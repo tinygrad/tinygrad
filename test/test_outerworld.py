@@ -50,8 +50,7 @@ class TestOuterRange(unittest.TestCase):
     # 3 matmuls with outer world range
     i = UOp.range(3, -100, AxisType.OUTER)
     vec_i = Tensor(vec.uop.after(i))
-    vi = UOp.variable("i", i.vmin, i.vmax).bind(i)
-    comp = vec_i.contiguous() @ mats[vi]
+    comp = vec_i.contiguous() @ mats[i]
     store = vec_i.uop.store(comp.uop).end(i)
     out = Tensor(vec.uop.after(store))
     out.realize()
@@ -77,10 +76,9 @@ class TestOuterScan(unittest.TestCase):
 
     # 3 matmuls with SCAN
     i = UOp.range(3, -100, AxisType.OUTER)
-    vi = UOp.variable("i", i.vmin, i.vmax).bind(i)
-    out = Tensor(Tensor.empty(3, 1, 10).uop.after(i))
-    comp = Tensor(vi.eq(0).where(vec.uop, out[(vi-1).maximum(0)].uop)) @ mats[vi]
-    store = out[vi].uop.store(comp.uop).end(i)
+    out = Tensor.empty(3, 1, 10)
+    comp = Tensor(i.eq(0).where(vec.uop, out[(i-1).maximum(0)].uop)) @ mats[i]
+    store = out[i].uop.store(comp.uop).end(i)
     out = Tensor(out.uop.after(store))
     out.realize()
 
