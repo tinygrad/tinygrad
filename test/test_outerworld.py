@@ -50,8 +50,36 @@ class TestOuterRange(unittest.TestCase):
     # 3 matmuls with outer world range
     i = UOp.range(3, -100, AxisType.OUTER)
     vec_i = Tensor(vec.uop.after(i))
-    vi = UOp.variable("i", i.vmin, i.vmax).bind(i)
-    out = Tensor(vec.uop.after(vec_i.uop.store((vec_i.contiguous() @ mats[vi]).uop).end(i)))
+    comp = vec_i.contiguous() @ mats[i]
+    store = vec_i.uop.store(comp.uop).end(i)
+    out = Tensor(vec.uop.after(store))
+    out.realize()
+
+    # TODO: testing allclose
+    assert Tensor.allclose(ref, out, atol=1e-6), f"{ref.numpy()=}, {out.numpy()=}"
+
+class TestOuterScan(unittest.TestCase):
+  def _test_scan(self):
+    vec = Tensor.randn(1, 10).realize()
+    mats = Tensor.randn(3, 10, 10).realize()
+
+    # 3 matmuls in "scan"
+    vec1 = vec @ mats[0]
+    vec2 = vec1 @ mats[1]
+    vec3 = vec2 @ mats[2]
+    ref = Tensor.stack(vec1, vec2, vec3)
+    ref.realize()
+    return vec, mats, ref
+
+  def test_uop_scan_matmul(self):
+    vec, mats, ref = self._test_scan()
+
+    # 3 matmuls with SCAN
+    i = UOp.range(3, -100, AxisType.OUTER)
+    out = Tensor.empty(3, 1, 10)
+    comp = Tensor(i.eq(0).where(vec.uop, out[(i-1).maximum(0)].uop)) @ mats[i]
+    store = out[i].uop.store(comp.uop).end(i)
+    out = Tensor(out.uop.after(store))
     out.realize()
 
     # TODO: testing allclose

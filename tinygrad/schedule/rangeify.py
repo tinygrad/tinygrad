@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 import itertools
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, ssimplify, KernelInfo
-from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType, BottomUpGate, Kernel, _remove_all_tags
+from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType, BottomUpGate, Kernel, _remove_all_tags, range_str
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY
 from tinygrad.helpers import PCONTIG, partition, get_single_element, unwrap, disable_gc
@@ -397,6 +397,9 @@ def handle_after(ctx:LocalAddBufferContext, after:UOp):
 
 def renumber_range(ctx:LocalAddBufferContext, r:UOp):
   if r.tag != (): return None
+  if r.arg[-1] == AxisType.OUTER:
+    # for outer range, we replace with a bound variable
+    return UOp.variable("range_"+range_str(r), r.vmin, r.vmax).bind(r.replace(tag=None))
   ret = r.replace(arg=(ctx.range,)+r.arg[1:], tag=None)
   ctx.range += 1
   return ret
@@ -571,11 +574,11 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
       assign_rep[a] = kernel_assign[s] = a.replace(src=a.src+(u,))
   if assign_rep: tsink = graph_rewrite(tsink, _substitute, ctx=assign_rep, bottom_up=True, name="fix_assign")
 
-  if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")
-
   # TODO: we can probably get this earlier
   sink_tags = [s.tag for s in tsink.src]
   tsink = graph_rewrite(tsink, _remove_all_tags, name="remove all tags")
+
+  if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")
 
   becomes_map: dict[UOp, UOp] = {}
   for tag, s in zip(sink_tags, tsink.src):
