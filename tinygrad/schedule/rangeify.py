@@ -541,9 +541,8 @@ pm_fix_vmap = PatternMatcher([
   # x>=y and x<(y+1) means x==y (this can go in symbolic)
   ((UPat.var("x", dtype=dtypes.index) >= UPat.var("y")) & (UPat.var("x") < (UPat.var("y")+1)), lambda x,y: x.eq(y)),
   # remove the reduce if it's compare reduce
-  (UPat(Ops.BUFFERIZE, name="buf", src=(
-    (UPat.var("r1", dtype=dtypes.index) != UPat.var("r2")).where(0, UPat.var("val")).reduce(UPat.var("r2"), arg=Ops.ADD),), allow_any_len=True),
-   lambda r1,r2,val,buf: buf.replace(src=(val,)+buf.src[1:]).substitute({r1:r2}) if r1 in buf.src[1:] else None),
+  ((UPat.var("r1", dtype=dtypes.index) != UPat.var("r2")).where(0, UPat.var("val")).reduce(UPat.var("r2"), arg=Ops.ADD),
+   lambda r1,r2,val: val.substitute({r2:r1})),
 ])
 
 @disable_gc()
