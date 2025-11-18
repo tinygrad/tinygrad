@@ -183,5 +183,38 @@ class TestVmap(unittest.TestCase):
 
     self.assertTrue((out==2).all().item())
 
+  def test_fancy_vmap(self):
+    def f(x,y): return x+y
+
+    x = Tensor.arange(9).reshape(3,3).contiguous()
+    y = Tensor.arange(9).reshape(3,3).contiguous()
+
+    a = UOp.range(3, -1)
+    out = f(x[:,a], y[a,:])
+    out = out.end(a).realize()
+    self.assertListEqual([[0,4,8],[4,8,12],[8,12,16]], out.tolist())
+
+  def test_vmap_inner_fusion(self):
+    x = Tensor.ones(3, 10, 2).contiguous()
+
+    # vmap across axis 0
+    a = UOp.range(3, -1)
+    out = x[a].sum(axis=0)*2
+    out = out.end(a)*4
+    out.realize()
+
+    self.assertTrue((out==10*2*4).all().item())
+
+  def test_vmap_outer_fusion(self):
+    x = Tensor.ones(3, 10, 2).contiguous()
+
+    # vmap across axis 0
+    a = UOp.range(3, -1, AxisType.OUTER)
+    out = x[a].sum(axis=0)*2
+    out = out.end(a)*4
+    out.realize()
+
+    self.assertTrue((out==10*2*4).all().item())
+
 if __name__ == '__main__':
   unittest.main()

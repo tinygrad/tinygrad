@@ -90,7 +90,7 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
       if rk.op is Ops.END: schedule.append(rk)
     else:
       raise RuntimeError(f"can't schedule {k.op}")
-    for x in children[k]:
+    for x in children[rk]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queues[_heuristic(x)].append(x)
 
