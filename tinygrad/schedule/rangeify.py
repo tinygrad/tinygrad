@@ -328,9 +328,13 @@ def bufferize_to_store(ctx:itertools.count|None, x:UOp, idx:UOp, allow_locals=Tr
   # lower outerworld reduce here
   if x.src[0].op is Ops.REDUCE and len(x.src[0].src) == 2 and x.src[0].src[1].arg[-1] == AxisType.OUTER:
     assert sdtype.addrspace == AddrSpace.GLOBAL
+    outer_range = x.src[0].src[1]
     buf = UOp.new_buffer(x.arg.device, size, x.dtype)
+    # NOTE: this has the same number as the outer range, we need string ranges!
+    zero_range = outer_range.replace(src=(UOp.const(dtypes.index, size),), arg=outer_range.arg[:-1]+(AxisType.LOOP,))
+    buf = buf.after(buf.index(zero_range).store(0).end(zero_range))
     bufi = buf.index(idx, dtype=sdtype)
-    do_store = bufi.store(bufi.load() + x.src[0].src[0], tag=x.tag).end(*rngs).end(x.src[0].src[1])
+    do_store = bufi.store(bufi.load() + x.src[0].src[0], tag=x.tag).end(*rngs).end(outer_range)
     return buf.after(do_store)
 
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
