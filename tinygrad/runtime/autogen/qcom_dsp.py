@@ -1,6 +1,5 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import unwrap
 from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
 ion_user_handle_t = ctypes.c_int32
 enum_ion_heap_type = CEnum(ctypes.c_uint32)

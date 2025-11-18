@@ -1,14 +1,9 @@
 # mypy: ignore-errors
-import ctypes, os
-from tinygrad.helpers import unwrap
+import ctypes
 from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-from ctypes.util import find_library
-def dll():
-  try: return ctypes.CDLL(unwrap(os.getenv('LIBUSB_PATH', find_library('usb-1.0'))))
-  except: pass
-  return None
-dll = dll()
-
+from tinygrad.helpers import findlib
+try: dll = ctypes.CDLL(findlib('usb-1.0', env='LIBUSB_PATH'))
+except: dll = None
 class _anonunion0(ctypes.Union): pass
 uint8_t = ctypes.c_ubyte
 uint16_t = ctypes.c_uint16

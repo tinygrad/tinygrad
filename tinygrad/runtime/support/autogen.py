@@ -1,5 +1,5 @@
 import ctypes, itertools, re, functools, os
-from tinygrad.helpers import flatten, unwrap
+from tinygrad.helpers import unwrap
 from tinygrad.runtime.autogen import libclang as clang # hmmm
 from typing import Iterator
 
@@ -260,9 +260,9 @@ def gen(dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, use_e
         lines, types = rollback
     clang.clang_disposeTranslationUnit(tu)
     clang.clang_disposeIndex(idx)
-  main = ("# mypy: ignore-errors\nimport ctypes\n"
-    "from tinygrad.helpers import findlib\nfrom tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR\n" + '\n'.join([*prolog,
-      *(["from tinygrad.runtime.support import objc"]*objc), *([f"try: dll = ctypes.CDLL({dll})\nexcept: dll = None"]*bool(dll)), *lines]) + '\n')
+  main = ('\n'.join(["# mypy: ignore-errors\nimport ctypes\nfrom tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR", *prolog,
+                     *(["from tinygrad.runtime.support import objc"]*objc), *(["from tinygrad.helpers import findlib"]*('findlib' in (dll or ''))),
+                     *([f"try: dll = ctypes.CDLL({dll})\nexcept: dll = None"]*bool(dll)), *lines]) + '\n')
   macros = [r for m in macros if (r:=functools.reduce(lambda s,r:re.sub(r[0], r[1], s), rules + base_rules, m))]
   while True:
     try:

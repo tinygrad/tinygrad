@@ -1,17 +1,9 @@
 # mypy: ignore-errors
-import ctypes, os
-from tinygrad.helpers import unwrap
+import ctypes
 from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-def dll():
-  try: return ctypes.CDLL(unwrap(os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libamd_comgr.so'))
-  except: pass
-  try: return ctypes.CDLL(unwrap('/usr/local/lib/libamd_comgr.dylib'))
-  except: pass
-  try: return ctypes.CDLL(unwrap('/opt/homebrew/lib/libamd_comgr.dylib'))
-  except: pass
-  return None
-dll = dll()
-
+from tinygrad.helpers import findlib
+try: dll = ctypes.CDLL(findlib('amd_comgr', [os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/']))
+except: dll = None
 amd_comgr_status_s = CEnum(ctypes.c_uint32)
 AMD_COMGR_STATUS_SUCCESS = amd_comgr_status_s.define('AMD_COMGR_STATUS_SUCCESS', 0)
 AMD_COMGR_STATUS_ERROR = amd_comgr_status_s.define('AMD_COMGR_STATUS_ERROR', 1)

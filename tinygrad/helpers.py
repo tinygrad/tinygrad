@@ -428,20 +428,23 @@ def init_c_var(ctypes_var, creat_cb): return (creat_cb(ctypes_var), ctypes_var)[
 def flat_mv(mv:memoryview): return mv if len(mv) == 0 else mv.cast("B", shape=(mv.nbytes,))
 
 def findlib(nm:str, extra_paths:list[str]=[], emsg="", env="") -> str:
+  ret: str|None
   # sometimes we find linker scripts
   def is_lib(p):
-    if not p.is_file(): return False
     if OSX: return True # frameworks are weird
+    if not p.is_file(): return False
     try:
       with open(p, 'rb') as f: return f.read(4) == b'\x7FELF'
     except Exception: return False
 
   libpaths = {"posix": ["/usr/lib", "/usr/local/lib"], "nt": os.environ['PATH'].split(os.pathsep), # os.name
-              "darwin": ["/opt/homebrew/lib"], 'linux': ['/lib', f"/lib/{sysconfig.get_config_var('MULTIARCH')}"]} # sys.platform
-  libnames = [f"lib{nm}.dylib", f"{nm}.dylib", f"{nm}.framework/{nm}"] if OSX else [f"{nm}.dll"] if WIN else [re.compile(f"lib{nm}\\.so\\.?[0-9]+")]
+              "darwin": ["/opt/homebrew/lib", f"/System/Library/Frameworks/{nm}.framework"],
+              'linux': ['/lib', f"/lib/{sysconfig.get_config_var('MULTIARCH')}"]}
+  libnames:list[re.Pattern|str] = [f"lib{nm}.dylib", f"{nm}.dylib", nm] if OSX else [f"{nm}.dll"] if WIN else [re.compile(f"lib{nm}\\.so\\.?[0-9]+")]
   if not pathlib.Path(ret:=getenv(env or f"{nm.replace('-', '_').upper()}_PATH", '')).is_file():
     for d, f in itertools.product(libpaths.get(os.name, []) + libpaths.get(sys.platform, []) + extra_paths, libnames):
-      if ret:=next((str(p) for p in pathlib.Path(d).iterdir() if (p.name==f if isinstance(f, str) else f.match(p.name)) and is_lib(p)), None): break
+      if (pathlib.Path(d).is_dir() and (ret:=next((str(p) for p in pathlib.Path(d).iterdir() if (p.name==f if isinstance(f, str) else f.match(p.name))
+                                                   and is_lib(p)), None))): break
     else: ret = ctypes.util.find_library(nm)
   if ret is None: raise FileNotFoundError(f"failed to find library {nm}: " + (emsg or f"try setting {env or nm.upper()+'_PATH'}?"))
   if DEBUG >= 3: print(f'Using {nm} at {repr(ret)}')

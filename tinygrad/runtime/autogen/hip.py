@@ -1,13 +1,9 @@
 # mypy: ignore-errors
-import ctypes, os
-from tinygrad.helpers import unwrap
+import ctypes
 from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-def dll():
-  try: return ctypes.CDLL(unwrap(os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libamdhip64.so'))
-  except: pass
-  return None
-dll = dll()
-
+from tinygrad.helpers import findlib
+try: dll = ctypes.CDLL(findlib('amdhip64', [os.getenv('ROCM_PATH', '/opt/rocm')+'/lib']))
+except: dll = None
 hipError_t = CEnum(ctypes.c_uint32)
 hipSuccess = hipError_t.define('hipSuccess', 0)
 hipErrorInvalidValue = hipError_t.define('hipErrorInvalidValue', 1)
