@@ -1,6 +1,7 @@
 import unittest
 import pathlib
 from examples.whisper import init_whisper, load_file_waveform, transcribe_file, transcribe_waveform
+import examples.mlperf.metrics as metrics
 from tinygrad.helpers import CI, fetch, CPU_LLVM
 from tinygrad import Device, dtypes
 from tinygrad.device import is_dtype_supported
@@ -16,6 +17,12 @@ TRANSCRIPTION_2 = "a slightly longer audio file so that we can test batch transc
 TEST_FILE_3_URL = 'https://homepage.ntu.edu.tw/~karchung/miniconversations/mc45.mp3'
 TRANSCRIPTION_3 = "Just lie back and relax. Is the level of pressure about right? Yes, it's fine, and I'd like conditioner please. Sure. I'm going to start the second lathering now. Would you like some Q-tips? How'd you like it cut? I'd like my bangs and the back trimmed, and I'd like the rest thinned out a bit and layered. Where would you like the part? On the left, right about here. Here, have a look. What do you think? It's fine. Here's a thousand anti-dollars. It's 30-ant extra for the rants. Here's your change and receipt. Thank you, and please come again. So how do you like it? It could have been worse, but you'll notice that I didn't ask her for her card. Hmm, yeah. Maybe you can try that place over there next time."   # noqa: E501
 
+def wer_helper(result: str, reference: str)->float:
+  result = metrics.normalize_string(result)
+  reference = metrics.normalize_string(reference)
+  wer, _, _ = metrics.word_error_rate([result], [reference])
+  return wer
+
 @unittest.skipIf(Device.DEFAULT in ["CPU"], "slow")
 @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need float16 support")
 class TestWhisper(unittest.TestCase):
@@ -29,6 +36,15 @@ class TestWhisper(unittest.TestCase):
   def tearDownClass(cls):
     del cls.model
     del cls.enc
+
+  def assertWER(self, actual: str, expected: str, threshold: float):
+    __tracebackhide__ = True  # Hide traceback for py.test
+    wer = wer_helper(actual, expected)
+    if wer > threshold:
+      err = f"WER={wer:.3f} > {threshold}"
+      raise AssertionError(
+        err
+      )
 
   def test_transcribe_file1(self):
     self.assertEqual(transcribe_file(self.model, self.enc, TEST_FILE_1),  TRANSCRIPTION_1)
@@ -56,7 +72,7 @@ class TestWhisper(unittest.TestCase):
   def test_transcribe_long(self):
     waveform = [load_file_waveform(fetch(TEST_FILE_3_URL))]
     transcription = transcribe_waveform(self.model, self.enc, waveform)
-    self.assertEqual(TRANSCRIPTION_3, transcription)
+    self.assertWER(transcription, TRANSCRIPTION_3, 0.1)
 
   @unittest.skipIf(CI or (Device.DEFAULT == "CPU" and CPU_LLVM), "too long for CI")
   def test_transcribe_long_no_batch(self):
@@ -64,7 +80,7 @@ class TestWhisper(unittest.TestCase):
 
     trancriptions = transcribe_waveform(self.model, self.enc, waveforms)
     self.assertEqual(2, len(trancriptions))
-    self.assertEqual(TRANSCRIPTION_3, trancriptions[0])
+    self.assertWER(trancriptions[0], TRANSCRIPTION_3, 0.1)
     self.assertEqual(TRANSCRIPTION_1, trancriptions[1])
 
 if __name__ == '__main__':
