@@ -216,5 +216,28 @@ class TestVmap(unittest.TestCase):
 
     self.assertTrue((out==10*2*4).all().item())
 
+  def test_vmap_outer_matmul(self):
+    x = Tensor.ones(1, 10).contiguous().requires_grad_()
+    mats = Tensor.ones(3, 10, 10).contiguous()
+
+    # vmap across axis 0
+    a = UOp.range(3, -1, AxisType.OUTER)
+    out = x @ mats[a]
+    out = out.end(a)
+
+    out.realize()
+
+  def test_vmap_outer_matmul_grad(self):
+    x = Tensor.ones(1, 10).contiguous().requires_grad_()
+    mats = Tensor.ones(3, 10, 10).contiguous().requires_grad_()
+
+    # vmap across axis 0
+    a = UOp.range(3, -1, AxisType.OUTER)
+    out = x @ mats[a]
+    out = out.end(a)
+    out.mean().backward()
+
+    mats.grad.realize()
+
 if __name__ == '__main__':
   unittest.main()
