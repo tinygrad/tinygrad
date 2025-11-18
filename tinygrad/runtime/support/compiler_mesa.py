@@ -122,6 +122,6 @@ class IR3Compiler(NIRCompiler):
     return v, cs, shifted
 
   def disassemble(self, lib: bytes):
-    v, _, bin_ = IR3Compiler.unpack_lib(lib)
-    mesa.ir3_shader_disasm(v, ctypes.cast(bin_, ctypes.POINTER(ctypes.c_uint32)),
-                           ctypes.POINTER(mesa.struct__IO_FILE).in_dll(ctypes.CDLL(ctypes.util.find_library('c')), "stdout"))
+    _, _, bin_ = IR3Compiler.unpack_lib(lib)
+    mesa.ir3_isa_disasm(bin_, len(bin_), ctypes.POINTER(mesa.struct__IO_FILE).in_dll(ctypes.CDLL(ctypes.util.find_library('c')), "stdout"),
+                        mesa.struct_isa_decode_options(gpu_id=self.dev_id.gpu_id, show_errors=True, branch_labels=True))
