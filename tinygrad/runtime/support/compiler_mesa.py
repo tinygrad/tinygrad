@@ -113,17 +113,17 @@ class IR3Compiler(NIRCompiler):
     mesa.ir3_shader_disasm(v, ctypes.cast(lib, ctypes.POINTER(ctypes.c_uint32)),
                            ctypes.POINTER(mesa.struct__IO_FILE).in_dll(ctypes.CDLL(ctypes.util.find_library('c')), "stdout"))
     # NB: bytes(v) means the pointers in v are no longer safe! a custom __reduce__ that supports pointers for c.Struct would make this simpler
-    ret = bytes(v) + bytes(v.const_state.contents) + ctypes.string_at(lib, v.info.size)
+    ret = bytes(v) + bytes(v.const_state.contents) + ctypes.string_at(v.imm_state.values, v.imm_state.count * 4) + ctypes.string_at(lib, v.info.size)
     mesa.ralloc_free(ctypes.pointer(v))
     return ret
 
   @staticmethod
-  def unpack_lib(lib: bytes) -> tuple[mesa.struct_ir3_shader_variant, mesa.struct_ir3_const_state, bytes]:
+  def unpack_lib(lib: bytes) -> tuple[mesa.struct_ir3_shader_variant, mesa.struct_ir3_const_state, bytes, bytes]:
     shifted = lib[ctypes.sizeof(v:=mesa.struct_ir3_shader_variant.from_buffer_copy(lib)):]
     shifted = shifted[ctypes.sizeof(cs:=mesa.struct_ir3_const_state.from_buffer_copy(shifted)):]
-    return v, cs, shifted
+    return v, cs, shifted[:v.imm_state.count * 4], shifted[v.imm_state.count * 4:]
 
   def disassemble(self, lib: bytes):
-    _, _, bin_ = IR3Compiler.unpack_lib(lib)
+    _, _, _, bin_ = IR3Compiler.unpack_lib(lib)
     mesa.ir3_isa_disasm(bin_, len(bin_), ctypes.POINTER(mesa.struct__IO_FILE).in_dll(ctypes.CDLL(ctypes.util.find_library('c')), "stdout"),
                         mesa.struct_isa_decode_options(gpu_id=self.dev_id.gpu_id, show_errors=True, branch_labels=True))
