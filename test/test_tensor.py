@@ -84,7 +84,7 @@ class TestTinygrad(unittest.TestCase):
     n = 70000
     t = Tensor.ones(n, dtype=dtypes.half, requires_grad=True).contiguous()
     # Pick an upstream gradient large enough that each split grad stays >= fp16 min normal
-    upstream = Tensor(5.0, dtype=dtypes.half)
+    upstream = Tensor(5.0, dtype=dtypes.float32)
     t.max().backward(upstream)
     grad = t.grad.numpy()
     self.assertTrue(np.isfinite(grad).all())
