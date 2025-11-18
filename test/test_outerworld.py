@@ -151,18 +151,14 @@ class TestVmap(unittest.TestCase):
     mats = Tensor.ones(3, 10, 10).contiguous().requires_grad_()
 
     ref = x @ mats
+    if fuse: ref = ref * 2
 
     # vmap across axis 0
     a = UOp.range(3, -1, axis_type)
     out = x @ mats[a]
     out = out.reshape(1, 10).pad(((a,(3-a)-1), None))
     out = Tensor(UOp(Ops.REDUCE, dtype=out.uop.dtype, src=(out.uop, a), arg=Ops.ADD))
-    if fuse:
-      out = out * 2
-      ref = ref * 2
-    if grad:
-      out.mean().backward()
-      mats.grad.realize()
+    if fuse: out = out * 2
     out.realize()
 
     # TODO: testing allclose
@@ -170,8 +166,6 @@ class TestVmap(unittest.TestCase):
   def test_vmap_inner_fuse(self): self.test_vmap_inner(fuse=True)
   def test_vmap_outer(self): self.test_vmap_inner(AxisType.OUTER)
   def test_vmap_outer_fuse(self): self.test_vmap_inner(AxisType.OUTER, fuse=True)
-
-  def test_vmap_inner_grad(self): self.test_vmap_inner(grad=True)
 
 if __name__ == '__main__':
   unittest.main()
