@@ -87,3 +87,4 @@ else:
         for f,v in zip(self._packed_fields_, args): setattr(self, f[0], v)
         for k,v in kwargs.items(): setattr(self, k, v)
       else: super().__init__(*args, **kwargs)
+    def __repr__(self): return f"{self.__class__.__name__}({', '.join(f'{f[0]}={getattr(self, f[0])}' for f in getattr(self, '_fields_', []))})"

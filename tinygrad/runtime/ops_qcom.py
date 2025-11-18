@@ -6,7 +6,7 @@ from typing import Any, cast
 from tinygrad.device import BufferSpec
 from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, BumpAllocator
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
-from tinygrad.runtime.autogen import kgsl, adreno
+from tinygrad.runtime.autogen import kgsl, adreno, mesa
 from tinygrad.runtime.ops_cl import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
 from tinygrad.renderer.nir import IR3Renderer
@@ -179,7 +179,8 @@ class QCOMArgsState(HCQArgsState):
   def __init__(self, buf:HCQBuffer, prg:QCOMProgram, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=()):
     super().__init__(buf, prg, bufs, vals=vals)
 
-    if len(bufs) + len(vals) != len(prg.buf_info): raise RuntimeError(f'incorrect args size given={len(bufs)+len(vals)} != want={len(prg.buf_info)}')
+    if not isinstance(prg.dev.compiler, IR3Compiler) and len(bufs) + len(vals) != len(prg.buf_info):
+      raise RuntimeError(f'incorrect args size given={len(bufs)+len(vals)} != want={len(prg.buf_info)}')
 
     self.buf_info, self.args_info = prg.buf_info[:len(bufs)], prg.buf_info[len(bufs):]
 
@@ -199,7 +200,62 @@ class QCOMProgram(HCQProgram):
   def __init__(self, dev: QCOMDevice, name: str, lib: bytes):
     self.dev: QCOMDevice = dev
     self.name, self.lib = name, lib
-    self._parse_lib()
+
+    if isinstance(dev.compiler, IR3Compiler):
+      v, cs, self.image = IR3Compiler.unpack_lib(lib)
+      self.image_size = v.info.size
+
+      self.prg_offset, self.brnchstck = 0, v.branchstack
+      self.pvtmem, self.shmem = v.pvtmem_size, v.shared_size # is this right?
+
+      print(cs)
+      # Fill up constants and buffers info
+      self.buf_info, self.consts_info = [], []
+
+      # Collect sampler info.
+      self.samp_cnt = samp_cnt_in_file = v.num_samp
+      assert self.samp_cnt <= 1, "Up to one sampler supported"
+      if self.samp_cnt:
+        self.samp_cnt += 1
+        self.samplers = [qreg.a6xx_tex_samp_0(wrap_s=(clamp_mode:=adreno.A6XX_TEX_CLAMP_TO_BORDER), wrap_t=clamp_mode, wrap_r=clamp_mode),
+                         qreg.a6xx_tex_samp_1(unnorm_coords=True, cubemapseamlessfiltoff=True), 0, 0, 0, 0, 0, 0]
+
+      # for i in range(mesa.IR3_CONST_ALLOC_MAX):
+      #   if cs.allocs.consts[i].size_vec4: print(f"{mesa.enum_ir3_const_alloc_type(i)}: {cs.allocs.consts[i].offset_vec4} {cs.allocs.consts[i].size_vec4}")
+      # for i in range(v.imm_state.count): print(v.imm_state.values[i])
+      # print(v.outputs_count, v.inputs_count)
+      # for i in range(v.outputs_count): print(v.outputs[i].slot)
+      # for i in range(v.inputs_count): print(v.inputs[i].slot)
+      # exit(1)
+
+      # Collect kernel arguments (buffers) info.
+      for i in range(cs.ubo_state.num_enabled):
+        rng = cs.ubo_state.range[i]
+        # FIXME: how do we really determine the type?
+        self.buf_info.extend([SimpleNamespace(offset=rng.offset + j, type=0) for j in range(rng.start, rng.end, 16)])
+
+      # Setting correct offsets to textures/ibos.
+      # TODO: do we need this ...
+      self.tex_cnt, self.ibo_cnt = sum(x.type is BUFTYPE_TEX for x in self.buf_info), sum(x.type is BUFTYPE_IBO for x in self.buf_info)
+      self.ibo_off, self.tex_off, self.samp_off = 2048, 2048 + 0x40 * self.ibo_cnt, 2048 + 0x40 * self.tex_cnt + 0x40 * self.ibo_cnt
+      cur_ibo_off, cur_tex_off = self.ibo_off, self.tex_off
+      for x in self.buf_info:
+        if x.type is BUFTYPE_IBO: x.offset, cur_ibo_off = cur_ibo_off, cur_ibo_off + 0x40
+        elif x.type is BUFTYPE_TEX: x.offset, cur_tex_off = cur_tex_off, cur_tex_off + 0x40
+
+      # FIXME
+      # if _read_lib(0xb0) != 0: # check if we have constants.
+      #   cdoff = _read_lib(0xac)
+      #   while cdoff + 40 <= image_offset:
+      #     cnst, offset_words, _, is32 = struct.unpack("I", self.lib[cdoff:cdoff+4])[0], *struct.unpack("III", self.lib[cdoff+16:cdoff+28])
+      #     self.consts_info.append((cnst, offset_words * (sz_bytes:=(2 << is32)), sz_bytes))
+      #     cdoff += 40
+
+      # Registers info
+      # FIXME: autogen signed chars
+      self.fregs, self.hregs = v.info.max_reg + 1, v.info.max_half_reg + 1
+    else:
+      self._parse_lib()
 
     self.lib_gpu: HCQBuffer = self.dev.allocator.alloc(self.image_size, buf_spec:=BufferSpec(cpu_access=True, nolru=True))
     to_mv(cast(int, self.lib_gpu.va_addr), self.image_size)[:] = self.image

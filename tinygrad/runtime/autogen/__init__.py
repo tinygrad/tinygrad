@@ -109,7 +109,7 @@ def __getattr__(nm):
         *[f"{{}}/src/gallium/auxiliary/gallivm/lp_bld{s}.h" for s in ["", "_passmgr", "_misc", "_type", "_init", "_nir", "_struct", "_jit_types",
                                                                      "_flow", "_const"]],
         *[f"{{}}/src/freedreno/{s}.h" for s in ["common/freedreno_dev_info", "ir3/ir3_compiler", "ir3/ir3_shader"]],
-        "{}/src/compiler/glsl_types.h", "{}/src/util/blob.h", "{}/src/util/ralloc.h"], args=lambda:[
+        "{}/src/compiler/glsl_types.h", "{}/src/util/blob.h", "{}/src/util/ralloc.h", "{}/gen/ir3-isa.h"], args=lambda:[
           "-DHAVE_ENDIAN_H", "-DHAVE_STRUCT_TIMESPEC", "-DHAVE_PTHREAD", "-DHAVE_FUNC_ATTRIBUTE_PACKED", "-I{}/src", "-I{}/include", "-I{}/gen",
           "-I{}/src/compiler/nir", "-I{}/src/gallium/auxiliary", "-I{}/src/gallium/include", "-I{}/src/freedreno/common",
           f"-I{system('llvm-config-20 --includedir')}"],
@@ -120,7 +120,8 @@ python3 src/compiler/nir/nir_intrinsics_h.py --outdir gen
 python3 src/compiler/nir/nir_intrinsics_indices_h.py --outdir gen
 python3 src/compiler/nir/nir_builder_opcodes_h.py > gen/nir_builder_opcodes.h
 python3 src/compiler/nir/nir_intrinsics_h.py --outdir gen
-python3 src/compiler/builtin_types_h.py gen/builtin_types.h""", cwd=path, shell=True, check=True),
+python3 src/compiler/builtin_types_h.py gen/builtin_types.h
+python3 src/compiler/isaspec/decode.py --xml src/freedreno/isa/ir3.xml --out-c /dev/null --out-h gen/ir3-isa.h""", cwd=path, shell=True, check=True),
   tarball="https://gitlab.freedesktop.org/mesa/mesa/-/archive/mesa-25.2.4/mesa-25.2.4.tar.gz",
   prolog=["import gzip, base64", "from tinygrad.helpers import OSX"], epilog=lambda path: [system(f"{root}/extra/mesa/lvp_nir_options.sh {path}")])
     case "libclang":

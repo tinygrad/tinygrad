@@ -96,21 +96,32 @@ class IR3Compiler(NIRCompiler):
 
   def __del__(self): pass
 
-  def __reduce__(self): return IR3Compiler, (self.dev_id.gpu_id, self.dev_id.chip_id)
+  def __reduce__(self): return IR3Compiler, (self.dev_id.chip_id,)
 
   def compile(self, src) -> bytes:
     nir_shader = deserialize(src, self.nir_options)
     shader = mesa.ir3_shader_from_nir(self.cc, nir_shader, mesa.struct_ir3_shader_options(), None).contents
-    input(f"shader.nir.info: {ctypes.addressof(shader.nir.contents.info):X}\nshader: {ctypes.addressof(shader):X}")
     v = rzalloc(mesa.struct_ir3_shader_variant).contents
     v.shader_id, v.key, v.type, v.shader_options = shader.id, mesa.struct_ir3_shader_key(), shader.type, shader.options,
     v.compiler, v.mergedregs, v.num_ssbos = ctypes.pointer(self.cc), self.cc.mergedregs, (info:=shader.nir.contents.info).num_ssbos,
     v.num_uavs, v.cs.req_local_mem, = info.num_ssbos+info.num_images, shader.cs.req_local_mem
     v.const_state = rzalloc(mesa.struct_ir3_const_state, ctypes.pointer(v))
-    print("alloced")
     (cs:=v.const_state.contents).allocs, cs.push_consts_type, cs.consts_ubo.idx = shader.options.const_allocs, shader.options.push_consts_type, -1
     cs.driver_params_ubo.idx, cs.primitive_map_ubo.idx, cs.primitive_param_ubo.idx = -1, -1, -1
     assert not mesa.ir3_compile_shader_nir(self.cc, shader, v), "compilation failed"
-    bin_ = ctypes.cast(mesa.ir3_shader_assemble(v), ctypes.POINTER(ctypes.c_uint32))
-    mesa.ir3_shader_disasm(v, bin_, ctypes.POINTER(mesa.struct__IO_FILE).in_dll(ctypes.CDLL(ctypes.util.find_library('c')), "stdout"))
-    return ctypes.string_at(mesa.ir3_shader_assemble(v), v.info.size)
+    lib = ctypes.cast(mesa.ir3_shader_assemble(v), ctypes.POINTER(ctypes.c_uint32))
+    # NB: bytes(v) means the pointers in v are no longer safe! a custom __reduce__ that supports pointers for c.Struct would make this simpler
+    ret = bytes(v) + bytes(v.const_state.contents) + ctypes.string_at(lib, v.info.size)
+    mesa.ralloc_free(ctypes.pointer(v))
+    return ret
+
+  @staticmethod
+  def unpack_lib(lib: bytes) -> tuple[mesa.struct_ir3_shader_variant, mesa.struct_ir3_const_state, bytes]:
+    shifted = lib[ctypes.sizeof(v:=mesa.struct_ir3_shader_variant.from_buffer_copy(lib)):]
+    shifted = shifted[ctypes.sizeof(cs:=mesa.struct_ir3_const_state.from_buffer_copy(shifted)):]
+    return v, cs, shifted
+
+  def disassemble(self, lib: bytes):
+    v, _, bin_ = IR3Compiler.unpack_lib(lib)
+    mesa.ir3_shader_disasm(v, ctypes.cast(bin_, ctypes.POINTER(ctypes.c_uint32)),
+                           ctypes.POINTER(mesa.struct__IO_FILE).in_dll(ctypes.CDLL(ctypes.util.find_library('c')), "stdout"))

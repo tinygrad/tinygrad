@@ -9253,6 +9253,47 @@ RALLOC_PRINT_INFO_SUMMARY_ONLY = _anonenum7.define('RALLOC_PRINT_INFO_SUMMARY_ON
 try: (ralloc_print_info:=dll.ralloc_print_info).restype, ralloc_print_info.argtypes = None, [ctypes.POINTER(FILE), ctypes.c_void_p, ctypes.c_uint32]
 except AttributeError: pass
 
+class struct_isa_decode_options(Struct): pass
+class struct_isa_decode_value(Struct): pass
+struct_isa_decode_value._fields_ = [
+  ('str', ctypes.POINTER(ctypes.c_char)),
+  ('num', uint64_t),
+]
+class struct_isa_print_state(Struct): pass
+struct_isa_print_state._fields_ = [
+  ('out', ctypes.POINTER(FILE)),
+  ('line_column', ctypes.c_uint32),
+]
+class struct_isa_entrypoint(Struct): pass
+struct_isa_entrypoint._fields_ = [
+  ('name', ctypes.POINTER(ctypes.c_char)),
+  ('offset', uint32_t),
+]
+struct_isa_decode_options._fields_ = [
+  ('gpu_id', uint32_t),
+  ('show_errors', ctypes.c_bool),
+  ('max_errors', ctypes.c_uint32),
+  ('branch_labels', ctypes.c_bool),
+  ('stop', ctypes.c_bool),
+  ('cbdata', ctypes.c_void_p),
+  ('field_cb', ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(struct_isa_decode_value))),
+  ('field_print_cb', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_isa_print_state), ctypes.POINTER(ctypes.c_char), uint64_t)),
+  ('pre_instr_cb', ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p)),
+  ('post_instr_cb', ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p)),
+  ('no_match_cb', ctypes.CFUNCTYPE(None, ctypes.POINTER(FILE), ctypes.POINTER(ctypes.c_uint32), size_t)),
+  ('entrypoint_count', ctypes.c_uint32),
+  ('entrypoints', ctypes.POINTER(struct_isa_entrypoint)),
+]
+try: (ir3_isa_disasm:=dll.ir3_isa_disasm).restype, ir3_isa_disasm.argtypes = None, [ctypes.c_void_p, ctypes.c_int32, ctypes.POINTER(FILE), ctypes.POINTER(struct_isa_decode_options)]
+except AttributeError: pass
+
+try: (ir3_isa_decode:=dll.ir3_isa_decode).restype, ir3_isa_decode.argtypes = ctypes.c_bool, [ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(struct_isa_decode_options)]
+except AttributeError: pass
+
+class struct_decode_scope(Struct): pass
+try: (ir3_isa_get_gpu_id:=dll.ir3_isa_get_gpu_id).restype, ir3_isa_get_gpu_id.argtypes = uint32_t, [ctypes.POINTER(struct_decode_scope)]
+except AttributeError: pass
+
 NIR_DEBUG_CLONE = (1 << 0)
 NIR_DEBUG_SERIALIZE = (1 << 1)
 NIR_DEBUG_NOVALIDATE = (1 << 2)
@@ -9356,4 +9397,5 @@ DECLARE_RALLOC_CXX_OPERATORS = lambda type: DECLARE_RALLOC_CXX_OPERATORS_TEMPLAT
 DECLARE_RZALLOC_CXX_OPERATORS = lambda type: DECLARE_RALLOC_CXX_OPERATORS_TEMPLATE(type, rzalloc_size)
 DECLARE_LINEAR_ALLOC_CXX_OPERATORS = lambda type: DECLARE_LINEAR_ALLOC_CXX_OPERATORS_TEMPLATE(type, linear_alloc_child)
 DECLARE_LINEAR_ZALLOC_CXX_OPERATORS = lambda type: DECLARE_LINEAR_ALLOC_CXX_OPERATORS_TEMPLATE(type, linear_zalloc_child)
+ISA_GPU_ID = lambda : ir3_isa_get_gpu_id(scope)
 lvp_nir_options = gzip.decompress(base64.b64decode("H4sIAAAAAAAAA2NgZGRkYGAAkYxgCsQFsxigwgwQBoxmhCqFq2WEKwIrAEGIkQxoAEMALwCqVsCiGUwLMHA0QPn29nBJkswHANb8YpH4AAAA"))
