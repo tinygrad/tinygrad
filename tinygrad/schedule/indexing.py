@@ -18,6 +18,11 @@ def realize_srcs(ctx:dict[UOp, None], rb:UOp) -> None:
 
 def realize_assign(ctx:dict[UOp, None], a:UOp) -> None:
   if a.src[1].op not in ALWAYS_CONTIGUOUS: ctx[a.src[1]] = None
+
+  # if it's an outer reduce, we *don't* realize it
+  if a.src[1].op is Ops.REDUCE and any(tr.arg[-1] == AxisType.OUTER for tr in a.src[1].src[1:]):
+    del ctx[a.src[1]]
+
   # if it's a kernel, we don't realize it
   if a.src[1].op is not Ops.KERNEL: ctx[a] = None
 

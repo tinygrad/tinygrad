@@ -87,6 +87,22 @@ class TestOuterScan(unittest.TestCase):
     # TODO: testing allclose
     assert Tensor.allclose(ref, out, atol=1e-6), f"{ref.numpy()=}, {out.numpy()=}"
 
+  def test_scan_with_assign(self):
+    vec, mats, ref = self._test_scan()
+
+    a = UOp.range(3, -1, AxisType.OUTER)
+    buf_out = Tensor.empty(3, 1, 10)
+    phi = Tensor(a.eq(0).where(vec.uop, buf_out[(a-1).maximum(0)].uop))
+    out = phi @ Tensor(mats.uop.reduce_backward(a, arg=Ops.ADD))[a]
+    out = out.reshape(1, 1, 10).pad(((a,(3-a)-1), None, None))
+    out = Tensor(out.uop.reduce(a, arg=Ops.ADD))
+    out = buf_out.assign(out)
+
+    out.realize()
+
+    # TODO: testing allclose
+    np.testing.assert_allclose(ref.numpy(), out.numpy())
+
 class TestOuterworld(unittest.TestCase):
   def test_range_plus_1(self):
     t = Tensor.arange(100).reshape(10,10).realize()
