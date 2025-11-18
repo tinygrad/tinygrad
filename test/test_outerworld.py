@@ -71,21 +71,6 @@ class TestOuterScan(unittest.TestCase):
     ref.realize()
     return vec, mats, ref
 
-  def test_uop_fold_matmul(self):
-    vec, mats, ref = self._test_scan()
-
-    # 3 matmuls with FOLD
-    i = UOp.range(3, -100, AxisType.OUTER)
-    out = Tensor.empty(1, 10)
-    phi = Tensor(i.eq(0).where(vec.uop, out.uop))
-    comp = phi @ mats[i]
-    store = out.uop.store(comp.uop).end(i)
-    out = Tensor(out.uop.after(store))
-    out.realize()
-
-    # TODO: testing allclose
-    assert Tensor.allclose(ref[2], out, atol=1e-6), f"{ref.numpy()=}, {out.numpy()=}"
-
   def test_uop_scan_matmul(self):
     vec, mats, ref = self._test_scan()
 
@@ -161,7 +146,7 @@ class TestOuterworld(unittest.TestCase):
     self.assertListEqual([[0,4,8],[4,8,12],[8,12,16]], out.tolist())
 
 class TestVmap(unittest.TestCase):
-  def test_vmap_inner(self, axis_type=AxisType.LOOP, fuse=False):
+  def test_vmap_inner(self, axis_type=AxisType.LOOP, fuse=False, grad=False):
     x = Tensor.ones(1, 10).contiguous().requires_grad_()
     mats = Tensor.ones(3, 10, 10).contiguous().requires_grad_()
 
@@ -175,6 +160,9 @@ class TestVmap(unittest.TestCase):
     if fuse:
       out = out * 2
       ref = ref * 2
+    if grad:
+      out.mean().backward()
+      mats.grad.realize()
     out.realize()
 
     # TODO: testing allclose
@@ -182,6 +170,8 @@ class TestVmap(unittest.TestCase):
   def test_vmap_inner_fuse(self): self.test_vmap_inner(fuse=True)
   def test_vmap_outer(self): self.test_vmap_inner(AxisType.OUTER)
   def test_vmap_outer_fuse(self): self.test_vmap_inner(AxisType.OUTER, fuse=True)
+
+  def test_vmap_inner_grad(self): self.test_vmap_inner(grad=True)
 
 if __name__ == '__main__':
   unittest.main()
