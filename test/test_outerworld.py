@@ -162,7 +162,7 @@ class TestVmap(unittest.TestCase):
     if fuse: out = out * 2
     if grad:
       out.mean().backward()
-      np.testing.assert_allclose(mats.grad.numpy(), 1./30)
+      np.testing.assert_allclose(mats.grad.numpy(), (2./30) if fuse else (1./30))
     out.realize()
 
     # TODO: testing allclose
@@ -172,6 +172,8 @@ class TestVmap(unittest.TestCase):
   def test_vmap_outer_fuse(self): self.test_vmap_inner(AxisType.OUTER, fuse=True)
 
   def test_vmap_inner_grad(self): self.test_vmap_inner(grad=True)
+  def test_vmap_inner_fuse_grad(self): self.test_vmap_inner(fuse=True, grad=True)
+  def test_vmap_outer_grad(self): self.test_vmap_inner(AxisType.OUTER, grad=True)
 
 if __name__ == '__main__':
   unittest.main()
