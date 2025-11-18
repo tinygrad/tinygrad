@@ -81,6 +81,8 @@ class TestTinygrad(unittest.TestCase):
     np.testing.assert_allclose(wgrad2.numpy(), wgrad.numpy() * 2., atol=1e-6)
 
   def test_max_backward_half_many_equal_maxima(self):
+    if not is_dtype_supported(dtypes.half):
+      self.skipTest("half dtype not supported on this device")
     n = 70000
     t = Tensor.ones(n, dtype=dtypes.half, requires_grad=True).contiguous()
     # Pick an upstream gradient large enough that each split grad stays >= fp16 min normal
