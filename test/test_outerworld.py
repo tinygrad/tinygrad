@@ -60,7 +60,7 @@ class TestOuterRange(unittest.TestCase):
     assert Tensor.allclose(ref, out, atol=1e-6), f"{ref.numpy()=}, {out.numpy()=}"
 
 class TestOuterScan(unittest.TestCase):
-  def test_scan_matmul(self):
+  def _test_scan(self):
     vec = Tensor.randn(1, 10).realize()
     mats = Tensor.randn(3, 10, 10).realize()
 
@@ -70,6 +70,10 @@ class TestOuterScan(unittest.TestCase):
     vec3 = vec2 @ mats[2]
     ref = Tensor.stack(vec1, vec2, vec3)
     ref.realize()
+    return vec, mats, ref
+
+  def test_uop_scan_matmul(self):
+    vec, mats, ref = self._test_scan()
 
     # 3 matmuls with SCAN
     i = UOp.range(3, -100, AxisType.OUTER)
