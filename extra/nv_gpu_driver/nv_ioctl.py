@@ -1,5 +1,5 @@
 # type: ignore
-import ctypes, ctypes.util, struct, platform, pathlib, re, time, os, signal
+import ctypes, ctypes.util, struct, platform, pathlib, re, time, os, signal, copy
 from tinygrad.helpers import from_mv, to_mv, getenv, init_c_struct_t
 from hexdump import hexdump
 start = time.perf_counter()
@@ -75,7 +75,7 @@ def get_classes():
   return res
 nvclasses = get_classes()
 nvuvms = {getattr(nv_gpu, x):x for x in dir(nv_gpu) if x.startswith("UVM_") and nv_gpu.__dict__.get(x+"_PARAMS")}
-nvqcmds = {int(getattr(nv_gpu, x)):x for x in dir(nv_gpu) if x[:7] in {"NVC6C0_", "NVC56F_", "NVC6B5_", "NVC9B0_"} and isinstance(getattr(nv_gpu, x), int)}
+nvqcmds = {int(getattr(nv_gpu, x)):x for x in dir(nv_gpu) if x[:7] in {"NVC9B0_", "NVC6C0_", "NVC56F_", "NVC6B5_"} and isinstance(getattr(nv_gpu, x), int)}
 
 global_ioctl_id = 0
 gpus_user_modes = []
@@ -85,6 +85,7 @@ gpus_sysmem = set()
 gpus_virtmem = set()
 gpus_virt_to_sys = dict()
 gpus_mappings = dict()
+virtmem_mappings = set()
 prev_nv_ioctl = None
 
 mappings_cache = []
@@ -112,18 +113,23 @@ def scan_mappings():
 
 # map segfaults...
 def mappings_watchdog():
+  global prev_nv_ioctl, virtmem_mappings
+
   x = list(scan_mappings())
-  if len(x) > 0: print(f"mappings_watchdog: found {len(x)} new mappings", x)
-  if len(x) > 0 and len(gpus_fifo) > 0 and gpus_fifo[-1][-1] is None:
-    print("updating gpfifo mapping", gpus_fifo[-1])
-    gpus_fifo[-1] = gpus_fifo[-1][:-1] + (x[0][0],)
-    print("updating gpfifo mapping", gpus_fifo[-1])
+  if len(x) > 0:
+    print(f"mappings_watchdog: found {len(x)} new mappings", x)
+    print("virtmem_mappings:", virtmem_mappings, prev_nv_ioctl)
+  if len(x) > 0 and len(gpus_fifo) > 0 and gpus_fifo[-1][-1] is None: gpus_fifo[-1] = gpus_fifo[-1][:-1] + (x[0][0],)
+  if len(x) > 0 and prev_nv_ioctl is not None:
+    nr, addr, siz = prev_nv_ioctl
+    # assert s.size == x[0][1]
+    if nr == nv_gpu.NV_ESC_RM_MAP_MEMORY_DMA: virtmem_mappings.add((addr, siz, x[0][0]))
 
 @ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_ulong, ctypes.c_void_p)
 def ioctl(fd, request, argp):
   mappings_watchdog()
 
-  global global_ioctl_id, gpus_user_modes, gpus_mmio, gpus_sysmem, gpus_mappings, gpus_fifo, gpus_virtmem, gpus_virt_to_sys, mappings_cache
+  global global_ioctl_id, gpus_user_modes, gpus_mmio, gpus_sysmem, gpus_mappings, gpus_fifo, gpus_virtmem, gpus_virt_to_sys, mappings_cache, prev_nv_ioctl
   global_ioctl_id += 1
   st = time.perf_counter()
   ret = libc.syscall(IOCTL_SYSCALL, ctypes.c_int(fd), ctypes.c_ulong(request), ctypes.c_void_p(argp))
@@ -205,10 +211,8 @@ def ioctl(fd, request, argp):
       if getenv("IOCTL", 0) >= 1:
         s = get_struct(argp, nv_gpu.NVOS46_PARAMETERS)
         print(f"NV_ESC_RM_MAP_MEMORY_DMA", end=" ")
-        # if s.dmaOffset == 4832034816:
-        #   global orig_mmap_mv
-        #   if orig_mmap_mv is None: orig_mmap_mv = install_hook(libc.mmap, _mmap)
         dump_struct(s)
+        prev_nv_ioctl = (nr, s.dmaOffset, s.length)
     elif nr == nv_gpu.NV_ESC_REGISTER_FD:
       if getenv("IOCTL", 0) >= 1:
         s = get_struct(argp, nv_gpu.nv_ioctl_register_fd_t)
@@ -360,6 +364,26 @@ def _dump_qmd(address, packets):
       qmds.append(qmd_struct_t.from_address(address + 12 + i * 4))
     elif mthd == nv_gpu.NVC6C0_SEND_PCAS_A:
       qmds.append(qmd_struct_t.from_address(gpfifo[i+1] << 8))
+    elif mthd in {nv_gpu.NVC9B0_SET_DRV_PIC_SETUP_OFFSET, nv_gpu.NVC9B0_HEVC_SET_SCALING_LIST_OFFSET, nv_gpu.NVC9B0_HEVC_SET_TILE_SIZES_OFFSET, nv_gpu.NVC9B0_SET_NVDEC_STATUS_OFFSET}:
+      ll = gpfifo[i+1] << 8
+      print("\t\tHEVC PIC S:", hex(ll))
+      print(hex(ll))
+      saddr = None
+      for st,ln,addr in virtmem_mappings:
+        if st <= ll and st < ll + ln:
+          saddr = addr + (ll - st)
+          break
+      if saddr is not None:
+        if mthd == nv_gpu.NVC9B0_SET_DRV_PIC_SETUP_OFFSET:
+          x = nv_gpu.nvdec_hevc_pic_s.from_address(saddr)
+          dump_struct(x)
+        elif mthd == nv_gpu.NVC9B0_HEVC_SET_SCALING_LIST_OFFSET:
+          hexdump(to_mv(saddr, 16*64))
+        elif mthd == nv_gpu.NVC9B0_HEVC_SET_TILE_SIZES_OFFSET:
+          hexdump(to_mv(saddr, 0x100))
+        elif mthd == nv_gpu.NVC9B0_SET_NVDEC_STATUS_OFFSET:
+          x = nv_gpu.nvdec_status_hevc_s.from_address(saddr)
+          dump_struct(x)
 
     i += size + 1
   return qmds
