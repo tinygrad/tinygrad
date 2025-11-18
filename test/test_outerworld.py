@@ -180,6 +180,8 @@ class TestVmap(unittest.TestCase):
     # TODO: testing allclose
     assert Tensor.allclose(ref, out, atol=1e-6), f"{ref.numpy()=}, {out.numpy()=}"
   def test_vmap_inner_fuse(self): self.test_vmap_inner(fuse=True)
+  def test_vmap_outer(self): self.test_vmap_inner(AxisType.OUTER)
+  #def test_vmap_outer_fuse(self): self.test_vmap_inner(AxisType.OUTER, fuse=True)
 
 if __name__ == '__main__':
   unittest.main()
