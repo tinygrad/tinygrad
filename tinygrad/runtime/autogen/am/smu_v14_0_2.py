@@ -476,7 +476,7 @@ PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_4 = PP_GRTAVFS_FW_SEP_FUSE_e.de
 PP_GRTAVFS_FW_SEP_FUSE_COUNT = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_COUNT', 19)
 
 class SviTelemetryScale_t(Struct): pass
-int8_t = ctypes.c_char
+int8_t = ctypes.c_byte
 SviTelemetryScale_t._fields_ = [
   ('Offset', int8_t),
   ('Padding', uint8_t),
