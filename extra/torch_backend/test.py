@@ -2,8 +2,6 @@
 import unittest
 import torch
 import numpy as np
-import pathlib
-import warnings
 from tinygrad.helpers import getenv, GlobalCounters
 if getenv("TINY_BACKEND2"):
   import extra.torch_backend.backend2

@@ -27,7 +27,7 @@ def calculate_storage_offset(x: Tensor) -> int:
   return offset
 def wrap(x: Tensor) -> torch.Tensor:
   x._strides = strides_for_shape(x.shape) # always recalculate
-  if not hasattr(x, '_storage_offset'): x._storage_offset = calculate_storage_offset(x)
+  if (not hasattr(x, '_storage_offset')) or (not x.uop.is_realized): x._storage_offset = calculate_storage_offset(x)
   return mod.wrap(x, _to_torch_dtype(x.dtype), _to_torch_device(x.device).index)
 def unwrap(x:torch.Tensor) -> Tensor:
   assert isinstance(x, torch.Tensor), f"x isn't {type(x)}"
@@ -123,9 +123,7 @@ def _try_simple_reshape_view_write(base: Tensor, view: Tensor, val: Tensor) -> b
       if not (next_shape := _reshape_target_shape(shapes[-1], args)): return False
       shapes.append(next_shape)
   if shapes[-1] != view.shape: return False
-  idx = len(shapes) - 2
-  for fn, *_ in reversed(ops):
-    if fn is Tensor.reshape: val, idx = val.reshape(shapes[idx]), idx - 1
+  for s in reversed(shapes[:-1]): val = val.reshape(s)
   base.assign(val)
   return True
 
@@ -281,26 +279,19 @@ def convolution_overrideable(input, weight, bias, stride, padding, dilation, tra
   if TORCH_DEBUG >= 1:
     print(f"convolution {input.shape=} {weight.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
   input, weight, bias = unwrap(input), unwrap(weight), unwrap(bias) if bias is not None else None
-  conv_fn = input.conv2d if not transposed else input.conv_transpose2d
-  kwargs = dict(groups=groups, stride=stride, dilation=dilation, padding=padding)
-  if transposed: kwargs['output_padding'] = output_padding
-  return wrap(conv_fn(weight, bias, **kwargs))
+  if not transposed: return wrap(input.conv2d(weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding))
+  return wrap(input.conv_transpose2d(weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding))
 
 @torch.library.impl("aten::convolution_backward_overrideable", "privateuseone")
 def convolution_backward_overrideable(grad_out, input, weight, stride, padding, dilation, transposed, output_padding, groups, output_mask):
   if TORCH_DEBUG >= 1:
     print(f"convolution_backward {input.shape=} {weight.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
-  grad_out_t = unwrap(grad_out).detach()
-  input_t = unwrap(input).detach()
-  weight_t = unwrap(weight).detach()
-  bias_shape = weight_t.shape[1] * groups if transposed else weight_t.shape[0]
-  bias_t = Tensor.zeros(bias_shape, device=input_t.device, dtype=input_t.dtype)
-  kwargs = {'groups': groups, 'stride': stride, 'dilation': dilation, 'padding': padding}
-  if transposed: kwargs['output_padding'] = output_padding
-  conv_fn = input_t.conv2d if not transposed else input_t.conv_transpose2d
-  out = conv_fn(weight_t, bias_t if output_mask[2] else None, **kwargs)
-  targets = [t for t, m in zip([input_t, weight_t, bias_t], output_mask) if m]
-  grads = out.gradient(*targets, gradient=grad_out_t)
+  grad_out, input, weight, bias = unwrap(grad_out).detach(), unwrap(input).detach(), unwrap(weight).detach(), Tensor.zeros(weight.shape[0], device=_from_torch_device(weight.device))
+  if not transposed: out = Tensor.conv2d(input, weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding)
+  else:
+    bias = Tensor.zeros(weight.shape[1] * groups)
+    out = Tensor.conv_transpose2d(input, weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding)
+  grads = out.gradient(*[t for t,m in zip([input, weight, bias], output_mask) if m], gradient=grad_out)
   return tuple([wrap(grads.pop(0)) if m else None for m in output_mask])
 
 @torch.library.impl("aten::slice.Tensor", "privateuseone")
@@ -732,9 +723,8 @@ def native_batch_norm_backward(grad_out, input, weight, running_mean, running_va
           wrap(grad_weight) if grad_weight is not None else None,
           wrap(grad_bias) if grad_bias is not None else None)
 
-# still ugly -> is there a better way? torch has no aten::pad_circularXd
-# only place that needs an explicit AutogradPrivateUse1 registration, this can't be the best way
-# only needed for test_pad_circular_backward
+# _pad_circular is not CompositeImplicitAutograd (unlike reflect/replicate pad)
+#e need torch.autograd.Function with explicit AutogradPrivateUse1 registration
 class _PadCircular(torch.autograd.Function):
   @staticmethod
   def forward(ctx, input, padding):
@@ -753,6 +743,8 @@ def _pad_circular(self, padding): return _PadCircular.apply(self, padding)
 def _pad_circular_autograd(self, padding): return _PadCircular.apply(self, padding)
 
 # only needed for test_diag_backward_gradient_values
+# was going through torch before, but now we are using tinygrad directly and tracking views
+# Tensor.diagonal does not support all cases tests in the tests
 @torch.library.impl("aten::diagonal", "privateuseone")
 @wrap_view_op
 def diagonal(self, offset=0, dim1=0, dim2=1):
