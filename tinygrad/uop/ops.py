@@ -400,7 +400,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return UOp(Ops.STORE, kwargs.pop("dtype", dtypes.void), (self, UOp.const(self.dtype, src) if not isinstance(src, UOp) else src), **kwargs)
   def end(self, *src:UOp):
     if len(src) == 0: return self
-    return UOp(Ops.END, dtype=self.dtype, src=(self,)+src)
+    return UOp(Ops.END, src=(self,)+src)
   def after(self, *src:UOp, **kwargs): return UOp(Ops.AFTER, self.dtype, (self,)+src, **kwargs)
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self, x))
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
