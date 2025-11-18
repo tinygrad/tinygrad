@@ -1,4 +1,4 @@
-import ctypes, pathlib, argparse, pickle, re, functools, dataclasses, itertools
+import ctypes, pathlib, argparse, pickle, re, functools, dataclasses, itertools, threading
 from tinygrad.helpers import temp, unwrap, DEBUG
 from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileProgramEvent
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
@@ -126,9 +126,11 @@ def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
 
     return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
 
-  try:
-    rocprof.rocprof_trace_decoder_parse_data(copy_cb, trace_cb, isa_cb, None)
-  except AttributeError as e: raise RuntimeError("Failed to find rocprof-trace-decoder. Run sudo ./extra/sqtt/install_sqtt_decoder.py to install") from e
+  def worker():
+    try: rocprof.rocprof_trace_decoder_parse_data(copy_cb, trace_cb, isa_cb, None)
+    except AttributeError as e: raise RuntimeError("Failed to find rocprof-trace-decoder. Run sudo ./extra/sqtt/install_sqtt_decoder.py to install") from e
+  (t:=threading.Thread(target=worker, daemon=True)).start()
+  t.join()
   return ROCParseCtx
 
 if __name__ == "__main__":
