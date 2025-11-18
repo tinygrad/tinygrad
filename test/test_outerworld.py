@@ -156,7 +156,7 @@ class TestVmap(unittest.TestCase):
 
     # vmap across axis 0
     a = UOp.range(3, -1, axis_type)
-    out = x @ Tensor(mats.uop.reduce_backward(a, arg=Ops.ADD))[a]
+    out = x @ mats[a]
     out = out.reshape(1, 10).pad(((a,(3-a)-1), None))
     out = Tensor(out.uop.reduce(a, arg=Ops.ADD))
     if fuse: out = out * 2
@@ -207,7 +207,7 @@ class TestVmap(unittest.TestCase):
     img = Tensor.randn(4, 16).realize(*layer_tensors)
     for l in layer_tensors: l.requires_grad_()
     a = UOp.range(4, -1, AxisType.OUTER)
-    out = Tensor(img.uop.reduce_backward(a, arg=Ops.ADD))[a:a+1].sequential(layers)
+    out = img[a:a+1].sequential(layers)
     out = out.pad(((a,(4-a)-1), None))
     out = Tensor(out.uop.reduce(a, arg=Ops.ADD))
     out.mean().backward()
