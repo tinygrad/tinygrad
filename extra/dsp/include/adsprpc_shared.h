@@ -73,16 +73,16 @@
 #define FASTRPC_INIT_CREATE_STATIC  2
 #define FASTRPC_INIT_ATTACH_SENSORS 3
 
-/* Retrives number of input buffers from the scalars parameter */
+/* Retrieves number of input buffers from the scalars parameter */
 #define REMOTE_SCALARS_INBUFS(sc)        (((sc) >> 16) & 0x0ff)
 
-/* Retrives number of output buffers from the scalars parameter */
+/* Retrieves number of output buffers from the scalars parameter */
 #define REMOTE_SCALARS_OUTBUFS(sc)       (((sc) >> 8) & 0x0ff)
 
-/* Retrives number of input handles from the scalars parameter */
+/* Retrieves number of input handles from the scalars parameter */
 #define REMOTE_SCALARS_INHANDLES(sc)     (((sc) >> 4) & 0x0f)
 
-/* Retrives number of output handles from the scalars parameter */
+/* Retrieves number of output handles from the scalars parameter */
 #define REMOTE_SCALARS_OUTHANDLES(sc)    ((sc) & 0x0f)
 
 #define REMOTE_SCALARS_LENGTH(sc)	(REMOTE_SCALARS_INBUFS(sc) +\
