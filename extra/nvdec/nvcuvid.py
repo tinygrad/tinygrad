@@ -35,11 +35,9 @@ class CUDAVideoDecoder:
     payload_buffer = (ctypes.c_ubyte * len(data)).from_buffer_copy(data)
     packet.payload_size = len(data)
     packet.payload = ctypes.cast(payload_buffer, ctypes.POINTER(ctypes.c_ubyte))
-    print("cuvidParseVideoData")
     _dump_gpfifo("before cuvidParseVideoData")
     check(nvcuvid.cuvidParseVideoData(self.parser, ctypes.byref(packet)))
     _dump_gpfifo("after cuvidParseVideoData")
-    print("end cuvidParseVideoData")
     return self._decoded_frame
 
   @ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(None), ctypes.POINTER(nvcuvid.CUVIDEOFORMAT))
@@ -85,6 +83,7 @@ class CUDAVideoDecoder:
     inst.luma_height = (videoformat.contents.display_area.bottom - videoformat.contents.display_area.top)
     inst.chroma_height = (inst.luma_height + 1) // 2 # nv12
     inst.surface_height = videoformat.contents.coded_height
+    _dump_gpfifo("after seq init")
     return videoformat.contents.min_num_decode_surfaces
 
   @ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(None), ctypes.POINTER(nvcuvid.CUVIDPICPARAMS))
@@ -97,13 +96,17 @@ class CUDAVideoDecoder:
     inst.decode_pic_counter += 1
 
     check(cuda.cuCtxSetCurrent(inst.dev.context))
+    print("cuvidDecodePicture")
     check(nvcuvid.cuvidDecodePicture(inst.decoder, pic_params))
+    _dump_gpfifo("after decode")
     return 1
 
   @ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(None), ctypes.POINTER(nvcuvid.CUVIDPARSERDISPINFO))
   def _display_callback(userdata, disp_info) -> int:
     inst = ctypes.cast(userdata, ctypes.POINTER(ctypes.py_object)).contents.value
     d = disp_info.contents
+
+    print("displaying picture", inst.pic_num_in_decode_order.get(d.picture_index, -1))
 
     proc = nvcuvid.CUVIDPROCPARAMS()
     proc.progressive_frame = d.progressive_frame
@@ -115,6 +118,8 @@ class CUDAVideoDecoder:
     src_frame, src_pitch = ctypes.c_uint64(0), ctypes.c_uint32(0)
     check(cuda.cuCtxSetCurrent(inst.dev.context))
     check(nvcuvid.cuvidMapVideoFrame64(inst.decoder, d.picture_index, ctypes.byref(src_frame), ctypes.byref(src_pitch), ctypes.byref(proc)))
+
+    _dump_gpfifo("after display map")
 
     status = nvcuvid.CUVIDGETDECODESTATUS()
     check(nvcuvid.cuvidGetDecodeStatus(inst.decoder, d.picture_index, ctypes.byref(status)))
@@ -141,6 +146,7 @@ class CUDAVideoDecoder:
     check(cuda.cuMemcpy2DAsync_v2(ctypes.byref(copy_chroma), inst.stream))
     check(cuda.cuStreamSynchronize(inst.stream))
     check(nvcuvid.cuvidUnmapVideoFrame64(inst.decoder, src_frame.value))
+    _dump_gpfifo("after display finalize")
 
     inst.frame_queue.put(bytes(host_buffer))
     inst._decoded_frame += 1

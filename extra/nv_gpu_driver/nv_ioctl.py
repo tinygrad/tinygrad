@@ -366,13 +366,12 @@ def _dump_qmd(address, packets):
       qmds.append(qmd_struct_t.from_address(gpfifo[i+1] << 8))
     elif mthd in {nv_gpu.NVC9B0_SET_DRV_PIC_SETUP_OFFSET, nv_gpu.NVC9B0_HEVC_SET_SCALING_LIST_OFFSET, nv_gpu.NVC9B0_HEVC_SET_TILE_SIZES_OFFSET, nv_gpu.NVC9B0_SET_NVDEC_STATUS_OFFSET}:
       ll = gpfifo[i+1] << 8
-      print("\t\tHEVC PIC S:", hex(ll))
-      print(hex(ll))
       saddr = None
       for st,ln,addr in virtmem_mappings:
-        if st <= ll and st < ll + ln:
+        if st <= ll and ll < st + ln:
           saddr = addr + (ll - st)
           break
+      print("\t\tHEVC PIC S:", hex(ll), "->", hex(saddr) if saddr is not None else "NOT MAPPED")
       if saddr is not None:
         if mthd == nv_gpu.NVC9B0_SET_DRV_PIC_SETUP_OFFSET:
           x = nv_gpu.nvdec_hevc_pic_s.from_address(saddr)
