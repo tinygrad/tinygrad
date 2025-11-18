@@ -214,8 +214,6 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
   try: rctx = decode(profile)
   except Exception: return err("DECODER ERROR")
   if not rctx.inst_execs: return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
-  pc_to_asm:dict[str, dict[int, str]] = {}
-  for k,v in rctx.disasms.items(): pc_to_asm.setdefault(k[0], {})[k[1]] = v[0]
   steps:list[dict] = []
   units:set[str] = set()
   for name,waves in rctx.inst_execs.items():
@@ -223,28 +221,30 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     prg = trace.keys[r].ret if (r:=ref_map.get(name)) else None
     steps.append(first:={"name":prg.name if prg is not None else name, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
                          "depth":0, "fmt":"timeline"})
-    asm = pc_to_asm[name]
-    # Idle:     The total time gap between the completion of previous instruction and the beginning of the current instruction.
-    #           The idle time can be caused by:
-    #             * Arbiter loss
-    #             * Source or destination register dependency
-    #             * Instruction cache miss
-    # Stall:    The total number of cycles the hardware pipe couldn't issue an instruction.
-    # Duration: Total latency in cycles, defined as "Stall time + Issue time" for gfx9 or "Stall time + Execute time" for gfx10+.
+    asm = rctx.disasms[name]
     for w in waves:
       units.add(row:=f"SIMD:{w.simd} CU:{w.cu} SE:{w.se}")
       events.append(ProfileRangeEvent(row, wave_name:=f"wave {w.wave_id}", Decimal(w.begin_time), Decimal(w.end_time)))
-      rows, prev_instr = [], w.begin_time
-      for i,e in enumerate(w.decode_insts(asm)):
-        rows.append((e.inst, e.time, max(0, e.time-prev_instr), e.dur, e.stall, str(e.typ).split("_")[-1]))
-        prev_instr = max(prev_instr, e.time + e.dur)
-      summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SIMD", "value":w.simd}, {"label":"CU", "value":w.cu},
-                 {"label":"SE", "value":w.se}]
-      steps.append({"name":wave_name, "depth":1, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
-                    "data":{"rows":rows, "cols":["Instruction", "Clk", "Idle", "Duration", "Stall", "Type"], "summary":summary}})
+      steps.append({"name":wave_name, "depth":1, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters", "data":(w, asm)})
     events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+events
     first["data"] = {"value":get_profile(events), "content_type":"application/octet-stream"}
   ctxs.append({"name":"Counters", "steps":steps})
+
+def get_sqtt_insts(wave, asm:dict[int, tuple[str, int]]) -> dict:
+  # Idle:     The total time gap between the completion of previous instruction and the beginning of the current instruction.
+  #           The idle time can be caused by:
+  #             * Arbiter loss
+  #             * Source or destination register dependency
+  #             * Instruction cache miss
+  # Stall:    The total number of cycles the hardware pipe couldn't issue an instruction.
+  # Duration: Total latency in cycles, defined as "Stall time + Issue time" for gfx9 or "Stall time + Execute time" for gfx10+.
+  rows, prev_instr = [], wave.begin_time
+  for i,e in enumerate(wave.decode_insts(asm)):
+    rows.append((e.inst, e.time, max(0, e.time-prev_instr), e.dur, e.stall, str(e.typ).split("_")[-1]))
+    prev_instr = max(prev_instr, e.time + e.dur)
+  summary = [{"label":"Total Cycles", "value":wave.end_time-wave.begin_time}, {"label":"SIMD", "value":wave.simd}, {"label":"CU", "value":wave.cu},
+             {"label":"SE", "value":wave.se}]
+  return {"rows":rows, "cols":["Instruction", "Clk", "Idle", "Duration", "Stall", "Type"], "summary":summary}
 
 def get_profile(profile:list[ProfileEvent]) -> bytes|None:
   # start by getting the time diffs
@@ -311,7 +311,7 @@ def get_stdout(f: Callable) -> str:
   return buf.getvalue()
 
 def get_render(i:int, j:int, fmt:str) -> dict:
-  if fmt == "counters": return ctxs[i]["steps"][j]["data"]
+  if fmt == "counters": return data if isinstance(data:=ctxs[i]["steps"][j]["data"], dict) else get_sqtt_insts(*data)
   if not isinstance(prg:=trace.keys[i].ret, ProgramSpec): return {}
   if fmt == "uops": return {"src":get_stdout(lambda: print_uops(prg.uops or [])), "lang":"txt"}
   if fmt == "src": return {"src":prg.src, "lang":"cpp"}

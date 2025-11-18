@@ -46,23 +46,24 @@ class WaveExec:
   begin_time:int
   end_time:int
   insts:bytearray
-  def decode_insts(self, pc_to_asm:dict[int, str]) -> Generator[InstExec, None, None]:
+  def decode_insts(self, pc_to_asm:dict[int, tuple[str, int]]) -> Generator[InstExec, None, None]:
     sz = ctypes.sizeof(struct:=rocprof.rocprofiler_thread_trace_decoder_inst_t)
     insts_array = (struct*(len(self.insts)//sz)).from_buffer(self.insts)
     for inst in insts_array:
       inst_typ = rocprof.enum_rocprofiler_thread_trace_decoder_inst_category_t.get(inst.category)
-      yield InstExec(inst_typ, pc_to_asm[inst.pc.address], inst.stall, inst.duration, inst.time)
+      yield InstExec(inst_typ, pc_to_asm[inst.pc.address][0], inst.stall, inst.duration, inst.time)
 
 class _ROCParseCtx:
   def __init__(self, dev_evs:dict[str, ProfileDeviceEvent], sqtt_evs:list[ProfileSQTTEvent], prog_evs:list[ProfileProgramEvent]):
     self.dev_evs, self.sqtt_evs, self.prog_evs = dev_evs, iter(sqtt_evs), prog_evs
-    self.disasms:dict[tuple[str, int], tuple[str, int]] = {}
+    self.disasms:dict[str, dict[int, tuple[str, int]]] = {}
     self.inst_execs:dict[str, list[WaveExec]] = {}
 
     for prog in prog_evs:
       arch = "gfx%d%x%x" % ((trgt:=unwrap(dev_evs[prog.device].props)['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
+      self.disasms[prog.name] = pc_to_asm = {}
       for addr, info in llvm_disasm(arch, unwrap(prog.lib)).items():
-        self.disasms[(prog.name, unwrap(prog.base) + addr)] = info
+        pc_to_asm[unwrap(prog.base)+addr] = info
 
   def next_sqtt(self):
     x = next(self.sqtt_evs, None)
@@ -115,7 +116,7 @@ def decode(profile:list[ProfileEvent], kernel:str|None=None) -> _ROCParseCtx:
 
   @rocprof.rocprof_trace_decoder_isa_callback_t
   def isa_cb(instr_ptr, mem_size_ptr, size_ptr, pc, _):
-    instr, mem_size_ptr[0] = ROCParseCtx.disasms[(unwrap(ROCParseCtx.active_kern), pc.address)]
+    instr, mem_size_ptr[0] = ROCParseCtx.disasms[unwrap(ROCParseCtx.active_kern)][pc.address]
 
     # this is the number of bytes to next instruction, set to 0 for end_pgm
     if instr == "s_endpgm": mem_size_ptr[0] = 0
