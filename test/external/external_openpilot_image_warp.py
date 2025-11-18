@@ -71,7 +71,8 @@ def frame_prepare_tinygrad(input_frame, M_inv):
 def update_img_input_tinygrad(tensor, frame, M_inv):
   new_img = frame_prepare_tinygrad(frame, M_inv)
   full_buffer = tensor[6:].cat(new_img, dim=0)
-  return full_buffer, Tensor.cat(full_buffer[:6], full_buffer[-6:], dim=0)
+  # TODO why is there a clone here?
+  return full_buffer.contiguous().clone(), Tensor.cat(full_buffer[:6], full_buffer[-6:], dim=0).contiguous()
 
 def update_both_imgs_tinygrad(calib_img_buffer, new_img, M_inv,
                               calib_big_img_buffer, new_big_img, M_inv_big):
@@ -138,8 +139,8 @@ def update_both_imgs_np(calib_img_buffer, new_img, M_inv,
 if __name__ == "__main__":
   update_img_jit = TinyJit(update_both_imgs_tinygrad, prune=True)
 
-  full_buffer = Tensor.zeros(IMG_BUFFER_SHAPE, dtype='uint8').realize()
-  big_full_buffer = Tensor.zeros(IMG_BUFFER_SHAPE, dtype='uint8').realize()
+  full_buffer = Tensor.zeros(IMG_BUFFER_SHAPE, dtype='uint8').contiguous().realize()
+  big_full_buffer = Tensor.zeros(IMG_BUFFER_SHAPE, dtype='uint8').contiguous().realize()
   full_buffer_np = np.zeros(IMG_BUFFER_SHAPE, dtype=np.uint8)
   big_full_buffer_np = np.zeros(IMG_BUFFER_SHAPE, dtype=np.uint8)
 
@@ -148,8 +149,8 @@ if __name__ == "__main__":
   for _ in range(20):
     
     # make inputs
-    img_inputs = [full_buffer, (32*Tensor.randn(W*H*3//2) + 128).cast(dtype='uint8').realize(), Tensor.randn(3,3).realize()]
-    big_img_inputs = [big_full_buffer, (32*Tensor.randn(W*H*3//2) + 128).cast(dtype='uint8').realize(), Tensor.randn(3,3).realize()]
+    img_inputs = [full_buffer, (32*Tensor.randn(W*H*3//2) + 128).cast(dtype='uint8').contiguous().realize(), Tensor.randn(3,3).contiguous().realize()]
+    big_img_inputs = [big_full_buffer, (32*Tensor.randn(W*H*3//2) + 128).cast(dtype='uint8').contiguous().realize(), Tensor.randn(3,3).contiguous().realize()]
     inputs = img_inputs + big_img_inputs
     Device.default.synchronize()
     inputs_np = [x.numpy() for x in inputs]
@@ -159,8 +160,8 @@ if __name__ == "__main__":
     # do warp
     st = time.perf_counter()
     out = update_img_jit(*inputs)
-    full_buffer = out[0]
-    big_full_buffer = out[2]
+    full_buffer = out[0].realize()
+    big_full_buffer = out[2].realize()
     mt = time.perf_counter()
     Device.default.synchronize()
     et = time.perf_counter()
