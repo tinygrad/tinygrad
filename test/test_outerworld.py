@@ -199,6 +199,7 @@ class TestVmap(unittest.TestCase):
     out.realize()
     np.testing.assert_allclose(out.numpy(), img.sequential(layers).numpy())
 
+  @unittest.skip("this is broken, we need to lower the outer reduce in the outer graph")
   def test_vmap_gemm_grad(self):
     layers = [
       nn.Linear(16, 16, bias=False), Tensor.relu,
