@@ -382,6 +382,11 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat.var("s"),)), lambda s: s),
   # VECTORIZE/CONST
   (UPat(Ops.VECTORIZE, src=UPat(Ops.CONST), name="vec"), lambda vec: UOp.const(vec.dtype, tuple(x.arg for x in vec.src))),
+  # x>=y and x<(y+1) means x==y
+  ((UPat.var("x", dtype=dtypes.index) >= UPat.var("y")) & (UPat.var("x") < (UPat.var("y")+1)), lambda x,y: x.eq(y)),
+  # remove the reduce if it's compare reduce
+  ((UPat.var("r1", dtype=dtypes.index) != UPat.var("r2")).where(0, UPat.var("val")).reduce(UPat.var("r2"), arg=Ops.ADD),
+   lambda r1,r2,val: val.substitute({r2:r1}) if r1.arg[-1] == r2.arg[-1] else None),
 ])+gep_pushing
 
 # ******** we take a small aside to "simplify_valid" to rewrite valids ********

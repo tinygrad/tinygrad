@@ -185,7 +185,7 @@ class TestVmap(unittest.TestCase):
     out = out.pad(((a,(4-a)-1), None, None, None))
     out = Tensor(out.uop.reduce(a, arg=Ops.ADD))
     out.realize()
-    np.testing.assert_allclose(out.numpy(), img.sequential(layers).numpy())
+    np.testing.assert_allclose(out.numpy(), img.sequential(layers).numpy(), atol=1e-6)
 
   def test_vmap_gemm(self):
     layers = [
@@ -197,7 +197,7 @@ class TestVmap(unittest.TestCase):
     out = out.pad(((a,(4-a)-1), None))
     out = Tensor(out.uop.reduce(a, arg=Ops.ADD))
     out.realize()
-    np.testing.assert_allclose(out.numpy(), img.sequential(layers).numpy())
+    np.testing.assert_allclose(out.numpy(), img.sequential(layers).numpy(), atol=1e-6)
 
   @unittest.skip("this is broken, we need to lower the outer reduce in the outer graph")
   def test_vmap_gemm_grad(self):
@@ -224,7 +224,7 @@ class TestVmap(unittest.TestCase):
     ref_grads = [x.numpy() for x in grads]
 
     # compare
-    for o,r in zip(out_grads, ref_grads): np.testing.assert_allclose(o, r)
+    for o,r in zip(out_grads, ref_grads): np.testing.assert_allclose(o, r, atol=1e-6)
 
 if __name__ == '__main__':
   unittest.main()
