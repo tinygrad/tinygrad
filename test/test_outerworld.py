@@ -187,17 +187,28 @@ class TestVmap(unittest.TestCase):
     out.realize()
     np.testing.assert_allclose(out.numpy(), img.sequential(layers).numpy())
 
-  @unittest.expectedFailure
-  def test_vmap_convs_grad(self):
+  def test_vmap_gemm(self):
     layers = [
-      nn.Conv2d(1, 8, 3), Tensor.relu,
-      nn.Conv2d(8, 8, 3), Tensor.relu]
-    layer_tensors = nn.state.get_parameters(layers)
-    img = Tensor.randn(4, 1, 16, 16).realize(*nn.state.get_parameters(layers))
-    for l in layer_tensors: l.requires_grad_()
+      nn.Linear(16, 16, bias=False), Tensor.relu,
+      nn.Linear(16, 16, bias=False), Tensor.relu]
+    img = Tensor.randn(4, 16).realize(*nn.state.get_parameters(layers))
     a = UOp.range(4, -1, AxisType.OUTER)
     out = img[a:a+1].sequential(layers)
-    out = out.pad(((a,(4-a)-1), None, None, None))
+    out = out.pad(((a,(4-a)-1), None))
+    out = Tensor(out.uop.reduce(a, arg=Ops.ADD))
+    out.realize()
+    np.testing.assert_allclose(out.numpy(), img.sequential(layers).numpy())
+
+  def test_vmap_gemm_grad(self):
+    layers = [
+      nn.Linear(16, 16, bias=False), Tensor.relu,
+      nn.Linear(16, 16, bias=False), Tensor.relu]
+    layer_tensors = nn.state.get_parameters(layers)
+    img = Tensor.randn(4, 16).realize(*layer_tensors)
+    for l in layer_tensors: l.requires_grad_()
+    a = UOp.range(4, -1, AxisType.OUTER)
+    out = Tensor(img.uop.reduce_backward(a, arg=Ops.ADD))[a:a+1].sequential(layers)
+    out = out.pad(((a,(4-a)-1), None))
     out = Tensor(out.uop.reduce(a, arg=Ops.ADD))
     out.mean().backward()
     grads = [l.grad for l in layer_tensors]
