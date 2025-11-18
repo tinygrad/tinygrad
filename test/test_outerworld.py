@@ -1,4 +1,5 @@
 import unittest
+import numpy as np
 from tinygrad import Tensor, UOp
 from tinygrad.uop.ops import AxisType, Ops
 
@@ -155,10 +156,13 @@ class TestVmap(unittest.TestCase):
 
     # vmap across axis 0
     a = UOp.range(3, -1, axis_type)
-    out = x @ mats[a]
+    out = x @ Tensor(mats.uop.reduce_backward(a, arg=Ops.ADD))[a]
     out = out.reshape(1, 10).pad(((a,(3-a)-1), None))
-    out = Tensor(UOp(Ops.REDUCE, dtype=out.uop.dtype, src=(out.uop, a), arg=Ops.ADD))
+    out = Tensor(out.uop.reduce(a, arg=Ops.ADD))
     if fuse: out = out * 2
+    if grad:
+      out.mean().backward()
+      np.testing.assert_allclose(mats.grad.numpy(), (2./30) if fuse else (1./30))
     out.realize()
 
     # TODO: testing allclose
@@ -166,6 +170,10 @@ class TestVmap(unittest.TestCase):
   def test_vmap_inner_fuse(self): self.test_vmap_inner(fuse=True)
   def test_vmap_outer(self): self.test_vmap_inner(AxisType.OUTER)
   def test_vmap_outer_fuse(self): self.test_vmap_inner(AxisType.OUTER, fuse=True)
+
+  def test_vmap_inner_grad(self): self.test_vmap_inner(grad=True)
+  def test_vmap_inner_fuse_grad(self): self.test_vmap_inner(fuse=True, grad=True)
+  def test_vmap_outer_grad(self): self.test_vmap_inner(AxisType.OUTER, grad=True)
 
 if __name__ == '__main__':
   unittest.main()

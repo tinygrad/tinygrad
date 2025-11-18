@@ -91,6 +91,7 @@ class Ops(FastEnum):
 
   # reduce
   REDUCE_AXIS = auto(); REDUCE = auto(); ALLREDUCE = auto()
+  REDUCE_BACKWARD = auto()
 
   # errors/placeholders
   REWRITE_ERROR = auto(); SENTINEL = auto()
