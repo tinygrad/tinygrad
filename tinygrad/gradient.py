@@ -72,5 +72,6 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
           all_metadata[bw_uop] = all_metadata.get(bw_uop, ())+backward_metadata
   # end any ranges on grads with a reduce sum
   for k,v in grads.items():
-    grads[k] = v.reduce(*v.ranges, arg=Ops.ADD)
+    if len(v.ranges):
+      grads[k] = v.reduce(*v.ranges, arg=Ops.ADD)
   return grads
