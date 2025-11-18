@@ -399,8 +399,7 @@ def renumber_range(ctx:LocalAddBufferContext, r:UOp):
   if r.tag != (): return None
   if r.arg[-1] == AxisType.OUTER:
     # for outer range, we replace with a bound variable
-    r = r.replace(tag=None)
-    return UOp.variable("range_"+range_str(r), r.vmin, r.vmax).bind(r)
+    return UOp.variable("range_"+range_str(r), r.vmin, r.vmax).bind(r.replace(tag=None))
   ret = r.replace(arg=(ctx.range,)+r.arg[1:], tag=None)
   ctx.range += 1
   return ret
