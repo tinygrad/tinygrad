@@ -1,7 +1,7 @@
 # all of symbolic lives here now
 import math, operator, struct, functools
 from collections import defaultdict
-from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
+from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu, resolve
 from tinygrad.dtype import ConstType, dtypes, PtrDType, AddrSpace, can_safe_cast, Invalid
 from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, cdiv, cmod, CORRECT_DIVMOD_FOLDING, unwrap
 from tinygrad.uop.decompositions import xpow
@@ -130,6 +130,14 @@ def lt_folding(x:UOp, c:int) -> UOp|None:
   if np and (d:=math.gcd(*[u.const_factor() for u in np], c)) > 1 and 0 <= sum(u.vmin for u in p) and sum(u.vmax for u in p) < d:
     return unwrap(UOp.sum(*np).divides(d))<(c//d)
   return None
+
+def lt_folding_symbolic_range(lt, x, y):
+  if not (sym_ranges:=[r for r in x.ranges if r.src[0].op is not Ops.CONST]): return None
+  # we try replacing all the _linear_ symbolic ranges with their min and max and see if the expression resolves
+  lt1 = UOp.sum(*[UOp.prod(*[u.src[0]-1 if u in sym_ranges else u for u in t.split_uop(Ops.MUL)]) for t in x.split_uop(Ops.ADD)])<y
+  lt2 = UOp.sum(*[UOp.prod(*[u.const_like(0) if u in sym_ranges else u for u in t.split_uop(Ops.MUL)]) for t in x.split_uop(Ops.ADD)])<y
+  if lt1 is lt or lt2 is lt: return None
+  if resolve(lt1&lt2, False): return UOp.const(dtypes.bool, True)
 
 def canonicalize_simplex(X:UOp) -> UOp|None:
   # (X := a0*x0 + a1*x1 + ...) > 0 is equivalent to x0 + x1 + ... > 0 if xi >= 0 and ai > 0 for ints.
@@ -337,6 +345,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # *** rules from symbolic ***
   # generic lt folding
   (UPat.var("x", dtypes.index)<UPat.cvar("c", vec=False), lambda x,c: lt_folding(x, c.arg) if 0 < c.arg else None),
+  ((UPat.var("x", dtypes.index)<UPat.var("y")).named("lt"), lt_folding_symbolic_range),
   (UPat.var("x", dtypes.index)*-1 < UPat.var("y")*-1, lambda x,y: y<x),
   # canonicalize a simplex with positive coefficients > 0
   # not x < 1 -> X > 0
