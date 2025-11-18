@@ -214,6 +214,8 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
   try: rctx = decode(profile)
   except Exception: return err("DECODER ERROR")
   if not rctx.inst_execs: return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
+  pc_to_asm:dict[str, dict[int, str]] = {}
+  for k,v in rctx.disasms.items(): pc_to_asm.setdefault(k[0], {})[k[1]] = v[0]
   steps:list[dict] = []
   units:set[str] = set()
   for name,waves in rctx.inst_execs.items():
@@ -221,7 +223,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     prg = trace.keys[r].ret if (r:=ref_map.get(name)) else None
     steps.append(first:={"name":prg.name if prg is not None else name, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
                          "depth":0, "fmt":"timeline"})
-
+    asm = pc_to_asm[name]
     # Idle:     The total time gap between the completion of previous instruction and the beginning of the current instruction.
     #           The idle time can be caused by:
     #             * Arbiter loss
@@ -233,7 +235,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
       units.add(row:=f"SIMD:{w.simd} CU:{w.cu} SE:{w.se}")
       events.append(ProfileRangeEvent(row, wave_name:=f"wave {w.wave_id}", Decimal(w.begin_time), Decimal(w.end_time)))
       rows, prev_instr = [], w.begin_time
-      for i,e in enumerate(w.insts):
+      for i,e in enumerate(w.decode_insts(asm)):
         rows.append((e.inst, e.time, max(0, e.time-prev_instr), e.dur, e.stall, str(e.typ).split("_")[-1]))
         prev_instr = max(prev_instr, e.time + e.dur)
       summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SIMD", "value":w.simd}, {"label":"CU", "value":w.cu},
