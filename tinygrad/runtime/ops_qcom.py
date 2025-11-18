@@ -179,7 +179,7 @@ class QCOMArgsState(HCQArgsState):
   def __init__(self, buf:HCQBuffer, prg:QCOMProgram, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=()):
     super().__init__(buf, prg, bufs, vals=vals)
 
-    if not isinstance(prg.dev.compiler, IR3Compiler) and len(bufs) + len(vals) != len(prg.buf_info):
+    if not prg.NIR and len(bufs) + len(vals) != len(prg.buf_info):
       raise RuntimeError(f'incorrect args size given={len(bufs)+len(vals)} != want={len(prg.buf_info)}')
 
     self.buf_info, self.args_info = prg.buf_info[:len(bufs)], prg.buf_info[len(bufs):]
@@ -199,21 +199,20 @@ class QCOMArgsState(HCQArgsState):
 class QCOMProgram(HCQProgram):
   def __init__(self, dev: QCOMDevice, name: str, lib: bytes):
     self.dev: QCOMDevice = dev
-    self.name, self.lib = name, lib
+    self.name, self.lib, self.NIR = name, lib, isinstance(dev.compiler, IR3Compiler)
 
-    if isinstance(dev.compiler, IR3Compiler):
+    if self.NIR:
       v, cs, self.image = IR3Compiler.unpack_lib(lib)
       self.image_size = v.info.size
 
       self.prg_offset, self.brnchstck = 0, v.branchstack
       self.pvtmem, self.shmem = v.pvtmem_size, v.shared_size # is this right?
 
-      print(cs)
       # Fill up constants and buffers info
       self.buf_info, self.consts_info = [], []
 
       # Collect sampler info.
-      self.samp_cnt = samp_cnt_in_file = v.num_samp
+      self.samp_cnt = v.num_samp
       assert self.samp_cnt <= 1, "Up to one sampler supported"
       if self.samp_cnt:
         self.samp_cnt += 1
@@ -225,14 +224,13 @@ class QCOMProgram(HCQProgram):
       # for i in range(v.imm_state.count): print(v.imm_state.values[i])
       # print(v.outputs_count, v.inputs_count)
       # for i in range(v.outputs_count): print(v.outputs[i].slot)
-      # for i in range(v.inputs_count): print(v.inputs[i].slot)
-      # exit(1)
+      for i in range(v.inputs_count): print(v.inputs[1].inloc)
+      self.buf_info.extend([SimpleNamespace(offset=v.inputs[i].inloc, type=-1) for i in range(v.inputs_count)])
 
       # Collect kernel arguments (buffers) info.
       for i in range(cs.ubo_state.num_enabled):
         rng = cs.ubo_state.range[i]
-        # FIXME: how do we really determine the type?
-        self.buf_info.extend([SimpleNamespace(offset=rng.offset + j, type=0) for j in range(rng.start, rng.end, 16)])
+        self.buf_info.extend([SimpleNamespace(offset=rng.offset + j, type=BUFTYPE_BUF) for j in range(rng.start, rng.end, 16)])
 
       # Setting correct offsets to textures/ibos.
       # TODO: do we need this ...

@@ -110,6 +110,8 @@ class IR3Compiler(NIRCompiler):
     cs.driver_params_ubo.idx, cs.primitive_map_ubo.idx, cs.primitive_param_ubo.idx = -1, -1, -1
     assert not mesa.ir3_compile_shader_nir(self.cc, shader, v), "compilation failed"
     lib = ctypes.cast(mesa.ir3_shader_assemble(v), ctypes.POINTER(ctypes.c_uint32))
+    mesa.ir3_shader_disasm(v, ctypes.cast(lib, ctypes.POINTER(ctypes.c_uint32)),
+                           ctypes.POINTER(mesa.struct__IO_FILE).in_dll(ctypes.CDLL(ctypes.util.find_library('c')), "stdout"))
     # NB: bytes(v) means the pointers in v are no longer safe! a custom __reduce__ that supports pointers for c.Struct would make this simpler
     ret = bytes(v) + bytes(v.const_state.contents) + ctypes.string_at(lib, v.info.size)
     mesa.ralloc_free(ctypes.pointer(v))
