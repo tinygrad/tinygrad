@@ -540,6 +540,12 @@ replace_contiguous = PatternMatcher([
 pm_fix_vmap = PatternMatcher([
   # x>=y and x<(y+1) means x==y (this can go in symbolic)
   ((UPat.var("x", dtype=dtypes.index) >= UPat.var("y")) & (UPat.var("x") < (UPat.var("y")+1)), lambda x,y: x.eq(y)),
+  # remove the reduce if it's compare reduce w assign (keep the outer range)
+  (UPat(Ops.BUFFERIZE, name="buf", src=(
+   UPat(Ops.ASSIGN, name="assign", allow_any_len=True, src=(UPat.var("assign_buf"),
+   (UPat.var("r1", dtype=dtypes.index) != UPat.var("r2")).where(0, UPat.var("val")).reduce(UPat.var("r2"), arg=Ops.ADD),)),), allow_any_len=True),
+   lambda r1,r2,val,buf,assign_buf,assign: buf.replace(src=(UOp(Ops.ASSIGN, val.dtype,
+    src=(assign_buf,val)+assign.src[2:]),)+buf.src[1:]).substitute({r1:r2}) if r1 in buf.src[1:] and r2.arg[-1] == AxisType.OUTER else None),
   # remove the reduce if it's compare reduce (keep the outer range)
   (UPat(Ops.BUFFERIZE, name="buf", src=(
    (UPat.var("r1", dtype=dtypes.index) != UPat.var("r2")).where(0, UPat.var("val")).reduce(UPat.var("r2"), arg=Ops.ADD),), allow_any_len=True),
