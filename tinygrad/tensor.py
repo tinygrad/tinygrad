@@ -481,6 +481,9 @@ class Tensor(OpMixin):
     if y.op is Ops.ADD: return Tensor.from_uop(y.src[0]) + Tensor.from_uop(y.src[1])
     raise RuntimeError(f"unhandled UOp {y}")
 
+  def end(self, *rngs:UOp):
+    return self._apply_uop(UOp.end, extra_args=rngs, dtype=self.dtype)
+
   # ***** creation entrypoint *****
 
   @staticmethod

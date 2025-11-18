@@ -66,6 +66,9 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
         new_src = s.end(*[r for r in closed_ranges if r.op is Ops.RANGE])
         del ctx.realize_map[s]
       else:
+        if new_src.op is Ops.END:
+          # skip END
+          new_src = new_src.src[0]
         # None in the device assigns it a number later
         opts = BufferizeOpts(device=s.device) if len(ctx.range_map[s][1]) == len(realized_ranges) else BufferizeOpts(None, AddrSpace.LOCAL)
         new_src = UOp(Ops.BUFFERIZE, s.dtype, src=(new_src,)+closed_ranges, arg=opts, tag=s.tag if opts.addrspace == AddrSpace.GLOBAL else None)
@@ -173,8 +176,12 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
 
     consumer_rngs = [rctx.range_map[c][0] for c in consumer_map[x] if c in rctx.range_map]
     if x in rctx.realize_map:
-      # if this is in the realize_map, we create new ranges (at the output)
-      out_rngs = tuple(rctx.new_range(s) for s in x.shape)
+      if x.op is Ops.END:
+        # for END, we use the ranges in the src as the early ones
+        out_rngs = x.src[1:]+tuple(rctx.new_range(s) for s in x.src[0].shape)
+      else:
+        # if this is in the realize_map, we create new ranges (at the output)
+        out_rngs = tuple(rctx.new_range(s) for s in x.shape)
       # all ranges are ended now
       ending_ranges[x] = []
       # mark all ranges as ended
@@ -248,6 +255,10 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     # REDUCE_AXIS creates ranges for the axes it is reducing
     if x.op is Ops.REDUCE_AXIS:
       rngs = tuple(rctx.new_range(s, axistype=AxisType.REDUCE) if i in x.arg[1] else r for i,(r,s) in enumerate(zip(rngs, x.src[0].shape)))
+
+    # END ends ranges
+    if x.op is Ops.END:
+      rngs = rngs[len(x.src)-1:]
 
     if debug:
       realized_ranges = rctx.realize_map.get(x, None)

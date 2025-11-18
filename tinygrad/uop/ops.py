@@ -219,8 +219,12 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.DEFINE_GLOBAL | Ops.DEFINE_LOCAL | Ops.DEFINE_REG: return (self.ptrdtype.size,)
 
       # passthrough ops
-      case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.END:
+      case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER:
         return self.src[0]._shape
+
+      # end adds dims to the front
+      case Ops.END:
+        return None if self.src[0]._shape is None else (tuple(x.vmax+1 for x in self.src[1:]) + self.src[0]._shape)
 
       # ops with custom handling
       case Ops.KERNEL: return self.arg.ast._shape
@@ -398,9 +402,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def load(self, *src:UOp, **kwargs): return UOp(Ops.LOAD, dtype=kwargs.pop("dtype", self.dtype.base), src=(self,)+src, **kwargs)
   def store(self, src:UOp|ConstType, **kwargs):
     return UOp(Ops.STORE, kwargs.pop("dtype", dtypes.void), (self, UOp.const(self.dtype, src) if not isinstance(src, UOp) else src), **kwargs)
-  def end(self, *src:UOp):
+  def end(self, *src:UOp, **kwargs):
     if len(src) == 0: return self
-    return UOp(Ops.END, src=(self,)+src)
+    return UOp(Ops.END, src=(self,)+src, **kwargs)
   def after(self, *src:UOp, **kwargs): return UOp(Ops.AFTER, self.dtype, (self,)+src, **kwargs)
   def assign(self, x:UOp): return UOp(Ops.ASSIGN, self.dtype, (self, x))
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)

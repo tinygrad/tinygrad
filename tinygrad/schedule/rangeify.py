@@ -472,6 +472,7 @@ pm_add_range_tags = PatternMatcher([
 ])
 
 def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
+  # if we have any outer ranges open here, we don't split
   if len([r for r in x.ranges if r.arg[-1] != AxisType.OUTER]): return None
 
   # ends of outer range don't go in kernels
@@ -499,7 +500,12 @@ def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
     raise RuntimeError(f"all buffers must be on the same device: {tuple(b.buf_uop.buffer for b in kernel.src)}")
   return kernel
 
+def split_inner_and_outer_end(x: UOp):
+  outer_ranges, inner_ranges = partition(x.src[1:], lambda r: r.arg[-1] == AxisType.OUTER)
+  if len(outer_ranges) and len(inner_ranges): return x.src[0].end(*inner_ranges).end(*outer_ranges)
+
 split_kernels = PatternMatcher([
+  (UPat(Ops.END, name="x"), split_inner_and_outer_end),
   (UPat((Ops.STORE, Ops.END), name="x"), split_store),
 ])
 
@@ -510,7 +516,7 @@ def tag_uop(ctx:list[UOp], x:UOp):
   return x.replace(tag=(len(ctx)-1,))
 add_tags = PatternMatcher([
   # don't tag BUFFERs, they are global
-  (UPat(GroupOp.All-{Ops.BUFFER, Ops.CONST, Ops.DEVICE, Ops.UNIQUE, Ops.DEFINE_VAR, Ops.BIND, Ops.KERNEL, Ops.END,
+  (UPat(GroupOp.All-{Ops.BUFFER, Ops.CONST, Ops.DEVICE, Ops.UNIQUE, Ops.DEFINE_VAR, Ops.BIND, Ops.KERNEL,
                      Ops.MSTACK, Ops.MSELECT, Ops.RANGE}.union(GroupOp.Movement), name="x"), tag_uop),
   (UPat({Ops.MSTACK, Ops.MSELECT}, name="x"), lambda ctx,x: None if all(s.op is Ops.BUFFER for s in x.src) else tag_uop(ctx, x)),
 ])

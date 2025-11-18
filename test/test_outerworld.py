@@ -71,13 +71,29 @@ class TestOuterScan(unittest.TestCase):
     ref.realize()
     return vec, mats, ref
 
+  def test_uop_fold_matmul(self):
+    vec, mats, ref = self._test_scan()
+
+    # 3 matmuls with FOLD
+    i = UOp.range(3, -100, AxisType.OUTER)
+    out = Tensor.empty(1, 10)
+    phi = Tensor(i.eq(0).where(vec.uop, out.uop))
+    comp = phi @ mats[i]
+    store = out.uop.store(comp.uop).end(i)
+    out = Tensor(out.uop.after(store))
+    out.realize()
+
+    # TODO: testing allclose
+    assert Tensor.allclose(ref[2], out, atol=1e-6), f"{ref.numpy()=}, {out.numpy()=}"
+
   def test_uop_scan_matmul(self):
     vec, mats, ref = self._test_scan()
 
     # 3 matmuls with SCAN
     i = UOp.range(3, -100, AxisType.OUTER)
     out = Tensor.empty(3, 1, 10)
-    comp = Tensor(i.eq(0).where(vec.uop, out[(i-1).maximum(0)].uop)) @ mats[i]
+    phi = Tensor(i.eq(0).where(vec.uop, out[(i-1).maximum(0)].uop))
+    comp = phi @ mats[i]
     store = out[i].uop.store(comp.uop).end(i)
     out = Tensor(out.uop.after(store))
     out.realize()
@@ -143,6 +159,29 @@ class TestOuterworld(unittest.TestCase):
     # TODO: this should support flatten
     out = out.reshape(1, 3).expand(a, 3).contiguous().realize()
     self.assertListEqual([[0,4,8],[4,8,12],[8,12,16]], out.tolist())
+
+class TestVmap(unittest.TestCase):
+  def test_vmap_inner(self):
+    x = Tensor.ones(3, 2).contiguous()
+
+    # vmap across axis 0
+    a = UOp.range(3, -1)
+    out = x[a]*2
+    out = out.end(a)
+    out.realize()
+
+    self.assertTrue((out==2).all().item())
+
+  def test_vmap_outer(self):
+    x = Tensor.ones(3, 2).contiguous()
+
+    # vmap across axis 0
+    a = UOp.range(3, -1, AxisType.OUTER)
+    out = x[a]*2
+    out = out.end(a)
+    out.realize()
+
+    self.assertTrue((out==2).all().item())
 
 if __name__ == '__main__':
   unittest.main()
