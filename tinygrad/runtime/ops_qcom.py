@@ -289,17 +289,11 @@ class QCOMProgram(HCQProgram):
 
       # "cs" is "compute shader"
       self.wgid, self.lid = v.cs.work_group_id, v.cs.local_invocation_id
-      print(f"{v.cs.work_group_id=:X} {v.cs.local_invocation_id=:X}")
-      print(v.imm_state, cs.allocs.max_const_offset_vec4)
-      from hexdump import hexdump
-      hexdump(imm_vals)
-      self.consts_info = [(imm_vals, cs.allocs.max_const_offset_vec4 * 4, len(imm_vals))]
+      self.consts_info = [(imm_vals, cs.allocs.max_const_offset_vec4 * 16, len(imm_vals))]
       # Collect kernel arguments (buffers) info.
       for i in range(cs.ubo_state.num_enabled):
         rng = cs.ubo_state.range[i]
-        print(f"{rng.offset} : {rng.start} -> {rng.end}")
         self.buf_info.extend([SimpleNamespace(offset=rng.offset + j, type=BUFTYPE_BUF) for j in range(rng.start, rng.end, 8)])
-        print(self.buf_info)
 
       # Setting correct offsets to textures/ibos.
       self.tex_cnt, self.ibo_cnt = sum(x.type is BUFTYPE_TEX for x in self.buf_info), sum(x.type is BUFTYPE_IBO for x in self.buf_info)

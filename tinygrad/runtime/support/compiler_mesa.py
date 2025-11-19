@@ -1,4 +1,4 @@
-import base64, ctypes, pathlib, tempfile, hashlib
+import base64, ctypes, pathlib, tempfile, hashlib, sys
 from tinygrad.device import Compiler
 from tinygrad.helpers import cpu_objdump, system
 from tinygrad.runtime.autogen import mesa
@@ -6,7 +6,10 @@ from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, expect, cerr
 try: from tinygrad.runtime.autogen import llvm
 except (ImportError, FileNotFoundError): llvm = None #type:ignore[assignment]
 
-def rzalloc(typ, ctx=None): return ctypes.cast(mesa.rzalloc_size(ctypes.cast(ctx, ctypes.c_void_p), ctypes.sizeof(typ)), ctypes.POINTER(typ))
+def rzalloc(typ, ctx=None, **kwargs):
+  s = ctypes.cast(mesa.rzalloc_size(ctypes.cast(ctx, ctypes.c_void_p), ctypes.sizeof(typ)), ctypes.POINTER(typ))
+  for k,v in kwargs.items(): setattr(s.contents, k, v)
+  return s
 
 def deserialize(enc_src, opts):
   blobreader = mesa.struct_blob_reader()
@@ -89,8 +92,10 @@ class NAKCompiler(NIRCompiler):
 
 class IR3Compiler(NIRCompiler):
   def __init__(self, chip_id, cache_key="ir3"):
+    assert sys.version_info >= (3,14), "IR3 requires python 3.14's bitfield fixes"
     self.dev_id = mesa.struct_fd_dev_id(((chip_id >> 24) & 0xFF) * 100 + ((chip_id >> 16) & 0xFF) * 10 + ((chip_id >>  8) & 0xFF), chip_id)
-    self.cc = mesa.ir3_compiler_create(None, self.dev_id, mesa.fd_dev_info(self.dev_id), mesa.struct_ir3_compiler_options(disable_cache=True)).contents
+    self.cc = mesa.ir3_compiler_create(None, self.dev_id, mesa.fd_dev_info(self.dev_id),
+                                       mesa.struct_ir3_compiler_options(disable_cache=True)).contents
     self.nir_options = bytes(mesa.ir3_get_compiler_options(self.cc).contents)
     super().__init__(f"compile_{cache_key}")
 
@@ -99,21 +104,18 @@ class IR3Compiler(NIRCompiler):
   def __reduce__(self): return IR3Compiler, (self.dev_id.chip_id,)
 
   def compile(self, src) -> bytes:
+    # import os
+    # input(os.getpid())
     nir_shader = deserialize(src, self.nir_options)
     mesa.ir3_nir_lower_io_vars_to_temporaries(nir_shader)
     mesa.ir3_finalize_nir(self.cc, (ir3_options:=mesa.struct_ir3_shader_options()).nir_options, nir_shader)
-    shader = mesa.ir3_shader_from_nir(self.cc, nir_shader, ir3_options, None).contents
-    v = rzalloc(mesa.struct_ir3_shader_variant).contents
-    v.shader_id, v.key, v.type, v.shader_options = shader.id, mesa.struct_ir3_shader_key(), shader.type, shader.options,
-    v.compiler, v.mergedregs, v.num_ssbos = ctypes.pointer(self.cc), self.cc.mergedregs, (info:=shader.nir.contents.info).num_ssbos,
-    v.num_uavs, v.cs.req_local_mem, = info.num_ssbos+info.num_images, shader.cs.req_local_mem
-    v.const_state = rzalloc(mesa.struct_ir3_const_state, ctypes.pointer(v))
-    (cs:=v.const_state.contents).allocs, cs.push_consts_type, cs.consts_ubo.idx = shader.options.const_allocs, shader.options.push_consts_type, -1
-    cs.driver_params_ubo.idx, cs.primitive_map_ubo.idx, cs.primitive_param_ubo.idx = -1, -1, -1
+    shader = rzalloc(mesa.struct_ir3_shader, compiler=ctypes.pointer(self.cc), type=mesa.MESA_SHADER_COMPUTE, nir=nir_shader).contents
+    mesa.ir3_nir_post_finalize(shader)
+    v = rzalloc(mesa.struct_ir3_shader_variant, type=shader.type, compiler=ctypes.pointer(self.cc), key=mesa.struct_ir3_shader_key()).contents
+    v.const_state, shader.variants, shader.variant_count = rzalloc(mesa.struct_ir3_const_state, ctypes.pointer(v)), ctypes.pointer(v), 1
     assert not mesa.ir3_compile_shader_nir(self.cc, shader, v), "compilation failed"
     lib = ctypes.cast(mesa.ir3_shader_assemble(v), ctypes.POINTER(ctypes.c_uint32))
-    mesa.ir3_shader_disasm(v, ctypes.cast(lib, ctypes.POINTER(ctypes.c_uint32)),
-                           ctypes.POINTER(mesa.struct__IO_FILE).in_dll(ctypes.CDLL(ctypes.util.find_library('c')), "stdout"))
+    mesa.ir3_shader_disasm(v, lib, ctypes.POINTER(mesa.struct__IO_FILE).in_dll(ctypes.CDLL(ctypes.util.find_library('c')), "stdout"))
     # NB: bytes(v) means the pointers in v are no longer safe! a custom __reduce__ that supports pointers for c.Struct would make this simpler
     ret = bytes(v) + bytes(v.const_state.contents) + ctypes.string_at(v.imm_state.values, v.imm_state.count * 4) + ctypes.string_at(lib, v.info.size)
     mesa.ralloc_free(ctypes.pointer(v))
