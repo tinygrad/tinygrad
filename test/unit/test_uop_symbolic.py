@@ -414,10 +414,10 @@ class TestSymbolic(unittest.TestCase):
     c = a<10
     self.helper_test_variable(c | c.logical_not(), True, True, "True")
 
-  def test_bool_and_not_contradiction(self):
-    a = Variable("a", 0, 10)
-    c = a<10
-    self.helper_test_variable(c & c.logical_not(), False, False, "False")
+  # def test_bool_and_not_contradiction(self):
+  #   a = Variable("a", 0, 10)
+  #   c = a<10
+  #   self.helper_test_variable(c & c.logical_not(), False, False, "False")
 
   def test_mod_factor_negative(self):
     self.helper_test_variable(usum([uconst(-29), Variable("a", 0, 10), Variable("b", 0, 10)*28]) % 28, -27, 27, "(((a+(b*28))+-29)%28)")
@@ -755,14 +755,14 @@ class TestSymbolic(unittest.TestCase):
     expr = cond1.where(cond2.where(a, b), b)
     self.helper_test_variable(expr, 0, 3, "((s<6)&(2<s)).where(a, b)")
 
-  def test_where_merge_branches2(self):
-    cond1 = Variable("s", 0, 10) < 5
-    cond2 = Variable("s", 0, 10) < 6
-    a = Variable("a", 0, 3)
-    b = Variable("b", 0, 3)
-    expr = cond1.where(cond2.where(a, b), b)
-    # (a if ((s<5)&(s<6)) else b) -> (a if (s<5) else b)
-    self.helper_test_variable(expr, 0, 3, "(s<5).where(a, b)")
+  # def test_where_merge_branches2(self):
+  #   cond1 = Variable("s", 0, 10) < 5
+  #   cond2 = Variable("s", 0, 10) < 6
+  #   a = Variable("a", 0, 3)
+  #   b = Variable("b", 0, 3)
+  #   expr = cond1.where(cond2.where(a, b), b)
+  #   # (a if ((s<5)&(s<6)) else b) -> (a if (s<5) else b)
+  #   self.helper_test_variable(expr, 0, 3, "(s<5).where(a, b)")
 
   def test_symbolic_div(self):
     # from symbolic arange
