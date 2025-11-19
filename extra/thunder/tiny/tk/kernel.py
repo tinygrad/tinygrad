@@ -2,7 +2,7 @@ from contextlib import AbstractContextManager
 from tinygrad.uop.ops import UOp, KernelInfo, AxisType, AddrSpace
 from extra.thunder.tiny.tk import WARP_THREADS
 from extra.thunder.tiny.tk.group import Group
-from extra.thunder.tiny.tk.tiles import GL, ST, RT_16X16, RT, RV
+from extra.thunder.tiny.tk.tiles import GL, ST_16X16, ST_16X16_SWIZZLED, ST, RT_16X16, RT, RV
 
 class _tk_range:
   user_rid = 0
@@ -69,7 +69,7 @@ class Kernel(AbstractContextManager):
     return uop
 
   def gl(self, shape, dtype): return GL.create(shape, dtype, self)
-  def st(self, shape, dtype): return ST.create(shape, dtype, self)
+  def st(self, shape, dtype, layout=ST_16X16_SWIZZLED): return ST.create(shape, dtype, layout, self)
   def rt(self, shape, dtype, layout=RT_16X16): return RT.create(shape, dtype, layout, self)
   def rv(self, length, dtype, layout="naive"): return RV.create(length, dtype, layout, self)
 
@@ -80,7 +80,11 @@ class Kernel(AbstractContextManager):
     rngs = []
     while self.range_stack: rngs.append(self.range_stack.pop(0)._rng)
 
-    return self.store_stack.pop()[0]._uop.end(*rngs).sink(arg=KernelInfo(opts_to_apply=())).simplify()
+    last_store = self.store_stack.pop()[0]
+    if hasattr(last_store, '_uop'): uop = last_store._uop
+    else: uop = last_store
+
+    return uop.end(*rngs).sink(arg=KernelInfo(opts_to_apply=())).simplify()
 
   def endrange(self):
     last_store = self.store_stack.pop()
