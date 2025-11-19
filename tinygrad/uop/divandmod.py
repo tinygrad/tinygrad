@@ -27,10 +27,10 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
       new_xs, changed = [], False
       for u in uops_no_const:
         if u.op is Ops.MOD and u.src[1].divides(c) is not None:
-          new_xs.append(u.src[0])
+          u = u.src[0]
           changed = True
-        else: new_xs.append(u)
-      if changed: return (UOp.sum(*new_xs) + const) % y
+        new_xs.append(u)
+      if changed and (new_x:=(UOp.sum(*new_xs) + const)).vmin >= 0: return new_x % y
 
     # Shared decomposition for folding rules
     decomp = [(u.divides(f:=u.const_factor()),f) for u in uops_no_const]
