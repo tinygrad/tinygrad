@@ -2,17 +2,17 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import cdiv, cmod, CORRECT_DIVMOD_FOLDING, unwrap
 
-def cancel_divmod(d: UOp, x: UOp, y: UOp) -> UOp|None:
-  # simple cancel div/mod case when the range of the numerator lies within a single denominator interval
+def fold_divmod_general(d: UOp) -> UOp|None:
+  x, y = d.src
+
+  # cancel_divmod: simple cancel div/mod case when the range of the numerator lies within a single denominator interval
   x_min, x_max, y_min, y_max = x.vmin, x.vmax, y.vmin, y.vmax
   assert isinstance(x_min, int) and isinstance(x_max, int) and isinstance(y_min, int) and isinstance(y_max, int)
   if y_min==y_max==0: raise ZeroDivisionError(f"{'Division' if d.op is Ops.IDIV else 'Mod'} by zero trying to rewrite {x.alu(d.op, y)}")
   if y_min*y_max > 0 and (q:=cdiv(x_min,y_min)) == cdiv(x_min,y_max) == cdiv(x_max,y_min) == cdiv(x_max,y_max):
     return x - q*y if d.op is Ops.MOD else d.const_like(q)
-  return None
 
-def fold_divmod_general(d: UOp) -> UOp|None:
-  x, y = d.src
+  # split uops for the rest of the processing
   x_peeled, const = x.pop_const()
   uops_no_const = list(x_peeled.split_uop(Ops.ADD))
 
@@ -56,6 +56,13 @@ def fold_divmod_general(d: UOp) -> UOp|None:
           ret = new_x.alu(d.op, x.ufix(c//gcd.arg))
           return ret*gcd + const%gcd.arg if d.op is Ops.MOD else ret+const//c
 
+    # nest_div_by_smallest_factor: try and nest the div and see if it allows the numerator to be simplified
+    if d.op is Ops.IDIV and x.vmin >= 0:
+      div = min([c] + [abs(f) for u, f in zip(uops_no_const, factors) if u.op not in (Ops.CONST, Ops.VCONST) and abs(f) > 1 and (c%f)==0])
+      # NOTE: this is recursive!
+      if div < c and (newxs := fold_divmod_general(x//div)) is not None and newxs.vmin >= 0:
+        return newxs // (c // div)
+
   # ** Variable Denominator / Fallback Rules **
   # These rules apply to variables OR constants that failed the checks above.
   # Reconstruct all uops including const for these checks.
@@ -82,18 +89,6 @@ def fold_divmod_general(d: UOp) -> UOp|None:
   if new_x.vmin<0: return None
   return new_x%y if d.op is Ops.MOD else new_x//y+sum(quo)
 
-def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
-  # we try and nest the div and see if it allows the numerator to be simplified
-  if ((c := y.arg) < 0): return None
-  factors = [u.const_factor() for u in x.split_uop(Ops.ADD) if u.op not in (Ops.CONST, Ops.VCONST)]
-  div = min([y.arg]+[abs(f) for f in factors if abs(f) > 1 and (c%f)==0])
-  if div != c:
-    newx = x//y.const_like(div)
-    newxs = fold_divmod_general(newx)
-    if div==y.arg or newxs is None or x.vmin<0 or newx.vmin<0: return None
-    return newxs//(c//div)
-  return None
-
 div_and_mod_symbolic = PatternMatcher([
   # ** 1. Fast Inline Rules **
   ((UPat.var("x")//UPat.cvar("c") + UPat.cvar("a"))//UPat.cvar("d"), lambda x,c,a,d: (x+a*c)//(c*d)
@@ -106,10 +101,7 @@ div_and_mod_symbolic = PatternMatcher([
     lambda x,c,n,d: (-(-(c.arg%d.arg + x - (d.arg-1))//d) + c.arg//d.arg) if x.vmax<=0 and n.vmin>=0 and d.arg>0 else None),
 
   # ** 2. Slow Rules **
-  # NOTE: if you move this one below `fold_divmod_general` you get more uops in test/external/external_benchmark_schedule.py
-  (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.var("y"))), cancel_divmod),
   (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d"), fold_divmod_general),
-  (UPat(Ops.IDIV, dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), nest_div_by_smallest_factor),
 
   # NOTE: these have to go at the bottom or TestSymbolicOps.test_var loops
   (UPat.var("x", dtypes.index) % UPat.var("d"), lambda x,d: -((-x)%d) if x.vmax <= 0 else None),
