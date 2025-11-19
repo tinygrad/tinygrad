@@ -34,7 +34,7 @@ jobs:
         llvm: 'true'
         webgpu: 'true'
         mesa: 'true'
-        pydeps: 'clang>=20 pyyaml mako'
+        pydeps: 'pyyaml mako'
     - name: Install autogen support packages
       run: sudo apt-get install -y --no-install-recommends libclang-20-dev llvm-20-dev hip-dev libusb-1.0-0-dev
     - name: Verify OpenCL autogen
@@ -130,6 +130,27 @@ jobs:
         mv tinygrad/runtime/autogen/mesa.py /tmp/mesa.py.bak
         python3 -c "from tinygrad.runtime.autogen import mesa"
         diff /tmp/mesa.py.bak tinygrad/runtime/autogen/mesa.py
+    - name: Verify libclang autogen
+      run: |
+        cp tinygrad/runtime/autogen/libclang.py /tmp/libclang.py.bak
+        REGEN=1 python3 -c "from tinygrad.runtime.autogen import libclang"
+        diff /tmp/libclang.py.bak tinygrad/runtime/autogen/libclang.py
+  autogen-mac:
+    name: In-tree Autogen (macos)
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        llvm: 'true'
+    - name: Verify macos autogen
+      run: |
+        mv tinygrad/runtime/autogen/metal.py /tmp/metal.py.bak
+        LIBCLANG_PATH=/opt/homebrew/opt/llvm@20/lib/libclang.dylib python3 -c "from tinygrad.runtime.autogen import metal"
+        diff /tmp/metal.py.bak tinygrad/runtime/autogen/metal.py
   autogen-comgr-3:
     name: In-tree Autogen (comgr 3)
     runs-on: ubuntu-24.04
@@ -139,8 +160,6 @@ jobs:
       uses: actions/checkout@v4
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
-      with:
-        pydeps: 'clang>=20'
     - name: Install autogen support packages
       run: |
         wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
