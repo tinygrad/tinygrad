@@ -10,9 +10,13 @@ def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
   if op == Ops.MAX:
     assert ret.op is Ops.REDUCE_AXIS, "only works on REDUCE_AXIS"
     mask = ret.src[0].eq(broadcast_to_input(ret))
-    count = mask.cast(dtypes.int32).r(Ops.ADD, ret.arg[1]).cast(dtypes.float32)
-    normalized = mask.cast(dtypes.float32) / broadcast_to_input(count)
-    return (normalized.cast(ctx.dtype) * broadcast_to_input(ctx),)
+    # accumulate counts in int32 then promote to a safe float (>= fp32) for division
+    ctx_scalar = ctx.dtype.scalar()
+    safe_dtype = ctx_scalar if ctx_scalar.itemsize >= dtypes.float32.itemsize else dtypes.float32
+    count = mask.cast(dtypes.int32).r(Ops.ADD, ret.arg[1]).cast(safe_dtype)
+    normalized = mask.cast(safe_dtype) / broadcast_to_input(count)
+    upstream = broadcast_to_input(ctx).cast(safe_dtype)
+    return ((normalized * upstream).cast(ctx.dtype),)
   if op == Ops.MUL: return (broadcast_to_input(ctx * ret) / ret.src[0],)
 
 # ctx is grad_output
