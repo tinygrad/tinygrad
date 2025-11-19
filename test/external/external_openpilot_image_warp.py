@@ -19,10 +19,10 @@ UV_SCALE_MATRIX_INV = np.linalg.inv(UV_SCALE_MATRIX)
 
 
 def tensor_arange(end):
-    return Tensor([float(i) for i in range(end)])
+  return Tensor([float(i) for i in range(end)])
 
 def tensor_round(tensor):
-    return (tensor + 0.5).floor()
+  return (tensor + 0.5).floor()
 
 def warp_perspective_tinygrad(src, M_inv, dst_shape):
   w_dst, h_dst = dst_shape
@@ -83,24 +83,24 @@ def update_both_imgs_tinygrad(calib_img_buffer, new_img, M_inv,
 import numpy as np
 
 def warp_perspective_numpy(src, M_inv, dst_shape):
-    w_dst, h_dst = dst_shape
-    h_src, w_src = src.shape[:2]
-    xs, ys = np.meshgrid(np.arange(w_dst), np.arange(h_dst))
-    dst_x = xs.reshape(-1)
-    dst_y = ys.reshape(-1)
+  w_dst, h_dst = dst_shape
+  h_src, w_src = src.shape[:2]
+  xs, ys = np.meshgrid(np.arange(w_dst), np.arange(h_dst))
+  dst_x = xs.reshape(-1)
+  dst_y = ys.reshape(-1)
 
-    ones = np.ones_like(xs)
-    dst_hom = np.stack([xs, ys, ones], axis=0).reshape(3, -1)
+  ones = np.ones_like(xs)
+  dst_hom = np.stack([xs, ys, ones], axis=0).reshape(3, -1)
 
-    src_hom = M_inv @ dst_hom
-    src_hom /= src_hom[2:3, :]
+  src_hom = M_inv @ dst_hom
+  src_hom /= src_hom[2:3, :]
 
-    src_x = np.clip(np.round(src_hom[0, :]).astype(int), 0, w_src - 1)
-    src_y = np.clip(np.round(src_hom[1, :]).astype(int), 0, h_src - 1)
+  src_x = np.clip(np.round(src_hom[0, :]).astype(int), 0, w_src - 1)
+  src_y = np.clip(np.round(src_hom[1, :]).astype(int), 0, h_src - 1)
 
-    dst = np.zeros((h_dst, w_dst), dtype=src.dtype)
-    dst[dst_y, dst_x] = src[src_y, src_x]
-    return dst.ravel()
+  dst = np.zeros((h_dst, w_dst), dtype=src.dtype)
+  dst[dst_y, dst_x] = src[src_y, src_x]
+  return dst.ravel()
 
 def frames_to_tensor_np(frames):
   H = (frames.shape[0]*2)//3
