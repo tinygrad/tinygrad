@@ -89,7 +89,7 @@ class Decoder:
         bs,c,py,px = x.shape
         x = x.reshape(bs, c, py, 1, px, 1).expand(bs, c, py, 2, px, 2).reshape(bs, c, py*2, px*2)
         x = l['upsample']['conv'](x)
-      x.realize()
+      # x.realize()
 
     return self.conv_out(self.norm_out(x).swish())
 
@@ -268,6 +268,7 @@ if __name__ == "__main__":
 
   model = StableDiffusion()
 
+  st = time.perf_counter()
   # load in weights
   with WallTimeEvent(BenchEvent.LOAD_WEIGHTS):
     if not args.fakeweights:
@@ -279,17 +280,24 @@ if __name__ == "__main__":
         if k.startswith("model"):
           v.replace(v.cast(dtypes.float16))
 
-    Tensor.realize(*get_state_dict(model).values())
+    # Replace weights with empty tensors to skip initialization computation
+    if args.fakeweights:
+      for k,v in get_state_dict(model).items():
+        v.replace(Tensor.empty(v.shape, dtype=v.dtype, device=v.device))
 
+    Tensor.realize(*get_state_dict(model).values())
+  print(f"Startup/Weights took: {time.perf_counter() - st:.2f}s")
+
+  st = time.perf_counter()
   # run through CLIP to get context
   tokenizer = Tokenizer.ClipTokenizer()
-  prompt = Tensor([tokenizer.encode(args.prompt)])
-  context = model.cond_stage_model.transformer.text_model(prompt).realize()
+  prompts = Tensor([tokenizer.encode(args.prompt), tokenizer.encode("")])
+  contexts = model.cond_stage_model.transformer.text_model(prompts).realize()
+  context, unconditional_context = contexts[0:1].contiguous().realize(), contexts[1:2].contiguous().realize()
   print("got CLIP context", context.shape)
-
-  prompt = Tensor([tokenizer.encode("")])
-  unconditional_context = model.cond_stage_model.transformer.text_model(prompt).realize()
   print("got unconditional CLIP context", unconditional_context.shape)
+  print(f"CLIP took: {time.perf_counter() - st:.2f}s")
+
 
   # done with clip model
   del model.cond_stage_model
@@ -298,16 +306,56 @@ if __name__ == "__main__":
   print(f"running for {timesteps} timesteps")
   alphas = model.alphas_cumprod[Tensor(timesteps)]
   alphas_prev = Tensor([1.0]).cat(alphas[:-1])
+  
+  # Precompute/realize values for reuse
+  alphas_np = alphas.numpy()
+  alphas_prev_np = alphas_prev.numpy()
+  
+  # Preallocate reused buffers
+  timestep_t = Tensor.zeros(1, dtype=dtypes.int).contiguous().realize()
+  alpha_t = Tensor.zeros(1, dtype=dtypes.float).contiguous().realize()
+  alpha_prev_t = Tensor.zeros(1, dtype=dtypes.float).contiguous().realize()
+  guidance_t = Tensor([args.guidance], dtype=dtypes.float).contiguous().realize()
 
   # start with random noise
   if args.seed is not None: Tensor.manual_seed(args.seed)
-  latent = Tensor.randn(1,4,64,64)
+  init_noise = Tensor.randn(1,4,64,64).realize()
+  init_noise_np = init_noise.numpy()
+  latent = init_noise # placeholder
 
   @TinyJit
   def run(model, *x): return model(*x).realize()
 
+  # Double Warmup to ensure JIT compatibility
+  print("Warming up JIT (Pass 1)...")
+  st_warm = time.perf_counter()
+  # Pass 1 inputs
+  timestep_t.uop.base.buffer.copyin(memoryview(np.array([timesteps[0]], dtype=np.int32)))
+  alpha_t.uop.base.buffer.copyin(memoryview(alphas_np[0:1]))
+  alpha_prev_t.uop.base.buffer.copyin(memoryview(alphas_prev_np[0:1]))
+  
+  # Pass 1: Compiles JIT-A (Input: init_noise buffer)
+  latent = run(model, unconditional_context, context, latent, timestep_t, alpha_t, alpha_prev_t, guidance_t)
+  print(f"Warmup Pass 1 took: {time.perf_counter() - st_warm:.2f}s")
+
+  print("Warming up JIT (Pass 2)...")
+  st_warm2 = time.perf_counter()
+  # Pass 2: Compiles JIT-B (Input: run output buffer) if mismatch, or Hits JIT-A if match
+  # We reuse the output of Pass 1 as input to Pass 2
+  # Reset content to valid inputs (though not strictly necessary for compilation)
+  timestep_t.uop.base.buffer.copyin(memoryview(np.array([timesteps[0]], dtype=np.int32)))
+  # latent is already the output of Pass 1
+  latent = run(model, unconditional_context, context, latent, timestep_t, alpha_t, alpha_prev_t, guidance_t)
+  print(f"Warmup Pass 2 took: {time.perf_counter() - st_warm2:.2f}s")
+
+  # Reset latent to initial noise for actual run
+  # The output of Pass 2 is a realized tensor compatible with JIT-B (or JIT-A)
+  # We overwrite its content with random noise
+  latent.uop.base.buffer.copyin(memoryview(init_noise_np))
+
   # this is diffusion
   step_times = []
+  st_loop = time.perf_counter()
   with Context(BEAM=getenv("LATEBEAM")):
     for index, timestep in (t:=tqdm(list(enumerate(timesteps))[::-1])):
       GlobalCounters.reset()
@@ -315,21 +363,30 @@ if __name__ == "__main__":
       t.set_description("%3d %3d" % (index, timestep))
       with Timing("step in ", enabled=args.timing, on_exit=lambda _: f", using {GlobalCounters.mem_used/1e9:.2f} GB"):
         with WallTimeEvent(BenchEvent.STEP):
-          tid = Tensor([index])
-          latent = run(model, unconditional_context, context, latent, Tensor([timestep]), alphas[tid], alphas_prev[tid], Tensor([args.guidance]))
+          # Update buffers in place
+          timestep_t.uop.base.buffer.copyin(memoryview(np.array([timestep], dtype=np.int32)))
+          alpha_t.uop.base.buffer.copyin(memoryview(alphas_np[index:index+1]))
+          alpha_prev_t.uop.base.buffer.copyin(memoryview(alphas_prev_np[index:index+1]))
+          
+          latent = run(model, unconditional_context, context, latent, timestep_t, alpha_t, alpha_prev_t, guidance_t)
           if args.timing: Device[Device.DEFAULT].synchronize()
       step_times.append((time.perf_counter_ns() - st)*1e-6)
     del run
+  print(f"Loop took: {time.perf_counter() - st_loop:.2f}s")
 
   if (assert_time:=getenv("ASSERT_MIN_STEP_TIME")):
     min_time = min(step_times)
     assert min_time < assert_time, f"Speed regression, expected min step time of < {assert_time} ms but took: {min_time} ms"
   # upsample latent space to image with autoencoder
+  st = time.perf_counter()
   x = model.decode(latent)
   print(x.shape)
+  print(f"Decode Graph Build took: {time.perf_counter() - st:.2f}s")
 
+  st = time.perf_counter()
   # save image
   im = Image.fromarray(x.numpy())
+  print(f"Realize/Save took: {time.perf_counter() - st:.2f}s")
   print(f"saving {args.out}")
   im.save(args.out)
   # Open image.
