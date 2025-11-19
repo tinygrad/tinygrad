@@ -23,7 +23,7 @@ if __name__ == "__main__":
 
   kernel_count = GlobalCounters.kernel_count
   assert kernel_count > 0, "No kernels, test failed"
-  expected_kernels = 229
+  expected_kernels = 228
   expectation = f"ResNet18 kernels are {kernel_count} vs {expected_kernels} expected."
   if kernel_count < expected_kernels: warnings.warn(f"{expectation} Expectation can be lowered.", UserWarning)
   assert kernel_count <= expected_kernels, f"{expectation}"

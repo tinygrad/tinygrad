@@ -47,18 +47,18 @@ aten = torch.ops.aten
 # track view relationships for in place operations
 def canonical_base(view: Tensor): return getattr(view, "_view_base", view)
 def derived_views(base: Tensor): return [t for tref in getattr(base, "_views", set()) if (t:=tref()) is not None]
+def unwrap_args(args, kwargs):
+  return [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args], {k:unwrap(v) if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()}
 def wrap_view_op(fn):
   @functools.wraps(fn)
   def _wrap(*args, **kwargs):
-    args = [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args]
-    kwargs = {k: unwrap(v) if isinstance(v, torch.Tensor) else v for k, v in kwargs.items()}
+    args, kwargs = unwrap_args(args, kwargs)
     ret = fn(*args, **kwargs)
     base = canonical_base(args[0])
     ret._view_base = base
     base._views = getattr(base, "_views", set())
     base._views.add(weakref.ref(ret))
-    ret._view_parent = args[0] 
-    ret._view_step = (fn, args[1:], kwargs)
+    ret._view_ops = _get_view_ops(args[0]) + [(fn, args[1:], kwargs)]
     return wrap(ret)
   return _wrap
 
@@ -79,14 +79,7 @@ view_ops = {
 
 for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(v))
 
-def _get_view_ops(view):
-  base = canonical_base(view)
-  ops = []
-  while view is not base:
-    if not (step := getattr(view, "_view_step", None)): break
-    ops.append(step)
-    view = getattr(view, "_view_parent", base)
-  return ops[::-1]
+def _get_view_ops(view): return getattr(view, "_view_ops", [])
 
 def _apply_view_ops(target, ops):
   for fn, args, kwargs in ops: target = fn(target, *args, **kwargs)
@@ -553,11 +546,6 @@ def wrap_out(f):
     return out.assign(assigned)
   return _wrap_out
 
-def _fill_tensor_tensor(self: Tensor, value: Tensor) -> Tensor:
-  if value.numel() != 1: raise RuntimeError("fill_ expects a 0-d tensor value")
-  scalar_value = value.reshape(()).item()
-  return self.assign(Tensor.full(self.shape, scalar_value, device=self.device, dtype=self.dtype))
-
 def _inplace_op(t, new_value):
   if not hasattr(t, "_view_base") and not getattr(canonical_base(t), "_views", set()): t.replace(new_value)
   else: _apply_inplace(t, new_value)
@@ -566,22 +554,22 @@ def _inplace_op(t, new_value):
 tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.remainder.Scalar_Tensor": lambda x,y: x%y,
   "aten.floor_divide": lambda x,y: x//y,
-  "aten.floor_divide_.Tensor": lambda x,y: x.assign(x//y),
+  "aten.floor_divide_.Tensor": lambda x,y: x//y,
   # TODO: use tinygrad methods, but they require x to be unsigned
   "aten.__lshift__.Scalar": lambda x,y: x*(2**y),
-  "aten.__ilshift__.Scalar": lambda x,y: x.assign(x*(2**y)),
+  "aten.__ilshift__.Scalar": lambda x,y: x*(2**y),
   "aten.__rshift__.Scalar": lambda x,y: x//(2**y),
-  "aten.__irshift__.Scalar": lambda x,y: x.assign(x//(2**y)),
+  "aten.__irshift__.Scalar": lambda x,y: x//(2**y),
   # inplace ops using replace for fusion
-  "aten.zero_": lambda x: _inplace_op(x, x.zeros_like()),
-  "aten.fill_.Scalar": lambda x, y: _inplace_op(x, x.full_like(y)),
-  "aten.add_.Tensor": lambda self, other, alpha=1.0: _inplace_op(self, self + other * alpha),
-  "aten.add_.Scalar": lambda self, other, alpha=1.0: _inplace_op(self, self + other * alpha),
-  "aten.mul_.Tensor": lambda self, other: _inplace_op(self, self * other),
-  "aten.mul_.Scalar": lambda self, other: _inplace_op(self, self * other),
+  "aten.zero_": lambda x: x.zeros_like(),
+  "aten.fill_.Scalar": lambda x, y: x.full_like(y),
+  "aten.add_.Tensor": lambda self, other, alpha=1.0: self + other * alpha,
+  "aten.add_.Scalar": lambda self, other, alpha=1.0: self + other * alpha,
+  "aten.mul_.Tensor": lambda self, other: self * other,
+  "aten.mul_.Scalar": lambda self, other: self * other,
   # relu doesn't have an out form?
   "aten.relu": Tensor.relu,
-  "aten.relu_": lambda x: x.assign(x.relu()),
+  "aten.relu_": lambda x: x.relu(),
   "aten.mean": Tensor.mean,
   "aten.mean.dim": Tensor.mean,
   "aten.min": Tensor.min,
@@ -602,19 +590,17 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.repeat": lambda x,*repeats: Tensor.repeat(x,*repeats).contiguous(), # not a view
   "aten._softmax": lambda self,dim,half_to_float: self.softmax(dim),
   "aten._log_softmax": lambda self,dim,half_to_float: self.log_softmax(dim),
-  "aten.random_": lambda self:
-    self.assign(Tensor.randint(*self.shape, low=dtypes.min(self.dtype), high=dtypes.max(self.dtype), device=self.device, dtype=self.dtype)),
-  "aten.random_.from": lambda self, from_, to:
-    self.assign(Tensor.randint(*self.shape, low=from_, high=to, device=self.device, dtype=self.dtype)),
-  "aten.uniform_": lambda self, low=0, high=1: self.assign(Tensor.uniform(*self.shape, low=low, high=high, dtype=self.dtype)),
-  "aten.normal_": lambda self, mean=0, std=1: self.assign(Tensor.normal(*self.shape, mean=mean, std=std, dtype=self.dtype)),
+  "aten.random_": lambda self: Tensor.randint(*self.shape, low=dtypes.min(self.dtype), high=dtypes.max(self.dtype), device=self.device, dtype=self.dtype),
+  "aten.random_.from": lambda self, from_, to: Tensor.randint(*self.shape, low=from_, high=to, device=self.device, dtype=self.dtype),
+  "aten.uniform_": lambda self, low=0, high=1: Tensor.uniform(*self.shape, low=low, high=high, dtype=self.dtype),
+  "aten.normal_": lambda self, mean=0, std=1: Tensor.normal(*self.shape, mean=mean, std=std, dtype=self.dtype),
   # these don't work in out form, they have size 0
   "aten.abs": Tensor.abs,
   "aten.logical_not": Tensor.logical_not,
-  "aten.logical_or_": lambda x, y: x.assign(x | y),
+  "aten.logical_or_": lambda x, y: x | y,
   "aten.multinomial": Tensor.multinomial,
-  "aten.masked_fill_.Scalar": lambda self, mask, value: self.assign(self.masked_fill(mask, value)),
-  "aten.masked_fill_.Tensor": lambda self, mask, value: self.assign(self.masked_fill(mask, value)),
+  "aten.masked_fill_.Scalar": lambda self, mask, value: self.masked_fill(mask, value),
+  "aten.masked_fill_.Tensor": lambda self, mask, value: self.masked_fill(mask, value),
   "aten.masked_fill.Scalar": Tensor.masked_fill,
   "aten.masked_fill.Tensor": Tensor.masked_fill,
   "aten.masked_select": Tensor.masked_select,
@@ -628,7 +614,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.asinh": Tensor.asinh,
   "aten.mul": Tensor.mul,
   "aten.atanh": Tensor.atanh,
-  "aten.fill_.Tensor": _fill_tensor_tensor,
+  "aten.fill_.Tensor": lambda self, value: Tensor.full(self.shape, value.reshape(()).item(), device=self.device, dtype=self.dtype),
   "aten.flip": Tensor.flip,
   "aten.scatter_reduce.two": Tensor.scatter_reduce,
   "aten.squeeze_.dim": lambda self, dim: self.replace(self.squeeze(dim), allow_shape_mismatch=True), # TODO: inplace view op, here?
@@ -649,20 +635,51 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.unfold": Tensor.unfold,
 }}
 
+# operations that need inplace treatment (use _inplace_op instead of wrap_fxn) AKA return original tensor
+inplace_ops = {
+  "aten.zero_",
+  "aten.fill_.Scalar",
+  "aten.fill_.Tensor",
+  "aten.add_.Tensor",
+  "aten.add_.Scalar",
+  "aten.mul_.Tensor",
+  "aten.mul_.Scalar",
+  "aten.floor_divide_.Tensor",
+  "aten.__ilshift__.Scalar",
+  "aten.__irshift__.Scalar",
+  "aten.relu_",
+  "aten.random_",
+  "aten.random_.from",
+  "aten.uniform_",
+  "aten.normal_",
+  "aten.logical_or_",
+  "aten.masked_fill_.Scalar",
+  "aten.masked_fill_.Tensor",
+}
+
 def wrap_fxn(k,f):
   def nf(*args, **kwargs):
     if TORCH_DEBUG:
       print(k, len(args), [x.shape if isinstance(x, torch.Tensor) else x for x in args],
                           {k:v.shape if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()})
-    args = [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args]
-    kwargs = {k:unwrap(v) if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()}
+    args, kwargs = unwrap_args(args, kwargs)
     out = f(*args, **kwargs)
     if isinstance(out, Tensor): return wrap(out)
     elif isinstance(out, tuple): return tuple(wrap(x) for x in out)
     else: raise RuntimeError(f"unknown output type {type(out)}")
   return nf
 
-for k,v in tiny_backend.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_fxn(k,v))
+def wrap_inplace(k,f):
+  def nf(*args, **kwargs):
+    orig = args[0]
+    args, kwargs = unwrap_args(args, kwargs)
+    _inplace_op(args[0], f(*args, **kwargs))
+    return orig
+  return nf
+
+for k,v in tiny_backend.items():
+  wrapper = wrap_inplace if k in inplace_ops else wrap_fxn
+  torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrapper(k,v))
 
 @torch.library.impl("aten::equal", "privateuseone")
 def equal(x: torch.Tensor, y: torch.Tensor): return (x==y).all().item()
@@ -676,7 +693,7 @@ if TORCH_DEBUG:
       return func(*args, **(kwargs or {}))
   (_dispatch_log:=DispatchLog()).__enter__() # NOTE: must be kept alive
 
-# this implementation is needed to allow the batchnorm kernels to fuse
+# this implementation is needed to allow the batchnorm kernels to fuse in e.g. mnist training
 # aten::native_batch_norm does more than Tensor.batchnorm
 @torch.library.impl("aten::native_batch_norm", "privateuseone")
 def native_batch_norm(input, weight, bias, running_mean, running_var, training, momentum, eps):

@@ -757,5 +757,162 @@ class TestBackendHelpers(unittest.TestCase):
     sliced_tiny_3d = torch_tiny_3d[1:3, 2:4, 3:5]
     np.testing.assert_equal(sliced_tiny_3d.cpu().numpy(), sliced_cpu_3d.numpy())
 
+  def test_topk_out(self):
+    a = torch.tensor([1, 3, 2, 4], device=device)
+    values = torch.empty(2, device=device)
+    indices = torch.empty(2, dtype=torch.int64, device=device)
+    ret_values, ret_indices = torch.topk(a, k=2, out=(values, indices))
+    np.testing.assert_equal(values.cpu().numpy(), [4, 3])
+    np.testing.assert_equal(indices.cpu().numpy(), [3, 1])
+    assert ret_values is values
+    assert ret_indices is indices
+
+  def test_sort_out(self):
+    a = torch.tensor([3, 1, 4, 2], device=device)
+    values = torch.empty(4, device=device)
+    indices = torch.empty(4, dtype=torch.int64, device=device)
+    ret_values, ret_indices = torch.sort(a, out=(values, indices))
+    np.testing.assert_equal(values.cpu().numpy(), [1, 2, 3, 4])
+    np.testing.assert_equal(indices.cpu().numpy(), [1, 3, 0, 2])
+    assert ret_values is values
+    assert ret_indices is indices
+
+  def test_cat_out(self):
+    a = torch.tensor([1, 2], device=device)
+    b = torch.tensor([3, 4], device=device)
+    out = torch.empty(4, device=device)
+    ret = torch.cat([a, b], out=out)
+    np.testing.assert_equal(out.cpu().numpy(), [1, 2, 3, 4])
+    assert ret is out
+
+  def test_scatter_add_out(self):
+    src = torch.tensor([[1, 2, 3], [4, 5, 6]], device=device, dtype=torch.float32)
+    index = torch.tensor([[0, 1, 2], [0, 1, 2]], device=device)
+    input = torch.zeros(3, 3, device=device, dtype=torch.float32)
+    out = torch.zeros(3, 3, device=device, dtype=torch.float32)
+    ret = torch.scatter_add(input, 0, index, src, out=out)
+    expected = torch.tensor([[5, 0, 0], [0, 7, 0], [0, 0, 9]], dtype=torch.float32)
+    np.testing.assert_allclose(out.cpu().numpy(), expected.cpu().numpy())
+    assert ret is out
+
+  def test_floor_divide_inplace_identity(self):
+    x = torch.tensor([10, 20, 30, 40], dtype=torch.int32, device=device)
+    y = torch.tensor([2, 4, 5, 8], dtype=torch.int32, device=device)
+    ret = x.floor_divide_(y)
+    assert ret is x
+    np.testing.assert_equal(x.cpu().numpy(), [5, 5, 6, 5])
+
+  def test_lshift_inplace_identity(self):
+    x = torch.tensor([1, 2, 3, 4], dtype=torch.int32, device=device)
+    ret = x.__ilshift__(2)
+    assert ret is x
+    np.testing.assert_equal(x.cpu().numpy(), [4, 8, 12, 16])
+
+  def test_rshift_inplace_identity(self):
+    x = torch.tensor([16, 32, 48, 64], dtype=torch.int32, device=device)
+    ret = x.__irshift__(2)
+    assert ret is x
+    np.testing.assert_equal(x.cpu().numpy(), [4, 8, 12, 16])
+
+  def test_relu_inplace_identity(self):
+    x = torch.tensor([-1.0, 2.0, -3.0, 4.0], device=device)
+    ret = x.relu_()
+    assert ret is x
+    np.testing.assert_equal(x.cpu().numpy(), [0.0, 2.0, 0.0, 4.0])
+
+  def test_random_inplace_identity(self):
+    x = torch.zeros(10, dtype=torch.int32, device=device)
+    ret = x.random_()
+    assert ret is x
+    assert x.shape == (10,)
+
+  def test_random_from_inplace_identity(self):
+    x = torch.zeros(10, dtype=torch.int32, device=device)
+    ret = x.random_(5, 10)
+    assert ret is x
+    # values should be in range [5, 10)
+    assert torch.all(x >= 5).item() and torch.all(x < 10).item()
+
+  def test_uniform_inplace_identity(self):
+    x = torch.zeros(10, device=device)
+    ret = x.uniform_(0.0, 1.0)
+    assert ret is x
+    # values should be in range [0, 1)
+    assert torch.all(x >= 0.0).item() and torch.all(x < 1.0).item()
+
+  def test_normal_inplace_identity(self):
+    x = torch.zeros(100, device=device)
+    ret = x.normal_(0.0, 1.0)
+    assert ret is x
+    # just check that values changed from zeros
+    assert not torch.all(x == 0.0).item()
+
+  def test_logical_or_inplace_identity(self):
+    x = torch.tensor([True, False, True, False], device=device)
+    y = torch.tensor([False, False, True, True], device=device)
+    ret = x.logical_or_(y)
+    assert ret is x
+    np.testing.assert_equal(x.cpu().numpy(), [True, False, True, True])
+
+  def test_masked_fill_scalar_inplace_identity(self):
+    x = torch.tensor([1.0, 2.0, 3.0, 4.0], device=device)
+    mask = torch.tensor([True, False, True, False], device=device)
+    ret = x.masked_fill_(mask, 0.0)
+    assert ret is x
+    np.testing.assert_equal(x.cpu().numpy(), [0.0, 2.0, 0.0, 4.0])
+
+  def test_masked_fill_tensor_inplace_identity(self):
+    x = torch.tensor([1.0, 2.0, 3.0, 4.0], device=device)
+    mask = torch.tensor([True, False, True, False], device=device)
+    value = torch.tensor(99.0, device=device)
+    ret = x.masked_fill_(mask, value)
+    assert ret is x
+    np.testing.assert_equal(x.cpu().numpy(), [99.0, 2.0, 99.0, 4.0])
+
+  def test_zero_inplace_identity(self):
+    x = torch.tensor([1.0, 2.0, 3.0, 4.0], device=device)
+    ret = x.zero_()
+    assert ret is x
+    np.testing.assert_equal(x.cpu().numpy(), [0.0, 0.0, 0.0, 0.0])
+
+  def test_fill_scalar_inplace_identity(self):
+    x = torch.tensor([1.0, 2.0, 3.0, 4.0], device=device)
+    ret = x.fill_(5.0)
+    assert ret is x
+    np.testing.assert_equal(x.cpu().numpy(), [5.0, 5.0, 5.0, 5.0])
+
+  def test_fill_tensor_inplace_identity(self):
+    x = torch.tensor([1.0, 2.0, 3.0, 4.0], device=device)
+    value = torch.tensor(7.0, device=device)
+    ret = x.fill_(value)
+    assert ret is x
+    np.testing.assert_equal(x.cpu().numpy(), [7.0, 7.0, 7.0, 7.0])
+
+  def test_add_tensor_inplace_identity(self):
+    x = torch.tensor([1.0, 2.0, 3.0, 4.0], device=device)
+    y = torch.tensor([10.0, 20.0, 30.0, 40.0], device=device)
+    ret = x.add_(y)
+    assert ret is x
+    np.testing.assert_equal(x.cpu().numpy(), [11.0, 22.0, 33.0, 44.0])
+
+  def test_add_scalar_inplace_identity(self):
+    x = torch.tensor([1.0, 2.0, 3.0, 4.0], device=device)
+    ret = x.add_(10.0)
+    assert ret is x
+    np.testing.assert_equal(x.cpu().numpy(), [11.0, 12.0, 13.0, 14.0])
+
+  def test_mul_tensor_inplace_identity(self):
+    x = torch.tensor([1.0, 2.0, 3.0, 4.0], device=device)
+    y = torch.tensor([2.0, 3.0, 4.0, 5.0], device=device)
+    ret = x.mul_(y)
+    assert ret is x
+    np.testing.assert_equal(x.cpu().numpy(), [2.0, 6.0, 12.0, 20.0])
+
+  def test_mul_scalar_inplace_identity(self):
+    x = torch.tensor([1.0, 2.0, 3.0, 4.0], device=device)
+    ret = x.mul_(2.0)
+    assert ret is x
+    np.testing.assert_equal(x.cpu().numpy(), [2.0, 4.0, 6.0, 8.0])
+
 if __name__ == "__main__":
   unittest.main()
