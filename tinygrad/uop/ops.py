@@ -615,6 +615,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   def buf_target(self) -> UOp:
     # the buffer that's being loaded from or store to
+    # NOTE: this is the good one to keep
     match self.op:
       case Ops.DEFINE_GLOBAL | Ops.DEFINE_LOCAL | Ops.DEFINE_REG: return self
       case Ops.AFTER | Ops.INDEX | Ops.STORE | Ops.LOAD: return self.src[0].buf_target()
