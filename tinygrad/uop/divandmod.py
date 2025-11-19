@@ -11,23 +11,21 @@ def cancel_divmod(d: UOp, x: UOp, y: UOp) -> UOp|None:
     return x - q*y if d.op is Ops.MOD else d.const_like(q)
   return None
 
-def fold_binary_numerator(d: UOp, x: UOp, y: UOp) -> UOp|None:
-  # we can fold if the expression has only one non-constant term and this term can only take on two values
+def fold_divmod_general(d: UOp, x: UOp, y: UOp) -> UOp|None:
   if ((c := y.arg) < 0): return None
-  x,const = x.pop_const()
-  terms, factors = zip(*[(u.divides(f:=u.const_factor()),f) for u in x.split_uop(Ops.ADD)])
+  x_peeled, const = x.pop_const()
+  decomp = [(u.divides(f:=u.const_factor()),f) for u in x_peeled.split_uop(Ops.ADD)]
+  if not decomp: return None
+  terms, factors = zip(*decomp)
+
+  # fold_binary_numerator: fold if expression has one non-constant term that takes on two values
   if len(terms)==1 and (v:=terms[0]).vmax-v.vmin == 1:
     y1 = cmod(factors[0]*v.vmin+const, c) if d.op is Ops.MOD else cdiv(factors[0]*v.vmin+const, c)
     y2 = cmod(factors[0]*v.vmax+const, c) if d.op is Ops.MOD else cdiv(factors[0]*v.vmax+const, c)
     return (y2-y1)*(v-v.vmin) + y1
-  return None
 
-def fold_divmod_congruence(d: UOp, x: UOp, y: UOp) -> UOp|None:
-  # within a mod we can freely subtract multiples of c, we use this to see if a is congruent to an expression whose vmin/vmax are between 0 and c
-  if (x.vmin<0 and CORRECT_DIVMOD_FOLDING) or ((c := y.arg) < 0): return None
-  x,const = x.pop_const()
-  terms, factors = zip(*[(u.divides(f:=u.const_factor()),f) for u in x.split_uop(Ops.ADD)])
-  # a//c = (a-a%c)/c, if we can fold a%c, we can fold a//c
+  # fold_divmod_congruence: fold if a is congruent to an expression whose range is between 0 and c
+  if (x.vmin<0 and CORRECT_DIVMOD_FOLDING): return None
   rems = [min((r:=f%c), r-c, key=abs) for f in factors]
   if (rem:=sum(r*v for r,v in zip(rems,terms))+const%c).vmin//c!=rem.vmax//c: return None
   if d.op is Ops.MOD: return rem - rem.vmin//c*c
@@ -40,7 +38,7 @@ def divide_by_gcd(d: UOp, x: UOp, y: UOp) -> UOp|None:
   ret = unwrap(x.divide_exact(gcd)).alu(d.op, unwrap(y.divide_exact(gcd)))
   return ret*gcd if d.op is Ops.MOD else ret
 
-def gcd_with_remainder(d: UOp, x: UOp, y: UOp):
+def gcd_with_remainder(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # (gcd*x+r)//(gcd*d) -> (x+(r%d)//gcd)//d + r//(gcd*d)
   # (gcd*x+r)%(gcd*d) -> gcd*(x+(r%d)//gcd)%d + r%gcd
   # These only work for floordiv (and the corresponding remainder)! Thats why we check the sign of x,y and new_x
@@ -54,17 +52,16 @@ def gcd_with_remainder(d: UOp, x: UOp, y: UOp):
   ret = new_x.alu(d.op, x.ufix(c//gcd.arg))
   return ret*gcd + const%gcd.arg if d.op is Ops.MOD else ret+const//c
 
-def remove_nested_mod(m: UOp, x: UOp, y: UOp) -> UOp|None:
+def remove_nested_mod(d: UOp, x: UOp, y: UOp) -> UOp|None:
   # remove nested mod in case the inner mod is a multiple of the outer mod
   # example: (a%4 + b)%2 -> (a+b)%2
   if ((c := y.arg) < 0) or x.vmin<0: return None
   new_xs = []
   something_changed = False
   for u in x.split_uop(Ops.ADD):
-    if u.op is Ops.MOD:
-      if u.src[1].divides(c) is not None:
-        something_changed = True
-        u = u.src[0]
+    if u.op is Ops.MOD and u.src[1].divides(c) is not None:
+      something_changed = True
+      u = u.src[0]
     new_xs.append(u)
   new_x: UOp = UOp.sum(*new_xs)
   if something_changed and new_x.vmin>=0: return new_x % y
@@ -75,7 +72,7 @@ def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
   if ((c := y.arg) < 0): return None
   factors = [u.const_factor() for u in x.split_uop(Ops.ADD) if u.op not in (Ops.CONST, Ops.VCONST)]
   div = min([y.arg]+[abs(f) for f in factors if abs(f) > 1 and (c%f)==0])
-  newxs = fold_divmod_congruence(newx:=(x//div), x, y.const_like(div))
+  newxs = fold_divmod_general(newx:=(x//div), x, y.const_like(div))
   if newxs is None: newxs = factor_remainder(newx, x, y.const_like(div))
   if div==y.arg or newxs is None or x.vmin<0 or newx.vmin<0: return None
   return newxs//(c//div)
@@ -108,15 +105,14 @@ div_and_mod_symbolic = PatternMatcher([
   ((UPat.var("x", dtypes.index)+UPat.cvar("c", vec=False)).named("n")//UPat.cvar("d", vec=False),
     lambda x,c,n,d: (-(-(c.arg%d.arg + x - (d.arg-1))//d) + c.arg//d.arg) if x.vmax<=0 and n.vmin>=0 and d.arg>0 else None),
 
-  # NOTE: if you move this one down you get more uops in test/external/external_benchmark_schedule.py
+  # NOTE: if you move this one below `fold_divmod_congruence` you get more uops in test/external/external_benchmark_schedule.py
   (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.var("y"))), cancel_divmod),
 
   # ** 2. Slow Constant Denominator Rules (cvar) **
   # Prioritize these because they are mathematically stronger for constants
-  (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), fold_binary_numerator),
-  (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), fold_divmod_congruence),
+  (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), fold_divmod_general),
   (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), gcd_with_remainder),
-  (UPat(Ops.MOD, dtypes.index, name="m", src=(UPat.var("x"), UPat.cvar("y", vec=False))), remove_nested_mod),
+  (UPat(Ops.MOD, dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), remove_nested_mod),
   (UPat(Ops.IDIV, dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), nest_div_by_smallest_factor),
 
   # ** 3. Slow Variable Denominator Rules (var) **
