@@ -14,7 +14,7 @@ from extra.thunder.tiny.tk.kernel import Kernel
 class TestTK(unittest.TestCase):
   @unittest.skipIf(CI, "no wmma in ci")
   def test_simple_matmul(self):
-    N = 32
+    N = 8192
     BLOCK_SIZE = 16
     with Kernel((N // BLOCK_SIZE, N // BLOCK_SIZE, 1), WARP_THREADS) as ker:
       warp = ker.warp
@@ -44,7 +44,7 @@ class TestTK(unittest.TestCase):
         c_reg = warp.mma_AB(c_reg, a_reg, b_reg)
       c_reg = ker.endrange()
 
-      c_smem = warp.store(c_smem, c_reg)
+      c_smem = warp.store(c_smem, c_reg, transpose=True)
       c = warp.store(c, c_smem, (0, 0, row, col), (), axis=2)
 
       sink = ker.finish()
@@ -95,7 +95,7 @@ class TestTK(unittest.TestCase):
         c_reg = warp.mma_ABt(c_reg, a_reg, b_reg)
       c_reg = ker.endrange()
 
-      c_smem = warp.store(c_smem, c_reg)
+      c_smem = warp.store(c_smem, c_reg, transpose=True)
       c = warp.store(c, c_smem, (0, 0, row, col), (), axis=2)
 
       sink = ker.finish()
