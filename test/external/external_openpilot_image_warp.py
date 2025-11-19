@@ -80,8 +80,6 @@ def update_both_imgs_tinygrad(calib_img_buffer, new_img, M_inv,
   calib_big_img_buffer, calib_big_img_pair = update_img_input_tinygrad(calib_big_img_buffer, new_big_img, M_inv_big)
   return calib_img_buffer, calib_img_pair, calib_big_img_buffer, calib_big_img_pair
 
-import numpy as np
-
 def warp_perspective_numpy(src, M_inv, dst_shape):
   w_dst, h_dst = dst_shape
   h_src, w_src = src.shape[:2]
