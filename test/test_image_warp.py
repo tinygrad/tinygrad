@@ -13,18 +13,12 @@ MODEL_HEIGHT = 256
 W, H = 1928, 1208
 
 
-def tensor_arange(end):
-  return Tensor([float(i) for i in range(end)])
-
-def tensor_round(tensor):
-  return (tensor + 0.5).floor()
-
 def warp_perspective_tinygrad(src, M_inv):
   w_dst, h_dst = (MODEL_WIDTH, MODEL_HEIGHT)
   w_src, h_src = (W,H)
 
-  x = tensor_arange(w_dst).reshape(1, w_dst).expand(h_dst, w_dst)
-  y = tensor_arange(h_dst).reshape(h_dst, 1).expand(h_dst, w_dst)
+  x = Tensor.arange(w_dst).reshape(1, w_dst).expand(h_dst, w_dst)
+  y = Tensor.arange(h_dst).reshape(h_dst, 1).expand(h_dst, w_dst)
   ones = Tensor.ones_like(x)
   dst_coords = x.reshape(1, -1).cat(y.reshape(1, -1)).cat(ones.reshape(1, -1))
 
@@ -33,8 +27,8 @@ def warp_perspective_tinygrad(src, M_inv):
   x_src = src_coords[0].reshape(h_dst, w_dst)
   y_src = src_coords[1].reshape(h_dst, w_dst)
 
-  x_nn_clipped = tensor_round(x_src).clip(0, w_src - 1).cast('int')
-  y_nn_clipped = tensor_round(y_src).clip(0, h_src - 1).cast('int')
+  x_nn_clipped = x_src.round().clip(0, w_src - 1).cast('int')
+  y_nn_clipped = y_src.round().clip(0, h_src - 1).cast('int')
 
   idx = (y_nn_clipped * w_src + x_nn_clipped).reshape(-1)
 
