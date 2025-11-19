@@ -181,8 +181,8 @@ if __name__ == "__main__":
   dec = CUDAVideoDecoder(Device.default)
   # with Path("/home/nimlgen/tinygrad/test/testextra/test_segment.hevc").open("rb") as f:
   with Path("/home/nimlgen/tinygrad/extra/nvdec/big_buck_bunny.hevc").open("rb") as f:
-    for packet in iter(lambda: f.read(4096), b""):
-      dec.decode(packet)
-      show_frames()
+    # for packet in iter(lambda: f.read(4096), b""):
+    dec.decode(f.read())
+    show_frames()
   show_frames()
   # cv2.destroyAllWindows()

@@ -21,6 +21,57 @@ def dump_struct(st):
   for v in type(st)._fields_: print(f"{v[0]}={getattr(st, v[0])}", end=" ")
   print("}")
 
+def dump_struct_ext(st, _depth: int = 0, _seen: set[int] | None = None):
+  # only check env once at top-level
+  if _depth == 0 and getenv("IOCTL", 0) == 0: return
+
+  # if _seen is None: _seen = set()
+  # sid = id(st)
+  # if sid in _seen:
+  #   print("\t" + "  " * _depth, st.__class__.__name__, "{ ...recursive... }")
+  #   return
+  # _seen.add(sid)
+
+  indent = "\t" + "  " * _depth
+  print(indent, st.__class__.__name__, end=" { ")
+
+  first_complex = True  # to decide when to break line for nested stuff
+
+  for lol in type(st)._fields_:
+    name, ftype = lol[0], lol[1]
+    val = getattr(st, name)
+
+    # nested struct
+    if isinstance(val, ctypes.Structure):
+      if first_complex:
+        print()  # finish current line before nested dump
+        first_complex = False
+      print(indent, f"{name} =", sep="")
+      dump_struct_ext(val, _depth + 1, _seen)
+      continue
+
+    # array of structs
+    if isinstance(val, ctypes.Array) and issubclass(getattr(ftype, "_type_", object), ctypes.Structure):
+      if first_complex:
+        print()
+        first_complex = False
+      print(indent, f"{name} [", sep="")
+      for i, elem in enumerate(val):
+        print(indent + "  ", f"[{i}] =", sep="")
+        dump_struct_ext(elem, _depth + 2, _seen)
+      print(indent, "]", sep="")
+      continue
+
+    # array of scalars
+    if isinstance(val, ctypes.Array):
+      print(f"{name}={[v for v in val]!r}", end=" ")
+      continue
+
+    # scalar field
+    print(f"{name}={val!r}", end=" ")
+
+  print("}")
+
 def format_struct(s):
   sdats = []
   for field in s._fields_:
@@ -175,9 +226,9 @@ def ioctl(fd, request, argp):
         if s.hClass == nv_gpu.GT200_DEBUGGER: dump_struct(get_struct(s.pAllocParms, nv_gpu.NV83DE_ALLOC_PARAMETERS))
         if s.hClass == nv_gpu.AMPERE_CHANNEL_GPFIFO_A:
           sx = get_struct(s.pAllocParms, nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS)
-          dump_struct(sx)
-          print("\thUserdMemory:", [sx.hUserdMemory[i] for i in range(8)])
-          print("\tuserdOffset:", [sx.userdOffset[i] for i in range(8)])
+          dump_struct_ext(sx)
+          # print("\thUserdMemory:", [sx.hUserdMemory[i] for i in range(8)])
+          # print("\tuserdOffset:", [sx.userdOffset[i] for i in range(8)])
 
           if sx.hObjectBuffer in gpus_virt_to_sys:
             gpus_fifo.append((sx.gpFifoOffset, sx.gpFifoEntries, next(x[0] for x in mappings_cache if x[1] == 196608) + 0x20000, None)) # hack
@@ -364,7 +415,12 @@ def _dump_qmd(address, packets):
       qmds.append(qmd_struct_t.from_address(address + 12 + i * 4))
     elif mthd == nv_gpu.NVC6C0_SEND_PCAS_A:
       qmds.append(qmd_struct_t.from_address(gpfifo[i+1] << 8))
-    elif mthd in {nv_gpu.NVC9B0_SET_DRV_PIC_SETUP_OFFSET, nv_gpu.NVC9B0_HEVC_SET_SCALING_LIST_OFFSET, nv_gpu.NVC9B0_HEVC_SET_TILE_SIZES_OFFSET, nv_gpu.NVC9B0_SET_NVDEC_STATUS_OFFSET}:
+    elif mthd in {nv_gpu.NVC9B0_SET_DRV_PIC_SETUP_OFFSET, nv_gpu.NVC9B0_HEVC_SET_SCALING_LIST_OFFSET, nv_gpu.NVC9B0_HEVC_SET_FILTER_BUFFER_OFFSET,
+                  nv_gpu.NVC9B0_HEVC_SET_TILE_SIZES_OFFSET, nv_gpu.NVC9B0_SET_NVDEC_STATUS_OFFSET, nv_gpu.NVC9B0_SET_IN_BUF_BASE_OFFSET,
+                  nv_gpu.NVC9B0_SET_COLOC_DATA_OFFSET,
+                  nv_gpu.NVC9B0_SET_PICTURE_LUMA_OFFSET0, nv_gpu.NVC9B0_SET_PICTURE_CHROMA_OFFSET0,
+                  nv_gpu.NVC9B0_SET_PICTURE_LUMA_OFFSET1, nv_gpu.NVC9B0_SET_PICTURE_CHROMA_OFFSET1,
+                  nv_gpu.NVC9B0_SET_PICTURE_LUMA_OFFSET2, nv_gpu.NVC9B0_SET_PICTURE_CHROMA_OFFSET2}:
       ll = gpfifo[i+1] << 8
       saddr = None
       for st,ln,addr in virtmem_mappings:
@@ -375,14 +431,24 @@ def _dump_qmd(address, packets):
       if saddr is not None:
         if mthd == nv_gpu.NVC9B0_SET_DRV_PIC_SETUP_OFFSET:
           x = nv_gpu.nvdec_hevc_pic_s.from_address(saddr)
-          dump_struct(x)
+          dump_struct_ext(x)
         elif mthd == nv_gpu.NVC9B0_HEVC_SET_SCALING_LIST_OFFSET:
-          hexdump(to_mv(saddr, 16*64))
+          hexdump(to_mv(saddr, 0x10))
         elif mthd == nv_gpu.NVC9B0_HEVC_SET_TILE_SIZES_OFFSET:
-          hexdump(to_mv(saddr, 0x100))
+          hexdump(to_mv(saddr, 0x10))
         elif mthd == nv_gpu.NVC9B0_SET_NVDEC_STATUS_OFFSET:
-          x = nv_gpu.nvdec_status_hevc_s.from_address(saddr)
-          dump_struct(x)
+          x = nv_gpu.nvdec_status_s.from_address(saddr)
+          dump_struct_ext(x)
+        elif mthd == nv_gpu.NVC9B0_SET_IN_BUF_BASE_OFFSET:
+          hexdump(to_mv(saddr, 0x80))
+        elif mthd == nv_gpu.NVC9B0_HEVC_SET_FILTER_BUFFER_OFFSET:
+          hexdump(to_mv(saddr, 0x40))
+        elif mthd == nv_gpu.NVC9B0_SET_COLOC_DATA_OFFSET:
+          hexdump(to_mv(saddr, 0x40))
+        elif mthd in {nv_gpu.NVC9B0_SET_PICTURE_LUMA_OFFSET0, nv_gpu.NVC9B0_SET_PICTURE_CHROMA_OFFSET0,
+                      nv_gpu.NVC9B0_SET_PICTURE_LUMA_OFFSET1, nv_gpu.NVC9B0_SET_PICTURE_CHROMA_OFFSET1,
+                      nv_gpu.NVC9B0_SET_PICTURE_LUMA_OFFSET2, nv_gpu.NVC9B0_SET_PICTURE_CHROMA_OFFSET2}:
+          hexdump(to_mv(saddr, 0x80))
 
     i += size + 1
   return qmds
