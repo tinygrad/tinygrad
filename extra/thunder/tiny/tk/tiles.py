@@ -11,9 +11,9 @@ def unwrap(x):
   if isinstance(x, dict): return {k: unwrap(v) for k,v in x.items()}
   return x
 
-def wrap(x, ker, cls):
-  if isinstance(x, UOp): return cls(x, ker)
-  if isinstance(x, (list, tuple)): return type(x)(wrap(y, ker, cls) for y in x)
+def wrap(x, s):
+  if isinstance(x, UOp): return s.ruop(x)
+  if isinstance(x, (list, tuple)): return type(x)(wrap(y, s) for y in x)
   return x
 
 def autowrap(source_cls, blacklist=None):
@@ -31,10 +31,10 @@ def autowrap(source_cls, blacklist=None):
       if callable(val):
         @functools.wraps(val)
         def proxy(*args, **kwargs):
-          return wrap(val(*unwrap(args), **unwrap(kwargs)), self.ker, cls)
+          return wrap(val(*unwrap(args), **unwrap(kwargs)), self)
         return proxy
       if name in UOp.__slots__: return val
-      return wrap(val, self.ker, cls)
+      return wrap(val, self)
     cls.__getattr__ = __getattr__
 
     for name in dir(source_cls):
@@ -46,9 +46,9 @@ def autowrap(source_cls, blacklist=None):
       else:
         original = getattr(source_cls, name)
         if callable(original):
-          def make_proxy(op_name, func):
+          def make_proxy(_, func):
             def proxy(self, *args, **kwargs):
-              return wrap(func(self._uop, *unwrap(args), **unwrap(kwargs)), self.ker, cls)
+              return wrap(func(self._uop, *unwrap(args), **unwrap(kwargs)), self)
             return proxy
           setattr(cls, name, make_proxy(name, original))
 
@@ -69,7 +69,7 @@ class TileMathMixin(MathMixin):
         if isinstance(self, RT) and isinstance(src[0], RV): uop = self.ker.warp.map(self._uop, lambda x, idx: UOp.alu(x, op, inner_op(src[0]._uop[idx[0], 0, (idx[2]%4)//2])))
         else: uop = self.ker.warp.map(self._uop, lambda x, idx: UOp.alu(x, op, inner_op(src[0]._uop[*idx])))
     else: raise NotImplementedError
-    return type(self)(uop, self.ker)
+    return self.ruop(uop)
   def const_like(self, b): return b
 
   # override ops that do compute on the src uop
@@ -83,6 +83,9 @@ class GL:
   def __init__(self, uop, ker):
     self._uop, self.ker = uop, ker
 
+  def ruop(self, uop):
+    return GL(uop, self.ker)
+
   @classmethod
   def create(cls, shape, dtype, ker):
     uop = ker.alloc(shape, dtype, AddrSpace.GLOBAL)
@@ -92,6 +95,9 @@ class GL:
 class ST:
   def __init__(self, uop, ker):
     self._uop, self.ker = uop, ker
+
+  def ruop(self, uop):
+    return ST(uop, self.ker)
 
   @classmethod
   def create(cls, shape, dtype, ker):
@@ -107,6 +113,9 @@ class RT(TileMathMixin):
   def __init__(self, uop, ker):
     self._uop, self.ker = uop, ker
 
+  def ruop(self, uop):
+    return RT(uop, self.ker)
+
   @classmethod
   def create(cls, shape, dtype, ker):
     assert len(shape) == 2
@@ -121,8 +130,11 @@ class RT(TileMathMixin):
 
 @autowrap(UOp)
 class RV(TileMathMixin):
-  def __init__(self, uop, ker):
-    self._uop, self.ker = uop, ker
+  def __init__(self, uop, layout, ker):
+    self._uop, self.layout, self.ker = uop, layout, ker
+
+  def ruop(self, uop):
+    return RV(uop, self.layout, self.ker)
 
   @classmethod
   def create(cls, length, dtype, layout, ker):
@@ -138,6 +150,6 @@ class RV(TileMathMixin):
       case _: raise NotImplementedError(f"rv layout {layout} not implemented")
 
     uop = ker.alloc((outer_dim, inner_dim, 2), dtype, AddrSpace.REG)
-    return RV(uop, ker)
+    return RV(uop, layout, ker)
 
 ALL_TILES = UOp | GL | ST | RT | RV
