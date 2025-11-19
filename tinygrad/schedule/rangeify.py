@@ -46,7 +46,7 @@ def split_reduceop(reduce:UOp, x:UOp):
   # get expanded by rangeifying the UOp x
   indexed = x.index(*[UOp.range(s, i) if resolve(s>1) else UOp.const(dtypes.index, 0) for i,s in enumerate(x.shape)])
   range_nums = [y.arg[0] for y in indexed.substitute({x.base:UOp(Ops.NOOP)}, extra_pm=pm_mops).ranges]
-  is_expanded = [i not in range_nums for i in range(len(x.shape))]
+  is_expanded = [str(i) not in range_nums for i in range(len(x.shape))]
 
   if not (split_candidates:=[(i,d) for i in reduce.arg[1] for d in range(min(256,2**getenv("REDUCEOP_SPLIT_SIZE",22)//prod(reduce.shape)),8-1,-1)
                              if x.shape[i]%d==0 and not is_expanded[i]]): return None
@@ -289,7 +289,7 @@ def limit_bufs(ctx:IndexingContext, root:UOp):
     for s in root.src:
       if s.op in GroupOp.Elementwise:
         # Insert bufferize: all AxisType.REDUCE before bufferize are AxisType.LOOP
-        orig_ranges, end_ranges = s.ranges, [x.replace(arg=(next(ctx.range_idx), AxisType.LOOP)) if x.op is Ops.RANGE else x for x in s.ranges]
+        orig_ranges, end_ranges = s.ranges, [x.replace(arg=(str(next(ctx.range_idx)), AxisType.LOOP)) if x.op is Ops.RANGE else x for x in s.ranges]
         s = s.substitute(dict(zip(orig_ranges, end_ranges))).bufferize(*end_ranges, arg=BufferizeOpts(device=s.device)).index(*orig_ranges)
       srcs.append(s)
     return root.replace(src=tuple(srcs))
@@ -412,7 +412,7 @@ def renumber_range(ctx:LocalAddBufferContext, r:UOp):
   if r.arg[-1] == AxisType.OUTER:
     # for outer range, we replace with a bound variable
     return UOp.variable("range_"+range_str(r), r.vmin, r.vmax).bind(r.replace(tag=None))
-  ret = r.replace(arg=(ctx.range,)+r.arg[1:], tag=None)
+  ret = r.replace(arg=(str(ctx.range),)+r.arg[1:], tag=None)
   ctx.range += 1
   return ret
 

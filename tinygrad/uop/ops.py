@@ -49,8 +49,8 @@ def ssimplify(uop:sint): return uop.ssimplify() if isinstance(uop, UOp) else uop
 def sym_infer(uop: UOp|int, var_vals: dict[str, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
 
 def range_str(u:UOp, color=False) -> str:
-  ret = '_'.join([str(x) if x >= 0 else "m"+str(-x) for x in u.arg[0:-1]])
-  return colored(ret, axis_colors[u.arg[-1]]) if color else ret
+  assert len(u.arg) == 2
+  return colored(u.arg[0], axis_colors[u.arg[-1]]) if color else u.arg[0]
 
 def multirange_str(rngs:Iterable[UOp], color=False, pad=None) -> str:
   ret = ','.join([range_str(x, color=color) for x in sorted(rngs, key=lambda x: x.arg)])
@@ -86,6 +86,7 @@ class UOpMetaClass(type):
     if _buffer is not None:
       assert op is Ops.BUFFER, f"trying to set Buffer {_buffer} for {op}"
       buffers[created] = _buffer
+    if op is Ops.RANGE: assert isinstance(arg[0], str)
     if SPEC > 1:
       from tinygrad.uop.spec import full_spec, test_pyrender
       if SPEC > 2: test_pyrender(created)
@@ -425,8 +426,10 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if shape is not None: ret = ret.reshape((1,)*len(shape)).expand(shape)
     return ret
   @staticmethod
-  def range(end:sint, axis_id, axis_type=AxisType.LOOP, *arg, dtype=dtypes.index, src=(), **kwargs):
-    return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end, dtype),)+src, arg=(axis_id, axis_type)+arg, **kwargs)
+  def range(end:sint, axis_id:str|int, axis_type=AxisType.LOOP, dtype=dtypes.index, src=(), **kwargs):
+    assert isinstance(axis_type, AxisType), f"{axis_type} must be an AxisType"
+    str_axis_id = ("m"+str(-axis_id)) if isinstance(axis_id, int) and axis_id < 0 else str(axis_id)
+    return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end, dtype),)+src, arg=(str_axis_id, axis_type), **kwargs)
   @staticmethod
   def special(end:sint, name:str, dtype=dtypes.index): return UOp(Ops.SPECIAL, dtype=dtype, src=(sint_to_uop(end, dtype),), arg=name)
   def r(self, op:Ops, axis:tuple[int, ...]):
@@ -1350,7 +1353,7 @@ pm_pyrender_extra = PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="r"), lambda ctx,r: f"{ctx[r.src[0]]}.r({r.arg[0]}, {r.arg[1]})"),
   # NOTE: range has srcs sometimes after control flow
   (UPat(Ops.RANGE, src=(UPat(Ops.CONST, name="c"),), allow_any_len=True, name="x"), lambda ctx,x,c:
-    "UOp.range("+', '.join([str(c.arg)] + [str(y) for y in x.arg])+
+    "UOp.range("+', '.join([str(c.arg)] + [repr(y) for y in x.arg])+
       (f', src={srcs(ctx, x.src[1:])}' if len(x.src) > 1 else '')+(', dtype='+str(x.dtype) if x.dtype is not dtypes.index else '')+")"),
   # TODO: index shouldn't mismatch dtype
   (UPat(Ops.INDEX, src=(UPat(), UPat()), allow_any_len=True, name="x"), lambda ctx,x:

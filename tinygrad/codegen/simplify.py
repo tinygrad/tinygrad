@@ -47,7 +47,7 @@ def do_substitute(ctx, x: UOp):
   subs = {}
   for k,v in ctx.items():
     if v is not None:
-      subs[k] = k.replace(src=(k.src[0]//v,), arg=k.arg[0:-1]+(0,k.arg[-1]))*v + k.replace(src=(v,), arg=k.arg[0:-1]+(1,k.arg[-1]))
+      subs[k] = k.replace(src=(k.src[0]//v,), arg=(k.arg[0]+"_0", k.arg[-1]))*v + k.replace(src=(v,), arg=(k.arg[0]+"_1", k.arg[-1]))
   if not len(subs): return None
   ret = x.substitute(subs).simplify()
   ctx.clear()
@@ -152,7 +152,7 @@ def cut_store_range(ctx, store:UOp, r:UOp):
   if r.src[0].op is not Ops.CONST or ctx!="CPU": return None
   if not (cuts:=[c.src[1].arg for c in store.get_consumer_map()[r] if c.op is Ops.CMPLT and r is c.src[0] and c.src[1].op is Ops.CONST]): return None
   cuts = sorted(dedup([0] + cuts + [r.src[0].arg]))
-  ranges = [UOp.range((end-start), *(r.arg[0:-1]+(i,r.arg[-1]))) for i,(start,end) in enumerate(zip(cuts[:-1], cuts[1:]))]
+  ranges = [UOp.range((end-start), r.arg[0]+f"_{i}", r.arg[-1]) for i,(start,end) in enumerate(zip(cuts[:-1], cuts[1:]))]
 
   return UOp.group(*[store.substitute({r: new_r+start}).end(new_r) for new_r, start in zip(ranges, cuts[:-1])])
 
