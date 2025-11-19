@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-import pickle
 import time
 import numpy as np
 
@@ -11,9 +10,6 @@ from tinygrad.device import Device
 MODEL_WIDTH = 512
 MODEL_HEIGHT = 256
 W, H = 1928, 1208
-
-UV_SCALE_MATRIX = np.array([[0.5, 0, 0], [0, 0.5, 0], [0, 0, 1]], dtype=np.float32)
-UV_SCALE_MATRIX_INV = np.linalg.inv(UV_SCALE_MATRIX)
 
 
 def tensor_arange(end):
