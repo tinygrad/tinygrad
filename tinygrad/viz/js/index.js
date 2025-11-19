@@ -206,7 +206,7 @@ async function renderProfiler(path, unit) {
   // support non realtime x axis units
   const formatTime = unit === "realtime" ? formatMicroseconds : (s) => `${s} ${unit}`;
   const profiler = d3.select("#profiler").html("");
-  const buf = await (await fetch(path)).arrayBuffer();
+  const buf = cache[path] ?? await (await fetch(path)).arrayBuffer();
   const view = new DataView(buf);
   let offset = 0;
   const u8 = () => { const ret = view.getUint8(offset); offset += 1; return ret; }
@@ -591,6 +591,11 @@ hljs.registerLanguage("cpp", (hljs) => ({
   contains: [{ begin: '\\b(?:float|half)[0-9]+\\b', className: 'type' }, ...hljs.getLanguage('cpp').contains]
 }));
 
+async function fetchValue(path) {
+  const res = await fetch(path);
+  return (await (res.headers.get("content-type") === "application/json" ? res.json() : res.arrayBuffer()));
+}
+
 var ret = [];
 var cache = {};
 var ctxs = null;
@@ -701,8 +706,8 @@ async function main() {
   }
   // ** Disassembly view
   if (ckey.startsWith("/render")) {
-    if (step.fmt === "timeline") return renderProfiler(ckey, "clk"); // cycles on the x axis
-    if (!(ckey in cache)) cache[ckey] = ret = await (await fetch(ckey)).json();
+    if (!(ckey in cache)) cache[ckey] = ret = await fetchValue(ckey);
+    if (ret instanceof ArrayBuffer) return renderProfiler(ckey, "clk"); // cycles on the x axis
     displaySelection("#custom");
     metadata.innerHTML = "";
     const root = d3.create("div").classed("raw-text", true).node();

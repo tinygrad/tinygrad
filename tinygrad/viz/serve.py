@@ -3,11 +3,12 @@ import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrow
 import subprocess, ctypes, pathlib, traceback
 from contextlib import redirect_stdout, redirect_stderr
 from decimal import Decimal
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, TypeVar, Generator, Callable
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
-from tinygrad.helpers import printable
+from tinygrad.helpers import printable, dedup
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, pyrender
 from tinygrad.uop.ops import print_uops, range_start, multirange_str
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device
@@ -203,32 +204,46 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
   peaks.append(peak)
   return struct.pack("<BIQ", 1, len(events), peak)+b"".join(events) if events else None
 
+@dataclass(frozen=True)
+class KernelData:
+  name:str
+  events:list[ProfileEvent]
+
 def load_sqtt(profile:list[ProfileEvent]) -> None:
   from tinygrad.runtime.ops_amd import ProfileSQTTEvent
-  if not (sqtt_events:=[e for e in profile if isinstance(e, ProfileSQTTEvent)]): return None
-  def err(name:str, msg:str|None=None) -> None:
-    step = {"name":name, "data":{"src":msg or traceback.format_exc()}, "depth":0, "query":f"/render?ctx={len(ctxs)}&step=0&fmt=counters"}
-    return ctxs.append({"name":"Counters", "steps":[step]})
+  if not (sqtt_kernels:=dedup([e.kern for e in profile if isinstance(e, ProfileSQTTEvent)])): return None
+  steps:list[dict] = []
+  for name in sqtt_kernels:
+    prg = trace.keys[r].ret if (r:=ref_map.get(name)) else None
+    steps.append({"name":prg.name if prg is not None else name, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
+                  "depth":0, "fmt":"timeline", "data":KernelData(name, profile)})
+  ctxs.append({"name":"Counters", "steps":steps})
+
+def get_counters_data(step:dict) -> list[dict]:
+  data = step["data"]
+  if isinstance(data, KernelData): return get_kernel_sqtt(data)
+  # TODO: add WaveData
+  return []
+
+def err(name:str, msg:str|None=None) -> dict: return {"src":name+"\n"+(msg or traceback.format_exc())}
+def get_kernel_sqtt(data:KernelData) -> dict:
+  # err handling
   try: from extra.sqtt.roc import decode
   except Exception: return err("DECODER IMPORT ISSUE")
-  try: rctx = decode(profile)
+  try: rctx = decode(data.events, data.name)
   except Exception: return err("DECODER ERROR")
-  if not rctx.inst_execs: return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
-  steps:list[dict] = []
+  if not (wave_events:=rctx.inst_execs.get(data.name)): return err("EMPTY DECODER OUTPUT", f"{len(data.events)} events saved, none got decoded.")
+  # construct the waves timeline
+  waves:list[ProfileEvent] = []
   units:set[str] = set()
-  for name,waves in rctx.inst_execs.items():
-    events:list[ProfileEvent] = []
-    prg = trace.keys[r].ret if (r:=ref_map.get(name)) else None
-    steps.append(first:={"name":prg.name if prg is not None else name, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
-                         "depth":0, "fmt":"timeline"})
-    asm = rctx.disasms[name]
-    for w in waves:
-      units.add(row:=f"SIMD:{w.simd} CU:{w.cu} SE:{w.se}")
-      events.append(ProfileRangeEvent(row, wave_name:=f"wave {w.wave_id}", Decimal(w.begin_time), Decimal(w.end_time)))
-      steps.append({"name":wave_name, "depth":1, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters", "data":(w, asm)})
-    events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+events
-    first["data"] = {"value":get_profile(events), "content_type":"application/octet-stream"}
-  ctxs.append({"name":"Counters", "steps":steps})
+  steps:list[dict] = []
+  asm = rctx.disasms[data.name]
+  for e in wave_events:
+    units.add(row:=f"SIMD:{e.simd} CU:{e.cu} SE:{e.se}")
+    waves.append(ProfileRangeEvent(row, wave_name:=f"wave {e.wave_id}", Decimal(e.begin_time), Decimal(e.end_time)))
+    steps.append({"name":wave_name, "depth":1, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters", "data":(e, asm)})
+  events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+waves
+  return {"value":get_profile(waves), "content_type":"application/octet-stream"}
 
 def get_sqtt_insts(wave, asm:dict[int, tuple[str, int]]) -> dict:
   # Idle:     The total time gap between the completion of previous instruction and the beginning of the current instruction.
@@ -311,7 +326,7 @@ def get_stdout(f: Callable) -> str:
   return buf.getvalue()
 
 def get_render(i:int, j:int, fmt:str) -> dict:
-  if fmt == "counters": return data if isinstance(data:=ctxs[i]["steps"][j]["data"], dict) else get_sqtt_insts(*data)
+  if fmt == "counters": return get_counters_data(ctxs[i]["steps"][j])
   if not isinstance(prg:=trace.keys[i].ret, ProgramSpec): return {}
   if fmt == "uops": return {"src":get_stdout(lambda: print_uops(prg.uops or [])), "lang":"txt"}
   if fmt == "src": return {"src":prg.src, "lang":"cpp"}
