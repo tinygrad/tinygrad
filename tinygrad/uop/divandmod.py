@@ -11,7 +11,8 @@ def cancel_divmod(d: UOp, x: UOp, y: UOp) -> UOp|None:
     return x - q*y if d.op is Ops.MOD else d.const_like(q)
   return None
 
-def fold_divmod_general(d: UOp, x: UOp, y: UOp) -> UOp|None:
+def fold_divmod_general(d: UOp) -> UOp|None:
+  x, y = d.src
   x_peeled, const = x.pop_const()
   uops_no_const = list(x_peeled.split_uop(Ops.ADD))
 
@@ -86,9 +87,12 @@ def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
   if ((c := y.arg) < 0): return None
   factors = [u.const_factor() for u in x.split_uop(Ops.ADD) if u.op not in (Ops.CONST, Ops.VCONST)]
   div = min([y.arg]+[abs(f) for f in factors if abs(f) > 1 and (c%f)==0])
-  newxs = fold_divmod_general(newx:=(x//div), x, y.const_like(div))
-  if div==y.arg or newxs is None or x.vmin<0 or newx.vmin<0: return None
-  return newxs//(c//div)
+  if div != c:
+    newx = x//y.const_like(div)
+    newxs = fold_divmod_general(newx)
+    if div==y.arg or newxs is None or x.vmin<0 or newx.vmin<0: return None
+    return newxs//(c//div)
+  return None
 
 div_and_mod_symbolic = PatternMatcher([
   # ** 1. Fast Inline Rules **
@@ -104,7 +108,7 @@ div_and_mod_symbolic = PatternMatcher([
   # ** 2. Slow Rules **
   # NOTE: if you move this one below `fold_divmod_general` you get more uops in test/external/external_benchmark_schedule.py
   (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.var("y"))), cancel_divmod),
-  (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.var("y"))), fold_divmod_general),
+  (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d"), fold_divmod_general),
   (UPat(Ops.IDIV, dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), nest_div_by_smallest_factor),
 
   # NOTE: these have to go at the bottom or TestSymbolicOps.test_var loops
