@@ -18,6 +18,7 @@ class Scheduler:
     self.ast, self.ren = ast, ren
     self.dont_use_locals = self.ast.arg.dont_use_locals if self.ast.arg is not None else False
     self.applied_opts = list(self.ast.arg.applied_opts) if self.ast.arg is not None else []
+    self.opt_range = itertools.count()
 
   @property
   def rngs(self):
@@ -29,8 +30,6 @@ class Scheduler:
   def full_shape(self): return [ssimplify(x.src[0]) for x in self.rngs]
   @property
   def axis_types(self): return [x.arg[-1] for x in self.rngs]
-  @property
-  def maxarg(self): return max([int(x.arg[0]) for x in self.rngs], default=0)
 
   # strings like ['g0', 'g1', 'l0', 'l1', 'l2', 'l3', 'l4', 'l5', 'R0', 'r0', 'r1', 'r2', 'u0', 'u1', 'u2']
   def shape_str(self) -> list[str]:
@@ -95,10 +94,10 @@ class Scheduler:
   def shift_to(self, rng:UOp, amount:int, new_type:AxisType, top:bool=False, input_new_rng=None):
     if (old_sz:=rng.src[0].divides(amount)) is None:
       raise KernelOptError(f"{amount} can't divide {rng.src[0]} in {self.colored_shape()}")
-    new_rng = UOp.range(amount, self.maxarg+1, new_type) if input_new_rng is None else input_new_rng
+    new_rng = UOp.range(amount, f"o{next(self.opt_range)}", new_type) if input_new_rng is None else input_new_rng
     replaced_rng = rng.replace(src=(UOp.const(dtypes.int, old_sz),))
     sub_axis = (new_rng * old_sz + replaced_rng) if top else (replaced_rng * amount + new_rng)
-    self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {rng.arg[:-1]} {amount} {str(new_type).split('.')[1].lower()}")
+    self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {rng.arg[0]} by {amount} {str(new_type).split('.')[1].lower()}")
     return replaced_rng, new_rng
 
   def ranges_of(self, *axis_type:AxisType) -> list[UOp]: return [r for r in self.rngs if r.arg[-1] in axis_type]
@@ -260,7 +259,8 @@ class Scheduler:
           except KernelOptError: continue
 
           # we create the warp as a whole thing, in case some of these ranges are moved/removed later
-          warp = UOp.range(tc.threads, -1, AxisType.WARP)
+          # the $ puts it before any numbered ranges
+          warp = UOp.range(tc.threads, '$warp', AxisType.WARP)
           ne: list[UOp] = []
           for opt in tc.opts:
             if opt[0] == "l":
