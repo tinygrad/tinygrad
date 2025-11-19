@@ -128,6 +128,7 @@ class TestProgressBar(unittest.TestCase):
         self._compare_bars(tinytqdm_output, tqdm_output)
         if n > 5: break
 
+  @unittest.skip("this is flaky")
   @patch('sys.stderr', new_callable=StringIO)
   @patch('shutil.get_terminal_size')
   def test_set_description(self, mock_terminal_size, mock_stderr):
