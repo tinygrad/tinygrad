@@ -162,9 +162,6 @@ class ST:
   def ruop(self, uop):
     return ST(uop, self.layout, self.ker)
 
-  def ruop(self, uop):
-    return ST(uop, self.ker)
-
   @classmethod
   def create(cls, shape, dtype, layout:STLayout, ker):
     rows = shape[-2]
@@ -212,9 +209,6 @@ class RT(TileMathMixin):
   def ruop(self, uop):
     return RT(uop, self.layout, self.ker)
 
-  def ruop(self, uop):
-    return RT(uop, self.ker)
-
   @classmethod
   def create(cls, shape, dtype, layout:RTLayout, ker):
     assert len(shape) == 2
@@ -234,9 +228,6 @@ class RV(TileMathMixin):
 
   def ruop(self, uop):
     return RV(uop, self.layout, self.ker)
-
-  def ruop(self, uop):
-    return RV(uop, self.ker)
 
   @classmethod
   def create(cls, length, dtype, layout, ker):
