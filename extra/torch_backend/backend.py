@@ -45,22 +45,20 @@ torch.utils.generate_methods_for_privateuse1_backend()
 aten = torch.ops.aten
 
 # track view relationships for in place operations
-def is_view(tensor: Tensor): return hasattr(tensor, "_view_base")
 def canonical_base(view: Tensor): return getattr(view, "_view_base", view)
 def derived_views(base: Tensor): return [t for tref in getattr(base, "_views", set()) if (t:=tref()) is not None]
 def wrap_view_op(fn):
   @functools.wraps(fn)
   def _wrap(*args, **kwargs):
-    t_args = [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args]
-    t_kwargs = {k: unwrap(v) if isinstance(v, torch.Tensor) else v for k, v in kwargs.items()}
-    ret = fn(*t_args, **t_kwargs)
-    if ret is None: raise NotImplementedError("view operation returned None")
-    if not isinstance(ret, Tensor): raise RuntimeError(f"view operation {fn.__name__} must return a tinygrad.Tensor, got {type(ret)}")
-    base = canonical_base(t_args[0])
+    args = [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args]
+    kwargs = {k: unwrap(v) if isinstance(v, torch.Tensor) else v for k, v in kwargs.items()}
+    ret = fn(*args, **kwargs)
+    base = canonical_base(args[0])
     ret._view_base = base
     base._views = getattr(base, "_views", set())
     base._views.add(weakref.ref(ret))
-    ret._view_parent, ret._view_step = t_args[0], (fn, t_args[1:], t_kwargs)
+    ret._view_parent = args[0] 
+    ret._view_step = (fn, args[1:], kwargs)
     return wrap(ret)
   return _wrap
 
@@ -153,7 +151,8 @@ def _apply_inplace(target: Tensor, value: Tensor) -> None:
 def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):
   # TODO: move to tinygrad
   ret = aten._index_put_impl_(self.cpu(), [x.cpu() if isinstance(x, torch.Tensor) else None for x in indices], values.cpu(), accumulate, unsafe).to(self.device)
-  return wrap(unwrap(self).assign(unwrap(ret)))
+  unwrap(self).assign(unwrap(ret))
+  return self
 
 @torch.library.impl("aten::index_put", "privateuseone")
 def index_put(self, indices, values, accumulate=False):
@@ -349,12 +348,10 @@ for i,pre in enumerate(["", "bi", "tri"]):
 
 @torch.library.impl("aten::scatter_add.out", "privateuseone")
 def scatter_add(self, dim, index, src, out):
-  self, index, src, out = unwrap(self), unwrap(index), unwrap(src), unwrap(out)
-  if self.shape == ():
-    _apply_inplace(out, src)
-    return wrap(out)
-  _apply_inplace(out, Tensor.scatter_reduce(self, dim, index, src, reduce='sum'))
-  return wrap(out)
+  self, index, src, out_unwrapped = unwrap(self), unwrap(index), unwrap(src), unwrap(out)
+  if self.shape == (): _apply_inplace(out_unwrapped, src)
+  else: _apply_inplace(out_unwrapped, Tensor.scatter_reduce(self, dim, index, src, reduce='sum'))
+  return out
 
 def _copy_between_devices(src, dest, cast_dtype, to_device, non_blocking=False):
   if src.is_tiny and dest.is_tiny:
@@ -380,33 +377,27 @@ def _copy_from(src: torch.Tensor, dest, non_blocking=False):
 def copy_(self, src, non_blocking=False):
   cast_dtype = _from_torch_dtype(self.dtype)
   to_device = _from_torch_device(self.device)
-  if TORCH_DEBUG and src.is_tiny and self.is_tiny:
-    dest_t = unwrap(self)
-    print("copy_ tiny->tiny", dest_t.shape, "from", unwrap(src).shape, "is_view", is_view(dest_t), "is_realized", dest_t.uop.is_realized)
   _copy_between_devices(src, self, cast_dtype, to_device, non_blocking)
   return self
 
 @torch.library.impl("aten::cat.out", "privateuseone")
 def cat_out(tensors, dim=0, out=None):
-  out_t = unwrap(out)
-  _apply_inplace(out_t, Tensor.cat(*[unwrap(x) for x in tensors], dim=dim))
-  return wrap(out_t)
+  _apply_inplace(unwrap(out), Tensor.cat(*[unwrap(x) for x in tensors], dim=dim))
+  return out
 
 @torch.library.impl("aten::topk.values", "privateuseone")
 def topk_values(input, k, dim=None, largest=True, sorted=True, values=None, indices=None):
   out_values, out_indices = unwrap(input).topk(k, dim if dim is not None else -1, largest, sorted)
-  val_t, idx_t = unwrap(values), unwrap(indices)
-  _apply_inplace(val_t, out_values)
-  _apply_inplace(idx_t, out_indices.cast(dtypes.int64))
-  return wrap(out_values), wrap(out_indices)
+  _apply_inplace(unwrap(values), out_values)
+  _apply_inplace(unwrap(indices), out_indices.cast(dtypes.int64))
+  return values, indices
 
 @torch.library.impl("aten::sort.values_stable", "privateuseone")
 def sort_values(input, dim=-1, descending=False, stable=True, values=None, indices=None):
   out_values, out_indices = unwrap(input).sort(dim, descending)
-  val_t, idx_t = unwrap(values), unwrap(indices)
-  _apply_inplace(val_t, out_values)
-  _apply_inplace(idx_t, out_indices.cast(dtypes.int64))
-  return wrap(out_values), wrap(out_indices)
+  _apply_inplace(unwrap(values), out_values)
+  _apply_inplace(unwrap(indices), out_indices.cast(dtypes.int64))
+  return values, indices
 
 @torch.library.impl("aten::_linalg_svd", "privateuseone")
 def _linalg_svd(self, full_matrices=False):
@@ -568,7 +559,7 @@ def _fill_tensor_tensor(self: Tensor, value: Tensor) -> Tensor:
   return self.assign(Tensor.full(self.shape, scalar_value, device=self.device, dtype=self.dtype))
 
 def _inplace_op(t, new_value):
-  if not is_view(t) and not getattr(canonical_base(t), "_views", set()): t.replace(new_value)
+  if not hasattr(t, "_view_base") and not getattr(canonical_base(t), "_views", set()): t.replace(new_value)
   else: _apply_inplace(t, new_value)
   return t
 
@@ -724,7 +715,7 @@ def native_batch_norm_backward(grad_out, input, weight, running_mean, running_va
           wrap(grad_bias) if grad_bias is not None else None)
 
 # _pad_circular is not CompositeImplicitAutograd (unlike reflect/replicate pad)
-#e need torch.autograd.Function with explicit AutogradPrivateUse1 registration
+# we need torch.autograd.Function with explicit AutogradPrivateUse1 registration
 class _PadCircular(torch.autograd.Function):
   @staticmethod
   def forward(ctx, input, padding):
