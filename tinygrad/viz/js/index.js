@@ -36,7 +36,7 @@ const updateProgress = ({ start, err }) => {
   d3.select("#custom").html("");
   if (err) {
     displaySelection("#custom");
-    d3.select("#custom").append(() => d3.create("div").classed("raw-text", true).call(s => s.append(() => codeBlock(err, "txt"))).node());
+    d3.select("#custom").append("div").classed("raw-text", true).call(s => s.append(() => codeBlock(err, "txt"))).node();
   }
 }
 
@@ -198,6 +198,8 @@ function focusShape(shape) {
   return metadata.replaceChildren(shapeMetadata.get(focusedShape) ?? "");
 }
 
+const EventTypes = { EXEC:0, BUF:1 };
+
 async function renderProfiler(path, unit) {
   displaySelection("#profiler");
   metadata.replaceChildren(shapeMetadata.get(focusedShape) ?? "");
@@ -238,12 +240,11 @@ async function renderProfiler(path, unit) {
     const { y:baseY, height:baseHeight } = rect(div.node());
     const offsetY = baseY-canvasTop+padding/2;
     const shapes = [], visible = [];
-    const EventTypes = {TIMELINE:0, MEMORY:1};
     const eventType = u8(), eventsLen = u32();
-    if (eventType === EventTypes.TIMELINE) {
+    if (eventType === EventTypes.EXEC) {
       const levelHeight = baseHeight-padding;
       const levels = [];
-      data.tracks.set(k, { shapes, visible, offsetY, pcolor:"#9ea2ad" });
+      data.tracks.set(k, { shapes, eventType, visible, offsetY, pcolor:"#9ea2ad" });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
         const e = {name:strings[u32()], ref:optional(u32()), key:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
@@ -366,7 +367,8 @@ async function renderProfiler(path, unit) {
         sum.x.push(allX[i], allX[i+1]);
         const y = maxY.get(allX[i]); sum.y1.push(y, y); sum.y0.push(base0, base0);
       }
-      data.tracks.set(k, { shapes:[sum], visible, offsetY, pcolor:"#c9a8ff", height, peak, scaleFactor:maxheight*4/height, views:[[sum], shapes], valueMap });
+      data.tracks.set(k, { shapes:[sum], eventType, visible, offsetY, pcolor:"#c9a8ff", height, peak, scaleFactor:maxheight*4/height,
+                           views:[[sum], shapes], valueMap });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
         let offset = 0;
@@ -396,11 +398,11 @@ async function renderProfiler(path, unit) {
     xscale.domain(visibleX);
     // draw shapes
     const paths = [];
-    for (const [_, { offsetY, shapes, visible, valueMap, pcolor }] of data.tracks) {
+    for (const [_, { shapes, eventType, visible, offsetY, valueMap, pcolor }] of data.tracks) {
       visible.length = 0;
       for (const e of shapes) {
         const p = new Path2D();
-        if (e.width == null) { // generic polygon
+        if (eventType === EventTypes.BUF) { // generic polygon
           if (e.x[0]>et || e.x.at(-1)<st) continue;
           const x = e.x.map(xscale);
           p.moveTo(x[0], offsetY+e.y0[0]);

@@ -1,4 +1,4 @@
-import ctypes, pathlib, argparse, pickle, re, functools, dataclasses, itertools
+import ctypes, pathlib, argparse, pickle, re, functools, dataclasses, itertools, threading
 from tinygrad.helpers import temp, unwrap, DEBUG
 from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileProgramEvent
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
@@ -94,14 +94,14 @@ def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
   ROCParseCtx = _ROCParseCtx(dev_events, sqtt_events, prog_events)
 
   @rocprof.rocprof_trace_decoder_se_data_callback_t
-  def copy_cb(buf, buf_size, data_ptr):
+  def copy_cb(buf, buf_size, _):
     if (prof_info:=ROCParseCtx.next_sqtt()) is None: return 0
     buf[0] = ctypes.cast(prof_info, ctypes.POINTER(ctypes.c_ubyte))
     buf_size[0] = len(prof_info)
     return len(prof_info)
 
   @rocprof.rocprof_trace_decoder_trace_callback_t
-  def trace_cb(record_type, events_ptr, n, data_ptr):
+  def trace_cb(record_type, events_ptr, n, _):
     match record_type:
       case rocprof.ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OCCUPANCY:
         for ev in (rocprof.rocprofiler_thread_trace_decoder_occupancy_t * n).from_address(events_ptr): ROCParseCtx.on_occupancy_ev(ev)
@@ -112,7 +112,7 @@ def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
     return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
 
   @rocprof.rocprof_trace_decoder_isa_callback_t
-  def isa_cb(instr_ptr, mem_size_ptr, size_ptr, pc, data_ptr):
+  def isa_cb(instr_ptr, mem_size_ptr, size_ptr, pc, _):
     instr, mem_size_ptr[0] = ROCParseCtx.disasms[(unwrap(ROCParseCtx.active_kern), pc.address)]
 
     # this is the number of bytes to next instruction, set to 0 for end_pgm
@@ -126,9 +126,11 @@ def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
 
     return rocprof.ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
 
-  try:
-    rocprof.rocprof_trace_decoder_parse_data(copy_cb, trace_cb, isa_cb, None)
-  except AttributeError as e: raise RuntimeError("Failed to find rocprof-trace-decoder. Run sudo ./extra/sqtt/install_sqtt_decoder.py to install") from e
+  def worker():
+    try: rocprof.rocprof_trace_decoder_parse_data(copy_cb, trace_cb, isa_cb, None)
+    except AttributeError as e: raise RuntimeError("Failed to find rocprof-trace-decoder. Run sudo ./extra/sqtt/install_sqtt_decoder.py to install") from e
+  (t:=threading.Thread(target=worker, daemon=True)).start()
+  t.join()
   return ROCParseCtx
 
 if __name__ == "__main__":
