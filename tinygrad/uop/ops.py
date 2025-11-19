@@ -428,7 +428,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @staticmethod
   def range(end:sint, axis_id:str|int, axis_type=AxisType.LOOP, dtype=dtypes.index, src=(), **kwargs):
     assert isinstance(axis_type, AxisType), f"{axis_type} must be an AxisType"
-    return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end, dtype),)+src, arg=(str(axis_id), axis_type), **kwargs)
+    str_axis_id = ("m"+str(-axis_id)) if isinstance(axis_id, int) and axis_id < 0 else str(axis_id)
+    return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end, dtype),)+src, arg=(str_axis_id, axis_type), **kwargs)
   @staticmethod
   def special(end:sint, name:str, dtype=dtypes.index): return UOp(Ops.SPECIAL, dtype=dtype, src=(sint_to_uop(end, dtype),), arg=name)
   def r(self, op:Ops, axis:tuple[int, ...]):
