@@ -53,39 +53,42 @@ def fold_divmod_const(d: UOp, x: UOp, y: UOp) -> UOp|None:
         return ret*gcd + const%gcd.arg if d.op is Ops.MOD else ret+const//c
   return None
 
-def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
-  # we try and nest the div and see if it allows the numerator to be simplified
-  if ((c := y.arg) < 0): return None
-  factors = [u.const_factor() for u in x.split_uop(Ops.ADD) if u.op not in (Ops.CONST, Ops.VCONST)]
-  div = min([y.arg]+[abs(f) for f in factors if abs(f) > 1 and (c%f)==0])
-  newxs = fold_divmod_const(newx:=(x//div), x, y.const_like(div))
-  if newxs is None: newxs = factor_remainder(newx, x, y.const_like(div))
-  if div==y.arg or newxs is None or x.vmin<0 or newx.vmin<0: return None
-  return newxs//(c//div)
+def fold_divmod_variable(d: UOp, x: UOp, y: UOp) -> UOp|None:
+  uops = list(x.split_uop(Ops.ADD))
 
-def divide_by_gcd(d: UOp, x: UOp, y: UOp) -> UOp|None:
-  # x//y -> (x//gcd)//(y//gcd) or x%y -> gcd*(x//gcd)%(y//gcd)
-  gcd = UOp.gcd(*x.split_uop(Ops.ADD), y).simplify()
-  if gcd.op is Ops.CONST and gcd.arg==1: return None
-  ret = unwrap(x.divide_exact(gcd)).alu(d.op, unwrap(y.divide_exact(gcd)))
-  return ret*gcd if d.op is Ops.MOD else ret
+  # 1. divide_by_gcd: x//y -> (x//gcd)//(y//gcd)  or  x%y -> gcd*(x//gcd)%(y//gcd)
+  gcd = UOp.gcd(*uops, y).simplify()
+  if not (gcd.op is Ops.CONST and gcd.arg==1):
+    ret = unwrap(x.divide_exact(gcd)).alu(d.op, unwrap(y.divide_exact(gcd)))
+    return ret*gcd if d.op is Ops.MOD else ret
 
-def factor_remainder(d: UOp, x: UOp, y: UOp) -> UOp|None:
-  # (d*x+y)//d -> x+y//d  or  (d*x+y)%d
+  # 2. factor_remainder: (d*x+y)//d -> x+y//d  or  (d*x+y)%d
   # for mod we go further and take the remainder of all factors to reduce their size
   # These only work for floordiv (and the corresponding remainder)! Thats why we check the sign of x,y and new_x
   if y.vmin<0 or x.vmin<0: return None
   quo, rem = [], []
-  for u in x.split_uop(Ops.ADD):
+  for u in uops:
     if (q:=u.divide_exact(y)) is not None: quo.append(q)
     # if this is mod and y is a const, we can make the remainder factor sm
     elif d.op is Ops.MOD and y.op is Ops.CONST and (c:=u.const_factor())%y.arg!=c:
       rem.append(u.divides(c)*(c%y.arg))
       quo.append(u.const_like(0))  # we append this so we can check if something changed
     else: rem.append(u)
+
+  if not quo: return None
   new_x = sum(rem)+x.const_like(0)
-  if len(quo)==0 or new_x.vmin<0: return None
+  if new_x.vmin<0: return None
   return new_x%y if d.op is Ops.MOD else new_x//y+sum(quo)
+
+def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
+  # we try and nest the div and see if it allows the numerator to be simplified
+  if ((c := y.arg) < 0): return None
+  factors = [u.const_factor() for u in x.split_uop(Ops.ADD) if u.op not in (Ops.CONST, Ops.VCONST)]
+  div = min([y.arg]+[abs(f) for f in factors if abs(f) > 1 and (c%f)==0])
+  newxs = fold_divmod_const(newx:=(x//div), x, y.const_like(div))
+  if newxs is None: newxs = fold_divmod_variable(newx, x, y.const_like(div))
+  if div==y.arg or newxs is None or x.vmin<0 or newx.vmin<0: return None
+  return newxs//(c//div)
 
 div_and_mod_symbolic = PatternMatcher([
   # ** 1. Fast Inline Rules **
@@ -98,18 +101,12 @@ div_and_mod_symbolic = PatternMatcher([
   ((UPat.var("x", dtypes.index)+UPat.cvar("c", vec=False)).named("n")//UPat.cvar("d", vec=False),
     lambda x,c,n,d: (-(-(c.arg%d.arg + x - (d.arg-1))//d) + c.arg//d.arg) if x.vmax<=0 and n.vmin>=0 and d.arg>0 else None),
 
-  # NOTE: if you move this one below `fold_divmod_congruence` you get more uops in test/external/external_benchmark_schedule.py
+  # ** 2. Slow Rules **
+  # NOTE: if you move this one below `fold_divmod_const` you get more uops in test/external/external_benchmark_schedule.py
   (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.var("y"))), cancel_divmod),
-
-  # ** 2. Slow Constant Denominator Rules (cvar) **
-  # Prioritize these because they are mathematically stronger for constants
   (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), fold_divmod_const),
+  (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.var("y"))), fold_divmod_variable),
   (UPat(Ops.IDIV, dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), nest_div_by_smallest_factor),
-
-  # ** 3. Slow Variable Denominator Rules (var) **
-  # These catch cases like x//x or (a*b)//b
-  (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.var("y"))), divide_by_gcd),
-  (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.var("y"))), factor_remainder),
 
   # NOTE: these have to go at the bottom or TestSymbolicOps.test_var loops
   (UPat.var("x", dtypes.index) % UPat.var("d"), lambda x,d: -((-x)%d) if x.vmax <= 0 else None),
