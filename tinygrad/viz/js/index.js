@@ -198,7 +198,8 @@ function focusShape(shape) {
   return metadata.replaceChildren(shapeMetadata.get(focusedShape) ?? "");
 }
 
-const EventTypes = Object.freeze({ EXEC:0, BUF:1 });
+const EventTypes = { EXEC:0, BUF:1 };
+
 async function renderProfiler(path, unit) {
   displaySelection("#profiler");
   metadata.replaceChildren(shapeMetadata.get(focusedShape) ?? "");
