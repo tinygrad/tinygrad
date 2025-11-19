@@ -104,18 +104,15 @@ class IR3Compiler(NIRCompiler):
   def __reduce__(self): return IR3Compiler, (self.dev_id.chip_id,)
 
   def compile(self, src) -> bytes:
-    # import os
-    # input(os.getpid())
     nir_shader = deserialize(src, self.nir_options)
     mesa.ir3_nir_lower_io_vars_to_temporaries(nir_shader)
-    mesa.ir3_finalize_nir(self.cc, (ir3_options:=mesa.struct_ir3_shader_options()).nir_options, nir_shader)
+    mesa.ir3_finalize_nir(self.cc, mesa.struct_ir3_shader_nir_options(), nir_shader)
     shader = rzalloc(mesa.struct_ir3_shader, compiler=ctypes.pointer(self.cc), type=mesa.MESA_SHADER_COMPUTE, nir=nir_shader).contents
     mesa.ir3_nir_post_finalize(shader)
     v = rzalloc(mesa.struct_ir3_shader_variant, type=shader.type, compiler=ctypes.pointer(self.cc), key=mesa.struct_ir3_shader_key()).contents
     v.const_state, shader.variants, shader.variant_count = rzalloc(mesa.struct_ir3_const_state, ctypes.pointer(v)), ctypes.pointer(v), 1
     assert not mesa.ir3_compile_shader_nir(self.cc, shader, v), "compilation failed"
     lib = ctypes.cast(mesa.ir3_shader_assemble(v), ctypes.POINTER(ctypes.c_uint32))
-    mesa.ir3_shader_disasm(v, lib, ctypes.POINTER(mesa.struct__IO_FILE).in_dll(ctypes.CDLL(ctypes.util.find_library('c')), "stdout"))
     # NB: bytes(v) means the pointers in v are no longer safe! a custom __reduce__ that supports pointers for c.Struct would make this simpler
     ret = bytes(v) + bytes(v.const_state.contents) + ctypes.string_at(v.imm_state.values, v.imm_state.count * 4) + ctypes.string_at(lib, v.info.size)
     mesa.ralloc_free(ctypes.pointer(v))

@@ -6,7 +6,7 @@ from typing import Any, cast
 from tinygrad.device import BufferSpec
 from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, BumpAllocator
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
-from tinygrad.runtime.autogen import kgsl, adreno, mesa
+from tinygrad.runtime.autogen import kgsl, adreno
 from tinygrad.runtime.ops_cl import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
 from tinygrad.renderer.nir import IR3Renderer
@@ -111,7 +111,6 @@ class QCOMComputeQueue(HWQueue):
     dev.last_cmd = kgsl.IOCTL_KGSL_GPU_COMMAND(dev.fd, __payload=submit_req).timestamp
 
   def exec(self, prg:QCOMProgram, args_state:QCOMArgsState, global_size, local_size):
-    if prg.NIR: return self.exec_gl(prg, args_state, global_size, local_size)
     self.bind_args_state(args_state)
 
     def cast_int(x, ceil=False): return (math.ceil(x) if ceil else int(x)) if isinstance(x, float) else x
@@ -122,9 +121,9 @@ class QCOMComputeQueue(HWQueue):
     self.reg(adreno.REG_A6XX_HLSQ_INVALIDATE_CMD, 0x0)
     self.reg(adreno.REG_A6XX_SP_CS_TEX_COUNT, qreg.a6xx_sp_cs_tex_count(0x80))
     self.reg(adreno.REG_A6XX_SP_CS_IBO_COUNT, qreg.a6xx_sp_cs_ibo_count(0x40))
-    self.reg(adreno.REG_A6XX_SP_MODE_CONTROL, qreg.a6xx_sp_mode_control(isammode=adreno.ISAMMODE_CL))
+    self.reg(adreno.REG_A6XX_SP_MODE_CONTROL, qreg.a6xx_sp_mode_control(isammode=adreno.ISAMMODE_GL if prg.NIR else adreno.ISAMMODE_CL))
     self.reg(adreno.REG_A6XX_SP_PERFCTR_ENABLE, qreg.a6xx_sp_perfctr_enable(cs=True))
-    self.reg(adreno.REG_A6XX_SP_TP_MODE_CNTL, qreg.a6xx_sp_tp_mode_cntl(isammode=adreno.ISAMMODE_CL, unk3=2))
+    self.reg(adreno.REG_A6XX_SP_TP_MODE_CNTL, qreg.a6xx_sp_tp_mode_cntl(isammode=adreno.ISAMMODE_GL if prg.NIR else adreno.ISAMMODE_CL, unk3=2))
     self.reg(adreno.REG_A6XX_TPL1_DBG_ECO_CNTL, 0)
     self.cmd(adreno.CP_WAIT_FOR_IDLE)
 
@@ -135,6 +134,7 @@ class QCOMComputeQueue(HWQueue):
 
     self.reg(adreno.REG_A6XX_SP_CS_CTRL_REG0,
              qreg.a6xx_sp_cs_ctrl_reg0(threadsize=adreno.THREAD64, halfregfootprint=prg.hregs, fullregfootprint=prg.fregs, branchstack=prg.brnchstck),
+             # mesa sets unk5 too...
              qreg.a6xx_sp_cs_unknown_a9b1(unk6=True, shared_size=prg.shared_size), 0, prg.prg_offset, *data64_le(prg.lib_gpu.va_addr),
              qreg.a6xx_sp_cs_pvt_mem_param(memsizeperitem=prg.pvtmem_size_per_item), *data64_le(prg.dev._stack.va_addr),
              qreg.a6xx_sp_cs_pvt_mem_size(totalpvtmemsize=prg.pvtmem_size_total))
@@ -171,69 +171,13 @@ class QCOMComputeQueue(HWQueue):
       self.reg(adreno.REG_A6XX_SP_CS_IBO, *data64_le(args_state.buf.va_addr + args_state.prg.ibo_off))
 
     self.reg(adreno.REG_A6XX_SP_CS_CONFIG, qreg.a6xx_sp_cs_config(enabled=True, nsamp=prg.samp_cnt, ntex=prg.tex_cnt, nibo=prg.ibo_cnt))
-    self.cmd(adreno.CP_RUN_OPENCL, 0)
-    self._cache_flush(write_back=True, invalidate=False, sync=False, memsync=False)
-    return self
-
-  # https://elixir.bootlin.com/mesa/mesa-25.3.0/source/src/freedreno/computerator/a6xx.cc
-  def exec_gl(self, prg:QCOMProgram, args_state:QCOMArgsState, global_size, local_size):
-    self.bind_args_state(args_state)
-
-    def cast_int(x, ceil=False): return (math.ceil(x) if ceil else int(x)) if isinstance(x, float) else x
-    global_size_mp = [cast_int(g*l) for g,l in zip(global_size, local_size)]
-    # program_emit
-    self.reg(adreno.REG_A6XX_SP_MODE_CONTROL, qreg.a6xx_sp_mode_control(constant_demotion_enable=True, isammode=adreno.ISAMMODE_GL))
-    self.reg(adreno.REG_A6XX_SP_PERFCTR_ENABLE, qreg.a6xx_sp_perfctr_enable(cs=True))
-    self.reg(adreno.REG_A6XX_SP_FLOAT_CNTL, 0)
-    # magic regs? https://elixir.bootlin.com/mesa/mesa-25.3.0/source/src/freedreno/common/freedreno_devices.py#L590
-    # computerator does this, we probably don't need to do all of these though...
-    self.reg(adreno.REG_A6XX_HLSQ_INVALIDATE_CMD, qreg.a6xx_hlsq_invalidate_cmd(vs_state=True, hs_state=True, ds_state=True, gs_state=True,
-                                                                                fs_state=True, cs_state=True, gfx_ibo=True))
-    self.reg(adreno.REG_A6XX_HLSQ_CS_CNTL, qreg.a6xx_hlsq_cs_cntl(constlen=1024 // 4, enabled=True))
-    # nibo=kernel->num_bufs, ntex=v->num_samp, nsamp=v->num_samp
-    self.reg(adreno.REG_A6XX_SP_CS_CONFIG, qreg.a6xx_sp_cs_config(enabled=True, nsamp=prg.samp_cnt, ntex=prg.tex_cnt, nibo=prg.ibo_cnt),
-             prg.image_size // 4) # SP_VS_INSTRLEN
-    self.reg(adreno.REG_A6XX_SP_CS_CTRL_REG0,
-             qreg.a6xx_sp_cs_ctrl_reg0(threadsize=adreno.THREAD64, halfregfootprint=prg.hregs, fullregfootprint=prg.fregs, branchstack=prg.brnchstck,
-                                       mergedregs=prg.mergedregs, earlypreamble=prg.early_preamble))
-    # TODO: 7XX support: see https://elixir.bootlin.com/mesa/mesa-25.2.7/source/src/freedreno/computerator/a6xx.cc#L171
-    self.reg(adreno.REG_A6XX_SP_CS_UNKNOWN_A9B1, qreg.a6xx_sp_cs_unknown_a9b1(shared_size=prg.shared_size, unk5=True, unk6=True))
-    self.reg(adreno.REG_A6XX_HLSQ_CS_CNTL_0, qreg.a6xx_hlsq_cs_cntl_0(wgidconstid=prg.wgid, wgsizeconstid=0xfc, wgoffsetconstid=0xfc,
-                                                                      localidregid=prg.lid),
-             qreg.a6xx_hlsq_cs_cntl_1(linearlocalidregid=0xfc, threadsize=adreno.THREAD64))
-    # TODO: 7xx support (and 6xx gen4) (lpac): https://elixir.bootlin.com/mesa/mesa-25.2.7/source/src/freedreno/computerator/a6xx.cc#L225
-    self.reg(adreno.REG_A6XX_SP_CS_OBJ_START, *data64_le(prg.lib_gpu.va_addr))
-    self.reg(adreno.REG_A6XX_SP_CS_INSTRLEN, qreg.a6xx_sp_cs_instrlen(prg.image_size // 4))
-    self.reg(adreno.REG_A6XX_SP_CS_OBJ_START, *data64_le(prg.lib_gpu.va_addr)) # mesa does this twice?
-    # NB: mesa sets num_unit differently: https://elixir.bootlin.com/mesa/mesa-24.3.4/source/src/freedreno/computerator/a6xx.cc#L258
-    self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST_SHADER, state_src=adreno.SS6_INDIRECT,
-                                                               state_block=adreno.SB6_CS_SHADER, num_unit=round_up(prg.image_size, 128) // 128),
-             *data64_le(prg.lib_gpu.va_addr))
-    if prg.pvtmem:
-      self.reg(adreno.REG_A6XX_SP_CS_PVT_MEM_PARAM, qreg.a6xx_sp_cs_pvt_mem_param(memsizeperitem=prg.pvtmem_size_per_item),
-               *data64_le(prg.dev._stack.va_addr), qreg.a6xx_sp_cs_pvt_mem_size(totalpvtmemsize=prg.pvtmem_size_total))
-      self.reg(adreno.REG_A6XX_SP_CS_PVT_MEM_HW_STACK_OFFSET, qreg.a6xx_sp_cs_pvt_mem_hw_stack_offset(prg.hw_stack_offset))
-    # const_emit
-    self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST_CONSTANTS, state_src=adreno.SS6_INDIRECT,
-                                                               state_block=adreno.SB6_CS_SHADER, num_unit=1024 // 4),
-             *data64_le(args_state.buf.va_addr))
-    # ibo_emit
-    # ubo_emit
-    self.cmd(adreno.CP_SET_MARKER, qreg.a6xx_cp_set_marker_0(mode=adreno.RM6_COMPUTE))
-    self.reg(adreno.REG_A6XX_HLSQ_CS_NDRANGE_0, qreg.a6xx_hlsq_cs_ndrange_0(kerneldim=3, localsizex=local_size[0] - 1, localsizey=local_size[1] - 1,
-                                                                            localsizez=local_size[2] - 1))
-    self.reg(adreno.REG_A6XX_HLSQ_CS_NDRANGE_1, qreg.a6xx_hlsq_cs_ndrange_1(global_size_mp[0]))
-    self.reg(adreno.REG_A6XX_HLSQ_CS_NDRANGE_2, 0)
-    self.reg(adreno.REG_A6XX_HLSQ_CS_NDRANGE_3, qreg.a6xx_hlsq_cs_ndrange_3(global_size_mp[1]))
-    self.reg(adreno.REG_A6XX_HLSQ_CS_NDRANGE_4, 0)
-    self.reg(adreno.REG_A6XX_HLSQ_CS_NDRANGE_5, qreg.a6xx_hlsq_cs_ndrange_5(global_size_mp[2]))
-    self.reg(adreno.REG_A6XX_HLSQ_CS_NDRANGE_6, 0)
-    self.reg(adreno.REG_A6XX_HLSQ_CS_KERNEL_GROUP_X, 1)
-    self.reg(adreno.REG_A6XX_HLSQ_CS_KERNEL_GROUP_Y, 1)
-    self.reg(adreno.REG_A6XX_HLSQ_CS_KERNEL_GROUP_Z, 1)
-    self.cmd(adreno.CP_EXEC_CS, 0, qreg.cp_exec_cs_1(ngroups_x=global_size[0]), qreg.cp_exec_cs_2(ngroups_y=global_size[1]),
-             qreg.cp_exec_cs_3(_ngroups_z=global_size[2]))
-
+    if prg.NIR:
+      self.reg(adreno.REG_A6XX_HLSQ_CS_CNTL_0,
+               qreg.a6xx_hlsq_cs_cntl_0(wgidconstid=prg.wgid, wgsizeconstid=0xfc, wgoffsetconstid=0xfc, localidregid=prg.lid),
+               qreg.a6xx_hlsq_cs_cntl_1(linearlocalidregid=0xfc, threadsize=adreno.THREAD64))
+      self.cmd(adreno.CP_EXEC_CS, 0,
+               qreg.cp_exec_cs_1(ngroups_x=global_size[0]), qreg.cp_exec_cs_2(ngroups_y=global_size[1]), qreg.cp_exec_cs_3(_ngroups_z=global_size[2]))
+    else: self.cmd(adreno.CP_RUN_OPENCL, 0)
     self._cache_flush(write_back=True, invalidate=False, sync=False, memsync=False)
     return self
 
@@ -268,7 +212,7 @@ class QCOMProgram(HCQProgram):
       self.image_size = v.info.size
 
       self.prg_offset, self.brnchstck = 0, v.branchstack
-      self.pvtmem, self.shmem = v.pvtmem_size, v.shared_size # is this right?
+      self.pvtmem, self.shmem = v.pvtmem_size, v.shared_size
 
       # Fill up constants and buffers info
       self.buf_info = []
@@ -281,16 +225,8 @@ class QCOMProgram(HCQProgram):
         self.samplers = [qreg.a6xx_tex_samp_0(wrap_s=(clamp_mode:=adreno.A6XX_TEX_CLAMP_TO_BORDER), wrap_t=clamp_mode, wrap_r=clamp_mode),
                          qreg.a6xx_tex_samp_1(unnorm_coords=True, cubemapseamlessfiltoff=True), 0, 0, 0, 0, 0, 0]
 
-      # for i in range(mesa.IR3_CONST_ALLOC_MAX):
-      #   if cs.allocs.consts[i].size_vec4: print(f"{mesa.enum_ir3_const_alloc_type(i)}: {cs.allocs.consts[i].offset_vec4} {cs.allocs.consts[i].size_vec4}")
-      # for i in range(v.imm_state.count): print(v.imm_state.values[i])
-      # print(v.outputs_count, v.inputs_count)
-      # for i in range(v.outputs_count): print(v.outputs[i].slot)
-
-      # "cs" is "compute shader"
       self.wgid, self.lid = v.cs.work_group_id, v.cs.local_invocation_id
       self.consts_info = [(imm_vals, cs.allocs.max_const_offset_vec4 * 16, len(imm_vals))]
-      # Collect kernel arguments (buffers) info.
       for i in range(cs.ubo_state.num_enabled):
         rng = cs.ubo_state.range[i]
         self.buf_info.extend([SimpleNamespace(offset=rng.offset + j, type=BUFTYPE_BUF) for j in range(rng.start, rng.end, 8)])
