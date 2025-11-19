@@ -306,6 +306,7 @@ jobs:
       with:
         key: spec-unit
         deps: testing_unit
+        python-version: '3.14'
     - name: Test SPEC=2
       run: IGNORE_OOB=0 SPEC=2 PYTHONPATH="." pytest --maxfail=10 -n auto --durations=30 --ignore=test/models --ignore test/unit/test_hashing.py --timeout 60 -k "not test_setitem_big" --splits 2 --group ${{ matrix.group }}
 
