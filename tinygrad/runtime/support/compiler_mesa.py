@@ -100,7 +100,9 @@ class IR3Compiler(NIRCompiler):
 
   def compile(self, src) -> bytes:
     nir_shader = deserialize(src, self.nir_options)
-    shader = mesa.ir3_shader_from_nir(self.cc, nir_shader, mesa.struct_ir3_shader_options(), None).contents
+    mesa.ir3_nir_lower_io_vars_to_temporaries(nir_shader)
+    mesa.ir3_finalize_nir(self.cc, (ir3_options:=mesa.struct_ir3_shader_options()).nir_options, nir_shader)
+    shader = mesa.ir3_shader_from_nir(self.cc, nir_shader, ir3_options, None).contents
     v = rzalloc(mesa.struct_ir3_shader_variant).contents
     v.shader_id, v.key, v.type, v.shader_options = shader.id, mesa.struct_ir3_shader_key(), shader.type, shader.options,
     v.compiler, v.mergedregs, v.num_ssbos = ctypes.pointer(self.cc), self.cc.mergedregs, (info:=shader.nir.contents.info).num_ssbos,

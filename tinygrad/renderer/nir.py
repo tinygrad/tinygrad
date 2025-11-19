@@ -249,3 +249,4 @@ class IR3Renderer(NIRRendererWithOpts):
   def prerender(self, uops:list[UOp]):
     super().prerender(uops)
     self.param_sz = sum([8 if u.op == Ops.DEFINE_GLOBAL else u.dtype.itemsize for u in uops if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR)])
+    self.b.shader.contents.info.num_ubos = len([u for u in uops if u.op == Ops.DEFINE_GLOBAL])

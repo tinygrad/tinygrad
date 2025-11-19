@@ -8645,6 +8645,203 @@ except AttributeError: pass
 try: (ir3_link_stream_out:=dll.ir3_link_stream_out).restype, ir3_link_stream_out.argtypes = None, [ctypes.POINTER(struct_ir3_shader_linkage), ctypes.POINTER(struct_ir3_shader_variant)]
 except AttributeError: pass
 
+try: (ir3_nir_apply_trig_workarounds:=dll.ir3_nir_apply_trig_workarounds).restype, ir3_nir_apply_trig_workarounds.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_imul:=dll.ir3_nir_lower_imul).restype, ir3_nir_lower_imul.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_io_offsets:=dll.ir3_nir_lower_io_offsets).restype, ir3_nir_lower_io_offsets.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_load_barycentric_at_sample:=dll.ir3_nir_lower_load_barycentric_at_sample).restype, ir3_nir_lower_load_barycentric_at_sample.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_load_barycentric_at_offset:=dll.ir3_nir_lower_load_barycentric_at_offset).restype, ir3_nir_lower_load_barycentric_at_offset.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_push_consts_to_preamble:=dll.ir3_nir_lower_push_consts_to_preamble).restype, ir3_nir_lower_push_consts_to_preamble.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_driver_params_to_ubo:=dll.ir3_nir_lower_driver_params_to_ubo).restype, ir3_nir_lower_driver_params_to_ubo.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_nir_move_varying_inputs:=dll.ir3_nir_move_varying_inputs).restype, ir3_nir_move_varying_inputs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_coord_offset:=dll.ir3_nir_coord_offset).restype, ir3_nir_coord_offset.argtypes = ctypes.c_int32, [ctypes.POINTER(nir_def), ctypes.POINTER(gl_system_value)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_tex_prefetch:=dll.ir3_nir_lower_tex_prefetch).restype, ir3_nir_lower_tex_prefetch.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(enum_ir3_bary)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_layer_id:=dll.ir3_nir_lower_layer_id).restype, ir3_nir_lower_layer_id.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_frag_shading_rate:=dll.ir3_nir_lower_frag_shading_rate).restype, ir3_nir_lower_frag_shading_rate.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_primitive_shading_rate:=dll.ir3_nir_lower_primitive_shading_rate).restype, ir3_nir_lower_primitive_shading_rate.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_to_explicit_output:=dll.ir3_nir_lower_to_explicit_output).restype, ir3_nir_lower_to_explicit_output.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant), ctypes.c_uint32]
+except AttributeError: pass
+
+try: (ir3_nir_lower_to_explicit_input:=dll.ir3_nir_lower_to_explicit_input).restype, ir3_nir_lower_to_explicit_input.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_tess_ctrl:=dll.ir3_nir_lower_tess_ctrl).restype, ir3_nir_lower_tess_ctrl.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant), ctypes.c_uint32]
+except AttributeError: pass
+
+try: (ir3_nir_lower_tess_eval:=dll.ir3_nir_lower_tess_eval).restype, ir3_nir_lower_tess_eval.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant), ctypes.c_uint32]
+except AttributeError: pass
+
+try: (ir3_nir_lower_gs:=dll.ir3_nir_lower_gs).restype, ir3_nir_lower_gs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_supports_vectorized_nir_op:=dll.ir3_supports_vectorized_nir_op).restype, ir3_supports_vectorized_nir_op.argtypes = ctypes.c_bool, [nir_op]
+except AttributeError: pass
+
+try: (ir3_nir_vectorize_filter:=dll.ir3_nir_vectorize_filter).restype, ir3_nir_vectorize_filter.argtypes = uint8_t, [ctypes.POINTER(nir_instr), ctypes.c_void_p]
+except AttributeError: pass
+
+try: (ir3_nir_lower_64b_intrinsics:=dll.ir3_nir_lower_64b_intrinsics).restype, ir3_nir_lower_64b_intrinsics.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_64b_undef:=dll.ir3_nir_lower_64b_undef).restype, ir3_nir_lower_64b_undef.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_64b_global:=dll.ir3_nir_lower_64b_global).restype, ir3_nir_lower_64b_global.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_64b_regs:=dll.ir3_nir_lower_64b_regs).restype, ir3_nir_lower_64b_regs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_mem_access_size_align:=dll.ir3_mem_access_size_align).restype, ir3_mem_access_size_align.argtypes = nir_mem_access_size_align, [nir_intrinsic_op, uint8_t, uint8_t, uint32_t, uint32_t, ctypes.c_bool, enum_gl_access_qualifier, ctypes.c_void_p]
+except AttributeError: pass
+
+try: (ir3_nir_opt_branch_and_or_not:=dll.ir3_nir_opt_branch_and_or_not).restype, ir3_nir_opt_branch_and_or_not.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_opt_triops_bitwise:=dll.ir3_nir_opt_triops_bitwise).restype, ir3_nir_opt_triops_bitwise.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_optimize_loop:=dll.ir3_optimize_loop).restype, ir3_optimize_loop.argtypes = ctypes.c_bool, [ctypes.POINTER(struct_ir3_compiler), ctypes.POINTER(struct_ir3_shader_nir_options), ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_io_vars_to_temporaries:=dll.ir3_nir_lower_io_vars_to_temporaries).restype, ir3_nir_lower_io_vars_to_temporaries.argtypes = None, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_finalize_nir:=dll.ir3_finalize_nir).restype, ir3_finalize_nir.argtypes = None, [ctypes.POINTER(struct_ir3_compiler), ctypes.POINTER(struct_ir3_shader_nir_options), ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_post_finalize:=dll.ir3_nir_post_finalize).restype, ir3_nir_post_finalize.argtypes = None, [ctypes.POINTER(struct_ir3_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_variant:=dll.ir3_nir_lower_variant).restype, ir3_nir_lower_variant.argtypes = None, [ctypes.POINTER(struct_ir3_shader_variant), ctypes.POINTER(struct_ir3_shader_nir_options), ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_setup_const_state:=dll.ir3_setup_const_state).restype, ir3_setup_const_state.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant), ctypes.POINTER(struct_ir3_const_state)]
+except AttributeError: pass
+
+try: (ir3_const_state_get_free_space:=dll.ir3_const_state_get_free_space).restype, ir3_const_state_get_free_space.argtypes = uint32_t, [ctypes.POINTER(struct_ir3_shader_variant), ctypes.POINTER(struct_ir3_const_state), uint32_t]
+except AttributeError: pass
+
+try: (ir3_const_alloc:=dll.ir3_const_alloc).restype, ir3_const_alloc.argtypes = None, [ctypes.POINTER(struct_ir3_const_allocations), enum_ir3_const_alloc_type, uint32_t, uint32_t]
+except AttributeError: pass
+
+try: (ir3_const_reserve_space:=dll.ir3_const_reserve_space).restype, ir3_const_reserve_space.argtypes = None, [ctypes.POINTER(struct_ir3_const_allocations), enum_ir3_const_alloc_type, uint32_t, uint32_t]
+except AttributeError: pass
+
+try: (ir3_const_free_reserved_space:=dll.ir3_const_free_reserved_space).restype, ir3_const_free_reserved_space.argtypes = None, [ctypes.POINTER(struct_ir3_const_allocations), enum_ir3_const_alloc_type]
+except AttributeError: pass
+
+try: (ir3_const_alloc_all_reserved_space:=dll.ir3_const_alloc_all_reserved_space).restype, ir3_const_alloc_all_reserved_space.argtypes = None, [ctypes.POINTER(struct_ir3_const_allocations)]
+except AttributeError: pass
+
+try: (ir3_nir_scan_driver_consts:=dll.ir3_nir_scan_driver_consts).restype, ir3_nir_scan_driver_consts.argtypes = uint32_t, [ctypes.POINTER(struct_ir3_compiler), ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_const_image_dims)]
+except AttributeError: pass
+
+try: (ir3_alloc_driver_params:=dll.ir3_alloc_driver_params).restype, ir3_alloc_driver_params.argtypes = None, [ctypes.POINTER(struct_ir3_const_allocations), ctypes.POINTER(uint32_t), ctypes.POINTER(struct_ir3_compiler), enum_pipe_shader_type]
+except AttributeError: pass
+
+try: (ir3_nir_lower_load_constant:=dll.ir3_nir_lower_load_constant).restype, ir3_nir_lower_load_constant.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_nir_analyze_ubo_ranges:=dll.ir3_nir_analyze_ubo_ranges).restype, ir3_nir_analyze_ubo_ranges.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_ubo_loads:=dll.ir3_nir_lower_ubo_loads).restype, ir3_nir_lower_ubo_loads.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_const_global_loads:=dll.ir3_nir_lower_const_global_loads).restype, ir3_nir_lower_const_global_loads.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_nir_fixup_load_const_ir3:=dll.ir3_nir_fixup_load_const_ir3).restype, ir3_nir_fixup_load_const_ir3.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_opt_preamble:=dll.ir3_nir_opt_preamble).restype, ir3_nir_opt_preamble.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_nir_opt_prefetch_descriptors:=dll.ir3_nir_opt_prefetch_descriptors).restype, ir3_nir_opt_prefetch_descriptors.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_preamble:=dll.ir3_nir_lower_preamble).restype, ir3_nir_lower_preamble.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_nir_try_propagate_bit_shift:=dll.ir3_nir_try_propagate_bit_shift).restype, ir3_nir_try_propagate_bit_shift.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_def), int32_t]
+except AttributeError: pass
+
+try: (ir3_nir_lower_subgroups_filter:=dll.ir3_nir_lower_subgroups_filter).restype, ir3_nir_lower_subgroups_filter.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_instr), ctypes.c_void_p]
+except AttributeError: pass
+
+try: (ir3_nir_lower_shuffle:=dll.ir3_nir_lower_shuffle).restype, ir3_nir_lower_shuffle.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_opt_subgroups:=dll.ir3_nir_opt_subgroups).restype, ir3_nir_opt_subgroups.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_get_shared_driver_ubo:=dll.ir3_get_shared_driver_ubo).restype, ir3_get_shared_driver_ubo.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(struct_ir3_driver_ubo)]
+except AttributeError: pass
+
+try: (ir3_get_driver_ubo:=dll.ir3_get_driver_ubo).restype, ir3_get_driver_ubo.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(struct_ir3_driver_ubo)]
+except AttributeError: pass
+
+try: (ir3_get_driver_consts_ubo:=dll.ir3_get_driver_consts_ubo).restype, ir3_get_driver_consts_ubo.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_update_driver_ubo:=dll.ir3_update_driver_ubo).restype, ir3_update_driver_ubo.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_driver_ubo), ctypes.POINTER(ctypes.c_char)]
+except AttributeError: pass
+
+try: (ir3_load_shared_driver_ubo:=dll.ir3_load_shared_driver_ubo).restype, ir3_load_shared_driver_ubo.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.c_uint32, ctypes.POINTER(struct_ir3_driver_ubo), ctypes.c_uint32]
+except AttributeError: pass
+
+try: (ir3_load_driver_ubo:=dll.ir3_load_driver_ubo).restype, ir3_load_driver_ubo.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.c_uint32, ctypes.POINTER(struct_ir3_driver_ubo), ctypes.c_uint32]
+except AttributeError: pass
+
+try: (ir3_load_driver_ubo_indirect:=dll.ir3_load_driver_ubo_indirect).restype, ir3_load_driver_ubo_indirect.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.c_uint32, ctypes.POINTER(struct_ir3_driver_ubo), ctypes.c_uint32, ctypes.POINTER(nir_def), ctypes.c_uint32]
+except AttributeError: pass
+
+try: (ir3_def_is_rematerializable_for_preamble:=dll.ir3_def_is_rematerializable_for_preamble).restype, ir3_def_is_rematerializable_for_preamble.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_def), ctypes.POINTER(ctypes.POINTER(nir_def))]
+except AttributeError: pass
+
+try: (ir3_rematerialize_def_for_preamble:=dll.ir3_rematerialize_def_for_preamble).restype, ir3_rematerialize_def_for_preamble.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_def), ctypes.POINTER(struct_set), ctypes.POINTER(ctypes.POINTER(nir_def))]
+except AttributeError: pass
+
+class struct_driver_param_info(Struct): pass
+struct_driver_param_info._fields_ = [
+  ('offset', uint32_t),
+  ('extra_size', uint32_t),
+]
+try: (ir3_get_driver_param_info:=dll.ir3_get_driver_param_info).restype, ir3_get_driver_param_info.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_intrinsic_instr), ctypes.POINTER(struct_driver_param_info)]
+except AttributeError: pass
+
+try: (ir3_nir_max_imm_offset:=dll.ir3_nir_max_imm_offset).restype, ir3_nir_max_imm_offset.argtypes = uint32_t, [ctypes.POINTER(nir_intrinsic_instr), ctypes.c_void_p]
+except AttributeError: pass
+
+try: (ir3_nir_intrinsic_barycentric_sysval:=dll.ir3_nir_intrinsic_barycentric_sysval).restype, ir3_nir_intrinsic_barycentric_sysval.argtypes = gl_system_value, [ctypes.POINTER(nir_intrinsic_instr)]
+except AttributeError: pass
+
 try: (glsl_type_singleton_init_or_ref:=dll.glsl_type_singleton_init_or_ref).restype, glsl_type_singleton_init_or_ref.argtypes = None, []
 except AttributeError: pass
 
