@@ -48,7 +48,7 @@ def autowrap(source_cls, blacklist=None):
       else:
         original = getattr(source_cls, name)
         if callable(original):
-          def make_proxy(op_name, func):
+          def make_proxy(_, func):
             def proxy(self, *args, **kwargs):
               return wrap(func(self._uop, *unwrap(args), **unwrap(kwargs)), self)
             return proxy
@@ -71,7 +71,7 @@ class TileMathMixin(MathMixin):
         if isinstance(self, RT) and isinstance(src[0], RV): uop = self.ker.warp.map(self._uop, lambda x, idx: UOp.alu(x, op, inner_op(src[0]._uop[idx[0], 0, (idx[2]%4)//2])))
         else: uop = self.ker.warp.map(self._uop, lambda x, idx: UOp.alu(x, op, inner_op(src[0]._uop[*idx])))
     else: raise NotImplementedError
-    return type(self)(uop, self.ker)
+    return self.ruop(uop)
   def const_like(self, b): return b
 
   # override ops that do compute on the src uop
@@ -162,6 +162,9 @@ class ST:
   def ruop(self, uop):
     return ST(uop, self.layout, self.ker)
 
+  def ruop(self, uop):
+    return ST(uop, self.ker)
+
   @classmethod
   def create(cls, shape, dtype, layout:STLayout, ker):
     rows = shape[-2]
@@ -209,6 +212,9 @@ class RT(TileMathMixin):
   def ruop(self, uop):
     return RT(uop, self.layout, self.ker)
 
+  def ruop(self, uop):
+    return RT(uop, self.ker)
+
   @classmethod
   def create(cls, shape, dtype, layout:RTLayout, ker):
     assert len(shape) == 2
@@ -223,8 +229,11 @@ class RT(TileMathMixin):
 
 @autowrap(UOp)
 class RV(TileMathMixin):
-  def __init__(self, uop, ker):
-    self._uop, self.ker = uop, ker
+  def __init__(self, uop, layout, ker):
+    self._uop, self.layout, self.ker = uop, layout, ker
+
+  def ruop(self, uop):
+    return RV(uop, self.layout, self.ker)
 
   def ruop(self, uop):
     return RV(uop, self.ker)
@@ -243,6 +252,6 @@ class RV(TileMathMixin):
       case _: raise NotImplementedError(f"rv layout {layout} not implemented")
 
     uop = ker.alloc((outer_dim, inner_dim, 2), dtype, AddrSpace.REG)
-    return RV(uop, ker)
+    return RV(uop, layout, ker)
 
 ALL_TILES = UOp | GL | ST | RT | RV
