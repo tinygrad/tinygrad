@@ -5,7 +5,7 @@ from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str
 from tinygrad.runtime.autogen import mesa
-import base64, ctypes, ctypes.util, struct, functools, inspect
+import base64, contextlib, ctypes, ctypes.util, struct, functools, inspect
 
 def g(s:str): return getattr(mesa, s)
 def nsrc(d:mesa.nir_def) -> mesa.nir_src: return mesa.nir_src(ssa=ctypes.pointer(d))
@@ -157,8 +157,7 @@ class NIRRenderer(Renderer):
   def __init__(self): mesa.glsl_type_singleton_init_or_ref()
 
   def __del__(self):
-    try: mesa.glsl_type_singleton_decref()
-    except FileNotFoundError: pass
+    with contextlib.suppress(AttributeError):mesa.glsl_type_singleton_decref()
 
   @property
   def nir_options(self): raise NotImplementedError("needs nir_options")
