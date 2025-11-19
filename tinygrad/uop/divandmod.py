@@ -15,7 +15,18 @@ def fold_divmod_const(d: UOp, x: UOp, y: UOp) -> UOp|None:
   if ((c := y.arg) < 0): return None
   x_peeled, const = x.pop_const()
   uops = list(x_peeled.split_uop(Ops.ADD))
-  if len(uops) == 0: return None
+
+  # remove_nested_mod: remove nested mod in case the inner mod is a multiple of the outer mod, example: (a%4 + b)%2 -> (a+b)%2
+  if d.op is Ops.MOD and x.vmin >= 0:
+    new_xs, changed = [], False
+    for u in uops:
+      if u.op is Ops.MOD and u.src[1].divides(c) is not None:
+        new_xs.append(u.src[0])
+        changed = True
+      else: new_xs.append(u)
+    if changed: return (UOp.sum(*new_xs) + const) % y
+
+  # Shared decomposition for folding rules
   decomp = [(u.divides(f:=u.const_factor()),f) for u in uops]
   terms, factors = zip(*decomp)
 
@@ -40,21 +51,6 @@ def fold_divmod_const(d: UOp, x: UOp, y: UOp) -> UOp|None:
       if new_x.vmin >= 0:
         ret = new_x.alu(d.op, x.ufix(c//gcd.arg))
         return ret*gcd + const%gcd.arg if d.op is Ops.MOD else ret+const//c
-  return None
-
-def remove_nested_mod(d: UOp, x: UOp, y: UOp) -> UOp|None:
-  # remove nested mod in case the inner mod is a multiple of the outer mod
-  # example: (a%4 + b)%2 -> (a+b)%2
-  if ((c := y.arg) < 0) or x.vmin<0: return None
-  new_xs = []
-  something_changed = False
-  for u in x.split_uop(Ops.ADD):
-    if u.op is Ops.MOD and u.src[1].divides(c) is not None:
-      something_changed = True
-      u = u.src[0]
-    new_xs.append(u)
-  new_x: UOp = UOp.sum(*new_xs)
-  if something_changed and new_x.vmin>=0: return new_x % y
   return None
 
 def nest_div_by_smallest_factor(d: UOp, x: UOp, y: UOp) -> UOp|None:
@@ -108,7 +104,6 @@ div_and_mod_symbolic = PatternMatcher([
   # ** 2. Slow Constant Denominator Rules (cvar) **
   # Prioritize these because they are mathematically stronger for constants
   (UPat((Ops.IDIV, Ops.MOD), dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), fold_divmod_const),
-  (UPat(Ops.MOD, dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), remove_nested_mod),
   (UPat(Ops.IDIV, dtypes.index, name="d", src=(UPat.var("x"), UPat.cvar("y", vec=False))), nest_div_by_smallest_factor),
 
   # ** 3. Slow Variable Denominator Rules (var) **
