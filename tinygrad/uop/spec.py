@@ -37,8 +37,7 @@ shared_spec = PatternMatcher([
 
   # RANGE can be in the big graph now
   (UPat(Ops.RANGE, src=(UPat.var("x"),), allow_any_len=True, name="rng"), lambda rng,x:
-    rng.dtype == x.dtype and isinstance(rng.arg, tuple) and len(rng.arg) >= 2 and \
-      all(isinstance(ra, int) for ra in rng.arg[0:-1]) and isinstance(rng.arg[-1], AxisType)),
+    rng.dtype == x.dtype and isinstance(rng.arg, tuple) and len(rng.arg) == 2 and isinstance(rng.arg[0], str) and isinstance(rng.arg[-1], AxisType)),
   (UPat(Ops.INDEX, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:]) or None),
 
   # RANGE/SPECIAL define loops, END closes them

@@ -134,7 +134,7 @@ def fix_group_for_reduce(x:UOp):
 
   # do only the non grouped reduces early
   ret = x.replace(src=(x.src[0],)+tuple(reduce_r))
-  reduce_loop = [x.replace(arg=(x.arg[0]+100, AxisType.REDUCE)) for x in reduce_gfr]
+  reduce_loop = [x.replace(arg=(x.arg[0]+"_gfr", AxisType.REDUCE)) for x in reduce_gfr]
   buf = ret.bufferize(*upstream_locals, *reduce_gfr, arg=BufferizeOpts(reduce_gfr[0].arg[0], AddrSpace.LOCAL)).index(*upstream_locals, *reduce_loop)
 
   # do the final reduce (if/barrier are added in gpudims step)
