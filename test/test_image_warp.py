@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import time
+import unittest
 import numpy as np
 
 from tinygrad.tensor import Tensor
@@ -62,7 +63,7 @@ def warp_perspective_numpy(src, M_inv):
   return dst.ravel()
 
 
-if __name__ == "__main__":
+class TestImageWarpJit(unittest.TestCase):
   update_img_jit = TinyJit(warp_perspective_tinygrad, prune=True)
 
   # run 20 times
@@ -87,3 +88,7 @@ if __name__ == "__main__":
     mismatch_percent = sum(mismatch.flatten()) / len(mismatch.flatten()) * 100
     mismatch_percent_tol = 1e-2
     assert mismatch_percent < mismatch_percent_tol, f"input mismatch percent {mismatch_percent} exceeds tolerance {mismatch_percent_tol}"
+
+
+if __name__ == '__main__':
+  unittest.main()
