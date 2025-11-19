@@ -56,7 +56,7 @@ class Group:
     self.ker.push_store(dst_store, dst)
     return dst.after(dst_store).reshape(dst.shape)
 
-  def mma_AB(self, c:UOp|RT, a:UOp|RT, b:UOp|RT, after=True):
+  def mma_AB(self, c:UOp|RT, a:UOp|RT, b:UOp|RT):
     c, a, b = cast(UOp, c), cast(UOp, a), cast(UOp, b)
     assert self.warps == 1
 
@@ -77,9 +77,9 @@ class Group:
           c_store = UOp.group(*c_i).end(height, width, inner)
 
     self.ker.push_store(c_store, c)
-    return c.after(c_store).reshape(c.shape) if after else c_store
+    return c.after(c_store).reshape(c.shape)
 
-  def mma_ABt(self, c:UOp|RT, a:UOp|RT, b:UOp|RT, after=True):
+  def mma_ABt(self, c:UOp|RT, a:UOp|RT, b:UOp|RT):
     c, a, b = cast(UOp, c), cast(UOp, a), cast(UOp, b)
     assert self.warps == 1
 
@@ -100,7 +100,7 @@ class Group:
           c_store = UOp.group(*c_i).end(height, width, inner)
 
     self.ker.push_store(c_store, c)
-    return c.after(c_store).reshape(c.shape) if after else c_store
+    return c.after(c_store).reshape(c.shape)
 
   map_rid = 400
   def map(self, a:ALL_TILES, op:Callable[[UOp], UOp]|Callable[[UOp, tuple], UOp]):
@@ -162,7 +162,7 @@ class Group:
 
   # ops that can work across multiple warps
 
-  LOAD_INNER = 8
+  LOAD_INNER = 4
   def load(self, dst:ALL_TILES, src:ALL_TILES, dst_idxs:tuple[UOp|int,...]=(), idxs:tuple[UOp|int,...]=(), axis:int=0, transpose:bool=False):
     dst, src = cast(UOp, dst), cast(UOp, src)
     assert isinstance(dst.dtype, PtrDType) and isinstance(src.dtype, PtrDType)
@@ -225,7 +225,7 @@ class Group:
 
     return dst.after(dst_store.barrier()).reshape(dst.shape)
 
-  STORE_INNER = 8
+  STORE_INNER = 4
   def store(self, dst:ALL_TILES, src:ALL_TILES, idxs:tuple[UOp|int,...]=(), src_idxs:tuple[UOp|int,...]=(), axis:int=0, transpose:bool=False):
     dst, src = cast(UOp, dst), cast(UOp, src)
     assert isinstance(dst.dtype, PtrDType) and isinstance(src.dtype, PtrDType)
