@@ -46,7 +46,7 @@ def split_reduceop(reduce:UOp, x:UOp):
   # get expanded by rangeifying the UOp x
   indexed = x.index(*[UOp.range(s, i) if resolve(s>1) else UOp.const(dtypes.index, 0) for i,s in enumerate(x.shape)])
   range_nums = [y.arg[0] for y in indexed.substitute({x.base:UOp(Ops.NOOP)}, extra_pm=pm_mops).ranges]
-  is_expanded = [i not in range_nums for i in range(len(x.shape))]
+  is_expanded = [str(i) not in range_nums for i in range(len(x.shape))]
 
   if not (split_candidates:=[(i,d) for i in reduce.arg[1] for d in range(min(256,2**getenv("REDUCEOP_SPLIT_SIZE",22)//prod(reduce.shape)),8-1,-1)
                              if x.shape[i]%d==0 and not is_expanded[i]]): return None
