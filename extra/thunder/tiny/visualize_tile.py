@@ -3,8 +3,8 @@ from tinygrad.helpers import colored
 WARP_THREADS = 64
 BASE_TILE_ROWS = 16
 BASE_TILE_COLS = 16
-DTYPE_SIZE = 2
 BASE_TILE_NEPT = (BASE_TILE_ROWS * BASE_TILE_COLS) // WARP_THREADS
+DTYPE_SIZE = 2
 INST = "ds_read_b64"
 
 def row_col(threadIdx_x):
