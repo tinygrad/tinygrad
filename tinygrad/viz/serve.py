@@ -243,7 +243,7 @@ def get_kernel_sqtt(data:KernelData) -> dict:
     waves.append(ProfileRangeEvent(row, wave_name:=f"wave {e.wave_id}", Decimal(e.begin_time), Decimal(e.end_time)))
     steps.append({"name":wave_name, "depth":1, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters", "data":(e, asm)})
   events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+waves
-  return {"value":get_profile(waves), "content_type":"application/octet-stream"}
+  return {"value":get_profile(events), "content_type":"application/octet-stream"}
 
 def get_sqtt_insts(wave, asm:dict[int, tuple[str, int]]) -> dict:
   # Idle:     The total time gap between the completion of previous instruction and the beginning of the current instruction.
