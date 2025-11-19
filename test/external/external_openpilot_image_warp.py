@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-from pathlib import Path
+import pickle
 import time
 import numpy as np
 
@@ -181,15 +181,9 @@ if __name__ == "__main__":
       mismatch_percent_tol = 1e-2
       assert mismatch_percent < mismatch_percent_tol, f"input mismatch percent {mismatch_percent} exceeds tolerance {mismatch_percent_tol}"
 
-
-
   # Test saving and loading the compiled function
-  import pickle
   WARP_PKL_PATH = '/tmp/warp_tinygrad.pkl'
   pickle.dump(update_img_jit, open(WARP_PKL_PATH, "wb"))
-
-  from tinygrad.tensor import Tensor
-  
   with open(WARP_PKL_PATH, "rb") as f:
     update_imgs = pickle.load(f)
 
