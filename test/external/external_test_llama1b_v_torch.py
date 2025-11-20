@@ -152,8 +152,8 @@ class TestTinyVsTorchLlama1b(unittest.TestCase):
         tg_model = TinyTransformer(**MODEL_PARAMS["1B"]["args"], disable_kv_cache=False, max_context=5, jit=True)
 
         # Warmup tinygrad; temperature=math.nan bypasses sampling, returns logits.
-        for _ in range(2): tg_model.forward_jit(tg_tokens, 2, temperature=math.nan, top_k=0, top_p=0, alpha_f=0, alpha_p=0).realize()
-        tg_bench = benchmark(lambda: tg_model.forward_jit(tg_tokens, 2, temperature=math.nan, top_k=0, top_p=0, alpha_f=0, alpha_p=0).realize(), count)
+        for _ in range(2): tg_model.forward_jit(tg_tokens,2,temperature=math.nan,top_k=0,top_p=0,alpha_f=0,alpha_p=0).realize()
+        tg_bench = benchmark(lambda:tg_model.forward_jit(tg_tokens,2,temperature=math.nan,top_k=0,top_p=0,alpha_f=0,alpha_p=0).realize(), count)
 
         tr_tokens = torch.tensor([[1,2]], device='cpu', dtype=torch.int32)
         tr_model = TorchTransformer(**MODEL_PARAMS["1B"]["args"], max_context=5).eval().to('cpu')
