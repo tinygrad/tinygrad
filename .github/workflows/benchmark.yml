@@ -67,6 +67,8 @@ jobs:
       run: METAL=1 python3.11 test/external/external_model_benchmark.py
     - name: Test speed vs torch
       run: BIG=2 MPS=1 python3.11 test/speed/external_test_speed_v_torch.py | tee torch_speed.txt
+    - name: Test Llama3.2:1b speed vs torch (CPU)
+      run: CPU=1 CPU_LLVM=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 python3.11 -m test.external.external_test_llama1b_v_torch
     - name: Test tensor cores
       run: METAL=1 python3.11 test/opt/test_tensor_cores.py
     - name: Test AMX tensor cores
@@ -198,6 +200,8 @@ jobs:
       run: NV=1 CAPTURE_PROCESS_REPLAY=0 NOCLANG=1 python3 test/external/external_model_benchmark.py
     - name: Test speed vs torch
       run: NV=1 CAPTURE_PROCESS_REPLAY=0 HALF=1 BIG=2 TORCHCUDA=1 python3 test/speed/external_test_speed_v_torch.py | tee torch_speed.txt
+    - name: Test Llama3.2:1b speed vs torch (CPU)
+      run: CPU=1 CPU_LLVM=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 python3.11 -m test.external.external_test_llama1b_v_torch
     - name: Test speed vs theoretical
       run: NV=1 IGNORE_BEAM_CACHE=1 CCACHE=0 BEAM_DEBUG=1 DEBUG=1 python -m pytest -rA test/external/speed_v_theoretical.py --durations=20
     - name: Test benchmark allreduce
