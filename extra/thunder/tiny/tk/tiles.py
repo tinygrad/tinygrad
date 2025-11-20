@@ -199,11 +199,7 @@ RT_16X32_4 = RTLayout(rows=16, cols=32, stride=4)
 
 @autowrap(UOp)
 class RT(TileMathMixin):
-  BASE_TILE_ROWS, BASE_TILE_COLS = 16, 16
-  BASE_TILE_NE = BASE_TILE_ROWS * BASE_TILE_COLS
-  BASE_TILE_NEPT = BASE_TILE_NE // WARP_THREADS
-
-  def __init__(self, uop, layout, ker):
+  def __init__(self, uop, layout:RTLayout, ker):
     self._uop, self.layout, self.ker = uop, layout, ker
 
   def ruop(self, uop):
@@ -218,7 +214,7 @@ class RT(TileMathMixin):
     height = shape[0] // layout.rows
     width = shape[1] // layout.cols
 
-    uop = ker.alloc((height, width), dtype.vec(layout.elements_per_thread), AddrSpace.REG)
+    uop = ker.alloc((height, width, layout.elements_per_thread), dtype, AddrSpace.REG)
     return cls(uop, layout, ker)
 
 @autowrap(UOp)
@@ -231,7 +227,7 @@ class RV(TileMathMixin):
 
   @classmethod
   def create(cls, length, dtype, layout, ker):
-    tiles = length // RT.BASE_TILE_ROWS
+    tiles = length // 16
 
     match layout:
       case "naive":
