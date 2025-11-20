@@ -553,6 +553,12 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
 
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites+replace_contiguous, ctx={}, name="earliest rewrites")
 
+  # link any movementops with tags to sink, and remove the tags from other parts of the graph
+  # we add "None" to the tag so it's deduped from the movementop that exists in the graph
+  #tagged_mops = [x.replace(tag=x.tag+(None,)) for x in tsink.toposort() if x.op in GroupOp.Movement and x.tag is not None]
+  #tsink = tsink.replace(src=tsink.src+tuple(tagged_mops))
+  #tsink = tsink.substitute({})
+
   # convert movement ops to ranges
   tsink, rctx = run_rangeify(tsink, DEBUG_RANGEIFY)
 

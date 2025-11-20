@@ -6,7 +6,7 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, g
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
 from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored
 
-ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
+ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.AFTER, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
                      Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_GLOBAL,
                      Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.LOAD, Ops.KERNEL}
 
@@ -16,10 +16,9 @@ def realize_srcs(ctx:dict[UOp, None], rb:UOp) -> None:
   for s in rb.src:
     if s.base.op not in ALWAYS_CONTIGUOUS: ctx[s] = None
 
-def realize_assign(ctx:dict[UOp, None], a:UOp) -> None:
+def realize_store(ctx:dict[UOp, None], a:UOp) -> None:
   if a.src[1].op not in ALWAYS_CONTIGUOUS: ctx[a.src[1]] = None
-  # if it's a kernel, we don't realize it
-  if a.src[1].op is not Ops.KERNEL: ctx[a] = None
+  ctx[a] = None
 
 pm_generate_realize_map = PatternMatcher([
   # always realize SINK src
@@ -31,7 +30,7 @@ pm_generate_realize_map = PatternMatcher([
   # realize srcs of COPY, MSELECT, MSTACK
   (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_srcs),
   # realize ASSIGN and input to assign (might be optimized out)
-  (UPat(Ops.ASSIGN, name="a"), realize_assign),
+  (UPat(Ops.STORE, name="a"), realize_store),
 ])
 
 @dataclass(frozen=True)
@@ -91,7 +90,7 @@ def convert_reduce_axis_to_reduce_with_ranges(ctx:IndexingContext, x:UOp):
   return ret
 
 def remove_movement_op_after_rangeify(ctx:IndexingContext, x:UOp):
-  if x in ctx.range_map or x.src[0].op is Ops.INDEX: return x.src[0]
+  if (x in ctx.range_map or x.src[0].op is Ops.INDEX): return x.src[0]
 
 def add_third_op_to_assign_to_track_shape(ctx:IndexingContext, assign:UOp):
   if assign.src[1].op is Ops.KERNEL: return None
@@ -182,7 +181,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
       # mark all ranges as ended
       assert rctx.realize_map[x] is None
       rctx.realize_map[x] = list(range(len(x.shape)))
-    elif x.op in {Ops.MSTACK, Ops.MSELECT}:
+    elif x.op in {Ops.MSTACK, Ops.MSELECT, Ops.AFTER}:
       # treat MSTACK/MSELECT like SINK
       continue
     elif len(consumer_rngs) == 0:
@@ -215,6 +214,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
       out_rngs = tuple(_out_rngs)
 
       # we have to (partially) realize here if there's new ranges
+      print(_realize_axis)
       if len(_realize_axis): rctx.realize_map[x] = _realize_axis
 
     # if this element is a reduce and there's ended ranges, we might have to end some other ranges
