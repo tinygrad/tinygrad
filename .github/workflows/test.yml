@@ -989,11 +989,12 @@ jobs:
         with:
           key: compile-${{ matrix.backend }}
           deps: testing_minimal
+          mesa: ${{ matrix.backend == 'ir3' && 'true' }}
       - name: Set env
         shell: bash
         run: printf "COMPILE_ONLY=1\n${{ matrix.backend == 'ir3' && 'QCOM=1\nQCOM_IR3=1' }}" >> $GITHUB_ENV
       - name: Run test_ops
         shell: bash
         run: |
-          python -c "from tinygrad import Device; assert Device,DEFAULT == {'IR3':'QCOM'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
+          python -c "from tinygrad import Device; assert Device.DEFAULT == {'IR3':'QCOM'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
           python -m pytest -n=auto test/test_ops.py --durations=20
