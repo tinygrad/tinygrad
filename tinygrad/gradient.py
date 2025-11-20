@@ -70,4 +70,8 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
         # we add the backward metadata to everything new in the graph
         for bw_uop in v.toposort(lambda x: x not in (t0, *t0.src, grads[t0])):
           all_metadata[bw_uop] = all_metadata.get(bw_uop, ())+backward_metadata
+  # end any ranges on grads with a reduce sum
+  for k,v in grads.items():
+    if len(v.ranges):
+      grads[k] = v.reduce(*v.ranges, arg=Ops.ADD)
   return grads

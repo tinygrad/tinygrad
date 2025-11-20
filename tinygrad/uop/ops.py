@@ -866,8 +866,8 @@ def print_uops(uops:list[UOp]):
 
 def get_location() -> tuple[str, int]:
   frm = sys._getframe(1)
-  # skip over ops.py/mathtraits.py (unless there's nothing but ops.py/mathtraits.py)
-  while pathlib.Path(frm.f_code.co_filename).name in ("ops.py", "mathtraits.py") and frm.f_back is not None and \
+  # skip over ops.py and anything in mixin
+  while ((codepath:=pathlib.Path(frm.f_code.co_filename)).name == "ops.py" or codepath.parent.name == "mixin") and frm.f_back is not None and \
       not frm.f_back.f_code.co_filename.startswith("<frozen"):
     frm = frm.f_back
   return frm.f_code.co_filename, frm.f_lineno
@@ -1077,20 +1077,22 @@ def track_rewrites(name:Callable[..., str|TracingKey]|bool=True, replay:bool=Fal
 
 active_rewrites:list[TrackedGraphRewrite] = []
 def profile_matches(fxn:Callable):
-  def wrap(*args, **kwargs):
-    name = str(kwargs.get("name", None) or fxn.__name__)
-    assert args and isinstance(args[0], UOp), f"invalid match tracing inputs for {name} with {args}"
-    if tracking:=(TRACK_MATCH_STATS >= 2):
+  def wrap_profile_matches(*args, **kwargs):
+    if TRACK_MATCH_STATS >= 2:
+      name = str(kwargs.get("name", None) or fxn.__name__)
+      assert args and isinstance(args[0], UOp), f"invalid match tracing inputs for {name} with {args}"
       loc = ((frm:=sys._getframe(1)).f_code.co_filename, frm.f_lineno)
       depth = len(active_rewrites)
       if not tracked_ctxs: add_trace_group(TracingKey(f"default {fxn.__name__}"))
       tracked_ctxs[-1].append(ctx:=TrackedGraphRewrite(loc, args[0].trace_num, [], name, depth, kwargs.get("bottom_up", False)))
       active_rewrites.append(ctx)
-    with cpu_profile(name, "TINY", display=tracking):
-      ret = fxn(*args, **kwargs)
-    if tracking: active_rewrites.pop()
-    return ret
-  return wrap
+      with cpu_profile(name, "TINY"):
+        ret = fxn(*args, **kwargs)
+      active_rewrites.pop()
+      return ret
+    # without tracking, we just call the function
+    return fxn(*args, **kwargs)
+  return wrap_profile_matches
 
 class TrackedPatternMatcher(PatternMatcher):
   def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
@@ -1350,7 +1352,7 @@ pm_pyrender_extra = PatternMatcher([
   (UPat(Ops.REDUCE_AXIS, name="r"), lambda ctx,r: f"{ctx[r.src[0]]}.r({r.arg[0]}, {r.arg[1]})"),
   # NOTE: range has srcs sometimes after control flow
   (UPat(Ops.RANGE, src=(UPat(Ops.CONST, name="c"),), allow_any_len=True, name="x"), lambda ctx,x,c:
-    "UOp.range("+', '.join([str(c.arg)] + [str(y) for y in x.arg])+
+    "UOp.range("+', '.join([str(c.arg)] + [repr(y) for y in x.arg])+
       (f', src={srcs(ctx, x.src[1:])}' if len(x.src) > 1 else '')+(', dtype='+str(x.dtype) if x.dtype is not dtypes.index else '')+")"),
   # TODO: index shouldn't mismatch dtype
   (UPat(Ops.INDEX, src=(UPat(), UPat()), allow_any_len=True, name="x"), lambda ctx,x:

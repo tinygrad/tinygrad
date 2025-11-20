@@ -61,9 +61,8 @@ class _ROCParseCtx:
 
     for prog in prog_evs:
       arch = "gfx%d%x%x" % ((trgt:=unwrap(dev_evs[prog.device].props)['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
-      self.disasms[prog.name] = pc_to_asm = {}
-      for addr, info in llvm_disasm(arch, unwrap(prog.lib)).items():
-        pc_to_asm[unwrap(prog.base)+addr] = info
+      base = unwrap(prog.base)
+      self.disasms[prog.name] = asm = {base+addr:info for addr,info in llvm_disasm(arch, unwrap(prog.lib)).items()}
 
   def next_sqtt(self):
     x = next(self.sqtt_evs, None)
