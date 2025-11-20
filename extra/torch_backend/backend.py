@@ -76,6 +76,9 @@ view_ops = {
   "aten.alias": lambda self: self,
   }
 
+# torch 2.10 handles this natively
+if tuple(map(int, torch.__version__.split('.')[:2])) < (2, 10): view_ops.update({"aten.detach": Tensor.detach})
+
 for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(v))
 
 def _get_view_ops(view): return getattr(view, "_view_ops", [])
