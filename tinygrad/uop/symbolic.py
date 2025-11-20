@@ -410,8 +410,8 @@ sym = symbolic+pm_simplify_valid+PatternMatcher([
       if any(x.op in REMOVE_FROM_SINK_LIKE for x in root.src) else None),
   # remove END with empty NOOP
   (UPat(Ops.END, src=(UPat(Ops.NOOP, src=(), name="noop"),), allow_any_len=True), lambda noop:noop),
-  # # ** combine terms (opinionated) **
-  # (-1 * (UPat.var("x") + UPat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
-  # # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
-  # ((UPat.var("x", dtypes.index) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
+  # ** combine terms (opinionated) **
+  (-1 * (UPat.var("x") + UPat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
+  # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
+  ((UPat.var("x", dtypes.index) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
 ])

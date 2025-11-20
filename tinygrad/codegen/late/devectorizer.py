@@ -4,7 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace, Invalid, PtrDType
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, graph_rewrite, GroupOp, identity_element
-from tinygrad.uop.symbolic import uop_given_valid, parse_valid, sym, symbolic, invalid_gate
+from tinygrad.uop.symbolic import uop_given_valid, parse_valid, symbolic, invalid_gate
 from tinygrad.helpers import getenv, flatten, AMX, prod
 from tinygrad.renderer import Renderer
 
@@ -314,7 +314,7 @@ pm_reduce = PatternMatcher([
   # tensor core built in accumulate
   (UPat(Ops.WMMA, name="wmma") + UPat.var("add"),
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
-])+sym
+])+symbolic
 
 # add loads
 
