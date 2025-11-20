@@ -237,7 +237,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   (UPat.var("x", dtypes.index)<UPat.cvar("c", vec=False), lambda x,c: lt_folding(x, c.arg) if 0 < c.arg else None),
   (UPat.var("x", dtypes.index)*-1 < UPat.var("y")*-1, lambda x,y: y<x),
   # canonicalize a simplex with positive coefficients > 0
-  # not x < 1 -> X > 0
+  # not x < 1 means x > 0
   ((UPat.var("x", dtypes.index)<1).ne(True), lambda x: (newx<1).ne(True) if (newx:=canonicalize_simplex(x)) is not None else None),
   # a range mod its own upper bound is just the range
   (UPat(Ops.RANGE, src=UPat.var("end"), name="r")%UPat.var("end"), lambda r,end: r),
@@ -262,15 +262,17 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
 
 # ******** we take a small aside to "simplify_valid" to rewrite valids ********
 
-def parse_valid(valid:UOp) -> tuple[UOp, bool, int]|None:
+def parse_valid(v:UOp) -> tuple[UOp, bool, int]|None:
   # if it's X <= c, returns X, True, c
   # if it's X >= c, returns X, False, c
 
-  # (X < c).ne(True) -> X >= c
-  if valid.op is Ops.CMPNE and valid.src[1].op is Ops.CONST and valid.src[1].arg == 1 and \
-    (s0:=valid.src[0]).op is Ops.CMPLT and dtypes.is_int(s0.src[0].dtype): return s0.src[0], False, int(s0.src[1].vmin)
-  # X < c -> X <= c-1
-  if valid.op is Ops.CMPLT and dtypes.is_int(valid.src[0].dtype): return valid.src[0], True, int((valid.src[1]).vmax)-1
+  if v.op is Ops.CMPNE and v.src[1].op is Ops.CONST and v.src[1].arg == 1 and (s0:=v.src[0]).op is Ops.CMPLT and dtypes.is_int(s0.src[0].dtype):
+    # (X < c).ne(True) -> X >= c
+    return s0.src[0], False, int(s0.src[1].vmin)
+  if v.op is Ops.CMPLT and dtypes.is_int(v.src[0].dtype):
+    # X < c -> X <= c-1
+    return v.src[0], True, int((v.src[1]).vmax)-1
+    # NOTE: v.src[1].op can be Ops.VCONST
   return None
 
 def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
