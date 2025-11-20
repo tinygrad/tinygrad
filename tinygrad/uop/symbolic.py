@@ -368,7 +368,7 @@ pm_simplify_valid = PatternMatcher([
   # simplify valid
   (UPat(Ops.AND, name="valid"), simplify_valid),
   # TODO: this regressed openpilot, not having this regressed cifar
-  # (invalid_gate, lambda cond,x,i: cond.where(uop_given_valid(cond, x, try_simplex=False), i)),
+  (invalid_gate, lambda cond,x,i: cond.where(uop_given_valid(cond, x, try_simplex=False), i)),
 ])
 
 # this is symbolic 2.0

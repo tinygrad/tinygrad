@@ -42,7 +42,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
     sink = graph_rewrite(sink, pm_split_ranges+pm_flatten_range, ctx={}, name="split ranges")
 
     # symbolic (NOTE: this is a requirement for pm_simplify_ranges to be correct)
-    sink = graph_rewrite(sink, sym+pm_flatten_range, name="initial symbolic")
+    sink = graph_rewrite(sink, symbolic+pm_flatten_range, name="initial symbolic")
 
     # optimize (schedule) the AST
     sink = graph_rewrite(sink, pm_simplify_ranges, name="simplify ranges")
@@ -54,10 +54,10 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
     sink = apply_opts(sink, ren)
 
   # ** expander (expand_rewrite) **
-  sink = graph_rewrite(sink, sym+pm_move_where_on_load, name="postopt symbolic")
+  sink = graph_rewrite(sink, symbolic+pm_move_where_on_load, name="postopt symbolic")
 
   # expand
-  sink = graph_rewrite(sink, sym+pm_pre_expander+pm_group_for_reduce+expander, name="expander")
+  sink = graph_rewrite(sink, symbolic+pm_pre_expander+pm_group_for_reduce+expander, name="expander")
 
   # add locals
   sink = graph_rewrite(sink, pm_add_buffers_local+rangeify_codegen, ctx=itertools.count(0), name="add local buffers")
@@ -75,14 +75,14 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   sink = graph_rewrite(sink, pm_add_loads, name="** add loads (code)")
 
   # devectorize (TODO: does this need opts?)
-  if DEVECTORIZE >= 2: pm_devectorize = sym+load_store_folding+load_store_indexing
-  elif DEVECTORIZE: pm_devectorize = sym+devectorize+load_store_folding+correct_load_store+load_store_indexing
-  else: pm_devectorize = sym+load_store_folding+correct_load_store+load_store_indexing
+  if DEVECTORIZE >= 2: pm_devectorize = symbolic+load_store_folding+load_store_indexing
+  elif DEVECTORIZE: pm_devectorize = symbolic+devectorize+load_store_folding+correct_load_store+load_store_indexing
+  else: pm_devectorize = symbolic+load_store_folding+correct_load_store+load_store_indexing
   sink = graph_rewrite(sink, pm_devectorize, ctx=ren, name="devectorize")
 
   # lower the index dtype to a concrete int
   sink = graph_rewrite(sink, pm_lower_index_dtype+load_store_indexing, ctx=ren.device, name="lower all index dtypes")
-  sink = graph_rewrite(sink, symbolic, name="post index symbolic")
+  sink = graph_rewrite(sink, sym, name="post index symbolic")
 
   # optional pre matcher
   if ren.pre_matcher is not None: sink = graph_rewrite(sink, ren.pre_matcher, name="pre_matcher")
