@@ -32,6 +32,7 @@ def CEnum(typ: type[ctypes._SimpleCData]):
 
     def __eq__(self, other): return self.value == other
     def __repr__(self): return self.get(self) if self.value in self.__class__._val_to_name_ else str(self.value)
+    def __hash__(self): return hash(self.value)
 
   return _CEnum
 
@@ -59,7 +60,9 @@ else:
         mask = (1 << (sz:=ctypes.sizeof(ty)*8 if bf == 0 else bf)) - 1
         def fget(self, mask, off, ty): return ((int.from_bytes(self._data, sys.byteorder)>>off)&mask if issubclass(ty, _SimpleCData) else
                                                ty.from_buffer(memoryview(self._data)[(st:=off//8):st+ctypes.sizeof(ty)]))
-        def fset(self, val, mask, off): self._data[:] = (((int.from_bytes(self._data, sys.byteorder) & ~(mask<<off))|((val&mask)<<off))
+        def fset(self, val, mask, off):
+          if val.__class__ is not int: val = int.from_bytes(val, sys.byteorder)
+          self._data[:] = (((int.from_bytes(self._data, sys.byteorder) & ~(mask<<off))|((val&mask)<<off))
                                                               .to_bytes(len(self._data), sys.byteorder))
         setattr(cls, nm, property(functools.partial(fget, mask=mask, off=offset, ty=ty), functools.partial(fset, mask=mask, off=offset)))
         offset += sz
