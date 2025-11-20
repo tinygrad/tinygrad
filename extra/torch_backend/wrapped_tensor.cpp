@@ -3,7 +3,6 @@
 #include <torch/extension.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <ATen/OpaqueTensorImpl.h>
-#include <torch/library.h>
 
 // register guard
 namespace at {
@@ -130,26 +129,6 @@ py::object unwrap_tensor(const at::Tensor &tensor) {
   auto* opaque_impl = static_cast<at::TinyOpaqueTensorImpl<std::shared_ptr<c10::SafePyObject>>*>(impl);
   std::shared_ptr<c10::SafePyObject> tiny = opaque_impl->opaque_handle();
   return py::reinterpret_borrow<py::object>(tiny->ptr(getPyInterpreter()));
-}
-
-at::Tensor detach_tiny(const at::Tensor& self) {
-  py::gil_scoped_acquire gil;
-  py::object py_obj = unwrap_tensor(self);
-  py::object backend = py::module::import("extra.torch_backend.backend");
-  py::object ret = backend.attr("detach_unwrapped")(py_obj);
-  std::vector<int64_t> sizes = ret.attr("shape").cast<std::vector<int64_t>>();
-  std::vector<int64_t> strides = ret.attr("_strides").cast<std::vector<int64_t>>();
-  int64_t storage_offset = ret.attr("_storage_offset").cast<int64_t>();
-  return at::detail::make_tensor<at::TinyOpaqueTensorImpl<std::shared_ptr<c10::SafePyObject>>>(
-    at::DispatchKeySet(at::DispatchKey::PrivateUse1),
-    c10::scalarTypeToTypeMeta(self.scalar_type()),
-    self.device(),
-    std::make_shared<c10::SafePyObject>(ret.release().ptr(), getPyInterpreter()),
-    sizes, strides, storage_offset);
-}
-
-TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
-  m.impl("detach", &detach_tiny);
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {

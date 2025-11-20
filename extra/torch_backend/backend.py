@@ -25,12 +25,10 @@ def calculate_storage_offset(x: Tensor) -> int:
       u_strides = strides_for_shape(u.src[0].shape)
       for i, (start, _) in enumerate(u.marg): offset += start * u_strides[i]
   return offset
-def update_strides_offset(x: Tensor) -> Tensor:
+def wrap(x: Tensor) -> torch.Tensor:
   x._strides = strides_for_shape(x.shape) # always recalculate
   if (not hasattr(x, '_storage_offset')) or (not x.uop.is_realized): x._storage_offset = calculate_storage_offset(x)
-  return x
-def detach_unwrapped(x: Tensor) -> Tensor: return update_strides_offset(x.detach())
-def wrap(x: Tensor) -> torch.Tensor: return mod.wrap(update_strides_offset(x), _to_torch_dtype(x.dtype), _to_torch_device(x.device).index)
+  return mod.wrap(x, _to_torch_dtype(x.dtype), _to_torch_device(x.device).index)
 def unwrap(x:torch.Tensor) -> Tensor:
   assert isinstance(x, torch.Tensor), f"x isn't {type(x)}"
   return mod.unwrap(x)
@@ -73,7 +71,6 @@ view_ops = {
   "aten.transpose.int": Tensor.transpose,
   "aten.squeeze.dim": Tensor.squeeze,
   "aten.unsqueeze": Tensor.unsqueeze,
-  #"aten.detach": Tensor.detach,
   "aten.select.int": lambda self, dim, idx: self[(slice(None),) * (dim%self.ndim) + (idx,)],
   "aten.permute": Tensor.permute,
   "aten.alias": lambda self: self,
