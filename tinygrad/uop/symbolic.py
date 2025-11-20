@@ -268,11 +268,10 @@ def parse_valid(v:UOp) -> tuple[UOp, bool, int]|None:
 
   if v.op is Ops.CMPNE and v.src[1].op is Ops.CONST and v.src[1].arg == 1 and (s0:=v.src[0]).op is Ops.CMPLT and dtypes.is_int(s0.src[0].dtype):
     # (X < c).ne(True) -> X >= c
-    if s0.src[1].op is Ops.CONST: return s0.src[0], False, int(s0.src[1].vmin)
-    # NOTE: s0.src[1].op can be Ops.VCONST
+    return s0.src[0], False, int(s0.src[1].vmin)
   if v.op is Ops.CMPLT and dtypes.is_int(v.src[0].dtype):
     # X < c -> X <= c-1
-    if v.src[1].op is Ops.CONST: return v.src[0], True, int((v.src[1]).vmax)-1
+    return v.src[0], True, int((v.src[1]).vmax)-1
     # NOTE: v.src[1].op can be Ops.VCONST
   return None
 
