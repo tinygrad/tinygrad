@@ -707,7 +707,7 @@ async function main() {
     ret = cache[ckey];
   }
   // ** Disassembly view
-  if (ckey.startsWith("/render")) {
+  if (!ckey.startsWith("/rewrites")) {
     if (!(ckey in cache)) cache[ckey] = ret = await fetchValue(ckey);
     if (ret instanceof ArrayBuffer) return renderProfiler(ckey, "clk"); // cycles on the x axis
     displaySelection("#custom");

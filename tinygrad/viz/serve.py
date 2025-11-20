@@ -25,18 +25,25 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
 
 # VIZ API
 
+
+# A step is a lightweight descriptor for a trace entry
+# Includes a name, metadata and a URL path for fetching the full data
+
+def create_step(name:str, query:tuple[str, int, int], data=None, depth:int=0, **kwargs) -> dict:
+  return {"name":name, "query":f"{query[0]}?ctx={query[1]}&step={query[2]}", "data":data, "depth":depth, **kwargs}
+
 # ** list all saved rewrites
 
 ref_map:dict[Any, int] = {}
 def get_rewrites(t:RewriteTrace) -> list[dict]:
   ret = []
   for i,(k,v) in enumerate(zip(t.keys, t.rewrites)):
-    steps = [{"name":s.name, "loc":s.loc, "match_count":len(s.matches), "code_line":printable(s.loc), "trace":k.tb if j == 0 else None,
-              "query":f"/ctxs?ctx={i}&idx={j}", "depth":s.depth} for j,s in enumerate(v)]
+    steps = [create_step(s.name, ("/rewrites", i, j), loc=s.loc, match_count=len(s.matches), code_line=printable(s.loc), trace=k.tb if j==0 else None,
+                         depth=s.depth) for j,s in enumerate(v)]
     if isinstance(k.ret, ProgramSpec):
-      steps.append({"name":"View UOp List", "query":f"/render?ctx={i}&fmt=uops", "depth":0})
-      steps.append({"name":"View Program", "query":f"/render?ctx={i}&fmt=src", "depth":0})
-      steps.append({"name":"View Disassembly", "query":f"/render?ctx={i}&fmt=asm", "depth":0})
+      steps.append(create_step("View UOp List", ("/uops", i, len(steps)), k.ret))
+      steps.append(create_step("View Program", ("/code", i, len(steps)), k.ret))
+      steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), k.ret))
     for key in k.keys: ref_map[key] = i
     ret.append({"name":k.display_name, "steps":steps})
   return ret
@@ -219,8 +226,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
   for name,waves in rctx.inst_execs.items():
     events:list[ProfileEvent] = []
     prg = trace.keys[r].ret if (r:=ref_map.get(name)) else None
-    steps.append(first:={"name":prg.name if prg is not None else name, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters", "depth":0})
-
+    steps.append(first:=create_step(prg.name if prg is not None else name, ("/counters", len(ctxs), len(steps))))
     # Idle:     The total time gap between the completion of previous instruction and the beginning of the current instruction.
     #           The idle time can be caused by:
     #             * Arbiter loss
@@ -237,8 +243,8 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
         prev_instr = max(prev_instr, e.time + e.dur)
       summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SIMD", "value":w.simd}, {"label":"CU", "value":w.cu},
                  {"label":"SE", "value":w.se}]
-      steps.append({"name":wave_name, "depth":1, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
-                    "data":{"rows":rows, "cols":["Instruction", "Clk", "Idle", "Duration", "Stall", "Type"], "summary":summary}})
+      steps.append(create_step(wave_name, ("/counters", len(ctxs), len(steps)), depth=2,
+                               data={"rows":rows, "cols":["Instruction", "Clk", "Idle", "Duration", "Stall", "Type"], "summary":summary}))
     events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+events
     first["data"] = {"value":get_profile(events), "content_type":"application/octet-stream"}
   ctxs.append({"name":"Counters", "steps":steps})
@@ -308,19 +314,18 @@ def get_stdout(f: Callable) -> str:
   return buf.getvalue()
 
 def get_render(i:int, j:int, fmt:str) -> dict:
-  if fmt == "counters": return ctxs[i]["steps"][j]["data"]
-  if not isinstance(prg:=trace.keys[i].ret, ProgramSpec): return {}
-  if fmt == "uops": return {"src":get_stdout(lambda: print_uops(prg.uops or [])), "lang":"txt"}
-  if fmt == "src": return {"src":prg.src, "lang":"cpp"}
-  compiler = Device[prg.device].compiler
-  disasm_str = get_stdout(lambda: compiler.disassemble(compiler.compile(prg.src)))
-  from tinygrad.runtime.support.compiler_cpu import llvm, LLVMCompiler
-  if isinstance(compiler, LLVMCompiler):
-    mtriple = ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode()
-    mcpu = ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode()
-    ret = get_llvm_mca(disasm_str, mtriple, mcpu)
-  else: ret = {"src":disasm_str, "lang":"x86asm"}
-  return ret
+  data = ctxs[i]["steps"][j]["data"]
+  if fmt == "uops": return {"src":get_stdout(lambda: print_uops(data.uops or [])), "lang":"txt"}
+  if fmt == "code": return {"src":data.src, "lang":"cpp"}
+  if fmt == "asm":
+    compiler = Device[data.device].compiler
+    disasm_str = get_stdout(lambda: compiler.disassemble(compiler.compile(data.src)))
+    from tinygrad.runtime.support.compiler_cpu import llvm, LLVMCompiler
+    if isinstance(compiler, LLVMCompiler):
+      return get_llvm_mca(disasm_str, ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode(),
+                          ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode())
+    return {"src":disasm_str, "lang":"x86asm"}
+  return data
 
 # ** HTTP server
 
@@ -339,13 +344,14 @@ class Handler(BaseHTTPRequestHandler):
         if url.path.endswith(".css"): content_type = "text/css"
       except FileNotFoundError: status_code = 404
     elif (query:=parse_qs(url.query)):
-      if url.path == "/render":
-        render_src = get_render(get_int(query, "ctx"), get_int(query, "step"), query["fmt"][0])
+      i, j = get_int(query, "ctx"), get_int(query, "step")
+      if (fmt:=url.path.lstrip("/")) == "rewrites":
+        try: return self.stream_json(get_full_rewrite(trace.rewrites[i][j], i))
+        except (KeyError, IndexError): status_code = 404
+      else:
+        render_src = get_render(i, j, fmt)
         if "content_type" in render_src: ret, content_type = render_src["value"], render_src["content_type"]
         else: ret, content_type = json.dumps(render_src).encode(), "application/json"
-      else:
-        try: return self.stream_json(get_full_rewrite(trace.rewrites[i:=get_int(query, "ctx")][get_int(query, "idx")], i))
-        except (KeyError, IndexError): status_code = 404
     elif url.path == "/ctxs":
       lst = [{**c, "steps":[{k:v for k, v in s.items() if k != "data"} for s in c["steps"]]} for c in ctxs]
       ret, content_type = json.dumps(lst).encode(), "application/json"
