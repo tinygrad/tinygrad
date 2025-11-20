@@ -64,14 +64,17 @@ nvcmds = {getattr(nv_gpu, x):(x, getattr(nv_gpu, "struct_"+x+"_PARAMS", getattr(
           x.startswith("NV") and x[6:].startswith("_CTRL_") and isinstance(getattr(nv_gpu, x), int)}
 
 def get_classes():
-  hdrpy = (pathlib.Path(__file__).parent.parent.parent / "tinygrad/runtime/autogen/nv_570.py").read_text()
-  clss = re.search(r'NV01_ROOT.*?NV_SEMAPHORE_SURFACE = \(0x000000da\) # macro', hdrpy, re.DOTALL).group()
-  pattern = r'([0-9a-zA-Z_]*) = +\((0x[0-9a-fA-F]+)\)'
-  matches = re.findall(pattern, clss, re.MULTILINE)
-  return {int(num, base=16):name for name, num in matches}
+  res = {}
+  known_classes = {"NV01_DEVICE_0", "NV01_ROOT", "NV1_MEMORY_SYSTEM", "NV01_MEMORY_VIRTUAL", "NV1_MEMORY_USER", "NV50_MEMORY_VIRTUAL", "NV_FERMI_VASPACE_A",
+                   "NV20_SUBDEVICE_0"}
+  for nm,val in nv_gpu.__dict__.items():
+    if not isinstance(val, int): continue
+    if 0x3000 < val < 0xffff: res[val] = nm
+    if nm in known_classes: res[val] = nm
+  return res
 nvclasses = get_classes()
 nvuvms = {getattr(nv_gpu, x):x for x in dir(nv_gpu) if x.startswith("UVM_") and nv_gpu.__dict__.get(x+"_PARAMS")}
-nvqcmds = {int(getattr(nv_gpu, x)):x for x in dir(nv_gpu) if x[:7] in {"NVC6C0_", "NVC56F_", "NVC6B5_"} and isinstance(getattr(nv_gpu, x), int)}
+nvqcmds = {int(getattr(nv_gpu, x)):x for x in dir(nv_gpu) if x[:7] in {"NVC9B0_", "NVC6C0_", "NVC56F_", "NVC6B5_"} and isinstance(getattr(nv_gpu, x), int)}
 
 global_ioctl_id = 0
 gpus_user_modes = []

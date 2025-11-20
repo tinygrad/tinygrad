@@ -36,7 +36,9 @@ def trunc_log(x):
   logging.info("\n".join(lines))
 
 # user config
-SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")
+# NOTE: process replay is slow so it's now disabled by default. add [pr] to enable it
+#SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")
+SKIP_PROCESS_REPLAY = not ASSERT_DIFF and not ((k:="[p]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", ""))
 if REF == "master": SKIP_PROCESS_REPLAY = True
 class ProcessReplayWarning(Warning): pass
 

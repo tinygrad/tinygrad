@@ -7,11 +7,9 @@ os.environ["AMD_LLVM"] = "0"
 
 import unittest
 import sys, contextlib
-from tinygrad import Tensor
-from tinygrad.dtype import dtypes
-from tinygrad.renderer import ProgramSpec
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, AddrSpace
-from tinygrad.engine.realize import CompiledRunner
+from tinygrad import Tensor, dtypes
+from tinygrad.helpers import getenv
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.device import Device, ProfileDeviceEvent
 
 from extra.sqtt.roc import decode, WaveExec
@@ -75,7 +73,6 @@ class TestTiming(unittest.TestCase):
     inp = Tensor([-2.0]).realize()
     with save_sqtt() as sqtt:
       Tensor.custom_kernel(out, inp, fxn=custom_vrcp)[0].realize()
-
     wave = list(sqtt.values())[0][0]
     for i in range(len(wave.insts)):
       if wave.insts[i].inst.startswith("global_store"):
@@ -102,7 +99,7 @@ class TestTiming(unittest.TestCase):
       assert data0.dtype.base == dtypes.ulong
       op = custom("unsigned long long t0 = __builtin_readcyclecounter();")
       op = custom(f"__builtin_amdgcn_s_sleep({n});", op)
-      op = custom(f"unsigned long long t1 = __builtin_readcyclecounter();", op)
+      op = custom("unsigned long long t1 = __builtin_readcyclecounter();", op)
       op = custom(f"data0_{data0.size}[0] = t1 - t0;", op)
       return UOp.sink(data0, op, arg=KernelInfo(name=f"sleep_{n}"))
     diff_hw_reg = Tensor.empty(1, dtype=dtypes.ulong)
@@ -119,6 +116,18 @@ class TestTiming(unittest.TestCase):
     wave = list(sqtt.values())[0][0]
     for e in wave.insts:
       print(f"{e.inst} {e.dur=} {e.stall=}")
+
+  def test_wave_sched(self):
+    num_waves = getenv("NUM_WAVES", 16)
+    num_wgps = getenv("NUM_WGPS", 2)
+    num_vgpr = getenv("NUM_VGPR", 256)
+    with save_sqtt() as sqtt:
+      # 1 cycle decode, no stall
+      asm_kernel([f"v_mov_b32_e32 v{i} {i}" for i in range(num_vgpr)], l=32*num_waves, g=num_wgps).realize()
+    waves = list(sqtt.values())[0]
+    print(len(waves), "waves decoded")
+    for w in waves:
+      print(f"{w.wave_id:<2} {w.simd=} {w.cu=} {w.se=} @ clk {w.begin_time}")
 
 if __name__ == "__main__":
   unittest.main()

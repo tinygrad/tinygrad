@@ -9,7 +9,7 @@ import numpy as np
 from extra.thunder.tiny.tk import WARP_THREADS
 from extra.thunder.tiny.tk.kernel import Kernel
 
-@unittest.skipUnless(Device.DEFAULT in ["CUDA", "NV"], "only cuda")
+@unittest.skipIf(CI and Device.DEFAULT not in ["CUDA", "NV"], "only cuda")
 @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "no ptx")
 class TestTK(unittest.TestCase):
   @unittest.skipIf(CI, "no wmma in ci")

@@ -1,4 +1,5 @@
 import unittest, time
+from tinygrad.helpers import Profiling
 from tinygrad.uop.ops import UOp
 from tinygrad.dtype import dtypes
 
@@ -37,6 +38,14 @@ class TestMicrobenchmarks(unittest.TestCase):
   def test_uop_simplify(self):
     a = UOp.const(dtypes.int, 2)
     for _ in range(N): (a+a).simplify()
+
+class TestMicroprofile(unittest.TestCase):
+  def test_uop_simplify_complex(self):
+    x = UOp.variable("x", 0, 10)
+    y = UOp.variable("y", 0, 10)
+    expr = (x*2)+5+(x*4)+(y*2)+y
+    with Profiling():
+      for _ in range(1000): expr.simplify()
 
 if __name__ == '__main__':
   unittest.main()

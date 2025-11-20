@@ -517,7 +517,7 @@ class TestUOpStr(unittest.TestCase):
 
 class TestUPatHelpers(unittest.TestCase):
   def test_location(self):
-    self.assertEqual(sym.patterns[-1][0].location[0].replace("\\", "/").split("/")[-1], "math.py")
+    self.assertEqual(sym.patterns[-1][0].location[0].replace("\\", "/").split("/")[-1], "symbolic.py")
     self.assertEqual(shared_spec.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "spec.py")
     test_upat = UPat(Ops.CONST, dtypes.bool)
     self.assertEqual(test_upat.location[0].split("/")[-1], __file__.replace("\\", "/").split("/")[-1])

@@ -80,7 +80,11 @@ class Kernel(AbstractContextManager):
     rngs = []
     while self.range_stack: rngs.append(self.range_stack.pop(0)._rng)
 
-    return self.store_stack.pop()[0]._uop.end(*rngs).sink(arg=KernelInfo(opts_to_apply=())).simplify()
+    last_store = self.store_stack.pop()[0]
+    if hasattr(last_store, '_uop'): uop = last_store._uop
+    else: uop = last_store
+
+    return uop.end(*rngs).sink(arg=KernelInfo(opts_to_apply=())).simplify()
 
   def endrange(self):
     last_store = self.store_stack.pop()
