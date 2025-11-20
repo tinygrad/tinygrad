@@ -60,9 +60,11 @@ t.realize()
 # now when we look at the uop, it's changed
 print(t.uop)
 """
-UOp(Ops.BUFFER, dtypes.int, arg=4, src=(
-  UOp(Ops.UNIQUE, dtypes.void, arg=1, src=()),
-  UOp(Ops.DEVICE, dtypes.void, arg='METAL', src=()),))
+UOp(Ops.RESHAPE, dtypes.int, arg=None, src=(
+  UOp(Ops.BUFFER, dtypes.int, arg=4, src=(
+    UOp(Ops.UNIQUE, dtypes.void, arg=1, src=()),
+    UOp(Ops.DEVICE, dtypes.void, arg='METAL', src=()),)),
+  UOp(Ops.CONST, dtypes.index, arg=4, src=()),))
 """
 # the copy was actually run, and now the "uop" of the Tensor is just a BUFFER
 # if you run this script with DEBUG=2 in the environment, you can see the copy happen
@@ -74,14 +76,17 @@ t_times_2 = t * 2
 print(t_times_2.uop)
 """
 UOp(Ops.MUL, dtypes.int, arg=None, src=(
-  UOp(Ops.BUFFER, dtypes.int, arg=4, src=(
-    UOp(Ops.UNIQUE, dtypes.void, arg=1, src=()),
-    x2:=UOp(Ops.DEVICE, dtypes.void, arg='METAL', src=()),)),
-  UOp(Ops.EXPAND, dtypes.int, arg=(4,), src=(
-    UOp(Ops.RESHAPE, dtypes.int, arg=(1,), src=(
+  UOp(Ops.RESHAPE, dtypes.int, arg=None, src=(
+    UOp(Ops.BUFFER, dtypes.int, arg=4, src=(
+      UOp(Ops.UNIQUE, dtypes.void, arg=1, src=()),
+      x3:=UOp(Ops.DEVICE, dtypes.void, arg='METAL', src=()),)),
+    x4:=UOp(Ops.CONST, dtypes.index, arg=4, src=()),)),
+  UOp(Ops.EXPAND, dtypes.int, arg=None, src=(
+    UOp(Ops.RESHAPE, dtypes.int, arg=None, src=(
       UOp(Ops.CONST, dtypes.int, arg=2, src=(
-        UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),)), src=(
-           x2,)),)),)),)),))
+         x3,)),
+      UOp(Ops.CONST, dtypes.index, arg=1, src=()),)),
+     x4,)),))
 """
 # the BUFFER from above is being multiplied by a CONST 2
 # it's RESHAPEd and EXPANDed to broadcast the CONST to the BUFFER
@@ -102,9 +107,11 @@ assert t_times_4_try_1 is not t_times_4_try_2
 t_times_4_try_1.realize()
 print(t_times_4_try_2.uop)
 """
-UOp(Ops.BUFFER, dtypes.int, arg=4, src=(
-  UOp(Ops.UNIQUE, dtypes.void, arg=4, src=()),
-  UOp(Ops.DEVICE, dtypes.void, arg='METAL', src=()),))
+UOp(Ops.RESHAPE, dtypes.int, arg=None, src=(
+  UOp(Ops.BUFFER, dtypes.int, arg=4, src=(
+    UOp(Ops.UNIQUE, dtypes.void, arg=3, src=()),
+    UOp(Ops.DEVICE, dtypes.void, arg='METAL', src=()),)),
+  UOp(Ops.CONST, dtypes.index, arg=4, src=()),))
 """
 # ... `t_times_4_try_2` also becomes the same BUFFER
 assert t_times_4_try_1.uop is t_times_4_try_2.uop
@@ -148,18 +155,23 @@ print(t_plus_3_plus_4.uop)
 """
 UOp(Ops.ADD, dtypes.int, arg=None, src=(
   UOp(Ops.ADD, dtypes.int, arg=None, src=(
-    UOp(Ops.BUFFER, dtypes.int, arg=4, src=(
-      UOp(Ops.UNIQUE, dtypes.void, arg=1, src=()),
-      x3:=UOp(Ops.DEVICE, dtypes.void, arg='CPU', src=()),)),
-    UOp(Ops.EXPAND, dtypes.int, arg=(4,), src=(
-      UOp(Ops.RESHAPE, dtypes.int, arg=(1,), src=(
+    UOp(Ops.COPY, dtypes.int, arg=None, src=(
+      UOp(Ops.BUFFER, dtypes.int, arg=4, src=(
+        UOp(Ops.UNIQUE, dtypes.void, arg=7, src=()),
+        UOp(Ops.DEVICE, dtypes.void, arg='PYTHON', src=()),)),
+      x5:=UOp(Ops.DEVICE, dtypes.void, arg='METAL', src=()),)),
+    UOp(Ops.EXPAND, dtypes.int, arg=None, src=(
+      UOp(Ops.RESHAPE, dtypes.int, arg=None, src=(
         UOp(Ops.CONST, dtypes.int, arg=3, src=(
-          x7:=UOp(Ops.VIEW, dtypes.void, arg=ShapeTracker(views=(View(shape=(), strides=(), offset=0, mask=None, contiguous=True),)), src=(
-             x3,)),)),)),)),)),
-  UOp(Ops.EXPAND, dtypes.int, arg=(4,), src=(
-    UOp(Ops.RESHAPE, dtypes.int, arg=(1,), src=(
+           x5,)),
+        x9:=UOp(Ops.CONST, dtypes.index, arg=1, src=()),)),
+      x10:=UOp(Ops.CONST, dtypes.index, arg=4, src=()),)),)),
+  UOp(Ops.EXPAND, dtypes.int, arg=None, src=(
+    UOp(Ops.RESHAPE, dtypes.int, arg=None, src=(
       UOp(Ops.CONST, dtypes.int, arg=4, src=(
-         x7,)),)),)),))
+         x5,)),
+       x9,)),
+     x10,)),))
 """
 # you can see it's adding both 3 and 4
 
