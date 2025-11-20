@@ -4,8 +4,8 @@ assert sys.platform != 'win32'
 from types import SimpleNamespace
 from typing import Any, cast
 from tinygrad.device import BufferSpec
-from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, BumpAllocator
-from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
+from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, CLikeArgsState
+from tinygrad.runtime.support.hcq import BumpAllocator, FileIOInterface, MMIOInterface
 from tinygrad.runtime.autogen import kgsl, adreno
 from tinygrad.runtime.ops_cl import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
@@ -202,45 +202,28 @@ class QCOMArgsState(HCQArgsState):
 
     for i, v in enumerate(vals): self.bind_sints_to_buf(v, buf=self.buf, fmt='I', offset=self.args_info[i].offset)
 
+class IR3ArgsState(HCQArgsState):
+  def __init__(self, buf:HCQBuffer, prg:QCOMProgram, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=()):
+    super().__init__(buf, prg, bufs, vals=vals)
+    to_mv(self.buf.va_addr + prg.imm_off, len(prg.imm_vals))[:] = prg.imm_vals
+
+    self.bind_sints_to_buf(*[b.va_addr for b in bufs], buf=self.buf, fmt='Q', offset=prg.buf_off)
+    self.bind_sints_to_buf(*vals, buf=self.buf, fmt='I', offset=prg.buf_off + len(bufs) * 8)
+
 class QCOMProgram(HCQProgram):
   def __init__(self, dev: QCOMDevice, name: str, lib: bytes):
     self.dev: QCOMDevice = dev
     self.name, self.lib, self.NIR = name, lib, isinstance(dev.compiler, IR3Compiler)
 
     if self.NIR:
-      v, cs, imm_vals, self.image = IR3Compiler.unpack_lib(lib)
-      self.image_size = v.info.size
+      v, cs, self.imm_vals, self.image = IR3Compiler.unpack_lib(lib)
+      self.prg_offset, self.brnchstck, self.image_size, self.pvtmem, self.shmem = 0, v.branchstack, v.info.size, v.pvtmem_size, v.shared_size
 
-      self.prg_offset, self.brnchstck = 0, v.branchstack
-      self.pvtmem, self.shmem = v.pvtmem_size, v.shared_size
+      self.wgid, self.lid = v.cs.work_group_id, v.cs.local_invocation_id # register ids
+      self.buf_off, self.imm_off = cs.ubo_state.range[0].offset, cs.allocs.max_const_offset_vec4 * 16
 
-      # Fill up constants and buffers info
-      self.buf_info = []
-
-      # Collect sampler info.
-      self.samp_cnt = v.num_samp
-      assert self.samp_cnt <= 1, "Up to one sampler supported"
-      if self.samp_cnt:
-        self.samp_cnt += 1
-        self.samplers = [qreg.a6xx_tex_samp_0(wrap_s=(clamp_mode:=adreno.A6XX_TEX_CLAMP_TO_BORDER), wrap_t=clamp_mode, wrap_r=clamp_mode),
-                         qreg.a6xx_tex_samp_1(unnorm_coords=True, cubemapseamlessfiltoff=True), 0, 0, 0, 0, 0, 0]
-
-      self.wgid, self.lid = v.cs.work_group_id, v.cs.local_invocation_id
-      self.consts_info = [(imm_vals, cs.allocs.max_const_offset_vec4 * 16, len(imm_vals))]
-      for i in range(cs.ubo_state.num_enabled):
-        rng = cs.ubo_state.range[i]
-        self.buf_info.extend([SimpleNamespace(offset=rng.offset + j, type=BUFTYPE_BUF) for j in range(rng.start, rng.end, 8)])
-
-      # Setting correct offsets to textures/ibos.
-      self.tex_cnt, self.ibo_cnt = sum(x.type is BUFTYPE_TEX for x in self.buf_info), sum(x.type is BUFTYPE_IBO for x in self.buf_info)
-      self.ibo_off, self.tex_off, self.samp_off = 2048, 2048 + 0x40 * self.ibo_cnt, 2048 + 0x40 * self.tex_cnt + 0x40 * self.ibo_cnt
-      cur_ibo_off, cur_tex_off = self.ibo_off, self.tex_off
-      for x in self.buf_info:
-        if x.type is BUFTYPE_IBO: x.offset, cur_ibo_off = cur_ibo_off, cur_ibo_off + 0x40
-        elif x.type is BUFTYPE_TEX: x.offset, cur_tex_off = cur_tex_off, cur_tex_off + 0x40
-
-      # Registers info
-      self.fregs, self.hregs, self.mergedregs, self.early_preamble= v.info.max_reg + 1, v.info.max_half_reg + 1, v.mergedregs, v.early_preamble
+      self.samp_cnt, self.tex_cnt, self.ibo_cnt = 0, 0, 0 # TODO
+      self.fregs, self.hregs = v.info.max_reg + 1, v.info.max_half_reg + 1
     else:
       self._parse_lib()
 
@@ -255,7 +238,7 @@ class QCOMProgram(HCQProgram):
     dev._ensure_stack_size(self.hw_stack_offset * 4)
 
     kernargs_alloc_size = round_up(2048 + (self.tex_cnt + self.ibo_cnt) * 0x40 + self.samp_cnt * 0x10, 0x100)
-    super().__init__(QCOMArgsState, self.dev, self.name, kernargs_alloc_size=kernargs_alloc_size)
+    super().__init__(IR3ArgsState if self.NIR else QCOMArgsState, self.dev, self.name, kernargs_alloc_size=kernargs_alloc_size)
     weakref.finalize(self, self._fini, self.dev, self.lib_gpu, buf_spec)
 
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
