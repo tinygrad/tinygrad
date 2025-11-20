@@ -156,7 +156,7 @@ function formatMicroseconds(ts, dur=ts) {
 }
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
-const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#1d2e62", "#63b0cd"],
+const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["get_program","#1d2e62"],["compile","#63b0cd"],["DEFAULT","#354f52"]]),
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
   BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SIMD:["#3600f0"],
   CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
@@ -238,6 +238,7 @@ async function renderProfiler(path, unit) {
     const k = textDecoder.decode(new Uint8Array(buf, offset, nameLen)); offset += nameLen;
     const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px");
     const { y:baseY, height:baseHeight } = rect(div.node());
+    const colors = colorScheme[k.split(":")[0]] ?? colorScheme.DEFAULT;
     const offsetY = baseY-canvasTop+padding/2;
     const shapes = [], visible = [];
     const eventType = u8(), eventsLen = u32();
@@ -256,7 +257,10 @@ async function renderProfiler(path, unit) {
           levels.push(et);
         } else levels[depth] = et;
         if (depth === 0) colorKey = e.name.split(" ")[0];
-        if (!colorMap.has(colorKey)) colorMap.set(colorKey, d3.rgb(cycleColors(colorScheme[k.split(":")[0]] ?? colorScheme.DEFAULT, colorMap.size)));
+        if (!colorMap.has(colorKey)) {
+          const color = colors instanceof Map ? (colors.get(colorKey) || colors.get("DEFAULT")) : cycleColors(colors, colorMap.size);
+          colorMap.set(colorKey, d3.rgb(color));
+        }
         const base = colorMap.get(colorKey), s = Math.min(Math.pow(1/0.7, depth), 240 / Math.max(base.r, base.g, base.b));
         const fillColor = d3.rgb(base.r*s, base.g*s, base.b*s).toString();
         const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
