@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io, struct
-import subprocess, ctypes, pathlib, traceback
+import ctypes, pathlib, traceback
 from contextlib import redirect_stdout, redirect_stderr
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, TypeVar, Generator, Callable
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
-from tinygrad.helpers import printable
+from tinygrad.helpers import printable, system
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, pyrender
 from tinygrad.uop.ops import print_uops, range_start, multirange_str
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device
@@ -287,9 +287,9 @@ def get_profile(profile:list[ProfileEvent]) -> bytes|None:
 # ** Assembly analyzers
 
 def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
-  target_args = [f"-mtriple={mtriple}", f"-mcpu={mcpu}"]
+  target_args = f"-mtriple={mtriple} -mcpu={mcpu}"
   # disassembly output can include headers / metadata, skip if llvm-mca can't parse those lines
-  data = json.loads(subprocess.check_output(["llvm-mca","-skip-unsupported-instructions=parse-failure","--json","-"]+target_args, input=asm.encode()))
+  data = json.loads(system("llvm-mca -skip-unsupported-instructions=parse-failure --json -"+target_args, input=asm.encode()))
   cr = data["CodeRegions"][0]
   resource_labels = [repr(x)[1:-1] for x in data["TargetInfo"]["Resources"]]
   rows:list = [[instr] for instr in cr["Instructions"]]
