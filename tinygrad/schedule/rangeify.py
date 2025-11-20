@@ -123,13 +123,16 @@ winograd_At = [[1, 1, 1, 1, 1, 0], [0, 1, -1, 2, -2, 0], [0, 1, 1, 4, 4, 0], [0,
 def winograd_kron(source, matrix, outer_axes, inner_axes, device, ctx):
   inner_shape = [ax.vmax+1 for ax in inner_axes]
   result_axes = [ctx.new_range(len(matrix), AxisType.LOOP) for _ in range(len(inner_shape))]
+
+  # Planar layout: use fresh loop axes for outer dimensions
   new_outer_axes = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in outer_axes]
 
   # Force bufferization of unbufferized sources to prevent inlining
+  # Bufferize with original axes [outer, inner] - pattern matcher will substitute with new axes
   if source.op not in {Ops.BUFFER, Ops.BUFFERIZE}:
-    source = source.bufferize(*(inner_axes + outer_axes), arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
+    source = source.bufferize(*(tuple(outer_axes) + tuple(inner_axes)), arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
 
-  # Precompute matrix constants per dimension
+  # Precompute matrix constants per dimension (factor out conditionals)
   matrix_constants = []
   for dim in range(len(inner_shape)):
     dim_constants = []
@@ -139,20 +142,26 @@ def winograd_kron(source, matrix, outer_axes, inner_axes, device, ctx):
       dim_constants.append(row_constants)
     matrix_constants.append(dim_constants)
 
-  # Build result: sum over all input positions of (matrix_factor * input_value)
+  # Build sum of products (inline expansion, but with factored constants)
+  from itertools import product
   terms = []
   for in_indices in product(*[range(inner_shape[d]) for d in range(len(inner_shape))]):
-    # Coalesced indexing: [inner, outer] layout
-    input_val = source.index(*[UOp.const(dtypes.index, i) for i in in_indices], *new_outer_axes)
+    # Index source with new outer axes (planar) and concrete inner indices
+    input_val = source.index(*new_outer_axes, *[UOp.const(dtypes.index, i) for i in in_indices])
+
+    # Build matrix multiplication factor for this input position
     matrix_factor = UOp.const(dtypes.float, 1.0)
     for dim in range(len(inner_shape)):
+      # Sum matrix elements for this dimension (factored: computed once per output position)
       dim_sum = sum(matrix_constants[dim][out_idx][in_indices[dim]] for out_idx in range(len(matrix)))
       matrix_factor = matrix_factor * dim_sum
+
     terms.append(matrix_factor * input_val)
 
-  result_expr = sum(terms) if terms else UOp.const(dtypes.float, 0.0)
-  # Coalesced output layout: [result, outer] gives r_6_6_tiles grid for better memory coalescing
-  return result_expr.bufferize(*(tuple(result_axes)+tuple(new_outer_axes)), arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
+  result_expr = sum(terms)
+
+  # Planar output layout: [outer, result] for sequential memory writes
+  return result_expr.bufferize(*(tuple(new_outer_axes)+tuple(result_axes)), arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
 
 def winoguard(lhs: UOp, rhs: UOp, redu: UOp):
   three = {ax for ax in redu.src[1:] if int(ax.vmax+1) == 3}
@@ -182,32 +191,49 @@ def winowrite(ctx: IndexingContext, lhs: UOp, rhs: UOp, redu: UOp):
   other_reduces = [ax for ax in act_like.ranges if ax not in k_axes and ax in reduce_ranges]
   other_loops_x = [ax for ax in act_like.ranges if ax not in reduce_ranges+o_axes]
   other_loops_w = [ax for ax in w_like.ranges if ax not in reduce_ranges]
-  tile_ranges, tile_ranges1 = [[ctx.new_range((int(b.vmax+1)+3)//4, AxisType.LOOP) for b in o_axes] for _ in range(2)]
-  inner6, inner6_1 = [[ctx.new_range(6, AxisType.LOOP) for _ in o_axes] for _ in range(2)]
-  kranges = [ctx.new_range(3, AxisType.LOOP) for _ in o_axes]
-  other_loop_ranges_xhat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_x]
-  other_loop_ranges_ghat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_w]
 
-  # Transform activations: X_tiled → XHAT with coalesced layout [6×6, cin, batch, tiles]
+  # REORDER axis creation to match OLD winograd axis mapping:
+  # OLD: axis1=6, axis2=6, axis3=2, axis4=8, axis5=2, axis6=2
+  # Need to interleave axis creation to get: inner6_1[0,1], tile[0], ghat, tile[1], xhat
+
+  # Create inner6 and inner6_1 (these go to intermediate kernels)
+  inner6 = [ctx.new_range(6, AxisType.LOOP) for _ in o_axes]
+  inner6_1 = [ctx.new_range(6, AxisType.LOOP) for _ in o_axes]
+
+  # Create tile_ranges for intermediate kernels
+  tile_ranges = [ctx.new_range((int(b.vmax+1)+3)//4, AxisType.LOOP) for b in o_axes]
+
+  # Create tile_ranges1, ghat, xhat in the order that matches OLD:
+  # axis3=tile[0], axis4=ghat, axis5=tile[1], axis6=xhat
+  tile_ranges1 = []
+  tile_ranges1.append(ctx.new_range((int(o_axes[0].vmax+1)+3)//4, AxisType.LOOP))  # First tile axis
+  other_loop_ranges_ghat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_w]  # cout
+  if len(o_axes) > 1:
+    tile_ranges1.append(ctx.new_range((int(o_axes[1].vmax+1)+3)//4, AxisType.LOOP))  # Second tile axis
+  other_loop_ranges_xhat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_x]  # batch
+
+  kranges = [ctx.new_range(3, AxisType.LOOP) for _ in o_axes]
+
+  # Transform activations: X_tiled → XHAT with planar layout [tiles, cin, batch, 6×6]
   X_tiled = act_like.substitute({add: tr*4 + u for add, tr, u in zip(o_adds, tile_ranges, inner6)})
   XHAT = winograd_kron(X_tiled, winograd_Bt, other_reduces+other_loops_x+tile_ranges, inner6, device, ctx)
 
-  # Transform weights: w_sub → GHAT with coalesced layout [6×6, cin, cout]
+  # Transform weights: w_sub → GHAT with planar layout [cin, cout, 6×6]
   w_sub = w_like.substitute(dict(zip(k_axes, kranges)))
   GHAT = winograd_kron(w_sub, winograd_G, other_reduces+other_loops_w, kranges, device, ctx)
 
-  # Hadamard multiply and reduce over cin - indexing matches coalesced buffer layouts
-  mhat_redu = (GHAT.index(*inner6_1, *other_reduces, *other_loop_ranges_ghat) *
-               XHAT.index(*inner6_1, *other_reduces, *other_loop_ranges_xhat, *tile_ranges1)).reduce(*other_reduces, arg=Ops.ADD)
+  # Hadamard multiply and reduce over cin - indexing matches planar buffer layouts [outer, inner]
+  mhat_redu = (GHAT.index(*other_reduces, *other_loop_ranges_ghat, *inner6_1) *
+               XHAT.index(*other_reduces, *other_loop_ranges_xhat, *tile_ranges1, *inner6_1)).reduce(*other_reduces, arg=Ops.ADD)
 
-  # Coalesced layout: inner6_1 first gives r_6_6_8 grid for better memory access
-  MHAT = mhat_redu.bufferize(*(inner6_1+tile_ranges1+other_loop_ranges_ghat+other_loop_ranges_xhat),
+  # Planar layout: [outer, inner] = [tiles, cout, batch, inner6] for sequential access
+  MHAT = mhat_redu.bufferize(*(tile_ranges1+other_loop_ranges_ghat+other_loop_ranges_xhat+inner6_1),
                               arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
 
-  # Output transform: MHAT[inner6, tiles, cout, batch] → result[4×4, tiles, cout, batch]
-  # Index order matches buffer layout: [within_tile, tiles, cout, batch]
+  # Output transform: MHAT[tiles, cout, batch, inner6] → result[tiles, cout, batch, 4×4]
+  # Planar indexing: [tiles, cout, batch, within_tile] for sequential writes
   return winograd_kron(MHAT, winograd_At, tile_ranges1+other_loop_ranges_ghat+other_loop_ranges_xhat, inner6_1, device, ctx)\
-    .index(*[ox%4 for ox in o_axes], *[ox//4 for ox in o_axes], *other_loops_w, *other_loops_x)
+    .index(*[ox//4 for ox in o_axes], *other_loops_w, *other_loops_x, *[ox%4 for ox in o_axes])
 
 winograd_rewrite = PatternMatcher([
  ((UPat.var("lhs")*UPat.var("rhs")).reduce(arg=Ops.ADD, allow_any_len=True, name="redu"), lambda ctx, lhs, rhs, redu: winowrite(ctx, lhs, rhs, redu))
