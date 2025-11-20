@@ -17,6 +17,7 @@ on:
   workflow_dispatch:
     paths:
     - 'tinygrad/runtime/autogen/**/*'
+    - 'tinygrad/runtime/support/autogen.py'
 
 jobs:
   autogen:
