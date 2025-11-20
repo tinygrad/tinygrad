@@ -89,7 +89,7 @@ NIR_CMAT_C_SIGNED = nir_cmat_signed.define('NIR_CMAT_C_SIGNED', 4)
 NIR_CMAT_RESULT_SIGNED = nir_cmat_signed.define('NIR_CMAT_RESULT_SIGNED', 8)
 
 class nir_const_value(ctypes.Union): pass
-int8_t = ctypes.c_char
+int8_t = ctypes.c_byte
 uint8_t = ctypes.c_ubyte
 int16_t = ctypes.c_int16
 uint16_t = ctypes.c_uint16
@@ -3723,7 +3723,7 @@ struct__IO_FILE._fields_ = [
   ('_flags2', ctypes.c_int32),
   ('_old_offset', ctypes.c_int64),
   ('_cur_column', ctypes.c_uint16),
-  ('_vtable_offset', ctypes.c_char),
+  ('_vtable_offset', ctypes.c_byte),
   ('_shortbuf', (ctypes.c_char * 1)),
   ('_lock', ctypes.POINTER(_IO_lock_t)),
   ('_offset', ctypes.c_int64),

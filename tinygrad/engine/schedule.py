@@ -23,10 +23,12 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
   in_degree: dict[UOp, int] = {}
   var_vals: dict[str, int] = {}
   for u in sched_sink.toposort():
-    if u.op is not Ops.AFTER: continue  # anything that's not an ASSIGN doesn't write a kernel, so we can skip
+    if u.op is Ops.RANGE:
+      in_degree.setdefault(u, 0)
+      continue
+    if u.op is not Ops.AFTER or u.src[1].op is Ops.RANGE: continue
     k = u.src[1]
     in_degree.setdefault(k, 0)
-    if k.op is Ops.RANGE: continue
     for s in k.src[0].src if k.op is Ops.END else k.src:
       if s.op is Ops.AFTER:
         children[s.src[1]].append(k)
@@ -88,7 +90,7 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
       if rk.op is Ops.END: schedule.append(rk)
     else:
       raise RuntimeError(f"can't schedule {k.op}")
-    for x in children[k]:
+    for x in children[rk]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queues[_heuristic(x)].append(x)
 

@@ -318,6 +318,7 @@ class QCOMAllocator(HCQAllocatorBase):
     self.dev.synchronize()
     return to_mv(cast(int, src.va_addr), src.size)
 
+  @suppress_finalizing
   def _free(self, opaque, options:BufferSpec):
     self.dev.synchronize()
     self.dev._gpu_free(opaque)
