@@ -117,7 +117,7 @@ pm_apply_rangeify = PatternMatcher([
 
 # this is the definition of the movement ops
 @functools.cache
-def _apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
+def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
   match op:
     case Ops.SHRINK:  rngs = tuple(a if ss == 0 else a+ss for a,(ss,_) in zip(rngs, arg))
     case Ops.PERMUTE: rngs = tuple(rngs[p] for p in argsort(arg))
@@ -144,13 +144,6 @@ def _apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[U
       rngs = graph_rewrite(UOp.sink(*axes_out[::-1]), symbolic+pm_simplify_valid+pm_drop_and_clauses, name="reshape").src
     case _: raise RuntimeError(f"{op} is not a MovementOp")
   return rngs
-
-def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
-  # for PAD and RESHAPE, we replace the ranges with PLACEHOLDERS
-  if op not in (Ops.PAD, Ops.RESHAPE): return _apply_movement_op(op, in_shape, arg, rngs)
-  sink = UOp.sink(*rngs)
-  real_ranges = {r:UOp.range(r.src[0], i, AxisType.PLACEHOLDER) for i,r in enumerate(sink.ranges)}
-  return UOp.sink(*_apply_movement_op(op, in_shape, arg, sink.substitute(real_ranges).src)).substitute({v:k for k,v in real_ranges.items()}).src
 
 @profile_matches
 def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
