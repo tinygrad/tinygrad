@@ -992,7 +992,7 @@ jobs:
           mesa: ${{ matrix.backend == 'ir3' && 'true' }}
       - name: Set env
         shell: bash
-        run: printf "COMPILE_ONLY=1\n${{ matrix.backend == 'ir3' && 'QCOM=1\nQCOM_IR3=1' }}" >> $GITHUB_ENV
+        run: printf "NULL=1\n${{ matrix.backend == 'ir3' && 'NULL_IR3=1' }}" >> $GITHUB_ENV
       - name: Run test_ops
         shell: bash
         run: |

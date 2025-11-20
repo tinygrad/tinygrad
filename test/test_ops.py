@@ -2,7 +2,7 @@ import time, math, unittest, functools, platform, warnings
 import numpy as np
 from typing import List, Callable
 import torch
-from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, CPU_LLVM, CPU_LVP, AMD_LLVM, COMPILE_ONLY
+from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, CPU_LLVM, CPU_LVP, AMD_LLVM, EMULATE
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
@@ -16,6 +16,7 @@ if CI:
 
 FORWARD_ONLY = getenv("FORWARD_ONLY", 0)
 PRINT_TENSORS = getenv("PRINT_TENSORS", 0)
+COMPILE_ONLY = Device.DEFAULT == "NULL" and not EMULATE
 
 def slow_test(test_func):
   return unittest.skipIf(getenv("SKIP_SLOW_TEST"), "Skipping slow test")(test_func)
@@ -36,9 +37,9 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
   st = time.monotonic()
   ret = tinygrad_fxn(*tst).realize()
   tinygrad_fp = time.monotonic() - st
-  if COMPILE_ONLY: return
 
   def compare(s, tinygrad_output, torch_output, atol, rtol):
+    if COMPILE_ONLY: return
     if PRINT_TENSORS: print(s, tinygrad_output, torch_output)
     try:
       assert tinygrad_output.shape == torch_output.shape, f"shape mismatch: tinygrad={tinygrad_output.shape} | torch={torch_output.shape}"
@@ -681,7 +682,7 @@ class TestOps(unittest.TestCase):
     # float to power of int
     helper_test_op(None, lambda x: 0.7**x, vals=[[-2,-1,0,1,2,3]], forward_only=True)
 
-  @unittest.skipIf(COMPILE_ONLY, "runtime only test")
+  @unittest.skipIf(COMPILE_ONLY, "test requires runtime")
   def test_pow_const_direct(self):
     # x ** c
     def get_tiny_gradient(x, c):
@@ -1160,15 +1161,15 @@ class TestOps(unittest.TestCase):
           helper_test_op([(5,5,4)],
                           lambda x: x.topk(4, dim, largest, sorted_).indices.type(torch.int32),
                           lambda x: x.topk(4, dim, largest, sorted_)[1], forward_only=True)
+    # repeated values
     if not COMPILE_ONLY:
-      # repeated values
       value, indices = Tensor([1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0]).topk(3)
       np.testing.assert_equal(value.numpy(), [1, 1, 1])
       np.testing.assert_equal(indices.numpy(), [0, 1, 3])
       value, indices = Tensor([1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0]).topk(3, largest=False)
       np.testing.assert_equal(value.numpy(), [0, 0, 0])
       np.testing.assert_equal(indices.numpy(), [2, 4, 6])
-      self.helper_test_exception([(4)], lambda x: x.topk(5), expected=(RuntimeError, ValueError))
+    self.helper_test_exception([(4)], lambda x: x.topk(5), expected=(RuntimeError, ValueError))
 
   @slow_test
   def test_einsum(self):
@@ -1730,7 +1731,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(7,5,10)], lambda x: x[1:5:2, 3, ::4])
     helper_test_op([(7,5,10)], lambda x: x[1:5:2, None, None, 3, None, ::4])
 
-  @unittest.skipIf(COMPILE_ONLY, "runtime only test")
+  @unittest.skipIf(COMPILE_ONLY, "test requires runtime")
   def test_slice_negative_strides(self):
     # Torch doesn't support slicing with negative steps
     a = np.random.randn(10, 10, 10).astype(np.float32)
@@ -2757,7 +2758,7 @@ class TestOps(unittest.TestCase):
     n = Tensor([1, float("nan")]).max().numpy()
     assert math.isnan(n.item()), f"{n.item()} is not nan"
 
-  @unittest.skipIf(COMPILE_ONLY, "runtime only test")
+  @unittest.skipIf(COMPILE_ONLY, "test requires runtime")
   def test_inf_where(self):
     x = Tensor.full((3, 3), float("inf"))
     n = (x < 0).where(x, 1).numpy()
