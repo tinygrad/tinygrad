@@ -76,6 +76,17 @@ def desc_struct(dev):
   pic1_desc.v3.HevcSliceEdgeOffset  = 32130
   return pic1, pic1_desc
 
+def patch_pic2(desc):
+  desc.stream_len=51302
+  desc.num_ref_frames=1
+  desc.RefDiffPicOrderCnts[0] = 4
+  desc.IDR_picture_flag=0
+  desc.RAP_picture_flag=0
+  desc.curr_pic_idx=1
+  desc.sw_hdr_skip_length=19
+  desc.num_bits_short_term_ref_pics_in_slice=10
+  desc.v3.slice_ec_slice_type=0
+
 class NVVideoQueue(NVCommandQueue):
   def decode_hevc_chunk(self, buf_in_data, luma_chroma_bufs:list,
                         coloc_buf, filter_buf,

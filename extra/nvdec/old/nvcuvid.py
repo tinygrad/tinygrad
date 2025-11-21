@@ -1,4 +1,5 @@
 import ctypes, queue
+from hexdump import hexdump
 from tinygrad.runtime.ops_cuda import CUDADevice
 from tinygrad.runtime.autogen import cuda, nvcuvid
 from tinygrad.helpers import DEBUG, init_c_var, getenv
@@ -57,10 +58,10 @@ class CUDAVideoDecoder:
     caps.eChromaFormat = videoformat.contents.chroma_format
     caps.nBitDepthMinus8 = videoformat.contents.bit_depth_luma_minus8
     check(cuda.cuCtxSetCurrent(inst.dev.context))
-    check(nvcuvid.cuvidGetDecoderCaps(ctypes.byref(caps)))
-    if not caps.bIsSupported: raise RuntimeError("codec not supported")
-    if videoformat.contents.coded_width > caps.nMaxWidth or videoformat.contents.coded_height > caps.nMaxHeight:
-      raise RuntimeError(f"resolution {videoformat.contents.coded_width}x{videoformat.contents.coded_height} exceeds max {caps.nMaxWidth}x{caps.nMaxHeight} on this device")
+    # check(nvcuvid.cuvidGetDecoderCaps(ctypes.byref(caps)))
+    # if not caps.bIsSupported: raise RuntimeError("codec not supported")
+    # if videoformat.contents.coded_width > caps.nMaxWidth or videoformat.contents.coded_height > caps.nMaxHeight:
+    #   raise RuntimeError(f"resolution {videoformat.contents.coded_width}x{videoformat.contents.coded_height} exceeds max {caps.nMaxWidth}x{caps.nMaxHeight} on this device")
 
     if inst.decoder: check(nvcuvid.cuvidDestroyDecoder(inst.decoder))
     create_info = nvcuvid.CUVIDDECODECREATEINFO()
@@ -98,6 +99,8 @@ class CUDAVideoDecoder:
     check(cuda.cuCtxSetCurrent(inst.dev.context))
     print("cuvidDecodePicture")
     check(nvcuvid.cuvidDecodePicture(inst.decoder, pic_params))
+    import time
+    time.sleep(2)
     _dump_gpfifo("after decode")
     return 1
 
@@ -107,49 +110,58 @@ class CUDAVideoDecoder:
     d = disp_info.contents
 
     print("displaying picture", inst.pic_num_in_decode_order.get(d.picture_index, -1))
+    # # exit(0)
 
-    proc = nvcuvid.CUVIDPROCPARAMS()
-    proc.progressive_frame = d.progressive_frame
-    proc.second_field = d.repeat_first_field + 1
-    proc.top_field_first = d.top_field_first
-    proc.unpaired_field = (d.repeat_first_field < 0)
-    proc.output_stream = ctypes.cast(inst.stream, ctypes.POINTER(nvcuvid.struct_CUstream_st))
+    # proc = nvcuvid.CUVIDPROCPARAMS()
+    # proc.progressive_frame = d.progressive_frame
+    # proc.second_field = d.repeat_first_field + 1
+    # proc.top_field_first = d.top_field_first
+    # proc.unpaired_field = (d.repeat_first_field < 0)
+    # proc.output_stream = ctypes.cast(inst.stream, ctypes.POINTER(nvcuvid.struct_CUstream_st))
 
-    src_frame, src_pitch = ctypes.c_uint64(0), ctypes.c_uint32(0)
-    check(cuda.cuCtxSetCurrent(inst.dev.context))
-    check(nvcuvid.cuvidMapVideoFrame64(inst.decoder, d.picture_index, ctypes.byref(src_frame), ctypes.byref(src_pitch), ctypes.byref(proc)))
+    # src_frame, src_pitch = ctypes.c_uint64(0), ctypes.c_uint32(0)
+    # check(cuda.cuCtxSetCurrent(inst.dev.context))
+    # check(nvcuvid.cuvidMapVideoFrame64(inst.decoder, d.picture_index, ctypes.byref(src_frame), ctypes.byref(src_pitch), ctypes.byref(proc)))
 
-    _dump_gpfifo("after display map")
+    # _dump_gpfifo("after display map")
 
-    status = nvcuvid.CUVIDGETDECODESTATUS()
-    check(nvcuvid.cuvidGetDecodeStatus(inst.decoder, d.picture_index, ctypes.byref(status)))
-    if status.decodeStatus in (nvcuvid.cuvidDecodeStatus_Error, nvcuvid.cuvidDecodeStatus_Error_Concealed):
-      print("decode error occurred for picture", inst.pic_num_in_decode_order.get(d.picture_index, -1), file=sys.stderr)
+    # status = nvcuvid.CUVIDGETDECODESTATUS()
+    # check(nvcuvid.cuvidGetDecodeStatus(inst.decoder, d.picture_index, ctypes.byref(status)))
+    # if status.decodeStatus in (nvcuvid.cuvidDecodeStatus_Error, nvcuvid.cuvidDecodeStatus_Error_Concealed):
+    #   print("decode error occurred for picture", inst.pic_num_in_decode_order.get(d.picture_index, -1), file=sys.stderr)
 
-    fw, lh, ch = inst.frame_width, inst.luma_height, inst.chroma_height
-    host_buffer = (ctypes.c_ubyte * fw * (lh + ch))()
+    # fw, lh, ch = inst.frame_width, inst.luma_height, inst.chroma_height
+    # host_buffer = (ctypes.c_ubyte * fw * (lh + ch))()
 
-    chroma_offset = src_pitch.value * (((inst.surface_height + 1) & ~1))
-    copy_luma = cuda.CUDA_MEMCPY2D(
-        srcMemoryType=cuda.CU_MEMORYTYPE_DEVICE, srcDevice=src_frame.value, srcPitch=src_pitch.value,
-        dstMemoryType=cuda.CU_MEMORYTYPE_HOST,   dstHost=ctypes.cast(host_buffer, ctypes.c_void_p),
-        dstPitch=fw, WidthInBytes=fw, Height=lh
-    )
-    copy_chroma = cuda.CUDA_MEMCPY2D(
-        srcDevice=src_frame.value + chroma_offset, srcMemoryType=cuda.CU_MEMORYTYPE_DEVICE,
-        srcPitch=src_pitch.value, dstY=lh, dstMemoryType=cuda.CU_MEMORYTYPE_HOST,
-        dstHost=ctypes.cast(host_buffer, ctypes.c_void_p), dstPitch=fw,
-        WidthInBytes=fw, Height=ch
-    )
+    # chroma_offset = src_pitch.value * (((inst.surface_height + 1) & ~1))
+    # print(f"{chroma_offset=:#x}, {src_pitch.value=:#x}, {fw=:#x}, {lh=:#x}, {ch=:#x}")
 
-    check(cuda.cuMemcpy2DAsync_v2(ctypes.byref(copy_luma), inst.stream))
-    check(cuda.cuMemcpy2DAsync_v2(ctypes.byref(copy_chroma), inst.stream))
-    check(cuda.cuStreamSynchronize(inst.stream))
-    check(nvcuvid.cuvidUnmapVideoFrame64(inst.decoder, src_frame.value))
-    _dump_gpfifo("after display finalize")
+    # copy_luma = cuda.CUDA_MEMCPY2D(
+    #     srcMemoryType=cuda.CU_MEMORYTYPE_DEVICE, srcDevice=src_frame.value, srcPitch=src_pitch.value,
+    #     dstMemoryType=cuda.CU_MEMORYTYPE_HOST,   dstHost=ctypes.cast(host_buffer, ctypes.c_void_p),
+    #     dstPitch=fw, WidthInBytes=fw, Height=lh
+    # )
+    # copy_chroma = cuda.CUDA_MEMCPY2D(
+    #     srcDevice=src_frame.value + chroma_offset, srcMemoryType=cuda.CU_MEMORYTYPE_DEVICE,
+    #     srcPitch=src_pitch.value, dstY=lh, dstMemoryType=cuda.CU_MEMORYTYPE_HOST,
+    #     dstHost=ctypes.cast(host_buffer, ctypes.c_void_p), dstPitch=fw,
+    #     WidthInBytes=fw, Height=ch
+    # )
 
-    inst.frame_queue.put(bytes(host_buffer))
-    inst._decoded_frame += 1
+    # check(cuda.cuMemcpy2DAsync_v2(ctypes.byref(copy_luma), inst.stream))
+    # check(cuda.cuMemcpy2DAsync_v2(ctypes.byref(copy_chroma), inst.stream))
+    # check(cuda.cuStreamSynchronize(inst.stream))
+    # check(nvcuvid.cuvidUnmapVideoFrame64(inst.decoder, src_frame.value))
+    # _dump_gpfifo("after display finalize")
+
+    # print("luma")
+    # hexdump(bytes(host_buffer)[:lh*fw])
+    # print("chroma")
+    # hexdump(bytes(host_buffer)[lh*fw:lh*fw+64])
+    # exit(0)
+
+    # inst.frame_queue.put(bytes(host_buffer))
+    # inst._decoded_frame += 1
     return 1
 
 if __name__ == "__main__":

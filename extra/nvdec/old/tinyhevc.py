@@ -145,7 +145,7 @@ class HEVCReader:
     return (-1 ** (k + 1)) * (k // 2)
 
 class NVVidDecoder:
-  def __init__(self):
+  def __init__(self, dev):
     self.desc = nv_gpu.nvdec_hevc_pic_s(gptimer_timeout_value=81600000, tileformat=1, sw_start_code_e=1)
 
   def stream_slice(self, nal_unit_type, data):

@@ -182,11 +182,11 @@ class FakeNV(HCQCompiled[HCQSignal]):
 def desc_struct(dev):
   pic1 = dev.allocator.alloc(0x1000)
   pic1_desc = nv_gpu.nvdec_hevc_pic_s.from_address(pic1.cpu_view().addr)
-  pic1_desc.stream_len = 264596
+  # pic1_desc.stream_len = 264596
 
-  pic1_desc.gptimer_timeout_value = 81600000
-  pic1_desc.tileformat = 1
-  pic1_desc.sw_start_code_e = 1
+  # pic1_desc.gptimer_timeout_value = 81600000
+  # pic1_desc.tileformat = 1
+  # pic1_desc.sw_start_code_e = 1
   
   pic1_desc.framestride[0] = 1920
   pic1_desc.framestride[1] = 1920
@@ -195,46 +195,46 @@ def desc_struct(dev):
   pic1_desc.HevcSaoBufferOffset = 2584
   pic1_desc.HevcBsdCtrlOffset = 23256
 
-  pic1_desc.pic_width_in_luma_samples  = 1920
-  pic1_desc.pic_height_in_luma_samples = 1080
+  # pic1_desc.pic_width_in_luma_samples  = 1920
+  # pic1_desc.pic_height_in_luma_samples = 1080
 
-  pic1_desc.chroma_format_idc = 1
-  pic1_desc.bit_depth_luma = 8
-  pic1_desc.bit_depth_chroma = 8
+  # pic1_desc.chroma_format_idc = 1
+  # pic1_desc.bit_depth_luma = 8
+  # pic1_desc.bit_depth_chroma = 8
 
-  pic1_desc.log2_min_luma_coding_block_size = 3
-  pic1_desc.log2_max_luma_coding_block_size = 6
-  pic1_desc.log2_min_transform_block_size   = 2
-  pic1_desc.log2_max_transform_block_size   = 5
+  # pic1_desc.log2_min_luma_coding_block_size = 3
+  # pic1_desc.log2_max_luma_coding_block_size = 6
+  # pic1_desc.log2_min_transform_block_size   = 2
+  # pic1_desc.log2_max_transform_block_size   = 5
 
-  pic1_desc.sample_adaptive_offset_enabled_flag = 1
-  pic1_desc.sps_temporal_mvp_enabled_flag       = 1
-  pic1_desc.strong_intra_smoothing_enabled_flag = 1
+  # pic1_desc.sample_adaptive_offset_enabled_flag = 1
+  # pic1_desc.sps_temporal_mvp_enabled_flag       = 1
+  # pic1_desc.strong_intra_smoothing_enabled_flag = 1
 
-  pic1_desc.sign_data_hiding_enabled_flag = 1
+  # pic1_desc.sign_data_hiding_enabled_flag = 1
 
-  pic1_desc.num_ref_idx_l0_default_active = 1
-  pic1_desc.num_ref_idx_l1_default_active = 1
+  # pic1_desc.num_ref_idx_l0_default_active = 1
+  # pic1_desc.num_ref_idx_l1_default_active = 1
 
-  pic1_desc.init_qp = 26
+  # pic1_desc.init_qp = 26
 
-  pic1_desc.cu_qp_delta_enabled_flag = 1
-  pic1_desc.diff_cu_qp_delta_depth   = 1
+  # pic1_desc.cu_qp_delta_enabled_flag = 1
+  # pic1_desc.diff_cu_qp_delta_depth   = 1
 
-  pic1_desc.weighted_pred_flag = 1
-  pic1_desc.entropy_coding_sync_enabled_flag = 1
+  # pic1_desc.weighted_pred_flag = 1
+  # pic1_desc.entropy_coding_sync_enabled_flag = 1
 
-  pic1_desc.loop_filter_across_tiles_enabled_flag  = 1
-  pic1_desc.loop_filter_across_slices_enabled_flag = 1
+  # pic1_desc.loop_filter_across_tiles_enabled_flag  = 1
+  # pic1_desc.loop_filter_across_slices_enabled_flag = 1
 
-  pic1_desc.log2_parallel_merge_level = 2
+  # pic1_desc.log2_parallel_merge_level = 2
 
-  pic1_desc.IDR_picture_flag = 1
-  pic1_desc.RAP_picture_flag = 1
+  # pic1_desc.IDR_picture_flag = 1
+  # pic1_desc.RAP_picture_flag = 1
 
   pic1_desc.pattern_id = 2
 
-  pic1_desc.ecdma_cfg.log2_max_pic_order_cnt_lsb_minus4 = 4
+  # pic1_desc.ecdma_cfg.log2_max_pic_order_cnt_lsb_minus4 = 4
 
   pic1_desc.v1.hevc_main10_444_ext.log2MaxTransformSkipSize = 2
   pic1_desc.v1.hevc_main10_444_ext.HevcFltAboveOffset = 23902
@@ -253,7 +253,7 @@ def patch_pic2(desc):
   desc.RAP_picture_flag=0
   desc.curr_pic_idx=1
   desc.sw_hdr_skip_length=19
-  desc.ecdma_cfg.num_bits_short_term_ref_pics_in_slice=10
+  # desc.ecdma_cfg.num_bits_short_term_ref_pics_in_slice=10
   desc.v3.slice_ec_slice_type=0
 
 def patch_pic3(desc):
@@ -266,7 +266,7 @@ def patch_pic3(desc):
 
   desc.curr_pic_idx=2
   desc.sw_hdr_skip_length=23
-  desc.ecdma_cfg.num_bits_short_term_ref_pics_in_slice=14
+  # desc.ecdma_cfg.num_bits_short_term_ref_pics_in_slice=14
 
 def get_tiled_offset(x, y, width):
   GOB_WIDTH = 64
