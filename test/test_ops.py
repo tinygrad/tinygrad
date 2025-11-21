@@ -2699,6 +2699,9 @@ class TestOps(unittest.TestCase):
     a = Tensor(3.14)
     np.testing.assert_allclose(Tensor.stack(a, a).numpy(), Tensor([3.14, 3.14]).numpy())
 
+  def test_stack_max(self):
+    helper_test_op(None, lambda x, y: torch.stack((x, y)).max(axis=0)[0], lambda x, y: Tensor.stack(x, y).max(axis=0), vals=[[1.], [2.]])
+
   def test_repeat(self):
     x = Tensor.randn(4, 6, 3)
     base_repeats = [2, 4, 3]
