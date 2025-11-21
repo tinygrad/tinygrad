@@ -72,6 +72,21 @@ class TestOuterScan(unittest.TestCase):
     ref.realize()
     return vec, mats, ref
 
+  def test_uop_fold_matmul(self):
+    vec, mats, ref = self._test_scan()
+
+    # 3 matmuls with FOLD
+    i = UOp.range(3, -100, AxisType.OUTER)
+    out = Tensor.empty(1, 10)
+    phi = Tensor(i.eq(0).where(vec.uop, out.uop))
+    comp = phi @ mats[i]
+    store = out.uop.store(comp.uop).end(i)
+    out = Tensor(out.uop.after(store))
+    out.realize()
+
+    # TODO: testing allclose
+    assert Tensor.allclose(ref[2], out, atol=1e-6), f"{ref.numpy()=}, {out.numpy()=}"
+
   def test_uop_scan_matmul(self):
     vec, mats, ref = self._test_scan()
 
@@ -86,6 +101,16 @@ class TestOuterScan(unittest.TestCase):
 
     # TODO: testing allclose
     assert Tensor.allclose(ref, out, atol=1e-6), f"{ref.numpy()=}, {out.numpy()=}"
+
+  def test_fold_matmul(self):
+    vec, mats, ref = self._test_scan()
+
+    # 3 matmuls with SCAN
+    i = UOp.range(3, -100, AxisType.OUTER)
+    phi = vec._apply_uop(UOp.phi)
+    comp = phi @ mats[i]
+    scan = comp._apply_uop(UOp.fold, phi, extra_args=(i,))
+    scan.realize()
 
 class TestOuterworld(unittest.TestCase):
   def test_range_plus_1(self):
