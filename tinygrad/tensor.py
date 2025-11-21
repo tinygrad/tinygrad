@@ -747,7 +747,7 @@ class Tensor(OpMixin):
     if self.uop.axis is None: return fxn(self.shape, *args, dtype=dtype, **kwargs).shard(self.device)
     sharded_shape = tuple(s//len(self.device) if a==self.uop.axis else s for a,s in enumerate(self.shape))
     rands = UOp(Ops.MSTACK, dtype=dtype, src=tuple([fxn(sharded_shape, *args, device=d, dtype=dtype, **kwargs).uop for d in self.device]))
-    return Tensor(UOp.multi(rands, axis=self.uop.axis), device=self.device, dtype=dtype, **kwargs)
+    return Tensor(UOp.multi(rands, axis=self.uop.axis), device=self.device, dtype=dtype)
 
   def full_like(self, fill_value:ConstType, **kwargs) -> Tensor:
     """
