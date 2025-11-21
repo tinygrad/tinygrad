@@ -135,16 +135,22 @@ def mel(
 
   return weights
 
+def sinc_window_kernel(num_taps, fc, window="hamming", dtype=None, device=None):
+  t = Tensor.arange(-num_taps//2, num_taps//2 + 1, dtype=dtype, device=device)
+  x = t * fc * math.pi
+  h = Tensor.where(x == 0, Tensor(1.0, dtype=dtype).to(device=x.device), x.sin() / x)
+
+  if window == "hamming":
+    w = 0.54 - 0.46 * (2 * math.pi * (t + num_taps//2) / num_taps).cos()
+  else:
+    w = Tensor(1.0, dtype=dtype).to(device=h.device)
+  h *= w
+  h /= h.sum()
+  return h
+
 def resample(x, L, M, num_taps=64):
   fc = 0.5 / max(L, M)
-  t = Tensor.arange(-num_taps//2, num_taps//2 + 1)
-
-  # poor man's sinc
-  h:Tensor = (t * fc * math.pi).sin() / (t * fc * math.pi)
-  h[num_taps//2] = 1.0 # hack fix NaN
-
-  h *= 0.54 - 0.46 * (2 * math.pi * (t + num_taps//2) / num_taps).cos() # hamming
-  h /= h.sum()
+  h = sinc_window_kernel(num_taps, fc, 'hamming', 'float32', 'cuda')
 
   upsampled = x.reshape(-1, 1, x.shape[-1]).pad((None, (0, L-1), None)).transpose(1, 2).flatten(1).unsqueeze(1)
 
