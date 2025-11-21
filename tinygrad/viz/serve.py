@@ -224,8 +224,8 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
   except Exception: return err("DECODER ERROR")
   if not rctx.inst_execs: return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
   steps:list[dict] = []
-  units:dict[str, int] = {}
   for name,waves in rctx.inst_execs.items():
+    units:dict[str, int] = {}
     events:list[ProfileEvent] = []
     prg = trace.keys[r].ret if (r:=ref_map.get(name)) else None
     steps.append(first:=create_step(prg.name if prg is not None else name, ("/counters", len(ctxs), len(steps))))
