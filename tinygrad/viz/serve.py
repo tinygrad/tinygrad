@@ -210,6 +210,8 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
   peaks.append(peak)
   return struct.pack("<BIQ", 1, len(events), peak)+b"".join(events) if events else None
 
+def row_tuple(row:str) -> tuple[int, ...]: return tuple(int(x.split(":")[1]) for x in row.split())
+
 def load_sqtt(profile:list[ProfileEvent]) -> None:
   from tinygrad.runtime.ops_amd import ProfileSQTTEvent
   if not (sqtt_events:=[e for e in profile if isinstance(e, ProfileSQTTEvent)]): return None
@@ -222,7 +224,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
   except Exception: return err("DECODER ERROR")
   if not rctx.inst_execs: return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
   steps:list[dict] = []
-  units:set[str] = set()
+  units:dict[str, int] = {}
   for name,waves in rctx.inst_execs.items():
     events:list[ProfileEvent] = []
     prg = trace.keys[r].ret if (r:=ref_map.get(name)) else None
@@ -234,19 +236,23 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     #             * Instruction cache miss
     # Stall:    The total number of cycles the hardware pipe couldn't issue an instruction.
     # Duration: Total latency in cycles, defined as "Stall time + Issue time" for gfx9 or "Stall time + Execute time" for gfx10+.
+    wave_lst:list[dict] = []
     for w in waves:
-      units.add(row:=f"SE:{w.se} CU:{w.cu} SIMD:{w.simd} WAVE:{w.wave_id}")
-      events.append(ProfileRangeEvent(row, wave_name:="wave", Decimal(w.begin_time), Decimal(w.end_time)))
+      if (row:=f"SE:{w.se} CU:{w.cu} SIMD:{w.simd} WAVE:{w.wave_id}") not in units: units[row] = 0
+      units[row] += 1
+      events.append(ProfileRangeEvent(row, "wave", Decimal(w.begin_time), Decimal(w.end_time)))
       rows, prev_instr = [], w.begin_time
       for i,e in enumerate(w.insts):
         rows.append((e.inst, e.time, max(0, e.time-prev_instr), e.dur, e.stall, str(e.typ).split("_")[-1]))
         prev_instr = max(prev_instr, e.time + e.dur)
       summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SIMD", "value":w.simd}, {"label":"CU", "value":w.cu},
                  {"label":"SE", "value":w.se}]
-      steps.append(create_step(wave_name, ("/counters", len(ctxs), len(steps)), depth=2,
+      wave_lst.append(create_step(f"{row} N:{units[row]}", ("/counters", len(ctxs), len(steps)), depth=2,
                                data={"rows":rows, "cols":["Instruction", "Clk", "Idle", "Duration", "Stall", "Type"], "summary":summary}))
+    wave_lst.sort(key=lambda s:row_tuple(s["name"]))
+    steps += wave_lst
     events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+events
-    first["data"] = {"value":get_profile(events, lambda k:tuple(int(x.split(":")[1]) for x in k.split())), "content_type":"application/octet-stream"}
+    first["data"] = {"value":get_profile(events, sort_fn=row_tuple), "content_type":"application/octet-stream"}
   ctxs.append({"name":"Counters", "steps":steps})
 
 def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]|None=None) -> bytes|None:
