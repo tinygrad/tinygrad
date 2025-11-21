@@ -49,13 +49,13 @@ class WaveExec:
 class _ROCParseCtx:
   def __init__(self, dev_evs:dict[str, ProfileDeviceEvent], sqtt_evs:list[ProfileSQTTEvent], prog_evs:list[ProfileProgramEvent]):
     self.dev_evs, self.sqtt_evs, self.prog_evs = dev_evs, iter(sqtt_evs), prog_evs
-    self.disasms:dict[tuple[str, int], tuple[str, int]] = {}
+    self.disasms:dict[str, dict[int, tuple[str, int]]] = {}
     self.inst_execs:dict[str, list[WaveExec]] = {}
 
     for prog in prog_evs:
       arch = "gfx%d%x%x" % ((trgt:=unwrap(dev_evs[prog.device].props)['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
-      for addr, info in llvm_disasm(arch, unwrap(prog.lib)).items():
-        self.disasms[(prog.name, unwrap(prog.base) + addr)] = info
+      base = unwrap(prog.base)
+      self.disasms[prog.name] = asm = {base+addr:info for addr,info in llvm_disasm(arch, unwrap(prog.lib)).items()}
 
   def next_sqtt(self):
     x = next(self.sqtt_evs, None)
@@ -71,10 +71,11 @@ class _ROCParseCtx:
     if DEBUG >= 5: print("WAVE", ev.wave_id, self.active_se, ev.cu, ev.simd, ev.contexts, ev.begin_time, ev.end_time)
 
     inst_execs:list[InstExec] = []
+    disasm = self.disasms[unwrap(self.active_kern)]
     for j in range(ev.instructions_size):
       inst_ev = ev.instructions_array[j]
       inst_typ = rocprof.enum_rocprofiler_thread_trace_decoder_inst_category_t.get(inst_ev.category)
-      inst_disasm = self.disasms[(unwrap(self.active_kern), unwrap(inst_ev.pc.address))][0]
+      inst_disasm = disasm[unwrap(inst_ev.pc.address)][0]
       inst_execs.append(InstExec(inst_typ, inst_disasm, inst_ev.stall, inst_ev.duration, inst_ev.time))
       if DEBUG >= 8: print(inst_execs[-1])
 
@@ -113,7 +114,7 @@ def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
 
   @rocprof.rocprof_trace_decoder_isa_callback_t
   def isa_cb(instr_ptr, mem_size_ptr, size_ptr, pc, _):
-    instr, mem_size_ptr[0] = ROCParseCtx.disasms[(unwrap(ROCParseCtx.active_kern), pc.address)]
+    instr, mem_size_ptr[0] = ROCParseCtx.disasms[unwrap(ROCParseCtx.active_kern)][pc.address]
 
     # this is the number of bytes to next instruction, set to 0 for end_pgm
     if instr == "s_endpgm": mem_size_ptr[0] = 0

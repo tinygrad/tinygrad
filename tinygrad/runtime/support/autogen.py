@@ -241,7 +241,7 @@ def gen(dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, use_e
               it = iter(toks[1:])
               _args = [nm(t) for t in itertools.takewhile(lambda t:nm(t)!=')', it) if clang.clang_getTokenKind(t) == clang.CXToken_Identifier]
               if len(body:=list(it)) == 0: continue
-              macros += [f"{nm(c)} = lambda {','.join(_args)}: {readext(f, loc(body[0]), clang.clang_getRangeEnd(extent(toks[-1])))}"]
+              macros += [f"{nm(c)} = lambda{' ' * bool(_args)}{','.join(_args)}: {readext(f,loc(body[0]),clang.clang_getRangeEnd(extent(toks[-1])))}"]
             else: macros += [f"{nm(c)} = {readext(f, loc(toks[1]), clang.clang_getRangeEnd(extent(toks[-1])))}"]
           case clang.CXCursor_VarDecl if clang.clang_getCursorLinkage(c) == clang.CXLinkage_Internal:
             ty = clang.clang_getCursorType(c)
