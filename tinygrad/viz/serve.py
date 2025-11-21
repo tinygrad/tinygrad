@@ -236,7 +236,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     #             * Instruction cache miss
     # Stall:    The total number of cycles the hardware pipe couldn't issue an instruction.
     # Duration: Total latency in cycles, defined as "Stall time + Issue time" for gfx9 or "Stall time + Execute time" for gfx10+.
-    wave_lst:list[dict] = []
+    wave_insts:dict[str, dict] = {}
     for w in waves:
       if (row:=f"SE:{w.se} CU:{w.cu} SIMD:{w.simd} WAVE:{w.wave_id}") not in units: units[row] = 0
       units[row] += 1
@@ -245,12 +245,12 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
       for i,e in enumerate(w.insts):
         rows.append((e.inst, e.time, max(0, e.time-prev_instr), e.dur, e.stall, str(e.typ).split("_")[-1]))
         prev_instr = max(prev_instr, e.time + e.dur)
-      summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SIMD", "value":w.simd}, {"label":"CU", "value":w.cu},
-                 {"label":"SE", "value":w.se}]
-      wave_lst.append(create_step(f"{row} N:{units[row]}", ("/counters", len(ctxs), len(steps)), depth=2,
-                               data={"rows":rows, "cols":["Instruction", "Clk", "Idle", "Duration", "Stall", "Type"], "summary":summary}))
-    wave_lst.sort(key=lambda s:row_tuple(s["name"]))
-    steps += wave_lst
+      summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
+                 {"label":"SIMD", "value":w.simd}, {"label":"Wave ID", "value":w.wave_id}, {"label":"Run number", "value":units[row]}]
+      wave_insts[f"{row} N:{units[row]}"] = {"rows":rows, "cols":["Instruction", "Clk", "Idle", "Duration", "Stall", "Type"], "summary":summary}
+
+    for k in sorted(wave_insts, key=row_tuple):
+      steps.append(create_step(k, ("/counters", len(ctxs), len(steps)), wave_insts[k], depth=2))
     events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+events
     first["data"] = {"value":get_profile(events, sort_fn=row_tuple), "content_type":"application/octet-stream"}
   ctxs.append({"name":"Counters", "steps":steps})
