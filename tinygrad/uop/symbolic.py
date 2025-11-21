@@ -1,7 +1,7 @@
 # all of symbolic lives here now
 import math, operator, struct, functools
 from collections import defaultdict
-from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
+from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu, WeakUOpCache
 from tinygrad.dtype import ConstType, dtypes, PtrDType, can_safe_cast, Invalid
 from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, unwrap
 from tinygrad.uop.decompositions import xpow
@@ -118,13 +118,21 @@ symbolic_simple = propagate_invalid + PatternMatcher([
 
 # ******** phase 2 builds on phase 1, it includes the old "symbolic", rules that match deeper ********
 
+_lt_fold_cache = WeakUOpCache()
+_simplex_canon_cache = WeakUOpCache()
+_simplify_valid_cache = WeakUOpCache()
+
 def lt_folding(x:UOp, c:int) -> UOp|None:
+  if (ret:=_lt_fold_cache.get(x, c)) is not None: return ret
   p, np = partition(x.split_uop(Ops.ADD), lambda u: u.const_factor() == 1)
+  ret = None
   if np and (d:=math.gcd(*[u.const_factor() for u in np], c)) > 1 and 0 <= sum(u.vmin for u in p) and sum(u.vmax for u in p) < d:
-    return unwrap(UOp.sum(*np).divides(d))<(c//d)
-  return None
+    ret = unwrap(UOp.sum(*np).divides(d))<(c//d)
+  _lt_fold_cache.set(x, ret, c, allow_none=True)
+  return ret
 
 def canonicalize_simplex(X:UOp) -> UOp|None:
+  if (ret:=_simplex_canon_cache.get(X)) is not None: return ret
   # (X := a0*x0 + a1*x1 + ...) > 0 is equivalent to x0 + x1 + ... > 0 if xi >= 0 and ai > 0 for ints.
   # returns x0 + x1 + ... in such case, or None if not
   changed, ret = False, []
@@ -135,7 +143,9 @@ def canonicalize_simplex(X:UOp) -> UOp|None:
       u = u.src[0]
     if not (u.op in GroupOp.Irreducible and u.vmin >= 0): return None
     ret.append(u)
-  return UOp.sum(*ret) if changed else None
+  ret_uop = UOp.sum(*ret) if changed else None
+  _simplex_canon_cache.set(X, ret_uop, allow_none=True)
+  return ret_uop
 
 def gep_through_wmma(gep:UOp, wmma:UOp):
   out_sz = prod(x[1] for x in wmma.arg[6][-1])
@@ -273,8 +283,12 @@ def parse_valid(v:UOp) -> tuple[UOp, bool, int]|None:
     # NOTE: v.src[1].op can be Ops.VCONST
   return None
 
+_given_valid_cache = WeakUOpCache()
+
 def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
   # return simplified uop (might be the same as input)
+  uop_in = uop
+  if try_simplex and (cached:=_given_valid_cache.get(valid, uop_in)) is not None: return cached
 
   # first, parse valid into {expr: (lower_bound, upper_bound)}
   bounds:defaultdict[UOp, list[ConstType|None]] = defaultdict(lambda: [None, None])
@@ -310,6 +324,7 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
   # try all the valids together (but only the whole expressions)
   if (s_uop:=uop.substitute(sub_dict:=dict(all_candidates))) is not uop:
     uop = s_uop.simplify().substitute({newX:X for X,newX in sub_dict.items()}).simplify()
+    if try_simplex: _given_valid_cache.set(valid, uop, uop_in)
   return uop
 
 def _valid_priority(v: UOp, valids:list[UOp]):
@@ -317,6 +332,7 @@ def _valid_priority(v: UOp, valids:list[UOp]):
   return sum(-1 if (res:=parse_valid(v)) is not None and res[0] in other.toposort() else 0 for other in valids)
 
 def simplify_valid(valid:UOp) -> UOp|None:
+  if (cached:=_simplify_valid_cache.get(valid)) is not None: return cached
   if valid.op_in_backward_slice_with_self(Ops.INDEX): return None  # this should only be for indexing, skip if there's a INDEX
   ret:list[UOp] = []
   something_changed = False
@@ -324,7 +340,9 @@ def simplify_valid(valid:UOp) -> UOp|None:
   for stmt in sorted(valids, key=lambda v: _valid_priority(v, valids)):
     ret.append(uop_given_valid(UOp.prod(*ret), stmt) if ret else stmt)
     if ret[-1] is not stmt: something_changed = True
-  return UOp.prod(*ret) if something_changed else None
+  ret_uop = UOp.prod(*ret) if something_changed else None
+  _simplify_valid_cache.set(valid, ret_uop, allow_none=True)
+  return ret_uop
 
 # ******** phase 3 is the complete symbolic ********
 
