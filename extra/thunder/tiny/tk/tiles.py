@@ -68,7 +68,7 @@ class TileMathMixin(MathMixin):
       elif isinstance(src[0], (int,float,bool)): uop = self.ker.warp.map(self._uop, lambda x: UOp.alu(x, op, inner_op(x.ufix(src[0]))))
       elif src[0]._shape is None: uop = UOp.alu(self._uop, op, inner_op(self._uop.ufix(src[0])))
       else:
-        if isinstance(self, RT) and isinstance(src[0], RV): uop = self.ker.warp.map(self._uop, lambda x, idx: UOp.alu(x, op, inner_op(src[0]._uop[idx[0], 0, (idx[2]%4)//2])))
+        if isinstance(self, RT) and isinstance(src[0], RV): uop = self.ker.warp.map(self._uop, lambda x, idx: UOp.alu(x, op, inner_op(src[0]._uop[0, idx[1]])))
         else: uop = self.ker.warp.map(self._uop, lambda x, idx: UOp.alu(x, op, inner_op(src[0]._uop[*idx])))
     else: raise NotImplementedError
     return self.ruop(uop)
@@ -106,6 +106,7 @@ class Layout:
 @dataclass(frozen=True)
 class STLayout(Layout):
   _swizzle: Callable[[UOp, DType], UOp]
+  bytes_per_thread: Callable[[DType], int]
 
   def swizzle(self, row, col, dtype:DType):
     offset = row * self.cols + col
@@ -115,7 +116,10 @@ class STLayout(Layout):
     return offset
 
 def st_16x16_swizzle(offset:UOp, _): return offset
-ST_16X16 = STLayout(16, 16, st_16x16_swizzle)
+def st_16x16_bpt(dtype:DType):
+  if dtype.itemsize == 2 or dtype.itemsize == 4: return 16
+  else: raise NotImplementedError
+ST_16X16 = STLayout(16, 16, st_16x16_swizzle, st_16x16_bpt)
 
 def st_16x16_swizzled_swizzle(offset:UOp, dtype:DType):
   if dtype.itemsize == 2:
@@ -124,7 +128,11 @@ def st_16x16_swizzled_swizzle(offset:UOp, dtype:DType):
   elif dtype.itemsize == 4:
     return offset
   else: raise NotImplementedError
-ST_16X16_SWIZZLED = STLayout(16, 16, st_16x16_swizzled_swizzle)
+def st_16x16_swizzled_bpt(dtype:DType):
+  if dtype.itemsize == 2: return 4
+  elif dtype.itemsize == 4: return 16
+  else: raise NotImplementedError
+ST_16X16_SWIZZLED = STLayout(16, 16, st_16x16_swizzled_swizzle, st_16x16_swizzled_bpt)
 
 def st_32x32_swizzle(offset:UOp, dtype:DType):
   if dtype.itemsize == 2:
@@ -134,7 +142,10 @@ def st_32x32_swizzle(offset:UOp, dtype:DType):
   elif dtype.itemsize == 4:
     return offset
   else: raise NotImplementedError
-ST_32X32 = STLayout(32, 32, st_32x32_swizzle)
+def st_32x32_bpt(dtype:DType):
+  if dtype.itemsize == 2 or dtype.itemsize == 4: return 16
+  else: raise NotImplementedError
+ST_32X32 = STLayout(32, 32, st_32x32_swizzle, st_32x32_bpt)
 
 def st_16x32_swizzle(offset:UOp, dtype:DType):
   if dtype.itemsize == 2:
@@ -143,7 +154,10 @@ def st_16x32_swizzle(offset:UOp, dtype:DType):
   elif dtype.itemsize == 4:
     return offset
   else: raise NotImplementedError
-ST_16X32 = STLayout(16, 32, st_16x32_swizzle)
+def st_16x32_bpt(dtype:DType):
+  if dtype.itemsize == 2 or dtype.itemsize == 4: return 16
+  else: raise NotImplementedError
+ST_16X32 = STLayout(16, 32, st_16x32_swizzle, st_16x32_bpt)
 
 def st_32x16_swizzle(offset:UOp, dtype:DType):
   if dtype.itemsize == 2:
@@ -152,15 +166,18 @@ def st_32x16_swizzle(offset:UOp, dtype:DType):
   elif dtype.itemsize == 4:
     return offset
   else: raise NotImplementedError
-ST_32X16 = STLayout(32, 16, st_32x16_swizzle)
+def st_32x16_bpt(dtype:DType):
+  if dtype.itemsize == 2 or dtype.itemsize == 4: return 16
+  else: raise NotImplementedError
+ST_32X16 = STLayout(32, 16, st_32x16_swizzle, st_32x16_bpt)
 
 @autowrap(UOp)
 class ST:
-  def __init__(self, uop, layout, ker):
-    self._uop, self.layout, self.ker = uop, layout, ker
+  def __init__(self, uop, rows, cols, layout, ker):
+    self._uop, self.rows, self.cols, self.layout, self.ker = uop, rows, cols, layout, ker
 
   def ruop(self, uop):
-    return ST(uop, self.layout, self.ker)
+    return ST(uop, self.rows, self.cols, self.layout, self.ker)
 
   @classmethod
   def create(cls, shape, dtype, layout:STLayout, ker):
@@ -170,8 +187,11 @@ class ST:
     assert cols % layout.cols == 0
     assert cols % layout.elements_per_thread == 0
 
-    uop = ker.alloc(shape[:-2] + (rows, cols), dtype, AddrSpace.LOCAL)
-    return cls(uop, layout, ker)
+    height = rows // layout.rows
+    width = cols // layout.cols
+
+    uop = ker.alloc(shape[:-2] + (height, width, layout.rows, layout.cols), dtype, AddrSpace.LOCAL)
+    return cls(uop, rows, cols, layout, ker)
 
   def swizzle(self, row, col):
     swizzled_offset = self.layout.swizzle(row, col, self._uop.dtype.base.scalar())
@@ -226,19 +246,22 @@ class RV(TileMathMixin):
     return RV(uop, self.layout, self.ker)
 
   @classmethod
-  def create(cls, length, dtype, layout, ker):
-    tiles = length // 16
+  def create(cls, length, dtype, layout, rt_layout:RTLayout, ker):
+    tiles = length // rt_layout.rows
 
     match layout:
       case "naive":
-        inner_dim = 1
-        outer_dim = (tiles + 1) // 2
+        inner_dim = (length + WARP_THREADS - 1) // WARP_THREADS
+        outer_dim = 1
       case "ortho":
         inner_dim = 1
         outer_dim = tiles
+      case "align":
+        inner_dim = rt_layout.elements_per_thread
+        outer_dim = tiles
       case _: raise NotImplementedError(f"rv layout {layout} not implemented")
 
-    uop = ker.alloc((outer_dim, inner_dim, 2), dtype, AddrSpace.REG)
+    uop = ker.alloc((outer_dim, inner_dim), dtype, AddrSpace.REG)
     return RV(uop, layout, ker)
 
 ALL_TILES = UOp | GL | ST | RT | RV
