@@ -200,7 +200,7 @@ function focusShape(shape) {
 
 const EventTypes = { EXEC:0, BUF:1 };
 
-async function renderProfiler(path, unit) {
+async function renderProfiler(path, unit, opts) {
   displaySelection("#profiler");
   metadata.replaceChildren(shapeMetadata.get(focusedShape) ?? "");
   // layout once!
@@ -236,7 +236,7 @@ async function renderProfiler(path, unit) {
   for (let i=0; i<layoutsLen; i++) {
     const nameLen = view.getUint8(offset, true); offset += 1;
     const k = textDecoder.decode(new Uint8Array(buf, offset, nameLen)); offset += nameLen;
-    const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px");
+    const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px").style("width", opts.width).style("min-height", opts.height);
     const { y:baseY, height:baseHeight } = rect(div.node());
     const colors = colorScheme[k.split(":")[0]] ?? colorScheme.DEFAULT;
     const offsetY = baseY-canvasTop+padding/2;
@@ -705,7 +705,7 @@ async function main() {
     if (url.pathname+url.search !== ckey) e.close();
     else if (e.readyState === EventSource.OPEN) activeSrc = e;
   }
-  if (ctx.name === "Profiler") return renderProfiler("/get_profile", "realtime");
+  if (ctx.name === "Profiler") return renderProfiler("/get_profile", "realtime", { width:"132px", height:"32px" });
   if (workerUrl == null) await initWorker();
   if (ckey in cache) {
     ret = cache[ckey];
@@ -713,7 +713,7 @@ async function main() {
   // ** Disassembly view
   if (!ckey.startsWith("/rewrites")) {
     if (!(ckey in cache)) cache[ckey] = ret = await fetchValue(ckey);
-    if (ret instanceof ArrayBuffer) return renderProfiler(ckey, "clk"); // cycles on the x axis
+    if (ret instanceof ArrayBuffer) return renderProfiler(ckey, "clk", { height:"16px" }); // cycles on the x axis
     displaySelection("#custom");
     metadata.innerHTML = "";
     const root = d3.create("div").classed("raw-text", true).node();
