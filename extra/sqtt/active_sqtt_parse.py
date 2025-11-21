@@ -15,13 +15,6 @@ from tinygrad.device import Device, ProfileDeviceEvent
 
 from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
 
-# TODO: should really check for AM driver / USB
-if not OSX:
-  def set_power(x): system(f"sudo /opt/rocm/bin/amd-smi set -l {x}")
-  @atexit.register
-  def reset_power(): set_power("auto")
-  set_power("stable_std")
-
 dev = Device["AMD"]
 
 @contextlib.contextmanager
