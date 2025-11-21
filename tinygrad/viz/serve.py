@@ -240,7 +240,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     for w in waves:
       if (row:=f"SE:{w.se} CU:{w.cu} SIMD:{w.simd} WAVE:{w.wave_id}") not in units: units[row] = 0
       units[row] += 1
-      events.append(ProfileRangeEvent(row, "wave", Decimal(w.begin_time), Decimal(w.end_time)))
+      events.append(ProfileRangeEvent(row, f"N:{units[row]}", Decimal(w.begin_time), Decimal(w.end_time)))
       rows, prev_instr = [], w.begin_time
       for i,e in enumerate(w.insts):
         rows.append((e.inst, e.time, max(0, e.time-prev_instr), e.dur, e.stall, str(e.typ).split("_")[-1]))
