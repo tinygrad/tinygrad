@@ -246,10 +246,10 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
       steps.append(create_step(wave_name, ("/counters", len(ctxs), len(steps)), depth=2,
                                data={"rows":rows, "cols":["Instruction", "Clk", "Idle", "Duration", "Stall", "Type"], "summary":summary}))
     events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+events
-    first["data"] = {"value":get_profile(events), "content_type":"application/octet-stream"}
+    first["data"] = {"value":get_profile(events, lambda k:tuple(int(x.split(":")[1]) for x in k.split())), "content_type":"application/octet-stream"}
   ctxs.append({"name":"Counters", "steps":steps})
 
-def get_profile(profile:list[ProfileEvent]) -> bytes|None:
+def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]|None=None) -> bytes|None:
   # start by getting the time diffs
   for ev in profile:
     if isinstance(ev,ProfileDeviceEvent): device_ts_diffs[ev.device] = (ev.comp_tdiff, ev.copy_tdiff if ev.copy_tdiff is not None else ev.comp_tdiff)
@@ -275,8 +275,8 @@ def get_profile(profile:list[ProfileEvent]) -> bytes|None:
   scache:dict[str, int] = {}
   peaks:list[int] = []
   dtype_size:dict[str, int] = {}
-  for k,v in dev_events.items():
-    v.sort(key=lambda e:e[0])
+  for k in sorted(dev_events, key=sort_fn) if sort_fn else dev_events:
+    (v:=dev_events[k]).sort(key=lambda e:e[0])
     layout[k] = timeline_layout(v, start_ts, scache)
     layout[f"{k} Memory"] = mem_layout(v, start_ts, unwrap(end_ts), peaks, dtype_size, scache)
   groups = sorted(layout.items(), key=lambda x: '' if len(ss:=x[0].split(" ")) == 1 else ss[1])
