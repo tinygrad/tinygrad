@@ -785,7 +785,7 @@ class KFDIface:
         os.system(f"echo 'profile_standard' | sudo tee {fn} > /dev/null")
         self.require_profile_mode(can_set_mode=False)
       else:
-        raise RuntimeError("SQTT requires stable power state: run `amd-smi set -l stable_std` for KFD iface")
+        raise RuntimeError("PMC/SQTT requires stable power state: run `amd-smi set -l stable_std` for KFD iface")
 
 class PCIIface(PCIIfaceBase):
   gpus:ClassVar[list[str]] = []
