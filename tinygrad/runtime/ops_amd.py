@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, ClassVar
-import os, ctypes, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, weakref, itertools, collections
+import os, ctypes, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, weakref, itertools, collections, atexit
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, FileIOInterface
@@ -776,10 +776,16 @@ class KFDIface:
 
     raise RuntimeError("\n".join(report))
 
-  def require_profile_mode(self):
+  def require_profile_mode(self, can_set_mode=True):
     if self.dev.target[0] == 9: return
-    if FileIOInterface(f'{self.dev_sysfs_path}/power_dpm_force_performance_level').read()[:16] != 'profile_standard':
-      raise RuntimeError("SQTT requires stable power state: run `amd-smi set -l stable_std` for KFD iface")
+    fn = f'{self.dev_sysfs_path}/power_dpm_force_performance_level'
+    if (perflevel:=FileIOInterface(fn).read().strip()) != 'profile_standard':
+      if can_set_mode:
+        atexit.register(lambda: os.system(f"echo '{perflevel}' | sudo tee {fn} > /dev/null"))
+        os.system(f"echo 'profile_standard' | sudo tee {fn} > /dev/null")
+        self.require_profile_mode(can_set_mode=False)
+      else:
+        raise RuntimeError("SQTT requires stable power state: run `amd-smi set -l stable_std` for KFD iface")
 
 class PCIIface(PCIIfaceBase):
   gpus:ClassVar[list[str]] = []
