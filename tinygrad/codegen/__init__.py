@@ -42,7 +42,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
     sink = graph_rewrite(sink, pm_split_ranges+pm_flatten_range, ctx={}, name="split ranges")
 
     # symbolic (NOTE: this is a requirement for pm_simplify_ranges to be correct)
-    sink = graph_rewrite(sink, sym+pm_flatten_range, name="initial symbolic")
+    sink = graph_rewrite(sink, symbolic+pm_flatten_range, name="initial symbolic")
 
     # optimize (schedule) the AST
     sink = graph_rewrite(sink, pm_simplify_ranges, name="simplify ranges")
