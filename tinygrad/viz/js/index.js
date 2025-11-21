@@ -282,7 +282,8 @@ async function renderProfiler(path, unit, opts) {
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
         if (key != null) shapeMetadata.set(key, html.node());
-        const arg = { tooltipText:colored(e.name).outerHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), key, ...shapeRef };
+        const arg = { tooltipText:colored(label).outerHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), key,
+                      ctx:shapeRef?.ctx, step:shapeRef?.step };
         if (e.key != null) shapeMap.set(e.key, arg);
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label, fillColor });
