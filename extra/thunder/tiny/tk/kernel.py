@@ -33,6 +33,8 @@ class Kernel(AbstractContextManager):
 
   @property
   def warpid(self): return self.threadIdx_x // WARP_THREADS
+  @property
+  def laneid(self): return self.threadIdx_x % WARP_THREADS
 
   def __enter__(self): return self
   def __exit__(self, exc_type, exc_value, traceback): pass
@@ -69,9 +71,9 @@ class Kernel(AbstractContextManager):
     return uop
 
   def gl(self, shape, dtype): return GL.create(shape, dtype, self)
-  def st(self, shape, dtype, layout=ST_16X16_SWIZZLED): return ST.create(shape, dtype, layout, self)
+  def st(self, shape, dtype, layout=ST_16X16): return ST.create(shape, dtype, layout, self)
   def rt(self, shape, dtype, layout=RT_16X16): return RT.create(shape, dtype, layout, self)
-  def rv(self, length, dtype, layout="naive"): return RV.create(length, dtype, layout, self)
+  def rv(self, length, dtype, layout="naive", rt_layout=RT_16X16): return RV.create(length, dtype, layout, rt_layout, self)
 
   def push_store(self, store:UOp, uop:UOp): self.store_stack.append((store, uop))
 
@@ -89,4 +91,4 @@ class Kernel(AbstractContextManager):
   def endrange(self):
     last_store = self.store_stack.pop()
     last_range = self.range_stack.pop()
-    return last_store[1].after(last_store[0].barrier().end(last_range._rng)).reshape(last_store[1].shape)
+    return last_store[1].after(last_store[0].end(last_range._rng)).reshape(last_store[1].shape)
