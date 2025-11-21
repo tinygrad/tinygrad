@@ -282,7 +282,8 @@ async function renderProfiler(path, unit, opts) {
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
         if (key != null) shapeMetadata.set(key, html.node());
-        const arg = { tooltipText:colored(e.name).outerHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), key, ...shapeRef };
+        const arg = { tooltipText:colored(label).outerHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), key,
+                      ctx:shapeRef?.ctx, step:shapeRef?.step };
         if (e.key != null) shapeMap.set(e.key, arg);
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label, fillColor });
@@ -495,16 +496,16 @@ async function renderProfiler(path, unit, opts) {
   new ResizeObserver(([e]) => e.contentRect.width > 0 && resize()).observe(profiler.node());
 
   function findRectAtPosition(x, y) {
-    let tid = null;
+    let track = null;
     for (const k of data.tracks.keys()) {
       const r = rect(document.getElementById(k));
-      if (y >= r.y && y <= r.y+r.height) { tid = k; break; }
+      if (y >= r.y && y <= r.y+r.height) { track = data.tracks.get(k); break; }
     }
-    if (tid == null) return;
-    const { top, left, width, height } = rect(canvas);
-    const X = ((x-left) * (canvas.width/width))/dpr;
-    const Y = ((y-top) * (canvas.height/height))/dpr;
-    for (const r of data.tracks.get(tid).visible) {
+    if (track == null) return;
+    const R = rect(canvas);
+    const X = ((x-R.left) * (canvas.width/R.width))/dpr;
+    const Y = ((y-R.top) * (canvas.height/R.height))/dpr;
+    for (const r of track.visible) {
       if (Y>=r.y0 && Y<=r.y1 && X>=r.x0 && X<=r.x1) return r.arg;
     }
   }
