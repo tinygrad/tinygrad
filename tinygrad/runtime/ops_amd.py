@@ -776,8 +776,10 @@ class KFDIface:
 
     raise RuntimeError("\n".join(report))
 
-  def is_in_profile_mode(self):
-    return self.dev.target[0] == 9 or FileIOInterface(f'{self.dev_sysfs_path}/power_dpm_force_performance_level').read()[:16] == 'profile_standard'
+  def require_profile_mode(self):
+    if self.dev.target[0] == 9: return
+    if FileIOInterface(f'{self.dev_sysfs_path}/power_dpm_force_performance_level').read()[:16] != 'profile_standard':
+      raise RuntimeError("SQTT requires stable power state: run `amd-smi set -l stable_std` for KFD iface")
 
 class PCIIface(PCIIfaceBase):
   gpus:ClassVar[list[str]] = []
@@ -788,7 +790,7 @@ class PCIIface(PCIIfaceBase):
     self._setup_adev(self.pci_dev)
     self.pci_dev.write_config(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
 
-  def is_in_profile_mode(self): return True
+  def require_profile_mode(self): return True
 
   def _setup_adev(self, pci_dev:PCIDevice, dma_regions:list[tuple[int, MMIOInterface]]|None=None):
     self.dev_impl:AMDev = AMDev(pci_dev, dma_regions)
@@ -925,7 +927,7 @@ class AMDDevice(HCQCompiled):
     self.pmc_enabled = PROFILE and PMC > 0
     if self.pmc_enabled:
       if self.target[0] not in {9, 11, 12}: raise RuntimeError(f'PMC are not supported on gc:{self.target}')
-      if not self.iface.is_in_profile_mode(): raise RuntimeError("PMC requires stable power state: run `amd-smi set -l stable_std` for KFD iface")
+      self.iface.require_profile_mode()
 
       self.pmc_sched:list[PMCSample] = []
       self.pmc_counters = import_pmc(self.target)
@@ -943,7 +945,7 @@ class AMDDevice(HCQCompiled):
     self.sqtt_enabled = PROFILE and SQTT > 0
     if self.sqtt_enabled:
       if self.target[0] not in {9, 11, 12}: raise RuntimeError(f'SQ Thread Tracing is not supported on gc:{self.target}')
-      if not self.iface.is_in_profile_mode(): raise RuntimeError("SQTT requires stable power state: run `amd-smi set -l stable_std` for KFD iface")
+      self.iface.require_profile_mode()
 
       SQTT_BUFFER_SIZE = getenv("SQTT_BUFFER_SIZE", 256) # in mb, per shader engine
       self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE << 20, BufferSpec(nolru=True, uncached=True)) for _ in range(self.se_cnt)]
