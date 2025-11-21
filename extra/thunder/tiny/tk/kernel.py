@@ -2,7 +2,7 @@ from contextlib import AbstractContextManager
 from tinygrad.uop.ops import UOp, KernelInfo, AxisType, AddrSpace
 from extra.thunder.tiny.tk import WARP_THREADS
 from extra.thunder.tiny.tk.group import Group
-from extra.thunder.tiny.tk.tiles import GL, ST_16X16, ST_16X16_SWIZZLED, ST, RT_16X16, RT, RV
+from extra.thunder.tiny.tk.tiles import GL, ST_16X16, ST_16X16_SWIZZLED, ST, RT_16X16, RT, RV, TileLayout, VecLayout
 
 class _tk_range:
   user_rid = 0
@@ -71,9 +71,9 @@ class Kernel(AbstractContextManager):
     return uop
 
   def gl(self, shape, dtype): return GL.create(shape, dtype, self)
-  def st(self, shape, dtype, layout=ST_16X16): return ST.create(shape, dtype, layout, self)
-  def rt(self, shape, dtype, layout=RT_16X16): return RT.create(shape, dtype, layout, self)
-  def rv(self, length, dtype, layout="naive", rt_layout=RT_16X16): return RV.create(length, dtype, layout, rt_layout, self)
+  def st(self, shape, dtype, layout=TileLayout.ROW, base_shape=ST_16X16): return ST.create(shape, dtype, layout, base_shape, self)
+  def rt(self, shape, dtype, layout=TileLayout.ROW, base_shape=RT_16X16): return RT.create(shape, dtype, layout, base_shape, self)
+  def rv(self, length, dtype, layout=VecLayout.ORTHO, rt_base_shape=RT_16X16): return RV.create(length, dtype, layout, rt_base_shape, self)
 
   def push_store(self, store:UOp, uop:UOp): self.store_stack.append((store, uop))
 
