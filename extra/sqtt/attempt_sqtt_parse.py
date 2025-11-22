@@ -255,6 +255,7 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       fields.append(f"idx_hi5=0x{idx_hi:x}")
       fields.append(f"id7=0x{id7:x}")
     case 0x18:
+      # FFF88 is the mask
       # From case 0x18:
       #   low3   = w & 7
       #   grp3   = (w >> 3) or (w >> 4) & 7   (layout-dependent)
@@ -262,25 +263,12 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       #   hi8    = (w >> 0xc) & 0xff   (layout 4 path)
       #   hi7    = (w >> 0xd) & 0x7f   (other layouts)
       #   idx5   = (w >> 7) or (w >> 8) & 0x1f, used as wave index
-      low3     = pkt & 0x7
-      grp3_a   = (pkt >> 3) & 0x7
-      grp3_b   = (pkt >> 4) & 0x7
-      flag_b6  = (pkt >> 6) & 0x1
-      flag_b7  = (pkt >> 7) & 0x1
-      idx5_a   = (pkt >> 7) & 0x1F
-      idx5_b   = (pkt >> 8) & 0x1F
-      hi8      = (pkt >> 12) & 0xFF
-      hi7      = (pkt >> 13) & 0x7F
-
-      fields.append(f"low3={low3:x}")
-      fields.append(f"grp3_a={grp3_a:x}")
-      fields.append(f"grp3_b={grp3_b:x}")
-      fields.append(f"flag_b6={flag_b6}")
-      fields.append(f"flag_b7={flag_b7}")
-      fields.append(f"idx5_a={idx5_a:x}")
-      fields.append(f"idx5_b={idx5_b:x}")
-      fields.append(f"hi8={hi8:02x}")
-      fields.append(f"hi7={hi7:02x}")
+      flag = (pkt >> 3) & 1
+      idx5 = (pkt >> 7) & 0x1F
+      hi8 = (pkt >> 12)
+      fields.append(f"flag={flag:x}")
+      fields.append(f"idx5={idx5:x}") # wave number?
+      fields.append(f"hi8=0x{hi8:x}")
     case 0x14:
       subop   = (pkt >> 16) & 0xFFFF       # (short)(w >> 0x10)
       val32   = (pkt >> 32) & 0xFFFFFFFF   # (uint)(w >> 0x20)
@@ -354,11 +342,13 @@ DEFAULT_FILTER = tuple()
 # NOP + pure time
 if FILTER_LEVEL >= 0: DEFAULT_FILTER += (0x10, 0xf)
 # reg + event + sample + marker
-if FILTER_LEVEL >= 1: DEFAULT_FILTER += (0x11, 0x12, 0x14, 0x16)
+if FILTER_LEVEL >= 1: DEFAULT_FILTER += (0x11, 0x14, 0x16)
 # instructions and runs + waverdy
 if FILTER_LEVEL >= 3: DEFAULT_FILTER += (0x01, 0x02, 0x03, 0x04, 0x05, 0x6, 0x18)
 # waves
 if FILTER_LEVEL >= 4: DEFAULT_FILTER += (0x8, 0x9,)
+# events
+if FILTER_LEVEL >= 5: DEFAULT_FILTER += (0x12,)
 
 def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -> None:
   """
