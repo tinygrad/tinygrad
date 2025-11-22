@@ -41,7 +41,6 @@ template = """.text
 .type matmul,@function
 matmul:
   INSTRUCTION
-  s_endpgm
 
 .rodata
 .p2align 6
@@ -64,7 +63,7 @@ amdhsa.kernels:
     .private_segment_fixed_size: 0
     .wavefront_size: 32
     .sgpr_count: 8
-    .vgpr_count: 32
+    .vgpr_count: 8
     .max_flat_workgroup_size: 1024
     .kernarg_segment_align: 8
     .kernarg_segment_size: 8
@@ -79,32 +78,33 @@ amdhsa.kernels:
 .end_amdgpu_metadata
 """
 
-def run_asm(src):
-  NUM_WORKGROUPS = 1
+def run_asm(src, num_workgroups=1, num_waves=1):
   WAVE_SIZE = 32
-  NUM_WAVES = 1
   t = Tensor.empty(0x1000).realize()
   buf = t.uop.buffer.ensure_allocated()
   lib = dev.compiler.compile(template.replace("INSTRUCTION", '\n'.join(src)))
   dev.compiler.disassemble(lib)
   fxn = AMDProgram(dev, "matmul", lib)
-  fxn(buf._buf, global_size=(NUM_WORKGROUPS,1,1), local_size=(WAVE_SIZE*NUM_WAVES,1,1), wait=True)
+  fxn(buf._buf, global_size=(num_workgroups,1,1), local_size=(WAVE_SIZE*num_waves,1,1), wait=True)
 
 if __name__ == "__main__":
   with save_sqtt() as sqtt:
     run_asm([
       "s_nop 0",
-      "s_nop 0",
-      "s_nop 0",
-      "s_nop 0",
-      "s_nop 0",
-      "s_nop 0",
+      #"s_nop 0",
+      #"s_nop 0",
+      #"s_nop 15",
+      #"s_nop 0",
+      #"s_nop 0",
       #"s_load_b64 s[0:1], s[0:1], null",
       #"s_waitcnt lgkmcnt(0)",
       #"v_mov_b32_e32 v0, 0",
       #"global_load_b32 v1, v0, s[0:1]",
       #"s_waitcnt vmcnt(0)",
-    ])
+      "v_add_f32_e32 v1 v0 v0",
+      "s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)",
+      "s_endpgm",
+    ], num_workgroups=32, num_waves=1)
   exit(0)
 
   with save_sqtt() as sqtt:

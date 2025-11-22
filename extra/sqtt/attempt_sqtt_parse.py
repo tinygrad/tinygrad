@@ -198,14 +198,20 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
   match opcode:
     case 0x01: # VALUINST
       # 6 bit field
-      fields.append(f"type = {pkt>>6:X}")
+      flag = (pkt >> 6) & 1
+      wave = pkt >> 7
+      fields.append(f"wave={wave:x}")
+      fields.append(f"flag={flag:X}")
     case 0x02: # VMEMEXEC
+      # 2 bit field
       fields.append(f"type = {pkt>>6:X}")
     case 0x03: # ALUEXEC
+      # 2 bit field
       fields.append(f"type = {pkt>>6:X}")
     case 0x04: # IMMEDIATE_4
       # 5 bit field
-      fields.append(f"type = {pkt>>7:X}")
+      wave = pkt >> 7
+      fields.append(f"wave={wave:x}")
     case 0x05: # IMMEDIATE_5
       # 16 bit field
       fields.append(f"type = {pkt>>8:X}")
@@ -235,7 +241,14 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       fields.append(f"wave = {pkt>>8:X}")
     case 0x8:
       # wave end, this is 20 bits (FFF00)
-      fields.append(f"wave = {pkt>>8:X}")
+      flag7   = (pkt >> 8) & 0x3
+      wgp     = (pkt >> 10) & 1
+      slot4   = (pkt >> 11) & 0xF
+      wave    = (pkt >> 15) & 0x1f
+      fields.append(f"wave={wave:x}")
+      fields.append(f"wgp={wgp}")
+      fields.append(f"flag7={flag7}")
+      fields.append(f"slot4={slot4:x}")
     case 0x9:
       # From case 9 (WAVESTART) in multiple consumers:
       #   flag7  = (w >> 7) & 1        (low bit of uVar41)
@@ -244,17 +257,15 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       #   idx_lo = (w >> 0xd) & 0x1f   (low index, layout<4 path)
       #   idx_hi = (w >> 0xf) & 0x1f   (high index, layout>=4 path)
       #   id7    = (w >> 0x19) & 0x7f  (7-bit id)
-      flag7   = (pkt >> 7) & 0x1
-      cls2    = (pkt >> 8) & 0x3
-      slot4   = (pkt >> 10) & 0xF
-      idx_lo  = (pkt >> 13) & 0x1F
-      idx_hi  = (pkt >> 15) & 0x1F
-      id7     = (pkt >> 25) & 0x7F
+      flag7   = (pkt >> 7) & 3
+      wgp     = (pkt >> 9) & 1
+      slot3   = (pkt >> 10) & 0x7  # NOTE: this isn't 4!
+      wave    = (pkt >> 13) & 0x1F
+      id7     = (pkt >> 17)
+      fields.append(f"wave={wave:x}")
       fields.append(f"flag7={flag7}")
-      fields.append(f"cls2={cls2}")
-      fields.append(f"slot4=0x{slot4:x}")
-      fields.append(f"idx_lo5=0x{idx_lo:x}")
-      fields.append(f"idx_hi5=0x{idx_hi:x}")
+      fields.append(f"wgp={wgp}")
+      fields.append(f"slot3={slot3:x}")
       fields.append(f"id7=0x{id7:x}")
     case 0x18:
       # FFF88 is the mask
@@ -266,10 +277,12 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       #   hi7    = (w >> 0xd) & 0x7f   (other layouts)
       #   idx5   = (w >> 7) or (w >> 8) & 0x1f, used as wave index
       flag = (pkt >> 3) & 1
-      idx5 = (pkt >> 7) & 0x1F
-      hi8 = (pkt >> 12)
+      flag2 = (pkt >> 7) & 1
+      wave = (pkt >> 8) & 0x1F
+      hi8 = (pkt >> 13)
+      fields.append(f"wave={wave:x}")
       fields.append(f"flag={flag:x}")
-      fields.append(f"idx5={idx5:x}") # wave number?
+      fields.append(f"flag2={flag2:x}")
       fields.append(f"hi8=0x{hi8:x}")
     case 0x14:
       subop   = (pkt >> 16) & 0xFFFF       # (short)(w >> 0x10)
@@ -321,7 +334,7 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       #   sel_b  = (w >> 0x21) & 7
       #   flag4  = (w >> 0x3b) & 1  (only meaningful when layout == 4)
       layout = (pkt >> 7)  & 0x3F
-      mode   = (pkt >> 13) & 0x3
+      simd   = (pkt >> 13) & 0x3  # you can change this by changing traced simd
       group  = (pkt >> 15) & 0x7
       sel_a  = (pkt >> 0x1C) & 0xF
       sel_b  = (pkt >> 0x21) & 0x7
@@ -329,7 +342,7 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
 
       fields.append(f"layout={layout}")
       fields.append(f"group={group}")
-      fields.append(f"mode={mode}")
+      fields.append(f"simd={simd}")
       fields.append(f"sel_a={sel_a}")
       fields.append(f"sel_b={sel_b}")
       if layout == 4:
