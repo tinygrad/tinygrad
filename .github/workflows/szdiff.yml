@@ -65,6 +65,7 @@ jobs:
           pip install tabulate
           BASE="$GITHUB_WORKSPACE/base"
           PR="$GITHUB_WORKSPACE/pr"
+          pip install $BASE
           cp "$BASE/sz.py" .
           echo "loc_content<<EOF" >> "$GITHUB_ENV"
           python sz.py "$BASE" "$PR" >> "$GITHUB_ENV"
