@@ -23,7 +23,9 @@ base_rewrite = PatternMatcher([
     f"__builtin_convertvector({ctx[x.src[0]]}, {ctx.render_dtype(x.dtype)})" if x.dtype.count > 1 and not isinstance(x.dtype, PtrDType) else None),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"({ctx.render_cast(x.dtype, ctx[x.src[0]])})"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x:
-    f"(((union {{ {ctx.render_dtype(x.src[0].dtype)} f; {ctx.render_dtype(x.dtype)} t; }}){{ .f = {ctx[x.src[0]]} }}).t)"),
+    f"__builtin_bit_cast({ctx.render_dtype(x.dtype)}, ({ctx.render_dtype(x.src[0].dtype)})({ctx[x.src[0]]}))"),
+  # this union is valid C99, but not valid C++. we use the clang specific __builtin_bit_cast
+  # f"(((union {{ {ctx.render_dtype(x.src[0].dtype)} f; {ctx.render_dtype(x.dtype)} t; }}){{ .f = {ctx[x.src[0]]} }}).t)"
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda ctx,x: f"{ctx.smem_align}{ctx.smem_prefix}{ctx.render_dtype(x.dtype.base)} {ctx[x]}[{x.dtype.size}];"),
   (UPat(Ops.BARRIER), lambda ctx: ctx.barrier),
   (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: f"{ctx.code_for_workitem[x.arg[0]](x.arg[-1])}; /* {(x.src[0]).render()} */"),
@@ -275,7 +277,6 @@ class OpenCLRenderer(CStyleLanguage):
               dtypes.bfloat16: "ushort" }
 
   string_rewrite = PatternMatcher([
-    # C99 BITCAST
     (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"as_{ctx.render_dtype(x.dtype)}(({ctx.render_dtype(x.src[0].dtype)})({ctx[x.src[0]]}))"),
     # load/store image (OpenCL)
     (UPat(Ops.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf').index(UPat.var('idx', dtypes.int.vec(2)), UPat.var("gate")), UPat.var("var"))),
@@ -336,7 +337,6 @@ class MetalRenderer(CStyleLanguage):
   ]) + extra_pm
 
   string_rewrite = PatternMatcher([
-    # C++14 BITCAST
     (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"as_type<{ctx.render_dtype(x.dtype)}>(({ctx.render_dtype(x.src[0].dtype)})({ctx[x.src[0]]}))"),
   ]) + base_rewrite
 
