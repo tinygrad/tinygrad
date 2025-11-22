@@ -13,14 +13,14 @@ class FastEnum(IntEnum):
 class Ops(FastEnum):
   # ** 1 -- defines/special **
 
-  # TODO: unify these ops into the levels of the memory hierarchy
-  DEFINE_GLOBAL = auto(); DEFINE_LOCAL = auto(); DEFINE_REG = auto()
-
-  # this is for symbolic shapes
-  DEFINE_VAR = auto(); BIND = auto()
+  # define GLOBAL/VAR are ptrs to outside the Kernel
+  DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); BIND = auto()
 
   # this is a RANGE for GPU dimensions, similar to symbolic shapes but not exactly
   SPECIAL = auto()
+
+  # define LOCAL/REG allocate things
+  DEFINE_LOCAL = auto(); DEFINE_REG = auto()
 
   # ** 2 -- non op uops **
 
