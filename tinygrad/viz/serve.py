@@ -25,7 +25,6 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
 
 # VIZ API
 
-
 # A step is a lightweight descriptor for a trace entry
 # Includes a name, metadata and a URL path for fetching the full data
 
