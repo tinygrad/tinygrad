@@ -448,7 +448,6 @@ class TestTK(unittest.TestCase):
       sink = ker.finish()
 
     with Context(DEBUG=0):
-      Tensor.manual_seed(42)
       a = Tensor.rand(1, 1, BLOCK_SIZE, N, dtype="float32")
       b = Tensor.empty(1, 1, BLOCK_SIZE, N, dtype="float32")
       Tensor.realize(a, b)
@@ -508,7 +507,6 @@ class TestTK(unittest.TestCase):
       sink = ker.finish()
 
     with Context(DEBUG=0):
-      Tensor.manual_seed(42)
       a = Tensor.rand(1, 1, N, BLOCK_SIZE, dtype="float32")
       b = Tensor.empty(1, 1, N, BLOCK_SIZE, dtype="float32")
       Tensor.realize(a, b)
@@ -520,6 +518,166 @@ class TestTK(unittest.TestCase):
     ref = a.float().softmax(axis=2)
 
     np.testing.assert_allclose(b.numpy(), ref.numpy(), atol=1e-5, rtol=1e-5)
+
+  def test_fa(self):
+    NUM_WORKERS = 1
+    B, N, H, H_KV, D = 1, 8192, 32, 32, 128
+    Q_BLOCK_SIZE = 16
+    KV_BLOCK_SIZE = 16
+    GROUP_SIZE = H // H_KV
+    with Kernel((H, N // (Q_BLOCK_SIZE*NUM_WORKERS), B), NUM_WORKERS * WARP_THREADS) as ker:
+      warp = ker.warp
+
+      # kernel
+      o = ker.gl((B, N, H, D), dtypes.bfloat16)
+      q = ker.gl((B, N, H, D), dtypes.bfloat16)
+      k = ker.gl((B, N, H_KV, D), dtypes.bfloat16)
+      v = ker.gl((B, N, H_KV, D), dtypes.bfloat16)
+
+      head = (ker.blockIdx_x % GROUP_SIZE) * GROUP_SIZE + (ker.blockIdx_x // GROUP_SIZE)
+      head_kv = head // GROUP_SIZE
+      batch = ker.blockIdx_z
+      q_seq = ker.blockIdx_y * NUM_WORKERS + ker.warpid
+
+      k_smem = ker.st((KV_BLOCK_SIZE, D), dtypes.bfloat16)
+      v_smem = ker.st((KV_BLOCK_SIZE, D), dtypes.bfloat16)
+
+      q_reg_fl = ker.rt((Q_BLOCK_SIZE, D), dtypes.float32)
+      q_reg = ker.rt((Q_BLOCK_SIZE, D), dtypes.bfloat16)
+      q_reg_transposed = ker.rt((D, Q_BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
+      k_reg = ker.rt((KV_BLOCK_SIZE, D), dtypes.bfloat16)
+      k_reg_transposed = ker.rt((D, KV_BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
+      v_reg = ker.rt((KV_BLOCK_SIZE, D), dtypes.bfloat16, TileLayout.COL)
+      o_reg = ker.rt((D, Q_BLOCK_SIZE), dtypes.float32, TileLayout.COL)
+      o_reg_transposed = ker.rt((Q_BLOCK_SIZE, D), dtypes.float32)
+      att_block = ker.rt((KV_BLOCK_SIZE, Q_BLOCK_SIZE), dtypes.float32, TileLayout.COL)
+      att_block_mma = ker.rt((KV_BLOCK_SIZE, Q_BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
+      max_vec_last = ker.rv(KV_BLOCK_SIZE, dtypes.float32)
+      max_vec = ker.rv(KV_BLOCK_SIZE, dtypes.float32)
+      norm_vec = ker.rv(KV_BLOCK_SIZE, dtypes.float32)
+      scale_vec = ker.rv(KV_BLOCK_SIZE, dtypes.float32)
+
+      max_vec = warp.neg_inf(max_vec)
+      norm_vec = warp.zero(norm_vec)
+      o_reg = warp.zero(o_reg)
+      scale_vec = warp.ones(scale_vec)
+
+      # load q tile
+      q_reg_fl = warp.load(q_reg_fl, q, (), (batch, q_seq, head, 0), axis=1)
+      q_reg_fl *= (1.0 / math.sqrt(D)) * (1.0 / math.log(2))
+      q_reg = warp.copy(q_reg, q_reg_fl)
+      q_reg_transposed = warp.transpose(q_reg_transposed, q_reg)
+
+      for kv_idx in ker.range(N // KV_BLOCK_SIZE):
+        k_smem = warp.load(k_smem, k, (), (batch, kv_idx, head_kv, 0), axis=1)
+        v_smem = warp.load(v_smem, v, (), (batch, kv_idx, head_kv, 0), axis=1)
+
+        k_reg = warp.load(k_reg, k_smem)
+        v_reg = warp.load(v_reg, v_smem)
+
+        # mma qk^t
+        att_block = warp.zero(att_block.after(kv_idx))
+        k_reg_transposed = warp.transpose(k_reg_transposed, k_reg)
+        att_block = warp.mma_AtB(att_block, k_reg_transposed, q_reg_transposed)
+
+        # softmax
+        max_vec_last = warp.copy(max_vec_last.after(kv_idx), max_vec)
+        max_vec = warp.row_reduce(max_vec.after(max_vec_last), att_block, lambda a, b: a.maximum(b), init_value=-math.inf)
+
+        scale_vec = warp.map(scale_vec.after(max_vec_last, max_vec), lambda _, idx: max_vec_last[*idx] - max_vec[*idx])
+        scale_vec = scale_vec.exp2()
+
+        o_reg *= scale_vec
+        norm_vec *= scale_vec
+
+        att_block -= max_vec
+        att_block = att_block.exp2()
+
+        norm_vec = warp.row_reduce(norm_vec.after(scale_vec), att_block, lambda a, b: a + b)
+
+        # mma av
+        att_block_mma = warp.copy(att_block_mma.after(kv_idx, norm_vec), att_block)
+        o_reg = warp.mma_AtB(o_reg, v_reg, att_block_mma)
+      o_reg = ker.endrange()
+
+      o_reg /= norm_vec
+
+      o_reg_transposed = warp.transpose(o_reg_transposed, o_reg)
+      o = warp.store(o, o_reg_transposed, (batch, q_seq, head, 0), (), axis=1)
+
+      sink = ker.finish()
+
+    with Context(DEBUG=0):
+      q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
+      k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
+      v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
+      out = Tensor.empty(B, N, H, D, dtype=dtypes.bfloat16)
+      Tensor.realize(q, k, v, out)
+
+    ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (out, q, k, v)])
+    for _ in range(5): ei.run(wait=True)
+    out = out.float()
+
+    q_permuted = q.permute(0, 2, 1, 3)
+    k_permuted = k.permute(0, 2, 1, 3)
+    v_permuted = v.permute(0, 2, 1, 3)
+    ref = q_permuted.scaled_dot_product_attention(k_permuted, v_permuted, enable_gqa=True).float()
+    ref = ref.permute(0, 2, 1, 3)
+
+    # diff_arrays(out.tolist(), ref.tolist())
+
+    np.testing.assert_allclose(out.numpy(), ref.numpy(), atol=1e-2, rtol=1e-5)
+
+import itertools
+def diff_arrays(arr1, arr2):
+  """
+  Compares two arrays (flat or nested) and prints them with highlighting.
+  Red = element in arr1 (expected) but different or missing in arr2.
+  Green = element in arr2 (actual) but different or missing in arr1.
+  """
+  # ANSI escape codes for colors
+  RED = "\033[91m"
+  GREEN = "\033[92m"
+  RESET = "\033[0m"
+  SENTINEL = object()
+
+  def colorize_entire(item, color_code):
+    """Helper to recursively color an entire structure (for missing/added branches)."""
+    if isinstance(item, list):
+      elements = [colorize_entire(x, color_code) for x in item]
+      return f"[{', '.join(elements)}]"
+    return f"{color_code}{str(item)}{RESET}"
+
+  def recursive_diff(a, b):
+    # Case 1: Both are lists - Recurse
+    if isinstance(a, list) and isinstance(b, list):
+      diffs = []
+      for sub_a, sub_b in itertools.zip_longest(a, b, fillvalue=SENTINEL):
+        diffs.append(recursive_diff(sub_a, sub_b))
+      return f"[{', '.join(diffs)}]"
+
+    # Case 2: Item missing in 'a' (New in 'b')
+    if a is SENTINEL:
+      return colorize_entire(b, GREEN)
+    
+    # Case 3: Item missing in 'b' (Deleted from 'a')
+    if b is SENTINEL:
+      return colorize_entire(a, RED)
+
+    # Case 4: Values Match
+    if np.allclose(a, b):
+      return str(a)
+
+    # Case 5: Mismatch (Value or Type difference)
+    part_a = f"{RED}{str(a)}{RESET}"
+    part_b = f"{GREEN}{str(b)}{RESET}"
+    return f"[{part_a} -> {part_b}]"
+
+  print(f"Comparing arrays:")
+  # We treat the initial inputs as the first level of recursion
+  result = recursive_diff(arr1, arr2)
+  print(result)
+  print("-" * 40)
 
 if __name__ == "__main__":
   unittest.main()
