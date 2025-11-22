@@ -4,6 +4,8 @@ import token
 import tokenize
 import itertools
 from tabulate import tabulate
+from tinygrad.uop import Ops
+from tinygrad.helpers import ContextVar
 
 TOKEN_WHITELIST = [token.OP, token.NAME, token.NUMBER, token.STRING]
 
@@ -82,7 +84,10 @@ if __name__ == "__main__":
       for dir_name, group in itertools.groupby(groups, key=lambda x:x[0]):
         dir_sizes[dir_name] = sum([x[1] for x in group])
         print(f"{dir_name:30s} : {dir_sizes[dir_name]:6d}")
-      print(f"\n core line count: {sum([v for k,v in dir_sizes.items() if k not in NONCORE_DIRS])}")
+      print()
+      print(f"      flag count: {len(ContextVar._cache)}")
+      print(f"   number of ops: {len(Ops)}")
+      print(f" core line count: {sum([v for k,v in dir_sizes.items() if k not in NONCORE_DIRS])}")
       total_lines = sum([x[1] for x in table])
       print(f"total line count: {total_lines}")
       max_line_count = int(os.getenv("MAX_LINE_COUNT", "-1"))
