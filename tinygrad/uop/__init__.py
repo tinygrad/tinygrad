@@ -25,13 +25,11 @@ class Ops(FastEnum):
   # ** 2 -- non op uops **
 
   # uops that aren't rendered
-  NOOP = auto(); SINK = auto()
+  NOOP = auto(); REWRITE_ERROR = auto()
 
   # AFTER passes src[0] through and promises in the toposort that any consumers of the AFTER run after src[1:]
-  AFTER = auto()
-
   # GROUP is a NOOP that just merges things together
-  GROUP = auto()
+  SINK = auto(); AFTER = auto(); GROUP = auto()
 
   # vector creation / item selection
   GEP = auto(); VECTORIZE = auto()
@@ -76,8 +74,7 @@ class Ops(FastEnum):
   # ** 6 -- ops that don't exist in programs **
 
   # tensor graph ops
-  UNIQUE = auto(); DEVICE = auto(); KERNEL = auto()
-  ASSIGN = auto()
+  UNIQUE = auto(); DEVICE = auto(); KERNEL = auto(); ASSIGN = auto()
 
   # buffer ops
   BUFFERIZE = auto(); COPY = auto(); BUFFER = auto(); BUFFER_VIEW = auto(); MSELECT = auto(); MSTACK = auto()
@@ -85,15 +82,12 @@ class Ops(FastEnum):
   # ops that adjust the behavior of the scheduler
   CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto()
 
-  # movement ops! these only exist in the tensor graph
+  # the core 6 movement ops! these only exist in the tensor graph
   RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); FLIP = auto()
   MULTI = auto()  # MULTI is really a movement op
 
   # reduce
   REDUCE_AXIS = auto(); REDUCE = auto(); ALLREDUCE = auto()
-
-  # errors
-  REWRITE_ERROR = auto()
 
   # expander ops
   UNROLL = auto(); CONTRACT = auto(); CAT = auto(); PTRCAT = auto()
