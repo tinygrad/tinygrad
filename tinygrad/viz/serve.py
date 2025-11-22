@@ -225,34 +225,21 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
   if not rctx.inst_execs: return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
   steps:list[dict] = []
   for name,waves in rctx.inst_execs.items():
+    disasm = rctx.disasms[name]
     units:dict[str, int] = {}
     events:list[ProfileEvent] = []
-    prg = trace.keys[r].ret if (r:=ref_map.get(name)) else None
-    steps.append(first:=create_step(prg.name if prg is not None else name, ("/counters", len(ctxs), len(steps))))
-    # Idle:     The total time gap between the completion of previous instruction and the beginning of the current instruction.
-    #           The idle time can be caused by:
-    #             * Arbiter loss
-    #             * Source or destination register dependency
-    #             * Instruction cache miss
-    # Stall:    The total number of cycles the hardware pipe couldn't issue an instruction.
-    # Duration: Total latency in cycles, defined as "Stall time + Issue time" for gfx9 or "Stall time + Execute time" for gfx10+.
-    wave_insts:dict[str, dict] = {}
+    wave_execs:dict[str, dict] = {}
     for w in waves:
       if (row:=f"SE:{w.se} CU:{w.cu} SIMD:{w.simd} WAVE:{w.wave_id}") not in units: units[row] = 0
       units[row] += 1
       events.append(ProfileRangeEvent(row, f"N:{units[row]}", Decimal(w.begin_time), Decimal(w.end_time)))
-      rows, prev_instr = [], w.begin_time
-      for i,e in enumerate(w.insts):
-        rows.append((e.inst, e.time, max(0, e.time-prev_instr), e.dur, e.stall, str(e.typ).split("_")[-1]))
-        prev_instr = max(prev_instr, e.time + e.dur)
-      summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
-                 {"label":"SIMD", "value":w.simd}, {"label":"Wave ID", "value":w.wave_id}, {"label":"Run number", "value":units[row]}]
-      wave_insts[f"{row} N:{units[row]}"] = {"rows":rows, "cols":["Instruction", "Clk", "Idle", "Duration", "Stall", "Type"], "summary":summary}
-
-    for k in sorted(wave_insts, key=row_tuple):
-      steps.append(create_step(k, ("/counters", len(ctxs), len(steps)), wave_insts[k], depth=2))
+      wave_execs[f"{row} N:{units[row]}"] = {"wave":w, "disasm":disasm, "run_number":units[row]}
+    # gather and sort all wave execs of this kernel
     events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+events
-    first["data"] = {"value":get_profile(events, sort_fn=row_tuple), "content_type":"application/octet-stream"}
+    kernel = trace.keys[r].ret if (r:=ref_map.get(name)) else None
+    steps.append(create_step(kernel.name if kernel is not None else name, ("/counters", len(ctxs), len(steps)),
+                             {"value":get_profile(events, sort_fn=row_tuple), "content_type":"application/octet-stream"}, depth=1))
+    for k in sorted(wave_execs, key=row_tuple): steps.append(create_step(k, ("/sqtt-insts", len(ctxs), len(steps)), wave_execs[k], depth=2))
   ctxs.append({"name":"Counters", "steps":steps})
 
 def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]|None=None) -> bytes|None:
@@ -331,6 +318,24 @@ def get_render(i:int, j:int, fmt:str) -> dict:
       return get_llvm_mca(disasm_str, ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode(),
                           ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode())
     return {"src":disasm_str, "lang":"x86asm"}
+  if fmt == "sqtt-insts":
+    columns = ["Instruction", "Clk", "Idle", "Duration", "Stall", "Type"]
+    # Idle:     The total time gap between the completion of previous instruction and the beginning of the current instruction.
+    #           The idle time can be caused by:
+    #             * Arbiter loss
+    #             * Source or destination register dependency
+    #             * Instruction cache miss
+    # Stall:    The total number of cycles the hardware pipe couldn't issue an instruction.
+    # Duration: Total latency in cycles, defined as "Stall time + Issue time" for gfx9 or "Stall time + Execute time" for gfx10+.
+    prev_instr = (w:=data["wave"]).begin_time
+    pc_to_inst = data["disasm"]
+    rows:list[tuple] = []
+    for e in w.unpack_insts():
+      rows.append((pc_to_inst[e.pc][0], e.time, max(0, e.time-prev_instr), e.dur, e.stall, str(e.typ).split("_")[-1]))
+      prev_instr = max(prev_instr, e.time + e.dur)
+    summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
+               {"label":"SIMD", "value":w.simd}, {"label":"Wave ID", "value":w.wave_id}, {"label":"Run number", "value":data["run_number"]}]
+    return {"rows":rows, "cols":columns, "summary":summary}
   return data
 
 # ** HTTP server
