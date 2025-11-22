@@ -101,12 +101,10 @@ if __name__ == "__main__":
     ])
   exit(0)
 
-
   with save_sqtt() as sqtt:
     (Tensor.empty(16,16) @ Tensor.empty(16,16)).elu().realize()
     #Tensor.empty(65536, 1024).sum(axis=1).realize()
     #Tensor.empty(1).elu().realize()
-
   exit(0)
 
   with save_sqtt() as sqtt:

@@ -2,6 +2,11 @@ import pickle, sys
 from tinygrad.helpers import getenv, Timing, colored
 from extra.sqtt.roc import decode, ProfileSQTTEvent
 
+# do these enums match fields in the packets?
+#from tinygrad.runtime.support.amd import import_soc
+#soc = import_soc([11])
+#perf_sel = {getattr(soc, k):k for k in dir(soc) if k.startswith("SQ_PERF_")}
+
 # Instruction packets (one per ISA op)
 # NOTE: these are bad guesses and may be wrong! feel free to update if you know better
 # some names were taken from SQ_TT_TOKEN_MASK_TOKEN_EXCLUDE_SHIFT
