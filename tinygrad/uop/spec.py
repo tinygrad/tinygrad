@@ -147,8 +147,8 @@ shared_codegen_spec = PatternMatcher([
   (UPat().index(UPat()).or_casted().load(), lambda: True),
   (UPat(Ops.INDEX).or_casted().store(UPat()), lambda: True),
 
-  # all CUSTOM + PRECAST
-  (UPat((Ops.CUSTOMI, Ops.CUSTOM, Ops.PRECAST)), lambda: True),
+  # CUSTOM (inline and non inline)
+  (UPat((Ops.CUSTOMI, Ops.CUSTOM)), lambda: True),
 
   # INDEX
   (UPat(GroupOp.Defines|{Ops.AFTER}, name="buf").index(UPat.var("idx")), validate_index),

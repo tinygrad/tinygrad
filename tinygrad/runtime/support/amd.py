@@ -65,7 +65,9 @@ def import_ip_offsets(ip): return type("IPOFF", (object,), import_header(f"inclu
 
 def import_pmc(ip) -> dict[str, tuple[str, int]]:
   res:dict[str, tuple[str, int]] = {}
-  arch = f"gfx{ip[0]}{ip[1]:x}{ip[2]:x}"
+
+  # NOTE: precise arch for mi300+, generic for others, since rocm headers lack some archs
+  arch = f"gfx{ip[0]}{ip[1]:x}{ip[2]:x}" if ip[0] == 9 else f"gfx{ip[0]}"
 
   for sec in header_download("rocprofiler-compute/src/rocprof_compute_soc/profile_configs/counter_defs.yaml", url=ROCM_URL).split('- name: ')[1:]:
     for arch_spec in sec.split('- architectures:')[1:]:

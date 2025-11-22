@@ -156,9 +156,9 @@ function formatMicroseconds(ts, dur=ts) {
 }
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
-const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#1d2e62", "#63b0cd"],
+const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["get_program","#1d2e62"],["compile","#63b0cd"],["DEFAULT","#354f52"]]),
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
-  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SIMD:["#3600f0"],
+  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SE:["#2b2e39"],
   CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
@@ -200,7 +200,7 @@ function focusShape(shape) {
 
 const EventTypes = { EXEC:0, BUF:1 };
 
-async function renderProfiler(path, unit) {
+async function renderProfiler(path, unit, opts) {
   displaySelection("#profiler");
   metadata.replaceChildren(shapeMetadata.get(focusedShape) ?? "");
   // layout once!
@@ -236,8 +236,9 @@ async function renderProfiler(path, unit) {
   for (let i=0; i<layoutsLen; i++) {
     const nameLen = view.getUint8(offset, true); offset += 1;
     const k = textDecoder.decode(new Uint8Array(buf, offset, nameLen)); offset += nameLen;
-    const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px");
+    const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px").style("width", opts.width).style("min-height", opts.height);
     const { y:baseY, height:baseHeight } = rect(div.node());
+    const colors = colorScheme[k.split(":")[0]] ?? colorScheme.DEFAULT;
     const offsetY = baseY-canvasTop+padding/2;
     const shapes = [], visible = [];
     const eventType = u8(), eventsLen = u32();
@@ -256,7 +257,10 @@ async function renderProfiler(path, unit) {
           levels.push(et);
         } else levels[depth] = et;
         if (depth === 0) colorKey = e.name.split(" ")[0];
-        if (!colorMap.has(colorKey)) colorMap.set(colorKey, d3.rgb(cycleColors(colorScheme[k.split(":")[0]] ?? colorScheme.DEFAULT, colorMap.size)));
+        if (!colorMap.has(colorKey)) {
+          const color = colors instanceof Map ? (colors.get(colorKey) || colors.get("DEFAULT")) : cycleColors(colors, colorMap.size);
+          colorMap.set(colorKey, d3.rgb(color));
+        }
         const base = colorMap.get(colorKey), s = Math.min(Math.pow(1/0.7, depth), 240 / Math.max(base.r, base.g, base.b));
         const fillColor = d3.rgb(base.r*s, base.g*s, base.b*s).toString();
         const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
@@ -278,7 +282,8 @@ async function renderProfiler(path, unit) {
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
         if (key != null) shapeMetadata.set(key, html.node());
-        const arg = { tooltipText:colored(e.name).outerHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), key, ...shapeRef };
+        const arg = { tooltipText:colored(label).outerHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), key,
+                      ctx:shapeRef?.ctx, step:shapeRef?.step };
         if (e.key != null) shapeMap.set(e.key, arg);
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label, fillColor });
@@ -491,16 +496,16 @@ async function renderProfiler(path, unit) {
   new ResizeObserver(([e]) => e.contentRect.width > 0 && resize()).observe(profiler.node());
 
   function findRectAtPosition(x, y) {
-    let tid = null;
+    let track = null;
     for (const k of data.tracks.keys()) {
       const r = rect(document.getElementById(k));
-      if (y >= r.y && y <= r.y+r.height) { tid = k; break; }
+      if (y >= r.y && y <= r.y+r.height) { track = data.tracks.get(k); break; }
     }
-    if (tid == null) return;
-    const { top, left, width, height } = rect(canvas);
-    const X = ((x-left) * (canvas.width/width))/dpr;
-    const Y = ((y-top) * (canvas.height/height))/dpr;
-    for (const r of data.tracks.get(tid).visible) {
+    if (track == null) return;
+    const R = rect(canvas);
+    const X = ((x-R.left) * (canvas.width/R.width))/dpr;
+    const Y = ((y-R.top) * (canvas.height/R.height))/dpr;
+    for (const r of track.visible) {
       if (Y>=r.y0 && Y<=r.y1 && X>=r.x0 && X<=r.x1) return r.arg;
     }
   }
@@ -701,15 +706,15 @@ async function main() {
     if (url.pathname+url.search !== ckey) e.close();
     else if (e.readyState === EventSource.OPEN) activeSrc = e;
   }
-  if (ctx.name === "Profiler") return renderProfiler("/get_profile", "realtime");
+  if (ctx.name === "Profiler") return renderProfiler("/get_profile", "realtime", { width:"132px", height:"32px" });
   if (workerUrl == null) await initWorker();
   if (ckey in cache) {
     ret = cache[ckey];
   }
   // ** Disassembly view
-  if (ckey.startsWith("/render")) {
+  if (!ckey.startsWith("/rewrites")) {
     if (!(ckey in cache)) cache[ckey] = ret = await fetchValue(ckey);
-    if (ret instanceof ArrayBuffer) return renderProfiler(ckey, "clk"); // cycles on the x axis
+    if (ret instanceof ArrayBuffer) return renderProfiler(ckey, "clk", { height:"16px" }); // cycles on the x axis
     displaySelection("#custom");
     metadata.innerHTML = "";
     const root = d3.create("div").classed("raw-text", true).node();

@@ -25,7 +25,7 @@ class Ops(FastEnum):
   # ** 2 -- non op uops **
 
   # uops that aren't rendered
-  NOOP = auto(); SINK = auto(); PRECAST = auto()
+  NOOP = auto(); SINK = auto()
 
   # AFTER passes src[0] through and promises in the toposort that any consumers of the AFTER run after src[1:]
   AFTER = auto()
