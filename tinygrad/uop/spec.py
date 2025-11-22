@@ -17,9 +17,6 @@ from tinygrad.uop.validate import validate_index
 shared_spec = PatternMatcher([
   (UPat(Ops.SINK, dtypes.void), lambda: True), # NOTE: for testing, we let sinks be anything
 
-  # SENTINEL should never be anywhere
-  (UPat(Ops.SENTINEL), lambda: False),
-
   # CONST/DEFINE_VAR are everywhere
   (UPat(Ops.CONST, src=(), name="x"), lambda x: type(x.arg) is type(dtypes.as_const(x.arg, x.dtype))),
   (UPat(Ops.DEFINE_VAR, name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
