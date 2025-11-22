@@ -233,7 +233,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
       if (row:=f"SE:{w.se} CU:{w.cu} SIMD:{w.simd} WAVE:{w.wave_id}") not in units: units[row] = 0
       units[row] += 1
       events.append(ProfileRangeEvent(row, f"N:{units[row]}", Decimal(w.begin_time), Decimal(w.end_time)))
-      wave_execs[f"{row} N:{units[row]}"] = {"wave":w, "disasm":disasm}
+      wave_execs[f"{row} N:{units[row]}"] = {"wave":w, "disasm":disasm, "run_number":units[row]}
     # gather and sort all wave execs of this kernel
     events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+events
     kernel = trace.keys[r].ret if (r:=ref_map.get(name)) else None
@@ -333,7 +333,9 @@ def get_render(i:int, j:int, fmt:str) -> dict:
     for e in w.unpack_insts():
       rows.append((pc_to_inst[e.pc][0], e.time, max(0, e.time-prev_instr), e.dur, e.stall, str(e.typ).split("_")[-1]))
       prev_instr = max(prev_instr, e.time + e.dur)
-    return {"rows":rows, "cols":columns, "summary":[{"label":"Total Cycles", "value":w.end_time-w.begin_time}]}
+    summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
+               {"label":"SIMD", "value":w.simd}, {"label":"Wave ID", "value":w.wave_id}, {"label":"Run number", "value":data["run_number"]}]
+    return {"rows":rows, "cols":columns, "summary":summary}
   return data
 
 # ** HTTP server
