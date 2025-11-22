@@ -1,6 +1,7 @@
 # all of symbolic lives here now
 import math, operator, struct, functools
 from collections import defaultdict
+from typing import cast
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu, WeakUOpCache
 from tinygrad.dtype import ConstType, dtypes, PtrDType, can_safe_cast, Invalid
 from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, unwrap
@@ -135,15 +136,15 @@ def canonicalize_simplex(X:UOp) -> UOp|None:
   if (ret:=_simplex_canon_cache.get(X)) is not None: return ret
   # (X := a0*x0 + a1*x1 + ...) > 0 is equivalent to x0 + x1 + ... > 0 if xi >= 0 and ai > 0 for ints.
   # returns x0 + x1 + ... in such case, or None if not
-  changed, ret = False, []
+  changed, ret_list = False, []
   for u in X.split_uop(Ops.ADD):
     # assumed the const is the last src of MUL
     if u.op is Ops.MUL and u.src[1].op is Ops.CONST and u.src[1].arg > 0:
       changed = True
       u = u.src[0]
     if not (u.op in GroupOp.Irreducible and u.vmin >= 0): return None
-    ret.append(u)
-  ret_uop = UOp.sum(*ret) if changed else None
+    ret_list.append(u)
+  ret_uop = UOp.sum(*ret_list) if changed else None
   _simplex_canon_cache.set(X, ret_uop, allow_none=True)
   return ret_uop
 
@@ -283,24 +284,24 @@ def parse_valid(v:UOp) -> tuple[UOp, bool, int]|None:
     # NOTE: v.src[1].op can be Ops.VCONST
   return None
 
-_given_valid_cache = WeakUOpCache()
-
 def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
-  # return simplified uop (might be the same as input)
-  uop_in = uop
-  if try_simplex and (cached:=_given_valid_cache.get(valid, uop_in)) is not None: return cached
-
   # first, parse valid into {expr: (lower_bound, upper_bound)}
   bounds:defaultdict[UOp, list[ConstType|None]] = defaultdict(lambda: [None, None])
   for stmt in valid.split_uop(Ops.AND):
     if (res:=parse_valid(stmt)) is None: continue
     expr, is_upper, c = res
-    bounds[expr][int(is_upper)] = c
+    if is_upper: bounds[expr][1] = c if bounds[expr][1] is None else min(cast(ConstType, bounds[expr][1]), c)
+    else: bounds[expr][0] = c if bounds[expr][0] is None else max(cast(ConstType, bounds[expr][0]), c)
 
   # simplify uop given that valid is True
+  uop_topo = uop.toposort() if try_simplex else set()
   all_candidates = []
   for i,(expr,v) in enumerate(bounds.items()):
-    v0, v1 = (expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1])
+    v0 = expr.vmin if v[0] is None else max(expr.vmin, v[0])
+    v1 = expr.vmax if v[1] is None else min(expr.vmax, v[1])
+    if v0 > v1: continue
+    if v0 == expr.vmin and v1 == expr.vmax: continue
+
     # try checking the whole clause
     all_candidates.append((expr, UOp.variable(f"fake{i}", v0, v1, expr.dtype)))
 
@@ -312,19 +313,27 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
         candidates.append([(Xi, UOp.variable(f"fake{i}", 1, Xi.vmax, Xi.dtype)) for Xi in expr.split_uop(Ops.ADD)])
 
       for candidate in candidates:
+        if not any(X in uop_topo for X,_ in candidate): continue
         # if every branch in candidate gives the same simplified uop, we can rewrite the uop
         newuops = [uop.substitute({X:newX}) for X,newX in candidate]
         if any(u is uop for u in newuops): continue  # if any branch doesnt appear in uop, skip
-        newuops = [u.simplify().substitute({newX:X}).simplify() for (X,newX),u in zip(candidate,newuops)]
+        if all_same(newuops): continue
+        simplified = [u.simplify() for u in newuops]
+        rev_dict = {newX:X for X,newX in candidate}
+        newuops = [u.substitute(rev_dict).simplify() for u in simplified]
         if all_same(newuops): uop = newuops[0]
         elif uop.op is Ops.VECTORIZE and len(uop.src) == 2:
           if all_same([uops.src[0] for uops in newuops]): uop = uop.replace(src=(newuops[0].src[0], uop.src[1]))
           if all_same([uops.src[1] for uops in newuops]): uop = uop.replace(src=(uop.src[0], newuops[0].src[1]))
 
   # try all the valids together (but only the whole expressions)
-  if (s_uop:=uop.substitute(sub_dict:=dict(all_candidates))) is not uop:
-    uop = s_uop.simplify().substitute({newX:X for X,newX in sub_dict.items()}).simplify()
-    if try_simplex: _given_valid_cache.set(valid, uop, uop_in)
+  if all_candidates and (s_uop:=uop.substitute(sub_dict:=dict(all_candidates))) is not uop:
+    simplified_s_uop = s_uop.simplify()
+    if simplified_s_uop is s_uop: pass
+    elif simplified_s_uop.op is Ops.CONST: uop = simplified_s_uop
+    else:
+      rev_dict = {newX:X for X,newX in sub_dict.items()}
+      uop = simplified_s_uop.substitute(rev_dict).simplify()
   return uop
 
 def _valid_priority(v: UOp, valids:list[UOp]):
