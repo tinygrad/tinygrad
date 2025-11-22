@@ -218,7 +218,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
   def err(name:str, msg:str|None=None) -> None:
     step = {"name":name, "data":{"src":msg or traceback.format_exc()}, "depth":0, "query":f"/render?ctx={len(ctxs)}&step=0&fmt=counters"}
     return ctxs.append({"name":"Counters", "steps":[step]})
-  try: from extra.sqtt.roc import decode
+  try: from extra.sqtt.roc import decode, WaveExec
   except Exception: return err("DECODER IMPORT ISSUE")
   try: rctx = decode(profile)
   except Exception: return err("DECODER ERROR")
@@ -234,24 +234,18 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     # Duration: Total latency in cycles, defined as "Stall time + Issue time" for gfx9 or "Stall time + Execute time" for gfx10+.
     units:dict[str, int] = {}
     events:list[ProfileEvent] = []
-    wave_execs:dict[str, dict] = {}
+    wave_execs:dict[str, WaveExec] = {}
     for w in waves:
       if (row:=f"SE:{w.se} CU:{w.cu} SIMD:{w.simd} WAVE:{w.wave_id}") not in units: units[row] = 0
       units[row] += 1
       events.append(ProfileRangeEvent(row, f"N:{units[row]}", Decimal(w.begin_time), Decimal(w.end_time)))
-      rows, prev_instr = [], w.begin_time
-      for i,e in enumerate(w.insts):
-        rows.append((e.inst, e.time, max(0, e.time-prev_instr), e.dur, e.stall, str(e.typ).split("_")[-1]))
-        prev_instr = max(prev_instr, e.time + e.dur)
-      summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
-                 {"label":"SIMD", "value":w.simd}, {"label":"Wave ID", "value":w.wave_id}, {"label":"Run number", "value":units[row]}]
-      wave_execs[f"{row} N:{units[row]}"] = {"rows":rows, "cols":["Instruction", "Clk", "Idle", "Duration", "Stall", "Type"], "summary":summary}
+      wave_execs[f"{row} N:{units[row]}"] = w
     # gather and sort all wave execs of this kernel
     events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+events
     kernel = trace.keys[r].ret if (r:=ref_map.get(name)) else None
-    steps.append(create_step(kernel.name if kernel is not None else name, ("/counters", len(ctxs), len(steps)),
+    steps.append(create_step(kernel.name if kernel is not None else name, ("/hw_timeline", len(ctxs), len(steps)),
                              {"value":get_profile(events, sort_fn=row_tuple), "content_type":"application/octet-stream"}, depth=1))
-    for k in sorted(wave_execs, key=row_tuple): steps.append(create_step(k, ("/counters", len(ctxs), len(steps)), wave_execs[k], depth=2))
+    for k in sorted(wave_execs, key=row_tuple): steps.append(create_step(k, ("/sqtt_insts", len(ctxs), len(steps)), wave_execs[k], depth=2))
   ctxs.append({"name":"Counters", "steps":steps})
 
 def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]|None=None) -> bytes|None:
@@ -330,6 +324,8 @@ def get_render(i:int, j:int, fmt:str) -> dict:
       return get_llvm_mca(disasm_str, ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode(),
                           ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode())
     return {"src":disasm_str, "lang":"x86asm"}
+  if fmt == "sqtt_insts":
+    return {"src":"TEST", "lang":"txt"}
   return data
 
 # ** HTTP server
