@@ -1,6 +1,6 @@
 import base64, ctypes, pathlib, tempfile, hashlib, sys
 from tinygrad.device import Compiler
-from tinygrad.helpers import cpu_objdump, system
+from tinygrad.helpers import cpu_objdump, system, data64
 from tinygrad.runtime.autogen import mesa
 from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, expect, cerr
 try: from tinygrad.runtime.autogen import llvm
@@ -90,6 +90,11 @@ class NAKCompiler(NIRCompiler):
       print(system(f"nvdisasm -b SM{self.arch[3:]} {fn}"))
     except Exception as e: print("Failed to generate SASS", str(e), "Make sure your PATH contains nvdisasm binary of compatible version.")
 
+@ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p)
+def hd(data, n, instr):
+  fst, snd = data64(ctypes.cast(instr, ctypes.POINTER(ctypes.c_uint64)).contents.value)
+  print(f"{n:04} [{fst:08x}_{snd:08x}] ", end="", flush=True)
+
 class IR3Compiler(NIRCompiler):
   def __init__(self, chip_id, cache_key="ir3"):
     assert sys.version_info >= (3,14), "IR3 requires python 3.14's bitfield fixes"
@@ -103,6 +108,7 @@ class IR3Compiler(NIRCompiler):
 
   def __reduce__(self): return IR3Compiler, (self.dev_id.chip_id,)
 
+  # ir3_shader_variant info: https://elixir.bootlin.com/mesa/mesa-25.3.0/source/src/freedreno/ir3/ir3_shader.c#L1099
   def compile(self, src) -> bytes:
     nir_shader = deserialize(src, self.nir_options)
     mesa.ir3_nir_lower_io_vars_to_temporaries(nir_shader)
@@ -111,6 +117,7 @@ class IR3Compiler(NIRCompiler):
     mesa.ir3_nir_post_finalize(shader)
     v = rzalloc(mesa.struct_ir3_shader_variant, type=shader.type, compiler=ctypes.pointer(self.cc), key=mesa.struct_ir3_shader_key()).contents
     v.const_state, shader.variants, shader.variant_count = rzalloc(mesa.struct_ir3_const_state, ctypes.pointer(v)), ctypes.pointer(v), 1
+    v.num_uavs = (info:=nir_shader.contents.info).num_ssbos + info.num_images
     assert not mesa.ir3_compile_shader_nir(self.cc, shader, v), "compilation failed"
     lib = ctypes.cast(mesa.ir3_shader_assemble(v), ctypes.POINTER(ctypes.c_uint32))
     # NB: bytes(v) means the pointers in v are no longer safe! a custom __reduce__ that supports pointers for c.Struct would make this simpler
@@ -125,6 +132,5 @@ class IR3Compiler(NIRCompiler):
     return v, cs, shifted[:v.imm_state.count * 4], shifted[v.imm_state.count * 4:]
 
   def disassemble(self, lib: bytes):
-    _, _, _, bin_ = IR3Compiler.unpack_lib(lib)
-    mesa.ir3_isa_disasm(bin_, len(bin_), ctypes.POINTER(mesa.struct__IO_FILE).in_dll(ctypes.CDLL(ctypes.util.find_library('c')), "stdout"),
-                        mesa.struct_isa_decode_options(gpu_id=self.dev_id.gpu_id, show_errors=True, branch_labels=True))
+    mesa.ir3_isa_disasm(b:=self.unpack_lib(lib)[3], len(b), ctypes.POINTER(mesa.struct__IO_FILE).in_dll(ctypes.CDLL(None), "stdout"),
+                        mesa.struct_isa_decode_options(gpu_id=self.dev_id.gpu_id, show_errors=True, branch_labels=True, pre_instr_cb=hd))
