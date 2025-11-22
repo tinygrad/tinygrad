@@ -49,7 +49,7 @@ class NVVideoQueue(NVCommandQueue):
     self.nvm(4, nv_gpu.NVC9B0_SET_CONTROL_PARAMS, 0x52057)
     self.nvm(4, nv_gpu.NVC9B0_SET_DRV_PIC_SETUP_OFFSET, pic_desc.va_addr >> 8)
     self.nvm(4, nv_gpu.NVC9B0_SET_IN_BUF_BASE_OFFSET, buf_in_data.va_addr >> 8)
-    for i in range(3):
+    for i in range(len(luma_chroma_bufs)):
       self.nvm(4, nv_gpu.NVC9B0_SET_PICTURE_LUMA_OFFSET0 + i*4, luma_chroma_bufs[i].va_addr >> 8)
       self.nvm(4, nv_gpu.NVC9B0_SET_PICTURE_CHROMA_OFFSET0 + i*4, (luma_chroma_bufs[i].va_addr + 0x1fe000) >> 8)
     self.nvm(4, nv_gpu.NVC9B0_SET_COLOC_DATA_OFFSET, coloc_buf.va_addr >> 8)

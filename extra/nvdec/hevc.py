@@ -105,6 +105,11 @@ HEVC_CODED_SLICE_SEGMENT_NAL_UNITS = (
   HevcNalUnitType.CRA_NUT,
 )
 
+class HevcSliceType(IntEnum):
+  B = 0
+  P = 1
+  I = 2
+
 class BitReader:
   def __init__(self, data:bytes): self.reader, self.current_bits, self.bits, self.read_bits, self.total = iter(data), 0, 0, 0, len(data) * 8
   def empty(self): return self.read_bits == self.total and self.current_bits == 0

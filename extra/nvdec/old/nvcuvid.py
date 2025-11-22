@@ -99,8 +99,8 @@ class CUDAVideoDecoder:
     check(cuda.cuCtxSetCurrent(inst.dev.context))
     print("cuvidDecodePicture")
     check(nvcuvid.cuvidDecodePicture(inst.decoder, pic_params))
-    import time
-    time.sleep(2)
+    # import time
+    # time.sleep(2)
     _dump_gpfifo("after decode")
     return 1
 
@@ -174,7 +174,7 @@ if __name__ == "__main__":
     global img_id
     while not dec.frame_queue.empty():
       img_id += 1
-      if img_id > 4: break
+      # if img_id > 4: break
       w, h, ch = dec.frame_width, dec.luma_height, dec.chroma_height
       total = h + ch
       frame = np.frombuffer(dec.frame_queue.get(), dtype=np.uint8).reshape((total, w))
