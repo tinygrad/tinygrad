@@ -39,6 +39,7 @@ class Group:
     return reg.after(reg_store).reshape(reg.shape)
 
   def zero(self, reg:ALL_TILES): return self.clear(reg, 0)
+  def ones(self, reg:ALL_TILES): return self.clear(reg, 1)
   def neg_inf(self, reg:ALL_TILES): return self.clear(reg, -math.inf)
 
   copy_rid = 300
@@ -50,7 +51,22 @@ class Group:
     rngs_for_shape = tuple(UOp.range(dim, Group.copy_rid + i) for i, dim in enumerate(dst.shape))
     Group.copy_rid += len(dst.shape)
 
-    dst_store = dst[*rngs_for_shape].store(src[*rngs_for_shape].cast(dst.dtype.base)).end(*rngs_for_shape)
+    src_load = src[*rngs_for_shape]
+    if src.dtype.base != dst.dtype.base:
+      src_load = src_load.cast(dst.dtype.base)
+    dst_store = dst[*rngs_for_shape].store(src_load).end(*rngs_for_shape)
+
+    self.ker.push_store(dst_store, dst)
+    return dst.after(dst_store).reshape(dst.shape)
+
+  def transpose(self, dst:UOp|RT, src:UOp|RT):
+    dst, src = cast(UOp, dst), cast(UOp, src)
+    assert self.warps == 1
+
+    for height in self.ker.range(src.shape[-3], track=False):
+      for width in self.ker.range(src.shape[-2], track=False):
+        for inner in self.ker.range(src.shape[-1], track=False):
+          dst_store = dst[width, height, inner].store(src[height, width, inner]).end(height, width, inner)
 
     self.ker.push_store(dst_store, dst)
     return dst.after(dst_store).reshape(dst.shape)
@@ -106,6 +122,66 @@ class Group:
             a_in = UOp.vectorize(*[a[height, inner, i] for i in range(8)])
             b_in = UOp.vectorize(*[b[width, inner, i] for i in range(8)])
           else: raise NotImplementedError(f"mma_ABt not implemented for {a_base_shape.cols=}")
+          d_in = UOp.vectorize(*[c[height, width, i] for i in range(4)])
+
+          out = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in, d_in), arg=wmma_arg)
+          c_i = [c[height, width, i].store(out.gep(i)) for i in range(4)]
+          c_store = UOp.group(*c_i).end(height, width, inner)
+
+    self.ker.push_store(c_store, c)
+    return c.after(c_store).reshape(c.shape)
+
+  def mma_AtB(self, c:UOp|RT, a:UOp|RT, b:UOp|RT):
+    c, a, b = cast(UOp, c), cast(UOp, a), cast(UOp, b)
+    assert self.warps == 1
+
+    a_base_shape = cast(RT, a).base_shape
+    if a_base_shape.cols == 16:
+      wmma_arg = ('WMMA_16_16_16___bf16_float', (16, 16, 16), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ())
+    elif a_base_shape.cols == 32:
+      wmma_arg = ('WMMA_16_16_32___bf16_float', (16, 16, 32), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2))), ())
+    else:  raise NotImplementedError(f"mma_AtB not implemented for {a_base_shape.cols=}")
+
+    for height in self.ker.range(c.shape[-3], track=False):
+      for width in self.ker.range(c.shape[-2], track=False):
+        for inner in self.ker.range(a.shape[-3], AxisType.REDUCE, track=False):
+          if a_base_shape.cols == 16:
+            a_in = UOp.vectorize(*[a[inner, height, i] for i in range(4)])
+            b_in = UOp.vectorize(*[b[inner, width, i] for i in range(4)])
+          elif a_base_shape.cols == 32:
+            a_in = UOp.vectorize(*[a[inner, height, i] for i in range(8)])
+            b_in = UOp.vectorize(*[b[inner, width, i] for i in range(8)])
+          else: raise NotImplementedError(f"mma_AtB not implemented for {a_base_shape.cols=}")
+          d_in = UOp.vectorize(*[c[height, width, i] for i in range(4)])
+
+          out = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in, d_in), arg=wmma_arg)
+          c_i = [c[height, width, i].store(out.gep(i)) for i in range(4)]
+          c_store = UOp.group(*c_i).end(height, width, inner)
+
+    self.ker.push_store(c_store, c)
+    return c.after(c_store).reshape(c.shape)
+
+  def mma_AtBt(self, c:UOp|RT, a:UOp|RT, b:UOp|RT):
+    c, a, b = cast(UOp, c), cast(UOp, a), cast(UOp, b)
+    assert self.warps == 1
+
+    a_base_shape = cast(RT, a).base_shape
+    if a_base_shape.cols == 16:
+      wmma_arg = ('WMMA_16_16_16___bf16_float', (16, 16, 16), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ())
+    elif a_base_shape.cols == 32:
+      wmma_arg = ('WMMA_16_16_32___bf16_float', (16, 16, 32), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2))), ())
+    else:  raise NotImplementedError(f"mma_AtBt not implemented for {a_base_shape.cols=}")
+
+    for height in self.ker.range(c.shape[-3], track=False):
+      for width in self.ker.range(c.shape[-2], track=False):
+        for inner in self.ker.range(a.shape[-3], AxisType.REDUCE, track=False):
+          if a_base_shape.cols == 16:
+            a_in = UOp.vectorize(*[a[inner, height, i] for i in range(4)])
+            b_in = UOp.vectorize(*[b[width, inner, i] for i in range(4)])
+          elif a_base_shape.cols == 32:
+            a_in = UOp.vectorize(*[a[inner, height, i] for i in range(8)])
+            b_in = UOp.vectorize(*[b[width, inner, i] for i in range(8)])
+          else: raise NotImplementedError(f"mma_AtBt not implemented for {a_base_shape.cols=}")
           d_in = UOp.vectorize(*[c[height, width, i] for i in range(4)])
 
           out = UOp(Ops.WMMA, dtypes.float32.vec(4), (a_in, b_in, d_in), arg=wmma_arg)
@@ -203,13 +279,6 @@ class Group:
     self.ker.push_store(vec_store, vec)
     return vec.after(vec_store).reshape(vec.shape)
 
-  def reduce(self, vec:UOp|RV, src:UOp|RT, op:Callable[[UOp, UOp], UOp], init_value:float=0.0):
-    rt = cast(RT, src)
-    if rt.layout == TileLayout.ROW:
-      return self.row_reduce(vec, src, op, init_value)
-    else:
-      return self.col_reduce(vec, src, op, init_value)
-
   # ops that can work across multiple warps
 
   def load(self, dst:ALL_TILES, src:ALL_TILES, dst_idxs:tuple[UOp|int,...]=(), idxs:tuple[UOp|int,...]=(), axis:int=0):
@@ -233,7 +302,10 @@ class Group:
 
             srow, scol = cast(ST, src).swizzle(row, col)
 
-            dst_store = dst[*dst_idxs, height, width, inner].store(src[*idxs[:-2], height, width, srow, scol])
+            src_load = src[*idxs[:-2], height, width, srow, scol]
+            if src.dtype.base != dst.dtype.base:
+              src_load = src_load.cast(dst.dtype.base)
+            dst_store = dst[*dst_idxs, height, width, inner].store(src_load)
             dst_store = dst_store.end(height, width, inner)
     elif dst_dtype.addrspace == AddrSpace.LOCAL and src_dtype.addrspace == AddrSpace.GLOBAL:
       srcf = src.flatten()
@@ -261,8 +333,44 @@ class Group:
               src_i += height * st.base_shape.rows * row_stride + width * st.base_shape.cols
               src_i += row * row_stride + col
 
-              dst_store = dst[*dst_idxs, height, width, srow, scol].store(srcf[src_i])
+              src_load = srcf[src_i]
+              if src.dtype.base != dst.dtype.base:
+                src_load = src_load.cast(dst.dtype.base)
+              dst_store = dst[*dst_idxs, height, width, srow, scol].store(src_load)
               dst_store = dst_store.end(height, width, outer, inner).barrier()
+    elif dst_dtype.addrspace == AddrSpace.REG and src_dtype.addrspace ==AddrSpace.GLOBAL:
+      srcf = src.flatten()
+      row_stride = prod(src.shape[axis+1:])
+
+      laneid = self.ker.laneid
+      rt = cast(RT, dst)
+      elements_per_thread = rt.base_shape.elements_per_thread
+
+      idxs = tuple(idx * dst.shape[-3] * rt.base_shape.rows if i == axis else idx for i, idx in enumerate(idxs))
+      idxs = tuple(idx * dst.shape[-2] * rt.base_shape.cols if i == 3 else idx for i, idx in enumerate(idxs))
+      src_i = ((idxs[0] * src.shape[-3] + idxs[1]) * src.shape[-2] + idxs[2]) * src.shape[-1] + idxs[3]
+
+      for height in self.ker.range(dst.shape[-3], track=False):
+        for width in self.ker.range(dst.shape[-2], track=False):
+          for inner in self.ker.range(elements_per_thread, track=False):
+            base_row = height * rt.base_shape.rows
+            base_col = width * rt.base_shape.cols
+
+            if rt.layout == TileLayout.COL:
+              row = rt.base_shape.stride * (laneid // rt.base_shape.cols) + inner
+              col = laneid % rt.base_shape.cols
+            else:
+              row = laneid % rt.base_shape.rows
+              col = rt.base_shape.stride * (laneid // rt.base_shape.rows) + inner
+
+            srow, scol = base_row + row, base_col + col
+
+            src_i += srow * row_stride + scol
+
+            src_load = srcf[src_i]
+            if src.dtype.base != dst.dtype.base:
+              src_load = src_load.cast(dst.dtype.base)
+            dst_store = dst[*dst_idxs, height, width, inner].store(src_load).end(height, width, inner)
     else:
       raise NotImplementedError(f"load from {src_dtype.addrspace} to {dst_dtype.addrspace} not implemented")
 
@@ -302,7 +410,10 @@ class Group:
 
             dst_i += srow * row_stride + scol
 
-            dst_store = dstf[dst_i].store(src[*src_idxs, height, width, inner]).end(height, width, inner)
+            src_load = src[*src_idxs, height, width, inner]
+            if src.dtype.base != dst.dtype.base:
+              src_load = src_load.cast(dst.dtype.base)
+            dst_store = dstf[dst_i].store(src_load).end(height, width, inner)
     else:
       raise NotImplementedError(f"store from {src_dtype.addrspace} to {dst_dtype.addrspace} not implemented")
 
