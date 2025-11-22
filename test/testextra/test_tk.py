@@ -521,7 +521,7 @@ class TestTK(unittest.TestCase):
 
   def test_fa(self):
     NUM_WORKERS = 1
-    B, N, H, H_KV, D = 1, 8192, 32, 32, 128
+    B, N, H, H_KV, D = 1, 8192, 32, 8, 128
     Q_BLOCK_SIZE = 16
     KV_BLOCK_SIZE = 16
     GROUP_SIZE = H // H_KV
