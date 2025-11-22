@@ -41,6 +41,8 @@ GOOD_OPCODE_NAMES = {
   0x14: "REG",
   # marker
   0x16: "TS_DELTA36_OR_MARK",       # 36-bit long delta or 36-bit marker
+  # this is the first packet
+  0x17: "LAYOUT_MODE_HEADER",       # layout/mode/group + selectors A/B
   # gated by SQ_TT_TOKEN_EXCLUDE_INST_SHIFT
   0x18: "INST",
   # gated by SQ_TT_TOKEN_EXCLUDE_UTILCTR_SHIFT
@@ -65,7 +67,6 @@ OPCODE_NAMES = {
   0x11: "TS_WAVE_STATE_SAMPLE",     # wave stall/termination sample (byte at +10)
   0x13: "EVT_SMALL_GENERIC",        # same structural family as 0x08/0x12/0x19
   0x15: "PERFCOUNTER_SNAPSHOT",     # small delta + 50-ish bits of snapshot
-  0x17: "LAYOUT_MODE_HEADER",       # layout/mode/group + selectors A/B
 }
 
 # these tables are from rocprof trace decoder
@@ -451,4 +452,4 @@ if __name__ == "__main__":
   dat_sqtt = parse(sys.argv[1] if len(sys.argv) > 1 else fn)
   for i,dat in enumerate(dat_sqtt):
     with Timing(f"decode pkt {i} with len {len(dat.blob):_}: "):
-      parse_sqtt_print_packets(dat.blob[8:], verbose=getenv("V", 1))
+      parse_sqtt_print_packets(dat.blob, verbose=getenv("V", 1))
