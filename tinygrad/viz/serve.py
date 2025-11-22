@@ -239,7 +239,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     kernel = trace.keys[r].ret if (r:=ref_map.get(name)) else None
     steps.append(create_step(kernel.name if kernel is not None else name, ("/counters", len(ctxs), len(steps)),
                              {"value":get_profile(events, sort_fn=row_tuple), "content_type":"application/octet-stream"}, depth=1))
-    for k in sorted(wave_execs, key=row_tuple): steps.append(create_step(k, ("/sqtt-insts", len(ctxs), len(steps)), wave_execs[k], depth=2))
+    for k in sorted(wave_execs, key=row_tuple): steps.append(create_step(k, ("/sqtt-events", len(ctxs), len(steps)), wave_execs[k], depth=2))
   ctxs.append({"name":"Counters", "steps":steps})
 
 def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]|None=None) -> bytes|None:
@@ -318,6 +318,16 @@ def get_render(i:int, j:int, fmt:str) -> dict:
       return get_llvm_mca(disasm_str, ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode(),
                           ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode())
     return {"src":disasm_str, "lang":"x86asm"}
+  if fmt == "sqtt-events":
+    categories:set[str] = set()
+    events:list[ProfileEvent] = []
+    w, pc_to_inst = data["wave"], data["disasm"]
+    for e in w.unpack_insts():
+      category = e.typ.split("_")[-1]
+      if category not in categories: categories.add(category)
+      events.append(ProfileRangeEvent(category, pc_to_inst[e.pc][0], Decimal(e.time), Decimal(e.time+e.dur)))
+    events = [ProfilePointEvent(x.split("_")[-1], "start", x, ts=Decimal(0)) for x in categories]+events
+    return {"value":get_profile(events), "content_type":"application/octet-stream"}
   if fmt == "sqtt-insts":
     columns = ["Instruction", "Clk", "Idle", "Duration", "Stall", "Type"]
     # Idle:     The total time gap between the completion of previous instruction and the beginning of the current instruction.
