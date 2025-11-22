@@ -44,7 +44,7 @@ OPCODE_NAMES = {
   # ------------------------------------------------------------------------
   # 0x10–0x19: timestamps, layout headers, events, perf
   # ------------------------------------------------------------------------
-  0x10: "PSEUDO_NEED_MORE_BITS",    # not a real packet; decoder refill hint
+  0x10: "NOP",
 
   0x11: "TS_WAVE_STATE_SAMPLE",     # wave stall/termination sample (byte at +10)
   0x13: "EVT_SMALL_GENERIC",        # same structural family as 0x08/0x12/0x19
@@ -422,7 +422,7 @@ def decode_packet_fields(opcode: int, reg: int, delta: int) -> str:
 # 0x11 is time advance
 # 0x16 is big time advance + markers
 # 0x14 is REG
-DEFAULT_FILTER = (0xb, 0xd, 0xf, 0x11, 0x16, 0x14) if getenv("FILTER", 1) else None
+DEFAULT_FILTER = (0xb, 0xd, 0xf, 0x10, 0x11, 0x16, 0x14) if getenv("FILTER", 1) else None
 
 def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -> None:
   """
@@ -440,41 +440,23 @@ def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -
   token_index = 0
 
   while (offset >> 3) < n:
-    # Remember where we started refilling for this step (bit offset),
-    # but the *logical* start of the current packet is last_real_offset.
-    refill_start = offset
-
     # 1) Fill register with nibbles according to nib_budget
     if nib_budget != 0:
-      target = refill_start + 4 + ((nib_budget - 1) & ~3)
-      cur = refill_start
-      while cur != target and (cur >> 3) < n:
-        byte = data[cur >> 3]
-        shift = 4 if (cur & 4) else 0  # low then high nibble
+      target = offset + 4 + ((nib_budget - 1) & ~3)
+      while offset != target and (offset >> 3) < n:
+        byte = data[offset >> 3]
+        shift = 4 if (offset & 4) else 0  # low then high nibble
         nib = (byte >> shift) & 0xF
         reg = ((reg >> 4) | (nib << 60)) & ((1 << 64) - 1)
-        cur += 4
-      offset = cur
+        offset += 4
 
     # 2) Decode token from low 8 bits
-    state = reg & 0xFF
-    opcode = STATE_TO_TOKEN[state]
+    opcode = STATE_TO_TOKEN[reg & 0xFF]
 
-    # 3) Handle pseudo-token 0x10: need more bits, don't print. Looks like a NOP.
-    if opcode == 0x10:
-      # "need more bits" pseudo-token: adjust nibble budget and continue
-      nib_budget = 4
-      if (offset >> 3) >= n:
-        break
-      # Do NOT count this as a real packet; do not update last_real_offset.
-      continue
-
-    # 4) Set next nibble budget
-    nb_index = opcode & 0x1F
-    nib_budget = NIBBLE_BUDGET[nb_index]
+    # 4) Set next nibble budget based on opcode
+    nib_budget = NIBBLE_BUDGET[opcode & 0x1F]
 
     # 5) Update time and handle special opcodes 0xF/0x16
-    time_before = time
     if opcode == 0x16:
       two_bits = (reg >> 8) & 0x3
       if two_bits == 1:
@@ -485,7 +467,6 @@ def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -
       if (reg & 0x200) == 0:
         # delta mode: add 36-bit delta to time
         delta = (reg >> 12) & ((1 << 36) - 1)
-        time += delta
       else:
         # marker / other modes: no time advance
         if (reg & 0x100) == 0:
@@ -498,13 +479,9 @@ def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -
       mask = (1 << width) - 1
       delta = (reg >> shift) & mask
 
-      # TODO: add more opcode parsers here that add notes to other opcodes
+      # opcode 0x0F has an offset of 4 to the delta
       if opcode == 0x0F:
-        delta_with_fix = delta + 4
-        time += delta_with_fix
-        delta = delta_with_fix
-      else:
-        time += delta
+        delta = delta + 4
 
     # Append extra decoded fields into the note string
     note = decode_packet_fields(opcode, reg, delta)
@@ -516,11 +493,12 @@ def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -
         f"off={offset//4:5d}  "
         f"op=0x{opcode:02x} "
         f"{OPCODE_NAMES[opcode]:24s} "
-        f" time={time_before:8d}+{delta:8d}  "
+        f" time={time:8d}+{delta:8d}  "
         f"{my_reg:16X} "
         f"{note}"
       )
 
+    time += delta
     token_index += 1
 
   # Optional summary at the end
@@ -535,7 +513,7 @@ def parse(fn:str):
   return dat_sqtt
 
 if __name__ == "__main__":
-  fn = "extra/sqtt/examples/profile_gemm_run_0.pkl"
+  fn = "extra/sqtt/examples/profile_plus_run_0.pkl"
   dat_sqtt = parse(sys.argv[1] if len(sys.argv) > 1 else fn)
   for i,dat in enumerate(dat_sqtt):
     with Timing(f"decode pkt {i} with len {len(dat.blob):_}: "):
