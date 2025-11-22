@@ -251,31 +251,29 @@ class LVPRenderer(NIRRenderer):
 
 # FIXME: this should be a rewrite rule
 def tovec(b, coord): return nalu(b, "vec4", nchannel(b, coord, 0), nchannel(b, coord, 1), nundef(b, dtypes.int), nundef(b, dtypes.int))
-# intrins: FORMAT = ?, DEST_TYPE = ?, EXPLICIT_COORD = ?
-nstore_img = nir_instr(has_def=False, df=lambda img:img, intrins={'IMAGE_DIM':mesa.GLSL_SAMPLER_DIM_2D, 'ACCESS':mesa.ACCESS_CAN_REORDER},
-  srcs=lambda b,img,coord,val:[nsrc(x) for x in [img, tovec(b, coord), nundef(b, dtypes.int), val, nimm(b, 0, dtypes.int)]],
-  num_components=lambda val:val.num_components)(lambda b,img,coord,val,dtype:mesa.nir_intrinsic_instr_create(b.shader,g("nir_intrinsic_image_store")))
+def nfloat(dtype): return mesa.nir_type_float16 if dtype == dtypes.half else mesa.nir_type_float32
+nstore_img = nir_instr(has_def=False, df=lambda img:img, num_components=lambda val:val.num_components,
+  intrins=lambda dtype:{'IMAGE_DIM':mesa.GLSL_SAMPLER_DIM_2D, 'ACCESS':mesa.ACCESS_CAN_REORDER, 'SRC_TYPE':nfloat(dtype)},
+  srcs=lambda b,img,coord,val:[nsrc(x) for x in [img, tovec(b, coord), nundef(b, dtypes.int), val, nimm(b, 0, dtypes.int)]])(
+    lambda b,img,coord,val,dtype:mesa.nir_intrinsic_instr_create(b.shader,g("nir_intrinsic_image_store")))
 
-@nir_instr(nc=lambda dtype:dtype.count, bs=lambda dtype:dtype.itemsize*8//dtype.count, num_components=lambda dtype:dtype.count,
-           intrins={'IMAGE_DIM':mesa.GLSL_SAMPLER_DIM_2D, 'ACCESS':mesa.ACCESS_CAN_REORDER, 'FORMAT':mesa.PIPE_FORMAT_R32G32B32A32_FLOAT,
-                    'DEST_TYPE':mesa.nir_type_float32},
-           srcs=lambda b,img,coord:[nsrc(x) for x in [img, tovec(b, coord), nundef(b, dtypes.int), nimm(b, 0, dtypes.int)]])
-def _nload_img(b, img, coord, dtype): return mesa.nir_intrinsic_instr_create(b.shader, g("nir_intrinsic_image_load"))
+_nload_img = nir_instr(intrins=lambda dtype:{'IMAGE_DIM':mesa.GLSL_SAMPLER_DIM_2D, 'ACCESS':mesa.ACCESS_CAN_REORDER, 'DEST_TYPE':nfloat(dtype)},
+  nc=4, bs=32, num_components=4, srcs=lambda b,img,coord:[nsrc(x) for x in [img, tovec(b, coord), nundef(b, dtypes.int), nimm(b, 0, dtypes.int)]])(
+    lambda b,img,coord,dtype: mesa.nir_intrinsic_instr_create(b.shader, g("nir_intrinsic_image_load")))
 
 class IR3Renderer(NIRRendererWithOpts):
   device = "QCOM"
 
   def nload_img(ctx,img,coord):
     ctx.texs.add(img)
-    return _nload_img(ctx.b, ctx.r[img], ctx.r[coord], dtypes.float.vec(4))
+    return _nload_img(ctx.b, ctx.r[img], ctx.r[coord], img.dtype)
 
   def_rewrite = PatternMatcher([
-    (UPat(Ops.STORE, src=(UPat.var('img').index(UPat.var('coord', dtypes.int.vec(2)), allow_any_len=True), UPat.var("val", dtypes.float.vec(4))),
+    (UPat(Ops.STORE, src=(UPat.var('img').index(UPat.var('coord', dtypes.int.vec(2)), allow_any_len=True), UPat.var("val")),
           allow_any_len=True), lambda ctx,img,coord,val: nstore_img(ctx.b, ctx.r[img], ctx.r[coord], ctx.r[val], val.dtype)),
-    # TODO: half support
-    (UPat(Ops.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('img').index(UPat.var('coord', dtypes.int.vec(2)), UPat.var("gate")), UPat.var("alt"))),
+    (UPat(Ops.LOAD, src=(UPat.var('img').index(UPat.var('coord', dtypes.int.vec(2)), UPat.var("gate")), UPat.var("alt"))),
      lambda ctx,img,coord,alt,gate: if_phi(ctx.b, ctx.r[gate], lambda: ctx.nload_img(img, coord), lambda: ctx.r[alt])),
-    (UPat(Ops.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('img').index(UPat.var('coord', dtypes.int.vec(2))),)), nload_img),
+    (UPat(Ops.LOAD, src=(UPat.var('img').index(UPat.var('coord', dtypes.int.vec(2))),)), nload_img),
   ]) + NIRRenderer.def_rewrite
 
   _param = LVPRenderer.param
