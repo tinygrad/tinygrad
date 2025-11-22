@@ -96,14 +96,18 @@ if __name__ == "__main__":
       "s_load_b64 s[0:1], s[0:1], null",
       "s_waitcnt lgkmcnt(0)",
       "v_mov_b32_e32 v0, 0",
+      "global_load_b32 v1, v0, s[0:1]",
+      "s_waitcnt vmcnt(0)",
     ])
   exit(0)
 
 
   with save_sqtt() as sqtt:
-    #(Tensor.empty(16,16) @ Tensor.empty(16,16)).elu().realize()
-    Tensor.empty(65536, 1024).sum(axis=1).realize()
+    (Tensor.empty(16,16) @ Tensor.empty(16,16)).elu().realize()
+    #Tensor.empty(65536, 1024).sum(axis=1).realize()
     #Tensor.empty(1).elu().realize()
+
+  exit(0)
 
   with save_sqtt() as sqtt:
     # what's in v0?

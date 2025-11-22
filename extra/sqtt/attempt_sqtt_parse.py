@@ -10,6 +10,10 @@ from extra.sqtt.roc import decode, ProfileSQTTEvent
 # opcodes(18):  1  2  3  4  5  6  8  9  F 10 11 12 14 15 16 17 18 19
 # if you exclude everything, you are left with 6
 # opcodes( 6): 10 11 14 15 16 17
+# sometimes we see a lot of B, but not repeatable
+
+# not seen
+# 7 A C
 
 GOOD_OPCODE_NAMES = {
   # gated by SQ_TT_TOKEN_EXCLUDE_VALUINST_SHIFT (but others must be enabled for it to show)
@@ -148,6 +152,7 @@ DELTA_MAP_DEFAULT = {
   0x0B: (5,  3),   # shift=5,  end=8
   0x0C: (5,  3),   # shift=5,  end=8
   0x0D: (5,  3),   # shift=5,  end=8
+  # NOTE: 0x0e can never be decoded, it's not in the STATE_TO_OPCODE table
   #0x0E: (7,  2),   # shift=7,  end=9
   0x0F: (4,  4),   # shift=4,  end=8
   0x10: (0,  0),   # shift=0,  end=0  (no delta)
@@ -342,12 +347,12 @@ FILTER_LEVEL = getenv("FILTER", 2)
 DEFAULT_FILTER = tuple()
 # NOP + pure time
 if FILTER_LEVEL >= 0: DEFAULT_FILTER += (0x10, 0xf)
-# reg + marker + sample + event
+# reg + event + sample + marker
 if FILTER_LEVEL >= 1: DEFAULT_FILTER += (0x11, 0x12, 0x14, 0x16)
 # instructions and runs + waverdy
-if FILTER_LEVEL >= 2: DEFAULT_FILTER += (0x01, 0x02, 0x03, 0x04, 0x05, 0x6, 0x18)
+if FILTER_LEVEL >= 3: DEFAULT_FILTER += (0x01, 0x02, 0x03, 0x04, 0x05, 0x6, 0x18)
 # waves
-if FILTER_LEVEL >= 3: DEFAULT_FILTER += (0x8, 0x9,)
+if FILTER_LEVEL >= 4: DEFAULT_FILTER += (0x8, 0x9,)
 
 def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -> None:
   """
@@ -358,6 +363,7 @@ def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -
   """
   n = len(data)
   time = 0
+  last_printed_time = 0
   reg = 0          # shift register
   offset = 0       # bit offset, in steps of 4 (one nibble)
   nib_budget = 0x40
@@ -417,10 +423,11 @@ def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -
         f"off={offset//4:5d}  "
         f"op=0x{opcode:02x} "
         f"{OPCODE_NAMES[opcode]:24s} "
-        f" time={time:8d}+{delta:8d}  "
+        f" time={time:8d}+{time-last_printed_time:8d}  "
         f"{reg&reg_mask(opcode):16X} "
         f"{note}"
       )
+      last_printed_time = time
 
     time += delta
     token_index += 1
