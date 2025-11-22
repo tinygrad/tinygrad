@@ -32,7 +32,7 @@ def llvm_disasm(arch:str, lib:bytes) -> dict[int, tuple[str, int]]:
 @dataclasses.dataclass(frozen=True)
 class InstExec:
   typ:str
-  inst:str
+  pc:int
   stall:int
   dur:int
   time:int
@@ -46,12 +46,12 @@ class WaveExec:
   begin_time:int
   end_time:int
   insts:bytearray
-  def decode_insts(self, pc_to_asm:dict[int, tuple[str, int]]) -> Generator[InstExec, None, None]:
+  def unpack_insts(self) -> Generator[InstExec, None, None]:
     sz = ctypes.sizeof(struct:=rocprof.rocprofiler_thread_trace_decoder_inst_t)
     insts_array = (struct*(len(self.insts)//sz)).from_buffer(self.insts)
     for inst in insts_array:
       inst_typ = rocprof.enum_rocprofiler_thread_trace_decoder_inst_category_t.get(inst.category)
-      yield InstExec(inst_typ, pc_to_asm[inst.pc.address][0], inst.stall, inst.duration, inst.time)
+      yield InstExec(inst_typ, inst.pc.address, inst.stall, inst.duration, inst.time)
 
 class _ROCParseCtx:
   def __init__(self, dev_evs:dict[str, ProfileDeviceEvent], sqtt_evs:list[ProfileSQTTEvent], prog_evs:list[ProfileProgramEvent]):
