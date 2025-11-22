@@ -62,10 +62,9 @@ jobs:
           python-version: '3.10'
       - name: Count Line Diff
         run: |
-          pip install tabulate
+          pip install tabulate $BASE
           BASE="$GITHUB_WORKSPACE/base"
           PR="$GITHUB_WORKSPACE/pr"
-          pip install $BASE
           cp "$BASE/sz.py" .
           echo "loc_content<<EOF" >> "$GITHUB_ENV"
           python sz.py "$BASE" "$PR" >> "$GITHUB_ENV"
