@@ -3,7 +3,7 @@ import os, ctypes, functools, mmap, struct, array, math, sys, weakref, contextli
 assert sys.platform != 'win32'
 from types import SimpleNamespace
 from typing import Any, cast
-from tinygrad.device import BufferSpec
+from tinygrad.device import BufferSpec, CompilerPairT
 from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, BumpAllocator
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.runtime.autogen import kgsl, adreno
@@ -397,7 +397,7 @@ class QCOMDevice(HCQCompiled):
     if PROFILE and self.gpu_id[:2] < (7, 3):
       System.write_sysfs("/sys/class/kgsl/kgsl-3d0/idle_timer", value="4000000000", msg="Failed to disable suspend mode", expected="4294967276")
 
-    compilers = [(QCOMRenderer, functools.partial(QCOMCompiler, device)),
+    compilers: list[CompilerPairT] = [(QCOMRenderer, functools.partial(QCOMCompiler, device)),
                  (functools.partial(IR3Renderer, self), functools.partial(IR3Compiler, info.chip_id))]
     super().__init__(device, QCOMAllocator(self), compilers, functools.partial(QCOMProgram, self), QCOMSignal,
                      functools.partial(QCOMComputeQueue, self), None)

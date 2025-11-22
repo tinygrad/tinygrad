@@ -287,7 +287,8 @@ class IR3Renderer(NIRRendererWithOpts):
 
   def prerender(self, uops:list[UOp]):
     super().prerender(uops)
-    self.texs, self.uops, self.ibo_idx, self.img_idx = set(), uops, 0, 0
+    self.texs:set[UOp] = set()
+    self.uops, self.ibo_idx, self.img_idx = uops, 0, 0
     self.param_sz = sum([8 if u.op == Ops.DEFINE_GLOBAL else u.dtype.itemsize for u in uops if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR)])
 
   def postrender(self, uops:list[UOp]):
