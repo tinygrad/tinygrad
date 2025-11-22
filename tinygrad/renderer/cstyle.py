@@ -8,6 +8,12 @@ from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, AddrSpace, trunc
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu
 
+c99_bitcast = PatternMatcher([
+  # this union is valid C99, but not valid C++. we use the clang specific __builtin_bit_cast by default
+  (UPat(Ops.BITCAST, name="x"), lambda ctx,x:
+    f"(((union {{ {ctx.render_dtype(x.src[0].dtype)} f; {ctx.render_dtype(x.dtype)} t; }}){{ .f = {ctx[x.src[0]]} }}).t)")
+])
+
 base_rewrite = PatternMatcher([
   (UPat(Ops.DEFINE_REG, name="x"), lambda ctx,x: f"{ctx.render_dtype(x.dtype.base)} {ctx[x]}[{x.dtype.size}];"),
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"if ({ctx[x.src[0]]}) {{"),
@@ -24,8 +30,6 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"({ctx.render_cast(x.dtype, ctx[x.src[0]])})"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x:
     f"__builtin_bit_cast({ctx.render_dtype(x.dtype)}, ({ctx.render_dtype(x.src[0].dtype)})({ctx[x.src[0]]}))"),
-  # this union is valid C99, but not valid C++. we use the clang specific __builtin_bit_cast
-  # f"(((union {{ {ctx.render_dtype(x.src[0].dtype)} f; {ctx.render_dtype(x.dtype)} t; }}){{ .f = {ctx[x.src[0]]} }}).t)"
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda ctx,x: f"{ctx.smem_align}{ctx.smem_prefix}{ctx.render_dtype(x.dtype.base)} {ctx[x]}[{x.dtype.size}];"),
   (UPat(Ops.BARRIER), lambda ctx: ctx.barrier),
   (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: f"{ctx.code_for_workitem[x.arg[0]](x.arg[-1])}; /* {(x.src[0]).render()} */"),
@@ -384,6 +388,8 @@ class CUDARenderer(CStyleLanguage):
   extra_matcher = create_non_native_float_pats(dtypes.fp8s, casting=False) + PatternMatcher([
     (UPat(Ops.CAST, dtypes.fp8s, UPat.var("x", dtypes.fp8s), name='y'), lambda x,y: x.cast(dtypes.float).cast(y.dtype) if x.dtype!=y.dtype else None),
   ]) + extra_pm
+  string_rewrite = c99_bitcast + base_rewrite
+
   def render_vector_prefix(self, dt:DType) -> str:
     vec, scal = self.render_dtype(dt), self.render_dtype(dt.scalar()),
     elems, header = ', '.join(_nms[:dt.count]), ', '.join([f"{scal} {x}" for x in _nms[:dt.count]])
