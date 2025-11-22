@@ -1,4 +1,5 @@
 import ctypes, pathlib, argparse, pickle, re, functools, dataclasses, itertools, threading
+from typing import Generator
 from tinygrad.helpers import temp, unwrap, DEBUG
 from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileProgramEvent
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
@@ -31,7 +32,7 @@ def llvm_disasm(arch:str, lib:bytes) -> dict[int, tuple[str, int]]:
 @dataclasses.dataclass(frozen=True)
 class InstExec:
   typ:str
-  inst:str
+  pc:int
   stall:int
   dur:int
   time:int
@@ -44,7 +45,13 @@ class WaveExec:
   se:int
   begin_time:int
   end_time:int
-  insts:list[InstExec]
+  insts:bytearray
+  def unpack_insts(self) -> Generator[InstExec, None, None]:
+    sz = ctypes.sizeof(struct:=rocprof.rocprofiler_thread_trace_decoder_inst_t)
+    insts_array = (struct*(len(self.insts)//sz)).from_buffer(self.insts)
+    for inst in insts_array:
+      inst_typ = rocprof.enum_rocprofiler_thread_trace_decoder_inst_category_t.get(inst.category)
+      yield InstExec(inst_typ, inst.pc.address, inst.stall, inst.duration, inst.time)
 
 class _ROCParseCtx:
   def __init__(self, dev_evs:dict[str, ProfileDeviceEvent], sqtt_evs:list[ProfileSQTTEvent], prog_evs:list[ProfileProgramEvent]):
@@ -70,18 +77,12 @@ class _ROCParseCtx:
   def on_wave_ev(self, ev:rocprof.rocprofiler_thread_trace_decoder_wave_t):
     if DEBUG >= 5: print("WAVE", ev.wave_id, self.active_se, ev.cu, ev.simd, ev.contexts, ev.begin_time, ev.end_time)
 
-    inst_execs:list[InstExec] = []
-    disasm = self.disasms[unwrap(self.active_kern)]
-    for j in range(ev.instructions_size):
-      inst_ev = ev.instructions_array[j]
-      inst_typ = rocprof.enum_rocprofiler_thread_trace_decoder_inst_category_t.get(inst_ev.category)
-      inst_disasm = disasm[unwrap(inst_ev.pc.address)][0]
-      inst_execs.append(InstExec(inst_typ, inst_disasm, inst_ev.stall, inst_ev.duration, inst_ev.time))
-      if DEBUG >= 8: print(inst_execs[-1])
+    insts_blob = bytearray(sz:=ev.instructions_size * ctypes.sizeof(rocprof.rocprofiler_thread_trace_decoder_inst_t))
+    ctypes.memmove((ctypes.c_char * sz).from_buffer(insts_blob), ev.instructions_array, sz)
 
     if ev.instructions_size > 0:
       self.inst_execs.setdefault(unwrap(self.active_kern), []).append(WaveExec(ev.wave_id, ev.cu, ev.simd, unwrap(self.active_se), ev.begin_time,
-                                                                               ev.end_time, inst_execs))
+                                                                               ev.end_time, insts_blob))
 
 def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
   dev_events:dict[str, ProfileDeviceEvent] = {}
