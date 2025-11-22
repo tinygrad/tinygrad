@@ -8,12 +8,6 @@ from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, AddrSpace, trunc
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu
 
-c99_bitcast = PatternMatcher([
-  # this union is valid C99, but not valid C++. we use the clang specific __builtin_bit_cast by default
-  (UPat(Ops.BITCAST, name="x"), lambda ctx,x:
-    f"(((union {{ {ctx.render_dtype(x.src[0].dtype)} f; {ctx.render_dtype(x.dtype)} t; }}){{ .f = {ctx[x.src[0]]} }}).t)")
-])
-
 base_rewrite = PatternMatcher([
   (UPat(Ops.DEFINE_REG, name="x"), lambda ctx,x: f"{ctx.render_dtype(x.dtype.base)} {ctx[x]}[{x.dtype.size}];"),
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"if ({ctx[x.src[0]]}) {{"),
@@ -63,6 +57,12 @@ base_rewrite = PatternMatcher([
     (f"[{x.arg[0]}]" if x.src[0].dtype.count > ctx.gep_arr_threshold else f".{'xyzwabcd'[x.arg[0]]}")),
   # custom passes through with format
   (UPat((Ops.CUSTOM, Ops.CUSTOMI), name="x"), lambda ctx,x: x.arg.format(*[ctx[y] for y in x.src])),
+])
+
+lambda_union_bitcast = PatternMatcher([
+  # this union is valid C99, a lambda makes it valid C++
+  (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"([]({ctx.render_dtype(x.src[0].dtype)} x){{"
+    f" union {{ {ctx.render_dtype(x.src[0].dtype)} f; {ctx.render_dtype(x.dtype)} t; }} u; u.f = x; return u.t; }}({ctx[x.src[0]]}))"),
 ])
 
 extra_pm = PatternMatcher([
@@ -388,7 +388,7 @@ class CUDARenderer(CStyleLanguage):
   extra_matcher = create_non_native_float_pats(dtypes.fp8s, casting=False) + PatternMatcher([
     (UPat(Ops.CAST, dtypes.fp8s, UPat.var("x", dtypes.fp8s), name='y'), lambda x,y: x.cast(dtypes.float).cast(y.dtype) if x.dtype!=y.dtype else None),
   ]) + extra_pm
-  string_rewrite = c99_bitcast + base_rewrite
+  string_rewrite = lambda_union_bitcast + base_rewrite
 
   def render_vector_prefix(self, dt:DType) -> str:
     vec, scal = self.render_dtype(dt), self.render_dtype(dt.scalar()),
