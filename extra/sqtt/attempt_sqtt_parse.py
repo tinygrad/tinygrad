@@ -58,9 +58,9 @@ OPCODE_NAMES = {
 # rocprof_trace_decoder_parse_data-0x11c6a0
 # parse_sqtt_180 = b *rocprof_trace_decoder_parse_data-0x11c6a0+0x110040
 
-# ---------- 1. local_138: 256-byte state->token table ----------
+# ---------- 1. local_138: 256-byte state->opcode table ----------
 
-STATE_TO_TOKEN: bytes = bytes([
+STATE_TO_OPCODE: bytes = bytes([
   0x10, 0x16, 0x18, 0x01, 0x05, 0x0b, 0x0c, 0x00, 0x0f, 0x14, 0x18, 0x01, 0x09, 0x04, 0x03, 0x02,
   0x10, 0x17, 0x18, 0x01, 0x06, 0x08, 0x0d, 0x00, 0x0f, 0x14, 0x18, 0x01, 0x0a, 0x04, 0x03, 0x02,
   0x10, 0x07, 0x18, 0x01, 0x05, 0x0b, 0x0c, 0x00, 0x0f, 0x14, 0x18, 0x01, 0x09, 0x04, 0x03, 0x02,
@@ -83,13 +83,9 @@ STATE_TO_TOKEN: bytes = bytes([
 # ---------- 2. DAT_0012e280: nibble budget per opcode&0x1F ----------
 
 NIBBLE_BUDGET = [
-  0x08, 0x0C, 0x08, 0x08, 0x0C, 0x18, 0x18, 0x40,
-  0x14, 0x20, 0x30, 0x14, 0x34, 0x1C, 0x30, 0x08,
-  0x04, 0x18, 0x18, 0x20, 0x40, 0x40, 0x30, 0x40,
-  0x14, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x08, 0x0C, 0x08, 0x08, 0x0C, 0x18, 0x18, 0x40, 0x14, 0x20, 0x30, 0x14, 0x34, 0x1C, 0x30, 0x08,
+  0x04, 0x18, 0x18, 0x20, 0x40, 0x40, 0x30, 0x40, 0x14, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 ]
-assert len(NIBBLE_BUDGET) == 32
-
 
 # ---------- 3. delta_map from your hash nodes ----------
 
@@ -124,7 +120,7 @@ DELTA_MAP_DEFAULT = {
 
 # ---------- 4. One-line-per-packet parser ----------
 
-def decode_packet_fields(opcode: int, reg: int, delta: int) -> str:
+def decode_packet_fields(opcode: int, reg: int) -> str:
   """
   Decode packet payloads conservatively, using:
     - NIBBLE_BUDGET[opcode & 0x1F] to mask reg down to true width.
@@ -133,37 +129,21 @@ def decode_packet_fields(opcode: int, reg: int, delta: int) -> str:
   """
   # --- 0. Restrict to real packet bits ---------------------------------
   nb_bits = NIBBLE_BUDGET[opcode & 0x1F]
-  if nb_bits <= 0 or nb_bits >= 64:
-    pkt = reg & ((1 << 64) - 1)
-  else:
-    pkt = reg & ((1 << nb_bits) - 1)
+  pkt = reg & ((1 << nb_bits) - 1)
 
   fields: list[str] = []
 
   shift, width = DELTA_MAP_DEFAULT.get(opcode, (0, 0))
-  if width:
-    field_mask = (1 << width) - 1
-    shaped_field = (pkt >> shift) & field_mask
-  else:
-    field_mask = 0
-    shaped_field = 0
+  mask_delta = (1 << width) - 1
+  extracted_delta = (pkt >> shift) & mask_delta
 
   # =====================================================================
   # 1. Timestamp-centric opcodes (actually drive 'time')
   # =====================================================================
 
-  if opcode == 0x0F:  # TS_DELTA_SHORT_PLUS4
-    # In the caller, delta already has +4 applied.
-    raw_delta = shaped_field
-    fields.append(f"raw_delta={raw_delta}")
-    fields.append(f"ts_short_plus4={delta}")
-    return ", ".join(fields)
-
   if opcode == 0x11:  # TS_WAVE_STATE_SAMPLE
     # DELTA_MAP_DEFAULT: shift=7, width=9 -> small delta.
-    raw_delta = shaped_field
     coarse    = (pkt >> (shift + width)) & 0xFF  # matches byte at +10 in C
-    fields.append(f"raw_delta={raw_delta}")
     if coarse:
       fields.append(f"coarse_state=0x{coarse:02x}")
     # From decomp:
@@ -198,9 +178,7 @@ def decode_packet_fields(opcode: int, reg: int, delta: int) -> str:
   # but we don't see any other fields used in the decomp.
   if opcode in (0x07, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E):
     if width:
-      raw_delta = shaped_field
-      leftover  = pkt & ~(field_mask << shift)
-      fields.append(f"raw_delta={raw_delta}")
+      leftover  = pkt & ~(mask_delta << shift)
       if leftover:
         fields.append(f"payload=0x{leftover:x}")
     return ", ".join(fields)
@@ -212,36 +190,26 @@ def decode_packet_fields(opcode: int, reg: int, delta: int) -> str:
   if opcode == 0x01:  # META_ID12_TS_SMALL
     id12 = pkt & 0xFFF
     fields.append(f"id12=0x{id12:03x}")
-    if width:
-      fields.append(f"field_s{shift}_w{width}={shaped_field}")
     return ", ".join(fields)
 
   if opcode == 0x02:  # META_FLAG8_TS_SMALL
     flag8 = pkt & 0xFF
-    fields.append(f"flag8=0x{flag8:02x}")
-    if width:
-      fields.append(f"field_s{shift}_w{width}={shaped_field}")
+    fields.append(f"opcode=0x{flag8:02x}")
     return ", ".join(fields)
 
   if opcode == 0x03:  # META_SUBEVENT8_TS_SMALL
     sub8 = pkt & 0xFF
-    fields.append(f"subevent8=0x{sub8:02x}")
-    if width:
-      fields.append(f"field_s{shift}_w{width}={shaped_field}")
+    fields.append(f"opcode=0x{sub8:02x}")
     return ", ".join(fields)
 
   if opcode == 0x04:  # META_BASE_INDEX12_TS
     idx12 = pkt & 0xFFF
     fields.append(f"base_index12=0x{idx12:03x}")
-    if width:
-      fields.append(f"field_s{shift}_w{width}={shaped_field}")
     return ", ".join(fields)
 
   if opcode in (0x05, 0x06):  # META_DESC24_TS_A/B
     desc24 = pkt & 0xFFFFFF
     fields.append(f"desc24=0x{desc24:06x}")
-    if width:
-      fields.append(f"field_s{shift}_w{width}={shaped_field}")
     return ", ".join(fields)
 
   # =====================================================================
@@ -329,10 +297,10 @@ def decode_packet_fields(opcode: int, reg: int, delta: int) -> str:
     return ", ".join(fields)
 
   # =====================================================================
-  # 6. Opcode 0x18: perf/event selector (FUN_0010aba0)
+  # 6. Opcode 0x18: INST (FUN_0010aba0)
   # =====================================================================
 
-  if opcode == 0x18:  # PERF_EVENT_SELECT
+  if opcode == 0x18:  # INST
     # From case 0x18:
     #   low3   = w & 7
     #   grp3   = (w >> 3) or (w >> 4) & 7   (layout-dependent)
@@ -368,13 +336,11 @@ def decode_packet_fields(opcode: int, reg: int, delta: int) -> str:
   if opcode == 0x15:  # PERFCOUNTER_SNAPSHOT
     # NIBBLE_BUDGET gives full 64 bits here.
     # DELTA_MAP_DEFAULT: shift=7, width=3 → tiny delta field.
-    raw_delta = shaped_field if width else 0
     # low bits below the delta field
     snap_low  = pkt & ((1 << shift) - 1) if shift else 0
     # everything above delta field
     snap_hi   = pkt >> (shift + width) if width else (pkt >> shift)
 
-    fields.append(f"raw_delta={raw_delta}")
     fields.append(f"snap_low_s{shift}=0x{snap_low:x}")
     fields.append(f"snap_hi=0x{snap_hi:x}")
     return ", ".join(fields)
@@ -408,21 +374,19 @@ def decode_packet_fields(opcode: int, reg: int, delta: int) -> str:
   # 10. Generic fallback: expose the DELTA_MAP_DEFAULT field + leftover
   # =====================================================================
 
-  if width:
-    fields.append(f"field_s{shift}_w{width}={shaped_field}")
-    leftover = pkt & ~(field_mask << shift)
-    if leftover:
-      fields.append(f"payload=0x{leftover:x}")
+  leftover = pkt & ~(mask_delta << shift)
+  fields.append(f"payload=0x{leftover:x}")
 
   return ", ".join(fields)
 
 # 0xb is time something
 # 0xd is time something
 # 0xf is small time advance
+# 0x10 is NOP (which we always filter)
 # 0x11 is time advance
 # 0x16 is big time advance + markers
 # 0x14 is REG
-DEFAULT_FILTER = (0xb, 0xd, 0xf, 0x10, 0x11, 0x16, 0x14) if getenv("FILTER", 1) else None
+DEFAULT_FILTER = (0xb, 0xd, 0xf, 0x10, 0x11, 0x16, 0x14) if getenv("FILTER", 1) else (0x10,)
 
 def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -> None:
   """
@@ -445,13 +409,12 @@ def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -
       target = offset + 4 + ((nib_budget - 1) & ~3)
       while offset != target and (offset >> 3) < n:
         byte = data[offset >> 3]
-        shift = 4 if (offset & 4) else 0  # low then high nibble
-        nib = (byte >> shift) & 0xF
+        nib = (byte >> (offset & 4)) & 0xF
         reg = ((reg >> 4) | (nib << 60)) & ((1 << 64) - 1)
         offset += 4
 
     # 2) Decode token from low 8 bits
-    opcode = STATE_TO_TOKEN[reg & 0xFF]
+    opcode = STATE_TO_OPCODE[reg & 0xFF]
 
     # 4) Set next nibble budget based on opcode
     nib_budget = NIBBLE_BUDGET[opcode & 0x1F]
@@ -476,15 +439,14 @@ def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -
     else:
       # 6) Generic opcode (including 0x0F)
       shift, width = DELTA_MAP_DEFAULT[opcode]
-      mask = (1 << width) - 1
-      delta = (reg >> shift) & mask
+      delta = (reg >> shift) & ((1 << width) - 1)
 
       # opcode 0x0F has an offset of 4 to the delta
       if opcode == 0x0F:
         delta = delta + 4
 
     # Append extra decoded fields into the note string
-    note = decode_packet_fields(opcode, reg, delta)
+    note = decode_packet_fields(opcode, reg)
 
     if verbose and (filter is None or opcode not in filter):
       my_reg = reg & ((1 << nib_budget)-1)
