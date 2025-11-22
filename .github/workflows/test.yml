@@ -990,6 +990,7 @@ jobs:
           key: compile-${{ matrix.backend }}
           deps: testing_minimal
           mesa: ${{ matrix.backend == 'ir3' && 'true' }}
+          python-version: '3.14'
       - name: Set env
         shell: bash
         run: printf "NULL=1\n${{ matrix.backend == 'ir3' && 'NULL_IR3=1' }}" >> $GITHUB_ENV
