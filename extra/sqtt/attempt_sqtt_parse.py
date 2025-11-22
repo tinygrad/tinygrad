@@ -216,6 +216,11 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       # 16 bit field
       # 1 bit per wave
       fields.append(f"mask={pkt>>8:16b}")
+    case 0x6:
+      # wave ready FFFF00
+      # 16 bit field
+      # 1 bit per wave
+      fields.append(f"mask={pkt>>8:16b}")
     case 0x0d:
       # 20 bit field
       fields.append(f"arg = {pkt>>8:X}")
@@ -237,9 +242,6 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
         fields.append("flag_wave_interest=1")
       if coarse & 0x08:
         fields.append("flag_terminate_all=1")
-    case 0x6:
-      # wave ready
-      fields.append(f"wave = {pkt>>8:X}")
     case 0x8:
       # wave end, this is 20 bits (FFF00)
       flag7   = (pkt >> 8) & 0x3
@@ -352,7 +354,7 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       fields.append(f"& {reg_mask(opcode):X}")
   return ",".join(fields)
 
-FILTER_LEVEL = getenv("FILTER", 2)
+FILTER_LEVEL = getenv("FILTER", 1)
 
 DEFAULT_FILTER = tuple()
 # NOP + pure time
@@ -432,14 +434,11 @@ def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -
 
     if verbose and (filter is None or opcode not in filter):
       print(
-        f"{token_index:4d}  "
-        f"time={time:8d}+{delta+(time-last_printed_time):8d}  "
+        f"{time:8d}+{delta+(time-last_printed_time):8d} : "
         f"op={opcode:2x} "
         f"{OPCODE_NAMES[opcode]:24s} "
         f"{reg&reg_mask(opcode):16X} "
-        f"{note}"
-      )
-      #f"off={offset//4:5d}  "
+        f"{note}")
       last_printed_time = time+delta
 
     time += delta
@@ -448,7 +447,8 @@ def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -
   # Optional summary at the end
   print(f"# done: tokens={token_index:_}, final_time={time}, flags=0x{flags:02x}")
   if verbose:
-    print(f"opcodes({len(opcodes_seen):2d}):", ' '.join([colored(f"{op:2X}", "white" if op in GOOD_OPCODE_NAMES else "red") for op in opcodes_seen]))
+    print(f"opcodes({len(opcodes_seen):2d}):",
+          ' '.join([colored(f"{op:2X}", "WHITE" if op in opcodes_seen else "BLACK") for op in sorted(opcode_mask)]))
 
 
 def parse(fn:str):
