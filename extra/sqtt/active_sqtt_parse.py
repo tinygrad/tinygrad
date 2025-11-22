@@ -91,17 +91,21 @@ def run_asm(src):
   fxn(buf._buf, global_size=(NUM_WORKGROUPS,1,1), local_size=(WAVE_SIZE*NUM_WAVES,1,1), wait=True)
 
 if __name__ == "__main__":
-  """
   with save_sqtt() as sqtt:
     run_asm([
-      "s_load_b64 s[0:1], s[0:1], null",
-      "s_waitcnt lgkmcnt(0)",
-      "v_mov_b32_e32 v0, 0",
-      "global_load_b32 v1, v0, s[0:1]",
-      "s_waitcnt vmcnt(0)",
+      "s_nop 0",
+      "s_nop 0",
+      "s_nop 0",
+      "s_nop 0",
+      "s_nop 0",
+      "s_nop 0",
+      #"s_load_b64 s[0:1], s[0:1], null",
+      #"s_waitcnt lgkmcnt(0)",
+      #"v_mov_b32_e32 v0, 0",
+      #"global_load_b32 v1, v0, s[0:1]",
+      #"s_waitcnt vmcnt(0)",
     ])
   exit(0)
-  """
 
   with save_sqtt() as sqtt:
     #(Tensor.empty(16,16) @ Tensor.empty(16,16)).elu().realize()

@@ -20,6 +20,8 @@ from extra.sqtt.roc import decode, ProfileSQTTEvent
 # not seen
 # 7 A C
 
+# NOTE: INST runs before EXEC
+
 GOOD_OPCODE_NAMES = {
   # gated by SQ_TT_TOKEN_EXCLUDE_VALUINST_SHIFT (but others must be enabled for it to show)
   0x01: "VALUINST",
@@ -232,7 +234,7 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       # wave ready
       fields.append(f"wave = {pkt>>8:X}")
     case 0x8:
-      # wave end
+      # wave end, this is 20 bits (FFF00)
       fields.append(f"wave = {pkt>>8:X}")
     case 0x9:
       # From case 9 (WAVESTART) in multiple consumers:
@@ -343,12 +345,14 @@ DEFAULT_FILTER = tuple()
 if FILTER_LEVEL >= 0: DEFAULT_FILTER += (0x10, 0xf)
 # reg + event + sample + marker
 if FILTER_LEVEL >= 1: DEFAULT_FILTER += (0x11, 0x14, 0x16)
-# instructions and runs + waverdy
-if FILTER_LEVEL >= 3: DEFAULT_FILTER += (0x01, 0x02, 0x03, 0x04, 0x05, 0x6, 0x18)
+# instruction runs
+if FILTER_LEVEL >= 3: DEFAULT_FILTER += (0x02, 0x03, 0x04, 0x05)
+# instructions defs + waveready
+if FILTER_LEVEL >= 4: DEFAULT_FILTER += (0x01, 0x6, 0x18)
 # waves
-if FILTER_LEVEL >= 4: DEFAULT_FILTER += (0x8, 0x9,)
+if FILTER_LEVEL >= 5: DEFAULT_FILTER += (0x8, 0x9,)
 # events
-if FILTER_LEVEL >= 5: DEFAULT_FILTER += (0x12,)
+if FILTER_LEVEL >= 6: DEFAULT_FILTER += (0x12,)
 
 def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -> None:
   """
@@ -419,11 +423,11 @@ def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -
         f"off={offset//4:5d}  "
         f"op=0x{opcode:02x} "
         f"{OPCODE_NAMES[opcode]:24s} "
-        f" time={time:8d}+{time-last_printed_time:8d}  "
+        f" time={time:8d}+{delta+(time-last_printed_time):8d}  "
         f"{reg&reg_mask(opcode):16X} "
         f"{note}"
       )
-      last_printed_time = time
+      last_printed_time = time+delta
 
     time += delta
     token_index += 1
