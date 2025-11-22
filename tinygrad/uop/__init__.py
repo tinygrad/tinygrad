@@ -92,8 +92,8 @@ class Ops(FastEnum):
   # reduce
   REDUCE_AXIS = auto(); REDUCE = auto(); ALLREDUCE = auto()
 
-  # errors/placeholders
-  REWRITE_ERROR = auto(); SENTINEL = auto()
+  # errors
+  REWRITE_ERROR = auto()
 
   # expander ops
   UNROLL = auto(); CONTRACT = auto(); CAT = auto(); PTRCAT = auto()

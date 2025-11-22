@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence, Iterable
+from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence, Iterable, Final
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, collections
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -1153,7 +1153,8 @@ if TRACK_MATCH_STATS or PROFILE:
 
 # *** simple graph rewrite engine ***
 
-with Context(SPEC=0): SENTINEL = UOp(Ops.SENTINEL)
+# A pure Python sentinel, but *typed* as UOp so it fits all the dict annotations
+SENTINEL: Final[UOp] = cast(UOp, object())
 class BottomUpGate(Exception): pass
 class RewriteContext:
   def __init__(self, pm, bpm, ctx=None):
@@ -1164,12 +1165,12 @@ class RewriteContext:
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
 
-  def cached_pm_rewrite(self, x:UOp):
+  def cached_pm_rewrite(self, x:UOp) -> UOp|None:
     if (ret:=self.pm_cache.get(x,SENTINEL)) is not SENTINEL: return ret
     ret = self.pm_cache[x] = unwrap(self.pm).rewrite(x, self.ctx)
     return ret
 
-  def cached_bpm_rewrite(self, x:UOp):
+  def cached_bpm_rewrite(self, x:UOp) -> UOp|None:
     if (ret:=self.bpm_cache.get(x,SENTINEL)) is not SENTINEL: return ret
     ret = self.bpm_cache[x] = unwrap(self.bpm).rewrite(x, self.ctx)
     return ret
