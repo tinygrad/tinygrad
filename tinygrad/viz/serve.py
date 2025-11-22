@@ -233,13 +233,13 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
       if (row:=f"SE:{w.se} CU:{w.cu} SIMD:{w.simd} WAVE:{w.wave_id}") not in units: units[row] = 0
       units[row] += 1
       events.append(ProfileRangeEvent(row, f"N:{units[row]}", Decimal(w.begin_time), Decimal(w.end_time)))
-      wave_execs[f"{row} N:{units[row]}"] = { "wave":w, "disasm":disasm}
+      wave_execs[f"{row} N:{units[row]}"] = {"wave":w, "disasm":disasm}
     # gather and sort all wave execs of this kernel
     events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+events
     kernel = trace.keys[r].ret if (r:=ref_map.get(name)) else None
-    steps.append(create_step(kernel.name if kernel is not None else name, ("/hw_timeline", len(ctxs), len(steps)),
+    steps.append(create_step(kernel.name if kernel is not None else name, ("/counters", len(ctxs), len(steps)),
                              {"value":get_profile(events, sort_fn=row_tuple), "content_type":"application/octet-stream"}, depth=1))
-    for k in sorted(wave_execs, key=row_tuple): steps.append(create_step(k, ("/sqtt_insts", len(ctxs), len(steps)), wave_execs[k], depth=2))
+    for k in sorted(wave_execs, key=row_tuple): steps.append(create_step(k, ("/sqtt-insts", len(ctxs), len(steps)), wave_execs[k], depth=2))
   ctxs.append({"name":"Counters", "steps":steps})
 
 def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]|None=None) -> bytes|None:
@@ -318,7 +318,7 @@ def get_render(i:int, j:int, fmt:str) -> dict:
       return get_llvm_mca(disasm_str, ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode(),
                           ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode())
     return {"src":disasm_str, "lang":"x86asm"}
-  if fmt == "sqtt_insts":
+  if fmt == "sqtt-insts":
     columns = ["Instruction", "Clk", "Idle", "Duration", "Stall", "Type"]
     # Idle:     The total time gap between the completion of previous instruction and the beginning of the current instruction.
     #           The idle time can be caused by:
