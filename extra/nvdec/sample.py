@@ -89,6 +89,18 @@ class NVVidDecoder:
     for i in range(16):
       if all(dpb_entry[0] != i for dpb_entry in self.dpb): return i
 
+  def _hevc_st_ref_pic_set(self, reader, stRpsIdx):
+    if stRpsIdx != 0: assert False, "st_ref_pic_set parsing not implemented"
+    else:
+      num_negative_pics = reader.ue_v()
+      num_positive_pics = reader.ue_v()
+      for i in range(num_negative_pics):
+        delta_poc_s0_minus1 = reader.ue_v()
+        used_by_curr_pic_s0_flag = reader.u(1)
+      for i in range(num_positive_pics):
+        delta_poc_s1_minus1 = reader.ue_v()
+        used_by_curr_pic_s1_flag = reader.u(1)
+
   def stream_slice(self, nal_unit_type, data):
     if nal_unit_type == HevcNalUnitType.SPS_NUT:
       reader = BitReader(hevc_get_rbsp(data, off=5))
@@ -222,13 +234,16 @@ class NVVidDecoder:
         if nal_unit_type != HevcNalUnitType.IDR_W_RADL and nal_unit_type != HevcNalUnitType.IDR_N_LP:
           slice_pic_order_cnt_lsb = reader.u(self.desc.log2_max_pic_order_cnt_lsb_minus4 + 4)
 
-          if short_term_ref_pic_set_sps_flag := reader.u(1): assert False, "short_term_ref_pic_set from SPS not implemented"
+          short_term_ref_pic_set_sps_flag = reader.u(1)
+          if not short_term_ref_pic_set_sps_flag:
+            short_term_ref_pics_in_slice_start = reader.read_bits - reader.current_bits
+            self._hevc_st_ref_pic_set(reader, self.pps_num_short_term_ref_pic_sets)
+            short_term_ref_pics_in_slice_end = reader.read_bits - reader.current_bits
           elif self.pps_num_short_term_ref_pic_sets > 1: assert False, "short_term_ref_pic_set parsing not implemented"
 
           if self.pps_long_term_ref_pics_present_flag: assert False, "long_term_ref_pics parsing not implemented"
 
           skip_end = reader.read_bits - reader.current_bits
-          # print('skipped bits for slice header:', skip_end - skip_start)
           slice_temporal_mvp_enabled_flag = reader.u(1) if self.desc.sps_temporal_mvp_enabled_flag else 0
         
         if self.desc.sample_adaptive_offset_enabled_flag:
@@ -255,8 +270,8 @@ class NVVidDecoder:
       self.desc.curr_pic_idx = self.free_pic_index()
       self.desc.num_ref_frames = len(self.dpb)
 
-      self.desc.num_bits_short_term_ref_pics_in_slice = ([0, 10, 14, 14, 14, 20, 24, 18] + ([20, 24, 26, 18] * 100))[global_pic_idx]
-      self.desc.sw_hdr_skip_length = ([0, 19, 23, 23, 23, 29, 33] + ([27, 29, 33, 35] * 100))[global_pic_idx]
+      self.desc.num_bits_short_term_ref_pics_in_slice = short_term_ref_pics_in_slice_end - short_term_ref_pics_in_slice_start
+      self.desc.sw_hdr_skip_length = skip_end - skip_start
       self.desc.loop_filter_across_tiles_enabled_flag = 1
       self.desc.v3.slice_ec_mv_type = 1
       self.desc.v1.hevc_main10_444_ext.HevcFltAboveOffset = 23902
