@@ -1,5 +1,5 @@
-import pickle
-from tinygrad.helpers import getenv
+import pickle, sys
+from tinygrad.helpers import getenv, Timing
 from extra.sqtt.roc import decode, ProfileSQTTEvent
 
 # Instruction packets (one per ISA op)
@@ -424,7 +424,7 @@ def decode_packet_fields(opcode: int, reg: int, delta: int) -> str:
 # 0x14 is REG
 DEFAULT_FILTER = (0xb, 0xd, 0xf, 0x11, 0x16, 0x14) if getenv("FILTER", 1) else None
 
-def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000, filter=DEFAULT_FILTER) -> None:
+def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -> None:
   """
   Minimal debug: print ONE LINE per decoded token (packet).
 
@@ -439,7 +439,7 @@ def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000, filter=DEFAU
   flags = 0
   token_index = 0
 
-  while (offset >> 3) < n and token_index < max_tokens:
+  while (offset >> 3) < n:
     # Remember where we started refilling for this step (bit offset),
     # but the *logical* start of the current packet is last_real_offset.
     refill_start = offset
@@ -449,8 +449,7 @@ def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000, filter=DEFAU
       target = refill_start + 4 + ((nib_budget - 1) & ~3)
       cur = refill_start
       while cur != target and (cur >> 3) < n:
-        byte_index = cur >> 3
-        byte = data[byte_index]
+        byte = data[cur >> 3]
         shift = 4 if (cur & 4) else 0  # low then high nibble
         nib = (byte >> shift) & 0xF
         reg = ((reg >> 4) | (nib << 60)) & ((1 << 64) - 1)
@@ -473,9 +472,9 @@ def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000, filter=DEFAU
     # 4) Set next nibble budget
     nb_index = opcode & 0x1F
     nib_budget = NIBBLE_BUDGET[nb_index]
+
+    # 5) Update time and handle special opcodes 0xF/0x16
     time_before = time
-    note = ""
-    # 5) Special opcode 0x16 (timestamp / marker)
     if opcode == 0x16:
       two_bits = (reg >> 8) & 0x3
       if two_bits == 1:
@@ -510,9 +509,8 @@ def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000, filter=DEFAU
     # Append extra decoded fields into the note string
     note = decode_packet_fields(opcode, reg, delta)
 
-    if filter is None or opcode not in filter:
-      my_reg = reg
-      my_reg &= (1 << nib_budget) - 1
+    if verbose and (filter is None or opcode not in filter):
+      my_reg = reg & ((1 << nib_budget)-1)
       print(
         f"{token_index:4d}  "
         f"off={offset//4:5d}  "
@@ -526,18 +524,19 @@ def parse_sqtt_print_packets(data: bytes, max_tokens: int = 100000, filter=DEFAU
     token_index += 1
 
   # Optional summary at the end
-  print(f"# done: tokens={token_index}, final_time={time}, flags=0x{flags:02x}")
+  print(f"# done: tokens={token_index:_}, final_time={time}, flags=0x{flags:02x}")
 
 def parse(fn:str):
-  dat = pickle.load(open(fn, "rb"))
-  ctx = decode(dat)
+  with Timing(f"unpickle {fn}: "): dat = pickle.load(open(fn, "rb"))
+  if getenv("ROCM", 0):
+    with Timing(f"decode {fn}: "): ctx = decode(dat)
   dat_sqtt = [x for x in dat if isinstance(x, ProfileSQTTEvent)]
   print(f"got {len(dat_sqtt)} SQTT events in {fn}")
   return dat_sqtt
 
 if __name__ == "__main__":
-  #dat_sqtt = parse("extra/sqtt/examples/profile_empty_run_0.pkl")
-  #dat_sqtt = parse("extra/sqtt/examples/profile_plus_run_0.pkl")
-  dat_sqtt = parse("extra/sqtt/examples/profile_gemm_run_0.pkl")
-  blob_0 = dat_sqtt[0].blob
-  parse_sqtt_print_packets(blob_0[8:])
+  fn = "extra/sqtt/examples/profile_gemm_run_0.pkl"
+  dat_sqtt = parse(sys.argv[1] if len(sys.argv) > 1 else fn)
+  for i,dat in enumerate(dat_sqtt):
+    with Timing(f"decode pkt {i} with len {len(dat.blob):_}: "):
+      parse_sqtt_print_packets(dat.blob[8:], verbose=getenv("V", 1))
