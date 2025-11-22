@@ -30,8 +30,8 @@ GOOD_OPCODE_NAMES = {
   # gated by SQ_TT_TOKEN_EXCLUDE_ALUEXEC_SHIFT
   0x03: "ALUEXEC",
   # gated by SQ_TT_TOKEN_EXCLUDE_IMMEDIATE_SHIFT
-  0x04: "IMMEDIATE_4",
-  0x05: "IMMEDIATE_5",
+  0x04: "IMMEDIATE",
+  0x05: "IMMEDIATE_MULTIWAVE",
   # gated by SQ_TT_TOKEN_EXCLUDE_WAVERDY_SHIFT
   0x06: "WAVERDY",
   # gated by SQ_TT_TOKEN_EXCLUDE_WAVESTARTEND_SHIFT
@@ -203,18 +203,19 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       fields.append(f"wave={wave:x}")
       fields.append(f"flag={flag:X}")
     case 0x02: # VMEMEXEC
-      # 2 bit field
-      fields.append(f"type = {pkt>>6:X}")
+      # 2 bit field (pipe is a guess)
+      fields.append(f"pipe={pkt>>6:X}")
     case 0x03: # ALUEXEC
-      # 2 bit field
-      fields.append(f"type = {pkt>>6:X}")
+      # 2 bit field (pipe is a guess)
+      fields.append(f"pipe={pkt>>6:X}")
     case 0x04: # IMMEDIATE_4
-      # 5 bit field
+      # 5 bit field (actually 4)
       wave = pkt >> 7
       fields.append(f"wave={wave:x}")
     case 0x05: # IMMEDIATE_5
       # 16 bit field
-      fields.append(f"type = {pkt>>8:X}")
+      # 1 bit per wave
+      fields.append(f"mask={pkt>>8:16b}")
     case 0x0d:
       # 20 bit field
       fields.append(f"arg = {pkt>>8:X}")
@@ -357,15 +358,14 @@ DEFAULT_FILTER = tuple()
 # NOP + pure time
 if FILTER_LEVEL >= 0: DEFAULT_FILTER += (0x10, 0xf)
 # reg + event + sample + marker
-if FILTER_LEVEL >= 1: DEFAULT_FILTER += (0x11, 0x14, 0x16)
+# TODO: events are probably good
+if FILTER_LEVEL >= 1: DEFAULT_FILTER += (0x11, 0x14, 0x16, 0x12)
 # instruction runs
-if FILTER_LEVEL >= 3: DEFAULT_FILTER += (0x02, 0x03, 0x04, 0x05)
-# instructions defs + waveready
-if FILTER_LEVEL >= 4: DEFAULT_FILTER += (0x01, 0x6, 0x18)
+if FILTER_LEVEL >= 2: DEFAULT_FILTER += (0x02, 0x03)
+# instructions dispatch (inst, valuinst, immed)
+if FILTER_LEVEL >= 3: DEFAULT_FILTER += (0x01, 0x4, 0x5, 0x18)
 # waves
-if FILTER_LEVEL >= 5: DEFAULT_FILTER += (0x8, 0x9,)
-# events
-if FILTER_LEVEL >= 6: DEFAULT_FILTER += (0x12,)
+if FILTER_LEVEL >= 4: DEFAULT_FILTER += (0x6, 0x8, 0x9)
 
 def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -> None:
   """
@@ -433,13 +433,13 @@ def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -
     if verbose and (filter is None or opcode not in filter):
       print(
         f"{token_index:4d}  "
-        f"off={offset//4:5d}  "
-        f"op=0x{opcode:02x} "
+        f"time={time:8d}+{delta+(time-last_printed_time):8d}  "
+        f"op={opcode:2x} "
         f"{OPCODE_NAMES[opcode]:24s} "
-        f" time={time:8d}+{delta+(time-last_printed_time):8d}  "
         f"{reg&reg_mask(opcode):16X} "
         f"{note}"
       )
+      #f"off={offset//4:5d}  "
       last_printed_time = time+delta
 
     time += delta
