@@ -996,5 +996,5 @@ jobs:
       - name: Run test_ops
         shell: bash
         run: |
-          python -c "from tinygrad import Device; assert Device.DEFAULT == {'IR3':'QCOM'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
+          python -c "from tinygrad import Device; assert Device.DEFAULT == NULL"
           python -m pytest -n=auto test/test_ops.py --durations=20
