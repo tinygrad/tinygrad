@@ -37,9 +37,11 @@ def pkt7_hdr(opcode: int, cnt: int): return adreno.CP_TYPE7_PKT | cnt & 0x3FFF |
 
 def pkt4_hdr(reg: int, cnt: int): return adreno.CP_TYPE4_PKT | cnt & 0x7F | parity(cnt) << 7 | (reg & 0x3FFFF) << 8 | parity(reg) << 27
 
+def _read_lib(lib, off) -> int: return struct.unpack("I", lib[off:off+4])[0]
 class QCOMCompiler(CLCompiler):
   def __init__(self, device:str=""): super().__init__(CLDevice(device), 'compile_qcom')
-  def disassemble(self, lib:bytes): fromimport('extra.disassemblers.adreno', 'disasm')(lib)
+  def disassemble(self, lib:bytes):
+    fromimport('tinygrad.runtime.support.compiler_mesa', 'disas_adreno')(lib[(ofs:=_read_lib(lib, 0xc0)):ofs+_read_lib(lib, 0x100)])
 
 class QCOMSignal(HCQSignal):
   def __init__(self, *args, **kwargs): super().__init__(*args, **{**kwargs, 'timestamp_divider': 19.2})
@@ -261,22 +263,20 @@ class QCOMProgram(HCQProgram):
     return super().__call__(*bufs, global_size=global_size, local_size=local_size, vals=vals, wait=wait)
 
   def _parse_lib(self):
-    def _read_lib(off) -> int: return struct.unpack("I", self.lib[off:off+4])[0]
-
     # Extract image binary
-    self.image_size = _read_lib(0x100)
-    self.image = bytearray(self.lib[(image_offset:=_read_lib(0xc0)):image_offset+self.image_size])
+    self.image_size = _read_lib(self.lib, 0x100)
+    self.image = bytearray(self.lib[(image_offset:=_read_lib(self.lib, 0xc0)):image_offset+self.image_size])
 
     # Parse image descriptors
-    image_desc_off = _read_lib(0x110)
-    self.prg_offset, self.brnchstck = _read_lib(image_desc_off+0xc4), _read_lib(image_desc_off+0x108) // 2
-    self.pvtmem, self.shmem = _read_lib(image_desc_off+0xc8), _read_lib(image_desc_off+0xd8)
+    image_desc_off = _read_lib(self.lib, 0x110)
+    self.prg_offset, self.brnchstck = _read_lib(self.lib, image_desc_off+0xc4), _read_lib(self.lib, image_desc_off+0x108) // 2
+    self.pvtmem, self.shmem = _read_lib(self.lib, image_desc_off+0xc8), _read_lib(self.lib, image_desc_off+0xd8)
 
     # Fill up constants and buffers info
     self.buf_info, self.consts_info = [], []
 
     # Collect sampler info.
-    self.samp_cnt = samp_cnt_in_file = _read_lib(image_desc_off + 0xdc)
+    self.samp_cnt = samp_cnt_in_file = _read_lib(self.lib, image_desc_off + 0xdc)
     assert self.samp_cnt <= 1, "Up to one sampler supported"
     if self.samp_cnt:
       self.samp_cnt += 1
@@ -300,16 +300,16 @@ class QCOMProgram(HCQProgram):
       if x.type is BUFTYPE_IBO: x.offset, cur_ibo_off = cur_ibo_off, cur_ibo_off + 0x40
       elif x.type is BUFTYPE_TEX: x.offset, cur_tex_off = cur_tex_off, cur_tex_off + 0x40
 
-    if _read_lib(0xb0) != 0: # check if we have constants.
-      cdoff = _read_lib(0xac)
+    if _read_lib(self.lib, 0xb0) != 0: # check if we have constants.
+      cdoff = _read_lib(self.lib, 0xac)
       while cdoff + 40 <= image_offset:
         cnst, offset_words, _, is32 = struct.unpack("I", self.lib[cdoff:cdoff+4])[0], *struct.unpack("III", self.lib[cdoff+16:cdoff+28])
         self.consts_info.append((cnst, offset_words * (sz_bytes:=(2 << is32)), sz_bytes))
         cdoff += 40
 
     # Registers info
-    reg_desc_off = _read_lib(0x34)
-    self.fregs, self.hregs = _read_lib(reg_desc_off + 0x14), _read_lib(reg_desc_off + 0x18)
+    reg_desc_off = _read_lib(self.lib, 0x34)
+    self.fregs, self.hregs = _read_lib(self.lib, reg_desc_off + 0x14), _read_lib(self.lib, reg_desc_off + 0x18)
 
 class QCOMTextureInfo:
   def __init__(self, pitch:int, real_stride:int, desc:list[int], ibo:list[int]):

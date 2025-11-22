@@ -94,6 +94,8 @@ class NAKCompiler(NIRCompiler):
 def hd(data, n, instr):
   fst, snd = data64(ctypes.cast(instr, ctypes.POINTER(ctypes.c_uint64)).contents.value)
   print(f"{n:04} [{fst:08x}_{snd:08x}] ", end="", flush=True)
+def disas_adreno(lib:bytes, gpu_id=630): mesa.ir3_isa_disasm(lib, len(lib), ctypes.POINTER(mesa.struct__IO_FILE).in_dll(ctypes.CDLL(None), "stdout"),
+                                                             mesa.struct_isa_decode_options(gpu_id, True, 0, True, pre_instr_cb=hd))
 
 class IR3Compiler(NIRCompiler):
   def __init__(self, chip_id, cache_key="ir3"):
@@ -131,6 +133,4 @@ class IR3Compiler(NIRCompiler):
     shifted = shifted[ctypes.sizeof(cs:=mesa.struct_ir3_const_state.from_buffer_copy(shifted)):]
     return v, cs, shifted[:v.imm_state.count * 4], shifted[v.imm_state.count * 4:]
 
-  def disassemble(self, lib: bytes):
-    mesa.ir3_isa_disasm(b:=self.unpack_lib(lib)[3], len(b), ctypes.POINTER(mesa.struct__IO_FILE).in_dll(ctypes.CDLL(None), "stdout"),
-                        mesa.struct_isa_decode_options(gpu_id=self.dev_id.gpu_id, show_errors=True, branch_labels=True, pre_instr_cb=hd))
+  def disassemble(self, lib: bytes): disas_adreno(self.unpack_lib(lib)[3], self.dev_id.gpu_id)
