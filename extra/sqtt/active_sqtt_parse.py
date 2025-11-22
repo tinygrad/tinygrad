@@ -25,9 +25,9 @@ def save_sqtt():
   yield sqtt
   events = dev.profile_events+[ProfileDeviceEvent("AMD", props=dev.device_props())]
 
-  rctx = decode(events)
-  assert len(rctx.inst_execs) > 0, "empty sqtt output"
-  sqtt.update(rctx.inst_execs)
+  #rctx = decode(events)
+  #assert len(rctx.inst_execs) > 0, "empty sqtt output"
+  #sqtt.update(rctx.inst_execs)
 
   for e in events:
     if isinstance(e, ProfileSQTTEvent):
@@ -92,9 +92,18 @@ def run_asm(src):
 
 if __name__ == "__main__":
   with save_sqtt() as sqtt:
-    #(Tensor.empty(16,16) @ Tensor.empty(16,16)).elu().realize()
-    Tensor.empty(1).elu().realize()
+    run_asm([
+      "s_load_b64 s[0:1], s[0:1], null",
+      "s_waitcnt lgkmcnt(0)",
+      "v_mov_b32_e32 v0, 0",
+    ])
   exit(0)
+
+
+  with save_sqtt() as sqtt:
+    #(Tensor.empty(16,16) @ Tensor.empty(16,16)).elu().realize()
+    Tensor.empty(65536, 1024).sum(axis=1).realize()
+    #Tensor.empty(1).elu().realize()
 
   with save_sqtt() as sqtt:
     # what's in v0?

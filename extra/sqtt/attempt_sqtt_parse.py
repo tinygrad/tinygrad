@@ -1,34 +1,50 @@
 import pickle, sys
-from tinygrad.helpers import getenv, Timing
+from tinygrad.helpers import getenv, Timing, colored
 from extra.sqtt.roc import decode, ProfileSQTTEvent
 
 # Instruction packets (one per ISA op)
 # NOTE: these are bad guesses and may be wrong! feel free to update if you know better
 # some names were taken from SQ_TT_TOKEN_MASK_TOKEN_EXCLUDE_SHIFT
 
-OPCODE_NAMES = {
+# we see 18 opcodes
+# opcodes(18):  1  2  3  4  5  6  8  9  F 10 11 12 14 15 16 17 18 19
+# if you exclude everything, you are left with 6
+# opcodes( 6): 10 11 14 15 16 17
+
+GOOD_OPCODE_NAMES = {
+  # gated by SQ_TT_TOKEN_EXCLUDE_VALUINST_SHIFT (but others must be enabled for it to show)
+  0x01: "VALUINST",
   # gated by SQ_TT_TOKEN_EXCLUDE_VMEMEXEC_SHIFT
   0x02: "VMEMEXEC",
   # gated by SQ_TT_TOKEN_EXCLUDE_ALUEXEC_SHIFT
   0x03: "ALUEXEC",
-  # gated by SQ_TT_TOKEN_EXCLUDE_VALUINST_SHIFT (but others must be enabled for it to show)
-  0x01: "VALUINST",
+  # gated by SQ_TT_TOKEN_EXCLUDE_IMMEDIATE_SHIFT
+  0x04: "IMMEDIATE_4",
+  0x05: "IMMEDIATE_5",
   # gated by SQ_TT_TOKEN_EXCLUDE_WAVERDY_SHIFT
   0x06: "WAVERDY",
   # gated by SQ_TT_TOKEN_EXCLUDE_WAVESTARTEND_SHIFT
   0x08: "WAVEEND",
   0x09: "WAVESTART",
-  # gated by SQ_TT_TOKEN_EXCLUDE_IMMEDIATE_SHIFT
-  0x04: "IMMEDIATE_4",
-  0x05: "IMMEDIATE_5",
-  # some gated by SQ_TT_TOKEN_EXCLUDE_REG_SHIFT, some always there
-  0x14: "REG",
+  # gated by NOT SQ_TT_TOKEN_EXCLUDE_PERF_SHIFT
+  0x0D: "PERF",
+  # pure time
+  0x0F: "TS_DELTA_SHORT_PLUS4",     # short delta; ROCm adds +4 before accumulate
+  0x10: "NOP",
   # gated by SQ_TT_TOKEN_EXCLUDE_EVENT_SHIFT
   0x12: "EVENT",
+  # some gated by SQ_TT_TOKEN_EXCLUDE_REG_SHIFT, some always there
+  0x14: "REG",
+  # marker
+  0x16: "TS_DELTA36_OR_MARK",       # 36-bit long delta or 36-bit marker
   # gated by SQ_TT_TOKEN_EXCLUDE_INST_SHIFT
   0x18: "INST",
   # gated by SQ_TT_TOKEN_EXCLUDE_UTILCTR_SHIFT
   0x19: "UTILCTR",
+}
+
+OPCODE_NAMES = {
+  **GOOD_OPCODE_NAMES,
 
   # ------------------------------------------------------------------------
   # 0x07–0x0F: pure timestamp-ish deltas
@@ -37,10 +53,6 @@ OPCODE_NAMES = {
   0x0A: "TS_DELTA_S5_W2_A",         # shift=5,  width=2
   0x0B: "TS_DELTA_S5_W3_A",         # shift=5,  width=3
   0x0C: "TS_DELTA_S5_W3_B",         # shift=5,  width=3 (different consumer)
-  0x0D: "TS_DELTA_S5_W3_C",         # shift=5,  width=3
-  0x0E: "TS_DELTA_S7_W2",           # shift=7,  width=2
-  0x0F: "TS_DELTA_SHORT_PLUS4",     # short delta; ROCm adds +4 before accumulate
-  0x10: "NOP",
 
   # ------------------------------------------------------------------------
   # 0x10–0x19: timestamps, layout headers, events, perf
@@ -49,7 +61,6 @@ OPCODE_NAMES = {
   0x11: "TS_WAVE_STATE_SAMPLE",     # wave stall/termination sample (byte at +10)
   0x13: "EVT_SMALL_GENERIC",        # same structural family as 0x08/0x12/0x19
   0x15: "PERFCOUNTER_SNAPSHOT",     # small delta + 50-ish bits of snapshot
-  0x16: "TS_DELTA36_OR_MARK",       # 36-bit long delta or 36-bit marker
   0x17: "LAYOUT_MODE_HEADER",       # layout/mode/group + selectors A/B
 }
 
@@ -137,7 +148,7 @@ DELTA_MAP_DEFAULT = {
   0x0B: (5,  3),   # shift=5,  end=8
   0x0C: (5,  3),   # shift=5,  end=8
   0x0D: (5,  3),   # shift=5,  end=8
-  0x0E: (7,  2),   # shift=7,  end=9
+  #0x0E: (7,  2),   # shift=7,  end=9
   0x0F: (4,  4),   # shift=4,  end=8
   0x10: (0,  0),   # shift=0,  end=0  (no delta)
   0x11: (7,  9),   # shift=7,  end=16
@@ -182,10 +193,33 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
     case 0x04: # IMMEDIATE_4
       # 5 bit field
       fields.append(f"type = {pkt>>7:X}")
+    case 0x05: # IMMEDIATE_5
+      # 16 bit field
+      fields.append(f"type = {pkt>>8:X}")
+    case 0x0d:
+      # 20 bit field
+      fields.append(f"arg = {pkt>>8:X}")
     case 0x12:
       fields.append(f"event = {pkt>>11:X}")
     case 0x15:
       fields.append(f"snap = {pkt>>10:X}")
+    case 0x19:
+      # wave end
+      fields.append(f"ctr = {pkt>>9:X}")
+    case 0x11:
+      # DELTA_MAP_DEFAULT: shift=7, width=9 -> small delta.
+      coarse    = pkt >> 16
+      fields.append(f"coarse=0x{coarse:02x}")
+      # From decomp:
+      #  - when layout<3 and coarse&1, it sets a "has interesting wave" flag
+      #  - when coarse&8, it marks all live waves as "terminated"
+      if coarse & 0x01:
+        fields.append("flag_wave_interest=1")
+      if coarse & 0x08:
+        fields.append("flag_terminate_all=1")
+    case 0x6:
+      # wave ready
+      fields.append(f"wave = {pkt>>8:X}")
     case 0x8:
       # wave end
       fields.append(f"wave = {pkt>>8:X}")
@@ -277,17 +311,6 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       fields.append(f"mode={mode}")
       if mode != "delta":
         fields.append(f"val36=0x{val36:x}")
-    case 0x11:
-      # DELTA_MAP_DEFAULT: shift=7, width=9 -> small delta.
-      coarse    = pkt >> 16
-      fields.append(f"coarse=0x{coarse:02x}")
-      # From decomp:
-      #  - when layout<3 and coarse&1, it sets a "has interesting wave" flag
-      #  - when coarse&8, it marks all live waves as "terminated"
-      if coarse & 0x01:
-        fields.append("flag_wave_interest=1")
-      if coarse & 0x08:
-        fields.append("flag_terminate_all=1")
     case 0x17:
       # From decomp (two sites with identical logic):
       #   layout = (w >> 7) & 0x3f
@@ -314,257 +337,17 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       fields.append(f"& {reg_mask(opcode):X}")
   return ",".join(fields)
 
-  # =====================================================================
-  # 1. Timestamp-centric opcodes (actually drive 'time')
-  # =====================================================================
+FILTER_LEVEL = getenv("FILTER", 2)
 
-  if opcode == 0x11:  # TS_WAVE_STATE_SAMPLE
-    # DELTA_MAP_DEFAULT: shift=7, width=9 -> small delta.
-    coarse    = (pkt >> (shift + width)) & 0xFF  # matches byte at +10 in C
-    if coarse:
-      fields.append(f"coarse_state=0x{coarse:02x}")
-    # From decomp:
-    #  - when layout<3 and coarse&1, it sets a "has interesting wave" flag
-    #  - when coarse&8, it marks all live waves as "terminated"
-    if coarse & 0x01:
-      fields.append("flag_wave_interest=1")
-    if coarse & 0x08:
-      fields.append("flag_terminate_all=1")
-    return ", ".join(fields)
-
-  if opcode == 0x16:  # TS_DELTA36_OR_MARK
-    # Bits:
-    #   bit8  -> 0x100
-    #   bit9  -> 0x200
-    #   bits 12..47 -> 36-bit field used as delta or marker
-    bit8 = bool(pkt & 0x100)
-    bit9 = bool(pkt & 0x200)
-    if not bit9:
-      mode = "delta"
-    elif not bit8:
-      mode = "marker"
-    else:
-      mode = "other"
-    val36 = (pkt >> 12) & ((1 << 36) - 1)
-    fields.append(f"mode={mode}")
-    if mode != "delta":
-      fields.append(f"val36=0x{val36:x}")
-    return ", ".join(fields)
-
-  # For 0x07, 0x0A–0x0E, we know they drive time (via DELTA_MAP_DEFAULT),
-  # but we don't see any other fields used in the decomp.
-  if opcode in (0x07, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E):
-    if width:
-      leftover  = pkt & ~(mask_delta << shift)
-      if leftover:
-        fields.append(f"payload=0x{leftover:x}")
-    return ", ".join(fields)
-
-  # =====================================================================
-  # 2. Small "meta + tiny delta" packets (0x01–0x06)
-  # =====================================================================
-
-  if opcode == 0x01:  # META_ID12_TS_SMALL
-    id12 = pkt & 0xFFF
-    fields.append(f"id12=0x{id12:03x}")
-    return ", ".join(fields)
-
-  if opcode == 0x02:  # META_FLAG8_TS_SMALL
-    flag8 = pkt & 0xFF
-    fields.append(f"opcode=0x{flag8:02x}")
-    return ", ".join(fields)
-
-  if opcode == 0x03:  # META_SUBEVENT8_TS_SMALL
-    sub8 = pkt & 0xFF
-    fields.append(f"opcode=0x{sub8:02x}")
-    return ", ".join(fields)
-
-  if opcode == 0x04:  # META_BASE_INDEX12_TS
-    idx12 = pkt & 0xFFF
-    fields.append(f"base_index12=0x{idx12:03x}")
-    return ", ".join(fields)
-
-  if opcode in (0x05, 0x06):  # META_DESC24_TS_A/B
-    desc24 = pkt & 0xFFFFFF
-    fields.append(f"desc24=0x{desc24:06x}")
-    return ", ".join(fields)
-
-  # =====================================================================
-  # 3. Opcode 0x14: exec/config record (+ COR marker)
-  # =====================================================================
-
-  if opcode == 0x14:  # INST_EXEC_OR_CFG
-    subop   = (pkt >> 16) & 0xFFFF       # (short)(w >> 0x10)
-    val32   = (pkt >> 32) & 0xFFFFFFFF   # (uint)(w >> 0x20)
-    slot    = (pkt >> 7) & 0x7           # index in local_168[...] tables
-    hi_byte = (pkt >> 8) & 0xFF          # determines config vs marker
-
-    fields.append(f"subop=0x{subop:04x}")
-    fields.append(f"slot={slot}")
-    fields.append(f"val32=0x{val32:08x}")
-
-    if hi_byte & 0x80:
-      # Config flavour: writes config words into per-slot state arrays.
-      fields.append("kind=config")
-      if subop == 0x000C:
-        fields.append("cfg_target=local_168[slot].lo")
-      elif subop == 0x000D:
-        fields.append("cfg_target=local_168[slot].hi")
-    else:
-      # COR marker: subop 0xC342, payload "COR\0" → start of a COR region.
-      if subop == 0xC342:
-        fields.append("kind=cor_stream")
-        if val32 == 0x434F5200:
-          fields.append("cor_magic='COR\\0'")
-    return ", ".join(fields)
-
-  # =====================================================================
-  # 4. Opcode 0x17: layout / mode header
-  # =====================================================================
-
-  if opcode == 0x17:  # LAYOUT_MODE_HEADER
-    # From decomp (two sites with identical logic):
-    #   layout = (w >> 7) & 0x3f
-    #   mode   = (w >> 0xd) & 3
-    #   group  = (w >> 0xf) & 7
-    #   sel_a  = (w >> 0x1c) & 0xf
-    #   sel_b  = (w >> 0x21) & 7
-    #   flag4  = (w >> 0x3b) & 1  (only meaningful when layout == 4)
-    layout = (pkt >> 7)  & 0x3F
-    mode   = (pkt >> 13) & 0x3
-    group  = (pkt >> 15) & 0x7
-    sel_a  = (pkt >> 0x1C) & 0xF
-    sel_b  = (pkt >> 0x21) & 0x7
-    flag4  = (pkt >> 0x3B) & 0x1
-
-    fields.append(f"layout={layout}")
-    fields.append(f"group={group}")
-    fields.append(f"mode={mode}")
-    fields.append(f"sel_a={sel_a}")
-    fields.append(f"sel_b={sel_b}")
-    if layout == 4:
-      fields.append(f"layout4_flag={flag4}")
-    return ", ".join(fields)
-
-  # =====================================================================
-  # 5. Opcode 0x09: state / route config record
-  # =====================================================================
-
-  if opcode == 0x09:  # PERF_ROUTE_CONFIG
-    # From case 9 in multiple consumers:
-    #   flag7  = (w >> 7) & 1        (low bit of uVar41)
-    #   cls2   = (w >> 8) & 3        (class / group)
-    #   slot4  = (w >> 10) & 0xf     (slot / group index)
-    #   idx_lo = (w >> 0xd) & 0x1f   (low index, layout<4 path)
-    #   idx_hi = (w >> 0xf) & 0x1f   (high index, layout>=4 path)
-    #   id7    = (w >> 0x19) & 0x7f  (7-bit id)
-    flag7   = (pkt >> 7) & 0x1
-    cls2    = (pkt >> 8) & 0x3
-    slot4   = (pkt >> 10) & 0xF
-    idx_lo  = (pkt >> 13) & 0x1F
-    idx_hi  = (pkt >> 15) & 0x1F
-    id7     = (pkt >> 0x19) & 0x7F
-
-    fields.append(f"flag7={flag7}")
-    fields.append(f"cls2={cls2}")
-    fields.append(f"slot4=0x{slot4:x}")
-    fields.append(f"idx_lo5=0x{idx_lo:x}")
-    fields.append(f"idx_hi5=0x{idx_hi:x}")
-    fields.append(f"id7=0x{id7:x}")
-    return ", ".join(fields)
-
-  # =====================================================================
-  # 6. Opcode 0x18: INST (FUN_0010aba0)
-  # =====================================================================
-
-  if opcode == 0x18:  # INST
-    # From case 0x18:
-    #   low3   = w & 7
-    #   grp3   = (w >> 3) or (w >> 4) & 7   (layout-dependent)
-    #   flags  = bits 6 (B6) and 7 (B7)
-    #   hi8    = (w >> 0xc) & 0xff   (layout 4 path)
-    #   hi7    = (w >> 0xd) & 0x7f   (other layouts)
-    #   idx5   = (w >> 7) or (w >> 8) & 0x1f, used as wave index
-    low3     = pkt & 0x7
-    grp3_a   = (pkt >> 3) & 0x7
-    grp3_b   = (pkt >> 4) & 0x7
-    flag_b6  = (pkt >> 6) & 0x1
-    flag_b7  = (pkt >> 7) & 0x1
-    idx5_a   = (pkt >> 7) & 0x1F
-    idx5_b   = (pkt >> 8) & 0x1F
-    hi8      = (pkt >> 12) & 0xFF
-    hi7      = (pkt >> 13) & 0x7F
-
-    fields.append(f"low3=0x{low3:x}")
-    fields.append(f"grp3_a=0x{grp3_a:x}")
-    fields.append(f"grp3_b=0x{grp3_b:x}")
-    fields.append(f"flag_b6={flag_b6}")
-    fields.append(f"flag_b7={flag_b7}")
-    fields.append(f"idx5_a=0x{idx5_a:x}")
-    fields.append(f"idx5_b=0x{idx5_b:x}")
-    fields.append(f"hi8=0x{hi8:02x}")
-    fields.append(f"hi7=0x{hi7:02x}")
-    return ", ".join(fields)
-
-  # =====================================================================
-  # 7. Opcode 0x15: perfcounter snapshot
-  # =====================================================================
-
-  if opcode == 0x15:  # PERFCOUNTER_SNAPSHOT
-    # NIBBLE_BUDGET gives full 64 bits here.
-    # DELTA_MAP_DEFAULT: shift=7, width=3 → tiny delta field.
-    # low bits below the delta field
-    snap_low  = pkt & ((1 << shift) - 1) if shift else 0
-    # everything above delta field
-    snap_hi   = pkt >> (shift + width) if width else (pkt >> shift)
-
-    fields.append(f"snap_low_s{shift}=0x{snap_low:x}")
-    fields.append(f"snap_hi=0x{snap_hi:x}")
-    return ", ".join(fields)
-
-  # =====================================================================
-  # 8. Small event-ish packets (0x08 / 0x12 / 0x13 / 0x19)
-  # =====================================================================
-
-  if opcode in (0x08, 0x12, 0x13, 0x19):
-    # These are all "small event / metric" style tokens. The exact semantics
-    # depend on layout (0x17) and accumulated state (local_500 etc), so we
-    # expose:
-    #   - low 8 bits as kind byte
-    #   - rest as opaque payload.
-    kind    = pkt & 0xFF
-    payload = pkt >> 8
-    fields.append(f"kind_byte=0x{kind:02x}")
-    if payload:
-      fields.append(f"payload=0x{payload:x}")
-    return ", ".join(fields)
-
-  # =====================================================================
-  # 9. Pseudo opcode 0x10: never a "real" packet
-  # =====================================================================
-
-  if opcode == 0x10:  # PSEUDO_NEED_MORE_BITS
-    # The main loop never prints these; they're just a control token.
-    return ""
-
-  # =====================================================================
-  # 10. Generic fallback: expose the DELTA_MAP_DEFAULT field + leftover
-  # =====================================================================
-
-  leftover = pkt & ~(mask_delta << shift)
-  fields.append(f"payload=0x{leftover:x}")
-
-  return ", ".join(fields)
-
-# 0xb is time something
-# 0xd is time something
-# 0xf is small time advance
-# 0x10 is NOP (which we always filter)
-# 0x11 is time advance
-# 0x16 is big time advance + markers
-# 0x14 is REG
-FILTER_ARG = getenv("FILTER", 1)
-DEFAULT_FILTER = (0xb, 0xd, 0xf, 0x10, 0x11, 0x16, 0x14) if getenv("FILTER", 1) else (0x10,)
+DEFAULT_FILTER = tuple()
+# NOP + pure time
+if FILTER_LEVEL >= 0: DEFAULT_FILTER += (0x10, 0xf)
+# reg + marker + sample + event
+if FILTER_LEVEL >= 1: DEFAULT_FILTER += (0x11, 0x12, 0x14, 0x16)
+# instructions and runs + waverdy
+if FILTER_LEVEL >= 2: DEFAULT_FILTER += (0x01, 0x02, 0x03, 0x04, 0x05, 0x6, 0x18)
+# waves
+if FILTER_LEVEL >= 3: DEFAULT_FILTER += (0x8, 0x9,)
 
 def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -> None:
   """
@@ -580,6 +363,7 @@ def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -
   nib_budget = 0x40
   flags = 0
   token_index = 0
+  opcodes_seen = set()
 
   while (offset >> 3) < n:
     # 1) Fill register with nibbles according to nib_budget
@@ -593,6 +377,7 @@ def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -
 
     # 2) Decode token from low 8 bits
     opcode = STATE_TO_OPCODE[reg & 0xFF]
+    opcodes_seen.add(opcode)
 
     # 4) Set next nibble budget based on opcode
     nib_budget = NIBBLE_BUDGET[opcode & 0x1F]
@@ -642,6 +427,9 @@ def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -
 
   # Optional summary at the end
   print(f"# done: tokens={token_index:_}, final_time={time}, flags=0x{flags:02x}")
+  if verbose:
+    print(f"opcodes({len(opcodes_seen):2d}):", ' '.join([colored(f"{op:2X}", "white" if op in GOOD_OPCODE_NAMES else "red") for op in opcodes_seen]))
+
 
 def parse(fn:str):
   with Timing(f"unpickle {fn}: "): dat = pickle.load(open(fn, "rb"))
