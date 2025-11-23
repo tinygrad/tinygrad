@@ -108,7 +108,7 @@ class Tensor(OpMixin):
   np.set_printoptions(precision=4)
   ```
   """
-  __slots__ = "uop", "requires_grad", "grad"
+  __slots__ = "uop", "requires_grad", "grad", "_multi_axis"
   training: ClassVar[bool] = False
 
   def __init__(self, data:ConstType|bytes|list|tuple|UOp|'np.ndarray'|pathlib.Path|None,  # type: ignore [name-defined] # noqa: F821
@@ -163,6 +163,8 @@ class Tensor(OpMixin):
     else:
       assert data.device == _device, f"MultiLazyBuffer device mismatch, {data.device} != {_device}"
       self.uop = data
+
+    self._multi_axis:int|None = self.uop.axis if isinstance(self.device, tuple) else None
 
     # add to all_tensors after construction succeeds
     all_tensors[weakref.ref(self)] = None
@@ -270,7 +272,14 @@ class Tensor(OpMixin):
     """Triggers the computation needed to create these Tensor(s)."""
     if len(to_realize:=[x for x in (self,)+lst if not x.uop.is_contiguous()]):
       run_schedule(*Tensor.schedule_with_vars(*to_realize), do_update_stats=do_update_stats)
+      for t in to_realize: t._restore_multi_axis()
     return self
+
+  def _restore_multi_axis(self) -> None:
+    if not isinstance(self.device, tuple): return
+    if (axis:=getattr(self, "_multi_axis", None)) is None: return
+    if self.uop.axis == axis: return
+    self.uop = self.uop.multi(axis)
 
   def replace(self, x:Tensor, allow_shape_mismatch=False) -> Tensor:
     """
@@ -279,6 +288,7 @@ class Tensor(OpMixin):
     # used for replacing a Tensor with a new version of it (potentially with a different device and dtype)
     assert self.shape == x.shape or allow_shape_mismatch, f"replace shape mismatch {self.shape} != {x.shape}"
     self.uop = x.uop
+    self._multi_axis = x._multi_axis
     return self
 
   def assign(self, x) -> Tensor:

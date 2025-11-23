@@ -606,8 +606,5 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
     for a in tag:
       if a is None: continue
       orig = uop_list[int(a)]
-      if orig.op is Ops.MULTI and orig.axis is not None:
-        becomes_map[orig] = s.multi(orig.axis)
-      else:
-        becomes_map[orig] = s
+      becomes_map[orig] = s
   return becomes_map

@@ -111,8 +111,9 @@ replace_allreduce = PatternMatcher([
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce_multirank),
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce),
   # BROADCAST: explicitly expand broadcast copies and combine with MSTACK
-  (UPat(Ops.COPY, name="c", src=(UPat(GroupOp.All-{Ops.CONST}, name="x"), UPat(Ops.DEVICE))), lambda c,x:
-    _retag(c, UOp(Ops.MSTACK, c.dtype, tuple(x.copy_to_device(d) for d in c.device))) if isinstance(c.device, tuple) and isinstance(x.device, str) else None),
+  (UPat(Ops.COPY, name="c", src=(UPat(GroupOp.All-{Ops.CONST}, name="x"), UPat(Ops.DEVICE))),
+    lambda c,x: _retag(c, UOp(Ops.MSTACK, c.dtype, tuple(x.copy_to_device(d) for d in c.device)))
+      if isinstance(c.device, tuple) and isinstance(x.device, str) else None),
   # COPY_TO_ONE: if copying from multidevice to one, MSELECT the first (TODO: a little from each?)
   (UPat(Ops.COPY, name="c", src=(UPat(GroupOp.All-{Ops.CONST}, name="x"), UPat(Ops.DEVICE))), lambda c,x:
     _retag(c, x.mselect(0).copy_to_device(c.device)) if isinstance(c.device, str) and isinstance(x.device, tuple) else None),
@@ -191,7 +192,8 @@ def shrink_multi(root:UOp, multi:UOp):
     # NOTE: shrink on the shard axis is only allowed when result is a single partition, denoted by the new real
     # we just copy it to all the devices, no real. this will be optimized out later
     return _retag(root, multi.src[0].copy_to_device(multi.device, arg=multi.bounds.index(root.marg[multi.axis])))
-  return _retag(root, multi.src[0].shrink(tuple((0, multi.src[0].shape[multi.axis]) if a == multi.axis else s for a,s in enumerate(root.marg))).multi(multi.axis))
+  shrink_args = tuple((0, multi.src[0].shape[multi.axis]) if a == multi.axis else s for a,s in enumerate(root.marg))
+  return _retag(root, multi.src[0].shrink(shrink_args).multi(multi.axis))
 
 def flip_multi(root:UOp, multi:UOp):
   assert multi.axis is None or not root.marg[multi.axis], "flipping not supported on sharded axis"

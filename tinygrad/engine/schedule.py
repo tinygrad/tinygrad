@@ -1,7 +1,7 @@
 from typing import cast
 from dataclasses import dataclass, field, replace
 from collections import deque, defaultdict
-from tinygrad.uop.ops import UOp, Ops, buffers
+from tinygrad.uop.ops import UOp, Ops, buffers, GroupOp
 from tinygrad.device import Device, Buffer, MultiBuffer
 from tinygrad.helpers import Metadata, all_same
 
@@ -36,6 +36,8 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
       elif s.op in {Ops.MSELECT, Ops.MSTACK}:
         for ss in s.src:
           if ss.op is Ops.MSELECT: ss = ss.src[0]
+          while ss.op in GroupOp.Movement:
+            ss = ss.src[0]
           if ss.op is not Ops.BUFFER:
             assert ss.op is Ops.AFTER, f"ss.op is not AFTER, it's {ss.op}"
             children[ss.src[1]].append(k)
