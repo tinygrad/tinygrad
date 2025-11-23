@@ -1,4 +1,4 @@
- 2from dataclasses import dataclass, field
+from dataclasses import dataclass, field
 import itertools
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, ssimplify, KernelInfo
@@ -9,7 +9,7 @@ from tinygrad.helpers import PCONTIG, partition, get_single_element, unwrap, dis
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
 from tinygrad.schedule.indexing import run_rangeify, BufferizeOpts, ALWAYS_CONTIGUOUS, IndexingContext, apply_movement_op
-from tinygrad.schedule.multi import get_multi_map
+from tinygrad.schedule.multi import multi_pm
 
 # creation can recurse a lot
 import sys
@@ -543,17 +543,12 @@ replace_contiguous = PatternMatcher([
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len([u for u in UOp.sink(*ret.values()).toposort() if u.op is Ops.KERNEL]))}", True)
 def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   if getenv("VIZ"): graph_rewrite(sink, PatternMatcher([]), name="View Input Graph")
-<<<<<<< HEAD
-  multi_map: dict[UOp, UOp]|None = None
-=======
-  multi_map = None
->>>>>>> a6176cce3 (Refactor multi into rangeify)
-  if any(isinstance(x._device, tuple) for x in sink.toposort()):
-    multi_map = get_multi_map(sink)
-    sink = sink.substitute(multi_map, name="Apply Multi Map")
-    sink = UOp.sink(*flatten([s.src if s.op is Ops.MULTI else [s] for s in sink.src]))
+  has_multi = any(isinstance(x._device, tuple) for x in sink.toposort())
   uop_list: list[UOp] = []
   tsink = graph_rewrite(sink, add_tags, ctx=uop_list, bottom_up=True, name="number the uops")
+  if has_multi:
+    tsink = graph_rewrite(tsink, multi_pm, name="multi rewrites")
+    tsink = UOp.sink(*flatten([s.src if s.op is Ops.MULTI else [s] for s in tsink.src]))
 
   tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites+replace_contiguous, ctx={}, name="earliest rewrites")
 
@@ -601,11 +596,4 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
     for a in tag:
       if a is None: continue
       becomes_map[uop_list[int(a)]] = s
-  if multi_map is not None:
-<<<<<<< HEAD
-    composed_multi_map = {k: v.substitute(becomes_map, name="Compose Multi Map") for k,v in multi_map.items()}
-    becomes_map |= composed_multi_map
-=======
-    becomes_map |= {k: v.substitute(becomes_map, name="Compose Multi Map") for k,v in multi_map.items()}
->>>>>>> a6176cce3 (Refactor multi into rangeify)
   return becomes_map
