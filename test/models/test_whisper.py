@@ -33,7 +33,15 @@ So, how do you like it?
 It could have been worse. But you'll notice that I didn't ask her for her card.
 Hmm, yeah.
 Mm, maybe you can try that place over there next time."""
+
 TRANSCRIPTION_3_ALT = "Just lie back and relax. Is the level of pressure about right? Yes, it's fine. And I'd like conditioner please. Sure. I'm going to start the second lathering now. Would you like some Q-tips? How'd you like it cut? I'd like my bangs on the back trimmed, and I'd like the rest to stand out a bit and layered. Where would you like the part? On the left, right about here. Here. Have a look. What do you think? It's fine. Here's a thousand and eighty dollars. It's thirty and t extra for the rants. Here's your change and receipt. Thank you, and please come again. So how do you like it? It could have been worse, but you'll notice that I didn't ask her for her card. Hmm, yeah. Maybe you can try that place over there next time." #noqa: E501
+# NOTE: same as TRANSCRIPTION_3 but with minor changes that should only amount to ~0.079 WER difference (see test_wer_same)
+# 'and'     --> 'on'
+# 'thinned' --> 'to stand'
+# 'nt'      --> 'and eighty'
+# '30 nt'   --> 'thirty and t'
+# 'rinse'   --> 'rants'
+# 'mm'      --> ''
 
 def wer_helper(result: str, reference: str)->float:
   result = metrics.normalize_string(result)
@@ -95,6 +103,18 @@ class TestWhisper(unittest.TestCase):
   def test_wer_same(self):
     reference = TRANSCRIPTION_3
     self.assertWER(TRANSCRIPTION_3_ALT, reference, 0.079)
+
+  def test_wer_different(self):
+    reference = TRANSCRIPTION_3
+    self.assertWER("[no speech]", reference, 1.0)
+
+  def test_wer_different_2(self):
+    reference = TRANSCRIPTION_3
+    self.assertWER("", reference, 1.0)
+
+  def test_wer_different_3(self):
+    reference = TRANSCRIPTION_3
+    self.assertWER(reference[:len(reference)//2], reference, 0.524)
 
   @unittest.skipIf(CI or (Device.DEFAULT == "CPU" and CPU_LLVM), "too long for CI")
   def test_transcribe_long_no_batch(self):
