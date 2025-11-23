@@ -254,6 +254,15 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   @recursive_property
   def _shape(self) -> tuple[sint, ...]|None:
+
+    # elementwise ops keep the shape the same. all inputs with shape must match
+    if self.op in (GroupOp.Elementwise-{Ops.BITCAST}).union({Ops.COPY, Ops.ASSIGN, Ops.NOOP, Ops.GROUP, Ops.SINK, Ops.ALLREDUCE, Ops.STORE}):
+      # TODO: remove this hack for 3 op assign
+      input_shapes = [x._shape for x in (self.src[:2] if self.op is Ops.ASSIGN else self.src) if x._shape is not None]
+      if len(input_shapes) == 0: return None
+      if not all_same(input_shapes): raise RuntimeError(f"shape mismatch at {self.op}: {input_shapes}")
+      return input_shapes[0]
+
     match self.op:
       # late ops don't have shape
       case Ops.UNIQUE | Ops.DEVICE | Ops.RANGE | Ops.LOAD | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
@@ -330,14 +339,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
           if not isinstance(axis_arg, tuple) or not all(isinstance(x, int) and x>=0 and x<len(ps) for x in axis_arg):
             raise ValueError(f"invalid type for axis: {axis_arg}")
           return tuple(1 if i in axis_arg else s for i,s in enumerate(ps))
-
-    # elementwise ops keep the shape the same. all inputs with shape must match
-    if self.op in GroupOp.ALU.union({Ops.CAST, Ops.COPY, Ops.ASSIGN, Ops.NOOP, Ops.GROUP, Ops.SINK, Ops.ALLREDUCE, Ops.STORE}):
-      # TODO: remove this hack for 3 op assign
-      input_shapes = [x._shape for x in (self.src[:2] if self.op is Ops.ASSIGN else self.src) if x._shape is not None]
-      if len(input_shapes) == 0: return None
-      if not all_same(input_shapes): raise RuntimeError(f"shape mismatch at {self.op}: {input_shapes}")
-      return input_shapes[0]
 
     # all Ops must be explicitly handled
     raise NotImplementedError(f"no shape handling for {self.op} with {self.dtype}")
