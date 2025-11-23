@@ -44,7 +44,7 @@ GOOD_OPCODE_NAMES = {
   0x10: "NOP",
   # gated by SQ_TT_TOKEN_EXCLUDE_EVENT_SHIFT
   0x12: "EVENT",
-  # some gated by SQ_TT_TOKEN_EXCLUDE_REG_SHIFT, some always there
+  # some gated by SQ_TT_TOKEN_EXCLUDE_REG_SHIFT, some always there. something is broken with the timing on this
   0x14: "REG",
   # marker
   0x16: "TS_DELTA36_OR_MARK",       # 36-bit long delta or 36-bit marker
@@ -231,8 +231,12 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
     case 0x19:
       # wave end
       fields.append(f"ctr = {pkt>>9:X}")
+    case 0xf:
+      extracted_delta = (reg >> 4) & 0xF
+      fields.append(f"strange_delta=0x{extracted_delta:x}")
     case 0x11:
       # DELTA_MAP_DEFAULT: shift=7, width=9 -> small delta.
+      # FF0000 is the mask
       coarse    = pkt >> 16
       fields.append(f"coarse=0x{coarse:02x}")
       # From decomp:
@@ -403,31 +407,31 @@ def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -
     # 4) Set next nibble budget based on opcode
     nib_budget = NIBBLE_BUDGET[opcode & 0x1F]
 
-    # 5) Update time and handle special opcodes 0xF/0x16
+    # 5) Get delta
+    shift, width = DELTA_MAP_DEFAULT[opcode]
+    delta = (reg >> shift) & ((1 << width) - 1)
+
+    # 6) Update time and handle special opcodes 0xF/0x16
     if opcode == 0x16:
       two_bits = (reg >> 8) & 0x3
       if two_bits == 1:
         flags |= 0x01
 
       # Common 36-bit field at bits [12..47]
-
       if (reg & 0x200) == 0:
         # delta mode: add 36-bit delta to time
-        delta = (reg >> 12) & ((1 << 36) - 1)
-      else:
+        pass
+      elif (reg & 0x100) == 0:
         # marker / other modes: no time advance
-        if (reg & 0x100) == 0:
-          # real marker: bit9=1, bit8=0, non-zero payload
-          # "other" 0x16 variants, ignored for timing
-          delta = 0
-    else:
-      # 6) Generic opcode (including 0x0F)
-      shift, width = DELTA_MAP_DEFAULT[opcode]
-      delta = (reg >> shift) & ((1 << width) - 1)
-
+        # real marker: bit9=1, bit8=0, non-zero payload
+        # "other" 0x16 variants, ignored for timing
+        delta = 0
+      else:
+        raise RuntimeError("unknown 0x16 delta")
+    elif opcode == 0x0F:
       # opcode 0x0F has an offset of 4 to the delta
-      if opcode == 0x0F:
-        delta = delta + 4
+      # update: it's actually computed to be 8 to match WAVESTART
+      delta = delta + 8
 
     # Append extra decoded fields into the note string
     note = decode_packet_fields(opcode, reg)
