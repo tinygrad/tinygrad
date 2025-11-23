@@ -1,9 +1,10 @@
 from typing import cast
 from dataclasses import dataclass, field, replace
 from collections import deque, defaultdict
-from tinygrad.uop.ops import UOp, Ops, buffers
+from tinygrad.uop.ops import UOp, Ops, buffers, print_uops
 from tinygrad.device import Device, Buffer, MultiBuffer
 from tinygrad.helpers import Metadata, all_same
+from tinygrad.codegen.late.linearizer import linearize
 
 # **** ScheduleItem return type
 
@@ -18,6 +19,19 @@ class ScheduleItem:
 # **** schedule linearizer
 
 def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[str, int]]:
+  lst = linearize(sched_sink, tuple_order=False)
+  print_uops(lst)
+
+  schedule: list[ScheduleItem] = []
+  var_vals: dict[str, int] = {}
+  for k in lst:
+    if k.op is Ops.KERNEL:
+      ubufs = tuple(s.buf_uop.buffer for s in k.src if s.op is not Ops.BIND)
+      # ONE -> ONE
+      schedule.append(ScheduleItem(k.arg.ast, cast(tuple[Buffer, ...], ubufs), k.arg.metadata))
+      pass
+
+  """
   # construct the KERNEL children graph based on assigns
   children: defaultdict[UOp, list[UOp]] = defaultdict(list)
   in_degree: dict[UOp, int] = {}
@@ -93,6 +107,7 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
     for x in children[rk]:
       in_degree[x] -= 1
       if in_degree[x] == 0: queues[_heuristic(x)].append(x)
+  """
 
   # expand the ranges in the schedule
   real_schedule: list[ScheduleItem] = []
