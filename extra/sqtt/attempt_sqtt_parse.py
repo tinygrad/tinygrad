@@ -191,7 +191,8 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       flag = (pkt >> 6) & 1
       wave = pkt >> 7
       fields.append(f"wave={wave:x}")
-      fields.append(f"flag={flag:X}")
+      assert flag == 0, "non 0 flag in 0x1"
+      #fields.append(f"flag={flag:X}")
     case 0x02: # VMEMEXEC
       # 2 bit field (pipe is a guess)
       fields.append(f"pipe={pkt>>6:X}")
@@ -278,20 +279,25 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       wave = (pkt >> 8) & 0x1F
       hi8 = (pkt >> 13)
       fields.append(f"wave={wave:x}")
-      fields.append(f"flag={flag:x}")
-      fields.append(f"flag2={flag2:x}")
+      assert flag == 0 and flag2 == 0, "non 0 flags in 0x18"
+      #fields.append(f"flag={flag:x}")
+      #fields.append(f"flag2={flag2:x}")
       # hi8 values:
       #  SALU    =  0x0 / s_mov_b32
       #  SMEM    =  0x1 / s_load_b*
       #  NEXT    =  0x4 / s_cbranch_execz
       #  MESSAGE =  0x9 / s_sendmsg
-      #  VALU    =  0xb / v_exp_f32_e32
+      #  VALU    =  0xb / v_(exp,log)_f32_e32
       #  VALU    =  0xd / v_lshlrev_b64
       #  VMEM    = 0x21 / global_load_b32
+      #  VMEM    = 0x22 / global_load_b32
       #  VMEM    = 0x24 / global_store_b32
       #  VMEM    = 0x25 / global_store_b64
       #  LDS     = 0x29 / ds_load_b128
       #  LDS     = 0x2b / ds_store_b32
+      #  ????    = 0x5a / hidden global_load  instruction
+      #  ????    = 0x5b / hidden global_load  instruction
+      #  ????    = 0x5c / hidden global_store instruction
       #  VALU    = 0x73 / v_cmpx_eq_u32_e32 (not normal VALUINST)
       fields.append(f"hi8=0x{hi8:x}")
     case 0x14:

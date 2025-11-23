@@ -88,6 +88,7 @@ def run_asm(src, num_workgroups=1, num_waves=1):
   fxn(buf._buf, global_size=(num_workgroups,1,1), local_size=(WAVE_SIZE*num_waves,1,1), wait=True)
 
 if __name__ == "__main__":
+  """
   with save_sqtt() as sqtt:
     run_asm([
       #"s_barrier",
@@ -117,6 +118,7 @@ if __name__ == "__main__":
       "v_mov_b32_e32 v0, 0",
       "v_mov_b32_e32 v0, 0",
       "v_mov_b32_e32 v0, 0",
+      "v_mov_b32_e32 v1, 0",
       "s_nop 0",
       "s_nop 0",
       "s_nop 100",
@@ -124,21 +126,21 @@ if __name__ == "__main__":
       "s_nop 100",
       "s_nop 0",
       "s_nop 0",
-      "global_load_b32 v1, v0, s[0:1]",
       "global_load_b32 v2, v0, s[0:1]",
       "global_load_b32 v3, v0, s[0:1]",
       "global_load_b32 v4, v0, s[0:1]",
-      "global_load_b32 v1, v0, s[0:1]",
-      "global_load_b32 v1, v0, s[0:1]",
-      "global_load_b32 v1, v0, s[0:1]",
-      "global_load_b32 v1, v0, s[0:1]",
-      "global_load_b32 v1, v0, s[0:1]",
-      "global_load_b32 v1, v0, s[0:1]",
-      "global_load_b32 v1, v0, s[0:1]",
-      "global_load_b32 v1, v0, s[0:1]",
-      "global_load_b32 v1, v0, s[0:1]",
-      "global_load_b32 v1, v0, s[0:1]",
-      "global_load_b32 v1, v0, s[0:1]",
+      "global_load_b32 v5, v0, s[0:1]",
+      "global_load_b32 v5, v0, s[0:1]",
+      "global_load_b32 v2, v0, s[0:1]",
+      "global_load_b32 v2, v1, s[0:1]",
+      "global_load_b32 v2, v1, s[0:1]",
+      "global_load_b32 v2, v1, s[0:1]",
+      "global_load_b32 v2, v0, s[0:1]",
+      "global_load_b32 v2, v0, s[0:1]",
+      "global_load_b32 v2, v0, s[0:1]",
+      "global_load_b32 v2, v0, s[0:1]",
+      "global_load_b32 v2, v0, s[0:1]",
+      "global_load_b32 v2, v0, s[0:1]",
       "s_nop 0",
       "s_nop 0",
       "s_nop 0",
@@ -153,11 +155,12 @@ if __name__ == "__main__":
       "s_endpgm",
     ], num_workgroups=1, num_waves=1)
   exit(0)
+  """
 
   with save_sqtt() as sqtt:
     #(Tensor.empty(16,16) @ Tensor.empty(16,16)).elu().realize()
-    Tensor.empty(1, 64).sum(axis=1).realize()
-    #Tensor.empty(1).exp().realize()
+    #Tensor.empty(1, 64).sum(axis=1).realize()
+    Tensor.empty(1).log2().realize()
   exit(0)
 
   with save_sqtt() as sqtt:
