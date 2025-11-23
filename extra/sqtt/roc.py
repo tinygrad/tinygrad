@@ -81,7 +81,7 @@ class _ROCParseCtx:
     ctypes.memmove((ctypes.c_char * sz).from_buffer(insts_blob), ev.instructions_array, sz)
 
     self.inst_execs.setdefault(unwrap(self.active_kern), []).append(WaveExec(ev.wave_id, ev.cu, ev.simd, unwrap(self.active_se), ev.begin_time,
-                                                                               ev.end_time, insts_blob))
+                                                                             ev.end_time, insts_blob))
 
 def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
   dev_events:dict[str, ProfileDeviceEvent] = {}
