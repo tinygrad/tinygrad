@@ -111,7 +111,9 @@ class IR3Compiler(NIRCompiler):
     self.nir_options = bytes(mesa.ir3_get_compiler_options(self.cc).contents)
     super().__init__(f"compile_{cache_key}")
 
-  def __del__(self): pass
+  def __del__(self):
+    mesa.ir3_compiler_destroy(self.cc)
+    super().__del__()
 
   def __reduce__(self): return IR3Compiler, (self.dev_id.chip_id,)
 
