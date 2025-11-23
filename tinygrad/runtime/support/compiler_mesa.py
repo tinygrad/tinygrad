@@ -90,12 +90,18 @@ class NAKCompiler(NIRCompiler):
       print(system(f"nvdisasm -b SM{self.arch[3:]} {fn}"))
     except Exception as e: print("Failed to generate SASS", str(e), "Make sure your PATH contains nvdisasm binary of compatible version.")
 
-@ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p)
-def hd(data, n, instr):
-  fst, snd = data64(ctypes.cast(instr, ctypes.POINTER(ctypes.c_uint64)).contents.value)
-  print(f"{n:04} [{fst:08x}_{snd:08x}] ", end="", flush=True)
-def disas_adreno(lib:bytes, gpu_id=630): mesa.ir3_isa_disasm(lib, len(lib), ctypes.POINTER(mesa.struct__IO_FILE).in_dll(ctypes.CDLL(None), "stdout"),
-                                                             mesa.struct_isa_decode_options(gpu_id, True, 0, True, pre_instr_cb=hd))
+def disas_adreno(lib:bytes, gpu_id=630):
+  with tempfile.TemporaryFile('w+', buffering=1) as tf:
+    @ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p)
+    def hd(data, n, instr):
+      fst, snd = data64(ctypes.cast(instr, ctypes.POINTER(ctypes.c_uint64)).contents.value)
+      print(f"{n:04} [{fst:08x}_{snd:08x}] ", end="", flush=True, file=tf)
+
+    fp = ctypes.cast(ctypes.CDLL(None).fdopen(tf.fileno(), b"w"), ctypes.POINTER(mesa.struct__IO_FILE))
+    ctypes.CDLL(None).setlinebuf(fp)
+    mesa.ir3_isa_disasm(lib, len(lib), fp, mesa.struct_isa_decode_options(gpu_id, True, 0, True, pre_instr_cb=hd))
+    tf.seek(0)
+    print(tf.read())
 
 class IR3Compiler(NIRCompiler):
   def __init__(self, chip_id, cache_key="ir3"):
