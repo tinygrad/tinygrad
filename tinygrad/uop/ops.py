@@ -403,6 +403,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def substitute(self, dvars:dict[UOp, UOp], name:str|None=None, extra_pm:PatternMatcher|None=None):
     dvars = {k:v for k,v in dvars.items() if k is not v}
     if len(dvars) == 0: return self
+    if extra_pm is None and not self.has_st_var and all(k.op in {Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE} for k in dvars): return self
     with Context(TRACK_MATCH_STATS=(0 if name is None else TRACK_MATCH_STATS.value)):
       return graph_rewrite(self, (extra_pm+_substitute) if extra_pm is not None else _substitute, dvars, bottom_up=True, name=name)
 
@@ -795,6 +796,10 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def vmin(self) -> ConstType: return self._min_max[0]
   @property
   def vmax(self) -> ConstType: return self._min_max[1]
+  @property
+  def has_st_var(self) -> bool: return self._has_st_var
+  @functools.cached_property
+  def _has_st_var(self) -> bool: return self.op in (Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE) or any(x._has_st_var for x in self.src)
   @functools.cached_property
   def _min_max(self) -> tuple[ConstType, ConstType]:
     if self.op in GroupOp.Binary and not dtypes.is_float(self.dtype):

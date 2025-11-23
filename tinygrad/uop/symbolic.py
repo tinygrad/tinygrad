@@ -125,6 +125,7 @@ _simplify_valid_cache = WeakUOpCache()
 
 def lt_folding(x:UOp, c:int) -> UOp|None:
   if (ret:=_lt_fold_cache.get(x, c)) is not None: return ret
+  if not x.has_st_var: return None
   p, np = partition(x.split_uop(Ops.ADD), lambda u: u.const_factor() == 1)
   ret = None
   if np and (d:=math.gcd(*[u.const_factor() for u in np], c)) > 1 and 0 <= sum(u.vmin for u in p) and sum(u.vmax for u in p) < d:
@@ -134,6 +135,7 @@ def lt_folding(x:UOp, c:int) -> UOp|None:
 
 def canonicalize_simplex(X:UOp) -> UOp|None:
   if (ret:=_simplex_canon_cache.get(X)) is not None: return ret
+  if not X.has_st_var: return None
   # (X := a0*x0 + a1*x1 + ...) > 0 is equivalent to x0 + x1 + ... > 0 if xi >= 0 and ai > 0 for ints.
   # returns x0 + x1 + ... in such case, or None if not
   changed, ret_list = False, []
@@ -348,6 +350,9 @@ def _valid_priority(v: UOp, valids:list[UOp], topo_cache:dict[UOp, dict[UOp, Non
 
 def simplify_valid(valid:UOp) -> UOp|None:
   if (cache_ret:=_simplify_valid_cache.get(valid)) is not None: return cache_ret
+  if not valid.has_st_var:
+    _simplify_valid_cache.set(valid, None, allow_none=True)
+    return None  # skip if there are no symbolic variables
   if valid.op_in_backward_slice_with_self(Ops.INDEX):
     _simplify_valid_cache.set(valid, None, allow_none=True)
     return None  # this should only be for indexing, skip if there's a INDEX
