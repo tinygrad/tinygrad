@@ -239,14 +239,14 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
         fields.append("flag_terminate_all=1")
     case 0x8:
       # wave end, this is 20 bits (FFF00)
-      flag7   = (pkt >> 8) & 0x3
-      wgp     = (pkt >> 10) & 1
+      flag7   = (pkt >> 8) & 1
+      simd    = (pkt >> 9) & 3
       slot4   = (pkt >> 11) & 0xF
       wave    = (pkt >> 15) & 0x1f
+      assert flag7 == 0, "flag7 should be 0"
+      assert slot4 == 0, "slot4 should be 0"
       fields.append(f"wave={wave:x}")
-      fields.append(f"wgp={wgp}")
-      fields.append(f"flag7={flag7}")
-      fields.append(f"slot4={slot4:x}")
+      fields.append(f"simd={simd}")
     case 0x9:
       # From case 9 (WAVESTART) in multiple consumers:
       #   flag7  = (w >> 7) & 1        (low bit of uVar41)
@@ -255,15 +255,15 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       #   idx_lo = (w >> 0xd) & 0x1f   (low index, layout<4 path)
       #   idx_hi = (w >> 0xf) & 0x1f   (high index, layout>=4 path)
       #   id7    = (w >> 0x19) & 0x7f  (7-bit id)
-      flag7   = (pkt >> 7) & 3
-      wgp     = (pkt >> 9) & 1
+      flag7   = (pkt >> 7) & 1
+      simd    = (pkt >> 8) & 2
       slot3   = (pkt >> 10) & 0x7  # NOTE: this isn't 4!
       wave    = (pkt >> 13) & 0x1F
       id7     = (pkt >> 17)
+      assert flag7 == 0, "flag7 should be 0"
+      assert slot3 == 0, "slot3 should be 0"
       fields.append(f"wave={wave:x}")
-      fields.append(f"flag7={flag7}")
-      fields.append(f"wgp={wgp}")
-      fields.append(f"slot3={slot3:x}")
+      fields.append(f"simd={simd}")
       fields.append(f"id7=0x{id7:x}")
     case 0x18:
       # FFF88 is the mask
@@ -374,7 +374,7 @@ DEFAULT_FILTER = tuple()
 if FILTER_LEVEL >= 0: DEFAULT_FILTER += (0x10, 0xf)
 # reg + event + sample + marker
 # TODO: events are probably good
-if FILTER_LEVEL >= 1: DEFAULT_FILTER += (0x11, 0x14, 0x16, 0x12)
+if FILTER_LEVEL >= 1: DEFAULT_FILTER += (0x11, 0x14, 0x12, 0x16)
 # instruction runs
 if FILTER_LEVEL >= 2: DEFAULT_FILTER += (0x02, 0x03)
 # instructions dispatch (inst, valuinst, immed)
