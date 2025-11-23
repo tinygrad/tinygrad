@@ -2,7 +2,7 @@ from __future__ import annotations
 import math, itertools
 from collections import defaultdict
 from typing import cast, Final
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, GroupOp
+from tinygrad.uop.ops import Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, GroupOp, _remove_all_tags
 from tinygrad.uop.ops import axis_letters, axis_colors, axis_to_pos
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes, ImageDType
@@ -10,8 +10,6 @@ from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOO
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
 from tinygrad.codegen.simplify import pm_flatten_range
 from tinygrad.renderer import Renderer
-
-remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
 class Scheduler:
   def __init__(self, ast:UOp, ren:Renderer):
@@ -209,7 +207,7 @@ class Scheduler:
       self.ast = self.ast.substitute({rng:rng.replace(arg=(*altrng.arg[0:-1], rng.arg[-1]), tag=1),
                                       altrng:altrng.replace(arg=(*rng.arg[0:-1], altrng.arg[-1]), tag=1)},
                                       name=f"swap {rng.arg[:-1]} {altrng.arg[:-1]}")
-      self.ast = graph_rewrite(self.ast, remove_tags, name="swap remove tags")
+      self.ast = graph_rewrite(self.ast, _remove_all_tags, name="swap remove tags")
     else:
       raise KernelOptError(f"unsupported opt {opt.op}")
 

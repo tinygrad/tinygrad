@@ -2,7 +2,7 @@ from typing import Iterator
 import functools, operator, itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, profile_matches
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, profile_matches, _remove_movement_tags
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
 from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored
 
@@ -99,7 +99,7 @@ def remove_movement_op_after_rangeify(ctx:IndexingContext, x:UOp):
 
 def add_third_op_to_assign_to_track_shape(ctx:IndexingContext, assign:UOp):
   if assign.src[1].op is Ops.KERNEL: return None
-  to_mop = graph_rewrite(assign.src[0], PatternMatcher([(UPat(GroupOp.Movement, name="x"), lambda x: x.replace(tag=()) if x.tag != () else None)]))
+  to_mop = graph_rewrite(assign.src[0], _remove_movement_tags)
   ret = assign.replace(src=assign.src+(to_mop,))
   ctx.range_map[ret] = ctx.range_map[assign]
   return ret

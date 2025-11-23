@@ -1348,7 +1348,9 @@ def _index_to_concrete_int(u:UOp): return graph_rewrite(u.sink(), pm_lower_index
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
 _substitute_range = PatternMatcher([(UPat(Ops.RANGE, name="x"), lambda ctx,x: ctx.get(x,None))])
+_substitute_after = PatternMatcher([(UPat(Ops.AFTER, name="x"), lambda ctx,x: ctx.get(x,None))])
 _remove_all_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
+_remove_movement_tags = PatternMatcher([(UPat(GroupOp.Movement, name="x"), lambda x: x.replace(tag=()) if x.tag != () else None)])
 
 def do_unbind(ctx:dict[Variable, int], x:UOp):
   v,i = x.unbind()
