@@ -127,12 +127,13 @@ OPNAME = {
   0x2e: "LDS_STORE",
   0x50: "__SIMD_LDS_LOAD",
   0x51: "__SIMD_LDS_LOAD",
-  0x54: "__???",
+  0x54: "__SIMD_LDS_STORE",
   0x5a: "__SIMD_VMEM_LOAD",
   0x5b: "__SIMD_VMEM_LOAD",
   0x5c: "__SIMD_VMEM_STORE",
   0x5e: "__SIMD_VMEM_STORE",
   0x5f: "__SIMD_VMEM_STORE",
+  0x72: "SALU_OR",
   0x73: "VALU_CMPX",
 }
 
@@ -441,10 +442,10 @@ if FILTER_LEVEL >= 0: DEFAULT_FILTER += (0x10, 0xf, 0x11)
 # reg + event + sample + marker
 # TODO: events are probably good
 if FILTER_LEVEL >= 1: DEFAULT_FILTER += (0x14, 0x12, 0x16)
-# instruction runs
-if FILTER_LEVEL >= 2: DEFAULT_FILTER += (0x02, 0x03)
-# instructions dispatch (inst, valuinst, immed)
-if FILTER_LEVEL >= 3: DEFAULT_FILTER += (0x01, 0x4, 0x5, 0x18)
+# instruction runs + valuinst
+if FILTER_LEVEL >= 2: DEFAULT_FILTER += (0x01, 0x02, 0x03)
+# instructions dispatch (inst, immed)
+if FILTER_LEVEL >= 3: DEFAULT_FILTER += (0x4, 0x5, 0x18)
 # waves
 if FILTER_LEVEL >= 4: DEFAULT_FILTER += (0x6, 0x8, 0x9)
 
