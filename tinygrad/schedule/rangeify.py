@@ -192,13 +192,16 @@ def winowrite(ctx: IndexingContext, lhs: UOp, rhs: UOp, redu: UOp):
   other_loop_ranges_xhat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_x]
   kranges = [ctx.new_range(3, AxisType.LOOP) for _ in o_axes]
 
-  # Transform activations: Winograd F(4x4,3x3) with 6x6 input tiles, check bounds for partial tiles
-  # Apply boundary mask and bufferize BEFORE winograd_kron to prevent SPEC from seeing OOB INDEX operations
-  X_tiled = act_like.substitute({add: tr*4 + u for add, tr, u in zip(o_adds, tile_ranges, inner6)})
+  # Transform activations: Winograd F(4x4,3x3) with 6x6 input tiles, check bounds for partial tiles  # Clamp indices to prevent OOB (SPEC) - use valid index or max valid index, then zero out clamped values with mask
+  clamped_subs = {}
+  for add, tr, u, oa in zip(o_adds, tile_ranges, inner6, o_axes):
+    idx = tr*4 + u
+    max_valid = int(oa.vmax) + 2
+    clamped_subs[add] = ((idx < (max_valid + 1)).where(idx, UOp.const(dtypes.index, max_valid)))
+  X_tiled = act_like.substitute(clamped_subs)
   valid_mask = functools.reduce(operator.and_, [(tr*4 + u) < (int(oa.vmax) + 3) for tr, u, oa in zip(tile_ranges, inner6, o_axes)],
     UOp.const(dtypes.bool, True))
-  X_tiled = valid_mask.where(X_tiled, UOp.const(X_tiled.dtype, 0.0)).bufferize(
-    *(other_reduces+other_loops_x+tile_ranges+inner6), arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
+  X_tiled = valid_mask.where(X_tiled, UOp.const(X_tiled.dtype, 0.0))
   XHAT = winograd_kron(X_tiled, winograd_Bt, other_reduces+other_loops_x+tile_ranges, inner6, device, ctx)
 
   # Transform weights
