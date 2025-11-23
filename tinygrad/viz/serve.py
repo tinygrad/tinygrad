@@ -223,11 +223,8 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
   try: rctx = decode(profile)
   except Exception: return err("DECODER ERROR")
   if getenv("SQTT_PARSE"):
-    try:
-      from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
-      for e in sqtt_events: parse_sqtt_print_packets(e.blob)
-    except Exception:
-      pass
+    from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
+    for e in sqtt_events: parse_sqtt_print_packets(e.blob)
   if not rctx.inst_execs: return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
   steps:list[dict] = []
   for name,waves in rctx.inst_execs.items():
