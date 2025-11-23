@@ -125,22 +125,26 @@ OPNAME = {
   0x29: "LDS_LOAD",
   0x2b: "LDS_STORE",
   0x2e: "LDS_STORE",
-  0x50: "__???",
+  0x50: "__SIMD_LDS_LOAD",
+  0x51: "__SIMD_LDS_LOAD",
   0x54: "__???",
-  0x5a: "__SIMD_LOAD",
-  0x5b: "__SIMD_LOAD",
-  0x5c: "__SIMD_STORE",
-  0x5e: "__SIMD_STORE",
-  0x5f: "__SIMD_STORE",
+  0x5a: "__SIMD_VMEM_LOAD",
+  0x5b: "__SIMD_VMEM_LOAD",
+  0x5c: "__SIMD_VMEM_STORE",
+  0x5e: "__SIMD_VMEM_STORE",
+  0x5f: "__SIMD_VMEM_STORE",
   0x73: "VALU_CMPX",
 }
 
 ALUSRC = {
   1: "SALU",
   2: "VALU",
+  3: "VALU_ALT",
 }
 
 MEMSRC = {
+  0: "LDS",
+  1: "__LDS",
   2: "VMEM",
   3: "__VMEM",
 }
@@ -354,13 +358,14 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       #   hi8    = (w >> 0xc) & 0xff   (layout 4 path)
       #   hi7    = (w >> 0xd) & 0x7f   (other layouts)
       #   idx5   = (w >> 7) or (w >> 8) & 0x1f, used as wave index
-      flag = (pkt >> 3) & 1
+      flag1 = (pkt >> 3) & 1
       flag2 = (pkt >> 7) & 1
       wave = (pkt >> 8) & 0x1F
       op = (pkt >> 13)
-      assert flag == 0 and flag2 == 0, "non 0 flags in 0x18"
       fields.append(f"wave={wave:x}")
       fields.append(f"op=0x{op:02x} [{OPNAME.get(op, '')}]")
+      if flag1: fields.append(f"flag1")
+      if flag2: fields.append(f"flag2")
     case 0x14:
       subop   = (pkt >> 16) & 0xFFFF       # (short)(w >> 0x10)
       val32   = (pkt >> 32) & 0xFFFFFFFF   # (uint)(w >> 0x20)
@@ -430,7 +435,7 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
 
 FILTER_LEVEL = getenv("FILTER", 1)
 
-DEFAULT_FILTER = tuple()
+DEFAULT_FILTER: tuple[int, ...] = tuple()
 # NOP + pure time + "sample"
 if FILTER_LEVEL >= 0: DEFAULT_FILTER += (0x10, 0xf, 0x11)
 # reg + event + sample + marker
