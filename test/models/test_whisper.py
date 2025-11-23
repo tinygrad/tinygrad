@@ -100,6 +100,15 @@ class TestWhisper(unittest.TestCase):
     transcription = transcribe_waveform(self.model, self.enc, waveform)
     self.assertWER(transcription, TRANSCRIPTION_3, 0.085)
 
+  @unittest.skipIf(CI or (Device.DEFAULT == "CPU" and CPU_LLVM), "too long for CI")
+  def test_transcribe_long_no_batch(self):
+    waveforms = [load_file_waveform(fetch(TEST_FILE_3_URL)), load_file_waveform(TEST_FILE_1)]
+
+    trancriptions = transcribe_waveform(self.model, self.enc, waveforms)
+    self.assertEqual(2, len(trancriptions))
+    self.assertWER(trancriptions[0], TRANSCRIPTION_3, 0.1)
+    self.assertEqual(TRANSCRIPTION_1, trancriptions[1])
+
   def test_wer_same(self):
     reference = TRANSCRIPTION_3
     self.assertWER(TRANSCRIPTION_3_ALT, reference, 0.079)
@@ -115,15 +124,6 @@ class TestWhisper(unittest.TestCase):
   def test_wer_different_3(self):
     reference = TRANSCRIPTION_3
     self.assertWER(reference[:len(reference)//2], reference, 0.524)
-
-  @unittest.skipIf(CI or (Device.DEFAULT == "CPU" and CPU_LLVM), "too long for CI")
-  def test_transcribe_long_no_batch(self):
-    waveforms = [load_file_waveform(fetch(TEST_FILE_3_URL)), load_file_waveform(TEST_FILE_1)]
-
-    trancriptions = transcribe_waveform(self.model, self.enc, waveforms)
-    self.assertEqual(2, len(trancriptions))
-    self.assertWER(trancriptions[0], TRANSCRIPTION_3, 0.1)
-    self.assertEqual(TRANSCRIPTION_1, trancriptions[1])
 
 if __name__ == '__main__':
   unittest.main()
