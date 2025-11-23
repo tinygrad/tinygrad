@@ -106,7 +106,7 @@ class TestWhisper(unittest.TestCase):
 
     trancriptions = transcribe_waveform(self.model, self.enc, waveforms)
     self.assertEqual(2, len(trancriptions))
-    self.assertWER(trancriptions[0], TRANSCRIPTION_3, 0.1)
+    self.assertWER(trancriptions[0], TRANSCRIPTION_3, 0.085)
     self.assertEqual(TRANSCRIPTION_1, trancriptions[1])
 
   def test_wer_same(self):
