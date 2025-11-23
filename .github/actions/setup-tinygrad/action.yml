@@ -298,7 +298,7 @@ runs:
     - name: Install mesa (linux)
       if: inputs.mesa == 'true' && runner.os == 'Linux'
       shell: bash
-      run: sudo curl -fL https://github.com/sirhcm/tinymesa/releases/download/tinymesa-32dc66c/libtinymesa_cpu-mesa-25.2.4-linux-amd64.so -o /usr/lib/libtinymesa_cpu.so
+      run: sudo curl -fL https://github.com/sirhcm/tinymesa/releases/download/v1/libtinymesa_cpu-mesa-25.2.7-linux-amd64.so -o /usr/lib/libtinymesa_cpu.so
     - name: Install mesa (macOS)
       if: inputs.mesa == 'true' && runner.os == 'macOS'
       shell: bash
