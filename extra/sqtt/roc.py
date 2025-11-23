@@ -53,11 +53,21 @@ class WaveExec:
       inst_typ = rocprof.enum_rocprofiler_thread_trace_decoder_inst_category_t.get(inst.category)
       yield InstExec(inst_typ, inst.pc.address, inst.stall, inst.duration, inst.time)
 
+@dataclasses.dataclass(frozen=True)
+class OccEvent:
+  se:int
+  cu:int
+  simd:int
+  wave_id:int
+  time:int
+  start:int
+
 class _ROCParseCtx:
   def __init__(self, dev_evs:dict[str, ProfileDeviceEvent], sqtt_evs:list[ProfileSQTTEvent], prog_evs:list[ProfileProgramEvent]):
     self.dev_evs, self.sqtt_evs, self.prog_evs = dev_evs, iter(sqtt_evs), prog_evs
     self.disasms:dict[str, dict[int, tuple[str, int]]] = {}
     self.inst_execs:dict[str, list[WaveExec]] = {}
+    self.occ_events:dict[str, list[OccEvent]] = {}
 
     for prog in prog_evs:
       arch = "gfx%d%x%x" % ((trgt:=unwrap(dev_evs[prog.device].props)['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
@@ -73,6 +83,7 @@ class _ROCParseCtx:
 
   def on_occupancy_ev(self, ev:rocprof.rocprofiler_thread_trace_decoder_occupancy_t):
     if DEBUG >= 5: print(f"OCC {ev.time=} {self.active_se=} {ev.cu=} {ev.simd=} {ev.wave_id=} {ev.start=}")
+    self.occ_events.setdefault(unwrap(self.active_kern), []).append(OccEvent(unwrap(self.active_se), ev.cu, ev.simd, ev.wave_id, ev.time, ev.start))
 
   def on_wave_ev(self, ev:rocprof.rocprofiler_thread_trace_decoder_wave_t):
     if DEBUG >= 5: print(f"WAVE {ev.wave_id=} {self.active_se=} {ev.cu=} {ev.simd=} {ev.contexts=} {ev.begin_time=} {ev.end_time=}")
