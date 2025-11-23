@@ -19,21 +19,21 @@ pm_flatten_range = PatternMatcher([
 def count_divmod(x:UOp): return len([u for u in x.toposort() if u.op in {Ops.IDIV, Ops.MOD}])
 def simplify_merge_adjacent(u:UOp) -> UOp|None:
   reduce_ranges = [x.ranges for x in u.backward_slice_with_self if x.op is Ops.REDUCE]
+  u_divmod_count = count_divmod(u)
   # on END we only want to merge adjacent ranges, on REDUCE we want to try all combinations
   for r0, r1 in (zip(u.ended_ranges, u.ended_ranges[1:]) if u.op is Ops.END else itertools.permutations(u.ended_ranges, 2)):
-    # check same type
-    if r0.arg[-1] == r1.arg[-1]:
-      # check if the ranges to merge are in the same reduces
-      if all((r0 in rngs) == (r1 in rngs) for rngs in reduce_ranges):
-        s0, s1 = r0.src[0], r1.src[0]
-        # do the merge
-        new_range = r0.replace(src=(s0*s1,))
-        nidx = graph_rewrite(u, _substitute+symbolic+pm_flatten_range, ctx={r0:new_range//s1, r1:new_range%s1},
-                             name=f"check_merge_{r0.arg[0]}_{r1.arg[0]}")
-
-        # check if it simplifies
-        if count_divmod(nidx) <= count_divmod(u):
-          u = nidx
+    if r0.arg[-1] != r1.arg[-1]: continue
+    if not all((r0 in rngs) == (r1 in rngs) for rngs in reduce_ranges): continue
+    s0, s1 = r0.src[0], r1.src[0]
+    # skip if both are const and sizes don't divide nicely
+    if s0.op is Ops.CONST and s1.op is Ops.CONST and s0.divides(s1.arg) is None and s1.divides(s0.arg) is None: continue
+    # skip trivial cases: merging with size 1 never helps
+    if (s0.op is Ops.CONST and s0.arg == 1) or (s1.op is Ops.CONST and s1.arg == 1): continue
+    new_range = r0.replace(src=(s0*s1,))
+    nidx = graph_rewrite(u, _substitute+symbolic+pm_flatten_range, ctx={r0:new_range//s1, r1:new_range%s1},
+                         name=f"check_merge_{r0.arg[0]}_{r1.arg[0]}")
+    if (nidx_divmod:=count_divmod(nidx)) <= u_divmod_count:
+      u, u_divmod_count = nidx, nidx_divmod
   return u
 
 pm_simplify_ranges = PatternMatcher([
