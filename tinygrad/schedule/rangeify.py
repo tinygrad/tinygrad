@@ -120,7 +120,7 @@ winograd_G = [[1/4, 0, 0], [-1/6, -1/6, -1/6], [-1/6, 1/6, -1/6], [1/24, 1/12, 1
 winograd_Bt = [[4, 0, -5, 0, 1, 0], [0, -4, -4, 1, 1, 0], [0, 4, -4, -1, 1, 0], [0, -2, -1, 2, 1, 0], [0, 2, -1, -2, 1, 0], [0, 4, 0, -5, 0, 1]]
 winograd_At = [[1, 1, 1, 1, 1, 0], [0, 1, -1, 2, -2, 0], [0, 1, 1, 4, 4, 0], [0, 1, -1, 8, -8, 1]]
 
-def winograd_kron(source, matrix, outer_axes, inner_axes, device, ctx):
+def winograd_kron(source, matrix, outer_axes, inner_axes, device, ctx, spatial_bounds=None):
   inner_shape = [ax.vmax+1 for ax in inner_axes]
   result_axes = [ctx.new_range(len(matrix), AxisType.LOOP) for _ in range(len(inner_shape))]
 
@@ -141,6 +141,24 @@ def winograd_kron(source, matrix, outer_axes, inner_axes, device, ctx):
   for in_indices in product(*[range(inner_shape[d]) for d in range(len(inner_shape))]):
     # SCALAR indexing: [outer, inner] - OLD behavior
     indexed = source.index(*new_outer_axes, *[UOp.const(dtypes.index, i) for i in in_indices])
+
+    # Apply spatial bounds checking if provided (for SPEC verification)
+    if spatial_bounds is not None:
+      num_spatial = len(spatial_bounds)
+      # The last num_spatial outer axes are tile ranges that need bounds checking
+      tile_axes_new = new_outer_axes[-num_spatial:]
+      # Check if tile*4 + inner_idx <= input_max for each spatial dimension
+      valid_masks = []
+      for i, input_max in enumerate(spatial_bounds):
+        tiled_pos = tile_axes_new[i] * 4 + in_indices[-num_spatial + i]
+        valid_masks.append(UOp(Ops.CMPLT, dtypes.bool, (tiled_pos, UOp.const(dtypes.index, input_max + 1))))
+      # Combine masks with AND
+      valid_mask = valid_masks[0]
+      for vm in valid_masks[1:]:
+        valid_mask = UOp(Ops.AND, dtypes.bool, (valid_mask, vm))
+      # Gate the indexed value with WHERE
+      indexed = UOp(Ops.WHERE, indexed.dtype, (valid_mask, indexed, UOp.const(indexed.dtype, 0.0)))
+
     input_vals[in_indices] = indexed
 
   # Build coefficient selectors using CMPNE+AND pattern (matches OLD)
@@ -254,24 +272,14 @@ def winowrite(ctx: IndexingContext, lhs: UOp, rhs: UOp, redu: UOp):
 
   # Transform activations: X_tiled → XHAT with SCALAR layout [cin, batch, tiles, 6×6]
   # Winograd F(4x4,3x3) needs 6x6 input tiles, but partial tiles may access out-of-bounds positions
-  # For 3x3 kernel, input_size = output_size + 2, so check tr*4 + u <= output_vmax + 2
+  # For 3x3 kernel, input_size = output_size + 2, so need to check tr*4 + u <= output_vmax + 2
   X_tiled = act_like.substitute({add: tr*4 + u for add, tr, u in zip(o_adds, tile_ranges, inner6)})
 
-  # Apply boundary mask to zero out-of-bounds accesses
-  valid_masks = []
-  for tr, u, oa in zip(tile_ranges, inner6, o_axes):
-    tiled_idx = tr*4 + u  # Compute tiled index into INPUT space
-    # Input max = output max + (kernel_size - 1) = oa.vmax + 2 for 3x3 kernel
-    input_max = int(oa.vmax) + 2
-    valid_masks.append(UOp(Ops.CMPLT, dtypes.bool, (tiled_idx, UOp.const(dtypes.index, input_max + 1))))
-  # Combine masks: all dimensions must be valid (AND them together)
-  valid_mask = valid_masks[0]
-  for vm in valid_masks[1:]:
-    valid_mask = UOp(Ops.AND, dtypes.bool, (valid_mask, vm))
-  # Perform substitution, then apply validity mask to zero out-of-bounds accesses
-  X_tiled = UOp(Ops.WHERE, X_tiled.dtype, (valid_mask, X_tiled, UOp.const(X_tiled.dtype, 0.0)))
+  # Compute spatial bounds for SPEC verification (input_max = output_max + kernel_size - 1)
+  spatial_bounds = [int(oa.vmax) + 2 for oa in o_axes]  # +2 for 3x3 kernel
 
-  XHAT = winograd_kron(X_tiled, winograd_Bt, other_reduces+other_loops_x+tile_ranges, inner6, device, ctx)
+  XHAT = winograd_kron(X_tiled, winograd_Bt, other_reduces+other_loops_x+tile_ranges, inner6, device, ctx,
+                       spatial_bounds=spatial_bounds)
 
   # Transform weights: w_sub → GHAT with SCALAR layout [cin, cout, 6×6]
   w_sub = w_like.substitute(dict(zip(k_axes, kranges)))
