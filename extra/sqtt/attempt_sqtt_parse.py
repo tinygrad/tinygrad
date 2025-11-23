@@ -22,6 +22,23 @@ from extra.sqtt.roc import decode, ProfileSQTTEvent
 
 # NOTE: INST runs before EXEC
 
+OPCODE_COLORS = {
+  # dispatches are BLACK
+  0x1: "BLACK",
+  0x18: "BLACK",
+
+  # execs are yellow
+  0x2: "yellow",
+  0x3: "yellow",
+  0x4: "YELLOW",
+  0x5: "YELLOW",
+
+  # waves are blue
+  0x8: "blue",
+  0x9: "blue",
+  0x6: "cyan",
+}
+
 OPCODE_NAMES = {
   # gated by SQ_TT_TOKEN_EXCLUDE_VALUINST_SHIFT (but others must be enabled for it to show)
   0x01: "VALUINST",
@@ -31,12 +48,14 @@ OPCODE_NAMES = {
   0x03: "ALUEXEC",
   # gated by SQ_TT_TOKEN_EXCLUDE_IMMEDIATE_SHIFT
   0x04: "IMMEDIATE",
-  0x05: "IMMEDIATE_MULTIWAVE",
+  0x05: "IMMEDIATE_MASK",
+
   # gated by SQ_TT_TOKEN_EXCLUDE_WAVERDY_SHIFT
   0x06: "WAVERDY",
   # gated by SQ_TT_TOKEN_EXCLUDE_WAVESTARTEND_SHIFT
   0x08: "WAVEEND",
   0x09: "WAVESTART",
+
   # gated by NOT SQ_TT_TOKEN_EXCLUDE_PERF_SHIFT
   0x0D: "PERF",
   # gated by SQ_TT_TOKEN_EXCLUDE_EVENT_SHIFT
@@ -49,16 +68,16 @@ OPCODE_NAMES = {
   0x19: "UTILCTR",
 
   # this is the first (8 byte) packet in the bitstream
-  0x17: "LAYOUT_MODE_HEADER",       # layout/mode/group + selectors A/B (reversed)
+  0x17: "LAYOUT_HEADER",       # layout/mode/group + selectors A/B (reversed)
 
   # pure time (no extra bits)
-  0x0F: "TS_DELTA_SHORT_PLUS4",
+  0x0F: "TS_DELTA_SHORT",
   0x10: "NOP",
-  0x11: "TS_WAVE_STATE_SAMPLE",     # almost pure time, has a small flag
+  0x11: "TS_WAVE_STATE",     # almost pure time, has a small flag
 
   # not a good name, but seen and understood mostly
-  0x15: "PERFCOUNTER_SNAPSHOT",     # small delta + 50-ish bits of snapshot
-  0x16: "TS_DELTA36_OR_MARK",       # 36-bit long delta or 36-bit marker
+  0x15: "PERFCOUNTER",            # small delta + 50-ish bits of snapshot
+  0x16: "TS_DELTA_OR_MARK",       # 36-bit long delta or 36-bit marker
 
   # packets we haven't seen / rarely see 0x0b
   0x07: "TS_DELTA_S8_W3",           # shift=8,  width=3  (small delta)
@@ -67,6 +86,65 @@ OPCODE_NAMES = {
   0x0C: "TS_DELTA_S5_W3_B",         # shift=5,  width=3 (different consumer)
   0x13: "EVT_SMALL_GENERIC",        # same structural family as 0x08/0x12/0x19
 }
+
+#  SALU    =  0x0 / s_mov_b32
+#  SMEM    =  0x1 / s_load_b*
+#  JUMP    =  0x3 / s_cbranch_scc0
+#  NEXT    =  0x4 / s_cbranch_execz
+#  MESSAGE =  0x9 / s_sendmsg
+#  VALU    =  0xb / v_(exp,log)_f32_e32
+#  VALU    =  0xd / v_lshlrev_b64
+#  VMEM    = 0x21 / global_load_b32
+#  VMEM    = 0x22 / global_load_b32
+#  VMEM    = 0x24 / global_store_b32
+#  VMEM    = 0x25 / global_store_b64
+#  VMEM    = 0x27 / global_store
+#  VMEM    = 0x28 / global_store_b64
+#  LDS     = 0x29 / ds_load_b128
+#  LDS     = 0x2b / ds_store_b32
+#  LDS     = 0x2e / ds_store_b128
+#  ????    = 0x5a / hidden global_load  instruction
+#  ????    = 0x5b / hidden global_load  instruction
+#  ????    = 0x5c / hidden global_store instruction
+#  VALU    = 0x73 / v_cmpx_eq_u32_e32 (not normal VALUINST)
+OPNAME = {
+  0x0: "SALU",
+  0x1: "SMEM",
+  0x3: "JUMP",
+  0x4: "NEXT",
+  0x9: "MESSAGE",
+  0xb: "VALU",
+  0xd: "VALU",
+  0x10: "__END",
+  0x21: "VMEM_LOAD",
+  0x22: "VMEM_LOAD",
+  0x24: "VMEM_STORE",
+  0x25: "VMEM_STORE",
+  0x27: "VMEM_STORE",
+  0x28: "VMEM_STORE",
+  0x29: "LDS_LOAD",
+  0x2b: "LDS_STORE",
+  0x2e: "LDS_STORE",
+  0x50: "__???",
+  0x54: "__???",
+  0x5a: "__SIMD_LOAD",
+  0x5b: "__SIMD_LOAD",
+  0x5c: "__SIMD_STORE",
+  0x5e: "__SIMD_STORE",
+  0x5f: "__SIMD_STORE",
+  0x73: "VALU_CMPX",
+}
+
+ALUSRC = {
+  1: "SALU",
+  2: "VALU",
+}
+
+MEMSRC = {
+  2: "VMEM",
+  3: "__VMEM",
+}
+
 
 # these tables are from rocprof trace decoder
 # rocprof_trace_decoder_parse_data-0x11c6a0
@@ -197,10 +275,12 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       #fields.append(f"flag={flag:X}")
     case 0x02: # VMEMEXEC
       # 2 bit field (pipe is a guess)
-      fields.append(f"pipe={pkt>>6:X}")
+      src = pkt>>6
+      fields.append(f"src={src} [{MEMSRC.get(src, "")}]")
     case 0x03: # ALUEXEC
-      # 2 bit field (pipe is a guess)
-      fields.append(f"pipe={pkt>>6:X}")
+      # 2 bit field
+      src = pkt>>6
+      fields.append(f"src={src} [{ALUSRC.get(src, "")}]")
     case 0x04: # IMMEDIATE_4
       # 5 bit field (actually 4)
       wave = pkt >> 7
@@ -208,12 +288,12 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
     case 0x05: # IMMEDIATE_5
       # 16 bit field
       # 1 bit per wave
-      fields.append(f"mask={pkt>>8:16b}")
+      fields.append(f"mask={pkt>>8:016b}")
     case 0x6:
       # wave ready FFFF00
       # 16 bit field
       # 1 bit per wave
-      fields.append(f"mask={pkt>>8:16b}")
+      fields.append(f"mask={pkt>>8:016b}")
     case 0x0d:
       # 20 bit field
       fields.append(f"arg = {pkt>>8:X}")
@@ -277,29 +357,10 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       flag = (pkt >> 3) & 1
       flag2 = (pkt >> 7) & 1
       wave = (pkt >> 8) & 0x1F
-      hi8 = (pkt >> 13)
-      fields.append(f"wave={wave:x}")
+      op = (pkt >> 13)
       assert flag == 0 and flag2 == 0, "non 0 flags in 0x18"
-      #fields.append(f"flag={flag:x}")
-      #fields.append(f"flag2={flag2:x}")
-      # hi8 values:
-      #  SALU    =  0x0 / s_mov_b32
-      #  SMEM    =  0x1 / s_load_b*
-      #  NEXT    =  0x4 / s_cbranch_execz
-      #  MESSAGE =  0x9 / s_sendmsg
-      #  VALU    =  0xb / v_(exp,log)_f32_e32
-      #  VALU    =  0xd / v_lshlrev_b64
-      #  VMEM    = 0x21 / global_load_b32
-      #  VMEM    = 0x22 / global_load_b32
-      #  VMEM    = 0x24 / global_store_b32
-      #  VMEM    = 0x25 / global_store_b64
-      #  LDS     = 0x29 / ds_load_b128
-      #  LDS     = 0x2b / ds_store_b32
-      #  ????    = 0x5a / hidden global_load  instruction
-      #  ????    = 0x5b / hidden global_load  instruction
-      #  ????    = 0x5c / hidden global_store instruction
-      #  VALU    = 0x73 / v_cmpx_eq_u32_e32 (not normal VALUINST)
-      fields.append(f"hi8=0x{hi8:x}")
+      fields.append(f"wave={wave:x}")
+      fields.append(f"op=0x{op:02x} [{OPNAME.get(op, "")}]")
     case 0x14:
       subop   = (pkt >> 16) & 0xFFFF       # (short)(w >> 0x10)
       val32   = (pkt >> 32) & 0xFFFFFFFF   # (uint)(w >> 0x20)
@@ -450,12 +511,7 @@ def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -
     token_index += 1
 
     if verbose and (filter is None or opcode not in filter):
-      print(
-        f"{time:8d}+{time-last_printed_time:8d} : "
-        f"op={opcode:2x} "
-        f"{OPCODE_NAMES[opcode]:24s} "
-        f"{reg&reg_mask(opcode):16X} "
-        f"{note}")
+      print(f"{time:8d} +{time-last_printed_time:8d} : "+colored(f"{OPCODE_NAMES[opcode]:18s} ", OPCODE_COLORS.get(opcode, "white"))+f"{note}")
       last_printed_time = time
 
   # Optional summary at the end
