@@ -271,12 +271,16 @@ def limit_bufs(ctx:IndexingContext, root:UOp):
   device = device if isinstance(device, str) else device[0].split(":")[0]
   if not (MAX_BUFS:=getenv("MAX_KERNEL_BUFFERS", DEVICE_MAX_BUFS.get(device, 0))): return None
 
-  bufs: set[UOp] = set()
-  def gate_input(u:UOp):
-    # TODO: add cache to fix n^2
-    if is_load:=(u.op in {Ops.BUFFERIZE, Ops.AFTER, Ops.BUFFER, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_VAR}): bufs.add(u)
-    return not is_load
-  root.toposort(gate=gate_input)
+  if not hasattr(ctx,"buf_cache"): ctx.buf_cache:dict[UOp,set[UOp]] = {}
+  def get_bufs(u:UOp) -> set[UOp]:
+    if u in ctx.buf_cache: return ctx.buf_cache[u]
+    if u.op in {Ops.BUFFERIZE, Ops.AFTER, Ops.BUFFER, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_VAR}: ret = {u}
+    else:
+      ret = set()
+      for x in u.src: ret.update(get_bufs(x))
+    ctx.buf_cache[u] = ret
+    return ret
+  bufs = get_bufs(root)
 
   if len(bufs) > MAX_BUFS - 1: # NOTE: this -1 is for the output buffer
     srcs = []
