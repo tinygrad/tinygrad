@@ -91,6 +91,11 @@ class TestWhisper(unittest.TestCase):
     transcription = transcribe_waveform(self.model, self.enc, waveform)
     self.assertWER(transcription, TRANSCRIPTION_3, 0.085)
 
+  def test_transcribe_wer(self):
+    reference = TRANSCRIPTION_3
+    transcription = "Just lie back and relax. Is the level of pressure about right? Yes, it's fine. And I'd like conditioner please. Sure. I'm going to start the second lathering now. Would you like some Q-tips? How'd you like it cut? I'd like my bangs on the back trimmed, and I'd like the rest to stand out a bit and layered. Where would you like the part? On the left, right about here. Here. Have a look. What do you think? It's fine. Here's a thousand and eighty dollars. It's thirty and t extra for the rants. Here's your change and receipt. Thank you, and please come again. So how do you like it? It could have been worse, but you'll notice that I didn't ask her for her card. Hmm, yeah. Maybe you can try that place over there next time."
+    self.assertWER(transcription, reference, 0.079)
+
   @unittest.skipIf(CI or (Device.DEFAULT == "CPU" and CPU_LLVM), "too long for CI")
   def test_transcribe_long_no_batch(self):
     waveforms = [load_file_waveform(fetch(TEST_FILE_3_URL)), load_file_waveform(TEST_FILE_1)]
