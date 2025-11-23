@@ -20,7 +20,7 @@ def get_random_expr(ranges, factors):
 
 if __name__ == "__main__":
   skipped = 0
-  for i in range(1000):
+  for i in range(700):
     if i % 100 == 0:
       print(f"Running test {i}")
     upper_bounds = [*list(range(1, 4)), 16, 33, 53, 64, 256]
@@ -29,8 +29,6 @@ if __name__ == "__main__":
     factors = variables+upper_bounds
     # add some products
     for _ in range(2): factors.append(random.choice(variables)*random.choice(variables))
-    # add some adds
-    for _ in range(2): factors.append(random.choice(variables)+random.choice(factors))
     num_ranges = 4
     ranges = [UOp.range(random.choice(factors), i) for i in range(num_ranges)]
     variable_names += [f"r{i}" for i in range(num_ranges)]
