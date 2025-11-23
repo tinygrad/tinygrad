@@ -24,10 +24,13 @@ if __name__ == "__main__":
     if i % 100 == 0:
       print(f"Running test {i}")
     upper_bounds = [*list(range(1, 4)), 16, 30, 53, 64, 256]
-    variables = [UOp.variable(s, 1, random.choice(upper_bounds)) for s in ("i", "j", "k", "l")]
+    variable_names = ["i", "j", "k", "l"]
+    variables = [UOp.variable(s, 1, random.choice(upper_bounds)) for s in variable_names]
     factors = variables+upper_bounds
     for _ in range(5): factors.append(random.choice(factors)*random.choice(factors))
-    ranges = [UOp.range(random.choice(factors), i) for i in range(5)]
+    num_ranges = 5
+    ranges = [UOp.range(random.choice(factors), i) for i in range(num_ranges)]
+    variable_names += [f"r{i}" for i in range(num_ranges)]
     expr = get_random_expr(ranges, factors)
 
     with Context(CORRECT_DIVMOD_FOLDING=1):
@@ -46,7 +49,7 @@ if __name__ == "__main__":
     elif check == z3.sat:
       print(colored("simplify INCORRECT!", "red"))
       print(solver.model())
-      var_vals = {s:solver.model()[z] for s,z in zip(("i", "j", "k", "l", "r0", "r1", "r2", "r3", "r4"), z3_vars)}
+      var_vals = {s:solver.model()[z] for s,z in zip(variable_names, z3_vars)}
       print("reproduce with:")
       print("var_vals = ", var_vals)
       print("globals = var_vals|{'cdiv':cdiv,'cmod':cmod}")
