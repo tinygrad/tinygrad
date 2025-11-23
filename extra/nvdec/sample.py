@@ -1,72 +1,51 @@
 import pathlib, argparse, ctypes, numpy as np, cv2, itertools
-from extra.nvdec.nvdecdev import NVDECDevice, NVVideoQueue
 from extra.nvdec.hevc import NAL_UNIT_START_CODE, NAL_UNIT_START_CODE_SIZE, NAL_UNIT_HEADER_SIZE, HevcNalUnitType, BitReader, HevcSliceType
-from tinygrad.runtime.ops_nv import NVDevice, NVCommandQueue, nv_gpu
-from tinygrad.helpers import DEBUG
+from tinygrad.runtime.ops_nv import NVCommandQueue, NVVideoQueue, nv_gpu, BufferSpec
+from tinygrad.helpers import DEBUG, round_up
+from tinygrad import Tensor, dtypes, Device
 
 from extra.nv_gpu_driver.nv_ioctl import _dump_gpfifo, dump_struct_ext
 
-def get_tiled_offset(x, y, width):
-  GOB_WIDTH = 64
-  GOB_HEIGHT = 8
-  GOB_SIZE = 512
-  BLOCK_HEIGHT_GOBS = 2  
+def _addr_table(h, w):
+  GOB_W, GOB_H = 64, 8          # pixels
+  GOB_SIZE = 512            # bytes  (64 * 8 * 1-byte pixels)
+  BLOCK_H_GOBS = 2
 
-  gob_x = x // GOB_WIDTH
-  gob_y = y // GOB_HEIGHT
+  xs = Tensor.arange(w, dtype=dtypes.uint32).reshape(1, w)
+  ys = Tensor.arange(h, dtype=dtypes.uint32).reshape(h, 1)
 
-  super_block_y = gob_y // BLOCK_HEIGHT_GOBS
-  gob_y_in_block = gob_y % BLOCK_HEIGHT_GOBS
+  gob_x = xs // GOB_W
+  gob_y = ys // GOB_H
+  super_block_y  = gob_y // BLOCK_H_GOBS
+  gob_y_in_block = gob_y  % BLOCK_H_GOBS
+  stride_gobs    = w // GOB_W
 
-  stride_gobs = width // GOB_WIDTH
+  base = ((super_block_y * stride_gobs + gob_x) * BLOCK_H_GOBS + gob_y_in_block) * GOB_SIZE
 
-  gob_index = (super_block_y * stride_gobs + gob_x) * BLOCK_HEIGHT_GOBS + gob_y_in_block
-  base_offset = gob_index * GOB_SIZE
-
-  lx = x % GOB_WIDTH
-  ly = y % GOB_HEIGHT
-
-  swizzle_offset = (
-      (lx & 0x0F)       |  # Bits 0-3: Lower 4 bits of X
-      ((ly & 0x03) << 4)|  # Bits 4-5: Lower 2 bits of Y
-      ((lx & 0x10) << 2)|  # Bit 6:    Bit 4 of X
-      ((ly & 0x04) << 5)|  # Bit 7:    Bit 2 of Y
-      ((lx & 0x20) << 3)   # Bit 8:    Bit 5 of X
+  lx, ly = xs % GOB_W, ys % GOB_H
+  swiz = (
+      (lx & 0x0F) |
+      ((ly & 0x03) << 4) |
+      ((lx & 0x10) << 2) |
+      ((ly & 0x04) << 5) |
+      ((lx & 0x20) << 3)
   )
-
-  return base_offset + swizzle_offset
+  return (base + swiz).reshape(-1)
 
 def untile(luma_chroma_buf):
-  chroma_offset=0x1fe000 # 0x220000 # 0x1fe000
-  src_pitch=0x780 # 0x800
-  fw=0x780
-  lh=0x438
-  ch=0x21c
-
-  sz = fw * (lh + ch)
-  host_buffer = (ctypes.c_ubyte * sz)()
-  def copy_2d(height, width, src_offset, dst_offset):
-    for y in range(height):
-      for x in range(width):
-        src_idx = src_offset + get_tiled_offset(x, y, width)
-        dst_idx = dst_offset + y * width + x
-        host_buffer[dst_idx] = luma_chroma_buf[src_idx]
-
-  copy_2d(lh, fw, 0, 0) # luma
-  copy_2d(ch, fw, chroma_offset, lh * fw) # chroma
-
-  return bytes(host_buffer)
+  src = Tensor.from_blob(luma_chroma_buf.va_addr, (0x3fe000,), dtype=dtypes.uint8) # TODO: remove this
+  return bytes(src[_addr_table(1080, 1920)].reshape(-1).cat(src[_addr_table(540, 1920) + 0x1fe000].reshape(-1)).tolist())
 
 class NVVidCtx:
-  def __init__(self, dev:NVDECDevice):
+  def __init__(self, dev):
     self.dev = dev
-    self.buf_in_data = dev.allocator.alloc(0x3fc000)
-    self.luma_chroma_bufs = [dev.allocator.alloc(0x2fd000) for i in range(6)]
+    self.buf_in_data = dev.allocator.alloc(0x3fc000, BufferSpec(cpu_access=True))
+    self.luma_chroma_bufs = [dev.allocator.alloc(0x2fd000, BufferSpec(cpu_access=True)) for i in range(6)]
     self.coloc_buf = dev.allocator.alloc(0x400000)
     self.filter_buf = dev.allocator.alloc(0xa00000)
-    self.scaling_list = dev.allocator.alloc(0x1000)
-    self.tile_sizes = dev.allocator.alloc(0x1000)
-    self.status_buf = dev.allocator.alloc(0x1000)
+    self.scaling_list = dev.allocator.alloc(0x1000, BufferSpec(cpu_access=True))
+    self.tile_sizes = dev.allocator.alloc(0x1000, BufferSpec(cpu_access=True))
+    self.status_buf = dev.allocator.alloc(0x1000, BufferSpec(cpu_access=True))
     self.status_desc = nv_gpu.nvdec_status_s.from_address(self.status_buf.cpu_view().addr)
 
     self.tile_cnt = 63*16
@@ -76,7 +55,7 @@ class NVVidCtx:
     # 1E 00 11 00 00 00 00 00  00 00 00 00 00 00 00 00
     self.tile_sizes.cpu_view()[:4] = bytes([0x1e,0x0,0x11,0x0])
 
-    self.pic_desc = dev.allocator.alloc(0x1000)
+    self.pic_desc = dev.allocator.alloc(0x1000, BufferSpec(cpu_access=True))
 
 class NVVidDecoder:
   def __init__(self, dev):
@@ -119,9 +98,9 @@ class NVVidDecoder:
       self.desc.pic_height_in_luma_samples = reader.ue_v()
       self.desc.framestride[0] = self.desc.pic_width_in_luma_samples
       self.desc.framestride[1] = self.desc.pic_width_in_luma_samples
-      self.desc.colMvBuffersize=510
-      self.desc.HevcSaoBufferOffset=2584
-      self.desc.HevcBsdCtrlOffset=23256
+      self.desc.colMvBuffersize = (round_up(self.desc.pic_width_in_luma_samples, 64) * round_up(self.desc.pic_height_in_luma_samples, 64) // 16) // 256
+      # self.desc.HevcSaoBufferOffset=2584
+      # self.desc.HevcBsdCtrlOffset=23256
       if conformance_window_flag := reader.u(1):
         conf_win_left_offset = reader.ue_v()
         conf_win_right_offset = reader.ue_v()
@@ -212,7 +191,7 @@ class NVVidDecoder:
 
       self.dpb = [(self.desc.curr_pic_idx, 0, 0)]  # reset DPB on IDR
 
-      return self.ctx.luma_chroma_bufs[self.desc.curr_pic_idx].cpu_view()
+      return self.ctx.luma_chroma_bufs[self.desc.curr_pic_idx]
     elif nal_unit_type in {HevcNalUnitType.TRAIL_R, HevcNalUnitType.TRAIL_N}:
       global_pic_idx = next(self.pic_counter)
       
@@ -274,10 +253,10 @@ class NVVidDecoder:
       self.desc.sw_hdr_skip_length = skip_end - skip_start
       self.desc.loop_filter_across_tiles_enabled_flag = 1
       self.desc.v3.slice_ec_mv_type = 1
-      self.desc.v1.hevc_main10_444_ext.HevcFltAboveOffset = 23902
-      self.desc.v1.hevc_main10_444_ext.HevcSaoAboveOffset = 32130
-      self.desc.v1.hevc_main10_444_ext.log2MaxTransformSkipSize = 2
-      self.desc.v3.HevcSliceEdgeOffset = 32130
+      # self.desc.v1.hevc_main10_444_ext.HevcFltAboveOffset = 23902
+      # self.desc.v1.hevc_main10_444_ext.HevcSaoAboveOffset = 32130
+      # self.desc.v1.hevc_main10_444_ext.log2MaxTransformSkipSize = 2
+      # self.desc.v3.HevcSliceEdgeOffset = 32130
 
       for i in range(16): self.desc.RefDiffPicOrderCnts[i] = 0
       
@@ -314,7 +293,7 @@ class NVVidDecoder:
         # remove the oldest poc
         self.dpb.pop(0)
 
-      return self.ctx.luma_chroma_bufs[self.desc.curr_pic_idx].cpu_view()
+      return self.ctx.luma_chroma_bufs[self.desc.curr_pic_idx]
 
 def hevc_get_rbsp(dat:bytes, off=0) -> bytes:
   # 7.3.1.1 General NAL unit syntax
@@ -330,7 +309,7 @@ def hevc_get_rbsp(dat:bytes, off=0) -> bytes:
 
 def hevc_decode(dat:bytes, nal_unit_start=0):
   next_img_counter = 0
-  decoder = NVVidDecoder(NVDECDevice())
+  decoder = NVVidDecoder(Device.default)
 
   while nal_unit_start < len(dat):
     assert dat[nal_unit_start:nal_unit_start + NAL_UNIT_START_CODE_SIZE] == NAL_UNIT_START_CODE
