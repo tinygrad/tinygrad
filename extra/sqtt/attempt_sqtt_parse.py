@@ -37,6 +37,7 @@ OPCODE_COLORS = {
   0x8: "blue",
   0x9: "blue",
   0x6: "cyan",
+  0xb: "cyan",
 }
 
 OPCODE_NAMES = {
@@ -55,11 +56,14 @@ OPCODE_NAMES = {
   # gated by SQ_TT_TOKEN_EXCLUDE_WAVESTARTEND_SHIFT
   0x08: "WAVEEND",
   0x09: "WAVESTART",
+  # gated by SQ_TT_TOKEN_EXCLUDE_WAVEALLOC_SHIFT
+  0x0B: "WAVEALLOC",  # FFF00
 
   # gated by NOT SQ_TT_TOKEN_EXCLUDE_PERF_SHIFT
   0x0D: "PERF",
   # gated by SQ_TT_TOKEN_EXCLUDE_EVENT_SHIFT
   0x12: "EVENT",
+  0x13: "EVENT_BIG",  # FFFFF800
   # some gated by SQ_TT_TOKEN_EXCLUDE_REG_SHIFT, some always there. something is broken with the timing on this
   0x14: "REG",
   # gated by SQ_TT_TOKEN_EXCLUDE_INST_SHIFT
@@ -76,15 +80,13 @@ OPCODE_NAMES = {
   0x11: "TS_WAVE_STATE",     # almost pure time, has a small flag
 
   # not a good name, but seen and understood mostly
-  0x15: "PERFCOUNTER",            # small delta + 50-ish bits of snapshot
-  0x16: "TS_DELTA_OR_MARK",       # 36-bit long delta or 36-bit marker
+  0x15: "SNAPSHOT",          # small delta + 50-ish bits of snapshot
+  0x16: "TS_DELTA_OR_MARK",  # 36-bit long delta or 36-bit marker
 
   # packets we haven't seen / rarely see 0x0b
-  0x07: "TS_DELTA_S8_W3",           # shift=8,  width=3  (small delta)
+  0x07: "TS_DELTA_S8_W3_7",         # shift=8,  width=3  (small delta)
   0x0A: "TS_DELTA_S5_W2_A",         # shift=5,  width=2
-  0x0B: "TS_DELTA_S5_W3_A",         # shift=5,  width=3
   0x0C: "TS_DELTA_S5_W3_B",         # shift=5,  width=3 (different consumer)
-  0x13: "EVT_SMALL_GENERIC",        # same structural family as 0x08/0x12/0x19
 }
 
 #  SALU    =  0x0 / s_mov_b32
@@ -276,8 +278,7 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       flag = (pkt >> 6) & 1
       wave = pkt >> 7
       fields.append(f"wave={wave:x}")
-      assert flag == 0, "non 0 flag in 0x1"
-      #fields.append(f"flag={flag:X}")
+      if flag: fields.append("flag")
     case 0x02: # VMEMEXEC
       # 2 bit field (pipe is a guess)
       src = pkt>>6
@@ -365,8 +366,8 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       op = (pkt >> 13)
       fields.append(f"wave={wave:x}")
       fields.append(f"op=0x{op:02x} [{OPNAME.get(op, '')}]")
-      if flag1: fields.append(f"flag1")
-      if flag2: fields.append(f"flag2")
+      if flag1: fields.append("flag1")
+      if flag2: fields.append("flag2")
     case 0x14:
       subop   = (pkt >> 16) & 0xFFFF       # (short)(w >> 0x10)
       val32   = (pkt >> 32) & 0xFFFFFFFF   # (uint)(w >> 0x20)
@@ -431,7 +432,7 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       if layout == 4:
         fields.append(f"layout4_flag={flag4}")
     case _:
-      fields.append(f"& {reg_mask(opcode):X}")
+      fields.append(f"{pkt:X} & {reg_mask(opcode):X}")
   return ",".join(fields)
 
 FILTER_LEVEL = getenv("FILTER", 1)
