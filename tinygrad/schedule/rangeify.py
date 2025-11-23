@@ -192,7 +192,6 @@ def winowrite(ctx: IndexingContext, lhs: UOp, rhs: UOp, redu: UOp):
   other_loop_ranges_xhat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_x]
   kranges = [ctx.new_range(3, AxisType.LOOP) for _ in o_axes]
 
-  # Transform activations: Winograd F(4x4,3x3) with 6x6 input tiles, check bounds for partial tiles  # Clamp indices to prevent OOB (SPEC) - use valid index or max valid index, then zero out clamped values with mask
   clamped_subs = {}
   for add, tr, u, oa in zip(o_adds, tile_ranges, inner6, o_axes):
     idx = tr*4 + u
