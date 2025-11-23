@@ -352,7 +352,13 @@ def _copy_between_devices(src, dest, cast_dtype, to_device, non_blocking=False):
   if src.is_tiny and dest.is_tiny:
     src_t, dest_t = unwrap(src), unwrap(dest)
     if dest_t.uop.is_contiguous() or dest_t.uop.is_realized: src_t = src_t.contiguous()
-    _apply_inplace(dest_t, src_t.cast(cast_dtype).to(to_device))
+    val = src_t.cast(cast_dtype).to(to_device)
+    if val.shape != dest_t.shape:
+      if prod(val.shape) == prod(dest_t.shape):
+        val = val.reshape(dest_t.shape)
+      else:
+        raise RuntimeError(f"copy shape mismatch {val.shape} -> {dest_t.shape}")
+    _apply_inplace(dest_t, val)
   elif src.is_tiny and dest.is_cpu:
     dest.resize_(src.numel()).resize_(src.shape)
     dest.copy_(torch.from_numpy(unwrap(src).cast(cast_dtype).numpy()))
