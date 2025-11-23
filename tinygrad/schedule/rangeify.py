@@ -140,7 +140,8 @@ def winograd_kron(source, matrix, outer_axes, inner_axes, device, ctx):
   input_vals = {}
   for in_indices in product(*[range(inner_shape[d]) for d in range(len(inner_shape))]):
     # SCALAR indexing: [outer, inner] - OLD behavior
-    input_vals[in_indices] = source.index(*new_outer_axes, *[UOp.const(dtypes.index, i) for i in in_indices])
+    indexed = source.index(*new_outer_axes, *[UOp.const(dtypes.index, i) for i in in_indices])
+    input_vals[in_indices] = indexed
 
   # Build coefficient selectors using CMPNE+AND pattern (matches OLD)
   # For each dimension and input index, create selector that picks matrix[result_axis][in_idx]
@@ -252,7 +253,24 @@ def winowrite(ctx: IndexingContext, lhs: UOp, rhs: UOp, redu: UOp):
   kranges = [ctx.new_range(3, AxisType.LOOP) for _ in o_axes]
 
   # Transform activations: X_tiled → XHAT with SCALAR layout [cin, batch, tiles, 6×6]
+  # Winograd F(4x4,3x3) needs 6x6 input tiles, but partial tiles may access out-of-bounds positions
+  # For 3x3 kernel, input_size = output_size + 2, so check tr*4 + u <= output_vmax + 2
   X_tiled = act_like.substitute({add: tr*4 + u for add, tr, u in zip(o_adds, tile_ranges, inner6)})
+
+  # Apply boundary mask to zero out-of-bounds accesses
+  valid_masks = []
+  for tr, u, oa in zip(tile_ranges, inner6, o_axes):
+    tiled_idx = tr*4 + u  # Compute tiled index into INPUT space
+    # Input max = output max + (kernel_size - 1) = oa.vmax + 2 for 3x3 kernel
+    input_max = int(oa.vmax) + 2
+    valid_masks.append(UOp(Ops.CMPLT, dtypes.bool, (tiled_idx, UOp.const(dtypes.index, input_max + 1))))
+  # Combine masks: all dimensions must be valid (AND them together)
+  valid_mask = valid_masks[0]
+  for vm in valid_masks[1:]:
+    valid_mask = UOp(Ops.AND, dtypes.bool, (valid_mask, vm))
+  # Perform substitution, then apply validity mask to zero out-of-bounds accesses
+  X_tiled = UOp(Ops.WHERE, X_tiled.dtype, (valid_mask, X_tiled, UOp.const(X_tiled.dtype, 0.0)))
+
   XHAT = winograd_kron(X_tiled, winograd_Bt, other_reduces+other_loops_x+tile_ranges, inner6, device, ctx)
 
   # Transform weights: w_sub → GHAT with SCALAR layout [cin, cout, 6×6]
