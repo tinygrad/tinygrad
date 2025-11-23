@@ -15,13 +15,6 @@ from tinygrad.device import Device, ProfileDeviceEvent
 
 from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
 
-# TODO: should really check for AM driver / USB
-if not OSX:
-  def set_power(x): system(f"sudo /opt/rocm/bin/amd-smi set -l {x}")
-  @atexit.register
-  def reset_power(): set_power("auto")
-  set_power("stable_std")
-
 dev = Device["AMD"]
 
 @contextlib.contextmanager
@@ -32,9 +25,9 @@ def save_sqtt():
   yield sqtt
   events = dev.profile_events+[ProfileDeviceEvent("AMD", props=dev.device_props())]
 
-  rctx = decode(events)
-  assert len(rctx.inst_execs) > 0, "empty sqtt output"
-  sqtt.update(rctx.inst_execs)
+  #rctx = decode(events)
+  #assert len(rctx.inst_execs) > 0, "empty sqtt output"
+  #sqtt.update(rctx.inst_execs)
 
   for e in events:
     if isinstance(e, ProfileSQTTEvent):
@@ -48,7 +41,6 @@ template = """.text
 .type matmul,@function
 matmul:
   INSTRUCTION
-  s_endpgm
 
 .rodata
 .p2align 6
@@ -71,7 +63,7 @@ amdhsa.kernels:
     .private_segment_fixed_size: 0
     .wavefront_size: 32
     .sgpr_count: 8
-    .vgpr_count: 32
+    .vgpr_count: 8
     .max_flat_workgroup_size: 1024
     .kernarg_segment_align: 8
     .kernarg_segment_size: 8
@@ -86,21 +78,86 @@ amdhsa.kernels:
 .end_amdgpu_metadata
 """
 
-def run_asm(src):
-  NUM_WORKGROUPS = 1
+def run_asm(src, num_workgroups=1, num_waves=1):
   WAVE_SIZE = 32
-  NUM_WAVES = 1
   t = Tensor.empty(0x1000).realize()
   buf = t.uop.buffer.ensure_allocated()
   lib = dev.compiler.compile(template.replace("INSTRUCTION", '\n'.join(src)))
   dev.compiler.disassemble(lib)
   fxn = AMDProgram(dev, "matmul", lib)
-  fxn(buf._buf, global_size=(NUM_WORKGROUPS,1,1), local_size=(WAVE_SIZE*NUM_WAVES,1,1), wait=True)
+  fxn(buf._buf, global_size=(num_workgroups,1,1), local_size=(WAVE_SIZE*num_waves,1,1), wait=True)
 
 if __name__ == "__main__":
   with save_sqtt() as sqtt:
+    run_asm([
+      #"s_barrier",
+      #"s_nop 0",
+      #"s_nop 0",
+      #"s_nop 15",
+      #"s_nop 0",
+      #"s_nop 0",
+      "s_nop 0",
+      "s_nop 0",
+      "s_load_b64 s[0:1], s[0:1], null",
+      "s_waitcnt lgkmcnt(0)",
+      "s_nop 0",
+      "s_nop 0",
+      "s_nop 100",
+      "s_nop 100",
+      "s_nop 100",
+      "s_nop 0",
+      "s_nop 0",
+      "v_mov_b32_e32 v0, 0",
+      "v_mov_b32_e32 v0, 0",
+      "v_mov_b32_e32 v0, 0",
+      "v_mov_b32_e32 v0, 0",
+      "v_mov_b32_e32 v0, 0",
+      "v_mov_b32_e32 v0, 0",
+      "v_mov_b32_e32 v0, 0",
+      "v_mov_b32_e32 v0, 0",
+      "v_mov_b32_e32 v0, 0",
+      "v_mov_b32_e32 v0, 0",
+      "s_nop 0",
+      "s_nop 0",
+      "s_nop 100",
+      "s_nop 100",
+      "s_nop 100",
+      "s_nop 0",
+      "s_nop 0",
+      "global_load_b32 v1, v0, s[0:1]",
+      "global_load_b32 v2, v0, s[0:1]",
+      "global_load_b32 v3, v0, s[0:1]",
+      "global_load_b32 v4, v0, s[0:1]",
+      "global_load_b32 v1, v0, s[0:1]",
+      "global_load_b32 v1, v0, s[0:1]",
+      "global_load_b32 v1, v0, s[0:1]",
+      "global_load_b32 v1, v0, s[0:1]",
+      "global_load_b32 v1, v0, s[0:1]",
+      "global_load_b32 v1, v0, s[0:1]",
+      "global_load_b32 v1, v0, s[0:1]",
+      "global_load_b32 v1, v0, s[0:1]",
+      "global_load_b32 v1, v0, s[0:1]",
+      "global_load_b32 v1, v0, s[0:1]",
+      "global_load_b32 v1, v0, s[0:1]",
+      "s_nop 0",
+      "s_nop 0",
+      "s_nop 0",
+      "s_waitcnt vmcnt(0)",
+      "s_nop 100",
+      "s_nop 100",
+      "s_nop 100",
+      "s_nop 0",
+      "s_nop 0",
+      #"v_add_f32_e32 v1 v0 v0",
+      #"s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)",
+      "s_endpgm",
+    ], num_workgroups=1, num_waves=1)
+  exit(0)
+
+  with save_sqtt() as sqtt:
     #(Tensor.empty(16,16) @ Tensor.empty(16,16)).elu().realize()
-    Tensor.empty(1).elu().realize()
+    Tensor.empty(1, 64).sum(axis=1).realize()
+    #Tensor.empty(1).exp().realize()
   exit(0)
 
   with save_sqtt() as sqtt:

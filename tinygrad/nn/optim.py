@@ -2,7 +2,7 @@
 import itertools
 from tinygrad.helpers import dedup, flatten, getenv, unwrap, FUSE_OPTIM
 from tinygrad.tensor import Tensor
-from tinygrad.dtype import dtypes, least_upper_dtype
+from tinygrad.dtype import dtypes, least_upper_dtype, to_dtype
 
 class Optimizer:
   """
@@ -24,9 +24,9 @@ class Optimizer:
     if self.fused: self.pos_params = list(itertools.accumulate(self.params, lambda x,y: x+y.numel(), initial=0))
 
   def _new_optim_param(self) -> list[Tensor]:
-    param_dtype = getenv("OPTIM_DTYPE", "float32")
+    param_dtype = to_dtype(getenv("OPTIM_DTYPE", "float32"))
     if self.fused: return [Tensor.zeros(self.pos_params[-1], dtype=param_dtype, device=self.device, requires_grad=False).contiguous()]
-    return [Tensor.zeros(*t.shape, dtype=param_dtype, device=t.device, requires_grad=False).contiguous() for t in self.params]
+    return [Tensor.zeros_like(t, dtype=param_dtype, requires_grad=False).contiguous() for t in self.params]
 
   def zero_grad(self):
     """
