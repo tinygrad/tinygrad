@@ -210,14 +210,14 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
   peaks.append(peak)
   return struct.pack("<BIQ", 1, len(events), peak)+b"".join(events) if events else None
 
+def err(name:str, msg:str|None=None) -> None:
+  ctxs.append({"name":"ERROR", "steps":[create_step(name, ("render",len(ctxs),0), {"src":msg or traceback.format_exc()})]})
+
 def row_tuple(row:str) -> tuple[int, ...]: return tuple(int(x.split(":")[1]) for x in row.split())
 
 def load_sqtt(profile:list[ProfileEvent]) -> None:
   from tinygrad.runtime.ops_amd import ProfileSQTTEvent
   if not (sqtt_events:=[e for e in profile if isinstance(e, ProfileSQTTEvent)]): return None
-  def err(name:str, msg:str|None=None) -> None:
-    step = {"name":name, "data":{"src":msg or traceback.format_exc()}, "depth":0, "query":f"/render?ctx={len(ctxs)}&step=0&fmt=counters"}
-    return ctxs.append({"name":"Counters", "steps":[step]})
   try: from extra.sqtt.roc import decode
   except Exception: return err("DECODER IMPORT ISSUE")
   try: rctx = decode(profile)
