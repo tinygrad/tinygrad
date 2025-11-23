@@ -243,12 +243,11 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       # wave end, this is 20 bits (FFF00)
       flag7   = (pkt >> 8) & 1
       simd    = (pkt >> 9) & 3
-      slot4   = (pkt >> 11) & 0xF
+      cu      = ((pkt >> 11) & 0x7) | (flag7 << 3)
       wave    = (pkt >> 15) & 0x1f
-      assert flag7 == 0, "flag7 should be 0"
-      assert slot4 == 0, "slot4 should be 0"
       fields.append(f"wave={wave:x}")
       fields.append(f"simd={simd}")
+      fields.append(f"cu={cu}")
     case 0x9:
       # From case 9 (WAVESTART) in multiple consumers:
       #   flag7  = (w >> 7) & 1        (low bit of uVar41)
@@ -258,14 +257,13 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       #   idx_hi = (w >> 0xf) & 0x1f   (high index, layout>=4 path)
       #   id7    = (w >> 0x19) & 0x7f  (7-bit id)
       flag7   = (pkt >> 7) & 1
-      simd    = (pkt >> 8) & 2
-      slot3   = (pkt >> 10) & 0x7  # NOTE: this isn't 4!
+      simd    = (pkt >> 8) & 3
+      cu      = ((pkt >> 10) & 0x7) | (flag7 << 3)
       wave    = (pkt >> 13) & 0x1F
       id7     = (pkt >> 17)
-      assert flag7 == 0, "flag7 should be 0"
-      assert slot3 == 0, "slot3 should be 0"
       fields.append(f"wave={wave:x}")
       fields.append(f"simd={simd}")
+      fields.append(f"cu={cu}")
       fields.append(f"id7=0x{id7:x}")
     case 0x18:
       # FFF88 is the mask
