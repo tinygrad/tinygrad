@@ -22,7 +22,7 @@ from extra.sqtt.roc import decode, ProfileSQTTEvent
 
 # NOTE: INST runs before EXEC
 
-GOOD_OPCODE_NAMES = {
+OPCODE_NAMES = {
   # gated by SQ_TT_TOKEN_EXCLUDE_VALUINST_SHIFT (but others must be enabled for it to show)
   0x01: "VALUINST",
   # gated by SQ_TT_TOKEN_EXCLUDE_VMEMEXEC_SHIFT
@@ -40,40 +40,30 @@ GOOD_OPCODE_NAMES = {
   # gated by NOT SQ_TT_TOKEN_EXCLUDE_PERF_SHIFT
   0x0D: "PERF",
   # pure time
-  0x0F: "TS_DELTA_SHORT_PLUS4",     # short delta; ROCm adds +4 before accumulate
   0x10: "NOP",
   # gated by SQ_TT_TOKEN_EXCLUDE_EVENT_SHIFT
   0x12: "EVENT",
   # some gated by SQ_TT_TOKEN_EXCLUDE_REG_SHIFT, some always there. something is broken with the timing on this
   0x14: "REG",
-  # marker
-  0x16: "TS_DELTA36_OR_MARK",       # 36-bit long delta or 36-bit marker
   # this is the first packet
   0x17: "LAYOUT_MODE_HEADER",       # layout/mode/group + selectors A/B
   # gated by SQ_TT_TOKEN_EXCLUDE_INST_SHIFT
   0x18: "INST",
   # gated by SQ_TT_TOKEN_EXCLUDE_UTILCTR_SHIFT
   0x19: "UTILCTR",
-}
 
-OPCODE_NAMES = {
-  **GOOD_OPCODE_NAMES,
+  # not a good name, but seen and understood mostly
+  0x0F: "TS_DELTA_SHORT_PLUS4",     # short delta; ROCm adds +4 before accumulate
+  0x15: "PERFCOUNTER_SNAPSHOT",     # small delta + 50-ish bits of snapshot
+  0x16: "TS_DELTA36_OR_MARK",       # 36-bit long delta or 36-bit marker
+  0x11: "TS_WAVE_STATE_SAMPLE",     # wave stall/termination sample (byte at +10)
 
-  # ------------------------------------------------------------------------
-  # 0x07–0x0F: pure timestamp-ish deltas
-  # ------------------------------------------------------------------------
+  # packets we haven't seen / rarely see 0x0b
   0x07: "TS_DELTA_S8_W3",           # shift=8,  width=3  (small delta)
   0x0A: "TS_DELTA_S5_W2_A",         # shift=5,  width=2
   0x0B: "TS_DELTA_S5_W3_A",         # shift=5,  width=3
   0x0C: "TS_DELTA_S5_W3_B",         # shift=5,  width=3 (different consumer)
-
-  # ------------------------------------------------------------------------
-  # 0x10–0x19: timestamps, layout headers, events, perf
-  # ------------------------------------------------------------------------
-
-  0x11: "TS_WAVE_STATE_SAMPLE",     # wave stall/termination sample (byte at +10)
   0x13: "EVT_SMALL_GENERIC",        # same structural family as 0x08/0x12/0x19
-  0x15: "PERFCOUNTER_SNAPSHOT",     # small delta + 50-ish bits of snapshot
 }
 
 # these tables are from rocprof trace decoder
@@ -290,6 +280,16 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       fields.append(f"wave={wave:x}")
       fields.append(f"flag={flag:x}")
       fields.append(f"flag2={flag2:x}")
+      # hi8 values:
+      #  SALU    =  0x0 / s_mov_b32
+      #  SMEM    =  0x1 / s_load_b*
+      #  NEXT    =  0x4 / s_cbranch_execz
+      #  MESSAGE =  0x9 / s_sendmsg
+      #  VMEM    = 0x21 / global_load_b32
+      #  VMEM    = 0x24 / global_store_b32
+      #  LDS     = 0x29 / ds_load_b128
+      #  LDS     = 0x2b / ds_store_b32
+      #  VALU    = 0x73 / v_cmpx_eq_u32_e32 (not normal VALUINST)
       fields.append(f"hi8=0x{hi8:x}")
     case 0x14:
       subop   = (pkt >> 16) & 0xFFFF       # (short)(w >> 0x10)
