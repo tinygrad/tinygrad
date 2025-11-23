@@ -436,17 +436,18 @@ def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -
     # Append extra decoded fields into the note string
     note = decode_packet_fields(opcode, reg)
 
+    # this delta happens before the instruction
+    time += delta
+    token_index += 1
+
     if verbose and (filter is None or opcode not in filter):
       print(
-        f"{time:8d}+{delta+(time-last_printed_time):8d} : "
+        f"{time:8d}+{time-last_printed_time:8d} : "
         f"op={opcode:2x} "
         f"{OPCODE_NAMES[opcode]:24s} "
         f"{reg&reg_mask(opcode):16X} "
         f"{note}")
-      last_printed_time = time+delta
-
-    time += delta
-    token_index += 1
+      last_printed_time = time
 
   # Optional summary at the end
   print(f"# done: tokens={token_index:_}, final_time={time}, flags=0x{flags:02x}")
