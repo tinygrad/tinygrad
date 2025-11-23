@@ -225,20 +225,31 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
   if getenv("SQTT_PARSE"):
     from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
     for e in sqtt_events: parse_sqtt_print_packets(e.blob)
-  if not rctx.inst_execs: return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
+  if not any([rctx.inst_execs, rctx.occ_events]): return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
   steps:list[dict] = []
-  for name,disasm in rctx.disams.items():
-    units:dict[str, int] = {}
+  for name,disasm in rctx.disasms.items():
+    traced_units:set[str] = set()
     events:list[ProfileEvent] = []
+    # occupancy events
+    wave_start:dict[str, int] = {}
+    units:dict[str, int] = {}
+    for e in rctx.occ_events.get(name, []):
+      if (row:=f"SE:{e.se} CU:{e.cu} SIMD:{e.simd} WAVE:{e.wave_id}") not in units: units[row] = 0
+      if e.start: wave_start[row] = e.time
+      else:
+        units[row] += 1
+        events.append(ProfileRangeEvent(row, f"OCC N:{units[row]}", Decimal(wave_start.pop(row)), Decimal(e.time)))
     # wave events
+    traced_units.update(units)
+    units.clear()
     wave_insts:dict[str, dict] = {}
     for w in rctx.inst_execs.get(name, []):
       if (row:=f"SE:{w.se} CU:{w.cu} SIMD:{w.simd} WAVE:{w.wave_id}") not in units: units[row] = 0
       units[row] += 1
-      events.append(ProfileRangeEvent(row, f"N:{units[row]}", Decimal(w.begin_time), Decimal(w.end_time)))
+      events.append(ProfileRangeEvent(row, f"INST N:{units[row]}", Decimal(w.begin_time), Decimal(w.end_time)))
       wave_insts[f"{row} N:{units[row]}"] = {"wave":w, "disasm":disasm, "run_number":units[row]}
     # gather and sort all sqtt events for this kernel
-    events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+events
+    events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in traced_units]+events
     kernel = trace.keys[r].ret if (r:=ref_map.get(name)) else None
     steps.append(create_step(kernel.name if kernel is not None else name, ("/counters", len(ctxs), len(steps)),
                              {"value":get_profile(events, sort_fn=row_tuple), "content_type":"application/octet-stream"}, depth=1))
