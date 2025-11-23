@@ -360,7 +360,7 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       op = (pkt >> 13)
       assert flag == 0 and flag2 == 0, "non 0 flags in 0x18"
       fields.append(f"wave={wave:x}")
-      fields.append(f"op=0x{op:02x} [{OPNAME.get(op, "")}]")
+      fields.append(f"op=0x{op:02x} [{OPNAME.get(op, '')}]")
     case 0x14:
       subop   = (pkt >> 16) & 0xFFFF       # (short)(w >> 0x10)
       val32   = (pkt >> 32) & 0xFFFFFFFF   # (uint)(w >> 0x20)
