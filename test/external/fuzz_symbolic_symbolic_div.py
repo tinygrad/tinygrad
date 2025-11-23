@@ -14,8 +14,8 @@ def get_random_term(ranges, factors):
   return random.choice(ranges)*random.choice(factors)*random.choice([1, 1, 1, -1])
 
 def get_random_expr(ranges, factors):
-  num_terms = random.randint(2,5)
-  x = sum([get_random_term(ranges, factors) for _ in range(num_terms)])
+  num_terms = random.randint(2,4)
+  x = UOp.sum(*[get_random_term(ranges, factors) for _ in range(num_terms)])
   return x.alu(random.choice([Ops.IDIV, Ops.MOD]), x.ufix(random.choice(factors)*random.choice([1, 1, 1, -1])))
 
 if __name__ == "__main__":
@@ -23,12 +23,15 @@ if __name__ == "__main__":
   for i in range(1000):
     if i % 100 == 0:
       print(f"Running test {i}")
-    upper_bounds = [*list(range(1, 4)), 16, 30, 53, 64, 256]
-    variable_names = ["i", "j", "k", "l"]
+    upper_bounds = [*list(range(1, 4)), 16, 33, 53, 64, 256]
+    variable_names = ["i", "j", "k"]
     variables = [UOp.variable(s, 1, random.choice(upper_bounds)) for s in variable_names]
     factors = variables+upper_bounds
-    for _ in range(5): factors.append(random.choice(factors)*random.choice(factors))
-    num_ranges = 5
+    # add some products
+    for _ in range(2): factors.append(random.choice(variables)*random.choice(variables))
+    # add some adds
+    for _ in range(2): factors.append(random.choice(variables)+random.choice(factors))
+    num_ranges = 4
     ranges = [UOp.range(random.choice(factors), i) for i in range(num_ranges)]
     variable_names += [f"r{i}" for i in range(num_ranges)]
     expr = get_random_expr(ranges, factors)
