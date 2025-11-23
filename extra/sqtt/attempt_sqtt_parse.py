@@ -96,6 +96,7 @@ OPCODE_NAMES = {
 #  MESSAGE =  0x9 / s_sendmsg
 #  VALU    =  0xb / v_(exp,log)_f32_e32
 #  VALU    =  0xd / v_lshlrev_b64
+#  VALU    =  0xe / v_mad_u64_u32
 #  VMEM    = 0x21 / global_load_b32
 #  VMEM    = 0x22 / global_load_b32
 #  VMEM    = 0x24 / global_store_b32
@@ -117,11 +118,13 @@ OPNAME = {
   0x9: "MESSAGE",
   0xb: "VALU",
   0xd: "VALU",
+  0xe: "VALU",
   0x10: "__END",
   0x21: "VMEM_LOAD",
   0x22: "VMEM_LOAD",
   0x24: "VMEM_STORE",
   0x25: "VMEM_STORE",
+  0x26: "VMEM_STORE",
   0x27: "VMEM_STORE",
   0x28: "VMEM_STORE",
   0x29: "LDS_LOAD",
@@ -133,6 +136,7 @@ OPNAME = {
   0x5a: "__SIMD_VMEM_LOAD",
   0x5b: "__SIMD_VMEM_LOAD",
   0x5c: "__SIMD_VMEM_STORE",
+  0x5d: "__SIMD_VMEM_STORE",
   0x5e: "__SIMD_VMEM_STORE",
   0x5f: "__SIMD_VMEM_STORE",
   0x72: "SALU_OR",
