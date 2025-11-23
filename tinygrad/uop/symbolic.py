@@ -336,20 +336,34 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
       uop = simplified_s_uop.substitute(rev_dict).simplify()
   return uop
 
-def _valid_priority(v: UOp, valids:list[UOp]):
+def _valid_priority(v: UOp, valids:list[UOp], topo_cache:dict[UOp, dict[UOp, None]]) -> int:
   # we want valid that's in other valids' parents to be first, so it's more likely the other valids get simplified
-  return sum(-1 if (res:=parse_valid(v)) is not None and res[0] in other.toposort() else 0 for other in valids)
+  if (res:=parse_valid(v)) is None: return 0
+  expr = res[0]
+  cnt = 0
+  for other in valids:
+    if other not in topo_cache: topo_cache[other] = other.toposort()
+    if expr in topo_cache[other]: cnt -= 1
+  return cnt
 
 def simplify_valid(valid:UOp) -> UOp|None:
-  if (cached:=_simplify_valid_cache.get(valid)) is not None: return cached
-  if valid.op_in_backward_slice_with_self(Ops.INDEX): return None  # this should only be for indexing, skip if there's a INDEX
-  ret:list[UOp] = []
-  something_changed = False
+  if (cache_ret:=_simplify_valid_cache.get(valid)) is not None: return cache_ret
+  if valid.op_in_backward_slice_with_self(Ops.INDEX):
+    _simplify_valid_cache.set(valid, None, allow_none=True)
+    return None  # this should only be for indexing, skip if there's a INDEX
   valids = list(valid.split_uop(Ops.AND))
-  for stmt in sorted(valids, key=lambda v: _valid_priority(v, valids)):
-    ret.append(uop_given_valid(UOp.prod(*ret), stmt) if ret else stmt)
-    if ret[-1] is not stmt: something_changed = True
-  ret_uop = UOp.prod(*ret) if something_changed else None
+  # cache toposorts to avoid recomputation in sorting
+  topo_cache:dict[UOp, dict[UOp, None]] = {}
+  sorted_valids = sorted(valids, key=lambda v: _valid_priority(v, valids, topo_cache))
+  ret_list:list[UOp] = []
+  something_changed = False
+  current_prod:UOp|None = None
+  for stmt in sorted_valids:
+    new_stmt = uop_given_valid(current_prod, stmt) if current_prod is not None else stmt
+    ret_list.append(new_stmt)
+    if new_stmt is not stmt: something_changed = True
+    current_prod = UOp.prod(*ret_list)
+  ret_uop = current_prod if something_changed else None
   _simplify_valid_cache.set(valid, ret_uop, allow_none=True)
   return ret_uop
 
