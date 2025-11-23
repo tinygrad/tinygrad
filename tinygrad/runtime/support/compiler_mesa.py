@@ -97,8 +97,7 @@ def disas_adreno(lib:bytes, gpu_id=630):
       fst, snd = data64(ctypes.cast(instr, ctypes.POINTER(ctypes.c_uint64)).contents.value)
       print(f"{n:04} [{fst:08x}_{snd:08x}] ", end="", flush=True, file=tf)
 
-    fp = ctypes.cast(ctypes.CDLL(None).fdopen(tf.fileno(), b"w"), ctypes.POINTER(mesa.struct__IO_FILE))
-    ctypes.CDLL(None).setlinebuf(fp)
+    ctypes.CDLL(None).setlinebuf(fp:=ctypes.cast(ctypes.CDLL(None).fdopen(tf.fileno(), b"w"), ctypes.POINTER(mesa.struct__IO_FILE)))
     mesa.ir3_isa_disasm(lib, len(lib), fp, mesa.struct_isa_decode_options(gpu_id, True, 0, True, pre_instr_cb=hd))
     tf.seek(0)
     print(tf.read())
