@@ -120,104 +120,44 @@ winograd_G = [[1/4, 0, 0], [-1/6, -1/6, -1/6], [-1/6, 1/6, -1/6], [1/24, 1/12, 1
 winograd_Bt = [[4, 0, -5, 0, 1, 0], [0, -4, -4, 1, 1, 0], [0, 4, -4, -1, 1, 0], [0, -2, -1, 2, 1, 0], [0, 2, -1, -2, 1, 0], [0, 4, 0, -5, 0, 1]]
 winograd_At = [[1, 1, 1, 1, 1, 0], [0, 1, -1, 2, -2, 0], [0, 1, 1, 4, 4, 0], [0, 1, -1, 8, -8, 1]]
 
-def winograd_kron(source, matrix, outer_axes, inner_axes, device, ctx, spatial_bounds=None):
+def _build_matrix_selector(axis, matrix_col, dtype):
+  """Build selector that picks matrix_col[axis] at runtime using WHERE cascade"""
+  terms = []
+  for k, coef in enumerate(matrix_col):
+    if abs(coef) < 1e-10: continue
+    cond = (UOp(Ops.CMPLT, dtypes.bool, (axis, UOp.const(dtypes.index, 1))) if k == 0 else
+            UOp(Ops.AND, dtypes.bool, (UOp(Ops.CMPNE, dtypes.bool,
+                (UOp(Ops.CMPLT, dtypes.bool, (axis, UOp.const(dtypes.index, k))), UOp.const(dtypes.bool, True))),
+                UOp(Ops.CMPLT, dtypes.bool, (axis, UOp.const(dtypes.index, k+1))))))
+    terms.append(cond.where(UOp.const(dtype, coef), UOp.const(dtype, 0.0)))
+  return sum(terms) if terms else UOp.const(dtype, 0.0)
+
+def winograd_kron(source, matrix, outer_axes, inner_axes, device, ctx):
+  from itertools import product
+  import functools, operator
   inner_shape = [ax.vmax+1 for ax in inner_axes]
   result_axes = [ctx.new_range(len(matrix), AxisType.LOOP) for _ in range(len(inner_shape))]
-
-  # Scalar layout: use fresh loop axes for outer dimensions
   new_outer_axes = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in outer_axes]
 
-  # Force bufferization of unbufferized sources to prevent inlining
-  # Bufferize with SCALAR layout [outer, inner] - OLD behavior
+  # Bufferize source to prevent inlining
   if source.op not in {Ops.BUFFER, Ops.BUFFERIZE}:
     source = source.bufferize(*(tuple(outer_axes) + tuple(inner_axes)), arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
 
-  # OLD PATTERN: Build coefficient selectors with shared conditions
-  # Key insight: Create conditions ONCE, REUSE across all input positions, use ADD pattern
-  from itertools import product
-
-  # First, load all input values (shared across all outputs)
+  # Load input values
   input_vals = {}
   for in_indices in product(*[range(inner_shape[d]) for d in range(len(inner_shape))]):
-    # SCALAR indexing: [outer, inner] - OLD behavior
-    indexed = source.index(*new_outer_axes, *[UOp.const(dtypes.index, i) for i in in_indices])
+    input_vals[in_indices] = source.index(*new_outer_axes, *[UOp.const(dtypes.index, i) for i in in_indices])
 
-    # Apply spatial bounds checking if provided (for SPEC verification)
-    if spatial_bounds is not None:
-      num_spatial = len(spatial_bounds)
-      # The last num_spatial outer axes are tile ranges that need bounds checking
-      tile_axes_new = new_outer_axes[-num_spatial:]
-      # Check if tile*4 + inner_idx <= input_max for each spatial dimension
-      valid_masks = []
-      for i, input_max in enumerate(spatial_bounds):
-        tiled_pos = tile_axes_new[i] * 4 + in_indices[-num_spatial + i]
-        valid_masks.append(UOp(Ops.CMPLT, dtypes.bool, (tiled_pos, UOp.const(dtypes.index, input_max + 1))))
-      # Combine masks with AND
-      valid_mask = valid_masks[0]
-      for vm in valid_masks[1:]:
-        valid_mask = UOp(Ops.AND, dtypes.bool, (valid_mask, vm))
-      # Gate the indexed value with WHERE
-      indexed = UOp(Ops.WHERE, indexed.dtype, (valid_mask, indexed, UOp.const(indexed.dtype, 0.0)))
-
-    input_vals[in_indices] = indexed
-
-  # Build coefficient selectors using CMPNE+AND pattern (matches OLD)
-  # For each dimension and input index, create selector that picks matrix[result_axis][in_idx]
-  # This creates conditions ONCE that are REUSED across all combinations
-  # Use source buffer's dtype for numerical consistency across platforms
+  # Build matrix coefficient selectors (reused across all input combinations)
   compute_dtype = source.dtype
-  matrix_coefs = []
-  for dim in range(len(inner_shape)):
-    dim_coefs = []
-    for in_idx in range(inner_shape[dim]):
-      # Build selector using OLD's ADD pattern: sum of WHERE(axis==K, matrix[K][in_idx], 0)
-      # Each WHERE uses CMPNE+AND to test axis == K
-      selector_terms = []
+  matrix_coefs = [[_build_matrix_selector(result_axes[dim], [matrix[k][i] for k in range(len(matrix))], compute_dtype)
+                   for i in range(inner_shape[dim])] for dim in range(len(inner_shape))]
 
-      for out_idx in range(len(matrix)):
-        # Create condition: result_axes[dim] == out_idx
-        if out_idx == 0:
-          # Special case: axis < 1 means axis == 0
-          cond = UOp(Ops.CMPLT, dtypes.bool, (result_axes[dim], UOp.const(dtypes.index, 1)))
-        else:
-          # axis == out_idx: (axis >= out_idx) AND (axis < out_idx+1)
-          # axis >= out_idx: CMPNE(axis < out_idx, True) - negation pattern from OLD
-          cond_ge = UOp(Ops.CMPNE, dtypes.bool,
-                       (UOp(Ops.CMPLT, dtypes.bool, (result_axes[dim], UOp.const(dtypes.index, out_idx))),
-                        UOp.const(dtypes.bool, True)))
-          cond_lt = UOp(Ops.CMPLT, dtypes.bool, (result_axes[dim], UOp.const(dtypes.index, out_idx + 1)))
-          cond = UOp(Ops.AND, dtypes.bool, (cond_ge, cond_lt))
+  # Compute Kronecker product: multiply inputs by products of matrix coefficients
+  terms = [functools.reduce(operator.mul, [matrix_coefs[dim][in_indices[dim]] for dim in range(len(inner_shape))]) * input_vals[in_indices]
+           for in_indices in product(*[range(inner_shape[d]) for d in range(len(inner_shape))])]
 
-        # WHERE(axis == out_idx, matrix[out_idx][in_idx], 0.0)
-        matrix_val = matrix[out_idx][in_idx]
-        if abs(matrix_val) > 1e-10:  # Skip zero coefficients
-          where_result = UOp(Ops.WHERE, compute_dtype,
-                            (cond, UOp.const(compute_dtype, matrix_val), UOp.const(compute_dtype, 0.0)))
-          selector_terms.append(where_result)
-
-      # ADD all WHERE results (OLD pattern)
-      selector = sum(selector_terms) if selector_terms else UOp.const(compute_dtype, 0.0)
-      dim_coefs.append(selector)
-    matrix_coefs.append(dim_coefs)
-
-  # Build final sum: for each input position, multiply by product of matrix coefficients
-  # The matrix_coefs are REUSED here - this is where OLD gets efficiency!
-  terms = []
-  for in_indices in product(*[range(inner_shape[d]) for d in range(len(inner_shape))]):
-    input_val = input_vals[in_indices]
-
-    # Compute matrix factor as product of selected coefficients from each dimension
-    # These selectors are SHARED across all input combinations!
-    matrix_factor = matrix_coefs[0][in_indices[0]]
-    for dim in range(1, len(inner_shape)):
-      matrix_factor = matrix_factor * matrix_coefs[dim][in_indices[dim]]
-
-    terms.append(matrix_factor * input_val)
-
-  result_expr = sum(terms)
-
-  # SCALAR output layout: [outer, result] - OLD behavior
-  return result_expr.bufferize(*(tuple(new_outer_axes)+tuple(result_axes)), arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
+  return sum(terms).bufferize(*(tuple(new_outer_axes)+tuple(result_axes)), arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
 
 def winoguard(lhs: UOp, rhs: UOp, redu: UOp):
   three = {ax for ax in redu.src[1:] if int(ax.vmax+1) == 3}
@@ -248,53 +188,35 @@ def winowrite(ctx: IndexingContext, lhs: UOp, rhs: UOp, redu: UOp):
   other_loops_x = [ax for ax in act_like.ranges if ax not in reduce_ranges+o_axes]
   other_loops_w = [ax for ax in w_like.ranges if ax not in reduce_ranges]
 
-  # REORDER axis creation to match OLD winograd axis mapping:
-  # OLD: axis1=6, axis2=6, axis3=2, axis4=8, axis5=2, axis6=2
-  # Need to interleave axis creation to get: inner6_1[0,1], tile[0], ghat, tile[1], xhat
-
-  # Create inner6 and inner6_1 (these go to intermediate kernels)
-  inner6 = [ctx.new_range(6, AxisType.LOOP) for _ in o_axes]
-  inner6_1 = [ctx.new_range(6, AxisType.LOOP) for _ in o_axes]
-
-  # Create tile_ranges for intermediate kernels
-  tile_ranges = [ctx.new_range((int(b.vmax+1)+3)//4, AxisType.LOOP) for b in o_axes]
-
-  # Create tile_ranges1, ghat, xhat in the order that matches OLD:
-  # axis3=tile[0], axis4=ghat, axis5=tile[1], axis6=xhat
-  tile_ranges1 = []
-  tile_ranges1.append(ctx.new_range((int(o_axes[0].vmax+1)+3)//4, AxisType.LOOP))  # First tile axis
-  other_loop_ranges_ghat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_w]  # cout
-  if len(o_axes) > 1:
-    tile_ranges1.append(ctx.new_range((int(o_axes[1].vmax+1)+3)//4, AxisType.LOOP))  # Second tile axis
-  other_loop_ranges_xhat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_x]  # batch
-
+  # Axis creation with specific ordering to match OLD winograd axis mapping
+  nt = lambda ax: (int(ax.vmax+1)+3)//4  # num_tiles helper
+  inner6, inner6_1 = [[ctx.new_range(6, AxisType.LOOP) for _ in o_axes] for _ in range(2)]
+  tile_ranges = [ctx.new_range(nt(ax), AxisType.LOOP) for ax in o_axes]
+  tile_ranges1 = [ctx.new_range(nt(o_axes[0]), AxisType.LOOP)]
+  other_loop_ranges_ghat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_w]
+  if len(o_axes) > 1: tile_ranges1.append(ctx.new_range(nt(o_axes[1]), AxisType.LOOP))
+  other_loop_ranges_xhat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_x]
   kranges = [ctx.new_range(3, AxisType.LOOP) for _ in o_axes]
 
-  # Transform activations: X_tiled → XHAT with SCALAR layout [cin, batch, tiles, 6×6]
-  # Winograd F(4x4,3x3) needs 6x6 input tiles, but partial tiles may access out-of-bounds positions
-  # For 3x3 kernel, input_size = output_size + 2, so need to check tr*4 + u <= output_vmax + 2
+  # Transform activations: Winograd F(4x4,3x3) with 6x6 input tiles, check bounds for partial tiles
+  # Apply boundary mask BEFORE winograd_kron to prevent SPEC from detecting OOB INDEX operations
+  import functools, operator
   X_tiled = act_like.substitute({add: tr*4 + u for add, tr, u in zip(o_adds, tile_ranges, inner6)})
+  valid_mask = functools.reduce(operator.and_, [UOp(Ops.CMPLT, dtypes.bool,
+    (tr*4 + u, UOp.const(dtypes.index, int(oa.vmax) + 3))) for tr, u, oa in zip(tile_ranges, inner6, o_axes)],
+    UOp.const(dtypes.bool, True))
+  X_tiled = valid_mask.where(X_tiled, UOp.const(X_tiled.dtype, 0.0))
+  XHAT = winograd_kron(X_tiled, winograd_Bt, other_reduces+other_loops_x+tile_ranges, inner6, device, ctx)
 
-  # Compute spatial bounds for SPEC verification (input_max = output_max + kernel_size - 1)
-  spatial_bounds = [int(oa.vmax) + 2 for oa in o_axes]  # +2 for 3x3 kernel
+  # Transform weights
+  GHAT = winograd_kron(w_like.substitute(dict(zip(k_axes, kranges))), winograd_G, other_reduces+other_loops_w, kranges, device, ctx)
 
-  XHAT = winograd_kron(X_tiled, winograd_Bt, other_reduces+other_loops_x+tile_ranges, inner6, device, ctx,
-                       spatial_bounds=spatial_bounds)
-
-  # Transform weights: w_sub → GHAT with SCALAR layout [cin, cout, 6×6]
-  w_sub = w_like.substitute(dict(zip(k_axes, kranges)))
-  GHAT = winograd_kron(w_sub, winograd_G, other_reduces+other_loops_w, kranges, device, ctx)
-
-  # Hadamard multiply and reduce over cin - SCALAR indexing [outer, inner]
-  mhat_redu = (GHAT.index(*other_reduces, *other_loop_ranges_ghat, *inner6_1) *
-               XHAT.index(*other_reduces, *other_loop_ranges_xhat, *tile_ranges1, *inner6_1)).reduce(*other_reduces, arg=Ops.ADD, dtype=redu.dtype)
-
-  # SCALAR layout: reorder to match OLD memory strides [batch, tiles, cout, inner6]
-  MHAT = mhat_redu.bufferize(*(other_loop_ranges_xhat+tile_ranges1+other_loop_ranges_ghat+inner6_1),
-                              arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
-
-  # Output transform: MHAT[batch, tiles, cout, inner6] → result[batch, tiles, cout, 4×4]
-  # SCALAR indexing to match MHAT layout
+  # Hadamard multiply, reduce, and output transform
+  MHAT = ((GHAT.index(*other_reduces, *other_loop_ranges_ghat, *inner6_1) *
+           XHAT.index(*other_reduces, *other_loop_ranges_xhat, *tile_ranges1, *inner6_1))
+          .reduce(*other_reduces, arg=Ops.ADD, dtype=redu.dtype)
+          .bufferize(*(other_loop_ranges_xhat+tile_ranges1+other_loop_ranges_ghat+inner6_1),
+                     arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL)))
   return winograd_kron(MHAT, winograd_At, other_loop_ranges_xhat+tile_ranges1+other_loop_ranges_ghat, inner6_1, device, ctx)\
     .index(*other_loops_x, *[ox//4 for ox in o_axes], *other_loops_w, *[ox%4 for ox in o_axes])
 
