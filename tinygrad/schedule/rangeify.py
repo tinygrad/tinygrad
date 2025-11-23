@@ -193,11 +193,12 @@ def winowrite(ctx: IndexingContext, lhs: UOp, rhs: UOp, redu: UOp):
   kranges = [ctx.new_range(3, AxisType.LOOP) for _ in o_axes]
 
   # Transform activations: Winograd F(4x4,3x3) with 6x6 input tiles, check bounds for partial tiles
-  # Apply boundary mask BEFORE winograd_kron to prevent SPEC from detecting OOB INDEX operations
+  # Apply boundary mask and bufferize BEFORE winograd_kron to prevent SPEC from seeing OOB INDEX operations
   X_tiled = act_like.substitute({add: tr*4 + u for add, tr, u in zip(o_adds, tile_ranges, inner6)})
   valid_mask = functools.reduce(operator.and_, [(tr*4 + u) < (int(oa.vmax) + 3) for tr, u, oa in zip(tile_ranges, inner6, o_axes)],
     UOp.const(dtypes.bool, True))
-  X_tiled = valid_mask.where(X_tiled, UOp.const(X_tiled.dtype, 0.0))
+  X_tiled = valid_mask.where(X_tiled, UOp.const(X_tiled.dtype, 0.0)).bufferize(
+    *(other_reduces+other_loops_x+tile_ranges+inner6), arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
   XHAT = winograd_kron(X_tiled, winograd_Bt, other_reduces+other_loops_x+tile_ranges, inner6, device, ctx)
 
   # Transform weights
