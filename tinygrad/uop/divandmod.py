@@ -128,9 +128,9 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
 
   if not quo: return None
   # Optimization: use UOp.sum instead of sum() to avoid intermediate additions
-  new_x = UOp.sum(*rem) + x.const_like(0)
+  new_x = x.const_like(0).sum(*rem)
   if new_x.vmin<0: return None
-  return new_x%y if d_op is Ops.MOD else new_x//y+UOp.sum(*quo)
+  return new_x%y if d_op is Ops.MOD else new_x//y+x.const_like(0).sum(*quo)
 
 div_and_mod_symbolic = PatternMatcher([
   # ** 1. Fast Inline Rules **
