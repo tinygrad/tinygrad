@@ -211,7 +211,7 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
   return struct.pack("<BIQ", 1, len(events), peak)+b"".join(events) if events else None
 
 def err(name:str, msg:str|None=None) -> None:
-  ctxs.append({"name":"ERROR", "steps":[create_step(name, ("render",len(ctxs),0), {"src":msg or traceback.format_exc()})]})
+  ctxs.append({"name":"ERR", "steps":[create_step(name, ("render",len(ctxs),0), {"src":msg or traceback.format_exc()})]})
 
 def row_tuple(row:str) -> tuple[int, ...]: return tuple(int(x.split(":")[1]) for x in row.split())
 
@@ -248,6 +248,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
       units[row] += 1
       events.append(ProfileRangeEvent(row, f"INST N:{units[row]}", Decimal(w.begin_time), Decimal(w.end_time)))
       wave_insts[f"{row} N:{units[row]}"] = {"wave":w, "disasm":disasm, "run_number":units[row]}
+    if not events: continue
     # gather and sort all sqtt events for this kernel
     events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in traced_units]+events
     kernel = trace.keys[r].ret if (r:=ref_map.get(name)) else None
