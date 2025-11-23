@@ -1,5 +1,5 @@
 import itertools
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start, ImageDType
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute_range, range_start, ImageDType
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import partition, dedup
 from tinygrad.dtype import dtypes
@@ -30,7 +30,7 @@ def simplify_merge_adjacent(u:UOp) -> UOp|None:
     # skip trivial cases: merging with size 1 never helps
     if (s0.op is Ops.CONST and s0.arg == 1) or (s1.op is Ops.CONST and s1.arg == 1): continue
     new_range = r0.replace(src=(s0*s1,))
-    nidx = graph_rewrite(u, _substitute+symbolic+pm_flatten_range, ctx={r0:new_range//s1, r1:new_range%s1},
+    nidx = graph_rewrite(u, _substitute_range+symbolic+pm_flatten_range, ctx={r0:new_range//s1, r1:new_range%s1},
                          name=f"check_merge_{r0.arg[0]}_{r1.arg[0]}")
     if (nidx_divmod:=count_divmod(nidx)) <= u_divmod_count:
       u, u_divmod_count = nidx, nidx_divmod
