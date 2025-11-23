@@ -2,8 +2,8 @@ from __future__ import annotations
 import math, itertools
 from collections import defaultdict
 from typing import cast, Final
-from tinygrad.uop.ops import Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, GroupOp, _remove_all_tags
-from tinygrad.uop.ops import axis_letters, axis_colors, axis_to_pos
+from tinygrad.uop.ops import Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, GroupOp
+from tinygrad.uop.ops import _remove_all_tags, _substitute_range, _substitute_reduce, axis_letters, axis_colors, axis_to_pos
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes, ImageDType
 from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element, flatten
@@ -95,7 +95,8 @@ class Scheduler:
     new_rng = UOp.range(amount, next(self.opt_range), new_type) if input_new_rng is None else input_new_rng
     replaced_rng = rng.replace(src=(UOp.const(dtypes.int, old_sz),))
     sub_axis = (new_rng * old_sz + replaced_rng) if top else (replaced_rng * amount + new_rng)
-    self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {rng.arg[:-1]} {amount} {str(new_type).split('.')[1].lower()}")
+    self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {rng.arg[:-1]} {amount} {str(new_type).split('.')[1].lower()}",
+                                    extra_pm=_substitute_range)
     return replaced_rng, new_rng
 
   def ranges_of(self, *axis_type:AxisType) -> list[UOp]: return [r for r in self.rngs if r.arg[-1] in axis_type]
@@ -243,7 +244,7 @@ class Scheduler:
           axes = list(axis_choices[axis])
 
           # tag the reduceop
-          self.ast = self.ast.substitute({reduceop: reduceop.replace(tag="TC")})
+          self.ast = self.ast.substitute({reduceop: reduceop.replace(tag="TC")}, extra_pm=_substitute_reduce)
 
           # do optimizations and save the ranges
           try:
@@ -303,7 +304,7 @@ class Scheduler:
             # preserve extra reduces
             reduce_ranges = [x for x in UOp.sink(*reduceop.src[1:]).toposort() if x.op is Ops.RANGE and x.arg[0] not in tc_reduce_axes]
             if len(reduce_ranges): tc_uop = UOp(Ops.REDUCE, tc_uop.dtype, (tc_uop,)+tuple(reduce_ranges), Ops.ADD)
-            self.ast = self.ast.substitute({reduceop: tc_uop})
+            self.ast = self.ast.substitute({reduceop: tc_uop}, extra_pm=_substitute_reduce)
           return axes
     return None
 

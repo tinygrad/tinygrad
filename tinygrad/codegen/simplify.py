@@ -154,7 +154,7 @@ def cut_store_range(ctx, store:UOp, r:UOp):
   cuts = sorted(dedup([0] + cuts + [r.src[0].arg]))
   ranges = [UOp.range((end-start), *(r.arg[0:-1]+(i,r.arg[-1]))) for i,(start,end) in enumerate(zip(cuts[:-1], cuts[1:]))]
 
-  return UOp.group(*[store.substitute({r: new_r+start}).end(new_r) for new_r, start in zip(ranges, cuts[:-1])])
+  return UOp.group(*[store.substitute({r: new_r+start}, extra_pm=_substitute_range).end(new_r) for new_r, start in zip(ranges, cuts[:-1])])
 
 pm_split_store = pm_flatten_range+PatternMatcher([
   (UPat(Ops.END, src=(UPat(Ops.STORE, name="store"), UPat.var("r"))), cut_store_range),
