@@ -39,24 +39,26 @@ OPCODE_NAMES = {
   0x09: "WAVESTART",
   # gated by NOT SQ_TT_TOKEN_EXCLUDE_PERF_SHIFT
   0x0D: "PERF",
-  # pure time
-  0x10: "NOP",
   # gated by SQ_TT_TOKEN_EXCLUDE_EVENT_SHIFT
   0x12: "EVENT",
   # some gated by SQ_TT_TOKEN_EXCLUDE_REG_SHIFT, some always there. something is broken with the timing on this
   0x14: "REG",
-  # this is the first packet
-  0x17: "LAYOUT_MODE_HEADER",       # layout/mode/group + selectors A/B
   # gated by SQ_TT_TOKEN_EXCLUDE_INST_SHIFT
   0x18: "INST",
   # gated by SQ_TT_TOKEN_EXCLUDE_UTILCTR_SHIFT
   0x19: "UTILCTR",
 
+  # this is the first (8 byte) packet in the bitstream
+  0x17: "LAYOUT_MODE_HEADER",       # layout/mode/group + selectors A/B (reversed)
+
+  # pure time (no extra bits)
+  0x0F: "TS_DELTA_SHORT_PLUS4",
+  0x10: "NOP",
+  0x11: "TS_WAVE_STATE_SAMPLE",     # almost pure time, has a small flag
+
   # not a good name, but seen and understood mostly
-  0x0F: "TS_DELTA_SHORT_PLUS4",     # short delta; ROCm adds +4 before accumulate
   0x15: "PERFCOUNTER_SNAPSHOT",     # small delta + 50-ish bits of snapshot
   0x16: "TS_DELTA36_OR_MARK",       # 36-bit long delta or 36-bit marker
-  0x11: "TS_WAVE_STATE_SAMPLE",     # wave stall/termination sample (byte at +10)
 
   # packets we haven't seen / rarely see 0x0b
   0x07: "TS_DELTA_S8_W3",           # shift=8,  width=3  (small delta)
@@ -370,11 +372,11 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
 FILTER_LEVEL = getenv("FILTER", 1)
 
 DEFAULT_FILTER = tuple()
-# NOP + pure time
-if FILTER_LEVEL >= 0: DEFAULT_FILTER += (0x10, 0xf)
+# NOP + pure time + "sample"
+if FILTER_LEVEL >= 0: DEFAULT_FILTER += (0x10, 0xf, 0x11)
 # reg + event + sample + marker
 # TODO: events are probably good
-if FILTER_LEVEL >= 1: DEFAULT_FILTER += (0x11, 0x14, 0x12, 0x16)
+if FILTER_LEVEL >= 1: DEFAULT_FILTER += (0x14, 0x12, 0x16)
 # instruction runs
 if FILTER_LEVEL >= 2: DEFAULT_FILTER += (0x02, 0x03)
 # instructions dispatch (inst, valuinst, immed)
