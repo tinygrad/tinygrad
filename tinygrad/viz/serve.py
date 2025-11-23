@@ -227,17 +227,17 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     for e in sqtt_events: parse_sqtt_print_packets(e.blob)
   if not rctx.inst_execs: return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
   steps:list[dict] = []
-  for name,waves in rctx.inst_execs.items():
-    disasm = rctx.disasms[name]
+  for name,disasm in rctx.disasms.items():
     units:dict[str, int] = {}
     events:list[ProfileEvent] = []
     wave_execs:dict[str, dict] = {}
-    for w in waves:
+    for w in rctx.inst_execs.get(name, []):
       if (row:=f"SE:{w.se} CU:{w.cu} SIMD:{w.simd} WAVE:{w.wave_id}") not in units: units[row] = 0
       units[row] += 1
       events.append(ProfileRangeEvent(row, f"N:{units[row]}", Decimal(w.begin_time), Decimal(w.end_time)))
       wave_execs[f"{row} N:{units[row]}"] = {"wave":w, "disasm":disasm, "run_number":units[row]}
     # gather and sort all wave execs of this kernel
+    if not events: continue
     events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+events
     kernel = trace.keys[r].ret if (r:=ref_map.get(name)) else None
     steps.append(create_step(kernel.name if kernel is not None else name, ("/counters", len(ctxs), len(steps)),
