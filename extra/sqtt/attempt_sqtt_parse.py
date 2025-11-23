@@ -285,8 +285,11 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       #  SMEM    =  0x1 / s_load_b*
       #  NEXT    =  0x4 / s_cbranch_execz
       #  MESSAGE =  0x9 / s_sendmsg
+      #  VALU    =  0xb / v_exp_f32_e32
+      #  VALU    =  0xd / v_lshlrev_b64
       #  VMEM    = 0x21 / global_load_b32
       #  VMEM    = 0x24 / global_store_b32
+      #  VMEM    = 0x25 / global_store_b64
       #  LDS     = 0x29 / ds_load_b128
       #  LDS     = 0x2b / ds_store_b32
       #  VALU    = 0x73 / v_cmpx_eq_u32_e32 (not normal VALUINST)
