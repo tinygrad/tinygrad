@@ -187,7 +187,9 @@ def winowrite(ctx: IndexingContext, lhs: UOp, rhs: UOp, redu: UOp):
   tile_ranges = [ctx.new_range((int(ax.vmax+1)+3)//4, AxisType.LOOP) for ax in o_axes]
   tile_ranges1 = [ctx.new_range((int(o_axes[0].vmax+1)+3)//4, AxisType.LOOP)]
   other_loop_ranges_ghat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_w]
+  if len(o_axes) > 1: tile_ranges1.append(ctx.new_range((int(o_axes[1].vmax+1)+3)//4, AxisType.LOOP))
   other_loop_ranges_xhat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_x]
+  kranges = [ctx.new_range(3, AxisType.LOOP) for _ in o_axes]
 
   # Transform activations: clamp indices (for SPEC) then mask values (for correctness)
   tiled_idx_and_max = [(tr*4 + u, int(oa.vmax) + 2) for tr, u, oa in zip(tile_ranges, inner6, o_axes)]
