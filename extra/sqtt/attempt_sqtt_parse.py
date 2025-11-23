@@ -276,11 +276,11 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
     case 0x02: # VMEMEXEC
       # 2 bit field (pipe is a guess)
       src = pkt>>6
-      fields.append(f"src={src} [{MEMSRC.get(src, "")}]")
+      fields.append(f"src={src} [{MEMSRC.get(src, '')}]")
     case 0x03: # ALUEXEC
       # 2 bit field
       src = pkt>>6
-      fields.append(f"src={src} [{ALUSRC.get(src, "")}]")
+      fields.append(f"src={src} [{ALUSRC.get(src, '')}]")
     case 0x04: # IMMEDIATE_4
       # 5 bit field (actually 4)
       wave = pkt >> 7
