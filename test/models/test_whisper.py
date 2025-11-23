@@ -92,7 +92,7 @@ class TestWhisper(unittest.TestCase):
     transcription = transcribe_waveform(self.model, self.enc, waveform)
     self.assertWER(transcription, TRANSCRIPTION_3, 0.085)
 
-  def test_wer_passes(self):
+  def test_wer_same(self):
     reference = TRANSCRIPTION_3
     self.assertWER(TRANSCRIPTION_3_ALT, reference, 0.079)
 
