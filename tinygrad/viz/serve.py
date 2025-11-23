@@ -233,12 +233,12 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     # occupancy events
     wave_start:dict[str, int] = {}
     units:dict[str, int] = {}
-    for e in rctx.occ_events.get(name, []):
-      if (row:=f"SE:{e.se} CU:{e.cu} SIMD:{e.simd} WAVE:{e.wave_id}") not in units: units[row] = 0
-      if e.start: wave_start[row] = e.time
+    for occ in rctx.occ_events.get(name, []):
+      if (row:=f"SE:{occ.se} CU:{occ.cu} SIMD:{occ.simd} WAVE:{occ.wave_id}") not in units: units[row] = 0
+      if occ.start: wave_start[row] = occ.time
       else:
         units[row] += 1
-        events.append(ProfileRangeEvent(row, f"OCC N:{units[row]}", Decimal(wave_start.pop(row)), Decimal(e.time)))
+        events.append(ProfileRangeEvent(row, f"OCC N:{units[row]}", Decimal(wave_start.pop(row)), Decimal(occ.time)))
     # wave events
     traced_units.update(units)
     units.clear()
