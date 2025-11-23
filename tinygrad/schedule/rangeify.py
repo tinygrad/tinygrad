@@ -124,43 +124,78 @@ def winograd_kron(source, matrix, outer_axes, inner_axes, device, ctx):
   inner_shape = [ax.vmax+1 for ax in inner_axes]
   result_axes = [ctx.new_range(len(matrix), AxisType.LOOP) for _ in range(len(inner_shape))]
 
-  # Planar layout: use fresh loop axes for outer dimensions
+  # Scalar layout: use fresh loop axes for outer dimensions
   new_outer_axes = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in outer_axes]
 
   # Force bufferization of unbufferized sources to prevent inlining
-  # Bufferize with original axes [outer, inner] - pattern matcher will substitute with new axes
+  # Bufferize with SCALAR layout [outer, inner] - OLD behavior
   if source.op not in {Ops.BUFFER, Ops.BUFFERIZE}:
     source = source.bufferize(*(tuple(outer_axes) + tuple(inner_axes)), arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
 
-  # Precompute matrix constants per dimension (factor out conditionals)
-  matrix_constants = []
-  for dim in range(len(inner_shape)):
-    dim_constants = []
-    for out_idx in range(len(matrix)):
-      cond = result_axes[dim].eq(UOp.const(dtypes.index, out_idx))
-      row_constants = [cond.where(UOp.const(dtypes.float, matrix[out_idx][in_idx]), 0.0) for in_idx in range(inner_shape[dim])]
-      dim_constants.append(row_constants)
-    matrix_constants.append(dim_constants)
-
-  # Build sum of products (inline expansion, but with factored constants)
+  # OLD PATTERN: Build coefficient selectors with shared conditions
+  # Key insight: Create conditions ONCE, REUSE across all input positions, use ADD pattern
   from itertools import product
+
+  # First, load all input values (shared across all outputs)
+  input_vals = {}
+  for in_indices in product(*[range(inner_shape[d]) for d in range(len(inner_shape))]):
+    # SCALAR indexing: [outer, inner] - OLD behavior
+    input_vals[in_indices] = source.index(*new_outer_axes, *[UOp.const(dtypes.index, i) for i in in_indices])
+
+  # Build coefficient selectors using CMPNE+AND pattern (matches OLD)
+  # For each dimension and input index, create selector that picks matrix[result_axis][in_idx]
+  # This creates conditions ONCE that are REUSED across all combinations
+  matrix_coefs = []
+  for dim in range(len(inner_shape)):
+    dim_coefs = []
+    for in_idx in range(inner_shape[dim]):
+      # Build selector using OLD's ADD pattern: sum of WHERE(axis==K, matrix[K][in_idx], 0)
+      # Each WHERE uses CMPNE+AND to test axis == K
+      selector_terms = []
+
+      for out_idx in range(len(matrix)):
+        # Create condition: result_axes[dim] == out_idx
+        if out_idx == 0:
+          # Special case: axis < 1 means axis == 0
+          cond = UOp(Ops.CMPLT, dtypes.bool, (result_axes[dim], UOp.const(dtypes.index, 1)))
+        else:
+          # axis == out_idx: (axis >= out_idx) AND (axis < out_idx+1)
+          # axis >= out_idx: CMPNE(axis < out_idx, True) - negation pattern from OLD
+          cond_ge = UOp(Ops.CMPNE, dtypes.bool,
+                       (UOp(Ops.CMPLT, dtypes.bool, (result_axes[dim], UOp.const(dtypes.index, out_idx))),
+                        UOp.const(dtypes.bool, True)))
+          cond_lt = UOp(Ops.CMPLT, dtypes.bool, (result_axes[dim], UOp.const(dtypes.index, out_idx + 1)))
+          cond = UOp(Ops.AND, dtypes.bool, (cond_ge, cond_lt))
+
+        # WHERE(axis == out_idx, matrix[out_idx][in_idx], 0.0)
+        matrix_val = matrix[out_idx][in_idx]
+        if abs(matrix_val) > 1e-10:  # Skip zero coefficients
+          where_result = UOp(Ops.WHERE, dtypes.float,
+                            (cond, UOp.const(dtypes.float, matrix_val), UOp.const(dtypes.float, 0.0)))
+          selector_terms.append(where_result)
+
+      # ADD all WHERE results (OLD pattern)
+      selector = sum(selector_terms) if selector_terms else UOp.const(dtypes.float, 0.0)
+      dim_coefs.append(selector)
+    matrix_coefs.append(dim_coefs)
+
+  # Build final sum: for each input position, multiply by product of matrix coefficients
+  # The matrix_coefs are REUSED here - this is where OLD gets efficiency!
   terms = []
   for in_indices in product(*[range(inner_shape[d]) for d in range(len(inner_shape))]):
-    # Index source with new outer axes (planar) and concrete inner indices
-    input_val = source.index(*new_outer_axes, *[UOp.const(dtypes.index, i) for i in in_indices])
+    input_val = input_vals[in_indices]
 
-    # Build matrix multiplication factor for this input position
-    matrix_factor = UOp.const(dtypes.float, 1.0)
-    for dim in range(len(inner_shape)):
-      # Sum matrix elements for this dimension (factored: computed once per output position)
-      dim_sum = sum(matrix_constants[dim][out_idx][in_indices[dim]] for out_idx in range(len(matrix)))
-      matrix_factor = matrix_factor * dim_sum
+    # Compute matrix factor as product of selected coefficients from each dimension
+    # These selectors are SHARED across all input combinations!
+    matrix_factor = matrix_coefs[0][in_indices[0]]
+    for dim in range(1, len(inner_shape)):
+      matrix_factor = matrix_factor * matrix_coefs[dim][in_indices[dim]]
 
     terms.append(matrix_factor * input_val)
 
   result_expr = sum(terms)
 
-  # Planar output layout: [outer, result] for sequential memory writes
+  # SCALAR output layout: [outer, result] - OLD behavior
   return result_expr.bufferize(*(tuple(new_outer_axes)+tuple(result_axes)), arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
 
 def winoguard(lhs: UOp, rhs: UOp, redu: UOp):
@@ -214,26 +249,26 @@ def winowrite(ctx: IndexingContext, lhs: UOp, rhs: UOp, redu: UOp):
 
   kranges = [ctx.new_range(3, AxisType.LOOP) for _ in o_axes]
 
-  # Transform activations: X_tiled → XHAT with planar layout [tiles, cin, batch, 6×6]
+  # Transform activations: X_tiled → XHAT with SCALAR layout [cin, batch, tiles, 6×6]
   X_tiled = act_like.substitute({add: tr*4 + u for add, tr, u in zip(o_adds, tile_ranges, inner6)})
   XHAT = winograd_kron(X_tiled, winograd_Bt, other_reduces+other_loops_x+tile_ranges, inner6, device, ctx)
 
-  # Transform weights: w_sub → GHAT with planar layout [cin, cout, 6×6]
+  # Transform weights: w_sub → GHAT with SCALAR layout [cin, cout, 6×6]
   w_sub = w_like.substitute(dict(zip(k_axes, kranges)))
   GHAT = winograd_kron(w_sub, winograd_G, other_reduces+other_loops_w, kranges, device, ctx)
 
-  # Hadamard multiply and reduce over cin - indexing matches planar buffer layouts [outer, inner]
+  # Hadamard multiply and reduce over cin - SCALAR indexing [outer, inner]
   mhat_redu = (GHAT.index(*other_reduces, *other_loop_ranges_ghat, *inner6_1) *
                XHAT.index(*other_reduces, *other_loop_ranges_xhat, *tile_ranges1, *inner6_1)).reduce(*other_reduces, arg=Ops.ADD)
 
-  # Planar layout: [outer, inner] = [tiles, cout, batch, inner6] for sequential access
-  MHAT = mhat_redu.bufferize(*(tile_ranges1+other_loop_ranges_ghat+other_loop_ranges_xhat+inner6_1),
+  # SCALAR layout: reorder to match OLD memory strides [batch, tiles, cout, inner6]
+  MHAT = mhat_redu.bufferize(*(other_loop_ranges_xhat+tile_ranges1+other_loop_ranges_ghat+inner6_1),
                               arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
 
-  # Output transform: MHAT[tiles, cout, batch, inner6] → result[tiles, cout, batch, 4×4]
-  # Planar indexing: [tiles, cout, batch, within_tile] for sequential writes
-  return winograd_kron(MHAT, winograd_At, tile_ranges1+other_loop_ranges_ghat+other_loop_ranges_xhat, inner6_1, device, ctx)\
-    .index(*[ox//4 for ox in o_axes], *other_loops_w, *other_loops_x, *[ox%4 for ox in o_axes])
+  # Output transform: MHAT[batch, tiles, cout, inner6] → result[batch, tiles, cout, 4×4]
+  # SCALAR indexing to match MHAT layout
+  return winograd_kron(MHAT, winograd_At, other_loop_ranges_xhat+tile_ranges1+other_loop_ranges_ghat, inner6_1, device, ctx)\
+    .index(*other_loops_x, *[ox//4 for ox in o_axes], *other_loops_w, *[ox%4 for ox in o_axes])
 
 winograd_rewrite = PatternMatcher([
  ((UPat.var("lhs")*UPat.var("rhs")).reduce(arg=Ops.ADD, allow_any_len=True, name="redu"), lambda ctx, lhs, rhs, redu: winowrite(ctx, lhs, rhs, redu))
