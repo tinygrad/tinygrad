@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 import itertools
+import functools, operator
 from itertools import product
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, ssimplify, KernelInfo
@@ -124,17 +125,11 @@ def _build_matrix_selector(axis, matrix_col, dtype):
   """Build selector that picks matrix_col[axis] at runtime using WHERE cascade"""
   terms = []
   for k, coef in enumerate(matrix_col):
-    if abs(coef) < 1e-10: continue
-    cond = (UOp(Ops.CMPLT, dtypes.bool, (axis, UOp.const(dtypes.index, 1))) if k == 0 else
-            UOp(Ops.AND, dtypes.bool, (UOp(Ops.CMPNE, dtypes.bool,
-                (UOp(Ops.CMPLT, dtypes.bool, (axis, UOp.const(dtypes.index, k))), UOp.const(dtypes.bool, True))),
-                UOp(Ops.CMPLT, dtypes.bool, (axis, UOp.const(dtypes.index, k+1))))))
+    cond = (axis < 1) if k == 0 else (axis >= k) & (axis < (k+1))
     terms.append(cond.where(UOp.const(dtype, coef), UOp.const(dtype, 0.0)))
   return sum(terms) if terms else UOp.const(dtype, 0.0)
 
 def winograd_kron(source, matrix, outer_axes, inner_axes, device, ctx):
-  from itertools import product
-  import functools, operator
   inner_shape = [ax.vmax+1 for ax in inner_axes]
   result_axes = [ctx.new_range(len(matrix), AxisType.LOOP) for _ in range(len(inner_shape))]
   new_outer_axes = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in outer_axes]
@@ -189,21 +184,18 @@ def winowrite(ctx: IndexingContext, lhs: UOp, rhs: UOp, redu: UOp):
   other_loops_w = [ax for ax in w_like.ranges if ax not in reduce_ranges]
 
   # Axis creation with specific ordering to match OLD winograd axis mapping
-  nt = lambda ax: (int(ax.vmax+1)+3)//4  # num_tiles helper
   inner6, inner6_1 = [[ctx.new_range(6, AxisType.LOOP) for _ in o_axes] for _ in range(2)]
-  tile_ranges = [ctx.new_range(nt(ax), AxisType.LOOP) for ax in o_axes]
-  tile_ranges1 = [ctx.new_range(nt(o_axes[0]), AxisType.LOOP)]
+  tile_ranges = [ctx.new_range((int(ax.vmax+1)+3)//4, AxisType.LOOP) for ax in o_axes]
+  tile_ranges1 = [ctx.new_range((int(o_axes[0].vmax+1)+3)//4, AxisType.LOOP)]
   other_loop_ranges_ghat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_w]
-  if len(o_axes) > 1: tile_ranges1.append(ctx.new_range(nt(o_axes[1]), AxisType.LOOP))
+  if len(o_axes) > 1: tile_ranges1.append(ctx.new_range((int(o_axes[1].vmax+1)+3)//4, AxisType.LOOP))
   other_loop_ranges_xhat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_x]
   kranges = [ctx.new_range(3, AxisType.LOOP) for _ in o_axes]
 
   # Transform activations: Winograd F(4x4,3x3) with 6x6 input tiles, check bounds for partial tiles
   # Apply boundary mask BEFORE winograd_kron to prevent SPEC from detecting OOB INDEX operations
-  import functools, operator
   X_tiled = act_like.substitute({add: tr*4 + u for add, tr, u in zip(o_adds, tile_ranges, inner6)})
-  valid_mask = functools.reduce(operator.and_, [UOp(Ops.CMPLT, dtypes.bool,
-    (tr*4 + u, UOp.const(dtypes.index, int(oa.vmax) + 3))) for tr, u, oa in zip(tile_ranges, inner6, o_axes)],
+  valid_mask = functools.reduce(operator.and_, [(tr*4 + u) < (int(oa.vmax) + 3) for tr, u, oa in zip(tile_ranges, inner6, o_axes)],
     UOp.const(dtypes.bool, True))
   X_tiled = valid_mask.where(X_tiled, UOp.const(X_tiled.dtype, 0.0))
   XHAT = winograd_kron(X_tiled, winograd_Bt, other_reduces+other_loops_x+tile_ranges, inner6, device, ctx)
@@ -221,8 +213,8 @@ def winowrite(ctx: IndexingContext, lhs: UOp, rhs: UOp, redu: UOp):
     .index(*other_loops_x, *[ox//4 for ox in o_axes], *other_loops_w, *[ox%4 for ox in o_axes])
 
 winograd_rewrite = PatternMatcher([
- ((UPat.var("lhs")*UPat.var("rhs")).reduce(arg=Ops.ADD, allow_any_len=True, name="redu"), lambda ctx, lhs, rhs, redu: winowrite(ctx, lhs, rhs, redu))
- ])
+  ((UPat.var("lhs")*UPat.var("rhs")).reduce(arg=Ops.ADD, allow_any_len=True, name="redu"),
+   lambda ctx, lhs, rhs, redu: winowrite(ctx, lhs, rhs, redu))])
 # *****************
 # 3.5 cleanups
 
