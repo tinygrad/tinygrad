@@ -1,6 +1,5 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import unwrap
 from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
 class struct_SMU14_Firmware_Footer(Struct): pass
 uint32_t = ctypes.c_uint32

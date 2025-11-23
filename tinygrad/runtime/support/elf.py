@@ -1,6 +1,6 @@
-import struct, ctypes, ctypes.util
+import struct, ctypes
 from dataclasses import dataclass
-from tinygrad.helpers import getbits, i2u, unwrap
+from tinygrad.helpers import findlib, getbits, i2u, unwrap
 from tinygrad.runtime.autogen import libc
 
 @dataclass(frozen=True)
@@ -8,7 +8,7 @@ class ElfSection: name:str; header:libc.Elf64_Shdr; content:bytes # noqa: E702
 
 def link_sym(sym:str, libs:list[str]) -> int:
   for lib in libs:
-    try: return unwrap(ctypes.cast(getattr(ctypes.CDLL(ctypes.util.find_library(lib)), sym), ctypes.c_void_p).value)
+    try: return unwrap(ctypes.cast(getattr(ctypes.CDLL(findlib(lib)), sym), ctypes.c_void_p).value)
     except (OSError, AttributeError): pass
   raise RuntimeError(f'Attempting to relocate against an undefined symbol {sym}')
 

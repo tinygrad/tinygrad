@@ -1,6 +1,5 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import unwrap
 from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
 class MCTP_HEADER(Struct): pass
 NvU32 = ctypes.c_uint32

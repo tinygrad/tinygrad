@@ -1,6 +1,5 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import unwrap
 from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
 class struct_kfd_ioctl_get_version_args(Struct): pass
 __u32 = ctypes.c_uint32
