@@ -543,14 +543,24 @@ replace_contiguous = PatternMatcher([
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len([u for u in UOp.sink(*ret.values()).toposort() if u.op is Ops.KERNEL]))}", True)
 def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   if getenv("VIZ"): graph_rewrite(sink, PatternMatcher([]), name="View Input Graph")
-  has_multi = any(isinstance(x._device, tuple) for x in sink.toposort())
   uop_list: list[UOp] = []
   tsink = graph_rewrite(sink, add_tags, ctx=uop_list, bottom_up=True, name="number the uops")
-  if has_multi:
-    tsink = graph_rewrite(tsink, multi_pm, name="multi rewrites")
-    tsink = UOp.sink(*flatten([s.src if s.op is Ops.MULTI else [s] for s in tsink.src]))
+  tsink = graph_rewrite(tsink, multi_pm+pm_mops+earliest_rewrites+replace_contiguous, ctx={}, name="earliest rewrites")
 
-  tsink = graph_rewrite(tsink, pm_mops+earliest_rewrites+replace_contiguous, ctx={}, name="earliest rewrites")
+  def _flatten_multi_with_tags(nodes:list[UOp]) -> list[UOp]:
+    out:list[UOp] = []
+    for node in nodes:
+      if node.op is Ops.MULTI:
+        for i, child in enumerate(node.src):
+          if i == 0 and node.tag is not None and (child.tag != node.tag):
+            out.append(child.rtag(node.tag))
+          else:
+            out.append(child)
+      else:
+        out.append(node)
+    return out
+
+  tsink = UOp.sink(*_flatten_multi_with_tags(list(tsink.src)))
 
   # convert movement ops to ranges
   tsink, rctx = run_rangeify(tsink, DEBUG_RANGEIFY)
@@ -595,5 +605,9 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
     assert tag is not None
     for a in tag:
       if a is None: continue
-      becomes_map[uop_list[int(a)]] = s
+      orig = uop_list[int(a)]
+      if orig.op is Ops.MULTI and orig.axis is not None:
+        becomes_map[orig] = s.multi(orig.axis)
+      else:
+        becomes_map[orig] = s
   return becomes_map
