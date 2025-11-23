@@ -259,7 +259,7 @@ def winowrite(ctx: IndexingContext, lhs: UOp, rhs: UOp, redu: UOp):
 
   # Hadamard multiply and reduce over cin - SCALAR indexing [outer, inner]
   mhat_redu = (GHAT.index(*other_reduces, *other_loop_ranges_ghat, *inner6_1) *
-               XHAT.index(*other_reduces, *other_loop_ranges_xhat, *tile_ranges1, *inner6_1)).reduce(*other_reduces, arg=Ops.ADD)
+               XHAT.index(*other_reduces, *other_loop_ranges_xhat, *tile_ranges1, *inner6_1)).reduce(*other_reduces, arg=Ops.ADD, dtype=redu.dtype)
 
   # SCALAR layout: reorder to match OLD memory strides [batch, tiles, cout, inner6]
   MHAT = mhat_redu.bufferize(*(other_loop_ranges_xhat+tile_ranges1+other_loop_ranges_ghat+inner6_1),
