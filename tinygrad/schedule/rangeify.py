@@ -144,8 +144,7 @@ def winograd_kron(source, matrix, outer_axes, inner_axes, device, ctx):
     input_vals[in_indices] = source.index(*new_outer_axes, *[UOp.const(dtypes.index, i) for i in in_indices])
 
   # Build matrix coefficient selectors (reused across all input combinations)
-  compute_dtype = source.dtype
-  matrix_coefs = [[_build_matrix_selector(result_axes[dim], [matrix[k][i] for k in range(len(matrix))], compute_dtype)
+  matrix_coefs = [[_build_matrix_selector(result_axes[dim], [matrix[k][i] for k in range(len(matrix))], source.dtype)
                    for i in range(inner_shape[dim])] for dim in range(len(inner_shape))]
 
   # Compute Kronecker product: multiply inputs by products of matrix coefficients
@@ -188,19 +187,14 @@ def winowrite(ctx: IndexingContext, lhs: UOp, rhs: UOp, redu: UOp):
   tile_ranges = [ctx.new_range((int(ax.vmax+1)+3)//4, AxisType.LOOP) for ax in o_axes]
   tile_ranges1 = [ctx.new_range((int(o_axes[0].vmax+1)+3)//4, AxisType.LOOP)]
   other_loop_ranges_ghat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_w]
-  if len(o_axes) > 1: tile_ranges1.append(ctx.new_range((int(o_axes[1].vmax+1)+3)//4, AxisType.LOOP))
   other_loop_ranges_xhat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_x]
-  kranges = [ctx.new_range(3, AxisType.LOOP) for _ in o_axes]
 
-  clamped_subs = {}
-  for add, tr, u, oa in zip(o_adds, tile_ranges, inner6, o_axes):
-    idx = tr*4 + u
-    max_valid = int(oa.vmax) + 2
-    clamped_subs[add] = ((idx < (max_valid + 1)).where(idx, UOp.const(dtypes.index, max_valid)))
-  X_tiled = act_like.substitute(clamped_subs)
-  valid_mask = functools.reduce(operator.and_, [(tr*4 + u) < (int(oa.vmax) + 3) for tr, u, oa in zip(tile_ranges, inner6, o_axes)],
-    UOp.const(dtypes.bool, True))
-  X_tiled = valid_mask.where(X_tiled, UOp.const(X_tiled.dtype, 0.0))
+  # Transform activations: clamp indices (for SPEC) then mask values (for correctness)
+  tiled_idx_and_max = [(tr*4 + u, int(oa.vmax) + 2) for tr, u, oa in zip(tile_ranges, inner6, o_axes)]
+  X_tiled = act_like.substitute({add: (idx < max_idx+1).where(idx, UOp.const(dtypes.index, max_idx))
+                                  for add, (idx, max_idx) in zip(o_adds, tiled_idx_and_max)})
+  X_tiled = functools.reduce(operator.and_, [idx < (max_idx+1) for idx, max_idx in tiled_idx_and_max],
+    UOp.const(dtypes.bool, True)).where(X_tiled, UOp.const(X_tiled.dtype, 0.0))
   XHAT = winograd_kron(X_tiled, winograd_Bt, other_reduces+other_loops_x+tile_ranges, inner6, device, ctx)
 
   # Transform weights
