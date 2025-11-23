@@ -145,6 +145,8 @@ def winograd_kron(source, matrix, outer_axes, inner_axes, device, ctx):
   # Build coefficient selectors using CMPNE+AND pattern (matches OLD)
   # For each dimension and input index, create selector that picks matrix[result_axis][in_idx]
   # This creates conditions ONCE that are REUSED across all combinations
+  # Use source buffer's dtype for numerical consistency across platforms
+  compute_dtype = source.dtype
   matrix_coefs = []
   for dim in range(len(inner_shape)):
     dim_coefs = []
@@ -170,12 +172,12 @@ def winograd_kron(source, matrix, outer_axes, inner_axes, device, ctx):
         # WHERE(axis == out_idx, matrix[out_idx][in_idx], 0.0)
         matrix_val = matrix[out_idx][in_idx]
         if abs(matrix_val) > 1e-10:  # Skip zero coefficients
-          where_result = UOp(Ops.WHERE, dtypes.float,
-                            (cond, UOp.const(dtypes.float, matrix_val), UOp.const(dtypes.float, 0.0)))
+          where_result = UOp(Ops.WHERE, compute_dtype,
+                            (cond, UOp.const(compute_dtype, matrix_val), UOp.const(compute_dtype, 0.0)))
           selector_terms.append(where_result)
 
       # ADD all WHERE results (OLD pattern)
-      selector = sum(selector_terms) if selector_terms else UOp.const(dtypes.float, 0.0)
+      selector = sum(selector_terms) if selector_terms else UOp.const(compute_dtype, 0.0)
       dim_coefs.append(selector)
     matrix_coefs.append(dim_coefs)
 
