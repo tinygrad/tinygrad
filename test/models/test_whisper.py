@@ -89,7 +89,7 @@ class TestWhisper(unittest.TestCase):
   def test_transcribe_long(self):
     waveform = [load_file_waveform(fetch(TEST_FILE_3_URL))]
     transcription = transcribe_waveform(self.model, self.enc, waveform)
-    self.assertWER(transcription, TRANSCRIPTION_3, 0.1)
+    self.assertWER(transcription, TRANSCRIPTION_3, 0.085)
 
   @unittest.skipIf(CI or (Device.DEFAULT == "CPU" and CPU_LLVM), "too long for CI")
   def test_transcribe_long_no_batch(self):
