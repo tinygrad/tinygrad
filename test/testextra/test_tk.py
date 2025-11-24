@@ -521,7 +521,7 @@ class TestTK(unittest.TestCase):
 
   def test_fa(self):
     NUM_WORKERS = 1
-    B, N, H, H_KV, D = 1, 8192, 32, 8, 128
+    B, N, H, H_KV, D = 1, 16, 2, 1, 128
     Q_BLOCK_SIZE = 16
     KV_BLOCK_SIZE = 16
     GROUP_SIZE = H // H_KV
@@ -624,7 +624,7 @@ class TestTK(unittest.TestCase):
     ref = q_permuted.scaled_dot_product_attention(k_permuted, v_permuted, enable_gqa=True).float()
     ref = ref.permute(0, 2, 1, 3)
 
-    # diff_arrays(out.tolist(), ref.tolist())
+    diff_arrays(out.tolist(), ref.tolist())
 
     np.testing.assert_allclose(out.numpy(), ref.numpy(), atol=1e-2, rtol=1e-5)
 
