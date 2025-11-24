@@ -15,7 +15,7 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
   and_clause:list[UOp] = []
   if self.op is not None:
     if len(self.op) > 1: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=tuple(int(x) for x in self.op))), arg="{0}.op in {1}"))
-    else: and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg="{0}.op == "+str(self.op[0].value)))
+    else: and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg="{0}.op == "+str(next(iter(self.op)).value)))
   if self.arg is not None:
     if isinstance(self.arg, int): and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg="{0}.arg == "+str(int(self.arg))))
     else: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=self.arg)), arg="{0}.arg == {1}"))

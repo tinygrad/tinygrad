@@ -945,8 +945,8 @@ class UPat(OpMixin):
   def __init__(self, op:Ops|tuple[Ops, ...]|set[Ops]|None=None, dtype:DType|tuple[DType, ...]|None=None,
                src:tuple[UPat, ...]|list[UPat]|UPat|None=None, arg:Any=None,
                name:str|None=None, allow_any_len:bool=False, custom_early_reject:set[Ops]|None=None, location=None):
-    assert op is None or isinstance(op, (Ops, tuple, set)), "op must be Ops or tuple of Ops"
-    self.op: tuple[Ops, ...]|None = (op,) if isinstance(op, Ops) else (tuple(op) if isinstance(op, set) else op)
+    assert op is None or isinstance(op, (Ops, tuple, set, frozenset)), "op must be Ops or tuple of Ops"
+    self.op: frozenset[Ops]|None = None if op is None else (frozenset([op]) if isinstance(op, Ops) else frozenset(op))
     self.dtype: tuple[DType, ...]|None = (dtype,) if isinstance(dtype, DType) else dtype
     self.arg, self.name, self._in_src, self.custom_early_reject = arg, name, src, custom_early_reject
     self.src: Any = None
@@ -967,10 +967,11 @@ class UPat(OpMixin):
     if custom_early_reject is not None: self.early_reject = custom_early_reject
     else:
       upat_match = [src] if isinstance(src, UPat) else ([] if src is None else self.src[0])
-      self.early_reject = {pp.op[0] for pp in upat_match if pp.op is not None and len(pp.op) == 1}
+      self.early_reject = {next(iter(pp.op)) for pp in upat_match if pp.op is not None and len(pp.op) == 1}
 
   def __reduce__(self):
-    return UPat, (self.op, self.dtype, self._in_src, self.arg, self.name, not self.strict_length, self.custom_early_reject, self.location)
+    return UPat, (tuple(self.op) if self.op else None, self.dtype, self._in_src, self.arg, self.name, not self.strict_length,
+                  self.custom_early_reject, self.location)
   def named(self, name:str): return UPat(self.op, self.dtype, self._in_src, self.arg, name, not self.strict_length, self.custom_early_reject)
 
   @staticmethod
