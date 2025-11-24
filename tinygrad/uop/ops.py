@@ -215,6 +215,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.CONST | Ops.DEFINE_VAR | Ops.BIND: return () if self._device is not None else None
       case Ops.BUFFER: return (self.arg,)
       case Ops.BUFFER_VIEW: return (self.arg[0],)
+      case Ops.ENCDEC: return self.arg[0]
       case Ops.BUFFERIZE: return tuple([int(r.vmax+1) for r in self.src[1:]])
       case Ops.DEFINE_GLOBAL | Ops.DEFINE_LOCAL | Ops.DEFINE_REG: return (self.ptrdtype.size,)
 
@@ -517,6 +518,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def mselect(self, arg:int) -> UOp: return UOp(Ops.MSELECT, self.dtype, (self,), arg)
   @property
   def metadata(self) -> tuple[Metadata, ...]|None: return all_metadata.get(self, None)
+  def encdec(self, shape, ctx:Any=None): return UOp(Ops.ENCDEC, self.dtype, src=(self,), arg=(shape, ctx))
 
   # *** uop movement ops ***
 

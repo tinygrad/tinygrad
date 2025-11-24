@@ -24,10 +24,10 @@ def realize_assign(ctx:dict[UOp, None], a:UOp) -> None:
 pm_generate_realize_map = PatternMatcher([
   # always realize SINK src
   (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in ALWAYS_CONTIGUOUS)),
-  # always realize COPY/BUFFER_VIEW/CONTIGUOUS/STORE
-  (UPat({Ops.COPY, Ops.BUFFER_VIEW, Ops.CONTIGUOUS, Ops.STORE}, name="tr"), realize),
-  # realize srcs of COPY, MSELECT, MSTACK
-  (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_srcs),
+  # always realize COPY/BUFFER_VIEW/CONTIGUOUS/STORE/ENCDEC
+  (UPat({Ops.COPY, Ops.BUFFER_VIEW, Ops.CONTIGUOUS, Ops.STORE, Ops.ENCDEC}, name="tr"), realize),
+  # realize srcs of COPY, MSELECT, MSTACK, ENCDEC
+  (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK, Ops.ENCDEC), name="rb"), realize_srcs),
   # realize ASSIGN and input to assign (might be optimized out)
   (UPat(Ops.ASSIGN, name="a"), realize_assign),
 ])

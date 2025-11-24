@@ -181,10 +181,7 @@ class NVCopyQueue(NVCommandQueue):
   def _submit(self, dev:NVDevice): self._submit_to_gpfifo(dev, dev.dma_gpfifo)
 
 class NVVideoQueue(NVCommandQueue):
-  def decode_hevc_chunk(self, buf_in_data, luma_chroma_bufs:list,
-                        coloc_buf, filter_buf,
-                        scaling_list, tile_sizes,
-                        status_buf, pic_desc, pic_idx):
+  def decode_hevc_chunk(self, buf_in_data, luma_chroma_bufs:list, coloc_buf, filter_buf, scaling_list, tile_sizes, status_buf, pic_desc, pic_idx):
     self.nvm(4, nv_gpu.NVC9B0_SET_APPLICATION_ID, 7)
     self.nvm(4, nv_gpu.NVC9B0_SET_CONTROL_PARAMS, 0x52057)
     self.nvm(4, nv_gpu.NVC9B0_SET_DRV_PIC_SETUP_OFFSET, pic_desc.va_addr >> 8)
@@ -310,6 +307,51 @@ class NVAllocator(HCQAllocator['NVDevice']):
     self.dev.iface.free(opaque)
 
   def _map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
+
+  def _encode_decode(self, bufout:HCQBuffer, bufin:HCQBuffer, hist:list[HCQBuffer], insize:int, ctx):
+    self.dev._ensure_has_vid_buffers(0, 0) # TODO
+
+    x = nv_gpu.nvdec_hevc_pic_s(gptimer_timeout_value=81600000, tileformat=1, sw_start_code_e=1,
+      chroma_format_idc=ctx.sps['chroma_format_idc'], pic_width_in_luma_samples=ctx.sps['pic_width_in_luma_samples'],
+      pic_height_in_luma_samples=ctx.sps['pic_height_in_luma_samples'], bit_depth_luma=ctx.sps['bit_depth_luma_minus8']+8,
+      bit_depth_chroma=ctx.sps['bit_depth_chroma_minus8']+8, log2_max_pic_order_cnt_lsb_minus4=ctx.sps['log2_max_pic_order_cnt_lsb_minus4'],
+      log2_min_luma_coding_block_size=ctx.sps['log2_min_luma_coding_block_size_minus3']+3,
+      log2_max_luma_coding_block_size=ctx.sps['log2_min_luma_coding_block_size_minus3']+3+ctx.sps['log2_diff_max_min_luma_coding_block_size'],
+      log2_min_transform_block_size=ctx.sps['log2_min_luma_transform_block_size_minus2']+2,
+      log2_max_transform_block_size=ctx.sps['log2_min_luma_transform_block_size_minus2']+2+ctx.sps['log2_diff_max_min_luma_transform_block_size'],
+      amp_enabled_flag=ctx.sps['amp_enabled_flag'], sample_adaptive_offset_enabled_flag=ctx.sps['sample_adaptive_offset_enabled_flag'],
+      pcm_enabled_flag=ctx.sps['pcm_enabled_flag'], sps_temporal_mvp_enabled_flag=ctx.sps['sps_temporal_mvp_enabled_flag'],
+      strong_intra_smoothing_enabled_flag=ctx.sps['strong_intra_smoothing_enabled_flag'],
+      # pps
+      sign_data_hiding_enabled_flag=ctx.pps['sign_data_hiding_enabled_flag'], num_ref_idx_l0_default_active=ctx.pps['num_ref_idx_l0_default_active_minus1']+1,
+      num_ref_idx_l1_default_active=ctx.pps['num_ref_idx_l1_default_active_minus1']+1, init_qp=ctx.pps['init_qp_minus26']+26,
+      cu_qp_delta_enabled_flag=ctx.pps['cu_qp_delta_enabled_flag'], diff_cu_qp_delta_depth=ctx.pps['diff_cu_qp_delta_depth'],
+      pps_cb_qp_offset=ctx.pps['pps_cb_qp_offset'], pps_cr_qp_offset=ctx.pps['pps_cr_qp_offset'],
+      pps_slice_chroma_qp_offsets_present_flag=ctx.pps['pps_slice_chroma_qp_offsets_present_flag'],
+      weighted_pred_flag=ctx.pps['weighted_pred_flag'], weighted_bipred_flag=ctx.pps['weighted_bipred_flag'],
+      transquant_bypass_enabled_flag=ctx.pps['transquant_bypass_enabled_flag'], tiles_enabled_flag=ctx.pps['tiles_enabled_flag'],
+      entropy_coding_sync_enabled_flag=ctx.pps['entropy_coding_sync_enabled_flag'],
+      loop_filter_across_slices_enabled_flag=ctx.pps['loop_filter_across_slices_enabled_flag'],
+      deblocking_filter_control_present_flag=ctx.pps['deblocking_filter_control_present_flag'],
+      scaling_list_data_present_flag=ctx.pps['scaling_list_data_present_flag'],
+      lists_modification_present_flag=ctx.pps['lists_modification_present_flag'],
+      log2_parallel_merge_level_minus2=ctx.pps['log2_parallel_merge_level_minus2']+2)
+    x.framestride[0] = x.pic_width_in_luma_samples
+    x.framestride[1] = x.pic_width_in_luma_samples
+    x.colMvBuffersize = (round_up(x.pic_width_in_luma_samples, 64) * round_up(x.pic_height_in_luma_samples, 64) // 16) // 256
+    x.IDR_picture_flag = 1
+    x.RAP_picture_flag = 1
+    x.pattern_id = 2
+    x.stream_len = insize
+    x.curr_pic_idx = 0
+
+    desc_buf = self.dev.kernargs_buf.offset(offset=self.dev.kernargs_offset_allocator.alloc(0x1000, 0x100), size=0x1000)
+    desc_buf.cpu_view().view(fmt='B')[:ctypes.sizeof(x)] = bytes(x)
+
+    NVVideoQueue().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
+                  .decode_hevc_chunk(bufin, [bufout] + hist, self.dev.vid_coloc_buf, self.dev.vid_filter_buf,
+                                     self.dev.vid_scaling_list, self.dev.vid_tile_sizes, self.dev.vid_status_buf, desc_buf, 0) \
+                  .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
 
 @dataclass
 class GPFifo:
@@ -653,6 +695,22 @@ class NVDevice(HCQCompiled[HCQSignal]):
     cast(NVComputeQueue, NVComputeQueue().wait(self.timeline_signal, self.timeline_value - 1)) \
                                          .setup(local_mem=self.shader_local_mem.va_addr, local_mem_tpc_bytes=bytes_per_tpc) \
                                          .signal(self.timeline_signal, self.next_timeline()).submit(self)
+
+  def _ensure_has_vid_buffers(self, w, h):
+    if hasattr(self, 'vid_coloc_buf'): return
+
+    self.vid_coloc_buf = self.allocator.alloc(0x400000)
+    self.vid_filter_buf = self.allocator.alloc(0xa00000)
+    self.vid_scaling_list = self.allocator.alloc(0x1000, BufferSpec(cpu_access=True))
+    self.vid_tile_sizes = self.allocator.alloc(0x1000, BufferSpec(cpu_access=True))
+    self.vid_status_buf = self.allocator.alloc(0x1000, BufferSpec(cpu_access=True))
+    # TODO: Scaling list + tile size should not be here
+    self.vid_tile_cnt = 63*16
+    self.vid_scaling_list.cpu_view()[:self.vid_tile_cnt] = bytes([0x10]*self.vid_tile_cnt)
+    self.vid_scaling_list.cpu_view()[8:16] = bytes([0x0]*8)
+
+    # 1E 00 11 00 00 00 00 00  00 00 00 00 00 00 00 00
+    self.vid_tile_sizes.cpu_view()[:4] = bytes([0x1e,0x0,0x11,0x0])
 
   def invalidate_caches(self):
     if self.is_nvd(): self.iface.rm_control(self.subdevice, nv_gpu.NV2080_CTRL_CMD_INTERNAL_BUS_FLUSH_WITH_SYSMEMBAR, None)

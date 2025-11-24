@@ -524,6 +524,12 @@ class Tensor(OpMixin):
     return r
 
   @staticmethod
+  def from_hevc(nal_unit_type:int, data:Tensor, ctx, **kwargs) -> Tensor:
+    r = Tensor.empty(ctx.sps['pic_width_in_luma_samples']*(ctx.sps['pic_height_in_luma_samples']+ctx.sps['pic_height_in_luma_samples']//2), **kwargs)
+    r.uop = data.to(r.device).uop.encdec(r.shape, ctx)
+    return r
+
+  @staticmethod
   def from_url(url:str, gunzip:bool=False, **kwargs) -> Tensor:
     """
     Creates a Tensor from a URL.
