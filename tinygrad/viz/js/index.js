@@ -236,37 +236,37 @@ async function renderProfiler(path, unit, opts) {
   for (let i=0; i<layoutsLen; i++) {
     const nameLen = view.getUint8(offset, true); offset += 1;
     const k = textDecoder.decode(new Uint8Array(buf, offset, nameLen)); offset += nameLen;
-    const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px").style("width", opts.width).style("min-height", opts.height);
+    const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px").style("width", opts.width).style("min-height", "32px");
     const { y:baseY, height:baseHeight } = rect(div.node());
     const colors = colorScheme[k.split(":")[0]] ?? colorScheme.DEFAULT;
     const offsetY = baseY-canvasTop+padding/2;
     const shapes = [], visible = [];
     const eventType = u8(), eventsLen = u32();
     if (eventType === EventTypes.EXEC) {
-      const levelHeight = (baseHeight-padding)/2;
+      const levelHeight = (baseHeight-padding)*(opts.heightScale ?? 1);
       const levels = [];
       data.tracks.set(k, { shapes, eventType, visible, offsetY, pcolor:"#9ea2ad" });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
         const e = {name:strings[u32()], ref:optional(u32()), key:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
         // find a free level to put the event
-        const depth = parseInt(e.name.split(" ")[1].split(":")[1]);
-        const et = e.st+Math.trunc(e.dur);
-        levels[depth] = et;
-        /*
-        let depth = levels.findIndex(levelEt => e.st >= levelEt);
-        if (depth === -1) {
-          depth = levels.length;
-          levels.push(et);
-        } else levels[depth] = et;
-        */
+        let depth = 0;
+        if (opts.levelKey != null) { depth = opts.levelKey(e); levels[depth] = et; }
+        else {
+          depth = levels.findIndex(levelEt => e.st >= levelEt);
+          const et = e.st+Math.trunc(e.dur);
+          if (depth === -1) {
+            depth = levels.length;
+            levels.push(et);
+          } else levels[depth] = et;
+        }
         if (depth === 0) colorKey = e.name.split(" ")[0];
         if (!colorMap.has(colorKey)) {
           const color = colors instanceof Map ? (colors.get(colorKey) || colors.get("DEFAULT")) : cycleColors(colors, colorMap.size);
           colorMap.set(colorKey, d3.rgb(color));
         }
-        const base = colorMap.get(colorKey);
-        // const base = colorMap.get(colorKey), s = Math.min(Math.pow(1/0.7, depth), 1000 / Math.max(base.r, base.g, base.b));
+        const base = colorMap.get(colorKey), s = Math.min(Math.pow(1/0.7, depth), 120 / Math.max(base.r, base.g, base.b));
+        // const fillColor = d3.rgb(base.r*s, base.g*s, base.b*s).toString();
         const fillColor = base.brighter(0.3*depth).toString();
         const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
         let shapeRef = e.ref;
@@ -291,7 +291,7 @@ async function renderProfiler(path, unit, opts) {
                       ctx:shapeRef?.ctx, step:shapeRef?.step };
         if (e.key != null) shapeMap.set(e.key, arg);
         // offset y by depth
-        shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label, fillColor });
+        shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label:opts.hideLabels ? null : label, fillColor });
       }
       div.style("height", levelHeight*levels.length+padding+"px").style("pointerEvents", "none");
     } else {
@@ -407,7 +407,6 @@ async function renderProfiler(path, unit, opts) {
     const st = visibleX[0], et = visibleX[1];
     xscale.domain(visibleX);
     // draw shapes
-    ctx.font = "5px sans-serif";
     const paths = [];
     for (const [_, { shapes, eventType, visible, offsetY, valueMap, pcolor }] of data.tracks) {
       visible.length = 0;
@@ -435,7 +434,6 @@ async function renderProfiler(path, unit, opts) {
           visible.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
           ctx.fillStyle = e.fillColor; ctx.fill(p);
           // add label
-          /*
           let lw = 0;
           const lx = x+2, ly = y+e.height/2;
           for (let li=0; li<e.label?.length; li++) {
@@ -448,13 +446,11 @@ async function renderProfiler(path, unit, opts) {
             ctx.fillText(e.label[li].st, lx+lw, ly);
             lw += e.label[li].width;
           }
-          */
         }
         if (focusedShape != null && e.arg?.key === focusedShape) { paths.push([p, pcolor]); }
       }
     }
     // draw axes
-    ctx.font = "8px sans-serif";
     drawLine(ctx, xscale.range(), [0, 0]);
     for (const tick of xscale.ticks()) {
       // tick line
@@ -716,7 +712,7 @@ async function main() {
     if (url.pathname+url.search !== ckey) e.close();
     else if (e.readyState === EventSource.OPEN) activeSrc = e;
   }
-  if (ctx.name === "Profiler") return renderProfiler("/get_profile", "realtime", { width:"132px", height:"32px" });
+  if (ctx.name === "Profiler") return renderProfiler("/get_profile", "realtime", { width:"132px" });
   if (workerUrl == null) await initWorker();
   if (ckey in cache) {
     ret = cache[ckey];
@@ -724,7 +720,11 @@ async function main() {
   // ** Disassembly view
   if (!ckey.startsWith("/rewrites")) {
     if (!(ckey in cache)) cache[ckey] = ret = await fetchValue(ckey);
-    if (ret instanceof ArrayBuffer) return renderProfiler(ckey, "clk", { height:"16px" }); // cycles on the x axis
+    // cycles on the x axis
+    if (ret instanceof ArrayBuffer) {
+      opts = {heightScale:0.5, hideLabels:true, levelFn:(e) => parseInt(e.name.split(" ")[1].split(":")[1])};
+      return renderProfiler(ckey, "clk", opts);
+    }
     displaySelection("#custom");
     metadata.innerHTML = "";
     const root = d3.create("div").classed("raw-text", true).node();
