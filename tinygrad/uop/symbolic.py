@@ -397,14 +397,16 @@ pm_drop_and_clauses = PatternMatcher([(invalid_gate, drop_and_clauses)])
 
 def where_on_load(c1, buf, x):
   c2 = x.get_valid()
-  duplicate_clauses = [c for c in c1.split_uop(Ops.AND) if c in c2.split_uop(Ops.AND)]
+  c1_split = c1.split_uop(Ops.AND)
+  c2_split = set(c2.split_uop(Ops.AND))
+  duplicate_clauses = [c for c in c1_split if c in c2_split]
   # we move the condition from the where to the load _as long as_ the condtition doesn't have some range that would place it inside of a new range
   # also no data dependent loads!
-  moved_clauses = [c for c in c1.split_uop(Ops.AND) if c not in duplicate_clauses and all(r in x.ranges for r in c.ranges)
+  moved_clauses = [c for c in c1_split if c not in duplicate_clauses and all(r in x.ranges for r in c.ranges)
     and all(u in x.backward_slice_with_self for u in c.backward_slice_with_self if u.op is Ops.INDEX)]
   if not (removed:=moved_clauses+duplicate_clauses): return None
   # aditionally we can drop the clause on the where if it already exists in the load
-  remaining_clause = UOp.const(dtypes.bool, True).prod(*[c for c in c1.split_uop(Ops.AND) if c not in removed])
+  remaining_clause = UOp.const(dtypes.bool, True).prod(*[c for c in c1_split if c not in removed])
   return remaining_clause.where(buf.index(x.get_idx().valid(functools.reduce(operator.and_, moved_clauses, c2))), 0)
 
 # where after gated load becomes alt value, TODO: this is sort of duplicated with rules in devectorizer

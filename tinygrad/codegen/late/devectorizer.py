@@ -3,7 +3,7 @@ import functools, operator, itertools
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace, Invalid, PtrDType
-from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, identity_element
+from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, identity_element, WeakUOpCache
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate
 from tinygrad.helpers import getenv, flatten, AMX, prod
 from tinygrad.renderer import Renderer
@@ -45,6 +45,7 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
   new_valid = functools.reduce(operator.and_, ss) if (ss:=[s for s in valid.split_uop(Ops.AND) if s not in drop_stmt]) else None
   return buf.index(idx.valid(new_valid) if new_valid is not None else idx, ptr=True)
 
+_no_vectorized_alu_cache = WeakUOpCache()
 
 load_store_indexing = PatternMatcher([
   # image load valid idx simplification
@@ -229,10 +230,13 @@ def no_vectorized_wmma(wmma:UOp):
   return UOp(Ops.VECTORIZE, wmma.dtype, tuple(wmma_ex))
 
 def no_vectorized_alu(alu:UOp):
+  if (cache_ret:=_no_vectorized_alu_cache.get(alu)) is not None: return cache_ret
   if alu.dtype.vcount == 1: return None
   if alu.op is Ops.WHERE and alu.src[2].arg is Invalid: return None  # image load/store has cond.where(idx.vec(2), Invalid) as the index
-  alus = tuple(UOp(alu.op, alu.dtype.scalar(), tuple(s.gep(i) for s in alu.src), alu.arg) for i in range(alu.dtype.vcount))
-  return UOp(Ops.VECTORIZE, alu.dtype, alus)
+  alus = tuple([UOp(alu.op, alu.dtype.scalar(), tuple(s.gep(i) for s in alu.src), alu.arg) for i in range(alu.dtype.vcount)])
+  ret = UOp(Ops.VECTORIZE, alu.dtype, alus)
+  _no_vectorized_alu_cache.set(alu, ret, allow_none=True)
+  return ret
 
 def no_vectorized_buf(buf:UOp):
   return buf.replace(dtype=buf.ptrdtype.base.scalar().ptr(buf.ptrdtype.size*buf.ptrdtype.count, buf.ptrdtype.addrspace)).cast(buf.dtype)
