@@ -158,7 +158,7 @@ const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
 const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["get_program","#1d2e62"],["compile","#63b0cd"],["DEFAULT","#354f52"]]),
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
-  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SE:new Map([["OCC", "#0D1A26"], ["INST", "#0A2042"]]),
+  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SE:new Map([["OCC", "#101725"], ["INST", "#0A2042"]]),
   CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
@@ -243,7 +243,7 @@ async function renderProfiler(path, unit, opts) {
     const shapes = [], visible = [];
     const eventType = u8(), eventsLen = u32();
     if (eventType === EventTypes.EXEC) {
-      const levelHeight = 8;
+      const levelHeight = 2;
       const levels = [];
       data.tracks.set(k, { shapes, eventType, visible, offsetY, pcolor:"#9ea2ad" });
       let colorKey, ref;
@@ -431,6 +431,7 @@ async function renderProfiler(path, unit, opts) {
           visible.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
           ctx.fillStyle = e.fillColor; ctx.fill(p);
           // add label
+          /*
           let lw = 0;
           const lx = x+2, ly = y+e.height/2;
           for (let li=0; li<e.label?.length; li++) {
@@ -443,6 +444,7 @@ async function renderProfiler(path, unit, opts) {
             ctx.fillText(e.label[li].st, lx+lw, ly);
             lw += e.label[li].width;
           }
+          */
         }
         if (focusedShape != null && e.arg?.key === focusedShape) { paths.push([p, pcolor]); }
       }
@@ -695,7 +697,7 @@ async function main() {
         if (subrewrites.length > 0) { l.appendChild(d3.create("span").text(` (${subrewrites.length})`).node()); l.parentElement.classList.add("has-children"); }
       }
     }
-    return setState({ currentCtx:10 });
+    return setState({ currentCtx:-1 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
