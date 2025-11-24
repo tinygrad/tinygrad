@@ -271,7 +271,6 @@ def limit_bufs(ctx:IndexingContext, root:UOp):
   device = device if isinstance(device, str) else device[0].split(":")[0]
   if not (MAX_BUFS:=getenv("MAX_KERNEL_BUFFERS", DEVICE_MAX_BUFS.get(device, 0))): return None
 
-  if not hasattr(ctx,"buf_cache"): ctx.buf_cache:dict[UOp,set[UOp]] = {}
   def get_bufs(u:UOp) -> set[UOp]:
     if u in ctx.buf_cache: return ctx.buf_cache[u]
     if u.op in {Ops.BUFFERIZE, Ops.AFTER, Ops.BUFFER, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_VAR}: ret = {u}
