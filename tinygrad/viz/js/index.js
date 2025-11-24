@@ -236,7 +236,7 @@ async function renderProfiler(path, unit, opts) {
   for (let i=0; i<layoutsLen; i++) {
     const nameLen = view.getUint8(offset, true); offset += 1;
     const k = textDecoder.decode(new Uint8Array(buf, offset, nameLen)); offset += nameLen;
-    const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px").style("width", opts.width).style("min-height", "32px");
+    const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px").style("width", opts.width);
     const { y:baseY, height:baseHeight } = rect(div.node());
     const colors = colorScheme[k.split(":")[0]] ?? colorScheme.DEFAULT;
     const offsetY = baseY-canvasTop+padding/2;
@@ -251,7 +251,7 @@ async function renderProfiler(path, unit, opts) {
         const e = {name:strings[u32()], ref:optional(u32()), key:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
         // find a free level to put the event
         let depth = 0;
-        if (opts.levelKey != null) { depth = opts.levelKey(e); levels[depth] = et; }
+        if (opts.levelKey != null) { depth = opts.levelKey(e); levels[depth] = 0; }
         else {
           depth = levels.findIndex(levelEt => e.st >= levelEt);
           const et = e.st+Math.trunc(e.dur);
@@ -477,7 +477,7 @@ async function renderProfiler(path, unit, opts) {
       drawLine(ctx, [x, x], [0, canvas.clientHeight], { color:m.color });
       ctx.fillText(m.name, x+2, 1);
     }
-    for (const [p, color] of paths) { ctx.lineWidth = 0.5; ctx.strokeStyle = color; ctx.stroke(p); }
+    for (const [p, color] of paths) { ctx.strokeStyle = color; ctx.stroke(p); }
   }
 
   function resize() {
@@ -722,7 +722,7 @@ async function main() {
     if (!(ckey in cache)) cache[ckey] = ret = await fetchValue(ckey);
     // cycles on the x axis
     if (ret instanceof ArrayBuffer) {
-      opts = {heightScale:0.5, hideLabels:true, levelFn:(e) => parseInt(e.name.split(" ")[1].split(":")[1])};
+      opts = {heightScale:0.5, hideLabels:true, levelKey:(e) => parseInt(e.name.split(" ")[1].split(":")[1])};
       return renderProfiler(ckey, "clk", opts);
     }
     displaySelection("#custom");
