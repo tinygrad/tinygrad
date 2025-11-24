@@ -38,11 +38,18 @@ class InstExec:
   time:int
 
 @dataclasses.dataclass(frozen=True)
-class WaveExec:
+class WaveSlot:
   wave_id:int
   cu:int
   simd:int
   se:int
+  @property
+  def simd_loc(self) -> str: return f"SE:{self.se} CU:{self.cu} SIMD:{self.simd}"
+  @property
+  def wave_loc(self) -> str: return f"{self.simd_loc} WAVE:{self.wave_id}"
+
+@dataclasses.dataclass(frozen=True)
+class WaveExec(WaveSlot):
   begin_time:int
   end_time:int
   insts:bytearray
@@ -54,11 +61,7 @@ class WaveExec:
       yield InstExec(inst_typ, inst.pc.address, inst.stall, inst.duration, inst.time)
 
 @dataclasses.dataclass(frozen=True)
-class OccEvent:
-  se:int
-  cu:int
-  simd:int
-  wave_id:int
+class OccEvent(WaveSlot):
   time:int
   start:int
 
@@ -83,7 +86,7 @@ class _ROCParseCtx:
 
   def on_occupancy_ev(self, ev:rocprof.rocprofiler_thread_trace_decoder_occupancy_t):
     if DEBUG >= 5: print(f"OCC {ev.time=} {self.active_se=} {ev.cu=} {ev.simd=} {ev.wave_id=} {ev.start=}")
-    self.occ_events.setdefault(unwrap(self.active_kern), []).append(OccEvent(unwrap(self.active_se), ev.cu, ev.simd, ev.wave_id, ev.time, ev.start))
+    self.occ_events.setdefault(unwrap(self.active_kern), []).append(OccEvent(ev.wave_id, ev.cu, ev.simd, unwrap(self.active_se), ev.time, ev.start))
 
   def on_wave_ev(self, ev:rocprof.rocprofiler_thread_trace_decoder_wave_t):
     if DEBUG >= 5: print(f"WAVE {ev.wave_id=} {self.active_se=} {ev.cu=} {ev.simd=} {ev.contexts=} {ev.begin_time=} {ev.end_time=}")

@@ -233,20 +233,18 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     wave_insts:dict[str, dict] = {}
     inst_units:dict[str, itertools.count] = {}
     for w in rctx.inst_execs.get(name, []):
-      row = f"SE:{w.se} CU:{w.cu} SIMD:{w.simd}"
-      if (u:=f"{row} WAVE:{w.wave_id}") not in inst_units: inst_units[u] = itertools.count(0)
+      if (u:=w.wave_loc) not in inst_units: inst_units[u] = itertools.count(0)
       n = next(inst_units[u])
-      events.append(ProfileRangeEvent(row, f"INST WAVE:{w.wave_id} N:{n}", Decimal(w.begin_time), Decimal(w.end_time)))
+      events.append(ProfileRangeEvent(w.simd_loc, f"INST WAVE:{w.wave_id} N:{n}", Decimal(w.begin_time), Decimal(w.end_time)))
       wave_insts[f"{u} N:{n}"] = {"wave":w, "disasm":disasm, "run_number":n}
     # occupancy events
     units:dict[str, itertools.count] = {}
     wave_start:dict[str, int] = {}
     for occ in rctx.occ_events[name]:
-      row = f"SE:{occ.se} CU:{occ.cu} SIMD:{occ.simd}"
-      if (u:=f"{row} WAVE:{occ.wave_id}") not in units: units[u] = itertools.count(0)
+      if (u:=occ.wave_loc) not in units: units[u] = itertools.count(0)
       if u in inst_units: continue
       if occ.start: wave_start[u] = occ.time
-      else: events.append(ProfileRangeEvent(row, f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)), Decimal(occ.time)))
+      else: events.append(ProfileRangeEvent(occ.simd_loc, f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)), Decimal(occ.time)))
     if not events: continue
     # gather and sort all sqtt events for this kernel
     events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+events

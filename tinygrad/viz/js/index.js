@@ -243,7 +243,7 @@ async function renderProfiler(path, unit, opts) {
     const shapes = [], visible = [];
     const eventType = u8(), eventsLen = u32();
     if (eventType === EventTypes.EXEC) {
-      const levelHeight = 2;
+      const levelHeight = (baseHeight-padding)/2;
       const levels = [];
       data.tracks.set(k, { shapes, eventType, visible, offsetY, pcolor:"#9ea2ad" });
       let colorKey, ref;
