@@ -157,16 +157,14 @@ def winoguard(lhs: UOp, rhs: UOp, redu: UOp):
   three = {ax for ax in redu.src[1:] if int(ax.vmax+1) == 3}
   #dfs to check if conv with 3^n kernel and stride = dilation = 1 exists.
   def collect(root: UOp):
-    need, ks, ox, os = set(three), [], [], []
+    need, matches = set(three), []
     for a, b, n in ((u.src[0], u.src[1], u) for u in root.toposort(lambda s: s.op not in {Ops.BUFFERIZE, Ops.BUFFER}) if u.op is Ops.ADD):
       for loop, red in ((a, b), (b, a)):  #could be made nicer with UPat
         if red in need and loop.op is Ops.RANGE and loop not in need:
-          ks.append(red)
-          ox.append(loop)
-          os.append(n)
+          matches.append((red, loop, n))
           need.remove(red)
           break
-    return ks, ox, os #we dont allow the case where output axes are shared between activations and weights
+    return tuple(zip(*matches)) if matches else ([], [], []) #we dont allow the case where output axes are shared between activations and weights
   kL, oxl, oL = collect(lhs)
   kR, oxr, oR = collect(rhs)
   #identify activation and weight if they exist
