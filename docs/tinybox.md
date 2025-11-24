@@ -41,7 +41,7 @@ The BMC also has a web interface you can use if you find that easier.
 It is recommended that you change the BMC password after setting up the box, as the password on the screen is only the initial password.
 
 If you do decide to change the BMC password and no longer want the initial password to be displayed, remove the `/root/.bmc_password` file.
-Reboot after making these changes or restart the `displayservice.service` service.
+Reboot after making these changes or restart the `tinybox-display.service` service.
 
 ## What do I use it for?
 
