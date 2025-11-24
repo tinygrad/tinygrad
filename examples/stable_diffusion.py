@@ -9,7 +9,7 @@ from typing import Dict, Any
 from PIL import Image
 import numpy as np
 from tinygrad import Device, GlobalCounters, dtypes, Tensor, TinyJit
-from tinygrad.helpers import Timing, Context, getenv, fetch, colored, tqdm, flatten
+from tinygrad.helpers import Timing, Context, getenv, fetch, colored, tqdm, flatten, profile_marker
 from tinygrad.nn import Conv2d, GroupNorm
 from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
 from extra.models.clip import Closed, Tokenizer, FrozenOpenClipEmbedder
@@ -266,9 +266,10 @@ if __name__ == "__main__":
   parser.add_argument('--fakeweights', action='store_true', help="Skip loading checkpoints and use fake weights")
   args = parser.parse_args()
 
+  profile_marker("create model")
   model = StableDiffusion()
 
-  # load in weights
+  profile_marker("load in weights")
   with WallTimeEvent(BenchEvent.LOAD_WEIGHTS):
     if not args.fakeweights:
       model_bin = fetch('https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt', 'sd-v1-4.ckpt')
@@ -281,12 +282,13 @@ if __name__ == "__main__":
 
     Tensor.realize(*get_state_dict(model).values())
 
-  # run through CLIP to get context
+  profile_marker("run clip (conditional)")
   tokenizer = Tokenizer.ClipTokenizer()
   prompt = Tensor([tokenizer.encode(args.prompt)])
   context = model.cond_stage_model.transformer.text_model(prompt).realize()
   print("got CLIP context", context.shape)
 
+  profile_marker("run clip (unconditional)")
   prompt = Tensor([tokenizer.encode("")])
   unconditional_context = model.cond_stage_model.transformer.text_model(prompt).realize()
   print("got unconditional CLIP context", unconditional_context.shape)
@@ -309,6 +311,7 @@ if __name__ == "__main__":
   # this is diffusion
   step_times = []
   with Context(BEAM=getenv("LATEBEAM")):
+    profile_marker("start diffusion")
     for index, timestep in (t:=tqdm(list(enumerate(timesteps))[::-1])):
       GlobalCounters.reset()
       st = time.perf_counter_ns()
@@ -324,11 +327,11 @@ if __name__ == "__main__":
   if (assert_time:=getenv("ASSERT_MIN_STEP_TIME")):
     min_time = min(step_times)
     assert min_time < assert_time, f"Speed regression, expected min step time of < {assert_time} ms but took: {min_time} ms"
-  # upsample latent space to image with autoencoder
+  profile_marker("run decoder") # upsample latent space to image with autoencoder
   x = model.decode(latent)
   print(x.shape)
 
-  # save image
+  profile_marker("save image")
   im = Image.fromarray(x.numpy())
   print(f"saving {args.out}")
   im.save(args.out)
