@@ -260,8 +260,8 @@ class Tensor(OpMixin):
     _apply_map_to_tensors(remove_assign_map, name="Remove After")
 
     # create the schedule
-    schedule, var_vals = create_schedule_with_vars(sink)
-    schedule = memory_planner(schedule)
+    with cpu_profile(TracingKey("toposort schedule")): schedule, var_vals = create_schedule_with_vars(sink)
+    with cpu_profile(TracingKey("memory planner")): schedule = memory_planner(schedule)
     if (DEBUG >= 1 and len(schedule) > 1) or DEBUG >= 3: print(f"scheduled {len(schedule)} kernels in {(time.perf_counter()-st)*1000:.2f} ms")
     return schedule, var_vals
 
