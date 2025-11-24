@@ -84,7 +84,7 @@ class Group:
 
     for height in self.ker.range(c.shape[-3], track=False):
       for width in self.ker.range(c.shape[-2], track=False):
-        for inner in self.ker.range(a.shape[-2], AxisType.REDUCE, track=False):
+        for inner in self.ker.range(a.shape[-2], axis_type=AxisType.REDUCE, track=False):
           if a_base_shape.cols == 16:
             a_in = UOp.vectorize(*[a[height, inner, i] for i in range(4)])
             b_in = UOp.vectorize(*[b[inner, width, i] for i in range(4)])
@@ -114,7 +114,7 @@ class Group:
 
     for height in self.ker.range(c.shape[-3], track=False):
       for width in self.ker.range(c.shape[-2], track=False):
-        for inner in self.ker.range(a.shape[-2], AxisType.REDUCE, track=False):
+        for inner in self.ker.range(a.shape[-2], axis_type=AxisType.REDUCE, track=False):
           if a_base_shape.cols == 16:
             a_in = UOp.vectorize(*[a[height, inner, i] for i in range(4)])
             b_in = UOp.vectorize(*[b[width, inner, i] for i in range(4)])
@@ -144,7 +144,7 @@ class Group:
 
     for height in self.ker.range(c.shape[-3], track=False):
       for width in self.ker.range(c.shape[-2], track=False):
-        for inner in self.ker.range(a.shape[-3], AxisType.REDUCE, track=False):
+        for inner in self.ker.range(a.shape[-3], axis_type=AxisType.REDUCE, track=False):
           if a_base_shape.cols == 16:
             a_in = UOp.vectorize(*[a[inner, height, i] for i in range(4)])
             b_in = UOp.vectorize(*[b[inner, width, i] for i in range(4)])
@@ -174,7 +174,7 @@ class Group:
 
     for height in self.ker.range(c.shape[-3], track=False):
       for width in self.ker.range(c.shape[-2], track=False):
-        for inner in self.ker.range(a.shape[-3], AxisType.REDUCE, track=False):
+        for inner in self.ker.range(a.shape[-3], axis_type=AxisType.REDUCE, track=False):
           if a_base_shape.cols == 16:
             a_in = UOp.vectorize(*[a[inner, height, i] for i in range(4)])
             b_in = UOp.vectorize(*[b[width, inner, i] for i in range(4)])
@@ -223,8 +223,8 @@ class Group:
       reg_store = red_reg.flatten()[i].store(init_value).end(i)
       red_reg = red_reg.after(reg_store).reshape(red_reg.shape)
 
-      for width in self.ker.range(src.shape[-2], AxisType.REDUCE, track=False):
-        for inner in self.ker.range(4, AxisType.REDUCE, track=False):
+      for width in self.ker.range(src.shape[-2], axis_type=AxisType.REDUCE, track=False):
+        for inner in self.ker.range(4, axis_type=AxisType.REDUCE, track=False):
           reg_store = red_reg[0].store(op(red_reg[0], src[height, width, inner])).end(width, inner)
           red_reg = red_reg.after(reg_store).reshape(red_reg.shape)
 
@@ -233,7 +233,7 @@ class Group:
       red_local = red_local.after(red_local_store.barrier()).reshape(red_local.shape)
 
       # reduce from shared memory
-      for inner in self.ker.range(3, AxisType.REDUCE, track=False):
+      for inner in self.ker.range(3, axis_type=AxisType.REDUCE, track=False):
         offset = (self.laneid + (1 + inner) * 16) % self.group_threads
         reg_store = red_reg[0].store(op(red_reg[0], red_local[offset])).end(inner)
         red_reg = red_reg.after(reg_store).reshape(red_reg.shape)
@@ -258,8 +258,8 @@ class Group:
       reg_store = red_reg.flatten()[i].store(init_value).end(i)
       red_reg = red_reg.after(reg_store).reshape(red_reg.shape)
 
-      for height in self.ker.range(src.shape[-3], AxisType.REDUCE, track=False):
-        for inner in self.ker.range(4, AxisType.REDUCE, track=False):
+      for height in self.ker.range(src.shape[-3], axis_type=AxisType.REDUCE, track=False):
+        for inner in self.ker.range(4, axis_type=AxisType.REDUCE, track=False):
           reg_store = red_reg[0].store(op(red_reg[0], src[height, width, inner])).end(height, inner)
           red_reg = red_reg.after(reg_store).reshape(red_reg.shape)
 
@@ -268,7 +268,7 @@ class Group:
       red_local = red_local.after(red_local_store.barrier()).reshape(red_local.shape)
 
       # reduce from shared memory
-      for inner in self.ker.range(3, AxisType.REDUCE, track=False):
+      for inner in self.ker.range(3, axis_type=AxisType.REDUCE, track=False):
         offset = (self.laneid + (1 + inner) * 16) % self.group_threads
         reg_store = red_reg[0].store(op(red_reg[0], red_local[offset])).end(inner)
         red_reg = red_reg.after(reg_store).reshape(red_reg.shape)
@@ -323,7 +323,7 @@ class Group:
           total_calls = st.base_shape.num_elements // (self.group_threads * elements_per_thread)
 
           for outer in self.ker.range(total_calls, track=False):
-            for inner in self.ker.range(elements_per_thread, AxisType.UPCAST, track=False):
+            for inner in self.ker.range(elements_per_thread, axis_type=AxisType.UPCAST, track=False):
               load_idx = outer * self.group_threads + self.laneid
               row = load_idx // memcpy_per_row
               col = (load_idx * elements_per_thread) % st.base_shape.cols + inner
