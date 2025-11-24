@@ -35,9 +35,9 @@ class TestTiny(unittest.TestCase):
     out = Tensor.cat(Tensor.ones(8).contiguous(), Tensor.zeros(8).contiguous())
     self.assertListEqual(out.tolist(), [1]*8+[0]*8)
 
-  def test_sum(self):
-    out = Tensor.ones(256).contiguous().sum()
-    self.assertEqual(out.item(), 256)
+  def test_sum(self, N=getenv("SUM_N", 256)):
+    out = Tensor.ones(N).contiguous().sum()
+    self.assertEqual(out.item(), N)
 
   def test_gemm(self, N=getenv("GEMM_N", 64), out_dtype=dtypes.float):
     a = Tensor.ones(N,N).contiguous()

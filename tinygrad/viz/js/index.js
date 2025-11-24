@@ -158,7 +158,7 @@ const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
 const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["get_program","#1d2e62"],["compile","#63b0cd"],["DEFAULT","#354f52"]]),
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
-  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SE:["#2b2e39"],
+  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SE:new Map([["OCC", "#101725"], ["INST", "#0A2042"]]),
   CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
@@ -206,7 +206,7 @@ async function renderProfiler(path, unit, opts) {
   // layout once!
   if (data != null && data.path === path) return updateProgress({ start:false });
   // support non realtime x axis units
-  const formatTime = unit === "realtime" ? formatMicroseconds : (s) => `${s} ${unit}`;
+  const formatTime = unit === "realtime" ? formatMicroseconds : (s) => formatUnit(s, " "+unit);
   const profiler = d3.select("#profiler").html("");
   const buf = cache[path] ?? await fetchValue(path);
   const view = new DataView(buf);
@@ -236,33 +236,36 @@ async function renderProfiler(path, unit, opts) {
   for (let i=0; i<layoutsLen; i++) {
     const nameLen = view.getUint8(offset, true); offset += 1;
     const k = textDecoder.decode(new Uint8Array(buf, offset, nameLen)); offset += nameLen;
-    const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px").style("width", opts.width).style("min-height", opts.height);
+    const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px").style("width", opts.width);
     const { y:baseY, height:baseHeight } = rect(div.node());
     const colors = colorScheme[k.split(":")[0]] ?? colorScheme.DEFAULT;
     const offsetY = baseY-canvasTop+padding/2;
     const shapes = [], visible = [];
     const eventType = u8(), eventsLen = u32();
     if (eventType === EventTypes.EXEC) {
-      const levelHeight = baseHeight-padding;
+      const levelHeight = (baseHeight-padding)*(opts.heightScale ?? 1);
       const levels = [];
       data.tracks.set(k, { shapes, eventType, visible, offsetY, pcolor:"#9ea2ad" });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
         const e = {name:strings[u32()], ref:optional(u32()), key:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
         // find a free level to put the event
-        let depth = levels.findIndex(levelEt => e.st >= levelEt);
-        const et = e.st+Math.trunc(e.dur);
-        if (depth === -1) {
-          depth = levels.length;
-          levels.push(et);
-        } else levels[depth] = et;
+        let depth = 0;
+        if (opts.levelKey != null) { depth = opts.levelKey(e); levels[depth] = 0; }
+        else {
+          depth = levels.findIndex(levelEt => e.st >= levelEt);
+          const et = e.st+Math.trunc(e.dur);
+          if (depth === -1) {
+            depth = levels.length;
+            levels.push(et);
+          } else levels[depth] = et;
+        }
         if (depth === 0) colorKey = e.name.split(" ")[0];
         if (!colorMap.has(colorKey)) {
           const color = colors instanceof Map ? (colors.get(colorKey) || colors.get("DEFAULT")) : cycleColors(colors, colorMap.size);
           colorMap.set(colorKey, d3.rgb(color));
         }
-        const base = colorMap.get(colorKey), s = Math.min(Math.pow(1/0.7, depth), 240 / Math.max(base.r, base.g, base.b));
-        const fillColor = d3.rgb(base.r*s, base.g*s, base.b*s).toString();
+        const fillColor = colorMap.get(colorKey).brighter(0.3*depth).toString();
         const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
         let shapeRef = e.ref;
         if (shapeRef != null) { ref = {ctx:e.ref, step:0}; shapeRef = ref; }
@@ -286,7 +289,7 @@ async function renderProfiler(path, unit, opts) {
                       ctx:shapeRef?.ctx, step:shapeRef?.step };
         if (e.key != null) shapeMap.set(e.key, arg);
         // offset y by depth
-        shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label, fillColor });
+        shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label:opts.hideLabels ? null : label, fillColor });
       }
       div.style("height", levelHeight*levels.length+padding+"px").style("pointerEvents", "none");
     } else {
@@ -472,7 +475,7 @@ async function renderProfiler(path, unit, opts) {
       drawLine(ctx, [x, x], [0, canvas.clientHeight], { color:m.color });
       ctx.fillText(m.name, x+2, 1);
     }
-    for (const [p, color] of paths) { ctx.lineWidth = 1.4; ctx.strokeStyle = color; ctx.stroke(p); }
+    for (const [p, color] of paths) { ctx.strokeStyle = color; ctx.stroke(p); }
   }
 
   function resize() {
@@ -675,7 +678,8 @@ async function main() {
         while (stack.length && stack.at(-1).depth >= u.depth) stack.pop();
         const list = stack.length > 0 ? stack.at(-1).li : ul;
         u.li = list.appendChild(document.createElement("ul"));
-        u.li.id = `step-${i}-${j}`;
+        u.li.id = `step-${i}-${j}`
+        u.li.style.marginLeft = u.depth > 0 ? "calc(6px + 1ch)" : "6px";
         const p = u.li.appendChild(document.createElement("p"));
         p.appendChild(colored(`${u.name}`+(u.match_count ? ` - ${u.match_count}` : '')));
         p.onclick = (e) => {
@@ -706,7 +710,7 @@ async function main() {
     if (url.pathname+url.search !== ckey) e.close();
     else if (e.readyState === EventSource.OPEN) activeSrc = e;
   }
-  if (ctx.name === "Profiler") return renderProfiler("/get_profile", "realtime", { width:"132px", height:"32px" });
+  if (ctx.name === "Profiler") return renderProfiler("/get_profile", "realtime", { width:"132px" });
   if (workerUrl == null) await initWorker();
   if (ckey in cache) {
     ret = cache[ckey];
@@ -714,7 +718,11 @@ async function main() {
   // ** Disassembly view
   if (!ckey.startsWith("/rewrites")) {
     if (!(ckey in cache)) cache[ckey] = ret = await fetchValue(ckey);
-    if (ret instanceof ArrayBuffer) return renderProfiler(ckey, "clk", { height:"16px" }); // cycles on the x axis
+    // cycles on the x axis
+    if (ret instanceof ArrayBuffer) {
+      opts = {heightScale:0.5, hideLabels:true, levelKey:(e) => parseInt(e.name.split(" ")[1].split(":")[1])};
+      return renderProfiler(ckey, "clk", opts);
+    }
     displaySelection("#custom");
     metadata.innerHTML = "";
     const root = d3.create("div").classed("raw-text", true).node();

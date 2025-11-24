@@ -199,7 +199,10 @@ class AMDComputeQueue(HWQueue):
       for xcc in range(self.dev.xccs):
         with self.pred_exec(xcc_mask=1 << xcc):
           for i in range(8 if prg.dev.target >= (11,0,0) else 4):
-            self.wreg(getattr(self.gc, f'regCOMPUTE_STATIC_THREAD_MGMT_SE{i}'), min(0xffffffff, (1 << (se_cap + (1 if i == 0 else 0))) - 1))
+            if SQTT_LIMIT_SE > 1: # only run unmasked shader engines
+              self.wreg(getattr(self.gc, f'regCOMPUTE_STATIC_THREAD_MGMT_SE{i}'), 1 if SQTT_ITRACE_SE_MASK.value & (1 << i) else 0)
+            else:
+              self.wreg(getattr(self.gc, f'regCOMPUTE_STATIC_THREAD_MGMT_SE{i}'), min(0xffffffff, (1 << (se_cap + (1 if i == 0 else 0))) - 1))
 
   def sqtt_userdata(self, data, *extra_dwords):
     data_ints = [x[0] for x in struct.iter_unpack('<I', bytes(data))] + list(extra_dwords)
