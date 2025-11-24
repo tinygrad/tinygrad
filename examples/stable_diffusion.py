@@ -322,13 +322,15 @@ if __name__ == "__main__":
           latent = run(model, unconditional_context, context, latent, Tensor([timestep]), alphas[tid], alphas_prev[tid], Tensor([args.guidance]))
           if args.timing: Device[Device.DEFAULT].synchronize()
       step_times.append((time.perf_counter_ns() - st)*1e-6)
+    # done with diffusion model
     del run
+    del model.model
 
   if (assert_time:=getenv("ASSERT_MIN_STEP_TIME")):
     min_time = min(step_times)
     assert min_time < assert_time, f"Speed regression, expected min step time of < {assert_time} ms but took: {min_time} ms"
   profile_marker("run decoder") # upsample latent space to image with autoencoder
-  x = model.decode(latent)
+  x = model.decode(latent).realize()
   print(x.shape)
 
   profile_marker("save image")
@@ -338,8 +340,8 @@ if __name__ == "__main__":
   # Open image.
   if not args.noshow: im.show()
 
-  # validation!
   if args.prompt == default_prompt and args.steps == 6 and args.seed == 0 and args.guidance == 7.5:
+    profile_marker("validate")
     ref_image = Tensor(np.array(Image.open(Path(__file__).parent / "stable_diffusion_seed0.png")))
     distance = (((x.cast(dtypes.float) - ref_image.cast(dtypes.float)) / ref_image.max())**2).mean().item()
     assert distance < 3e-3, colored(f"validation failed with {distance=}", "red")  # higher distance with WINO
