@@ -337,7 +337,7 @@ def get_render(i:int, j:int, fmt:str) -> dict:
     for e in w.unpack_insts():
       category = e.typ.split("_")[-1]
       if category not in categories: categories.add(category)
-      events.append(ProfileRangeEvent(category, pc_to_inst[e.pc][0], Decimal(e.time), Decimal(e.time+e.dur)))
+      events.append(ProfileRangeEvent(category, f"{category} {pc_to_inst[e.pc][0]}", Decimal(e.time), Decimal(e.time+e.dur)))
     events = [ProfilePointEvent(x.split("_")[-1], "start", x, ts=Decimal(0)) for x in categories]+events
     return {"value":get_profile(events), "content_type":"application/octet-stream"}
   if fmt == "sqtt-insts":
