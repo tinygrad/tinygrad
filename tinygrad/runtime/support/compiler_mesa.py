@@ -129,7 +129,7 @@ class IR3Compiler(NIRCompiler):
     v.num_uavs = (info:=nir_shader.contents.info).num_ssbos + info.num_images
     assert not mesa.ir3_compile_shader_nir(self.cc, shader, v), "compilation failed"
     lib = ctypes.cast(mesa.ir3_shader_assemble(v), ctypes.POINTER(ctypes.c_uint32))
-    # NB: bytes(v) means the pointers in v are no longer safe! a custom __reduce__ that supports pointers for c.Struct would make this simpler
+    # NB: bytes(v) means the pointers in v are no longer safe! eventually compilers should have a unified method for outputing metadata
     ret = bytes(v) + bytes(v.const_state.contents) + ctypes.string_at(v.imm_state.values, v.imm_state.count * 4) + ctypes.string_at(lib, v.info.size)
     mesa.ralloc_free(ctypes.pointer(v))
     return ret

@@ -78,8 +78,8 @@ def nimm_set(imm:mesa.nir_def, x, dtype:DType):
 def nimm(b:mesa.nir_builder, x, dtype:DType) -> mesa.nir_def:
   nimm_set(getattr((instr:=mesa.nir_load_const_instr_create(b.shader, 1, 1 if dtype==dtypes.bool else dtype.itemsize * 8)).contents, "def"), x, dtype)
   return instr
-@nir_instr(nc=1, bs=lambda dtype: 1 if dtype == dtypes.bool else dtype.itemsize * 8)
-def nundef(b, dtype): return mesa.nir_undef_instr_create(b.shader, 1, 1 if dtype == dtypes.bool else dtype.itemsize * 8)
+nundef = nir_instr(nc=1, bs=lambda dtype: 1 if dtype == dtypes.bool else dtype.itemsize * 8)(
+  lambda b,dtype: mesa.nir_undef_instr_create(b.shader, 1, 1 if dtype == dtypes.bool else dtype.itemsize * 8))
 
 deref_var = nir_instr(nc=1, bs=32, modes=lambda var:var.data.mode, type=lambda var:var.type, var=lambda var:ctypes.pointer(var))( # pylint: disable=W0108
   lambda b, var: mesa.nir_deref_instr_create(b.shader, mesa.nir_deref_type_var))
