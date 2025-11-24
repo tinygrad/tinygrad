@@ -236,7 +236,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
       row = f"SE:{w.se} CU:{w.cu} SIMD:{w.simd}"
       if (u:=f"{row} WAVE:{w.wave_id}") not in inst_units: inst_units[u] = itertools.count(0)
       n = next(inst_units[u])
-      events.append(ProfileRangeEvent(row, f"INST N:{n}", Decimal(w.begin_time), Decimal(w.end_time)))
+      events.append(ProfileRangeEvent(row, f"INST WAVE:{w.wave_id} N:{n}", Decimal(w.begin_time), Decimal(w.end_time)))
       wave_insts[f"{u} N:{n}"] = {"wave":w, "disasm":disasm, "run_number":n}
     # occupancy events
     units:dict[str, itertools.count] = {}
@@ -246,7 +246,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
       if (u:=f"{row} WAVE:{occ.wave_id}") not in units: units[u] = itertools.count(0)
       if u in inst_units: continue
       if occ.start: wave_start[u] = occ.time
-      else: events.append(ProfileRangeEvent(row, f"OCC N:{next(units[u])}", Decimal(wave_start.pop(u)), Decimal(occ.time)))
+      else: events.append(ProfileRangeEvent(row, f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)), Decimal(occ.time)))
     if not events: continue
     # gather and sort all sqtt events for this kernel
     events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+events

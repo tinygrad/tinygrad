@@ -250,12 +250,16 @@ async function renderProfiler(path, unit, opts) {
       for (let j=0; j<eventsLen; j++) {
         const e = {name:strings[u32()], ref:optional(u32()), key:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
         // find a free level to put the event
-        let depth = levels.findIndex(levelEt => e.st >= levelEt);
+        const depth = parseInt(e.name.split(" ")[1].split(":")[1]);
         const et = e.st+Math.trunc(e.dur);
+        levels[depth] = et;
+        /*
+        let depth = levels.findIndex(levelEt => e.st >= levelEt);
         if (depth === -1) {
           depth = levels.length;
           levels.push(et);
         } else levels[depth] = et;
+        */
         if (depth === 0) colorKey = e.name.split(" ")[0];
         if (!colorMap.has(colorKey)) {
           const color = colors instanceof Map ? (colors.get(colorKey) || colors.get("DEFAULT")) : cycleColors(colors, colorMap.size);
