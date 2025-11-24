@@ -122,6 +122,7 @@ symbolic_simple = propagate_invalid + PatternMatcher([
 _lt_fold_cache = WeakUOpCache()
 _simplex_canon_cache = WeakUOpCache()
 _simplify_valid_cache = WeakUOpCache()
+_uop_given_valid_cache = WeakUOpCache()
 
 def lt_folding(x:UOp, c:int) -> UOp|None:
   if (ret:=_lt_fold_cache.get(x, c)) is not None: return ret
@@ -287,6 +288,8 @@ def parse_valid(v:UOp) -> tuple[UOp, bool, int]|None:
   return None
 
 def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
+  if (cache_ret:=_uop_given_valid_cache.get(valid, uop)) is not None: return cache_ret
+  if not uop.has_st_var: return uop  # skip if uop has no symbolic variables
   # first, parse valid into {expr: (lower_bound, upper_bound)}
   bounds:defaultdict[UOp, list[ConstType|None]] = defaultdict(lambda: [None, None])
   for stmt in valid.split_uop(Ops.AND):
@@ -336,6 +339,7 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
     else:
       rev_dict = {newX:X for X,newX in sub_dict.items()}
       uop = simplified_s_uop.substitute(rev_dict).simplify()
+  _uop_given_valid_cache.set(valid, uop, uop)
   return uop
 
 def _valid_priority(v: UOp, valids:list[UOp], topo_cache:dict[UOp, dict[UOp, None]]) -> int:
@@ -377,6 +381,7 @@ def simplify_valid(valid:UOp) -> UOp|None:
 def reduce_mul_chain(r:UOp):
   if r.arg not in {Ops.ADD, Ops.MAX}: return None
   if r.dtype != r.src[0].dtype: return None
+  if not r.src[0].has_st_var: return None  # skip if no symbolic variables
   inside, outside = [], []
   for m in r.src[0].split_uop(Ops.MUL):
     m_parents = m.toposort()
