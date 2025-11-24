@@ -62,7 +62,7 @@ class Group:
 
     for height in self.ker.range(c.shape[-3], track=False):
       for width in self.ker.range(c.shape[-2], track=False):
-        for inner in self.ker.range(a.shape[-2], AxisType.REDUCE, track=False):
+        for inner in self.ker.range(a.shape[-2], axis_type=AxisType.REDUCE, track=False):
           wmma_arg = ("WMMA_8_16_16_bfloat16_float", (8, 16, 16), dtypes.bfloat16, dtypes.float, "CUDA", 32, (((4, 2), (3, 2), (8, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ())
 
           a_in = UOp.vectorize(*[a[height, inner, i] for i in range(8)])
@@ -85,7 +85,7 @@ class Group:
 
     for height in self.ker.range(c.shape[-3], track=False):
       for width in self.ker.range(c.shape[-2], track=False):
-        for inner in self.ker.range(a.shape[-2], AxisType.REDUCE, track=False):
+        for inner in self.ker.range(a.shape[-2], axis_type=AxisType.REDUCE, track=False):
           wmma_arg = ("WMMA_8_16_16_bfloat16_float", (8, 16, 16), dtypes.bfloat16, dtypes.float, "CUDA", 32, (((4, 2), (3, 2), (8, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ())
 
           a_in = UOp.vectorize(*[a[height, inner, i] for i in range(8)])
@@ -135,8 +135,8 @@ class Group:
       red_reg = red_reg.after(reg_store).reshape(red_reg.shape)
 
       for outer in self.ker.range(2, track=False):
-        for width in self.ker.range(src.shape[-2], AxisType.REDUCE, track=False):
-          for inner in self.ker.range(4, AxisType.REDUCE, track=False):
+        for width in self.ker.range(src.shape[-2], axis_type=AxisType.REDUCE, track=False):
+          for inner in self.ker.range(4, axis_type=AxisType.REDUCE, track=False):
             elem_index = inner + 2 * (inner // 2) + outer * 2
             reg_store = red_reg[outer].store(op(red_reg[outer], src[height, width, elem_index])).end(inner, width, outer)
             red_reg = red_reg.after(reg_store).reshape(red_reg.shape)
@@ -148,7 +148,7 @@ class Group:
 
       # reduce from shared memory
       for outer in self.ker.range(2, track=False):
-        for inner in self.ker.range(3, AxisType.REDUCE, track=False):
+        for inner in self.ker.range(3, axis_type=AxisType.REDUCE, track=False):
           offset = (self.laneid // 4) * 4 + ((self.laneid + inner + 1) % 4)
           reg_store = red_reg[outer].store(op(red_reg[outer], red_local[offset, outer])).end(inner, outer)
           red_reg = red_reg.after(reg_store).reshape(red_reg.shape)

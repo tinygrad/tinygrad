@@ -6,13 +6,15 @@ from extra.thunder.tiny.tk.tiles import GL, ST, RT, RV
 
 class _tk_range:
   user_rid = 0
-  def __init__(self, end:int, axis_type:AxisType): self.end, self.axis_type, self.done = end, axis_type, False
+  def __init__(self, start:int, end:int, step:int, axis_type:AxisType):
+    self.start, self.end, self.step = start, end, step
+    self.axis_type, self.done = axis_type, False
   def __iter__(self): return self
   def __next__(self):
     if not self.done:
       self.done = True
       _tk_range.user_rid += 1
-      self._rng = UOp.range(self.end, _tk_range.user_rid-1, axis_type=self.axis_type)
+      self._rng = UOp.range(self.end // self.step, _tk_range.user_rid-1, axis_type=self.axis_type) * self.step + self.start
       return self._rng
     raise StopIteration
 
@@ -43,8 +45,9 @@ class Kernel(AbstractContextManager):
   @property
   def warpgroup(self): return self.group(4)
 
-  def range(self, end:int, axis_type:AxisType=AxisType.LOOP, track:bool=True):
-    rng = _tk_range(end, axis_type)
+  def range(self, start:int, end:int=0, step:int=1, axis_type:AxisType=AxisType.LOOP, track:bool=True):
+    if end == 0: start, end = 0, start
+    rng = _tk_range(start, end, step, axis_type)
     if track: self.range_stack.append(rng)
     return rng
 
