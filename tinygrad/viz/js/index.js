@@ -265,9 +265,7 @@ async function renderProfiler(path, unit, opts) {
           const color = colors instanceof Map ? (colors.get(colorKey) || colors.get("DEFAULT")) : cycleColors(colors, colorMap.size);
           colorMap.set(colorKey, d3.rgb(color));
         }
-        const base = colorMap.get(colorKey), s = Math.min(Math.pow(1/0.7, depth), 120 / Math.max(base.r, base.g, base.b));
-        // const fillColor = d3.rgb(base.r*s, base.g*s, base.b*s).toString();
-        const fillColor = base.brighter(0.3*depth).toString();
+        const fillColor = colorMap.get(colorKey).brighter(0.3*depth).toString();
         const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
         let shapeRef = e.ref;
         if (shapeRef != null) { ref = {ctx:e.ref, step:0}; shapeRef = ref; }
