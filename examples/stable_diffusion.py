@@ -311,8 +311,8 @@ if __name__ == "__main__":
   # this is diffusion
   step_times = []
   with Context(BEAM=getenv("LATEBEAM")):
-    profile_marker("start diffusion")
     for index, timestep in (t:=tqdm(list(enumerate(timesteps))[::-1])):
+      profile_marker(f"step {len(timesteps)-index-1}")
       GlobalCounters.reset()
       st = time.perf_counter_ns()
       t.set_description("%3d %3d" % (index, timestep))
