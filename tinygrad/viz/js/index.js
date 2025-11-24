@@ -158,7 +158,7 @@ const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
 const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["get_program","#1d2e62"],["compile","#63b0cd"],["DEFAULT","#354f52"]]),
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
-  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SE:["#2b2e39"],
+  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SE:["#001233"],
   CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
@@ -206,7 +206,7 @@ async function renderProfiler(path, unit, opts) {
   // layout once!
   if (data != null && data.path === path) return updateProgress({ start:false });
   // support non realtime x axis units
-  const formatTime = unit === "realtime" ? formatMicroseconds : (s) => `${s} ${unit}`;
+  const formatTime = unit === "realtime" ? formatMicroseconds : (s) => formatUnit(s, " "+unit);
   const profiler = d3.select("#profiler").html("");
   const buf = cache[path] ?? await fetchValue(path);
   const view = new DataView(buf);
@@ -243,7 +243,7 @@ async function renderProfiler(path, unit, opts) {
     const shapes = [], visible = [];
     const eventType = u8(), eventsLen = u32();
     if (eventType === EventTypes.EXEC) {
-      const levelHeight = baseHeight-padding;
+      const levelHeight = 8;
       const levels = [];
       data.tracks.set(k, { shapes, eventType, visible, offsetY, pcolor:"#9ea2ad" });
       let colorKey, ref;
@@ -261,8 +261,9 @@ async function renderProfiler(path, unit, opts) {
           const color = colors instanceof Map ? (colors.get(colorKey) || colors.get("DEFAULT")) : cycleColors(colors, colorMap.size);
           colorMap.set(colorKey, d3.rgb(color));
         }
-        const base = colorMap.get(colorKey), s = Math.min(Math.pow(1/0.7, depth), 240 / Math.max(base.r, base.g, base.b));
-        const fillColor = d3.rgb(base.r*s, base.g*s, base.b*s).toString();
+        const base = colorMap.get(colorKey);
+        // const base = colorMap.get(colorKey), s = Math.min(Math.pow(1/0.7, depth), 1000 / Math.max(base.r, base.g, base.b));
+        const fillColor = base.brighter(0.3*depth).toString();
         const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
         let shapeRef = e.ref;
         if (shapeRef != null) { ref = {ctx:e.ref, step:0}; shapeRef = ref; }
@@ -402,6 +403,7 @@ async function renderProfiler(path, unit, opts) {
     const st = visibleX[0], et = visibleX[1];
     xscale.domain(visibleX);
     // draw shapes
+    ctx.font = "5px sans-serif";
     const paths = [];
     for (const [_, { shapes, eventType, visible, offsetY, valueMap, pcolor }] of data.tracks) {
       visible.length = 0;
@@ -446,6 +448,7 @@ async function renderProfiler(path, unit, opts) {
       }
     }
     // draw axes
+    ctx.font = "8px sans-serif";
     drawLine(ctx, xscale.range(), [0, 0]);
     for (const tick of xscale.ticks()) {
       // tick line
@@ -472,7 +475,7 @@ async function renderProfiler(path, unit, opts) {
       drawLine(ctx, [x, x], [0, canvas.clientHeight], { color:m.color });
       ctx.fillText(m.name, x+2, 1);
     }
-    for (const [p, color] of paths) { ctx.lineWidth = 1.4; ctx.strokeStyle = color; ctx.stroke(p); }
+    for (const [p, color] of paths) { ctx.lineWidth = 0.5; ctx.strokeStyle = color; ctx.stroke(p); }
   }
 
   function resize() {
@@ -692,7 +695,7 @@ async function main() {
         if (subrewrites.length > 0) { l.appendChild(d3.create("span").text(` (${subrewrites.length})`).node()); l.parentElement.classList.add("has-children"); }
       }
     }
-    return setState({ currentCtx:-1 });
+    return setState({ currentCtx:10 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;

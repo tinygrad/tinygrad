@@ -233,16 +233,18 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     # occupancy events
     wave_start:dict[str, int] = {}
     for occ in rctx.occ_events[name]:
-      if (row:=f"SE:{occ.se} CU:{occ.cu} SIMD:{occ.simd} WAVE:{occ.wave_id}") not in units: units[row] = itertools.count(0)
-      if occ.start: wave_start[row] = occ.time
-      else: events.append(ProfileRangeEvent(row, f"OCC N:{next(units[row])}", Decimal(wave_start.pop(row)), Decimal(occ.time)))
+      row = f"SE:{occ.se} CU:{occ.cu} SIMD:{occ.simd}"
+      if (u:=f"{row} WAVE:{occ.wave_id}") not in units: units[u] = itertools.count(0)
+      if occ.start: wave_start[u] = occ.time
+      else: events.append(ProfileRangeEvent(row, f"OCC N:{next(units[u])}", Decimal(wave_start.pop(u)), Decimal(occ.time)))
     # wave events
     wave_insts:dict[str, dict] = {}
     inst_units:dict[str, itertools.count] = {u:itertools.count(0) for u in units}
     for w in rctx.inst_execs.get(name, []):
-      n = next(inst_units[row:=f"SE:{w.se} CU:{w.cu} SIMD:{w.simd} WAVE:{w.wave_id}"])
+      row = f"SE:{w.se} CU:{w.cu} SIMD:{w.simd}"
+      n = next(inst_units[u:=f"{row} WAVE:{w.wave_id}"])
       events.append(ProfileRangeEvent(row, f"INST N:{n}", Decimal(w.begin_time), Decimal(w.end_time)))
-      wave_insts[f"{row} N:{n}"] = {"wave":w, "disasm":disasm, "run_number":n}
+      wave_insts[f"{u} N:{n}"] = {"wave":w, "disasm":disasm, "run_number":n}
     if not events: continue
     # gather and sort all sqtt events for this kernel
     events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+events
