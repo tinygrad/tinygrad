@@ -8,10 +8,10 @@ from sz import NONCORE_DIRS
 # llama 3 tokenizer
 tokenizer = Tokenizer(fetch("https://huggingface.co/bofenghuang/Meta-Llama-3-8B/resolve/main/original/tokenizer.model").as_posix())
 
-def read_code(base_path):
+def read_code(base_path, full=False):
   ret = []
   for path, _, files in os.walk(os.path.join(base_path, "tinygrad")):
-    if not getenv("CORE") and any(path.split("./")[1].startswith(x) for x in NONCORE_DIRS): continue
+    if not full and any(path.split("./")[1].startswith(x) for x in NONCORE_DIRS): continue
     for name in files:
       if not name.endswith(".py"): continue
       if 'tinygrad/runtime/autogen' in path.replace('\\', '/'): continue
@@ -23,9 +23,10 @@ def read_code(base_path):
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Analyze and optionally save tinygrad code.")
   parser.add_argument("--output", help="Output file to write the combined code to.")
+  parser.add_argument("--full", action="store_true", help="All directories")
   args = parser.parse_args()
 
-  ret = read_code(".")
+  ret = read_code(".", args.full)
 
   table = []
   for name,code in ret:
