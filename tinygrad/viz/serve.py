@@ -228,23 +228,25 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
   if not any([rctx.inst_execs, rctx.occ_events]): return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
   steps:list[dict] = []
   for name,disasm in rctx.disasms.items():
-    units:dict[str, itertools.count] = {}
     events:list[ProfileEvent] = []
+    # wave instruction events
+    wave_insts:dict[str, dict] = {}
+    inst_units:dict[str, itertools.count] = {}
+    for w in rctx.inst_execs.get(name, []):
+      row = f"SE:{w.se} CU:{w.cu} SIMD:{w.simd}"
+      if (u:=f"{row} WAVE:{w.wave_id}") not in inst_units: inst_units[u] = itertools.count(0)
+      n = next(inst_units[u])
+      events.append(ProfileRangeEvent(row, f"INST N:{n}", Decimal(w.begin_time), Decimal(w.end_time)))
+      wave_insts[f"{u} N:{n}"] = {"wave":w, "disasm":disasm, "run_number":n}
     # occupancy events
+    units:dict[str, itertools.count] = {}
     wave_start:dict[str, int] = {}
     for occ in rctx.occ_events[name]:
       row = f"SE:{occ.se} CU:{occ.cu} SIMD:{occ.simd}"
       if (u:=f"{row} WAVE:{occ.wave_id}") not in units: units[u] = itertools.count(0)
+      if u in inst_units: continue
       if occ.start: wave_start[u] = occ.time
       else: events.append(ProfileRangeEvent(row, f"OCC N:{next(units[u])}", Decimal(wave_start.pop(u)), Decimal(occ.time)))
-    # wave events
-    wave_insts:dict[str, dict] = {}
-    inst_units:dict[str, itertools.count] = {u:itertools.count(0) for u in units}
-    for w in rctx.inst_execs.get(name, []):
-      row = f"SE:{w.se} CU:{w.cu} SIMD:{w.simd}"
-      n = next(inst_units[u:=f"{row} WAVE:{w.wave_id}"])
-      events.append(ProfileRangeEvent(row, f"INST N:{n}", Decimal(w.begin_time), Decimal(w.end_time)))
-      wave_insts[f"{u} N:{n}"] = {"wave":w, "disasm":disasm, "run_number":n}
     if not events: continue
     # gather and sort all sqtt events for this kernel
     events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+events
