@@ -5,9 +5,14 @@ from enum import IntEnum
 class SrcEnum(IntEnum):
   """Table 65. SOP2 Fields: SSRC encoding"""
 
+  FLAT_SCRATCH_LO = 102; FLAT_SCRATCH_HI = 103 # CDNA only
+  XNACK_MASK_LO = 104; XNACK_MASK_HI = 105 # CDNA only
+
   VCC_LO = 106; VCC_HI = 107
 
-  NULL    = 124
+  # TTMP0 - TTMP15
+
+  NULL    = 124  # M0 on CDNA4
   M0      = 125
   EXEC_LO = 126; EXEC_HI = 127
 
@@ -28,6 +33,10 @@ class SrcEnum(IntEnum):
 
   INV_2PI = 248
   DPP16   = 250  # VOp only
+
+  VCCZ    = 251 # CDNA only
+  EXECZ   = 252 # CDNA only
+
   SCC     = 253
   LITERAL = 255
 

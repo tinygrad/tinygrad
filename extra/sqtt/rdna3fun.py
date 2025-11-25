@@ -80,7 +80,7 @@ class SOPP(Inst32):
   simm16:SImm   = bits[15:0]
 
 class VOP2(Inst32):
-  encoding   = bits[31] == 0b1
+  encoding   = bits[31] == 0b0
   op:VOP2Op  = bits[30:25]
   vdst:VGPR  = bits[24:17]
   vsrc1:VGPR = bits[16:9]
@@ -99,11 +99,13 @@ class SMEM(Inst64):
 # s_load_b128 s[4:7], s[0:1], null
 
 s_load_b128 = functools.partial(SMEM, SMEMOp.S_LOAD_B128)
+v_and_b32_e32 = functools.partial(VOP2, VOP2Op.V_AND_B32)
+s = SGPR  # assembly-style alias
+v = VGPR  # assembly-style alias
+
+NULL = SSrc.NULL
 
 if __name__ == "__main__":
-  s = SGPR  # assembly-style alias
-  v = VGPR  # assembly-style alias
-
   # assembler
   inst = SOP2(SOP2Op.S_ADD_U32, s[3], s[2], s[1])
   word = inst.to_int()
@@ -115,12 +117,14 @@ if __name__ == "__main__":
   inst = SOP2.from_int(word)
   print(inst)
 
-  # some of these are wrong
+  s_load_b128(s[4:7], s[0:1], NULL)
+  v_and_b32_e32(v[0], 0x3FF, v[0])
 
+  # some of these are wrong
   program = [
     VOP3(VOP3Op.V_BFE_U32, v[1], v[0], 10, 10),
     SMEM(SMEMOp.S_LOAD_B128, s[4:7], s[0:1], SSrc.NULL),
-    VOP2(VOP2Op.V_AND_B32_E32, v[0], 0x3FF, v[0]),
+    VOP2(VOP2Op.V_AND_B32, v[0], 0x3FF, v[0]),
     SOP1(SOP1Op.S_MULK_I32, s[3], 0x87),
     VOP3(VOP3Op.V_MAD_U64_U32, v[1:2], SSrc.NULL, s[2], 3, v[1:2]),
     VOP2(VOP2Op.V_MUL_U32_U24_E32, v[0], 45, v[0]),
@@ -144,7 +148,7 @@ if __name__ == "__main__":
 
   program = [
     v_bfe_u32(v[1], v[0], 10, 10),
-    s_load_b128(s[4:7], s[0:1], NULL),
+    s_load_b128(s[4:7], s[0:1], SrcEnum.NULL),
     v_and_b32_e32(v[0], 0x3FF, v[0]),
     s_mulk_i32(s[3], 0x87),
     v_mad_u64_u32(v[1:2], NULL, s[2], 3, v[1:2]),
