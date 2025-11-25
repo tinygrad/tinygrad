@@ -18,10 +18,12 @@ from typing import Generator
 import argparse, math, os, time
 from pathlib import Path
 from tinygrad import Tensor, TinyJit, UOp, nn, dtypes, Device
-from tinygrad.helpers import fetch, getenv, DEBUG, Timing
+from tinygrad.helpers import fetch, getenv, DEBUG, Timing, profile_marker
 from tinygrad.nn.state import load_state_dict, ggml_data_to_tensor
 from examples.llama3 import load
 from transformers import AutoTokenizer
+from icecream import install
+install()
 
 # adapted from https://huggingface.co/openai/gpt-oss-20b/blob/main/config.json
 MODELS = {
@@ -198,6 +200,7 @@ class TransformerBlock:
     k = self.cache_kv[0, :, :, 0:start_pos+T, :]
     v = self.cache_kv[1, :, :, 0:start_pos+T, :]
 
+    ic(type(start_pos), start_pos)
     mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).triu(start_pos+1) if T > 1 else None
     if self.sliding_window:
      sliding_mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).tril(-self.sliding_window)
@@ -235,8 +238,10 @@ class Transformer:
 
   @staticmethod
   def from_pretrained(model_path:Path, params:dict[str, int|float|dict], fakeweights:bool=False) -> Transformer:
+    if DEBUG >= 1: profile_marker("create model")
     model = Transformer(**params) # type: ignore[arg-type]
     if not fakeweights:
+      if DEBUG >= 1: profile_marker("load in weights")
       num_blocks = len(model.blk)
       weights = load(str(model_path / "model.safetensors.index.json"))
       weights = convert_from_huggingface(weights, num_blocks)
@@ -245,21 +250,13 @@ class Transformer:
       load_state_dict(model, weights, strict=False, consume=True)
     return model
 
-<<<<<<< Updated upstream
-  def generate(self, tokens:list[int], max_new_tokens:int) -> Generator[int, None, None]:
-    start_pos, prompt_len = 0, len(tokens)
-    t = Tensor([tokens], dtype="int32")
-    while len(tokens) < min(self.max_context, max_new_tokens+prompt_len):
-      t = self(t, start_pos)
-=======
   def generate(self, tokens:list[int], start_pos=0, max_new_tokens:int=4096):
     v_start_pos = UOp.variable("start_pos", 1, self.max_context-1)
     start_pos = 0
     t = Tensor([tokens[start_pos:]], dtype="int32")
     self.forward_jit.reset()  # TODO: why is this required? root cause the issue and make it not be needed
-    while len(tokens) < min(self.max_context, max_new_tokens):
+    while len(tokens) < min(self.max_context, max_new_tokens+len(tokens)):
       t = self(t, v_start_pos.bind(start_pos) if getenv("SYM", 1) and start_pos != 0 and t.shape[-1] == 1 else start_pos)
->>>>>>> Stashed changes
       next_id = int(t.item())
       tokens.append(next_id)
       start_pos = len(tokens) - 1
@@ -295,8 +292,10 @@ def main(args):
   # generate text
   print(args.prompt, end="\n" if args.timing else "", flush=True)
   ids = tokenizer(args.prompt)["input_ids"]
+  ic(ids)
   st = time.perf_counter()
-  for next_id in model.generate(ids, args.max_new_tokens):
+  for next_id in model.generate(ids, max_new_tokens=args.max_new_tokens):
+    ic(next_id)
     duration, st = time.perf_counter()-st, time.perf_counter()
     print(tokenizer.decode([next_id], skip_special_tokens=True), flush=True, end="")
     if args.timing: print(f'\t{1/duration:.3f} tok/sec', end="\n")
