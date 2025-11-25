@@ -157,17 +157,29 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def op_in_backward_slice_with_self(self, *ops:Ops): return any(x.op in ops for x in self.backward_slice_with_self)
 
   def toposort(self, gate:Callable|None=None) -> dict[UOp, None]:
-    ret: dict[UOp, None] = {}
+    cache: dict[UOp, None] = {}
     stack: list[tuple[UOp, bool]] = [(self, False)] # each stack entry is (node, visited_flag)
     while stack:
       node, visited = stack.pop()
-      if node in ret: continue
+      if node in cache: continue
       if not visited:
         if gate is None or gate(node):
           stack.append((node, True))  # push node back on stack to process after its srcs
           for s in reversed(node.src): stack.append((s, False)) # push srcs on the stack
-      else: ret[node] = None # second time i'm seeing this node, add it to returned toposort
-    return ret
+      else: cache[node] = None # second time i'm seeing this node, add it to returned toposort
+    return cache
+
+  def topovisit(self, visitor:Callable[[UOp], T], cache:dict[UOp, T]) -> T:
+    # NOTE: this shares a lot of code with toposort
+    stack: list[tuple[UOp, bool]] = [(self, False)]
+    while stack:
+      node, visited = stack.pop()
+      if node in cache: continue
+      if not visited:
+        stack.append((node, True))
+        for s in reversed(node.src): stack.append((s, False))
+      else: cache[node] = visitor(node)
+    return cache[self]
 
   # returns map of UOps to their consumers in the graph rooted by self
   def get_consumer_map(self) -> dict[UOp, dict[UOp, None]]: return consumer_map_from_toposort(self.toposort())

@@ -28,25 +28,10 @@ def canonicalize_device(device:str|None) -> str: return Device.canonicalize(devi
 all_tensors: dict[weakref.ref[Tensor], None] = {}
 def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str) -> None:
   with cpu_profile(TracingKey(name), "TINY"):
-    #def uop_in_scope_slow(u0: UOp) -> bool: return t.uop in applied_map or len(applied_map.keys() & t.uop.backward_slice.keys())
-
-    # this is very similar to toposort, might be able to refactor it to share code
-    in_scope: dict[UOp, bool] = {}
-    def uop_in_scope_fast(u0: UOp) -> bool:
-      stack: list[tuple[UOp, bool]] = [(u0, False)]  # Explicit DFS with a stack: (uop, state)
-      while stack:
-        node, visited = stack.pop()
-        if node in in_scope: continue # already know this one, nothing to do
-        if not visited:
-          stack.append((node, True))  # push node back on stack to process after its srcs
-          for s in reversed(node.src): stack.append((s, False)) # push srcs on the stack
-        else:
-          # post-visit: all children (if any) are in in_scope now
-          in_scope[node] = True if node in applied_map else any(in_scope.get(s, False) for s in node.src)
-      return in_scope[u0]
-
     # get tensors in scope
-    scope_tensors = [t for tref in list(all_tensors) if (t:=tref()) is not None and uop_in_scope_fast(t.uop)]
+    in_scope: dict[UOp, bool] = {}
+    def visitor(node: UOp) -> bool: return True if node in applied_map else any(in_scope.get(s, False) for s in node.src)
+    scope_tensors = [t for tref in list(all_tensors) if (t:=tref()) is not None and t.uop.topovisit(visitor, in_scope)]
 
     # get all Tensors and apply the map
     sink = UOp.sink(*[t.uop for t in scope_tensors])
