@@ -6,7 +6,7 @@ from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatch
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
-from tinygrad.helpers import VIZ
+from tinygrad.helpers import VIZ, cpu_profile
 from tinygrad.device import Buffer
 
 @track_rewrites(name=True)
@@ -415,8 +415,8 @@ class TestVizProfiler(BaseTestViz):
 
     tracks = list(j['layout'])
     self.assertEqual(tracks[0], 'NV')
-    self.assertEqual(tracks[1], 'NV:1')
-    self.assertEqual(tracks[2], 'NV Graph')
+    self.assertEqual(tracks[1], 'NV Graph')
+    self.assertEqual(tracks[2], 'NV:1')
 
     nv_events = j['layout']['NV']['events']
     self.assertEqual(nv_events[0]['name'], 'E_25_4n2')
@@ -469,6 +469,14 @@ class TestVizProfiler(BaseTestViz):
     self.assertEqual(len(markers), 2)
     assert kernels[0]["st"] <= markers[0]["ts"] <= kernels[1]["st"]
     assert markers[1]["ts"] >= kernels[1]["st"]+kernels[1]["dur"]
+
+  def test_layout_order(self):
+    def fn(): return
+    for dname in ["TINY", "USER", "TEST:1 N1", "TEST:2 N1", "TEST:1 N2"]:
+      with cpu_profile("fn", dname): fn()
+    layout = list(load_profile(cpu_events)["layout"])
+    self.assertListEqual(layout[:2], ["USER","TINY"])
+    self.assertListEqual(layout[2:], ["TEST:1 N1","TEST:1 N2", "TEST:2 N1"])
 
 def _alloc(b:int):
   a = Tensor.empty(b, device="NULL", dtype=dtypes.char)
