@@ -44,9 +44,11 @@ class WaveSlot:
   simd:int
   se:int
   @property
-  def simd_loc(self) -> str: return f"SE:{self.se} CU:{self.cu} SIMD:{self.simd}"
+  def cu_loc(self) -> str: return f"SE:{self.se} CU:{self.cu}"
   @property
-  def wave_loc(self) -> str: return f"{self.simd_loc} WAVE:{self.wave_id}"
+  def simd_loc(self) -> str: return f"{self.cu_loc} SIMD:{self.simd}"
+  @property
+  def wave_loc(self) -> str: return f"{self.simd_loc} W:{self.wave_id}"
 
 @dataclasses.dataclass(frozen=True)
 class WaveExec(WaveSlot):
