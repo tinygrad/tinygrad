@@ -2,7 +2,7 @@ from contextlib import AbstractContextManager
 from tinygrad.uop.ops import UOp, KernelInfo, AxisType, AddrSpace
 from extra.thunder.tiny.tk import WARP_THREADS
 from extra.thunder.tiny.tk.group import Group
-from extra.thunder.tiny.tk.tiles import GL, ST, RT, RV
+from extra.thunder.tiny.tk.tiles import GL, ST_16X16, ST_16X16_SWIZZLED, ST, RT_16X16, RT, RV, TileLayout, VecLayout
 
 class _tk_range:
   user_rid = 0
@@ -35,6 +35,8 @@ class Kernel(AbstractContextManager):
 
   @property
   def warpid(self): return self.threadIdx_x // WARP_THREADS
+  @property
+  def laneid(self): return self.threadIdx_x % WARP_THREADS
 
   def __enter__(self): return self
   def __exit__(self, exc_type, exc_value, traceback): pass
@@ -72,9 +74,9 @@ class Kernel(AbstractContextManager):
     return uop
 
   def gl(self, shape, dtype): return GL.create(shape, dtype, self)
-  def st(self, shape, dtype): return ST.create(shape, dtype, self)
-  def rt(self, shape, dtype): return RT.create(shape, dtype, self)
-  def rv(self, length, dtype, layout="naive"): return RV.create(length, dtype, layout, self)
+  def st(self, shape, dtype, layout=TileLayout.ROW, base_shape=ST_16X16): return ST.create(shape, dtype, layout, base_shape, self)
+  def rt(self, shape, dtype, layout=TileLayout.ROW, base_shape=RT_16X16): return RT.create(shape, dtype, layout, base_shape, self)
+  def rv(self, length, dtype, layout=VecLayout.ORTHO, rt_base_shape=RT_16X16): return RV.create(length, dtype, layout, rt_base_shape, self)
 
   def push_store(self, store:UOp, uop:UOp): self.store_stack.append((store, uop))
 
@@ -92,4 +94,4 @@ class Kernel(AbstractContextManager):
   def endrange(self):
     last_store = self.store_stack.pop()
     last_range = self.range_stack.pop()
-    return last_store[1].after(last_store[0].barrier().end(last_range._rng)).reshape(last_store[1].shape)
+    return last_store[1].after(last_store[0].end(last_range._rng)).reshape(last_store[1].shape)
