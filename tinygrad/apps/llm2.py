@@ -166,6 +166,7 @@ class TransformerBlock:
     self.ffn_down_proj_bias     = Tensor.empty(n_experts, dim)                      # (E,D)
 
   def _feed_forward(self, x: Tensor) -> Tensor:
+    profile_marker("ffn")
     (B, T, D), E = x.shape, self.n_experts
 
     # Select top-k experts
@@ -183,6 +184,7 @@ class TransformerBlock:
     return x + x_out
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
+    profile_marker("attention")
     x_norm = self.attn_norm(x)                                              # (B,T,D) -> (B,T,D)
     q, k, v = self.attn_q(x_norm), self.attn_k(x_norm), self.attn_v(x_norm) # (B,T,D) -> (B,T,D)
 
@@ -228,8 +230,11 @@ class Transformer:
     self.forward_jit  = TinyJit(self.forward)
 
   def forward(self, tokens:Tensor, start_pos:int|UOp) -> Tensor:
+    profile_marker("forward pass")
     x = self.token_embd(tokens)                     # (B,T)   -> (B,T,D)
-    for block in self.blk: x = block(x, start_pos)  # (B,T,D) -> (B,T,D)
+    for i, block in enumerate(self.blk):
+      profile_marker(f"layer {i}")
+      x = block(x, start_pos)  # (B,T,D) -> (B,T,D)
     logits = self.output(self.output_norm(x))       # (B,T,D) -> (B,T,V)
     return logits[:, -1:, :].argmax(-1)             # (B,T,V) -> (B,)
 
@@ -239,10 +244,10 @@ class Transformer:
 
   @staticmethod
   def from_pretrained(model_path:Path, params:dict[str, int|float|dict], fakeweights:bool=False) -> Transformer:
-    if DEBUG >= 1: profile_marker("create model")
+    profile_marker("create model")
     model = Transformer(**params) # type: ignore[arg-type]
     if not fakeweights:
-      if DEBUG >= 1: profile_marker("load in weights")
+      profile_marker("load in weights")
       num_blocks = len(model.blk)
       weights = load(str(model_path / "model.safetensors.index.json"))
       weights = convert_from_huggingface(weights, num_blocks)
@@ -258,8 +263,9 @@ class Transformer:
     self.forward_jit.reset()  # TODO: why is this required? root cause the issue and make it not be needed
     start_length = len(tokens)
     while len(tokens) < min(self.max_context, max_new_tokens+start_length):
-      t = self(t, v_start_pos.bind(start_pos) if getenv("SYM", 1) and start_pos != 0 and t.shape[-1] == 1 else start_pos)
-      next_id = int(t.item())
+      with Timing("forward pass", on_exit=lambda et: f"{1e9/et:.2f} tok/sec", enabled=DEBUG >= 1):
+        t = self(t, v_start_pos.bind(start_pos) if getenv("SYM", 1) and start_pos != 0 and t.shape[-1] == 1 else start_pos)
+        next_id = int(t.item())
       tokens.append(next_id)
       start_pos = len(tokens) - 1
       yield next_id
