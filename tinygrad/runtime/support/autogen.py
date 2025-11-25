@@ -103,7 +103,7 @@ def gen(dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, use_e
     suggested_name = anon_names.get(f"{loc_file(loc(decl:=clang.clang_getTypeDeclaration(t)))}:{loc_line(loc(decl))}", suggested_name)
     nonlocal lines, types, anoncnt, objc
     tmap = {clang.CXType_Void:"None", clang.CXType_Char_U:"ctypes.c_ubyte", clang.CXType_UChar:"ctypes.c_ubyte", clang.CXType_Char_S:"ctypes.c_char",
-            clang.CXType_SChar:"ctypes.c_char",
+            clang.CXType_SChar:"ctypes.c_byte",
             **{getattr(clang, f'CXType_{k}'):f"ctypes.c_{k.lower()}" for k in ["Bool", "WChar", "Float", "Double", "LongDouble"]},
             **{getattr(clang, f'CXType_{k}'):f"ctypes.c_{'u' if 'U' in k else ''}int{sz}" for sz,k in
                [(16, "UShort"), (16, "Short"), (32, "UInt"), (32, "Int"), (64, "ULong"), (64, "Long"), (64, "ULongLong"), (64, "LongLong")]}}
@@ -241,7 +241,7 @@ def gen(dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, use_e
               it = iter(toks[1:])
               _args = [nm(t) for t in itertools.takewhile(lambda t:nm(t)!=')', it) if clang.clang_getTokenKind(t) == clang.CXToken_Identifier]
               if len(body:=list(it)) == 0: continue
-              macros += [f"{nm(c)} = lambda {','.join(_args)}: {readext(f, loc(body[0]), clang.clang_getRangeEnd(extent(toks[-1])))}"]
+              macros += [f"{nm(c)} = lambda{' ' * bool(_args)}{','.join(_args)}: {readext(f,loc(body[0]),clang.clang_getRangeEnd(extent(toks[-1])))}"]
             else: macros += [f"{nm(c)} = {readext(f, loc(toks[1]), clang.clang_getRangeEnd(extent(toks[-1])))}"]
           case clang.CXCursor_VarDecl if clang.clang_getCursorLinkage(c) == clang.CXLinkage_Internal:
             ty = clang.clang_getCursorType(c)

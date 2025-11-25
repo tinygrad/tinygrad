@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import cast, ClassVar
-import os, ctypes, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, weakref, itertools, collections
+import os, ctypes, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, weakref, itertools, collections, atexit
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, FileIOInterface
@@ -8,18 +8,20 @@ from tinygrad.runtime.support.hcq import MMIOInterface, BumpAllocator, hcq_filte
 from tinygrad.uop.ops import sint
 from tinygrad.device import Compiled, DMAFdRef, BufferSpec, CompilerPairT
 from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, suppress_finalizing, lo32, hi32, colored, prod, ContextVar
+from tinygrad.helpers import VIZ
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, pci, sqtt
 from tinygrad.runtime.autogen.am import am
-from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler
+from tinygrad.runtime.support.compiler_amd import HIPCompiler, HIPCCCompiler, AMDLLVMCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_soc, import_ip_offsets, import_pmc
 from tinygrad.runtime.support.system import System, PCIIfaceBase, PCIAllocationMeta, PCIDevice, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
-SQTT, SQTT_ITRACE_SE_MASK, PMC = ContextVar("SQTT", 0), ContextVar("SQTT_ITRACE_SE_MASK", 0b11), ContextVar("PMC", 0)
+SQTT, SQTT_ITRACE_SE_MASK, SQTT_LIMIT_SE = ContextVar("SQTT", VIZ.value>=2), ContextVar("SQTT_ITRACE_SE_MASK", 0b11), ContextVar("SQTT_LIMIT_SE", 0)
+PMC = ContextVar("PMC", 0)
 EVENT_INDEX_PARTIAL_FLUSH = 4 # based on a comment in nvd.h
 WAIT_REG_MEM_FUNCTION_EQ  = 3 # ==
 WAIT_REG_MEM_FUNCTION_NEQ = 4 # !=
@@ -28,13 +30,13 @@ AQL_HDR = (1 << hsa.HSA_PACKET_HEADER_BARRIER) | (hsa.HSA_FENCE_SCOPE_SYSTEM << 
         | (hsa.HSA_FENCE_SCOPE_SYSTEM << hsa.HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE)
 
 @dataclass(frozen=True)
-class ProfileSQTTEvent(ProfileEvent): device:str; kern:str; se:int; blob:bytes; itrace:bool; exec_tag:int # noqa: E702
+class ProfileSQTTEvent(ProfileEvent): device:str; kern:str; se:int; blob:bytes; itrace:bool # noqa: E702
 
 @dataclass(frozen=True)
 class PMCSample: name:str; block:str; xcc:int; inst:int; se:int; sa:int; wgp:int; off:int; size:int; regsample:str # noqa: E702
 
 @dataclass(frozen=True)
-class ProfilePMCEvent(ProfileEvent): device:str; kern:str; sched:list[PMCSample]; blob:bytes; exec_tag:int # noqa: E702
+class ProfilePMCEvent(ProfileEvent): device:str; kern:str; sched:list[PMCSample]; blob:bytes # noqa: E702
 
 class AMDSignal(HCQSignal):
   def __init__(self, *args, **kwargs): super().__init__(*args, **{**kwargs, 'timestamp_divider': 100})
@@ -192,11 +194,18 @@ class AMDComputeQueue(HWQueue):
                                                                  bind_point=(__BIND_POINT_COMPUTE:=1), api_pso_hash=data64_le(prg.libhash[0])))
     self.sqtt_userdata(sqtt.struct_rgp_sqtt_marker_event(has_thread_dims=1, cmd_id=next(prg.dev.sqtt_next_cmd_id)), *global_size)
 
-    se_cap = max(prod([x if isinstance(x, int) else 1 for x in global_size]) // 4, 1) // 32
-    for xcc in range(self.dev.xccs):
-      with self.pred_exec(xcc_mask=1 << xcc):
-        for i in range(8 if prg.dev.target >= (11,0,0) else 4):
-          self.wreg(getattr(self.gc, f'regCOMPUTE_STATIC_THREAD_MGMT_SE{i}'), min(0xffffffff, (1 << (se_cap + (1 if i == 0 else 0))) - 1))
+    if SQTT_LIMIT_SE:
+      # Calculate number of CUs per SE to enable based on blocks count. 4 is maximum simd per CU, but on rdna we can trace only 1.
+      cu_per_se = prod([x if isinstance(x, int) else 1 for x in global_size]) // (((self.dev.max_cu_id + 1) // self.dev.se_cnt) * 4)
+      for xcc in range(self.dev.xccs):
+        with self.pred_exec(xcc_mask=1 << xcc):
+          for i in range(8 if prg.dev.target >= (11,0,0) else 4):
+            if SQTT_LIMIT_SE > 1: mask = 1 if SQTT_ITRACE_SE_MASK.value & (1 << i) else 0 # only run unmasked shader engines
+            else:
+              sa_mask = (1 << (self.dev.iface.props['cu_per_simd_array'] // 2)) - 1
+              cu_mask = (1 << (cu_per_se + (1 if i == 0 else 0))) - 1
+              mask = lo32((cu_mask & sa_mask) | (cu_mask & (sa_mask << 16)) << 16)
+            self.wreg(getattr(self.gc, f'regCOMPUTE_STATIC_THREAD_MGMT_SE{i}'), mask)
 
   def sqtt_userdata(self, data, *extra_dwords):
     data_ints = [x[0] for x in struct.iter_unpack('<I', bytes(data))] + list(extra_dwords)
@@ -583,7 +592,7 @@ class AMDProgram(HCQProgram):
       cast(AMDComputeQueue, self.dev.hw_compute_queue_t()).pmc_read(self.dev.pmc_buffer, self.dev.pmc_sched) \
                                                           .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
       self.dev.allocator._copyout(pmc_buf:=memoryview(bytearray(self.dev.pmc_buffer.size)), self.dev.pmc_buffer)
-      Compiled.profile_events += [ProfilePMCEvent(self.dev.device, self.name, self.dev.pmc_sched, bytes(pmc_buf), self.dev.prof_exec_counter)]
+      Compiled.profile_events += [ProfilePMCEvent(self.dev.device, self.name, self.dev.pmc_sched, bytes(pmc_buf))]
     if self.dev.sqtt_enabled:
       cast(AMDComputeQueue, self.dev.hw_compute_queue_t()).sqtt_stop(self.dev.sqtt_wptrs) \
                                                           .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
@@ -602,8 +611,7 @@ class AMDProgram(HCQProgram):
 
         self.dev.allocator._copyout(sqtt_mv:=memoryview(bytearray(wptr)), buf)
         resbuf = (struct.pack('<Q', 0x11 | (4 << 13) | (0xf << 16) | (se << 24)) + bytes(sqtt_mv)) if self.dev.target[0] == 9 else bytes(sqtt_mv)
-        Compiled.profile_events += [ProfileSQTTEvent(self.dev.device, self.name, se, resbuf, bool((SQTT_ITRACE_SE_MASK.value >> se) & 1),
-                                                     self.dev.prof_exec_counter)]
+        Compiled.profile_events += [ProfileSQTTEvent(self.dev.device, self.name, se, resbuf, bool((SQTT_ITRACE_SE_MASK.value >> se) & 1))]
     return res
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
@@ -776,8 +784,16 @@ class KFDIface:
 
     raise RuntimeError("\n".join(report))
 
-  def is_in_profile_mode(self):
-    return self.dev.target[0] == 9 or FileIOInterface(f'{self.dev_sysfs_path}/power_dpm_force_performance_level').read()[:16] == 'profile_standard'
+  def require_profile_mode(self, can_set_mode=True):
+    if self.dev.target[0] == 9: return
+    fn = f'{self.dev_sysfs_path}/power_dpm_force_performance_level'
+    if (perflevel:=FileIOInterface(fn).read().strip()) != 'profile_standard':
+      if can_set_mode:
+        atexit.register(lambda: os.system(f"echo '{perflevel}' | sudo tee {fn} > /dev/null"))
+        os.system(f"echo 'profile_standard' | sudo tee {fn} > /dev/null")
+        self.require_profile_mode(can_set_mode=False)
+      else:
+        raise RuntimeError("PMC/SQTT requires stable power state: run `amd-smi set -l stable_std` for KFD iface")
 
 class PCIIface(PCIIfaceBase):
   gpus:ClassVar[list[str]] = []
@@ -788,7 +804,7 @@ class PCIIface(PCIIfaceBase):
     self._setup_adev(self.pci_dev)
     self.pci_dev.write_config(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
 
-  def is_in_profile_mode(self): return True
+  def require_profile_mode(self): return True
 
   def _setup_adev(self, pci_dev:PCIDevice, dma_regions:list[tuple[int, MMIOInterface]]|None=None):
     self.dev_impl:AMDev = AMDev(pci_dev, dma_regions)
@@ -910,7 +926,8 @@ class AMDDevice(HCQCompiled):
     self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else (16 << 20))
 
     compilers:list[CompilerPairT] = [(functools.partial(AMDRenderer, self.arch), functools.partial(HIPCompiler, self.arch)),
-                                     (functools.partial(AMDLLVMRenderer, self.arch), functools.partial(AMDLLVMCompiler, self.arch))]
+                                     (functools.partial(AMDLLVMRenderer, self.arch), functools.partial(AMDLLVMCompiler, self.arch)),
+                                     (functools.partial(AMDRenderer, self.arch), functools.partial(HIPCCCompiler, self.arch))]
 
     super().__init__(device, AMDAllocator(self), compilers, functools.partial(AMDProgram, self), AMDSignal,
                      functools.partial(AMDComputeAQLQueue if self.is_aql else AMDComputeQueue, self),
@@ -924,7 +941,7 @@ class AMDDevice(HCQCompiled):
     self.pmc_enabled = PROFILE and PMC > 0
     if self.pmc_enabled:
       if self.target[0] not in {9, 11, 12}: raise RuntimeError(f'PMC are not supported on gc:{self.target}')
-      if not self.iface.is_in_profile_mode(): raise RuntimeError("PMC requires stable power state: run `amd-smi set -l stable_std` for KFD iface")
+      self.iface.require_profile_mode()
 
       self.pmc_sched:list[PMCSample] = []
       self.pmc_counters = import_pmc(self.target)
@@ -942,7 +959,7 @@ class AMDDevice(HCQCompiled):
     self.sqtt_enabled = PROFILE and SQTT > 0
     if self.sqtt_enabled:
       if self.target[0] not in {9, 11, 12}: raise RuntimeError(f'SQ Thread Tracing is not supported on gc:{self.target}')
-      if not self.iface.is_in_profile_mode(): raise RuntimeError("SQTT requires stable power state: run `amd-smi set -l stable_std` for KFD iface")
+      self.iface.require_profile_mode()
 
       SQTT_BUFFER_SIZE = getenv("SQTT_BUFFER_SIZE", 256) # in mb, per shader engine
       self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE << 20, BufferSpec(nolru=True, uncached=True)) for _ in range(self.se_cnt)]

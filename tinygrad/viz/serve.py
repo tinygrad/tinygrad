@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io, struct
-import subprocess, ctypes, pathlib, traceback
+import ctypes, pathlib, traceback, itertools
 from contextlib import redirect_stdout, redirect_stderr
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, TypeVar, Generator, Callable
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
-from tinygrad.helpers import printable, EncDecCtx
+from tinygrad.helpers import printable, system, EncDecCtx
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, pyrender
 from tinygrad.uop.ops import print_uops, range_start, multirange_str
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device
@@ -25,18 +25,25 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
 
 # VIZ API
 
+
+# A step is a lightweight descriptor for a trace entry
+# Includes a name, metadata and a URL path for fetching the full data
+
+def create_step(name:str, query:tuple[str, int, int], data=None, depth:int=0, **kwargs) -> dict:
+  return {"name":name, "query":f"{query[0]}?ctx={query[1]}&step={query[2]}", "data":data, "depth":depth, **kwargs}
+
 # ** list all saved rewrites
 
 ref_map:dict[Any, int] = {}
 def get_rewrites(t:RewriteTrace) -> list[dict]:
   ret = []
   for i,(k,v) in enumerate(zip(t.keys, t.rewrites)):
-    steps = [{"name":s.name, "loc":s.loc, "match_count":len(s.matches), "code_line":printable(s.loc), "trace":k.tb if j == 0 else None,
-              "query":f"/ctxs?ctx={i}&idx={j}", "depth":s.depth} for j,s in enumerate(v)]
+    steps = [create_step(s.name, ("/rewrites", i, j), loc=s.loc, match_count=len(s.matches), code_line=printable(s.loc), trace=k.tb if j==0 else None,
+                         depth=s.depth) for j,s in enumerate(v)]
     if isinstance(k.ret, ProgramSpec):
-      steps.append({"name":"View UOp List", "query":f"/render?ctx={i}&fmt=uops", "depth":0})
-      steps.append({"name":"View Program", "query":f"/render?ctx={i}&fmt=src", "depth":0})
-      steps.append({"name":"View Disassembly", "query":f"/render?ctx={i}&fmt=asm", "depth":0})
+      steps.append(create_step("View UOp List", ("/uops", i, len(steps)), k.ret))
+      steps.append(create_step("View Program", ("/code", i, len(steps)), k.ret))
+      steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), k.ret))
     for key in k.keys: ref_map[key] = i
     ret.append({"name":k.display_name, "steps":steps})
   return ret
@@ -203,42 +210,63 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
   peaks.append(peak)
   return struct.pack("<BIQ", 1, len(events), peak)+b"".join(events) if events else None
 
+def err(name:str, msg:str|None=None) -> None:
+  ctxs.append({"name":"ERR", "steps":[create_step(name, ("render",len(ctxs),0), {"src":msg or traceback.format_exc()})]})
+
+def row_tuple(row:str) -> tuple[int, ...]: return tuple(int(x.split(":")[1]) for x in row.split())
+
 def load_sqtt(profile:list[ProfileEvent]) -> None:
   from tinygrad.runtime.ops_amd import ProfileSQTTEvent
   if not (sqtt_events:=[e for e in profile if isinstance(e, ProfileSQTTEvent)]): return None
-  def err(name:str, msg:str|None=None) -> None:
-    step = {"name":name, "data":{"src":msg or traceback.format_exc()}, "depth":0, "query":f"/render?ctx={len(ctxs)}&step=0&fmt=counters"}
-    return ctxs.append({"name":"Counters", "steps":[step]})
   try: from extra.sqtt.roc import decode
   except Exception: return err("DECODER IMPORT ISSUE")
   try: rctx = decode(profile)
   except Exception: return err("DECODER ERROR")
-  if not rctx.inst_execs: return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
+  if getenv("SQTT_PARSE"):
+    from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
+    for e in sqtt_events: parse_sqtt_print_packets(e.blob)
+  if not any([rctx.inst_execs, rctx.occ_events]): return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
   steps:list[dict] = []
-  for name,waves in rctx.inst_execs.items():
-    prg = trace.keys[r].ret if (r:=ref_map.get(name)) else None
-    steps.append({"name":prg.name if prg is not None else name, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
-                  "depth":0, "data":{"src":prg.src if prg is not None else name, "lang":"cpp"}})
-
-    # Idle:     The total time gap between the completion of previous instruction and the beginning of the current instruction.
-    #           The idle time can be caused by:
-    #             * Arbiter loss
-    #             * Source or destination register dependency
-    #             * Instruction cache miss
-    # Stall:    The total number of cycles the hardware pipe couldn't issue an instruction.
-    # Duration: Total latency in cycles, defined as "Stall time + Issue time" for gfx9 or "Stall time + Execute time" for gfx10+.
-    for w in waves:
-      rows, prev_instr = [], w.begin_time
-      for i,e in enumerate(w.insts):
-        rows.append((e.inst, e.time, max(0, e.time-prev_instr), e.dur, e.stall, str(e.typ).split("_")[-1]))
-        prev_instr = max(prev_instr, e.time + e.dur)
-      summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SIMD", "value":w.simd}, {"label":"CU", "value":w.cu},
-                 {"label":"SE", "value":w.se}]
-      steps.append({"name":f"Wave {w.wave_id}", "depth":1, "query":f"/render?ctx={len(ctxs)}&step={len(steps)}&fmt=counters",
-                    "data":{"rows":rows, "cols":["Instruction", "Clk", "Idle", "Duration", "Stall", "Type"], "summary":summary}})
+  for name,disasm in rctx.disasms.items():
+    cu_events:dict[str, list[ProfileEvent]] = {}
+    # wave instruction events
+    wave_insts:dict[str, dict[str, dict]] = {}
+    inst_units:dict[str, itertools.count] = {}
+    for w in rctx.inst_execs.get(name, []):
+      if (u:=w.wave_loc) not in inst_units: inst_units[u] = itertools.count(0)
+      n = next(inst_units[u])
+      if (events:=cu_events.get(w.cu_loc)) is None: cu_events[w.cu_loc] = events = []
+      events.append(ProfileRangeEvent(w.simd_loc, f"INST WAVE:{w.wave_id} N:{n}", Decimal(w.begin_time), Decimal(w.end_time)))
+      wave_insts.setdefault(w.cu_loc, {})[f"{u} N:{n}"] = {"wave":w, "disasm":disasm, "run_number":n}
+    # occupancy events
+    units:dict[str, itertools.count] = {}
+    wave_start:dict[str, int] = {}
+    for occ in rctx.occ_events[name]:
+      if (u:=occ.wave_loc) not in units: units[u] = itertools.count(0)
+      if u in inst_units: continue
+      if occ.start: wave_start[u] = occ.time
+      else:
+        if (events:=cu_events.get(occ.cu_loc)) is None: cu_events[occ.cu_loc] = events = []
+        events.append(ProfileRangeEvent(occ.simd_loc, f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)), Decimal(occ.time)))
+    if not cu_events: continue
+    prg_cu = sorted(cu_events, key=row_tuple)
+    kernel = trace.keys[r].ret if (r:=ref_map.get(name)) else None
+    src = f"Scheduled on {len(prg_cu)} CUs"+(f"\n\n{kernel.global_size=} {kernel.local_size=}" if kernel else "")
+    steps.append(create_step(kernel.name if kernel is not None else name, ("/counters", len(ctxs), len(steps)), {"src":src}, depth=1))
+    for cu in prg_cu:
+      events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]
+      steps.append(create_step(cu, ("/counters", len(ctxs), len(steps)),
+                               {"value":get_profile(events, sort_fn=row_tuple), "content_type":"application/octet-stream"}, depth=2))
+      for k in sorted(wave_insts.get(cu, []), key=row_tuple):
+        steps.append(create_step(k.replace(cu, ""), ("/sqtt-insts", len(ctxs), len(steps)), wave_insts[cu][k], depth=3))
   ctxs.append({"name":"Counters", "steps":steps})
 
-def get_profile(profile:list[ProfileEvent]) -> bytes|None:
+def device_sort_fn(k):
+  order = {"USER": 0, "TINY": 1}
+  dname, *rest = k.split()
+  return order.get(dname, len(order)+len(rest))
+
+def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_sort_fn) -> bytes|None:
   # start by getting the time diffs
   for ev in profile:
     if isinstance(ev,ProfileDeviceEvent): device_ts_diffs[ev.device] = (ev.comp_tdiff, ev.copy_tdiff if ev.copy_tdiff is not None else ev.comp_tdiff)
@@ -264,11 +292,11 @@ def get_profile(profile:list[ProfileEvent]) -> bytes|None:
   scache:dict[str, int] = {}
   peaks:list[int] = []
   dtype_size:dict[str, int] = {}
-  for k,v in dev_events.items():
-    v.sort(key=lambda e:e[0])
+  for k in sorted(dev_events, key=sort_fn):
+    (v:=dev_events[k]).sort(key=lambda e:e[0])
     layout[k] = timeline_layout(v, start_ts, scache)
     layout[f"{k} Memory"] = mem_layout(v, start_ts, unwrap(end_ts), peaks, dtype_size, scache)
-  groups = sorted(layout.items(), key=lambda x: '' if len(ss:=x[0].split(" ")) == 1 else ss[1])
+  groups = layout.items() if sort_fn is not None else sorted(layout.items(), key=lambda x: '' if len(ss:=x[0].split(" ")) == 1 else ss[1])
   ret = [b"".join([struct.pack("<B", len(k)), k.encode(), v]) for k,v in groups if v is not None]
   index = json.dumps({"strings":list(scache), "dtypeSize":dtype_size, "markers":[{"ts":int(e.ts-start_ts), **e.arg} for e in markers]}).encode()
   return struct.pack("<IQII", unwrap(end_ts)-start_ts, max(peaks,default=0), len(index), len(ret))+index+b"".join(ret)
@@ -276,9 +304,9 @@ def get_profile(profile:list[ProfileEvent]) -> bytes|None:
 # ** Assembly analyzers
 
 def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
-  target_args = [f"-mtriple={mtriple}", f"-mcpu={mcpu}"]
+  target_args = f"-mtriple={mtriple} -mcpu={mcpu}"
   # disassembly output can include headers / metadata, skip if llvm-mca can't parse those lines
-  data = json.loads(subprocess.check_output(["llvm-mca","-skip-unsupported-instructions=parse-failure","--json","-"]+target_args, input=asm.encode()))
+  data = json.loads(system("llvm-mca -skip-unsupported-instructions=parse-failure --json -"+target_args, input=asm.encode()))
   cr = data["CodeRegions"][0]
   resource_labels = [repr(x)[1:-1] for x in data["TargetInfo"]["Resources"]]
   rows:list = [[instr] for instr in cr["Instructions"]]
@@ -302,20 +330,37 @@ def get_stdout(f: Callable) -> str:
   except Exception: traceback.print_exc(file=buf)
   return buf.getvalue()
 
-def get_render(i:int, j:int, fmt:str) -> dict|None:
-  if fmt == "counters": return ctxs[i]["steps"][j]["data"]
-  if not isinstance(prg:=trace.keys[i].ret, ProgramSpec): return None
-  if fmt == "uops": return {"src":get_stdout(lambda: print_uops(prg.uops or [])), "lang":"txt"}
-  if fmt == "src": return {"src":prg.src, "lang":"cpp"}
-  compiler = Device[prg.device].compiler
-  disasm_str = get_stdout(lambda: compiler.disassemble(compiler.compile(prg.src)))
-  from tinygrad.runtime.support.compiler_cpu import llvm, LLVMCompiler
-  if isinstance(compiler, LLVMCompiler):
-    mtriple = ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode()
-    mcpu = ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode()
-    ret = get_llvm_mca(disasm_str, mtriple, mcpu)
-  else: ret = {"src":disasm_str, "lang":"x86asm"}
-  return ret
+def get_render(i:int, j:int, fmt:str) -> dict:
+  data = ctxs[i]["steps"][j]["data"]
+  if fmt == "uops": return {"src":get_stdout(lambda: print_uops(data.uops or [])), "lang":"txt"}
+  if fmt == "code": return {"src":data.src, "lang":"cpp"}
+  if fmt == "asm":
+    compiler = Device[data.device].compiler
+    disasm_str = get_stdout(lambda: compiler.disassemble(compiler.compile(data.src)))
+    from tinygrad.runtime.support.compiler_cpu import llvm, LLVMCompiler
+    if isinstance(compiler, LLVMCompiler):
+      return get_llvm_mca(disasm_str, ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode(),
+                          ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode())
+    return {"src":disasm_str, "lang":"x86asm"}
+  if fmt == "sqtt-insts":
+    columns = ["Instruction", "Clk", "Idle", "Duration", "Stall", "Type"]
+    # Idle:     The total time gap between the completion of previous instruction and the beginning of the current instruction.
+    #           The idle time can be caused by:
+    #             * Arbiter loss
+    #             * Source or destination register dependency
+    #             * Instruction cache miss
+    # Stall:    The total number of cycles the hardware pipe couldn't issue an instruction.
+    # Duration: Total latency in cycles, defined as "Stall time + Issue time" for gfx9 or "Stall time + Execute time" for gfx10+.
+    prev_instr = (w:=data["wave"]).begin_time
+    pc_to_inst = data["disasm"]
+    rows:list[tuple] = []
+    for e in w.unpack_insts():
+      rows.append((pc_to_inst[e.pc][0], e.time, max(0, e.time-prev_instr), e.dur, e.stall, str(e.typ).split("_")[-1]))
+      prev_instr = max(prev_instr, e.time + e.dur)
+    summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
+               {"label":"SIMD", "value":w.simd}, {"label":"Wave ID", "value":w.wave_id}, {"label":"Run number", "value":data["run_number"]}]
+    return {"rows":rows, "cols":columns, "summary":summary}
+  return data
 
 # ** HTTP server
 
@@ -334,13 +379,17 @@ class Handler(BaseHTTPRequestHandler):
         if url.path.endswith(".css"): content_type = "text/css"
       except FileNotFoundError: status_code = 404
     elif (query:=parse_qs(url.query)):
-      if url.path == "/render":
-        render_src = get_render(get_int(query, "ctx"), get_int(query, "step"), query["fmt"][0])
-        ret, content_type = json.dumps(render_src).encode(), "application/json"
-      else:
-        try: return self.stream_json(get_full_rewrite(trace.rewrites[i:=get_int(query, "ctx")][get_int(query, "idx")], i))
+      i, j = get_int(query, "ctx"), get_int(query, "step")
+      if (fmt:=url.path.lstrip("/")) == "rewrites":
+        try: return self.stream_json(get_full_rewrite(trace.rewrites[i][j], i))
         except (KeyError, IndexError): status_code = 404
-    elif url.path == "/ctxs": ret, content_type = json.dumps(ctxs).encode(), "application/json"
+      else:
+        render_src = get_render(i, j, fmt)
+        if "content_type" in render_src: ret, content_type = render_src["value"], render_src["content_type"]
+        else: ret, content_type = json.dumps(render_src).encode(), "application/json"
+    elif url.path == "/ctxs":
+      lst = [{**c, "steps":[{k:v for k, v in s.items() if k != "data"} for s in c["steps"]]} for c in ctxs]
+      ret, content_type = json.dumps(lst).encode(), "application/json"
     elif url.path == "/get_profile" and profile_ret: ret, content_type = profile_ret, "application/octet-stream"
     else: status_code = 404
 

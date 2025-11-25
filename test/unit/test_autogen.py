@@ -5,16 +5,16 @@ from tinygrad.runtime.support.c import Struct
 class TestAutogen(unittest.TestCase):
   def test_packed_struct_sizeof(self):
     layout = [('a', ctypes.c_char), ('b', ctypes.c_int, 5), ('c', ctypes.c_char)]
-    class X(ctypes.Structure): _fields_, _layout_ = layout, 'gcc-sysv'
     class Y(ctypes.Structure): _fields_, _pack_, _layout_ = layout, 1, 'ms'
-    class Z(Struct): _packed_, _fields_ = True, layout
-    self.assertNotEqual(ctypes.sizeof(X), 4) # ctypes bug! gcc-13.3.0 says this should have size 4
+    class Z(Struct): pass
+    Z._packed_, Z._fields_ = True, layout
     self.assertEqual(ctypes.sizeof(Y), 6)
     self.assertEqual(ctypes.sizeof(Z), 3)
     layout = [('a', ctypes.c_int, 31), ('b', ctypes.c_int, 31), ('c', ctypes.c_int, 1), ('d', ctypes.c_int, 1)]
     class Foo(ctypes.Structure): _fields_, _layout_ = layout, 'gcc-sysv'
     class Bar(ctypes.Structure): _fields_, _pack_, _layout_ = layout, 1, 'ms'
-    class Baz(Struct): _fields_, _packed_ = layout, True
+    class Baz(Struct): pass
+    Baz._packed_, Baz._fields_ = True, layout
     self.assertEqual(ctypes.sizeof(Foo), 12)
     self.assertEqual(ctypes.sizeof(Bar), 12)
     self.assertEqual(ctypes.sizeof(Baz), 8)

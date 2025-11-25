@@ -118,10 +118,11 @@ nvcmds = {getattr(nv_gpu, x):(x, getattr(nv_gpu, "struct_"+x+"_PARAMS", getattr(
 
 def get_classes():
   res = {}
-  known_classes = {"NV01_DEVICE_0", "NV01_ROOT", "NV1_MEMORY_SYSTEM", "NV01_MEMORY_VIRTUAL", "NV1_MEMORY_USER", "NV50_MEMORY_VIRTUAL", "NV_FERMI_VASPACE_A"}
+  known_classes = {"NV01_DEVICE_0", "NV01_ROOT", "NV1_MEMORY_SYSTEM", "NV01_MEMORY_VIRTUAL", "NV1_MEMORY_USER", "NV50_MEMORY_VIRTUAL", "NV_FERMI_VASPACE_A",
+                   "NV20_SUBDEVICE_0"}
   for nm,val in nv_gpu.__dict__.items():
     if not isinstance(val, int): continue
-    if 0x2000 < val < 0xffff: res[val] = nm
+    if 0x3000 < val < 0xffff: res[val] = nm
     if nm in known_classes: res[val] = nm
   return res
 nvclasses = get_classes()
