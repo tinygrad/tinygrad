@@ -25,6 +25,10 @@ from transformers import AutoTokenizer
 from icecream import install
 install()
 
+# max tok/sec
+# gpt-oss-20b in bf16 is 3.6B active, so 7.2 GB
+# M1 Pro is 200GB/s, so 200/7.2 = 27 tok/s
+
 GPT_OSS_LAYERS = getenv("GPT_OSS_LAYERS", 24)
 
 # adapted from https://huggingface.co/openai/gpt-oss-20b/blob/main/config.json
@@ -230,11 +234,10 @@ class Transformer:
     self.forward_jit  = TinyJit(self.forward)
 
   def forward(self, tokens:Tensor, start_pos:int|UOp) -> Tensor:
-    profile_marker("forward pass")
     x = self.token_embd(tokens)                     # (B,T)   -> (B,T,D)
     for i, block in enumerate(self.blk):
       profile_marker(f"layer {i}")
-      x = block(x, start_pos)  # (B,T,D) -> (B,T,D)
+      x = block(x, start_pos)                       # (B,T,D) -> (B,T,D)
     logits = self.output(self.output_norm(x))       # (B,T,D) -> (B,T,V)
     return logits[:, -1:, :].argmax(-1)             # (B,T,V) -> (B,)
 
@@ -256,19 +259,17 @@ class Transformer:
       load_state_dict(model, weights, strict=False, consume=True)
     return model
 
-  def generate(self, tokens:list[int], start_pos=0, max_new_tokens:int=4096):
-    v_start_pos = UOp.variable("start_pos", 1, self.max_context-1)
-    start_pos = 0
-    t = Tensor([tokens[start_pos:]], dtype="int32")
+  def generate(self, toks:list[int], start_pos=0, max_new_tokens:int=4096):
+    start_pos, v_start_pos = 0, UOp.variable("start_pos", 1, self.max_context-1)
+    t = Tensor([toks[start_pos:]], dtype="int32")
     self.forward_jit.reset()  # TODO: why is this required? root cause the issue and make it not be needed
-    start_length = len(tokens)
-    while len(tokens) < min(self.max_context, max_new_tokens+start_length):
-      with Timing("forward pass", on_exit=lambda et: f"{1e9/et:.2f} tok/sec", enabled=DEBUG >= 1):
-        t = self(t, v_start_pos.bind(start_pos) if getenv("SYM", 1) and start_pos != 0 and t.shape[-1] == 1 else start_pos)
-        next_id = int(t.item())
-      tokens.append(next_id)
-      start_pos = len(tokens) - 1
-      yield next_id
+    start_length = len(toks)
+    while len(toks) < min(self.max_context, max_new_tokens+start_length):
+      t = self(t, v_start_pos.bind(start_pos) if getenv("SYM", 1) and start_pos != 0 and t.shape[-1] == 1 else start_pos)
+      next_tok = int(t.item())
+      toks.append(next_tok)
+      start_pos = len(toks) - 1
+      yield next_tok
 
 def main(args):
   if args.seed is not None: Tensor.manual_seed(args.seed)
@@ -299,15 +300,19 @@ def main(args):
     model = Transformer.from_pretrained(model_path, model_info["params"], args.fakeweights) # type: ignore[arg-type]
 
   # generate text
-  print(args.prompt, end="\n" if args.timing else "", flush=True)
-  ids = tokenizer(args.prompt)["input_ids"]
-  st = time.perf_counter()
-  for next_id in model.generate(ids, max_new_tokens=args.max_new_tokens):
-    duration, st = time.perf_counter()-st, time.perf_counter()
-    print(tokenizer.decode([next_id], skip_special_tokens=True), flush=True, end="")
-    if args.timing: print(f'\t{1/duration:.3f} tok/sec', end="\n")
-    if next_id == tokenizer.eos_token: break
+  toks = tokenizer(args.prompt)["input_ids"]
+  start_pos = 0
+  timings = [time.perf_counter_ns()]
+  for next_tok in model.generate(toks, max_new_tokens=args.max_new_tokens):
+    timings.append(time.perf_counter_ns())
+    if args.timing:
+      elapsed = (timings[-1] - timings[-2]) / 1e9
+      print(f'[{elapsed:.2f} s, {len(toks[start_pos:])/elapsed:.2f} tok/s]'.ljust(25), end="")
+    print(tokenizer.decode(toks[start_pos:], skip_special_tokens=True), flush=True, end="\n" if args.timing else "")
+    if next_tok == tokenizer.eos_token: break
+    start_pos = len(toks)
   print(flush=True)
+  if args.timing: print(f'Average: {len(toks)/(timings[-1] - timings[0])*1e9:.2f} tok/s')
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Run gpt-oss in tinygrad", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
