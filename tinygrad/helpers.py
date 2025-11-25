@@ -147,8 +147,10 @@ def temp(x:str, append_user:bool=False) -> str:
 class Context(contextlib.ContextDecorator):
   def __init__(self, **kwargs): self.kwargs = kwargs
   def __enter__(self):
-    self.old_context:dict[str, int] = {k:v.value for k,v in ContextVar._cache.items()}
-    for k,v in self.kwargs.items(): ContextVar._cache[k].value = v
+    self.old_context:dict[str, int] = {}
+    for k,v in self.kwargs.items():
+      self.old_context[k] = ContextVar._cache[k].value
+      ContextVar._cache[k].value = v
   def __exit__(self, *args):
     for k,v in self.old_context.items(): ContextVar._cache[k].value = v
 
@@ -179,7 +181,9 @@ ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE = ContextVar("ALLOW_DEVICE_USAGE", 1), Conte
 EMULATE = ContextVar("EMULATE", "")
 CPU_COUNT = ContextVar("CPU_COUNT", max(1, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)))
 CPU_LLVM, CPU_LVP, AMD_LLVM = ContextVar("CPU_LLVM", 0), ContextVar("CPU_LVP", 0), ContextVar("AMD_LLVM", 0)
-VIZ = PROFILE = ContextVar("VIZ", 0)
+# VIZ implies PROFILE, but you can run PROFILE without VIZ
+VIZ = ContextVar("VIZ", 0)
+PROFILE = ContextVar("PROFILE", VIZ.value)
 SPEC = ContextVar("SPEC", 1)
 # TODO: disable by default due to speed
 IGNORE_OOB = ContextVar("IGNORE_OOB", 1)
@@ -277,7 +281,7 @@ class ProfilePointEvent(ProfileEvent):
 
 cpu_events:list[ProfileEvent] = []
 @contextlib.contextmanager
-def cpu_profile(name:str|TracingKey, device="CPU", is_copy=False, display=True) -> Generator[ProfileRangeEvent, None, None]:
+def cpu_profile(name:str|TracingKey, device="TINY", is_copy=False, display=True) -> Generator[ProfileRangeEvent, None, None]:
   res = ProfileRangeEvent(device, name, perf_counter_us(), is_copy=is_copy)
   try: yield res
   finally:
@@ -380,7 +384,11 @@ def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip
 
 # *** Exec helpers
 
-def system(cmd, **kwargs): return subprocess.check_output(cmd.split(), **kwargs).decode().strip()
+def system(cmd:str, **kwargs) -> str:
+  st = time.perf_counter()
+  ret = subprocess.check_output(cmd.split(), **kwargs).decode().strip()
+  if DEBUG >= 1: print(f"system: '{cmd}' returned {len(ret)} bytes in {(time.perf_counter() - st)*1e3:.2f} ms")
+  return ret
 
 def cpu_objdump(lib, objdump_tool='objdump'):
   with tempfile.NamedTemporaryFile(delete=True) as f:

@@ -6,6 +6,7 @@ from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatch
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
+from tinygrad.helpers import VIZ
 from tinygrad.device import Buffer
 
 @track_rewrites(name=True)
@@ -33,11 +34,14 @@ class BaseTestViz(unittest.TestCase):
     cpu_events.clear()
     self.tms = TRACK_MATCH_STATS.value
     self.profile = PROFILE.value
+    self.viz = VIZ.value
     TRACK_MATCH_STATS.value = 2
     PROFILE.value = 1
+    VIZ.value = 1
   def tearDown(self):
     TRACK_MATCH_STATS.value = self.tms
     PROFILE.value = self.profile
+    VIZ.value = self.viz
 
 class TestViz(BaseTestViz):
   def test_simple(self):

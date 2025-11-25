@@ -26,6 +26,8 @@ pm_generate_realize_map = PatternMatcher([
   (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in ALWAYS_CONTIGUOUS)),
   # always realize COPY/BUFFER_VIEW/CONTIGUOUS/STORE
   (UPat({Ops.COPY, Ops.BUFFER_VIEW, Ops.CONTIGUOUS, Ops.STORE}, name="tr"), realize),
+  # always realize REDUCE on outer ranges
+  (UPat(Ops.REDUCE, name="r"), lambda ctx,r: realize(ctx, r) if any(tr.arg[-1] == AxisType.OUTER for tr in r.src[1:]) else None),
   # realize srcs of COPY, MSELECT, MSTACK
   (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_srcs),
   # realize ASSIGN and input to assign (might be optimized out)
@@ -37,6 +39,7 @@ class BufferizeOpts:
   # on AddrSpace.LOCAL, device is the id
   device: str|tuple[str, ...]|int|None
   addrspace: AddrSpace = AddrSpace.GLOBAL
+  removable: bool = True
 
 @dataclass
 class IndexingContext:
@@ -66,8 +69,11 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
         new_src = s.end(*[r for r in closed_ranges if r.op is Ops.RANGE])
         del ctx.realize_map[s]
       else:
+        # the Bufferize before a COPY is not removable. there should be a better way to do this
+        removable = x.op is not Ops.COPY and s.op not in ALWAYS_CONTIGUOUS
         # None in the device assigns it a number later
-        opts = BufferizeOpts(device=s.device) if len(ctx.range_map[s][1]) == len(realized_ranges) else BufferizeOpts(None, AddrSpace.LOCAL)
+        opts = BufferizeOpts(device=s.device, removable=removable) if len(ctx.range_map[s][1]) == len(realized_ranges) else \
+               BufferizeOpts(None, AddrSpace.LOCAL, removable=removable)
         new_src = UOp(Ops.BUFFERIZE, s.dtype, src=(new_src,)+closed_ranges, arg=opts, tag=s.tag if opts.addrspace == AddrSpace.GLOBAL else None)
         if x in ctx.range_map: new_src = new_src.index(*[r for i,r in enumerate(ctx.range_map[x][0]) if i in realized_ranges])
     new_srcs.append(new_src)

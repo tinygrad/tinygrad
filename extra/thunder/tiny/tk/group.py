@@ -56,13 +56,13 @@ class Group:
     self.ker.push_store(dst_store, dst)
     return dst.after(dst_store).reshape(dst.shape)
 
-  def mma_AB(self, c:UOp|RT, a:UOp|RT, b:UOp|RT, after=True):
+  def mma_AB(self, c:UOp|RT, a:UOp|RT, b:UOp|RT):
     c, a, b = cast(UOp, c), cast(UOp, a), cast(UOp, b)
     assert self.warps == 1
 
     for height in self.ker.range(c.shape[-3], track=False):
       for width in self.ker.range(c.shape[-2], track=False):
-        for inner in self.ker.range(a.shape[-2], AxisType.REDUCE, track=False):
+        for inner in self.ker.range(a.shape[-2], axis_type=AxisType.REDUCE, track=False):
           wmma_arg = ("WMMA_8_16_16_bfloat16_float", (8, 16, 16), dtypes.bfloat16, dtypes.float, "CUDA", 32, (((4, 2), (3, 2), (8, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ())
 
           a_in = UOp.vectorize(*[a[height, inner, i] for i in range(8)])
@@ -77,15 +77,15 @@ class Group:
           c_store = UOp.group(*c_i).end(height, width, inner)
 
     self.ker.push_store(c_store, c)
-    return c.after(c_store).reshape(c.shape) if after else c_store
+    return c.after(c_store).reshape(c.shape)
 
-  def mma_ABt(self, c:UOp|RT, a:UOp|RT, b:UOp|RT, after=True):
+  def mma_ABt(self, c:UOp|RT, a:UOp|RT, b:UOp|RT):
     c, a, b = cast(UOp, c), cast(UOp, a), cast(UOp, b)
     assert self.warps == 1
 
     for height in self.ker.range(c.shape[-3], track=False):
       for width in self.ker.range(c.shape[-2], track=False):
-        for inner in self.ker.range(a.shape[-2], AxisType.REDUCE, track=False):
+        for inner in self.ker.range(a.shape[-2], axis_type=AxisType.REDUCE, track=False):
           wmma_arg = ("WMMA_8_16_16_bfloat16_float", (8, 16, 16), dtypes.bfloat16, dtypes.float, "CUDA", 32, (((4, 2), (3, 2), (8, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ())
 
           a_in = UOp.vectorize(*[a[height, inner, i] for i in range(8)])
@@ -100,7 +100,7 @@ class Group:
           c_store = UOp.group(*c_i).end(height, width, inner)
 
     self.ker.push_store(c_store, c)
-    return c.after(c_store).reshape(c.shape) if after else c_store
+    return c.after(c_store).reshape(c.shape)
 
   map_rid = 400
   def map(self, a:ALL_TILES, op:Callable[[UOp], UOp]|Callable[[UOp, tuple], UOp]):
@@ -135,8 +135,8 @@ class Group:
       red_reg = red_reg.after(reg_store).reshape(red_reg.shape)
 
       for outer in self.ker.range(2, track=False):
-        for width in self.ker.range(src.shape[-2], AxisType.REDUCE, track=False):
-          for inner in self.ker.range(4, AxisType.REDUCE, track=False):
+        for width in self.ker.range(src.shape[-2], axis_type=AxisType.REDUCE, track=False):
+          for inner in self.ker.range(4, axis_type=AxisType.REDUCE, track=False):
             elem_index = inner + 2 * (inner // 2) + outer * 2
             reg_store = red_reg[outer].store(op(red_reg[outer], src[height, width, elem_index])).end(inner, width, outer)
             red_reg = red_reg.after(reg_store).reshape(red_reg.shape)
@@ -148,7 +148,7 @@ class Group:
 
       # reduce from shared memory
       for outer in self.ker.range(2, track=False):
-        for inner in self.ker.range(3, AxisType.REDUCE, track=False):
+        for inner in self.ker.range(3, axis_type=AxisType.REDUCE, track=False):
           offset = (self.laneid // 4) * 4 + ((self.laneid + inner + 1) % 4)
           reg_store = red_reg[outer].store(op(red_reg[outer], red_local[offset, outer])).end(inner, outer)
           red_reg = red_reg.after(reg_store).reshape(red_reg.shape)
@@ -162,7 +162,7 @@ class Group:
 
   # ops that can work across multiple warps
 
-  LOAD_INNER = 8
+  LOAD_INNER = 4
   def load(self, dst:ALL_TILES, src:ALL_TILES, dst_idxs:tuple[UOp|int,...]=(), idxs:tuple[UOp|int,...]=(), axis:int=0, transpose:bool=False):
     dst, src = cast(UOp, dst), cast(UOp, src)
     assert isinstance(dst.dtype, PtrDType) and isinstance(src.dtype, PtrDType)
@@ -225,7 +225,7 @@ class Group:
 
     return dst.after(dst_store.barrier()).reshape(dst.shape)
 
-  STORE_INNER = 8
+  STORE_INNER = 4
   def store(self, dst:ALL_TILES, src:ALL_TILES, idxs:tuple[UOp|int,...]=(), src_idxs:tuple[UOp|int,...]=(), axis:int=0, transpose:bool=False):
     dst, src = cast(UOp, dst), cast(UOp, src)
     assert isinstance(dst.dtype, PtrDType) and isinstance(src.dtype, PtrDType)

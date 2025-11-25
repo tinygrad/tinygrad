@@ -17,9 +17,6 @@ from tinygrad.uop.validate import validate_index
 shared_spec = PatternMatcher([
   (UPat(Ops.SINK, dtypes.void), lambda: True), # NOTE: for testing, we let sinks be anything
 
-  # SENTINEL should never be anywhere
-  (UPat(Ops.SENTINEL), lambda: False),
-
   # CONST/DEFINE_VAR are everywhere
   (UPat(Ops.CONST, src=(), name="x"), lambda x: type(x.arg) is type(dtypes.as_const(x.arg, x.dtype))),
   (UPat(Ops.DEFINE_VAR, name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
@@ -42,7 +39,7 @@ shared_spec = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:]) or None),
 
   # RANGE/SPECIAL define loops, END closes them
-  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE)), dtype=dtypes.void), lambda: True),
+  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE))), lambda: True),
 ])
 
 # ***** UOp spec in the Tensor graph *****
@@ -147,8 +144,8 @@ shared_codegen_spec = PatternMatcher([
   (UPat().index(UPat()).or_casted().load(), lambda: True),
   (UPat(Ops.INDEX).or_casted().store(UPat()), lambda: True),
 
-  # all CUSTOM + PRECAST
-  (UPat((Ops.CUSTOMI, Ops.CUSTOM, Ops.PRECAST)), lambda: True),
+  # CUSTOM (inline and non inline)
+  (UPat((Ops.CUSTOMI, Ops.CUSTOM)), lambda: True),
 
   # INDEX
   (UPat(GroupOp.Defines|{Ops.AFTER}, name="buf").index(UPat.var("idx")), validate_index),
@@ -171,7 +168,7 @@ kernel_spec = PatternMatcher([
   (UPat(Ops.UNROLL, name="x"), lambda x: x.src[0].dtype.count == prod(y[1] for y in x.arg)),
 
   # END can end multiple axes here
-  (UPat(Ops.END, src=(UPat(), UPat()), allow_any_len=True, dtype=dtypes.void), lambda: True),
+  (UPat(Ops.END, src=(UPat(), UPat()), allow_any_len=True), lambda: True),
 
   # bufferize can be on anything
   (UPat(Ops.BUFFERIZE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: True),
