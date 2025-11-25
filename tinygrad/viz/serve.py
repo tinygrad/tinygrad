@@ -256,7 +256,8 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
 
 def device_sort_fn(k):
   order = {"USER": 0, "TINY": 1}
-  return order.get(k, len(order)+1)
+  dname, *rest = k.split()
+  return order.get(dname, len(order)+len(rest))
 
 def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_sort_fn) -> bytes|None:
   # start by getting the time diffs
