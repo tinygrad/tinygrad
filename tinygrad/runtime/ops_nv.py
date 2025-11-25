@@ -7,7 +7,7 @@ from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, H
 from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, MOCKGPU, hcq_filter_visible_devices
 from tinygrad.uop.ops import sint
 from tinygrad.device import BufferSpec, CompilerPairT
-from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, to_mv, hi32, lo32, suppress_finalizing
+from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, to_mv, hi32, lo32, suppress_finalizing, EncDecCtx
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.support.compiler_cuda import CUDACompiler, PTXCompiler, NVPTXCompiler, NVCompiler
@@ -308,49 +308,52 @@ class NVAllocator(HCQAllocator['NVDevice']):
 
   def _map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
 
-  def _encode_decode(self, bufout:HCQBuffer, bufin:HCQBuffer, hist:list[HCQBuffer], insize:int, ctx):
+  def _encode_decode(self, bufout:HCQBuffer, bufin:HCQBuffer, hist:list[HCQBuffer], insize:int, ctx:EncDecCtx):
     self.dev._ensure_has_vid_buffers(0, 0) # TODO
 
-    x = nv_gpu.nvdec_hevc_pic_s(gptimer_timeout_value=81600000, tileformat=1, sw_start_code_e=1,
-      chroma_format_idc=ctx.sps['chroma_format_idc'], pic_width_in_luma_samples=ctx.sps['pic_width_in_luma_samples'],
-      pic_height_in_luma_samples=ctx.sps['pic_height_in_luma_samples'], bit_depth_luma=ctx.sps['bit_depth_luma_minus8']+8,
-      bit_depth_chroma=ctx.sps['bit_depth_chroma_minus8']+8, log2_max_pic_order_cnt_lsb_minus4=ctx.sps['log2_max_pic_order_cnt_lsb_minus4'],
-      log2_min_luma_coding_block_size=ctx.sps['log2_min_luma_coding_block_size_minus3']+3,
-      log2_max_luma_coding_block_size=ctx.sps['log2_min_luma_coding_block_size_minus3']+3+ctx.sps['log2_diff_max_min_luma_coding_block_size'],
-      log2_min_transform_block_size=ctx.sps['log2_min_luma_transform_block_size_minus2']+2,
-      log2_max_transform_block_size=ctx.sps['log2_min_luma_transform_block_size_minus2']+2+ctx.sps['log2_diff_max_min_luma_transform_block_size'],
-      amp_enabled_flag=ctx.sps['amp_enabled_flag'], sample_adaptive_offset_enabled_flag=ctx.sps['sample_adaptive_offset_enabled_flag'],
-      pcm_enabled_flag=ctx.sps['pcm_enabled_flag'], sps_temporal_mvp_enabled_flag=ctx.sps['sps_temporal_mvp_enabled_flag'],
-      strong_intra_smoothing_enabled_flag=ctx.sps['strong_intra_smoothing_enabled_flag'],
-      # pps
-      sign_data_hiding_enabled_flag=ctx.pps['sign_data_hiding_enabled_flag'], num_ref_idx_l0_default_active=ctx.pps['num_ref_idx_l0_default_active_minus1']+1,
-      num_ref_idx_l1_default_active=ctx.pps['num_ref_idx_l1_default_active_minus1']+1, init_qp=ctx.pps['init_qp_minus26']+26,
-      cu_qp_delta_enabled_flag=ctx.pps['cu_qp_delta_enabled_flag'], diff_cu_qp_delta_depth=ctx.pps['diff_cu_qp_delta_depth'],
-      pps_cb_qp_offset=ctx.pps['pps_cb_qp_offset'], pps_cr_qp_offset=ctx.pps['pps_cr_qp_offset'],
-      pps_slice_chroma_qp_offsets_present_flag=ctx.pps['pps_slice_chroma_qp_offsets_present_flag'],
-      weighted_pred_flag=ctx.pps['weighted_pred_flag'], weighted_bipred_flag=ctx.pps['weighted_bipred_flag'],
-      transquant_bypass_enabled_flag=ctx.pps['transquant_bypass_enabled_flag'], tiles_enabled_flag=ctx.pps['tiles_enabled_flag'],
-      entropy_coding_sync_enabled_flag=ctx.pps['entropy_coding_sync_enabled_flag'],
-      loop_filter_across_slices_enabled_flag=ctx.pps['loop_filter_across_slices_enabled_flag'],
-      deblocking_filter_control_present_flag=ctx.pps['deblocking_filter_control_present_flag'],
-      scaling_list_data_present_flag=ctx.pps['scaling_list_data_present_flag'],
-      lists_modification_present_flag=ctx.pps['lists_modification_present_flag'],
-      log2_parallel_merge_level_minus2=ctx.pps['log2_parallel_merge_level_minus2']+2)
-    x.framestride[0] = x.pic_width_in_luma_samples
-    x.framestride[1] = x.pic_width_in_luma_samples
-    x.colMvBuffersize = (round_up(x.pic_width_in_luma_samples, 64) * round_up(x.pic_height_in_luma_samples, 64) // 16) // 256
-    x.IDR_picture_flag = 1
-    x.RAP_picture_flag = 1
-    x.pattern_id = 2
-    x.stream_len = insize
-    x.curr_pic_idx = 0
+    sps, pps = ctx.hevc.sps, ctx.hevc.pps
+    x = nv_gpu.nvdec_hevc_pic_s(gptimer_timeout_value=81600000, tileformat=1, sw_start_code_e=1, pattern_id=2, stream_len=insize,
+      # frame
+      IDR_picture_flag=ctx.hevc.frame.idr, RAP_picture_flag=ctx.hevc.frame.rap, curr_pic_idx=ctx.hevc.frame.pic_idx, num_ref_frames=len(hist),
+      sw_hdr_skip_length=ctx.hevc.frame.sw_hdr_skip, num_bits_short_term_ref_pics_in_slice=max(ctx.hevc.frame.sw_hdr_skip - 9, 0),
+      colMvBuffersize = (round_up(sps.pic_width_in_luma_samples, 64) * round_up(sps.pic_height_in_luma_samples, 64) // 16) // 256,
+      framestride=(ctypes.c_uint32 * 2)(sps.pic_width_in_luma_samples, sps.pic_width_in_luma_samples),
+      RefDiffPicOrderCnts=(ctypes.c_int16 * 16)(*ctx.hevc.frame.diff_poc), initreflistidxl0=(ctypes.c_ubyte*16)(*ctx.hevc.frame.ref_idx_l0),
+      initreflistidxl1=(ctypes.c_uint8 * 16)(*ctx.hevc.frame.ref_idx_l1),
+
+      # SPS
+      chroma_format_idc=sps.chroma_format_idc, pic_width_in_luma_samples=sps.pic_width_in_luma_samples,
+      pic_height_in_luma_samples=sps.pic_height_in_luma_samples, bit_depth_luma=sps.bit_depth_luma,
+      bit_depth_chroma=sps.bit_depth_chroma, log2_max_pic_order_cnt_lsb_minus4=sps.log2_max_pic_order_cnt_lsb_minus4,
+      log2_min_luma_coding_block_size=sps.log2_min_luma_coding_block_size, log2_max_luma_coding_block_size=sps.log2_max_luma_coding_block_size,
+      log2_min_transform_block_size=sps.log2_min_transform_block_size, log2_max_transform_block_size=sps.log2_max_transform_block_size,
+      amp_enabled_flag=sps.amp_enabled_flag, sample_adaptive_offset_enabled_flag=sps.sample_adaptive_offset_enabled_flag,
+      pcm_enabled_flag=sps.pcm_enabled_flag, sps_temporal_mvp_enabled_flag=sps.sps_temporal_mvp_enabled_flag,
+      strong_intra_smoothing_enabled_flag=sps.strong_intra_smoothing_enabled_flag,
+      # PPS
+      sign_data_hiding_enabled_flag=pps.sign_data_hiding_enabled_flag, num_ref_idx_l0_default_active=pps.num_ref_idx_l0_default_active,
+      num_ref_idx_l1_default_active=pps.num_ref_idx_l1_default_active, init_qp=pps.init_qp,
+      cu_qp_delta_enabled_flag=pps.cu_qp_delta_enabled_flag, diff_cu_qp_delta_depth=pps.diff_cu_qp_delta_depth,
+      pps_cb_qp_offset=pps.pps_cb_qp_offset, pps_cr_qp_offset=pps.pps_cr_qp_offset,
+      pps_slice_chroma_qp_offsets_present_flag=pps.pps_slice_chroma_qp_offsets_present_flag,
+      weighted_pred_flag=pps.weighted_pred_flag, weighted_bipred_flag=pps.weighted_bipred_flag,
+      transquant_bypass_enabled_flag=pps.transquant_bypass_enabled_flag, tiles_enabled_flag=pps.tiles_enabled_flag,
+      entropy_coding_sync_enabled_flag=pps.entropy_coding_sync_enabled_flag,
+      loop_filter_across_slices_enabled_flag=pps.loop_filter_across_slices_enabled_flag,
+      deblocking_filter_control_present_flag=pps.deblocking_filter_control_present_flag,
+      scaling_list_data_present_flag=pps.scaling_list_data_present_flag,
+      lists_modification_present_flag=pps.lists_modification_present_flag, log2_parallel_merge_level=pps.log2_parallel_merge_level)
+
+    build_hist_list = [None] * (len(hist) + 1)
+    for i in range(len(hist)): build_hist_list[ctx.hevc.hist_order[i]] = hist[i]
+    build_hist_list[x.curr_pic_idx] = bufout
 
     desc_buf = self.dev.kernargs_buf.offset(offset=self.dev.kernargs_offset_allocator.alloc(0x1000, 0x100), size=0x1000)
     desc_buf.cpu_view().view(fmt='B')[:ctypes.sizeof(x)] = bytes(x)
 
     NVVideoQueue().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
-                  .decode_hevc_chunk(bufin, [bufout] + hist, self.dev.vid_coloc_buf, self.dev.vid_filter_buf,
-                                     self.dev.vid_scaling_list, self.dev.vid_tile_sizes, self.dev.vid_status_buf, desc_buf, 0) \
+                  .decode_hevc_chunk(bufin, build_hist_list, self.dev.vid_coloc_buf, self.dev.vid_filter_buf,
+                                     self.dev.vid_scaling_list, self.dev.vid_tile_sizes, self.dev.vid_status_buf, desc_buf, ctx.hevc.idx) \
                   .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
 
 @dataclass

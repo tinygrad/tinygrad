@@ -524,9 +524,9 @@ class Tensor(OpMixin):
     return r
 
   @staticmethod
-  def from_hevc(nal_unit_type:int, data:Tensor, ctx, **kwargs) -> Tensor:
-    r = Tensor.empty(ctx.sps['pic_width_in_luma_samples']*(ctx.sps['pic_height_in_luma_samples']+ctx.sps['pic_height_in_luma_samples']//2), **kwargs)
-    r.uop = data.to(r.device).uop.encdec(r.shape, ctx)
+  def from_hevc(data:Tensor, ref_frames:list[Tensor], size:int, ctx, **kwargs) -> Tensor:
+    r = Tensor.empty(size, **kwargs)
+    r.uop = data.to(r.device).uop.encdec(r.shape, [x.to(r.device).uop for x in ref_frames], ctx)
     return r
 
   @staticmethod
