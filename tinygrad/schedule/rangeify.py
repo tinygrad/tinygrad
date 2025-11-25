@@ -349,7 +349,9 @@ def flatten_bufferize(x:UOp):
   ret = x.replace(tag=None, src=(x.src[0], get_single_element(apply_movement_op(Ops.RESHAPE, (prod(x.shape),), x.shape, x.src[1:]))))
   rngs = x.src[1:]
   ret = ret.forced_reshape(x.shape)
-  if any(r.op is Ops.RANGE and r.src[0].op is not Ops.CONST for r in rngs): ret = ret.shrink(tuple([(0, r.src[0]) for r in rngs]))
+  if any(r.op is Ops.RANGE and r.src[0].op is not Ops.CONST for r in rngs):
+    sym_shape = tuple([r.src[0] if r.op is not Ops.CONST else 1 for r in rngs])
+    ret = ret.shrink(tuple([(0,x) for x in sym_shape]))
   return ret.rtag(x.tag)
 pm_flatten_bufferize = PatternMatcher([(UPat(Ops.BUFFERIZE, name="x"), flatten_bufferize)])
 
