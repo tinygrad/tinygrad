@@ -97,6 +97,30 @@ class UOpMetaClass(type):
 buffers:weakref.WeakKeyDictionary[UOp, Buffer|MultiBuffer] = weakref.WeakKeyDictionary() # this maps BUFFER uops to their device Buffers
 all_metadata:weakref.WeakKeyDictionary[UOp, tuple[Metadata, ...]] = weakref.WeakKeyDictionary() # TODO: should this be here?
 
+def _restore_weakuopcache(m, n):
+  import importlib
+  return WeakUOpCache(getattr(importlib.import_module(m), n))
+
+class WeakUOpCache:
+  def __init__(self, fxn=None):
+    self.cache: weakref.WeakKeyDictionary[UOp, dict[Any, weakref.ref|None]|weakref.WeakKeyDictionary] = weakref.WeakKeyDictionary()
+    self.fxn = fxn
+    if fxn: functools.wraps(fxn)(self)
+  def clear(self): self.cache.clear()
+  def __get__(self, obj, objtype=None): return self if obj is None else lambda *a, **k: self(obj, *a, **k)
+  def __call__(self, *args, **kwargs):
+    if self.fxn is None: return WeakUOpCache(fxn=args[0])
+    subkey = args[1] if len(args) > 1 else None
+    if (inner:=self.cache.get(args[0])) and subkey in inner:
+      cached = inner[subkey]
+      if cached is None: return None
+      if (ret:=cached()) is not None: return ret
+    if inner is None: self.cache[args[0]] = inner = weakref.WeakKeyDictionary() if isinstance(subkey, UOp) else {}
+    ret = self.fxn(*args, **kwargs)
+    inner[subkey] = None if ret is None else weakref.ref(ret)
+    return ret
+  def __reduce__(self): return (_restore_weakuopcache, (self.__wrapped__.__module__, self.__wrapped__.__name__))
+
 # recursive_property replaces functools.cached_property in recursive UOp functions to prevent RecursionError
 class recursive_property(property):
   def __init__(self, fxn):
@@ -338,6 +362,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   # *** uop evaluation ***
 
+  @WeakUOpCache
   def simplify(self, tracked=False):
     # late import!
     from tinygrad.uop.symbolic import symbolic

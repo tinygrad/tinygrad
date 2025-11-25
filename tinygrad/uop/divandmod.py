@@ -1,10 +1,9 @@
-import functools
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, WeakUOpCache
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import cdiv, cmod, CORRECT_DIVMOD_FOLDING, unwrap
 
 # NOTE: this cache is only on index UOps and matches the cache in the old ShapeTracker in spirit
-@functools.cache
+@WeakUOpCache
 def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
   x, y = d.src
 
