@@ -396,6 +396,7 @@ async function renderProfiler(path, unit, opts) {
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
+  const LINE_HEIGHT = 14;
   function render(transform) {
     zoomLevel = transform;
     ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
@@ -404,6 +405,7 @@ async function renderProfiler(path, unit, opts) {
     const visibleX = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
     const st = visibleX[0], et = visibleX[1];
     xscale.domain(visibleX);
+    ctx.translate(0, LINE_HEIGHT);
     // draw shapes
     const paths = [];
     for (const [_, { shapes, eventType, visible, offsetY, valueMap, pcolor }] of data.tracks) {
@@ -469,6 +471,7 @@ async function renderProfiler(path, unit, opts) {
       }
     }
     // draw markers
+    ctx.translate(0, -LINE_HEIGHT);
     ctx.textBaseline = "top";
     for (const m of markers) {
       const x = xscale(m.ts);
