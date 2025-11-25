@@ -1,6 +1,7 @@
-import unittest, math, time
+import unittest, math
 
 from tinygrad import Tensor, Device, dtypes, Context
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.engine.realize import ExecItem, get_runner
 from tinygrad.helpers import CI
 import numpy as np
@@ -580,6 +581,11 @@ class TestTK(unittest.TestCase):
         k_reg_transposed = warp.transpose(k_reg_transposed, k_reg)
         att_block = warp.mma_AtB(att_block, k_reg_transposed, q_reg_transposed)
 
+        # mask for causal
+        q_start = q_seq * Q_BLOCK_SIZE
+        kv_start = kv_idx * KV_BLOCK_SIZE
+        att_block = warp.map(att_block, lambda x, idx: ((kv_start + idx[0]) > (q_start + idx[1])).alu(Ops.WHERE, UOp.ufix(x._uop, -math.inf), x))
+
         # softmax
         max_vec_last = warp.copy(max_vec_last.after(kv_idx), max_vec)
         max_vec = warp.row_reduce(max_vec.after(max_vec_last), att_block, lambda a, b: a.maximum(b), init_value=-math.inf)
@@ -621,7 +627,7 @@ class TestTK(unittest.TestCase):
     q_permuted = q.permute(0, 2, 1, 3)
     k_permuted = k.permute(0, 2, 1, 3)
     v_permuted = v.permute(0, 2, 1, 3)
-    ref = q_permuted.scaled_dot_product_attention(k_permuted, v_permuted, enable_gqa=True).float()
+    ref = q_permuted.scaled_dot_product_attention(k_permuted, v_permuted, is_causal=True, enable_gqa=True).float()
     ref = ref.permute(0, 2, 1, 3)
 
     # diff_arrays(out.tolist(), ref.tolist())
