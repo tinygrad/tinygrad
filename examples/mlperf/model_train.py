@@ -1356,7 +1356,7 @@ def train_llama3():
       v.realize()
 
   optim = AdamW(get_parameters(model), lr=0.0,
-                b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay)
+                b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, fused=True)
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
 
   # init tensors
@@ -1376,7 +1376,11 @@ def train_llama3():
   @Tensor.train()
   def train_step(tokens:Tensor, grad_acc:int):
     optim.zero_grad()
-    # grad acc
+    # grad acc. NOTE: this has to become multidevice aware, this cat should be per device
+    cat_params = Tensor.cat(*[t.flatten() for t in optim.params], dim=0)
+    cat_grads = Tensor.zeros_like(cat_params)
+
+    total_loss = Tensor(0, dtype=dtypes.float)
     for batch in tokens.split(tokens.shape[0]//grad_acc):
       profile_marker("grads")
       if (DP := getenv("DP", 1)) > 1:
@@ -1388,20 +1392,28 @@ def train_llama3():
       logits:Tensor = model(batch[:, :-1], start_pos=0, temperature=math.nan)
       loss = logits.sparse_categorical_crossentropy(batch[:, 1:])
       loss.backward()
-      loss.realize(*[p.grad for p in optim.params])
+      total_loss += loss/grad_acc
+      cat_grads += Tensor.cat(*[t.grad.flatten() for t in optim.params], dim=0)
+      total_loss.realize(cat_grads)
+
     # L2 norm grad clip
     # https://github.com/NVIDIA/NeMo/blob/3368c3fc0b4a186ab33a1d68a504315100c0b2a6/nemo/collections/nlp/modules/common/megatron/clip_grads.py#L57
     # https://docs.pytorch.org/docs/stable/generated/torch.nn.utils.clip_grad_norm_.html
     profile_marker("optimizer")
+
     if not getenv("DISABLE_GRAD_CLIP_NORM"):
-      total_norm = Tensor(0.0, dtype=dtypes.float32, device=optim.params[0].device)
-      for p in optim.params:
-        total_norm += p.grad.float().square().sum()
-      total_norm = total_norm.sqrt().contiguous()
-      for p in optim.params:
-        p.grad = p.grad * (opt_gradient_clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)
-    Tensor.realize(*optim.schedule_step(), *scheduler.schedule_step())
-    return loss
+      total_norm = cat_grads.float().square().sum().sqrt().contiguous()
+      cat_grads = cat_grads * (opt_gradient_clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)
+
+    # run the optimizer
+    # NOTE: this is copied from _schedule_step
+    out, extra = optim._step([cat_params], [cat_grads]) # this will go on CPU
+
+    # update the parameters
+    updated_params = [out[0][optim.pos_params[i]:optim.pos_params[i+1]].reshape(tt.shape) for i, tt in enumerate(optim.params)]
+    for i, tt in enumerate(optim.params): tt.assign(updated_params[i])
+    Tensor.realize(*optim.params, *extra, *optim.buffers, *scheduler.schedule_step())
+    return total_loss
 
   @TinyJit
   @Tensor.train(False)
