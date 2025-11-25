@@ -396,6 +396,18 @@ async function renderProfiler(path, unit, opts) {
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
+  const drawLabel = (label, lx, ly, freeWidth) => {
+    let lw = 0;
+    for (let li=0; li<label?.length; li++) {
+      if (lw+label[li].width+(li===label.length-1 ? 0 : ellipsisWidth)+2 > freeWidth) {
+        if (lw>0) ctx.fillText("...", lx+lw, ly);
+        break;
+      }
+      ctx.fillStyle = label[li].color;
+      ctx.fillText(label[li].st, lx+lw, ly);
+      lw += label[li].width;
+    }
+  }
   const LINE_HEIGHT = 14;
   function render(transform) {
     zoomLevel = transform;
@@ -406,6 +418,7 @@ async function renderProfiler(path, unit, opts) {
     const st = visibleX[0], et = visibleX[1];
     xscale.domain(visibleX);
     ctx.translate(0, LINE_HEIGHT);
+    ctx.textBaseline = "middle";
     // draw shapes
     const paths = [];
     for (const [_, { shapes, eventType, visible, offsetY, valueMap, pcolor }] of data.tracks) {
@@ -434,18 +447,7 @@ async function renderProfiler(path, unit, opts) {
           visible.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
           ctx.fillStyle = e.fillColor; ctx.fill(p);
           // add label
-          let lw = 0;
-          const lx = x+2, ly = y+e.height/2;
-          for (let li=0; li<e.label?.length; li++) {
-            if (lw+e.label[li].width+(li===e.label.length-1 ? 0 : ellipsisWidth)+2 > width) {
-              if (lw>0) ctx.fillText("...", lx+lw, ly);
-              break;
-            }
-            ctx.textBaseline = "middle";
-            ctx.fillStyle = e.label[li].color;
-            ctx.fillText(e.label[li].st, lx+lw, ly);
-            lw += e.label[li].width;
-          }
+          drawLabel(e.label, x+2, y+e.height/2, width);
         }
         if (focusedShape != null && e.arg?.key === focusedShape) { paths.push([p, pcolor]); }
       }
@@ -698,7 +700,7 @@ async function main() {
         if (subrewrites.length > 0) { l.appendChild(d3.create("span").text(` (${subrewrites.length})`).node()); l.parentElement.classList.add("has-children"); }
       }
     }
-    return setState({ currentCtx:-1 });
+    return setState({ currentCtx:0 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
