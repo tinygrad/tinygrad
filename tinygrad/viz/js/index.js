@@ -220,8 +220,8 @@ async function renderProfiler(path, unit, opts) {
   const textDecoder = new TextDecoder("utf-8");
   const { strings, dtypeSize, markers }  = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
   // place devices on the y axis and set vertical positions
-  const [tickSize, padding] = [10, 8];
-  const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize+padding+"px");
+  const [tickSize, padding, baseOffset] = [10, 8, markers.length ? 14 : 0];
+  const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize+padding+baseOffset+"px");
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
   // NOTE: scrolling via mouse can only zoom the graph
   canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
@@ -409,7 +409,6 @@ async function renderProfiler(path, unit, opts) {
       lw += label[li].width;
     }
   }
-  const LINE_HEIGHT = 14;
   function render(transform) {
     zoomLevel = transform;
     const canvasWidth = canvas.clientWidth;
@@ -419,7 +418,6 @@ async function renderProfiler(path, unit, opts) {
     const visibleX = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
     const st = visibleX[0], et = visibleX[1];
     xscale.domain(visibleX);
-    ctx.translate(0, LINE_HEIGHT);
     ctx.textBaseline = "middle";
     // draw shapes
     const paths = [];
@@ -455,6 +453,7 @@ async function renderProfiler(path, unit, opts) {
       }
     }
     // draw axes
+    ctx.translate(0, baseOffset);
     drawLine(ctx, xscale.range(), [0, 0]);
     for (const tick of xscale.ticks()) {
       // tick line
@@ -475,7 +474,7 @@ async function renderProfiler(path, unit, opts) {
       }
     }
     // draw markers
-    ctx.translate(0, -LINE_HEIGHT);
+    ctx.translate(0, -baseOffset);
     ctx.textBaseline = "top";
     for (let i=0; i<markers.length; i++) {
       const m = markers[i];
