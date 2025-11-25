@@ -271,7 +271,6 @@ def main(args):
   expected = [12194, 11, 1495, 553, 481, 30, 357, 939, 8975, 13]
 
   if getenv("TORCH"):
-    # todo: change num_hidden_layers based on getenv("GPT_OSS_LAYERS", 1)
     import torch
     from transformers import GptOssForCausalLM, GptOssConfig
     device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
@@ -283,7 +282,7 @@ def main(args):
     generate_ids = model.generate(input_ids, max_new_tokens=args.max_new_tokens) # tensor([[12194,    11,   1495,   553,   481,    30]], device='cuda:0')
     out = tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
     print(out)
-    torch.testing.assert_close(generate_ids[0], torch.tensor(expected, device=device))
+    assert (ret := generate_ids[0].tolist()) == expected, f"{ret=} did not match {expected=}"
     return
 
   # build model
