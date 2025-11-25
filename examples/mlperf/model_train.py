@@ -3,7 +3,7 @@ from pathlib import Path
 import multiprocessing
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
-from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, Profiling
+from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, Profiling, profile_marker
 from tinygrad.nn.state import get_parameters, get_state_dict, load_state_dict, safe_load, safe_save
 from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup, Adam, AdamW
 
@@ -1331,10 +1331,6 @@ def train_llama3():
   if (llama_layers:=getenv("LLAMA_LAYERS")) != 0: params['n_layers'] = llama_layers
   model = Transformer(**params, max_context=SEQLEN, jit=False, disable_kv_cache=True)
 
-  if getenv("FAKEDATA"):
-    for v in get_parameters(model):
-      v = v.assign(Tensor.empty(v.shape))
-
   if (DP := getenv("DP", 1)) > 1:
     device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
     for v in get_parameters(model):
@@ -1363,6 +1359,10 @@ def train_llama3():
                 b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay)
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
 
+  # init tensors
+  profile_marker("init tensors")
+  optim.lr.realize(*[p.replace(p.contiguous()) for p in optim.params])
+
   if resume_ckpt := getenv("RESUME_CKPT"):
     fn = f"./ckpts/llama3_{resume_ckpt}.safe"
     print(f"loading initial checkpoint from {fn}")
@@ -1378,6 +1378,7 @@ def train_llama3():
     optim.zero_grad()
     # grad acc
     for batch in tokens.split(tokens.shape[0]//grad_acc):
+      profile_marker("grads")
       if (DP := getenv("DP", 1)) > 1:
         device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
         batch = batch.shard(device, 0)
@@ -1387,10 +1388,11 @@ def train_llama3():
       logits:Tensor = model(batch[:, :-1], start_pos=0, temperature=math.nan)
       loss = logits.sparse_categorical_crossentropy(batch[:, 1:])
       loss.backward()
-      Tensor.realize(*[p.grad for p in optim.params])
+      loss.realize(*[p.grad for p in optim.params])
     # L2 norm grad clip
     # https://github.com/NVIDIA/NeMo/blob/3368c3fc0b4a186ab33a1d68a504315100c0b2a6/nemo/collections/nlp/modules/common/megatron/clip_grads.py#L57
     # https://docs.pytorch.org/docs/stable/generated/torch.nn.utils.clip_grad_norm_.html
+    profile_marker("optimizer")
     if not getenv("DISABLE_GRAD_CLIP_NORM"):
       total_norm = Tensor(0.0, dtype=dtypes.float32, device=optim.params[0].device)
       for p in optim.params:
@@ -1398,7 +1400,8 @@ def train_llama3():
       total_norm = total_norm.sqrt().contiguous()
       for p in optim.params:
         p.grad = p.grad * (opt_gradient_clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)
-    return loss.float().to('CPU').realize(*optim.schedule_step(), *scheduler.schedule_step())
+    Tensor.realize(*optim.schedule_step(), *scheduler.schedule_step())
+    return loss
 
   @TinyJit
   @Tensor.train(False)
@@ -1443,17 +1446,19 @@ def train_llama3():
   iter = get_train_iter()
   i, sequences_seen = resume_ckpt, 0
   for tokens in tqdm(iter, total=SAMPLES//GBS):
+    profile_marker(f"train step {i}")
     t = time.perf_counter()
     GlobalCounters.reset()
     loss = train_step(tokens, grad_acc)
+    loss, lr = loss.float().item(), optim.lr.item()
 
     i += 1
     sequences_seen += tokens.shape[0]
 
-    tqdm.write(f"{loss.item():.4f} loss, {optim.lr.item():.12f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {time.perf_counter()-t:.2f} s")
+    tqdm.write(f"{loss:.4f} loss, {lr:.12f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {time.perf_counter()-t:.2f} s")
     if (fname:=getenv("LOSS_FILE", "")):
       with open(fname, "a") as f:
-        f.write(f"{i} {loss.item():.4f} {optim.lr.item():.12f} {GlobalCounters.mem_used / 1e9:.2f}\n")
+        f.write(f"{i} {loss:.4f} {lr:.12f} {GlobalCounters.mem_used / 1e9:.2f}\n")
 
     if (ckpt_freq := getenv("CKPT")) and (i % ckpt_freq == 0 and (i != 1 or ckpt_freq == 1)):
       tqdm.write("saving checkpoint")
