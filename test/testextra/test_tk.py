@@ -401,7 +401,6 @@ class TestTK(unittest.TestCase):
 
     np.testing.assert_allclose(b.numpy(), ref.numpy(), atol=1e-5, rtol=1e-5)
 
-  # @unittest.skip("fake range not ended")
   def test_softmax(self):
     N = 64
     BLOCK_SIZE = 32
@@ -630,60 +629,7 @@ class TestTK(unittest.TestCase):
     ref = q_permuted.scaled_dot_product_attention(k_permuted, v_permuted, is_causal=True, enable_gqa=True).float()
     ref = ref.permute(0, 2, 1, 3)
 
-    # diff_arrays(out.tolist(), ref.tolist())
-
     np.testing.assert_allclose(out.numpy(), ref.numpy(), atol=1e-2, rtol=1e-5)
-
-import itertools
-def diff_arrays(arr1, arr2):
-  """
-  Compares two arrays (flat or nested) and prints them with highlighting.
-  Red = element in arr1 (expected) but different or missing in arr2.
-  Green = element in arr2 (actual) but different or missing in arr1.
-  """
-  # ANSI escape codes for colors
-  RED = "\033[91m"
-  GREEN = "\033[92m"
-  RESET = "\033[0m"
-  SENTINEL = object()
-
-  def colorize_entire(item, color_code):
-    """Helper to recursively color an entire structure (for missing/added branches)."""
-    if isinstance(item, list):
-      elements = [colorize_entire(x, color_code) for x in item]
-      return f"[{', '.join(elements)}]"
-    return f"{color_code}{str(item)}{RESET}"
-
-  def recursive_diff(a, b):
-    # Case 1: Both are lists - Recurse
-    if isinstance(a, list) and isinstance(b, list):
-      diffs = []
-      for sub_a, sub_b in itertools.zip_longest(a, b, fillvalue=SENTINEL):
-        diffs.append(recursive_diff(sub_a, sub_b))
-      return f"[{', '.join(diffs)}]"
-
-    # Case 2: Item missing in 'a' (New in 'b')
-    if a is SENTINEL:
-      return colorize_entire(b, GREEN)
-    
-    # Case 3: Item missing in 'b' (Deleted from 'a')
-    if b is SENTINEL:
-      return colorize_entire(a, RED)
-
-    # Case 4: Values Match
-    if np.allclose(a, b, equal_nan=True, atol=1e-2, rtol=1e-5):
-      return str(a)
-
-    # Case 5: Mismatch (Value or Type difference)
-    part_a = f"{RED}{str(a)}{RESET}"
-    part_b = f"{GREEN}{str(b)}{RESET}"
-    return f"[{part_a} -> {part_b}]"
-
-  print(f"Comparing arrays:")
-  # We treat the initial inputs as the first level of recursion
-  result = recursive_diff(arr1, arr2)
-  print(result)
-  print("-" * 40)
 
 if __name__ == "__main__":
   unittest.main()
