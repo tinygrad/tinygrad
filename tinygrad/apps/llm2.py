@@ -245,11 +245,21 @@ class Transformer:
       load_state_dict(model, weights, strict=False, consume=True)
     return model
 
+<<<<<<< Updated upstream
   def generate(self, tokens:list[int], max_new_tokens:int) -> Generator[int, None, None]:
     start_pos, prompt_len = 0, len(tokens)
     t = Tensor([tokens], dtype="int32")
     while len(tokens) < min(self.max_context, max_new_tokens+prompt_len):
       t = self(t, start_pos)
+=======
+  def generate(self, tokens:list[int], start_pos=0, max_new_tokens:int=4096):
+    v_start_pos = UOp.variable("start_pos", 1, self.max_context-1)
+    start_pos = 0
+    t = Tensor([tokens[start_pos:]], dtype="int32")
+    self.forward_jit.reset()  # TODO: why is this required? root cause the issue and make it not be needed
+    while len(tokens) < min(self.max_context, max_new_tokens):
+      t = self(t, v_start_pos.bind(start_pos) if getenv("SYM", 1) and start_pos != 0 and t.shape[-1] == 1 else start_pos)
+>>>>>>> Stashed changes
       next_id = int(t.item())
       tokens.append(next_id)
       start_pos = len(tokens) - 1
