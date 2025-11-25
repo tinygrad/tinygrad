@@ -273,11 +273,12 @@ def main(args):
   if getenv("TORCH"):
     # todo: change num_hidden_layers based on getenv("GPT_OSS_LAYERS", 1)
     import torch
-    from transformers import GptOssForCausalLM
+    from transformers import GptOssForCausalLM, GptOssConfig
     device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
     print(f"Using torch {device}")
     fetch(f"https://huggingface.co/{model_info['model']}/resolve/main/config.json", "config.json", subdir=model_info["model"].split('/')[-1]) # type: ignore[attr-defined]
-    model = GptOssForCausalLM.from_pretrained(model_path, local_files_only=True, cache_dir=model_path, device_map=device)
+    config = GptOssConfig.from_pretrained(model_path, local_files_only=True, cache_dir=model_path, num_hidden_layers=getenv("GPT_OSS_LAYERS", 24))
+    model = GptOssForCausalLM.from_pretrained(model_path, config=config, local_files_only=True, cache_dir=model_path, device_map=device)
     input_ids = tokenizer(args.prompt, return_tensors="pt")["input_ids"].to(device)
     generate_ids = model.generate(input_ids, max_new_tokens=args.max_new_tokens) # tensor([[12194,    11,   1495,   553,   481,    30]], device='cuda:0')
     out = tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
