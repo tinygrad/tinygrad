@@ -310,9 +310,15 @@ async function renderProfiler(path, unit, opts) {
         const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
         let shapeRef = e.ref;
         if (shapeRef != null) { ref = {ctx:e.ref, step:0}; shapeRef = ref; }
+        else if (ref != null) {
+          const start = ref.step>0 ? ref.step+1 : 0;
+          const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
+          if (stepIdx !== -1) { ref.step = stepIdx; shapeRef = ref; }
+        }
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
-        const arg = { tooltipText:label.map(l => `<span style="color:${l.color}">${l.st}</span>`)+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), key,
+        const labelHTML = label.map(l=>`<span style="color:${l.color}">${l.st}</span>`);
+        const arg = { tooltipText:labelHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), key,
                       ctx:shapeRef?.ctx, step:shapeRef?.step };
         if (e.key != null) shapeMap.set(e.key, arg);
         // offset y by depth
