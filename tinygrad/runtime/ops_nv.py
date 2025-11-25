@@ -309,6 +309,8 @@ class NVAllocator(HCQAllocator['NVDevice']):
   def _map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
 
   def _encode_decode(self, bufout:HCQBuffer, bufin:HCQBuffer, hist:list[HCQBuffer], insize:int, ctx:EncDecCtx):
+    assert all(h.va_addr % 0x100 == 0 for h in hist + [bufin, bufout]), "all buffers must be 0x100 aligned"
+
     sps, pps = ctx.hevc.sps, ctx.hevc.pps
     self.dev._ensure_has_vid_buffers(sps.pic_width_in_luma_samples, sps.pic_height_in_luma_samples)
 
