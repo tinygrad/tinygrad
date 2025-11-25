@@ -230,7 +230,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
   for name,disasm in rctx.disasms.items():
     cu_events:dict[str, list[ProfileEvent]] = {}
     # wave instruction events
-    wave_insts:dict[str, list[str, dict]] = {}
+    wave_insts:dict[str, dict[str, dict]] = {}
     inst_units:dict[str, itertools.count] = {}
     for w in rctx.inst_execs.get(name, []):
       if (u:=w.wave_loc) not in inst_units: inst_units[u] = itertools.count(0)

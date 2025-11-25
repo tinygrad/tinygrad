@@ -251,7 +251,7 @@ async function renderProfiler(path, unit, opts) {
         const e = {name:strings[u32()], ref:optional(u32()), key:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
         // find a free level to put the event
         let depth = 0;
-        if (opts.levelKey != null) { depth = opts.levelKey(e); levels[depth] = 0; colorKey = e.name.split(" ")[0]; }
+        if (opts.levelKey != null) { depth = opts.levelKey(e); levels[depth] = 0; }
         else {
           depth = levels.findIndex(levelEt => e.st >= levelEt);
           const et = e.st+Math.trunc(e.dur);
@@ -259,8 +259,8 @@ async function renderProfiler(path, unit, opts) {
             depth = levels.length;
             levels.push(et);
           } else levels[depth] = et;
-          if (depth === 0) colorKey = e.name.split(" ")[0];
         }
+        if (depth === 0) colorKey = e.name.split(" ")[0];
         if (!colorMap.has(colorKey)) {
           const color = colors instanceof Map ? (colors.get(colorKey) || colors.get("DEFAULT")) : cycleColors(colors, colorMap.size);
           colorMap.set(colorKey, d3.rgb(color));
@@ -445,7 +445,6 @@ async function renderProfiler(path, unit, opts) {
           const width = xscale(e.x+e.width)-x;
           p.rect(x, y, width, e.height);
           visible.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
-          console.log(e.fillColor, e.arg);
           ctx.fillStyle = e.fillColor; ctx.fill(p);
           // add label
           drawText(ctx, e.label, x+2, y+e.height/2, width);
