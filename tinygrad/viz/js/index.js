@@ -197,11 +197,13 @@ var data, focusedDevice, focusedShape, canvasZoom, formatTime, zoomLevel = d3.zo
 function getMetadata(shape) {
   if (shape == null) return;
   const [t, idx] = shape.split("-");
-  const track = data.tracks.get(t), e = track.shapes[idx];
+  const track = data.tracks.get(t);
+  if (track == null) return;
+  const e = track.shapes[idx];
   const html = d3.create("div").classed("info", true);
   if (track.eventType === EventTypes.EXEC) {
-    html.append(() => tabulate([["Name", colored(e.label)], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]]).node());
-    html.append("div").classed("args", true);
+    html.append(() => tabulate([["Name", d3.create("p").html(e.arg.tooltipText.split("\n")[0]).node()],
+                                ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]]).node());
     if (e.arg.ctx != null) {
       html.append("a").text("View codegen rewrite").on("click", () => switchCtx(e.arg.ctx, e.arg.step));
       html.append("a").text("View program").on("click", () => switchCtx(e.arg.ctx, ctxs[e.arg.ctx+1].steps.findIndex(s => s.name==="View Program")));
