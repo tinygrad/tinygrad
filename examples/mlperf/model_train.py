@@ -1374,7 +1374,7 @@ def train_llama3():
 
   @TinyJit
   @Tensor.train()
-  def train_step(model, tokens:Tensor, grad_acc:int):
+  def train_step(tokens:Tensor, grad_acc:int):
     optim.zero_grad()
     # grad acc
     for batch in tokens.split(tokens.shape[0]//grad_acc):
@@ -1398,17 +1398,11 @@ def train_llama3():
       total_norm = total_norm.sqrt().contiguous()
       for p in optim.params:
         p.grad = p.grad * (opt_gradient_clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)
-
-    optim.step()
-    scheduler.step()
-
-    lr = optim.lr
-    loss.realize(lr)
-    return loss, lr
+    return loss.float().to('CPU').realize(*optim.schedule_step(), *scheduler.schedule_step())
 
   @TinyJit
   @Tensor.train(False)
-  def eval_step(model, tokens:Tensor):
+  def eval_step(tokens:Tensor):
     if (DP := getenv("DP", 1)) > 1:
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
       tokens = tokens.shard(device, 0)
@@ -1451,16 +1445,15 @@ def train_llama3():
   for tokens in tqdm(iter, total=SAMPLES//GBS):
     t = time.perf_counter()
     GlobalCounters.reset()
-    loss, lr = train_step(model, tokens, grad_acc)
-    loss = loss.float().item()
+    loss = train_step(tokens, grad_acc)
 
     i += 1
     sequences_seen += tokens.shape[0]
 
-    tqdm.write(f"{loss:.4f} loss, {lr.item():.12f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {time.perf_counter()-t:.2f} s")
+    tqdm.write(f"{loss.item():.4f} loss, {optim.lr.item():.12f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {time.perf_counter()-t:.2f} s")
     if (fname:=getenv("LOSS_FILE", "")):
       with open(fname, "a") as f:
-        f.write(f"{i} {loss:.4f} {lr.item():.12f} {GlobalCounters.mem_used / 1e9:.2f}\n")
+        f.write(f"{i} {loss.item():.4f} {optim.lr.item():.12f} {GlobalCounters.mem_used / 1e9:.2f}\n")
 
     if (ckpt_freq := getenv("CKPT")) and (i % ckpt_freq == 0 and (i != 1 or ckpt_freq == 1)):
       tqdm.write("saving checkpoint")
@@ -1481,7 +1474,7 @@ def train_llama3():
       tqdm.write(f"evaluating {5760//EVAL_BS} batches of {EVAL_BS} sequences")
 
       for tokens in tqdm(eval_iter, total=5760//EVAL_BS):
-        eval_losses += eval_step(model, tokens).tolist()
+        eval_losses += eval_step(tokens).tolist()
       log_perplexity = Tensor(eval_losses).mean().float().item()
 
       tqdm.write(f"eval log perplexity: {log_perplexity:.4f}")
@@ -1564,7 +1557,7 @@ def train_stable_diffusion():
     loss, out_lr = loss.detach().to("CPU"), optimizer.lr.to("CPU")
     Tensor.realize(loss, out_lr)
     return loss, out_lr
-    
+
   # checkpointing takes ~9 minutes without this, and ~1 minute with this
   @TinyJit
   def ckpt_to_cpu():
@@ -1603,7 +1596,7 @@ def train_stable_diffusion():
     if i == 3:
       for _ in range(3): ckpt_to_cpu() # do this at the beginning of run to prevent OOM surprises when checkpointing
       print("BEAM COMPLETE", flush=True) # allows wrapper script to detect BEAM search completion and retry if it failed
-      
+
     total_train_time = time.perf_counter() - train_start_time
     if WANDB:
       wandb.log({"train/loss": loss_item, "train/lr": lr_item, "train/loop_time_prev": loop_time, "train/dl_time": dl_time, "train/step": i,
