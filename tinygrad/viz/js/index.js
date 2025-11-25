@@ -192,7 +192,7 @@ function tabulate(rows) {
   return root;
 }
 
-var data, focusedDevice, focusedShape, canvasZoom, zoomLevel = d3.zoomIdentity;
+var data, focusedDevice, focusedShape, canvasZoom, formatTime, zoomLevel = d3.zoomIdentity;
 
 function getMetadata(shape) {
   if (shape == null) return;
@@ -200,7 +200,7 @@ function getMetadata(shape) {
   const track = data.tracks.get(t), e = track.shapes[idx];
   const html = d3.create("div").classed("info", true);
   if (track.eventType === EventTypes.EXEC) {
-    html.append(() => tabulate([["Name", colored(e.label)], ["Duration", formatMicroseconds(e.width)], ["Start Time", formatMicroseconds(e.x)]]).node());
+    html.append(() => tabulate([["Name", colored(e.label)], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]]).node());
     html.append("div").classed("args", true);
     if (e.arg.ctx != null) {
       html.append("a").text("View codegen rewrite").on("click", () => switchCtx(e.arg.ctx, e.arg.step));
@@ -237,11 +237,11 @@ const EventTypes = { EXEC:0, BUF:1 };
 
 async function renderProfiler(path, unit, opts) {
   displaySelection("#profiler");
+  // support non realtime x axis units
+  formatTime = unit === "realtime" ? formatMicroseconds : (s) => formatUnit(s, " "+unit);
   metadata.replaceChildren(getMetadata(focusedShape) ?? "");
   // layout once!
   if (data != null && data.path === path) return updateProgress({ start:false });
-  // support non realtime x axis units
-  const formatTime = unit === "realtime" ? formatMicroseconds : (s) => formatUnit(s, " "+unit);
   const profiler = d3.select("#profiler").html("");
   const buf = cache[path] ?? await fetchValue(path);
   const view = new DataView(buf);
