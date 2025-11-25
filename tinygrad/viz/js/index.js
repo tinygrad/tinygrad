@@ -220,8 +220,8 @@ async function renderProfiler(path, unit, opts) {
   const textDecoder = new TextDecoder("utf-8");
   const { strings, dtypeSize, markers }  = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
   // place devices on the y axis and set vertical positions
-  const [tickSize, padding] = [10, 8];
-  const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize+padding+"px");
+  const [tickSize, padding, baseOffset] = [10, 8, markers.length ? 14 : 0];
+  const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize+padding+baseOffset+"px");
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
   // NOTE: scrolling via mouse can only zoom the graph
   canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
@@ -392,18 +392,33 @@ async function renderProfiler(path, unit, opts) {
       });
     }
   }
+  for (const m of markers) m.label = m.name.split(/(\s+)/).map(st => ({ st, color:m.color, width:ctx.measureText(st).width }));
   updateProgress({ start:false });
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
+  const drawText = (ctx, label, lx, ly, maxWidth) => {
+    let lw = 0;
+    for (let li=0; li<label?.length; li++) {
+      if (lw+label[li].width+(li===label.length-1 ? 0 : ellipsisWidth)+2 > maxWidth) {
+        if (lw>0) ctx.fillText("...", lx+lw, ly);
+        break;
+      }
+      ctx.fillStyle = label[li].color;
+      ctx.fillText(label[li].st, lx+lw, ly);
+      lw += label[li].width;
+    }
+  }
   function render(transform) {
     zoomLevel = transform;
-    ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+    const canvasWidth = canvas.clientWidth;
+    ctx.clearRect(0, 0, canvasWidth, canvas.clientHeight);
     // rescale to match current zoom
-    const xscale = d3.scaleLinear().domain([0, dur]).range([0, canvas.clientWidth]);
+    const xscale = d3.scaleLinear().domain([0, dur]).range([0, canvasWidth]);
     const visibleX = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
     const st = visibleX[0], et = visibleX[1];
     xscale.domain(visibleX);
+    ctx.textBaseline = "middle";
     // draw shapes
     const paths = [];
     for (const [_, { shapes, eventType, visible, offsetY, valueMap, pcolor }] of data.tracks) {
@@ -432,23 +447,13 @@ async function renderProfiler(path, unit, opts) {
           visible.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
           ctx.fillStyle = e.fillColor; ctx.fill(p);
           // add label
-          let lw = 0;
-          const lx = x+2, ly = y+e.height/2;
-          for (let li=0; li<e.label?.length; li++) {
-            if (lw+e.label[li].width+(li===e.label.length-1 ? 0 : ellipsisWidth)+2 > width) {
-              if (lw>0) ctx.fillText("...", lx+lw, ly);
-              break;
-            }
-            ctx.textBaseline = "middle";
-            ctx.fillStyle = e.label[li].color;
-            ctx.fillText(e.label[li].st, lx+lw, ly);
-            lw += e.label[li].width;
-          }
+          drawText(ctx, e.label, x+2, y+e.height/2, width);
         }
         if (focusedShape != null && e.arg?.key === focusedShape) { paths.push([p, pcolor]); }
       }
     }
     // draw axes
+    ctx.translate(0, baseOffset);
     drawLine(ctx, xscale.range(), [0, 0]);
     for (const tick of xscale.ticks()) {
       // tick line
@@ -469,11 +474,17 @@ async function renderProfiler(path, unit, opts) {
       }
     }
     // draw markers
+    ctx.translate(0, -baseOffset);
     ctx.textBaseline = "top";
-    for (const m of markers) {
-      const x = xscale(m.ts);
+    for (let i=0; i<markers.length; i++) {
+      const m = markers[i];
+      const x = xscale(m.ts), tx = x+2;
       drawLine(ctx, [x, x], [0, canvas.clientHeight], { color:m.color });
-      ctx.fillText(m.name, x+2, 1);
+      let maxWidth = canvasWidth-(tx);
+      const nextMark = markers[i+1]?.ts;
+      if (nextMark != null) maxWidth = Math.min(maxWidth, xscale(nextMark)-tx);
+      if (maxWidth <= 0) continue;
+      drawText(ctx, m.label, tx, 1, maxWidth);
     }
     for (const [p, color] of paths) { ctx.strokeStyle = color; ctx.stroke(p); }
   }
