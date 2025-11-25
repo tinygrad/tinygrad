@@ -200,9 +200,8 @@ class TransformerBlock:
     k = self.cache_kv[0, :, :, 0:start_pos+T, :]
     v = self.cache_kv[1, :, :, 0:start_pos+T, :]
 
-    ic(type(start_pos), start_pos)
     mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).triu(start_pos+1) if T > 1 else None
-    if self.sliding_window:
+    if self.sliding_window and T > 1:
      sliding_mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).tril(-self.sliding_window)
      mask = sliding_mask if mask is None else mask+sliding_mask
 
@@ -255,7 +254,8 @@ class Transformer:
     start_pos = 0
     t = Tensor([tokens[start_pos:]], dtype="int32")
     self.forward_jit.reset()  # TODO: why is this required? root cause the issue and make it not be needed
-    while len(tokens) < min(self.max_context, max_new_tokens+len(tokens)):
+    start_length = len(tokens)
+    while len(tokens) < min(self.max_context, max_new_tokens+start_length):
       t = self(t, v_start_pos.bind(start_pos) if getenv("SYM", 1) and start_pos != 0 and t.shape[-1] == 1 else start_pos)
       next_id = int(t.item())
       tokens.append(next_id)
@@ -271,6 +271,7 @@ def main(args):
   expected = [12194, 11, 1495, 553, 481, 30, 357, 939, 8975, 13]
 
   if getenv("TORCH"):
+    # todo: change num_hidden_layers based on getenv("GPT_OSS_LAYERS", 1)
     import torch
     from transformers import GptOssForCausalLM
     device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
