@@ -582,9 +582,9 @@ class TestTK(unittest.TestCase):
         att_block = warp.mma_AtB(att_block, k_reg_transposed, q_reg_transposed)
 
         # mask for causal
-        q_start = q_seq * Q_BLOCK_SIZE
-        kv_start = kv_idx * KV_BLOCK_SIZE
-        att_block = warp.map(att_block, lambda x, idx: ((kv_start + idx[0]) > (q_start + idx[1])).alu(Ops.WHERE, UOp.ufix(x._uop, -math.inf), x))
+        q_base = q_seq * Q_BLOCK_SIZE + (warp.laneid % 16)
+        kv_base = kv_idx * KV_BLOCK_SIZE + (warp.laneid // 16) * 4
+        att_block = warp.map(att_block, lambda x, idx: ((kv_base + idx[0] * 16 + idx[2]) > (q_base + idx[1] * 16)).alu(Ops.WHERE, UOp.ufix(x._uop, -math.inf), x))
 
         # softmax
         max_vec_last = warp.copy(max_vec_last.after(kv_idx), max_vec)
