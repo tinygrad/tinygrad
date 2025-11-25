@@ -1,7 +1,7 @@
 import dataclasses, enum, argparse, os, itertools
 from typing import Any
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.helpers import DEBUG, EncDecCtx, HEVCFrameCtx, HEVCRawSPS, HEVCRawPPS, HEVCRawSlice
+from tinygrad.helpers import DEBUG, EncDecCtx, HEVCFrameCtx, HEVCRawSPS, HEVCRawPPS, HEVCRawSlice, round_up
 from tinygrad.nn.state import TensorIO
 from tinygrad.runtime.autogen import avcodec
 
@@ -69,8 +69,8 @@ class HEVCDecoderState:
     self.sps_seq_parameter_set_id = r.ue_v()
     self.chroma_format_idc = r.ue_v()
     self.separate_colour_plane_flag = r.u(1) if self.chroma_format_idc == 3 else 0
-    self.pic_width_in_luma_samples = r.ue_v()
-    self.pic_height_in_luma_samples = r.ue_v()
+    self.width = self.pic_width_in_luma_samples = r.ue_v()
+    self.height = self.pic_height_in_luma_samples = r.ue_v()
     self.conformance_window_flag = r.u(1)
     
     if self.conformance_window_flag:
@@ -100,7 +100,8 @@ class HEVCDecoderState:
     self.pcm_enabled_flag = r.u(1)
     assert self.pcm_enabled_flag == 0, "pcm not implemented"
     self.pps_num_short_term_ref_pic_sets = r.ue_v()
-    assert self.pps_num_short_term_ref_pic_sets == 0, "ref pic sets parsing not implemented"
+    for i in range(self.pps_num_short_term_ref_pic_sets):
+      self.st_ref_pic_set(r, i)
     self.pps_long_term_ref_pics_present_flag = r.u(1)
     if self.pps_long_term_ref_pics_present_flag: assert False, "long_term_ref_pics parsing not implemented"
     self.sps_temporal_mvp_enabled_flag = r.u(1)
@@ -147,7 +148,7 @@ class HEVCDecoderState:
     self.lists_modification_present_flag = r.u(1)
     self.log2_parallel_merge_level = r.ue_v() + 2
 
-    self.pps = HEVCRawPPS(sign_data_hiding_enabled_flag=self.sign_data_hiding_enabled_flag,
+    self.pps = HEVCRawPPS(sign_data_hiding_enabled_flag=self.sign_data_hiding_enabled_flag, cabac_init_present_flag=self.cabac_init_present_flag,
       num_ref_idx_l0_default_active=self.num_ref_idx_l0_default_active, num_ref_idx_l1_default_active=self.num_ref_idx_l1_default_active,
       init_qp=self.init_qp, cu_qp_delta_enabled_flag=self.cu_qp_delta_enabled_flag, diff_cu_qp_delta_depth=getattr(self, 'diff_cu_qp_delta_depth', 0),
       pps_cb_qp_offset=self.pps_cb_qp_offset, pps_cr_qp_offset=self.pps_cr_qp_offset, 
@@ -159,17 +160,19 @@ class HEVCDecoderState:
       scaling_list_data_present_flag=self.scaling_list_data_present_flag, lists_modification_present_flag=self.lists_modification_present_flag,
       log2_parallel_merge_level=self.log2_parallel_merge_level)
 
-  def st_ref_pic_set(self, reader, stRpsIdx):
-    if stRpsIdx != 0: assert False, "st_ref_pic_set parsing not implemented"
+  def st_ref_pic_set(self, r, stRpsIdx):
+    inter_ref_pic_set_prediction_flag = r.u(1) if stRpsIdx != 0 else 0
+
+    if inter_ref_pic_set_prediction_flag: assert False, "inter_ref_pic_set_prediction_flag parsing not implemented"
     else:
-      num_negative_pics = reader.ue_v()
-      num_positive_pics = reader.ue_v()
+      num_negative_pics = r.ue_v()
+      num_positive_pics = r.ue_v()
       for i in range(num_negative_pics):
-        delta_poc_s0_minus1 = reader.ue_v()
-        used_by_curr_pic_s0_flag = reader.u(1)
+        delta_poc_s0_minus1 = r.ue_v()
+        used_by_curr_pic_s0_flag = r.u(1)
       for i in range(num_positive_pics):
-        delta_poc_s1_minus1 = reader.ue_v()
-        used_by_curr_pic_s1_flag = reader.u(1)
+        delta_poc_s1_minus1 = r.ue_v()
+        used_by_curr_pic_s1_flag = r.u(1)
 
   def slice_fragment_header(self, nal_unit_type, r:BitReader):
     self.first_slice_segment_in_pic_flag = r.u(1)
@@ -248,10 +251,14 @@ class HEVCDecoderState:
       rap=nal_unit_type >= avcodec.HEVC_NAL_BLA_W_LP and nal_unit_type <= avcodec.HEVC_NAL_RSV_IRAP_VCL23, pic_idx=self.cur_pic_idx,
       sw_hdr_skip=self.sw_skip_end - self.sw_skip_start, diff_poc=tuple(diff_poc), ref_idx_l0=tuple(ref_idx_l0), ref_idx_l1=tuple(ref_idx_l1))
 
-    return EncDecCtx(hevc=HEVCFrameCtx(idx=next(self.next_frame), hist_order=hist_order, sps=self.sps, pps=self.pps, frame=frame_info)), hist
+    luma_size = round_up(self.width, 64) * round_up(self.height, 64)
+    chroma_size = round_up(self.width, 64) * round_up(self.height // 2, 64)
+    hevc_context = HEVCFrameCtx(idx=next(self.next_frame), ch_off=luma_size, hist_order=hist_order, sps=self.sps, pps=self.pps, frame=frame_info)
+
+    return luma_size + chroma_size, EncDecCtx(hevc=hevc_context), hist
 
   def add_ref_frame(self, nal_unit_type, img):
-    if nal_unit_type in {avcodec.HEVC_NAL_TRAIL_R, avcodec.HEVC_NAL_IDR_N_LP}:
+    if nal_unit_type in {avcodec.HEVC_NAL_TRAIL_R, avcodec.HEVC_NAL_IDR_N_LP, avcodec.HEVC_NAL_IDR_W_RADL}:
       self.dpb.append((self.cur_pic_idx, self.slice_pic_order_cnt_lsb, img))
 
     if len(self.dpb) >= self.sps_max_dec_pic_buffering[0]:
@@ -282,20 +289,18 @@ class HEVCDecoder:
 
       if nal_unit_type == avcodec.HEVC_NAL_SPS: self.decoder.seq_parameter_set_rbsp(BitReader(_hevc_get_rbsp(dat, off=2)))
       elif nal_unit_type == avcodec.HEVC_NAL_PPS: self.decoder.pic_parameter_set_rbsp(BitReader(_hevc_get_rbsp(dat, off=2)))
-      elif nal_unit_type in {avcodec.HEVC_NAL_IDR_N_LP, avcodec.HEVC_NAL_TRAIL_R, avcodec.HEVC_NAL_TRAIL_N}:
-        ctx, ref_frames = self.decoder.state_for_slice(nal_unit_type, BitReader(dat[2:]))
-        size = 0x3fe000 #ctx.hevc.sps.pic_width_in_luma_samples * (ctx.hevc.sps.pic_height_in_luma_samples+ctx.hevc.sps.pic_height_in_luma_samples//2)
+      elif nal_unit_type in {avcodec.HEVC_NAL_IDR_N_LP, avcodec.HEVC_NAL_IDR_W_RADL, avcodec.HEVC_NAL_TRAIL_R, avcodec.HEVC_NAL_TRAIL_N}:
+        size, ctx, ref_frames = self.decoder.state_for_slice(nal_unit_type, BitReader(dat[2:]))
         img = Tensor.from_hevc(self.io._tensor[nal_unit_start:nal_unit_start+nal_unit_len], ref_frames, size=size, ctx=ctx, device=Device.DEFAULT)
         self.decoder.add_ref_frame(nal_unit_type, img)
-        yield img
-        # exit(0)
+        yield self.decoder.width, self.decoder.height, ctx.hevc.ch_off, img
 
       print(f"NAL unit type: {nal_unit_type}, length: {nal_unit_len}")
       nal_unit_start += nal_unit_len
 
-def _addr_table(h, w):
-  GOB_W, GOB_H = 64, 8          # pixels
-  GOB_SIZE = 512            # bytes  (64 * 8 * 1-byte pixels)
+def _addr_table(h, w, w_aligned):
+  GOB_W, GOB_H = 64, 8
+  GOB_SIZE = GOB_W * GOB_H
   BLOCK_H_GOBS = 2
 
   xs = Tensor.arange(w, dtype=dtypes.uint32).reshape(1, w)
@@ -303,25 +308,15 @@ def _addr_table(h, w):
 
   gob_x = xs // GOB_W
   gob_y = ys // GOB_H
-  super_block_y  = gob_y // BLOCK_H_GOBS
+  super_block_y = gob_y // BLOCK_H_GOBS
   gob_y_in_block = gob_y  % BLOCK_H_GOBS
-  stride_gobs    = w // GOB_W
+  stride_gobs = w_aligned // GOB_W
 
   base = ((super_block_y * stride_gobs + gob_x) * BLOCK_H_GOBS + gob_y_in_block) * GOB_SIZE
 
   lx, ly = xs % GOB_W, ys % GOB_H
-  swiz = (
-      (lx & 0x0F) |
-      ((ly & 0x03) << 4) |
-      ((lx & 0x10) << 2) |
-      ((ly & 0x04) << 5) |
-      ((lx & 0x20) << 3)
-  )
+  swiz = (lx & 0x0F) | ((ly & 0x03) << 4) | ((lx & 0x10) << 2) | ((ly & 0x04) << 5) | ((lx & 0x20) << 3)
   return (base + swiz).reshape(-1)
-
-def untile(luma_chroma_buf):
-  src = Tensor.from_blob(luma_chroma_buf.va_addr, (0x3fe000,), dtype=dtypes.uint8) # TODO: remove this
-  return bytes(src[_addr_table(1080, 1920)].reshape(-1).cat(src[_addr_table(540, 1920) + 0x1fe000].reshape(-1)).tolist())
 
 if __name__ == "__main__":
   import cv2, numpy as np
@@ -330,11 +325,12 @@ if __name__ == "__main__":
   parser.add_argument("input_file", type=str)
   args = parser.parse_args()
 
+  # hevc_tensor = Tensor.from_url("https://github.com/commaai/comma2k19/raw/refs/heads/master/Example_1/b0c9d2329ad1606b%7C2018-08-02--08-34-47/40/video.hevc", device="CPU")
+
   hevc_tensor = Tensor.empty(os.stat(args.input_file).st_size, dtype=dtypes.uint8, device=f"disk:{args.input_file}").to("CPU")
-  for i, src in enumerate(HEVCDecoder(hevc_tensor).frames()):
-    if i > 200:
-      img1 = bytes(src[_addr_table(1080, 1920)].reshape(-1).cat(src[_addr_table(540, 1920) + 0x1fe000].reshape(-1)).tolist())
-      w, h, ch = 1920, 1080, 540
-      total = h + ch
-      frame = np.frombuffer(img1, dtype=np.uint8).reshape((total, w))
-      cv2.imwrite(f"extra/nvdec/out/nvp_frame_{i}.png", cv2.cvtColor(frame, cv2.COLOR_YUV2BGR_NV12))
+  for i, (w, h, ch_off, src) in enumerate(HEVCDecoder(hevc_tensor).frames()):
+    w_aligned = round_up(w, 64)
+
+    img = bytes(src[_addr_table(h, w, w_aligned)].reshape(-1).cat(src[_addr_table(h // 2, w, w_aligned) + ch_off].reshape(-1)).tolist())
+    frame = np.frombuffer(img, dtype=np.uint8).reshape((h + h // 2, w))
+    cv2.imwrite(f"extra/nvdec/out/nvp_frame_{i}.png", cv2.cvtColor(frame, cv2.COLOR_YUV2BGR_NV12))

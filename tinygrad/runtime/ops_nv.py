@@ -7,7 +7,7 @@ from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, H
 from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, MOCKGPU, hcq_filter_visible_devices
 from tinygrad.uop.ops import sint
 from tinygrad.device import BufferSpec, CompilerPairT
-from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, to_mv, hi32, lo32, suppress_finalizing, EncDecCtx
+from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, to_mv, hi32, lo32, suppress_finalizing, EncDecCtx, ceildiv
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.support.compiler_cuda import CUDACompiler, PTXCompiler, NVPTXCompiler, NVCompiler
@@ -181,21 +181,21 @@ class NVCopyQueue(NVCommandQueue):
   def _submit(self, dev:NVDevice): self._submit_to_gpfifo(dev, dev.dma_gpfifo)
 
 class NVVideoQueue(NVCommandQueue):
-  def decode_hevc_chunk(self, buf_in_data, luma_chroma_bufs:list, coloc_buf, filter_buf, scaling_list, tile_sizes, status_buf, pic_desc, pic_idx):
+  def decode_hevc_chunk(self, pic_idx:int, pic_desc:HCQBuffer, in_buf:HCQBuffer, lch_bufs:list[HCQBuffer], ch_offset:int, coloc_buf:HCQBuffer,
+                        filter_buf:HCQBuffer, intra_top_off:int, status_buf:HCQBuffer):
     self.nvm(4, nv_gpu.NVC9B0_SET_APPLICATION_ID, 7)
     self.nvm(4, nv_gpu.NVC9B0_SET_CONTROL_PARAMS, 0x52057)
     self.nvm(4, nv_gpu.NVC9B0_SET_DRV_PIC_SETUP_OFFSET, pic_desc.va_addr >> 8)
-    self.nvm(4, nv_gpu.NVC9B0_SET_IN_BUF_BASE_OFFSET, buf_in_data.va_addr >> 8)
-    for i in range(len(luma_chroma_bufs)):
-      self.nvm(4, nv_gpu.NVC9B0_SET_PICTURE_LUMA_OFFSET0 + i*4, luma_chroma_bufs[i].va_addr >> 8)
-      self.nvm(4, nv_gpu.NVC9B0_SET_PICTURE_CHROMA_OFFSET0 + i*4, (luma_chroma_bufs[i].va_addr + 0x1fe000) >> 8)
+    self.nvm(4, nv_gpu.NVC9B0_SET_IN_BUF_BASE_OFFSET, in_buf.va_addr >> 8)
+    for i in range(len(lch_bufs)):
+      self.nvm(4, nv_gpu.NVC9B0_SET_PICTURE_LUMA_OFFSET0 + i*4, lch_bufs[i].va_addr >> 8)
+      self.nvm(4, nv_gpu.NVC9B0_SET_PICTURE_CHROMA_OFFSET0 + i*4, lch_bufs[i].offset(ch_offset).va_addr >> 8) # 0x1fe000
     self.nvm(4, nv_gpu.NVC9B0_SET_COLOC_DATA_OFFSET, coloc_buf.va_addr >> 8)
     self.nvm(4, nv_gpu.NVC9B0_SET_NVDEC_STATUS_OFFSET, status_buf.va_addr >> 8)
     self.nvm(4, nv_gpu.NVC9B0_SET_PICTURE_INDEX, pic_idx)
-    self.nvm(4, nv_gpu.NVC9B0_HEVC_SET_SCALING_LIST_OFFSET, scaling_list.va_addr >> 8)
-    self.nvm(4, nv_gpu.NVC9B0_HEVC_SET_TILE_SIZES_OFFSET, tile_sizes.va_addr >> 8)
+    self.nvm(4, nv_gpu.NVC9B0_HEVC_SET_TILE_SIZES_OFFSET, pic_desc.offset(0x200).va_addr >> 8)
     self.nvm(4, nv_gpu.NVC9B0_HEVC_SET_FILTER_BUFFER_OFFSET, filter_buf.va_addr >> 8)
-    self.nvm(4, nv_gpu.NVC9B0_SET_INTRA_TOP_BUF_OFFSET, (filter_buf.va_addr + 0x8d7200) >> 8)
+    self.nvm(4, nv_gpu.NVC9B0_SET_INTRA_TOP_BUF_OFFSET, (filter_buf.va_addr + intra_top_off) >> 8)
     self.nvm(4, nv_gpu.NVC9B0_EXECUTE, 0)
     return self
 
@@ -309,18 +309,17 @@ class NVAllocator(HCQAllocator['NVDevice']):
   def _map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
 
   def _encode_decode(self, bufout:HCQBuffer, bufin:HCQBuffer, hist:list[HCQBuffer], insize:int, ctx:EncDecCtx):
-    self.dev._ensure_has_vid_buffers(0, 0) # TODO
-
     sps, pps = ctx.hevc.sps, ctx.hevc.pps
+    self.dev._ensure_has_vid_buffers(sps.pic_width_in_luma_samples, sps.pic_height_in_luma_samples)
+
     x = nv_gpu.nvdec_hevc_pic_s(gptimer_timeout_value=81600000, tileformat=1, sw_start_code_e=1, pattern_id=2, stream_len=insize,
-      # frame
+      # Frame
       IDR_picture_flag=ctx.hevc.frame.idr, RAP_picture_flag=ctx.hevc.frame.rap, curr_pic_idx=ctx.hevc.frame.pic_idx, num_ref_frames=len(hist),
       sw_hdr_skip_length=ctx.hevc.frame.sw_hdr_skip, num_bits_short_term_ref_pics_in_slice=max(ctx.hevc.frame.sw_hdr_skip - 9, 0),
-      colMvBuffersize = (round_up(sps.pic_width_in_luma_samples, 64) * round_up(sps.pic_height_in_luma_samples, 64) // 16) // 256,
-      framestride=(ctypes.c_uint32 * 2)(sps.pic_width_in_luma_samples, sps.pic_width_in_luma_samples),
+      colMvBuffersize=self.dev.col_mv_buffersize, HevcSaoBufferOffset=self.dev.sao_off>>8, HevcBsdCtrlOffset=self.dev.bsd_ctrl_off>>8,
+      framestride=(ctypes.c_uint32 * 2)(round_up(sps.pic_width_in_luma_samples, 64), round_up(sps.pic_width_in_luma_samples, 64)),
       RefDiffPicOrderCnts=(ctypes.c_int16 * 16)(*ctx.hevc.frame.diff_poc), initreflistidxl0=(ctypes.c_ubyte*16)(*ctx.hevc.frame.ref_idx_l0),
       initreflistidxl1=(ctypes.c_uint8 * 16)(*ctx.hevc.frame.ref_idx_l1),
-
       # SPS
       chroma_format_idc=sps.chroma_format_idc, pic_width_in_luma_samples=sps.pic_width_in_luma_samples,
       pic_height_in_luma_samples=sps.pic_height_in_luma_samples, bit_depth_luma=sps.bit_depth_luma,
@@ -332,7 +331,7 @@ class NVAllocator(HCQAllocator['NVDevice']):
       strong_intra_smoothing_enabled_flag=sps.strong_intra_smoothing_enabled_flag,
       # PPS
       sign_data_hiding_enabled_flag=pps.sign_data_hiding_enabled_flag, num_ref_idx_l0_default_active=pps.num_ref_idx_l0_default_active,
-      num_ref_idx_l1_default_active=pps.num_ref_idx_l1_default_active, init_qp=pps.init_qp,
+      num_ref_idx_l1_default_active=pps.num_ref_idx_l1_default_active, init_qp=pps.init_qp, cabac_init_present_flag=pps.cabac_init_present_flag,
       cu_qp_delta_enabled_flag=pps.cu_qp_delta_enabled_flag, diff_cu_qp_delta_depth=pps.diff_cu_qp_delta_depth,
       pps_cb_qp_offset=pps.pps_cb_qp_offset, pps_cr_qp_offset=pps.pps_cr_qp_offset,
       pps_slice_chroma_qp_offsets_present_flag=pps.pps_slice_chroma_qp_offsets_present_flag,
@@ -348,12 +347,14 @@ class NVAllocator(HCQAllocator['NVDevice']):
     for i in range(len(hist)): build_hist_list[ctx.hevc.hist_order[i]] = hist[i]
     build_hist_list[x.curr_pic_idx] = bufout
 
-    desc_buf = self.dev.kernargs_buf.offset(offset=self.dev.kernargs_offset_allocator.alloc(0x1000, 0x100), size=0x1000)
-    desc_buf.cpu_view().view(fmt='B')[:ctypes.sizeof(x)] = bytes(x)
+    desc_buf = self.dev.kernargs_buf.offset(offset=self.dev.kernargs_offset_allocator.alloc(0x300, 0x100), size=0x300)
+    desc_buf.cpu_view()[:ctypes.sizeof(x)] = bytes(x)
+    desc_buf.cpu_view()[0x200:0x202] = ceildiv(sps.pic_width_in_luma_samples, (1 << sps.log2_max_luma_coding_block_size)).to_bytes(2, "little")
+    desc_buf.cpu_view()[0x202:0x204] = ceildiv(sps.pic_height_in_luma_samples, (1 << sps.log2_max_luma_coding_block_size)).to_bytes(2, "little")
 
     NVVideoQueue().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
-                  .decode_hevc_chunk(bufin, build_hist_list, self.dev.vid_coloc_buf, self.dev.vid_filter_buf,
-                                     self.dev.vid_scaling_list, self.dev.vid_tile_sizes, self.dev.vid_status_buf, desc_buf, ctx.hevc.idx) \
+                  .decode_hevc_chunk(ctx.hevc.idx, desc_buf, bufin, build_hist_list, ctx.hevc.ch_off, self.dev.vid_coloc_buf,
+                                     self.dev.vid_filter_buf, self.dev.intra_top_off, self.dev.vid_status_buf) \
                   .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
 
 @dataclass
@@ -679,6 +680,7 @@ class NVDevice(HCQCompiled[HCQSignal]):
                  .setup(copy_class=self.iface.dma_class) \
                  .signal(self.timeline_signal, self.next_timeline()).submit(self)
 
+    self.vid_coloc_buf, self.vid_filter_buf, self.vid_status_buf = None, None, None
     NVVideoQueue().wait(self.timeline_signal, self.timeline_value - 1) \
                   .setup(copy_class=nv_gpu.NVC9B0_VIDEO_DECODER) \
                   .signal(self.timeline_signal, self.next_timeline()).submit(self)
@@ -700,20 +702,18 @@ class NVDevice(HCQCompiled[HCQSignal]):
                                          .signal(self.timeline_signal, self.next_timeline()).submit(self)
 
   def _ensure_has_vid_buffers(self, w, h):
-    if hasattr(self, 'vid_coloc_buf'): return
+    self.col_mv_buffersize = (round_up(w, 64) * round_up(h, 64) // 16) // 256
+    self.flt_above_off, self.flt_above_size = 0, round_up(w, 64) * 4
+    self.slice_edge_off, self.slice_edge_size = round_up(self.flt_above_off + self.flt_above_size, 0x10000), round_up(h, 64) * 4
+    self.sao_off, self.sao_size = round_up(self.slice_edge_off + self.slice_edge_size, 0x10000), self.col_mv_buffersize * 32
+    self.bsd_ctrl_off, self.bsd_ctrl_size = round_up(self.sao_off + self.sao_size, 0x10000), self.col_mv_buffersize * 160
+    self.intra_top_off, self.intra_top_size = round_up(self.bsd_ctrl_off + self.bsd_ctrl_size, 0x10000), round_up(w, 64) * 40
+    filter_buf_size = round_up(self.intra_top_off + self.intra_top_size, 2 << 20)
+    coloc_size = round_up((round_up(w, 64) * round_up(h, 64)) + (round_up(w, 64) * round_up(h, 64) // 16), 2 << 20)
 
-    self.vid_coloc_buf = self.allocator.alloc(0x400000)
-    self.vid_filter_buf = self.allocator.alloc(0xa00000)
-    self.vid_scaling_list = self.allocator.alloc(0x1000, BufferSpec(cpu_access=True))
-    self.vid_tile_sizes = self.allocator.alloc(0x1000, BufferSpec(cpu_access=True))
-    self.vid_status_buf = self.allocator.alloc(0x1000, BufferSpec(cpu_access=True))
-    # TODO: Scaling list + tile size should not be here
-    self.vid_tile_cnt = 63*16
-    self.vid_scaling_list.cpu_view()[:self.vid_tile_cnt] = bytes([0x10]*self.vid_tile_cnt)
-    self.vid_scaling_list.cpu_view()[8:16] = bytes([0x0]*8)
-
-    # 1E 00 11 00 00 00 00 00  00 00 00 00 00 00 00 00
-    self.vid_tile_sizes.cpu_view()[:4] = bytes([0x1e,0x0,0x11,0x0])
+    if self.vid_coloc_buf is None or coloc_size > self.vid_coloc_buf.size: self.vid_coloc_buf = self.allocator.alloc(coloc_size)
+    if self.vid_filter_buf is None or filter_buf_size > self.vid_filter_buf.size: self.vid_filter_buf = self.allocator.alloc(filter_buf_size)
+    if self.vid_status_buf is None: self.vid_status_buf = self.allocator.alloc(0x1000, BufferSpec(cpu_access=True))
 
   def invalidate_caches(self):
     if self.is_nvd(): self.iface.rm_control(self.subdevice, nv_gpu.NV2080_CTRL_CMD_INTERNAL_BUS_FLUSH_WITH_SYSMEMBAR, None)

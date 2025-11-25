@@ -495,8 +495,8 @@ class HEVCRawSPS:
 
 @dataclass(frozen=True)
 class HEVCRawPPS:
-  sign_data_hiding_enabled_flag:int; num_ref_idx_l0_default_active:int; num_ref_idx_l1_default_active:int; init_qp:int # noqa: E701
-  cu_qp_delta_enabled_flag:int; diff_cu_qp_delta_depth:int; pps_cb_qp_offset:int; pps_cr_qp_offset:int # noqa: E701
+  sign_data_hiding_enabled_flag:int; cabac_init_present_flag:int; num_ref_idx_l0_default_active:int; num_ref_idx_l1_default_active:int # noqa: E701
+  init_qp:int; cu_qp_delta_enabled_flag:int; diff_cu_qp_delta_depth:int; pps_cb_qp_offset:int; pps_cr_qp_offset:int # noqa: E701
   pps_slice_chroma_qp_offsets_present_flag:int; weighted_pred_flag:int; weighted_bipred_flag:int; transquant_bypass_enabled_flag:int # noqa: E701
   tiles_enabled_flag:int; entropy_coding_sync_enabled_flag:int; loop_filter_across_slices_enabled_flag:int # noqa: E701
   deblocking_filter_control_present_flag:int; scaling_list_data_present_flag:int; lists_modification_present_flag:int; # noqa: E701
@@ -507,7 +507,7 @@ class HEVCRawSlice:
   idr:bool; rap:bool; sw_hdr_skip:int; pic_idx:int; diff_poc:tuple[int,...]; ref_idx_l0:tuple[int,...]; ref_idx_l1:tuple[int,...] # noqa: E701
 
 @dataclass(frozen=True)
-class HEVCFrameCtx: idx:int; hist_order:list[int]; frame:HEVCRawSlice; sps:HEVCRawSPS|None=None; pps:HEVCRawPPS|None=None # noqa: E701
+class HEVCFrameCtx: idx:int; ch_off:int; hist_order:list[int]; frame:HEVCRawSlice; sps:HEVCRawSPS|None=None; pps:HEVCRawPPS|None=None # noqa: E701
 
 @dataclass(frozen=True)
 class EncDecCtx: hevc:HEVCFrameCtx|None=None
