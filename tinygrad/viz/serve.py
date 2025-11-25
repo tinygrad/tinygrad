@@ -254,7 +254,11 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     for k in sorted(wave_insts, key=row_tuple): steps.append(create_step(k, ("/sqtt-insts", len(ctxs), len(steps)), wave_insts[k], depth=2))
   ctxs.append({"name":"Counters", "steps":steps})
 
-def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]|None=None) -> bytes|None:
+def device_sort_fn(k):
+  order = {"USER": 0, "TINY": 1}
+  return order.get(k, len(order)+1)
+
+def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_sort_fn) -> bytes|None:
   # start by getting the time diffs
   for ev in profile:
     if isinstance(ev,ProfileDeviceEvent): device_ts_diffs[ev.device] = (ev.comp_tdiff, ev.copy_tdiff if ev.copy_tdiff is not None else ev.comp_tdiff)
