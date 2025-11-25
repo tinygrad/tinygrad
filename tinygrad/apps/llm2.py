@@ -25,10 +25,12 @@ from transformers import AutoTokenizer
 from icecream import install
 install()
 
+GPT_OSS_LAYERS = getenv("GPT_OSS_LAYERS", 24)
+
 # adapted from https://huggingface.co/openai/gpt-oss-20b/blob/main/config.json
 MODELS = {
   "20B": {
-    "params": {"dim": 2880, "hidden_dim": 2880, "head_dim": 64, "n_heads": 64, "n_kv_heads": 8, "num_blocks": getenv("GPT_OSS_LAYERS", 24),
+    "params": {"dim": 2880, "hidden_dim": 2880, "head_dim": 64, "n_heads": 64, "n_kv_heads": 8, "num_blocks": GPT_OSS_LAYERS,
                "n_experts": 32, "n_active_experts": 4, "norm_eps": 1e-5, "vocab_size": 201088, "sliding_window": 128, "max_context": 4096,
                "rope_params": {"base": 150000, "scale": 32.0, "ntk_alpha": 1.0, "ntk_beta": 32.0, "initial_context_length": 4096},},
     "total_num_weights": 3,
@@ -268,7 +270,7 @@ def main(args):
   model_info = MODELS[args.size]
   model_path = Path(args.weights) if args.weights or args.fakeweights else download_weights(model_info["model"], model_info["total_num_weights"]) # type: ignore[arg-type]
   tokenizer = AutoTokenizer.from_pretrained(model_info["tokenizer"], cache_dir=model_path)
-  expected = [12194, 11, 1495, 553, 481, 30, 357, 939, 8975, 13]
+  ref = [12194, 11, 1495, 553, 481, 30, 4483, 23042, 70544, 26760] if GPT_OSS_LAYERS == 1 else [12194, 11, 1495, 553, 481, 30, 357, 939, 8975, 13]
 
   if getenv("TORCH"):
     import torch
@@ -276,13 +278,13 @@ def main(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.mps.is_available() else "cpu")
     print(f"Using torch {device}")
     fetch(f"https://huggingface.co/{model_info['model']}/resolve/main/config.json", "config.json", subdir=model_info["model"].split('/')[-1]) # type: ignore[attr-defined]
-    config = GptOssConfig.from_pretrained(model_path, local_files_only=True, cache_dir=model_path, num_hidden_layers=getenv("GPT_OSS_LAYERS", 24))
+    config = GptOssConfig.from_pretrained(model_path, local_files_only=True, cache_dir=model_path, num_hidden_layers=GPT_OSS_LAYERS)
     model = GptOssForCausalLM.from_pretrained(model_path, config=config, local_files_only=True, cache_dir=model_path, device_map=device)
     input_ids = tokenizer(args.prompt, return_tensors="pt")["input_ids"].to(device)
     generate_ids = model.generate(input_ids, max_new_tokens=args.max_new_tokens) # tensor([[12194,    11,   1495,   553,   481,    30]], device='cuda:0')
     out = tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
     print(out)
-    assert (ret := generate_ids[0].tolist()) == expected, f"{ret=} did not match {expected=}"
+    assert (ret := generate_ids[0].tolist()) == ref, f"{ret=} did not match {ref=}"
     return
 
   # build model
@@ -293,10 +295,8 @@ def main(args):
   # generate text
   print(args.prompt, end="\n" if args.timing else "", flush=True)
   ids = tokenizer(args.prompt)["input_ids"]
-  ic(ids)
   st = time.perf_counter()
   for next_id in model.generate(ids, max_new_tokens=args.max_new_tokens):
-    ic(next_id)
     duration, st = time.perf_counter()-st, time.perf_counter()
     print(tokenizer.decode([next_id], skip_special_tokens=True), flush=True, end="")
     if args.timing: print(f'\t{1/duration:.3f} tok/sec', end="\n")
