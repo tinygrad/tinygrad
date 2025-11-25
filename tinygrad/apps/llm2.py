@@ -170,7 +170,6 @@ class TransformerBlock:
     self.ffn_down_proj_bias     = Tensor.empty(n_experts, dim)                      # (E,D)
 
   def _feed_forward(self, x: Tensor) -> Tensor:
-    profile_marker("ffn")
     (B, T, D), E = x.shape, self.n_experts
 
     # Select top-k experts
@@ -188,7 +187,6 @@ class TransformerBlock:
     return x + x_out
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
-    profile_marker("attention")
     x_norm = self.attn_norm(x)                                              # (B,T,D) -> (B,T,D)
     q, k, v = self.attn_q(x_norm), self.attn_k(x_norm), self.attn_v(x_norm) # (B,T,D) -> (B,T,D)
 
@@ -235,14 +233,13 @@ class Transformer:
 
   def forward(self, tokens:Tensor, start_pos:int|UOp) -> Tensor:
     x = self.token_embd(tokens)                     # (B,T)   -> (B,T,D)
-    for i, block in enumerate(self.blk):
-      profile_marker(f"layer {i}")
-      x = block(x, start_pos)                       # (B,T,D) -> (B,T,D)
+    for block in self.blk: x = block(x, start_pos)  # (B,T,D) -> (B,T,D)
     logits = self.output(self.output_norm(x))       # (B,T,D) -> (B,T,V)
     return logits[:, -1:, :].argmax(-1)             # (B,T,V) -> (B,)
 
   def __call__(self, tokens:Tensor, start_pos:int|UOp=0) -> Tensor:
     forward = self.forward_jit if getenv("JIT", 1) and tokens.shape[1] == 1 and isinstance(start_pos, UOp) else self.forward
+    profile_marker("forward")
     return forward(tokens, start_pos)
 
   @staticmethod
@@ -307,7 +304,7 @@ def main(args):
     timings.append(time.perf_counter_ns())
     if args.timing:
       elapsed = (timings[-1] - timings[-2]) / 1e9
-      print(f'[{elapsed:.2f} s, {len(toks[start_pos:])/elapsed:.2f} tok/s]'.ljust(25), end="")
+      print(f'\n[{elapsed:.2f} s, {len(toks[start_pos:])/elapsed:.2f} tok/s]'.ljust(25), end="")
     print(tokenizer.decode(toks[start_pos:], skip_special_tokens=True), flush=True, end="\n" if args.timing else "")
     if next_tok == tokenizer.eos_token: break
     start_pos = len(toks)
