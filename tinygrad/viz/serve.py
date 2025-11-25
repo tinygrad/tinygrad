@@ -261,10 +261,11 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
         steps.append(create_step(k.replace(cu, ""), ("/sqtt-insts", len(ctxs), len(steps)), wave_insts[cu][k], depth=3))
   ctxs.append({"name":"Counters", "steps":steps})
 
-def device_sort_fn(k):
-  order = {"USER": 0, "TINY": 1}
-  dname, *rest = k.split()
-  return order.get(dname, len(order)+len(rest))
+def device_sort_fn(k:str) -> tuple[int, str, int]:
+  order = {"USER": 0, "TINY": 1, "DISK": 999}
+  dname = k.split()[0]
+  dev_rank = next((v for k,v in order.items() if dname.startswith(k)), len(order))
+  return (dev_rank, dname, len(k))
 
 def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_sort_fn) -> bytes|None:
   # start by getting the time diffs
@@ -292,12 +293,12 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_
   scache:dict[str, int] = {}
   peaks:list[int] = []
   dtype_size:dict[str, int] = {}
-  for k in sorted(dev_events, key=sort_fn):
-    (v:=dev_events[k]).sort(key=lambda e:e[0])
+  for k,v in dev_events.items():
+    v.sort(key=lambda e:e[0])
     layout[k] = timeline_layout(v, start_ts, scache)
     layout[f"{k} Memory"] = mem_layout(v, start_ts, unwrap(end_ts), peaks, dtype_size, scache)
-  groups = layout.items() if sort_fn is not None else sorted(layout.items(), key=lambda x: '' if len(ss:=x[0].split(" ")) == 1 else ss[1])
-  ret = [b"".join([struct.pack("<B", len(k)), k.encode(), v]) for k,v in groups if v is not None]
+  keys = sorted([k for k,v in layout.items() if v is not None], key=sort_fn)
+  ret = [b"".join([struct.pack("<B", len(k)), k.encode(), layout[k]]) for k in keys]
   index = json.dumps({"strings":list(scache), "dtypeSize":dtype_size, "markers":[{"ts":int(e.ts-start_ts), **e.arg} for e in markers]}).encode()
   return struct.pack("<IQII", unwrap(end_ts)-start_ts, max(peaks,default=0), len(index), len(ret))+index+b"".join(ret)
 
