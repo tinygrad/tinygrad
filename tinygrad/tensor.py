@@ -3729,9 +3729,8 @@ class Tensor(OpMixin):
       if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
       qk = qk + attn_mask
     # attention sink https://arxiv.org/abs/2309.17453
-    if sink is not None: # todo: we can't we use qk.cat(sink, dim=-1).cast(self.dtype).softmax(-1)[..., :-1]?
-      # return qk.cat(sink, dim=-1).cast(self.dtype).softmax(-1).shrink((None, None, None, (0, qk.shape[-1]))).dropout(dropout_p) @ value
-      return qk.cat(sink, dim=-1).cast(self.dtype).softmax(-1).split((qk.shape[-1], 1), dim=-1)[0].dropout(dropout_p) @ value
+    if sink is not None: # todo: use [..., :-1] instead of shrink((None, None, None, (0, qk.shape[-1])))
+      return qk.cat(sink, dim=-1).cast(self.dtype).softmax(-1).shrink((None, None, None, (0, qk.shape[-1]))).dropout(dropout_p) @ value
     return qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
 
   def _do_reduction(self, reduction:ReductionStr="mean") -> Tensor:
