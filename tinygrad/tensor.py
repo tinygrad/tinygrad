@@ -423,7 +423,7 @@ class Tensor(OpMixin):
     return self.replace(self.shard(devices, axis))
 
   CHUNK_SIZE = 2**20
-  def load(self, size:int) -> Tensor:
+  def fs_load(self, size:int) -> Tensor:
     """
     Load a tensor from storage.
 
@@ -451,7 +451,7 @@ class Tensor(OpMixin):
 
     return data[:size]
 
-  def store(self) -> Tensor:
+  def fs_store(self) -> Tensor:
     """
     Store a tensor to storage.
     """
