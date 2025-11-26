@@ -494,26 +494,26 @@ copyreg.pickle(types.ModuleType, _serialize_module)
 
 @dataclass(frozen=True)
 class HEVCRawSPS:
-  chroma_format_idc:int; pic_width_in_luma_samples:int; pic_height_in_luma_samples:int; bit_depth_luma:int; bit_depth_chroma:int # noqa: E701
-  log2_max_pic_order_cnt_lsb_minus4:int; log2_min_luma_coding_block_size:int; log2_max_luma_coding_block_size:int # noqa: E701
-  log2_min_transform_block_size:int; log2_max_transform_block_size:int; amp_enabled_flag:int; pcm_enabled_flag:int # noqa: E701
-  sample_adaptive_offset_enabled_flag:int; sps_temporal_mvp_enabled_flag:int; strong_intra_smoothing_enabled_flag:int # noqa: E701
+  chroma_format_idc:int; pic_width_in_luma_samples:int; pic_height_in_luma_samples:int; bit_depth_luma:int; bit_depth_chroma:int # noqa: E702
+  log2_max_pic_order_cnt_lsb_minus4:int; log2_min_luma_coding_block_size:int; log2_max_luma_coding_block_size:int # noqa: E702
+  log2_min_transform_block_size:int; log2_max_transform_block_size:int; amp_enabled_flag:int; pcm_enabled_flag:int # noqa: E702
+  sample_adaptive_offset_enabled_flag:int; sps_temporal_mvp_enabled_flag:int; strong_intra_smoothing_enabled_flag:int # noqa: E702
 
 @dataclass(frozen=True)
 class HEVCRawPPS:
-  sign_data_hiding_enabled_flag:int; cabac_init_present_flag:int; num_ref_idx_l0_default_active:int; num_ref_idx_l1_default_active:int # noqa: E701
-  init_qp:int; cu_qp_delta_enabled_flag:int; diff_cu_qp_delta_depth:int; pps_cb_qp_offset:int; pps_cr_qp_offset:int # noqa: E701
-  pps_slice_chroma_qp_offsets_present_flag:int; weighted_pred_flag:int; weighted_bipred_flag:int; transquant_bypass_enabled_flag:int # noqa: E701
-  tiles_enabled_flag:int; entropy_coding_sync_enabled_flag:int; loop_filter_across_slices_enabled_flag:int # noqa: E701
-  deblocking_filter_control_present_flag:int; scaling_list_data_present_flag:int; lists_modification_present_flag:int; # noqa: E701
+  sign_data_hiding_enabled_flag:int; cabac_init_present_flag:int; num_ref_idx_l0_default_active:int; num_ref_idx_l1_default_active:int # noqa: E702
+  init_qp:int; cu_qp_delta_enabled_flag:int; diff_cu_qp_delta_depth:int; pps_cb_qp_offset:int; pps_cr_qp_offset:int # noqa: E702
+  pps_slice_chroma_qp_offsets_present_flag:int; weighted_pred_flag:int; weighted_bipred_flag:int; transquant_bypass_enabled_flag:int # noqa: E702
+  tiles_enabled_flag:int; entropy_coding_sync_enabled_flag:int; loop_filter_across_slices_enabled_flag:int # noqa: E702
+  deblocking_filter_control_present_flag:int; scaling_list_data_present_flag:int; lists_modification_present_flag:int; # noqa: E702
   log2_parallel_merge_level:int
 
 @dataclass(frozen=True)
 class HEVCRawSlice:
-  idr:bool; rap:bool; sw_hdr_skip:int; pic_idx:int; diff_poc:tuple[int,...]; ref_idx_l0:tuple[int,...]; ref_idx_l1:tuple[int,...] # noqa: E701
+  idr:bool; rap:bool; sw_hdr_skip:int; pic_idx:int; diff_poc:tuple[int,...]; ref_idx_l0:tuple[int,...]; ref_idx_l1:tuple[int,...] # noqa: E702
 
 @dataclass(frozen=True)
-class HEVCFrameCtx: idx:int; chroma_off:int; hist_order:list[int]; frame:HEVCRawSlice; sps:HEVCRawSPS|None=None; pps:HEVCRawPPS|None=None # noqa: E701
+class HEVCFrameCtx: idx:int; chroma_off:int; hist_order:list[int]; frame:HEVCRawSlice; sps:HEVCRawSPS|None=None; pps:HEVCRawPPS|None=None # noqa: E702
 
 @dataclass(frozen=True)
 class EncDecCtx: hevc:HEVCFrameCtx|None=None
