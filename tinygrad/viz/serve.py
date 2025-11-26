@@ -236,7 +236,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
       if (u:=w.wave_loc) not in inst_units: inst_units[u] = itertools.count(0)
       n = next(inst_units[u])
       if (events:=cu_events.get(w.cu_loc)) is None: cu_events[w.cu_loc] = events = []
-      events.append(ProfileRangeEvent(w.simd_loc, loc:=f"INST WAVE:{w.wave_id} N:{n}", Decimal(w.begin_time), Decimal(w.end_time)))
+      events.append(ProfileRangeEvent(w.wave_loc, loc:=f"INST WAVE:{w.wave_id} N:{n}", Decimal(w.begin_time), Decimal(w.end_time)))
       wave_insts.setdefault(w.cu_loc, {})[f"{u} N:{n}"] = {"wave":w, "disasm":disasm, "run_number":n, "loc":loc}
     # occupancy events
     units:dict[str, itertools.count] = {}
@@ -247,7 +247,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
       if occ.start: wave_start[u] = occ.time
       else:
         if (events:=cu_events.get(occ.cu_loc)) is None: cu_events[occ.cu_loc] = events = []
-        events.append(ProfileRangeEvent(occ.simd_loc, f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)), Decimal(occ.time)))
+        events.append(ProfileRangeEvent(occ.wave_loc, f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)), Decimal(occ.time)))
     if not cu_events: continue
     prg_cu = sorted(cu_events, key=row_tuple)
     kernel = trace.keys[r].ret if (r:=ref_map.get(name)) else None
