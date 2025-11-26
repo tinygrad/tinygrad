@@ -260,8 +260,8 @@ async function renderProfiler(path, unit, opts) {
   const textDecoder = new TextDecoder("utf-8");
   const { strings, dtypeSize, markers }  = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
   // place devices on the y axis and set vertical positions
-  const [tickSize, padding, baseOffset] = [10, 8, markers.length ? 14 : 0];
-  const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize+padding+baseOffset+"px");
+  const [tickSize, padding, baseOffset] = [10, opts.hideLabels ? 0 : 8, markers.length ? 14 : 0];
+  const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", (tickSize*2)+4+baseOffset+"px");
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
   // NOTE: scrolling via mouse can only zoom the graph
   canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
@@ -290,15 +290,12 @@ async function renderProfiler(path, unit, opts) {
         const e = {name:strings[u32()], ref:optional(u32()), key:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
         // find a free level to put the event
         let depth = 0;
-        if (opts.levelKey != null) { depth = opts.levelKey(e); levels[depth] = 0; }
-        else {
-          depth = levels.findIndex(levelEt => e.st >= levelEt);
-          const et = e.st+Math.trunc(e.dur);
-          if (depth === -1) {
-            depth = levels.length;
-            levels.push(et);
-          } else levels[depth] = et;
-        }
+        depth = levels.findIndex(levelEt => e.st >= levelEt);
+        const et = e.st+Math.trunc(e.dur);
+        if (depth === -1) {
+          depth = levels.length;
+          levels.push(et);
+        } else levels[depth] = et;
         if (depth === 0) colorKey = e.name.split(" ")[0];
         if (!colorMap.has(colorKey)) {
           const color = colors instanceof Map ? (colors.get(colorKey) || colors.get("DEFAULT")) : cycleColors(colors, colorMap.size);
