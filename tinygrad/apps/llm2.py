@@ -18,7 +18,7 @@ from typing import Generator
 import argparse, math, os, time
 from pathlib import Path
 from tinygrad import Tensor, TinyJit, UOp, nn, dtypes, Device
-from tinygrad.helpers import fetch, getenv, DEBUG, Timing, profile_marker
+from tinygrad.helpers import fetch, getenv, DEBUG, Timing, profile_marker, Context
 from tinygrad.nn.state import load_state_dict, ggml_data_to_tensor
 from examples.llama3 import load
 from transformers import AutoTokenizer
@@ -240,7 +240,9 @@ class Transformer:
   def __call__(self, tokens:Tensor, start_pos:int|UOp=0) -> Tensor:
     forward = self.forward_jit if getenv("JIT", 1) and tokens.shape[1] == 1 and isinstance(start_pos, UOp) else self.forward
     profile_marker("forward")
-    return forward(tokens, start_pos)
+    print(f'forward_jit={forward==self.forward_jit}')
+    with Context(DEBUG=2):
+      return forward(tokens, start_pos)
 
   @staticmethod
   def from_pretrained(model_path:Path, params:dict[str, int|float|dict], fakeweights:bool=False) -> Transformer:
