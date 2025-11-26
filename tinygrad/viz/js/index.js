@@ -430,7 +430,7 @@ async function renderProfiler(path, unit, opts) {
     // rescale to match current zoom
     const xscale = d3.scaleLinear().domain([data.first, dur]).range([0, canvasWidth]);
     const visibleX = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
-    const st = visibleX[0] < 0 ? 0 : visibleX[0], et = visibleX[1];
+    const st = visibleX[0], et = visibleX[1];
     xscale.domain([st, et]);
     ctx.textBaseline = "middle";
     // draw shapes
