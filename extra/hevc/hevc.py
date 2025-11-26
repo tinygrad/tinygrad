@@ -89,7 +89,7 @@ class SPS(HevcSlice):
     self.pic_width_in_luma_samples = r.ue_v()
     self.pic_height_in_luma_samples = r.ue_v()
     self.conformance_window_flag = r.u(1)
-    
+
     if self.conformance_window_flag:
       self.conf_win_left_offset = r.ue_v()
       self.conf_win_right_offset = r.ue_v()
@@ -176,7 +176,7 @@ class PPS(HevcSlice):
     return HEVCRawPPS(sign_data_hiding_enabled_flag=self.sign_data_hiding_enabled_flag, cabac_init_present_flag=self.cabac_init_present_flag,
       num_ref_idx_l0_default_active=self.num_ref_idx_l0_default_active, num_ref_idx_l1_default_active=self.num_ref_idx_l1_default_active,
       init_qp=self.init_qp, cu_qp_delta_enabled_flag=self.cu_qp_delta_enabled_flag, diff_cu_qp_delta_depth=getattr(self, 'diff_cu_qp_delta_depth', 0),
-      pps_cb_qp_offset=self.pps_cb_qp_offset, pps_cr_qp_offset=self.pps_cr_qp_offset, 
+      pps_cb_qp_offset=self.pps_cb_qp_offset, pps_cr_qp_offset=self.pps_cr_qp_offset,
       pps_slice_chroma_qp_offsets_present_flag=self.pps_slice_chroma_qp_offsets_present_flag, weighted_pred_flag=self.weighted_pred_flag,
       weighted_bipred_flag=self.weighted_bipred_flag, transquant_bypass_enabled_flag=self.transquant_bypass_enabled_flag,
       tiles_enabled_flag=self.tiles_enabled_flag, entropy_coding_sync_enabled_flag=self.entropy_coding_sync_enabled_flag,
@@ -222,7 +222,7 @@ class SliceSegment(HevcSlice):
         slice_sao_luma_flag = r.u(1)
         ChromaArrayType = sps.chroma_format_idc if sps.separate_colour_plane_flag == 0 else 0
         slice_sao_chroma_flag = r.u(1) if ChromaArrayType != 0 else 0
-      
+
       if self.slice_type in {avcodec.HEVC_SLICE_B, avcodec.HEVC_SLICE_B}:
         if num_ref_idx_active_override_flag := r.u(1):
           num_ref_idx_l0_active_minus1 = r.ue_v()
@@ -260,7 +260,7 @@ class HEVCDecoder:
     # Save to read in _add_frame_to_history()
     self.last_pic_index = next(i for i in range(16) if all(d[0] != i for d in self.dpb))
     self.last_slice_pic_order_cnt_lsb = hdr.slice_pic_order_cnt_lsb
-  
+
     # Collect history informations. Need to preserve historical order of frames for hw.
     hist = [x[2] for x in self.dpb]
     hist_order = tuple([x[0] for x in self.dpb])
