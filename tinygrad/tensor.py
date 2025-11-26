@@ -7,7 +7,7 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, leas
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten
 from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, polyN, DEBUG, is_numpy_ndarray, SPEC, TracingKey, cpu_profile
-from tinygrad.helpers import suppress_finalizing
+from tinygrad.helpers import suppress_finalizing, EncDecCtx
 from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
 from tinygrad.mixin.movement import _align_left
@@ -528,10 +528,15 @@ class Tensor(OpMixin):
     return r
 
   @staticmethod
-  def from_hevc(data:Tensor, ref_frames:list[Tensor], size:int, ctx, **kwargs) -> Tensor:
-    r = Tensor.empty(size, **kwargs)
-    r.uop = data.to(r.device).uop.encdec(r.shape, [x.to(r.device).uop for x in ref_frames], ctx)
-    return r
+  def from_hevc(data:Tensor, ref_frames:list[Tensor], shape:tuple[int, ...], ctx:EncDecCtx) -> Tensor:
+    """
+    Creates a Tensor by decoding HEVC encoded data using reference frames.
+    `data` is a 1D Tensor containing the HEVC encoded bitstream.
+    `ref_frames` is a list of Tensors representing the reference frames.
+    `shape` is the desired shape of the output Tensor.
+    `ctx` is the encoding/decoding context.
+    """
+    return data.contiguous()._apply_uop(UOp.encdec, *[x.contiguous() for x in ref_frames], arg=((prod(shape), ), ctx)).reshape(shape)
 
   @staticmethod
   def from_url(url:str, gunzip:bool=False, **kwargs) -> Tensor:

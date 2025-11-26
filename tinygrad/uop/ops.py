@@ -535,7 +535,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def mselect(self, arg:int) -> UOp: return UOp(Ops.MSELECT, self.dtype, (self,), arg)
   @property
   def metadata(self) -> tuple[Metadata, ...]|None: return all_metadata.get(self, None)
-  def encdec(self, shape, srcs, ctx:Any=None): return UOp(Ops.ENCDEC, self.dtype, src=(self,)+tuple(srcs), arg=(shape, ctx))
+  def encdec(self, *src, arg=None): return UOp(Ops.ENCDEC, self.dtype, src=(self,)+src, arg=arg)
 
   # *** uop movement ops ***
 

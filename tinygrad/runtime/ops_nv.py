@@ -298,7 +298,6 @@ class NVProgram(HCQProgram):
 
 class NVAllocator(HCQAllocator['NVDevice']):
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
-    if options.external_ptr is not None: return HCQBuffer(options.external_ptr, size, meta=None, view=None, owner=None)
     return self.dev.iface.alloc(size, cpu_access=options.cpu_access, host=options.host)
 
   @suppress_finalizing
@@ -355,7 +354,7 @@ class NVAllocator(HCQAllocator['NVDevice']):
     desc_buf.cpu_view()[0x202:0x204] = ceildiv(sps.pic_height_in_luma_samples, (1 << sps.log2_max_luma_coding_block_size)).to_bytes(2, "little")
 
     NVVideoQueue().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
-                  .decode_hevc_chunk(ctx.hevc.idx, desc_buf, bufin, build_hist_list, ctx.hevc.ch_off, self.dev.vid_coloc_buf,
+                  .decode_hevc_chunk(ctx.hevc.idx, desc_buf, bufin, build_hist_list, ctx.hevc.chroma_off, self.dev.vid_coloc_buf,
                                      self.dev.vid_filter_buf, self.dev.intra_top_off, self.dev.vid_status_buf) \
                   .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
 

@@ -513,7 +513,7 @@ class HEVCRawSlice:
   idr:bool; rap:bool; sw_hdr_skip:int; pic_idx:int; diff_poc:tuple[int,...]; ref_idx_l0:tuple[int,...]; ref_idx_l1:tuple[int,...] # noqa: E701
 
 @dataclass(frozen=True)
-class HEVCFrameCtx: idx:int; ch_off:int; hist_order:list[int]; frame:HEVCRawSlice; sps:HEVCRawSPS|None=None; pps:HEVCRawPPS|None=None # noqa: E701
+class HEVCFrameCtx: idx:int; chroma_off:int; hist_order:list[int]; frame:HEVCRawSlice; sps:HEVCRawSPS|None=None; pps:HEVCRawPPS|None=None # noqa: E701
 
 @dataclass(frozen=True)
 class EncDecCtx: hevc:HEVCFrameCtx|None=None
