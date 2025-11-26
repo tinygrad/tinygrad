@@ -505,7 +505,7 @@ class HEVCRawPPS:
   init_qp:int; cu_qp_delta_enabled_flag:int; diff_cu_qp_delta_depth:int; pps_cb_qp_offset:int; pps_cr_qp_offset:int # noqa: E702
   pps_slice_chroma_qp_offsets_present_flag:int; weighted_pred_flag:int; weighted_bipred_flag:int; transquant_bypass_enabled_flag:int # noqa: E702
   tiles_enabled_flag:int; entropy_coding_sync_enabled_flag:int; loop_filter_across_slices_enabled_flag:int # noqa: E702
-  deblocking_filter_control_present_flag:int; scaling_list_data_present_flag:int; lists_modification_present_flag:int; # noqa: E702
+  deblocking_filter_control_present_flag:int; scaling_list_data_present_flag:int; lists_modification_present_flag:int # noqa: E702
   log2_parallel_merge_level:int
 
 @dataclass(frozen=True)
