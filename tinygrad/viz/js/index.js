@@ -260,8 +260,8 @@ async function renderProfiler(path, unit, opts) {
   const textDecoder = new TextDecoder("utf-8");
   const { strings, dtypeSize, markers }  = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
   // place devices on the y axis and set vertical positions
-  const [tickSize, padding, baseOffset] = [10, opts.hideLabels ? 0 : 8, markers.length ? 14 : 0];
-  const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", (tickSize*2)+4+baseOffset+"px");
+  const [tickSize, padding, baseOffset] = [10, 8*opts.heightScale, markers.length ? 14 : 0];
+  const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", (tickSize*2)+2+baseOffset+"px");
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
   // NOTE: scrolling via mouse can only zoom the graph
   canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
@@ -272,17 +272,27 @@ async function renderProfiler(path, unit, opts) {
   // map shapes by event key
   const shapeMap = new Map();
   const heightScale = d3.scaleLinear().domain([0, tracePeak]).range([4,maxheight=100]);
+  let prevRow = null;
   for (let i=0; i<layoutsLen; i++) {
     const nameLen = view.getUint8(offset, true); offset += 1;
     const k = textDecoder.decode(new Uint8Array(buf, offset, nameLen)); offset += nameLen;
-    const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px").style("width", opts.width);
+    const div = deviceList.append("div").attr("id", k).style("padding", padding+"px").style("width", opts.width).style("min-height", 32*opts.heightScale+"px");
+    if (opts.hideLabels) {
+      const dedupKey = opts.hideLabels(k);
+      const show = prevRow == null || dedupKey !== prevRow;
+      if (show) {
+        if (prevRow != null) div.style("margin-top", (padding*2)+"px");
+        prevRow = dedupKey; div.text(dedupKey);
+      }
+    }
+    else { div.text(k); }
     const { y:baseY, height:baseHeight } = rect(div.node());
     const colors = colorScheme[k.split(":")[0]] ?? colorScheme.DEFAULT;
     const offsetY = baseY-canvasTop+padding/2;
     const shapes = [], visible = [];
     const eventType = u8(), eventsLen = u32();
     if (eventType === EventTypes.EXEC) {
-      const levelHeight = (baseHeight-padding)*(opts.heightScale ?? 1);
+      const levelHeight = (baseHeight-padding);
       const levels = [];
       data.tracks.set(k, { shapes, eventType, visible, offsetY, pcolor:"#9ea2ad" });
       let colorKey, ref;
@@ -301,7 +311,7 @@ async function renderProfiler(path, unit, opts) {
           const color = colors instanceof Map ? (colors.get(colorKey) || colors.get("DEFAULT")) : cycleColors(colors, colorMap.size);
           colorMap.set(colorKey, d3.rgb(color));
         }
-        const fillColor = colorMap.get(colorKey).brighter(0.3*depth).toString();
+        const fillColor = colorMap.get(colorKey).brighter(0.3*(opts.colorScale ? opts.colorScale(e.name) : depth)).toString();
         const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
         let shapeRef = e.ref;
         if (shapeRef != null) { ref = {ctx:e.ref, step:0}; shapeRef = ref; }
@@ -731,7 +741,7 @@ async function main() {
     if (url.pathname+url.search !== ckey) e.close();
     else if (e.readyState === EventSource.OPEN) activeSrc = e;
   }
-  if (ctx.name === "Profiler") return renderProfiler("/get_profile", "realtime", { width:"132px" });
+  if (ctx.name === "Profiler") return renderProfiler("/get_profile", "realtime", { width:"132px", heightScale:1 });
   if (workerUrl == null) await initWorker();
   if (ckey in cache) {
     ret = cache[ckey];
@@ -741,7 +751,10 @@ async function main() {
     if (!(ckey in cache)) cache[ckey] = ret = await fetchValue(ckey);
     // cycles on the x axis
     if (ret instanceof ArrayBuffer) {
-      opts = {heightScale:1, hideLabels:true};
+      opts = {heightScale:0.5, hideLabels:(k) => k.split("W")[0], colorScale:(e) => {
+        const N = 8, i = parseInt(e.split(":").at(-1));
+        return ((i % N) + N) % N;
+      }};
       return renderProfiler(ckey, "clk", opts);
     }
     displaySelection("#custom");
