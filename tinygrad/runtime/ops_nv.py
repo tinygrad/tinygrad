@@ -189,7 +189,7 @@ class NVVideoQueue(NVCommandQueue):
     self.nvm(4, nv_gpu.NVC9B0_SET_IN_BUF_BASE_OFFSET, in_buf.va_addr >> 8)
     for i in range(len(lch_bufs)):
       self.nvm(4, nv_gpu.NVC9B0_SET_PICTURE_LUMA_OFFSET0 + i*4, lch_bufs[i].va_addr >> 8)
-      self.nvm(4, nv_gpu.NVC9B0_SET_PICTURE_CHROMA_OFFSET0 + i*4, lch_bufs[i].offset(ch_offset).va_addr >> 8) # 0x1fe000
+      self.nvm(4, nv_gpu.NVC9B0_SET_PICTURE_CHROMA_OFFSET0 + i*4, lch_bufs[i].offset(ch_offset).va_addr >> 8)
     self.nvm(4, nv_gpu.NVC9B0_SET_COLOC_DATA_OFFSET, coloc_buf.va_addr >> 8)
     self.nvm(4, nv_gpu.NVC9B0_SET_NVDEC_STATUS_OFFSET, status_buf.va_addr >> 8)
     self.nvm(4, nv_gpu.NVC9B0_SET_PICTURE_INDEX, pic_idx)
@@ -435,6 +435,7 @@ class NVKIface:
     self.gpfifo_class:int = next(c for c in [nv_gpu.BLACKWELL_CHANNEL_GPFIFO_A, nv_gpu.AMPERE_CHANNEL_GPFIFO_A] if c in self.nvclasses)
     self.compute_class:int = next(c for c in [nv_gpu.BLACKWELL_COMPUTE_B, nv_gpu.ADA_COMPUTE_A, nv_gpu.AMPERE_COMPUTE_B] if c in self.nvclasses)
     self.dma_class:int = next(c for c in [nv_gpu.BLACKWELL_DMA_COPY_B, nv_gpu.AMPERE_DMA_COPY_B] if c in self.nvclasses)
+    self.viddec_class:int|None = next((c for c in [nv_gpu.NVC9B0_VIDEO_DECODER] if c in self.nvclasses), None)
 
     usermode = self.rm_alloc(self.dev.subdevice, self.usermode_class)
     return usermode, MMIOInterface(self._gpu_map_to_cpu(usermode, mmio_sz:=0x10000), mmio_sz, fmt='I')
@@ -556,6 +557,7 @@ class PCIIface(PCIIfaceBase):
 
     # Setup classes for the GPU
     self.gpfifo_class, self.compute_class, self.dma_class = (gsp:=self.dev_impl.gsp).gpfifo_class, gsp.compute_class, gsp.dma_class
+    self.viddec_class = None
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, **kwargs) -> HCQBuffer:
     # Force use of huge pages for large allocations. NVDev will attempt to use huge pages in any case,
@@ -599,17 +601,15 @@ class NVDevice(HCQCompiled[HCQSignal]):
     channel_params = nv_gpu.NV_CHANNEL_GROUP_ALLOCATION_PARAMETERS(engineType=nv_gpu.NV2080_ENGINE_TYPE_GRAPHICS)
     channel_group = self.iface.rm_alloc(self.nvdevice, nv_gpu.KEPLER_CHANNEL_GROUP_A, channel_params)
 
-    gpfifo_area = self.iface.alloc(0x300000, contiguous=True, cpu_access=True, force_devmem=True,
+    self.gpfifo_area = self.iface.alloc(0x300000, contiguous=True, cpu_access=True, force_devmem=True,
       map_flags=(nv_gpu.NVOS33_FLAGS_CACHING_TYPE_WRITECOMBINED<<23))
 
     ctxshare_params = nv_gpu.NV_CTXSHARE_ALLOCATION_PARAMETERS(hVASpace=vaspace, flags=nv_gpu.NV_CTXSHARE_ALLOCATION_FLAGS_SUBCONTEXT_ASYNC)
     ctxshare = self.iface.rm_alloc(channel_group, nv_gpu.FERMI_CONTEXT_SHARE_A, ctxshare_params)
 
-    self.compute_gpfifo = self._new_gpu_fifo(gpfifo_area, ctxshare, channel_group, offset=0, entries=0x10000, compute=True)
-    self.dma_gpfifo = self._new_gpu_fifo(gpfifo_area, ctxshare, channel_group, offset=0x100000, entries=0x10000, compute=False)
+    self.compute_gpfifo = self._new_gpu_fifo(self.gpfifo_area, ctxshare, channel_group, offset=0, entries=0x10000, compute=True)
+    self.dma_gpfifo = self._new_gpu_fifo(self.gpfifo_area, ctxshare, channel_group, offset=0x100000, entries=0x10000, compute=False)
     self.iface.rm_control(channel_group, nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS(bEnable=1))
-
-    self.vid_gpfifo = self._new_gpu_fifo(gpfifo_area, 0, self.nvdevice, offset=0x200000, entries=2048, compute=False, video=True)
 
     self.cmdq_page:HCQBuffer = self.iface.alloc(0x200000, cpu_access=True)
     self.cmdq_allocator = BumpAllocator(size=self.cmdq_page.size, base=cast(int, self.cmdq_page.va_addr), wrap=True)
@@ -631,11 +631,9 @@ class NVDevice(HCQCompiled[HCQSignal]):
 
   def _new_gpu_fifo(self, gpfifo_area, ctxshare, channel_group, offset=0, entries=0x400, compute=False, video=False) -> GPFifo:
     notifier = self.iface.alloc(48 << 20, uncached=True)
-    params = nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS(hObjectError=notifier.meta.hMemory,
-      hObjectBuffer=self.virtmem if video else gpfifo_area.meta.hMemory,
-      gpFifoOffset=gpfifo_area.va_addr+offset, gpFifoEntries=entries, hContextShare=ctxshare,
-      hUserdMemory=(ctypes.c_uint32*8)(gpfifo_area.meta.hMemory), userdOffset=(ctypes.c_uint64*8)(entries*8+offset),
-      engineType=19 if video else 0, flags=32)
+    params = nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS(gpFifoOffset=gpfifo_area.va_addr+offset, gpFifoEntries=entries, hContextShare=ctxshare,
+      hObjectError=notifier.meta.hMemory, hObjectBuffer=self.virtmem if video else gpfifo_area.meta.hMemory,
+      hUserdMemory=(ctypes.c_uint32*8)(gpfifo_area.meta.hMemory), userdOffset=(ctypes.c_uint64*8)(entries*8+offset), engineType=19 if video else 0)
     gpfifo = self.iface.rm_alloc(channel_group, self.iface.gpfifo_class, params)
 
     if compute:
@@ -643,7 +641,7 @@ class NVDevice(HCQCompiled[HCQSignal]):
       debugger_params = nv_gpu.NV83DE_ALLOC_PARAMETERS(hAppClient=self.iface.root, hClass3dObject=self.debug_compute_obj)
       self.debugger = self.iface.rm_alloc(self.nvdevice, nv_gpu.GT200_DEBUGGER, debugger_params)
     elif not video: self.iface.rm_alloc(gpfifo, self.iface.dma_class)
-    else: self.iface.rm_alloc(gpfifo, nv_gpu.NVC9B0_VIDEO_DECODER)
+    else: self.iface.rm_alloc(gpfifo, self.iface.viddec_class)
 
     if channel_group == self.nvdevice:
       self.iface.rm_control(gpfifo, nv_gpu.NVA06F_CTRL_CMD_BIND, nv_gpu.NVA06F_CTRL_BIND_PARAMS(engineType=params.engineType))
@@ -682,11 +680,6 @@ class NVDevice(HCQCompiled[HCQSignal]):
                  .setup(copy_class=self.iface.dma_class) \
                  .signal(self.timeline_signal, self.next_timeline()).submit(self)
 
-    self.vid_coloc_buf, self.vid_filter_buf, self.vid_status_buf = None, None, None
-    NVVideoQueue().wait(self.timeline_signal, self.timeline_value - 1) \
-                  .setup(copy_class=nv_gpu.NVC9B0_VIDEO_DECODER) \
-                  .signal(self.timeline_signal, self.next_timeline()).submit(self)
-
     self.synchronize()
 
   def _ensure_has_local_memory(self, required):
@@ -704,6 +697,15 @@ class NVDevice(HCQCompiled[HCQSignal]):
                                          .signal(self.timeline_signal, self.next_timeline()).submit(self)
 
   def _ensure_has_vid_buffers(self, w, h):
+    if self.iface.viddec_class is None: raise RuntimeError(f"{self.device} Video decoder class not available.")
+
+    if not hasattr(self, 'vid_gpfifo'):
+      self.vid_gpfifo = self._new_gpu_fifo(self.gpfifo_area, 0, self.nvdevice, offset=0x200000, entries=2048, compute=False, video=True)
+      self.vid_coloc_buf, self.vid_filter_buf, self.vid_status_buf = None, None, None
+      NVVideoQueue().wait(self.timeline_signal, self.timeline_value - 1) \
+                    .setup(copy_class=self.iface.viddec_class) \
+                    .signal(self.timeline_signal, self.next_timeline()).submit(self)
+
     self.col_mv_buffersize = (round_up(w, 64) * round_up(h, 64) // 16) // 256
     self.flt_above_off, self.flt_above_size = 0, round_up(w, 64) * 4
     self.slice_edge_off, self.slice_edge_size = round_up(self.flt_above_off + self.flt_above_size, 0x10000), round_up(h, 64) * 4
