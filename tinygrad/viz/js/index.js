@@ -231,7 +231,7 @@ function getMetadata(shape) {
 
 function focusShape(shape) {
   saveToHistory({ shape:focusedShape });
-  focusedShape = shape?.key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
+  focusedShape = shape; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
   return metadata.replaceChildren(getMetadata(focusedShape) ?? "");
 }
 
@@ -241,8 +241,10 @@ async function renderProfiler(path, unit, opts) {
   displaySelection("#profiler");
   // support non realtime x axis units
   formatTime = unit === "realtime" ? formatMicroseconds : (s) => formatUnit(s, " "+unit);
+  if (data?.path !== path) data = {tracks:new Map(), axes:{}, path, first:null};
+  metadata.replaceChildren(getMetadata(focusedShape) ?? "");
   // layout once!
-  if (data != null && data.path === path) return updateProgress({ start:false });
+  if (data.tracks.size !== 0) return updateProgress({ start:false });
   const profiler = d3.select("#profiler").html("");
   const buf = cache[path] ?? await fetchValue(path);
   const view = new DataView(buf);
@@ -267,8 +269,6 @@ async function renderProfiler(path, unit, opts) {
   const colorMap = new Map();
   // map shapes by event key
   const shapeMap = new Map();
-  data = {tracks:new Map(), axes:{}, path, first:null};
-  metadata.replaceChildren(getMetadata(focusedShape) ?? "");
   const heightScale = d3.scaleLinear().domain([0, tracePeak]).range([4,maxheight=100]);
   for (let i=0; i<layoutsLen; i++) {
     const nameLen = view.getUint8(offset, true); offset += 1;
@@ -316,7 +316,7 @@ async function renderProfiler(path, unit, opts) {
         const labelHTML = label.map(l=>`<span style="color:${l.color}">${l.st}</span>`).join("");
         const arg = { tooltipText:labelHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), key,
                       ctx:shapeRef?.ctx, step:shapeRef?.step };
-        if (e.key != null) shapeMap.set(e.key, arg);
+        if (e.key != null) shapeMap.set(e.key, key);
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label:opts.hideLabels ? null : label, fillColor });
         if (j === 0) data.first = data.first == null ? e.st : Math.min(data.first, e.st);
@@ -533,10 +533,9 @@ async function renderProfiler(path, unit, opts) {
     e.preventDefault();
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
     if (foundRect?.step != null && (foundRect?.key == null || e.type == "dblclick")) { return switchCtx(foundRect.ctx, foundRect.step); }
-    if (foundRect?.key != focusedShape) { focusShape(foundRect); }
+    if (foundRect?.key != focusedShape) { focusShape(foundRect?.key); }
   }
   canvas.addEventListener("click", clickShape);
-
   canvas.addEventListener("dblclick", clickShape);
 
   canvas.addEventListener("mousemove", e => {
@@ -667,7 +666,7 @@ function saveToHistory(ns) {
 const switchCtx = (newCtx, step) => setState({ expandSteps:true, currentCtx:newCtx+1, currentStep:step ?? 0, currentRewrite:0 });
 
 window.addEventListener("popstate", (e) => {
-  if (e.state?.shape != null) return focusShape({ key:e.state?.shape });
+  if (e.state?.shape != null) return focusShape(e.state?.shape);
   if (e.state != null) setState(e.state);
 });
 
