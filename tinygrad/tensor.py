@@ -528,15 +528,15 @@ class Tensor(OpMixin):
     return r
 
   @staticmethod
-  def from_hevc(data:Tensor, ref_frames:list[Tensor], shape:tuple[int, ...], ctx:EncDecCtx) -> Tensor:
+  def from_hevc(chunk_data:Tensor, ref_frames:list[Tensor], shape:tuple[int, ...], ctx:EncDecCtx) -> Tensor:
     """
-    Creates a Tensor by decoding HEVC encoded data using reference frames.
-    `data` is a 1D Tensor containing the HEVC encoded bitstream.
-    `ref_frames` is a list of Tensors representing the reference frames.
-    `shape` is the desired shape of the output Tensor.
-    `ctx` is the encoding/decoding context.
+    Creates a Tensor by decoding an HEVC frame chunk.
+
+    You must provide the output shape of the decoded data (`shape`), the HEVC context (`ctx`), and, if required by the chunk,
+    the reference frames (`ref_frames`).
     """
-    return data.contiguous()._apply_uop(UOp.encdec, *[x.contiguous() for x in ref_frames], arg=((prod(shape), ), ctx)).reshape(shape)
+    assert isinstance(ctx, EncDecCtx) and ctx.hevc is not None, "HEVC context is required"
+    return chunk_data.contiguous()._apply_uop(UOp.encdec, *[x.contiguous() for x in ref_frames], arg=((prod(shape), ), ctx)).reshape(shape)
 
   @staticmethod
   def from_url(url:str, gunzip:bool=False, **kwargs) -> Tensor:
