@@ -322,25 +322,16 @@ class NVAllocator(HCQAllocator['NVDevice']):
       RefDiffPicOrderCnts=(ctypes.c_int16 * 16)(*frame.diff_poc), initreflistidxl0=(ctypes.c_ubyte*16)(*frame.ref_idx_l0),
       initreflistidxl1=(ctypes.c_uint8 * 16)(*frame.ref_idx_l1),
       # SPS
-      chroma_format_idc=sps.chroma_format_idc, pic_width_in_luma_samples=sps.pic_width_in_luma_samples,
-      pic_height_in_luma_samples=sps.pic_height_in_luma_samples, bit_depth_luma=sps.bit_depth_luma,
-      bit_depth_chroma=sps.bit_depth_chroma, log2_max_pic_order_cnt_lsb_minus4=sps.log2_max_pic_order_cnt_lsb_minus4,
-      log2_min_luma_coding_block_size=sps.log2_min_luma_coding_block_size, log2_max_luma_coding_block_size=sps.log2_max_luma_coding_block_size,
-      log2_min_transform_block_size=sps.log2_min_transform_block_size, log2_max_transform_block_size=sps.log2_max_transform_block_size,
-      amp_enabled_flag=sps.amp_enabled_flag, sample_adaptive_offset_enabled_flag=sps.sample_adaptive_offset_enabled_flag,
-      pcm_enabled_flag=sps.pcm_enabled_flag, sps_temporal_mvp_enabled_flag=sps.sps_temporal_mvp_enabled_flag,
-      strong_intra_smoothing_enabled_flag=sps.strong_intra_smoothing_enabled_flag,
+      **{x:getattr(sps, x) for x in ['chroma_format_idc', 'log2_max_pic_order_cnt_lsb_minus4', 'bit_depth_luma', 'bit_depth_chroma',
+        'pic_width_in_luma_samples', 'pic_height_in_luma_samples', 'log2_min_luma_coding_block_size', 'log2_max_luma_coding_block_size',
+        'log2_min_transform_block_size', 'log2_max_transform_block_size', 'amp_enabled_flag', 'sample_adaptive_offset_enabled_flag',
+        'pcm_enabled_flag', 'sps_temporal_mvp_enabled_flag', 'strong_intra_smoothing_enabled_flag']},
       # PPS
-      sign_data_hiding_enabled_flag=pps.sign_data_hiding_enabled_flag, num_ref_idx_l0_default_active=pps.num_ref_idx_l0_default_active,
-      num_ref_idx_l1_default_active=pps.num_ref_idx_l1_default_active, init_qp=pps.init_qp, cabac_init_present_flag=pps.cabac_init_present_flag,
-      cu_qp_delta_enabled_flag=pps.cu_qp_delta_enabled_flag, diff_cu_qp_delta_depth=pps.diff_cu_qp_delta_depth,
-      pps_cb_qp_offset=pps.pps_cb_qp_offset, pps_cr_qp_offset=pps.pps_cr_qp_offset, weighted_pred_flag=pps.weighted_pred_flag,
-      pps_slice_chroma_qp_offsets_present_flag=pps.pps_slice_chroma_qp_offsets_present_flag, weighted_bipred_flag=pps.weighted_bipred_flag,
-      transquant_bypass_enabled_flag=pps.transquant_bypass_enabled_flag, tiles_enabled_flag=pps.tiles_enabled_flag,
-      entropy_coding_sync_enabled_flag=pps.entropy_coding_sync_enabled_flag, scaling_list_data_present_flag=pps.scaling_list_data_present_flag,
-      loop_filter_across_slices_enabled_flag=pps.loop_filter_across_slices_enabled_flag,
-      deblocking_filter_control_present_flag=pps.deblocking_filter_control_present_flag,
-      lists_modification_present_flag=pps.lists_modification_present_flag, log2_parallel_merge_level=pps.log2_parallel_merge_level)
+      **{x:getattr(pps, x) for x in ['sign_data_hiding_enabled_flag', 'num_ref_idx_l0_default_active', 'num_ref_idx_l1_default_active', 'init_qp',
+        'cabac_init_present_flag', 'cu_qp_delta_enabled_flag', 'diff_cu_qp_delta_depth', 'pps_cb_qp_offset', 'pps_cr_qp_offset',
+        'weighted_pred_flag', 'pps_slice_chroma_qp_offsets_present_flag', 'weighted_bipred_flag', 'transquant_bypass_enabled_flag',
+        'tiles_enabled_flag', 'entropy_coding_sync_enabled_flag', 'scaling_list_data_present_flag', 'loop_filter_across_slices_enabled_flag',
+        'deblocking_filter_control_present_flag', 'lists_modification_present_flag', 'log2_parallel_merge_level']})
 
     desc_buf = self.dev.kernargs_buf.offset(offset=self.dev.kernargs_offset_allocator.alloc(0x300, 0x100), size=0x300)
     desc_buf.cpu_view()[:ctypes.sizeof(x)] = bytes(x)
