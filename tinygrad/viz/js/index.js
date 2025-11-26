@@ -268,7 +268,7 @@ async function renderProfiler(path, unit, opts) {
   const colorMap = new Map();
   // map shapes by event key
   const shapeMap = new Map();
-  data = {tracks:new Map(), axes:{}, path};
+  data = {tracks:new Map(), axes:{}, path, first:null};
   const heightScale = d3.scaleLinear().domain([0, tracePeak]).range([4,maxheight=100]);
   for (let i=0; i<layoutsLen; i++) {
     const nameLen = view.getUint8(offset, true); offset += 1;
@@ -319,6 +319,7 @@ async function renderProfiler(path, unit, opts) {
         if (e.key != null) shapeMap.set(e.key, arg);
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label:opts.hideLabels ? null : label, fillColor });
+        if (j === 0) data.first = data.first == null ? e.st : Math.min(data.first, e.st);
       }
       div.style("height", levelHeight*levels.length+padding+"px").style("pointerEvents", "none");
     } else {
@@ -378,6 +379,7 @@ async function renderProfiler(path, unit, opts) {
         sum.x.push(allX[i], allX[i+1]);
         const y = maxY.get(allX[i]); sum.y1.push(y, y); sum.y0.push(base0, base0);
       }
+      if (timestamps.length > 0) data.first = data.first == null ? timestamps[0] : Math.min(data.first, timestamps[0]);
       data.tracks.set(k, { shapes:[sum], eventType, visible, offsetY, pcolor:"#c9a8ff", height, peak, scaleFactor:maxheight*4/height,
                            views:[[sum], shapes], valueMap });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
@@ -417,10 +419,10 @@ async function renderProfiler(path, unit, opts) {
     const canvasWidth = canvas.clientWidth;
     ctx.clearRect(0, 0, canvasWidth, canvas.clientHeight);
     // rescale to match current zoom
-    const xscale = d3.scaleLinear().domain([0, dur]).range([0, canvasWidth]);
+    const xscale = d3.scaleLinear().domain([data.first, dur]).range([0, canvasWidth]);
     const visibleX = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
-    const st = visibleX[0], et = visibleX[1];
-    xscale.domain(visibleX);
+    const st = visibleX[0] < 0 ? 0 : visibleX[0], et = visibleX[1];
+    xscale.domain([st, et]);
     ctx.textBaseline = "middle";
     // draw shapes
     const paths = [];
@@ -506,7 +508,7 @@ async function renderProfiler(path, unit, opts) {
   }
 
   zoomLevel = d3.zoomIdentity;
-  canvasZoom = d3.zoom().filter(vizZoomFilter).scaleExtent([1, Infinity]).translateExtent([[0,0], [Infinity,0]]).on("zoom", e => render(e.transform));
+  canvasZoom = d3.zoom().filter(vizZoomFilter).on("zoom", e => render(e.transform));
   d3.select(canvas).call(canvasZoom);
   document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
 
