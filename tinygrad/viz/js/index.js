@@ -310,6 +310,13 @@ async function renderProfiler(path, unit, opts) {
           const start = ref.step>0 ? ref.step+1 : 0;
           const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
           if (stepIdx !== -1) { ref.step = stepIdx; shapeRef = ref; }
+        } else {
+          const steps = ctxs[state.currentCtx].steps;
+          for (let i=state.currentStep+1; i<steps.length; i++) {
+            const loc = steps[i].loc;
+            if (loc == null) break;
+            if (loc === e.name) { shapeRef = {ctx:state.currentCtx-1, step:i}; break; }
+          }
         }
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
@@ -631,6 +638,7 @@ const evtSources = [];
 // context: collection of steps
 const state = {currentCtx:-1, currentStep:0, currentRewrite:0, expandSteps:false};
 function setState(ns) {
+  saveToHistory(state);
   const { ctx:prevCtx, step:prevStep } = select(state.currentCtx, state.currentStep);
   const prevRewrite = state.currentRewrite;
   Object.assign(state, ns);
@@ -638,7 +646,6 @@ function setState(ns) {
   const { ctx, step } = select(state.currentCtx, state.currentStep);
   toggleCls(prevCtx, ctx, "expanded", state.expandSteps);
   if (ctx?.id !== prevCtx?.id) {
-    saveToHistory({ currentCtx:deselect(prevCtx).ctx, currentStep:deselect(prevStep).step || 0, currentRewrite:prevRewrite, expandSteps:true });
     toggleCls(prevCtx, ctx, "active");
   }
   if (ctx?.id !== prevCtx?.id || step?.id !== prevStep?.id) {
