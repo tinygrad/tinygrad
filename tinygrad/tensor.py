@@ -220,25 +220,6 @@ class Tensor(OpMixin):
 
   # ***** data handlers ****
 
-  def kernelize(self, *lst:Tensor) -> Tensor:
-    """
-    Creates the kernels and buffers needed to realize these Tensor(s).
-
-    NOTE: Kernelize can be called multiple times on a Tensor
-    """
-    big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
-
-    # verify Tensors match the spec
-    if SPEC: type_verify(big_sink, tensor_spec)
-
-    if any(isinstance(x._device, tuple) for x in big_sink.toposort()):
-      _apply_map_to_tensors(get_multi_map(big_sink), name="Apply Multi Map")
-      big_sink = UOp.sink(*flatten([x.uop.src if x.uop.op is Ops.MULTI else [x.uop] for x in (self,)+lst]))
-
-    becomes_map = get_rangeify_map(big_sink)
-    _apply_map_to_tensors(becomes_map, name="Apply Kernelize Map")
-    return self
-
   def custom_kernel(self, *lst:Tensor, fxn:Callable, grad_fxn:Callable|None=None) -> list[Tensor]:
     """
     Call into a custom kernel written in UOps. Returns the Tensors after the Kernel has been applied.
@@ -254,7 +235,19 @@ class Tensor(OpMixin):
     NOTE: A Tensor can only be scheduled once.
     """
     st = time.perf_counter()
-    self.kernelize(*lst)
+    big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
+
+    # verify Tensors match the spec
+    if SPEC: type_verify(big_sink, tensor_spec)
+
+    if any(isinstance(x._device, tuple) for x in big_sink.toposort()):
+      _apply_map_to_tensors(get_multi_map(big_sink), name="Apply Multi Map")
+      big_sink = UOp.sink(*flatten([x.uop.src if x.uop.op is Ops.MULTI else [x.uop] for x in (self,)+lst]))
+
+    becomes_map = get_rangeify_map(big_sink)
+    _apply_map_to_tensors(becomes_map, name="Apply Kernelize Map")
+
+    # get new sink
     sink = UOp.sink(*[x.uop for x in (self,)+lst])
 
     # remove all AFTERs, after scheduling, the tensors are just buffers
@@ -1853,8 +1846,7 @@ class Tensor(OpMixin):
         # χ and ι step
         state = state.bitwise_xor(~state.roll(shifts=-1, dims=2) & state.roll(shifts=-2, dims=2))
         state = state.flatten(1) ^ rnd_const_masks[i]
-      # NOTE: kernelize here to prevent internal stack from growing propotional to data size
-      state = state.kernelize()
+      # NOTE: there was a kernelize here to prevent internal stack from growing propotional to data size, do we need something else?
     return state.bitcast(dtypes.uint8)[:,:(obytes:=(200 - rate) // 2)].reshape(*self.shape[:-1], obytes)
 
   def _hash_1mb(self) -> Tensor:
