@@ -514,6 +514,3 @@ class HEVCRawSlice:
 
 @dataclass(frozen=True)
 class HEVCFrameCtx: idx:int; chroma_off:int; hist_order:list[int]; frame:HEVCRawSlice; sps:HEVCRawSPS; pps:HEVCRawPPS # noqa: E702
-
-@dataclass(frozen=True)
-class EncDecCtx: hevc:HEVCFrameCtx

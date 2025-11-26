@@ -1,7 +1,7 @@
 import dataclasses, enum, argparse, os, itertools, functools
 from typing import Any
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.helpers import DEBUG, EncDecCtx, HEVCFrameCtx, HEVCRawSPS, HEVCRawPPS, HEVCRawSlice, round_up
+from tinygrad.helpers import DEBUG, HEVCFrameCtx, HEVCFrameCtx, HEVCRawSPS, HEVCRawPPS, HEVCRawSlice, round_up
 from tinygrad.nn.state import TensorIO
 from tinygrad.runtime.autogen import avcodec
 
@@ -236,7 +236,7 @@ class HEVCDecoder:
     self.dpb:list[tuple[int, int, Tensor]] = [] # (pos, poc, frame)
     self.next_frame = itertools.count()
 
-  def _get_decode_context(self, nal_unit_type:int, r:BitReader) -> tuple[int, EncDecCtx, list[Tensor]]:
+  def _get_decode_context(self, nal_unit_type:int, r:BitReader) -> tuple[int, HEVCFrameCtx, list[Tensor]]:
     hdr = SliceSegment(r, nal_unit_type, self.sps, self.pps)
 
     # Calculate history frames
@@ -278,7 +278,7 @@ class HEVCDecoder:
     hevc_context = HEVCFrameCtx(sps=self.sps.context, pps=self.pps.context, frame=frame_info,
                                 idx=next(self.next_frame), chroma_off=luma_size, hist_order=hist_order)
 
-    return luma_size + chroma_size, EncDecCtx(hevc=hevc_context), hist
+    return luma_size + chroma_size, hevc_context, hist
 
   def _add_frame_to_history(self, nal_unit_type, img):
     if nal_unit_type in {avcodec.HEVC_NAL_TRAIL_R, avcodec.HEVC_NAL_IDR_N_LP, avcodec.HEVC_NAL_IDR_W_RADL}:
@@ -317,7 +317,7 @@ class HEVCDecoder:
         # Update history
         self._add_frame_to_history(nal_unit_type, result_img)
 
-        yield self.display_width, self.display_height, encdec_ctx.hevc.chroma_off, result_img
+        yield self.display_width, self.display_height, encdec_ctx.chroma_off, result_img
 
       if DEBUG >= 4: print(f"NAL unit type: {nal_unit_type}, length: {nal_unit_len}")
       nal_unit_start += nal_unit_len

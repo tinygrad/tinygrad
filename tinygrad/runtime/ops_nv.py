@@ -7,7 +7,7 @@ from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, H
 from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, MOCKGPU, hcq_filter_visible_devices
 from tinygrad.uop.ops import sint
 from tinygrad.device import BufferSpec, CompilerPairT
-from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, to_mv, hi32, lo32, suppress_finalizing, EncDecCtx, ceildiv
+from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, to_mv, hi32, lo32, suppress_finalizing, HEVCFrameCtx, ceildiv
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.support.compiler_cuda import CUDACompiler, PTXCompiler, NVPTXCompiler, NVCompiler
@@ -307,10 +307,10 @@ class NVAllocator(HCQAllocator['NVDevice']):
 
   def _map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
 
-  def _encode_decode(self, bufout:HCQBuffer, bufin:HCQBuffer, hist:list[HCQBuffer], insize:int, ctx:EncDecCtx):
+  def _encode_decode(self, bufout:HCQBuffer, bufin:HCQBuffer, hist:list[HCQBuffer], insize:int, ctx:HEVCFrameCtx):
     assert all(h.va_addr % 0x100 == 0 for h in hist + [bufin, bufout]), "all buffers must be 0x100 aligned"
 
-    sps, pps, frame = ctx.hevc.sps, ctx.hevc.pps, ctx.hevc.frame
+    sps, pps, frame = ctx.sps, ctx.pps, ctx.frame
     self.dev._ensure_has_vid_hw(sps.pic_width_in_luma_samples, sps.pic_height_in_luma_samples)
 
     x = nv_gpu.nvdec_hevc_pic_s(gptimer_timeout_value=81600000, tileformat=1, sw_start_code_e=1, pattern_id=2, stream_len=insize,
@@ -339,7 +339,7 @@ class NVAllocator(HCQAllocator['NVDevice']):
     desc_buf.cpu_view()[0x202:0x204] = ceildiv(sps.pic_height_in_luma_samples, (1 << sps.log2_max_luma_coding_block_size)).to_bytes(2, "little")
 
     NVVideoQueue().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
-                  .decode_hevc_chunk(ctx.hevc.idx, desc_buf, bufin, bufout, x.curr_pic_idx, hist, list(ctx.hevc.hist_order), ctx.hevc.chroma_off,
+                  .decode_hevc_chunk(ctx.idx, desc_buf, bufin, bufout, x.curr_pic_idx, hist, list(ctx.hist_order), ctx.chroma_off,
                                      self.dev.vid_coloc_buf, self.dev.vid_filter_buf, self.dev.intra_top_off, self.dev.vid_status_buf) \
                   .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
 

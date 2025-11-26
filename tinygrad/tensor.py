@@ -7,7 +7,7 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, leas
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten
 from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, polyN, DEBUG, is_numpy_ndarray, SPEC, TracingKey, cpu_profile
-from tinygrad.helpers import suppress_finalizing, EncDecCtx
+from tinygrad.helpers import suppress_finalizing, HEVCFrameCtx
 from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
 from tinygrad.mixin.movement import _align_left
@@ -528,14 +528,14 @@ class Tensor(OpMixin):
     return r
 
   @staticmethod
-  def from_hevc(chunk_data:Tensor, ref_frames:list[Tensor], shape:tuple[int, ...], ctx:EncDecCtx) -> Tensor:
+  def from_hevc(chunk_data:Tensor, ref_frames:list[Tensor], shape:tuple[int, ...], ctx:HEVCFrameCtx) -> Tensor:
     """
     Creates a Tensor by decoding an HEVC frame chunk.
 
     You must provide the output shape of the decoded data (`shape`), the HEVC context (`ctx`), and, if required by the chunk,
     the reference frames (`ref_frames`).
     """
-    assert isinstance(ctx, EncDecCtx) and ctx.hevc is not None, "HEVC context is required"
+    assert isinstance(ctx, HEVCFrameCtx), "HEVC context is required"
     return chunk_data.contiguous()._apply_uop(UOp.encdec, *[x.contiguous() for x in ref_frames], arg=((prod(shape), ), ctx)).reshape(shape)
 
   @staticmethod
