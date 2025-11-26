@@ -241,7 +241,6 @@ async function renderProfiler(path, unit, opts) {
   displaySelection("#profiler");
   // support non realtime x axis units
   formatTime = unit === "realtime" ? formatMicroseconds : (s) => formatUnit(s, " "+unit);
-  metadata.replaceChildren(getMetadata(focusedShape) ?? "");
   // layout once!
   if (data != null && data.path === path) return updateProgress({ start:false });
   const profiler = d3.select("#profiler").html("");
@@ -269,6 +268,7 @@ async function renderProfiler(path, unit, opts) {
   // map shapes by event key
   const shapeMap = new Map();
   data = {tracks:new Map(), axes:{}, path, first:null};
+  metadata.replaceChildren(getMetadata(focusedShape) ?? "");
   const heightScale = d3.scaleLinear().domain([0, tracePeak]).range([4,maxheight=100]);
   for (let i=0; i<layoutsLen; i++) {
     const nameLen = view.getUint8(offset, true); offset += 1;
