@@ -311,7 +311,7 @@ class NVAllocator(HCQAllocator['NVDevice']):
     assert all(h.va_addr % 0x100 == 0 for h in hist + [bufin, bufout]), "all buffers must be 0x100 aligned"
 
     sps, pps, frame = ctx.hevc.sps, ctx.hevc.pps, ctx.hevc.frame
-    self.dev._ensure_has_vid_buffers(sps.pic_width_in_luma_samples, sps.pic_height_in_luma_samples)
+    self.dev._ensure_has_vid_hw(sps.pic_width_in_luma_samples, sps.pic_height_in_luma_samples)
 
     x = nv_gpu.nvdec_hevc_pic_s(gptimer_timeout_value=81600000, tileformat=1, sw_start_code_e=1, pattern_id=2, stream_len=insize,
       # Frame
@@ -691,15 +691,8 @@ class NVDevice(HCQCompiled[HCQSignal]):
                                          .setup(local_mem=self.shader_local_mem.va_addr, local_mem_tpc_bytes=bytes_per_tpc) \
                                          .signal(self.timeline_signal, self.next_timeline()).submit(self)
 
-  def _ensure_has_vid_buffers(self, w, h):
+  def _ensure_has_vid_hw(self, w, h):
     if self.iface.viddec_class is None: raise RuntimeError(f"{self.device} Video decoder class not available.")
-
-    if not hasattr(self, 'vid_gpfifo'):
-      self.vid_gpfifo = self._new_gpu_fifo(self.gpfifo_area, 0, self.nvdevice, offset=0x200000, entries=2048, compute=False, video=True)
-      self.vid_coloc_buf, self.vid_filter_buf, self.vid_status_buf = None, None, None
-      NVVideoQueue().wait(self.timeline_signal, self.timeline_value - 1) \
-                    .setup(copy_class=self.iface.viddec_class) \
-                    .signal(self.timeline_signal, self.next_timeline()).submit(self)
 
     self.col_mv_buffersize = (round_up(w, 64) * round_up(h, 64) // 16) // 256
     self.flt_above_off, self.flt_above_size = 0, round_up(w, 64) * 4
@@ -707,12 +700,19 @@ class NVDevice(HCQCompiled[HCQSignal]):
     self.sao_off, self.sao_size = round_up(self.slice_edge_off + self.slice_edge_size, 0x10000), self.col_mv_buffersize * 32
     self.bsd_ctrl_off, self.bsd_ctrl_size = round_up(self.sao_off + self.sao_size, 0x10000), self.col_mv_buffersize * 160
     self.intra_top_off, self.intra_top_size = round_up(self.bsd_ctrl_off + self.bsd_ctrl_size, 0x10000), round_up(w, 64) * 40
-    filter_buf_size = round_up(self.intra_top_off + self.intra_top_size, 2 << 20)
+    filter_size = round_up(self.intra_top_off + self.intra_top_size, 2 << 20)
     coloc_size = round_up((round_up(w, 64) * round_up(h, 64)) + (round_up(w, 64) * round_up(h, 64) // 16), 2 << 20)
 
-    if self.vid_coloc_buf is None or coloc_size > self.vid_coloc_buf.size: self.vid_coloc_buf = self.allocator.alloc(coloc_size)
-    if self.vid_filter_buf is None or filter_buf_size > self.vid_filter_buf.size: self.vid_filter_buf = self.allocator.alloc(filter_buf_size)
-    if self.vid_status_buf is None: self.vid_status_buf = self.allocator.alloc(0x1000, BufferSpec(cpu_access=True))
+    if not hasattr(self, 'vid_gpfifo'):
+      self.vid_gpfifo = self._new_gpu_fifo(self.gpfifo_area, 0, self.nvdevice, offset=0x200000, entries=1024, compute=False, video=True)
+      self.vid_coloc_buf, self.vid_filter_buf = self.allocator.alloc(coloc_size), self.allocator.alloc(filter_size)
+      self.vid_status_buf = self.allocator.alloc(0x1000)
+      NVVideoQueue().wait(self.timeline_signal, self.timeline_value - 1) \
+                    .setup(copy_class=self.iface.viddec_class) \
+                    .signal(self.timeline_signal, self.next_timeline()).submit(self)
+    else:
+      if coloc_size > self.vid_coloc_buf.size: self.vid_coloc_buf, _ = self._realloc(self.vid_coloc_buf, coloc_size, force=True)
+      if filter_size > self.vid_filter_buf.size: self.vid_filter_buf, _ = self._realloc(self.vid_filter_buf, filter_size, force=True)
 
   def invalidate_caches(self):
     if self.is_nvd(): self.iface.rm_control(self.subdevice, nv_gpu.NV2080_CTRL_CMD_INTERNAL_BUS_FLUSH_WITH_SYSMEMBAR, None)
