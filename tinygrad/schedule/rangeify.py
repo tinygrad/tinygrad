@@ -1,10 +1,12 @@
 from dataclasses import dataclass, field
 import itertools
+import functools, operator
+from itertools import product
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo
 from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType, BottomUpGate, Kernel, _remove_all_tags, range_str
 from tinygrad.uop.symbolic import symbolic
-from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY
+from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, WINO
 from tinygrad.helpers import PCONTIG, partition, get_single_element, unwrap, disable_gc
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
 from tinygrad.codegen.opt import Opt
@@ -113,6 +115,103 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
    (UPat(Ops.ASSIGN, src=(UPat.var("a"), UPat.var("b")), name="assign"), find_permutes),
 ])
 
+# *****************
+# 3.2 Winograd
+winograd_G = [[1/4, 0, 0], [-1/6, -1/6, -1/6], [-1/6, 1/6, -1/6], [1/24, 1/12, 1/6], [1/24, -1/12, 1/6], [0, 0, 1]]
+winograd_Bt = [[4, 0, -5, 0, 1, 0], [0, -4, -4, 1, 1, 0], [0, 4, -4, -1, 1, 0], [0, -2, -1, 2, 1, 0], [0, 2, -1, -2, 1, 0], [0, 4, 0, -5, 0, 1]]
+winograd_At = [[1, 1, 1, 1, 1, 0], [0, 1, -1, 2, -2, 0], [0, 1, 1, 4, 4, 0], [0, 1, -1, 8, -8, 1]]
+
+def _build_matrix_selector(axis, matrix_col, dtype):
+  """Build selector that picks matrix_col[axis] at runtime using WHERE cascade"""
+  terms = []
+  for k, coef in enumerate(matrix_col):
+    cond = (axis < 1) if k == 0 else (axis >= k) & (axis < (k+1))
+    terms.append(cond.where(UOp.const(dtype, coef), UOp.const(dtype, 0.0)))
+  return sum(terms) if terms else UOp.const(dtype, 0.0)
+
+def winograd_kron(source, matrix, outer_axes, inner_axes, device, ctx):
+  inner_shape = [ax.vmax+1 for ax in inner_axes]
+  result_axes = [ctx.new_range(len(matrix), AxisType.LOOP) for _ in range(len(inner_shape))]
+  new_outer_axes = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in outer_axes]
+
+  # Bufferize source to prevent inlining
+  if source.op not in {Ops.BUFFER, Ops.BUFFERIZE}:
+    source = source.bufferize(*(tuple(outer_axes) + tuple(inner_axes)), arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
+
+  # Load input values
+  input_vals = {}
+  for in_indices in product(*[range(inner_shape[d]) for d in range(len(inner_shape))]):
+    input_vals[in_indices] = source.index(*new_outer_axes, *[UOp.const(dtypes.index, i) for i in in_indices])
+
+  # Build matrix coefficient selectors (reused across all input combinations)
+  matrix_coefs = [[_build_matrix_selector(result_axes[dim], [matrix[k][i] for k in range(len(matrix))], source.dtype)
+                   for i in range(inner_shape[dim])] for dim in range(len(inner_shape))]
+
+  # Compute Kronecker product: multiply inputs by products of matrix coefficients
+  terms = [functools.reduce(operator.mul, [matrix_coefs[dim][in_indices[dim]] for dim in range(len(inner_shape))]) * input_vals[in_indices]
+           for in_indices in product(*[range(inner_shape[d]) for d in range(len(inner_shape))])]
+
+  return sum(terms).bufferize(*(tuple(new_outer_axes)+tuple(result_axes)), arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL))
+
+def winoguard(lhs: UOp, rhs: UOp, redu: UOp):
+  three = {ax for ax in redu.src[1:] if int(ax.vmax+1) == 3}
+  #dfs to check if conv with 3^n kernel and stride = dilation = 1 exists.
+  def collect(root: UOp):
+    need, matches = set(three), []
+    for a, b, n in ((u.src[0], u.src[1], u) for u in root.toposort(lambda s: s.op not in {Ops.BUFFERIZE, Ops.BUFFER}) if u.op is Ops.ADD):
+      for loop, red in ((a, b), (b, a)):  #could be made nicer with UPat
+        if red in need and loop.op is Ops.RANGE and loop not in need:
+          matches.append((red, loop, n))
+          need.remove(red)
+          break
+    return tuple(zip(*matches)) if matches else ([], [], []) #we dont allow the case where output axes are shared between activations and weights
+  kL, oxl, oL = collect(lhs)
+  kR, oxr, oR = collect(rhs)
+  #identify activation and weight if they exist
+  return (lhs, rhs, kL, oxl, oL) if (len(kL) >= 2 and not oR) else ((rhs, lhs, kR, oxr, oR) if (len(kR) >= 2 and not oL) else None)
+
+def winowrite(ctx: IndexingContext, lhs: UOp, rhs: UOp, redu: UOp):
+  # detect winograd pattern and pick activation/weight branches + spatial reduce axes (k_axes) and their adds (o_adds)
+  if not (g := winoguard(lhs, rhs, redu)): return None
+  act_like, w_like, k_axes, o_axes, o_adds = g
+  reduce_ranges = list(redu.src[1:])
+  device = redu.device
+  other_reduces = [ax for ax in act_like.ranges if ax not in k_axes and ax in reduce_ranges]
+  other_loops_x = [ax for ax in act_like.ranges if ax not in reduce_ranges+o_axes]
+  other_loops_w = [ax for ax in w_like.ranges if ax not in reduce_ranges]
+
+  # Axis creation with specific ordering to match OLD winograd axis mapping
+  inner6, inner6_1 = [[ctx.new_range(6, AxisType.LOOP) for _ in o_axes] for _ in range(2)]
+  tile_ranges = [ctx.new_range((int(ax.vmax+1)+3)//4, AxisType.LOOP) for ax in o_axes]
+  tile_ranges1 = [ctx.new_range((int(o_axes[0].vmax+1)+3)//4, AxisType.LOOP)]
+  other_loop_ranges_ghat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_w]
+  if len(o_axes) > 1: tile_ranges1.append(ctx.new_range((int(o_axes[1].vmax+1)+3)//4, AxisType.LOOP))
+  other_loop_ranges_xhat = [ctx.new_range(r.vmax+1, AxisType.LOOP) for r in other_loops_x]
+  kranges = [ctx.new_range(3, AxisType.LOOP) for _ in o_axes]
+
+  # Transform activations: clamp indices (for SPEC) then mask values (for correctness)
+  tiled_idx_and_max = [(tr*4 + u, int(oa.vmax) + 2) for tr, u, oa in zip(tile_ranges, inner6, o_axes)]
+  X_tiled = act_like.substitute({add: (idx < max_idx+1).where(idx, UOp.const(dtypes.index, max_idx))
+                                  for add, (idx, max_idx) in zip(o_adds, tiled_idx_and_max)})
+  X_tiled = functools.reduce(operator.and_, [idx < (max_idx+1) for idx, max_idx in tiled_idx_and_max],
+    UOp.const(dtypes.bool, True)).where(X_tiled, UOp.const(X_tiled.dtype, 0.0))
+  XHAT = winograd_kron(X_tiled, winograd_Bt, other_reduces+other_loops_x+tile_ranges, inner6, device, ctx)
+
+  # Transform weights
+  GHAT = winograd_kron(w_like.substitute(dict(zip(k_axes, kranges))), winograd_G, other_reduces+other_loops_w, kranges, device, ctx)
+
+  # Hadamard multiply, reduce, and output transform
+  MHAT = ((GHAT.index(*other_reduces, *other_loop_ranges_ghat, *inner6_1) *
+           XHAT.index(*other_reduces, *other_loop_ranges_xhat, *tile_ranges1, *inner6_1))
+          .reduce(*other_reduces, arg=Ops.ADD, dtype=redu.dtype)
+          .bufferize(*(other_loop_ranges_xhat+tile_ranges1+other_loop_ranges_ghat+inner6_1),
+                     arg=BufferizeOpts(device=device, addrspace=AddrSpace.GLOBAL)))
+  return winograd_kron(MHAT, winograd_At, other_loop_ranges_xhat+tile_ranges1+other_loop_ranges_ghat, inner6_1, device, ctx)\
+    .index(*other_loops_x, *[ox//4 for ox in o_axes], *other_loops_w, *[ox%4 for ox in o_axes])
+
+winograd_rewrite = PatternMatcher([
+  ((UPat.var("lhs")*UPat.var("rhs")).reduce(arg=Ops.ADD, allow_any_len=True, name="redu"),
+   lambda ctx, lhs, rhs, redu: winowrite(ctx, lhs, rhs, redu))])
 # *****************
 # 3.5 cleanups
 
@@ -550,6 +649,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   # convert movement ops to ranges
   tsink, rctx = run_rangeify(tsink, DEBUG_RANGEIFY)
 
+  if WINO: tsink = graph_rewrite(tsink, winograd_rewrite, ctx=rctx, name="winograd")
   tsink = graph_rewrite(tsink, symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize, name="symbolic+reduce_collapse+debuf")
   tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
 
