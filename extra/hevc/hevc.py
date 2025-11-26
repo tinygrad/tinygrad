@@ -343,18 +343,21 @@ def _addr_table(h, w, w_aligned):
   return (base + swiz).reshape(-1)
 
 if __name__ == "__main__":
-  import cv2, numpy as np
+  import cv2
 
   parser = argparse.ArgumentParser()
   parser.add_argument("input_file", type=str)
+  parser.add_argument("--output_file", type=str, default="extra/hevc/out")
   args = parser.parse_args()
 
-  # hevc_tensor = Tensor.from_url("https://github.com/commaai/comma2k19/raw/refs/heads/master/Example_1/b0c9d2329ad1606b%7C2018-08-02--08-34-47/40/video.hevc", device="CPU")
+  os.makedirs(args.output_file, exist_ok=True)
 
+  # url = "https://github.com/commaai/comma2k19/raw/refs/heads/master/Example_1/b0c9d2329ad1606b%7C2018-08-02--08-34-47/40/video.hevc"
+  # hevc_tensor = Tensor.from_url(url, device="CPU")
   hevc_tensor = Tensor.empty(os.stat(args.input_file).st_size, dtype=dtypes.uint8, device=f"disk:{args.input_file}").to("CPU")
   for i, (w, h, ch_off, src) in enumerate(HEVCDecoder(hevc_tensor).frames()):
     w_aligned = round_up(w, 64)
 
     luma = src[_addr_table(h, w, w_aligned)]
     chroma = src[ch_off:][_addr_table(h // 2, w, w_aligned)]
-    cv2.imwrite(f"extra/nvdec/out/nvp_frame_{i}.png", cv2.cvtColor(luma.cat(chroma).reshape((h + (h + 1) // 2, w)).numpy(), cv2.COLOR_YUV2BGR_NV12))
+    cv2.imwrite(f"{args.output_file}/nv_frame_{i}.png", cv2.cvtColor(luma.cat(chroma).reshape((h + (h + 1) // 2, w)).numpy(), cv2.COLOR_YUV2BGR_NV12))
