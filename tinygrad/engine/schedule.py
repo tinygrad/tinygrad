@@ -1,9 +1,11 @@
+import time
 from typing import cast
 from dataclasses import dataclass, field, replace
 from collections import deque, defaultdict
 from tinygrad.uop.ops import UOp, Ops, buffers
+from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Device, Buffer, MultiBuffer
-from tinygrad.helpers import Metadata, all_same
+from tinygrad.helpers import Metadata, all_same, DEBUG, cpu_profile, TracingKey, SPEC, flatten
 
 # **** ScheduleItem return type
 
@@ -114,3 +116,35 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
       real_schedule.append(replace(si, fixedvars=si.fixedvars | {s.src[0].arg[0]:in_ranges[s.src[1]] for s in si.bound_ranges}, bound_ranges=()))
     sched_ptr += 1
   return real_schedule, var_vals
+
+from tinygrad.engine.memory import memory_planner
+from tinygrad.schedule.rangeify import get_rangeify_map
+from tinygrad.schedule.multi import get_multi_map
+
+def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], list[ScheduleItem], dict[str, int]]:
+  # big_sink srcs are all the Tensors
+  st = time.perf_counter()
+
+  # verify Tensors match the spec
+  if SPEC: type_verify(big_sink, tensor_spec)
+
+  # tensor map is what we return
+  tensor_map: dict[UOp, UOp] = {}
+
+  if any(isinstance(x._device, tuple) for x in big_sink.toposort()):
+    tensor_map |= get_multi_map(big_sink)
+    big_sink = big_sink.substitute(tensor_map, name="Apply Multi Map")
+    big_sink = UOp.sink(*flatten([x.src if x.op is Ops.MULTI else [x] for x in big_sink.src]))
+
+  tensor_map |= get_rangeify_map(big_sink)
+  big_sink = big_sink.substitute(tensor_map, name="Apply Kernelize Map")
+
+  # create the schedule
+  with cpu_profile(TracingKey("toposort schedule")): schedule, var_vals = create_schedule_with_vars(big_sink)
+  with cpu_profile(TracingKey("memory planner")): schedule = memory_planner(schedule)
+
+  # remove all AFTERs, after scheduling, the tensors are just buffers
+  tensor_map |= {u:u.buf_uop for u in big_sink.toposort() if u.op is Ops.AFTER}
+
+  if (DEBUG >= 1 and len(schedule) > 1) or DEBUG >= 3: print(f"scheduled {len(schedule)} kernels in {(time.perf_counter()-st)*1000:.2f} ms")
+  return tensor_map, schedule, var_vals
