@@ -1,5 +1,5 @@
 # type: ignore
-import ctypes, ctypes.util, struct, platform, pathlib, re, time, os, signal, copy
+import ctypes, ctypes.util, struct, platform, pathlib, re, time, os, signal
 from tinygrad.helpers import from_mv, to_mv, getenv, init_c_struct_t
 from hexdump import hexdump
 start = time.perf_counter()
@@ -10,8 +10,6 @@ processor = platform.processor()
 IOCTL_SYSCALL = {"aarch64": 0x1d, "x86_64":16}[processor]
 MMAP_SYSCALL = {"aarch64": 0xde, "x86_64":0x09}[processor]
 
-orig_mmap_mv = None
-
 def get_struct(argp, stype):
   return ctypes.cast(ctypes.c_void_p(argp), ctypes.POINTER(stype)).contents
 
@@ -19,57 +17,6 @@ def dump_struct(st):
   if getenv("IOCTL", 0) == 0: return
   print("\t", st.__class__.__name__, end=" { ")
   for v in type(st)._fields_: print(f"{v[0]}={getattr(st, v[0])}", end=" ")
-  print("}")
-
-def dump_struct_ext(st, _depth: int = 0, _seen: set[int] | None = None):
-  # only check env once at top-level
-  if _depth == 0 and getenv("IOCTL", 0) == 0: return
-
-  # if _seen is None: _seen = set()
-  # sid = id(st)
-  # if sid in _seen:
-  #   print("\t" + "  " * _depth, st.__class__.__name__, "{ ...recursive... }")
-  #   return
-  # _seen.add(sid)
-
-  indent = "\t" + "  " * _depth
-  print(indent, st.__class__.__name__, end=" { ")
-
-  first_complex = True  # to decide when to break line for nested stuff
-
-  for lol in type(st)._fields_:
-    name, ftype = lol[0], lol[1]
-    val = getattr(st, name)
-
-    # nested struct
-    if isinstance(val, ctypes.Structure):
-      if first_complex:
-        print()  # finish current line before nested dump
-        first_complex = False
-      print(indent, f"{name} =", sep="")
-      dump_struct_ext(val, _depth + 1, _seen)
-      continue
-
-    # array of structs
-    if isinstance(val, ctypes.Array) and issubclass(getattr(ftype, "_type_", object), ctypes.Structure):
-      if first_complex:
-        print()
-        first_complex = False
-      print(indent, f"{name} [", sep="")
-      for i, elem in enumerate(val):
-        print(indent + "  ", f"[{i}] =", sep="")
-        dump_struct_ext(elem, _depth + 2, _seen)
-      print(indent, "]", sep="")
-      continue
-
-    # array of scalars
-    if isinstance(val, ctypes.Array):
-      print(f"{name}={[v for v in val]!r}", end=" ")
-      continue
-
-    # scalar field
-    print(f"{name}={val!r}", end=" ")
-
   print("}")
 
 def format_struct(s):
@@ -133,55 +80,10 @@ global_ioctl_id = 0
 gpus_user_modes = []
 gpus_mmio = []
 gpus_fifo = []
-gpus_sysmem = set()
-gpus_virtmem = set()
-gpus_virt_to_sys = dict()
-gpus_mappings = dict()
-virtmem_mappings = set()
-prev_nv_ioctl = None
-
-mappings_cache = []
-def scan_mappings():
-  global mappings_cache
-  new_mappings = set()
-
-  with open("/proc/self/maps", "r", encoding="utf-8") as f:
-    for line in f:
-      line = line.rstrip("\n")
-      parts = line.split(maxsplit=5)
-      if len(parts) < 6: continue
-
-      addr_range, perms, offset, dev, inode, pathname = parts
-      if "nvidia" not in pathname.lower(): continue
-
-      start_str, end_str = addr_range.split("-")
-      start = int(start_str, 16)
-      end = int(end_str, 16)
-      size = end - start
-
-      if (start, size, pathname) not in mappings_cache: new_mappings.add((start, size, pathname))
-      mappings_cache.append((start, size, pathname))
-  return new_mappings
-
-# map segfaults...
-def mappings_watchdog():
-  global prev_nv_ioctl, virtmem_mappings
-
-  x = list(scan_mappings())
-  if len(x) > 0:
-    print(f"mappings_watchdog: found {len(x)} new mappings", x)
-    print("virtmem_mappings:", virtmem_mappings, prev_nv_ioctl)
-  if len(x) > 0 and len(gpus_fifo) > 0 and gpus_fifo[-1][-1] is None: gpus_fifo[-1] = gpus_fifo[-1][:-1] + (x[0][0],)
-  if len(x) > 0 and prev_nv_ioctl is not None:
-    nr, addr, siz = prev_nv_ioctl
-    # assert s.size == x[0][1]
-    if nr == nv_gpu.NV_ESC_RM_MAP_MEMORY_DMA: virtmem_mappings.add((addr, siz, x[0][0]))
 
 @ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_ulong, ctypes.c_void_p)
 def ioctl(fd, request, argp):
-  mappings_watchdog()
-
-  global global_ioctl_id, gpus_user_modes, gpus_mmio, gpus_sysmem, gpus_mappings, gpus_fifo, gpus_virtmem, gpus_virt_to_sys, mappings_cache, prev_nv_ioctl
+  global global_ioctl_id, gpus_user_modes, gpus_mmio
   global_ioctl_id += 1
   st = time.perf_counter()
   ret = libc.syscall(IOCTL_SYSCALL, ctypes.c_int(fd), ctypes.c_ulong(request), ctypes.c_void_p(argp))
@@ -214,37 +116,18 @@ def ioctl(fd, request, argp):
         if s.hClass == nv_gpu.FERMI_VASPACE_A: dump_struct(get_struct(s.pAllocParms, nv_gpu.NV_VASPACE_ALLOCATION_PARAMETERS))
         if s.hClass == nv_gpu.NV50_MEMORY_VIRTUAL: dump_struct(get_struct(s.pAllocParms, nv_gpu.NV_MEMORY_ALLOCATION_PARAMS))
         if s.hClass == nv_gpu.NV1_MEMORY_USER: dump_struct(get_struct(s.pAllocParms, nv_gpu.NV_MEMORY_ALLOCATION_PARAMS))
-        if s.hClass == nv_gpu.NV01_MEMORY_VIRTUAL:
-          sx = get_struct(s.pAllocParms, nv_gpu.NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS)
-          gpus_virtmem.add(s.hObjectNew)
-          dump_struct(sx)
-        if s.hClass == nv_gpu.NV1_MEMORY_SYSTEM:
-          sx = get_struct(s.pAllocParms, nv_gpu.NV_MEMORY_ALLOCATION_PARAMS)
-          if sx.owner in gpus_virtmem:
-            gpus_virt_to_sys[sx.owner] = s.hObjectNew
-            print(f"\tMapping virtmem hMemory:0x{sx.owner:X} to sysmem hMemory:0x{s.hObjectNew:X}")
-          dump_struct(sx)
+        if s.hClass == nv_gpu.NV1_MEMORY_SYSTEM: dump_struct(get_struct(s.pAllocParms, nv_gpu.NV_MEMORY_ALLOCATION_PARAMS))
         if s.hClass == nv_gpu.GT200_DEBUGGER: dump_struct(get_struct(s.pAllocParms, nv_gpu.NV83DE_ALLOC_PARAMETERS))
         if s.hClass == nv_gpu.AMPERE_CHANNEL_GPFIFO_A:
           sx = get_struct(s.pAllocParms, nv_gpu.NV_CHANNELGPFIFO_ALLOCATION_PARAMETERS)
-          dump_struct_ext(sx)
-          # print("\thUserdMemory:", [sx.hUserdMemory[i] for i in range(8)])
-          # print("\tuserdOffset:", [sx.userdOffset[i] for i in range(8)])
-
-          if sx.hObjectBuffer in gpus_virt_to_sys:
-            gpus_fifo.append((sx.gpFifoOffset, sx.gpFifoEntries, next(x[0] for x in mappings_cache if x[1] == 196608) + 0x20000, None)) # hack
-            print(f"\tGPFIFO uses sysmem hMemory:0x{gpus_virt_to_sys[sx.hObjectBuffer]:X}")
-            print("\tpLinearAddress:", hex(gpus_mappings.get(gpus_virt_to_sys[sx.hObjectBuffer], None)))
-            # hexdump(to_mv(gpus_mappings.get(gpus_virt_to_sys[sx.hObjectBuffer], 0), sx.gpFifoEntries * 8)[:64])
-          else:
-            gpus_fifo.append((sx.gpFifoOffset, sx.gpFifoEntries, 0, 0))
+          dump_struct(sx)
+          gpus_fifo.append((sx.gpFifoOffset, sx.gpFifoEntries))
         if s.hClass == nv_gpu.KEPLER_CHANNEL_GROUP_A: dump_struct(get_struct(s.pAllocParms, nv_gpu.NV_CHANNEL_GROUP_ALLOCATION_PARAMETERS))
       if s.hClass == nv_gpu.TURING_USERMODE_A: gpus_user_modes.append(s.hObjectNew)
     elif nr == nv_gpu.NV_ESC_RM_MAP_MEMORY:
       # nv_ioctl_nvos33_parameters_with_fd
-      s = get_struct(argp, nv_gpu.NVOS33_PARAMETERS)
-      gpus_mappings[s.hMemory] = s.pLinearAddress
       if getenv("IOCTL", 0) >= 1:
+        s = get_struct(argp, nv_gpu.NVOS33_PARAMETERS)
         print(f"NV_ESC_RM_MAP_MEMORY   hClient={s.hClient}, hDevice={s.hDevice}, hMemory={s.hMemory}, length={s.length} flags={s.flags} pLinearAddress={s.pLinearAddress}")
     elif nr == nv_gpu.NV_ESC_RM_UPDATE_DEVICE_MAPPING_INFO:
       if getenv("IOCTL", 0) >= 1:
@@ -253,27 +136,15 @@ def ioctl(fd, request, argp):
     elif nr == nv_gpu.NV_ESC_RM_ALLOC_MEMORY:
       if getenv("IOCTL", 0) >= 1:
         s = get_struct(argp, nv_gpu.nv_ioctl_nvos02_parameters_with_fd)
-        print(f"NV_ESC_RM_ALLOC_MEMORY", end="")
-        dump_struct(s)
+        print(f"NV_ESC_RM_ALLOC_MEMORY  fd={s.fd}, hRoot={s.params.hRoot}, hObjectParent={s.params.hObjectParent}, hObjectNew={s.params.hObjectNew}, hClass={s.params.hClass}, flags={s.params.flags}, pMemory={s.params.pMemory}, limit={s.params.limit}, status={s.params.status}")
     elif nr == nv_gpu.NV_ESC_ALLOC_OS_EVENT:
       if getenv("IOCTL", 0) >= 1:
         s = get_struct(argp, nv_gpu.nv_ioctl_alloc_os_event_t)
         print(f"NV_ESC_ALLOC_OS_EVENT  hClient={s.hClient} hDevice={s.hDevice} fd={s.fd} Status={s.Status}")
-    elif nr == nv_gpu.NV_ESC_RM_MAP_MEMORY_DMA:
-      if getenv("IOCTL", 0) >= 1:
-        s = get_struct(argp, nv_gpu.NVOS46_PARAMETERS)
-        print(f"NV_ESC_RM_MAP_MEMORY_DMA", end=" ")
-        dump_struct(s)
-        prev_nv_ioctl = (nr, s.dmaOffset, s.length)
     elif nr == nv_gpu.NV_ESC_REGISTER_FD:
       if getenv("IOCTL", 0) >= 1:
         s = get_struct(argp, nv_gpu.nv_ioctl_register_fd_t)
         print(f"NV_ESC_REGISTER_FD  fd={s.ctl_fd}")
-    elif nr == nv_gpu.NV_ESC_RM_DUP_OBJECT:
-      if getenv("IOCTL", 0) >= 1:
-        s = get_struct(argp, nv_gpu.NVOS55_PARAMETERS)
-        print(f"NV_ESC_RM_DUP_OBJECT", end=" ")
-        dump_struct(s)
     elif nr in nvescs:
       if getenv("IOCTL", 0) >= 1: print(nvescs[nr])
     else:
@@ -297,88 +168,30 @@ def _mmap(addr, length, prot, flags, fd, offset):
   orig_mmap = mmap_type(ctypes.addressof(orig_mmap_mv))
   ret = orig_mmap(addr, length, prot, flags, fd, offset)
   # ll = os.readlink(f"/proc/self/fd/{fd}") if fd >= 0 else ""
-  print(f"mmap {addr=}, {length=}, {prot=}, {flags=}, {fd=}, {offset=} {ret=}", flush=True)
+  print(f"mmap {addr=}, {length=}, {prot=}, {flags=}, {fd=}, {offset=} {ret=}")
   return ret
 
 install_hook(libc.ioctl, ioctl)
-# if getenv("IOCTL") >= 3: orig_mmap_mv = install_hook(libc.mmap, _mmap)
-
-def print_maps(pid: int | None = None) -> None:
-  path = "/proc/self/maps"
-
-  try:
-    with open(path, "r", encoding="utf-8") as f:
-      for line in f:
-        line = line.rstrip("\n")
-        # example:
-        # 708c0515e000-708c0515f000 rw-p 00085000 08:02 131883 /usr/lib/...
-        parts = line.split(maxsplit=5)
-        if len(parts) < 6:
-            # no pathname (anonymous mapping)
-            continue
-
-        addr_range, perms, offset, dev, inode, pathname = parts
-        if "nvidia" not in pathname.lower():
-          continue
-
-        start_str, end_str = addr_range.split("-")
-        start = int(start_str, 16)
-        end = int(end_str, 16)
-        size = end - start  # bytes
-
-        print(f"{size:#x}  {line}")
-        if size == 0x30000:
-          for x in range(128):
-            el = to_mv(start + 0x20000, 2048 * 8).cast('Q')[x]
-            if el == 0: break
-            addr = ((el & ((1 << 40)-1)) >> 2) << 2
-            pckt_cnt = (el>>42)&((1 << 20)-1)
-
-            cpu_addr = start + (addr - 0x120030000)
-            print("VID QMD:", hex(cpu_addr), hex(pckt_cnt))
-            _dump_qmd(cpu_addr, pckt_cnt)
-          # hexdump(lol[:1024])
-
-  except FileNotFoundError:
-    print(f"no such process or maps file: {path}", file=sys.stderr)
-  except PermissionError:
-    print(f"permission denied reading {path} (try sudo?)", file=sys.stderr)
-
+if getenv("IOCTL") >= 3: orig_mmap_mv = install_hook(libc.mmap, _mmap)
 
 import collections
 old_gpputs = collections.defaultdict(int)
 def _dump_gpfifo(mark):
   launches = []
 
-  # print_maps()
-
-  print("_dump_gpfifo:", mark)
-  for start, size, start_sys, ud_sys in gpus_fifo:
-    # print(old_gpputs[start], hex(start), hex(size))
-    if start_sys > 0:
-      gpfifo_controls = nv_gpu.AmpereAControlGPFifo.from_address(ud_sys)
-      gpfifo = to_mv(start_sys, size * 8).cast("Q")
-      # hexdump(to_mv(start_sys, size * 8)[:64])
-      til = 0x1000
-    else:
-      gpfifo_controls = nv_gpu.AmpereAControlGPFifo.from_address(start+size*8)
-      gpfifo = to_mv(start, size * 8).cast("Q")
-      til = gpfifo_controls.GPPut
-    while old_gpputs[start] != til:
-      if gpfifo[old_gpputs[start]] == 0: break
+  # print("_dump_gpfifo:", mark)
+  for start, size in gpus_fifo:
+    gpfifo_controls = nv_gpu.AmpereAControlGPFifo.from_address(start+size*8)
+    gpfifo = to_mv(start, size * 8).cast("Q")
+    while old_gpputs[start] != gpfifo_controls.GPPut:
       addr = ((gpfifo[old_gpputs[start]] & ((1 << 40)-1)) >> 2) << 2
       pckt_cnt = (gpfifo[old_gpputs[start]]>>42)&((1 << 20)-1)
-
-      if start_sys > 0:
-        addr = start_sys + (addr - 0x120030000) - 0x20000
-        print(f"GPFIFO Launch from 0x{start:x} entry {old_gpputs[start]}: addr=0x{addr:x} packets={pckt_cnt}")
 
       # print(f"\t{i}: 0x{gpfifo[i % size]:x}: addr:0x{addr:x} packets:{pckt_cnt} sync:{(gpfifo[i % size] >> 63) & 0x1} fetch:{gpfifo[i % size] & 0x1}")
       x = _dump_qmd(addr, pckt_cnt)
       if isinstance(x, list): launches += x
       old_gpputs[start] += 1
       old_gpputs[start] %= size
-  
   return launches
 
 import types
@@ -408,7 +221,7 @@ def _dump_qmd(address, packets):
     size = (dat>>16) & 0xFFF
     subc = (dat>>13) & 7
     mthd = (dat<<2) & 0x7FFF
-    method_name = nvqcmds.get(mthd, f"unknown method {mthd:#x}")
+    method_name = nvqcmds.get(mthd, f"unknown method #{mthd}")
     if getenv("IOCTL", 0) >= 1:
       print(f"\t\t{method_name}, {typ=} {size=} {subc=} {mthd=}")
       for j in range(size): print(f"\t\t\t{j}: {gpfifo[i+j+1]} | 0x{gpfifo[i+j+1]:x}")
@@ -416,40 +229,6 @@ def _dump_qmd(address, packets):
       qmds.append(qmd_struct_t.from_address(address + 12 + i * 4))
     elif mthd == nv_gpu.NVC6C0_SEND_PCAS_A:
       qmds.append(qmd_struct_t.from_address(gpfifo[i+1] << 8))
-    elif mthd in {nv_gpu.NVC9B0_SET_DRV_PIC_SETUP_OFFSET, nv_gpu.NVC9B0_HEVC_SET_SCALING_LIST_OFFSET, nv_gpu.NVC9B0_HEVC_SET_FILTER_BUFFER_OFFSET,
-                  nv_gpu.NVC9B0_HEVC_SET_TILE_SIZES_OFFSET, nv_gpu.NVC9B0_SET_NVDEC_STATUS_OFFSET, nv_gpu.NVC9B0_SET_IN_BUF_BASE_OFFSET,
-                  nv_gpu.NVC9B0_SET_COLOC_DATA_OFFSET,
-                  nv_gpu.NVC9B0_SET_PICTURE_LUMA_OFFSET0, nv_gpu.NVC9B0_SET_PICTURE_CHROMA_OFFSET0,
-                  nv_gpu.NVC9B0_SET_PICTURE_LUMA_OFFSET1, nv_gpu.NVC9B0_SET_PICTURE_CHROMA_OFFSET1,
-                  nv_gpu.NVC9B0_SET_PICTURE_LUMA_OFFSET2, nv_gpu.NVC9B0_SET_PICTURE_CHROMA_OFFSET2}:
-      ll = gpfifo[i+1] << 8
-      saddr = None
-      for st,ln,addr in virtmem_mappings:
-        if st <= ll and ll < st + ln:
-          saddr = addr + (ll - st)
-          break
-      print("\t\tHEVC PIC S:", hex(ll), "->", hex(saddr) if saddr is not None else "NOT MAPPED")
-      if saddr is not None:
-        if mthd == nv_gpu.NVC9B0_SET_DRV_PIC_SETUP_OFFSET:
-          x = nv_gpu.nvdec_hevc_pic_s.from_address(saddr)
-          dump_struct_ext(x)
-        elif mthd == nv_gpu.NVC9B0_HEVC_SET_SCALING_LIST_OFFSET:
-          hexdump(to_mv(saddr, 0x10))
-        elif mthd == nv_gpu.NVC9B0_HEVC_SET_TILE_SIZES_OFFSET:
-          hexdump(to_mv(saddr, 0x10))
-        elif mthd == nv_gpu.NVC9B0_SET_NVDEC_STATUS_OFFSET:
-          x = nv_gpu.nvdec_status_s.from_address(saddr)
-          dump_struct_ext(x)
-        elif mthd == nv_gpu.NVC9B0_SET_IN_BUF_BASE_OFFSET:
-          hexdump(to_mv(saddr, 0x80))
-        elif mthd == nv_gpu.NVC9B0_HEVC_SET_FILTER_BUFFER_OFFSET:
-          hexdump(to_mv(saddr, 0x40))
-        elif mthd == nv_gpu.NVC9B0_SET_COLOC_DATA_OFFSET:
-          hexdump(to_mv(saddr, 0x40))
-        elif mthd in {nv_gpu.NVC9B0_SET_PICTURE_LUMA_OFFSET0, nv_gpu.NVC9B0_SET_PICTURE_CHROMA_OFFSET0,
-                      nv_gpu.NVC9B0_SET_PICTURE_LUMA_OFFSET1, nv_gpu.NVC9B0_SET_PICTURE_CHROMA_OFFSET1,
-                      nv_gpu.NVC9B0_SET_PICTURE_LUMA_OFFSET2, nv_gpu.NVC9B0_SET_PICTURE_CHROMA_OFFSET2}:
-          hexdump(to_mv(saddr, 0x80))
 
     i += size + 1
   return qmds
