@@ -181,15 +181,15 @@ class NVCopyQueue(NVCommandQueue):
   def _submit(self, dev:NVDevice): self._submit_to_gpfifo(dev, dev.dma_gpfifo)
 
 class NVVideoQueue(NVCommandQueue):
-  def decode_hevc_chunk(self, pic_idx:int, pic_desc:HCQBuffer, in_buf:HCQBuffer, lch_bufs:list[HCQBuffer], ch_offset:int, coloc_buf:HCQBuffer,
-                        filter_buf:HCQBuffer, intra_top_off:int, status_buf:HCQBuffer):
-    self.nvm(4, nv_gpu.NVC9B0_SET_APPLICATION_ID, 7)
+  def decode_hevc_chunk(self, pic_idx:int, pic_desc:HCQBuffer, in_buf:HCQBuffer, out_buf:HCQBuffer, out_buf_pos:int, hist_bufs:list[HCQBuffer],
+                        hist_pos:list[int], chroma_off:int, coloc_buf:HCQBuffer, filter_buf:HCQBuffer, intra_top_off:int, status_buf:HCQBuffer):
+    self.nvm(4, nv_gpu.NVC9B0_SET_APPLICATION_ID, nv_gpu.NVC9B0_SET_APPLICATION_ID_ID_HEVC)
     self.nvm(4, nv_gpu.NVC9B0_SET_CONTROL_PARAMS, 0x52057)
     self.nvm(4, nv_gpu.NVC9B0_SET_DRV_PIC_SETUP_OFFSET, pic_desc.va_addr >> 8)
     self.nvm(4, nv_gpu.NVC9B0_SET_IN_BUF_BASE_OFFSET, in_buf.va_addr >> 8)
-    for i in range(len(lch_bufs)):
-      self.nvm(4, nv_gpu.NVC9B0_SET_PICTURE_LUMA_OFFSET0 + i*4, lch_bufs[i].va_addr >> 8)
-      self.nvm(4, nv_gpu.NVC9B0_SET_PICTURE_CHROMA_OFFSET0 + i*4, lch_bufs[i].offset(ch_offset).va_addr >> 8)
+    for pos, buf in zip(hist_pos + [out_buf_pos], hist_bufs + [out_buf]):
+      self.nvm(4, nv_gpu.NVC9B0_SET_PICTURE_LUMA_OFFSET0 + pos*4, buf.va_addr >> 8)
+      self.nvm(4, nv_gpu.NVC9B0_SET_PICTURE_CHROMA_OFFSET0 + pos*4, buf.offset(chroma_off).va_addr >> 8)
     self.nvm(4, nv_gpu.NVC9B0_SET_COLOC_DATA_OFFSET, coloc_buf.va_addr >> 8)
     self.nvm(4, nv_gpu.NVC9B0_SET_NVDEC_STATUS_OFFSET, status_buf.va_addr >> 8)
     self.nvm(4, nv_gpu.NVC9B0_SET_PICTURE_INDEX, pic_idx)
@@ -310,17 +310,17 @@ class NVAllocator(HCQAllocator['NVDevice']):
   def _encode_decode(self, bufout:HCQBuffer, bufin:HCQBuffer, hist:list[HCQBuffer], insize:int, ctx:EncDecCtx):
     assert all(h.va_addr % 0x100 == 0 for h in hist + [bufin, bufout]), "all buffers must be 0x100 aligned"
 
-    sps, pps = ctx.hevc.sps, ctx.hevc.pps
+    sps, pps, frame = ctx.hevc.sps, ctx.hevc.pps, ctx.hevc.frame
     self.dev._ensure_has_vid_buffers(sps.pic_width_in_luma_samples, sps.pic_height_in_luma_samples)
 
     x = nv_gpu.nvdec_hevc_pic_s(gptimer_timeout_value=81600000, tileformat=1, sw_start_code_e=1, pattern_id=2, stream_len=insize,
       # Frame
-      IDR_picture_flag=ctx.hevc.frame.idr, RAP_picture_flag=ctx.hevc.frame.rap, curr_pic_idx=ctx.hevc.frame.pic_idx, num_ref_frames=len(hist),
-      sw_hdr_skip_length=ctx.hevc.frame.sw_hdr_skip, num_bits_short_term_ref_pics_in_slice=max(ctx.hevc.frame.sw_hdr_skip - 9, 0),
+      IDR_picture_flag=frame.idr, RAP_picture_flag=frame.rap, curr_pic_idx=frame.pic_idx, num_ref_frames=len(hist),
+      sw_hdr_skip_length=frame.sw_hdr_skip, num_bits_short_term_ref_pics_in_slice=max(frame.sw_hdr_skip - 9, 0),
       colMvBuffersize=self.dev.col_mv_buffersize, HevcSaoBufferOffset=self.dev.sao_off>>8, HevcBsdCtrlOffset=self.dev.bsd_ctrl_off>>8,
       framestride=(ctypes.c_uint32 * 2)(round_up(sps.pic_width_in_luma_samples, 64), round_up(sps.pic_width_in_luma_samples, 64)),
-      RefDiffPicOrderCnts=(ctypes.c_int16 * 16)(*ctx.hevc.frame.diff_poc), initreflistidxl0=(ctypes.c_ubyte*16)(*ctx.hevc.frame.ref_idx_l0),
-      initreflistidxl1=(ctypes.c_uint8 * 16)(*ctx.hevc.frame.ref_idx_l1),
+      RefDiffPicOrderCnts=(ctypes.c_int16 * 16)(*frame.diff_poc), initreflistidxl0=(ctypes.c_ubyte*16)(*frame.ref_idx_l0),
+      initreflistidxl1=(ctypes.c_uint8 * 16)(*frame.ref_idx_l1),
       # SPS
       chroma_format_idc=sps.chroma_format_idc, pic_width_in_luma_samples=sps.pic_width_in_luma_samples,
       pic_height_in_luma_samples=sps.pic_height_in_luma_samples, bit_depth_luma=sps.bit_depth_luma,
@@ -334,19 +334,13 @@ class NVAllocator(HCQAllocator['NVDevice']):
       sign_data_hiding_enabled_flag=pps.sign_data_hiding_enabled_flag, num_ref_idx_l0_default_active=pps.num_ref_idx_l0_default_active,
       num_ref_idx_l1_default_active=pps.num_ref_idx_l1_default_active, init_qp=pps.init_qp, cabac_init_present_flag=pps.cabac_init_present_flag,
       cu_qp_delta_enabled_flag=pps.cu_qp_delta_enabled_flag, diff_cu_qp_delta_depth=pps.diff_cu_qp_delta_depth,
-      pps_cb_qp_offset=pps.pps_cb_qp_offset, pps_cr_qp_offset=pps.pps_cr_qp_offset,
-      pps_slice_chroma_qp_offsets_present_flag=pps.pps_slice_chroma_qp_offsets_present_flag,
-      weighted_pred_flag=pps.weighted_pred_flag, weighted_bipred_flag=pps.weighted_bipred_flag,
+      pps_cb_qp_offset=pps.pps_cb_qp_offset, pps_cr_qp_offset=pps.pps_cr_qp_offset, weighted_pred_flag=pps.weighted_pred_flag,
+      pps_slice_chroma_qp_offsets_present_flag=pps.pps_slice_chroma_qp_offsets_present_flag, weighted_bipred_flag=pps.weighted_bipred_flag,
       transquant_bypass_enabled_flag=pps.transquant_bypass_enabled_flag, tiles_enabled_flag=pps.tiles_enabled_flag,
-      entropy_coding_sync_enabled_flag=pps.entropy_coding_sync_enabled_flag,
+      entropy_coding_sync_enabled_flag=pps.entropy_coding_sync_enabled_flag, scaling_list_data_present_flag=pps.scaling_list_data_present_flag,
       loop_filter_across_slices_enabled_flag=pps.loop_filter_across_slices_enabled_flag,
       deblocking_filter_control_present_flag=pps.deblocking_filter_control_present_flag,
-      scaling_list_data_present_flag=pps.scaling_list_data_present_flag,
       lists_modification_present_flag=pps.lists_modification_present_flag, log2_parallel_merge_level=pps.log2_parallel_merge_level)
-
-    build_hist_list = [None] * (len(hist) + 1)
-    for i in range(len(hist)): build_hist_list[ctx.hevc.hist_order[i]] = hist[i]
-    build_hist_list[x.curr_pic_idx] = bufout
 
     desc_buf = self.dev.kernargs_buf.offset(offset=self.dev.kernargs_offset_allocator.alloc(0x300, 0x100), size=0x300)
     desc_buf.cpu_view()[:ctypes.sizeof(x)] = bytes(x)
@@ -354,8 +348,8 @@ class NVAllocator(HCQAllocator['NVDevice']):
     desc_buf.cpu_view()[0x202:0x204] = ceildiv(sps.pic_height_in_luma_samples, (1 << sps.log2_max_luma_coding_block_size)).to_bytes(2, "little")
 
     NVVideoQueue().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
-                  .decode_hevc_chunk(ctx.hevc.idx, desc_buf, bufin, build_hist_list, ctx.hevc.chroma_off, self.dev.vid_coloc_buf,
-                                     self.dev.vid_filter_buf, self.dev.intra_top_off, self.dev.vid_status_buf) \
+                  .decode_hevc_chunk(ctx.hevc.idx, desc_buf, bufin, bufout, x.curr_pic_idx, hist, list(ctx.hevc.hist_order), ctx.hevc.chroma_off,
+                                     self.dev.vid_coloc_buf, self.dev.vid_filter_buf, self.dev.intra_top_off, self.dev.vid_status_buf) \
                   .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
 
 @dataclass
