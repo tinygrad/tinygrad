@@ -205,8 +205,10 @@ function getMetadata(shape) {
     html.append(() => tabulate([["Name", d3.create("p").html(e.arg.tooltipText.split("\n")[0]).node()],
                                 ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]]).node());
     if (e.arg.ctx != null) {
-      html.append("a").text("View codegen rewrite").on("click", () => switchCtx(e.arg.ctx, e.arg.step));
-      html.append("a").text("View program").on("click", () => switchCtx(e.arg.ctx, ctxs[e.arg.ctx+1].steps.findIndex(s => s.name==="View Program")));
+      const i = e.arg.ctx; s = e.arg.step;
+      html.append("a").text(ctxs[i+1].steps[s].name).on("click", () => switchCtx(i, s));
+      const prgSrc = ctxs[i+1].steps.findIndex(s => s.name === "View Program");
+      if (prgSrc !== -1) html.append("a").text("View program").on("click", () => switchCtx(i, prgSrc));
     }
   }
   if (track.eventType === EventTypes.BUF) {
