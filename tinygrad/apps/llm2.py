@@ -239,7 +239,6 @@ class Transformer:
 
   def __call__(self, tokens:Tensor, start_pos:int|UOp=0) -> Tensor:
     forward = self.forward_jit if getenv("JIT", 1) and tokens.shape[1] == 1 and isinstance(start_pos, UOp) else self.forward
-    profile_marker("forward")
     print(f'forward_jit={forward==self.forward_jit}')
     with Context(DEBUG=2):
       return forward(tokens, start_pos)
@@ -262,8 +261,8 @@ class Transformer:
     start_pos, v_start_pos = 0, UOp.variable("start_pos", 1, self.max_context-1)
     t = Tensor([toks[start_pos:]], dtype="int32")
     self.forward_jit.reset()  # TODO: why is this required? root cause the issue and make it not be needed
-    start_length = len(toks)
-    while len(toks) < min(self.max_context, max_new_tokens+start_length):
+    for i in range(min(max_new_tokens, self.max_context - len(toks))):
+      profile_marker(f"step {i}")
       t = self(t, v_start_pos.bind(start_pos) if getenv("SYM", 1) and start_pos != 0 and t.shape[-1] == 1 else start_pos)
       next_tok = int(t.item())
       toks.append(next_tok)
