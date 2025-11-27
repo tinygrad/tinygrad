@@ -162,8 +162,9 @@ def sinc_window_kernel(num_taps: int, fc: float, window: str = "hamming", dtype=
   h /= h.sum()
   return h
 
+# TODO: option to use better polyphasic resampler from sovits_helpers/preprocess.py
 
-def resample(x: Tensor, L: int, M: int, num_taps: int = 64) -> Tensor:
+def resample_naive(x: Tensor, L: int, M: int, num_taps: int = 64) -> Tensor:
   fc = 0.5 / max(L, M)
   h = sinc_window_kernel(num_taps, fc, "hamming", "float32", x.device)
 
@@ -180,18 +181,18 @@ def next_power_of_2(n: int) -> int:
   return 1 << (n - 1).bit_length()
 
 
-def resample2(samples: Tensor, source: int, target: int) -> Tensor:
+def resample_naive_sr_helper(samples: Tensor, source: int, target: int) -> Tensor:
   gcd = math.gcd(source, target)
   M = source // gcd
   L = target // gcd
   taps = next_power_of_2(max(M, L)) * 2  # overkill but works
-  return resample(samples, L, M, taps)
+  return resample_naive(samples, L, M, taps)
 
 
-def resample_batched(samples: Tensor, source: int, target: int) -> Tensor:
+def resample_batched_helper(samples: Tensor, source: int, target: int) -> Tensor:
   count = samples.shape[-1]
   rbs = source * 10
   samples = samples.pad(((0, math.ceil(count / rbs) * rbs - count))).reshape(-1, rbs)
-  resampled = resample2(samples, source, target)
+  resampled = resample_naive_sr_helper(samples, source, target)
 
   return resampled[: int((count / source) * target)]
