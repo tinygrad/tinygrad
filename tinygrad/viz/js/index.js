@@ -202,8 +202,10 @@ function getMetadata(shape) {
   const e = track.shapes[idx];
   const html = d3.create("div").classed("info", true);
   if (track.eventType === EventTypes.EXEC) {
-    html.append(() => tabulate([["Name", d3.create("p").html(e.arg.tooltipText.split("\n")[0]).node()],
-                                ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]]).node());
+    const [n, _, ...rest] = e.arg.tooltipText.split("\n");
+    html.append(() => tabulate([["Name", d3.create("p").html(n).node()], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]]).node());
+    const group = html.append("div").classed("args", true);
+    for (const r of rest) group.append("p").text(r);
     if (e.arg.ctx != null) {
       const i = e.arg.ctx; s = e.arg.step;
       html.append("a").text(ctxs[i+1].steps[s].name).on("click", () => switchCtx(i, s));
