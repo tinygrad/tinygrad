@@ -120,10 +120,10 @@ pm_apply_rangeify = PatternMatcher([
 ])
 
 @functools.cache
-def _apply_reshape(in_shape:tuple[sint,...], arg:tuple[sint, ...], rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
+def _apply_reshape(in_shape:tuple[sint,...], out_shape:tuple[sint, ...], urngs:UOp) -> UOp:
   acc = 1
   axes_in:list[UOp] = []
-  for s,src in list(zip(arg, rngs))[::-1]:
+  for s,src in list(zip(out_shape, urngs.src))[::-1]:
     axes_in.append(acc*src)
     acc *= s
   combined_axes = sum(axes_in, start=UOp.const(dtypes.index, 0))
@@ -132,7 +132,7 @@ def _apply_reshape(in_shape:tuple[sint,...], arg:tuple[sint, ...], rngs:tuple[UO
     axes_out.append(combined_axes % s)
     combined_axes //= s
   # this simplify is doing a lot of heavy lifting. this is the replacement for the reshape view merging code
-  return graph_rewrite(UOp.sink(*axes_out[::-1]), symbolic+pm_simplify_valid+pm_drop_and_clauses, name="reshape").src
+  return graph_rewrite(UOp.sink(*axes_out[::-1]), symbolic+pm_simplify_valid+pm_drop_and_clauses, name="reshape")
 
 # this is the definition of the movement ops
 @functools.cache
@@ -151,8 +151,7 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
     case Ops.RESHAPE:
       sink = UOp.sink(*rngs)
       sub_array = {r:UOp.range(r.src[0], i, AxisType.PLACEHOLDER) for i,r in enumerate(sink.ranges)}
-      rngs_sub = _apply_reshape(in_shape, arg, sink.substitute(sub_array).src)
-      rngs = UOp.sink(*rngs_sub).substitute({v:k for k,v in sub_array.items()}).src
+      rngs = _apply_reshape(in_shape, arg, sink.substitute(sub_array)).substitute({v:k for k,v in sub_array.items()}).src
     case _: raise RuntimeError(f"{op} is not a MovementOp")
   return rngs
 
