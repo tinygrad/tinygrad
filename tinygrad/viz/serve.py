@@ -263,7 +263,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
   ctxs.append({"name":"Counters", "steps":steps})
 
 def device_sort_fn(k:str) -> tuple[int, str, int]:
-  order = {"USER": 0, "TINY": 1, "DISK": 999}
+  order = {"GC": 0, "USER": 1, "TINY": 2, "DISK": 999}
   dname = k.split()[0]
   dev_rank = next((v for k,v in order.items() if dname.startswith(k)), len(order))
   return (dev_rank, dname, len(k))
