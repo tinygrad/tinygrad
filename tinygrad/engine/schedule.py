@@ -1,11 +1,11 @@
 import time
 from typing import cast
 from dataclasses import dataclass, field, replace
-from collections import deque, defaultdict
+from collections import deque
 from tinygrad.uop.ops import UOp, Ops, buffers
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.helpers import Metadata, DEBUG, cpu_profile, TracingKey, SPEC, flatten
+from tinygrad.helpers import Metadata, DEBUG, cpu_profile, TracingKey, SPEC, flatten, disable_gc
 
 # **** ScheduleItem return type
 
@@ -22,7 +22,7 @@ class ScheduleItem:
 def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[str, int]]:
   with cpu_profile(TracingKey("toposort sched_sink")):
     # construct the KERNEL children graph based on assigns
-    children: defaultdict[UOp, list[UOp]] = defaultdict(list)
+    children: dict[UOp, list[UOp]] = {}
     in_degree: dict[UOp, int] = {}
     var_vals: dict[str, int] = {}
     for u in sched_sink.toposort():
@@ -34,14 +34,14 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
       in_degree.setdefault(k, 0)
       for s in k.src[0].src if k.op is Ops.END else k.src:
         if s.op is Ops.AFTER:
-          children[s.src[1]].append(k)
+          children.setdefault(s.src[1], []).append(k)
           in_degree[k] += 1
         elif s.op in {Ops.MSELECT, Ops.MSTACK}:
           for ss in s.src:
             if ss.op is Ops.MSELECT: ss = ss.src[0]
             if ss.op is not Ops.BUFFER:
               assert ss.op is Ops.AFTER, f"ss.op is not AFTER, it's {ss.op}"
-              children[ss.src[1]].append(k)
+              children.setdefault(ss.src[1], []).append(k)
               in_degree[k] += 1
         elif s.op is Ops.BUFFER:
           pass  # a BUFFER is already realized, nothing to do here
@@ -84,7 +84,7 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
         if rk.op is Ops.END: schedule.append(rk)
       else:
         raise RuntimeError(f"can't schedule {k.op}")
-      for x in children[rk]:
+      for x in children.get(rk, []):
         in_degree[x] -= 1
         if in_degree[x] == 0: queue.append(x)
 
@@ -113,6 +113,7 @@ from tinygrad.engine.memory import memory_planner
 from tinygrad.schedule.rangeify import get_rangeify_map
 from tinygrad.schedule.multi import get_multi_map
 
+@disable_gc()
 def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], list[ScheduleItem], dict[str, int]]:
   # big_sink srcs are all the Tensors
   st = time.perf_counter()

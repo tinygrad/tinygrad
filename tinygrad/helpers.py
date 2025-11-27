@@ -296,7 +296,8 @@ if getenv("DEBUG_GC"):
   def my_gc_callback(phase, info):
     global gc_start
     if phase == 'start': gc_start = perf_counter_us()
-    elif phase == "stop": cpu_events.append(ProfileRangeEvent("GC", f"collected: {info['collected']}", gc_start, perf_counter_us()))
+    elif phase == "stop":
+      cpu_events.append(ProfileRangeEvent("GC", f"collected: {info['collected']} (gen {info['generation']})", gc_start, perf_counter_us()))
   if PROFILE: gc.callbacks.append(my_gc_callback)
 
 # *** universal database cache ***
