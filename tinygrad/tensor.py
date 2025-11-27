@@ -7,7 +7,7 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, leas
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten
 from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, polyN, DEBUG, is_numpy_ndarray, SPEC, TracingKey, cpu_profile
-from tinygrad.helpers import suppress_finalizing, HEVCFrameCtx
+from tinygrad.helpers import suppress_finalizing
 from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
 from tinygrad.mixin.movement import _align_left
@@ -526,17 +526,6 @@ class Tensor(OpMixin):
     assert isinstance(r.device, str)
     cast(Buffer, r.uop.buffer).allocate(external_ptr=ptr)
     return r
-
-  @staticmethod
-  def from_hevc(chunk_data:Tensor, ref_frames:list[Tensor], shape:tuple[int, ...], ctx:HEVCFrameCtx) -> Tensor:
-    """
-    Creates a Tensor by decoding an HEVC frame chunk.
-
-    You must provide the output shape of the decoded data (`shape`), the HEVC context (`ctx`), and, if required by the chunk,
-    the reference frames (`ref_frames`).
-    """
-    assert isinstance(ctx, HEVCFrameCtx), "HEVC context is required"
-    return chunk_data.contiguous()._apply_uop(UOp.encdec, *[x.contiguous() for x in ref_frames], arg=((prod(shape), ), ctx)).reshape(shape)
 
   @staticmethod
   def from_url(url:str, gunzip:bool=False, **kwargs) -> Tensor:
@@ -4174,6 +4163,15 @@ class Tensor(OpMixin):
     # NCHW output
     ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
+
+  def decode_hevc_frame(self, frame_pos:int, shape:tuple[int, ...], state:Tensor, ref_frames:list[Tensor]|None=None) -> Tensor:
+    """
+    Creates a Tensor by decoding an HEVC frame chunk.
+
+    You must provide the output shape of the decoded data (`shape`), the HEVC context (`ctx`), and, if required by the chunk,
+    the reference frames (`ref_frames`).
+    """
+    return self.contiguous()._apply_uop(UOp.encdec, state, *[x.contiguous() for x in ref_frames or []], arg=((prod(shape), ), frame_pos))
 
 P = ParamSpec("P")
 T = TypeVar("T")

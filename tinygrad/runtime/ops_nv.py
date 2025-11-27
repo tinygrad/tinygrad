@@ -7,7 +7,7 @@ from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, H
 from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, MOCKGPU, hcq_filter_visible_devices
 from tinygrad.uop.ops import sint
 from tinygrad.device import BufferSpec, CompilerPairT
-from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, to_mv, hi32, lo32, suppress_finalizing, HEVCFrameCtx, ceildiv
+from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, to_mv, hi32, lo32, suppress_finalizing, ceildiv
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.support.compiler_cuda import CUDACompiler, PTXCompiler, NVPTXCompiler, NVCompiler
@@ -307,40 +307,16 @@ class NVAllocator(HCQAllocator['NVDevice']):
 
   def _map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
 
-  def _encode_decode(self, bufout:HCQBuffer, bufin:HCQBuffer, hist:list[HCQBuffer], insize:int, ctx:HEVCFrameCtx):
+  def _encode_decode(self, bufout:HCQBuffer, bufin:HCQBuffer, desc_buf:HCQBuffer, hist:list[HCQBuffer], insize:int, cur_pic):
     assert all(h.va_addr % 0x100 == 0 for h in hist + [bufin, bufout]), "all buffers must be 0x100 aligned"
 
-    sps, pps, frame = ctx.sps, ctx.pps, ctx.frame
-    self.dev._ensure_has_vid_hw(sps.pic_width_in_luma_samples, sps.pic_height_in_luma_samples)
-
-    x = nv_gpu.nvdec_hevc_pic_s(gptimer_timeout_value=81600000, tileformat=1, sw_start_code_e=1, pattern_id=2, stream_len=insize,
-      # Frame
-      IDR_picture_flag=frame.idr, RAP_picture_flag=frame.rap, curr_pic_idx=frame.pic_idx, num_ref_frames=len(hist),
-      sw_hdr_skip_length=frame.sw_hdr_skip, num_bits_short_term_ref_pics_in_slice=max(frame.sw_hdr_skip - 9, 0),
-      colMvBuffersize=self.dev.col_mv_buffersize, HevcSaoBufferOffset=self.dev.sao_off>>8, HevcBsdCtrlOffset=self.dev.bsd_ctrl_off>>8,
-      framestride=(ctypes.c_uint32 * 2)(round_up(sps.pic_width_in_luma_samples, 64), round_up(sps.pic_width_in_luma_samples, 64)),
-      RefDiffPicOrderCnts=(ctypes.c_int16 * 16)(*frame.diff_poc), initreflistidxl0=(ctypes.c_ubyte*16)(*frame.ref_idx_l0),
-      initreflistidxl1=(ctypes.c_uint8 * 16)(*frame.ref_idx_l1),
-      # SPS
-      **{x:getattr(sps, x) for x in ['chroma_format_idc', 'log2_max_pic_order_cnt_lsb_minus4', 'bit_depth_luma', 'bit_depth_chroma',
-        'pic_width_in_luma_samples', 'pic_height_in_luma_samples', 'log2_min_luma_coding_block_size', 'log2_max_luma_coding_block_size',
-        'log2_min_transform_block_size', 'log2_max_transform_block_size', 'amp_enabled_flag', 'sample_adaptive_offset_enabled_flag',
-        'pcm_enabled_flag', 'sps_temporal_mvp_enabled_flag', 'strong_intra_smoothing_enabled_flag']},
-      # PPS
-      **{x:getattr(pps, x) for x in ['sign_data_hiding_enabled_flag', 'num_ref_idx_l0_default_active', 'num_ref_idx_l1_default_active', 'init_qp',
-        'cabac_init_present_flag', 'cu_qp_delta_enabled_flag', 'diff_cu_qp_delta_depth', 'pps_cb_qp_offset', 'pps_cr_qp_offset',
-        'weighted_pred_flag', 'pps_slice_chroma_qp_offsets_present_flag', 'weighted_bipred_flag', 'transquant_bypass_enabled_flag',
-        'tiles_enabled_flag', 'entropy_coding_sync_enabled_flag', 'scaling_list_data_present_flag', 'loop_filter_across_slices_enabled_flag',
-        'deblocking_filter_control_present_flag', 'lists_modification_present_flag', 'log2_parallel_merge_level']})
-
-    desc_buf = self.dev.kernargs_buf.offset(offset=self.dev.kernargs_offset_allocator.alloc(0x300, 0x100), size=0x300)
-    desc_buf.cpu_view()[:ctypes.sizeof(x)] = bytes(x)
-    desc_buf.cpu_view()[0x200:0x202] = ceildiv(sps.pic_width_in_luma_samples, (1 << sps.log2_max_luma_coding_block_size)).to_bytes(2, "little")
-    desc_buf.cpu_view()[0x202:0x204] = ceildiv(sps.pic_height_in_luma_samples, (1 << sps.log2_max_luma_coding_block_size)).to_bytes(2, "little")
-
+    # sps, pps, frame = ctx.sps, ctx.pps, ctx.frame
+    self.dev._ensure_has_vid_hw(1920, 1080)
+  
+    chroma_off = 0x10a000
     NVVideoQueue().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
-                  .decode_hevc_chunk(ctx.idx, desc_buf, bufin, bufout, x.curr_pic_idx, hist, list(ctx.hist_order), ctx.chroma_off,
-                                     self.dev.vid_coloc_buf, self.dev.vid_filter_buf, self.dev.intra_top_off, self.dev.vid_status_buf) \
+                  .decode_hevc_chunk(0, desc_buf, bufin, bufout, cur_pic, hist, [(cur_pic-x) % (len(hist)+1) for x in range(len(hist)-1, 0, -1)],
+                                     chroma_off, self.dev.vid_coloc_buf, self.dev.vid_filter_buf, self.dev.intra_top_off, self.dev.vid_status_buf) \
                   .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
 
 @dataclass
@@ -695,7 +671,7 @@ class NVDevice(HCQCompiled[HCQSignal]):
     coloc_size = round_up((round_up(w, 64) * round_up(h, 64)) + (round_up(w, 64) * round_up(h, 64) // 16), 2 << 20)
 
     if not hasattr(self, 'vid_gpfifo'):
-      self.vid_gpfifo = self._new_gpu_fifo(self.gpfifo_area, 0, self.nvdevice, offset=0x200000, entries=1024, compute=False, video=True)
+      self.vid_gpfifo = self._new_gpu_fifo(self.gpfifo_area, 0, self.nvdevice, offset=0x200000, entries=2048, compute=False, video=True)
       self.vid_coloc_buf, self.vid_filter_buf = self.allocator.alloc(coloc_size), self.allocator.alloc(filter_size)
       self.vid_status_buf = self.allocator.alloc(0x1000)
       NVVideoQueue().wait(self.timeline_signal, self.timeline_value - 1) \

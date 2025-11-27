@@ -149,7 +149,7 @@ class EncDec(Runner):
     super().__init__(colored(name, "yellow"), device, Estimates(lds=total_sz, mem=total_sz))
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int], wait=False):
     st = time.perf_counter()
-    rawbufs[0].allocator._encode_decode(rawbufs[0]._buf, rawbufs[1]._buf, [x._buf for x in rawbufs[2:]], rawbufs[1].nbytes, self.ctx)
+    rawbufs[0].allocator._encode_decode(rawbufs[0]._buf, rawbufs[1]._buf, rawbufs[2]._buf, [x._buf for x in rawbufs[3:]], rawbufs[1].nbytes, self.ctx)
     if wait:
       Device[rawbufs[0].device].synchronize()
       return time.perf_counter() - st

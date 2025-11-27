@@ -1,9 +1,8 @@
-import dataclasses, enum, argparse, os, itertools, functools
+import dataclasses, enum, argparse, os, itertools, time, ctypes
 from typing import Any
-from tinygrad import Tensor, dtypes, Device
-from tinygrad.helpers import DEBUG, HEVCFrameCtx, HEVCFrameCtx, HEVCRawSPS, HEVCRawPPS, HEVCRawSlice, round_up
-from tinygrad.nn.state import TensorIO
-from tinygrad.runtime.autogen import avcodec
+from tinygrad import Tensor, dtypes, Device, TinyJit
+from tinygrad.helpers import DEBUG, round_up, ceildiv, Timing, prod
+from tinygrad.runtime.autogen import avcodec, nv_570 as nv_gpu
 
 class BitReader:
   def __init__(self, data:bytes): self.reader, self.current_bits, self.bits, self.read_bits, self.total = iter(data), 0, 0, 0, len(data) * 8
@@ -60,10 +59,16 @@ class HevcSlice:
     self.general_level_idc = r.u(8)
 
   # 7.3.7 Short-term reference picture set syntax
-  def st_ref_pic_set(self, r:BitReader, stRpsIdx:int):
+  def st_ref_pic_set(self, r:BitReader, stRpsIdx:int, num_short_term_ref_pic_sets:int=0):
     inter_ref_pic_set_prediction_flag = r.u(1) if stRpsIdx != 0 else 0
 
-    if inter_ref_pic_set_prediction_flag: assert False, "inter_ref_pic_set_prediction_flag parsing not implemented"
+    if inter_ref_pic_set_prediction_flag:
+      if stRpsIdx == num_short_term_ref_pic_sets:
+        delta_idx_minus1 = r.ue_v()
+      delta_rps_sign = r.u(1)
+      abs_delta_rps_minus1 = r.ue_v()
+      # for( j = 0; j <= NumDeltaPocs[ RefRpsIdx ]; j++ ) {
+
     else:
       num_negative_pics = r.ue_v()
       num_positive_pics = r.ue_v()
@@ -120,21 +125,11 @@ class SPS(HevcSlice):
     assert self.pcm_enabled_flag == 0, "pcm not implemented"
     self.num_short_term_ref_pic_sets = r.ue_v()
     for i in range(self.num_short_term_ref_pic_sets):
-      self.st_ref_pic_set(r, i)
+      self.st_ref_pic_set(r, i, self.num_short_term_ref_pic_sets)
     self.long_term_ref_pics_present_flag = r.u(1)
     if self.long_term_ref_pics_present_flag: assert False, "long_term_ref_pics parsing not implemented"
     self.sps_temporal_mvp_enabled_flag = r.u(1)
     self.strong_intra_smoothing_enabled_flag = r.u(1)
-
-  @functools.cached_property
-  def context(self) -> HEVCRawSPS:
-    return HEVCRawSPS(chroma_format_idc=self.chroma_format_idc, pic_width_in_luma_samples=self.pic_width_in_luma_samples,
-      pic_height_in_luma_samples=self.pic_height_in_luma_samples, bit_depth_luma=self.bit_depth_luma, bit_depth_chroma=self.bit_depth_chroma,
-      log2_max_pic_order_cnt_lsb_minus4=self.log2_max_pic_order_cnt_lsb_minus4, log2_min_luma_coding_block_size=self.log2_min_luma_coding_block_size,
-      log2_max_luma_coding_block_size=self.log2_max_luma_coding_block_size, log2_min_transform_block_size=self.log2_min_transform_block_size,
-      log2_max_transform_block_size=self.log2_max_transform_block_size, amp_enabled_flag=self.amp_enabled_flag,pcm_enabled_flag=self.pcm_enabled_flag,
-      sample_adaptive_offset_enabled_flag=self.sample_adaptive_offset_enabled_flag, sps_temporal_mvp_enabled_flag=self.sps_temporal_mvp_enabled_flag,
-      strong_intra_smoothing_enabled_flag=self.strong_intra_smoothing_enabled_flag)
 
 # 7.3.2.3 Picture parameter set RBSP syntax
 class PPS(HevcSlice):
@@ -162,7 +157,15 @@ class PPS(HevcSlice):
     self.transquant_bypass_enabled_flag = r.u(1)
     self.tiles_enabled_flag = r.u(1)
     self.entropy_coding_sync_enabled_flag = r.u(1)
-    if self.tiles_enabled_flag: assert False, "tiles parsing not implemented"
+    if self.tiles_enabled_flag:
+      self.num_tile_columns_minus1 = r.ue_v()
+      self.num_tile_rows_minus1 = r.ue_v()
+      self.uniform_spacing_flag = r.u(1)
+      self.column_width_minus1, self.row_height_minus1 = [], []
+      if not self.uniform_spacing_flag:
+        for i in range(self.num_tile_columns_minus1): self.column_width_minus1.append(r.ue_v())
+        for i in range(self.num_tile_rows_minus1): self.row_height_minus1.append(r.ue_v())
+      self.loop_filter_across_tiles_enabled_flag = r.u(1)
     self.loop_filter_across_slices_enabled_flag = r.u(1)
     self.deblocking_filter_control_present_flag = r.u(1)
     if self.deblocking_filter_control_present_flag: assert False, "deblocking_filter parsing not implemented"
@@ -171,20 +174,6 @@ class PPS(HevcSlice):
     self.lists_modification_present_flag = r.u(1)
     self.log2_parallel_merge_level = r.ue_v() + 2
 
-  @functools.cached_property
-  def context(self) -> HEVCRawPPS:
-    return HEVCRawPPS(sign_data_hiding_enabled_flag=self.sign_data_hiding_enabled_flag, cabac_init_present_flag=self.cabac_init_present_flag,
-      num_ref_idx_l0_default_active=self.num_ref_idx_l0_default_active, num_ref_idx_l1_default_active=self.num_ref_idx_l1_default_active,
-      init_qp=self.init_qp, cu_qp_delta_enabled_flag=self.cu_qp_delta_enabled_flag, diff_cu_qp_delta_depth=getattr(self, 'diff_cu_qp_delta_depth', 0),
-      pps_cb_qp_offset=self.pps_cb_qp_offset, pps_cr_qp_offset=self.pps_cr_qp_offset,
-      pps_slice_chroma_qp_offsets_present_flag=self.pps_slice_chroma_qp_offsets_present_flag, weighted_pred_flag=self.weighted_pred_flag,
-      weighted_bipred_flag=self.weighted_bipred_flag, transquant_bypass_enabled_flag=self.transquant_bypass_enabled_flag,
-      tiles_enabled_flag=self.tiles_enabled_flag, entropy_coding_sync_enabled_flag=self.entropy_coding_sync_enabled_flag,
-      loop_filter_across_slices_enabled_flag=self.loop_filter_across_slices_enabled_flag,
-      deblocking_filter_control_present_flag=self.deblocking_filter_control_present_flag,
-      scaling_list_data_present_flag=self.scaling_list_data_present_flag, lists_modification_present_flag=self.lists_modification_present_flag,
-      log2_parallel_merge_level=self.log2_parallel_merge_level)
-
 # 7.3.6 Slice segment header syntax
 class SliceSegment(HevcSlice):
   def __init__(self, r:BitReader, nal_unit_type:int, sps:SPS, pps:PPS):
@@ -192,7 +181,10 @@ class SliceSegment(HevcSlice):
     if nal_unit_type >= avcodec.HEVC_NAL_BLA_W_LP and nal_unit_type <= avcodec.HEVC_NAL_RSV_IRAP_VCL23:
       self.no_output_of_prior_pics_flag = r.u(1)
     self.slice_pic_parameter_set_id = r.ue_v()
-    if not self.first_slice_segment_in_pic_flag: assert False, "dependent slices not implemented"
+    if not self.first_slice_segment_in_pic_flag:
+      if pps.dependent_slice_segments_enabled_flag:
+        self.dependent_slice_segment_flag = r.u(1)
+      self.slice_segment_address = r.ue_v()
     self.dependent_slice_segment_flag = 0
     if not self.dependent_slice_segment_flag:
       r.u(pps.num_extra_slice_header_bits) # extra bits ignored
@@ -228,99 +220,123 @@ class SliceSegment(HevcSlice):
           num_ref_idx_l0_active_minus1 = r.ue_v()
           num_ref_idx_l1_active_minus1 = r.ue_v() if self.slice_type == avcodec.HEVC_SLICE_B else 0
 
-class HEVCDecoder:
-  def __init__(self, t:Tensor):
-    self.tdata = t
+def fill_sps_into_dev_context(device_ctx, sps:SPS):
+  device_ctx.chroma_format_idc = sps.chroma_format_idc
+  device_ctx.pic_width_in_luma_samples = sps.pic_width_in_luma_samples
+  device_ctx.pic_height_in_luma_samples = sps.pic_height_in_luma_samples
+  device_ctx.bit_depth_luma = sps.bit_depth_luma
+  device_ctx.bit_depth_chroma = sps.bit_depth_chroma
+  device_ctx.log2_max_pic_order_cnt_lsb_minus4 = sps.log2_max_pic_order_cnt_lsb_minus4
+  device_ctx.log2_min_luma_coding_block_size = sps.log2_min_luma_coding_block_size
+  device_ctx.log2_max_luma_coding_block_size = sps.log2_max_luma_coding_block_size
+  device_ctx.log2_min_transform_block_size = sps.log2_min_transform_block_size
+  device_ctx.log2_max_transform_block_size = sps.log2_max_transform_block_size
+  device_ctx.amp_enabled_flag = sps.amp_enabled_flag
+  device_ctx.pcm_enabled_flag = sps.pcm_enabled_flag
+  device_ctx.sample_adaptive_offset_enabled_flag = sps.sample_adaptive_offset_enabled_flag
+  device_ctx.sps_temporal_mvp_enabled_flag = sps.sps_temporal_mvp_enabled_flag
+  device_ctx.strong_intra_smoothing_enabled_flag = sps.strong_intra_smoothing_enabled_flag
 
-    # Hevc State
-    self.dpb:list[tuple[int, int, Tensor]] = [] # (pos, poc, frame)
-    self.next_frame = itertools.count()
+def fill_pps_into_dev_context(device_ctx, pps:PPS):
+  device_ctx.sign_data_hiding_enabled_flag = pps.sign_data_hiding_enabled_flag
+  device_ctx.cabac_init_present_flag = pps.cabac_init_present_flag
+  device_ctx.num_ref_idx_l0_default_active = pps.num_ref_idx_l0_default_active
+  device_ctx.num_ref_idx_l1_default_active = pps.num_ref_idx_l1_default_active
+  device_ctx.init_qp = pps.init_qp
+  device_ctx.cu_qp_delta_enabled_flag = pps.cu_qp_delta_enabled_flag
+  device_ctx.diff_cu_qp_delta_depth = getattr(pps, 'diff_cu_qp_delta_depth', 0)
+  device_ctx.pps_cb_qp_offset = pps.pps_cb_qp_offset
+  device_ctx.pps_cr_qp_offset = pps.pps_cr_qp_offset
+  device_ctx.pps_slice_chroma_qp_offsets_present_flag = pps.pps_slice_chroma_qp_offsets_present_flag
+  device_ctx.weighted_pred_flag = pps.weighted_pred_flag
+  device_ctx.weighted_bipred_flag = pps.weighted_bipred_flag
+  device_ctx.transquant_bypass_enabled_flag = pps.transquant_bypass_enabled_flag
+  device_ctx.tiles_enabled_flag = pps.tiles_enabled_flag
+  device_ctx.entropy_coding_sync_enabled_flag = pps.entropy_coding_sync_enabled_flag
+  device_ctx.loop_filter_across_slices_enabled_flag = pps.loop_filter_across_slices_enabled_flag
+  device_ctx.deblocking_filter_control_present_flag = pps.deblocking_filter_control_present_flag
+  device_ctx.scaling_list_data_present_flag = pps.scaling_list_data_present_flag
+  device_ctx.lists_modification_present_flag = pps.lists_modification_present_flag
+  device_ctx.log2_parallel_merge_level = pps.log2_parallel_merge_level
 
-  def _get_decode_context(self, nal_unit_type:int, r:BitReader) -> tuple[int, HEVCFrameCtx, list[Tensor]]:
-    hdr = SliceSegment(r, nal_unit_type, self.sps, self.pps)
+def parse_hevc_file_headers(dat:bytes):
+  res = []
+  nal_unit_start = 1
+  history:list[tuple[int, int, int]] = []
+  device_ctx = nv_gpu.nvdec_hevc_pic_s(gptimer_timeout_value=81600000, tileformat=1, sw_start_code_e=1, pattern_id=2)
 
-    # Calculate history frames
-    if nal_unit_type in {avcodec.HEVC_NAL_IDR_W_RADL, avcodec.HEVC_NAL_IDR_N_LP}:
-      self.dpb = [] # reset DPB on IDR
+  while nal_unit_start < len(dat):
+    assert dat[nal_unit_start:nal_unit_start+3] == b"\x00\x00\x01", "NAL unit start code not found"
 
-    diff_poc = [0] * 16
-    before_list, after_list = [], []
-    for pic_idx, poc, _ in self.dpb:
-      diff_poc[pic_idx] = hdr.slice_pic_order_cnt_lsb - poc
+    pos = dat.find(b"\x00\x00\x01", nal_unit_start + 3)
+    nal_unit_len = (pos if pos != -1 else len(dat)) - nal_unit_start
 
-      if hdr.slice_pic_order_cnt_lsb < poc: after_list.append((poc - hdr.slice_pic_order_cnt_lsb, pic_idx))
-      else: before_list.append((hdr.slice_pic_order_cnt_lsb - poc, pic_idx))
+    # 7.3.1.1 General NAL unit syntax
+    nal_unit_type = (dat[nal_unit_start+3] >> 1) & 0x3F
+    slice_dat = dat[nal_unit_start+5:nal_unit_start+nal_unit_len]
 
-    before_list.sort()
-    after_list.sort()
+    if nal_unit_type == avcodec.HEVC_NAL_SPS:
+      sps = SPS(BitReader(_hevc_get_rbsp(slice_dat)))
+      fill_sps_into_dev_context(device_ctx, sps)
+    elif nal_unit_type == avcodec.HEVC_NAL_PPS:
+      pps = PPS(BitReader(_hevc_get_rbsp(slice_dat)))
+      fill_pps_into_dev_context(device_ctx, pps)
+    elif nal_unit_type in {avcodec.HEVC_NAL_IDR_N_LP, avcodec.HEVC_NAL_IDR_W_RADL, avcodec.HEVC_NAL_TRAIL_R, avcodec.HEVC_NAL_TRAIL_N}:
+      hdr = SliceSegment(BitReader(slice_dat), nal_unit_type, sps, pps)
 
-    ref_idx_l0 = [pic_idx for _, pic_idx in before_list + after_list]
-    ref_idx_l1 = [pic_idx for _, pic_idx in after_list + before_list] if hdr.slice_type == avcodec.HEVC_SLICE_B else [0]*len(ref_idx_l0)
+      device_ctx.curr_pic_idx = next(i for i in range(16) if all(d[0] != i for d in history))
 
-    # Save to read in _add_frame_to_history()
-    self.last_pic_index = next(i for i in range(16) if all(d[0] != i for d in self.dpb))
-    self.last_slice_pic_order_cnt_lsb = hdr.slice_pic_order_cnt_lsb
+      if nal_unit_type in {avcodec.HEVC_NAL_IDR_W_RADL, avcodec.HEVC_NAL_IDR_N_LP}:
+        history = []
 
-    # Collect history informations. Need to preserve historical order of frames for hw.
-    hist = [x[2] for x in self.dpb]
-    hist_order = tuple([x[0] for x in self.dpb])
+      device_ctx.num_ref_frames = len(history)
+      device_ctx.IDR_picture_flag = int(nal_unit_type in {avcodec.HEVC_NAL_IDR_W_RADL, avcodec.HEVC_NAL_IDR_N_LP})
+      device_ctx.RAP_picture_flag = int(nal_unit_type >= avcodec.HEVC_NAL_BLA_W_LP and nal_unit_type <= avcodec.HEVC_NAL_RSV_IRAP_VCL23)
+      device_ctx.RefDiffPicOrderCnts=(ctypes.c_int16 * 16)()
+      device_ctx.colMvBuffersize = (round_up(sps.pic_width_in_luma_samples, 64) * round_up(sps.pic_height_in_luma_samples, 64) // 16) // 256
+      device_ctx.framestride=(ctypes.c_uint32 * 2)(round_up(sps.pic_width_in_luma_samples, 64), round_up(sps.pic_width_in_luma_samples, 64))
+      device_ctx.sw_hdr_skip_length = hdr.sw_skip_end - hdr.sw_skip_start
+      device_ctx.num_bits_short_term_ref_pics_in_slice = max(0, device_ctx.sw_hdr_skip_length - 9)
+      device_ctx.stream_len = nal_unit_len
 
-    assert len(hist) == len(ref_idx_l0) and (len(hist) == len(ref_idx_l1) or hdr.slice_type != avcodec.HEVC_SLICE_B), "History length mismatch"
+      before_list, after_list = [], []
+      for pic_idx, poc, _ in history:
+        device_ctx.RefDiffPicOrderCnts[pic_idx] = hdr.slice_pic_order_cnt_lsb - poc
+        if hdr.slice_pic_order_cnt_lsb < poc: after_list.append((poc - hdr.slice_pic_order_cnt_lsb, pic_idx))
+        else: before_list.append((hdr.slice_pic_order_cnt_lsb - poc, pic_idx))
+      before_list.sort()
+      after_list.sort()
 
-    frame_info = HEVCRawSlice(idr=nal_unit_type in {avcodec.HEVC_NAL_IDR_W_RADL, avcodec.HEVC_NAL_IDR_N_LP},
-                              rap=nal_unit_type >= avcodec.HEVC_NAL_BLA_W_LP and nal_unit_type <= avcodec.HEVC_NAL_RSV_IRAP_VCL23,
-                              pic_idx=self.last_pic_index, sw_hdr_skip=hdr.sw_skip_end - hdr.sw_skip_start,
-                              diff_poc=tuple(diff_poc), ref_idx_l0=tuple(ref_idx_l0), ref_idx_l1=tuple(ref_idx_l1))
+      device_ctx.initreflistidxl0 = (ctypes.c_uint8 * 16)(*[idx for _,idx in before_list + after_list])
+      if hdr.slice_type == avcodec.HEVC_SLICE_B: device_ctx.initreflistidxl1 = (ctypes.c_uint8 * 16)(*[idx for _,idx in after_list + before_list])
 
-    luma_size = round_up(self.sps.pic_width_in_luma_samples, 64) * round_up(self.sps.pic_height_in_luma_samples, 64)
-    chroma_size = round_up(self.sps.pic_width_in_luma_samples, 64) * round_up(self.sps.pic_height_in_luma_samples // 2, 64)
+      ctx_bytes = bytes(device_ctx)
+      ctx_bytes += bytes(0x200 - len(ctx_bytes)) # pad to 512 bytes
 
-    hevc_context = HEVCFrameCtx(sps=self.sps.context, pps=self.pps.context, frame=frame_info,
-                                idx=next(self.next_frame), chroma_off=luma_size, hist_order=hist_order)
+      # append tile sizes 0x200
+      ctx_bytes += ceildiv(sps.pic_width_in_luma_samples, (1 << sps.log2_max_luma_coding_block_size)).to_bytes(2, "little")
+      ctx_bytes += ceildiv(sps.pic_height_in_luma_samples, (1 << sps.log2_max_luma_coding_block_size)).to_bytes(2, "little")
 
-    return luma_size + chroma_size, hevc_context, hist
+      ctx = Tensor(ctx_bytes, dtype=dtypes.uint8)
+      luma_size = round_up(sps.pic_width_in_luma_samples, 64) * round_up(sps.pic_height_in_luma_samples, 64)
+      chroma_size = round_up(sps.pic_width_in_luma_samples, 64) * round_up((sps.pic_height_in_luma_samples + 1) // 2, 64)
+      is_hist = nal_unit_type in {avcodec.HEVC_NAL_TRAIL_R, avcodec.HEVC_NAL_IDR_N_LP, avcodec.HEVC_NAL_IDR_W_RADL}
 
-  def _add_frame_to_history(self, nal_unit_type, img):
-    if nal_unit_type in {avcodec.HEVC_NAL_TRAIL_R, avcodec.HEVC_NAL_IDR_N_LP, avcodec.HEVC_NAL_IDR_W_RADL}:
-      self.dpb.append((self.last_pic_index, self.last_slice_pic_order_cnt_lsb, img))
+      res.append((nal_unit_start, nal_unit_len, (sps.pic_height_in_luma_samples, sps.pic_width_in_luma_samples), ctx, device_ctx.curr_pic_idx, len(history), is_hist))
 
-    if len(self.dpb) >= self.sps.sps_max_dec_pic_buffering[0]:
-      # remove the oldest poc
-      self.dpb.pop(0)
+      if nal_unit_type in {avcodec.HEVC_NAL_TRAIL_R, avcodec.HEVC_NAL_IDR_N_LP, avcodec.HEVC_NAL_IDR_W_RADL}:
+        history.append((device_ctx.curr_pic_idx, hdr.slice_pic_order_cnt_lsb, None))
 
-  def frames(self) -> Tensor:
-    nal_unit_start = 1
-    dat = bytes(self.tdata.data())
+      if len(history) >= sps.sps_max_dec_pic_buffering[0]:
+        # remove the oldest poc
+        history.pop(0)
 
-    while nal_unit_start < len(dat):
-      assert dat[nal_unit_start:nal_unit_start+3] == b"\x00\x00\x01", "NAL unit start code not found"
+    if DEBUG >= 4: print(f"NAL unit type: {nal_unit_type}, length: {nal_unit_len}")
+    nal_unit_start += nal_unit_len
 
-      pos = dat.find(b"\x00\x00\x01", nal_unit_start + 3)
-      nal_unit_len = (pos if pos != -1 else len(dat)) - nal_unit_start
-
-      # 7.3.1.1 General NAL unit syntax
-      nal_unit_type = (dat[nal_unit_start+3] >> 1) & 0x3F
-      slice_dat = dat[nal_unit_start+5:nal_unit_start+nal_unit_len]
-
-      if nal_unit_type == avcodec.HEVC_NAL_SPS:
-        self.sps = SPS(BitReader(_hevc_get_rbsp(slice_dat)))
-        self.display_width = self.sps.pic_width_in_luma_samples - 2 * (self.sps.conf_win_left_offset + self.sps.conf_win_right_offset)
-        self.display_height = self.sps.pic_height_in_luma_samples - 2 * (self.sps.conf_win_top_offset  + self.sps.conf_win_bottom_offset)
-      elif nal_unit_type == avcodec.HEVC_NAL_PPS: self.pps = PPS(BitReader(_hevc_get_rbsp(slice_dat)))
-      elif nal_unit_type in {avcodec.HEVC_NAL_IDR_N_LP, avcodec.HEVC_NAL_IDR_W_RADL, avcodec.HEVC_NAL_TRAIL_R, avcodec.HEVC_NAL_TRAIL_N}:
-        raw_size, encdec_ctx, ref_frames = self._get_decode_context(nal_unit_type, BitReader(slice_dat))
-
-        # Move NAL to device for decoding.
-        nal_slice = self.tdata[nal_unit_start:nal_unit_start+nal_unit_len].to(Device.DEFAULT)
-        result_img = Tensor.from_hevc(nal_slice, ref_frames, shape=(raw_size,), ctx=encdec_ctx)
-
-        # Update history
-        self._add_frame_to_history(nal_unit_type, result_img)
-
-        yield self.display_width, self.display_height, encdec_ctx.chroma_off, result_img
-
-      if DEBUG >= 4: print(f"NAL unit type: {nal_unit_type}, length: {nal_unit_len}")
-      nal_unit_start += nal_unit_len
+  w = sps.pic_width_in_luma_samples - 2 * (sps.conf_win_left_offset + sps.conf_win_right_offset)
+  h = sps.pic_height_in_luma_samples - 2 * (sps.conf_win_top_offset  + sps.conf_win_bottom_offset)
+  return w, h, res
 
 def _addr_table(h, w, w_aligned):
   GOB_W, GOB_H = 64, 8
@@ -342,6 +358,30 @@ def _addr_table(h, w, w_aligned):
   swiz = (lx & 0x0F) | ((ly & 0x03) << 4) | ((lx & 0x10) << 2) | ((ly & 0x04) << 5) | ((lx & 0x20) << 3)
   return (base + swiz).reshape(-1)
 
+def nv12_to_bgr_from_planes(luma: Tensor, chroma: Tensor, h: int, w: int) -> Tensor:
+  Y = luma.reshape(h, w).cast(dtypes.float32)
+
+  uv = chroma.reshape(h // 2, w // 2, 2).cast(dtypes.float32)
+  U_small = uv[..., 0]
+  V_small = uv[..., 1]
+
+  U = U_small.reshape(h // 2, 1, w // 2, 1).expand(h // 2, 2, w // 2, 2).reshape(h, w)
+  V = V_small.reshape(h // 2, 1, w // 2, 1).expand(h // 2, 2, w // 2, 2).reshape(h, w)
+
+  C = Y - 16.0
+  D = U - 128.0
+  E = V - 128.0
+
+  R = 1.1643835616438356 * C + 1.5960267857142858 * E
+  G = 1.1643835616438356 * C - 0.39176229009491365 * D - 0.8129676472377708 * E
+  B = 1.1643835616438356 * C + 2.017232142857143  * D
+
+  R = R.maximum(0.0).minimum(255.0)
+  G = G.maximum(0.0).minimum(255.0)
+  B = B.maximum(0.0).minimum(255.0)
+
+  return Tensor.stack([B, G, R], dim=2).cast(dtypes.uint8)
+
 if __name__ == "__main__":
   import cv2
 
@@ -357,9 +397,81 @@ if __name__ == "__main__":
     hevc_tensor = Tensor.from_url(url, device="CPU")
   else:
     hevc_tensor = Tensor.empty(os.stat(args.input_file).st_size, dtype=dtypes.uint8, device=f"disk:{args.input_file}").to("CPU")
-  for i, (w, h, ch_off, src) in enumerate(HEVCDecoder(hevc_tensor).frames()):
-    w_aligned = round_up(w, 64)
 
-    luma = src[_addr_table(h, w, w_aligned)]
-    chroma = src[ch_off:][_addr_table(h // 2, w, w_aligned)]
-    cv2.imwrite(f"{args.output_dir}/nv_frame_{i}.png", cv2.cvtColor(luma.cat(chroma).reshape((h + (h + 1) // 2, w)).numpy(), cv2.COLOR_YUV2BGR_NV12))
+  with Timing("prep infos: "):
+    dat = bytes(hevc_tensor.data())
+    dat_nv = hevc_tensor.to("NV")
+    w, h, frame_info = parse_hevc_file_headers(dat)
+
+  all_slices = []
+  all_datas = []
+  all_bufs_out = []
+  all_pics = []
+  with Timing("prep slices to gpu: "):
+    for i, (offset, sz, shape, opaque, frame_pos, history_sz, _) in enumerate(frame_info):
+      all_slices.append(dat_nv[offset:offset+sz].contiguous().realize())
+      all_datas.append(opaque.contiguous().realize())
+      
+      chroma_off = round_up(shape[0], 64) * round_up(shape[1], 64)
+      shape = (round_up(shape[0] + (shape[0] + 1) // 2, 64), round_up(shape[1], 64))
+      bufout = Tensor.empty(shape, dtype=dtypes.uint8).realize()
+      bufout.uop.buffer.allocate()
+      all_bufs_out.append(bufout)
+
+      pic = Tensor.empty(h, w, 3, dtype=dtypes.uint8).realize()
+      pic.uop.buffer.allocate()
+      all_pics.append(pic)
+    Device.default.synchronize()
+
+  @TinyJit
+  def untile_nv12(src:Tensor, out:Tensor):
+    luma = src.reshape(-1)[_addr_table(h, w, round_up(w, 64))]
+    chroma = src.reshape(-1)[chroma_off:][_addr_table((h + 1) // 2, w, round_up(w, 64))]
+    x = nv12_to_bgr_from_planes(luma, chroma, h, w)
+    out.assign(x).realize()
+    return x.realize()
+  
+  # warm up
+  for i in range(3): x = untile_nv12(all_bufs_out[0], all_pics[0])
+
+  from tinygrad.runtime.ops_nv import NVVideoQueue
+  # from extra.nv_gpu_driver.nv_ioctl import dump_struct_ext
+  dev = Device.default
+  dev._ensure_has_vid_hw(w, h)
+
+  # from hexdump import hexdump
+
+  history = []
+  prev_timeline_wait = dev.timeline_value - 1
+  with Timing("decoding whole file (no tg): "):
+    for i, (offset, sz, shape, opaque, frame_pos, history_sz, is_hist) in enumerate(frame_info):
+      history = history[-history_sz:] if history_sz > 0 else []
+
+      bufin_hcq = all_slices[i].uop.buffer._buf
+      desc_buf_hcq = all_datas[i].uop.buffer._buf
+      bufout_hcq = all_bufs_out[i].uop.buffer._buf
+
+      # dump_struct_ext(nv_gpu.nvdec_hevc_pic_s.from_buffer(opaque.data()))
+      # assert frame_pos not in [(frame_pos-x) % (len(history)+1) for x in range(len(history), 0, -1)]
+      # print(frame_pos, [(frame_pos-x) % (len(history)+1) for x in range(len(history), 0, -1)], [(frame_pos-x) % 5 for x in range(len(history), 0, -1)])
+
+      NVVideoQueue().wait(dev.timeline_signal, prev_timeline_wait) \
+                    .decode_hevc_chunk(i, desc_buf_hcq, bufin_hcq, bufout_hcq, frame_pos, history,
+                                       [(frame_pos-x) % (len(history) + 1) for x in range(len(history), 0, -1)],
+                                       chroma_off, dev.vid_coloc_buf, dev.vid_filter_buf, dev.intra_top_off, dev.vid_status_buf) \
+                    .signal(dev.timeline_signal, prev_timeline_wait:=dev.next_timeline()).submit(dev)
+
+      untile_nv12(all_bufs_out[i], all_pics[i])
+      if is_hist: history.append(bufout_hcq)
+    Device.default.synchronize()
+
+  import cv2
+  for i, src in enumerate(all_pics):
+    if i > 230:
+      cv2.imwrite(f"{args.output_dir}/nv_frame_{i}.png", all_pics[i].numpy())
+  # for i, src in enumerate(all_bufs_out):
+  #   w_aligned = round_up(w, 64)
+  #   luma = src.reshape(-1)[_addr_table(h, w, w_aligned)]
+  #   chroma = src.reshape(-1)[chroma_off:][_addr_table((h + 1) // 2, w, w_aligned)]
+  #   cv2.imwrite(f"{args.output_dir}/nv_frame_{i}.png", cv2.cvtColor(luma.cat(chroma).reshape((h + (h + 1) // 2, w)).numpy(), cv2.COLOR_YUV2BGR_NV12))
+  #   cv2.imwrite(f"{args.output_dir}/c_nv_frame_{i}.png", cv2.cvtColor(chroma.reshape(((h + 1) // 2, w)).numpy(), cv2.COLOR_YUV2BGR_NV12))
