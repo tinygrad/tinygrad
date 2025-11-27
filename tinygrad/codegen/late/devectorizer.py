@@ -59,18 +59,16 @@ load_store_indexing = PatternMatcher([
 def expand_index(buf:UOp, vec:UOp):
   if getenv("UNSAFE_DISABLE_MASK", 0): vec = vec.get_idx()
   # generate the individual indexes
-  return UOp.sink(*[buf.index(vec.gep(i), ptr=True) for i in range(vec.dtype.count)])
+  return UOp(Ops.VECTORIZE, buf.dtype, tuple(buf.index(vec.gep(i), ptr=True) for i in range(vec.dtype.count)))
 
 def fold_expanded_index(midx:UOp):
-  vec_count = len(midx.src)
-  if midx.op is not Ops.SINK or vec_count== 0 or not all(s.op is Ops.INDEX for s in midx.src): return None
   buf = midx.src[0].src[0]
   if not all(s.src[0] is buf for s in midx.src): return None
   if not all(isinstance(s.dtype, PtrDType) for s in midx.src): return None
 
   # extract all the relevant offsets
   offsets_rootsrc: defaultdict[Any, dict[int, list[int]]] = defaultdict(dict)
-  for i in range(vec_count):
+  for i in range(len(midx.src)):
     idx: Any = midx.src[i].src[1].get_idx()
     if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
     elif idx.op is Ops.ADD and idx.src[0].op is Ops.CONST: root_src, arg = idx.src[1], idx.src[0].arg
@@ -82,7 +80,7 @@ def fold_expanded_index(midx:UOp):
 
   # then rewrite everything we can into groups
   ret = []
-  idxs: list[int|None] = [None]*vec_count
+  idxs: list[int|None] = [None]*len(midx.src)
   global_offset = 0
   for offsets in offsets_rootsrc.values():
     grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]
@@ -120,7 +118,7 @@ def gep_on_store(gep:UOp, st:UOp, sto:UOp):
 
 load_store_folding = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat(GroupOp.Defines).or_after(name="buf")), UPat.var("vec"))), expand_index),
-  (UPat(Ops.SINK, name="midx"), fold_expanded_index),
+  (UPat(Ops.VECTORIZE, src=UPat(Ops.INDEX), name="midx"), fold_expanded_index),
   # GEP after LOAD
   (UPat(Ops.LOAD, src=(UPat(Ops.GEP, name="gep"),), name="ld", allow_any_len=True),
    lambda gep, ld: ld.replace(dtype=ld.dtype.scalar().vec(gep.dtype.count), src=(gep.src[0],)+ld.src[1:]).gep(gep.arg)),
