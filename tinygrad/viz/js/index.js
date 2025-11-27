@@ -207,16 +207,20 @@ function getMetadata(key) {
   if (eventType === EventTypes.EXEC) {
     const [n, _, ...rest] = e.arg.tooltipText.split("\n");
     html.append(() => tabulate([["Name", d3.create("p").html(n).node()], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]]).node());
-    const group = html.append("div").classed("args", true);
+    let group = html.append("div").classed("args", true);
     for (const r of rest) group.append("p").text(r);
+    group = html.append("div").classed("args", true);
+    for (const b of e.arg.bufs.sort((a, b) => a.num - b.num)) {
+      group.append("p").text(`@data${b.num} ${formatUnit(b.nbytes, 'B')}`).style("cursor", "pointer").on("click", () => {
+        const row = document.getElementById(b.k); if (!isExpanded(row)) { row.click(); }
+        focusShape(b.key);
+      });
+    }
     if (e.arg.ctx != null) {
       const i = e.arg.ctx; s = e.arg.step;
       html.append("a").text(ctxs[i+1].steps[s].name).on("click", () => switchCtx(i, s));
       const prgSrc = ctxs[i+1].steps.findIndex(s => s.name === "View Program");
       if (prgSrc !== -1) html.append("a").text("View program").on("click", () => switchCtx(i, prgSrc));
-    }
-    for (const b of e.arg.bufs) {
-      console.log(b);
     }
   }
   if (eventType === EventTypes.BUF) {
@@ -375,7 +379,7 @@ async function renderProfiler(path, unit, opts) {
         const dur = x.at(-1)-x[0];
         const arg = { tooltipText:`${dtype}\n${sz}\n${formatUnit(nbytes, 'B')}\n${formatTime(dur)}`, users, key:`${k}-${shapes.length}` };
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
-        users?.forEach((u) => selectShape(u.shape).e?.arg.bufs.push({ key:arg.key, nbytes, num:u.num, mode:u.mode }));
+        users?.forEach((u) => selectShape(u.shape).e?.arg.bufs.push({ key:arg.key, nbytes, num:u.num, mode:u.mode, k }));
       }
       // generic polygon merger
       const base0 = yscale(0);
@@ -728,7 +732,7 @@ async function main() {
         if (subrewrites.length > 0) { l.appendChild(d3.create("span").text(` (${subrewrites.length})`).node()); l.parentElement.classList.add("has-children"); }
       }
     }
-    return setState({ currentCtx:0 });
+    return setState({ currentCtx:-1 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
