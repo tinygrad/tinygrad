@@ -357,7 +357,7 @@ async function renderProfiler(path, unit, opts) {
           x += 1; y += nbytes; valueMap.set(ts, y);
         } else {
           const free = buf_shapes.get(key);
-          free.users = Array.from({ length: u32() }, () => ({shape:shapeMap.get(u32()), repr:strings[u32()], num:u8(), mode:u8()}));
+          free.users = Array.from({ length: u32() }, () => ({shape:shapeMap.get(u32()), repr:strings[u32()], num:u32(), mode:u8()}));
           timestamps.push(ts); valueMap.set(ts, y);
           x += 1; y -= free.nbytes;
           free.x.push(x);
