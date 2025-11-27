@@ -7,7 +7,7 @@ from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, leas
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten
 from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, polyN, is_numpy_ndarray, TracingKey, cpu_profile
-from tinygrad.helpers import suppress_finalizing
+from tinygrad.helpers import suppress_finalizing, disable_gc
 from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
 from tinygrad.mixin.movement import _align_left
@@ -241,6 +241,7 @@ class Tensor(OpMixin):
     assert len(var_vals) == 0
     return schedule
 
+  @disable_gc()
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
     if len(to_realize:=[x for x in (self,)+lst if not x.uop.is_contiguous()]):
