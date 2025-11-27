@@ -1,12 +1,13 @@
-from typing import Optional
+from typing import Optional, Sequence
 
 from tinygrad import Tensor
 
 from tinygrad.dtype import DTypeLike, dtypes
+from tinygrad.uop.ops import sint
 import math
 
 
-def stft(x:Tensor, weight:Tensor, n_fft, stride, pad, pad_mode="constant")->Tensor:
+def stft(x:Tensor, weight:Tensor, n_fft:int, stride:int, pad:Sequence[sint]|Sequence[tuple[sint, sint]|None], pad_mode:str="constant")->Tensor:
   cutoff = int(n_fft // 2) + 1
   x_padded = x.pad(pad, mode=pad_mode)
   stft_raw = x_padded.unsqueeze(1).conv2d(weight, stride=stride)
@@ -31,7 +32,7 @@ class STFT:
     self.pad_mode = pad_mode
     self.forward_basis_buffers = make_stft_basis_buffers(n_fft, hann_window(n_fft)).realize()
 
-  def __call__(self, waveforms):
+  def __call__(self, waveforms) -> Tensor:
     return self.forward(waveforms)
 
   def forward(self, x:Tensor) -> Tensor:
@@ -55,14 +56,14 @@ def stft_full(x:Tensor, n_fft:int, stride:int, pad:tuple[int, int], window="hann
   return res
 
 # rewritten from numpy
-def rfftfreq(n, d=1.0, device=None):
+def rfftfreq(n:int, d:float=1.0, device=None) -> Tensor:
   val = 1.0 / (n * d)
   N = n // 2 + 1
   results = Tensor.arange(N, device=device)
   return results * val
 
 # just like in librosa
-def fft_frequencies(sr:float, n_fft:int):
+def fft_frequencies(sr:float, n_fft:int) -> Tensor:
   return rfftfreq(n=n_fft, d=1.0 / sr)
 
 def hz_to_mel(freq:Tensor)->Tensor:
@@ -135,7 +136,7 @@ def mel(
 
   return weights
 
-def sinc_window_kernel(num_taps, fc, window="hamming", dtype=None, device=None):
+def sinc_window_kernel(num_taps:int, fc:float, window:str="hamming", dtype=None, device=None) -> Tensor:
   t = Tensor.arange(-num_taps//2, num_taps//2 + 1, dtype=dtype, device=device)
   x = t * fc * math.pi
   h = Tensor.where(x == 0, 1.0, x.sin() / x)
@@ -148,7 +149,7 @@ def sinc_window_kernel(num_taps, fc, window="hamming", dtype=None, device=None):
   h /= h.sum()
   return h
 
-def resample(x, L, M, num_taps=64):
+def resample(x:Tensor, L:int, M:int, num_taps:int=64) -> Tensor:
   fc = 0.5 / max(L, M)
   h = sinc_window_kernel(num_taps, fc, 'hamming', 'float32', x.device)
 
@@ -158,19 +159,19 @@ def resample(x, L, M, num_taps=64):
   filtered = upsampled.conv2d(h.reshape(1, 1, -1), stride=M, padding=padding).flatten(1)
   return filtered
 
-def next_power_of_2(n):
+def next_power_of_2(n:int) -> int:
   if n <= 0:
     return 1
   return 1 << (n - 1).bit_length()
 
-def resample2(samples, source, target):
+def resample2(samples:Tensor, source:int, target:int) -> Tensor:
   gcd = math.gcd(source, target)
   M = source // gcd
   L = target // gcd
   taps = next_power_of_2(max(M, L))*2 # overkill but works
   return resample(samples, L, M, taps)
 
-def resample_batched(samples, source, target):
+def resample_batched(samples:Tensor, source:int, target:int) -> Tensor:
   count = samples.shape[-1]
   rbs = source*10
   samples = samples.pad(((0, math.ceil(count / rbs) * rbs - count))).reshape(-1, rbs)
