@@ -3,8 +3,8 @@ import functools, operator, itertools
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace, Invalid, PtrDType
-from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, graph_rewrite, GroupOp, identity_element
-from tinygrad.uop.symbolic import uop_given_valid, parse_valid, symbolic, invalid_gate
+from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, identity_element
+from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate
 from tinygrad.helpers import getenv, flatten, AMX, prod
 from tinygrad.renderer import Renderer
 
@@ -59,11 +59,16 @@ load_store_indexing = PatternMatcher([
 def expand_index(buf:UOp, vec:UOp):
   if getenv("UNSAFE_DISABLE_MASK", 0): vec = vec.get_idx()
   # generate the individual indexes
-  midx = graph_rewrite(UOp.sink(*[buf.index(vec.gep(i), ptr=True) for i in range(vec.dtype.count)]),
-                       symbolic+load_store_indexing, name=f"index_buf_{buf.arg}")
+  return UOp(Ops.VECTORIZE, buf.dtype, tuple(buf.index(vec.gep(i), ptr=True) for i in range(vec.dtype.count)))
+
+def fold_expanded_index(midx:UOp):
+  buf = midx.src[0].src[0]
+  if not all(s.src[0] is buf for s in midx.src): return None
+  if not all(isinstance(s.dtype, PtrDType) for s in midx.src): return None
+
   # extract all the relevant offsets
   offsets_rootsrc: defaultdict[Any, dict[int, list[int]]] = defaultdict(dict)
-  for i in range(vec.dtype.count):
+  for i in range(len(midx.src)):
     idx: Any = midx.src[i].src[1].get_idx()
     if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: root_src, arg = idx.src[0], idx.src[1].arg
     elif idx.op is Ops.ADD and idx.src[0].op is Ops.CONST: root_src, arg = idx.src[1], idx.src[0].arg
@@ -75,7 +80,7 @@ def expand_index(buf:UOp, vec:UOp):
 
   # then rewrite everything we can into groups
   ret = []
-  idxs: list[int|None] = [None]*vec.dtype.count
+  idxs: list[int|None] = [None]*len(midx.src)
   global_offset = 0
   for offsets in offsets_rootsrc.values():
     grouped_offsets = [[x for _,x in group] for _,group in itertools.groupby(enumerate(sorted(offsets.keys())), lambda x: x[1]-x[0])]
@@ -113,6 +118,7 @@ def gep_on_store(gep:UOp, st:UOp, sto:UOp):
 
 load_store_folding = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat(GroupOp.Defines).or_after(name="buf")), UPat.var("vec"))), expand_index),
+  (UPat(Ops.VECTORIZE, src=UPat(Ops.INDEX), name="midx"), fold_expanded_index),
   # GEP after LOAD
   (UPat(Ops.LOAD, src=(UPat(Ops.GEP, name="gep"),), name="ld", allow_any_len=True),
    lambda gep, ld: ld.replace(dtype=ld.dtype.scalar().vec(gep.dtype.count), src=(gep.src[0],)+ld.src[1:]).gep(gep.arg)),
