@@ -390,16 +390,16 @@ class TestImageSimplification(unittest.TestCase):
 
     # TODO: can this be simplified further?
     load = get_load_image_uop(shape, alu9, (((alu8+(alu2*8))%64),(alu2//8)))
-    self.check(load, "(idx0<256)", "(((((idx0%8)*32)+(idx0//32))+8)%64)", "((idx0%8)//2)")
+    self.check(load, "(idx0<256)", "(((((idx0%8)*32)+(idx0//32))+8)%64)", "((idx0//2)%4)")
 
     load = get_load_image_uop(shape, alu9, (((alu8+(alu3*8))%64),(alu3//8)))
-    self.check(load, "(idx0<256)", "(((((idx0%8)*32)+(idx0//32))+16)%64)", "((idx0%8)//2)")
+    self.check(load, "(idx0<256)", "(((((idx0%8)*32)+(idx0//32))+16)%64)", "((idx0//2)%4)")
 
     load = get_load_image_uop(shape, alu9, (((alu8+(alu4*8))%64),(alu4//8)))
-    self.check(load, "(idx0<256)", "(((((idx0%8)*32)+(idx0//32))+24)%64)", "((idx0%8)//2)")
+    self.check(load, "(idx0<256)", "(((((idx0%8)*32)+(idx0//32))+24)%64)", "((idx0//2)%4)")
 
     load = get_load_image_uop(shape, alu9, (((alu8+(alu5*8))%64),(alu5//8)))
-    self.check(load, "(idx0<256)", "((((idx0%8)*32)+(idx0//32))%64)", "((idx0%8)//2)")
+    self.check(load, "(idx0<256)", "((((idx0%8)*32)+(idx0//32))%64)", "((idx0//2)%4)")
 
   def test_simplify5(self):
     # openpilot 0.9.7, chunk replacement to simplify
@@ -414,7 +414,7 @@ class TestImageSimplification(unittest.TestCase):
     valid = alu3<640
 
     load = get_load_image_uop(shape, valid, idx)
-    self.check(load, "(((idx0+(idx1*64))%192)<160)", "((idx0+((idx1//3)*16))+128)", "(((idx0+(idx1*64))%192)//16)")
+    self.check(load, "(((idx0+(idx1*64))%192)<160)", "((idx0+((idx1//3)*16))+128)", "((idx1%3)*4)")
 
   def test_simplify6(self):
     # from openpilot
