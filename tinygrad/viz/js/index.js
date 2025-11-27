@@ -201,6 +201,8 @@ function selectShape(key) {
   return { eventType:track?.eventType, e:track?.shapes[idx] };
 }
 
+const Modes = {0:'read', 1:'write', 2:'read+write'};
+
 function getMetadata(key) {
   const { eventType, e } = selectShape(key);
   const html = d3.create("div").classed("info", true);
@@ -211,7 +213,7 @@ function getMetadata(key) {
     for (const r of rest) group.append("p").text(r);
     group = html.append("div").classed("args", true);
     for (const b of e.arg.bufs.sort((a, b) => a.num - b.num)) {
-      group.append("p").text(`@data${b.num} ${formatUnit(b.nbytes, 'B')}`).style("cursor", "pointer").on("click", () => {
+      group.append("p").text(`${Modes[b.mode]}@data${b.num} ${formatUnit(b.nbytes, 'B')}`).style("cursor", "pointer").on("click", () => {
         const row = document.getElementById(b.k); if (!isExpanded(row)) { row.click(); }
         focusShape(b.key);
       });
@@ -231,13 +233,10 @@ function getMetadata(key) {
     const kernels = html.append("div").classed("args", true);
     for (let u=0; u<e.arg.users?.length; u++) {
       const { repr, num, mode, shape } = e.arg.users[u];
-      const bufInfo = `${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}@data${num}`;
-      const p = kernels.append("p").append(() => colored(`[${u}] ${repr} ${bufInfo}`));
-      const shapeTxt = shape?.tooltipText?.split("\n").at(-1);
-      if (shapeTxt != null) p.append("span").text(" "+shapeTxt);
-      if (shape != null) {
-        p.style("cursor", "pointer").on("click", () => focusShape(shape));
-      }
+      const p = kernels.append("p").append(() => colored(`[${u}] ${repr} ${Modes[mode]}@data${num}`));
+      const shapeInfo = selectShape(shape).e?.arg?.tooltipText?.split("\n");
+      if (shapeInfo?.length > 5) p.append("span").text(" "+shapeInfo[5]);
+      if (shape != null) p.style("cursor", "pointer").on("click", () => focusShape(shape));
     }
   }
   return html.node();
