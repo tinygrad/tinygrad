@@ -194,14 +194,17 @@ function tabulate(rows) {
 
 var data, focusedDevice, focusedShape, canvasZoom, formatTime, zoomLevel = d3.zoomIdentity;
 
-function getMetadata(shape) {
-  if (shape == null) return;
-  const [t, idx] = shape.split("-");
+function selectShape(key) {
+  const [t, idx] = key.split("-");
   const track = data.tracks.get(t);
-  if (track == null) return;
-  const e = track.shapes[idx];
+  return { eventType:track?.eventType, e:track?.shapes[idx] };
+}
+
+function getMetadata(key) {
+  if (key == null) return;
+  const { eventType, e } = selectShape(key);
   const html = d3.create("div").classed("info", true);
-  if (track.eventType === EventTypes.EXEC) {
+  if (eventType === EventTypes.EXEC) {
     const [n, _, ...rest] = e.arg.tooltipText.split("\n");
     html.append(() => tabulate([["Name", d3.create("p").html(n).node()], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]]).node());
     const group = html.append("div").classed("args", true);
@@ -213,7 +216,7 @@ function getMetadata(shape) {
       if (prgSrc !== -1) html.append("a").text("View program").on("click", () => switchCtx(i, prgSrc));
     }
   }
-  if (track.eventType === EventTypes.BUF) {
+  if (eventType === EventTypes.BUF) {
     const [dtype, sz, nbytes, dur] = e.arg.tooltipText.split("\n");
     const rows = [["DType", dtype], ["Len", sz], ["Size", nbytes], ["Lifetime", dur]];
     if (e.arg.users != null) rows.push(["Users", e.arg.users.length]);
