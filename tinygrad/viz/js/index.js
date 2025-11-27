@@ -195,13 +195,13 @@ function tabulate(rows) {
 var data, focusedDevice, focusedShape, canvasZoom, formatTime, zoomLevel = d3.zoomIdentity;
 
 function selectShape(key) {
+  if (key == null) return {};
   const [t, idx] = key.split("-");
   const track = data.tracks.get(t);
   return { eventType:track?.eventType, e:track?.shapes[idx] };
 }
 
 function getMetadata(key) {
-  if (key == null) return;
   const { eventType, e } = selectShape(key);
   const html = d3.create("div").classed("info", true);
   if (eventType === EventTypes.EXEC) {
@@ -214,6 +214,9 @@ function getMetadata(key) {
       html.append("a").text(ctxs[i+1].steps[s].name).on("click", () => switchCtx(i, s));
       const prgSrc = ctxs[i+1].steps.findIndex(s => s.name === "View Program");
       if (prgSrc !== -1) html.append("a").text("View program").on("click", () => switchCtx(i, prgSrc));
+    }
+    for (const b of e.arg.bufs) {
+      console.log(b);
     }
   }
   if (eventType === EventTypes.BUF) {
@@ -239,7 +242,7 @@ function getMetadata(key) {
 function focusShape(shape) {
   saveToHistory({ shape:focusedShape });
   focusedShape = shape; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
-  return metadata.replaceChildren(getMetadata(focusedShape) ?? "");
+  return metadata.replaceChildren(getMetadata(focusedShape));
 }
 
 const EventTypes = { EXEC:0, BUF:1 };
@@ -249,7 +252,7 @@ async function renderProfiler(path, unit, opts) {
   // support non realtime x axis units
   formatTime = unit === "realtime" ? formatMicroseconds : (s) => formatUnit(s, " "+unit);
   if (data?.path !== path) data = {tracks:new Map(), axes:{}, path, first:null};
-  metadata.replaceChildren(getMetadata(focusedShape) ?? "");
+  metadata.replaceChildren(getMetadata(focusedShape));
   // layout once!
   if (data.tracks.size !== 0) return updateProgress({ start:false });
   const profiler = d3.select("#profiler").html("");
@@ -328,7 +331,7 @@ async function renderProfiler(path, unit, opts) {
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
         const labelHTML = label.map(l=>`<span style="color:${l.color}">${l.st}</span>`).join("");
-        const arg = { tooltipText:labelHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), key,
+        const arg = { tooltipText:labelHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), bufs:[], key,
                       ctx:shapeRef?.ctx, step:shapeRef?.step };
         if (e.key != null) shapeMap.set(e.key, key);
         // offset y by depth
@@ -372,6 +375,7 @@ async function renderProfiler(path, unit, opts) {
         const dur = x.at(-1)-x[0];
         const arg = { tooltipText:`${dtype}\n${sz}\n${formatUnit(nbytes, 'B')}\n${formatTime(dur)}`, users, key:`${k}-${shapes.length}` };
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
+        users?.forEach((u) => selectShape(u.shape).e?.arg.bufs.push({ key:arg.key, nbytes, num:u.num, mode:u.mode }));
       }
       // generic polygon merger
       const base0 = yscale(0);
@@ -724,7 +728,7 @@ async function main() {
         if (subrewrites.length > 0) { l.appendChild(d3.create("span").text(` (${subrewrites.length})`).node()); l.parentElement.classList.add("has-children"); }
       }
     }
-    return setState({ currentCtx:-1 });
+    return setState({ currentCtx:0 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
