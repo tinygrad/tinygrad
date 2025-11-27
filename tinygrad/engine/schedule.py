@@ -2,7 +2,7 @@ import time
 from typing import cast
 from dataclasses import dataclass, field, replace
 from collections import deque
-from tinygrad.uop.ops import UOp, Ops, buffers
+from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.helpers import Metadata, DEBUG, cpu_profile, TracingKey, SPEC, flatten, disable_gc
@@ -139,5 +139,6 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   # remove all AFTERs, after scheduling, the tensors are just buffers
   tensor_map |= {u:u.buf_uop for u in big_sink.toposort() if u.op is Ops.AFTER}
 
-  if (DEBUG >= 1 and len(schedule) > 1) or DEBUG >= 3: print(f"scheduled {len(schedule)} kernels in {(time.perf_counter()-st)*1000:.2f} ms")
+  if (DEBUG >= 1 and len(schedule) > 1) or DEBUG >= 3:
+    print(f"scheduled {len(schedule)} kernels in {(time.perf_counter()-st)*1000:.2f} ms ({len(UOpMetaClass.ucache)} uops in cache)")
   return tensor_map, schedule, var_vals

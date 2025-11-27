@@ -2,7 +2,6 @@ import gc
 from tinygrad import Tensor, UOp, Device, nn
 from tinygrad.engine.realize import method_cache, get_program
 from tinygrad.schedule.indexing import apply_movement_op
-from tinygrad.uop.divandmod import fold_divmod_general
 from test.test_tiny import TestTiny
 
 def uops_allocated(): return sum([isinstance(x, UOp) for x in gc.get_objects()])
@@ -70,7 +69,6 @@ if __name__ == "__main__":
     # these caches will keep uops alive
     method_cache.clear()
     apply_movement_op.cache_clear()
-    fold_divmod_general.cache_clear()
     Tensor._device_seeds.clear()
     Tensor._device_rng_counters.clear()
 
