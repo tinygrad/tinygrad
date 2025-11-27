@@ -8,4 +8,4 @@ if __name__ == "__main__":
   parser.add_argument("--dest", type=str, required=True, help="destination path to save the file")
   args = parser.parse_args()
 
-  Tensor(bytes.fromhex(args.hash), device="CPU").load(args.len).to(f"disk:{args.dest}").realize()
+  Tensor(bytes.fromhex(args.hash), device="CPU").fs_load(args.len).to(f"disk:{args.dest}").realize()

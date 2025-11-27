@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence, Iterable
+from typing import Any, Callable, cast, TYPE_CHECKING, Type, Sequence, Iterable, Final
 import sys, time, functools, itertools, math, operator, hashlib, os, types, pickle, pathlib, inspect, weakref, collections
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 class AxisType(Enum):
   def __repr__(self): return str(self)
   GLOBAL = auto(); WARP = auto(); LOCAL = auto(); LOOP = auto(); GROUP_REDUCE = auto(); REDUCE = auto(); UPCAST = auto(); UNROLL = auto() # noqa: E702
-  THREAD = auto(); OUTER = auto() # noqa: E702
+  THREAD = auto(); OUTER = auto(); PLACEHOLDER = auto() # noqa: E702
 axis_letters = {AxisType.GLOBAL: "g", AxisType.THREAD: "t", AxisType.LOCAL: "l", AxisType.WARP: "w", AxisType.LOOP: "L", AxisType.UPCAST: "u",
                 AxisType.GROUP_REDUCE: "G", AxisType.REDUCE: "R", AxisType.UNROLL: "r", AxisType.OUTER: "O"}
 axis_colors = {AxisType.GLOBAL: "blue", AxisType.THREAD: "BLUE", AxisType.LOCAL: "cyan", AxisType.WARP: "CYAN", AxisType.LOOP: "WHITE",
@@ -98,7 +98,6 @@ buffers:weakref.WeakKeyDictionary[UOp, Buffer|MultiBuffer] = weakref.WeakKeyDict
 all_metadata:weakref.WeakKeyDictionary[UOp, tuple[Metadata, ...]] = weakref.WeakKeyDictionary() # TODO: should this be here?
 
 # recursive_property replaces functools.cached_property in recursive UOp functions to prevent RecursionError
-_NOT_FOUND = object()
 class recursive_property(property):
   def __init__(self, fxn):
     self.fxn = fxn
@@ -106,10 +105,16 @@ class recursive_property(property):
     self.__doc__ = fxn.__doc__
   def __get__(self, x:UOp|None, owner=None):
     if x is None: return self
-    if (val:=x.__dict__.get(self.nm, _NOT_FOUND)) is _NOT_FOUND:
-      for s in x.toposort(lambda z: not hasattr(z, self.nm)):
-        s.__dict__[self.nm] = val = self.fxn(s)
-    return val
+    # this is very similar to toposort/topovisit
+    stack: list[tuple[UOp, bool]] = [(x, False)]
+    while stack:
+      node, visited = stack.pop()
+      if self.nm in node.__dict__: continue
+      if not visited:
+        stack.append((node, True))
+        for s in reversed(node.src): stack.append((s, False))
+      else: node.__dict__[self.nm] = self.fxn(node)
+    return x.__dict__[self.nm]
 
 # we import this late so we can use resolve/smax in mixins
 from tinygrad.mixin import OpMixin
@@ -157,17 +162,29 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def op_in_backward_slice_with_self(self, *ops:Ops): return any(x.op in ops for x in self.backward_slice_with_self)
 
   def toposort(self, gate:Callable|None=None) -> dict[UOp, None]:
-    ret: dict[UOp, None] = {}
+    cache: dict[UOp, None] = {}
     stack: list[tuple[UOp, bool]] = [(self, False)] # each stack entry is (node, visited_flag)
     while stack:
       node, visited = stack.pop()
-      if node in ret: continue
+      if node in cache: continue
       if not visited:
         if gate is None or gate(node):
           stack.append((node, True))  # push node back on stack to process after its srcs
           for s in reversed(node.src): stack.append((s, False)) # push srcs on the stack
-      else: ret[node] = None # second time i'm seeing this node, add it to returned toposort
-    return ret
+      else: cache[node] = None # second time i'm seeing this node, add it to returned toposort
+    return cache
+
+  def topovisit(self, visitor:Callable[[UOp], T], cache:dict[UOp, T]) -> T:
+    # NOTE: this shares a lot of code with toposort
+    stack: list[tuple[UOp, bool]] = [(self, False)]
+    while stack:
+      node, visited = stack.pop()
+      if node in cache: continue
+      if not visited:
+        stack.append((node, True))
+        for s in reversed(node.src): stack.append((s, False))
+      else: cache[node] = visitor(node)
+    return cache[self]
 
   # returns map of UOps to their consumers in the graph rooted by self
   def get_consumer_map(self) -> dict[UOp, dict[UOp, None]]: return consumer_map_from_toposort(self.toposort())
@@ -200,7 +217,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.UNIQUE | Ops.DEVICE | Ops.RANGE | Ops.LOAD | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
-           Ops.VECTORIZE | Ops.VCONST | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.PRECAST | Ops.CONTRACT:
+           Ops.VECTORIZE | Ops.VCONST | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.CONTRACT:
         return None
 
       case Ops.INDEX:
@@ -275,7 +292,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
           return tuple(1 if i in axis_arg else s for i,s in enumerate(ps))
 
     # elementwise ops keep the shape the same. all inputs with shape must match
-    if self.op in (GroupOp.Elementwise-{Ops.BITCAST}).union({Ops.COPY, Ops.ASSIGN, Ops.NOOP, Ops.GROUP, Ops.SINK, Ops.ALLREDUCE, Ops.STORE}):
+    if self.op in GroupOp.ALU.union({Ops.CAST, Ops.COPY, Ops.ASSIGN, Ops.NOOP, Ops.GROUP, Ops.SINK, Ops.ALLREDUCE, Ops.STORE}):
       # TODO: remove this hack for 3 op assign
       input_shapes = [x._shape for x in (self.src[:2] if self.op is Ops.ASSIGN else self.src) if x._shape is not None]
       if len(input_shapes) == 0: return None
@@ -321,11 +338,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   # *** uop evaluation ***
 
-  def simplify(self, tracked=False, full_symbolic=True):
+  def simplify(self, tracked=False):
     # late import!
-    from tinygrad.uop.symbolic import symbolic, commutative
+    from tinygrad.uop.symbolic import symbolic
     with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
-      return graph_rewrite(self, symbolic if full_symbolic else commutative, name="simplify")
+      return graph_rewrite(self, symbolic, name="simplify")
   def ssimplify(self) -> UOp|ConstType: return ret.arg if (ret:=self.simplify()).op is Ops.CONST else ret
   def sintify(self) -> sint: return self.arg if self.op is Ops.CONST else self
   def _eval(self, dtype, expected_type:Type[T]) -> T:
@@ -1153,7 +1170,8 @@ if TRACK_MATCH_STATS or PROFILE:
 
 # *** simple graph rewrite engine ***
 
-with Context(SPEC=0): SENTINEL = UOp(Ops.SENTINEL)
+# A pure Python sentinel, but *typed* as UOp so it fits all the dict annotations
+SENTINEL: Final[UOp] = cast(UOp, object())
 class BottomUpGate(Exception): pass
 class RewriteContext:
   def __init__(self, pm, bpm, ctx=None):
@@ -1164,12 +1182,12 @@ class RewriteContext:
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
 
-  def cached_pm_rewrite(self, x:UOp):
+  def cached_pm_rewrite(self, x:UOp) -> UOp|None:
     if (ret:=self.pm_cache.get(x,SENTINEL)) is not SENTINEL: return ret
     ret = self.pm_cache[x] = unwrap(self.pm).rewrite(x, self.ctx)
     return ret
 
-  def cached_bpm_rewrite(self, x:UOp):
+  def cached_bpm_rewrite(self, x:UOp) -> UOp|None:
     if (ret:=self.bpm_cache.get(x,SENTINEL)) is not SENTINEL: return ret
     ret = self.bpm_cache[x] = unwrap(self.bpm).rewrite(x, self.ctx)
     return ret

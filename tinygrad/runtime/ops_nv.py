@@ -360,7 +360,7 @@ class NVKIface:
     self.dma_class:int = next(c for c in [nv_gpu.BLACKWELL_DMA_COPY_B, nv_gpu.AMPERE_DMA_COPY_B] if c in self.nvclasses)
 
     usermode = self.rm_alloc(self.dev.subdevice, self.usermode_class)
-    return usermode, MMIOInterface(self._gpu_map_to_cpu(usermode, mmio_sz:=0x10000, flags=2), mmio_sz, fmt='I')
+    return usermode, MMIOInterface(self._gpu_map_to_cpu(usermode, mmio_sz:=0x10000), mmio_sz, fmt='I')
 
   def setup_vm(self, vaspace):
     self.rm_control(self.dev.subdevice, nv_gpu.NV2080_CTRL_CMD_GPU_GET_GID_INFO, raw_uuid:=nv_gpu.NV2080_CTRL_GPU_GET_GID_INFO_PARAMS(
@@ -496,7 +496,7 @@ class NVDevice(HCQCompiled[HCQSignal]):
     self.iface = self._select_iface(NVKIface, PCIIface)
 
     device_params = nv_gpu.NV0080_ALLOC_PARAMETERS(deviceId=self.iface.gpu_instance, hClientShare=self.iface.root,
-                                                   vaMode=nv_gpu.NV_DEVICE_ALLOCATION_VAMODE_MULTIPLE_VASPACES)
+                                                   vaMode=nv_gpu.NV_DEVICE_ALLOCATION_VAMODE_OPTIONAL_MULTIPLE_VASPACES)
     self.nvdevice = self.iface.rm_alloc(self.iface.root, nv_gpu.NV01_DEVICE_0, device_params)
     self.subdevice = self.iface.rm_alloc(self.nvdevice, nv_gpu.NV20_SUBDEVICE_0, nv_gpu.NV2080_ALLOC_PARAMETERS())
     self.usermode, self.gpu_mmio = self.iface.setup_usermode()
@@ -514,7 +514,8 @@ class NVDevice(HCQCompiled[HCQSignal]):
     channel_params = nv_gpu.NV_CHANNEL_GROUP_ALLOCATION_PARAMETERS(engineType=nv_gpu.NV2080_ENGINE_TYPE_GRAPHICS)
     channel_group = self.iface.rm_alloc(self.nvdevice, nv_gpu.KEPLER_CHANNEL_GROUP_A, channel_params)
 
-    gpfifo_area = self.iface.alloc(0x200000, contiguous=True, cpu_access=True, force_devmem=True, map_flags=0x10d0000)
+    gpfifo_area = self.iface.alloc(0x200000, contiguous=True, cpu_access=True, force_devmem=True,
+      map_flags=(nv_gpu.NVOS33_FLAGS_CACHING_TYPE_WRITECOMBINED<<23))
 
     ctxshare_params = nv_gpu.NV_CTXSHARE_ALLOCATION_PARAMETERS(hVASpace=vaspace, flags=nv_gpu.NV_CTXSHARE_ALLOCATION_FLAGS_SUBCONTEXT_ASYNC)
     ctxshare = self.iface.rm_alloc(channel_group, nv_gpu.FERMI_CONTEXT_SHARE_A, ctxshare_params)

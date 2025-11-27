@@ -1,9 +1,10 @@
 import ctypes, functools, sys
 from typing import TYPE_CHECKING
-from tinygrad.helpers import flatten
+from tinygrad.helpers import flatten, WIN
 from _ctypes import _SimpleCData
 
 def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
+  assert not WIN, "ioctl not supported"
   import tinygrad.runtime.support.hcq as hcq, fcntl
   ioctl = __fd.ioctl if isinstance(__fd, hcq.FileIOInterface) else functools.partial(fcntl.ioctl, __fd)
   if (rc:=ioctl((__idir<<30)|(ctypes.sizeof(out:=(__payload or __struct(*args, **kwargs)))<<16)|(__base<<8)|__nr, out)):

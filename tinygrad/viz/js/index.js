@@ -16,6 +16,7 @@ const darkenHex = (h, p = 0) =>
 
 const ANSI_COLORS = ["#b3b3b3", "#ff6666", "#66b366", "#ffff66", "#6666ff", "#ff66ff", "#66ffff", "#ffffff"];
 const ANSI_COLORS_LIGHT = ["#d9d9d9","#ff9999","#99cc99","#ffff99","#9999ff","#ff99ff","#ccffff","#ffffff"];
+const colorsCache = new Map();
 const parseColors = (name, defaultColor="#ffffff") => Array.from(name.matchAll(/(?:\u001b\[(\d+)m([\s\S]*?)\u001b\[0m)|([^\u001b]+)/g),
   ([_, code, colored_st, st]) => ({ st: colored_st ?? st, color: code != null ? (code>=90 ? ANSI_COLORS_LIGHT : ANSI_COLORS)[(parseInt(code)-30+60)%60] : defaultColor }));
 
@@ -156,9 +157,9 @@ function formatMicroseconds(ts, dur=ts) {
 }
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
-const colorScheme = {TINY:["#1b5745", "#354f52", "#354f52", "#1d2e62", "#63b0cd"],
+const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["get_program","#1d2e62"],["compile","#63b0cd"],["DEFAULT","#354f52"]]),
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
-  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SIMD:["#3600f0"],
+  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SE:new Map([["OCC", "#101725"], ["INST", "#0A2042"]]),
   CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
@@ -191,22 +192,72 @@ function tabulate(rows) {
   return root;
 }
 
-var data, focusedDevice, focusedShape, canvasZoom, zoomLevel = d3.zoomIdentity, shapeMetadata = new Map();
+var data, focusedDevice, focusedShape, canvasZoom, formatTime, zoomLevel = d3.zoomIdentity;
+
+function selectShape(key) {
+  if (key == null) return {};
+  const [t, idx] = key.split("-");
+  const track = data.tracks.get(t);
+  return { eventType:track?.eventType, e:track?.shapes[idx] };
+}
+
+const Modes = {0:'read', 1:'write', 2:'write+read'};
+
+function getMetadata(key) {
+  const { eventType, e } = selectShape(key);
+  const html = d3.create("div").classed("info", true);
+  if (eventType === EventTypes.EXEC) {
+    const [n, _, ...rest] = e.arg.tooltipText.split("\n");
+    html.append(() => tabulate([["Name", d3.create("p").html(n).node()], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]]).node());
+    let group = html.append("div").classed("args", true);
+    for (const r of rest) group.append("p").text(r);
+    group = html.append("div").classed("args", true);
+    for (const b of e.arg.bufs.sort((a, b) => a.num - b.num)) {
+      group.append("p").text(`${Modes[b.mode]}@data${b.num} ${formatUnit(b.nbytes, 'B')}`).style("cursor", "pointer").on("click", () => {
+        const row = document.getElementById(b.k); if (!isExpanded(row)) { row.click(); }
+        focusShape(b.key);
+      });
+    }
+    if (e.arg.ctx != null) {
+      const i = e.arg.ctx; s = e.arg.step;
+      html.append("a").text(ctxs[i+1].steps[s].name).on("click", () => switchCtx(i, s));
+      const prgSrc = ctxs[i+1].steps.findIndex(s => s.name === "View Program");
+      if (prgSrc !== -1) html.append("a").text("View program").on("click", () => switchCtx(i, prgSrc));
+    }
+  }
+  if (eventType === EventTypes.BUF) {
+    const [dtype, sz, nbytes, dur] = e.arg.tooltipText.split("\n");
+    const rows = [["DType", dtype], ["Len", sz], ["Size", nbytes], ["Lifetime", dur]];
+    if (e.arg.users != null) rows.push(["Users", e.arg.users.length]);
+    html.append(() => tabulate(rows).node());
+    const kernels = html.append("div").classed("args", true);
+    for (let u=0; u<e.arg.users?.length; u++) {
+      const { repr, num, mode, shape } = e.arg.users[u];
+      const p = kernels.append("p").append(() => colored(`[${u}] ${repr} ${Modes[mode]}@data${num}`));
+      const shapeInfo = selectShape(shape).e?.arg?.tooltipText?.split("\n");
+      if (shapeInfo?.length > 5) p.append("span").text(" "+shapeInfo[5]);
+      if (shape != null) p.style("cursor", "pointer").on("click", () => focusShape(shape));
+    }
+  }
+  return html.node();
+}
+
 function focusShape(shape) {
   saveToHistory({ shape:focusedShape });
-  focusedShape = shape?.key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
-  return metadata.replaceChildren(shapeMetadata.get(focusedShape) ?? "");
+  focusedShape = shape; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
+  return metadata.replaceChildren(getMetadata(focusedShape));
 }
 
 const EventTypes = { EXEC:0, BUF:1 };
 
-async function renderProfiler(path, unit) {
+async function renderProfiler(path, unit, opts) {
   displaySelection("#profiler");
-  metadata.replaceChildren(shapeMetadata.get(focusedShape) ?? "");
-  // layout once!
-  if (data != null && data.path === path) return updateProgress({ start:false });
   // support non realtime x axis units
-  const formatTime = unit === "realtime" ? formatMicroseconds : (s) => `${s} ${unit}`;
+  formatTime = unit === "realtime" ? formatMicroseconds : (s) => formatUnit(s, " "+unit);
+  if (data?.path !== path) data = {tracks:new Map(), axes:{}, path, first:null};
+  metadata.replaceChildren(getMetadata(focusedShape));
+  // layout once!
+  if (data.tracks.size !== 0) return updateProgress({ start:false });
   const profiler = d3.select("#profiler").html("");
   const buf = cache[path] ?? await fetchValue(path);
   const view = new DataView(buf);
@@ -220,8 +271,8 @@ async function renderProfiler(path, unit) {
   const textDecoder = new TextDecoder("utf-8");
   const { strings, dtypeSize, markers }  = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
   // place devices on the y axis and set vertical positions
-  const [tickSize, padding] = [10, 8];
-  const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize+padding+"px");
+  const [tickSize, padding, baseOffset] = [10, 8, markers.length ? 14 : 0];
+  const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", tickSize+padding+baseOffset+"px");
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
   // NOTE: scrolling via mouse can only zoom the graph
   canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
@@ -231,34 +282,40 @@ async function renderProfiler(path, unit) {
   const colorMap = new Map();
   // map shapes by event key
   const shapeMap = new Map();
-  data = {tracks:new Map(), axes:{}, path};
   const heightScale = d3.scaleLinear().domain([0, tracePeak]).range([4,maxheight=100]);
   for (let i=0; i<layoutsLen; i++) {
     const nameLen = view.getUint8(offset, true); offset += 1;
     const k = textDecoder.decode(new Uint8Array(buf, offset, nameLen)); offset += nameLen;
-    const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px");
+    const div = deviceList.append("div").attr("id", k).text(k).style("padding", padding+"px").style("width", opts.width);
     const { y:baseY, height:baseHeight } = rect(div.node());
+    const colors = colorScheme[k.split(":")[0]] ?? colorScheme.DEFAULT;
     const offsetY = baseY-canvasTop+padding/2;
     const shapes = [], visible = [];
     const eventType = u8(), eventsLen = u32();
     if (eventType === EventTypes.EXEC) {
-      const levelHeight = baseHeight-padding;
+      const levelHeight = (baseHeight-padding)*(opts.heightScale ?? 1);
       const levels = [];
       data.tracks.set(k, { shapes, eventType, visible, offsetY, pcolor:"#9ea2ad" });
       let colorKey, ref;
       for (let j=0; j<eventsLen; j++) {
         const e = {name:strings[u32()], ref:optional(u32()), key:optional(u32()), st:u32(), dur:f32(), info:strings[u32()] || null};
         // find a free level to put the event
-        let depth = levels.findIndex(levelEt => e.st >= levelEt);
-        const et = e.st+Math.trunc(e.dur);
-        if (depth === -1) {
-          depth = levels.length;
-          levels.push(et);
-        } else levels[depth] = et;
+        let depth = 0;
+        if (opts.levelKey != null) { depth = opts.levelKey(e); levels[depth] = 0; }
+        else {
+          depth = levels.findIndex(levelEt => e.st >= levelEt);
+          const et = e.st+Math.trunc(e.dur);
+          if (depth === -1) {
+            depth = levels.length;
+            levels.push(et);
+          } else levels[depth] = et;
+        }
         if (depth === 0) colorKey = e.name.split(" ")[0];
-        if (!colorMap.has(colorKey)) colorMap.set(colorKey, d3.rgb(cycleColors(colorScheme[k.split(":")[0]] ?? colorScheme.DEFAULT, colorMap.size)));
-        const base = colorMap.get(colorKey), s = Math.min(Math.pow(1/0.7, depth), 240 / Math.max(base.r, base.g, base.b));
-        const fillColor = d3.rgb(base.r*s, base.g*s, base.b*s).toString();
+        if (!colorMap.has(colorKey)) {
+          const color = colors instanceof Map ? (colors.get(colorKey) || colors.get("DEFAULT")) : cycleColors(colors, colorMap.size);
+          colorMap.set(colorKey, d3.rgb(color));
+        }
+        const fillColor = colorMap.get(colorKey).brighter(0.3*depth).toString();
         const label = parseColors(e.name).map(({ color, st }) => ({ color, st, width:ctx.measureText(st).width }));
         let shapeRef = e.ref;
         if (shapeRef != null) { ref = {ctx:e.ref, step:0}; shapeRef = ref; }
@@ -266,22 +323,23 @@ async function renderProfiler(path, unit) {
           const start = ref.step>0 ? ref.step+1 : 0;
           const stepIdx = ctxs[ref.ctx+1].steps.findIndex((s, i) => i >= start && s.name == e.name);
           if (stepIdx !== -1) { ref.step = stepIdx; shapeRef = ref; }
-        }
-        const html = d3.create("div").classed("info", true);
-        html.append(() => tabulate([["Name", colored(e.name)], ["Duration", formatTime(e.dur)], ["Start Time", formatTime(e.st)]]).node());
-        html.append("div").classed("args", true);
-        if (e.info != null) html.append("p").style("white-space", "pre-wrap").text(e.info);
-        if (shapeRef != null) {
-          html.append("a").text("View codegen rewrite").on("click", () => switchCtx(shapeRef.ctx, shapeRef.step));
-          html.append("a").text("View program").on("click", () => switchCtx(shapeRef.ctx, ctxs[shapeRef.ctx+1].steps.findIndex(s => s.name==="View Program")));
+        } else {
+          const steps = ctxs[state.currentCtx].steps;
+          for (let i=state.currentStep+1; i<steps.length; i++) {
+            const loc = steps[i].loc;
+            if (loc == null) break;
+            if (loc === e.name) { shapeRef = {ctx:state.currentCtx-1, step:i}; break; }
+          }
         }
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
-        if (key != null) shapeMetadata.set(key, html.node());
-        const arg = { tooltipText:colored(e.name).outerHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), key, ...shapeRef };
-        if (e.key != null) shapeMap.set(e.key, arg);
+        const labelHTML = label.map(l=>`<span style="color:${l.color}">${l.st}</span>`).join("");
+        const arg = { tooltipText:labelHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), bufs:[], key,
+                      ctx:shapeRef?.ctx, step:shapeRef?.step };
+        if (e.key != null) shapeMap.set(e.key, key);
         // offset y by depth
-        shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label, fillColor });
+        shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label:opts.hideLabels ? null : label, fillColor });
+        if (j === 0) data.first = data.first == null ? e.st : Math.min(data.first, e.st);
       }
       div.style("height", levelHeight*levels.length+padding+"px").style("pointerEvents", "none");
     } else {
@@ -299,7 +357,7 @@ async function renderProfiler(path, unit) {
           x += 1; y += nbytes; valueMap.set(ts, y);
         } else {
           const free = buf_shapes.get(key);
-          free.users = Array.from({ length: u32() }, () => ({shape:shapeMap.get(u32()), repr:strings[u32()], num:u8(), mode:u8()}));
+          free.users = Array.from({ length: u32() }, () => ({shape:shapeMap.get(u32()), repr:strings[u32()], num:u32(), mode:u8()}));
           timestamps.push(ts); valueMap.set(ts, y);
           x += 1; y -= free.nbytes;
           free.x.push(x);
@@ -318,34 +376,9 @@ async function renderProfiler(path, unit) {
       for (const [num, {dtype, sz, nbytes, y, x:steps, users}] of buf_shapes) {
         const x = steps.map(s => timestamps[s]);
         const dur = x.at(-1)-x[0];
-        const html = d3.create("div").classed("info", true);
-        const rows = [["DType", dtype], ["Len", formatUnit(sz)], ["Size", formatUnit(nbytes, "B")], ["Lifetime", formatTime(dur)]];
-        if (users != null) rows.push(["Users", users.length]);
-        const info = html.append(() => tabulate(rows).node());
-        const arg = {tooltipText:info.node().outerHTML, key:`${k}-${num}`};
-        const kernels = html.append("div").classed("args", true);
-        for (let u=0; u<users?.length; u++) {
-          const { repr, num, mode, shape } = users[u];
-          const bufInfo = `${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}@data${num}`
-          const p = kernels.append("p").append(() => colored(`[${u}] ${repr} ${bufInfo}`));
-          const shapeTxt = shape?.tooltipText?.split("\n").at(-1);
-          if (shapeTxt != null) p.append("span").text(" "+shapeTxt);
-          if (shape != null) {
-            p.style("cursor", "pointer").on("click", () => focusShape(shape))
-            const args = shapeMetadata.get(shape.key).querySelector(".args");
-            const bufArg = d3.create("p").text(`${bufInfo} ${rows[2][1]}`).style("cursor", "pointer").on("click", () => {
-              const device = document.getElementById(k);
-              if (!isExpanded(device)) device.click();
-              focusShape(arg);
-            }).node();
-            bufArg.dataset.num = num;
-            let before = null;
-            for (const c of args.children) { if (+c.dataset.num > num) { before = c; break; } }
-            args.insertBefore(bufArg, before);
-          }
-        }
-        shapeMetadata.set(arg.key, html.node())
+        const arg = { tooltipText:`${dtype}\n${sz}\n${formatUnit(nbytes, 'B')}\n${formatTime(dur)}`, users, key:`${k}-${shapes.length}` };
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
+        users?.forEach((u) => selectShape(u.shape).e?.arg.bufs.push({ key:arg.key, nbytes, num:u.num, mode:u.mode, k }));
       }
       // generic polygon merger
       const base0 = yscale(0);
@@ -367,6 +400,7 @@ async function renderProfiler(path, unit) {
         sum.x.push(allX[i], allX[i+1]);
         const y = maxY.get(allX[i]); sum.y1.push(y, y); sum.y0.push(base0, base0);
       }
+      if (timestamps.length > 0) data.first = data.first == null ? timestamps[0] : Math.min(data.first, timestamps[0]);
       data.tracks.set(k, { shapes:[sum], eventType, visible, offsetY, pcolor:"#c9a8ff", height, peak, scaleFactor:maxheight*4/height,
                            views:[[sum], shapes], valueMap });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
@@ -384,18 +418,33 @@ async function renderProfiler(path, unit) {
       });
     }
   }
+  for (const m of markers) m.label = m.name.split(/(\s+)/).map(st => ({ st, color:m.color, width:ctx.measureText(st).width }));
   updateProgress({ start:false });
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
+  const drawText = (ctx, label, lx, ly, maxWidth) => {
+    let lw = 0;
+    for (let li=0; li<label?.length; li++) {
+      if (lw+label[li].width+(li===label.length-1 ? 0 : ellipsisWidth)+2 > maxWidth) {
+        if (lw>0) ctx.fillText("...", lx+lw, ly);
+        break;
+      }
+      ctx.fillStyle = label[li].color;
+      ctx.fillText(label[li].st, lx+lw, ly);
+      lw += label[li].width;
+    }
+  }
   function render(transform) {
     zoomLevel = transform;
-    ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+    const canvasWidth = canvas.clientWidth;
+    ctx.clearRect(0, 0, canvasWidth, canvas.clientHeight);
     // rescale to match current zoom
-    const xscale = d3.scaleLinear().domain([0, dur]).range([0, canvas.clientWidth]);
+    const xscale = d3.scaleLinear().domain([data.first, dur]).range([0, canvasWidth]);
     const visibleX = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
     const st = visibleX[0], et = visibleX[1];
-    xscale.domain(visibleX);
+    xscale.domain([st, et]);
+    ctx.textBaseline = "middle";
     // draw shapes
     const paths = [];
     for (const [_, { shapes, eventType, visible, offsetY, valueMap, pcolor }] of data.tracks) {
@@ -424,23 +473,13 @@ async function renderProfiler(path, unit) {
           visible.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
           ctx.fillStyle = e.fillColor; ctx.fill(p);
           // add label
-          let lw = 0;
-          const lx = x+2, ly = y+e.height/2;
-          for (let li=0; li<e.label?.length; li++) {
-            if (lw+e.label[li].width+(li===e.label.length-1 ? 0 : ellipsisWidth)+2 > width) {
-              if (lw>0) ctx.fillText("...", lx+lw, ly);
-              break;
-            }
-            ctx.textBaseline = "middle";
-            ctx.fillStyle = e.label[li].color;
-            ctx.fillText(e.label[li].st, lx+lw, ly);
-            lw += e.label[li].width;
-          }
+          drawText(ctx, e.label, x+2, y+e.height/2, width);
         }
         if (focusedShape != null && e.arg?.key === focusedShape) { paths.push([p, pcolor]); }
       }
     }
     // draw axes
+    ctx.translate(0, baseOffset);
     drawLine(ctx, xscale.range(), [0, 0]);
     for (const tick of xscale.ticks()) {
       // tick line
@@ -461,13 +500,19 @@ async function renderProfiler(path, unit) {
       }
     }
     // draw markers
+    ctx.translate(0, -baseOffset);
     ctx.textBaseline = "top";
-    for (const m of markers) {
-      const x = xscale(m.ts);
+    for (let i=0; i<markers.length; i++) {
+      const m = markers[i];
+      const x = xscale(m.ts), tx = x+2;
       drawLine(ctx, [x, x], [0, canvas.clientHeight], { color:m.color });
-      ctx.fillText(m.name, x+2, 1);
+      let maxWidth = canvasWidth-(tx);
+      const nextMark = markers[i+1]?.ts;
+      if (nextMark != null) maxWidth = Math.min(maxWidth, xscale(nextMark)-tx);
+      if (maxWidth <= 0) continue;
+      drawText(ctx, m.label, tx, 1, maxWidth);
     }
-    for (const [p, color] of paths) { ctx.lineWidth = 1.4; ctx.strokeStyle = color; ctx.stroke(p); }
+    for (const [p, color] of paths) { ctx.strokeStyle = color; ctx.stroke(p); }
   }
 
   function resize() {
@@ -484,23 +529,23 @@ async function renderProfiler(path, unit) {
   }
 
   zoomLevel = d3.zoomIdentity;
-  canvasZoom = d3.zoom().filter(vizZoomFilter).scaleExtent([1, Infinity]).translateExtent([[0,0], [Infinity,0]]).on("zoom", e => render(e.transform));
+  canvasZoom = d3.zoom().filter(vizZoomFilter).on("zoom", e => render(e.transform));
   d3.select(canvas).call(canvasZoom);
   document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
 
   new ResizeObserver(([e]) => e.contentRect.width > 0 && resize()).observe(profiler.node());
 
   function findRectAtPosition(x, y) {
-    let tid = null;
+    let track = null;
     for (const k of data.tracks.keys()) {
       const r = rect(document.getElementById(k));
-      if (y >= r.y && y <= r.y+r.height) { tid = k; break; }
+      if (y >= r.y && y <= r.y+r.height) { track = data.tracks.get(k); break; }
     }
-    if (tid == null) return;
-    const { top, left, width, height } = rect(canvas);
-    const X = ((x-left) * (canvas.width/width))/dpr;
-    const Y = ((y-top) * (canvas.height/height))/dpr;
-    for (const r of data.tracks.get(tid).visible) {
+    if (track == null) return;
+    const R = rect(canvas);
+    const X = ((x-R.left) * (canvas.width/R.width))/dpr;
+    const Y = ((y-R.top) * (canvas.height/R.height))/dpr;
+    for (const r of track.visible) {
       if (Y>=r.y0 && Y<=r.y1 && X>=r.x0 && X<=r.x1) return r.arg;
     }
   }
@@ -509,10 +554,9 @@ async function renderProfiler(path, unit) {
     e.preventDefault();
     const foundRect = findRectAtPosition(e.clientX, e.clientY);
     if (foundRect?.step != null && (foundRect?.key == null || e.type == "dblclick")) { return switchCtx(foundRect.ctx, foundRect.step); }
-    if (foundRect?.key != focusedShape) { focusShape(foundRect); }
+    if (foundRect?.key != focusedShape) { focusShape(foundRect?.key); }
   }
   canvas.addEventListener("click", clickShape);
-
   canvas.addEventListener("dblclick", clickShape);
 
   canvas.addEventListener("mousemove", e => {
@@ -608,6 +652,7 @@ const evtSources = [];
 // context: collection of steps
 const state = {currentCtx:-1, currentStep:0, currentRewrite:0, expandSteps:false};
 function setState(ns) {
+  saveToHistory(state);
   const { ctx:prevCtx, step:prevStep } = select(state.currentCtx, state.currentStep);
   const prevRewrite = state.currentRewrite;
   Object.assign(state, ns);
@@ -615,7 +660,6 @@ function setState(ns) {
   const { ctx, step } = select(state.currentCtx, state.currentStep);
   toggleCls(prevCtx, ctx, "expanded", state.expandSteps);
   if (ctx?.id !== prevCtx?.id) {
-    saveToHistory({ currentCtx:deselect(prevCtx).ctx, currentStep:deselect(prevStep).step || 0, currentRewrite:prevRewrite, expandSteps:true });
     toggleCls(prevCtx, ctx, "active");
   }
   if (ctx?.id !== prevCtx?.id || step?.id !== prevStep?.id) {
@@ -643,7 +687,7 @@ function saveToHistory(ns) {
 const switchCtx = (newCtx, step) => setState({ expandSteps:true, currentCtx:newCtx+1, currentStep:step ?? 0, currentRewrite:0 });
 
 window.addEventListener("popstate", (e) => {
-  if (e.state?.shape != null) return focusShape({ key:e.state?.shape });
+  if (e.state?.shape != null) return focusShape(e.state?.shape);
   if (e.state != null) setState(e.state);
 });
 
@@ -670,7 +714,8 @@ async function main() {
         while (stack.length && stack.at(-1).depth >= u.depth) stack.pop();
         const list = stack.length > 0 ? stack.at(-1).li : ul;
         u.li = list.appendChild(document.createElement("ul"));
-        u.li.id = `step-${i}-${j}`;
+        u.li.id = `step-${i}-${j}`
+        u.li.style.marginLeft = u.depth > 0 ? "calc(6px + 1ch)" : "6px";
         const p = u.li.appendChild(document.createElement("p"));
         p.appendChild(colored(`${u.name}`+(u.match_count ? ` - ${u.match_count}` : '')));
         p.onclick = (e) => {
@@ -701,7 +746,7 @@ async function main() {
     if (url.pathname+url.search !== ckey) e.close();
     else if (e.readyState === EventSource.OPEN) activeSrc = e;
   }
-  if (ctx.name === "Profiler") return renderProfiler("/get_profile", "realtime");
+  if (ctx.name === "Profiler") return renderProfiler("/get_profile", "realtime", { width:"132px" });
   if (workerUrl == null) await initWorker();
   if (ckey in cache) {
     ret = cache[ckey];
@@ -709,7 +754,11 @@ async function main() {
   // ** Disassembly view
   if (!ckey.startsWith("/rewrites")) {
     if (!(ckey in cache)) cache[ckey] = ret = await fetchValue(ckey);
-    if (ret instanceof ArrayBuffer) return renderProfiler(ckey, "clk"); // cycles on the x axis
+    // cycles on the x axis
+    if (ret instanceof ArrayBuffer) {
+      opts = {heightScale:0.5, hideLabels:true, levelKey:(e) => parseInt(e.name.split(" ")[1].split(":")[1])};
+      return renderProfiler(ckey, "clk", opts);
+    }
     displaySelection("#custom");
     metadata.innerHTML = "";
     const root = d3.create("div").classed("raw-text", true).node();

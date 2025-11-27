@@ -4,7 +4,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace, Invalid, PtrDType
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, graph_rewrite, GroupOp, identity_element
-from tinygrad.uop.symbolic import uop_given_valid, parse_valid, sym, symbolic, invalid_gate
+from tinygrad.uop.symbolic import uop_given_valid, parse_valid, symbolic, invalid_gate
 from tinygrad.helpers import getenv, flatten, AMX, prod
 from tinygrad.renderer import Renderer
 
@@ -26,7 +26,6 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
     # for X0 + X1 + ... >= 1, check if it's out of bound when Xi = 0 for all i
     if not is_upper_bound and c == 1 and all(u.op in GroupOp.Irreducible and u.vmin == 0 for u in X.split_uop(Ops.ADD)):
       testidx = functools.reduce(lambda nowidx,u: nowidx.substitute({u:u.const_like(0)}), X.split_uop(Ops.ADD), idx)
-      testidx = testidx.simplify()
       if testidx.gep(0).vmax < 0 or testidx.gep(1).vmax < 0:
         drop_stmt.append(stmt)
         continue
@@ -36,7 +35,7 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
     test_value = c + 1 if is_upper_bound else c - 1
     for i,b in zip(idx.src, (buf.dtype.shape[1], buf.dtype.shape[0])):
       if i.is_increasing():
-        rw = i.substitute({X:X.const_like(test_value)}).simplify()
+        rw = i.substitute({X:X.const_like(test_value)})
         if rw.vmin >= b or rw.vmax < 0:
           drop_stmt.append(stmt)
           break
@@ -314,7 +313,7 @@ pm_reduce = PatternMatcher([
   # tensor core built in accumulate
   (UPat(Ops.WMMA, name="wmma") + UPat.var("add"),
     lambda add, wmma: UOp(wmma.op, wmma.dtype, (wmma.src[0], wmma.src[1], wmma.src[2]+add), wmma.arg)),
-])+sym
+])
 
 # add loads
 
