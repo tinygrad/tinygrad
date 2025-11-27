@@ -138,12 +138,12 @@ def mel(
 def sinc_window_kernel(num_taps, fc, window="hamming", dtype=None, device=None):
   t = Tensor.arange(-num_taps//2, num_taps//2 + 1, dtype=dtype, device=device)
   x = t * fc * math.pi
-  h = Tensor.where(x == 0, Tensor(1.0, dtype=dtype).to(device=x.device), x.sin() / x)
+  h = Tensor.where(x == 0, Tensor(1.0, dtype=dtype).to(device=device), x.sin() / x)
 
   if window == "hamming":
     w = 0.54 - 0.46 * (2 * math.pi * (t + num_taps//2) / num_taps).cos()
   else:
-    w = Tensor(1.0, dtype=dtype).to(device=h.device)
+    w = Tensor(1.0, dtype=dtype).to(device=device)
   h *= w
   h /= h.sum()
   return h
