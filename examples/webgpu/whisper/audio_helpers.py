@@ -150,7 +150,7 @@ def sinc_window_kernel(num_taps, fc, window="hamming", dtype=None, device=None):
 
 def resample(x, L, M, num_taps=64):
   fc = 0.5 / max(L, M)
-  h = sinc_window_kernel(num_taps, fc, 'hamming', 'float32', 'cuda')
+  h = sinc_window_kernel(num_taps, fc, 'hamming', 'float32', x.device)
 
   upsampled = x.reshape(-1, 1, x.shape[-1]).pad((None, (0, L-1), None)).transpose(1, 2).flatten(1).unsqueeze(1)
 
