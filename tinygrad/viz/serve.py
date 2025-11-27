@@ -178,12 +178,12 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
   return struct.pack("<BI", 0, len(events))+b"".join(events) if events else None
 
 def encode_mem_free(key:int, ts:int, execs:list[ProfilePointEvent], scache:dict) -> bytes:
-  ei_encoding:list[tuple[int, int, int, int]] = [] # <[u32, u32, u8, u8] [run id, display name, buffer number and mode (2 = r/w, 1 = w, 0 = r)]
+  ei_encoding:list[tuple[int, int, int, int]] = [] # <[u32, u32, u32, u8] [run id, display name, buffer number and mode (2 = r/w, 1 = w, 0 = r)]
   for e in execs:
     num = next(i for i,k in enumerate(e.arg["bufs"]) if k == key)
     mode = 2 if (num in e.arg["inputs"] and num in e.arg["outputs"]) else 1 if (num in e.arg["outputs"]) else 0
     ei_encoding.append((e.key, enum_str(e.arg["name"], scache), num, mode))
-  return struct.pack("<BIII", 0, ts, key, len(ei_encoding))+b"".join(struct.pack("<IIBB", *t) for t in ei_encoding)
+  return struct.pack("<BIII", 0, ts, key, len(ei_encoding))+b"".join(struct.pack("<IIIB", *t) for t in ei_encoding)
 
 def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int, peaks:list[int], dtype_size:dict[str, int],
                scache:dict[str, int]) -> bytes|None:
@@ -228,15 +228,16 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
   if not any([rctx.inst_execs, rctx.occ_events]): return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
   steps:list[dict] = []
   for name,disasm in rctx.disasms.items():
-    events:list[ProfileEvent] = []
+    cu_events:dict[str, list[ProfileEvent]] = {}
     # wave instruction events
-    wave_insts:dict[str, dict] = {}
+    wave_insts:dict[str, dict[str, dict]] = {}
     inst_units:dict[str, itertools.count] = {}
     for w in rctx.inst_execs.get(name, []):
       if (u:=w.wave_loc) not in inst_units: inst_units[u] = itertools.count(0)
       n = next(inst_units[u])
-      events.append(ProfileRangeEvent(w.simd_loc, f"INST WAVE:{w.wave_id} N:{n}", Decimal(w.begin_time), Decimal(w.end_time)))
-      wave_insts[f"{u} N:{n}"] = {"wave":w, "disasm":disasm, "run_number":n}
+      if (events:=cu_events.get(w.cu_loc)) is None: cu_events[w.cu_loc] = events = []
+      events.append(ProfileRangeEvent(w.simd_loc, loc:=f"INST WAVE:{w.wave_id} N:{n}", Decimal(w.begin_time), Decimal(w.end_time)))
+      wave_insts.setdefault(w.cu_loc, {})[f"{u} N:{n}"] = {"wave":w, "disasm":disasm, "run_number":n, "loc":loc}
     # occupancy events
     units:dict[str, itertools.count] = {}
     wave_start:dict[str, int] = {}
@@ -244,17 +245,30 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
       if (u:=occ.wave_loc) not in units: units[u] = itertools.count(0)
       if u in inst_units: continue
       if occ.start: wave_start[u] = occ.time
-      else: events.append(ProfileRangeEvent(occ.simd_loc, f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)),Decimal(occ.time)))
-    if not events: continue
-    # gather and sort all sqtt events for this kernel
-    events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+events
+      else:
+        if (events:=cu_events.get(occ.cu_loc)) is None: cu_events[occ.cu_loc] = events = []
+        events.append(ProfileRangeEvent(occ.simd_loc, f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)), Decimal(occ.time)))
+    if not cu_events: continue
+    prg_cu = sorted(cu_events, key=row_tuple)
     kernel = trace.keys[r].ret if (r:=ref_map.get(name)) else None
-    steps.append(create_step(kernel.name if kernel is not None else name, ("/counters", len(ctxs), len(steps)),
-                             {"value":get_profile(events, sort_fn=row_tuple), "content_type":"application/octet-stream"}, depth=1))
-    for k in sorted(wave_insts, key=row_tuple): steps.append(create_step(k, ("/sqtt-insts", len(ctxs), len(steps)), wave_insts[k], depth=2))
+    src = f"Scheduled on {len(prg_cu)} CUs"+(f"\n\n{kernel.global_size=} {kernel.local_size=}" if kernel else "")
+    steps.append(create_step(kernel.name if kernel is not None else name, ("/counters", len(ctxs), len(steps)), {"src":src}, depth=1))
+    for cu in prg_cu:
+      events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]
+      steps.append(create_step(cu, ("/counters", len(ctxs), len(steps)),
+                               {"value":get_profile(events, sort_fn=row_tuple), "content_type":"application/octet-stream"}, depth=2))
+      for k in sorted(wave_insts.get(cu, []), key=row_tuple):
+        data = wave_insts[cu][k]
+        steps.append(create_step(k.replace(cu, ""), ("/sqtt-insts", len(ctxs), len(steps)), data, loc=data["loc"], depth=3))
   ctxs.append({"name":"Counters", "steps":steps})
 
-def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]|None=None) -> bytes|None:
+def device_sort_fn(k:str) -> tuple[int, str, int]:
+  order = {"GC": 0, "USER": 1, "TINY": 2, "DISK": 999}
+  dname = k.split()[0]
+  dev_rank = next((v for k,v in order.items() if dname.startswith(k)), len(order))
+  return (dev_rank, dname, len(k))
+
+def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_sort_fn) -> bytes|None:
   # start by getting the time diffs
   for ev in profile:
     if isinstance(ev,ProfileDeviceEvent): device_ts_diffs[ev.device] = (ev.comp_tdiff, ev.copy_tdiff if ev.copy_tdiff is not None else ev.comp_tdiff)
@@ -280,12 +294,12 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]|None=No
   scache:dict[str, int] = {}
   peaks:list[int] = []
   dtype_size:dict[str, int] = {}
-  for k in sorted(dev_events, key=sort_fn) if sort_fn else dev_events:
-    (v:=dev_events[k]).sort(key=lambda e:e[0])
+  for k,v in dev_events.items():
+    v.sort(key=lambda e:e[0])
     layout[k] = timeline_layout(v, start_ts, scache)
     layout[f"{k} Memory"] = mem_layout(v, start_ts, unwrap(end_ts), peaks, dtype_size, scache)
-  groups = layout.items() if sort_fn is not None else sorted(layout.items(), key=lambda x: '' if len(ss:=x[0].split(" ")) == 1 else ss[1])
-  ret = [b"".join([struct.pack("<B", len(k)), k.encode(), v]) for k,v in groups if v is not None]
+  sorted_layout = sorted([k for k,v in layout.items() if v is not None], key=sort_fn)
+  ret = [b"".join([struct.pack("<B", len(k)), k.encode(), unwrap(layout[k])]) for k in sorted_layout]
   index = json.dumps({"strings":list(scache), "dtypeSize":dtype_size, "markers":[{"ts":int(e.ts-start_ts), **e.arg} for e in markers]}).encode()
   return struct.pack("<IQII", unwrap(end_ts)-start_ts, max(peaks,default=0), len(index), len(ret))+index+b"".join(ret)
 

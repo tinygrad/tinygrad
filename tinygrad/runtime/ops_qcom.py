@@ -51,6 +51,7 @@ class QCOMComputeQueue(HWQueue):
     self.dev = dev
     super().__init__()
 
+  @suppress_finalizing
   def __del__(self):
     if self.binded_device is not None: self.binded_device.allocator.free(self.hw_page, self.hw_page.size, BufferSpec(cpu_access=True, nolru=True))
 
