@@ -201,7 +201,7 @@ function selectShape(key) {
   return { eventType:track?.eventType, e:track?.shapes[idx] };
 }
 
-const Modes = {0:'read', 1:'write', 2:'read+write'};
+const Modes = {0:'read', 1:'write', 2:'write+read'};
 
 function getMetadata(key) {
   const { eventType, e } = selectShape(key);
