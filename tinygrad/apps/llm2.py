@@ -299,18 +299,17 @@ def main(args):
 
   # generate text
   toks = tokenizer(args.prompt)["input_ids"]
-  start_pos = 0
-  timings = [time.perf_counter_ns()]
+  start_pos, timings, st = 0, [], time.perf_counter_ns()
   for next_tok in model.generate(toks, max_new_tokens=args.max_new_tokens):
-    timings.append(time.perf_counter_ns())
+    timings.append(time.perf_counter_ns() - st)
     if args.timing:
-      elapsed = (timings[-1] - timings[-2]) / 1e9
-      print(f'\n[{elapsed:.2f} s, {len(toks[start_pos:])/elapsed:.2f} tok/s]'.ljust(25), end="")
+      print(f'\n[{timings[-1]*1e-9:.2f} s, {len(toks[start_pos:])/timings[-1]*1e9:.2f} tok/s]'.ljust(25), end="")
     print(tokenizer.decode(toks[start_pos:], skip_special_tokens=True), flush=True, end="\n" if args.timing else "")
     if next_tok == tokenizer.eos_token: break
     start_pos = len(toks)
+    st = time.perf_counter_ns()
   print(flush=True)
-  if args.timing: print(f'Average: {len(toks)/(timings[-1] - timings[0])*1e9:.2f} tok/s')
+  if args.timing: print(f'Average: {len(toks)/sum(timings)*1e9:.2f} tok/s')
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="Run gpt-oss in tinygrad", formatter_class=argparse.ArgumentDefaultsHelpFormatter)
