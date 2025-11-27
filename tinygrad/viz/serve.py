@@ -178,12 +178,12 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
   return struct.pack("<BI", 0, len(events))+b"".join(events) if events else None
 
 def encode_mem_free(key:int, ts:int, execs:list[ProfilePointEvent], scache:dict) -> bytes:
-  ei_encoding:list[tuple[int, int, int, int]] = [] # <[u32, u32, u8, u8] [run id, display name, buffer number and mode (2 = r/w, 1 = w, 0 = r)]
+  ei_encoding:list[tuple[int, int, int, int]] = [] # <[u32, u32, u32, u8] [run id, display name, buffer number and mode (2 = r/w, 1 = w, 0 = r)]
   for e in execs:
     num = next(i for i,k in enumerate(e.arg["bufs"]) if k == key)
     mode = 2 if (num in e.arg["inputs"] and num in e.arg["outputs"]) else 1 if (num in e.arg["outputs"]) else 0
     ei_encoding.append((e.key, enum_str(e.arg["name"], scache), num, mode))
-  return struct.pack("<BIII", 0, ts, key, len(ei_encoding))+b"".join(struct.pack("<IIBB", *t) for t in ei_encoding)
+  return struct.pack("<BIII", 0, ts, key, len(ei_encoding))+b"".join(struct.pack("<IIIB", *t) for t in ei_encoding)
 
 def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int, peaks:list[int], dtype_size:dict[str, int],
                scache:dict[str, int]) -> bytes|None:
@@ -263,7 +263,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
   ctxs.append({"name":"Counters", "steps":steps})
 
 def device_sort_fn(k:str) -> tuple[int, str, int]:
-  order = {"USER": 0, "TINY": 1, "DISK": 999}
+  order = {"GC": 0, "USER": 1, "TINY": 2, "DISK": 999}
   dname = k.split()[0]
   dev_rank = next((v for k,v in order.items() if dname.startswith(k)), len(order))
   return (dev_rank, dname, len(k))

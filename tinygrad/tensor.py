@@ -6,19 +6,15 @@ from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, Suppor
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten
-from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, polyN, DEBUG, is_numpy_ndarray, SPEC, TracingKey, cpu_profile
-from tinygrad.helpers import suppress_finalizing
+from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, polyN, is_numpy_ndarray, TracingKey, cpu_profile
+from tinygrad.helpers import suppress_finalizing, disable_gc
 from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
 from tinygrad.mixin.movement import _align_left
 from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop
-from tinygrad.uop.spec import type_verify, tensor_spec
+from tinygrad.engine.schedule import ScheduleItem, complete_create_schedule_with_vars
 from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import run_schedule
-from tinygrad.engine.memory import memory_planner
-from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
-from tinygrad.schedule.rangeify import get_rangeify_map
-from tinygrad.schedule.multi import get_multi_map
 
 # TODO: this should be the only usage of Device
 def canonicalize_device(device:str|None) -> str: return Device.canonicalize(device)
@@ -220,25 +216,6 @@ class Tensor(OpMixin):
 
   # ***** data handlers ****
 
-  def kernelize(self, *lst:Tensor) -> Tensor:
-    """
-    Creates the kernels and buffers needed to realize these Tensor(s).
-
-    NOTE: Kernelize can be called multiple times on a Tensor
-    """
-    big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
-
-    # verify Tensors match the spec
-    if SPEC: type_verify(big_sink, tensor_spec)
-
-    if any(isinstance(x._device, tuple) for x in big_sink.toposort()):
-      _apply_map_to_tensors(get_multi_map(big_sink), name="Apply Multi Map")
-      big_sink = UOp.sink(*flatten([x.uop.src if x.uop.op is Ops.MULTI else [x.uop] for x in (self,)+lst]))
-
-    becomes_map = get_rangeify_map(big_sink)
-    _apply_map_to_tensors(becomes_map, name="Apply Kernelize Map")
-    return self
-
   def custom_kernel(self, *lst:Tensor, fxn:Callable, grad_fxn:Callable|None=None) -> list[Tensor]:
     """
     Call into a custom kernel written in UOps. Returns the Tensors after the Kernel has been applied.
@@ -253,18 +230,9 @@ class Tensor(OpMixin):
 
     NOTE: A Tensor can only be scheduled once.
     """
-    st = time.perf_counter()
-    self.kernelize(*lst)
-    sink = UOp.sink(*[x.uop for x in (self,)+lst])
-
-    # remove all AFTERs, after scheduling, the tensors are just buffers
-    remove_assign_map = {u:u.buf_uop for u in sink.toposort() if u.op is Ops.AFTER}
-    _apply_map_to_tensors(remove_assign_map, name="Remove After")
-
-    # create the schedule
-    with cpu_profile(TracingKey("toposort schedule")): schedule, var_vals = create_schedule_with_vars(sink)
-    with cpu_profile(TracingKey("memory planner")): schedule = memory_planner(schedule)
-    if (DEBUG >= 1 and len(schedule) > 1) or DEBUG >= 3: print(f"scheduled {len(schedule)} kernels in {(time.perf_counter()-st)*1000:.2f} ms")
+    big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
+    becomes_map, schedule, var_vals = complete_create_schedule_with_vars(big_sink)
+    _apply_map_to_tensors(becomes_map, name="Apply Schedule Map")
     return schedule, var_vals
 
   def schedule(self, *lst:Tensor) -> list[ScheduleItem]:
@@ -273,6 +241,7 @@ class Tensor(OpMixin):
     assert len(var_vals) == 0
     return schedule
 
+  @disable_gc()
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
     if len(to_realize:=[x for x in (self,)+lst if not x.uop.is_contiguous()]):
@@ -1853,8 +1822,7 @@ class Tensor(OpMixin):
         # χ and ι step
         state = state.bitwise_xor(~state.roll(shifts=-1, dims=2) & state.roll(shifts=-2, dims=2))
         state = state.flatten(1) ^ rnd_const_masks[i]
-      # NOTE: kernelize here to prevent internal stack from growing propotional to data size
-      state = state.kernelize()
+      # NOTE: there was a kernelize here to prevent internal stack from growing propotional to data size, do we need something else?
     return state.bitcast(dtypes.uint8)[:,:(obytes:=(200 - rate) // 2)].reshape(*self.shape[:-1], obytes)
 
   def _hash_1mb(self) -> Tensor:

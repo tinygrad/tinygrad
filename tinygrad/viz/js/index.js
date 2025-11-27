@@ -194,16 +194,30 @@ function tabulate(rows) {
 
 var data, focusedDevice, focusedShape, canvasZoom, formatTime, zoomLevel = d3.zoomIdentity;
 
-function getMetadata(shape) {
-  if (shape == null) return;
-  const [t, idx] = shape.split("-");
+function selectShape(key) {
+  if (key == null) return {};
+  const [t, idx] = key.split("-");
   const track = data.tracks.get(t);
-  if (track == null) return;
-  const e = track.shapes[idx];
+  return { eventType:track?.eventType, e:track?.shapes[idx] };
+}
+
+const Modes = {0:'read', 1:'write', 2:'write+read'};
+
+function getMetadata(key) {
+  const { eventType, e } = selectShape(key);
   const html = d3.create("div").classed("info", true);
-  if (track.eventType === EventTypes.EXEC) {
-    html.append(() => tabulate([["Name", d3.create("p").html(e.arg.tooltipText.split("\n")[0]).node()],
-                                ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]]).node());
+  if (eventType === EventTypes.EXEC) {
+    const [n, _, ...rest] = e.arg.tooltipText.split("\n");
+    html.append(() => tabulate([["Name", d3.create("p").html(n).node()], ["Duration", formatTime(e.width)], ["Start Time", formatTime(e.x)]]).node());
+    let group = html.append("div").classed("args", true);
+    for (const r of rest) group.append("p").text(r);
+    group = html.append("div").classed("args", true);
+    for (const b of e.arg.bufs.sort((a, b) => a.num - b.num)) {
+      group.append("p").text(`${Modes[b.mode]}@data${b.num} ${formatUnit(b.nbytes, 'B')}`).style("cursor", "pointer").on("click", () => {
+        const row = document.getElementById(b.k); if (!isExpanded(row)) { row.click(); }
+        focusShape(b.key);
+      });
+    }
     if (e.arg.ctx != null) {
       const i = e.arg.ctx; s = e.arg.step;
       html.append("a").text(ctxs[i+1].steps[s].name).on("click", () => switchCtx(i, s));
@@ -211,7 +225,7 @@ function getMetadata(shape) {
       if (prgSrc !== -1) html.append("a").text("View program").on("click", () => switchCtx(i, prgSrc));
     }
   }
-  if (track.eventType === EventTypes.BUF) {
+  if (eventType === EventTypes.BUF) {
     const [dtype, sz, nbytes, dur] = e.arg.tooltipText.split("\n");
     const rows = [["DType", dtype], ["Len", sz], ["Size", nbytes], ["Lifetime", dur]];
     if (e.arg.users != null) rows.push(["Users", e.arg.users.length]);
@@ -219,13 +233,10 @@ function getMetadata(shape) {
     const kernels = html.append("div").classed("args", true);
     for (let u=0; u<e.arg.users?.length; u++) {
       const { repr, num, mode, shape } = e.arg.users[u];
-      const bufInfo = `${mode == 2 ? 'read+write' : mode == 1 ? 'write' : 'read'}@data${num}`;
-      const p = kernels.append("p").append(() => colored(`[${u}] ${repr} ${bufInfo}`));
-      const shapeTxt = shape?.tooltipText?.split("\n").at(-1);
-      if (shapeTxt != null) p.append("span").text(" "+shapeTxt);
-      if (shape != null) {
-        p.style("cursor", "pointer").on("click", () => focusShape(shape));
-      }
+      const p = kernels.append("p").append(() => colored(`[${u}] ${repr} ${Modes[mode]}@data${num}`));
+      const shapeInfo = selectShape(shape).e?.arg?.tooltipText?.split("\n");
+      if (shapeInfo?.length > 5) p.append("span").text(" "+shapeInfo[5]);
+      if (shape != null) p.style("cursor", "pointer").on("click", () => focusShape(shape));
     }
   }
   return html.node();
@@ -234,7 +245,7 @@ function getMetadata(shape) {
 function focusShape(shape) {
   saveToHistory({ shape:focusedShape });
   focusedShape = shape; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
-  return metadata.replaceChildren(getMetadata(focusedShape) ?? "");
+  return metadata.replaceChildren(getMetadata(focusedShape));
 }
 
 const EventTypes = { EXEC:0, BUF:1 };
@@ -244,7 +255,7 @@ async function renderProfiler(path, unit, opts) {
   // support non realtime x axis units
   formatTime = unit === "realtime" ? formatMicroseconds : (s) => formatUnit(s, " "+unit);
   if (data?.path !== path) data = {tracks:new Map(), axes:{}, path, first:null};
-  metadata.replaceChildren(getMetadata(focusedShape) ?? "");
+  metadata.replaceChildren(getMetadata(focusedShape));
   // layout once!
   if (data.tracks.size !== 0) return updateProgress({ start:false });
   const profiler = d3.select("#profiler").html("");
@@ -323,7 +334,7 @@ async function renderProfiler(path, unit, opts) {
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
         const labelHTML = label.map(l=>`<span style="color:${l.color}">${l.st}</span>`).join("");
-        const arg = { tooltipText:labelHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), key,
+        const arg = { tooltipText:labelHTML+"\n"+formatTime(e.dur)+(e.info != null ? "\n"+e.info : ""), bufs:[], key,
                       ctx:shapeRef?.ctx, step:shapeRef?.step };
         if (e.key != null) shapeMap.set(e.key, key);
         // offset y by depth
@@ -346,7 +357,7 @@ async function renderProfiler(path, unit, opts) {
           x += 1; y += nbytes; valueMap.set(ts, y);
         } else {
           const free = buf_shapes.get(key);
-          free.users = Array.from({ length: u32() }, () => ({shape:shapeMap.get(u32()), repr:strings[u32()], num:u8(), mode:u8()}));
+          free.users = Array.from({ length: u32() }, () => ({shape:shapeMap.get(u32()), repr:strings[u32()], num:u32(), mode:u8()}));
           timestamps.push(ts); valueMap.set(ts, y);
           x += 1; y -= free.nbytes;
           free.x.push(x);
@@ -367,6 +378,7 @@ async function renderProfiler(path, unit, opts) {
         const dur = x.at(-1)-x[0];
         const arg = { tooltipText:`${dtype}\n${sz}\n${formatUnit(nbytes, 'B')}\n${formatTime(dur)}`, users, key:`${k}-${shapes.length}` };
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
+        users?.forEach((u) => selectShape(u.shape).e?.arg.bufs.push({ key:arg.key, nbytes, num:u.num, mode:u.mode, k }));
       }
       // generic polygon merger
       const base0 = yscale(0);

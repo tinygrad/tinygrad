@@ -291,6 +291,15 @@ def cpu_profile(name:str|TracingKey, device="TINY", is_copy=False, display=True)
 def profile_marker(name:str, color="gray") -> None:
   cpu_events.append(ProfilePointEvent("TINY", "marker", None, {"name":name, "color":color}))
 
+if getenv("DEBUG_GC"):
+  gc_start: decimal.Decimal = perf_counter_us()
+  def my_gc_callback(phase, info):
+    global gc_start
+    if phase == 'start': gc_start = perf_counter_us()
+    elif phase == "stop":
+      cpu_events.append(ProfileRangeEvent("GC", f"collected: {info['collected']} (gen {info['generation']})", gc_start, perf_counter_us()))
+  if PROFILE: gc.callbacks.append(my_gc_callback)
+
 # *** universal database cache ***
 
 cache_dir: str = os.path.join(getenv("XDG_CACHE_HOME", os.path.expanduser("~/Library/Caches" if OSX else "~/.cache")), "tinygrad")

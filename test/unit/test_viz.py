@@ -262,14 +262,6 @@ from tinygrad import Tensor, Device
 from tinygrad.engine.realize import get_program
 
 class TestVizIntegration(BaseTestViz):
-  # kernelize has a custom name function in VIZ
-  def test_kernelize_tracing(self):
-    a = Tensor.empty(4, 4)
-    Tensor.kernelize(a+1, a+2)
-    lst = get_viz_list()
-    self.assertEqual(len(lst), 1)
-    self.assertEqual(lst[0]["name"], "Schedule 2 Kernels n1")
-
   # codegen supports rendering of code blocks
   def test_codegen_tracing(self):
     ast = Tensor.schedule(Tensor.empty(4)+Tensor.empty(4))[0].ast
@@ -284,7 +276,7 @@ class TestVizIntegration(BaseTestViz):
       a = Tensor.empty(1)
       b = Tensor.empty(1)
       metadata = (alu:=a+b).uop.metadata
-      alu.kernelize()
+      alu.schedule()
       graph = next(get_viz_details(0, 0))["graph"]
     self.assertEqual(len([n for n in graph.values() if repr(metadata) in n["label"]]), 1)
 
@@ -367,7 +359,7 @@ def load_profile(lst:list[ProfileEvent]) -> dict:
       for _ in range(event_count):
         alloc, ts, key = u("<BII")
         if alloc: v["events"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
-        else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[u("<IIBB") for _ in range(u("<I")[0])]}})
+        else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[u("<IIIB") for _ in range(u("<I")[0])]}})
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
 class TestVizProfiler(BaseTestViz):
