@@ -1,7 +1,8 @@
 import time
+import heapq
+from collections import defaultdict
 from typing import cast
 from dataclasses import dataclass, field, replace
-from collections import deque
 from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
@@ -19,80 +20,91 @@ class ScheduleItem:
 
 # **** schedule linearizer
 
-def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[str, int]]:
+def create_schedule_with_vars(sched_sink: UOp) -> tuple[list[ScheduleItem], dict[str, int]]:
   with cpu_profile(TracingKey("toposort sched_sink")):
-    # construct the KERNEL children graph based on assigns
-    children: dict[UOp, list[UOp]] = {}
+    # build kernel dependency graph from AFTER operations
+    children: defaultdict[UOp, list[UOp]] = defaultdict(list)
     in_degree: dict[UOp, int] = {}
     var_vals: dict[str, int] = {}
+    priorities: dict[UOp, int] = {}
     for u in sched_sink.toposort():
       if u.op is Ops.RANGE:
-        in_degree.setdefault(u, 0)
+        in_degree[u] = 0
+        priorities[u] = 0
         continue
       if u.op is not Ops.AFTER or u.src[1].op is Ops.RANGE: continue
       k = u.src[1]
       in_degree.setdefault(k, 0)
-      for s in k.src[0].src if k.op is Ops.END else k.src:
+      #prioritize kernels to improve execution locality
+      priorities[k] = 10 if k.op is Ops.KERNEL else 0
+      for s in (k.src[0].src if k.op is Ops.END else k.src):
         if s.op is Ops.AFTER:
-          children.setdefault(s.src[1], []).append(k)
+          children[s.src[1]].append(k)
           in_degree[k] += 1
         elif s.op in {Ops.MSELECT, Ops.MSTACK}:
           for ss in s.src:
-            if ss.op is Ops.MSELECT: ss = ss.src[0]
+            ss = ss.src[0] if ss.op is Ops.MSELECT else ss
             if ss.op is not Ops.BUFFER:
-              assert ss.op is Ops.AFTER, f"ss.op is not AFTER, it's {ss.op}"
-              children.setdefault(ss.src[1], []).append(k)
+              assert ss.op is Ops.AFTER, f"unexpected op {ss.op}"
+              children[ss.src[1]].append(k)
               in_degree[k] += 1
         elif s.op is Ops.BUFFER:
-          pass  # a BUFFER is already realized, nothing to do here
+          pass
         elif s.op is Ops.BIND:
-          # for RANGE this is in fixedvars
           if s.src[1].op is not Ops.RANGE:
             var, val = s.unbind()
-            assert var.expr not in var_vals or var_vals[var.expr] == val, f"bind mismatch on {var}, {var_vals[var.expr]} != {val}"
+            assert var.expr not in var_vals or var_vals[var.expr] == val, f"bind conflict {var.expr}"
             var_vals[var.expr] = val
         else:
-          raise RuntimeError(f"input to kernel must be AFTER or BUFFER, not {s.op}")
+          raise RuntimeError(f"unexpected input {s.op}")
 
   with cpu_profile(TracingKey("linearize to ScheduleItem")):
-    queue: deque[UOp] = deque()
-    for k,v in in_degree.items():
-      if v == 0: queue.append(k)
-
-    schedule: list[ScheduleItem|UOp] = []
-    while len(queue):
-      k = rk = queue.popleft()
-      if k.op is Ops.END: k = k.src[0]
-      if k.op is Ops.RANGE: schedule.append(k)
+    #using a heap-based topological sort with priority ordering
+    queue: list[tuple[int, int, UOp]] = []
+    counter = 0
+    for k, v in in_degree.items():
+      if v == 0:
+        heapq.heappush(queue, (-priorities.get(k, 0), -counter, k))
+        counter += 1
+    #linearize kernels into schedule items
+    schedule: list[ScheduleItem | UOp] = []
+    while queue:
+      _, _, rk = heapq.heappop(queue)
+      k = rk.src[0] if rk.op is Ops.END else rk
+      if k.op is Ops.RANGE:
+        schedule.append(k)
       elif k.op is Ops.KERNEL:
         ast = k.arg.ast
-        # create subbuffers if needed
+        #create buffer views for offset access
         if ast.op is Ops.BUFFER_VIEW:
           base = k.src[1].buf_uop.buffer
-          assert isinstance(base, Buffer), "base can't be MultiBuffer"
-          buffers[k.src[0]] = base.view(k.size, ast.dtype, ast.arg[1]*base.dtype.itemsize)
+          assert isinstance(base, Buffer), "base cannot be MultiBuffer"
+          buffers[k.src[0]] = base.view(k.size, ast.dtype, ast.arg[1] * base.dtype.itemsize)
         ubufs = tuple(s.buf_uop.buffer for s in k.src if s.op is not Ops.BIND)
         bound_ranges = tuple(s for s in k.src if s.op is Ops.BIND and s.src[1].op is Ops.RANGE)
+        #multi-device: generate one schedule item per device
         if any(isinstance(x, MultiBuffer) for x in ubufs):
-          assert all(isinstance(x, MultiBuffer) for x in ubufs), "kernel must all be multibuffer"
+          assert all(isinstance(x, MultiBuffer) for x in ubufs), "mixed buffer types"
           dnums = [x for x in ast.variables() if x.arg[0] == '_device_num']
-          for i,bufs in enumerate(zip(*[x.bufs for x in cast(tuple[MultiBuffer, ...], ubufs)])):
-            schedule.append(ScheduleItem(ast, bufs, k.arg.metadata, {dnums[0].expr:i} if len(dnums) else {}, bound_ranges=bound_ranges))
+          for i, bufs in enumerate(zip(*[x.bufs for x in cast(tuple[MultiBuffer, ...], ubufs)])):
+            schedule.append(ScheduleItem(ast, bufs, k.arg.metadata, {dnums[0].expr: i} if len(dnums) else {}, bound_ranges=bound_ranges))
         else:
-          # ONE -> ONE
           schedule.append(ScheduleItem(ast, cast(tuple[Buffer, ...], ubufs), k.arg.metadata, bound_ranges=bound_ranges))
         if rk.op is Ops.END: schedule.append(rk)
       else:
-        raise RuntimeError(f"can't schedule {k.op}")
+        raise RuntimeError(f"cannot schedule {k.op}")
       for x in children.get(rk, []):
         in_degree[x] -= 1
-        if in_degree[x] == 0: queue.append(x)
+        if in_degree[x] == 0:
+          heapq.heappush(queue, (-priorities.get(x, 0), -counter, x))
+          counter += 1
 
   with cpu_profile(TracingKey("expand ranges")):
+    #expand ranges into explicit loop iterations
     real_schedule: list[ScheduleItem] = []
     sched_ptr = 0
-    in_ranges = {}
-    range_ptrs = {}
+    in_ranges: dict[UOp, int] = {}
+    range_ptrs: dict[UOp, int] = {}
     while sched_ptr < len(schedule):
       si = schedule[sched_ptr]
       if isinstance(si, UOp):
@@ -105,7 +117,7 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
             sched_ptr = range_ptrs[si.src[1]]
             continue
       else:
-        real_schedule.append(replace(si, fixedvars=si.fixedvars | {s.src[0].arg[0]:in_ranges[s.src[1]] for s in si.bound_ranges}, bound_ranges=()))
+        real_schedule.append(replace(si, fixedvars=si.fixedvars | {s.src[0].arg[0]: in_ranges[s.src[1]] for s in si.bound_ranges}, bound_ranges=()))
       sched_ptr += 1
   return real_schedule, var_vals
 
