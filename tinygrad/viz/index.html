@@ -347,6 +347,18 @@
   tr.nested-row table tr.main-row:hover {
     background-color: unset;
   }
+  tr.main-row.has-children > td:first-child {
+    white-space: pre;
+  }
+  tr.main-row.has-children > td:first-child::before {
+    content: "▸ ";
+    display: inline-block;
+    width: 1em;
+    margin-left: -0.25em;
+  }
+  tr.main-row.has-children.expanded > td:first-child::before {
+    content: "▾ ";
+  }
   </style>
 </head>
 <body>

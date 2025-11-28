@@ -773,6 +773,7 @@ async function main() {
         for (const [i,value] of r.entries()) {
           // nested table
           if (value.cols != null) {
+            tr.classList.add("has-children");
             tr.onclick = () => {
               const el = tr.nextElementSibling;
               if (el?.classList.contains("nested-row")) { tr.classList.remove("expanded"); return el.remove(); }
