@@ -357,7 +357,7 @@ def get_render(i:int, j:int, fmt:str) -> dict:
     prev_instr = (w:=data["wave"]).begin_time
     pc_to_inst = data["disasm"]
     start_pc = None
-    rows:dict[int, tuple] = {}
+    rows:dict[int, dict] = {}
     for e in w.unpack_insts():
       if start_pc is None: start_pc = e.pc
       if (inst:=rows.get(e.pc)) is None:
