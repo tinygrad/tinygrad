@@ -131,7 +131,7 @@ class TestTiming(unittest.TestCase):
 
   def test_multiple_runs(self):
     N = 4096
-    CNT = 2
+    CNT = getenv("CNT", 2)
     with save_sqtt() as sqtt:
       for _ in range(CNT):
         Tensor.ones(N, N).contiguous().realize()
