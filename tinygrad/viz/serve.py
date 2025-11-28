@@ -323,7 +323,7 @@ def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
   summary = [{"idx":k, "label":resource_labels[k], "value":v} for k,v in instr_usage.pop(len(rows), {}).items()]
   max_usage = max([sum(v.values()) for i,v in instr_usage.items() if i<len(rows)], default=0)
   for i,usage in instr_usage.items(): rows[i].append([[k, v, (v/max_usage)*100] for k,v in usage.items()])
-  return {"rows":rows, "cols":["Opcode", "Latency", {"title":"HW Resources", "labels":resource_labels}], "summary":summary}
+  return {"rows":rows, "cols":["Instruction", "Latency", {"title":"HW Resources", "labels":resource_labels}], "summary":summary}
 
 def get_stdout(f: Callable) -> str:
   buf = io.StringIO()

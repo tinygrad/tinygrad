@@ -769,15 +769,16 @@ async function main() {
       for (const c of ret.cols) thead.appendChild(document.createElement("th")).innerText = c.title ?? c;
       for (const r of ret.rows) {
         const tr = asm.appendChild(document.createElement("tr"));
-        tr.className = "main-row code-row";
+        tr.className = "main-row";
         for (const [i,value] of r.entries()) {
+          const td = tr.appendChild(document.createElement("td"));
+          td.className = ret.cols[i];
           // string format scalar values
-          if (!Array.isArray(value)) tr.appendChild(document.createElement("td")).innerText = value;
+          if (!Array.isArray(value)) td.innerText = value;
           // display arrays in a bar graph
           else {
-            const segmentsTd = tr.appendChild(document.createElement("td"));
-            segmentsTd.className = "pct-row";
-            const usageBar = segmentsTd.appendChild(document.createElement("div"));
+            td.classList.add("pct-row");
+            const usageBar = td.appendChild(document.createElement("div"));
             for (const [k, v, width] of value) {
               const seg = usageBar.appendChild(document.createElement("div"));
               seg.style.width = width+"%";
