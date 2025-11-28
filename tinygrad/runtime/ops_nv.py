@@ -591,7 +591,7 @@ class NVDevice(HCQCompiled[HCQSignal]):
     self.synchronize()
 
   def _ensure_has_local_memory(self, required):
-    if self.slm_per_thread >= required or ((maxlm:=getenv("NV_MAX_LOCAL_MEMORY_PER_THREAD")) > 0 and required >= maxlm): return
+    if self.slm_per_thread >= required: return
 
     self.slm_per_thread, old_slm_per_thread = round_up(required, 32), self.slm_per_thread
     bytes_per_tpc = round_up(round_up(self.slm_per_thread * 32, 0x200) * self.max_warps_per_sm * self.num_sm_per_tpc, 0x8000)
