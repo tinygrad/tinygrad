@@ -661,14 +661,9 @@ class NVDevice(HCQCompiled[HCQSignal]):
   def _ensure_has_vid_hw(self, w, h):
     if self.iface.viddec_class is None: raise RuntimeError(f"{self.device} Video decoder class not available.")
 
-    self.col_mv_buffersize = (round_up(w, 64) * round_up(h, 64) // 16) // 256
-    self.flt_above_off, self.flt_above_size = 0, round_up(w, 64) * 4
-    self.slice_edge_off, self.slice_edge_size = round_up(self.flt_above_off + self.flt_above_size, 0x10000), round_up(h, 64) * 4
-    self.sao_off, self.sao_size = round_up(self.slice_edge_off + self.slice_edge_size, 0x10000), self.col_mv_buffersize * 32
-    self.bsd_ctrl_off, self.bsd_ctrl_size = round_up(self.sao_off + self.sao_size, 0x10000), self.col_mv_buffersize * 160
-    self.intra_top_off, self.intra_top_size = round_up(self.bsd_ctrl_off + self.bsd_ctrl_size, 0x10000), round_up(w, 64) * 40
-    filter_size = round_up(self.intra_top_off + self.intra_top_size, 2 << 20)
-    coloc_size = round_up((round_up(w, 64) * round_up(h, 64)) + (round_up(w, 64) * round_up(h, 64) // 16), 2 << 20)
+    coloc_size = round_up((round_up(h, 64) * round_up(h, 64)) + (round_up(w, 64) * round_up(h, 64) // 16), 2 << 20)
+    self.intra_top_off = round_up(h, 64) * (608 + 4864 + 152 + 2000)
+    filter_size = round_up(round_up(self.intra_top_off, 0x10000) + 64 << 10, 2 << 20)
 
     if not hasattr(self, 'vid_gpfifo'):
       self.vid_gpfifo = self._new_gpu_fifo(self.gpfifo_area, 0, self.nvdevice, offset=0x200000, entries=2048, compute=False, video=True)

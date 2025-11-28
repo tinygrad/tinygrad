@@ -1,7 +1,7 @@
 import cv2, argparse, os
 from tinygrad.runtime.ops_nv import NVVideoQueue
 from tinygrad.helpers import getenv, DEBUG
-from tinygrad.helpers import DEBUG, round_up, ceildiv, Timing, prod
+from tinygrad.helpers import DEBUG, round_up, ceildiv, Timing, prod, tqdm
 from extra.hevc.hevc import parse_hevc_file_headers, _addr_table, nv12_to_bgr_from_planes, nv_gpu
 from tinygrad import Tensor, dtypes, Device, TinyJit
 
@@ -25,9 +25,8 @@ if __name__ == "__main__":
   with Timing("prep infos: "):
     dat = bytes(hevc_tensor.data())
     dat_nv = hevc_tensor.to("NV")
-    w, h, frame_info = parse_hevc_file_headers(dat)
-  
-  # frame_info = frame_info[:80]
+    w, h, luma_w, luma_h, frame_info = parse_hevc_file_headers(dat)
+
   offset, sz, shape, opaque, frame_pos, history_sz, _ = frame_info[0]
   chroma_off = round_up(shape[0], 64) * round_up(shape[1], 64)
 
@@ -45,7 +44,10 @@ if __name__ == "__main__":
       bufout.uop.buffer.allocate()
       all_bufs_out.append(bufout)
 
-      pic = Tensor.empty(h, w, 3, dtype=dtypes.uint8).realize()
+      if getenv("VALIDATE", 0):
+        pic = Tensor.empty((h + (h + 1) // 2) * w, dtype=dtypes.uint8).realize()
+      else:
+        pic = Tensor.empty(h, w, 3, dtype=dtypes.uint8).realize()
       pic.uop.buffer.allocate()
       all_pics.append(pic)
     Device.default.synchronize()
@@ -54,7 +56,7 @@ if __name__ == "__main__":
   def untile_nv12(src:Tensor, out:Tensor):
     luma = src.reshape(-1)[_addr_table(h, w, round_up(w, 64))]
     chroma = src.reshape(-1)[chroma_off:][_addr_table((h + 1) // 2, w, round_up(w, 64))]
-    x = nv12_to_bgr_from_planes(luma, chroma, h, w)
+    x = luma.cat(chroma) if getenv("VALIDATE", 0) else nv12_to_bgr_from_planes(luma, chroma, h, w)
     out.assign(x).realize()
     return x.realize()
 
@@ -62,11 +64,11 @@ if __name__ == "__main__":
   for i in range(3): x = untile_nv12(all_bufs_out[0], all_pics[0])
 
   dev = Device.default
-  dev._ensure_has_vid_hw(w, h)
+  dev._ensure_has_vid_hw(luma_w, luma_h)
 
   history = []
   prev_timeline_wait = dev.timeline_value - 1
-  with Timing("decoding whole file (no tg): ", on_exit=(lambda et: f", {len(frame_info)} frames, {len(frame_info)/(et/1e9):.2f} fps")):
+  with Timing("decoding whole file (hcq): ", on_exit=(lambda et: f", {len(frame_info)} frames, {len(frame_info)/(et/1e9):.2f} fps")):
     for i, (offset, sz, shape, opaque, frame_pos, history_sz, is_hist) in enumerate(frame_info):
       history = history[-history_sz:] if history_sz > 0 else []
 
@@ -86,16 +88,13 @@ if __name__ == "__main__":
     Device.default.synchronize()
 
   import cv2
-  for i, src in enumerate(all_pics):
-    if getenv("HEVC_DUMP_FRAMES"):
-      cv2.imwrite(f"{args.output_dir}/nv_frame_{i:04d}.png", all_pics[i].numpy())
+  if getenv("VALIDATE", 0):
+    import pickle
+    decoded_frames = pickle.load(open("extra/hevc/cuda_decoded_frames.pkl", "rb"))
 
-    if getenv("VALIDATE"):
-      if os.path.exists(f"{args.output_dir}/ref_frame_{i:04d}.png"):
-        ref = cv2.imread(f"{args.output_dir}/ref_frame_{i:04d}.png")
-        diff = cv2.absdiff(ref, all_pics[i].numpy())
-        max_diff = diff.max()
-        avg_diff = diff.mean()
-        print(f"Ref frame {i}: max diff: {max_diff}, avg diff: {avg_diff}")
-        if max_diff > 1:
-          cv2.imwrite(f"{args.output_dir}/diff_frame_{i:04d}.png", diff)
+  for i, src in tqdm(enumerate(all_pics)):
+    if getenv("VALIDATE", 0):
+      if i < len(decoded_frames):
+        assert all_pics[i].data() == decoded_frames[i], f"Frame {i} does not match reference decoder!"
+    else:
+      cv2.imwrite(f"{args.output_dir}/cm_frame_{i:04d}.png", all_pics[i].numpy())
