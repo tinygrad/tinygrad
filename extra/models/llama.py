@@ -103,6 +103,9 @@ class Attention:
         ck = Tensor.custom_kernel(grad_q, grad_k, grad_v, Tensor(grad), q, k, v, fxn=fa_custom_backward)[:3]
         return (None, ck[0].uop, ck[1].uop, ck[2].uop)
       attn = Tensor.empty_like(attn).custom_kernel(xq, keys, values, fxn=fa_custom_forward, grad_fxn=fa_backward)[0]
+    if getenv("FLASH_ATTENTION"):
+      from extra.thunder.tiny.fa import flash_attention
+      attn = flash_attention(xq, keys, values).transpose(1, 2)
     attn = attn.reshape(bsz, seqlen, -1)
     return self.wo(attn)
 
