@@ -763,14 +763,27 @@ async function main() {
     metadata.innerHTML = "";
     const root = d3.create("div").classed("raw-text", true).node();
     // detailed assembly view
-    if (ret.cols != null) {
-      const asm = root.appendChild(document.createElement("table"));
-      const thead = asm.appendChild(document.createElement("thead"));
+    function renderTable(root, ret) {
+      const table = root.appendChild(document.createElement("table"));
+      const thead = table.appendChild(document.createElement("thead"));
       for (const c of ret.cols) thead.appendChild(document.createElement("th")).innerText = c.title ?? c;
       for (const r of ret.rows) {
-        const tr = asm.appendChild(document.createElement("tr"));
+        const tr = table.appendChild(document.createElement("tr"));
         tr.className = "main-row";
         for (const [i,value] of r.entries()) {
+          // nested table
+          if (value.cols != null) {
+            tr.onclick = () => {
+              const el = tr.nextElementSibling;
+              if (el?.classList.contains("nested-row")) { tr.classList.remove("expanded"); return el.remove(); }
+              tr.classList.add("expanded");
+              const nestedTr = table.insertBefore(document.createElement("tr"), tr.nextSibling); nestedTr.className = "nested-row"; ;
+              const td = nestedTr.appendChild(document.createElement("td"));
+              td.colSpan = ret.cols.length;
+              renderTable(td, value);
+            }
+            continue;
+          }
           const td = tr.appendChild(document.createElement("td"));
           td.className = ret.cols[i];
           // string format scalar values
@@ -788,6 +801,10 @@ async function main() {
           }
         }
       }
+      return table;
+    }
+    if (ret.cols != null) {
+      renderTable(root, ret);
       metadata.appendChild(tabulate(ret.summary.map(s => {
         const div = d3.create("div").style("background", cycleColors(colorScheme.CATEGORICAL, s.idx)).style("width", "100%").style("height", "100%");
         return [s.label.trim(), div.text(s.value.toLocaleString()).node()];

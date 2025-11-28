@@ -345,7 +345,8 @@ def get_render(i:int, j:int, fmt:str) -> dict:
                           ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode())
     return {"src":disasm_str, "lang":"x86asm"}
   if fmt == "sqtt-insts":
-    columns = ["Instruction", "Clk", "Idle", "Duration", "Stall", "Type"]
+    columns = ["PC", "Instruction", "Hits", "Duration", "Stall", "Type"]
+    inst_columns = ["N", "Clk", "Idle", "Dur", "Stall"]
     # Idle:     The total time gap between the completion of previous instruction and the beginning of the current instruction.
     #           The idle time can be caused by:
     #             * Arbiter loss
@@ -355,13 +356,21 @@ def get_render(i:int, j:int, fmt:str) -> dict:
     # Duration: Total latency in cycles, defined as "Stall time + Issue time" for gfx9 or "Stall time + Execute time" for gfx10+.
     prev_instr = (w:=data["wave"]).begin_time
     pc_to_inst = data["disasm"]
-    rows:list[tuple] = []
+    start_pc = None
+    rows:dict[int, tuple] = {}
     for e in w.unpack_insts():
-      rows.append((pc_to_inst[e.pc][0], e.time, max(0, e.time-prev_instr), e.dur, e.stall, str(e.typ).split("_")[-1]))
+      if start_pc is None: start_pc = e.pc
+      if (inst:=rows.get(e.pc)) is None:
+        rows[e.pc] = inst = {"pc":e.pc-start_pc, "inst":pc_to_inst[e.pc][0], "hit_count":0, "dur":0, "stall":0, "type":str(e.typ).split("_")[-1],
+                             "hits":{"cols":inst_columns, "rows":[]}}
+      inst["hit_count"] += 1
+      inst["dur"] += e.dur
+      inst["stall"] += e.stall
+      inst["hits"]["rows"].append((inst["hit_count"]-1, e.time, max(0, e.time-prev_instr), e.dur, e.stall))
       prev_instr = max(prev_instr, e.time + e.dur)
     summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
                {"label":"SIMD", "value":w.simd}, {"label":"Wave ID", "value":w.wave_id}, {"label":"Run number", "value":data["run_number"]}]
-    return {"rows":rows, "cols":columns, "summary":summary}
+    return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "summary":summary}
   return data
 
 # ** HTTP server
