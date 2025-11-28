@@ -1,9 +1,8 @@
 import time
-import sys
 import heapq
-from collections import defaultdict
-from typing import cast
+from typing import cast, Any
 from dataclasses import dataclass, field, replace
+from collections import defaultdict
 from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
@@ -23,87 +22,101 @@ class ScheduleItem:
 
 def create_schedule_with_vars(sched_sink: UOp) -> tuple[list[ScheduleItem], dict[str, int]]:
   with cpu_profile(TracingKey("toposort sched_sink")):
-    # build kernel dependency graph from AFTER operations
+    # construct the KERNEL children graph based on assigns
     children: defaultdict[UOp, list[UOp]] = defaultdict(list)
     in_degree: dict[UOp, int] = {}
+    out_degree: dict[UOp, int] = {}
     var_vals: dict[str, int] = {}
-    priorities: dict[UOp, int] = {}
+    priorities: dict[UOp, tuple[int, int, Any]] = {}
+
+    # collect all schedulable nodes and build dependency graph
+    all_nodes: list[UOp] = []
     for u in sched_sink.toposort():
       if u.op is Ops.RANGE:
-        in_degree[u] = 0
-        #higher priority for RANGE to make sure it schedules before the kernels inside it
-        priorities[u] = 20
+        in_degree.setdefault(u, 0)
+        out_degree[u] = 0
+        all_nodes.append(u)
         continue
       if u.op is not Ops.AFTER or u.src[1].op is Ops.RANGE: continue
       k = u.src[1]
       in_degree.setdefault(k, 0)
-      # prioritize kernels to improve execution locality
-      priorities[k] = 10 if k.op is Ops.KERNEL else 0
-      for s in (k.src[0].src if k.op is Ops.END else k.src):
+      out_degree.setdefault(k, 0)
+      all_nodes.append(k)
+      for s in k.src[0].src if k.op is Ops.END else k.src:
         if s.op is Ops.AFTER:
           children[s.src[1]].append(k)
           in_degree[k] += 1
+          out_degree[s.src[1]] = out_degree.get(s.src[1], 0) + 1
         elif s.op in {Ops.MSELECT, Ops.MSTACK}:
           for ss in s.src:
-            ss = ss.src[0] if ss.op is Ops.MSELECT else ss
+            if ss.op is Ops.MSELECT: ss = ss.src[0]
             if ss.op is not Ops.BUFFER:
-              assert ss.op is Ops.AFTER, f"unexpected op {ss.op}"
+              assert ss.op is Ops.AFTER, f"ss.op is not AFTER, it's {ss.op}"
               children[ss.src[1]].append(k)
               in_degree[k] += 1
+              out_degree[ss.src[1]] = out_degree.get(ss.src[1], 0) + 1
         elif s.op is Ops.BUFFER:
-          pass
+          pass  # a BUFFER is already realized, nothing to do here
         elif s.op is Ops.BIND:
+          # for RANGE this is in fixedvars
           if s.src[1].op is not Ops.RANGE:
             var, val = s.unbind()
             assert var.expr not in var_vals or var_vals[var.expr] == val, f"bind mismatch on {var}, {var_vals[var.expr]} != {val}"
             var_vals[var.expr] = val
         else:
-          raise RuntimeError(f"unexpected input {s.op}")
+          raise RuntimeError(f"input to kernel must be AFTER or BUFFER, not {s.op}")
+    # assign priorities similar to linearize.py pattern
+    for u in all_nodes:
+      match u.op:
+        case Ops.RANGE: priority = -10   # RANGE early
+        case Ops.END: priority = 10      # END late
+        case Ops.KERNEL: priority = 0    # KERNEL in middle
+        case _: priority = 0
+      priorities[u] = (priority, id(u), None)
 
   with cpu_profile(TracingKey("linearize to ScheduleItem")):
-    # heap-based topological sort with priority ordering
-    queue: list[tuple[int, int, UOp]] = []
-    counter = 0
-    for k, v in in_degree.items():
-      if v == 0:
-        heapq.heappush(queue, (-priorities.get(k, 0), -counter, k))
-        counter += 1
-    # linearize kernels into schedule items
+    # number nodes in "ideal" order (sorted by priority)
+    sorted_nodes = sorted(all_nodes, key=lambda x: priorities[x])
+    nkey = {u: i for i, u in enumerate(sorted_nodes)}
+    # heap-based toposort forcing nodes as close to ideal order as possible
+    # start with nodes that have no dependencies
+    heap: list[tuple[int, UOp]] = []
+    for k in all_nodes:
+      if in_degree.get(k, 0) == 0:
+        heapq.heappush(heap, (nkey[k], k))
     schedule: list[ScheduleItem | UOp] = []
-    while queue:
-      _, _, rk = heapq.heappop(queue)
+    while heap:
+      _, rk = heapq.heappop(heap)
       k = rk.src[0] if rk.op is Ops.END else rk
       if k.op is Ops.RANGE:
         schedule.append(k)
       elif k.op is Ops.KERNEL:
         ast = k.arg.ast
-        # create buffer views for offset access
+        # create subbuffers if needed
         if ast.op is Ops.BUFFER_VIEW:
           base = k.src[1].buf_uop.buffer
-          assert isinstance(base, Buffer), "base cannot be MultiBuffer"
+          assert isinstance(base, Buffer), "base can't be MultiBuffer"
           buffers[k.src[0]] = base.view(k.size, ast.dtype, ast.arg[1] * base.dtype.itemsize)
         ubufs = tuple(s.buf_uop.buffer for s in k.src if s.op is not Ops.BIND)
         bound_ranges = tuple(s for s in k.src if s.op is Ops.BIND and s.src[1].op is Ops.RANGE)
-        # multi-device: generate one schedule item per device
         if any(isinstance(x, MultiBuffer) for x in ubufs):
-          assert all(isinstance(x, MultiBuffer) for x in ubufs), "mixed buffer types"
+          assert all(isinstance(x, MultiBuffer) for x in ubufs), "kernel must all be multibuffer"
           dnums = [x for x in ast.variables() if x.arg[0] == '_device_num']
           for i, bufs in enumerate(zip(*[x.bufs for x in cast(tuple[MultiBuffer, ...], ubufs)])):
             schedule.append(ScheduleItem(ast, bufs, k.arg.metadata, {dnums[0].expr: i} if len(dnums) else {}, bound_ranges=bound_ranges))
         else:
+          # ONE -> ONE
           schedule.append(ScheduleItem(ast, cast(tuple[Buffer, ...], ubufs), k.arg.metadata, bound_ranges=bound_ranges))
         if rk.op is Ops.END: schedule.append(rk)
       else:
-        raise RuntimeError(f"cannot schedule {k.op}")
-      # iterate children in reverse to make sure that the first child is processed last
-      for x in reversed(children.get(rk, [])):
+        raise RuntimeError(f"can't schedule {k.op}")
+      # add children whose dependencies are now satisfied
+      for x in children.get(rk, []):
         in_degree[x] -= 1
         if in_degree[x] == 0:
-          heapq.heappush(queue, (-priorities.get(x, 0), -counter, x))
-          counter += 1
+          heapq.heappush(heap, (nkey[x], x))
 
   with cpu_profile(TracingKey("expand ranges")):
-    # expand ranges into explicit loop iterations
     real_schedule: list[ScheduleItem] = []
     sched_ptr = 0
     in_ranges: dict[UOp, int] = {}
@@ -128,7 +141,7 @@ from tinygrad.engine.memory import memory_planner
 from tinygrad.schedule.rangeify import get_rangeify_map
 from tinygrad.schedule.multi import get_multi_map
 
-def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], list[ScheduleItem], dict[str, int]]:
+def complete_create_schedule_with_vars(big_sink: UOp) -> tuple[dict[UOp, UOp], list[ScheduleItem], dict[str, int]]:
   # big_sink srcs are all the Tensors
   st = time.perf_counter()
 
@@ -151,7 +164,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   with cpu_profile(TracingKey("memory planner")): schedule = memory_planner(schedule)
 
   # remove all AFTERs, after scheduling, the tensors are just buffers
-  tensor_map |= {u:u.buf_uop for u in big_sink.toposort() if u.op is Ops.AFTER}
+  tensor_map |= {u: u.buf_uop for u in big_sink.toposort() if u.op is Ops.AFTER}
 
   if (DEBUG >= 1 and len(schedule) > 1) or DEBUG >= 3:
     print(f"scheduled {len(schedule)} kernels in {(time.perf_counter()-st)*1000:.2f} ms ({len(UOpMetaClass.ucache)} uops in cache)")
