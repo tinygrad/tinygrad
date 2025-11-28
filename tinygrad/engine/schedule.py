@@ -1,4 +1,5 @@
 import time
+import sys
 import heapq
 from collections import defaultdict
 from typing import cast
@@ -30,12 +31,13 @@ def create_schedule_with_vars(sched_sink: UOp) -> tuple[list[ScheduleItem], dict
     for u in sched_sink.toposort():
       if u.op is Ops.RANGE:
         in_degree[u] = 0
-        priorities[u] = 0
+        #higher priority for RANGE to make sure it schedules before the kernels inside it
+        priorities[u] = 20
         continue
       if u.op is not Ops.AFTER or u.src[1].op is Ops.RANGE: continue
       k = u.src[1]
       in_degree.setdefault(k, 0)
-      #prioritize kernels to improve execution locality
+      # prioritize kernels to improve execution locality
       priorities[k] = 10 if k.op is Ops.KERNEL else 0
       for s in (k.src[0].src if k.op is Ops.END else k.src):
         if s.op is Ops.AFTER:
@@ -53,20 +55,20 @@ def create_schedule_with_vars(sched_sink: UOp) -> tuple[list[ScheduleItem], dict
         elif s.op is Ops.BIND:
           if s.src[1].op is not Ops.RANGE:
             var, val = s.unbind()
-            assert var.expr not in var_vals or var_vals[var.expr] == val, f"bind conflict {var.expr}"
+            assert var.expr not in var_vals or var_vals[var.expr] == val, f"bind mismatch on {var}, {var_vals[var.expr]} != {val}"
             var_vals[var.expr] = val
         else:
           raise RuntimeError(f"unexpected input {s.op}")
 
   with cpu_profile(TracingKey("linearize to ScheduleItem")):
-    #using a heap-based topological sort with priority ordering
+    # heap-based topological sort with priority ordering
     queue: list[tuple[int, int, UOp]] = []
     counter = 0
     for k, v in in_degree.items():
       if v == 0:
         heapq.heappush(queue, (-priorities.get(k, 0), -counter, k))
         counter += 1
-    #linearize kernels into schedule items
+    # linearize kernels into schedule items
     schedule: list[ScheduleItem | UOp] = []
     while queue:
       _, _, rk = heapq.heappop(queue)
@@ -75,14 +77,14 @@ def create_schedule_with_vars(sched_sink: UOp) -> tuple[list[ScheduleItem], dict
         schedule.append(k)
       elif k.op is Ops.KERNEL:
         ast = k.arg.ast
-        #create buffer views for offset access
+        # create buffer views for offset access
         if ast.op is Ops.BUFFER_VIEW:
           base = k.src[1].buf_uop.buffer
           assert isinstance(base, Buffer), "base cannot be MultiBuffer"
           buffers[k.src[0]] = base.view(k.size, ast.dtype, ast.arg[1] * base.dtype.itemsize)
         ubufs = tuple(s.buf_uop.buffer for s in k.src if s.op is not Ops.BIND)
         bound_ranges = tuple(s for s in k.src if s.op is Ops.BIND and s.src[1].op is Ops.RANGE)
-        #multi-device: generate one schedule item per device
+        # multi-device: generate one schedule item per device
         if any(isinstance(x, MultiBuffer) for x in ubufs):
           assert all(isinstance(x, MultiBuffer) for x in ubufs), "mixed buffer types"
           dnums = [x for x in ast.variables() if x.arg[0] == '_device_num']
@@ -93,14 +95,15 @@ def create_schedule_with_vars(sched_sink: UOp) -> tuple[list[ScheduleItem], dict
         if rk.op is Ops.END: schedule.append(rk)
       else:
         raise RuntimeError(f"cannot schedule {k.op}")
-      for x in children.get(rk, []):
+      # iterate children in reverse to make sure that the first child is processed last
+      for x in reversed(children.get(rk, [])):
         in_degree[x] -= 1
         if in_degree[x] == 0:
           heapq.heappush(queue, (-priorities.get(x, 0), -counter, x))
           counter += 1
 
   with cpu_profile(TracingKey("expand ranges")):
-    #expand ranges into explicit loop iterations
+    # expand ranges into explicit loop iterations
     real_schedule: list[ScheduleItem] = []
     sched_ptr = 0
     in_ranges: dict[UOp, int] = {}
