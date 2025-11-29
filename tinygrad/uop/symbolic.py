@@ -255,7 +255,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # after with 1 src is just src[0]
   (UPat(Ops.AFTER, src=(UPat.var("s"),)), lambda s: s),
   # VECTORIZE/CONST
-  (UPat(Ops.VECTORIZE, src=UPat(Ops.CONST), name="vec"), lambda vec: UOp.const(vec.dtype, tuple(x.arg for x in vec.src))),
+  (UPat(Ops.VECTORIZE, src=UPat(Ops.CONST), name="vec"),
+    lambda vec: UOp.const(vec.dtype, tuple(x.arg for x in vec.src)) if len(vec.src) > 0 else None),
 ])+div_and_mod_symbolic+gep_pushing
 
 # ******** we take a small aside to "simplify_valid" to rewrite valids ********
