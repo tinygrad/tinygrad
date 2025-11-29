@@ -253,8 +253,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     prg_cu = sorted(cu_events, key=row_tuple)
     kernel = trace.keys[r].ret if (r:=ref_map.get(name.prg)) else None
     src = f"Scheduled on {len(prg_cu)} CUs"+(f"\n\n{kernel.global_size=} {kernel.local_size=}" if kernel else "")
-    steps.append(create_step(f"{kernel.name if kernel is not None else name.prg}:{name.tag}", ("/counters", len(ctxs), len(steps)),
-                             {"src":src}, depth=1))
+    steps.append(create_step(kernel.name if kernel is not None else name.prg, ("/counters", len(ctxs), len(steps)), {"src":src}, depth=1))
     for cu in prg_cu:
       events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]
       steps.append(create_step(cu, ("/counters", len(ctxs), len(steps)),
