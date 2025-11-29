@@ -307,16 +307,16 @@ class NVAllocator(HCQAllocator['NVDevice']):
 
   def _map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
 
-  def _encode_decode(self, bufout:HCQBuffer, bufin:HCQBuffer, desc_buf:HCQBuffer, hist:list[HCQBuffer], insize:int, cur_pic):
+  def _encode_decode(self, bufout:HCQBuffer, bufin:HCQBuffer, desc_buf:HCQBuffer, hist:list[HCQBuffer], shape, frame_pos):
     assert all(h.va_addr % 0x100 == 0 for h in hist + [bufin, bufout]), "all buffers must be 0x100 aligned"
+    # print(frame_pos)
 
-    # sps, pps, frame = ctx.sps, ctx.pps, ctx.frame
-    self.dev._ensure_has_vid_hw(1920, 1080)
-  
-    chroma_off = 0x10a000
+    h, w = ((2 * shape[0]) // 3 if shape[0] % 3 == 0 else (2 * shape[0] - 1) // 3), shape[1]
+    # print(h, w, shape, frame_pos, desc_buf.size, bufin.size, hist)
+    self.dev._ensure_has_vid_hw(w, h)
     NVVideoQueue().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
-                  .decode_hevc_chunk(0, desc_buf, bufin, bufout, cur_pic, hist, [(cur_pic-x) % (len(hist)+1) for x in range(len(hist)-1, 0, -1)],
-                                     chroma_off, self.dev.vid_coloc_buf, self.dev.vid_filter_buf, self.dev.intra_top_off, self.dev.vid_status_buf) \
+                  .decode_hevc_chunk(0, desc_buf, bufin, bufout, frame_pos, hist, [(frame_pos-x) % (len(hist) + 1) for x in range(len(hist), 0, -1)],
+                    round_up(w, 64)*round_up(h, 64), self.dev.vid_coloc_buf, self.dev.vid_filter_buf, self.dev.intra_top_off, self.dev.vid_stat_buf) \
                   .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
 
 @dataclass
@@ -668,7 +668,7 @@ class NVDevice(HCQCompiled[HCQSignal]):
     if not hasattr(self, 'vid_gpfifo'):
       self.vid_gpfifo = self._new_gpu_fifo(self.gpfifo_area, 0, self.nvdevice, offset=0x200000, entries=2048, compute=False, video=True)
       self.vid_coloc_buf, self.vid_filter_buf = self.allocator.alloc(coloc_size), self.allocator.alloc(filter_size)
-      self.vid_status_buf = self.allocator.alloc(0x1000)
+      self.vid_stat_buf = self.allocator.alloc(0x1000)
       NVVideoQueue().wait(self.timeline_signal, self.timeline_value - 1) \
                     .setup(copy_class=self.iface.viddec_class) \
                     .signal(self.timeline_signal, self.next_timeline()).submit(self)
