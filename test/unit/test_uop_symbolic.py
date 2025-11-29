@@ -208,6 +208,14 @@ class TestSymbolic(unittest.TestCase):
     with self.assertRaises(ZeroDivisionError):
       (Variable("a", 0, 7) % 0).simplify()
 
+  def test_zero_numerator(self):
+    a = Variable("a", 1, 10)
+    self.helper_test_variable(UOp.const_like(a, 0) // a, 0, 0, "0")
+    self.helper_test_variable(UOp.const_like(a, 0) % a, 0, 0, "0")
+    b = Variable("b", 0, 10)
+    self.assertEqual((UOp.const_like(b, 0) // b).simplify().render(), "(0//b)")
+    self.assertEqual((UOp.const_like(b, 0) % b).simplify().render(), "(0%b)")
+
   def test_sum_div_remove(self):
     self.helper_test_variable(usum([Variable("a", 0, 7), Variable("b", 0, 3)]) // 20, 0, 0, "0")
 
