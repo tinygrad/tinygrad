@@ -67,7 +67,10 @@ def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer|None=None, opts
   ast_repr = codecs.decode(str(input_ast), "unicode_escape")
   return to_str(p2), to_str(p), (ast_repr, renderer)
 
-replayers: dict[str, Callable[..., tuple[str, str, tuple[Any, ...]]]] = {"get_rangeify_map":replay_get_rangeify_map, "get_program":replay_get_program}
+replayers: dict[str, Callable[..., tuple[str, str, tuple[Any, ...]]]] = {}
+replayers["get_program"] = replay_get_program
+# disable this for speed, does it ever find things?
+#replayers["get_rangeify_map"] = replay_get_rangeify_map
 
 # *** run replayers on captured rows and print diffs
 

@@ -179,12 +179,12 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
   return struct.pack("<BI", 0, len(events))+b"".join(events) if events else None
 
 def encode_mem_free(key:int, ts:int, execs:list[ProfilePointEvent], scache:dict) -> bytes:
-  ei_encoding:list[tuple[int, int, int, int]] = [] # <[u32, u32, u8, u8] [run id, display name, buffer number and mode (2 = r/w, 1 = w, 0 = r)]
+  ei_encoding:list[tuple[int, int, int, int]] = [] # <[u32, u32, u32, u8] [run id, display name, buffer number and mode (2 = r/w, 1 = w, 0 = r)]
   for e in execs:
     num = next(i for i,k in enumerate(e.arg["bufs"]) if k == key)
     mode = 2 if (num in e.arg["inputs"] and num in e.arg["outputs"]) else 1 if (num in e.arg["outputs"]) else 0
     ei_encoding.append((e.key, enum_str(e.arg["name"], scache), num, mode))
-  return struct.pack("<BIII", 0, ts, key, len(ei_encoding))+b"".join(struct.pack("<IIBB", *t) for t in ei_encoding)
+  return struct.pack("<BIII", 0, ts, key, len(ei_encoding))+b"".join(struct.pack("<IIIB", *t) for t in ei_encoding)
 
 def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int, peaks:list[int], dtype_size:dict[str, int],
                scache:dict[str, int]) -> bytes|None:
@@ -228,7 +228,8 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     for e in sqtt_events: parse_sqtt_print_packets(e.blob)
   if not any([rctx.inst_execs, rctx.occ_events]): return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
   steps:list[dict] = []
-  for name,disasm in rctx.disasms.items():
+  for name in rctx.occ_events:
+    disasm = rctx.disasms[name.prg]
     cu_events:dict[str, list[ProfileEvent]] = {}
     # wave instruction events
     wave_insts:dict[str, dict[str, dict]] = {}
@@ -251,9 +252,9 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
         events.append(ProfileRangeEvent(occ.simd_loc, f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)), Decimal(occ.time)))
     if not cu_events: continue
     prg_cu = sorted(cu_events, key=row_tuple)
-    kernel = trace.keys[r].ret if (r:=ref_map.get(name)) else None
+    kernel = trace.keys[r].ret if (r:=ref_map.get(name.prg)) else None
     src = f"Scheduled on {len(prg_cu)} CUs"+(f"\n\n{kernel.global_size=} {kernel.local_size=}" if kernel else "")
-    steps.append(create_step(kernel.name if kernel is not None else name, ("/counters", len(ctxs), len(steps)), {"src":src}, depth=1))
+    steps.append(create_step(kernel.name if kernel is not None else name.prg, ("/counters", len(ctxs), len(steps)), {"src":src}, depth=1))
     for cu in prg_cu:
       events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]
       steps.append(create_step(cu, ("/counters", len(ctxs), len(steps)),
@@ -324,7 +325,7 @@ def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
   summary = [{"idx":k, "label":resource_labels[k], "value":v} for k,v in instr_usage.pop(len(rows), {}).items()]
   max_usage = max([sum(v.values()) for i,v in instr_usage.items() if i<len(rows)], default=0)
   for i,usage in instr_usage.items(): rows[i].append([[k, v, (v/max_usage)*100] for k,v in usage.items()])
-  return {"rows":rows, "cols":["Opcode", "Latency", {"title":"HW Resources", "labels":resource_labels}], "summary":summary}
+  return {"rows":rows, "cols":["Instruction", "Latency", {"title":"HW Resources", "labels":resource_labels}], "summary":summary}
 
 def get_stdout(f: Callable) -> str:
   buf = io.StringIO()
@@ -346,7 +347,8 @@ def get_render(i:int, j:int, fmt:str) -> dict:
                           ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode())
     return {"src":disasm_str, "lang":"x86asm"}
   if fmt == "sqtt-insts":
-    columns = ["Instruction", "Clk", "Idle", "Duration", "Stall", "Type"]
+    columns = ["PC", "Instruction", "Hits", "Duration", "Stall", "Type"]
+    inst_columns = ["N", "Clk", "Idle", "Dur", "Stall"]
     # Idle:     The total time gap between the completion of previous instruction and the beginning of the current instruction.
     #           The idle time can be caused by:
     #             * Arbiter loss
@@ -356,13 +358,21 @@ def get_render(i:int, j:int, fmt:str) -> dict:
     # Duration: Total latency in cycles, defined as "Stall time + Issue time" for gfx9 or "Stall time + Execute time" for gfx10+.
     prev_instr = (w:=data["wave"]).begin_time
     pc_to_inst = data["disasm"]
-    rows:list[tuple] = []
+    start_pc = None
+    rows:dict[int, dict] = {}
     for e in w.unpack_insts():
-      rows.append((pc_to_inst[e.pc][0], e.time, max(0, e.time-prev_instr), e.dur, e.stall, str(e.typ).split("_")[-1]))
+      if start_pc is None: start_pc = e.pc
+      if (inst:=rows.get(e.pc)) is None:
+        rows[e.pc] = inst = {"pc":e.pc-start_pc, "inst":pc_to_inst[e.pc][0], "hit_count":0, "dur":0, "stall":0, "type":str(e.typ).split("_")[-1],
+                             "hits":{"cols":inst_columns, "rows":[]}}
+      inst["hit_count"] += 1
+      inst["dur"] += e.dur
+      inst["stall"] += e.stall
+      inst["hits"]["rows"].append((inst["hit_count"]-1, e.time, max(0, e.time-prev_instr), e.dur, e.stall))
       prev_instr = max(prev_instr, e.time + e.dur)
     summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
                {"label":"SIMD", "value":w.simd}, {"label":"Wave ID", "value":w.wave_id}, {"label":"Run number", "value":data["run_number"]}]
-    return {"rows":rows, "cols":columns, "summary":summary}
+    return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "summary":summary}
   return data
 
 # ** HTTP server

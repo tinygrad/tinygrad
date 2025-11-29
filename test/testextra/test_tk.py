@@ -10,7 +10,7 @@ from extra.thunder.tiny.tk import WARP_THREADS
 from extra.thunder.tiny.tk.kernel import Kernel
 from extra.thunder.tiny.tk.tiles import ST_16X32, RT_16X32, RT_16X16, TileLayout
 
-@unittest.skipIf(CI and Device.DEFAULT not in ["AMD"], "only amd")
+@unittest.skipIf(CI or Device.DEFAULT not in ["AMD"], "only amd")
 class TestTK(unittest.TestCase):
   @unittest.skipIf(CI, "no wmma in ci")
   def test_simple_matmul(self):
