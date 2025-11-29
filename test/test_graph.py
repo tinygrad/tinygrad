@@ -8,7 +8,7 @@ from tinygrad.dtype import dtypes
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.engine.realize import ExecItem, BufferXfer, get_runner, CompiledRunner
 
-from test.helpers import not_support_multi_device
+from test.helpers import needs_second_gpu
 
 np.random.seed(1337)
 Tensor.manual_seed(1337)
@@ -156,7 +156,7 @@ class TestGraph(unittest.TestCase):
 
     helper_test_graphs(Device[d0].graph, graphs)
 
-  @unittest.skipIf(not_support_multi_device(), "no multi")
+  @needs_second_gpu
   def test_copies_2_devs(self):
     self.skip_if_not_multigraph()
 
@@ -170,7 +170,7 @@ class TestGraph(unittest.TestCase):
 
     helper_test_graphs(Device[d0].graph, graphs)
 
-  @unittest.skipIf(not_support_multi_device(), "no multi")
+  @needs_second_gpu
   def test_copies_after_graph_global(self):
     self.skip_if_not_multigraph()
 
@@ -219,7 +219,7 @@ class TestGraph(unittest.TestCase):
 
     helper_test_graphs(Device[d0].graph, graphs)
 
-  @unittest.skipIf(not_support_multi_device(), "no multi")
+  @needs_second_gpu
   def test_graph_after_copies_devs(self):
     self.skip_if_not_multigraph()
 
