@@ -128,6 +128,8 @@ class dtypes:
       assert len(val) == dtype.count, f"mismatch {val} {dtype}"
       return tuple(dtypes.as_const(x, dtype) for x in val)
     if isinstance(val, InvalidType): return val
+    # NOTE: float('nan') != float('nan'), so we canonicalize here
+    if isinstance(val, float) and math.isnan(val): val = math.nan
     return int(val) if dtypes.is_int(dtype) else float(val) if dtypes.is_float(dtype) else bool(val)
   @staticmethod
   @functools.cache
