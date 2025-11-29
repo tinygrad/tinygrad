@@ -368,7 +368,7 @@ def enumerate_devices_str() -> Generator[str, None, None]:
       d = Device[device]
       default_renderer, default_compiler = d.renderer, d.compiler
       try:
-        for i,(r,c) in enumerate(d.compilers):
+        for r,c in d.compilers:
           try:
             d.renderer, d.compiler = r(), c()
             with Context(CACHELEVEL=0): test = (Tensor([1,2,3], device=device) * 2).tolist()
