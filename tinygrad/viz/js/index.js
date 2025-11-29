@@ -761,45 +761,36 @@ async function main() {
     }
     displaySelection("#custom");
     metadata.innerHTML = "";
-    const root = d3.create("div").classed("raw-text", true).node();
+    const root = d3.create("div").classed("raw-text", true);
     // detailed assembly view
     function renderTable(root, ret) {
-      const table = root.appendChild(document.createElement("table"));
-      const thead = table.appendChild(document.createElement("thead"));
-      for (const c of ret.cols) thead.appendChild(document.createElement("th")).innerText = c.title ?? c;
+      const table = root.append("table");
+      const thead = table.append("thead");
+      for (const c of ret.cols) thead.append("th").text(c.title ?? c);
       for (const r of ret.rows) {
-        const tr = table.appendChild(document.createElement("tr"));
-        tr.className = "main-row";
+        const tr = table.append("tr").classed("main-row", true);
         for (const [i,value] of r.entries()) {
           // nested table
           if (value.cols != null) {
-            tr.classList.add("has-children");
-            tr.onclick = () => {
-              const el = tr.nextElementSibling;
-              if (el?.classList.contains("nested-row")) { tr.classList.remove("expanded"); return el.remove(); }
-              tr.classList.add("expanded");
-              const nestedTr = table.insertBefore(document.createElement("tr"), tr.nextSibling); nestedTr.className = "nested-row"; ;
-              const td = nestedTr.appendChild(document.createElement("td"));
-              td.colSpan = ret.cols.length;
+            tr.classed("has-children", true);
+            tr.on("click", () => {
+              const el = tr.node().nextElementSibling;
+              if (el?.classList.contains("nested-row")) { tr.classed("expanded", false); return el.remove(); }
+              tr.classed("expanded", true);
+              const td = table.insert("tr", () => tr.node().nextSibling).classed("nested-row", true).append("td");
+              td.attr("colSpan", ret.cols.length);
               renderTable(td, value);
-            }
+            });
             continue;
           }
-          const td = tr.appendChild(document.createElement("td"));
-          td.className = ret.cols[i];
+          const td = tr.append("td").classed(ret.cols[i], true);
           // string format scalar values
-          if (!Array.isArray(value)) td.innerText = value;
+          if (!Array.isArray(value)) { td.text(value); continue; }
           // display arrays in a bar graph
-          else {
-            td.classList.add("pct-row");
-            const usageBar = td.appendChild(document.createElement("div"));
-            for (const [k, v, width] of value) {
-              const seg = usageBar.appendChild(document.createElement("div"));
-              seg.style.width = width+"%";
-              seg.title = `${ret.cols[i].labels[k]} ${v}`;
-              seg.style.background = cycleColors(colorScheme.CATEGORICAL, parseInt(k));
-            }
-          }
+          td.classed("pct-row", true);
+          const bar = td.append("div");
+          value.forEach(([k, v, width]) => bar.append("div").style("width", width+"%").attr("title", `${ret.cols[i].labels[k]} ${v}`)
+            .style("background", cycleColors(colorScheme.CATEGORICAL, parseInt(k))))
         }
       }
       return table;
@@ -810,8 +801,8 @@ async function main() {
         const div = d3.create("div").style("background", cycleColors(colorScheme.CATEGORICAL, s.idx)).style("width", "100%").style("height", "100%");
         return [s.label.trim(), div.text(s.value.toLocaleString()).node()];
       })).node());
-    } else root.appendChild(codeBlock(ret.src, ret.lang || "txt"));
-    return document.querySelector("#custom").replaceChildren(root);
+    } else root.append(() => codeBlock(ret.src, ret.lang || "txt"));
+    return document.querySelector("#custom").replaceChildren(root.node());
   }
   // ** UOp view (default)
   // if we don't have a complete cache yet we start streaming rewrites in this step
