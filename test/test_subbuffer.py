@@ -2,7 +2,7 @@ import unittest
 from tinygrad import Device, dtypes, Tensor
 from tinygrad.device import Buffer
 from tinygrad.helpers import Context
-from test.helpers import REAL_DEV
+from test.helpers import REAL_DEV, not_support_multi_device
 
 @unittest.skipUnless(hasattr(Device[Device.DEFAULT].allocator, "_offset"), "subbuffer not supported")
 class TestSubBuffer(unittest.TestCase):
@@ -41,6 +41,7 @@ class TestSubBuffer(unittest.TestCase):
     out = (vt + 100).tolist()
     assert out == [102, 103]
 
+  @unittest.skipIf(not_support_multi_device(), "no multi")
   @unittest.skipIf(REAL_DEV not in {"CUDA", "NV", "AMD"}, "only NV, AMD, CUDA")
   def test_subbuffer_transfer(self):
     t = Tensor.arange(0, 10, dtype=dtypes.uint8).realize()
