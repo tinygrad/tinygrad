@@ -56,6 +56,10 @@
   }
   ul > ul {
     display: none;
+    margin-left: 6px;
+  }
+  ul.has-children ul {
+    margin-left: calc(6px + 1ch);
   }
   ul.has-children > p::before {
     content:"▸ ";

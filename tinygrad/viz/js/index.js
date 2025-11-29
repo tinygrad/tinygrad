@@ -715,7 +715,6 @@ async function main() {
         const list = stack.length > 0 ? stack.at(-1).li : ul;
         u.li = list.appendChild(document.createElement("ul"));
         u.li.id = `step-${i}-${j}`
-        u.li.style.marginLeft = u.depth > 0 ? "calc(6px + 1ch)" : "6px";
         const p = u.li.appendChild(document.createElement("p"));
         p.appendChild(colored(`${u.name}`+(u.match_count ? ` - ${u.match_count}` : '')));
         p.onclick = (e) => {
