@@ -434,15 +434,15 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if isinstance(b, tuple) and all_same(b):
       assert len(b) > 0, "can't create const from empty tuple"
       b = b[0]  # doesn't have to be a VCONST if they are all the same
-    # NOTE: float('nan') != float('nan'), so we canonicalize here
-    if isinstance(b, float) and math.isnan(b): b = math.nan
-    ret = UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype))
-    if device is not None:
-      if unique or not isinstance(unique, bool): ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device), UOp.unique(None if unique is True else unique)))
-      else: ret = ret.replace(src=(UOp(Ops.DEVICE, arg=device),))
-    elif unique or not isinstance(unique, bool): raise RuntimeError("unique consts only with DEVICE")
-    if shape is not None: ret = ret.reshape((1,)*len(shape)).expand(shape)
-    return ret
+    ret = UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype,
+              arg=dtypes.as_const(b, dtype),
+              src=(UOp(Ops.DEVICE, arg=device),) if device is not None else ())
+    return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None else ret
+  @staticmethod
+  def unique_const(dtype:DType, b:ConstType, device:str|tuple[str, ...], unique=True):
+    # NOTE: b is ConstType, not ConstLike, so UOps and tuples aren't allowed
+    assert not isinstance(b, (UOp, tuple))
+    return UOp(Ops.CONST, dtype, arg=dtypes.as_const(b, dtype), src=(UOp(Ops.DEVICE, arg=device), UOp.unique(None if unique is True else unique)))
   @staticmethod
   def range(end:sint, axis_id, axis_type=AxisType.LOOP, *arg, dtype=dtypes.index, src=(), **kwargs):
     return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end, dtype),)+src, arg=(axis_id, axis_type)+arg, **kwargs)
@@ -1359,7 +1359,7 @@ sugar = {Ops.SINK, Ops.END, Ops.STORE, Ops.LOAD, Ops.UNIQUE, Ops.SQRT, Ops.INDEX
          Ops.WHERE, Ops.RECIPROCAL, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.CONTIGUOUS, Ops.BARRIER, Ops.ASSIGN, Ops.DETACH}
 pm_pyrender_extra = PatternMatcher([
   (UPat(Ops.CONST, src=(UPat(Ops.DEVICE, name="d"), UPat(Ops.UNIQUE, name="u")), name="x"),
-   lambda x,d,u: f"UOp.const({x.dtype}, {x.arg}, device={repr(d.arg)}, unique={u.arg})"),
+   lambda x,d,u: f"UOp.unique_const({x.dtype}, {x.arg}, device={repr(d.arg)}, unique={u.arg})"),
   (UPat(Ops.CONST, src=(UPat(Ops.DEVICE, name="d"),), name="x"), lambda x,d: f"UOp.const({x.dtype}, {x.arg}, device={repr(d.arg)})"),
   (UPat(Ops.CONST, name="x"), lambda x: f"UOp.const({x.dtype}, {x.arg})"),
   (UPat(Ops.DEFINE_VAR, src=(), name="x"), lambda x:
