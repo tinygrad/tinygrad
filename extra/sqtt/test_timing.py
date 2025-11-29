@@ -129,5 +129,13 @@ class TestTiming(unittest.TestCase):
     for w in waves:
       print(f"{w.wave_id:<2} {w.simd=} {w.cu=} {w.se=} @ clk {w.begin_time}")
 
+  def test_multiple_runs(self):
+    N = 4096
+    CNT = getenv("CNT", 2)
+    with save_sqtt() as sqtt:
+      for _ in range(CNT):
+        Tensor.ones(N, N).contiguous().realize()
+    self.assertEqual(len(sqtt), 2)
+
 if __name__ == "__main__":
   unittest.main()
