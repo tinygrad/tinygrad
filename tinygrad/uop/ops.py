@@ -574,7 +574,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       else: usrcs.append(UOp(Ops.VECTORIZE, dtypes.index.vec(len(arg)), tuple(UOp.const(dtypes.index, x) if isinstance(x, int) else x for x in arg)))
     if len(usrcs) == 0: ret = UOp(op, self.dtype, (self,), arg)
     else: ret = UOp(op, self.dtype, (self,)+UOp.sink(*usrcs).simplify().src)
-    # for all movement ops, we check shape property
+    # for all movement ops, we check shape property to validity check the movement op
     if ret.shape == self.shape and same_shape_noop: return self
     return ret
 
