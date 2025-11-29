@@ -1,51 +1,83 @@
 import unittest, time
-from tinygrad.helpers import Profiling
-from tinygrad.uop.ops import UOp
-from tinygrad.dtype import dtypes
-
-# it's about 1 ms per 1k UOps on M3
-N = 10000
+from tinygrad import dtypes, Tensor, UOp
 
 class TestMicrobenchmarks(unittest.TestCase):
+  @staticmethod
+  def setUpClass():
+    # no fixed cost
+    Tensor.empty(10,10)
+    Tensor.randn(10,10)
+
+  def start_time(self): self.st = time.perf_counter()
+
   def setUp(self):
-    self.st = time.perf_counter()
+    # it's about 1 ms per 1k UOps on M3
+    self.N = 10000
+    self.start_time()
   def tearDown(self):
     et = (time.perf_counter() - self.st)
-    print(f"{self._testMethodName} {et*1e3:.2f} ms")
+    print(f"{self._testMethodName:30s} {et*1e6/self.N:.2f} us")
 
   def test_uop_instant_creation(self):
-    for i in range(N): UOp.const(dtypes.int, 100+i)
+    for i in range(self.N): UOp.const(dtypes.int, 100+i)
 
   def test_uop_list_creation(self):
-    [UOp.const(dtypes.int, 100+i) for i in range(N)]
+    [UOp.const(dtypes.int, 100+i) for i in range(self.N)]
 
   def test_uop_add_2n(self):
     a = UOp.const(dtypes.int, 2)
-    for _ in range(N): a = a + a
+    for _ in range(self.N): a = a + a
 
   def test_uop_toposort(self):
     a = UOp.const(dtypes.int, 0)
-    for i in range(N): a = a + UOp.const(dtypes.int, 100+i)
+    for i in range(self.N): a = a + UOp.const(dtypes.int, 100+i)
     self.setUp()
-    self.assertEqual(len(a.toposort()), 2*N+1)
+    self.assertEqual(len(a.toposort()), 2*self.N+1)
 
   def test_uop_toposort_2n(self):
     a = UOp.const(dtypes.int, 0)
-    for i in range(N): a = a + a
+    for i in range(self.N): a = a + a
     self.setUp()
-    self.assertEqual(len(a.toposort()), N+1)
+    self.assertEqual(len(a.toposort()), self.N+1)
 
   def test_uop_simplify(self):
     a = UOp.const(dtypes.int, 2)
-    for _ in range(N): (a+a).simplify()
+    for _ in range(self.N): (a+a).simplify()
 
-class TestMicroprofile(unittest.TestCase):
   def test_uop_simplify_complex(self):
+    self.N //= 10 # this test is slow
     x = UOp.variable("x", 0, 10)
     y = UOp.variable("y", 0, 10)
     expr = (x*2)+5+(x*4)+(y*2)+y
-    with Profiling():
-      for _ in range(1000): expr.simplify()
+    for _ in range(self.N): expr.simplify()
+
+  def test_uop_chain_free(self):
+    a = UOp.const(dtypes.int, 2)
+    for _ in range(self.N): a = a + a
+    self.start_time()
+    del a
+
+  def test_tensor_zeros(self):
+    self.N //= 10 # this test is slow
+    for _ in range(self.N): Tensor.zeros(10, 10)
+
+  def test_tensor_add(self):
+    self.N //= 10 # this test is slow
+    a = Tensor.zeros(10, 10)
+    b = Tensor.zeros(10, 10)
+    for _ in range(self.N): a+b
+
+  def test_tensor_empty(self):
+    self.N //= 10 # this test is slow
+    for _ in range(self.N): Tensor.empty(10, 10)
+
+  def test_tensor_rand(self):
+    self.N //= 100 # this test is very slow
+    for _ in range(self.N): Tensor.rand(10, 10)
+
+  def test_tensor_randn(self):
+    self.N //= 100 # this test is very slow
+    for _ in range(self.N): Tensor.randn(10, 10)
 
 if __name__ == '__main__':
   unittest.main()
