@@ -431,7 +431,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @staticmethod
   def const(dtype:DType, b:ConstLike, device:str|tuple[str, ...]|None=None, shape:tuple[sint, ...]|None=None, src=None, unique:bool|int=False):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is Ops.BIND else b
-    if isinstance(b, tuple) and all_same(b): b = b[0]  # doesn't have to be a VCONST if they are all the same
+    if isinstance(b, tuple) and all_same(b):
+      assert len(b) > 0, "can't create const from empty tuple"
+      b = b[0]  # doesn't have to be a VCONST if they are all the same
     # NOTE: float('nan') != float('nan'), so we canonicalize here
     if isinstance(b, float) and math.isnan(b): b = math.nan
     ret = UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype, arg=dtypes.as_const(b, dtype), src=() if src is None else (src,))

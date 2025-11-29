@@ -1,7 +1,9 @@
 import unittest, time
-from tinygrad import dtypes, Tensor, UOp
+from tinygrad import dtypes, Tensor, UOp, getenv
+from tinygrad.helpers import Profiling
 
-class TestMicrobenchmarks(unittest.TestCase):
+PYPROFILE = getenv("PYPROFILE")
+class TestBench(unittest.TestCase):
   @staticmethod
   def setUpClass():
     # no fixed cost
@@ -9,13 +11,19 @@ class TestMicrobenchmarks(unittest.TestCase):
     Tensor.randn(10,10)
 
   def start_time(self): self.st = time.perf_counter()
-
   def setUp(self):
     # it's about 1 ms per 1k UOps on M3
+    if PYPROFILE:
+      self.prof = Profiling()
+      self.prof.__enter__()
+    else:
+      self.prof = None
     self.N = 10000
     self.start_time()
+
   def tearDown(self):
     et = (time.perf_counter() - self.st)
+    if self.prof is not None: self.prof.__exit__()
     print(f"{self._testMethodName:30s} {et*1e6/self.N:.2f} us")
 
   def test_uop_instant_creation(self):
@@ -31,13 +39,13 @@ class TestMicrobenchmarks(unittest.TestCase):
   def test_uop_toposort(self):
     a = UOp.const(dtypes.int, 0)
     for i in range(self.N): a = a + UOp.const(dtypes.int, 100+i)
-    self.setUp()
+    self.start_time()
     self.assertEqual(len(a.toposort()), 2*self.N+1)
 
   def test_uop_toposort_2n(self):
     a = UOp.const(dtypes.int, 0)
-    for i in range(self.N): a = a + a
-    self.setUp()
+    for _ in range(self.N): a = a + a
+    self.start_time()
     self.assertEqual(len(a.toposort()), self.N+1)
 
   def test_uop_simplify(self):
@@ -49,6 +57,14 @@ class TestMicrobenchmarks(unittest.TestCase):
     x = UOp.variable("x", 0, 10)
     y = UOp.variable("y", 0, 10)
     expr = (x*2)+5+(x*4)+(y*2)+y
+    for _ in range(self.N): expr.simplify()
+
+  def test_uop_simplify_div(self):
+    self.N //= 10 # this test is slow
+    x = UOp.variable("x", 0, 10)
+    y = UOp.variable("y", 0, 10)
+    z = UOp.variable("z", 0, 10)
+    expr = (x*4+y*8)//(z*2)
     for _ in range(self.N): expr.simplify()
 
   def test_uop_chain_free(self):
