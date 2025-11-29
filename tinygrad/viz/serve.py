@@ -227,7 +227,8 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     for e in sqtt_events: parse_sqtt_print_packets(e.blob)
   if not any([rctx.inst_execs, rctx.occ_events]): return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
   steps:list[dict] = []
-  for name,disasm in rctx.disasms.items():
+  for name,occ_events in rctx.occ_events.items():
+    disasm = rctx.disasms[name.prg]
     cu_events:dict[str, list[ProfileEvent]] = {}
     # wave instruction events
     wave_insts:dict[str, dict[str, dict]] = {}
@@ -250,9 +251,9 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
         events.append(ProfileRangeEvent(occ.simd_loc, f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)), Decimal(occ.time)))
     if not cu_events: continue
     prg_cu = sorted(cu_events, key=row_tuple)
-    kernel = trace.keys[r].ret if (r:=ref_map.get(name)) else None
+    kernel = trace.keys[r].ret if (r:=ref_map.get(name.prg)) else None
     src = f"Scheduled on {len(prg_cu)} CUs"+(f"\n\n{kernel.global_size=} {kernel.local_size=}" if kernel else "")
-    steps.append(create_step(kernel.name if kernel is not None else name, ("/counters", len(ctxs), len(steps)), {"src":src}, depth=1))
+    steps.append(create_step(f"{kernel.name}:{name.tag}" if kernel is not None else name, ("/counters", len(ctxs), len(steps)), {"src":src}, depth=1))
     for cu in prg_cu:
       events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]
       steps.append(create_step(cu, ("/counters", len(ctxs), len(steps)),

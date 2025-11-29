@@ -69,7 +69,7 @@ class OccEvent(WaveSlot):
 
 @dataclasses.dataclass(frozen=True)
 class RunKey:
-  name:str
+  prg:str
   tag:int
 
 class _ROCParseCtx:
