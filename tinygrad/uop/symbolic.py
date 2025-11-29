@@ -310,10 +310,10 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
         if not any(X in uop_topo for X,_ in candidate): continue
         newuops = [substitute_simplify(uop, {X:newX}) for X,newX in candidate]
         if any(u is uop for u in newuops): continue
-        if all_same(newuops): uop = newuops[0]
+        if all_same(newuops): uop, uop_topo = newuops[0], None
         elif uop.op is Ops.VECTORIZE and len(uop.src) == 2:
-          if all_same([uops.src[0] for uops in newuops]): uop = uop.replace(src=(newuops[0].src[0], uop.src[1]))
-          if all_same([uops.src[1] for uops in newuops]): uop = uop.replace(src=(uop.src[0], newuops[0].src[1]))
+          if all_same([uops.src[0] for uops in newuops]): uop, uop_topo = uop.replace(src=(newuops[0].src[0], uop.src[1])), None
+          if all_same([uops.src[1] for uops in newuops]): uop, uop_topo = uop.replace(src=(uop.src[0], newuops[0].src[1])), None
 
   # try all the valids together (but only the whole expressions)
   if try_simplex and uop_topo is None: uop_topo = uop.toposort()
