@@ -227,7 +227,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     for e in sqtt_events: parse_sqtt_print_packets(e.blob)
   if not any([rctx.inst_execs, rctx.occ_events]): return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
   steps:list[dict] = []
-  for name,occ_events in rctx.occ_events.items():
+  for name in rctx.occ_events:
     disasm = rctx.disasms[name.prg]
     cu_events:dict[str, list[ProfileEvent]] = {}
     # wave instruction events

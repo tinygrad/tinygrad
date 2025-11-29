@@ -86,10 +86,9 @@ class _ROCParseCtx:
 
   def next_sqtt(self):
     x = next(self.sqtt_evs, None)
-    self.active_kern = x.kern if x is not None else None
+    self.active_run = RunKey(x.kern, x.exec_tag) if x is not None else None
     self.active_se = x.se if x is not None else None
     self.active_blob = (ctypes.c_ubyte * len(x.blob)).from_buffer_copy(x.blob) if x is not None else None
-    self.active_run = RunKey(x.kern, x.exec_tag) if x is not None else None
     return self.active_blob
 
   def on_occupancy_ev(self, ev:rocprof.rocprofiler_thread_trace_decoder_occupancy_t):
@@ -142,7 +141,7 @@ def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
 
   @rocprof.rocprof_trace_decoder_isa_callback_t
   def isa_cb(instr_ptr, mem_size_ptr, size_ptr, pc, _):
-    instr, mem_size_ptr[0] = ROCParseCtx.disasms[unwrap(ROCParseCtx.active_kern)][pc.address]
+    instr, mem_size_ptr[0] = ROCParseCtx.disasms[unwrap(ROCParseCtx.active_run).prg][pc.address]
 
     # this is the number of bytes to next instruction, set to 0 for end_pgm
     if instr == "s_endpgm": mem_size_ptr[0] = 0
