@@ -277,10 +277,7 @@ def substitute_simplify(uop:UOp, sub_dict:dict[UOp, UOp]) -> UOp:
   if not sub_dict: return uop
   new_uop = uop.substitute(sub_dict)
   if new_uop is uop: return uop
-  new_uop_simp = new_uop.simplify()
-  # skip reverse substitution if intermediate simplify did nothing - will just get back original uop
-  if new_uop_simp is new_uop: return uop
-  return new_uop_simp.substitute({v:k for k,v in sub_dict.items()}).simplify()
+  return new_uop.simplify().substitute({v:k for k,v in sub_dict.items()}).simplify()
 
 def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
   # return simplified uop (might be the same as input)
