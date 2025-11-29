@@ -756,7 +756,7 @@ async function main() {
     if (!(ckey in cache)) cache[ckey] = ret = await fetchValue(ckey);
     // cycles on the x axis
     if (ret instanceof ArrayBuffer) {
-      opts = {heightScale:0.5, hideLabels:true, }; // levelKey:(e) => parseInt(e.name.split(" ")[1].split(":")[1])};
+      opts = {heightScale:0.5, hideLabels:true, levelKey:(e) => parseInt(e.name.split(" ")[1].split(":")[1])};
       return renderProfiler(ckey, "clk", opts);
     }
     displaySelection("#custom");

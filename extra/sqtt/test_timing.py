@@ -135,7 +135,7 @@ class TestTiming(unittest.TestCase):
     with save_sqtt() as sqtt:
       for _ in range(CNT):
         Tensor.ones(N, N).contiguous().realize()
-    self.assertEqual(len(sqtt), 1)
+    self.assertEqual(len(sqtt), 2)
 
 if __name__ == "__main__":
   unittest.main()
