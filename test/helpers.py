@@ -57,6 +57,9 @@ def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None):
   return out_buf.cast(uop.dtype.fmt).tolist()[0]
 
 def not_support_multi_device():
+  # check if there's a second GPU, if not, skip multi tests
+  try: Tensor.zeros(10, device=Device.DEFAULT+":1").contiguous().realize()
+  except Exception: return True
   # CL and CUDA don't support multi device if in CI
   return CI and REAL_DEV in ("CL", "CUDA")
 
