@@ -442,8 +442,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @staticmethod
   def unique_const(dtype:DType, b:ConstType, device:str|tuple[str, ...], unique=True):
     # NOTE: b is ConstType, not ConstLike, so UOps and tuples aren't allowed
-    assert not isinstance(b, (UOp, tuple))
-    return UOp(Ops.CONST, dtype, arg=dtypes.as_const(b, dtype), src=(UOp(Ops.DEVICE, arg=device), UOp.unique(None if unique is True else unique)))
+    assert not isinstance(b, (UOp, tuple)), "unique const only works on numbers"
+    ret = UOp.const(dtype, b, device)
+    return ret.replace(src=ret.src + (UOp.unique(None if unique is True else unique),))
   @staticmethod
   def range(end:sint, axis_id, axis_type=AxisType.LOOP, *arg, dtype=dtypes.index, src=(), **kwargs):
     return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end, dtype),)+src, arg=(axis_id, axis_type)+arg, **kwargs)
