@@ -309,7 +309,6 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
 
       for candidate in candidates:
         # if every branch in candidate gives the same simplified uop, we can rewrite the uop
-        if len(candidate) == 1 and len(candidates) == 1: continue
         if uop_topo is None: uop_topo = uop.toposort()
         if not any(X in uop_topo for X,_ in candidate): continue
         newuops = [substitute_simplify(uop, {X:newX}) for X,newX in candidate]
