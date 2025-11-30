@@ -1,4 +1,4 @@
-from typing import cast, Generator, Callable
+from typing import cast, Generator, Callable, Iterable
 import time, pprint, random, itertools, math
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
@@ -220,8 +220,9 @@ def lower_schedule(schedule:list[ScheduleItem]) -> Generator[tuple[ScheduleItem,
 
 capturing: list = []  # put classes with an add method in here
 
-def run_schedule(schedule:list[ScheduleItem], var_vals:dict[str, int]|None=None, do_update_stats=True):
-  for si, ei in lower_schedule(schedule):
+def run_schedule(schedule:list[ScheduleItem], var_vals:dict[str, int]|None=None, do_update_stats=True,
+                 it:Iterable[tuple[ScheduleItem, ExecItem]]|None=None):
+  for si, ei in (it or lower_schedule(schedule)):
     if len(capturing) and CAPTURING: capturing[0].add(ei)
     if VALIDATE_WITH_CPU and si.ast.op is Ops.SINK:
       # copy in allocated buffers from the GPU

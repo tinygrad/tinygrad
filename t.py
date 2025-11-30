@@ -1,5 +1,5 @@
 from dataclasses import replace
-from tinygrad import Tensor, Device
+from tinygrad import Tensor, Device, Context
 from tinygrad.helpers import diskcache, system, temp
 from tinygrad.engine.realize import lower_schedule_item, run_schedule, CompiledRunner
 from tinygrad.runtime.support.compiler_amd import compile_hip
@@ -13,11 +13,14 @@ with open(temp('test.hsaco'), 'rb') as f: lib = f.read()
 
 x = Tensor.randn((1,1,16,16,16), device="CPU").tolist()
 a = Tensor(x).avg_pool2d(kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False)
+
 sched = a.schedule()
-run_schedule(sched[:-1])
+it = [(si, lower_schedule_item(si)) for si in sched[:-1]]
 ei = lower_schedule_item(sched[-1])
 dev.compiler.disassemble(ei.prg.lib)
 ei2 = replace(ei, prg=CompiledRunner(ei.prg.p, lib))
-ei2.run()
+it.append((sched[-1], ei2))
 
-print(a.uop.buffer.numpy())
+with Context(VALIDATE_WITH_CPU=1):
+  run_schedule(sched, it=it)
+  print(a.uop.buffer.numpy())
