@@ -22,21 +22,46 @@ def disassemble(text, root:ET.Element):
     ins = struct.unpack("I", text[i:i+4])[0]
 
     for enc_el in root.findall("./ISA/Encodings/Encoding"):
-      if did_match: break
-      name = enc_el.findtext("EncodingName")
       mask = enc_el.findtext("EncodingIdentifierMask")
       assert len(mask)%32 == 0
       bit_mask = int(mask, 2)
       iden = [int(x.text, 2) for x in enc_el.find("EncodingIdentifiers").findall("EncodingIdentifier")]
       for ide in iden:
         if ins&bit_mask == ide:
-          #print("match", name, len(mask))
-          #print(ET.tostring(enc_el).decode())
           did_match = True
           break
+      if did_match: break
     if not did_match: raise RuntimeError(f"unknown instruction {ins:08X}")
+    if len(mask) >= 64: ins = (struct.unpack("I", text[i+4:i+8])[0]<<32) | ins
+    if len(mask) >= 96: ins = (struct.unpack("I", text[i+8:i+12])[0]<<64) | ins
+    name = enc_el.findtext("EncodingName")
 
-    print(f"{i:4X} : {ins:08x} {name}")
+    #print(ET.tostring(enc_el).decode())
+
+    # 2. Parse the Fields for this Encoding
+    field_data = {}
+    for field in enc_el.findall("MicrocodeFormat/BitMap/Field"):
+      field_name = field.find("FieldName").text
+
+      # Fields can be split into multiple ranges (RangeCount > 1)
+      # We assume Order="0" is the least significant part of the value
+      ranges = field.findall("BitLayout/Range")
+      ranges.sort(key=lambda x: int(x.attrib.get('Order', '0')))
+
+      #print(field_name, ET.tostring(ranges[0]).decode())
+
+      val = 0
+      current_shift = 0
+      for rng in ranges:
+        width = int(rng.find("BitCount").text)
+        offset = int(rng.find("BitOffset").text)
+        chunk = (ins >> offset) & ((1 << width) - 1)
+        val |= (chunk << current_shift)
+        current_shift += width
+
+      field_data[field_name] = val
+
+    print(f"{i:4X} : {ins:08x} {name}", field_data)
     i += len(mask) // 8
 
   #print(ET.tostring(root).decode())
