@@ -1,11 +1,6 @@
-import unittest, math
+import unittest
 
-from tinygrad import Tensor, Device, dtypes, Context
-from tinygrad.uop.ops import UOp, Ops
-from tinygrad.engine.realize import ExecItem, get_runner
-from tinygrad.helpers import CI
-import numpy as np
-
+from tinygrad import Tensor
 from extra.hevc.hevc import parse_hevc_file_headers, nv_gpu
 
 class TestHevc(unittest.TestCase):
@@ -52,9 +47,9 @@ class TestHevc(unittest.TestCase):
     self.assertEqual(frame1.RAP_picture_flag, 0)
     self.assertEqual(frame1.sw_hdr_skip_length, 9)
     self.assertEqual(frame1.num_ref_frames, 1)
-    self.assertEqual([x for x in frame1.initreflistidxl0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
-    self.assertEqual([x for x in frame1.initreflistidxl1], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
-    self.assertEqual([x for x in frame1.RefDiffPicOrderCnts], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+    self.assertEqual(list(frame1.initreflistidxl0), [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+    self.assertEqual(list(frame1.initreflistidxl1), [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+    self.assertEqual(list(frame1.RefDiffPicOrderCnts), [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
 
     frame3 = nv_gpu.nvdec_hevc_pic_s.from_buffer(opaque[3].data())
     _test_common(frame3, opaque[3].data())
@@ -63,8 +58,8 @@ class TestHevc(unittest.TestCase):
     self.assertEqual(frame3.RAP_picture_flag, 0)
     self.assertEqual(frame3.sw_hdr_skip_length, 9)
     self.assertEqual(frame3.num_ref_frames, 1)
-    self.assertEqual([x for x in frame3.initreflistidxl0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
-    self.assertEqual([x for x in frame3.initreflistidxl1], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
-    self.assertEqual([x for x in frame3.RefDiffPicOrderCnts], [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+    self.assertEqual(list(frame3.initreflistidxl0), [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+    self.assertEqual(list(frame3.initreflistidxl1), [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+    self.assertEqual(list(frame3.RefDiffPicOrderCnts), [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
 if __name__ == "__main__":
   unittest.main()
