@@ -260,7 +260,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
                                {"value":get_profile(events, sort_fn=row_tuple), "content_type":"application/octet-stream"}, depth=2))
       for k in sorted(wave_insts.get(cu, []), key=row_tuple):
         data = wave_insts[cu][k]
-        steps.append(create_step(k.replace(cu, ""), ("/sqtt-insts", len(ctxs), len(steps)), data, loc=data["loc"], depth=3))
+        steps.append(create_step(k.replace(cu, ""), ("/sqtt-clk", len(ctxs), len(steps)), data, loc=data["loc"], depth=3))
   ctxs.append({"name":"Counters", "steps":steps})
 
 def device_sort_fn(k:str) -> tuple[int, str, int]:
@@ -345,6 +345,11 @@ def get_render(i:int, j:int, fmt:str) -> dict:
       return get_llvm_mca(disasm_str, ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode(),
                           ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode())
     return {"src":disasm_str, "lang":"x86asm"}
+  if fmt == "sqtt-clk":
+    columns = ["PC", "Instruction", "Clk", "Duration", "Stall", "Type"]
+    pc_to_inst = data["disasm"]
+    start_pc = next((w:=data["wave"]).unpack_insts()).pc
+    return {"rows":[(e.pc-start_pc, pc_to_inst[e.pc][0], e.time, e.dur, e.stall, str(e.typ).split("_")[-1]) for e in w.unpack_insts()], "cols":columns, "summary":[]}
   if fmt == "sqtt-insts":
     columns = ["PC", "Instruction", "Hits", "Duration", "Stall", "Type"]
     inst_columns = ["N", "Clk", "Idle", "Dur", "Stall"]
