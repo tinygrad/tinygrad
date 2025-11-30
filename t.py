@@ -7,7 +7,7 @@ from tinygrad.runtime.support.compiler_amd import compile_hip
 Device.DEFAULT = "AMD"
 dev = Device[Device.DEFAULT]
 
-system(f"clang -x assembler -target amdgcn-amd-amdhsa -mcpu=gfx1200 -mcode-object-version=5 -c test.s -o {temp('test.o')}")
+system(f"clang -x assembler -target amdgcn-amd-amdhsa -mcpu={dev.arch} -mcode-object-version=5 -c test.s -o {temp('test.o')}")
 system(f"ld.lld -shared -o {temp('test.hsaco')} {temp('test.o')}")
 with open(temp('test.hsaco'), 'rb') as f: lib = f.read()
 
