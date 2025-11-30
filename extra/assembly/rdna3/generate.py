@@ -50,27 +50,51 @@ def disassemble(text, root:ET.Element):
         chunk = (ins >> int(rng.find("BitOffset").text)) & ((1 << width) - 1)
         val |= (chunk << current_shift)
         current_shift += width
-
       field_data[field.find("FieldName").text] = val
-
-    print()
-    print(f"{i:4X} : {ins:08x} {encoding_name}")
-    print(field_data)
+    # this is already used
+    del field_data["ENCODING"]
 
     # 3. Extract the instruction
     did_match = False
     for ins_el in root.findall("./ISA/Instructions/Instruction"):
-      name = ins_el.findtext("InstructionName")
+      ins_name = ins_el.findtext("InstructionName")
       for ins_enc in ins_el.findall("InstructionEncodings/InstructionEncoding"):
         if ins_enc.findtext("EncodingName") == encoding_name:
           opcode = int(ins_enc.findtext("Opcode"))
           if "OP" in field_data and opcode == field_data["OP"]:
-            print(name.lower())
             did_match = True
-            #print(ET.tostring(ins_enc).decode())
+            del field_data["OP"]
             break
         if did_match: break
       if did_match: break
+
+    #print(ET.tostring(ins_enc).decode())
+    print()
+    print(f"{i:4X} : {ins:08x} {encoding_name}")
+    print(field_data)
+    if did_match:
+      print(ins_name.lower())
+      #print(ET.tostring(ins_el).decode())
+
+      # 4. Extract the opcodes
+      for op_ins in ins_enc.findall("Operands/Operand"):
+        op_type = op_ins.findtext("OperandType")
+        op_size = op_ins.findtext("OperandSize")
+        op_fmt = op_ins.findtext("DataFormatName")
+        op_field_name = op_ins.findtext("FieldName")
+        if op_field_name is None: continue
+        assert op_field_name in field_data
+        # loop through operands for compare
+        for op_el in root.findall("./ISA/OperandTypes/OperandType"):
+          test_op_type = op_el.findtext("OperandTypeName")
+          val_dict = {}
+          for op_val in op_el.findall("OperandPredefinedValues/PredefinedValue"):
+            val_dict[int(op_val.findtext("Value"))] = op_val.findtext("Name")
+          if op_type == test_op_type:
+            print(op_type, op_size, op_fmt, op_el, op_field_name,
+                  field_data[op_field_name],
+                  val_dict.get(field_data[op_field_name], "<UNK>"))
+            #print(ET.tostring(op_el).decode())
 
     # advance
     i += len(mask) // 8
@@ -81,6 +105,7 @@ if __name__ == "__main__":
   # human readable manual at https://docs.amd.com/v/u/en-US/rdna35_instruction_set_architecture
   fns = nn.state.zip_extract(Tensor.from_url("https://gpuopen.com/download/machine-readable-isa/latest/"))
   xml_str = fns['amdgpu_isa_rdna3_5.xml'].to("CPU").data()
+  with open("/tmp/rdna35.xml", "wb") as f: f.write(bytes(xml_str))
   root = ET.fromstring(xml_str)
 
   a = Tensor.empty(16)+1
