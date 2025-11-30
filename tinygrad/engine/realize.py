@@ -141,6 +141,19 @@ class BufferCopy(Runner):
 class BufferXfer(BufferCopy):
   def copy(self, dest, src): dest.allocator._transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.dev, dest_dev=dest.allocator.dev)
 
+class EncDec(Runner):
+  def __init__(self, encdec:UOp, total_sz:int, device:str):
+    self.shape, self.pos_var = encdec.arg[0], encdec.variables()[0].expr
+    name = f"enc/dec {total_sz/1e6:7.2f}M, HEVC" if total_sz >= 1e6 else f"enc/dec {total_sz:8d}, HEVC"
+    super().__init__(colored(name, "yellow"), device, Estimates(lds=total_sz, mem=total_sz))
+  def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int], wait=False):
+    st = time.perf_counter()
+    rawbufs[0].allocator._encode_decode(rawbufs[0]._buf, rawbufs[1]._buf, rawbufs[2]._buf,
+                                        [x._buf for x in rawbufs[3:]], self.shape, var_vals[self.pos_var])
+    if wait:
+      Device[rawbufs[0].device].synchronize()
+      return time.perf_counter() - st
+
 # **************** method cache ****************
 
 method_cache: dict[tuple[str, type, bytes, tuple[int, ...], bool], CompiledRunner] = {}
@@ -201,6 +214,7 @@ si_lowerer = PatternMatcher([
   (UPat(Ops.COPY, name="copy"), lambda ctx,copy: ((BufferXfer(ctx[0].nbytes, ctx[0].device, ctx[1].device) \
       if hasattr(Device[ctx[0].device].allocator, '_transfer') and all_same([x.device.split(":")[0] for x in ctx]) \
       else BufferCopy(ctx[0].nbytes, ctx[0].device, ctx[1].device)), list(ctx))),
+  (UPat(Ops.ENCDEC, name="encdec"), lambda ctx,encdec: ((EncDec(encdec, ctx[0].nbytes, ctx[1].device)), list(ctx))),
 ])
 def lower_schedule_item(si:ScheduleItem) -> ExecItem:
   return ExecItem(*cast(tuple[Runner,list], si_lowerer.rewrite(si.ast, si.bufs)), si.metadata, si.fixedvars)

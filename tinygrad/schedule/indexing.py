@@ -8,7 +8,7 @@ from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
                      Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_GLOBAL,
-                     Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.LOAD, Ops.KERNEL}
+                     Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.LOAD, Ops.KERNEL, Ops.ENCDEC}
 
 def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
 
@@ -24,12 +24,12 @@ def realize_assign(ctx:dict[UOp, None], a:UOp) -> None:
 pm_generate_realize_map = PatternMatcher([
   # always realize SINK src
   (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in ALWAYS_CONTIGUOUS)),
-  # always realize COPY/BUFFER_VIEW/CONTIGUOUS/STORE
-  (UPat({Ops.COPY, Ops.BUFFER_VIEW, Ops.CONTIGUOUS, Ops.STORE}, name="tr"), realize),
+  # always realize COPY/BUFFER_VIEW/CONTIGUOUS/STORE/ENCDEC
+  (UPat({Ops.COPY, Ops.BUFFER_VIEW, Ops.CONTIGUOUS, Ops.STORE, Ops.ENCDEC}, name="tr"), realize),
   # always realize REDUCE on outer ranges
   (UPat(Ops.REDUCE, name="r"), lambda ctx,r: realize(ctx, r) if any(tr.arg[-1] == AxisType.OUTER for tr in r.src[1:]) else None),
-  # realize srcs of COPY, MSELECT, MSTACK
-  (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_srcs),
+  # realize srcs of COPY, MSELECT, MSTACK, ENCDEC
+  (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK, Ops.ENCDEC), name="rb"), realize_srcs),
   # realize ASSIGN and input to assign (might be optimized out)
   (UPat(Ops.ASSIGN, name="a"), realize_assign),
 ])
