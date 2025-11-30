@@ -1,6 +1,8 @@
+from tinygrad.helpers import system, temp, colored, getenv
+if getenv("MOCKGPU"): system("cargo build --release --manifest-path ./extra/remu/Cargo.toml")
+
 from dataclasses import replace
 from tinygrad import Tensor, Device, Context
-from tinygrad.helpers import diskcache, system, temp, colored, getenv
 from tinygrad.engine.realize import lower_schedule_item, run_schedule, CompiledRunner, ExecItem, get_program
 from tinygrad.runtime.support.compiler_amd import compile_hip
 
