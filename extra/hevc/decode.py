@@ -24,10 +24,9 @@ if __name__ == "__main__":
     dat_nv = hevc_tensor.to("NV")
     opaque, frame_info, w, h, luma_w, luma_h, chroma_off = parse_hevc_file_headers(dat)
 
-  out_image_size = luma_h + (luma_h + 1) // 2, round_up(luma_w, 64)
-
   frame_info = frame_info[:getenv("MAX_FRAMES", len(frame_info))]
 
+  # move all needed data to gpu
   all_slices = []
   with Timing("prep slices to gpu: "):
     opaque_nv = opaque.to("NV").contiguous().realize()
@@ -37,22 +36,21 @@ if __name__ == "__main__":
 
     Device.default.synchronize()
 
+  out_image_size = luma_h + (luma_h + 1) // 2, round_up(luma_w, 64)
   max_hist = max(history_sz for _, _, _, history_sz, _ in frame_info)
-  history = [Tensor.empty(out_image_size, dtype=dtypes.uint8).realize() for x in range(max_hist)]
-
   pos = Variable("pos", 0, max_hist + 1)
-  out_images = []
 
+  history = []
+  out_images = []
   with Timing("decoding whole file: ", on_exit=(lambda et: f", {len(frame_info)} frames, {len(frame_info)/(et/1e9):.2f} fps")):
     for i, (offset, sz, frame_pos, history_sz, is_hist) in enumerate(frame_info):
-      history = history[-max_hist:]
+      history = history[-history_sz:] if history_sz > 0 else []
 
-      x = all_slices[i].decode_hevc_frame(pos.bind(frame_pos), out_image_size, opaque_nv[i], history).realize()
+      outimg = all_slices[i].decode_hevc_frame(pos.bind(frame_pos), out_image_size, opaque_nv[i], history).realize()
+      out_images.append(outimg)
+      if is_hist: history.append(outimg)
 
-      cloned = x.clone()
-      out_images.append(cloned)
-      if is_hist: history.append(cloned)
-      Device.default.synchronize()
+    Device.default.synchronize()
 
   if getenv("VALIDATE", 0):
     import pickle
