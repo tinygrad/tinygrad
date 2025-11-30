@@ -16,7 +16,7 @@ class TestTK(unittest.TestCase):
   def test_simple_matmul(self):
     N = 8192
     BLOCK_SIZE = 64
-    with Kernel((N // BLOCK_SIZE, N // BLOCK_SIZE, 1), WARP_THREADS) as ker:
+    with Kernel("simple_matmul", (N // BLOCK_SIZE, N // BLOCK_SIZE, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
       c = ker.gl((1, 1, N, N), dtypes.float32)
@@ -65,7 +65,7 @@ class TestTK(unittest.TestCase):
   def test_simple_matmul_transposed(self):
     N = 8192
     BLOCK_N, BLOCK_M, BLOCK_K = 64, 64, 128
-    with Kernel((N // BLOCK_N, N // BLOCK_M, 1), WARP_THREADS) as ker:
+    with Kernel("simple_matmul_transposed", (N // BLOCK_N, N // BLOCK_M, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
       c = ker.gl((1, 1, N, N), dtypes.float32)
@@ -113,7 +113,7 @@ class TestTK(unittest.TestCase):
   def test_load_store(self):
     N = 64
     BLOCK_SIZE = 32
-    with Kernel((N // BLOCK_SIZE, N // BLOCK_SIZE, 1), WARP_THREADS) as ker:
+    with Kernel("load_store", (N // BLOCK_SIZE, N // BLOCK_SIZE, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
       b = ker.gl((1, 1, N, N), dtypes.float32)
@@ -150,7 +150,7 @@ class TestTK(unittest.TestCase):
   def test_load_store_group(self):
     N = 256
     BLOCK_SIZE = 64
-    with Kernel((N // BLOCK_SIZE, N // BLOCK_SIZE, 1), WARP_THREADS * 2) as ker:
+    with Kernel("load_store_group", (N // BLOCK_SIZE, N // BLOCK_SIZE, 1), WARP_THREADS * 2) as ker:
       warp = ker.warp
       group = ker.group(2)
 
@@ -187,7 +187,7 @@ class TestTK(unittest.TestCase):
   def test_add(self):
     N = 64
     BLOCK_SIZE = 32
-    with Kernel((1, 1, 1), WARP_THREADS) as ker:
+    with Kernel("add", (1, 1, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
       b = ker.gl((1, 1, N, N), dtypes.float32)
@@ -224,7 +224,7 @@ class TestTK(unittest.TestCase):
   def test_max(self):
     N = 64
     BLOCK_SIZE = 32
-    with Kernel((1, 1, 1), WARP_THREADS) as ker:
+    with Kernel("max", (1, 1, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
       b = ker.gl((1, 1, N, N), dtypes.float32)
@@ -269,7 +269,7 @@ class TestTK(unittest.TestCase):
   def test_max_nonsquare(self):
     N, M = 32, 128
     BLOCK_N, BLOCK_M = 16, 64
-    with Kernel((1, 1, 1), WARP_THREADS) as ker:
+    with Kernel("max_nonsquare", (1, 1, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
       b = ker.gl((1, 1, N, M), dtypes.float32)
@@ -314,7 +314,7 @@ class TestTK(unittest.TestCase):
   def test_sum(self):
     N = 64
     BLOCK_SIZE = 32
-    with Kernel((1, 1, 1), WARP_THREADS) as ker:
+    with Kernel("sum", (1, 1, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
       b = ker.gl((1, 1, N, N), dtypes.float32)
@@ -359,7 +359,7 @@ class TestTK(unittest.TestCase):
   def test_sum_nonsquare(self):
     N, M = 32, 128
     BLOCK_N, BLOCK_M = 16, 64
-    with Kernel((1, 1, 1), WARP_THREADS) as ker:
+    with Kernel("sum_nonsquare", (1, 1, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
       b = ker.gl((1, 1, N, M), dtypes.float32)
@@ -404,7 +404,7 @@ class TestTK(unittest.TestCase):
   def test_softmax(self):
     N = 64
     BLOCK_SIZE = 32
-    with Kernel((1, 1, 1), WARP_THREADS) as ker:
+    with Kernel("softmax", (1, 1, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
       b = ker.gl((1, 1, BLOCK_SIZE, N), dtypes.float32)
@@ -463,7 +463,7 @@ class TestTK(unittest.TestCase):
   def test_softmax_col(self):
     N = 64
     BLOCK_SIZE = 32
-    with Kernel((1, 1, 1), WARP_THREADS) as ker:
+    with Kernel("softmax_col", (1, 1, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
       b = ker.gl((1, 1, N, BLOCK_SIZE), dtypes.float32)
@@ -521,11 +521,11 @@ class TestTK(unittest.TestCase):
 
   def test_fa(self):
     NUM_WORKERS = 1
-    B, N, H, H_KV, D = 1, 8192, 32, 8, 128
+    B, N, H, H_KV, D = 2, 8192, 32, 8, 128
     Q_BLOCK_SIZE = 16
     KV_BLOCK_SIZE = 16
     GROUP_SIZE = H // H_KV
-    with Kernel((H, N // (Q_BLOCK_SIZE*NUM_WORKERS), B), NUM_WORKERS * WARP_THREADS) as ker:
+    with Kernel("fa", (H, N // (Q_BLOCK_SIZE*NUM_WORKERS), B), NUM_WORKERS * WARP_THREADS) as ker:
       warp = ker.warp
 
       # kernel
