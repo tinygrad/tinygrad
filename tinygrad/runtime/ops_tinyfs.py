@@ -1,4 +1,4 @@
-import socket, json, asyncio, threading
+import socket, json, asyncio, threading, math
 from contextlib import asynccontextmanager
 from tinygrad.device import Compiled, Allocator
 from tinygrad.helpers import DEBUG, getenv
@@ -92,9 +92,9 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
     if dest.device.op == "LOAD":
       locs = self.dev.sfile.readline()
       dest.copyout_queue = json.loads(locs)
-      dest.hash_buf[:] = src.tobytes()
+      dest.hash_buf = src.tobytes()
     elif dest.device.op == "STORE":
-      expected_hashes = dest.size // Tensor.CHUNK_SIZE
+      expected_hashes = math.ceil(dest.size / Tensor.CHUNK_SIZE)
       dest.hash_buf = bytearray(expected_hashes * 16)
       self.dev.sfile.readinto(dest.hash_buf)
 
