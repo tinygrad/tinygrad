@@ -143,12 +143,13 @@ class BufferXfer(BufferCopy):
 
 class EncDec(Runner):
   def __init__(self, encdec:UOp, total_sz:int, device:str):
-    self.encdec, self.pos_var = encdec, encdec.variables()[0].expr
+    self.shape, self.pos_var = encdec.arg[0], encdec.variables()[0].expr
     name = f"enc/dec {total_sz/1e6:7.2f}M, HEVC" if total_sz >= 1e6 else f"enc/dec {total_sz:8d}, HEVC"
     super().__init__(colored(name, "yellow"), device, Estimates(lds=total_sz, mem=total_sz))
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int], wait=False):
     st = time.perf_counter()
-    rawbufs[0].allocator._encode_decode(*[x._buf for x in rawbufs[:3]], [x._buf for x in rawbufs[3:]], self.encdec.arg[0], var_vals[self.pos_var])
+    rawbufs[0].allocator._encode_decode(rawbufs[0]._buf, rawbufs[1]._buf, rawbufs[2]._buf,
+                                        [x._buf for x in rawbufs[3:]], self.shape, var_vals[self.pos_var])
     if wait:
       Device[rawbufs[0].device].synchronize()
       return time.perf_counter() - st
