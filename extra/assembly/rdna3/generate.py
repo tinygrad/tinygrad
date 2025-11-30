@@ -15,6 +15,7 @@ from tinygrad.runtime.ops_amd import ProfileSQTTEvent
 from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
 
 if __name__ == "__main__":
+  # human readable manual at https://docs.amd.com/v/u/en-US/rdna35_instruction_set_architecture
   fns = nn.state.zip_extract(Tensor.from_url("https://gpuopen.com/download/machine-readable-isa/latest/"))
   xml_str = fns['amdgpu_isa_rdna3_5.xml'].to("CPU").data()
   root = ET.fromstring(xml_str)
@@ -32,7 +33,7 @@ if __name__ == "__main__":
     ei.run()
 
   sqtt_events = [e for e in Device["AMD"].profile_events if isinstance(e, ProfileSQTTEvent)]
-  for e in sqtt_events:
+  for e in sqtt_events[0:1]: # only the first SE
     parse_sqtt_print_packets(e.blob)
 
   #from hexdump import hexdump
