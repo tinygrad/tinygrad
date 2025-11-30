@@ -7,13 +7,22 @@ from tinygrad.engine.realize import run_schedule
 from tinygrad.uop.ops import UOp
 from tinygrad.tensor import Tensor
 
+def _allocations_of_type(t):
+  ret = 0
+  for x in gc.get_objects():
+    try:
+      if isinstance(x, t): ret += 1
+    except ReferenceError:
+      pass
+  return ret
+
 def tensors_allocated():
   gc.collect()
-  return sum([isinstance(x, Tensor) for x in gc.get_objects()])
+  return _allocations_of_type(Tensor)
 
 def bufs_allocated():
   gc.collect()
-  return sum([isinstance(x, Buffer) for x in gc.get_objects()])
+  return _allocations_of_type(Buffer)
 
 class TestGC(unittest.TestCase):
 

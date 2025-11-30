@@ -8,7 +8,7 @@ from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.ASSIGN, Ops.COPY, Ops.BUFFER, Ops.BUFFER_VIEW,
                      Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.DEFINE_GLOBAL,
-                     Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.LOAD, Ops.KERNEL}
+                     Ops.DEFINE_LOCAL, Ops.DEFINE_REG, Ops.LOAD, Ops.KERNEL, Ops.ENCDEC}
 
 def realize(ctx:dict[UOp, None], tr:UOp) -> None: ctx[tr] = None
 
@@ -24,12 +24,12 @@ def realize_assign(ctx:dict[UOp, None], a:UOp) -> None:
 pm_generate_realize_map = PatternMatcher([
   # always realize SINK src
   (UPat(Ops.SINK, name="s"), lambda ctx,s: ctx.update((x.base, None) for x in s.src if x.base.op not in ALWAYS_CONTIGUOUS)),
-  # always realize COPY/BUFFER_VIEW/CONTIGUOUS/STORE
-  (UPat({Ops.COPY, Ops.BUFFER_VIEW, Ops.CONTIGUOUS, Ops.STORE}, name="tr"), realize),
+  # always realize COPY/BUFFER_VIEW/CONTIGUOUS/STORE/ENCDEC
+  (UPat({Ops.COPY, Ops.BUFFER_VIEW, Ops.CONTIGUOUS, Ops.STORE, Ops.ENCDEC}, name="tr"), realize),
   # always realize REDUCE on outer ranges
   (UPat(Ops.REDUCE, name="r"), lambda ctx,r: realize(ctx, r) if any(tr.arg[-1] == AxisType.OUTER for tr in r.src[1:]) else None),
-  # realize srcs of COPY, MSELECT, MSTACK
-  (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_srcs),
+  # realize srcs of COPY, MSELECT, MSTACK, ENCDEC
+  (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK, Ops.ENCDEC), name="rb"), realize_srcs),
   # realize ASSIGN and input to assign (might be optimized out)
   (UPat(Ops.ASSIGN, name="a"), realize_assign),
 ])
@@ -119,6 +119,21 @@ pm_apply_rangeify = PatternMatcher([
   (UPat((Ops.CONST, Ops.DEFINE_VAR), name="c"), lambda ctx,c: c.replace(src=()) if c in ctx.range_map else None),
 ])
 
+@functools.cache
+def _apply_reshape(in_shape:tuple[sint,...], out_shape:tuple[sint, ...], urngs:UOp) -> UOp:
+  acc = 1
+  axes_in:list[UOp] = []
+  for s,src in list(zip(out_shape, urngs.src))[::-1]:
+    axes_in.append(acc*src)
+    acc *= s
+  combined_axes = sum(axes_in, start=UOp.const(dtypes.index, 0))
+  axes_out:list[UOp] = []
+  for s in in_shape[::-1]:
+    axes_out.append(combined_axes % s)
+    combined_axes //= s
+  # this simplify is doing a lot of heavy lifting. this is the replacement for the reshape view merging code
+  return graph_rewrite(UOp.sink(*axes_out[::-1]), symbolic+pm_simplify_valid+pm_drop_and_clauses, name="reshape")
+
 # this is the definition of the movement ops
 @functools.cache
 def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
@@ -134,18 +149,9 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
       rngs = tuple(r if (s == 0 and e == 0) else graph_rewrite(((r >= s) & (r < (sh+s))),
         symbolic+pm_simplify_valid, name="pad").where(r-s, UOp.invalid()) for r,sh,(s,e) in zip(rngs, in_shape, arg))
     case Ops.RESHAPE:
-      acc = 1
-      axes_in:list[UOp] = []
-      for s,src in list(zip(arg, rngs))[::-1]:
-        axes_in.append(acc*src)
-        acc *= s
-      combined_axes = sum(axes_in, start=UOp.const(dtypes.index, 0))
-      axes_out:list[UOp] = []
-      for s in in_shape[::-1]:
-        axes_out.append(combined_axes % s)
-        combined_axes //= s
-      # this simplify is doing a lot of heavy lifting. this is the replacement for the reshape view merging code
-      rngs = graph_rewrite(UOp.sink(*axes_out[::-1]), symbolic+pm_simplify_valid+pm_drop_and_clauses, name="reshape").src
+      sink = UOp.sink(*rngs)
+      sub_array = {r:UOp.range(r.src[0], i, AxisType.PLACEHOLDER) for i,r in enumerate(sink.ranges)}
+      rngs = _apply_reshape(in_shape, arg, sink.substitute(sub_array)).substitute({v:k for k,v in sub_array.items()}).src
     case _: raise RuntimeError(f"{op} is not a MovementOp")
   return rngs
 
