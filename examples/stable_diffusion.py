@@ -283,6 +283,7 @@ if __name__ == "__main__":
           v.replace(v.cast(dtypes.float16))
 
     Tensor.realize(*get_state_dict(model).values())
+  exit(0)
 
   profile_marker("run clip (conditional)")
   tokenizer = Tokenizer.ClipTokenizer()
