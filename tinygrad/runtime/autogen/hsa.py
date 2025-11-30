@@ -1,16 +1,9 @@
 # mypy: ignore-errors
-import ctypes, os
-from tinygrad.helpers import unwrap
+import ctypes
 from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-from ctypes.util import find_library
-def dll():
-  try: return ctypes.CDLL(unwrap(os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libhsa-runtime64.so'))
-  except: pass
-  try: return ctypes.CDLL(unwrap(find_library('hsa-runtime64')))
-  except: pass
-  return None
-dll = dll()
-
+from tinygrad.helpers import findlib
+try: dll = ctypes.CDLL(findlib('hsa-runtime64', [os.getenv('ROCM_PATH', '/opt/rocm')+'/lib']))
+except: dll = None
 hsa_status_t = CEnum(ctypes.c_uint32)
 HSA_STATUS_SUCCESS = hsa_status_t.define('HSA_STATUS_SUCCESS', 0)
 HSA_STATUS_INFO_BREAK = hsa_status_t.define('HSA_STATUS_INFO_BREAK', 1)

@@ -1,14 +1,9 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import unwrap
 from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-from ctypes.util import find_library
-def dll():
-  try: return ctypes.CDLL(unwrap(find_library('OpenCL')))
-  except: pass
-  return None
-dll = dll()
-
+from tinygrad.helpers import findlib
+try: dll = ctypes.CDLL(findlib('OpenCL'))
+except: dll = None
 class struct__cl_platform_id(Struct): pass
 cl_platform_id = ctypes.POINTER(struct__cl_platform_id)
 class struct__cl_device_id(Struct): pass

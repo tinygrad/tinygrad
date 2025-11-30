@@ -1,14 +1,9 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import unwrap
 from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support.llvm import LLVM_PATH
-def dll():
-  try: return ctypes.CDLL(unwrap(LLVM_PATH))
-  except: pass
-  return None
-dll = dll()
-
+try: dll = ctypes.CDLL(['LLVM_PATH'])
+except: dll = None
 intmax_t = ctypes.c_int64
 try: (imaxabs:=dll.imaxabs).restype, imaxabs.argtypes = intmax_t, [intmax_t]
 except AttributeError: pass
