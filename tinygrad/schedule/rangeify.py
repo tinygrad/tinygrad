@@ -48,7 +48,10 @@ def split_reduceop(reduce:UOp, x:UOp):
   range_nums = [y.arg[0] for y in indexed.substitute({x.base:UOp(Ops.NOOP)}, extra_pm=pm_mops).ranges]
   is_expanded = [i not in range_nums for i in range(len(x.shape))]
 
-  if not (split_candidates:=[(i,d) for i in reduce.arg[1] for d in range(min(256,2**getenv("REDUCEOP_SPLIT_SIZE",22)//prod(reduce.shape)),8-1,-1)
+  # CPU benefits from smaller splits for L1 cache locality (32-64KB)
+  max_div = 32 if (getenv("LLVM", 0) or getenv("CLANG", 0)) else 256
+  split_max = min(max_div, 2**getenv("REDUCEOP_SPLIT_SIZE", 22)//prod(reduce.shape))
+  if not (split_candidates:=[(i,d) for i in reduce.arg[1] for d in range(split_max, 8-1, -1)
                              if x.shape[i]%d==0 and not is_expanded[i]]): return None
   dim_to_split, divisor = split_candidates[0]
   splitted_shape = x.shape[:dim_to_split]+(divisor,)+(x.shape[dim_to_split]//divisor,)+x.shape[dim_to_split+1:]
