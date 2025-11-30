@@ -469,7 +469,7 @@ async function renderProfiler(path, unit, opts) {
           const x = xscale(e.x);
           const y = offsetY+e.y;
           let width = xscale(e.x+e.width)-x;
-          if (width < 0.1) width = 0.1; // draw thin line for very small events
+          // if (width < 0.1) width = 0.1; // draw thin line for very small events
           p.rect(x, y, width, e.height);
           visible.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
           ctx.fillStyle = e.fillColor; ctx.fill(p);
@@ -731,7 +731,7 @@ async function main() {
         if (subrewrites.length > 0) { l.appendChild(d3.create("span").text(` (${subrewrites.length})`).node()); l.parentElement.classList.add("has-children"); }
       }
     }
-    return setState({ currentCtx: 10, currentStep: 1 });
+    return setState({ currentCtx:-1 });
   }
   // ** center graph
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
