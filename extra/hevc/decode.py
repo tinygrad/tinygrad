@@ -25,7 +25,7 @@ if __name__ == "__main__":
     opaque, frame_info, w, h, luma_w, luma_h, chroma_off = parse_hevc_file_headers(dat)
 
   out_image_size = luma_h + (luma_h + 1) // 2, round_up(luma_w, 64)
-  
+
   frame_info = frame_info[:getenv("MAX_FRAMES", len(frame_info))]
 
   all_slices = []

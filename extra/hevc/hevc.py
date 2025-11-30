@@ -277,7 +277,7 @@ def parse_hevc_file_headers(dat:bytes):
     nonlocal res, history, device_ctx, nal_infos, ctx_bytes, align_ctx_bytes_size
 
     if not len(nal_infos): return
-    
+
     hdr, nal_unit_type = nal_infos[0][0]
     assert all(nal_unit_type == x[0][1] for x in nal_infos), "all NAL units in a picture must be of the same type"
 
