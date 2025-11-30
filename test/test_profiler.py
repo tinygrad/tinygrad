@@ -4,6 +4,7 @@ from tinygrad.helpers import CI, getenv, Context, ProfileRangeEvent, cpu_profile
 from tinygrad.device import Buffer, BufferSpec, Compiled, ProfileDeviceEvent, ProfileGraphEvent
 from tinygrad.runtime.support.hcq import HCQCompiled
 from tinygrad.engine.realize import get_runner
+from test.helpers import needs_second_gpu
 
 MOCKGPU = getenv("MOCKGPU")
 
@@ -91,9 +92,9 @@ class TestProfiler(unittest.TestCase):
     #for i in range(1, 3):
     #  assert evs[i].st > evs[i-1].en, "timestamp not aranged"
 
+  @needs_second_gpu
   def test_profile_multidev(self):
-    try: d1 = Device[f"{Device.DEFAULT}:1"]
-    except Exception as e: self.skipTest(f"second device not available {e}")
+    d1 = Device[f"{Device.DEFAULT}:1"]
 
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
     buf2 = Buffer(f"{Device.DEFAULT}:1", 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
@@ -110,9 +111,9 @@ class TestProfiler(unittest.TestCase):
       assert len(evs) == 1, "one kernel runs are expected"
       assert evs[0].is_copy, "kernel should be copy"
 
+  @needs_second_gpu
   def test_profile_multidev_transfer(self):
-    try: d1 = Device[f"{Device.DEFAULT}:1"]
-    except Exception as e: self.skipTest(f"second device not available {e}")
+    d1 = Device[f"{Device.DEFAULT}:1"]
 
     buf1 = Tensor.randn(10, 10, device=f"{Device.DEFAULT}:0").realize()
     with helper_collect_profile(TestProfiler.d0, d1) as profile:
@@ -123,10 +124,10 @@ class TestProfiler(unittest.TestCase):
     assert len(kernel_runs) == 1, "one kernel run is expected"
     assert kernel_runs[0].is_copy, "kernel should be copy"
 
+  @needs_second_gpu
   @unittest.skipIf(Device.DEFAULT in "METAL" or (MOCKGPU and Device.DEFAULT == "AMD"), "AMD mockgpu does not support queue wait interrupts")
   def test_profile_graph(self):
-    try: d1 = Device[f"{Device.DEFAULT}:1"]
-    except Exception as e: self.skipTest(f"second device not available {e}")
+    d1 = Device[f"{Device.DEFAULT}:1"]
 
     def f(a):
       x = (a + 1).realize()
