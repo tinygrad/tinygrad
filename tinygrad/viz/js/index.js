@@ -468,7 +468,8 @@ async function renderProfiler(path, unit, opts) {
           if (e.x>et || e.x+e.width<st) continue;
           const x = xscale(e.x);
           const y = offsetY+e.y;
-          const width = xscale(e.x+e.width)-x;
+          let width = xscale(e.x+e.width)-x;
+          if (width < 0.1) width = 0.1; // draw thin line for very small events
           p.rect(x, y, width, e.height);
           visible.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
           ctx.fillStyle = e.fillColor; ctx.fill(p);
@@ -755,7 +756,7 @@ async function main() {
     if (!(ckey in cache)) cache[ckey] = ret = await fetchValue(ckey);
     // cycles on the x axis
     if (ret instanceof ArrayBuffer) {
-      opts = {heightScale:0.5, hideLabels:true, levelKey:(e) => parseInt(e.name.split(" ")[1].split(":")[1])};
+      opts = {heightScale:0.5, hideLabels:true, levelKey:ckey === "counters" ? (e) => parseInt(e.name.split(" ")[1].split(":")[1]) : null};
       return renderProfiler(ckey, "clk", opts);
     }
     displaySelection("#custom");

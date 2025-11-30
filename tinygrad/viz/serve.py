@@ -260,7 +260,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
                                {"value":get_profile(events, sort_fn=row_tuple), "content_type":"application/octet-stream"}, depth=2))
       for k in sorted(wave_insts.get(cu, []), key=row_tuple):
         data = wave_insts[cu][k]
-        steps.append(create_step(k.replace(cu, ""), ("/sqtt-insts", len(ctxs), len(steps)), data, loc=data["loc"], depth=3))
+        steps.append(create_step(k.replace(cu, ""), ("/sqtt-events", len(ctxs), len(steps)), data, loc=data["loc"], depth=3))
   ctxs.append({"name":"Counters", "steps":steps})
 
 def device_sort_fn(k:str) -> tuple[int, str, int]:
@@ -372,6 +372,16 @@ def get_render(i:int, j:int, fmt:str) -> dict:
     summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
                {"label":"SIMD", "value":w.simd}, {"label":"Wave ID", "value":w.wave_id}, {"label":"Run number", "value":data["run_number"]}]
     return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "summary":summary}
+  if fmt == "sqtt-events":
+    categories:set[str] = set()
+    events:list[ProfileEvent] = []
+    w, pc_to_inst = data["wave"], data["disasm"]
+    for e in w.unpack_insts():
+      category = e.typ.split("_")[-1]
+      if category not in categories: categories.add(category)
+      events.append(ProfileRangeEvent(category, f"{category} {pc_to_inst[e.pc][0]}", Decimal(e.time), Decimal(e.time+e.dur)))
+    events = [ProfilePointEvent(x.split("_")[-1], "start", x, ts=Decimal(0)) for x in categories]+events
+    return {"value":get_profile(events), "content_type":"application/octet-stream"}
   return data
 
 # ** HTTP server
