@@ -136,7 +136,7 @@ mod tests {
 }
 
 use std::sync::LazyLock;
-pub static DEBUG: LazyLock<bool> = LazyLock::new(|| std::env::var("DEBUG").map(|v| v.parse::<usize>().unwrap_or(0) >= 6).unwrap_or(false));
+pub static DEBUG: LazyLock<bool> = LazyLock::new(|| std::env::var("REMU_DEBUG").map(|v| v.parse::<usize>().unwrap_or(0) >= 1).unwrap_or(false));
 
 pub fn colored(st:&str, color:&str) -> String {
     let ansi_code = match color {
