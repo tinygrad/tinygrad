@@ -56,6 +56,10 @@
   }
   ul > ul {
     display: none;
+    margin-left: 6px;
+  }
+  ul.has-children ul {
+    margin-left: calc(6px + 1ch);
   }
   ul.has-children > p::before {
     content:"▸ ";
@@ -310,16 +314,13 @@
   table tr:last-child > td {
      border-bottom: none;
   }
-  tr.main-row:hover {
+  tr.main-row:hover, tr.main-row.expanded, tr.nested-row > td > table, tr.nested-row thead {
     background-color: #2a2d3a;
   }
-  tr.sub-row {
-    max-width: 150px;
-  }
-  tr.main-row > td, tr.sub-row > td {
+  tr.main-row > td {
     padding: 8px 12px;
   }
-  tr.code-row > td:first-child {
+  td.Instruction {
     font-family: monospace;
   }
   td.pct-row > div {
@@ -343,6 +344,24 @@
     border-bottom: 1px solid #4a4b56;
     font-size: 0.95em;
     letter-spacing: 0.03em;
+  }
+  tr.nested-row > td {
+    border-bottom: none;
+  }
+  tr.nested-row table tr.main-row:hover {
+    background-color: unset;
+  }
+  tr.main-row.has-children > td:first-child {
+    white-space: pre;
+  }
+  tr.main-row.has-children > td:first-child::before {
+    content: "▸ ";
+    display: inline-block;
+    width: 1em;
+    margin-left: -0.25em;
+  }
+  tr.main-row.has-children.expanded > td:first-child::before {
+    content: "▾ ";
   }
   </style>
 </head>

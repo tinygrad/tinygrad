@@ -166,6 +166,7 @@ class RGP:
           se=ev.se,
           itrace=merged_sqtt_events[ev.se].itrace or ev.itrace,
           blob=merged_sqtt_events[ev.se].blob + ev.blob,
+          exec_tag=0,
         )
     sqtt_events = list(merged_sqtt_events.values())
 

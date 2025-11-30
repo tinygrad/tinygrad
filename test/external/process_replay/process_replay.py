@@ -36,9 +36,9 @@ def trunc_log(x):
   logging.info("\n".join(lines))
 
 # user config
-# NOTE: process replay is slow so it's now disabled by default. add [pr] to enable it
-#SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")
-SKIP_PROCESS_REPLAY = not ASSERT_DIFF and not ((k:="[p]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", ""))
+SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")
+# uncomment this to disable by default
+#SKIP_PROCESS_REPLAY = not ASSERT_DIFF and not ((k:="[p]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", ""))
 if REF == "master": SKIP_PROCESS_REPLAY = True
 class ProcessReplayWarning(Warning): pass
 
@@ -67,7 +67,10 @@ def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer|None=None, opts
   ast_repr = codecs.decode(str(input_ast), "unicode_escape")
   return to_str(p2), to_str(p), (ast_repr, renderer)
 
-replayers: dict[str, Callable[..., tuple[str, str, tuple[Any, ...]]]] = {"get_rangeify_map":replay_get_rangeify_map, "get_program":replay_get_program}
+replayers: dict[str, Callable[..., tuple[str, str, tuple[Any, ...]]]] = {}
+replayers["get_program"] = replay_get_program
+# disable this for speed, does it ever find things?
+#replayers["get_rangeify_map"] = replay_get_rangeify_map
 
 # *** run replayers on captured rows and print diffs
 
