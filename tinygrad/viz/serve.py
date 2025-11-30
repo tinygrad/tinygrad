@@ -256,7 +256,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     steps.append(create_step(kernel.name if kernel is not None else name.prg, ("/counters", len(ctxs), len(steps)), {"src":src}, depth=1))
     for cu in prg_cu:
       events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]
-      steps.append(create_step(cu, ("/counters", len(ctxs), len(steps)),
+      steps.append(create_step(f"{cu} {len(cu_events[cu])}", ("/counters", len(ctxs), len(steps)),
                                {"value":get_profile(events, sort_fn=row_tuple), "content_type":"application/octet-stream"}, depth=2))
       for k in sorted(wave_insts.get(cu, []), key=row_tuple):
         data = wave_insts[cu][k]
