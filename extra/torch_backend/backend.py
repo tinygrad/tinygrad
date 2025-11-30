@@ -4,10 +4,10 @@
 # A006 Lambda argument `input` is shadowing a Python builtin
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.uop.ops import Ops
-from tinygrad.helpers import getenv, prod
+from tinygrad.helpers import getenv, prod, strides_for_shape, argfix
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
-import torch, pathlib, math, operator, functools, inspect
+import torch, pathlib, math, operator, functools, weakref
 torch.autograd.grad_mode.set_multithreading_enabled(False)
 from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
 
@@ -18,7 +18,17 @@ def _to_torch_device(device: str): return torch.device("tiny", int(device.partit
 
 import torch.utils.cpp_extension
 mod = torch.utils.cpp_extension.load(name="custom_device_extension", sources=[str(pathlib.Path(__file__).parent / "wrapped_tensor.cpp")])
-def wrap(x:Tensor) -> torch.Tensor: return mod.wrap(x, _to_torch_dtype(x.dtype), _to_torch_device(x.device).index)
+def calculate_storage_offset(x: Tensor) -> int:
+  offset = 0
+  for u in x.uop.toposort():
+    if u.op == Ops.SHRINK:
+      u_strides = strides_for_shape(u.src[0].shape)
+      for i, (start, _) in enumerate(u.marg): offset += start * u_strides[i]
+  return offset
+def wrap(x: Tensor) -> torch.Tensor:
+  x._strides = strides_for_shape(x.shape) # always recalculate
+  if (not hasattr(x, '_storage_offset')) or (not x.uop.is_realized): x._storage_offset = calculate_storage_offset(x)
+  return mod.wrap(x, _to_torch_dtype(x.dtype), _to_torch_device(x.device).index)
 def unwrap(x:torch.Tensor) -> Tensor:
   assert isinstance(x, torch.Tensor), f"x isn't {type(x)}"
   return mod.unwrap(x)
@@ -35,17 +45,20 @@ torch.utils.generate_methods_for_privateuse1_backend()
 aten = torch.ops.aten
 
 # track view relationships for in place operations
-def is_view(tensor: Tensor): return hasattr(tensor, "_view_base")
 def canonical_base(view: Tensor): return getattr(view, "_view_base", view)
 def derived_views(base: Tensor): return [t for tref in getattr(base, "_views", set()) if (t:=tref()) is not None]
+def unwrap_args(args, kwargs):
+  return [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args], {k:unwrap(v) if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()}
 def wrap_view_op(fn):
-  def _wrap(*args,**kwargs):
-    args = [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args]
-    kwargs = {k:unwrap(v) if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()}
-    ret = fn(*args,**kwargs)
-    ret._view_base = base = canonical_base(args[0])
-    if not hasattr(base, "_views"): base._views = set()
+  @functools.wraps(fn)
+  def _wrap(*args, **kwargs):
+    args, kwargs = unwrap_args(args, kwargs)
+    ret = fn(*args, **kwargs)
+    base = canonical_base(args[0])
+    ret._view_base = base
+    base._views = getattr(base, "_views", set())
     base._views.add(weakref.ref(ret))
+    ret._view_ops = _get_view_ops(args[0]) + [(fn, args[1:], kwargs)]
     return wrap(ret)
   return _wrap
 
@@ -58,48 +71,83 @@ view_ops = {
   "aten.transpose.int": Tensor.transpose,
   "aten.squeeze.dim": Tensor.squeeze,
   "aten.unsqueeze": Tensor.unsqueeze,
-  "aten.detach": Tensor.detach,
   "aten.select.int": lambda self, dim, idx: self[(slice(None),) * (dim%self.ndim) + (idx,)],
-}
+  "aten.permute": Tensor.permute,
+  "aten.alias": lambda self: self,
+  }
+
+# torch 2.10 handles this natively
+if tuple(map(int, torch.__version__.split('.')[:2])) < (2, 10): view_ops.update({"aten.detach": Tensor.detach})
 
 for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(v))
 
-# in place operations with views
-def realize_with_views(self: Tensor, views: Tensor):
-  if not self.uop.st.contiguous: self.replace(self.contiguous())
-  self.replace(self.clone().realize())
-  for v in views:
-    if v.uop.base.op is Ops.BUFFER_VIEW: continue # skip subbuffer, we just use the real buffer view
-    ret = self
-    st = ShapeTracker(self.uop.st.views + v.uop.st.views) # TODO: is this right?
-    for mo in cached_to_movement_ops(self.shape, st): ret = apply_mop(ret, mo)
-    v.replace(ret)
-def maybe_realize_storage(self: Tensor) -> bool:
-  if realize:=is_view(self): realize_with_views((base:=canonical_base(self)), derived_views(base))
-  return realize
-def inplace_fn(outvars: str|list[str]):
-  if type(outvars) is str: outvars = [outvars]
-  def decorator(fn):
-    sig = inspect.signature(fn)
-    def wrapper(*args, **kwargs):
-      bound = sig.bind(*args, **kwargs)
-      outs = [kwargs.get(v, bound.arguments.get(v)) for v in outvars]
-      outs = [unwrap(o) if isinstance(o, torch.Tensor) else o for o in outs]
-      realize = any(maybe_realize_storage(o) for o in outs)
-      ret = fn(*args, **kwargs)
-      if realize: Tensor.realize(*(o for o in outs))
-      return ret
-    return wrapper
-  return decorator
+def _get_view_ops(view): return getattr(view, "_view_ops", [])
+
+def _apply_view_ops(target, ops):
+  for fn, args, kwargs in ops: target = fn(target, *args, **kwargs)
+  return target
+
+# similar to https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/InferSize.h
+def _reshape_target_shape(shape:tuple[int, ...], args) -> tuple[int, ...]|None:
+  if not (req := argfix(*args)): return None
+  new_shape, infer_idx = [], -1
+  for i, s in enumerate(req):
+    if s is None: s = shape[i] if i < len(shape) else None
+    if not isinstance(s, int): return None
+    if s == -1:
+      if infer_idx != -1: return None
+      infer_idx = len(new_shape)
+    new_shape.append(s)
+  total = prod(shape)
+  if infer_idx != -1:
+    known = prod(x for x in new_shape if x != -1)
+    if known == 0:
+      if total != 0: return None
+      new_shape[infer_idx] = 0
+    else: new_shape[infer_idx] = total // known
+  return tuple(new_shape) if prod(new_shape) == total else None
+
+# TODO: can we get rid of this? only for test_flatten_reshape_add
+def _try_simple_reshape_view_write(base: Tensor, view: Tensor, val: Tensor) -> bool:
+  if not (ops := _get_view_ops(view)): return False
+  shapes = [base.shape]
+  for fn, args, _ in ops:
+    if fn is Tensor.reshape:
+      if not (next_shape := _reshape_target_shape(shapes[-1], args)): return False
+      shapes.append(next_shape)
+  if shapes[-1] != view.shape: return False
+  for s in reversed(shapes[:-1]): val = val.reshape(s)
+  base.assign(val)
+  return True
+
+def _view_write(base: Tensor, view: Tensor, value: Tensor) -> None:
+  val = value if value.dtype == base.dtype else value.cast(base.dtype)
+  if view.shape == base.shape: return base.assign(val)
+  if _try_simple_reshape_view_write(base, view, val): return
+  idx_base = Tensor.arange(base.numel(), device=base.device, dtype=dtypes.int32).reshape(base.shape)
+  idx_view = _apply_view_ops(idx_base, _get_view_ops(view)).reshape(-1)
+  flat_base = base.reshape(base.numel()).contiguous()
+  flat_base[idx_view] = val.reshape(-1)
+  base.assign(flat_base.reshape(base.shape))
+
+def _apply_inplace(target: Tensor, value: Tensor) -> None:
+  val = value if value.dtype == target.dtype else value.cast(target.dtype)
+  base = canonical_base(target)
+  views = derived_views(base)
+  if not views: return target.assign(val)
+  view_ops_map = {v: _get_view_ops(v) for v in views}
+  if target is base or target.uop is base.uop: base.assign(val)
+  else: _view_write(base, target, val)
+  for v in views: v.replace(_apply_view_ops(base, view_ops_map[v]))
 
 # *** bad functions on CPU ***
 
 @torch.library.impl("aten::_index_put_impl_", "privateuseone")
-@inplace_fn("self")
 def _index_put_impl_(self, indices, values, accumulate=False, unsafe=False):
   # TODO: move to tinygrad
   ret = aten._index_put_impl_(self.cpu(), [x.cpu() if isinstance(x, torch.Tensor) else None for x in indices], values.cpu(), accumulate, unsafe).to(self.device)
-  return wrap(unwrap(self).assign(unwrap(ret)))
+  unwrap(self).assign(unwrap(ret))
+  return self
 
 @torch.library.impl("aten::index_put", "privateuseone")
 def index_put(self, indices, values, accumulate=False):
@@ -150,43 +198,23 @@ for i in [
 def index_tensor(x, y):
   return wrap(unwrap(x)[[unwrap(_y.to(x.device)) if _y is not None else slice(None) for _y in y]])
 
-@torch.library.impl("aten::zero_", "privateuseone")
-@inplace_fn("x")
-def zero_(x):
-  if TORCH_DEBUG: print(f"zero_ {x.shape}")
-  tt = unwrap(x)
-  tt.assign(tt.zeros_like())
-
-@torch.library.impl("aten::fill_.Scalar", "privateuseone")
-@inplace_fn("x")
-def fill_scalar(x, y):
-  if TORCH_DEBUG: print(f"fill_.Scalar {x.shape} {y}")
-  tt = unwrap(x)
-  tt.assign(tt.full_like(y))
 
 @torch.library.impl("aten::_local_scalar_dense", "privateuseone")
 def _local_scalar_dense(tensor): return unwrap(tensor).item()
 
-@functools.cache
-def cached_to_movement_ops(shape, st) -> list:
-  mops = to_movement_ops(st)
-  if mops[0] == (MovementOps.RESHAPE, shape): mops = mops[1:]
-  return mops
-
-from tinygrad.shape.shapetracker import ShapeTracker, View
-from extra.to_movement_ops import to_movement_ops, apply_mop, MovementOps
-
 @wrap_view_op
-def _as_strided(tensor:Tensor, size, stride, storage_offset=None):
-  # multiple as_strided do not compound
-  base = canonical_base(tensor)
-  # TODO: this is heavyweight
-  st = ShapeTracker(base.uop.st.views + (View.create(tuple(size), tuple(stride), storage_offset),))
-  ret = base
-  if TORCH_DEBUG >= 1: print("**** as_strided", tensor.shape, size, stride, st)
-  if prod(size) == 1: return ret.flatten()[storage_offset].reshape(size)
-  for mo in cached_to_movement_ops(tuple(base.shape), st): ret = apply_mop(ret, mo)
-  return ret
+def _as_strided(tensor:Tensor, size, stride, storage_offset=0):
+  base = getattr(tensor, "_as_strided_base", canonical_base(tensor)).flatten()
+  if prod(size) == 1: return base[storage_offset].reshape(size)
+  indices = Tensor.zeros(size, dtype=dtypes.int32, device=base.device) + storage_offset
+  for dim, (sz, st) in enumerate(zip(size, stride)):
+    if st != 0:
+      dim_range = Tensor.arange(sz, device=base.device, dtype=dtypes.int32) * st
+      shape_for_broadcast = [1] * dim + [sz] + [1] * (len(size) - dim - 1)
+      indices = indices + dim_range.reshape(shape_for_broadcast)
+  result = base[indices.flatten()].reshape(size)
+  result._as_strided_base = base
+  return result
 
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
@@ -245,15 +273,14 @@ def convolution_overrideable(input, weight, bias, stride, padding, dilation, tra
   if TORCH_DEBUG >= 1:
     print(f"convolution {input.shape=} {weight.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
   input, weight, bias = unwrap(input), unwrap(weight), unwrap(bias) if bias is not None else None
-  # TODO: fix test_biased_conv2d fails without realize()
-  if not transposed: return wrap(input.conv2d(weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding).realize())
-  return wrap(input.conv_transpose2d(weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding).realize())
+  if not transposed: return wrap(input.conv2d(weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding))
+  return wrap(input.conv_transpose2d(weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding, output_padding=output_padding))
 
 @torch.library.impl("aten::convolution_backward_overrideable", "privateuseone")
 def convolution_backward_overrideable(grad_out, input, weight, stride, padding, dilation, transposed, output_padding, groups, output_mask):
   if TORCH_DEBUG >= 1:
     print(f"convolution_backward {input.shape=} {weight.shape=} {stride=} {padding=} {dilation=} {transposed=} {output_padding=} {groups=}")
-  grad_out, input, weight, bias = unwrap(grad_out), unwrap(input), unwrap(weight), Tensor.zeros(weight.shape[0], device=_from_torch_device(weight.device))
+  grad_out, input, weight, bias = unwrap(grad_out).detach(), unwrap(input).detach(), unwrap(weight).detach(), Tensor.zeros(weight.shape[0], device=_from_torch_device(weight.device))
   if not transposed: out = Tensor.conv2d(input, weight, bias, groups=groups, stride=stride, dilation=dilation, padding=padding)
   else:
     bias = Tensor.zeros(weight.shape[1] * groups)
@@ -315,55 +342,57 @@ for i,pre in enumerate(["", "bi", "tri"]):
   torch.library.impl(f"aten::_upsample_nearest_exact{i+1}d", "privateuseone")(functools.partial(upsample, mode="nearest-exact"))
 
 @torch.library.impl("aten::scatter_add.out", "privateuseone")
-@inplace_fn("out")
 def scatter_add(self, dim, index, src, out):
-  self, index, src, out = unwrap(self), unwrap(index), unwrap(src), unwrap(out)
-  if self.shape == (): return wrap(out.assign(src))
-  return wrap(out.assign(Tensor.scatter_reduce(self, dim, index, src, reduce='sum')))
+  self, index, src, out_unwrapped = unwrap(self), unwrap(index), unwrap(src), unwrap(out)
+  if self.shape == (): _apply_inplace(out_unwrapped, src)
+  else: _apply_inplace(out_unwrapped, Tensor.scatter_reduce(self, dim, index, src, reduce='sum'))
+  return out
 
-@torch.library.impl("aten::_copy_from", "privateuseone")
-def _copy_from(src: torch.Tensor, dest, non_blocking=False):
-  realize = dest.is_tiny and maybe_realize_storage(unwrap(dest))
-  cast_dtype = _from_torch_dtype(dest.dtype)
+def _copy_between_devices(src, dest, cast_dtype, to_device, non_blocking=False):
   if src.is_tiny and dest.is_tiny:
-    to_device = _from_torch_device(dest.device)
-    src,dest = unwrap(src),unwrap(dest)
-    # TODO we need to properly match dest shape and strides, not blindly assign
-    if dest.uop.st.contiguous or dest.uop.is_realized: src = src.contiguous() # this only solves some cases
-    dest.assign(src.cast(cast_dtype).to(to_device))
-    if realize: Tensor.realize(dest)
+    src_t, dest_t = unwrap(src), unwrap(dest)
+    if dest_t.uop.is_contiguous() or dest_t.uop.is_realized: src_t = src_t.contiguous()
+    _apply_inplace(dest_t, src_t.cast(cast_dtype).to(to_device))
   elif src.is_tiny and dest.is_cpu:
-    # TODO: is there a better way?
     dest.resize_(src.numel()).resize_(src.shape)
     dest.copy_(torch.from_numpy(unwrap(src).cast(cast_dtype).numpy()))
   elif src.is_cpu and dest.is_tiny:
-    to_device = _from_torch_device(dest.device)
-    # TODO we need to properly match dest shape and strides, not blindly assign
     unwrap(dest).assign(Tensor(src.numpy()).cast(cast_dtype).to(to_device))
-    if realize: Tensor.realize(unwrap(dest))
   else:
     raise NotImplementedError(f"can't copy from {src.device} -> {dest.device}")
 
+@torch.library.impl("aten::_copy_from", "privateuseone")
+def _copy_from(src: torch.Tensor, dest, non_blocking=False):
+  cast_dtype = _from_torch_dtype(dest.dtype)
+  to_device = _from_torch_device(dest.device)
+  _copy_between_devices(src, dest, cast_dtype, to_device, non_blocking)
+  return dest
+
+@torch.library.impl("aten::copy_", "privateuseone")
+def copy_(self, src, non_blocking=False):
+  cast_dtype = _from_torch_dtype(self.dtype)
+  to_device = _from_torch_device(self.device)
+  _copy_between_devices(src, self, cast_dtype, to_device, non_blocking)
+  return self
+
 @torch.library.impl("aten::cat.out", "privateuseone")
-@inplace_fn("out")
 def cat_out(tensors, dim=0, out=None):
-  unwrap(out).assign(Tensor.cat(*[unwrap(x) for x in tensors], dim=dim))
+  _apply_inplace(unwrap(out), Tensor.cat(*[unwrap(x) for x in tensors], dim=dim))
+  return out
 
 @torch.library.impl("aten::topk.values", "privateuseone")
-@inplace_fn(["values", "indices"])
 def topk_values(input, k, dim=None, largest=True, sorted=True, values=None, indices=None):
   out_values, out_indices = unwrap(input).topk(k, dim if dim is not None else -1, largest, sorted)
-  unwrap(values).assign(out_values)
-  unwrap(indices).assign(out_indices.cast(dtypes.int64))
-  return wrap(out_values), wrap(out_indices)
+  _apply_inplace(unwrap(values), out_values)
+  _apply_inplace(unwrap(indices), out_indices.cast(dtypes.int64))
+  return values, indices
 
 @torch.library.impl("aten::sort.values_stable", "privateuseone")
-@inplace_fn(["values", "indices"])
 def sort_values(input, dim=-1, descending=False, stable=True, values=None, indices=None):
   out_values, out_indices = unwrap(input).sort(dim, descending)
-  unwrap(values).assign(out_values)
-  unwrap(indices).assign(out_indices.cast(dtypes.int64))
-  return wrap(out_values), wrap(out_indices)
+  _apply_inplace(unwrap(values), out_values)
+  _apply_inplace(unwrap(indices), out_indices.cast(dtypes.int64))
+  return values, indices
 
 @torch.library.impl("aten::_linalg_svd", "privateuseone")
 def _linalg_svd(self, full_matrices=False):
@@ -373,7 +402,6 @@ def _linalg_svd(self, full_matrices=False):
 # register some decompositions
 from torch._decomp import get_decompositions
 decomps = [
-  aten.native_batch_norm, aten.native_batch_norm_backward,
   aten.native_layer_norm_backward,
   aten.linalg_cross,
   aten.addmm,
@@ -510,7 +538,6 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
 
 # we add the "out" here
 def wrap_out(f):
-  @inplace_fn("out")
   def _wrap_out(*args, **kwargs):
     out = kwargs.pop('out')
     assigned = f(*args, **kwargs)
@@ -518,22 +545,33 @@ def wrap_out(f):
     assert out.shape == assigned.shape, f"shape mismatch: {assigned.shape} -> {out.shape}"
     assert out.device == assigned.device, f"device mismatch: {assigned.device} -> {out.device}"
     assert out.dtype == assigned.dtype, f"dtype mismatch: {assigned.dtype} -> {out.dtype}"
-    if out.uop.is_realized: assigned = assigned.contiguous() # TODO: how does this map to torch's semantics
     return out.assign(assigned)
   return _wrap_out
+
+def _inplace_op(t, new_value):
+  if not hasattr(t, "_view_base") and not getattr(canonical_base(t), "_views", set()): t.replace(new_value)
+  else: _apply_inplace(t, new_value)
+  return t
 
 tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.remainder.Scalar_Tensor": lambda x,y: x%y,
   "aten.floor_divide": lambda x,y: x//y,
-  "aten.floor_divide_.Tensor": inplace_fn("x")(lambda x,y: x.assign(x//y)),
+  "aten.floor_divide_.Tensor": lambda x,y: x//y,
   # TODO: use tinygrad methods, but they require x to be unsigned
   "aten.__lshift__.Scalar": lambda x,y: x*(2**y),
-  "aten.__ilshift__.Scalar": inplace_fn("x")(lambda x,y: x.assign(x*(2**y))),
+  "aten.__ilshift__.Scalar": lambda x,y: x*(2**y),
   "aten.__rshift__.Scalar": lambda x,y: x//(2**y),
-  "aten.__irshift__.Scalar": inplace_fn("x")(lambda x,y: x.assign(x//(2**y))),
+  "aten.__irshift__.Scalar": lambda x,y: x//(2**y),
+  # inplace ops using replace for fusion
+  "aten.zero_": lambda x: x.zeros_like(),
+  "aten.fill_.Scalar": lambda x, y: x.full_like(y),
+  "aten.add_.Tensor": lambda self, other, alpha=1.0: self + other * alpha,
+  "aten.add_.Scalar": lambda self, other, alpha=1.0: self + other * alpha,
+  "aten.mul_.Tensor": lambda self, other: self * other,
+  "aten.mul_.Scalar": lambda self, other: self * other,
   # relu doesn't have an out form?
   "aten.relu": Tensor.relu,
-  "aten.relu_": inplace_fn("x")(lambda x: x.assign(x.relu())),
+  "aten.relu_": lambda x: x.relu(),
   "aten.mean": Tensor.mean,
   "aten.mean.dim": Tensor.mean,
   "aten.min": Tensor.min,
@@ -554,19 +592,17 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.repeat": lambda x,*repeats: Tensor.repeat(x,*repeats).contiguous(), # not a view
   "aten._softmax": lambda self,dim,half_to_float: self.softmax(dim),
   "aten._log_softmax": lambda self,dim,half_to_float: self.log_softmax(dim),
-  "aten.random_": inplace_fn("self")(lambda self:
-    self.assign(Tensor.randint(*self.shape, low=dtypes.min(self.dtype), high=dtypes.max(self.dtype), device=self.device, dtype=self.dtype))),
-  "aten.random_.from": inplace_fn("self")(lambda self, from_, to:
-    self.assign(Tensor.randint(*self.shape, low=from_, high=to, device=self.device, dtype=self.dtype))),
-  "aten.uniform_": inplace_fn("self")(lambda self, low=0, high=1: self.assign(Tensor.uniform(*self.shape, low=low, high=high, dtype=self.dtype))),
-  "aten.normal_": inplace_fn("self")(lambda self, mean=0, std=1: self.assign(Tensor.normal(*self.shape, mean=mean, std=std, dtype=self.dtype))),
+  "aten.random_": lambda self: Tensor.randint(*self.shape, low=dtypes.min(self.dtype), high=dtypes.max(self.dtype), device=self.device, dtype=self.dtype),
+  "aten.random_.from": lambda self, from_, to: Tensor.randint(*self.shape, low=from_, high=to, device=self.device, dtype=self.dtype),
+  "aten.uniform_": lambda self, low=0, high=1: Tensor.uniform(*self.shape, low=low, high=high, dtype=self.dtype),
+  "aten.normal_": lambda self, mean=0, std=1: Tensor.normal(*self.shape, mean=mean, std=std, dtype=self.dtype),
   # these don't work in out form, they have size 0
   "aten.abs": Tensor.abs,
   "aten.logical_not": Tensor.logical_not,
-  "aten.logical_or_": inplace_fn("x")(lambda x, y: x.assign(x | y)),
+  "aten.logical_or_": lambda x, y: x | y,
   "aten.multinomial": Tensor.multinomial,
-  "aten.masked_fill_.Scalar": inplace_fn("self")(lambda self, mask, value: self.assign(self.masked_fill(mask, value))),
-  "aten.masked_fill_.Tensor": inplace_fn("self")(lambda self, mask, value: self.assign(self.masked_fill(mask, value))),
+  "aten.masked_fill_.Scalar": lambda self, mask, value: self.masked_fill(mask, value),
+  "aten.masked_fill_.Tensor": lambda self, mask, value: self.masked_fill(mask, value),
   "aten.masked_fill.Scalar": Tensor.masked_fill,
   "aten.masked_fill.Tensor": Tensor.masked_fill,
   "aten.masked_select": Tensor.masked_select,
@@ -580,7 +616,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.asinh": Tensor.asinh,
   "aten.mul": Tensor.mul,
   "aten.atanh": Tensor.atanh,
-  "aten.fill_.Tensor": Tensor.full, # TODO: looks wrong
+  "aten.fill_.Tensor": lambda self, value: Tensor.full(self.shape, value.reshape(()).item(), device=self.device, dtype=self.dtype),
   "aten.flip": Tensor.flip,
   "aten.scatter_reduce.two": Tensor.scatter_reduce,
   "aten.squeeze_.dim": lambda self, dim: self.replace(self.squeeze(dim), allow_shape_mismatch=True), # TODO: inplace view op, here?
@@ -601,20 +637,51 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.unfold": Tensor.unfold,
 }}
 
+# operations that need inplace treatment (use _inplace_op instead of wrap_fxn) AKA return original tensor
+inplace_ops = {
+  "aten.zero_",
+  "aten.fill_.Scalar",
+  "aten.fill_.Tensor",
+  "aten.add_.Tensor",
+  "aten.add_.Scalar",
+  "aten.mul_.Tensor",
+  "aten.mul_.Scalar",
+  "aten.floor_divide_.Tensor",
+  "aten.__ilshift__.Scalar",
+  "aten.__irshift__.Scalar",
+  "aten.relu_",
+  "aten.random_",
+  "aten.random_.from",
+  "aten.uniform_",
+  "aten.normal_",
+  "aten.logical_or_",
+  "aten.masked_fill_.Scalar",
+  "aten.masked_fill_.Tensor",
+}
+
 def wrap_fxn(k,f):
   def nf(*args, **kwargs):
     if TORCH_DEBUG:
       print(k, len(args), [x.shape if isinstance(x, torch.Tensor) else x for x in args],
                           {k:v.shape if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()})
-    args = [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args]
-    kwargs = {k:unwrap(v) if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()}
+    args, kwargs = unwrap_args(args, kwargs)
     out = f(*args, **kwargs)
     if isinstance(out, Tensor): return wrap(out)
     elif isinstance(out, tuple): return tuple(wrap(x) for x in out)
     else: raise RuntimeError(f"unknown output type {type(out)}")
   return nf
 
-for k,v in tiny_backend.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_fxn(k,v))
+def wrap_inplace(k,f):
+  def nf(*args, **kwargs):
+    orig = args[0]
+    args, kwargs = unwrap_args(args, kwargs)
+    _inplace_op(args[0], f(*args, **kwargs))
+    return orig
+  return nf
+
+for k,v in tiny_backend.items():
+  wrapper = wrap_inplace if k in inplace_ops else wrap_fxn
+  torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrapper(k,v))
 
 @torch.library.impl("aten::equal", "privateuseone")
 def equal(x: torch.Tensor, y: torch.Tensor): return (x==y).all().item()
@@ -628,42 +695,72 @@ if TORCH_DEBUG:
       return func(*args, **(kwargs or {}))
   (_dispatch_log:=DispatchLog()).__enter__() # NOTE: must be kept alive
 
-# NOTE: patch torch optimizer step to avoid continously growing the computation graph
-import weakref
-_torch_modules_with_buffers: weakref.WeakSet[torch.nn.Module] = weakref.WeakSet()
-def register_torch_buffer(mod, _name, _buffer): _torch_modules_with_buffers.add(mod)
-def get_real_tinygrad_buffers():
-  res = set()
-  for mod in _torch_modules_with_buffers:
-    for _,b in mod.named_buffers(recurse=False):
-      if b is not None and b.is_tiny:
-        res.add(unwrap(b))
-  return res
-torch.nn.modules.module.register_module_buffer_registration_hook(register_torch_buffer)
+# this implementation is needed to allow the batchnorm kernels to fuse in e.g. mnist training
+# aten::native_batch_norm does more than Tensor.batchnorm
+@torch.library.impl("aten::native_batch_norm", "privateuseone")
+def native_batch_norm(input, weight, bias, running_mean, running_var, training, momentum, eps):
+  input_t, weight_t, bias_t = unwrap(input), unwrap(weight) if weight is not None else None, unwrap(bias) if bias is not None else None
+  running_mean_t, running_var_t = unwrap(running_mean) if running_mean is not None else None, unwrap(running_var) if running_var is not None else None
+  if training:
+    batch_var, batch_mean = input_t.var_mean(axis=tuple(x for x in range(input_t.ndim) if x != 1), correction=0)
+    batch_invstd = batch_var.add(eps).rsqrt()
+    out = input_t.batchnorm(weight_t, bias_t, batch_mean, batch_invstd)
+    if running_mean_t is not None and running_var_t is not None:
+      numel_ratio = input_t.numel() / (input_t.numel() - input_t.shape[1])
+      running_mean_t.assign((1 - momentum) * running_mean_t + momentum * batch_mean.detach())
+      running_var_t.assign((1 - momentum) * running_var_t + momentum * numel_ratio * batch_var.detach())
+    return wrap(out), wrap(batch_mean), wrap(batch_invstd)
+  else:
+    out = input_t.batchnorm(weight_t, bias_t, running_mean_t, running_var_t.add(eps).rsqrt())
+    return wrap(out), wrap(running_mean_t), wrap(running_var_t.add(eps).rsqrt())
 
-from torch.nn.modules import Module
-def param_hook(_grad):
-  if _grad is not None and _grad.is_tiny: Tensor.realize(unwrap(_grad))
-def module_hook(module:Module, _name, _submodule):
-  for param in _submodule.parameters(recurse=False):
-    if param.requires_grad: param.register_hook(param_hook)
-torch.nn.modules.module.register_module_module_registration_hook(module_hook)
+@torch.library.impl("aten::native_batch_norm_backward", "privateuseone")
+def native_batch_norm_backward(grad_out, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps, output_mask):
+  grad_out_t, input_t = unwrap(grad_out), unwrap(input)
+  weight_t = unwrap(weight) if weight is not None else None
+  save_mean_t = unwrap(save_mean)
+  save_invstd_t = unwrap(save_invstd)
+  out = input_t.batchnorm(weight_t, None, save_mean_t, save_invstd_t)
+  targets = [t for t, m in zip([input_t, weight_t], output_mask[:2]) if t is not None and m]
+  if targets:
+    grads = out.gradient(*targets, gradient=grad_out_t)
+    grad_input = grads.pop(0) if output_mask[0] else None
+    grad_weight = grads.pop(0) if output_mask[1] and weight_t is not None else None
+  else:
+    grad_input, grad_weight = None, None
+  grad_bias = grad_out_t.sum(axis=tuple(x for x in range(grad_out_t.ndim) if x != 1)) if output_mask[2] else None
+  return (wrap(grad_input) if grad_input is not None else None,
+          wrap(grad_weight) if grad_weight is not None else None,
+          wrap(grad_bias) if grad_bias is not None else None)
 
-def realize_optimizer_step(optimizer: torch.optim.Optimizer, *args, **kwargs):
-  tinygrad_tensors = []
-  for param_group in optimizer.param_groups:
-    for param in param_group["params"]:
-      if param is None: continue
-      tinygrad_tensors.append(param.data)
-  for state_dict in optimizer.state.values():
-    for _, value in state_dict.items():
-      if torch.is_tensor(value): tinygrad_tensors.append(value)
-  real_tinygrad_tensors = [unwrap(x) for x in tinygrad_tensors if x.is_tiny]
-  real_tinygrad_tensors += get_real_tinygrad_buffers()
-  if len(real_tinygrad_tensors): Tensor.realize(*real_tinygrad_tensors)
+# _pad_circular is not CompositeImplicitAutograd (unlike reflect/replicate pad)
+# we need torch.autograd.Function with explicit AutogradPrivateUse1 registration
+class _PadCircular(torch.autograd.Function):
+  @staticmethod
+  def forward(ctx, input, padding):
+    ctx.save_for_backward(input)
+    ctx.padding = padding
+    return pad_forward(input, padding, mode="circular")
+  @staticmethod
+  def backward(ctx, grad_output):
+    input, = ctx.saved_tensors
+    return pad_backward(grad_output, input, ctx.padding, mode="circular"), None
 
-_optimizer_init = torch.optim.Optimizer.__init__
-def _optimizer_patched_init(self, *args, **kwargs):
-  _optimizer_init(self, *args, **kwargs)
-  self.register_step_post_hook(realize_optimizer_step)
-torch.optim.Optimizer.__init__ = _optimizer_patched_init
+@torch.library.impl("aten::_pad_circular", "privateuseone")
+def _pad_circular(self, padding): return _PadCircular.apply(self, padding)
+
+@torch.library.impl("aten::_pad_circular", "AutogradPrivateUse1")
+def _pad_circular_autograd(self, padding): return _PadCircular.apply(self, padding)
+
+# only needed for test_diag_backward_gradient_values
+# was going through torch before, but now we are using tinygrad directly and tracking views
+# Tensor.diagonal does not support all cases tests in the tests
+@torch.library.impl("aten::diagonal", "privateuseone")
+@wrap_view_op
+def diagonal(self, offset=0, dim1=0, dim2=1):
+  if offset != 0: raise NotImplementedError(f"diagonal with {offset=} not implemented")
+  dim1, dim2 = dim1 % self.ndim, dim2 % self.ndim
+  if dim1 != self.ndim - 2 or dim2 != self.ndim - 1: raise NotImplementedError(f"diagonal with {dim1=}, {dim2=} not implemented, only last two dims supported")
+  batch_shape, m, n = self.shape[:-2], self.shape[-2], self.shape[-1]
+  diag_len = min(m, n)
+  return self.reshape(*batch_shape, m*n).pad(tuple((0,0) for _ in batch_shape) + ((0, diag_len),)).reshape(*batch_shape, diag_len, n+1)[..., :, 0]

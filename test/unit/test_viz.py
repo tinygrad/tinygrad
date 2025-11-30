@@ -6,6 +6,7 @@ from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatch
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
+from tinygrad.helpers import VIZ, cpu_profile
 from tinygrad.device import Buffer
 
 @track_rewrites(name=True)
@@ -33,11 +34,14 @@ class BaseTestViz(unittest.TestCase):
     cpu_events.clear()
     self.tms = TRACK_MATCH_STATS.value
     self.profile = PROFILE.value
+    self.viz = VIZ.value
     TRACK_MATCH_STATS.value = 2
     PROFILE.value = 1
+    VIZ.value = 1
   def tearDown(self):
     TRACK_MATCH_STATS.value = self.tms
     PROFILE.value = self.profile
+    VIZ.value = self.viz
 
 class TestViz(BaseTestViz):
   def test_simple(self):
@@ -258,14 +262,6 @@ from tinygrad import Tensor, Device
 from tinygrad.engine.realize import get_program
 
 class TestVizIntegration(BaseTestViz):
-  # kernelize has a custom name function in VIZ
-  def test_kernelize_tracing(self):
-    a = Tensor.empty(4, 4)
-    Tensor.kernelize(a+1, a+2)
-    lst = get_viz_list()
-    self.assertEqual(len(lst), 1)
-    self.assertEqual(lst[0]["name"], "Schedule 2 Kernels n1")
-
   # codegen supports rendering of code blocks
   def test_codegen_tracing(self):
     ast = Tensor.schedule(Tensor.empty(4)+Tensor.empty(4))[0].ast
@@ -280,7 +276,7 @@ class TestVizIntegration(BaseTestViz):
       a = Tensor.empty(1)
       b = Tensor.empty(1)
       metadata = (alu:=a+b).uop.metadata
-      alu.kernelize()
+      alu.schedule()
       graph = next(get_viz_details(0, 0))["graph"]
     self.assertEqual(len([n for n in graph.values() if repr(metadata) in n["label"]]), 1)
 
@@ -363,11 +359,11 @@ def load_profile(lst:list[ProfileEvent]) -> dict:
       for _ in range(event_count):
         alloc, ts, key = u("<BII")
         if alloc: v["events"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
-        else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[u("<IIBB") for _ in range(u("<I")[0])]}})
+        else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[u("<IIIB") for _ in range(u("<I")[0])]}})
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
-class TestVizProfiler(unittest.TestCase):
-  def test_perfetto_node(self):
+class TestVizProfiler(BaseTestViz):
+  def test_node(self):
     prof = [ProfileRangeEvent(device='NV', name='E_2', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=False),
             ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100))]
 
@@ -381,7 +377,7 @@ class TestVizProfiler(unittest.TestCase):
     self.assertEqual(event['dur'], 10)
     assert event['ref'] is None
 
-  def test_perfetto_copy_node(self):
+  def test_copy_node(self):
     prof = [ProfileRangeEvent(device='NV', name='COPYxx', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=True),
             ProfileRangeEvent(device='NV:2', name='COPYxx', st=decimal.Decimal(1000), en=decimal.Decimal(1010), is_copy=True),
             ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100)),
@@ -399,7 +395,7 @@ class TestVizProfiler(unittest.TestCase):
 
     self.assertEqual(j["dur"], (event2["st"]+event2["dur"])-event["st"])
 
-  def test_perfetto_graph(self):
+  def test_graph(self):
     prof = [ProfileDeviceEvent(device='NV', comp_tdiff=decimal.Decimal(-1000), copy_tdiff=decimal.Decimal(-100)),
             ProfileDeviceEvent(device='NV:1', comp_tdiff=decimal.Decimal(-500), copy_tdiff=decimal.Decimal(-50)),
             ProfileGraphEvent(ents=[ProfileGraphEntry(device='NV', name='E_25_4n2', st_id=0, en_id=1, is_copy=False),
@@ -411,8 +407,8 @@ class TestVizProfiler(unittest.TestCase):
 
     tracks = list(j['layout'])
     self.assertEqual(tracks[0], 'NV')
-    self.assertEqual(tracks[1], 'NV:1')
-    self.assertEqual(tracks[2], 'NV Graph')
+    self.assertEqual(tracks[1], 'NV Graph')
+    self.assertEqual(tracks[2], 'NV:1')
 
     nv_events = j['layout']['NV']['events']
     self.assertEqual(nv_events[0]['name'], 'E_25_4n2')
@@ -435,6 +431,12 @@ class TestVizProfiler(unittest.TestCase):
     prof = [ProfileRangeEvent("CPU", name="k_test", st=decimal.Decimal(ts:=i*step), en=decimal.Decimal(ts)+step) for i in range(n_events)]
     sz = len(get_profile(prof))
     self.assertLessEqual(sz/n_events, 26)
+
+  def test_calltrace(self):
+    def fxn(): return Tensor.empty(10).mul(2).realize()
+    fxn()
+    trace = get_viz_list()[0]["steps"][0]["trace"]
+    assert any(fxn.__code__.co_filename == f and fxn.__code__.co_firstlineno == l for f,l,*_ in trace), str(trace)
 
   # can pack up to 1hr 11 min of trace events
   def test_trace_duration(self):
@@ -459,6 +461,14 @@ class TestVizProfiler(unittest.TestCase):
     self.assertEqual(len(markers), 2)
     assert kernels[0]["st"] <= markers[0]["ts"] <= kernels[1]["st"]
     assert markers[1]["ts"] >= kernels[1]["st"]+kernels[1]["dur"]
+
+  def test_layout_order(self):
+    def fn(): return
+    for dname in ["TINY", "USER", "TEST:1 N1", "TEST:2 N1", "TEST:1 N2"]:
+      with cpu_profile("fn", dname): fn()
+    layout = list(load_profile(cpu_events)["layout"])
+    self.assertListEqual(layout[:2], ["USER","TINY"])
+    self.assertListEqual(layout[2:], ["TEST:1 N1","TEST:1 N2", "TEST:2 N1"])
 
 def _alloc(b:int):
   a = Tensor.empty(b, device="NULL", dtype=dtypes.char)

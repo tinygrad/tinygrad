@@ -430,5 +430,27 @@ class TestImageSimplification(unittest.TestCase):
     load = get_load_image_uop((128, 768, 4), valid, (alu0, alu1))
     self.check(load, None, "((((idx1*24)+r3)+(r5*3))+-3)", "(((idx2*2)+r4)+-1)")
 
+  def test_simplify7(self):
+    # DEBUG=2 ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1397 ALLOWED_GATED_READ_IMAGE=94 FLOAT16=1 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916 # noqa: E501
+    # kernel 143
+    gidx0 = Special("gidx0", 32)
+    lidx0 = Special("lidx0", 16)
+    lidx1 = Special("lidx1", 8)
+    r0 = Range(0, 7)
+
+    # buf.render()='UOp(Ops.DEFINE_GLOBAL, dtypes.imageh((32, 1024, 4)), arg=1, src=())'
+    alu0 = ((gidx0*2+(lidx0*128+r0*64+lidx1*8+-183)%64*64+(lidx0*128+r0*64+lidx1*8+-183)//64%32*4096+1)//4%1024)
+    alu1 = ((gidx0*2+(lidx0*128+r0*64+lidx1*8+-183)%64*64+(lidx0*128+r0*64+lidx1*8+-183)//64%32*4096+1)//4096)
+    valid = ((lidx1<7)&((((lidx0*2+r0)<3)!=1)&((lidx0*2+r0)<35)))
+    load = get_load_image_uop((32, 1024, 4), valid, (alu0, alu1))
+    self.check(load, None, "(lidx1*128+gidx0//2+144)", "(lidx0*2+r0+-3)")
+
+    # TODO: this is the same idx as above, but simplifying idx too early makes it hard to drop the valid
+    alu0 = ((gidx0*2+lidx1*512+(lidx0*8192+r0*4096)+-11711)//4%1024)
+    alu1 = (lidx0*2+r0+-3)
+    valid = ((lidx1<7)&((((lidx0*2+r0)<3)!=1)&((lidx0*2+r0)<35)))
+    load = get_load_image_uop((32, 1024, 4), valid, (alu0, alu1))
+    self.check(load, "(lidx1<7)", "((gidx0*2+lidx1*512+(lidx0*8192+r0*4096)+-11711)//4%1024)", "(lidx0*2+r0+-3)")
+
 if __name__ == '__main__':
   unittest.main()

@@ -8,7 +8,7 @@ raid_root = Path("/raid")
 
 def upload_file(path: Path):
   pt = Tensor(path).realize()
-  h = pt.store().realize()
+  h = pt.fs_store().realize()
   pt.uop.realized.deallocate()
   return h.data().hex(), path, pt.nbytes()
 
@@ -26,6 +26,6 @@ if __name__ == "__main__":
 
   mapping = json.dumps(mapping).encode()
   mapping_tensor = Tensor(mapping, device="CPU")
-  h = mapping_tensor.store().realize()
+  h = mapping_tensor.fs_store().realize()
 
   print(f"final hash: {h.data().hex()}, size: {len(mapping)}")

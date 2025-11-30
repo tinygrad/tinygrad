@@ -17,9 +17,6 @@ from tinygrad.uop.validate import validate_index
 shared_spec = PatternMatcher([
   (UPat(Ops.SINK, dtypes.void), lambda: True), # NOTE: for testing, we let sinks be anything
 
-  # SENTINEL should never be anywhere
-  (UPat(Ops.SENTINEL), lambda: False),
-
   # CONST/DEFINE_VAR are everywhere
   (UPat(Ops.CONST, src=(), name="x"), lambda x: type(x.arg) is type(dtypes.as_const(x.arg, x.dtype))),
   (UPat(Ops.DEFINE_VAR, name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
@@ -40,6 +37,9 @@ shared_spec = PatternMatcher([
     rng.dtype == x.dtype and isinstance(rng.arg, tuple) and len(rng.arg) >= 2 and \
       all(isinstance(ra, int) for ra in rng.arg[0:-1]) and isinstance(rng.arg[-1], AxisType)),
   (UPat(Ops.INDEX, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.index for y in x.src[1:]) or None),
+
+  # RANGE/SPECIAL define loops, END closes them
+  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE))), lambda: True),
 ])
 
 # ***** UOp spec in the Tensor graph *****
@@ -109,6 +109,10 @@ _tensor_spec = PatternMatcher([
 
   # AFTER if things were kernelized
   (UPat(Ops.AFTER, src=(UPat((Ops.BUFFER, Ops.AFTER)),), allow_any_len=True), lambda: True),
+
+  # Tensor range bind / store
+  (UPat(Ops.BIND, (dtypes.int,dtypes.index,), (UPat(Ops.DEFINE_VAR), UPat(Ops.RANGE)), arg=None), lambda: True),
+  (UPat(Ops.STORE, src=(UPat(), UPat())), lambda: True)
 ])+movement_ops+shared_spec
 
 tensor_spec = PatternMatcher([
@@ -128,9 +132,6 @@ shared_codegen_spec = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Defines|{Ops.AFTER}),), allow_any_len=True), lambda: True),
   (UPat(Ops.GROUP, dtypes.void), lambda: True),
 
-  # RANGE/SPECIAL define loops, END closes them
-  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE)), dtype=dtypes.void), lambda: True),
-
   # WMMA has a <a, b, acc>
   (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 8),
 
@@ -143,8 +144,8 @@ shared_codegen_spec = PatternMatcher([
   (UPat().index(UPat()).or_casted().load(), lambda: True),
   (UPat(Ops.INDEX).or_casted().store(UPat()), lambda: True),
 
-  # all CUSTOM + PRECAST
-  (UPat((Ops.CUSTOMI, Ops.CUSTOM, Ops.PRECAST)), lambda: True),
+  # CUSTOM (inline and non inline)
+  (UPat((Ops.CUSTOMI, Ops.CUSTOM)), lambda: True),
 
   # INDEX
   (UPat(GroupOp.Defines|{Ops.AFTER}, name="buf").index(UPat.var("idx")), validate_index),
@@ -167,7 +168,7 @@ kernel_spec = PatternMatcher([
   (UPat(Ops.UNROLL, name="x"), lambda x: x.src[0].dtype.count == prod(y[1] for y in x.arg)),
 
   # END can end multiple axes here
-  (UPat(Ops.END, src=(UPat(), UPat()), allow_any_len=True, dtype=dtypes.void), lambda: True),
+  (UPat(Ops.END, src=(UPat(), UPat()), allow_any_len=True), lambda: True),
 
   # bufferize can be on anything
   (UPat(Ops.BUFFERIZE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: True),

@@ -427,7 +427,7 @@ class AM_PSP(AM_IP):
 
     self._wait_for_bootloader()
 
-    if DEBUG >= 2: print(f"am {self.adev.devfmt}: loading sos component: {am.psp_fw_type__enumvalues[fw]}")
+    if DEBUG >= 2: print(f"am {self.adev.devfmt}: loading sos component: {am.enum_psp_fw_type.get(fw)}")
 
     self._prep_msg1(self.adev.fw.sos_fw[fw])
     self.adev.reg(f"{self.reg_pref}_36").write(self.msg1_addr >> 20)
@@ -482,7 +482,7 @@ class AM_PSP(AM_IP):
   def _load_ip_fw_cmd(self, fw_types:list[int], fw_bytes:memoryview):
     self._prep_msg1(fw_bytes)
     for fw_type in fw_types:
-      if DEBUG >= 2: print(f"am {self.adev.devfmt}: loading fw: {am.psp_gfx_fw_type__enumvalues[fw_type]}")
+      if DEBUG >= 2: print(f"am {self.adev.devfmt}: loading fw: {am.enum_psp_gfx_fw_type.get(fw_type)}")
       cmd = am.struct_psp_gfx_cmd_resp(cmd_id=am.GFX_CMD_ID_LOAD_IP_FW)
       cmd.cmd.cmd_load_ip_fw.fw_phy_addr_hi, cmd.cmd.cmd_load_ip_fw.fw_phy_addr_lo = data64(self.msg1_addr)
       cmd.cmd.cmd_load_ip_fw.fw_size = len(fw_bytes)

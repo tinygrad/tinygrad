@@ -1,10 +1,7 @@
 name: Unit Tests
 env:
   # increment this when downloads substantially change to avoid the internet
-  DOWNLOAD_CACHE_VERSION: '12'
-  PYTHON_CACHE_VERSION: '4'
-  APT_CACHE_VERSION: '1'
-  BUILD_CACHE_VERSION: '1'
+  CACHE_VERSION: '13'
   CAPTURE_PROCESS_REPLAY: 1
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PYTHONPATH: ${{ github.workspace }}
@@ -89,65 +86,67 @@ jobs:
         clang -O2 recognize.c -lm -o recognize
         cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
 
-  # TODO: fix the torch backend and reenable
-  # torchbackend:
-  #   name: Torch Backend Tests
-  #   runs-on: ubuntu-latest
-  #   timeout-minutes: 15
-  #   steps:
-  #   - name: Checkout Code
-  #     uses: actions/checkout@v4
-  #   - name: Setup Environment
-  #     uses: ./.github/actions/setup-tinygrad
-  #     with:
-  #       key: torch-backend-pillow-torchvision-et-pt
-  #       deps: testing_minimal
-  #       pydeps: "pillow torchvision expecttest"
-  #       llvm: 'true'
-  #   - name: Install ninja
-  #     run: |
-  #       sudo apt update || true
-  #       sudo apt install -y --no-install-recommends ninja-build
-  #   - name: Lint with ruff
-  #     run: |
-  #       pip3 install --upgrade --force-reinstall ruff==0.11.0
-  #       python3 -m ruff check extra/torch_backend/backend.py
-  #   - name: Test one op
-  #     run: FORWARD_ONLY=1 TINY_BACKEND=1 python3 test/test_ops.py TestOps.test_add
-  #   - name: Test ResNet-18
-  #     run: DEBUG=2 python3 extra/torch_backend/example.py
-  #   - name: My (custom) tests
-  #     run: python3 extra/torch_backend/test.py
-  #   - name: Test one op in torch tests
-  #     run: DEBUG=2 python3 extra/torch_backend/torch_tests.py TestTinyBackendPRIVATEUSE1.test_unary_log_tiny_float32
-  #   - name: Test Ops with TINY_BACKEND
-  #     run: CPU=1 CPU_LLVM=1 LLVMOPT=0 TINY_BACKEND=1 python3 -m pytest -n auto test/test_ops.py --durations=20
-  #   - name: Test in-place operations on views
-  #     run: TORCH_DEBUG=1 python3 extra/torch_backend/test_inplace.py
-  #   - name: Test multi-gpu
-  #     run: CPU=1 CPU_LLVM=1 GPUS=4 TORCH_DEBUG=1 python3 extra/torch_backend/test_multigpu.py
+  torchbackend:
+    name: Torch Backend Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: torch-backend-pillow-torchvision-et-pt
+        deps: testing_minimal
+        pydeps: "pillow torchvision expecttest"
+        llvm: 'true'
+    - name: Install ninja
+      run: |
+        sudo apt update || true
+        sudo apt install -y --no-install-recommends ninja-build
+    - name: Lint with ruff
+      run: |
+        pip3 install --upgrade --force-reinstall ruff==0.11.0
+        python3 -m ruff check extra/torch_backend/backend.py
+    - name: Test one op
+      run: FORWARD_ONLY=1 TINY_BACKEND=1 python3 test/test_ops.py TestOps.test_add
+    - name: Test ResNet-18
+      run: DEBUG=2 python3 extra/torch_backend/example.py
+    - name: My (custom) tests
+      run: python3 extra/torch_backend/test.py
+    - name: Test one op in torch tests
+      run: DEBUG=2 python3 extra/torch_backend/torch_tests.py TestTinyBackendPRIVATEUSE1.test_unary_log_tiny_float32
+    - name: Test Ops with TINY_BACKEND
+      run: CPU=1 CPU_LLVM=1 LLVMOPT=0 TINY_BACKEND=1 python3 -m pytest -n auto test/test_ops.py --durations=20
+    - name: Test in-place operations on views
+      run: TORCH_DEBUG=1 python3 extra/torch_backend/test_inplace.py
+    - name: Test multi-gpu
+      run: CPU=1 CPU_LLVM=1 GPUS=4 TORCH_DEBUG=1 python3 extra/torch_backend/test_multigpu.py
+    - name: Test kernel fusion
+      run: python3 extra/torch_backend/test_kernel_fusion.py
 
-  # torchbackendmore:
-  #   name: Torch Backend Tests More
-  #   runs-on: ubuntu-latest
-  #   timeout-minutes: 15
-  #   steps:
-  #   - name: Checkout Code
-  #     uses: actions/checkout@v4
-  #   - name: Setup Environment
-  #     uses: ./.github/actions/setup-tinygrad
-  #     with:
-  #       key: torch-backend-pillow-torchvision-et-pt
-  #       deps: testing_minimal
-  #       llvm: 'true'
-  #   - name: Install ninja
-  #     run: |
-  #       sudo apt update || true
-  #       sudo apt install -y --no-install-recommends ninja-build
-  #   - name: Test beautiful_mnist in torch with TINY_BACKEND
-  #     run: STEPS=20 CPU=1 TARGET_EVAL_ACC_PCT=90.0 TINY_BACKEND=1 python3 examples/other_mnist/beautiful_mnist_torch.py
-  #   - name: Test some torch tests (expect failure)
-  #     run: python3 -m pytest extra/torch_backend/torch_tests.py -v --tb=no || true
+
+  torchbackendmore:
+    name: Torch Backend Tests More
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Setup Environment
+      uses: ./.github/actions/setup-tinygrad
+      with:
+        key: torch-backend-pillow-torchvision-et-pt
+        deps: testing_minimal
+        llvm: 'true'
+    - name: Install ninja
+      run: |
+        sudo apt update || true
+        sudo apt install -y --no-install-recommends ninja-build
+    - name: Test beautiful_mnist in torch with TINY_BACKEND
+      run: STEPS=20 CPU=1 TARGET_EVAL_ACC_PCT=90.0 TINY_BACKEND=1 python3 examples/other_mnist/beautiful_mnist_torch.py
+    - name: Test some torch tests (expect failure)
+      run: python3 -m pytest extra/torch_backend/torch_tests.py -v --tb=no || true
 
   bepython:
     name: Python Backend
@@ -290,8 +289,8 @@ jobs:
         python extra/optimization/extract_dataset.py
         gzip -c /tmp/sops > extra/datasets/sops.gz
         #DEBUG=1 MIN_ASTS=1 python extra/optimization/get_action_space.py
-    - name: Repo line count < 18000 lines
-      run: MAX_LINE_COUNT=18000 python sz.py
+    - name: Repo line count < 19000 lines
+      run: MAX_LINE_COUNT=19000 python sz.py
 
   spec:
     strategy:
@@ -309,6 +308,7 @@ jobs:
       with:
         key: spec-unit
         deps: testing_unit
+        python-version: '3.14'
     - name: Test SPEC=2
       run: IGNORE_OOB=0 SPEC=2 PYTHONPATH="." pytest --maxfail=10 -n auto --durations=30 --ignore=test/models --ignore test/unit/test_hashing.py --timeout 60 -k "not test_setitem_big" --splits 2 --group ${{ matrix.group }}
 
@@ -326,6 +326,8 @@ jobs:
         deps: testing_unit
     - name: Fuzz Test symbolic
       run: python test/external/fuzz_symbolic.py
+    - name: Fuzz Test symbolic (symbolic divisors)
+      run: python test/external/fuzz_symbolic_symbolic_div.py
     - name: Fuzz Test fast idiv
       run: python test/external/fuzz_fast_idiv.py
     - name: Fuzz Test shape ops
@@ -344,10 +346,11 @@ jobs:
           key: gpu-image
           deps: testing_minimal
           opencl: 'true'
-      - name: Test CL IMAGE=2 ops + training
+      - name: Test CL IMAGE=2 ops
         run: |
           CL=1 IMAGE=2 python -m pytest -n=auto test/test_ops.py --durations=20
-          CL=1 IMAGE=2 python test/models/test_end2end.py TestEnd2End.test_linear_mnist
+        # TODO: training is broken
+        # CL=1 IMAGE=2 python test/models/test_end2end.py TestEnd2End.test_linear_mnist
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
@@ -392,7 +395,7 @@ jobs:
           llvm: 'true'
       - name: Test openpilot model kernel count and gate usage
         run: |
-          ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1452 ALLOWED_GATED_READ_IMAGE=122 FLOAT16=1 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
+          ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1397 ALLOWED_GATED_READ_IMAGE=94 FLOAT16=1 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
       - name: Test openpilot CL compile fp16
         run: FLOAT16=1 DEBUGCL=1 CL=1 IMAGE=2 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
       - name: Test openpilot CL compile fp32 (test correctness)

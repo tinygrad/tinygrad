@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import sys, os, zlib, struct, hashlib
-from hexdump import hexdump
 from tinygrad.helpers import DEBUG, getenv, fetch
 from tinygrad.runtime.support.usb import USB3
 

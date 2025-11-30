@@ -4,8 +4,8 @@ from collections import defaultdict
 from typing import Any, Generic, TypeVar, Iterator, Sequence, cast, Generator
 import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal
 from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored, CPU_LLVM
-from tinygrad.helpers import Context, DISABLE_COMPILER_CACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup
-from tinygrad.helpers import unwrap_class_type, suppress_finalizing, AMD_LLVM, select_first_inited
+from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup
+from tinygrad.helpers import unwrap_class_type, suppress_finalizing, select_first_inited, VIZ
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 from tinygrad.renderer import Renderer
 
@@ -266,7 +266,7 @@ class LRUAllocator(Allocator, Generic[DeviceType]):
 class CompileError(Exception): pass
 
 class Compiler:
-  def __init__(self, cachekey:str|None=None): self.cachekey = None if DISABLE_COMPILER_CACHE else cachekey
+  def __init__(self, cachekey:str|None=None): self.cachekey = cachekey if CCACHE else None
   def compile(self, src:str) -> bytes: return src.encode()   # NOTE: empty compiler is the default
   def compile_cached(self, src:str) -> bytes:
     if self.cachekey is None or (lib := diskcache_get(self.cachekey, src)) is None:
@@ -329,7 +329,7 @@ def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
     return device in {"AMD", "PYTHON", "NULL"}
   if dtype in dtypes.fp8s:
     if device in {"CUDA", "NV"}: return not CI and not getenv(f"{device}_PTX") and not getenv("NV_NAK")
-    if device == "AMD": return not CI and not AMD_LLVM and getattr(Device["AMD"], "target") in {(9,4,2), (9,5,0)}
+    if device == "AMD": return not CI and getattr(Device["AMD"], "target") in {(9,4,2), (9,5,0)}
     return device in {"PYTHON", "NULL"}
   if device == "WEBGPU": return dtype in [dtypes.bool, dtypes.char, dtypes.uchar, dtypes.short,
                                           dtypes.ushort, dtypes.float, dtypes.int32, dtypes.uint32, dtypes.half]
@@ -355,8 +355,9 @@ if PROFILE:
 
     with open(fn:=temp("profile.pkl", append_user=True), "wb") as f: pickle.dump(cpu_events+Compiled.profile_events+Buffer.profile_events, f)
 
-    from tinygrad.uop.ops import launch_viz
-    launch_viz("PROFILE", fn)
+    if VIZ:
+      from tinygrad.uop.ops import launch_viz
+      launch_viz("PROFILE", fn)
 
 def enumerate_devices_str() -> Generator[str, None, None]:
   from tinygrad import Tensor, Device
@@ -364,16 +365,21 @@ def enumerate_devices_str() -> Generator[str, None, None]:
   for device in ALL_DEVICES:
     compilers_results, any_works = [], False
     try:
-      default_compiler = (d:=Device[device]).compiler
-      for i,(r,c) in enumerate(d.compilers):
-        try:
-          d.renderer, d.compiler = r(), c()
-          with Context(CACHELEVEL=0): test = (Tensor([1,2,3], device=device) * 2).tolist()
-          if test != [2,4,6]: raise ValueError(f"got {test} instead of [2, 4, 6]")
-          default_text = '(default)' if type(default_compiler) is type(d.compiler) else f'({d._get_compiler_envvar(c)}=1 to make default)'
-          compilers_results.append(f"{colored('+', 'green')} {unwrap_class_type(c).__name__} {default_text}")
-          any_works = True
-        except Exception as e: compilers_results.append(f"{colored('-', 'yellow')} {unwrap_class_type(c).__name__}: {e}")
+      d = Device[device]
+      default_renderer, default_compiler = d.renderer, d.compiler
+      try:
+        for r,c in d.compilers:
+          try:
+            d.renderer, d.compiler = r(), c()
+            with Context(CACHELEVEL=0): test = (Tensor([1,2,3], device=device) * 2).tolist()
+            if test != [2,4,6]: raise ValueError(f"got {test} instead of [2, 4, 6]")
+            default_text = '(default)' if type(default_compiler) is type(d.compiler) else f'({d._get_compiler_envvar(c)}=1 to make default)'
+            compilers_results.append(f"{colored('+', 'green')} {unwrap_class_type(c).__name__} {default_text}")
+            any_works = True
+          except Exception as e: compilers_results.append(f"{colored('-', 'yellow')} {unwrap_class_type(c).__name__}: {e}")
+      finally:
+        # put the defaults back!
+        d.renderer, d.compiler = default_renderer, default_compiler
       result = (colored('PASS', 'green') if any_works else f"{colored('FAIL', 'yellow')}") + ''.join([f'\n{" "*16} {x}' for x in compilers_results])
     except Exception as e:
       result = f"{colored('FAIL', 'red')} {e}"
