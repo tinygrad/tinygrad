@@ -6601,6 +6601,9 @@ kernel:
 
 .rodata
 .amdhsa_kernel kernel
+  .amdhsa_enable_private_segment 1
+  .amdhsa_private_segment_fixed_size 116
+  .amdhsa_kernarg_size 16
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
   .amdhsa_next_free_vgpr .amdgcn.next_free_vgpr
   .amdhsa_next_free_sgpr .amdgcn.next_free_sgpr
