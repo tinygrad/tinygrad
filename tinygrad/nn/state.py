@@ -177,7 +177,7 @@ def zip_extract(t: Tensor) -> dict[str, Tensor]:
     files[filename] = t[file_offset_int:file_offset_int+compress_size]
     match compress_type:
       case zipfile.ZIP_STORED: pass
-      # TODO: we need a zlib UOp
+      # TODO: we need a zlib UOp so this can be lazy
       case zipfile.ZIP_DEFLATED: files[filename] = Tensor(zlib.decompress(files[filename].data(), -15))
       case _: raise NotImplementedError(f"compression {compress_type} not supported")
   return files

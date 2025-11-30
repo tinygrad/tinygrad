@@ -69,11 +69,12 @@ def disassemble(text, root:ET.Element):
       if did_match: break
 
     #print(ET.tostring(ins_enc).decode())
-    print()
-    print(f"{i:4X} : {ins:08x} {encoding_name}")
-    print(field_data)
-    if did_match:
-      print(ins_name.lower())
+    #print()
+    #print(field_data)
+    if not did_match:
+      print(f"{i:4X} : {ins:16x} -- {encoding_name}")
+    elif did_match:
+      params = []
       #print(ET.tostring(ins_el).decode())
 
       # 4. Extract the opcodes
@@ -91,10 +92,18 @@ def disassemble(text, root:ET.Element):
           for op_val in op_el.findall("OperandPredefinedValues/PredefinedValue"):
             val_dict[int(op_val.findtext("Value"))] = op_val.findtext("Name")
           if op_type == test_op_type:
-            print(op_type, op_size, op_fmt, op_el, op_field_name,
-                  field_data[op_field_name],
-                  val_dict.get(field_data[op_field_name], "<UNK>"))
+            if field_data[op_field_name] in val_dict:
+              print(op_type, op_size, op_fmt)
+              params.append(val_dict[field_data[op_field_name]])
+            else:
+              params.append(f"{op_type}({field_data[op_field_name]})")
+            del field_data[op_field_name]
+            #print(op_type, op_size, op_fmt, op_el, op_field_name,
+            #      field_data[op_field_name],
+            #      val_dict.get(field_data[op_field_name], "<UNK>"))
             #print(ET.tostring(op_el).decode())
+
+      print(f"{i:4X} : {ins:16x} -- {ins_name.lower()} {', '.join(params)}", field_data)
 
     # advance
     i += len(mask) // 8
