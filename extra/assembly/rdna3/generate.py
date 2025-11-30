@@ -15,12 +15,12 @@ from tinygrad.runtime.ops_amd import ProfileSQTTEvent
 from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
 
 def disassemble(text, root:ET.Element):
-  # TODO: write a disassembler
   i = 0
   while i < len(text):
-    did_match = False
     ins = struct.unpack("I", text[i:i+4])[0]
 
+    # 1. Get the encoding
+    did_match = False
     for enc_el in root.findall("./ISA/Encodings/Encoding"):
       mask = enc_el.findtext("EncodingIdentifierMask")
       assert len(mask)%32 == 0
@@ -34,34 +34,45 @@ def disassemble(text, root:ET.Element):
     if not did_match: raise RuntimeError(f"unknown instruction {ins:08X}")
     if len(mask) >= 64: ins = (struct.unpack("I", text[i+4:i+8])[0]<<32) | ins
     if len(mask) >= 96: ins = (struct.unpack("I", text[i+8:i+12])[0]<<64) | ins
-    name = enc_el.findtext("EncodingName")
+    encoding_name = enc_el.findtext("EncodingName")
 
     #print(ET.tostring(enc_el).decode())
 
     # 2. Parse the Fields for this Encoding
     field_data = {}
     for field in enc_el.findall("MicrocodeFormat/BitMap/Field"):
-      field_name = field.find("FieldName").text
-
       # Fields can be split into multiple ranges (RangeCount > 1)
-      # We assume Order="0" is the least significant part of the value
-      ranges = field.findall("BitLayout/Range")
-      ranges.sort(key=lambda x: int(x.attrib.get('Order', '0')))
-
-      #print(field_name, ET.tostring(ranges[0]).decode())
-
+      ranges = sorted(field.findall("BitLayout/Range"), key=lambda x: int(x.attrib.get('Order')))
       val = 0
       current_shift = 0
       for rng in ranges:
         width = int(rng.find("BitCount").text)
-        offset = int(rng.find("BitOffset").text)
-        chunk = (ins >> offset) & ((1 << width) - 1)
+        chunk = (ins >> int(rng.find("BitOffset").text)) & ((1 << width) - 1)
         val |= (chunk << current_shift)
         current_shift += width
 
-      field_data[field_name] = val
+      field_data[field.find("FieldName").text] = val
 
-    print(f"{i:4X} : {ins:08x} {name}", field_data)
+    print()
+    print(f"{i:4X} : {ins:08x} {encoding_name}")
+    print(field_data)
+
+    # 3. Extract the instruction
+    did_match = False
+    for ins_el in root.findall("./ISA/Instructions/Instruction"):
+      name = ins_el.findtext("InstructionName")
+      for ins_enc in ins_el.findall("InstructionEncodings/InstructionEncoding"):
+        if ins_enc.findtext("EncodingName") == encoding_name:
+          opcode = int(ins_enc.findtext("Opcode"))
+          if "OP" in field_data and opcode == field_data["OP"]:
+            print(name.lower())
+            did_match = True
+            #print(ET.tostring(ins_enc).decode())
+            break
+        if did_match: break
+      if did_match: break
+
+    # advance
     i += len(mask) // 8
 
   #print(ET.tostring(root).decode())
