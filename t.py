@@ -1,6 +1,6 @@
 from dataclasses import replace
 from tinygrad import Tensor, Device, Context
-from tinygrad.helpers import diskcache, system, temp
+from tinygrad.helpers import diskcache, system, temp, colored
 from tinygrad.engine.realize import lower_schedule_item, run_schedule, CompiledRunner
 from tinygrad.runtime.support.compiler_amd import compile_hip
 
@@ -24,3 +24,4 @@ it.append((sched[-1], ei2))
 with Context(VALIDATE_WITH_CPU=1):
   run_schedule(sched, it=it)
   print(a.uop.buffer.numpy())
+print(colored("** asm kernel passed", "green"))
