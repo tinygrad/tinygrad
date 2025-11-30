@@ -274,6 +274,12 @@ def parse_valid(v:UOp) -> tuple[UOp, bool, int]|None:
     # NOTE: v.src[1].op can be Ops.VCONST
   return None
 
+def substitute_simplify(uop:UOp, sub_dict:dict[UOp, UOp]) -> UOp:
+  if not sub_dict: return uop
+  new_uop = uop.substitute(sub_dict)
+  if new_uop is uop: return uop
+  return new_uop.simplify().substitute({v:k for k,v in sub_dict.items()}).simplify()
+
 def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
   # return simplified uop (might be the same as input)
 
@@ -286,6 +292,7 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
 
   # simplify uop given that valid is True
   all_candidates = []
+  uop_topo = None
   for i,(expr,v) in enumerate(bounds.items()):
     v0, v1 = (expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1])
     # try checking the whole clause
@@ -300,18 +307,20 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
 
       for candidate in candidates:
         # if every branch in candidate gives the same simplified uop, we can rewrite the uop
-        newuops = [uop.substitute({X:newX}) for X,newX in candidate]
-        if any(u is uop for u in newuops): continue  # if any branch doesnt appear in uop, skip
-        newuops = [u.simplify().substitute({newX:X}).simplify() for (X,newX),u in zip(candidate,newuops)]
-        if all_same(newuops): uop = newuops[0]
+        if uop_topo is None: uop_topo = uop.toposort()
+        if not any(X in uop_topo for X,_ in candidate): continue
+        newuops = [substitute_simplify(uop, {X:newX}) for X,newX in candidate]
+        if any(u is uop for u in newuops): continue
+        if all_same(newuops): uop, uop_topo = newuops[0], None
         elif uop.op is Ops.VECTORIZE and len(uop.src) == 2:
-          if all_same([uops.src[0] for uops in newuops]): uop = uop.replace(src=(newuops[0].src[0], uop.src[1]))
-          if all_same([uops.src[1] for uops in newuops]): uop = uop.replace(src=(uop.src[0], newuops[0].src[1]))
+          if all_same([uops.src[0] for uops in newuops]): uop, uop_topo = uop.replace(src=(newuops[0].src[0], uop.src[1])), None
+          if all_same([uops.src[1] for uops in newuops]): uop, uop_topo = uop.replace(src=(uop.src[0], newuops[0].src[1])), None
 
   # try all the valids together (but only the whole expressions)
-  if (s_uop:=uop.substitute(sub_dict:=dict(all_candidates))) is not uop:
-    uop = s_uop.simplify().substitute({newX:X for X,newX in sub_dict.items()}).simplify()
-  return uop
+  if try_simplex and uop_topo is None: uop_topo = uop.toposort()
+  sub_dict = {expr: newX for expr,newX in all_candidates if not try_simplex or (uop_topo is not None and expr in uop_topo)}
+  if not sub_dict: return uop
+  return substitute_simplify(uop, sub_dict)
 
 def _valid_priority(v: UOp, valids:list[UOp]):
   # we want valid that's in other valids' parents to be first, so it's more likely the other valids get simplified
