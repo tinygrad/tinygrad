@@ -4150,7 +4150,8 @@ class Tensor(OpMixin):
     You must provide the output shape of the decoded data (`shape`), the HEVC context (`ctx`), and, if required by the chunk,
     the reference frames (`ref_frames`).
     """
-    return self.cast(dtypes.uint8).contiguous()._apply_uop(UOp.encdec, state, *[x.contiguous() for x in ref_frames or []], extra_args=(frame_pos,), arg=(shape,))
+    ref_frames = [x.contiguous() for x in ref_frames or []]
+    return self.contiguous()._apply_uop(UOp.encdec, state.contiguous(), *ref_frames, extra_args=(frame_pos,), arg=(shape,))
 
 P = ParamSpec("P")
 T = TypeVar("T")

@@ -270,9 +270,11 @@ def parse_hevc_file_headers(dat:bytes):
   history:list[tuple[int, int, int]] = []
   device_ctx = nv_gpu.nvdec_hevc_pic_s(gptimer_timeout_value=92720000, tileformat=1, sw_start_code_e=1, pattern_id=2)
   nal_infos = []
+  ctx_bytes = bytes()
+  align_ctx_bytes_size = 0x300
 
   def _flush_picture():
-    nonlocal res, history, device_ctx, nal_infos
+    nonlocal res, history, device_ctx, nal_infos, ctx_bytes, align_ctx_bytes_size
 
     if not len(nal_infos): return
     
@@ -319,15 +321,15 @@ def parse_hevc_file_headers(dat:bytes):
     device_ctx.initreflistidxl0 = (ctypes.c_uint8 * 16)(*[idx for _,idx in before_list + after_list])
     if hdr.slice_type == avcodec.HEVC_SLICE_B: device_ctx.initreflistidxl1 = (ctypes.c_uint8 * 16)(*[idx for _,idx in after_list + before_list])
 
-    ctx_bytes = bytes(device_ctx)
-    ctx_bytes += bytes(0x200 - len(ctx_bytes)) # pad to 512 bytes
+    locl_ctx_bytes = bytes(device_ctx)
+    locl_ctx_bytes += bytes(0x200 - len(locl_ctx_bytes)) # pad to 512 bytes
 
     pic_width_in_ctbs = ceildiv(sps.pic_width_in_luma_samples, (1 << sps.log2_max_luma_coding_block_size))
     pic_height_in_ctbs = ceildiv(sps.pic_height_in_luma_samples, (1 << sps.log2_max_luma_coding_block_size))
     # append tile sizes 0x200
     if pps.tiles_enabled_flag and pps.uniform_spacing_flag:
       assert device_ctx.num_tile_columns == 1 and device_ctx.num_tile_rows == 1, "not implemented: uniform spacing with multiple tiles"
-      ctx_bytes += pic_width_in_ctbs.to_bytes(2, "little") + pic_height_in_ctbs.to_bytes(2, "little")
+      locl_ctx_bytes += pic_width_in_ctbs.to_bytes(2, "little") + pic_height_in_ctbs.to_bytes(2, "little")
     else:
       if pps.tiles_enabled_flag and not getattr(pps, 'uniform_spacing_flag', 0):
         column_width = [cw_minus1 + 1 for cw_minus1 in pps.column_width_minus1[0:pps.num_tile_columns_minus1]]
@@ -383,13 +385,14 @@ def parse_hevc_file_headers(dat:bytes):
       if hdr.first_slice_segment_in_pic_flag == 1: _flush_picture()
       nal_infos.append(((hdr, nal_unit_type), nal_unit_start, nal_unit_len))
 
-    # print(f"NAL unit type: {nal_unit_type}, length: {nal_unit_len}")
     nal_unit_start += nal_unit_len
   _flush_picture()
 
   w = sps.pic_width_in_luma_samples - 2 * (sps.conf_win_left_offset + sps.conf_win_right_offset)
   h = sps.pic_height_in_luma_samples - 2 * (sps.conf_win_top_offset  + sps.conf_win_bottom_offset)
-  return w, h, sps.pic_width_in_luma_samples, sps.pic_height_in_luma_samples, res
+  chroma_off = round_up(sps.pic_width_in_luma_samples, 64) * round_up(sps.pic_height_in_luma_samples, 64)
+  opaque = Tensor(ctx_bytes, device="NV").reshape(len(res), align_ctx_bytes_size)
+  return opaque, res, w, h, sps.pic_width_in_luma_samples, sps.pic_height_in_luma_samples, chroma_off
 
 def _addr_table(h, w, w_aligned):
   GOB_W, GOB_H = 64, 8
@@ -434,99 +437,3 @@ def nv12_to_bgr_from_planes(luma: Tensor, chroma: Tensor, h: int, w: int) -> Ten
   B = B.maximum(0.0).minimum(255.0)
 
   return Tensor.stack([B, G, R], dim=2).cast(dtypes.uint8)
-
-# if __name__ == "__main__":
-#   import cv2
-
-#   parser = argparse.ArgumentParser()
-#   parser.add_argument("--input_file", type=str, default="")
-#   parser.add_argument("--output_dir", type=str, default="extra/hevc/out")
-#   args = parser.parse_args()
-
-#   os.makedirs(args.output_dir, exist_ok=True)
-
-#   if args.input_file == "":
-#     url = "https://github.com/commaai/comma2k19/raw/refs/heads/master/Example_1/b0c9d2329ad1606b%7C2018-08-02--08-34-47/40/video.hevc"
-#     hevc_tensor = Tensor.from_url(url, device="CPU")
-#   else:
-#     hevc_tensor = Tensor.empty(os.stat(args.input_file).st_size, dtype=dtypes.uint8, device=f"disk:{args.input_file}").to("CPU")
-
-#   with Timing("prep infos: "):
-#     dat = bytes(hevc_tensor.data())
-#     dat_nv = hevc_tensor.to("NV")
-#     w, h, frame_info = parse_hevc_file_headers(dat)
-
-#   frame_info = frame_info[:3]
-
-#   all_slices = []
-#   all_datas = []
-#   all_bufs_out = []
-#   all_pics = []
-#   with Timing("prep slices to gpu: "):
-#     for i, (offset, sz, shape, opaque, frame_pos, history_sz, _) in enumerate(frame_info):
-#       all_slices.append(dat_nv[offset:offset+sz].contiguous().realize())
-#       all_datas.append(opaque.contiguous().realize())
-      
-#       chroma_off = round_up(shape[0], 64) * round_up(shape[1], 64)
-#       shape = (round_up(shape[0] + (shape[0] + 1) // 2, 64), round_up(shape[1], 64))
-#       bufout = Tensor.empty(shape, dtype=dtypes.uint8).realize()
-#       bufout.uop.buffer.allocate()
-#       all_bufs_out.append(bufout)
-
-#       pic = Tensor.empty(h, w, 3, dtype=dtypes.uint8).realize()
-#       pic.uop.buffer.allocate()
-#       all_pics.append(pic)
-#     Device.default.synchronize()
-
-#   @TinyJit
-#   def untile_nv12(src:Tensor, out:Tensor):
-#     luma = src.reshape(-1)[_addr_table(h, w, round_up(w, 64))]
-#     chroma = src.reshape(-1)[chroma_off:][_addr_table((h + 1) // 2, w, round_up(w, 64))]
-#     x = nv12_to_bgr_from_planes(luma, chroma, h, w)
-#     out.assign(x).realize()
-#     return x.realize()
-  
-#   # warm up
-#   for i in range(3): x = untile_nv12(all_bufs_out[0], all_pics[0])
-
-#   from tinygrad.runtime.ops_nv import NVVideoQueue
-#   # from extra.nv_gpu_driver.nv_ioctl import dump_struct_ext
-#   dev = Device.default
-#   dev._ensure_has_vid_hw(w, h)
-
-#   # from hexdump import hexdump
-
-#   history = []
-#   prev_timeline_wait = dev.timeline_value - 1
-#   with Timing("decoding whole file (no tg): "):
-#     for i, (offset, sz, shape, opaque, frame_pos, history_sz, is_hist) in enumerate(frame_info):
-#       history = history[-history_sz:] if history_sz > 0 else []
-
-#       bufin_hcq = all_slices[i].uop.buffer._buf
-#       desc_buf_hcq = all_datas[i].uop.buffer._buf
-#       bufout_hcq = all_bufs_out[i].uop.buffer._buf
-
-#       dump_struct_ext(nv_gpu.nvdec_hevc_pic_s.from_buffer(opaque.data()))
-#       # assert frame_pos not in [(frame_pos-x) % (len(history)+1) for x in range(len(history), 0, -1)]
-#       # print(frame_pos, [(frame_pos-x) % (len(history)+1) for x in range(len(history), 0, -1)], [(frame_pos-x) % 5 for x in range(len(history), 0, -1)])
-
-#       NVVideoQueue().wait(dev.timeline_signal, prev_timeline_wait) \
-#                     .decode_hevc_chunk(i, desc_buf_hcq, bufin_hcq, bufout_hcq, frame_pos, history,
-#                                        [(frame_pos-x) % (len(history) + 1) for x in range(len(history), 0, -1)],
-#                                        chroma_off, dev.vid_coloc_buf, dev.vid_filter_buf, dev.intra_top_off, dev.vid_status_buf) \
-#                     .signal(dev.timeline_signal, prev_timeline_wait:=dev.next_timeline()).submit(dev)
-
-#       untile_nv12(all_bufs_out[i], all_pics[i])
-#       if is_hist: history.append(bufout_hcq)
-#     Device.default.synchronize()
-
-#   import cv2
-#   for i, src in enumerate(all_pics):
-#     if i > 230:
-#       cv2.imwrite(f"{args.output_dir}/nv_frame_{i}.png", all_pics[i].numpy())
-#   # for i, src in enumerate(all_bufs_out):
-#   #   w_aligned = round_up(w, 64)
-#   #   luma = src.reshape(-1)[_addr_table(h, w, w_aligned)]
-#   #   chroma = src.reshape(-1)[chroma_off:][_addr_table((h + 1) // 2, w, w_aligned)]
-#   #   cv2.imwrite(f"{args.output_dir}/nv_frame_{i}.png", cv2.cvtColor(luma.cat(chroma).reshape((h + (h + 1) // 2, w)).numpy(), cv2.COLOR_YUV2BGR_NV12))
-#   #   cv2.imwrite(f"{args.output_dir}/c_nv_frame_{i}.png", cv2.cvtColor(chroma.reshape(((h + 1) // 2, w)).numpy(), cv2.COLOR_YUV2BGR_NV12))
