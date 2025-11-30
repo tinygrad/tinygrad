@@ -264,7 +264,7 @@ def fill_pps_into_dev_context(device_ctx, pps:PPS):
   device_ctx.log2_parallel_merge_level = pps.log2_parallel_merge_level
   device_ctx.loop_filter_across_tiles_enabled_flag = getattr(pps, 'loop_filter_across_tiles_enabled_flag', 0)
 
-def parse_hevc_file_headers(dat:bytes):
+def parse_hevc_file_headers(dat:bytes, device="NV"):
   res = []
   nal_unit_start = 1
   history:list[tuple[int, int, int]] = []
@@ -391,7 +391,7 @@ def parse_hevc_file_headers(dat:bytes):
   w = sps.pic_width_in_luma_samples - 2 * (sps.conf_win_left_offset + sps.conf_win_right_offset)
   h = sps.pic_height_in_luma_samples - 2 * (sps.conf_win_top_offset  + sps.conf_win_bottom_offset)
   chroma_off = round_up(sps.pic_width_in_luma_samples, 64) * round_up(sps.pic_height_in_luma_samples, 64)
-  opaque = Tensor(ctx_bytes, device="NV").reshape(len(res), align_ctx_bytes_size)
+  opaque = Tensor(ctx_bytes, device=device).reshape(len(res), align_ctx_bytes_size)
   return opaque, res, w, h, sps.pic_width_in_luma_samples, sps.pic_height_in_luma_samples, chroma_off
 
 def _addr_table(h, w, w_aligned):

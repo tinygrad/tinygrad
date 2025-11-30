@@ -1,6 +1,6 @@
 import unittest
 
-from tinygrad import Tensor
+from tinygrad import Tensor, Device
 from extra.hevc.hevc import parse_hevc_file_headers, nv_gpu
 
 class TestHevc(unittest.TestCase):
@@ -9,7 +9,7 @@ class TestHevc(unittest.TestCase):
     hevc_tensor = Tensor.from_url(url, device="CPU")
 
     dat = bytes(hevc_tensor.data())
-    opaque, frame_info, w, h, luma_w, luma_h, chroma_off = parse_hevc_file_headers(dat)
+    opaque, frame_info, w, h, luma_w, luma_h, chroma_off = parse_hevc_file_headers(dat, device=Device.DEFAULT)
 
     def _test_common(frame, bts):
       self.assertEqual(frame0.pic_width_in_luma_samples, 1952)
