@@ -57,9 +57,9 @@ class TestOnnxModel(unittest.TestCase):
     cls = run(car_img)
     print(cls, _LABELS[cls])
     assert "car" in _LABELS[cls] or _LABELS[cls] == "convertible"
-  
+
   def test_pad_list_value(self):
-    from tinygrad.nn.onnx import onnx_ops 
+    from tinygrad.nn.onnx import onnx_ops
     from tinygrad import Tensor
     Pad = onnx_ops['Pad']
     x = Tensor([1, 2, 3])
