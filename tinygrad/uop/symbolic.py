@@ -37,7 +37,7 @@ propagate_invalid = PatternMatcher([
   *((invalid_pat.alu(op, UPat(dtype=dtypes.index)), lambda i: i) for op in GroupOp.Binary-GroupOp.Comparison),
 ])
 
-symbolic_simple = propagate_invalid + PatternMatcher([
+symbolic_simple = PatternMatcher([
   # ** self folding **
   (UPat.var("x") + 0, lambda x: x),    # x+0 -> x
   (UPat.var("x") * 1, lambda x: x),    # x*1 -> x

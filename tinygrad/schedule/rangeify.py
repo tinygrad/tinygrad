@@ -3,7 +3,7 @@ import itertools
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo
 from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType, BottomUpGate, Kernel, _remove_all_tags, range_str
-from tinygrad.uop.symbolic import symbolic
+from tinygrad.uop.symbolic import symbolic, propagate_invalid
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY
 from tinygrad.helpers import PCONTIG, partition, get_single_element, unwrap
 from tinygrad.codegen.simplify import pm_flatten_range, pm_reduce_simplify
@@ -549,7 +549,8 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   # convert movement ops to ranges
   tsink, rctx = run_rangeify(tsink, DEBUG_RANGEIFY)
 
-  tsink = graph_rewrite(tsink, symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize, name="symbolic+reduce_collapse+debuf")
+  tsink = graph_rewrite(tsink, propagate_invalid+symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize,
+                        name="symbolic+reduce_collapse+debuf")
   tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph

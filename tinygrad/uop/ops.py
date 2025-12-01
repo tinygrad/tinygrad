@@ -341,9 +341,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   def simplify(self, tracked=False):
     # late import!
-    from tinygrad.uop.symbolic import symbolic
+    from tinygrad.uop.symbolic import symbolic, propagate_invalid
     with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
-      return graph_rewrite(self, symbolic, name="simplify")
+      return graph_rewrite(self, propagate_invalid+symbolic, name="simplify")
   def ssimplify(self) -> UOp|ConstType: return ret.arg if (ret:=self.simplify()).op is Ops.CONST else ret
   def sintify(self) -> sint: return self.arg if self.op is Ops.CONST else self
   def _eval(self, dtype, expected_type:Type[T]) -> T:
