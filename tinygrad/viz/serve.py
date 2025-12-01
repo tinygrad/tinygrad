@@ -216,9 +216,10 @@ def err(name:str, msg:str|None=None) -> None:
 def row_tuple(row:str) -> tuple[int, ...]: return tuple(int(x.split(":")[1]) for x in row.split())
 
 def load_sqtt(profile:list[ProfileEvent]) -> None:
-  from tinygrad.runtime.ops_amd import ProfileSQTTEvent
-  if not (sqtt_events:=[e for e in profile if isinstance(e, ProfileSQTTEvent)]): return None
-  try: from extra.sqtt.roc import decode
+  from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
+  pmc_events = {(e.kern, e.exec_tag):e for e in profile if isinstance(e, ProfilePMCEvent)}
+  if not (sqtt_events:=[e for e in profile if isinstance(e, ProfileSQTTEvent)]) and not pmc_events: return
+  try: from extra.sqtt.roc import decode, print_pmc
   except Exception: return err("DECODER IMPORT ISSUE")
   try: rctx = decode(profile)
   except Exception: return err("DECODER ERROR")
@@ -253,6 +254,8 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     prg_cu = sorted(cu_events, key=row_tuple)
     kernel = trace.keys[r].ret if (r:=ref_map.get(name.prg)) else None
     src = f"Scheduled on {len(prg_cu)} CUs"+(f"\n\n{kernel.global_size=} {kernel.local_size=}" if kernel else "")
+    pmc = pmc_events.get((name.prg, name.tag))
+    if pmc is not None: src += "\n\nPMC:\n"+get_stdout(lambda: print_pmc(pmc))
     steps.append(create_step(kernel.name if kernel is not None else name.prg, ("/counters", len(ctxs), len(steps)), {"src":src}, depth=1))
     for cu in prg_cu:
       events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]

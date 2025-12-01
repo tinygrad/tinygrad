@@ -161,6 +161,15 @@ def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
   t.join()
   return ROCParseCtx
 
+def print_pmc(ev:ProfilePMCEvent) -> None:
+  ptr = 0
+  for s in ev.sched:
+    view = memoryview(ev.blob).cast('Q')
+    print(f"\t{s.name}")
+    for xcc, inst, se_idx, sa_idx, wgp_idx in itertools.product(range(s.xcc), range(s.inst), range(s.se), range(s.sa), range(s.wgp)):
+      print(f"\t\tXCC {xcc} Inst {inst:<2} SE {se_idx} SA {sa_idx} WGP {wgp_idx}: {view[ptr]:#x}")
+      ptr += 1
+
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument('--profile', type=pathlib.Path, help='Path to profile', default=pathlib.Path(temp("profile.pkl", append_user=True)))
@@ -173,10 +182,4 @@ if __name__ == "__main__":
   for ev in profile:
     if not isinstance(ev, ProfilePMCEvent): continue
     print(f"PMC Event: dev={ev.device} kern={ev.kern}")
-    ptr = 0
-    for s in ev.sched:
-      view = memoryview(ev.blob).cast('Q')
-      print(f"\t{s.name}")
-      for xcc, inst, se_idx, sa_idx, wgp_idx in itertools.product(range(s.xcc), range(s.inst), range(s.se), range(s.sa), range(s.wgp)):
-        print(f"\t\tXCC {xcc} Inst {inst} SE {se_idx} SA {sa_idx} WGP {wgp_idx}: {view[ptr]:#x}")
-        ptr += 1
+    print_pmc(ev)
