@@ -1014,19 +1014,24 @@ def upat_interpret(p:UPat, fxn:Callable) -> Callable:
       return None
   return universal_match
 
+def ops_to_bitfield(ops:Iterable[Ops]) -> int:
+  ret = 0
+  for op in ops: ret |= 1 << op.value
+  return ret
+
 class PatternMatcher:
   def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple]], compiled=bool(getenv("UPAT_COMPILE", 1))):
     if compiled: from tinygrad.uop.upat import upat_compile
     # if this comes from a pickle, we reconstruct the lambda functions here
     self.patterns:list[tuple[UPat, Callable]] = [(p,types.FunctionType(*fxn) if isinstance(fxn, tuple) else fxn) for p,fxn in patterns]
     # NOTE: use of DefaultDict here is very dangerous! all keys will live for the lifetime of the PatternMatcher!
-    self.pdict: dict[Ops, list[tuple[UPat, Callable, set]]] = {}
+    self.pdict: dict[Ops, list[tuple[UPat, Callable, int]]] = {}
     # uop is required, arg is optional
     for p,fxn in self.patterns:
       assert p.op is not None
       if compiled and (match:=upat_compile(p, fxn)) is not None: pass # pylint: disable=E0606
       else: match = upat_interpret(p, fxn)
-      for uop in p.op: self.pdict.setdefault(uop, []).append((p, match, p.early_reject))
+      for uop in p.op: self.pdict.setdefault(uop, []).append((p, match, ops_to_bitfield(p.early_reject)))
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
@@ -1034,9 +1039,9 @@ class PatternMatcher:
   def __add__(self, more:PatternMatcher) -> PatternMatcher: return PatternMatcher(self.patterns+more.patterns)
 
   def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
-    ler = {u.op for u in uop.src}
+    lerb = ops_to_bitfield([u.op for u in uop.src])
     for _,match,early_reject in self.pdict.get(uop.op, []):
-      if not early_reject.issubset(ler): continue
+      if early_reject & lerb != early_reject: continue
       if (ret:=match(uop, ctx)) is not None and ret is not uop: return ret
     return None
 
@@ -1120,11 +1125,11 @@ def profile_matches(fxn:Callable):
 class TrackedPatternMatcher(PatternMatcher):
   def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
     ret = None
-    ler = {u.op for u in uop.src}
+    lerb = ops_to_bitfield([u.op for u in uop.src])
     for p,match,early_reject in self.pdict.get(uop.op, []):
       if p not in match_stats: match_stats[p] = [0,0,0.0,0.0]
       st = time.perf_counter()
-      if not early_reject.issubset(ler):
+      if early_reject & lerb != early_reject:
         match_stats[p][2] += time.perf_counter()-st
         continue
       match_stats[p][1] += 1
