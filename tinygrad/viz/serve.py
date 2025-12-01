@@ -41,16 +41,15 @@ def get_rewrites(t:RewriteTrace) -> list[dict]:
     steps = [create_step(s.name, ("/rewrites", i, j), loc=s.loc, match_count=len(s.matches), code_line=printable(s.loc), trace=k.tb if j==0 else None,
                          depth=s.depth) for j,s in enumerate(v)]
     # build an index of all places a rule is used
-    match_index:dict[tuple[str, int], list[dict]] = {}
+    match_index:dict[tuple[str, int], tuple[str, int]] = {}
     for j,s in enumerate(v):
       for num,m in enumerate(s.matches):
         if (index:=match_index.get(m[2])) is None: match_index[m[2]] = index = []
-        index.append({"rewrite":s.name, "num":num+1}) # 0 is always the input graph
-    match_index_src = ""
-    for x,seen in match_index.items():
-      match_index_src += f"{x}:\n"
-      for item in seen: match_index_src += f"  {item}\n"
-    steps.append(create_step("View Rewrite Index", ("/rewrite-index", i, len(steps)), {"src":match_index_src}))
+        index.append((s.name, num+1)) # 0 is the input graph
+    cols, match_cols = ["Location", "Code", "Hits"], ["Rewrite", "Num"]
+    rows = [(f"{x[0].split('/')[-1]}:{x[1]}", rep[:50]+"..." if len(rep:=printable(x))>50 else rep, len(seen), {"cols":match_cols, "rows":seen})
+            for x,seen in sorted(match_index.items(), key=lambda kv: len(kv[1]), reverse=True)]
+    steps.append(create_step("View Rewrite Index", ("/rewrite-index", i, len(steps)), {"cols":cols, "rows":rows, "summary":[]}))
     if isinstance(k.ret, ProgramSpec):
       steps.append(create_step("View UOp List", ("/uops", i, len(steps)), k.ret))
       steps.append(create_step("View Program", ("/code", i, len(steps)), k.ret))
