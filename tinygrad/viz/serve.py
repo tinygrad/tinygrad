@@ -45,7 +45,7 @@ def get_rewrites(t:RewriteTrace) -> list[dict]:
     for j,s in enumerate(v):
       for num,m in enumerate(s.matches):
         if (index:=match_index.get(m[2])) is None: match_index[m[2]] = index = []
-        index.append({"rewrite":s.name, "num":num})
+        index.append({"rewrite":s.name, "num":num+1}) # 0 is always the input graph
     match_index_src = ""
     for x,seen in match_index.items():
       match_index_src += f"{x}:\n"
