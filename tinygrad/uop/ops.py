@@ -1039,10 +1039,12 @@ class PatternMatcher:
   def __add__(self, more:PatternMatcher) -> PatternMatcher: return PatternMatcher(self.patterns+more.patterns)
 
   def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
-    lerb = ops_to_bitfield([u.op for u in uop.src])
-    for _,match,early_reject in self.pdict.get(uop.op, []):
-      if early_reject & lerb != early_reject: continue
-      if (ret:=match(uop, ctx)) is not None and ret is not uop: return ret
+    if len(pats:=self.pdict.get(uop.op, [])):
+      lerb = 0
+      for u in uop.src: lerb |= 1 << u.op.value
+      for _,match,early_reject in pats:
+        if early_reject & lerb != early_reject: continue
+        if (ret:=match(uop, ctx)) is not None and ret is not uop: return ret
     return None
 
 # *** tracking pattern matcher ***
