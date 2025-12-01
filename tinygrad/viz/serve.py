@@ -40,6 +40,17 @@ def get_rewrites(t:RewriteTrace) -> list[dict]:
   for i,(k,v) in enumerate(zip(t.keys, t.rewrites)):
     steps = [create_step(s.name, ("/rewrites", i, j), loc=s.loc, match_count=len(s.matches), code_line=printable(s.loc), trace=k.tb if j==0 else None,
                          depth=s.depth) for j,s in enumerate(v)]
+    # build an index of all places a rule is used
+    match_index:dict[tuple[str, int], list[dict]] = {}
+    for j,s in enumerate(v):
+      for num,m in enumerate(s.matches):
+        if (index:=match_index.get(m[2])) is None: match_index[m[2]] = index = []
+        index.append({"rewrite":s.name, "num":num})
+    match_index_src = ""
+    for x,seen in match_index.items():
+      match_index_src += f"{x}:\n"
+      for item in seen: match_index_src += f"  {item}\n"
+    steps.append(create_step("View Rewrite Index", ("/rewrite-index", i, len(steps)), {"src":match_index_src}))
     if isinstance(k.ret, ProgramSpec):
       steps.append(create_step("View UOp List", ("/uops", i, len(steps)), k.ret))
       steps.append(create_step("View Program", ("/code", i, len(steps)), k.ret))
