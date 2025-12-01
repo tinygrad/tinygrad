@@ -19,7 +19,7 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
                Ops.RANGE: "#c8a0e0", Ops.ASSIGN: "#909090", Ops.BARRIER: "#ff8080", Ops.IF: "#c8b0c0", Ops.SPECIAL: "#c0c0ff",
                Ops.INDEX: "#cef263", Ops.WMMA: "#efefc0", Ops.MULTI: "#f6ccff", Ops.KERNEL: "#3e7f55",
                **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80",
-               Ops.BUFFER_VIEW: "#E5EAFF", Ops.BUFFER: "#B0BDFF", Ops.COPY: "#a040a0",
+               Ops.BUFFER_VIEW: "#E5EAFF", Ops.BUFFER: "#B0BDFF", Ops.COPY: "#a040a0", Ops.ENCDEC: "#bf71b6",
                Ops.ALLREDUCE: "#ff40a0", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0", Ops.CONTIGUOUS: "#FFC14D",
                Ops.BUFFERIZE: "#FF991C", Ops.REWRITE_ERROR: "#ff2e2e", Ops.AFTER: "#8A7866", Ops.END: "#524C46"}
 
@@ -178,12 +178,12 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
   return struct.pack("<BI", 0, len(events))+b"".join(events) if events else None
 
 def encode_mem_free(key:int, ts:int, execs:list[ProfilePointEvent], scache:dict) -> bytes:
-  ei_encoding:list[tuple[int, int, int, int]] = [] # <[u32, u32, u8, u8] [run id, display name, buffer number and mode (2 = r/w, 1 = w, 0 = r)]
+  ei_encoding:list[tuple[int, int, int, int]] = [] # <[u32, u32, u32, u8] [run id, display name, buffer number and mode (2 = r/w, 1 = w, 0 = r)]
   for e in execs:
     num = next(i for i,k in enumerate(e.arg["bufs"]) if k == key)
     mode = 2 if (num in e.arg["inputs"] and num in e.arg["outputs"]) else 1 if (num in e.arg["outputs"]) else 0
     ei_encoding.append((e.key, enum_str(e.arg["name"], scache), num, mode))
-  return struct.pack("<BIII", 0, ts, key, len(ei_encoding))+b"".join(struct.pack("<IIBB", *t) for t in ei_encoding)
+  return struct.pack("<BIII", 0, ts, key, len(ei_encoding))+b"".join(struct.pack("<IIIB", *t) for t in ei_encoding)
 
 def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, end_ts:int, peaks:list[int], dtype_size:dict[str, int],
                scache:dict[str, int]) -> bytes|None:
@@ -216,9 +216,10 @@ def err(name:str, msg:str|None=None) -> None:
 def row_tuple(row:str) -> tuple[int, ...]: return tuple(int(x.split(":")[1]) for x in row.split())
 
 def load_sqtt(profile:list[ProfileEvent]) -> None:
-  from tinygrad.runtime.ops_amd import ProfileSQTTEvent
-  if not (sqtt_events:=[e for e in profile if isinstance(e, ProfileSQTTEvent)]): return None
-  try: from extra.sqtt.roc import decode
+  from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
+  pmc_events = {(e.kern, e.exec_tag):e for e in profile if isinstance(e, ProfilePMCEvent)}
+  if not (sqtt_events:=[e for e in profile if isinstance(e, ProfileSQTTEvent)]) and not pmc_events: return
+  try: from extra.sqtt.roc import decode, print_pmc
   except Exception: return err("DECODER IMPORT ISSUE")
   try: rctx = decode(profile)
   except Exception: return err("DECODER ERROR")
@@ -227,7 +228,8 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     for e in sqtt_events: parse_sqtt_print_packets(e.blob)
   if not any([rctx.inst_execs, rctx.occ_events]): return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
   steps:list[dict] = []
-  for name,disasm in rctx.disasms.items():
+  for name in rctx.occ_events:
+    disasm = rctx.disasms[name.prg]
     cu_events:dict[str, list[ProfileEvent]] = {}
     # wave instruction events
     wave_insts:dict[str, dict[str, dict]] = {}
@@ -236,8 +238,8 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
       if (u:=w.wave_loc) not in inst_units: inst_units[u] = itertools.count(0)
       n = next(inst_units[u])
       if (events:=cu_events.get(w.cu_loc)) is None: cu_events[w.cu_loc] = events = []
-      events.append(ProfileRangeEvent(w.simd_loc, f"INST WAVE:{w.wave_id} N:{n}", Decimal(w.begin_time), Decimal(w.end_time)))
-      wave_insts.setdefault(w.cu_loc, {})[f"{u} N:{n}"] = {"wave":w, "disasm":disasm, "run_number":n}
+      events.append(ProfileRangeEvent(w.simd_loc, loc:=f"INST WAVE:{w.wave_id} N:{n}", Decimal(w.begin_time), Decimal(w.end_time)))
+      wave_insts.setdefault(w.cu_loc, {})[f"{u} N:{n}"] = {"wave":w, "disasm":disasm, "run_number":n, "loc":loc}
     # occupancy events
     units:dict[str, itertools.count] = {}
     wave_start:dict[str, int] = {}
@@ -250,19 +252,22 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
         events.append(ProfileRangeEvent(occ.simd_loc, f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)), Decimal(occ.time)))
     if not cu_events: continue
     prg_cu = sorted(cu_events, key=row_tuple)
-    kernel = trace.keys[r].ret if (r:=ref_map.get(name)) else None
+    kernel = trace.keys[r].ret if (r:=ref_map.get(name.prg)) else None
     src = f"Scheduled on {len(prg_cu)} CUs"+(f"\n\n{kernel.global_size=} {kernel.local_size=}" if kernel else "")
-    steps.append(create_step(kernel.name if kernel is not None else name, ("/counters", len(ctxs), len(steps)), {"src":src}, depth=1))
+    pmc = pmc_events.get((name.prg, name.tag))
+    if pmc is not None: src += "\n\nPMC:\n"+get_stdout(lambda: print_pmc(pmc))
+    steps.append(create_step(kernel.name if kernel is not None else name.prg, ("/counters", len(ctxs), len(steps)), {"src":src}, depth=1))
     for cu in prg_cu:
       events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]
-      steps.append(create_step(cu, ("/counters", len(ctxs), len(steps)),
+      steps.append(create_step(f"{cu} {len(cu_events[cu])}", ("/counters", len(ctxs), len(steps)),
                                {"value":get_profile(events, sort_fn=row_tuple), "content_type":"application/octet-stream"}, depth=2))
       for k in sorted(wave_insts.get(cu, []), key=row_tuple):
-        steps.append(create_step(k.replace(cu, ""), ("/sqtt-insts", len(ctxs), len(steps)), wave_insts[cu][k], depth=3))
+        data = wave_insts[cu][k]
+        steps.append(create_step(k.replace(cu, ""), ("/sqtt-insts", len(ctxs), len(steps)), data, loc=data["loc"], depth=3))
   ctxs.append({"name":"Counters", "steps":steps})
 
 def device_sort_fn(k:str) -> tuple[int, str, int]:
-  order = {"USER": 0, "TINY": 1, "DISK": 999}
+  order = {"GC": 0, "USER": 1, "TINY": 2, "DISK": 999}
   dname = k.split()[0]
   dev_rank = next((v for k,v in order.items() if dname.startswith(k)), len(order))
   return (dev_rank, dname, len(k))
@@ -322,7 +327,7 @@ def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
   summary = [{"idx":k, "label":resource_labels[k], "value":v} for k,v in instr_usage.pop(len(rows), {}).items()]
   max_usage = max([sum(v.values()) for i,v in instr_usage.items() if i<len(rows)], default=0)
   for i,usage in instr_usage.items(): rows[i].append([[k, v, (v/max_usage)*100] for k,v in usage.items()])
-  return {"rows":rows, "cols":["Opcode", "Latency", {"title":"HW Resources", "labels":resource_labels}], "summary":summary}
+  return {"rows":rows, "cols":["Instruction", "Latency", {"title":"HW Resources", "labels":resource_labels}], "summary":summary}
 
 def get_stdout(f: Callable) -> str:
   buf = io.StringIO()
@@ -344,7 +349,8 @@ def get_render(i:int, j:int, fmt:str) -> dict:
                           ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode())
     return {"src":disasm_str, "lang":"x86asm"}
   if fmt == "sqtt-insts":
-    columns = ["Instruction", "Clk", "Idle", "Duration", "Stall", "Type"]
+    columns = ["PC", "Instruction", "Hits", "Duration", "Stall", "Type"]
+    inst_columns = ["N", "Clk", "Idle", "Dur", "Stall"]
     # Idle:     The total time gap between the completion of previous instruction and the beginning of the current instruction.
     #           The idle time can be caused by:
     #             * Arbiter loss
@@ -354,13 +360,21 @@ def get_render(i:int, j:int, fmt:str) -> dict:
     # Duration: Total latency in cycles, defined as "Stall time + Issue time" for gfx9 or "Stall time + Execute time" for gfx10+.
     prev_instr = (w:=data["wave"]).begin_time
     pc_to_inst = data["disasm"]
-    rows:list[tuple] = []
+    start_pc = None
+    rows:dict[int, dict] = {}
     for e in w.unpack_insts():
-      rows.append((pc_to_inst[e.pc][0], e.time, max(0, e.time-prev_instr), e.dur, e.stall, str(e.typ).split("_")[-1]))
+      if start_pc is None: start_pc = e.pc
+      if (inst:=rows.get(e.pc)) is None:
+        rows[e.pc] = inst = {"pc":e.pc-start_pc, "inst":pc_to_inst[e.pc][0], "hit_count":0, "dur":0, "stall":0, "type":str(e.typ).split("_")[-1],
+                             "hits":{"cols":inst_columns, "rows":[]}}
+      inst["hit_count"] += 1
+      inst["dur"] += e.dur
+      inst["stall"] += e.stall
+      inst["hits"]["rows"].append((inst["hit_count"]-1, e.time, max(0, e.time-prev_instr), e.dur, e.stall))
       prev_instr = max(prev_instr, e.time + e.dur)
     summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
                {"label":"SIMD", "value":w.simd}, {"label":"Wave ID", "value":w.wave_id}, {"label":"Run number", "value":data["run_number"]}]
-    return {"rows":rows, "cols":columns, "summary":summary}
+    return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "summary":summary}
   return data
 
 # ** HTTP server
