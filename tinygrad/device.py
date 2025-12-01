@@ -238,6 +238,7 @@ class Allocator(Generic[DeviceType]):
   # def _as_buffer(self, src) -> memoryview:
   # def _offset(self, buf, size:int, offset:int):
   # def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
+  def _encode_decode(self, bufout, bufin, desc, hist:list, shape:tuple[int,...], frame_pos:int): raise NotImplementedError("need encdec") # optional
 
 class LRUAllocator(Allocator, Generic[DeviceType]):
   """
@@ -365,16 +366,21 @@ def enumerate_devices_str() -> Generator[str, None, None]:
   for device in ALL_DEVICES:
     compilers_results, any_works = [], False
     try:
-      default_compiler = (d:=Device[device]).compiler
-      for i,(r,c) in enumerate(d.compilers):
-        try:
-          d.renderer, d.compiler = r(), c()
-          with Context(CACHELEVEL=0): test = (Tensor([1,2,3], device=device) * 2).tolist()
-          if test != [2,4,6]: raise ValueError(f"got {test} instead of [2, 4, 6]")
-          default_text = '(default)' if type(default_compiler) is type(d.compiler) else f'({d._get_compiler_envvar(c)}=1 to make default)'
-          compilers_results.append(f"{colored('+', 'green')} {unwrap_class_type(c).__name__} {default_text}")
-          any_works = True
-        except Exception as e: compilers_results.append(f"{colored('-', 'yellow')} {unwrap_class_type(c).__name__}: {e}")
+      d = Device[device]
+      default_renderer, default_compiler = d.renderer, d.compiler
+      try:
+        for r,c in d.compilers:
+          try:
+            d.renderer, d.compiler = r(), c()
+            with Context(CACHELEVEL=0): test = (Tensor([1,2,3], device=device) * 2).tolist()
+            if test != [2,4,6]: raise ValueError(f"got {test} instead of [2, 4, 6]")
+            default_text = '(default)' if type(default_compiler) is type(d.compiler) else f'({d._get_compiler_envvar(c)}=1 to make default)'
+            compilers_results.append(f"{colored('+', 'green')} {unwrap_class_type(c).__name__} {default_text}")
+            any_works = True
+          except Exception as e: compilers_results.append(f"{colored('-', 'yellow')} {unwrap_class_type(c).__name__}: {e}")
+      finally:
+        # put the defaults back!
+        d.renderer, d.compiler = default_renderer, default_compiler
       result = (colored('PASS', 'green') if any_works else f"{colored('FAIL', 'yellow')}") + ''.join([f'\n{" "*16} {x}' for x in compilers_results])
     except Exception as e:
       result = f"{colored('FAIL', 'red')} {e}"

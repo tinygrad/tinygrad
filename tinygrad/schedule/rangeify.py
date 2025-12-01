@@ -117,7 +117,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 # 3.5 cleanups
 
 # Ops.NOOP happens when we have a COPY to the device the Tensor is already on. We treat it like COPY here for MSTACK.
-ALWAYS_RUN_OPS = {Ops.CONTIGUOUS, Ops.COPY, Ops.ASSIGN, Ops.NOOP}
+ALWAYS_RUN_OPS = {Ops.CONTIGUOUS, Ops.COPY, Ops.ASSIGN, Ops.ENCDEC, Ops.NOOP}
 
 # you don't know in the first pass if axes are going to die, this happens if there's an EXPAND to the left
 def cleanup_dead_axes(b:UOp):
@@ -494,7 +494,7 @@ def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
   # NOTE: the hack for COPY is here
   for u in ret.toposort():
     # TODO: this can be wrong if there's multiple of these
-    if u.op in {Ops.COPY, Ops.BUFFER_VIEW}:
+    if u.op in {Ops.COPY, Ops.BUFFER_VIEW, Ops.ENCDEC}:
       ret = u
       break
   else:
