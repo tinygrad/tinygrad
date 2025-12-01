@@ -41,7 +41,7 @@ def get_rewrites(t:RewriteTrace) -> list[dict]:
     steps = [create_step(s.name, ("/rewrites", i, j), loc=s.loc, match_count=len(s.matches), code_line=printable(s.loc), trace=k.tb if j==0 else None,
                          depth=s.depth) for j,s in enumerate(v)]
     # build an index of all places a rule is used
-    match_index:dict[tuple[str, int], tuple[str, int]] = {}
+    match_index:dict[tuple[str, int], list[tuple[str, int]]] = {}
     for j,s in enumerate(v):
       for num,m in enumerate(s.matches):
         if (index:=match_index.get(m[2])) is None: match_index[m[2]] = index = []
