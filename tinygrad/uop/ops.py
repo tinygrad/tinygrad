@@ -1014,11 +1014,6 @@ def upat_interpret(p:UPat, fxn:Callable) -> Callable:
       return None
   return universal_match
 
-def ops_to_bitfield(ops:Iterable[Ops]) -> int:
-  ret = 0
-  for op in ops: ret |= 1 << op.value
-  return ret
-
 class PatternMatcher:
   def __init__(self, patterns:Sequence[tuple[UPat, Callable|tuple]], compiled=bool(getenv("UPAT_COMPILE", 1))):
     if compiled: from tinygrad.uop.upat import upat_compile
@@ -1031,7 +1026,10 @@ class PatternMatcher:
       assert p.op is not None
       if compiled and (match:=upat_compile(p, fxn)) is not None: pass # pylint: disable=E0606
       else: match = upat_interpret(p, fxn)
-      for uop in p.op: self.pdict.setdefault(uop, []).append((p, match, ops_to_bitfield(p.early_reject)))
+      for uop in p.op:
+        lerb = 0
+        for o in p.early_reject: lerb |= 1 << o.value
+        self.pdict.setdefault(uop, []).append((p, match, lerb))
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
@@ -1041,7 +1039,7 @@ class PatternMatcher:
   def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
     if len(pats:=self.pdict.get(uop.op, [])):
       lerb = 0
-      for u in uop.src: lerb |= 1 << u.op.value
+      for u in uop.src: lerb |= 1 << u.op
       for _,match,early_reject in pats:
         if early_reject & lerb != early_reject: continue
         if (ret:=match(uop, ctx)) is not None and ret is not uop: return ret
@@ -1127,27 +1125,29 @@ def profile_matches(fxn:Callable):
 class TrackedPatternMatcher(PatternMatcher):
   def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
     ret = None
-    lerb = ops_to_bitfield([u.op for u in uop.src])
-    for p,match,early_reject in self.pdict.get(uop.op, []):
-      if p not in match_stats: match_stats[p] = [0,0,0.0,0.0]
-      st = time.perf_counter()
-      if early_reject & lerb != early_reject:
+    if len(pats:=self.pdict.get(uop.op, [])):
+      lerb = 0
+      for u in uop.src: lerb |= 1 << u.op.value
+      for p,match,early_reject in pats:
+        if p not in match_stats: match_stats[p] = [0,0,0.0,0.0]
+        st = time.perf_counter()
+        if early_reject & lerb != early_reject:
+          match_stats[p][2] += time.perf_counter()-st
+          continue
+        match_stats[p][1] += 1
+        try: ret = match(uop, ctx)
+        except Exception:
+          if TRACK_MATCH_STATS >= 2 and active_rewrites:
+            active_rewrites[-1].matches.append((uop.trace_num, UOp(Ops.REWRITE_ERROR,src=uop.src,arg=str(sys.exc_info()[1])).trace_num,p.location,0))
+          raise
+        if ret is not None and ret is not uop:
+          match_stats[p][0] += 1
+          match_stats[p][3] += (et:=time.perf_counter()-st)
+          if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", printable(p.location))
+          if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites:
+            active_rewrites[-1].matches.append((uop.trace_num, ret.trace_num, p.location, et))
+          return ret
         match_stats[p][2] += time.perf_counter()-st
-        continue
-      match_stats[p][1] += 1
-      try: ret = match(uop, ctx)
-      except Exception:
-        if TRACK_MATCH_STATS >= 2 and active_rewrites:
-          active_rewrites[-1].matches.append((uop.trace_num, UOp(Ops.REWRITE_ERROR,src=uop.src,arg=str(sys.exc_info()[1])).trace_num,p.location,0))
-        raise
-      if ret is not None and ret is not uop:
-        match_stats[p][0] += 1
-        match_stats[p][3] += (et:=time.perf_counter()-st)
-        if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", printable(p.location))
-        if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites:
-          active_rewrites[-1].matches.append((uop.trace_num, ret.trace_num, p.location, et))
-        return ret
-      match_stats[p][2] += time.perf_counter()-st
     return None
 
 @dataclass(frozen=True)
