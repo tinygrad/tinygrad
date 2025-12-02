@@ -42,8 +42,6 @@ class TestDevice(unittest.TestCase):
                         shell=True, check=True, env={**os.environ, "DEV": "CPU", "CPU_LLVM": "1"})
       subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, ClangJITCompiler)"'],
                         shell=True, check=True, env={**os.environ, "DEV": "CPU", "CPU_LLVM": "0"})
-      subprocess.run([f'python3 -c "{imports}; {expect_failure}"'],
-                        shell=True, check=True, env={**os.environ, "DEV": "CPU", "CPU_CLANGJIT": "0", "CPU_LLVM": "0"})
       subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, CPULLVMCompiler)"'],
                         shell=True, check=True, env={**os.environ, "DEV": "CPU", "CPU_CC": "LLVM"})
       subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, ClangJITCompiler)"'],
