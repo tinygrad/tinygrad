@@ -11,18 +11,32 @@ NUM_WORKERS = 1
 Q_BLOCK_SIZE = 16
 KV_BLOCK_SIZE = 16
 
-def flash_attention(xq, xk, xv, is_causal:bool=False):
+def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False):
+  if len(xq.shape) == 3: xq, xk, xv = xq.unsqueeze(0), xk.unsqueeze(0), xv.unsqueeze(0)
+
+  odtype = xq.dtype
   xq, xk, xv = xq.transpose(1, 2).cast(dtypes.bfloat16), xk.transpose(1, 2).cast(dtypes.bfloat16), xv.transpose(1, 2).cast(dtypes.bfloat16)
+
+  _, N_, _, D_ = xq.shape
+  block_size = max(Q_BLOCK_SIZE, KV_BLOCK_SIZE)
+  assert D_ % block_size == 0, f"embedding dimension must be multiple of block size, got {D_=} {block_size=}"
+
+  # pad to multiple of block size
+  xq = xq.pad(((0, 0), (0, (block_size - (xq.shape[1] % block_size)) % block_size), (0, 0), (0, 0)))
+  xk = xk.pad(((0, 0), (0, (block_size - (xk.shape[1] % block_size)) % block_size), (0, 0), (0, 0)))
+  xv = xv.pad(((0, 0), (0, (block_size - (xv.shape[1] % block_size)) % block_size), (0, 0), (0, 0)))
 
   B, N, H, D = xq.shape
   H_KV = xk.shape[2]
   GROUP_SIZE = H // H_KV
+  print(f"Flash Attention {B=} {N=} {H=} {D=} {H_KV=} {GROUP_SIZE=}")
 
-  def custom_forward(ou:UOp, qu:UOp, ku:UOp, vu:UOp) -> UOp:
+  def custom_forward(ou:UOp, qu:UOp, ku:UOp, vu:UOp, mu:UOp) -> UOp:
+    print(ou.shape, qu.shape, ku.shape, vu.shape)
     with Kernel("fa_custom_forward", (H, N // (Q_BLOCK_SIZE*NUM_WORKERS), B), NUM_WORKERS * WARP_THREADS) as ker:
       warp = ker.warp
 
-      o, q, k, v = GL(ou, ker), GL(qu, ker), GL(ku, ker), GL(vu, ker)
+      o, q, k, v, mask = GL(ou, ker), GL(qu, ker), GL(ku, ker), GL(vu, ker), GL(mu, ker)
 
       head = ker.blockIdx_x
       head_kv = head // GROUP_SIZE
@@ -42,6 +56,9 @@ def flash_attention(xq, xk, xv, is_causal:bool=False):
       o_reg_transposed = ker.rt((Q_BLOCK_SIZE, D), dtypes.float32)
       att_block = ker.rt((KV_BLOCK_SIZE, Q_BLOCK_SIZE), dtypes.float32, TileLayout.COL)
       att_block_mma = ker.rt((KV_BLOCK_SIZE, Q_BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
+      mask_reg = ker.rt((Q_BLOCK_SIZE, KV_BLOCK_SIZE), dtypes.float32)
+      mask_reg_transposed = ker.rt((KV_BLOCK_SIZE, Q_BLOCK_SIZE), dtypes.float32, TileLayout.COL)
+
       max_vec_last = ker.rv(KV_BLOCK_SIZE, dtypes.float32)
       max_vec = ker.rv(KV_BLOCK_SIZE, dtypes.float32)
       norm_vec = ker.rv(KV_BLOCK_SIZE, dtypes.float32)
@@ -70,12 +87,15 @@ def flash_attention(xq, xk, xv, is_causal:bool=False):
         k_reg_transposed = warp.transpose(k_reg_transposed, k_reg)
         att_block = warp.mma_AtB(att_block, k_reg_transposed, q_reg_transposed)
 
-        # mask for causal
-        if is_causal:
-          q_base = q_seq * Q_BLOCK_SIZE + (warp.laneid % 16)
-          kv_base = kv_idx * KV_BLOCK_SIZE + (warp.laneid // 16) * 4
-          att_block = warp.map(att_block,
-                               lambda x, idx: ((kv_base + idx[0]*16 + idx[2]) > (q_base + idx[1]*16)).alu(Ops.WHERE, UOp.ufix(x._uop, -math.inf), x))
+        # apply attention mask
+        # mask_reg = warp.load(mask_reg, mask, (), (batch, 0, q_seq, kv_idx))
+        # mask_reg_transposed = warp.transpose(mask_reg_transposed, mask_reg)
+        # att_block += mask_reg_transposed
+
+        q_base = q_seq * Q_BLOCK_SIZE + (warp.laneid % 16)
+        kv_base = kv_idx * KV_BLOCK_SIZE + (warp.laneid // 16) * 4
+        att_block = warp.map(att_block,
+                             lambda x, idx: ((kv_base + idx[0]*16 + idx[2]) > (q_base + idx[1]*16)).alu(Ops.WHERE, UOp.ufix(x._uop, -math.inf), x))
 
         # softmax
         max_vec_last = warp.copy(max_vec_last.after(kv_idx), max_vec)
@@ -114,4 +134,15 @@ def flash_attention(xq, xk, xv, is_causal:bool=False):
     ck = Tensor.custom_kernel(grad_q, grad_k, grad_v, Tensor(grad), q, k, v, fxn=custom_backward)[:3]
     return (None, ck[0].uop, ck[1].uop, ck[2].uop)
 
-  return Tensor.empty_like(xq).custom_kernel(xq, xk, xv, fxn=custom_forward, grad_fxn=grad)[0].transpose(1, 2)
+  if is_causal:
+    if attn_mask is not None: raise RuntimeError("cannot set attn_mask when is_causal=True")
+    attn_mask = Tensor.ones((B, 1, N, N), requires_grad=False, device=xq.device, dtype=dtypes.bool).tril()
+  if attn_mask is not None:
+    if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
+  else:
+    attn_mask = Tensor.zeros((B, 1, N, N), requires_grad=False, device=xq.device, dtype=dtypes.float32)
+
+  attn = Tensor.empty_like(xq).custom_kernel(xq, xk, xv, attn_mask, fxn=custom_forward, grad_fxn=grad)[0]
+  attn = attn[:, :N_, :, :D_]
+
+  return attn.transpose(1, 2).cast(odtype)
