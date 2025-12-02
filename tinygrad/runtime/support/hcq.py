@@ -1,10 +1,10 @@
 from __future__ import annotations
-from typing import cast, Callable, Type, TypeVar, Generic, Any, Sequence
+from typing import cast, Callable, Type, TypeVar, Generic, Any
 import contextlib, decimal, statistics, time, ctypes, array, os, struct, collections, functools
 try: import fcntl # windows misses that
 except ImportError: fcntl = None #type:ignore[assignment]
 from tinygrad.helpers import PROFILE, getenv, to_mv, ProfileRangeEvent, select_first_inited, unwrap
-from tinygrad.device import BufferSpec, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent, CompilerPairT
+from tinygrad.device import BufferSpec, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent, CompilerSet
 from tinygrad.uop.ops import sym_infer, sint, UOp
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.memory import BumpAllocator
@@ -353,7 +353,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
   signal_pool: dict[str, list[HCQBuffer]] = collections.defaultdict(list) # per peer group
   cpu_devices: list[HCQCompiled] = []
 
-  def __init__(self, device:str, allocator:HCQAllocatorBase, compilers:Sequence[CompilerPairT], runtime, signal_t:Type[SignalType],
+  def __init__(self, device:str, allocator:HCQAllocatorBase, compilers:CompilerSet, runtime, signal_t:Type[SignalType],
                comp_queue_t:Callable[[], HWQueue], copy_queue_t:Callable[[], HWQueue]|None=None, kernargs_size=(16 << 20), sigalloc_size=0x1000):
     self.device_id:int = int(device.split(":")[1]) if ":" in device else 0
 
