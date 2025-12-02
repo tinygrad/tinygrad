@@ -1287,10 +1287,13 @@ impl<'a> Thread<'a> {
                                             if s0.is_nan() || s1.is_nan() || s2.is_nan() {
                                                 f32::min(f32::min(s0, s1), s2)
                                             } else {
-                                                match f32::max(f32::max(s0, s1), s2) {
-                                                  m if m == s0 => f32::max(s1, s2),
-                                                  m if m == s1 => f32::max(s0, s2),
-                                                  _ => f32::max(s0, s1),
+                                                let max = f32::max(f32::max(s0, s1), s2);
+                                                if max == s0 {
+                                                    f32::max(s1, s2)
+                                                } else if max == s1 {
+                                                    f32::max(s0, s2)
+                                                } else {
+                                                    f32::max(s0, s1)
                                                 }
                                             }
                                         },
