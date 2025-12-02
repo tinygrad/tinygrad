@@ -1,6 +1,6 @@
 import unittest
 
-from tinygrad import Tensor, Device
+from tinygrad import Device
 from tinygrad.helpers import fetch
 from extra.hevc.hevc import parse_hevc_file_headers, nv_gpu
 
