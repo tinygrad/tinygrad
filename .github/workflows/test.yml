@@ -1,7 +1,7 @@
 name: Unit Tests
 env:
   # increment this when downloads substantially change to avoid the internet
-  CACHE_VERSION: '13'
+  CACHE_VERSION: '14'
   CAPTURE_PROCESS_REPLAY: 1
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PYTHONPATH: ${{ github.workspace }}
@@ -263,7 +263,9 @@ jobs:
     - name: Check Device.DEFAULT
       run: python -c "from tinygrad import Device; assert Device.DEFAULT == 'CPU', Device.DEFAULT"
     - name: Run unit tests
-      run: CPU=1 python -m pytest -n=auto test/unit/ --durations=20
+      run: |
+        CPU=1 python test/unit/test_device.py TestRunAsModule.test_module_runs
+        CPU=1 python -m pytest -n=auto test/unit/ --durations=20 --deselect=test/unit/test_device.py::TestRunAsModule::test_module_runs
     - name: Run targetted tests on NULL backend
       run: NULL=1 python3 -m unittest test.test_multitensor.TestMultiTensor.test_data_parallel_resnet_train_step test/device/test_null.py
     # TODO: too slow
