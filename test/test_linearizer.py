@@ -517,7 +517,7 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
   device = real_bufs[0].device
   wanna_output = [np.array(x).flatten() for x in wanna_output]
 
-  def get_prg(opts): return CompiledRunner(replace(get_program(realized_ast, opts=opts), device=device))
+  def get_prg(opts): return CompiledRunner(replace(get_program(realized_ast, renderer=Device[Device.DEFAULT].renderer, opts=opts), device=device))
 
   def check_opt(opts):
     prg = get_prg(opts=opts)
