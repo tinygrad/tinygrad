@@ -28,39 +28,39 @@ class TestDevice(unittest.TestCase):
     self.assertEqual(Device.canonicalize(None), device)
     Device.DEFAULT = device
 
-  # @unittest.skipIf(WIN and CI, "skipping windows test") # TODO: subproccess causes memory violation?
-  # def test_env_overwrite_default_compiler(self):
-  #   expect_failure = "\ntry: assert Device[Device.DEFAULT].compiler is None;\nexcept Exception: pass"
+  @unittest.skipIf(WIN and CI, "skipping windows test") # TODO: subproccess causes memory violation?
+  def test_env_overwrite_default_compiler(self):
+    expect_failure = "\ntry: assert Device[Device.DEFAULT].compiler is None;\nexcept Exception: pass"
 
-  #   if Device.DEFAULT == "CPU":
-  #     from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler
-  #     try: _, _ = CPULLVMCompiler(), ClangJITCompiler()
-  #     except Exception as e: self.skipTest(f"skipping compiler test: not all compilers: {e}")
+    if Device.DEFAULT == "CPU":
+      from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler
+      try: _, _ = CPULLVMCompiler(), ClangJITCompiler()
+      except Exception as e: self.skipTest(f"skipping compiler test: not all compilers: {e}")
 
-  #     imports = "from tinygrad import Device; from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler"
-  #     subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, CPULLVMCompiler)"'],
-  #                       shell=True, check=True, env={**os.environ, "DEV": "CPU", "CPU_LLVM": "1"})
-  #     subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, ClangJITCompiler)"'],
-  #                       shell=True, check=True, env={**os.environ, "DEV": "CPU", "CPU_LLVM": "0"})
-  #     subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, CPULLVMCompiler)"'],
-  #                       shell=True, check=True, env={**os.environ, "DEV": "CPU", "CPU_CC": "LLVM"})
-  #     subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, ClangJITCompiler)"'],
-  #                       shell=True, check=True, env={**os.environ, "DEV": "CPU", "CPU_CC": "CLANGJIT"})
-  #   elif Device.DEFAULT == "AMD":
-  #     from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler
-  #     try: _, _ = HIPCompiler(Device[Device.DEFAULT].arch), AMDLLVMCompiler(Device[Device.DEFAULT].arch)
-  #     except Exception as e: self.skipTest(f"skipping compiler test: not all compilers: {e}")
+      imports = "from tinygrad import Device; from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler"
+      subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, CPULLVMCompiler)"'],
+                        shell=True, check=True, env={**os.environ, "DEV": "CPU", "CPU_LLVM": "1"})
+      subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, ClangJITCompiler)"'],
+                        shell=True, check=True, env={**os.environ, "DEV": "CPU", "CPU_LLVM": "0"})
+      subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, CPULLVMCompiler)"'],
+                        shell=True, check=True, env={**os.environ, "DEV": "CPU", "CPU_CC": "LLVM"})
+      subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, ClangJITCompiler)"'],
+                        shell=True, check=True, env={**os.environ, "DEV": "CPU", "CPU_CC": "CLANGJIT"})
+    elif Device.DEFAULT == "AMD":
+      from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler
+      try: _, _ = HIPCompiler(Device[Device.DEFAULT].arch), AMDLLVMCompiler(Device[Device.DEFAULT].arch)
+      except Exception as e: self.skipTest(f"skipping compiler test: not all compilers: {e}")
 
-  #     imports = "from tinygrad import Device; from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler"
-  #     subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, AMDLLVMCompiler)"'],
-  #                       shell=True, check=True, env={**os.environ, "DEV": "AMD", "AMD_LLVM": "1"})
-  #     subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, HIPCompiler)"'],
-  #                       shell=True, check=True, env={**os.environ, "DEV": "AMD", "AMD_LLVM": "0"})
-  #     subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, HIPCompiler)"'],
-  #                       shell=True, check=True, env={**os.environ, "DEV": "AMD", "AMD_HIP": "1"})
-  #     subprocess.run([f'python3 -c "{imports}; {expect_failure}"'],
-  #                       shell=True, check=True, env={**os.environ, "DEV": "AMD", "AMD_HIP": "1", "AMD_LLVM": "1"})
-  #   else: self.skipTest("only run on CPU/AMD")
+      imports = "from tinygrad import Device; from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler"
+      subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, AMDLLVMCompiler)"'],
+                        shell=True, check=True, env={**os.environ, "DEV": "AMD", "AMD_LLVM": "1"})
+      subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, HIPCompiler)"'],
+                        shell=True, check=True, env={**os.environ, "DEV": "AMD", "AMD_LLVM": "0"})
+      subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, HIPCompiler)"'],
+                        shell=True, check=True, env={**os.environ, "DEV": "AMD", "AMD_HIP": "1"})
+      subprocess.run([f'python3 -c "{imports}; {expect_failure}"'],
+                        shell=True, check=True, env={**os.environ, "DEV": "AMD", "AMD_HIP": "1", "AMD_LLVM": "1"})
+    else: self.skipTest("only run on CPU/AMD")
 
   # @unittest.skipIf((WIN and CI) or (not Device.DEFAULT == "CPU"), "skipping windows test") # TODO: subproccess causes memory violation?
   # def test_env_online(self):
