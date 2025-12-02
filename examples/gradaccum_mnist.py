@@ -19,26 +19,32 @@ if __name__ == "__main__":
 
   X_train, Y_train, X_test, Y_test = nn.datasets.mnist()
   model = Model()
-  buffers, params = partition(nn.state.get_parameters(model), lambda x: x.requires_grad is False)
+
+  params = nn.state.get_parameters(model)
+
+  # set requires grad on the ones we need gradients of
+  for x in params:
+    if x.requires_grad is None: x.requires_grad_()
+
+  # split params (with grads) and buffers (without)
+  params, buffers = partition(nn.state.get_parameters(model), lambda x: x.requires_grad)
   print(f"params: {len(params)} buffers: {len(buffers)}")
 
-  # assign all gradients in order
-  pos_params = list(itertools.accumulate(params, lambda x,y: x+y.numel(), initial=0))
-  grads = Tensor.zeros(pos_params[-1], dtype=dtypes.float, requires_grad=False).contiguous()
-  for p,pos in zip(params, pos_params): p.grad = grads[pos:pos+p.numel()]
-
   # optim params
-  adam_m = Tensor.zeros_like(grads, device="CPU").contiguous()
-  adam_v = Tensor.zeros_like(grads, device="CPU").contiguous()
+  pos_params = list(itertools.accumulate(params, lambda x,y: x+y.numel(), initial=0))
+  adam_m = Tensor.zeros(pos_params[-1], device="CPU").contiguous()
+  adam_v = Tensor.zeros(pos_params[-1], device="CPU").contiguous()
   adam_b1_t = Tensor.ones((1,), dtype=dtypes.float32, device="CPU", requires_grad=False)
   adam_b2_t = Tensor.ones((1,), dtype=dtypes.float32, device="CPU", requires_grad=False)
   adam_params = [adam_m, adam_v, adam_b1_t, adam_b2_t]
 
-  @TinyJit
+  #@TinyJit
   @Tensor.train()
-  def microbatch():
+  def microbatch(grads:Tensor):
     samples = Tensor.randint(BS // ACC_STEPS, high=X_train.shape[0])
-    return model(X_train[samples]).sparse_categorical_crossentropy(Y_train[samples]).backward()
+    ret = model(X_train[samples]).sparse_categorical_crossentropy(Y_train[samples]).backward()
+    # concat the grads
+    return ret, grads+Tensor.cat(*[t.flatten() for t in params], dim=0)
 
   @TinyJit
   def get_test_acc() -> Tensor: return (model(X_test).argmax(axis=1) == Y_test).mean()*100
@@ -46,7 +52,12 @@ if __name__ == "__main__":
   test_acc = float('nan')
   for i in (t:=trange(getenv("STEPS", 20))):
     # microbatch sets the gradients
-    loss = sum([microbatch() for _ in range(ACC_STEPS)])/ACC_STEPS
+    grads = Tensor.zeros(pos_params[-1]).contiguous()
+    losses = []
+    for _ in range(ACC_STEPS):
+      uloss, grads = microbatch(grads)
+      losses.append(uloss)
+    loss = sum(losses) / ACC_STEPS
     if i%10 == 9: test_acc = get_test_acc().item()
     t.set_description(f"loss: {loss.item():6.2f} test_accuracy: {test_acc:5.2f}%")
 
