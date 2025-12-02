@@ -3020,8 +3020,8 @@ class Tensor(OpMixin):
     ```
     """
     if min_ is None and max_ is None: raise RuntimeError("at least one of 'min_' or 'max_' must not be None")
-    ret = self.maximum(min_) if min_ is not None else self
-    return ret.minimum(max_) if max_ is not None else ret
+    ret = (self < min_).where(min_, self) if min_ is not None else self
+    return (ret > max_).where(max_, ret) if max_ is not None else ret
 
   def clip(self, min_=None, max_=None) -> Tensor:
     """
