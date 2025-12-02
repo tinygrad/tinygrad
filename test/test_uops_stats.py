@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor
 from tinygrad.helpers import getenv, GlobalCounters, EMULATE
-from tinygrad.engine.realize import lower_schedule_item, ProgramSpec, get_program
+from tinygrad.engine.realize import lower_schedule_item, ProgramSpec, get_program as _get_program
 from tinygrad.renderer import Estimates
 from tinygrad.codegen import full_rewrite
 from tinygrad.uop.ops import Ops, UOp
@@ -9,6 +9,9 @@ from tinygrad.dtype import dtypes
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.device import Device
 from tinygrad.renderer.ptx import PTXRenderer
+
+def get_program(*args, **kwargs):
+  return _get_program(*args, renderer=kwargs.pop("renderer", Device[Device.DEFAULT].renderer), **kwargs)
 
 def flops_mem(uops, ignore_indexing=False):
   est = Estimates.from_uops(uops, ignore_indexing)

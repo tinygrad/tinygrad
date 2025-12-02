@@ -5,7 +5,9 @@ from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.engine.realize import get_program
 from tinygrad.helpers import AMX
 
-@unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
+dev = Device[Device.DEFAULT]
+
+@unittest.skipUnless(dev.renderer.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):
   @staticmethod
   def count_float4(uops: list[UOp], n=4):
@@ -24,7 +26,7 @@ class TestFloat4(unittest.TestCase):
     s = c.schedule()[0]
     realized_ast = s.ast
     opts_to_apply = [Opt(op=OptOps.UPCAST, axis=0, arg=4)]
-    program = get_program(realized_ast, Device[Device.DEFAULT].renderer, opts=opts_to_apply)
+    program = get_program(realized_ast, dev.renderer, opts=opts_to_apply)
 
     assert TestFloat4.count_float4(program.uops) == (2, 1)
 
@@ -64,7 +66,7 @@ class TestFloat4(unittest.TestCase):
     s = c.schedule()[0]
     realized_ast = s.ast
     opts_to_apply = [Opt(op=OptOps.UPCAST, axis=0, arg=4)]
-    program = get_program(realized_ast, Device[Device.DEFAULT].renderer, opts=opts_to_apply)
+    program = get_program(realized_ast, dev.renderer, opts=opts_to_apply)
 
     assert TestFloat4.count_float4(program.uops) == (0, 1)
 
@@ -132,7 +134,7 @@ class TestFloat4(unittest.TestCase):
     # since the top axis is not contiguous.
 
     s = c.schedule()[0]
-    uops = get_program(s.ast, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=4)]).uops
+    uops = get_program(s.ast, renderer=dev.renderer, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=4)]).uops
 
     assert TestFloat4.count_float4(uops) == (0, 1)
 
@@ -144,7 +146,7 @@ class TestFloat4(unittest.TestCase):
     # should float4 b but not a
 
     s = c.schedule()[0]
-    uops = get_program(s.ast, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=4)]).uops
+    uops = get_program(s.ast, renderer=dev.renderer, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=4)]).uops
 
     assert TestFloat4.count_float4(uops) == (1, 1)
 

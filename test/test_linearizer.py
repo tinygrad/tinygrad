@@ -7,12 +7,15 @@ from tinygrad.codegen.gpudims import get_grouped_dims
 from tinygrad.uop.ops import UOp, Ops, GroupOp, AxisType, PatternMatcher, graph_rewrite, UPat
 from tinygrad.device import Device, Buffer, is_dtype_supported
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner, get_program
+from tinygrad.engine.realize import run_schedule, lower_schedule, CompiledRunner, get_program as _get_program
 from tinygrad.helpers import Context, flatten, dedup, TC_SELECT, TC_OPT, getenv
 from tinygrad.dtype import DType, dtypes, PtrDType, AddrSpace
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer
 MOCKGPU = getenv("MOCKGPU")
+
+def get_program(*args, **kwargs):
+  return _get_program(*args, renderer=kwargs.pop("renderer", Device[Device.DEFAULT].renderer), **kwargs)
 
 from tinygrad.uop.ops import print_uops # noqa: F401 # pylint: disable=unused-import
 
