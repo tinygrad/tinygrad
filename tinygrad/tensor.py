@@ -12,7 +12,7 @@ from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
 from tinygrad.mixin.movement import _align_left
 from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop, Variable
-from tinygrad.engine.schedule import ScheduleItem, complete_create_schedule_with_vars
+from tinygrad.engine.schedule import ScheduleItem, cached_create_schedule_with_vars
 from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import run_schedule
 
@@ -27,7 +27,7 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str) -> None:
     # get tensors in scope
     in_scope: dict[UOp, bool] = {}
     def visitor(node: UOp) -> bool: return True if node in applied_map else any(in_scope.get(s, False) for s in node.src)
-    scope_tensors = [t for tref in list(all_tensors) if (t:=tref()) is not None and t.uop.topovisit(visitor, in_scope)]
+    scope_tensors: list[Tensor] = [t for tref in list(all_tensors) if (t:=tref()) is not None and t.uop.topovisit(visitor, in_scope)]
 
     # get all Tensors and apply the map
     sink = UOp.sink(*[t.uop for t in scope_tensors])
@@ -242,7 +242,9 @@ class Tensor(OpMixin):
     NOTE: A Tensor can only be scheduled once.
     """
     big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
-    becomes_map, schedule, var_vals = complete_create_schedule_with_vars(big_sink)
+
+    # this is where the schedule cache should go
+    becomes_map, schedule, var_vals = cached_create_schedule_with_vars(big_sink)
     _apply_map_to_tensors(becomes_map, name="Apply Schedule Map")
     return schedule, var_vals
 

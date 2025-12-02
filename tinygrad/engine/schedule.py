@@ -2,10 +2,10 @@ import time
 from typing import cast
 from dataclasses import dataclass, field, replace
 from collections import deque
-from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass
+from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.helpers import Metadata, DEBUG, cpu_profile, TracingKey, SPEC, flatten
+from tinygrad.helpers import Metadata, DEBUG, cpu_profile, TracingKey, SPEC, flatten, pluralize
 
 # **** ScheduleItem return type
 
@@ -140,7 +140,39 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
 
   if (DEBUG >= 1 and len(schedule) > 1) or DEBUG >= 3:
     print(f"scheduled {len(schedule)} kernels in {(time.perf_counter()-st)*1000:.2f} ms ({len(UOpMetaClass.ucache)} uops in cache)")
-
-  for si in schedule:
-    print(si.bufs)
   return tensor_map, schedule, var_vals
+
+# **** schedule cache ****
+
+schedule_cache = {}
+
+def replace_input_buffer(ctx:dict[UOp, UOp], b:UOp):
+  if b not in ctx:
+    ctx[b] = b.replace(src=(UOp(Ops.LUNIQUE, arg=len(ctx)),)+b.src[1:])
+  return ctx[b]
+
+from tinygrad.uop.ops import PatternMatcher, UPat, graph_rewrite
+pm_pre_sched_cache = PatternMatcher([
+  # replace input buffers
+  (UPat(Ops.BUFFER, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE)), name="b"), replace_input_buffer),
+  # remove unique consts
+  (UPat(Ops.CONST, src=(UPat(Ops.DEVICE), UPat(Ops.UNIQUE)), name="c"), lambda c: c.replace(src=c.src[:1])),
+])
+
+@track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[1]))}", True)
+def cached_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], list[ScheduleItem], dict[str, int]]:
+  # replace all buffers with placeholders
+  input_buffers: dict[UOp, UOp] = {}
+  big_sink_cache = graph_rewrite(big_sink, pm_pre_sched_cache, ctx=input_buffers, name="rewrite for sched cache")
+
+  if (ret:=schedule_cache.get(big_sink_cache.key, None)) is not None:
+    print("SC HIT", big_sink_cache.key)
+  else :
+    print("SC MISS")
+    schedule_cache[big_sink_cache.key] = "HIT"
+
+  ret = complete_create_schedule_with_vars(big_sink)
+
+  # put input buffers back and allocate
+
+  return ret
