@@ -492,6 +492,8 @@ class TestNN(unittest.TestCase):
     load_state_dict(layer, state_dict)
     state_dict['num_batches_tracked'] = Tensor.empty()
     load_state_dict(layer, state_dict)
+    layer.num_batches_tracked = Tensor.ones(1)
+    load_state_dict(layer, state_dict)
 
   @unittest.skipIf(not_support_multi_device(), "no multi")
   def test_load_state_dict_sharded_model(self):
