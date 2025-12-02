@@ -14,7 +14,6 @@ try:
   from tinygrad.uop.ops import UOp, Ops, KernelInfo
   from tinygrad.codegen.opt import Opt
   from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm, BEAM
-  from tinygrad.device import Device
 except ImportError as e:
   print(repr(e))
   exit(int(ASSERT_DIFF))
