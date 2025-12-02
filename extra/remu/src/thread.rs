@@ -1266,7 +1266,7 @@ impl<'a> Thread<'a> {
                             }
 
                             let ret = match op {
-                                257 | 259 | 299 | 260 | 261 | 264 | 272 | 392 | 426 | 430 | 531 | 537 | 540 | 551 | 567 | 796 => {
+                                257 | 259 | 299 | 260 | 261 | 264 | 272 | 392 | 426 | 430 | 531 | 537 | 540 | 543 | 551 | 567 | 796 => {
                                     let s0 = f32::from_bits(s0).negate(0, neg).absolute(0, abs);
                                     let s1 = f32::from_bits(s1).negate(1, neg).absolute(1, abs);
                                     let s2 = f32::from_bits(s2).negate(2, neg).absolute(2, abs);
@@ -1281,6 +1281,17 @@ impl<'a> Thread<'a> {
                                         430 => 1.0 / f32::sqrt(s0),
                                         531 => f32::mul_add(s0, s1, s2),
                                         537 => f32::min(f32::min(s0, s1), s2),
+                                        543 => {
+                                            if s0.is_nan() || s1.is_nan() || s2.is_nan() {
+                                                f32::min(f32::min(s0, s1), s2)
+                                            } else {
+                                                match f32::max(f32::max(s0, s1), s2) {
+                                                  m if m == s0 => f32::max(s1, s2),
+                                                  m if m == s1 => f32::max(s0, s2),
+                                                  _            => f32::max(s0, s1),
+                                                }
+                                            }
+                                        },
                                         540 => f32::max(f32::max(s0, s1), s2),
                                         551 => s2 / s1,
                                         567 => {
