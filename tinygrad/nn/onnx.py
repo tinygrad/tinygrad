@@ -710,7 +710,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
 
   def Pad(x:Tensor, pads:list[int], constant_value:ConstType|None=None, axes:list[int]|None=None,
           mode:Literal["constant", "reflect", "edge", "wrap"]="constant", value=0):
-    value = constant_value or value
+    value = _resolve_const(constant_value or value)
     axes = axes or list(range(x.ndim))
     real_pads = [0] * (x.ndim*2)
     for i,axis in enumerate(axes): real_pads[axis%x.ndim], real_pads[axis%x.ndim+x.ndim] = pads[i], pads[i+len(axes)]

@@ -200,6 +200,8 @@ DEBUG_RANGEIFY = ContextVar("DEBUG_RANGEIFY", 0)
 TUPLE_ORDER = ContextVar("TUPLE_ORDER", 1)
 # set to 0 to disable the compiler cache
 CCACHE = ContextVar("CCACHE", 1)
+# allow tf32 to be used on NVIDIA GPUs
+ALLOW_TF32 = ContextVar("ALLOW_TF32", 0)
 
 @dataclass(frozen=True)
 class Metadata:
