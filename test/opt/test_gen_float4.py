@@ -35,7 +35,8 @@ class TestFloat4(unittest.TestCase):
     c = a + b
 
     s = c.schedule()[0]
-    uops = get_program(s.ast, renderer=Device[Device.DEFAULT].renderer, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=2)]).uops
+    uops = get_program(s.ast, renderer=Device[Device.DEFAULT].renderer,
+                       opts=[Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=2)]).uops
     assert TestFloat4.count_float4(uops) == (4, 2)
 
   @unittest.skipUnless(Device.DEFAULT in {"CPU"} and AMX, "Only CPU with AMX upcasts float up to size 16")
@@ -46,7 +47,8 @@ class TestFloat4(unittest.TestCase):
       c = a + b
 
       s = c.schedule()[0]
-      return get_program(s.ast, renderer=Device[Device.DEFAULT].renderer, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=shift)]).uops
+      return get_program(s.ast, renderer=Device[Device.DEFAULT].renderer,
+                         opts=[Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=shift)]).uops
 
     sizes = [12, 8, 16]
     shifts = [3, 2, 4]
@@ -75,7 +77,8 @@ class TestFloat4(unittest.TestCase):
     c = a + b
 
     s = c.schedule()[0]
-    uops = get_program(s.ast, renderer=Device[Device.DEFAULT].renderer, opts=[Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.UPCAST, axis=1, arg=2)]).uops
+    uops = get_program(s.ast, renderer=Device[Device.DEFAULT].renderer,
+                       opts=[Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.UPCAST, axis=1, arg=2)]).uops
 
     assert TestFloat4.count_float4(uops) == (0, 2)
 
@@ -87,7 +90,8 @@ class TestFloat4(unittest.TestCase):
       c = a + b
 
       s = c.schedule()[0]
-      return get_program(s.ast, renderer=Device[Device.DEFAULT].renderer, opts=[Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.UPCAST, axis=1, arg=shift)]).uops
+      return get_program(s.ast, renderer=Device[Device.DEFAULT].renderer,
+                         opts=[Opt(op=OptOps.UPCAST, axis=1, arg=4), Opt(op=OptOps.UPCAST, axis=1, arg=shift)]).uops
 
     sizes = [13, 9, 17]
     shifts = [3, 2, 4]
@@ -119,7 +123,8 @@ class TestFloat4(unittest.TestCase):
     # UPDATE: now we do this fusion
 
     s = c.schedule()[0]
-    uops = get_program(s.ast, renderer=Device[Device.DEFAULT].renderer, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.UNROLL, axis=0, arg=0)]).uops
+    uops = get_program(s.ast, renderer=Device[Device.DEFAULT].renderer,
+                       opts=[Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.UNROLL, axis=0, arg=0)]).uops
 
     assert TestFloat4.count_float4(uops) in {(0,1), (1,1)}
 
