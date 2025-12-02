@@ -75,7 +75,7 @@ class TestOnnxModel(unittest.TestCase):
     from tinygrad import Tensor
     Swish = onnx_ops['Swish']
     x = Tensor([-1.0, 0.0, 1.0])
-    out = Swish(x) 
+    out = Swish(x)
     expected = x.numpy() / (1 + np.exp(-1 * x.numpy()))
     assert np.allclose(out.numpy(), expected)
     out2 = Swish(x, alpha=0.5)
