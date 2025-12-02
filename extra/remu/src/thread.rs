@@ -1024,7 +1024,7 @@ impl<'a> Thread<'a> {
                     let vdst = (instr & 0xff) as usize;
                     let abs = ((instr >> 8) & 0x7) as usize;
                     let opsel = ((instr >> 11) & 0xf) as usize;
-                    let cm = (instr >> 15) & 0x1;
+                    let cm = ((instr >> 15) & 0x1) != 0;
 
                     let s = |n: usize| ((instr >> n) & 0x1ff) as usize;
                     let src = (s(32), s(41), s(50));
@@ -1032,7 +1032,9 @@ impl<'a> Thread<'a> {
                     let omod = (instr >> 59) & 0x3;
                     let neg = ((instr >> 61) & 0x7) as usize;
                     assert_eq!(omod, 0);
-                    assert_eq!(cm, 0);
+                    if op != 272 && cm {
+                        return todo_instr!(op); // TODO: add VOP3 clamp for all ops
+                    }
                     assert_eq!(opsel, 0);
 
                     match op {
@@ -1275,7 +1277,7 @@ impl<'a> Thread<'a> {
                                         260 => s0 - s1,
                                         261 => s1 - s0,
                                         264 => s0 * s1,
-                                        272 => f32::max(s0, s1),
+                                        272 => f32::max(s0, s1).clmp(cm),
                                         299 => f32::mul_add(s0, s1, f32::from_bits(self.vec_reg[vdst])),
                                         426 => s0.recip(),
                                         430 => 1.0 / f32::sqrt(s0),
@@ -1288,7 +1290,7 @@ impl<'a> Thread<'a> {
                                                 match f32::max(f32::max(s0, s1), s2) {
                                                   m if m == s0 => f32::max(s1, s2),
                                                   m if m == s1 => f32::max(s0, s2),
-                                                  _            => f32::max(s0, s1),
+                                                  _ => f32::max(s0, s1),
                                                 }
                                             }
                                         },
