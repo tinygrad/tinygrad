@@ -62,7 +62,7 @@ class TestDevice(unittest.TestCase):
                         shell=True, check=True, env={**os.environ, "DEV": "AMD", "AMD_HIP": "1", "AMD_LLVM": "1"})
     else: self.skipTest("only run on CPU/AMD")
 
-  @unittest.skipIf(WIN and CI and not Device.DEFAULT == "CPU", "skipping windows test") # TODO: subproccess causes memory violation?
+  @unittest.skipIf((WIN and CI) or (not Device.DEFAULT == "CPU"), "skipping windows test") # TODO: subproccess causes memory violation?
   def test_env_online(self):
     from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler
     try: _, _ = CPULLVMCompiler(), ClangJITCompiler()
