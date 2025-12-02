@@ -1,6 +1,6 @@
 import itertools
 from examples.beautiful_mnist import Model
-from tinygrad import nn, Tensor, TinyJit, dtypes, Device
+from tinygrad import nn, Tensor, dtypes, Device
 from tinygrad.helpers import getenv, trange, partition
 
 # TODO: refactor this into optim/onnx
@@ -22,10 +22,6 @@ if __name__ == "__main__":
 
   params = nn.state.get_parameters(model)
 
-  # realize all params (fixes JIT)
-  for p in params: p.assign(p.contiguous())
-  Tensor.realize(*params)
-
   # set requires grad on the ones we need gradients of
   for x in params:
     if x.requires_grad is None: x.requires_grad_()
@@ -42,28 +38,25 @@ if __name__ == "__main__":
   adam_b2_t = Tensor.ones((1,), dtype=dtypes.float32, device="CPU", requires_grad=False)
   adam_params = [adam_m, adam_v, adam_b1_t, adam_b2_t]
 
-  #@TinyJit
   @Tensor.train()
-  def microbatch():
+  def microbatch(loss: Tensor, grads: Tensor):
     samples = Tensor.randint(BS // ACC_STEPS, high=X_train.shape[0])
     for t in params: t.grad = None
-    ret = model(X_train[samples]).sparse_categorical_crossentropy(Y_train[samples]).backward()
-    # concat the grads
-    return ret, Tensor.cat(*[t.grad.contiguous().flatten() for t in params], dim=0).contiguous()
+    # divide by ACC_STEPS at the loss
+    uloss = (model(X_train[samples]).sparse_categorical_crossentropy(Y_train[samples]) / ACC_STEPS).backward()
+    # concat the grads and assign them
+    loss.assign(loss + uloss)
+    grads.assign(grads + Tensor.cat(*[t.grad.contiguous().flatten() for t in params], dim=0))
+    Tensor.realize(loss, grads)
 
-  @TinyJit
   def get_test_acc() -> Tensor: return (model(X_test).argmax(axis=1) == Y_test).mean()*100
 
   test_acc = float('nan')
   for i in (t:=trange(getenv("STEPS", 70))):
     # microbatch sets the gradients
+    loss = Tensor.zeros(tuple()).contiguous()
     grads = Tensor.zeros(pos_params[-1]).contiguous()
-    loss = 0.0
-    for _ in range(ACC_STEPS):
-      uloss, ugrads = microbatch()
-      grads = grads + ugrads / ACC_STEPS
-      Tensor.realize(uloss, grads)
-      loss = loss + uloss.item() / ACC_STEPS
+    for _ in range(ACC_STEPS): microbatch(loss, grads)
 
     # run optimizer (on CPU, where adam params live)
     delta = functional_adam(grads.to("CPU"), adam_m, adam_v, adam_b1_t, adam_b2_t)
@@ -77,4 +70,4 @@ if __name__ == "__main__":
 
     # eval
     if i%10 == 9: test_acc = get_test_acc().item()
-    t.set_description(f"loss: {loss:6.2f} test_accuracy: {test_acc:5.2f}%")
+    t.set_description(f"loss: {loss.item():6.2f} test_accuracy: {test_acc:5.2f}%")
