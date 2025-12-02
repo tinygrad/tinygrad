@@ -14,7 +14,7 @@ from tinygrad.codegen.opt import Opt
 # **************** Program Creation ****************
 
 @track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.name, (ret.function_name, ret.ast), ret=ret), replay=True)
-def get_program(ast:UOp, renderer:Renderer|None=None, opts:list[Opt]|None=None) -> ProgramSpec:
+def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> ProgramSpec:
   """
   Transform an AST into a ProgramSpec. May trigger BEAM search.
 
@@ -30,7 +30,6 @@ def get_program(ast:UOp, renderer:Renderer|None=None, opts:list[Opt]|None=None) 
   if DEBUG >= 5: print(pyrender(ast))
 
   # linearize
-  if renderer is None: renderer = Device.default.renderer
   if opts is not None:
     assert ast.arg is None, "can't apply opts if sink has an arg"
     ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts)))
