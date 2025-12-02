@@ -1266,7 +1266,7 @@ impl<'a> Thread<'a> {
                             }
 
                             let ret = match op {
-                                257 | 259 | 299 | 260 | 261 | 264 | 272 | 392 | 426 | 430 | 531 | 537 | 540 | 543 | 551 | 567 | 796 => {
+                                257 | 259 | 299 | 260 | 261 | 264 | 272 | 392 | 426 | 430 | 531 | 537 | 540 | 543 | 551 | 567 | 606 | 796 => {
                                     let s0 = f32::from_bits(s0).negate(0, neg).absolute(0, abs);
                                     let s1 = f32::from_bits(s1).negate(1, neg).absolute(1, abs);
                                     let s2 = f32::from_bits(s2).negate(2, neg).absolute(2, abs);
@@ -1301,6 +1301,7 @@ impl<'a> Thread<'a> {
                                                 false => ret,
                                             }
                                         }
+                                        606 => f32::min(f32::max(s0, s1), s2),
                                         796 => s0 * 2f32.powi(s1.to_bits() as i32),
                                         // cnd_mask isn't a float only ALU but supports neg
                                         257 => {
