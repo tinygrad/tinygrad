@@ -69,9 +69,13 @@ class TestDevice(unittest.TestCase):
     except Exception as e: self.skipTest(f"skipping compiler test: not all compilers: {e}")
 
     with Context(CPU_LLVM=1):
+      inst = Device["CPU"].compiler
       self.assertIsInstance(Device["CPU"].compiler, CPULLVMCompiler)
     with Context(CPU_LLVM=0):
       self.assertIsInstance(Device["CPU"].compiler, ClangJITCompiler)
+    with Context(CPU_LLVM=1):
+      self.assertIsInstance(Device["CPU"].compiler, CPULLVMCompiler)
+      assert inst is Device["CPU"].compiler  # cached
 
 class MockCompiler(Compiler):
   def __init__(self, key): super().__init__(key)
