@@ -291,7 +291,7 @@ class Compiled:
 
     self.comps_ctrl_var = compilers.ctrl_var if compilers is not None else None
     self.comp_sets, self.cached_pair = {}, {}
-    for cpair in (compilers.cset if compilers is not None else [(Renderer, Compiler)]):
+    for cpair in (compilers.cset if compilers is not None else [CompilerPair(Renderer, Compiler)]):
       self.comp_sets[self._compiler_name(cpair.compiler)] = (cpair.ctrl_var, (cpair.renderer, cpair.compiler))
 
   @property
