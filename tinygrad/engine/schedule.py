@@ -54,7 +54,6 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
           raise RuntimeError(f"input to kernel must be AFTER or BUFFER, not {s.op}")
 
   with cpu_profile(TracingKey("linearize to ScheduleItem")):
-    from tinygrad.codegen.late.linearizer import linearize
     from tinygrad.helpers import prod
     import heapq
     from collections import defaultdict
