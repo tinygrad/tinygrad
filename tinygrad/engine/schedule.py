@@ -1,7 +1,6 @@
 import time
 from typing import cast
 from dataclasses import dataclass, field, replace
-from collections import deque
 from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
@@ -55,13 +54,44 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
           raise RuntimeError(f"input to kernel must be AFTER or BUFFER, not {s.op}")
 
   with cpu_profile(TracingKey("linearize to ScheduleItem")):
-    queue: deque[UOp] = deque()
-    for k,v in in_degree.items():
-      if v == 0: queue.append(k)
+    from tinygrad.codegen.late.linearizer import linearize
+    from tinygrad.helpers import prod
+    import heapq
+    from collections import defaultdict
+    from typing import Any
 
+    # use linearizer's priority-based toposort instead of simple deque
+    lst = list(in_degree.keys())
+    consumers: defaultdict[UOp, list[UOp]] = defaultdict(list)
+    out_degree: dict[UOp, int] = {}
+    priorities: dict[UOp, tuple[int, int, Any]] = {}
+
+    # get consumers and assign priorities
+    for u in lst:
+      for c in children.get(u, []): consumers[u].append(c)
+      out_degree[u] = len(children.get(u, []))
+
+      # we place UOps with higher run_counts later
+      run_count = prod([int(r.vmax)+1 for r in u.ranges]) if hasattr(u, 'ranges') else 0
+
+      # simple priority override. this is all bottom up now, smaller numbers will be closer to the top
+      extra = None
+      match u.op:
+        case Ops.RANGE: priority = 5    # placing RANGE is good
+        case Ops.END: priority = -5     # placing END is bad
+        case Ops.KERNEL: priority = 0
+        case _: priority = 0            # everything else has priority 0
+      priorities[u] = (run_count, priority, extra)
+
+    # number the uops in "ideal" order
+    nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: priorities[x]))}
+
+    # then force them to be toposorted in as close to the ideal order as possible
+    heap = [(-nkey[u], u) for u,d in in_degree.items() if d == 0]
+    heapq.heapify(heap)
     schedule: list[ScheduleItem|UOp] = []
-    while len(queue):
-      k = rk = queue.popleft()
+    while heap:
+      k = rk = heapq.heappop(heap)[1]
       if k.op is Ops.END: k = k.src[0]
       if k.op is Ops.RANGE: schedule.append(k)
       elif k.op is Ops.KERNEL:
@@ -86,7 +116,7 @@ def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[
         raise RuntimeError(f"can't schedule {k.op}")
       for x in children.get(rk, []):
         in_degree[x] -= 1
-        if in_degree[x] == 0: queue.append(x)
+        if in_degree[x] == 0: heapq.heappush(heap, (-nkey[x], x))
 
   with cpu_profile(TracingKey("expand ranges")):
     real_schedule: list[ScheduleItem] = []
