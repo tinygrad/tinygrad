@@ -114,10 +114,14 @@ def suppress_finalizing(func):
       if not getattr(sys, 'is_finalizing', lambda: True)(): raise # re-raise if not finalizing
   return wrapper
 
-def select_first_inited(candidates:Sequence[Callable[...,T]|Sequence[Callable[...,T]]], err_msg: str) -> tuple[T,...]|T:
+def select_first_inited(candidates:Sequence[Callable[...,T]|Sequence[Callable[...,T]]], err_msg:str, cache:dict|None=None) -> tuple[T,...]|T:
   excs = []
   for typ in candidates:
-    try: return tuple([cast(Callable, t)() for t in typ]) if isinstance(typ, Sequence) else cast(Callable, typ)()
+    if cache is not None and typ in cache: return cache[typ]
+    try:
+      x = tuple([cast(Callable, t)() for t in typ]) if isinstance(typ, Sequence) else cast(Callable, typ)()
+      if cache is not None: cache[typ] = x
+      return x
     except Exception as e: excs.append(e)
   raise ExceptionGroup(err_msg, excs)
 
@@ -180,7 +184,10 @@ CORRECT_DIVMOD_FOLDING, FUSE_OPTIM = ContextVar("CORRECT_DIVMOD_FOLDING", 0), Co
 ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE = ContextVar("ALLOW_DEVICE_USAGE", 1), ContextVar("MAX_BUFFER_SIZE", 0)
 EMULATE = ContextVar("EMULATE", "")
 CPU_COUNT = ContextVar("CPU_COUNT", max(1, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)))
+# Compilers
 CPU_LLVM, CPU_LVP, AMD_LLVM = ContextVar("CPU_LLVM", 0), ContextVar("CPU_LVP", 0), ContextVar("AMD_LLVM", 0)
+NV_PTX, CUDA_PTX, NV_NAK = ContextVar("NV_PTX", 0), ContextVar("CUDA_PTX", 0), ContextVar("NV_NAK", 0)
+AMD_CC, CPU_CC, NV_CC, CUDA_CC = ContextVar("AMD_CC", ""), ContextVar("CPU_CC", ""), ContextVar("NV_CC", ""), ContextVar("CUDA_CC", "")
 # VIZ implies PROFILE, but you can run PROFILE without VIZ
 VIZ = ContextVar("VIZ", 0)
 PROFILE = ContextVar("PROFILE", VIZ.value)
