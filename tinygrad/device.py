@@ -302,7 +302,7 @@ class Compiled:
   def compiler(self) -> Compiler: return self._select_compiler_pair()[1]
 
   def _compiler_name(self, c:type[Compiler]|functools.partial) -> str:
-    return unwrap_class_type(c).__name__.upper().removesuffix("COMPILER").removeprefix(self.device.split(':')[0].upper())
+    return unwrap_class_type(c).__name__.upper().removesuffix("COMPILER").removeprefix(devname:=self.device.split(':')[0].upper()) or devname
 
   def _select_compiler_pair(self) -> tuple[Renderer, Compiler]:
     # select forced compiler from global env var.
@@ -389,22 +389,23 @@ def enumerate_devices_str() -> Generator[str, None, None]:
     compilers_results, any_works = [], False
     try:
       d = Device[device]
-      default_comp_pairs, default_compiler = d.comp_sets, d.compiler
+      default_comp_pairs, default_compiler, cc_ctrl_var = d.comp_sets, d.compiler, d.comps_ctrl_var
       try:
         for k,(en,(r,c)) in default_comp_pairs.items():
           d.comp_sets = {k:(None,(r,c))} # env var set to None, so it doesn't interfere
+          d.comps_ctrl_var = None
           try:
             # d.renderer, d.compiler = r(), c()
             with Context(CACHELEVEL=0): test = (Tensor([1,2,3], device=device) * 2).tolist()
             if test != [2,4,6]: raise ValueError(f"got {test} instead of [2, 4, 6]")
-            set_text = f'({d.comps_ctrl_var.key}={d._compiler_name(c)} to make default)' if d.comps_ctrl_var is not None else ''
+            set_text = f'({cc_ctrl_var.key}={d._compiler_name(c)} to make default)' if cc_ctrl_var is not None else ''
             default_text = '(default)' if type(default_compiler) is type(d.compiler) else set_text
             compilers_results.append(f"{colored('+', 'green')} {unwrap_class_type(c).__name__} {default_text}")
             any_works = True
           except Exception as e: compilers_results.append(f"{colored('-', 'yellow')} {unwrap_class_type(c).__name__}: {e}")
       finally:
         # put the defaults back!
-        d.comp_sets = default_comp_pairs
+        d.comp_sets, d.comps_ctrl_var = default_comp_pairs, cc_ctrl_var
       result = (colored('PASS', 'green') if any_works else f"{colored('FAIL', 'yellow')}") + ''.join([f'\n{" "*16} {x}' for x in compilers_results])
     except Exception as e:
       result = f"{colored('FAIL', 'red')} {e}"
