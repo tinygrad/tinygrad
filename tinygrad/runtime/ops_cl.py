@@ -117,7 +117,7 @@ class CLDevice(Compiled):
                                            ctypes.string_at(buf, size=total.value).decode())[1]
 
     renderer = IntelRenderer if "cl_intel_subgroup_matrix_multiply_accumulate" in self.device_exts else OpenCLRenderer
-    compiler = CLCompiler(self, f"{hashlib.md5(self.device_name.encode() + self.driver_version.encode()).hexdigest()}")
+    compiler = functools.partial(CLCompiler, self, f"{hashlib.md5(self.device_name.encode() + self.driver_version.encode()).hexdigest()}")
     super().__init__(device, CLAllocator(self), CompilerSet([CompilerPair(renderer, compiler)]), functools.partial(CLProgram, self))
   def synchronize(self):
     check(cl.clFinish(self.queue))
