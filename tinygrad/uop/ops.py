@@ -314,7 +314,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @functools.cached_property
   def ended_ranges(self):
     if self.op in range_start: return self.src[range_start[self.op]:]
-    return ()
+    return tuple(flatten([x.ended_ranges for x in self.backward_slice if x.op in range_start]))
+    # return ()
 
   # determine what ranges this is in
   @recursive_property
