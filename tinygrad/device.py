@@ -278,7 +278,7 @@ class Compiler:
   def disassemble(self, lib:bytes): pass
 
 @dataclass(frozen=True)
-class CompilerPair: renderer:Renderer; compiler:Compiler; ctrl_var:ContextVar|None = None # noqa: E702
+class CompilerPair: renderer:type[Renderer]|functools.partial; compiler:type[Compiler]|functools.partial; ctrl_var:ContextVar|None = None # noqa: E702
 
 @dataclass(frozen=True)
 class CompilerSet: cset:list[CompilerPair]; ctrl_var:ContextVar|None = None # noqa: E702
@@ -290,7 +290,8 @@ class Compiled:
     self.device, self.allocator, self.runtime, self.graph, self.group_id = device, allocator, runtime, graph, group_id
 
     self.comps_ctrl_var = compilers.ctrl_var if compilers is not None else None
-    self.comp_sets, self.cached_pair = {}, {}
+    self.comp_sets:dict[Any, tuple[ContextVar|None, tuple[type[Renderer]|functools.partial, type[Compiler]|functools.partial]]] = {}
+    self.cached_pair:dict[Any, tuple[Renderer, Compiler]] = {}
     for cpair in (compilers.cset if compilers is not None else [CompilerPair(Renderer, Compiler)]):
       self.comp_sets[self._compiler_name(cpair.compiler)] = (cpair.ctrl_var, (cpair.renderer, cpair.compiler))
 
@@ -300,7 +301,7 @@ class Compiled:
   @property
   def compiler(self) -> Compiler: return self._select_compiler_pair()[1]
 
-  def _compiler_name(self, c:Compiler) -> str:
+  def _compiler_name(self, c:type[Compiler]|functools.partial) -> str:
     return unwrap_class_type(c).__name__.upper().removesuffix("COMPILER").removeprefix(self.device.split(':')[0].upper())
 
   def _select_compiler_pair(self) -> tuple[Renderer, Compiler]:
