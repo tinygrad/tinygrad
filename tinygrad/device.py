@@ -315,8 +315,6 @@ class Compiled:
     # select remaining compilers (all or forced only)
     comps = list(rc for en, rc in self.comp_sets.values())
 
-    print(comps, self.cached_pair, flush=True)
-
     # remove disabled compilers
     for en, rc in self.comp_sets.values():
       if en is not None and en.value == 0 and rc in comps: comps.remove(rc)
