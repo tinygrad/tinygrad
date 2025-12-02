@@ -384,6 +384,7 @@ class Tensor(OpMixin):
     """
     assert isinstance(self.device, str), "can't shard a MultiLazyBuffer"
     devices = tuple(canonicalize_device(x) for x in devices)
+    if len(devices) == 1: return self.to(devices[0])
     mlb = self.uop.shard(devices, self._resolve_dim(axis)) if axis is not None else self.uop.copy_to_device(devices)
     return Tensor(mlb, device=devices, requires_grad=self.requires_grad)
 
