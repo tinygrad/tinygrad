@@ -426,23 +426,27 @@ class CUDARenderer(CStyleLanguage):
     if any(dt.scalar() == dtypes.bfloat16 for dt in used_dtypes): prefix.append("#include <cuda_bf16.h>")
     prefix += [self.render_vector_prefix(dt) for dt in used_dtypes if (dt.count in (4,8) and dt.scalar() in {dtypes.half, dtypes.bfloat16})
       or (dt.count in (2,4,8,16) and dt.scalar() in dtypes.fp8s)]
-    prefix.append("#include <cuda_pipeline.h>")
+    prefix.append("#include <cuda_pipeline_primitives.h>")
     prefix += ["""__device__ void __ldmatrix_a_elems(half8 *regs, half *smem) {
     uint32_t reg0, reg1, reg2, reg3;
-    asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0, %1, %2, %3}, [%4];" : "=r"(reg0), "=r"(reg1), "=r"(reg2), "=r"(reg3) : "l"(__cvta_generic_to_shared(smem)));
+    asm volatile("ldmatrix.sync.aligned.m8n8.x4.shared.b16 {%0, %1, %2, %3}, [%4];"
+        : "=r"(reg0), "=r"(reg1), "=r"(reg2), "=r"(reg3) : "l"(__cvta_generic_to_shared(smem)));
     uint32_t *addr = reinterpret_cast<uint32_t*>(regs);
     addr[0] = reg0; addr[1] = reg1; addr[2] = reg2; addr[3] = reg3;
 }
 template<typename T> __device__ void __ldmatrix_a_elems(T *regs, half *smem) { __ldmatrix_a_elems(reinterpret_cast<half8*>(regs), smem); }""",
               """__device__ void __ldmatrix_b_elems(half4 *regs_lo, half4 *regs_hi, half *smem) {
     uint32_t reg0, reg1, reg2, reg3;
-    asm volatile("ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 {%0, %1, %2, %3}, [%4];" : "=r"(reg0), "=r"(reg1), "=r"(reg2), "=r"(reg3) : "l"(__cvta_generic_to_shared(smem)));
+    asm volatile("ldmatrix.sync.aligned.m8n8.x4.trans.shared.b16 {%0, %1, %2, %3}, [%4];"
+        : "=r"(reg0), "=r"(reg1), "=r"(reg2), "=r"(reg3) : "l"(__cvta_generic_to_shared(smem)));
     uint32_t *addr_lo = reinterpret_cast<uint32_t*>(regs_lo);
     uint32_t *addr_hi = reinterpret_cast<uint32_t*>(regs_hi);
     addr_lo[0] = reg0; addr_lo[1] = reg1;
     addr_hi[0] = reg2; addr_hi[1] = reg3;
 }
-template<typename T> __device__ void __ldmatrix_b_elems(T *regs_lo, T *regs_hi, half *smem) { __ldmatrix_b_elems(reinterpret_cast<half4*>(regs_lo), reinterpret_cast<half4*>(regs_hi), smem); }"""]
+template<typename T> __device__ void __ldmatrix_b_elems(T *regs_lo, T *regs_hi, half *smem) {
+    __ldmatrix_b_elems(reinterpret_cast<half4*>(regs_lo), reinterpret_cast<half4*>(regs_hi), smem);
+}"""]
     dt_map_in = { dtypes.float: "tf32", dtypes.half: "f16", dtypes.bfloat16: "bf16", dtypes.fp8e4m3: "e4m3", dtypes.fp8e5m2: "e5m2" }
     dt_map_out = { dtypes.float: "f32", dtypes.half: "f16" }
     for name, (N, M, K), dtype_in, dtype_out, _, _, upcast_axes, _ in wmma_args(uops):
