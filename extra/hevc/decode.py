@@ -9,8 +9,6 @@ if __name__ == "__main__":
   parser.add_argument("--output_dir", type=str, default="extra/hevc/out")
   args = parser.parse_args()
 
-  os.makedirs(args.output_dir, exist_ok=True)
-
   if args.input_file == "":
     url = "https://github.com/haraschax/filedump/raw/09a497959f7fa6fd8dba501a25f2cdb3a41ecb12/comma_video.hevc"
     hevc_tensor = Tensor.from_url(url, device="CPU")
@@ -27,13 +25,15 @@ if __name__ == "__main__":
   frame_info = frame_info[:getenv("MAX_FRAMES", len(frame_info))]
 
   # move all needed data to gpu
+  hevc_tensor = hevc_tensor.to("NV")
   all_slices = []
   with Timing("prep slices to gpu: "):
     opaque_nv = opaque.to("NV").contiguous().realize()
 
     for i, (offset, sz, frame_pos, history_sz, _) in enumerate(frame_info):
-      all_slices.append(hevc_tensor[offset:offset+sz].to("NV").contiguous().realize())
+      all_slices.append(hevc_tensor[offset:offset+sz].contiguous())
 
+    Tensor.realize(*all_slices)
     Device.default.synchronize()
 
   out_image_size = luma_h + (luma_h + 1) // 2, round_up(luma_w, 64)
@@ -67,5 +67,7 @@ if __name__ == "__main__":
         assert img.data() == decoded_frames[i], f"Frame {i} does not match reference decoder!"
         print(f"Frame {i} matches reference decoder!")
     else:
-      img = to_bgr(img, h, w, luma_w, chroma_off).realize()
-      cv2.imwrite(f"{args.output_dir}/out_frame_{i:04d}.png", img.numpy())
+      if len(args.output_dir):
+        os.makedirs(args.output_dir, exist_ok=True)
+        img = to_bgr(img, h, w, luma_w, chroma_off).realize()
+        cv2.imwrite(f"{args.output_dir}/out_frame_{i:04d}.png", img.numpy())
