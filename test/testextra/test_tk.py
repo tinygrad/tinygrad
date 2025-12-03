@@ -12,6 +12,11 @@ from extra.thunder.tiny.tk.tiles import ST_16X32, RT_16X32, RT_16X16, TileLayout
 
 @unittest.skipIf(CI or Device.DEFAULT not in ["AMD"], "only amd")
 class TestTK(unittest.TestCase):
+  def setUp(self):
+    arch = Device["AMD"].arch
+    if not arch.startswith("gfx9"):
+      self.skipTest(f"arch {arch} not supported")
+
   @unittest.skipIf(CI, "no wmma in ci")
   def test_simple_matmul(self):
     N = 8192
