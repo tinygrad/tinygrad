@@ -36,7 +36,7 @@ if __name__ == "__main__":
   # define variables
   v_pos = Variable("pos", 0, max_hist + 1)
   v_offset = Variable("offset", 0, hevc_tensor.numel()-1)
-  v_sz = Variable("sz", 0, hevc_tensor.numel()-1)
+  v_sz = Variable("sz", 0, hevc_tensor.numel())
   v_i = Variable("i", 0, len(frame_info)-1)
 
   history = []
@@ -45,8 +45,7 @@ if __name__ == "__main__":
     for i, (offset, sz, frame_pos, history_sz, is_hist) in enumerate(frame_info):
       history = history[-history_sz:] if history_sz > 0 else []
       # TODO: this shrink should work as a slice
-      bound_offset, bound_sz = v_offset.bind(offset), v_sz.bind(sz)
-      hevc_frame = hevc_tensor.shrink(((bound_offset,bound_offset+bound_sz),))
+      hevc_frame = hevc_tensor.shrink((((bound_offset:=v_offset.bind(offset)), bound_offset+v_sz.bind(sz)),))
       # TODO: can this go in the JIT?
       outimg = hevc_frame.decode_hevc_frame(v_pos.bind(frame_pos), out_image_size, opaque_nv[v_i.bind(i)], history).realize()
       out_images.append(outimg)
