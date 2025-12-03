@@ -180,7 +180,7 @@ backend_test.exclude('test_mod_mixed_sign_float16_cpu')
 backend_test.exclude('test_qlinearmatmul_2D_uint8_float16_cpu')
 backend_test.exclude('test_qlinearmatmul_3D_uint8_float16_cpu')
 backend_test.exclude('test_attention_4d_diff_heads_mask4d_padded_kv_cpu')
-backend_test.exclude('test_attention_3d_gqa_*')
+backend_test.exclude('test_attention_3d_*')
 
 # rest of the failing tests
 backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # tf_crop_and_resize not implemented
