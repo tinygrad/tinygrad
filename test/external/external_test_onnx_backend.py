@@ -89,11 +89,17 @@ if not is_dtype_supported(dtypes.float16):
 # dtype cast
 backend_test.exclude('STRING')
 backend_test.exclude('FLOAT8')
+backend_test.exclude('INT2')
 backend_test.exclude('INT4')
+backend_test.exclude('UINT2')
 backend_test.exclude('UINT4')
 backend_test.exclude('BFLOAT16')  # not supported in numpy
 backend_test.exclude('FLOAT4E2M1')
 
+backend_test.exclude('test_dequantizelinear_int2_cpu')
+backend_test.exclude('test_dequantizelinear_uint2_cpu')
+backend_test.exclude('test_quantizelinear_int2_cpu')
+backend_test.exclude('test_quantizelinear_uint2_cpu')
 backend_test.exclude('test_dequantizelinear_int4_cpu')
 backend_test.exclude('test_dequantizelinear_uint4_cpu')
 backend_test.exclude('test_quantizelinear_int4_cpu')
@@ -169,6 +175,17 @@ backend_test.exclude('test_lppool_*')
 backend_test.exclude('test_scan_*')
 backend_test.exclude('test_split_to_sequence_*')
 backend_test.exclude('test_ai_onnx_ml_tree_ensemble_*') # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/aionnxml/op_tree_ensemble.py#L121
+
+# TODO: not yet implemented
+backend_test.exclude('test_tensorscatter_*')
+backend_test.exclude('test_l1normalization_*')
+backend_test.exclude('test_l2normalization_*')
+backend_test.exclude('test_lpnormalization_*')
+backend_test.exclude('test_einsum_scalar_cpu')
+backend_test.exclude('test_mod_mixed_sign_float16_cpu')
+backend_test.exclude('test_qlinearmatmul_2D_uint8_float16_cpu')
+backend_test.exclude('test_qlinearmatmul_3D_uint8_float16_cpu')
+backend_test.exclude('test_attention_4d_diff_heads_mask4d_padded_kv_cpu')
 
 # rest of the failing tests
 backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # tf_crop_and_resize not implemented

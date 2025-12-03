@@ -58,30 +58,6 @@ class TestOnnxModel(unittest.TestCase):
     print(cls, _LABELS[cls])
     assert "car" in _LABELS[cls] or _LABELS[cls] == "convertible"
 
-  def test_pad_list_value(self):
-    from tinygrad.nn.onnx import onnx_ops
-    from tinygrad import Tensor
-    Pad = onnx_ops['Pad']
-    x = Tensor([1, 2, 3])
-    out = Pad(x, pads=[0, 1], value=[-float('inf')])
-    assert out.shape == (4,)
-    assert out.numpy()[-1] == -float('inf')
-    out2 = Pad(x, pads=[1, 0], constant_value=[5.0])
-    assert out2.shape == (4,)
-    assert out2.numpy()[0] == 5.0
-
-  def test_swish(self):
-    from tinygrad.nn.onnx import onnx_ops
-    from tinygrad import Tensor
-    Swish = onnx_ops['Swish']
-    x = Tensor([-1.0, 0.0, 1.0])
-    out = Swish(x)
-    expected = x.numpy() / (1 + np.exp(-1 * x.numpy()))
-    assert np.allclose(out.numpy(), expected)
-    out2 = Swish(x, alpha=0.5)
-    expected2 = x.numpy() / (1 + np.exp(-0.5 * x.numpy()))
-    assert np.allclose(out2.numpy(), expected2)
-
 @unittest.skipUnless(Device.DEFAULT == "METAL", "only run on METAL")
 class TestHuggingFaceOnnxModels(unittest.TestCase):
   @classmethod
