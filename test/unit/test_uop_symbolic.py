@@ -112,8 +112,9 @@ class TestSymbolic(unittest.TestCase):
     b = Variable("b", 1, 8)
     self.assertEqual((a*a*3).divide_exact(a).simplify(), a*3)
     self.assertEqual((a*a*3).divide_exact(a*a*3).simplify(), a.const_like(1))
+    self.assertEqual((a*a*6).divide_exact(a*a*3).simplify(), a.const_like(2))
     self.assertEqual((a*b*3).divide_exact(a.const_like(3)).simplify(), a*b)
-    self.assertEqual((a*a*3).divide_exact(a*a.const_like(-3)).simplify(), a*-1)
+    self.assertEqual((a*a*3).divide_exact(a*(-3)).simplify(), a*-1)
     self.assertEqual((a*a*b*3).divide_exact(a*b).simplify(), a*3)
     self.assertEqual((a*3+a*b).divide_exact(a).simplify(), b+3)
     self.assertEqual((a*b*3+a*b*b).divide_exact(a*b).simplify(), b+3)
@@ -580,12 +581,12 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((gidx0*4+lidx2*2+lidx3)//12, 0, 4, "(((lidx2//2)+gidx0)//3)")
     self.helper_test_variable((lidx2*2+gidx0*4+lidx3)//12, 0, 4, "(((lidx2//2)+gidx0)//3)")
 
-  @unittest.expectedFailure  # TODO: improve nest_div_by_smallest_factor
   def test_sum_div_complex4(self):
     gidx0 = Variable("gidx0", 0, 2)
     lidx2 = Variable("lidx2", 0, 12)
     lidx3 = Variable("lidx3", 0, 12)
-    self.helper_test_variable((gidx0*3+lidx2*19+lidx3*38)//(3*19), 0, 12, "((lidx2+(lidx3*2))//3)")
+    # TODO: improve nest_div_by_smallest_factor to get ((lidx2+(lidx3*2))//3)
+    self.helper_test_variable((gidx0*3+lidx2*19+lidx3*38)//(3*19), 0, 12, "((gidx0+(lidx2*19+lidx3*38)//3)//19)")
 
   def test_sum_mul_distribute(self):
     gidx0 = Variable("gidx0", 0, 7)
