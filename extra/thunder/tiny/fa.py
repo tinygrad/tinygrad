@@ -32,7 +32,6 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
   print(f"Flash Attention {B=} {N=} {H=} {D=} {H_KV=} {GROUP_SIZE=}")
 
   def custom_forward(ou:UOp, qu:UOp, ku:UOp, vu:UOp, mu:UOp) -> UOp:
-    print(ou.shape, qu.shape, ku.shape, vu.shape)
     with Kernel("fa_custom_forward", (H, N // (Q_BLOCK_SIZE*NUM_WORKERS), B), NUM_WORKERS * WARP_THREADS) as ker:
       warp = ker.warp
 
@@ -88,14 +87,9 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
         att_block = warp.mma_AtB(att_block, k_reg_transposed, q_reg_transposed)
 
         # apply attention mask
-        # mask_reg = warp.load(mask_reg, mask, (), (batch, 0, q_seq, kv_idx))
-        # mask_reg_transposed = warp.transpose(mask_reg_transposed, mask_reg)
-        # att_block += mask_reg_transposed
-
-        q_base = q_seq * Q_BLOCK_SIZE + (warp.laneid % 16)
-        kv_base = kv_idx * KV_BLOCK_SIZE + (warp.laneid // 16) * 4
-        att_block = warp.map(att_block,
-                             lambda x, idx: ((kv_base + idx[0]*16 + idx[2]) > (q_base + idx[1]*16)).alu(Ops.WHERE, UOp.ufix(x._uop, -math.inf), x))
+        mask_reg = warp.load(mask_reg, mask, (), (batch, 0, q_seq, kv_idx), axis=2)
+        mask_reg_transposed = warp.transpose(mask_reg_transposed, mask_reg)
+        att_block += mask_reg_transposed
 
         # softmax
         max_vec_last = warp.copy(max_vec_last.after(kv_idx), max_vec)
@@ -116,6 +110,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
         att_block_mma = warp.copy(att_block_mma.after(kv_idx, norm_vec), att_block)
         o_reg = warp.mma_AtB(o_reg, v_reg, att_block_mma)
       o_reg = ker.endrange()
+      norm_vec = norm_vec.after(o_reg)
 
       o_reg /= norm_vec
 
