@@ -12,7 +12,7 @@ from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
 from tinygrad.mixin.movement import _align_left
 from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop, Variable
-from tinygrad.engine.schedule import ScheduleItem, cached_create_schedule_with_vars
+from tinygrad.engine.schedule import ScheduleItem, complete_create_schedule_with_vars
 from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import run_schedule
 
@@ -244,7 +244,7 @@ class Tensor(OpMixin):
     big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
 
     # this is where the schedule cache should go
-    becomes_map, schedule, var_vals = cached_create_schedule_with_vars(big_sink)
+    becomes_map, schedule, var_vals = complete_create_schedule_with_vars(big_sink)
     _apply_map_to_tensors(becomes_map, name="Apply Schedule Map")
     return schedule, var_vals
 
