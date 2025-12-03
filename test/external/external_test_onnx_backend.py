@@ -89,17 +89,11 @@ if not is_dtype_supported(dtypes.float16):
 # dtype cast
 backend_test.exclude('STRING')
 backend_test.exclude('FLOAT8')
-backend_test.exclude('INT2')
 backend_test.exclude('INT4')
-backend_test.exclude('UINT2')
 backend_test.exclude('UINT4')
 backend_test.exclude('BFLOAT16')  # not supported in numpy
 backend_test.exclude('FLOAT4E2M1')
 
-backend_test.exclude('test_dequantizelinear_int2_cpu')
-backend_test.exclude('test_dequantizelinear_uint2_cpu')
-backend_test.exclude('test_quantizelinear_int2_cpu')
-backend_test.exclude('test_quantizelinear_uint2_cpu')
 backend_test.exclude('test_dequantizelinear_int4_cpu')
 backend_test.exclude('test_dequantizelinear_uint4_cpu')
 backend_test.exclude('test_quantizelinear_int4_cpu')
