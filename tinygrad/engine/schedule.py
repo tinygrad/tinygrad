@@ -191,7 +191,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   tensor_map |= {u:u.buf_uop for u in big_sink.toposort() if u.op is Ops.AFTER}
 
   if (DEBUG >= (1 if sc_ret is None else 2) and len(schedule) > 1) or DEBUG >= 3:
-    print(f"scheduled {len(schedule)} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
+    print(f"scheduled {len(schedule):4d} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
           f" | {' cache hit' if sc_ret is not None else 'CACHE MISS'} {sched_cache_key.hex()[:8]}"+\
           f" | {len(UOpMetaClass.ucache)} uops in cache")
   return tensor_map, schedule, var_vals
