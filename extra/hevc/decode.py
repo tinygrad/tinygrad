@@ -25,28 +25,31 @@ if __name__ == "__main__":
   frame_info = frame_info[:getenv("MAX_FRAMES", len(frame_info))]
 
   # move all needed data to gpu
-  hevc_tensor = hevc_tensor.to("NV")
-  all_slices = []
-  with Timing("prep slices to gpu: "):
+  #all_slices = []
+  with Timing("copy to gpu: "):
     opaque_nv = opaque.to("NV").contiguous().realize()
-
-    for i, (offset, sz, frame_pos, history_sz, _) in enumerate(frame_info):
-      all_slices.append(hevc_tensor[offset:offset+sz].contiguous())
-
-    Tensor.realize(*all_slices)
-    Device.default.synchronize()
+    hevc_tensor = hevc_tensor.to("NV")
 
   out_image_size = luma_h + (luma_h + 1) // 2, round_up(luma_w, 64)
   max_hist = max(history_sz for _, _, _, history_sz, _ in frame_info)
   pos = Variable("pos", 0, max_hist + 1)
+  v_offset = Variable("offset", 0, hevc_tensor.numel()-1)
+  v_sz = Variable("sz", 0, hevc_tensor.numel()-1)
+  v_i = Variable("i", 0, len(frame_info)-1)
 
   history = []
   out_images = []
   with Timing("decoding whole file: ", on_exit=(lambda et: f", {len(frame_info)} frames, {len(frame_info)/(et/1e9):.2f} fps")):
     for i, (offset, sz, frame_pos, history_sz, is_hist) in enumerate(frame_info):
       history = history[-history_sz:] if history_sz > 0 else []
-
-      outimg = all_slices[i].decode_hevc_frame(pos.bind(frame_pos), out_image_size, opaque_nv[i], history).realize()
+      # TODO: this API should be better
+      bound_offset = v_offset.bind(offset)
+      bound_sz = v_sz.bind(sz)
+      bound_i = v_i.bind(i)
+      # TODO: this shrink should work as a slice
+      hevc_frame = hevc_tensor.shrink(((bound_offset,bound_offset+bound_sz),))
+      # TODO: can this go in the JIT?
+      outimg = hevc_frame.decode_hevc_frame(pos.bind(frame_pos), out_image_size, opaque_nv[bound_i], history).realize()
       out_images.append(outimg)
       if is_hist: history.append(outimg)
 
