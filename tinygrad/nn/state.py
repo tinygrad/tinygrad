@@ -1,4 +1,4 @@
-import json, pathlib, zipfile, pickle, tarfile, struct, functools, io
+import json, pathlib, zipfile, pickle, tarfile, struct, functools, io, zlib
 from collections import OrderedDict
 from typing import Any, Callable, BinaryIO, Iterable, cast
 from tinygrad.tensor import Tensor
@@ -162,6 +162,27 @@ def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=Tr
   return ret
 
 @accept_filename
+def zip_extract(t: Tensor) -> dict[str, Tensor]:
+  files: dict[str, Tensor] = {}
+  file_offsets: dict[str, tuple[Tensor, int, int]] = {}
+  with zipfile.ZipFile(TensorIO(t), "r") as myzip:
+    for zi in myzip.filelist:
+      file_offset = zi.header_offset+30+t[zi.header_offset+26:zi.header_offset+30].bitcast(dtypes.uint16).to("CPU").sum()
+      file_offsets[zi.filename] = (file_offset, zi.compress_size, zi.compress_type)
+  # sadly, the extra length needs to be read from the local header of each file. this is a limitation of the zip file format
+  Tensor.realize(*[x[0] for x in file_offsets.values()])
+  for filename, (file_offset, compress_size, compress_type) in file_offsets.items():
+    # possible to remove this realize/item? it's slow
+    file_offset_int = int(file_offset.item())
+    files[filename] = t[file_offset_int:file_offset_int+compress_size]
+    match compress_type:
+      case zipfile.ZIP_STORED: pass
+      # TODO: we need a zlib UOp so this can be lazy
+      case zipfile.ZIP_DEFLATED: files[filename] = Tensor(zlib.decompress(files[filename].data(), -15))
+      case _: raise NotImplementedError(f"compression {compress_type} not supported")
+  return files
+
+@accept_filename
 def tar_extract(t: Tensor) -> dict[str, Tensor]:
   """
   ```python
@@ -179,6 +200,7 @@ def tar_extract(t: Tensor) -> dict[str, Tensor]:
 
 # torch support!
 
+# TODO: this should use tar_extract and zip_extract
 @accept_filename
 def torch_load(t:Tensor) -> dict[str, Tensor]:
   """
