@@ -181,8 +181,8 @@ class NVCopyQueue(NVCommandQueue):
   def _submit(self, dev:NVDevice): self._submit_to_gpfifo(dev, dev.dma_gpfifo)
 
 class NVVideoQueue(NVCommandQueue):
-  def decode_hevc_chunk(self, pic_desc:HCQBuffer, in_buf:HCQBuffer, out_buf:HCQBuffer, out_buf_pos:int, hist_bufs:list[HCQBuffer],
-                        hist_pos:list[int], chroma_off:int, coloc_buf:HCQBuffer, filter_buf:HCQBuffer, intra_top_off:int, status_buf:HCQBuffer):
+  def decode_hevc_chunk(self, pic_desc:HCQBuffer, in_buf:HCQBuffer, out_buf:HCQBuffer, out_buf_pos:int, hist_bufs:list[HCQBuffer], hist_pos:list[int],
+                        chroma_off:int, coloc_buf:HCQBuffer, filter_buf:HCQBuffer, intra_top_off:int, intra_unk_off:int|None, status_buf:HCQBuffer):
     self.nvm(4, nv_gpu.NVC9B0_SET_APPLICATION_ID, nv_gpu.NVC9B0_SET_APPLICATION_ID_ID_HEVC)
     self.nvm(4, nv_gpu.NVC9B0_SET_CONTROL_PARAMS, 0x52057)
     self.nvm(4, nv_gpu.NVC9B0_SET_DRV_PIC_SETUP_OFFSET, pic_desc.va_addr >> 8)
@@ -195,6 +195,7 @@ class NVVideoQueue(NVCommandQueue):
     self.nvm(4, nv_gpu.NVC9B0_HEVC_SET_TILE_SIZES_OFFSET, pic_desc.offset(0x200).va_addr >> 8)
     self.nvm(4, nv_gpu.NVC9B0_HEVC_SET_FILTER_BUFFER_OFFSET, filter_buf.va_addr >> 8)
     self.nvm(4, nv_gpu.NVC9B0_SET_INTRA_TOP_BUF_OFFSET, (filter_buf.va_addr + intra_top_off) >> 8)
+    if intra_unk_off is not None: self.nvm(4, 0x4dc, (filter_buf.va_addr + intra_unk_off) >> 8)
     self.nvm(4, nv_gpu.NVC9B0_EXECUTE, 0)
     return self
 
@@ -313,7 +314,8 @@ class NVAllocator(HCQAllocator['NVDevice']):
     self.dev._ensure_has_vid_hw(w, h)
     NVVideoQueue().wait(self.dev.timeline_signal, self.dev.timeline_value - 1) \
                   .decode_hevc_chunk(desc_buf, bufin, bufout, frame_pos, hist, [(frame_pos-x) % (len(hist) + 1) for x in range(len(hist), 0, -1)],
-                    round_up(w, 64)*round_up(h, 64), self.dev.vid_coloc_buf, self.dev.vid_filter_buf, self.dev.intra_top_off, self.dev.vid_stat_buf) \
+                                     round_up(w, 64)*round_up(h, 64), self.dev.vid_coloc_buf, self.dev.vid_filter_buf, self.dev.intra_top_off,
+                                     self.dev.intra_unk_off, self.dev.vid_stat_buf) \
                   .signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
 
 @dataclass
@@ -393,7 +395,7 @@ class NVKIface:
     self.gpfifo_class:int = next(c for c in [nv_gpu.BLACKWELL_CHANNEL_GPFIFO_A, nv_gpu.AMPERE_CHANNEL_GPFIFO_A] if c in self.nvclasses)
     self.compute_class:int = next(c for c in [nv_gpu.BLACKWELL_COMPUTE_B, nv_gpu.ADA_COMPUTE_A, nv_gpu.AMPERE_COMPUTE_B] if c in self.nvclasses)
     self.dma_class:int = next(c for c in [nv_gpu.BLACKWELL_DMA_COPY_B, nv_gpu.AMPERE_DMA_COPY_B] if c in self.nvclasses)
-    self.viddec_class:int|None = next((c for c in [nv_gpu.NVC9B0_VIDEO_DECODER] if c in self.nvclasses), None)
+    self.viddec_class:int|None = next((c for c in [nv_gpu.NVCFB0_VIDEO_DECODER, nv_gpu.NVC9B0_VIDEO_DECODER] if c in self.nvclasses), None)
 
     usermode = self.rm_alloc(self.dev.subdevice, self.usermode_class)
     return usermode, MMIOInterface(self._gpu_map_to_cpu(usermode, mmio_sz:=0x10000), mmio_sz, fmt='I')
@@ -661,7 +663,9 @@ class NVDevice(HCQCompiled[HCQSignal]):
 
     coloc_size = round_up((round_up(h, 64) * round_up(h, 64)) + (round_up(w, 64) * round_up(h, 64) // 16), 2 << 20)
     self.intra_top_off = round_up(h, 64) * (608 + 4864 + 152 + 2000)
-    filter_size = round_up(round_up(self.intra_top_off, 0x10000) + 64 << 10, 2 << 20)
+    intra_unk_size = ((2 << 20) if self.iface.viddec_class >= nv_gpu.NVCFB0_VIDEO_DECODER else 0)
+    self.intra_unk_off = (round_up(self.intra_top_off, 0x10000) + (64 << 10)) if intra_unk_size > 0 else None
+    filter_size = round_up(round_up(self.intra_top_off, 0x10000) + (64 << 10) + intra_unk_size, 2 << 20)
 
     if not hasattr(self, 'vid_gpfifo'):
       self.vid_gpfifo = self._new_gpu_fifo(self.gpfifo_area, 0, self.nvdevice, offset=0x200000, entries=2048, compute=False, video=True)
