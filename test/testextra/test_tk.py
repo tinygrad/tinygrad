@@ -624,7 +624,12 @@ class TestTK(unittest.TestCase):
       Tensor.realize(q, k, v, out)
 
     ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (out, q, k, v)])
-    for _ in range(5): ei.run(wait=True)
+    for _ in range(5):
+      et = ei.run(wait=True)
+      attn_flops = 2 * B * H * N * N * D + \
+                   4 * B * H * N * N + \
+                   2 * B * H * N * N * D
+      print(f"{attn_flops/(et*1e9):2f} GFLOPS")
     out = out.float()
 
     q_permuted = q.permute(0, 2, 1, 3)
