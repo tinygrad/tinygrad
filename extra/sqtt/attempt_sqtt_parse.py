@@ -119,7 +119,6 @@ OPNAME = {
   0xb: "VALU",
   0xd: "VALU",
   0xe: "VALU",
-  0x10: "__END",
   0x21: "VMEM_LOAD",
   0x22: "VMEM_LOAD",
   0x24: "VMEM_STORE",
@@ -480,6 +479,7 @@ def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -
         nib = (byte >> (offset & 4)) & 0xF
         reg = ((reg >> 4) | (nib << 60)) & ((1 << 64) - 1)
         offset += 4
+      if offset != target: break  # don't parse past the end
 
     # 2) Decode token from low 8 bits
     opcode = STATE_TO_OPCODE[reg & 0xFF]

@@ -112,8 +112,9 @@ class TestSymbolic(unittest.TestCase):
     b = Variable("b", 1, 8)
     self.assertEqual((a*a*3).divide_exact(a).simplify(), a*3)
     self.assertEqual((a*a*3).divide_exact(a*a*3).simplify(), a.const_like(1))
+    self.assertEqual((a*a*6).divide_exact(a*a*3).simplify(), a.const_like(2))
     self.assertEqual((a*b*3).divide_exact(a.const_like(3)).simplify(), a*b)
-    self.assertEqual((a*a*3).divide_exact(a*a.const_like(-3)).simplify(), a*-1)
+    self.assertEqual((a*a*3).divide_exact(a*(-3)).simplify(), a*-1)
     self.assertEqual((a*a*b*3).divide_exact(a*b).simplify(), a*3)
     self.assertEqual((a*3+a*b).divide_exact(a).simplify(), b+3)
     self.assertEqual((a*b*3+a*b*b).divide_exact(a*b).simplify(), b+3)
@@ -322,12 +323,12 @@ class TestSymbolic(unittest.TestCase):
   def test_mod_mod_wrong_sign(self):
     v1=Variable("v1", 0, 128)
     v3=Variable("v3", 0, 7)
-    self.helper_test_variable((((((v1%2)*2)+((v3+-1)%5))+-2)%5), -4, 4, "(((((v1%2)*2)+((v3+-1)%5))+-2)%5)")
+    self.helper_test_variable((((((v1%2)*2)+((v3+-1)%5))+-2)%5), -3, 4, "(v1%2*2+(v3+-1)%5+-2)")
 
   def test_mod_mod_wrong_sign2(self):
     v2=Variable("v2", 0, 8)
     v3=Variable("v3", 0, 4)
-    self.helper_test_variable((((((v3+3)%7)+(v2+-2))%7)%7), -6, 6, "(((v2+((v3+3)%7))+-2)%7)")
+    self.helper_test_variable((((((v3+3)%7)+(v2+-2))%7)%7), -2, 6, "(((v2+((v3+3)%7))+-2)%7)")
 
   def test_mul_mul(self):
     self.helper_test_variable((Variable("a", 0, 5)*10)*9, 0, 5*10*9, "(a*90)")
@@ -377,9 +378,9 @@ class TestSymbolic(unittest.TestCase):
   def test_big_mod(self):
     self.helper_test_variable(Variable("a", -20, 20)%10, -9, 9, "(a%10)")
     self.helper_test_variable(Variable("a", -20, 0)%10, -9, 0, "(((a*-1)%10)*-1)")
-    self.helper_test_variable(Variable("a", -20, 1)%10, -9, 9, "(a%10)")  # TODO: tighter max
+    self.helper_test_variable(Variable("a", -20, 1)%10, -9, 1, "(a%10)")
     self.helper_test_variable(Variable("a", 0, 20)%10, 0, 9, "(a%10)")
-    self.helper_test_variable(Variable("a", -1, 20)%10, -9, 9, "(a%10)")  # TODO: tighter min
+    self.helper_test_variable(Variable("a", -1, 20)%10, -1, 9, "(a%10)")
 
   def test_ge_remove(self):
     self.helper_test_variable(Variable("a", 0, 6) >= 25, 0, 0, "False")
@@ -580,12 +581,12 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((gidx0*4+lidx2*2+lidx3)//12, 0, 4, "(((lidx2//2)+gidx0)//3)")
     self.helper_test_variable((lidx2*2+gidx0*4+lidx3)//12, 0, 4, "(((lidx2//2)+gidx0)//3)")
 
-  @unittest.expectedFailure  # TODO: improve nest_div_by_smallest_factor
   def test_sum_div_complex4(self):
     gidx0 = Variable("gidx0", 0, 2)
     lidx2 = Variable("lidx2", 0, 12)
     lidx3 = Variable("lidx3", 0, 12)
-    self.helper_test_variable((gidx0*3+lidx2*19+lidx3*38)//(3*19), 0, 12, "((lidx2+(lidx3*2))//3)")
+    # TODO: improve nest_div_by_smallest_factor to get ((lidx2+(lidx3*2))//3)
+    self.helper_test_variable((gidx0*3+lidx2*19+lidx3*38)//(3*19), 0, 12, "((gidx0+(lidx2*19+lidx3*38)//3)//19)")
 
   def test_sum_mul_distribute(self):
     gidx0 = Variable("gidx0", 0, 7)

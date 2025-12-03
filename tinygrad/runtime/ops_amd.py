@@ -939,7 +939,7 @@ class AMDDevice(HCQCompiled):
     self.max_private_segment_size = 0
     self._ensure_has_local_memory(128) # set default scratch size to 128 bytes per thread
 
-    self.pmc_enabled = PROFILE and PMC > 0
+    self.pmc_enabled:bool = PROFILE > 0 and PMC > 0
     if self.pmc_enabled:
       if self.target[0] not in {9, 11, 12}: raise RuntimeError(f'PMC are not supported on gc:{self.target}')
       self.iface.require_profile_mode()
@@ -957,7 +957,7 @@ class AMDDevice(HCQCompiled):
       self.allocator._copyin(self.pmc_buffer, memoryview(bytearray(self.pmc_buffer.size))) # zero pmc buffers, some counters have only lo part.
 
     # SQTT is disabled by default because of runtime overhead and big file sizes (~200mb to Tensor.full() two 4096x4096 tensors and matmul them)
-    self.sqtt_enabled = PROFILE and SQTT > 0
+    self.sqtt_enabled:bool = PROFILE > 0 and SQTT > 0
     if self.sqtt_enabled:
       if self.target[0] not in {9, 11, 12}: raise RuntimeError(f'SQ Thread Tracing is not supported on gc:{self.target}')
       self.iface.require_profile_mode()

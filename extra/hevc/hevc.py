@@ -322,6 +322,7 @@ def parse_hevc_file_headers(dat:bytes, device="NV"):
     if hdr.slice_type == avcodec.HEVC_SLICE_B: device_ctx.initreflistidxl1 = (ctypes.c_uint8 * 16)(*[idx for _,idx in after_list + before_list])
 
     locl_ctx_bytes = bytes(device_ctx)
+    locl_ctx_bytes += b'\x00\x00\x00\x00\x00\x00\x00\x00\x10\x00\x00\x00' # blackwell extension
     locl_ctx_bytes += bytes(0x200 - len(locl_ctx_bytes)) # pad to 512 bytes
 
     pic_width_in_ctbs = ceildiv(sps.pic_width_in_luma_samples, (1 << sps.log2_max_luma_coding_block_size))
