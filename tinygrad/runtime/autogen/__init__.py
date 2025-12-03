@@ -5,6 +5,7 @@ root = (here:=pathlib.Path(__file__).parent).parents[2]
 nv_src = {"nv_570": "https://github.com/NVIDIA/open-gpu-kernel-modules/archive/81fe4fb417c8ac3b9bdcc1d56827d116743892a5.tar.gz",
           "nv_580": "https://github.com/NVIDIA/open-gpu-kernel-modules/archive/2af9f1f0f7de4988432d4ae875b5858ffdb09cc2.tar.gz"}
 ffmpeg_src = "https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.gz"
+rocr_src = "https://github.com/ROCm/rocm-systems/archive/refs/tags/rocm-7.1.1.tar.gz"
 macossdk = "/var/db/xcode_select_link/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
 
 def load(name, dll, files, **kwargs):
@@ -89,8 +90,11 @@ def __getattr__(nm):
         "os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libamd_comgr.so'", "'/usr/local/lib/libamd_comgr.dylib'", "'/opt/homebrew/lib/libamd_comgr.dylib'"
       ], ["/opt/rocm/include/amd_comgr/amd_comgr.h"], args=["-D__HIP_PLATFORM_AMD__", "-I/opt/rocm/include", "-x", "c++"])
     case "hsa": return load("hsa", ["os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libhsa-runtime64.so'", "find_library('hsa-runtime64')"], [
-      f"/opt/rocm/include/hsa/{s}.h" for s in ["hsa", "hsa_ext_amd", "amd_hsa_signal", "amd_hsa_queue", "amd_hsa_kernel_code", "hsa_ext_finalize",
-                                               "hsa_ext_image", "hsa_ven_amd_aqlprofile"] ], args=["-I/opt/rocm/include"])
+      *[f"{{}}/projects/rocr-runtime/runtime/hsa-runtime/core/inc/{s}.h" for s in ["registers"]],
+      *[f"{{}}/projects/rocr-runtime/runtime/hsa-runtime/inc/{s}.h" for s in ["hsa", "hsa_ext_amd", "amd_hsa_signal", "amd_hsa_queue",
+                                                                              "amd_hsa_kernel_code", "hsa_ext_finalize",
+                                                                              "hsa_ext_image", "hsa_ven_amd_aqlprofile"]]],
+      tarball=rocr_src, args=["-DLITTLEENDIAN_CPU"])
     case "amd_gpu": return load("amd_gpu", [], [root/f"extra/hip_gpu_driver/{s}.h" for s in ["sdma_registers", "nvd", "gc_11_0_0_offset",
                                                                                              "sienna_cichlid_ip_offset"]],
                                 args=["-I/opt/rocm/include", "-x", "c++"])

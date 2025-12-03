@@ -1,5 +1,5 @@
 import functools
-from tinygrad.device import Compiled, Compiler, Allocator
+from tinygrad.device import Compiled, Compiler, Allocator, CompilerSet, CompilerPair
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.renderer.cstyle import Renderer, CStyleLanguage
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
@@ -37,4 +37,4 @@ class NullDevice(Compiled):
       case "AMD_RDNA4": renderer = functools.partial(AMDLLVMRenderer, "gfx1201")
       case "": renderer = NullRenderer
       case _: raise RuntimeError(f"can't EMULATE device: {EMULATE.value}")
-    super().__init__(device, NullAllocator(self), [(renderer, Compiler)], functools.partial(NullProgram, device), NullGraph)
+    super().__init__(device, NullAllocator(self), CompilerSet([CompilerPair(renderer, Compiler)]), functools.partial(NullProgram, device), NullGraph)

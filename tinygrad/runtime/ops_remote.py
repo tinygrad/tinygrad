@@ -16,7 +16,7 @@ from tinygrad.uop.ops import UOp, Ops, Variable, sint
 from tinygrad.helpers import getenv, DEBUG, fromimport, unwrap, LazySeq, Timing
 from tinygrad.engine.jit import GraphRunner, MultiGraphRunner, ExecItem, graph_class
 from tinygrad.engine.realize import CompiledRunner, BufferXfer
-from tinygrad.device import Compiled, Buffer, Allocator, Compiler, Device, BufferSpec
+from tinygrad.device import Compiled, Buffer, Allocator, Compiler, Device, BufferSpec, CompilerSet, CompilerPair
 from tinygrad.runtime.support.ib import IBCtx, IBConn, SGE
 
 # ***** API *****
@@ -473,7 +473,7 @@ class RemoteDevice(Compiled):
     if not issubclass(renderer_class, Renderer): raise RuntimeError(f"renderer isn't a Renderer {renderer}")
 
     graph = fromimport('tinygrad.runtime.graph.remote', "RemoteGraph") if self.properties.graph_supported else None
-    compilers = [(functools.partial(renderer_class, *renderer[2]), Compiler)]
+    compilers = CompilerSet([CompilerPair(functools.partial(renderer_class, *renderer[2]), Compiler)])
     super().__init__(device, RemoteAllocator(self), compilers, functools.partial(RemoteProgram, self), graph, id(self.conn))
     self.renderer.device = device
 

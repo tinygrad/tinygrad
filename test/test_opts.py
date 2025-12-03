@@ -13,7 +13,7 @@ class TestOpts(unittest.TestCase):
     s = out.schedule()
     self.assertEqual(s[-1].ast.arg.opts_to_apply, opts)
     if Device.DEFAULT in {"CPU", "CL", "METAL"} and not CPU_LLVM and not CPU_LVP:
-      prg = get_program(s[-1].ast)
+      prg = get_program(s[-1].ast, renderer=Device[Device.DEFAULT].renderer)
       self.assertIn('float4', prg.src)
 
 if __name__ == '__main__':

@@ -1,5 +1,5 @@
 import functools, struct
-from tinygrad.device import  Compiled, Allocator, Compiler, BufferSpec
+from tinygrad.device import  Compiled, Allocator, Compiler, BufferSpec, CompilerSet, CompilerPair
 from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.helpers import round_up, suppress_finalizing
 from tinygrad.runtime.autogen import webgpu
@@ -215,7 +215,7 @@ class WebGpuDevice(Compiled):
     device_res = _run(webgpu.wgpuAdapterRequestDeviceF, webgpu.WGPURequestDeviceCallbackInfo, webgpu.WGPURequestDeviceCallback,
       webgpu.WGPURequestDeviceStatus, 1, 2, adapter_res, dev_desc)
 
-    super().__init__(device, WebGpuAllocator(device_res), [(WGSLRenderer, Compiler)],
+    super().__init__(device, WebGpuAllocator(device_res), CompilerSet([CompilerPair(WGSLRenderer, Compiler)]),
       functools.partial(WebGPUProgram, (device_res, webgpu.WGPUFeatureName_TimestampQuery in supported)))
 
   def synchronize(self):
