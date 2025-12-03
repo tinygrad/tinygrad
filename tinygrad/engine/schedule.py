@@ -175,7 +175,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
 
     # save in schedule cache
     tensor_map_sink = UOp.sink(*flatten([(k,v) for k,v in tensor_map.items()]))
-    schedule_cache[sched_cache_key] = (big_sink, tensor_map_sink)
+    #schedule_cache[sched_cache_key] = (big_sink, tensor_map_sink)
   else:
     # schedule cache hit
     del big_sink_cache
