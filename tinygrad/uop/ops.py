@@ -1006,8 +1006,8 @@ def upat_interpret(p:UPat, fxn:Callable) -> Callable:
   wants_ctx = 'ctx' in inspect.signature(real_fxn).parameters
   def universal_match(uop, ctx):
     for match in p.match(uop, {}):
-      if wants_ctx: match['ctx'] = ctx
-      if (ret:=real_fxn(**match)) is not None: return ret  # pylint: disable=not-callable
+      kwargs = {**match, 'ctx': ctx} if wants_ctx else match
+      if (ret:=real_fxn(**kwargs)) is not None: return ret  # pylint: disable=not-callable
     return None
   return universal_match
 
