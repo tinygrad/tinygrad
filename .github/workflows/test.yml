@@ -449,7 +449,7 @@ jobs:
         with:
           key: onnxoptl
           deps: testing
-          pydeps: "tensorflow==2.15.1 tensorflow_addons"
+          pydeps: "tensorflow==2.19"
           python-version: '3.11'
           opencl: 'true'
       - name: Test ONNX (CL)
