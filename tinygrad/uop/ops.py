@@ -663,7 +663,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       assert all_same([x.size for x in ret.bufs]) and all_same([x.dtype for x in ret.bufs]), "multibuffers mismatch buffers"
       return ret
     assert self.op is Ops.BUFFER, f"must be BUFFER {self.op}"
-    assert self.src[0].op is Ops.UNIQUE, "buffer src[0] must be UNIQUE"
+    assert self.src[0].op is Ops.UNIQUE, f"buffer src[0] must be UNIQUE, not {self.src[0].op}"
     if (cret:=buffers.get(self)) is not None: return cret
     rdtype = self.dtype if isinstance(self.dtype, ImageDType) else self.dtype.base
     if isinstance(self.device, tuple): ret = MultiBuffer(self.device, self.size, rdtype).ref(1)
@@ -672,8 +672,12 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return ret
   @property
   def realized(self) -> Buffer|MultiBuffer|None:
+    # only these can be realized
+    if self.op not in (Ops.BUFFER, Ops.MSTACK): return None
+    # LUNIQUEs are never realized
+    if self.op_in_backward_slice_with_self(Ops.LUNIQUE): return None
     # NOTE: this is used by the JIT to determine which inputs we capture
-    return self.buffer if self.op in {Ops.BUFFER, Ops.MSTACK} and self.buffer.is_allocated() else None
+    return self.buffer if self.buffer.is_allocated() else None
   @property
   def is_realized(self) -> bool:
     return all(x.base.realized is not None for x in self.base.src) if self.base.op is Ops.MULTI else self.base.realized is not None
