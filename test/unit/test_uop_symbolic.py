@@ -322,12 +322,12 @@ class TestSymbolic(unittest.TestCase):
   def test_mod_mod_wrong_sign(self):
     v1=Variable("v1", 0, 128)
     v3=Variable("v3", 0, 7)
-    self.helper_test_variable((((((v1%2)*2)+((v3+-1)%5))+-2)%5), -4, 4, "(((((v1%2)*2)+((v3+-1)%5))+-2)%5)")
+    self.helper_test_variable((((((v1%2)*2)+((v3+-1)%5))+-2)%5), -3, 4, "(v1%2*2+(v3+-1)%5+-2)")
 
   def test_mod_mod_wrong_sign2(self):
     v2=Variable("v2", 0, 8)
     v3=Variable("v3", 0, 4)
-    self.helper_test_variable((((((v3+3)%7)+(v2+-2))%7)%7), -6, 6, "(((v2+((v3+3)%7))+-2)%7)")
+    self.helper_test_variable((((((v3+3)%7)+(v2+-2))%7)%7), -2, 6, "(((v2+((v3+3)%7))+-2)%7)")
 
   def test_mul_mul(self):
     self.helper_test_variable((Variable("a", 0, 5)*10)*9, 0, 5*10*9, "(a*90)")
@@ -377,9 +377,9 @@ class TestSymbolic(unittest.TestCase):
   def test_big_mod(self):
     self.helper_test_variable(Variable("a", -20, 20)%10, -9, 9, "(a%10)")
     self.helper_test_variable(Variable("a", -20, 0)%10, -9, 0, "(((a*-1)%10)*-1)")
-    self.helper_test_variable(Variable("a", -20, 1)%10, -9, 9, "(a%10)")  # TODO: tighter max
+    self.helper_test_variable(Variable("a", -20, 1)%10, -9, 1, "(a%10)")
     self.helper_test_variable(Variable("a", 0, 20)%10, 0, 9, "(a%10)")
-    self.helper_test_variable(Variable("a", -1, 20)%10, -9, 9, "(a%10)")  # TODO: tighter min
+    self.helper_test_variable(Variable("a", -1, 20)%10, -1, 9, "(a%10)")
 
   def test_ge_remove(self):
     self.helper_test_variable(Variable("a", 0, 6) >= 25, 0, 0, "False")
