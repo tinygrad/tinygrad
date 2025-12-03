@@ -192,7 +192,7 @@ function tabulate(rows) {
   return root;
 }
 
-var data, focusedDevice, focusedShape, canvasZoom, formatTime, zoomLevel = d3.zoomIdentity;
+var data, focusedDevice, focusedShape, formatTime, canvasZoom, zoomLevel = d3.zoomIdentity;
 
 function selectShape(key) {
   if (key == null) return {};
@@ -254,7 +254,7 @@ async function renderProfiler(path, unit, opts) {
   displaySelection("#profiler");
   // support non realtime x axis units
   formatTime = unit === "realtime" ? formatMicroseconds : (s) => formatUnit(s, " "+unit);
-  if (data?.path !== path) data = {tracks:new Map(), axes:{}, path, first:null};
+  if (data?.path !== path) { data = {tracks:new Map(), axes:{}, path, first:null}; focusedDevice = null; focusedShape = null; }
   metadata.replaceChildren(getMetadata(focusedShape));
   // layout once!
   if (data.tracks.size !== 0) return updateProgress({ start:false });
@@ -376,7 +376,7 @@ async function renderProfiler(path, unit, opts) {
       for (const [num, {dtype, sz, nbytes, y, x:steps, users}] of buf_shapes) {
         const x = steps.map(s => timestamps[s]);
         const dur = x.at(-1)-x[0];
-        const arg = { tooltipText:`${dtype}\n${sz}\n${formatUnit(nbytes, 'B')}\n${formatTime(dur)}`, users, key:`${k}-${shapes.length}` };
+        const arg = { tooltipText:`${dtype}\n${formatUnit(sz)}\n${formatUnit(nbytes, 'B')}\n${formatTime(dur)}`, users, key:`${k}-${shapes.length}` };
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
         users?.forEach((u) => selectShape(u.shape).e?.arg.bufs.push({ key:arg.key, nbytes, num:u.num, mode:u.mode, k }));
       }
@@ -715,7 +715,6 @@ async function main() {
         const list = stack.length > 0 ? stack.at(-1).li : ul;
         u.li = list.appendChild(document.createElement("ul"));
         u.li.id = `step-${i}-${j}`
-        u.li.style.marginLeft = u.depth > 0 ? "calc(6px + 1ch)" : "6px";
         const p = u.li.appendChild(document.createElement("p"));
         p.appendChild(colored(`${u.name}`+(u.match_count ? ` - ${u.match_count}` : '')));
         p.onclick = (e) => {
@@ -761,38 +760,48 @@ async function main() {
     }
     displaySelection("#custom");
     metadata.innerHTML = "";
-    const root = d3.create("div").classed("raw-text", true).node();
+    const root = d3.create("div").classed("raw-text", true);
     // detailed assembly view
-    if (ret.cols != null) {
-      const asm = root.appendChild(document.createElement("table"));
-      const thead = asm.appendChild(document.createElement("thead"));
-      for (const c of ret.cols) thead.appendChild(document.createElement("th")).innerText = c.title ?? c;
+    function renderTable(root, ret) {
+      const table = root.append("table");
+      const thead = table.append("thead");
+      for (const c of ret.cols) thead.append("th").text(c.title ?? c);
       for (const r of ret.rows) {
-        const tr = asm.appendChild(document.createElement("tr"));
-        tr.className = "main-row code-row";
+        const tr = table.append("tr").classed("main-row", true);
         for (const [i,value] of r.entries()) {
-          // string format scalar values
-          if (!Array.isArray(value)) tr.appendChild(document.createElement("td")).innerText = value;
-          // display arrays in a bar graph
-          else {
-            const segmentsTd = tr.appendChild(document.createElement("td"));
-            segmentsTd.className = "pct-row";
-            const usageBar = segmentsTd.appendChild(document.createElement("div"));
-            for (const [k, v, width] of value) {
-              const seg = usageBar.appendChild(document.createElement("div"));
-              seg.style.width = width+"%";
-              seg.title = `${ret.cols[i].labels[k]} ${v}`;
-              seg.style.background = cycleColors(colorScheme.CATEGORICAL, parseInt(k));
-            }
+          // nested table
+          if (value.cols != null) {
+            tr.classed("has-children", true);
+            tr.on("click", () => {
+              const el = tr.node().nextElementSibling;
+              if (el?.classList.contains("nested-row")) { tr.classed("expanded", false); return el.remove(); }
+              tr.classed("expanded", true);
+              const td = table.insert("tr", () => tr.node().nextSibling).classed("nested-row", true).append("td");
+              td.attr("colSpan", ret.cols.length);
+              renderTable(td, value);
+            });
+            continue;
           }
+          const td = tr.append("td").classed(ret.cols[i], true);
+          // string format scalar values
+          if (!Array.isArray(value)) { td.text(value); continue; }
+          // display arrays in a bar graph
+          td.classed("pct-row", true);
+          const bar = td.append("div");
+          value.forEach(([k, v, width]) => bar.append("div").style("width", width+"%").attr("title", `${ret.cols[i].labels[k]} ${v}`)
+            .style("background", cycleColors(colorScheme.CATEGORICAL, parseInt(k))))
         }
       }
+      return table;
+    }
+    if (ret.cols != null) {
+      renderTable(root, ret);
       metadata.appendChild(tabulate(ret.summary.map(s => {
         const div = d3.create("div").style("background", cycleColors(colorScheme.CATEGORICAL, s.idx)).style("width", "100%").style("height", "100%");
         return [s.label.trim(), div.text(s.value.toLocaleString()).node()];
       })).node());
-    } else root.appendChild(codeBlock(ret.src, ret.lang || "txt"));
-    return document.querySelector("#custom").replaceChildren(root);
+    } else root.append(() => codeBlock(ret.src, ret.lang || "txt"));
+    return document.querySelector("#custom").replaceChildren(root.node());
   }
   // ** UOp view (default)
   // if we don't have a complete cache yet we start streaming rewrites in this step
