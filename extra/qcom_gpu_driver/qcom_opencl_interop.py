@@ -1,4 +1,4 @@
-import ctypes, array, numpy as np
+import ctypes, array
 from hexdump import hexdump
 from tinygrad.runtime.ops_cl import CLDevice
 from tinygrad.helpers import getenv, to_mv, mv_address
@@ -89,9 +89,7 @@ cl.clReleaseMemObject(cl_img)
 
 # from numpy
 import numpy as np
-from pathlib import Path
-from tinygrad.tensor import Tensor, dtypes
- 
+
 YUV_SIZE = 50
 a_np = (32*np.random.randn(YUV_SIZE).astype(np.float32) + 128).clip(0,255).astype(np.uint8)
 a = Tensor.from_blob(a_np.ctypes.data, (YUV_SIZE,), dtype=dtypes.uint8, device='QCOM').realize()
