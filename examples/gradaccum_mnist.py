@@ -27,8 +27,6 @@ def functional_adam(g:Tensor, m:Tensor, v:Tensor, b1_t:Tensor, b2_t:Tensor, lr=0
   return lr * (m_hat / (v_hat.sqrt() + eps))
 
 if __name__ == "__main__":
-  Tensor.manual_seed(1337)
-
   BS = getenv("BS", 512)
   ACC_STEPS = getenv("ACC_STEPS", 8)
 
@@ -55,9 +53,15 @@ if __name__ == "__main__":
   adam_b2_t = Tensor.ones((1,), dtype=dtypes.float32, device="CPU", requires_grad=False).contiguous()
   adam_params = [adam_m, adam_v, adam_b1_t, adam_b2_t]
 
+  # create loss and grads. init all state so the JIT works on microbatch
+  for x in params: x.assign(x.detach())
+  loss = Tensor.zeros(tuple()).contiguous()
+  grads = Tensor.zeros(pos_params[-1]).contiguous()
+  Tensor.realize(*params, *buffers, *adam_params, loss, grads)
+
   @TinyJit
   @Tensor.train()
-  def microbatch(loss: Tensor, grads: Tensor):
+  def microbatch():
     samples = Tensor.randint(BS // ACC_STEPS, high=X_train.shape[0])
     for t in params: t.grad = None
     # divide by ACC_STEPS at the loss
@@ -70,33 +74,34 @@ if __name__ == "__main__":
     Tensor.realize(*params, *buffers, loss, grads)
 
   @TinyJit
-  def get_test_acc() -> Tensor: return (model(X_test).argmax(axis=1) == Y_test).mean()*100
-
-  # init all state so the JIT works on microbatch
-  for x in params: x.assign(x.detach())
-  loss = Tensor.zeros(tuple()).contiguous()
-  grads = Tensor.zeros(pos_params[-1]).contiguous()
-  Tensor.realize(*params, *buffers, *adam_params, loss, grads)
-
-  test_acc = float('nan')
-  for i in (t:=trange(getenv("STEPS", 70))):
-    # microbatch sets the gradients
-    for _ in range(ACC_STEPS): microbatch(loss, grads)
-
-    # get the loss, it should be realized so this isn't a schedule
-    loss_item = loss.item()
-
+  def optimizer():
     # run optimizer (on CPU, where adam params live)
     delta = functional_adam(grads.to("CPU"), adam_m, adam_v, adam_b1_t, adam_b2_t)
 
     # update the params, copying back the delta one at a time to avoid OOM
+    # NOTE: the scheduler is ordering things poorly, all the copies are happening before the adds
     for j,tt in enumerate(params):
       tt.assign(tt.detach() - delta[pos_params[j]:pos_params[j+1]].reshape(tt.shape).to(Device.DEFAULT))
 
     # realize everything, zero out loss and grads
     loss.assign(Tensor.zeros_like(loss))
     grads.assign(Tensor.zeros_like(grads))
-    Tensor.realize(*params, *buffers, *adam_params, loss, grads)
+    Tensor.realize(*params, *adam_params, loss, grads)
+
+  @TinyJit
+  def get_test_acc() -> Tensor: return (model(X_test).argmax(axis=1) == Y_test).mean()*100
+
+  test_acc = float('nan')
+  for i in (t:=trange(getenv("STEPS", 70))):
+    # microbatch sets the gradients
+    for _ in range(ACC_STEPS): microbatch()
+
+    # get the loss because the optimizer clears it
+    # this is already realized so this isn't a schedule
+    loss_item = loss.item()
+
+    # run the optimizer
+    optimizer()
 
     # eval
     if i%10 == 9: test_acc = get_test_acc().item()
