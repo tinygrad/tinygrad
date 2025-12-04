@@ -22,7 +22,25 @@ from extra.sqtt.roc import decode, ProfileSQTTEvent
 
 # NOTE: INST runs before EXEC
 
-GOOD_OPCODE_NAMES = {
+OPCODE_COLORS = {
+  # dispatches are BLACK
+  0x1: "BLACK",
+  0x18: "BLACK",
+
+  # execs are yellow
+  0x2: "yellow",
+  0x3: "yellow",
+  0x4: "YELLOW",
+  0x5: "YELLOW",
+
+  # waves are blue
+  0x8: "blue",
+  0x9: "blue",
+  0x6: "cyan",
+  0xb: "cyan",
+}
+
+OPCODE_NAMES = {
   # gated by SQ_TT_TOKEN_EXCLUDE_VALUINST_SHIFT (but others must be enabled for it to show)
   0x01: "VALUINST",
   # gated by SQ_TT_TOKEN_EXCLUDE_VMEMEXEC_SHIFT
@@ -31,50 +49,112 @@ GOOD_OPCODE_NAMES = {
   0x03: "ALUEXEC",
   # gated by SQ_TT_TOKEN_EXCLUDE_IMMEDIATE_SHIFT
   0x04: "IMMEDIATE",
-  0x05: "IMMEDIATE_MULTIWAVE",
+  0x05: "IMMEDIATE_MASK",
+
   # gated by SQ_TT_TOKEN_EXCLUDE_WAVERDY_SHIFT
   0x06: "WAVERDY",
   # gated by SQ_TT_TOKEN_EXCLUDE_WAVESTARTEND_SHIFT
   0x08: "WAVEEND",
   0x09: "WAVESTART",
+  # gated by SQ_TT_TOKEN_EXCLUDE_WAVEALLOC_SHIFT
+  0x0B: "WAVEALLOC",  # FFF00
+
   # gated by NOT SQ_TT_TOKEN_EXCLUDE_PERF_SHIFT
   0x0D: "PERF",
-  # pure time
-  0x0F: "TS_DELTA_SHORT_PLUS4",     # short delta; ROCm adds +4 before accumulate
-  0x10: "NOP",
   # gated by SQ_TT_TOKEN_EXCLUDE_EVENT_SHIFT
   0x12: "EVENT",
-  # some gated by SQ_TT_TOKEN_EXCLUDE_REG_SHIFT, some always there
+  0x13: "EVENT_BIG",  # FFFFF800
+  # some gated by SQ_TT_TOKEN_EXCLUDE_REG_SHIFT, some always there. something is broken with the timing on this
   0x14: "REG",
-  # marker
-  0x16: "TS_DELTA36_OR_MARK",       # 36-bit long delta or 36-bit marker
-  # this is the first packet
-  0x17: "LAYOUT_MODE_HEADER",       # layout/mode/group + selectors A/B
   # gated by SQ_TT_TOKEN_EXCLUDE_INST_SHIFT
   0x18: "INST",
   # gated by SQ_TT_TOKEN_EXCLUDE_UTILCTR_SHIFT
   0x19: "UTILCTR",
-}
 
-OPCODE_NAMES = {
-  **GOOD_OPCODE_NAMES,
+  # this is the first (8 byte) packet in the bitstream
+  0x17: "LAYOUT_HEADER",       # layout/mode/group + selectors A/B (reversed)
 
-  # ------------------------------------------------------------------------
-  # 0x07–0x0F: pure timestamp-ish deltas
-  # ------------------------------------------------------------------------
-  0x07: "TS_DELTA_S8_W3",           # shift=8,  width=3  (small delta)
+  # pure time (no extra bits)
+  0x0F: "TS_DELTA_SHORT",
+  0x10: "NOP",
+  0x11: "TS_WAVE_STATE",     # almost pure time, has a small flag
+
+  # not a good name, but seen and understood mostly
+  0x15: "SNAPSHOT",          # small delta + 50-ish bits of snapshot
+  0x16: "TS_DELTA_OR_MARK",  # 36-bit long delta or 36-bit marker
+
+  # packets we haven't seen / rarely see 0x0b
+  0x07: "TS_DELTA_S8_W3_7",         # shift=8,  width=3  (small delta)
   0x0A: "TS_DELTA_S5_W2_A",         # shift=5,  width=2
-  0x0B: "TS_DELTA_S5_W3_A",         # shift=5,  width=3
   0x0C: "TS_DELTA_S5_W3_B",         # shift=5,  width=3 (different consumer)
-
-  # ------------------------------------------------------------------------
-  # 0x10–0x19: timestamps, layout headers, events, perf
-  # ------------------------------------------------------------------------
-
-  0x11: "TS_WAVE_STATE_SAMPLE",     # wave stall/termination sample (byte at +10)
-  0x13: "EVT_SMALL_GENERIC",        # same structural family as 0x08/0x12/0x19
-  0x15: "PERFCOUNTER_SNAPSHOT",     # small delta + 50-ish bits of snapshot
 }
+
+#  SALU    =  0x0 / s_mov_b32
+#  SMEM    =  0x1 / s_load_b*
+#  JUMP    =  0x3 / s_cbranch_scc0
+#  NEXT    =  0x4 / s_cbranch_execz
+#  MESSAGE =  0x9 / s_sendmsg
+#  VALU    =  0xb / v_(exp,log)_f32_e32
+#  VALU    =  0xd / v_lshlrev_b64
+#  VALU    =  0xe / v_mad_u64_u32
+#  VMEM    = 0x21 / global_load_b32
+#  VMEM    = 0x22 / global_load_b32
+#  VMEM    = 0x24 / global_store_b32
+#  VMEM    = 0x25 / global_store_b64
+#  VMEM    = 0x27 / global_store
+#  VMEM    = 0x28 / global_store_b64
+#  LDS     = 0x29 / ds_load_b128
+#  LDS     = 0x2b / ds_store_b32
+#  LDS     = 0x2e / ds_store_b128
+#  ????    = 0x5a / hidden global_load  instruction
+#  ????    = 0x5b / hidden global_load  instruction
+#  ????    = 0x5c / hidden global_store instruction
+#  VALU    = 0x73 / v_cmpx_eq_u32_e32 (not normal VALUINST)
+OPNAME = {
+  0x0: "SALU",
+  0x1: "SMEM",
+  0x3: "JUMP",
+  0x4: "NEXT",
+  0x9: "MESSAGE",
+  0xb: "VALU",
+  0xd: "VALU",
+  0xe: "VALU",
+  0x21: "VMEM_LOAD",
+  0x22: "VMEM_LOAD",
+  0x24: "VMEM_STORE",
+  0x25: "VMEM_STORE",
+  0x26: "VMEM_STORE",
+  0x27: "VMEM_STORE",
+  0x28: "VMEM_STORE",
+  0x29: "LDS_LOAD",
+  0x2b: "LDS_STORE",
+  0x2e: "LDS_STORE",
+  0x50: "__SIMD_LDS_LOAD",
+  0x51: "__SIMD_LDS_LOAD",
+  0x54: "__SIMD_LDS_STORE",
+  0x5a: "__SIMD_VMEM_LOAD",
+  0x5b: "__SIMD_VMEM_LOAD",
+  0x5c: "__SIMD_VMEM_STORE",
+  0x5d: "__SIMD_VMEM_STORE",
+  0x5e: "__SIMD_VMEM_STORE",
+  0x5f: "__SIMD_VMEM_STORE",
+  0x72: "SALU_OR",
+  0x73: "VALU_CMPX",
+}
+
+ALUSRC = {
+  1: "SALU",
+  2: "VALU",
+  3: "VALU_ALT",
+}
+
+MEMSRC = {
+  0: "LDS",
+  1: "__LDS",
+  2: "VMEM",
+  3: "__VMEM",
+}
+
 
 # these tables are from rocprof trace decoder
 # rocprof_trace_decoder_parse_data-0x11c6a0
@@ -201,13 +281,15 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       flag = (pkt >> 6) & 1
       wave = pkt >> 7
       fields.append(f"wave={wave:x}")
-      fields.append(f"flag={flag:X}")
+      if flag: fields.append("flag")
     case 0x02: # VMEMEXEC
       # 2 bit field (pipe is a guess)
-      fields.append(f"pipe={pkt>>6:X}")
+      src = pkt>>6
+      fields.append(f"src={src} [{MEMSRC.get(src, '')}]")
     case 0x03: # ALUEXEC
-      # 2 bit field (pipe is a guess)
-      fields.append(f"pipe={pkt>>6:X}")
+      # 2 bit field
+      src = pkt>>6
+      fields.append(f"src={src} [{ALUSRC.get(src, '')}]")
     case 0x04: # IMMEDIATE_4
       # 5 bit field (actually 4)
       wave = pkt >> 7
@@ -215,7 +297,12 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
     case 0x05: # IMMEDIATE_5
       # 16 bit field
       # 1 bit per wave
-      fields.append(f"mask={pkt>>8:16b}")
+      fields.append(f"mask={pkt>>8:016b}")
+    case 0x6:
+      # wave ready FFFF00
+      # 16 bit field
+      # 1 bit per wave
+      fields.append(f"mask={pkt>>8:016b}")
     case 0x0d:
       # 20 bit field
       fields.append(f"arg = {pkt>>8:X}")
@@ -226,8 +313,12 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
     case 0x19:
       # wave end
       fields.append(f"ctr = {pkt>>9:X}")
+    case 0xf:
+      extracted_delta = (reg >> 4) & 0xF
+      fields.append(f"strange_delta=0x{extracted_delta:x}")
     case 0x11:
       # DELTA_MAP_DEFAULT: shift=7, width=9 -> small delta.
+      # FF0000 is the mask
       coarse    = pkt >> 16
       fields.append(f"coarse=0x{coarse:02x}")
       # From decomp:
@@ -237,19 +328,15 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
         fields.append("flag_wave_interest=1")
       if coarse & 0x08:
         fields.append("flag_terminate_all=1")
-    case 0x6:
-      # wave ready
-      fields.append(f"wave = {pkt>>8:X}")
     case 0x8:
       # wave end, this is 20 bits (FFF00)
-      flag7   = (pkt >> 8) & 0x3
-      wgp     = (pkt >> 10) & 1
-      slot4   = (pkt >> 11) & 0xF
+      flag7   = (pkt >> 8) & 1
+      simd    = (pkt >> 9) & 3
+      cu      = ((pkt >> 11) & 0x7) | (flag7 << 3)
       wave    = (pkt >> 15) & 0x1f
       fields.append(f"wave={wave:x}")
-      fields.append(f"wgp={wgp}")
-      fields.append(f"flag7={flag7}")
-      fields.append(f"slot4={slot4:x}")
+      fields.append(f"simd={simd}")
+      fields.append(f"cu={cu}")
     case 0x9:
       # From case 9 (WAVESTART) in multiple consumers:
       #   flag7  = (w >> 7) & 1        (low bit of uVar41)
@@ -258,15 +345,14 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       #   idx_lo = (w >> 0xd) & 0x1f   (low index, layout<4 path)
       #   idx_hi = (w >> 0xf) & 0x1f   (high index, layout>=4 path)
       #   id7    = (w >> 0x19) & 0x7f  (7-bit id)
-      flag7   = (pkt >> 7) & 3
-      wgp     = (pkt >> 9) & 1
-      slot3   = (pkt >> 10) & 0x7  # NOTE: this isn't 4!
+      flag7   = (pkt >> 7) & 1
+      simd    = (pkt >> 8) & 3
+      cu      = ((pkt >> 10) & 0x7) | (flag7 << 3)
       wave    = (pkt >> 13) & 0x1F
       id7     = (pkt >> 17)
       fields.append(f"wave={wave:x}")
-      fields.append(f"flag7={flag7}")
-      fields.append(f"wgp={wgp}")
-      fields.append(f"slot3={slot3:x}")
+      fields.append(f"simd={simd}")
+      fields.append(f"cu={cu}")
       fields.append(f"id7=0x{id7:x}")
     case 0x18:
       # FFF88 is the mask
@@ -277,14 +363,14 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       #   hi8    = (w >> 0xc) & 0xff   (layout 4 path)
       #   hi7    = (w >> 0xd) & 0x7f   (other layouts)
       #   idx5   = (w >> 7) or (w >> 8) & 0x1f, used as wave index
-      flag = (pkt >> 3) & 1
+      flag1 = (pkt >> 3) & 1
       flag2 = (pkt >> 7) & 1
       wave = (pkt >> 8) & 0x1F
-      hi8 = (pkt >> 13)
+      op = (pkt >> 13)
       fields.append(f"wave={wave:x}")
-      fields.append(f"flag={flag:x}")
-      fields.append(f"flag2={flag2:x}")
-      fields.append(f"hi8=0x{hi8:x}")
+      fields.append(f"op=0x{op:02x} [{OPNAME.get(op, '')}]")
+      if flag1: fields.append("flag1")
+      if flag2: fields.append("flag2")
     case 0x14:
       subop   = (pkt >> 16) & 0xFFFF       # (short)(w >> 0x10)
       val32   = (pkt >> 32) & 0xFFFFFFFF   # (uint)(w >> 0x20)
@@ -349,21 +435,21 @@ def decode_packet_fields(opcode: int, reg: int) -> str:
       if layout == 4:
         fields.append(f"layout4_flag={flag4}")
     case _:
-      fields.append(f"& {reg_mask(opcode):X}")
+      fields.append(f"{pkt:X} & {reg_mask(opcode):X}")
   return ",".join(fields)
 
-FILTER_LEVEL = getenv("FILTER", 2)
+FILTER_LEVEL = getenv("FILTER", 1)
 
-DEFAULT_FILTER = tuple()
-# NOP + pure time
-if FILTER_LEVEL >= 0: DEFAULT_FILTER += (0x10, 0xf)
+DEFAULT_FILTER: tuple[int, ...] = tuple()
+# NOP + pure time + "sample"
+if FILTER_LEVEL >= 0: DEFAULT_FILTER += (0x10, 0xf, 0x11)
 # reg + event + sample + marker
 # TODO: events are probably good
-if FILTER_LEVEL >= 1: DEFAULT_FILTER += (0x11, 0x14, 0x16, 0x12)
-# instruction runs
-if FILTER_LEVEL >= 2: DEFAULT_FILTER += (0x02, 0x03)
-# instructions dispatch (inst, valuinst, immed)
-if FILTER_LEVEL >= 3: DEFAULT_FILTER += (0x01, 0x4, 0x5, 0x18)
+if FILTER_LEVEL >= 1: DEFAULT_FILTER += (0x14, 0x12, 0x16)
+# instruction runs + valuinst
+if FILTER_LEVEL >= 2: DEFAULT_FILTER += (0x01, 0x02, 0x03)
+# instructions dispatch (inst, immed)
+if FILTER_LEVEL >= 3: DEFAULT_FILTER += (0x4, 0x5, 0x18)
 # waves
 if FILTER_LEVEL >= 4: DEFAULT_FILTER += (0x6, 0x8, 0x9)
 
@@ -393,6 +479,7 @@ def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -
         nib = (byte >> (offset & 4)) & 0xF
         reg = ((reg >> 4) | (nib << 60)) & ((1 << 64) - 1)
         offset += 4
+      if offset != target: break  # don't parse past the end
 
     # 2) Decode token from low 8 bits
     opcode = STATE_TO_OPCODE[reg & 0xFF]
@@ -401,54 +488,48 @@ def parse_sqtt_print_packets(data: bytes, filter=DEFAULT_FILTER, verbose=True) -
     # 4) Set next nibble budget based on opcode
     nib_budget = NIBBLE_BUDGET[opcode & 0x1F]
 
-    # 5) Update time and handle special opcodes 0xF/0x16
+    # 5) Get delta
+    shift, width = DELTA_MAP_DEFAULT[opcode]
+    delta = (reg >> shift) & ((1 << width) - 1)
+
+    # 6) Update time and handle special opcodes 0xF/0x16
     if opcode == 0x16:
       two_bits = (reg >> 8) & 0x3
       if two_bits == 1:
         flags |= 0x01
 
       # Common 36-bit field at bits [12..47]
-
       if (reg & 0x200) == 0:
         # delta mode: add 36-bit delta to time
-        delta = (reg >> 12) & ((1 << 36) - 1)
-      else:
+        pass
+      elif (reg & 0x100) == 0:
         # marker / other modes: no time advance
-        if (reg & 0x100) == 0:
-          # real marker: bit9=1, bit8=0, non-zero payload
-          # "other" 0x16 variants, ignored for timing
-          delta = 0
-    else:
-      # 6) Generic opcode (including 0x0F)
-      shift, width = DELTA_MAP_DEFAULT[opcode]
-      delta = (reg >> shift) & ((1 << width) - 1)
-
+        # real marker: bit9=1, bit8=0, non-zero payload
+        # "other" 0x16 variants, ignored for timing
+        delta = 0
+      else:
+        raise RuntimeError("unknown 0x16 delta")
+    elif opcode == 0x0F:
       # opcode 0x0F has an offset of 4 to the delta
-      if opcode == 0x0F:
-        delta = delta + 4
+      # update: it's actually computed to be 8 to match WAVESTART
+      delta = delta + 8
 
     # Append extra decoded fields into the note string
     note = decode_packet_fields(opcode, reg)
 
-    if verbose and (filter is None or opcode not in filter):
-      print(
-        f"{token_index:4d}  "
-        f"time={time:8d}+{delta+(time-last_printed_time):8d}  "
-        f"op={opcode:2x} "
-        f"{OPCODE_NAMES[opcode]:24s} "
-        f"{reg&reg_mask(opcode):16X} "
-        f"{note}"
-      )
-      #f"off={offset//4:5d}  "
-      last_printed_time = time+delta
-
+    # this delta happens before the instruction
     time += delta
     token_index += 1
+
+    if verbose and (filter is None or opcode not in filter):
+      print(f"{time:8d} +{time-last_printed_time:8d} : "+colored(f"{OPCODE_NAMES[opcode]:18s} ", OPCODE_COLORS.get(opcode, "white"))+f"{note}")
+      last_printed_time = time
 
   # Optional summary at the end
   print(f"# done: tokens={token_index:_}, final_time={time}, flags=0x{flags:02x}")
   if verbose:
-    print(f"opcodes({len(opcodes_seen):2d}):", ' '.join([colored(f"{op:2X}", "white" if op in GOOD_OPCODE_NAMES else "red") for op in opcodes_seen]))
+    print(f"opcodes({len(opcodes_seen):2d}):",
+          ' '.join([colored(f"{op:2X}", "WHITE" if op in opcodes_seen else "BLACK") for op in sorted(opcode_mask)]))
 
 
 def parse(fn:str):

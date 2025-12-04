@@ -1,6 +1,6 @@
 import collections, time
 from typing import Any, cast
-from tinygrad.helpers import round_up, PROFILE, merge_dicts, getenv, dedup
+from tinygrad.helpers import round_up, PROFILE, merge_dicts, getenv, dedup, suppress_finalizing
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQSignal, HCQBuffer, HWQueue, HCQArgsState, BumpAllocator, MMIOInterface
 from tinygrad.device import Buffer, BufferSpec, Compiled, Device, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.dtype import dtypes
@@ -221,6 +221,7 @@ class HCQGraph(MultiGraphRunner):
 
   def dev_name(self, dev) -> str: return dev.device.replace(":", "_")
 
+  @suppress_finalizing
   def __del__(self):
     for dev in self.devices: self.last_timeline[dev][0].wait(self.last_timeline[dev][1])
 

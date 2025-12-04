@@ -3,7 +3,7 @@ import os, ctypes, functools, mmap, struct, array, math, sys, weakref, contextli
 assert sys.platform != 'win32'
 from types import SimpleNamespace
 from typing import Any, cast
-from tinygrad.device import BufferSpec, CompilerPairT
+from tinygrad.device import BufferSpec, CompilerSet, CompilerPair
 from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, BumpAllocator
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.runtime.autogen import kgsl, adreno
@@ -12,7 +12,7 @@ from tinygrad.renderer.cstyle import QCOMRenderer
 from tinygrad.renderer.nir import IR3Renderer
 from tinygrad.runtime.support.compiler_mesa import IR3Compiler
 from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, prod, fromimport, cpu_profile, lo32, PROFILE, suppress_finalizing
-from tinygrad.helpers import flatten
+from tinygrad.helpers import flatten, QCOM_IR3, QCOM_CC
 from tinygrad.runtime.support.system import System
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
@@ -56,6 +56,7 @@ class QCOMComputeQueue(HWQueue):
     self.dev = dev
     super().__init__()
 
+  @suppress_finalizing
   def __del__(self):
     if self.binded_device is not None: self.binded_device.allocator.free(self.hw_page, self.hw_page.size, BufferSpec(cpu_access=True, nolru=True))
 
@@ -397,8 +398,8 @@ class QCOMDevice(HCQCompiled):
     if PROFILE and self.gpu_id[:2] < (7, 3):
       System.write_sysfs("/sys/class/kgsl/kgsl-3d0/idle_timer", value="4000000000", msg="Failed to disable suspend mode", expected="4294967276")
 
-    compilers: list[CompilerPairT] = [(QCOMRenderer, functools.partial(QCOMCompiler, device)),
-                 (functools.partial(IR3Renderer, self), functools.partial(IR3Compiler, info.chip_id))]
+    compilers = CompilerSet(ctrl_var=QCOM_CC, cset=[CompilerPair(QCOMRenderer, functools.partial(QCOMCompiler, device)),
+                             CompilerPair(functools.partial(IR3Renderer, self), functools.partial(IR3Compiler, info.chip_id), QCOM_IR3)])
     super().__init__(device, QCOMAllocator(self), compilers, functools.partial(QCOMProgram, self), QCOMSignal,
                      functools.partial(QCOMComputeQueue, self), None)
 
