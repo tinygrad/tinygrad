@@ -19,6 +19,31 @@ class TestAutogen(unittest.TestCase):
     self.assertEqual(ctypes.sizeof(Bar), 12)
     self.assertEqual(ctypes.sizeof(Baz), 8)
 
+  @unittest.skipIf(WIN, "doesn't compile on windows")
+  def test_packed_struct_interop(self):
+    class Baz(Struct): pass
+    Baz._packed_ = True
+    Baz._fields_ = [('a', ctypes.c_int, 30), ('b', ctypes.c_int, 30), ('c', ctypes.c_int, 2), ('d', ctypes.c_int, 2)]
+    src = '''
+      struct __attribute__((packed)) baz {
+        int a:30;
+        int b:30;
+        int c:2;
+        int d:2;
+      };
+
+      int test(struct baz x) {
+        return x.a + x.b + x.c + x.d;
+      }
+    '''
+    args = ('-x', 'c', '-fPIC', '-shared')
+    with tempfile.NamedTemporaryFile(suffix=".so") as f:
+      subprocess.check_output(('clang',) + args + ('-', '-o', f.name), input=src.encode('utf-8'))
+      b = Baz(0xAA000, 0x00BB0, 0, 1)
+      test = ctypes.CDLL(f.name).test
+      test.argtypes = [Baz]
+      self.assertEqual(test(b), b.a + b.b + b.c + b.d)
+
   # https://github.com/python/cpython/issues/90914
   @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_bitfield_interop(self):
