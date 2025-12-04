@@ -222,7 +222,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     if isinstance(e, (ProfilePMCEvent, ProfileSQTTEvent)): counter_events.setdefault((e.kern, e.exec_tag), []).append(e)
   if not counter_events: return
   # ** init decoder
-  try: from extra.sqtt.roc import decode, print_pmc
+  try: from extra.sqtt.roc import decode
   except Exception: return err("DECODER IMPORT ISSUE")
   try: rctx = decode(profile)
   except Exception: return err("DECODER ERROR")
@@ -237,9 +237,6 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     # ** Run summary
     program = trace.keys[r].ret if (r:=ref_map.get(key[0])) else None
     summary = [f"{program.global_size=} {program.local_size=}"] if program else [repr(key)]
-    # ** PMC events
-    pmc_events = [e for e in counters if isinstance(e, ProfilePMCEvent)]
-    if pmc_events: summary.append("PMC:\n"+"\n".join([get_stdout(lambda: print_pmc(e)) for e in pmc_events]))
     # ** SQTT events
     disasm = rctx.disasms[key[0]]
     cu_events:dict[str, list[ProfileEvent]] = {}
@@ -272,6 +269,20 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
       for k in sorted(wave_insts.get(cu, []), key=row_tuple):
         data = wave_insts[cu][k]
         steps.append(create_step(k.replace(cu, ""), ("/sqtt-insts", len(ctxs), len(steps)), data, loc=data["loc"], depth=3))
+    # ** PMC events
+    if (pmc_event:=next((e for e in counters if isinstance(e, ProfilePMCEvent)), None)) is None: continue
+    agg_cols = ["Name", "Sum"]
+    sample_cols = ["XCC", "INST", "SE", "SA", "WGP", "Value"]
+    rows:list[list] = []
+    view, ptr = memoryview(pmc_event.blob).cast('Q'), 0
+    for s in pmc_event.sched:
+      row = [s.name, 0, {"cols":sample_cols, "rows":[]}]
+      for sample in itertools.product(range(s.xcc), range(s.inst), range(s.se), range(s.sa), range(s.wgp)):
+        row[1] += (val:=int(view[ptr]))
+        row[2]["rows"].append(sample+(val,))
+        ptr += 1
+      rows.append(row)
+    steps.append(create_step("PMC", ("/pmc", len(ctxs), len(steps)), {"rows":rows, "cols":agg_cols, "summary":[]}))
   ctxs.append({"name":"Counters", "steps":steps})
 
 def device_sort_fn(k:str) -> tuple[int, str, int]:

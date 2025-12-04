@@ -784,7 +784,7 @@ async function main() {
           }
           const td = tr.append("td").classed(ret.cols[i], true);
           // string format scalar values
-          if (!Array.isArray(value)) { td.text(value); continue; }
+          if (!Array.isArray(value)) { td.text(typeof value === "string" ? value : formatUnit(value)); continue; }
           // display arrays in a bar graph
           td.classed("pct-row", true);
           const bar = td.append("div");
