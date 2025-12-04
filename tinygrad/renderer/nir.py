@@ -1,11 +1,11 @@
 from typing import Callable, cast, Any
 from tinygrad.dtype import AddrSpace, DType, PtrDType, dtypes
-from tinygrad.helpers import DEBUG, OSX, unwrap
+from tinygrad.helpers import DEBUG, OSX, unwrap, charptr
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str
-import tinygrad.runtime.autogen.mesa as mesa
-import base64, ctypes, ctypes.util, struct, functools, inspect
+from tinygrad.runtime.autogen import mesa
+import base64, contextlib, ctypes, ctypes.util, struct, functools, inspect
 
 def g(s:str): return getattr(mesa, s)
 def nsrc(d:mesa.nir_def) -> mesa.nir_src: return mesa.nir_src(ssa=ctypes.pointer(d))
@@ -51,7 +51,7 @@ def nir_instr(nc=1, bs=lambda: None, intrins=None, srcs=None, has_def=True, df=N
       instr = f(*args, **kwargs)
       if has_def: mesa.nir_def_init(instr.contents.instr, getattr(instr.contents, "def"), go(nc), go(bs))
       for k, v in go(intrins or {}).items():
-        idx = mesa.nir_intrinsic_infos[instr.contents.intrinsic].index_map[g(f"NIR_INTRINSIC_{k}")]
+        idx = mesa.nir_intrinsic_infos[instr.contents.intrinsic.value].index_map[g(f"NIR_INTRINSIC_{k}")]
         assert idx > 0
         instr.contents.const_index[idx - 1] = go(v)
       for i, src in enumerate(go(srcs or [])): ctypes.cast(instr.contents.src, ctypes.POINTER(mesa.nir_src))[i] = go(src)
@@ -157,8 +157,7 @@ class NIRRenderer(Renderer):
   def __init__(self): mesa.glsl_type_singleton_init_or_ref()
 
   def __del__(self):
-    try: mesa.glsl_type_singleton_decref()
-    except FileNotFoundError: pass
+    with contextlib.suppress(AttributeError):mesa.glsl_type_singleton_decref()
 
   @property
   def nir_options(self): raise NotImplementedError("needs nir_options")
@@ -177,7 +176,7 @@ class NIRRenderer(Renderer):
       elif u.op is Ops.AFTER:
         self.r[u] = self.r[u.src[0]]
       elif u.op == Ops.SINK:
-        if u.arg is not None: self.b.shader.contents.info.name = mesa.char_pointer_cast(u.arg.function_name)
+        if u.arg is not None: self.b.shader.contents.info.name = charptr(u.arg.function_name.encode())
       elif u.op == Ops.DEFINE_LOCAL:
         self.r[u] = nimm(self.b, self.b.shader.contents.info.shared_size, dtypes.long)
         self.b.shader.contents.info.shared_size += u.dtype.nbytes()

@@ -176,9 +176,8 @@ class TestIndexing(unittest.TestCase):
     self.assertRaises(IndexError, lambda: reference[0.0, ..., 0.0:2.0])
     self.assertRaises(IndexError, lambda: reference[0.0, :, 0.0])
 
-    # TODO: delitem
-    # def delitem(): del reference[0]
-    # self.assertRaises(TypeError, delitem)
+    def delitem(): del reference[0]
+    self.assertRaises(TypeError, delitem)
 
   # TODO setitem backward
   '''
@@ -894,7 +893,7 @@ class TestNumpy(unittest.TestCase):
     a = Tensor([[1, 2, 3],
                 [4, 5, 6],
                 [7, 8, 9]])
-    self.assertIsNot(a[...], a)
+    self.assertIs(a[...], a)
     numpy_testing_assert_equal_helper(a[...], a)
     # `a[...]` was `a` in numpy <1.9.
     #numpy_testing_assert_equal_helper(data_ptr(a[...]), data_ptr(a))
@@ -1037,9 +1036,9 @@ class TestNumpy(unittest.TestCase):
     # Before `...` would return a itself.
     a = Tensor([5])
 
-    self.assertIsNot(a, a[()])
-    self.assertIsNot(a, a[...])
-    self.assertIsNot(a, a[:])
+    self.assertIs(a, a[()])
+    self.assertIs(a, a[...])
+    self.assertIs(a, a[:])
 
   def test_broaderrors_indexing(self):
     a = Tensor.zeros(5, 5)

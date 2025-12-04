@@ -1551,8 +1551,10 @@ class TestOps(unittest.TestCase):
                                 lambda x: Tensor.stack(*x.std_mean(axis=(1,2))))
 
   def test_std_mean_loaded_nan(self):
-    helper_test_op([(1,0,3,0,5)], lambda x: torch.stack(torch.std_mean(x, axis=(1,3))),
-                                  lambda x: Tensor.stack(*x.std_mean(axis=(1,3))))
+    with warnings.catch_warnings():
+      warnings.filterwarnings("ignore", message="std_mean\\(\\): degrees of freedom is <= 0")
+      helper_test_op([(1,0,3,0,5)], lambda x: torch.stack(torch.std_mean(x, axis=(1,3))),
+                                    lambda x: Tensor.stack(*x.std_mean(axis=(1,3))))
   def test_softmax(self):
     helper_test_op([(45,65)], torch.nn.Softmax(dim=1), Tensor.softmax, atol=1e-7, grad_atol=1e-7)
     helper_test_op([(45)], torch.nn.Softmax(dim=0), Tensor.softmax, atol=1e-7, grad_atol=1e-7)
@@ -2697,6 +2699,9 @@ class TestOps(unittest.TestCase):
     a = Tensor(3.14)
     np.testing.assert_allclose(Tensor.stack(a, a).numpy(), Tensor([3.14, 3.14]).numpy())
 
+  def test_stack_max(self):
+    helper_test_op(None, lambda x, y: torch.stack((x, y)).max(axis=0)[0], lambda x, y: Tensor.stack(x, y).max(axis=0), vals=[[1.], [2.]])
+
   def test_repeat(self):
     x = Tensor.randn(4, 6, 3)
     base_repeats = [2, 4, 3]
@@ -2724,6 +2729,9 @@ class TestOps(unittest.TestCase):
 
   def test_clip(self):
     helper_test_op([(45,65)], lambda x: x.clip(-2.3, 1.2))
+    # NOTE: torch set backward to 1 at the boundaries
+    # https://github.com/pytorch/pytorch/blob/7a41b66367c38d0af3e8a90f7be48d6b281e7bca/tools/autograd/derivatives.yaml#L421
+    helper_test_op(None, lambda x: x.clip(-2.5, 1.5), vals=[[-3.0, -2.5, 0, 1.5, 2]])
     helper_test_op([(45,65)], lambda x: x.clip(0, 0))
     helper_test_op([(45,65)], lambda x: x.clip(10, 100))
     helper_test_op([(45,65)], lambda x: x.clip(0, 0.1))
@@ -2820,13 +2828,13 @@ class TestOps(unittest.TestCase):
   @slow_test
   def test_slice_fancy_indexing_list_indices(self):
     a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
-    helper_test_op([(2,5,6,5,3,4)], lambda x: x[[[0]]], lambda x: x[[[0]]])
-    helper_test_op([(2,5,6,5,3,4)], lambda x: x[[0],b,c,d,:], lambda x: x[[0],j,k,o,:])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[((0,),)])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[(0,),b,c,d,:], lambda x: x[(0,),j,k,o,:])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[[[[0]]],b,c,d,[[1]]], lambda x: x[[[[0]]],j,k,o,[[1]]])
-    helper_test_op([(2,5,6,5,3,4)], lambda x: x[[1,0,-1],b,c,d,:], lambda x: x[[1,0,-1],j,k,o,:])
-    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,c,[1,2,3],...], lambda x: x[i,j,k,[1,2,3],...])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[(1,0,-1),b,c,d,:], lambda x: x[(1,0,-1),j,k,o,:])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,c,(1,2,3),...], lambda x: x[i,j,k,(1,2,3),...])
     helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,b,c,[[1],[2],[3]],...], lambda x: x[i,j,k,[[1],[2],[3]],...])
-    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,[2,1,0],c,[-2,1,0],e], lambda x: x[i,[2,1,0],k,[-2,1,0],p])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[a,(2,1,0),c,(-2,1,0),e], lambda x: x[i,(2,1,0),k,(-2,1,0),p])
 
   @slow_test
   def test_slice_fancy_indexing_tuple_indices(self):
@@ -2841,11 +2849,10 @@ class TestOps(unittest.TestCase):
   @slow_test
   def test_slice_fancy_indexing_list_with_tensors(self):
     a,b,c,d,e,i,j,k,o,p = self._get_index_randoms()
-    helper_test_op([(2,5,6,5,3,4)], lambda x: x[[a]], lambda x: x[[i]])
-    helper_test_op([(2,5,6,5,3,4)], lambda x: x[[a,1]], lambda x: x[[i,1]])
-    helper_test_op([(2,5,6,5,3,4)], lambda x: x[[a,[1,1]]], lambda x: x[[i,[1,1]]])
-    helper_test_op([(2,5,6,5,3,4)], lambda x: x[[a,(1,1)]], lambda x: x[[i,(1,1)]])
-    helper_test_op([(2,5,6,5,3,4)], lambda x: x[[a,b,c,d,e]], lambda x: x[[i,j,k,o,p]])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[(a,)], lambda x: x[(i,)])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[(a,1)], lambda x: x[(i,1)])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[(a,(1,1))], lambda x: x[(i,(1,1))])
+    helper_test_op([(2,5,6,5,3,4)], lambda x: x[(a,b,c,d,e)], lambda x: x[(i,j,k,o,p)])
 
   def test_slice_fancy_indexing_errors(self):
     a = Tensor.ones(10,11,12)

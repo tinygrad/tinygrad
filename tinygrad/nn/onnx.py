@@ -710,7 +710,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
 
   def Pad(x:Tensor, pads:list[int], constant_value:ConstType|None=None, axes:list[int]|None=None,
           mode:Literal["constant", "reflect", "edge", "wrap"]="constant", value=0):
-    value = constant_value or value
+    value = _resolve_const(constant_value or value)
     axes = axes or list(range(x.ndim))
     real_pads = [0] * (x.ndim*2)
     for i,axis in enumerate(axes): real_pads[axis%x.ndim], real_pads[axis%x.ndim+x.ndim] = pads[i], pads[i+len(axes)]
@@ -1124,6 +1124,16 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     return output.flatten(start_dim=2) if len(original_input_shape) == 3 else output.permute(0, 2, 1, 3)
 
   # ***** Indexing Ops *****
+  def NonZero(x:Tensor):
+    mask = (x!=0).flatten()
+    flat_idx = Tensor.arange(mask.numel(), dtype=dtypes.int64, device=x.device).masked_select(mask)
+    if flat_idx.ndim == 0: flat_idx = flat_idx.reshape(1)
+    if x.ndim == 0:
+      return Tensor.zeros((0, flat_idx.shape[0]), dtype=dtypes.int64, device=x.device, requires_grad=False)
+    strides = [prod(int(s) for s in x.shape[i+1:]) if i+1 < x.ndim else 1 for i in range(x.ndim)]
+    coords = [((flat_idx // stride) % int(dim)) for stride, dim in zip(strides, x.shape)]
+    return Tensor.stack(*coords, dim=0)
+
   def ArrayFeatureExtractor(x:Tensor, indices:Tensor): return x[..., indices]
 
   def Gather(x:Tensor, indices:Tensor, axis:int=0):
@@ -1148,7 +1158,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     b_idx = Tensor.arange(b, device=x.device).reshape(b, *(1,)*(indices.ndim - 2)).expand(*indices.shape[:-1])
     ret = x[(b_idx,) + tuple(i.squeeze(-1) for i in indices.split(1, -1))]
     return ret.reshape(*x_shape[:batch_dims], *i_shape[batch_dims:-1], *ret.shape[indices.ndim-1:])
-  def ScatterND(x:Tensor, indices:Tensor, updates:Tensor, reduction:Literal["none", "add", "mul"]='none'):
+  def ScatterND(x:Tensor, indices:Tensor, updates:Tensor, reduction:Literal["none", "add", "mul", "max", "min"]='none'):
     assert updates.shape == indices.shape[:-1] + x.shape[cast(int, indices.shape[-1]):]
     x = x.contiguous()
     for index, u in zip(indices.split(1, 0), updates.split(1, 0)):
@@ -1157,7 +1167,8 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       if reduction == "none": x[i] = u
       elif reduction == "add": x[i] += u
       elif reduction == "mul": x[i] *= u
-      else: raise NotImplementedError("reduction doesn't support max or min")
+      elif reduction == "max": x[i] = x[i].maximum(u)
+      elif reduction == "min": x[i] = x[i].minimum(u)
     return x
 
   def ScatterElements(x: Tensor, indices: Tensor, updates: Tensor, axis=0, reduction:Literal["none", "add", "mul", "min", "max"]="none"):

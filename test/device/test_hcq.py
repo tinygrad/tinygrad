@@ -224,7 +224,8 @@ class TestHCQ(unittest.TestCase):
   def test_copy_64bit(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
 
-    for sz in [(1 << 32) - 1, (1 << 32), (1 << 32) + 1, (5 << 30), (6 << 30) - 0x4642ee1]:
+    # NOTE: these must be a multiple of 8 for .view(fmt='Q') to work
+    for sz in [(1 << 32) - 8, (1 << 32), (1 << 32) + 8, (5 << 30), (6 << 30) - 0x4642ee0]:
       buf1 = Buffer(Device.DEFAULT, sz, dtypes.int8, options=BufferSpec(nolru=True)).ensure_allocated()
       buf2 = Buffer(Device.DEFAULT, sz, dtypes.int8, options=BufferSpec(host=True, nolru=True)).ensure_allocated()
 

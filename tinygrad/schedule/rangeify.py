@@ -1,8 +1,8 @@
 from dataclasses import dataclass, field
 import itertools
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, ssimplify, KernelInfo
-from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType, BottomUpGate, Kernel, _remove_all_tags
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo
+from tinygrad.uop.ops import track_rewrites, graph_rewrite, identity_element, sint, AxisType, BottomUpGate, Kernel, _remove_all_tags, range_str
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import argsort, prod, all_same, pluralize, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY
 from tinygrad.helpers import PCONTIG, partition, get_single_element, unwrap
@@ -117,7 +117,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 # 3.5 cleanups
 
 # Ops.NOOP happens when we have a COPY to the device the Tensor is already on. We treat it like COPY here for MSTACK.
-ALWAYS_RUN_OPS = {Ops.CONTIGUOUS, Ops.COPY, Ops.ASSIGN, Ops.NOOP}
+ALWAYS_RUN_OPS = {Ops.CONTIGUOUS, Ops.COPY, Ops.ASSIGN, Ops.ENCDEC, Ops.NOOP}
 
 # you don't know in the first pass if axes are going to die, this happens if there's an EXPAND to the left
 def cleanup_dead_axes(b:UOp):
@@ -152,7 +152,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   assert all(x.op in {Ops.RANGE, Ops.CONST} for x in buf.src[1:])
 
   # if it's user contiguous, we never remove it
-  if src.op in ALWAYS_RUN_OPS: return None
+  if src.op in ALWAYS_RUN_OPS or not buf.arg.removable: return None
 
   # we don't want to bufferize threefry, also causes problems because not all platforms support long
   if src.op is not Ops.THREEFRY:
@@ -177,7 +177,7 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
     accessed_buffers = dedup(accessed_buffers)
 
     # if this is generated from multiple buffers, don't remove this buffer
-    if len(accessed_buffers) > 2 and not (PCONTIG > 2): return None
+    if len(accessed_buffers) > 3 and not (PCONTIG > 2): return None
 
     # if any reduces access a buffer, don't remove this buffer
     buffer_in_reduce = False
@@ -238,13 +238,7 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
    lambda s: UOp.const(c.dtype, c.arg) if (c:=s.base).op is Ops.CONST else None),
 ])
 
-def pre_bufferize(b:UOp, x:UOp, copy:UOp):
-  nb = b.replace(src=(b.src[0].contiguous(),)+b.src[1:])
-  return copy.replace(src=(x.replace(src=(nb,)+x.src[1:]), copy.src[1]))
 pm_remove_bufferize = PatternMatcher([
-  # hack so remove_bufferize doesnt remove the buffer before a copy
-  (UPat(Ops.COPY, src=(UPat(GroupOp.All-{Ops.CONTIGUOUS, Ops.COPY}).f(Ops.BUFFERIZE, allow_any_len=True, name="b")
-                      .f(Ops.INDEX, allow_any_len=True, name="x"), UPat()), name="copy"), pre_bufferize),
   # remove reindexing with cost function
   (UPat.var("src").f(Ops.BUFFERIZE, allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_bufferize),
 ])
@@ -325,6 +319,18 @@ def bufferize_to_store(ctx:itertools.count|None, x:UOp, idx:UOp, allow_locals=Tr
     for m in mops[::-1]: ret = ret._mop(*m)
     return ret
 
+  # lower outerworld reduce here
+  if x.src[0].op is Ops.REDUCE and len(x.src[0].src) == 2 and x.src[0].src[1].arg[-1] == AxisType.OUTER:
+    assert sdtype.addrspace == AddrSpace.GLOBAL
+    outer_range = x.src[0].src[1]
+    buf = UOp.new_buffer(x.arg.device, size, x.dtype)
+    # NOTE: this has the same number as the outer range, we need string ranges!
+    zero_range = outer_range.replace(src=(UOp.const(dtypes.index, size),), arg=outer_range.arg[:-1]+(AxisType.LOOP,))
+    buf = buf.after(buf.index(zero_range).store(0).end(zero_range))
+    bufi = buf.index(idx, dtype=sdtype)
+    do_store = bufi.store(bufi.load() + x.src[0].src[0], tag=x.tag).end(*rngs).end(outer_range)
+    return buf.after(do_store)
+
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
     buf = UOp.new_buffer(x.arg.device, size, x.dtype)
@@ -344,7 +350,7 @@ def flatten_bufferize(x:UOp):
   rngs = x.src[1:]
   ret = ret.forced_reshape(x.shape)
   if any(r.op is Ops.RANGE and r.src[0].op is not Ops.CONST for r in rngs):
-    sym_shape = tuple([ssimplify(r.src[0]) if r.op is not Ops.CONST else 1 for r in rngs])
+    sym_shape = tuple([r.src[0] if r.op is not Ops.CONST else 1 for r in rngs])
     ret = ret.shrink(tuple([(0,x) for x in sym_shape]))
   return ret.rtag(x.tag)
 pm_flatten_bufferize = PatternMatcher([(UPat(Ops.BUFFERIZE, name="x"), flatten_bufferize)])
@@ -397,6 +403,9 @@ def handle_after(ctx:LocalAddBufferContext, after:UOp):
 
 def renumber_range(ctx:LocalAddBufferContext, r:UOp):
   if r.tag != (): return None
+  if r.arg[-1] == AxisType.OUTER:
+    # for outer range, we replace with a bound variable
+    return UOp.variable("range_"+range_str(r), r.vmin, r.vmax).bind(r.replace(tag=None))
   ret = r.replace(arg=(ctx.range,)+r.arg[1:], tag=None)
   ctx.range += 1
   return ret
@@ -469,7 +478,11 @@ pm_add_range_tags = PatternMatcher([
 ])
 
 def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
-  if len(x.ranges): return None
+  # if we have any outer ranges open here, we don't split
+  if len([r for r in x.ranges if r.arg[-1] != AxisType.OUTER]): return None
+
+  # ends of outer range don't go in kernels
+  if x.op is Ops.END and x.src[1].op is Ops.RANGE and x.src[1].arg[-1] == AxisType.OUTER: return None
 
   # local kernel rewrite
   lctx = LocalAddBufferContext()
@@ -481,7 +494,7 @@ def split_store(ctx:list[UOp], x:UOp) -> UOp|None:
   # NOTE: the hack for COPY is here
   for u in ret.toposort():
     # TODO: this can be wrong if there's multiple of these
-    if u.op in {Ops.COPY, Ops.BUFFER_VIEW}:
+    if u.op in {Ops.COPY, Ops.BUFFER_VIEW, Ops.ENCDEC}:
       ret = u
       break
   else:
@@ -504,7 +517,7 @@ def tag_uop(ctx:list[UOp], x:UOp):
   return x.replace(tag=(len(ctx)-1,))
 add_tags = PatternMatcher([
   # don't tag BUFFERs, they are global
-  (UPat(GroupOp.All-{Ops.BUFFER, Ops.CONST, Ops.DEVICE, Ops.UNIQUE, Ops.DEFINE_VAR, Ops.BIND, Ops.KERNEL,
+  (UPat(GroupOp.All-{Ops.BUFFER, Ops.CONST, Ops.DEVICE, Ops.UNIQUE, Ops.DEFINE_VAR, Ops.BIND, Ops.KERNEL, Ops.END,
                      Ops.MSTACK, Ops.MSELECT, Ops.RANGE}.union(GroupOp.Movement), name="x"), tag_uop),
   (UPat({Ops.MSTACK, Ops.MSELECT}, name="x"), lambda ctx,x: None if all(s.op is Ops.BUFFER for s in x.src) else tag_uop(ctx, x)),
 ])
@@ -536,8 +549,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   # convert movement ops to ranges
   tsink, rctx = run_rangeify(tsink, DEBUG_RANGEIFY)
 
-  tsink = graph_rewrite(tsink, symbolic+pm_reduce_simplify+pm_const_buffer_folding, name="symbolic+reduce_collapse")  # this does const folding
-  tsink = graph_rewrite(tsink, pm_remove_bufferize, bottom_up=True, name="remove bufferize with cost function")
+  tsink = graph_rewrite(tsink, symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize, name="symbolic+reduce_collapse+debuf")
   tsink = graph_rewrite(tsink, pm_limit_bufs, ctx=rctx, name="limit buffers")
 
   # rebuild the sink with all the BUFFERIZEs with tags, this is what's ending up in the tensor graph
@@ -566,11 +578,11 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
       assign_rep[a] = kernel_assign[s] = a.replace(src=a.src+(u,))
   if assign_rep: tsink = graph_rewrite(tsink, _substitute, ctx=assign_rep, bottom_up=True, name="fix_assign")
 
-  if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")
-
   # TODO: we can probably get this earlier
   sink_tags = [s.tag for s in tsink.src]
   tsink = graph_rewrite(tsink, _remove_all_tags, name="remove all tags")
+
+  if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")
 
   becomes_map: dict[UOp, UOp] = {}
   for tag, s in zip(sink_tags, tsink.src):

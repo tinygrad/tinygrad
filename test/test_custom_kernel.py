@@ -9,6 +9,11 @@ def custom_arange_kernel(C:UOp) -> UOp:
   i = UOp.range(C.size, 0)
   return C[i].store(i.cast(C.dtype.base)).end(i).sink(arg=KernelInfo(name=f"custom_arange_{C.size}"))
 
+def custom_eye_kernel(C:UOp) -> UOp:
+  i = UOp.range(C.shape[0], 0)
+  j = UOp.range(C.shape[1], 1)
+  return C[i, j].store((i.eq(j)).cast(C.dtype.base)).end(i, j).sink(arg=KernelInfo(name=f"custom_eye_{C.size}"))
+
 def custom_add_one_kernel(B:UOp, A:UOp) -> UOp:
   A,B = A.flatten(), B.flatten()
   assert B.size == A.size
@@ -59,6 +64,27 @@ def slice_sum_kernel(dest:UOp, src:UOp):
   ast = dest[G].set(reg[0], end=G)
   return ast.sink(arg=KernelInfo(name=f"slice_sum_{src.shape[0]}_{src.shape[1]}", opts_to_apply=()))
 
+def simple_qkv_kernel(O:UOp, Q:UOp, K:UOp, V:UOp) -> UOp:
+  # attention without softmax
+  N, d = Q.shape[0], Q.shape[1]
+
+  i = UOp.range(N, 0)  # output row
+  d_out = UOp.range(d, 1)  # output column
+  j = UOp.range(N, 2, axis_type=AxisType.REDUCE)
+
+  k_inner = UOp.range(d, 3, axis_type=AxisType.REDUCE)
+  qk_acc = UOp.placeholder((1,), Q.dtype.base, 0, addrspace=AddrSpace.REG)
+  qk_acc = qk_acc.after(i, j)[0].set(0.0)
+  qk_acc = qk_acc[0].set(qk_acc.after(k_inner)[0] + Q[i, k_inner] * K[j, k_inner], end=k_inner)
+  qk_score = qk_acc[0] / (d ** 0.5)
+
+  out_acc = UOp.placeholder((1,), Q.dtype.base, 1, addrspace=AddrSpace.REG)
+  out_acc = out_acc.after(i, d_out)[0].set(0.0)
+  out_acc = out_acc[0].set(out_acc.after(j)[0] + qk_score * V[j, d_out], end=j)
+
+  store = O[i, d_out].store(out_acc[0])
+  return store.end(d_out).end(i).sink(arg=KernelInfo(name=f"simple_qkv_{N}_{d}", opts_to_apply=()))
+
 # **** backward callbacks ****
 
 def backward_gemm(gradient:UOp, kernel:UOp) -> tuple[UOp, UOp]:
@@ -76,6 +102,11 @@ def backward_gemm_custom(gradient:UOp, kernel:UOp) -> tuple[UOp, UOp]:
 # **** tests ****
 
 class TestCustomKernel(unittest.TestCase):
+  def test_empty(self):
+    a = Tensor.empty(1)
+    a = Tensor.custom_kernel(a, fxn=lambda _: UOp.sink())[0]
+    a.realize()
+
   def test_simple(self):
     a = Tensor.ones(16, 16).contiguous()
     b = Tensor.ones(16, 16).contiguous()
@@ -104,6 +135,12 @@ class TestCustomKernel(unittest.TestCase):
     tst = tst.custom_kernel(fxn=custom_arange_kernel)[0]
     self.assertTrue((ref == tst).all().item())
 
+  def test_eye(self):
+    ref = Tensor.eye(1024).contiguous().realize()
+    tst = Tensor.empty_like(ref)
+    tst = tst.custom_kernel(fxn=custom_eye_kernel)[0]
+    self.assertTrue((ref == tst).all().item())
+
   def test_flip_contract(self):
     a = Tensor.randn(10,4)
     b = Tensor.empty_like(a)
@@ -118,9 +155,14 @@ class TestCustomKernel(unittest.TestCase):
     self.assertTrue((b_p1 == 3).all().item())
 
   def test_sum(self):
-    # TODO: this only works for float, and silently fails with int
     a = Tensor([1.0, 2, 3, 4, 5])
     tst = Tensor.empty(1)
+    b = Tensor.custom_kernel(tst, a, fxn=custom_sum)[0]
+    self.assertEqual(b.item(), 15)
+
+  def test_sum_int(self):
+    a = Tensor([1, 2, 3, 4, 5])
+    tst = Tensor.empty(1, dtype=a.dtype)
     b = Tensor.custom_kernel(tst, a, fxn=custom_sum)[0]
     self.assertEqual(b.item(), 15)
 
@@ -169,6 +211,20 @@ class TestCustomKernel(unittest.TestCase):
     self.assertLess(err.item(), 1e-6)
 
     err = (grad_b - real_grad_b).square().max()
+    self.assertLess(err.item(), 1e-6)
+
+  def test_simple_qkv(self):
+    N, d = 8, 4
+    Q = Tensor.randn(N, d)
+    K = Tensor.randn(N, d)
+    V = Tensor.randn(N, d)
+    O = Tensor.empty(N, d)
+
+    O_custom = Tensor.custom_kernel(O, Q, K, V, fxn=lambda o,q,k,v: simple_qkv_kernel(o,q,k,v))[0]
+    O_ref = ((Q @ K.T) / (d ** 0.5)) @ V
+
+    Tensor.realize(O_custom, O_ref)
+    err = (O_custom - O_ref).square().max()
     self.assertLess(err.item(), 1e-6)
 
 if __name__ == '__main__':

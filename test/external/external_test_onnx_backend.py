@@ -112,7 +112,6 @@ backend_test.exclude('test_dequantizelinear_e5m2_cpu')
 backend_test.exclude('test_dequantizelinear_float4e2m1_cpu')
 
 # we don't support indexes
-backend_test.exclude('test_nonzero_*')
 
 # no support for int pow
 backend_test.exclude('test_pow_types_int32_int32_cpu')
@@ -184,9 +183,6 @@ backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_value_only_mapping_cp
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_mapping_cpu') # bad data type string
 backend_test.exclude('test_if_opt_cpu') # ValueError: 13 is not a valid AttributeType
 backend_test.exclude('test_if_seq_cpu') # NotImplementedError: op='SequenceConstruct' is not supported
-
-backend_test.exclude('test_scatternd_min_cpu') # min not yet supported
-backend_test.exclude('test_scatternd_max_cpu') # max not yet supported
 
 # regression from removing StrEnum in Domain
 backend_test.exclude('test_adam_cpu')

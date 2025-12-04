@@ -1,11 +1,11 @@
 from __future__ import annotations
-import ctypes, collections, dataclasses, functools, os, hashlib, array
+import ctypes, collections, dataclasses, functools, hashlib, array
 from tinygrad.helpers import mv_address, getenv, DEBUG, fetch
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.amd import AMDReg, import_module, import_asic_regs
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager
-from tinygrad.runtime.support.system import System, PCIDevice, PCIDevImplBase
+from tinygrad.runtime.support.system import PCIDevice, PCIDevImplBase
 from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
@@ -122,8 +122,6 @@ class AMDev(PCIDevImplBase):
     self.pci_dev, self.devfmt, self.dma_regions = pci_dev, pci_dev.pcibus, dma_regions
     self.vram, self.doorbell64, self.mmio = self.pci_dev.map_bar(0), self.pci_dev.map_bar(2, fmt='Q'), self.pci_dev.map_bar(5, fmt='I')
 
-    self.lock_fd = System.flock_acquire(f"am_{self.devfmt}.lock")
-
     self._run_discovery()
     self._build_regs()
 
@@ -190,7 +188,6 @@ class AMDev(PCIDevImplBase):
     for ip in [self.sdma, self.gfx]: ip.fini_hw()
     self.smu.set_clocks(level=0)
     self.ih.interrupt_handler()
-    os.close(self.lock_fd)
 
   def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr
 
@@ -241,8 +238,6 @@ class AMDev(PCIDevImplBase):
     ihdr = am.struct_ip_discovery_header.from_address(ctypes.addressof(self.bhdr) + self.bhdr.table_list[am.IP_DISCOVERY].offset)
     assert self.bhdr.binary_signature == am.BINARY_SIGNATURE and ihdr.signature == am.DISCOVERY_TABLE_SIGNATURE, "discovery signatures mismatch"
 
-    # Mapping of HW IP to Discovery HW IP
-    hw_id_map = {am.__dict__[x]: int(y) for x,y in am.hw_id_map}
     self.regs_offset:dict[int, dict[int, tuple]] = collections.defaultdict(dict)
     self.ip_ver:dict[int, tuple[int, int, int]] = {}
 
@@ -254,7 +249,7 @@ class AMDev(PCIDevImplBase):
         ip = am.struct_ip_v4.from_address(ip_offset)
         ba = ((ctypes.c_uint64 if ihdr.base_addr_64_bit else ctypes.c_uint32) * ip.num_base_address).from_address(ip_offset + 8)
         for hw_ip in range(1, am.MAX_HWIP):
-          if hw_ip in hw_id_map and hw_id_map[hw_ip] == ip.hw_id:
+          if hw_ip in am.hw_id_map and am.hw_id_map[hw_ip] == ip.hw_id:
             self.regs_offset[hw_ip][ip.instance_number] = tuple(list(ba))
             self.ip_ver[hw_ip] = (ip.major, ip.minor, ip.revision)
 

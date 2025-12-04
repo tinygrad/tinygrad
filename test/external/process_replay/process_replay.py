@@ -14,7 +14,6 @@ try:
   from tinygrad.uop.ops import UOp, Ops, KernelInfo
   from tinygrad.codegen.opt import Opt
   from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm, BEAM
-  from tinygrad.device import Device
 except ImportError as e:
   print(repr(e))
   exit(int(ASSERT_DIFF))
@@ -37,6 +36,8 @@ def trunc_log(x):
 
 # user config
 SKIP_PROCESS_REPLAY = (k:="[skip_process_replay]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", "")
+# uncomment this to disable by default
+#SKIP_PROCESS_REPLAY = not ASSERT_DIFF and not ((k:="[p]") in os.getenv("COMMIT_MESSAGE", "") or k in os.getenv("PR_TITLE", ""))
 if REF == "master": SKIP_PROCESS_REPLAY = True
 class ProcessReplayWarning(Warning): pass
 
@@ -50,12 +51,10 @@ def replay_get_rangeify_map(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str,
     return "\n".join([f"{len(asts)} kernels", *asts])
   return to_str(new_sink), to_str(big_sink.substitute(ret)), (big_sink,)
 
-def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer|None=None, opts:list[Opt]|None=None) -> tuple[str, str, tuple[Any, ...]]:
+def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> tuple[str, str, tuple[Any, ...]]:
   # the ast.arg is non None if we are inside of search.py
   sink_arg = ast.arg or KernelInfo(opts_to_apply=tuple(opts) if opts is not None else p.applied_opts if BEAM>=1 else None)
   input_ast = ast.replace(arg=replace(sink_arg, name=p.name))
-  # if no renderer was provided, open the device to get it
-  if renderer is None: renderer = Device[p.device].renderer
   p2 = get_program(input_ast, renderer=renderer)
   def to_str(ret:ProgramSpec) -> str:
     # PYTHON renderer pickles UOps, first unpickle and decode here
@@ -65,7 +64,10 @@ def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer|None=None, opts
   ast_repr = codecs.decode(str(input_ast), "unicode_escape")
   return to_str(p2), to_str(p), (ast_repr, renderer)
 
-replayers: dict[str, Callable[..., tuple[str, str, tuple[Any, ...]]]] = {"get_rangeify_map":replay_get_rangeify_map, "get_program":replay_get_program}
+replayers: dict[str, Callable[..., tuple[str, str, tuple[Any, ...]]]] = {}
+replayers["get_program"] = replay_get_program
+# disable this for speed, does it ever find things?
+#replayers["get_rangeify_map"] = replay_get_rangeify_map
 
 # *** run replayers on captured rows and print diffs
 

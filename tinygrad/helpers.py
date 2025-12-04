@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
 import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools
 from dataclasses import dataclass, field
 from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload
@@ -114,6 +114,17 @@ def suppress_finalizing(func):
       if not getattr(sys, 'is_finalizing', lambda: True)(): raise # re-raise if not finalizing
   return wrapper
 
+def select_first_inited(candidates:Sequence[Callable[...,T]|Sequence[Callable[...,T]]], err_msg:str, cache:dict|None=None) -> tuple[T,...]|T:
+  excs = []
+  for typ in candidates:
+    if cache is not None and typ in cache: return cache[typ]
+    try:
+      x = tuple([cast(Callable, t)() for t in typ]) if isinstance(typ, Sequence) else cast(Callable, typ)()
+      if cache is not None: cache[typ] = x
+      return x
+    except Exception as e: excs.append(e)
+  raise ExceptionGroup(err_msg, excs)
+
 def unwrap_class_type(cls_t): return cls_t.func if isinstance(cls_t, functools.partial) else cls_t
 
 def pluralize(st:str, cnt:int): return f"{cnt} {st}"+('' if cnt == 1 else 's')
@@ -140,8 +151,10 @@ def temp(x:str, append_user:bool=False) -> str:
 class Context(contextlib.ContextDecorator):
   def __init__(self, **kwargs): self.kwargs = kwargs
   def __enter__(self):
-    self.old_context:dict[str, int] = {k:v.value for k,v in ContextVar._cache.items()}
-    for k,v in self.kwargs.items(): ContextVar._cache[k].value = v
+    self.old_context:dict[str, int] = {}
+    for k,v in self.kwargs.items():
+      self.old_context[k] = ContextVar._cache[k].value
+      ContextVar._cache[k].value = v
   def __exit__(self, *args):
     for k,v in self.old_context.items(): ContextVar._cache[k].value = v
 
@@ -166,19 +179,29 @@ TRANSCENDENTAL, NOLOCALS = ContextVar("TRANSCENDENTAL", 1), ContextVar("NOLOCALS
 SPLIT_REDUCEOP, NO_MEMORY_PLANNER, RING = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("NO_MEMORY_PLANNER", 0), ContextVar("RING", 1)
 PICKLE_BUFFERS, LRU = ContextVar("PICKLE_BUFFERS", 1), ContextVar("LRU", 1)
 CACHELEVEL, IGNORE_BEAM_CACHE, DEVECTORIZE = ContextVar("CACHELEVEL", 2), ContextVar("IGNORE_BEAM_CACHE", 0), ContextVar("DEVECTORIZE", 1)
-DISABLE_COMPILER_CACHE = ContextVar("DISABLE_COMPILER_CACHE", 0)
 VALIDATE_WITH_CPU, DISABLE_FAST_IDIV = ContextVar("VALIDATE_WITH_CPU", 0), ContextVar("DISABLE_FAST_IDIV", 0)
 CORRECT_DIVMOD_FOLDING, FUSE_OPTIM = ContextVar("CORRECT_DIVMOD_FOLDING", 0), ContextVar("FUSE_OPTIM", 0)
 ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE = ContextVar("ALLOW_DEVICE_USAGE", 1), ContextVar("MAX_BUFFER_SIZE", 0)
 EMULATE = ContextVar("EMULATE", "")
 CPU_COUNT = ContextVar("CPU_COUNT", max(1, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)))
-CPU_LLVM, CPU_LVP, AMD_LLVM = ContextVar("CPU_LLVM", 0), ContextVar("CPU_LVP", 0), ContextVar("AMD_LLVM", 1)
-VIZ = PROFILE = ContextVar("VIZ", 0)
+# Compilers
+CPU_LLVM, CPU_LVP, AMD_LLVM = ContextVar("CPU_LLVM", 0), ContextVar("CPU_LVP", 0), ContextVar("AMD_LLVM", 0)
+NV_PTX, CUDA_PTX, NV_NAK = ContextVar("NV_PTX", 0), ContextVar("CUDA_PTX", 0), ContextVar("NV_NAK", 0)
+AMD_CC, CPU_CC, NV_CC, CUDA_CC = ContextVar("AMD_CC", ""), ContextVar("CPU_CC", ""), ContextVar("NV_CC", ""), ContextVar("CUDA_CC", "")
+# VIZ implies PROFILE, but you can run PROFILE without VIZ
+VIZ = ContextVar("VIZ", 0)
+PROFILE = ContextVar("PROFILE", VIZ.value)
 SPEC = ContextVar("SPEC", 1)
 # TODO: disable by default due to speed
 IGNORE_OOB = ContextVar("IGNORE_OOB", 1)
 PCONTIG = ContextVar("PCONTIG", 0)  # partial contiguous in rangeify
 DEBUG_RANGEIFY = ContextVar("DEBUG_RANGEIFY", 0)
+# set to 1, this uses tuplize in the linearizer sort order
+TUPLE_ORDER = ContextVar("TUPLE_ORDER", 1)
+# set to 0 to disable the compiler cache
+CCACHE = ContextVar("CCACHE", 1)
+# allow tf32 to be used on NVIDIA GPUs
+ALLOW_TF32 = ContextVar("ALLOW_TF32", 0)
 
 @dataclass(frozen=True)
 class Metadata:
@@ -231,11 +254,29 @@ class Profiling(contextlib.ContextDecorator):
 
 def perf_counter_us() -> decimal.Decimal: return decimal.Decimal(time.perf_counter_ns())/1000
 
+@functools.cache
+def lines(fn) -> list[str]:
+  try:
+    with open(fn, encoding="utf-8") as f: return f.readlines()
+  except (FileNotFoundError, OSError): return []
+
+def printable(loc:tuple[str, int]) -> str:
+  try: return lines(loc[0])[loc[1]-1].strip()
+  except IndexError: return "<missing>"
+
+def get_stacktrace(frm, max_frames=30) -> tuple[tuple, ...]:
+  ret:list[tuple] = []
+  for i in range(max_frames):
+    if (frm:=frm.f_back) is None: break
+    ret.append(((fc:=frm.f_code).co_filename, frm.f_lineno, fc.co_name, printable((fc.co_filename, frm.f_lineno))))
+  return tuple(ret)
+
 @dataclass(frozen=True)
 class TracingKey:
   display_name:str                       # display name of this trace event
   keys:tuple[Any, ...]=()                # optional keys to search for related traces
   ret:Any=None
+  tb:tuple[tuple, ...]|None=field(default_factory=lambda: get_stacktrace(sys._getframe(1)) if VIZ else None)
 
 class ProfileEvent: pass
 
@@ -249,7 +290,7 @@ class ProfilePointEvent(ProfileEvent):
 
 cpu_events:list[ProfileEvent] = []
 @contextlib.contextmanager
-def cpu_profile(name:str|TracingKey, device="CPU", is_copy=False, display=True) -> Generator[ProfileRangeEvent, None, None]:
+def cpu_profile(name:str|TracingKey, device="TINY", is_copy=False, display=True) -> Generator[ProfileRangeEvent, None, None]:
   res = ProfileRangeEvent(device, name, perf_counter_us(), is_copy=is_copy)
   try: yield res
   finally:
@@ -258,6 +299,15 @@ def cpu_profile(name:str|TracingKey, device="CPU", is_copy=False, display=True) 
 
 def profile_marker(name:str, color="gray") -> None:
   cpu_events.append(ProfilePointEvent("TINY", "marker", None, {"name":name, "color":color}))
+
+if getenv("DEBUG_GC"):
+  gc_start: decimal.Decimal = perf_counter_us()
+  def my_gc_callback(phase, info):
+    global gc_start
+    if phase == 'start': gc_start = perf_counter_us()
+    elif phase == "stop":
+      cpu_events.append(ProfileRangeEvent("GC", f"collected: {info['collected']} (gen {info['generation']})", gc_start, perf_counter_us()))
+  if PROFILE: gc.callbacks.append(my_gc_callback)
 
 # *** universal database cache ***
 
@@ -331,14 +381,16 @@ def _ensure_downloads_dir() -> pathlib.Path:
   return pathlib.Path(cache_dir) / "downloads"
 
 def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip:bool=False,
-          allow_caching=not getenv("DISABLE_HTTP_CACHE")) -> pathlib.Path:
+          allow_caching=not getenv("DISABLE_HTTP_CACHE"), headers:dict[str, str]={}) -> pathlib.Path:
   if url.startswith(("/", ".")): return pathlib.Path(url)
   if name is not None and (isinstance(name, pathlib.Path) or '/' in name): fp = pathlib.Path(name)
-  else: fp = _ensure_downloads_dir() / (subdir or "") / ((name or hashlib.md5(url.encode('utf-8')).hexdigest()) + (".gunzip" if gunzip else ""))
+  else:
+    hh = "_"+hashlib.md5(("\n".join(f"{k.strip()}:{v.strip()}" for k,v in sorted(headers.items()))).encode("utf-8")).hexdigest() if headers else ""
+    fp = _ensure_downloads_dir() / (subdir or "") / ((name or hashlib.md5(url.encode('utf-8')).hexdigest()) + hh + (".gunzip" if gunzip else ""))
   if not fp.is_file() or not allow_caching:
     (_dir := fp.parent).mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "tinygrad 0.11.0"}), timeout=10) as r:
-      assert r.status == 200, r.status
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "tinygrad 0.11.0", **headers}), timeout=10) as r:
+      assert r.status in {200, 206}, r.status
       length = int(r.headers.get('content-length', 0)) if not gunzip else None
       readfile = gzip.GzipFile(fileobj=r) if gunzip else r
       progress_bar:tqdm = tqdm(total=length, unit='B', unit_scale=True, desc=f"{url}", disable=CI)
@@ -352,10 +404,16 @@ def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip
 
 # *** Exec helpers
 
+def system(cmd:str, **kwargs) -> str:
+  st = time.perf_counter()
+  ret = subprocess.check_output(cmd.split(), **kwargs).decode().strip()
+  if DEBUG >= 1: print(f"system: '{cmd}' returned {len(ret)} bytes in {(time.perf_counter() - st)*1e3:.2f} ms")
+  return ret
+
 def cpu_objdump(lib, objdump_tool='objdump'):
   with tempfile.NamedTemporaryFile(delete=True) as f:
     pathlib.Path(f.name).write_bytes(lib)
-    print(subprocess.check_output([objdump_tool, '-d', f.name]).decode('utf-8'))
+    print(system(f"{objdump_tool} -d {f.name}"))
 
 def capstone_flatdump(lib: bytes):
   try: import capstone
@@ -386,6 +444,7 @@ def to_mv(ptr:int, sz:int) -> memoryview: return memoryview((ctypes.c_uint8 * sz
 def mv_address(mv): return ctypes.addressof(ctypes.c_char.from_buffer(mv))
 def to_char_p_p(options: list[bytes], to_type=ctypes.c_char):
   return (ctypes.POINTER(to_type) * len(options))(*[ctypes.cast(ctypes.create_string_buffer(o), ctypes.POINTER(to_type)) for o in options])
+def charptr(s:str|bytes): return ctypes.cast(ctypes.c_char_p(s if isinstance(s, bytes) else s.encode()), ctypes.POINTER(ctypes.c_char))
 @functools.cache
 def init_c_struct_t(fields: tuple[tuple[str, type[ctypes._SimpleCData]], ...]):
   class CStruct(ctypes.Structure):
@@ -432,6 +491,13 @@ class tqdm(Generic[T]):
 
 class trange(tqdm):
   def __init__(self, n:int, **kwargs): super().__init__(iterable=range(n), total=n, **kwargs)
+
+class disable_gc(contextlib.ContextDecorator):
+  def __enter__(self):
+    self._was_enabled = gc.isenabled()
+    if self._was_enabled: gc.disable()
+  def __exit__(self, *exc):
+    if self._was_enabled: gc.enable()
 
 # *** universal support for code object pickling
 

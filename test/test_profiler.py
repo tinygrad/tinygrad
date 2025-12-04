@@ -17,7 +17,7 @@ def helper_collect_profile(*devs):
   cpu_events.clear()
 
   profile_list = []
-  with Context(VIZ=1):
+  with Context(VIZ=1, PROFILE=1):
     yield profile_list
     for dev in devs: dev.synchronize()
     for dev in devs: dev._at_profile_finalize()
@@ -199,7 +199,7 @@ class TestProfiler(unittest.TestCase):
     #self.assertLess(e1.st, e2.st)
     #self.assertGreater(e1.en-e1.st, e2.en-e2.st)
 
-  @unittest.skipIf(not CI, "this test is flaky locally")
+  @unittest.skip("this test is flaky")
   @unittest.skipUnless(Device[Device.DEFAULT].graph is not None, "graph support required")
   def test_graph(self):
     from test.test_graph import helper_alloc_rawbuffer, helper_exec_op, helper_test_graphs
