@@ -373,8 +373,8 @@ jobs:
         run: CL=1 python -m pytest -n=auto test/external/external_test_opt.py
       - name: Run fused optimizer tests
         run: |
-          CL=1 FUSE_OPTIM=0 python -m pytest -n=auto test/models/test_mnist.py test/test_optim.py
-          CL=1 FUSE_OPTIM=1 python -m pytest -n=auto test/models/test_mnist.py test/test_optim.py
+          CL=1 FUSE_OPTIM=0 python -m pytest -n=auto test/models/test_mnist.py test/test_optim.py test/test_schedule.py
+          CL=1 FUSE_OPTIM=1 python -m pytest -n=auto test/models/test_mnist.py test/test_optim.py test/test_schedule.py
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
