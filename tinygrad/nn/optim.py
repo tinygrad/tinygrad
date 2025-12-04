@@ -9,7 +9,7 @@ class Optimizer:
   Base class for all optimizers.
   """
   def __init__(self, params: list[Tensor], lr: float, fused=FUSE_OPTIM):
-    # if it's None, but being put into an optimizer, set it to True
+    # if requires_grad is None, but being put into an optimizer, set it to True
     for x in params:
       if x.requires_grad is None: x.requires_grad = True
 
@@ -51,6 +51,7 @@ class Optimizer:
                 - help: Consider setting Tensor.training=True before calling Optimizer.step().""")
     if self.fused:
       # optimizer fusion just concatenates all the buffers, runs the _step, then splits them back up
+      # NOTE: contiguous is for speed
       out, extra = self._step([Tensor.cat(*[t.flatten() for t in self.params], dim=0)],
                               [Tensor.cat(*[unwrap(t.grad).contiguous().flatten() for t in self.params], dim=0)])
       updated_params = [out[0][self.pos_params[i]:self.pos_params[i+1]].reshape(tt.shape) for i, tt in enumerate(self.params)]
