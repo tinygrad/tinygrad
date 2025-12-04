@@ -276,7 +276,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     rows:list[list] = []
     view, ptr = memoryview(pmc_event.blob).cast('Q'), 0
     for s in pmc_event.sched:
-      row = [s.name, 0, {"cols":sample_cols, "rows":[]}]
+      row:list = [s.name, 0, {"cols":sample_cols, "rows":[]}]
       for sample in itertools.product(range(s.xcc), range(s.inst), range(s.se), range(s.sa), range(s.wgp)):
         row[1] += (val:=int(view[ptr]))
         row[2]["rows"].append(sample+(val,))
