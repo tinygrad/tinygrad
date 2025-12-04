@@ -9,26 +9,47 @@ class Model(nn.Module):
     super().__init__()
     self.c1 = nn.Conv2d(1, 32, 5)
     self.c2 = nn.Conv2d(32, 32, 5)
-    self.bn1 = nn.BatchNorm2d(32)
     self.m1 = nn.MaxPool2d(2)
     self.c3 = nn.Conv2d(32, 64, 3)
     self.c4 = nn.Conv2d(64, 64, 3)
-    self.bn2 = nn.BatchNorm2d(64)
     self.m2 = nn.MaxPool2d(2)
     self.lin = nn.Linear(576, 10)
   def forward(self, x):
     x = nn.functional.relu(self.c1(x))
     x = nn.functional.relu(self.c2(x), 0)
-    x = self.m1(self.bn1(x))
+    x = self.m1(x)
     x = nn.functional.relu(self.c3(x), 0)
     x = nn.functional.relu(self.c4(x), 0)
-    x = self.m2(self.bn2(x))
+    x = self.m2(x)
     return self.lin(torch.flatten(x, 1))
 
 if __name__ == "__main__":
   if getenv("TINY_BACKEND"):
     import tinygrad.nn.torch  # noqa: F401
-    device = torch.device("tiny")
+    from extra.torch_backend.backend import unwrap, wrap
+    from torch._dynamo.backends.registry import register_backend
+    from torch._functorch.aot_autograd import aot_module_simplified
+    from torch._functorch._aot_autograd.utils import make_boxed_func
+    from tinygrad import Tensor, TinyJit
+
+    @register_backend
+    def tiny(gm:torch.fx.GraphModule, sample_inputs):
+      def my_compiler(gm:torch.fx.GraphModule, sample_inputs):
+        @TinyJit
+        def tiny_function(*args:Tensor):
+          outs = gm(*[wrap(x) for x in args])
+          if isinstance(outs, (list, tuple)):
+            for x in outs:
+              if x is not None: unwrap(x).realize()
+          else: unwrap(outs).realize()
+          return outs
+        def torch_function(*args:torch.Tensor):
+          tiny_outs = tiny_function(*[unwrap(x.tiny()) for x in args])
+          if isinstance(tiny_outs, (list, tuple)): return [x.cpu() if x is not None else None for x in tiny_outs]
+          return tiny_outs.cpu()
+        return make_boxed_func(torch_function)
+      return aot_module_simplified(gm, sample_inputs, decompositions={}, fw_compiler=my_compiler)
+    device = torch.device("cpu")
   else:
     device = torch.device({"METAL":"mps","NV":"cuda"}.get(Device.DEFAULT, "cpu"))
   if DEBUG >= 1: print(f"using torch backend {device}")
@@ -41,13 +62,13 @@ if __name__ == "__main__":
   if getenv("TORCHVIZ"): torch.cuda.memory._record_memory_history()
   model = Model().to(device)
   optimizer = optim.Adam(model.parameters(), 1e-3)
-
   loss_fn = nn.CrossEntropyLoss()
-  #@torch.compile
-  def step(samples):
-    X,Y = X_train[samples], Y_train[samples]
-    out = model(X)
-    loss = loss_fn(out, Y)
+
+  @torch.compile(backend="tiny" if getenv("TINY_BACKEND") else "inductor")
+  def forward_and_loss(X, Y): return loss_fn(model(X), Y)
+
+  def step(X, Y):
+    loss = forward_and_loss(X, Y)
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
@@ -55,8 +76,9 @@ if __name__ == "__main__":
 
   test_acc = float('nan')
   for i in (t:=trange(getenv("STEPS", 70))):
-    samples = torch.randint(0, X_train.shape[0], (512,))  # putting this in JIT didn't work well
-    loss = step(samples)
+    samples = torch.randint(0, X_train.shape[0], (512,))
+    X, Y = X_train[samples], Y_train[samples]
+    loss = step(X, Y)
     if i%10 == 9: test_acc = ((model(X_test).argmax(axis=-1) == Y_test).sum() * 100 / X_test.shape[0]).item()
     t.set_description(f"loss: {loss.item():6.2f} test_accuracy: {test_acc:5.2f}%")
 

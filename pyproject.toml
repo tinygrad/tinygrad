@@ -68,6 +68,7 @@ testing_minimal = [
   "pytest-split",
   "hypothesis",
   "z3-solver",
+  "ninja",
 ]
 testing_unit = ["tinygrad[testing_minimal]", "tqdm", "safetensors", "tabulate"]
 testing = [
