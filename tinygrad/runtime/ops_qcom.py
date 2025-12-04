@@ -176,8 +176,12 @@ class QCOMComputeQueue(HWQueue):
 
     self.reg(adreno.REG_A6XX_SP_CS_CONFIG, qreg.a6xx_sp_cs_config(enabled=True, nsamp=prg.samp_cnt, ntex=prg.tex_cnt, nibo=prg.ibo_cnt))
     if prg.NIR:
+      if prg.wgsz != 0xfc: self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST_CONSTANTS, state_src=adreno.SS6_DIRECT,
+                                                                                      state_block=adreno.SB6_CS_SHADER, dst_off=prg.wgsz, num_unit=1),
+                                    local_size[0], local_size[1], local_size[2], 0)
+
       self.reg(adreno.REG_A6XX_HLSQ_CS_CNTL_0,
-               qreg.a6xx_hlsq_cs_cntl_0(wgidconstid=prg.wgid, wgsizeconstid=0xfc, wgoffsetconstid=0xfc, localidregid=prg.lid),
+               qreg.a6xx_hlsq_cs_cntl_0(wgidconstid=prg.wgid, wgsizeconstid=prg.wgsz, wgoffsetconstid=0xfc, localidregid=prg.lid),
                qreg.a6xx_hlsq_cs_cntl_1(linearlocalidregid=0xfc, threadsize=adreno.THREAD64))
       self.cmd(adreno.CP_EXEC_CS, 0,
                qreg.cp_exec_cs_1(ngroups_x=global_size[0]), qreg.cp_exec_cs_2(ngroups_y=global_size[1]), qreg.cp_exec_cs_3(_ngroups_z=global_size[2]))
@@ -209,6 +213,7 @@ class QCOMArgsState(HCQArgsState):
 class IR3ArgsState(HCQArgsState):
   def __init__(self, buf:HCQBuffer, prg:QCOMProgram, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=()):
     super().__init__(buf, prg, bufs, vals=vals)
+    ctypes.memset(cast(int, self.buf.va_addr), 0, prg.kernargs_alloc_size)
     to_mv(self.buf.va_addr + prg.imm_off, len(prg.imm_vals))[:] = prg.imm_vals
 
     ubos, uavs = [b for b in bufs if b.texture_info is None], [b for b in bufs if b.texture_info is not None]
@@ -216,9 +221,9 @@ class IR3ArgsState(HCQArgsState):
 
     if prg.samp_cnt > 0: to_mv(self.buf.va_addr + prg.samp_off, len(prg.samplers) * 4).cast('I')[:] = array.array('I', prg.samplers)
     self.bind_sints_to_buf(*[b.va_addr for b in ubos], buf=self.buf, fmt='Q', offset=prg.buf_off)
+    self.bind_sints_to_buf(*vals, buf=self.buf, fmt='I', offset=prg.buf_off + len(ubos) * 8)
     self.bind_sints_to_buf(*flatten([b.texture_info.desc + ([0] * 8) for b in texs]), buf=self.buf, fmt='I', offset=prg.tex_off)
     self.bind_sints_to_buf(*flatten([b.texture_info.ibo + ([0] * 8) for b in ibos]), buf=self.buf, fmt='I', offset=prg.ibo_off)
-    self.bind_sints_to_buf(*vals, buf=self.buf, fmt='I', offset=prg.buf_off + len(ubos) * 8)
 
 class QCOMProgram(HCQProgram):
   def __init__(self, dev: QCOMDevice, name: str, lib: bytes):
@@ -226,8 +231,10 @@ class QCOMProgram(HCQProgram):
     self.name, self.lib, self.NIR = name, lib, isinstance(dev.compiler, IR3Compiler)
 
     if self.NIR:
+      from tinygrad.runtime.autogen import mesa
       v, cs, self.imm_vals, self.image = IR3Compiler.unpack_lib(lib)
       self.prg_offset, self.brnchstck, self.image_size, self.pvtmem, self.shmem = 0, v.branchstack, v.info.size, v.pvtmem_size, v.shared_size
+      self.wgsz = alloc.offset_vec4 * 4 + 8 if (alloc:=cs.allocs.consts[mesa.IR3_CONST_ALLOC_DRIVER_PARAMS]).size_vec4 else 0xfc
 
       self.wgid, self.lid = v.cs.work_group_id, v.cs.local_invocation_id # register ids
       self.buf_off, self.imm_off = cs.ubo_state.range[0].offset, cs.allocs.max_const_offset_vec4 * 16
