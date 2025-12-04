@@ -6,7 +6,7 @@ from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType, least_upper_dtype, Invalid, InvalidType, AddrSpace
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
-from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, to_function_name, cpu_profile, TracingKey, VIZ, SPEC, CI
+from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, VIZ, SPEC, CI
 from tinygrad.helpers import strip_parens, colored, ansilen, printable
 if TYPE_CHECKING:
   from tinygrad.device import Buffer, MultiBuffer
@@ -133,7 +133,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     except AttributeError: pass
   def __reduce__(self):
     args = [self.op, self.dtype, self.src, self.arg, self.tag, self.metadata]
-    if self.op is Ops.BUFFER and self.realized is not None: args.append(self.realized)
+    if self.op is Ops.BUFFER and self.realized is not None and PICKLE_BUFFERS: args.append(self.realized)
     return UOp, tuple(args)
   def replace(self, **kwargs) -> UOp:
     new_args = (kwargs.pop("op", self.op), kwargs.pop("dtype", self.dtype), kwargs.pop("src", self.src),
@@ -1071,11 +1071,18 @@ tracked_keys:list[TracingKey] = []
 tracked_ctxs:list[list[TrackedGraphRewrite]] = []
 _name_cnt:dict[str, itertools.count] = {}
 
+if getenv("CAPTURE_PROCESS_REPLAY"):
+  replay_capture: dict[str, bytes] = {}
+  import atexit
+  @atexit.register
+  def save_to_diskcache():
+    for k,v in replay_capture.items(): diskcache_put("process_replay", k, v, prepickled=True)
+
 def add_trace_group(kt:TracingKey) -> None:
   tracked_keys.append(kt)
   tracked_ctxs.append([])
 
-def track_rewrites(name:Callable[..., str|TracingKey]|bool=True):
+def track_rewrites(name:Callable[..., str|TracingKey]|bool=True, replay:bool=False):
   def _decorator(func):
     def __wrapper(*args, **kwargs):
       fn = key = func.__name__
@@ -1087,6 +1094,15 @@ def track_rewrites(name:Callable[..., str|TracingKey]|bool=True):
         assert isinstance(name_ret, (TracingKey, str)), f"name function returned {type(name_ret)}"
         tracked_keys[-1] = k = TracingKey(n:=tracked_keys[-1].display_name.replace(fn, name_ret), (n,)) if isinstance(name_ret, str) else name_ret
         e.name = TracingKey(k.display_name if isinstance(name_ret, str) else f"{fn} for {k.display_name}", k.keys)
+      if getenv("CAPTURE_PROCESS_REPLAY") and replay:
+        # find the unittest frame we're capturing in
+        frm = sys._getframe(1)
+        while (f_back:=frm.f_back) is not None and "unittest" not in f_back.f_code.co_filename: frm = f_back
+        loc = f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
+        # capture global context vars and all the args passed in
+        with Context(PICKLE_BUFFERS=0):
+          inputs = (fn, args, kwargs, ContextVar._cache)
+          replay_capture[hashlib.sha256(pickle.dumps(inputs)).hexdigest()] = pickle.dumps(inputs+(loc, ret))
       return ret
     return __wrapper
   return _decorator
