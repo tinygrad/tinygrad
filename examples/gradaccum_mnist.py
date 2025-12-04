@@ -96,7 +96,7 @@ if __name__ == "__main__":
     # microbatch sets the gradients
     for _ in range(ACC_STEPS): microbatch()
 
-    # get the loss because the optimizer clears it
+    # get the loss before the optimizer clears it
     # this is already realized so this isn't a schedule
     loss_item = loss.item()
 
