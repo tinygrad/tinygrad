@@ -19,30 +19,33 @@ class TestAutogen(unittest.TestCase):
     self.assertEqual(ctypes.sizeof(Bar), 12)
     self.assertEqual(ctypes.sizeof(Baz), 8)
 
+  # https://github.com/python/cpython/issues/90914
   @unittest.skipIf(WIN, "doesn't compile on windows")
-  def test_packed_struct_interop(self):
+  def test_bitfield_interop(self):
     class Baz(Struct): pass
-    Baz._packed_ = True
-    Baz._fields_ = [('a', ctypes.c_int, 30), ('b', ctypes.c_int, 30), ('c', ctypes.c_int, 2), ('d', ctypes.c_int, 2)]
-    src = '''
-      struct __attribute__((packed)) baz {
-        int a:30;
-        int b:30;
-        int c:2;
-        int d:2;
+    Baz._fields_ = [(chr(ord('a') + i), ctypes.c_bool, 1) for i in range(8)]
+    src = '''#include <stdbool.h>
+      struct baz {
+        bool a:1;
+        bool b:1;
+        bool c:1;
+        bool d:1;
+        bool e:1;
+        bool f:1;
+        bool g:1;
+        bool h:1;
       };
 
       int test(struct baz x) {
-        return x.a + x.b + x.c + x.d;
+        return x.c;
       }
     '''
     args = ('-x', 'c', '-fPIC', '-shared')
     with tempfile.NamedTemporaryFile(suffix=".so") as f:
       subprocess.check_output(('clang',) + args + ('-', '-o', f.name), input=src.encode('utf-8'))
-      b = Baz(0xAA000, 0x00BB0, 0, 1)
       test = ctypes.CDLL(f.name).test
       test.argtypes = [Baz]
-      self.assertEqual(test(b), b.a + b.b + b.c + b.d)
+      for i in range(8): self.assertEqual(test(Baz(*(j==i for j in range(8)))), i==2)
 
   @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_packed_structs(self):
