@@ -113,7 +113,7 @@ from tinygrad.engine.memory import memory_planner
 from tinygrad.schedule.rangeify import get_rangeify_map
 from tinygrad.schedule.multi import get_multi_map
 
-@track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[1]))}", True)
+@track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[1]))}")
 def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], list[ScheduleItem], dict[str, int]]:
   # big_sink srcs are all the Tensors
   st = time.perf_counter()

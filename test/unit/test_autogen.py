@@ -44,6 +44,34 @@ class TestAutogen(unittest.TestCase):
       test.argtypes = [Baz]
       self.assertEqual(test(b), b.a + b.b + b.c + b.d)
 
+  # https://github.com/python/cpython/issues/90914
+  @unittest.skipIf(WIN, "doesn't compile on windows")
+  def test_bitfield_interop(self):
+    class Baz(Struct): pass
+    Baz._fields_ = [(chr(ord('a') + i), ctypes.c_bool, 1) for i in range(8)]
+    src = '''#include <stdbool.h>
+      struct baz {
+        bool a:1;
+        bool b:1;
+        bool c:1;
+        bool d:1;
+        bool e:1;
+        bool f:1;
+        bool g:1;
+        bool h:1;
+      };
+
+      int test(struct baz x) {
+        return x.c;
+      }
+    '''
+    args = ('-x', 'c', '-fPIC', '-shared')
+    with tempfile.NamedTemporaryFile(suffix=".so") as f:
+      subprocess.check_output(('clang',) + args + ('-', '-o', f.name), input=src.encode('utf-8'))
+      test = ctypes.CDLL(f.name).test
+      test.argtypes = [Baz]
+      for i in range(8): self.assertEqual(test(Baz(*(j==i for j in range(8)))), i==2)
+
   @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_packed_structs(self):
     NvU32 = ctypes.c_uint32
