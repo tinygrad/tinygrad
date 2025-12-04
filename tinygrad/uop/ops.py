@@ -1076,7 +1076,8 @@ if getenv("CAPTURE_PROCESS_REPLAY"):
   import atexit, uuid
   @atexit.register
   def save_to_diskcache():
-    for v in replay_capture: diskcache_put("process_replay", str(uuid.uuid4()), v, prepickled=True)
+    uid = uuid.uuid4() # one id per process
+    for i,v in enumerate(replay_capture): diskcache_put("process_replay", f"{uid}_{i}", v, prepickled=True)
 
 def add_trace_group(kt:TracingKey) -> None:
   tracked_keys.append(kt)
