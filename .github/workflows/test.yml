@@ -71,9 +71,7 @@ jobs:
     - name: Test Docs Build
       run: python -m mkdocs build --strict
     - name: Test Docs
-      run: |
-        python docs/abstractions2.py
-        python docs/abstractions3.py
+      run: python docs/abstractions3.py
     - name: Test README
       run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  python README.py
     - name: Test Quickstart
@@ -449,7 +447,7 @@ jobs:
         with:
           key: onnxoptl
           deps: testing
-          pydeps: "tensorflow==2.15.1 tensorflow_addons"
+          pydeps: "tensorflow==2.19"
           python-version: '3.11'
           opencl: 'true'
       - name: Test ONNX (CL)

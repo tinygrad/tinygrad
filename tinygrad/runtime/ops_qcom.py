@@ -287,7 +287,7 @@ class QCOMAllocator(HCQAllocatorBase):
       pitch = round_up((real_stride:=imgw * 4 * options.image.itemsize), 1 << pitchalign) + pitch_add
       size = pitch * imgh
 
-    buf = HCQBuffer(options.external_ptr, size, owner=self.dev) if options.external_ptr else self.dev._gpu_alloc(size)
+    buf = self.dev._gpu_map(options.external_ptr, size) if options.external_ptr else self.dev._gpu_alloc(size)
 
     if options.image is not None:
       tex_fmt = adreno.FMT6_32_32_32_32_FLOAT if options.image.itemsize == 4 else adreno.FMT6_16_16_16_16_FLOAT
@@ -306,17 +306,17 @@ class QCOMAllocator(HCQAllocatorBase):
 
   def _copyin(self, dest:HCQBuffer, src:memoryview):
     stride, pitch = (src.nbytes, src.nbytes) if (ti:=cast(QCOMTextureInfo, dest.texture_info)) is None else (ti.real_stride, ti.pitch)
-    self._do_copy(mv_address(src), dest.va_addr, src.nbytes, stride, stride, pitch, f"TINY -> {self.dev.device}")
+    self._do_copy(mv_address(src), dest.cpu_view().addr, src.nbytes, stride, stride, pitch, f"TINY -> {self.dev.device}")
 
   def _copyout(self, dest:memoryview, src:HCQBuffer):
     self.dev.synchronize()
 
     stride, pitch = (src.size, src.size) if (ti:=cast(QCOMTextureInfo, src.texture_info)) is None else (ti.real_stride, ti.pitch)
-    self._do_copy(src.va_addr, mv_address(dest), src.size, stride, pitch, stride, f"{self.dev.device} -> TINY")
+    self._do_copy(src.cpu_view().addr, mv_address(dest), src.size, stride, pitch, stride, f"{self.dev.device} -> TINY")
 
   def _as_buffer(self, src:HCQBuffer) -> memoryview:
     self.dev.synchronize()
-    return to_mv(cast(int, src.va_addr), src.size)
+    return to_mv(src.cpu_view().addr, src.size)
 
   @suppress_finalizing
   def _free(self, opaque, options:BufferSpec):
@@ -367,11 +367,21 @@ class QCOMDevice(HCQCompiled):
     va_addr = self.fd.mmap(0, bosz, mmap.PROT_READ | mmap.PROT_WRITE, mmap.MAP_SHARED, alloc.id * 0x1000)
 
     if fill_zeroes: ctypes.memset(va_addr, 0, size)
-    return HCQBuffer(va_addr=va_addr, size=size, meta=alloc, view=MMIOInterface(va_addr, size, fmt='B'), owner=self)
+    return HCQBuffer(va_addr=va_addr, size=size, meta=(alloc, True), view=MMIOInterface(va_addr, size, fmt='B'), owner=self)
+
+  def _gpu_map(self, ptr:int, size:int) -> HCQBuffer:
+    ptr_aligned, size_aligned = (ptr & ~0xfff), round_up(size + (ptr & 0xfff), 0x1000)
+    try:
+      mapinfo = kgsl.IOCTL_KGSL_MAP_USER_MEM(self.fd, hostptr=ptr_aligned, len=size_aligned, memtype=kgsl.KGSL_USER_MEM_TYPE_ADDR)
+      return HCQBuffer(mapinfo.gpuaddr + (ptr - ptr_aligned), size=size, meta=(mapinfo, False), view=MMIOInterface(ptr, size, fmt='B'), owner=self)
+    except OSError as e:
+      if e.errno == 14: return HCQBuffer(va_addr=ptr, size=size, meta=(None, False), view=MMIOInterface(ptr, size, fmt='B'), owner=self)
+      raise RuntimeError("Failed to map external pointer to GPU memory") from e
 
   def _gpu_free(self, mem:HCQBuffer):
-    kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=mem.meta.id)
-    FileIOInterface.munmap(mem.va_addr, mem.meta.mmapsize)
+    if mem.meta[0] is None: return
+    kgsl.IOCTL_KGSL_GPUOBJ_FREE(self.fd, id=mem.meta[0].id)
+    if mem.meta[1]: FileIOInterface.munmap(mem.va_addr, mem.meta[0].mmapsize)
 
   def _ensure_stack_size(self, sz):
     if not hasattr(self, '_stack'): self._stack = self._gpu_alloc(sz)

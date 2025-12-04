@@ -481,6 +481,20 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
     np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
 
+  #https://github.com/pytorch/pytorch/blob/d38164a545b4a4e4e0cf73ce67173f70574890b6/torch/nn/modules/module.py#L2425
+  def test_load_conv_num_batches_tracked(self):
+    layer = BatchNorm(sz=1, track_running_stats=False)
+    state_dict = {
+      'weight': Tensor.ones(1),
+      'bias': Tensor.ones(1),
+      'num_batches_tracked': Tensor.ones(1),
+    }
+    load_state_dict(layer, state_dict)
+    state_dict['num_batches_tracked'] = Tensor.empty()
+    load_state_dict(layer, state_dict)
+    layer.num_batches_tracked = Tensor.ones(1)
+    load_state_dict(layer, state_dict)
+
   @needs_second_gpu
   @unittest.skipIf(not_support_multi_device(), "no multi")
   def test_load_state_dict_sharded_model(self):
