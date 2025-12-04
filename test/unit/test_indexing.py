@@ -176,9 +176,8 @@ class TestIndexing(unittest.TestCase):
     self.assertRaises(IndexError, lambda: reference[0.0, ..., 0.0:2.0])
     self.assertRaises(IndexError, lambda: reference[0.0, :, 0.0])
 
-    # TODO: delitem
-    # def delitem(): del reference[0]
-    # self.assertRaises(TypeError, delitem)
+    def delitem(): del reference[0]
+    self.assertRaises(TypeError, delitem)
 
   # TODO setitem backward
   '''
