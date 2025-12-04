@@ -8,6 +8,7 @@ import numpy as np
 from tinygrad import Tensor, Context, Device
 from tinygrad.uop.ops import UOp, KernelInfo, AxisType
 from tinygrad.runtime.ops_amd import ProfilePMCEvent
+from extra.sqtt.roc import print_pmc
 
 def copy_kernel(B, A, stride=1):
   n_threads = 32
@@ -39,6 +40,7 @@ class TestPMC(unittest.TestCase):
     b = Tensor.custom_kernel(b, a, fxn=functools.partial(copy_kernel, stride=stride))[0]
     with save_pmc() as pmc:
       b.realize()
+    print_pmc(pmc[0])
     np.testing.assert_equal(a.numpy(), b.numpy())
 
   def test_copy_uncoalesced(self): return self.test_copy(stride=17)
