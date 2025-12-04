@@ -316,7 +316,7 @@ class QCOMAllocator(HCQAllocatorBase):
 
   def _as_buffer(self, src:HCQBuffer) -> memoryview:
     self.dev.synchronize()
-    return to_mv(cast(int, src.cpu_view().addr), src.size)
+    return to_mv(src.cpu_view().addr, src.size)
 
   @suppress_finalizing
   def _free(self, opaque, options:BufferSpec):
@@ -376,6 +376,7 @@ class QCOMDevice(HCQCompiled):
       return HCQBuffer(mapinfo.gpuaddr + (ptr - ptr_aligned), size=size, meta=(mapinfo, False), view=MMIOInterface(ptr, size, fmt='B'), owner=self)
     except OSError as e:
       if e.errno == 14: return HCQBuffer(va_addr=ptr, size=size, meta=(None, False), view=MMIOInterface(ptr, size, fmt='B'), owner=self)
+      raise RuntimeError("Failed to map external pointer to GPU memory") from e
 
   def _gpu_free(self, mem:HCQBuffer):
     if mem.meta[0] is None: return
