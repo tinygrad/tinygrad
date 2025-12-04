@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
-import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools
+import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools, atexit
 from dataclasses import dataclass, field
 from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload
 
@@ -202,6 +202,15 @@ TUPLE_ORDER = ContextVar("TUPLE_ORDER", 1)
 CCACHE = ContextVar("CCACHE", 1)
 # allow tf32 to be used on NVIDIA GPUs
 ALLOW_TF32 = ContextVar("ALLOW_TF32", 0)
+
+# enable process replay capture
+
+CAPTURE_PROCESS_REPLAY = getenv("CAPTURE_PROCESS_REPLAY", 0)
+process_replay_capture:list = []
+if CAPTURE_PROCESS_REPLAY:
+  @atexit.register
+  def save_to_diskcache():
+    for i,v in enumerate(process_replay_capture): diskcache_put("process_replay", i, v)
 
 @dataclass(frozen=True)
 class Metadata:
