@@ -16,10 +16,10 @@ class Model(nn.Module):
     self.lin = nn.Linear(576, 10)
   def forward(self, x):
     x = nn.functional.relu(self.c1(x))
-    x = nn.functional.relu(self.c2(x), 0)
+    x = nn.functional.relu(self.c2(x))
     x = self.m1(x)
-    x = nn.functional.relu(self.c3(x), 0)
-    x = nn.functional.relu(self.c4(x), 0)
+    x = nn.functional.relu(self.c3(x))
+    x = nn.functional.relu(self.c4(x))
     x = self.m2(x)
     return self.lin(torch.flatten(x, 1))
 
@@ -65,10 +65,10 @@ if __name__ == "__main__":
   loss_fn = nn.CrossEntropyLoss()
 
   @torch.compile(backend="tiny" if getenv("TINY_BACKEND") else "inductor")
-  def forward_and_loss(X, Y): return loss_fn(model(X), Y)
+  def forward_and_loss(X): return model(X)
 
   def step(X, Y):
-    loss = forward_and_loss(X, Y)
+    loss = loss_fn(forward_and_loss(X), Y)
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
