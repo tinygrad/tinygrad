@@ -1072,11 +1072,11 @@ tracked_ctxs:list[list[TrackedGraphRewrite]] = []
 _name_cnt:dict[str, itertools.count] = {}
 
 if getenv("CAPTURE_PROCESS_REPLAY"):
-  replay_capture: dict[str, bytes] = {}
+  replay_capture: list[bytes] = []
   import atexit
   @atexit.register
   def save_to_diskcache():
-    for k,v in replay_capture.items(): diskcache_put("process_replay", k, v, prepickled=True)
+    for i,v in enumerate(replay_capture): diskcache_put("process_replay", i, v, prepickled=True)
 
 def add_trace_group(kt:TracingKey) -> None:
   tracked_keys.append(kt)
@@ -1100,9 +1100,8 @@ def track_rewrites(name:Callable[..., str|TracingKey]|bool=True, replay:bool=Fal
         while (f_back:=frm.f_back) is not None and "unittest" not in f_back.f_code.co_filename: frm = f_back
         loc = f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
         # capture global context vars and all the args passed in
-        with Context(PICKLE_BUFFERS=0):
-          inputs = (fn, args, kwargs, ContextVar._cache)
-          replay_capture[hashlib.sha256(pickle.dumps(inputs)).hexdigest()] = pickle.dumps(inputs+(loc, ret))
+        inputs = (fn, args, kwargs, ContextVar._cache)
+        replay_capture.append(pickle.dumps(inputs+(loc, ret)))
       return ret
     return __wrapper
   return _decorator
