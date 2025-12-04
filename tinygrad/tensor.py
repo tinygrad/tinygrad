@@ -27,7 +27,7 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str) -> None:
     # get tensors in scope
     in_scope: dict[UOp, bool] = {}
     def visitor(node: UOp) -> bool: return True if node in applied_map else any(in_scope.get(s, False) for s in node.src)
-    scope_tensors = [t for tref in list(all_tensors) if (t:=tref()) is not None and t.uop.topovisit(visitor, in_scope)]
+    scope_tensors: list[Tensor] = [t for tref in list(all_tensors) if (t:=tref()) is not None and t.uop.topovisit(visitor, in_scope)]
 
     # get all Tensors and apply the map
     sink = UOp.sink(*[t.uop for t in scope_tensors])
@@ -242,6 +242,8 @@ class Tensor(OpMixin):
     NOTE: A Tensor can only be scheduled once.
     """
     big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
+
+    # this is where the schedule cache should go
     becomes_map, schedule, var_vals = complete_create_schedule_with_vars(big_sink)
     _apply_map_to_tensors(becomes_map, name="Apply Schedule Map")
     return schedule, var_vals
@@ -1254,6 +1256,9 @@ class Tensor(OpMixin):
     else: # no copy, basic setitem
       v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
       res.assign(v).realize()
+
+  def __delitem__(self, indices) -> None:
+    raise TypeError("Tensor does not support deleting items")
 
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
     """
