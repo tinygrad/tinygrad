@@ -282,7 +282,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
         row[2]["rows"].append(sample+(val,))
         ptr += 1
       rows.append(row)
-    steps.append(create_step("PMC", ("/pmc", len(ctxs), len(steps)), {"rows":rows, "cols":agg_cols, "summary":[]}))
+    steps.append(create_step("PMC", ("/pmc", len(ctxs), len(steps)), {"rows":rows, "cols":agg_cols, "summary":[]}, depth=2))
   ctxs.append({"name":"Counters", "steps":steps})
 
 def device_sort_fn(k:str) -> tuple[int, str, int]:
