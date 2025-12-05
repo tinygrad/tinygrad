@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io, struct
 import ctypes, pathlib, traceback, itertools
-from contextlib import redirect_stdout, redirect_stderr
+from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
@@ -210,11 +210,14 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
   peaks.append(peak)
   return struct.pack("<BIQ", 1, len(events), peak)+b"".join(events) if events else None
 
-def err(name:str, msg:str|None=None) -> None:
-  ctxs.append({"name":"ERR", "steps":[create_step(name, ("render",len(ctxs),0), {"src":msg or traceback.format_exc()})]})
+@contextmanager
+def soft_err(fn:Callable):
+  try: yield
+  except Exception: fn({"src":traceback.format_exc()})
 
 def row_tuple(row:str) -> tuple[int, ...]: return tuple(int(x.split(":")[1]) for x in row.split())
 
+@soft_err(lambda err: ctxs.append({"name":"ERR", "steps":[create_step("loader error", ("render", len(ctxs), 0), err)]}))
 def load_sqtt(profile:list[ProfileEvent]) -> None:
   from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
   counter_events:dict[tuple[str, int], list[ProfileSQTTEvent|ProfilePMCEvent]] = {}
@@ -222,10 +225,8 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     if isinstance(e, (ProfilePMCEvent, ProfileSQTTEvent)): counter_events.setdefault((e.kern, e.exec_tag), []).append(e)
   if not counter_events: return
   # ** init decoder
-  try: from extra.sqtt.roc import decode
-  except Exception: return err("DECODER IMPORT ISSUE")
-  try: rctx = decode(profile)
-  except Exception: return err("DECODER ERROR")
+  from extra.sqtt.roc import decode
+  rctx = decode(profile)
   if getenv("SQTT_PARSE"):
     from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
     for counters in counter_events.values():
@@ -355,6 +356,18 @@ def get_stdout(f: Callable) -> str:
   except Exception: traceback.print_exc(file=buf)
   return buf.getvalue()
 
+def amd_readelf(lib:bytes) -> list[dict]:
+  from tinygrad.runtime.support.elf import elf_loader
+  import struct, msgpack
+  _, sections, __ = elf_loader(lib)
+  data = next((s for s in sections if s.name.startswith(".note"))).content
+  namesz, descsz, typ = struct.unpack_from("<III", data, 0)
+  offset = (12+namesz+3) & -4
+  notes = msgpack.unpackb(data[offset:offset+descsz])
+  keys = {".sgpr_count":"SGPRs", ".vgpr_count":"VGPRs", ".max_flat_workgroup_size":"WGP size",
+          ".group_segment_fixed_size":"LDS size", ".private_segment_fixed_size":"Scratch size"}
+  return [{"label":label, "value":v} for k,label in keys.items() if (v:=notes["amdhsa.kernels"][0][k]) > 0]
+
 def get_render(i:int, j:int, fmt:str) -> dict:
   data = ctxs[i]["steps"][j]["data"]
   if fmt == "uops": return {"src":get_stdout(lambda: print_uops(data.uops or [])), "lang":"txt"}
@@ -366,9 +379,10 @@ def get_render(i:int, j:int, fmt:str) -> dict:
     if isinstance(compiler, LLVMCompiler):
       return get_llvm_mca(disasm_str, ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode(),
                           ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode())
-    metadata = None
+    metadata:dict|list[dict] = {}
     if data.device.startswith("AMD"):
-      metadata = {"src":get_stdout(lambda: print(system("llvm-readelf --notes -", input=compiler.compile(data.src))))}
+      with soft_err(lambda err: metadata.update(err)):
+        metadata = amd_readelf(compiler.compile(data.src))
     return {"src":disasm_str, "lang":"amdgpu" if data.device.startswith("AMD") else None, "metadata":metadata}
   if fmt == "sqtt-insts":
     columns = ["PC", "Instruction", "Hits", "Duration", "Stall", "Type"]
