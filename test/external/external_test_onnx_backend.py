@@ -184,9 +184,6 @@ backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_mapping_cpu') # bad d
 backend_test.exclude('test_if_opt_cpu') # ValueError: 13 is not a valid AttributeType
 backend_test.exclude('test_if_seq_cpu') # NotImplementedError: op='SequenceConstruct' is not supported
 
-backend_test.exclude('test_scatternd_min_cpu') # min not yet supported
-backend_test.exclude('test_scatternd_max_cpu') # max not yet supported
-
 # regression from removing StrEnum in Domain
 backend_test.exclude('test_adam_cpu')
 backend_test.exclude('test_gradient_of_add_and_mul_cpu')

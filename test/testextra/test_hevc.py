@@ -1,14 +1,14 @@
 import unittest
 
-from tinygrad import Tensor, Device
+from tinygrad import Device
+from tinygrad.helpers import fetch
 from extra.hevc.hevc import parse_hevc_file_headers, nv_gpu
 
 class TestHevc(unittest.TestCase):
   def test_hevc_parser(self):
     url = "https://github.com/haraschax/filedump/raw/09a497959f7fa6fd8dba501a25f2cdb3a41ecb12/comma_video.hevc"
-    hevc_tensor = Tensor.from_url(url, device="CPU")
+    dat = fetch(url, headers={"Range": f"bytes=0-{512<<10}"}).read_bytes()
 
-    dat = bytes(hevc_tensor.data())
     opaque, frame_info, w, h, luma_w, luma_h, chroma_off = parse_hevc_file_headers(dat, device=Device.DEFAULT)
 
     def _test_common(frame, bts):

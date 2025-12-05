@@ -1637,16 +1637,7 @@ class struct_gc_ctx(Struct): pass
 gc_ctx = struct_gc_ctx
 class struct_nir_shader_compiler_options(Struct): pass
 nir_shader_compiler_options = struct_nir_shader_compiler_options
-class const_struct_nir_instr(Struct): pass
-const_struct_nir_instr._fields_ = [
-  ('node', struct_exec_node),
-  ('block', ctypes.POINTER(nir_block)),
-  ('type', nir_instr_type),
-  ('pass_flags', uint8_t),
-  ('has_debug_info', ctypes.c_bool),
-  ('index', uint32_t),
-]
-nir_instr_filter_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(const_struct_nir_instr), ctypes.c_void_p)
+nir_instr_filter_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_instr), ctypes.c_void_p)
 nir_lower_int64_options = CEnum(ctypes.c_uint32)
 nir_lower_imul64 = nir_lower_int64_options.define('nir_lower_imul64', 1)
 nir_lower_isign64 = nir_lower_int64_options.define('nir_lower_isign64', 2)
@@ -3410,18 +3401,8 @@ struct_nir_loop._fields_ = [
   ('divergent_break', ctypes.c_bool),
 ]
 nir_loop = struct_nir_loop
-class const_struct_nir_intrinsic_instr(Struct): pass
-const_struct_nir_intrinsic_instr._fields_ = [
-  ('instr', nir_instr),
-  ('intrinsic', nir_intrinsic_op),
-  ('def', nir_def),
-  ('num_components', uint8_t),
-  ('const_index', (ctypes.c_int32 * 8)),
-  ('name', ctypes.POINTER(ctypes.c_char)),
-  ('src', (nir_src * 0)),
-]
-nir_intrin_filter_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(const_struct_nir_intrinsic_instr), ctypes.c_void_p)
-nir_vectorize_cb = ctypes.CFUNCTYPE(ctypes.c_ubyte, ctypes.POINTER(const_struct_nir_instr), ctypes.c_void_p)
+nir_intrin_filter_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.c_void_p)
+nir_vectorize_cb = ctypes.CFUNCTYPE(ctypes.c_ubyte, ctypes.POINTER(struct_nir_instr), ctypes.c_void_p)
 try: (nir_remove_non_entrypoints:=dll.nir_remove_non_entrypoints).restype, nir_remove_non_entrypoints.argtypes = None, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
@@ -3819,7 +3800,7 @@ except AttributeError: pass
 try: (nir_metadata_require_all:=dll.nir_metadata_require_all).restype, nir_metadata_require_all.argtypes = None, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-nir_instr_writemask_filter_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(const_struct_nir_instr), ctypes.c_uint32, ctypes.c_void_p)
+nir_instr_writemask_filter_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_instr), ctypes.c_uint32, ctypes.c_void_p)
 class struct_nir_builder(Struct): pass
 nir_lower_instr_cb = ctypes.CFUNCTYPE(ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_instr), ctypes.c_void_p)
 try: (nir_function_impl_lower_instructions:=dll.nir_function_impl_lower_instructions).restype, nir_function_impl_lower_instructions.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_function_impl), nir_instr_filter_cb, nir_lower_instr_cb, ctypes.c_void_p]
@@ -3971,28 +3952,7 @@ except AttributeError: pass
 try: (nir_lower_io_vars_to_temporaries:=dll.nir_lower_io_vars_to_temporaries).restype, nir_lower_io_vars_to_temporaries.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_function_impl), ctypes.c_bool, ctypes.c_bool]
 except AttributeError: pass
 
-class const_struct_glsl_type(Struct): pass
-const_struct_glsl_type._fields_ = [
-  ('gl_type', uint32_t),
-  ('base_type', enum_glsl_base_type,8),
-  ('sampled_type', enum_glsl_base_type,8),
-  ('sampler_dimensionality', ctypes.c_uint32,4),
-  ('sampler_shadow', ctypes.c_uint32,1),
-  ('sampler_array', ctypes.c_uint32,1),
-  ('interface_packing', ctypes.c_uint32,2),
-  ('interface_row_major', ctypes.c_uint32,1),
-  ('cmat_desc', struct_glsl_cmat_description),
-  ('packed', ctypes.c_uint32,1),
-  ('has_builtin_name', ctypes.c_uint32,1),
-  ('vector_elements', uint8_t),
-  ('matrix_columns', uint8_t),
-  ('length', ctypes.c_uint32),
-  ('name_id', uintptr_t),
-  ('explicit_stride', ctypes.c_uint32),
-  ('explicit_alignment', ctypes.c_uint32),
-  ('fields', struct_glsl_type_fields),
-]
-glsl_type_size_align_func = ctypes.CFUNCTYPE(None, ctypes.POINTER(const_struct_glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32))
+glsl_type_size_align_func = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32))
 try: (nir_lower_vars_to_scratch:=dll.nir_lower_vars_to_scratch).restype, nir_lower_vars_to_scratch.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.c_int32, glsl_type_size_align_func, glsl_type_size_align_func]
 except AttributeError: pass
 
@@ -4174,7 +4134,7 @@ except AttributeError: pass
 try: (nir_remove_sysval_output:=dll.nir_remove_sysval_output).restype, nir_remove_sysval_output.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_intrinsic_instr), gl_shader_stage]
 except AttributeError: pass
 
-try: (nir_lower_amul:=dll.nir_lower_amul).restype, nir_lower_amul.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(const_struct_glsl_type), ctypes.c_bool)]
+try: (nir_lower_amul:=dll.nir_lower_amul).restype, nir_lower_amul.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_glsl_type), ctypes.c_bool)]
 except AttributeError: pass
 
 try: (nir_lower_ubo_vec4:=dll.nir_lower_ubo_vec4).restype, nir_lower_ubo_vec4.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
@@ -4195,7 +4155,7 @@ nir_lower_io_lower_64bit_float_to_32 = nir_lower_io_options.define('nir_lower_io
 nir_lower_io_lower_64bit_to_32_new = nir_lower_io_options.define('nir_lower_io_lower_64bit_to_32_new', 4)
 nir_lower_io_use_interpolated_input_intrinsics = nir_lower_io_options.define('nir_lower_io_use_interpolated_input_intrinsics', 8)
 
-try: (nir_lower_io:=dll.nir_lower_io).restype, nir_lower_io.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(const_struct_glsl_type), ctypes.c_bool), nir_lower_io_options]
+try: (nir_lower_io:=dll.nir_lower_io).restype, nir_lower_io.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_glsl_type), ctypes.c_bool), nir_lower_io_options]
 except AttributeError: pass
 
 try: (nir_io_add_const_offset_to_base:=dll.nir_io_add_const_offset_to_base).restype, nir_io_add_const_offset_to_base.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode]
@@ -4725,40 +4685,8 @@ nir_lower_non_uniform_get_ssbo_size = enum_nir_lower_non_uniform_access_type.def
 nir_lower_non_uniform_texture_offset_access = enum_nir_lower_non_uniform_access_type.define('nir_lower_non_uniform_texture_offset_access', 32)
 nir_lower_non_uniform_access_type_count = enum_nir_lower_non_uniform_access_type.define('nir_lower_non_uniform_access_type_count', 6)
 
-class const_struct_nir_tex_instr(Struct): pass
-const_struct_nir_tex_instr._fields_ = [
-  ('instr', nir_instr),
-  ('sampler_dim', enum_glsl_sampler_dim),
-  ('dest_type', nir_alu_type),
-  ('op', nir_texop),
-  ('def', nir_def),
-  ('src', ctypes.POINTER(nir_tex_src)),
-  ('num_srcs', ctypes.c_uint32),
-  ('coord_components', ctypes.c_uint32),
-  ('is_array', ctypes.c_bool),
-  ('is_shadow', ctypes.c_bool),
-  ('is_new_style_shadow', ctypes.c_bool),
-  ('is_sparse', ctypes.c_bool),
-  ('component', ctypes.c_uint32,2),
-  ('array_is_lowered_cube', ctypes.c_uint32,1),
-  ('is_gather_implicit_lod', ctypes.c_uint32,1),
-  ('skip_helpers', ctypes.c_uint32,1),
-  ('tg4_offsets', ((int8_t * 2) * 4)),
-  ('texture_non_uniform', ctypes.c_bool),
-  ('sampler_non_uniform', ctypes.c_bool),
-  ('offset_non_uniform', ctypes.c_bool),
-  ('texture_index', ctypes.c_uint32),
-  ('sampler_index', ctypes.c_uint32),
-  ('backend_flags', uint32_t),
-]
-nir_lower_non_uniform_src_access_callback = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(const_struct_nir_tex_instr), ctypes.c_uint32, ctypes.c_void_p)
-class const_struct_nir_src(Struct): pass
-const_struct_nir_src._fields_ = [
-  ('_parent', uintptr_t),
-  ('use_link', struct_list_head),
-  ('ssa', ctypes.POINTER(nir_def)),
-]
-nir_lower_non_uniform_access_callback = ctypes.CFUNCTYPE(ctypes.c_uint16, ctypes.POINTER(const_struct_nir_src), ctypes.c_void_p)
+nir_lower_non_uniform_src_access_callback = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_tex_instr), ctypes.c_uint32, ctypes.c_void_p)
+nir_lower_non_uniform_access_callback = ctypes.CFUNCTYPE(ctypes.c_uint16, ctypes.POINTER(struct_nir_src), ctypes.c_void_p)
 class struct_nir_lower_non_uniform_access_options(Struct): pass
 struct_nir_lower_non_uniform_access_options._fields_ = [
   ('types', enum_nir_lower_non_uniform_access_type),
@@ -4911,7 +4839,7 @@ nir_lower_task_shader_options = struct_nir_lower_task_shader_options
 try: (nir_lower_task_shader:=dll.nir_lower_task_shader).restype, nir_lower_task_shader.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_lower_task_shader_options]
 except AttributeError: pass
 
-nir_lower_bit_size_callback = ctypes.CFUNCTYPE(ctypes.c_uint32, ctypes.POINTER(const_struct_nir_instr), ctypes.c_void_p)
+nir_lower_bit_size_callback = ctypes.CFUNCTYPE(ctypes.c_uint32, ctypes.POINTER(struct_nir_instr), ctypes.c_void_p)
 try: (nir_lower_bit_size:=dll.nir_lower_bit_size).restype, nir_lower_bit_size.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_lower_bit_size_callback, ctypes.c_void_p]
 except AttributeError: pass
 
@@ -7723,6 +7651,596 @@ RALLOC_PRINT_INFO_SUMMARY_ONLY = _anonenum7.define('RALLOC_PRINT_INFO_SUMMARY_ON
 try: (ralloc_print_info:=dll.ralloc_print_info).restype, ralloc_print_info.argtypes = None, [ctypes.POINTER(FILE), ctypes.c_void_p, ctypes.c_uint32]
 except AttributeError: pass
 
+try: glsl_type_builtin_error = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_error')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_void = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_void')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_bool = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_bool')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_bvec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_bvec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_bvec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_bvec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_bvec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_bvec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_bvec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_bvec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_bvec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_bvec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_bvec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_bvec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_int = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_int')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_ivec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_ivec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_ivec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_ivec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_ivec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_ivec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_ivec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_ivec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_ivec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_ivec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_ivec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_ivec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uint = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uint')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uvec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uvec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uvec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uvec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uvec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uvec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uvec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uvec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uvec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uvec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uvec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uvec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_float = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_float')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_float16_t = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_float16_t')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16vec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16vec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16vec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16vec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16vec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16vec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16vec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16vec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16vec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16vec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16vec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16vec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_double = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_double')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dvec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dvec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dvec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dvec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dvec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dvec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dvec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dvec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dvec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dvec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dvec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dvec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_int64_t = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_int64_t')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64vec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64vec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64vec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64vec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64vec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64vec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64vec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64vec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64vec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64vec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64vec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64vec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uint64_t = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uint64_t')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64vec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64vec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64vec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64vec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64vec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64vec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64vec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64vec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64vec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64vec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64vec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64vec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_int16_t = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_int16_t')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i16vec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i16vec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i16vec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i16vec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i16vec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i16vec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i16vec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i16vec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i16vec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i16vec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i16vec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i16vec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uint16_t = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uint16_t')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u16vec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u16vec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u16vec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u16vec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u16vec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u16vec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u16vec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u16vec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u16vec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u16vec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u16vec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u16vec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_int8_t = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_int8_t')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i8vec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i8vec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i8vec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i8vec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i8vec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i8vec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i8vec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i8vec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i8vec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i8vec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i8vec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i8vec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uint8_t = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uint8_t')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u8vec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u8vec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u8vec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u8vec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u8vec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u8vec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u8vec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u8vec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u8vec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u8vec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u8vec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u8vec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_bfloat16_t = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_bfloat16_t')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_bf16vec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_bf16vec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_bf16vec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_bf16vec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_bf16vec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_bf16vec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_bf16vec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_bf16vec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_bf16vec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_bf16vec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_bf16vec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_bf16vec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_e4m3fn_t = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_e4m3fn_t')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_e4m3fnvec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_e4m3fnvec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_e4m3fnvec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_e4m3fnvec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_e4m3fnvec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_e4m3fnvec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_e4m3fnvec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_e4m3fnvec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_e4m3fnvec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_e4m3fnvec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_e4m3fnvec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_e4m3fnvec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_e5m2_t = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_e5m2_t')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_e5m2vec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_e5m2vec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_e5m2vec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_e5m2vec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_e5m2vec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_e5m2vec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_e5m2vec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_e5m2vec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_e5m2vec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_e5m2vec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_e5m2vec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_e5m2vec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_mat2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_mat2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_mat3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_mat3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_mat4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_mat4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_mat2x3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_mat2x3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_mat2x4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_mat2x4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_mat3x2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_mat3x2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_mat3x4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_mat3x4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_mat4x2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_mat4x2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_mat4x3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_mat4x3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16mat2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16mat2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16mat3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16mat3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16mat4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16mat4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16mat2x3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16mat2x3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16mat2x4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16mat2x4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16mat3x2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16mat3x2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16mat3x4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16mat3x4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16mat4x2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16mat4x2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16mat4x3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16mat4x3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dmat2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dmat2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dmat3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dmat3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dmat4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dmat4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dmat2x3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dmat2x3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dmat2x4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dmat2x4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dmat3x2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dmat3x2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dmat3x4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dmat3x4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dmat4x2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dmat4x2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dmat4x3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dmat4x3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_atomic_uint = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_atomic_uint')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_sampler = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_sampler')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_sampler1D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_sampler1D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_sampler2D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_sampler2D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_sampler3D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_sampler3D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_samplerCube = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_samplerCube')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_sampler1DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_sampler1DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_sampler2DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_sampler2DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_samplerCubeArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_samplerCubeArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_sampler2DRect = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_sampler2DRect')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_samplerBuffer = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_samplerBuffer')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_sampler2DMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_sampler2DMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_sampler2DMSArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_sampler2DMSArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_isampler1D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_isampler1D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_isampler2D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_isampler2D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_isampler3D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_isampler3D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_isamplerCube = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_isamplerCube')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_isampler1DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_isampler1DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_isampler2DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_isampler2DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_isamplerCubeArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_isamplerCubeArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_isampler2DRect = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_isampler2DRect')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_isamplerBuffer = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_isamplerBuffer')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_isampler2DMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_isampler2DMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_isampler2DMSArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_isampler2DMSArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_usampler1D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_usampler1D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_usampler2D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_usampler2D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_usampler3D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_usampler3D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_usamplerCube = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_usamplerCube')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_usampler1DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_usampler1DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_usampler2DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_usampler2DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_usamplerCubeArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_usamplerCubeArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_usampler2DRect = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_usampler2DRect')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_usamplerBuffer = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_usamplerBuffer')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_usampler2DMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_usampler2DMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_usampler2DMSArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_usampler2DMSArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_samplerShadow = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_samplerShadow')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_sampler1DShadow = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_sampler1DShadow')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_sampler2DShadow = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_sampler2DShadow')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_samplerCubeShadow = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_samplerCubeShadow')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_sampler1DArrayShadow = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_sampler1DArrayShadow')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_sampler2DArrayShadow = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_sampler2DArrayShadow')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_samplerCubeArrayShadow = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_samplerCubeArrayShadow')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_sampler2DRectShadow = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_sampler2DRectShadow')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_samplerExternalOES = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_samplerExternalOES')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_texture1D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_texture1D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_texture2D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_texture2D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_texture3D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_texture3D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_textureCube = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_textureCube')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_texture1DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_texture1DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_texture2DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_texture2DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_textureCubeArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_textureCubeArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_texture2DRect = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_texture2DRect')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_textureBuffer = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_textureBuffer')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_texture2DMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_texture2DMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_texture2DMSArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_texture2DMSArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_itexture1D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_itexture1D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_itexture2D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_itexture2D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_itexture3D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_itexture3D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_itextureCube = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_itextureCube')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_itexture1DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_itexture1DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_itexture2DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_itexture2DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_itextureCubeArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_itextureCubeArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_itexture2DRect = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_itexture2DRect')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_itextureBuffer = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_itextureBuffer')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_itexture2DMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_itexture2DMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_itexture2DMSArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_itexture2DMSArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_utexture1D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_utexture1D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_utexture2D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_utexture2D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_utexture3D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_utexture3D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_utextureCube = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_utextureCube')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_utexture1DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_utexture1DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_utexture2DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_utexture2DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_utextureCubeArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_utextureCubeArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_utexture2DRect = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_utexture2DRect')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_utextureBuffer = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_utextureBuffer')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_utexture2DMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_utexture2DMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_utexture2DMSArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_utexture2DMSArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_textureExternalOES = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_textureExternalOES')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vtexture1D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vtexture1D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vtexture2D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vtexture2D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vtexture3D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vtexture3D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vtexture2DMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vtexture2DMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vtexture2DMSArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vtexture2DMSArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vtexture1DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vtexture1DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vtexture2DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vtexture2DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vtextureBuffer = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vtextureBuffer')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_image1D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_image1D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_image2D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_image2D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_image3D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_image3D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_image2DRect = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_image2DRect')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_imageCube = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_imageCube')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_imageBuffer = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_imageBuffer')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_image1DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_image1DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_image2DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_image2DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_imageCubeArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_imageCubeArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_image2DMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_image2DMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_image2DMSArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_image2DMSArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_iimage1D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_iimage1D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_iimage2D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_iimage2D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_iimage3D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_iimage3D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_iimage2DRect = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_iimage2DRect')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_iimageCube = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_iimageCube')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_iimageBuffer = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_iimageBuffer')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_iimage1DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_iimage1DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_iimage2DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_iimage2DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_iimageCubeArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_iimageCubeArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_iimage2DMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_iimage2DMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_iimage2DMSArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_iimage2DMSArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uimage1D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uimage1D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uimage2D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uimage2D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uimage3D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uimage3D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uimage2DRect = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uimage2DRect')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uimageCube = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uimageCube')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uimageBuffer = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uimageBuffer')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uimage1DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uimage1DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uimage2DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uimage2DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uimageCubeArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uimageCubeArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uimage2DMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uimage2DMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uimage2DMSArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uimage2DMSArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64image1D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64image1D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64image2D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64image2D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64image3D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64image3D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64image2DRect = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64image2DRect')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64imageCube = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64imageCube')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64imageBuffer = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64imageBuffer')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64image1DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64image1DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64image2DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64image2DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64imageCubeArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64imageCubeArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64image2DMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64image2DMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64image2DMSArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64image2DMSArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64image1D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64image1D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64image2D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64image2D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64image3D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64image3D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64image2DRect = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64image2DRect')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64imageCube = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64imageCube')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64imageBuffer = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64imageBuffer')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64image1DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64image1DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64image2DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64image2DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64imageCubeArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64imageCubeArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64image2DMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64image2DMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64image2DMSArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64image2DMSArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vbuffer = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vbuffer')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vimage1D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vimage1D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vimage2D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vimage2D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vimage3D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vimage3D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vimage2DMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vimage2DMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vimage2DMSArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vimage2DMSArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vimage1DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vimage1DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vimage2DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vimage2DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_subpassInput = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_subpassInput')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_subpassInputMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_subpassInputMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_isubpassInput = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_isubpassInput')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_isubpassInputMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_isubpassInputMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_usubpassInput = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_usubpassInput')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_usubpassInputMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_usubpassInputMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_textureSubpassInput = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_textureSubpassInput')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_textureSubpassInputMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_textureSubpassInputMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_itextureSubpassInput = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_itextureSubpassInput')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_itextureSubpassInputMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_itextureSubpassInputMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_utextureSubpassInput = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_utextureSubpassInput')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_utextureSubpassInputMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_utextureSubpassInputMS')
+except (ValueError,AttributeError): pass
 NIR_DEBUG_CLONE = (1 << 0)
 NIR_DEBUG_SERIALIZE = (1 << 1)
 NIR_DEBUG_NOVALIDATE = (1 << 2)

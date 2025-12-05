@@ -69,7 +69,7 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
   excluded: set[UOp] = set()
   for u in (toposort:=x.toposort()):
     # always exclude DEVICE/CONST/UNIQUE
-    if u.op in {Ops.DEVICE, Ops.CONST, Ops.UNIQUE} and u is not x: excluded.add(u)
+    if u.op in {Ops.DEVICE, Ops.CONST, Ops.UNIQUE, Ops.LUNIQUE} and u is not x: excluded.add(u)
     if u.op is Ops.VCONST and u.dtype.scalar() == dtypes.index and u is not x: excluded.add(u)
     if u.op is Ops.VECTORIZE and len(u.src) == 0: excluded.add(u)
   for u in toposort:
@@ -217,46 +217,65 @@ def row_tuple(row:str) -> tuple[int, ...]: return tuple(int(x.split(":")[1]) for
 
 def load_sqtt(profile:list[ProfileEvent]) -> None:
   from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
-  pmc_events = {(e.kern, e.exec_tag):e for e in profile if isinstance(e, ProfilePMCEvent)}
-  if not (sqtt_events:=[e for e in profile if isinstance(e, ProfileSQTTEvent)]) and not pmc_events: return
-  try: from extra.sqtt.roc import decode, print_pmc
+  counter_events:dict[tuple[str, int], list[ProfileSQTTEvent|ProfilePMCEvent]] = {}
+  for e in profile:
+    if isinstance(e, (ProfilePMCEvent, ProfileSQTTEvent)): counter_events.setdefault((e.kern, e.exec_tag), []).append(e)
+  if not counter_events: return
+  # ** init decoder
+  try: from extra.sqtt.roc import decode
   except Exception: return err("DECODER IMPORT ISSUE")
   try: rctx = decode(profile)
   except Exception: return err("DECODER ERROR")
   if getenv("SQTT_PARSE"):
     from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
-    for e in sqtt_events: parse_sqtt_print_packets(e.blob)
-  if not any([rctx.inst_execs, rctx.occ_events]): return err("EMPTY SQTT OUTPUT", f"{len(sqtt_events)} SQTT events recorded, none got decoded")
+    for counters in counter_events.values():
+      for e in counters:
+        if isinstance(e, ProfileSQTTEvent): parse_sqtt_print_packets(e.blob)
+  # ** decode traces for each run
   steps:list[dict] = []
-  for name in rctx.occ_events:
-    disasm = rctx.disasms[name.prg]
+  for key,counters in counter_events.items():
+    # ** Run summary
+    program = trace.keys[r].ret if (r:=ref_map.get(key[0])) else None
+    summary = [f"{program.global_size=} {program.local_size=}"] if program else [repr(key)]
+    # ** SQTT events
+    disasm = rctx.disasms[key[0]]
     cu_events:dict[str, list[ProfileEvent]] = {}
-    # wave instruction events
+    # * INST waves
     wave_insts:dict[str, dict[str, dict]] = {}
     inst_units:dict[str, itertools.count] = {}
-    for w in rctx.inst_execs.get(name, []):
+    for w in rctx.inst_execs.get(key, []):
       if (u:=w.wave_loc) not in inst_units: inst_units[u] = itertools.count(0)
       n = next(inst_units[u])
       if (events:=cu_events.get(w.cu_loc)) is None: cu_events[w.cu_loc] = events = []
       events.append(ProfileRangeEvent(w.simd_loc, loc:=f"INST WAVE:{w.wave_id} N:{n}", Decimal(w.begin_time), Decimal(w.end_time)))
       wave_insts.setdefault(w.cu_loc, {})[f"{u} N:{n}"] = {"wave":w, "disasm":disasm, "run_number":n, "loc":loc}
-    # occupancy events
+    # * OCC waves
     units:dict[str, itertools.count] = {}
     wave_start:dict[str, int] = {}
-    for occ in rctx.occ_events[name]:
+    for occ in rctx.occ_events.get(key, []):
       if (u:=occ.wave_loc) not in units: units[u] = itertools.count(0)
       if u in inst_units: continue
       if occ.start: wave_start[u] = occ.time
       else:
         if (events:=cu_events.get(occ.cu_loc)) is None: cu_events[occ.cu_loc] = events = []
         events.append(ProfileRangeEvent(occ.simd_loc, f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)), Decimal(occ.time)))
-    if not cu_events: continue
     prg_cu = sorted(cu_events, key=row_tuple)
-    kernel = trace.keys[r].ret if (r:=ref_map.get(name.prg)) else None
-    src = f"Scheduled on {len(prg_cu)} CUs"+(f"\n\n{kernel.global_size=} {kernel.local_size=}" if kernel else "")
-    pmc = pmc_events.get((name.prg, name.tag))
-    if pmc is not None: src += "\n\nPMC:\n"+get_stdout(lambda: print_pmc(pmc))
-    steps.append(create_step(kernel.name if kernel is not None else name.prg, ("/counters", len(ctxs), len(steps)), {"src":src}, depth=1))
+    if cu_events: summary.append(f"Scheduled on {len(prg_cu)} CUs")
+    steps.append(create_step(program.name if program else key[0], ("/counters", len(ctxs), len(steps)), {"src":"\n\n".join(summary)}, depth=1))
+    # ** PMC events
+    if (pmc_event:=next((e for e in counters if isinstance(e, ProfilePMCEvent)), None)) is not None:
+      agg_cols = ["Name", "Sum"]
+      sample_cols = ["XCC", "INST", "SE", "SA", "WGP", "Value"]
+      rows:list[list] = []
+      view, ptr = memoryview(pmc_event.blob).cast('Q'), 0
+      for s in pmc_event.sched:
+        row:list = [s.name, 0, {"cols":sample_cols, "rows":[]}]
+        for sample in itertools.product(range(s.xcc), range(s.inst), range(s.se), range(s.sa), range(s.wgp)):
+          row[1] += (val:=int(view[ptr]))
+          row[2]["rows"].append(sample+(val,))
+          ptr += 1
+        rows.append(row)
+      steps.append(create_step("PMC", ("/pmc", len(ctxs), len(steps)), {"rows":rows, "cols":agg_cols, "summary":[]}, depth=2))
     for cu in prg_cu:
       events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]
       steps.append(create_step(f"{cu} {len(cu_events[cu])}", ("/counters", len(ctxs), len(steps)),
