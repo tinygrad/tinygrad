@@ -20,7 +20,7 @@ class NIRCompiler(Compiler):
 
 class LVPCompiler(CPULLVMCompiler, NIRCompiler):
   def __init__(self, cache_key="lvp"):
-    assert mesa.dll
+    assert mesa.dll is not None
     CPULLVMCompiler.__init__(self)
     NIRCompiler.__init__(self, f"compile_{cache_key}")
 
