@@ -64,7 +64,7 @@ if __name__ == "__main__":
   if getenv("TORCHVIZ"): torch.cuda.memory._record_memory_history()
   model = Model().to(device)
   optimizer = optim.Adam(model.parameters(), 1e-3)
-  loss_fn = nn.CrossEntropyLoss()
+  loss_fn = nn.CrossEntropyLoss(label_smoothing=0.1)
 
   @torch.compile(backend="tiny" if getenv("TINY_BACKEND") else "inductor")
   def forward_and_loss(X): return model(X)
