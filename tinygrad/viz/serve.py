@@ -210,6 +210,8 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
   peaks.append(peak)
   return struct.pack("<BIQ", 1, len(events), peak)+b"".join(events) if events else None
 
+# by default, VIZ does not start when there is an error
+# use this to instead display the traceback to the user
 @contextmanager
 def soft_err(fn:Callable):
   try: yield
@@ -217,7 +219,7 @@ def soft_err(fn:Callable):
 
 def row_tuple(row:str) -> tuple[int, ...]: return tuple(int(x.split(":")[1]) for x in row.split())
 
-@soft_err(lambda err: ctxs.append({"name":"ERR", "steps":[create_step("loader error", ("render", len(ctxs), 0), err)]}))
+@soft_err(lambda err: ctxs.append({"name":"ERR", "steps":[create_step("Loader error", ("render",len(ctxs),0), err)]}))
 def load_sqtt(profile:list[ProfileEvent]) -> None:
   from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
   counter_events:dict[tuple[str, int], list[ProfileSQTTEvent|ProfilePMCEvent]] = {}
@@ -379,7 +381,7 @@ def get_render(i:int, j:int, fmt:str) -> dict:
     if isinstance(compiler, LLVMCompiler):
       return get_llvm_mca(disasm_str, ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode(),
                           ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode())
-    metadata:list[dict] = []
+    metadata:list = []
     if data.device.startswith("AMD"):
       with soft_err(lambda err: metadata.append(err)):
         metadata.append(amd_readelf(compiler.compile(data.src)))
@@ -496,7 +498,7 @@ if __name__ == "__main__":
   st = time.perf_counter()
   print("*** viz is starting")
 
-  ctxs = get_rewrites(trace:=load_pickle(args.kernels, default=RewriteTrace([], [], {})))
+  ctxs:list[dict] = get_rewrites(trace:=load_pickle(args.kernels, default=RewriteTrace([], [], {})))
   profile_ret = get_profile(load_pickle(args.profile, default=[]))
 
   server = TCPServerWithReuse(('', PORT), Handler)
