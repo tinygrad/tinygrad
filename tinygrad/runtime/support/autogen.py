@@ -1,6 +1,6 @@
 import ctypes, itertools, re, functools, os
 from tinygrad.helpers import flatten, unwrap
-from tinygrad.runtime.autogen import libclang as clang # hmmm
+from tinygrad.runtime.autogen import libclang as clang # use REGEN=1 to regenerate libclang bindings
 from typing import Iterator
 
 def unwrap_cursor(c: clang.CXCursor) -> clang.CXCursor:
@@ -58,23 +58,15 @@ def cxs(fn):
   return wrap
 
 # TODO: caching this would be nice?
-@cxs
-def nm(c: clang.CXCursor|clang.CXToken|clang.CXType) -> str:
-  return clang.clang_getTokenSpelling(c._tu, c) if isinstance(c, clang.CXToken) else getattr(clang, f"clang_get{c.__class__.__name__[2:]}Spelling")(c)
-def extent(c: clang.CXCursor|clang.CXToken|clang.CXType) -> clang.CXSourceRange:
-  return clang.clang_getTokenExtent(c._tu, c) if isinstance(c, clang.CXToken) else getattr(clang, f"clang_get{c.__class__.__name__[2:]}Extent")(c)
-def loc(c: clang.CXCursor|clang.CXToken|clang.CXType) -> clang.CXSourceLocation:
-  return clang.clang_getTokenLocation(c._tu, c) if isinstance(c, clang.CXToken) else getattr(clang, f"clang_get{c.__class__.__name__[2:]}Location")(c)
-@cxs
-def loc_file(loc: clang.CXSourceLocation) -> str:
-  clang.clang_getExpansionLocation(loc, f:=clang.CXFile(), None, None, None)
-  return clang.clang_getFileName(f)
-def loc_off(loc: clang.CXSourceLocation) -> int:
-  clang.clang_getExpansionLocation(loc, None, None, None, off:=ctypes.c_uint32())
-  return off.value
-def loc_line(loc: clang.CXSourceLocation) -> int:
-  clang.clang_getExpansionLocation(loc, None, line:=ctypes.c_uint32(), None, None)
-  return line.value
+nm = cxs(lambda c: getattr(clang, f"clang_get{c.__class__.__name__[2:]}Spelling")(*([c._tu, c] if isinstance(c, clang.CXToken) else [c])))
+def extent(c): return getattr(clang, f"clang_get{c.__class__.__name__[2:]}Extent")(*([c._tu, c] if isinstance(c, clang.CXToken) else [c]))
+def loc(c): return getattr(clang, f"clang_get{c.__class__.__name__[2:]}Location")(*([c._tu, c] if isinstance(c, clang.CXToken) else [c]))
+def gel(loc: clang.CXSourceLocation):
+  clang.clang_getExpansionLocation(loc, file:=clang.CXFile(), line:=ctypes.c_uint32(), None, offset:=ctypes.c_uint32())
+  return {"file":clang.clang_getFileName(file), "line":line.value, "offset":offset.value}
+loc_file = cxs(lambda loc: gel(loc)['file'])
+def loc_off(loc: clang.CXSourceLocation) -> int: return gel(loc)['offset']
+def loc_line(loc: clang.CXSourceLocation) -> int: return gel(loc)['line']
 
 def readext(f, fst, snd=None):
   with open(f, "r") as f: # reopening this every time is dumb...
@@ -92,8 +84,7 @@ base_rules = [(r'\s*\\\n\s*', ' '), (r'\s*\n\s*', ' '), (r'//.*', ''), (r'/\*.*?
 
 uints = (clang.CXType_Char_U, clang.CXType_UChar, clang.CXType_UShort, clang.CXType_UInt, clang.CXType_ULong, clang.CXType_ULongLong)
 ints = uints + (clang.CXType_Char_S, clang.CXType_Short, clang.CXType_Int, clang.CXType_ULong, clang.CXType_LongLong)
-fns = (clang.CXType_FunctionProto, clang.CXType_FunctionNoProto)
-specs = (clang.CXCursor_ObjCSuperClassRef,)
+fns, specs = (clang.CXType_FunctionProto, clang.CXType_FunctionNoProto), (clang.CXCursor_ObjCSuperClassRef,) # this could include protocols
 # https://clang.llvm.org/docs/AutomaticReferenceCounting.html#arc-method-families
 arc_families = ['alloc', 'copy', 'mutableCopy', 'new']
 
@@ -127,18 +118,20 @@ def gen(dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, use_e
         return types[nm(t)][0]
       case clang.CXType_Record:
         # TODO: packed unions
+        # libclang does not use CXType_Elaborated for function parameters with type qualifiers (eg. void (*)(const struct foo))
+        if (_nm:=re.sub(r"^const ", "", nm(t))) in types and types[_nm][1]: return types[_nm][0]
         # check for forward declaration
-        if nm(t) in types: types[nm(t)] = (tnm:=types[nm(t)][0]), len(fields(t)) != 0
+        if _nm in types: types[_nm] = (tnm:=types[_nm][0]), len(fields(t)) != 0
         else:
           if clang.clang_Cursor_isAnonymous(decl):
-            types[nm(t)] = (tnm:=(suggested_name or (f"_anon{'struct' if decl.kind==clang.CXCursor_StructDecl else 'union'}{anoncnt()}")), True)
-          else: types[nm(t)] = (tnm:=nm(t).replace(' ', '_').replace('::', '_')), len(fields(t)) != 0
+            types[_nm] = (tnm:=(suggested_name or (f"_anon{'struct' if decl.kind==clang.CXCursor_StructDecl else 'union'}{anoncnt()}")), True)
+          else: types[_nm] = (tnm:=_nm.replace(' ', '_').replace('::', '_')), len(fields(t)) != 0
           lines.append(f"class {tnm}({'Struct' if decl.kind==clang.CXCursor_StructDecl else 'ctypes.Union'}): pass")
           if typedef: lines.append(f"{typedef} = {tnm}")
         if ((is_packed:=(clang.CXCursor_PackedAttr in attrs(decl)) or
             ((N:=clang.clang_Type_getAlignOf(t)) != max([clang.clang_Type_getAlignOf(clang.clang_getCursorType(f)) for f in fields(t)], default=N)))):
           if clang.clang_Type_getAlignOf(t) != 1:
-            print(f"WARNING: ignoring alignment={clang.clang_Type_getAlignOf(t)} on {nm(t)}")
+            print(f"WARNING: ignoring alignment={clang.clang_Type_getAlignOf(t)} on {_nm}")
             is_packed = False
         acnt = itertools.count().__next__
         def is_anon(f): return clang.clang_Cursor_isAnonymousRecordDecl(clang.clang_getTypeDeclaration(clang.clang_getCursorType(f)))
@@ -224,8 +217,7 @@ def gen(dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, use_e
                                           clang.CXTranslationUnit_DetailedPreprocessingRecord)
     # FIXME: deep walk is not neccesary...
     for c in walk(unwrap_cursor(clang.clang_getTranslationUnitCursor(tu))):
-      if loc_file(loc(c)) != str(f) and (not recsym or c.kind not in (clang.CXCursor_FunctionDecl,)):
-        continue
+      if loc_file(loc(c)) != str(f) and (not recsym or c.kind not in (clang.CXCursor_FunctionDecl,)): continue
       rollback = lines, types
       try:
         match c.kind:
