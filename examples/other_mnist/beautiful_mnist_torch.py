@@ -9,18 +9,20 @@ class Model(nn.Module):
     super().__init__()
     self.c1 = nn.Conv2d(1, 32, 5)
     self.c2 = nn.Conv2d(32, 32, 5)
+    self.bn1 = nn.BatchNorm2d(32)
     self.m1 = nn.MaxPool2d(2)
     self.c3 = nn.Conv2d(32, 64, 3)
     self.c4 = nn.Conv2d(64, 64, 3)
+    self.bn2 = nn.BatchNorm2d(64)
     self.m2 = nn.MaxPool2d(2)
     self.lin = nn.Linear(576, 10)
   def forward(self, x):
     x = nn.functional.relu(self.c1(x))
     x = nn.functional.relu(self.c2(x))
-    x = self.m1(x)
+    x = self.m1(self.bn1(x))
     x = nn.functional.relu(self.c3(x))
     x = nn.functional.relu(self.c4(x))
-    x = self.m2(x)
+    x = self.m2(self.bn2(x))
     return self.lin(torch.flatten(x, 1))
 
 if __name__ == "__main__":
@@ -75,7 +77,7 @@ if __name__ == "__main__":
     return loss
 
   test_acc = float('nan')
-  for i in (t:=trange(getenv("STEPS", 70))):
+  for i in (t:=trange(getenv("STEPS", 20))):
     samples = torch.randint(0, X_train.shape[0], (512,))
     X, Y = X_train[samples], Y_train[samples]
     loss = step(X, Y)

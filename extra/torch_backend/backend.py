@@ -764,3 +764,24 @@ def diagonal(self, offset=0, dim1=0, dim2=1):
   batch_shape, m, n = self.shape[:-2], self.shape[-2], self.shape[-1]
   diag_len = min(m, n)
   return self.reshape(*batch_shape, m*n).pad(tuple((0,0) for _ in batch_shape) + ((0, diag_len),)).reshape(*batch_shape, diag_len, n+1)[..., :, 0]
+
+@torch.library.impl("aten::_native_batch_norm_legit", "privateuseone")
+def _native_batch_norm_legit(input, weight, bias, running_mean, running_var, training, momentum, eps):
+  input_t, weight_t, bias_t = unwrap(input), unwrap(weight) if weight is not None else None, unwrap(bias) if bias is not None else None
+  running_mean_t, running_var_t = unwrap(running_mean) if running_mean is not None else None, unwrap(running_var) if running_var is not None else None
+  if training:
+    batch_var, batch_mean = input_t.var_mean(axis=tuple(x for x in range(input_t.ndim) if x != 1), correction=0)
+    batch_invstd = batch_var.add(eps).rsqrt()
+    out = input_t.batchnorm(weight_t, bias_t, batch_mean, batch_invstd)
+    if running_mean_t is not None and running_var_t is not None:
+      numel_ratio = input_t.numel() / (input_t.numel() - input_t.shape[1])
+      running_mean_t.assign((1 - momentum) * running_mean_t + momentum * batch_mean.detach())
+      running_var_t.assign((1 - momentum) * running_var_t + momentum * numel_ratio * batch_var.detach())
+    return wrap(out), wrap(batch_mean), wrap(batch_invstd)
+  else:
+    out = input_t.batchnorm(weight_t, bias_t, running_mean_t, running_var_t.add(eps).rsqrt())
+    return wrap(out), wrap(running_mean_t), wrap(running_var_t.add(eps).rsqrt())
+
+@torch.library.impl("aten::_native_batch_norm_legit.no_stats", "privateuseone")  
+def _native_batch_norm_legit_no_stats(input, weight, bias, training, momentum, eps):
+  return _native_batch_norm_legit(input, weight, bias, None, None, training, momentum, eps)
