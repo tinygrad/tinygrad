@@ -86,7 +86,13 @@ else:
 
   class Struct(ctypes.Structure, metaclass=MetaStruct):
     def __init__(self, *args, **kwargs):
+      unk = set(kwargs.keys()) - (set(f[0] for f in self._fields_) | (set(f[0] for f in getattr(self, '_packed_fields_', []))))
+      assert len(unk) == 0, f"Unknown fields for {self.__class__.__name__}: {unk}"
       if hasattr(self, '_packed_fields_'):
         for f,v in zip(self._packed_fields_, args): setattr(self, f[0], v)
         for k,v in kwargs.items(): setattr(self, k, v)
       else: super().__init__(*args, **kwargs)
+    def __setattr__(self, key, value):
+      assert key in set(f[0] for f in self._fields_) | (set(f[0] for f in getattr(self, '_packed_fields_', []))),
+        f"Unknown field for {self.__class__.__name__}: {key}"
+      super().__setattr__(key, value)

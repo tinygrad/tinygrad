@@ -110,4 +110,20 @@ class TestAutogen(unittest.TestCase):
     assert frts_cmd.readVbiosDesc.__class__ is FWSECLIC_READ_VBIOS_DESC
     assert frts_cmd.frtsRegionDesc.__class__ is FWSECLIC_FRTS_REGION_DESC
 
+  def test_unknown_field_error(self):
+    class MyStruct(Struct): pass
+    MyStruct._packed_ = True
+    MyStruct._fields_ = [('a', ctypes.c_int), ('b', ctypes.c_int)]
+    with self.assertRaises(AssertionError): MyStruct(a=1, b=2, c=3)
+    with self.assertRaises(AssertionError): MyStruct(A=1, b=2)
+    x = MyStruct(a=1, b=2)
+    with self.assertRaises(AssertionError): x.c = 3
+
+    class MyStructNotPacked(Struct): pass
+    MyStructNotPacked._fields_ = [('a', ctypes.c_int), ('b', ctypes.c_int)]
+    with self.assertRaises(AssertionError): MyStructNotPacked(a=1, b=2, c=3)
+    with self.assertRaises(AssertionError): MyStructNotPacked(A=1, b=2)
+    x = MyStructNotPacked(a=1, b=2)
+    with self.assertRaises(AssertionError): x.c = 3
+
 if __name__ == "__main__": unittest.main()
