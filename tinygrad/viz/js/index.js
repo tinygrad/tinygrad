@@ -800,11 +800,13 @@ async function main() {
     if (ret.cols != null) {
       renderTable(root, ret);
     } else root.append(() => codeBlock(ret.src, ret.lang || "txt"));
-    if (Array.isArray(ret.metadata)) metadata.appendChild(tabulate(ret.metadata.map(({ label, value, idx }) => {
-      const div = d3.create("div").style("background", cycleColors(colorScheme.CATEGORICAL, idx)).style("width", "100%").style("height", "100%");
-      return [label.trim(), div.text(typeof value === "string" ? value : formatUnit(value)).node()];
-    })).node());
-    else if (ret.metadata?.src != null) metadata.appendChild(codeBlock(ret.metadata.src, "txt")).classList.add("full-height");
+    ret.metadata?.forEach(m => {
+      if (Array.isArray(m)) return metadata.appendChild(tabulate(m.map(({ label, value, idx }) => {
+        const div = d3.create("div").style("background", cycleColors(colorScheme.CATEGORICAL, idx)).style("width", "100%").style("height", "100%");
+        return [label.trim(), div.text(typeof value === "string" ? value : formatUnit(value)).node()];
+      })).node());
+      metadata.appendChild(codeBlock(m.src, "txt")).classList.add("full-height")
+    });
     return document.querySelector("#custom").replaceChildren(root.node());
   }
   // ** UOp view (default)

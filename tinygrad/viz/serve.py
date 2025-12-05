@@ -358,11 +358,11 @@ def get_stdout(f: Callable) -> str:
 
 def amd_readelf(lib:bytes) -> list[dict]:
   from tinygrad.runtime.support.elf import elf_loader
-  import struct, msgpack
+  import msgpack
   _, sections, __ = elf_loader(lib)
   data = next((s for s in sections if s.name.startswith(".note"))).content
-  namesz, descsz, typ = struct.unpack_from("<III", data, 0)
-  offset = (12+namesz+3) & -4
+  namesz, descsz, typ = struct.unpack_from(hdr:="<III", data, 0)
+  offset = (struct.calcsize(hdr)+namesz+3) & -4
   notes = msgpack.unpackb(data[offset:offset+descsz])
   keys = {".sgpr_count":"SGPRs", ".vgpr_count":"VGPRs", ".max_flat_workgroup_size":"WGP size",
           ".group_segment_fixed_size":"LDS size", ".private_segment_fixed_size":"Scratch size"}
@@ -379,10 +379,10 @@ def get_render(i:int, j:int, fmt:str) -> dict:
     if isinstance(compiler, LLVMCompiler):
       return get_llvm_mca(disasm_str, ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode(),
                           ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode())
-    metadata:dict|list[dict] = {}
+    metadata:list[dict] = []
     if data.device.startswith("AMD"):
-      with soft_err(lambda err: metadata.update(err)):
-        metadata = amd_readelf(compiler.compile(data.src))
+      with soft_err(lambda err: metadata.append(err)):
+        metadata.append(amd_readelf(compiler.compile(data.src)))
     return {"src":disasm_str, "lang":"amdgpu" if data.device.startswith("AMD") else None, "metadata":metadata}
   if fmt == "sqtt-insts":
     columns = ["PC", "Instruction", "Hits", "Duration", "Stall", "Type"]
