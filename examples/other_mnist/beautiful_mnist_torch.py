@@ -77,7 +77,7 @@ if __name__ == "__main__":
     return loss
 
   test_acc = float('nan')
-  for i in (t:=trange(getenv("STEPS", 20))):
+  for i in (t:=trange(getenv("STEPS", 30))):
     samples = torch.randint(0, X_train.shape[0], (512,))
     X, Y = X_train[samples], Y_train[samples]
     loss = step(X, Y)
