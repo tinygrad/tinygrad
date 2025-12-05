@@ -121,9 +121,15 @@ amd_cdna_161632 = [TensorCore(dims=(16,16,32), threads=64, elements_per_thread=(
            (('l0', 'l1', 'l2', 'l3', 'r3', 'r4'), ('r0', 'r1'), ('l4', 'l5', 'u0', 'u1', 'r2'))))
   for di,do in [(dtypes.fp8e5m2,dtypes.float),(dtypes.fp8e4m3,dtypes.float),(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)]]
 
+amd_cdna_1616128 = [TensorCore(dims=(16,16,128), threads=64, elements_per_thread=(32,32,4), dtype_in=di, dtype_out=do,
+  opts=("l0","l0","l0","l0","u1","u1","l1","l1"),
+  swizzle=((('u0', 'u1', 'l4', 'l5', 'r5', 'r6'), ('r0', 'r1'), ('l0', 'l1', 'l2', 'l3', 'r2', 'r3', 'r4')),
+           (('l0', 'l1', 'l2', 'l3', 'r5', 'r6'), ('r0', 'r1'), ('l4', 'l5', 'u0', 'u1', 'r2', 'r3', 'r4'))))
+  for di,do in [(dtypes.fp8e5m2,dtypes.float),(dtypes.fp8e4m3,dtypes.float)]]
+
 amd_cdna3 = amd_cdna_161632[:2] + amd_cdna_161616
 
-amd_cdna4 = amd_cdna_161632 + amd_cdna_161616
+amd_cdna4 = amd_cdna_1616128 + amd_cdna_161632 + amd_cdna_161616
 
 # ***** Apple Metal *****
 
