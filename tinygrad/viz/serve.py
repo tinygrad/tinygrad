@@ -366,7 +366,7 @@ def get_render(i:int, j:int, fmt:str) -> dict:
     if isinstance(compiler, LLVMCompiler):
       return get_llvm_mca(disasm_str, ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode(),
                           ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode())
-    return {"src":disasm_str, "lang":"x86asm"}
+    return {"src":disasm_str, "lang":"amdgpu" if data.device.startswith("AMD") else None}
   if fmt == "sqtt-insts":
     columns = ["PC", "Instruction", "Hits", "Duration", "Stall", "Type"]
     inst_columns = ["N", "Clk", "Idle", "Dur", "Stall"]
