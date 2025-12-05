@@ -263,7 +263,6 @@ from tinygrad.engine.realize import get_program
 
 class TestVizIntegration(BaseTestViz):
   # codegen supports rendering of code blocks
-  @unittest.skip("fix this")
   def test_codegen_tracing(self):
     ast = Tensor.schedule(Tensor.empty(4)+Tensor.empty(4))[0].ast
     prg = get_program(ast, Device[Device.DEFAULT].renderer)
