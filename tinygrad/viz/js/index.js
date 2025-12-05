@@ -636,6 +636,9 @@ hljs.registerLanguage("cpp", (hljs) => ({
   ...hljs.getLanguage('cpp'),
   contains: [{ begin: '\\b(?:float|half)[0-9]+\\b', className: 'type' }, ...hljs.getLanguage('cpp').contains]
 }));
+hljs.registerLanguage("amdgpu", (hljs) => ({
+  contains: [hljs.COMMENT("//", "$"), { begin:/\b(?:s_|v_|global_|buffer_|scratch_|flat_|ds_)[a-z0-9_]*\b/, className:"code" }]
+}));
 
 async function fetchValue(path) {
   const res = await fetch(path);
