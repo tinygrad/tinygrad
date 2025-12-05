@@ -1000,7 +1000,7 @@ class AMDDevice(HCQCompiled):
       wavesize = scratch_size // ((wave_scratch_len * self.se_cnt) if self.target >= (11,0,0) else wave_scratch_len)
 
       tmpring_t = getattr(hsa, f'union_COMPUTE_TMPRING_SIZE{"_GFX"+str(self.target[0]) if self.target[0] >= 11 else ""}_bitfields')
-      self.tmpring_size = int.from_bytes(tmpring_t(waves=waves, wavesize=wavesize), 'little')
+      self.tmpring_size = int.from_bytes(tmpring_t(WAVES=waves, WAVESIZE=wavesize), 'little')
       self.max_private_segment_size = required
 
       if hasattr(self, 'aql_desc'):
@@ -1013,7 +1013,7 @@ class AMDDevice(HCQCompiled):
         self.aql_desc.scratch_backing_memory_location = self.scratch.va_addr
         self.aql_desc.scratch_wave64_lane_byte_size = self.max_private_segment_size * (self.aql_desc.max_wave_id + 1) // 64
         self.aql_desc.scratch_resource_descriptor[:] = [lo32(self.scratch.va_addr),
-          int.from_bytes(rsrc1_t(base_address_hi=hi32(self.scratch.va_addr), swizzle_enable=1), 'little'),
+          int.from_bytes(rsrc1_t(BASE_ADDRESS_HI=hi32(self.scratch.va_addr), SWIZZLE_ENABLE=1), 'little'),
           lo32(scratch_size), int.from_bytes(bytes(rsrc3_t(**rsrc)), 'little')]
         self.aql_desc.compute_tmpring_size = self.tmpring_size
 
