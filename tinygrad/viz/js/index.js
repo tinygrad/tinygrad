@@ -796,11 +796,11 @@ async function main() {
     }
     if (ret.cols != null) {
       renderTable(root, ret);
-      metadata.appendChild(tabulate(ret.summary.map(s => {
-        const div = d3.create("div").style("background", cycleColors(colorScheme.CATEGORICAL, s.idx)).style("width", "100%").style("height", "100%");
-        return [s.label.trim(), div.text(s.value.toLocaleString()).node()];
-      })).node());
     } else root.append(() => codeBlock(ret.src, ret.lang || "txt"));
+    metadata.appendChild(tabulate(ret.metadata?.map(({ label, value, idx }) => {
+      const div = d3.create("div").style("background", cycleColors(colorScheme.CATEGORICAL, idx)).style("width", "100%").style("height", "100%");
+      return [label.trim(), div.text(typeof value === "string" ? value : formatUnit(value)).node()];
+    })).node());
     return document.querySelector("#custom").replaceChildren(root.node());
   }
   // ** UOp view (default)
