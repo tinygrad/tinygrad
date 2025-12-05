@@ -114,12 +114,16 @@ class TestAutogen(unittest.TestCase):
     class MyStruct(Struct): pass
     MyStruct._packed_ = True
     MyStruct._fields_ = [('a', ctypes.c_int), ('b', ctypes.c_int)]
-    with self.assertRaises(AssertionError) as cm:
-      MyStruct(a=1, b=2, c=3)
-    with self.assertRaises(AssertionError) as cm:
-      MyStruct(A=1, b=2)
+    with self.assertRaises(AssertionError): MyStruct(a=1, b=2, c=3)
+    with self.assertRaises(AssertionError): MyStruct(A=1, b=2)
     x = MyStruct(a=1, b=2)
-    with self.assertRaises(AssertionError) as cm:
-      x.c = 3
+    with self.assertRaises(AssertionError): x.c = 3
+
+    class MyStructNotPacked(Struct): pass
+    MyStructNotPacked._fields_ = [('a', ctypes.c_int), ('b', ctypes.c_int)]
+    with self.assertRaises(AssertionError): MyStructNotPacked(a=1, b=2, c=3)
+    with self.assertRaises(AssertionError): MyStructNotPacked(A=1, b=2)
+    x = MyStructNotPacked(a=1, b=2)
+    with self.assertRaises(AssertionError): x.c = 3
 
 if __name__ == "__main__": unittest.main()
