@@ -160,8 +160,8 @@ def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
 
 def print_pmc(ev:ProfilePMCEvent) -> None:
   ptr = 0
+  view = memoryview(ev.blob).cast('Q')
   for s in ev.sched:
-    view = memoryview(ev.blob).cast('Q')
     print(f"\t{s.name}")
     for xcc, inst, se_idx, sa_idx, wgp_idx in itertools.product(range(s.xcc), range(s.inst), range(s.se), range(s.sa), range(s.wgp)):
       print(f"\t\tXCC {xcc} Inst {inst:<2} SE {se_idx} SA {sa_idx} WGP {wgp_idx}: {view[ptr]:#x}")
