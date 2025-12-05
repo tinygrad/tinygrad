@@ -93,5 +93,6 @@ else:
         for k,v in kwargs.items(): setattr(self, k, v)
       else: super().__init__(*args, **kwargs)
     def __setattr__(self, key, value):
-      assert key in set(f[0] for f in self._fields_) | (set(f[0] for f in getattr(self, '_packed_fields_', [])))
+      assert key in set(f[0] for f in self._fields_) | (set(f[0] for f in getattr(self, '_packed_fields_', []))),
+        f"Unknown field for {self.__class__.__name__}: {key}"
       super().__setattr__(key, value)
