@@ -998,6 +998,16 @@ class UPatAny(UPat):
     matches = [x.match(uop, store.copy()) for x in self.src[0]]
     return flatten([x for x in matches if x is not None])
 
+  def to_upat(self:UPat) -> UPat:
+    return UPat(op=self.op,
+                dtype=self.dtype,
+                src=self._in_src,
+                arg=self.arg,
+                name=self.name,
+                allow_any_len=not self.strict_length, 
+                custom_early_reject= self.custom_early_reject, 
+                location=self.location)
+
 def deconstruct_function(fxn:Callable) -> tuple:
   new_globals = {k:v for k,v in fxn.__globals__.items() if k in fxn.__code__.co_names}
   for co in fxn.__code__.co_consts:
