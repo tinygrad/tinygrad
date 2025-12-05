@@ -782,6 +782,6 @@ def _native_batch_norm_legit(input, weight, bias, running_mean, running_var, tra
     out = input_t.batchnorm(weight_t, bias_t, running_mean_t, running_var_t.add(eps).rsqrt())
     return wrap(out), wrap(running_mean_t), wrap(running_var_t.add(eps).rsqrt())
 
-@torch.library.impl("aten::_native_batch_norm_legit.no_stats", "privateuseone")  
+@torch.library.impl("aten::_native_batch_norm_legit.no_stats", "privateuseone")
 def _native_batch_norm_legit_no_stats(input, weight, bias, training, momentum, eps):
   return _native_batch_norm_legit(input, weight, bias, None, None, training, momentum, eps)
