@@ -275,7 +275,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
           row[2]["rows"].append(sample+(val,))
           ptr += 1
         rows.append(row)
-      steps.append(create_step("PMC", ("/pmc", len(ctxs), len(steps)), {"rows":rows, "cols":agg_cols, "summary":[]}, depth=2))
+      steps.append(create_step("PMC", ("/pmc", len(ctxs), len(steps)), {"rows":rows, "cols":agg_cols}, depth=2))
     for cu in prg_cu:
       events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]
       steps.append(create_step(f"{cu} {len(cu_events[cu])}", ("/counters", len(ctxs), len(steps)),
@@ -343,10 +343,10 @@ def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
     instr_usage.setdefault(i:=d["InstructionIndex"], {}).setdefault(r:=d["ResourceIndex"], 0)
     instr_usage[i][r] += d["ResourceUsage"]
   # last row is the usage summary
-  summary = [{"idx":k, "label":resource_labels[k], "value":v} for k,v in instr_usage.pop(len(rows), {}).items()]
+  metadata = [{"idx":k, "label":resource_labels[k], "value":v} for k,v in instr_usage.pop(len(rows), {}).items()]
   max_usage = max([sum(v.values()) for i,v in instr_usage.items() if i<len(rows)], default=0)
   for i,usage in instr_usage.items(): rows[i].append([[k, v, (v/max_usage)*100] for k,v in usage.items()])
-  return {"rows":rows, "cols":["Instruction", "Latency", {"title":"HW Resources", "labels":resource_labels}], "summary":summary}
+  return {"rows":rows, "cols":["Instruction", "Latency", {"title":"HW Resources", "labels":resource_labels}], "metadata":metadata}
 
 def get_stdout(f: Callable) -> str:
   buf = io.StringIO()
@@ -366,7 +366,7 @@ def get_render(i:int, j:int, fmt:str) -> dict:
     if isinstance(compiler, LLVMCompiler):
       return get_llvm_mca(disasm_str, ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode(),
                           ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode())
-    return {"src":disasm_str, "lang":"x86asm"}
+    return {"src":disasm_str, "lang":"amdgpu" if data.device.startswith("AMD") else None}
   if fmt == "sqtt-insts":
     columns = ["PC", "Instruction", "Hits", "Duration", "Stall", "Type"]
     inst_columns = ["N", "Clk", "Idle", "Dur", "Stall"]
@@ -391,9 +391,9 @@ def get_render(i:int, j:int, fmt:str) -> dict:
       inst["stall"] += e.stall
       inst["hits"]["rows"].append((inst["hit_count"]-1, e.time, max(0, e.time-prev_instr), e.dur, e.stall))
       prev_instr = max(prev_instr, e.time + e.dur)
-    summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
+    metadata = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
                {"label":"SIMD", "value":w.simd}, {"label":"Wave ID", "value":w.wave_id}, {"label":"Run number", "value":data["run_number"]}]
-    return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "summary":summary}
+    return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":metadata}
   return data
 
 # ** HTTP server

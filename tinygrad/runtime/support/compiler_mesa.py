@@ -1,4 +1,4 @@
-import base64, ctypes, pathlib, tempfile, hashlib, contextlib, sys
+import base64, ctypes, pathlib, tempfile, hashlib, sys
 from tinygrad.device import Compiler
 from tinygrad.helpers import cpu_objdump, system, data64
 from tinygrad.runtime.autogen import mesa
@@ -20,12 +20,10 @@ class NIRCompiler(Compiler):
   def __init__(self, cache_key):
     mesa.glsl_type_singleton_init_or_ref()
     super().__init__(cache_key)
-  def __del__(self):
-    with contextlib.suppress(AttributeError): mesa.glsl_type_singleton_decref()
+  def __del__(self): mesa.glsl_type_singleton_decref()
 
 class LVPCompiler(CPULLVMCompiler, NIRCompiler):
   def __init__(self, cache_key="lvp"):
-    assert mesa.dll is not None
     CPULLVMCompiler.__init__(self)
     NIRCompiler.__init__(self, f"compile_{cache_key}")
 
@@ -72,7 +70,7 @@ class NAKCompiler(NIRCompiler):
     super().__init__(f"compile_{cache_key}_{arch}")
 
   def __del__(self):
-    with contextlib.suppress(AttributeError): mesa.nak_compiler_destroy(self.cc)
+    mesa.nak_compiler_destroy(self.cc)
     super().__del__()
 
   def __reduce__(self): return NAKCompiler, (self.arch, self.warps_per_sm)
