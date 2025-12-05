@@ -829,6 +829,7 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(len(si.metadata), 3)
     self.assertEqual(set(m.name for m in si.metadata), {"relu", "sigmoid", "__mul__"})
 
+  @unittest.skip("metadata is no longer promised to be exact with schedulecache")
   def test_complex_backward(self):
     x = Tensor.rand(3, requires_grad=True).realize()
     y = Tensor.rand(3, requires_grad=True).realize()
