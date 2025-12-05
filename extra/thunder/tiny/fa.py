@@ -129,10 +129,10 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
 
       return ker.finish()
 
-  def custom_backward_q(out_qu:UOp, gradu:UOp, qu:UOp, ku:UOp, vu:UOp, l_vecu:UOp, delta_vecu:UOp) -> UOp:
+  def custom_backward_q(out_qu:UOp, gradu:UOp, qu:UOp, ku:UOp, vu:UOp, masku:UOp, l_vecu:UOp, delta_vecu:UOp) -> UOp:
     return UOp.sink(arg=KernelInfo(name="fa_custom_backward_q"))
 
-  def custom_backward_kv(out_ku:UOp, out_vu:UOp, gradu:UOp, qu:UOp, ku:UOp, vu:UOp, l_vecu:UOp, delta_vecu:UOp) -> UOp:
+  def custom_backward_kv(out_ku:UOp, out_vu:UOp, gradu:UOp, qu:UOp, ku:UOp, vu:UOp, masku:UOp, l_vecu:UOp, delta_vecu:UOp) -> UOp:
     return UOp.sink(arg=KernelInfo(name="fa_custom_backward_kv"))
 
   if is_causal:
@@ -150,13 +150,14 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
     grad_q = Tensor.empty_like(q := Tensor(kernel.src[2]))
     grad_k = Tensor.empty_like(k := Tensor(kernel.src[3]))
     grad_v = Tensor.empty_like(v := Tensor(kernel.src[4]))
+    mask = Tensor(kernel.src[5])
 
     delta_vec = (Tensor(grad) * attn).sum(-1).unsqueeze(-2).detach()
 
     print(l_vec.numpy())
 
-    grad_q = Tensor.custom_kernel(grad_q, Tensor(grad), q, k, v, l_vec, delta_vec, fxn=custom_backward_q)[0]
-    grad_k, grad_v = Tensor.custom_kernel(grad_k, grad_v, Tensor(grad), q, k, v, l_vec, delta_vec, fxn=custom_backward_kv)[:2]
+    grad_q = Tensor.custom_kernel(grad_q, Tensor(grad), q, k, v, mask, l_vec, delta_vec, fxn=custom_backward_q)[0]
+    grad_k, grad_v = Tensor.custom_kernel(grad_k, grad_v, Tensor(grad), q, k, v, mask, l_vec, delta_vec, fxn=custom_backward_kv)[:2]
     return (None, None, grad_q.uop, grad_k.uop, grad_v.uop, None)
 
   attn, l_vec = Tensor.custom_kernel(attn, l_vec, xq, xk, xv, attn_mask, fxn=custom_forward, grad_fxn=grad)[:2]
