@@ -1000,7 +1000,7 @@ class AMDDevice(HCQCompiled):
       wavesize = scratch_size // ((wave_scratch_len * self.se_cnt) if self.target >= (11,0,0) else wave_scratch_len)
 
       tmpring_t = getattr(hsa, f'union_COMPUTE_TMPRING_SIZE{"_GFX"+str(self.target[0]) if self.target[0] >= 11 else ""}_bitfields')
-      self.tmpring_size = int.from_bytes(tmpring_t(waves=waves, wavesize=wavesize), 'little')
+      self.tmpring_size = int.from_bytes(tmpring_t(WAVES=waves, WAVESIZE=wavesize), 'little')
       self.max_private_segment_size = required
 
       if hasattr(self, 'aql_desc'):
