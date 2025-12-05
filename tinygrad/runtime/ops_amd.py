@@ -1013,7 +1013,7 @@ class AMDDevice(HCQCompiled):
         self.aql_desc.scratch_backing_memory_location = self.scratch.va_addr
         self.aql_desc.scratch_wave64_lane_byte_size = self.max_private_segment_size * (self.aql_desc.max_wave_id + 1) // 64
         self.aql_desc.scratch_resource_descriptor[:] = [lo32(self.scratch.va_addr),
-          int.from_bytes(rsrc1_t(base_address_hi=hi32(self.scratch.va_addr), swizzle_enable=1), 'little'),
+          int.from_bytes(rsrc1_t(BASE_ADDRESS_HI=hi32(self.scratch.va_addr), SWIZZLE_ENABLE=1), 'little'),
           lo32(scratch_size), int.from_bytes(bytes(rsrc3_t(**rsrc)), 'little')]
         self.aql_desc.compute_tmpring_size = self.tmpring_size
 
