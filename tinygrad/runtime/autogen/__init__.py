@@ -99,7 +99,6 @@ def __getattr__(nm):
                                                                                              "sienna_cichlid_ip_offset"]],
                                 args=["-I/opt/rocm/include", "-x", "c++"])
     case "kgsl": return load("kgsl", [], [root/"extra/qcom_gpu_driver/msm_kgsl.h"], args=["-D__user="])
-    case "adreno": return load("adreno", [], [root/"extra/qcom_gpu_driver/a6xx.xml.h"])
     case "qcom_dsp":
       return load("qcom_dsp", [], [root/f"extra/dsp/include/{s}.h" for s in ["ion", "msm_ion", "adsprpc_shared", "remote_default", "apps_std"]])
     case "sqtt": return load("sqtt", [], [root/"extra/sqtt/sqtt.h"])
@@ -114,10 +113,11 @@ def __getattr__(nm):
         *[f"{{}}/src/nouveau/{s}.h" for s in ["headers/nv_device_info", "compiler/nak"]],
         *[f"{{}}/src/gallium/auxiliary/gallivm/lp_bld{s}.h" for s in ["", "_passmgr", "_misc", "_type", "_init", "_nir", "_struct", "_jit_types",
                                                                      "_flow", "_const"]],
-        "{}/src/compiler/glsl_types.h", "{}/src/util/blob.h", "{}/src/util/ralloc.h", "{}/gen/builtin_types.h"], args=lambda:[
+        "{}/src/compiler/glsl_types.h", "{}/src/util/blob.h", "{}/src/util/ralloc.h", "{}/gen/builtin_types.h", "{}/gen/a6xx.xml.h"], args=lambda:[
           "-DHAVE_ENDIAN_H", "-DHAVE_STRUCT_TIMESPEC", "-DHAVE_PTHREAD", "-DHAVE_FUNC_ATTRIBUTE_PACKED", "-I{}/src", "-I{}/include", "-I{}/gen",
           "-I{}/src/compiler/nir", "-I{}/src/gallium/auxiliary", "-I{}/src/gallium/include", f"-I{system('llvm-config-20 --includedir')}"],
         preprocess=lambda path: subprocess.run("""mkdir -p gen/util/format
+python3 src/freedreno/registers/gen_header.py --rnn src/freedreno/registers/ --xml src/freedreno/registers/adreno/a6xx.xml c-defines > gen/a6xx.xml.h
 python3 src/util/format/u_format_table.py src/util/format/u_format.yaml --enums > gen/util/format/u_format_gen.h
 python3 src/compiler/nir/nir_opcodes_h.py > gen/nir_opcodes.h
 python3 src/compiler/nir/nir_intrinsics_h.py --outdir gen
