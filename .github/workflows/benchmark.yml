@@ -3,7 +3,8 @@ env:
   # TODO: this rescheduling makes gpt2, mixtral and llama unjitted slower
   # TODO: very slow for llama 70B and resnet training 6 GPU
   CAPTURE_PROCESS_REPLAY: "1"
-  ASSERT_PROCESS_REPLAY: "0"
+  # uncomment to run process replay in diff only mode
+  #ASSERT_PROCESS_REPLAY: "0"
   PYTHONPATH: .
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -14,12 +15,6 @@ on:
       - update_benchmark
       - update_benchmark_staging
   workflow_dispatch:
-    inputs:
-      run_process_replay:
-        description: "Run process replay tests"
-        required: false
-        default: false
-        type: boolean
 
 jobs:
   testmacbenchmark:
@@ -163,7 +158,7 @@ jobs:
           train_cifar_bf16.txt
           train_cifar_wino.txt
     - name: Run process replay tests
-      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3.11 process_replay.py
+      uses: ./.github/actions/process-replay
 
   testnvidiabenchmark:
     name: tinybox green Benchmark
@@ -282,7 +277,7 @@ jobs:
           gpt2_half.txt
           gpt2_half_beam.txt
     - name: Run process replay tests
-      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+      uses: ./.github/actions/process-replay
 
   testmorenvidiabenchmark:
     name: tinybox green Training Benchmark
@@ -358,7 +353,7 @@ jobs:
           train_resnet_one_gpu.txt
           train_bert.txt
     - name: Run process replay tests
-      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+      uses: ./.github/actions/process-replay
 
   testamdbenchmark:
     name: tinybox red Benchmark
@@ -488,7 +483,7 @@ jobs:
           sdxl.txt
           mixtral.txt
     - name: Run process replay tests
-      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+      uses: ./.github/actions/process-replay
 
   testmoreamdbenchmark:
     name: tinybox red Training Benchmark
@@ -552,7 +547,7 @@ jobs:
           train_cifar_six_gpu.txt
           train_cifar_six_gpu_remote.txt
     - name: Run process replay tests
-      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+      uses: ./.github/actions/process-replay
 
   testmlperfamdbenchmark:
     name: tinybox red MLPerf Benchmark
@@ -603,7 +598,7 @@ jobs:
           train_resnet_one_gpu.txt
           train_bert.txt
     - name: Run process replay tests
-      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+      uses: ./.github/actions/process-replay
 
   testqualcommbenchmark:
     name: comma Benchmark
@@ -646,7 +641,7 @@ jobs:
         # benchmark on DSP with NOOPT=1, the devectorizer has issues
         PYTHONPATH=. CC=clang-19 DSP=1 NOOPT=1 CNT=2 DEBUG=2 python3 examples/test_onnx_imagenet.py /tmp/model.quant.onnx
     - name: Run process replay tests
-      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+      uses: ./.github/actions/process-replay
 
   testreddriverbenchmark:
     name: AM Benchmark
@@ -716,7 +711,7 @@ jobs:
           am_train_resnet_one_gpu.txt
           am_train_bert_one_gpu.txt
     - name: Run process replay tests
-      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+      uses: ./.github/actions/process-replay
 
   testgreendriverbenchmark:
     name: NV Benchmark
@@ -778,4 +773,4 @@ jobs:
           nv_train_resnet_one_gpu.txt
           nv_train_bert_one_gpu.txt
     - name: Run process replay tests
-      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+      uses: ./.github/actions/process-replay
