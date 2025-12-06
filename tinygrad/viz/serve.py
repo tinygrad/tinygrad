@@ -349,7 +349,7 @@ def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
   metadata = [{"idx":k, "label":resource_labels[k], "value":v} for k,v in instr_usage.pop(len(rows), {}).items()]
   max_usage = max([sum(v.values()) for i,v in instr_usage.items() if i<len(rows)], default=0)
   for i,usage in instr_usage.items(): rows[i].append([[k, v, (v/max_usage)*100] for k,v in usage.items()])
-  return {"rows":rows, "cols":["Instruction", "Latency", {"title":"HW Resources", "labels":resource_labels}], "metadata":metadata}
+  return {"rows":rows, "cols":["Instruction", "Latency", {"title":"HW Resources", "labels":resource_labels}], "metadata":[metadata]}
 
 def get_stdout(f: Callable) -> str:
   buf = io.StringIO()
@@ -357,6 +357,18 @@ def get_stdout(f: Callable) -> str:
     with redirect_stdout(buf), redirect_stderr(buf): f()
   except Exception: traceback.print_exc(file=buf)
   return buf.getvalue()
+
+def amd_readelf(lib:bytes) -> list[dict]:
+  from tinygrad.runtime.support.elf import elf_loader
+  import msgpack
+  _, sections, __ = elf_loader(lib)
+  data = next((s for s in sections if s.name.startswith(".note"))).content
+  namesz, descsz, typ = struct.unpack_from(hdr:="<III", data, 0)
+  offset = (struct.calcsize(hdr)+namesz+3) & -4
+  notes = msgpack.unpackb(data[offset:offset+descsz])
+  keys = {".sgpr_count":"SGPRs", ".vgpr_count":"VGPRs", ".max_flat_workgroup_size":"WGP size",
+          ".group_segment_fixed_size":"LDS size", ".private_segment_fixed_size":"Scratch size"}
+  return [{"label":label, "value":v} for k,label in keys.items() if (v:=notes["amdhsa.kernels"][0][k]) > 0]
 
 def get_render(i:int, j:int, fmt:str) -> dict:
   data = ctxs[i]["steps"][j]["data"]
@@ -369,7 +381,11 @@ def get_render(i:int, j:int, fmt:str) -> dict:
     if isinstance(compiler, LLVMCompiler):
       return get_llvm_mca(disasm_str, ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode(),
                           ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode())
-    return {"src":disasm_str, "lang":"amdgpu" if data.device.startswith("AMD") else None}
+    metadata:list = []
+    if data.device.startswith("AMD"):
+      with soft_err(lambda err: metadata.append(err)):
+        metadata.append(amd_readelf(compiler.compile(data.src)))
+    return {"src":disasm_str, "lang":"amdgpu" if data.device.startswith("AMD") else None, "metadata":metadata}
   if fmt == "sqtt-insts":
     columns = ["PC", "Instruction", "Hits", "Duration", "Stall", "Type"]
     inst_columns = ["N", "Clk", "Idle", "Dur", "Stall"]
@@ -396,7 +412,7 @@ def get_render(i:int, j:int, fmt:str) -> dict:
       prev_instr = max(prev_instr, e.time + e.dur)
     metadata = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
                {"label":"SIMD", "value":w.simd}, {"label":"Wave ID", "value":w.wave_id}, {"label":"Run number", "value":data["run_number"]}]
-    return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":metadata}
+    return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":[metadata]}
   return data
 
 # ** HTTP server
