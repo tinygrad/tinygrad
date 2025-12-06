@@ -300,10 +300,7 @@ class NVAllocator(HCQAllocator['NVDevice']):
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
     return self.dev.iface.alloc(size, cpu_access=options.cpu_access, host=options.host)
 
-  @suppress_finalizing
-  def _free(self, opaque:HCQBuffer, options:BufferSpec):
-    self.dev.synchronize()
-    self.dev.iface.free(opaque)
+  def _do_free(self, opaque:HCQBuffer, options:BufferSpec): self.dev.iface.free(opaque)
 
   def _map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
 
