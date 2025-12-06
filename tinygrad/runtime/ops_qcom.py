@@ -143,6 +143,7 @@ class QCOMComputeQueue(HWQueue):
              qreg.a6xx_sp_cs_pvt_mem_param(memsizeperitem=prg.pvtmem_size_per_item), *data64_le(prg.dev._stack.va_addr),
              qreg.a6xx_sp_cs_pvt_mem_size(totalpvtmemsize=prg.pvtmem_size_total))
 
+    if prg.NIR and prg.wgsz != 0xfc: to_mv(args_state.buf.va_addr + prg.wgsz * 4, 12)[:] = struct.pack("III", *local_size)
     self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST_CONSTANTS, state_src=adreno.SS6_INDIRECT,
                                                                state_block=adreno.SB6_CS_SHADER, num_unit=1024 // 4),
              *data64_le(args_state.buf.va_addr))
@@ -176,12 +177,8 @@ class QCOMComputeQueue(HWQueue):
 
     self.reg(adreno.REG_A6XX_SP_CS_CONFIG, qreg.a6xx_sp_cs_config(enabled=True, nsamp=prg.samp_cnt, ntex=prg.tex_cnt, nibo=prg.ibo_cnt))
     if prg.NIR:
-      if prg.wgsz != 0xfc: self.cmd(adreno.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=adreno.ST_CONSTANTS, state_src=adreno.SS6_DIRECT,
-                                                                                      state_block=adreno.SB6_CS_SHADER, dst_off=prg.wgsz, num_unit=1),
-                                    local_size[0], local_size[1], local_size[2], 0)
-
       self.reg(adreno.REG_A6XX_HLSQ_CS_CNTL_0,
-               qreg.a6xx_hlsq_cs_cntl_0(wgidconstid=prg.wgid, wgsizeconstid=prg.wgsz, wgoffsetconstid=0xfc, localidregid=prg.lid),
+               qreg.a6xx_hlsq_cs_cntl_0(wgidconstid=prg.wgid, wgsizeconstid=0xfc, wgoffsetconstid=0xfc, localidregid=prg.lid),
                qreg.a6xx_hlsq_cs_cntl_1(linearlocalidregid=0xfc, threadsize=adreno.THREAD64))
       self.cmd(adreno.CP_EXEC_CS, 0,
                qreg.cp_exec_cs_1(ngroups_x=global_size[0]), qreg.cp_exec_cs_2(ngroups_y=global_size[1]), qreg.cp_exec_cs_3(_ngroups_z=global_size[2]))
