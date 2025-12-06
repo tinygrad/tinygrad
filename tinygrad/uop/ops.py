@@ -531,7 +531,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return self.shrink(tuple((0,s) if i != axis else (dnum*sz,dnum*sz+sz) for i,s in enumerate(self.shape)))
   def shard(self, devices:tuple[str, ...], axis:int) -> UOp:
     if self.op is Ops.BUFFER and isinstance(self.device, str) and self.shape[axis] % len(devices) == 0:
-      return UOp.new_buffer(devices, self.arg // len(devices), self.dtype, self.src[0].arg).reshape(tuple(s if i != axis else s // len(devices) 
+      return UOp.new_buffer(devices, self.arg // len(devices), self.dtype, self.src[0].arg).reshape(tuple(s if i != axis else s // len(devices)
       for i, s in enumerate(self.shape))).multi(axis)
     return self.copy_to_device(devices)._shard(axis).multi(axis)
 
