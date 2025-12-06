@@ -1,7 +1,7 @@
 from typing import Union, Optional, Any
 import collections, math
 from tinygrad import Tensor, Variable, TinyJit, dtypes, nn, Device
-from tinygrad.helpers import getenv, DEBUG
+from tinygrad.helpers import getenv, DEBUG, profile_marker, Context
 
 # https://github.com/facebookresearch/llama/blob/1076b9c51c77ad06e9d7ba8a4c6df775741732bd/llama/model.py#L47
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
@@ -207,8 +207,14 @@ class Transformer:
   def __call__(self, tokens:Tensor, start_pos:int, temperature:float=0.0, top_k:int=0, top_p:float=0.8, alpha_f:float=0.0, alpha_p:float=0.0):
     # TODO: better way to handle the first call v.s. the rest?
     if tokens.shape[0:2] == (1,1) and self.forward_jit is not None and start_pos != 0:
-      return self.forward_jit(tokens, Variable("start_pos", 1, self.max_context-1).bind(start_pos), temperature, top_k, top_p, alpha_f, alpha_p)
-    return self.forward(tokens, start_pos, temperature, top_k, top_p, alpha_f, alpha_p)
+      profile_marker("forward")
+      print(f'forward_jit=True')
+      with Context(DEBUG=2):
+        return self.forward_jit(tokens, Variable("start_pos", 1, self.max_context-1).bind(start_pos), temperature, top_k, top_p, alpha_f, alpha_p)
+    profile_marker("forward")
+    print(f'forward_jit=False')
+    with Context(DEBUG=2):
+      return self.forward(tokens, start_pos, temperature, top_k, top_p, alpha_f, alpha_p)
 
 # *** helpers ***
 
@@ -233,6 +239,10 @@ def convert_from_huggingface(weights:dict[str, Tensor], n_layers: int, n_heads: 
   sd = {}
   experts = collections.defaultdict(dict)
   for k, v in weights.items():
+    if k not in keymap:
+      if DEBUG >= 1: print(f"WARNING: key {k} not in keymap")
+      del v
+      continue
     if ".rotary_emb." in k: continue
     v = v.to(Device.DEFAULT)
     if "model.layers" in k:
