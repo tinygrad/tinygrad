@@ -117,7 +117,7 @@ def __getattr__(nm):
         "{}/gen/adreno_pm4.xml.h"], args=lambda:[
           "-DHAVE_ENDIAN_H", "-DHAVE_STRUCT_TIMESPEC", "-DHAVE_PTHREAD", "-DHAVE_FUNC_ATTRIBUTE_PACKED", "-I{}/src", "-I{}/include", "-I{}/gen",
           "-I{}/src/compiler/nir", "-I{}/src/gallium/auxiliary", "-I{}/src/gallium/include", f"-I{system('llvm-config-20 --includedir')}"],
-        preprocess=lambda path: subprocess.run("\n".join(["mkdir -p gen/util/format", *[f"python3 src/freedreno/registers/gen_header.py --rnn " +
+        preprocess=lambda path: subprocess.run("\n".join(["mkdir -p gen/util/format", *["python3 src/freedreno/registers/gen_header.py --rnn " +
         f"src/freedreno/registers/ --xml src/freedreno/registers/adreno/{s}.xml c-defines > gen/{s}.xml.h" for s in ["a6xx", "adreno_pm4"]],
         "python3 src/util/format/u_format_table.py src/util/format/u_format.yaml --enums > gen/util/format/u_format_gen.h",
         "python3 src/compiler/builtin_types_h.py gen/builtin_types.h",
