@@ -349,7 +349,7 @@ def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
   metadata = [{"idx":k, "label":resource_labels[k], "value":v} for k,v in instr_usage.pop(len(rows), {}).items()]
   max_usage = max([sum(v.values()) for i,v in instr_usage.items() if i<len(rows)], default=0)
   for i,usage in instr_usage.items(): rows[i].append([[k, v, (v/max_usage)*100] for k,v in usage.items()])
-  return {"rows":rows, "cols":["Instruction", "Latency", {"title":"HW Resources", "labels":resource_labels}], "metadata":metadata}
+  return {"rows":rows, "cols":["Instruction", "Latency", {"title":"HW Resources", "labels":resource_labels}], "metadata":[metadata]}
 
 def get_stdout(f: Callable) -> str:
   buf = io.StringIO()
@@ -412,7 +412,7 @@ def get_render(i:int, j:int, fmt:str) -> dict:
       prev_instr = max(prev_instr, e.time + e.dur)
     metadata = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
                {"label":"SIMD", "value":w.simd}, {"label":"Wave ID", "value":w.wave_id}, {"label":"Run number", "value":data["run_number"]}]
-    return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":metadata}
+    return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":[metadata]}
   return data
 
 # ** HTTP server
