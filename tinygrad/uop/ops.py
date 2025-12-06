@@ -535,7 +535,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       if self.shape[axis] % dcount != 0:
         return self.copy_to_device(devices)._shard(axis).multi(axis)
       shard_size = self.arg // dcount
-      multi_buf = UOp(Ops.BUFFER, self.dtype, (self.src[0], UOp(Ops.DEVICE, arg=tuple(devices))), shard_size)
+      multi_buf = UOp(Ops.BUFFER, self.dtype, (self.src[0], UOp(Ops.DEVICE, arg=devices)), shard_size)
       shard_shape = tuple(s if i != axis else s // dcount for i, s in enumerate(self.shape))
       return multi_buf.reshape(shard_shape).multi(axis)
     return self.copy_to_device(devices)._shard(axis).multi(axis)
