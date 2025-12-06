@@ -530,14 +530,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     sz = self.shape[axis] // dcount
     return self.shrink(tuple((0,s) if i != axis else (dnum*sz,dnum*sz+sz) for i,s in enumerate(self.shape)))
   def shard(self, devices:tuple[str, ...], axis:int) -> UOp:
-    if self.op is Ops.BUFFER and isinstance(self.device, str):
-      dcount = len(devices)
-      if self.shape[axis] % dcount != 0:
-        return self.copy_to_device(devices)._shard(axis).multi(axis)
-      shard_size = self.arg // dcount
-      multi_buf = UOp(Ops.BUFFER, self.dtype, (self.src[0], UOp(Ops.DEVICE, arg=devices)), shard_size)
-      shard_shape = tuple(s if i != axis else s // dcount for i, s in enumerate(self.shape))
-      return multi_buf.reshape(shard_shape).multi(axis)
+    if self.op is Ops.BUFFER and isinstance(self.device, str) and self.shape[axis] % len(devices) == 0:
+      return UOp.new_buffer(devices, self.arg // len(devices), self.dtype, self.src[0].arg).reshape(tuple(s if i != axis else s // len(devices) for i, s in enumerate(self.shape))).multi(axis)
     return self.copy_to_device(devices)._shard(axis).multi(axis)
 
   # *** from LazyBuffer ***
