@@ -346,10 +346,10 @@ def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
     instr_usage.setdefault(i:=d["InstructionIndex"], {}).setdefault(r:=d["ResourceIndex"], 0)
     instr_usage[i][r] += d["ResourceUsage"]
   # last row is the usage summary
-  metadata = [{"idx":k, "label":resource_labels[k], "value":v} for k,v in instr_usage.pop(len(rows), {}).items()]
+  summary = [{"idx":k, "label":resource_labels[k], "value":v} for k,v in instr_usage.pop(len(rows), {}).items()]
   max_usage = max([sum(v.values()) for i,v in instr_usage.items() if i<len(rows)], default=0)
   for i,usage in instr_usage.items(): rows[i].append([[k, v, (v/max_usage)*100] for k,v in usage.items()])
-  return {"rows":rows, "cols":["Instruction", "Latency", {"title":"HW Resources", "labels":resource_labels}], "metadata":[metadata]}
+  return {"rows":rows, "cols":["Instruction", "Latency", {"title":"HW Resources", "labels":resource_labels}], "metadata":[summary]}
 
 def get_stdout(f: Callable) -> str:
   buf = io.StringIO()
@@ -410,9 +410,9 @@ def get_render(i:int, j:int, fmt:str) -> dict:
       inst["stall"] += e.stall
       inst["hits"]["rows"].append((inst["hit_count"]-1, e.time, max(0, e.time-prev_instr), e.dur, e.stall))
       prev_instr = max(prev_instr, e.time + e.dur)
-    metadata = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
+    summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
                {"label":"SIMD", "value":w.simd}, {"label":"Wave ID", "value":w.wave_id}, {"label":"Run number", "value":data["run_number"]}]
-    return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":[metadata]}
+    return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":[summary]}
   return data
 
 # ** HTTP server
