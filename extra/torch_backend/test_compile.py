@@ -3,6 +3,7 @@ import torch
 import torch._dynamo
 from extra.torch_backend.backend import unwrap, wrap
 
+from functorch.compile import make_boxed_func
 from torch._dynamo.backends.registry import register_backend
 from torch._functorch.aot_autograd import aot_module_simplified
 
@@ -23,7 +24,8 @@ def tiny(gm:torch.fx.GraphModule, sample_inputs):
       outs = tiny_function(*[unwrap(x.tiny()) for x in args])
       # torch expects output tensors to be on the same device as input tensors (cpu, in our case)
       return tuple(x.cpu() if x is not None else x for x in outs)
-    return torch_function
+    # "box" the function for torch's AOT (https://docs.pytorch.org/docs/stable/torch.compiler_custom_backends.html#custom-backends-after-aotautograd)
+    return make_boxed_func(torch_function)
   return aot_module_simplified(gm, sample_inputs, decompositions={}, fw_compiler=my_compiler)
 
 if __name__ == "__main__":
