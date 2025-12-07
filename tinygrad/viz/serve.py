@@ -358,6 +358,18 @@ def get_stdout(f: Callable) -> str:
   except Exception: traceback.print_exc(file=buf)
   return buf.getvalue()
 
+def amd_readelf(lib:bytes) -> list[dict]:
+  from tinygrad.runtime.support.elf import elf_loader
+  import msgpack
+  _, sections, __ = elf_loader(lib)
+  data = next((s for s in sections if s.name.startswith(".note"))).content
+  namesz, descsz, typ = struct.unpack_from(hdr:="<III", data, 0)
+  offset = (struct.calcsize(hdr)+namesz+3) & -4
+  notes = msgpack.unpackb(data[offset:offset+descsz])
+  keys = {".sgpr_count":"SGPRs", ".vgpr_count":"VGPRs", ".max_flat_workgroup_size":"Max WGP size",
+          ".group_segment_fixed_size":"LDS size", ".private_segment_fixed_size":"Scratch size"}
+  return [{"label":label, "value":v} for k,label in keys.items() if (v:=notes["amdhsa.kernels"][0][k]) > 0]
+
 def get_render(i:int, j:int, fmt:str) -> dict:
   data = ctxs[i]["steps"][j]["data"]
   if fmt == "uops": return {"src":get_stdout(lambda: print_uops(data.uops or [])), "lang":"txt"}
@@ -369,7 +381,11 @@ def get_render(i:int, j:int, fmt:str) -> dict:
     if isinstance(compiler, LLVMCompiler):
       return get_llvm_mca(disasm_str, ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode(),
                           ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode())
-    return {"src":disasm_str, "lang":"amdgpu" if data.device.startswith("AMD") else None}
+    metadata:list = []
+    if data.device.startswith("AMD"):
+      with soft_err(lambda err: metadata.append(err)):
+        metadata.append(amd_readelf(compiler.compile(data.src)))
+    return {"src":disasm_str, "lang":"amdgpu" if data.device.startswith("AMD") else None, "metadata":metadata}
   if fmt == "sqtt-insts":
     columns = ["PC", "Instruction", "Hits", "Duration", "Stall", "Type"]
     inst_columns = ["N", "Clk", "Idle", "Dur", "Stall"]
