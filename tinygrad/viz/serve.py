@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io, struct
 import ctypes, pathlib, traceback, itertools
-from contextlib import redirect_stdout, redirect_stderr
+from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
@@ -210,11 +210,16 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
   peaks.append(peak)
   return struct.pack("<BIQ", 1, len(events), peak)+b"".join(events) if events else None
 
-def err(name:str, msg:str|None=None) -> None:
-  ctxs.append({"name":"ERR", "steps":[create_step(name, ("render",len(ctxs),0), {"src":msg or traceback.format_exc()})]})
+# by default, VIZ does not start when there is an error
+# use this to instead display the traceback to the user
+@contextmanager
+def soft_err(fn:Callable):
+  try: yield
+  except Exception: fn({"src":traceback.format_exc()})
 
 def row_tuple(row:str) -> tuple[int, ...]: return tuple(int(x.split(":")[1]) for x in row.split())
 
+@soft_err(lambda err: ctxs.append({"name":"ERR", "steps":[create_step("Loader error", ("render",len(ctxs),0), err)]}))
 def load_sqtt(profile:list[ProfileEvent]) -> None:
   from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
   counter_events:dict[tuple[str, int], list[ProfileSQTTEvent|ProfilePMCEvent]] = {}
@@ -222,10 +227,8 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     if isinstance(e, (ProfilePMCEvent, ProfileSQTTEvent)): counter_events.setdefault((e.kern, e.exec_tag), []).append(e)
   if not counter_events: return
   # ** init decoder
-  try: from extra.sqtt.roc import decode
-  except Exception: return err("DECODER IMPORT ISSUE")
-  try: rctx = decode(profile)
-  except Exception: return err("DECODER ERROR")
+  from extra.sqtt.roc import decode
+  rctx = decode(profile)
   if getenv("SQTT_PARSE"):
     from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
     for counters in counter_events.values():
@@ -479,7 +482,7 @@ if __name__ == "__main__":
   st = time.perf_counter()
   print("*** viz is starting")
 
-  ctxs = get_rewrites(trace:=load_pickle(args.kernels, default=RewriteTrace([], [], {})))
+  ctxs:list[dict] = get_rewrites(trace:=load_pickle(args.kernels, default=RewriteTrace([], [], {})))
   profile_ret = get_profile(load_pickle(args.profile, default=[]))
 
   server = TCPServerWithReuse(('', PORT), Handler)
