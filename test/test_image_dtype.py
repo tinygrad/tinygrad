@@ -7,7 +7,7 @@ from tinygrad.engine.realize import lower_schedule
 from tinygrad.helpers import prod, unwrap
 from test.helpers import REAL_DEV
 
-IMAGE_SUPPORTED_DEVICES = ("QCOM", "GPU")
+IMAGE_SUPPORTED_DEVICES = ("QCOM", "CL")
 
 @unittest.skipUnless(REAL_DEV in IMAGE_SUPPORTED_DEVICES, "Images not supported")
 class TestImageCopy(unittest.TestCase):
@@ -52,7 +52,6 @@ class TestImageDType(unittest.TestCase):
     assert isinstance(it.uop.base.realized.dtype, ImageDType)
     np.testing.assert_equal(tst, it.numpy())
 
-  @unittest.expectedFailure # this isn't supported anymore, CAST to ImageDType stays ImageDType
   def test_image_cast_and_back_collapses(self):
     data = Tensor.randn(9*27*4).realize()
     tst = data.numpy()
@@ -139,7 +138,7 @@ class TestImageDType(unittest.TestCase):
       # NOTE: the w1 grad must realize to a seperate kernel
       assert w1.grad.uop.is_realized, f"never realized {w1.grad}"
       self.assertEqual(w1.grad.uop.base.buffer.dtype, dtypes.float32)
-      self.assertEqual(len(sched), 10)
+      self.assertEqual(len(sched), 9)
 
 @unittest.skipUnless(REAL_DEV in IMAGE_SUPPORTED_DEVICES, "Images not supported")
 class TestImageRealization(unittest.TestCase):

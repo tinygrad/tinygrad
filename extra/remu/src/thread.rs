@@ -673,6 +673,7 @@ impl<'a> Thread<'a> {
                                         39 => f32::log2(s0),
                                         42 => 1.0 / s0,
                                         43 => 1.0 / s0,
+                                        46 => 1.0 / f32::sqrt(s0),
                                         51 => f32::sqrt(s0),
                                         _ => todo_instr!(instruction)?,
                                     }
@@ -881,6 +882,11 @@ impl<'a> Thread<'a> {
                             let s1 = sign_ext((s1 & 0xffffff) as u64, 24) as i32;
                             (s0 * s1) as u32
                         }
+                        10 => {
+                            let s0 = sign_ext((s0 & 0xffffff) as u64, 24) as i64;
+                            let s1 = sign_ext((s1 & 0xffffff) as u64, 24) as i64;
+                            ((s0 * s1) >> 32) as u32
+                        }
                         17 | 18 | 26 => {
                             let (s0, s1) = (s0 as i32, s1 as i32);
                             (match op {
@@ -929,7 +935,7 @@ impl<'a> Thread<'a> {
 
             let op = ((instr >> 16) & 0x3ff) as u32;
             match op {
-                764 | 765 | 288 | 289 | 290 | 766 | 768 | 769 => {
+                764 | 765 | 288 | 289 | 290 | 766 | 767 | 768 | 769 | 770 => {
                     let vdst = (instr & 0xff) as usize;
                     let sdst = ((instr >> 8) & 0x7f) as usize;
                     let f = |i: u32| -> usize { ((instr >> i) & 0x1ff) as usize };
@@ -943,6 +949,16 @@ impl<'a> Thread<'a> {
                     assert_eq!(clmp, 0);
 
                     let vcc = match op {
+                        767 => {
+                            let (s0, s1, s2): (u32, u32, u64) = (self.val(s0), self.val(s1), self.val(s2));
+                            let (mul_result, overflow_mul) = (s0 as i64).overflowing_mul(s1 as i64);
+                            let (ret, overflow_add) = mul_result.overflowing_add(s2 as i64);
+                            let overflowed = overflow_mul || overflow_add;
+                            if self.exec.read() {
+                                self.vec_reg.write64(vdst, ret as u64);
+                            }
+                            overflowed
+                        },
                         766 => {
                             let (s0, s1, s2): (u32, u32, u64) = (self.val(s0), self.val(s1), self.val(s2));
                             let (mul_result, overflow_mul) = (s0 as u64).overflowing_mul(s1 as u64);
@@ -985,6 +1001,10 @@ impl<'a> Thread<'a> {
                                     let ret = s0.wrapping_sub(s1);
                                     (ret as u32, s1 > s0)
                                 }
+                                770 => {
+                                    let ret = s1.wrapping_sub(s0);
+                                    (ret as u32, s0 > s1)
+                                }
                                 _ => todo_instr!(instruction)?,
                             };
                             if self.exec.read() {
@@ -1004,7 +1024,7 @@ impl<'a> Thread<'a> {
                     let vdst = (instr & 0xff) as usize;
                     let abs = ((instr >> 8) & 0x7) as usize;
                     let opsel = ((instr >> 11) & 0xf) as usize;
-                    let cm = (instr >> 15) & 0x1;
+                    let cm = ((instr >> 15) & 0x1) != 0;
 
                     let s = |n: usize| ((instr >> n) & 0x1ff) as usize;
                     let src = (s(32), s(41), s(50));
@@ -1012,7 +1032,9 @@ impl<'a> Thread<'a> {
                     let omod = (instr >> 59) & 0x3;
                     let neg = ((instr >> 61) & 0x7) as usize;
                     assert_eq!(omod, 0);
-                    assert_eq!(cm, 0);
+                    if op != 272 && cm {
+                        return todo_instr!(op); // TODO: add VOP3 clamp for all ops
+                    }
                     assert_eq!(opsel, 0);
 
                     match op {
@@ -1246,7 +1268,7 @@ impl<'a> Thread<'a> {
                             }
 
                             let ret = match op {
-                                257 | 259 | 299 | 260 | 261 | 264 | 272 | 392 | 426 | 531 | 537 | 540 | 551 | 567 | 796 => {
+                                257 | 259 | 299 | 260 | 261 | 264 | 272 | 392 | 426 | 430 | 531 | 537 | 540 | 543 | 551 | 567 | 606 | 796 => {
                                     let s0 = f32::from_bits(s0).negate(0, neg).absolute(0, abs);
                                     let s1 = f32::from_bits(s1).negate(1, neg).absolute(1, abs);
                                     let s2 = f32::from_bits(s2).negate(2, neg).absolute(2, abs);
@@ -1255,11 +1277,26 @@ impl<'a> Thread<'a> {
                                         260 => s0 - s1,
                                         261 => s1 - s0,
                                         264 => s0 * s1,
-                                        272 => f32::max(s0, s1),
+                                        272 => f32::max(s0, s1).clmp(cm),
                                         299 => f32::mul_add(s0, s1, f32::from_bits(self.vec_reg[vdst])),
                                         426 => s0.recip(),
+                                        430 => 1.0 / f32::sqrt(s0),
                                         531 => f32::mul_add(s0, s1, s2),
                                         537 => f32::min(f32::min(s0, s1), s2),
+                                        543 => {
+                                            if s0.is_nan() || s1.is_nan() || s2.is_nan() {
+                                                f32::min(f32::min(s0, s1), s2)
+                                            } else {
+                                                let max = f32::max(f32::max(s0, s1), s2);
+                                                if max == s0 {
+                                                    f32::max(s1, s2)
+                                                } else if max == s1 {
+                                                    f32::max(s0, s2)
+                                                } else {
+                                                    f32::max(s0, s1)
+                                                }
+                                            }
+                                        },
                                         540 => f32::max(f32::max(s0, s1), s2),
                                         551 => s2 / s1,
                                         567 => {
@@ -1269,6 +1306,7 @@ impl<'a> Thread<'a> {
                                                 false => ret,
                                             }
                                         }
+                                        606 => f32::min(f32::max(s0, s1), s2),
                                         796 => s0 * 2f32.powi(s1.to_bits() as i32),
                                         // cnd_mask isn't a float only ALU but supports neg
                                         257 => {
@@ -2623,6 +2661,14 @@ mod test_vop1 {
         r(&vec![0x7E045F00, END_PRG], &mut thread);
         assert_eq!(thread.vec_reg[2], 0);
         assert_eq!(thread.vec_reg[3], 1071644672);
+    }
+
+    #[test]
+    fn test_v_rsq_f32() {
+        let mut thread = _helper_test_thread();
+        thread.vec_reg[0] = f32::to_bits(4.0);
+        r(&vec![0x7E005D00, END_PRG], &mut thread);
+        assert_eq!(f32::from_bits(thread.vec_reg[0]), 0.5);
     }
 
     #[test]

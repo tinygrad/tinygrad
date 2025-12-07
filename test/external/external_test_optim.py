@@ -2,7 +2,7 @@
 import unittest, math
 import numpy as np
 import tensorflow as tf
-import tensorflow_addons as tfa
+from tensorflow.keras.optimizers import Lamb
 from tensorflow.python.ops import math_ops
 from extra.lr_scheduler import LRSchedulerGroup
 
@@ -11,7 +11,7 @@ from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup, AdamW
 
 from test.external.mlperf_resnet.lars_optimizer import LARSOptimizer
 
-from examples.mlperf.lr_schedulers import PolynomialDecayWithWarmup, CosineAnnealingLRWithWarmup
+from examples.mlperf.lr_schedulers import PolynomialDecayWithWarmup, CosineAnnealingLRWithWarmup, LambdaLR, LambdaLinearScheduler
 from test.external.mlperf_resnet.lars_util import PolynomialDecayWithWarmup as PolynomialDecayWithWarmup_tf
 
 np.random.seed(1337)
@@ -88,6 +88,8 @@ def create_tiny_lars(params, lr, skip_list=False):
   if skip_list: return OptimizerGroup(LARS([params[0]], lr), SGD([params[1]], lr, classic=True, weight_decay=0., momentum=.9))
   return LARS(params, lr)
 def create_tf_lars(lr, skip_list=False): return LARSOptimizer(lr, skip_list=["W"] if skip_list else None)
+def create_tf_lamb(lr=0.001, b1=0.9, b2=0.999, eps=1e-7, weight_decay=0.0):
+  return Lamb(learning_rate=float(lr), beta_1=b1, beta_2=b2, epsilon=eps, weight_decay=weight_decay)
 
 def create_tiny_polylr(optim, initial_lr, end_lr, train_steps, warmup, power=2, skip_list=False):
   assert power == 2
@@ -112,7 +114,7 @@ class ExternalTestOptim(unittest.TestCase):
                    step_tf(tensorflow_optim, steps=steps, kwargs=opts, scheduler=tf_sched, schedopts=schedopts, do_optim=do_optim)):
       np.testing.assert_allclose(x, y, atol=atol, rtol=rtol)
 
-  def _test_lamb(self, steps, opts, atol, rtol): self._test_optim(LAMB, tfa.optimizers.LAMB, steps, opts, atol, rtol)
+  def _test_lamb(self, steps, opts, atol, rtol): self._test_optim(LAMB, create_tf_lamb, steps, opts, atol, rtol)
   def _test_lars(self, steps, opts, atol, rtol): self._test_optim(create_tiny_lars, create_tf_lars, steps, opts, atol, rtol)
   def _test_lars_polylr(self, steps, opts, schedopts, atol, rtol, do_optim=True):
     self._test_optim(create_tiny_lars, create_tf_lars, steps, opts, atol, rtol,
@@ -191,6 +193,28 @@ class TestCosineAnnealingLRWithWarmup(unittest.TestCase):
   def test_lr_0(self): self._test_lr(3e-4, 8e-5, 3, 5)
   def test_lr_1(self): self._test_lr(3e-4, 8e-5, 10, 20)
   def test_lr_llama3(self): self._test_lr(8e-5, 8e-7, 20, 100)
+
+class TestLambdaLRLinearWarmup(unittest.TestCase):
+  def test_linear_lr_warmup(self):
+    BS, BASE_LR = 304, 2.5e-7
+    lr = BS * BASE_LR
+    # Use a dummy Tensor parameter for optimizer because the lr_scheduler only needs the optimizer's device and lr, the params aren't touched.
+    optimizer = AdamW([Tensor([1.])])
+    lambda_lr_callback = LambdaLinearScheduler(1000, 1.0, 1.0, 1e-06, 10000000000000).schedule
+    lr_scheduler = LambdaLR(optimizer, Tensor(lr, device=optimizer.device), lambda_lr_callback)
+    lrs = {}
+
+    # with above settings, optimizer.lr should warm up to lr over 1000 steps linearly
+    for i in range(1200):
+      lr_scheduler.step()
+      if i in {0, 499, 998, 999, 1000, 1199}:
+        lrs[i] = optimizer.lr.item()
+
+    np.testing.assert_allclose(lr, lrs[999], rtol=0, atol=1e-11)
+    np.testing.assert_equal(lrs[999], lrs[1000])
+    np.testing.assert_equal(lrs[999], lrs[1199])
+    np.testing.assert_allclose(lrs[999] / lrs[0], 1000, rtol=0, atol=1)
+    np.testing.assert_allclose(lrs[999] / lrs[499], 2, rtol=0, atol=1e-5)
 
 if __name__ == '__main__':
   unittest.main()

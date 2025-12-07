@@ -5,7 +5,7 @@ from tinygrad.helpers import colored
 from extra.helpers import enable_early_exec
 early_exec = enable_early_exec()
 
-from tinygrad.runtime.ops_gpu import CLProgram, CLBuffer, ROCM_LLVM_PATH
+from tinygrad.runtime.ops_cl import CLProgram, CLBuffer, ROCM_LLVM_PATH
 
 ENABLE_NON_ASM = False
 

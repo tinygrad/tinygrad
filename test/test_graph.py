@@ -8,6 +8,8 @@ from tinygrad.dtype import dtypes
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.engine.realize import ExecItem, BufferXfer, get_runner, CompiledRunner
 
+from test.helpers import needs_second_gpu
+
 np.random.seed(1337)
 Tensor.manual_seed(1337)
 BUF_SIZE = 4096 if CI else 4096 * 128
@@ -107,8 +109,9 @@ class TestGraph(unittest.TestCase):
     helper_test_graphs(Device[d0].graph, graphs)
 
   def skip_if_not_multigraph(self):
-    graph = g.func if isinstance(g:=Device[Device.DEFAULT].graph, functools.partial) else g
+    graph = g.func if isinstance(g:=(d:=Device[Device.DEFAULT]).graph, functools.partial) else g
     if not issubclass(graph, MultiGraphRunner): self.skipTest("graph is not supported (not MultiGraphRunner)")
+    if not hasattr(d.allocator, '_transfer'): self.skipTest("device is not supported (no transfers)")
 
   def test_order_copy_writed(self):
     self.skip_if_not_multigraph()
@@ -153,6 +156,7 @@ class TestGraph(unittest.TestCase):
 
     helper_test_graphs(Device[d0].graph, graphs)
 
+  @needs_second_gpu
   def test_copies_2_devs(self):
     self.skip_if_not_multigraph()
 
@@ -166,6 +170,7 @@ class TestGraph(unittest.TestCase):
 
     helper_test_graphs(Device[d0].graph, graphs)
 
+  @needs_second_gpu
   def test_copies_after_graph_global(self):
     self.skip_if_not_multigraph()
 
@@ -214,6 +219,7 @@ class TestGraph(unittest.TestCase):
 
     helper_test_graphs(Device[d0].graph, graphs)
 
+  @needs_second_gpu
   def test_graph_after_copies_devs(self):
     self.skip_if_not_multigraph()
 

@@ -2,8 +2,8 @@ import unittest, math
 import numpy as np
 from tinygrad import dtypes
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.uop.transcendental import TRANSCENDENTAL_SUPPORTED_DTYPES, payne_hanek_reduction, cody_waite_reduction
-from tinygrad.uop.transcendental import frexp, rintk, xpow, xexp2, xlog2, trig_poly, pow2if
+from tinygrad.uop.decompositions import TRANSCENDENTAL_DTYPES, payne_hanek_reduction, cody_waite_reduction
+from tinygrad.uop.decompositions import frexp, rintk, xpow, xexp2, xlog2, trig_poly, pow2if
 from test.helpers import eval_uop
 
 class TestTranscendentalFunctions(unittest.TestCase):
@@ -11,7 +11,7 @@ class TestTranscendentalFunctions(unittest.TestCase):
     # TODO: Test constant input when constant folding is fixed (or maybe test both variants)
     # Load input value from a buffer to prevent constant folding
     input_buf = UOp(Ops.DEFINE_GLOBAL, dtypes.double.ptr(), arg=1, src=())
-    loaded_value = UOp.load(input_buf.index(UOp.const(dtypes.int, 0)), dtype=dtypes.double)
+    loaded_value = input_buf.index(UOp.const(dtypes.int, 0))
     def eval_payne_hanek_reduction(v:float) -> tuple[float, int]:
       return tuple(eval_uop(u, [(dtypes.float64, [v])]) for u in payne_hanek_reduction(loaded_value))
 
@@ -89,7 +89,7 @@ class TestTranscendentalVectorizedFunctions(unittest.TestCase):
       assert u1.op == u2.op, f'expected {u1.op=} but got {u2.op=} for UOps\n{u1=}\n{u2}'
     [self._check_uops_match(x1, x2) for x1, x2 in zip((u1 if isinstance(u1, tuple) else u1.src), (u2 if isinstance(u2, tuple) else u2.src))]
 
-  def _test_vectorized(self, fxn, scalar_dtypes=TRANSCENDENTAL_SUPPORTED_DTYPES, vals=[-2,1.3,194], vcounts=[1,4,19]):
+  def _test_vectorized(self, fxn, scalar_dtypes=TRANSCENDENTAL_DTYPES, vals=[-2,1.3,194], vcounts=[1,4,19]):
     for scalar_dtype in scalar_dtypes:
       for val in vals:
         for vcount in vcounts:

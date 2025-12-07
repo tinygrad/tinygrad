@@ -1,7 +1,8 @@
-import ctypes, time, contextlib, importlib, functools
+import ctypes, time, contextlib, functools
 from typing import Literal
+from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG, wait_cond, pad_bytes
 from tinygrad.runtime.autogen.am import am
-from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG, wait_cond
+from tinygrad.runtime.support.amd import import_soc
 
 class AM_IP:
   def __init__(self, adev): self.adev = adev
@@ -14,7 +15,7 @@ class AM_SOC(AM_IP):
   def init_sw(self):
     self.xccs = len(self.adev.regs_offset[am.GC_HWIP])
     self.vmhubs = 4
-    self.module = importlib.import_module(f"tinygrad.runtime.autogen.am.{({9: 'vega10', 11: 'soc21', 12: 'soc24'}[self.adev.ip_ver[am.GC_HWIP][0]])}")
+    self.module = import_soc(self.adev.ip_ver[am.GC_HWIP])
 
   def init_hw(self):
     # pass
@@ -123,7 +124,7 @@ class AM_GMC(AM_IP):
       for eng_i in range(18): self.adev.wreg_pair(f"reg{ip}VM_INVALIDATE_ENG{eng_i}_ADDR_RANGE", "_LO32", "_HI32", 0x1fffffffff, inst=i)
     self.hub_initted[ip] = True
 
-  @functools.cache
+  @functools.cache  # pylint: disable=method-cache-max-size-none
   def get_pte_flags(self, pte_lv, is_table, frag, uncached, system, snooped, valid, extra=0):
     extra |= (am.AMDGPU_PTE_SYSTEM * system) | (am.AMDGPU_PTE_SNOOPED * snooped) | (am.AMDGPU_PTE_VALID * valid) | am.AMDGPU_PTE_FRAG(frag)
     if not is_table: extra |= (am.AMDGPU_PTE_WRITEABLE | am.AMDGPU_PTE_READABLE | am.AMDGPU_PTE_EXECUTABLE)
@@ -188,14 +189,14 @@ class AM_SMU(AM_IP):
       self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMinByFreq, clck << 16 | (vals[level]))
       self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMaxByFreq, clck << 16 | (vals[level]))
 
-  def _smu_cmn_send_msg(self, msg, param=0, debug=False):
+  def _smu_cmn_send_msg(self, msg:int, param=0, debug=False):
     (self.adev.mmMP1_SMN_C2PMSG_90 if not debug else self.adev.mmMP1_SMN_C2PMSG_54).write(0) # resp reg
     (self.adev.mmMP1_SMN_C2PMSG_82 if not debug else self.adev.mmMP1_SMN_C2PMSG_53).write(param)
     (self.adev.mmMP1_SMN_C2PMSG_66 if not debug else self.adev.mmMP1_SMN_C2PMSG_75).write(msg)
 
-  def _send_msg(self, msg, param, read_back_arg=False, timeout=10000, debug=False): # 10s
+  def _send_msg(self, msg:int, param:int, read_back_arg=False, timeout=10000, debug=False): # default timeout is 10 seconds
     self._smu_cmn_send_msg(msg, param, debug=debug)
-    wait_cond(lambda: (self.adev.mmMP1_SMN_C2PMSG_90 if not debug else self.adev.mmMP1_SMN_C2PMSG_54).read(), value=1, timeout_ms=timeout,
+    wait_cond((self.adev.mmMP1_SMN_C2PMSG_90 if not debug else self.adev.mmMP1_SMN_C2PMSG_54).read, value=1, timeout_ms=timeout,
       msg=f"SMU msg {msg:#x} timeout")
     return (self.adev.mmMP1_SMN_C2PMSG_82 if not debug else self.adev.mmMP1_SMN_C2PMSG_53).read() if read_back_arg else None
 
@@ -251,7 +252,8 @@ class AM_GFX(AM_IP):
     self._grbm_select()
     self.adev.regGCVM_CONTEXT0_CNTL.write(0)
 
-  def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, doorbell:int, pipe:int, queue:int):
+  def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, doorbell:int, pipe:int, queue:int,
+                 aql:bool):
     mqd = self.adev.mm.valloc(0x1000, uncached=True, contiguous=True)
     mc_addr = self.adev.paddr2mc(mqd.paddrs[0][0])
 
@@ -263,11 +265,13 @@ class AM_GFX(AM_IP):
       cp_hqd_pq_rptr_report_addr_lo=lo32(rptr_addr), cp_hqd_pq_rptr_report_addr_hi=hi32(rptr_addr),
       cp_hqd_pq_wptr_poll_addr_lo=lo32(wptr_addr), cp_hqd_pq_wptr_poll_addr_hi=hi32(wptr_addr),
       cp_hqd_pq_doorbell_control=self.adev.regCP_HQD_PQ_DOORBELL_CONTROL.encode(doorbell_offset=doorbell*2, doorbell_en=1),
-      cp_hqd_pq_control=self.adev.regCP_HQD_PQ_CONTROL.encode(rptr_block_size=5, unord_dispatch=0, queue_size=(ring_size//4).bit_length()-2),
+      cp_hqd_pq_control=self.adev.regCP_HQD_PQ_CONTROL.encode(rptr_block_size=5, unord_dispatch=0, queue_size=(ring_size//4).bit_length()-2,
+        **({'queue_full_en':1, 'slot_based_wptr':2, 'no_update_rptr':1} if aql else {})),
       cp_hqd_ib_control=self.adev.regCP_HQD_IB_CONTROL.encode(min_ib_avail_size=0x3), cp_hqd_hq_status0=0x20004000,
-      cp_mqd_control=self.adev.regCP_MQD_CONTROL.encode(priv_state=1), cp_hqd_vmid=0,
+      cp_mqd_control=self.adev.regCP_MQD_CONTROL.encode(priv_state=1), cp_hqd_vmid=0, cp_hqd_aql_control=int(aql),
       cp_hqd_eop_base_addr_lo=lo32(eop_addr>>8), cp_hqd_eop_base_addr_hi=hi32(eop_addr>>8),
       cp_hqd_eop_control=self.adev.regCP_HQD_EOP_CONTROL.encode(eop_size=(eop_size//4).bit_length()-2))
+    for se in range(8): setattr(mqd_struct, f'compute_static_thread_mgmt_se{se}', 0xffffffff)
 
     # Copy mqd into memory
     self.adev.vram.view(mqd.paddrs[0][0], ctypes.sizeof(mqd_struct))[:] = memoryview(mqd_struct).cast('B')
@@ -276,7 +280,7 @@ class AM_GFX(AM_IP):
     self._grbm_select(me=1, pipe=pipe, queue=queue)
 
     mqd_st_mv = to_mv(ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct)).cast('I')
-    for i, reg in enumerate(range(self.adev.regCP_MQD_BASE_ADDR.addrs[0], self.adev.regCP_HQD_PQ_WPTR_HI.addrs[0] + 1)):
+    for i, reg in enumerate(range(self.adev.regCP_MQD_BASE_ADDR.addr[0], self.adev.regCP_HQD_PQ_WPTR_HI.addr[0] + 1)):
       self.adev.wreg(reg, mqd_st_mv[0x80 + i])
     self.adev.regCP_HQD_ACTIVE.write(0x1)
 
@@ -297,7 +301,7 @@ class AM_GFX(AM_IP):
     self.adev.regSDMA0_RLC_CGCG_CTRL.update(cgcg_int_enable=1)
     self.adev.regSDMA1_RLC_CGCG_CTRL.update(cgcg_int_enable=1)
 
-    self.adev.regRLC_CGTT_MGCG_OVERRIDE.update(perfmon_clock_state=0, gfxip_fgcg_override=0, gfxip_repeater_fgcg_override=0,
+    self.adev.regRLC_CGTT_MGCG_OVERRIDE.update(perfmon_clock_state=1, gfxip_fgcg_override=0, gfxip_repeater_fgcg_override=0,
       grbm_cgtt_sclk_override=0, rlc_cgtt_sclk_override=0, gfxip_mgcg_override=0, gfxip_cgls_override=0, gfxip_cgcg_override=0)
 
     self.adev.regRLC_SAFE_MODE.write(message=0, cmd=1)
@@ -452,17 +456,18 @@ class AM_PSP(AM_IP):
 
   def _wait_for_bootloader(self): wait_cond(lambda: self.adev.reg(f"{self.reg_pref}_35").read() & 0x80000000, value=0x80000000, msg="BL not ready")
 
-  def _prep_msg1(self, data):
+  def _prep_msg1(self, data:memoryview):
     assert len(data) <= self.msg1_view.nbytes, f"msg1 buffer is too small {len(data):#x} > {self.msg1_view.nbytes:#x}"
-    self.msg1_view[:len(data)+4] = bytes(data) + b'\x00' * 4
+    padded_data = pad_bytes(bytes(data) + b'\x00' * 4, 16) # HACK: apple's memcpy requires 16-bytes alignment
+    self.msg1_view[:len(padded_data)] = padded_data
     self.adev.gmc.flush_hdp()
 
-  def _bootloader_load_component(self, fw, compid):
+  def _bootloader_load_component(self, fw:int, compid:int):
     if fw not in self.adev.fw.sos_fw: return 0
 
     self._wait_for_bootloader()
 
-    if DEBUG >= 2: print(f"am {self.adev.devfmt}: loading sos component: {am.psp_fw_type__enumvalues[fw]}")
+    if DEBUG >= 2: print(f"am {self.adev.devfmt}: loading sos component: {am.enum_psp_fw_type.get(fw)}")
 
     self._prep_msg1(self.adev.fw.sos_fw[fw])
     self.adev.reg(f"{self.reg_pref}_36").write(self.msg1_addr >> 20)
@@ -496,9 +501,9 @@ class AM_PSP(AM_IP):
 
     wait_cond(lambda: self.adev.reg(f"{self.reg_pref}_64").read() & 0x8000FFFF, value=0x80000000, msg="sOS ring not created")
 
-  def _ring_submit(self, cmd):
+  def _ring_submit(self, cmd:am.struct_psp_gfx_cmd_resp) -> am.struct_psp_gfx_cmd_resp:
     print(hex(self.adev.paddr2mc(self.cmd_paddr)))
-    msg = am.struct_psp_gfx_rb_frame(fence_value=((prev_wptr:=self.adev.reg(f"{self.reg_pref}_67").read()) + 1),
+    msg = am.struct_psp_gfx_rb_frame(fence_value=(prev_wptr:=self.adev.reg(f"{self.reg_pref}_67").read()) + 1,
       cmd_buf_addr_lo=lo32(self.adev.paddr2mc(self.cmd_paddr)), cmd_buf_addr_hi=hi32(self.adev.paddr2mc(self.cmd_paddr)),
       fence_addr_lo=lo32(self.adev.paddr2mc(self.fence_paddr)), fence_addr_hi=hi32(self.adev.paddr2mc(self.fence_paddr)))
 
@@ -508,25 +513,24 @@ class AM_PSP(AM_IP):
     # Move the wptr
     self.adev.reg(f"{self.reg_pref}_67").write(prev_wptr + ctypes.sizeof(am.struct_psp_gfx_rb_frame) // 4)
 
-    while self.adev.vram.view(self.fence_paddr, 4, 'I')[0] != msg.fence_value: pass
-    time.sleep(0.005)
+    wait_cond(lambda: self.adev.vram.view(self.fence_paddr, 4, 'I')[0], value=msg.fence_value, msg="sOS ring not responding")
 
     resp = type(cmd).from_buffer(bytearray(self.adev.vram.view(self.cmd_paddr, ctypes.sizeof(cmd))[:]))
     if resp.resp.status != 0: raise RuntimeError(f"PSP command failed {resp.cmd_id} {resp.resp.status}")
 
     return resp
 
-  def _load_ip_fw_cmd(self, fw_types, fw_bytes):
+  def _load_ip_fw_cmd(self, fw_types:list[int], fw_bytes:memoryview):
     self._prep_msg1(fw_bytes)
     for fw_type in fw_types:
-      if DEBUG >= 2: print(f"am {self.adev.devfmt}: loading fw: {am.psp_gfx_fw_type__enumvalues[fw_type]}")
+      if DEBUG >= 2: print(f"am {self.adev.devfmt}: loading fw: {am.enum_psp_gfx_fw_type.get(fw_type)}")
       cmd = am.struct_psp_gfx_cmd_resp(cmd_id=am.GFX_CMD_ID_LOAD_IP_FW)
       cmd.cmd.cmd_load_ip_fw.fw_phy_addr_hi, cmd.cmd.cmd_load_ip_fw.fw_phy_addr_lo = data64(self.msg1_addr)
       cmd.cmd.cmd_load_ip_fw.fw_size = len(fw_bytes)
       cmd.cmd.cmd_load_ip_fw.fw_type = fw_type
       self._ring_submit(cmd)
 
-  def _tmr_load_cmd(self):
+  def _tmr_load_cmd(self) -> am.struct_psp_gfx_cmd_resp:
     cmd = am.struct_psp_gfx_cmd_resp(cmd_id=am.GFX_CMD_ID_SETUP_TMR)
     cmd.cmd.cmd_setup_tmr.buf_phy_addr_hi, cmd.cmd.cmd_setup_tmr.buf_phy_addr_lo = data64(self.adev.paddr2mc(self.tmr_paddr) if self.tmr_paddr else 0)
     cmd.cmd.cmd_setup_tmr.system_phy_addr_hi, cmd.cmd.cmd_setup_tmr.system_phy_addr_lo = data64(self.tmr_paddr)
@@ -534,7 +538,7 @@ class AM_PSP(AM_IP):
     cmd.cmd.cmd_setup_tmr.buf_size = 0 # self.tmr_size
     return self._ring_submit(cmd)
 
-  def _load_toc_cmd(self, toc_size):
+  def _load_toc_cmd(self, toc_size:int) -> am.struct_psp_gfx_cmd_resp:
     cmd = am.struct_psp_gfx_cmd_resp(cmd_id=am.GFX_CMD_ID_LOAD_TOC)
     cmd.cmd.cmd_load_toc.toc_phy_addr_hi, cmd.cmd.cmd_load_toc.toc_phy_addr_lo = data64(self.msg1_addr)
     cmd.cmd.cmd_load_toc.toc_size = toc_size

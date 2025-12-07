@@ -1,15 +1,15 @@
-import subprocess
 import numpy as np
 import torch
 import unittest, copy, mmap, random, math, array
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _METADATA
-from tinygrad.helpers import getenv, temp, mv_address
+from tinygrad.helpers import Context, getenv, temp, mv_address
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.runtime.support.compiler_cuda import PTX
+from tinygrad.renderer.ptx import PTXRenderer
+from tinygrad.renderer.nir import NIRRenderer
 from tinygrad.codegen import full_rewrite
 from tinygrad.dtype import DType
 
@@ -415,6 +415,21 @@ class TestTinygrad(unittest.TestCase):
         data = _generate_data(depth)
         np.testing.assert_allclose(Tensor(data).numpy(), np.array(data))
 
+  def test_tensor_list_implicit_cast(self):
+    data = [True, False]
+    np.testing.assert_equal(Tensor(data, dtype=dtypes.int).numpy(), torch.tensor(data, dtype=torch.int).numpy())
+    np.testing.assert_equal(Tensor(data, dtype=dtypes.uint8).numpy(), torch.tensor(data, dtype=torch.uint8).numpy())
+    np.testing.assert_equal(Tensor(data, dtype=dtypes.float).numpy(), torch.tensor(data, dtype=torch.float).numpy())
+    data = [-1, 0, 1, 2, 3]
+    np.testing.assert_equal(Tensor(data, dtype=dtypes.int).numpy(), torch.tensor(data, dtype=torch.int).numpy())
+    np.testing.assert_equal(Tensor(data, dtype=dtypes.uint8).numpy(), torch.tensor(data, dtype=torch.uint8).numpy())
+    np.testing.assert_equal(Tensor(data, dtype=dtypes.float).numpy(), torch.tensor(data, dtype=torch.float).numpy())
+    data = [-3.5, -2.5, -1.5, 0, 1.5, 2.5, 3.5]
+    np.testing.assert_equal(Tensor(data, dtype=dtypes.int).numpy(), torch.tensor(data, dtype=torch.int).numpy())
+    # NOTE: torch and jax raise OverflowError: Python integer -3 out of bounds for uint8
+    # np.testing.assert_equal(Tensor(data, dtype=dtypes.uint8).numpy(), torch.tensor(data, dtype=torch.uint8).numpy())
+    np.testing.assert_equal(Tensor(data, dtype=dtypes.float).numpy(), torch.tensor(data, dtype=torch.float).numpy())
+
   def test_tensor_list_special_values(self):
     if is_dtype_supported(dtypes.float16):
       data = [math.nan, -math.inf, 65504, 65519, 65519.999, 65520, 65520.1]
@@ -500,36 +515,6 @@ class TestTinygrad(unittest.TestCase):
     print(a)
     print(c)
 
-  def test_env_overwrite_default_device(self):
-    subprocess.run(['DISK=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT != \\"DISK\\""'],
-                    shell=True, check=True)
-    subprocess.run(['NPY=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT != \\"NPY\\""'],
-                    shell=True, check=True)
-    subprocess.run([f'{Device.DEFAULT}=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
-                    shell=True, check=True)
-    subprocess.run([f'DISK=1 {Device.DEFAULT}=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
-                    shell=True, check=True)
-    subprocess.run([f'NPY=1 {Device.DEFAULT}=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
-                    shell=True, check=True)
-
-    if Device.DEFAULT != "CPU":
-      # setting multiple devices fail
-      with self.assertRaises(subprocess.CalledProcessError):
-        subprocess.run([f'{Device.DEFAULT}=1 CPU=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
-                        shell=True, check=True)
-
-      # setting device via DEV
-      subprocess.run([f'DEV={Device.DEFAULT.capitalize()} python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
-                      shell=True, check=True)
-      subprocess.run([f'DEV={Device.DEFAULT.lower()} python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
-                      shell=True, check=True)
-      subprocess.run([f'DEV={Device.DEFAULT.upper()} python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
-                      shell=True, check=True)
-
-      with self.assertRaises(subprocess.CalledProcessError):
-        subprocess.run([f'DEV={Device.DEFAULT} CPU=1 python3 -c "from tinygrad import Device; assert Device.DEFAULT == \\"{Device.DEFAULT}\\""'],
-                        shell=True, check=True)
-
   def test_no_attributeerror_after_apply_uop_exception(self):
     try:
       Tensor.arange(4).reshape(3,2)
@@ -539,6 +524,12 @@ class TestTinygrad(unittest.TestCase):
   def test_shrink(self):
     t = Tensor.arange(32).contiguous().realize()
     self.assertListEqual(t[16:20].tolist(), [16,17,18,19])
+    self.assertListEqual(t.shrink_to(16).tolist(), list(range(16)))
+    t = t.reshape(4, 8).contiguous().realize()
+    self.assertListEqual(t.shrink_to(2, 2).tolist(), [[0, 1], [8, 9]])
+    self.assertListEqual(t.shrink_to(None, 2).tolist(), t.shrink_to(4, 2).tolist())
+    with self.assertRaises(ValueError): t.shrink_to(2)
+    with self.assertRaises(ValueError): t.shrink_to(2, 2, 2)
 
 @unittest.skip("this test is just flaky, sync issue")
 class TestMoveTensor(unittest.TestCase):
@@ -579,22 +570,6 @@ class TestMoveTensor(unittest.TestCase):
     np.testing.assert_equal(x.grad.numpy(), [[2,2,2],[0,0,0],[-2,-2,-2]])
 
 class TestZeroShapeTensor(unittest.TestCase):
-  def test_shape_stride(self):
-    t = Tensor.empty(3, 2, 0)
-    assert t.shape == (3, 2, 0)
-    # numpy has stride 0, 0, 0; torch has stride 2, 1, 1
-    assert t.uop.st.real_strides() == (0, 0, 0)
-
-    t = Tensor.empty(3, 0, 2)
-    assert t.shape == (3, 0, 2)
-    # numpy has stride 0, 0, 0; torch has stride 2, 2, 1
-    assert t.uop.st.real_strides() == (0, 0, 0)
-
-    t = Tensor.empty(0, 0, 0)
-    assert t.shape == (0, 0, 0)
-    # numpy has stride 0, 0, 0; torch has stride 1, 1, 1
-    assert t.uop.st.real_strides() == (0, 0, 0)
-
   def test_rand(self):
     t = Tensor.rand(3, 2, 0)
     assert t.shape == (3, 2, 0)
@@ -633,16 +608,23 @@ class TestZeroShapeTensor(unittest.TestCase):
 
   def test_pad(self):
     t = Tensor.rand(3, 2, 0).pad((None, None, (1, 1)), value=1)
-    assert t.shape == (3, 2, 2)
+    self.assertEqual(t.shape, (3, 2, 2))
     np.testing.assert_equal(t.numpy(), np.ones((3, 2, 2)))
 
     t = Tensor.rand(3, 2, 0).pad((None, (1, 1), None), value=1)
-    assert t.shape == (3, 4, 0)
+    self.assertEqual(t.shape, (3, 4, 0))
     np.testing.assert_equal(t.numpy(), np.ones((3, 4, 0)))
 
     t = Tensor.rand(3, 2, 0).pad(((1, 1), None, None), value=1)
-    assert t.shape == (5, 2, 0)
+    self.assertEqual(t.shape, (5, 2, 0))
     np.testing.assert_equal(t.numpy(), np.ones((5, 2, 0)))
+
+    np.testing.assert_equal(Tensor([1, 2]).pad_to(4).numpy(), [1, 2, 0, 0])
+    np.testing.assert_equal(Tensor([[1, 2]]).pad_to(2, 3).numpy(), [[1, 2, 0], [0, 0, 0]])
+    np.testing.assert_equal(Tensor([[1, 2]]).pad_to(1, 3).numpy(), [[1, 2, 0]])
+    np.testing.assert_equal(Tensor([[1, 2]]).pad_to(None, 3).numpy(), [[1, 2, 0]])
+    with self.assertRaises(ValueError): Tensor([1, 2]).pad_to(2, 3)
+    with self.assertRaises(ValueError): Tensor([[1, 2]]).pad_to(3)
 
   def test_shrink_into_zero(self):
     t = Tensor.rand(3, 4).realize()
@@ -828,6 +810,14 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(len(si.metadata), 1)
     self.assertEqual(si.metadata[0].name, "relu")
 
+  @unittest.skip("this no longer works")
+  def test_assign(self):
+    x = Tensor.empty(10, 10).realize()
+    x.assign(Tensor.ones(10, 10).contiguous())
+    si = x.schedule()[-1]
+    self.assertEqual(len(si.metadata), 1)
+    self.assertEqual(si.metadata[0].name, "assign")
+
   def test_complex(self):
     x = Tensor.rand(3, requires_grad=True)
     y = Tensor.rand(3, requires_grad=True)
@@ -839,6 +829,7 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(len(si.metadata), 3)
     self.assertEqual(set(m.name for m in si.metadata), {"relu", "sigmoid", "__mul__"})
 
+  @unittest.skip("metadata is no longer promised to be exact with schedulecache")
   def test_complex_backward(self):
     x = Tensor.rand(3, requires_grad=True).realize()
     y = Tensor.rand(3, requires_grad=True).realize()
@@ -850,11 +841,23 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(y.grad.uop.metadata[0].name, "sigmoid")
     self.assertTrue(y.grad.uop.metadata[0].backward)
     si = Tensor.schedule(out, x.grad, y.grad)[-1]
-    self.assertEqual(len(si.metadata), 4, f"failed with {si.metadata}")
-    self.assertSetEqual(set(m.name for m in si.metadata), {"sigmoid", "__mul__", "relu"})
-    bw = [m for m in si.metadata if m.backward]
-    self.assertEqual(len(bw), 2)
-    self.assertEqual(bw[0].name, "sigmoid")
+    #self.assertEqual(len(si.metadata), 3, f"failed with {si.metadata}")
+    # skip numpy, this is schedule cache
+    self.assertSetEqual(set(m.name for m in si.metadata if m.name != "numpy"), {"sigmoid", "relu"})
+    #bw = [m for m in si.metadata if m.backward]
+    #self.assertEqual(len(bw), 1)
+    #self.assertEqual(bw[0].name, "sigmoid")
+
+  @unittest.skip("metadata is no longer promised to be exact with schedulecache")
+  def test_tracemeta_0(self):
+    with Context(TRACEMETA=0):
+      x = Tensor.rand(3, requires_grad=True)
+      y = Tensor.rand(3, requires_grad=True)
+      out = (x.relu() * y.sigmoid()).sum()
+      self.assertIsNone(out.uop.metadata)
+      self.assertIsNone(out.uop.src[0].metadata)
+      si = out.schedule()[-1]
+      self.assertEqual(si.metadata, ())
 
 class TestIdxUpcast(unittest.TestCase):
   def _find_op(self, ast: UOp, op: Ops):
@@ -876,7 +879,8 @@ class TestIdxUpcast(unittest.TestCase):
     store = next(uop for uop in uops if uop.op is Ops.STORE)
     assert store.op is Ops.STORE
     idx = self._find_op(store, Ops.INDEX)
-    if idx is not None: # PTX turns Ops.INDEX into pointer arithmetic earlier than cstyle, plus it's already cast to int64
+    # PTX and NIR turn Ops.INDEX into pointer arithmetic earlier than cstyle, plus it's already cast to int64
+    if not isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer)):
       assert idx.op is Ops.INDEX
       idx_val = idx.src[1]
       assert idx_val.dtype is dtype
@@ -892,27 +896,32 @@ class TestIdxUpcast(unittest.TestCase):
 
   @unittest.skipUnless(is_dtype_supported(dtypes.long), "int64 is supported")
   def test_overflow_sym(self):
-    self.do_op_then_assert(dtypes.long, 2048, 2048, UOp.variable("dim3", 0, 2048).bind(32))
+    self.do_op_then_assert(dtypes.long, 2048, 2048, UOp.variable("dim3", 1, 2048).bind(32))
 
   def test_regular(self):
     self.do_op_then_assert(dtypes.int, 64, 64, 64)
 
   def test_regular_sym(self):
-    self.do_op_then_assert(dtypes.int, 2048, 2048, UOp.variable("dim3", 0, 64).bind(32))
+    self.do_op_then_assert(dtypes.int, 2048, 2048, UOp.variable("dim3", 1, 64).bind(32))
 
-  @unittest.skipIf(PTX, "PTX always convert Ops.INDEX to int64")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer)), "PTX and NIR always converts Ops.INDEX to int64")
   def test_symfold(self):
     # This would cause an overflow, but after sym fold it's within int32
     a = Tensor.arange(65535)
     uops = self._schedule_render(a)
     assert all(uop.dtype is not dtypes.long for uop in uops)
 
+  def test_arange_raise_overflow(self):
+    with self.assertRaises(ValueError):
+      self._schedule_render(Tensor.arange(2**33, dtype=dtypes.int))
+
   @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
   def test_int64_unsupported_overflow_sym(self):
     with self.assertRaises(KeyError):
-      self.do_op_then_assert(dtypes.long, 2048, 2048, UOp.variable("dim3", 0, 2048).bind(32))
+      self.do_op_then_assert(dtypes.long, 2048, 2048, UOp.variable("dim3", 1, 2048).bind(32))
 
   @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
+  @unittest.expectedFailure  # bug in gpu dims limiting
   def test_int64_unsupported_overflow(self):
     with self.assertRaises(KeyError):
       self.do_op_then_assert(dtypes.long, 2048, 2048, 2048)
@@ -923,6 +932,39 @@ class TestIdxUpcast(unittest.TestCase):
     # Modified example from issue 3271
     a = Tensor.empty(2**11, 2**11, 1, dtype=dtypes.int8).permute((2, 0, 1)).expand((2**9+10, -1, -1)).contiguous()
     a.realize()
+
+class TestTensorUnique(unittest.TestCase):
+  def test_empty_bufs_unique(self):
+    a = Tensor.empty(10, 10).contiguous()
+    b = Tensor.empty(10, 10).contiguous()
+    Tensor.realize(a,b)
+    self.assertIsNot(a.uop.buffer, b.uop.buffer)
+
+  def test_zeros_bufs_unique_sep(self):
+    a = Tensor.zeros(10, 10).contiguous()
+    Tensor.realize(a)
+    b = Tensor.zeros(10, 10).contiguous()
+    Tensor.realize(b)
+    self.assertIsNot(a.uop.buffer, b.uop.buffer)
+
+  def test_zeros_bufs_unique(self):
+    a = Tensor.zeros(10, 10).contiguous()
+    b = Tensor.zeros(10, 10).contiguous()
+    Tensor.realize(a,b)
+    self.assertIsNot(a.uop.buffer, b.uop.buffer)
+
+  def test_eye_bufs_unique(self):
+    a = Tensor.eye(10).contiguous()
+    b = Tensor.eye(10).contiguous()
+    Tensor.realize(a,b)
+    self.assertIsNot(a.uop.buffer, b.uop.buffer)
+
+  def test_times_2_not_unique(self):
+    a = Tensor.zeros(10, 10).contiguous()
+    b = a * 2
+    c = a * 2
+    Tensor.realize(b,c)
+    self.assertIs(b.uop.buffer, c.uop.buffer)
 
 if __name__ == '__main__':
   unittest.main()

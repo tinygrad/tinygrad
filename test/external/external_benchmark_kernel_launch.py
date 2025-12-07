@@ -2,7 +2,7 @@ import time
 from tinygrad import Tensor, TinyJit, Device, Context
 from tinygrad.helpers import Profiling, Timing, GlobalCounters
 
-# python3 test/test_speed_v_torch.py TestSpeed.test_add_a
+# python3 test/speed/external_test_speed_v_torch.py TestSpeed.test_add_a
 
 @TinyJit
 def plus(a:Tensor, b:Tensor): return a+b

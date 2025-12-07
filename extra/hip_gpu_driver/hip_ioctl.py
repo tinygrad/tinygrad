@@ -50,7 +50,7 @@ def ioctls_from_header():
   hdr = (pathlib.Path(__file__).parent / "kfd_ioctl.h").read_text().replace("\\\n", "")
   pattern = r'#define\s+(AMDKFD_IOC_[A-Z0-9_]+)\s+AMDKFD_IOW?R?\((0x[0-9a-fA-F]+),\s+struct\s([A-Za-z0-9_]+)\)'
   matches = re.findall(pattern, hdr, re.MULTILINE)
-  return {int(nr, 0x10):(name, getattr(kfd_ioctl, "struct_"+sname)) for name, nr, sname in matches}
+  return {int(nr, 0x10):(name, getattr(kfd_ioctl, "struct_"+sname, None)) for name, nr, sname in matches}
 nrs = ioctls_from_header()
 
 @ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_int, ctypes.c_ulong, ctypes.c_void_p)
@@ -66,7 +66,7 @@ def ioctl(fd, request, argp):
     print(f"{(st-start)*1000:7.2f} ms +{et*1000.:7.2f} ms : {ret:2d} = {name:40s}", ' '.join(format_struct(s)))
     if name == "AMDKFD_IOC_SVM":
       out = ctypes.cast(s.attrs, ctypes.POINTER(kfd_ioctl.struct_kfd_ioctl_svm_attribute))
-      for i in range(s.nattr): print(f"{i}: {kfd_ioctl.kfd_ioctl_svm_attr_type__enumvalues[out[i].type]:40s}: {out[i].value:#x}")
+      for i in range(s.nattr): print(f"{i}: {kfd_ioctl.enum_kfd_ioctl_svm_attr_type.get(out[i].type):40s}: {out[i].value:#x}")
   else:
     print(f"{(st-start)*1000:7.2f} ms +{et*1000.:7.2f} ms : ioctl",
           f"{idir=} {size=} {itype=} {nr=} {fd=} {ret=}", os.readlink(f"/proc/self/fd/{fd}") if fd >= 0 else "")

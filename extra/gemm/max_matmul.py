@@ -1,17 +1,11 @@
 import numpy as np, os
 from tinygrad.helpers import getenv, flat_mv
 from tinygrad import dtypes
-from typing import Optional, List, Tuple, cast, Dict, Final, DefaultDict, Self
 from tinygrad.engine.realize import get_program
 
 # for copied uops
-from tinygrad.opt.kernel import Kernel, KernelOptError
-from tinygrad.uop.ops import UOp, Ops, BinaryOps, UnaryOps, TernaryOps, KernelInfo
-from tinygrad.opt.search import Opt, OptOps
-from tinygrad import Device, dtypes, Tensor
-from tinygrad.dtype import PtrDType, DType, DTYPES_DICT
-from tinygrad.shape.shapetracker import ShapeTracker
-from tinygrad.shape.view import View
+from tinygrad import dtypes
+from tinygrad.dtype import DTYPES_DICT
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -53,12 +47,6 @@ def randoms():
     nc = nc.astype(np.bfloat16 if DTYPE_IN == dtypes.bfloat16 else np.float16)
   return na, nb, nc
 
-def ast_to_cuda_prog(compiler, ast, opts):
-  k = Kernel(ast)
-  k.apply_opts(opts)
-  p = get_program(k.get_optimized_ast(), k.opts)
-  return CUDAProgram(device, p.function_name, compiler.compile(p.src))
-
 if __name__ == "__main__":
   print(f"gemm variation: {GEMM_VARIATION=} {M=} {N=} {K=} {DTYPE_IN=} {DTYPE_OUT=} {DTYPE_ACC=}")
   prog, global_size, local_size = None, None, None
@@ -75,7 +63,7 @@ if __name__ == "__main__":
 
     if GEMM_VARIATION == "max" and (M%64)==0 and (N%128)==0 and (K%64)==0 and DTYPE_IN == dtypes.half and DTYPE_OUT == dtypes.float and DTYPE_ACC == dtypes.float:
       print("Using CUDA and triton-generated kernel")
-      # See nv_triton_gemm.annotated.ptx for PTX code which was generated from `PYTHONPATH=. DEBUG=6 CUDA=1 PTX=1 python3 extra/gemm/triton_nv_matmul.py`
+      # See nv_triton_gemm.annotated.ptx for PTX code which was generated from `PYTHONPATH=. DEBUG=6 CUDA=1 CUDA_PTX=1 python3 extra/gemm/triton_nv_matmul.py`
       # this kernel with M=N=K=4096 does 162TFLOPS, vs torch at 144TFLOPS and BEAM=8 tinygrad at 138TFLOPS.  theo max is 165TFLOPS.
 
       # WMMA element size is (M, N, K) = (16, 8, 16)
@@ -189,11 +177,11 @@ if __name__ == "__main__":
 
     tms = []
     na, nb, nc = randoms()
-    cudaalloc.copyin(a, bytearray(na))
-    cudaalloc.copyin(b, bytearray(nb))
+    cudaalloc._copyin(a, memoryview(bytearray(na)))
+    cudaalloc._copyin(b, memoryview(bytearray(nb)))
     for i in range(CNT):
       tms.append(prog(*args, **kwargs))
-    cudaalloc.copyout(flat_mv(nc.data), c)
+    cudaalloc._copyout(flat_mv(nc.data), c)
     comp = na.astype(np.float32) @ nb.astype(np.float32)
     result = nc.reshape(M, N).astype(np.float32)
 

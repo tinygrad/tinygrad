@@ -89,6 +89,20 @@ class Attention:
     keys, values = repeat_kv(keys, self.n_rep), repeat_kv(values, self.n_rep)
     xq, keys, values = xq.transpose(1, 2), keys.transpose(1, 2), values.transpose(1, 2)
     attn = xq.scaled_dot_product_attention(keys, values, mask).transpose(1, 2)
+    if getenv("STUB_ATTENTION"):
+      # TODO: do we need mask?
+      from tinygrad.uop.ops import UOp, KernelInfo
+      def fa_custom_forward(attn:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
+        return UOp.sink(arg=KernelInfo(name="fa_custom_forward"))
+      def fa_custom_backward(out_q:UOp, out_k:UOp, out_v:UOp, grad:UOp, q:UOp, k:UOp, v:UOp) -> UOp:
+        return UOp.sink(arg=KernelInfo(name="fa_custom_backward"))
+      def fa_backward(grad:UOp, kernel:UOp) -> tuple[None, UOp, UOp, UOp]:
+        grad_q = Tensor.empty_like(q:=Tensor(kernel.src[1]))
+        grad_k = Tensor.empty_like(k:=Tensor(kernel.src[2]))
+        grad_v = Tensor.empty_like(v:=Tensor(kernel.src[3]))
+        ck = Tensor.custom_kernel(grad_q, grad_k, grad_v, Tensor(grad), q, k, v, fxn=fa_custom_backward)[:3]
+        return (None, ck[0].uop, ck[1].uop, ck[2].uop)
+      attn = Tensor.empty_like(attn).custom_kernel(xq, keys, values, fxn=fa_custom_forward, grad_fxn=fa_backward)[0]
     attn = attn.reshape(bsz, seqlen, -1)
     return self.wo(attn)
 
@@ -99,7 +113,9 @@ class FeedForward:
     self.w3 = linear(dim, hidden_dim, bias=False) # the gate in Gated Linear Unit
 
   def __call__(self, x:Tensor) -> Tensor:
-    return self.w2(self.w1(x).silu() * self.w3(x)) # SwiGLU [arxiv/2002.05202, eq (5)]
+    w1 = self.w1(x).silu()
+    w3 = self.w3(x.contiguous_backward())  # this fixes a strange fusion that makes tensor cores miss
+    return self.w2(w1 * w3)
 
 class TransformerBlock:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, max_context:int, linear=nn.Linear,
@@ -111,7 +127,7 @@ class TransformerBlock:
 
   def __call__(self, x:Tensor, start_pos:Union[Variable,int], freqs_cis:Tensor, mask:Optional[Tensor]):
     h = x + self.attention(self.attention_norm(x), start_pos, freqs_cis, mask)
-    return (h + self.feed_forward(self.ffn_norm(h))).contiguous()
+    return (h + self.feed_forward(self.ffn_norm(h))).contiguous().contiguous_backward()
 
 # standard openai sampling
 def sample(logits: Tensor, temp: float, k: int, p: float, af: float, ap: float):
@@ -179,16 +195,14 @@ class Transformer:
   def forward(self, tokens:Tensor, start_pos:Union[Variable,int], temperature:float, top_k:int, top_p:float, alpha_f:float, alpha_p:float):
     _bsz, seqlen = tokens.shape
     h = self.tok_embeddings(tokens)
-
-    self.freqs_cis = self.freqs_cis.cast(h.dtype).contiguous()
-    freqs_cis = self.freqs_cis[:, start_pos:start_pos+seqlen, :, :, :]
+    freqs_cis = self.freqs_cis.cast(h.dtype)[:, start_pos:start_pos+seqlen, :, :, :]
 
     mask = Tensor.full((1, 1, seqlen, start_pos+seqlen), float("-inf"), dtype=h.dtype, device=h.device).triu(start_pos+1) if seqlen > 1 else None
     for layer in self.layers: h = layer(h, start_pos, freqs_cis, mask)
-    logits = self.output(self.norm(h)).float()[:, -1, :]
+    logits = self.output(self.norm(h))
     if math.isnan(temperature): return logits
 
-    return sample(logits.flatten(), temperature, top_k, top_p, alpha_f, alpha_p)
+    return sample(logits[:, -1, :].flatten(), temperature, top_k, top_p, alpha_f, alpha_p)
 
   def __call__(self, tokens:Tensor, start_pos:int, temperature:float=0.0, top_k:int=0, top_p:float=0.8, alpha_f:float=0.0, alpha_p:float=0.0):
     # TODO: better way to handle the first call v.s. the rest?
@@ -249,8 +263,5 @@ def convert_from_gguf(weights:dict[str, Tensor], n_layers:int):
   return sd
 
 def fix_bf16(weights:dict[Any, Tensor]):
-  if getenv("SUPPORT_BF16", 1):
-    # TODO: without casting to float16, 70B llama OOM on tinybox.
-    return {k:v.cast(dtypes.float32).cast(dtypes.float16) if v.dtype == dtypes.bfloat16 else v for k,v in weights.items()}
-  # TODO: check if device supports bf16
-  return {k:v.llvm_bf16_cast(dtypes.half).to(v.device) if v.dtype == dtypes.bfloat16 else v for k,v in weights.items()}
+  # TODO: without casting to float16, 70B llama OOM on tinybox.
+  return {k:v.cast(dtypes.float32).cast(dtypes.float16) if v.dtype == dtypes.bfloat16 else v for k,v in weights.items()}

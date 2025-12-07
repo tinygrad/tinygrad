@@ -1,10 +1,10 @@
-import ctypes, ctypes.util, os, subprocess, platform, sysconfig
-from tinygrad.helpers import OSX
+import ctypes.util, os, platform, sysconfig
+from tinygrad.helpers import system, OSX
 
 WEBGPU_PATH: str | None
 
 if OSX:
-  if not os.path.exists(brew_prefix:=subprocess.check_output(['brew', '--prefix', 'dawn']).decode().strip()):
+  if not os.path.exists(brew_prefix:=system("brew --prefix dawn")):
     raise FileNotFoundError('dawn library not found. Install it with `brew tap wpmed92/dawn && brew install dawn`')
   WEBGPU_PATH = os.path.join(brew_prefix, 'lib', 'libwebgpu_dawn.dylib')
 elif platform.system() == "Windows":

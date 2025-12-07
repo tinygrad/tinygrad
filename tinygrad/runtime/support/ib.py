@@ -1,5 +1,6 @@
 from __future__ import annotations
-import resource, ctypes, weakref, functools, itertools, tinygrad.runtime.autogen.ib as ib
+import resource, ctypes, weakref, functools, itertools
+from tinygrad.runtime.autogen import ib
 from typing import Iterator
 from dataclasses import dataclass
 from weakref import WeakKeyDictionary
@@ -10,7 +11,7 @@ DEFAULT_PORT, DEFAULT_GID = getenv("DEFAULT_PORT", 1), getenv("DEFAULT_GID", 3) 
 IOVA_ALIGN = resource.getpagesize()
 
 def checkz(x, ret=None):
-  assert x == 0, f'{x} != 0 (errno {ctypes.get_errno()})'
+  if x != 0: raise RuntimeError(f'{x} != 0 (errno {ctypes.get_errno()})')
   return ret
 
 @dataclass(frozen=True)
@@ -141,7 +142,7 @@ class IBConn:
     while (wr_id in self.pending_wrids) if wr_id is not None else self.pending_wrids:
       if self.ctx.ctx.contents.ops.poll_cq(self.cq, _num_entries:=1, ctypes.byref(wc:=ib.struct_ibv_wc())):
         if wc.status != ib.IBV_WC_SUCCESS:
-          raise RuntimeError(f'Work Request completed with error: wr_id={wc.wr_id} status={ib.ibv_wc_status__enumvalues.get(wc.status, wc.status)}')
+          raise RuntimeError(f'Work Request completed with error: wr_id={wc.wr_id} status={ib.enum_ibv_wc_status.get(wc.status, wc.status)}')
         self.pending_wrids.remove(wc.wr_id)
 
   def rdma_write(self, sgl:list[SGE]):
@@ -162,7 +163,7 @@ class IBConn:
         # Scatter-Gather Entry for local memory
         sge = ctypes.pointer(ib.struct_ibv_sge(addr=sg.src_iova+off, length=min(sg.size-off, self.ctx.port_attr.max_msg_sz), lkey=sg.src_key))
         # RDMA struct for remote memory
-        wr = ib.union_ibv_send_wr_wr(rdma=ib.struct_ibv_send_wr_1_rdma(remote_addr=sg.dst_iova+off, rkey=sg.dst_key))
+        wr = ib.struct_ibv_send_wr_wr(rdma=ib.struct_ibv_send_wr_wr_rdma(remote_addr=sg.dst_iova+off, rkey=sg.dst_key))
         # Signal (with chosen work request id) if it's the last wr (first in the loop since it's reversed)
         wid, flags = (wr_id, ib.IBV_SEND_SIGNALED) if swr is None else (0, 0)
         # Create Send Request

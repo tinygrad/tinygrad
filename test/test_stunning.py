@@ -25,7 +25,7 @@ class TestStunning(unittest.TestCase):
     nv = a[12].cat(a[76]).tolist()
 
     vi = Variable('i', 0, a.shape[0]-1)
-    with self.assertRaisesRegex(AssertionError, "different values for the same key"):
+    with self.assertRaisesRegex(AssertionError, "bind mismatch on"):
       wv = a[vi.bind(12)].cat(a[vi.bind(76)]).tolist()
       self.assertListEqual(nv, wv)
 
@@ -40,7 +40,7 @@ class TestStunning(unittest.TestCase):
     Y_train = Y_train.one_hot(10)
     X_samp, Y_samp = X_train[samples], Y_train[samples]
     vi = Variable('i', 0, samples.shape[0]-1)
-    with Context(FUSE_ARANGE=1, SPLIT_REDUCEOP=0):
+    with Context(SPLIT_REDUCEOP=0):
       with Tensor.train():
         losses = []
         for i in range(samples.shape[0]):

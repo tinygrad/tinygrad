@@ -1,6 +1,6 @@
 from typing import List, Tuple
-from tinygrad.opt.kernel import Kernel
-from tinygrad.opt.search import get_kernel_actions, actions
+from tinygrad.codegen.opt.kernel import Kernel
+from tinygrad.codegen.opt.search import get_kernel_actions, actions
 
 _net = None
 def beam_q_estimate(beam:List[Tuple[Kernel, float]]) -> List[Tuple[Kernel, float]]:

@@ -1,5 +1,5 @@
-import ctypes, ctypes.util, os, sys, subprocess
-from tinygrad.helpers import DEBUG, OSX, getenv
+import ctypes.util, os, sys
+from tinygrad.helpers import DEBUG, OSX, getenv, system
 
 if sys.platform == 'win32':
   # Windows llvm distribution doesn't seem to add itself to PATH or anywhere else where it can be easily retrieved from.
@@ -10,13 +10,13 @@ if sys.platform == 'win32':
 elif OSX:
   # Will raise FileNotFoundError if brew is not installed
   # `brew --prefix` will return even if formula is not installed
-  if not os.path.exists(brew_prefix:=subprocess.check_output(['brew', '--prefix', 'llvm@20']).decode().strip()):
+  if not os.path.exists(brew_prefix:=system("brew --prefix llvm@20")):
     raise FileNotFoundError('LLVM not found, you can install it with `brew install llvm@20`')
   LLVM_PATH: str|None = os.path.join(brew_prefix, 'lib', 'libLLVM.dylib')
 else:
   LLVM_PATH = ctypes.util.find_library('LLVM')
   # use newer LLVM if possible
-  for ver in reversed(range(14, 20+1)):
+  for ver in reversed(range(14, 21+1)):
     if LLVM_PATH is not None: break
     LLVM_PATH = ctypes.util.find_library(f'LLVM-{ver}')
   if LLVM_PATH is None:

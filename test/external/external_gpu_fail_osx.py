@@ -1,5 +1,5 @@
 # ugh, OS X OpenCL doesn't support half
-from tinygrad.runtime.ops_gpu import CLDevice, CLProgram, CLCompiler
+from tinygrad.runtime.ops_cl import CLDevice, CLProgram, CLCompiler
 
 src = """#pragma OPENCL EXTENSION cl_khr_fp16 : enable
 __kernel void max_half(__global half* data0, const __global half* data1) {
