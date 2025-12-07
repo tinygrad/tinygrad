@@ -127,7 +127,7 @@ class QCOMComputeQueue(HWQueue):
     self.reg(mesa.REG_A6XX_SP_CS_USIZE, qreg.a6xx_sp_cs_usize(0x40)) # mesa also uses 1
     self.reg(mesa.REG_A6XX_SP_MODE_CNTL, qreg.a6xx_sp_mode_cntl(isammode=mesa.ISAMMODE_GL if prg.NIR else mesa.ISAMMODE_CL))
     self.reg(mesa.REG_A6XX_SP_PERFCTR_SHADER_MASK, qreg.a6xx_sp_perfctr_shader_mask(cs=True))
-    self.reg(mesa.REG_A6XX_TPL1_MODE_CNTL, qreg.a6xx_tpl1_mode_cntl(isammode=mesa.ISAMMODE_GL if prg.NIR else mesa.ISAMMODE_CL, unk3=2)) # FIXME
+    self.reg(mesa.REG_A6XX_TPL1_MODE_CNTL, qreg.a6xx_tpl1_mode_cntl(isammode=mesa.ISAMMODE_GL if prg.NIR else mesa.ISAMMODE_CL))
     self.reg(mesa.REG_A6XX_TPL1_DBG_ECO_CNTL, 0)
     self.cmd(mesa.CP_WAIT_FOR_IDLE)
 
@@ -179,9 +179,9 @@ class QCOMComputeQueue(HWQueue):
              qreg.a6xx_sp_cs_config(enabled=True, nsamp=args_state.prg.samp_cnt, ntex=args_state.prg.tex_cnt, nuav=args_state.prg.ibo_cnt))
 
     if prg.NIR:
-      self.reg(mesa.REG_A6XX_HLSQ_CS_CNTL_0,
-               qreg.a6xx_hlsq_cs_cntl_0(wgidconstid=prg.wgid, wgsizeconstid=0xfc, wgoffsetconstid=0xfc, localidregid=prg.lid),
-               qreg.a6xx_hlsq_cs_cntl_1(linearlocalidregid=0xfc, threadsize=mesa.THREAD64))
+      self.reg(mesa.REG_A6XX_SP_CS_CONST_CONFIG_0,
+               qreg.a6xx_sp_cs_const_config_0(wgidconstid=prg.wgid, wgsizeconstid=0xfc, wgoffsetconstid=0xfc, localidregid=prg.lid),
+               qreg.a6xx_sp_cs_wge_cntl(linearlocalidregid=0xfc, threadsize=mesa.THREAD64))
       self.cmd(mesa.CP_EXEC_CS, 0,
                qreg.cp_exec_cs_1(ngroups_x=global_size[0]), qreg.cp_exec_cs_2(ngroups_y=global_size[1]), qreg.cp_exec_cs_3(_ngroups_z=global_size[2]))
     else: self.cmd(mesa.CP_RUN_OPENCL, 0)
