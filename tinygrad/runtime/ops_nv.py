@@ -472,7 +472,7 @@ class NVKIface:
       if made.status != 0: raise RuntimeError(f"_gpu_free returned {get_error_str(made.status)}")
 
     self.uvm(nv_gpu.UVM_FREE, nv_gpu.UVM_FREE_PARAMS(base=cast(int, mem.va_addr), length=mem.size))
-    if mem.meta.has_cpu_mapping: FileIOInterface.munmap(cast(int, mem.va_addr), mem.size)
+    if mem.view is not None: FileIOInterface.munmap(cast(int, mem.va_addr), mem.size)
 
   def _gpu_uvm_map(self, va_base, size, mem_handle, create_range=True, has_cpu_mapping=False) -> HCQBuffer:
     if create_range:
@@ -487,8 +487,7 @@ class NVKIface:
     attrs = (nv_gpu.UvmGpuMappingAttributes*256)(nv_gpu.UvmGpuMappingAttributes(gpuUuid=self.gpu_uuid, gpuMappingType=1))
 
     self.uvm(nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION, uvm_map:=nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS(base=va_base, length=size,
-      rmCtrlFd=self.fd_ctl.fd, hClient=self.root, hMemory=mem_handle, gpuAttributesCount=1, perGpuAttributes=attrs, mapped_gpu_ids=[self.gpu_uuid],
-      has_cpu_mapping=has_cpu_mapping))
+      rmCtrlFd=self.fd_ctl.fd, hClient=self.root, hMemory=mem_handle, gpuAttributesCount=1, perGpuAttributes=attrs, mapped_gpu_ids=[self.gpu_uuid]))
     return HCQBuffer(va_base, size, meta=uvm_map, view=MMIOInterface(va_base, size, fmt='B') if has_cpu_mapping else None, owner=self.dev)
 
   def map(self, mem:HCQBuffer):
