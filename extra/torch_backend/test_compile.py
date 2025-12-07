@@ -15,10 +15,14 @@ def tiny(gm:torch.fx.GraphModule, sample_inputs):
     @TinyJit
     def tiny_function(*args:Tensor):
       outs = gm(*[wrap(x) for x in args])
-      for x in outs: unwrap(x).realize()
+      for x in outs:
+        if x is not None: unwrap(x).realize()
       return outs
     # TODO: this should be able to pass in .tiny() Tensors, not need to convert them. it tries to access Storage if you pass in.
-    def torch_function(*args:torch.Tensor): return tiny_function(*[unwrap(x.tiny()) for x in args])
+    def torch_function(*args:torch.Tensor):
+      outs = tiny_function(*[unwrap(x.tiny()) for x in args])
+      # torch expects output tensors to be on the same device as input tensors (cpu, in our case)
+      return tuple(x.cpu() if x is not None else x for x in outs)
     return torch_function
   return aot_module_simplified(gm, sample_inputs, decompositions={}, fw_compiler=my_compiler)
 
