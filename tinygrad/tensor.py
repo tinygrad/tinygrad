@@ -3449,7 +3449,6 @@ class Tensor(OpMixin):
     """
     Computes power of `self` with `x`.
     Equivalent to `self ** x`.
-
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor([-1, 2, 3]).pow(2.0).numpy())
     ```
@@ -3459,13 +3458,19 @@ class Tensor(OpMixin):
     ```python exec="true" source="above" session="tensor" result="python"
     print((2.0 ** Tensor([-1, 2, 3])).numpy())
     ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-2, -3, 2, 3]).pow(Tensor([3, 2, 3, 2])).numpy())
+    ```
     """
     base, exponent = self._broadcasted(x, reverse=reverse)
-    # TODO: int pow
+    # NOTE: negative exponents not checked (would require sync)
+    if not base.is_floating_point() and isinstance(x, Tensor) and not exponent.is_floating_point():
+      float_base = base.cast(dtypes.float32)
+      float_exp = exponent.cast(dtypes.float32)
+      ret = float_base._apply_uop(UOp.pow, float_exp)
+      return ret.round().cast(base.dtype)
     if not base.is_floating_point() and not (isinstance(x, int) and x >= 0): raise RuntimeError("base needs to be float")
-
     ret = base._apply_uop(UOp.pow, exponent)
-    # NOTE: pow(int, float) -> int
     return ret.round().cast(self.dtype) if not reverse and not dtypes.is_float(self.dtype) and dtypes.is_float(exponent.dtype) else ret
 
   def maximum(self, x:Tensor|ConstType) -> Tensor:
