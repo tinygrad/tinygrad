@@ -716,7 +716,6 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x**29, vals=[[-2,0,2]], forward_only=True, atol=0)
     self.helper_test_exception(None, lambda x: x**-2, vals=[[-2,0,2]], forward_only=True, expected=RuntimeError)
 
-  @unittest.skip("not supported")
   def test_pow_int(self):
     def _test(base, exponent): helper_test_op(None, lambda x,y: x**y, vals=[base, exponent], forward_only=True)
 
@@ -728,9 +727,8 @@ class TestOps(unittest.TestCase):
 
     np.testing.assert_equal((Tensor(11) ** Tensor(7)).item(), 11 ** 7)
     np.testing.assert_equal((Tensor([11]) ** Tensor(7)).item(), 11 ** 7)
-    # TODO: fix non-precise int pow
-    with self.assertRaises(AssertionError): np.testing.assert_equal((Tensor(11) ** Tensor([7])).item(), 11 ** 7)
-    with self.assertRaises(AssertionError): np.testing.assert_equal((Tensor([11]) ** Tensor([7])).item(), 11 ** 7)
+    np.testing.assert_equal((Tensor(11) ** Tensor([7])).item(), 11 ** 7)
+    np.testing.assert_equal((Tensor([11]) ** Tensor([7])).item(), 11 ** 7)
 
     # pow to a const int
     helper_test_op([], lambda: torch.tensor([2], dtype=torch.int) ** torch.tensor(-2, dtype=torch.int),
