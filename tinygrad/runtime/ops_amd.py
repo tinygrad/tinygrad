@@ -7,8 +7,8 @@ from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, H
 from tinygrad.runtime.support.hcq import MMIOInterface, BumpAllocator, hcq_filter_visible_devices
 from tinygrad.uop.ops import sint
 from tinygrad.device import Compiled, DMAFdRef, BufferSpec, CompilerSet, CompilerPair
-from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, suppress_finalizing, lo32, hi32, colored, prod, ContextVar
-from tinygrad.helpers import VIZ, AMD_CC, AMD_LLVM
+from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, colored, prod, ContextVar
+from tinygrad.helpers import VIZ, AMD_CC, AMD_LLVM, ceildiv
 from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, pci, sqtt
@@ -624,10 +624,7 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
     return self.dev.iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access)
 
-  @suppress_finalizing
-  def _free(self, opaque, options:BufferSpec):
-    self.dev.synchronize()
-    self.dev.iface.free(opaque)
+  def _do_free(self, opaque, options:BufferSpec): self.dev.iface.free(opaque)
 
   def _map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
 
@@ -986,31 +983,36 @@ class AMDDevice(HCQCompiled):
             wptr=getattr(hsa.amd_queue_t, 'write_dispatch_id').offset, eop_buffer=eop_buffer, cwsr_buffer=cwsr_buffer,
             ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size))
 
-  def _ensure_has_local_memory(self, required):
-    if self.max_private_segment_size >= required: return
+  def _ensure_has_local_memory(self, private_segment_size):
+    if self.max_private_segment_size >= private_segment_size: return
 
-    # <gfx103 requires alignment of 1024, >=gfx11 requires 256
-    wave_scratch_len = round_up(((self.max_wave_id + 1) * required), 256 if self.target >= (11,0,0) else 1024)
-
-    scratch_size = (self.max_cu_id+1)*self.iface.props['max_slots_scratch_cu']*wave_scratch_len # per xcc
-    self.scratch, ok = self._realloc(getattr(self, 'scratch', None), scratch_size*self.xccs)
+    lanes_per_wave = 64 # wave64
+    mem_alignment_size = 256 if self.target >= (11,0,0) else 1024
+    size_per_thread = round_up(private_segment_size, mem_alignment_size // lanes_per_wave)
+    size_per_xcc = size_per_thread * lanes_per_wave * self.iface.props['max_slots_scratch_cu'] * (self.max_cu_id + 1)
+    self.scratch, ok = self._realloc(getattr(self, 'scratch', None), size_per_xcc * self.xccs)
     if ok:
-      waves = wave_scratch_len // (256 if self.target >= (11,0,0) else 1024)
-      # >=gfx11 wavesize is per SE
-      wavesize = scratch_size // ((wave_scratch_len * self.se_cnt) if self.target >= (11,0,0) else wave_scratch_len)
-      self.tmpring_size = waves << 12 | wavesize
-      self.max_private_segment_size = required
+      # NOTE: xcc logic is correct only for GFX9.
+      max_scratch_waves = (self.max_cu_id + 1) * self.iface.props['max_slots_scratch_cu'] * self.xccs
+      wave_scratch = ceildiv(lanes_per_wave * size_per_thread, mem_alignment_size)
+      num_waves = (size_per_xcc // (wave_scratch * mem_alignment_size)) // (self.se_cnt if self.target >= (11,0,0) else 1)
+
+      tmpring_t = getattr(hsa, f'union_COMPUTE_TMPRING_SIZE{"_GFX"+str(self.target[0]) if self.target[0] >= 11 else ""}_bitfields')
+      self.tmpring_size = int.from_bytes(tmpring_t(WAVES=min(num_waves, max_scratch_waves), WAVESIZE=wave_scratch), 'little')
+      self.max_private_segment_size = private_segment_size
 
       if hasattr(self, 'aql_desc'):
         gfx9_rsrc = {'NUM_FORMAT':hsa.BUF_NUM_FORMAT_UINT, 'DATA_FORMAT':hsa.BUF_DATA_FORMAT_32, 'ELEMENT_SIZE':1, 'INDEX_STRIDE':3}
         rsrc = {'DST_SEL_X':hsa.SQ_SEL_X, 'DST_SEL_Y':hsa.SQ_SEL_Y, 'DST_SEL_Z':hsa.SQ_SEL_Z, 'DST_SEL_W':hsa.SQ_SEL_W, 'ADD_TID_ENABLE':1,
                 'TYPE':hsa.SQ_RSRC_BUF, **(gfx9_rsrc if self.target[0] < 10 else {'FORMAT':hsa.BUF_FORMAT_32_UINT, 'OOB_SELECT':2})}
-        rsrc_t = getattr(hsa, f'union_SQ_BUF_RSRC_WORD3{"_GFX"+str(self.target[0]) if self.target[0] >= 10 else ""}_bitfields')
+        rsrc1_t = getattr(hsa, f'union_SQ_BUF_RSRC_WORD1{"_GFX11" if self.target[0] >= 11 else ""}_bitfields')
+        rsrc3_t = getattr(hsa, f'union_SQ_BUF_RSRC_WORD3{"_GFX"+str(self.target[0]) if self.target[0] >= 10 else ""}_bitfields')
 
         self.aql_desc.scratch_backing_memory_location = self.scratch.va_addr
         self.aql_desc.scratch_wave64_lane_byte_size = self.max_private_segment_size * (self.aql_desc.max_wave_id + 1) // 64
-        self.aql_desc.scratch_resource_descriptor[:] = [lo32(self.scratch.va_addr), hi32(self.scratch.va_addr) | (1 << 30), lo32(scratch_size),
-          int.from_bytes(bytes(rsrc_t(**rsrc)), 'little')]
+        self.aql_desc.scratch_resource_descriptor[:] = [lo32(self.scratch.va_addr),
+          int.from_bytes(rsrc1_t(BASE_ADDRESS_HI=hi32(self.scratch.va_addr), SWIZZLE_ENABLE=1), 'little'),
+          lo32(size_per_xcc), int.from_bytes(bytes(rsrc3_t(**rsrc)), 'little')]
         self.aql_desc.compute_tmpring_size = self.tmpring_size
 
   def invalidate_caches(self):
