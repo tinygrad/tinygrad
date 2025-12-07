@@ -366,7 +366,7 @@ def amd_readelf(lib:bytes) -> list[dict]:
   namesz, descsz, typ = struct.unpack_from(hdr:="<III", data, 0)
   offset = (struct.calcsize(hdr)+namesz+3) & -4
   notes = msgpack.unpackb(data[offset:offset+descsz])
-  keys = {".sgpr_count":"SGPRs", ".vgpr_count":"VGPRs", ".max_flat_workgroup_size":"WGP size",
+  keys = {".sgpr_count":"SGPRs", ".vgpr_count":"VGPRs", ".max_flat_workgroup_size":"Max WGP size",
           ".group_segment_fixed_size":"LDS size", ".private_segment_fixed_size":"Scratch size"}
   return [{"label":label, "value":v} for k,label in keys.items() if (v:=notes["amdhsa.kernels"][0][k]) > 0]
 
