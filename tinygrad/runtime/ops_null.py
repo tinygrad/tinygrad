@@ -4,7 +4,7 @@ from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.renderer.cstyle import Renderer, CStyleLanguage
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.uop.ops import Ops
-from tinygrad.helpers import cpu_profile, EMULATE
+from tinygrad.helpers import cpu_profile, EMULATE, NULL_IR3
 from tinygrad.renderer.nir import IR3Renderer
 from tinygrad.runtime.support.compiler_mesa import IR3Compiler
 
@@ -40,5 +40,5 @@ class NullDevice(Compiled):
       case "": renderer = NullRenderer
       case _: raise RuntimeError(f"can't EMULATE device: {EMULATE.value}")
     compilers = CompilerSet([CompilerPair(renderer, Compiler),
-                             CompilerPair(functools.partial(IR3Renderer, self), functools.partial(IR3Compiler, 0x6030001))]) # adreno 630
+                             CompilerPair(functools.partial(IR3Renderer, self), functools.partial(IR3Compiler, 0x6030001), NULL_IR3)]) # adreno 630
     super().__init__(device, NullAllocator(self), compilers, functools.partial(NullProgram, device), NullGraph)
