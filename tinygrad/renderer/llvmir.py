@@ -63,21 +63,33 @@ def render_wmma_amd(ctx, wmma: UOp, cdna=False) -> str:
       if wmma.dtype.scalar() != dtypes.float else ")")
 
 def render_pow(ctx, x, base, exp):
-  # Use alloca to avoid phi node complexity (mem2reg will fix this)
-  # TODO: this assumes we have stack space
   ptr_t = ldt(x.dtype) + "*"
   val_t = ldt(x.dtype)
+  # Uses alloca for simplified control flow generation (letting mem2reg optimize later)
   return "\n".join([
     f"  {ctx[x]}_b_ptr = alloca {val_t}, align {x.dtype.itemsize}",
     f"  {ctx[x]}_e_ptr = alloca {val_t}, align {x.dtype.itemsize}",
     f"  {ctx[x]}_r_ptr = alloca {val_t}, align {x.dtype.itemsize}",
     f"  store {val_t} {ctx[base]}, {ptr_t} {ctx[x]}_b_ptr, align {x.dtype.itemsize}",
     f"  store {val_t} {ctx[exp]}, {ptr_t} {ctx[x]}_e_ptr, align {x.dtype.itemsize}",
+    # Logic for negative exponent: b==1?1 : (b==-1?(e&1?-1:1) : 0)
+    f"  {ctx[x]}_neg = icmp slt {val_t} {ctx[exp]}, 0",
+    f"  br i1 {ctx[x]}_neg, label %pow_neg_{ctx[x][1:]}, label %pow_init_{ctx[x][1:]}",
+    f"pow_neg_{ctx[x][1:]}:",
+    f"  {ctx[x]}_is_one = icmp eq {val_t} {ctx[base]}, 1",
+    f"  {ctx[x]}_is_neg_one = icmp eq {val_t} {ctx[base]}, -1",
+    f"  {ctx[x]}_odd_exp = and {val_t} {ctx[exp]}, 1",
+    f"  {ctx[x]}_neg_one_res = select i1 {ctx[x]}_odd_exp, {val_t} -1, {val_t} 1",
+    f"  {ctx[x]}_neg_res_tmp = select i1 {ctx[x]}_is_neg_one, {val_t} {ctx[x]}_neg_one_res, {val_t} 0",
+    f"  {ctx[x]}_neg_res = select i1 {ctx[x]}_is_one, {val_t} 1, {val_t} {ctx[x]}_neg_res_tmp",
+    f"  store {val_t} {ctx[x]}_neg_res, {ptr_t} {ctx[x]}_r_ptr, align {x.dtype.itemsize}",
+    f"  br label %pow_exit_{ctx[x][1:]}",
+    f"pow_init_{ctx[x][1:]}:",
     f"  store {val_t} 1, {ptr_t} {ctx[x]}_r_ptr, align {x.dtype.itemsize}",
     f"  br label %pow_head_{ctx[x][1:]}",
     f"pow_head_{ctx[x][1:]}:",
     f"  {ctx[x]}_e = load {val_t}, {ptr_t} {ctx[x]}_e_ptr, align {x.dtype.itemsize}",
-    f"  {ctx[x]}_cond = {lop[x.dtype.scalar()][Ops.CMPLT]} {val_t} 0, {ctx[x]}_e", # Check e > 0 (reversed logic in loop check)
+    f"  {ctx[x]}_cond = {lop[x.dtype.scalar()][Ops.CMPLT]} {val_t} 0, {ctx[x]}_e",
     f"  br i1 {ctx[x]}_cond, label %pow_body_{ctx[x][1:]}, label %pow_exit_{ctx[x][1:]}",
     f"pow_body_{ctx[x][1:]}:",
     f"  {ctx[x]}_b = load {val_t}, {ptr_t} {ctx[x]}_b_ptr, align {x.dtype.itemsize}",
@@ -136,6 +148,7 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
   (UPat(Ops.TRUNC, name="x"),
    lambda ctx,x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.trunc.{ldt(x.dtype.scalar())}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
+  (UPat(Ops.POW, dtype=dtypes.ints, src=(UPat.var("b"), UPat.var("e")), name="x"), lambda ctx,x,b,e: render_pow(ctx, x, b, e)),
   (UPat(GroupOp.Binary, name="x"), lambda ctx,x:
    f"  {ctx[x]} = {lop[x.src[0].dtype.scalar()][x.op]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ctx[x.src[1]]}"),
   (UPat(Ops.WHERE, name="x"), lambda ctx,x:
@@ -161,7 +174,6 @@ base_rewrite = PatternMatcher([
   # if
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"  br i1 {ctx[x.src[0]]}, label %ifbody_{ctx[x][1:]}, label %ifskip_{ctx[x][1:]}\nifbody_{ctx[x][1:]}:"),
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f"  br label %ifskip_{ctx[x.src[0]][1:]}\nifskip_{ctx[x.src[0]][1:]}:"),
-  (UPat(Ops.POW, dtype=dtypes.ints, src=(UPat.var("b"), UPat.var("e")), name="x"), lambda ctx,x,b,e: render_pow(ctx, x, b, e)),
   (UPat(Ops.BARRIER), lambda ctx: "")
 ])
 

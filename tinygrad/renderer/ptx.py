@@ -87,8 +87,19 @@ def render_wmma(ctx: "PTXRenderer", wmma: UOp):
 
 def render_pow(ctx, x, base, exp):
   dt = ctx.types[x.dtype.scalar()]
-  pred = "pred"
   return [
+    f".reg .{dt} {ctx.r[x]}_b;",
+    f".reg .{dt} {ctx.r[x]}_e;",
+    f".reg .{dt} {ctx.r[x]}_odd;",
+    f".reg .{dt} {ctx.r[x]}_odd_neg;",
+    f".reg .pred %p_neg;",
+    f".reg .pred %p;",
+    f".reg .pred %p_skip;",
+    f".reg .pred %p_one;",
+    f".reg .pred %p_neg_one;",
+    f".reg .pred %p_is_odd;",
+    f"setp.lt.{dt} %p_neg, {ctx.r[exp]}, 0;",
+    f"@%p_neg bra $pow_neg_{ctx.r[x]};",
     f"mov.{dt} {ctx.r[x]}, 1;",
     f"mov.{dt} {ctx.r[x]}_b, {ctx.r[base]};",
     f"mov.{dt} {ctx.r[x]}_e, {ctx.r[exp]};",
@@ -97,12 +108,20 @@ def render_pow(ctx, x, base, exp):
     f"@%p bra $pow_exit_{ctx.r[x]};",
     f"and.b{dt[1:]} {ctx.r[x]}_odd, {ctx.r[x]}_e, 1;",
     f"setp.eq.{dt} %p_skip, {ctx.r[x]}_odd, 0;",
-    f"@%p_skip bra $pow_skip_mul_{ctx.r[x]};",
-    f"mul.lo.{dt} {ctx.r[x]}, {ctx.r[x]}, {ctx.r[x]}_b;",
-    f"$pow_skip_mul_{ctx.r[x]}:",
+    f"@!%p_skip mul.lo.{dt} {ctx.r[x]}, {ctx.r[x]}, {ctx.r[x]}_b;",
     f"mul.lo.{dt} {ctx.r[x]}_b, {ctx.r[x]}_b, {ctx.r[x]}_b;",
     f"shr.{dt} {ctx.r[x]}_e, {ctx.r[x]}_e, 1;",
     f"bra $pow_loop_{ctx.r[x]};",
+    f"$pow_neg_{ctx.r[x]}:",
+    f"setp.eq.{dt} %p_one, {ctx.r[base]}, 1;",
+    f"@%p_one mov.{dt} {ctx.r[x]}, 1;",
+    f"@%p_one bra $pow_exit_{ctx.r[x]};",
+    f"setp.eq.{dt} %p_neg_one, {ctx.r[base]}, -1;",
+    f"@!%p_neg_one mov.{dt} {ctx.r[x]}, 0;",
+    f"@!%p_neg_one bra $pow_exit_{ctx.r[x]};",
+    f"and.b{dt[1:]} {ctx.r[x]}_odd_neg, {ctx.r[exp]}, 1;",
+    f"setp.ne.{dt} %p_is_odd, {ctx.r[x]}_odd_neg, 0;",
+    f"selp.{dt} {ctx.r[x]}, -1, 1, %p_is_odd;",
     f"$pow_exit_{ctx.r[x]}:"
   ]
 
@@ -114,11 +133,11 @@ string_rewrite = PatternMatcher([
   (UPat.cvar("x"), lambda ctx, x: f"mov.b{ctx.types[x.dtype][1:]} {ctx.r[x]}, {render_val(x.arg, x.dtype)};"),
   (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: f"mov.u32 %{x.arg}, %{'ctaid' if x.arg[0] == 'g' else 'tid'}.{chr(120+int(x.arg[-1]))};"),
   (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda ctx, x: f"ld.param.{ctx.types[dtypes.ulong]} {ctx.r[x]}, [data{x.arg}+0];"),
+  (UPat(Ops.POW, dtype=dtypes.ints, src=(UPat.var("b"), UPat.var("e")), name="x"), 
+    lambda ctx, x, b, e: render_pow(ctx, x, b, e)),
   (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ), name="x", allow_any_len=True, src=(UPat.var("src0"),)),
     lambda ctx, x, src0: ctx.code_for_op[x.op](ctx.r[x], *[ctx.r[v] for v in x.src], src0.dtype, ctx.types[src0.dtype])),
   (UPat(GroupOp.ALU, name="x"), lambda ctx, x: ctx.code_for_op[x.op](ctx.r[x], *[ctx.r[v] for v in x.src], x.dtype, ctx.types[x.dtype])),
-  (UPat(Ops.POW, dtype=dtypes.ints, src=(UPat.var("b"), UPat.var("e")), name="x"), 
-    lambda ctx, x, b, e: render_pow(ctx, x, b, e)),
   (UPat(Ops.BITCAST, name="x", src=(UPat.var("a"),), allow_any_len=True), lambda ctx, x, a: f"mov.b{ctx.types[x.dtype][1:]} {ctx.r[x]}, {ctx.r[a]};"),
   (UPat(Ops.CAST, name="x", src=(UPat(dtype=dtypes.bool, name="a"),)),
    lambda ctx, x, a: f"selp.b{ctx.types[x.dtype][1:]} {ctx.r[x]}, {render_val(1, x.dtype)}, {render_val(0, x.dtype)}, {ctx.r[a]};"),

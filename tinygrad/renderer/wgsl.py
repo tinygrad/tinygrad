@@ -97,6 +97,7 @@ class WGSLRenderer(CStyleLanguage):
     prg += "fn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\n"
     if any(uop.op == Ops.POW and dtypes.is_int(uop.dtype) for uop in uops):
       prg += """fn _int_pow(base: i32, exp: i32) -> i32 {
+    if (exp < 0) { return select(0, select(select(1, -1, (exp & 1) != 0), 1, base == 1), base == -1); }
     var b = base;
     var e = exp;
     var res = 1;
