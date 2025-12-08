@@ -94,9 +94,6 @@ class WGSLRenderer(CStyleLanguage):
     kernel[:] = [line for line in kernel if "var<workgroup>" not in line]
     prg = "enable f16;\n" if any(uop.dtype.base == dtypes.half for uop in uops) else ""
     prg += "fn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\n"
-    if any("_int_pow" in line for line in kernel):
-      prg += "fn _int_pow(base: i32, exp: i32) -> i32 { if (exp < 0) { if (base == 1) { return 1; } if (base == -1) { return select(1, -1, (exp & 1) != 0); } return 0; }\n"
-      prg += "  var res: i32 = 1; var b: i32 = base; var e: i32 = exp; while (e > 0) { if ((e & 1) != 0) { res = res * b; } b = b * b; e = e >> 1u; } return res; }\n"
     prg += "@group(0) @binding(0)\nvar<uniform> INFINITY : f32;\n"
     prg += "\n".join((external_local_bufs or [])+[f"@group(0) @binding({next(bind_it)+1})" +
       f"{'var<storage,read_write>' if isinstance(dtype, PtrDType) else 'var<uniform>'}" +

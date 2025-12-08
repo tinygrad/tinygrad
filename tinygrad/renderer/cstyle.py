@@ -8,18 +8,7 @@ from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, AddrSpace, trunc
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu
 
-_INT_POW_FUNC = """
-inline int _int_pow(int base, int exp) {
-  if (exp < 0) return (base == 1) ? 1 : (base == -1) ? ((exp & 1) ? -1 : 1) : 0;
-  int res = 1;
-  while (exp > 0) {
-    if (exp & 1) res *= base;
-    base *= base;
-    exp >>= 1;
-  }
-  return res;
-}
-"""
+_INT_POW_FUNC = "inline int _int_pow(int b,int e){if(e<0)return b==1?1:(b==-1?((e&1)?-1:1):0);int r=1;while(e>0){if(e&1)r*=b;b*=b;e>>=1;}return r;}"
 
 base_rewrite = PatternMatcher([
   (UPat(Ops.DEFINE_REG, name="x"), lambda ctx,x: f"{ctx.render_dtype(x.dtype.base)} {ctx[x]}[{x.dtype.size}];"),
@@ -135,9 +124,7 @@ class CStyleLanguage(Renderer):
 
   def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[DType,bool]]], uops:list[UOp], prefix=None) -> str:
     if prefix is None: prefix = []
-    if any("_int_pow" in line for line in kernel):
-      attr = "__device__ " if self.device in {"CUDA", "NV", "HIP"} else ""
-      prefix.append(attr + _INT_POW_FUNC)
+    if any("_int_pow" in line for line in kernel): prefix.append(("__device__ " if self.device in {"CUDA","NV","HIP"} else "")+_INT_POW_FUNC)
     tmp = ""
     if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs):
       tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"
