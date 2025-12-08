@@ -48,6 +48,8 @@ else:
       return cls
 
     def __setattr__(cls, k, v):
+      # https://github.com/python/cpython/issues/90914
+      if k == "_fields_": v = [(f[0], ctypes.c_uint8, f[2]) if len(f) == 3 and f[1] == ctypes.c_bool else f for f in v]
       # NB: _fields_ must be set after _packed_ because PyCStructType_setattro marks _fields_ as final.
       if k == "_fields_" and getattr(cls, "_packed_", False): type(cls)._build(cls, v)
       elif k == "_packed_" and hasattr(cls, "_fields_"): type(cls)._build(cls, cls._fields_)
@@ -75,7 +77,8 @@ else:
       if hasattr(cls, '_anonymous_'):
         for anm, aty in [(a, get_aty(a)) for a in cls._anonymous_]:
           for fnm in (get_fnms(aty) + flatten([get_fnms(get_aty(aanm, pget(aty, 'fields'))) for aanm in pget(aty, 'anonymous')])):
-            setattr(cls, fnm, property(lambda self: getattr(getattr(self, anm), fnm), lambda self, v: setattr(getattr(self, anm), fnm, v)))
+            setattr(cls, fnm, property(functools.partial(lambda self, anm, fnm: getattr(getattr(self, anm), fnm), anm=anm, fnm=fnm),
+                                       functools.partial(lambda self, v, anm, fnm: setattr(getattr(self, anm), fnm, v), anm=anm, fnm=fnm)))
         setattr(cls, '_packed_anonymous_', cls._anonymous_)
         setattr(cls, '_anonymous_', [])
       type(ctypes.Structure).__setattr__(cls, '_fields_', [('_data', ctypes.c_ubyte * ((offset + 7) // 8))])

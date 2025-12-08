@@ -163,6 +163,14 @@ class TestFetch(unittest.TestCase):
     fetch("https://csrc.nist.gov/CSRC/media/Projects/lightweight-cryptography/documents/finalist-round/updated-submissions/sparkle.zip",
           allow_caching=False)
 
+  def test_fetch_half_and_full_file(self):
+    x = fetch("https://csrc.nist.gov/CSRC/media/Projects/lightweight-cryptography/documents/finalist-round/updated-submissions/sparkle.zip",
+          headers={"Range": "bytes=0-10"}).read_bytes()
+    assert len(x) == 11, f"{len(x) != 11}"
+    x = fetch("https://csrc.nist.gov/CSRC/media/Projects/lightweight-cryptography/documents/finalist-round/updated-submissions/sparkle.zip",
+          headers={"Range": "bytes=0-100"}).read_bytes()
+    assert len(x) == 101, f"{len(x) != 101}"
+
 class TestFullyFlatten(unittest.TestCase):
   def test_fully_flatten(self):
     self.assertEqual(fully_flatten([[1, 3], [1, 2]]), [1, 3, 1, 2])
