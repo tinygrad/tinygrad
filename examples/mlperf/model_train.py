@@ -1360,9 +1360,10 @@ def train_llama3():
 
   parameters, buffers = partition(get_parameters(model), lambda x: x.requires_grad)
   # print(f"parameters: {len(parameters)} buffers: {len(buffers)}")  # freqs_cis does not need grad
-  pos_params = list(itertools.accumulate(parameters, lambda x,y: x+y.numel(), initial=0))
-  bigloss = Tensor.zeros((), device=parameters[0].device).contiguous()
-  biggrads = Tensor.zeros(pos_params[-1], dtype=parameters[0].dtype, device=parameters[0].device).contiguous()
+  steploss = Tensor.zeros((), device=parameters[0].device).contiguous()
+  for p in parameters:
+    p.grad = p.zeros_like().contiguous().realize()
+  grads = [p.grad for p in parameters]
 
   optim = AdamW(get_parameters(model), lr=0.0,
                 b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay)
@@ -1389,11 +1390,8 @@ def train_llama3():
     logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
     uloss = logits.sparse_categorical_crossentropy(tokens[:, 1:]) / grad_acc
     uloss.backward()
-    ugrads = Tensor.cat(*[p.grad.contiguous().flatten() for p in parameters], dim=0)
-    for p in parameters: p.grad = None
-    biggrads.assign(biggrads + ugrads)
-    bigloss.assign(bigloss + uloss.cast(bigloss.dtype))
-    Tensor.realize(bigloss, biggrads)
+    steploss.assign(steploss + uloss.cast(steploss.dtype))
+    Tensor.realize(*grads, steploss)
 
   @TinyJit
   @Tensor.train()
@@ -1402,20 +1400,21 @@ def train_llama3():
     # https://github.com/NVIDIA/NeMo/blob/3368c3fc0b4a186ab33a1d68a504315100c0b2a6/nemo/collections/nlp/modules/common/megatron/clip_grads.py#L57
     # https://docs.pytorch.org/docs/stable/generated/torch.nn.utils.clip_grad_norm_.html
     if not getenv("DISABLE_GRAD_CLIP_NORM"):
-      total_norm = biggrads.float().square().sum()
-      total_norm = total_norm.sqrt()
-      biggrads.assign((biggrads * (opt_gradient_clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)).cast(biggrads.dtype))
+      total_norm = Tensor(0.0, dtype=dtypes.float32, device=optim.params[0].device)
+      for g in grads:
+        total_norm += g.float().square().sum()
+      total_norm = total_norm.sqrt().contiguous()
+      for g in grads:
+        g.assign((g * (opt_gradient_clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)).cast(g.dtype))
 
-    for i,p in enumerate(parameters):
-      p.grad = biggrads[pos_params[i]:pos_params[i+1]].reshape(p.shape)
     optim.step()
     scheduler.step()
-    for p in parameters: p.grad = None
+    for g in grads:
+      g.assign(g.zeros_like().contiguous())
 
     lr = optim.lr
-    bigloss.assign(bigloss.zeros_like().contiguous())
-    biggrads.assign(biggrads.zeros_like().contiguous())
-    Tensor.realize(*parameters, lr, bigloss, biggrads)
+    steploss.assign(steploss.zeros_like().contiguous())
+    Tensor.realize(*parameters, *grads, lr, steploss)
     return lr
 
   @TinyJit
@@ -1471,7 +1470,7 @@ def train_llama3():
     i += 1
     sequences_seen += tokens.shape[0]
 
-    loss_str = bigloss.float().item()
+    loss_str = steploss.float().item()
     tqdm.write(f"{loss_str:.4f} loss, {lr.item():.12f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {time.perf_counter()-t:.2f} s")
     if (fname:=getenv("LOSS_FILE", "")):
       with open(fname, "a") as f:
