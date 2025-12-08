@@ -36,7 +36,7 @@ def autowrap(source_cls, blacklist=None):
         def proxy(*args, **kwargs):
           return wrap(val(*unwrap(args), **unwrap(kwargs)), self)
         return proxy
-      if name in UOp.__slots__: return val
+      if name in UOp.__slots__: return val # type: ignore
       return wrap(val, self)
     cls.__getattr__ = __getattr__
 
