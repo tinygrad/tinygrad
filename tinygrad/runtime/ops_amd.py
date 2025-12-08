@@ -881,11 +881,11 @@ class AMDDevice(HCQCompiled):
     if self.target < (9,4,2) or self.target >= (13,0,0): raise RuntimeError(f"Unsupported arch: {self.arch}")
     if DEBUG >= 1: print(f"AMDDevice: opening {self.device_id} with target {self.target} arch {self.arch}")
 
+    self.xccs = self.iface.props.get('num_xcc', 1)
     self.se_cnt = self.iface.props['array_count'] // self.iface.props['simd_arrays_per_engine']
-    self.max_cu_id = self.iface.props['simd_count'] // self.iface.props['simd_per_cu'] // self.iface.props.get('num_xcc', 1) - 1
+    self.max_cu_id = self.iface.props['simd_count'] // self.iface.props['simd_per_cu'] // self.xccs - 1
     self.max_wave_id = (self.iface.props['max_waves_per_simd'] * self.iface.props['simd_per_cu'] - 1) if self.target >= (10,1,0) else \
                        (min((self.max_cu_id+1)*40, self.se_cnt * 512) - 1)
-    self.xccs = self.iface.props.get('num_xcc', 1)
     # this is what llvm refers to as "architected flat scratch"
     self.has_scratch_base_registers = self.target >= (11,0,0) or self.target in {(9,4,2), (9,5,0)}
 
