@@ -1286,7 +1286,6 @@ def train_bert():
         previous_step = i
 
 def train_llama3():
-  import itertools
   from tinygrad.helpers import trange, partition
   from extra.models.llama import Transformer
   from examples.llama3 import MODEL_PARAMS
@@ -1359,8 +1358,8 @@ def train_llama3():
     if p.requires_grad is None: p.requires_grad_()
 
   parameters, buffers = partition(get_parameters(model), lambda x: x.requires_grad)
-  # print(f"parameters: {len(parameters)} buffers: {len(buffers)}")  # freqs_cis does not need grad
-  steploss = Tensor.zeros((), device=parameters[0].device).contiguous()
+  print(f"parameters: {len(parameters)} buffers: {len(buffers)}")  # freqs_cis does not need grad
+  steploss = Tensor.zeros((), device="CPU").contiguous()
   for p in parameters:
     p.grad = p.zeros_like().contiguous().realize()
   grads = [p.grad for p in parameters]
@@ -1388,9 +1387,9 @@ def train_llama3():
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
       tokens = tokens.shard(device)
     logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
-    uloss = logits.sparse_categorical_crossentropy(tokens[:, 1:]) / grad_acc
+    uloss = logits.sparse_categorical_crossentropy(tokens[:, 1:]).float() / grad_acc
     uloss.backward()
-    steploss.assign(steploss + uloss.cast(steploss.dtype))
+    steploss.assign(steploss + uloss.cast(steploss.dtype).to(steploss.device))
     Tensor.realize(*grads, steploss)
 
   @TinyJit
@@ -1465,12 +1464,12 @@ def train_llama3():
     for _ in range(grad_acc):
       tokens = next(iter)
       minibatch(model, tokens)
+    loss_str = steploss.float().item()
     lr = optimizer_step()
 
     i += 1
     sequences_seen += tokens.shape[0]
 
-    loss_str = steploss.float().item()
     tqdm.write(f"{loss_str:.4f} loss, {lr.item():.12f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {time.perf_counter()-t:.2f} s")
     if (fname:=getenv("LOSS_FILE", "")):
       with open(fname, "a") as f:
