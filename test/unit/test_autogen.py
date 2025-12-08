@@ -110,4 +110,53 @@ class TestAutogen(unittest.TestCase):
     assert frts_cmd.readVbiosDesc.__class__ is FWSECLIC_READ_VBIOS_DESC
     assert frts_cmd.frtsRegionDesc.__class__ is FWSECLIC_FRTS_REGION_DESC
 
+  def test_packed_fields(self):
+    uint8_t = ctypes.c_ubyte
+    uint16_t = ctypes.c_ushort
+    uint32_t = ctypes.c_uint32
+
+    class struct_die_info(Struct): pass
+    struct_die_info._packed_ = True
+    struct_die_info._fields_ = [
+      ('die_id', uint16_t),
+      ('die_offset', uint16_t),
+    ]
+    die_info = struct_die_info
+    class struct_ip_discovery_header(Struct): pass
+    class struct_ip_discovery_header_0(ctypes.Union): pass
+    class struct_ip_discovery_header_0_0(Struct): pass
+    uint8_t = ctypes.c_ubyte
+    struct_ip_discovery_header_0_0._fields_ = [
+      ('base_addr_64_bit', uint8_t,1),
+      ('reserved', uint8_t,7),
+      ('reserved2', uint8_t),
+    ]
+    struct_ip_discovery_header_0._anonymous_ = ['_0']
+    struct_ip_discovery_header_0._packed_ = True
+    struct_ip_discovery_header_0._fields_ = [
+      ('padding', (uint16_t * 1)),
+      ('_0', struct_ip_discovery_header_0_0),
+    ]
+    struct_ip_discovery_header._anonymous_ = ['_0']
+    struct_ip_discovery_header._packed_ = True
+    struct_ip_discovery_header._fields_ = [
+      ('signature', uint32_t),
+      ('version', uint16_t),
+      ('size', uint16_t),
+      ('id', uint32_t),
+      ('num_dies', uint16_t),
+      ('die_info', (die_info * 16)),
+      ('_0', struct_ip_discovery_header_0),
+    ]
+    ip_discovery_header = struct_ip_discovery_header
+
+    hdr = b'IPDS\x04\x00|\x1d\x80\x1a\xffd\x01\x00\x00\x00\x8c\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00' # noqa: E501
+    ihdr = ip_discovery_header.from_buffer_copy(hdr)
+
+    assert ctypes.sizeof(ihdr) == 80
+    assert ihdr.signature == 0x53445049
+    assert ihdr.version == 0x0004
+    assert ihdr.num_dies == 1
+    assert ihdr.base_addr_64_bit == 1
+
 if __name__ == "__main__": unittest.main()

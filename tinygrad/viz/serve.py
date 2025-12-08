@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io, struct
 import ctypes, pathlib, traceback, itertools
-from contextlib import redirect_stdout, redirect_stderr
+from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
@@ -210,11 +210,16 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
   peaks.append(peak)
   return struct.pack("<BIQ", 1, len(events), peak)+b"".join(events) if events else None
 
-def err(name:str, msg:str|None=None) -> None:
-  ctxs.append({"name":"ERR", "steps":[create_step(name, ("render",len(ctxs),0), {"src":msg or traceback.format_exc()})]})
+# by default, VIZ does not start when there is an error
+# use this to instead display the traceback to the user
+@contextmanager
+def soft_err(fn:Callable):
+  try: yield
+  except Exception: fn({"src":traceback.format_exc()})
 
 def row_tuple(row:str) -> tuple[int, ...]: return tuple(int(x.split(":")[1]) for x in row.split())
 
+@soft_err(lambda err: ctxs.append({"name":"ERR", "steps":[create_step("Loader error", ("render",len(ctxs),0), err)]}))
 def load_sqtt(profile:list[ProfileEvent]) -> None:
   from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
   counter_events:dict[tuple[str, int], list[ProfileSQTTEvent|ProfilePMCEvent]] = {}
@@ -222,10 +227,8 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     if isinstance(e, (ProfilePMCEvent, ProfileSQTTEvent)): counter_events.setdefault((e.kern, e.exec_tag), []).append(e)
   if not counter_events: return
   # ** init decoder
-  try: from extra.sqtt.roc import decode
-  except Exception: return err("DECODER IMPORT ISSUE")
-  try: rctx = decode(profile)
-  except Exception: return err("DECODER ERROR")
+  from extra.sqtt.roc import decode
+  rctx = decode(profile)
   if getenv("SQTT_PARSE"):
     from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
     for counters in counter_events.values():
@@ -261,7 +264,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
         events.append(ProfileRangeEvent(occ.simd_loc, f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)), Decimal(occ.time)))
     prg_cu = sorted(cu_events, key=row_tuple)
     if cu_events: summary.append(f"Scheduled on {len(prg_cu)} CUs")
-    steps.append(create_step(program.name if program else key[0], ("/counters", len(ctxs), len(steps)), {"src":"\n\n".join(summary)}, depth=1))
+    steps.append(create_step(program.name if program else key[0], ("/prg-run", len(ctxs), len(steps)), {"src":"\n\n".join(summary)}, depth=0))
     # ** PMC events
     if (pmc_event:=next((e for e in counters if isinstance(e, ProfilePMCEvent)), None)) is not None:
       agg_cols = ["Name", "Sum"]
@@ -275,14 +278,14 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
           row[2]["rows"].append(sample+(val,))
           ptr += 1
         rows.append(row)
-      steps.append(create_step("PMC", ("/pmc", len(ctxs), len(steps)), {"rows":rows, "cols":agg_cols, "summary":[]}, depth=2))
+      steps.append(create_step("PMC", ("/pmc", len(ctxs), len(steps)), {"rows":rows, "cols":agg_cols}, depth=1))
     for cu in prg_cu:
       events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]
       steps.append(create_step(f"{cu} {len(cu_events[cu])}", ("/counters", len(ctxs), len(steps)),
-                               {"value":get_profile(events, sort_fn=row_tuple), "content_type":"application/octet-stream"}, depth=2))
+                               {"value":get_profile(events, sort_fn=row_tuple), "content_type":"application/octet-stream"}, depth=1))
       for k in sorted(wave_insts.get(cu, []), key=row_tuple):
         data = wave_insts[cu][k]
-        steps.append(create_step(k.replace(cu, ""), ("/sqtt-insts", len(ctxs), len(steps)), data, loc=data["loc"], depth=3))
+        steps.append(create_step(k.replace(cu, ""), ("/sqtt-insts", len(ctxs), len(steps)), data, loc=data["loc"], depth=2))
   ctxs.append({"name":"Counters", "steps":steps})
 
 def device_sort_fn(k:str) -> tuple[int, str, int]:
@@ -346,7 +349,7 @@ def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
   summary = [{"idx":k, "label":resource_labels[k], "value":v} for k,v in instr_usage.pop(len(rows), {}).items()]
   max_usage = max([sum(v.values()) for i,v in instr_usage.items() if i<len(rows)], default=0)
   for i,usage in instr_usage.items(): rows[i].append([[k, v, (v/max_usage)*100] for k,v in usage.items()])
-  return {"rows":rows, "cols":["Instruction", "Latency", {"title":"HW Resources", "labels":resource_labels}], "summary":summary}
+  return {"rows":rows, "cols":["Instruction", "Latency", {"title":"HW Resources", "labels":resource_labels}], "metadata":[summary]}
 
 def get_stdout(f: Callable) -> str:
   buf = io.StringIO()
@@ -354,6 +357,18 @@ def get_stdout(f: Callable) -> str:
     with redirect_stdout(buf), redirect_stderr(buf): f()
   except Exception: traceback.print_exc(file=buf)
   return buf.getvalue()
+
+def amd_readelf(lib:bytes) -> list[dict]:
+  from tinygrad.runtime.support.elf import elf_loader
+  import msgpack
+  _, sections, __ = elf_loader(lib)
+  data = next((s for s in sections if s.name.startswith(".note"))).content
+  namesz, descsz, typ = struct.unpack_from(hdr:="<III", data, 0)
+  offset = (struct.calcsize(hdr)+namesz+3) & -4
+  notes = msgpack.unpackb(data[offset:offset+descsz])
+  keys = {".sgpr_count":"SGPRs", ".vgpr_count":"VGPRs", ".max_flat_workgroup_size":"Max WGP size",
+          ".group_segment_fixed_size":"LDS size", ".private_segment_fixed_size":"Scratch size"}
+  return [{"label":label, "value":v} for k,label in keys.items() if (v:=notes["amdhsa.kernels"][0][k]) > 0]
 
 def get_render(i:int, j:int, fmt:str) -> dict:
   data = ctxs[i]["steps"][j]["data"]
@@ -366,7 +381,11 @@ def get_render(i:int, j:int, fmt:str) -> dict:
     if isinstance(compiler, LLVMCompiler):
       return get_llvm_mca(disasm_str, ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode(),
                           ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode())
-    return {"src":disasm_str, "lang":"x86asm"}
+    metadata:list = []
+    if data.device.startswith("AMD"):
+      with soft_err(lambda err: metadata.append(err)):
+        metadata.append(amd_readelf(compiler.compile(data.src)))
+    return {"src":disasm_str, "lang":"amdgpu" if data.device.startswith("AMD") else None, "metadata":metadata}
   if fmt == "sqtt-insts":
     columns = ["PC", "Instruction", "Hits", "Duration", "Stall", "Type"]
     inst_columns = ["N", "Clk", "Idle", "Dur", "Stall"]
@@ -393,7 +412,7 @@ def get_render(i:int, j:int, fmt:str) -> dict:
       prev_instr = max(prev_instr, e.time + e.dur)
     summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
                {"label":"SIMD", "value":w.simd}, {"label":"Wave ID", "value":w.wave_id}, {"label":"Run number", "value":data["run_number"]}]
-    return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "summary":summary}
+    return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":[summary]}
   return data
 
 # ** HTTP server
@@ -479,7 +498,7 @@ if __name__ == "__main__":
   st = time.perf_counter()
   print("*** viz is starting")
 
-  ctxs = get_rewrites(trace:=load_pickle(args.kernels, default=RewriteTrace([], [], {})))
+  ctxs:list[dict] = get_rewrites(trace:=load_pickle(args.kernels, default=RewriteTrace([], [], {})))
   profile_ret = get_profile(load_pickle(args.profile, default=[]))
 
   server = TCPServerWithReuse(('', PORT), Handler)

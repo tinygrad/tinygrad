@@ -1783,13 +1783,7 @@ struct_hsa_amd_event_s._fields_ = [
   ('_0', struct_hsa_amd_event_s_0),
 ]
 hsa_amd_event_t = struct_hsa_amd_event_s
-class const_struct_hsa_amd_event_s(Struct): pass
-const_struct_hsa_amd_event_s._anonymous_ = ['_0']
-const_struct_hsa_amd_event_s._fields_ = [
-  ('event_type', hsa_amd_event_type_t),
-  ('_0', struct_hsa_amd_event_s_0),
-]
-hsa_amd_system_event_callback_t = ctypes.CFUNCTYPE(hsa_status_t, ctypes.POINTER(const_struct_hsa_amd_event_s), ctypes.c_void_p)
+hsa_amd_system_event_callback_t = ctypes.CFUNCTYPE(hsa_status_t, ctypes.POINTER(struct_hsa_amd_event_s), ctypes.c_void_p)
 try: (hsa_amd_register_system_event_handler:=dll.hsa_amd_register_system_event_handler).restype, hsa_amd_register_system_event_handler.argtypes = hsa_status_t, [hsa_amd_system_event_callback_t, ctypes.c_void_p]
 except AttributeError: pass
 
