@@ -751,7 +751,7 @@ class TestSchedule(unittest.TestCase):
 
   @unittest.skipUnless(SPLIT_REDUCEOP, "Testing split reducop requires SPLIT_REDUCEOP")
   def test_preserve_multistage_reduce(self):
-    big_enough = getenv("REDUCEOP_SPLIT_THRESHOLD", 32768)
+    big_enough = getenv("REDUCEOP_SPLIT_THRESHOLD", 32768) + 1
     x = Tensor.randn(big_enough).realize()
     out = (x - x.max(keepdim=True)).max()
     run_schedule(check_schedule(out, 4))
