@@ -180,7 +180,7 @@ class QCOMComputeQueue(HWQueue):
 
     if prg.NIR:
       self.reg(mesa.REG_A6XX_SP_CS_CONST_CONFIG_0,
-               qreg.a6xx_sp_cs_const_config_0(wgidconstid=prg.wgid, wgsizeconstid=0xfc, wgoffsetconstid=0xfc, localidregid=prg.lid),
+               qreg.a6xx_sp_cs_const_config_0(wgidconstid=prg.wgid, wgsizeconstid=prg.wgsz, wgoffsetconstid=0xfc, localidregid=prg.lid),
                qreg.a6xx_sp_cs_wge_cntl(linearlocalidregid=0xfc, threadsize=mesa.THREAD64))
       self.cmd(mesa.CP_EXEC_CS, 0,
                qreg.cp_exec_cs_1(ngroups_x=global_size[0]), qreg.cp_exec_cs_2(ngroups_y=global_size[1]), qreg.cp_exec_cs_3(_ngroups_z=global_size[2]))
