@@ -257,7 +257,8 @@ def xlog2(d:UOp) -> UOp:
   # log2(-0.0) = -Inf. In certain devices like PTX, x == -0.0 won't be true. so making reciprocal.
   return d.reciprocal().ne(-math.inf).where(r, r.const_like(-math.inf))
 
-def xpow(base:UOp, exponent:UOp) -> UOp:
+def xpow(base:UOp, exponent:UOp) -> UOp|None:
+  if dtypes.is_int(base.dtype): return None
   # start with b ** e = exp2(e * log2(b))
   ret = (base < 0).where(-base, base).log2().mul(exponent).exp2()
   # negative base adjustment: nan for non-integer exponent and -1 for odd exponent

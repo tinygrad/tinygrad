@@ -3463,15 +3463,17 @@ class Tensor(OpMixin):
     ```
     """
     base, exponent = self._broadcasted(x, reverse=reverse)
-    # NOTE: negative exponents not checked (would require sync)
-    if not base.is_floating_point() and isinstance(x, Tensor) and not exponent.is_floating_point():
-      float_base = base.cast(dtypes.float64)
-      float_exp = exponent.cast(dtypes.float64)
-      ret = float_base._apply_uop(UOp.pow, float_exp)
-      return ret.round().cast(base.dtype)
-    if not base.is_floating_point() and not (isinstance(x, int) and x >= 0): raise RuntimeError("base needs to be float")
+    if not base.is_floating_point() and isinstance(x, int) and x < 0:
+        raise RuntimeError("Integers cannot be raised to negative powers")
+    if not base.is_floating_point():
+        is_int_const = isinstance(x, int) and x >= 0
+        is_int_tensor = isinstance(x, Tensor) and not exponent.is_floating_point()
+        if not (is_int_const or is_int_tensor):
+            raise RuntimeError("base needs to be float")
     ret = base._apply_uop(UOp.pow, exponent)
-    return ret.round().cast(self.dtype) if not reverse and not dtypes.is_float(self.dtype) and dtypes.is_float(exponent.dtype) else ret
+    if not reverse and not dtypes.is_float(self.dtype) and dtypes.is_float(exponent.dtype):
+        return ret.round().cast(self.dtype)
+    return ret
 
   def maximum(self, x:Tensor|ConstType) -> Tensor:
     """
