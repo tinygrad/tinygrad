@@ -705,7 +705,8 @@ jobs:
     # - name: Run 10 MLPerf ResNet50 training steps (1 gpu)
     #   run: BENCHMARK_LOG=resnet_10steps AMD=1 MNISTMOCK=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=256 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py | tee am_train_resnet_one_gpu.txt
     - name: Run 10 MLPerf Bert training steps (1 gpu)
-      run: BENCHMARK_LOG=bert_10steps AMD=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=12 GPUS=1 MODEL=bert python3 examples/mlperf/model_train.py | tee am_train_bert_one_gpu.txt
+      # TODO: remove BERT_LAYERS once scheduler is fast
+      run: BENCHMARK_LOG=bert_10steps AMD=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=1 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py | tee am_train_bert_one_gpu.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (AM Driver)
@@ -766,7 +767,8 @@ jobs:
     - name: Run 10 MLPerf ResNet50 training steps (1 gpu)
       run: BENCHMARK_LOG=resnet_10steps NV=1 MNISTMOCK=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=256 GPUS=1 MODEL=resnet python3 examples/mlperf/model_train.py | tee nv_train_resnet_one_gpu.txt
     - name: Run 10 MLPerf Bert training steps (1 gpu)
-      run: BENCHMARK_LOG=bert_10steps NV=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=12 GPUS=1 MODEL=bert python3 examples/mlperf/model_train.py | tee nv_train_bert_one_gpu.txt
+      # TODO: remove BERT_LAYERS once scheduler is fast
+      run: BENCHMARK_LOG=bert_10steps NV=1 CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=66 GPUS=1 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py | tee nv_train_bert_one_gpu.txt
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (NV Driver)
