@@ -7,7 +7,7 @@ from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, H
 from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, MOCKGPU, hcq_filter_visible_devices
 from tinygrad.uop.ops import sint
 from tinygrad.device import BufferSpec, CompilerPair, CompilerSet
-from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, to_mv, hi32, lo32, suppress_finalizing, NV_CC, NV_PTX, NV_NAK
+from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, to_mv, hi32, lo32, NV_CC, NV_PTX, NV_NAK
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import NVRenderer
 from tinygrad.runtime.support.compiler_cuda import CUDACompiler, PTXCompiler, NVPTXCompiler, NVCompiler
@@ -300,10 +300,7 @@ class NVAllocator(HCQAllocator['NVDevice']):
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
     return self.dev.iface.alloc(size, cpu_access=options.cpu_access, host=options.host)
 
-  @suppress_finalizing
-  def _free(self, opaque:HCQBuffer, options:BufferSpec):
-    self.dev.synchronize()
-    self.dev.iface.free(opaque)
+  def _do_free(self, opaque:HCQBuffer, options:BufferSpec): self.dev.iface.free(opaque)
 
   def _map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
 
@@ -475,7 +472,7 @@ class NVKIface:
       if made.status != 0: raise RuntimeError(f"_gpu_free returned {get_error_str(made.status)}")
 
     self.uvm(nv_gpu.UVM_FREE, nv_gpu.UVM_FREE_PARAMS(base=cast(int, mem.va_addr), length=mem.size))
-    if mem.meta.has_cpu_mapping: FileIOInterface.munmap(cast(int, mem.va_addr), mem.size)
+    if mem.view is not None: FileIOInterface.munmap(cast(int, mem.va_addr), mem.size)
 
   def _gpu_uvm_map(self, va_base, size, mem_handle, create_range=True, has_cpu_mapping=False) -> HCQBuffer:
     if create_range:
@@ -490,8 +487,7 @@ class NVKIface:
     attrs = (nv_gpu.UvmGpuMappingAttributes*256)(nv_gpu.UvmGpuMappingAttributes(gpuUuid=self.gpu_uuid, gpuMappingType=1))
 
     self.uvm(nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION, uvm_map:=nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS(base=va_base, length=size,
-      rmCtrlFd=self.fd_ctl.fd, hClient=self.root, hMemory=mem_handle, gpuAttributesCount=1, perGpuAttributes=attrs, mapped_gpu_ids=[self.gpu_uuid],
-      has_cpu_mapping=has_cpu_mapping))
+      rmCtrlFd=self.fd_ctl.fd, hClient=self.root, hMemory=mem_handle, gpuAttributesCount=1, perGpuAttributes=attrs, mapped_gpu_ids=[self.gpu_uuid]))
     return HCQBuffer(va_base, size, meta=uvm_map, view=MMIOInterface(va_base, size, fmt='B') if has_cpu_mapping else None, owner=self.dev)
 
   def map(self, mem:HCQBuffer):

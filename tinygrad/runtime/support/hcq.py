@@ -3,7 +3,7 @@ from typing import cast, Callable, Type, TypeVar, Generic, Any
 import contextlib, decimal, statistics, time, ctypes, array, os, struct, collections, functools
 try: import fcntl # windows misses that
 except ImportError: fcntl = None #type:ignore[assignment]
-from tinygrad.helpers import PROFILE, getenv, to_mv, ProfileRangeEvent, select_first_inited, unwrap
+from tinygrad.helpers import PROFILE, getenv, to_mv, ProfileRangeEvent, select_first_inited, unwrap, suppress_finalizing
 from tinygrad.device import BufferSpec, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent, CompilerSet
 from tinygrad.uop.ops import sym_infer, sint, UOp
 from tinygrad.runtime.autogen import libc
@@ -496,6 +496,11 @@ class HCQAllocatorBase(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
     # Devices can save mappings and internal metadata as a new buffer.
     if (mb:=self._map(buf)) is not None: buf.mappings[self.dev] = mb
     buf.mapped_devs.append(self.dev)
+
+  @suppress_finalizing
+  def _free(self, buf:HCQBuffer, options:BufferSpec|None=None):
+    for dev in buf.mapped_devs: dev.synchronize()
+    if hasattr(self, '_do_free'): self._do_free(buf, options)
 
   def _offset(self, buf, size:int, offset:int) -> HCQBuffer: return buf.offset(offset=offset, size=size)
 
