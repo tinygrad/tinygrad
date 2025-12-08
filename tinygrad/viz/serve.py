@@ -264,7 +264,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
         events.append(ProfileRangeEvent(occ.simd_loc, f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)), Decimal(occ.time)))
     prg_cu = sorted(cu_events, key=row_tuple)
     if cu_events: summary.append(f"Scheduled on {len(prg_cu)} CUs")
-    steps.append(create_step(program.name if program else key[0], ("/counters", len(ctxs), len(steps)), {"src":"\n\n".join(summary)}, depth=0))
+    steps.append(create_step(program.name if program else key[0], ("/prg-run", len(ctxs), len(steps)), {"src":"\n\n".join(summary)}, depth=0))
     # ** PMC events
     if (pmc_event:=next((e for e in counters if isinstance(e, ProfilePMCEvent)), None)) is not None:
       agg_cols = ["Name", "Sum"]
