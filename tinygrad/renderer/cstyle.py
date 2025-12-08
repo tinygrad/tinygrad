@@ -132,7 +132,9 @@ class CStyleLanguage(Renderer):
 
   def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[DType,bool]]], uops:list[UOp], prefix=None) -> str:
     if prefix is None: prefix = []
-    if any("_int_pow" in line for line in kernel): prefix.append(("__device__ " if self.device in {"CUDA","NV","HIP", "AMD"} else "")+_INT_POW_FUNC)
+    if any("_int_pow" in line for line in kernel):
+      attr = "__device__ " if self.device in {"CUDA", "NV"} else ("__attribute__((device)) " if self.device in {"HIP", "AMD"} else "")
+      prefix.append(attr + _INT_POW_FUNC)
     tmp = ""
     if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs):
       tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"
