@@ -17,6 +17,14 @@ def simplify_pow(x:UOp, c:UOp) -> UOp|None:
   if int(c.arg) == c.arg: return (y := x.pow(c.const_like(c.arg//2))) * y * (x if c.arg%2 == 1 else 1)
   return None
 
+def unroll_pow(x:UOp, c:UOp) -> UOp|None:
+  if not dtypes.is_int(x.dtype) or c.op is not Ops.CONST or not isinstance(c.arg, int) or c.arg < 0 or c.arg > 32: return None
+  res, base, e = None, x, int(c.arg)
+  while e:
+    if e % 2: res = base if res is None else res * base
+    base, e = base * base, e // 2
+  return res if res is not None else x.const_like(1)
+
 def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
   if (from_fmt:=c.dtype.scalar().fmt) is None or (to_fmt:=root.dtype.scalar().fmt) is None: return None
   if c.dtype.itemsize != root.dtype.itemsize: return None
@@ -100,6 +108,7 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   # b.cast(a).cast(b) -> b if a preserves all values in b
   (UPat.var('x').cast(name="a").cast(name="b"), lambda x,a,b: x if x.dtype == b.dtype and can_safe_cast(b.dtype, a.dtype) else None),
   # ** pow **
+  (UPat.var("x").alu(Ops.POW, UPat.cvar("c", vec=False)), unroll_pow),
   (UPat.var("x").alu(Ops.POW, UPat.cvar("c", vec=False)), simplify_pow),
   # positive const ** x
   # Prevent 2**int_x from becoming exp2(int_x * log2(2))
