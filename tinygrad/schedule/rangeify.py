@@ -36,7 +36,7 @@ def find_permutes(a:UOp, b:UOp, assign:UOp):
 
 def split_reduceop(reduce:UOp, x:UOp):
   if prod(reduce.shape) == 0: return None
-  if not SPLIT_REDUCEOP or not all_int(x.shape) or (prod(x.shape)//prod(reduce.shape))<getenv("REDUCEOP_SPLIT_THRESHOLD", 32768): return None
+  if not SPLIT_REDUCEOP or not all_int(x.shape) or (prod(x.shape)//prod(reduce.shape))<=getenv("REDUCEOP_SPLIT_THRESHOLD", 32768): return None
   # if there are few globals, make some reduces into globals by splitting into two kernels
   # cap output buffer to 2**22: heuristic number of global outputs to achieve max occupancy with enough locals+upcasts for gemm
   #   ~2**10 should be enough if GROUP is used
