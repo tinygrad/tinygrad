@@ -76,6 +76,9 @@ class Ops(FastEnum):
   # tensor graph ops
   UNIQUE = auto(); DEVICE = auto(); KERNEL = auto(); ASSIGN = auto()
 
+  # local unique
+  LUNIQUE = auto()
+
   # ops that adjust the behavior of the scheduler
   CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto()
 

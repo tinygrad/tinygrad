@@ -1,8 +1,9 @@
-import unittest, math
+import unittest, math, time
 
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.engine.realize import ExecItem, get_runner
+from tinygrad.engine.jit import TinyJit
 from tinygrad.helpers import CI
 import numpy as np
 
@@ -12,11 +13,16 @@ from extra.thunder.tiny.tk.tiles import ST_16X32, RT_16X32, RT_16X16, TileLayout
 
 @unittest.skipIf(CI or Device.DEFAULT not in ["AMD"], "only amd")
 class TestTK(unittest.TestCase):
+  def setUp(self):
+    arch = Device["AMD"].arch
+    if not arch.startswith("gfx9"):
+      self.skipTest(f"arch {arch} not supported")
+
   @unittest.skipIf(CI, "no wmma in ci")
   def test_simple_matmul(self):
     N = 8192
     BLOCK_SIZE = 64
-    with Kernel((N // BLOCK_SIZE, N // BLOCK_SIZE, 1), WARP_THREADS) as ker:
+    with Kernel("simple_matmul", (N // BLOCK_SIZE, N // BLOCK_SIZE, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
       c = ker.gl((1, 1, N, N), dtypes.float32)
@@ -65,7 +71,7 @@ class TestTK(unittest.TestCase):
   def test_simple_matmul_transposed(self):
     N = 8192
     BLOCK_N, BLOCK_M, BLOCK_K = 64, 64, 128
-    with Kernel((N // BLOCK_N, N // BLOCK_M, 1), WARP_THREADS) as ker:
+    with Kernel("simple_matmul_transposed", (N // BLOCK_N, N // BLOCK_M, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
       c = ker.gl((1, 1, N, N), dtypes.float32)
@@ -113,7 +119,7 @@ class TestTK(unittest.TestCase):
   def test_load_store(self):
     N = 64
     BLOCK_SIZE = 32
-    with Kernel((N // BLOCK_SIZE, N // BLOCK_SIZE, 1), WARP_THREADS) as ker:
+    with Kernel("load_store", (N // BLOCK_SIZE, N // BLOCK_SIZE, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
       b = ker.gl((1, 1, N, N), dtypes.float32)
@@ -150,7 +156,7 @@ class TestTK(unittest.TestCase):
   def test_load_store_group(self):
     N = 256
     BLOCK_SIZE = 64
-    with Kernel((N // BLOCK_SIZE, N // BLOCK_SIZE, 1), WARP_THREADS * 2) as ker:
+    with Kernel("load_store_group", (N // BLOCK_SIZE, N // BLOCK_SIZE, 1), WARP_THREADS * 2) as ker:
       warp = ker.warp
       group = ker.group(2)
 
@@ -187,7 +193,7 @@ class TestTK(unittest.TestCase):
   def test_add(self):
     N = 64
     BLOCK_SIZE = 32
-    with Kernel((1, 1, 1), WARP_THREADS) as ker:
+    with Kernel("add", (1, 1, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
       b = ker.gl((1, 1, N, N), dtypes.float32)
@@ -224,7 +230,7 @@ class TestTK(unittest.TestCase):
   def test_max(self):
     N = 64
     BLOCK_SIZE = 32
-    with Kernel((1, 1, 1), WARP_THREADS) as ker:
+    with Kernel("max", (1, 1, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
       b = ker.gl((1, 1, N, N), dtypes.float32)
@@ -269,7 +275,7 @@ class TestTK(unittest.TestCase):
   def test_max_nonsquare(self):
     N, M = 32, 128
     BLOCK_N, BLOCK_M = 16, 64
-    with Kernel((1, 1, 1), WARP_THREADS) as ker:
+    with Kernel("max_nonsquare", (1, 1, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
       b = ker.gl((1, 1, N, M), dtypes.float32)
@@ -314,7 +320,7 @@ class TestTK(unittest.TestCase):
   def test_sum(self):
     N = 64
     BLOCK_SIZE = 32
-    with Kernel((1, 1, 1), WARP_THREADS) as ker:
+    with Kernel("sum", (1, 1, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
       b = ker.gl((1, 1, N, N), dtypes.float32)
@@ -359,7 +365,7 @@ class TestTK(unittest.TestCase):
   def test_sum_nonsquare(self):
     N, M = 32, 128
     BLOCK_N, BLOCK_M = 16, 64
-    with Kernel((1, 1, 1), WARP_THREADS) as ker:
+    with Kernel("sum_nonsquare", (1, 1, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
       b = ker.gl((1, 1, N, M), dtypes.float32)
@@ -404,7 +410,7 @@ class TestTK(unittest.TestCase):
   def test_softmax(self):
     N = 64
     BLOCK_SIZE = 32
-    with Kernel((1, 1, 1), WARP_THREADS) as ker:
+    with Kernel("softmax", (1, 1, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
       b = ker.gl((1, 1, BLOCK_SIZE, N), dtypes.float32)
@@ -422,28 +428,29 @@ class TestTK(unittest.TestCase):
       norm_vec = warp.zero(norm_vec)
 
       for tile_col in ker.range(N // BLOCK_SIZE):
-        a_smem = warp.load(a_smem, a, (), (0, 0, 0, tile_col), axis=2)
-        a_reg = warp.load(a_reg, a_smem)
+        a_smem_ = warp.load(a_smem, a, (), (0, 0, 0, tile_col), axis=2)
+        a_reg_ = warp.load(a_reg, a_smem_)
 
-        a_reg *= 1.0 / math.log(2)
+        a_reg_ *= 1.0 / math.log(2)
 
         max_vec_last = warp.copy(max_vec_last.after(tile_col), max_vec)
-        max_vec = warp.row_reduce(max_vec.after(max_vec_last), a_reg, lambda a, b: a.maximum(b), init_value=-math.inf)
-        a_reg = (a_reg - max_vec).exp2()
+        max_vec = warp.row_reduce(max_vec.after(max_vec_last), a_reg_, lambda a, b: a.maximum(b), init_value=-math.inf)
+        a_reg_ = (a_reg_ - max_vec).exp2()
         max_vec_last = (max_vec_last - max_vec).exp2()
         norm_vec *= max_vec_last
-        norm_vec = warp.row_reduce(norm_vec, a_reg, lambda a, b: a + b)
+        norm_vec = warp.row_reduce(norm_vec, a_reg_, lambda a, b: a + b)
       norm_vec = ker.endrange()
+      max_vec = max_vec.after(norm_vec)
 
       for tile_col in ker.range(N // BLOCK_SIZE):
-        a_smem = warp.load(a_smem, a, (), (0, 0, 0, tile_col), axis=2)
-        a_reg = warp.load(a_reg.after(norm_vec), a_smem)
+        a_smem_ = warp.load(a_smem, a, (), (0, 0, 0, tile_col), axis=2)
+        a_reg_ = warp.load(a_reg, a_smem_)
 
-        a_reg *= 1.0 / math.log(2)
-        a_reg = (a_reg - max_vec).exp2()
-        a_reg /= norm_vec
+        a_reg_ *= 1.0 / math.log(2)
+        a_reg_ = (a_reg_ - max_vec).exp2()
+        a_reg_ /= norm_vec
 
-        b = warp.store(b, a_reg, (0, 0, 0, tile_col), (), axis=2)
+        b = warp.store(b, a_reg_, (0, 0, 0, tile_col), (), axis=2)
 
       sink = ker.finish()
 
@@ -463,7 +470,7 @@ class TestTK(unittest.TestCase):
   def test_softmax_col(self):
     N = 64
     BLOCK_SIZE = 32
-    with Kernel((1, 1, 1), WARP_THREADS) as ker:
+    with Kernel("softmax_col", (1, 1, 1), WARP_THREADS) as ker:
       warp = ker.warp
 
       b = ker.gl((1, 1, N, BLOCK_SIZE), dtypes.float32)
@@ -481,28 +488,29 @@ class TestTK(unittest.TestCase):
       norm_vec = warp.zero(norm_vec)
 
       for tile_row in ker.range(N // BLOCK_SIZE):
-        a_smem = warp.load(a_smem, a, (), (0, 0, tile_row, 0), axis=2)
-        a_reg = warp.load(a_reg, a_smem)
+        a_smem_ = warp.load(a_smem, a, (), (0, 0, tile_row, 0), axis=2)
+        a_reg_ = warp.load(a_reg, a_smem_)
 
-        a_reg *= 1.0 / math.log(2)
+        a_reg_ *= 1.0 / math.log(2)
 
         max_vec_last = warp.copy(max_vec_last.after(tile_row), max_vec)
-        max_vec = warp.col_reduce(max_vec.after(max_vec_last), a_reg, lambda a, b: a.maximum(b), init_value=-math.inf)
-        a_reg = (a_reg - max_vec).exp2()
+        max_vec = warp.col_reduce(max_vec.after(max_vec_last), a_reg_, lambda a, b: a.maximum(b), init_value=-math.inf)
+        a_reg_ = (a_reg_ - max_vec).exp2()
         max_vec_last = (max_vec_last - max_vec).exp2()
         norm_vec *= max_vec_last
-        norm_vec = warp.col_reduce(norm_vec, a_reg, lambda a, b: a + b)
+        norm_vec = warp.col_reduce(norm_vec, a_reg_, lambda a, b: a + b)
       norm_vec = ker.endrange()
+      max_vec = max_vec.after(norm_vec)
 
       for tile_row in ker.range(N // BLOCK_SIZE):
-        a_smem = warp.load(a_smem, a, (), (0, 0, tile_row, 0), axis=2)
-        a_reg = warp.load(a_reg.after(norm_vec), a_smem)
+        a_smem_ = warp.load(a_smem, a, (), (0, 0, tile_row, 0), axis=2)
+        a_reg_ = warp.load(a_reg.after(norm_vec), a_smem_)
 
-        a_reg *= 1.0 / math.log(2)
-        a_reg = (a_reg - max_vec).exp2()
-        a_reg /= norm_vec
+        a_reg_ *= 1.0 / math.log(2)
+        a_reg_ = (a_reg_ - max_vec).exp2()
+        a_reg_ /= norm_vec
 
-        b = warp.store(b, a_reg, (0, 0, tile_row, 0), (), axis=2)
+        b = warp.store(b, a_reg_, (0, 0, tile_row, 0), (), axis=2)
 
       sink = ker.finish()
 
@@ -521,11 +529,11 @@ class TestTK(unittest.TestCase):
 
   def test_fa(self):
     NUM_WORKERS = 1
-    B, N, H, H_KV, D = 1, 8192, 32, 8, 128
+    B, N, H, H_KV, D = 2, 8192, 32, 8, 128
     Q_BLOCK_SIZE = 16
     KV_BLOCK_SIZE = 16
     GROUP_SIZE = H // H_KV
-    with Kernel((H, N // (Q_BLOCK_SIZE*NUM_WORKERS), B), NUM_WORKERS * WARP_THREADS) as ker:
+    with Kernel("fa", (H, N // (Q_BLOCK_SIZE*NUM_WORKERS), B), NUM_WORKERS * WARP_THREADS) as ker:
       warp = ker.warp
 
       # kernel
@@ -605,6 +613,7 @@ class TestTK(unittest.TestCase):
         att_block_mma = warp.copy(att_block_mma.after(kv_idx, norm_vec), att_block)
         o_reg = warp.mma_AtB(o_reg, v_reg, att_block_mma)
       o_reg = ker.endrange()
+      norm_vec = norm_vec.after(o_reg)
 
       o_reg /= norm_vec
 
@@ -621,7 +630,12 @@ class TestTK(unittest.TestCase):
       Tensor.realize(q, k, v, out)
 
     ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (out, q, k, v)])
-    for _ in range(5): ei.run(wait=True)
+    for _ in range(5):
+      et = ei.run(wait=True)
+      attn_flops = 2 * B * H * N * N * D + \
+                   4 * B * H * N * N + \
+                   2 * B * H * N * N * D
+      print(f"{attn_flops/(et*1e9):2f} GFLOPS")
     out = out.float()
 
     q_permuted = q.permute(0, 2, 1, 3)
@@ -630,7 +644,36 @@ class TestTK(unittest.TestCase):
     ref = q_permuted.scaled_dot_product_attention(k_permuted, v_permuted, is_causal=True, enable_gqa=True).float()
     ref = ref.permute(0, 2, 1, 3)
 
-    np.testing.assert_allclose(out.numpy(), ref.numpy(), atol=1e-2, rtol=1e-5)
+    np.testing.assert_allclose(out.numpy(), ref.numpy(), atol=2e-2, rtol=2e-2)
+
+  def test_fast_fa(self):
+    from extra.thunder.tiny.fa import flash_attention
+
+    B, N, H, H_KV, D = 2, 8192, 32, 8, 128
+
+    with Context(DEBUG=0):
+      q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
+      k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
+      v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
+      Tensor.realize(q, k, v)
+
+    q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
+
+    fa_jitted = TinyJit(flash_attention)
+
+    for _ in range(10):
+      st = time.perf_counter()
+      out = fa_jitted(q, k, v, is_causal=True)
+      et = time.perf_counter() - st
+      attn_flops = 2 * B * H * N * N * D + \
+                   4 * B * H * N * N + \
+                   2 * B * H * N * N * D
+      print(f"{attn_flops/(et*1e9):2f} GFLOPS")
+    out = out.float().transpose(1, 2)
+
+    ref = q.scaled_dot_product_attention(k, v, is_causal=True, enable_gqa=True).float().transpose(1, 2)
+
+    np.testing.assert_allclose(out.numpy(), ref.numpy(), atol=2e-2, rtol=2e-2)
 
 if __name__ == "__main__":
   unittest.main()

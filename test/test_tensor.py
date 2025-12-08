@@ -829,6 +829,7 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(len(si.metadata), 3)
     self.assertEqual(set(m.name for m in si.metadata), {"relu", "sigmoid", "__mul__"})
 
+  @unittest.skip("metadata is no longer promised to be exact with schedulecache")
   def test_complex_backward(self):
     x = Tensor.rand(3, requires_grad=True).realize()
     y = Tensor.rand(3, requires_grad=True).realize()
@@ -841,11 +842,13 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertTrue(y.grad.uop.metadata[0].backward)
     si = Tensor.schedule(out, x.grad, y.grad)[-1]
     #self.assertEqual(len(si.metadata), 3, f"failed with {si.metadata}")
-    self.assertSetEqual(set(m.name for m in si.metadata), {"sigmoid", "relu"})
+    # skip numpy, this is schedule cache
+    self.assertSetEqual(set(m.name for m in si.metadata if m.name != "numpy"), {"sigmoid", "relu"})
     #bw = [m for m in si.metadata if m.backward]
     #self.assertEqual(len(bw), 1)
     #self.assertEqual(bw[0].name, "sigmoid")
 
+  @unittest.skip("metadata is no longer promised to be exact with schedulecache")
   def test_tracemeta_0(self):
     with Context(TRACEMETA=0):
       x = Tensor.rand(3, requires_grad=True)

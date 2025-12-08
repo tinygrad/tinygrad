@@ -1637,16 +1637,7 @@ class struct_gc_ctx(Struct): pass
 gc_ctx = struct_gc_ctx
 class struct_nir_shader_compiler_options(Struct): pass
 nir_shader_compiler_options = struct_nir_shader_compiler_options
-class const_struct_nir_instr(Struct): pass
-const_struct_nir_instr._fields_ = [
-  ('node', struct_exec_node),
-  ('block', ctypes.POINTER(nir_block)),
-  ('type', nir_instr_type),
-  ('pass_flags', uint8_t),
-  ('has_debug_info', ctypes.c_bool),
-  ('index', uint32_t),
-]
-nir_instr_filter_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(const_struct_nir_instr), ctypes.c_void_p)
+nir_instr_filter_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_instr), ctypes.c_void_p)
 nir_lower_int64_options = CEnum(ctypes.c_uint32)
 nir_lower_imul64 = nir_lower_int64_options.define('nir_lower_imul64', 1)
 nir_lower_isign64 = nir_lower_int64_options.define('nir_lower_isign64', 2)
@@ -3410,18 +3401,8 @@ struct_nir_loop._fields_ = [
   ('divergent_break', ctypes.c_bool),
 ]
 nir_loop = struct_nir_loop
-class const_struct_nir_intrinsic_instr(Struct): pass
-const_struct_nir_intrinsic_instr._fields_ = [
-  ('instr', nir_instr),
-  ('intrinsic', nir_intrinsic_op),
-  ('def', nir_def),
-  ('num_components', uint8_t),
-  ('const_index', (ctypes.c_int32 * 8)),
-  ('name', ctypes.POINTER(ctypes.c_char)),
-  ('src', (nir_src * 0)),
-]
-nir_intrin_filter_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(const_struct_nir_intrinsic_instr), ctypes.c_void_p)
-nir_vectorize_cb = ctypes.CFUNCTYPE(ctypes.c_ubyte, ctypes.POINTER(const_struct_nir_instr), ctypes.c_void_p)
+nir_intrin_filter_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.c_void_p)
+nir_vectorize_cb = ctypes.CFUNCTYPE(ctypes.c_ubyte, ctypes.POINTER(struct_nir_instr), ctypes.c_void_p)
 try: (nir_remove_non_entrypoints:=dll.nir_remove_non_entrypoints).restype, nir_remove_non_entrypoints.argtypes = None, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
@@ -3819,7 +3800,7 @@ except AttributeError: pass
 try: (nir_metadata_require_all:=dll.nir_metadata_require_all).restype, nir_metadata_require_all.argtypes = None, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-nir_instr_writemask_filter_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(const_struct_nir_instr), ctypes.c_uint32, ctypes.c_void_p)
+nir_instr_writemask_filter_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_instr), ctypes.c_uint32, ctypes.c_void_p)
 class struct_nir_builder(Struct): pass
 nir_lower_instr_cb = ctypes.CFUNCTYPE(ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_instr), ctypes.c_void_p)
 try: (nir_function_impl_lower_instructions:=dll.nir_function_impl_lower_instructions).restype, nir_function_impl_lower_instructions.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_function_impl), nir_instr_filter_cb, nir_lower_instr_cb, ctypes.c_void_p]
@@ -3971,28 +3952,7 @@ except AttributeError: pass
 try: (nir_lower_io_vars_to_temporaries:=dll.nir_lower_io_vars_to_temporaries).restype, nir_lower_io_vars_to_temporaries.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_function_impl), ctypes.c_bool, ctypes.c_bool]
 except AttributeError: pass
 
-class const_struct_glsl_type(Struct): pass
-const_struct_glsl_type._fields_ = [
-  ('gl_type', uint32_t),
-  ('base_type', enum_glsl_base_type,8),
-  ('sampled_type', enum_glsl_base_type,8),
-  ('sampler_dimensionality', ctypes.c_uint32,4),
-  ('sampler_shadow', ctypes.c_uint32,1),
-  ('sampler_array', ctypes.c_uint32,1),
-  ('interface_packing', ctypes.c_uint32,2),
-  ('interface_row_major', ctypes.c_uint32,1),
-  ('cmat_desc', struct_glsl_cmat_description),
-  ('packed', ctypes.c_uint32,1),
-  ('has_builtin_name', ctypes.c_uint32,1),
-  ('vector_elements', uint8_t),
-  ('matrix_columns', uint8_t),
-  ('length', ctypes.c_uint32),
-  ('name_id', uintptr_t),
-  ('explicit_stride', ctypes.c_uint32),
-  ('explicit_alignment', ctypes.c_uint32),
-  ('fields', struct_glsl_type_fields),
-]
-glsl_type_size_align_func = ctypes.CFUNCTYPE(None, ctypes.POINTER(const_struct_glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32))
+glsl_type_size_align_func = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32))
 try: (nir_lower_vars_to_scratch:=dll.nir_lower_vars_to_scratch).restype, nir_lower_vars_to_scratch.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.c_int32, glsl_type_size_align_func, glsl_type_size_align_func]
 except AttributeError: pass
 
@@ -4174,7 +4134,7 @@ except AttributeError: pass
 try: (nir_remove_sysval_output:=dll.nir_remove_sysval_output).restype, nir_remove_sysval_output.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_intrinsic_instr), gl_shader_stage]
 except AttributeError: pass
 
-try: (nir_lower_amul:=dll.nir_lower_amul).restype, nir_lower_amul.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(const_struct_glsl_type), ctypes.c_bool)]
+try: (nir_lower_amul:=dll.nir_lower_amul).restype, nir_lower_amul.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_glsl_type), ctypes.c_bool)]
 except AttributeError: pass
 
 try: (nir_lower_ubo_vec4:=dll.nir_lower_ubo_vec4).restype, nir_lower_ubo_vec4.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
@@ -4195,7 +4155,7 @@ nir_lower_io_lower_64bit_float_to_32 = nir_lower_io_options.define('nir_lower_io
 nir_lower_io_lower_64bit_to_32_new = nir_lower_io_options.define('nir_lower_io_lower_64bit_to_32_new', 4)
 nir_lower_io_use_interpolated_input_intrinsics = nir_lower_io_options.define('nir_lower_io_use_interpolated_input_intrinsics', 8)
 
-try: (nir_lower_io:=dll.nir_lower_io).restype, nir_lower_io.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(const_struct_glsl_type), ctypes.c_bool), nir_lower_io_options]
+try: (nir_lower_io:=dll.nir_lower_io).restype, nir_lower_io.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_glsl_type), ctypes.c_bool), nir_lower_io_options]
 except AttributeError: pass
 
 try: (nir_io_add_const_offset_to_base:=dll.nir_io_add_const_offset_to_base).restype, nir_io_add_const_offset_to_base.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode]
@@ -4725,40 +4685,8 @@ nir_lower_non_uniform_get_ssbo_size = enum_nir_lower_non_uniform_access_type.def
 nir_lower_non_uniform_texture_offset_access = enum_nir_lower_non_uniform_access_type.define('nir_lower_non_uniform_texture_offset_access', 32)
 nir_lower_non_uniform_access_type_count = enum_nir_lower_non_uniform_access_type.define('nir_lower_non_uniform_access_type_count', 6)
 
-class const_struct_nir_tex_instr(Struct): pass
-const_struct_nir_tex_instr._fields_ = [
-  ('instr', nir_instr),
-  ('sampler_dim', enum_glsl_sampler_dim),
-  ('dest_type', nir_alu_type),
-  ('op', nir_texop),
-  ('def', nir_def),
-  ('src', ctypes.POINTER(nir_tex_src)),
-  ('num_srcs', ctypes.c_uint32),
-  ('coord_components', ctypes.c_uint32),
-  ('is_array', ctypes.c_bool),
-  ('is_shadow', ctypes.c_bool),
-  ('is_new_style_shadow', ctypes.c_bool),
-  ('is_sparse', ctypes.c_bool),
-  ('component', ctypes.c_uint32,2),
-  ('array_is_lowered_cube', ctypes.c_uint32,1),
-  ('is_gather_implicit_lod', ctypes.c_uint32,1),
-  ('skip_helpers', ctypes.c_uint32,1),
-  ('tg4_offsets', ((int8_t * 2) * 4)),
-  ('texture_non_uniform', ctypes.c_bool),
-  ('sampler_non_uniform', ctypes.c_bool),
-  ('offset_non_uniform', ctypes.c_bool),
-  ('texture_index', ctypes.c_uint32),
-  ('sampler_index', ctypes.c_uint32),
-  ('backend_flags', uint32_t),
-]
-nir_lower_non_uniform_src_access_callback = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(const_struct_nir_tex_instr), ctypes.c_uint32, ctypes.c_void_p)
-class const_struct_nir_src(Struct): pass
-const_struct_nir_src._fields_ = [
-  ('_parent', uintptr_t),
-  ('use_link', struct_list_head),
-  ('ssa', ctypes.POINTER(nir_def)),
-]
-nir_lower_non_uniform_access_callback = ctypes.CFUNCTYPE(ctypes.c_uint16, ctypes.POINTER(const_struct_nir_src), ctypes.c_void_p)
+nir_lower_non_uniform_src_access_callback = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_tex_instr), ctypes.c_uint32, ctypes.c_void_p)
+nir_lower_non_uniform_access_callback = ctypes.CFUNCTYPE(ctypes.c_uint16, ctypes.POINTER(struct_nir_src), ctypes.c_void_p)
 class struct_nir_lower_non_uniform_access_options(Struct): pass
 struct_nir_lower_non_uniform_access_options._fields_ = [
   ('types', enum_nir_lower_non_uniform_access_type),
@@ -4911,7 +4839,7 @@ nir_lower_task_shader_options = struct_nir_lower_task_shader_options
 try: (nir_lower_task_shader:=dll.nir_lower_task_shader).restype, nir_lower_task_shader.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_lower_task_shader_options]
 except AttributeError: pass
 
-nir_lower_bit_size_callback = ctypes.CFUNCTYPE(ctypes.c_uint32, ctypes.POINTER(const_struct_nir_instr), ctypes.c_void_p)
+nir_lower_bit_size_callback = ctypes.CFUNCTYPE(ctypes.c_uint32, ctypes.POINTER(struct_nir_instr), ctypes.c_void_p)
 try: (nir_lower_bit_size:=dll.nir_lower_bit_size).restype, nir_lower_bit_size.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_lower_bit_size_callback, ctypes.c_void_p]
 except AttributeError: pass
 
@@ -7115,6 +7043,1733 @@ except AttributeError: pass
 try: (lp_build_const_func_pointer_from_type:=dll.lp_build_const_func_pointer_from_type).restype, lp_build_const_func_pointer_from_type.argtypes = LLVMValueRef, [ctypes.POINTER(struct_gallivm_state), ctypes.c_void_p, LLVMTypeRef, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
+class struct_fd_dev_info(Struct): pass
+class struct_fd_dev_info_0(ctypes.Union): pass
+struct_fd_dev_info_0._fields_ = [
+  ('num_sp_cores', uint32_t),
+  ('num_ccu', uint32_t),
+]
+class struct_fd_dev_info_a6xx(Struct): pass
+class struct_fd_dev_info_a6xx_magic(Struct): pass
+struct_fd_dev_info_a6xx_magic._fields_ = [
+  ('PC_POWER_CNTL', uint32_t),
+  ('TPL1_DBG_ECO_CNTL', uint32_t),
+  ('GRAS_DBG_ECO_CNTL', uint32_t),
+  ('SP_CHICKEN_BITS', uint32_t),
+  ('UCHE_CLIENT_PF', uint32_t),
+  ('PC_MODE_CNTL', uint32_t),
+  ('SP_DBG_ECO_CNTL', uint32_t),
+  ('RB_DBG_ECO_CNTL', uint32_t),
+  ('RB_DBG_ECO_CNTL_blit', uint32_t),
+  ('HLSQ_DBG_ECO_CNTL', uint32_t),
+  ('RB_UNKNOWN_8E01', uint32_t),
+  ('VPC_DBG_ECO_CNTL', uint32_t),
+  ('UCHE_UNKNOWN_0E12', uint32_t),
+  ('RB_CCU_DBG_ECO_CNTL', uint32_t),
+]
+class struct_fd_dev_info_a6xx_magic_raw(Struct): pass
+struct_fd_dev_info_a6xx_magic_raw._fields_ = [
+  ('reg', uint32_t),
+  ('value', uint32_t),
+]
+struct_fd_dev_info_a6xx._fields_ = [
+  ('reg_size_vec4', uint32_t),
+  ('instr_cache_size', uint32_t),
+  ('has_hw_multiview', ctypes.c_bool),
+  ('has_fs_tex_prefetch', ctypes.c_bool),
+  ('supports_multiview_mask', ctypes.c_bool),
+  ('concurrent_resolve', ctypes.c_bool),
+  ('has_z24uint_s8uint', ctypes.c_bool),
+  ('tess_use_shared', ctypes.c_bool),
+  ('has_legacy_pipeline_shading_rate', ctypes.c_bool),
+  ('storage_16bit', ctypes.c_bool),
+  ('indirect_draw_wfm_quirk', ctypes.c_bool),
+  ('depth_bounds_require_depth_test_quirk', ctypes.c_bool),
+  ('has_tex_filter_cubic', ctypes.c_bool),
+  ('has_separate_chroma_filter', ctypes.c_bool),
+  ('has_sample_locations', ctypes.c_bool),
+  ('has_cp_reg_write', ctypes.c_bool),
+  ('has_8bpp_ubwc', ctypes.c_bool),
+  ('has_lpac', ctypes.c_bool),
+  ('has_getfiberid', ctypes.c_bool),
+  ('mov_half_shared_quirk', ctypes.c_bool),
+  ('has_movs', ctypes.c_bool),
+  ('has_dp2acc', ctypes.c_bool),
+  ('has_dp4acc', ctypes.c_bool),
+  ('enable_lrz_fast_clear', ctypes.c_bool),
+  ('has_lrz_dir_tracking', ctypes.c_bool),
+  ('lrz_track_quirk', ctypes.c_bool),
+  ('has_lrz_feedback', ctypes.c_bool),
+  ('has_per_view_viewport', ctypes.c_bool),
+  ('has_gmem_fast_clear', ctypes.c_bool),
+  ('sysmem_per_ccu_depth_cache_size', uint32_t),
+  ('sysmem_per_ccu_color_cache_size', uint32_t),
+  ('gmem_ccu_color_cache_fraction', uint32_t),
+  ('prim_alloc_threshold', uint32_t),
+  ('vs_max_inputs_count', uint32_t),
+  ('supports_double_threadsize', ctypes.c_bool),
+  ('has_sampler_minmax', ctypes.c_bool),
+  ('broken_ds_ubwc_quirk', ctypes.c_bool),
+  ('has_scalar_alu', ctypes.c_bool),
+  ('has_early_preamble', ctypes.c_bool),
+  ('has_isam_v', ctypes.c_bool),
+  ('has_ssbo_imm_offsets', ctypes.c_bool),
+  ('has_coherent_ubwc_flag_caches', ctypes.c_bool),
+  ('has_attachment_shading_rate', ctypes.c_bool),
+  ('has_ubwc_linear_mipmap_fallback', ctypes.c_bool),
+  ('predtf_nop_quirk', ctypes.c_bool),
+  ('prede_nop_quirk', ctypes.c_bool),
+  ('has_sad', ctypes.c_bool),
+  ('is_a702', ctypes.c_bool),
+  ('magic', struct_fd_dev_info_a6xx_magic),
+  ('magic_raw', (struct_fd_dev_info_a6xx_magic_raw * 64)),
+  ('max_sets', uint32_t),
+  ('line_width_min', ctypes.c_float),
+  ('line_width_max', ctypes.c_float),
+  ('has_bin_mask', ctypes.c_bool),
+]
+class struct_fd_dev_info_a7xx(Struct): pass
+struct_fd_dev_info_a7xx._fields_ = [
+  ('stsc_duplication_quirk', ctypes.c_bool),
+  ('has_event_write_sample_count', ctypes.c_bool),
+  ('has_64b_ssbo_atomics', ctypes.c_bool),
+  ('cmdbuf_start_a725_quirk', ctypes.c_bool),
+  ('load_inline_uniforms_via_preamble_ldgk', ctypes.c_bool),
+  ('load_shader_consts_via_preamble', ctypes.c_bool),
+  ('has_gmem_vpc_attr_buf', ctypes.c_bool),
+  ('sysmem_vpc_attr_buf_size', uint32_t),
+  ('gmem_vpc_attr_buf_size', uint32_t),
+  ('supports_uav_ubwc', ctypes.c_bool),
+  ('ubwc_unorm_snorm_int_compatible', ctypes.c_bool),
+  ('fs_must_have_non_zero_constlen_quirk', ctypes.c_bool),
+  ('gs_vpc_adjacency_quirk', ctypes.c_bool),
+  ('enable_tp_ubwc_flag_hint', ctypes.c_bool),
+  ('storage_8bit', ctypes.c_bool),
+  ('ubwc_all_formats_compatible', ctypes.c_bool),
+  ('has_compliant_dp4acc', ctypes.c_bool),
+  ('has_generic_clear', ctypes.c_bool),
+  ('r8g8_faulty_fast_clear_quirk', ctypes.c_bool),
+  ('ubwc_coherency_quirk', ctypes.c_bool),
+  ('has_persistent_counter', ctypes.c_bool),
+  ('has_primitive_shading_rate', ctypes.c_bool),
+  ('reading_shading_rate_requires_smask_quirk', ctypes.c_bool),
+  ('has_ray_intersection', ctypes.c_bool),
+  ('has_sw_fuse', ctypes.c_bool),
+  ('has_rt_workaround', ctypes.c_bool),
+  ('has_alias_rt', ctypes.c_bool),
+  ('has_abs_bin_mask', ctypes.c_bool),
+  ('new_control_regs', ctypes.c_bool),
+]
+struct_fd_dev_info._anonymous_ = ['_0']
+struct_fd_dev_info._fields_ = [
+  ('chip', uint8_t),
+  ('tile_align_w', uint32_t),
+  ('tile_align_h', uint32_t),
+  ('gmem_align_w', uint32_t),
+  ('gmem_align_h', uint32_t),
+  ('tile_max_w', uint32_t),
+  ('tile_max_h', uint32_t),
+  ('num_vsc_pipes', uint32_t),
+  ('cs_shared_mem_size', uint32_t),
+  ('wave_granularity', ctypes.c_int32),
+  ('highest_bank_bit', uint32_t),
+  ('ubwc_swizzle', uint32_t),
+  ('macrotile_mode', uint32_t),
+  ('fibers_per_sp', uint32_t),
+  ('threadsize_base', uint32_t),
+  ('max_waves', uint32_t),
+  ('compute_lb_size', uint32_t),
+  ('_0', struct_fd_dev_info_0),
+  ('a6xx', struct_fd_dev_info_a6xx),
+  ('a7xx', struct_fd_dev_info_a7xx),
+]
+class struct_fd_dev_id(Struct): pass
+struct_fd_dev_id._fields_ = [
+  ('gpu_id', uint32_t),
+  ('chip_id', uint64_t),
+]
+try: (fd_dev_info_raw:=dll.fd_dev_info_raw).restype, fd_dev_info_raw.argtypes = ctypes.POINTER(struct_fd_dev_info), [ctypes.POINTER(struct_fd_dev_id)]
+except AttributeError: pass
+
+try: (fd_dev_info:=dll.fd_dev_info).restype, fd_dev_info.argtypes = struct_fd_dev_info, [ctypes.POINTER(struct_fd_dev_id)]
+except AttributeError: pass
+
+try: (fd_dev_info_raw_by_name:=dll.fd_dev_info_raw_by_name).restype, fd_dev_info_raw_by_name.argtypes = ctypes.POINTER(struct_fd_dev_info), [ctypes.POINTER(ctypes.c_char)]
+except AttributeError: pass
+
+try: (fd_dev_name:=dll.fd_dev_name).restype, fd_dev_name.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(struct_fd_dev_id)]
+except AttributeError: pass
+
+try: (fd_dev_info_apply_dbg_options:=dll.fd_dev_info_apply_dbg_options).restype, fd_dev_info_apply_dbg_options.argtypes = None, [ctypes.POINTER(struct_fd_dev_info)]
+except AttributeError: pass
+
+class struct_ir3_ra_reg_set(Struct): pass
+class struct_ir3_shader(Struct): pass
+class struct_ir3_compiler_options(Struct): pass
+struct_ir3_compiler_options._fields_ = [
+  ('push_ubo_with_preamble', ctypes.c_bool),
+  ('disable_cache', ctypes.c_bool),
+  ('bindless_fb_read_descriptor', ctypes.c_int32),
+  ('bindless_fb_read_slot', ctypes.c_int32),
+  ('storage_16bit', ctypes.c_bool),
+  ('storage_8bit', ctypes.c_bool),
+  ('lower_base_vertex', ctypes.c_bool),
+  ('shared_push_consts', ctypes.c_bool),
+  ('dual_color_blend_by_location', ctypes.c_bool),
+  ('uche_trap_base', uint64_t),
+]
+class struct_ir3_compiler(Struct): pass
+class struct_fd_device(Struct): pass
+class struct_disk_cache(Struct): pass
+type_t = CEnum(ctypes.c_uint32)
+TYPE_F16 = type_t.define('TYPE_F16', 0)
+TYPE_F32 = type_t.define('TYPE_F32', 1)
+TYPE_U16 = type_t.define('TYPE_U16', 2)
+TYPE_U32 = type_t.define('TYPE_U32', 3)
+TYPE_S16 = type_t.define('TYPE_S16', 4)
+TYPE_S32 = type_t.define('TYPE_S32', 5)
+TYPE_ATOMIC_U64 = type_t.define('TYPE_ATOMIC_U64', 6)
+TYPE_U8 = type_t.define('TYPE_U8', 6)
+TYPE_U8_32 = type_t.define('TYPE_U8_32', 7)
+
+class struct_ir3_compiler_delay_slots(Struct): pass
+struct_ir3_compiler_delay_slots._fields_ = [
+  ('alu_to_alu', ctypes.c_uint32),
+  ('non_alu', ctypes.c_uint32),
+  ('cat3_src2_read', ctypes.c_uint32),
+]
+struct_ir3_compiler._fields_ = [
+  ('dev', ctypes.POINTER(struct_fd_device)),
+  ('dev_id', ctypes.POINTER(struct_fd_dev_id)),
+  ('gen', uint8_t),
+  ('shader_count', uint32_t),
+  ('disk_cache', ctypes.POINTER(struct_disk_cache)),
+  ('nir_options', struct_nir_shader_compiler_options),
+  ('options', struct_ir3_compiler_options),
+  ('is_64bit', ctypes.c_bool),
+  ('flat_bypass', ctypes.c_bool),
+  ('levels_add_one', ctypes.c_bool),
+  ('unminify_coords', ctypes.c_bool),
+  ('txf_ms_with_isaml', ctypes.c_bool),
+  ('array_index_add_half', ctypes.c_bool),
+  ('samgq_workaround', ctypes.c_bool),
+  ('tess_use_shared', ctypes.c_bool),
+  ('mergedregs', ctypes.c_bool),
+  ('max_const_pipeline', uint16_t),
+  ('max_const_geom', uint16_t),
+  ('max_const_frag', uint16_t),
+  ('max_const_safe', uint16_t),
+  ('max_const_compute', uint16_t),
+  ('compute_lb_size', uint32_t),
+  ('instr_align', uint32_t),
+  ('const_upload_unit', uint32_t),
+  ('threadsize_base', uint32_t),
+  ('wave_granularity', uint32_t),
+  ('max_waves', uint32_t),
+  ('reg_size_vec4', uint32_t),
+  ('local_mem_size', uint32_t),
+  ('branchstack_size', uint32_t),
+  ('pvtmem_per_fiber_align', uint32_t),
+  ('has_clip_cull', ctypes.c_bool),
+  ('has_pvtmem', ctypes.c_bool),
+  ('has_isam_ssbo', ctypes.c_bool),
+  ('has_isam_v', ctypes.c_bool),
+  ('has_ssbo_imm_offsets', ctypes.c_bool),
+  ('has_getfiberid', ctypes.c_bool),
+  ('mov_half_shared_quirk', ctypes.c_bool),
+  ('has_movs', ctypes.c_bool),
+  ('has_shfl', ctypes.c_bool),
+  ('has_bitwise_triops', ctypes.c_bool),
+  ('num_predicates', uint32_t),
+  ('bitops_can_write_predicates', ctypes.c_bool),
+  ('has_branch_and_or', ctypes.c_bool),
+  ('has_predication', ctypes.c_bool),
+  ('predtf_nop_quirk', ctypes.c_bool),
+  ('prede_nop_quirk', ctypes.c_bool),
+  ('max_variable_workgroup_size', uint32_t),
+  ('has_dp2acc', ctypes.c_bool),
+  ('has_dp4acc', ctypes.c_bool),
+  ('has_compliant_dp4acc', ctypes.c_bool),
+  ('bool_type', type_t),
+  ('has_shared_regfile', ctypes.c_bool),
+  ('has_preamble', ctypes.c_bool),
+  ('shared_consts_base_offset', uint16_t),
+  ('shared_consts_size', uint64_t),
+  ('geom_shared_consts_size_quirk', uint64_t),
+  ('has_fs_tex_prefetch', ctypes.c_bool),
+  ('stsc_duplication_quirk', ctypes.c_bool),
+  ('load_shader_consts_via_preamble', ctypes.c_bool),
+  ('load_inline_uniforms_via_preamble_ldgk', ctypes.c_bool),
+  ('has_scalar_alu', ctypes.c_bool),
+  ('fs_must_have_non_zero_constlen_quirk', ctypes.c_bool),
+  ('has_early_preamble', ctypes.c_bool),
+  ('has_rpt_bary_f', ctypes.c_bool),
+  ('has_alias_tex', ctypes.c_bool),
+  ('has_alias_rt', ctypes.c_bool),
+  ('reading_shading_rate_requires_smask_quirk', ctypes.c_bool),
+  ('delay_slots', struct_ir3_compiler_delay_slots),
+]
+try: (ir3_compiler_destroy:=dll.ir3_compiler_destroy).restype, ir3_compiler_destroy.argtypes = None, [ctypes.POINTER(struct_ir3_compiler)]
+except AttributeError: pass
+
+try: (ir3_compiler_create:=dll.ir3_compiler_create).restype, ir3_compiler_create.argtypes = ctypes.POINTER(struct_ir3_compiler), [ctypes.POINTER(struct_fd_device), ctypes.POINTER(struct_fd_dev_id), ctypes.POINTER(struct_fd_dev_info), ctypes.POINTER(struct_ir3_compiler_options)]
+except AttributeError: pass
+
+try: (ir3_disk_cache_init:=dll.ir3_disk_cache_init).restype, ir3_disk_cache_init.argtypes = None, [ctypes.POINTER(struct_ir3_compiler)]
+except AttributeError: pass
+
+try: (ir3_disk_cache_init_shader_key:=dll.ir3_disk_cache_init_shader_key).restype, ir3_disk_cache_init_shader_key.argtypes = None, [ctypes.POINTER(struct_ir3_compiler), ctypes.POINTER(struct_ir3_shader)]
+except AttributeError: pass
+
+class struct_ir3_shader_variant(Struct): pass
+try: (ir3_retrieve_variant:=dll.ir3_retrieve_variant).restype, ir3_retrieve_variant.argtypes = ctypes.POINTER(struct_ir3_shader_variant), [ctypes.POINTER(struct_blob_reader), ctypes.POINTER(struct_ir3_compiler), ctypes.c_void_p]
+except AttributeError: pass
+
+try: (ir3_store_variant:=dll.ir3_store_variant).restype, ir3_store_variant.argtypes = None, [ctypes.POINTER(struct_blob), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_disk_cache_retrieve:=dll.ir3_disk_cache_retrieve).restype, ir3_disk_cache_retrieve.argtypes = ctypes.c_bool, [ctypes.POINTER(struct_ir3_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_disk_cache_store:=dll.ir3_disk_cache_store).restype, ir3_disk_cache_store.argtypes = None, [ctypes.POINTER(struct_ir3_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_get_compiler_options:=dll.ir3_get_compiler_options).restype, ir3_get_compiler_options.argtypes = ctypes.POINTER(nir_shader_compiler_options), [ctypes.POINTER(struct_ir3_compiler)]
+except AttributeError: pass
+
+try: (ir3_compile_shader_nir:=dll.ir3_compile_shader_nir).restype, ir3_compile_shader_nir.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ir3_compiler), ctypes.POINTER(struct_ir3_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+enum_ir3_shader_debug = CEnum(ctypes.c_uint32)
+IR3_DBG_SHADER_VS = enum_ir3_shader_debug.define('IR3_DBG_SHADER_VS', 1)
+IR3_DBG_SHADER_TCS = enum_ir3_shader_debug.define('IR3_DBG_SHADER_TCS', 2)
+IR3_DBG_SHADER_TES = enum_ir3_shader_debug.define('IR3_DBG_SHADER_TES', 4)
+IR3_DBG_SHADER_GS = enum_ir3_shader_debug.define('IR3_DBG_SHADER_GS', 8)
+IR3_DBG_SHADER_FS = enum_ir3_shader_debug.define('IR3_DBG_SHADER_FS', 16)
+IR3_DBG_SHADER_CS = enum_ir3_shader_debug.define('IR3_DBG_SHADER_CS', 32)
+IR3_DBG_DISASM = enum_ir3_shader_debug.define('IR3_DBG_DISASM', 64)
+IR3_DBG_OPTMSGS = enum_ir3_shader_debug.define('IR3_DBG_OPTMSGS', 128)
+IR3_DBG_FORCES2EN = enum_ir3_shader_debug.define('IR3_DBG_FORCES2EN', 256)
+IR3_DBG_NOUBOOPT = enum_ir3_shader_debug.define('IR3_DBG_NOUBOOPT', 512)
+IR3_DBG_NOFP16 = enum_ir3_shader_debug.define('IR3_DBG_NOFP16', 1024)
+IR3_DBG_NOCACHE = enum_ir3_shader_debug.define('IR3_DBG_NOCACHE', 2048)
+IR3_DBG_SPILLALL = enum_ir3_shader_debug.define('IR3_DBG_SPILLALL', 4096)
+IR3_DBG_NOPREAMBLE = enum_ir3_shader_debug.define('IR3_DBG_NOPREAMBLE', 8192)
+IR3_DBG_SHADER_INTERNAL = enum_ir3_shader_debug.define('IR3_DBG_SHADER_INTERNAL', 16384)
+IR3_DBG_FULLSYNC = enum_ir3_shader_debug.define('IR3_DBG_FULLSYNC', 32768)
+IR3_DBG_FULLNOP = enum_ir3_shader_debug.define('IR3_DBG_FULLNOP', 65536)
+IR3_DBG_NOEARLYPREAMBLE = enum_ir3_shader_debug.define('IR3_DBG_NOEARLYPREAMBLE', 131072)
+IR3_DBG_NODESCPREFETCH = enum_ir3_shader_debug.define('IR3_DBG_NODESCPREFETCH', 262144)
+IR3_DBG_EXPANDRPT = enum_ir3_shader_debug.define('IR3_DBG_EXPANDRPT', 524288)
+IR3_DBG_ASM_ROUNDTRIP = enum_ir3_shader_debug.define('IR3_DBG_ASM_ROUNDTRIP', 1048576)
+IR3_DBG_SCHEDMSGS = enum_ir3_shader_debug.define('IR3_DBG_SCHEDMSGS', 2097152)
+IR3_DBG_RAMSGS = enum_ir3_shader_debug.define('IR3_DBG_RAMSGS', 4194304)
+IR3_DBG_NOALIASTEX = enum_ir3_shader_debug.define('IR3_DBG_NOALIASTEX', 8388608)
+IR3_DBG_NOALIASRT = enum_ir3_shader_debug.define('IR3_DBG_NOALIASRT', 16777216)
+
+try: ir3_shader_debug = enum_ir3_shader_debug.in_dll(dll, 'ir3_shader_debug')
+except (ValueError,AttributeError): pass
+try: ir3_shader_override_path = ctypes.POINTER(ctypes.c_char).in_dll(dll, 'ir3_shader_override_path')
+except (ValueError,AttributeError): pass
+try: (ir3_shader_debug_as_string:=dll.ir3_shader_debug_as_string).restype, ir3_shader_debug_as_string.argtypes = ctypes.POINTER(ctypes.c_char), []
+except AttributeError: pass
+
+class struct_ir3_driver_params_cs(Struct): pass
+struct_ir3_driver_params_cs._fields_ = [
+  ('num_work_groups_x', uint32_t),
+  ('num_work_groups_y', uint32_t),
+  ('num_work_groups_z', uint32_t),
+  ('work_dim', uint32_t),
+  ('base_group_x', uint32_t),
+  ('base_group_y', uint32_t),
+  ('base_group_z', uint32_t),
+  ('subgroup_size', uint32_t),
+  ('local_group_size_x', uint32_t),
+  ('local_group_size_y', uint32_t),
+  ('local_group_size_z', uint32_t),
+  ('subgroup_id_shift', uint32_t),
+  ('workgroup_id_x', uint32_t),
+  ('workgroup_id_y', uint32_t),
+  ('workgroup_id_z', uint32_t),
+  ('__pad', uint32_t),
+]
+class struct_ir3_driver_params_vs(Struct): pass
+class struct_ir3_driver_params_vs_ucp(Struct): pass
+struct_ir3_driver_params_vs_ucp._fields_ = [
+  ('x', uint32_t),
+  ('y', uint32_t),
+  ('z', uint32_t),
+  ('w', uint32_t),
+]
+struct_ir3_driver_params_vs._fields_ = [
+  ('draw_id', uint32_t),
+  ('vtxid_base', uint32_t),
+  ('instid_base', uint32_t),
+  ('vtxcnt_max', uint32_t),
+  ('is_indexed_draw', uint32_t),
+  ('ucp', (struct_ir3_driver_params_vs_ucp * 8)),
+  ('__pad_37_39', (uint32_t * 3)),
+]
+class struct_ir3_driver_params_tcs(Struct): pass
+struct_ir3_driver_params_tcs._fields_ = [
+  ('default_outer_level_x', uint32_t),
+  ('default_outer_level_y', uint32_t),
+  ('default_outer_level_z', uint32_t),
+  ('default_outer_level_w', uint32_t),
+  ('default_inner_level_x', uint32_t),
+  ('default_inner_level_y', uint32_t),
+  ('__pad_06_07', (uint32_t * 2)),
+]
+class struct_ir3_driver_params_fs(Struct): pass
+struct_ir3_driver_params_fs._fields_ = [
+  ('subgroup_size', uint32_t),
+  ('__pad_01_03', (uint32_t * 3)),
+  ('frag_invocation_count', uint32_t),
+  ('__pad_05_07', (uint32_t * 3)),
+  ('frag_size', uint32_t),
+  ('__pad_09', uint32_t),
+  ('frag_offset', uint32_t),
+  ('__pad_11_12', (uint32_t * 2)),
+]
+enum_ir3_bary = CEnum(ctypes.c_uint32)
+IJ_PERSP_PIXEL = enum_ir3_bary.define('IJ_PERSP_PIXEL', 0)
+IJ_PERSP_SAMPLE = enum_ir3_bary.define('IJ_PERSP_SAMPLE', 1)
+IJ_PERSP_CENTROID = enum_ir3_bary.define('IJ_PERSP_CENTROID', 2)
+IJ_PERSP_CENTER_RHW = enum_ir3_bary.define('IJ_PERSP_CENTER_RHW', 3)
+IJ_LINEAR_PIXEL = enum_ir3_bary.define('IJ_LINEAR_PIXEL', 4)
+IJ_LINEAR_CENTROID = enum_ir3_bary.define('IJ_LINEAR_CENTROID', 5)
+IJ_LINEAR_SAMPLE = enum_ir3_bary.define('IJ_LINEAR_SAMPLE', 6)
+IJ_COUNT = enum_ir3_bary.define('IJ_COUNT', 7)
+
+enum_ir3_wavesize_option = CEnum(ctypes.c_uint32)
+IR3_SINGLE_ONLY = enum_ir3_wavesize_option.define('IR3_SINGLE_ONLY', 0)
+IR3_SINGLE_OR_DOUBLE = enum_ir3_wavesize_option.define('IR3_SINGLE_OR_DOUBLE', 1)
+IR3_DOUBLE_ONLY = enum_ir3_wavesize_option.define('IR3_DOUBLE_ONLY', 2)
+
+class struct_ir3_ubo_info(Struct): pass
+struct_ir3_ubo_info._fields_ = [
+  ('global_base', ctypes.POINTER(struct_nir_def)),
+  ('block', uint32_t),
+  ('bindless_base', uint16_t),
+  ('bindless', ctypes.c_bool),
+  ('global', ctypes.c_bool),
+]
+class struct_ir3_ubo_range(Struct): pass
+struct_ir3_ubo_range._fields_ = [
+  ('ubo', struct_ir3_ubo_info),
+  ('offset', uint32_t),
+  ('start', uint32_t),
+  ('end', uint32_t),
+]
+class struct_ir3_ubo_analysis_state(Struct): pass
+struct_ir3_ubo_analysis_state._fields_ = [
+  ('range', (struct_ir3_ubo_range * 32)),
+  ('num_enabled', uint32_t),
+  ('size', uint32_t),
+]
+enum_ir3_push_consts_type = CEnum(ctypes.c_uint32)
+IR3_PUSH_CONSTS_NONE = enum_ir3_push_consts_type.define('IR3_PUSH_CONSTS_NONE', 0)
+IR3_PUSH_CONSTS_PER_STAGE = enum_ir3_push_consts_type.define('IR3_PUSH_CONSTS_PER_STAGE', 1)
+IR3_PUSH_CONSTS_SHARED = enum_ir3_push_consts_type.define('IR3_PUSH_CONSTS_SHARED', 2)
+IR3_PUSH_CONSTS_SHARED_PREAMBLE = enum_ir3_push_consts_type.define('IR3_PUSH_CONSTS_SHARED_PREAMBLE', 3)
+
+class struct_ir3_driver_ubo(Struct): pass
+struct_ir3_driver_ubo._fields_ = [
+  ('idx', int32_t),
+  ('size', uint32_t),
+]
+enum_ir3_const_alloc_type = CEnum(ctypes.c_uint32)
+IR3_CONST_ALLOC_PUSH_CONSTS = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_PUSH_CONSTS', 0)
+IR3_CONST_ALLOC_DYN_DESCRIPTOR_OFFSET = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_DYN_DESCRIPTOR_OFFSET', 1)
+IR3_CONST_ALLOC_INLINE_UNIFORM_ADDRS = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_INLINE_UNIFORM_ADDRS', 2)
+IR3_CONST_ALLOC_DRIVER_PARAMS = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_DRIVER_PARAMS', 3)
+IR3_CONST_ALLOC_UBO_RANGES = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_UBO_RANGES', 4)
+IR3_CONST_ALLOC_PREAMBLE = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_PREAMBLE', 5)
+IR3_CONST_ALLOC_GLOBAL = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_GLOBAL', 6)
+IR3_CONST_ALLOC_UBO_PTRS = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_UBO_PTRS', 7)
+IR3_CONST_ALLOC_IMAGE_DIMS = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_IMAGE_DIMS', 8)
+IR3_CONST_ALLOC_TFBO = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_TFBO', 9)
+IR3_CONST_ALLOC_PRIMITIVE_PARAM = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_PRIMITIVE_PARAM', 10)
+IR3_CONST_ALLOC_PRIMITIVE_MAP = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_PRIMITIVE_MAP', 11)
+IR3_CONST_ALLOC_MAX = enum_ir3_const_alloc_type.define('IR3_CONST_ALLOC_MAX', 12)
+
+class struct_ir3_const_allocation(Struct): pass
+struct_ir3_const_allocation._fields_ = [
+  ('offset_vec4', uint32_t),
+  ('size_vec4', uint32_t),
+  ('reserved_size_vec4', uint32_t),
+  ('reserved_align_vec4', uint32_t),
+]
+class struct_ir3_const_allocations(Struct): pass
+struct_ir3_const_allocations._fields_ = [
+  ('consts', (struct_ir3_const_allocation * 12)),
+  ('max_const_offset_vec4', uint32_t),
+  ('reserved_vec4', uint32_t),
+]
+class struct_ir3_const_image_dims(Struct): pass
+struct_ir3_const_image_dims._fields_ = [
+  ('mask', uint32_t),
+  ('count', uint32_t),
+  ('off', (uint32_t * 32)),
+]
+class struct_ir3_imm_const_state(Struct): pass
+struct_ir3_imm_const_state._fields_ = [
+  ('size', ctypes.c_uint32),
+  ('count', ctypes.c_uint32),
+  ('values', ctypes.POINTER(uint32_t)),
+]
+class struct_ir3_const_state(Struct): pass
+struct_ir3_const_state._fields_ = [
+  ('num_ubos', ctypes.c_uint32),
+  ('num_app_ubos', ctypes.c_uint32),
+  ('num_driver_params', ctypes.c_uint32),
+  ('consts_ubo', struct_ir3_driver_ubo),
+  ('driver_params_ubo', struct_ir3_driver_ubo),
+  ('primitive_map_ubo', struct_ir3_driver_ubo),
+  ('primitive_param_ubo', struct_ir3_driver_ubo),
+  ('allocs', struct_ir3_const_allocations),
+  ('image_dims', struct_ir3_const_image_dims),
+  ('ubo_state', struct_ir3_ubo_analysis_state),
+  ('push_consts_type', enum_ir3_push_consts_type),
+]
+class struct_ir3_stream_output(Struct): pass
+struct_ir3_stream_output._fields_ = [
+  ('register_index', ctypes.c_uint32,6),
+  ('start_component', ctypes.c_uint32,2),
+  ('num_components', ctypes.c_uint32,3),
+  ('output_buffer', ctypes.c_uint32,3),
+  ('dst_offset', ctypes.c_uint32,16),
+  ('stream', ctypes.c_uint32,2),
+]
+class struct_ir3_stream_output_info(Struct): pass
+struct_ir3_stream_output_info._fields_ = [
+  ('num_outputs', ctypes.c_uint32),
+  ('stride', (uint16_t * 4)),
+  ('streams_written', uint8_t),
+  ('buffer_to_stream', (uint8_t * 4)),
+  ('output', (struct_ir3_stream_output * 128)),
+]
+class struct_ir3_sampler_prefetch(Struct): pass
+opc_t = CEnum(ctypes.c_uint32)
+OPC_NOP = opc_t.define('OPC_NOP', 0)
+OPC_JUMP = opc_t.define('OPC_JUMP', 2)
+OPC_CALL = opc_t.define('OPC_CALL', 3)
+OPC_RET = opc_t.define('OPC_RET', 4)
+OPC_KILL = opc_t.define('OPC_KILL', 5)
+OPC_END = opc_t.define('OPC_END', 6)
+OPC_EMIT = opc_t.define('OPC_EMIT', 7)
+OPC_CUT = opc_t.define('OPC_CUT', 8)
+OPC_CHMASK = opc_t.define('OPC_CHMASK', 9)
+OPC_CHSH = opc_t.define('OPC_CHSH', 10)
+OPC_FLOW_REV = opc_t.define('OPC_FLOW_REV', 11)
+OPC_BKT = opc_t.define('OPC_BKT', 16)
+OPC_STKS = opc_t.define('OPC_STKS', 17)
+OPC_STKR = opc_t.define('OPC_STKR', 18)
+OPC_XSET = opc_t.define('OPC_XSET', 19)
+OPC_XCLR = opc_t.define('OPC_XCLR', 20)
+OPC_GETONE = opc_t.define('OPC_GETONE', 21)
+OPC_DBG = opc_t.define('OPC_DBG', 22)
+OPC_SHPS = opc_t.define('OPC_SHPS', 23)
+OPC_SHPE = opc_t.define('OPC_SHPE', 24)
+OPC_GETLAST = opc_t.define('OPC_GETLAST', 25)
+OPC_PREDT = opc_t.define('OPC_PREDT', 29)
+OPC_PREDF = opc_t.define('OPC_PREDF', 30)
+OPC_PREDE = opc_t.define('OPC_PREDE', 31)
+OPC_BR = opc_t.define('OPC_BR', 40)
+OPC_BRAO = opc_t.define('OPC_BRAO', 41)
+OPC_BRAA = opc_t.define('OPC_BRAA', 42)
+OPC_BRAC = opc_t.define('OPC_BRAC', 43)
+OPC_BANY = opc_t.define('OPC_BANY', 44)
+OPC_BALL = opc_t.define('OPC_BALL', 45)
+OPC_BRAX = opc_t.define('OPC_BRAX', 46)
+OPC_DEMOTE = opc_t.define('OPC_DEMOTE', 47)
+OPC_MOV = opc_t.define('OPC_MOV', 128)
+OPC_MOVP = opc_t.define('OPC_MOVP', 129)
+OPC_MOVS = opc_t.define('OPC_MOVS', 130)
+OPC_MOVMSK = opc_t.define('OPC_MOVMSK', 131)
+OPC_SWZ = opc_t.define('OPC_SWZ', 132)
+OPC_GAT = opc_t.define('OPC_GAT', 133)
+OPC_SCT = opc_t.define('OPC_SCT', 134)
+OPC_MOV_IMMED = opc_t.define('OPC_MOV_IMMED', 168)
+OPC_MOV_CONST = opc_t.define('OPC_MOV_CONST', 169)
+OPC_MOV_GPR = opc_t.define('OPC_MOV_GPR', 170)
+OPC_MOV_RELGPR = opc_t.define('OPC_MOV_RELGPR', 171)
+OPC_MOV_RELCONST = opc_t.define('OPC_MOV_RELCONST', 172)
+OPC_MOVS_IMMED = opc_t.define('OPC_MOVS_IMMED', 173)
+OPC_MOVS_A0 = opc_t.define('OPC_MOVS_A0', 174)
+OPC_BALLOT_MACRO = opc_t.define('OPC_BALLOT_MACRO', 178)
+OPC_ANY_MACRO = opc_t.define('OPC_ANY_MACRO', 179)
+OPC_ALL_MACRO = opc_t.define('OPC_ALL_MACRO', 180)
+OPC_ELECT_MACRO = opc_t.define('OPC_ELECT_MACRO', 181)
+OPC_READ_COND_MACRO = opc_t.define('OPC_READ_COND_MACRO', 182)
+OPC_READ_FIRST_MACRO = opc_t.define('OPC_READ_FIRST_MACRO', 183)
+OPC_SHPS_MACRO = opc_t.define('OPC_SHPS_MACRO', 184)
+OPC_READ_GETLAST_MACRO = opc_t.define('OPC_READ_GETLAST_MACRO', 185)
+OPC_SCAN_MACRO = opc_t.define('OPC_SCAN_MACRO', 186)
+OPC_SCAN_CLUSTERS_MACRO = opc_t.define('OPC_SCAN_CLUSTERS_MACRO', 188)
+OPC_ADD_F = opc_t.define('OPC_ADD_F', 256)
+OPC_MIN_F = opc_t.define('OPC_MIN_F', 257)
+OPC_MAX_F = opc_t.define('OPC_MAX_F', 258)
+OPC_MUL_F = opc_t.define('OPC_MUL_F', 259)
+OPC_SIGN_F = opc_t.define('OPC_SIGN_F', 260)
+OPC_CMPS_F = opc_t.define('OPC_CMPS_F', 261)
+OPC_ABSNEG_F = opc_t.define('OPC_ABSNEG_F', 262)
+OPC_CMPV_F = opc_t.define('OPC_CMPV_F', 263)
+OPC_FLOOR_F = opc_t.define('OPC_FLOOR_F', 265)
+OPC_CEIL_F = opc_t.define('OPC_CEIL_F', 266)
+OPC_RNDNE_F = opc_t.define('OPC_RNDNE_F', 267)
+OPC_RNDAZ_F = opc_t.define('OPC_RNDAZ_F', 268)
+OPC_TRUNC_F = opc_t.define('OPC_TRUNC_F', 269)
+OPC_ADD_U = opc_t.define('OPC_ADD_U', 272)
+OPC_ADD_S = opc_t.define('OPC_ADD_S', 273)
+OPC_SUB_U = opc_t.define('OPC_SUB_U', 274)
+OPC_SUB_S = opc_t.define('OPC_SUB_S', 275)
+OPC_CMPS_U = opc_t.define('OPC_CMPS_U', 276)
+OPC_CMPS_S = opc_t.define('OPC_CMPS_S', 277)
+OPC_MIN_U = opc_t.define('OPC_MIN_U', 278)
+OPC_MIN_S = opc_t.define('OPC_MIN_S', 279)
+OPC_MAX_U = opc_t.define('OPC_MAX_U', 280)
+OPC_MAX_S = opc_t.define('OPC_MAX_S', 281)
+OPC_ABSNEG_S = opc_t.define('OPC_ABSNEG_S', 282)
+OPC_AND_B = opc_t.define('OPC_AND_B', 284)
+OPC_OR_B = opc_t.define('OPC_OR_B', 285)
+OPC_NOT_B = opc_t.define('OPC_NOT_B', 286)
+OPC_XOR_B = opc_t.define('OPC_XOR_B', 287)
+OPC_CMPV_U = opc_t.define('OPC_CMPV_U', 289)
+OPC_CMPV_S = opc_t.define('OPC_CMPV_S', 290)
+OPC_MUL_U24 = opc_t.define('OPC_MUL_U24', 304)
+OPC_MUL_S24 = opc_t.define('OPC_MUL_S24', 305)
+OPC_MULL_U = opc_t.define('OPC_MULL_U', 306)
+OPC_BFREV_B = opc_t.define('OPC_BFREV_B', 307)
+OPC_CLZ_S = opc_t.define('OPC_CLZ_S', 308)
+OPC_CLZ_B = opc_t.define('OPC_CLZ_B', 309)
+OPC_SHL_B = opc_t.define('OPC_SHL_B', 310)
+OPC_SHR_B = opc_t.define('OPC_SHR_B', 311)
+OPC_ASHR_B = opc_t.define('OPC_ASHR_B', 312)
+OPC_BARY_F = opc_t.define('OPC_BARY_F', 313)
+OPC_MGEN_B = opc_t.define('OPC_MGEN_B', 314)
+OPC_GETBIT_B = opc_t.define('OPC_GETBIT_B', 315)
+OPC_SETRM = opc_t.define('OPC_SETRM', 316)
+OPC_CBITS_B = opc_t.define('OPC_CBITS_B', 317)
+OPC_SHB = opc_t.define('OPC_SHB', 318)
+OPC_MSAD = opc_t.define('OPC_MSAD', 319)
+OPC_FLAT_B = opc_t.define('OPC_FLAT_B', 320)
+OPC_MAD_U16 = opc_t.define('OPC_MAD_U16', 384)
+OPC_MADSH_U16 = opc_t.define('OPC_MADSH_U16', 385)
+OPC_MAD_S16 = opc_t.define('OPC_MAD_S16', 386)
+OPC_MADSH_M16 = opc_t.define('OPC_MADSH_M16', 387)
+OPC_MAD_U24 = opc_t.define('OPC_MAD_U24', 388)
+OPC_MAD_S24 = opc_t.define('OPC_MAD_S24', 389)
+OPC_MAD_F16 = opc_t.define('OPC_MAD_F16', 390)
+OPC_MAD_F32 = opc_t.define('OPC_MAD_F32', 391)
+OPC_SEL_B16 = opc_t.define('OPC_SEL_B16', 392)
+OPC_SEL_B32 = opc_t.define('OPC_SEL_B32', 393)
+OPC_SEL_S16 = opc_t.define('OPC_SEL_S16', 394)
+OPC_SEL_S32 = opc_t.define('OPC_SEL_S32', 395)
+OPC_SEL_F16 = opc_t.define('OPC_SEL_F16', 396)
+OPC_SEL_F32 = opc_t.define('OPC_SEL_F32', 397)
+OPC_SAD_S16 = opc_t.define('OPC_SAD_S16', 398)
+OPC_SAD_S32 = opc_t.define('OPC_SAD_S32', 399)
+OPC_SHRM = opc_t.define('OPC_SHRM', 400)
+OPC_SHLM = opc_t.define('OPC_SHLM', 401)
+OPC_SHRG = opc_t.define('OPC_SHRG', 402)
+OPC_SHLG = opc_t.define('OPC_SHLG', 403)
+OPC_ANDG = opc_t.define('OPC_ANDG', 404)
+OPC_DP2ACC = opc_t.define('OPC_DP2ACC', 405)
+OPC_DP4ACC = opc_t.define('OPC_DP4ACC', 406)
+OPC_WMM = opc_t.define('OPC_WMM', 407)
+OPC_WMM_ACCU = opc_t.define('OPC_WMM_ACCU', 408)
+OPC_RCP = opc_t.define('OPC_RCP', 512)
+OPC_RSQ = opc_t.define('OPC_RSQ', 513)
+OPC_LOG2 = opc_t.define('OPC_LOG2', 514)
+OPC_EXP2 = opc_t.define('OPC_EXP2', 515)
+OPC_SIN = opc_t.define('OPC_SIN', 516)
+OPC_COS = opc_t.define('OPC_COS', 517)
+OPC_SQRT = opc_t.define('OPC_SQRT', 518)
+OPC_HRSQ = opc_t.define('OPC_HRSQ', 521)
+OPC_HLOG2 = opc_t.define('OPC_HLOG2', 522)
+OPC_HEXP2 = opc_t.define('OPC_HEXP2', 523)
+OPC_ISAM = opc_t.define('OPC_ISAM', 640)
+OPC_ISAML = opc_t.define('OPC_ISAML', 641)
+OPC_ISAMM = opc_t.define('OPC_ISAMM', 642)
+OPC_SAM = opc_t.define('OPC_SAM', 643)
+OPC_SAMB = opc_t.define('OPC_SAMB', 644)
+OPC_SAML = opc_t.define('OPC_SAML', 645)
+OPC_SAMGQ = opc_t.define('OPC_SAMGQ', 646)
+OPC_GETLOD = opc_t.define('OPC_GETLOD', 647)
+OPC_CONV = opc_t.define('OPC_CONV', 648)
+OPC_CONVM = opc_t.define('OPC_CONVM', 649)
+OPC_GETSIZE = opc_t.define('OPC_GETSIZE', 650)
+OPC_GETBUF = opc_t.define('OPC_GETBUF', 651)
+OPC_GETPOS = opc_t.define('OPC_GETPOS', 652)
+OPC_GETINFO = opc_t.define('OPC_GETINFO', 653)
+OPC_DSX = opc_t.define('OPC_DSX', 654)
+OPC_DSY = opc_t.define('OPC_DSY', 655)
+OPC_GATHER4R = opc_t.define('OPC_GATHER4R', 656)
+OPC_GATHER4G = opc_t.define('OPC_GATHER4G', 657)
+OPC_GATHER4B = opc_t.define('OPC_GATHER4B', 658)
+OPC_GATHER4A = opc_t.define('OPC_GATHER4A', 659)
+OPC_SAMGP0 = opc_t.define('OPC_SAMGP0', 660)
+OPC_SAMGP1 = opc_t.define('OPC_SAMGP1', 661)
+OPC_SAMGP2 = opc_t.define('OPC_SAMGP2', 662)
+OPC_SAMGP3 = opc_t.define('OPC_SAMGP3', 663)
+OPC_DSXPP_1 = opc_t.define('OPC_DSXPP_1', 664)
+OPC_DSYPP_1 = opc_t.define('OPC_DSYPP_1', 665)
+OPC_RGETPOS = opc_t.define('OPC_RGETPOS', 666)
+OPC_RGETINFO = opc_t.define('OPC_RGETINFO', 667)
+OPC_BRCST_ACTIVE = opc_t.define('OPC_BRCST_ACTIVE', 668)
+OPC_QUAD_SHUFFLE_BRCST = opc_t.define('OPC_QUAD_SHUFFLE_BRCST', 669)
+OPC_QUAD_SHUFFLE_HORIZ = opc_t.define('OPC_QUAD_SHUFFLE_HORIZ', 670)
+OPC_QUAD_SHUFFLE_VERT = opc_t.define('OPC_QUAD_SHUFFLE_VERT', 671)
+OPC_QUAD_SHUFFLE_DIAG = opc_t.define('OPC_QUAD_SHUFFLE_DIAG', 672)
+OPC_TCINV = opc_t.define('OPC_TCINV', 673)
+OPC_DSXPP_MACRO = opc_t.define('OPC_DSXPP_MACRO', 675)
+OPC_DSYPP_MACRO = opc_t.define('OPC_DSYPP_MACRO', 676)
+OPC_LDG = opc_t.define('OPC_LDG', 768)
+OPC_LDL = opc_t.define('OPC_LDL', 769)
+OPC_LDP = opc_t.define('OPC_LDP', 770)
+OPC_STG = opc_t.define('OPC_STG', 771)
+OPC_STL = opc_t.define('OPC_STL', 772)
+OPC_STP = opc_t.define('OPC_STP', 773)
+OPC_LDIB = opc_t.define('OPC_LDIB', 774)
+OPC_G2L = opc_t.define('OPC_G2L', 775)
+OPC_L2G = opc_t.define('OPC_L2G', 776)
+OPC_PREFETCH = opc_t.define('OPC_PREFETCH', 777)
+OPC_LDLW = opc_t.define('OPC_LDLW', 778)
+OPC_STLW = opc_t.define('OPC_STLW', 779)
+OPC_RESFMT = opc_t.define('OPC_RESFMT', 782)
+OPC_RESINFO = opc_t.define('OPC_RESINFO', 783)
+OPC_ATOMIC_ADD = opc_t.define('OPC_ATOMIC_ADD', 784)
+OPC_ATOMIC_SUB = opc_t.define('OPC_ATOMIC_SUB', 785)
+OPC_ATOMIC_XCHG = opc_t.define('OPC_ATOMIC_XCHG', 786)
+OPC_ATOMIC_INC = opc_t.define('OPC_ATOMIC_INC', 787)
+OPC_ATOMIC_DEC = opc_t.define('OPC_ATOMIC_DEC', 788)
+OPC_ATOMIC_CMPXCHG = opc_t.define('OPC_ATOMIC_CMPXCHG', 789)
+OPC_ATOMIC_MIN = opc_t.define('OPC_ATOMIC_MIN', 790)
+OPC_ATOMIC_MAX = opc_t.define('OPC_ATOMIC_MAX', 791)
+OPC_ATOMIC_AND = opc_t.define('OPC_ATOMIC_AND', 792)
+OPC_ATOMIC_OR = opc_t.define('OPC_ATOMIC_OR', 793)
+OPC_ATOMIC_XOR = opc_t.define('OPC_ATOMIC_XOR', 794)
+OPC_LDGB = opc_t.define('OPC_LDGB', 795)
+OPC_STGB = opc_t.define('OPC_STGB', 796)
+OPC_STIB = opc_t.define('OPC_STIB', 797)
+OPC_LDC = opc_t.define('OPC_LDC', 798)
+OPC_LDLV = opc_t.define('OPC_LDLV', 799)
+OPC_PIPR = opc_t.define('OPC_PIPR', 800)
+OPC_PIPC = opc_t.define('OPC_PIPC', 801)
+OPC_EMIT2 = opc_t.define('OPC_EMIT2', 802)
+OPC_ENDLS = opc_t.define('OPC_ENDLS', 803)
+OPC_GETSPID = opc_t.define('OPC_GETSPID', 804)
+OPC_GETWID = opc_t.define('OPC_GETWID', 805)
+OPC_GETFIBERID = opc_t.define('OPC_GETFIBERID', 806)
+OPC_SHFL = opc_t.define('OPC_SHFL', 807)
+OPC_STC = opc_t.define('OPC_STC', 808)
+OPC_RESINFO_B = opc_t.define('OPC_RESINFO_B', 809)
+OPC_LDIB_B = opc_t.define('OPC_LDIB_B', 810)
+OPC_STIB_B = opc_t.define('OPC_STIB_B', 811)
+OPC_ATOMIC_B_ADD = opc_t.define('OPC_ATOMIC_B_ADD', 812)
+OPC_ATOMIC_B_SUB = opc_t.define('OPC_ATOMIC_B_SUB', 813)
+OPC_ATOMIC_B_XCHG = opc_t.define('OPC_ATOMIC_B_XCHG', 814)
+OPC_ATOMIC_B_INC = opc_t.define('OPC_ATOMIC_B_INC', 815)
+OPC_ATOMIC_B_DEC = opc_t.define('OPC_ATOMIC_B_DEC', 816)
+OPC_ATOMIC_B_CMPXCHG = opc_t.define('OPC_ATOMIC_B_CMPXCHG', 817)
+OPC_ATOMIC_B_MIN = opc_t.define('OPC_ATOMIC_B_MIN', 818)
+OPC_ATOMIC_B_MAX = opc_t.define('OPC_ATOMIC_B_MAX', 819)
+OPC_ATOMIC_B_AND = opc_t.define('OPC_ATOMIC_B_AND', 820)
+OPC_ATOMIC_B_OR = opc_t.define('OPC_ATOMIC_B_OR', 821)
+OPC_ATOMIC_B_XOR = opc_t.define('OPC_ATOMIC_B_XOR', 822)
+OPC_ATOMIC_S_ADD = opc_t.define('OPC_ATOMIC_S_ADD', 823)
+OPC_ATOMIC_S_SUB = opc_t.define('OPC_ATOMIC_S_SUB', 824)
+OPC_ATOMIC_S_XCHG = opc_t.define('OPC_ATOMIC_S_XCHG', 825)
+OPC_ATOMIC_S_INC = opc_t.define('OPC_ATOMIC_S_INC', 826)
+OPC_ATOMIC_S_DEC = opc_t.define('OPC_ATOMIC_S_DEC', 827)
+OPC_ATOMIC_S_CMPXCHG = opc_t.define('OPC_ATOMIC_S_CMPXCHG', 828)
+OPC_ATOMIC_S_MIN = opc_t.define('OPC_ATOMIC_S_MIN', 829)
+OPC_ATOMIC_S_MAX = opc_t.define('OPC_ATOMIC_S_MAX', 830)
+OPC_ATOMIC_S_AND = opc_t.define('OPC_ATOMIC_S_AND', 831)
+OPC_ATOMIC_S_OR = opc_t.define('OPC_ATOMIC_S_OR', 832)
+OPC_ATOMIC_S_XOR = opc_t.define('OPC_ATOMIC_S_XOR', 833)
+OPC_ATOMIC_G_ADD = opc_t.define('OPC_ATOMIC_G_ADD', 834)
+OPC_ATOMIC_G_SUB = opc_t.define('OPC_ATOMIC_G_SUB', 835)
+OPC_ATOMIC_G_XCHG = opc_t.define('OPC_ATOMIC_G_XCHG', 836)
+OPC_ATOMIC_G_INC = opc_t.define('OPC_ATOMIC_G_INC', 837)
+OPC_ATOMIC_G_DEC = opc_t.define('OPC_ATOMIC_G_DEC', 838)
+OPC_ATOMIC_G_CMPXCHG = opc_t.define('OPC_ATOMIC_G_CMPXCHG', 839)
+OPC_ATOMIC_G_MIN = opc_t.define('OPC_ATOMIC_G_MIN', 840)
+OPC_ATOMIC_G_MAX = opc_t.define('OPC_ATOMIC_G_MAX', 841)
+OPC_ATOMIC_G_AND = opc_t.define('OPC_ATOMIC_G_AND', 842)
+OPC_ATOMIC_G_OR = opc_t.define('OPC_ATOMIC_G_OR', 843)
+OPC_ATOMIC_G_XOR = opc_t.define('OPC_ATOMIC_G_XOR', 844)
+OPC_LDG_A = opc_t.define('OPC_LDG_A', 845)
+OPC_STG_A = opc_t.define('OPC_STG_A', 846)
+OPC_SPILL_MACRO = opc_t.define('OPC_SPILL_MACRO', 847)
+OPC_RELOAD_MACRO = opc_t.define('OPC_RELOAD_MACRO', 848)
+OPC_LDC_K = opc_t.define('OPC_LDC_K', 849)
+OPC_STSC = opc_t.define('OPC_STSC', 850)
+OPC_LDG_K = opc_t.define('OPC_LDG_K', 851)
+OPC_PUSH_CONSTS_LOAD_MACRO = opc_t.define('OPC_PUSH_CONSTS_LOAD_MACRO', 852)
+OPC_RAY_INTERSECTION = opc_t.define('OPC_RAY_INTERSECTION', 858)
+OPC_RESBASE = opc_t.define('OPC_RESBASE', 859)
+OPC_BAR = opc_t.define('OPC_BAR', 896)
+OPC_FENCE = opc_t.define('OPC_FENCE', 897)
+OPC_SLEEP = opc_t.define('OPC_SLEEP', 898)
+OPC_ICINV = opc_t.define('OPC_ICINV', 899)
+OPC_DCCLN = opc_t.define('OPC_DCCLN', 900)
+OPC_DCINV = opc_t.define('OPC_DCINV', 901)
+OPC_DCFLU = opc_t.define('OPC_DCFLU', 902)
+OPC_LOCK = opc_t.define('OPC_LOCK', 903)
+OPC_UNLOCK = opc_t.define('OPC_UNLOCK', 904)
+OPC_ALIAS = opc_t.define('OPC_ALIAS', 905)
+OPC_CCINV = opc_t.define('OPC_CCINV', 906)
+OPC_META_INPUT = opc_t.define('OPC_META_INPUT', 1024)
+OPC_META_SPLIT = opc_t.define('OPC_META_SPLIT', 1026)
+OPC_META_COLLECT = opc_t.define('OPC_META_COLLECT', 1027)
+OPC_META_TEX_PREFETCH = opc_t.define('OPC_META_TEX_PREFETCH', 1028)
+OPC_META_PARALLEL_COPY = opc_t.define('OPC_META_PARALLEL_COPY', 1029)
+OPC_META_PHI = opc_t.define('OPC_META_PHI', 1030)
+OPC_META_RAW = opc_t.define('OPC_META_RAW', 1031)
+
+struct_ir3_sampler_prefetch._fields_ = [
+  ('src', uint8_t),
+  ('bindless', ctypes.c_bool),
+  ('samp_id', uint8_t),
+  ('tex_id', uint8_t),
+  ('samp_bindless_id', uint16_t),
+  ('tex_bindless_id', uint16_t),
+  ('dst', uint8_t),
+  ('wrmask', uint8_t),
+  ('half_precision', uint8_t),
+  ('tex_opc', opc_t),
+]
+class struct_ir3_shader_key(Struct): pass
+class struct_ir3_shader_key_0(ctypes.Union): pass
+class struct_ir3_shader_key_0_0(Struct): pass
+struct_ir3_shader_key_0_0._fields_ = [
+  ('ucp_enables', ctypes.c_uint32,8),
+  ('has_per_samp', ctypes.c_uint32,1),
+  ('sample_shading', ctypes.c_uint32,1),
+  ('msaa', ctypes.c_uint32,1),
+  ('rasterflat', ctypes.c_uint32,1),
+  ('tessellation', ctypes.c_uint32,2),
+  ('has_gs', ctypes.c_uint32,1),
+  ('tcs_store_primid', ctypes.c_uint32,1),
+  ('safe_constlen', ctypes.c_uint32,1),
+  ('force_dual_color_blend', ctypes.c_uint32,1),
+]
+struct_ir3_shader_key_0._anonymous_ = ['_0']
+struct_ir3_shader_key_0._fields_ = [
+  ('_0', struct_ir3_shader_key_0_0),
+  ('global', uint32_t),
+]
+struct_ir3_shader_key._anonymous_ = ['_0']
+struct_ir3_shader_key._fields_ = [
+  ('_0', struct_ir3_shader_key_0),
+  ('vsamples', uint32_t),
+  ('fsamples', uint32_t),
+  ('vastc_srgb', uint16_t),
+  ('fastc_srgb', uint16_t),
+  ('vsampler_swizzles', (uint16_t * 16)),
+  ('fsampler_swizzles', (uint16_t * 16)),
+]
+class struct_ir3_ibo_mapping(Struct): pass
+struct_ir3_ibo_mapping._fields_ = [
+  ('ssbo_to_tex', (uint8_t * 32)),
+  ('image_to_tex', (uint8_t * 32)),
+  ('tex_to_image', (uint8_t * 32)),
+  ('num_tex', uint8_t),
+  ('tex_base', uint8_t),
+]
+class struct_ir3_disasm_info(Struct): pass
+struct_ir3_disasm_info._fields_ = [
+  ('write_disasm', ctypes.c_bool),
+  ('nir', ctypes.POINTER(ctypes.c_char)),
+  ('disasm', ctypes.POINTER(ctypes.c_char)),
+]
+class struct_ir3_shader_nir_options(Struct): pass
+struct_ir3_shader_nir_options._fields_ = [
+  ('robust_modes', nir_variable_mode),
+]
+class struct_ir3_shader_options(Struct): pass
+struct_ir3_shader_options._fields_ = [
+  ('api_wavesize', enum_ir3_wavesize_option),
+  ('real_wavesize', enum_ir3_wavesize_option),
+  ('push_consts_type', enum_ir3_push_consts_type),
+  ('push_consts_base', uint32_t),
+  ('push_consts_dwords', uint32_t),
+  ('const_allocs', struct_ir3_const_allocations),
+  ('nir_options', struct_ir3_shader_nir_options),
+  ('fragdata_dynamic_remap', ctypes.c_bool),
+]
+class struct_ir3_shader_output(Struct): pass
+struct_ir3_shader_output._fields_ = [
+  ('slot', uint8_t),
+  ('regid', uint8_t),
+  ('view', uint8_t),
+  ('aliased_components', uint8_t,4),
+  ('half', ctypes.c_bool,1),
+]
+class struct_fd_bo(Struct): pass
+class struct_ir3(Struct): pass
+class struct_ir3_instruction(Struct): pass
+class struct_ir3_block(Struct): pass
+struct_ir3_block._fields_ = [
+  ('node', struct_list_head),
+  ('shader', ctypes.POINTER(struct_ir3)),
+  ('nblock', ctypes.POINTER(struct_nir_block)),
+  ('instr_list', struct_list_head),
+  ('successors', (ctypes.POINTER(struct_ir3_block) * 2)),
+  ('divergent_condition', ctypes.c_bool),
+  ('predecessors_count', ctypes.c_uint32),
+  ('predecessors_sz', ctypes.c_uint32),
+  ('predecessors', ctypes.POINTER(ctypes.POINTER(struct_ir3_block))),
+  ('physical_predecessors_count', ctypes.c_uint32),
+  ('physical_predecessors_sz', ctypes.c_uint32),
+  ('physical_predecessors', ctypes.POINTER(ctypes.POINTER(struct_ir3_block))),
+  ('physical_successors_count', ctypes.c_uint32),
+  ('physical_successors_sz', ctypes.c_uint32),
+  ('physical_successors', ctypes.POINTER(ctypes.POINTER(struct_ir3_block))),
+  ('start_ip', uint16_t),
+  ('end_ip', uint16_t),
+  ('reconvergence_point', ctypes.c_bool),
+  ('in_early_preamble', ctypes.c_bool),
+  ('keeps_count', ctypes.c_uint32),
+  ('keeps_sz', ctypes.c_uint32),
+  ('keeps', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction))),
+  ('data', ctypes.c_void_p),
+  ('index', uint32_t),
+  ('imm_dom', ctypes.POINTER(struct_ir3_block)),
+  ('dom_children_count', ctypes.c_uint32),
+  ('dom_children_sz', ctypes.c_uint32),
+  ('dom_children', ctypes.POINTER(ctypes.POINTER(struct_ir3_block))),
+  ('dom_pre_index', uint32_t),
+  ('dom_post_index', uint32_t),
+  ('loop_depth', uint32_t),
+]
+enum_ir3_instruction_flags = CEnum(ctypes.c_uint32)
+IR3_INSTR_SY = enum_ir3_instruction_flags.define('IR3_INSTR_SY', 1)
+IR3_INSTR_SS = enum_ir3_instruction_flags.define('IR3_INSTR_SS', 2)
+IR3_INSTR_JP = enum_ir3_instruction_flags.define('IR3_INSTR_JP', 4)
+IR3_INSTR_EQ = enum_ir3_instruction_flags.define('IR3_INSTR_EQ', 8)
+IR3_INSTR_UL = enum_ir3_instruction_flags.define('IR3_INSTR_UL', 16)
+IR3_INSTR_3D = enum_ir3_instruction_flags.define('IR3_INSTR_3D', 32)
+IR3_INSTR_A = enum_ir3_instruction_flags.define('IR3_INSTR_A', 64)
+IR3_INSTR_O = enum_ir3_instruction_flags.define('IR3_INSTR_O', 128)
+IR3_INSTR_P = enum_ir3_instruction_flags.define('IR3_INSTR_P', 256)
+IR3_INSTR_S = enum_ir3_instruction_flags.define('IR3_INSTR_S', 512)
+IR3_INSTR_S2EN = enum_ir3_instruction_flags.define('IR3_INSTR_S2EN', 1024)
+IR3_INSTR_SAT = enum_ir3_instruction_flags.define('IR3_INSTR_SAT', 2048)
+IR3_INSTR_B = enum_ir3_instruction_flags.define('IR3_INSTR_B', 4096)
+IR3_INSTR_NONUNIF = enum_ir3_instruction_flags.define('IR3_INSTR_NONUNIF', 8192)
+IR3_INSTR_A1EN = enum_ir3_instruction_flags.define('IR3_INSTR_A1EN', 16384)
+IR3_INSTR_U = enum_ir3_instruction_flags.define('IR3_INSTR_U', 32768)
+IR3_INSTR_MARK = enum_ir3_instruction_flags.define('IR3_INSTR_MARK', 65536)
+IR3_INSTR_SHARED_SPILL = enum_ir3_instruction_flags.define('IR3_INSTR_SHARED_SPILL', 65536)
+IR3_INSTR_UNUSED = enum_ir3_instruction_flags.define('IR3_INSTR_UNUSED', 131072)
+IR3_INSTR_NEEDS_HELPERS = enum_ir3_instruction_flags.define('IR3_INSTR_NEEDS_HELPERS', 262144)
+IR3_INSTR_V = enum_ir3_instruction_flags.define('IR3_INSTR_V', 524288)
+IR3_INSTR_INV_1D = enum_ir3_instruction_flags.define('IR3_INSTR_INV_1D', 1048576)
+IR3_INSTR_IMM_OFFSET = enum_ir3_instruction_flags.define('IR3_INSTR_IMM_OFFSET', 2097152)
+
+class struct_ir3_register(Struct): pass
+enum_ir3_register_flags = CEnum(ctypes.c_uint32)
+IR3_REG_CONST = enum_ir3_register_flags.define('IR3_REG_CONST', 1)
+IR3_REG_IMMED = enum_ir3_register_flags.define('IR3_REG_IMMED', 2)
+IR3_REG_HALF = enum_ir3_register_flags.define('IR3_REG_HALF', 4)
+IR3_REG_SHARED = enum_ir3_register_flags.define('IR3_REG_SHARED', 8)
+IR3_REG_RELATIV = enum_ir3_register_flags.define('IR3_REG_RELATIV', 16)
+IR3_REG_R = enum_ir3_register_flags.define('IR3_REG_R', 32)
+IR3_REG_FNEG = enum_ir3_register_flags.define('IR3_REG_FNEG', 64)
+IR3_REG_FABS = enum_ir3_register_flags.define('IR3_REG_FABS', 128)
+IR3_REG_SNEG = enum_ir3_register_flags.define('IR3_REG_SNEG', 256)
+IR3_REG_SABS = enum_ir3_register_flags.define('IR3_REG_SABS', 512)
+IR3_REG_BNOT = enum_ir3_register_flags.define('IR3_REG_BNOT', 1024)
+IR3_REG_EI = enum_ir3_register_flags.define('IR3_REG_EI', 2048)
+IR3_REG_SSA = enum_ir3_register_flags.define('IR3_REG_SSA', 4096)
+IR3_REG_ARRAY = enum_ir3_register_flags.define('IR3_REG_ARRAY', 8192)
+IR3_REG_KILL = enum_ir3_register_flags.define('IR3_REG_KILL', 16384)
+IR3_REG_FIRST_KILL = enum_ir3_register_flags.define('IR3_REG_FIRST_KILL', 32768)
+IR3_REG_UNUSED = enum_ir3_register_flags.define('IR3_REG_UNUSED', 65536)
+IR3_REG_EARLY_CLOBBER = enum_ir3_register_flags.define('IR3_REG_EARLY_CLOBBER', 131072)
+IR3_REG_LAST_USE = enum_ir3_register_flags.define('IR3_REG_LAST_USE', 262144)
+IR3_REG_PREDICATE = enum_ir3_register_flags.define('IR3_REG_PREDICATE', 524288)
+IR3_REG_RT = enum_ir3_register_flags.define('IR3_REG_RT', 1048576)
+IR3_REG_ALIAS = enum_ir3_register_flags.define('IR3_REG_ALIAS', 2097152)
+IR3_REG_FIRST_ALIAS = enum_ir3_register_flags.define('IR3_REG_FIRST_ALIAS', 4194304)
+
+class struct_ir3_register_0(ctypes.Union): pass
+class struct_ir3_register_0_array(Struct): pass
+struct_ir3_register_0_array._fields_ = [
+  ('id', uint16_t),
+  ('offset', int16_t),
+  ('base', uint16_t),
+]
+struct_ir3_register_0._fields_ = [
+  ('iim_val', int32_t),
+  ('uim_val', uint32_t),
+  ('fim_val', ctypes.c_float),
+  ('array', struct_ir3_register_0_array),
+]
+class struct_ir3_merge_set(Struct): pass
+struct_ir3_merge_set._fields_ = [
+  ('preferred_reg', uint16_t),
+  ('size', uint16_t),
+  ('alignment', uint16_t),
+  ('interval_start', ctypes.c_uint32),
+  ('spill_slot', ctypes.c_uint32),
+  ('regs_count', ctypes.c_uint32),
+  ('regs', ctypes.POINTER(ctypes.POINTER(struct_ir3_register))),
+]
+struct_ir3_register._anonymous_ = ['_0']
+struct_ir3_register._fields_ = [
+  ('flags', enum_ir3_register_flags),
+  ('name', ctypes.c_uint32),
+  ('wrmask', ctypes.c_uint32,16),
+  ('size', ctypes.c_uint32,16),
+  ('num', uint16_t),
+  ('_0', struct_ir3_register_0),
+  ('instr', ctypes.POINTER(struct_ir3_instruction)),
+  ('def', ctypes.POINTER(struct_ir3_register)),
+  ('tied', ctypes.POINTER(struct_ir3_register)),
+  ('spill_slot', ctypes.c_uint32),
+  ('next_use', ctypes.c_uint32),
+  ('merge_set_offset', ctypes.c_uint32),
+  ('merge_set', ctypes.POINTER(struct_ir3_merge_set)),
+  ('interval_start', ctypes.c_uint32),
+  ('interval_end', ctypes.c_uint32),
+]
+class struct_ir3_instruction_0(ctypes.Union): pass
+class struct_ir3_instruction_0_cat0(Struct): pass
+struct_ir3_instruction_0_cat0._fields_ = [
+  ('inv1', ctypes.c_char),
+  ('inv2', ctypes.c_char),
+  ('immed', ctypes.c_int32),
+  ('target', ctypes.POINTER(struct_ir3_block)),
+  ('target_label', ctypes.POINTER(ctypes.c_char)),
+  ('idx', ctypes.c_uint32),
+]
+class struct_ir3_instruction_0_cat1(Struct): pass
+round_t = CEnum(ctypes.c_uint32)
+ROUND_ZERO = round_t.define('ROUND_ZERO', 0)
+ROUND_EVEN = round_t.define('ROUND_EVEN', 1)
+ROUND_POS_INF = round_t.define('ROUND_POS_INF', 2)
+ROUND_NEG_INF = round_t.define('ROUND_NEG_INF', 3)
+
+reduce_op_t = CEnum(ctypes.c_uint32)
+REDUCE_OP_ADD_U = reduce_op_t.define('REDUCE_OP_ADD_U', 0)
+REDUCE_OP_ADD_F = reduce_op_t.define('REDUCE_OP_ADD_F', 1)
+REDUCE_OP_MUL_U = reduce_op_t.define('REDUCE_OP_MUL_U', 2)
+REDUCE_OP_MUL_F = reduce_op_t.define('REDUCE_OP_MUL_F', 3)
+REDUCE_OP_MIN_U = reduce_op_t.define('REDUCE_OP_MIN_U', 4)
+REDUCE_OP_MIN_S = reduce_op_t.define('REDUCE_OP_MIN_S', 5)
+REDUCE_OP_MIN_F = reduce_op_t.define('REDUCE_OP_MIN_F', 6)
+REDUCE_OP_MAX_U = reduce_op_t.define('REDUCE_OP_MAX_U', 7)
+REDUCE_OP_MAX_S = reduce_op_t.define('REDUCE_OP_MAX_S', 8)
+REDUCE_OP_MAX_F = reduce_op_t.define('REDUCE_OP_MAX_F', 9)
+REDUCE_OP_AND_B = reduce_op_t.define('REDUCE_OP_AND_B', 10)
+REDUCE_OP_OR_B = reduce_op_t.define('REDUCE_OP_OR_B', 11)
+REDUCE_OP_XOR_B = reduce_op_t.define('REDUCE_OP_XOR_B', 12)
+
+struct_ir3_instruction_0_cat1._fields_ = [
+  ('src_type', type_t),
+  ('dst_type', type_t),
+  ('round', round_t),
+  ('reduce_op', reduce_op_t),
+]
+class struct_ir3_instruction_0_cat2(Struct): pass
+struct_ir3_instruction_0_cat2_condition = CEnum(ctypes.c_uint32)
+IR3_COND_LT = struct_ir3_instruction_0_cat2_condition.define('IR3_COND_LT', 0)
+IR3_COND_LE = struct_ir3_instruction_0_cat2_condition.define('IR3_COND_LE', 1)
+IR3_COND_GT = struct_ir3_instruction_0_cat2_condition.define('IR3_COND_GT', 2)
+IR3_COND_GE = struct_ir3_instruction_0_cat2_condition.define('IR3_COND_GE', 3)
+IR3_COND_EQ = struct_ir3_instruction_0_cat2_condition.define('IR3_COND_EQ', 4)
+IR3_COND_NE = struct_ir3_instruction_0_cat2_condition.define('IR3_COND_NE', 5)
+
+struct_ir3_instruction_0_cat2._fields_ = [
+  ('condition', struct_ir3_instruction_0_cat2_condition),
+]
+class struct_ir3_instruction_0_cat3(Struct): pass
+struct_ir3_instruction_0_cat3_signedness = CEnum(ctypes.c_uint32)
+IR3_SRC_UNSIGNED = struct_ir3_instruction_0_cat3_signedness.define('IR3_SRC_UNSIGNED', 0)
+IR3_SRC_MIXED = struct_ir3_instruction_0_cat3_signedness.define('IR3_SRC_MIXED', 1)
+
+struct_ir3_instruction_0_cat3_packed = CEnum(ctypes.c_uint32)
+IR3_SRC_PACKED_LOW = struct_ir3_instruction_0_cat3_packed.define('IR3_SRC_PACKED_LOW', 0)
+IR3_SRC_PACKED_HIGH = struct_ir3_instruction_0_cat3_packed.define('IR3_SRC_PACKED_HIGH', 1)
+
+struct_ir3_instruction_0_cat3._fields_ = [
+  ('signedness', struct_ir3_instruction_0_cat3_signedness),
+  ('packed', struct_ir3_instruction_0_cat3_packed),
+  ('swapped', ctypes.c_bool),
+]
+class struct_ir3_instruction_0_cat5(Struct): pass
+struct_ir3_instruction_0_cat5._fields_ = [
+  ('samp', ctypes.c_uint32),
+  ('tex', ctypes.c_uint32),
+  ('tex_base', ctypes.c_uint32,3),
+  ('cluster_size', ctypes.c_uint32,4),
+  ('type', type_t),
+]
+class struct_ir3_instruction_0_cat6(Struct): pass
+ir3_shfl_mode = CEnum(ctypes.c_uint32)
+SHFL_XOR = ir3_shfl_mode.define('SHFL_XOR', 1)
+SHFL_UP = ir3_shfl_mode.define('SHFL_UP', 2)
+SHFL_DOWN = ir3_shfl_mode.define('SHFL_DOWN', 3)
+SHFL_RUP = ir3_shfl_mode.define('SHFL_RUP', 6)
+SHFL_RDOWN = ir3_shfl_mode.define('SHFL_RDOWN', 7)
+
+struct_ir3_instruction_0_cat6._fields_ = [
+  ('type', type_t),
+  ('dst_offset', ctypes.c_int32),
+  ('iim_val', ctypes.c_int32),
+  ('d', ctypes.c_uint32,3),
+  ('typed', ctypes.c_bool,1),
+  ('base', ctypes.c_uint32,3),
+  ('shfl_mode', ir3_shfl_mode,3),
+]
+class struct_ir3_instruction_0_cat7(Struct): pass
+ir3_alias_scope = CEnum(ctypes.c_uint32)
+ALIAS_TEX = ir3_alias_scope.define('ALIAS_TEX', 0)
+ALIAS_RT = ir3_alias_scope.define('ALIAS_RT', 1)
+ALIAS_MEM = ir3_alias_scope.define('ALIAS_MEM', 2)
+
+struct_ir3_instruction_0_cat7._fields_ = [
+  ('w', ctypes.c_uint32,1),
+  ('r', ctypes.c_uint32,1),
+  ('l', ctypes.c_uint32,1),
+  ('g', ctypes.c_uint32,1),
+  ('alias_scope', ir3_alias_scope),
+  ('alias_table_size_minus_one', ctypes.c_uint32),
+  ('alias_type_float', ctypes.c_bool),
+]
+class struct_ir3_instruction_0_split(Struct): pass
+struct_ir3_instruction_0_split._fields_ = [
+  ('off', ctypes.c_int32),
+]
+class struct_ir3_instruction_0_end(Struct): pass
+struct_ir3_instruction_0_end._fields_ = [
+  ('outidxs', ctypes.POINTER(ctypes.c_uint32)),
+]
+class struct_ir3_instruction_0_phi(Struct): pass
+struct_ir3_instruction_0_phi._fields_ = [
+  ('nphi', ctypes.c_void_p),
+  ('comp', ctypes.c_uint32),
+]
+class struct_ir3_instruction_0_prefetch(Struct): pass
+struct_ir3_instruction_0_prefetch._fields_ = [
+  ('samp', ctypes.c_uint32),
+  ('tex', ctypes.c_uint32),
+  ('input_offset', ctypes.c_uint32),
+  ('samp_base', ctypes.c_uint32,3),
+  ('tex_base', ctypes.c_uint32,3),
+]
+class struct_ir3_instruction_0_input(Struct): pass
+struct_ir3_instruction_0_input._fields_ = [
+  ('inidx', ctypes.c_int32),
+  ('sysval', gl_system_value),
+]
+class struct_ir3_instruction_0_push_consts(Struct): pass
+struct_ir3_instruction_0_push_consts._fields_ = [
+  ('src_base', ctypes.c_uint32),
+  ('src_size', ctypes.c_uint32),
+  ('dst_base', ctypes.c_uint32),
+]
+class struct_ir3_instruction_0_raw(Struct): pass
+struct_ir3_instruction_0_raw._fields_ = [
+  ('value', uint64_t),
+]
+struct_ir3_instruction_0._fields_ = [
+  ('cat0', struct_ir3_instruction_0_cat0),
+  ('cat1', struct_ir3_instruction_0_cat1),
+  ('cat2', struct_ir3_instruction_0_cat2),
+  ('cat3', struct_ir3_instruction_0_cat3),
+  ('cat5', struct_ir3_instruction_0_cat5),
+  ('cat6', struct_ir3_instruction_0_cat6),
+  ('cat7', struct_ir3_instruction_0_cat7),
+  ('split', struct_ir3_instruction_0_split),
+  ('end', struct_ir3_instruction_0_end),
+  ('phi', struct_ir3_instruction_0_phi),
+  ('prefetch', struct_ir3_instruction_0_prefetch),
+  ('input', struct_ir3_instruction_0_input),
+  ('push_consts', struct_ir3_instruction_0_push_consts),
+  ('raw', struct_ir3_instruction_0_raw),
+]
+struct_ir3_instruction_barrier_class = CEnum(ctypes.c_uint32)
+IR3_BARRIER_EVERYTHING = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_EVERYTHING', 1)
+IR3_BARRIER_SHARED_R = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_SHARED_R', 2)
+IR3_BARRIER_SHARED_W = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_SHARED_W', 4)
+IR3_BARRIER_IMAGE_R = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_IMAGE_R', 8)
+IR3_BARRIER_IMAGE_W = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_IMAGE_W', 16)
+IR3_BARRIER_BUFFER_R = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_BUFFER_R', 32)
+IR3_BARRIER_BUFFER_W = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_BUFFER_W', 64)
+IR3_BARRIER_ARRAY_R = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_ARRAY_R', 128)
+IR3_BARRIER_ARRAY_W = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_ARRAY_W', 256)
+IR3_BARRIER_PRIVATE_R = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_PRIVATE_R', 512)
+IR3_BARRIER_PRIVATE_W = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_PRIVATE_W', 1024)
+IR3_BARRIER_CONST_W = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_CONST_W', 2048)
+IR3_BARRIER_ACTIVE_FIBERS_R = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_ACTIVE_FIBERS_R', 4096)
+IR3_BARRIER_ACTIVE_FIBERS_W = struct_ir3_instruction_barrier_class.define('IR3_BARRIER_ACTIVE_FIBERS_W', 8192)
+
+struct_ir3_instruction._anonymous_ = ['_0']
+struct_ir3_instruction._fields_ = [
+  ('block', ctypes.POINTER(struct_ir3_block)),
+  ('opc', opc_t),
+  ('flags', enum_ir3_instruction_flags),
+  ('repeat', uint8_t),
+  ('nop', uint8_t),
+  ('srcs_count', ctypes.c_uint32),
+  ('dsts_count', ctypes.c_uint32),
+  ('dsts', ctypes.POINTER(ctypes.POINTER(struct_ir3_register))),
+  ('srcs', ctypes.POINTER(ctypes.POINTER(struct_ir3_register))),
+  ('_0', struct_ir3_instruction_0),
+  ('ip', uint32_t),
+  ('data', ctypes.c_void_p),
+  ('uses', ctypes.POINTER(struct_set)),
+  ('use_count', ctypes.c_int32),
+  ('address', ctypes.POINTER(struct_ir3_register)),
+  ('deps_count', ctypes.c_uint32),
+  ('deps_sz', ctypes.c_uint32),
+  ('deps', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction))),
+  ('barrier_class', struct_ir3_instruction_barrier_class),
+  ('barrier_conflict', struct_ir3_instruction_barrier_class),
+  ('node', struct_list_head),
+  ('rpt_node', struct_list_head),
+  ('serialno', uint32_t),
+  ('line', ctypes.c_int32),
+]
+struct_ir3._fields_ = [
+  ('compiler', ctypes.POINTER(struct_ir3_compiler)),
+  ('type', gl_shader_stage),
+  ('inputs_count', ctypes.c_uint32),
+  ('inputs_sz', ctypes.c_uint32),
+  ('inputs', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction))),
+  ('baryfs_count', ctypes.c_uint32),
+  ('baryfs_sz', ctypes.c_uint32),
+  ('baryfs', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction))),
+  ('a0_users_count', ctypes.c_uint32),
+  ('a0_users_sz', ctypes.c_uint32),
+  ('a0_users', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction))),
+  ('a1_users_count', ctypes.c_uint32),
+  ('a1_users_sz', ctypes.c_uint32),
+  ('a1_users', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction))),
+  ('astc_srgb_count', ctypes.c_uint32),
+  ('astc_srgb_sz', ctypes.c_uint32),
+  ('astc_srgb', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction))),
+  ('tg4_count', ctypes.c_uint32),
+  ('tg4_sz', ctypes.c_uint32),
+  ('tg4', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction))),
+  ('block_list', struct_list_head),
+  ('array_list', struct_list_head),
+  ('instr_count', ctypes.c_uint32),
+]
+class struct_ir3_info(Struct): pass
+struct_ir3_info._fields_ = [
+  ('size', uint32_t),
+  ('constant_data_offset', uint32_t),
+  ('sizedwords', uint16_t),
+  ('instrs_count', uint16_t),
+  ('preamble_instrs_count', uint16_t),
+  ('nops_count', uint16_t),
+  ('mov_count', uint16_t),
+  ('cov_count', uint16_t),
+  ('stp_count', uint16_t),
+  ('ldp_count', uint16_t),
+  ('max_reg', int8_t),
+  ('max_half_reg', int8_t),
+  ('max_const', int16_t),
+  ('max_waves', int8_t),
+  ('subgroup_size', uint8_t),
+  ('double_threadsize', ctypes.c_bool),
+  ('multi_dword_ldp_stp', ctypes.c_bool),
+  ('early_preamble', ctypes.c_bool),
+  ('uses_ray_intersection', ctypes.c_bool),
+  ('ss', uint16_t),
+  ('sy', uint16_t),
+  ('sstall', uint16_t),
+  ('systall', uint16_t),
+  ('last_baryf', uint16_t),
+  ('last_helper', uint16_t),
+  ('instrs_per_cat', (uint16_t * 8)),
+]
+class struct_ir3_shader_variant_input(Struct): pass
+struct_ir3_shader_variant_input._fields_ = [
+  ('slot', uint8_t),
+  ('regid', uint8_t),
+  ('compmask', uint8_t),
+  ('inloc', uint8_t),
+  ('sysval', ctypes.c_bool,1),
+  ('bary', ctypes.c_bool,1),
+  ('rasterflat', ctypes.c_bool,1),
+  ('half', ctypes.c_bool,1),
+  ('flat', ctypes.c_bool,1),
+]
+class struct_ir3_shader_variant_astc_srgb(Struct): pass
+struct_ir3_shader_variant_astc_srgb._fields_ = [
+  ('base', ctypes.c_uint32),
+  ('count', ctypes.c_uint32),
+  ('orig_idx', (ctypes.c_uint32 * 16)),
+]
+class struct_ir3_shader_variant_tg4(Struct): pass
+struct_ir3_shader_variant_tg4._fields_ = [
+  ('base', ctypes.c_uint32),
+  ('count', ctypes.c_uint32),
+  ('orig_idx', (ctypes.c_uint32 * 16)),
+]
+class struct_ir3_shader_variant_0(ctypes.Union): pass
+class struct_ir3_shader_variant_0_tess(Struct): pass
+enum_gl_tess_spacing = CEnum(ctypes.c_uint32)
+TESS_SPACING_UNSPECIFIED = enum_gl_tess_spacing.define('TESS_SPACING_UNSPECIFIED', 0)
+TESS_SPACING_EQUAL = enum_gl_tess_spacing.define('TESS_SPACING_EQUAL', 1)
+TESS_SPACING_FRACTIONAL_ODD = enum_gl_tess_spacing.define('TESS_SPACING_FRACTIONAL_ODD', 2)
+TESS_SPACING_FRACTIONAL_EVEN = enum_gl_tess_spacing.define('TESS_SPACING_FRACTIONAL_EVEN', 3)
+
+struct_ir3_shader_variant_0_tess._fields_ = [
+  ('primitive_mode', enum_tess_primitive_mode),
+  ('tcs_vertices_out', uint8_t),
+  ('spacing', enum_gl_tess_spacing,2),
+  ('ccw', ctypes.c_bool,1),
+  ('point_mode', ctypes.c_bool,1),
+]
+class struct_ir3_shader_variant_0_gs(Struct): pass
+struct_ir3_shader_variant_0_gs._fields_ = [
+  ('output_primitive', uint16_t),
+  ('vertices_out', uint16_t),
+  ('invocations', uint8_t),
+  ('vertices_in', uint8_t,3),
+]
+class struct_ir3_shader_variant_0_fs(Struct): pass
+struct_ir3_shader_variant_0_fs._fields_ = [
+  ('early_fragment_tests', ctypes.c_bool,1),
+  ('color_is_dual_source', ctypes.c_bool,1),
+  ('uses_fbfetch_output', ctypes.c_bool,1),
+  ('fbfetch_coherent', ctypes.c_bool,1),
+  ('depth_layout', enum_gl_frag_depth_layout),
+]
+class struct_ir3_shader_variant_0_cs(Struct): pass
+struct_ir3_shader_variant_0_cs._fields_ = [
+  ('req_local_mem', ctypes.c_uint32),
+  ('force_linear_dispatch', ctypes.c_bool),
+  ('local_invocation_id', uint32_t),
+  ('work_group_id', uint32_t),
+]
+struct_ir3_shader_variant_0._fields_ = [
+  ('tess', struct_ir3_shader_variant_0_tess),
+  ('gs', struct_ir3_shader_variant_0_gs),
+  ('fs', struct_ir3_shader_variant_0_fs),
+  ('cs', struct_ir3_shader_variant_0_cs),
+]
+struct_ir3_shader_variant._anonymous_ = ['_0']
+struct_ir3_shader_variant._fields_ = [
+  ('bo', ctypes.POINTER(struct_fd_bo)),
+  ('id', uint32_t),
+  ('shader_id', uint32_t),
+  ('key', struct_ir3_shader_key),
+  ('binning_pass', ctypes.c_bool),
+  ('binning', ctypes.POINTER(struct_ir3_shader_variant)),
+  ('nonbinning', ctypes.POINTER(struct_ir3_shader_variant)),
+  ('ir', ctypes.POINTER(struct_ir3)),
+  ('next', ctypes.POINTER(struct_ir3_shader_variant)),
+  ('type', gl_shader_stage),
+  ('compiler', ctypes.POINTER(struct_ir3_compiler)),
+  ('name', ctypes.POINTER(ctypes.c_char)),
+  ('constant_data', ctypes.c_void_p),
+  ('disasm_info', struct_ir3_disasm_info),
+  ('bin', ctypes.POINTER(uint32_t)),
+  ('const_state', ctypes.POINTER(struct_ir3_const_state)),
+  ('imm_state', struct_ir3_imm_const_state),
+  ('info', struct_ir3_info),
+  ('sha1_str', (ctypes.c_char * 41)),
+  ('shader_options', struct_ir3_shader_options),
+  ('constant_data_size', uint32_t),
+  ('branchstack', ctypes.c_uint32),
+  ('loops', ctypes.c_uint32),
+  ('instrlen', ctypes.c_uint32),
+  ('constlen', ctypes.c_uint32),
+  ('pvtmem_size', ctypes.c_uint32),
+  ('pvtmem_per_wave', ctypes.c_bool),
+  ('multi_pos_output', ctypes.c_bool),
+  ('dual_src_blend', ctypes.c_bool),
+  ('early_preamble', ctypes.c_bool),
+  ('shared_size', ctypes.c_uint32),
+  ('frag_face', ctypes.c_bool),
+  ('color0_mrt', ctypes.c_bool),
+  ('fragcoord_compmask', uint8_t),
+  ('outputs_count', ctypes.c_uint32),
+  ('outputs', (struct_ir3_shader_output * 34)),
+  ('writes_pos', ctypes.c_bool),
+  ('writes_smask', ctypes.c_bool),
+  ('writes_psize', ctypes.c_bool),
+  ('writes_viewport', ctypes.c_bool),
+  ('writes_stencilref', ctypes.c_bool),
+  ('writes_shading_rate', ctypes.c_bool),
+  ('output_size', uint32_t),
+  ('input_size', uint32_t),
+  ('output_loc', (ctypes.c_uint32 * 45)),
+  ('inputs_count', ctypes.c_uint32),
+  ('inputs', (struct_ir3_shader_variant_input * 34)),
+  ('reads_primid', ctypes.c_bool),
+  ('reads_shading_rate', ctypes.c_bool),
+  ('reads_smask', ctypes.c_bool),
+  ('total_in', ctypes.c_uint32),
+  ('sysval_in', ctypes.c_uint32),
+  ('varying_in', ctypes.c_uint32),
+  ('image_mapping', struct_ir3_ibo_mapping),
+  ('num_samp', ctypes.c_int32),
+  ('fb_read', ctypes.c_bool),
+  ('has_ssbo', ctypes.c_bool),
+  ('bindless_tex', ctypes.c_bool),
+  ('bindless_samp', ctypes.c_bool),
+  ('bindless_ibo', ctypes.c_bool),
+  ('bindless_ubo', ctypes.c_bool),
+  ('need_pixlod', ctypes.c_bool),
+  ('need_full_quad', ctypes.c_bool),
+  ('need_driver_params', ctypes.c_bool),
+  ('no_earlyz', ctypes.c_bool),
+  ('has_kill', ctypes.c_bool),
+  ('per_samp', ctypes.c_bool),
+  ('post_depth_coverage', ctypes.c_bool),
+  ('empty', ctypes.c_bool),
+  ('writes_only_color', ctypes.c_bool),
+  ('mergedregs', ctypes.c_bool),
+  ('clip_mask', uint8_t),
+  ('cull_mask', uint8_t),
+  ('astc_srgb', struct_ir3_shader_variant_astc_srgb),
+  ('tg4', struct_ir3_shader_variant_tg4),
+  ('num_sampler_prefetch', uint32_t),
+  ('sampler_prefetch', (struct_ir3_sampler_prefetch * 4)),
+  ('prefetch_bary_type', enum_ir3_bary),
+  ('prefetch_end_of_quad', ctypes.c_bool),
+  ('local_size', (uint16_t * 3)),
+  ('local_size_variable', ctypes.c_bool),
+  ('has_barrier', ctypes.c_bool),
+  ('num_ssbos', ctypes.c_uint32),
+  ('num_uavs', ctypes.c_uint32),
+  ('_0', struct_ir3_shader_variant_0),
+  ('vtxid_base', uint32_t),
+  ('stream_output', struct_ir3_stream_output_info),
+]
+class struct_ir3_shader_0(ctypes.Union): pass
+class struct_ir3_shader_0_cs(Struct): pass
+struct_ir3_shader_0_cs._fields_ = [
+  ('req_local_mem', ctypes.c_uint32),
+  ('force_linear_dispatch', ctypes.c_bool),
+]
+class struct_ir3_shader_0_vs(Struct): pass
+struct_ir3_shader_0_vs._fields_ = [
+  ('passthrough_tcs_compiled', ctypes.c_uint32),
+  ('passthrough_tcs', (ctypes.POINTER(struct_ir3_shader) * 32)),
+]
+struct_ir3_shader_0._fields_ = [
+  ('cs', struct_ir3_shader_0_cs),
+  ('vs', struct_ir3_shader_0_vs),
+]
+class pthread_mutex_t(ctypes.Union): pass
+mtx_t = pthread_mutex_t
+class struct___pthread_mutex_s(Struct): pass
+class struct___pthread_internal_list(Struct): pass
+__pthread_list_t = struct___pthread_internal_list
+struct___pthread_internal_list._fields_ = [
+  ('__prev', ctypes.POINTER(struct___pthread_internal_list)),
+  ('__next', ctypes.POINTER(struct___pthread_internal_list)),
+]
+struct___pthread_mutex_s._fields_ = [
+  ('__lock', ctypes.c_int32),
+  ('__count', ctypes.c_uint32),
+  ('__owner', ctypes.c_int32),
+  ('__nusers', ctypes.c_uint32),
+  ('__kind', ctypes.c_int32),
+  ('__spins', ctypes.c_int16),
+  ('__elision', ctypes.c_int16),
+  ('__list', struct___pthread_internal_list),
+]
+pthread_mutex_t._fields_ = [
+  ('__data', struct___pthread_mutex_s),
+  ('__size', (ctypes.c_char * 40)),
+  ('__align', ctypes.c_int64),
+]
+cache_key = (ctypes.c_ubyte * 20)
+struct_ir3_shader._anonymous_ = ['_0']
+struct_ir3_shader._fields_ = [
+  ('type', gl_shader_stage),
+  ('id', uint32_t),
+  ('variant_count', uint32_t),
+  ('initial_variants_done', ctypes.c_bool),
+  ('compiler', ctypes.POINTER(struct_ir3_compiler)),
+  ('options', struct_ir3_shader_options),
+  ('nir_finalized', ctypes.c_bool),
+  ('nir', ctypes.POINTER(struct_nir_shader)),
+  ('stream_output', struct_ir3_stream_output_info),
+  ('_0', struct_ir3_shader_0),
+  ('variants', ctypes.POINTER(struct_ir3_shader_variant)),
+  ('variants_lock', mtx_t),
+  ('cache_key', cache_key),
+  ('key_mask', struct_ir3_shader_key),
+]
+try: (ir3_const_ensure_imm_size:=dll.ir3_const_ensure_imm_size).restype, ir3_const_ensure_imm_size.argtypes = ctypes.c_bool, [ctypes.POINTER(struct_ir3_shader_variant), ctypes.c_uint32]
+except AttributeError: pass
+
+try: (ir3_const_imm_index_to_reg:=dll.ir3_const_imm_index_to_reg).restype, ir3_const_imm_index_to_reg.argtypes = uint16_t, [ctypes.POINTER(struct_ir3_const_state), ctypes.c_uint32]
+except AttributeError: pass
+
+try: (ir3_const_find_imm:=dll.ir3_const_find_imm).restype, ir3_const_find_imm.argtypes = uint16_t, [ctypes.POINTER(struct_ir3_shader_variant), uint32_t]
+except AttributeError: pass
+
+try: (ir3_const_add_imm:=dll.ir3_const_add_imm).restype, ir3_const_add_imm.argtypes = uint16_t, [ctypes.POINTER(struct_ir3_shader_variant), uint32_t]
+except AttributeError: pass
+
+try: (ir3_shader_assemble:=dll.ir3_shader_assemble).restype, ir3_shader_assemble.argtypes = ctypes.c_void_p, [ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_shader_create_variant:=dll.ir3_shader_create_variant).restype, ir3_shader_create_variant.argtypes = ctypes.POINTER(struct_ir3_shader_variant), [ctypes.POINTER(struct_ir3_shader), ctypes.POINTER(struct_ir3_shader_key), ctypes.c_bool]
+except AttributeError: pass
+
+try: (ir3_shader_get_variant:=dll.ir3_shader_get_variant).restype, ir3_shader_get_variant.argtypes = ctypes.POINTER(struct_ir3_shader_variant), [ctypes.POINTER(struct_ir3_shader), ctypes.POINTER(struct_ir3_shader_key), ctypes.c_bool, ctypes.c_bool, ctypes.POINTER(ctypes.c_bool)]
+except AttributeError: pass
+
+try: (ir3_shader_from_nir:=dll.ir3_shader_from_nir).restype, ir3_shader_from_nir.argtypes = ctypes.POINTER(struct_ir3_shader), [ctypes.POINTER(struct_ir3_compiler), ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_options), ctypes.POINTER(struct_ir3_stream_output_info)]
+except AttributeError: pass
+
+try: (ir3_trim_constlen:=dll.ir3_trim_constlen).restype, ir3_trim_constlen.argtypes = uint32_t, [ctypes.POINTER(ctypes.POINTER(struct_ir3_shader_variant)), ctypes.POINTER(struct_ir3_compiler)]
+except AttributeError: pass
+
+try: (ir3_shader_passthrough_tcs:=dll.ir3_shader_passthrough_tcs).restype, ir3_shader_passthrough_tcs.argtypes = ctypes.POINTER(struct_ir3_shader), [ctypes.POINTER(struct_ir3_shader), ctypes.c_uint32]
+except AttributeError: pass
+
+try: (ir3_shader_destroy:=dll.ir3_shader_destroy).restype, ir3_shader_destroy.argtypes = None, [ctypes.POINTER(struct_ir3_shader)]
+except AttributeError: pass
+
+try: (ir3_shader_disasm:=dll.ir3_shader_disasm).restype, ir3_shader_disasm.argtypes = None, [ctypes.POINTER(struct_ir3_shader_variant), ctypes.POINTER(uint32_t), ctypes.POINTER(FILE)]
+except AttributeError: pass
+
+try: (ir3_shader_outputs:=dll.ir3_shader_outputs).restype, ir3_shader_outputs.argtypes = uint64_t, [ctypes.POINTER(struct_ir3_shader)]
+except AttributeError: pass
+
+try: (ir3_glsl_type_size:=dll.ir3_glsl_type_size).restype, ir3_glsl_type_size.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_glsl_type), ctypes.c_bool]
+except AttributeError: pass
+
+try: (ir3_shader_get_subgroup_size:=dll.ir3_shader_get_subgroup_size).restype, ir3_shader_get_subgroup_size.argtypes = None, [ctypes.POINTER(struct_ir3_compiler), ctypes.POINTER(struct_ir3_shader_options), gl_shader_stage, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
+except AttributeError: pass
+
+class struct_ir3_shader_linkage(Struct): pass
+class struct_ir3_shader_linkage_var(Struct): pass
+struct_ir3_shader_linkage_var._fields_ = [
+  ('slot', uint8_t),
+  ('regid', uint8_t),
+  ('compmask', uint8_t),
+  ('loc', uint8_t),
+]
+struct_ir3_shader_linkage._fields_ = [
+  ('max_loc', uint8_t),
+  ('cnt', uint8_t),
+  ('varmask', (uint32_t * 4)),
+  ('var', (struct_ir3_shader_linkage_var * 32)),
+  ('primid_loc', uint8_t),
+  ('viewid_loc', uint8_t),
+  ('clip0_loc', uint8_t),
+  ('clip1_loc', uint8_t),
+]
+try: (print_raw:=dll.print_raw).restype, print_raw.argtypes = None, [ctypes.POINTER(FILE), ctypes.POINTER(ctypes.c_uint32), size_t]
+except AttributeError: pass
+
+try: (ir3_link_stream_out:=dll.ir3_link_stream_out).restype, ir3_link_stream_out.argtypes = None, [ctypes.POINTER(struct_ir3_shader_linkage), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_nir_apply_trig_workarounds:=dll.ir3_nir_apply_trig_workarounds).restype, ir3_nir_apply_trig_workarounds.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_imul:=dll.ir3_nir_lower_imul).restype, ir3_nir_lower_imul.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_io_offsets:=dll.ir3_nir_lower_io_offsets).restype, ir3_nir_lower_io_offsets.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_load_barycentric_at_sample:=dll.ir3_nir_lower_load_barycentric_at_sample).restype, ir3_nir_lower_load_barycentric_at_sample.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_load_barycentric_at_offset:=dll.ir3_nir_lower_load_barycentric_at_offset).restype, ir3_nir_lower_load_barycentric_at_offset.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_push_consts_to_preamble:=dll.ir3_nir_lower_push_consts_to_preamble).restype, ir3_nir_lower_push_consts_to_preamble.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_driver_params_to_ubo:=dll.ir3_nir_lower_driver_params_to_ubo).restype, ir3_nir_lower_driver_params_to_ubo.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_nir_move_varying_inputs:=dll.ir3_nir_move_varying_inputs).restype, ir3_nir_move_varying_inputs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_coord_offset:=dll.ir3_nir_coord_offset).restype, ir3_nir_coord_offset.argtypes = ctypes.c_int32, [ctypes.POINTER(nir_def), ctypes.POINTER(gl_system_value)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_tex_prefetch:=dll.ir3_nir_lower_tex_prefetch).restype, ir3_nir_lower_tex_prefetch.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(enum_ir3_bary)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_layer_id:=dll.ir3_nir_lower_layer_id).restype, ir3_nir_lower_layer_id.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_frag_shading_rate:=dll.ir3_nir_lower_frag_shading_rate).restype, ir3_nir_lower_frag_shading_rate.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_primitive_shading_rate:=dll.ir3_nir_lower_primitive_shading_rate).restype, ir3_nir_lower_primitive_shading_rate.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_to_explicit_output:=dll.ir3_nir_lower_to_explicit_output).restype, ir3_nir_lower_to_explicit_output.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant), ctypes.c_uint32]
+except AttributeError: pass
+
+try: (ir3_nir_lower_to_explicit_input:=dll.ir3_nir_lower_to_explicit_input).restype, ir3_nir_lower_to_explicit_input.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_tess_ctrl:=dll.ir3_nir_lower_tess_ctrl).restype, ir3_nir_lower_tess_ctrl.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant), ctypes.c_uint32]
+except AttributeError: pass
+
+try: (ir3_nir_lower_tess_eval:=dll.ir3_nir_lower_tess_eval).restype, ir3_nir_lower_tess_eval.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant), ctypes.c_uint32]
+except AttributeError: pass
+
+try: (ir3_nir_lower_gs:=dll.ir3_nir_lower_gs).restype, ir3_nir_lower_gs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_supports_vectorized_nir_op:=dll.ir3_supports_vectorized_nir_op).restype, ir3_supports_vectorized_nir_op.argtypes = ctypes.c_bool, [nir_op]
+except AttributeError: pass
+
+try: (ir3_nir_vectorize_filter:=dll.ir3_nir_vectorize_filter).restype, ir3_nir_vectorize_filter.argtypes = uint8_t, [ctypes.POINTER(nir_instr), ctypes.c_void_p]
+except AttributeError: pass
+
+try: (ir3_nir_lower_64b_intrinsics:=dll.ir3_nir_lower_64b_intrinsics).restype, ir3_nir_lower_64b_intrinsics.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_64b_undef:=dll.ir3_nir_lower_64b_undef).restype, ir3_nir_lower_64b_undef.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_64b_global:=dll.ir3_nir_lower_64b_global).restype, ir3_nir_lower_64b_global.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_64b_regs:=dll.ir3_nir_lower_64b_regs).restype, ir3_nir_lower_64b_regs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_mem_access_size_align:=dll.ir3_mem_access_size_align).restype, ir3_mem_access_size_align.argtypes = nir_mem_access_size_align, [nir_intrinsic_op, uint8_t, uint8_t, uint32_t, uint32_t, ctypes.c_bool, enum_gl_access_qualifier, ctypes.c_void_p]
+except AttributeError: pass
+
+try: (ir3_nir_opt_branch_and_or_not:=dll.ir3_nir_opt_branch_and_or_not).restype, ir3_nir_opt_branch_and_or_not.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_opt_triops_bitwise:=dll.ir3_nir_opt_triops_bitwise).restype, ir3_nir_opt_triops_bitwise.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_optimize_loop:=dll.ir3_optimize_loop).restype, ir3_optimize_loop.argtypes = ctypes.c_bool, [ctypes.POINTER(struct_ir3_compiler), ctypes.POINTER(struct_ir3_shader_nir_options), ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_io_vars_to_temporaries:=dll.ir3_nir_lower_io_vars_to_temporaries).restype, ir3_nir_lower_io_vars_to_temporaries.argtypes = None, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_finalize_nir:=dll.ir3_finalize_nir).restype, ir3_finalize_nir.argtypes = None, [ctypes.POINTER(struct_ir3_compiler), ctypes.POINTER(struct_ir3_shader_nir_options), ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_post_finalize:=dll.ir3_nir_post_finalize).restype, ir3_nir_post_finalize.argtypes = None, [ctypes.POINTER(struct_ir3_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_variant:=dll.ir3_nir_lower_variant).restype, ir3_nir_lower_variant.argtypes = None, [ctypes.POINTER(struct_ir3_shader_variant), ctypes.POINTER(struct_ir3_shader_nir_options), ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_setup_const_state:=dll.ir3_setup_const_state).restype, ir3_setup_const_state.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant), ctypes.POINTER(struct_ir3_const_state)]
+except AttributeError: pass
+
+try: (ir3_const_state_get_free_space:=dll.ir3_const_state_get_free_space).restype, ir3_const_state_get_free_space.argtypes = uint32_t, [ctypes.POINTER(struct_ir3_shader_variant), ctypes.POINTER(struct_ir3_const_state), uint32_t]
+except AttributeError: pass
+
+try: (ir3_const_alloc:=dll.ir3_const_alloc).restype, ir3_const_alloc.argtypes = None, [ctypes.POINTER(struct_ir3_const_allocations), enum_ir3_const_alloc_type, uint32_t, uint32_t]
+except AttributeError: pass
+
+try: (ir3_const_reserve_space:=dll.ir3_const_reserve_space).restype, ir3_const_reserve_space.argtypes = None, [ctypes.POINTER(struct_ir3_const_allocations), enum_ir3_const_alloc_type, uint32_t, uint32_t]
+except AttributeError: pass
+
+try: (ir3_const_free_reserved_space:=dll.ir3_const_free_reserved_space).restype, ir3_const_free_reserved_space.argtypes = None, [ctypes.POINTER(struct_ir3_const_allocations), enum_ir3_const_alloc_type]
+except AttributeError: pass
+
+try: (ir3_const_alloc_all_reserved_space:=dll.ir3_const_alloc_all_reserved_space).restype, ir3_const_alloc_all_reserved_space.argtypes = None, [ctypes.POINTER(struct_ir3_const_allocations)]
+except AttributeError: pass
+
+try: (ir3_nir_scan_driver_consts:=dll.ir3_nir_scan_driver_consts).restype, ir3_nir_scan_driver_consts.argtypes = uint32_t, [ctypes.POINTER(struct_ir3_compiler), ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_const_image_dims)]
+except AttributeError: pass
+
+try: (ir3_alloc_driver_params:=dll.ir3_alloc_driver_params).restype, ir3_alloc_driver_params.argtypes = None, [ctypes.POINTER(struct_ir3_const_allocations), ctypes.POINTER(uint32_t), ctypes.POINTER(struct_ir3_compiler), enum_pipe_shader_type]
+except AttributeError: pass
+
+try: (ir3_nir_lower_load_constant:=dll.ir3_nir_lower_load_constant).restype, ir3_nir_lower_load_constant.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_nir_analyze_ubo_ranges:=dll.ir3_nir_analyze_ubo_ranges).restype, ir3_nir_analyze_ubo_ranges.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_ubo_loads:=dll.ir3_nir_lower_ubo_loads).restype, ir3_nir_lower_ubo_loads.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_const_global_loads:=dll.ir3_nir_lower_const_global_loads).restype, ir3_nir_lower_const_global_loads.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_nir_fixup_load_const_ir3:=dll.ir3_nir_fixup_load_const_ir3).restype, ir3_nir_fixup_load_const_ir3.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_opt_preamble:=dll.ir3_nir_opt_preamble).restype, ir3_nir_opt_preamble.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_nir_opt_prefetch_descriptors:=dll.ir3_nir_opt_prefetch_descriptors).restype, ir3_nir_opt_prefetch_descriptors.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_nir_lower_preamble:=dll.ir3_nir_lower_preamble).restype, ir3_nir_lower_preamble.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_nir_try_propagate_bit_shift:=dll.ir3_nir_try_propagate_bit_shift).restype, ir3_nir_try_propagate_bit_shift.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_def), int32_t]
+except AttributeError: pass
+
+try: (ir3_nir_lower_subgroups_filter:=dll.ir3_nir_lower_subgroups_filter).restype, ir3_nir_lower_subgroups_filter.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_instr), ctypes.c_void_p]
+except AttributeError: pass
+
+try: (ir3_nir_lower_shuffle:=dll.ir3_nir_lower_shuffle).restype, ir3_nir_lower_shuffle.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader)]
+except AttributeError: pass
+
+try: (ir3_nir_opt_subgroups:=dll.ir3_nir_opt_subgroups).restype, ir3_nir_opt_subgroups.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_get_shared_driver_ubo:=dll.ir3_get_shared_driver_ubo).restype, ir3_get_shared_driver_ubo.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(struct_ir3_driver_ubo)]
+except AttributeError: pass
+
+try: (ir3_get_driver_ubo:=dll.ir3_get_driver_ubo).restype, ir3_get_driver_ubo.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(struct_ir3_driver_ubo)]
+except AttributeError: pass
+
+try: (ir3_get_driver_consts_ubo:=dll.ir3_get_driver_consts_ubo).restype, ir3_get_driver_consts_ubo.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(struct_ir3_shader_variant)]
+except AttributeError: pass
+
+try: (ir3_update_driver_ubo:=dll.ir3_update_driver_ubo).restype, ir3_update_driver_ubo.argtypes = None, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_driver_ubo), ctypes.POINTER(ctypes.c_char)]
+except AttributeError: pass
+
+try: (ir3_load_shared_driver_ubo:=dll.ir3_load_shared_driver_ubo).restype, ir3_load_shared_driver_ubo.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.c_uint32, ctypes.POINTER(struct_ir3_driver_ubo), ctypes.c_uint32]
+except AttributeError: pass
+
+try: (ir3_load_driver_ubo:=dll.ir3_load_driver_ubo).restype, ir3_load_driver_ubo.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.c_uint32, ctypes.POINTER(struct_ir3_driver_ubo), ctypes.c_uint32]
+except AttributeError: pass
+
+try: (ir3_load_driver_ubo_indirect:=dll.ir3_load_driver_ubo_indirect).restype, ir3_load_driver_ubo_indirect.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.c_uint32, ctypes.POINTER(struct_ir3_driver_ubo), ctypes.c_uint32, ctypes.POINTER(nir_def), ctypes.c_uint32]
+except AttributeError: pass
+
+try: (ir3_def_is_rematerializable_for_preamble:=dll.ir3_def_is_rematerializable_for_preamble).restype, ir3_def_is_rematerializable_for_preamble.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_def), ctypes.POINTER(ctypes.POINTER(nir_def))]
+except AttributeError: pass
+
+try: (ir3_rematerialize_def_for_preamble:=dll.ir3_rematerialize_def_for_preamble).restype, ir3_rematerialize_def_for_preamble.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_def), ctypes.POINTER(struct_set), ctypes.POINTER(ctypes.POINTER(nir_def))]
+except AttributeError: pass
+
+class struct_driver_param_info(Struct): pass
+struct_driver_param_info._fields_ = [
+  ('offset', uint32_t),
+  ('extra_size', uint32_t),
+]
+try: (ir3_get_driver_param_info:=dll.ir3_get_driver_param_info).restype, ir3_get_driver_param_info.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_intrinsic_instr), ctypes.POINTER(struct_driver_param_info)]
+except AttributeError: pass
+
+try: (ir3_nir_max_imm_offset:=dll.ir3_nir_max_imm_offset).restype, ir3_nir_max_imm_offset.argtypes = uint32_t, [ctypes.POINTER(nir_intrinsic_instr), ctypes.c_void_p]
+except AttributeError: pass
+
+try: (ir3_nir_intrinsic_barycentric_sysval:=dll.ir3_nir_intrinsic_barycentric_sysval).restype, ir3_nir_intrinsic_barycentric_sysval.argtypes = gl_system_value, [ctypes.POINTER(nir_intrinsic_instr)]
+except AttributeError: pass
+
 try: (glsl_type_singleton_init_or_ref:=dll.glsl_type_singleton_init_or_ref).restype, glsl_type_singleton_init_or_ref.argtypes = None, []
 except AttributeError: pass
 
@@ -7723,6 +9378,1629 @@ RALLOC_PRINT_INFO_SUMMARY_ONLY = _anonenum7.define('RALLOC_PRINT_INFO_SUMMARY_ON
 try: (ralloc_print_info:=dll.ralloc_print_info).restype, ralloc_print_info.argtypes = None, [ctypes.POINTER(FILE), ctypes.c_void_p, ctypes.c_uint32]
 except AttributeError: pass
 
+class struct_isa_decode_options(Struct): pass
+class struct_isa_decode_value(Struct): pass
+struct_isa_decode_value._fields_ = [
+  ('str', ctypes.POINTER(ctypes.c_char)),
+  ('num', uint64_t),
+]
+class struct_isa_print_state(Struct): pass
+struct_isa_print_state._fields_ = [
+  ('out', ctypes.POINTER(FILE)),
+  ('line_column', ctypes.c_uint32),
+]
+class struct_isa_entrypoint(Struct): pass
+struct_isa_entrypoint._fields_ = [
+  ('name', ctypes.POINTER(ctypes.c_char)),
+  ('offset', uint32_t),
+]
+struct_isa_decode_options._fields_ = [
+  ('gpu_id', uint32_t),
+  ('show_errors', ctypes.c_bool),
+  ('max_errors', ctypes.c_uint32),
+  ('branch_labels', ctypes.c_bool),
+  ('stop', ctypes.c_bool),
+  ('cbdata', ctypes.c_void_p),
+  ('field_cb', ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(struct_isa_decode_value))),
+  ('field_print_cb', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_isa_print_state), ctypes.POINTER(ctypes.c_char), uint64_t)),
+  ('pre_instr_cb', ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p)),
+  ('post_instr_cb', ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p)),
+  ('no_match_cb', ctypes.CFUNCTYPE(None, ctypes.POINTER(FILE), ctypes.POINTER(ctypes.c_uint32), size_t)),
+  ('entrypoint_count', ctypes.c_uint32),
+  ('entrypoints', ctypes.POINTER(struct_isa_entrypoint)),
+]
+try: (ir3_isa_disasm:=dll.ir3_isa_disasm).restype, ir3_isa_disasm.argtypes = None, [ctypes.c_void_p, ctypes.c_int32, ctypes.POINTER(FILE), ctypes.POINTER(struct_isa_decode_options)]
+except AttributeError: pass
+
+try: (ir3_isa_decode:=dll.ir3_isa_decode).restype, ir3_isa_decode.argtypes = ctypes.c_bool, [ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(struct_isa_decode_options)]
+except AttributeError: pass
+
+class struct_decode_scope(Struct): pass
+try: (ir3_isa_get_gpu_id:=dll.ir3_isa_get_gpu_id).restype, ir3_isa_get_gpu_id.argtypes = uint32_t, [ctypes.POINTER(struct_decode_scope)]
+except AttributeError: pass
+
+try: glsl_type_builtin_error = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_error')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_void = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_void')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_bool = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_bool')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_bvec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_bvec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_bvec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_bvec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_bvec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_bvec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_bvec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_bvec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_bvec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_bvec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_bvec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_bvec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_int = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_int')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_ivec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_ivec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_ivec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_ivec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_ivec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_ivec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_ivec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_ivec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_ivec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_ivec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_ivec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_ivec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uint = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uint')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uvec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uvec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uvec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uvec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uvec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uvec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uvec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uvec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uvec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uvec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uvec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uvec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_float = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_float')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_float16_t = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_float16_t')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16vec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16vec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16vec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16vec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16vec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16vec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16vec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16vec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16vec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16vec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16vec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16vec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_double = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_double')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dvec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dvec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dvec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dvec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dvec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dvec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dvec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dvec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dvec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dvec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dvec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dvec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_int64_t = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_int64_t')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64vec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64vec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64vec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64vec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64vec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64vec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64vec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64vec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64vec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64vec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64vec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64vec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uint64_t = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uint64_t')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64vec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64vec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64vec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64vec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64vec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64vec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64vec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64vec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64vec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64vec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64vec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64vec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_int16_t = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_int16_t')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i16vec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i16vec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i16vec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i16vec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i16vec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i16vec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i16vec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i16vec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i16vec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i16vec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i16vec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i16vec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uint16_t = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uint16_t')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u16vec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u16vec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u16vec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u16vec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u16vec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u16vec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u16vec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u16vec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u16vec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u16vec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u16vec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u16vec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_int8_t = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_int8_t')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i8vec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i8vec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i8vec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i8vec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i8vec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i8vec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i8vec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i8vec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i8vec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i8vec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i8vec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i8vec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uint8_t = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uint8_t')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u8vec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u8vec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u8vec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u8vec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u8vec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u8vec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u8vec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u8vec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u8vec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u8vec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u8vec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u8vec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_bfloat16_t = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_bfloat16_t')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_bf16vec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_bf16vec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_bf16vec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_bf16vec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_bf16vec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_bf16vec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_bf16vec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_bf16vec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_bf16vec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_bf16vec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_bf16vec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_bf16vec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_e4m3fn_t = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_e4m3fn_t')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_e4m3fnvec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_e4m3fnvec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_e4m3fnvec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_e4m3fnvec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_e4m3fnvec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_e4m3fnvec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_e4m3fnvec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_e4m3fnvec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_e4m3fnvec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_e4m3fnvec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_e4m3fnvec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_e4m3fnvec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_e5m2_t = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_e5m2_t')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_e5m2vec2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_e5m2vec2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_e5m2vec3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_e5m2vec3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_e5m2vec4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_e5m2vec4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_e5m2vec5 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_e5m2vec5')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_e5m2vec8 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_e5m2vec8')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_e5m2vec16 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_e5m2vec16')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_mat2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_mat2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_mat3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_mat3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_mat4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_mat4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_mat2x3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_mat2x3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_mat2x4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_mat2x4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_mat3x2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_mat3x2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_mat3x4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_mat3x4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_mat4x2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_mat4x2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_mat4x3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_mat4x3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16mat2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16mat2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16mat3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16mat3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16mat4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16mat4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16mat2x3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16mat2x3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16mat2x4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16mat2x4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16mat3x2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16mat3x2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16mat3x4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16mat3x4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16mat4x2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16mat4x2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_f16mat4x3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_f16mat4x3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dmat2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dmat2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dmat3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dmat3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dmat4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dmat4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dmat2x3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dmat2x3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dmat2x4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dmat2x4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dmat3x2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dmat3x2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dmat3x4 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dmat3x4')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dmat4x2 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dmat4x2')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_dmat4x3 = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_dmat4x3')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_atomic_uint = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_atomic_uint')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_sampler = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_sampler')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_sampler1D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_sampler1D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_sampler2D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_sampler2D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_sampler3D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_sampler3D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_samplerCube = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_samplerCube')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_sampler1DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_sampler1DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_sampler2DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_sampler2DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_samplerCubeArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_samplerCubeArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_sampler2DRect = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_sampler2DRect')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_samplerBuffer = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_samplerBuffer')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_sampler2DMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_sampler2DMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_sampler2DMSArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_sampler2DMSArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_isampler1D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_isampler1D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_isampler2D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_isampler2D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_isampler3D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_isampler3D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_isamplerCube = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_isamplerCube')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_isampler1DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_isampler1DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_isampler2DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_isampler2DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_isamplerCubeArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_isamplerCubeArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_isampler2DRect = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_isampler2DRect')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_isamplerBuffer = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_isamplerBuffer')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_isampler2DMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_isampler2DMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_isampler2DMSArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_isampler2DMSArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_usampler1D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_usampler1D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_usampler2D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_usampler2D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_usampler3D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_usampler3D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_usamplerCube = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_usamplerCube')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_usampler1DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_usampler1DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_usampler2DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_usampler2DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_usamplerCubeArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_usamplerCubeArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_usampler2DRect = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_usampler2DRect')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_usamplerBuffer = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_usamplerBuffer')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_usampler2DMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_usampler2DMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_usampler2DMSArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_usampler2DMSArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_samplerShadow = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_samplerShadow')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_sampler1DShadow = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_sampler1DShadow')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_sampler2DShadow = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_sampler2DShadow')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_samplerCubeShadow = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_samplerCubeShadow')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_sampler1DArrayShadow = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_sampler1DArrayShadow')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_sampler2DArrayShadow = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_sampler2DArrayShadow')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_samplerCubeArrayShadow = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_samplerCubeArrayShadow')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_sampler2DRectShadow = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_sampler2DRectShadow')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_samplerExternalOES = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_samplerExternalOES')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_texture1D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_texture1D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_texture2D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_texture2D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_texture3D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_texture3D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_textureCube = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_textureCube')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_texture1DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_texture1DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_texture2DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_texture2DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_textureCubeArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_textureCubeArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_texture2DRect = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_texture2DRect')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_textureBuffer = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_textureBuffer')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_texture2DMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_texture2DMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_texture2DMSArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_texture2DMSArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_itexture1D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_itexture1D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_itexture2D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_itexture2D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_itexture3D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_itexture3D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_itextureCube = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_itextureCube')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_itexture1DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_itexture1DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_itexture2DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_itexture2DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_itextureCubeArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_itextureCubeArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_itexture2DRect = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_itexture2DRect')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_itextureBuffer = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_itextureBuffer')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_itexture2DMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_itexture2DMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_itexture2DMSArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_itexture2DMSArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_utexture1D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_utexture1D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_utexture2D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_utexture2D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_utexture3D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_utexture3D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_utextureCube = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_utextureCube')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_utexture1DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_utexture1DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_utexture2DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_utexture2DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_utextureCubeArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_utextureCubeArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_utexture2DRect = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_utexture2DRect')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_utextureBuffer = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_utextureBuffer')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_utexture2DMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_utexture2DMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_utexture2DMSArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_utexture2DMSArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_textureExternalOES = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_textureExternalOES')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vtexture1D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vtexture1D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vtexture2D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vtexture2D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vtexture3D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vtexture3D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vtexture2DMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vtexture2DMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vtexture2DMSArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vtexture2DMSArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vtexture1DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vtexture1DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vtexture2DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vtexture2DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vtextureBuffer = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vtextureBuffer')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_image1D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_image1D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_image2D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_image2D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_image3D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_image3D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_image2DRect = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_image2DRect')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_imageCube = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_imageCube')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_imageBuffer = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_imageBuffer')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_image1DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_image1DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_image2DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_image2DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_imageCubeArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_imageCubeArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_image2DMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_image2DMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_image2DMSArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_image2DMSArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_iimage1D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_iimage1D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_iimage2D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_iimage2D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_iimage3D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_iimage3D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_iimage2DRect = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_iimage2DRect')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_iimageCube = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_iimageCube')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_iimageBuffer = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_iimageBuffer')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_iimage1DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_iimage1DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_iimage2DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_iimage2DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_iimageCubeArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_iimageCubeArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_iimage2DMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_iimage2DMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_iimage2DMSArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_iimage2DMSArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uimage1D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uimage1D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uimage2D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uimage2D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uimage3D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uimage3D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uimage2DRect = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uimage2DRect')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uimageCube = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uimageCube')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uimageBuffer = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uimageBuffer')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uimage1DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uimage1DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uimage2DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uimage2DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uimageCubeArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uimageCubeArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uimage2DMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uimage2DMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_uimage2DMSArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_uimage2DMSArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64image1D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64image1D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64image2D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64image2D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64image3D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64image3D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64image2DRect = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64image2DRect')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64imageCube = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64imageCube')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64imageBuffer = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64imageBuffer')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64image1DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64image1DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64image2DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64image2DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64imageCubeArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64imageCubeArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64image2DMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64image2DMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_i64image2DMSArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_i64image2DMSArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64image1D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64image1D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64image2D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64image2D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64image3D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64image3D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64image2DRect = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64image2DRect')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64imageCube = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64imageCube')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64imageBuffer = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64imageBuffer')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64image1DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64image1DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64image2DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64image2DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64imageCubeArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64imageCubeArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64image2DMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64image2DMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_u64image2DMSArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_u64image2DMSArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vbuffer = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vbuffer')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vimage1D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vimage1D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vimage2D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vimage2D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vimage3D = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vimage3D')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vimage2DMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vimage2DMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vimage2DMSArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vimage2DMSArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vimage1DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vimage1DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_vimage2DArray = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_vimage2DArray')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_subpassInput = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_subpassInput')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_subpassInputMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_subpassInputMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_isubpassInput = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_isubpassInput')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_isubpassInputMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_isubpassInputMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_usubpassInput = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_usubpassInput')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_usubpassInputMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_usubpassInputMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_textureSubpassInput = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_textureSubpassInput')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_textureSubpassInputMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_textureSubpassInputMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_itextureSubpassInput = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_itextureSubpassInput')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_itextureSubpassInputMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_itextureSubpassInputMS')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_utextureSubpassInput = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_utextureSubpassInput')
+except (ValueError,AttributeError): pass
+try: glsl_type_builtin_utextureSubpassInputMS = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_utextureSubpassInputMS')
+except (ValueError,AttributeError): pass
+enum_a6xx_shift_amount = CEnum(ctypes.c_uint32)
+NO_SHIFT = enum_a6xx_shift_amount.define('NO_SHIFT', 0)
+HALF_PIXEL_SHIFT = enum_a6xx_shift_amount.define('HALF_PIXEL_SHIFT', 1)
+FULL_PIXEL_SHIFT = enum_a6xx_shift_amount.define('FULL_PIXEL_SHIFT', 2)
+
+enum_a6xx_sequenced_thread_dist = CEnum(ctypes.c_uint32)
+DIST_SCREEN_COORD = enum_a6xx_sequenced_thread_dist.define('DIST_SCREEN_COORD', 0)
+DIST_ALL_TO_RB0 = enum_a6xx_sequenced_thread_dist.define('DIST_ALL_TO_RB0', 1)
+
+enum_a6xx_single_prim_mode = CEnum(ctypes.c_uint32)
+NO_FLUSH = enum_a6xx_single_prim_mode.define('NO_FLUSH', 0)
+FLUSH_PER_OVERLAP_AND_OVERWRITE = enum_a6xx_single_prim_mode.define('FLUSH_PER_OVERLAP_AND_OVERWRITE', 1)
+FLUSH_PER_OVERLAP = enum_a6xx_single_prim_mode.define('FLUSH_PER_OVERLAP', 3)
+
+enum_a6xx_raster_mode = CEnum(ctypes.c_uint32)
+TYPE_TILED = enum_a6xx_raster_mode.define('TYPE_TILED', 0)
+TYPE_WRITER = enum_a6xx_raster_mode.define('TYPE_WRITER', 1)
+
+enum_a6xx_raster_direction = CEnum(ctypes.c_uint32)
+LR_TB = enum_a6xx_raster_direction.define('LR_TB', 0)
+RL_TB = enum_a6xx_raster_direction.define('RL_TB', 1)
+LR_BT = enum_a6xx_raster_direction.define('LR_BT', 2)
+RB_BT = enum_a6xx_raster_direction.define('RB_BT', 3)
+
+enum_a6xx_render_mode = CEnum(ctypes.c_uint32)
+RENDERING_PASS = enum_a6xx_render_mode.define('RENDERING_PASS', 0)
+BINNING_PASS = enum_a6xx_render_mode.define('BINNING_PASS', 1)
+
+enum_a6xx_buffers_location = CEnum(ctypes.c_uint32)
+BUFFERS_IN_GMEM = enum_a6xx_buffers_location.define('BUFFERS_IN_GMEM', 0)
+BUFFERS_IN_SYSMEM = enum_a6xx_buffers_location.define('BUFFERS_IN_SYSMEM', 3)
+
+enum_a6xx_lrz_feedback_mask = CEnum(ctypes.c_uint32)
+LRZ_FEEDBACK_NONE = enum_a6xx_lrz_feedback_mask.define('LRZ_FEEDBACK_NONE', 0)
+LRZ_FEEDBACK_EARLY_Z = enum_a6xx_lrz_feedback_mask.define('LRZ_FEEDBACK_EARLY_Z', 1)
+LRZ_FEEDBACK_EARLY_Z_LATE_Z = enum_a6xx_lrz_feedback_mask.define('LRZ_FEEDBACK_EARLY_Z_LATE_Z', 2)
+LRZ_FEEDBACK_EARLY_Z_OR_EARLY_Z_LATE_Z = enum_a6xx_lrz_feedback_mask.define('LRZ_FEEDBACK_EARLY_Z_OR_EARLY_Z_LATE_Z', 3)
+LRZ_FEEDBACK_LATE_Z = enum_a6xx_lrz_feedback_mask.define('LRZ_FEEDBACK_LATE_Z', 4)
+
+enum_a6xx_fsr_combiner = CEnum(ctypes.c_uint32)
+FSR_COMBINER_OP_KEEP = enum_a6xx_fsr_combiner.define('FSR_COMBINER_OP_KEEP', 0)
+FSR_COMBINER_OP_REPLACE = enum_a6xx_fsr_combiner.define('FSR_COMBINER_OP_REPLACE', 1)
+FSR_COMBINER_OP_MIN = enum_a6xx_fsr_combiner.define('FSR_COMBINER_OP_MIN', 2)
+FSR_COMBINER_OP_MAX = enum_a6xx_fsr_combiner.define('FSR_COMBINER_OP_MAX', 3)
+FSR_COMBINER_OP_MUL = enum_a6xx_fsr_combiner.define('FSR_COMBINER_OP_MUL', 4)
+
+enum_a6xx_lrz_dir_status = CEnum(ctypes.c_uint32)
+LRZ_DIR_LE = enum_a6xx_lrz_dir_status.define('LRZ_DIR_LE', 1)
+LRZ_DIR_GE = enum_a6xx_lrz_dir_status.define('LRZ_DIR_GE', 2)
+LRZ_DIR_INVALID = enum_a6xx_lrz_dir_status.define('LRZ_DIR_INVALID', 3)
+
+enum_a6xx_fragcoord_sample_mode = CEnum(ctypes.c_uint32)
+FRAGCOORD_CENTER = enum_a6xx_fragcoord_sample_mode.define('FRAGCOORD_CENTER', 0)
+FRAGCOORD_SAMPLE = enum_a6xx_fragcoord_sample_mode.define('FRAGCOORD_SAMPLE', 3)
+
+enum_a6xx_rotation = CEnum(ctypes.c_uint32)
+ROTATE_0 = enum_a6xx_rotation.define('ROTATE_0', 0)
+ROTATE_90 = enum_a6xx_rotation.define('ROTATE_90', 1)
+ROTATE_180 = enum_a6xx_rotation.define('ROTATE_180', 2)
+ROTATE_270 = enum_a6xx_rotation.define('ROTATE_270', 3)
+ROTATE_HFLIP = enum_a6xx_rotation.define('ROTATE_HFLIP', 4)
+ROTATE_VFLIP = enum_a6xx_rotation.define('ROTATE_VFLIP', 5)
+
+enum_a6xx_blit_event_type = CEnum(ctypes.c_uint32)
+BLIT_EVENT_STORE = enum_a6xx_blit_event_type.define('BLIT_EVENT_STORE', 0)
+BLIT_EVENT_STORE_AND_CLEAR = enum_a6xx_blit_event_type.define('BLIT_EVENT_STORE_AND_CLEAR', 1)
+BLIT_EVENT_CLEAR = enum_a6xx_blit_event_type.define('BLIT_EVENT_CLEAR', 2)
+BLIT_EVENT_LOAD = enum_a6xx_blit_event_type.define('BLIT_EVENT_LOAD', 3)
+
+enum_a7xx_blit_clear_mode = CEnum(ctypes.c_uint32)
+CLEAR_MODE_SYSMEM = enum_a7xx_blit_clear_mode.define('CLEAR_MODE_SYSMEM', 0)
+CLEAR_MODE_GMEM = enum_a7xx_blit_clear_mode.define('CLEAR_MODE_GMEM', 1)
+
+enum_a6xx_ccu_cache_size = CEnum(ctypes.c_uint32)
+CCU_CACHE_SIZE_FULL = enum_a6xx_ccu_cache_size.define('CCU_CACHE_SIZE_FULL', 0)
+CCU_CACHE_SIZE_HALF = enum_a6xx_ccu_cache_size.define('CCU_CACHE_SIZE_HALF', 1)
+CCU_CACHE_SIZE_QUARTER = enum_a6xx_ccu_cache_size.define('CCU_CACHE_SIZE_QUARTER', 2)
+CCU_CACHE_SIZE_EIGHTH = enum_a6xx_ccu_cache_size.define('CCU_CACHE_SIZE_EIGHTH', 3)
+
+enum_a7xx_concurrent_resolve_mode = CEnum(ctypes.c_uint32)
+CONCURRENT_RESOLVE_MODE_DISABLED = enum_a7xx_concurrent_resolve_mode.define('CONCURRENT_RESOLVE_MODE_DISABLED', 0)
+CONCURRENT_RESOLVE_MODE_1 = enum_a7xx_concurrent_resolve_mode.define('CONCURRENT_RESOLVE_MODE_1', 1)
+CONCURRENT_RESOLVE_MODE_2 = enum_a7xx_concurrent_resolve_mode.define('CONCURRENT_RESOLVE_MODE_2', 2)
+
+enum_a7xx_concurrent_unresolve_mode = CEnum(ctypes.c_uint32)
+CONCURRENT_UNRESOLVE_MODE_DISABLED = enum_a7xx_concurrent_unresolve_mode.define('CONCURRENT_UNRESOLVE_MODE_DISABLED', 0)
+CONCURRENT_UNRESOLVE_MODE_PARTIAL = enum_a7xx_concurrent_unresolve_mode.define('CONCURRENT_UNRESOLVE_MODE_PARTIAL', 1)
+CONCURRENT_UNRESOLVE_MODE_FULL = enum_a7xx_concurrent_unresolve_mode.define('CONCURRENT_UNRESOLVE_MODE_FULL', 3)
+
+enum_a6xx_varying_interp_mode = CEnum(ctypes.c_uint32)
+INTERP_SMOOTH = enum_a6xx_varying_interp_mode.define('INTERP_SMOOTH', 0)
+INTERP_FLAT = enum_a6xx_varying_interp_mode.define('INTERP_FLAT', 1)
+INTERP_ZERO = enum_a6xx_varying_interp_mode.define('INTERP_ZERO', 2)
+INTERP_ONE = enum_a6xx_varying_interp_mode.define('INTERP_ONE', 3)
+
+enum_a6xx_varying_ps_repl_mode = CEnum(ctypes.c_uint32)
+PS_REPL_NONE = enum_a6xx_varying_ps_repl_mode.define('PS_REPL_NONE', 0)
+PS_REPL_S = enum_a6xx_varying_ps_repl_mode.define('PS_REPL_S', 1)
+PS_REPL_T = enum_a6xx_varying_ps_repl_mode.define('PS_REPL_T', 2)
+PS_REPL_ONE_MINUS_T = enum_a6xx_varying_ps_repl_mode.define('PS_REPL_ONE_MINUS_T', 3)
+
+enum_a6xx_threadsize = CEnum(ctypes.c_uint32)
+THREAD64 = enum_a6xx_threadsize.define('THREAD64', 0)
+THREAD128 = enum_a6xx_threadsize.define('THREAD128', 1)
+
+enum_a6xx_const_ram_mode = CEnum(ctypes.c_uint32)
+CONSTLEN_128 = enum_a6xx_const_ram_mode.define('CONSTLEN_128', 0)
+CONSTLEN_192 = enum_a6xx_const_ram_mode.define('CONSTLEN_192', 1)
+CONSTLEN_256 = enum_a6xx_const_ram_mode.define('CONSTLEN_256', 2)
+CONSTLEN_512 = enum_a6xx_const_ram_mode.define('CONSTLEN_512', 3)
+
+enum_a7xx_workitem_rast_order = CEnum(ctypes.c_uint32)
+WORKITEMRASTORDER_LINEAR = enum_a7xx_workitem_rast_order.define('WORKITEMRASTORDER_LINEAR', 0)
+WORKITEMRASTORDER_TILED = enum_a7xx_workitem_rast_order.define('WORKITEMRASTORDER_TILED', 1)
+
+enum_a6xx_bindless_descriptor_size = CEnum(ctypes.c_uint32)
+BINDLESS_DESCRIPTOR_16B = enum_a6xx_bindless_descriptor_size.define('BINDLESS_DESCRIPTOR_16B', 1)
+BINDLESS_DESCRIPTOR_64B = enum_a6xx_bindless_descriptor_size.define('BINDLESS_DESCRIPTOR_64B', 3)
+
+enum_a6xx_isam_mode = CEnum(ctypes.c_uint32)
+ISAMMODE_CL = enum_a6xx_isam_mode.define('ISAMMODE_CL', 1)
+ISAMMODE_GL = enum_a6xx_isam_mode.define('ISAMMODE_GL', 2)
+
+enum_a6xx_sp_a2d_output_ifmt_type = CEnum(ctypes.c_uint32)
+OUTPUT_IFMT_2D_FLOAT = enum_a6xx_sp_a2d_output_ifmt_type.define('OUTPUT_IFMT_2D_FLOAT', 0)
+OUTPUT_IFMT_2D_SINT = enum_a6xx_sp_a2d_output_ifmt_type.define('OUTPUT_IFMT_2D_SINT', 1)
+OUTPUT_IFMT_2D_UINT = enum_a6xx_sp_a2d_output_ifmt_type.define('OUTPUT_IFMT_2D_UINT', 2)
+
+enum_a6xx_coord_round = CEnum(ctypes.c_uint32)
+COORD_TRUNCATE = enum_a6xx_coord_round.define('COORD_TRUNCATE', 0)
+COORD_ROUND_NEAREST_EVEN = enum_a6xx_coord_round.define('COORD_ROUND_NEAREST_EVEN', 1)
+
+enum_a6xx_nearest_mode = CEnum(ctypes.c_uint32)
+ROUND_CLAMP_TRUNCATE = enum_a6xx_nearest_mode.define('ROUND_CLAMP_TRUNCATE', 0)
+CLAMP_ROUND_TRUNCATE = enum_a6xx_nearest_mode.define('CLAMP_ROUND_TRUNCATE', 1)
+
+enum_a7xx_cs_yalign = CEnum(ctypes.c_uint32)
+CS_YALIGN_1 = enum_a7xx_cs_yalign.define('CS_YALIGN_1', 8)
+CS_YALIGN_2 = enum_a7xx_cs_yalign.define('CS_YALIGN_2', 4)
+CS_YALIGN_4 = enum_a7xx_cs_yalign.define('CS_YALIGN_4', 2)
+CS_YALIGN_8 = enum_a7xx_cs_yalign.define('CS_YALIGN_8', 1)
+
+enum_vgt_event_type = CEnum(ctypes.c_uint32)
+VS_DEALLOC = enum_vgt_event_type.define('VS_DEALLOC', 0)
+PS_DEALLOC = enum_vgt_event_type.define('PS_DEALLOC', 1)
+VS_DONE_TS = enum_vgt_event_type.define('VS_DONE_TS', 2)
+PS_DONE_TS = enum_vgt_event_type.define('PS_DONE_TS', 3)
+CACHE_FLUSH_TS = enum_vgt_event_type.define('CACHE_FLUSH_TS', 4)
+CONTEXT_DONE = enum_vgt_event_type.define('CONTEXT_DONE', 5)
+CACHE_FLUSH = enum_vgt_event_type.define('CACHE_FLUSH', 6)
+VIZQUERY_START = enum_vgt_event_type.define('VIZQUERY_START', 7)
+HLSQ_FLUSH = enum_vgt_event_type.define('HLSQ_FLUSH', 7)
+VIZQUERY_END = enum_vgt_event_type.define('VIZQUERY_END', 8)
+SC_WAIT_WC = enum_vgt_event_type.define('SC_WAIT_WC', 9)
+WRITE_PRIMITIVE_COUNTS = enum_vgt_event_type.define('WRITE_PRIMITIVE_COUNTS', 9)
+START_PRIMITIVE_CTRS = enum_vgt_event_type.define('START_PRIMITIVE_CTRS', 11)
+STOP_PRIMITIVE_CTRS = enum_vgt_event_type.define('STOP_PRIMITIVE_CTRS', 12)
+RST_PIX_CNT = enum_vgt_event_type.define('RST_PIX_CNT', 13)
+RST_VTX_CNT = enum_vgt_event_type.define('RST_VTX_CNT', 14)
+TILE_FLUSH = enum_vgt_event_type.define('TILE_FLUSH', 15)
+STAT_EVENT = enum_vgt_event_type.define('STAT_EVENT', 16)
+CACHE_FLUSH_AND_INV_TS_EVENT = enum_vgt_event_type.define('CACHE_FLUSH_AND_INV_TS_EVENT', 20)
+ZPASS_DONE = enum_vgt_event_type.define('ZPASS_DONE', 21)
+CACHE_FLUSH_AND_INV_EVENT = enum_vgt_event_type.define('CACHE_FLUSH_AND_INV_EVENT', 22)
+RB_DONE_TS = enum_vgt_event_type.define('RB_DONE_TS', 22)
+PERFCOUNTER_START = enum_vgt_event_type.define('PERFCOUNTER_START', 23)
+PERFCOUNTER_STOP = enum_vgt_event_type.define('PERFCOUNTER_STOP', 24)
+VS_FETCH_DONE = enum_vgt_event_type.define('VS_FETCH_DONE', 27)
+FACENESS_FLUSH = enum_vgt_event_type.define('FACENESS_FLUSH', 28)
+WT_DONE_TS = enum_vgt_event_type.define('WT_DONE_TS', 8)
+START_FRAGMENT_CTRS = enum_vgt_event_type.define('START_FRAGMENT_CTRS', 13)
+STOP_FRAGMENT_CTRS = enum_vgt_event_type.define('STOP_FRAGMENT_CTRS', 14)
+START_COMPUTE_CTRS = enum_vgt_event_type.define('START_COMPUTE_CTRS', 15)
+STOP_COMPUTE_CTRS = enum_vgt_event_type.define('STOP_COMPUTE_CTRS', 16)
+FLUSH_SO_0 = enum_vgt_event_type.define('FLUSH_SO_0', 17)
+FLUSH_SO_1 = enum_vgt_event_type.define('FLUSH_SO_1', 18)
+FLUSH_SO_2 = enum_vgt_event_type.define('FLUSH_SO_2', 19)
+FLUSH_SO_3 = enum_vgt_event_type.define('FLUSH_SO_3', 20)
+PC_CCU_INVALIDATE_DEPTH = enum_vgt_event_type.define('PC_CCU_INVALIDATE_DEPTH', 24)
+PC_CCU_INVALIDATE_COLOR = enum_vgt_event_type.define('PC_CCU_INVALIDATE_COLOR', 25)
+PC_CCU_RESOLVE_TS = enum_vgt_event_type.define('PC_CCU_RESOLVE_TS', 26)
+PC_CCU_FLUSH_DEPTH_TS = enum_vgt_event_type.define('PC_CCU_FLUSH_DEPTH_TS', 28)
+PC_CCU_FLUSH_COLOR_TS = enum_vgt_event_type.define('PC_CCU_FLUSH_COLOR_TS', 29)
+BLIT = enum_vgt_event_type.define('BLIT', 30)
+LRZ_FLIP_BUFFER = enum_vgt_event_type.define('LRZ_FLIP_BUFFER', 36)
+LRZ_CLEAR = enum_vgt_event_type.define('LRZ_CLEAR', 37)
+LRZ_FLUSH = enum_vgt_event_type.define('LRZ_FLUSH', 38)
+BLIT_OP_FILL_2D = enum_vgt_event_type.define('BLIT_OP_FILL_2D', 39)
+BLIT_OP_COPY_2D = enum_vgt_event_type.define('BLIT_OP_COPY_2D', 40)
+UNK_40 = enum_vgt_event_type.define('UNK_40', 40)
+LRZ_Q_CACHE_INVALIDATE = enum_vgt_event_type.define('LRZ_Q_CACHE_INVALIDATE', 41)
+BLIT_OP_SCALE_2D = enum_vgt_event_type.define('BLIT_OP_SCALE_2D', 42)
+CONTEXT_DONE_2D = enum_vgt_event_type.define('CONTEXT_DONE_2D', 43)
+UNK_2C = enum_vgt_event_type.define('UNK_2C', 44)
+UNK_2D = enum_vgt_event_type.define('UNK_2D', 45)
+CACHE_INVALIDATE = enum_vgt_event_type.define('CACHE_INVALIDATE', 49)
+LABEL = enum_vgt_event_type.define('LABEL', 63)
+DUMMY_EVENT = enum_vgt_event_type.define('DUMMY_EVENT', 1)
+CCU_INVALIDATE_DEPTH = enum_vgt_event_type.define('CCU_INVALIDATE_DEPTH', 24)
+CCU_INVALIDATE_COLOR = enum_vgt_event_type.define('CCU_INVALIDATE_COLOR', 25)
+CCU_RESOLVE_CLEAN = enum_vgt_event_type.define('CCU_RESOLVE_CLEAN', 26)
+CCU_FLUSH_DEPTH = enum_vgt_event_type.define('CCU_FLUSH_DEPTH', 28)
+CCU_FLUSH_COLOR = enum_vgt_event_type.define('CCU_FLUSH_COLOR', 29)
+CCU_RESOLVE = enum_vgt_event_type.define('CCU_RESOLVE', 30)
+CCU_END_RESOLVE_GROUP = enum_vgt_event_type.define('CCU_END_RESOLVE_GROUP', 31)
+CCU_CLEAN_DEPTH = enum_vgt_event_type.define('CCU_CLEAN_DEPTH', 32)
+CCU_CLEAN_COLOR = enum_vgt_event_type.define('CCU_CLEAN_COLOR', 33)
+CACHE_RESET = enum_vgt_event_type.define('CACHE_RESET', 48)
+CACHE_CLEAN = enum_vgt_event_type.define('CACHE_CLEAN', 49)
+CACHE_FLUSH7 = enum_vgt_event_type.define('CACHE_FLUSH7', 50)
+CACHE_INVALIDATE7 = enum_vgt_event_type.define('CACHE_INVALIDATE7', 51)
+
+enum_pc_di_primtype = CEnum(ctypes.c_uint32)
+DI_PT_NONE = enum_pc_di_primtype.define('DI_PT_NONE', 0)
+DI_PT_POINTLIST_PSIZE = enum_pc_di_primtype.define('DI_PT_POINTLIST_PSIZE', 1)
+DI_PT_LINELIST = enum_pc_di_primtype.define('DI_PT_LINELIST', 2)
+DI_PT_LINESTRIP = enum_pc_di_primtype.define('DI_PT_LINESTRIP', 3)
+DI_PT_TRILIST = enum_pc_di_primtype.define('DI_PT_TRILIST', 4)
+DI_PT_TRIFAN = enum_pc_di_primtype.define('DI_PT_TRIFAN', 5)
+DI_PT_TRISTRIP = enum_pc_di_primtype.define('DI_PT_TRISTRIP', 6)
+DI_PT_LINELOOP = enum_pc_di_primtype.define('DI_PT_LINELOOP', 7)
+DI_PT_RECTLIST = enum_pc_di_primtype.define('DI_PT_RECTLIST', 8)
+DI_PT_POINTLIST = enum_pc_di_primtype.define('DI_PT_POINTLIST', 9)
+DI_PT_LINE_ADJ = enum_pc_di_primtype.define('DI_PT_LINE_ADJ', 10)
+DI_PT_LINESTRIP_ADJ = enum_pc_di_primtype.define('DI_PT_LINESTRIP_ADJ', 11)
+DI_PT_TRI_ADJ = enum_pc_di_primtype.define('DI_PT_TRI_ADJ', 12)
+DI_PT_TRISTRIP_ADJ = enum_pc_di_primtype.define('DI_PT_TRISTRIP_ADJ', 13)
+DI_PT_PATCHES0 = enum_pc_di_primtype.define('DI_PT_PATCHES0', 31)
+DI_PT_PATCHES1 = enum_pc_di_primtype.define('DI_PT_PATCHES1', 32)
+DI_PT_PATCHES2 = enum_pc_di_primtype.define('DI_PT_PATCHES2', 33)
+DI_PT_PATCHES3 = enum_pc_di_primtype.define('DI_PT_PATCHES3', 34)
+DI_PT_PATCHES4 = enum_pc_di_primtype.define('DI_PT_PATCHES4', 35)
+DI_PT_PATCHES5 = enum_pc_di_primtype.define('DI_PT_PATCHES5', 36)
+DI_PT_PATCHES6 = enum_pc_di_primtype.define('DI_PT_PATCHES6', 37)
+DI_PT_PATCHES7 = enum_pc_di_primtype.define('DI_PT_PATCHES7', 38)
+DI_PT_PATCHES8 = enum_pc_di_primtype.define('DI_PT_PATCHES8', 39)
+DI_PT_PATCHES9 = enum_pc_di_primtype.define('DI_PT_PATCHES9', 40)
+DI_PT_PATCHES10 = enum_pc_di_primtype.define('DI_PT_PATCHES10', 41)
+DI_PT_PATCHES11 = enum_pc_di_primtype.define('DI_PT_PATCHES11', 42)
+DI_PT_PATCHES12 = enum_pc_di_primtype.define('DI_PT_PATCHES12', 43)
+DI_PT_PATCHES13 = enum_pc_di_primtype.define('DI_PT_PATCHES13', 44)
+DI_PT_PATCHES14 = enum_pc_di_primtype.define('DI_PT_PATCHES14', 45)
+DI_PT_PATCHES15 = enum_pc_di_primtype.define('DI_PT_PATCHES15', 46)
+DI_PT_PATCHES16 = enum_pc_di_primtype.define('DI_PT_PATCHES16', 47)
+DI_PT_PATCHES17 = enum_pc_di_primtype.define('DI_PT_PATCHES17', 48)
+DI_PT_PATCHES18 = enum_pc_di_primtype.define('DI_PT_PATCHES18', 49)
+DI_PT_PATCHES19 = enum_pc_di_primtype.define('DI_PT_PATCHES19', 50)
+DI_PT_PATCHES20 = enum_pc_di_primtype.define('DI_PT_PATCHES20', 51)
+DI_PT_PATCHES21 = enum_pc_di_primtype.define('DI_PT_PATCHES21', 52)
+DI_PT_PATCHES22 = enum_pc_di_primtype.define('DI_PT_PATCHES22', 53)
+DI_PT_PATCHES23 = enum_pc_di_primtype.define('DI_PT_PATCHES23', 54)
+DI_PT_PATCHES24 = enum_pc_di_primtype.define('DI_PT_PATCHES24', 55)
+DI_PT_PATCHES25 = enum_pc_di_primtype.define('DI_PT_PATCHES25', 56)
+DI_PT_PATCHES26 = enum_pc_di_primtype.define('DI_PT_PATCHES26', 57)
+DI_PT_PATCHES27 = enum_pc_di_primtype.define('DI_PT_PATCHES27', 58)
+DI_PT_PATCHES28 = enum_pc_di_primtype.define('DI_PT_PATCHES28', 59)
+DI_PT_PATCHES29 = enum_pc_di_primtype.define('DI_PT_PATCHES29', 60)
+DI_PT_PATCHES30 = enum_pc_di_primtype.define('DI_PT_PATCHES30', 61)
+DI_PT_PATCHES31 = enum_pc_di_primtype.define('DI_PT_PATCHES31', 62)
+
+enum_pc_di_src_sel = CEnum(ctypes.c_uint32)
+DI_SRC_SEL_DMA = enum_pc_di_src_sel.define('DI_SRC_SEL_DMA', 0)
+DI_SRC_SEL_IMMEDIATE = enum_pc_di_src_sel.define('DI_SRC_SEL_IMMEDIATE', 1)
+DI_SRC_SEL_AUTO_INDEX = enum_pc_di_src_sel.define('DI_SRC_SEL_AUTO_INDEX', 2)
+DI_SRC_SEL_AUTO_XFB = enum_pc_di_src_sel.define('DI_SRC_SEL_AUTO_XFB', 3)
+
+enum_pc_di_face_cull_sel = CEnum(ctypes.c_uint32)
+DI_FACE_CULL_NONE = enum_pc_di_face_cull_sel.define('DI_FACE_CULL_NONE', 0)
+DI_FACE_CULL_FETCH = enum_pc_di_face_cull_sel.define('DI_FACE_CULL_FETCH', 1)
+DI_FACE_BACKFACE_CULL = enum_pc_di_face_cull_sel.define('DI_FACE_BACKFACE_CULL', 2)
+DI_FACE_FRONTFACE_CULL = enum_pc_di_face_cull_sel.define('DI_FACE_FRONTFACE_CULL', 3)
+
+enum_pc_di_index_size = CEnum(ctypes.c_uint32)
+INDEX_SIZE_IGN = enum_pc_di_index_size.define('INDEX_SIZE_IGN', 0)
+INDEX_SIZE_16_BIT = enum_pc_di_index_size.define('INDEX_SIZE_16_BIT', 0)
+INDEX_SIZE_32_BIT = enum_pc_di_index_size.define('INDEX_SIZE_32_BIT', 1)
+INDEX_SIZE_8_BIT = enum_pc_di_index_size.define('INDEX_SIZE_8_BIT', 2)
+INDEX_SIZE_INVALID = enum_pc_di_index_size.define('INDEX_SIZE_INVALID', 0)
+
+enum_pc_di_vis_cull_mode = CEnum(ctypes.c_uint32)
+IGNORE_VISIBILITY = enum_pc_di_vis_cull_mode.define('IGNORE_VISIBILITY', 0)
+USE_VISIBILITY = enum_pc_di_vis_cull_mode.define('USE_VISIBILITY', 1)
+
+enum_adreno_pm4_packet_type = CEnum(ctypes.c_uint32)
+CP_TYPE0_PKT = enum_adreno_pm4_packet_type.define('CP_TYPE0_PKT', 0)
+CP_TYPE1_PKT = enum_adreno_pm4_packet_type.define('CP_TYPE1_PKT', 1073741824)
+CP_TYPE2_PKT = enum_adreno_pm4_packet_type.define('CP_TYPE2_PKT', 2147483648)
+CP_TYPE3_PKT = enum_adreno_pm4_packet_type.define('CP_TYPE3_PKT', 3221225472)
+CP_TYPE4_PKT = enum_adreno_pm4_packet_type.define('CP_TYPE4_PKT', 1073741824)
+CP_TYPE7_PKT = enum_adreno_pm4_packet_type.define('CP_TYPE7_PKT', 1879048192)
+
+enum_adreno_pm4_type3_packets = CEnum(ctypes.c_uint32)
+CP_ME_INIT = enum_adreno_pm4_type3_packets.define('CP_ME_INIT', 72)
+CP_NOP = enum_adreno_pm4_type3_packets.define('CP_NOP', 16)
+CP_PREEMPT_ENABLE = enum_adreno_pm4_type3_packets.define('CP_PREEMPT_ENABLE', 28)
+CP_PREEMPT_TOKEN = enum_adreno_pm4_type3_packets.define('CP_PREEMPT_TOKEN', 30)
+CP_INDIRECT_BUFFER = enum_adreno_pm4_type3_packets.define('CP_INDIRECT_BUFFER', 63)
+CP_INDIRECT_BUFFER_CHAIN = enum_adreno_pm4_type3_packets.define('CP_INDIRECT_BUFFER_CHAIN', 87)
+CP_INDIRECT_BUFFER_PFD = enum_adreno_pm4_type3_packets.define('CP_INDIRECT_BUFFER_PFD', 55)
+CP_WAIT_FOR_IDLE = enum_adreno_pm4_type3_packets.define('CP_WAIT_FOR_IDLE', 38)
+CP_WAIT_REG_MEM = enum_adreno_pm4_type3_packets.define('CP_WAIT_REG_MEM', 60)
+CP_WAIT_REG_EQ = enum_adreno_pm4_type3_packets.define('CP_WAIT_REG_EQ', 82)
+CP_WAIT_REG_GTE = enum_adreno_pm4_type3_packets.define('CP_WAIT_REG_GTE', 83)
+CP_WAIT_UNTIL_READ = enum_adreno_pm4_type3_packets.define('CP_WAIT_UNTIL_READ', 92)
+CP_WAIT_IB_PFD_COMPLETE = enum_adreno_pm4_type3_packets.define('CP_WAIT_IB_PFD_COMPLETE', 93)
+CP_REG_RMW = enum_adreno_pm4_type3_packets.define('CP_REG_RMW', 33)
+CP_SET_BIN_DATA = enum_adreno_pm4_type3_packets.define('CP_SET_BIN_DATA', 47)
+CP_SET_BIN_DATA5 = enum_adreno_pm4_type3_packets.define('CP_SET_BIN_DATA5', 47)
+CP_REG_TO_MEM = enum_adreno_pm4_type3_packets.define('CP_REG_TO_MEM', 62)
+CP_MEM_WRITE = enum_adreno_pm4_type3_packets.define('CP_MEM_WRITE', 61)
+CP_MEM_WRITE_CNTR = enum_adreno_pm4_type3_packets.define('CP_MEM_WRITE_CNTR', 79)
+CP_COND_EXEC = enum_adreno_pm4_type3_packets.define('CP_COND_EXEC', 68)
+CP_COND_WRITE = enum_adreno_pm4_type3_packets.define('CP_COND_WRITE', 69)
+CP_COND_WRITE5 = enum_adreno_pm4_type3_packets.define('CP_COND_WRITE5', 69)
+CP_EVENT_WRITE = enum_adreno_pm4_type3_packets.define('CP_EVENT_WRITE', 70)
+CP_EVENT_WRITE7 = enum_adreno_pm4_type3_packets.define('CP_EVENT_WRITE7', 70)
+CP_EVENT_WRITE_SHD = enum_adreno_pm4_type3_packets.define('CP_EVENT_WRITE_SHD', 88)
+CP_EVENT_WRITE_CFL = enum_adreno_pm4_type3_packets.define('CP_EVENT_WRITE_CFL', 89)
+CP_EVENT_WRITE_ZPD = enum_adreno_pm4_type3_packets.define('CP_EVENT_WRITE_ZPD', 91)
+CP_RUN_OPENCL = enum_adreno_pm4_type3_packets.define('CP_RUN_OPENCL', 49)
+CP_DRAW_INDX = enum_adreno_pm4_type3_packets.define('CP_DRAW_INDX', 34)
+CP_DRAW_INDX_2 = enum_adreno_pm4_type3_packets.define('CP_DRAW_INDX_2', 54)
+CP_DRAW_INDX_BIN = enum_adreno_pm4_type3_packets.define('CP_DRAW_INDX_BIN', 52)
+CP_DRAW_INDX_2_BIN = enum_adreno_pm4_type3_packets.define('CP_DRAW_INDX_2_BIN', 53)
+CP_VIZ_QUERY = enum_adreno_pm4_type3_packets.define('CP_VIZ_QUERY', 35)
+CP_SET_STATE = enum_adreno_pm4_type3_packets.define('CP_SET_STATE', 37)
+CP_SET_CONSTANT = enum_adreno_pm4_type3_packets.define('CP_SET_CONSTANT', 45)
+CP_IM_LOAD = enum_adreno_pm4_type3_packets.define('CP_IM_LOAD', 39)
+CP_IM_LOAD_IMMEDIATE = enum_adreno_pm4_type3_packets.define('CP_IM_LOAD_IMMEDIATE', 43)
+CP_LOAD_CONSTANT_CONTEXT = enum_adreno_pm4_type3_packets.define('CP_LOAD_CONSTANT_CONTEXT', 46)
+CP_INVALIDATE_STATE = enum_adreno_pm4_type3_packets.define('CP_INVALIDATE_STATE', 59)
+CP_SET_SHADER_BASES = enum_adreno_pm4_type3_packets.define('CP_SET_SHADER_BASES', 74)
+CP_SET_BIN_MASK = enum_adreno_pm4_type3_packets.define('CP_SET_BIN_MASK', 80)
+CP_SET_BIN_SELECT = enum_adreno_pm4_type3_packets.define('CP_SET_BIN_SELECT', 81)
+CP_CONTEXT_UPDATE = enum_adreno_pm4_type3_packets.define('CP_CONTEXT_UPDATE', 94)
+CP_INTERRUPT = enum_adreno_pm4_type3_packets.define('CP_INTERRUPT', 64)
+CP_IM_STORE = enum_adreno_pm4_type3_packets.define('CP_IM_STORE', 44)
+CP_SET_DRAW_INIT_FLAGS = enum_adreno_pm4_type3_packets.define('CP_SET_DRAW_INIT_FLAGS', 75)
+CP_SET_PROTECTED_MODE = enum_adreno_pm4_type3_packets.define('CP_SET_PROTECTED_MODE', 95)
+CP_BOOTSTRAP_UCODE = enum_adreno_pm4_type3_packets.define('CP_BOOTSTRAP_UCODE', 111)
+CP_LOAD_STATE = enum_adreno_pm4_type3_packets.define('CP_LOAD_STATE', 48)
+CP_LOAD_STATE4 = enum_adreno_pm4_type3_packets.define('CP_LOAD_STATE4', 48)
+CP_COND_INDIRECT_BUFFER_PFE = enum_adreno_pm4_type3_packets.define('CP_COND_INDIRECT_BUFFER_PFE', 58)
+CP_COND_INDIRECT_BUFFER_PFD = enum_adreno_pm4_type3_packets.define('CP_COND_INDIRECT_BUFFER_PFD', 50)
+CP_INDIRECT_BUFFER_PFE = enum_adreno_pm4_type3_packets.define('CP_INDIRECT_BUFFER_PFE', 63)
+CP_SET_BIN = enum_adreno_pm4_type3_packets.define('CP_SET_BIN', 76)
+CP_TEST_TWO_MEMS = enum_adreno_pm4_type3_packets.define('CP_TEST_TWO_MEMS', 113)
+CP_REG_WR_NO_CTXT = enum_adreno_pm4_type3_packets.define('CP_REG_WR_NO_CTXT', 120)
+CP_RECORD_PFP_TIMESTAMP = enum_adreno_pm4_type3_packets.define('CP_RECORD_PFP_TIMESTAMP', 17)
+CP_SET_SECURE_MODE = enum_adreno_pm4_type3_packets.define('CP_SET_SECURE_MODE', 102)
+CP_WAIT_FOR_ME = enum_adreno_pm4_type3_packets.define('CP_WAIT_FOR_ME', 19)
+CP_SET_DRAW_STATE = enum_adreno_pm4_type3_packets.define('CP_SET_DRAW_STATE', 67)
+CP_DRAW_INDX_OFFSET = enum_adreno_pm4_type3_packets.define('CP_DRAW_INDX_OFFSET', 56)
+CP_DRAW_INDIRECT = enum_adreno_pm4_type3_packets.define('CP_DRAW_INDIRECT', 40)
+CP_DRAW_INDX_INDIRECT = enum_adreno_pm4_type3_packets.define('CP_DRAW_INDX_INDIRECT', 41)
+CP_DRAW_INDIRECT_MULTI = enum_adreno_pm4_type3_packets.define('CP_DRAW_INDIRECT_MULTI', 42)
+CP_DRAW_AUTO = enum_adreno_pm4_type3_packets.define('CP_DRAW_AUTO', 36)
+CP_DRAW_PRED_ENABLE_GLOBAL = enum_adreno_pm4_type3_packets.define('CP_DRAW_PRED_ENABLE_GLOBAL', 25)
+CP_DRAW_PRED_ENABLE_LOCAL = enum_adreno_pm4_type3_packets.define('CP_DRAW_PRED_ENABLE_LOCAL', 26)
+CP_DRAW_PRED_SET = enum_adreno_pm4_type3_packets.define('CP_DRAW_PRED_SET', 78)
+CP_WIDE_REG_WRITE = enum_adreno_pm4_type3_packets.define('CP_WIDE_REG_WRITE', 116)
+CP_SCRATCH_TO_REG = enum_adreno_pm4_type3_packets.define('CP_SCRATCH_TO_REG', 77)
+CP_REG_TO_SCRATCH = enum_adreno_pm4_type3_packets.define('CP_REG_TO_SCRATCH', 74)
+CP_WAIT_MEM_WRITES = enum_adreno_pm4_type3_packets.define('CP_WAIT_MEM_WRITES', 18)
+CP_COND_REG_EXEC = enum_adreno_pm4_type3_packets.define('CP_COND_REG_EXEC', 71)
+CP_MEM_TO_REG = enum_adreno_pm4_type3_packets.define('CP_MEM_TO_REG', 66)
+CP_EXEC_CS_INDIRECT = enum_adreno_pm4_type3_packets.define('CP_EXEC_CS_INDIRECT', 65)
+CP_EXEC_CS = enum_adreno_pm4_type3_packets.define('CP_EXEC_CS', 51)
+CP_PERFCOUNTER_ACTION = enum_adreno_pm4_type3_packets.define('CP_PERFCOUNTER_ACTION', 80)
+CP_SMMU_TABLE_UPDATE = enum_adreno_pm4_type3_packets.define('CP_SMMU_TABLE_UPDATE', 83)
+CP_SET_MARKER = enum_adreno_pm4_type3_packets.define('CP_SET_MARKER', 101)
+CP_SET_PSEUDO_REG = enum_adreno_pm4_type3_packets.define('CP_SET_PSEUDO_REG', 86)
+CP_CONTEXT_REG_BUNCH = enum_adreno_pm4_type3_packets.define('CP_CONTEXT_REG_BUNCH', 92)
+CP_YIELD_ENABLE = enum_adreno_pm4_type3_packets.define('CP_YIELD_ENABLE', 28)
+CP_SKIP_IB2_ENABLE_GLOBAL = enum_adreno_pm4_type3_packets.define('CP_SKIP_IB2_ENABLE_GLOBAL', 29)
+CP_SKIP_IB2_ENABLE_LOCAL = enum_adreno_pm4_type3_packets.define('CP_SKIP_IB2_ENABLE_LOCAL', 35)
+CP_SET_SUBDRAW_SIZE = enum_adreno_pm4_type3_packets.define('CP_SET_SUBDRAW_SIZE', 53)
+CP_WHERE_AM_I = enum_adreno_pm4_type3_packets.define('CP_WHERE_AM_I', 98)
+CP_SET_VISIBILITY_OVERRIDE = enum_adreno_pm4_type3_packets.define('CP_SET_VISIBILITY_OVERRIDE', 100)
+CP_PREEMPT_ENABLE_GLOBAL = enum_adreno_pm4_type3_packets.define('CP_PREEMPT_ENABLE_GLOBAL', 105)
+CP_PREEMPT_ENABLE_LOCAL = enum_adreno_pm4_type3_packets.define('CP_PREEMPT_ENABLE_LOCAL', 106)
+CP_CONTEXT_SWITCH_YIELD = enum_adreno_pm4_type3_packets.define('CP_CONTEXT_SWITCH_YIELD', 107)
+CP_SET_RENDER_MODE = enum_adreno_pm4_type3_packets.define('CP_SET_RENDER_MODE', 108)
+CP_COMPUTE_CHECKPOINT = enum_adreno_pm4_type3_packets.define('CP_COMPUTE_CHECKPOINT', 110)
+CP_MEM_TO_MEM = enum_adreno_pm4_type3_packets.define('CP_MEM_TO_MEM', 115)
+CP_BLIT = enum_adreno_pm4_type3_packets.define('CP_BLIT', 44)
+CP_REG_TEST = enum_adreno_pm4_type3_packets.define('CP_REG_TEST', 57)
+CP_SET_MODE = enum_adreno_pm4_type3_packets.define('CP_SET_MODE', 99)
+CP_LOAD_STATE6_GEOM = enum_adreno_pm4_type3_packets.define('CP_LOAD_STATE6_GEOM', 50)
+CP_LOAD_STATE6_FRAG = enum_adreno_pm4_type3_packets.define('CP_LOAD_STATE6_FRAG', 52)
+CP_LOAD_STATE6 = enum_adreno_pm4_type3_packets.define('CP_LOAD_STATE6', 54)
+IN_IB_PREFETCH_END = enum_adreno_pm4_type3_packets.define('IN_IB_PREFETCH_END', 23)
+IN_SUBBLK_PREFETCH = enum_adreno_pm4_type3_packets.define('IN_SUBBLK_PREFETCH', 31)
+IN_INSTR_PREFETCH = enum_adreno_pm4_type3_packets.define('IN_INSTR_PREFETCH', 32)
+IN_INSTR_MATCH = enum_adreno_pm4_type3_packets.define('IN_INSTR_MATCH', 71)
+IN_CONST_PREFETCH = enum_adreno_pm4_type3_packets.define('IN_CONST_PREFETCH', 73)
+IN_INCR_UPDT_STATE = enum_adreno_pm4_type3_packets.define('IN_INCR_UPDT_STATE', 85)
+IN_INCR_UPDT_CONST = enum_adreno_pm4_type3_packets.define('IN_INCR_UPDT_CONST', 86)
+IN_INCR_UPDT_INSTR = enum_adreno_pm4_type3_packets.define('IN_INCR_UPDT_INSTR', 87)
+PKT4 = enum_adreno_pm4_type3_packets.define('PKT4', 4)
+IN_IB_END = enum_adreno_pm4_type3_packets.define('IN_IB_END', 10)
+IN_GMU_INTERRUPT = enum_adreno_pm4_type3_packets.define('IN_GMU_INTERRUPT', 11)
+IN_PREEMPT = enum_adreno_pm4_type3_packets.define('IN_PREEMPT', 15)
+CP_SCRATCH_WRITE = enum_adreno_pm4_type3_packets.define('CP_SCRATCH_WRITE', 76)
+CP_REG_TO_MEM_OFFSET_MEM = enum_adreno_pm4_type3_packets.define('CP_REG_TO_MEM_OFFSET_MEM', 116)
+CP_REG_TO_MEM_OFFSET_REG = enum_adreno_pm4_type3_packets.define('CP_REG_TO_MEM_OFFSET_REG', 114)
+CP_WAIT_MEM_GTE = enum_adreno_pm4_type3_packets.define('CP_WAIT_MEM_GTE', 20)
+CP_WAIT_TWO_REGS = enum_adreno_pm4_type3_packets.define('CP_WAIT_TWO_REGS', 112)
+CP_MEMCPY = enum_adreno_pm4_type3_packets.define('CP_MEMCPY', 117)
+CP_SET_BIN_DATA5_OFFSET = enum_adreno_pm4_type3_packets.define('CP_SET_BIN_DATA5_OFFSET', 46)
+CP_SET_UNK_BIN_DATA = enum_adreno_pm4_type3_packets.define('CP_SET_UNK_BIN_DATA', 45)
+CP_CONTEXT_SWITCH = enum_adreno_pm4_type3_packets.define('CP_CONTEXT_SWITCH', 84)
+CP_SET_AMBLE = enum_adreno_pm4_type3_packets.define('CP_SET_AMBLE', 85)
+CP_REG_WRITE = enum_adreno_pm4_type3_packets.define('CP_REG_WRITE', 109)
+CP_START_BIN = enum_adreno_pm4_type3_packets.define('CP_START_BIN', 80)
+CP_END_BIN = enum_adreno_pm4_type3_packets.define('CP_END_BIN', 81)
+CP_PREEMPT_DISABLE = enum_adreno_pm4_type3_packets.define('CP_PREEMPT_DISABLE', 108)
+CP_WAIT_TIMESTAMP = enum_adreno_pm4_type3_packets.define('CP_WAIT_TIMESTAMP', 20)
+CP_GLOBAL_TIMESTAMP = enum_adreno_pm4_type3_packets.define('CP_GLOBAL_TIMESTAMP', 21)
+CP_LOCAL_TIMESTAMP = enum_adreno_pm4_type3_packets.define('CP_LOCAL_TIMESTAMP', 22)
+CP_THREAD_CONTROL = enum_adreno_pm4_type3_packets.define('CP_THREAD_CONTROL', 23)
+CP_RESOURCE_LIST = enum_adreno_pm4_type3_packets.define('CP_RESOURCE_LIST', 24)
+CP_BV_BR_COUNT_OPS = enum_adreno_pm4_type3_packets.define('CP_BV_BR_COUNT_OPS', 27)
+CP_MODIFY_TIMESTAMP = enum_adreno_pm4_type3_packets.define('CP_MODIFY_TIMESTAMP', 28)
+CP_CONTEXT_REG_BUNCH2 = enum_adreno_pm4_type3_packets.define('CP_CONTEXT_REG_BUNCH2', 93)
+CP_MEM_TO_SCRATCH_MEM = enum_adreno_pm4_type3_packets.define('CP_MEM_TO_SCRATCH_MEM', 73)
+CP_FIXED_STRIDE_DRAW_TABLE = enum_adreno_pm4_type3_packets.define('CP_FIXED_STRIDE_DRAW_TABLE', 127)
+CP_RESET_CONTEXT_STATE = enum_adreno_pm4_type3_packets.define('CP_RESET_CONTEXT_STATE', 31)
+CP_CCHE_INVALIDATE = enum_adreno_pm4_type3_packets.define('CP_CCHE_INVALIDATE', 58)
+CP_SCOPE_CNTL = enum_adreno_pm4_type3_packets.define('CP_SCOPE_CNTL', 108)
+
+enum_adreno_state_block = CEnum(ctypes.c_uint32)
+SB_VERT_TEX = enum_adreno_state_block.define('SB_VERT_TEX', 0)
+SB_VERT_MIPADDR = enum_adreno_state_block.define('SB_VERT_MIPADDR', 1)
+SB_FRAG_TEX = enum_adreno_state_block.define('SB_FRAG_TEX', 2)
+SB_FRAG_MIPADDR = enum_adreno_state_block.define('SB_FRAG_MIPADDR', 3)
+SB_VERT_SHADER = enum_adreno_state_block.define('SB_VERT_SHADER', 4)
+SB_GEOM_SHADER = enum_adreno_state_block.define('SB_GEOM_SHADER', 5)
+SB_FRAG_SHADER = enum_adreno_state_block.define('SB_FRAG_SHADER', 6)
+SB_COMPUTE_SHADER = enum_adreno_state_block.define('SB_COMPUTE_SHADER', 7)
+
+enum_adreno_state_type = CEnum(ctypes.c_uint32)
+ST_SHADER = enum_adreno_state_type.define('ST_SHADER', 0)
+ST_CONSTANTS = enum_adreno_state_type.define('ST_CONSTANTS', 1)
+
+enum_adreno_state_src = CEnum(ctypes.c_uint32)
+SS_DIRECT = enum_adreno_state_src.define('SS_DIRECT', 0)
+SS_INVALID_ALL_IC = enum_adreno_state_src.define('SS_INVALID_ALL_IC', 2)
+SS_INVALID_PART_IC = enum_adreno_state_src.define('SS_INVALID_PART_IC', 3)
+SS_INDIRECT = enum_adreno_state_src.define('SS_INDIRECT', 4)
+SS_INDIRECT_TCM = enum_adreno_state_src.define('SS_INDIRECT_TCM', 5)
+SS_INDIRECT_STM = enum_adreno_state_src.define('SS_INDIRECT_STM', 6)
+
+enum_a4xx_state_block = CEnum(ctypes.c_uint32)
+SB4_VS_TEX = enum_a4xx_state_block.define('SB4_VS_TEX', 0)
+SB4_HS_TEX = enum_a4xx_state_block.define('SB4_HS_TEX', 1)
+SB4_DS_TEX = enum_a4xx_state_block.define('SB4_DS_TEX', 2)
+SB4_GS_TEX = enum_a4xx_state_block.define('SB4_GS_TEX', 3)
+SB4_FS_TEX = enum_a4xx_state_block.define('SB4_FS_TEX', 4)
+SB4_CS_TEX = enum_a4xx_state_block.define('SB4_CS_TEX', 5)
+SB4_VS_SHADER = enum_a4xx_state_block.define('SB4_VS_SHADER', 8)
+SB4_HS_SHADER = enum_a4xx_state_block.define('SB4_HS_SHADER', 9)
+SB4_DS_SHADER = enum_a4xx_state_block.define('SB4_DS_SHADER', 10)
+SB4_GS_SHADER = enum_a4xx_state_block.define('SB4_GS_SHADER', 11)
+SB4_FS_SHADER = enum_a4xx_state_block.define('SB4_FS_SHADER', 12)
+SB4_CS_SHADER = enum_a4xx_state_block.define('SB4_CS_SHADER', 13)
+SB4_SSBO = enum_a4xx_state_block.define('SB4_SSBO', 14)
+SB4_CS_SSBO = enum_a4xx_state_block.define('SB4_CS_SSBO', 15)
+
+enum_a4xx_state_type = CEnum(ctypes.c_uint32)
+ST4_SHADER = enum_a4xx_state_type.define('ST4_SHADER', 0)
+ST4_CONSTANTS = enum_a4xx_state_type.define('ST4_CONSTANTS', 1)
+ST4_UBO = enum_a4xx_state_type.define('ST4_UBO', 2)
+
+enum_a4xx_state_src = CEnum(ctypes.c_uint32)
+SS4_DIRECT = enum_a4xx_state_src.define('SS4_DIRECT', 0)
+SS4_INDIRECT = enum_a4xx_state_src.define('SS4_INDIRECT', 2)
+
+enum_a6xx_state_block = CEnum(ctypes.c_uint32)
+SB6_VS_TEX = enum_a6xx_state_block.define('SB6_VS_TEX', 0)
+SB6_HS_TEX = enum_a6xx_state_block.define('SB6_HS_TEX', 1)
+SB6_DS_TEX = enum_a6xx_state_block.define('SB6_DS_TEX', 2)
+SB6_GS_TEX = enum_a6xx_state_block.define('SB6_GS_TEX', 3)
+SB6_FS_TEX = enum_a6xx_state_block.define('SB6_FS_TEX', 4)
+SB6_CS_TEX = enum_a6xx_state_block.define('SB6_CS_TEX', 5)
+SB6_VS_SHADER = enum_a6xx_state_block.define('SB6_VS_SHADER', 8)
+SB6_HS_SHADER = enum_a6xx_state_block.define('SB6_HS_SHADER', 9)
+SB6_DS_SHADER = enum_a6xx_state_block.define('SB6_DS_SHADER', 10)
+SB6_GS_SHADER = enum_a6xx_state_block.define('SB6_GS_SHADER', 11)
+SB6_FS_SHADER = enum_a6xx_state_block.define('SB6_FS_SHADER', 12)
+SB6_CS_SHADER = enum_a6xx_state_block.define('SB6_CS_SHADER', 13)
+SB6_UAV = enum_a6xx_state_block.define('SB6_UAV', 14)
+SB6_CS_UAV = enum_a6xx_state_block.define('SB6_CS_UAV', 15)
+
+enum_a6xx_state_type = CEnum(ctypes.c_uint32)
+ST6_SHADER = enum_a6xx_state_type.define('ST6_SHADER', 0)
+ST6_CONSTANTS = enum_a6xx_state_type.define('ST6_CONSTANTS', 1)
+ST6_UBO = enum_a6xx_state_type.define('ST6_UBO', 2)
+ST6_UAV = enum_a6xx_state_type.define('ST6_UAV', 3)
+
+enum_a6xx_state_src = CEnum(ctypes.c_uint32)
+SS6_DIRECT = enum_a6xx_state_src.define('SS6_DIRECT', 0)
+SS6_BINDLESS = enum_a6xx_state_src.define('SS6_BINDLESS', 1)
+SS6_INDIRECT = enum_a6xx_state_src.define('SS6_INDIRECT', 2)
+SS6_UBO = enum_a6xx_state_src.define('SS6_UBO', 3)
+
+enum_a4xx_index_size = CEnum(ctypes.c_uint32)
+INDEX4_SIZE_8_BIT = enum_a4xx_index_size.define('INDEX4_SIZE_8_BIT', 0)
+INDEX4_SIZE_16_BIT = enum_a4xx_index_size.define('INDEX4_SIZE_16_BIT', 1)
+INDEX4_SIZE_32_BIT = enum_a4xx_index_size.define('INDEX4_SIZE_32_BIT', 2)
+
+enum_a6xx_patch_type = CEnum(ctypes.c_uint32)
+TESS_QUADS = enum_a6xx_patch_type.define('TESS_QUADS', 0)
+TESS_TRIANGLES = enum_a6xx_patch_type.define('TESS_TRIANGLES', 1)
+TESS_ISOLINES = enum_a6xx_patch_type.define('TESS_ISOLINES', 2)
+
+enum_a6xx_draw_indirect_opcode = CEnum(ctypes.c_uint32)
+INDIRECT_OP_NORMAL = enum_a6xx_draw_indirect_opcode.define('INDIRECT_OP_NORMAL', 2)
+INDIRECT_OP_INDEXED = enum_a6xx_draw_indirect_opcode.define('INDIRECT_OP_INDEXED', 4)
+INDIRECT_OP_INDIRECT_COUNT = enum_a6xx_draw_indirect_opcode.define('INDIRECT_OP_INDIRECT_COUNT', 6)
+INDIRECT_OP_INDIRECT_COUNT_INDEXED = enum_a6xx_draw_indirect_opcode.define('INDIRECT_OP_INDIRECT_COUNT_INDEXED', 7)
+
+enum_cp_draw_pred_src = CEnum(ctypes.c_uint32)
+PRED_SRC_MEM = enum_cp_draw_pred_src.define('PRED_SRC_MEM', 5)
+
+enum_cp_draw_pred_test = CEnum(ctypes.c_uint32)
+NE_0_PASS = enum_cp_draw_pred_test.define('NE_0_PASS', 0)
+EQ_0_PASS = enum_cp_draw_pred_test.define('EQ_0_PASS', 1)
+
+enum_a7xx_abs_mask_mode = CEnum(ctypes.c_uint32)
+ABS_MASK = enum_a7xx_abs_mask_mode.define('ABS_MASK', 1)
+NO_ABS_MASK = enum_a7xx_abs_mask_mode.define('NO_ABS_MASK', 0)
+
+enum_cp_cond_function = CEnum(ctypes.c_uint32)
+WRITE_ALWAYS = enum_cp_cond_function.define('WRITE_ALWAYS', 0)
+WRITE_LT = enum_cp_cond_function.define('WRITE_LT', 1)
+WRITE_LE = enum_cp_cond_function.define('WRITE_LE', 2)
+WRITE_EQ = enum_cp_cond_function.define('WRITE_EQ', 3)
+WRITE_NE = enum_cp_cond_function.define('WRITE_NE', 4)
+WRITE_GE = enum_cp_cond_function.define('WRITE_GE', 5)
+WRITE_GT = enum_cp_cond_function.define('WRITE_GT', 6)
+
+enum_poll_memory_type = CEnum(ctypes.c_uint32)
+POLL_REGISTER = enum_poll_memory_type.define('POLL_REGISTER', 0)
+POLL_MEMORY = enum_poll_memory_type.define('POLL_MEMORY', 1)
+POLL_SCRATCH = enum_poll_memory_type.define('POLL_SCRATCH', 2)
+POLL_ON_CHIP = enum_poll_memory_type.define('POLL_ON_CHIP', 3)
+
+enum_render_mode_cmd = CEnum(ctypes.c_uint32)
+BYPASS = enum_render_mode_cmd.define('BYPASS', 1)
+BINNING = enum_render_mode_cmd.define('BINNING', 2)
+GMEM = enum_render_mode_cmd.define('GMEM', 3)
+BLIT2D = enum_render_mode_cmd.define('BLIT2D', 5)
+BLIT2DSCALE = enum_render_mode_cmd.define('BLIT2DSCALE', 7)
+END2D = enum_render_mode_cmd.define('END2D', 8)
+
+enum_event_write_src = CEnum(ctypes.c_uint32)
+EV_WRITE_USER_32B = enum_event_write_src.define('EV_WRITE_USER_32B', 0)
+EV_WRITE_USER_64B = enum_event_write_src.define('EV_WRITE_USER_64B', 1)
+EV_WRITE_TIMESTAMP_SUM = enum_event_write_src.define('EV_WRITE_TIMESTAMP_SUM', 2)
+EV_WRITE_ALWAYSON = enum_event_write_src.define('EV_WRITE_ALWAYSON', 3)
+EV_WRITE_REGS_CONTENT = enum_event_write_src.define('EV_WRITE_REGS_CONTENT', 4)
+
+enum_event_write_dst = CEnum(ctypes.c_uint32)
+EV_DST_RAM = enum_event_write_dst.define('EV_DST_RAM', 0)
+EV_DST_ONCHIP = enum_event_write_dst.define('EV_DST_ONCHIP', 1)
+
+enum_cp_blit_cmd = CEnum(ctypes.c_uint32)
+BLIT_OP_FILL = enum_cp_blit_cmd.define('BLIT_OP_FILL', 0)
+BLIT_OP_COPY = enum_cp_blit_cmd.define('BLIT_OP_COPY', 1)
+BLIT_OP_SCALE = enum_cp_blit_cmd.define('BLIT_OP_SCALE', 3)
+
+enum_set_marker_mode = CEnum(ctypes.c_uint32)
+SET_RENDER_MODE = enum_set_marker_mode.define('SET_RENDER_MODE', 0)
+SET_IFPC_MODE = enum_set_marker_mode.define('SET_IFPC_MODE', 1)
+
+enum_a6xx_ifpc_mode = CEnum(ctypes.c_uint32)
+IFPC_ENABLE = enum_a6xx_ifpc_mode.define('IFPC_ENABLE', 0)
+IFPC_DISABLE = enum_a6xx_ifpc_mode.define('IFPC_DISABLE', 1)
+
+enum_a6xx_marker = CEnum(ctypes.c_uint32)
+RM6_DIRECT_RENDER = enum_a6xx_marker.define('RM6_DIRECT_RENDER', 1)
+RM6_BIN_VISIBILITY = enum_a6xx_marker.define('RM6_BIN_VISIBILITY', 2)
+RM6_BIN_DIRECT = enum_a6xx_marker.define('RM6_BIN_DIRECT', 3)
+RM6_BIN_RENDER_START = enum_a6xx_marker.define('RM6_BIN_RENDER_START', 4)
+RM6_BIN_END_OF_DRAWS = enum_a6xx_marker.define('RM6_BIN_END_OF_DRAWS', 5)
+RM6_BIN_RESOLVE = enum_a6xx_marker.define('RM6_BIN_RESOLVE', 6)
+RM6_BIN_RENDER_END = enum_a6xx_marker.define('RM6_BIN_RENDER_END', 7)
+RM6_COMPUTE = enum_a6xx_marker.define('RM6_COMPUTE', 8)
+RM6_BLIT2DSCALE = enum_a6xx_marker.define('RM6_BLIT2DSCALE', 12)
+RM6_IB1LIST_START = enum_a6xx_marker.define('RM6_IB1LIST_START', 13)
+RM6_IB1LIST_END = enum_a6xx_marker.define('RM6_IB1LIST_END', 14)
+
+enum_pseudo_reg = CEnum(ctypes.c_uint32)
+SMMU_INFO = enum_pseudo_reg.define('SMMU_INFO', 0)
+NON_SECURE_SAVE_ADDR = enum_pseudo_reg.define('NON_SECURE_SAVE_ADDR', 1)
+SECURE_SAVE_ADDR = enum_pseudo_reg.define('SECURE_SAVE_ADDR', 2)
+NON_PRIV_SAVE_ADDR = enum_pseudo_reg.define('NON_PRIV_SAVE_ADDR', 3)
+COUNTER = enum_pseudo_reg.define('COUNTER', 4)
+VSC_PIPE_DATA_DRAW_BASE = enum_pseudo_reg.define('VSC_PIPE_DATA_DRAW_BASE', 8)
+VSC_SIZE_BASE = enum_pseudo_reg.define('VSC_SIZE_BASE', 9)
+VSC_PIPE_DATA_PRIM_BASE = enum_pseudo_reg.define('VSC_PIPE_DATA_PRIM_BASE', 10)
+UNK_STRM_ADDRESS = enum_pseudo_reg.define('UNK_STRM_ADDRESS', 11)
+UNK_STRM_SIZE_ADDRESS = enum_pseudo_reg.define('UNK_STRM_SIZE_ADDRESS', 12)
+BINDLESS_BASE_0_ADDR = enum_pseudo_reg.define('BINDLESS_BASE_0_ADDR', 16)
+BINDLESS_BASE_1_ADDR = enum_pseudo_reg.define('BINDLESS_BASE_1_ADDR', 17)
+BINDLESS_BASE_2_ADDR = enum_pseudo_reg.define('BINDLESS_BASE_2_ADDR', 18)
+BINDLESS_BASE_3_ADDR = enum_pseudo_reg.define('BINDLESS_BASE_3_ADDR', 19)
+BINDLESS_BASE_4_ADDR = enum_pseudo_reg.define('BINDLESS_BASE_4_ADDR', 20)
+BINDLESS_BASE_5_ADDR = enum_pseudo_reg.define('BINDLESS_BASE_5_ADDR', 21)
+BINDLESS_BASE_6_ADDR = enum_pseudo_reg.define('BINDLESS_BASE_6_ADDR', 22)
+
+enum_source_type = CEnum(ctypes.c_uint32)
+SOURCE_REG = enum_source_type.define('SOURCE_REG', 0)
+SOURCE_SCRATCH_MEM = enum_source_type.define('SOURCE_SCRATCH_MEM', 1)
+
+enum_compare_mode = CEnum(ctypes.c_uint32)
+PRED_TEST = enum_compare_mode.define('PRED_TEST', 1)
+REG_COMPARE = enum_compare_mode.define('REG_COMPARE', 2)
+RENDER_MODE = enum_compare_mode.define('RENDER_MODE', 3)
+REG_COMPARE_IMM = enum_compare_mode.define('REG_COMPARE_IMM', 4)
+THREAD_MODE = enum_compare_mode.define('THREAD_MODE', 5)
+
+enum_amble_type = CEnum(ctypes.c_uint32)
+PREAMBLE_AMBLE_TYPE = enum_amble_type.define('PREAMBLE_AMBLE_TYPE', 0)
+BIN_PREAMBLE_AMBLE_TYPE = enum_amble_type.define('BIN_PREAMBLE_AMBLE_TYPE', 1)
+POSTAMBLE_AMBLE_TYPE = enum_amble_type.define('POSTAMBLE_AMBLE_TYPE', 2)
+KMD_AMBLE_TYPE = enum_amble_type.define('KMD_AMBLE_TYPE', 3)
+
+enum_reg_tracker = CEnum(ctypes.c_uint32)
+TRACK_CNTL_REG = enum_reg_tracker.define('TRACK_CNTL_REG', 1)
+TRACK_RENDER_CNTL = enum_reg_tracker.define('TRACK_RENDER_CNTL', 2)
+UNK_EVENT_WRITE = enum_reg_tracker.define('UNK_EVENT_WRITE', 4)
+TRACK_LRZ = enum_reg_tracker.define('TRACK_LRZ', 8)
+
+enum_ts_wait_value_src = CEnum(ctypes.c_uint32)
+TS_WAIT_GE_32B = enum_ts_wait_value_src.define('TS_WAIT_GE_32B', 0)
+TS_WAIT_GE_64B = enum_ts_wait_value_src.define('TS_WAIT_GE_64B', 1)
+TS_WAIT_GE_TIMESTAMP_SUM = enum_ts_wait_value_src.define('TS_WAIT_GE_TIMESTAMP_SUM', 2)
+
+enum_ts_wait_type = CEnum(ctypes.c_uint32)
+TS_WAIT_RAM = enum_ts_wait_type.define('TS_WAIT_RAM', 0)
+TS_WAIT_ONCHIP = enum_ts_wait_type.define('TS_WAIT_ONCHIP', 1)
+
+enum_pipe_count_op = CEnum(ctypes.c_uint32)
+PIPE_CLEAR_BV_BR = enum_pipe_count_op.define('PIPE_CLEAR_BV_BR', 1)
+PIPE_SET_BR_OFFSET = enum_pipe_count_op.define('PIPE_SET_BR_OFFSET', 2)
+PIPE_BR_WAIT_FOR_BV = enum_pipe_count_op.define('PIPE_BR_WAIT_FOR_BV', 3)
+PIPE_BV_WAIT_FOR_BR = enum_pipe_count_op.define('PIPE_BV_WAIT_FOR_BR', 4)
+
+enum_timestamp_op = CEnum(ctypes.c_uint32)
+MODIFY_TIMESTAMP_CLEAR = enum_timestamp_op.define('MODIFY_TIMESTAMP_CLEAR', 0)
+MODIFY_TIMESTAMP_ADD_GLOBAL = enum_timestamp_op.define('MODIFY_TIMESTAMP_ADD_GLOBAL', 1)
+MODIFY_TIMESTAMP_ADD_LOCAL = enum_timestamp_op.define('MODIFY_TIMESTAMP_ADD_LOCAL', 2)
+
+enum_cp_thread = CEnum(ctypes.c_uint32)
+CP_SET_THREAD_BR = enum_cp_thread.define('CP_SET_THREAD_BR', 1)
+CP_SET_THREAD_BV = enum_cp_thread.define('CP_SET_THREAD_BV', 2)
+CP_SET_THREAD_BOTH = enum_cp_thread.define('CP_SET_THREAD_BOTH', 3)
+
+enum_cp_scope = CEnum(ctypes.c_uint32)
+INTERRUPTS = enum_cp_scope.define('INTERRUPTS', 0)
+
+enum_a6xx_tile_mode = CEnum(ctypes.c_uint32)
+TILE6_LINEAR = enum_a6xx_tile_mode.define('TILE6_LINEAR', 0)
+TILE6_2 = enum_a6xx_tile_mode.define('TILE6_2', 2)
+TILE6_3 = enum_a6xx_tile_mode.define('TILE6_3', 3)
+
+enum_a6xx_format = CEnum(ctypes.c_uint32)
+FMT6_A8_UNORM = enum_a6xx_format.define('FMT6_A8_UNORM', 2)
+FMT6_8_UNORM = enum_a6xx_format.define('FMT6_8_UNORM', 3)
+FMT6_8_SNORM = enum_a6xx_format.define('FMT6_8_SNORM', 4)
+FMT6_8_UINT = enum_a6xx_format.define('FMT6_8_UINT', 5)
+FMT6_8_SINT = enum_a6xx_format.define('FMT6_8_SINT', 6)
+FMT6_4_4_4_4_UNORM = enum_a6xx_format.define('FMT6_4_4_4_4_UNORM', 8)
+FMT6_5_5_5_1_UNORM = enum_a6xx_format.define('FMT6_5_5_5_1_UNORM', 10)
+FMT6_1_5_5_5_UNORM = enum_a6xx_format.define('FMT6_1_5_5_5_UNORM', 12)
+FMT6_5_6_5_UNORM = enum_a6xx_format.define('FMT6_5_6_5_UNORM', 14)
+FMT6_8_8_UNORM = enum_a6xx_format.define('FMT6_8_8_UNORM', 15)
+FMT6_8_8_SNORM = enum_a6xx_format.define('FMT6_8_8_SNORM', 16)
+FMT6_8_8_UINT = enum_a6xx_format.define('FMT6_8_8_UINT', 17)
+FMT6_8_8_SINT = enum_a6xx_format.define('FMT6_8_8_SINT', 18)
+FMT6_L8_A8_UNORM = enum_a6xx_format.define('FMT6_L8_A8_UNORM', 19)
+FMT6_16_UNORM = enum_a6xx_format.define('FMT6_16_UNORM', 21)
+FMT6_16_SNORM = enum_a6xx_format.define('FMT6_16_SNORM', 22)
+FMT6_16_FLOAT = enum_a6xx_format.define('FMT6_16_FLOAT', 23)
+FMT6_16_UINT = enum_a6xx_format.define('FMT6_16_UINT', 24)
+FMT6_16_SINT = enum_a6xx_format.define('FMT6_16_SINT', 25)
+FMT6_8_8_8_UNORM = enum_a6xx_format.define('FMT6_8_8_8_UNORM', 33)
+FMT6_8_8_8_SNORM = enum_a6xx_format.define('FMT6_8_8_8_SNORM', 34)
+FMT6_8_8_8_UINT = enum_a6xx_format.define('FMT6_8_8_8_UINT', 35)
+FMT6_8_8_8_SINT = enum_a6xx_format.define('FMT6_8_8_8_SINT', 36)
+FMT6_8_8_8_8_UNORM = enum_a6xx_format.define('FMT6_8_8_8_8_UNORM', 48)
+FMT6_8_8_8_X8_UNORM = enum_a6xx_format.define('FMT6_8_8_8_X8_UNORM', 49)
+FMT6_8_8_8_8_SNORM = enum_a6xx_format.define('FMT6_8_8_8_8_SNORM', 50)
+FMT6_8_8_8_8_UINT = enum_a6xx_format.define('FMT6_8_8_8_8_UINT', 51)
+FMT6_8_8_8_8_SINT = enum_a6xx_format.define('FMT6_8_8_8_8_SINT', 52)
+FMT6_9_9_9_E5_FLOAT = enum_a6xx_format.define('FMT6_9_9_9_E5_FLOAT', 53)
+FMT6_10_10_10_2_UNORM = enum_a6xx_format.define('FMT6_10_10_10_2_UNORM', 54)
+FMT6_10_10_10_2_UNORM_DEST = enum_a6xx_format.define('FMT6_10_10_10_2_UNORM_DEST', 55)
+FMT6_10_10_10_2_SNORM = enum_a6xx_format.define('FMT6_10_10_10_2_SNORM', 57)
+FMT6_10_10_10_2_UINT = enum_a6xx_format.define('FMT6_10_10_10_2_UINT', 58)
+FMT6_10_10_10_2_SINT = enum_a6xx_format.define('FMT6_10_10_10_2_SINT', 59)
+FMT6_11_11_10_FLOAT = enum_a6xx_format.define('FMT6_11_11_10_FLOAT', 66)
+FMT6_16_16_UNORM = enum_a6xx_format.define('FMT6_16_16_UNORM', 67)
+FMT6_16_16_SNORM = enum_a6xx_format.define('FMT6_16_16_SNORM', 68)
+FMT6_16_16_FLOAT = enum_a6xx_format.define('FMT6_16_16_FLOAT', 69)
+FMT6_16_16_UINT = enum_a6xx_format.define('FMT6_16_16_UINT', 70)
+FMT6_16_16_SINT = enum_a6xx_format.define('FMT6_16_16_SINT', 71)
+FMT6_32_UNORM = enum_a6xx_format.define('FMT6_32_UNORM', 72)
+FMT6_32_SNORM = enum_a6xx_format.define('FMT6_32_SNORM', 73)
+FMT6_32_FLOAT = enum_a6xx_format.define('FMT6_32_FLOAT', 74)
+FMT6_32_UINT = enum_a6xx_format.define('FMT6_32_UINT', 75)
+FMT6_32_SINT = enum_a6xx_format.define('FMT6_32_SINT', 76)
+FMT6_32_FIXED = enum_a6xx_format.define('FMT6_32_FIXED', 77)
+FMT6_16_16_16_UNORM = enum_a6xx_format.define('FMT6_16_16_16_UNORM', 88)
+FMT6_16_16_16_SNORM = enum_a6xx_format.define('FMT6_16_16_16_SNORM', 89)
+FMT6_16_16_16_FLOAT = enum_a6xx_format.define('FMT6_16_16_16_FLOAT', 90)
+FMT6_16_16_16_UINT = enum_a6xx_format.define('FMT6_16_16_16_UINT', 91)
+FMT6_16_16_16_SINT = enum_a6xx_format.define('FMT6_16_16_16_SINT', 92)
+FMT6_16_16_16_16_UNORM = enum_a6xx_format.define('FMT6_16_16_16_16_UNORM', 96)
+FMT6_16_16_16_16_SNORM = enum_a6xx_format.define('FMT6_16_16_16_16_SNORM', 97)
+FMT6_16_16_16_16_FLOAT = enum_a6xx_format.define('FMT6_16_16_16_16_FLOAT', 98)
+FMT6_16_16_16_16_UINT = enum_a6xx_format.define('FMT6_16_16_16_16_UINT', 99)
+FMT6_16_16_16_16_SINT = enum_a6xx_format.define('FMT6_16_16_16_16_SINT', 100)
+FMT6_32_32_UNORM = enum_a6xx_format.define('FMT6_32_32_UNORM', 101)
+FMT6_32_32_SNORM = enum_a6xx_format.define('FMT6_32_32_SNORM', 102)
+FMT6_32_32_FLOAT = enum_a6xx_format.define('FMT6_32_32_FLOAT', 103)
+FMT6_32_32_UINT = enum_a6xx_format.define('FMT6_32_32_UINT', 104)
+FMT6_32_32_SINT = enum_a6xx_format.define('FMT6_32_32_SINT', 105)
+FMT6_32_32_FIXED = enum_a6xx_format.define('FMT6_32_32_FIXED', 106)
+FMT6_32_32_32_UNORM = enum_a6xx_format.define('FMT6_32_32_32_UNORM', 112)
+FMT6_32_32_32_SNORM = enum_a6xx_format.define('FMT6_32_32_32_SNORM', 113)
+FMT6_32_32_32_UINT = enum_a6xx_format.define('FMT6_32_32_32_UINT', 114)
+FMT6_32_32_32_SINT = enum_a6xx_format.define('FMT6_32_32_32_SINT', 115)
+FMT6_32_32_32_FLOAT = enum_a6xx_format.define('FMT6_32_32_32_FLOAT', 116)
+FMT6_32_32_32_FIXED = enum_a6xx_format.define('FMT6_32_32_32_FIXED', 117)
+FMT6_32_32_32_32_UNORM = enum_a6xx_format.define('FMT6_32_32_32_32_UNORM', 128)
+FMT6_32_32_32_32_SNORM = enum_a6xx_format.define('FMT6_32_32_32_32_SNORM', 129)
+FMT6_32_32_32_32_FLOAT = enum_a6xx_format.define('FMT6_32_32_32_32_FLOAT', 130)
+FMT6_32_32_32_32_UINT = enum_a6xx_format.define('FMT6_32_32_32_32_UINT', 131)
+FMT6_32_32_32_32_SINT = enum_a6xx_format.define('FMT6_32_32_32_32_SINT', 132)
+FMT6_32_32_32_32_FIXED = enum_a6xx_format.define('FMT6_32_32_32_32_FIXED', 133)
+FMT6_G8R8B8R8_422_UNORM = enum_a6xx_format.define('FMT6_G8R8B8R8_422_UNORM', 140)
+FMT6_R8G8R8B8_422_UNORM = enum_a6xx_format.define('FMT6_R8G8R8B8_422_UNORM', 141)
+FMT6_R8_G8B8_2PLANE_420_UNORM = enum_a6xx_format.define('FMT6_R8_G8B8_2PLANE_420_UNORM', 142)
+FMT6_NV21 = enum_a6xx_format.define('FMT6_NV21', 143)
+FMT6_R8_G8_B8_3PLANE_420_UNORM = enum_a6xx_format.define('FMT6_R8_G8_B8_3PLANE_420_UNORM', 144)
+FMT6_Z24_UNORM_S8_UINT_AS_R8G8B8A8 = enum_a6xx_format.define('FMT6_Z24_UNORM_S8_UINT_AS_R8G8B8A8', 145)
+FMT6_NV12_Y = enum_a6xx_format.define('FMT6_NV12_Y', 148)
+FMT6_NV12_UV = enum_a6xx_format.define('FMT6_NV12_UV', 149)
+FMT6_NV12_VU = enum_a6xx_format.define('FMT6_NV12_VU', 150)
+FMT6_NV12_4R = enum_a6xx_format.define('FMT6_NV12_4R', 151)
+FMT6_NV12_4R_Y = enum_a6xx_format.define('FMT6_NV12_4R_Y', 152)
+FMT6_NV12_4R_UV = enum_a6xx_format.define('FMT6_NV12_4R_UV', 153)
+FMT6_P010 = enum_a6xx_format.define('FMT6_P010', 154)
+FMT6_P010_Y = enum_a6xx_format.define('FMT6_P010_Y', 155)
+FMT6_P010_UV = enum_a6xx_format.define('FMT6_P010_UV', 156)
+FMT6_TP10 = enum_a6xx_format.define('FMT6_TP10', 157)
+FMT6_TP10_Y = enum_a6xx_format.define('FMT6_TP10_Y', 158)
+FMT6_TP10_UV = enum_a6xx_format.define('FMT6_TP10_UV', 159)
+FMT6_Z24_UNORM_S8_UINT = enum_a6xx_format.define('FMT6_Z24_UNORM_S8_UINT', 160)
+FMT6_ETC2_RG11_UNORM = enum_a6xx_format.define('FMT6_ETC2_RG11_UNORM', 171)
+FMT6_ETC2_RG11_SNORM = enum_a6xx_format.define('FMT6_ETC2_RG11_SNORM', 172)
+FMT6_ETC2_R11_UNORM = enum_a6xx_format.define('FMT6_ETC2_R11_UNORM', 173)
+FMT6_ETC2_R11_SNORM = enum_a6xx_format.define('FMT6_ETC2_R11_SNORM', 174)
+FMT6_ETC1 = enum_a6xx_format.define('FMT6_ETC1', 175)
+FMT6_ETC2_RGB8 = enum_a6xx_format.define('FMT6_ETC2_RGB8', 176)
+FMT6_ETC2_RGBA8 = enum_a6xx_format.define('FMT6_ETC2_RGBA8', 177)
+FMT6_ETC2_RGB8A1 = enum_a6xx_format.define('FMT6_ETC2_RGB8A1', 178)
+FMT6_DXT1 = enum_a6xx_format.define('FMT6_DXT1', 179)
+FMT6_DXT3 = enum_a6xx_format.define('FMT6_DXT3', 180)
+FMT6_DXT5 = enum_a6xx_format.define('FMT6_DXT5', 181)
+FMT6_RGTC1_UNORM = enum_a6xx_format.define('FMT6_RGTC1_UNORM', 182)
+FMT6_RGTC1_UNORM_FAST = enum_a6xx_format.define('FMT6_RGTC1_UNORM_FAST', 183)
+FMT6_RGTC1_SNORM = enum_a6xx_format.define('FMT6_RGTC1_SNORM', 184)
+FMT6_RGTC1_SNORM_FAST = enum_a6xx_format.define('FMT6_RGTC1_SNORM_FAST', 185)
+FMT6_RGTC2_UNORM = enum_a6xx_format.define('FMT6_RGTC2_UNORM', 186)
+FMT6_RGTC2_UNORM_FAST = enum_a6xx_format.define('FMT6_RGTC2_UNORM_FAST', 187)
+FMT6_RGTC2_SNORM = enum_a6xx_format.define('FMT6_RGTC2_SNORM', 188)
+FMT6_RGTC2_SNORM_FAST = enum_a6xx_format.define('FMT6_RGTC2_SNORM_FAST', 189)
+FMT6_BPTC_UFLOAT = enum_a6xx_format.define('FMT6_BPTC_UFLOAT', 190)
+FMT6_BPTC_FLOAT = enum_a6xx_format.define('FMT6_BPTC_FLOAT', 191)
+FMT6_BPTC = enum_a6xx_format.define('FMT6_BPTC', 192)
+FMT6_ASTC_4x4 = enum_a6xx_format.define('FMT6_ASTC_4x4', 193)
+FMT6_ASTC_5x4 = enum_a6xx_format.define('FMT6_ASTC_5x4', 194)
+FMT6_ASTC_5x5 = enum_a6xx_format.define('FMT6_ASTC_5x5', 195)
+FMT6_ASTC_6x5 = enum_a6xx_format.define('FMT6_ASTC_6x5', 196)
+FMT6_ASTC_6x6 = enum_a6xx_format.define('FMT6_ASTC_6x6', 197)
+FMT6_ASTC_8x5 = enum_a6xx_format.define('FMT6_ASTC_8x5', 198)
+FMT6_ASTC_8x6 = enum_a6xx_format.define('FMT6_ASTC_8x6', 199)
+FMT6_ASTC_8x8 = enum_a6xx_format.define('FMT6_ASTC_8x8', 200)
+FMT6_ASTC_10x5 = enum_a6xx_format.define('FMT6_ASTC_10x5', 201)
+FMT6_ASTC_10x6 = enum_a6xx_format.define('FMT6_ASTC_10x6', 202)
+FMT6_ASTC_10x8 = enum_a6xx_format.define('FMT6_ASTC_10x8', 203)
+FMT6_ASTC_10x10 = enum_a6xx_format.define('FMT6_ASTC_10x10', 204)
+FMT6_ASTC_12x10 = enum_a6xx_format.define('FMT6_ASTC_12x10', 205)
+FMT6_ASTC_12x12 = enum_a6xx_format.define('FMT6_ASTC_12x12', 206)
+FMT6_Z24_UINT_S8_UINT = enum_a6xx_format.define('FMT6_Z24_UINT_S8_UINT', 234)
+FMT6_NONE = enum_a6xx_format.define('FMT6_NONE', 255)
+
+enum_a6xx_polygon_mode = CEnum(ctypes.c_uint32)
+POLYMODE6_POINTS = enum_a6xx_polygon_mode.define('POLYMODE6_POINTS', 1)
+POLYMODE6_LINES = enum_a6xx_polygon_mode.define('POLYMODE6_LINES', 2)
+POLYMODE6_TRIANGLES = enum_a6xx_polygon_mode.define('POLYMODE6_TRIANGLES', 3)
+
+enum_a6xx_depth_format = CEnum(ctypes.c_uint32)
+DEPTH6_NONE = enum_a6xx_depth_format.define('DEPTH6_NONE', 0)
+DEPTH6_16 = enum_a6xx_depth_format.define('DEPTH6_16', 1)
+DEPTH6_24_8 = enum_a6xx_depth_format.define('DEPTH6_24_8', 2)
+DEPTH6_32 = enum_a6xx_depth_format.define('DEPTH6_32', 4)
+
+enum_a6xx_shader_id = CEnum(ctypes.c_uint32)
+A6XX_TP0_TMO_DATA = enum_a6xx_shader_id.define('A6XX_TP0_TMO_DATA', 9)
+A6XX_TP0_SMO_DATA = enum_a6xx_shader_id.define('A6XX_TP0_SMO_DATA', 10)
+A6XX_TP0_MIPMAP_BASE_DATA = enum_a6xx_shader_id.define('A6XX_TP0_MIPMAP_BASE_DATA', 11)
+A6XX_TP1_TMO_DATA = enum_a6xx_shader_id.define('A6XX_TP1_TMO_DATA', 25)
+A6XX_TP1_SMO_DATA = enum_a6xx_shader_id.define('A6XX_TP1_SMO_DATA', 26)
+A6XX_TP1_MIPMAP_BASE_DATA = enum_a6xx_shader_id.define('A6XX_TP1_MIPMAP_BASE_DATA', 27)
+A6XX_SP_INST_DATA = enum_a6xx_shader_id.define('A6XX_SP_INST_DATA', 41)
+A6XX_SP_LB_0_DATA = enum_a6xx_shader_id.define('A6XX_SP_LB_0_DATA', 42)
+A6XX_SP_LB_1_DATA = enum_a6xx_shader_id.define('A6XX_SP_LB_1_DATA', 43)
+A6XX_SP_LB_2_DATA = enum_a6xx_shader_id.define('A6XX_SP_LB_2_DATA', 44)
+A6XX_SP_LB_3_DATA = enum_a6xx_shader_id.define('A6XX_SP_LB_3_DATA', 45)
+A6XX_SP_LB_4_DATA = enum_a6xx_shader_id.define('A6XX_SP_LB_4_DATA', 46)
+A6XX_SP_LB_5_DATA = enum_a6xx_shader_id.define('A6XX_SP_LB_5_DATA', 47)
+A6XX_SP_CB_BINDLESS_DATA = enum_a6xx_shader_id.define('A6XX_SP_CB_BINDLESS_DATA', 48)
+A6XX_SP_CB_LEGACY_DATA = enum_a6xx_shader_id.define('A6XX_SP_CB_LEGACY_DATA', 49)
+A6XX_SP_GFX_UAV_BASE_DATA = enum_a6xx_shader_id.define('A6XX_SP_GFX_UAV_BASE_DATA', 50)
+A6XX_SP_INST_TAG = enum_a6xx_shader_id.define('A6XX_SP_INST_TAG', 51)
+A6XX_SP_CB_BINDLESS_TAG = enum_a6xx_shader_id.define('A6XX_SP_CB_BINDLESS_TAG', 52)
+A6XX_SP_TMO_UMO_TAG = enum_a6xx_shader_id.define('A6XX_SP_TMO_UMO_TAG', 53)
+A6XX_SP_SMO_TAG = enum_a6xx_shader_id.define('A6XX_SP_SMO_TAG', 54)
+A6XX_SP_STATE_DATA = enum_a6xx_shader_id.define('A6XX_SP_STATE_DATA', 55)
+A6XX_HLSQ_CHUNK_CVS_RAM = enum_a6xx_shader_id.define('A6XX_HLSQ_CHUNK_CVS_RAM', 73)
+A6XX_HLSQ_CHUNK_CPS_RAM = enum_a6xx_shader_id.define('A6XX_HLSQ_CHUNK_CPS_RAM', 74)
+A6XX_HLSQ_CHUNK_CVS_RAM_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_CHUNK_CVS_RAM_TAG', 75)
+A6XX_HLSQ_CHUNK_CPS_RAM_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_CHUNK_CPS_RAM_TAG', 76)
+A6XX_HLSQ_ICB_CVS_CB_BASE_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_ICB_CVS_CB_BASE_TAG', 77)
+A6XX_HLSQ_ICB_CPS_CB_BASE_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_ICB_CPS_CB_BASE_TAG', 78)
+A6XX_HLSQ_CVS_MISC_RAM = enum_a6xx_shader_id.define('A6XX_HLSQ_CVS_MISC_RAM', 80)
+A6XX_HLSQ_CPS_MISC_RAM = enum_a6xx_shader_id.define('A6XX_HLSQ_CPS_MISC_RAM', 81)
+A6XX_HLSQ_INST_RAM = enum_a6xx_shader_id.define('A6XX_HLSQ_INST_RAM', 82)
+A6XX_HLSQ_GFX_CVS_CONST_RAM = enum_a6xx_shader_id.define('A6XX_HLSQ_GFX_CVS_CONST_RAM', 83)
+A6XX_HLSQ_GFX_CPS_CONST_RAM = enum_a6xx_shader_id.define('A6XX_HLSQ_GFX_CPS_CONST_RAM', 84)
+A6XX_HLSQ_CVS_MISC_RAM_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_CVS_MISC_RAM_TAG', 85)
+A6XX_HLSQ_CPS_MISC_RAM_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_CPS_MISC_RAM_TAG', 86)
+A6XX_HLSQ_INST_RAM_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_INST_RAM_TAG', 87)
+A6XX_HLSQ_GFX_CVS_CONST_RAM_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_GFX_CVS_CONST_RAM_TAG', 88)
+A6XX_HLSQ_GFX_CPS_CONST_RAM_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_GFX_CPS_CONST_RAM_TAG', 89)
+A6XX_HLSQ_PWR_REST_RAM = enum_a6xx_shader_id.define('A6XX_HLSQ_PWR_REST_RAM', 90)
+A6XX_HLSQ_PWR_REST_TAG = enum_a6xx_shader_id.define('A6XX_HLSQ_PWR_REST_TAG', 91)
+A6XX_HLSQ_DATAPATH_META = enum_a6xx_shader_id.define('A6XX_HLSQ_DATAPATH_META', 96)
+A6XX_HLSQ_FRONTEND_META = enum_a6xx_shader_id.define('A6XX_HLSQ_FRONTEND_META', 97)
+A6XX_HLSQ_INDIRECT_META = enum_a6xx_shader_id.define('A6XX_HLSQ_INDIRECT_META', 98)
+A6XX_HLSQ_BACKEND_META = enum_a6xx_shader_id.define('A6XX_HLSQ_BACKEND_META', 99)
+A6XX_SP_LB_6_DATA = enum_a6xx_shader_id.define('A6XX_SP_LB_6_DATA', 112)
+A6XX_SP_LB_7_DATA = enum_a6xx_shader_id.define('A6XX_SP_LB_7_DATA', 113)
+A6XX_HLSQ_INST_RAM_1 = enum_a6xx_shader_id.define('A6XX_HLSQ_INST_RAM_1', 115)
+
+enum_a6xx_debugbus_id = CEnum(ctypes.c_uint32)
+A6XX_DBGBUS_CP = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_CP', 1)
+A6XX_DBGBUS_RBBM = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_RBBM', 2)
+A6XX_DBGBUS_VBIF = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VBIF', 3)
+A6XX_DBGBUS_HLSQ = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_HLSQ', 4)
+A6XX_DBGBUS_UCHE = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_UCHE', 5)
+A6XX_DBGBUS_DPM = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_DPM', 6)
+A6XX_DBGBUS_TESS = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_TESS', 7)
+A6XX_DBGBUS_PC = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_PC', 8)
+A6XX_DBGBUS_VFDP = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VFDP', 9)
+A6XX_DBGBUS_VPC = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VPC', 10)
+A6XX_DBGBUS_TSE = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_TSE', 11)
+A6XX_DBGBUS_RAS = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_RAS', 12)
+A6XX_DBGBUS_VSC = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VSC', 13)
+A6XX_DBGBUS_COM = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_COM', 14)
+A6XX_DBGBUS_LRZ = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_LRZ', 16)
+A6XX_DBGBUS_A2D = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_A2D', 17)
+A6XX_DBGBUS_CCUFCHE = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_CCUFCHE', 18)
+A6XX_DBGBUS_GMU_CX = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_GMU_CX', 19)
+A6XX_DBGBUS_RBP = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_RBP', 20)
+A6XX_DBGBUS_DCS = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_DCS', 21)
+A6XX_DBGBUS_DBGC = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_DBGC', 22)
+A6XX_DBGBUS_CX = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_CX', 23)
+A6XX_DBGBUS_GMU_GX = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_GMU_GX', 24)
+A6XX_DBGBUS_TPFCHE = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_TPFCHE', 25)
+A6XX_DBGBUS_GBIF_GX = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_GBIF_GX', 26)
+A6XX_DBGBUS_GPC = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_GPC', 29)
+A6XX_DBGBUS_LARC = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_LARC', 30)
+A6XX_DBGBUS_HLSQ_SPTP = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_HLSQ_SPTP', 31)
+A6XX_DBGBUS_RB_0 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_RB_0', 32)
+A6XX_DBGBUS_RB_1 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_RB_1', 33)
+A6XX_DBGBUS_RB_2 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_RB_2', 34)
+A6XX_DBGBUS_UCHE_WRAPPER = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_UCHE_WRAPPER', 36)
+A6XX_DBGBUS_CCU_0 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_CCU_0', 40)
+A6XX_DBGBUS_CCU_1 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_CCU_1', 41)
+A6XX_DBGBUS_CCU_2 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_CCU_2', 42)
+A6XX_DBGBUS_VFD_0 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VFD_0', 56)
+A6XX_DBGBUS_VFD_1 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VFD_1', 57)
+A6XX_DBGBUS_VFD_2 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VFD_2', 58)
+A6XX_DBGBUS_VFD_3 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VFD_3', 59)
+A6XX_DBGBUS_VFD_4 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VFD_4', 60)
+A6XX_DBGBUS_VFD_5 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_VFD_5', 61)
+A6XX_DBGBUS_SP_0 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_SP_0', 64)
+A6XX_DBGBUS_SP_1 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_SP_1', 65)
+A6XX_DBGBUS_SP_2 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_SP_2', 66)
+A6XX_DBGBUS_TPL1_0 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_TPL1_0', 72)
+A6XX_DBGBUS_TPL1_1 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_TPL1_1', 73)
+A6XX_DBGBUS_TPL1_2 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_TPL1_2', 74)
+A6XX_DBGBUS_TPL1_3 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_TPL1_3', 75)
+A6XX_DBGBUS_TPL1_4 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_TPL1_4', 76)
+A6XX_DBGBUS_TPL1_5 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_TPL1_5', 77)
+A6XX_DBGBUS_SPTP_0 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_SPTP_0', 88)
+A6XX_DBGBUS_SPTP_1 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_SPTP_1', 89)
+A6XX_DBGBUS_SPTP_2 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_SPTP_2', 90)
+A6XX_DBGBUS_SPTP_3 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_SPTP_3', 91)
+A6XX_DBGBUS_SPTP_4 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_SPTP_4', 92)
+A6XX_DBGBUS_SPTP_5 = enum_a6xx_debugbus_id.define('A6XX_DBGBUS_SPTP_5', 93)
+
+enum_a6xx_2d_ifmt = CEnum(ctypes.c_uint32)
+R2D_INT32 = enum_a6xx_2d_ifmt.define('R2D_INT32', 7)
+R2D_INT16 = enum_a6xx_2d_ifmt.define('R2D_INT16', 6)
+R2D_INT8 = enum_a6xx_2d_ifmt.define('R2D_INT8', 5)
+R2D_FLOAT32 = enum_a6xx_2d_ifmt.define('R2D_FLOAT32', 4)
+R2D_FLOAT16 = enum_a6xx_2d_ifmt.define('R2D_FLOAT16', 3)
+R2D_SNORM8 = enum_a6xx_2d_ifmt.define('R2D_SNORM8', 2)
+R2D_UNORM8_SRGB = enum_a6xx_2d_ifmt.define('R2D_UNORM8_SRGB', 1)
+R2D_UNORM8 = enum_a6xx_2d_ifmt.define('R2D_UNORM8', 0)
+
+enum_a6xx_tex_type = CEnum(ctypes.c_uint32)
+A6XX_TEX_1D = enum_a6xx_tex_type.define('A6XX_TEX_1D', 0)
+A6XX_TEX_2D = enum_a6xx_tex_type.define('A6XX_TEX_2D', 1)
+A6XX_TEX_CUBE = enum_a6xx_tex_type.define('A6XX_TEX_CUBE', 2)
+A6XX_TEX_3D = enum_a6xx_tex_type.define('A6XX_TEX_3D', 3)
+A6XX_TEX_BUFFER = enum_a6xx_tex_type.define('A6XX_TEX_BUFFER', 4)
+A6XX_TEX_IMG_BUFFER = enum_a6xx_tex_type.define('A6XX_TEX_IMG_BUFFER', 5)
+
+enum_a6xx_ztest_mode = CEnum(ctypes.c_uint32)
+A6XX_EARLY_Z = enum_a6xx_ztest_mode.define('A6XX_EARLY_Z', 0)
+A6XX_LATE_Z = enum_a6xx_ztest_mode.define('A6XX_LATE_Z', 1)
+A6XX_EARLY_Z_LATE_Z = enum_a6xx_ztest_mode.define('A6XX_EARLY_Z_LATE_Z', 2)
+A6XX_INVALID_ZTEST = enum_a6xx_ztest_mode.define('A6XX_INVALID_ZTEST', 3)
+
+enum_a6xx_tess_spacing = CEnum(ctypes.c_uint32)
+TESS_EQUAL = enum_a6xx_tess_spacing.define('TESS_EQUAL', 0)
+TESS_FRACTIONAL_ODD = enum_a6xx_tess_spacing.define('TESS_FRACTIONAL_ODD', 2)
+TESS_FRACTIONAL_EVEN = enum_a6xx_tess_spacing.define('TESS_FRACTIONAL_EVEN', 3)
+
+enum_a6xx_tess_output = CEnum(ctypes.c_uint32)
+TESS_POINTS = enum_a6xx_tess_output.define('TESS_POINTS', 0)
+TESS_LINES = enum_a6xx_tess_output.define('TESS_LINES', 1)
+TESS_CW_TRIS = enum_a6xx_tess_output.define('TESS_CW_TRIS', 2)
+TESS_CCW_TRIS = enum_a6xx_tess_output.define('TESS_CCW_TRIS', 3)
+
+enum_a6xx_tex_filter = CEnum(ctypes.c_uint32)
+A6XX_TEX_NEAREST = enum_a6xx_tex_filter.define('A6XX_TEX_NEAREST', 0)
+A6XX_TEX_LINEAR = enum_a6xx_tex_filter.define('A6XX_TEX_LINEAR', 1)
+A6XX_TEX_ANISO = enum_a6xx_tex_filter.define('A6XX_TEX_ANISO', 2)
+A6XX_TEX_CUBIC = enum_a6xx_tex_filter.define('A6XX_TEX_CUBIC', 3)
+
+enum_a6xx_tex_clamp = CEnum(ctypes.c_uint32)
+A6XX_TEX_REPEAT = enum_a6xx_tex_clamp.define('A6XX_TEX_REPEAT', 0)
+A6XX_TEX_CLAMP_TO_EDGE = enum_a6xx_tex_clamp.define('A6XX_TEX_CLAMP_TO_EDGE', 1)
+A6XX_TEX_MIRROR_REPEAT = enum_a6xx_tex_clamp.define('A6XX_TEX_MIRROR_REPEAT', 2)
+A6XX_TEX_CLAMP_TO_BORDER = enum_a6xx_tex_clamp.define('A6XX_TEX_CLAMP_TO_BORDER', 3)
+A6XX_TEX_MIRROR_CLAMP = enum_a6xx_tex_clamp.define('A6XX_TEX_MIRROR_CLAMP', 4)
+
+enum_a6xx_tex_aniso = CEnum(ctypes.c_uint32)
+A6XX_TEX_ANISO_1 = enum_a6xx_tex_aniso.define('A6XX_TEX_ANISO_1', 0)
+A6XX_TEX_ANISO_2 = enum_a6xx_tex_aniso.define('A6XX_TEX_ANISO_2', 1)
+A6XX_TEX_ANISO_4 = enum_a6xx_tex_aniso.define('A6XX_TEX_ANISO_4', 2)
+A6XX_TEX_ANISO_8 = enum_a6xx_tex_aniso.define('A6XX_TEX_ANISO_8', 3)
+A6XX_TEX_ANISO_16 = enum_a6xx_tex_aniso.define('A6XX_TEX_ANISO_16', 4)
+
+enum_a6xx_reduction_mode = CEnum(ctypes.c_uint32)
+A6XX_REDUCTION_MODE_AVERAGE = enum_a6xx_reduction_mode.define('A6XX_REDUCTION_MODE_AVERAGE', 0)
+A6XX_REDUCTION_MODE_MIN = enum_a6xx_reduction_mode.define('A6XX_REDUCTION_MODE_MIN', 1)
+A6XX_REDUCTION_MODE_MAX = enum_a6xx_reduction_mode.define('A6XX_REDUCTION_MODE_MAX', 2)
+
+enum_a6xx_fast_border_color = CEnum(ctypes.c_uint32)
+A6XX_BORDER_COLOR_0_0_0_0 = enum_a6xx_fast_border_color.define('A6XX_BORDER_COLOR_0_0_0_0', 0)
+A6XX_BORDER_COLOR_0_0_0_1 = enum_a6xx_fast_border_color.define('A6XX_BORDER_COLOR_0_0_0_1', 1)
+A6XX_BORDER_COLOR_1_1_1_0 = enum_a6xx_fast_border_color.define('A6XX_BORDER_COLOR_1_1_1_0', 2)
+A6XX_BORDER_COLOR_1_1_1_1 = enum_a6xx_fast_border_color.define('A6XX_BORDER_COLOR_1_1_1_1', 3)
+
+enum_a6xx_tex_swiz = CEnum(ctypes.c_uint32)
+A6XX_TEX_X = enum_a6xx_tex_swiz.define('A6XX_TEX_X', 0)
+A6XX_TEX_Y = enum_a6xx_tex_swiz.define('A6XX_TEX_Y', 1)
+A6XX_TEX_Z = enum_a6xx_tex_swiz.define('A6XX_TEX_Z', 2)
+A6XX_TEX_W = enum_a6xx_tex_swiz.define('A6XX_TEX_W', 3)
+A6XX_TEX_ZERO = enum_a6xx_tex_swiz.define('A6XX_TEX_ZERO', 4)
+A6XX_TEX_ONE = enum_a6xx_tex_swiz.define('A6XX_TEX_ONE', 5)
+
 NIR_DEBUG_CLONE = (1 << 0)
 NIR_DEBUG_SERIALIZE = (1 << 1)
 NIR_DEBUG_NOVALIDATE = (1 << 2)
@@ -7794,6 +11072,30 @@ lp_jit_vertex_header_id = lambda _gallivm,_type,_ptr: lp_build_struct__get_ptr2(
 lp_jit_vertex_header_clip_pos = lambda _gallivm,_type,_ptr: lp_build_struct__get_ptr2(_gallivm, _type, _ptr, LP_JIT_VERTEX_HEADER_CLIP_POS, "clip_pos")
 lp_jit_vertex_header_data = lambda _gallivm,_type,_ptr: lp_build_struct__get_ptr2(_gallivm, _type, _ptr, LP_JIT_VERTEX_HEADER_DATA, "data")
 LP_MAX_TEX_FUNC_ARGS = 32
+A6XX_CCU_DEPTH_SIZE = (64 * 1024)
+A6XX_CCU_GMEM_COLOR_SIZE = (16 * 1024)
+dword_offsetof = lambda type,name: DIV_ROUND_UP(offsetof(type, name), 4)
+dword_sizeof = lambda type: DIV_ROUND_UP(sizeof(type), 4)
+IR3_DP_CS = lambda name: dword_offsetof(struct_ir3_driver_params_cs, name)
+IR3_DP_VS = lambda name: dword_offsetof(struct_ir3_driver_params_vs, name)
+IR3_DP_TCS = lambda name: dword_offsetof(struct_ir3_driver_params_tcs, name)
+IR3_DP_FS = lambda name: dword_offsetof(struct_ir3_driver_params_fs, name)
+IR3_MAX_SHADER_BUFFERS = 32
+IR3_MAX_SHADER_IMAGES = 32
+IR3_MAX_SO_BUFFERS = 4
+IR3_MAX_SO_STREAMS = 4
+IR3_MAX_SO_OUTPUTS = 128
+IR3_MAX_UBO_PUSH_RANGES = 32
+IR3_MAX_SAMPLER_PREFETCH = 4
+IR3_SAMPLER_PREFETCH_CMD = 0x4
+IR3_SAMPLER_BINDLESS_PREFETCH_CMD = 0x6
+IR3_TESS_NONE = 0
+IR3_TESS_QUADS = 1
+IR3_TESS_TRIANGLES = 2
+IR3_TESS_ISOLINES = 3
+UAV_INVALID = 0xff
+UAV_SSBO = 0x80
+HALF_REG_ID = 0x100
 gc_alloc = lambda ctx,type,count: gc_alloc_size(ctx, sizeof(type) * (count), alignof(type))
 gc_zalloc = lambda ctx,type,count: gc_zalloc_size(ctx, sizeof(type) * (count), alignof(type))
 gc_alloc_zla = lambda ctx,type,type2,count: gc_alloc_size(ctx, sizeof(type) + sizeof(type2) * (count), MAX2(alignof(type), alignof(type2)))
@@ -7802,4 +11104,4381 @@ DECLARE_RALLOC_CXX_OPERATORS = lambda type: DECLARE_RALLOC_CXX_OPERATORS_TEMPLAT
 DECLARE_RZALLOC_CXX_OPERATORS = lambda type: DECLARE_RALLOC_CXX_OPERATORS_TEMPLATE(type, rzalloc_size)
 DECLARE_LINEAR_ALLOC_CXX_OPERATORS = lambda type: DECLARE_LINEAR_ALLOC_CXX_OPERATORS_TEMPLATE(type, linear_alloc_child)
 DECLARE_LINEAR_ZALLOC_CXX_OPERATORS = lambda type: DECLARE_LINEAR_ALLOC_CXX_OPERATORS_TEMPLATE(type, linear_zalloc_child)
+ISA_GPU_ID = lambda: ir3_isa_get_gpu_id(scope)
+__struct__cast = lambda X: (struct_X)
+A6XX_RBBM_INT_0_MASK_RBBM_GPU_IDLE = 0x00000001
+A6XX_RBBM_INT_0_MASK_CP_AHB_ERROR = 0x00000002
+A6XX_RBBM_INT_0_MASK_CP_IPC_INTR_0 = 0x00000010
+A6XX_RBBM_INT_0_MASK_CP_IPC_INTR_1 = 0x00000020
+A6XX_RBBM_INT_0_MASK_RBBM_ATB_ASYNCFIFO_OVERFLOW = 0x00000040
+A6XX_RBBM_INT_0_MASK_RBBM_GPC_ERROR = 0x00000080
+A6XX_RBBM_INT_0_MASK_CP_SW = 0x00000100
+A6XX_RBBM_INT_0_MASK_CP_HW_ERROR = 0x00000200
+A6XX_RBBM_INT_0_MASK_CP_CCU_FLUSH_DEPTH_TS = 0x00000400
+A6XX_RBBM_INT_0_MASK_CP_CCU_FLUSH_COLOR_TS = 0x00000800
+A6XX_RBBM_INT_0_MASK_CP_CCU_RESOLVE_TS = 0x00001000
+A6XX_RBBM_INT_0_MASK_CP_IB2 = 0x00002000
+A6XX_RBBM_INT_0_MASK_CP_IB1 = 0x00004000
+A6XX_RBBM_INT_0_MASK_CP_RB = 0x00008000
+A6XX_RBBM_INT_0_MASK_PM4CPINTERRUPT = 0x00008000
+A6XX_RBBM_INT_0_MASK_PM4CPINTERRUPTLPAC = 0x00010000
+A6XX_RBBM_INT_0_MASK_CP_RB_DONE_TS = 0x00020000
+A6XX_RBBM_INT_0_MASK_CP_WT_DONE_TS = 0x00040000
+A6XX_RBBM_INT_0_MASK_CP_CACHE_FLUSH_TS = 0x00100000
+A6XX_RBBM_INT_0_MASK_CP_CACHE_FLUSH_TS_LPAC = 0x00200000
+A6XX_RBBM_INT_0_MASK_RBBM_ATB_BUS_OVERFLOW = 0x00400000
+A6XX_RBBM_INT_0_MASK_RBBM_HANG_DETECT = 0x00800000
+A6XX_RBBM_INT_0_MASK_UCHE_OOB_ACCESS = 0x01000000
+A6XX_RBBM_INT_0_MASK_UCHE_TRAP_INTR = 0x02000000
+A6XX_RBBM_INT_0_MASK_DEBBUS_INTR_0 = 0x04000000
+A6XX_RBBM_INT_0_MASK_DEBBUS_INTR_1 = 0x08000000
+A6XX_RBBM_INT_0_MASK_TSBWRITEERROR = 0x10000000
+A6XX_RBBM_INT_0_MASK_SWFUSEVIOLATION = 0x20000000
+A6XX_RBBM_INT_0_MASK_ISDB_CPU_IRQ = 0x40000000
+A6XX_RBBM_INT_0_MASK_ISDB_UNDER_DEBUG = 0x80000000
+A6XX_CP_INT_CP_OPCODE_ERROR = 0x00000001
+A6XX_CP_INT_CP_UCODE_ERROR = 0x00000002
+A6XX_CP_INT_CP_HW_FAULT_ERROR = 0x00000004
+A6XX_CP_INT_CP_REGISTER_PROTECTION_ERROR = 0x00000010
+A6XX_CP_INT_CP_AHB_ERROR = 0x00000020
+A6XX_CP_INT_CP_VSD_PARITY_ERROR = 0x00000040
+A6XX_CP_INT_CP_ILLEGAL_INSTR_ERROR = 0x00000080
+A6XX_CP_INT_CP_OPCODE_ERROR_LPAC = 0x00000100
+A6XX_CP_INT_CP_UCODE_ERROR_LPAC = 0x00000200
+A6XX_CP_INT_CP_HW_FAULT_ERROR_LPAC = 0x00000400
+A6XX_CP_INT_CP_REGISTER_PROTECTION_ERROR_LPAC = 0x00000800
+A6XX_CP_INT_CP_ILLEGAL_INSTR_ERROR_LPAC = 0x00001000
+A6XX_CP_INT_CP_OPCODE_ERROR_BV = 0x00002000
+A6XX_CP_INT_CP_UCODE_ERROR_BV = 0x00004000
+A6XX_CP_INT_CP_HW_FAULT_ERROR_BV = 0x00008000
+A6XX_CP_INT_CP_REGISTER_PROTECTION_ERROR_BV = 0x00010000
+A6XX_CP_INT_CP_ILLEGAL_INSTR_ERROR_BV = 0x00020000
+REG_A6XX_CP_RB_BASE = 0x00000800
+REG_A6XX_CP_RB_CNTL = 0x00000802
+REG_A6XX_CP_RB_RPTR_ADDR = 0x00000804
+REG_A6XX_CP_RB_RPTR = 0x00000806
+REG_A6XX_CP_RB_WPTR = 0x00000807
+REG_A6XX_CP_SQE_CNTL = 0x00000808
+REG_A6XX_CP_CP2GMU_STATUS = 0x00000812
+A6XX_CP_CP2GMU_STATUS_IFPC = 0x00000001
+REG_A6XX_CP_HW_FAULT = 0x00000821
+REG_A6XX_CP_INTERRUPT_STATUS = 0x00000823
+REG_A6XX_CP_PROTECT_STATUS = 0x00000824
+REG_A6XX_CP_STATUS_1 = 0x00000825
+REG_A6XX_CP_SQE_INSTR_BASE = 0x00000830
+REG_A6XX_CP_MISC_CNTL = 0x00000840
+REG_A6XX_CP_APRIV_CNTL = 0x00000844
+A6XX_CP_APRIV_CNTL_CDWRITE = 0x00000040
+A6XX_CP_APRIV_CNTL_CDREAD = 0x00000020
+A6XX_CP_APRIV_CNTL_RBRPWB = 0x00000008
+A6XX_CP_APRIV_CNTL_RBPRIVLEVEL = 0x00000004
+A6XX_CP_APRIV_CNTL_RBFETCH = 0x00000002
+A6XX_CP_APRIV_CNTL_ICACHE = 0x00000001
+REG_A6XX_CP_PREEMPT_THRESHOLD = 0x000008c0
+REG_A6XX_CP_ROQ_THRESHOLDS_1 = 0x000008c1
+A6XX_CP_ROQ_THRESHOLDS_1_MRB_START__MASK = 0x000000ff
+A6XX_CP_ROQ_THRESHOLDS_1_MRB_START__SHIFT = 0
+A6XX_CP_ROQ_THRESHOLDS_1_VSD_START__MASK = 0x0000ff00
+A6XX_CP_ROQ_THRESHOLDS_1_VSD_START__SHIFT = 8
+A6XX_CP_ROQ_THRESHOLDS_1_IB1_START__MASK = 0x00ff0000
+A6XX_CP_ROQ_THRESHOLDS_1_IB1_START__SHIFT = 16
+A6XX_CP_ROQ_THRESHOLDS_1_IB2_START__MASK = 0xff000000
+A6XX_CP_ROQ_THRESHOLDS_1_IB2_START__SHIFT = 24
+REG_A6XX_CP_ROQ_THRESHOLDS_2 = 0x000008c2
+A6XX_CP_ROQ_THRESHOLDS_2_SDS_START__MASK = 0x000001ff
+A6XX_CP_ROQ_THRESHOLDS_2_SDS_START__SHIFT = 0
+A6XX_CP_ROQ_THRESHOLDS_2_ROQ_SIZE__MASK = 0xffff0000
+A6XX_CP_ROQ_THRESHOLDS_2_ROQ_SIZE__SHIFT = 16
+REG_A6XX_CP_MEM_POOL_SIZE = 0x000008c3
+REG_A6XX_CP_CHICKEN_DBG = 0x00000841
+REG_A6XX_CP_ADDR_MODE_CNTL = 0x00000842
+REG_A6XX_CP_DBG_ECO_CNTL = 0x00000843
+REG_A6XX_CP_PROTECT_CNTL = 0x0000084f
+A6XX_CP_PROTECT_CNTL_LAST_SPAN_INF_RANGE = 0x00000008
+A6XX_CP_PROTECT_CNTL_ACCESS_FAULT_ON_VIOL_EN = 0x00000002
+A6XX_CP_PROTECT_CNTL_ACCESS_PROT_EN = 0x00000001
+REG_A6XX_CP_SCRATCH = lambda i0: (0x00000883 + 0x1*i0 )
+REG_A6XX_CP_PROTECT = lambda i0: (0x00000850 + 0x1*i0 )
+A6XX_CP_PROTECT_REG_BASE_ADDR__MASK = 0x0003ffff
+A6XX_CP_PROTECT_REG_BASE_ADDR__SHIFT = 0
+A6XX_CP_PROTECT_REG_MASK_LEN__MASK = 0x7ffc0000
+A6XX_CP_PROTECT_REG_MASK_LEN__SHIFT = 18
+A6XX_CP_PROTECT_REG_READ = 0x80000000
+REG_A6XX_CP_CONTEXT_SWITCH_CNTL = 0x000008a0
+A6XX_CP_CONTEXT_SWITCH_CNTL_STOP = 0x00000001
+A6XX_CP_CONTEXT_SWITCH_CNTL_LEVEL__MASK = 0x000000c0
+A6XX_CP_CONTEXT_SWITCH_CNTL_LEVEL__SHIFT = 6
+A6XX_CP_CONTEXT_SWITCH_CNTL_USES_GMEM = 0x00000100
+A6XX_CP_CONTEXT_SWITCH_CNTL_SKIP_SAVE_RESTORE = 0x00000200
+REG_A6XX_CP_CONTEXT_SWITCH_SMMU_INFO = 0x000008a1
+REG_A6XX_CP_CONTEXT_SWITCH_PRIV_NON_SECURE_RESTORE_ADDR = 0x000008a3
+REG_A6XX_CP_CONTEXT_SWITCH_PRIV_SECURE_RESTORE_ADDR = 0x000008a5
+REG_A6XX_CP_CONTEXT_SWITCH_NON_PRIV_RESTORE_ADDR = 0x000008a7
+REG_A7XX_CP_CONTEXT_SWITCH_LEVEL_STATUS = 0x000008ab
+REG_A6XX_CP_PERFCTR_CP_SEL = lambda i0: (0x000008d0 + 0x1*i0 )
+REG_A7XX_CP_BV_PERFCTR_CP_SEL = lambda i0: (0x000008e0 + 0x1*i0 )
+REG_A6XX_CP_CRASH_DUMP_SCRIPT_BASE = 0x00000900
+REG_A6XX_CP_CRASH_DUMP_CNTL = 0x00000902
+REG_A6XX_CP_CRASH_DUMP_STATUS = 0x00000903
+REG_A6XX_CP_SQE_STAT_ADDR = 0x00000908
+REG_A6XX_CP_SQE_STAT_DATA = 0x00000909
+REG_A6XX_CP_DRAW_STATE_ADDR = 0x0000090a
+REG_A6XX_CP_DRAW_STATE_DATA = 0x0000090b
+REG_A6XX_CP_ROQ_DBG_ADDR = 0x0000090c
+REG_A6XX_CP_ROQ_DBG_DATA = 0x0000090d
+REG_A6XX_CP_MEM_POOL_DBG_ADDR = 0x0000090e
+REG_A6XX_CP_MEM_POOL_DBG_DATA = 0x0000090f
+REG_A6XX_CP_SQE_UCODE_DBG_ADDR = 0x00000910
+REG_A6XX_CP_SQE_UCODE_DBG_DATA = 0x00000911
+REG_A6XX_CP_IB1_BASE = 0x00000928
+REG_A6XX_CP_IB1_REM_SIZE = 0x0000092a
+REG_A6XX_CP_IB2_BASE = 0x0000092b
+REG_A6XX_CP_IB2_REM_SIZE = 0x0000092d
+REG_A6XX_CP_SDS_BASE = 0x0000092e
+REG_A6XX_CP_SDS_REM_SIZE = 0x00000930
+REG_A6XX_CP_MRB_BASE = 0x00000931
+REG_A6XX_CP_MRB_REM_SIZE = 0x00000933
+REG_A6XX_CP_VSD_BASE = 0x00000934
+REG_A6XX_CP_ROQ_RB_STATUS = 0x00000939
+A6XX_CP_ROQ_RB_STATUS_RPTR__MASK = 0x000003ff
+A6XX_CP_ROQ_RB_STATUS_RPTR__SHIFT = 0
+A6XX_CP_ROQ_RB_STATUS_WPTR__MASK = 0x03ff0000
+A6XX_CP_ROQ_RB_STATUS_WPTR__SHIFT = 16
+REG_A6XX_CP_ROQ_IB1_STATUS = 0x0000093a
+A6XX_CP_ROQ_IB1_STATUS_RPTR__MASK = 0x000003ff
+A6XX_CP_ROQ_IB1_STATUS_RPTR__SHIFT = 0
+A6XX_CP_ROQ_IB1_STATUS_WPTR__MASK = 0x03ff0000
+A6XX_CP_ROQ_IB1_STATUS_WPTR__SHIFT = 16
+REG_A6XX_CP_ROQ_IB2_STATUS = 0x0000093b
+A6XX_CP_ROQ_IB2_STATUS_RPTR__MASK = 0x000003ff
+A6XX_CP_ROQ_IB2_STATUS_RPTR__SHIFT = 0
+A6XX_CP_ROQ_IB2_STATUS_WPTR__MASK = 0x03ff0000
+A6XX_CP_ROQ_IB2_STATUS_WPTR__SHIFT = 16
+REG_A6XX_CP_ROQ_SDS_STATUS = 0x0000093c
+A6XX_CP_ROQ_SDS_STATUS_RPTR__MASK = 0x000003ff
+A6XX_CP_ROQ_SDS_STATUS_RPTR__SHIFT = 0
+A6XX_CP_ROQ_SDS_STATUS_WPTR__MASK = 0x03ff0000
+A6XX_CP_ROQ_SDS_STATUS_WPTR__SHIFT = 16
+REG_A6XX_CP_ROQ_MRB_STATUS = 0x0000093d
+A6XX_CP_ROQ_MRB_STATUS_RPTR__MASK = 0x000003ff
+A6XX_CP_ROQ_MRB_STATUS_RPTR__SHIFT = 0
+A6XX_CP_ROQ_MRB_STATUS_WPTR__MASK = 0x03ff0000
+A6XX_CP_ROQ_MRB_STATUS_WPTR__SHIFT = 16
+REG_A6XX_CP_ROQ_VSD_STATUS = 0x0000093e
+A6XX_CP_ROQ_VSD_STATUS_RPTR__MASK = 0x000003ff
+A6XX_CP_ROQ_VSD_STATUS_RPTR__SHIFT = 0
+A6XX_CP_ROQ_VSD_STATUS_WPTR__MASK = 0x03ff0000
+A6XX_CP_ROQ_VSD_STATUS_WPTR__SHIFT = 16
+REG_A6XX_CP_IB1_INIT_SIZE = 0x00000943
+REG_A6XX_CP_IB2_INIT_SIZE = 0x00000944
+REG_A6XX_CP_SDS_INIT_SIZE = 0x00000945
+REG_A6XX_CP_MRB_INIT_SIZE = 0x00000946
+REG_A6XX_CP_VSD_INIT_SIZE = 0x00000947
+REG_A6XX_CP_ROQ_AVAIL_RB = 0x00000948
+A6XX_CP_ROQ_AVAIL_RB_REM__MASK = 0xffff0000
+A6XX_CP_ROQ_AVAIL_RB_REM__SHIFT = 16
+REG_A6XX_CP_ROQ_AVAIL_IB1 = 0x00000949
+A6XX_CP_ROQ_AVAIL_IB1_REM__MASK = 0xffff0000
+A6XX_CP_ROQ_AVAIL_IB1_REM__SHIFT = 16
+REG_A6XX_CP_ROQ_AVAIL_IB2 = 0x0000094a
+A6XX_CP_ROQ_AVAIL_IB2_REM__MASK = 0xffff0000
+A6XX_CP_ROQ_AVAIL_IB2_REM__SHIFT = 16
+REG_A6XX_CP_ROQ_AVAIL_SDS = 0x0000094b
+A6XX_CP_ROQ_AVAIL_SDS_REM__MASK = 0xffff0000
+A6XX_CP_ROQ_AVAIL_SDS_REM__SHIFT = 16
+REG_A6XX_CP_ROQ_AVAIL_MRB = 0x0000094c
+A6XX_CP_ROQ_AVAIL_MRB_REM__MASK = 0xffff0000
+A6XX_CP_ROQ_AVAIL_MRB_REM__SHIFT = 16
+REG_A6XX_CP_ROQ_AVAIL_VSD = 0x0000094d
+A6XX_CP_ROQ_AVAIL_VSD_REM__MASK = 0xffff0000
+A6XX_CP_ROQ_AVAIL_VSD_REM__SHIFT = 16
+REG_A6XX_CP_ALWAYS_ON_COUNTER = 0x00000980
+REG_A6XX_CP_AHB_CNTL = 0x0000098d
+REG_A6XX_CP_APERTURE_CNTL_HOST = 0x00000a00
+REG_A7XX_CP_APERTURE_CNTL_HOST = 0x00000a00
+A7XX_CP_APERTURE_CNTL_HOST_PIPE__MASK = 0x00003000
+A7XX_CP_APERTURE_CNTL_HOST_PIPE__SHIFT = 12
+A7XX_CP_APERTURE_CNTL_HOST_CLUSTER__MASK = 0x00000700
+A7XX_CP_APERTURE_CNTL_HOST_CLUSTER__SHIFT = 8
+A7XX_CP_APERTURE_CNTL_HOST_CONTEXT__MASK = 0x00000030
+A7XX_CP_APERTURE_CNTL_HOST_CONTEXT__SHIFT = 4
+REG_A6XX_CP_APERTURE_CNTL_SQE = 0x00000a01
+REG_A6XX_CP_APERTURE_CNTL_CD = 0x00000a03
+REG_A7XX_CP_APERTURE_CNTL_CD = 0x00000a03
+A7XX_CP_APERTURE_CNTL_CD_PIPE__MASK = 0x00003000
+A7XX_CP_APERTURE_CNTL_CD_PIPE__SHIFT = 12
+A7XX_CP_APERTURE_CNTL_CD_CLUSTER__MASK = 0x00000700
+A7XX_CP_APERTURE_CNTL_CD_CLUSTER__SHIFT = 8
+A7XX_CP_APERTURE_CNTL_CD_CONTEXT__MASK = 0x00000030
+A7XX_CP_APERTURE_CNTL_CD_CONTEXT__SHIFT = 4
+REG_A7XX_CP_BV_PROTECT_STATUS = 0x00000a61
+REG_A7XX_CP_BV_HW_FAULT = 0x00000a64
+REG_A7XX_CP_BV_DRAW_STATE_ADDR = 0x00000a81
+REG_A7XX_CP_BV_DRAW_STATE_DATA = 0x00000a82
+REG_A7XX_CP_BV_ROQ_DBG_ADDR = 0x00000a83
+REG_A7XX_CP_BV_ROQ_DBG_DATA = 0x00000a84
+REG_A7XX_CP_BV_SQE_UCODE_DBG_ADDR = 0x00000a85
+REG_A7XX_CP_BV_SQE_UCODE_DBG_DATA = 0x00000a86
+REG_A7XX_CP_BV_SQE_STAT_ADDR = 0x00000a87
+REG_A7XX_CP_BV_SQE_STAT_DATA = 0x00000a88
+REG_A7XX_CP_BV_MEM_POOL_DBG_ADDR = 0x00000a96
+REG_A7XX_CP_BV_MEM_POOL_DBG_DATA = 0x00000a97
+REG_A7XX_CP_BV_RB_RPTR_ADDR = 0x00000a98
+REG_A7XX_CP_RESOURCE_TABLE_DBG_ADDR = 0x00000a9a
+REG_A7XX_CP_RESOURCE_TABLE_DBG_DATA = 0x00000a9b
+REG_A7XX_CP_BV_APRIV_CNTL = 0x00000ad0
+REG_A7XX_CP_BV_CHICKEN_DBG = 0x00000ada
+REG_A7XX_CP_LPAC_DRAW_STATE_ADDR = 0x00000b0a
+REG_A7XX_CP_LPAC_DRAW_STATE_DATA = 0x00000b0b
+REG_A7XX_CP_LPAC_ROQ_DBG_ADDR = 0x00000b0c
+REG_A7XX_CP_SQE_AC_UCODE_DBG_ADDR = 0x00000b27
+REG_A7XX_CP_SQE_AC_UCODE_DBG_DATA = 0x00000b28
+REG_A7XX_CP_SQE_AC_STAT_ADDR = 0x00000b29
+REG_A7XX_CP_SQE_AC_STAT_DATA = 0x00000b2a
+REG_A7XX_CP_LPAC_APRIV_CNTL = 0x00000b31
+REG_A6XX_CP_LPAC_PROG_FIFO_SIZE = 0x00000b34
+REG_A7XX_CP_LPAC_ROQ_DBG_DATA = 0x00000b35
+REG_A7XX_CP_LPAC_FIFO_DBG_DATA = 0x00000b36
+REG_A7XX_CP_LPAC_FIFO_DBG_ADDR = 0x00000b40
+REG_A6XX_CP_LPAC_SQE_CNTL = 0x00000b81
+REG_A6XX_CP_LPAC_SQE_INSTR_BASE = 0x00000b82
+REG_A7XX_CP_AQE_INSTR_BASE_0 = 0x00000b70
+REG_A7XX_CP_AQE_INSTR_BASE_1 = 0x00000b72
+REG_A7XX_CP_AQE_APRIV_CNTL = 0x00000b78
+REG_A7XX_CP_AQE_ROQ_DBG_ADDR_0 = 0x00000ba8
+REG_A7XX_CP_AQE_ROQ_DBG_ADDR_1 = 0x00000ba9
+REG_A7XX_CP_AQE_ROQ_DBG_DATA_0 = 0x00000bac
+REG_A7XX_CP_AQE_ROQ_DBG_DATA_1 = 0x00000bad
+REG_A7XX_CP_AQE_UCODE_DBG_ADDR_0 = 0x00000bb0
+REG_A7XX_CP_AQE_UCODE_DBG_ADDR_1 = 0x00000bb1
+REG_A7XX_CP_AQE_UCODE_DBG_DATA_0 = 0x00000bb4
+REG_A7XX_CP_AQE_UCODE_DBG_DATA_1 = 0x00000bb5
+REG_A7XX_CP_AQE_STAT_ADDR_0 = 0x00000bb8
+REG_A7XX_CP_AQE_STAT_ADDR_1 = 0x00000bb9
+REG_A7XX_CP_AQE_STAT_DATA_0 = 0x00000bbc
+REG_A7XX_CP_AQE_STAT_DATA_1 = 0x00000bbd
+REG_A6XX_VSC_ADDR_MODE_CNTL = 0x00000c01
+REG_A6XX_RBBM_GPR0_CNTL = 0x00000018
+REG_A6XX_RBBM_INT_0_STATUS = 0x00000201
+REG_A6XX_RBBM_STATUS = 0x00000210
+A6XX_RBBM_STATUS_GPU_BUSY_IGN_AHB = 0x00800000
+A6XX_RBBM_STATUS_GPU_BUSY_IGN_AHB_CP = 0x00400000
+A6XX_RBBM_STATUS_HLSQ_BUSY = 0x00200000
+A6XX_RBBM_STATUS_VSC_BUSY = 0x00100000
+A6XX_RBBM_STATUS_TPL1_BUSY = 0x00080000
+A6XX_RBBM_STATUS_SP_BUSY = 0x00040000
+A6XX_RBBM_STATUS_UCHE_BUSY = 0x00020000
+A6XX_RBBM_STATUS_VPC_BUSY = 0x00010000
+A6XX_RBBM_STATUS_VFD_BUSY = 0x00008000
+A6XX_RBBM_STATUS_TESS_BUSY = 0x00004000
+A6XX_RBBM_STATUS_PC_VSD_BUSY = 0x00002000
+A6XX_RBBM_STATUS_PC_DCALL_BUSY = 0x00001000
+A6XX_RBBM_STATUS_COM_DCOM_BUSY = 0x00000800
+A6XX_RBBM_STATUS_LRZ_BUSY = 0x00000400
+A6XX_RBBM_STATUS_A2D_BUSY = 0x00000200
+A6XX_RBBM_STATUS_CCU_BUSY = 0x00000100
+A6XX_RBBM_STATUS_RB_BUSY = 0x00000080
+A6XX_RBBM_STATUS_RAS_BUSY = 0x00000040
+A6XX_RBBM_STATUS_TSE_BUSY = 0x00000020
+A6XX_RBBM_STATUS_VBIF_BUSY = 0x00000010
+A6XX_RBBM_STATUS_GFX_DBGC_BUSY = 0x00000008
+A6XX_RBBM_STATUS_CP_BUSY = 0x00000004
+A6XX_RBBM_STATUS_CP_AHB_BUSY_CP_MASTER = 0x00000002
+A6XX_RBBM_STATUS_CP_AHB_BUSY_CX_MASTER = 0x00000001
+REG_A6XX_RBBM_STATUS1 = 0x00000211
+REG_A6XX_RBBM_STATUS2 = 0x00000212
+REG_A6XX_RBBM_STATUS3 = 0x00000213
+A6XX_RBBM_STATUS3_SMMU_STALLED_ON_FAULT = 0x01000000
+REG_A6XX_RBBM_VBIF_GX_RESET_STATUS = 0x00000215
+REG_A7XX_RBBM_CLOCK_MODE_CP = 0x00000260
+REG_A7XX_RBBM_CLOCK_MODE_BV_LRZ = 0x00000284
+REG_A7XX_RBBM_CLOCK_MODE_BV_GRAS = 0x00000285
+REG_A7XX_RBBM_CLOCK_MODE2_GRAS = 0x00000286
+REG_A7XX_RBBM_CLOCK_MODE_BV_VFD = 0x00000287
+REG_A7XX_RBBM_CLOCK_MODE_BV_GPC = 0x00000288
+REG_A7XX_RBBM_SW_FUSE_INT_STATUS = 0x000002c0
+REG_A7XX_RBBM_SW_FUSE_INT_MASK = 0x000002c1
+REG_A6XX_RBBM_PERFCTR_CP = lambda i0: (0x00000400 + 0x2*i0 )
+REG_A6XX_RBBM_PERFCTR_RBBM = lambda i0: (0x0000041c + 0x2*i0 )
+REG_A6XX_RBBM_PERFCTR_PC = lambda i0: (0x00000424 + 0x2*i0 )
+REG_A6XX_RBBM_PERFCTR_VFD = lambda i0: (0x00000434 + 0x2*i0 )
+REG_A6XX_RBBM_PERFCTR_HLSQ = lambda i0: (0x00000444 + 0x2*i0 )
+REG_A6XX_RBBM_PERFCTR_VPC = lambda i0: (0x00000450 + 0x2*i0 )
+REG_A6XX_RBBM_PERFCTR_CCU = lambda i0: (0x0000045c + 0x2*i0 )
+REG_A6XX_RBBM_PERFCTR_TSE = lambda i0: (0x00000466 + 0x2*i0 )
+REG_A6XX_RBBM_PERFCTR_RAS = lambda i0: (0x0000046e + 0x2*i0 )
+REG_A6XX_RBBM_PERFCTR_UCHE = lambda i0: (0x00000476 + 0x2*i0 )
+REG_A6XX_RBBM_PERFCTR_TP = lambda i0: (0x0000048e + 0x2*i0 )
+REG_A6XX_RBBM_PERFCTR_SP = lambda i0: (0x000004a6 + 0x2*i0 )
+REG_A6XX_RBBM_PERFCTR_RB = lambda i0: (0x000004d6 + 0x2*i0 )
+REG_A6XX_RBBM_PERFCTR_VSC = lambda i0: (0x000004e6 + 0x2*i0 )
+REG_A6XX_RBBM_PERFCTR_LRZ = lambda i0: (0x000004ea + 0x2*i0 )
+REG_A6XX_RBBM_PERFCTR_CMP = lambda i0: (0x000004f2 + 0x2*i0 )
+REG_A7XX_RBBM_PERFCTR_CP = lambda i0: (0x00000300 + 0x2*i0 )
+REG_A7XX_RBBM_PERFCTR_RBBM = lambda i0: (0x0000031c + 0x2*i0 )
+REG_A7XX_RBBM_PERFCTR_PC = lambda i0: (0x00000324 + 0x2*i0 )
+REG_A7XX_RBBM_PERFCTR_VFD = lambda i0: (0x00000334 + 0x2*i0 )
+REG_A7XX_RBBM_PERFCTR_HLSQ = lambda i0: (0x00000344 + 0x2*i0 )
+REG_A7XX_RBBM_PERFCTR_VPC = lambda i0: (0x00000350 + 0x2*i0 )
+REG_A7XX_RBBM_PERFCTR_CCU = lambda i0: (0x0000035c + 0x2*i0 )
+REG_A7XX_RBBM_PERFCTR_TSE = lambda i0: (0x00000366 + 0x2*i0 )
+REG_A7XX_RBBM_PERFCTR_RAS = lambda i0: (0x0000036e + 0x2*i0 )
+REG_A7XX_RBBM_PERFCTR_UCHE = lambda i0: (0x00000376 + 0x2*i0 )
+REG_A7XX_RBBM_PERFCTR_TP = lambda i0: (0x0000038e + 0x2*i0 )
+REG_A7XX_RBBM_PERFCTR_SP = lambda i0: (0x000003a6 + 0x2*i0 )
+REG_A7XX_RBBM_PERFCTR_RB = lambda i0: (0x000003d6 + 0x2*i0 )
+REG_A7XX_RBBM_PERFCTR_VSC = lambda i0: (0x000003e6 + 0x2*i0 )
+REG_A7XX_RBBM_PERFCTR_LRZ = lambda i0: (0x000003ea + 0x2*i0 )
+REG_A7XX_RBBM_PERFCTR_CMP = lambda i0: (0x000003f2 + 0x2*i0 )
+REG_A7XX_RBBM_PERFCTR_UFC = lambda i0: (0x000003fa + 0x2*i0 )
+REG_A7XX_RBBM_PERFCTR2_HLSQ = lambda i0: (0x00000410 + 0x2*i0 )
+REG_A7XX_RBBM_PERFCTR2_CP = lambda i0: (0x0000041c + 0x2*i0 )
+REG_A7XX_RBBM_PERFCTR2_SP = lambda i0: (0x0000042a + 0x2*i0 )
+REG_A7XX_RBBM_PERFCTR2_TP = lambda i0: (0x00000442 + 0x2*i0 )
+REG_A7XX_RBBM_PERFCTR2_UFC = lambda i0: (0x0000044e + 0x2*i0 )
+REG_A7XX_RBBM_PERFCTR_BV_PC = lambda i0: (0x00000460 + 0x2*i0 )
+REG_A7XX_RBBM_PERFCTR_BV_VFD = lambda i0: (0x00000470 + 0x2*i0 )
+REG_A7XX_RBBM_PERFCTR_BV_VPC = lambda i0: (0x00000480 + 0x2*i0 )
+REG_A7XX_RBBM_PERFCTR_BV_TSE = lambda i0: (0x0000048c + 0x2*i0 )
+REG_A7XX_RBBM_PERFCTR_BV_RAS = lambda i0: (0x00000494 + 0x2*i0 )
+REG_A7XX_RBBM_PERFCTR_BV_LRZ = lambda i0: (0x0000049c + 0x2*i0 )
+REG_A6XX_RBBM_PERFCTR_CNTL = 0x00000500
+REG_A6XX_RBBM_PERFCTR_LOAD_CMD0 = 0x00000501
+REG_A6XX_RBBM_PERFCTR_LOAD_CMD1 = 0x00000502
+REG_A6XX_RBBM_PERFCTR_LOAD_CMD2 = 0x00000503
+REG_A6XX_RBBM_PERFCTR_LOAD_CMD3 = 0x00000504
+REG_A6XX_RBBM_PERFCTR_LOAD_VALUE_LO = 0x00000505
+REG_A6XX_RBBM_PERFCTR_LOAD_VALUE_HI = 0x00000506
+REG_A6XX_RBBM_PERFCTR_RBBM_SEL = lambda i0: (0x00000507 + 0x1*i0 )
+REG_A6XX_RBBM_PERFCTR_GPU_BUSY_MASKED = 0x0000050b
+REG_A6XX_RBBM_PERFCTR_SRAM_INIT_CMD = 0x0000050e
+REG_A6XX_RBBM_PERFCTR_SRAM_INIT_STATUS = 0x0000050f
+REG_A6XX_RBBM_ISDB_CNT = 0x00000533
+REG_A6XX_RBBM_NC_MODE_CNTL = 0x00000534
+REG_A7XX_RBBM_SNAPSHOT_STATUS = 0x00000535
+REG_A6XX_RBBM_PIPESTAT_IAVERTICES = 0x00000540
+REG_A6XX_RBBM_PIPESTAT_IAPRIMITIVES = 0x00000542
+REG_A6XX_RBBM_PIPESTAT_VSINVOCATIONS = 0x00000544
+REG_A6XX_RBBM_PIPESTAT_HSINVOCATIONS = 0x00000546
+REG_A6XX_RBBM_PIPESTAT_DSINVOCATIONS = 0x00000548
+REG_A6XX_RBBM_PIPESTAT_GSINVOCATIONS = 0x0000054a
+REG_A6XX_RBBM_PIPESTAT_GSPRIMITIVES = 0x0000054c
+REG_A6XX_RBBM_PIPESTAT_CINVOCATIONS = 0x0000054e
+REG_A6XX_RBBM_PIPESTAT_CPRIMITIVES = 0x00000550
+REG_A6XX_RBBM_PIPESTAT_PSINVOCATIONS = 0x00000552
+REG_A6XX_RBBM_PIPESTAT_CSINVOCATIONS = 0x00000554
+REG_A6XX_RBBM_SECVID_TRUST_CNTL = 0x0000f400
+REG_A6XX_RBBM_SECVID_TSB_TRUSTED_BASE = 0x0000f800
+REG_A6XX_RBBM_SECVID_TSB_TRUSTED_SIZE = 0x0000f802
+REG_A6XX_RBBM_SECVID_TSB_CNTL = 0x0000f803
+REG_A6XX_RBBM_SECVID_TSB_ADDR_MODE_CNTL = 0x0000f810
+REG_A7XX_RBBM_SECVID_TSB_STATUS = 0x0000fc00
+REG_A6XX_RBBM_VBIF_CLIENT_QOS_CNTL = 0x00000010
+REG_A6XX_RBBM_GBIF_CLIENT_QOS_CNTL = 0x00000011
+REG_A6XX_RBBM_GBIF_HALT = 0x00000016
+REG_A6XX_RBBM_GBIF_HALT_ACK = 0x00000017
+REG_A6XX_RBBM_WAIT_FOR_GPU_IDLE_CMD = 0x0000001c
+A6XX_RBBM_WAIT_FOR_GPU_IDLE_CMD_WAIT_GPU_IDLE = 0x00000001
+REG_A7XX_RBBM_GBIF_HALT = 0x00000016
+REG_A7XX_RBBM_GBIF_HALT_ACK = 0x00000017
+REG_A6XX_RBBM_INTERFACE_HANG_INT_CNTL = 0x0000001f
+REG_A6XX_RBBM_INT_CLEAR_CMD = 0x00000037
+REG_A6XX_RBBM_INT_0_MASK = 0x00000038
+REG_A7XX_RBBM_INT_2_MASK = 0x0000003a
+REG_A6XX_RBBM_SP_HYST_CNT = 0x00000042
+REG_A6XX_RBBM_SW_RESET_CMD = 0x00000043
+REG_A6XX_RBBM_RAC_THRESHOLD_CNT = 0x00000044
+REG_A6XX_RBBM_BLOCK_SW_RESET_CMD = 0x00000045
+REG_A6XX_RBBM_BLOCK_SW_RESET_CMD2 = 0x00000046
+REG_A7XX_RBBM_CLOCK_CNTL_GLOBAL = 0x000000ad
+REG_A6XX_RBBM_CLOCK_CNTL = 0x000000ae
+REG_A6XX_RBBM_CLOCK_CNTL_SP0 = 0x000000b0
+REG_A6XX_RBBM_CLOCK_CNTL_SP1 = 0x000000b1
+REG_A6XX_RBBM_CLOCK_CNTL_SP2 = 0x000000b2
+REG_A6XX_RBBM_CLOCK_CNTL_SP3 = 0x000000b3
+REG_A6XX_RBBM_CLOCK_CNTL2_SP0 = 0x000000b4
+REG_A6XX_RBBM_CLOCK_CNTL2_SP1 = 0x000000b5
+REG_A6XX_RBBM_CLOCK_CNTL2_SP2 = 0x000000b6
+REG_A6XX_RBBM_CLOCK_CNTL2_SP3 = 0x000000b7
+REG_A6XX_RBBM_CLOCK_DELAY_SP0 = 0x000000b8
+REG_A6XX_RBBM_CLOCK_DELAY_SP1 = 0x000000b9
+REG_A6XX_RBBM_CLOCK_DELAY_SP2 = 0x000000ba
+REG_A6XX_RBBM_CLOCK_DELAY_SP3 = 0x000000bb
+REG_A6XX_RBBM_CLOCK_HYST_SP0 = 0x000000bc
+REG_A6XX_RBBM_CLOCK_HYST_SP1 = 0x000000bd
+REG_A6XX_RBBM_CLOCK_HYST_SP2 = 0x000000be
+REG_A6XX_RBBM_CLOCK_HYST_SP3 = 0x000000bf
+REG_A6XX_RBBM_CLOCK_CNTL_TP0 = 0x000000c0
+REG_A6XX_RBBM_CLOCK_CNTL_TP1 = 0x000000c1
+REG_A6XX_RBBM_CLOCK_CNTL_TP2 = 0x000000c2
+REG_A6XX_RBBM_CLOCK_CNTL_TP3 = 0x000000c3
+REG_A6XX_RBBM_CLOCK_CNTL2_TP0 = 0x000000c4
+REG_A6XX_RBBM_CLOCK_CNTL2_TP1 = 0x000000c5
+REG_A6XX_RBBM_CLOCK_CNTL2_TP2 = 0x000000c6
+REG_A6XX_RBBM_CLOCK_CNTL2_TP3 = 0x000000c7
+REG_A6XX_RBBM_CLOCK_CNTL3_TP0 = 0x000000c8
+REG_A6XX_RBBM_CLOCK_CNTL3_TP1 = 0x000000c9
+REG_A6XX_RBBM_CLOCK_CNTL3_TP2 = 0x000000ca
+REG_A6XX_RBBM_CLOCK_CNTL3_TP3 = 0x000000cb
+REG_A6XX_RBBM_CLOCK_CNTL4_TP0 = 0x000000cc
+REG_A6XX_RBBM_CLOCK_CNTL4_TP1 = 0x000000cd
+REG_A6XX_RBBM_CLOCK_CNTL4_TP2 = 0x000000ce
+REG_A6XX_RBBM_CLOCK_CNTL4_TP3 = 0x000000cf
+REG_A6XX_RBBM_CLOCK_DELAY_TP0 = 0x000000d0
+REG_A6XX_RBBM_CLOCK_DELAY_TP1 = 0x000000d1
+REG_A6XX_RBBM_CLOCK_DELAY_TP2 = 0x000000d2
+REG_A6XX_RBBM_CLOCK_DELAY_TP3 = 0x000000d3
+REG_A6XX_RBBM_CLOCK_DELAY2_TP0 = 0x000000d4
+REG_A6XX_RBBM_CLOCK_DELAY2_TP1 = 0x000000d5
+REG_A6XX_RBBM_CLOCK_DELAY2_TP2 = 0x000000d6
+REG_A6XX_RBBM_CLOCK_DELAY2_TP3 = 0x000000d7
+REG_A6XX_RBBM_CLOCK_DELAY3_TP0 = 0x000000d8
+REG_A6XX_RBBM_CLOCK_DELAY3_TP1 = 0x000000d9
+REG_A6XX_RBBM_CLOCK_DELAY3_TP2 = 0x000000da
+REG_A6XX_RBBM_CLOCK_DELAY3_TP3 = 0x000000db
+REG_A6XX_RBBM_CLOCK_DELAY4_TP0 = 0x000000dc
+REG_A6XX_RBBM_CLOCK_DELAY4_TP1 = 0x000000dd
+REG_A6XX_RBBM_CLOCK_DELAY4_TP2 = 0x000000de
+REG_A6XX_RBBM_CLOCK_DELAY4_TP3 = 0x000000df
+REG_A6XX_RBBM_CLOCK_HYST_TP0 = 0x000000e0
+REG_A6XX_RBBM_CLOCK_HYST_TP1 = 0x000000e1
+REG_A6XX_RBBM_CLOCK_HYST_TP2 = 0x000000e2
+REG_A6XX_RBBM_CLOCK_HYST_TP3 = 0x000000e3
+REG_A6XX_RBBM_CLOCK_HYST2_TP0 = 0x000000e4
+REG_A6XX_RBBM_CLOCK_HYST2_TP1 = 0x000000e5
+REG_A6XX_RBBM_CLOCK_HYST2_TP2 = 0x000000e6
+REG_A6XX_RBBM_CLOCK_HYST2_TP3 = 0x000000e7
+REG_A6XX_RBBM_CLOCK_HYST3_TP0 = 0x000000e8
+REG_A6XX_RBBM_CLOCK_HYST3_TP1 = 0x000000e9
+REG_A6XX_RBBM_CLOCK_HYST3_TP2 = 0x000000ea
+REG_A6XX_RBBM_CLOCK_HYST3_TP3 = 0x000000eb
+REG_A6XX_RBBM_CLOCK_HYST4_TP0 = 0x000000ec
+REG_A6XX_RBBM_CLOCK_HYST4_TP1 = 0x000000ed
+REG_A6XX_RBBM_CLOCK_HYST4_TP2 = 0x000000ee
+REG_A6XX_RBBM_CLOCK_HYST4_TP3 = 0x000000ef
+REG_A6XX_RBBM_CLOCK_CNTL_RB0 = 0x000000f0
+REG_A6XX_RBBM_CLOCK_CNTL_RB1 = 0x000000f1
+REG_A6XX_RBBM_CLOCK_CNTL_RB2 = 0x000000f2
+REG_A6XX_RBBM_CLOCK_CNTL_RB3 = 0x000000f3
+REG_A6XX_RBBM_CLOCK_CNTL2_RB0 = 0x000000f4
+REG_A6XX_RBBM_CLOCK_CNTL2_RB1 = 0x000000f5
+REG_A6XX_RBBM_CLOCK_CNTL2_RB2 = 0x000000f6
+REG_A6XX_RBBM_CLOCK_CNTL2_RB3 = 0x000000f7
+REG_A6XX_RBBM_CLOCK_CNTL_CCU0 = 0x000000f8
+REG_A6XX_RBBM_CLOCK_CNTL_CCU1 = 0x000000f9
+REG_A6XX_RBBM_CLOCK_CNTL_CCU2 = 0x000000fa
+REG_A6XX_RBBM_CLOCK_CNTL_CCU3 = 0x000000fb
+REG_A6XX_RBBM_CLOCK_HYST_RB_CCU0 = 0x00000100
+REG_A6XX_RBBM_CLOCK_HYST_RB_CCU1 = 0x00000101
+REG_A6XX_RBBM_CLOCK_HYST_RB_CCU2 = 0x00000102
+REG_A6XX_RBBM_CLOCK_HYST_RB_CCU3 = 0x00000103
+REG_A6XX_RBBM_CLOCK_CNTL_RAC = 0x00000104
+REG_A6XX_RBBM_CLOCK_CNTL2_RAC = 0x00000105
+REG_A6XX_RBBM_CLOCK_DELAY_RAC = 0x00000106
+REG_A6XX_RBBM_CLOCK_HYST_RAC = 0x00000107
+REG_A6XX_RBBM_CLOCK_CNTL_TSE_RAS_RBBM = 0x00000108
+REG_A6XX_RBBM_CLOCK_DELAY_TSE_RAS_RBBM = 0x00000109
+REG_A6XX_RBBM_CLOCK_HYST_TSE_RAS_RBBM = 0x0000010a
+REG_A6XX_RBBM_CLOCK_CNTL_UCHE = 0x0000010b
+REG_A6XX_RBBM_CLOCK_CNTL2_UCHE = 0x0000010c
+REG_A6XX_RBBM_CLOCK_CNTL3_UCHE = 0x0000010d
+REG_A6XX_RBBM_CLOCK_CNTL4_UCHE = 0x0000010e
+REG_A6XX_RBBM_CLOCK_DELAY_UCHE = 0x0000010f
+REG_A6XX_RBBM_CLOCK_HYST_UCHE = 0x00000110
+REG_A6XX_RBBM_CLOCK_MODE_VFD = 0x00000111
+REG_A6XX_RBBM_CLOCK_DELAY_VFD = 0x00000112
+REG_A6XX_RBBM_CLOCK_HYST_VFD = 0x00000113
+REG_A6XX_RBBM_CLOCK_MODE_GPC = 0x00000114
+REG_A6XX_RBBM_CLOCK_DELAY_GPC = 0x00000115
+REG_A6XX_RBBM_CLOCK_HYST_GPC = 0x00000116
+REG_A6XX_RBBM_CLOCK_DELAY_HLSQ_2 = 0x00000117
+REG_A6XX_RBBM_CLOCK_CNTL_GMU_GX = 0x00000118
+REG_A6XX_RBBM_CLOCK_DELAY_GMU_GX = 0x00000119
+REG_A6XX_RBBM_CLOCK_HYST_GMU_GX = 0x0000011a
+REG_A6XX_RBBM_CLOCK_MODE_HLSQ = 0x0000011b
+REG_A6XX_RBBM_CLOCK_DELAY_HLSQ = 0x0000011c
+REG_A6XX_RBBM_CLOCK_HYST_HLSQ = 0x0000011d
+REG_A7XX_RBBM_CGC_GLOBAL_LOAD_CMD = 0x0000011e
+REG_A7XX_RBBM_CGC_P2S_TRIG_CMD = 0x0000011f
+REG_A6XX_RBBM_CLOCK_CNTL_TEX_FCHE = 0x00000120
+REG_A6XX_RBBM_CLOCK_DELAY_TEX_FCHE = 0x00000121
+REG_A6XX_RBBM_CLOCK_HYST_TEX_FCHE = 0x00000122
+REG_A7XX_RBBM_CGC_P2S_STATUS = 0x00000122
+A7XX_RBBM_CGC_P2S_STATUS_TXDONE = 0x00000001
+REG_A6XX_RBBM_CLOCK_CNTL_FCHE = 0x00000123
+REG_A6XX_RBBM_CLOCK_DELAY_FCHE = 0x00000124
+REG_A6XX_RBBM_CLOCK_HYST_FCHE = 0x00000125
+REG_A6XX_RBBM_CLOCK_CNTL_MHUB = 0x00000126
+REG_A6XX_RBBM_CLOCK_DELAY_MHUB = 0x00000127
+REG_A6XX_RBBM_CLOCK_HYST_MHUB = 0x00000128
+REG_A6XX_RBBM_CLOCK_DELAY_GLC = 0x00000129
+REG_A6XX_RBBM_CLOCK_HYST_GLC = 0x0000012a
+REG_A6XX_RBBM_CLOCK_CNTL_GLC = 0x0000012b
+REG_A7XX_RBBM_CLOCK_HYST2_VFD = 0x0000012f
+REG_A6XX_RBBM_LPAC_GBIF_CLIENT_QOS_CNTL = 0x000005ff
+REG_A6XX_DBGC_CFG_DBGBUS_SEL_A = 0x00000600
+REG_A6XX_DBGC_CFG_DBGBUS_SEL_B = 0x00000601
+REG_A6XX_DBGC_CFG_DBGBUS_SEL_C = 0x00000602
+REG_A6XX_DBGC_CFG_DBGBUS_SEL_D = 0x00000603
+A6XX_DBGC_CFG_DBGBUS_SEL_D_PING_INDEX__MASK = 0x000000ff
+A6XX_DBGC_CFG_DBGBUS_SEL_D_PING_INDEX__SHIFT = 0
+A6XX_DBGC_CFG_DBGBUS_SEL_D_PING_BLK_SEL__MASK = 0x0000ff00
+A6XX_DBGC_CFG_DBGBUS_SEL_D_PING_BLK_SEL__SHIFT = 8
+REG_A6XX_DBGC_CFG_DBGBUS_CNTLT = 0x00000604
+A6XX_DBGC_CFG_DBGBUS_CNTLT_TRACEEN__MASK = 0x0000003f
+A6XX_DBGC_CFG_DBGBUS_CNTLT_TRACEEN__SHIFT = 0
+A6XX_DBGC_CFG_DBGBUS_CNTLT_GRANU__MASK = 0x00007000
+A6XX_DBGC_CFG_DBGBUS_CNTLT_GRANU__SHIFT = 12
+A6XX_DBGC_CFG_DBGBUS_CNTLT_SEGT__MASK = 0xf0000000
+A6XX_DBGC_CFG_DBGBUS_CNTLT_SEGT__SHIFT = 28
+REG_A6XX_DBGC_CFG_DBGBUS_CNTLM = 0x00000605
+A6XX_DBGC_CFG_DBGBUS_CNTLM_ENABLE__MASK = 0x0f000000
+A6XX_DBGC_CFG_DBGBUS_CNTLM_ENABLE__SHIFT = 24
+REG_A6XX_DBGC_CFG_DBGBUS_IVTL_0 = 0x00000608
+REG_A6XX_DBGC_CFG_DBGBUS_IVTL_1 = 0x00000609
+REG_A6XX_DBGC_CFG_DBGBUS_IVTL_2 = 0x0000060a
+REG_A6XX_DBGC_CFG_DBGBUS_IVTL_3 = 0x0000060b
+REG_A6XX_DBGC_CFG_DBGBUS_MASKL_0 = 0x0000060c
+REG_A6XX_DBGC_CFG_DBGBUS_MASKL_1 = 0x0000060d
+REG_A6XX_DBGC_CFG_DBGBUS_MASKL_2 = 0x0000060e
+REG_A6XX_DBGC_CFG_DBGBUS_MASKL_3 = 0x0000060f
+REG_A6XX_DBGC_CFG_DBGBUS_BYTEL_0 = 0x00000610
+A6XX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL0__MASK = 0x0000000f
+A6XX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL0__SHIFT = 0
+A6XX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL1__MASK = 0x000000f0
+A6XX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL1__SHIFT = 4
+A6XX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL2__MASK = 0x00000f00
+A6XX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL2__SHIFT = 8
+A6XX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL3__MASK = 0x0000f000
+A6XX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL3__SHIFT = 12
+A6XX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL4__MASK = 0x000f0000
+A6XX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL4__SHIFT = 16
+A6XX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL5__MASK = 0x00f00000
+A6XX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL5__SHIFT = 20
+A6XX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL6__MASK = 0x0f000000
+A6XX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL6__SHIFT = 24
+A6XX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL7__MASK = 0xf0000000
+A6XX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL7__SHIFT = 28
+REG_A6XX_DBGC_CFG_DBGBUS_BYTEL_1 = 0x00000611
+A6XX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL8__MASK = 0x0000000f
+A6XX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL8__SHIFT = 0
+A6XX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL9__MASK = 0x000000f0
+A6XX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL9__SHIFT = 4
+A6XX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL10__MASK = 0x00000f00
+A6XX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL10__SHIFT = 8
+A6XX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL11__MASK = 0x0000f000
+A6XX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL11__SHIFT = 12
+A6XX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL12__MASK = 0x000f0000
+A6XX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL12__SHIFT = 16
+A6XX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL13__MASK = 0x00f00000
+A6XX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL13__SHIFT = 20
+A6XX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL14__MASK = 0x0f000000
+A6XX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL14__SHIFT = 24
+A6XX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL15__MASK = 0xf0000000
+A6XX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL15__SHIFT = 28
+REG_A6XX_DBGC_CFG_DBGBUS_TRACE_BUF1 = 0x0000062f
+REG_A6XX_DBGC_CFG_DBGBUS_TRACE_BUF2 = 0x00000630
+REG_A6XX_VSC_PERFCTR_VSC_SEL = lambda i0: (0x00000cd8 + 0x1*i0 )
+REG_A7XX_VSC_UNKNOWN_0CD8 = 0x00000cd8
+A7XX_VSC_UNKNOWN_0CD8_BINNING = 0x00000001
+REG_A6XX_HLSQ_DBG_AHB_READ_APERTURE = 0x0000c800
+REG_A6XX_HLSQ_DBG_READ_SEL = 0x0000d000
+REG_A6XX_UCHE_ADDR_MODE_CNTL = 0x00000e00
+REG_A6XX_UCHE_MODE_CNTL = 0x00000e01
+REG_A6XX_UCHE_WRITE_RANGE_MAX = 0x00000e05
+REG_A6XX_UCHE_WRITE_THRU_BASE = 0x00000e07
+REG_A6XX_UCHE_TRAP_BASE = 0x00000e09
+REG_A6XX_UCHE_GMEM_RANGE_MIN = 0x00000e0b
+REG_A6XX_UCHE_GMEM_RANGE_MAX = 0x00000e0d
+REG_A6XX_UCHE_CACHE_WAYS = 0x00000e17
+REG_A6XX_UCHE_FILTER_CNTL = 0x00000e18
+REG_A6XX_UCHE_CLIENT_PF = 0x00000e19
+A6XX_UCHE_CLIENT_PF_PERFSEL__MASK = 0x000000ff
+A6XX_UCHE_CLIENT_PF_PERFSEL__SHIFT = 0
+REG_A6XX_UCHE_PERFCTR_UCHE_SEL = lambda i0: (0x00000e1c + 0x1*i0 )
+REG_A6XX_UCHE_GBIF_GX_CONFIG = 0x00000e3a
+REG_A6XX_UCHE_CMDQ_CONFIG = 0x00000e3c
+REG_A6XX_VBIF_VERSION = 0x00003000
+REG_A6XX_VBIF_CLKON = 0x00003001
+A6XX_VBIF_CLKON_FORCE_ON_TESTBUS = 0x00000002
+REG_A6XX_VBIF_GATE_OFF_WRREQ_EN = 0x0000302a
+REG_A6XX_VBIF_XIN_HALT_CTRL0 = 0x00003080
+REG_A6XX_VBIF_XIN_HALT_CTRL1 = 0x00003081
+REG_A6XX_VBIF_TEST_BUS_OUT_CTRL = 0x00003084
+REG_A6XX_VBIF_TEST_BUS1_CTRL0 = 0x00003085
+REG_A6XX_VBIF_TEST_BUS1_CTRL1 = 0x00003086
+A6XX_VBIF_TEST_BUS1_CTRL1_DATA_SEL__MASK = 0x0000000f
+A6XX_VBIF_TEST_BUS1_CTRL1_DATA_SEL__SHIFT = 0
+REG_A6XX_VBIF_TEST_BUS2_CTRL0 = 0x00003087
+REG_A6XX_VBIF_TEST_BUS2_CTRL1 = 0x00003088
+A6XX_VBIF_TEST_BUS2_CTRL1_DATA_SEL__MASK = 0x000001ff
+A6XX_VBIF_TEST_BUS2_CTRL1_DATA_SEL__SHIFT = 0
+REG_A6XX_VBIF_TEST_BUS_OUT = 0x0000308c
+REG_A6XX_VBIF_PERF_CNT_SEL0 = 0x000030d0
+REG_A6XX_VBIF_PERF_CNT_SEL1 = 0x000030d1
+REG_A6XX_VBIF_PERF_CNT_SEL2 = 0x000030d2
+REG_A6XX_VBIF_PERF_CNT_SEL3 = 0x000030d3
+REG_A6XX_VBIF_PERF_CNT_LOW0 = 0x000030d8
+REG_A6XX_VBIF_PERF_CNT_LOW1 = 0x000030d9
+REG_A6XX_VBIF_PERF_CNT_LOW2 = 0x000030da
+REG_A6XX_VBIF_PERF_CNT_LOW3 = 0x000030db
+REG_A6XX_VBIF_PERF_CNT_HIGH0 = 0x000030e0
+REG_A6XX_VBIF_PERF_CNT_HIGH1 = 0x000030e1
+REG_A6XX_VBIF_PERF_CNT_HIGH2 = 0x000030e2
+REG_A6XX_VBIF_PERF_CNT_HIGH3 = 0x000030e3
+REG_A6XX_VBIF_PERF_PWR_CNT_EN0 = 0x00003100
+REG_A6XX_VBIF_PERF_PWR_CNT_EN1 = 0x00003101
+REG_A6XX_VBIF_PERF_PWR_CNT_EN2 = 0x00003102
+REG_A6XX_VBIF_PERF_PWR_CNT_LOW0 = 0x00003110
+REG_A6XX_VBIF_PERF_PWR_CNT_LOW1 = 0x00003111
+REG_A6XX_VBIF_PERF_PWR_CNT_LOW2 = 0x00003112
+REG_A6XX_VBIF_PERF_PWR_CNT_HIGH0 = 0x00003118
+REG_A6XX_VBIF_PERF_PWR_CNT_HIGH1 = 0x00003119
+REG_A6XX_VBIF_PERF_PWR_CNT_HIGH2 = 0x0000311a
+REG_A6XX_GBIF_SCACHE_CNTL0 = 0x00003c01
+REG_A6XX_GBIF_SCACHE_CNTL1 = 0x00003c02
+REG_A6XX_GBIF_QSB_SIDE0 = 0x00003c03
+REG_A6XX_GBIF_QSB_SIDE1 = 0x00003c04
+REG_A6XX_GBIF_QSB_SIDE2 = 0x00003c05
+REG_A6XX_GBIF_QSB_SIDE3 = 0x00003c06
+REG_A6XX_GBIF_HALT = 0x00003c45
+REG_A6XX_GBIF_HALT_ACK = 0x00003c46
+REG_A6XX_GBIF_PERF_PWR_CNT_EN = 0x00003cc0
+REG_A6XX_GBIF_PERF_PWR_CNT_CLR = 0x00003cc1
+REG_A6XX_GBIF_PERF_CNT_SEL = 0x00003cc2
+REG_A6XX_GBIF_PERF_PWR_CNT_SEL = 0x00003cc3
+REG_A6XX_GBIF_PERF_CNT_LOW0 = 0x00003cc4
+REG_A6XX_GBIF_PERF_CNT_LOW1 = 0x00003cc5
+REG_A6XX_GBIF_PERF_CNT_LOW2 = 0x00003cc6
+REG_A6XX_GBIF_PERF_CNT_LOW3 = 0x00003cc7
+REG_A6XX_GBIF_PERF_CNT_HIGH0 = 0x00003cc8
+REG_A6XX_GBIF_PERF_CNT_HIGH1 = 0x00003cc9
+REG_A6XX_GBIF_PERF_CNT_HIGH2 = 0x00003cca
+REG_A6XX_GBIF_PERF_CNT_HIGH3 = 0x00003ccb
+REG_A6XX_GBIF_PWR_CNT_LOW0 = 0x00003ccc
+REG_A6XX_GBIF_PWR_CNT_LOW1 = 0x00003ccd
+REG_A6XX_GBIF_PWR_CNT_LOW2 = 0x00003cce
+REG_A6XX_GBIF_PWR_CNT_HIGH0 = 0x00003ccf
+REG_A6XX_GBIF_PWR_CNT_HIGH1 = 0x00003cd0
+REG_A6XX_GBIF_PWR_CNT_HIGH2 = 0x00003cd1
+REG_A6XX_VSC_DBG_ECO_CNTL = 0x00000c00
+REG_A6XX_VSC_BIN_SIZE = 0x00000c02
+A6XX_VSC_BIN_SIZE_WIDTH__MASK = 0x000000ff
+A6XX_VSC_BIN_SIZE_WIDTH__SHIFT = 0
+A6XX_VSC_BIN_SIZE_HEIGHT__MASK = 0x0001ff00
+A6XX_VSC_BIN_SIZE_HEIGHT__SHIFT = 8
+REG_A6XX_VSC_SIZE_BASE = 0x00000c03
+REG_A6XX_VSC_EXPANDED_BIN_CNTL = 0x00000c06
+A6XX_VSC_EXPANDED_BIN_CNTL_NX__MASK = 0x000007fe
+A6XX_VSC_EXPANDED_BIN_CNTL_NX__SHIFT = 1
+A6XX_VSC_EXPANDED_BIN_CNTL_NY__MASK = 0x001ff800
+A6XX_VSC_EXPANDED_BIN_CNTL_NY__SHIFT = 11
+REG_A6XX_VSC_PIPE_CONFIG = lambda i0: (0x00000c10 + 0x1*i0 )
+A6XX_VSC_PIPE_CONFIG_REG_X__MASK = 0x000003ff
+A6XX_VSC_PIPE_CONFIG_REG_X__SHIFT = 0
+A6XX_VSC_PIPE_CONFIG_REG_Y__MASK = 0x000ffc00
+A6XX_VSC_PIPE_CONFIG_REG_Y__SHIFT = 10
+A6XX_VSC_PIPE_CONFIG_REG_W__MASK = 0x03f00000
+A6XX_VSC_PIPE_CONFIG_REG_W__SHIFT = 20
+A6XX_VSC_PIPE_CONFIG_REG_H__MASK = 0xfc000000
+A6XX_VSC_PIPE_CONFIG_REG_H__SHIFT = 26
+REG_A6XX_VSC_PIPE_DATA_PRIM_BASE = 0x00000c30
+REG_A6XX_VSC_PIPE_DATA_PRIM_STRIDE = 0x00000c32
+REG_A6XX_VSC_PIPE_DATA_PRIM_LENGTH = 0x00000c33
+REG_A6XX_VSC_PIPE_DATA_DRAW_BASE = 0x00000c34
+REG_A6XX_VSC_PIPE_DATA_DRAW_STRIDE = 0x00000c36
+REG_A6XX_VSC_PIPE_DATA_DRAW_LENGTH = 0x00000c37
+REG_A6XX_VSC_CHANNEL_VISIBILITY = lambda i0: (0x00000c38 + 0x1*i0 )
+REG_A6XX_VSC_PIPE_DATA_PRIM_SIZE = lambda i0: (0x00000c58 + 0x1*i0 )
+REG_A6XX_VSC_PIPE_DATA_DRAW_SIZE = lambda i0: (0x00000c78 + 0x1*i0 )
+REG_A7XX_VSC_UNKNOWN_0D08 = 0x00000d08
+REG_A7XX_UCHE_UNKNOWN_0E10 = 0x00000e10
+REG_A7XX_UCHE_UNKNOWN_0E11 = 0x00000e11
+REG_A6XX_UCHE_UNKNOWN_0E12 = 0x00000e12
+REG_A6XX_GRAS_CL_CNTL = 0x00008000
+A6XX_GRAS_CL_CNTL_CLIP_DISABLE = 0x00000001
+A6XX_GRAS_CL_CNTL_ZNEAR_CLIP_DISABLE = 0x00000002
+A6XX_GRAS_CL_CNTL_ZFAR_CLIP_DISABLE = 0x00000004
+A6XX_GRAS_CL_CNTL_Z_CLAMP_ENABLE = 0x00000020
+A6XX_GRAS_CL_CNTL_ZERO_GB_SCALE_Z = 0x00000040
+A6XX_GRAS_CL_CNTL_VP_CLIP_CODE_IGNORE = 0x00000080
+A6XX_GRAS_CL_CNTL_VP_XFORM_DISABLE = 0x00000100
+A6XX_GRAS_CL_CNTL_PERSP_DIVISION_DISABLE = 0x00000200
+REG_A6XX_GRAS_CL_VS_CLIP_CULL_DISTANCE = 0x00008001
+A6XX_GRAS_CL_VS_CLIP_CULL_DISTANCE_CLIP_MASK__MASK = 0x000000ff
+A6XX_GRAS_CL_VS_CLIP_CULL_DISTANCE_CLIP_MASK__SHIFT = 0
+A6XX_GRAS_CL_VS_CLIP_CULL_DISTANCE_CULL_MASK__MASK = 0x0000ff00
+A6XX_GRAS_CL_VS_CLIP_CULL_DISTANCE_CULL_MASK__SHIFT = 8
+REG_A6XX_GRAS_CL_DS_CLIP_CULL_DISTANCE = 0x00008002
+A6XX_GRAS_CL_DS_CLIP_CULL_DISTANCE_CLIP_MASK__MASK = 0x000000ff
+A6XX_GRAS_CL_DS_CLIP_CULL_DISTANCE_CLIP_MASK__SHIFT = 0
+A6XX_GRAS_CL_DS_CLIP_CULL_DISTANCE_CULL_MASK__MASK = 0x0000ff00
+A6XX_GRAS_CL_DS_CLIP_CULL_DISTANCE_CULL_MASK__SHIFT = 8
+REG_A6XX_GRAS_CL_GS_CLIP_CULL_DISTANCE = 0x00008003
+A6XX_GRAS_CL_GS_CLIP_CULL_DISTANCE_CLIP_MASK__MASK = 0x000000ff
+A6XX_GRAS_CL_GS_CLIP_CULL_DISTANCE_CLIP_MASK__SHIFT = 0
+A6XX_GRAS_CL_GS_CLIP_CULL_DISTANCE_CULL_MASK__MASK = 0x0000ff00
+A6XX_GRAS_CL_GS_CLIP_CULL_DISTANCE_CULL_MASK__SHIFT = 8
+REG_A6XX_GRAS_CL_ARRAY_SIZE = 0x00008004
+REG_A6XX_GRAS_CL_INTERP_CNTL = 0x00008005
+A6XX_GRAS_CL_INTERP_CNTL_IJ_PERSP_PIXEL = 0x00000001
+A6XX_GRAS_CL_INTERP_CNTL_IJ_PERSP_CENTROID = 0x00000002
+A6XX_GRAS_CL_INTERP_CNTL_IJ_PERSP_SAMPLE = 0x00000004
+A6XX_GRAS_CL_INTERP_CNTL_IJ_LINEAR_PIXEL = 0x00000008
+A6XX_GRAS_CL_INTERP_CNTL_IJ_LINEAR_CENTROID = 0x00000010
+A6XX_GRAS_CL_INTERP_CNTL_IJ_LINEAR_SAMPLE = 0x00000020
+A6XX_GRAS_CL_INTERP_CNTL_COORD_MASK__MASK = 0x000003c0
+A6XX_GRAS_CL_INTERP_CNTL_COORD_MASK__SHIFT = 6
+A6XX_GRAS_CL_INTERP_CNTL_UNK10 = 0x00000400
+A6XX_GRAS_CL_INTERP_CNTL_UNK11 = 0x00000800
+REG_A6XX_GRAS_CL_GUARDBAND_CLIP_ADJ = 0x00008006
+A6XX_GRAS_CL_GUARDBAND_CLIP_ADJ_HORZ__MASK = 0x000001ff
+A6XX_GRAS_CL_GUARDBAND_CLIP_ADJ_HORZ__SHIFT = 0
+A6XX_GRAS_CL_GUARDBAND_CLIP_ADJ_VERT__MASK = 0x0007fc00
+A6XX_GRAS_CL_GUARDBAND_CLIP_ADJ_VERT__SHIFT = 10
+REG_A7XX_GRAS_UNKNOWN_8007 = 0x00008007
+REG_A7XX_GRAS_UNKNOWN_8008 = 0x00008008
+REG_A7XX_GRAS_UNKNOWN_8009 = 0x00008009
+REG_A7XX_GRAS_UNKNOWN_800A = 0x0000800a
+REG_A7XX_GRAS_UNKNOWN_800B = 0x0000800b
+REG_A7XX_GRAS_UNKNOWN_800C = 0x0000800c
+REG_A6XX_GRAS_CL_VIEWPORT = lambda i0: (0x00008010 + 0x6*i0 )
+A6XX_GRAS_CL_VIEWPORT_XOFFSET__MASK = 0xffffffff
+A6XX_GRAS_CL_VIEWPORT_XOFFSET__SHIFT = 0
+A6XX_GRAS_CL_VIEWPORT_XSCALE__MASK = 0xffffffff
+A6XX_GRAS_CL_VIEWPORT_XSCALE__SHIFT = 0
+A6XX_GRAS_CL_VIEWPORT_YOFFSET__MASK = 0xffffffff
+A6XX_GRAS_CL_VIEWPORT_YOFFSET__SHIFT = 0
+A6XX_GRAS_CL_VIEWPORT_YSCALE__MASK = 0xffffffff
+A6XX_GRAS_CL_VIEWPORT_YSCALE__SHIFT = 0
+A6XX_GRAS_CL_VIEWPORT_ZOFFSET__MASK = 0xffffffff
+A6XX_GRAS_CL_VIEWPORT_ZOFFSET__SHIFT = 0
+A6XX_GRAS_CL_VIEWPORT_ZSCALE__MASK = 0xffffffff
+A6XX_GRAS_CL_VIEWPORT_ZSCALE__SHIFT = 0
+REG_A6XX_GRAS_CL_VIEWPORT_ZCLAMP = lambda i0: (0x00008070 + 0x2*i0 )
+A6XX_GRAS_CL_VIEWPORT_ZCLAMP_MIN__MASK = 0xffffffff
+A6XX_GRAS_CL_VIEWPORT_ZCLAMP_MIN__SHIFT = 0
+A6XX_GRAS_CL_VIEWPORT_ZCLAMP_MAX__MASK = 0xffffffff
+A6XX_GRAS_CL_VIEWPORT_ZCLAMP_MAX__SHIFT = 0
+REG_A6XX_GRAS_SU_CNTL = 0x00008090
+A6XX_GRAS_SU_CNTL_CULL_FRONT = 0x00000001
+A6XX_GRAS_SU_CNTL_CULL_BACK = 0x00000002
+A6XX_GRAS_SU_CNTL_FRONT_CW = 0x00000004
+A6XX_GRAS_SU_CNTL_LINEHALFWIDTH__MASK = 0x000007f8
+A6XX_GRAS_SU_CNTL_LINEHALFWIDTH__SHIFT = 3
+A6XX_GRAS_SU_CNTL_POLY_OFFSET = 0x00000800
+A6XX_GRAS_SU_CNTL_UNK12 = 0x00001000
+A6XX_GRAS_SU_CNTL_LINE_MODE__MASK = 0x00002000
+A6XX_GRAS_SU_CNTL_LINE_MODE__SHIFT = 13
+A6XX_GRAS_SU_CNTL_UNK15__MASK = 0x00018000
+A6XX_GRAS_SU_CNTL_UNK15__SHIFT = 15
+A6XX_GRAS_SU_CNTL_MULTIVIEW_ENABLE = 0x00020000
+A6XX_GRAS_SU_CNTL_RENDERTARGETINDEXINCR = 0x00040000
+A6XX_GRAS_SU_CNTL_VIEWPORTINDEXINCR = 0x00080000
+A6XX_GRAS_SU_CNTL_UNK20__MASK = 0x00700000
+A6XX_GRAS_SU_CNTL_UNK20__SHIFT = 20
+REG_A6XX_GRAS_SU_POINT_MINMAX = 0x00008091
+A6XX_GRAS_SU_POINT_MINMAX_MIN__MASK = 0x0000ffff
+A6XX_GRAS_SU_POINT_MINMAX_MIN__SHIFT = 0
+A6XX_GRAS_SU_POINT_MINMAX_MAX__MASK = 0xffff0000
+A6XX_GRAS_SU_POINT_MINMAX_MAX__SHIFT = 16
+REG_A6XX_GRAS_SU_POINT_SIZE = 0x00008092
+A6XX_GRAS_SU_POINT_SIZE__MASK = 0x0000ffff
+A6XX_GRAS_SU_POINT_SIZE__SHIFT = 0
+REG_A6XX_GRAS_SU_DEPTH_PLANE_CNTL = 0x00008094
+A6XX_GRAS_SU_DEPTH_PLANE_CNTL_Z_MODE__MASK = 0x00000003
+A6XX_GRAS_SU_DEPTH_PLANE_CNTL_Z_MODE__SHIFT = 0
+REG_A6XX_GRAS_SU_POLY_OFFSET_SCALE = 0x00008095
+A6XX_GRAS_SU_POLY_OFFSET_SCALE__MASK = 0xffffffff
+A6XX_GRAS_SU_POLY_OFFSET_SCALE__SHIFT = 0
+REG_A6XX_GRAS_SU_POLY_OFFSET_OFFSET = 0x00008096
+A6XX_GRAS_SU_POLY_OFFSET_OFFSET__MASK = 0xffffffff
+A6XX_GRAS_SU_POLY_OFFSET_OFFSET__SHIFT = 0
+REG_A6XX_GRAS_SU_POLY_OFFSET_OFFSET_CLAMP = 0x00008097
+A6XX_GRAS_SU_POLY_OFFSET_OFFSET_CLAMP__MASK = 0xffffffff
+A6XX_GRAS_SU_POLY_OFFSET_OFFSET_CLAMP__SHIFT = 0
+REG_A6XX_GRAS_SU_DEPTH_BUFFER_INFO = 0x00008098
+A6XX_GRAS_SU_DEPTH_BUFFER_INFO_DEPTH_FORMAT__MASK = 0x00000007
+A6XX_GRAS_SU_DEPTH_BUFFER_INFO_DEPTH_FORMAT__SHIFT = 0
+A6XX_GRAS_SU_DEPTH_BUFFER_INFO_UNK3 = 0x00000008
+REG_A6XX_GRAS_SU_CONSERVATIVE_RAS_CNTL = 0x00008099
+A6XX_GRAS_SU_CONSERVATIVE_RAS_CNTL_CONSERVATIVERASEN = 0x00000001
+A6XX_GRAS_SU_CONSERVATIVE_RAS_CNTL_SHIFTAMOUNT__MASK = 0x00000006
+A6XX_GRAS_SU_CONSERVATIVE_RAS_CNTL_SHIFTAMOUNT__SHIFT = 1
+A6XX_GRAS_SU_CONSERVATIVE_RAS_CNTL_INNERCONSERVATIVERASEN = 0x00000008
+A6XX_GRAS_SU_CONSERVATIVE_RAS_CNTL_UNK4__MASK = 0x00000030
+A6XX_GRAS_SU_CONSERVATIVE_RAS_CNTL_UNK4__SHIFT = 4
+REG_A6XX_GRAS_SU_PATH_RENDERING_CNTL = 0x0000809a
+A6XX_GRAS_SU_PATH_RENDERING_CNTL_UNK0 = 0x00000001
+A6XX_GRAS_SU_PATH_RENDERING_CNTL_LINELENGTHEN = 0x00000002
+REG_A6XX_GRAS_SU_VS_SIV_CNTL = 0x0000809b
+A6XX_GRAS_SU_VS_SIV_CNTL_WRITES_LAYER = 0x00000001
+A6XX_GRAS_SU_VS_SIV_CNTL_WRITES_VIEW = 0x00000002
+REG_A6XX_GRAS_SU_GS_SIV_CNTL = 0x0000809c
+A6XX_GRAS_SU_GS_SIV_CNTL_WRITES_LAYER = 0x00000001
+A6XX_GRAS_SU_GS_SIV_CNTL_WRITES_VIEW = 0x00000002
+REG_A6XX_GRAS_SU_DS_SIV_CNTL = 0x0000809d
+A6XX_GRAS_SU_DS_SIV_CNTL_WRITES_LAYER = 0x00000001
+A6XX_GRAS_SU_DS_SIV_CNTL_WRITES_VIEW = 0x00000002
+REG_A6XX_GRAS_SC_CNTL = 0x000080a0
+A6XX_GRAS_SC_CNTL_CCUSINGLECACHELINESIZE__MASK = 0x00000007
+A6XX_GRAS_SC_CNTL_CCUSINGLECACHELINESIZE__SHIFT = 0
+A6XX_GRAS_SC_CNTL_SINGLE_PRIM_MODE__MASK = 0x00000018
+A6XX_GRAS_SC_CNTL_SINGLE_PRIM_MODE__SHIFT = 3
+A6XX_GRAS_SC_CNTL_RASTER_MODE__MASK = 0x00000020
+A6XX_GRAS_SC_CNTL_RASTER_MODE__SHIFT = 5
+A6XX_GRAS_SC_CNTL_RASTER_DIRECTION__MASK = 0x000000c0
+A6XX_GRAS_SC_CNTL_RASTER_DIRECTION__SHIFT = 6
+A6XX_GRAS_SC_CNTL_SEQUENCED_THREAD_DISTRIBUTION__MASK = 0x00000100
+A6XX_GRAS_SC_CNTL_SEQUENCED_THREAD_DISTRIBUTION__SHIFT = 8
+A6XX_GRAS_SC_CNTL_UNK9 = 0x00000200
+A6XX_GRAS_SC_CNTL_ROTATION__MASK = 0x00000c00
+A6XX_GRAS_SC_CNTL_ROTATION__SHIFT = 10
+A6XX_GRAS_SC_CNTL_EARLYVIZOUTEN = 0x00001000
+REG_A6XX_GRAS_SC_BIN_CNTL = 0x000080a1
+A6XX_GRAS_SC_BIN_CNTL_BINW__MASK = 0x0000003f
+A6XX_GRAS_SC_BIN_CNTL_BINW__SHIFT = 0
+A6XX_GRAS_SC_BIN_CNTL_BINH__MASK = 0x00007f00
+A6XX_GRAS_SC_BIN_CNTL_BINH__SHIFT = 8
+A6XX_GRAS_SC_BIN_CNTL_RENDER_MODE__MASK = 0x001c0000
+A6XX_GRAS_SC_BIN_CNTL_RENDER_MODE__SHIFT = 18
+A6XX_GRAS_SC_BIN_CNTL_FORCE_LRZ_WRITE_DIS = 0x00200000
+A6XX_GRAS_SC_BIN_CNTL_BUFFERS_LOCATION__MASK = 0x00c00000
+A6XX_GRAS_SC_BIN_CNTL_BUFFERS_LOCATION__SHIFT = 22
+A6XX_GRAS_SC_BIN_CNTL_LRZ_FEEDBACK_ZMODE_MASK__MASK = 0x07000000
+A6XX_GRAS_SC_BIN_CNTL_LRZ_FEEDBACK_ZMODE_MASK__SHIFT = 24
+A6XX_GRAS_SC_BIN_CNTL_UNK27 = 0x08000000
+REG_A6XX_GRAS_SC_RAS_MSAA_CNTL = 0x000080a2
+A6XX_GRAS_SC_RAS_MSAA_CNTL_SAMPLES__MASK = 0x00000003
+A6XX_GRAS_SC_RAS_MSAA_CNTL_SAMPLES__SHIFT = 0
+A6XX_GRAS_SC_RAS_MSAA_CNTL_UNK2 = 0x00000004
+A6XX_GRAS_SC_RAS_MSAA_CNTL_UNK3 = 0x00000008
+REG_A6XX_GRAS_SC_DEST_MSAA_CNTL = 0x000080a3
+A6XX_GRAS_SC_DEST_MSAA_CNTL_SAMPLES__MASK = 0x00000003
+A6XX_GRAS_SC_DEST_MSAA_CNTL_SAMPLES__SHIFT = 0
+A6XX_GRAS_SC_DEST_MSAA_CNTL_MSAA_DISABLE = 0x00000004
+REG_A6XX_GRAS_SC_MSAA_SAMPLE_POS_CNTL = 0x000080a4
+A6XX_GRAS_SC_MSAA_SAMPLE_POS_CNTL_UNK0 = 0x00000001
+A6XX_GRAS_SC_MSAA_SAMPLE_POS_CNTL_LOCATION_ENABLE = 0x00000002
+REG_A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_0 = 0x000080a5
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_0_SAMPLE_0_X__MASK = 0x0000000f
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_0_SAMPLE_0_X__SHIFT = 0
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_0_SAMPLE_0_Y__MASK = 0x000000f0
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_0_SAMPLE_0_Y__SHIFT = 4
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_0_SAMPLE_1_X__MASK = 0x00000f00
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_0_SAMPLE_1_X__SHIFT = 8
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_0_SAMPLE_1_Y__MASK = 0x0000f000
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_0_SAMPLE_1_Y__SHIFT = 12
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_0_SAMPLE_2_X__MASK = 0x000f0000
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_0_SAMPLE_2_X__SHIFT = 16
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_0_SAMPLE_2_Y__MASK = 0x00f00000
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_0_SAMPLE_2_Y__SHIFT = 20
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_0_SAMPLE_3_X__MASK = 0x0f000000
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_0_SAMPLE_3_X__SHIFT = 24
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_0_SAMPLE_3_Y__MASK = 0xf0000000
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_0_SAMPLE_3_Y__SHIFT = 28
+REG_A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_1 = 0x000080a6
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_1_SAMPLE_0_X__MASK = 0x0000000f
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_1_SAMPLE_0_X__SHIFT = 0
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_1_SAMPLE_0_Y__MASK = 0x000000f0
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_1_SAMPLE_0_Y__SHIFT = 4
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_1_SAMPLE_1_X__MASK = 0x00000f00
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_1_SAMPLE_1_X__SHIFT = 8
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_1_SAMPLE_1_Y__MASK = 0x0000f000
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_1_SAMPLE_1_Y__SHIFT = 12
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_1_SAMPLE_2_X__MASK = 0x000f0000
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_1_SAMPLE_2_X__SHIFT = 16
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_1_SAMPLE_2_Y__MASK = 0x00f00000
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_1_SAMPLE_2_Y__SHIFT = 20
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_1_SAMPLE_3_X__MASK = 0x0f000000
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_1_SAMPLE_3_X__SHIFT = 24
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_1_SAMPLE_3_Y__MASK = 0xf0000000
+A6XX_GRAS_SC_PROGRAMMABLE_MSAA_POS_1_SAMPLE_3_Y__SHIFT = 28
+REG_A7XX_GRAS_UNKNOWN_80A7 = 0x000080a7
+REG_A6XX_GRAS_UNKNOWN_80AF = 0x000080af
+REG_A6XX_GRAS_SC_SCREEN_SCISSOR = lambda i0: (0x000080b0 + 0x2*i0 )
+A6XX_GRAS_SC_SCREEN_SCISSOR_TL_X__MASK = 0x0000ffff
+A6XX_GRAS_SC_SCREEN_SCISSOR_TL_X__SHIFT = 0
+A6XX_GRAS_SC_SCREEN_SCISSOR_TL_Y__MASK = 0xffff0000
+A6XX_GRAS_SC_SCREEN_SCISSOR_TL_Y__SHIFT = 16
+A6XX_GRAS_SC_SCREEN_SCISSOR_BR_X__MASK = 0x0000ffff
+A6XX_GRAS_SC_SCREEN_SCISSOR_BR_X__SHIFT = 0
+A6XX_GRAS_SC_SCREEN_SCISSOR_BR_Y__MASK = 0xffff0000
+A6XX_GRAS_SC_SCREEN_SCISSOR_BR_Y__SHIFT = 16
+REG_A6XX_GRAS_SC_VIEWPORT_SCISSOR = lambda i0: (0x000080d0 + 0x2*i0 )
+A6XX_GRAS_SC_VIEWPORT_SCISSOR_TL_X__MASK = 0x0000ffff
+A6XX_GRAS_SC_VIEWPORT_SCISSOR_TL_X__SHIFT = 0
+A6XX_GRAS_SC_VIEWPORT_SCISSOR_TL_Y__MASK = 0xffff0000
+A6XX_GRAS_SC_VIEWPORT_SCISSOR_TL_Y__SHIFT = 16
+A6XX_GRAS_SC_VIEWPORT_SCISSOR_BR_X__MASK = 0x0000ffff
+A6XX_GRAS_SC_VIEWPORT_SCISSOR_BR_X__SHIFT = 0
+A6XX_GRAS_SC_VIEWPORT_SCISSOR_BR_Y__MASK = 0xffff0000
+A6XX_GRAS_SC_VIEWPORT_SCISSOR_BR_Y__SHIFT = 16
+REG_A6XX_GRAS_SC_WINDOW_SCISSOR_TL = 0x000080f0
+A6XX_GRAS_SC_WINDOW_SCISSOR_TL_X__MASK = 0x00003fff
+A6XX_GRAS_SC_WINDOW_SCISSOR_TL_X__SHIFT = 0
+A6XX_GRAS_SC_WINDOW_SCISSOR_TL_Y__MASK = 0x3fff0000
+A6XX_GRAS_SC_WINDOW_SCISSOR_TL_Y__SHIFT = 16
+REG_A6XX_GRAS_SC_WINDOW_SCISSOR_BR = 0x000080f1
+A6XX_GRAS_SC_WINDOW_SCISSOR_BR_X__MASK = 0x00003fff
+A6XX_GRAS_SC_WINDOW_SCISSOR_BR_X__SHIFT = 0
+A6XX_GRAS_SC_WINDOW_SCISSOR_BR_Y__MASK = 0x3fff0000
+A6XX_GRAS_SC_WINDOW_SCISSOR_BR_Y__SHIFT = 16
+REG_A7XX_GRAS_VRS_CONFIG = 0x000080f4
+A7XX_GRAS_VRS_CONFIG_PIPELINE_FSR_ENABLE = 0x00000001
+A7XX_GRAS_VRS_CONFIG_FRAG_SIZE_X__MASK = 0x00000006
+A7XX_GRAS_VRS_CONFIG_FRAG_SIZE_X__SHIFT = 1
+A7XX_GRAS_VRS_CONFIG_FRAG_SIZE_Y__MASK = 0x00000018
+A7XX_GRAS_VRS_CONFIG_FRAG_SIZE_Y__SHIFT = 3
+A7XX_GRAS_VRS_CONFIG_COMBINER_OP_1__MASK = 0x000000e0
+A7XX_GRAS_VRS_CONFIG_COMBINER_OP_1__SHIFT = 5
+A7XX_GRAS_VRS_CONFIG_COMBINER_OP_2__MASK = 0x00000700
+A7XX_GRAS_VRS_CONFIG_COMBINER_OP_2__SHIFT = 8
+A7XX_GRAS_VRS_CONFIG_ATTACHMENT_FSR_ENABLE = 0x00002000
+A7XX_GRAS_VRS_CONFIG_PRIMITIVE_FSR_ENABLE = 0x00100000
+REG_A7XX_GRAS_QUALITY_BUFFER_INFO = 0x000080f5
+A7XX_GRAS_QUALITY_BUFFER_INFO_LAYERED = 0x00000001
+A7XX_GRAS_QUALITY_BUFFER_INFO_TILE_MODE__MASK = 0x00000006
+A7XX_GRAS_QUALITY_BUFFER_INFO_TILE_MODE__SHIFT = 1
+REG_A7XX_GRAS_QUALITY_BUFFER_DIMENSION = 0x000080f6
+A7XX_GRAS_QUALITY_BUFFER_DIMENSION_WIDTH__MASK = 0x0000ffff
+A7XX_GRAS_QUALITY_BUFFER_DIMENSION_WIDTH__SHIFT = 0
+A7XX_GRAS_QUALITY_BUFFER_DIMENSION_HEIGHT__MASK = 0xffff0000
+A7XX_GRAS_QUALITY_BUFFER_DIMENSION_HEIGHT__SHIFT = 16
+REG_A7XX_GRAS_QUALITY_BUFFER_BASE = 0x000080f8
+REG_A7XX_GRAS_QUALITY_BUFFER_PITCH = 0x000080fa
+A7XX_GRAS_QUALITY_BUFFER_PITCH_PITCH__MASK = 0x000000ff
+A7XX_GRAS_QUALITY_BUFFER_PITCH_PITCH__SHIFT = 0
+A7XX_GRAS_QUALITY_BUFFER_PITCH_ARRAY_PITCH__MASK = 0x1ffffc00
+A7XX_GRAS_QUALITY_BUFFER_PITCH_ARRAY_PITCH__SHIFT = 10
+REG_A6XX_GRAS_LRZ_CNTL = 0x00008100
+A6XX_GRAS_LRZ_CNTL_ENABLE = 0x00000001
+A6XX_GRAS_LRZ_CNTL_LRZ_WRITE = 0x00000002
+A6XX_GRAS_LRZ_CNTL_GREATER = 0x00000004
+A6XX_GRAS_LRZ_CNTL_FC_ENABLE = 0x00000008
+A6XX_GRAS_LRZ_CNTL_Z_WRITE_ENABLE = 0x00000010
+A6XX_GRAS_LRZ_CNTL_Z_BOUNDS_ENABLE = 0x00000020
+A6XX_GRAS_LRZ_CNTL_DIR__MASK = 0x000000c0
+A6XX_GRAS_LRZ_CNTL_DIR__SHIFT = 6
+A6XX_GRAS_LRZ_CNTL_DIR_WRITE = 0x00000100
+A6XX_GRAS_LRZ_CNTL_DISABLE_ON_WRONG_DIR = 0x00000200
+A6XX_GRAS_LRZ_CNTL_Z_FUNC__MASK = 0x00003800
+A6XX_GRAS_LRZ_CNTL_Z_FUNC__SHIFT = 11
+REG_A6XX_GRAS_LRZ_PS_INPUT_CNTL = 0x00008101
+A6XX_GRAS_LRZ_PS_INPUT_CNTL_SAMPLEID = 0x00000001
+A6XX_GRAS_LRZ_PS_INPUT_CNTL_FRAGCOORDSAMPLEMODE__MASK = 0x00000006
+A6XX_GRAS_LRZ_PS_INPUT_CNTL_FRAGCOORDSAMPLEMODE__SHIFT = 1
+REG_A6XX_GRAS_LRZ_MRT_BUFFER_INFO_0 = 0x00008102
+A6XX_GRAS_LRZ_MRT_BUFFER_INFO_0_COLOR_FORMAT__MASK = 0x000000ff
+A6XX_GRAS_LRZ_MRT_BUFFER_INFO_0_COLOR_FORMAT__SHIFT = 0
+REG_A6XX_GRAS_LRZ_BUFFER_BASE = 0x00008103
+REG_A6XX_GRAS_LRZ_BUFFER_PITCH = 0x00008105
+A6XX_GRAS_LRZ_BUFFER_PITCH_PITCH__MASK = 0x000000ff
+A6XX_GRAS_LRZ_BUFFER_PITCH_PITCH__SHIFT = 0
+A6XX_GRAS_LRZ_BUFFER_PITCH_ARRAY_PITCH__MASK = 0x1ffffc00
+A6XX_GRAS_LRZ_BUFFER_PITCH_ARRAY_PITCH__SHIFT = 10
+REG_A6XX_GRAS_LRZ_FAST_CLEAR_BUFFER_BASE = 0x00008106
+REG_A6XX_GRAS_LRZ_PS_SAMPLEFREQ_CNTL = 0x00008109
+A6XX_GRAS_LRZ_PS_SAMPLEFREQ_CNTL_PER_SAMP_MODE = 0x00000001
+REG_A6XX_GRAS_LRZ_VIEW_INFO = 0x0000810a
+A6XX_GRAS_LRZ_VIEW_INFO_BASE_LAYER__MASK = 0x000007ff
+A6XX_GRAS_LRZ_VIEW_INFO_BASE_LAYER__SHIFT = 0
+A6XX_GRAS_LRZ_VIEW_INFO_LAYER_COUNT__MASK = 0x07ff0000
+A6XX_GRAS_LRZ_VIEW_INFO_LAYER_COUNT__SHIFT = 16
+A6XX_GRAS_LRZ_VIEW_INFO_BASE_MIP_LEVEL__MASK = 0xf0000000
+A6XX_GRAS_LRZ_VIEW_INFO_BASE_MIP_LEVEL__SHIFT = 28
+REG_A7XX_GRAS_LRZ_CNTL2 = 0x0000810b
+A7XX_GRAS_LRZ_CNTL2_DISABLE_ON_WRONG_DIR = 0x00000001
+A7XX_GRAS_LRZ_CNTL2_FC_ENABLE = 0x00000002
+REG_A6XX_GRAS_UNKNOWN_8110 = 0x00008110
+REG_A7XX_GRAS_LRZ_DEPTH_CLEAR = 0x00008111
+A7XX_GRAS_LRZ_DEPTH_CLEAR__MASK = 0xffffffff
+A7XX_GRAS_LRZ_DEPTH_CLEAR__SHIFT = 0
+REG_A7XX_GRAS_LRZ_DEPTH_BUFFER_INFO = 0x00008113
+A7XX_GRAS_LRZ_DEPTH_BUFFER_INFO_DEPTH_FORMAT__MASK = 0x00000007
+A7XX_GRAS_LRZ_DEPTH_BUFFER_INFO_DEPTH_FORMAT__SHIFT = 0
+A7XX_GRAS_LRZ_DEPTH_BUFFER_INFO_UNK3 = 0x00000008
+REG_A7XX_GRAS_UNKNOWN_8120 = 0x00008120
+REG_A7XX_GRAS_UNKNOWN_8121 = 0x00008121
+REG_A6XX_GRAS_A2D_BLT_CNTL = 0x00008400
+A6XX_GRAS_A2D_BLT_CNTL_ROTATE__MASK = 0x00000007
+A6XX_GRAS_A2D_BLT_CNTL_ROTATE__SHIFT = 0
+A6XX_GRAS_A2D_BLT_CNTL_OVERWRITEEN = 0x00000008
+A6XX_GRAS_A2D_BLT_CNTL_UNK4__MASK = 0x00000070
+A6XX_GRAS_A2D_BLT_CNTL_UNK4__SHIFT = 4
+A6XX_GRAS_A2D_BLT_CNTL_SOLID_COLOR = 0x00000080
+A6XX_GRAS_A2D_BLT_CNTL_COLOR_FORMAT__MASK = 0x0000ff00
+A6XX_GRAS_A2D_BLT_CNTL_COLOR_FORMAT__SHIFT = 8
+A6XX_GRAS_A2D_BLT_CNTL_SCISSOR = 0x00010000
+A6XX_GRAS_A2D_BLT_CNTL_UNK17__MASK = 0x00060000
+A6XX_GRAS_A2D_BLT_CNTL_UNK17__SHIFT = 17
+A6XX_GRAS_A2D_BLT_CNTL_D24S8 = 0x00080000
+A6XX_GRAS_A2D_BLT_CNTL_MASK__MASK = 0x00f00000
+A6XX_GRAS_A2D_BLT_CNTL_MASK__SHIFT = 20
+A6XX_GRAS_A2D_BLT_CNTL_IFMT__MASK = 0x07000000
+A6XX_GRAS_A2D_BLT_CNTL_IFMT__SHIFT = 24
+A6XX_GRAS_A2D_BLT_CNTL_UNK27 = 0x08000000
+A6XX_GRAS_A2D_BLT_CNTL_UNK28 = 0x10000000
+A6XX_GRAS_A2D_BLT_CNTL_RASTER_MODE__MASK = 0x20000000
+A6XX_GRAS_A2D_BLT_CNTL_RASTER_MODE__SHIFT = 29
+A6XX_GRAS_A2D_BLT_CNTL_COPY = 0x40000000
+REG_A6XX_GRAS_A2D_SRC_XMIN = 0x00008401
+A6XX_GRAS_A2D_SRC_XMIN__MASK = 0x01ffff00
+A6XX_GRAS_A2D_SRC_XMIN__SHIFT = 8
+REG_A6XX_GRAS_A2D_SRC_XMAX = 0x00008402
+A6XX_GRAS_A2D_SRC_XMAX__MASK = 0x01ffff00
+A6XX_GRAS_A2D_SRC_XMAX__SHIFT = 8
+REG_A6XX_GRAS_A2D_SRC_YMIN = 0x00008403
+A6XX_GRAS_A2D_SRC_YMIN__MASK = 0x01ffff00
+A6XX_GRAS_A2D_SRC_YMIN__SHIFT = 8
+REG_A6XX_GRAS_A2D_SRC_YMAX = 0x00008404
+A6XX_GRAS_A2D_SRC_YMAX__MASK = 0x01ffff00
+A6XX_GRAS_A2D_SRC_YMAX__SHIFT = 8
+REG_A6XX_GRAS_A2D_DEST_TL = 0x00008405
+A6XX_GRAS_A2D_DEST_TL_X__MASK = 0x00003fff
+A6XX_GRAS_A2D_DEST_TL_X__SHIFT = 0
+A6XX_GRAS_A2D_DEST_TL_Y__MASK = 0x3fff0000
+A6XX_GRAS_A2D_DEST_TL_Y__SHIFT = 16
+REG_A6XX_GRAS_A2D_DEST_BR = 0x00008406
+A6XX_GRAS_A2D_DEST_BR_X__MASK = 0x00003fff
+A6XX_GRAS_A2D_DEST_BR_X__SHIFT = 0
+A6XX_GRAS_A2D_DEST_BR_Y__MASK = 0x3fff0000
+A6XX_GRAS_A2D_DEST_BR_Y__SHIFT = 16
+REG_A6XX_GRAS_2D_UNKNOWN_8407 = 0x00008407
+REG_A6XX_GRAS_2D_UNKNOWN_8408 = 0x00008408
+REG_A6XX_GRAS_2D_UNKNOWN_8409 = 0x00008409
+REG_A6XX_GRAS_A2D_SCISSOR_TL = 0x0000840a
+A6XX_GRAS_A2D_SCISSOR_TL_X__MASK = 0x00003fff
+A6XX_GRAS_A2D_SCISSOR_TL_X__SHIFT = 0
+A6XX_GRAS_A2D_SCISSOR_TL_Y__MASK = 0x3fff0000
+A6XX_GRAS_A2D_SCISSOR_TL_Y__SHIFT = 16
+REG_A6XX_GRAS_A2D_SCISSOR_BR = 0x0000840b
+A6XX_GRAS_A2D_SCISSOR_BR_X__MASK = 0x00003fff
+A6XX_GRAS_A2D_SCISSOR_BR_X__SHIFT = 0
+A6XX_GRAS_A2D_SCISSOR_BR_Y__MASK = 0x3fff0000
+A6XX_GRAS_A2D_SCISSOR_BR_Y__SHIFT = 16
+REG_A6XX_GRAS_DBG_ECO_CNTL = 0x00008600
+A6XX_GRAS_DBG_ECO_CNTL_UNK7 = 0x00000080
+A6XX_GRAS_DBG_ECO_CNTL_LRZCACHELOCKDIS = 0x00000800
+REG_A6XX_GRAS_ADDR_MODE_CNTL = 0x00008601
+REG_A7XX_GRAS_NC_MODE_CNTL = 0x00008602
+REG_A6XX_GRAS_PERFCTR_TSE_SEL = lambda i0: (0x00008610 + 0x1*i0 )
+REG_A6XX_GRAS_PERFCTR_RAS_SEL = lambda i0: (0x00008614 + 0x1*i0 )
+REG_A6XX_GRAS_PERFCTR_LRZ_SEL = lambda i0: (0x00008618 + 0x1*i0 )
+REG_A6XX_RB_CNTL = 0x00008800
+A6XX_RB_CNTL_BINW__MASK = 0x0000003f
+A6XX_RB_CNTL_BINW__SHIFT = 0
+A6XX_RB_CNTL_BINH__MASK = 0x00007f00
+A6XX_RB_CNTL_BINH__SHIFT = 8
+A6XX_RB_CNTL_RENDER_MODE__MASK = 0x001c0000
+A6XX_RB_CNTL_RENDER_MODE__SHIFT = 18
+A6XX_RB_CNTL_FORCE_LRZ_WRITE_DIS = 0x00200000
+A6XX_RB_CNTL_BUFFERS_LOCATION__MASK = 0x00c00000
+A6XX_RB_CNTL_BUFFERS_LOCATION__SHIFT = 22
+A6XX_RB_CNTL_LRZ_FEEDBACK_ZMODE_MASK__MASK = 0x07000000
+A6XX_RB_CNTL_LRZ_FEEDBACK_ZMODE_MASK__SHIFT = 24
+REG_A7XX_RB_CNTL = 0x00008800
+A7XX_RB_CNTL_BINW__MASK = 0x0000003f
+A7XX_RB_CNTL_BINW__SHIFT = 0
+A7XX_RB_CNTL_BINH__MASK = 0x00007f00
+A7XX_RB_CNTL_BINH__SHIFT = 8
+A7XX_RB_CNTL_RENDER_MODE__MASK = 0x001c0000
+A7XX_RB_CNTL_RENDER_MODE__SHIFT = 18
+A7XX_RB_CNTL_FORCE_LRZ_WRITE_DIS = 0x00200000
+A7XX_RB_CNTL_LRZ_FEEDBACK_ZMODE_MASK__MASK = 0x07000000
+A7XX_RB_CNTL_LRZ_FEEDBACK_ZMODE_MASK__SHIFT = 24
+REG_A6XX_RB_RENDER_CNTL = 0x00008801
+A6XX_RB_RENDER_CNTL_CCUSINGLECACHELINESIZE__MASK = 0x00000038
+A6XX_RB_RENDER_CNTL_CCUSINGLECACHELINESIZE__SHIFT = 3
+A6XX_RB_RENDER_CNTL_EARLYVIZOUTEN = 0x00000040
+A6XX_RB_RENDER_CNTL_FS_DISABLE = 0x00000080
+A6XX_RB_RENDER_CNTL_UNK8__MASK = 0x00000700
+A6XX_RB_RENDER_CNTL_UNK8__SHIFT = 8
+A6XX_RB_RENDER_CNTL_RASTER_MODE__MASK = 0x00000100
+A6XX_RB_RENDER_CNTL_RASTER_MODE__SHIFT = 8
+A6XX_RB_RENDER_CNTL_RASTER_DIRECTION__MASK = 0x00000600
+A6XX_RB_RENDER_CNTL_RASTER_DIRECTION__SHIFT = 9
+A6XX_RB_RENDER_CNTL_CONSERVATIVERASEN = 0x00000800
+A6XX_RB_RENDER_CNTL_INNERCONSERVATIVERASEN = 0x00001000
+A6XX_RB_RENDER_CNTL_FLAG_DEPTH = 0x00004000
+A6XX_RB_RENDER_CNTL_FLAG_MRTS__MASK = 0x00ff0000
+A6XX_RB_RENDER_CNTL_FLAG_MRTS__SHIFT = 16
+REG_A7XX_RB_RENDER_CNTL = 0x00008801
+A7XX_RB_RENDER_CNTL_EARLYVIZOUTEN = 0x00000040
+A7XX_RB_RENDER_CNTL_FS_DISABLE = 0x00000080
+A7XX_RB_RENDER_CNTL_RASTER_MODE__MASK = 0x00000100
+A7XX_RB_RENDER_CNTL_RASTER_MODE__SHIFT = 8
+A7XX_RB_RENDER_CNTL_RASTER_DIRECTION__MASK = 0x00000600
+A7XX_RB_RENDER_CNTL_RASTER_DIRECTION__SHIFT = 9
+A7XX_RB_RENDER_CNTL_CONSERVATIVERASEN = 0x00000800
+A7XX_RB_RENDER_CNTL_INNERCONSERVATIVERASEN = 0x00001000
+REG_A7XX_GRAS_SU_RENDER_CNTL = 0x00008116
+A7XX_GRAS_SU_RENDER_CNTL_FS_DISABLE = 0x00000080
+REG_A6XX_RB_RAS_MSAA_CNTL = 0x00008802
+A6XX_RB_RAS_MSAA_CNTL_SAMPLES__MASK = 0x00000003
+A6XX_RB_RAS_MSAA_CNTL_SAMPLES__SHIFT = 0
+A6XX_RB_RAS_MSAA_CNTL_UNK2 = 0x00000004
+A6XX_RB_RAS_MSAA_CNTL_UNK3 = 0x00000008
+REG_A6XX_RB_DEST_MSAA_CNTL = 0x00008803
+A6XX_RB_DEST_MSAA_CNTL_SAMPLES__MASK = 0x00000003
+A6XX_RB_DEST_MSAA_CNTL_SAMPLES__SHIFT = 0
+A6XX_RB_DEST_MSAA_CNTL_MSAA_DISABLE = 0x00000004
+REG_A6XX_RB_MSAA_SAMPLE_POS_CNTL = 0x00008804
+A6XX_RB_MSAA_SAMPLE_POS_CNTL_UNK0 = 0x00000001
+A6XX_RB_MSAA_SAMPLE_POS_CNTL_LOCATION_ENABLE = 0x00000002
+REG_A6XX_RB_PROGRAMMABLE_MSAA_POS_0 = 0x00008805
+A6XX_RB_PROGRAMMABLE_MSAA_POS_0_SAMPLE_0_X__MASK = 0x0000000f
+A6XX_RB_PROGRAMMABLE_MSAA_POS_0_SAMPLE_0_X__SHIFT = 0
+A6XX_RB_PROGRAMMABLE_MSAA_POS_0_SAMPLE_0_Y__MASK = 0x000000f0
+A6XX_RB_PROGRAMMABLE_MSAA_POS_0_SAMPLE_0_Y__SHIFT = 4
+A6XX_RB_PROGRAMMABLE_MSAA_POS_0_SAMPLE_1_X__MASK = 0x00000f00
+A6XX_RB_PROGRAMMABLE_MSAA_POS_0_SAMPLE_1_X__SHIFT = 8
+A6XX_RB_PROGRAMMABLE_MSAA_POS_0_SAMPLE_1_Y__MASK = 0x0000f000
+A6XX_RB_PROGRAMMABLE_MSAA_POS_0_SAMPLE_1_Y__SHIFT = 12
+A6XX_RB_PROGRAMMABLE_MSAA_POS_0_SAMPLE_2_X__MASK = 0x000f0000
+A6XX_RB_PROGRAMMABLE_MSAA_POS_0_SAMPLE_2_X__SHIFT = 16
+A6XX_RB_PROGRAMMABLE_MSAA_POS_0_SAMPLE_2_Y__MASK = 0x00f00000
+A6XX_RB_PROGRAMMABLE_MSAA_POS_0_SAMPLE_2_Y__SHIFT = 20
+A6XX_RB_PROGRAMMABLE_MSAA_POS_0_SAMPLE_3_X__MASK = 0x0f000000
+A6XX_RB_PROGRAMMABLE_MSAA_POS_0_SAMPLE_3_X__SHIFT = 24
+A6XX_RB_PROGRAMMABLE_MSAA_POS_0_SAMPLE_3_Y__MASK = 0xf0000000
+A6XX_RB_PROGRAMMABLE_MSAA_POS_0_SAMPLE_3_Y__SHIFT = 28
+REG_A6XX_RB_PROGRAMMABLE_MSAA_POS_1 = 0x00008806
+A6XX_RB_PROGRAMMABLE_MSAA_POS_1_SAMPLE_0_X__MASK = 0x0000000f
+A6XX_RB_PROGRAMMABLE_MSAA_POS_1_SAMPLE_0_X__SHIFT = 0
+A6XX_RB_PROGRAMMABLE_MSAA_POS_1_SAMPLE_0_Y__MASK = 0x000000f0
+A6XX_RB_PROGRAMMABLE_MSAA_POS_1_SAMPLE_0_Y__SHIFT = 4
+A6XX_RB_PROGRAMMABLE_MSAA_POS_1_SAMPLE_1_X__MASK = 0x00000f00
+A6XX_RB_PROGRAMMABLE_MSAA_POS_1_SAMPLE_1_X__SHIFT = 8
+A6XX_RB_PROGRAMMABLE_MSAA_POS_1_SAMPLE_1_Y__MASK = 0x0000f000
+A6XX_RB_PROGRAMMABLE_MSAA_POS_1_SAMPLE_1_Y__SHIFT = 12
+A6XX_RB_PROGRAMMABLE_MSAA_POS_1_SAMPLE_2_X__MASK = 0x000f0000
+A6XX_RB_PROGRAMMABLE_MSAA_POS_1_SAMPLE_2_X__SHIFT = 16
+A6XX_RB_PROGRAMMABLE_MSAA_POS_1_SAMPLE_2_Y__MASK = 0x00f00000
+A6XX_RB_PROGRAMMABLE_MSAA_POS_1_SAMPLE_2_Y__SHIFT = 20
+A6XX_RB_PROGRAMMABLE_MSAA_POS_1_SAMPLE_3_X__MASK = 0x0f000000
+A6XX_RB_PROGRAMMABLE_MSAA_POS_1_SAMPLE_3_X__SHIFT = 24
+A6XX_RB_PROGRAMMABLE_MSAA_POS_1_SAMPLE_3_Y__MASK = 0xf0000000
+A6XX_RB_PROGRAMMABLE_MSAA_POS_1_SAMPLE_3_Y__SHIFT = 28
+REG_A6XX_RB_INTERP_CNTL = 0x00008809
+A6XX_RB_INTERP_CNTL_IJ_PERSP_PIXEL = 0x00000001
+A6XX_RB_INTERP_CNTL_IJ_PERSP_CENTROID = 0x00000002
+A6XX_RB_INTERP_CNTL_IJ_PERSP_SAMPLE = 0x00000004
+A6XX_RB_INTERP_CNTL_IJ_LINEAR_PIXEL = 0x00000008
+A6XX_RB_INTERP_CNTL_IJ_LINEAR_CENTROID = 0x00000010
+A6XX_RB_INTERP_CNTL_IJ_LINEAR_SAMPLE = 0x00000020
+A6XX_RB_INTERP_CNTL_COORD_MASK__MASK = 0x000003c0
+A6XX_RB_INTERP_CNTL_COORD_MASK__SHIFT = 6
+A6XX_RB_INTERP_CNTL_UNK10 = 0x00000400
+REG_A6XX_RB_PS_INPUT_CNTL = 0x0000880a
+A6XX_RB_PS_INPUT_CNTL_SAMPLEMASK = 0x00000001
+A6XX_RB_PS_INPUT_CNTL_POSTDEPTHCOVERAGE = 0x00000002
+A6XX_RB_PS_INPUT_CNTL_FACENESS = 0x00000004
+A6XX_RB_PS_INPUT_CNTL_SAMPLEID = 0x00000008
+A6XX_RB_PS_INPUT_CNTL_FRAGCOORDSAMPLEMODE__MASK = 0x00000030
+A6XX_RB_PS_INPUT_CNTL_FRAGCOORDSAMPLEMODE__SHIFT = 4
+A6XX_RB_PS_INPUT_CNTL_CENTERRHW = 0x00000040
+A6XX_RB_PS_INPUT_CNTL_LINELENGTHEN = 0x00000080
+A6XX_RB_PS_INPUT_CNTL_FOVEATION = 0x00000100
+REG_A6XX_RB_PS_OUTPUT_CNTL = 0x0000880b
+A6XX_RB_PS_OUTPUT_CNTL_DUAL_COLOR_IN_ENABLE = 0x00000001
+A6XX_RB_PS_OUTPUT_CNTL_FRAG_WRITES_Z = 0x00000002
+A6XX_RB_PS_OUTPUT_CNTL_FRAG_WRITES_SAMPMASK = 0x00000004
+A6XX_RB_PS_OUTPUT_CNTL_FRAG_WRITES_STENCILREF = 0x00000008
+REG_A6XX_RB_PS_MRT_CNTL = 0x0000880c
+A6XX_RB_PS_MRT_CNTL_MRT__MASK = 0x0000000f
+A6XX_RB_PS_MRT_CNTL_MRT__SHIFT = 0
+REG_A6XX_RB_PS_OUTPUT_MASK = 0x0000880d
+A6XX_RB_PS_OUTPUT_MASK_RT0__MASK = 0x0000000f
+A6XX_RB_PS_OUTPUT_MASK_RT0__SHIFT = 0
+A6XX_RB_PS_OUTPUT_MASK_RT1__MASK = 0x000000f0
+A6XX_RB_PS_OUTPUT_MASK_RT1__SHIFT = 4
+A6XX_RB_PS_OUTPUT_MASK_RT2__MASK = 0x00000f00
+A6XX_RB_PS_OUTPUT_MASK_RT2__SHIFT = 8
+A6XX_RB_PS_OUTPUT_MASK_RT3__MASK = 0x0000f000
+A6XX_RB_PS_OUTPUT_MASK_RT3__SHIFT = 12
+A6XX_RB_PS_OUTPUT_MASK_RT4__MASK = 0x000f0000
+A6XX_RB_PS_OUTPUT_MASK_RT4__SHIFT = 16
+A6XX_RB_PS_OUTPUT_MASK_RT5__MASK = 0x00f00000
+A6XX_RB_PS_OUTPUT_MASK_RT5__SHIFT = 20
+A6XX_RB_PS_OUTPUT_MASK_RT6__MASK = 0x0f000000
+A6XX_RB_PS_OUTPUT_MASK_RT6__SHIFT = 24
+A6XX_RB_PS_OUTPUT_MASK_RT7__MASK = 0xf0000000
+A6XX_RB_PS_OUTPUT_MASK_RT7__SHIFT = 28
+REG_A6XX_RB_DITHER_CNTL = 0x0000880e
+A6XX_RB_DITHER_CNTL_DITHER_MODE_MRT0__MASK = 0x00000003
+A6XX_RB_DITHER_CNTL_DITHER_MODE_MRT0__SHIFT = 0
+A6XX_RB_DITHER_CNTL_DITHER_MODE_MRT1__MASK = 0x0000000c
+A6XX_RB_DITHER_CNTL_DITHER_MODE_MRT1__SHIFT = 2
+A6XX_RB_DITHER_CNTL_DITHER_MODE_MRT2__MASK = 0x00000030
+A6XX_RB_DITHER_CNTL_DITHER_MODE_MRT2__SHIFT = 4
+A6XX_RB_DITHER_CNTL_DITHER_MODE_MRT3__MASK = 0x000000c0
+A6XX_RB_DITHER_CNTL_DITHER_MODE_MRT3__SHIFT = 6
+A6XX_RB_DITHER_CNTL_DITHER_MODE_MRT4__MASK = 0x00000300
+A6XX_RB_DITHER_CNTL_DITHER_MODE_MRT4__SHIFT = 8
+A6XX_RB_DITHER_CNTL_DITHER_MODE_MRT5__MASK = 0x00000c00
+A6XX_RB_DITHER_CNTL_DITHER_MODE_MRT5__SHIFT = 10
+A6XX_RB_DITHER_CNTL_DITHER_MODE_MRT6__MASK = 0x00003000
+A6XX_RB_DITHER_CNTL_DITHER_MODE_MRT6__SHIFT = 12
+A6XX_RB_DITHER_CNTL_DITHER_MODE_MRT7__MASK = 0x0000c000
+A6XX_RB_DITHER_CNTL_DITHER_MODE_MRT7__SHIFT = 14
+REG_A6XX_RB_SRGB_CNTL = 0x0000880f
+A6XX_RB_SRGB_CNTL_SRGB_MRT0 = 0x00000001
+A6XX_RB_SRGB_CNTL_SRGB_MRT1 = 0x00000002
+A6XX_RB_SRGB_CNTL_SRGB_MRT2 = 0x00000004
+A6XX_RB_SRGB_CNTL_SRGB_MRT3 = 0x00000008
+A6XX_RB_SRGB_CNTL_SRGB_MRT4 = 0x00000010
+A6XX_RB_SRGB_CNTL_SRGB_MRT5 = 0x00000020
+A6XX_RB_SRGB_CNTL_SRGB_MRT6 = 0x00000040
+A6XX_RB_SRGB_CNTL_SRGB_MRT7 = 0x00000080
+REG_A6XX_RB_PS_SAMPLEFREQ_CNTL = 0x00008810
+A6XX_RB_PS_SAMPLEFREQ_CNTL_PER_SAMP_MODE = 0x00000001
+REG_A6XX_RB_UNKNOWN_8811 = 0x00008811
+REG_A7XX_RB_UNKNOWN_8812 = 0x00008812
+REG_A6XX_RB_UNKNOWN_8818 = 0x00008818
+REG_A6XX_RB_UNKNOWN_8819 = 0x00008819
+REG_A6XX_RB_UNKNOWN_881A = 0x0000881a
+REG_A6XX_RB_UNKNOWN_881B = 0x0000881b
+REG_A6XX_RB_UNKNOWN_881C = 0x0000881c
+REG_A6XX_RB_UNKNOWN_881D = 0x0000881d
+REG_A6XX_RB_UNKNOWN_881E = 0x0000881e
+REG_A6XX_RB_MRT = lambda i0: (0x00008820 + 0x8*i0 )
+A6XX_RB_MRT_CONTROL_BLEND = 0x00000001
+A6XX_RB_MRT_CONTROL_BLEND2 = 0x00000002
+A6XX_RB_MRT_CONTROL_ROP_ENABLE = 0x00000004
+A6XX_RB_MRT_CONTROL_ROP_CODE__MASK = 0x00000078
+A6XX_RB_MRT_CONTROL_ROP_CODE__SHIFT = 3
+A6XX_RB_MRT_CONTROL_COMPONENT_ENABLE__MASK = 0x00000780
+A6XX_RB_MRT_CONTROL_COMPONENT_ENABLE__SHIFT = 7
+A6XX_RB_MRT_BLEND_CONTROL_RGB_SRC_FACTOR__MASK = 0x0000001f
+A6XX_RB_MRT_BLEND_CONTROL_RGB_SRC_FACTOR__SHIFT = 0
+A6XX_RB_MRT_BLEND_CONTROL_RGB_BLEND_OPCODE__MASK = 0x000000e0
+A6XX_RB_MRT_BLEND_CONTROL_RGB_BLEND_OPCODE__SHIFT = 5
+A6XX_RB_MRT_BLEND_CONTROL_RGB_DEST_FACTOR__MASK = 0x00001f00
+A6XX_RB_MRT_BLEND_CONTROL_RGB_DEST_FACTOR__SHIFT = 8
+A6XX_RB_MRT_BLEND_CONTROL_ALPHA_SRC_FACTOR__MASK = 0x001f0000
+A6XX_RB_MRT_BLEND_CONTROL_ALPHA_SRC_FACTOR__SHIFT = 16
+A6XX_RB_MRT_BLEND_CONTROL_ALPHA_BLEND_OPCODE__MASK = 0x00e00000
+A6XX_RB_MRT_BLEND_CONTROL_ALPHA_BLEND_OPCODE__SHIFT = 21
+A6XX_RB_MRT_BLEND_CONTROL_ALPHA_DEST_FACTOR__MASK = 0x1f000000
+A6XX_RB_MRT_BLEND_CONTROL_ALPHA_DEST_FACTOR__SHIFT = 24
+A6XX_RB_MRT_BUF_INFO_COLOR_FORMAT__MASK = 0x000000ff
+A6XX_RB_MRT_BUF_INFO_COLOR_FORMAT__SHIFT = 0
+A6XX_RB_MRT_BUF_INFO_COLOR_TILE_MODE__MASK = 0x00000300
+A6XX_RB_MRT_BUF_INFO_COLOR_TILE_MODE__SHIFT = 8
+A6XX_RB_MRT_BUF_INFO_UNK10 = 0x00000400
+A6XX_RB_MRT_BUF_INFO_COLOR_SWAP__MASK = 0x00006000
+A6XX_RB_MRT_BUF_INFO_COLOR_SWAP__SHIFT = 13
+A7XX_RB_MRT_BUF_INFO_COLOR_FORMAT__MASK = 0x000000ff
+A7XX_RB_MRT_BUF_INFO_COLOR_FORMAT__SHIFT = 0
+A7XX_RB_MRT_BUF_INFO_COLOR_TILE_MODE__MASK = 0x00000300
+A7XX_RB_MRT_BUF_INFO_COLOR_TILE_MODE__SHIFT = 8
+A7XX_RB_MRT_BUF_INFO_UNK10 = 0x00000400
+A7XX_RB_MRT_BUF_INFO_LOSSLESSCOMPEN = 0x00000800
+A7XX_RB_MRT_BUF_INFO_COLOR_SWAP__MASK = 0x00006000
+A7XX_RB_MRT_BUF_INFO_COLOR_SWAP__SHIFT = 13
+A7XX_RB_MRT_BUF_INFO_MUTABLEEN = 0x00010000
+A6XX_RB_MRT_PITCH__MASK = 0xffffffff
+A6XX_RB_MRT_PITCH__SHIFT = 0
+A6XX_RB_MRT_ARRAY_PITCH__MASK = 0xffffffff
+A6XX_RB_MRT_ARRAY_PITCH__SHIFT = 0
+REG_A6XX_RB_BLEND_CONSTANT_RED_FP32 = 0x00008860
+A6XX_RB_BLEND_CONSTANT_RED_FP32__MASK = 0xffffffff
+A6XX_RB_BLEND_CONSTANT_RED_FP32__SHIFT = 0
+REG_A6XX_RB_BLEND_CONSTANT_GREEN_FP32 = 0x00008861
+A6XX_RB_BLEND_CONSTANT_GREEN_FP32__MASK = 0xffffffff
+A6XX_RB_BLEND_CONSTANT_GREEN_FP32__SHIFT = 0
+REG_A6XX_RB_BLEND_CONSTANT_BLUE_FP32 = 0x00008862
+A6XX_RB_BLEND_CONSTANT_BLUE_FP32__MASK = 0xffffffff
+A6XX_RB_BLEND_CONSTANT_BLUE_FP32__SHIFT = 0
+REG_A6XX_RB_BLEND_CONSTANT_ALPHA_FP32 = 0x00008863
+A6XX_RB_BLEND_CONSTANT_ALPHA_FP32__MASK = 0xffffffff
+A6XX_RB_BLEND_CONSTANT_ALPHA_FP32__SHIFT = 0
+REG_A6XX_RB_ALPHA_TEST_CNTL = 0x00008864
+A6XX_RB_ALPHA_TEST_CNTL_ALPHA_REF__MASK = 0x000000ff
+A6XX_RB_ALPHA_TEST_CNTL_ALPHA_REF__SHIFT = 0
+A6XX_RB_ALPHA_TEST_CNTL_ALPHA_TEST = 0x00000100
+A6XX_RB_ALPHA_TEST_CNTL_ALPHA_TEST_FUNC__MASK = 0x00000e00
+A6XX_RB_ALPHA_TEST_CNTL_ALPHA_TEST_FUNC__SHIFT = 9
+REG_A6XX_RB_BLEND_CNTL = 0x00008865
+A6XX_RB_BLEND_CNTL_BLEND_READS_DEST__MASK = 0x000000ff
+A6XX_RB_BLEND_CNTL_BLEND_READS_DEST__SHIFT = 0
+A6XX_RB_BLEND_CNTL_INDEPENDENT_BLEND = 0x00000100
+A6XX_RB_BLEND_CNTL_DUAL_COLOR_IN_ENABLE = 0x00000200
+A6XX_RB_BLEND_CNTL_ALPHA_TO_COVERAGE = 0x00000400
+A6XX_RB_BLEND_CNTL_ALPHA_TO_ONE = 0x00000800
+A6XX_RB_BLEND_CNTL_SAMPLE_MASK__MASK = 0xffff0000
+A6XX_RB_BLEND_CNTL_SAMPLE_MASK__SHIFT = 16
+REG_A6XX_RB_DEPTH_PLANE_CNTL = 0x00008870
+A6XX_RB_DEPTH_PLANE_CNTL_Z_MODE__MASK = 0x00000003
+A6XX_RB_DEPTH_PLANE_CNTL_Z_MODE__SHIFT = 0
+REG_A6XX_RB_DEPTH_CNTL = 0x00008871
+A6XX_RB_DEPTH_CNTL_Z_TEST_ENABLE = 0x00000001
+A6XX_RB_DEPTH_CNTL_Z_WRITE_ENABLE = 0x00000002
+A6XX_RB_DEPTH_CNTL_ZFUNC__MASK = 0x0000001c
+A6XX_RB_DEPTH_CNTL_ZFUNC__SHIFT = 2
+A6XX_RB_DEPTH_CNTL_Z_CLAMP_ENABLE = 0x00000020
+A6XX_RB_DEPTH_CNTL_Z_READ_ENABLE = 0x00000040
+A6XX_RB_DEPTH_CNTL_Z_BOUNDS_ENABLE = 0x00000080
+REG_A6XX_GRAS_SU_DEPTH_CNTL = 0x00008114
+A6XX_GRAS_SU_DEPTH_CNTL_Z_TEST_ENABLE = 0x00000001
+REG_A6XX_RB_DEPTH_BUFFER_INFO = 0x00008872
+A6XX_RB_DEPTH_BUFFER_INFO_DEPTH_FORMAT__MASK = 0x00000007
+A6XX_RB_DEPTH_BUFFER_INFO_DEPTH_FORMAT__SHIFT = 0
+A6XX_RB_DEPTH_BUFFER_INFO_UNK3__MASK = 0x00000018
+A6XX_RB_DEPTH_BUFFER_INFO_UNK3__SHIFT = 3
+REG_A7XX_RB_DEPTH_BUFFER_INFO = 0x00008872
+A7XX_RB_DEPTH_BUFFER_INFO_DEPTH_FORMAT__MASK = 0x00000007
+A7XX_RB_DEPTH_BUFFER_INFO_DEPTH_FORMAT__SHIFT = 0
+A7XX_RB_DEPTH_BUFFER_INFO_UNK3__MASK = 0x00000018
+A7XX_RB_DEPTH_BUFFER_INFO_UNK3__SHIFT = 3
+A7XX_RB_DEPTH_BUFFER_INFO_TILEMODE__MASK = 0x00000060
+A7XX_RB_DEPTH_BUFFER_INFO_TILEMODE__SHIFT = 5
+A7XX_RB_DEPTH_BUFFER_INFO_LOSSLESSCOMPEN = 0x00000080
+REG_A6XX_RB_DEPTH_BUFFER_PITCH = 0x00008873
+A6XX_RB_DEPTH_BUFFER_PITCH__MASK = 0x00003fff
+A6XX_RB_DEPTH_BUFFER_PITCH__SHIFT = 0
+REG_A6XX_RB_DEPTH_BUFFER_ARRAY_PITCH = 0x00008874
+A6XX_RB_DEPTH_BUFFER_ARRAY_PITCH__MASK = 0x0fffffff
+A6XX_RB_DEPTH_BUFFER_ARRAY_PITCH__SHIFT = 0
+REG_A6XX_RB_DEPTH_BUFFER_BASE = 0x00008875
+REG_A6XX_RB_DEPTH_GMEM_BASE = 0x00008877
+REG_A6XX_RB_DEPTH_BOUND_MIN = 0x00008878
+A6XX_RB_DEPTH_BOUND_MIN__MASK = 0xffffffff
+A6XX_RB_DEPTH_BOUND_MIN__SHIFT = 0
+REG_A6XX_RB_DEPTH_BOUND_MAX = 0x00008879
+A6XX_RB_DEPTH_BOUND_MAX__MASK = 0xffffffff
+A6XX_RB_DEPTH_BOUND_MAX__SHIFT = 0
+REG_A6XX_RB_STENCIL_CNTL = 0x00008880
+A6XX_RB_STENCIL_CNTL_STENCIL_ENABLE = 0x00000001
+A6XX_RB_STENCIL_CNTL_STENCIL_ENABLE_BF = 0x00000002
+A6XX_RB_STENCIL_CNTL_STENCIL_READ = 0x00000004
+A6XX_RB_STENCIL_CNTL_FUNC__MASK = 0x00000700
+A6XX_RB_STENCIL_CNTL_FUNC__SHIFT = 8
+A6XX_RB_STENCIL_CNTL_FAIL__MASK = 0x00003800
+A6XX_RB_STENCIL_CNTL_FAIL__SHIFT = 11
+A6XX_RB_STENCIL_CNTL_ZPASS__MASK = 0x0001c000
+A6XX_RB_STENCIL_CNTL_ZPASS__SHIFT = 14
+A6XX_RB_STENCIL_CNTL_ZFAIL__MASK = 0x000e0000
+A6XX_RB_STENCIL_CNTL_ZFAIL__SHIFT = 17
+A6XX_RB_STENCIL_CNTL_FUNC_BF__MASK = 0x00700000
+A6XX_RB_STENCIL_CNTL_FUNC_BF__SHIFT = 20
+A6XX_RB_STENCIL_CNTL_FAIL_BF__MASK = 0x03800000
+A6XX_RB_STENCIL_CNTL_FAIL_BF__SHIFT = 23
+A6XX_RB_STENCIL_CNTL_ZPASS_BF__MASK = 0x1c000000
+A6XX_RB_STENCIL_CNTL_ZPASS_BF__SHIFT = 26
+A6XX_RB_STENCIL_CNTL_ZFAIL_BF__MASK = 0xe0000000
+A6XX_RB_STENCIL_CNTL_ZFAIL_BF__SHIFT = 29
+REG_A6XX_GRAS_SU_STENCIL_CNTL = 0x00008115
+A6XX_GRAS_SU_STENCIL_CNTL_STENCIL_ENABLE = 0x00000001
+REG_A6XX_RB_STENCIL_BUFFER_INFO = 0x00008881
+A6XX_RB_STENCIL_BUFFER_INFO_SEPARATE_STENCIL = 0x00000001
+A6XX_RB_STENCIL_BUFFER_INFO_UNK1 = 0x00000002
+REG_A7XX_RB_STENCIL_BUFFER_INFO = 0x00008881
+A7XX_RB_STENCIL_BUFFER_INFO_SEPARATE_STENCIL = 0x00000001
+A7XX_RB_STENCIL_BUFFER_INFO_UNK1 = 0x00000002
+A7XX_RB_STENCIL_BUFFER_INFO_TILEMODE__MASK = 0x0000000c
+A7XX_RB_STENCIL_BUFFER_INFO_TILEMODE__SHIFT = 2
+REG_A6XX_RB_STENCIL_BUFFER_PITCH = 0x00008882
+A6XX_RB_STENCIL_BUFFER_PITCH__MASK = 0x00000fff
+A6XX_RB_STENCIL_BUFFER_PITCH__SHIFT = 0
+REG_A6XX_RB_STENCIL_BUFFER_ARRAY_PITCH = 0x00008883
+A6XX_RB_STENCIL_BUFFER_ARRAY_PITCH__MASK = 0x00ffffff
+A6XX_RB_STENCIL_BUFFER_ARRAY_PITCH__SHIFT = 0
+REG_A6XX_RB_STENCIL_BUFFER_BASE = 0x00008884
+REG_A6XX_RB_STENCIL_GMEM_BASE = 0x00008886
+REG_A6XX_RB_STENCIL_REF_CNTL = 0x00008887
+A6XX_RB_STENCIL_REF_CNTL_REF__MASK = 0x000000ff
+A6XX_RB_STENCIL_REF_CNTL_REF__SHIFT = 0
+A6XX_RB_STENCIL_REF_CNTL_BFREF__MASK = 0x0000ff00
+A6XX_RB_STENCIL_REF_CNTL_BFREF__SHIFT = 8
+REG_A6XX_RB_STENCIL_MASK = 0x00008888
+A6XX_RB_STENCIL_MASK_MASK__MASK = 0x000000ff
+A6XX_RB_STENCIL_MASK_MASK__SHIFT = 0
+A6XX_RB_STENCIL_MASK_BFMASK__MASK = 0x0000ff00
+A6XX_RB_STENCIL_MASK_BFMASK__SHIFT = 8
+REG_A6XX_RB_STENCIL_WRITE_MASK = 0x00008889
+A6XX_RB_STENCIL_WRITE_MASK_WRMASK__MASK = 0x000000ff
+A6XX_RB_STENCIL_WRITE_MASK_WRMASK__SHIFT = 0
+A6XX_RB_STENCIL_WRITE_MASK_BFWRMASK__MASK = 0x0000ff00
+A6XX_RB_STENCIL_WRITE_MASK_BFWRMASK__SHIFT = 8
+REG_A6XX_RB_WINDOW_OFFSET = 0x00008890
+A6XX_RB_WINDOW_OFFSET_X__MASK = 0x00003fff
+A6XX_RB_WINDOW_OFFSET_X__SHIFT = 0
+A6XX_RB_WINDOW_OFFSET_Y__MASK = 0x3fff0000
+A6XX_RB_WINDOW_OFFSET_Y__SHIFT = 16
+REG_A6XX_RB_SAMPLE_COUNTER_CNTL = 0x00008891
+A6XX_RB_SAMPLE_COUNTER_CNTL_DISABLE = 0x00000001
+A6XX_RB_SAMPLE_COUNTER_CNTL_COPY = 0x00000002
+REG_A6XX_RB_LRZ_CNTL = 0x00008898
+A6XX_RB_LRZ_CNTL_ENABLE = 0x00000001
+REG_A7XX_RB_UNKNOWN_8899 = 0x00008899
+REG_A6XX_RB_VIEWPORT_ZCLAMP_MIN = 0x000088c0
+A6XX_RB_VIEWPORT_ZCLAMP_MIN__MASK = 0xffffffff
+A6XX_RB_VIEWPORT_ZCLAMP_MIN__SHIFT = 0
+REG_A6XX_RB_VIEWPORT_ZCLAMP_MAX = 0x000088c1
+A6XX_RB_VIEWPORT_ZCLAMP_MAX__MASK = 0xffffffff
+A6XX_RB_VIEWPORT_ZCLAMP_MAX__SHIFT = 0
+REG_A6XX_RB_RESOLVE_CNTL_0 = 0x000088d0
+A6XX_RB_RESOLVE_CNTL_0_UNK0__MASK = 0x00001fff
+A6XX_RB_RESOLVE_CNTL_0_UNK0__SHIFT = 0
+A6XX_RB_RESOLVE_CNTL_0_UNK16__MASK = 0x07ff0000
+A6XX_RB_RESOLVE_CNTL_0_UNK16__SHIFT = 16
+REG_A6XX_RB_RESOLVE_CNTL_1 = 0x000088d1
+A6XX_RB_RESOLVE_CNTL_1_X__MASK = 0x00003fff
+A6XX_RB_RESOLVE_CNTL_1_X__SHIFT = 0
+A6XX_RB_RESOLVE_CNTL_1_Y__MASK = 0x3fff0000
+A6XX_RB_RESOLVE_CNTL_1_Y__SHIFT = 16
+REG_A6XX_RB_RESOLVE_CNTL_2 = 0x000088d2
+A6XX_RB_RESOLVE_CNTL_2_X__MASK = 0x00003fff
+A6XX_RB_RESOLVE_CNTL_2_X__SHIFT = 0
+A6XX_RB_RESOLVE_CNTL_2_Y__MASK = 0x3fff0000
+A6XX_RB_RESOLVE_CNTL_2_Y__SHIFT = 16
+REG_A6XX_RB_RESOLVE_CNTL_3 = 0x000088d3
+A6XX_RB_RESOLVE_CNTL_3_BINW__MASK = 0x0000003f
+A6XX_RB_RESOLVE_CNTL_3_BINW__SHIFT = 0
+A6XX_RB_RESOLVE_CNTL_3_BINH__MASK = 0x00007f00
+A6XX_RB_RESOLVE_CNTL_3_BINH__SHIFT = 8
+REG_A6XX_RB_RESOLVE_WINDOW_OFFSET = 0x000088d4
+A6XX_RB_RESOLVE_WINDOW_OFFSET_X__MASK = 0x00003fff
+A6XX_RB_RESOLVE_WINDOW_OFFSET_X__SHIFT = 0
+A6XX_RB_RESOLVE_WINDOW_OFFSET_Y__MASK = 0x3fff0000
+A6XX_RB_RESOLVE_WINDOW_OFFSET_Y__SHIFT = 16
+REG_A6XX_RB_RESOLVE_GMEM_BUFFER_INFO = 0x000088d5
+A6XX_RB_RESOLVE_GMEM_BUFFER_INFO_SAMPLES__MASK = 0x00000018
+A6XX_RB_RESOLVE_GMEM_BUFFER_INFO_SAMPLES__SHIFT = 3
+REG_A6XX_RB_RESOLVE_GMEM_BUFFER_BASE = 0x000088d6
+REG_A6XX_RB_RESOLVE_SYSTEM_BUFFER_INFO = 0x000088d7
+A6XX_RB_RESOLVE_SYSTEM_BUFFER_INFO_TILE_MODE__MASK = 0x00000003
+A6XX_RB_RESOLVE_SYSTEM_BUFFER_INFO_TILE_MODE__SHIFT = 0
+A6XX_RB_RESOLVE_SYSTEM_BUFFER_INFO_FLAGS = 0x00000004
+A6XX_RB_RESOLVE_SYSTEM_BUFFER_INFO_SAMPLES__MASK = 0x00000018
+A6XX_RB_RESOLVE_SYSTEM_BUFFER_INFO_SAMPLES__SHIFT = 3
+A6XX_RB_RESOLVE_SYSTEM_BUFFER_INFO_COLOR_SWAP__MASK = 0x00000060
+A6XX_RB_RESOLVE_SYSTEM_BUFFER_INFO_COLOR_SWAP__SHIFT = 5
+A6XX_RB_RESOLVE_SYSTEM_BUFFER_INFO_COLOR_FORMAT__MASK = 0x00007f80
+A6XX_RB_RESOLVE_SYSTEM_BUFFER_INFO_COLOR_FORMAT__SHIFT = 7
+A6XX_RB_RESOLVE_SYSTEM_BUFFER_INFO_UNK15 = 0x00008000
+A6XX_RB_RESOLVE_SYSTEM_BUFFER_INFO_MUTABLEEN = 0x00010000
+REG_A6XX_RB_RESOLVE_SYSTEM_BUFFER_BASE = 0x000088d8
+REG_A6XX_RB_RESOLVE_SYSTEM_BUFFER_PITCH = 0x000088da
+A6XX_RB_RESOLVE_SYSTEM_BUFFER_PITCH__MASK = 0x0000ffff
+A6XX_RB_RESOLVE_SYSTEM_BUFFER_PITCH__SHIFT = 0
+REG_A6XX_RB_RESOLVE_SYSTEM_BUFFER_ARRAY_PITCH = 0x000088db
+A6XX_RB_RESOLVE_SYSTEM_BUFFER_ARRAY_PITCH__MASK = 0x1fffffff
+A6XX_RB_RESOLVE_SYSTEM_BUFFER_ARRAY_PITCH__SHIFT = 0
+REG_A6XX_RB_RESOLVE_SYSTEM_FLAG_BUFFER_BASE = 0x000088dc
+REG_A6XX_RB_RESOLVE_SYSTEM_FLAG_BUFFER_PITCH = 0x000088de
+A6XX_RB_RESOLVE_SYSTEM_FLAG_BUFFER_PITCH_PITCH__MASK = 0x000007ff
+A6XX_RB_RESOLVE_SYSTEM_FLAG_BUFFER_PITCH_PITCH__SHIFT = 0
+A6XX_RB_RESOLVE_SYSTEM_FLAG_BUFFER_PITCH_ARRAY_PITCH__MASK = 0x0ffff800
+A6XX_RB_RESOLVE_SYSTEM_FLAG_BUFFER_PITCH_ARRAY_PITCH__SHIFT = 11
+REG_A6XX_RB_RESOLVE_CLEAR_COLOR_DW0 = 0x000088df
+REG_A6XX_RB_RESOLVE_CLEAR_COLOR_DW1 = 0x000088e0
+REG_A6XX_RB_RESOLVE_CLEAR_COLOR_DW2 = 0x000088e1
+REG_A6XX_RB_RESOLVE_CLEAR_COLOR_DW3 = 0x000088e2
+REG_A6XX_RB_RESOLVE_OPERATION = 0x000088e3
+A6XX_RB_RESOLVE_OPERATION_TYPE__MASK = 0x00000003
+A6XX_RB_RESOLVE_OPERATION_TYPE__SHIFT = 0
+A6XX_RB_RESOLVE_OPERATION_SAMPLE_0 = 0x00000004
+A6XX_RB_RESOLVE_OPERATION_DEPTH = 0x00000008
+A6XX_RB_RESOLVE_OPERATION_CLEAR_MASK__MASK = 0x000000f0
+A6XX_RB_RESOLVE_OPERATION_CLEAR_MASK__SHIFT = 4
+A6XX_RB_RESOLVE_OPERATION_LAST__MASK = 0x00000300
+A6XX_RB_RESOLVE_OPERATION_LAST__SHIFT = 8
+A6XX_RB_RESOLVE_OPERATION_BUFFER_ID__MASK = 0x0000f000
+A6XX_RB_RESOLVE_OPERATION_BUFFER_ID__SHIFT = 12
+REG_A7XX_RB_CLEAR_TARGET = 0x000088e4
+A7XX_RB_CLEAR_TARGET_CLEAR_MODE__MASK = 0x00000001
+A7XX_RB_CLEAR_TARGET_CLEAR_MODE__SHIFT = 0
+REG_A7XX_RB_CCU_CACHE_CNTL = 0x000088e5
+A7XX_RB_CCU_CACHE_CNTL_DEPTH_OFFSET_HI__MASK = 0x00000001
+A7XX_RB_CCU_CACHE_CNTL_DEPTH_OFFSET_HI__SHIFT = 0
+A7XX_RB_CCU_CACHE_CNTL_COLOR_OFFSET_HI__MASK = 0x00000004
+A7XX_RB_CCU_CACHE_CNTL_COLOR_OFFSET_HI__SHIFT = 2
+A7XX_RB_CCU_CACHE_CNTL_DEPTH_CACHE_SIZE__MASK = 0x00000c00
+A7XX_RB_CCU_CACHE_CNTL_DEPTH_CACHE_SIZE__SHIFT = 10
+A7XX_RB_CCU_CACHE_CNTL_DEPTH_OFFSET__MASK = 0x001ff000
+A7XX_RB_CCU_CACHE_CNTL_DEPTH_OFFSET__SHIFT = 12
+A7XX_RB_CCU_CACHE_CNTL_COLOR_CACHE_SIZE__MASK = 0x00600000
+A7XX_RB_CCU_CACHE_CNTL_COLOR_CACHE_SIZE__SHIFT = 21
+A7XX_RB_CCU_CACHE_CNTL_COLOR_OFFSET__MASK = 0xff800000
+A7XX_RB_CCU_CACHE_CNTL_COLOR_OFFSET__SHIFT = 23
+REG_A6XX_RB_UNKNOWN_88F0 = 0x000088f0
+REG_A6XX_RB_UNK_FLAG_BUFFER_BASE = 0x000088f1
+REG_A6XX_RB_UNK_FLAG_BUFFER_PITCH = 0x000088f3
+A6XX_RB_UNK_FLAG_BUFFER_PITCH_PITCH__MASK = 0x000007ff
+A6XX_RB_UNK_FLAG_BUFFER_PITCH_PITCH__SHIFT = 0
+A6XX_RB_UNK_FLAG_BUFFER_PITCH_ARRAY_PITCH__MASK = 0x00fff800
+A6XX_RB_UNK_FLAG_BUFFER_PITCH_ARRAY_PITCH__SHIFT = 11
+REG_A6XX_RB_VRS_CONFIG = 0x000088f4
+A6XX_RB_VRS_CONFIG_UNK2 = 0x00000004
+A6XX_RB_VRS_CONFIG_PIPELINE_FSR_ENABLE = 0x00000010
+A6XX_RB_VRS_CONFIG_ATTACHMENT_FSR_ENABLE = 0x00000020
+A6XX_RB_VRS_CONFIG_PRIMITIVE_FSR_ENABLE = 0x00040000
+REG_A7XX_RB_UNKNOWN_88F5 = 0x000088f5
+REG_A6XX_RB_DEPTH_FLAG_BUFFER_BASE = 0x00008900
+REG_A6XX_RB_DEPTH_FLAG_BUFFER_PITCH = 0x00008902
+A6XX_RB_DEPTH_FLAG_BUFFER_PITCH_PITCH__MASK = 0x0000007f
+A6XX_RB_DEPTH_FLAG_BUFFER_PITCH_PITCH__SHIFT = 0
+A6XX_RB_DEPTH_FLAG_BUFFER_PITCH_UNK8__MASK = 0x00000700
+A6XX_RB_DEPTH_FLAG_BUFFER_PITCH_UNK8__SHIFT = 8
+A6XX_RB_DEPTH_FLAG_BUFFER_PITCH_ARRAY_PITCH__MASK = 0x0ffff800
+A6XX_RB_DEPTH_FLAG_BUFFER_PITCH_ARRAY_PITCH__SHIFT = 11
+REG_A6XX_RB_COLOR_FLAG_BUFFER = lambda i0: (0x00008903 + 0x3*i0 )
+A6XX_RB_COLOR_FLAG_BUFFER_PITCH_PITCH__MASK = 0x000007ff
+A6XX_RB_COLOR_FLAG_BUFFER_PITCH_PITCH__SHIFT = 0
+A6XX_RB_COLOR_FLAG_BUFFER_PITCH_ARRAY_PITCH__MASK = 0x1ffff800
+A6XX_RB_COLOR_FLAG_BUFFER_PITCH_ARRAY_PITCH__SHIFT = 11
+REG_A6XX_RB_SAMPLE_COUNTER_BASE = 0x00008927
+REG_A6XX_RB_UNKNOWN_8A00 = 0x00008a00
+REG_A6XX_RB_UNKNOWN_8A10 = 0x00008a10
+REG_A6XX_RB_UNKNOWN_8A20 = 0x00008a20
+REG_A6XX_RB_UNKNOWN_8A30 = 0x00008a30
+REG_A6XX_RB_A2D_BLT_CNTL = 0x00008c00
+A6XX_RB_A2D_BLT_CNTL_ROTATE__MASK = 0x00000007
+A6XX_RB_A2D_BLT_CNTL_ROTATE__SHIFT = 0
+A6XX_RB_A2D_BLT_CNTL_OVERWRITEEN = 0x00000008
+A6XX_RB_A2D_BLT_CNTL_UNK4__MASK = 0x00000070
+A6XX_RB_A2D_BLT_CNTL_UNK4__SHIFT = 4
+A6XX_RB_A2D_BLT_CNTL_SOLID_COLOR = 0x00000080
+A6XX_RB_A2D_BLT_CNTL_COLOR_FORMAT__MASK = 0x0000ff00
+A6XX_RB_A2D_BLT_CNTL_COLOR_FORMAT__SHIFT = 8
+A6XX_RB_A2D_BLT_CNTL_SCISSOR = 0x00010000
+A6XX_RB_A2D_BLT_CNTL_UNK17__MASK = 0x00060000
+A6XX_RB_A2D_BLT_CNTL_UNK17__SHIFT = 17
+A6XX_RB_A2D_BLT_CNTL_D24S8 = 0x00080000
+A6XX_RB_A2D_BLT_CNTL_MASK__MASK = 0x00f00000
+A6XX_RB_A2D_BLT_CNTL_MASK__SHIFT = 20
+A6XX_RB_A2D_BLT_CNTL_IFMT__MASK = 0x07000000
+A6XX_RB_A2D_BLT_CNTL_IFMT__SHIFT = 24
+A6XX_RB_A2D_BLT_CNTL_UNK27 = 0x08000000
+A6XX_RB_A2D_BLT_CNTL_UNK28 = 0x10000000
+A6XX_RB_A2D_BLT_CNTL_RASTER_MODE__MASK = 0x20000000
+A6XX_RB_A2D_BLT_CNTL_RASTER_MODE__SHIFT = 29
+A6XX_RB_A2D_BLT_CNTL_COPY = 0x40000000
+REG_A6XX_RB_A2D_PIXEL_CNTL = 0x00008c01
+REG_A6XX_RB_A2D_DEST_BUFFER_INFO = 0x00008c17
+A6XX_RB_A2D_DEST_BUFFER_INFO_COLOR_FORMAT__MASK = 0x000000ff
+A6XX_RB_A2D_DEST_BUFFER_INFO_COLOR_FORMAT__SHIFT = 0
+A6XX_RB_A2D_DEST_BUFFER_INFO_TILE_MODE__MASK = 0x00000300
+A6XX_RB_A2D_DEST_BUFFER_INFO_TILE_MODE__SHIFT = 8
+A6XX_RB_A2D_DEST_BUFFER_INFO_COLOR_SWAP__MASK = 0x00000c00
+A6XX_RB_A2D_DEST_BUFFER_INFO_COLOR_SWAP__SHIFT = 10
+A6XX_RB_A2D_DEST_BUFFER_INFO_FLAGS = 0x00001000
+A6XX_RB_A2D_DEST_BUFFER_INFO_SRGB = 0x00002000
+A6XX_RB_A2D_DEST_BUFFER_INFO_SAMPLES__MASK = 0x0000c000
+A6XX_RB_A2D_DEST_BUFFER_INFO_SAMPLES__SHIFT = 14
+A6XX_RB_A2D_DEST_BUFFER_INFO_MUTABLEEN = 0x00020000
+REG_A6XX_RB_A2D_DEST_BUFFER_BASE = 0x00008c18
+REG_A6XX_RB_A2D_DEST_BUFFER_PITCH = 0x00008c1a
+A6XX_RB_A2D_DEST_BUFFER_PITCH__MASK = 0x0000ffff
+A6XX_RB_A2D_DEST_BUFFER_PITCH__SHIFT = 0
+REG_A6XX_RB_A2D_DEST_BUFFER_BASE_1 = 0x00008c1b
+REG_A6XX_RB_A2D_DEST_BUFFER_PITCH_1 = 0x00008c1d
+A6XX_RB_A2D_DEST_BUFFER_PITCH_1__MASK = 0x0000ffff
+A6XX_RB_A2D_DEST_BUFFER_PITCH_1__SHIFT = 0
+REG_A6XX_RB_A2D_DEST_BUFFER_BASE_2 = 0x00008c1e
+REG_A6XX_RB_A2D_DEST_FLAG_BUFFER_BASE = 0x00008c20
+REG_A6XX_RB_A2D_DEST_FLAG_BUFFER_PITCH = 0x00008c22
+A6XX_RB_A2D_DEST_FLAG_BUFFER_PITCH__MASK = 0x000000ff
+A6XX_RB_A2D_DEST_FLAG_BUFFER_PITCH__SHIFT = 0
+REG_A6XX_RB_A2D_DEST_FLAG_BUFFER_BASE_1 = 0x00008c23
+REG_A6XX_RB_A2D_DEST_FLAG_BUFFER_PITCH_1 = 0x00008c25
+A6XX_RB_A2D_DEST_FLAG_BUFFER_PITCH_1__MASK = 0x000000ff
+A6XX_RB_A2D_DEST_FLAG_BUFFER_PITCH_1__SHIFT = 0
+REG_A6XX_RB_A2D_CLEAR_COLOR_DW0 = 0x00008c2c
+REG_A6XX_RB_A2D_CLEAR_COLOR_DW1 = 0x00008c2d
+REG_A6XX_RB_A2D_CLEAR_COLOR_DW2 = 0x00008c2e
+REG_A6XX_RB_A2D_CLEAR_COLOR_DW3 = 0x00008c2f
+REG_A7XX_RB_UNKNOWN_8C34 = 0x00008c34
+REG_A6XX_RB_UNKNOWN_8E01 = 0x00008e01
+REG_A6XX_RB_DBG_ECO_CNTL = 0x00008e04
+REG_A6XX_RB_ADDR_MODE_CNTL = 0x00008e05
+REG_A7XX_RB_CCU_DBG_ECO_CNTL = 0x00008e06
+REG_A6XX_RB_CCU_CNTL = 0x00008e07
+A6XX_RB_CCU_CNTL_GMEM_FAST_CLEAR_DISABLE = 0x00000001
+A6XX_RB_CCU_CNTL_CONCURRENT_RESOLVE = 0x00000004
+A6XX_RB_CCU_CNTL_DEPTH_OFFSET_HI__MASK = 0x00000080
+A6XX_RB_CCU_CNTL_DEPTH_OFFSET_HI__SHIFT = 7
+A6XX_RB_CCU_CNTL_COLOR_OFFSET_HI__MASK = 0x00000200
+A6XX_RB_CCU_CNTL_COLOR_OFFSET_HI__SHIFT = 9
+A6XX_RB_CCU_CNTL_DEPTH_CACHE_SIZE__MASK = 0x00000c00
+A6XX_RB_CCU_CNTL_DEPTH_CACHE_SIZE__SHIFT = 10
+A6XX_RB_CCU_CNTL_DEPTH_OFFSET__MASK = 0x001ff000
+A6XX_RB_CCU_CNTL_DEPTH_OFFSET__SHIFT = 12
+A6XX_RB_CCU_CNTL_COLOR_CACHE_SIZE__MASK = 0x00600000
+A6XX_RB_CCU_CNTL_COLOR_CACHE_SIZE__SHIFT = 21
+A6XX_RB_CCU_CNTL_COLOR_OFFSET__MASK = 0xff800000
+A6XX_RB_CCU_CNTL_COLOR_OFFSET__SHIFT = 23
+REG_A7XX_RB_CCU_CNTL = 0x00008e07
+A7XX_RB_CCU_CNTL_GMEM_FAST_CLEAR_DISABLE = 0x00000001
+A7XX_RB_CCU_CNTL_CONCURRENT_RESOLVE_MODE__MASK = 0x0000000c
+A7XX_RB_CCU_CNTL_CONCURRENT_RESOLVE_MODE__SHIFT = 2
+A7XX_RB_CCU_CNTL_CONCURRENT_UNRESOLVE_MODE__MASK = 0x00000060
+A7XX_RB_CCU_CNTL_CONCURRENT_UNRESOLVE_MODE__SHIFT = 5
+REG_A6XX_RB_NC_MODE_CNTL = 0x00008e08
+A6XX_RB_NC_MODE_CNTL_MODE = 0x00000001
+A6XX_RB_NC_MODE_CNTL_LOWER_BIT__MASK = 0x00000006
+A6XX_RB_NC_MODE_CNTL_LOWER_BIT__SHIFT = 1
+A6XX_RB_NC_MODE_CNTL_MIN_ACCESS_LENGTH = 0x00000008
+A6XX_RB_NC_MODE_CNTL_AMSBC = 0x00000010
+A6XX_RB_NC_MODE_CNTL_UPPER_BIT__MASK = 0x00000400
+A6XX_RB_NC_MODE_CNTL_UPPER_BIT__SHIFT = 10
+A6XX_RB_NC_MODE_CNTL_RGB565_PREDICATOR = 0x00000800
+A6XX_RB_NC_MODE_CNTL_UNK12__MASK = 0x00003000
+A6XX_RB_NC_MODE_CNTL_UNK12__SHIFT = 12
+REG_A7XX_RB_UNKNOWN_8E09 = 0x00008e09
+REG_A6XX_RB_PERFCTR_RB_SEL = lambda i0: (0x00008e10 + 0x1*i0 )
+REG_A6XX_RB_PERFCTR_CCU_SEL = lambda i0: (0x00008e18 + 0x1*i0 )
+REG_A6XX_RB_CMP_DBG_ECO_CNTL = 0x00008e28
+REG_A6XX_RB_PERFCTR_CMP_SEL = lambda i0: (0x00008e2c + 0x1*i0 )
+REG_A7XX_RB_PERFCTR_UFC_SEL = lambda i0: (0x00008e30 + 0x1*i0 )
+REG_A6XX_RB_RB_SUB_BLOCK_SEL_CNTL_HOST = 0x00008e3b
+REG_A6XX_RB_RB_SUB_BLOCK_SEL_CNTL_CD = 0x00008e3d
+REG_A6XX_RB_CONTEXT_SWITCH_GMEM_SAVE_RESTORE_ENABLE = 0x00008e50
+REG_A6XX_RB_CONTEXT_SWITCH_GMEM_SAVE_RESTORE_ADDR = 0x00008e51
+REG_A7XX_RB_UNKNOWN_8E79 = 0x00008e79
+REG_A6XX_VPC_GS_PARAM = 0x00009100
+A6XX_VPC_GS_PARAM_LINELENGTHLOC__MASK = 0x000000ff
+A6XX_VPC_GS_PARAM_LINELENGTHLOC__SHIFT = 0
+REG_A6XX_VPC_VS_CLIP_CULL_CNTL = 0x00009101
+A6XX_VPC_VS_CLIP_CULL_CNTL_CLIP_MASK__MASK = 0x000000ff
+A6XX_VPC_VS_CLIP_CULL_CNTL_CLIP_MASK__SHIFT = 0
+A6XX_VPC_VS_CLIP_CULL_CNTL_CLIP_DIST_03_LOC__MASK = 0x0000ff00
+A6XX_VPC_VS_CLIP_CULL_CNTL_CLIP_DIST_03_LOC__SHIFT = 8
+A6XX_VPC_VS_CLIP_CULL_CNTL_CLIP_DIST_47_LOC__MASK = 0x00ff0000
+A6XX_VPC_VS_CLIP_CULL_CNTL_CLIP_DIST_47_LOC__SHIFT = 16
+REG_A6XX_VPC_GS_CLIP_CULL_CNTL = 0x00009102
+A6XX_VPC_GS_CLIP_CULL_CNTL_CLIP_MASK__MASK = 0x000000ff
+A6XX_VPC_GS_CLIP_CULL_CNTL_CLIP_MASK__SHIFT = 0
+A6XX_VPC_GS_CLIP_CULL_CNTL_CLIP_DIST_03_LOC__MASK = 0x0000ff00
+A6XX_VPC_GS_CLIP_CULL_CNTL_CLIP_DIST_03_LOC__SHIFT = 8
+A6XX_VPC_GS_CLIP_CULL_CNTL_CLIP_DIST_47_LOC__MASK = 0x00ff0000
+A6XX_VPC_GS_CLIP_CULL_CNTL_CLIP_DIST_47_LOC__SHIFT = 16
+REG_A6XX_VPC_DS_CLIP_CULL_CNTL = 0x00009103
+A6XX_VPC_DS_CLIP_CULL_CNTL_CLIP_MASK__MASK = 0x000000ff
+A6XX_VPC_DS_CLIP_CULL_CNTL_CLIP_MASK__SHIFT = 0
+A6XX_VPC_DS_CLIP_CULL_CNTL_CLIP_DIST_03_LOC__MASK = 0x0000ff00
+A6XX_VPC_DS_CLIP_CULL_CNTL_CLIP_DIST_03_LOC__SHIFT = 8
+A6XX_VPC_DS_CLIP_CULL_CNTL_CLIP_DIST_47_LOC__MASK = 0x00ff0000
+A6XX_VPC_DS_CLIP_CULL_CNTL_CLIP_DIST_47_LOC__SHIFT = 16
+REG_A6XX_VPC_VS_CLIP_CULL_CNTL_V2 = 0x00009311
+A6XX_VPC_VS_CLIP_CULL_CNTL_V2_CLIP_MASK__MASK = 0x000000ff
+A6XX_VPC_VS_CLIP_CULL_CNTL_V2_CLIP_MASK__SHIFT = 0
+A6XX_VPC_VS_CLIP_CULL_CNTL_V2_CLIP_DIST_03_LOC__MASK = 0x0000ff00
+A6XX_VPC_VS_CLIP_CULL_CNTL_V2_CLIP_DIST_03_LOC__SHIFT = 8
+A6XX_VPC_VS_CLIP_CULL_CNTL_V2_CLIP_DIST_47_LOC__MASK = 0x00ff0000
+A6XX_VPC_VS_CLIP_CULL_CNTL_V2_CLIP_DIST_47_LOC__SHIFT = 16
+REG_A6XX_VPC_GS_CLIP_CULL_CNTL_V2 = 0x00009312
+A6XX_VPC_GS_CLIP_CULL_CNTL_V2_CLIP_MASK__MASK = 0x000000ff
+A6XX_VPC_GS_CLIP_CULL_CNTL_V2_CLIP_MASK__SHIFT = 0
+A6XX_VPC_GS_CLIP_CULL_CNTL_V2_CLIP_DIST_03_LOC__MASK = 0x0000ff00
+A6XX_VPC_GS_CLIP_CULL_CNTL_V2_CLIP_DIST_03_LOC__SHIFT = 8
+A6XX_VPC_GS_CLIP_CULL_CNTL_V2_CLIP_DIST_47_LOC__MASK = 0x00ff0000
+A6XX_VPC_GS_CLIP_CULL_CNTL_V2_CLIP_DIST_47_LOC__SHIFT = 16
+REG_A6XX_VPC_DS_CLIP_CULL_CNTL_V2 = 0x00009313
+A6XX_VPC_DS_CLIP_CULL_CNTL_V2_CLIP_MASK__MASK = 0x000000ff
+A6XX_VPC_DS_CLIP_CULL_CNTL_V2_CLIP_MASK__SHIFT = 0
+A6XX_VPC_DS_CLIP_CULL_CNTL_V2_CLIP_DIST_03_LOC__MASK = 0x0000ff00
+A6XX_VPC_DS_CLIP_CULL_CNTL_V2_CLIP_DIST_03_LOC__SHIFT = 8
+A6XX_VPC_DS_CLIP_CULL_CNTL_V2_CLIP_DIST_47_LOC__MASK = 0x00ff0000
+A6XX_VPC_DS_CLIP_CULL_CNTL_V2_CLIP_DIST_47_LOC__SHIFT = 16
+REG_A6XX_VPC_VS_SIV_CNTL = 0x00009104
+A6XX_VPC_VS_SIV_CNTL_LAYERLOC__MASK = 0x000000ff
+A6XX_VPC_VS_SIV_CNTL_LAYERLOC__SHIFT = 0
+A6XX_VPC_VS_SIV_CNTL_VIEWLOC__MASK = 0x0000ff00
+A6XX_VPC_VS_SIV_CNTL_VIEWLOC__SHIFT = 8
+A6XX_VPC_VS_SIV_CNTL_SHADINGRATELOC__MASK = 0x00ff0000
+A6XX_VPC_VS_SIV_CNTL_SHADINGRATELOC__SHIFT = 16
+REG_A6XX_VPC_GS_SIV_CNTL = 0x00009105
+A6XX_VPC_GS_SIV_CNTL_LAYERLOC__MASK = 0x000000ff
+A6XX_VPC_GS_SIV_CNTL_LAYERLOC__SHIFT = 0
+A6XX_VPC_GS_SIV_CNTL_VIEWLOC__MASK = 0x0000ff00
+A6XX_VPC_GS_SIV_CNTL_VIEWLOC__SHIFT = 8
+A6XX_VPC_GS_SIV_CNTL_SHADINGRATELOC__MASK = 0x00ff0000
+A6XX_VPC_GS_SIV_CNTL_SHADINGRATELOC__SHIFT = 16
+REG_A6XX_VPC_DS_SIV_CNTL = 0x00009106
+A6XX_VPC_DS_SIV_CNTL_LAYERLOC__MASK = 0x000000ff
+A6XX_VPC_DS_SIV_CNTL_LAYERLOC__SHIFT = 0
+A6XX_VPC_DS_SIV_CNTL_VIEWLOC__MASK = 0x0000ff00
+A6XX_VPC_DS_SIV_CNTL_VIEWLOC__SHIFT = 8
+A6XX_VPC_DS_SIV_CNTL_SHADINGRATELOC__MASK = 0x00ff0000
+A6XX_VPC_DS_SIV_CNTL_SHADINGRATELOC__SHIFT = 16
+REG_A6XX_VPC_VS_SIV_CNTL_V2 = 0x00009314
+A6XX_VPC_VS_SIV_CNTL_V2_LAYERLOC__MASK = 0x000000ff
+A6XX_VPC_VS_SIV_CNTL_V2_LAYERLOC__SHIFT = 0
+A6XX_VPC_VS_SIV_CNTL_V2_VIEWLOC__MASK = 0x0000ff00
+A6XX_VPC_VS_SIV_CNTL_V2_VIEWLOC__SHIFT = 8
+A6XX_VPC_VS_SIV_CNTL_V2_SHADINGRATELOC__MASK = 0x00ff0000
+A6XX_VPC_VS_SIV_CNTL_V2_SHADINGRATELOC__SHIFT = 16
+REG_A6XX_VPC_GS_SIV_CNTL_V2 = 0x00009315
+A6XX_VPC_GS_SIV_CNTL_V2_LAYERLOC__MASK = 0x000000ff
+A6XX_VPC_GS_SIV_CNTL_V2_LAYERLOC__SHIFT = 0
+A6XX_VPC_GS_SIV_CNTL_V2_VIEWLOC__MASK = 0x0000ff00
+A6XX_VPC_GS_SIV_CNTL_V2_VIEWLOC__SHIFT = 8
+A6XX_VPC_GS_SIV_CNTL_V2_SHADINGRATELOC__MASK = 0x00ff0000
+A6XX_VPC_GS_SIV_CNTL_V2_SHADINGRATELOC__SHIFT = 16
+REG_A6XX_VPC_DS_SIV_CNTL_V2 = 0x00009316
+A6XX_VPC_DS_SIV_CNTL_V2_LAYERLOC__MASK = 0x000000ff
+A6XX_VPC_DS_SIV_CNTL_V2_LAYERLOC__SHIFT = 0
+A6XX_VPC_DS_SIV_CNTL_V2_VIEWLOC__MASK = 0x0000ff00
+A6XX_VPC_DS_SIV_CNTL_V2_VIEWLOC__SHIFT = 8
+A6XX_VPC_DS_SIV_CNTL_V2_SHADINGRATELOC__MASK = 0x00ff0000
+A6XX_VPC_DS_SIV_CNTL_V2_SHADINGRATELOC__SHIFT = 16
+REG_A6XX_VPC_UNKNOWN_9107 = 0x00009107
+A6XX_VPC_UNKNOWN_9107_RASTER_DISCARD = 0x00000001
+A6XX_VPC_UNKNOWN_9107_UNK2 = 0x00000004
+REG_A6XX_VPC_RAST_CNTL = 0x00009108
+A6XX_VPC_RAST_CNTL_MODE__MASK = 0x00000003
+A6XX_VPC_RAST_CNTL_MODE__SHIFT = 0
+REG_A7XX_VPC_PC_CNTL = 0x00009109
+A7XX_VPC_PC_CNTL_PRIMITIVE_RESTART = 0x00000001
+A7XX_VPC_PC_CNTL_PROVOKING_VTX_LAST = 0x00000002
+A7XX_VPC_PC_CNTL_D3D_VERTEX_ORDERING = 0x00000004
+A7XX_VPC_PC_CNTL_UNK3 = 0x00000008
+REG_A7XX_VPC_GS_PARAM_0 = 0x0000910a
+A7XX_VPC_GS_PARAM_0_GS_VERTICES_OUT__MASK = 0x000000ff
+A7XX_VPC_GS_PARAM_0_GS_VERTICES_OUT__SHIFT = 0
+A7XX_VPC_GS_PARAM_0_GS_INVOCATIONS__MASK = 0x00007c00
+A7XX_VPC_GS_PARAM_0_GS_INVOCATIONS__SHIFT = 10
+A7XX_VPC_GS_PARAM_0_LINELENGTHEN = 0x00008000
+A7XX_VPC_GS_PARAM_0_GS_OUTPUT__MASK = 0x00030000
+A7XX_VPC_GS_PARAM_0_GS_OUTPUT__SHIFT = 16
+A7XX_VPC_GS_PARAM_0_UNK18 = 0x00040000
+REG_A7XX_VPC_STEREO_RENDERING_VIEWMASK = 0x0000910b
+REG_A7XX_VPC_STEREO_RENDERING_CNTL = 0x0000910c
+A7XX_VPC_STEREO_RENDERING_CNTL_ENABLE = 0x00000001
+A7XX_VPC_STEREO_RENDERING_CNTL_DISABLEMULTIPOS = 0x00000002
+A7XX_VPC_STEREO_RENDERING_CNTL_VIEWS__MASK = 0x0000007c
+A7XX_VPC_STEREO_RENDERING_CNTL_VIEWS__SHIFT = 2
+REG_A6XX_VPC_VARYING_INTERP_MODE = lambda i0: (0x00009200 + 0x1*i0 )
+REG_A6XX_VPC_VARYING_REPLACE_MODE_0 = lambda i0: (0x00009208 + 0x1*i0 )
+REG_A6XX_VPC_UNKNOWN_9210 = 0x00009210
+REG_A6XX_VPC_UNKNOWN_9211 = 0x00009211
+REG_A6XX_VPC_VARYING_LM_TRANSFER_CNTL_0 = lambda i0: (0x00009212 + 0x1*i0 )
+REG_A6XX_VPC_SO_MAPPING_WPTR = 0x00009216
+A6XX_VPC_SO_MAPPING_WPTR_ADDR__MASK = 0x000000ff
+A6XX_VPC_SO_MAPPING_WPTR_ADDR__SHIFT = 0
+A6XX_VPC_SO_MAPPING_WPTR_RESET = 0x00010000
+REG_A6XX_VPC_SO_MAPPING_PORT = 0x00009217
+A6XX_VPC_SO_MAPPING_PORT_A_BUF__MASK = 0x00000003
+A6XX_VPC_SO_MAPPING_PORT_A_BUF__SHIFT = 0
+A6XX_VPC_SO_MAPPING_PORT_A_OFF__MASK = 0x000007fc
+A6XX_VPC_SO_MAPPING_PORT_A_OFF__SHIFT = 2
+A6XX_VPC_SO_MAPPING_PORT_A_EN = 0x00000800
+A6XX_VPC_SO_MAPPING_PORT_B_BUF__MASK = 0x00003000
+A6XX_VPC_SO_MAPPING_PORT_B_BUF__SHIFT = 12
+A6XX_VPC_SO_MAPPING_PORT_B_OFF__MASK = 0x007fc000
+A6XX_VPC_SO_MAPPING_PORT_B_OFF__SHIFT = 14
+A6XX_VPC_SO_MAPPING_PORT_B_EN = 0x00800000
+REG_A6XX_VPC_SO_QUERY_BASE = 0x00009218
+REG_A6XX_VPC_SO = lambda i0: (0x0000921a + 0x7*i0 )
+REG_A6XX_VPC_REPLACE_MODE_CNTL = 0x00009236
+A6XX_VPC_REPLACE_MODE_CNTL_INVERT = 0x00000001
+REG_A6XX_VPC_UNKNOWN_9300 = 0x00009300
+REG_A6XX_VPC_VS_CNTL = 0x00009301
+A6XX_VPC_VS_CNTL_STRIDE_IN_VPC__MASK = 0x000000ff
+A6XX_VPC_VS_CNTL_STRIDE_IN_VPC__SHIFT = 0
+A6XX_VPC_VS_CNTL_POSITIONLOC__MASK = 0x0000ff00
+A6XX_VPC_VS_CNTL_POSITIONLOC__SHIFT = 8
+A6XX_VPC_VS_CNTL_PSIZELOC__MASK = 0x00ff0000
+A6XX_VPC_VS_CNTL_PSIZELOC__SHIFT = 16
+A6XX_VPC_VS_CNTL_EXTRAPOS__MASK = 0x0f000000
+A6XX_VPC_VS_CNTL_EXTRAPOS__SHIFT = 24
+REG_A6XX_VPC_GS_CNTL = 0x00009302
+A6XX_VPC_GS_CNTL_STRIDE_IN_VPC__MASK = 0x000000ff
+A6XX_VPC_GS_CNTL_STRIDE_IN_VPC__SHIFT = 0
+A6XX_VPC_GS_CNTL_POSITIONLOC__MASK = 0x0000ff00
+A6XX_VPC_GS_CNTL_POSITIONLOC__SHIFT = 8
+A6XX_VPC_GS_CNTL_PSIZELOC__MASK = 0x00ff0000
+A6XX_VPC_GS_CNTL_PSIZELOC__SHIFT = 16
+A6XX_VPC_GS_CNTL_EXTRAPOS__MASK = 0x0f000000
+A6XX_VPC_GS_CNTL_EXTRAPOS__SHIFT = 24
+REG_A6XX_VPC_DS_CNTL = 0x00009303
+A6XX_VPC_DS_CNTL_STRIDE_IN_VPC__MASK = 0x000000ff
+A6XX_VPC_DS_CNTL_STRIDE_IN_VPC__SHIFT = 0
+A6XX_VPC_DS_CNTL_POSITIONLOC__MASK = 0x0000ff00
+A6XX_VPC_DS_CNTL_POSITIONLOC__SHIFT = 8
+A6XX_VPC_DS_CNTL_PSIZELOC__MASK = 0x00ff0000
+A6XX_VPC_DS_CNTL_PSIZELOC__SHIFT = 16
+A6XX_VPC_DS_CNTL_EXTRAPOS__MASK = 0x0f000000
+A6XX_VPC_DS_CNTL_EXTRAPOS__SHIFT = 24
+REG_A6XX_VPC_PS_CNTL = 0x00009304
+A6XX_VPC_PS_CNTL_NUMNONPOSVAR__MASK = 0x000000ff
+A6XX_VPC_PS_CNTL_NUMNONPOSVAR__SHIFT = 0
+A6XX_VPC_PS_CNTL_PRIMIDLOC__MASK = 0x0000ff00
+A6XX_VPC_PS_CNTL_PRIMIDLOC__SHIFT = 8
+A6XX_VPC_PS_CNTL_VARYING = 0x00010000
+A6XX_VPC_PS_CNTL_VIEWIDLOC__MASK = 0xff000000
+A6XX_VPC_PS_CNTL_VIEWIDLOC__SHIFT = 24
+REG_A6XX_VPC_SO_CNTL = 0x00009305
+A6XX_VPC_SO_CNTL_BUF0_STREAM__MASK = 0x00000007
+A6XX_VPC_SO_CNTL_BUF0_STREAM__SHIFT = 0
+A6XX_VPC_SO_CNTL_BUF1_STREAM__MASK = 0x00000038
+A6XX_VPC_SO_CNTL_BUF1_STREAM__SHIFT = 3
+A6XX_VPC_SO_CNTL_BUF2_STREAM__MASK = 0x000001c0
+A6XX_VPC_SO_CNTL_BUF2_STREAM__SHIFT = 6
+A6XX_VPC_SO_CNTL_BUF3_STREAM__MASK = 0x00000e00
+A6XX_VPC_SO_CNTL_BUF3_STREAM__SHIFT = 9
+A6XX_VPC_SO_CNTL_STREAM_ENABLE__MASK = 0x00078000
+A6XX_VPC_SO_CNTL_STREAM_ENABLE__SHIFT = 15
+REG_A6XX_VPC_SO_OVERRIDE = 0x00009306
+A6XX_VPC_SO_OVERRIDE_DISABLE = 0x00000001
+REG_A6XX_VPC_PS_RAST_CNTL = 0x00009307
+A6XX_VPC_PS_RAST_CNTL_MODE__MASK = 0x00000003
+A6XX_VPC_PS_RAST_CNTL_MODE__SHIFT = 0
+REG_A7XX_VPC_ATTR_BUF_GMEM_SIZE = 0x00009308
+A7XX_VPC_ATTR_BUF_GMEM_SIZE_SIZE_GMEM__MASK = 0xffffffff
+A7XX_VPC_ATTR_BUF_GMEM_SIZE_SIZE_GMEM__SHIFT = 0
+REG_A7XX_VPC_ATTR_BUF_GMEM_BASE = 0x00009309
+A7XX_VPC_ATTR_BUF_GMEM_BASE_BASE_GMEM__MASK = 0xffffffff
+A7XX_VPC_ATTR_BUF_GMEM_BASE_BASE_GMEM__SHIFT = 0
+REG_A7XX_PC_ATTR_BUF_GMEM_SIZE = 0x00009b09
+A7XX_PC_ATTR_BUF_GMEM_SIZE_SIZE_GMEM__MASK = 0xffffffff
+A7XX_PC_ATTR_BUF_GMEM_SIZE_SIZE_GMEM__SHIFT = 0
+REG_A6XX_VPC_DBG_ECO_CNTL = 0x00009600
+REG_A6XX_VPC_ADDR_MODE_CNTL = 0x00009601
+REG_A6XX_VPC_UNKNOWN_9602 = 0x00009602
+REG_A6XX_VPC_UNKNOWN_9603 = 0x00009603
+REG_A6XX_VPC_PERFCTR_VPC_SEL = lambda i0: (0x00009604 + 0x1*i0 )
+REG_A7XX_VPC_PERFCTR_VPC_SEL = lambda i0: (0x0000960b + 0x1*i0 )
+REG_A6XX_PC_HS_PARAM_0 = 0x00009800
+REG_A6XX_PC_HS_PARAM_1 = 0x00009801
+A6XX_PC_HS_PARAM_1_SIZE__MASK = 0x000007ff
+A6XX_PC_HS_PARAM_1_SIZE__SHIFT = 0
+A6XX_PC_HS_PARAM_1_UNK13 = 0x00002000
+REG_A6XX_PC_DS_PARAM = 0x00009802
+A6XX_PC_DS_PARAM_SPACING__MASK = 0x00000003
+A6XX_PC_DS_PARAM_SPACING__SHIFT = 0
+A6XX_PC_DS_PARAM_OUTPUT__MASK = 0x0000000c
+A6XX_PC_DS_PARAM_OUTPUT__SHIFT = 2
+REG_A6XX_PC_RESTART_INDEX = 0x00009803
+REG_A6XX_PC_MODE_CNTL = 0x00009804
+REG_A6XX_PC_POWER_CNTL = 0x00009805
+REG_A6XX_PC_PS_CNTL = 0x00009806
+A6XX_PC_PS_CNTL_PRIMITIVEIDEN = 0x00000001
+REG_A6XX_PC_DGEN_SO_CNTL = 0x00009808
+A6XX_PC_DGEN_SO_CNTL_STREAM_ENABLE__MASK = 0x00078000
+A6XX_PC_DGEN_SO_CNTL_STREAM_ENABLE__SHIFT = 15
+REG_A6XX_PC_DGEN_SU_CONSERVATIVE_RAS_CNTL = 0x0000980a
+A6XX_PC_DGEN_SU_CONSERVATIVE_RAS_CNTL_CONSERVATIVERASEN = 0x00000001
+REG_A6XX_PC_DRAW_INITIATOR = 0x00009840
+A6XX_PC_DRAW_INITIATOR_STATE_ID__MASK = 0x000000ff
+A6XX_PC_DRAW_INITIATOR_STATE_ID__SHIFT = 0
+REG_A6XX_PC_KERNEL_INITIATOR = 0x00009841
+A6XX_PC_KERNEL_INITIATOR_STATE_ID__MASK = 0x000000ff
+A6XX_PC_KERNEL_INITIATOR_STATE_ID__SHIFT = 0
+REG_A6XX_PC_EVENT_INITIATOR = 0x00009842
+A6XX_PC_EVENT_INITIATOR_STATE_ID__MASK = 0x00ff0000
+A6XX_PC_EVENT_INITIATOR_STATE_ID__SHIFT = 16
+A6XX_PC_EVENT_INITIATOR_EVENT__MASK = 0x0000007f
+A6XX_PC_EVENT_INITIATOR_EVENT__SHIFT = 0
+REG_A6XX_PC_MARKER = 0x00009880
+REG_A6XX_PC_DGEN_RAST_CNTL = 0x00009981
+A6XX_PC_DGEN_RAST_CNTL_MODE__MASK = 0x00000003
+A6XX_PC_DGEN_RAST_CNTL_MODE__SHIFT = 0
+REG_A7XX_PC_DGEN_RAST_CNTL = 0x00009809
+A7XX_PC_DGEN_RAST_CNTL_MODE__MASK = 0x00000003
+A7XX_PC_DGEN_RAST_CNTL_MODE__SHIFT = 0
+REG_A6XX_VPC_RAST_STREAM_CNTL = 0x00009980
+A6XX_VPC_RAST_STREAM_CNTL_STREAM__MASK = 0x00000003
+A6XX_VPC_RAST_STREAM_CNTL_STREAM__SHIFT = 0
+A6XX_VPC_RAST_STREAM_CNTL_DISCARD = 0x00000004
+REG_A7XX_VPC_RAST_STREAM_CNTL = 0x00009107
+A7XX_VPC_RAST_STREAM_CNTL_STREAM__MASK = 0x00000003
+A7XX_VPC_RAST_STREAM_CNTL_STREAM__SHIFT = 0
+A7XX_VPC_RAST_STREAM_CNTL_DISCARD = 0x00000004
+REG_A7XX_VPC_RAST_STREAM_CNTL_V2 = 0x00009317
+A7XX_VPC_RAST_STREAM_CNTL_V2_STREAM__MASK = 0x00000003
+A7XX_VPC_RAST_STREAM_CNTL_V2_STREAM__SHIFT = 0
+A7XX_VPC_RAST_STREAM_CNTL_V2_DISCARD = 0x00000004
+REG_A7XX_PC_HS_BUFFER_SIZE = 0x00009885
+REG_A7XX_PC_TF_BUFFER_SIZE = 0x00009886
+REG_A6XX_PC_CNTL = 0x00009b00
+A6XX_PC_CNTL_PRIMITIVE_RESTART = 0x00000001
+A6XX_PC_CNTL_PROVOKING_VTX_LAST = 0x00000002
+A6XX_PC_CNTL_D3D_VERTEX_ORDERING = 0x00000004
+A6XX_PC_CNTL_UNK3 = 0x00000008
+REG_A6XX_PC_VS_CNTL = 0x00009b01
+A6XX_PC_VS_CNTL_STRIDE_IN_VPC__MASK = 0x000000ff
+A6XX_PC_VS_CNTL_STRIDE_IN_VPC__SHIFT = 0
+A6XX_PC_VS_CNTL_PSIZE = 0x00000100
+A6XX_PC_VS_CNTL_LAYER = 0x00000200
+A6XX_PC_VS_CNTL_VIEW = 0x00000400
+A6XX_PC_VS_CNTL_PRIMITIVE_ID = 0x00000800
+A6XX_PC_VS_CNTL_CLIP_MASK__MASK = 0x00ff0000
+A6XX_PC_VS_CNTL_CLIP_MASK__SHIFT = 16
+A6XX_PC_VS_CNTL_SHADINGRATE = 0x01000000
+REG_A6XX_PC_GS_CNTL = 0x00009b02
+A6XX_PC_GS_CNTL_STRIDE_IN_VPC__MASK = 0x000000ff
+A6XX_PC_GS_CNTL_STRIDE_IN_VPC__SHIFT = 0
+A6XX_PC_GS_CNTL_PSIZE = 0x00000100
+A6XX_PC_GS_CNTL_LAYER = 0x00000200
+A6XX_PC_GS_CNTL_VIEW = 0x00000400
+A6XX_PC_GS_CNTL_PRIMITIVE_ID = 0x00000800
+A6XX_PC_GS_CNTL_CLIP_MASK__MASK = 0x00ff0000
+A6XX_PC_GS_CNTL_CLIP_MASK__SHIFT = 16
+A6XX_PC_GS_CNTL_SHADINGRATE = 0x01000000
+REG_A6XX_PC_HS_CNTL = 0x00009b03
+A6XX_PC_HS_CNTL_STRIDE_IN_VPC__MASK = 0x000000ff
+A6XX_PC_HS_CNTL_STRIDE_IN_VPC__SHIFT = 0
+A6XX_PC_HS_CNTL_PSIZE = 0x00000100
+A6XX_PC_HS_CNTL_LAYER = 0x00000200
+A6XX_PC_HS_CNTL_VIEW = 0x00000400
+A6XX_PC_HS_CNTL_PRIMITIVE_ID = 0x00000800
+A6XX_PC_HS_CNTL_CLIP_MASK__MASK = 0x00ff0000
+A6XX_PC_HS_CNTL_CLIP_MASK__SHIFT = 16
+A6XX_PC_HS_CNTL_SHADINGRATE = 0x01000000
+REG_A6XX_PC_DS_CNTL = 0x00009b04
+A6XX_PC_DS_CNTL_STRIDE_IN_VPC__MASK = 0x000000ff
+A6XX_PC_DS_CNTL_STRIDE_IN_VPC__SHIFT = 0
+A6XX_PC_DS_CNTL_PSIZE = 0x00000100
+A6XX_PC_DS_CNTL_LAYER = 0x00000200
+A6XX_PC_DS_CNTL_VIEW = 0x00000400
+A6XX_PC_DS_CNTL_PRIMITIVE_ID = 0x00000800
+A6XX_PC_DS_CNTL_CLIP_MASK__MASK = 0x00ff0000
+A6XX_PC_DS_CNTL_CLIP_MASK__SHIFT = 16
+A6XX_PC_DS_CNTL_SHADINGRATE = 0x01000000
+REG_A6XX_PC_GS_PARAM_0 = 0x00009b05
+A6XX_PC_GS_PARAM_0_GS_VERTICES_OUT__MASK = 0x000000ff
+A6XX_PC_GS_PARAM_0_GS_VERTICES_OUT__SHIFT = 0
+A6XX_PC_GS_PARAM_0_GS_INVOCATIONS__MASK = 0x00007c00
+A6XX_PC_GS_PARAM_0_GS_INVOCATIONS__SHIFT = 10
+A6XX_PC_GS_PARAM_0_LINELENGTHEN = 0x00008000
+A6XX_PC_GS_PARAM_0_GS_OUTPUT__MASK = 0x00030000
+A6XX_PC_GS_PARAM_0_GS_OUTPUT__SHIFT = 16
+A6XX_PC_GS_PARAM_0_UNK18 = 0x00040000
+REG_A6XX_PC_PRIMITIVE_CNTL_6 = 0x00009b06
+A6XX_PC_PRIMITIVE_CNTL_6_STRIDE_IN_VPC__MASK = 0x000007ff
+A6XX_PC_PRIMITIVE_CNTL_6_STRIDE_IN_VPC__SHIFT = 0
+REG_A6XX_PC_STEREO_RENDERING_CNTL = 0x00009b07
+A6XX_PC_STEREO_RENDERING_CNTL_ENABLE = 0x00000001
+A6XX_PC_STEREO_RENDERING_CNTL_DISABLEMULTIPOS = 0x00000002
+A6XX_PC_STEREO_RENDERING_CNTL_VIEWS__MASK = 0x0000007c
+A6XX_PC_STEREO_RENDERING_CNTL_VIEWS__SHIFT = 2
+REG_A6XX_PC_STEREO_RENDERING_VIEWMASK = 0x00009b08
+REG_A6XX_PC_2D_EVENT_CMD = 0x00009c00
+A6XX_PC_2D_EVENT_CMD_EVENT__MASK = 0x0000007f
+A6XX_PC_2D_EVENT_CMD_EVENT__SHIFT = 0
+A6XX_PC_2D_EVENT_CMD_STATE_ID__MASK = 0x0000ff00
+A6XX_PC_2D_EVENT_CMD_STATE_ID__SHIFT = 8
+REG_A6XX_PC_DBG_ECO_CNTL = 0x00009e00
+REG_A6XX_PC_ADDR_MODE_CNTL = 0x00009e01
+REG_A6XX_PC_DMA_BASE = 0x00009e04
+REG_A6XX_PC_DMA_OFFSET = 0x00009e06
+REG_A6XX_PC_DMA_SIZE = 0x00009e07
+REG_A6XX_PC_TESS_BASE = 0x00009e08
+REG_A7XX_PC_TESS_BASE = 0x00009810
+REG_A6XX_PC_DRAWCALL_CNTL = 0x00009e0b
+A6XX_PC_DRAWCALL_CNTL_PRIM_TYPE__MASK = 0x0000003f
+A6XX_PC_DRAWCALL_CNTL_PRIM_TYPE__SHIFT = 0
+A6XX_PC_DRAWCALL_CNTL_SOURCE_SELECT__MASK = 0x000000c0
+A6XX_PC_DRAWCALL_CNTL_SOURCE_SELECT__SHIFT = 6
+A6XX_PC_DRAWCALL_CNTL_VIS_CULL__MASK = 0x00000300
+A6XX_PC_DRAWCALL_CNTL_VIS_CULL__SHIFT = 8
+A6XX_PC_DRAWCALL_CNTL_INDEX_SIZE__MASK = 0x00000c00
+A6XX_PC_DRAWCALL_CNTL_INDEX_SIZE__SHIFT = 10
+A6XX_PC_DRAWCALL_CNTL_PATCH_TYPE__MASK = 0x00003000
+A6XX_PC_DRAWCALL_CNTL_PATCH_TYPE__SHIFT = 12
+A6XX_PC_DRAWCALL_CNTL_GS_ENABLE = 0x00010000
+A6XX_PC_DRAWCALL_CNTL_TESS_ENABLE = 0x00020000
+REG_A6XX_PC_DRAWCALL_INSTANCE_NUM = 0x00009e0c
+REG_A6XX_PC_DRAWCALL_SIZE = 0x00009e0d
+REG_A6XX_PC_VIS_STREAM_CNTL = 0x00009e11
+A6XX_PC_VIS_STREAM_CNTL_UNK0__MASK = 0x0000ffff
+A6XX_PC_VIS_STREAM_CNTL_UNK0__SHIFT = 0
+A6XX_PC_VIS_STREAM_CNTL_VSC_SIZE__MASK = 0x003f0000
+A6XX_PC_VIS_STREAM_CNTL_VSC_SIZE__SHIFT = 16
+A6XX_PC_VIS_STREAM_CNTL_VSC_N__MASK = 0x07c00000
+A6XX_PC_VIS_STREAM_CNTL_VSC_N__SHIFT = 22
+REG_A6XX_PC_PVIS_STREAM_BIN_BASE = 0x00009e12
+REG_A6XX_PC_DVIS_STREAM_BIN_BASE = 0x00009e14
+REG_A6XX_PC_DRAWCALL_CNTL_OVERRIDE = 0x00009e1c
+A6XX_PC_DRAWCALL_CNTL_OVERRIDE_OVERRIDE = 0x00000001
+REG_A7XX_PC_UNKNOWN_9E24 = 0x00009e24
+REG_A6XX_PC_PERFCTR_PC_SEL = lambda i0: (0x00009e34 + 0x1*i0 )
+REG_A7XX_PC_PERFCTR_PC_SEL = lambda i0: (0x00009e42 + 0x1*i0 )
+REG_A6XX_PC_UNKNOWN_9E72 = 0x00009e72
+REG_A6XX_VFD_CNTL_0 = 0x0000a000
+A6XX_VFD_CNTL_0_FETCH_CNT__MASK = 0x0000003f
+A6XX_VFD_CNTL_0_FETCH_CNT__SHIFT = 0
+A6XX_VFD_CNTL_0_DECODE_CNT__MASK = 0x00003f00
+A6XX_VFD_CNTL_0_DECODE_CNT__SHIFT = 8
+REG_A6XX_VFD_CNTL_1 = 0x0000a001
+A6XX_VFD_CNTL_1_REGID4VTX__MASK = 0x000000ff
+A6XX_VFD_CNTL_1_REGID4VTX__SHIFT = 0
+A6XX_VFD_CNTL_1_REGID4INST__MASK = 0x0000ff00
+A6XX_VFD_CNTL_1_REGID4INST__SHIFT = 8
+A6XX_VFD_CNTL_1_REGID4PRIMID__MASK = 0x00ff0000
+A6XX_VFD_CNTL_1_REGID4PRIMID__SHIFT = 16
+A6XX_VFD_CNTL_1_REGID4VIEWID__MASK = 0xff000000
+A6XX_VFD_CNTL_1_REGID4VIEWID__SHIFT = 24
+REG_A6XX_VFD_CNTL_2 = 0x0000a002
+A6XX_VFD_CNTL_2_REGID_HSRELPATCHID__MASK = 0x000000ff
+A6XX_VFD_CNTL_2_REGID_HSRELPATCHID__SHIFT = 0
+A6XX_VFD_CNTL_2_REGID_INVOCATIONID__MASK = 0x0000ff00
+A6XX_VFD_CNTL_2_REGID_INVOCATIONID__SHIFT = 8
+REG_A6XX_VFD_CNTL_3 = 0x0000a003
+A6XX_VFD_CNTL_3_REGID_DSPRIMID__MASK = 0x000000ff
+A6XX_VFD_CNTL_3_REGID_DSPRIMID__SHIFT = 0
+A6XX_VFD_CNTL_3_REGID_DSRELPATCHID__MASK = 0x0000ff00
+A6XX_VFD_CNTL_3_REGID_DSRELPATCHID__SHIFT = 8
+A6XX_VFD_CNTL_3_REGID_TESSX__MASK = 0x00ff0000
+A6XX_VFD_CNTL_3_REGID_TESSX__SHIFT = 16
+A6XX_VFD_CNTL_3_REGID_TESSY__MASK = 0xff000000
+A6XX_VFD_CNTL_3_REGID_TESSY__SHIFT = 24
+REG_A6XX_VFD_CNTL_4 = 0x0000a004
+A6XX_VFD_CNTL_4_UNK0__MASK = 0x000000ff
+A6XX_VFD_CNTL_4_UNK0__SHIFT = 0
+REG_A6XX_VFD_CNTL_5 = 0x0000a005
+A6XX_VFD_CNTL_5_REGID_GSHEADER__MASK = 0x000000ff
+A6XX_VFD_CNTL_5_REGID_GSHEADER__SHIFT = 0
+A6XX_VFD_CNTL_5_UNK8__MASK = 0x0000ff00
+A6XX_VFD_CNTL_5_UNK8__SHIFT = 8
+REG_A6XX_VFD_CNTL_6 = 0x0000a006
+A6XX_VFD_CNTL_6_PRIMID4PSEN = 0x00000001
+REG_A6XX_VFD_RENDER_MODE = 0x0000a007
+A6XX_VFD_RENDER_MODE_RENDER_MODE__MASK = 0x00000007
+A6XX_VFD_RENDER_MODE_RENDER_MODE__SHIFT = 0
+REG_A6XX_VFD_STEREO_RENDERING_CNTL = 0x0000a008
+A6XX_VFD_STEREO_RENDERING_CNTL_ENABLE = 0x00000001
+A6XX_VFD_STEREO_RENDERING_CNTL_DISABLEMULTIPOS = 0x00000002
+A6XX_VFD_STEREO_RENDERING_CNTL_VIEWS__MASK = 0x0000007c
+A6XX_VFD_STEREO_RENDERING_CNTL_VIEWS__SHIFT = 2
+REG_A6XX_VFD_MODE_CNTL = 0x0000a009
+A6XX_VFD_MODE_CNTL_VERTEX = 0x00000001
+A6XX_VFD_MODE_CNTL_INSTANCE = 0x00000002
+REG_A6XX_VFD_INDEX_OFFSET = 0x0000a00e
+REG_A6XX_VFD_INSTANCE_START_OFFSET = 0x0000a00f
+REG_A6XX_VFD_VERTEX_BUFFER = lambda i0: (0x0000a010 + 0x4*i0 )
+REG_A6XX_VFD_FETCH_INSTR = lambda i0: (0x0000a090 + 0x2*i0 )
+A6XX_VFD_FETCH_INSTR_INSTR_IDX__MASK = 0x0000001f
+A6XX_VFD_FETCH_INSTR_INSTR_IDX__SHIFT = 0
+A6XX_VFD_FETCH_INSTR_INSTR_OFFSET__MASK = 0x0001ffe0
+A6XX_VFD_FETCH_INSTR_INSTR_OFFSET__SHIFT = 5
+A6XX_VFD_FETCH_INSTR_INSTR_INSTANCED = 0x00020000
+A6XX_VFD_FETCH_INSTR_INSTR_FORMAT__MASK = 0x0ff00000
+A6XX_VFD_FETCH_INSTR_INSTR_FORMAT__SHIFT = 20
+A6XX_VFD_FETCH_INSTR_INSTR_SWAP__MASK = 0x30000000
+A6XX_VFD_FETCH_INSTR_INSTR_SWAP__SHIFT = 28
+A6XX_VFD_FETCH_INSTR_INSTR_UNK30 = 0x40000000
+A6XX_VFD_FETCH_INSTR_INSTR_FLOAT = 0x80000000
+REG_A6XX_VFD_DEST_CNTL = lambda i0: (0x0000a0d0 + 0x1*i0 )
+A6XX_VFD_DEST_CNTL_INSTR_WRITEMASK__MASK = 0x0000000f
+A6XX_VFD_DEST_CNTL_INSTR_WRITEMASK__SHIFT = 0
+A6XX_VFD_DEST_CNTL_INSTR_REGID__MASK = 0x00000ff0
+A6XX_VFD_DEST_CNTL_INSTR_REGID__SHIFT = 4
+REG_A6XX_VFD_POWER_CNTL = 0x0000a0f8
+REG_A7XX_VFD_DBG_ECO_CNTL = 0x0000a600
+REG_A6XX_VFD_ADDR_MODE_CNTL = 0x0000a601
+REG_A6XX_VFD_PERFCTR_VFD_SEL = lambda i0: (0x0000a610 + 0x1*i0 )
+REG_A7XX_VFD_PERFCTR_VFD_SEL = lambda i0: (0x0000a610 + 0x1*i0 )
+REG_A6XX_SP_VS_CNTL_0 = 0x0000a800
+A6XX_SP_VS_CNTL_0_THREADMODE__MASK = 0x00000001
+A6XX_SP_VS_CNTL_0_THREADMODE__SHIFT = 0
+A6XX_SP_VS_CNTL_0_HALFREGFOOTPRINT__MASK = 0x0000007e
+A6XX_SP_VS_CNTL_0_HALFREGFOOTPRINT__SHIFT = 1
+A6XX_SP_VS_CNTL_0_FULLREGFOOTPRINT__MASK = 0x00001f80
+A6XX_SP_VS_CNTL_0_FULLREGFOOTPRINT__SHIFT = 7
+A6XX_SP_VS_CNTL_0_UNK13 = 0x00002000
+A6XX_SP_VS_CNTL_0_BRANCHSTACK__MASK = 0x000fc000
+A6XX_SP_VS_CNTL_0_BRANCHSTACK__SHIFT = 14
+A6XX_SP_VS_CNTL_0_MERGEDREGS = 0x00100000
+A6XX_SP_VS_CNTL_0_EARLYPREAMBLE = 0x00200000
+REG_A6XX_SP_VS_BOOLEAN_CF_MASK = 0x0000a801
+REG_A6XX_SP_VS_OUTPUT_CNTL = 0x0000a802
+A6XX_SP_VS_OUTPUT_CNTL_OUT__MASK = 0x0000003f
+A6XX_SP_VS_OUTPUT_CNTL_OUT__SHIFT = 0
+A6XX_SP_VS_OUTPUT_CNTL_FLAGS_REGID__MASK = 0x00003fc0
+A6XX_SP_VS_OUTPUT_CNTL_FLAGS_REGID__SHIFT = 6
+REG_A6XX_SP_VS_OUTPUT = lambda i0: (0x0000a803 + 0x1*i0 )
+A6XX_SP_VS_OUTPUT_REG_A_REGID__MASK = 0x000000ff
+A6XX_SP_VS_OUTPUT_REG_A_REGID__SHIFT = 0
+A6XX_SP_VS_OUTPUT_REG_A_COMPMASK__MASK = 0x00000f00
+A6XX_SP_VS_OUTPUT_REG_A_COMPMASK__SHIFT = 8
+A6XX_SP_VS_OUTPUT_REG_B_REGID__MASK = 0x00ff0000
+A6XX_SP_VS_OUTPUT_REG_B_REGID__SHIFT = 16
+A6XX_SP_VS_OUTPUT_REG_B_COMPMASK__MASK = 0x0f000000
+A6XX_SP_VS_OUTPUT_REG_B_COMPMASK__SHIFT = 24
+REG_A6XX_SP_VS_VPC_DEST = lambda i0: (0x0000a813 + 0x1*i0 )
+A6XX_SP_VS_VPC_DEST_REG_OUTLOC0__MASK = 0x000000ff
+A6XX_SP_VS_VPC_DEST_REG_OUTLOC0__SHIFT = 0
+A6XX_SP_VS_VPC_DEST_REG_OUTLOC1__MASK = 0x0000ff00
+A6XX_SP_VS_VPC_DEST_REG_OUTLOC1__SHIFT = 8
+A6XX_SP_VS_VPC_DEST_REG_OUTLOC2__MASK = 0x00ff0000
+A6XX_SP_VS_VPC_DEST_REG_OUTLOC2__SHIFT = 16
+A6XX_SP_VS_VPC_DEST_REG_OUTLOC3__MASK = 0xff000000
+A6XX_SP_VS_VPC_DEST_REG_OUTLOC3__SHIFT = 24
+REG_A6XX_SP_VS_PROGRAM_COUNTER_OFFSET = 0x0000a81b
+REG_A6XX_SP_VS_BASE = 0x0000a81c
+REG_A6XX_SP_VS_PVT_MEM_PARAM = 0x0000a81e
+A6XX_SP_VS_PVT_MEM_PARAM_MEMSIZEPERITEM__MASK = 0x000000ff
+A6XX_SP_VS_PVT_MEM_PARAM_MEMSIZEPERITEM__SHIFT = 0
+A6XX_SP_VS_PVT_MEM_PARAM_HWSTACKSIZEPERTHREAD__MASK = 0xff000000
+A6XX_SP_VS_PVT_MEM_PARAM_HWSTACKSIZEPERTHREAD__SHIFT = 24
+REG_A6XX_SP_VS_PVT_MEM_BASE = 0x0000a81f
+REG_A6XX_SP_VS_PVT_MEM_SIZE = 0x0000a821
+A6XX_SP_VS_PVT_MEM_SIZE_TOTALPVTMEMSIZE__MASK = 0x0003ffff
+A6XX_SP_VS_PVT_MEM_SIZE_TOTALPVTMEMSIZE__SHIFT = 0
+A6XX_SP_VS_PVT_MEM_SIZE_PERWAVEMEMLAYOUT = 0x80000000
+REG_A6XX_SP_VS_TSIZE = 0x0000a822
+REG_A6XX_SP_VS_CONFIG = 0x0000a823
+A6XX_SP_VS_CONFIG_BINDLESS_TEX = 0x00000001
+A6XX_SP_VS_CONFIG_BINDLESS_SAMP = 0x00000002
+A6XX_SP_VS_CONFIG_BINDLESS_UAV = 0x00000004
+A6XX_SP_VS_CONFIG_BINDLESS_UBO = 0x00000008
+A6XX_SP_VS_CONFIG_ENABLED = 0x00000100
+A6XX_SP_VS_CONFIG_NTEX__MASK = 0x0001fe00
+A6XX_SP_VS_CONFIG_NTEX__SHIFT = 9
+A6XX_SP_VS_CONFIG_NSAMP__MASK = 0x003e0000
+A6XX_SP_VS_CONFIG_NSAMP__SHIFT = 17
+A6XX_SP_VS_CONFIG_NUAV__MASK = 0x1fc00000
+A6XX_SP_VS_CONFIG_NUAV__SHIFT = 22
+REG_A6XX_SP_VS_INSTR_SIZE = 0x0000a824
+REG_A6XX_SP_VS_PVT_MEM_STACK_OFFSET = 0x0000a825
+A6XX_SP_VS_PVT_MEM_STACK_OFFSET_OFFSET__MASK = 0x0007ffff
+A6XX_SP_VS_PVT_MEM_STACK_OFFSET_OFFSET__SHIFT = 0
+REG_A7XX_SP_VS_VGS_CNTL = 0x0000a82d
+REG_A6XX_SP_HS_CNTL_0 = 0x0000a830
+A6XX_SP_HS_CNTL_0_THREADMODE__MASK = 0x00000001
+A6XX_SP_HS_CNTL_0_THREADMODE__SHIFT = 0
+A6XX_SP_HS_CNTL_0_HALFREGFOOTPRINT__MASK = 0x0000007e
+A6XX_SP_HS_CNTL_0_HALFREGFOOTPRINT__SHIFT = 1
+A6XX_SP_HS_CNTL_0_FULLREGFOOTPRINT__MASK = 0x00001f80
+A6XX_SP_HS_CNTL_0_FULLREGFOOTPRINT__SHIFT = 7
+A6XX_SP_HS_CNTL_0_UNK13 = 0x00002000
+A6XX_SP_HS_CNTL_0_BRANCHSTACK__MASK = 0x000fc000
+A6XX_SP_HS_CNTL_0_BRANCHSTACK__SHIFT = 14
+A6XX_SP_HS_CNTL_0_EARLYPREAMBLE = 0x00100000
+REG_A6XX_SP_HS_CNTL_1 = 0x0000a831
+REG_A6XX_SP_HS_BOOLEAN_CF_MASK = 0x0000a832
+REG_A6XX_SP_HS_PROGRAM_COUNTER_OFFSET = 0x0000a833
+REG_A6XX_SP_HS_BASE = 0x0000a834
+REG_A6XX_SP_HS_PVT_MEM_PARAM = 0x0000a836
+A6XX_SP_HS_PVT_MEM_PARAM_MEMSIZEPERITEM__MASK = 0x000000ff
+A6XX_SP_HS_PVT_MEM_PARAM_MEMSIZEPERITEM__SHIFT = 0
+A6XX_SP_HS_PVT_MEM_PARAM_HWSTACKSIZEPERTHREAD__MASK = 0xff000000
+A6XX_SP_HS_PVT_MEM_PARAM_HWSTACKSIZEPERTHREAD__SHIFT = 24
+REG_A6XX_SP_HS_PVT_MEM_BASE = 0x0000a837
+REG_A6XX_SP_HS_PVT_MEM_SIZE = 0x0000a839
+A6XX_SP_HS_PVT_MEM_SIZE_TOTALPVTMEMSIZE__MASK = 0x0003ffff
+A6XX_SP_HS_PVT_MEM_SIZE_TOTALPVTMEMSIZE__SHIFT = 0
+A6XX_SP_HS_PVT_MEM_SIZE_PERWAVEMEMLAYOUT = 0x80000000
+REG_A6XX_SP_HS_TSIZE = 0x0000a83a
+REG_A6XX_SP_HS_CONFIG = 0x0000a83b
+A6XX_SP_HS_CONFIG_BINDLESS_TEX = 0x00000001
+A6XX_SP_HS_CONFIG_BINDLESS_SAMP = 0x00000002
+A6XX_SP_HS_CONFIG_BINDLESS_UAV = 0x00000004
+A6XX_SP_HS_CONFIG_BINDLESS_UBO = 0x00000008
+A6XX_SP_HS_CONFIG_ENABLED = 0x00000100
+A6XX_SP_HS_CONFIG_NTEX__MASK = 0x0001fe00
+A6XX_SP_HS_CONFIG_NTEX__SHIFT = 9
+A6XX_SP_HS_CONFIG_NSAMP__MASK = 0x003e0000
+A6XX_SP_HS_CONFIG_NSAMP__SHIFT = 17
+A6XX_SP_HS_CONFIG_NUAV__MASK = 0x1fc00000
+A6XX_SP_HS_CONFIG_NUAV__SHIFT = 22
+REG_A6XX_SP_HS_INSTR_SIZE = 0x0000a83c
+REG_A6XX_SP_HS_PVT_MEM_STACK_OFFSET = 0x0000a83d
+A6XX_SP_HS_PVT_MEM_STACK_OFFSET_OFFSET__MASK = 0x0007ffff
+A6XX_SP_HS_PVT_MEM_STACK_OFFSET_OFFSET__SHIFT = 0
+REG_A7XX_SP_HS_VGS_CNTL = 0x0000a82f
+REG_A6XX_SP_DS_CNTL_0 = 0x0000a840
+A6XX_SP_DS_CNTL_0_THREADMODE__MASK = 0x00000001
+A6XX_SP_DS_CNTL_0_THREADMODE__SHIFT = 0
+A6XX_SP_DS_CNTL_0_HALFREGFOOTPRINT__MASK = 0x0000007e
+A6XX_SP_DS_CNTL_0_HALFREGFOOTPRINT__SHIFT = 1
+A6XX_SP_DS_CNTL_0_FULLREGFOOTPRINT__MASK = 0x00001f80
+A6XX_SP_DS_CNTL_0_FULLREGFOOTPRINT__SHIFT = 7
+A6XX_SP_DS_CNTL_0_UNK13 = 0x00002000
+A6XX_SP_DS_CNTL_0_BRANCHSTACK__MASK = 0x000fc000
+A6XX_SP_DS_CNTL_0_BRANCHSTACK__SHIFT = 14
+A6XX_SP_DS_CNTL_0_EARLYPREAMBLE = 0x00100000
+REG_A6XX_SP_DS_BOOLEAN_CF_MASK = 0x0000a841
+REG_A6XX_SP_DS_OUTPUT_CNTL = 0x0000a842
+A6XX_SP_DS_OUTPUT_CNTL_OUT__MASK = 0x0000003f
+A6XX_SP_DS_OUTPUT_CNTL_OUT__SHIFT = 0
+A6XX_SP_DS_OUTPUT_CNTL_FLAGS_REGID__MASK = 0x00003fc0
+A6XX_SP_DS_OUTPUT_CNTL_FLAGS_REGID__SHIFT = 6
+REG_A6XX_SP_DS_OUTPUT = lambda i0: (0x0000a843 + 0x1*i0 )
+A6XX_SP_DS_OUTPUT_REG_A_REGID__MASK = 0x000000ff
+A6XX_SP_DS_OUTPUT_REG_A_REGID__SHIFT = 0
+A6XX_SP_DS_OUTPUT_REG_A_COMPMASK__MASK = 0x00000f00
+A6XX_SP_DS_OUTPUT_REG_A_COMPMASK__SHIFT = 8
+A6XX_SP_DS_OUTPUT_REG_B_REGID__MASK = 0x00ff0000
+A6XX_SP_DS_OUTPUT_REG_B_REGID__SHIFT = 16
+A6XX_SP_DS_OUTPUT_REG_B_COMPMASK__MASK = 0x0f000000
+A6XX_SP_DS_OUTPUT_REG_B_COMPMASK__SHIFT = 24
+REG_A6XX_SP_DS_VPC_DEST = lambda i0: (0x0000a853 + 0x1*i0 )
+A6XX_SP_DS_VPC_DEST_REG_OUTLOC0__MASK = 0x000000ff
+A6XX_SP_DS_VPC_DEST_REG_OUTLOC0__SHIFT = 0
+A6XX_SP_DS_VPC_DEST_REG_OUTLOC1__MASK = 0x0000ff00
+A6XX_SP_DS_VPC_DEST_REG_OUTLOC1__SHIFT = 8
+A6XX_SP_DS_VPC_DEST_REG_OUTLOC2__MASK = 0x00ff0000
+A6XX_SP_DS_VPC_DEST_REG_OUTLOC2__SHIFT = 16
+A6XX_SP_DS_VPC_DEST_REG_OUTLOC3__MASK = 0xff000000
+A6XX_SP_DS_VPC_DEST_REG_OUTLOC3__SHIFT = 24
+REG_A6XX_SP_DS_PROGRAM_COUNTER_OFFSET = 0x0000a85b
+REG_A6XX_SP_DS_BASE = 0x0000a85c
+REG_A6XX_SP_DS_PVT_MEM_PARAM = 0x0000a85e
+A6XX_SP_DS_PVT_MEM_PARAM_MEMSIZEPERITEM__MASK = 0x000000ff
+A6XX_SP_DS_PVT_MEM_PARAM_MEMSIZEPERITEM__SHIFT = 0
+A6XX_SP_DS_PVT_MEM_PARAM_HWSTACKSIZEPERTHREAD__MASK = 0xff000000
+A6XX_SP_DS_PVT_MEM_PARAM_HWSTACKSIZEPERTHREAD__SHIFT = 24
+REG_A6XX_SP_DS_PVT_MEM_BASE = 0x0000a85f
+REG_A6XX_SP_DS_PVT_MEM_SIZE = 0x0000a861
+A6XX_SP_DS_PVT_MEM_SIZE_TOTALPVTMEMSIZE__MASK = 0x0003ffff
+A6XX_SP_DS_PVT_MEM_SIZE_TOTALPVTMEMSIZE__SHIFT = 0
+A6XX_SP_DS_PVT_MEM_SIZE_PERWAVEMEMLAYOUT = 0x80000000
+REG_A6XX_SP_DS_TSIZE = 0x0000a862
+REG_A6XX_SP_DS_CONFIG = 0x0000a863
+A6XX_SP_DS_CONFIG_BINDLESS_TEX = 0x00000001
+A6XX_SP_DS_CONFIG_BINDLESS_SAMP = 0x00000002
+A6XX_SP_DS_CONFIG_BINDLESS_UAV = 0x00000004
+A6XX_SP_DS_CONFIG_BINDLESS_UBO = 0x00000008
+A6XX_SP_DS_CONFIG_ENABLED = 0x00000100
+A6XX_SP_DS_CONFIG_NTEX__MASK = 0x0001fe00
+A6XX_SP_DS_CONFIG_NTEX__SHIFT = 9
+A6XX_SP_DS_CONFIG_NSAMP__MASK = 0x003e0000
+A6XX_SP_DS_CONFIG_NSAMP__SHIFT = 17
+A6XX_SP_DS_CONFIG_NUAV__MASK = 0x1fc00000
+A6XX_SP_DS_CONFIG_NUAV__SHIFT = 22
+REG_A6XX_SP_DS_INSTR_SIZE = 0x0000a864
+REG_A6XX_SP_DS_PVT_MEM_STACK_OFFSET = 0x0000a865
+A6XX_SP_DS_PVT_MEM_STACK_OFFSET_OFFSET__MASK = 0x0007ffff
+A6XX_SP_DS_PVT_MEM_STACK_OFFSET_OFFSET__SHIFT = 0
+REG_A7XX_SP_DS_VGS_CNTL = 0x0000a868
+REG_A6XX_SP_GS_CNTL_0 = 0x0000a870
+A6XX_SP_GS_CNTL_0_THREADMODE__MASK = 0x00000001
+A6XX_SP_GS_CNTL_0_THREADMODE__SHIFT = 0
+A6XX_SP_GS_CNTL_0_HALFREGFOOTPRINT__MASK = 0x0000007e
+A6XX_SP_GS_CNTL_0_HALFREGFOOTPRINT__SHIFT = 1
+A6XX_SP_GS_CNTL_0_FULLREGFOOTPRINT__MASK = 0x00001f80
+A6XX_SP_GS_CNTL_0_FULLREGFOOTPRINT__SHIFT = 7
+A6XX_SP_GS_CNTL_0_UNK13 = 0x00002000
+A6XX_SP_GS_CNTL_0_BRANCHSTACK__MASK = 0x000fc000
+A6XX_SP_GS_CNTL_0_BRANCHSTACK__SHIFT = 14
+A6XX_SP_GS_CNTL_0_EARLYPREAMBLE = 0x00100000
+REG_A6XX_SP_GS_CNTL_1 = 0x0000a871
+REG_A6XX_SP_GS_BOOLEAN_CF_MASK = 0x0000a872
+REG_A6XX_SP_GS_OUTPUT_CNTL = 0x0000a873
+A6XX_SP_GS_OUTPUT_CNTL_OUT__MASK = 0x0000003f
+A6XX_SP_GS_OUTPUT_CNTL_OUT__SHIFT = 0
+A6XX_SP_GS_OUTPUT_CNTL_FLAGS_REGID__MASK = 0x00003fc0
+A6XX_SP_GS_OUTPUT_CNTL_FLAGS_REGID__SHIFT = 6
+REG_A6XX_SP_GS_OUTPUT = lambda i0: (0x0000a874 + 0x1*i0 )
+A6XX_SP_GS_OUTPUT_REG_A_REGID__MASK = 0x000000ff
+A6XX_SP_GS_OUTPUT_REG_A_REGID__SHIFT = 0
+A6XX_SP_GS_OUTPUT_REG_A_COMPMASK__MASK = 0x00000f00
+A6XX_SP_GS_OUTPUT_REG_A_COMPMASK__SHIFT = 8
+A6XX_SP_GS_OUTPUT_REG_B_REGID__MASK = 0x00ff0000
+A6XX_SP_GS_OUTPUT_REG_B_REGID__SHIFT = 16
+A6XX_SP_GS_OUTPUT_REG_B_COMPMASK__MASK = 0x0f000000
+A6XX_SP_GS_OUTPUT_REG_B_COMPMASK__SHIFT = 24
+REG_A6XX_SP_GS_VPC_DEST = lambda i0: (0x0000a884 + 0x1*i0 )
+A6XX_SP_GS_VPC_DEST_REG_OUTLOC0__MASK = 0x000000ff
+A6XX_SP_GS_VPC_DEST_REG_OUTLOC0__SHIFT = 0
+A6XX_SP_GS_VPC_DEST_REG_OUTLOC1__MASK = 0x0000ff00
+A6XX_SP_GS_VPC_DEST_REG_OUTLOC1__SHIFT = 8
+A6XX_SP_GS_VPC_DEST_REG_OUTLOC2__MASK = 0x00ff0000
+A6XX_SP_GS_VPC_DEST_REG_OUTLOC2__SHIFT = 16
+A6XX_SP_GS_VPC_DEST_REG_OUTLOC3__MASK = 0xff000000
+A6XX_SP_GS_VPC_DEST_REG_OUTLOC3__SHIFT = 24
+REG_A6XX_SP_GS_PROGRAM_COUNTER_OFFSET = 0x0000a88c
+REG_A6XX_SP_GS_BASE = 0x0000a88d
+REG_A6XX_SP_GS_PVT_MEM_PARAM = 0x0000a88f
+A6XX_SP_GS_PVT_MEM_PARAM_MEMSIZEPERITEM__MASK = 0x000000ff
+A6XX_SP_GS_PVT_MEM_PARAM_MEMSIZEPERITEM__SHIFT = 0
+A6XX_SP_GS_PVT_MEM_PARAM_HWSTACKSIZEPERTHREAD__MASK = 0xff000000
+A6XX_SP_GS_PVT_MEM_PARAM_HWSTACKSIZEPERTHREAD__SHIFT = 24
+REG_A6XX_SP_GS_PVT_MEM_BASE = 0x0000a890
+REG_A6XX_SP_GS_PVT_MEM_SIZE = 0x0000a892
+A6XX_SP_GS_PVT_MEM_SIZE_TOTALPVTMEMSIZE__MASK = 0x0003ffff
+A6XX_SP_GS_PVT_MEM_SIZE_TOTALPVTMEMSIZE__SHIFT = 0
+A6XX_SP_GS_PVT_MEM_SIZE_PERWAVEMEMLAYOUT = 0x80000000
+REG_A6XX_SP_GS_TSIZE = 0x0000a893
+REG_A6XX_SP_GS_CONFIG = 0x0000a894
+A6XX_SP_GS_CONFIG_BINDLESS_TEX = 0x00000001
+A6XX_SP_GS_CONFIG_BINDLESS_SAMP = 0x00000002
+A6XX_SP_GS_CONFIG_BINDLESS_UAV = 0x00000004
+A6XX_SP_GS_CONFIG_BINDLESS_UBO = 0x00000008
+A6XX_SP_GS_CONFIG_ENABLED = 0x00000100
+A6XX_SP_GS_CONFIG_NTEX__MASK = 0x0001fe00
+A6XX_SP_GS_CONFIG_NTEX__SHIFT = 9
+A6XX_SP_GS_CONFIG_NSAMP__MASK = 0x003e0000
+A6XX_SP_GS_CONFIG_NSAMP__SHIFT = 17
+A6XX_SP_GS_CONFIG_NUAV__MASK = 0x1fc00000
+A6XX_SP_GS_CONFIG_NUAV__SHIFT = 22
+REG_A6XX_SP_GS_INSTR_SIZE = 0x0000a895
+REG_A6XX_SP_GS_PVT_MEM_STACK_OFFSET = 0x0000a896
+A6XX_SP_GS_PVT_MEM_STACK_OFFSET_OFFSET__MASK = 0x0007ffff
+A6XX_SP_GS_PVT_MEM_STACK_OFFSET_OFFSET__SHIFT = 0
+REG_A7XX_SP_GS_VGS_CNTL = 0x0000a899
+REG_A6XX_SP_VS_SAMPLER_BASE = 0x0000a8a0
+REG_A6XX_SP_HS_SAMPLER_BASE = 0x0000a8a2
+REG_A6XX_SP_DS_SAMPLER_BASE = 0x0000a8a4
+REG_A6XX_SP_GS_SAMPLER_BASE = 0x0000a8a6
+REG_A6XX_SP_VS_TEXMEMOBJ_BASE = 0x0000a8a8
+REG_A6XX_SP_HS_TEXMEMOBJ_BASE = 0x0000a8aa
+REG_A6XX_SP_DS_TEXMEMOBJ_BASE = 0x0000a8ac
+REG_A6XX_SP_GS_TEXMEMOBJ_BASE = 0x0000a8ae
+REG_A6XX_SP_PS_CNTL_0 = 0x0000a980
+A6XX_SP_PS_CNTL_0_THREADMODE__MASK = 0x00000001
+A6XX_SP_PS_CNTL_0_THREADMODE__SHIFT = 0
+A6XX_SP_PS_CNTL_0_HALFREGFOOTPRINT__MASK = 0x0000007e
+A6XX_SP_PS_CNTL_0_HALFREGFOOTPRINT__SHIFT = 1
+A6XX_SP_PS_CNTL_0_FULLREGFOOTPRINT__MASK = 0x00001f80
+A6XX_SP_PS_CNTL_0_FULLREGFOOTPRINT__SHIFT = 7
+A6XX_SP_PS_CNTL_0_UNK13 = 0x00002000
+A6XX_SP_PS_CNTL_0_BRANCHSTACK__MASK = 0x000fc000
+A6XX_SP_PS_CNTL_0_BRANCHSTACK__SHIFT = 14
+A6XX_SP_PS_CNTL_0_THREADSIZE__MASK = 0x00100000
+A6XX_SP_PS_CNTL_0_THREADSIZE__SHIFT = 20
+A6XX_SP_PS_CNTL_0_UNK21 = 0x00200000
+A6XX_SP_PS_CNTL_0_VARYING = 0x00400000
+A6XX_SP_PS_CNTL_0_LODPIXMASK = 0x00800000
+A6XX_SP_PS_CNTL_0_INOUTREGOVERLAP = 0x01000000
+A6XX_SP_PS_CNTL_0_UNK25 = 0x02000000
+A6XX_SP_PS_CNTL_0_PIXLODENABLE = 0x04000000
+A6XX_SP_PS_CNTL_0_UNK27 = 0x08000000
+A6XX_SP_PS_CNTL_0_EARLYPREAMBLE = 0x10000000
+A6XX_SP_PS_CNTL_0_MERGEDREGS = 0x80000000
+REG_A6XX_SP_PS_BOOLEAN_CF_MASK = 0x0000a981
+REG_A6XX_SP_PS_PROGRAM_COUNTER_OFFSET = 0x0000a982
+REG_A6XX_SP_PS_BASE = 0x0000a983
+REG_A6XX_SP_PS_PVT_MEM_PARAM = 0x0000a985
+A6XX_SP_PS_PVT_MEM_PARAM_MEMSIZEPERITEM__MASK = 0x000000ff
+A6XX_SP_PS_PVT_MEM_PARAM_MEMSIZEPERITEM__SHIFT = 0
+A6XX_SP_PS_PVT_MEM_PARAM_HWSTACKSIZEPERTHREAD__MASK = 0xff000000
+A6XX_SP_PS_PVT_MEM_PARAM_HWSTACKSIZEPERTHREAD__SHIFT = 24
+REG_A6XX_SP_PS_PVT_MEM_BASE = 0x0000a986
+REG_A6XX_SP_PS_PVT_MEM_SIZE = 0x0000a988
+A6XX_SP_PS_PVT_MEM_SIZE_TOTALPVTMEMSIZE__MASK = 0x0003ffff
+A6XX_SP_PS_PVT_MEM_SIZE_TOTALPVTMEMSIZE__SHIFT = 0
+A6XX_SP_PS_PVT_MEM_SIZE_PERWAVEMEMLAYOUT = 0x80000000
+REG_A6XX_SP_BLEND_CNTL = 0x0000a989
+A6XX_SP_BLEND_CNTL_ENABLE_BLEND__MASK = 0x000000ff
+A6XX_SP_BLEND_CNTL_ENABLE_BLEND__SHIFT = 0
+A6XX_SP_BLEND_CNTL_UNK8 = 0x00000100
+A6XX_SP_BLEND_CNTL_DUAL_COLOR_IN_ENABLE = 0x00000200
+A6XX_SP_BLEND_CNTL_ALPHA_TO_COVERAGE = 0x00000400
+REG_A6XX_SP_SRGB_CNTL = 0x0000a98a
+A6XX_SP_SRGB_CNTL_SRGB_MRT0 = 0x00000001
+A6XX_SP_SRGB_CNTL_SRGB_MRT1 = 0x00000002
+A6XX_SP_SRGB_CNTL_SRGB_MRT2 = 0x00000004
+A6XX_SP_SRGB_CNTL_SRGB_MRT3 = 0x00000008
+A6XX_SP_SRGB_CNTL_SRGB_MRT4 = 0x00000010
+A6XX_SP_SRGB_CNTL_SRGB_MRT5 = 0x00000020
+A6XX_SP_SRGB_CNTL_SRGB_MRT6 = 0x00000040
+A6XX_SP_SRGB_CNTL_SRGB_MRT7 = 0x00000080
+REG_A6XX_SP_PS_OUTPUT_MASK = 0x0000a98b
+A6XX_SP_PS_OUTPUT_MASK_RT0__MASK = 0x0000000f
+A6XX_SP_PS_OUTPUT_MASK_RT0__SHIFT = 0
+A6XX_SP_PS_OUTPUT_MASK_RT1__MASK = 0x000000f0
+A6XX_SP_PS_OUTPUT_MASK_RT1__SHIFT = 4
+A6XX_SP_PS_OUTPUT_MASK_RT2__MASK = 0x00000f00
+A6XX_SP_PS_OUTPUT_MASK_RT2__SHIFT = 8
+A6XX_SP_PS_OUTPUT_MASK_RT3__MASK = 0x0000f000
+A6XX_SP_PS_OUTPUT_MASK_RT3__SHIFT = 12
+A6XX_SP_PS_OUTPUT_MASK_RT4__MASK = 0x000f0000
+A6XX_SP_PS_OUTPUT_MASK_RT4__SHIFT = 16
+A6XX_SP_PS_OUTPUT_MASK_RT5__MASK = 0x00f00000
+A6XX_SP_PS_OUTPUT_MASK_RT5__SHIFT = 20
+A6XX_SP_PS_OUTPUT_MASK_RT6__MASK = 0x0f000000
+A6XX_SP_PS_OUTPUT_MASK_RT6__SHIFT = 24
+A6XX_SP_PS_OUTPUT_MASK_RT7__MASK = 0xf0000000
+A6XX_SP_PS_OUTPUT_MASK_RT7__SHIFT = 28
+REG_A6XX_SP_PS_OUTPUT_CNTL = 0x0000a98c
+A6XX_SP_PS_OUTPUT_CNTL_DUAL_COLOR_IN_ENABLE = 0x00000001
+A6XX_SP_PS_OUTPUT_CNTL_DEPTH_REGID__MASK = 0x0000ff00
+A6XX_SP_PS_OUTPUT_CNTL_DEPTH_REGID__SHIFT = 8
+A6XX_SP_PS_OUTPUT_CNTL_SAMPMASK_REGID__MASK = 0x00ff0000
+A6XX_SP_PS_OUTPUT_CNTL_SAMPMASK_REGID__SHIFT = 16
+A6XX_SP_PS_OUTPUT_CNTL_STENCILREF_REGID__MASK = 0xff000000
+A6XX_SP_PS_OUTPUT_CNTL_STENCILREF_REGID__SHIFT = 24
+REG_A6XX_SP_PS_MRT_CNTL = 0x0000a98d
+A6XX_SP_PS_MRT_CNTL_MRT__MASK = 0x0000000f
+A6XX_SP_PS_MRT_CNTL_MRT__SHIFT = 0
+REG_A6XX_SP_PS_OUTPUT = lambda i0: (0x0000a98e + 0x1*i0 )
+A6XX_SP_PS_OUTPUT_REG_REGID__MASK = 0x000000ff
+A6XX_SP_PS_OUTPUT_REG_REGID__SHIFT = 0
+A6XX_SP_PS_OUTPUT_REG_HALF_PRECISION = 0x00000100
+REG_A6XX_SP_PS_MRT = lambda i0: (0x0000a996 + 0x1*i0 )
+A6XX_SP_PS_MRT_REG_COLOR_FORMAT__MASK = 0x000000ff
+A6XX_SP_PS_MRT_REG_COLOR_FORMAT__SHIFT = 0
+A6XX_SP_PS_MRT_REG_COLOR_SINT = 0x00000100
+A6XX_SP_PS_MRT_REG_COLOR_UINT = 0x00000200
+A6XX_SP_PS_MRT_REG_UNK10 = 0x00000400
+REG_A6XX_SP_PS_INITIAL_TEX_LOAD_CNTL = 0x0000a99e
+A6XX_SP_PS_INITIAL_TEX_LOAD_CNTL_COUNT__MASK = 0x00000007
+A6XX_SP_PS_INITIAL_TEX_LOAD_CNTL_COUNT__SHIFT = 0
+A6XX_SP_PS_INITIAL_TEX_LOAD_CNTL_IJ_WRITE_DISABLE = 0x00000008
+A6XX_SP_PS_INITIAL_TEX_LOAD_CNTL_ENDOFQUAD = 0x00000010
+A6XX_SP_PS_INITIAL_TEX_LOAD_CNTL_WRITE_COLOR_TO_OUTPUT = 0x00000020
+A6XX_SP_PS_INITIAL_TEX_LOAD_CNTL_CONSTSLOTID__MASK = 0x00007fc0
+A6XX_SP_PS_INITIAL_TEX_LOAD_CNTL_CONSTSLOTID__SHIFT = 6
+A6XX_SP_PS_INITIAL_TEX_LOAD_CNTL_CONSTSLOTID4COORD__MASK = 0x01ff0000
+A6XX_SP_PS_INITIAL_TEX_LOAD_CNTL_CONSTSLOTID4COORD__SHIFT = 16
+REG_A6XX_SP_PS_INITIAL_TEX_LOAD = lambda i0: (0x0000a99f + 0x1*i0 )
+A6XX_SP_PS_INITIAL_TEX_LOAD_CMD_SRC__MASK = 0x0000007f
+A6XX_SP_PS_INITIAL_TEX_LOAD_CMD_SRC__SHIFT = 0
+A6XX_SP_PS_INITIAL_TEX_LOAD_CMD_SAMP_ID__MASK = 0x00000780
+A6XX_SP_PS_INITIAL_TEX_LOAD_CMD_SAMP_ID__SHIFT = 7
+A6XX_SP_PS_INITIAL_TEX_LOAD_CMD_TEX_ID__MASK = 0x0000f800
+A6XX_SP_PS_INITIAL_TEX_LOAD_CMD_TEX_ID__SHIFT = 11
+A6XX_SP_PS_INITIAL_TEX_LOAD_CMD_DST__MASK = 0x003f0000
+A6XX_SP_PS_INITIAL_TEX_LOAD_CMD_DST__SHIFT = 16
+A6XX_SP_PS_INITIAL_TEX_LOAD_CMD_WRMASK__MASK = 0x03c00000
+A6XX_SP_PS_INITIAL_TEX_LOAD_CMD_WRMASK__SHIFT = 22
+A6XX_SP_PS_INITIAL_TEX_LOAD_CMD_HALF = 0x04000000
+A6XX_SP_PS_INITIAL_TEX_LOAD_CMD_UNK27 = 0x08000000
+A6XX_SP_PS_INITIAL_TEX_LOAD_CMD_BINDLESS = 0x10000000
+A6XX_SP_PS_INITIAL_TEX_LOAD_CMD_CMD__MASK = 0xe0000000
+A6XX_SP_PS_INITIAL_TEX_LOAD_CMD_CMD__SHIFT = 29
+REG_A7XX_SP_PS_INITIAL_TEX_LOAD = lambda i0: (0x0000a99f + 0x1*i0 )
+A7XX_SP_PS_INITIAL_TEX_LOAD_CMD_SRC__MASK = 0x0000007f
+A7XX_SP_PS_INITIAL_TEX_LOAD_CMD_SRC__SHIFT = 0
+A7XX_SP_PS_INITIAL_TEX_LOAD_CMD_SAMP_ID__MASK = 0x00000380
+A7XX_SP_PS_INITIAL_TEX_LOAD_CMD_SAMP_ID__SHIFT = 7
+A7XX_SP_PS_INITIAL_TEX_LOAD_CMD_TEX_ID__MASK = 0x00001c00
+A7XX_SP_PS_INITIAL_TEX_LOAD_CMD_TEX_ID__SHIFT = 10
+A7XX_SP_PS_INITIAL_TEX_LOAD_CMD_DST__MASK = 0x0007e000
+A7XX_SP_PS_INITIAL_TEX_LOAD_CMD_DST__SHIFT = 13
+A7XX_SP_PS_INITIAL_TEX_LOAD_CMD_WRMASK__MASK = 0x00780000
+A7XX_SP_PS_INITIAL_TEX_LOAD_CMD_WRMASK__SHIFT = 19
+A7XX_SP_PS_INITIAL_TEX_LOAD_CMD_HALF = 0x00800000
+A7XX_SP_PS_INITIAL_TEX_LOAD_CMD_BINDLESS = 0x02000000
+A7XX_SP_PS_INITIAL_TEX_LOAD_CMD_CMD__MASK = 0x3c000000
+A7XX_SP_PS_INITIAL_TEX_LOAD_CMD_CMD__SHIFT = 26
+REG_A6XX_SP_PS_INITIAL_TEX_INDEX = lambda i0: (0x0000a9a3 + 0x1*i0 )
+A6XX_SP_PS_INITIAL_TEX_INDEX_CMD_SAMP_ID__MASK = 0x0000ffff
+A6XX_SP_PS_INITIAL_TEX_INDEX_CMD_SAMP_ID__SHIFT = 0
+A6XX_SP_PS_INITIAL_TEX_INDEX_CMD_TEX_ID__MASK = 0xffff0000
+A6XX_SP_PS_INITIAL_TEX_INDEX_CMD_TEX_ID__SHIFT = 16
+REG_A6XX_SP_PS_TSIZE = 0x0000a9a7
+REG_A6XX_SP_UNKNOWN_A9A8 = 0x0000a9a8
+REG_A6XX_SP_PS_PVT_MEM_STACK_OFFSET = 0x0000a9a9
+A6XX_SP_PS_PVT_MEM_STACK_OFFSET_OFFSET__MASK = 0x0007ffff
+A6XX_SP_PS_PVT_MEM_STACK_OFFSET_OFFSET__SHIFT = 0
+REG_A7XX_SP_PS_UNKNOWN_A9AB = 0x0000a9ab
+REG_A6XX_SP_CS_CNTL_0 = 0x0000a9b0
+A6XX_SP_CS_CNTL_0_THREADMODE__MASK = 0x00000001
+A6XX_SP_CS_CNTL_0_THREADMODE__SHIFT = 0
+A6XX_SP_CS_CNTL_0_HALFREGFOOTPRINT__MASK = 0x0000007e
+A6XX_SP_CS_CNTL_0_HALFREGFOOTPRINT__SHIFT = 1
+A6XX_SP_CS_CNTL_0_FULLREGFOOTPRINT__MASK = 0x00001f80
+A6XX_SP_CS_CNTL_0_FULLREGFOOTPRINT__SHIFT = 7
+A6XX_SP_CS_CNTL_0_UNK13 = 0x00002000
+A6XX_SP_CS_CNTL_0_BRANCHSTACK__MASK = 0x000fc000
+A6XX_SP_CS_CNTL_0_BRANCHSTACK__SHIFT = 14
+A6XX_SP_CS_CNTL_0_THREADSIZE__MASK = 0x00100000
+A6XX_SP_CS_CNTL_0_THREADSIZE__SHIFT = 20
+A6XX_SP_CS_CNTL_0_UNK21 = 0x00200000
+A6XX_SP_CS_CNTL_0_UNK22 = 0x00400000
+A6XX_SP_CS_CNTL_0_EARLYPREAMBLE = 0x00800000
+A6XX_SP_CS_CNTL_0_MERGEDREGS = 0x80000000
+REG_A6XX_SP_CS_CNTL_1 = 0x0000a9b1
+A6XX_SP_CS_CNTL_1_SHARED_SIZE__MASK = 0x0000001f
+A6XX_SP_CS_CNTL_1_SHARED_SIZE__SHIFT = 0
+A6XX_SP_CS_CNTL_1_CONSTANTRAMMODE__MASK = 0x00000060
+A6XX_SP_CS_CNTL_1_CONSTANTRAMMODE__SHIFT = 5
+REG_A6XX_SP_CS_BOOLEAN_CF_MASK = 0x0000a9b2
+REG_A6XX_SP_CS_PROGRAM_COUNTER_OFFSET = 0x0000a9b3
+REG_A6XX_SP_CS_BASE = 0x0000a9b4
+REG_A6XX_SP_CS_PVT_MEM_PARAM = 0x0000a9b6
+A6XX_SP_CS_PVT_MEM_PARAM_MEMSIZEPERITEM__MASK = 0x000000ff
+A6XX_SP_CS_PVT_MEM_PARAM_MEMSIZEPERITEM__SHIFT = 0
+A6XX_SP_CS_PVT_MEM_PARAM_HWSTACKSIZEPERTHREAD__MASK = 0xff000000
+A6XX_SP_CS_PVT_MEM_PARAM_HWSTACKSIZEPERTHREAD__SHIFT = 24
+REG_A6XX_SP_CS_PVT_MEM_BASE = 0x0000a9b7
+REG_A6XX_SP_CS_PVT_MEM_SIZE = 0x0000a9b9
+A6XX_SP_CS_PVT_MEM_SIZE_TOTALPVTMEMSIZE__MASK = 0x0003ffff
+A6XX_SP_CS_PVT_MEM_SIZE_TOTALPVTMEMSIZE__SHIFT = 0
+A6XX_SP_CS_PVT_MEM_SIZE_PERWAVEMEMLAYOUT = 0x80000000
+REG_A6XX_SP_CS_TSIZE = 0x0000a9ba
+REG_A6XX_SP_CS_CONFIG = 0x0000a9bb
+A6XX_SP_CS_CONFIG_BINDLESS_TEX = 0x00000001
+A6XX_SP_CS_CONFIG_BINDLESS_SAMP = 0x00000002
+A6XX_SP_CS_CONFIG_BINDLESS_UAV = 0x00000004
+A6XX_SP_CS_CONFIG_BINDLESS_UBO = 0x00000008
+A6XX_SP_CS_CONFIG_ENABLED = 0x00000100
+A6XX_SP_CS_CONFIG_NTEX__MASK = 0x0001fe00
+A6XX_SP_CS_CONFIG_NTEX__SHIFT = 9
+A6XX_SP_CS_CONFIG_NSAMP__MASK = 0x003e0000
+A6XX_SP_CS_CONFIG_NSAMP__SHIFT = 17
+A6XX_SP_CS_CONFIG_NUAV__MASK = 0x1fc00000
+A6XX_SP_CS_CONFIG_NUAV__SHIFT = 22
+REG_A6XX_SP_CS_INSTR_SIZE = 0x0000a9bc
+REG_A6XX_SP_CS_PVT_MEM_STACK_OFFSET = 0x0000a9bd
+A6XX_SP_CS_PVT_MEM_STACK_OFFSET_OFFSET__MASK = 0x0007ffff
+A6XX_SP_CS_PVT_MEM_STACK_OFFSET_OFFSET__SHIFT = 0
+REG_A7XX_SP_CS_UNKNOWN_A9BE = 0x0000a9be
+REG_A7XX_SP_CS_VGS_CNTL = 0x0000a9c5
+REG_A6XX_SP_CS_WIE_CNTL_0 = 0x0000a9c2
+A6XX_SP_CS_WIE_CNTL_0_WGIDCONSTID__MASK = 0x000000ff
+A6XX_SP_CS_WIE_CNTL_0_WGIDCONSTID__SHIFT = 0
+A6XX_SP_CS_WIE_CNTL_0_WGSIZECONSTID__MASK = 0x0000ff00
+A6XX_SP_CS_WIE_CNTL_0_WGSIZECONSTID__SHIFT = 8
+A6XX_SP_CS_WIE_CNTL_0_WGOFFSETCONSTID__MASK = 0x00ff0000
+A6XX_SP_CS_WIE_CNTL_0_WGOFFSETCONSTID__SHIFT = 16
+A6XX_SP_CS_WIE_CNTL_0_LOCALIDREGID__MASK = 0xff000000
+A6XX_SP_CS_WIE_CNTL_0_LOCALIDREGID__SHIFT = 24
+REG_A6XX_SP_CS_WIE_CNTL_1 = 0x0000a9c3
+A6XX_SP_CS_WIE_CNTL_1_LINEARLOCALIDREGID__MASK = 0x000000ff
+A6XX_SP_CS_WIE_CNTL_1_LINEARLOCALIDREGID__SHIFT = 0
+A6XX_SP_CS_WIE_CNTL_1_SINGLE_SP_CORE = 0x00000100
+A6XX_SP_CS_WIE_CNTL_1_THREADSIZE__MASK = 0x00000200
+A6XX_SP_CS_WIE_CNTL_1_THREADSIZE__SHIFT = 9
+A6XX_SP_CS_WIE_CNTL_1_THREADSIZE_SCALAR = 0x00000400
+REG_A7XX_SP_CS_WIE_CNTL_1 = 0x0000a9c3
+A7XX_SP_CS_WIE_CNTL_1_LINEARLOCALIDREGID__MASK = 0x000000ff
+A7XX_SP_CS_WIE_CNTL_1_LINEARLOCALIDREGID__SHIFT = 0
+A7XX_SP_CS_WIE_CNTL_1_THREADSIZE__MASK = 0x00000100
+A7XX_SP_CS_WIE_CNTL_1_THREADSIZE__SHIFT = 8
+A7XX_SP_CS_WIE_CNTL_1_THREADSIZE_SCALAR = 0x00000200
+A7XX_SP_CS_WIE_CNTL_1_WORKITEMRASTORDER__MASK = 0x00008000
+A7XX_SP_CS_WIE_CNTL_1_WORKITEMRASTORDER__SHIFT = 15
+REG_A6XX_SP_PS_SAMPLER_BASE = 0x0000a9e0
+REG_A6XX_SP_CS_SAMPLER_BASE = 0x0000a9e2
+REG_A6XX_SP_PS_TEXMEMOBJ_BASE = 0x0000a9e4
+REG_A6XX_SP_CS_TEXMEMOBJ_BASE = 0x0000a9e6
+REG_A6XX_SP_CS_BINDLESS_BASE = lambda i0: (0x0000a9e8 + 0x2*i0 )
+A6XX_SP_CS_BINDLESS_BASE_DESCRIPTOR_DESC_SIZE__MASK = 0x00000003
+A6XX_SP_CS_BINDLESS_BASE_DESCRIPTOR_DESC_SIZE__SHIFT = 0
+A6XX_SP_CS_BINDLESS_BASE_DESCRIPTOR_ADDR__MASK = 0xfffffffffffffffc
+A6XX_SP_CS_BINDLESS_BASE_DESCRIPTOR_ADDR__SHIFT = 2
+REG_A7XX_SP_CS_BINDLESS_BASE = lambda i0: (0x0000a9e8 + 0x2*i0 )
+A7XX_SP_CS_BINDLESS_BASE_DESCRIPTOR_DESC_SIZE__MASK = 0x00000003
+A7XX_SP_CS_BINDLESS_BASE_DESCRIPTOR_DESC_SIZE__SHIFT = 0
+A7XX_SP_CS_BINDLESS_BASE_DESCRIPTOR_ADDR__MASK = 0xfffffffffffffffc
+A7XX_SP_CS_BINDLESS_BASE_DESCRIPTOR_ADDR__SHIFT = 2
+REG_A6XX_SP_CS_UAV_BASE = 0x0000a9f2
+REG_A7XX_SP_CS_UAV_BASE = 0x0000a9f8
+REG_A6XX_SP_CS_USIZE = 0x0000aa00
+REG_A7XX_SP_PS_VGS_CNTL = 0x0000aa01
+REG_A7XX_SP_PS_OUTPUT_CONST_CNTL = 0x0000aa02
+A7XX_SP_PS_OUTPUT_CONST_CNTL_ENABLED = 0x00000001
+REG_A7XX_SP_PS_OUTPUT_CONST_MASK = 0x0000aa03
+A7XX_SP_PS_OUTPUT_CONST_MASK_RT0__MASK = 0x0000000f
+A7XX_SP_PS_OUTPUT_CONST_MASK_RT0__SHIFT = 0
+A7XX_SP_PS_OUTPUT_CONST_MASK_RT1__MASK = 0x000000f0
+A7XX_SP_PS_OUTPUT_CONST_MASK_RT1__SHIFT = 4
+A7XX_SP_PS_OUTPUT_CONST_MASK_RT2__MASK = 0x00000f00
+A7XX_SP_PS_OUTPUT_CONST_MASK_RT2__SHIFT = 8
+A7XX_SP_PS_OUTPUT_CONST_MASK_RT3__MASK = 0x0000f000
+A7XX_SP_PS_OUTPUT_CONST_MASK_RT3__SHIFT = 12
+A7XX_SP_PS_OUTPUT_CONST_MASK_RT4__MASK = 0x000f0000
+A7XX_SP_PS_OUTPUT_CONST_MASK_RT4__SHIFT = 16
+A7XX_SP_PS_OUTPUT_CONST_MASK_RT5__MASK = 0x00f00000
+A7XX_SP_PS_OUTPUT_CONST_MASK_RT5__SHIFT = 20
+A7XX_SP_PS_OUTPUT_CONST_MASK_RT6__MASK = 0x0f000000
+A7XX_SP_PS_OUTPUT_CONST_MASK_RT6__SHIFT = 24
+A7XX_SP_PS_OUTPUT_CONST_MASK_RT7__MASK = 0xf0000000
+A7XX_SP_PS_OUTPUT_CONST_MASK_RT7__SHIFT = 28
+REG_A6XX_SP_UNKNOWN_AAF2 = 0x0000aaf2
+REG_A6XX_SP_MODE_CNTL = 0x0000ab00
+A6XX_SP_MODE_CNTL_CONSTANT_DEMOTION_ENABLE = 0x00000001
+A6XX_SP_MODE_CNTL_ISAMMODE__MASK = 0x00000006
+A6XX_SP_MODE_CNTL_ISAMMODE__SHIFT = 1
+A6XX_SP_MODE_CNTL_SHARED_CONSTS_ENABLE = 0x00000008
+REG_A7XX_SP_UNKNOWN_AB01 = 0x0000ab01
+REG_A7XX_SP_UNKNOWN_AB02 = 0x0000ab02
+REG_A6XX_SP_PS_CONFIG = 0x0000ab04
+A6XX_SP_PS_CONFIG_BINDLESS_TEX = 0x00000001
+A6XX_SP_PS_CONFIG_BINDLESS_SAMP = 0x00000002
+A6XX_SP_PS_CONFIG_BINDLESS_UAV = 0x00000004
+A6XX_SP_PS_CONFIG_BINDLESS_UBO = 0x00000008
+A6XX_SP_PS_CONFIG_ENABLED = 0x00000100
+A6XX_SP_PS_CONFIG_NTEX__MASK = 0x0001fe00
+A6XX_SP_PS_CONFIG_NTEX__SHIFT = 9
+A6XX_SP_PS_CONFIG_NSAMP__MASK = 0x003e0000
+A6XX_SP_PS_CONFIG_NSAMP__SHIFT = 17
+A6XX_SP_PS_CONFIG_NUAV__MASK = 0x1fc00000
+A6XX_SP_PS_CONFIG_NUAV__SHIFT = 22
+REG_A6XX_SP_PS_INSTR_SIZE = 0x0000ab05
+REG_A6XX_SP_GFX_BINDLESS_BASE = lambda i0: (0x0000ab10 + 0x2*i0 )
+A6XX_SP_GFX_BINDLESS_BASE_DESCRIPTOR_DESC_SIZE__MASK = 0x00000003
+A6XX_SP_GFX_BINDLESS_BASE_DESCRIPTOR_DESC_SIZE__SHIFT = 0
+A6XX_SP_GFX_BINDLESS_BASE_DESCRIPTOR_ADDR__MASK = 0xfffffffffffffffc
+A6XX_SP_GFX_BINDLESS_BASE_DESCRIPTOR_ADDR__SHIFT = 2
+REG_A7XX_SP_GFX_BINDLESS_BASE = lambda i0: (0x0000ab0a + 0x2*i0 )
+A7XX_SP_GFX_BINDLESS_BASE_DESCRIPTOR_DESC_SIZE__MASK = 0x00000003
+A7XX_SP_GFX_BINDLESS_BASE_DESCRIPTOR_DESC_SIZE__SHIFT = 0
+A7XX_SP_GFX_BINDLESS_BASE_DESCRIPTOR_ADDR__MASK = 0xfffffffffffffffc
+A7XX_SP_GFX_BINDLESS_BASE_DESCRIPTOR_ADDR__SHIFT = 2
+REG_A6XX_SP_GFX_UAV_BASE = 0x0000ab1a
+REG_A6XX_SP_GFX_USIZE = 0x0000ab20
+REG_A7XX_SP_UNKNOWN_AB22 = 0x0000ab22
+REG_A6XX_SP_A2D_OUTPUT_INFO = 0x0000acc0
+A6XX_SP_A2D_OUTPUT_INFO_HALF_PRECISION = 0x00000001
+A6XX_SP_A2D_OUTPUT_INFO_IFMT_TYPE__MASK = 0x00000006
+A6XX_SP_A2D_OUTPUT_INFO_IFMT_TYPE__SHIFT = 1
+A6XX_SP_A2D_OUTPUT_INFO_COLOR_FORMAT__MASK = 0x000007f8
+A6XX_SP_A2D_OUTPUT_INFO_COLOR_FORMAT__SHIFT = 3
+A6XX_SP_A2D_OUTPUT_INFO_SRGB = 0x00000800
+A6XX_SP_A2D_OUTPUT_INFO_MASK__MASK = 0x0000f000
+A6XX_SP_A2D_OUTPUT_INFO_MASK__SHIFT = 12
+REG_A7XX_SP_A2D_OUTPUT_INFO = 0x0000a9bf
+A7XX_SP_A2D_OUTPUT_INFO_HALF_PRECISION = 0x00000001
+A7XX_SP_A2D_OUTPUT_INFO_IFMT_TYPE__MASK = 0x00000006
+A7XX_SP_A2D_OUTPUT_INFO_IFMT_TYPE__SHIFT = 1
+A7XX_SP_A2D_OUTPUT_INFO_COLOR_FORMAT__MASK = 0x000007f8
+A7XX_SP_A2D_OUTPUT_INFO_COLOR_FORMAT__SHIFT = 3
+A7XX_SP_A2D_OUTPUT_INFO_SRGB = 0x00000800
+A7XX_SP_A2D_OUTPUT_INFO_MASK__MASK = 0x0000f000
+A7XX_SP_A2D_OUTPUT_INFO_MASK__SHIFT = 12
+REG_A6XX_SP_DBG_ECO_CNTL = 0x0000ae00
+REG_A6XX_SP_ADDR_MODE_CNTL = 0x0000ae01
+REG_A6XX_SP_NC_MODE_CNTL = 0x0000ae02
+REG_A6XX_SP_CHICKEN_BITS = 0x0000ae03
+REG_A6XX_SP_NC_MODE_CNTL_2 = 0x0000ae04
+A6XX_SP_NC_MODE_CNTL_2_F16_NO_INF = 0x00000008
+REG_A7XX_SP_UNKNOWN_AE06 = 0x0000ae06
+REG_A7XX_SP_CHICKEN_BITS_1 = 0x0000ae08
+REG_A7XX_SP_CHICKEN_BITS_2 = 0x0000ae09
+REG_A7XX_SP_CHICKEN_BITS_3 = 0x0000ae0a
+REG_A6XX_SP_PERFCTR_SHADER_MASK = 0x0000ae0f
+A6XX_SP_PERFCTR_SHADER_MASK_VS = 0x00000001
+A6XX_SP_PERFCTR_SHADER_MASK_HS = 0x00000002
+A6XX_SP_PERFCTR_SHADER_MASK_DS = 0x00000004
+A6XX_SP_PERFCTR_SHADER_MASK_GS = 0x00000008
+A6XX_SP_PERFCTR_SHADER_MASK_FS = 0x00000010
+A6XX_SP_PERFCTR_SHADER_MASK_CS = 0x00000020
+REG_A6XX_SP_PERFCTR_SP_SEL = lambda i0: (0x0000ae10 + 0x1*i0 )
+REG_A7XX_SP_PERFCTR_HLSQ_SEL = lambda i0: (0x0000ae60 + 0x1*i0 )
+REG_A7XX_SP_UNKNOWN_AE6A = 0x0000ae6a
+REG_A7XX_SP_UNKNOWN_AE6B = 0x0000ae6b
+REG_A7XX_SP_HLSQ_DBG_ECO_CNTL = 0x0000ae6c
+REG_A7XX_SP_READ_SEL = 0x0000ae6d
+A7XX_SP_READ_SEL_LOCATION__MASK = 0x000c0000
+A7XX_SP_READ_SEL_LOCATION__SHIFT = 18
+A7XX_SP_READ_SEL_PIPE__MASK = 0x00030000
+A7XX_SP_READ_SEL_PIPE__SHIFT = 16
+A7XX_SP_READ_SEL_STATETYPE__MASK = 0x0000ff00
+A7XX_SP_READ_SEL_STATETYPE__SHIFT = 8
+A7XX_SP_READ_SEL_USPTP__MASK = 0x000000f0
+A7XX_SP_READ_SEL_USPTP__SHIFT = 4
+A7XX_SP_READ_SEL_SPTP__MASK = 0x0000000f
+A7XX_SP_READ_SEL_SPTP__SHIFT = 0
+REG_A7XX_SP_DBG_CNTL = 0x0000ae71
+REG_A7XX_SP_UNKNOWN_AE73 = 0x0000ae73
+REG_A7XX_SP_PERFCTR_SP_SEL = lambda i0: (0x0000ae80 + 0x1*i0 )
+REG_A6XX_SP_CONTEXT_SWITCH_GFX_PREEMPTION_SAFE_MODE = 0x0000be22
+REG_A6XX_TPL1_CS_BORDER_COLOR_BASE = 0x0000b180
+REG_A6XX_SP_UNKNOWN_B182 = 0x0000b182
+REG_A6XX_SP_UNKNOWN_B183 = 0x0000b183
+REG_A6XX_SP_UNKNOWN_B190 = 0x0000b190
+REG_A6XX_SP_UNKNOWN_B191 = 0x0000b191
+REG_A6XX_TPL1_RAS_MSAA_CNTL = 0x0000b300
+A6XX_TPL1_RAS_MSAA_CNTL_SAMPLES__MASK = 0x00000003
+A6XX_TPL1_RAS_MSAA_CNTL_SAMPLES__SHIFT = 0
+A6XX_TPL1_RAS_MSAA_CNTL_UNK2__MASK = 0x0000000c
+A6XX_TPL1_RAS_MSAA_CNTL_UNK2__SHIFT = 2
+REG_A6XX_TPL1_DEST_MSAA_CNTL = 0x0000b301
+A6XX_TPL1_DEST_MSAA_CNTL_SAMPLES__MASK = 0x00000003
+A6XX_TPL1_DEST_MSAA_CNTL_SAMPLES__SHIFT = 0
+A6XX_TPL1_DEST_MSAA_CNTL_MSAA_DISABLE = 0x00000004
+REG_A6XX_TPL1_GFX_BORDER_COLOR_BASE = 0x0000b302
+REG_A6XX_TPL1_MSAA_SAMPLE_POS_CNTL = 0x0000b304
+A6XX_TPL1_MSAA_SAMPLE_POS_CNTL_UNK0 = 0x00000001
+A6XX_TPL1_MSAA_SAMPLE_POS_CNTL_LOCATION_ENABLE = 0x00000002
+REG_A6XX_TPL1_PROGRAMMABLE_MSAA_POS_0 = 0x0000b305
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_0_SAMPLE_0_X__MASK = 0x0000000f
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_0_SAMPLE_0_X__SHIFT = 0
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_0_SAMPLE_0_Y__MASK = 0x000000f0
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_0_SAMPLE_0_Y__SHIFT = 4
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_0_SAMPLE_1_X__MASK = 0x00000f00
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_0_SAMPLE_1_X__SHIFT = 8
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_0_SAMPLE_1_Y__MASK = 0x0000f000
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_0_SAMPLE_1_Y__SHIFT = 12
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_0_SAMPLE_2_X__MASK = 0x000f0000
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_0_SAMPLE_2_X__SHIFT = 16
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_0_SAMPLE_2_Y__MASK = 0x00f00000
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_0_SAMPLE_2_Y__SHIFT = 20
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_0_SAMPLE_3_X__MASK = 0x0f000000
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_0_SAMPLE_3_X__SHIFT = 24
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_0_SAMPLE_3_Y__MASK = 0xf0000000
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_0_SAMPLE_3_Y__SHIFT = 28
+REG_A6XX_TPL1_PROGRAMMABLE_MSAA_POS_1 = 0x0000b306
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_1_SAMPLE_0_X__MASK = 0x0000000f
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_1_SAMPLE_0_X__SHIFT = 0
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_1_SAMPLE_0_Y__MASK = 0x000000f0
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_1_SAMPLE_0_Y__SHIFT = 4
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_1_SAMPLE_1_X__MASK = 0x00000f00
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_1_SAMPLE_1_X__SHIFT = 8
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_1_SAMPLE_1_Y__MASK = 0x0000f000
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_1_SAMPLE_1_Y__SHIFT = 12
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_1_SAMPLE_2_X__MASK = 0x000f0000
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_1_SAMPLE_2_X__SHIFT = 16
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_1_SAMPLE_2_Y__MASK = 0x00f00000
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_1_SAMPLE_2_Y__SHIFT = 20
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_1_SAMPLE_3_X__MASK = 0x0f000000
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_1_SAMPLE_3_X__SHIFT = 24
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_1_SAMPLE_3_Y__MASK = 0xf0000000
+A6XX_TPL1_PROGRAMMABLE_MSAA_POS_1_SAMPLE_3_Y__SHIFT = 28
+REG_A6XX_TPL1_WINDOW_OFFSET = 0x0000b307
+A6XX_TPL1_WINDOW_OFFSET_X__MASK = 0x00003fff
+A6XX_TPL1_WINDOW_OFFSET_X__SHIFT = 0
+A6XX_TPL1_WINDOW_OFFSET_Y__MASK = 0x3fff0000
+A6XX_TPL1_WINDOW_OFFSET_Y__SHIFT = 16
+REG_A6XX_TPL1_MODE_CNTL = 0x0000b309
+A6XX_TPL1_MODE_CNTL_ISAMMODE__MASK = 0x00000003
+A6XX_TPL1_MODE_CNTL_ISAMMODE__SHIFT = 0
+A6XX_TPL1_MODE_CNTL_TEXCOORDROUNDMODE__MASK = 0x00000004
+A6XX_TPL1_MODE_CNTL_TEXCOORDROUNDMODE__SHIFT = 2
+A6XX_TPL1_MODE_CNTL_NEARESTMIPSNAP__MASK = 0x00000020
+A6XX_TPL1_MODE_CNTL_NEARESTMIPSNAP__SHIFT = 5
+A6XX_TPL1_MODE_CNTL_DESTDATATYPEOVERRIDE = 0x00000080
+REG_A7XX_SP_UNKNOWN_B310 = 0x0000b310
+REG_A6XX_TPL1_A2D_SRC_TEXTURE_INFO = 0x0000b4c0
+A6XX_TPL1_A2D_SRC_TEXTURE_INFO_COLOR_FORMAT__MASK = 0x000000ff
+A6XX_TPL1_A2D_SRC_TEXTURE_INFO_COLOR_FORMAT__SHIFT = 0
+A6XX_TPL1_A2D_SRC_TEXTURE_INFO_TILE_MODE__MASK = 0x00000300
+A6XX_TPL1_A2D_SRC_TEXTURE_INFO_TILE_MODE__SHIFT = 8
+A6XX_TPL1_A2D_SRC_TEXTURE_INFO_COLOR_SWAP__MASK = 0x00000c00
+A6XX_TPL1_A2D_SRC_TEXTURE_INFO_COLOR_SWAP__SHIFT = 10
+A6XX_TPL1_A2D_SRC_TEXTURE_INFO_FLAGS = 0x00001000
+A6XX_TPL1_A2D_SRC_TEXTURE_INFO_SRGB = 0x00002000
+A6XX_TPL1_A2D_SRC_TEXTURE_INFO_SAMPLES__MASK = 0x0000c000
+A6XX_TPL1_A2D_SRC_TEXTURE_INFO_SAMPLES__SHIFT = 14
+A6XX_TPL1_A2D_SRC_TEXTURE_INFO_FILTER = 0x00010000
+A6XX_TPL1_A2D_SRC_TEXTURE_INFO_UNK17 = 0x00020000
+A6XX_TPL1_A2D_SRC_TEXTURE_INFO_SAMPLES_AVERAGE = 0x00040000
+A6XX_TPL1_A2D_SRC_TEXTURE_INFO_UNK19 = 0x00080000
+A6XX_TPL1_A2D_SRC_TEXTURE_INFO_UNK20 = 0x00100000
+A6XX_TPL1_A2D_SRC_TEXTURE_INFO_UNK21 = 0x00200000
+A6XX_TPL1_A2D_SRC_TEXTURE_INFO_UNK22 = 0x00400000
+A6XX_TPL1_A2D_SRC_TEXTURE_INFO_UNK23__MASK = 0x07800000
+A6XX_TPL1_A2D_SRC_TEXTURE_INFO_UNK23__SHIFT = 23
+A6XX_TPL1_A2D_SRC_TEXTURE_INFO_UNK28 = 0x10000000
+A6XX_TPL1_A2D_SRC_TEXTURE_INFO_MUTABLEEN = 0x20000000
+REG_A6XX_TPL1_A2D_SRC_TEXTURE_SIZE = 0x0000b4c1
+A6XX_TPL1_A2D_SRC_TEXTURE_SIZE_WIDTH__MASK = 0x00007fff
+A6XX_TPL1_A2D_SRC_TEXTURE_SIZE_WIDTH__SHIFT = 0
+A6XX_TPL1_A2D_SRC_TEXTURE_SIZE_HEIGHT__MASK = 0x3fff8000
+A6XX_TPL1_A2D_SRC_TEXTURE_SIZE_HEIGHT__SHIFT = 15
+REG_A6XX_TPL1_A2D_SRC_TEXTURE_BASE = 0x0000b4c2
+REG_A6XX_TPL1_A2D_SRC_TEXTURE_PITCH = 0x0000b4c4
+A6XX_TPL1_A2D_SRC_TEXTURE_PITCH_UNK0__MASK = 0x000001ff
+A6XX_TPL1_A2D_SRC_TEXTURE_PITCH_UNK0__SHIFT = 0
+A6XX_TPL1_A2D_SRC_TEXTURE_PITCH_PITCH__MASK = 0x00fffe00
+A6XX_TPL1_A2D_SRC_TEXTURE_PITCH_PITCH__SHIFT = 9
+REG_A7XX_TPL1_A2D_SRC_TEXTURE_INFO = 0x0000b2c0
+A7XX_TPL1_A2D_SRC_TEXTURE_INFO_COLOR_FORMAT__MASK = 0x000000ff
+A7XX_TPL1_A2D_SRC_TEXTURE_INFO_COLOR_FORMAT__SHIFT = 0
+A7XX_TPL1_A2D_SRC_TEXTURE_INFO_TILE_MODE__MASK = 0x00000300
+A7XX_TPL1_A2D_SRC_TEXTURE_INFO_TILE_MODE__SHIFT = 8
+A7XX_TPL1_A2D_SRC_TEXTURE_INFO_COLOR_SWAP__MASK = 0x00000c00
+A7XX_TPL1_A2D_SRC_TEXTURE_INFO_COLOR_SWAP__SHIFT = 10
+A7XX_TPL1_A2D_SRC_TEXTURE_INFO_FLAGS = 0x00001000
+A7XX_TPL1_A2D_SRC_TEXTURE_INFO_SRGB = 0x00002000
+A7XX_TPL1_A2D_SRC_TEXTURE_INFO_SAMPLES__MASK = 0x0000c000
+A7XX_TPL1_A2D_SRC_TEXTURE_INFO_SAMPLES__SHIFT = 14
+A7XX_TPL1_A2D_SRC_TEXTURE_INFO_FILTER = 0x00010000
+A7XX_TPL1_A2D_SRC_TEXTURE_INFO_UNK17 = 0x00020000
+A7XX_TPL1_A2D_SRC_TEXTURE_INFO_SAMPLES_AVERAGE = 0x00040000
+A7XX_TPL1_A2D_SRC_TEXTURE_INFO_UNK19 = 0x00080000
+A7XX_TPL1_A2D_SRC_TEXTURE_INFO_UNK20 = 0x00100000
+A7XX_TPL1_A2D_SRC_TEXTURE_INFO_UNK21 = 0x00200000
+A7XX_TPL1_A2D_SRC_TEXTURE_INFO_UNK22 = 0x00400000
+A7XX_TPL1_A2D_SRC_TEXTURE_INFO_UNK23__MASK = 0x07800000
+A7XX_TPL1_A2D_SRC_TEXTURE_INFO_UNK23__SHIFT = 23
+A7XX_TPL1_A2D_SRC_TEXTURE_INFO_UNK28 = 0x10000000
+A7XX_TPL1_A2D_SRC_TEXTURE_INFO_MUTABLEEN = 0x20000000
+REG_A7XX_TPL1_A2D_SRC_TEXTURE_SIZE = 0x0000b2c1
+A7XX_TPL1_A2D_SRC_TEXTURE_SIZE_WIDTH__MASK = 0x00007fff
+A7XX_TPL1_A2D_SRC_TEXTURE_SIZE_WIDTH__SHIFT = 0
+A7XX_TPL1_A2D_SRC_TEXTURE_SIZE_HEIGHT__MASK = 0x3fff8000
+A7XX_TPL1_A2D_SRC_TEXTURE_SIZE_HEIGHT__SHIFT = 15
+REG_A7XX_TPL1_A2D_SRC_TEXTURE_BASE = 0x0000b2c2
+REG_A7XX_TPL1_A2D_SRC_TEXTURE_PITCH = 0x0000b2c4
+A7XX_TPL1_A2D_SRC_TEXTURE_PITCH_PITCH__MASK = 0x00fffff8
+A7XX_TPL1_A2D_SRC_TEXTURE_PITCH_PITCH__SHIFT = 3
+REG_A6XX_TPL1_A2D_SRC_TEXTURE_BASE_1 = 0x0000b4c5
+REG_A6XX_TPL1_A2D_SRC_TEXTURE_PITCH_1 = 0x0000b4c7
+A6XX_TPL1_A2D_SRC_TEXTURE_PITCH_1__MASK = 0x00000fff
+A6XX_TPL1_A2D_SRC_TEXTURE_PITCH_1__SHIFT = 0
+REG_A6XX_TPL1_A2D_SRC_TEXTURE_BASE_2 = 0x0000b4c8
+REG_A7XX_TPL1_A2D_SRC_TEXTURE_BASE_1 = 0x0000b2c5
+REG_A7XX_TPL1_A2D_SRC_TEXTURE_PITCH_1 = 0x0000b2c7
+A7XX_TPL1_A2D_SRC_TEXTURE_PITCH_1__MASK = 0x00000fff
+A7XX_TPL1_A2D_SRC_TEXTURE_PITCH_1__SHIFT = 0
+REG_A7XX_TPL1_A2D_SRC_TEXTURE_BASE_2 = 0x0000b2c8
+REG_A6XX_TPL1_A2D_SRC_TEXTURE_FLAG_BASE = 0x0000b4ca
+REG_A6XX_TPL1_A2D_SRC_TEXTURE_FLAG_PITCH = 0x0000b4cc
+A6XX_TPL1_A2D_SRC_TEXTURE_FLAG_PITCH__MASK = 0x000000ff
+A6XX_TPL1_A2D_SRC_TEXTURE_FLAG_PITCH__SHIFT = 0
+REG_A7XX_TPL1_A2D_SRC_TEXTURE_FLAG_BASE = 0x0000b2ca
+REG_A7XX_TPL1_A2D_SRC_TEXTURE_FLAG_PITCH = 0x0000b2cc
+A7XX_TPL1_A2D_SRC_TEXTURE_FLAG_PITCH__MASK = 0x000000ff
+A7XX_TPL1_A2D_SRC_TEXTURE_FLAG_PITCH__SHIFT = 0
+REG_A6XX_SP_PS_UNKNOWN_B4CD = 0x0000b4cd
+REG_A6XX_SP_PS_UNKNOWN_B4CE = 0x0000b4ce
+REG_A6XX_SP_PS_UNKNOWN_B4CF = 0x0000b4cf
+REG_A6XX_SP_PS_UNKNOWN_B4D0 = 0x0000b4d0
+REG_A6XX_SP_WINDOW_OFFSET = 0x0000b4d1
+A6XX_SP_WINDOW_OFFSET_X__MASK = 0x00003fff
+A6XX_SP_WINDOW_OFFSET_X__SHIFT = 0
+A6XX_SP_WINDOW_OFFSET_Y__MASK = 0x3fff0000
+A6XX_SP_WINDOW_OFFSET_Y__SHIFT = 16
+REG_A7XX_SP_PS_UNKNOWN_B4CD = 0x0000b2cd
+REG_A7XX_SP_PS_UNKNOWN_B4CE = 0x0000b2ce
+REG_A7XX_SP_PS_UNKNOWN_B4CF = 0x0000b2cf
+REG_A7XX_SP_PS_UNKNOWN_B4D0 = 0x0000b2d0
+REG_A7XX_TPL1_A2D_WINDOW_OFFSET = 0x0000b2d1
+A7XX_TPL1_A2D_WINDOW_OFFSET_X__MASK = 0x00003fff
+A7XX_TPL1_A2D_WINDOW_OFFSET_X__SHIFT = 0
+A7XX_TPL1_A2D_WINDOW_OFFSET_Y__MASK = 0x3fff0000
+A7XX_TPL1_A2D_WINDOW_OFFSET_Y__SHIFT = 16
+REG_A7XX_TPL1_A2D_BLT_CNTL = 0x0000b2d2
+A7XX_TPL1_A2D_BLT_CNTL_RAW_COPY = 0x00000001
+A7XX_TPL1_A2D_BLT_CNTL_START_OFFSET_TEXELS__MASK = 0x003f0000
+A7XX_TPL1_A2D_BLT_CNTL_START_OFFSET_TEXELS__SHIFT = 16
+A7XX_TPL1_A2D_BLT_CNTL_TYPE__MASK = 0xe0000000
+A7XX_TPL1_A2D_BLT_CNTL_TYPE__SHIFT = 29
+REG_A7XX_SP_WINDOW_OFFSET = 0x0000ab21
+A7XX_SP_WINDOW_OFFSET_X__MASK = 0x00003fff
+A7XX_SP_WINDOW_OFFSET_X__SHIFT = 0
+A7XX_SP_WINDOW_OFFSET_Y__MASK = 0x3fff0000
+A7XX_SP_WINDOW_OFFSET_Y__SHIFT = 16
+REG_A6XX_TPL1_DBG_ECO_CNTL = 0x0000b600
+REG_A6XX_TPL1_ADDR_MODE_CNTL = 0x0000b601
+REG_A6XX_TPL1_DBG_ECO_CNTL1 = 0x0000b602
+A6XX_TPL1_DBG_ECO_CNTL1_TP_UBWC_FLAG_HINT = 0x00040000
+REG_A6XX_TPL1_NC_MODE_CNTL = 0x0000b604
+A6XX_TPL1_NC_MODE_CNTL_MODE = 0x00000001
+A6XX_TPL1_NC_MODE_CNTL_LOWER_BIT__MASK = 0x00000006
+A6XX_TPL1_NC_MODE_CNTL_LOWER_BIT__SHIFT = 1
+A6XX_TPL1_NC_MODE_CNTL_MIN_ACCESS_LENGTH = 0x00000008
+A6XX_TPL1_NC_MODE_CNTL_UPPER_BIT__MASK = 0x00000010
+A6XX_TPL1_NC_MODE_CNTL_UPPER_BIT__SHIFT = 4
+A6XX_TPL1_NC_MODE_CNTL_UNK6__MASK = 0x000000c0
+A6XX_TPL1_NC_MODE_CNTL_UNK6__SHIFT = 6
+REG_A6XX_TPL1_UNKNOWN_B605 = 0x0000b605
+REG_A6XX_TPL1_BICUBIC_WEIGHTS_TABLE_0 = 0x0000b608
+REG_A6XX_TPL1_BICUBIC_WEIGHTS_TABLE_1 = 0x0000b609
+REG_A6XX_TPL1_BICUBIC_WEIGHTS_TABLE_2 = 0x0000b60a
+REG_A6XX_TPL1_BICUBIC_WEIGHTS_TABLE_3 = 0x0000b60b
+REG_A6XX_TPL1_BICUBIC_WEIGHTS_TABLE_4 = 0x0000b60c
+REG_A7XX_TPL1_BICUBIC_WEIGHTS_TABLE_0 = 0x0000b608
+REG_A7XX_TPL1_BICUBIC_WEIGHTS_TABLE_1 = 0x0000b609
+REG_A7XX_TPL1_BICUBIC_WEIGHTS_TABLE_2 = 0x0000b60a
+REG_A7XX_TPL1_BICUBIC_WEIGHTS_TABLE_3 = 0x0000b60b
+REG_A7XX_TPL1_BICUBIC_WEIGHTS_TABLE_4 = 0x0000b60c
+REG_A6XX_TPL1_PERFCTR_TP_SEL = lambda i0: (0x0000b610 + 0x1*i0 )
+REG_A7XX_TPL1_PERFCTR_TP_SEL = lambda i0: (0x0000b610 + 0x1*i0 )
+REG_A6XX_SP_VS_CONST_CONFIG = 0x0000b800
+A6XX_SP_VS_CONST_CONFIG_CONSTLEN__MASK = 0x000000ff
+A6XX_SP_VS_CONST_CONFIG_CONSTLEN__SHIFT = 0
+A6XX_SP_VS_CONST_CONFIG_ENABLED = 0x00000100
+A6XX_SP_VS_CONST_CONFIG_READ_IMM_SHARED_CONSTS = 0x00000200
+REG_A6XX_SP_HS_CONST_CONFIG = 0x0000b801
+A6XX_SP_HS_CONST_CONFIG_CONSTLEN__MASK = 0x000000ff
+A6XX_SP_HS_CONST_CONFIG_CONSTLEN__SHIFT = 0
+A6XX_SP_HS_CONST_CONFIG_ENABLED = 0x00000100
+A6XX_SP_HS_CONST_CONFIG_READ_IMM_SHARED_CONSTS = 0x00000200
+REG_A6XX_SP_DS_CONST_CONFIG = 0x0000b802
+A6XX_SP_DS_CONST_CONFIG_CONSTLEN__MASK = 0x000000ff
+A6XX_SP_DS_CONST_CONFIG_CONSTLEN__SHIFT = 0
+A6XX_SP_DS_CONST_CONFIG_ENABLED = 0x00000100
+A6XX_SP_DS_CONST_CONFIG_READ_IMM_SHARED_CONSTS = 0x00000200
+REG_A6XX_SP_GS_CONST_CONFIG = 0x0000b803
+A6XX_SP_GS_CONST_CONFIG_CONSTLEN__MASK = 0x000000ff
+A6XX_SP_GS_CONST_CONFIG_CONSTLEN__SHIFT = 0
+A6XX_SP_GS_CONST_CONFIG_ENABLED = 0x00000100
+A6XX_SP_GS_CONST_CONFIG_READ_IMM_SHARED_CONSTS = 0x00000200
+REG_A7XX_SP_VS_CONST_CONFIG = 0x0000a827
+A7XX_SP_VS_CONST_CONFIG_CONSTLEN__MASK = 0x000000ff
+A7XX_SP_VS_CONST_CONFIG_CONSTLEN__SHIFT = 0
+A7XX_SP_VS_CONST_CONFIG_ENABLED = 0x00000100
+A7XX_SP_VS_CONST_CONFIG_READ_IMM_SHARED_CONSTS = 0x00000200
+REG_A7XX_SP_HS_CONST_CONFIG = 0x0000a83f
+A7XX_SP_HS_CONST_CONFIG_CONSTLEN__MASK = 0x000000ff
+A7XX_SP_HS_CONST_CONFIG_CONSTLEN__SHIFT = 0
+A7XX_SP_HS_CONST_CONFIG_ENABLED = 0x00000100
+A7XX_SP_HS_CONST_CONFIG_READ_IMM_SHARED_CONSTS = 0x00000200
+REG_A7XX_SP_DS_CONST_CONFIG = 0x0000a867
+A7XX_SP_DS_CONST_CONFIG_CONSTLEN__MASK = 0x000000ff
+A7XX_SP_DS_CONST_CONFIG_CONSTLEN__SHIFT = 0
+A7XX_SP_DS_CONST_CONFIG_ENABLED = 0x00000100
+A7XX_SP_DS_CONST_CONFIG_READ_IMM_SHARED_CONSTS = 0x00000200
+REG_A7XX_SP_GS_CONST_CONFIG = 0x0000a898
+A7XX_SP_GS_CONST_CONFIG_CONSTLEN__MASK = 0x000000ff
+A7XX_SP_GS_CONST_CONFIG_CONSTLEN__SHIFT = 0
+A7XX_SP_GS_CONST_CONFIG_ENABLED = 0x00000100
+A7XX_SP_GS_CONST_CONFIG_READ_IMM_SHARED_CONSTS = 0x00000200
+REG_A7XX_SP_RENDER_CNTL = 0x0000a9aa
+A7XX_SP_RENDER_CNTL_FS_DISABLE = 0x00000001
+REG_A7XX_SP_DITHER_CNTL = 0x0000a9ac
+A7XX_SP_DITHER_CNTL_DITHER_MODE_MRT0__MASK = 0x00000003
+A7XX_SP_DITHER_CNTL_DITHER_MODE_MRT0__SHIFT = 0
+A7XX_SP_DITHER_CNTL_DITHER_MODE_MRT1__MASK = 0x0000000c
+A7XX_SP_DITHER_CNTL_DITHER_MODE_MRT1__SHIFT = 2
+A7XX_SP_DITHER_CNTL_DITHER_MODE_MRT2__MASK = 0x00000030
+A7XX_SP_DITHER_CNTL_DITHER_MODE_MRT2__SHIFT = 4
+A7XX_SP_DITHER_CNTL_DITHER_MODE_MRT3__MASK = 0x000000c0
+A7XX_SP_DITHER_CNTL_DITHER_MODE_MRT3__SHIFT = 6
+A7XX_SP_DITHER_CNTL_DITHER_MODE_MRT4__MASK = 0x00000300
+A7XX_SP_DITHER_CNTL_DITHER_MODE_MRT4__SHIFT = 8
+A7XX_SP_DITHER_CNTL_DITHER_MODE_MRT5__MASK = 0x00000c00
+A7XX_SP_DITHER_CNTL_DITHER_MODE_MRT5__SHIFT = 10
+A7XX_SP_DITHER_CNTL_DITHER_MODE_MRT6__MASK = 0x00003000
+A7XX_SP_DITHER_CNTL_DITHER_MODE_MRT6__SHIFT = 12
+A7XX_SP_DITHER_CNTL_DITHER_MODE_MRT7__MASK = 0x0000c000
+A7XX_SP_DITHER_CNTL_DITHER_MODE_MRT7__SHIFT = 14
+REG_A7XX_SP_VRS_CONFIG = 0x0000a9ad
+A7XX_SP_VRS_CONFIG_PIPELINE_FSR_ENABLE = 0x00000001
+A7XX_SP_VRS_CONFIG_ATTACHMENT_FSR_ENABLE = 0x00000002
+A7XX_SP_VRS_CONFIG_PRIMITIVE_FSR_ENABLE = 0x00000008
+REG_A7XX_SP_PS_CNTL_1 = 0x0000a9ae
+A7XX_SP_PS_CNTL_1_SYSVAL_REGS_COUNT__MASK = 0x000000ff
+A7XX_SP_PS_CNTL_1_SYSVAL_REGS_COUNT__SHIFT = 0
+A7XX_SP_PS_CNTL_1_UNK8 = 0x00000100
+A7XX_SP_PS_CNTL_1_UNK9 = 0x00000200
+REG_A6XX_HLSQ_LOAD_STATE_GEOM_CMD = 0x0000b820
+REG_A6XX_HLSQ_LOAD_STATE_GEOM_EXT_SRC_ADDR = 0x0000b821
+REG_A6XX_HLSQ_LOAD_STATE_GEOM_DATA = 0x0000b823
+REG_A6XX_SP_PS_WAVE_CNTL = 0x0000b980
+A6XX_SP_PS_WAVE_CNTL_THREADSIZE__MASK = 0x00000001
+A6XX_SP_PS_WAVE_CNTL_THREADSIZE__SHIFT = 0
+A6XX_SP_PS_WAVE_CNTL_VARYINGS = 0x00000002
+A6XX_SP_PS_WAVE_CNTL_UNK2__MASK = 0x00000ffc
+A6XX_SP_PS_WAVE_CNTL_UNK2__SHIFT = 2
+REG_A6XX_HLSQ_UNKNOWN_B981 = 0x0000b981
+REG_A6XX_SP_LB_PARAM_LIMIT = 0x0000b982
+A6XX_SP_LB_PARAM_LIMIT_PRIMALLOCTHRESHOLD__MASK = 0x00000007
+A6XX_SP_LB_PARAM_LIMIT_PRIMALLOCTHRESHOLD__SHIFT = 0
+REG_A6XX_SP_REG_PROG_ID_0 = 0x0000b983
+A6XX_SP_REG_PROG_ID_0_FACEREGID__MASK = 0x000000ff
+A6XX_SP_REG_PROG_ID_0_FACEREGID__SHIFT = 0
+A6XX_SP_REG_PROG_ID_0_SAMPLEID__MASK = 0x0000ff00
+A6XX_SP_REG_PROG_ID_0_SAMPLEID__SHIFT = 8
+A6XX_SP_REG_PROG_ID_0_SAMPLEMASK__MASK = 0x00ff0000
+A6XX_SP_REG_PROG_ID_0_SAMPLEMASK__SHIFT = 16
+A6XX_SP_REG_PROG_ID_0_CENTERRHW__MASK = 0xff000000
+A6XX_SP_REG_PROG_ID_0_CENTERRHW__SHIFT = 24
+REG_A6XX_SP_REG_PROG_ID_1 = 0x0000b984
+A6XX_SP_REG_PROG_ID_1_IJ_PERSP_PIXEL__MASK = 0x000000ff
+A6XX_SP_REG_PROG_ID_1_IJ_PERSP_PIXEL__SHIFT = 0
+A6XX_SP_REG_PROG_ID_1_IJ_LINEAR_PIXEL__MASK = 0x0000ff00
+A6XX_SP_REG_PROG_ID_1_IJ_LINEAR_PIXEL__SHIFT = 8
+A6XX_SP_REG_PROG_ID_1_IJ_PERSP_CENTROID__MASK = 0x00ff0000
+A6XX_SP_REG_PROG_ID_1_IJ_PERSP_CENTROID__SHIFT = 16
+A6XX_SP_REG_PROG_ID_1_IJ_LINEAR_CENTROID__MASK = 0xff000000
+A6XX_SP_REG_PROG_ID_1_IJ_LINEAR_CENTROID__SHIFT = 24
+REG_A6XX_SP_REG_PROG_ID_2 = 0x0000b985
+A6XX_SP_REG_PROG_ID_2_IJ_PERSP_SAMPLE__MASK = 0x000000ff
+A6XX_SP_REG_PROG_ID_2_IJ_PERSP_SAMPLE__SHIFT = 0
+A6XX_SP_REG_PROG_ID_2_IJ_LINEAR_SAMPLE__MASK = 0x0000ff00
+A6XX_SP_REG_PROG_ID_2_IJ_LINEAR_SAMPLE__SHIFT = 8
+A6XX_SP_REG_PROG_ID_2_XYCOORDREGID__MASK = 0x00ff0000
+A6XX_SP_REG_PROG_ID_2_XYCOORDREGID__SHIFT = 16
+A6XX_SP_REG_PROG_ID_2_ZWCOORDREGID__MASK = 0xff000000
+A6XX_SP_REG_PROG_ID_2_ZWCOORDREGID__SHIFT = 24
+REG_A6XX_SP_REG_PROG_ID_3 = 0x0000b986
+A6XX_SP_REG_PROG_ID_3_LINELENGTHREGID__MASK = 0x000000ff
+A6XX_SP_REG_PROG_ID_3_LINELENGTHREGID__SHIFT = 0
+A6XX_SP_REG_PROG_ID_3_FOVEATIONQUALITYREGID__MASK = 0x0000ff00
+A6XX_SP_REG_PROG_ID_3_FOVEATIONQUALITYREGID__SHIFT = 8
+REG_A6XX_SP_CS_CONST_CONFIG = 0x0000b987
+A6XX_SP_CS_CONST_CONFIG_CONSTLEN__MASK = 0x000000ff
+A6XX_SP_CS_CONST_CONFIG_CONSTLEN__SHIFT = 0
+A6XX_SP_CS_CONST_CONFIG_ENABLED = 0x00000100
+A6XX_SP_CS_CONST_CONFIG_READ_IMM_SHARED_CONSTS = 0x00000200
+REG_A7XX_SP_PS_WAVE_CNTL = 0x0000a9c6
+A7XX_SP_PS_WAVE_CNTL_THREADSIZE__MASK = 0x00000001
+A7XX_SP_PS_WAVE_CNTL_THREADSIZE__SHIFT = 0
+A7XX_SP_PS_WAVE_CNTL_VARYINGS = 0x00000002
+A7XX_SP_PS_WAVE_CNTL_UNK2__MASK = 0x00000ffc
+A7XX_SP_PS_WAVE_CNTL_UNK2__SHIFT = 2
+REG_A7XX_SP_LB_PARAM_LIMIT = 0x0000a9c7
+A7XX_SP_LB_PARAM_LIMIT_PRIMALLOCTHRESHOLD__MASK = 0x00000007
+A7XX_SP_LB_PARAM_LIMIT_PRIMALLOCTHRESHOLD__SHIFT = 0
+REG_A7XX_SP_REG_PROG_ID_0 = 0x0000a9c8
+A7XX_SP_REG_PROG_ID_0_FACEREGID__MASK = 0x000000ff
+A7XX_SP_REG_PROG_ID_0_FACEREGID__SHIFT = 0
+A7XX_SP_REG_PROG_ID_0_SAMPLEID__MASK = 0x0000ff00
+A7XX_SP_REG_PROG_ID_0_SAMPLEID__SHIFT = 8
+A7XX_SP_REG_PROG_ID_0_SAMPLEMASK__MASK = 0x00ff0000
+A7XX_SP_REG_PROG_ID_0_SAMPLEMASK__SHIFT = 16
+A7XX_SP_REG_PROG_ID_0_CENTERRHW__MASK = 0xff000000
+A7XX_SP_REG_PROG_ID_0_CENTERRHW__SHIFT = 24
+REG_A7XX_SP_REG_PROG_ID_1 = 0x0000a9c9
+A7XX_SP_REG_PROG_ID_1_IJ_PERSP_PIXEL__MASK = 0x000000ff
+A7XX_SP_REG_PROG_ID_1_IJ_PERSP_PIXEL__SHIFT = 0
+A7XX_SP_REG_PROG_ID_1_IJ_LINEAR_PIXEL__MASK = 0x0000ff00
+A7XX_SP_REG_PROG_ID_1_IJ_LINEAR_PIXEL__SHIFT = 8
+A7XX_SP_REG_PROG_ID_1_IJ_PERSP_CENTROID__MASK = 0x00ff0000
+A7XX_SP_REG_PROG_ID_1_IJ_PERSP_CENTROID__SHIFT = 16
+A7XX_SP_REG_PROG_ID_1_IJ_LINEAR_CENTROID__MASK = 0xff000000
+A7XX_SP_REG_PROG_ID_1_IJ_LINEAR_CENTROID__SHIFT = 24
+REG_A7XX_SP_REG_PROG_ID_2 = 0x0000a9ca
+A7XX_SP_REG_PROG_ID_2_IJ_PERSP_SAMPLE__MASK = 0x000000ff
+A7XX_SP_REG_PROG_ID_2_IJ_PERSP_SAMPLE__SHIFT = 0
+A7XX_SP_REG_PROG_ID_2_IJ_LINEAR_SAMPLE__MASK = 0x0000ff00
+A7XX_SP_REG_PROG_ID_2_IJ_LINEAR_SAMPLE__SHIFT = 8
+A7XX_SP_REG_PROG_ID_2_XYCOORDREGID__MASK = 0x00ff0000
+A7XX_SP_REG_PROG_ID_2_XYCOORDREGID__SHIFT = 16
+A7XX_SP_REG_PROG_ID_2_ZWCOORDREGID__MASK = 0xff000000
+A7XX_SP_REG_PROG_ID_2_ZWCOORDREGID__SHIFT = 24
+REG_A7XX_SP_REG_PROG_ID_3 = 0x0000a9cb
+A7XX_SP_REG_PROG_ID_3_LINELENGTHREGID__MASK = 0x000000ff
+A7XX_SP_REG_PROG_ID_3_LINELENGTHREGID__SHIFT = 0
+A7XX_SP_REG_PROG_ID_3_FOVEATIONQUALITYREGID__MASK = 0x0000ff00
+A7XX_SP_REG_PROG_ID_3_FOVEATIONQUALITYREGID__SHIFT = 8
+REG_A7XX_SP_CS_CONST_CONFIG = 0x0000a9cd
+A7XX_SP_CS_CONST_CONFIG_CONSTLEN__MASK = 0x000000ff
+A7XX_SP_CS_CONST_CONFIG_CONSTLEN__SHIFT = 0
+A7XX_SP_CS_CONST_CONFIG_ENABLED = 0x00000100
+A7XX_SP_CS_CONST_CONFIG_READ_IMM_SHARED_CONSTS = 0x00000200
+REG_A6XX_SP_CS_NDRANGE_0 = 0x0000b990
+A6XX_SP_CS_NDRANGE_0_KERNELDIM__MASK = 0x00000003
+A6XX_SP_CS_NDRANGE_0_KERNELDIM__SHIFT = 0
+A6XX_SP_CS_NDRANGE_0_LOCALSIZEX__MASK = 0x00000ffc
+A6XX_SP_CS_NDRANGE_0_LOCALSIZEX__SHIFT = 2
+A6XX_SP_CS_NDRANGE_0_LOCALSIZEY__MASK = 0x003ff000
+A6XX_SP_CS_NDRANGE_0_LOCALSIZEY__SHIFT = 12
+A6XX_SP_CS_NDRANGE_0_LOCALSIZEZ__MASK = 0xffc00000
+A6XX_SP_CS_NDRANGE_0_LOCALSIZEZ__SHIFT = 22
+REG_A6XX_SP_CS_NDRANGE_1 = 0x0000b991
+A6XX_SP_CS_NDRANGE_1_GLOBALSIZE_X__MASK = 0xffffffff
+A6XX_SP_CS_NDRANGE_1_GLOBALSIZE_X__SHIFT = 0
+REG_A6XX_SP_CS_NDRANGE_2 = 0x0000b992
+A6XX_SP_CS_NDRANGE_2_GLOBALOFF_X__MASK = 0xffffffff
+A6XX_SP_CS_NDRANGE_2_GLOBALOFF_X__SHIFT = 0
+REG_A6XX_SP_CS_NDRANGE_3 = 0x0000b993
+A6XX_SP_CS_NDRANGE_3_GLOBALSIZE_Y__MASK = 0xffffffff
+A6XX_SP_CS_NDRANGE_3_GLOBALSIZE_Y__SHIFT = 0
+REG_A6XX_SP_CS_NDRANGE_4 = 0x0000b994
+A6XX_SP_CS_NDRANGE_4_GLOBALOFF_Y__MASK = 0xffffffff
+A6XX_SP_CS_NDRANGE_4_GLOBALOFF_Y__SHIFT = 0
+REG_A6XX_SP_CS_NDRANGE_5 = 0x0000b995
+A6XX_SP_CS_NDRANGE_5_GLOBALSIZE_Z__MASK = 0xffffffff
+A6XX_SP_CS_NDRANGE_5_GLOBALSIZE_Z__SHIFT = 0
+REG_A6XX_SP_CS_NDRANGE_6 = 0x0000b996
+A6XX_SP_CS_NDRANGE_6_GLOBALOFF_Z__MASK = 0xffffffff
+A6XX_SP_CS_NDRANGE_6_GLOBALOFF_Z__SHIFT = 0
+REG_A6XX_SP_CS_CONST_CONFIG_0 = 0x0000b997
+A6XX_SP_CS_CONST_CONFIG_0_WGIDCONSTID__MASK = 0x000000ff
+A6XX_SP_CS_CONST_CONFIG_0_WGIDCONSTID__SHIFT = 0
+A6XX_SP_CS_CONST_CONFIG_0_WGSIZECONSTID__MASK = 0x0000ff00
+A6XX_SP_CS_CONST_CONFIG_0_WGSIZECONSTID__SHIFT = 8
+A6XX_SP_CS_CONST_CONFIG_0_WGOFFSETCONSTID__MASK = 0x00ff0000
+A6XX_SP_CS_CONST_CONFIG_0_WGOFFSETCONSTID__SHIFT = 16
+A6XX_SP_CS_CONST_CONFIG_0_LOCALIDREGID__MASK = 0xff000000
+A6XX_SP_CS_CONST_CONFIG_0_LOCALIDREGID__SHIFT = 24
+REG_A6XX_SP_CS_WGE_CNTL = 0x0000b998
+A6XX_SP_CS_WGE_CNTL_LINEARLOCALIDREGID__MASK = 0x000000ff
+A6XX_SP_CS_WGE_CNTL_LINEARLOCALIDREGID__SHIFT = 0
+A6XX_SP_CS_WGE_CNTL_SINGLE_SP_CORE = 0x00000100
+A6XX_SP_CS_WGE_CNTL_THREADSIZE__MASK = 0x00000200
+A6XX_SP_CS_WGE_CNTL_THREADSIZE__SHIFT = 9
+A6XX_SP_CS_WGE_CNTL_THREADSIZE_SCALAR = 0x00000400
+REG_A6XX_SP_CS_KERNEL_GROUP_X = 0x0000b999
+REG_A6XX_SP_CS_KERNEL_GROUP_Y = 0x0000b99a
+REG_A6XX_SP_CS_KERNEL_GROUP_Z = 0x0000b99b
+REG_A7XX_SP_CS_NDRANGE_0 = 0x0000a9d4
+A7XX_SP_CS_NDRANGE_0_KERNELDIM__MASK = 0x00000003
+A7XX_SP_CS_NDRANGE_0_KERNELDIM__SHIFT = 0
+A7XX_SP_CS_NDRANGE_0_LOCALSIZEX__MASK = 0x00000ffc
+A7XX_SP_CS_NDRANGE_0_LOCALSIZEX__SHIFT = 2
+A7XX_SP_CS_NDRANGE_0_LOCALSIZEY__MASK = 0x003ff000
+A7XX_SP_CS_NDRANGE_0_LOCALSIZEY__SHIFT = 12
+A7XX_SP_CS_NDRANGE_0_LOCALSIZEZ__MASK = 0xffc00000
+A7XX_SP_CS_NDRANGE_0_LOCALSIZEZ__SHIFT = 22
+REG_A7XX_SP_CS_NDRANGE_1 = 0x0000a9d5
+A7XX_SP_CS_NDRANGE_1_GLOBALSIZE_X__MASK = 0xffffffff
+A7XX_SP_CS_NDRANGE_1_GLOBALSIZE_X__SHIFT = 0
+REG_A7XX_SP_CS_NDRANGE_2 = 0x0000a9d6
+A7XX_SP_CS_NDRANGE_2_GLOBALOFF_X__MASK = 0xffffffff
+A7XX_SP_CS_NDRANGE_2_GLOBALOFF_X__SHIFT = 0
+REG_A7XX_SP_CS_NDRANGE_3 = 0x0000a9d7
+A7XX_SP_CS_NDRANGE_3_GLOBALSIZE_Y__MASK = 0xffffffff
+A7XX_SP_CS_NDRANGE_3_GLOBALSIZE_Y__SHIFT = 0
+REG_A7XX_SP_CS_NDRANGE_4 = 0x0000a9d8
+A7XX_SP_CS_NDRANGE_4_GLOBALOFF_Y__MASK = 0xffffffff
+A7XX_SP_CS_NDRANGE_4_GLOBALOFF_Y__SHIFT = 0
+REG_A7XX_SP_CS_NDRANGE_5 = 0x0000a9d9
+A7XX_SP_CS_NDRANGE_5_GLOBALSIZE_Z__MASK = 0xffffffff
+A7XX_SP_CS_NDRANGE_5_GLOBALSIZE_Z__SHIFT = 0
+REG_A7XX_SP_CS_NDRANGE_6 = 0x0000a9da
+A7XX_SP_CS_NDRANGE_6_GLOBALOFF_Z__MASK = 0xffffffff
+A7XX_SP_CS_NDRANGE_6_GLOBALOFF_Z__SHIFT = 0
+REG_A7XX_SP_CS_KERNEL_GROUP_X = 0x0000a9dc
+REG_A7XX_SP_CS_KERNEL_GROUP_Y = 0x0000a9dd
+REG_A7XX_SP_CS_KERNEL_GROUP_Z = 0x0000a9de
+REG_A7XX_SP_CS_WGE_CNTL = 0x0000a9db
+A7XX_SP_CS_WGE_CNTL_LINEARLOCALIDREGID__MASK = 0x000000ff
+A7XX_SP_CS_WGE_CNTL_LINEARLOCALIDREGID__SHIFT = 0
+A7XX_SP_CS_WGE_CNTL_THREADSIZE__MASK = 0x00000200
+A7XX_SP_CS_WGE_CNTL_THREADSIZE__SHIFT = 9
+A7XX_SP_CS_WGE_CNTL_WORKGROUPRASTORDERZFIRSTEN = 0x00000800
+A7XX_SP_CS_WGE_CNTL_WGTILEWIDTH__MASK = 0x03f00000
+A7XX_SP_CS_WGE_CNTL_WGTILEWIDTH__SHIFT = 20
+A7XX_SP_CS_WGE_CNTL_WGTILEHEIGHT__MASK = 0xfc000000
+A7XX_SP_CS_WGE_CNTL_WGTILEHEIGHT__SHIFT = 26
+REG_A7XX_SP_CS_NDRANGE_7 = 0x0000a9df
+A7XX_SP_CS_NDRANGE_7_LOCALSIZEX__MASK = 0x00000ffc
+A7XX_SP_CS_NDRANGE_7_LOCALSIZEX__SHIFT = 2
+A7XX_SP_CS_NDRANGE_7_LOCALSIZEY__MASK = 0x003ff000
+A7XX_SP_CS_NDRANGE_7_LOCALSIZEY__SHIFT = 12
+A7XX_SP_CS_NDRANGE_7_LOCALSIZEZ__MASK = 0xffc00000
+A7XX_SP_CS_NDRANGE_7_LOCALSIZEZ__SHIFT = 22
+REG_A6XX_HLSQ_LOAD_STATE_FRAG_CMD = 0x0000b9a0
+REG_A6XX_HLSQ_LOAD_STATE_FRAG_EXT_SRC_ADDR = 0x0000b9a1
+REG_A6XX_HLSQ_LOAD_STATE_FRAG_DATA = 0x0000b9a3
+REG_A6XX_HLSQ_CS_BINDLESS_BASE = lambda i0: (0x0000b9c0 + 0x2*i0 )
+A6XX_HLSQ_CS_BINDLESS_BASE_DESCRIPTOR_DESC_SIZE__MASK = 0x00000003
+A6XX_HLSQ_CS_BINDLESS_BASE_DESCRIPTOR_DESC_SIZE__SHIFT = 0
+A6XX_HLSQ_CS_BINDLESS_BASE_DESCRIPTOR_ADDR__MASK = 0xfffffffffffffffc
+A6XX_HLSQ_CS_BINDLESS_BASE_DESCRIPTOR_ADDR__SHIFT = 2
+REG_A6XX_HLSQ_CS_CTRL_REG1 = 0x0000b9d0
+A6XX_HLSQ_CS_CTRL_REG1_SHARED_SIZE__MASK = 0x0000001f
+A6XX_HLSQ_CS_CTRL_REG1_SHARED_SIZE__SHIFT = 0
+A6XX_HLSQ_CS_CTRL_REG1_CONSTANTRAMMODE__MASK = 0x00000060
+A6XX_HLSQ_CS_CTRL_REG1_CONSTANTRAMMODE__SHIFT = 5
+REG_A6XX_SP_DRAW_INITIATOR = 0x0000bb00
+A6XX_SP_DRAW_INITIATOR_STATE_ID__MASK = 0x000000ff
+A6XX_SP_DRAW_INITIATOR_STATE_ID__SHIFT = 0
+REG_A6XX_SP_KERNEL_INITIATOR = 0x0000bb01
+A6XX_SP_KERNEL_INITIATOR_STATE_ID__MASK = 0x000000ff
+A6XX_SP_KERNEL_INITIATOR_STATE_ID__SHIFT = 0
+REG_A6XX_SP_EVENT_INITIATOR = 0x0000bb02
+A6XX_SP_EVENT_INITIATOR_STATE_ID__MASK = 0x00ff0000
+A6XX_SP_EVENT_INITIATOR_STATE_ID__SHIFT = 16
+A6XX_SP_EVENT_INITIATOR_EVENT__MASK = 0x0000007f
+A6XX_SP_EVENT_INITIATOR_EVENT__SHIFT = 0
+REG_A6XX_SP_UPDATE_CNTL = 0x0000bb08
+A6XX_SP_UPDATE_CNTL_VS_STATE = 0x00000001
+A6XX_SP_UPDATE_CNTL_HS_STATE = 0x00000002
+A6XX_SP_UPDATE_CNTL_DS_STATE = 0x00000004
+A6XX_SP_UPDATE_CNTL_GS_STATE = 0x00000008
+A6XX_SP_UPDATE_CNTL_FS_STATE = 0x00000010
+A6XX_SP_UPDATE_CNTL_CS_STATE = 0x00000020
+A6XX_SP_UPDATE_CNTL_CS_UAV = 0x00000040
+A6XX_SP_UPDATE_CNTL_GFX_UAV = 0x00000080
+A6XX_SP_UPDATE_CNTL_CS_SHARED_CONST = 0x00080000
+A6XX_SP_UPDATE_CNTL_GFX_SHARED_CONST = 0x00000100
+A6XX_SP_UPDATE_CNTL_CS_BINDLESS__MASK = 0x00003e00
+A6XX_SP_UPDATE_CNTL_CS_BINDLESS__SHIFT = 9
+A6XX_SP_UPDATE_CNTL_GFX_BINDLESS__MASK = 0x0007c000
+A6XX_SP_UPDATE_CNTL_GFX_BINDLESS__SHIFT = 14
+REG_A7XX_SP_DRAW_INITIATOR = 0x0000ab1c
+A7XX_SP_DRAW_INITIATOR_STATE_ID__MASK = 0x000000ff
+A7XX_SP_DRAW_INITIATOR_STATE_ID__SHIFT = 0
+REG_A7XX_SP_KERNEL_INITIATOR = 0x0000ab1d
+A7XX_SP_KERNEL_INITIATOR_STATE_ID__MASK = 0x000000ff
+A7XX_SP_KERNEL_INITIATOR_STATE_ID__SHIFT = 0
+REG_A7XX_SP_EVENT_INITIATOR = 0x0000ab1e
+A7XX_SP_EVENT_INITIATOR_STATE_ID__MASK = 0x00ff0000
+A7XX_SP_EVENT_INITIATOR_STATE_ID__SHIFT = 16
+A7XX_SP_EVENT_INITIATOR_EVENT__MASK = 0x0000007f
+A7XX_SP_EVENT_INITIATOR_EVENT__SHIFT = 0
+REG_A7XX_SP_UPDATE_CNTL = 0x0000ab1f
+A7XX_SP_UPDATE_CNTL_VS_STATE = 0x00000001
+A7XX_SP_UPDATE_CNTL_HS_STATE = 0x00000002
+A7XX_SP_UPDATE_CNTL_DS_STATE = 0x00000004
+A7XX_SP_UPDATE_CNTL_GS_STATE = 0x00000008
+A7XX_SP_UPDATE_CNTL_FS_STATE = 0x00000010
+A7XX_SP_UPDATE_CNTL_CS_STATE = 0x00000020
+A7XX_SP_UPDATE_CNTL_CS_UAV = 0x00000040
+A7XX_SP_UPDATE_CNTL_GFX_UAV = 0x00000080
+A7XX_SP_UPDATE_CNTL_CS_BINDLESS__MASK = 0x0001fe00
+A7XX_SP_UPDATE_CNTL_CS_BINDLESS__SHIFT = 9
+A7XX_SP_UPDATE_CNTL_GFX_BINDLESS__MASK = 0x01fe0000
+A7XX_SP_UPDATE_CNTL_GFX_BINDLESS__SHIFT = 17
+REG_A6XX_SP_PS_CONST_CONFIG = 0x0000bb10
+A6XX_SP_PS_CONST_CONFIG_CONSTLEN__MASK = 0x000000ff
+A6XX_SP_PS_CONST_CONFIG_CONSTLEN__SHIFT = 0
+A6XX_SP_PS_CONST_CONFIG_ENABLED = 0x00000100
+A6XX_SP_PS_CONST_CONFIG_READ_IMM_SHARED_CONSTS = 0x00000200
+REG_A7XX_SP_PS_CONST_CONFIG = 0x0000ab03
+A7XX_SP_PS_CONST_CONFIG_CONSTLEN__MASK = 0x000000ff
+A7XX_SP_PS_CONST_CONFIG_CONSTLEN__SHIFT = 0
+A7XX_SP_PS_CONST_CONFIG_ENABLED = 0x00000100
+A7XX_SP_PS_CONST_CONFIG_READ_IMM_SHARED_CONSTS = 0x00000200
+REG_A7XX_SP_SHARED_CONSTANT_GFX_0 = lambda i0: (0x0000ab40 + 0x1*i0 )
+REG_A6XX_HLSQ_SHARED_CONSTS = 0x0000bb11
+A6XX_HLSQ_SHARED_CONSTS_ENABLE = 0x00000001
+REG_A6XX_HLSQ_BINDLESS_BASE = lambda i0: (0x0000bb20 + 0x2*i0 )
+A6XX_HLSQ_BINDLESS_BASE_DESCRIPTOR_DESC_SIZE__MASK = 0x00000003
+A6XX_HLSQ_BINDLESS_BASE_DESCRIPTOR_DESC_SIZE__SHIFT = 0
+A6XX_HLSQ_BINDLESS_BASE_DESCRIPTOR_ADDR__MASK = 0xfffffffffffffffc
+A6XX_HLSQ_BINDLESS_BASE_DESCRIPTOR_ADDR__SHIFT = 2
+REG_A6XX_HLSQ_2D_EVENT_CMD = 0x0000bd80
+A6XX_HLSQ_2D_EVENT_CMD_STATE_ID__MASK = 0x0000ff00
+A6XX_HLSQ_2D_EVENT_CMD_STATE_ID__SHIFT = 8
+A6XX_HLSQ_2D_EVENT_CMD_EVENT__MASK = 0x0000007f
+A6XX_HLSQ_2D_EVENT_CMD_EVENT__SHIFT = 0
+REG_A6XX_HLSQ_UNKNOWN_BE00 = 0x0000be00
+REG_A6XX_HLSQ_UNKNOWN_BE01 = 0x0000be01
+REG_A6XX_HLSQ_DBG_ECO_CNTL = 0x0000be04
+REG_A6XX_HLSQ_ADDR_MODE_CNTL = 0x0000be05
+REG_A6XX_HLSQ_UNKNOWN_BE08 = 0x0000be08
+REG_A6XX_HLSQ_PERFCTR_HLSQ_SEL = lambda i0: (0x0000be10 + 0x1*i0 )
+REG_A6XX_HLSQ_CONTEXT_SWITCH_GFX_PREEMPTION_SAFE_MODE = 0x0000be22
+REG_A7XX_SP_AHB_READ_APERTURE = 0x0000c000
+REG_A7XX_SP_UNKNOWN_0CE2 = 0x00000ce2
+REG_A7XX_SP_UNKNOWN_0CE4 = 0x00000ce4
+REG_A7XX_SP_UNKNOWN_0CE6 = 0x00000ce6
+REG_A6XX_CP_EVENT_START = 0x0000d600
+A6XX_CP_EVENT_START_STATE_ID__MASK = 0x000000ff
+A6XX_CP_EVENT_START_STATE_ID__SHIFT = 0
+REG_A6XX_CP_EVENT_END = 0x0000d601
+A6XX_CP_EVENT_END_STATE_ID__MASK = 0x000000ff
+A6XX_CP_EVENT_END_STATE_ID__SHIFT = 0
+REG_A6XX_CP_2D_EVENT_START = 0x0000d700
+A6XX_CP_2D_EVENT_START_STATE_ID__MASK = 0x000000ff
+A6XX_CP_2D_EVENT_START_STATE_ID__SHIFT = 0
+REG_A6XX_CP_2D_EVENT_END = 0x0000d701
+A6XX_CP_2D_EVENT_END_STATE_ID__MASK = 0x000000ff
+A6XX_CP_2D_EVENT_END_STATE_ID__SHIFT = 0
+REG_A6XX_PDC_GPU_ENABLE_PDC = 0x00001140
+REG_A6XX_PDC_GPU_SEQ_START_ADDR = 0x00001148
+REG_A6XX_PDC_GPU_TCS0_CONTROL = 0x00001540
+REG_A6XX_PDC_GPU_TCS0_CMD_ENABLE_BANK = 0x00001541
+REG_A6XX_PDC_GPU_TCS0_CMD_WAIT_FOR_CMPL_BANK = 0x00001542
+REG_A6XX_PDC_GPU_TCS0_CMD0_MSGID = 0x00001543
+REG_A6XX_PDC_GPU_TCS0_CMD0_ADDR = 0x00001544
+REG_A6XX_PDC_GPU_TCS0_CMD0_DATA = 0x00001545
+REG_A6XX_PDC_GPU_TCS1_CONTROL = 0x00001572
+REG_A6XX_PDC_GPU_TCS1_CMD_ENABLE_BANK = 0x00001573
+REG_A6XX_PDC_GPU_TCS1_CMD_WAIT_FOR_CMPL_BANK = 0x00001574
+REG_A6XX_PDC_GPU_TCS1_CMD0_MSGID = 0x00001575
+REG_A6XX_PDC_GPU_TCS1_CMD0_ADDR = 0x00001576
+REG_A6XX_PDC_GPU_TCS1_CMD0_DATA = 0x00001577
+REG_A6XX_PDC_GPU_TCS2_CONTROL = 0x000015a4
+REG_A6XX_PDC_GPU_TCS2_CMD_ENABLE_BANK = 0x000015a5
+REG_A6XX_PDC_GPU_TCS2_CMD_WAIT_FOR_CMPL_BANK = 0x000015a6
+REG_A6XX_PDC_GPU_TCS2_CMD0_MSGID = 0x000015a7
+REG_A6XX_PDC_GPU_TCS2_CMD0_ADDR = 0x000015a8
+REG_A6XX_PDC_GPU_TCS2_CMD0_DATA = 0x000015a9
+REG_A6XX_PDC_GPU_TCS3_CONTROL = 0x000015d6
+REG_A6XX_PDC_GPU_TCS3_CMD_ENABLE_BANK = 0x000015d7
+REG_A6XX_PDC_GPU_TCS3_CMD_WAIT_FOR_CMPL_BANK = 0x000015d8
+REG_A6XX_PDC_GPU_TCS3_CMD0_MSGID = 0x000015d9
+REG_A6XX_PDC_GPU_TCS3_CMD0_ADDR = 0x000015da
+REG_A6XX_PDC_GPU_TCS3_CMD0_DATA = 0x000015db
+REG_A6XX_PDC_GPU_SEQ_MEM_0 = 0x00000000
+REG_A6XX_CX_DBGC_CFG_DBGBUS_SEL_A = 0x00000000
+A6XX_CX_DBGC_CFG_DBGBUS_SEL_A_PING_INDEX__MASK = 0x000000ff
+A6XX_CX_DBGC_CFG_DBGBUS_SEL_A_PING_INDEX__SHIFT = 0
+A6XX_CX_DBGC_CFG_DBGBUS_SEL_A_PING_BLK_SEL__MASK = 0x0000ff00
+A6XX_CX_DBGC_CFG_DBGBUS_SEL_A_PING_BLK_SEL__SHIFT = 8
+REG_A6XX_CX_DBGC_CFG_DBGBUS_SEL_B = 0x00000001
+REG_A6XX_CX_DBGC_CFG_DBGBUS_SEL_C = 0x00000002
+REG_A6XX_CX_DBGC_CFG_DBGBUS_SEL_D = 0x00000003
+REG_A6XX_CX_DBGC_CFG_DBGBUS_CNTLT = 0x00000004
+A6XX_CX_DBGC_CFG_DBGBUS_CNTLT_TRACEEN__MASK = 0x0000003f
+A6XX_CX_DBGC_CFG_DBGBUS_CNTLT_TRACEEN__SHIFT = 0
+A6XX_CX_DBGC_CFG_DBGBUS_CNTLT_GRANU__MASK = 0x00007000
+A6XX_CX_DBGC_CFG_DBGBUS_CNTLT_GRANU__SHIFT = 12
+A6XX_CX_DBGC_CFG_DBGBUS_CNTLT_SEGT__MASK = 0xf0000000
+A6XX_CX_DBGC_CFG_DBGBUS_CNTLT_SEGT__SHIFT = 28
+REG_A6XX_CX_DBGC_CFG_DBGBUS_CNTLM = 0x00000005
+A6XX_CX_DBGC_CFG_DBGBUS_CNTLM_ENABLE__MASK = 0x0f000000
+A6XX_CX_DBGC_CFG_DBGBUS_CNTLM_ENABLE__SHIFT = 24
+REG_A6XX_CX_DBGC_CFG_DBGBUS_IVTL_0 = 0x00000008
+REG_A6XX_CX_DBGC_CFG_DBGBUS_IVTL_1 = 0x00000009
+REG_A6XX_CX_DBGC_CFG_DBGBUS_IVTL_2 = 0x0000000a
+REG_A6XX_CX_DBGC_CFG_DBGBUS_IVTL_3 = 0x0000000b
+REG_A6XX_CX_DBGC_CFG_DBGBUS_MASKL_0 = 0x0000000c
+REG_A6XX_CX_DBGC_CFG_DBGBUS_MASKL_1 = 0x0000000d
+REG_A6XX_CX_DBGC_CFG_DBGBUS_MASKL_2 = 0x0000000e
+REG_A6XX_CX_DBGC_CFG_DBGBUS_MASKL_3 = 0x0000000f
+REG_A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_0 = 0x00000010
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL0__MASK = 0x0000000f
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL0__SHIFT = 0
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL1__MASK = 0x000000f0
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL1__SHIFT = 4
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL2__MASK = 0x00000f00
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL2__SHIFT = 8
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL3__MASK = 0x0000f000
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL3__SHIFT = 12
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL4__MASK = 0x000f0000
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL4__SHIFT = 16
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL5__MASK = 0x00f00000
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL5__SHIFT = 20
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL6__MASK = 0x0f000000
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL6__SHIFT = 24
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL7__MASK = 0xf0000000
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_0_BYTEL7__SHIFT = 28
+REG_A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_1 = 0x00000011
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL8__MASK = 0x0000000f
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL8__SHIFT = 0
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL9__MASK = 0x000000f0
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL9__SHIFT = 4
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL10__MASK = 0x00000f00
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL10__SHIFT = 8
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL11__MASK = 0x0000f000
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL11__SHIFT = 12
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL12__MASK = 0x000f0000
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL12__SHIFT = 16
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL13__MASK = 0x00f00000
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL13__SHIFT = 20
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL14__MASK = 0x0f000000
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL14__SHIFT = 24
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL15__MASK = 0xf0000000
+A6XX_CX_DBGC_CFG_DBGBUS_BYTEL_1_BYTEL15__SHIFT = 28
+REG_A6XX_CX_DBGC_CFG_DBGBUS_TRACE_BUF1 = 0x0000002f
+REG_A6XX_CX_DBGC_CFG_DBGBUS_TRACE_BUF2 = 0x00000030
+REG_A6XX_CX_MISC_SYSTEM_CACHE_CNTL_0 = 0x00000001
+REG_A6XX_CX_MISC_SYSTEM_CACHE_CNTL_1 = 0x00000002
+REG_A7XX_CX_MISC_TCM_RET_CNTL = 0x00000039
+REG_A7XX_CX_MISC_SW_FUSE_VALUE = 0x00000400
+A7XX_CX_MISC_SW_FUSE_VALUE_FASTBLEND = 0x00000001
+A7XX_CX_MISC_SW_FUSE_VALUE_LPAC = 0x00000002
+A7XX_CX_MISC_SW_FUSE_VALUE_RAYTRACING = 0x00000004
+__struct__cast = lambda X: (struct_X)
+REG_CP_LOAD_STATE_0 = 0x00000000
+CP_LOAD_STATE_0_DST_OFF__MASK = 0x0000ffff
+CP_LOAD_STATE_0_DST_OFF__SHIFT = 0
+CP_LOAD_STATE_0_STATE_SRC__MASK = 0x00070000
+CP_LOAD_STATE_0_STATE_SRC__SHIFT = 16
+CP_LOAD_STATE_0_STATE_BLOCK__MASK = 0x00380000
+CP_LOAD_STATE_0_STATE_BLOCK__SHIFT = 19
+CP_LOAD_STATE_0_NUM_UNIT__MASK = 0xffc00000
+CP_LOAD_STATE_0_NUM_UNIT__SHIFT = 22
+REG_CP_LOAD_STATE_1 = 0x00000001
+CP_LOAD_STATE_1_STATE_TYPE__MASK = 0x00000003
+CP_LOAD_STATE_1_STATE_TYPE__SHIFT = 0
+CP_LOAD_STATE_1_EXT_SRC_ADDR__MASK = 0xfffffffc
+CP_LOAD_STATE_1_EXT_SRC_ADDR__SHIFT = 2
+REG_CP_LOAD_STATE4_0 = 0x00000000
+CP_LOAD_STATE4_0_DST_OFF__MASK = 0x00003fff
+CP_LOAD_STATE4_0_DST_OFF__SHIFT = 0
+CP_LOAD_STATE4_0_STATE_SRC__MASK = 0x00030000
+CP_LOAD_STATE4_0_STATE_SRC__SHIFT = 16
+CP_LOAD_STATE4_0_STATE_BLOCK__MASK = 0x003c0000
+CP_LOAD_STATE4_0_STATE_BLOCK__SHIFT = 18
+CP_LOAD_STATE4_0_NUM_UNIT__MASK = 0xffc00000
+CP_LOAD_STATE4_0_NUM_UNIT__SHIFT = 22
+REG_CP_LOAD_STATE4_1 = 0x00000001
+CP_LOAD_STATE4_1_STATE_TYPE__MASK = 0x00000003
+CP_LOAD_STATE4_1_STATE_TYPE__SHIFT = 0
+CP_LOAD_STATE4_1_EXT_SRC_ADDR__MASK = 0xfffffffc
+CP_LOAD_STATE4_1_EXT_SRC_ADDR__SHIFT = 2
+REG_CP_LOAD_STATE4_2 = 0x00000002
+CP_LOAD_STATE4_2_EXT_SRC_ADDR_HI__MASK = 0xffffffff
+CP_LOAD_STATE4_2_EXT_SRC_ADDR_HI__SHIFT = 0
+REG_CP_LOAD_STATE6_0 = 0x00000000
+CP_LOAD_STATE6_0_DST_OFF__MASK = 0x00003fff
+CP_LOAD_STATE6_0_DST_OFF__SHIFT = 0
+CP_LOAD_STATE6_0_STATE_TYPE__MASK = 0x0000c000
+CP_LOAD_STATE6_0_STATE_TYPE__SHIFT = 14
+CP_LOAD_STATE6_0_STATE_SRC__MASK = 0x00030000
+CP_LOAD_STATE6_0_STATE_SRC__SHIFT = 16
+CP_LOAD_STATE6_0_STATE_BLOCK__MASK = 0x003c0000
+CP_LOAD_STATE6_0_STATE_BLOCK__SHIFT = 18
+CP_LOAD_STATE6_0_NUM_UNIT__MASK = 0xffc00000
+CP_LOAD_STATE6_0_NUM_UNIT__SHIFT = 22
+REG_CP_LOAD_STATE6_1 = 0x00000001
+CP_LOAD_STATE6_1_EXT_SRC_ADDR__MASK = 0xfffffffc
+CP_LOAD_STATE6_1_EXT_SRC_ADDR__SHIFT = 2
+REG_CP_LOAD_STATE6_2 = 0x00000002
+CP_LOAD_STATE6_2_EXT_SRC_ADDR_HI__MASK = 0xffffffff
+CP_LOAD_STATE6_2_EXT_SRC_ADDR_HI__SHIFT = 0
+REG_CP_LOAD_STATE6_EXT_SRC_ADDR = 0x00000001
+REG_CP_DRAW_INDX_0 = 0x00000000
+CP_DRAW_INDX_0_VIZ_QUERY__MASK = 0xffffffff
+CP_DRAW_INDX_0_VIZ_QUERY__SHIFT = 0
+REG_CP_DRAW_INDX_1 = 0x00000001
+CP_DRAW_INDX_1_PRIM_TYPE__MASK = 0x0000003f
+CP_DRAW_INDX_1_PRIM_TYPE__SHIFT = 0
+CP_DRAW_INDX_1_SOURCE_SELECT__MASK = 0x000000c0
+CP_DRAW_INDX_1_SOURCE_SELECT__SHIFT = 6
+CP_DRAW_INDX_1_VIS_CULL__MASK = 0x00000600
+CP_DRAW_INDX_1_VIS_CULL__SHIFT = 9
+CP_DRAW_INDX_1_INDEX_SIZE__MASK = 0x00000800
+CP_DRAW_INDX_1_INDEX_SIZE__SHIFT = 11
+CP_DRAW_INDX_1_NOT_EOP = 0x00001000
+CP_DRAW_INDX_1_SMALL_INDEX = 0x00002000
+CP_DRAW_INDX_1_PRE_DRAW_INITIATOR_ENABLE = 0x00004000
+CP_DRAW_INDX_1_NUM_INSTANCES__MASK = 0xff000000
+CP_DRAW_INDX_1_NUM_INSTANCES__SHIFT = 24
+REG_CP_DRAW_INDX_2 = 0x00000002
+CP_DRAW_INDX_2_NUM_INDICES__MASK = 0xffffffff
+CP_DRAW_INDX_2_NUM_INDICES__SHIFT = 0
+REG_CP_DRAW_INDX_3 = 0x00000003
+CP_DRAW_INDX_3_INDX_BASE__MASK = 0xffffffff
+CP_DRAW_INDX_3_INDX_BASE__SHIFT = 0
+REG_CP_DRAW_INDX_4 = 0x00000004
+CP_DRAW_INDX_4_INDX_SIZE__MASK = 0xffffffff
+CP_DRAW_INDX_4_INDX_SIZE__SHIFT = 0
+REG_CP_DRAW_INDX_2_0 = 0x00000000
+CP_DRAW_INDX_2_0_VIZ_QUERY__MASK = 0xffffffff
+CP_DRAW_INDX_2_0_VIZ_QUERY__SHIFT = 0
+REG_CP_DRAW_INDX_2_1 = 0x00000001
+CP_DRAW_INDX_2_1_PRIM_TYPE__MASK = 0x0000003f
+CP_DRAW_INDX_2_1_PRIM_TYPE__SHIFT = 0
+CP_DRAW_INDX_2_1_SOURCE_SELECT__MASK = 0x000000c0
+CP_DRAW_INDX_2_1_SOURCE_SELECT__SHIFT = 6
+CP_DRAW_INDX_2_1_VIS_CULL__MASK = 0x00000600
+CP_DRAW_INDX_2_1_VIS_CULL__SHIFT = 9
+CP_DRAW_INDX_2_1_INDEX_SIZE__MASK = 0x00000800
+CP_DRAW_INDX_2_1_INDEX_SIZE__SHIFT = 11
+CP_DRAW_INDX_2_1_NOT_EOP = 0x00001000
+CP_DRAW_INDX_2_1_SMALL_INDEX = 0x00002000
+CP_DRAW_INDX_2_1_PRE_DRAW_INITIATOR_ENABLE = 0x00004000
+CP_DRAW_INDX_2_1_NUM_INSTANCES__MASK = 0xff000000
+CP_DRAW_INDX_2_1_NUM_INSTANCES__SHIFT = 24
+REG_CP_DRAW_INDX_2_2 = 0x00000002
+CP_DRAW_INDX_2_2_NUM_INDICES__MASK = 0xffffffff
+CP_DRAW_INDX_2_2_NUM_INDICES__SHIFT = 0
+REG_CP_DRAW_INDX_OFFSET_0 = 0x00000000
+CP_DRAW_INDX_OFFSET_0_PRIM_TYPE__MASK = 0x0000003f
+CP_DRAW_INDX_OFFSET_0_PRIM_TYPE__SHIFT = 0
+CP_DRAW_INDX_OFFSET_0_SOURCE_SELECT__MASK = 0x000000c0
+CP_DRAW_INDX_OFFSET_0_SOURCE_SELECT__SHIFT = 6
+CP_DRAW_INDX_OFFSET_0_VIS_CULL__MASK = 0x00000300
+CP_DRAW_INDX_OFFSET_0_VIS_CULL__SHIFT = 8
+CP_DRAW_INDX_OFFSET_0_INDEX_SIZE__MASK = 0x00000c00
+CP_DRAW_INDX_OFFSET_0_INDEX_SIZE__SHIFT = 10
+CP_DRAW_INDX_OFFSET_0_PATCH_TYPE__MASK = 0x00003000
+CP_DRAW_INDX_OFFSET_0_PATCH_TYPE__SHIFT = 12
+CP_DRAW_INDX_OFFSET_0_GS_ENABLE = 0x00010000
+CP_DRAW_INDX_OFFSET_0_TESS_ENABLE = 0x00020000
+REG_CP_DRAW_INDX_OFFSET_1 = 0x00000001
+CP_DRAW_INDX_OFFSET_1_NUM_INSTANCES__MASK = 0xffffffff
+CP_DRAW_INDX_OFFSET_1_NUM_INSTANCES__SHIFT = 0
+REG_CP_DRAW_INDX_OFFSET_2 = 0x00000002
+CP_DRAW_INDX_OFFSET_2_NUM_INDICES__MASK = 0xffffffff
+CP_DRAW_INDX_OFFSET_2_NUM_INDICES__SHIFT = 0
+REG_CP_DRAW_INDX_OFFSET_3 = 0x00000003
+CP_DRAW_INDX_OFFSET_3_FIRST_INDX__MASK = 0xffffffff
+CP_DRAW_INDX_OFFSET_3_FIRST_INDX__SHIFT = 0
+REG_A5XX_CP_DRAW_INDX_OFFSET_4 = 0x00000004
+A5XX_CP_DRAW_INDX_OFFSET_4_INDX_BASE_LO__MASK = 0xffffffff
+A5XX_CP_DRAW_INDX_OFFSET_4_INDX_BASE_LO__SHIFT = 0
+REG_A5XX_CP_DRAW_INDX_OFFSET_5 = 0x00000005
+A5XX_CP_DRAW_INDX_OFFSET_5_INDX_BASE_HI__MASK = 0xffffffff
+A5XX_CP_DRAW_INDX_OFFSET_5_INDX_BASE_HI__SHIFT = 0
+REG_A5XX_CP_DRAW_INDX_OFFSET_INDX_BASE = 0x00000004
+REG_A5XX_CP_DRAW_INDX_OFFSET_6 = 0x00000006
+A5XX_CP_DRAW_INDX_OFFSET_6_MAX_INDICES__MASK = 0xffffffff
+A5XX_CP_DRAW_INDX_OFFSET_6_MAX_INDICES__SHIFT = 0
+REG_CP_DRAW_INDX_OFFSET_4 = 0x00000004
+CP_DRAW_INDX_OFFSET_4_INDX_BASE__MASK = 0xffffffff
+CP_DRAW_INDX_OFFSET_4_INDX_BASE__SHIFT = 0
+REG_CP_DRAW_INDX_OFFSET_5 = 0x00000005
+CP_DRAW_INDX_OFFSET_5_INDX_SIZE__MASK = 0xffffffff
+CP_DRAW_INDX_OFFSET_5_INDX_SIZE__SHIFT = 0
+REG_A4XX_CP_DRAW_INDIRECT_0 = 0x00000000
+A4XX_CP_DRAW_INDIRECT_0_PRIM_TYPE__MASK = 0x0000003f
+A4XX_CP_DRAW_INDIRECT_0_PRIM_TYPE__SHIFT = 0
+A4XX_CP_DRAW_INDIRECT_0_SOURCE_SELECT__MASK = 0x000000c0
+A4XX_CP_DRAW_INDIRECT_0_SOURCE_SELECT__SHIFT = 6
+A4XX_CP_DRAW_INDIRECT_0_VIS_CULL__MASK = 0x00000300
+A4XX_CP_DRAW_INDIRECT_0_VIS_CULL__SHIFT = 8
+A4XX_CP_DRAW_INDIRECT_0_INDEX_SIZE__MASK = 0x00000c00
+A4XX_CP_DRAW_INDIRECT_0_INDEX_SIZE__SHIFT = 10
+A4XX_CP_DRAW_INDIRECT_0_PATCH_TYPE__MASK = 0x00003000
+A4XX_CP_DRAW_INDIRECT_0_PATCH_TYPE__SHIFT = 12
+A4XX_CP_DRAW_INDIRECT_0_GS_ENABLE = 0x00010000
+A4XX_CP_DRAW_INDIRECT_0_TESS_ENABLE = 0x00020000
+REG_A4XX_CP_DRAW_INDIRECT_1 = 0x00000001
+A4XX_CP_DRAW_INDIRECT_1_INDIRECT__MASK = 0xffffffff
+A4XX_CP_DRAW_INDIRECT_1_INDIRECT__SHIFT = 0
+REG_A5XX_CP_DRAW_INDIRECT_1 = 0x00000001
+A5XX_CP_DRAW_INDIRECT_1_INDIRECT_LO__MASK = 0xffffffff
+A5XX_CP_DRAW_INDIRECT_1_INDIRECT_LO__SHIFT = 0
+REG_A5XX_CP_DRAW_INDIRECT_2 = 0x00000002
+A5XX_CP_DRAW_INDIRECT_2_INDIRECT_HI__MASK = 0xffffffff
+A5XX_CP_DRAW_INDIRECT_2_INDIRECT_HI__SHIFT = 0
+REG_A5XX_CP_DRAW_INDIRECT_INDIRECT = 0x00000001
+REG_A4XX_CP_DRAW_INDX_INDIRECT_0 = 0x00000000
+A4XX_CP_DRAW_INDX_INDIRECT_0_PRIM_TYPE__MASK = 0x0000003f
+A4XX_CP_DRAW_INDX_INDIRECT_0_PRIM_TYPE__SHIFT = 0
+A4XX_CP_DRAW_INDX_INDIRECT_0_SOURCE_SELECT__MASK = 0x000000c0
+A4XX_CP_DRAW_INDX_INDIRECT_0_SOURCE_SELECT__SHIFT = 6
+A4XX_CP_DRAW_INDX_INDIRECT_0_VIS_CULL__MASK = 0x00000300
+A4XX_CP_DRAW_INDX_INDIRECT_0_VIS_CULL__SHIFT = 8
+A4XX_CP_DRAW_INDX_INDIRECT_0_INDEX_SIZE__MASK = 0x00000c00
+A4XX_CP_DRAW_INDX_INDIRECT_0_INDEX_SIZE__SHIFT = 10
+A4XX_CP_DRAW_INDX_INDIRECT_0_PATCH_TYPE__MASK = 0x00003000
+A4XX_CP_DRAW_INDX_INDIRECT_0_PATCH_TYPE__SHIFT = 12
+A4XX_CP_DRAW_INDX_INDIRECT_0_GS_ENABLE = 0x00010000
+A4XX_CP_DRAW_INDX_INDIRECT_0_TESS_ENABLE = 0x00020000
+REG_A4XX_CP_DRAW_INDX_INDIRECT_1 = 0x00000001
+A4XX_CP_DRAW_INDX_INDIRECT_1_INDX_BASE__MASK = 0xffffffff
+A4XX_CP_DRAW_INDX_INDIRECT_1_INDX_BASE__SHIFT = 0
+REG_A4XX_CP_DRAW_INDX_INDIRECT_2 = 0x00000002
+A4XX_CP_DRAW_INDX_INDIRECT_2_INDX_SIZE__MASK = 0xffffffff
+A4XX_CP_DRAW_INDX_INDIRECT_2_INDX_SIZE__SHIFT = 0
+REG_A4XX_CP_DRAW_INDX_INDIRECT_3 = 0x00000003
+A4XX_CP_DRAW_INDX_INDIRECT_3_INDIRECT__MASK = 0xffffffff
+A4XX_CP_DRAW_INDX_INDIRECT_3_INDIRECT__SHIFT = 0
+REG_A5XX_CP_DRAW_INDX_INDIRECT_1 = 0x00000001
+A5XX_CP_DRAW_INDX_INDIRECT_1_INDX_BASE_LO__MASK = 0xffffffff
+A5XX_CP_DRAW_INDX_INDIRECT_1_INDX_BASE_LO__SHIFT = 0
+REG_A5XX_CP_DRAW_INDX_INDIRECT_2 = 0x00000002
+A5XX_CP_DRAW_INDX_INDIRECT_2_INDX_BASE_HI__MASK = 0xffffffff
+A5XX_CP_DRAW_INDX_INDIRECT_2_INDX_BASE_HI__SHIFT = 0
+REG_A5XX_CP_DRAW_INDX_INDIRECT_INDX_BASE = 0x00000001
+REG_A5XX_CP_DRAW_INDX_INDIRECT_3 = 0x00000003
+A5XX_CP_DRAW_INDX_INDIRECT_3_MAX_INDICES__MASK = 0xffffffff
+A5XX_CP_DRAW_INDX_INDIRECT_3_MAX_INDICES__SHIFT = 0
+REG_A5XX_CP_DRAW_INDX_INDIRECT_4 = 0x00000004
+A5XX_CP_DRAW_INDX_INDIRECT_4_INDIRECT_LO__MASK = 0xffffffff
+A5XX_CP_DRAW_INDX_INDIRECT_4_INDIRECT_LO__SHIFT = 0
+REG_A5XX_CP_DRAW_INDX_INDIRECT_5 = 0x00000005
+A5XX_CP_DRAW_INDX_INDIRECT_5_INDIRECT_HI__MASK = 0xffffffff
+A5XX_CP_DRAW_INDX_INDIRECT_5_INDIRECT_HI__SHIFT = 0
+REG_A5XX_CP_DRAW_INDX_INDIRECT_INDIRECT = 0x00000004
+REG_A6XX_CP_DRAW_INDIRECT_MULTI_0 = 0x00000000
+A6XX_CP_DRAW_INDIRECT_MULTI_0_PRIM_TYPE__MASK = 0x0000003f
+A6XX_CP_DRAW_INDIRECT_MULTI_0_PRIM_TYPE__SHIFT = 0
+A6XX_CP_DRAW_INDIRECT_MULTI_0_SOURCE_SELECT__MASK = 0x000000c0
+A6XX_CP_DRAW_INDIRECT_MULTI_0_SOURCE_SELECT__SHIFT = 6
+A6XX_CP_DRAW_INDIRECT_MULTI_0_VIS_CULL__MASK = 0x00000300
+A6XX_CP_DRAW_INDIRECT_MULTI_0_VIS_CULL__SHIFT = 8
+A6XX_CP_DRAW_INDIRECT_MULTI_0_INDEX_SIZE__MASK = 0x00000c00
+A6XX_CP_DRAW_INDIRECT_MULTI_0_INDEX_SIZE__SHIFT = 10
+A6XX_CP_DRAW_INDIRECT_MULTI_0_PATCH_TYPE__MASK = 0x00003000
+A6XX_CP_DRAW_INDIRECT_MULTI_0_PATCH_TYPE__SHIFT = 12
+A6XX_CP_DRAW_INDIRECT_MULTI_0_GS_ENABLE = 0x00010000
+A6XX_CP_DRAW_INDIRECT_MULTI_0_TESS_ENABLE = 0x00020000
+REG_A6XX_CP_DRAW_INDIRECT_MULTI_1 = 0x00000001
+A6XX_CP_DRAW_INDIRECT_MULTI_1_OPCODE__MASK = 0x0000000f
+A6XX_CP_DRAW_INDIRECT_MULTI_1_OPCODE__SHIFT = 0
+A6XX_CP_DRAW_INDIRECT_MULTI_1_DST_OFF__MASK = 0x003fff00
+A6XX_CP_DRAW_INDIRECT_MULTI_1_DST_OFF__SHIFT = 8
+REG_A6XX_CP_DRAW_INDIRECT_MULTI_DRAW_COUNT = 0x00000002
+REG_INDIRECT_OP_NORMAL_CP_DRAW_INDIRECT_MULTI_INDIRECT = 0x00000003
+REG_INDIRECT_OP_NORMAL_CP_DRAW_INDIRECT_MULTI_STRIDE = 0x00000005
+REG_INDIRECT_OP_INDEXED_CP_DRAW_INDIRECT_MULTI_INDEX = 0x00000003
+REG_INDIRECT_OP_INDEXED_CP_DRAW_INDIRECT_MULTI_MAX_INDICES = 0x00000005
+REG_INDIRECT_OP_INDEXED_CP_DRAW_INDIRECT_MULTI_INDIRECT = 0x00000006
+REG_INDIRECT_OP_INDEXED_CP_DRAW_INDIRECT_MULTI_STRIDE = 0x00000008
+REG_INDIRECT_OP_INDIRECT_COUNT_CP_DRAW_INDIRECT_MULTI_INDIRECT = 0x00000003
+REG_INDIRECT_OP_INDIRECT_COUNT_CP_DRAW_INDIRECT_MULTI_INDIRECT_COUNT = 0x00000005
+REG_INDIRECT_OP_INDIRECT_COUNT_CP_DRAW_INDIRECT_MULTI_STRIDE = 0x00000007
+REG_INDIRECT_OP_INDIRECT_COUNT_INDEXED_CP_DRAW_INDIRECT_MULTI_INDEX = 0x00000003
+REG_INDIRECT_OP_INDIRECT_COUNT_INDEXED_CP_DRAW_INDIRECT_MULTI_MAX_INDICES = 0x00000005
+REG_INDIRECT_OP_INDIRECT_COUNT_INDEXED_CP_DRAW_INDIRECT_MULTI_INDIRECT = 0x00000006
+REG_INDIRECT_OP_INDIRECT_COUNT_INDEXED_CP_DRAW_INDIRECT_MULTI_INDIRECT_COUNT = 0x00000008
+REG_INDIRECT_OP_INDIRECT_COUNT_INDEXED_CP_DRAW_INDIRECT_MULTI_STRIDE = 0x0000000a
+REG_CP_DRAW_AUTO_0 = 0x00000000
+CP_DRAW_AUTO_0_PRIM_TYPE__MASK = 0x0000003f
+CP_DRAW_AUTO_0_PRIM_TYPE__SHIFT = 0
+CP_DRAW_AUTO_0_SOURCE_SELECT__MASK = 0x000000c0
+CP_DRAW_AUTO_0_SOURCE_SELECT__SHIFT = 6
+CP_DRAW_AUTO_0_VIS_CULL__MASK = 0x00000300
+CP_DRAW_AUTO_0_VIS_CULL__SHIFT = 8
+CP_DRAW_AUTO_0_INDEX_SIZE__MASK = 0x00000c00
+CP_DRAW_AUTO_0_INDEX_SIZE__SHIFT = 10
+CP_DRAW_AUTO_0_PATCH_TYPE__MASK = 0x00003000
+CP_DRAW_AUTO_0_PATCH_TYPE__SHIFT = 12
+CP_DRAW_AUTO_0_GS_ENABLE = 0x00010000
+CP_DRAW_AUTO_0_TESS_ENABLE = 0x00020000
+REG_CP_DRAW_AUTO_1 = 0x00000001
+CP_DRAW_AUTO_1_NUM_INSTANCES__MASK = 0xffffffff
+CP_DRAW_AUTO_1_NUM_INSTANCES__SHIFT = 0
+REG_CP_DRAW_AUTO_NUM_VERTICES_BASE = 0x00000002
+REG_CP_DRAW_AUTO_4 = 0x00000004
+CP_DRAW_AUTO_4_NUM_VERTICES_OFFSET__MASK = 0xffffffff
+CP_DRAW_AUTO_4_NUM_VERTICES_OFFSET__SHIFT = 0
+REG_CP_DRAW_AUTO_5 = 0x00000005
+CP_DRAW_AUTO_5_STRIDE__MASK = 0xffffffff
+CP_DRAW_AUTO_5_STRIDE__SHIFT = 0
+REG_CP_DRAW_PRED_ENABLE_GLOBAL_0 = 0x00000000
+CP_DRAW_PRED_ENABLE_GLOBAL_0_ENABLE = 0x00000001
+REG_CP_DRAW_PRED_ENABLE_LOCAL_0 = 0x00000000
+CP_DRAW_PRED_ENABLE_LOCAL_0_ENABLE = 0x00000001
+REG_CP_DRAW_PRED_SET_0 = 0x00000000
+CP_DRAW_PRED_SET_0_SRC__MASK = 0x000000f0
+CP_DRAW_PRED_SET_0_SRC__SHIFT = 4
+CP_DRAW_PRED_SET_0_TEST__MASK = 0x00000100
+CP_DRAW_PRED_SET_0_TEST__SHIFT = 8
+REG_CP_DRAW_PRED_SET_MEM_ADDR = 0x00000001
+REG_CP_SET_DRAW_STATE_ = lambda i0: (0x00000000 + 0x3*i0 )
+CP_SET_DRAW_STATE__0_COUNT__MASK = 0x0000ffff
+CP_SET_DRAW_STATE__0_COUNT__SHIFT = 0
+CP_SET_DRAW_STATE__0_DIRTY = 0x00010000
+CP_SET_DRAW_STATE__0_DISABLE = 0x00020000
+CP_SET_DRAW_STATE__0_DISABLE_ALL_GROUPS = 0x00040000
+CP_SET_DRAW_STATE__0_LOAD_IMMED = 0x00080000
+CP_SET_DRAW_STATE__0_BINNING = 0x00100000
+CP_SET_DRAW_STATE__0_GMEM = 0x00200000
+CP_SET_DRAW_STATE__0_SYSMEM = 0x00400000
+CP_SET_DRAW_STATE__0_GROUP_ID__MASK = 0x1f000000
+CP_SET_DRAW_STATE__0_GROUP_ID__SHIFT = 24
+CP_SET_DRAW_STATE__1_ADDR_LO__MASK = 0xffffffff
+CP_SET_DRAW_STATE__1_ADDR_LO__SHIFT = 0
+CP_SET_DRAW_STATE__2_ADDR_HI__MASK = 0xffffffff
+CP_SET_DRAW_STATE__2_ADDR_HI__SHIFT = 0
+REG_CP_SET_BIN_0 = 0x00000000
+REG_CP_SET_BIN_1 = 0x00000001
+CP_SET_BIN_1_X1__MASK = 0x0000ffff
+CP_SET_BIN_1_X1__SHIFT = 0
+CP_SET_BIN_1_Y1__MASK = 0xffff0000
+CP_SET_BIN_1_Y1__SHIFT = 16
+REG_CP_SET_BIN_2 = 0x00000002
+CP_SET_BIN_2_X2__MASK = 0x0000ffff
+CP_SET_BIN_2_X2__SHIFT = 0
+CP_SET_BIN_2_Y2__MASK = 0xffff0000
+CP_SET_BIN_2_Y2__SHIFT = 16
+REG_CP_SET_BIN_DATA_0 = 0x00000000
+CP_SET_BIN_DATA_0_BIN_DATA_ADDR__MASK = 0xffffffff
+CP_SET_BIN_DATA_0_BIN_DATA_ADDR__SHIFT = 0
+REG_CP_SET_BIN_DATA_1 = 0x00000001
+CP_SET_BIN_DATA_1_BIN_SIZE_ADDRESS__MASK = 0xffffffff
+CP_SET_BIN_DATA_1_BIN_SIZE_ADDRESS__SHIFT = 0
+REG_CP_SET_BIN_DATA5_0 = 0x00000000
+CP_SET_BIN_DATA5_0_VSC_MASK__MASK = 0x0000ffff
+CP_SET_BIN_DATA5_0_VSC_MASK__SHIFT = 0
+CP_SET_BIN_DATA5_0_VSC_SIZE__MASK = 0x003f0000
+CP_SET_BIN_DATA5_0_VSC_SIZE__SHIFT = 16
+CP_SET_BIN_DATA5_0_VSC_N__MASK = 0x07c00000
+CP_SET_BIN_DATA5_0_VSC_N__SHIFT = 22
+CP_SET_BIN_DATA5_0_ABS_MASK__MASK = 0x10000000
+CP_SET_BIN_DATA5_0_ABS_MASK__SHIFT = 28
+REG_NO_ABS_MASK_CP_SET_BIN_DATA5_1 = 0x00000001
+NO_ABS_MASK_CP_SET_BIN_DATA5_1_BIN_DATA_ADDR_LO__MASK = 0xffffffff
+NO_ABS_MASK_CP_SET_BIN_DATA5_1_BIN_DATA_ADDR_LO__SHIFT = 0
+REG_NO_ABS_MASK_CP_SET_BIN_DATA5_2 = 0x00000002
+NO_ABS_MASK_CP_SET_BIN_DATA5_2_BIN_DATA_ADDR_HI__MASK = 0xffffffff
+NO_ABS_MASK_CP_SET_BIN_DATA5_2_BIN_DATA_ADDR_HI__SHIFT = 0
+REG_NO_ABS_MASK_CP_SET_BIN_DATA5_3 = 0x00000003
+NO_ABS_MASK_CP_SET_BIN_DATA5_3_BIN_SIZE_ADDRESS_LO__MASK = 0xffffffff
+NO_ABS_MASK_CP_SET_BIN_DATA5_3_BIN_SIZE_ADDRESS_LO__SHIFT = 0
+REG_NO_ABS_MASK_CP_SET_BIN_DATA5_4 = 0x00000004
+NO_ABS_MASK_CP_SET_BIN_DATA5_4_BIN_SIZE_ADDRESS_HI__MASK = 0xffffffff
+NO_ABS_MASK_CP_SET_BIN_DATA5_4_BIN_SIZE_ADDRESS_HI__SHIFT = 0
+REG_NO_ABS_MASK_CP_SET_BIN_DATA5_5 = 0x00000005
+NO_ABS_MASK_CP_SET_BIN_DATA5_5_BIN_PRIM_STRM_LO__MASK = 0xffffffff
+NO_ABS_MASK_CP_SET_BIN_DATA5_5_BIN_PRIM_STRM_LO__SHIFT = 0
+REG_NO_ABS_MASK_CP_SET_BIN_DATA5_6 = 0x00000006
+NO_ABS_MASK_CP_SET_BIN_DATA5_6_BIN_PRIM_STRM_HI__MASK = 0xffffffff
+NO_ABS_MASK_CP_SET_BIN_DATA5_6_BIN_PRIM_STRM_HI__SHIFT = 0
+REG_NO_ABS_MASK_CP_SET_BIN_DATA5_7 = 0x00000007
+REG_NO_ABS_MASK_CP_SET_BIN_DATA5_9 = 0x00000009
+REG_ABS_MASK_CP_SET_BIN_DATA5_ABS_MASK = 0x00000001
+REG_ABS_MASK_CP_SET_BIN_DATA5_2 = 0x00000002
+ABS_MASK_CP_SET_BIN_DATA5_2_BIN_DATA_ADDR_LO__MASK = 0xffffffff
+ABS_MASK_CP_SET_BIN_DATA5_2_BIN_DATA_ADDR_LO__SHIFT = 0
+REG_ABS_MASK_CP_SET_BIN_DATA5_3 = 0x00000003
+ABS_MASK_CP_SET_BIN_DATA5_3_BIN_DATA_ADDR_HI__MASK = 0xffffffff
+ABS_MASK_CP_SET_BIN_DATA5_3_BIN_DATA_ADDR_HI__SHIFT = 0
+REG_ABS_MASK_CP_SET_BIN_DATA5_4 = 0x00000004
+ABS_MASK_CP_SET_BIN_DATA5_4_BIN_SIZE_ADDRESS_LO__MASK = 0xffffffff
+ABS_MASK_CP_SET_BIN_DATA5_4_BIN_SIZE_ADDRESS_LO__SHIFT = 0
+REG_ABS_MASK_CP_SET_BIN_DATA5_5 = 0x00000005
+ABS_MASK_CP_SET_BIN_DATA5_5_BIN_SIZE_ADDRESS_HI__MASK = 0xffffffff
+ABS_MASK_CP_SET_BIN_DATA5_5_BIN_SIZE_ADDRESS_HI__SHIFT = 0
+REG_ABS_MASK_CP_SET_BIN_DATA5_6 = 0x00000006
+ABS_MASK_CP_SET_BIN_DATA5_6_BIN_PRIM_STRM_LO__MASK = 0xffffffff
+ABS_MASK_CP_SET_BIN_DATA5_6_BIN_PRIM_STRM_LO__SHIFT = 0
+REG_ABS_MASK_CP_SET_BIN_DATA5_7 = 0x00000007
+ABS_MASK_CP_SET_BIN_DATA5_7_BIN_PRIM_STRM_HI__MASK = 0xffffffff
+ABS_MASK_CP_SET_BIN_DATA5_7_BIN_PRIM_STRM_HI__SHIFT = 0
+REG_ABS_MASK_CP_SET_BIN_DATA5_8 = 0x00000008
+REG_ABS_MASK_CP_SET_BIN_DATA5_10 = 0x0000000a
+REG_CP_SET_BIN_DATA5_OFFSET_0 = 0x00000000
+CP_SET_BIN_DATA5_OFFSET_0_VSC_MASK__MASK = 0x0000ffff
+CP_SET_BIN_DATA5_OFFSET_0_VSC_MASK__SHIFT = 0
+CP_SET_BIN_DATA5_OFFSET_0_VSC_SIZE__MASK = 0x003f0000
+CP_SET_BIN_DATA5_OFFSET_0_VSC_SIZE__SHIFT = 16
+CP_SET_BIN_DATA5_OFFSET_0_VSC_N__MASK = 0x07c00000
+CP_SET_BIN_DATA5_OFFSET_0_VSC_N__SHIFT = 22
+CP_SET_BIN_DATA5_OFFSET_0_ABS_MASK__MASK = 0x10000000
+CP_SET_BIN_DATA5_OFFSET_0_ABS_MASK__SHIFT = 28
+REG_NO_ABS_MASK_CP_SET_BIN_DATA5_OFFSET_1 = 0x00000001
+NO_ABS_MASK_CP_SET_BIN_DATA5_OFFSET_1_BIN_DATA_OFFSET__MASK = 0xffffffff
+NO_ABS_MASK_CP_SET_BIN_DATA5_OFFSET_1_BIN_DATA_OFFSET__SHIFT = 0
+REG_NO_ABS_MASK_CP_SET_BIN_DATA5_OFFSET_2 = 0x00000002
+NO_ABS_MASK_CP_SET_BIN_DATA5_OFFSET_2_BIN_SIZE_OFFSET__MASK = 0xffffffff
+NO_ABS_MASK_CP_SET_BIN_DATA5_OFFSET_2_BIN_SIZE_OFFSET__SHIFT = 0
+REG_NO_ABS_MASK_CP_SET_BIN_DATA5_OFFSET_3 = 0x00000003
+NO_ABS_MASK_CP_SET_BIN_DATA5_OFFSET_3_BIN_DATA2_OFFSET__MASK = 0xffffffff
+NO_ABS_MASK_CP_SET_BIN_DATA5_OFFSET_3_BIN_DATA2_OFFSET__SHIFT = 0
+REG_ABS_MASK_CP_SET_BIN_DATA5_OFFSET_ABS_MASK = 0x00000001
+REG_ABS_MASK_CP_SET_BIN_DATA5_OFFSET_2 = 0x00000002
+ABS_MASK_CP_SET_BIN_DATA5_OFFSET_2_BIN_DATA_OFFSET__MASK = 0xffffffff
+ABS_MASK_CP_SET_BIN_DATA5_OFFSET_2_BIN_DATA_OFFSET__SHIFT = 0
+REG_ABS_MASK_CP_SET_BIN_DATA5_OFFSET_3 = 0x00000003
+ABS_MASK_CP_SET_BIN_DATA5_OFFSET_3_BIN_SIZE_OFFSET__MASK = 0xffffffff
+ABS_MASK_CP_SET_BIN_DATA5_OFFSET_3_BIN_SIZE_OFFSET__SHIFT = 0
+REG_ABS_MASK_CP_SET_BIN_DATA5_OFFSET_4 = 0x00000004
+ABS_MASK_CP_SET_BIN_DATA5_OFFSET_4_BIN_DATA2_OFFSET__MASK = 0xffffffff
+ABS_MASK_CP_SET_BIN_DATA5_OFFSET_4_BIN_DATA2_OFFSET__SHIFT = 0
+REG_CP_REG_RMW_0 = 0x00000000
+CP_REG_RMW_0_DST_REG__MASK = 0x0003ffff
+CP_REG_RMW_0_DST_REG__SHIFT = 0
+CP_REG_RMW_0_DST_SCRATCH = 0x00080000
+CP_REG_RMW_0_SKIP_WAIT_FOR_ME = 0x00800000
+CP_REG_RMW_0_ROTATE__MASK = 0x1f000000
+CP_REG_RMW_0_ROTATE__SHIFT = 24
+CP_REG_RMW_0_SRC1_ADD = 0x20000000
+CP_REG_RMW_0_SRC1_IS_REG = 0x40000000
+CP_REG_RMW_0_SRC0_IS_REG = 0x80000000
+REG_CP_REG_RMW_1 = 0x00000001
+CP_REG_RMW_1_SRC0__MASK = 0xffffffff
+CP_REG_RMW_1_SRC0__SHIFT = 0
+REG_CP_REG_RMW_2 = 0x00000002
+CP_REG_RMW_2_SRC1__MASK = 0xffffffff
+CP_REG_RMW_2_SRC1__SHIFT = 0
+REG_CP_REG_TO_MEM_0 = 0x00000000
+CP_REG_TO_MEM_0_REG__MASK = 0x0003ffff
+CP_REG_TO_MEM_0_REG__SHIFT = 0
+CP_REG_TO_MEM_0_CNT__MASK = 0x3ffc0000
+CP_REG_TO_MEM_0_CNT__SHIFT = 18
+CP_REG_TO_MEM_0_64B = 0x40000000
+CP_REG_TO_MEM_0_ACCUMULATE = 0x80000000
+REG_CP_REG_TO_MEM_1 = 0x00000001
+CP_REG_TO_MEM_1_DEST__MASK = 0xffffffff
+CP_REG_TO_MEM_1_DEST__SHIFT = 0
+REG_CP_REG_TO_MEM_2 = 0x00000002
+CP_REG_TO_MEM_2_DEST_HI__MASK = 0xffffffff
+CP_REG_TO_MEM_2_DEST_HI__SHIFT = 0
+REG_CP_REG_TO_MEM_OFFSET_REG_0 = 0x00000000
+CP_REG_TO_MEM_OFFSET_REG_0_REG__MASK = 0x0003ffff
+CP_REG_TO_MEM_OFFSET_REG_0_REG__SHIFT = 0
+CP_REG_TO_MEM_OFFSET_REG_0_CNT__MASK = 0x3ffc0000
+CP_REG_TO_MEM_OFFSET_REG_0_CNT__SHIFT = 18
+CP_REG_TO_MEM_OFFSET_REG_0_64B = 0x40000000
+CP_REG_TO_MEM_OFFSET_REG_0_ACCUMULATE = 0x80000000
+REG_CP_REG_TO_MEM_OFFSET_REG_1 = 0x00000001
+CP_REG_TO_MEM_OFFSET_REG_1_DEST__MASK = 0xffffffff
+CP_REG_TO_MEM_OFFSET_REG_1_DEST__SHIFT = 0
+REG_CP_REG_TO_MEM_OFFSET_REG_2 = 0x00000002
+CP_REG_TO_MEM_OFFSET_REG_2_DEST_HI__MASK = 0xffffffff
+CP_REG_TO_MEM_OFFSET_REG_2_DEST_HI__SHIFT = 0
+REG_CP_REG_TO_MEM_OFFSET_REG_3 = 0x00000003
+CP_REG_TO_MEM_OFFSET_REG_3_OFFSET0__MASK = 0x0003ffff
+CP_REG_TO_MEM_OFFSET_REG_3_OFFSET0__SHIFT = 0
+CP_REG_TO_MEM_OFFSET_REG_3_OFFSET0_SCRATCH = 0x00080000
+REG_CP_REG_TO_MEM_OFFSET_MEM_0 = 0x00000000
+CP_REG_TO_MEM_OFFSET_MEM_0_REG__MASK = 0x0003ffff
+CP_REG_TO_MEM_OFFSET_MEM_0_REG__SHIFT = 0
+CP_REG_TO_MEM_OFFSET_MEM_0_CNT__MASK = 0x3ffc0000
+CP_REG_TO_MEM_OFFSET_MEM_0_CNT__SHIFT = 18
+CP_REG_TO_MEM_OFFSET_MEM_0_64B = 0x40000000
+CP_REG_TO_MEM_OFFSET_MEM_0_ACCUMULATE = 0x80000000
+REG_CP_REG_TO_MEM_OFFSET_MEM_1 = 0x00000001
+CP_REG_TO_MEM_OFFSET_MEM_1_DEST__MASK = 0xffffffff
+CP_REG_TO_MEM_OFFSET_MEM_1_DEST__SHIFT = 0
+REG_CP_REG_TO_MEM_OFFSET_MEM_2 = 0x00000002
+CP_REG_TO_MEM_OFFSET_MEM_2_DEST_HI__MASK = 0xffffffff
+CP_REG_TO_MEM_OFFSET_MEM_2_DEST_HI__SHIFT = 0
+REG_CP_REG_TO_MEM_OFFSET_MEM_3 = 0x00000003
+CP_REG_TO_MEM_OFFSET_MEM_3_OFFSET_LO__MASK = 0xffffffff
+CP_REG_TO_MEM_OFFSET_MEM_3_OFFSET_LO__SHIFT = 0
+REG_CP_REG_TO_MEM_OFFSET_MEM_4 = 0x00000004
+CP_REG_TO_MEM_OFFSET_MEM_4_OFFSET_HI__MASK = 0xffffffff
+CP_REG_TO_MEM_OFFSET_MEM_4_OFFSET_HI__SHIFT = 0
+REG_CP_MEM_TO_REG_0 = 0x00000000
+CP_MEM_TO_REG_0_REG__MASK = 0x0003ffff
+CP_MEM_TO_REG_0_REG__SHIFT = 0
+CP_MEM_TO_REG_0_CNT__MASK = 0x3ff80000
+CP_MEM_TO_REG_0_CNT__SHIFT = 19
+CP_MEM_TO_REG_0_SHIFT_BY_2 = 0x40000000
+CP_MEM_TO_REG_0_UNK31 = 0x80000000
+REG_CP_MEM_TO_REG_1 = 0x00000001
+CP_MEM_TO_REG_1_SRC__MASK = 0xffffffff
+CP_MEM_TO_REG_1_SRC__SHIFT = 0
+REG_CP_MEM_TO_REG_2 = 0x00000002
+CP_MEM_TO_REG_2_SRC_HI__MASK = 0xffffffff
+CP_MEM_TO_REG_2_SRC_HI__SHIFT = 0
+REG_CP_MEM_TO_MEM_0 = 0x00000000
+CP_MEM_TO_MEM_0_NEG_A = 0x00000001
+CP_MEM_TO_MEM_0_NEG_B = 0x00000002
+CP_MEM_TO_MEM_0_NEG_C = 0x00000004
+CP_MEM_TO_MEM_0_DOUBLE = 0x20000000
+CP_MEM_TO_MEM_0_WAIT_FOR_MEM_WRITES = 0x40000000
+CP_MEM_TO_MEM_0_UNK31 = 0x80000000
+REG_CP_MEMCPY_0 = 0x00000000
+CP_MEMCPY_0_DWORDS__MASK = 0xffffffff
+CP_MEMCPY_0_DWORDS__SHIFT = 0
+REG_CP_MEMCPY_1 = 0x00000001
+CP_MEMCPY_1_SRC_LO__MASK = 0xffffffff
+CP_MEMCPY_1_SRC_LO__SHIFT = 0
+REG_CP_MEMCPY_2 = 0x00000002
+CP_MEMCPY_2_SRC_HI__MASK = 0xffffffff
+CP_MEMCPY_2_SRC_HI__SHIFT = 0
+REG_CP_MEMCPY_3 = 0x00000003
+CP_MEMCPY_3_DST_LO__MASK = 0xffffffff
+CP_MEMCPY_3_DST_LO__SHIFT = 0
+REG_CP_MEMCPY_4 = 0x00000004
+CP_MEMCPY_4_DST_HI__MASK = 0xffffffff
+CP_MEMCPY_4_DST_HI__SHIFT = 0
+REG_CP_REG_TO_SCRATCH_0 = 0x00000000
+CP_REG_TO_SCRATCH_0_REG__MASK = 0x0003ffff
+CP_REG_TO_SCRATCH_0_REG__SHIFT = 0
+CP_REG_TO_SCRATCH_0_SCRATCH__MASK = 0x00700000
+CP_REG_TO_SCRATCH_0_SCRATCH__SHIFT = 20
+CP_REG_TO_SCRATCH_0_CNT__MASK = 0x07000000
+CP_REG_TO_SCRATCH_0_CNT__SHIFT = 24
+CP_REG_TO_SCRATCH_0_SKIP_WAIT_FOR_ME = 0x08000000
+REG_CP_SCRATCH_TO_REG_0 = 0x00000000
+CP_SCRATCH_TO_REG_0_REG__MASK = 0x0003ffff
+CP_SCRATCH_TO_REG_0_REG__SHIFT = 0
+CP_SCRATCH_TO_REG_0_UNK18 = 0x00040000
+CP_SCRATCH_TO_REG_0_SCRATCH__MASK = 0x00700000
+CP_SCRATCH_TO_REG_0_SCRATCH__SHIFT = 20
+CP_SCRATCH_TO_REG_0_CNT__MASK = 0x07000000
+CP_SCRATCH_TO_REG_0_CNT__SHIFT = 24
+REG_CP_SCRATCH_WRITE_0 = 0x00000000
+CP_SCRATCH_WRITE_0_SCRATCH__MASK = 0x00700000
+CP_SCRATCH_WRITE_0_SCRATCH__SHIFT = 20
+REG_CP_MEM_WRITE_0 = 0x00000000
+CP_MEM_WRITE_0_ADDR_LO__MASK = 0xffffffff
+CP_MEM_WRITE_0_ADDR_LO__SHIFT = 0
+REG_CP_MEM_WRITE_1 = 0x00000001
+CP_MEM_WRITE_1_ADDR_HI__MASK = 0xffffffff
+CP_MEM_WRITE_1_ADDR_HI__SHIFT = 0
+REG_CP_COND_WRITE_0 = 0x00000000
+CP_COND_WRITE_0_FUNCTION__MASK = 0x00000007
+CP_COND_WRITE_0_FUNCTION__SHIFT = 0
+CP_COND_WRITE_0_POLL_MEMORY = 0x00000010
+CP_COND_WRITE_0_WRITE_MEMORY = 0x00000100
+REG_CP_COND_WRITE_1 = 0x00000001
+CP_COND_WRITE_1_POLL_ADDR__MASK = 0xffffffff
+CP_COND_WRITE_1_POLL_ADDR__SHIFT = 0
+REG_CP_COND_WRITE_2 = 0x00000002
+CP_COND_WRITE_2_REF__MASK = 0xffffffff
+CP_COND_WRITE_2_REF__SHIFT = 0
+REG_CP_COND_WRITE_3 = 0x00000003
+CP_COND_WRITE_3_MASK__MASK = 0xffffffff
+CP_COND_WRITE_3_MASK__SHIFT = 0
+REG_CP_COND_WRITE_4 = 0x00000004
+CP_COND_WRITE_4_WRITE_ADDR__MASK = 0xffffffff
+CP_COND_WRITE_4_WRITE_ADDR__SHIFT = 0
+REG_CP_COND_WRITE_5 = 0x00000005
+CP_COND_WRITE_5_WRITE_DATA__MASK = 0xffffffff
+CP_COND_WRITE_5_WRITE_DATA__SHIFT = 0
+REG_CP_COND_WRITE5_0 = 0x00000000
+CP_COND_WRITE5_0_FUNCTION__MASK = 0x00000007
+CP_COND_WRITE5_0_FUNCTION__SHIFT = 0
+CP_COND_WRITE5_0_SIGNED_COMPARE = 0x00000008
+CP_COND_WRITE5_0_POLL__MASK = 0x00000030
+CP_COND_WRITE5_0_POLL__SHIFT = 4
+CP_COND_WRITE5_0_WRITE_MEMORY = 0x00000100
+REG_CP_COND_WRITE5_1 = 0x00000001
+CP_COND_WRITE5_1_POLL_ADDR_LO__MASK = 0xffffffff
+CP_COND_WRITE5_1_POLL_ADDR_LO__SHIFT = 0
+REG_CP_COND_WRITE5_2 = 0x00000002
+CP_COND_WRITE5_2_POLL_ADDR_HI__MASK = 0xffffffff
+CP_COND_WRITE5_2_POLL_ADDR_HI__SHIFT = 0
+REG_CP_COND_WRITE5_3 = 0x00000003
+CP_COND_WRITE5_3_REF__MASK = 0xffffffff
+CP_COND_WRITE5_3_REF__SHIFT = 0
+REG_CP_COND_WRITE5_4 = 0x00000004
+CP_COND_WRITE5_4_MASK__MASK = 0xffffffff
+CP_COND_WRITE5_4_MASK__SHIFT = 0
+REG_CP_COND_WRITE5_5 = 0x00000005
+CP_COND_WRITE5_5_WRITE_ADDR_LO__MASK = 0xffffffff
+CP_COND_WRITE5_5_WRITE_ADDR_LO__SHIFT = 0
+REG_CP_COND_WRITE5_6 = 0x00000006
+CP_COND_WRITE5_6_WRITE_ADDR_HI__MASK = 0xffffffff
+CP_COND_WRITE5_6_WRITE_ADDR_HI__SHIFT = 0
+REG_CP_COND_WRITE5_7 = 0x00000007
+CP_COND_WRITE5_7_WRITE_DATA__MASK = 0xffffffff
+CP_COND_WRITE5_7_WRITE_DATA__SHIFT = 0
+REG_CP_WAIT_MEM_GTE_0 = 0x00000000
+CP_WAIT_MEM_GTE_0_RESERVED__MASK = 0xffffffff
+CP_WAIT_MEM_GTE_0_RESERVED__SHIFT = 0
+REG_CP_WAIT_MEM_GTE_1 = 0x00000001
+CP_WAIT_MEM_GTE_1_POLL_ADDR_LO__MASK = 0xffffffff
+CP_WAIT_MEM_GTE_1_POLL_ADDR_LO__SHIFT = 0
+REG_CP_WAIT_MEM_GTE_2 = 0x00000002
+CP_WAIT_MEM_GTE_2_POLL_ADDR_HI__MASK = 0xffffffff
+CP_WAIT_MEM_GTE_2_POLL_ADDR_HI__SHIFT = 0
+REG_CP_WAIT_MEM_GTE_3 = 0x00000003
+CP_WAIT_MEM_GTE_3_REF__MASK = 0xffffffff
+CP_WAIT_MEM_GTE_3_REF__SHIFT = 0
+REG_CP_WAIT_REG_MEM_0 = 0x00000000
+CP_WAIT_REG_MEM_0_FUNCTION__MASK = 0x00000007
+CP_WAIT_REG_MEM_0_FUNCTION__SHIFT = 0
+CP_WAIT_REG_MEM_0_SIGNED_COMPARE = 0x00000008
+CP_WAIT_REG_MEM_0_POLL__MASK = 0x00000030
+CP_WAIT_REG_MEM_0_POLL__SHIFT = 4
+CP_WAIT_REG_MEM_0_WRITE_MEMORY = 0x00000100
+REG_CP_WAIT_REG_MEM_1 = 0x00000001
+CP_WAIT_REG_MEM_1_POLL_ADDR_LO__MASK = 0xffffffff
+CP_WAIT_REG_MEM_1_POLL_ADDR_LO__SHIFT = 0
+REG_CP_WAIT_REG_MEM_2 = 0x00000002
+CP_WAIT_REG_MEM_2_POLL_ADDR_HI__MASK = 0xffffffff
+CP_WAIT_REG_MEM_2_POLL_ADDR_HI__SHIFT = 0
+REG_CP_WAIT_REG_MEM_3 = 0x00000003
+CP_WAIT_REG_MEM_3_REF__MASK = 0xffffffff
+CP_WAIT_REG_MEM_3_REF__SHIFT = 0
+REG_CP_WAIT_REG_MEM_4 = 0x00000004
+CP_WAIT_REG_MEM_4_MASK__MASK = 0xffffffff
+CP_WAIT_REG_MEM_4_MASK__SHIFT = 0
+REG_CP_WAIT_REG_MEM_5 = 0x00000005
+CP_WAIT_REG_MEM_5_DELAY_LOOP_CYCLES__MASK = 0xffffffff
+CP_WAIT_REG_MEM_5_DELAY_LOOP_CYCLES__SHIFT = 0
+REG_CP_WAIT_TWO_REGS_0 = 0x00000000
+CP_WAIT_TWO_REGS_0_REG0__MASK = 0x0003ffff
+CP_WAIT_TWO_REGS_0_REG0__SHIFT = 0
+REG_CP_WAIT_TWO_REGS_1 = 0x00000001
+CP_WAIT_TWO_REGS_1_REG1__MASK = 0x0003ffff
+CP_WAIT_TWO_REGS_1_REG1__SHIFT = 0
+REG_CP_WAIT_TWO_REGS_2 = 0x00000002
+CP_WAIT_TWO_REGS_2_REF__MASK = 0xffffffff
+CP_WAIT_TWO_REGS_2_REF__SHIFT = 0
+REG_CP_DISPATCH_COMPUTE_0 = 0x00000000
+REG_CP_DISPATCH_COMPUTE_1 = 0x00000001
+CP_DISPATCH_COMPUTE_1_X__MASK = 0xffffffff
+CP_DISPATCH_COMPUTE_1_X__SHIFT = 0
+REG_CP_DISPATCH_COMPUTE_2 = 0x00000002
+CP_DISPATCH_COMPUTE_2_Y__MASK = 0xffffffff
+CP_DISPATCH_COMPUTE_2_Y__SHIFT = 0
+REG_CP_DISPATCH_COMPUTE_3 = 0x00000003
+CP_DISPATCH_COMPUTE_3_Z__MASK = 0xffffffff
+CP_DISPATCH_COMPUTE_3_Z__SHIFT = 0
+REG_CP_SET_RENDER_MODE_0 = 0x00000000
+CP_SET_RENDER_MODE_0_MODE__MASK = 0x000001ff
+CP_SET_RENDER_MODE_0_MODE__SHIFT = 0
+REG_CP_SET_RENDER_MODE_1 = 0x00000001
+CP_SET_RENDER_MODE_1_ADDR_0_LO__MASK = 0xffffffff
+CP_SET_RENDER_MODE_1_ADDR_0_LO__SHIFT = 0
+REG_CP_SET_RENDER_MODE_2 = 0x00000002
+CP_SET_RENDER_MODE_2_ADDR_0_HI__MASK = 0xffffffff
+CP_SET_RENDER_MODE_2_ADDR_0_HI__SHIFT = 0
+REG_CP_SET_RENDER_MODE_3 = 0x00000003
+CP_SET_RENDER_MODE_3_VSC_ENABLE = 0x00000008
+CP_SET_RENDER_MODE_3_GMEM_ENABLE = 0x00000010
+REG_CP_SET_RENDER_MODE_4 = 0x00000004
+REG_CP_SET_RENDER_MODE_5 = 0x00000005
+CP_SET_RENDER_MODE_5_ADDR_1_LEN__MASK = 0xffffffff
+CP_SET_RENDER_MODE_5_ADDR_1_LEN__SHIFT = 0
+REG_CP_SET_RENDER_MODE_6 = 0x00000006
+CP_SET_RENDER_MODE_6_ADDR_1_LO__MASK = 0xffffffff
+CP_SET_RENDER_MODE_6_ADDR_1_LO__SHIFT = 0
+REG_CP_SET_RENDER_MODE_7 = 0x00000007
+CP_SET_RENDER_MODE_7_ADDR_1_HI__MASK = 0xffffffff
+CP_SET_RENDER_MODE_7_ADDR_1_HI__SHIFT = 0
+REG_CP_COMPUTE_CHECKPOINT_0 = 0x00000000
+CP_COMPUTE_CHECKPOINT_0_ADDR_0_LO__MASK = 0xffffffff
+CP_COMPUTE_CHECKPOINT_0_ADDR_0_LO__SHIFT = 0
+REG_CP_COMPUTE_CHECKPOINT_1 = 0x00000001
+CP_COMPUTE_CHECKPOINT_1_ADDR_0_HI__MASK = 0xffffffff
+CP_COMPUTE_CHECKPOINT_1_ADDR_0_HI__SHIFT = 0
+REG_CP_COMPUTE_CHECKPOINT_2 = 0x00000002
+REG_CP_COMPUTE_CHECKPOINT_3 = 0x00000003
+REG_CP_COMPUTE_CHECKPOINT_4 = 0x00000004
+CP_COMPUTE_CHECKPOINT_4_ADDR_1_LEN__MASK = 0xffffffff
+CP_COMPUTE_CHECKPOINT_4_ADDR_1_LEN__SHIFT = 0
+REG_CP_COMPUTE_CHECKPOINT_5 = 0x00000005
+CP_COMPUTE_CHECKPOINT_5_ADDR_1_LO__MASK = 0xffffffff
+CP_COMPUTE_CHECKPOINT_5_ADDR_1_LO__SHIFT = 0
+REG_CP_COMPUTE_CHECKPOINT_6 = 0x00000006
+CP_COMPUTE_CHECKPOINT_6_ADDR_1_HI__MASK = 0xffffffff
+CP_COMPUTE_CHECKPOINT_6_ADDR_1_HI__SHIFT = 0
+REG_CP_COMPUTE_CHECKPOINT_7 = 0x00000007
+REG_CP_PERFCOUNTER_ACTION_0 = 0x00000000
+REG_CP_PERFCOUNTER_ACTION_1 = 0x00000001
+CP_PERFCOUNTER_ACTION_1_ADDR_0_LO__MASK = 0xffffffff
+CP_PERFCOUNTER_ACTION_1_ADDR_0_LO__SHIFT = 0
+REG_CP_PERFCOUNTER_ACTION_2 = 0x00000002
+CP_PERFCOUNTER_ACTION_2_ADDR_0_HI__MASK = 0xffffffff
+CP_PERFCOUNTER_ACTION_2_ADDR_0_HI__SHIFT = 0
+REG_CP_EVENT_WRITE_0 = 0x00000000
+CP_EVENT_WRITE_0_EVENT__MASK = 0x000000ff
+CP_EVENT_WRITE_0_EVENT__SHIFT = 0
+CP_EVENT_WRITE_0_TIMESTAMP = 0x40000000
+CP_EVENT_WRITE_0_IRQ = 0x80000000
+REG_CP_EVENT_WRITE_1 = 0x00000001
+CP_EVENT_WRITE_1_ADDR_0_LO__MASK = 0xffffffff
+CP_EVENT_WRITE_1_ADDR_0_LO__SHIFT = 0
+REG_CP_EVENT_WRITE_2 = 0x00000002
+CP_EVENT_WRITE_2_ADDR_0_HI__MASK = 0xffffffff
+CP_EVENT_WRITE_2_ADDR_0_HI__SHIFT = 0
+REG_CP_EVENT_WRITE_3 = 0x00000003
+REG_CP_EVENT_WRITE7_0 = 0x00000000
+CP_EVENT_WRITE7_0_EVENT__MASK = 0x000000ff
+CP_EVENT_WRITE7_0_EVENT__SHIFT = 0
+CP_EVENT_WRITE7_0_WRITE_SAMPLE_COUNT = 0x00001000
+CP_EVENT_WRITE7_0_SAMPLE_COUNT_END_OFFSET = 0x00002000
+CP_EVENT_WRITE7_0_WRITE_ACCUM_SAMPLE_COUNT_DIFF = 0x00004000
+CP_EVENT_WRITE7_0_INC_BV_COUNT = 0x00010000
+CP_EVENT_WRITE7_0_INC_BR_COUNT = 0x00020000
+CP_EVENT_WRITE7_0_CLEAR_RENDER_RESOURCE = 0x00040000
+CP_EVENT_WRITE7_0_CLEAR_LRZ_RESOURCE = 0x00080000
+CP_EVENT_WRITE7_0_WRITE_SRC__MASK = 0x00700000
+CP_EVENT_WRITE7_0_WRITE_SRC__SHIFT = 20
+CP_EVENT_WRITE7_0_WRITE_DST__MASK = 0x01000000
+CP_EVENT_WRITE7_0_WRITE_DST__SHIFT = 24
+CP_EVENT_WRITE7_0_WRITE_ENABLED = 0x08000000
+CP_EVENT_WRITE7_0_IRQ = 0x80000000
+REG_EV_DST_RAM_CP_EVENT_WRITE7_1 = 0x00000001
+REG_EV_DST_RAM_CP_EVENT_WRITE7_3 = 0x00000003
+EV_DST_RAM_CP_EVENT_WRITE7_3_PAYLOAD_0__MASK = 0xffffffff
+EV_DST_RAM_CP_EVENT_WRITE7_3_PAYLOAD_0__SHIFT = 0
+REG_EV_DST_RAM_CP_EVENT_WRITE7_4 = 0x00000004
+EV_DST_RAM_CP_EVENT_WRITE7_4_PAYLOAD_1__MASK = 0xffffffff
+EV_DST_RAM_CP_EVENT_WRITE7_4_PAYLOAD_1__SHIFT = 0
+REG_EV_DST_ONCHIP_CP_EVENT_WRITE7_1 = 0x00000001
+EV_DST_ONCHIP_CP_EVENT_WRITE7_1_ONCHIP_ADDR_0__MASK = 0xffffffff
+EV_DST_ONCHIP_CP_EVENT_WRITE7_1_ONCHIP_ADDR_0__SHIFT = 0
+REG_EV_DST_ONCHIP_CP_EVENT_WRITE7_3 = 0x00000003
+EV_DST_ONCHIP_CP_EVENT_WRITE7_3_PAYLOAD_0__MASK = 0xffffffff
+EV_DST_ONCHIP_CP_EVENT_WRITE7_3_PAYLOAD_0__SHIFT = 0
+REG_EV_DST_ONCHIP_CP_EVENT_WRITE7_4 = 0x00000004
+EV_DST_ONCHIP_CP_EVENT_WRITE7_4_PAYLOAD_1__MASK = 0xffffffff
+EV_DST_ONCHIP_CP_EVENT_WRITE7_4_PAYLOAD_1__SHIFT = 0
+REG_CP_BLIT_0 = 0x00000000
+CP_BLIT_0_OP__MASK = 0x0000000f
+CP_BLIT_0_OP__SHIFT = 0
+REG_CP_BLIT_1 = 0x00000001
+CP_BLIT_1_SRC_X1__MASK = 0x00003fff
+CP_BLIT_1_SRC_X1__SHIFT = 0
+CP_BLIT_1_SRC_Y1__MASK = 0x3fff0000
+CP_BLIT_1_SRC_Y1__SHIFT = 16
+REG_CP_BLIT_2 = 0x00000002
+CP_BLIT_2_SRC_X2__MASK = 0x00003fff
+CP_BLIT_2_SRC_X2__SHIFT = 0
+CP_BLIT_2_SRC_Y2__MASK = 0x3fff0000
+CP_BLIT_2_SRC_Y2__SHIFT = 16
+REG_CP_BLIT_3 = 0x00000003
+CP_BLIT_3_DST_X1__MASK = 0x00003fff
+CP_BLIT_3_DST_X1__SHIFT = 0
+CP_BLIT_3_DST_Y1__MASK = 0x3fff0000
+CP_BLIT_3_DST_Y1__SHIFT = 16
+REG_CP_BLIT_4 = 0x00000004
+CP_BLIT_4_DST_X2__MASK = 0x00003fff
+CP_BLIT_4_DST_X2__SHIFT = 0
+CP_BLIT_4_DST_Y2__MASK = 0x3fff0000
+CP_BLIT_4_DST_Y2__SHIFT = 16
+REG_CP_EXEC_CS_0 = 0x00000000
+REG_CP_EXEC_CS_1 = 0x00000001
+CP_EXEC_CS_1_NGROUPS_X__MASK = 0xffffffff
+CP_EXEC_CS_1_NGROUPS_X__SHIFT = 0
+REG_CP_EXEC_CS_2 = 0x00000002
+CP_EXEC_CS_2_NGROUPS_Y__MASK = 0xffffffff
+CP_EXEC_CS_2_NGROUPS_Y__SHIFT = 0
+REG_CP_EXEC_CS_3 = 0x00000003
+CP_EXEC_CS_3_NGROUPS_Z__MASK = 0xffffffff
+CP_EXEC_CS_3_NGROUPS_Z__SHIFT = 0
+REG_A4XX_CP_EXEC_CS_INDIRECT_0 = 0x00000000
+REG_A4XX_CP_EXEC_CS_INDIRECT_1 = 0x00000001
+A4XX_CP_EXEC_CS_INDIRECT_1_ADDR__MASK = 0xffffffff
+A4XX_CP_EXEC_CS_INDIRECT_1_ADDR__SHIFT = 0
+REG_A4XX_CP_EXEC_CS_INDIRECT_2 = 0x00000002
+A4XX_CP_EXEC_CS_INDIRECT_2_LOCALSIZEX__MASK = 0x00000ffc
+A4XX_CP_EXEC_CS_INDIRECT_2_LOCALSIZEX__SHIFT = 2
+A4XX_CP_EXEC_CS_INDIRECT_2_LOCALSIZEY__MASK = 0x003ff000
+A4XX_CP_EXEC_CS_INDIRECT_2_LOCALSIZEY__SHIFT = 12
+A4XX_CP_EXEC_CS_INDIRECT_2_LOCALSIZEZ__MASK = 0xffc00000
+A4XX_CP_EXEC_CS_INDIRECT_2_LOCALSIZEZ__SHIFT = 22
+REG_A5XX_CP_EXEC_CS_INDIRECT_1 = 0x00000001
+A5XX_CP_EXEC_CS_INDIRECT_1_ADDR_LO__MASK = 0xffffffff
+A5XX_CP_EXEC_CS_INDIRECT_1_ADDR_LO__SHIFT = 0
+REG_A5XX_CP_EXEC_CS_INDIRECT_2 = 0x00000002
+A5XX_CP_EXEC_CS_INDIRECT_2_ADDR_HI__MASK = 0xffffffff
+A5XX_CP_EXEC_CS_INDIRECT_2_ADDR_HI__SHIFT = 0
+REG_A5XX_CP_EXEC_CS_INDIRECT_3 = 0x00000003
+A5XX_CP_EXEC_CS_INDIRECT_3_LOCALSIZEX__MASK = 0x00000ffc
+A5XX_CP_EXEC_CS_INDIRECT_3_LOCALSIZEX__SHIFT = 2
+A5XX_CP_EXEC_CS_INDIRECT_3_LOCALSIZEY__MASK = 0x003ff000
+A5XX_CP_EXEC_CS_INDIRECT_3_LOCALSIZEY__SHIFT = 12
+A5XX_CP_EXEC_CS_INDIRECT_3_LOCALSIZEZ__MASK = 0xffc00000
+A5XX_CP_EXEC_CS_INDIRECT_3_LOCALSIZEZ__SHIFT = 22
+REG_A6XX_CP_SET_MARKER_0 = 0x00000000
+A6XX_CP_SET_MARKER_0_MARKER_MODE__MASK = 0x00000100
+A6XX_CP_SET_MARKER_0_MARKER_MODE__SHIFT = 8
+A6XX_CP_SET_MARKER_0_MODE__MASK = 0x0000000f
+A6XX_CP_SET_MARKER_0_MODE__SHIFT = 0
+A6XX_CP_SET_MARKER_0_USES_GMEM = 0x00000010
+A6XX_CP_SET_MARKER_0_IFPC_MODE__MASK = 0x00000001
+A6XX_CP_SET_MARKER_0_IFPC_MODE__SHIFT = 0
+A6XX_CP_SET_MARKER_0_SHADER_USES_RT = 0x00000200
+A6XX_CP_SET_MARKER_0_RT_WA_START = 0x00000400
+A6XX_CP_SET_MARKER_0_RT_WA_END = 0x00000800
+REG_A6XX_CP_SET_PSEUDO_REG_ = lambda i0: (0x00000000 + 0x3*i0 )
+A6XX_CP_SET_PSEUDO_REG__0_PSEUDO_REG__MASK = 0x000007ff
+A6XX_CP_SET_PSEUDO_REG__0_PSEUDO_REG__SHIFT = 0
+A6XX_CP_SET_PSEUDO_REG__1_LO__MASK = 0xffffffff
+A6XX_CP_SET_PSEUDO_REG__1_LO__SHIFT = 0
+A6XX_CP_SET_PSEUDO_REG__2_HI__MASK = 0xffffffff
+A6XX_CP_SET_PSEUDO_REG__2_HI__SHIFT = 0
+REG_A6XX_CP_REG_TEST_0 = 0x00000000
+A6XX_CP_REG_TEST_0_REG__MASK = 0x0003ffff
+A6XX_CP_REG_TEST_0_REG__SHIFT = 0
+A6XX_CP_REG_TEST_0_SCRATCH_MEM_OFFSET__MASK = 0x0003ffff
+A6XX_CP_REG_TEST_0_SCRATCH_MEM_OFFSET__SHIFT = 0
+A6XX_CP_REG_TEST_0_SOURCE__MASK = 0x00040000
+A6XX_CP_REG_TEST_0_SOURCE__SHIFT = 18
+A6XX_CP_REG_TEST_0_BIT__MASK = 0x01f00000
+A6XX_CP_REG_TEST_0_BIT__SHIFT = 20
+A6XX_CP_REG_TEST_0_SKIP_WAIT_FOR_ME = 0x02000000
+A6XX_CP_REG_TEST_0_PRED_BIT__MASK = 0x7c000000
+A6XX_CP_REG_TEST_0_PRED_BIT__SHIFT = 26
+A6XX_CP_REG_TEST_0_PRED_UPDATE = 0x80000000
+REG_A6XX_CP_REG_TEST_PRED_MASK = 0x00000001
+REG_A6XX_CP_REG_TEST_PRED_VAL = 0x00000002
+REG_CP_COND_REG_EXEC_0 = 0x00000000
+CP_COND_REG_EXEC_0_REG0__MASK = 0x0003ffff
+CP_COND_REG_EXEC_0_REG0__SHIFT = 0
+CP_COND_REG_EXEC_0_PRED_BIT__MASK = 0x007c0000
+CP_COND_REG_EXEC_0_PRED_BIT__SHIFT = 18
+CP_COND_REG_EXEC_0_SKIP_WAIT_FOR_ME = 0x00800000
+CP_COND_REG_EXEC_0_ONCHIP_MEM = 0x01000000
+CP_COND_REG_EXEC_0_BINNING = 0x02000000
+CP_COND_REG_EXEC_0_GMEM = 0x04000000
+CP_COND_REG_EXEC_0_SYSMEM = 0x08000000
+CP_COND_REG_EXEC_0_BV = 0x02000000
+CP_COND_REG_EXEC_0_BR = 0x04000000
+CP_COND_REG_EXEC_0_LPAC = 0x08000000
+CP_COND_REG_EXEC_0_MODE__MASK = 0xf0000000
+CP_COND_REG_EXEC_0_MODE__SHIFT = 28
+REG_PRED_TEST_CP_COND_REG_EXEC_1 = 0x00000001
+PRED_TEST_CP_COND_REG_EXEC_1_DWORDS__MASK = 0x00ffffff
+PRED_TEST_CP_COND_REG_EXEC_1_DWORDS__SHIFT = 0
+REG_REG_COMPARE_CP_COND_REG_EXEC_1 = 0x00000001
+REG_COMPARE_CP_COND_REG_EXEC_1_REG1__MASK = 0x0003ffff
+REG_COMPARE_CP_COND_REG_EXEC_1_REG1__SHIFT = 0
+REG_COMPARE_CP_COND_REG_EXEC_1_ONCHIP_MEM = 0x01000000
+REG_RENDER_MODE_CP_COND_REG_EXEC_1 = 0x00000001
+RENDER_MODE_CP_COND_REG_EXEC_1_DWORDS__MASK = 0x00ffffff
+RENDER_MODE_CP_COND_REG_EXEC_1_DWORDS__SHIFT = 0
+REG_REG_COMPARE_IMM_CP_COND_REG_EXEC_1 = 0x00000001
+REG_COMPARE_IMM_CP_COND_REG_EXEC_1_IMM__MASK = 0xffffffff
+REG_COMPARE_IMM_CP_COND_REG_EXEC_1_IMM__SHIFT = 0
+REG_THREAD_MODE_CP_COND_REG_EXEC_1 = 0x00000001
+THREAD_MODE_CP_COND_REG_EXEC_1_DWORDS__MASK = 0x00ffffff
+THREAD_MODE_CP_COND_REG_EXEC_1_DWORDS__SHIFT = 0
+REG_CP_COND_REG_EXEC_2 = 0x00000002
+CP_COND_REG_EXEC_2_DWORDS__MASK = 0x00ffffff
+CP_COND_REG_EXEC_2_DWORDS__SHIFT = 0
+REG_CP_COND_EXEC_0 = 0x00000000
+CP_COND_EXEC_0_ADDR0_LO__MASK = 0xffffffff
+CP_COND_EXEC_0_ADDR0_LO__SHIFT = 0
+REG_CP_COND_EXEC_1 = 0x00000001
+CP_COND_EXEC_1_ADDR0_HI__MASK = 0xffffffff
+CP_COND_EXEC_1_ADDR0_HI__SHIFT = 0
+REG_CP_COND_EXEC_2 = 0x00000002
+CP_COND_EXEC_2_ADDR1_LO__MASK = 0xffffffff
+CP_COND_EXEC_2_ADDR1_LO__SHIFT = 0
+REG_CP_COND_EXEC_3 = 0x00000003
+CP_COND_EXEC_3_ADDR1_HI__MASK = 0xffffffff
+CP_COND_EXEC_3_ADDR1_HI__SHIFT = 0
+REG_CP_COND_EXEC_4 = 0x00000004
+CP_COND_EXEC_4_REF__MASK = 0xffffffff
+CP_COND_EXEC_4_REF__SHIFT = 0
+REG_CP_COND_EXEC_5 = 0x00000005
+CP_COND_EXEC_5_DWORDS__MASK = 0xffffffff
+CP_COND_EXEC_5_DWORDS__SHIFT = 0
+REG_CP_SET_AMBLE_0 = 0x00000000
+CP_SET_AMBLE_0_ADDR_LO__MASK = 0xffffffff
+CP_SET_AMBLE_0_ADDR_LO__SHIFT = 0
+REG_CP_SET_AMBLE_1 = 0x00000001
+CP_SET_AMBLE_1_ADDR_HI__MASK = 0xffffffff
+CP_SET_AMBLE_1_ADDR_HI__SHIFT = 0
+REG_CP_SET_AMBLE_2 = 0x00000002
+CP_SET_AMBLE_2_DWORDS__MASK = 0x000fffff
+CP_SET_AMBLE_2_DWORDS__SHIFT = 0
+CP_SET_AMBLE_2_TYPE__MASK = 0x00300000
+CP_SET_AMBLE_2_TYPE__SHIFT = 20
+REG_CP_REG_WRITE_0 = 0x00000000
+CP_REG_WRITE_0_TRACKER__MASK = 0x0000000f
+CP_REG_WRITE_0_TRACKER__SHIFT = 0
+REG_CP_REG_WRITE_1 = 0x00000001
+REG_CP_REG_WRITE_2 = 0x00000002
+REG_CP_SMMU_TABLE_UPDATE_0 = 0x00000000
+CP_SMMU_TABLE_UPDATE_0_TTBR0_LO__MASK = 0xffffffff
+CP_SMMU_TABLE_UPDATE_0_TTBR0_LO__SHIFT = 0
+REG_CP_SMMU_TABLE_UPDATE_1 = 0x00000001
+CP_SMMU_TABLE_UPDATE_1_TTBR0_HI__MASK = 0x0000ffff
+CP_SMMU_TABLE_UPDATE_1_TTBR0_HI__SHIFT = 0
+CP_SMMU_TABLE_UPDATE_1_ASID__MASK = 0xffff0000
+CP_SMMU_TABLE_UPDATE_1_ASID__SHIFT = 16
+REG_CP_SMMU_TABLE_UPDATE_2 = 0x00000002
+CP_SMMU_TABLE_UPDATE_2_CONTEXTIDR__MASK = 0xffffffff
+CP_SMMU_TABLE_UPDATE_2_CONTEXTIDR__SHIFT = 0
+REG_CP_SMMU_TABLE_UPDATE_3 = 0x00000003
+CP_SMMU_TABLE_UPDATE_3_CONTEXTBANK__MASK = 0xffffffff
+CP_SMMU_TABLE_UPDATE_3_CONTEXTBANK__SHIFT = 0
+REG_CP_START_BIN_BIN_COUNT = 0x00000000
+REG_CP_START_BIN_PREFIX_ADDR = 0x00000001
+REG_CP_START_BIN_PREFIX_DWORDS = 0x00000003
+REG_CP_START_BIN_BODY_DWORDS = 0x00000004
+REG_CP_WAIT_TIMESTAMP_0 = 0x00000000
+CP_WAIT_TIMESTAMP_0_WAIT_VALUE_SRC__MASK = 0x00000003
+CP_WAIT_TIMESTAMP_0_WAIT_VALUE_SRC__SHIFT = 0
+CP_WAIT_TIMESTAMP_0_WAIT_DST__MASK = 0x00000010
+CP_WAIT_TIMESTAMP_0_WAIT_DST__SHIFT = 4
+REG_TS_WAIT_RAM_CP_WAIT_TIMESTAMP_ADDR = 0x00000001
+REG_TS_WAIT_ONCHIP_CP_WAIT_TIMESTAMP_ONCHIP_ADDR_0 = 0x00000001
+REG_CP_WAIT_TIMESTAMP_SRC_0 = 0x00000003
+REG_CP_WAIT_TIMESTAMP_SRC_1 = 0x00000004
+REG_CP_BV_BR_COUNT_OPS_0 = 0x00000000
+CP_BV_BR_COUNT_OPS_0_OP__MASK = 0x0000000f
+CP_BV_BR_COUNT_OPS_0_OP__SHIFT = 0
+REG_CP_BV_BR_COUNT_OPS_1 = 0x00000001
+CP_BV_BR_COUNT_OPS_1_BR_OFFSET__MASK = 0x0000ffff
+CP_BV_BR_COUNT_OPS_1_BR_OFFSET__SHIFT = 0
+REG_CP_MODIFY_TIMESTAMP_0 = 0x00000000
+CP_MODIFY_TIMESTAMP_0_ADD__MASK = 0x000000ff
+CP_MODIFY_TIMESTAMP_0_ADD__SHIFT = 0
+CP_MODIFY_TIMESTAMP_0_OP__MASK = 0xf0000000
+CP_MODIFY_TIMESTAMP_0_OP__SHIFT = 28
+REG_CP_MEM_TO_SCRATCH_MEM_0 = 0x00000000
+CP_MEM_TO_SCRATCH_MEM_0_CNT__MASK = 0x0000003f
+CP_MEM_TO_SCRATCH_MEM_0_CNT__SHIFT = 0
+REG_CP_MEM_TO_SCRATCH_MEM_1 = 0x00000001
+CP_MEM_TO_SCRATCH_MEM_1_OFFSET__MASK = 0x0000003f
+CP_MEM_TO_SCRATCH_MEM_1_OFFSET__SHIFT = 0
+REG_CP_MEM_TO_SCRATCH_MEM_2 = 0x00000002
+CP_MEM_TO_SCRATCH_MEM_2_SRC__MASK = 0xffffffff
+CP_MEM_TO_SCRATCH_MEM_2_SRC__SHIFT = 0
+REG_CP_MEM_TO_SCRATCH_MEM_3 = 0x00000003
+CP_MEM_TO_SCRATCH_MEM_3_SRC_HI__MASK = 0xffffffff
+CP_MEM_TO_SCRATCH_MEM_3_SRC_HI__SHIFT = 0
+REG_CP_THREAD_CONTROL_0 = 0x00000000
+CP_THREAD_CONTROL_0_THREAD__MASK = 0x00000003
+CP_THREAD_CONTROL_0_THREAD__SHIFT = 0
+CP_THREAD_CONTROL_0_CONCURRENT_BIN_DISABLE = 0x08000000
+CP_THREAD_CONTROL_0_SYNC_THREADS = 0x80000000
+REG_CP_FIXED_STRIDE_DRAW_TABLE_IB_BASE = 0x00000000
+REG_CP_FIXED_STRIDE_DRAW_TABLE_2 = 0x00000002
+CP_FIXED_STRIDE_DRAW_TABLE_2_IB_SIZE__MASK = 0x00000fff
+CP_FIXED_STRIDE_DRAW_TABLE_2_IB_SIZE__SHIFT = 0
+CP_FIXED_STRIDE_DRAW_TABLE_2_STRIDE__MASK = 0xfff00000
+CP_FIXED_STRIDE_DRAW_TABLE_2_STRIDE__SHIFT = 20
+REG_CP_FIXED_STRIDE_DRAW_TABLE_3 = 0x00000003
+CP_FIXED_STRIDE_DRAW_TABLE_3_COUNT__MASK = 0xffffffff
+CP_FIXED_STRIDE_DRAW_TABLE_3_COUNT__SHIFT = 0
+REG_CP_RESET_CONTEXT_STATE_0 = 0x00000000
+CP_RESET_CONTEXT_STATE_0_CLEAR_ON_CHIP_TS = 0x00000001
+CP_RESET_CONTEXT_STATE_0_CLEAR_RESOURCE_TABLE = 0x00000002
+CP_RESET_CONTEXT_STATE_0_CLEAR_BV_BR_COUNTER = 0x00000004
+CP_RESET_CONTEXT_STATE_0_RESET_GLOBAL_LOCAL_TS = 0x00000008
+REG_CP_SCOPE_CNTL_0 = 0x00000000
+CP_SCOPE_CNTL_0_DISABLE_PREEMPTION = 0x00000001
+CP_SCOPE_CNTL_0_SCOPE__MASK = 0xf0000000
+CP_SCOPE_CNTL_0_SCOPE__SHIFT = 28
+REG_A5XX_CP_INDIRECT_BUFFER_IB_BASE = 0x00000000
+REG_A5XX_CP_INDIRECT_BUFFER_2 = 0x00000002
+A5XX_CP_INDIRECT_BUFFER_2_IB_SIZE__MASK = 0x000fffff
+A5XX_CP_INDIRECT_BUFFER_2_IB_SIZE__SHIFT = 0
+__struct__cast = lambda X: (struct_X)
+__struct__cast = lambda X: (struct_X)
+REG_A6XX_TEX_SAMP_0 = 0x00000000
+A6XX_TEX_SAMP_0_MIPFILTER_LINEAR_NEAR = 0x00000001
+A6XX_TEX_SAMP_0_XY_MAG__MASK = 0x00000006
+A6XX_TEX_SAMP_0_XY_MAG__SHIFT = 1
+A6XX_TEX_SAMP_0_XY_MIN__MASK = 0x00000018
+A6XX_TEX_SAMP_0_XY_MIN__SHIFT = 3
+A6XX_TEX_SAMP_0_WRAP_S__MASK = 0x000000e0
+A6XX_TEX_SAMP_0_WRAP_S__SHIFT = 5
+A6XX_TEX_SAMP_0_WRAP_T__MASK = 0x00000700
+A6XX_TEX_SAMP_0_WRAP_T__SHIFT = 8
+A6XX_TEX_SAMP_0_WRAP_R__MASK = 0x00003800
+A6XX_TEX_SAMP_0_WRAP_R__SHIFT = 11
+A6XX_TEX_SAMP_0_ANISO__MASK = 0x0001c000
+A6XX_TEX_SAMP_0_ANISO__SHIFT = 14
+A6XX_TEX_SAMP_0_LOD_BIAS__MASK = 0xfff80000
+A6XX_TEX_SAMP_0_LOD_BIAS__SHIFT = 19
+REG_A6XX_TEX_SAMP_1 = 0x00000001
+A6XX_TEX_SAMP_1_CLAMPENABLE = 0x00000001
+A6XX_TEX_SAMP_1_COMPARE_FUNC__MASK = 0x0000000e
+A6XX_TEX_SAMP_1_COMPARE_FUNC__SHIFT = 1
+A6XX_TEX_SAMP_1_CUBEMAPSEAMLESSFILTOFF = 0x00000010
+A6XX_TEX_SAMP_1_UNNORM_COORDS = 0x00000020
+A6XX_TEX_SAMP_1_MIPFILTER_LINEAR_FAR = 0x00000040
+A6XX_TEX_SAMP_1_MAX_LOD__MASK = 0x000fff00
+A6XX_TEX_SAMP_1_MAX_LOD__SHIFT = 8
+A6XX_TEX_SAMP_1_MIN_LOD__MASK = 0xfff00000
+A6XX_TEX_SAMP_1_MIN_LOD__SHIFT = 20
+REG_A6XX_TEX_SAMP_2 = 0x00000002
+A6XX_TEX_SAMP_2_REDUCTION_MODE__MASK = 0x00000003
+A6XX_TEX_SAMP_2_REDUCTION_MODE__SHIFT = 0
+A6XX_TEX_SAMP_2_FASTBORDERCOLOR__MASK = 0x0000000c
+A6XX_TEX_SAMP_2_FASTBORDERCOLOR__SHIFT = 2
+A6XX_TEX_SAMP_2_FASTBORDERCOLOREN = 0x00000010
+A6XX_TEX_SAMP_2_CHROMA_LINEAR = 0x00000020
+A6XX_TEX_SAMP_2_BCOLOR__MASK = 0xffffff80
+A6XX_TEX_SAMP_2_BCOLOR__SHIFT = 7
+REG_A6XX_TEX_SAMP_3 = 0x00000003
+REG_A6XX_TEX_CONST_0 = 0x00000000
+A6XX_TEX_CONST_0_TILE_MODE__MASK = 0x00000003
+A6XX_TEX_CONST_0_TILE_MODE__SHIFT = 0
+A6XX_TEX_CONST_0_SRGB = 0x00000004
+A6XX_TEX_CONST_0_SWIZ_X__MASK = 0x00000070
+A6XX_TEX_CONST_0_SWIZ_X__SHIFT = 4
+A6XX_TEX_CONST_0_SWIZ_Y__MASK = 0x00000380
+A6XX_TEX_CONST_0_SWIZ_Y__SHIFT = 7
+A6XX_TEX_CONST_0_SWIZ_Z__MASK = 0x00001c00
+A6XX_TEX_CONST_0_SWIZ_Z__SHIFT = 10
+A6XX_TEX_CONST_0_SWIZ_W__MASK = 0x0000e000
+A6XX_TEX_CONST_0_SWIZ_W__SHIFT = 13
+A6XX_TEX_CONST_0_MIPLVLS__MASK = 0x000f0000
+A6XX_TEX_CONST_0_MIPLVLS__SHIFT = 16
+A6XX_TEX_CONST_0_CHROMA_MIDPOINT_X = 0x00010000
+A6XX_TEX_CONST_0_CHROMA_MIDPOINT_Y = 0x00040000
+A6XX_TEX_CONST_0_SAMPLES__MASK = 0x00300000
+A6XX_TEX_CONST_0_SAMPLES__SHIFT = 20
+A6XX_TEX_CONST_0_FMT__MASK = 0x3fc00000
+A6XX_TEX_CONST_0_FMT__SHIFT = 22
+A6XX_TEX_CONST_0_SWAP__MASK = 0xc0000000
+A6XX_TEX_CONST_0_SWAP__SHIFT = 30
+REG_A6XX_TEX_CONST_1 = 0x00000001
+A6XX_TEX_CONST_1_WIDTH__MASK = 0x00007fff
+A6XX_TEX_CONST_1_WIDTH__SHIFT = 0
+A6XX_TEX_CONST_1_HEIGHT__MASK = 0x3fff8000
+A6XX_TEX_CONST_1_HEIGHT__SHIFT = 15
+A6XX_TEX_CONST_1_MUTABLEEN = 0x80000000
+REG_A6XX_TEX_CONST_2 = 0x00000002
+A6XX_TEX_CONST_2_STRUCTSIZETEXELS__MASK = 0x0000fff0
+A6XX_TEX_CONST_2_STRUCTSIZETEXELS__SHIFT = 4
+A6XX_TEX_CONST_2_STARTOFFSETTEXELS__MASK = 0x003f0000
+A6XX_TEX_CONST_2_STARTOFFSETTEXELS__SHIFT = 16
+A6XX_TEX_CONST_2_PITCHALIGN__MASK = 0x0000000f
+A6XX_TEX_CONST_2_PITCHALIGN__SHIFT = 0
+A6XX_TEX_CONST_2_PITCH__MASK = 0x1fffff80
+A6XX_TEX_CONST_2_PITCH__SHIFT = 7
+A6XX_TEX_CONST_2_TYPE__MASK = 0xe0000000
+A6XX_TEX_CONST_2_TYPE__SHIFT = 29
+REG_A6XX_TEX_CONST_3 = 0x00000003
+A6XX_TEX_CONST_3_ARRAY_PITCH__MASK = 0x007fffff
+A6XX_TEX_CONST_3_ARRAY_PITCH__SHIFT = 0
+A6XX_TEX_CONST_3_MIN_LAYERSZ__MASK = 0x07800000
+A6XX_TEX_CONST_3_MIN_LAYERSZ__SHIFT = 23
+A6XX_TEX_CONST_3_TILE_ALL = 0x08000000
+A6XX_TEX_CONST_3_FLAG = 0x10000000
+REG_A6XX_TEX_CONST_4 = 0x00000004
+A6XX_TEX_CONST_4_BASE_LO__MASK = 0xffffffe0
+A6XX_TEX_CONST_4_BASE_LO__SHIFT = 5
+REG_A6XX_TEX_CONST_5 = 0x00000005
+A6XX_TEX_CONST_5_BASE_HI__MASK = 0x0001ffff
+A6XX_TEX_CONST_5_BASE_HI__SHIFT = 0
+A6XX_TEX_CONST_5_DEPTH__MASK = 0x3ffe0000
+A6XX_TEX_CONST_5_DEPTH__SHIFT = 17
+REG_A6XX_TEX_CONST_6 = 0x00000006
+A6XX_TEX_CONST_6_MIN_LOD_CLAMP__MASK = 0x00000fff
+A6XX_TEX_CONST_6_MIN_LOD_CLAMP__SHIFT = 0
+A6XX_TEX_CONST_6_PLANE_PITCH__MASK = 0xffffff00
+A6XX_TEX_CONST_6_PLANE_PITCH__SHIFT = 8
+REG_A6XX_TEX_CONST_7 = 0x00000007
+A6XX_TEX_CONST_7_FLAG_LO__MASK = 0xffffffe0
+A6XX_TEX_CONST_7_FLAG_LO__SHIFT = 5
+REG_A6XX_TEX_CONST_8 = 0x00000008
+A6XX_TEX_CONST_8_FLAG_HI__MASK = 0x0001ffff
+A6XX_TEX_CONST_8_FLAG_HI__SHIFT = 0
+REG_A6XX_TEX_CONST_9 = 0x00000009
+A6XX_TEX_CONST_9_FLAG_BUFFER_ARRAY_PITCH__MASK = 0x0001ffff
+A6XX_TEX_CONST_9_FLAG_BUFFER_ARRAY_PITCH__SHIFT = 0
+REG_A6XX_TEX_CONST_10 = 0x0000000a
+A6XX_TEX_CONST_10_FLAG_BUFFER_PITCH__MASK = 0x0000007f
+A6XX_TEX_CONST_10_FLAG_BUFFER_PITCH__SHIFT = 0
+A6XX_TEX_CONST_10_FLAG_BUFFER_LOGW__MASK = 0x00000f00
+A6XX_TEX_CONST_10_FLAG_BUFFER_LOGW__SHIFT = 8
+A6XX_TEX_CONST_10_FLAG_BUFFER_LOGH__MASK = 0x0000f000
+A6XX_TEX_CONST_10_FLAG_BUFFER_LOGH__SHIFT = 12
+REG_A6XX_TEX_CONST_11 = 0x0000000b
+REG_A6XX_TEX_CONST_12 = 0x0000000c
+REG_A6XX_TEX_CONST_13 = 0x0000000d
+REG_A6XX_TEX_CONST_14 = 0x0000000e
+REG_A6XX_TEX_CONST_15 = 0x0000000f
+REG_A6XX_UBO_0 = 0x00000000
+A6XX_UBO_0_BASE_LO__MASK = 0xffffffff
+A6XX_UBO_0_BASE_LO__SHIFT = 0
+REG_A6XX_UBO_1 = 0x00000001
+A6XX_UBO_1_BASE_HI__MASK = 0x0001ffff
+A6XX_UBO_1_BASE_HI__SHIFT = 0
+A6XX_UBO_1_SIZE__MASK = 0xfffe0000
+A6XX_UBO_1_SIZE__SHIFT = 17
 lvp_nir_options = gzip.decompress(base64.b64decode("H4sIAAAAAAAAA2NgZGRkYGAAkYxgCsQFsxigwgwQBoxmhCqFq2WEKwIrAEGIkQxoAEMALwCqVsCiGUwLMHA0QPn29nBJkswHANb8YpH4AAAA"))

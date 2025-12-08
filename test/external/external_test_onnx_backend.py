@@ -170,6 +170,19 @@ backend_test.exclude('test_scan_*')
 backend_test.exclude('test_split_to_sequence_*')
 backend_test.exclude('test_ai_onnx_ml_tree_ensemble_*') # https://github.com/onnx/onnx/blob/main/onnx/reference/ops/aionnxml/op_tree_ensemble.py#L121
 
+# TODO: not yet implemented
+backend_test.exclude('test_tensorscatter_*')
+backend_test.exclude('test_l1normalization_*')
+backend_test.exclude('test_l2normalization_*')
+backend_test.exclude('test_lpnormalization_*')
+backend_test.exclude('test_einsum_scalar_cpu')
+backend_test.exclude('test_mod_mixed_sign_float16_cpu')
+backend_test.exclude('test_qlinearmatmul_2D_uint8_float16_cpu')
+backend_test.exclude('test_qlinearmatmul_3D_uint8_float16_cpu')
+backend_test.exclude('test_attention_3d_*')
+backend_test.exclude('test_attention_4d_*')
+
+
 # rest of the failing tests
 backend_test.exclude('test_resize_tf_crop_and_resize_cpu') # tf_crop_and_resize not implemented
 backend_test.exclude('test_resize_tf_crop_and_resize_axes_2_3_cpu') # tf_crop_and_resize not implemented
@@ -183,9 +196,6 @@ backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_value_only_mapping_cp
 backend_test.exclude('test_ai_onnx_ml_label_encoder_tensor_mapping_cpu') # bad data type string
 backend_test.exclude('test_if_opt_cpu') # ValueError: 13 is not a valid AttributeType
 backend_test.exclude('test_if_seq_cpu') # NotImplementedError: op='SequenceConstruct' is not supported
-
-backend_test.exclude('test_scatternd_min_cpu') # min not yet supported
-backend_test.exclude('test_scatternd_max_cpu') # max not yet supported
 
 # regression from removing StrEnum in Domain
 backend_test.exclude('test_adam_cpu')

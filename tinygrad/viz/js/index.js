@@ -376,7 +376,7 @@ async function renderProfiler(path, unit, opts) {
       for (const [num, {dtype, sz, nbytes, y, x:steps, users}] of buf_shapes) {
         const x = steps.map(s => timestamps[s]);
         const dur = x.at(-1)-x[0];
-        const arg = { tooltipText:`${dtype}\n${sz}\n${formatUnit(nbytes, 'B')}\n${formatTime(dur)}`, users, key:`${k}-${shapes.length}` };
+        const arg = { tooltipText:`${dtype}\n${formatUnit(sz)}\n${formatUnit(nbytes, 'B')}\n${formatTime(dur)}`, users, key:`${k}-${shapes.length}` };
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
         users?.forEach((u) => selectShape(u.shape).e?.arg.bufs.push({ key:arg.key, nbytes, num:u.num, mode:u.mode, k }));
       }
@@ -636,6 +636,9 @@ hljs.registerLanguage("cpp", (hljs) => ({
   ...hljs.getLanguage('cpp'),
   contains: [{ begin: '\\b(?:float|half)[0-9]+\\b', className: 'type' }, ...hljs.getLanguage('cpp').contains]
 }));
+hljs.registerLanguage("amdgpu", (hljs) => ({
+  contains: [hljs.COMMENT("//", "$"), { begin:/\b(?:s_|v_|global_|buffer_|scratch_|flat_|ds_)[a-z0-9_]*\b/, className:"code" }]
+}));
 
 async function fetchValue(path) {
   const res = await fetch(path);
@@ -784,7 +787,7 @@ async function main() {
           }
           const td = tr.append("td").classed(ret.cols[i], true);
           // string format scalar values
-          if (!Array.isArray(value)) { td.text(value); continue; }
+          if (!Array.isArray(value)) { td.text(typeof value === "string" ? value : formatUnit(value)); continue; }
           // display arrays in a bar graph
           td.classed("pct-row", true);
           const bar = td.append("div");
@@ -796,11 +799,14 @@ async function main() {
     }
     if (ret.cols != null) {
       renderTable(root, ret);
-      metadata.appendChild(tabulate(ret.summary.map(s => {
-        const div = d3.create("div").style("background", cycleColors(colorScheme.CATEGORICAL, s.idx)).style("width", "100%").style("height", "100%");
-        return [s.label.trim(), div.text(s.value.toLocaleString()).node()];
-      })).node());
     } else root.append(() => codeBlock(ret.src, ret.lang || "txt"));
+    ret.metadata?.forEach(m => {
+      if (Array.isArray(m)) return metadata.appendChild(tabulate(m.map(({ label, value, idx }) => {
+        const div = d3.create("div").style("background", cycleColors(colorScheme.CATEGORICAL, idx)).style("width", "100%").style("height", "100%");
+        return [label.trim(), div.text(typeof value === "string" ? value : formatUnit(value)).node()];
+      })).node());
+      metadata.appendChild(codeBlock(m.src, "txt")).classList.add("full-height")
+    });
     return document.querySelector("#custom").replaceChildren(root.node());
   }
   // ** UOp view (default)
