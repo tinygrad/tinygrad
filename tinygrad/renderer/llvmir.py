@@ -62,6 +62,40 @@ def render_wmma_amd(ctx, wmma: UOp, cdna=False) -> str:
     f"{dt_map[wmma.src[0].dtype.scalar()]}(" + ", ".join([f"{ldt(w.dtype)} {ctx[w]}" for w in wmma.src]) + (", i1 false)" \
       if wmma.dtype.scalar() != dtypes.float else ")")
 
+def render_pow(ctx, x, base, exp):
+  # Use alloca to avoid phi node complexity (mem2reg will fix this)
+  # TODO: this assumes we have stack space
+  ptr_t = ldt(x.dtype) + "*"
+  val_t = ldt(x.dtype)
+  return "\n".join([
+    f"  {ctx[x]}_b_ptr = alloca {val_t}, align {x.dtype.itemsize}",
+    f"  {ctx[x]}_e_ptr = alloca {val_t}, align {x.dtype.itemsize}",
+    f"  {ctx[x]}_r_ptr = alloca {val_t}, align {x.dtype.itemsize}",
+    f"  store {val_t} {ctx[base]}, {ptr_t} {ctx[x]}_b_ptr, align {x.dtype.itemsize}",
+    f"  store {val_t} {ctx[exp]}, {ptr_t} {ctx[x]}_e_ptr, align {x.dtype.itemsize}",
+    f"  store {val_t} 1, {ptr_t} {ctx[x]}_r_ptr, align {x.dtype.itemsize}",
+    f"  br label %pow_head_{ctx[x][1:]}",
+    f"pow_head_{ctx[x][1:]}:",
+    f"  {ctx[x]}_e = load {val_t}, {ptr_t} {ctx[x]}_e_ptr, align {x.dtype.itemsize}",
+    f"  {ctx[x]}_cond = {lop[x.dtype.scalar()][Ops.CMPLT]} {val_t} 0, {ctx[x]}_e", # Check e > 0 (reversed logic in loop check)
+    f"  br i1 {ctx[x]}_cond, label %pow_body_{ctx[x][1:]}, label %pow_exit_{ctx[x][1:]}",
+    f"pow_body_{ctx[x][1:]}:",
+    f"  {ctx[x]}_b = load {val_t}, {ptr_t} {ctx[x]}_b_ptr, align {x.dtype.itemsize}",
+    f"  {ctx[x]}_r = load {val_t}, {ptr_t} {ctx[x]}_r_ptr, align {x.dtype.itemsize}",
+    f"  {ctx[x]}_is_odd = and {val_t} {ctx[x]}_e, 1",
+    f"  {ctx[x]}_do_mul = icmp ne {val_t} {ctx[x]}_is_odd, 0",
+    f"  {ctx[x]}_mul = mul {val_t} {ctx[x]}_r, {ctx[x]}_b",
+    f"  {ctx[x]}_new_r = select i1 {ctx[x]}_do_mul, {val_t} {ctx[x]}_mul, {val_t} {ctx[x]}_r",
+    f"  store {val_t} {ctx[x]}_new_r, {ptr_t} {ctx[x]}_r_ptr, align {x.dtype.itemsize}",
+    f"  {ctx[x]}_new_b = mul {val_t} {ctx[x]}_b, {ctx[x]}_b",
+    f"  store {val_t} {ctx[x]}_new_b, {ptr_t} {ctx[x]}_b_ptr, align {x.dtype.itemsize}",
+    f"  {ctx[x]}_new_e = {lop[x.dtype.scalar()][Ops.SHR]} {val_t} {ctx[x]}_e, 1",
+    f"  store {val_t} {ctx[x]}_new_e, {ptr_t} {ctx[x]}_e_ptr, align {x.dtype.itemsize}",
+    f"  br label %pow_head_{ctx[x][1:]}",
+    f"pow_exit_{ctx[x][1:]}:",
+    f"  {ctx[x]} = load {val_t}, {ptr_t} {ctx[x]}_r_ptr, align {x.dtype.itemsize}"
+  ])
+
 # llvm ops, lop[<dtype>][<op>]
 unsigned_lop = { Ops.ADD: "add", Ops.MUL: "mul", Ops.IDIV: "udiv", Ops.MOD: "urem",
                  Ops.CMPLT: "icmp ult", Ops.CMPNE: "icmp ne", Ops.CMPEQ: "icmp eq", Ops.OR: "or", Ops.AND: "and", Ops.XOR: "xor",}
@@ -127,7 +161,7 @@ base_rewrite = PatternMatcher([
   # if
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"  br i1 {ctx[x.src[0]]}, label %ifbody_{ctx[x][1:]}, label %ifskip_{ctx[x][1:]}\nifbody_{ctx[x][1:]}:"),
   (UPat(Ops.ENDIF, name="x"), lambda ctx,x: f"  br label %ifskip_{ctx[x.src[0]][1:]}\nifskip_{ctx[x.src[0]][1:]}:"),
-
+  (UPat(Ops.POW, dtype=dtypes.ints, src=(UPat.var("b"), UPat.var("e")), name="x"), lambda ctx,x,b,e: render_pow(ctx, x, b, e)),
   (UPat(Ops.BARRIER), lambda ctx: "")
 ])
 
@@ -138,7 +172,7 @@ class LLVMRenderer(Renderer):
   has_local = False
   global_max: tuple[int, ...] | None = None
   string_rewrite = base_rewrite + PatternMatcher([(UPat(Ops.WMMA, name="wmma"), render_wmma_amx)])
-  code_for_op = {Ops.FDIV: lambda: None, Ops.CMPLT: lambda: None}
+  code_for_op = {Ops.FDIV: lambda: None, Ops.CMPLT: lambda: None, Ops.POW: lambda: None}
   if AMX: tensor_cores = tc.amx
 
   extra_matcher = create_non_native_float_pats((dtypes.bfloat16,))

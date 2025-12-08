@@ -30,8 +30,9 @@ asm_for_op: dict[Ops, Callable] = {
   Ops.MAX: lambda d,a,b,dt,name: f"max.{name} {d}, {a}, {b};", Ops.CMPEQ: lambda d,a,b,dt,name: f"setp.eq.{name} {d}, {a}, {b};",
   Ops.CMPLT: lambda d,a,b,dt,name: f"setp.lt.{name} {d}, {a}, {b};", Ops.CMPNE: lambda d,a,b,dt,name: f"setp.ne.{name} {d}, {a}, {b};",
   Ops.MULACC: lambda d,a,b,c,dt,name: f"{'fma.rn' if dtypes.is_float(dt) else 'mad.lo'}.{name} {d}, {a}, {b}, {c};",
-  Ops.WHERE: lambda d,a,b,c,dt,name: [f"@{a} mov.{name} {d}, {b};", f"@!{a} mov.{name} {d}, {c};"] if dt == dtypes.bool else \
-    f"selp.{'b16' if name == 'f16' else name} {d}, {b}, {c}, {a};"
+    Ops.WHERE: lambda d,a,b,c,dt,name: [f"@{a} mov.{name} {d}, {b};", f"@!{a} mov.{name} {d}, {c};"] if dt == dtypes.bool else \
+    f"selp.{'b16' if name == 'f16' else name} {d}, {b}, {c}, {a};",
+  Ops.POW: lambda: None,
 }
 
 supports_half = (Ops.EXP2, Ops.ADD, Ops.MUL, Ops.MAX, Ops.CMPLT, Ops.WHERE, Ops.TRUNC)
@@ -84,6 +85,27 @@ def render_wmma(ctx: "PTXRenderer", wmma: UOp):
     if (elems_per_reg := 4 // dtype_out.itemsize) == 1: yield f"mov.b32 {ctx.r[wmma][i]}, {reg};"
     else: yield f"mov.b32 {{{', '.join(ctx.r[wmma][i * elems_per_reg : (i+1) * elems_per_reg])}}}, {reg};"
 
+def render_pow(ctx, x, base, exp):
+  dt = ctx.types[x.dtype.scalar()]
+  pred = "pred"
+  return [
+    f"mov.{dt} {ctx.r[x]}, 1;",
+    f"mov.{dt} {ctx.r[x]}_b, {ctx.r[base]};",
+    f"mov.{dt} {ctx.r[x]}_e, {ctx.r[exp]};",
+    f"$pow_loop_{ctx.r[x]}:",
+    f"setp.le.{dt} %p, {ctx.r[x]}_e, 0;",
+    f"@%p bra $pow_exit_{ctx.r[x]};",
+    f"and.b{dt[1:]} {ctx.r[x]}_odd, {ctx.r[x]}_e, 1;",
+    f"setp.eq.{dt} %p_skip, {ctx.r[x]}_odd, 0;",
+    f"@%p_skip bra $pow_skip_mul_{ctx.r[x]};",
+    f"mul.lo.{dt} {ctx.r[x]}, {ctx.r[x]}, {ctx.r[x]}_b;",
+    f"$pow_skip_mul_{ctx.r[x]}:",
+    f"mul.lo.{dt} {ctx.r[x]}_b, {ctx.r[x]}_b, {ctx.r[x]}_b;",
+    f"shr.{dt} {ctx.r[x]}_e, {ctx.r[x]}_e, 1;",
+    f"bra $pow_loop_{ctx.r[x]};",
+    f"$pow_exit_{ctx.r[x]}:"
+  ]
+
 def modifier(a: DType, b: DType): return '.rzi' if dtypes.is_int(a) and dtypes.is_float(b) else '.rn' if dtypes.is_float(a) and \
   (a.itemsize < b.itemsize or dtypes.is_int(b) or b == dtypes.bool) else ''
 
@@ -95,6 +117,8 @@ string_rewrite = PatternMatcher([
   (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ), name="x", allow_any_len=True, src=(UPat.var("src0"),)),
     lambda ctx, x, src0: ctx.code_for_op[x.op](ctx.r[x], *[ctx.r[v] for v in x.src], src0.dtype, ctx.types[src0.dtype])),
   (UPat(GroupOp.ALU, name="x"), lambda ctx, x: ctx.code_for_op[x.op](ctx.r[x], *[ctx.r[v] for v in x.src], x.dtype, ctx.types[x.dtype])),
+  (UPat(Ops.POW, dtype=dtypes.ints, src=(UPat.var("b"), UPat.var("e")), name="x"), 
+    lambda ctx, x, b, e: render_pow(ctx, x, b, e)),
   (UPat(Ops.BITCAST, name="x", src=(UPat.var("a"),), allow_any_len=True), lambda ctx, x, a: f"mov.b{ctx.types[x.dtype][1:]} {ctx.r[x]}, {ctx.r[a]};"),
   (UPat(Ops.CAST, name="x", src=(UPat(dtype=dtypes.bool, name="a"),)),
    lambda ctx, x, a: f"selp.b{ctx.types[x.dtype][1:]} {ctx.r[x]}, {render_val(1, x.dtype)}, {render_val(0, x.dtype)}, {ctx.r[a]};"),

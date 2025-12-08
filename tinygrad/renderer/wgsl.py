@@ -49,7 +49,8 @@ class WGSLRenderer(CStyleLanguage):
   extra_matcher = wgsl_matcher
   supports_float4 = False
   barrier = "workgroupBarrier();"
-  code_for_op = {**CStyleLanguage.code_for_op, Ops.WHERE: lambda a,b,c,dtype: f"select({c},{b},{a})"}
+  code_for_op = {**CStyleLanguage.code_for_op, Ops.WHERE: lambda a,b,c,dtype: f"select({c},{b},{a})",
+               Ops.POW: lambda a,b,dtype: f"_int_pow({a},{b})" if dtypes.is_int(dtype) else f"pow({a},{b})"}
   nan = "nan()"
   type_map = { dtypes.float: "f32", dtypes.uchar: "u32", dtypes.ushort: "u32", dtypes.short: "i32",
               dtypes.char: "i32", dtypes.int32: "i32", dtypes.uint32: "u32", dtypes.bool: "bool", dtypes.half: "f16" }
@@ -94,6 +95,18 @@ class WGSLRenderer(CStyleLanguage):
     kernel[:] = [line for line in kernel if "var<workgroup>" not in line]
     prg = "enable f16;\n" if any(uop.dtype.base == dtypes.half for uop in uops) else ""
     prg += "fn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\n"
+    if any(uop.op == Ops.POW and dtypes.is_int(uop.dtype) for uop in uops):
+      prg += """fn _int_pow(base: i32, exp: i32) -> i32 {
+    var b = base;
+    var e = exp;
+    var res = 1;
+    while (e > 0) {
+      if ((e & 1) != 0) { res *= b; }
+      b *= b;
+      e >>= 1u;
+    }
+    return res;
+}\n"""
     prg += "@group(0) @binding(0)\nvar<uniform> INFINITY : f32;\n"
     prg += "\n".join((external_local_bufs or [])+[f"@group(0) @binding({next(bind_it)+1})" +
       f"{'var<storage,read_write>' if isinstance(dtype, PtrDType) else 'var<uniform>'}" +
