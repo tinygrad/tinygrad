@@ -264,7 +264,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
         events.append(ProfileRangeEvent(occ.simd_loc, f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)), Decimal(occ.time)))
     prg_cu = sorted(cu_events, key=row_tuple)
     if cu_events: summary.append(f"Scheduled on {len(prg_cu)} CUs")
-    steps.append(create_step(program.name if program else key[0], ("/counters", len(ctxs), len(steps)), {"src":"\n\n".join(summary)}, depth=1))
+    steps.append(create_step(program.name if program else key[0], ("/prg-run", len(ctxs), len(steps)), {"src":"\n\n".join(summary)}, depth=0))
     # ** PMC events
     if (pmc_event:=next((e for e in counters if isinstance(e, ProfilePMCEvent)), None)) is not None:
       agg_cols = ["Name", "Sum"]
@@ -278,14 +278,14 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
           row[2]["rows"].append(sample+(val,))
           ptr += 1
         rows.append(row)
-      steps.append(create_step("PMC", ("/pmc", len(ctxs), len(steps)), {"rows":rows, "cols":agg_cols}, depth=2))
+      steps.append(create_step("PMC", ("/pmc", len(ctxs), len(steps)), {"rows":rows, "cols":agg_cols}, depth=1))
     for cu in prg_cu:
       events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]
       steps.append(create_step(f"{cu} {len(cu_events[cu])}", ("/counters", len(ctxs), len(steps)),
-                               {"value":get_profile(events, sort_fn=row_tuple), "content_type":"application/octet-stream"}, depth=2))
+                               {"value":get_profile(events, sort_fn=row_tuple), "content_type":"application/octet-stream"}, depth=1))
       for k in sorted(wave_insts.get(cu, []), key=row_tuple):
         data = wave_insts[cu][k]
-        steps.append(create_step(k.replace(cu, ""), ("/sqtt-insts", len(ctxs), len(steps)), data, loc=data["loc"], depth=3))
+        steps.append(create_step(k.replace(cu, ""), ("/sqtt-insts", len(ctxs), len(steps)), data, loc=data["loc"], depth=2))
   ctxs.append({"name":"Counters", "steps":steps})
 
 def device_sort_fn(k:str) -> tuple[int, str, int]:
