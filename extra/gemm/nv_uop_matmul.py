@@ -12,9 +12,9 @@ run_count = getenv("CNT", 5)
 
 WARP_SIZE = 32
 
-BLOCK_N = 128   # columns of C per block
+BLOCK_N = 256   # columns of C per block
 BLOCK_M = 128   # rows of C per block
-BLOCK_K = 32    # K-slice per block iteration
+BLOCK_K = 64    # K-slice per block iteration
 
 TN = 4  # columns per thread
 TM = 4  # rows per thread
