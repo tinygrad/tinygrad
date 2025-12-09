@@ -8,16 +8,22 @@ from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, AddrSpace, trunc
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu
 
-_INT_POW_FUNC = """inline int _int_pow(int b, int e) {
-  if (e < 0) return b == 1 ? 1 : (b == -1 ? ((e & 1) ? -1 : 1) : 0);
-  int r = 1;
-  while (e > 0) {
-    if (e & 1) r *= b;
-    b *= b;
-    e >>= 1;
-  }
-  return r;
-}"""
+def render_pow_cstyle(ctx, x, b, e):
+  bits, dtype, dt = x.dtype.itemsize * 8, x.dtype, ctx.render_dtype(x.dtype)
+  one = ctx.render_cast(dtype, "1")
+  neg_one = ctx.render_cast(dtype, "-1")
+  logic = [f"{dt} {ctx[x]} = {one};", f"{dt} {ctx[x]}_b = {ctx[b]};"]
+  for i in range(bits):
+    logic.append(f"if((({ctx[e]} >> {i}) & 1) != 0) {ctx[x]} *= {ctx[x]}_b;")
+    if i < bits - 1: logic.append(f"{ctx[x]}_b *= {ctx[x]}_b;")
+  if dtype in dtypes.sints:
+    base_is_one = f"({ctx[b]} == {one})"
+    base_is_neg_one = f"({ctx[b]} == {neg_one})"
+    exp_is_odd = f"(({ctx[e]} & 1) != 0)"
+    neg_res = f"({base_is_one} ? {one} : ({base_is_neg_one} ? ({exp_is_odd} ? {neg_one} : {one}) : 0))"
+    logic.append(f"{ctx[x]} = ({ctx[e]} < 0) ? {neg_res} : {ctx[x]};")
+  return " ".join(logic)
+
 base_rewrite = PatternMatcher([
   (UPat(Ops.DEFINE_REG, name="x"), lambda ctx,x: f"{ctx.render_dtype(x.dtype.base)} {ctx[x]}[{x.dtype.size}];"),
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"if ({ctx[x.src[0]]}) {{"),
@@ -59,6 +65,7 @@ base_rewrite = PatternMatcher([
    lambda ctx,bidx,var,gate: f"({ctx[gate]}?*{ctx[bidx]}:{ctx[var]})"),
   (UPat(Ops.LOAD, src=(UPat.var('bidx'),), allow_any_len=True), lambda ctx,bidx: f"(*{ctx[bidx]})"),
   (UPat(Ops.STORE, src=(UPat.var('bidx'), UPat.var("var")), allow_any_len=True), lambda ctx,bidx,var: f"*{ctx[bidx]} = {ctx[var]};"),
+  (UPat(Ops.POW, dtype=dtypes.ints, src=(UPat.var("b"), UPat.var("e")), name="x"), lambda ctx,x,b,e: render_pow_cstyle(ctx, x, b, e)),
   # alu/gep
   # TODO: look for left-associative
   (UPat(GroupOp.ALU, name="x"), lambda ctx,x: ctx.code_for_op[x.op](
@@ -125,16 +132,13 @@ class CStyleLanguage(Renderer):
     Ops.MOD: lambda a,b,dtype: f"({a}%{b})", Ops.IDIV: lambda a,b,dtype: f"({a}/{b})", Ops.CMPNE: lambda a,b,dtype: f"({a}!={b})",
     Ops.SHR: lambda a,b,dtype: f"({a}>>{b})", Ops.SHL: lambda a,b,dtype: f"({a}<<{b})", Ops.CMPLT: lambda a,b,dtype: f"({a}<{b})",
     Ops.WHERE: lambda a,b,c,dtype: f"({a}?{b}:{c})", Ops.CMPEQ: lambda a,b,dtype: f"({a}=={b})",
-    Ops.POW: lambda a,b,dtype: f"_int_pow({a},{b})" if dtypes.is_int(dtype) else f"pow({a},{b})"}
+    Ops.POW: lambda a,b,dtype: f"pow({a},{b})"}
 
   string_rewrite = base_rewrite
   extra_matcher = extra_pm
 
   def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[DType,bool]]], uops:list[UOp], prefix=None) -> str:
     if prefix is None: prefix = []
-    if any("_int_pow" in line for line in kernel):
-      attr = "__device__ " if self.device in {"CUDA", "NV"} else ("__attribute__((device)) " if self.device in {"HIP", "AMD"} else "")
-      prefix.append(attr + _INT_POW_FUNC)
     tmp = ""
     if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs):
       tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"
@@ -207,7 +211,7 @@ class CStyleLanguage(Renderer):
         (u.op in {Ops.VECTORIZE, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
         r[u] = l
       else:
-        if u.op in {Ops.RANGE, Ops.DEFINE_LOCAL, Ops.STORE, Ops.DEFINE_REG} or u.dtype == dtypes.void: pass
+        if u.op in {Ops.RANGE, Ops.DEFINE_LOCAL, Ops.STORE, Ops.DEFINE_REG} or u.dtype == dtypes.void or (u.op is Ops.POW and dtypes.is_int(u.dtype)): pass
         else: l = f"{self.render_dtype(u.dtype)} {r[u]} = {l}" + (";" if u.op is not Ops.SPECIAL else "")
         kernel.append("  "*depth + l)
         if prefix: c[prefix] += 1  # if it was used, increment

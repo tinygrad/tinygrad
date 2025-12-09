@@ -63,38 +63,42 @@ def render_wmma_amd(ctx, wmma: UOp, cdna=False) -> str:
       if wmma.dtype.scalar() != dtypes.float else ")")
 
 def render_pow(ctx, x, base, exp):
-  val_t, zer, one = ldt(x.dtype), lconst(0, x.dtype), lconst(1, x.dtype)
+  bit_width, val_t, zer, one = x.dtype.itemsize * 8, ldt(x.dtype), lconst(0, x.dtype), lconst(1, x.dtype)
   bool_t = ldt(dtypes.bool.vec(x.dtype.count)) if x.dtype.count > 1 else "i1"
-  neg_one, code = lconst(-1, x.dtype), []
-  curr_res, curr_base = f"{ctx[x]}_res_0", f"{ctx[x]}_base_0"
+  code, curr_res, curr_base = [], f"{ctx[x]}_res_0", f"{ctx[x]}_base_0"
   code.append(f"  {curr_res} = add {val_t} {zer}, {one}")
   code.append(f"  {curr_base} = add {val_t} {ctx[base]}, {zer}")
-  # Branchless binary exponentiation (unrolled 32x)
-  for i in range(32):
-    mask_val, masked, is_set = lconst(1 << i, x.dtype), f"{ctx[x]}_mask_{i}", f"{ctx[x]}_isset_{i}"
-    code.append(f"  {masked} = and {val_t} {ctx[exp]}, {mask_val}")
+  # Branchless binary exponentiation (unrolled to bit_width)
+  for i in range(bit_width):
+    shift_amt, shifted, masked, is_set = lconst(i, x.dtype), f"{ctx[x]}_shift_{i}", f"{ctx[x]}_mask_{i}", f"{ctx[x]}_isset_{i}"
+    code.append(f"  {shifted} = lshr {val_t} {ctx[exp]}, {shift_amt}")
+    code.append(f"  {masked} = and {val_t} {shifted}, {one}")
     code.append(f"  {is_set} = icmp ne {val_t} {masked}, {zer}")
     mul_res, next_res = f"{ctx[x]}_mul_{i}", f"{ctx[x]}_res_{i+1}"
     code.append(f"  {mul_res} = mul {val_t} {curr_res}, {curr_base}")
     code.append(f"  {next_res} = select {bool_t} {is_set}, {val_t} {mul_res}, {val_t} {curr_res}")
     curr_res = next_res
-    if i < 31:
+    if i < bit_width - 1:
       next_base = f"{ctx[x]}_base_{i+1}"
       code.append(f"  {next_base} = mul {val_t} {curr_base}, {curr_base}")
       curr_base = next_base
-  # Handle negative exponents: x^y where y<0 is 0, except base=1->1, base=-1->1 or -1
-  is_neg_exp, is_base_1, is_base_neg1 = f"{ctx[x]}_is_neg", f"{ctx[x]}_is_1", f"{ctx[x]}_is_neg1"
-  is_odd, exp_and_1 = f"{ctx[x]}_is_odd", f"{ctx[x]}_odd_check"
-  code.append(f"  {is_neg_exp} = icmp slt {val_t} {ctx[exp]}, {zer}")
-  code.append(f"  {is_base_1} = icmp eq {val_t} {ctx[base]}, {one}")
-  code.append(f"  {is_base_neg1} = icmp eq {val_t} {ctx[base]}, {neg_one}")
-  code.append(f"  {exp_and_1} = and {val_t} {ctx[exp]}, {one}")
-  code.append(f"  {is_odd} = icmp ne {val_t} {exp_and_1}, {zer}")
-  neg1_res, neg_tmp, neg_val = f"{ctx[x]}_neg1_res", f"{ctx[x]}_neg_tmp", f"{ctx[x]}_neg_val"
-  code.append(f"  {neg1_res} = select {bool_t} {is_odd}, {val_t} {neg_one}, {val_t} {one}")
-  code.append(f"  {neg_tmp} = select {bool_t} {is_base_neg1}, {val_t} {neg1_res}, {val_t} {zer}")
-  code.append(f"  {neg_val} = select {bool_t} {is_base_1}, {val_t} {one}, {val_t} {neg_tmp}")
-  code.append(f"  {ctx[x]} = select {bool_t} {is_neg_exp}, {val_t} {neg_val}, {val_t} {curr_res}")
+  # Handle negative exponents for signed types
+  if dtypes.is_unsigned(x.dtype):
+    code.append(f"  {ctx[x]} = add {val_t} {curr_res}, {zer}")
+  else:
+    neg_one = lconst(-1, x.dtype)
+    is_neg_exp, is_base_1, is_base_neg1 = f"{ctx[x]}_is_neg", f"{ctx[x]}_is_1", f"{ctx[x]}_is_neg1"
+    is_odd, exp_and_1 = f"{ctx[x]}_is_odd", f"{ctx[x]}_odd_check"
+    code.append(f"  {is_neg_exp} = icmp slt {val_t} {ctx[exp]}, {zer}")
+    code.append(f"  {is_base_1} = icmp eq {val_t} {ctx[base]}, {one}")
+    code.append(f"  {is_base_neg1} = icmp eq {val_t} {ctx[base]}, {neg_one}")
+    code.append(f"  {exp_and_1} = and {val_t} {ctx[exp]}, {one}")
+    code.append(f"  {is_odd} = icmp ne {val_t} {exp_and_1}, {zer}")
+    neg1_res, neg_tmp, neg_val = f"{ctx[x]}_neg1_res", f"{ctx[x]}_neg_tmp", f"{ctx[x]}_neg_val"
+    code.append(f"  {neg1_res} = select {bool_t} {is_odd}, {val_t} {neg_one}, {val_t} {one}")
+    code.append(f"  {neg_tmp} = select {bool_t} {is_base_neg1}, {val_t} {neg1_res}, {val_t} {zer}")
+    code.append(f"  {neg_val} = select {bool_t} {is_base_1}, {val_t} {one}, {val_t} {neg_tmp}")
+    code.append(f"  {ctx[x]} = select {bool_t} {is_neg_exp}, {val_t} {neg_val}, {val_t} {curr_res}")
   return "\n".join(code)
 
 # llvm ops, lop[<dtype>][<op>]
