@@ -235,7 +235,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
       for e in counters:
         if isinstance(e, ProfileSQTTEvent): parse_sqtt_print_packets(e.blob)
   # ** decode traces for each run
-  all_runs:dict = {}
+  all_runs:dict = {"cols":set(), "rows":[]}
   steps:list[dict] = [create_step("All", ("/all", len(ctxs), 0), data=all_runs)]
   for key,counters in counter_events.items():
     # ** Run summary
