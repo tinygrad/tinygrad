@@ -1,4 +1,4 @@
-import functools, importlib, re, urllib, tinygrad.runtime.autogen
+import functools, re, urllib, tinygrad.runtime.autogen
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.helpers import getbits, fetch
