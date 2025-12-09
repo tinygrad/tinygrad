@@ -30,7 +30,7 @@ asm_for_op: dict[Ops, Callable] = {
   Ops.MAX: lambda d,a,b,dt,name: f"max.{name} {d}, {a}, {b};", Ops.CMPEQ: lambda d,a,b,dt,name: f"setp.eq.{name} {d}, {a}, {b};",
   Ops.CMPLT: lambda d,a,b,dt,name: f"setp.lt.{name} {d}, {a}, {b};", Ops.CMPNE: lambda d,a,b,dt,name: f"setp.ne.{name} {d}, {a}, {b};",
   Ops.MULACC: lambda d,a,b,c,dt,name: f"{'fma.rn' if dtypes.is_float(dt) else 'mad.lo'}.{name} {d}, {a}, {b}, {c};",
-    Ops.WHERE: lambda d,a,b,c,dt,name: [f"@{a} mov.{name} {d}, {b};", f"@!{a} mov.{name} {d}, {c};"] if dt == dtypes.bool else \
+  Ops.WHERE: lambda d,a,b,c,dt,name: [f"@{a} mov.{name} {d}, {b};", f"@!{a} mov.{name} {d}, {c};"] if dt == dtypes.bool else \
     f"selp.{'b16' if name == 'f16' else name} {d}, {b}, {c}, {a};",
   Ops.POW: lambda: None,
 }
@@ -86,44 +86,42 @@ def render_wmma(ctx: "PTXRenderer", wmma: UOp):
     else: yield f"mov.b32 {{{', '.join(ctx.r[wmma][i * elems_per_reg : (i+1) * elems_per_reg])}}}, {reg};"
 
 def render_pow(ctx, x, base, exp):
-  dt = ctx.types[x.dtype.scalar()]
-  return [
-    f".reg .{dt} {ctx.r[x]}_b;",
-    f".reg .{dt} {ctx.r[x]}_e;",
-    f".reg .{dt} {ctx.r[x]}_odd;",
-    f".reg .{dt} {ctx.r[x]}_odd_neg;",
-    f".reg .pred %p_neg;",
-    f".reg .pred %p;",
-    f".reg .pred %p_skip;",
-    f".reg .pred %p_one;",
-    f".reg .pred %p_neg_one;",
-    f".reg .pred %p_is_odd;",
-    f"setp.lt.{dt} %p_neg, {ctx.r[exp]}, 0;",
-    f"@%p_neg bra $pow_neg_{ctx.r[x]};",
-    f"mov.{dt} {ctx.r[x]}, 1;",
-    f"mov.{dt} {ctx.r[x]}_b, {ctx.r[base]};",
-    f"mov.{dt} {ctx.r[x]}_e, {ctx.r[exp]};",
-    f"$pow_loop_{ctx.r[x]}:",
-    f"setp.le.{dt} %p, {ctx.r[x]}_e, 0;",
-    f"@%p bra $pow_exit_{ctx.r[x]};",
-    f"and.b{dt[1:]} {ctx.r[x]}_odd, {ctx.r[x]}_e, 1;",
-    f"setp.eq.{dt} %p_skip, {ctx.r[x]}_odd, 0;",
-    f"@!%p_skip mul.lo.{dt} {ctx.r[x]}, {ctx.r[x]}, {ctx.r[x]}_b;",
-    f"mul.lo.{dt} {ctx.r[x]}_b, {ctx.r[x]}_b, {ctx.r[x]}_b;",
-    f"shr.{dt} {ctx.r[x]}_e, {ctx.r[x]}_e, 1;",
-    f"bra $pow_loop_{ctx.r[x]};",
-    f"$pow_neg_{ctx.r[x]}:",
-    f"setp.eq.{dt} %p_one, {ctx.r[base]}, 1;",
-    f"@%p_one mov.{dt} {ctx.r[x]}, 1;",
-    f"@%p_one bra $pow_exit_{ctx.r[x]};",
-    f"setp.eq.{dt} %p_neg_one, {ctx.r[base]}, -1;",
-    f"@!%p_neg_one mov.{dt} {ctx.r[x]}, 0;",
-    f"@!%p_neg_one bra $pow_exit_{ctx.r[x]};",
-    f"and.b{dt[1:]} {ctx.r[x]}_odd_neg, {ctx.r[exp]}, 1;",
-    f"setp.ne.{dt} %p_is_odd, {ctx.r[x]}_odd_neg, 0;",
-    f"selp.{dt} {ctx.r[x]}, -1, 1, %p_is_odd;",
-    f"$pow_exit_{ctx.r[x]}:"
-  ]
+  dt, pred, code = ctx.types[x.dtype.scalar()], ctx.types[dtypes.bool], []
+  width, b_type = dt[1:], f"b{dt[1:]}"
+  def new_reg(name_suffix, dtype=dt):
+    reg_name = f"{ctx.r[x]}_{name_suffix}"
+    code.append(f".reg .{dtype} {reg_name};")
+    return reg_name
+  curr_res, curr_base = new_reg("res_0"), new_reg("base_0")
+  code.append(f"mov.{dt} {curr_res}, 1;")
+  code.append(f"mov.{dt} {curr_base}, {ctx.r[base]};")
+  # Branchless binary exponentiation (unrolled 32x)
+  for i in range(32):
+    mask_reg, p_bit = new_reg(f"mask_{i}", b_type), new_reg(f"p_{i}", pred)
+    code.append(f"and.{b_type} {mask_reg}, {ctx.r[exp]}, {1 << i};")
+    code.append(f"setp.ne.{b_type} {p_bit}, {mask_reg}, 0;")
+    mul_res, next_res = new_reg(f"mul_{i}"), new_reg(f"res_{i+1}")
+    code.append(f"mul.lo.{dt} {mul_res}, {curr_res}, {curr_base};")
+    code.append(f"selp.{dt} {next_res}, {mul_res}, {curr_res}, {p_bit};")
+    curr_res = next_res
+    if i < 31:
+      next_base = new_reg(f"base_{i+1}")
+      code.append(f"mul.lo.{dt} {next_base}, {curr_base}, {curr_base};")
+      curr_base = next_base
+  # Handle negative exponents: x^y where y<0 is 0, except base=1->1, base=-1->1 or -1
+  is_neg_exp, is_base_1, is_base_neg1 = new_reg("is_neg", pred), new_reg("is_1", pred), new_reg("is_neg1", pred)
+  code.append(f"setp.lt.{dt} {is_neg_exp}, {ctx.r[exp]}, 0;")
+  code.append(f"setp.eq.{dt} {is_base_1}, {ctx.r[base]}, 1;")
+  code.append(f"setp.eq.{dt} {is_base_neg1}, {ctx.r[base]}, -1;")
+  exp_and_1, is_odd = new_reg("odd_check", b_type), new_reg("is_odd", pred)
+  code.append(f"and.{b_type} {exp_and_1}, {ctx.r[exp]}, 1;")
+  code.append(f"setp.ne.{b_type} {is_odd}, {exp_and_1}, 0;")
+  neg1_res, neg_tmp, neg_val = new_reg("neg1_res"), new_reg("neg_tmp"), new_reg("neg_val")
+  code.append(f"selp.{dt} {neg1_res}, -1, 1, {is_odd};")
+  code.append(f"selp.{dt} {neg_tmp}, {neg1_res}, 0, {is_base_neg1};")
+  code.append(f"selp.{dt} {neg_val}, 1, {neg_tmp}, {is_base_1};")
+  code.append(f"selp.{dt} {ctx.r[x]}, {neg_val}, {curr_res}, {is_neg_exp};")
+  return code
 
 def modifier(a: DType, b: DType): return '.rzi' if dtypes.is_int(a) and dtypes.is_float(b) else '.rn' if dtypes.is_float(a) and \
   (a.itemsize < b.itemsize or dtypes.is_int(b) or b == dtypes.bool) else ''

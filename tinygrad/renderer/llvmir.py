@@ -63,51 +63,39 @@ def render_wmma_amd(ctx, wmma: UOp, cdna=False) -> str:
       if wmma.dtype.scalar() != dtypes.float else ")")
 
 def render_pow(ctx, x, base, exp):
-  ptr_t = ldt(x.dtype) + "*"
-  val_t = ldt(x.dtype)
-  # Uses alloca for simplified control flow generation (letting mem2reg optimize later)
-  return "\n".join([
-    f"  {ctx[x]}_b_ptr = alloca {val_t}, align {x.dtype.itemsize}",
-    f"  {ctx[x]}_e_ptr = alloca {val_t}, align {x.dtype.itemsize}",
-    f"  {ctx[x]}_r_ptr = alloca {val_t}, align {x.dtype.itemsize}",
-    f"  store {val_t} {ctx[base]}, {ptr_t} {ctx[x]}_b_ptr, align {x.dtype.itemsize}",
-    f"  store {val_t} {ctx[exp]}, {ptr_t} {ctx[x]}_e_ptr, align {x.dtype.itemsize}",
-    # Logic for negative exponent: b==1?1 : (b==-1?(e&1?-1:1) : 0)
-    f"  {ctx[x]}_neg = icmp slt {val_t} {ctx[exp]}, 0",
-    f"  br i1 {ctx[x]}_neg, label %pow_neg_{ctx[x][1:]}, label %pow_init_{ctx[x][1:]}",
-    f"pow_neg_{ctx[x][1:]}:",
-    f"  {ctx[x]}_is_one = icmp eq {val_t} {ctx[base]}, 1",
-    f"  {ctx[x]}_is_neg_one = icmp eq {val_t} {ctx[base]}, -1",
-    f"  {ctx[x]}_odd_exp_val = and {val_t} {ctx[exp]}, 1",
-    f"  {ctx[x]}_odd_exp = icmp ne {val_t} {ctx[x]}_odd_exp_val, 0",
-    f"  {ctx[x]}_neg_one_res = select i1 {ctx[x]}_odd_exp, {val_t} -1, {val_t} 1",
-    f"  {ctx[x]}_neg_res_tmp = select i1 {ctx[x]}_is_neg_one, {val_t} {ctx[x]}_neg_one_res, {val_t} 0",
-    f"  {ctx[x]}_neg_res = select i1 {ctx[x]}_is_one, {val_t} 1, {val_t} {ctx[x]}_neg_res_tmp",
-    f"  store {val_t} {ctx[x]}_neg_res, {ptr_t} {ctx[x]}_r_ptr, align {x.dtype.itemsize}",
-    f"  br label %pow_exit_{ctx[x][1:]}",
-    f"pow_init_{ctx[x][1:]}:",
-    f"  store {val_t} 1, {ptr_t} {ctx[x]}_r_ptr, align {x.dtype.itemsize}",
-    f"  br label %pow_head_{ctx[x][1:]}",
-    f"pow_head_{ctx[x][1:]}:",
-    f"  {ctx[x]}_e = load {val_t}, {ptr_t} {ctx[x]}_e_ptr, align {x.dtype.itemsize}",
-    f"  {ctx[x]}_cond = {lop[x.dtype.scalar()][Ops.CMPLT]} {val_t} 0, {ctx[x]}_e",
-    f"  br i1 {ctx[x]}_cond, label %pow_body_{ctx[x][1:]}, label %pow_exit_{ctx[x][1:]}",
-    f"pow_body_{ctx[x][1:]}:",
-    f"  {ctx[x]}_b = load {val_t}, {ptr_t} {ctx[x]}_b_ptr, align {x.dtype.itemsize}",
-    f"  {ctx[x]}_r = load {val_t}, {ptr_t} {ctx[x]}_r_ptr, align {x.dtype.itemsize}",
-    f"  {ctx[x]}_is_odd = and {val_t} {ctx[x]}_e, 1",
-    f"  {ctx[x]}_do_mul = icmp ne {val_t} {ctx[x]}_is_odd, 0",
-    f"  {ctx[x]}_mul = mul {val_t} {ctx[x]}_r, {ctx[x]}_b",
-    f"  {ctx[x]}_new_r = select i1 {ctx[x]}_do_mul, {val_t} {ctx[x]}_mul, {val_t} {ctx[x]}_r",
-    f"  store {val_t} {ctx[x]}_new_r, {ptr_t} {ctx[x]}_r_ptr, align {x.dtype.itemsize}",
-    f"  {ctx[x]}_new_b = mul {val_t} {ctx[x]}_b, {ctx[x]}_b",
-    f"  store {val_t} {ctx[x]}_new_b, {ptr_t} {ctx[x]}_b_ptr, align {x.dtype.itemsize}",
-    f"  {ctx[x]}_new_e = {lop[x.dtype.scalar()][Ops.SHR]} {val_t} {ctx[x]}_e, 1",
-    f"  store {val_t} {ctx[x]}_new_e, {ptr_t} {ctx[x]}_e_ptr, align {x.dtype.itemsize}",
-    f"  br label %pow_head_{ctx[x][1:]}",
-    f"pow_exit_{ctx[x][1:]}:",
-    f"  {ctx[x]} = load {val_t}, {ptr_t} {ctx[x]}_r_ptr, align {x.dtype.itemsize}"
-  ])
+  val_t, zer, one = ldt(x.dtype), lconst(0, x.dtype), lconst(1, x.dtype)
+  bool_t = ldt(dtypes.bool.vec(x.dtype.count)) if x.dtype.count > 1 else "i1"
+  neg_one, code = lconst(-1, x.dtype), []
+  curr_res, curr_base = f"{ctx[x]}_res_0", f"{ctx[x]}_base_0"
+  code.append(f"  {curr_res} = add {val_t} {zer}, {one}")
+  code.append(f"  {curr_base} = add {val_t} {ctx[base]}, {zer}")
+  # Branchless binary exponentiation (unrolled 32x)
+  for i in range(32):
+    mask_val, masked, is_set = lconst(1 << i, x.dtype), f"{ctx[x]}_mask_{i}", f"{ctx[x]}_isset_{i}"
+    code.append(f"  {masked} = and {val_t} {ctx[exp]}, {mask_val}")
+    code.append(f"  {is_set} = icmp ne {val_t} {masked}, {zer}")
+    mul_res, next_res = f"{ctx[x]}_mul_{i}", f"{ctx[x]}_res_{i+1}"
+    code.append(f"  {mul_res} = mul {val_t} {curr_res}, {curr_base}")
+    code.append(f"  {next_res} = select {bool_t} {is_set}, {val_t} {mul_res}, {val_t} {curr_res}")
+    curr_res = next_res
+    if i < 31:
+      next_base = f"{ctx[x]}_base_{i+1}"
+      code.append(f"  {next_base} = mul {val_t} {curr_base}, {curr_base}")
+      curr_base = next_base
+  # Handle negative exponents: x^y where y<0 is 0, except base=1->1, base=-1->1 or -1
+  is_neg_exp, is_base_1, is_base_neg1 = f"{ctx[x]}_is_neg", f"{ctx[x]}_is_1", f"{ctx[x]}_is_neg1"
+  is_odd, exp_and_1 = f"{ctx[x]}_is_odd", f"{ctx[x]}_odd_check"
+  code.append(f"  {is_neg_exp} = icmp slt {val_t} {ctx[exp]}, {zer}")
+  code.append(f"  {is_base_1} = icmp eq {val_t} {ctx[base]}, {one}")
+  code.append(f"  {is_base_neg1} = icmp eq {val_t} {ctx[base]}, {neg_one}")
+  code.append(f"  {exp_and_1} = and {val_t} {ctx[exp]}, {one}")
+  code.append(f"  {is_odd} = icmp ne {val_t} {exp_and_1}, {zer}")
+  neg1_res, neg_tmp, neg_val = f"{ctx[x]}_neg1_res", f"{ctx[x]}_neg_tmp", f"{ctx[x]}_neg_val"
+  code.append(f"  {neg1_res} = select {bool_t} {is_odd}, {val_t} {neg_one}, {val_t} {one}")
+  code.append(f"  {neg_tmp} = select {bool_t} {is_base_neg1}, {val_t} {neg1_res}, {val_t} {zer}")
+  code.append(f"  {neg_val} = select {bool_t} {is_base_1}, {val_t} {one}, {val_t} {neg_tmp}")
+  code.append(f"  {ctx[x]} = select {bool_t} {is_neg_exp}, {val_t} {neg_val}, {val_t} {curr_res}")
+  return "\n".join(code)
 
 # llvm ops, lop[<dtype>][<op>]
 unsigned_lop = { Ops.ADD: "add", Ops.MUL: "mul", Ops.IDIV: "udiv", Ops.MOD: "urem",
