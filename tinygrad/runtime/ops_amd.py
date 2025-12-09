@@ -814,9 +814,11 @@ class PCIIface(PCIIfaceBase):
     self.ip_versions = self.dev_impl.ip_ver
 
     gfxver = int(f"{self.dev_impl.ip_ver[am.GC_HWIP][0]:02d}{self.dev_impl.ip_ver[am.GC_HWIP][1]:02d}{self.dev_impl.ip_ver[am.GC_HWIP][2]:02d}")
-    array_count = self.dev_impl.gc_info.gc_num_sa_per_se * self.dev_impl.gc_info.gc_num_se
-    self.props = {'cu_per_simd_array': (cu_per_sa:=2 * (self.dev_impl.gc_info.gc_num_wgp0_per_sa + self.dev_impl.gc_info.gc_num_wgp1_per_sa)),
-      'simd_count': 2 * cu_per_sa * array_count, 'simd_per_cu': 2, 'array_count': array_count, 'gfx_target_version': gfxver,
+    # array_count = self.dev_impl.gc_info.gc_num_sa_per_se * self.dev_impl.gc_info.gc_num_se
+    array_count = self.dev_impl.gc_info.gc_num_sc_per_se * self.dev_impl.gc_info.gc_num_se
+    simd_count = 64
+    self.props = {'cu_per_simd_array': 1,
+      'simd_count': simd_count, 'simd_per_cu': 2, 'array_count': array_count, 'gfx_target_version': gfxver,
       'max_slots_scratch_cu': self.dev_impl.gc_info.gc_max_scratch_slots_per_cu, 'max_waves_per_simd': self.dev_impl.gc_info.gc_max_waves_per_simd,
       'simd_arrays_per_engine': self.dev_impl.gc_info.gc_num_sc_per_se, 'lds_size_in_kb': self.dev_impl.gc_info.gc_lds_size}
 
@@ -916,13 +918,14 @@ class AMDDevice(HCQCompiled):
     self.nbio = AMDIP('nbio' if self.target[0] < 12 else 'nbif', self.iface.ip_versions[am.NBIF_HWIP],
                       bases={i: tuple(getattr(self.ip_off, f'NBIO_BASE__INST{i}_SEG{s}', 0) for s in range(9)) for i in range(6)})
 
-    self.is_aql = getenv("AMD_AQL", int(self.xccs > 1))
-    if self.is_aql:
-      self.pm4_ibs = self.iface.alloc(0x2000 if self.is_usb() else (16 << 20), uncached=True, cpu_access=True)
-      self.pm4_ib_alloc = BumpAllocator(self.pm4_ibs.size, wrap=True)
+    # self.is_aql = getenv("AMD_AQL", int(self.xccs > 1))
+    self.is_aql = False
+    # if self.is_aql:
+    #   self.pm4_ibs = self.iface.alloc(0x2000 if self.is_usb() else (16 << 20), uncached=True, cpu_access=True)
+    #   self.pm4_ib_alloc = BumpAllocator(self.pm4_ibs.size, wrap=True)
 
     self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL if self.is_aql else kfd.KFD_IOC_QUEUE_TYPE_COMPUTE,
-      0x2000 if self.is_usb() else (16 << 20), eop_buffer_size=0x1000,
+      0x2000 if self.is_usb() else 0x1000, eop_buffer_size=0x1000,
       ctx_save_restore_size=0 if self.is_am() else wg_data_size + ctl_stack_size, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
 
     self.allocator = AMDAllocator(self)

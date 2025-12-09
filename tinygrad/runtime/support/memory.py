@@ -205,8 +205,8 @@ class MemoryManager:
                        frag=self._frag_size(ctx.vaddr+off, pte_cnt * pte_covers), valid=True)
 
     self.on_range_mapped()
-    # print(paddrs[0][0])
     mc_addr = self.dev.paddr2mc(paddrs[0][0])
+    print('aft mapping', hex(vaddr), hex(paddrs[0][0]), hex(mc_addr))
     return VirtMapping(mc_addr, size, paddrs, sva=vaddr, uncached=uncached, system=system, snooped=snooped)
 
   def unmap_range(self, vaddr:int, size:int):
@@ -247,6 +247,8 @@ class MemoryManager:
           continue
         rem_size -= self.palloc_ranges[nxt_range][0]
 
+    # print(paddrs)
+    # paddrs = [(paddrs[0][0], 0x40000000)]
     return self.map_range(va, size, paddrs, uncached=uncached)
 
   def vfree(self, vm:VirtMapping):

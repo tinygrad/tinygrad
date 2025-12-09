@@ -66,8 +66,10 @@ class AM_GMC(AM_IP):
 
     if ip == "MM": wait_cond(lambda: self.adev.regMMVM_INVALIDATE_ENG17_SEM.read() & 0x1, value=1, msg="mm flush_tlb timeout")
 
-    self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_REQ").write(flush_type=flush_type, per_vmid_invalidate_req=(1 << vmid), invalidate_l2_ptes=1,
-      invalidate_l2_pde0=1, invalidate_l2_pde1=1, invalidate_l2_pde2=1, invalidate_l1_ptes=1, clear_protection_fault_status_addr=0)
+    # self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_REQ").write(flush_type=flush_type, per_vmid_invalidate_req=(1 << vmid), invalidate_l2_ptes=1,
+    #   invalidate_l2_pde0=1, invalidate_l2_pde1=1, invalidate_l2_pde2=1, invalidate_l1_ptes=1, clear_protection_fault_status_addr=0)
+
+    self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_REQ").write(0x7c0001)
 
     wait_cond(lambda: self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_ACK").read() & (1 << vmid), value=(1 << vmid), msg="flush_tlb timeout")
 
@@ -126,7 +128,7 @@ class AM_GMC(AM_IP):
 
   @functools.cache  # pylint: disable=method-cache-max-size-none
   def get_pte_flags(self, pte_lv, is_table, frag, uncached, system, snooped, valid, extra=0):
-    extra |= (am.AMDGPU_PTE_SYSTEM * system) | (am.AMDGPU_PTE_SNOOPED * snooped) | (am.AMDGPU_PTE_VALID * valid) | am.AMDGPU_PTE_FRAG(frag)
+    extra |= (am.AMDGPU_PTE_SYSTEM * system) | (am.AMDGPU_PTE_SNOOPED * snooped) | (am.AMDGPU_PTE_VALID * valid) #| am.AMDGPU_PTE_FRAG(frag)
     if not is_table: extra |= (am.AMDGPU_PTE_WRITEABLE | am.AMDGPU_PTE_READABLE | am.AMDGPU_PTE_EXECUTABLE)
     if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0):
       extra |= am.AMDGPU_PTE_MTYPE_GFX12(0, self.adev.soc.module.MTYPE_UC if uncached else 0)
@@ -135,15 +137,61 @@ class AM_GMC(AM_IP):
       extra |= am.AMDGPU_PTE_MTYPE_NV10(0, self.adev.soc.module.MTYPE_UC if uncached else 0)
       extra |= (am.AMDGPU_PDE_PTE if not is_table and pte_lv != am.AMDGPU_VM_PTB else 0)
     else:
+      # [  585.530578] amdgpu 0000:e5:00.0: amdgpu: amdgpu_vm_ptes_update: size=0x2 start=0xffffffbfe dst=0x1244bb96000
+      # [  585.530606] amdgpu 0000:e5:00.0: amdgpu: 	nptes=0x2 incr=0x1000 upd_flags=0x6000000000000b7 frags=0x1
+      # [  585.530615] amdgpu 0000:e5:00.0: amdgpu: 		pde: level=2, addr=0x5fed6ed000, flags=0x100000000000001
+      # [  585.530621] amdgpu 0000:e5:00.0: amdgpu: 		amdgpu_vm_pde_update: level=0x2 pde=0xfe8 pt=0x5fed6ed000 flags=0x100000000000001
+      # [  585.530627] amdgpu 0000:e5:00.0: amdgpu: 		pde: level=1, addr=0x5fed6ee000, flags=0x4800000000000001
+      # [  585.530632] amdgpu 0000:e5:00.0: amdgpu: 		amdgpu_vm_pde_update: level=0x1 pde=0xff8 pt=0x5fed6ee000 flags=0x4800000000000001
+      # [  585.530638] amdgpu 0000:e5:00.0: amdgpu: 		pde: level=0, addr=0x5fed6ef000, flags=0x1
+      # [  585.530643] amdgpu 0000:e5:00.0: amdgpu: 		amdgpu_vm_pde_update: level=0x0 pde=0xff8 pt=0x5fed6ef000 flags=0x1
+      # [  585.531090] amdgpu 0000:e5:00.0: amdgpu: 		pde: level=-1, addr=0x5fed6dc000, flags=0x1
+      # [  585.531099] amdgpu 0000:e5:00.0: amdgpu: 		pte: flags=0x600000000000077
+
       extra |= am.AMDGPU_PTE_MTYPE_VG10(0, self.adev.soc.module.MTYPE_UC if uncached else 0)
       if is_table and pte_lv == am.AMDGPU_VM_PDB1: extra |= am.AMDGPU_PDE_BFS(0x9)
       if is_table and pte_lv == am.AMDGPU_VM_PDB0: extra |= am.AMDGPU_PTE_TF
       if not is_table and pte_lv not in {am.AMDGPU_VM_PTB, am.AMDGPU_VM_PDB0}: extra |= am.AMDGPU_PDE_PTE
-      if not is_table and pte_lv == am.AMDGPU_VM_PDB0: extra |= (1 << 12)
-      extra |= (am.AMDGPU_PDE_PTE if not is_table and pte_lv != am.AMDGPU_VM_PTB else 0)
+      # if not is_table and pte_lv == am.AMDGPU_VM_PDB0: extra |= (1 << 12)
+      # extra |= (am.AMDGPU_PDE_PTE if not is_table and pte_lv != am.AMDGPU_VM_PTB else 0)
+    # else:
+    #   # GFX9 / Vega10-style PTEs (MI300 gfx942 lives under major 9)
+    #   extra |= am.AMDGPU_PTE_MTYPE_VG10(0, self.adev.soc.module.MTYPE_UC if uncached else 0)
+    #   tf = True # bool(getattr(self, "translate_further", False))
+    #   if is_table:
+    #     # When TF is enabled, kernel sets BFS for PDB1 tables and sets TF bit on PDB0 tables
+    #     if tf and pte_lv == am.AMDGPU_VM_PDB1:
+    #       extra |= am.AMDGPU_PDE_BFS(0x9)
+    #     if tf and pte_lv == am.AMDGPU_VM_PDB0:
+    #       extra |= am.AMDGPU_PTE_TF
+    #   else:
+    #     # Leaf at higher levels (huge pages) normally uses PDE_PTE…
+    #     if pte_lv != am.AMDGPU_VM_PTB:
+    #       extra |= am.AMDGPU_PDE_PTE
+    #     # …but for TF-enabled GFX9, kernel clears PDE_PTE for *PDB0 leaves*.
+    #     if tf and pte_lv == am.AMDGPU_VM_PDB0:
+    #       extra &= ~am.AMDGPU_PDE_PTE
     return extra
-  def is_pte_huge_page(self, pte):
-    return pte & (am.AMDGPU_PDE_PTE_GFX12 if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else am.AMDGPU_PDE_PTE)
+  def is_pte_huge_page(self, pte_lv, pte):
+    # GFX12+
+    if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0):
+      return bool(pte & am.AMDGPU_PDE_PTE_GFX12)
+
+    # GFX10/11
+    if self.adev.ip_ver[am.GC_HWIP] >= (10,0,0):
+      return bool(pte & am.AMDGPU_PDE_PTE)
+
+    # GFX9 (Vega10-style, incl MI300 gfx942)
+    # In translate_further mode, for PDB0:
+    #  - tables have AMDGPU_PTE_TF set
+    #  - leaf mappings clear AMDGPU_PDE_PTE, so we must detect "leaf" as VALID && !TF
+    tf = True # getattr(self, "translate_further", False)
+    if tf and pte_lv == am.AMDGPU_VM_PDB0:
+      return bool((pte & am.AMDGPU_PTE_VALID) and not (pte & am.AMDGPU_PTE_TF))
+
+    return bool(pte & am.AMDGPU_PDE_PTE)
+    
+    # return pte & (am.AMDGPU_PDE_PTE_GFX12 if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else am.AMDGPU_PDE_PTE)
 
   def on_interrupt(self):
     for ip in ["MM", "GC"]:

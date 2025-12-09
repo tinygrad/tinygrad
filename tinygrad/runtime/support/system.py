@@ -258,12 +258,12 @@ class LNXPCIIfaceBase:
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, **kwargs) -> HCQBuffer:
     # NOTE: logic on macos is different, since bar is small
-    should_use_sysmem = host or ((cpu_access if OSX else (uncached and cpu_access)) and not force_devmem)
-    if should_use_sysmem:
-      vaddr = self.dev_impl.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
-      memview, paddrs = System.alloc_sysmem(size, vaddr=vaddr, contiguous=contiguous)
-      mapping = self.dev_impl.mm.map_range(vaddr, size, [(paddr, 0x1000) for paddr in paddrs], system=True, snooped=True, uncached=True)
-      return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(mapping, has_cpu_mapping=True, hMemory=paddrs[0]), view=memview, owner=self.dev)
+    # should_use_sysmem = host or ((cpu_access if OSX else (uncached and cpu_access)) and not force_devmem)
+    # if should_use_sysmem:
+    #   vaddr = self.dev_impl.mm.alloc_vaddr(size:=round_up(size, mmap.PAGESIZE), align=mmap.PAGESIZE)
+    #   memview, paddrs = System.alloc_sysmem(size, vaddr=vaddr, contiguous=contiguous)
+    #   mapping = self.dev_impl.mm.map_range(vaddr, size, [(paddr, 0x1000) for paddr in paddrs], system=True, snooped=True, uncached=True)
+    #   return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(mapping, has_cpu_mapping=True, hMemory=paddrs[0]), view=memview, owner=self.dev)
 
     mapping = self.dev_impl.mm.valloc(size:=round_up(size, 0x1000), uncached=uncached, contiguous=cpu_access)
     barview = self.pci_dev.map_bar(bar=self.vram_bar, off=mapping.paddrs[0][0], size=mapping.size) if cpu_access else None
