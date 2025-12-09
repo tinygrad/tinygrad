@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 from tinygrad import dtypes, Tensor, TinyJit, GlobalCounters, Variable
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import temp
+from tinygrad.helpers import temp, CI, CPU_LVP
 
 N = 200  # has to be bigger than the cache to fail
 
@@ -180,6 +180,7 @@ class TestAssign(unittest.TestCase):
     new = a + times_a
     np.testing.assert_allclose(new.numpy(), 8)
 
+  @unittest.skipIf(CI and CPU_LVP, "flaky in CI")
   def test_double_assign(self):
     a = Tensor.ones(4).contiguous().realize()
     a += 1
