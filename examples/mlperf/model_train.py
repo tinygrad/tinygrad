@@ -1040,8 +1040,8 @@ def train_bert():
 
   # ** Optimizer **
   parameters_no_wd = [v for k, v in get_state_dict(model).items() if "bias" in k or "LayerNorm" in k]
-  parameters = [x for x in parameters if x not in set(parameters_no_wd)]
-  optimizer_wd = LAMB(parameters, lr=max_lr, b1=opt_lamb_beta_1, b2=opt_lamb_beta_2, eps=epsilon, weight_decay=decay, adam=False)
+  parameters_wd = [x for x in parameters if x not in set(parameters_no_wd)]
+  optimizer_wd = LAMB(parameters_wd, lr=max_lr, b1=opt_lamb_beta_1, b2=opt_lamb_beta_2, eps=epsilon, weight_decay=decay, adam=False)
   optimizer_no_wd = LAMB(parameters_no_wd, lr=max_lr, b1=opt_lamb_beta_1, b2=opt_lamb_beta_2, eps=epsilon, weight_decay=0.0, adam=False)
   optimizer_group = OptimizerGroup(optimizer_wd, optimizer_no_wd)
 
@@ -1294,6 +1294,7 @@ def train_llama3():
   BASEDIR            = config["BASEDIR"]                = Path(getenv("BASEDIR", "/raid/datasets/c4/"))
   BS                 = config["BS"]                     = getenv("BS", 16)
   grad_acc           = config["GRADIENT_ACC_STEPS"]     = getenv("GRADIENT_ACC_STEPS", 1)
+  assert grad_acc == 1, f"{grad_acc=} is not supported"
   GBS                = config["GLOBAL_BATCH_SIZE"]      = BS * grad_acc
   SEED               = config["SEED"]                   = getenv("SEED", 5760)
   SEQLEN             = config["SEQLEN"]                 = getenv("SEQLEN", 8192)
@@ -1368,20 +1369,17 @@ def train_llama3():
 
   @TinyJit
   @Tensor.train()
-  def train_step(model, tokens:Tensor, grad_acc:int):
+  def train_step(model, tokens:Tensor):
     optim.zero_grad()
-    # grad acc
-    for batch in tokens.split(tokens.shape[0]//grad_acc):
-      if (DP := getenv("DP", 1)) > 1:
-        device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
-        batch = batch.shard(device, 0)
-      if (MP := getenv("MP", 1)) > 1:
-        device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
-        batch = batch.shard(device)
-      logits:Tensor = model(batch[:, :-1], start_pos=0, temperature=math.nan)
-      loss = logits.sparse_categorical_crossentropy(batch[:, 1:])
-      loss.backward()
-      Tensor.realize(*[p.grad for p in optim.params])
+    if (DP := getenv("DP", 1)) > 1:
+      device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
+      tokens = tokens.shard(device, 0)
+    if (MP := getenv("MP", 1)) > 1:
+      device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
+      tokens = tokens.shard(device)
+    logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
+    loss = logits.sparse_categorical_crossentropy(tokens[:, 1:])
+    loss.backward()
     # L2 norm grad clip
     # https://github.com/NVIDIA/NeMo/blob/3368c3fc0b4a186ab33a1d68a504315100c0b2a6/nemo/collections/nlp/modules/common/megatron/clip_grads.py#L57
     # https://docs.pytorch.org/docs/stable/generated/torch.nn.utils.clip_grad_norm_.html
@@ -1420,14 +1418,14 @@ def train_llama3():
 
   def get_train_iter():
     if getenv("FAKEDATA", 0):
-      return fake_data(GBS, SAMPLES)
+      return fake_data(BS, SAMPLES)
     else:
       if SMALL:
         from examples.mlperf.dataloader import batch_load_llama3_small
-        return batch_load_llama3_small(GBS, SAMPLES, SEQLEN, BASEDIR, seed=SEED, val=bool(TRAIN_ON_VAL))
+        return batch_load_llama3_small(BS, SAMPLES, SEQLEN, BASEDIR, seed=SEED, val=bool(TRAIN_ON_VAL))
       else:
         from examples.mlperf.dataloader import batch_load_llama3
-        return batch_load_llama3(GBS, SAMPLES, SEQLEN, BASEDIR, seed=SEED, val=bool(TRAIN_ON_VAL))
+        return batch_load_llama3(BS, SAMPLES, SEQLEN, BASEDIR, seed=SEED, val=bool(TRAIN_ON_VAL))
 
   def get_eval_iter():
     if getenv("FAKEDATA", 0):
@@ -1445,7 +1443,7 @@ def train_llama3():
   for tokens in tqdm(iter, total=SAMPLES//GBS):
     t = time.perf_counter()
     GlobalCounters.reset()
-    loss, lr = train_step(model, tokens, grad_acc)
+    loss, lr = train_step(model, tokens)
     loss = loss.float().item()
 
     i += 1
