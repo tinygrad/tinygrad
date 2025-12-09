@@ -14,10 +14,10 @@ def __getattr__(nm):
                                    args=["-I/opt/rocm/include", "-x", "c++"], tarball=am_src),
     case "sdma_5_0_0": return load("am/sdma_5_0_0", [], [root/"extra/hip_gpu_driver/sdma_registers.h", f"{AMD}/amdgpu/navi10_sdma_pkt_open.h"],
                                    args=["-I/opt/rocm/include", "-x", "c++"], tarball=am_src),
-    case "sdma_6_0_0": return load("am/sdma_6_0_0", [], [root/"extra/hip_gpu_driver/sdma_registers.h", f"{AMD}//amdgpu/sdma_v6_0_0_pkt_open.h"],
+    case "sdma_6_0_0": return load("am/sdma_6_0_0", [], [root/"extra/hip_gpu_driver/sdma_registers.h", f"{AMD}/amdgpu/sdma_v6_0_0_pkt_open.h"],
                                    args=["-I/opt/rocm/include", "-x", "c++"], tarball=am_src),
     case "smu_v13_0_0": return load("am/smu_v13_0_0",[],[f"{AMD}/pm/swsmu/inc/pmfw_if/{s}.h" for s in ["smu_v13_0_0_ppsmc","smu13_driver_if_v13_0_0"]]
-                                    +[root/"extra/amdpci/headers/amdgpu_smu.h"], tarball=am_src),
+                                    +[root/"extra/amdpci/headers/amdgpu_smu.h"], args=inc, tarball=am_src),
     case "smu_v14_0_2": return load("am/smu_v14_0_2", [], [f"{AMD}/pm/swsmu/inc/pmfw_if/{s}.h" for s in ["smu_v14_0_0_pmfw", "smu_v14_0_2_ppsmc",
                                     "smu14_driver_if_v14_0"]]+[root/"extra/amdpci/headers/amdgpu_smu.h"], args=inc, tarball=am_src)
     case _: raise AttributeError(f"no such autogen: {nm}")
