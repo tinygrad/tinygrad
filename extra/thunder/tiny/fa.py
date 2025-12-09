@@ -31,11 +31,11 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
   GROUP_SIZE = H // H_KV
   print(f"Flash Attention {B=} {N=} {H=} {D=} {H_KV=} {GROUP_SIZE=}")
 
-  def custom_forward(ou:UOp, l_vecu:UOp, qu:UOp, ku:UOp, vu:UOp, mu:UOp) -> UOp:
+  def custom_forward(ou:UOp, l_vecu:UOp, qu:UOp, ku:UOp, vu:UOp, masku:UOp) -> UOp:
     with Kernel("fa_custom_forward", (H, N // (Q_BLOCK_SIZE*NUM_WORKERS), B), NUM_WORKERS * WARP_THREADS) as ker:
       warp = ker.warp
 
-      o, q, k, v, mask, l_vec = GL(ou, ker), GL(qu, ker), GL(ku, ker), GL(vu, ker), GL(mu, ker), GL(l_vecu, ker)
+      o, q, k, v, mask, l_vec = GL(ou, ker), GL(qu, ker), GL(ku, ker), GL(vu, ker), GL(masku, ker), GL(l_vecu, ker)
 
       head = ker.blockIdx_x
       head_kv = head // GROUP_SIZE
@@ -130,7 +130,50 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       return ker.finish()
 
   def custom_backward_q(out_qu:UOp, gradu:UOp, qu:UOp, ku:UOp, vu:UOp, masku:UOp, l_vecu:UOp, delta_vecu:UOp) -> UOp:
-    return UOp.sink(arg=KernelInfo(name="fa_custom_backward_q"))
+    with Kernel("fa_custom_backward_q", (H, N // (Q_BLOCK_SIZE*NUM_WORKERS), B), NUM_WORKERS * WARP_THREADS) as ker:
+      warp = ker.warp
+
+      dq, do, q, k, v, mask = GL(out_qu, ker), GL(gradu, ker), GL(qu, ker), GL(ku, ker), GL(vu, ker), GL(masku, ker)
+      l_vec, delta_vec = GL(l_vecu, ker), GL(delta_vecu, ker)
+
+      head = ker.blockIdx_x
+      head_kv = head // GROUP_SIZE
+      batch = ker.blockIdx_z
+      q_seq = ker.blockIdx_y * NUM_WORKERS + ker.warpid
+
+      k_smem = ker.st((KV_BLOCK_SIZE, D), dtypes.bfloat16)
+      v_smem = ker.st((KV_BLOCK_SIZE, D), dtypes.bfloat16)
+
+      q_reg_fl = ker.rt((Q_BLOCK_SIZE, D), dtypes.float32)
+      q_reg = ker.rt((Q_BLOCK_SIZE, D), dtypes.bfloat16)
+      q_reg_transposed = ker.rt((D, Q_BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
+      k_reg = ker.rt((KV_BLOCK_SIZE, D), dtypes.bfloat16)
+      k_reg_transposed = ker.rt((D, KV_BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
+      v_reg = ker.rt((KV_BLOCK_SIZE, D), dtypes.bfloat16, TileLayout.COL)
+      o_reg = ker.rt((D, Q_BLOCK_SIZE), dtypes.float32, TileLayout.COL)
+      o_reg_transposed = ker.rt((Q_BLOCK_SIZE, D), dtypes.float32)
+      att_block = ker.rt((KV_BLOCK_SIZE, Q_BLOCK_SIZE), dtypes.float32, TileLayout.COL)
+      att_block_mma = ker.rt((KV_BLOCK_SIZE, Q_BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
+      mask_reg = ker.rt((Q_BLOCK_SIZE, KV_BLOCK_SIZE), dtypes.float32)
+      mask_reg_transposed = ker.rt((KV_BLOCK_SIZE, Q_BLOCK_SIZE), dtypes.float32, TileLayout.COL)
+
+      max_vec_last = ker.rv(KV_BLOCK_SIZE, dtypes.float32)
+      max_vec = ker.rv(KV_BLOCK_SIZE, dtypes.float32)
+      norm_vec = ker.rv(KV_BLOCK_SIZE, dtypes.float32)
+      scale_vec = ker.rv(KV_BLOCK_SIZE, dtypes.float32)
+
+      max_vec = warp.neg_inf(max_vec)
+      norm_vec = warp.zero(norm_vec)
+      o_reg = warp.zero(o_reg)
+      scale_vec = warp.ones(scale_vec)
+
+      # load q tile
+      q_reg_fl = warp.load(q_reg_fl, q, (), (batch, q_seq, head, 0), axis=1)
+      q_reg_fl *= (1.0 / math.sqrt(D)) * (1.0 / math.log(2))
+      q_reg = warp.copy(q_reg, q_reg_fl)
+      q_reg_transposed = warp.transpose(q_reg_transposed, q_reg)
+
+      return ker.finish()
 
   def custom_backward_kv(out_ku:UOp, out_vu:UOp, gradu:UOp, qu:UOp, ku:UOp, vu:UOp, masku:UOp, l_vecu:UOp, delta_vecu:UOp) -> UOp:
     return UOp.sink(arg=KernelInfo(name="fa_custom_backward_kv"))
@@ -146,17 +189,17 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
   attn = Tensor.empty_like(xq)
   l_vec = Tensor.empty(B, H, 1, N, requires_grad=False, device=xq.device, dtype=dtypes.float32).detach()
 
-  def grad(grad:UOp, kernel:UOp) -> tuple[None, None, UOp, UOp, UOp, None]:
+  def grad(gradu:UOp, kernel:UOp) -> tuple[None, None, UOp, UOp, UOp, None]:
+    grad = Tensor(gradu)
     grad_q = Tensor.empty_like(q := Tensor(kernel.src[2]))
     grad_k = Tensor.empty_like(k := Tensor(kernel.src[3]))
     grad_v = Tensor.empty_like(v := Tensor(kernel.src[4]))
     mask = Tensor(kernel.src[5])
 
-    delta_vec = (Tensor(grad) * attn).sum(-1).unsqueeze(-2).detach()
+    delta_vec = (grad * attn).sum(-1).unsqueeze(-2).detach()
+    print(delta_vec.shape, grad.shape, attn.shape)
 
-    print(l_vec.numpy())
-
-    grad_q = Tensor.custom_kernel(grad_q, Tensor(grad), q, k, v, mask, l_vec, delta_vec, fxn=custom_backward_q)[0]
+    grad_q = Tensor.custom_kernel(grad_q, grad, q, k, v, mask, l_vec, delta_vec, fxn=custom_backward_q)[0]
     grad_k, grad_v = Tensor.custom_kernel(grad_k, grad_v, Tensor(grad), q, k, v, mask, l_vec, delta_vec, fxn=custom_backward_kv)[:2]
     return (None, None, grad_q.uop, grad_k.uop, grad_v.uop, None)
 
