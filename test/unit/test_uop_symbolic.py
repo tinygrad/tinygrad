@@ -769,6 +769,15 @@ class TestSymbolic(unittest.TestCase):
     # (a if ((s<5)&(s<6)) else b) -> (a if (s<5) else b)
     self.helper_test_variable(expr, 0, 3, "(s<5).where(a, b)")
 
+  def test_where_same_cond_fold(self):
+    cond = Variable("x", 0, 10) < 5
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    c = Variable("c", 0, 3)
+    d = Variable("d", 0, 3)
+    expr = cond.where(cond.where(a, b), cond.where(c, d))
+    self.helper_test_variable(expr, 0, 3, "(x<5).where(a, d)")
+
   def test_symbolic_div(self):
     # from symbolic arange
     a = Variable("a", 1, 10)
