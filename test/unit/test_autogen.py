@@ -110,8 +110,6 @@ class TestAutogen(unittest.TestCase):
     assert frts_cmd.readVbiosDesc.__class__ is FWSECLIC_READ_VBIOS_DESC
     assert frts_cmd.frtsRegionDesc.__class__ is FWSECLIC_FRTS_REGION_DESC
 
-  @unittest.skip("fails")
-  @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_packed_fields(self):
     uint8_t = ctypes.c_ubyte
     uint16_t = ctypes.c_ushort
