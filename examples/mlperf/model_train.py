@@ -1118,7 +1118,11 @@ def train_bert():
     lm_logits, seq_relationship_logits = model(input_ids, attention_mask, masked_positions, segment_ids)
     loss = model.loss(lm_logits, seq_relationship_logits, masked_lm_ids, masked_lm_weights, next_sentence_labels)
     (loss * loss_scaler).backward()
+    Tensor.realize(*grads, loss)
+    return loss
 
+  @TinyJit # maybe issue two jits
+  def optimizer_step():
     global_norm = Tensor(0.0, dtype=dtypes.float32, device=optimizer_group[0].device)
     for p in optimizer_group.params:
       p.grad = p.grad / loss_scaler
@@ -1131,8 +1135,8 @@ def train_bert():
     scheduler_group.step()
     for g in grads: g.assign(g.zeros_like().contiguous())
     # TODO: no to("CPU") here because it blocks and messes the python time
-    Tensor.realize(*parameters, *grads, loss, global_norm, optimizer_group.optimizers[0].lr)
-    return loss, global_norm, optimizer_group.optimizers[0].lr
+    Tensor.realize(*parameters, *grads, global_norm, optimizer_group.optimizers[0].lr)
+    return global_norm, optimizer_group.optimizers[0].lr
 
   while train_data is not None and i < train_steps and not achieved:
     if getenv("TRAIN", 1):
@@ -1141,9 +1145,10 @@ def train_bert():
       st = time.perf_counter()
       GlobalCounters.reset()
       with WallTimeEvent(BenchEvent.STEP):
-        loss, global_norm, lr = train_step_bert(
+        loss = train_step_bert(
           train_data["input_ids"], train_data["segment_ids"], train_data["input_mask"], train_data["masked_lm_positions"], \
           train_data["masked_lm_ids"], train_data["masked_lm_weights"], train_data["next_sentence_labels"])
+        global_norm, lr = optimizer_step()
 
         pt = time.perf_counter()
         next_data = next(train_it)
