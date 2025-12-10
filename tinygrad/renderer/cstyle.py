@@ -308,6 +308,8 @@ class OpenCLRenderer(CStyleLanguage):
     if any(uop.dtype.base == dtypes.half for uop in uops): prefix = (["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"] + (prefix or []))
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
+  def render(self, uops:list[UOp]): return super().render(uops), [u.dtype for u in uops if u.op == Ops.DEFINE_GLOBAL]
+
 class IntelRenderer(OpenCLRenderer):
   device, suffix, kernel_typedef = "CL", "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel void"
   tensor_cores = tc.intel
@@ -534,7 +536,4 @@ class AMDRenderer(CStyleLanguage):
 
 class NVRenderer(CUDARenderer): device = "NV"
 class HIPRenderer(AMDRenderer): device = "HIP"
-class QCOMRenderer(OpenCLRenderer):
-  device = "QCOM"
-  def render(self, uops:list[UOp]):
-      return super().render(uops), [u.dtype for u in uops if u.op == Ops.DEFINE_GLOBAL and isinstance(u.dtype, ImageDType)]
+class QCOMRenderer(OpenCLRenderer): device = "QCOM"
