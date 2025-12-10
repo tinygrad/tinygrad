@@ -44,11 +44,11 @@ def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> Program
 
   # print and render
   if DEBUG >= 6: print_uops(uops)
-  src = renderer.render(uops)
+  src, aux = r if isinstance(r:=renderer.render(uops), tuple) else (r, None)
 
   return ProgramSpec(uops[-1].arg.name if uops[-1].arg is not None else "test", src, renderer.device, ast, uops,
                      global_size=[1,1,1] if renderer.has_local or renderer.has_threads else None,
-                     local_size=[1,1,1] if renderer.has_local else None)
+                     local_size=[1,1,1] if renderer.has_local else None, aux=aux)
 
 # **************** Runners ****************
 
@@ -86,7 +86,7 @@ class CompiledRunner(Runner):
       with cpu_profile(TracingKey(f"compile {p.name}", (p.function_name,)), "TINY"):
         self.lib = Device[p.device].compiler.compile_cached(p.src)
     if DEBUG >= 7: Device[p.device].compiler.disassemble(self.lib)
-    self._prg = Device[p.device].runtime(p.function_name, self.lib) if prg is None else prg
+    self._prg = Device[p.device].runtime(p.function_name, self.lib, **({"aux_render": p.aux} if p.aux is not None else {})) if prg is None else prg
     super().__init__(p.name, p.device, p.estimates)
 
   def __reduce__(self): return self.__class__, (self.p, self.lib)
