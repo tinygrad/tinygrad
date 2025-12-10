@@ -27,17 +27,22 @@ class AM_SOC(AM_IP):
     self.adev.regBIFC_DOORBELL_ACCESS_EN_PF.write(0xfffff)
     self.adev.regRCC_DEV0_EPF0_VF7_RCC_DOORBELL_APER_EN.write(0x1)
     self.adev.regXCC_DOORBELL_FENCE.write(0x0)
-    for i in range(16): self.adev.reg(f"DOORBELL0_CTRL_ENTRY_{i}").write(0x5200 + 0x14 * i)
+    for i in range(16): self.adev.reg(f"regDOORBELL0_CTRL_ENTRY_{i}").write(0x5200 + 0x14 * i)
     # regRCC_DEV0_EPF0_VF7_RCC_DOORBELL_APER_EN
-  def set_clockgating_state(self): self.adev.regHDP_MEM_POWER_CTRL.update(atomic_mem_power_ctrl_en=1, atomic_mem_power_ds_en=1)
+  def set_clockgating_state(self): 
+    pass
+    # self.adev.regHDP_MEM_POWER_CTRL.update(atomic_mem_power_ctrl_en=1, atomic_mem_power_ds_en=1)
 
   def doorbell_enable(self, port, awid=0, awaddr_31_28_value=0, offset=0, size=0):
-    self.adev.reg(f"{'regGDC_S2A0_S2A' if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else 'regS2A'}_DOORBELL_ENTRY_{port}_CTRL").update(
-      **{f"s2a_doorbell_port{port}_enable":1, f"s2a_doorbell_port{port}_awid":awid, f"s2a_doorbell_port{port}_awaddr_31_28_value":awaddr_31_28_value,
-         f"s2a_doorbell_port{port}_range_offset":offset, f"s2a_doorbell_port{port}_range_size":size})
+    pass
+    # self.adev.reg(f"{'regGDC_S2A0_S2A' if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else 'regS2A'}_DOORBELL_ENTRY_{port}_CTRL").update(
+    #   **{f"s2a_doorbell_port{port}_enable":1, f"s2a_doorbell_port{port}_awid":awid, f"s2a_doorbell_port{port}_awaddr_31_28_value":awaddr_31_28_value,
+    #      f"s2a_doorbell_port{port}_range_offset":offset, f"s2a_doorbell_port{port}_range_size":size})
 
 class AM_GMC(AM_IP):
   def init_sw(self):
+    self.translate_further = True
+
     # xgmi
     self.xgmi_phys_id = self.adev.regMMMC_VM_XGMI_LFB_CNTL.read_bitfields()['pf_lfb_region']
     self.xgmi_seg_size = self.adev.regMMMC_VM_XGMI_LFB_SIZE.read_bitfields()['pf_lfb_size'] << 24
@@ -50,7 +55,7 @@ class AM_GMC(AM_IP):
     self.mc_end = self.mc_base + self.adev.mm.vram_size - 1
 
     # VM aperture
-    self.vm_base = self.adev.mm.va_allocator.base
+    self.vm_base = self.adev.mm.va_base
     self.vm_end = min(self.vm_base + (1 << self.adev.mm.va_bits) - 1, 0x7fffffffffff)
 
     # GFX11/GFX12 has 44-bit address space
@@ -73,21 +78,20 @@ class AM_GMC(AM_IP):
     # Can't issue TLB invalidation if the hub isn't initialized.
     if not self.hub_initted[ip]: return
 
-    if ip == "MM": wait_cond(lambda: self.adev.regMMVM_INVALIDATE_ENG17_SEM.read() & 0x1, value=1, msg="mm flush_tlb timeout")
-
     # self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_REQ").write(flush_type=flush_type, per_vmid_invalidate_req=(1 << vmid), invalidate_l2_ptes=1,
     #   invalidate_l2_pde0=1, invalidate_l2_pde1=1, invalidate_l2_pde2=1, invalidate_l1_ptes=1, clear_protection_fault_status_addr=0)
 
-    self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_REQ").write(0x7c0001)
+    for inst in range(self.adev.soc.vmhubs if ip == "MM" else self.adev.soc.xccs):
+      # if ip == "MM": wait_cond(lambda: self.adev.regMMVM_INVALIDATE_ENG17_SEM.read(inst=inst) & 0x1, value=1, msg="mm flush_tlb timeout")
+      self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_REQ").write(0x7c0001, inst=inst)
+      wait_cond(lambda: self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_ACK").read(inst=inst) & (1 << vmid), value=(1 << vmid), msg="flush_tlb timeout")
 
-    wait_cond(lambda: self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_ACK").read() & (1 << vmid), value=(1 << vmid), msg="flush_tlb timeout")
+    # if ip == "MM":
+    #   self.adev.regMMVM_INVALIDATE_ENG17_SEM.write(0x0)
+    #   self.adev.regMMVM_L2_BANK_SELECT_RESERVED_CID2.update(reserved_cache_private_invalidation=1)
 
-    if ip == "MM":
-      self.adev.regMMVM_INVALIDATE_ENG17_SEM.write(0x0)
-      self.adev.regMMVM_L2_BANK_SELECT_RESERVED_CID2.update(reserved_cache_private_invalidation=1)
-
-      # Read back the register to ensure the invalidation is complete
-      self.adev.regMMVM_L2_BANK_SELECT_RESERVED_CID2.read()
+    #   # Read back the register to ensure the invalidation is complete
+    #   self.adev.regMMVM_L2_BANK_SELECT_RESERVED_CID2.read()
 
   def enable_vm_addressing(self, page_table, ip:Literal["MM", "GC"], vmid, inst):
     self.adev.wreg_pair(f"reg{ip}VM_CONTEXT{vmid}_PAGE_TABLE_START_ADDR", "_LO32", "_HI32", self.vm_base >> 12, inst=inst)
@@ -100,7 +104,7 @@ class AM_GMC(AM_IP):
                                                          read_protection_fault_enable_interrupt=1, read_protection_fault_enable_default=1,
                                                          write_protection_fault_enable_interrupt=1, write_protection_fault_enable_default=1,
                                                          execute_protection_fault_enable_interrupt=1, execute_protection_fault_enable_default=1,
-                                                         enable_context=1, page_table_depth=3, inst=inst)
+                                                         enable_context=1, page_table_depth=2, page_table_block_size=9, inst=inst)
 
   def init_hub(self, ip:Literal["MM", "GC"], insts:int):
     # Init system apertures
@@ -117,12 +121,19 @@ class AM_GMC(AM_IP):
       self.adev.reg(f"reg{ip}VM_L2_PROTECTION_FAULT_CNTL2").update(active_page_migration_pte_read_retry=1, inst=i)
 
       # Init TLB and cache
-      self.adev.reg(f"reg{ip}MC_VM_MX_L1_TLB_CNTL").write(0x3d59, inst=i)
+      self.adev.reg(f"reg{ip}MC_VM_MX_L1_TLB_CNTL").update(enable_l1_tlb=1, system_access_mode=3, enable_advanced_driver_model=1,
+        system_aperture_unmapped_access=0, mtype=self.adev.soc.module.MTYPE_UC, atc_en=1, inst=i)
 
-      self.adev.reg(f"reg{ip}VM_L2_CNTL").write(0x80603, inst=i)
-      self.adev.reg(f"reg{ip}VM_L2_CNTL2").write(0x3, inst=i)
-      self.adev.reg(f"reg{ip}VM_L2_CNTL3").write(0x8014800c, inst=i)
+      self.adev.reg(f"reg{ip}VM_L2_CNTL").update(enable_l2_cache=1, enable_l2_fragment_processing=1, context1_identity_access_mode=1, inst=i)
+      self.adev.reg(f"reg{ip}VM_L2_CNTL2").update(invalidate_all_l1_tlbs=1, invalidate_l2_cache=1, inst=i)
+      self.adev.reg(f"reg{ip}VM_L2_CNTL3").update(bank_select=12 if self.translate_further else 9,
+        l2_cache_bigk_fragment_size=9 if self.translate_further else 6, inst=i)
       self.adev.reg(f"reg{ip}VM_L2_CNTL4").write(0x1, inst=i)
+
+      # self.adev.reg(f"reg{ip}VM_L2_CNTL").write(0x80603, inst=i)
+      # self.adev.reg(f"reg{ip}VM_L2_CNTL2").write(0x3, inst=i)
+      # self.adev.reg(f"reg{ip}VM_L2_CNTL3").write(0x8014800c, inst=i)
+      # self.adev.reg(f"reg{ip}VM_L2_CNTL4").write(0x1, inst=i)
       # self.adev.reg(f"reg{ip}VM_L2_CNTL5").write(inst=i, walker_priority_client_id=0x1ff)
 
       self.enable_vm_addressing(self.adev.mm.root_page_table, ip, vmid=0, inst=i)
@@ -158,6 +169,7 @@ class AM_GMC(AM_IP):
       # [  585.531099] amdgpu 0000:e5:00.0: amdgpu: 		pte: flags=0x600000000000077
 
       extra |= am.AMDGPU_PTE_MTYPE_VG10(0, self.adev.soc.module.MTYPE_UC if uncached else 0)
+      print(hex(am.AMDGPU_PTE_MTYPE_VG10(0, self.adev.soc.module.MTYPE_UC if uncached else 0)))
       if is_table and pte_lv == am.AMDGPU_VM_PDB1: extra |= am.AMDGPU_PDE_BFS(0x9)
       if is_table and pte_lv == am.AMDGPU_VM_PDB0: extra |= am.AMDGPU_PTE_TF
       if not is_table and pte_lv not in {am.AMDGPU_VM_PTB, am.AMDGPU_VM_PDB0}: extra |= am.AMDGPU_PDE_PTE
@@ -505,11 +517,14 @@ class AM_PSP(AM_IP):
 
     print(self.is_sos_alive())
 
+    was_alive = self.is_sos_alive()
     if not self.is_sos_alive():
       for fw, compid in sos_components: self._bootloader_load_component(fw, compid)
       while not self.is_sos_alive(): time.sleep(0.01)
 
     self._ring_create()
+    if was_alive: self._tmr_unload_cmd()
+
     if not self.boot_time_tmr or self.autoload_supported: self._tmr_init()
 
     # SMU fw should be loaded before TMR.
@@ -606,6 +621,8 @@ class AM_PSP(AM_IP):
     cmd.cmd.cmd_setup_tmr.bitfield.virt_phy_addr = 1
     cmd.cmd.cmd_setup_tmr.buf_size = 0 # self.tmr_size
     return self._ring_submit(cmd)
+
+  def _tmr_unload_cmd(self) -> am.struct_psp_gfx_cmd_resp: return self._ring_submit(am.struct_psp_gfx_cmd_resp(cmd_id=am.GFX_CMD_ID_DESTROY_TMR))
 
   def _load_toc_cmd(self, toc_size:int) -> am.struct_psp_gfx_cmd_resp:
     cmd = am.struct_psp_gfx_cmd_resp(cmd_id=am.GFX_CMD_ID_LOAD_TOC)

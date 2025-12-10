@@ -130,7 +130,8 @@ class AMPageTableEntry:
     # [  585.531099] amdgpu 0000:e5:00.0: amdgpu: 		pte: flags=0x600000000000077
 
     assert paddr & self.adev.gmc.address_space_mask == paddr, f"Invalid physical address {paddr:#x}"
-    if not system and not table: paddr = self.adev.paddr2mc(paddr) # TODO: is this right?
+    # if not system and not table: paddr = self.adev.paddr2mc(paddr) # TODO: is this right?
+    # if self.lv == 0:
     self.entries[entry_id] = self.adev.gmc.get_pte_flags(self.lv, table, frag, uncached, system, snooped, valid) | (paddr & 0x0000FFFFFFFFF000)
     print(f"Setting PTE {self.entries[entry_id]=:#x} (lv={self.lv}) {entry_id} to {paddr:#x} table={table} uncached={uncached} system={system} snooped={snooped} frag={frag} valid={valid}")
 
@@ -206,7 +207,7 @@ class AMDev(PCIDevImplBase):
 
     # Memory manager & firmware
     self.mm = AMMemoryManager(self, self.vram_size, boot_size=(32 << 20), pt_t=AMPageTableEntry, va_shifts=[12, 21, 30, 39], va_bits=48,
-      first_lv=am.AMDGPU_VM_PDB2, va_base=AMMemoryManager.va_allocator.base,
+      first_lv=am.AMDGPU_VM_PDB2, va_base=0,
       palloc_ranges=[(1 << (i + 12), 0x1000) for i in range(9 * (3 - am.AMDGPU_VM_PDB2), -1, -1)], reserve_ptable=not self.large_bar)
     self.fw = AMFirmware(self)
 

@@ -373,8 +373,12 @@ class AMDComputeQueue(HWQueue):
 
   def signal(self, signal:AMDSignal, value:sint=0):
     print(hex(signal.value_addr), value, hex(signal.base_buf.meta.mapping.sva))
-    self.release_mem(signal.value_addr, value, self.pm4.data_sel__mec_release_mem__send_32_bit_low,
+    self.release_mem(signal.base_buf.meta.mapping.sva, value, self.pm4.data_sel__mec_release_mem__send_32_bit_low,
                        self.pm4.int_sel__mec_release_mem__send_interrupt_after_write_confirm, cache_flush=True)
+    # self.release_mem(0x800000004000, value, self.pm4.data_sel__mec_release_mem__send_32_bit_low,
+    #                    self.pm4.int_sel__mec_release_mem__send_interrupt_after_write_confirm, cache_flush=True)
+    # self.release_mem(signal.base_buf.meta.mapping.sva, value, self.pm4.data_sel__mec_release_mem__send_32_bit_low,
+    #                    self.pm4.int_sel__mec_release_mem__send_interrupt_after_write_confirm, cache_flush=True)
     return self
 
     with self.pred_exec(xcc_mask=0b1):
@@ -924,12 +928,12 @@ class AMDDevice(HCQCompiled):
     #   self.pm4_ibs = self.iface.alloc(0x2000 if self.is_usb() else (16 << 20), uncached=True, cpu_access=True)
     #   self.pm4_ib_alloc = BumpAllocator(self.pm4_ibs.size, wrap=True)
 
+    self.allocator = AMDAllocator(self)
+    self.xcc_sync_area = self.allocator.alloc(0x1000, BufferSpec(nolru=True, cpu_access=True, uncached=True))
+
     self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL if self.is_aql else kfd.KFD_IOC_QUEUE_TYPE_COMPUTE,
       0x2000 if self.is_usb() else 0x1000, eop_buffer_size=0x1000,
       ctx_save_restore_size=0 if self.is_am() else wg_data_size + ctl_stack_size, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
-
-    self.allocator = AMDAllocator(self)
-    self.xcc_sync_area = self.allocator.alloc(0x1000, BufferSpec(nolru=True, cpu_access=True))
 
     import time
     time.sleep(2)
@@ -949,7 +953,7 @@ class AMDDevice(HCQCompiled):
     print(self.compute_queue.read_ptrs[0][0])
     print(self.compute_queue.write_ptrs[0][0])
 
-    AMDComputeQueue(self).signal(sig, 10) # .submit(self)
+    AMDComputeQueue(self).memory_barrier().signal(sig, 10).submit(self)
     time.sleep(2)
     print(sig.value)
     print(self.compute_queue.read_ptrs[0][0])
