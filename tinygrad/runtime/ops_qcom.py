@@ -13,6 +13,7 @@ from tinygrad.renderer.nir import IR3Renderer
 from tinygrad.runtime.support.compiler_mesa import IR3Compiler
 from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, prod, fromimport, cpu_profile, lo32, PROFILE, suppress_finalizing
 from tinygrad.helpers import flatten, QCOM_IR3, QCOM_CC
+from tinygrad.dtype import ImageDType
 from tinygrad.runtime.support.system import System
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
@@ -201,11 +202,9 @@ class QCOMArgsState(HCQArgsState):
     for cnst_val,cnst_off,cnst_sz in prg.consts_info: to_mv(self.buf.va_addr + cnst_off, cnst_sz)[:] = cnst_val.to_bytes(cnst_sz, byteorder='little')
 
     if prg.samp_cnt > 0: to_mv(self.buf.va_addr + prg.samp_off, len(prg.samplers) * 4).cast('I')[:] = array.array('I', prg.samplers)
-    idx = 0
     for i, b in enumerate(bufs):
       if prg.buf_info[i].type in {BUFTYPE_TEX, BUFTYPE_IBO}:
-        obj = prg.tex_infos[idx].desc if prg.buf_info[i].type is BUFTYPE_TEX else prg.tex_infos[idx].ibo
-        idx += 1
+        obj = prg.tex_infos[i].desc if prg.buf_info[i].type is BUFTYPE_TEX else prg.tex_infos[i].ibo
         to_mv(self.buf.va_addr + prg.buf_info[i].offset, len(obj) * 4).cast('I')[:] = array.array('I', obj)
       self.bind_sints_to_buf(b.va_addr, buf=self.buf, fmt='Q', offset=self.buf_info[i].offset+(0 if self.buf_info[i].type is BUFTYPE_BUF else 16))
 
@@ -230,18 +229,20 @@ class QCOMProgram(HCQProgram):
   def __init__(self, dev: QCOMDevice, name: str, lib: bytes, aux_render=None):
     self.tex_infos = []
     for dtype in aux_render:
-      imgw, imgh, itemsize_log = dtype.shape[1], dtype.shape[0], int(math.log2(dtype.itemsize))
-      pitchalign, stride = max(6, 11 - int(math.log2(imgh))) if imgh > 1 else 6, imgw * 4 * dtype.itemsize
-      assert stride % (1 << pitchalign) == 0 or imgh == 0
-      align_up = max(1, (8 // itemsize_log + 1) - imgh // 32) if pitchalign == 6 else (2 ** (pitchalign - itemsize_log - 2))
-      granularity = 128 if dtype.itemsize == 4 else 256
-      assert not (min(next_power2(imgw), round_up(imgw, granularity)) - align_up + 1 <= imgw and imgw > granularity//2), \
-        f"{imgw=} {imgh=} {granularity=} {align_up=} {min(next_power2(imgw), round_up(imgw, granularity)) - align_up + 1}"
-      tex_fmt = mesa.FMT6_32_32_32_32_FLOAT if dtype.itemsize == 4 else mesa.FMT6_16_16_16_16_FLOAT
-      desc = [qreg.a6xx_tex_const_0(0x8, swiz_x=0, swiz_y=1, swiz_z=2, swiz_w=3, fmt=tex_fmt), qreg.a6xx_tex_const_1(width=imgw, height=imgh),
-              qreg.a6xx_tex_const_2(type=mesa.A6XX_TEX_2D, pitch=stride, pitchalign=pitchalign-6), 0, 0, 0,
-              qreg.a6xx_tex_const_6(plane_pitch=0x400000), qreg.a6xx_tex_const_7(13)]
-      self.tex_infos.append(QCOMTextureInfo(stride, stride, desc, [desc[0] & (~0xffff), *desc[1:len(desc)]]))
+      if isinstance(dtype, ImageDType):
+        imgw, imgh, itemsize_log = dtype.shape[1], dtype.shape[0], int(math.log2(dtype.itemsize))
+        pitchalign, stride = max(6, 11 - int(math.log2(imgh))) if imgh > 1 else 6, imgw * 4 * dtype.itemsize
+        assert stride % (1 << pitchalign) == 0 or imgh == 0
+        align_up = max(1, (8 // itemsize_log + 1) - imgh // 32) if pitchalign == 6 else (2 ** (pitchalign - itemsize_log - 2))
+        granularity = 128 if dtype.itemsize == 4 else 256
+        assert not (min(next_power2(imgw), round_up(imgw, granularity)) - align_up + 1 <= imgw and imgw > granularity//2), \
+          f"{imgw=} {imgh=} {granularity=} {align_up=} {min(next_power2(imgw), round_up(imgw, granularity)) - align_up + 1}"
+        tex_fmt = mesa.FMT6_32_32_32_32_FLOAT if dtype.itemsize == 4 else mesa.FMT6_16_16_16_16_FLOAT
+        desc = [qreg.a6xx_tex_const_0(0x8, swiz_x=0, swiz_y=1, swiz_z=2, swiz_w=3, fmt=tex_fmt), qreg.a6xx_tex_const_1(width=imgw, height=imgh),
+                qreg.a6xx_tex_const_2(type=mesa.A6XX_TEX_2D, pitch=stride, pitchalign=pitchalign-6), 0, 0, 0,
+                qreg.a6xx_tex_const_6(plane_pitch=0x400000), qreg.a6xx_tex_const_7(13)]
+        self.tex_infos.append(QCOMTextureInfo(stride, stride, desc, [desc[0] & (~0xffff), *desc[1:len(desc)]]))
+      else: self.tex_infos.append(None)
 
     self.dev: QCOMDevice = dev
     self.name, self.lib, self.NIR = name, lib, isinstance(dev.compiler, IR3Compiler)
