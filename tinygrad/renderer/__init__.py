@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Callable, cast
+from typing import Any, Callable, cast
 import functools
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup, prod
@@ -64,7 +64,7 @@ class ProgramSpec:
   device:str
   ast:UOp  # save the base ast (this is method cache key)
   uops:list[UOp]|None=None
-  aux:dict|None=None
+  aux:Any=None
 
   # filled in from uops (if we have uops)
   global_size:list[int]|None=None
@@ -132,4 +132,4 @@ class Renderer:
   code_for_op: dict[Ops, Callable] = {}
 
   def __reduce__(self): return self.__class__, ()
-  def render(self, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")
+  def render(self, uops:list[UOp]) -> str|tuple[str,...]: raise NotImplementedError("needs a renderer")
