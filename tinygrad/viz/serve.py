@@ -235,7 +235,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
       for e in counters:
         if isinstance(e, ProfileSQTTEvent): parse_sqtt_print_packets(e.blob)
   # ** decode traces for each run
-  all_runs:dict = {"cols":set(), "rows":[]}
+  all_runs:dict = {"cols":{}, "rows":[]}
   steps:list[dict] = [create_step("All", ("/all", len(ctxs), 0), data=all_runs)]
   for key,counters in counter_events.items():
     # ** Run summary
@@ -274,7 +274,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
       view, ptr = memoryview(pmc_event.blob).cast('Q'), 0
       for s in pmc_event.sched:
         row:list = [s.name, 0, {"cols":sample_cols, "rows":[]}]
-        all_runs["cols"].add(s.name)
+        all_runs["cols"][s.name] = None
         for sample in itertools.product(range(s.xcc), range(s.inst), range(s.se), range(s.sa), range(s.wgp)):
           row[1] += (val:=int(view[ptr]))
           row[2]["rows"].append(sample+(val,))
