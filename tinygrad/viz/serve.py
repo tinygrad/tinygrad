@@ -223,10 +223,10 @@ def row_tuple(row:str) -> tuple[int, ...]: return tuple(int(x.split(":")[1]) for
 def load_sqtt(profile:list[ProfileEvent]) -> None:
   from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
   counter_events:dict[tuple[str, int], list[ProfileSQTTEvent|ProfilePMCEvent]] = {}
-  range_events:dict[str, list[float]] = {}
+  durations:dict[str, list[float]] = {}
   for e in profile:
     if isinstance(e, (ProfilePMCEvent, ProfileSQTTEvent)): counter_events.setdefault((e.kern, e.exec_tag), []).append(e)
-    if isinstance(e, ProfileRangeEvent) and e.device.startswith("AMD"): range_events.setdefault(e.name, []).append(float(e.en-e.st))
+    if isinstance(e, ProfileRangeEvent) and e.device.startswith("AMD") and e.en is not None: durations.setdefault(e.name,[]).append(float(e.en-e.st))
   if not counter_events: return
   # ** init decoder
   from extra.sqtt.roc import decode
@@ -283,7 +283,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
           ptr += 1
         rows.append(row)
       steps.append(create_step("PMC", ("/pmc", len(ctxs), len(steps)), {"rows":rows, "cols":agg_cols}, depth=1))
-      all_runs["rows"].append((key[0], range_events[key[0]].pop(0), *[r[1] for r in rows]))
+      all_runs["rows"].append((key[0], durations[key[0]].pop(0), *[r[1] for r in rows]))
     for cu in prg_cu:
       events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]
       steps.append(create_step(f"{cu} {len(cu_events[cu])}", ("/counters", len(ctxs), len(steps)),
