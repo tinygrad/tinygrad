@@ -1110,8 +1110,8 @@ def train_bert():
       MLLOGGER.start(key=mllog_constants.EPOCH_START, value=i*GBS, metadata={"epoch_num": i*GBS})
 
   @TinyJit
-  def train_step_bert(input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor,
-                      masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
+  def minibatch(input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor,
+                masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
     for t in [input_ids, segment_ids, attention_mask, masked_positions, masked_lm_ids, masked_lm_weights, next_sentence_labels]:
       if len(GPUS) > 1: t.shard_(GPUS, axis=0)
       else: t.to_(GPUS[0])
@@ -1145,7 +1145,7 @@ def train_bert():
       st = time.perf_counter()
       GlobalCounters.reset()
       with WallTimeEvent(BenchEvent.STEP):
-        loss = train_step_bert(
+        loss = minibatch(
           train_data["input_ids"], train_data["segment_ids"], train_data["input_mask"], train_data["masked_lm_positions"], \
           train_data["masked_lm_ids"], train_data["masked_lm_weights"], train_data["next_sentence_labels"])
         global_norm, lr = optimizer_step()
@@ -1185,9 +1185,12 @@ def train_bert():
     if i % eval_step_freq == 0 or (BENCHMARK and i == BENCHMARK) or i == train_steps:
       if MLLOGGER and RUNMLPERF:
         MLLOGGER.start(key=mllog_constants.EVAL_START, value=None, metadata={"epoch_num": i*GBS, "step_num": i})
-      if getenv("RESET_STEP"): train_step_bert.reset()
-      elif getenv("FREE_INTERMEDIATE", 1) and train_step_bert.captured is not None:
-        train_step_bert.captured.free_intermediates()
+      if getenv("RESET_STEP"):
+        minibatch.reset()
+        optimizer_step.reset()
+      elif getenv("FREE_INTERMEDIATE", 1):
+        if minibatch.captured is not None: minibatch.captured.free_intermediates()
+        if optimizer_step.captured is not None: optimizer_step.captured.free_intermediates()
       eval_lm_losses = []
       eval_clsf_losses = []
       eval_lm_accs = []
