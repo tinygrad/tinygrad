@@ -1183,7 +1183,6 @@ def train_bert():
         MLLOGGER.start(key=mllog_constants.EVAL_START, value=None, metadata={"epoch_num": i*GBS, "step_num": i})
       if getenv("RESET_STEP"): train_step_bert.reset()
       elif getenv("FREE_INTERMEDIATE", 1) and train_step_bert.captured is not None:
-        # TODO: FREE_INTERMEDIATE nan'ed after jit step 2
         train_step_bert.captured.free_intermediates()
       eval_lm_losses = []
       eval_clsf_losses = []
