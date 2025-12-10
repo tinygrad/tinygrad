@@ -1045,6 +1045,11 @@ def train_bert():
   optimizer_no_wd = LAMB(parameters_no_wd, lr=max_lr, b1=opt_lamb_beta_1, b2=opt_lamb_beta_2, eps=epsilon, weight_decay=0.0, adam=False)
   optimizer_group = OptimizerGroup(optimizer_wd, optimizer_no_wd)
 
+  # init grads
+  for p in optimizer_group.params:
+    p.grad = p.zeros_like().contiguous().realize()
+  grads = [p.grad for p in optimizer_group.params]
+
   # ** LR scheduler **
   scheduler_wd = PolynomialDecayWithWarmup(optimizer_wd, max_lr, 0, train_steps, warmup_steps, power=poly_power)
   scheduler_no_wd = PolynomialDecayWithWarmup(optimizer_no_wd, max_lr, 0, train_steps, warmup_steps, power=poly_power)
@@ -1110,8 +1115,6 @@ def train_bert():
     for t in [input_ids, segment_ids, attention_mask, masked_positions, masked_lm_ids, masked_lm_weights, next_sentence_labels]:
       if len(GPUS) > 1: t.shard_(GPUS, axis=0)
       else: t.to_(GPUS[0])
-    optimizer_group.zero_grad()
-
     lm_logits, seq_relationship_logits = model(input_ids, attention_mask, masked_positions, segment_ids)
     loss = model.loss(lm_logits, seq_relationship_logits, masked_lm_ids, masked_lm_weights, next_sentence_labels)
     (loss * loss_scaler).backward()
@@ -1126,8 +1129,9 @@ def train_bert():
 
     optimizer_group.step()
     scheduler_group.step()
+    for g in grads: g.assign(g.zeros_like().contiguous())
     # TODO: no to("CPU") here because it blocks and messes the python time
-    Tensor.realize(loss, global_norm, optimizer_group.optimizers[0].lr)
+    Tensor.realize(*parameters, *grads, loss, global_norm, optimizer_group.optimizers[0].lr)
     return loss, global_norm, optimizer_group.optimizers[0].lr
 
   while train_data is not None and i < train_steps and not achieved:
