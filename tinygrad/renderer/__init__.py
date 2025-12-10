@@ -64,6 +64,7 @@ class ProgramSpec:
   device:str
   ast:UOp  # save the base ast (this is method cache key)
   uops:list[UOp]|None=None
+  aux:dict|None=None
 
   # filled in from uops (if we have uops)
   global_size:list[int]|None=None

@@ -201,9 +201,11 @@ class QCOMArgsState(HCQArgsState):
     for cnst_val,cnst_off,cnst_sz in prg.consts_info: to_mv(self.buf.va_addr + cnst_off, cnst_sz)[:] = cnst_val.to_bytes(cnst_sz, byteorder='little')
 
     if prg.samp_cnt > 0: to_mv(self.buf.va_addr + prg.samp_off, len(prg.samplers) * 4).cast('I')[:] = array.array('I', prg.samplers)
+    idx = 0
     for i, b in enumerate(bufs):
       if prg.buf_info[i].type in {BUFTYPE_TEX, BUFTYPE_IBO}:
-        obj = b.texture_info.desc if prg.buf_info[i].type is BUFTYPE_TEX else b.texture_info.ibo
+        obj = prg.tex_infos[idx].desc if prg.buf_info[i].type is BUFTYPE_TEX else prg.tex_infos[idx].ibo
+        idx += 1
         to_mv(self.buf.va_addr + prg.buf_info[i].offset, len(obj) * 4).cast('I')[:] = array.array('I', obj)
       self.bind_sints_to_buf(b.va_addr, buf=self.buf, fmt='Q', offset=self.buf_info[i].offset+(0 if self.buf_info[i].type is BUFTYPE_BUF else 16))
 
@@ -225,12 +227,26 @@ class IR3ArgsState(HCQArgsState):
     self.bind_sints_to_buf(*flatten([b.texture_info.ibo + ([0] * 8) for b in ibos]), buf=self.buf, fmt='I', offset=prg.ibo_off)
 
 class QCOMProgram(HCQProgram):
-  def __init__(self, dev: QCOMDevice, name: str, lib: bytes):
+  def __init__(self, dev: QCOMDevice, name: str, lib: bytes, aux_render=None):
+    self.tex_infos = []
+    for dtype in aux_render:
+      imgw, imgh, itemsize_log = dtype.shape[1], dtype.shape[0], int(math.log2(dtype.itemsize))
+      pitchalign, stride = max(6, 11 - int(math.log2(imgh))) if imgh > 1 else 6, imgw * 4 * dtype.itemsize
+      assert stride % (1 << pitchalign) == 0 or imgh == 0
+      align_up = max(1, (8 // itemsize_log + 1) - imgh // 32) if pitchalign == 6 else (2 ** (pitchalign - itemsize_log - 2))
+      granularity = 128 if dtype.itemsize == 4 else 256
+      assert not (min(next_power2(imgw), round_up(imgw, granularity)) - align_up + 1 <= imgw and imgw > granularity//2), \
+        f"{imgw=} {imgh=} {granularity=} {align_up=} {min(next_power2(imgw), round_up(imgw, granularity)) - align_up + 1}"
+      tex_fmt = mesa.FMT6_32_32_32_32_FLOAT if dtype.itemsize == 4 else mesa.FMT6_16_16_16_16_FLOAT
+      desc = [qreg.a6xx_tex_const_0(0x8, swiz_x=0, swiz_y=1, swiz_z=2, swiz_w=3, fmt=tex_fmt), qreg.a6xx_tex_const_1(width=imgw, height=imgh),
+              qreg.a6xx_tex_const_2(type=mesa.A6XX_TEX_2D, pitch=stride, pitchalign=pitchalign-6), 0, 0, 0,
+              qreg.a6xx_tex_const_6(plane_pitch=0x400000), qreg.a6xx_tex_const_7(13)]
+      self.tex_infos.append(QCOMTextureInfo(stride, stride, desc, [desc[0] & (~0xffff), *desc[1:len(desc)]]))
+
     self.dev: QCOMDevice = dev
     self.name, self.lib, self.NIR = name, lib, isinstance(dev.compiler, IR3Compiler)
 
     if self.NIR:
-      from tinygrad.runtime.autogen import mesa
       v, cs, self.imm_vals, self.image = IR3Compiler.unpack_lib(lib)
       self.prg_offset, self.brnchstck, self.image_size, self.pvtmem, self.shmem = 0, v.branchstack, v.info.size, v.pvtmem_size, v.shared_size
       self.wgsz = alloc.offset_vec4 * 4 + 8 if (alloc:=cs.allocs.consts[mesa.IR3_CONST_ALLOC_DRIVER_PARAMS]).size_vec4 else 0xfc
@@ -324,27 +340,7 @@ class QCOMTextureInfo:
 
 class QCOMAllocator(HCQAllocatorBase):
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
-    # Recalculate real size for texture
-    if options.image is not None:
-      imgw, imgh, itemsize_log = options.image.shape[1], options.image.shape[0], int(math.log2(options.image.itemsize))
-      pitchalign = max(6, 11 - int(math.log2(imgh))) if imgh > 1 else 6
-      align_up = max(1, (8 // itemsize_log + 1) - imgh // 32) if pitchalign == 6 else (2 ** (pitchalign - itemsize_log - 2))
-
-      granularity = 128 if options.image.itemsize == 4 else 256
-      pitch_add = (1 << pitchalign) if min(next_power2(imgw), round_up(imgw, granularity)) - align_up + 1 <= imgw and imgw > granularity//2 else 0
-      pitch = round_up((real_stride:=imgw * 4 * options.image.itemsize), 1 << pitchalign) + pitch_add
-      size = pitch * imgh
-
-    buf = self.dev._gpu_map(options.external_ptr, size) if options.external_ptr else self.dev._gpu_alloc(size)
-
-    if options.image is not None:
-      tex_fmt = mesa.FMT6_32_32_32_32_FLOAT if options.image.itemsize == 4 else mesa.FMT6_16_16_16_16_FLOAT
-      desc = [qreg.a6xx_tex_const_0(0x8, swiz_x=0, swiz_y=1, swiz_z=2, swiz_w=3, fmt=tex_fmt), qreg.a6xx_tex_const_1(width=imgw, height=imgh),
-              qreg.a6xx_tex_const_2(type=mesa.A6XX_TEX_2D, pitch=pitch, pitchalign=pitchalign-6), 0,
-              *data64_le(buf.va_addr), qreg.a6xx_tex_const_6(plane_pitch=0x400000), qreg.a6xx_tex_const_7(13)]
-
-      buf.texture_info = QCOMTextureInfo(pitch, real_stride, desc, [desc[0] & (~0xffff), *desc[1:len(desc)]])
-    return buf
+    return self.dev._gpu_map(options.external_ptr, size) if options.external_ptr else self.dev._gpu_alloc(size)
 
   def _do_copy(self, src_addr, dest_addr, src_size, real_size, src_stride, dest_stride, prof_text, dest_off=0, src_off=0):
     with cpu_profile(prof_text, self.dev.device, is_copy=True):

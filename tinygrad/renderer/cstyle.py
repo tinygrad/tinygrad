@@ -534,4 +534,7 @@ class AMDRenderer(CStyleLanguage):
 
 class NVRenderer(CUDARenderer): device = "NV"
 class HIPRenderer(AMDRenderer): device = "HIP"
-class QCOMRenderer(OpenCLRenderer): device = "QCOM"
+class QCOMRenderer(OpenCLRenderer):
+  device = "QCOM"
+  def render(self, uops:list[UOp]):
+      return super().render(uops), [u.dtype for u in uops if u.op == Ops.DEFINE_GLOBAL and isinstance(u.dtype, ImageDType)]
