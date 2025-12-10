@@ -31,7 +31,7 @@ class AM_GMC(AM_IP):
     self.mc_end = self.mc_base + self.adev.mm.vram_size - 1
 
     # VM aperture
-    self.vm_base = self.adev.mm.va_allocator.base
+    self.vm_base = self.adev.mm.va_base
     self.vm_end = min(self.vm_base + (1 << self.adev.mm.va_bits) - 1, 0x7fffffffffff)
 
     # GFX11/GFX12 has 44-bit address space
