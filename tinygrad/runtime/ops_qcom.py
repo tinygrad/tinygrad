@@ -203,8 +203,8 @@ class QCOMArgsState(HCQArgsState):
 
     if prg.samp_cnt > 0: to_mv(self.buf.va_addr + prg.samp_off, len(prg.samplers) * 4).cast('I')[:] = array.array('I', prg.samplers)
     for i, b in enumerate(bufs):
-      if prg.buf_info[i].type in {BUFTYPE_TEX, BUFTYPE_IBO}:
-        obj = prg.tex_infos[i].desc if prg.buf_info[i].type is BUFTYPE_TEX else prg.tex_infos[i].ibo
+      if (ti:=prg.tex_infos[i]) is not None:
+        obj = ti.desc if prg.buf_info[i].type is BUFTYPE_TEX else ti.ibo
         to_mv(self.buf.va_addr + prg.buf_info[i].offset, len(obj) * 4).cast('I')[:] = array.array('I', obj)
       self.bind_sints_to_buf(b.va_addr, buf=self.buf, fmt='Q', offset=self.buf_info[i].offset+(0 if self.buf_info[i].type is BUFTYPE_BUF else 16))
 
@@ -227,7 +227,7 @@ class IR3ArgsState(HCQArgsState):
 
 class QCOMProgram(HCQProgram):
   def __init__(self, dev: QCOMDevice, name: str, lib: bytes, aux_render=None):
-    self.tex_infos = []
+    self.tex_infos:list[QCOMTextureInfo|None] = []
     for dtype in aux_render:
       if isinstance(dtype, ImageDType):
         imgw, imgh, itemsize_log = dtype.shape[1], dtype.shape[0], int(math.log2(dtype.itemsize))
