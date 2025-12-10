@@ -373,7 +373,7 @@ class AMDComputeQueue(HWQueue):
 
   def signal(self, signal:AMDSignal, value:sint=0):
     print(hex(signal.value_addr), value, hex(signal.base_buf.meta.mapping.sva))
-    self.release_mem(signal.base_buf.meta.mapping.sva, value, self.pm4.data_sel__mec_release_mem__send_32_bit_low,
+    self.release_mem(signal.value_addr, value, self.pm4.data_sel__mec_release_mem__send_32_bit_low,
                        self.pm4.int_sel__mec_release_mem__send_interrupt_after_write_confirm, cache_flush=True)
     return self
 
@@ -930,10 +930,26 @@ class AMDDevice(HCQCompiled):
 
     self.allocator = AMDAllocator(self)
     self.xcc_sync_area = self.allocator.alloc(0x1000, BufferSpec(nolru=True, cpu_access=True))
+
+    import time
+    time.sleep(2)
+
     sig = AMDSignal(base_buf=self.xcc_sync_area)
     sig.value = 1
-    AMDComputeQueue(self).signal(sig, 10).submit(self)
-    import time
+
+    print(sig.value)
+    print(self.compute_queue.read_ptrs[0][0])
+    print(self.compute_queue.write_ptrs[0][0])
+
+    time.sleep(2)
+
+    sig.value = 2
+
+    print(sig.value)
+    print(self.compute_queue.read_ptrs[0][0])
+    print(self.compute_queue.write_ptrs[0][0])
+
+    AMDComputeQueue(self).signal(sig, 10) # .submit(self)
     time.sleep(2)
     print(sig.value)
     print(self.compute_queue.read_ptrs[0][0])

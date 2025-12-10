@@ -130,7 +130,7 @@ class AMPageTableEntry:
     # [  585.531099] amdgpu 0000:e5:00.0: amdgpu: 		pte: flags=0x600000000000077
 
     assert paddr & self.adev.gmc.address_space_mask == paddr, f"Invalid physical address {paddr:#x}"
-    if not system: paddr = self.adev.paddr2mc(paddr) # TODO: is this right?
+    if not system and not table: paddr = self.adev.paddr2mc(paddr) # TODO: is this right?
     self.entries[entry_id] = self.adev.gmc.get_pte_flags(self.lv, table, frag, uncached, system, snooped, valid) | (paddr & 0x0000FFFFFFFFF000)
     print(f"Setting PTE {self.entries[entry_id]=:#x} (lv={self.lv}) {entry_id} to {paddr:#x} table={table} uncached={uncached} system={system} snooped={snooped} frag={frag} valid={valid}")
 
@@ -141,7 +141,7 @@ class AMPageTableEntry:
   def supports_huge_page(self, paddr:int): return self.lv >= am.AMDGPU_VM_PDB2
 
 class AMMemoryManager(MemoryManager):
-  va_allocator = TLSFAllocator(512 * (1 << 30), base=0x400000000000) # global for all devices.
+  va_allocator = TLSFAllocator(512 * (1 << 30), base=0x200000000000) # global for all devices.
 
   def on_range_mapped(self):
     # Invalidate TLB after mappings.
@@ -185,10 +185,16 @@ class AMDev(PCIDevImplBase):
     # Booting done
     self.is_booting = False
 
+    import time
+    time.sleep(5)
+
     # Re-initialize main blocks
     for ip in [self.gfx]:
       ip.init_hw()
       if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
+
+    import time
+    time.sleep(5)
 
     # self.smu.set_clocks(level=-1) # last level, max perf.
     # for ip in [self.soc, self.gfx]: ip.set_clockgating_state()

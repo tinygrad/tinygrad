@@ -20,8 +20,15 @@ class AM_SOC(AM_IP):
   def init_hw(self):
     # pass
     # self.adev.regRCC_DEV0_EPF2_STRAP2.update(strap_no_soft_reset_dev0_f2=0x0)
+    self.adev.regXCC_DOORBELL_FENCE.write(0x0)
+    self.adev.regBIFC_GFX_INT_MONITOR_MASK.write(0x7ff)
+    self.adev.regBIF_BX0_REMAP_HDP_MEM_FLUSH_CNTL.write(0x1a000)
+    self.adev.regBIF_BX0_REMAP_HDP_REG_FLUSH_CNTL.write(0x1a004)
     self.adev.regBIFC_DOORBELL_ACCESS_EN_PF.write(0xfffff)
-    self.adev.regRCC_DEV0_EPF0_RCC_DOORBELL_APER_EN.write(0x1)
+    self.adev.regRCC_DEV0_EPF0_VF7_RCC_DOORBELL_APER_EN.write(0x1)
+    self.adev.regXCC_DOORBELL_FENCE.write(0x0)
+    for i in range(16): self.adev.reg(f"DOORBELL0_CTRL_ENTRY_{i}").write(0x5200 + 0x14 * i)
+    # regRCC_DEV0_EPF0_VF7_RCC_DOORBELL_APER_EN
   def set_clockgating_state(self): self.adev.regHDP_MEM_POWER_CTRL.update(atomic_mem_power_ctrl_en=1, atomic_mem_power_ds_en=1)
 
   def doorbell_enable(self, port, awid=0, awaddr_31_28_value=0, offset=0, size=0):
@@ -55,7 +62,9 @@ class AM_GMC(AM_IP):
 
     self.pf_status_reg = lambda ip: f"reg{ip}VM_L2_PROTECTION_FAULT_STATUS{'_LO32' if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else ''}"
 
-  def init_hw(self): self.init_hub("MM", insts=self.adev.soc.vmhubs)
+  def init_hw(self):
+    self.init_hub("MM", insts=self.adev.soc.vmhubs)
+    for xcc in range(self.adev.soc.xccs): self.adev.regRLC_SPM_MC_CNTL.write(0xf, inst=xcc)
 
   def flush_hdp(self): self.adev.wreg(self.adev.reg("regBIF_BX0_REMAP_HDP_MEM_FLUSH_CNTL").read() // 4, 0x0)
   def flush_tlb(self, ip:Literal["MM", "GC"], vmid, flush_type=0):
@@ -91,7 +100,7 @@ class AM_GMC(AM_IP):
                                                          read_protection_fault_enable_interrupt=1, read_protection_fault_enable_default=1,
                                                          write_protection_fault_enable_interrupt=1, write_protection_fault_enable_default=1,
                                                          execute_protection_fault_enable_interrupt=1, execute_protection_fault_enable_default=1,
-                                                         enable_context=1, page_table_depth=(3 - page_table.lv), inst=inst)
+                                                         enable_context=1, page_table_depth=3, inst=inst)
 
   def init_hub(self, ip:Literal["MM", "GC"], insts:int):
     # Init system apertures
@@ -265,6 +274,9 @@ class AM_GFX(AM_IP):
     self.adev.soc.doorbell_enable(port=3, awid=0x6, awaddr_31_28_value=0x3)
 
     for xcc in range(self.adev.soc.xccs):
+      self.adev.regGB_ADDR_CONFIG.write(0x2a114042, inst=xcc)
+      self.adev.regTCP_UTCL1_CNTL2.write(0x18000001, inst=xcc)
+
       self.adev.regGRBM_CNTL.update(read_timeout=0xff, inst=xcc)
       for i in range(0, 16):
         self._grbm_select(vmid=i, xcc=xcc)
@@ -273,7 +285,7 @@ class AM_GFX(AM_IP):
         # Configure apertures:
         # LDS:         0x10000000'00000000 - 0x10000001'00000000 (4GB)
         # Scratch:     0x20000000'00000000 - 0x20000001'00000000 (4GB)
-        self.adev.regSH_MEM_BASES.write(0x20001000, inst=xcc)
+        self.adev.regSH_MEM_BASES.write(0x60006000, inst=xcc)
       self._grbm_select(xcc=xcc)
 
       # Configure MEC doorbell range
@@ -284,11 +296,20 @@ class AM_GFX(AM_IP):
       if self.adev.ip_ver[am.GC_HWIP] < (10,0,0): self.adev.regCP_MEC_CNTL.write(0, inst=xcc)
       else: self.adev.regCP_MEC_RS64_CNTL.update(mec_invalidate_icache=0, mec_pipe0_reset=0, mec_pipe0_active=1, mec_halt=0, inst=xcc)
 
-      print("RLC")
+      self.adev.regSQ_CONFIG1.write(0x1804, inst=xcc)
+
+    print("RLC")
+    for xcc in range(self.adev.soc.xccs):
+      self.adev.regRLC_CNTL.write(0x1, inst=xcc)
       self.adev.regRLC_SAFE_MODE.write(message=1, cmd=1, inst=xcc)
       wait_cond(lambda: self.adev.regRLC_SAFE_MODE.read(inst=xcc) & 0x1, value=0, msg="RLC safe mode timeout")
       self.adev.regRLC_CGCG_CGLS_CTRL.write(0, inst=xcc)
+      self.adev.regRLC_SRM_CNTL.write(3, inst=xcc)
+      self.adev.regCP_INT_CNTL_RING0.write(0x0, inst=xcc)
       self.adev.regRLC_SAFE_MODE.write(message=0, cmd=1, inst=xcc)
+
+    # Program xcc
+    for xcc in range(self.adev.soc.xccs): self.adev.regCP_HYP_XCP_CTL.write(num_xcc_in_xcp=self.adev.soc.xccs, virtual_xcc_id=xcc, inst=xcc)
 
     # NOTE: Wait for MEC to be ready. The kernel does udelay here as well.
     time.sleep(0.05)
@@ -334,7 +355,7 @@ class AM_GFX(AM_IP):
 
     self._grbm_select()
 
-    self.adev.reg(f"regCP_ME1_PIPE{pipe}_INT_CNTL").update(time_stamp_int_enable=1, generic0_int_enable=1)
+    # self.adev.reg(f"regCP_ME1_PIPE{pipe}_INT_CNTL").update(time_stamp_int_enable=1, generic0_int_enable=1)
 
   def set_clockgating_state(self):
     if hasattr(self.adev, 'regMM_ATC_L2_MISC_CG'): self.adev.regMM_ATC_L2_MISC_CG.write(enable=1, mem_ls_enable=1)
