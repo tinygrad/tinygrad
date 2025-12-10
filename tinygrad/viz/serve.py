@@ -141,8 +141,6 @@ def option(s:int|None) -> int: return 0 if s is None else s+1
 device_ts_diffs:dict[str, tuple[Decimal, Decimal]] = {}
 def cpu_ts_diff(device:str, thread=0) -> Decimal: return device_ts_diffs.get(device, (Decimal(0),))[thread]
 
-def event_name(e) -> str: return e.name.display_name if isinstance(e.name, TracingKey) else e.name
-
 DevEvent = ProfileRangeEvent|ProfileGraphEntry|ProfilePointEvent
 def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decimal, DevEvent], None, None]:
   for e in profile:
@@ -161,11 +159,8 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
   for st,et,dur,e in dev_events:
     if isinstance(e, ProfilePointEvent) and e.name == "exec": exec_points[e.arg["name"]] = e
     if dur == 0: continue
-    name, fmt, key = event_name(e), [], None
-    # tracing keys explicitly set the links
-    if isinstance(e.name, TracingKey): ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
-    # otherwise optionally find the link from the event name
-    elif (ref:=ref_map.get(e.name)) is not None:
+    name, fmt, key = e.name, [], None
+    if (ref:=ref_map.get(name)) is not None:
       name = ctxs[ref]["name"]
       if isinstance(p:=trace.keys[ref].ret, ProgramSpec) and (ei:=exec_points.get(p.name)) is not None:
         flops = sym_infer(p.estimates.ops, var_vals:=ei.arg['var_vals'])/(t:=dur*1e-6)
@@ -176,6 +171,9 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
         if (metadata_str:=",".join([str(m) for m in (ei.arg['metadata'] or ())])): fmt.append(metadata_str)
         if isinstance(e, ProfileGraphEntry): fmt.append("(batched)")
         key = ei.key
+    elif isinstance(e.name, TracingKey):
+      name = e.name.display_name
+      ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
     events.append(struct.pack("<IIIIfI", enum_str(name, scache), option(ref), option(key), st-start_ts, dur, enum_str("\n".join(fmt), scache)))
   return struct.pack("<BI", 0, len(events))+b"".join(events) if events else None
 
@@ -229,7 +227,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
   for e in profile:
     if isinstance(e, (ProfilePMCEvent, ProfileSQTTEvent)): counter_events.setdefault((e.kern, e.exec_tag), []).append(e)
     if isinstance(e, ProfileRangeEvent) and e.device.startswith("AMD") and e.en is not None:
-      durations.setdefault(event_name(e), []).append(float(e.en-e.st))
+      durations.setdefault(str(e.name), []).append(float(e.en-e.st))
   if not counter_events: return
   # ** init decoder
   from extra.sqtt.roc import decode
