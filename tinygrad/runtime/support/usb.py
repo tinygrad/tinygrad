@@ -72,27 +72,21 @@ class USB3:
         if tr.contents.status == libusb.LIBUSB_TRANSFER_COMPLETED: running -= 1
         elif tr.contents.status != 0xFF: raise RuntimeError(f"EP 0x{tr.contents.endpoint:02X} error: {tr.contents.status}")
 
-  def _bulk_out(self, ep: int, payload: bytes, timeout: int = 1000):
-    buf = (ctypes.c_ubyte * len(payload))(*payload)
+  def _bulk_out(self, ep: int, payload: bytes, timeout: int = 1000) -> None:
     transferred = ctypes.c_int(0)
     rc = libusb.libusb_bulk_transfer(
       self.handle,
       ep,
-      buf,
+      (ctypes.c_ubyte * len(payload))(*payload),
       len(payload),
       ctypes.byref(transferred),
       timeout,
     )
-    if rc != 0:
-      raise RuntimeError(f"bulk OUT 0x{ep:02X} failed: {rc}")
-    if transferred.value != len(payload):
-      raise RuntimeError(
-        f"bulk OUT short write on 0x{ep:02X}: {transferred.value}/{len(payload)} bytes"
-      )
+    assert rc == 0, f"bulk OUT 0x{ep:02X} failed: {rc}"
+    assert transferred.value == len(payload), f"bulk OUT short write on 0x{ep:02X}: {transferred.value}/{len(payload)} bytes"
 
   def _bulk_in(self, ep: int, length: int, timeout: int = 1000) -> bytes:
-    buf = (ctypes.c_ubyte * length)()
-    transferred = ctypes.c_int(0)
+    buf, transferred = (ctypes.c_ubyte * length)(), ctypes.c_int(0)
     rc = libusb.libusb_bulk_transfer(
       self.handle,
       ep,
@@ -101,8 +95,7 @@ class USB3:
       ctypes.byref(transferred),
       timeout,
     )
-    if rc != 0:
-      raise RuntimeError(f"bulk IN 0x{ep:02X} failed: {rc}")
+    assert rc == 0, f"bulk IN 0x{ep:02X} failed: {rc}"
     return bytes(buf[:transferred.value])
 
   def send_batch(self, cdbs:list[bytes], idata:list[int]|None=None, odata:list[bytes|None]|None=None) -> list[bytes|None]:
