@@ -27,8 +27,10 @@ invalid_gate = UPat.var("cond").where(UPat.var("x"), invalid_pat)
 
 def where_fold_with_cond_sub(cond:UOp, t:UOp, f:UOp) -> UOp|None:
   if cond not in t.toposort() and cond not in f.toposort(): return None
-  new_t = t.substitute({cond: UOp.const(dtypes.bool, True)}).simplify()
-  new_f = f.substitute({cond: UOp.const(dtypes.bool, False)}).simplify()
+  true_val = tuple([True]*cond.dtype.count) if cond.dtype.count > 1 else True
+  false_val = tuple([False]*cond.dtype.count) if cond.dtype.count > 1 else False
+  new_t = t.substitute({cond: UOp.const(cond.dtype, true_val)}).simplify()
+  new_f = f.substitute({cond: UOp.const(cond.dtype, false_val)}).simplify()
   if new_t is not t or new_f is not f: return cond.where(new_t, new_f)
   return None
 
