@@ -27,12 +27,13 @@ class Ops(FastEnum):
   # uops that aren't rendered
   NOOP = auto(); REWRITE_ERROR = auto()
 
+  # renderer/compiler
+  # LINEAR is a list of UOps, SOURCE has a str arg that's human readable, BINARY has a bytes arg that's not
+  PROGRAM = auto(); LINEAR = auto(); SOURCE = auto(); BINARY = auto()
+
   # AFTER passes src[0] through and promises in the toposort that any consumers of the AFTER run after src[1:]
   # GROUP is a NOOP that just merges things together
   SINK = auto(); AFTER = auto(); GROUP = auto()
-
-  # renderer/compiler
-  PROGRAM = auto(); LINEAR = auto(); SOURCE = auto(); BINARY = auto()
 
   # vector creation / item selection
   GEP = auto(); VECTORIZE = auto()
