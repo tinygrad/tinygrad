@@ -51,7 +51,7 @@ class USB3:
     for slot in range(self.max_streams): struct.pack_into(">B", self.buf_cmd[slot], 3, slot + 1)
 
   @staticmethod
-  def list_devices(filter=None) -> list[tuple[int, int]]:
+  def list_devices(dev_filter=None) -> list[tuple[int, int]]:
     devices = []
     ctx = ctypes.POINTER(libusb.struct_libusb_context)()
     if libusb.libusb_init(ctypes.byref(ctx)): raise RuntimeError("libusb_init failed")
@@ -61,7 +61,7 @@ class USB3:
       dev = devs[i]
       desc = libusb.struct_libusb_device_descriptor()
       if libusb.libusb_get_device_descriptor(dev, ctypes.byref(desc)) == 0:
-        if filter is None or (desc.idVendor, desc.idProduct) in filter:
+        if dev_filter is None or (desc.idVendor, desc.idProduct) in dev_filter:
           devices.append((desc.idVendor, desc.idProduct))
     libusb.libusb_free_device_list(devs, 1)
     libusb.libusb_exit(ctx)
