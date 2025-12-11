@@ -778,6 +778,59 @@ class TestSymbolic(unittest.TestCase):
     expr = cond.where(cond.where(a, b), cond.where(c, d))
     self.helper_test_variable(expr, 0, 3, "(x<5).where(a, d)")
 
+  def test_where_closure_fold_left_only(self):
+    cond = Variable("x", 0, 10) < 5
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    c = Variable("c", 0, 3)
+    expr = cond.where(cond.where(a, b), c)
+    self.helper_test_variable(expr, 0, 3, "(x<5).where(a, c)")
+
+  def test_where_closure_fold_right_only(self):
+    cond = Variable("x", 0, 10) < 5
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    c = Variable("c", 0, 3)
+    expr = cond.where(a, cond.where(b, c))
+    self.helper_test_variable(expr, 0, 3, "(x<5).where(a, c)")
+
+  def test_where_closure_with_and(self):
+    cond = Variable("x", 0, 10) < 5
+    other = Variable("y", 0, 10) < 3
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    expr = cond.where(cond & other, b)
+    self.helper_test_variable(expr, 0, 3, "(x<5).where((y<3), b)")
+
+  def test_where_closure_different_conds_no_fold(self):
+    cond1 = Variable("x", 0, 10) < 5
+    cond2 = Variable("y", 0, 10) < 3
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    c = Variable("c", 0, 3)
+    expr = cond1.where(cond2.where(a, b), c)
+    simplified = expr.simplify()
+    # just verify the structure stays the same
+    self.assertEqual(simplified.render(), "((a if (y<3) else b) if (x<5) else c)")
+
+  def test_where_closure_with_or(self):
+    cond = Variable("x", 0, 10) < 5
+    other = Variable("y", 0, 10) < 3
+    a = Variable("a", 0, 3)
+    expr = cond.where(a, cond | other)
+    # note: result is bool type since it's (a | cond | other)
+    simplified = expr.simplify()
+    self.assertEqual(simplified.render(), "(a if (x<5) else (y<3))")
+
+  def test_where_closure_vectorized(self):
+    cond = UOp.const(dtypes.bool.vec(2), (True, False))
+    a = UOp.const(dtypes.index.vec(2), (1, 2))
+    b = UOp.const(dtypes.index.vec(2), (3, 4))
+    c = UOp.const(dtypes.index.vec(2), (5, 6))
+    expr = cond.where(cond.where(a, b), c)
+    simplified = expr.simplify()
+    self.assertEqual(simplified.render(), "(1, 6)")
+
   def test_symbolic_div(self):
     # from symbolic arange
     a = Variable("a", 1, 10)
