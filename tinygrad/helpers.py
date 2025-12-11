@@ -186,8 +186,10 @@ EMULATE = ContextVar("EMULATE", "")
 CPU_COUNT = ContextVar("CPU_COUNT", max(1, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)))
 # Compilers
 CPU_LLVM, CPU_LVP, AMD_LLVM = ContextVar("CPU_LLVM", -1), ContextVar("CPU_LVP", -1), ContextVar("AMD_LLVM", -1)
-NV_PTX, CUDA_PTX, NV_NAK = ContextVar("NV_PTX", -1), ContextVar("CUDA_PTX", -1), ContextVar("NV_NAK", -1)
+NV_PTX, CUDA_PTX, NV_NAK, QCOM_IR3 = ContextVar("NV_PTX", -1), ContextVar("CUDA_PTX", -1), ContextVar("NV_NAK", -1), ContextVar("QCOM_IR3", -1)
+NULL_IR3, NULL_NAK = ContextVar("NULL_IR3", -1), ContextVar("NULL_NAK", -1)
 AMD_CC, CPU_CC, NV_CC, CUDA_CC = ContextVar("AMD_CC", ""), ContextVar("CPU_CC", ""), ContextVar("NV_CC", ""), ContextVar("CUDA_CC", "")
+QCOM_CC = ContextVar("QCOM_CC", "")
 # VIZ implies PROFILE, but you can run PROFILE without VIZ
 VIZ = ContextVar("VIZ", 0)
 PROFILE = ContextVar("PROFILE", VIZ.value)

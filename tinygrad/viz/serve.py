@@ -223,8 +223,11 @@ def row_tuple(row:str) -> tuple[int, ...]: return tuple(int(x.split(":")[1]) for
 def load_sqtt(profile:list[ProfileEvent]) -> None:
   from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
   counter_events:dict[tuple[str, int], list[ProfileSQTTEvent|ProfilePMCEvent]] = {}
+  durations:dict[str, list[float]] = {}
   for e in profile:
     if isinstance(e, (ProfilePMCEvent, ProfileSQTTEvent)): counter_events.setdefault((e.kern, e.exec_tag), []).append(e)
+    if isinstance(e, ProfileRangeEvent) and e.device.startswith("AMD") and e.en is not None:
+      durations.setdefault(str(e.name), []).append(float(e.en-e.st))
   if not counter_events: return
   # ** init decoder
   from extra.sqtt.roc import decode
@@ -235,7 +238,8 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
       for e in counters:
         if isinstance(e, ProfileSQTTEvent): parse_sqtt_print_packets(e.blob)
   # ** decode traces for each run
-  steps:list[dict] = []
+  all_runs:dict = {"cols":{}, "rows":[]}
+  steps:list[dict] = [create_step("All", ("/all", len(ctxs), 0), data=all_runs)]
   for key,counters in counter_events.items():
     # ** Run summary
     program = trace.keys[r].ret if (r:=ref_map.get(key[0])) else None
@@ -273,12 +277,14 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
       view, ptr = memoryview(pmc_event.blob).cast('Q'), 0
       for s in pmc_event.sched:
         row:list = [s.name, 0, {"cols":sample_cols, "rows":[]}]
+        all_runs["cols"][s.name] = None
         for sample in itertools.product(range(s.xcc), range(s.inst), range(s.se), range(s.sa), range(s.wgp)):
           row[1] += (val:=int(view[ptr]))
           row[2]["rows"].append(sample+(val,))
           ptr += 1
         rows.append(row)
       steps.append(create_step("PMC", ("/pmc", len(ctxs), len(steps)), {"rows":rows, "cols":agg_cols}, depth=1))
+      all_runs["rows"].append((key[0], durations[key[0]].pop(0), *[r[1] for r in rows]))
     for cu in prg_cu:
       events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]
       steps.append(create_step(f"{cu} {len(cu_events[cu])}", ("/counters", len(ctxs), len(steps)),
@@ -286,6 +292,7 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
       for k in sorted(wave_insts.get(cu, []), key=row_tuple):
         data = wave_insts[cu][k]
         steps.append(create_step(k.replace(cu, ""), ("/sqtt-insts", len(ctxs), len(steps)), data, loc=data["loc"], depth=2))
+  all_runs["cols"] = ["Kernel", "Duration", *all_runs["cols"]]
   ctxs.append({"name":"Counters", "steps":steps})
 
 def device_sort_fn(k:str) -> tuple[int, str, int]:

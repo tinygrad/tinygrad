@@ -1,4 +1,4 @@
-import functools, importlib, re, urllib
+import functools, re, urllib, tinygrad.runtime.autogen
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.helpers import getbits, fetch
@@ -53,8 +53,8 @@ def import_header(path:str, url=AMDGPU_URL):
 
 def import_module(name:str, version:tuple[int, ...], version_prefix:str=""):
   for ver in fixup_ip_version(name, version):
-    try: return importlib.import_module(f"tinygrad.runtime.autogen.am.{name}_{version_prefix}{'_'.join(map(str, ver))}")
-    except ImportError: pass
+    try: return getattr(tinygrad.runtime.autogen.am, f"{name}_{version_prefix}{'_'.join(map(str, ver))}")
+    except AttributeError: pass
   raise ImportError(f"Failed to load autogen module for {name.upper()} {'.'.join(map(str, version))}")
 
 def import_soc(ip):

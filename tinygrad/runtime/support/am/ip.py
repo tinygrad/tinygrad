@@ -31,7 +31,7 @@ class AM_GMC(AM_IP):
     self.mc_end = self.mc_base + self.adev.mm.vram_size - 1
 
     # VM aperture
-    self.vm_base = self.adev.mm.va_allocator.base
+    self.vm_base = self.adev.mm.va_base
     self.vm_end = min(self.vm_base + (1 << self.adev.mm.va_bits) - 1, 0x7fffffffffff)
 
     # GFX11/GFX12 has 44-bit address space
@@ -220,7 +220,6 @@ class AM_GFX(AM_IP):
   def fini_hw(self):
     self._grbm_select(me=1, pipe=0, queue=0)
     self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2) # 1 - DRAIN_PIPE; 2 - RESET_WAVES
-    self.adev.regSPI_COMPUTE_QUEUE_RESET.write(1)
     self._grbm_select()
     self.adev.regGCVM_CONTEXT0_CNTL.write(0)
 
