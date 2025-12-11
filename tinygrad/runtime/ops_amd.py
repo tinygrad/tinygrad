@@ -479,10 +479,10 @@ class AMDCopyQueue(HWQueue):
     fence_flags = self.sdma.SDMA_PKT_FENCE_HEADER_MTYPE(3) if self.dev.target >= (10,0,0) else 0
     self.q(self.sdma.SDMA_OP_FENCE | fence_flags, *data64_le(signal.value_addr), value)
 
-    if (dev:=signal.owner) is not None and signal.is_timeline and not dev.is_am():
-      self.q(self.sdma.SDMA_OP_FENCE | fence_flags, *data64_le(dev.queue_event_mailbox_ptr), dev.queue_event.event_id)
-      self.q(self.sdma.SDMA_OP_TRAP, self.sdma.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(dev.queue_event.event_id))
-    elif dev is not None and dev.is_am(): self.q(self.sdma.SDMA_OP_TRAP, self.sdma.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(0))
+    # if (dev:=signal.owner) is not None and signal.is_timeline and not dev.is_am():
+    #   self.q(self.sdma.SDMA_OP_FENCE | fence_flags, *data64_le(dev.queue_event_mailbox_ptr), dev.queue_event.event_id)
+    #   self.q(self.sdma.SDMA_OP_TRAP, self.sdma.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(dev.queue_event.event_id))
+    # elif dev is not None and dev.is_am(): self.q(self.sdma.SDMA_OP_TRAP, self.sdma.SDMA_PKT_TRAP_INT_CONTEXT_INT_CONTEXT(0))
 
     return self
 
@@ -931,9 +931,12 @@ class AMDDevice(HCQCompiled):
     self.allocator = AMDAllocator(self)
     self.xcc_sync_area = self.allocator.alloc(0x1000, BufferSpec(nolru=True, cpu_access=True, uncached=True))
 
-    self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL if self.is_aql else kfd.KFD_IOC_QUEUE_TYPE_COMPUTE,
-      0x2000 if self.is_usb() else 0x1000, eop_buffer_size=0x1000,
-      ctx_save_restore_size=0 if self.is_am() else wg_data_size + ctl_stack_size, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
+    # self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL if self.is_aql else kfd.KFD_IOC_QUEUE_TYPE_COMPUTE,
+    #   0x2000 if self.is_usb() else 0x1000, eop_buffer_size=0x1000,
+    #   ctx_save_restore_size=0 if self.is_am() else wg_data_size + ctl_stack_size, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
+
+    max_copy_size = 0x40000000 if self.iface.ip_versions[am.SDMA0_HWIP][0] >= 5 else 0x400000
+    self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else (16 << 20))
 
     import time
     time.sleep(2)
@@ -942,22 +945,22 @@ class AMDDevice(HCQCompiled):
     sig.value = 1
 
     print(sig.value)
-    print(self.compute_queue.read_ptrs[0][0])
-    print(self.compute_queue.write_ptrs[0][0])
+    print(self.sdma_queue.read_ptrs[0][0])
+    print(self.sdma_queue.write_ptrs[0][0])
 
     time.sleep(2)
 
     sig.value = 2
 
     print(sig.value)
-    print(self.compute_queue.read_ptrs[0][0])
-    print(self.compute_queue.write_ptrs[0][0])
+    print(self.sdma_queue.read_ptrs[0][0])
+    print(self.sdma_queue.write_ptrs[0][0])
 
-    AMDComputeQueue(self).memory_barrier().signal(sig, 10).submit(self)
+    AMDCopyQueue(self).signal(sig, 10).submit(self)
     time.sleep(2)
     print(sig.value)
-    print(self.compute_queue.read_ptrs[0][0])
-    print(self.compute_queue.write_ptrs[0][0])
+    print(self.sdma_queue.read_ptrs[0][0])
+    print(self.sdma_queue.write_ptrs[0][0])
     self.iface.dev_impl.gmc.on_interrupt()
     exit(0)
 

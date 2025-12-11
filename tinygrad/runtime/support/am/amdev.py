@@ -129,15 +129,17 @@ class AMPageTableEntry:
     # [  585.531090] amdgpu 0000:e5:00.0: amdgpu: 		pde: level=-1, addr=0x5fed6dc000, flags=0x1
     # [  585.531099] amdgpu 0000:e5:00.0: amdgpu: 		pte: flags=0x600000000000077
 
+    if not system: paddr = self.adev.paddr2xgmi_paddr(paddr)
     assert paddr & self.adev.gmc.address_space_mask == paddr, f"Invalid physical address {paddr:#x}"
+
     # if not system and not table: paddr = self.adev.paddr2mc(paddr) # TODO: is this right?
     # if self.lv == 0:
     self.entries[entry_id] = self.adev.gmc.get_pte_flags(self.lv, table, frag, uncached, system, snooped, valid) | (paddr & 0x0000FFFFFFFFF000)
     print(f"Setting PTE {self.entries[entry_id]=:#x} (lv={self.lv}) {entry_id} to {paddr:#x} table={table} uncached={uncached} system={system} snooped={snooped} frag={frag} valid={valid}")
 
   def entry(self, entry_id:int) -> int: return self.entries[entry_id]
-  def valid(self, entry_id:int) -> bool: return (self.entries[entry_id] & am.AMDGPU_PTE_VALID) != 0
-  def address(self, entry_id:int) -> int: return self.entries[entry_id] & 0x0000FFFFFFFFF000
+  def valid(self, entry_id:int) -> bool: return self.entries[entry_id] & am.AMDGPU_PTE_VALID != 0
+  def address(self, entry_id:int) -> int: return self.adev.xgmi_paddr2paddr(self.entries[entry_id] & 0x0000FFFFFFFFF000)
   def is_page(self, entry_id:int) -> bool: return self.lv == am.AMDGPU_VM_PTB or self.adev.gmc.is_pte_huge_page(self.lv, self.entries[entry_id])
   def supports_huge_page(self, paddr:int): return self.lv >= am.AMDGPU_VM_PDB2
 
@@ -154,6 +156,16 @@ class AMDev(PCIDevImplBase):
 
   def __init__(self, pci_dev:PCIDevice, dma_regions:list[tuple[int, MMIOInterface]]|None=None):
     self.pci_dev, self.devfmt, self.dma_regions = pci_dev, pci_dev.pcibus, dma_regions
+
+    # import time
+    # print(self.devfmt)
+    # x = [self.pci_dev.read_config(off, 4) for off in range(0, 256, 4)]
+    # self.pci_dev.reset()
+    # time.sleep(1.0)
+    # for off, val in enumerate(x):
+    #   if self.pci_dev.read_config(off * 4, 4) != val: print(f"am {self.devfmt}: PCI config space mismatch at offset {off * 4:#x}")
+    #   self.pci_dev.write_config(off * 4, val, 4)
+
     self.vram, self.doorbell64, self.mmio = self.pci_dev.map_bar(0), self.pci_dev.map_bar(2, fmt='Q'), self.pci_dev.map_bar(5, fmt='I')
 
     self._run_discovery()
@@ -186,16 +198,10 @@ class AMDev(PCIDevImplBase):
     # Booting done
     self.is_booting = False
 
-    import time
-    time.sleep(5)
-
     # Re-initialize main blocks
-    for ip in [self.gfx]:
+    for ip in [self.gfx, self.sdma]:
       ip.init_hw()
       if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
-
-    import time
-    time.sleep(5)
 
     # self.smu.set_clocks(level=-1) # last level, max perf.
     # for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
@@ -230,6 +236,8 @@ class AMDev(PCIDevImplBase):
     self.ih.interrupt_handler()
 
   def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr
+  def paddr2xgmi_paddr(self, paddr:int) -> int: return self.gmc.paddr_base + paddr
+  def xgmi_paddr2paddr(self, xgmi_paddr:int) -> int: return xgmi_paddr - self.gmc.paddr_base
 
   def reg(self, reg:str) -> AMRegister: return self.__dict__[reg]
 
@@ -302,7 +310,7 @@ class AMDev(PCIDevImplBase):
 
   def _build_regs(self):
     mods = [("mp", am.MP0_HWIP), ("hdp", am.HDP_HWIP), ("gc", am.GC_HWIP), ("mmhub", am.MMHUB_HWIP), ("osssys", am.OSSSYS_HWIP),
-      ("nbio" if self.ip_ver[am.GC_HWIP] < (12,0,0) else "nbif", am.NBIO_HWIP)]
+      ("nbio" if self.ip_ver[am.GC_HWIP] < (12,0,0) else "nbif", am.NBIO_HWIP), ("sdma", am.SDMA0_HWIP)]
 
     for prefix, hwip in mods:
       self.__dict__.update(import_asic_regs(prefix, self.ip_ver[hwip], cls=functools.partial(AMRegister, adev=self, bases=self.regs_offset[hwip])))
