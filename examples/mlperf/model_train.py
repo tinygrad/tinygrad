@@ -918,7 +918,7 @@ def train_rnnt():
   # TODO: RNN-T
   pass
 
-# @TinyJit
+@TinyJit
 def eval_step_bert(model, input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor, masked_positions:Tensor, masked_lm_ids:Tensor,
                    masked_lm_weights:Tensor, next_sentence_labels:Tensor, GPUS):
   for t in [input_ids, segment_ids, attention_mask, masked_positions, masked_lm_ids, masked_lm_weights, next_sentence_labels]:
@@ -1047,7 +1047,6 @@ def train_bert():
   for p in optimizer_group.params:
     p.grad = p.zeros_like().contiguous().realize()
   grads = [p.grad for p in optimizer_group.params]
-  grads_id = [id(g) for g in grads]
 
   # ** LR scheduler **
   scheduler_wd = PolynomialDecayWithWarmup(optimizer_wd, max_lr, 0, train_steps, warmup_steps, power=poly_power)
@@ -1118,31 +1117,34 @@ def train_bert():
       else: t.to_(GPUS[0])
     lm_logits, seq_relationship_logits = model(input_ids, attention_mask, masked_positions, segment_ids)
     loss = model.loss(lm_logits, seq_relationship_logits, masked_lm_ids, masked_lm_weights, next_sentence_labels)
+    assert all(g is p.grad for g,p in zip(grads, optimizer_group.params))
     (loss * loss_scaler).backward()
-    new_grads_id = [id(p.grad) for p in optimizer_group.params]
-    if new_grads_id != grads_id:
-      same = sum(int(a==b) for a,b in zip(new_grads_id, grads_id))
-      diff = len(grads) - same
-      raise ValueError(f"{same=}, {diff=}")
+    assert all(g is p.grad for g,p in zip(grads, optimizer_group.params))
     Tensor.realize(*grads, loss)
+    assert all(g is p.grad for g,p in zip(grads, optimizer_group.params))
     return loss
 
   @TinyJit
   def optimizer_step():
     global_norm = Tensor(0.0, dtype=dtypes.float32, device=optimizer_group[0].device)
+    assert all(g is p.grad for g,p in zip(grads, optimizer_group.params))
     # TODO: remove these realize
+    # TODO: update / 4 to grad_acc
     for p in optimizer_group.params:
-      p.grad.assign(p.grad / loss_scaler / grad_acc).realize()
+      p.grad.assign(p.grad / loss_scaler / 4).realize()
       global_norm += p.grad.float().square().sum()
+    assert all(g is p.grad for g,p in zip(grads, optimizer_group.params))
     global_norm = global_norm.sqrt().contiguous().realize()
     for p in optimizer_group.params:
       p.grad.assign((global_norm > 1.0).where((p.grad/global_norm).cast(p.grad.dtype), p.grad)).realize()
+    assert all(g is p.grad for g,p in zip(grads, optimizer_group.params))
 
     optimizer_group.step()
     scheduler_group.step()
     # TODO: no to("CPU") here because it blocks and messes the python time
     Tensor.realize(*parameters, global_norm, optimizer_group.optimizers[0].lr)
     for g in grads: g.assign(g.zeros_like().contiguous()).realize()
+    assert all(g is p.grad for g,p in zip(grads, optimizer_group.params))
     return global_norm, optimizer_group.optimizers[0].lr
 
   while train_data is not None and i < train_steps and not achieved:
@@ -1152,11 +1154,12 @@ def train_bert():
       st = time.perf_counter()
       GlobalCounters.reset()
       with WallTimeEvent(BenchEvent.STEP):
-        for _ in range(grad_acc):
+        for _ in range(4):
           loss = minibatch(
             train_data["input_ids"], train_data["segment_ids"], train_data["input_mask"], train_data["masked_lm_positions"], \
             train_data["masked_lm_ids"], train_data["masked_lm_weights"], train_data["next_sentence_labels"])
-          train_data = next(train_it)
+          # TODO: update train_data
+          # train_data = next(train_it)
         global_norm, lr = optimizer_step()
 
         pt = time.perf_counter()
