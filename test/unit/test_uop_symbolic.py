@@ -797,7 +797,6 @@ class TestSymbolic(unittest.TestCase):
   def test_where_closure_with_and(self):
     cond = Variable("x", 0, 10) < 5
     other = Variable("y", 0, 10) < 3
-    a = Variable("a", 0, 3)
     b = Variable("b", 0, 3)
     expr = cond.where(cond & other, b)
     self.helper_test_variable(expr, 0, 3, "(x<5).where((y<3), b)")
@@ -816,11 +815,10 @@ class TestSymbolic(unittest.TestCase):
   def test_where_closure_with_or(self):
     cond = Variable("x", 0, 10) < 5
     other = Variable("y", 0, 10) < 3
-    a = Variable("a", 0, 3)
-    expr = cond.where(a, cond | other)
-    # note: result is bool type since it's (a | cond | other)
+    third = Variable("z", 0, 10) < 7
+    expr = cond.where(third, cond | other)
     simplified = expr.simplify()
-    self.assertEqual(simplified.render(), "(a if (x<5) else (y<3))")
+    self.assertEqual(simplified.render(), "((z<7) if (x<5) else (y<3))")
 
   def test_where_closure_vectorized(self):
     cond = UOp.const(dtypes.bool.vec(2), (True, False))
