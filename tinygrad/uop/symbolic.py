@@ -29,8 +29,8 @@ def where_fold_with_cond_sub(cond:UOp, t:UOp, f:UOp) -> UOp|None:
   if cond not in t.toposort() and cond not in f.toposort(): return None
   true_val = tuple([True]*cond.dtype.count) if cond.dtype.count > 1 else True
   false_val = tuple([False]*cond.dtype.count) if cond.dtype.count > 1 else False
-  new_t = t.substitute({cond: UOp.const(cond.dtype, true_val)}).simplify()
-  new_f = f.substitute({cond: UOp.const(cond.dtype, false_val)}).simplify()
+  new_t = t.substitute({cond: cond.const_like(true_val)}).simplify()
+  new_f = f.substitute({cond: cond.const_like(false_val)}).simplify()
   if new_t is not t or new_f is not f: return cond.where(new_t, new_f)
   return None
 
@@ -123,7 +123,13 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
   # a.where(b.where(c, d), d) -> (a & b).where(c, d)
   (UPat.var("a").where(UPat.var("b").where(UPat.var("c"), UPat.var("d")), UPat.var("d")), lambda a,b,c,d: (a&b).where(c,d)),
-  (UPat.var("cond", dtype=dtypes.bool).where(UPat.var("t"), UPat.var("f")), where_fold_with_cond_sub),
+  # specific where folding to avoid overhead on simple cases
+  (UPat.var("cond").where(UPat.var("cond").where(UPat.var(), UPat.var()).named("t"), UPat.var("f")), where_fold_with_cond_sub),
+  (UPat.var("cond").where(UPat.var("t"), UPat.var("cond").where(UPat.var(), UPat.var()).named("f")), where_fold_with_cond_sub),
+  (UPat.var("cond").where(UPat.var("cond").where(UPat.var(), UPat.var()).named("t"), UPat.var("cond").where(UPat.var(), UPat.var()).named("f")),
+   where_fold_with_cond_sub),
+  (UPat.var("cond").where((UPat.var("cond") & UPat.var()).named("t"), UPat.var("f")), where_fold_with_cond_sub),
+  (UPat.var("cond").where(UPat.var("t"), (UPat.var("cond") | UPat.var()).named("f")), where_fold_with_cond_sub),
 ])
 
 # ******** phase 2 builds on phase 1, it includes the old "symbolic", rules that match deeper ********
