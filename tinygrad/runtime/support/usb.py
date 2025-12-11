@@ -50,6 +50,23 @@ class USB3:
 
     for slot in range(self.max_streams): struct.pack_into(">B", self.buf_cmd[slot], 3, slot + 1)
 
+  @staticmethod
+  def list_devices(filter=None) -> list[tuple[int, int]]:
+    devices = []
+    ctx = ctypes.POINTER(libusb.struct_libusb_context)()
+    if libusb.libusb_init(ctypes.byref(ctx)): raise RuntimeError("libusb_init failed")
+
+    devs = ctypes.POINTER(ctypes.POINTER(libusb.struct_libusb_device))()
+    for i in range(libusb.libusb_get_device_list(ctx, ctypes.byref(devs))):
+      dev = devs[i]
+      desc = libusb.struct_libusb_device_descriptor()
+      if libusb.libusb_get_device_descriptor(dev, ctypes.byref(desc)) == 0:
+        if filter is None or (desc.idVendor, desc.idProduct) in filter:
+          devices.append((desc.idVendor, desc.idProduct))
+    libusb.libusb_free_device_list(devs, 1)
+    libusb.libusb_exit(ctx)
+    return devices
+
   def _prep_transfer(self, tr, ep, stream_id, buf, length):
     tr.contents.dev_handle, tr.contents.endpoint, tr.contents.length, tr.contents.buffer = self.handle, ep, length, buf
     tr.contents.status, tr.contents.flags, tr.contents.timeout, tr.contents.num_iso_packets = 0xff, 0, 1000, 0
