@@ -1047,6 +1047,7 @@ def train_bert():
   for p in optimizer_group.params:
     p.grad = p.zeros_like().contiguous().realize()
   grads = [p.grad for p in optimizer_group.params]
+  grads_id = [id(g) for g in grads]
 
   # ** LR scheduler **
   scheduler_wd = PolynomialDecayWithWarmup(optimizer_wd, max_lr, 0, train_steps, warmup_steps, power=poly_power)
@@ -1118,6 +1119,11 @@ def train_bert():
     lm_logits, seq_relationship_logits = model(input_ids, attention_mask, masked_positions, segment_ids)
     loss = model.loss(lm_logits, seq_relationship_logits, masked_lm_ids, masked_lm_weights, next_sentence_labels)
     (loss * loss_scaler).backward()
+    new_grads_id = [id(p.grad) for p in optimizer_group.params]
+    if new_grads_id != grads_id:
+      same = sum(int(a==b) for a,b in zip(new_grads_id, grads_id))
+      diff = len(grads) - same
+      raise ValueError(f"{same=}, {diff=}")
     Tensor.realize(*grads, loss)
     return loss
 
