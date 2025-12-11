@@ -72,7 +72,7 @@ class USB3:
         if tr.contents.status == libusb.LIBUSB_TRANSFER_COMPLETED: running -= 1
         elif tr.contents.status != 0xFF: raise RuntimeError(f"EP 0x{tr.contents.endpoint:02X} error: {tr.contents.status}")
 
-  def _bulk_out(self, ep: int, payload: bytes, timeout: int = 1000) -> None:
+  def _bulk_out(self, ep: int, payload: bytes, timeout: int = 1000):
     transferred = ctypes.c_int(0)
     rc = libusb.libusb_bulk_transfer(
       self.handle,
@@ -100,7 +100,8 @@ class USB3:
 
   def send_batch(self, cdbs:list[bytes], idata:list[int]|None=None, odata:list[bytes|None]|None=None) -> list[bytes|None]:
     idata, odata = idata or [0] * len(cdbs), odata or [None] * len(cdbs)
-    results, tr_window, op_window = [], [], []
+    results : list[bytes|None] = []
+    tr_window, op_window = [], []
 
     for idx, (cdb, rlen, send_data) in enumerate(zip(cdbs, idata, odata)):
       if self.use_bot:
@@ -117,8 +118,10 @@ class USB3:
         # DAT
         if dir_in:
           results.append(self._bulk_in(self.ep_data_in, rlen))
-        elif send_data is not None:
-          results.append(self._bulk_out(self.ep_data_out, send_data))
+        else:
+          if send_data is not None:
+            self._bulk_out(self.ep_data_out, send_data)
+          results.append(None)
 
         # CSW
         sig, rtag, residue, status = struct.unpack("<IIIB", self._bulk_in(self.ep_data_in, 13))
