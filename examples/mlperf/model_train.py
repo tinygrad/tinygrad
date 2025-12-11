@@ -1107,6 +1107,8 @@ def train_bert():
     if MLLOGGER:
       MLLOGGER.start(key=mllog_constants.EPOCH_START, value=i*GBS, metadata={"epoch_num": i*GBS})
 
+  # time PYTHONPATH="." NV=1 MODEL="bert" DEFAULT_FLOAT="HALF" GPUS=1 BS=4 BERT_LAYERS=4 GRADIENT_ACC_STEPS=2 BENCHMARK=10 INITMLPERF=1 python3 examples/mlperf/model_train.py
+  # TODO: removing this jit fixes global_norm but mem usage keeps increasing
   @TinyJit
   def minibatch(input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor,
                 masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
@@ -1119,21 +1121,21 @@ def train_bert():
     Tensor.realize(*grads, loss)
     return loss
 
-  @TinyJit # maybe issue two jits
+  @TinyJit
   def optimizer_step():
     global_norm = Tensor(0.0, dtype=dtypes.float32, device=optimizer_group[0].device)
     for p in optimizer_group.params:
-      p.grad = p.grad / loss_scaler
+      p.grad.assign(p.grad / loss_scaler / grad_acc).realize()
       global_norm += p.grad.float().square().sum()
-    global_norm = global_norm.sqrt().contiguous()
-    for p in optimizer_group.params:
-      p.grad = (global_norm > 1.0).where((p.grad/global_norm).cast(p.grad.dtype), p.grad)
+    global_norm = global_norm.sqrt().contiguous().realize()
+    # for p in optimizer_group.params:
+    #   p.grad.assign((global_norm > 1.0).where((p.grad/global_norm).cast(p.grad.dtype), p.grad)).realize()
 
     optimizer_group.step()
     scheduler_group.step()
-    for g in grads: g.assign(g.zeros_like().contiguous())
     # TODO: no to("CPU") here because it blocks and messes the python time
-    Tensor.realize(*parameters, *grads, global_norm, optimizer_group.optimizers[0].lr)
+    Tensor.realize(*parameters, global_norm, optimizer_group.optimizers[0].lr)
+    for g in grads: g.assign(g.zeros_like().contiguous()).realize()
     return global_norm, optimizer_group.optimizers[0].lr
 
   while train_data is not None and i < train_steps and not achieved:
@@ -1166,6 +1168,7 @@ def train_bert():
         f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, "
         f"{(cl - dt) * 1000.0:7.2f} ms {device_str}, {loss:5.2f} loss, {lr:.6f} LR, "
         f"{GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
+      tqdm.write(f"{global_norm.item()=}")
       if WANDB:
         wandb.log({"lr": lr, "train/loss": loss, "train/global_norm": global_norm.item(), "train/step_time": cl - st,
                     "train/python_time": pt - st, "train/data_time": dt - pt, "train/cl_time": cl - dt,
@@ -1185,12 +1188,12 @@ def train_bert():
     if i % eval_step_freq == 0 or (BENCHMARK and i == BENCHMARK) or i == train_steps:
       if MLLOGGER and RUNMLPERF:
         MLLOGGER.start(key=mllog_constants.EVAL_START, value=None, metadata={"epoch_num": i*GBS, "step_num": i})
-      if getenv("RESET_STEP"):
-        minibatch.reset()
-        optimizer_step.reset()
-      elif getenv("FREE_INTERMEDIATE", 1):
-        if minibatch.captured is not None: minibatch.captured.free_intermediates()
-        if optimizer_step.captured is not None: optimizer_step.captured.free_intermediates()
+      # if getenv("RESET_STEP"):
+      #   minibatch.reset()
+      #   optimizer_step.reset()
+      # elif getenv("FREE_INTERMEDIATE", 1):
+      #   if minibatch.captured is not None: minibatch.captured.free_intermediates()
+      #   if optimizer_step.captured is not None: optimizer_step.captured.free_intermediates()
       eval_lm_losses = []
       eval_clsf_losses = []
       eval_lm_accs = []
