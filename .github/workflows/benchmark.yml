@@ -132,6 +132,10 @@ jobs:
       run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB python3.11 test/external/external_test_usb_asm24.py TestDevCopySpeeds
     #- name: UsbGPU openpilot test
     #  run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB GRAPH_ONE_KERNEL=1 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
+    - name: UsbGPU (USB4/TB) boot time
+      run: PYTHONPATH=. DEBUG=3 NV=1 NV_IFACE=PCI NV_NAK=1 time python3.11 test/test_tiny.py TestTiny.test_plus
+    - name: UsbGPU (USB4/TB) tiny tests
+      run: PYTHONPATH=. NV=1 NV_IFACE=PCI NV_NAK=1 python3.11 test/test_tiny.py
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (Mac)
