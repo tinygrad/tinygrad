@@ -100,7 +100,7 @@ class USB3:
 
   def send_batch(self, cdbs:list[bytes], idata:list[int]|None=None, odata:list[bytes|None]|None=None) -> list[bytes|None]:
     idata, odata = idata or [0] * len(cdbs), odata or [None] * len(cdbs)
-    results : list[bytes|None] = []
+    results:list[bytes|None] = []
     tr_window, op_window = [], []
 
     for idx, (cdb, rlen, send_data) in enumerate(zip(cdbs, idata, odata)):
