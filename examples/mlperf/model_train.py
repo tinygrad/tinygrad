@@ -1124,12 +1124,13 @@ def train_bert():
   @TinyJit
   def optimizer_step():
     global_norm = Tensor(0.0, dtype=dtypes.float32, device=optimizer_group[0].device)
+    # TODO: remove these realize
     for p in optimizer_group.params:
       p.grad.assign(p.grad / loss_scaler / grad_acc).realize()
       global_norm += p.grad.float().square().sum()
     global_norm = global_norm.sqrt().contiguous().realize()
-    # for p in optimizer_group.params:
-    #   p.grad.assign((global_norm > 1.0).where((p.grad/global_norm).cast(p.grad.dtype), p.grad)).realize()
+    for p in optimizer_group.params:
+      p.grad.assign((global_norm > 1.0).where((p.grad/global_norm).cast(p.grad.dtype), p.grad)).realize()
 
     optimizer_group.step()
     scheduler_group.step()
@@ -1168,7 +1169,7 @@ def train_bert():
         f"{i:5} {((cl - st)) * 1000.0:7.2f} ms run, {(pt - st) * 1000.0:7.2f} ms python, {(dt - pt) * 1000.0:6.2f} ms fetch data, "
         f"{(cl - dt) * 1000.0:7.2f} ms {device_str}, {loss:5.2f} loss, {lr:.6f} LR, "
         f"{GlobalCounters.mem_used / 1e9:.2f} GB used, {GlobalCounters.global_ops * 1e-9 / (cl - st):9.2f} GFLOPS")
-      tqdm.write(f"{global_norm.item()=}")
+      # tqdm.write(f"{global_norm.item()=}")
       if WANDB:
         wandb.log({"lr": lr, "train/loss": loss, "train/global_norm": global_norm.item(), "train/step_time": cl - st,
                     "train/python_time": pt - st, "train/data_time": dt - pt, "train/cl_time": cl - dt,
