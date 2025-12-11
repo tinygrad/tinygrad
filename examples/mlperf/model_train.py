@@ -1113,7 +1113,7 @@ def train_bert():
   def minibatch(input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor,
                 masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
     for t in [input_ids, segment_ids, attention_mask, masked_positions, masked_lm_ids, masked_lm_weights, next_sentence_labels]:
-      if len(GPUS) > 1: t.shard_(GPUS, axis=0)
+      if len(GPUS) > 1 and isinstance(t.device, str): t.shard_(GPUS, axis=0)
       else: t.to_(GPUS[0])
     lm_logits, seq_relationship_logits = model(input_ids, attention_mask, masked_positions, segment_ids)
     loss = model.loss(lm_logits, seq_relationship_logits, masked_lm_ids, masked_lm_weights, next_sentence_labels)
