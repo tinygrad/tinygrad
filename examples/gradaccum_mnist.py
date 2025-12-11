@@ -1,6 +1,6 @@
 import itertools
 from typing import Callable
-from tinygrad import nn, Tensor, dtypes, Device, TinyJit
+from tinygrad import nn, Tensor, dtypes, Device, TinyJit, GlobalCounters
 from tinygrad.helpers import getenv, trange, partition
 
 class Model:
@@ -82,14 +82,15 @@ if __name__ == "__main__":
 
     # realize everything, zero out loss and grads
     loss.assign(Tensor.zeros_like(loss))
-    grads.assign(Tensor.zeros_like(grads))
-    Tensor.realize(*params, *adam_params, loss, grads)
+    for g in pgrads: g.assign(g.zeros_like().contiguous())
+    Tensor.realize(*params, *adam_params, *pgrads, loss)
 
   @TinyJit
   def get_test_acc() -> Tensor: return (model(X_test).argmax(axis=1) == Y_test).mean()*100
 
   test_acc = float('nan')
   for i in (t:=trange(getenv("STEPS", 70))):
+    GlobalCounters.reset()
     # microbatch sets the gradients
     for _ in range(ACC_STEPS): microbatch()
 
