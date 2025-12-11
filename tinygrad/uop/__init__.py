@@ -31,6 +31,9 @@ class Ops(FastEnum):
   # GROUP is a NOOP that just merges things together
   SINK = auto(); AFTER = auto(); GROUP = auto()
 
+  # renderer/compiler
+  PROGRAM = auto(); LINEAR = auto(); SOURCE = auto(); BINARY = auto()
+
   # vector creation / item selection
   GEP = auto(); VECTORIZE = auto()
 

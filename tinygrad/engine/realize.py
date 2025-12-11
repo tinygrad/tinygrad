@@ -7,10 +7,25 @@ from tinygrad.helpers import unwrap
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, print_uops, track_rewrites, KernelInfo, pyrender
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
-from tinygrad.codegen import full_rewrite
+from tinygrad.codegen import full_rewrite, full_rewrite_to_sink, line_rewrite, linearize
 from tinygrad.codegen.opt import Opt
 
 # **************** Program Creation ****************
+
+def do_linearize(sink:UOp) -> UOp:
+  if sink.tag is None: return None
+  lin = UOp(Ops.LINEAR, src=tuple(linearize(sink.replace(tag=None))))
+  return UOp(Ops.PROGRAM, src=(lin,))
+
+def do_render(ctx:Renderer, prg:UOp) -> UOp:
+  src = ctx.render(prg.src[0].src)
+  return prg.replace(src=prg.src + (UOp(Ops.DEVICE, arg=ctx.device), UOp(Ops.SOURCE, arg=src)))
+
+pm_process = PatternMatcher([
+  (UPat(Ops.SINK, name="sink"), do_linearize),
+  (UPat(Ops.PROGRAM, src=(UPat(Ops.LINEAR),), name="prg"), do_render),
+  (UPat(Ops.PROGRAM, src=(UPat(Ops.LINEAR),), name="prg"), do_render),
+])
 
 @track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.name, (ret.function_name, ret.ast), ret=ret), replay=True)
 def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> ProgramSpec:
@@ -32,6 +47,11 @@ def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> Program
   if opts is not None:
     assert ast.arg is None, "can't apply opts if sink has an arg"
     ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts)))
+
+  # new linearizer
+  rsink = full_rewrite_to_sink(ast, renderer)
+  graph_rewrite(rsink, pm_process, ctx=renderer, name="process")
+
   try:
     uops = full_rewrite(ast, renderer)
   except RuntimeError as e:
