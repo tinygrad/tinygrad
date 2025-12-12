@@ -204,9 +204,9 @@ class AMDev(PCIDevImplBase):
     if reg > len(self.mmio): self.indirect_wreg(reg * 4, val)
     else: self.mmio[reg] = val
 
-  def wreg_pair(self, reg_base:str, lo_suffix:str, hi_suffix:str, val:int):
-    self.reg(f"{reg_base}{lo_suffix}").write(val & 0xffffffff)
-    self.reg(f"{reg_base}{hi_suffix}").write(val >> 32)
+  def wreg_pair(self, reg_base:str, lo_suffix:str, hi_suffix:str, val:int, inst:int=0):
+    self.reg(f"{reg_base}{lo_suffix}").write(val & 0xffffffff, inst=inst)
+    self.reg(f"{reg_base}{hi_suffix}").write(val >> 32, inst=inst)
 
   def indirect_rreg(self, reg:int) -> int:
     self.reg("regBIF_BX_PF0_RSMU_INDEX").write(reg)
