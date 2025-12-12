@@ -45,6 +45,8 @@ def create_schedule(sched_sink:UOp) -> list[ScheduleItem]:
               in_degree[k] += 1
         elif s.op is Ops.BUFFER:
           pass  # a BUFFER is already realized, nothing to do here
+        elif s.op is Ops.BIND:
+          pass  # BIND to RANGE handled in fixedvars, BIND to CONST extracted earlier in complete_create_schedule_with_vars
         else:
           raise RuntimeError(f"input to kernel must be AFTER or BUFFER, not {s.op}")
 
@@ -151,7 +153,12 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   input_buffers: dict[UOp, UOp] = {}
   big_sink_cache = graph_rewrite(big_sink, pm_pre_sched_cache, ctx=input_buffers, name="rewrite for sched cache")
   # extract var_vals from BINDs that were unbound (ctx stores BIND -> tagged_DEFINE_VAR)
-  var_vals: dict[str, int] = {k.src[0].arg[0]:k.src[1].arg for k in input_buffers if k.op is Ops.BIND}
+  var_vals: dict[str, int] = {}
+  for k in input_buffers:
+    if k.op is Ops.BIND:
+      name, val = k.src[0].arg[0], k.src[1].arg
+      assert name not in var_vals or var_vals[name] == val, f"bind mismatch on {k.src[0]}, {var_vals[name]} != {val}"
+      var_vals[name] = val
   sched_cache_key = big_sink_cache.key
 
   if (sc_ret:=schedule_cache.get(sched_cache_key, None)) is None:
