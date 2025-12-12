@@ -251,7 +251,7 @@ class Tensor(OpMixin):
   def schedule(self, *lst:Tensor) -> list[ScheduleItem]:
     """Creates the schedule needed to realize these Tensor(s)."""
     schedule, var_vals = self.schedule_with_vars(*lst)
-    assert len(schedule) == 0 or len(var_vals) == 0
+    assert len(var_vals) == 0
     return schedule
 
   @disable_gc()

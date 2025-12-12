@@ -20,11 +20,12 @@ class ScheduleItem:
 
 # **** schedule linearizer
 
-def create_schedule(sched_sink:UOp) -> list[ScheduleItem]:
+def create_schedule_with_vars(sched_sink:UOp) -> tuple[list[ScheduleItem], dict[str, int]]:
   with cpu_profile(TracingKey("toposort sched_sink")):
     # construct the KERNEL children graph based on assigns
     children: dict[UOp, list[UOp]] = {}
     in_degree: dict[UOp, int] = {}
+    var_vals: dict[str, int] = {}
     for u in sched_sink.toposort():
       if u.op is Ops.RANGE:
         in_degree.setdefault(u, 0)
@@ -46,7 +47,11 @@ def create_schedule(sched_sink:UOp) -> list[ScheduleItem]:
         elif s.op is Ops.BUFFER:
           pass  # a BUFFER is already realized, nothing to do here
         elif s.op is Ops.BIND:
-          pass  # BIND to RANGE handled in fixedvars, BIND to CONST extracted earlier in complete_create_schedule_with_vars
+          # for RANGE this is in fixedvars
+          if s.src[1].op is not Ops.RANGE:
+            var, val = s.unbind()
+            assert var.expr not in var_vals or var_vals[var.expr] == val, f"bind mismatch on {var}, {var_vals[var.expr]} != {val}"
+            var_vals[var.expr] = val
         else:
           raise RuntimeError(f"input to kernel must be AFTER or BUFFER, not {s.op}")
 
@@ -103,7 +108,7 @@ def create_schedule(sched_sink:UOp) -> list[ScheduleItem]:
       else:
         real_schedule.append(replace(si, fixedvars=si.fixedvars | {s.src[0].arg[0]:in_ranges[s.src[1]] for s in si.bound_ranges}, bound_ranges=()))
       sched_ptr += 1
-  return real_schedule
+  return real_schedule, var_vals
 
 from tinygrad.engine.memory import memory_planner
 from tinygrad.schedule.rangeify import get_rangeify_map
@@ -119,15 +124,11 @@ def replace_input_buffer(ctx:dict[UOp, UOp], b:UOp):
       ctx[b] = ret = b.replace(src=(b.src[0], UOp(Ops.LUNIQUE, arg=len(ctx))))
   return ret
 
-def unbind_var(ctx:dict[UOp, UOp], b:UOp):
-  # tag the DEFINE_VAR to distinguish it from unbound ones in rebind
-  ctx[b] = ret = b.src[0].rtag(())
-  return ret
-
 pm_pre_sched_cache = PatternMatcher([
+  # replace input buffers
   (UPat(Ops.BUFFER, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE)), name="b"), replace_input_buffer),
+  # remove unique consts
   (UPat(Ops.CONST, src=(UPat(Ops.DEVICE), UPat(Ops.UNIQUE)), name="b"), replace_input_buffer),
-  (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST)), name="b"), unbind_var),
 ])
 
 def replace_input_buffer_back(ctx:dict[UOp, UOp], b:UOp):
@@ -140,7 +141,6 @@ def replace_input_buffer_back(ctx:dict[UOp, UOp], b:UOp):
 pm_post_sched_cache = PatternMatcher([
   (UPat(Ops.BUFFER, src=(UPat(Ops.LUNIQUE), UPat(Ops.DEVICE)), name="b"), replace_input_buffer_back),
   (UPat(Ops.CONST, src=(UPat(Ops.DEVICE), UPat(Ops.LUNIQUE)), name="b"), replace_input_buffer_back),
-  (UPat(Ops.DEFINE_VAR, name="b"), lambda ctx,b: ctx.get(b) if b.tag is not None else None),
 ])
 
 schedule_cache: dict[bytes, tuple[UOp, UOp]] = {}
@@ -149,16 +149,9 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   # big_sink srcs are all the Tensors
   st = time.perf_counter()
 
-  # replace all UNIQUE buffers with LUNIQUE, unbind BINDs
+  # replace all UNIQUE buffers with LUNIQUE
   input_buffers: dict[UOp, UOp] = {}
   big_sink_cache = graph_rewrite(big_sink, pm_pre_sched_cache, ctx=input_buffers, name="rewrite for sched cache")
-  # extract var_vals from BINDs that were unbound (ctx stores BIND -> tagged_DEFINE_VAR)
-  var_vals: dict[str, int] = {}
-  for k in input_buffers:
-    if k.op is Ops.BIND:
-      name, val = k.src[0].arg[0], k.src[1].arg
-      assert name not in var_vals or var_vals[name] == val, f"bind mismatch on {k.src[0]}, {var_vals[name]} != {val}"
-      var_vals[name] = val
   sched_cache_key = big_sink_cache.key
 
   if (sc_ret:=schedule_cache.get(sched_cache_key, None)) is None:
@@ -194,7 +187,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   tensor_map = {tm_src[i]:tm_src[i+1] for i in range(0, len(tm_src), 2)}
 
   # create the schedule
-  schedule = create_schedule(big_sink)
+  schedule, var_vals = create_schedule_with_vars(big_sink)
   with cpu_profile(TracingKey("memory planner")): schedule = memory_planner(schedule)
 
   # remove all AFTERs, after scheduling, the tensors are just buffers
