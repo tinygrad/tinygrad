@@ -336,7 +336,6 @@ class AM_GFX(AM_IP):
     for xcc in range(self.adev.soc.xccs):
       self._grbm_select(me=1, pipe=0, queue=0, xcc=xcc)
       self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2, inst=xcc) # 1 - DRAIN_PIPE; 2 - RESET_WAVES
-      self.adev.regSPI_COMPUTE_QUEUE_RESET.write(1, inst=xcc)
       self.adev.regGCVM_CONTEXT0_CNTL.write(0, inst=xcc)
     self._grbm_select()
 
