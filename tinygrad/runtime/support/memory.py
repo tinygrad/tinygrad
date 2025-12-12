@@ -203,13 +203,11 @@ class MemoryManager:
           print(f"Mapping {vaddr + off + pte_off * pte_covers:#x} to {paddr + off + pte_off * pte_covers:#x} size={pte_covers:#x} uncached={uncached} system={system} snooped={snooped} frag={self._frag_size(ctx.vaddr+off, pte_covers)}")
           pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, system=system, snooped=snooped,
                       frag=self._frag_size(ctx.vaddr+off, pte_cnt * pte_covers), valid=True)
-    # else:
-    #   print('map_range not implemented for', hex(vaddr))
 
     self.on_range_mapped()
-    mc_addr = self.dev.paddr2mc(paddrs[0][0])
-    print('aft mapping', hex(vaddr), hex(paddrs[0][0]), hex(mc_addr))
-    return VirtMapping(mc_addr, size, paddrs, sva=vaddr, uncached=uncached, system=system, snooped=snooped)
+    # mc_addr = self.dev.paddr2mc(paddrs[0][0])
+    # print('aft mapping', hex(vaddr), hex(paddrs[0][0]), hex(mc_addr))
+    return VirtMapping(vaddr, size, paddrs, uncached=uncached, system=system, snooped=snooped)
 
   def unmap_range(self, vaddr:int, size:int):
     if getenv("MM_DEBUG", 0): print(f"mm {self.dev.devfmt}: unmapping {vaddr=:#x} ({size=:#x})")

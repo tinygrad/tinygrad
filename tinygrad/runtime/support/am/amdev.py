@@ -118,24 +118,10 @@ class AMPageTableEntry:
   def __init__(self, adev, paddr, lv): self.adev, self.paddr, self.lv, self.entries = adev, paddr, lv, adev.vram.view(paddr, 0x1000, fmt='Q')
 
   def set_entry(self, entry_id:int, paddr:int, table=False, uncached=False, system=False, snooped=False, frag=0, valid=True):
-    # [  585.530578] amdgpu 0000:e5:00.0: amdgpu: amdgpu_vm_ptes_update: size=0x2 start=0xffffffbfe dst=0x1244bb96000
-    # [  585.530606] amdgpu 0000:e5:00.0: amdgpu: 	nptes=0x2 incr=0x1000 upd_flags=0x6000000000000b7 frags=0x1
-    # [  585.530615] amdgpu 0000:e5:00.0: amdgpu: 		pde: level=2, addr=0x5fed6ed000, flags=0x100000000000001
-    # [  585.530621] amdgpu 0000:e5:00.0: amdgpu: 		amdgpu_vm_pde_update: level=0x2 pde=0xfe8 pt=0x5fed6ed000 flags=0x100000000000001
-    # [  585.530627] amdgpu 0000:e5:00.0: amdgpu: 		pde: level=1, addr=0x5fed6ee000, flags=0x4800000000000001
-    # [  585.530632] amdgpu 0000:e5:00.0: amdgpu: 		amdgpu_vm_pde_update: level=0x1 pde=0xff8 pt=0x5fed6ee000 flags=0x4800000000000001
-    # [  585.530638] amdgpu 0000:e5:00.0: amdgpu: 		pde: level=0, addr=0x5fed6ef000, flags=0x1
-    # [  585.530643] amdgpu 0000:e5:00.0: amdgpu: 		amdgpu_vm_pde_update: level=0x0 pde=0xff8 pt=0x5fed6ef000 flags=0x1
-    # [  585.531090] amdgpu 0000:e5:00.0: amdgpu: 		pde: level=-1, addr=0x5fed6dc000, flags=0x1
-    # [  585.531099] amdgpu 0000:e5:00.0: amdgpu: 		pte: flags=0x600000000000077
-
     if not system: paddr = self.adev.paddr2xgmi_paddr(paddr)
     assert paddr & self.adev.gmc.address_space_mask == paddr, f"Invalid physical address {paddr:#x}"
-
-    # if not system and not table: paddr = self.adev.paddr2mc(paddr) # TODO: is this right?
-    # if self.lv == 0:
     self.entries[entry_id] = self.adev.gmc.get_pte_flags(self.lv, table, frag, uncached, system, snooped, valid) | (paddr & 0x0000FFFFFFFFF000)
-    print(f"Setting PTE {self.entries[entry_id]=:#x} (lv={self.lv}) {entry_id} to {paddr:#x} table={table} uncached={uncached} system={system} snooped={snooped} frag={frag} valid={valid}")
+    # print(f"Setting PTE {self.entries[entry_id]=:#x} (lv={self.lv}) {entry_id} to {paddr:#x} table={table} uncached={uncached} system={system} snooped={snooped} frag={frag} valid={valid}")
 
   def entry(self, entry_id:int) -> int: return self.entries[entry_id]
   def valid(self, entry_id:int) -> bool: return self.entries[entry_id] & am.AMDGPU_PTE_VALID != 0
@@ -263,6 +249,10 @@ class AMDev(PCIDevImplBase):
   def indirect_wreg(self, reg:int, val:int):
     self.reg("regBIF_BX_PF0_RSMU_INDEX").write(reg)
     self.reg("regBIF_BX_PF0_RSMU_DATA").write(val)
+
+  def indirect_wreg_pcie(self, reg:int, val:int):
+    self.reg("regBIF_BX0_PCIE_INDEX2").write(reg)
+    self.reg("regBIF_BX0_PCIE_DATA2").write(val)
 
   def _read_vram(self, addr, size) -> bytes:
     assert addr % 4 == 0 and size % 4 == 0, f"Invalid address {addr:#x} or size {size:#x}"

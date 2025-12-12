@@ -372,13 +372,9 @@ class AMDComputeQueue(HWQueue):
     return self
 
   def signal(self, signal:AMDSignal, value:sint=0):
-    print(hex(signal.value_addr), value, hex(signal.base_buf.meta.mapping.sva))
-    self.release_mem(signal.base_buf.meta.mapping.sva, value, self.pm4.data_sel__mec_release_mem__send_32_bit_low,
+    # print(hex(signal.value_addr), value, hex(signal.base_buf.meta.mapping.sva))
+    self.release_mem(signal.value_addr, value, self.pm4.data_sel__mec_release_mem__send_32_bit_low,
                        self.pm4.int_sel__mec_release_mem__send_interrupt_after_write_confirm, cache_flush=True)
-    # self.release_mem(0x800000004000, value, self.pm4.data_sel__mec_release_mem__send_32_bit_low,
-    #                    self.pm4.int_sel__mec_release_mem__send_interrupt_after_write_confirm, cache_flush=True)
-    # self.release_mem(signal.base_buf.meta.mapping.sva, value, self.pm4.data_sel__mec_release_mem__send_32_bit_low,
-    #                    self.pm4.int_sel__mec_release_mem__send_interrupt_after_write_confirm, cache_flush=True)
     return self
 
     with self.pred_exec(xcc_mask=0b1):
@@ -931,9 +927,9 @@ class AMDDevice(HCQCompiled):
     self.allocator = AMDAllocator(self)
     self.xcc_sync_area = self.allocator.alloc(0x1000, BufferSpec(nolru=True, cpu_access=True, uncached=True))
 
-    # self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL if self.is_aql else kfd.KFD_IOC_QUEUE_TYPE_COMPUTE,
-    #   0x2000 if self.is_usb() else 0x1000, eop_buffer_size=0x1000,
-    #   ctx_save_restore_size=0 if self.is_am() else wg_data_size + ctl_stack_size, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
+    self.compute_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL if self.is_aql else kfd.KFD_IOC_QUEUE_TYPE_COMPUTE,
+      0x2000 if self.is_usb() else 0x1000, eop_buffer_size=0x1000,
+      ctx_save_restore_size=0 if self.is_am() else wg_data_size + ctl_stack_size, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
 
     max_copy_size = 0x40000000 if self.iface.ip_versions[am.SDMA0_HWIP][0] >= 5 else 0x400000
     self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else (16 << 20))
@@ -944,19 +940,25 @@ class AMDDevice(HCQCompiled):
     sig = AMDSignal(base_buf=self.xcc_sync_area)
     sig.value = 1
 
-    print(sig.value)
-    print(self.sdma_queue.read_ptrs[0][0])
-    print(self.sdma_queue.write_ptrs[0][0])
+    # print(sig.value)
+    # print(self.sdma_queue.read_ptrs[0][0])
+    # print(self.sdma_queue.write_ptrs[0][0])
 
+    # time.sleep(2)
+
+    # sig.value = 2
+
+    # print(sig.value)
+    # print(self.sdma_queue.read_ptrs[0][0])
+    # print(self.sdma_queue.write_ptrs[0][0])
+
+    AMDComputeQueue(self).signal(sig, 10).submit(self)
     time.sleep(2)
-
-    sig.value = 2
-
     print(sig.value)
-    print(self.sdma_queue.read_ptrs[0][0])
-    print(self.sdma_queue.write_ptrs[0][0])
+    print(self.compute_queue.read_ptrs[0][0])
+    print(self.compute_queue.write_ptrs[0][0])
 
-    AMDCopyQueue(self).signal(sig, 10).submit(self)
+    AMDCopyQueue(self).signal(sig, 11).submit(self)
     time.sleep(2)
     print(sig.value)
     print(self.sdma_queue.read_ptrs[0][0])

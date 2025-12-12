@@ -26,9 +26,10 @@ class AM_SOC(AM_IP):
     self.adev.regBIF_BX0_REMAP_HDP_REG_FLUSH_CNTL.write(0x1a004)
     self.adev.regBIFC_DOORBELL_ACCESS_EN_PF.write(0xfffff)
     self.adev.regRCC_DEV0_EPF0_VF7_RCC_DOORBELL_APER_EN.write(0x1)
-    self.adev.regXCC_DOORBELL_FENCE.write(0x0)
-    for i in range(16): self.adev.reg(f"regDOORBELL0_CTRL_ENTRY_{i}").write(0x5200 + 0x14 * i)
-    # regRCC_DEV0_EPF0_VF7_RCC_DOORBELL_APER_EN
+
+    self.adev.indirect_wreg_pcie(0x141ea04, 0x1028071d)
+    self.adev.reg(f"regDOORBELL0_CTRL_ENTRY_1").write(0x5200)
+
   def set_clockgating_state(self): 
     pass
     # self.adev.regHDP_MEM_POWER_CTRL.update(atomic_mem_power_ctrl_en=1, atomic_mem_power_ds_en=1)
@@ -340,10 +341,9 @@ class AM_GFX(AM_IP):
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, doorbell:int, pipe:int, queue:int,
                  aql:bool):
     mqd = self.adev.mm.valloc(0x1000, uncached=True, contiguous=True)
-    mc_addr = self.adev.paddr2mc(mqd.paddrs[0][0])
 
     struct_t = getattr(am, f"struct_v{self.adev.ip_ver[am.GC_HWIP][0]}_compute_mqd")
-    mqd_struct = struct_t(header=0xC0310800, cp_mqd_base_addr_lo=lo32(mc_addr), cp_mqd_base_addr_hi=hi32(mc_addr),
+    mqd_struct = struct_t(header=0xC0310800, cp_mqd_base_addr_lo=lo32(mqd.va_addr), cp_mqd_base_addr_hi=hi32(mqd.va_addr),
       cp_hqd_persistent_state=self.adev.regCP_HQD_PERSISTENT_STATE.encode(preload_size=0x55, preload_req=1),
       cp_hqd_pipe_priority=0x2, cp_hqd_queue_priority=0xf, cp_hqd_quantum=0x111,
       cp_hqd_pq_base_lo=lo32(ring_addr>>8), cp_hqd_pq_base_hi=hi32(ring_addr>>8),
@@ -458,9 +458,15 @@ class AM_SDMA(AM_IP):
     for inst in range(16):
       self.adev.regSDMA_GB_ADDR_CONFIG.write(0x104002, inst=inst)
       self.adev.regSDMA_GB_ADDR_CONFIG_READ.write(0x104002, inst=inst)
+      self.adev.regSDMA_PHASE0_QUANTUM.write(0x2000, inst=inst)
+      self.adev.regSDMA_PHASE1_QUANTUM.write(0x2000, inst=inst)
+      self.adev.regSDMA_PHASE2_QUANTUM.write(0x2000, inst=inst)
+      self.adev.regSDMA_UTCL1_TIMEOUT.write(0x800080, inst=inst)
       self.adev.regSDMA_SEM_WAIT_FAIL_TIMER_CNTL.write(0x0, inst=inst)
-      self.adev.regSDMA_F32_CNTL.update(halt=0, inst=inst)
-      self.adev.regSDMA_CNTL.update(utc_l1_enable=1, ctxempty_int_enable=1, inst=inst)
+      # self.adev.regSDMA_F32_CNTL.update(halt=0, inst=inst)
+      print(inst, self.adev.regSDMA_F32_CNTL.read_bitfields(inst=inst))
+      # self.adev.regSDMA_CNTL.update(utc_l1_enable=1, ctxempty_int_enable=1, auto_ctxsw_enable=1, inst=inst)
+      self.adev.regSDMA_CNTL.write(0x10046382, inst=inst)
 
     # for pipe in range(2):
       
@@ -494,7 +500,7 @@ class AM_SDMA(AM_IP):
       self.adev.reg(f"regSDMA_GFX_DOORBELL_OFFSET").update(offset=doorbell * 2, inst=0)
       self.adev.reg(f"regSDMA_GFX_DOORBELL").update(enable=1, inst=0)
       self.adev.reg(f"regSDMA_GFX_MINOR_PTR_UPDATE").write(0x0, inst=0)
-      self.adev.regSDMA_GFX_RB_WPTR_POLL_CNTL.update(f32_poll_enable=1, inst=0)
+      self.adev.regSDMA_GFX_RB_WPTR_POLL_CNTL.update(f32_poll_enable=0, inst=0)
       self.adev.reg(f"regSDMA_GFX_RB_CNTL").write(rb_vmid=0, rptr_writeback_enable=1, rptr_writeback_timer=6,
         rb_size=(ring_size//4).bit_length()-1, rb_enable=1, inst=0)
       self.adev.reg(f"regSDMA_GFX_IB_CNTL").update(ib_enable=1, inst=0)
