@@ -1,30 +1,14 @@
 import ctypes, subprocess, tempfile, unittest
 from tinygrad.helpers import WIN
-from tinygrad.runtime.support.c import Struct
+from tinygrad.runtime.support.c import Struct, field
 from tinygrad.runtime.support.autogen import gen
 
 class TestAutogen(unittest.TestCase):
-  def test_packed_struct_sizeof(self):
-    layout = [('a', ctypes.c_char), ('b', ctypes.c_int, 5), ('c', ctypes.c_char)]
-    class Y(ctypes.Structure): _fields_, _pack_, _layout_ = layout, 1, 'ms'
-    class Z(Struct): pass
-    Z._packed_, Z._fields_ = True, layout
-    self.assertEqual(ctypes.sizeof(Y), 6)
-    self.assertEqual(ctypes.sizeof(Z), 3)
-    layout = [('a', ctypes.c_int, 31), ('b', ctypes.c_int, 31), ('c', ctypes.c_int, 1), ('d', ctypes.c_int, 1)]
-    class Foo(ctypes.Structure): _fields_, _layout_ = layout, 'gcc-sysv'
-    class Bar(ctypes.Structure): _fields_, _pack_, _layout_ = layout, 1, 'ms'
-    class Baz(Struct): pass
-    Baz._packed_, Baz._fields_ = True, layout
-    self.assertEqual(ctypes.sizeof(Foo), 12)
-    self.assertEqual(ctypes.sizeof(Bar), 12)
-    self.assertEqual(ctypes.sizeof(Baz), 8)
-
   @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_packed_struct_interop(self):
-    class Baz(Struct): pass
-    Baz._packed_ = True
-    Baz._fields_ = [('a', ctypes.c_int, 30), ('b', ctypes.c_int, 30), ('c', ctypes.c_int, 2), ('d', ctypes.c_int, 2)]
+    class Baz(Struct): SIZE = 8
+    Baz._fields_ = ['a', 'b', 'c', 'd']
+    Baz.a, Baz.b, Baz.c, Baz.d = field(0, 'i', 30), field(3, 'i', 30, 6), field(7, 'i', 2, 4), field(7, 'i', 2, 6)
     src = '''
       struct __attribute__((packed)) baz {
         int a:30;
@@ -48,8 +32,9 @@ class TestAutogen(unittest.TestCase):
   # https://github.com/python/cpython/issues/90914
   @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_bitfield_interop(self):
-    class Baz(Struct): pass
-    Baz._fields_ = [(chr(ord('a') + i), ctypes.c_bool, 1) for i in range(8)]
+    class Baz(Struct): SIZE = 1
+    Baz._fields_ = [chr(ord('a') + i) for i in range(8)]
+    for i in range(8): setattr(Baz, chr(ord('a') + i), field(0, 'B', 1, i))
     src = '''#include <stdbool.h>
       struct baz {
         bool a:1;
