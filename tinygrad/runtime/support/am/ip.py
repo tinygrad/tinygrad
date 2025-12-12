@@ -28,8 +28,17 @@ class AM_GMC(AM_IP):
   def init_sw(self):
     self.vmhubs = len(self.adev.regs_offset[am.MMHUB_HWIP])
 
+    # XGMI (for supported systems)
+    xgmi_phys_id = self.adev.regMMMC_VM_XGMI_LFB_CNTL.read_bitfields()['pf_lfb_region'] if hasattr(self.adev, 'regMMMC_VM_XGMI_LFB_CNTL') else 0
+    xgmi_seg_sz = (self.adev.regMMMC_VM_XGMI_LFB_SIZE.read_bitfields()['pf_lfb_size'] << 24) if hasattr(self.adev, 'regMMMC_VM_XGMI_LFB_SIZE') else 0
+
+    self.paddr_base = xgmi_phys_id * xgmi_seg_sz
+
+    self.fb_base = (self.adev.regMMMC_VM_FB_LOCATION_BASE.read() & 0xFFFFFF) << 24
+    self.fb_end = (self.adev.regMMMC_VM_FB_LOCATION_TOP.read() & 0xFFFFFF) << 24
+
     # Memory controller aperture
-    self.mc_base = (self.adev.regMMMC_VM_FB_LOCATION_BASE.read() & 0xFFFFFF) << 24
+    self.mc_base = self.fb_base + self.paddr_base
     self.mc_end = self.mc_base + self.adev.mm.vram_size - 1
 
     # VM aperture
@@ -39,8 +48,8 @@ class AM_GMC(AM_IP):
     # GFX11/GFX12 has 44-bit address space
     self.address_space_mask = (1 << 44) - 1
 
-    self.memscratch_paddr = self.adev.mm.palloc(0x1000, zero=False, boot=True)
-    self.dummy_page_paddr = self.adev.mm.palloc(0x1000, zero=False, boot=True)
+    self.memscratch_xgmi_paddr = self.adev.paddr2xgmi(self.adev.mm.palloc(0x1000, zero=False, boot=True))
+    self.dummy_page_xgmi_paddr = self.adev.paddr2xgmi(self.adev.mm.palloc(0x1000, zero=False, boot=True))
     self.hub_initted = {"MM": False, "GC": False}
 
     self.pf_status_reg = lambda ip: f"reg{ip}VM_L2_PROTECTION_FAULT_STATUS{'_LO32' if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else ''}"
@@ -71,7 +80,7 @@ class AM_GMC(AM_IP):
   def enable_vm_addressing(self, page_table, ip:Literal["MM", "GC"], vmid, inst):
     self.adev.wreg_pair(f"reg{ip}VM_CONTEXT{vmid}_PAGE_TABLE_START_ADDR", "_LO32", "_HI32", self.vm_base >> 12, inst=inst)
     self.adev.wreg_pair(f"reg{ip}VM_CONTEXT{vmid}_PAGE_TABLE_END_ADDR", "_LO32", "_HI32", self.vm_end >> 12, inst=inst)
-    self.adev.wreg_pair(f"reg{ip}VM_CONTEXT{vmid}_PAGE_TABLE_BASE_ADDR", "_LO32", "_HI32", page_table.paddr | 1, inst=inst)
+    self.adev.wreg_pair(f"reg{ip}VM_CONTEXT{vmid}_PAGE_TABLE_BASE_ADDR", "_LO32", "_HI32", self.adev.paddr2xgmi(page_table.paddr) | 1, inst=inst)
     self.adev.reg(f"reg{ip}VM_CONTEXT{vmid}_CNTL").write(0x1800000, pde0_protection_fault_enable_interrupt=1, pde0_protection_fault_enable_default=1,
                                                          dummy_page_protection_fault_enable_interrupt=1, dummy_page_protection_fault_enable_default=1,
                                                          range_protection_fault_enable_interrupt=1, range_protection_fault_enable_default=1,
@@ -90,8 +99,8 @@ class AM_GMC(AM_IP):
 
       self.adev.reg(f"reg{ip}MC_VM_SYSTEM_APERTURE_LOW_ADDR").write(self.mc_base >> 18, inst=inst)
       self.adev.reg(f"reg{ip}MC_VM_SYSTEM_APERTURE_HIGH_ADDR").write(self.mc_end >> 18, inst=inst)
-      self.adev.wreg_pair(f"reg{ip}MC_VM_SYSTEM_APERTURE_DEFAULT_ADDR", "_LSB", "_MSB", self.memscratch_paddr >> 12, inst=inst)
-      self.adev.wreg_pair(f"reg{ip}VM_L2_PROTECTION_FAULT_DEFAULT_ADDR", "_LO32", "_HI32", self.dummy_page_paddr >> 12, inst=inst)
+      self.adev.wreg_pair(f"reg{ip}MC_VM_SYSTEM_APERTURE_DEFAULT_ADDR", "_LSB", "_MSB", self.memscratch_xgmi_paddr >> 12, inst=inst)
+      self.adev.wreg_pair(f"reg{ip}VM_L2_PROTECTION_FAULT_DEFAULT_ADDR", "_LO32", "_HI32", self.dummy_page_xgmi_paddr >> 12, inst=inst)
 
       self.adev.reg(f"reg{ip}VM_L2_PROTECTION_FAULT_CNTL2").update(active_page_migration_pte_read_retry=1, inst=inst)
 
@@ -500,7 +509,7 @@ class AM_PSP(AM_IP):
   def _tmr_load_cmd(self) -> am.struct_psp_gfx_cmd_resp:
     cmd = am.struct_psp_gfx_cmd_resp(cmd_id=am.GFX_CMD_ID_SETUP_TMR)
     cmd.cmd.cmd_setup_tmr.buf_phy_addr_hi, cmd.cmd.cmd_setup_tmr.buf_phy_addr_lo = data64(self.adev.paddr2mc(self.tmr_paddr))
-    cmd.cmd.cmd_setup_tmr.system_phy_addr_hi, cmd.cmd.cmd_setup_tmr.system_phy_addr_lo = data64(self.tmr_paddr)
+    cmd.cmd.cmd_setup_tmr.system_phy_addr_hi, cmd.cmd.cmd_setup_tmr.system_phy_addr_lo = data64(self.adev.paddr2xgmi(self.tmr_paddr))
     cmd.cmd.cmd_setup_tmr.bitfield.virt_phy_addr = 1
     cmd.cmd.cmd_setup_tmr.buf_size = self.tmr_size
     return self._ring_submit(cmd)
