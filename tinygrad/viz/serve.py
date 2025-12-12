@@ -457,12 +457,7 @@ class Handler(HTTPRequestHandler):
     elif url.path == "/get_profile" and profile_ret: ret, content_type = profile_ret, "application/octet-stream"
     else: status_code = 404
 
-    # send response
-    self.send_response(status_code)
-    self.send_header('Content-Type', content_type)
-    self.send_header('Content-Length', str(len(ret)))
-    self.end_headers()
-    return self.wfile.write(ret)
+    return self.send_data(ret, content_type, status_code)
 
 # ** main loop
 

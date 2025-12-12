@@ -1,5 +1,5 @@
 from __future__ import annotations
-import sys, argparse, typing, re, unicodedata, json, uuid
+import sys, argparse, typing, re, unicodedata, json, uuid, time
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv
 from tinygrad.helpers import partition, TCPServerWithReuse, HTTPRequestHandler, tqdm, DEBUG
 
@@ -184,8 +184,8 @@ models = {
 # OPENAI_BASE_URL=http://localhost:11434/v1 OPENAI_API_KEY=ollama uvx --from gpt-command-line gpt
 
 class Handler(HTTPRequestHandler):
-  def run_model(self, ids:list[int], include_usage=False):
-    tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk"}
+  def run_model(self, ids:list[int], model_name:str, include_usage=False):
+    tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
     yield {"choices": [{"index":0, "delta":{"role":"assistant","content":""}, "finish_reason":None}], **tmpl}
     out = []
     for next_id in tqdm(model.generate(ids), disable=not DEBUG>=1):
@@ -194,7 +194,7 @@ class Handler(HTTPRequestHandler):
       yield {"choices": [{"index":0, "delta":{"content":tok.decode([next_id])}, "finish_reason":None}], **tmpl}
     yield {"choices": [{"index":0, "delta":{},"finish_reason":"stop"}], **tmpl}
     if include_usage:
-      yield {"choices": [], "usage": {"prompt_tokens": len(ids), "completion_tokens": len(out), "total_tokens": len(ids) + len(out)}}
+      yield {"choices": [], "usage": {"prompt_tokens": len(ids), "completion_tokens": len(out), "total_tokens": len(ids) + len(out)}, **tmpl}
 
   def do_POST(self):
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
@@ -203,8 +203,6 @@ class Handler(HTTPRequestHandler):
       print(self.path)
       print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
-      assert body["stream"], "we only support stream mode"
-
       # extract tokens
       ids = [bos_id]
       for msg in body["messages"]:
@@ -219,8 +217,14 @@ class Handler(HTTPRequestHandler):
         else: raise RuntimeError(f"unknown content type: {type(content)}")
         ids += tok.role("assistant")
 
-      # stream reply
-      self.stream_json(self.run_model(ids, include_usage=body.get("stream_options",{}).get("include_usage", False)))
+      # reply
+      chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False))
+      if body.get("stream"): self.stream_json(chunks)
+      else:
+        out = []
+        for c in chunks: out.append(c["choices"][0]["delta"].get("content", "") if c["choices"] else "")
+        self.send_data(json.dumps({**c, "object":"chat.completion",
+          "choices":[{"index":0, "message":{"role":"assistant","content":"".join(out)}, "finish_reason":"stop"}]}).encode())
     else:
       raise RuntimeError(f"unhandled path {self.path}")
 
