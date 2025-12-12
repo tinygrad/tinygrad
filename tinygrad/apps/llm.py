@@ -181,26 +181,44 @@ models = {
 # *** simple OpenAI compatible server on 11434 to match ollama ***
 
 import json
-from tinygrad.helpers import TCPServerWithReuse, tqdm
+from tinygrad.helpers import TCPServerWithReuse, tqdm, DEBUG
 from http.server import BaseHTTPRequestHandler
 
 class Handler(BaseHTTPRequestHandler):
   def do_POST(self):
     print(self.path)
-    # TODO: fill this in to respond to OpenAI API
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
     body = json.loads(raw_body.decode("utf-8"))
-    ids = [bos_id]
-    for msg in body["messages"]:
-      ids += tok.role(msg["role"])
-      for c in msg["content"]: ids += tok.encode(c["text"])
-      ids += tok.role("assisstant")
-    print("inp:", ids)
-    out = []
-    for next_id in tqdm(model.generate(ids)):
-      out.append(next_id)
-      if next_id == eos_id: break
-    print("out:", out)
+    if self.path == "/v1/chat/completions":
+      # TODO: fill this in to respond to OpenAI API
+      ids = [bos_id]
+      for msg in body["messages"]:
+        ids += tok.role(msg["role"])
+        for c in msg["content"]:
+          if c["type"] == "text": ids += tok.encode(c["text"])
+          else: raise RuntimeError(f"unhandled type: {c['type']}")
+        ids += tok.role("assistant")
+      if DEBUG >= 1: print(f"inp({len(ids):3d}):", tok.decode(ids))
+      out = []
+      for next_id in tqdm(model.generate(ids), disable=not DEBUG>=1):
+        if next_id == eos_id: break
+        out.append(next_id)
+      if DEBUG >= 1: print(f"out({len(ids):3d}):", tok.decode(out))
+
+      jret = {
+        "choices": [{ "index": 0, "message": {"role": "assistant", "content": tok.decode(out)}}],
+        "usage": {"prompt_tokens": len(ids), "completion_tokens": len(out), "total_tokens": len(ids) + len(out)},
+      }
+
+      # send response
+      ret = json.dumps(jret).encode()
+      self.send_response(200)
+      self.send_header('Content-Type', "application/json")
+      self.send_header('Content-Length', str(len(ret)))
+      self.end_headers()
+      return self.wfile.write(ret)
+    else:
+      raise RuntimeError(f"unhandled path {self.path}")
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
