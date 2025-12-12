@@ -88,6 +88,7 @@ class _CBuffer:
   def from_param(cls, obj):
     if obj is None: return None
     assert isinstance(obj, cls)
+    # TODO: remove this
     return type('_shadow', (ctypes.Structure,), {'_fields_': [('a', ctypes.c_char * cls.SIZE)]}).from_buffer(obj._mem_)
 
 class Union(_CBuffer): pass
