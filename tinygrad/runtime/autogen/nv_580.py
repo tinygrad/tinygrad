@@ -1323,17 +1323,6 @@ nvdec_crc_s._fields_ = [
   ('reserved1', ctypes.c_uint32,16),
   ('reserved2', (ctypes.c_ubyte * 56)),
 ]
-class _anonunion12(ctypes.Union): pass
-NvUPtr = ctypes.c_uint64
-_anonunion12._fields_ = [
-  ('v', NvUPtr),
-  ('p', ctypes.c_void_p),
-]
-class _anonunion13(ctypes.Union): pass
-_anonunion13._fields_ = [
-  ('v', NvUPtr),
-  ('p', ctypes.c_void_p),
-]
 class struct_NV0000_ALLOC_PARAMETERS(Struct): pass
 NvHandle = ctypes.c_uint32
 NvU32 = ctypes.c_uint32
@@ -7219,6 +7208,7 @@ struct_NV2080_CTRL_FLCN_USTREAMER_EVENT_FILTER._fields_ = [
 ]
 NV2080_CTRL_FLCN_USTREAMER_EVENT_FILTER = struct_NV2080_CTRL_FLCN_USTREAMER_EVENT_FILTER
 class struct_NV2080_CTRL_FLCN_USTREAMER_QUEUE_INFO_PARAMS(Struct): pass
+NvUPtr = ctypes.c_uint64
 struct_NV2080_CTRL_FLCN_USTREAMER_QUEUE_INFO_PARAMS._fields_ = [
   ('engine', NvU32),
   ('pageSize', NvU32),

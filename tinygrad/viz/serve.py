@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io, struct
+import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, functools, codecs, io, struct
 import ctypes, pathlib, traceback, itertools
 from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from decimal import Decimal
-from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, TypeVar, Generator, Callable
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
-from tinygrad.helpers import printable, system
+from tinygrad.helpers import printable, system, TCPServerWithReuse, HTTPRequestHandler
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, pyrender
 from tinygrad.uop.ops import print_uops, range_start, multirange_str
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device
@@ -219,6 +218,22 @@ def soft_err(fn:Callable):
 
 def row_tuple(row:str) -> tuple[int, ...]: return tuple(int(x.split(":")[1]) for x in row.split())
 
+# *** Performance counters
+
+def unpack_pmc(e) -> dict:
+  agg_cols = ["Name", "Sum"]
+  sample_cols = ["XCC", "INST", "SE", "SA", "WGP", "Value"]
+  rows:list[list] = []
+  view, ptr = memoryview(e.blob).cast('Q'), 0
+  for s in e.sched:
+    row:list = [s.name, 0, {"cols":sample_cols, "rows":[]}]
+    for sample in itertools.product(range(s.xcc), range(s.inst), range(s.se), range(s.sa), range(s.wgp)):
+      row[1] += (val:=int(view[ptr]))
+      row[2]["rows"].append(sample+(val,))
+      ptr += 1
+    rows.append(row)
+  return {"rows":rows, "cols":agg_cols}
+
 @soft_err(lambda err: ctxs.append({"name":"ERR", "steps":[create_step("Loader error", ("render",len(ctxs),0), err)]}))
 def load_sqtt(profile:list[ProfileEvent]) -> None:
   from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
@@ -271,20 +286,9 @@ def load_sqtt(profile:list[ProfileEvent]) -> None:
     steps.append(create_step(program.name if program else key[0], ("/prg-run", len(ctxs), len(steps)), {"src":"\n\n".join(summary)}, depth=0))
     # ** PMC events
     if (pmc_event:=next((e for e in counters if isinstance(e, ProfilePMCEvent)), None)) is not None:
-      agg_cols = ["Name", "Sum"]
-      sample_cols = ["XCC", "INST", "SE", "SA", "WGP", "Value"]
-      rows:list[list] = []
-      view, ptr = memoryview(pmc_event.blob).cast('Q'), 0
-      for s in pmc_event.sched:
-        row:list = [s.name, 0, {"cols":sample_cols, "rows":[]}]
-        all_runs["cols"][s.name] = None
-        for sample in itertools.product(range(s.xcc), range(s.inst), range(s.se), range(s.sa), range(s.wgp)):
-          row[1] += (val:=int(view[ptr]))
-          row[2]["rows"].append(sample+(val,))
-          ptr += 1
-        rows.append(row)
-      steps.append(create_step("PMC", ("/pmc", len(ctxs), len(steps)), {"rows":rows, "cols":agg_cols}, depth=1))
-      all_runs["rows"].append((key[0], durations[key[0]].pop(0), *[r[1] for r in rows]))
+      steps.append(create_step("PMC", ("/pmc", len(ctxs), len(steps)), pmc_table:=unpack_pmc(pmc_event), depth=1))
+      all_runs["cols"].update([(r[0], None) for r in pmc_table["rows"]])
+      all_runs["rows"].append((key[0], durations[key[0]].pop(0), *[r[1] for r in pmc_table["rows"]]))
     for cu in prg_cu:
       events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]
       steps.append(create_step(f"{cu} {len(cu_events[cu])}", ("/counters", len(ctxs), len(steps)),
@@ -336,7 +340,7 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_
   index = json.dumps({"strings":list(scache), "dtypeSize":dtype_size, "markers":[{"ts":int(e.ts-start_ts), **e.arg} for e in markers]}).encode()
   return struct.pack("<IQII", unwrap(end_ts)-start_ts, max(peaks,default=0), len(index), len(ret))+index+b"".join(ret)
 
-# ** Assembly analyzers
+# ** Assembly static analyzers
 
 def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
   target_args = f"-mtriple={mtriple} -mcpu={mcpu}"
@@ -426,7 +430,7 @@ def get_render(i:int, j:int, fmt:str) -> dict:
 
 def get_int(query:dict[str, list[str]], k:str) -> int: return int(query.get(k,["0"])[0])
 
-class Handler(BaseHTTPRequestHandler):
+class Handler(HTTPRequestHandler):
   def do_GET(self):
     ret, status_code, content_type = b"", 200, "text/html"
 
@@ -453,25 +457,7 @@ class Handler(BaseHTTPRequestHandler):
     elif url.path == "/get_profile" and profile_ret: ret, content_type = profile_ret, "application/octet-stream"
     else: status_code = 404
 
-    # send response
-    self.send_response(status_code)
-    self.send_header('Content-Type', content_type)
-    self.send_header('Content-Length', str(len(ret)))
-    self.end_headers()
-    return self.wfile.write(ret)
-
-  def stream_json(self, source:Generator):
-    try:
-      self.send_response(200)
-      self.send_header("Content-Type", "text/event-stream")
-      self.send_header("Cache-Control", "no-cache")
-      self.end_headers()
-      for r in source:
-        self.wfile.write(f"data: {json.dumps(r)}\n\n".encode("utf-8"))
-        self.wfile.flush()
-      self.wfile.write("data: END\n\n".encode("utf-8"))
-    # pass if client closed connection
-    except (BrokenPipeError, ConnectionResetError): return
+    return self.send_data(ret, content_type, status_code)
 
 # ** main loop
 
@@ -487,9 +473,6 @@ T = TypeVar("T")
 def load_pickle(path:pathlib.Path, default:T) -> T:
   if not path.exists(): return default
   with path.open("rb") as f: return pickle.load(f)
-
-# NOTE: using HTTPServer forces a potentially slow socket.getfqdn
-class TCPServerWithReuse(socketserver.TCPServer): allow_reuse_address = True
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
@@ -511,7 +494,6 @@ if __name__ == "__main__":
   server = TCPServerWithReuse(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)
   reloader_thread.start()
-  print(f"*** started viz on {HOST}:{PORT}")
   print(colored(f"*** ready in {(time.perf_counter()-st)*1e3:4.2f}ms", "green"), flush=True)
   if len(getenv("BROWSER", "")) > 0: webbrowser.open(f"{HOST}:{PORT}")
   try: server.serve_forever()
