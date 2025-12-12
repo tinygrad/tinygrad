@@ -190,7 +190,7 @@ class AMDev(PCIDevImplBase):
       if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
 
     # self.smu.set_clocks(level=-1) # last level, max perf.
-    # for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
+    for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
     self.reg("regSCRATCH_REG7").write(AMDev.Version)
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
 
@@ -199,7 +199,7 @@ class AMDev(PCIDevImplBase):
 
     # Memory manager & firmware
     self.mm = AMMemoryManager(self, self.vram_size, boot_size=(32 << 20), pt_t=AMPageTableEntry, va_shifts=[12, 21, 30, 39], va_bits=48,
-      first_lv=am.AMDGPU_VM_PDB2, va_base=0,
+      first_lv=am.AMDGPU_VM_PDB2, va_base=AMMemoryManager.va_allocator.base,
       palloc_ranges=[(1 << (i + 12), 0x1000) for i in range(9 * (3 - am.AMDGPU_VM_PDB2), -1, -1)], reserve_ptable=not self.large_bar)
     self.fw = AMFirmware(self)
 
@@ -218,7 +218,8 @@ class AMDev(PCIDevImplBase):
   def fini(self):
     if DEBUG >= 2: print(f"am {self.devfmt}: Finalizing")
     for ip in [self.sdma, self.gfx]: ip.fini_hw()
-    self.smu.set_clocks(level=0)
+    # self.smu.set_clocks(level=0)
+    self.gmc.on_interrupt()
     self.ih.interrupt_handler()
 
   def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr

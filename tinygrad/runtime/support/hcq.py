@@ -342,6 +342,7 @@ class HCQProgram(Generic[HCQDeviceType]):
     q.signal(self.dev.timeline_signal, self.dev.next_timeline()).submit(self.dev)
 
     if wait: self.dev.synchronize()
+    # return 1.0
     return (float(sig_en.timestamp - sig_st.timestamp) / 1e6) if wait else None
 
 class HCQCompiled(Compiled, Generic[SignalType]):
