@@ -1113,7 +1113,7 @@ def train_bert():
   def minibatch(input_ids:Tensor, segment_ids:Tensor, attention_mask:Tensor,
                 masked_positions:Tensor, masked_lm_ids:Tensor, masked_lm_weights:Tensor, next_sentence_labels:Tensor):
     for t in [input_ids, segment_ids, attention_mask, masked_positions, masked_lm_ids, masked_lm_weights, next_sentence_labels]:
-      if len(GPUS) > 1 and isinstance(t.device, str): t.shard_(GPUS, axis=0)
+      if len(GPUS) > 1: t.shard_(GPUS, axis=0)
       else: t.to_(GPUS[0])
     lm_logits, seq_relationship_logits = model(input_ids, attention_mask, masked_positions, segment_ids)
     loss = model.loss(lm_logits, seq_relationship_logits, masked_lm_ids, masked_lm_weights, next_sentence_labels)
@@ -1129,9 +1129,8 @@ def train_bert():
     global_norm = Tensor(0.0, dtype=dtypes.float32, device=optimizer_group[0].device)
     assert all(g is p.grad for g,p in zip(grads, optimizer_group.params))
     # TODO: remove these realize
-    # TODO: update / 4 to grad_acc
     for p in optimizer_group.params:
-      p.grad.assign(p.grad / loss_scaler / 4).realize()
+      p.grad.assign(p.grad / loss_scaler / grad_acc).realize()
       global_norm += p.grad.float().square().sum()
     assert all(g is p.grad for g,p in zip(grads, optimizer_group.params))
     global_norm = global_norm.sqrt().contiguous().realize()
@@ -1154,12 +1153,11 @@ def train_bert():
       st = time.perf_counter()
       GlobalCounters.reset()
       with WallTimeEvent(BenchEvent.STEP):
-        for _ in range(4):
+        for _ in range(grad_acc):
           loss = minibatch(
             train_data["input_ids"], train_data["segment_ids"], train_data["input_mask"], train_data["masked_lm_positions"], \
             train_data["masked_lm_ids"], train_data["masked_lm_weights"], train_data["next_sentence_labels"])
-          # TODO: update train_data
-          # train_data = next(train_it)
+          train_data = next(train_it)
         global_norm, lr = optimizer_step()
 
         pt = time.perf_counter()
