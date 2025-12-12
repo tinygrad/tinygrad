@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 import itertools
 from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo
-from tinygrad.uop.ops import graph_rewrite, identity_element, sint, AxisType, BottomUpGate, Kernel, _remove_all_tags, range_str
+from tinygrad.uop.ops import graph_rewrite, identity_element, sint, AxisType, BottomUpGate, Kernel, range_str
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import argsort, prod, all_same, getenv, flatten, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY
 from tinygrad.helpers import PCONTIG, partition, get_single_element
@@ -522,6 +522,11 @@ add_tags = PatternMatcher([
   (UPat({Ops.MSTACK, Ops.MSELECT}, name="x"), lambda ctx,x: None if all(s.op is Ops.BUFFER for s in x.src) else tag_uop(ctx, x)),
 ])
 
+# NOTE: don't remove tag from DEFINE_VAR - schedule cache uses tags to track unbound variables, and ucache would return original untagged UOp
+pm_remove_rangeify_tags = PatternMatcher([
+  (UPat(GroupOp.All-{Ops.DEFINE_VAR}, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None),
+])
+
 # support for using a contiguous permuted view instead of the parent view if one exists
 # modified from kernelize.py to not use ShapeTracker
 
@@ -580,7 +585,7 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
 
   # TODO: we can probably get this earlier
   sink_tags = [s.tag for s in tsink.src]
-  tsink = graph_rewrite(tsink, _remove_all_tags, name="remove all tags")
+  tsink = graph_rewrite(tsink, pm_remove_rangeify_tags, name="remove rangeify tags")
 
   if getenv("VIZ"): graph_rewrite(tsink, PatternMatcher([]), name="View Kernel Graph")
 
