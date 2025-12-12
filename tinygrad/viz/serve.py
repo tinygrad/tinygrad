@@ -222,8 +222,6 @@ def row_tuple(row:str) -> tuple[int, ...]: return tuple(int(x.split(":")[1]) for
 # *** Performance counters
 
 def unpack_pmc(e) -> dict:
-  from tinygrad.runtime.ops_amd import ProfilePMCEvent
-  assert isinstance(e, ProfilePMCEvent), f"not a PMC event: {type(e)}"
   agg_cols = ["Name", "Sum"]
   sample_cols = ["XCC", "INST", "SE", "SA", "WGP", "Value"]
   rows:list[list] = []
