@@ -185,8 +185,7 @@ models = {
 
 class Handler(HTTPRequestHandler):
   def run_model(self, ids:list[int], include_usage=False):
-    cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
-    tmpl = {"id":cid, "object":"chat.completion.chunk"}
+    tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk"}
     yield {"choices": [{"index":0, "delta":{"role":"assistant","content":""}, "finish_reason":None}], **tmpl}
     out = []
     for next_id in tqdm(model.generate(ids), disable=not DEBUG>=1):
