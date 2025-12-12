@@ -96,6 +96,7 @@ testing = [
   "boto3",
   "pandas",
   "influxdb3-python",
+  "openai",
 ]
 docs = [
   "mkdocs",
