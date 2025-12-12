@@ -7,7 +7,7 @@ from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, TypeVar, Generator, Callable
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
-from tinygrad.helpers import printable, system
+from tinygrad.helpers import printable, system, TCPServerWithReuse
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, pyrender
 from tinygrad.uop.ops import print_uops, range_start, multirange_str
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device
@@ -487,9 +487,6 @@ T = TypeVar("T")
 def load_pickle(path:pathlib.Path, default:T) -> T:
   if not path.exists(): return default
   with path.open("rb") as f: return pickle.load(f)
-
-# NOTE: using HTTPServer forces a potentially slow socket.getfqdn
-class TCPServerWithReuse(socketserver.TCPServer): allow_reuse_address = True
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()

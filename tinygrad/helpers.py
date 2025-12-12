@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
-import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools
+import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools, socketserver
 from dataclasses import dataclass, field
 from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload
 
@@ -403,6 +403,13 @@ def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip
       progress_bar.update(close=True)
       if length and (file_size:=os.stat(fp).st_size) < length: raise RuntimeError(f"fetch size incomplete, {file_size} < {length}")
   return fp
+
+# NOTE: using HTTPServer forces a potentially slow socket.getfqdn
+class TCPServerWithReuse(socketserver.TCPServer):
+  allow_reuse_address = True
+  def __init__(self, server_address, RequestHandlerClass):
+    print(f"*** starting server on {server_address[1]}")
+    super().__init__(server_address, RequestHandlerClass)
 
 # *** Exec helpers
 

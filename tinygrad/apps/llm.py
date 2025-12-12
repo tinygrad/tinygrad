@@ -178,10 +178,35 @@ models = {
   "8B": "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf",
 }
 
+# *** simple OpenAI compatible server on 11434 to match ollama ***
+
+import json
+from tinygrad.helpers import TCPServerWithReuse, tqdm
+from http.server import BaseHTTPRequestHandler
+
+class Handler(BaseHTTPRequestHandler):
+  def do_POST(self):
+    print(self.path)
+    # TODO: fill this in to respond to OpenAI API
+    raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+    body = json.loads(raw_body.decode("utf-8"))
+    ids = [bos_id]
+    for msg in body["messages"]:
+      ids += tok.role(msg["role"])
+      for c in msg["content"]: ids += tok.encode(c["text"])
+      ids += tok.role("assisstant")
+    print("inp:", ids)
+    out = []
+    for next_id in tqdm(model.generate(ids)):
+      out.append(next_id)
+      if next_id == eos_id: break
+    print("out:", out)
+
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument("--size", choices=list(models.keys()), default=list(models.keys())[0], help="Model size")
   parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
+  parser.add_argument("--serve", action="store_true", help="Run OpenAI compatible API")
   args = parser.parse_args()
 
   # load the model
@@ -191,6 +216,9 @@ if __name__ == "__main__":
   tok = SimpleTokenizer.from_gguf_kv(kv)
   bos_id: int = kv['tokenizer.ggml.bos_token_id']
   eos_id: int = kv['tokenizer.ggml.eos_token_id']
+
+  # start server
+  if args.serve: TCPServerWithReuse(('', 11434), Handler).serve_forever()
 
   ids: list[int] = [bos_id]
   while 1:
