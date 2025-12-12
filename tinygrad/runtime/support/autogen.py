@@ -256,7 +256,7 @@ def gen(dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, use_e
           case clang.CXCursor_VarDecl if clang.clang_getCursorLinkage(c) == clang.CXLinkage_External and dll:
             lines.append(f"try: {nm(c)} = {tname(clang.clang_getCursorType(c))}.in_dll(dll, '{nm(c)}')\nexcept (ValueError,AttributeError): pass")
           case clang.CXCursor_ObjCProtocolDecl: proto(c)
-          case clang.CXCursor_Namespace: q.extend(list(children(c))[::-1])
+          case clang.CXCursor_Namespace | clang.CXCursor_LinkageSpec: q.extend(list(children(c))[::-1])
       except NotImplementedError as e:
         print(f"skipping {nm(c)}: {e}")
         lines, types = rollback
