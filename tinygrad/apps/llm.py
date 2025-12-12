@@ -174,10 +174,10 @@ class Transformer:
       yield next_id
 
 models = {
-  "1B": "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf",
-  "3B": "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q6_K.gguf",
-  "3B_f16": "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-f16.gguf",
-  "8B": "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf",
+  "llama3.2:1b": "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf",
+  "llama3.2:3b": "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q6_K.gguf",
+  "llama3.2:3b-f16": "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-f16.gguf",
+  "llama3.1:8b": "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf",
 }
 
 # *** simple OpenAI compatible server on 11434 to match ollama ***
@@ -226,13 +226,14 @@ class Handler(HTTPRequestHandler):
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
-  parser.add_argument("--size", choices=list(models.keys()), default=list(models.keys())[0], help="Model size")
+  parser.add_argument("--model", choices=list(models.keys()), default=list(models.keys())[0], help="Model choice")
   parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
   parser.add_argument("--serve", action="store_true", help="Run OpenAI compatible API")
   args = parser.parse_args()
 
   # load the model
-  model, kv = Transformer.from_gguf(Tensor.from_url(models[args.size]), args.max_context)
+  model, kv = Transformer.from_gguf(Tensor.from_url(models[args.model]), args.max_context)
+  if DEBUG >= 1: print(f"using model {args.model}")
 
   # extract some metadata
   tok = SimpleTokenizer.from_gguf_kv(kv)
