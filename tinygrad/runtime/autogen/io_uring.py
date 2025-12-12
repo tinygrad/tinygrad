@@ -181,94 +181,14 @@ struct_statx._fields_ = [
   ('__spare3', (ctypes.c_uint64 * 12)),
 ]
 class struct_epoll_event(Struct): pass
-class _anonunion0(ctypes.Union): pass
-class _anonunion0_0(Struct): pass
-_anonunion0_0._fields_ = [
-  ('cmd_op', ctypes.c_uint32),
-  ('__pad1', ctypes.c_uint32),
-]
-_anonunion0._anonymous_ = ['_0']
-_anonunion0._fields_ = [
-  ('off', ctypes.c_uint64),
-  ('addr2', ctypes.c_uint64),
-  ('_0', _anonunion0_0),
-]
-class _anonunion1(ctypes.Union): pass
-class _anonunion1_0(Struct): pass
-_anonunion1_0._fields_ = [
-  ('level', ctypes.c_uint32),
-  ('optname', ctypes.c_uint32),
-]
-_anonunion1._anonymous_ = ['_0']
-_anonunion1._fields_ = [
-  ('addr', ctypes.c_uint64),
-  ('splice_off_in', ctypes.c_uint64),
-  ('_0', _anonunion1_0),
-]
-class _anonunion2(ctypes.Union): pass
-_anonunion2._fields_ = [
-  ('rw_flags', ctypes.c_int32),
-  ('fsync_flags', ctypes.c_uint32),
-  ('poll_events', ctypes.c_uint16),
-  ('poll32_events', ctypes.c_uint32),
-  ('sync_range_flags', ctypes.c_uint32),
-  ('msg_flags', ctypes.c_uint32),
-  ('timeout_flags', ctypes.c_uint32),
-  ('accept_flags', ctypes.c_uint32),
-  ('cancel_flags', ctypes.c_uint32),
-  ('open_flags', ctypes.c_uint32),
-  ('statx_flags', ctypes.c_uint32),
-  ('fadvise_advice', ctypes.c_uint32),
-  ('splice_flags', ctypes.c_uint32),
-  ('rename_flags', ctypes.c_uint32),
-  ('unlink_flags', ctypes.c_uint32),
-  ('hardlink_flags', ctypes.c_uint32),
-  ('xattr_flags', ctypes.c_uint32),
-  ('msg_ring_flags', ctypes.c_uint32),
-  ('uring_cmd_flags', ctypes.c_uint32),
-  ('waitid_flags', ctypes.c_uint32),
-  ('futex_flags', ctypes.c_uint32),
-  ('install_fd_flags', ctypes.c_uint32),
-]
-class _anonunion3(ctypes.Union): pass
-_anonunion3._packed_ = True
-_anonunion3._fields_ = [
-  ('buf_index', ctypes.c_uint16),
-  ('buf_group', ctypes.c_uint16),
-]
-class _anonunion4(ctypes.Union): pass
-class _anonunion4_0(Struct): pass
-_anonunion4_0._fields_ = [
-  ('addr_len', ctypes.c_uint16),
-  ('__pad3', (ctypes.c_uint16 * 1)),
-]
-_anonunion4._anonymous_ = ['_0']
-_anonunion4._fields_ = [
-  ('splice_fd_in', ctypes.c_int32),
-  ('file_index', ctypes.c_uint32),
-  ('optlen', ctypes.c_uint32),
-  ('_0', _anonunion4_0),
-]
-class _anonunion5(ctypes.Union): pass
-class _anonunion5_0(Struct): pass
-_anonunion5_0._fields_ = [
-  ('addr3', ctypes.c_uint64),
-  ('__pad2', (ctypes.c_uint64 * 1)),
-]
-_anonunion5._anonymous_ = ['_0']
-_anonunion5._fields_ = [
-  ('_0', _anonunion5_0),
-  ('optval', ctypes.c_uint64),
-  ('cmd', (ctypes.c_ubyte * 0)),
-]
-_anonenum6 = CEnum(ctypes.c_uint32)
-IOSQE_FIXED_FILE_BIT = _anonenum6.define('IOSQE_FIXED_FILE_BIT', 0)
-IOSQE_IO_DRAIN_BIT = _anonenum6.define('IOSQE_IO_DRAIN_BIT', 1)
-IOSQE_IO_LINK_BIT = _anonenum6.define('IOSQE_IO_LINK_BIT', 2)
-IOSQE_IO_HARDLINK_BIT = _anonenum6.define('IOSQE_IO_HARDLINK_BIT', 3)
-IOSQE_ASYNC_BIT = _anonenum6.define('IOSQE_ASYNC_BIT', 4)
-IOSQE_BUFFER_SELECT_BIT = _anonenum6.define('IOSQE_BUFFER_SELECT_BIT', 5)
-IOSQE_CQE_SKIP_SUCCESS_BIT = _anonenum6.define('IOSQE_CQE_SKIP_SUCCESS_BIT', 6)
+_anonenum0 = CEnum(ctypes.c_uint32)
+IOSQE_FIXED_FILE_BIT = _anonenum0.define('IOSQE_FIXED_FILE_BIT', 0)
+IOSQE_IO_DRAIN_BIT = _anonenum0.define('IOSQE_IO_DRAIN_BIT', 1)
+IOSQE_IO_LINK_BIT = _anonenum0.define('IOSQE_IO_LINK_BIT', 2)
+IOSQE_IO_HARDLINK_BIT = _anonenum0.define('IOSQE_IO_HARDLINK_BIT', 3)
+IOSQE_ASYNC_BIT = _anonenum0.define('IOSQE_ASYNC_BIT', 4)
+IOSQE_BUFFER_SELECT_BIT = _anonenum0.define('IOSQE_BUFFER_SELECT_BIT', 5)
+IOSQE_CQE_SKIP_SUCCESS_BIT = _anonenum0.define('IOSQE_CQE_SKIP_SUCCESS_BIT', 6)
 
 enum_io_uring_op = CEnum(ctypes.c_uint32)
 IORING_OP_NOP = enum_io_uring_op.define('IORING_OP_NOP', 0)
@@ -328,12 +248,12 @@ IORING_OP_FUTEX_WAITV = enum_io_uring_op.define('IORING_OP_FUTEX_WAITV', 53)
 IORING_OP_FIXED_FD_INSTALL = enum_io_uring_op.define('IORING_OP_FIXED_FD_INSTALL', 54)
 IORING_OP_LAST = enum_io_uring_op.define('IORING_OP_LAST', 55)
 
-_anonenum7 = CEnum(ctypes.c_uint32)
-IORING_MSG_DATA = _anonenum7.define('IORING_MSG_DATA', 0)
-IORING_MSG_SEND_FD = _anonenum7.define('IORING_MSG_SEND_FD', 1)
+_anonenum1 = CEnum(ctypes.c_uint32)
+IORING_MSG_DATA = _anonenum1.define('IORING_MSG_DATA', 0)
+IORING_MSG_SEND_FD = _anonenum1.define('IORING_MSG_SEND_FD', 1)
 
-_anonenum8 = CEnum(ctypes.c_uint32)
-IORING_CQE_BUFFER_SHIFT = _anonenum8.define('IORING_CQE_BUFFER_SHIFT', 16)
+_anonenum2 = CEnum(ctypes.c_uint32)
+IORING_CQE_BUFFER_SHIFT = _anonenum2.define('IORING_CQE_BUFFER_SHIFT', 16)
 
 class struct_io_sqring_offsets(Struct): pass
 struct_io_sqring_offsets._fields_ = [
@@ -372,40 +292,40 @@ struct_io_uring_params._fields_ = [
   ('sq_off', struct_io_sqring_offsets),
   ('cq_off', struct_io_cqring_offsets),
 ]
-_anonenum9 = CEnum(ctypes.c_uint32)
-IORING_REGISTER_BUFFERS = _anonenum9.define('IORING_REGISTER_BUFFERS', 0)
-IORING_UNREGISTER_BUFFERS = _anonenum9.define('IORING_UNREGISTER_BUFFERS', 1)
-IORING_REGISTER_FILES = _anonenum9.define('IORING_REGISTER_FILES', 2)
-IORING_UNREGISTER_FILES = _anonenum9.define('IORING_UNREGISTER_FILES', 3)
-IORING_REGISTER_EVENTFD = _anonenum9.define('IORING_REGISTER_EVENTFD', 4)
-IORING_UNREGISTER_EVENTFD = _anonenum9.define('IORING_UNREGISTER_EVENTFD', 5)
-IORING_REGISTER_FILES_UPDATE = _anonenum9.define('IORING_REGISTER_FILES_UPDATE', 6)
-IORING_REGISTER_EVENTFD_ASYNC = _anonenum9.define('IORING_REGISTER_EVENTFD_ASYNC', 7)
-IORING_REGISTER_PROBE = _anonenum9.define('IORING_REGISTER_PROBE', 8)
-IORING_REGISTER_PERSONALITY = _anonenum9.define('IORING_REGISTER_PERSONALITY', 9)
-IORING_UNREGISTER_PERSONALITY = _anonenum9.define('IORING_UNREGISTER_PERSONALITY', 10)
-IORING_REGISTER_RESTRICTIONS = _anonenum9.define('IORING_REGISTER_RESTRICTIONS', 11)
-IORING_REGISTER_ENABLE_RINGS = _anonenum9.define('IORING_REGISTER_ENABLE_RINGS', 12)
-IORING_REGISTER_FILES2 = _anonenum9.define('IORING_REGISTER_FILES2', 13)
-IORING_REGISTER_FILES_UPDATE2 = _anonenum9.define('IORING_REGISTER_FILES_UPDATE2', 14)
-IORING_REGISTER_BUFFERS2 = _anonenum9.define('IORING_REGISTER_BUFFERS2', 15)
-IORING_REGISTER_BUFFERS_UPDATE = _anonenum9.define('IORING_REGISTER_BUFFERS_UPDATE', 16)
-IORING_REGISTER_IOWQ_AFF = _anonenum9.define('IORING_REGISTER_IOWQ_AFF', 17)
-IORING_UNREGISTER_IOWQ_AFF = _anonenum9.define('IORING_UNREGISTER_IOWQ_AFF', 18)
-IORING_REGISTER_IOWQ_MAX_WORKERS = _anonenum9.define('IORING_REGISTER_IOWQ_MAX_WORKERS', 19)
-IORING_REGISTER_RING_FDS = _anonenum9.define('IORING_REGISTER_RING_FDS', 20)
-IORING_UNREGISTER_RING_FDS = _anonenum9.define('IORING_UNREGISTER_RING_FDS', 21)
-IORING_REGISTER_PBUF_RING = _anonenum9.define('IORING_REGISTER_PBUF_RING', 22)
-IORING_UNREGISTER_PBUF_RING = _anonenum9.define('IORING_UNREGISTER_PBUF_RING', 23)
-IORING_REGISTER_SYNC_CANCEL = _anonenum9.define('IORING_REGISTER_SYNC_CANCEL', 24)
-IORING_REGISTER_FILE_ALLOC_RANGE = _anonenum9.define('IORING_REGISTER_FILE_ALLOC_RANGE', 25)
-IORING_REGISTER_PBUF_STATUS = _anonenum9.define('IORING_REGISTER_PBUF_STATUS', 26)
-IORING_REGISTER_LAST = _anonenum9.define('IORING_REGISTER_LAST', 27)
-IORING_REGISTER_USE_REGISTERED_RING = _anonenum9.define('IORING_REGISTER_USE_REGISTERED_RING', 2147483648)
+_anonenum3 = CEnum(ctypes.c_uint32)
+IORING_REGISTER_BUFFERS = _anonenum3.define('IORING_REGISTER_BUFFERS', 0)
+IORING_UNREGISTER_BUFFERS = _anonenum3.define('IORING_UNREGISTER_BUFFERS', 1)
+IORING_REGISTER_FILES = _anonenum3.define('IORING_REGISTER_FILES', 2)
+IORING_UNREGISTER_FILES = _anonenum3.define('IORING_UNREGISTER_FILES', 3)
+IORING_REGISTER_EVENTFD = _anonenum3.define('IORING_REGISTER_EVENTFD', 4)
+IORING_UNREGISTER_EVENTFD = _anonenum3.define('IORING_UNREGISTER_EVENTFD', 5)
+IORING_REGISTER_FILES_UPDATE = _anonenum3.define('IORING_REGISTER_FILES_UPDATE', 6)
+IORING_REGISTER_EVENTFD_ASYNC = _anonenum3.define('IORING_REGISTER_EVENTFD_ASYNC', 7)
+IORING_REGISTER_PROBE = _anonenum3.define('IORING_REGISTER_PROBE', 8)
+IORING_REGISTER_PERSONALITY = _anonenum3.define('IORING_REGISTER_PERSONALITY', 9)
+IORING_UNREGISTER_PERSONALITY = _anonenum3.define('IORING_UNREGISTER_PERSONALITY', 10)
+IORING_REGISTER_RESTRICTIONS = _anonenum3.define('IORING_REGISTER_RESTRICTIONS', 11)
+IORING_REGISTER_ENABLE_RINGS = _anonenum3.define('IORING_REGISTER_ENABLE_RINGS', 12)
+IORING_REGISTER_FILES2 = _anonenum3.define('IORING_REGISTER_FILES2', 13)
+IORING_REGISTER_FILES_UPDATE2 = _anonenum3.define('IORING_REGISTER_FILES_UPDATE2', 14)
+IORING_REGISTER_BUFFERS2 = _anonenum3.define('IORING_REGISTER_BUFFERS2', 15)
+IORING_REGISTER_BUFFERS_UPDATE = _anonenum3.define('IORING_REGISTER_BUFFERS_UPDATE', 16)
+IORING_REGISTER_IOWQ_AFF = _anonenum3.define('IORING_REGISTER_IOWQ_AFF', 17)
+IORING_UNREGISTER_IOWQ_AFF = _anonenum3.define('IORING_UNREGISTER_IOWQ_AFF', 18)
+IORING_REGISTER_IOWQ_MAX_WORKERS = _anonenum3.define('IORING_REGISTER_IOWQ_MAX_WORKERS', 19)
+IORING_REGISTER_RING_FDS = _anonenum3.define('IORING_REGISTER_RING_FDS', 20)
+IORING_UNREGISTER_RING_FDS = _anonenum3.define('IORING_UNREGISTER_RING_FDS', 21)
+IORING_REGISTER_PBUF_RING = _anonenum3.define('IORING_REGISTER_PBUF_RING', 22)
+IORING_UNREGISTER_PBUF_RING = _anonenum3.define('IORING_UNREGISTER_PBUF_RING', 23)
+IORING_REGISTER_SYNC_CANCEL = _anonenum3.define('IORING_REGISTER_SYNC_CANCEL', 24)
+IORING_REGISTER_FILE_ALLOC_RANGE = _anonenum3.define('IORING_REGISTER_FILE_ALLOC_RANGE', 25)
+IORING_REGISTER_PBUF_STATUS = _anonenum3.define('IORING_REGISTER_PBUF_STATUS', 26)
+IORING_REGISTER_LAST = _anonenum3.define('IORING_REGISTER_LAST', 27)
+IORING_REGISTER_USE_REGISTERED_RING = _anonenum3.define('IORING_REGISTER_USE_REGISTERED_RING', 2147483648)
 
-_anonenum10 = CEnum(ctypes.c_uint32)
-IO_WQ_BOUND = _anonenum10.define('IO_WQ_BOUND', 0)
-IO_WQ_UNBOUND = _anonenum10.define('IO_WQ_UNBOUND', 1)
+_anonenum4 = CEnum(ctypes.c_uint32)
+IO_WQ_BOUND = _anonenum4.define('IO_WQ_BOUND', 0)
+IO_WQ_UNBOUND = _anonenum4.define('IO_WQ_UNBOUND', 1)
 
 class struct_io_uring_files_update(Struct): pass
 struct_io_uring_files_update._fields_ = [
@@ -496,8 +416,8 @@ struct_io_uring_buf_ring._anonymous_ = ['_0']
 struct_io_uring_buf_ring._fields_ = [
   ('_0', struct_io_uring_buf_ring_0),
 ]
-_anonenum11 = CEnum(ctypes.c_uint32)
-IOU_PBUF_RING_MMAP = _anonenum11.define('IOU_PBUF_RING_MMAP', 1)
+_anonenum5 = CEnum(ctypes.c_uint32)
+IOU_PBUF_RING_MMAP = _anonenum5.define('IOU_PBUF_RING_MMAP', 1)
 
 class struct_io_uring_buf_reg(Struct): pass
 struct_io_uring_buf_reg._fields_ = [
@@ -513,12 +433,12 @@ struct_io_uring_buf_status._fields_ = [
   ('head', ctypes.c_uint32),
   ('resv', (ctypes.c_uint32 * 8)),
 ]
-_anonenum12 = CEnum(ctypes.c_uint32)
-IORING_RESTRICTION_REGISTER_OP = _anonenum12.define('IORING_RESTRICTION_REGISTER_OP', 0)
-IORING_RESTRICTION_SQE_OP = _anonenum12.define('IORING_RESTRICTION_SQE_OP', 1)
-IORING_RESTRICTION_SQE_FLAGS_ALLOWED = _anonenum12.define('IORING_RESTRICTION_SQE_FLAGS_ALLOWED', 2)
-IORING_RESTRICTION_SQE_FLAGS_REQUIRED = _anonenum12.define('IORING_RESTRICTION_SQE_FLAGS_REQUIRED', 3)
-IORING_RESTRICTION_LAST = _anonenum12.define('IORING_RESTRICTION_LAST', 4)
+_anonenum6 = CEnum(ctypes.c_uint32)
+IORING_RESTRICTION_REGISTER_OP = _anonenum6.define('IORING_RESTRICTION_REGISTER_OP', 0)
+IORING_RESTRICTION_SQE_OP = _anonenum6.define('IORING_RESTRICTION_SQE_OP', 1)
+IORING_RESTRICTION_SQE_FLAGS_ALLOWED = _anonenum6.define('IORING_RESTRICTION_SQE_FLAGS_ALLOWED', 2)
+IORING_RESTRICTION_SQE_FLAGS_REQUIRED = _anonenum6.define('IORING_RESTRICTION_SQE_FLAGS_REQUIRED', 3)
+IORING_RESTRICTION_LAST = _anonenum6.define('IORING_RESTRICTION_LAST', 4)
 
 class struct_io_uring_getevents_arg(Struct): pass
 struct_io_uring_getevents_arg._fields_ = [
@@ -556,11 +476,11 @@ struct_io_uring_recvmsg_out._fields_ = [
   ('payloadlen', ctypes.c_uint32),
   ('flags', ctypes.c_uint32),
 ]
-_anonenum13 = CEnum(ctypes.c_uint32)
-SOCKET_URING_OP_SIOCINQ = _anonenum13.define('SOCKET_URING_OP_SIOCINQ', 0)
-SOCKET_URING_OP_SIOCOUTQ = _anonenum13.define('SOCKET_URING_OP_SIOCOUTQ', 1)
-SOCKET_URING_OP_GETSOCKOPT = _anonenum13.define('SOCKET_URING_OP_GETSOCKOPT', 2)
-SOCKET_URING_OP_SETSOCKOPT = _anonenum13.define('SOCKET_URING_OP_SETSOCKOPT', 3)
+_anonenum7 = CEnum(ctypes.c_uint32)
+SOCKET_URING_OP_SIOCINQ = _anonenum7.define('SOCKET_URING_OP_SIOCINQ', 0)
+SOCKET_URING_OP_SIOCOUTQ = _anonenum7.define('SOCKET_URING_OP_SIOCOUTQ', 1)
+SOCKET_URING_OP_GETSOCKOPT = _anonenum7.define('SOCKET_URING_OP_GETSOCKOPT', 2)
+SOCKET_URING_OP_SETSOCKOPT = _anonenum7.define('SOCKET_URING_OP_SETSOCKOPT', 3)
 
 _XOPEN_SOURCE = 500
 uring_unlikely = lambda cond: __builtin_expect( not  not (cond), 0)

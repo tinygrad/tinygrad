@@ -1294,18 +1294,13 @@ struct_hsa_amd_aie_ert_start_kernel_data_s._fields_ = [
 ]
 hsa_amd_aie_ert_start_kernel_data_t = struct_hsa_amd_aie_ert_start_kernel_data_s
 class struct_hsa_amd_aie_ert_packet_s(Struct): pass
-class struct_hsa_amd_aie_ert_packet_s_0(Struct): pass
-struct_hsa_amd_aie_ert_packet_s_0._fields_ = [
+struct_hsa_amd_aie_ert_packet_s._fields_ = [
+  ('header', hsa_amd_vendor_packet_header_t),
   ('state', uint32_t,4),
   ('custom', uint32_t,8),
   ('count', uint32_t,11),
   ('opcode', uint32_t,5),
   ('type', uint32_t,4),
-]
-struct_hsa_amd_aie_ert_packet_s._anonymous_ = ['_0']
-struct_hsa_amd_aie_ert_packet_s._fields_ = [
-  ('header', hsa_amd_vendor_packet_header_t),
-  ('_0', struct_hsa_amd_aie_ert_packet_s_0),
   ('reserved0', uint64_t),
   ('reserved1', uint64_t),
   ('reserved2', uint64_t),
