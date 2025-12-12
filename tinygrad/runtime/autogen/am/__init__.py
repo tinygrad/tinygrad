@@ -1,6 +1,6 @@
 from tinygrad.runtime.autogen import load, root
 
-am_src="https://github.com/ROCm/ROCK-Kernel-Driver/archive/ceb12c04e2b5b53ec0779362831f5ee40c4921e4.tar.gz"
+am_src="https://github.com/ROCm/ROCK-Kernel-Driver/archive/01cee31f91e55dc913933217d10341360f4a6f9e.tar.gz"
 AMD="{}/drivers/gpu/drm/amd"
 inc = ["-include", "stdint.h"]
 
@@ -18,6 +18,8 @@ def __getattr__(nm):
     case "sdma_6_0_0": return load("am/sdma_6_0_0", [], [root/"extra/hip_gpu_driver/sdma_registers.h", f"{AMD}/amdgpu/sdma_v6_0_0_pkt_open.h"],
                                    args=["-I/opt/rocm/include", "-x", "c++"], tarball=am_src)
     case "smu_v13_0_0": return load("am/smu_v13_0_0",[],[f"{AMD}/pm/swsmu/inc/pmfw_if/{s}.h" for s in ["smu_v13_0_0_ppsmc","smu13_driver_if_v13_0_0"]]
+                                    +[root/"extra/amdpci/headers/amdgpu_smu.h"], args=inc, tarball=am_src)
+    case "smu_v13_0_6": return load("am/smu_v13_0_6",[],[f"{AMD}/pm/swsmu/inc/pmfw_if/{s}.h" for s in ["smu_v13_0_6_ppsmc","smu13_driver_if_v13_0_6"]]
                                     +[root/"extra/amdpci/headers/amdgpu_smu.h"], args=inc, tarball=am_src)
     case "smu_v14_0_2": return load("am/smu_v14_0_2", [], [f"{AMD}/pm/swsmu/inc/pmfw_if/{s}.h" for s in ["smu_v14_0_0_pmfw", "smu_v14_0_2_ppsmc",
                                     "smu14_driver_if_v14_0"]]+[root/"extra/amdpci/headers/amdgpu_smu.h"], args=inc, tarball=am_src)

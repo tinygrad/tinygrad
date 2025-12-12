@@ -52,9 +52,6 @@ class AM_GMC(AM_IP):
     self.mc_base = self.fb_base + self.paddr_base
     self.mc_end = self.mc_base + self.adev.mm.vram_size - 1
 
-    # Paddr base
-    self.paddr_base = self.xgmi_phys_id * self.xgmi_seg_size
-
     # VM aperture
     self.vm_base = self.adev.mm.va_base
     self.vm_end = min(self.vm_base + (1 << self.adev.mm.va_bits) - 1, 0x7fffffffffff)
@@ -69,8 +66,8 @@ class AM_GMC(AM_IP):
     self.pf_status_reg = lambda ip: f"reg{ip}VM_L2_PROTECTION_FAULT_STATUS{'_LO32' if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else ''}"
 
   def init_hw(self):
-    self.init_hub("MM", insts=self.vmhubs)
-    for xcc in range(self.adev.soc.xccs): self.adev.regRLC_SPM_MC_CNTL.write(0xf, inst=xcc)
+    self.init_hub("MM", inst_cnt=self.vmhubs)
+    for xcc in range(self.adev.gfx.xccs): self.adev.regRLC_SPM_MC_CNTL.write(0xf, inst=xcc)
 
   def flush_hdp(self): self.adev.wreg(self.adev.reg("regBIF_BX0_REMAP_HDP_MEM_FLUSH_CNTL").read() // 4, 0x0)
   def flush_tlb(self, ip:Literal["MM", "GC"], vmid, flush_type=0):
@@ -82,7 +79,7 @@ class AM_GMC(AM_IP):
     # self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_REQ").write(flush_type=flush_type, per_vmid_invalidate_req=(1 << vmid), invalidate_l2_ptes=1,
     #   invalidate_l2_pde0=1, invalidate_l2_pde1=1, invalidate_l2_pde2=1, invalidate_l1_ptes=1, clear_protection_fault_status_addr=0)
 
-    for inst in range(self.adev.soc.vmhubs if ip == "MM" else self.adev.soc.xccs):
+    for inst in range(self.adev.gmc.vmhubs if ip == "MM" else self.adev.gfx.xccs):
       # if ip == "MM": wait_cond(lambda: self.adev.regMMVM_INVALIDATE_ENG17_SEM.read(inst=inst) & 0x1, value=1, msg="mm flush_tlb timeout")
       self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_REQ").write(0x7c0001, inst=inst)
       wait_cond(lambda: self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_ACK").read(inst=inst) & (1 << vmid), value=(1 << vmid), msg="flush_tlb timeout")
@@ -107,17 +104,17 @@ class AM_GMC(AM_IP):
                                                          execute_protection_fault_enable_interrupt=1, execute_protection_fault_enable_default=1,
                                                          enable_context=1, page_table_depth=2, page_table_block_size=9, inst=inst)
 
-  def init_hub(self, ip:Literal["MM", "GC"], insts:int):
+  def init_hub(self, ip:Literal["MM", "GC"], inst_cnt:int):
     # Init system apertures
-    for i in range(insts):
+    for i in range(inst_cnt):
       self.adev.reg(f"reg{ip}MC_VM_AGP_BASE").write(0, inst=i)
       self.adev.reg(f"reg{ip}MC_VM_AGP_BOT").write(0xffffffffffff >> 24, inst=i) # disable AGP
       self.adev.reg(f"reg{ip}MC_VM_AGP_TOP").write(0, inst=i)
 
       self.adev.reg(f"reg{ip}MC_VM_SYSTEM_APERTURE_LOW_ADDR").write(self.fb_base >> 18, inst=i)
       self.adev.reg(f"reg{ip}MC_VM_SYSTEM_APERTURE_HIGH_ADDR").write(self.fb_end >> 18, inst=i)
-      self.adev.wreg_pair(f"reg{ip}MC_VM_SYSTEM_APERTURE_DEFAULT_ADDR", "_LSB", "_MSB", self.adev.paddr2xgmi_paddr(self.memscratch_paddr) >> 12, inst=i)
-      self.adev.wreg_pair(f"reg{ip}VM_L2_PROTECTION_FAULT_DEFAULT_ADDR", "_LO32", "_HI32", self.adev.paddr2xgmi_paddr(self.dummy_page_paddr) >> 12, inst=i)
+      self.adev.wreg_pair(f"reg{ip}MC_VM_SYSTEM_APERTURE_DEFAULT_ADDR", "_LSB", "_MSB", self.memscratch_xgmi_paddr >> 12, inst=i)
+      self.adev.wreg_pair(f"reg{ip}VM_L2_PROTECTION_FAULT_DEFAULT_ADDR", "_LO32", "_HI32", self.dummy_page_xgmi_paddr >> 12, inst=i)
 
       self.adev.reg(f"reg{ip}VM_L2_PROTECTION_FAULT_CNTL2").update(active_page_migration_pte_read_retry=1, inst=i)
 
@@ -300,7 +297,7 @@ class AM_GFX(AM_IP):
       for i in range(0, 16):
         self._grbm_select(vmid=i, inst=xcc)
         self.adev.regSH_MEM_CONFIG.write(address_mode=self.adev.soc.module.SH_MEM_ADDRESS_MODE_64,
-                                         alignment_mode=self.adev.soc.module.SH_MEM_ALIGNMENT_MODE_UNALIGNED, initial_inst_prefetch=3, inst=xcc)
+                                         alignment_mode=self.adev.soc.module.SH_MEM_ALIGNMENT_MODE_UNALIGNED, inst=xcc)
 
         # Configure apertures:
         # LDS:         0x10000000'00000000 - 0x10000001'00000000 (4GB)
@@ -319,7 +316,7 @@ class AM_GFX(AM_IP):
       self.adev.regSQ_CONFIG1.write(0x1804, inst=xcc)
 
     print("RLC")
-    for xcc in range(self.adev.soc.xccs):
+    for xcc in range(self.xccs):
       self.adev.regRLC_CNTL.write(0x1, inst=xcc)
       self.adev.regRLC_SAFE_MODE.write(message=1, cmd=1, inst=xcc)
       wait_cond(lambda: self.adev.regRLC_SAFE_MODE.read(inst=xcc) & 0x1, value=0, msg="RLC safe mode timeout")
@@ -329,22 +326,22 @@ class AM_GFX(AM_IP):
       self.adev.regRLC_SAFE_MODE.write(message=0, cmd=1, inst=xcc)
 
     # Program xcc
-    for xcc in range(self.adev.soc.xccs): self.adev.regCP_HYP_XCP_CTL.write(num_xcc_in_xcp=self.adev.soc.xccs, virtual_xcc_id=xcc, inst=xcc)
+    for xcc in range(self.xccs): self.adev.regCP_HYP_XCP_CTL.write(num_xcc_in_xcp=self.xccs, virtual_xcc_id=xcc, inst=xcc)
     # self.adev.psp._spatial_partition_cmd(1)
 
     # NOTE: Wait for MEC to be ready. The kernel does udelay here as well.
     time.sleep(0.05)
 
   def fini_hw(self):
-    for xcc in range(self.adev.soc.xccs):
-      self._grbm_select(me=1, pipe=0, queue=0, xcc=xcc)
+    for xcc in range(self.xccs):
+      self._grbm_select(me=1, pipe=0, queue=0, inst=xcc)
       self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2, inst=xcc) # 1 - DRAIN_PIPE; 2 - RESET_WAVES
       self.adev.regGCVM_CONTEXT0_CNTL.write(0, inst=xcc)
-    self._grbm_select()
+    self._grbm_select(inst=xcc)
 
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, doorbell:int, pipe:int, queue:int,
                  aql:bool):
-    for xcc in range(self.adev.soc.xccs):
+    for xcc in range(self.xccs):
       mqd = self.adev.mm.valloc(0x1000, uncached=True, contiguous=True)
 
       struct_t = getattr(am, f"struct_v{self.adev.ip_ver[am.GC_HWIP][0]}_compute_mqd")
@@ -368,7 +365,7 @@ class AM_GFX(AM_IP):
       self.adev.vram.view(mqd.paddrs[0][0], ctypes.sizeof(mqd_struct))[:] = memoryview(mqd_struct).cast('B')
       self.adev.gmc.flush_hdp()
 
-      self._grbm_select(xcc=xcc, me=1, pipe=pipe, queue=queue)
+      self._grbm_select(inst=xcc, me=1, pipe=pipe, queue=queue)
 
       mqd_st_mv = to_mv(ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct)).cast('I')
       for i, reg in enumerate(range(self.adev.regCP_MQD_BASE_ADDR.addr[xcc], self.adev.regCP_HQD_PQ_WPTR_HI.addr[xcc] + 1)):
@@ -380,7 +377,7 @@ class AM_GFX(AM_IP):
     # self.adev.reg(f"regCP_ME1_PIPE{pipe}_INT_CNTL").update(time_stamp_int_enable=1, generic0_int_enable=1)
 
   def set_clockgating_state(self):
-    for xcc in range(self.adev.soc.xccs):
+    for xcc in range(self.xccs):
       self.adev.regRLC_SAFE_MODE.write(message=1, cmd=1, inst=xcc)
       wait_cond(lambda: self.adev.regRLC_SAFE_MODE.read(inst=xcc) & 0x1, value=0, msg="RLC safe mode timeout")
 
@@ -391,6 +388,7 @@ class AM_GFX(AM_IP):
       self.adev.regRLC_SAFE_MODE.write(message=0, cmd=1, inst=xcc)
 
     return # TODO
+
     for xcc in range(self.xccs):
       self.adev.regRLC_SAFE_MODE.write(message=1, cmd=1, inst=xcc)
       wait_cond(lambda: self.adev.regRLC_SAFE_MODE.read(inst=xcc) & 0x1, value=0, msg="RLC safe mode timeout")
@@ -420,10 +418,13 @@ class AM_GFX(AM_IP):
       self.adev.reg(f"regCP_{cntl_reg}_CNTL").update(**{f"{eng_name.lower()}_pipe{pipe}_reset": 0 for pipe in range(pipe_cnt)}, inst=xcc)
 
     for xcc in range(self.adev.gfx.xccs):
-      if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0):
-        _config_helper(eng_name="PFP", cntl_reg="ME", eng_reg="PFP", pipe_cnt=1, xcc=xcc)
-        _config_helper(eng_name="ME", cntl_reg="ME", eng_reg="ME", pipe_cnt=1, xcc=xcc)
-      _config_helper(eng_name="MEC", cntl_reg="MEC_RS64", eng_reg="MEC_RS64", pipe_cnt=1, me=1, xcc=xcc)
+      if self.adev.ip_ver[am.GC_HWIP] <= (10,0,0):
+        self.adev.regCP_MEC_CNTL.update(mec_invalidate_icache=1, mec_me1_pipe0_reset=1, mec_me2_pipe0_reset=1, mec_me1_halt=1, mec_me2_halt=1, inst=xcc)
+      else:
+        if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0):
+          _config_helper(eng_name="PFP", cntl_reg="ME", eng_reg="PFP", pipe_cnt=1, xcc=xcc)
+          _config_helper(eng_name="ME", cntl_reg="ME", eng_reg="ME", pipe_cnt=1, xcc=xcc)
+        _config_helper(eng_name="MEC", cntl_reg="MEC_RS64", eng_reg="MEC_RS64", pipe_cnt=1, me=1, xcc=xcc)
 
 class AM_IH(AM_IP):
   def init_sw(self):
@@ -504,10 +505,10 @@ class AM_SDMA(AM_IP):
     self.adev.regSDMA_GFX_IB_CNTL.update(ib_enable=0)
     self.adev.reg(f"regSDMA_GFX_DOORBELL").update(enable=0, inst=0)
     self.adev.reg(f"regSDMA_GFX_DOORBELL_OFFSET").update(offset=0, inst=0)
-    self.adev.smu._send_msg(self.adev.smu.smu_mod.PPSMC_MSG_ResetSDMA, 0xff)
-    self.adev.regGRBM_SOFT_RESET.write(soft_reset_cp=1, soft_reset_gfx=1, soft_reset_cpc=1)
-    time.sleep(0.01)
-    self.adev.regGRBM_SOFT_RESET.write(0x0)
+    # self.adev.smu._send_msg(self.adev.smu.smu_mod.PPSMC_MSG_ResetSDMA, 0xff)
+    # self.adev.regGRBM_SOFT_RESET.write(soft_reset_cp=1, soft_reset_gfx=1, soft_reset_cpc=1)
+    # time.sleep(0.01)
+    # self.adev.regGRBM_SOFT_RESET.write(0x0)
 
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, doorbell:int, pipe:int, queue:int):
     # Setup the ring
@@ -674,7 +675,7 @@ class AM_PSP(AM_IP):
   def _tmr_load_cmd(self) -> am.struct_psp_gfx_cmd_resp:
     cmd = am.struct_psp_gfx_cmd_resp(cmd_id=am.GFX_CMD_ID_SETUP_TMR)
     cmd.cmd.cmd_setup_tmr.buf_phy_addr_hi, cmd.cmd.cmd_setup_tmr.buf_phy_addr_lo = data64(self.adev.paddr2mc(self.tmr_paddr) if self.tmr_paddr else 0)
-    cmd.cmd.cmd_setup_tmr.system_phy_addr_hi, cmd.cmd.cmd_setup_tmr.system_phy_addr_lo = data64(self.adev.paddr2xgmi(self.tmr_paddr) if self.tmr_paddr else 0)
+    cmd.cmd.cmd_setup_tmr.system_phy_addr_hi, cmd.cmd.cmd_setup_tmr.system_phy_addr_lo = data64(self.adev.paddr2xgmi(self.tmr_paddr))
     cmd.cmd.cmd_setup_tmr.bitfield.virt_phy_addr = 1
     cmd.cmd.cmd_setup_tmr.buf_size = 0 # self.tmr_size
     return self._ring_submit(cmd)

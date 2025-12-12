@@ -884,7 +884,7 @@ class AMDDevice(HCQCompiled):
     if self.target < (9,4,2) or self.target >= (13,0,0): raise RuntimeError(f"Unsupported arch: {self.arch}")
     if DEBUG >= 1: print(f"AMDDevice: opening {self.device_id} with target {self.target} arch {self.arch}")
 
-    self.xccs = self.iface.props.get('num_xcc', 1)
+    self.xccs = self.iface.props.get('num_xcc', 8)
     self.se_cnt = self.iface.props['array_count'] // self.iface.props['simd_arrays_per_engine']
     self.max_cu_id = self.iface.props['simd_count'] // self.iface.props['simd_per_cu'] // self.xccs - 1
     self.max_wave_id = (self.iface.props['max_waves_per_simd'] * self.iface.props['simd_per_cu'] - 1) if self.target >= (10,1,0) else \
@@ -914,8 +914,6 @@ class AMDDevice(HCQCompiled):
                       bases={i: tuple(getattr(self.ip_off, f'NBIO_BASE__INST{i}_SEG{s}', 0) for s in range(9)) for i in range(6)})
 
     self.is_aql = getenv("AMD_AQL", int(self.xccs > 1))
-    self.is_aql = False
-    print(self.is_aql)
     if self.is_aql:
       self.pm4_ibs = self.iface.alloc(0x2000 if self.is_usb() else (16 << 20), uncached=True, cpu_access=True)
       self.pm4_ib_alloc = BumpAllocator(self.pm4_ibs.size, wrap=True)
