@@ -100,6 +100,45 @@ VIZ=1 python -c "from tinygrad import Tensor; Tensor.ones(10).sum().realize()"
 - UOp methods like `.replace()` preserve tags unless explicitly changed
 - Use `.rtag(value)` to add tags to UOps
 
+## Lessons Learned
+
+### UOp ucache Behavior
+UOps are cached by their contents - creating a UOp with identical (op, dtype, src, arg) returns the **same object**. This means:
+- `uop.replace(tag=None)` on a tagged UOp returns the original untagged UOp if it exists in cache
+- Two UOps with same structure are identical (`is` comparison works)
+- Be careful when using tags for temporary markers - they may disappear through ucache
+
+### Spec Validation
+When adding new UOp patterns, update `tinygrad/uop/spec.py`. Test with:
+```bash
+SPEC=2 python3 test/unit/test_something.py
+```
+Spec issues appear as `RuntimeError: SPEC ISSUE None: UOp(...)`.
+
+### Schedule Cache Key Normalization
+The schedule cache strips values from BIND nodes so different bound values (e.g., KV cache positions) hit the same cache entry:
+- `pm_pre_sched_cache`: BIND(DEFINE_VAR, CONST) → BIND(DEFINE_VAR) for cache key
+- `pm_post_sched_cache`: restores original BIND from context
+- When accessing `bind.src[1]`, check `len(bind.src) > 1` first (might be stripped)
+- Extract var_vals from `input_buffers` dict after graph_rewrite (avoids extra toposort)
+
+### Avoiding Extra Work
+- Use ctx dict from graph_rewrite to collect info during traversal instead of separate toposort
+- Only extract var_vals when schedule is non-empty (no kernels = no vars needed)
+- PatternMatchers are slow to construct - define at module level, not in functions
+
+### Testing LLM Changes
+```bash
+# Quick smoke test
+echo "Hello" | DEBUG=1 python tinygrad/apps/llm.py --model "llama3.2:1b"
+
+# Check cache hits (should see "cache hit" after warmup)
+echo "Hello world" | DEBUG=1 python tinygrad/apps/llm.py --model "llama3.2:1b" 2>&1 | grep cache
+
+# Test with beam search
+echo "Hello" | BEAM=2 python tinygrad/apps/llm.py --model "llama3.2:1b"
+```
+
 ## Common Patterns
 
 ### Graph Transformation
