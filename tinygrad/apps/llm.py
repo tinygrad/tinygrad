@@ -1,6 +1,7 @@
 from __future__ import annotations
-import sys, argparse, typing, re, unicodedata
-from tinygrad import Tensor, nn, UOp, TinyJit, getenv, helpers
+import sys, argparse, typing, re, unicodedata, json, uuid
+from tinygrad import Tensor, nn, UOp, TinyJit, getenv
+from tinygrad.helpers import partition, TCPServerWithReuse, HTTPRequestHandler, tqdm, DEBUG
 
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int]):
@@ -24,7 +25,7 @@ class SimpleTokenizer:
     # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L1818-L1820
     if kv["tokenizer.ggml.pre"] not in ("llama3","llama-v3","llama-bpe"): raise ValueError(f"Invalid tokenizer preset '{kv['tokenizer.ggml.pre']}'")
     vocab: typing.Iterable[tuple[str, int]] = ((tok, idx) for idx, tok in enumerate(kv["tokenizer.ggml.tokens"]))
-    normal_tokens, special_tokens = helpers.partition(vocab, lambda e: kv["tokenizer.ggml.token_type"][e[1]] == 1)
+    normal_tokens, special_tokens = partition(vocab, lambda e: kv["tokenizer.ggml.token_type"][e[1]] == 1)
     return SimpleTokenizer(dict(normal_tokens), dict(special_tokens))
 
   def _encode_word(self, word:bytes) -> list[int]:
@@ -182,19 +183,23 @@ models = {
 # *** simple OpenAI compatible server on 11434 to match ollama ***
 # OPENAI_BASE_URL=http://localhost:11434/v1 OPENAI_API_KEY=ollama uvx --from gpt-command-line gpt
 
-import json, uuid
-from tinygrad.helpers import TCPServerWithReuse, tqdm, DEBUG
-from http.server import BaseHTTPRequestHandler
-
-class Handler(BaseHTTPRequestHandler):
-  def send(self, cid, obj="", choices=None, **kwargs):
-    ret = {"id":cid, "object":obj, "choices":choices or [], **kwargs}
-    self.wfile.write(f"data: {json.dumps(ret)}\n\n".encode())
-    self.wfile.flush()
+class Handler(HTTPRequestHandler):
+  def run_model(self, ids:list[int], include_usage=False):
+    cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
+    tmpl = {"id":cid, "object":"chat.completion.chunk"}
+    yield {"choices": [{"index":0, "delta":{"role":"assistant","content":""}, "finish_reason":None}], **tmpl}
+    out = []
+    for next_id in tqdm(model.generate(ids), disable=not DEBUG>=1):
+      if next_id == eos_id: break
+      out.append(next_id)
+      yield {"choices": [{"index":0, "delta":{"content":tok.decode([next_id])}, "finish_reason":None}], **tmpl}
+    yield {"choices": [{"index":0, "delta":{},"finish_reason":"stop"}], **tmpl}
+    if include_usage:
+      yield {"choices": [], "usage": {"prompt_tokens": len(ids), "completion_tokens": len(out), "total_tokens": len(ids) + len(out)}}
 
   def do_POST(self):
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
-    body = json.loads(raw_body.decode("utf-8"))
+    body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
     if DEBUG >= 1:
       print(self.path)
       print(json.dumps(body, indent=2))
@@ -205,7 +210,7 @@ class Handler(BaseHTTPRequestHandler):
       ids = [bos_id]
       for msg in body["messages"]:
         ids += tok.role(msg["role"])
-        # it can be a str or a list
+        # content can be a str or a list
         content = msg["content"]
         if isinstance(content, str): ids += tok.encode(content)
         elif isinstance(content, list):
@@ -215,24 +220,8 @@ class Handler(BaseHTTPRequestHandler):
         else: raise RuntimeError(f"unknown content type: {type(content)}")
         ids += tok.role("assistant")
 
-      cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
-      self.send_response(200)
-      self.send_header("Content-Type", "text/event-stream")
-      self.end_headers()
-      self.send(cid, "chat.completion.chunk", [{"index":0, "delta":{"role":"assistant","content":""}, "finish_reason":None}])
-
-      out = []
-      for next_id in tqdm(model.generate(ids), disable=not DEBUG>=1):
-        if next_id == eos_id: break
-        out.append(next_id)
-        self.send(cid, "chat.completion.chunk", [{"index":0, "delta":{"content":tok.decode([next_id])}, "finish_reason":None}])
-      self.send(cid, "chat.completion.chunk", [{"index":0, "delta":{},"finish_reason":"stop"}])
-
-      if body.get("stream_options",{}).get("include_usage"):
-        self.send(cid, "chat.completion.chunk",
-                  usage={"prompt_tokens": len(ids), "completion_tokens": len(out), "total_tokens": len(ids) + len(out)})
-
-      self.wfile.write(b"data: [DONE]\n\n")
+      # stream reply
+      self.stream_json(self.run_model(ids, include_usage=body.get("stream_options",{}).get("include_usage", False)))
     else:
       raise RuntimeError(f"unhandled path {self.path}")
 

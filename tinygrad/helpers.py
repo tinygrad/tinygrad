@@ -1,8 +1,9 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
-import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools, socketserver
+import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools, socketserver, json
 from dataclasses import dataclass, field
 from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload
+from http.server import BaseHTTPRequestHandler
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -410,6 +411,20 @@ class TCPServerWithReuse(socketserver.TCPServer):
   def __init__(self, server_address, RequestHandlerClass):
     print(f"*** starting server on {server_address[1]}")
     super().__init__(server_address, RequestHandlerClass)
+
+class HTTPRequestHandler(BaseHTTPRequestHandler):
+  def stream_json(self, source:Generator):
+    try:
+      self.send_response(200)
+      self.send_header("Content-Type", "text/event-stream")
+      self.send_header("Cache-Control", "no-cache")
+      self.end_headers()
+      for r in source:
+        self.wfile.write(f"data: {json.dumps(r)}\n\n".encode("utf-8"))
+        self.wfile.flush()
+      self.wfile.write("data: [DONE]\n\n".encode("utf-8"))
+    # pass if client closed connection
+    except (BrokenPipeError, ConnectionResetError): return
 
 # *** Exec helpers
 

@@ -3,11 +3,10 @@ import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrow
 import ctypes, pathlib, traceback, itertools
 from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from decimal import Decimal
-from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, TypeVar, Generator, Callable
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
-from tinygrad.helpers import printable, system, TCPServerWithReuse
+from tinygrad.helpers import printable, system, TCPServerWithReuse, HTTPRequestHandler
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, pyrender
 from tinygrad.uop.ops import print_uops, range_start, multirange_str
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device
@@ -426,7 +425,7 @@ def get_render(i:int, j:int, fmt:str) -> dict:
 
 def get_int(query:dict[str, list[str]], k:str) -> int: return int(query.get(k,["0"])[0])
 
-class Handler(BaseHTTPRequestHandler):
+class Handler(HTTPRequestHandler):
   def do_GET(self):
     ret, status_code, content_type = b"", 200, "text/html"
 
@@ -459,19 +458,6 @@ class Handler(BaseHTTPRequestHandler):
     self.send_header('Content-Length', str(len(ret)))
     self.end_headers()
     return self.wfile.write(ret)
-
-  def stream_json(self, source:Generator):
-    try:
-      self.send_response(200)
-      self.send_header("Content-Type", "text/event-stream")
-      self.send_header("Cache-Control", "no-cache")
-      self.end_headers()
-      for r in source:
-        self.wfile.write(f"data: {json.dumps(r)}\n\n".encode("utf-8"))
-        self.wfile.flush()
-      self.wfile.write("data: END\n\n".encode("utf-8"))
-    # pass if client closed connection
-    except (BrokenPipeError, ConnectionResetError): return
 
 # ** main loop
 
