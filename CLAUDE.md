@@ -92,6 +92,12 @@ VIZ=1 python -c "from tinygrad import Tensor; Tensor.ones(10).sum().realize()"
 3. **Trace graph rewrites**: Use `VIZ=1` or add print in PatternMatcher callbacks
 4. **Find UOps by type**: `[u for u in uop.toposort() if u.op is Ops.SOMETHING]`
 
+## Workflow Rules
+
+- **NEVER commit without explicit user approval** - always show the diff and wait for approval
+- Run tests before proposing commits
+- Test with `SPEC=2` when modifying UOp-related code
+
 ## Style Notes
 
 - 2-space indentation, 150 char line limit
@@ -106,7 +112,6 @@ VIZ=1 python -c "from tinygrad import Tensor; Tensor.ones(10).sum().realize()"
 UOps are cached by their contents - creating a UOp with identical (op, dtype, src, arg) returns the **same object**. This means:
 - `uop.replace(tag=None)` on a tagged UOp returns the original untagged UOp if it exists in cache
 - Two UOps with same structure are identical (`is` comparison works)
-- Be careful when using tags for temporary markers - they may disappear through ucache
 
 ### Spec Validation
 When adding new UOp patterns, update `tinygrad/uop/spec.py`. Test with:
