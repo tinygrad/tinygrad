@@ -57,6 +57,12 @@ class TestMultiTensor(unittest.TestCase):
       assert lb.shape == (128,)
     (X + X).realize()
 
+  def test_shard_empty(self):
+    GlobalCounters.reset()
+    X = Tensor.empty(256).shard(devices_2, 0).realize()
+    assert GlobalCounters.kernel_count == 0
+    (X + X).realize()
+
   def _test_shard_op(self, op, out, n=4):
     t = Tensor.ones(n).contiguous().realize().shard(devices_2, 0)
     r = op(t).realize()

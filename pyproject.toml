@@ -73,7 +73,7 @@ testing_unit = ["tinygrad[testing_minimal]", "tqdm", "safetensors", "tabulate"]
 testing = [
   "tinygrad[testing_minimal]",
   "pillow",
-  "onnx==1.18.0",
+  "onnx==1.19.0",
   "onnx2torch",
   "onnxruntime",
   "opencv-python",
