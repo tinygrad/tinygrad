@@ -409,7 +409,7 @@ def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip
 class TCPServerWithReuse(socketserver.TCPServer):
   allow_reuse_address = True
   def __init__(self, server_address, RequestHandlerClass):
-    print(f"*** starting server on {server_address[1]}")
+    print(f"*** started server on http://127.0.0.1:{server_address[1]}")
     super().__init__(server_address, RequestHandlerClass)
 
 class HTTPRequestHandler(BaseHTTPRequestHandler):

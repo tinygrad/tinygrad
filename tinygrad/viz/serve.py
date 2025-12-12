@@ -499,7 +499,6 @@ if __name__ == "__main__":
   server = TCPServerWithReuse(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)
   reloader_thread.start()
-  print(f"*** started viz on {HOST}:{PORT}")
   print(colored(f"*** ready in {(time.perf_counter()-st)*1e3:4.2f}ms", "green"), flush=True)
   if len(getenv("BROWSER", "")) > 0: webbrowser.open(f"{HOST}:{PORT}")
   try: server.serve_forever()
