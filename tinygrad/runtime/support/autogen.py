@@ -27,10 +27,6 @@ def fields(t: clang.CXType) -> list[clang.CXCursor]:
   clang.clang_Type_visitFields(t, visitor, None)
   return ret
 
-def walk(c: clang.CXCursor) -> Iterator[clang.CXCursor]:
-  yield c
-  for child in children(c): yield from walk(child)
-
 def arguments(c: clang.CXCursor|clang.CXType):
   yield from ((clang.clang_Cursor_getArgument if isinstance(c, clang.CXCursor) else clang.clang_getArgType)(c, i)
               for i in range(clang.clang_Cursor_getNumArguments(c) if isinstance(c, clang.CXCursor) else clang.clang_getNumArgTypes(c)))
