@@ -108,7 +108,7 @@ class TLSFAllocator:
 # Memory Managment
 
 @dataclasses.dataclass(frozen=True)
-class VirtMapping: va_addr:int; size:int; paddrs:list[tuple[int, int]]; uncached:bool=False; system:bool=False; snooped:bool=False # noqa: E702
+class VirtMapping: va_addr:int; size:int; paddrs:list[tuple[int, int]]; sva:int=0; uncached:bool=False; system:bool=False; snooped:bool=False # noqa: E702
 
 class PageTableTraverseContext:
   def __init__(self, dev, pt, vaddr, create_pts=False, free_pts=False, boot=False):
@@ -200,10 +200,13 @@ class MemoryManager:
       for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize, paddr=paddr):
         for pte_off in range(pte_cnt):
           assert not pt.valid(pte_idx + pte_off), f"PTE already mapped: {pt.entry(pte_idx + pte_off):#x}"
+          # print(f"Mapping {vaddr + off + pte_off * pte_covers:#x} to {paddr + off + pte_off * pte_covers:#x} size={pte_covers:#x} uncached={uncached} system={system} snooped={snooped} frag={self._frag_size(ctx.vaddr+off, pte_covers)}")
           pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, system=system, snooped=snooped,
-                       frag=self._frag_size(ctx.vaddr+off, pte_cnt * pte_covers), valid=True)
+                      frag=self._frag_size(ctx.vaddr+off, pte_cnt * pte_covers), valid=True)
 
     self.on_range_mapped()
+    # mc_addr = self.dev.paddr2mc(paddrs[0][0])
+    # print('aft mapping', hex(vaddr), hex(paddrs[0][0]), hex(mc_addr))
     return VirtMapping(vaddr, size, paddrs, uncached=uncached, system=system, snooped=snooped)
 
   def unmap_range(self, vaddr:int, size:int):
@@ -226,6 +229,7 @@ class MemoryManager:
     # Alloc physical memory and map it to the virtual address
     va = self.alloc_vaddr(size:=round_up(size, 0x1000), align)
 
+    contiguous = True
     if contiguous: paddrs = [(self.palloc(size, zero=True), size)]
     else:
       # Traverse the PT to find the largest contiguous sizes we need to allocate. Try to allocate the longest segment to reduce TLB pressure.
@@ -243,6 +247,8 @@ class MemoryManager:
           continue
         rem_size -= self.palloc_ranges[nxt_range][0]
 
+    # print(paddrs)
+    # paddrs, size = [(paddrs[0][0], 0x40000000)], 0x40000000
     return self.map_range(va, size, paddrs, uncached=uncached)
 
   def vfree(self, vm:VirtMapping):

@@ -58,7 +58,7 @@ def main():
   with open(sys.argv[2], 'w') as f:
     f.write(processed_log)
 
-if __name__ == '__main__':
+if __name__ == '__main__':  
   if len(sys.argv) != 3:
     print("Usage: <input_file_path> <output_file_path>")
     sys.exit(1)
