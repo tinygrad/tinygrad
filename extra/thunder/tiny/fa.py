@@ -154,6 +154,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       k_reg = ker.rt((KV_BLOCK_SIZE, D), dtypes.bfloat16)
       k_reg_transposed = ker.rt((D, KV_BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
       v_reg = ker.rt((KV_BLOCK_SIZE, D), dtypes.bfloat16, TileLayout.COL)
+      v_reg_transposed = ker.rt((D, KV_BLOCK_SIZE), dtypes.bfloat16)
       att_block = ker.rt((KV_BLOCK_SIZE, Q_BLOCK_SIZE), dtypes.float32, TileLayout.COL)
       att_block_mma = ker.rt((KV_BLOCK_SIZE, Q_BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
       att_block_transposed = ker.rt((Q_BLOCK_SIZE, KV_BLOCK_SIZE), dtypes.bfloat16)
@@ -206,18 +207,18 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
         att_block = att_block.exp2()
 
         dp_block = warp.zero(dp_block.after(kv_idx, att_block))
+        v_reg_transposed = warp.transpose(v_reg_transposed, v_reg)
         dp_block = warp.mma_AtB(dp_block, v_reg, do_reg_transposed)
         dp_block -= delta_vec_reg
         att_block *= dp_block
 
         att_block_mma = warp.copy(att_block_mma.after(att_block), att_block)
-        att_block_transposed = warp.transpose(att_block_transposed.after(att_block), att_block)
-        dq_reg = warp.mma_AB(dq_reg, att_block_transposed, k_reg)
+        dq_reg = warp.mma_AtB(dq_reg, k_reg, att_block_mma)
       dq_reg = ker.endrange()
 
       dq_reg *= (1.0 / math.sqrt(D)) * (1.0 / math.log(2))
-      # dq_reg_transposed = warp.transpose(dq_reg_transposed, dq_reg)
-      dq = warp.store(dq, dq_reg, (batch, q_seq, head, 0), axis=1)
+      dq_reg_transposed = warp.transpose(dq_reg_transposed, dq_reg)
+      dq = warp.store(dq, dq_reg_transposed, (batch, q_seq, head, 0), axis=1)
 
       return ker.finish()
 
