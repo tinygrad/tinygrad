@@ -180,18 +180,28 @@ models = {
 }
 
 # *** simple OpenAI compatible server on 11434 to match ollama ***
+# OPENAI_BASE_URL=http://localhost:11434/v1 OPENAI_API_KEY=ollama uvx --from gpt-command-line gpt
 
-import json
+import json, uuid
 from tinygrad.helpers import TCPServerWithReuse, tqdm, DEBUG
 from http.server import BaseHTTPRequestHandler
 
 class Handler(BaseHTTPRequestHandler):
+  def send(self, cid, obj="", choices=None, **kwargs):
+    ret = {"id":cid, "object":obj, "choices":choices or [], **kwargs}
+    self.wfile.write(f"data: {json.dumps(ret)}\n\n".encode())
+    self.wfile.flush()
+
   def do_POST(self):
-    print(self.path)
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
     body = json.loads(raw_body.decode("utf-8"))
+    if DEBUG >= 1:
+      print(self.path)
+      print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
-      # TODO: fill this in to respond to OpenAI API
+      assert body["stream"], "we only support stream mode"
+
+      # extract tokens
       ids = [bos_id]
       for msg in body["messages"]:
         ids += tok.role(msg["role"])
@@ -204,25 +214,25 @@ class Handler(BaseHTTPRequestHandler):
             else: raise RuntimeError(f"unhandled type: {c['type']}")
         else: raise RuntimeError(f"unknown content type: {type(content)}")
         ids += tok.role("assistant")
-      if DEBUG >= 1: print(f"inp({len(ids):3d}):", tok.decode(ids))
+
+      cid = f"chatcmpl-{uuid.uuid4().hex[:24]}"
+      self.send_response(200)
+      self.send_header("Content-Type", "text/event-stream")
+      self.end_headers()
+      self.send(cid, "chat.completion.chunk", [{"index":0, "delta":{"role":"assistant","content":""}, "finish_reason":None}])
+
       out = []
       for next_id in tqdm(model.generate(ids), disable=not DEBUG>=1):
         if next_id == eos_id: break
         out.append(next_id)
-      if DEBUG >= 1: print(f"out({len(ids):3d}):", tok.decode(out))
+        self.send(cid, "chat.completion.chunk", [{"index":0, "delta":{"content":tok.decode([next_id])}, "finish_reason":None}])
+      self.send(cid, "chat.completion.chunk", [{"index":0, "delta":{},"finish_reason":"stop"}])
 
-      jret = {
-        "choices": [{ "index": 0, "message": {"role": "assistant", "content": tok.decode(out)}}],
-        "usage": {"prompt_tokens": len(ids), "completion_tokens": len(out), "total_tokens": len(ids) + len(out)},
-      }
+      if body.get("stream_options",{}).get("include_usage"):
+        self.send(cid, "chat.completion.chunk",
+                  usage={"prompt_tokens": len(ids), "completion_tokens": len(out), "total_tokens": len(ids) + len(out)})
 
-      # send response
-      ret = json.dumps(jret).encode()
-      self.send_response(200)
-      self.send_header('Content-Type', "application/json")
-      self.send_header('Content-Length', str(len(ret)))
-      self.end_headers()
-      return self.wfile.write(ret)
+      self.wfile.write(b"data: [DONE]\n\n")
     else:
       raise RuntimeError(f"unhandled path {self.path}")
 
