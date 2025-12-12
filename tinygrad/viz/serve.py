@@ -343,7 +343,7 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_
   index = json.dumps({"strings":list(scache), "dtypeSize":dtype_size, "markers":[{"ts":int(e.ts-start_ts), **e.arg} for e in markers]}).encode()
   return struct.pack("<IQII", unwrap(end_ts)-start_ts, max(peaks,default=0), len(index), len(ret))+index+b"".join(ret)
 
-# ** Assembly analyzers
+# ** Assembly static analyzers
 
 def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
   target_args = f"-mtriple={mtriple} -mcpu={mcpu}"
