@@ -384,6 +384,9 @@ hipGPUDirectRDMAWritesOrderingNone = hipGPUDirectRDMAWritesOrdering.define('hipG
 hipGPUDirectRDMAWritesOrderingOwner = hipGPUDirectRDMAWritesOrdering.define('hipGPUDirectRDMAWritesOrderingOwner', 100)
 hipGPUDirectRDMAWritesOrderingAllDevices = hipGPUDirectRDMAWritesOrdering.define('hipGPUDirectRDMAWritesOrderingAllDevices', 200)
 
+try: (hip_init:=dll.hip_init).restype, hip_init.argtypes = hipError_t, []
+except AttributeError: pass
+
 hipDeviceptr_t = ctypes.c_void_p
 hipChannelFormatKind = CEnum(ctypes.c_uint32)
 hipChannelFormatKindSigned = hipChannelFormatKind.define('hipChannelFormatKindSigned', 0)
