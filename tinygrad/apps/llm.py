@@ -1,6 +1,7 @@
 from __future__ import annotations
-import sys, argparse, typing, re, unicodedata
-from tinygrad import Tensor, nn, UOp, TinyJit, getenv, helpers
+import sys, argparse, typing, re, unicodedata, json, uuid
+from tinygrad import Tensor, nn, UOp, TinyJit, getenv
+from tinygrad.helpers import partition, TCPServerWithReuse, HTTPRequestHandler, tqdm, DEBUG
 
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int]):
@@ -24,7 +25,7 @@ class SimpleTokenizer:
     # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L1818-L1820
     if kv["tokenizer.ggml.pre"] not in ("llama3","llama-v3","llama-bpe"): raise ValueError(f"Invalid tokenizer preset '{kv['tokenizer.ggml.pre']}'")
     vocab: typing.Iterable[tuple[str, int]] = ((tok, idx) for idx, tok in enumerate(kv["tokenizer.ggml.tokens"]))
-    normal_tokens, special_tokens = helpers.partition(vocab, lambda e: kv["tokenizer.ggml.token_type"][e[1]] == 1)
+    normal_tokens, special_tokens = partition(vocab, lambda e: kv["tokenizer.ggml.token_type"][e[1]] == 1)
     return SimpleTokenizer(dict(normal_tokens), dict(special_tokens))
 
   def _encode_word(self, word:bytes) -> list[int]:
@@ -139,7 +140,7 @@ class Transformer:
     return (self.forward_jit if getenv("JIT", 1) and tokens.shape[1] == 1 and isinstance(start_pos, UOp) else self.forward)(tokens, start_pos)
 
   @staticmethod
-  def from_gguf(gguf:Tensor, max_context:int|None=None) -> tuple[Transformer, dict]:
+  def from_gguf(gguf:Tensor, max_context:int|None=None, realize=True) -> tuple[Transformer, dict]:
     # TODO: remove the need for copy to default device
     kv, state_dict = nn.state.gguf_load(gguf.to(None))
 
@@ -156,7 +157,8 @@ class Transformer:
                         norm_eps=kv[f'{arch}.attention.layer_norm_rms_epsilon'], vocab_size=len(kv['tokenizer.ggml.tokens']), max_context=max_context)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
-    for s in nn.state.get_parameters(model): s.replace(s.contiguous())
+    for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())
+    if realize: Tensor.realize(*params)
     return model, kv
 
   def generate(self, tokens:list[int], start_pos=0):
@@ -178,10 +180,55 @@ models = {
   "8B": "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf",
 }
 
+# *** simple OpenAI compatible server on 11434 to match ollama ***
+# OPENAI_BASE_URL=http://localhost:11434/v1 OPENAI_API_KEY=ollama uvx --from gpt-command-line gpt
+
+class Handler(HTTPRequestHandler):
+  def run_model(self, ids:list[int], include_usage=False):
+    tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk"}
+    yield {"choices": [{"index":0, "delta":{"role":"assistant","content":""}, "finish_reason":None}], **tmpl}
+    out = []
+    for next_id in tqdm(model.generate(ids), disable=not DEBUG>=1):
+      if next_id == eos_id: break
+      out.append(next_id)
+      yield {"choices": [{"index":0, "delta":{"content":tok.decode([next_id])}, "finish_reason":None}], **tmpl}
+    yield {"choices": [{"index":0, "delta":{},"finish_reason":"stop"}], **tmpl}
+    if include_usage:
+      yield {"choices": [], "usage": {"prompt_tokens": len(ids), "completion_tokens": len(out), "total_tokens": len(ids) + len(out)}}
+
+  def do_POST(self):
+    raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+    body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
+    if DEBUG >= 1:
+      print(self.path)
+      print(json.dumps(body, indent=2))
+    if self.path == "/v1/chat/completions":
+      assert body["stream"], "we only support stream mode"
+
+      # extract tokens
+      ids = [bos_id]
+      for msg in body["messages"]:
+        ids += tok.role(msg["role"])
+        # content can be a str or a list
+        content = msg["content"]
+        if isinstance(content, str): ids += tok.encode(content)
+        elif isinstance(content, list):
+          for c in content:
+            if c["type"] == "text": ids += tok.encode(c["text"])
+            else: raise RuntimeError(f"unhandled type: {c['type']}")
+        else: raise RuntimeError(f"unknown content type: {type(content)}")
+        ids += tok.role("assistant")
+
+      # stream reply
+      self.stream_json(self.run_model(ids, include_usage=body.get("stream_options",{}).get("include_usage", False)))
+    else:
+      raise RuntimeError(f"unhandled path {self.path}")
+
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument("--size", choices=list(models.keys()), default=list(models.keys())[0], help="Model size")
   parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
+  parser.add_argument("--serve", action="store_true", help="Run OpenAI compatible API")
   args = parser.parse_args()
 
   # load the model
@@ -191,6 +238,9 @@ if __name__ == "__main__":
   tok = SimpleTokenizer.from_gguf_kv(kv)
   bos_id: int = kv['tokenizer.ggml.bos_token_id']
   eos_id: int = kv['tokenizer.ggml.eos_token_id']
+
+  # start server
+  if args.serve: TCPServerWithReuse(('', 11434), Handler).serve_forever()
 
   ids: list[int] = [bos_id]
   while 1:
