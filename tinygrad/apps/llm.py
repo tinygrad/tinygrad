@@ -139,7 +139,7 @@ class Transformer:
     return (self.forward_jit if getenv("JIT", 1) and tokens.shape[1] == 1 and isinstance(start_pos, UOp) else self.forward)(tokens, start_pos)
 
   @staticmethod
-  def from_gguf(gguf:Tensor, max_context:int|None=None) -> tuple[Transformer, dict]:
+  def from_gguf(gguf:Tensor, max_context:int|None=None, realize=True) -> tuple[Transformer, dict]:
     # TODO: remove the need for copy to default device
     kv, state_dict = nn.state.gguf_load(gguf.to(None))
 
@@ -156,7 +156,8 @@ class Transformer:
                         norm_eps=kv[f'{arch}.attention.layer_norm_rms_epsilon'], vocab_size=len(kv['tokenizer.ggml.tokens']), max_context=max_context)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
-    for s in nn.state.get_parameters(model): s.replace(s.contiguous())
+    for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())
+    if realize: Tensor.realize(*params)
     return model, kv
 
   def generate(self, tokens:list[int], start_pos=0):
@@ -194,9 +195,14 @@ class Handler(BaseHTTPRequestHandler):
       ids = [bos_id]
       for msg in body["messages"]:
         ids += tok.role(msg["role"])
-        for c in msg["content"]:
-          if c["type"] == "text": ids += tok.encode(c["text"])
-          else: raise RuntimeError(f"unhandled type: {c['type']}")
+        # it can be a str or a list
+        content = msg["content"]
+        if isinstance(content, str): ids += tok.encode(content)
+        elif isinstance(content, list):
+          for c in content:
+            if c["type"] == "text": ids += tok.encode(c["text"])
+            else: raise RuntimeError(f"unhandled type: {c['type']}")
+        else: raise RuntimeError(f"unknown content type: {type(content)}")
         ids += tok.role("assistant")
       if DEBUG >= 1: print(f"inp({len(ids):3d}):", tok.decode(ids))
       out = []
