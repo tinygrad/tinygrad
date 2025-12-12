@@ -21,7 +21,8 @@ def load(name, dll, files, **kwargs):
       if (preprocess:=kwargs.pop('preprocess', None)): preprocess(base)
     files = flatten(sorted(glob.glob(p, recursive=True)) if isinstance(p, str) and '*' in p else [p] for p in files)
     kwargs['epilog'] = (epi(base) if tarball else epi()) if callable(epi:=kwargs.get('epilog', [])) else epi
-    f.write_text(importlib.import_module("tinygrad.runtime.support.autogen").gen(dll, files, **kwargs))
+    try: f.write_text(importlib.import_module("tinygrad.runtime.support.autogen").gen(dll, files, **kwargs))
+    except Exception as e: raise Exception("aaa") from e
   return importlib.import_module(f"{path}.{name.replace('/', '.')}")
 
 def __getattr__(nm):

@@ -215,8 +215,9 @@ def gen(dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, use_e
     aa = ctypes.cast((ctypes.c_char_p * len(args))(*[x.encode() for x in args]), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))) if len(args) else None
     tu = clang.clang_parseTranslationUnit(idx:=clang.clang_createIndex(False, 0), os.fspath(f).encode(), aa, len(args), None, 0,
                                           clang.CXTranslationUnit_DetailedPreprocessingRecord)
-    # FIXME: deep walk is not neccesary...
-    for c in walk(unwrap_cursor(clang.clang_getTranslationUnitCursor(tu))):
+    q = list(children(unwrap_cursor(clang.clang_getTranslationUnitCursor(tu))))[::-1]
+    while q:
+      c = q.pop()
       if loc_file(loc(c)) != str(f) and (not recsym or c.kind not in (clang.CXCursor_FunctionDecl,)): continue
       rollback = lines, types
       try:
@@ -247,6 +248,8 @@ def gen(dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, use_e
           case clang.CXCursor_VarDecl if clang.clang_getCursorLinkage(c) == clang.CXLinkage_External and dll:
             lines.append(f"try: {nm(c)} = {tname(clang.clang_getCursorType(c))}.in_dll(dll, '{nm(c)}')\nexcept (ValueError,AttributeError): pass")
           case clang.CXCursor_ObjCProtocolDecl: proto(c)
+          case clang.CXCursor_Namespace: q.extend(list(children(c))[::-1])
+          case _: print(c.kind)
       except NotImplementedError as e:
         print(f"skipping {nm(c)}: {e}")
         lines, types = rollback
