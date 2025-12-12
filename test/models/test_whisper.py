@@ -16,7 +16,7 @@ TRANSCRIPTION_1 = "Could you please let me out of the box?"
 TEST_FILE_2 = str(pathlib.Path(__file__).parent / "whisper/test2.wav")
 TRANSCRIPTION_2 = "a slightly longer audio file so that we can test batch transcriptions of varying length."
 # TODO this file will possibly not survive long. find another 1-2 minute sound file online to transcribe
-TEST_FILE_3_URL = "https://homepage.ntu.edu.tw/~karchung/miniconversations/mc45.mp3"
+TEST_FILE_3_URL = 'https://homepage.ntu.edu.tw/~karchung/miniconversations/mc45.mp3'
 TRANSCRIPTION_3 = """Just lie back and relax.
 Is the level of pressure about right?
 Yes, it's fine. And I'd like conditioner, please.
@@ -36,7 +36,7 @@ It could have been worse. But you'll notice that I didn't ask her for her card.
 Hmm, yeah.
 Mm, maybe you can try that place over there next time."""
 
-TRANSCRIPTION_3_ALT = "Just lie back and relax. Is the level of pressure about right? Yes, it's fine. And I'd like conditioner please. Sure. I'm going to start the second lathering now. Would you like some Q-tips? How'd you like it cut? I'd like my bangs on the back trimmed, and I'd like the rest to stand out a bit and layered. Where would you like the part? On the left, right about here. Here. Have a look. What do you think? It's fine. Here's a thousand and eighty dollars. It's thirty and t extra for the rants. Here's your change and receipt. Thank you, and please come again. So how do you like it? It could have been worse, but you'll notice that I didn't ask her for her card. Hmm, yeah. Maybe you can try that place over there next time."  # noqa: E501
+TRANSCRIPTION_3_ALT = "Just lie back and relax. Is the level of pressure about right? Yes, it's fine. And I'd like conditioner please. Sure. I'm going to start the second lathering now. Would you like some Q-tips? How'd you like it cut? I'd like my bangs on the back trimmed, and I'd like the rest to stand out a bit and layered. Where would you like the part? On the left, right about here. Here. Have a look. What do you think? It's fine. Here's a thousand and eighty dollars. It's thirty and t extra for the rants. Here's your change and receipt. Thank you, and please come again. So how do you like it? It could have been worse, but you'll notice that I didn't ask her for her card. Hmm, yeah. Maybe you can try that place over there next time." #noqa: E501
 # NOTE: same as TRANSCRIPTION_3 but with minor changes that should only amount to ~0.079 WER difference (see test_wer_same)
 # 'and'     --> 'on'
 # 'thinned' --> 'to stand'
@@ -45,13 +45,11 @@ TRANSCRIPTION_3_ALT = "Just lie back and relax. Is the level of pressure about r
 # 'rinse'   --> 'rants'
 # 'mm'      --> ''
 
-
-def wer_helper(result: str, reference: str) -> float:
+def wer_helper(result: str, reference: str)->float:
   result = metrics.normalize_string(result)
   reference = metrics.normalize_string(reference)
   wer, _, _ = metrics.word_error_rate([result], [reference])
   return wer
-
 
 @unittest.skipIf(Device.DEFAULT in ["CPU"], "slow")
 @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need float16 support")
@@ -72,29 +70,31 @@ class TestWhisper(unittest.TestCase):
     wer = wer_helper(actual, expected)
     if wer > threshold:
       err = f"WER={wer:.3f} > {threshold}"
-      raise AssertionError(err)
+      raise AssertionError(
+        err
+      )
 
   def test_transcribe_file1(self):
-    self.assertEqual(transcribe_file(self.model, self.enc, TEST_FILE_1), TRANSCRIPTION_1)
+    self.assertEqual(transcribe_file(self.model, self.enc, TEST_FILE_1),  TRANSCRIPTION_1)
 
   @unittest.skipIf(CI or (Device.DEFAULT == "CPU" and CPU_LLVM), "too many tests for CI")
   def test_transcribe_file2(self):
-    self.assertEqual(transcribe_file(self.model, self.enc, TEST_FILE_2), TRANSCRIPTION_2)
+    self.assertEqual(transcribe_file(self.model, self.enc, TEST_FILE_2),  TRANSCRIPTION_2)
 
   @unittest.skipIf(CI or (Device.DEFAULT == "CPU" and CPU_LLVM), "too many tests for CI")
   def test_transcribe_batch12(self):
     waveforms = [load_file_waveform(TEST_FILE_1), load_file_waveform(TEST_FILE_2)]
     transcriptions = transcribe_waveform(self.model, self.enc, waveforms)
     self.assertEqual(2, len(transcriptions))
-    self.assertEqual(TRANSCRIPTION_1, transcriptions[0])
-    self.assertEqual(TRANSCRIPTION_2, transcriptions[1])
+    self.assertEqual(TRANSCRIPTION_1,  transcriptions[0])
+    self.assertEqual(TRANSCRIPTION_2,  transcriptions[1])
 
   def test_transcribe_batch21(self):
     waveforms = [load_file_waveform(TEST_FILE_2), load_file_waveform(TEST_FILE_1)]
     transcriptions = transcribe_waveform(self.model, self.enc, waveforms)
     self.assertEqual(2, len(transcriptions))
-    self.assertEqual(TRANSCRIPTION_2, transcriptions[0])
-    self.assertEqual(TRANSCRIPTION_1, transcriptions[1])
+    self.assertEqual(TRANSCRIPTION_2,  transcriptions[0])
+    self.assertEqual(TRANSCRIPTION_1,  transcriptions[1])
 
   @unittest.skip("file 3 url is broken")
   @unittest.skipIf(CI or (Device.DEFAULT == "CPU" and CPU_LLVM), "too long for CI")
@@ -127,7 +127,7 @@ class TestWhisper(unittest.TestCase):
 
   def test_wer_different_3(self):
     reference = TRANSCRIPTION_3
-    self.assertWER(reference[: len(reference) // 2], reference, 0.524)
+    self.assertWER(reference[:len(reference)//2], reference, 0.524)
 
 
 class TestSTFT(unittest.TestCase):
@@ -146,5 +146,5 @@ class TestSTFT(unittest.TestCase):
     np.testing.assert_allclose(result.numpy(), reference, atol=1e-7, rtol=1e-2)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
   unittest.main()
