@@ -1,7 +1,6 @@
 import ctypes, itertools, re, functools, os
 from tinygrad.helpers import flatten, unwrap
 from tinygrad.runtime.autogen import libclang as clang # use REGEN=1 to regenerate libclang bindings
-from typing import Iterator
 
 def unwrap_cursor(c: clang.CXCursor) -> clang.CXCursor:
   assert c != clang.clang_getNullCursor()
@@ -34,10 +33,6 @@ def all_fields(t, kind):
         clang.clang_getTypeDeclaration(clang.clang_getCursorType(f)).kind == kind):
       yield from all_fields(clang.clang_getCursorType(f), kind)
     else: yield f
-
-def walk(c: clang.CXCursor) -> Iterator[clang.CXCursor]:
-  yield c
-  for child in children(c): yield from walk(child)
 
 def arguments(c: clang.CXCursor|clang.CXType):
   yield from ((clang.clang_Cursor_getArgument if isinstance(c, clang.CXCursor) else clang.clang_getArgType)(c, i)
