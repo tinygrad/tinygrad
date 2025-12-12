@@ -1,7 +1,6 @@
 import ctypes, itertools, re, functools, os
 from tinygrad.helpers import flatten, unwrap
 from tinygrad.runtime.autogen import libclang as clang # use REGEN=1 to regenerate libclang bindings
-from typing import Iterator
 
 def unwrap_cursor(c: clang.CXCursor) -> clang.CXCursor:
   assert c != clang.clang_getNullCursor()
@@ -34,10 +33,6 @@ def all_fields(t, kind):
         clang.clang_getTypeDeclaration(clang.clang_getCursorType(f)).kind == kind):
       yield from all_fields(clang.clang_getCursorType(f), kind)
     else: yield f
-
-def walk(c: clang.CXCursor) -> Iterator[clang.CXCursor]:
-  yield c
-  for child in children(c): yield from walk(child)
 
 def arguments(c: clang.CXCursor|clang.CXType):
   yield from ((clang.clang_Cursor_getArgument if isinstance(c, clang.CXCursor) else clang.clang_getArgType)(c, i)
@@ -223,8 +218,9 @@ def gen(dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, use_e
     aa = ctypes.cast((ctypes.c_char_p * len(args))(*[x.encode() for x in args]), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))) if len(args) else None
     tu = clang.clang_parseTranslationUnit(idx:=clang.clang_createIndex(False, 0), os.fspath(f).encode(), aa, len(args), None, 0,
                                           clang.CXTranslationUnit_DetailedPreprocessingRecord)
-    # FIXME: deep walk is not neccesary...
-    for c in walk(unwrap_cursor(clang.clang_getTranslationUnitCursor(tu))):
+    q = list(children(unwrap_cursor(clang.clang_getTranslationUnitCursor(tu))))[::-1]
+    while q:
+      c = q.pop()
       if loc_file(loc(c)) != str(f) and (not recsym or c.kind not in (clang.CXCursor_FunctionDecl,)): continue
       rollback = lines, types
       try:
@@ -255,6 +251,7 @@ def gen(dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, use_e
           case clang.CXCursor_VarDecl if clang.clang_getCursorLinkage(c) == clang.CXLinkage_External and dll:
             lines.append(f"try: {nm(c)} = {tname(clang.clang_getCursorType(c))}.in_dll(dll, '{nm(c)}')\nexcept (ValueError,AttributeError): pass")
           case clang.CXCursor_ObjCProtocolDecl: proto(c)
+          case clang.CXCursor_Namespace | clang.CXCursor_LinkageSpec: q.extend(list(children(c))[::-1])
       except NotImplementedError as e:
         print(f"skipping {nm(c)}: {e}")
         lines, types = rollback
