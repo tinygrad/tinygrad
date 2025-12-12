@@ -40,7 +40,7 @@ class TestPMC(unittest.TestCase):
     b = Tensor.custom_kernel(b, a, fxn=functools.partial(copy_kernel, stride=stride))[0]
     with save_pmc() as pmc:
       b.realize()
-    print_pmc(pmc[0])
+    print_pmc(pmc)
     np.testing.assert_equal(a.numpy(), b.numpy())
 
   def test_copy_uncoalesced(self): return self.test_copy(stride=17)
