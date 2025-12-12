@@ -482,11 +482,11 @@ class AM_SDMA(AM_IP):
     # self.adev.soc.doorbell_enable(port=2, awid=0xe, awaddr_31_28_value=0x3, offset=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0, size=4)
 
   def fini_hw(self):
-    self.adev.regSDMA0_QUEUE0_RB_CNTL.update(rb_enable=0)
-    self.adev.regSDMA0_QUEUE0_IB_CNTL.update(ib_enable=0)
-    self.adev.regGRBM_SOFT_RESET.write(soft_reset_sdma0=1)
-    time.sleep(0.01)
-    self.adev.regGRBM_SOFT_RESET.write(0x0)
+    self.adev.regSDMA_GFX_RB_CNTL.update(rb_enable=0)
+    self.adev.regSDMA_GFX_IB_CNTL.update(ib_enable=0)
+    # self.adev.regGRBM_SOFT_RESET.write(soft_reset_sdma0=1)
+    # time.sleep(0.01)
+    # self.adev.regGRBM_SOFT_RESET.write(0x0)
 
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, doorbell:int, pipe:int, queue:int):
     # Setup the ring

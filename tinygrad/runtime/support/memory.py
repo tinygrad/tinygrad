@@ -126,7 +126,7 @@ class PageTableTraverseContext:
       assert self.create_pts, "Not allowed to create new page table"
       pt.set_entry(pte_idx, self.dev.mm.palloc(0x1000, zero=True, boot=self.boot, ptable=True), table=True, valid=True)
 
-    # assert not pt.is_page(pte_idx), f"Must be table pt={pt.paddr:#x}, {pt.lv=} {pte_idx=} {pt.read_fields(pte_idx)}"
+    assert not pt.is_page(pte_idx), f"Must be table pt={pt.paddr:#x}, {pt.lv=} {pte_idx=} {pt.read_fields(pte_idx)}"
     child_page_table = self.dev.mm.pt_t(self.dev, pt.address(pte_idx), lv=pt.lv+1)
 
     self.pt_stack.append((child_page_table, self._pt_pte_idx(child_page_table, self.vaddr), self._pt_pte_size(child_page_table)))
@@ -200,7 +200,7 @@ class MemoryManager:
       for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize, paddr=paddr):
         for pte_off in range(pte_cnt):
           assert not pt.valid(pte_idx + pte_off), f"PTE already mapped: {pt.entry(pte_idx + pte_off):#x}"
-          print(f"Mapping {vaddr + off + pte_off * pte_covers:#x} to {paddr + off + pte_off * pte_covers:#x} size={pte_covers:#x} uncached={uncached} system={system} snooped={snooped} frag={self._frag_size(ctx.vaddr+off, pte_covers)}")
+          # print(f"Mapping {vaddr + off + pte_off * pte_covers:#x} to {paddr + off + pte_off * pte_covers:#x} size={pte_covers:#x} uncached={uncached} system={system} snooped={snooped} frag={self._frag_size(ctx.vaddr+off, pte_covers)}")
           pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, system=system, snooped=snooped,
                       frag=self._frag_size(ctx.vaddr+off, pte_cnt * pte_covers), valid=True)
 
@@ -223,7 +223,7 @@ class MemoryManager:
   @classmethod
   def alloc_vaddr(cls, size:int, align=0x1000) -> int:
     assert cls.va_allocator is not None, "must be set it"
-    return cls.va_allocator.alloc(size, max((1 << (size.bit_length() - 1)), 0x40000000))
+    return cls.va_allocator.alloc(size, max((1 << (size.bit_length() - 1)), align))
 
   def valloc(self, size:int, align=0x1000, uncached=False, contiguous=False) -> VirtMapping:
     # Alloc physical memory and map it to the virtual address
