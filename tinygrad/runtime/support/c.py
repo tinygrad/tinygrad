@@ -39,7 +39,7 @@ def CEnum(typ: type[ctypes._SimpleCData]):
 
 class DLL(ctypes.CDLL):
   @staticmethod
-  def findlib(nm:str, paths:list[str]) -> str|None:
+  def findlib(nm:str, paths:list[str]):
     if pathlib.Path(path:=getenv(nm.replace('-', '_').upper()+"_PATH", '')).is_file(): return path
     for p in paths:
       libpaths = {"posix": ["/usr/lib", "/usr/local/lib"], "nt": os.environ['PATH'].split(os.pathsep),
@@ -52,7 +52,7 @@ class DLL(ctypes.CDLL):
         if not pre.is_dir(): continue
         if WIN or OSX:
           for base in ([f"lib{p}.dylib", f"{p}.dylib", p] if OSX else [f"{p}.dll"]):
-            if (f:=pre / base).is_file(): return str(f)
+            if (l:=pre / base).is_file(): return str(l)
         else:
           for l in (l for l in pre.iterdir() if l.is_file() and re.fullmatch(f"lib{p}\\.so\\.?[0-9]*", l.name)):
             # filter out linker scripts
