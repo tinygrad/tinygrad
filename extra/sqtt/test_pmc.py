@@ -22,7 +22,6 @@ def copy_kernel(B, A, stride=1):
   index = (i * stride) % A.size
   return B[index].store(A[index]).sink(arg=KernelInfo(name=f"copy_{A.size}_stride_{stride}", opts_to_apply=()))
 
-
 def lds_kernel(offset:UOp, size:int, inst:int) -> UOp:
   tid = UOp.range(offset.size, 0, AxisType.LOCAL)
   dst = UOp.placeholder((size,), dtypes.float32, 1, AddrSpace.REG)
