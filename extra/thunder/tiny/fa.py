@@ -223,7 +223,100 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       return ker.finish()
 
   def custom_backward_kv(out_ku:UOp, out_vu:UOp, gradu:UOp, qu:UOp, ku:UOp, vu:UOp, masku:UOp, l_vecu:UOp, delta_vecu:UOp) -> UOp:
-    return UOp.sink(arg=KernelInfo(name="fa_custom_backward_kv"))
+    with Kernel("fa_custom_backward_kv", (H_KV, N // (KV_BLOCK_SIZE*NUM_WORKERS), B), NUM_WORKERS * WARP_THREADS) as ker:
+      warp = ker.warp
+
+      dk, dv, do, q, k, v, mask = GL(out_ku, ker), GL(out_vu, ker), GL(gradu, ker), GL(qu, ker), GL(ku, ker), GL(vu, ker), GL(masku, ker)
+      l_vec, delta_vec = GL(l_vecu, ker), GL(delta_vecu, ker)
+
+      head_kv = ker.blockIdx_x
+      batch = ker.blockIdx_z
+      kv_seq = ker.blockIdx_y * NUM_WORKERS + ker.warpid
+
+      dk_reg = ker.rt((D, KV_BLOCK_SIZE), dtypes.float32, TileLayout.COL)
+      dv_reg = ker.rt((D, KV_BLOCK_SIZE), dtypes.float32, TileLayout.COL)
+
+      k_reg = ker.rt((KV_BLOCK_SIZE, D), dtypes.bfloat16)
+      v_reg = ker.rt((KV_BLOCK_SIZE, D), dtypes.bfloat16)
+      k_reg_transposed = ker.rt((D, KV_BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
+
+      q_reg = ker.rt((Q_BLOCK_SIZE, D), dtypes.bfloat16)
+      q_reg_transposed = ker.rt((D, Q_BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
+
+      do_reg = ker.rt((Q_BLOCK_SIZE, D), dtypes.bfloat16)
+      do_reg_transposed = ker.rt((D, Q_BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
+
+      att_block = ker.rt((KV_BLOCK_SIZE, Q_BLOCK_SIZE), dtypes.float32, TileLayout.COL)
+      att_block_mma = ker.rt((KV_BLOCK_SIZE, Q_BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
+      dp_block = ker.rt((KV_BLOCK_SIZE, Q_BLOCK_SIZE), dtypes.float32, TileLayout.COL)
+
+      l_vec_reg = ker.rv(Q_BLOCK_SIZE, dtypes.float32)
+      delta_vec_reg = ker.rv(Q_BLOCK_SIZE, dtypes.float32)
+
+      mask_reg = ker.rt((Q_BLOCK_SIZE, KV_BLOCK_SIZE), dtypes.float32)
+      mask_reg_transposed = ker.rt((KV_BLOCK_SIZE, Q_BLOCK_SIZE), dtypes.float32, TileLayout.COL)
+
+      dk_reg = warp.zero(dk_reg)
+      dv_reg = warp.zero(dv_reg)
+
+      k_reg = warp.load(k_reg, k, (), (batch, kv_seq, head_kv, 0), axis=1)
+      v_reg = warp.load(v_reg, v, (), (batch, kv_seq, head_kv, 0), axis=1)
+
+      k_reg_transposed = warp.transpose(k_reg_transposed, k_reg)
+
+      for g in range(GROUP_SIZE):
+        head = head_kv * GROUP_SIZE + g
+
+        for q_idx in ker.range(N // Q_BLOCK_SIZE):
+          q_reg_fl = ker.rt((Q_BLOCK_SIZE, D), dtypes.float32)
+          q_reg_fl = warp.load(q_reg_fl, q, (), (batch, q_idx, head, 0), axis=1)
+          q_reg_fl *= (1.0 / math.sqrt(D)) * (1.0 / math.log(2))
+          q_reg = warp.copy(q_reg, q_reg_fl)
+          q_reg_transposed = warp.transpose(q_reg_transposed, q_reg)
+
+          do_reg = warp.load(do_reg, do, (), (batch, q_idx, head, 0), axis=1)
+          do_reg_transposed = warp.transpose(do_reg_transposed, do_reg)
+
+          l_vec_reg = warp.load(l_vec_reg, l_vec, (), (batch, head, 0, q_idx), axis=2)
+          l_vec_reg /= math.log(2)
+          delta_vec_reg = warp.load(delta_vec_reg, delta_vec, (), (batch, head, 0, q_idx), axis=2)
+
+          att_block = warp.zero(att_block.after(q_idx))
+          att_block = warp.mma_AtB(att_block, k_reg_transposed, q_reg_transposed)
+
+          mask_reg = warp.load(mask_reg, mask, (), (batch, 0, q_idx, kv_seq), axis=2)
+          mask_reg_transposed = warp.transpose(mask_reg_transposed, mask_reg)
+          att_block += mask_reg_transposed
+
+          att_block -= l_vec_reg
+          att_block = att_block.exp2()
+
+          att_block_mma = warp.copy(att_block_mma.after(att_block), att_block)
+          dv_reg = warp.mma_ABt(dv_reg, do_reg_transposed, att_block_mma)
+
+          dp_block = warp.zero(dp_block.after(att_block))
+          dp_block = warp.mma_AB(dp_block, v_reg, do_reg_transposed)
+
+          dp_block -= delta_vec_reg
+          att_block *= dp_block
+
+          att_block_mma = warp.copy(att_block_mma.after(dv_reg, att_block), att_block)
+          dk_reg = warp.mma_ABt(dk_reg, q_reg_transposed, att_block_mma)
+      dk_reg = ker.endrange()
+      dv_reg = dv_reg.after(dk_reg)
+
+      dk_reg *= (1.0 / math.sqrt(D)) * (1.0 / math.log(2))
+
+      dk_reg_transposed = ker.rt((KV_BLOCK_SIZE, D), dtypes.float32)
+      dv_reg_transposed = ker.rt((KV_BLOCK_SIZE, D), dtypes.float32)
+
+      dk_reg_transposed = warp.transpose(dk_reg_transposed, dk_reg)
+      dv_reg_transposed = warp.transpose(dv_reg_transposed, dv_reg)
+
+      dk = warp.store(dk, dk_reg_transposed, (batch, kv_seq, head_kv, 0), axis=1)
+      dv = warp.store(dv, dv_reg_transposed, (batch, kv_seq, head_kv, 0), axis=1)
+
+      return ker.finish()
 
   if is_causal:
     if attn_mask is not None: raise RuntimeError("cannot set attn_mask when is_causal=True")
