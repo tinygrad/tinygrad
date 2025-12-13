@@ -59,6 +59,7 @@ class GraphRewriteDetails(TypedDict):
 def shape_to_str(s:tuple[sint, ...]): return "(" + ','.join(srender(x) for x in s) + ")"
 def mask_to_str(s:tuple[tuple[sint, sint], ...]): return "(" + ','.join(shape_to_str(x) for x in s) + ")"
 def pystr(u:UOp) -> str:
+   # pyrender may check for shape mismatch
   try: return pyrender(u)
   except Exception: return str(u)
 
