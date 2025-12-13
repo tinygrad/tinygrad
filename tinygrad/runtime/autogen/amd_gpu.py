@@ -1,7 +1,6 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import unwrap
-from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG(Struct): pass
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_HEADER_UNION(ctypes.Union): pass
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_HEADER_UNION_0(Struct): pass
