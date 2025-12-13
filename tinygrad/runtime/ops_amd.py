@@ -944,7 +944,7 @@ class AMDDevice(HCQCompiled):
       self.pmc_counters = import_pmc(self.target)
 
       # validate counters
-      pmc_default = "TCC_HIT,TCC_MISS,SQ_LDS_BANK_CONFLICT" if self.target[0] == 9 else "GL2C_HIT,GL2C_MISS,SQC_LDS_IDX_ACTIVE,SQC_LDS_BANK_CONFLICT"
+      pmc_default = "TCC_HIT,TCC_MISS,SQ_LDS_IDX_ACTIVE,SQ_LDS_BANK_CONFLICT" if self.target[0] == 9 else "GL2C_HIT,GL2C_MISS,SQC_LDS_IDX_ACTIVE,SQC_LDS_BANK_CONFLICT"
       for k in (PMC_COUNTERS:=getenv("PMC_COUNTERS", pmc_default).split(",")):
         if k not in self.pmc_counters: raise RuntimeError(f"PMC counter {k} is not supported. Available: {','.join(self.pmc_counters.keys())}")
 
