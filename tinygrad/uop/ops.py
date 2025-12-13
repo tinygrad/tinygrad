@@ -158,7 +158,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   @property
   def backward_slice_with_self(self:UOp) -> dict[UOp, None]: return {self:None, **self.backward_slice}
-  def op_in_backward_slice_with_self(self, *ops:Ops): return any(x.op in ops for x in self.backward_slice_with_self)
+  def op_in_backward_slice_with_self(self, *ops:Ops) -> bool:
+    # Check self first, then iterate backward_slice (avoids creating intermediate dict)
+    return self.op in ops or any(x.op in ops for x in self.backward_slice)
 
   def toposort(self, gate:Callable|None=None) -> dict[UOp, None]:
     cache: dict[UOp, None] = {}
@@ -340,7 +342,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   # *** uop evaluation ***
 
   def simplify(self, tracked=False):
-    if self.op in {Ops.CONST, Ops.VCONST}: return self
     # late import!
     from tinygrad.uop.symbolic import symbolic
     with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
@@ -1192,22 +1193,17 @@ class BottomUpGate(Exception): pass
 class RewriteContext:
   def __init__(self, pm, bpm, ctx=None):
     self.pm: PatternMatcher|None = pm
+    self.pm_cache: dict[UOp, UOp|None] = {}
     self.bpm: PatternMatcher|None = bpm
     self.bpm_cache: dict[UOp, UOp|None] = {}
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
 
-  # pm_rewrite is guaranteed to be called at most once per UOp:
-  # - each original node n maps to one new_n after bottom-up rewriting
-  # - stage 1 only processes n once (checked via n in self.replace before calling pm_rewrite)
-  # - even with spinning (appendleft), we skip if n in self.replace
-  # correctness depends on this guarantee since ctx may be mutated between calls
-  def pm_rewrite(self, x:UOp) -> UOp|None:
-    return unwrap(self.pm).rewrite(x, self.ctx)
+  def cached_pm_rewrite(self, x:UOp) -> UOp|None:
+    if (ret:=self.pm_cache.get(x,SENTINEL)) is not SENTINEL: return ret
+    ret = self.pm_cache[x] = unwrap(self.pm).rewrite(x, self.ctx)
+    return ret
 
-  # bpm_rewrite can see the same UOp multiple times across different nodes:
-  # - bottom-up rewriting of different original nodes may produce identical intermediate UOps
-  # - the cache is shared across all nodes, so the second occurrence hits the cache
   def cached_bpm_rewrite(self, x:UOp) -> UOp|None:
     if (ret:=self.bpm_cache.get(x,SENTINEL)) is not SENTINEL: return ret
     ret = self.bpm_cache[x] = unwrap(self.bpm).rewrite(x, self.ctx)
@@ -1253,7 +1249,7 @@ class RewriteContext:
           # in stage 1, once all srcs are rewritten, rebuild (if changed) or run top-down rewrite
           if (new_src:=tuple(tmp)) == new_n.src:
             # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node so we add it to the dict
-            if self.pm is None or (new_src_n:=self.pm_rewrite(new_n)) is None:
+            if self.pm is None or (new_src_n:=self.cached_pm_rewrite(new_n)) is None:
               self.replace[n] = new_n
               continue
           else:
