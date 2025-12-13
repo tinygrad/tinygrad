@@ -155,7 +155,7 @@ class AM_SMU(AM_IP):
     self._send_msg(self.smu_mod.PPSMC_MSG_EnableAllSmuFeatures, 0)
 
   def is_smu_alive(self):
-    with contextlib.suppress(RuntimeError): self._send_msg(self.smu_mod.PPSMC_MSG_GetSmuVersion, 0, timeout=100)
+    with contextlib.suppress(TimeoutError): self._send_msg(self.smu_mod.PPSMC_MSG_GetSmuVersion, 0, timeout=100)
     return self.adev.mmMP1_SMN_C2PMSG_90.read() != 0
 
   def mode1_reset(self):
@@ -233,7 +233,7 @@ class AM_GFX(AM_IP):
 
   def fini_hw(self):
     self._grbm_select(me=1, pipe=0, queue=0)
-    self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2) # 1 - DRAIN_PIPE; 2 - RESET_WAVES
+    if self.adev.regCP_HQD_ACTIVE.read() & 1: self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2) # 1 - DRAIN_PIPE; 2 - RESET_WAVES
     self._grbm_select()
     self.adev.regGCVM_CONTEXT0_CNTL.write(0)
 
