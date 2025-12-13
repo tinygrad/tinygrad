@@ -1,4 +1,4 @@
-import ctypes, functools, itertools, os, pathlib, re, sys, sysconfig
+import ctypes, functools, os, pathlib, re, sys, sysconfig
 from typing import TYPE_CHECKING
 from tinygrad.helpers import flatten, getenv, DEBUG, OSX, WIN
 from _ctypes import _SimpleCData
@@ -40,7 +40,7 @@ def CEnum(typ: type[ctypes._SimpleCData]):
 class DLL(ctypes.CDLL):
   @staticmethod
   def findlib(nm:str, paths:list[str]) -> str|None:
-    if pathlib.Path(path:=getenv(env:=nm.replace('-', '_').upper()+"_PATH", '')).is_file(): return path
+    if pathlib.Path(path:=getenv(nm.replace('-', '_').upper()+"_PATH", '')).is_file(): return path
     for p in paths:
       libpaths = {"posix": ["/usr/lib", "/usr/local/lib"], "nt": os.environ['PATH'].split(os.pathsep),
                   "darwin": ["/opt/homebrew/lib", f"/System/Library/Frameworks/{p}.framework"],

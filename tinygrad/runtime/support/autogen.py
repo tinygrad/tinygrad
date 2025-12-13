@@ -1,5 +1,5 @@
 import ctypes, itertools, re, functools, os
-from tinygrad.helpers import flatten, unwrap
+from tinygrad.helpers import unwrap
 from tinygrad.runtime.autogen import libclang as clang # use REGEN=1 to regenerate libclang bindings
 
 def unwrap_cursor(c: clang.CXCursor) -> clang.CXCursor:
