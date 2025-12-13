@@ -85,7 +85,7 @@ def __getattr__(nm):
     # could add rule: WGPU_COMMA -> ','
     case "webgpu": return load("webgpu", webgpu_lib, [root/"extra/webgpu/webgpu.h"],
                                prolog=["from tinygrad.helpers import WIN, OSX", "import sysconfig, os"])
-    case "libusb": return load("libusb", "os.getenv('LIBUSB_PATH', 'usb-1.0')", ["/usr/include/libusb-1.0/libusb.h"], prolog=["import os"])
+    case "libusb": return load("libusb", "'usb-1.0'", ["/usr/include/libusb-1.0/libusb.h"])
     case "hip": return load("hip", "os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libamdhip64.so'", ["/opt/rocm/include/hip/hip_ext.h",
                             "/opt/rocm/include/hip/hiprtc.h", "/opt/rocm/include/hip/hip_runtime_api.h", "/opt/rocm/include/hip/driver_types.h"],
                             args=["-D__HIP_PLATFORM_AMD__", "-I/opt/rocm/include", "-x", "c++"], prolog=["import os"])
