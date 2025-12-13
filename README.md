@@ -185,7 +185,7 @@ Now, what we want:
 
 ### Running tests
 
-You should install the pre-commit hooks with `pre-commit install`. This will run the linter, mypy, and a subset of the tests on every commit.
+You should install the pre-commit hooks with `pip install -e '.[linting]'` and `pre-commit install`. This will run the linter, mypy, and a subset of the tests on every commit.
 
 For more examples on how to run the full test suite please refer to the [CI workflow](.github/workflows/test.yml).
 
