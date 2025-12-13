@@ -128,3 +128,17 @@ var, val = bind_uop.unbind()
 # Shapes can be symbolic (contain UOps)
 shape = tensor.shape  # tuple[sint, ...] where sint = int | UOp
 ```
+
+## Performance Optimization
+
+When optimizing tinygrad internals:
+
+1. **Measure wall time, not just call counts** - Reducing `graph_rewrite` calls doesn't always improve wall time. The overhead of conditional checks can exceed the cost of the operation being skipped.
+
+2. **Profile each optimization individually** - Run benchmarks with and without each change to measure actual impact. Use `test/external/external_benchmark_schedule.py` for schedule/rewrite timing.
+
+3. **Early exits in hot paths are effective** - Simple checks like `if self.op is Ops.CONST: return self` in `simplify()` can eliminate many unnecessary `graph_rewrite` calls.
+
+4. **`graph_rewrite` is expensive** - Each call has overhead even for small graphs. Avoid calling it when the result is trivially known (e.g., simplifying a CONST returns itself).
+
+5. **Beware iterator overhead** - Checks like `all(x.op is Ops.CONST for x in self.src)` can be slower than just running the operation, especially for small sequences.
