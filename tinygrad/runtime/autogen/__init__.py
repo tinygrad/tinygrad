@@ -11,7 +11,7 @@ macossdk = "/var/db/xcode_select_link/Platforms/MacOSX.platform/Developer/SDKs/M
 llvm_lib = (r"'C:\\Program Files\\LLVM\\bin\\LLVM-C.dll' if WIN else '/opt/homebrew/opt/llvm@20/lib/libLLVM.dylib' if OSX else " +
             repr(['LLVM'] + [f'LLVM-{i}' for i in reversed(range(14, 21+1))]))
 
-webgpu_lib = "os.path.join(sysconfig.get_paths()['purelib'], 'pydawn') if WIN else 'webgpu_dawn'"
+webgpu_lib = "os.path.join(sysconfig.get_paths()['purelib'], 'pydawn', 'lib', 'libwebgpu_dawn.dll') if WIN else 'webgpu_dawn'"
 
 def load(name, dll, files, **kwargs):
   if not (f:=(root/(path:=kwargs.pop("path", __name__)).replace('.','/')/f"{name}.py")).exists() or getenv('REGEN'):
