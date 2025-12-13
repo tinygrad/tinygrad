@@ -142,3 +142,5 @@ When optimizing tinygrad internals:
 4. **`graph_rewrite` is expensive** - Each call has overhead even for small graphs. Avoid calling it when the result is trivially known (e.g., simplifying a CONST returns itself).
 
 5. **Beware iterator overhead** - Checks like `all(x.op is Ops.CONST for x in self.src)` can be slower than just running the operation, especially for small sequences.
+
+6. **Verify cache hit rates before adding/keeping caches** - Measure actual hit rates with real workloads. A cache with 0% hit rate is pure overhead (e.g., `pm_cache` was removed because the algorithm guarantees each UOp is only passed to `pm_rewrite` once).
