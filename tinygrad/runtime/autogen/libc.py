@@ -1,14 +1,7 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import unwrap
-from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-from ctypes.util import find_library
-def dll():
-  try: return ctypes.CDLL(unwrap(find_library('c')), use_errno=True)
-  except: pass
-  return None
-dll = dll()
-
+from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+dll = DLL('libc', 'c', use_errno=True)
 off_t = ctypes.c_int64
 mode_t = ctypes.c_uint32
 size_t = ctypes.c_uint64

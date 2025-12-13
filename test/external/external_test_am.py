@@ -32,6 +32,8 @@ class FakeAM:
     self.ip_ver = {am.GC_HWIP: (11, 0, 0)}
   def paddr2cpu(self, paddr:int) -> int: return paddr + mv_address(self.vram)
   def paddr2mc(self, paddr:int) -> int: return paddr
+  def paddr2xgmi(self, paddr:int) -> int: return paddr
+  def xgmi2paddr(self, xgmi_paddr:int) -> int: return xgmi_paddr
 
 #  * PTE format:
 #  * 63:59 reserved

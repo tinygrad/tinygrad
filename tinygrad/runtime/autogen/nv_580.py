@@ -1,7 +1,6 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import unwrap
-from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
 _anonenum0 = CEnum(ctypes.c_uint32)
 AES128_NONE = _anonenum0.define('AES128_NONE', 0)
 AES128_CTR = _anonenum0.define('AES128_CTR', 1)

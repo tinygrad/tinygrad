@@ -1,5 +1,4 @@
 import ctypes, pathlib, argparse, pickle, re, functools, dataclasses, itertools, threading
-from tabulate import tabulate
 from typing import Generator
 from tinygrad.helpers import temp, unwrap, DEBUG
 from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileProgramEvent
@@ -161,6 +160,7 @@ def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
 
 def print_pmc(events:list[ProfilePMCEvent]) -> None:
   from tinygrad.viz.serve import unpack_pmc
+  from tabulate import tabulate
   for e in events:
     print("**", e.kern)
     data = unpack_pmc(e)

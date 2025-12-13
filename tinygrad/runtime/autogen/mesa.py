@@ -1,24 +1,8 @@
 # mypy: ignore-errors
-import ctypes, os
-from tinygrad.helpers import unwrap
-from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+import ctypes
+from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
 import gzip, base64
-from tinygrad.helpers import OSX
-from ctypes.util import find_library
-def dll():
-  try: return ctypes.CDLL(unwrap(find_library('tinymesa_cpu')))
-  except: pass
-  try: return ctypes.CDLL(unwrap((BASE:=os.getenv('MESA_PATH', f"/usr{'/local/' if OSX else '/'}lib"))+'/libtinymesa_cpu'+(EXT:='.dylib' if OSX else '.so')))
-  except: pass
-  try: return ctypes.CDLL(unwrap(f'{BASE}/libtinymesa{EXT}'))
-  except: pass
-  try: return ctypes.CDLL(unwrap('/opt/homebrew/lib/libtinymesa_cpu.dylib'))
-  except: pass
-  try: return ctypes.CDLL(unwrap('/opt/homebrew/lib/libtinymesa.dylib'))
-  except: pass
-  return None
-dll = dll()
-
+dll = DLL('mesa', ['tinymesa_cpu', 'tinymesa'])
 class struct_u_printf_info(Struct): pass
 u_printf_info = struct_u_printf_info
 uint32_t = ctypes.c_uint32
