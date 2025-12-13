@@ -25,15 +25,6 @@ def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
 invalid_pat = UPat(Ops.CONST, arg=Invalid, name="i")
 invalid_gate = UPat.var("cond").where(UPat.var("x"), invalid_pat)
 
-def where_fold_with_cond_sub(cond:UOp, t:UOp, f:UOp) -> UOp|None:
-  if cond not in t.toposort() and cond not in f.toposort(): return None
-  true_val = tuple([True]*cond.dtype.count) if cond.dtype.count > 1 else True
-  false_val = tuple([False]*cond.dtype.count) if cond.dtype.count > 1 else False
-  new_t = t.substitute({cond: cond.const_like(true_val)}).simplify()
-  new_f = f.substitute({cond: cond.const_like(false_val)}).simplify()
-  if new_t is not t or new_f is not f: return cond.where(new_t, new_f)
-  return None
-
 # this needs to be before symbolic so that 0*something_that_might_be_invalid doesnt become 0
 propagate_invalid = PatternMatcher([
   # propagate invalid, push it past children
@@ -123,13 +114,6 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
   # a.where(b.where(c, d), d) -> (a & b).where(c, d)
   (UPat.var("a").where(UPat.var("b").where(UPat.var("c"), UPat.var("d")), UPat.var("d")), lambda a,b,c,d: (a&b).where(c,d)),
-  # specific where folding to avoid overhead on simple cases
-  (UPat.var("cond").where(UPat.var("cond").where(UPat.var(), UPat.var()).named("t"), UPat.var("f")), where_fold_with_cond_sub),
-  (UPat.var("cond").where(UPat.var("t"), UPat.var("cond").where(UPat.var(), UPat.var()).named("f")), where_fold_with_cond_sub),
-  (UPat.var("cond").where(UPat.var("cond").where(UPat.var(), UPat.var()).named("t"), UPat.var("cond").where(UPat.var(), UPat.var()).named("f")),
-   where_fold_with_cond_sub),
-  (UPat.var("cond").where((UPat.var("cond") & UPat.var()).named("t"), UPat.var("f")), where_fold_with_cond_sub),
-  (UPat.var("cond").where(UPat.var("t"), (UPat.var("cond") | UPat.var()).named("f")), where_fold_with_cond_sub),
 ])
 
 # ******** phase 2 builds on phase 1, it includes the old "symbolic", rules that match deeper ********
@@ -327,6 +311,10 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
   # try all the valids together (but only the whole expressions)
   if (s_uop:=uop.substitute(sub_dict:=dict(all_candidates))) is not uop:
     uop = s_uop.simplify().substitute({newX:X for X,newX in sub_dict.items()}).simplify()
+
+  if valid in uop.toposort():
+    true_val = tuple([True]*valid.dtype.count) if valid.dtype.count > 1 else True
+    if (s_uop:=uop.substitute({valid: valid.const_like(true_val)}).simplify()) is not uop: uop = s_uop
   return uop
 
 def _valid_priority(v: UOp, valids:list[UOp]):
@@ -380,14 +368,20 @@ pm_move_where_on_load = PatternMatcher([
 ])
 
 def gated_given_valid(cond:UOp, x:UOp, i:UOp) -> UOp|None:
-  # Skip if x contains DIV/MOD AND IMAGE mode is enabled -> image index e.g. openpilot
-  if IMAGE.value > 0 and x.op_in_backward_slice_with_self(Ops.IDIV, Ops.MOD): return None
-  return cond.where(uop_given_valid(cond, x, try_simplex=False), i)
+  if IMAGE.value > 0 and (x.op_in_backward_slice_with_self(Ops.IDIV, Ops.MOD) or
+                          (i.arg is not Invalid and i.op_in_backward_slice_with_self(Ops.IDIV, Ops.MOD))): return None
+  new_x = uop_given_valid(cond, x, try_simplex=False)
+  if i.arg is not Invalid and cond in i.toposort():
+    false_val = tuple([False]*cond.dtype.count) if cond.dtype.count > 1 else False
+    new_i = i.substitute({cond: cond.const_like(false_val)}).simplify()
+  else: new_i = uop_given_valid(cond.logical_not(), i, try_simplex=False) if i.arg is not Invalid else i
+  if new_x is not x or new_i is not i: return cond.where(new_x, new_i)
+  return None
 
 pm_simplify_valid = PatternMatcher([
   # simplify valid
   (UPat(Ops.AND, name="valid"), simplify_valid),
-  (invalid_gate, gated_given_valid),
+  (UPat.var("cond").where(UPat.var("x"), UPat.var("i")), gated_given_valid),
 ])
 
 # this is symbolic 2.0
