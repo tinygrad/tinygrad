@@ -398,7 +398,7 @@ def get_render(i:int, j:int, fmt:str) -> dict:
         metadata.append(amd_readelf(compiler.compile(data.src)))
     return {"src":disasm_str, "lang":"amdgpu" if data.device.startswith("AMD") else None, "metadata":metadata}
   if fmt == "sqtt-insts":
-    columns = ["PC", "Instruction", "Hits", "Duration", "Stall", "Type"]
+    columns = ["PC", "Instruction", "Hits", "Cycles", "Stall", "Type"]
     inst_columns = ["N", "Clk", "Idle", "Dur", "Stall"]
     # Idle:     The total time gap between the completion of previous instruction and the beginning of the current instruction.
     #           The idle time can be caused by:
