@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 import ctypes
 from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+import sysconfig
 dll = DLL('nvrtc', 'nvrtc', f'/usr/local/cuda/targets/{sysconfig.get_config_var("MULTIARCH")}/lib')
 nvrtcResult = CEnum(ctypes.c_uint32)
 NVRTC_SUCCESS = nvrtcResult.define('NVRTC_SUCCESS', 0)
