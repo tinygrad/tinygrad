@@ -1,6 +1,7 @@
 import math
 from typing import cast, Any
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, AxisType, KernelInfo, pyrender, Kernel
+from tinygrad.uop import X86Ops, X86GroupOp
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Invalid
 from tinygrad.helpers import DEBUG, Context, prod, SPEC, Metadata
 from tinygrad.uop.validate import validate_index
@@ -256,6 +257,15 @@ full_spec = PatternMatcher([
   # allow any AFTER
   (UPat(Ops.AFTER, src=(UPat(),), allow_any_len=True), lambda: True),
 ])+_tensor_spec+kernel_spec+program_spec+shared_spec
+
+# ***** X86 isa spec *****
+
+x86_spec = PatternMatcher([
+  # these are the only non X86Ops allowed
+  (UPat((Ops.NOOP, Ops.GROUP, Ops.AFTER)), lambda: True),
+  (UPat(GroupOp.All), lambda: False),
+  (UPat(X86GroupOp.All), lambda: True),
+])
 
 # ***** uop helpers *****
 

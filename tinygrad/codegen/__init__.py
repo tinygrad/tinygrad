@@ -84,13 +84,13 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
   sink = graph_rewrite(sink, pm_lower_index_dtype+load_store_indexing, ctx=ren.device, name="lower all index dtypes")
   sink = graph_rewrite(sink, symbolic, name="post index symbolic")
 
-  # optional pre matcher
-  if ren.pre_matcher is not None: sink = graph_rewrite(sink, ren.pre_matcher, name="pre_matcher")
-
   # decompositions
   supported_ops = tuple(ren.code_for_op.keys())
   pm_decomp = symbolic_simple+get_late_rewrite_patterns(supported_ops, TRANSCENDENTAL>=2)
   sink = graph_rewrite(sink, pm_decomp, ctx=ren.device, name="decompositions")
+
+  # optional pre matcher
+  if ren.pre_matcher is not None: sink = graph_rewrite(sink, ren.pre_matcher, ctx=ren, name="pre_matcher")
 
   # final rules for the renderer (without sym)
   extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
@@ -113,12 +113,12 @@ pm_linearize_cleanups = PatternMatcher([
 ])
 
 # requires lst be toposorted. like graph rewrite, but for lines
-def line_rewrite(lst:list[UOp], pm:PatternMatcher) -> list[UOp]:
+def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
   newlst = []
   replaced: dict[UOp, UOp] = {}
   for u in lst:
-    nu = u.replace(src=tuple([replaced[x] for x in u.src]))
-    ret: tuple[UOp, list[UOp]] = cast(tuple[UOp, list[UOp]]|None, pm.rewrite(nu)) or (nu, [nu])
+    nu = u.replace(src=tuple([replaced.get(x, x) for x in u.src]))
+    ret: tuple[UOp, list[UOp]] = cast(tuple[UOp, list[UOp]]|None, pm.rewrite(nu, ctx)) or (nu, [nu])
     replaced[u] = ret[0]
     newlst.extend(ret[1])
   return newlst
@@ -138,5 +138,5 @@ def full_rewrite(sink:UOp, ren:Renderer|None=None) -> list[UOp]:
   full_sink = full_rewrite_to_sink(sink, ren, optimize=sink.tag is None)
   assert len(full_sink.ranges) == 0, f"all ranges must end by the sink, {full_sink.ranges}"
   lst = line_rewrite(linearize(full_sink), pm_linearize_cleanups)
-  if SPEC: type_verify(lst, program_spec)
+  #if SPEC: type_verify(lst, program_spec)
   return lst

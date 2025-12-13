@@ -1,6 +1,7 @@
 import heapq
 from typing import Any
 from collections import defaultdict
+from tinygrad.uop import X86Ops
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, multirange_str
 from tinygrad.helpers import prod, getenv, TUPLE_ORDER
 
@@ -35,6 +36,15 @@ def linearize(sink:UOp) -> list[UOp]:
       case Ops.STORE: priority = 1    # place stores late
       case Ops.RANGE: priority = 5    # placing RANGE is good
       case Ops.END: priority = -5     # placing END is bad
+      # x86 op version
+      case X86Ops.DEFINE_REG: priority = -20
+      case X86Ops.IMM: priority = -10
+      # HACK: this doesn't fix the issue just hides it, need to support rematerialization
+      case X86Ops.CMP | X86Ops.CMPi:
+        run_count = max([priorities[s][0] for s in consumers[u]])
+        priority = 5
+      case X86Ops.SETL | X86Ops.SETB | X86Ops.SETE | X86Ops.SETNE: priority = -5
+      case X86Ops.CMOVL | X86Ops.CMOVB | X86Ops.CMOVE | X86Ops.CMOVNE: priority = -5
       case _: priority = 0            # everything else has priority 0
     priorities[u] = (run_count, priority, extra)
 
