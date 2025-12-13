@@ -52,8 +52,8 @@ class DLL(ctypes.CDLL):
       for pre in (pathlib.Path(pre) for pre in libpaths.get(os.name, []) + libpaths.get(sys.platform, [])):
         if not pre.is_dir(): continue
         if WIN or OSX:
-          for base in ([f"lib{p}.dylib", f"{p}.dylib", p] if OSX else [f"{p}.dll"]):
-            if (l:=pre / base).is_file(): return str(l)
+          for base in ([f"lib{p}.dylib", f"{p}.dylib", str(p)] if OSX else [f"{p}.dll"]):
+            if (l:=pre / base).is_file() or (OSX and 'framework' in str(l) and l.is_symlink()): return str(l)
         else:
           for l in (l for l in pre.iterdir() if l.is_file() and re.fullmatch(f"lib{p}\\.so\\.?[0-9]*", l.name)):
             # filter out linker scripts
