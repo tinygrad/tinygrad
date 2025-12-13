@@ -68,7 +68,7 @@ class TestPMC(unittest.TestCase):
     with save_pmc() as pmc_events:
       runner = get_runner(Device.DEFAULT, k.schedule()[0].ast)
       # TODO: llvm eliminates lds definition from the ELF, is there another way to pin lds size?
-      runner._prg.group_segment_size = 160000
+      runner._prg.group_segment_size = 1024
       for offset in offsets: runner([offset.uop.buffer])
     # find read offsets that created bank conflicts from the pmc counters
     found:list[Tensor] = []
