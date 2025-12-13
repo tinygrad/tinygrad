@@ -40,6 +40,7 @@ def CEnum(typ: type[ctypes._SimpleCData]):
 class DLL(ctypes.CDLL):
   @staticmethod
   def findlib(nm:str, paths:list[str]):
+    if nm == 'libc' and OSX: return '/usr/lib/libc.dylib'
     if pathlib.Path(path:=getenv(nm.replace('-', '_').upper()+"_PATH", '')).is_file(): return path
     for p in paths:
       libpaths = {"posix": ["/usr/lib", "/usr/local/lib"], "nt": os.environ['PATH'].split(os.pathsep),
