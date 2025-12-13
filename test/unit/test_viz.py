@@ -51,7 +51,7 @@ class TestViz(BaseTestViz):
     # VIZ displays rewrites in groups of tracked functions
     self.assertEqual(len(lst), 1)
     # each group has a list of steps
-    self.assertEqual(len(lst[0]["steps"]), 1)
+    self.assertEqual(len(lst[0]["steps"]), 2)
     # each step has a list of matches
     self.assertEqual(lst[0]["steps"][0]["match_count"], 2)
 
@@ -135,7 +135,7 @@ class TestViz(BaseTestViz):
     steps = get_viz_list()[0]["steps"]
     self.assertEqual(steps[0]["name"], "init")
     self.assertEqual(steps[1]["name"], "nested_function")
-    self.assertEqual(len(steps), 4)
+    self.assertEqual(len(steps), 5)
 
   def test_profile_matches_invalid_arg(self):
     @profile_matches
@@ -219,7 +219,7 @@ class TestVizTree(BaseTestViz):
     tree_rewrite()
     lst = get_viz_list()
     steps = lst[0]["steps"]
-    self.assertEqual(len(steps), 1+2+4)
+    self.assertEqual(len(steps), 1+1+2+4)
     self.assertStepEqual(steps[0], {"name":"root", "depth":0, "match_count":1})
     self.assertStepEqual(steps[1], {"name":"branch_0", "depth":1, "match_count":1})
     self.assertStepEqual(steps[2], {"name":"leaf_left", "depth":2, "match_count":1})
