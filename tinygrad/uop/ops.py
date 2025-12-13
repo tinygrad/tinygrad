@@ -342,6 +342,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   # *** uop evaluation ***
 
   def simplify(self, tracked=False):
+    if self.op in {Ops.CONST, Ops.VCONST}: return self
     # late import!
     from tinygrad.uop.symbolic import symbolic
     with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
