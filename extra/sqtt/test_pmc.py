@@ -75,7 +75,7 @@ class TestPMC(unittest.TestCase):
     found:list[tuple] = []
     for i,e in enumerate(pmc_events):
       pmc = unpack_pmc(e)["rows"]
-      val = next(total for name,total,_all_xcds in pmc if name == "SQ_LDS_BANK_CONFLICT")
+      val = next(total for name,total,_all_instances in pmc if name in {"SQ_LDS_BANK_CONFLICT", "SQC_LDS_BANK_CONFLICT"})
       if val: found.append(offsets[i])
     print("Found bank conflicts at offsets:", [s.numpy() for s in found])
 
