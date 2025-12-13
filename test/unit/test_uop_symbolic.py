@@ -665,8 +665,8 @@ class TestSymbolic(unittest.TestCase):
   def test_gated_load(self):
     idx = Variable("idx", 0, 24)
     self.helper_test_variable(idx//4, 0, 6, "(idx//4)")
-    # TODO: simplify the true branch
-    self.helper_test_variable((idx<4).where(idx//4, idx.const_like(-1)), -1, 6, "(idx<4).where((idx//4), -1)")
+    # true branch (idx//4) simplifies to 0 when idx<4
+    self.helper_test_variable((idx<4).where(idx//4, idx.const_like(-1)), -1, 0, "(idx<4).where(idx.const_like(0), idx.const_like(-1))")
 
   def test_idiv_lt(self):
     idx = Variable("idx", 0, 24)
@@ -817,8 +817,7 @@ class TestSymbolic(unittest.TestCase):
     other = Variable("y", 0, 10) < 3
     third = Variable("z", 0, 10) < 7
     expr = cond.where(third, cond | other)
-    simplified = expr.simplify()
-    self.assertEqual(simplified.render(), "((z<7) if (x<5) else (y<3))")
+    self.helper_test_variable(expr, 0, 1, "(x<5).where((z<7), (y<3))")
 
   def test_where_closure_vectorized(self):
     cond = UOp.const(dtypes.bool.vec(2), (True, False))
