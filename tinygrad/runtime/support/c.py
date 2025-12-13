@@ -1,6 +1,6 @@
-import ctypes, functools, sys
+import ctypes, functools, itertools, os, pathlib, re, sys, sysconfig
 from typing import TYPE_CHECKING
-from tinygrad.helpers import flatten, WIN
+from tinygrad.helpers import flatten, getenv, DEBUG, OSX, WIN
 from _ctypes import _SimpleCData
 
 def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
@@ -36,6 +36,40 @@ def CEnum(typ: type[ctypes._SimpleCData]):
     def __hash__(self): return hash(self.value)
 
   return _CEnum
+
+class DLL(ctypes.CDLL):
+  @staticmethod
+  def findlib(nm:str, paths:list[str]) -> str|None:
+    if pathlib.Path(path:=getenv(env:=nm.replace('-', '_').upper()+"_PATH", '')).is_file(): return path
+    for p in paths:
+      libpaths = {"posix": ["/usr/lib", "/usr/local/lib"], "nt": os.environ['PATH'].split(os.pathsep),
+                  "darwin": ["/opt/homebrew/lib", f"/System/Library/Frameworks/{p}.framework"],
+                  'linux': ['/lib', f"/lib/{sysconfig.get_config_var('MULTIARCH')}"]}
+      if (pth:=pathlib.Path(p)).is_absolute():
+        if pth.is_file(): return p
+        else: continue
+      for pre in (pathlib.Path(pre) for pre in libpaths.get(os.name, []) + libpaths.get(sys.platform, [])):
+        if not pre.is_dir(): continue
+        if WIN or OSX:
+          for base in ([f"lib{p}.dylib", f"{p}.dylib", p] if OSX else [f"{p}.dll"]):
+            if (f:=pre / base).is_file(): return str(f)
+        else:
+          for l in (l for l in pre.iterdir() if l.is_file() and re.fullmatch(f"lib{p}\\.so\\.?[0-9]*", l.name)):
+            # filter out linker scripts
+            with open(l, 'rb') as f:
+              if f.read(4) == b'\x7FELF': return str(l)
+
+  def __init__(self, nm:str, paths:str|list[str], emsg="", **kwargs):
+    self.nm, self.emsg = nm, emsg
+    if (path:= DLL.findlib(nm, paths if isinstance(paths, list) else [paths])):
+      if DEBUG >= 3: print(f"loading {nm} from {path}")
+      super().__init__(path, **kwargs)
+      self.loaded = True
+    else: self.loaded = False
+
+  def __getattr__(self, nm):
+    if not self.loaded: raise AttributeError(f"failed to find library {self.nm}: " + (self.emsg or f"try setting {self.nm.upper()+'_PATH'}?"))
+    return super().__getattr__(nm)
 
 # supports gcc (C11) __attribute__((packed))
 if TYPE_CHECKING: Struct = ctypes.Structure
