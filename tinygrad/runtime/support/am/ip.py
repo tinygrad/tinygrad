@@ -225,7 +225,7 @@ class AM_GFX(AM_IP):
 
   def fini_hw(self):
     self._grbm_select(me=1, pipe=0, queue=0)
-    if self.adev.regCP_HQD_ACTIVE.read() != 0: self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2) # 1 - DRAIN_PIPE; 2 - RESET_WAVES
+    if self.adev.regCP_HQD_ACTIVE.read() & 1: self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2) # 1 - DRAIN_PIPE; 2 - RESET_WAVES
     self._grbm_select()
     self.adev.regGCVM_CONTEXT0_CNTL.write(0)
 
