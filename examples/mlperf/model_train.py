@@ -1280,6 +1280,7 @@ def train_bert():
         previous_step = i
 
 def train_llama3():
+  from tinygrad.helpers import trange, partition
   from extra.models.llama import Transformer
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
@@ -1288,7 +1289,6 @@ def train_llama3():
   BASEDIR            = config["BASEDIR"]                = Path(getenv("BASEDIR", "/raid/datasets/c4/"))
   BS                 = config["BS"]                     = getenv("BS", 16)
   grad_acc           = config["GRADIENT_ACC_STEPS"]     = getenv("GRADIENT_ACC_STEPS", 1)
-  assert grad_acc == 1, f"{grad_acc=} is not supported"
   GBS                = config["GLOBAL_BATCH_SIZE"]      = BS * grad_acc
   SEED               = config["SEED"]                   = getenv("SEED", 5760)
   SEQLEN             = config["SEQLEN"]                 = getenv("SEQLEN", 8192)
@@ -1348,6 +1348,16 @@ def train_llama3():
       # prevents memory spike on device 0
       v.realize()
 
+  for p in get_parameters(model):
+    if p.requires_grad is None: p.requires_grad_()
+
+  parameters, buffers = partition(get_parameters(model), lambda x: x.requires_grad)
+  print(f"parameters: {len(parameters)} buffers: {len(buffers)}")  # freqs_cis does not need grad
+  steploss = Tensor.zeros((), device="CPU").contiguous()
+  for p in parameters:
+    p.grad = p.zeros_like().contiguous().realize()
+  grads = [p.grad for p in parameters]
+
   optim = AdamW(get_parameters(model), lr=0.0,
                 b1=opt_adamw_beta_1, b2=opt_adamw_beta_2, eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay)
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
@@ -1363,8 +1373,7 @@ def train_llama3():
 
   @TinyJit
   @Tensor.train()
-  def train_step(model, tokens:Tensor):
-    optim.zero_grad()
+  def minibatch(model, tokens:Tensor):
     if (DP := getenv("DP", 1)) > 1:
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(DP))
       tokens = tokens.shard(device, 0)
@@ -1372,25 +1381,34 @@ def train_llama3():
       device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
       tokens = tokens.shard(device)
     logits:Tensor = model(tokens[:, :-1], start_pos=0, temperature=math.nan)
-    loss = logits.sparse_categorical_crossentropy(tokens[:, 1:])
-    loss.backward()
+    uloss = logits.sparse_categorical_crossentropy(tokens[:, 1:]).float() / grad_acc
+    uloss.backward()
+    steploss.assign(steploss + uloss.cast(steploss.dtype).to(steploss.device))
+    Tensor.realize(*grads, steploss)
+
+  @TinyJit
+  @Tensor.train()
+  def optimizer_step():
     # L2 norm grad clip
     # https://github.com/NVIDIA/NeMo/blob/3368c3fc0b4a186ab33a1d68a504315100c0b2a6/nemo/collections/nlp/modules/common/megatron/clip_grads.py#L57
     # https://docs.pytorch.org/docs/stable/generated/torch.nn.utils.clip_grad_norm_.html
     if not getenv("DISABLE_GRAD_CLIP_NORM"):
       total_norm = Tensor(0.0, dtype=dtypes.float32, device=optim.params[0].device)
-      for p in optim.params:
-        total_norm += p.grad.float().square().sum()
+      for g in grads:
+        total_norm += g.float().square().sum()
       total_norm = total_norm.sqrt().contiguous()
-      for p in optim.params:
-        p.grad = p.grad * (opt_gradient_clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)
+      for g in grads:
+        g.assign((g * (opt_gradient_clip_norm / (total_norm + 1e-6)).clamp(max_=1.0)).cast(g.dtype))
 
     optim.step()
     scheduler.step()
+    for g in grads:
+      g.assign(g.zeros_like().contiguous())
 
     lr = optim.lr
-    loss.realize(lr)
-    return loss, lr
+    steploss.assign(steploss.zeros_like().contiguous())
+    Tensor.realize(*parameters, *grads, lr, steploss)
+    return lr
 
   @TinyJit
   @Tensor.train(False)
@@ -1434,19 +1452,22 @@ def train_llama3():
 
   iter = get_train_iter()
   i, sequences_seen = resume_ckpt, 0
-  for tokens in tqdm(iter, total=SAMPLES//GBS):
+  for _ in trange(SAMPLES//GBS):
     t = time.perf_counter()
     GlobalCounters.reset()
-    loss, lr = train_step(model, tokens)
-    loss = loss.float().item()
+    for _ in range(grad_acc):
+      tokens = next(iter)
+      minibatch(model, tokens)
+    loss_str = steploss.float().item()
+    lr = optimizer_step()
 
     i += 1
     sequences_seen += tokens.shape[0]
 
-    tqdm.write(f"{loss:.4f} loss, {lr.item():.12f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {time.perf_counter()-t:.2f} s")
+    tqdm.write(f"{loss_str:.4f} loss, {lr.item():.12f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {time.perf_counter()-t:.2f} s")
     if (fname:=getenv("LOSS_FILE", "")):
       with open(fname, "a") as f:
-        f.write(f"{i} {loss:.4f} {lr.item():.12f} {GlobalCounters.mem_used / 1e9:.2f}\n")
+        f.write(f"{i} {loss_str:.4f} {lr.item():.12f} {GlobalCounters.mem_used / 1e9:.2f}\n")
 
     if (ckpt_freq := getenv("CKPT")) and (i % ckpt_freq == 0 and (i != 1 or ckpt_freq == 1)):
       tqdm.write("saving checkpoint")
