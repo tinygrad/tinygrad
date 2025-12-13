@@ -62,7 +62,7 @@ class DLL(ctypes.CDLL):
 
   def __init__(self, nm:str, paths:str|list[str], extra_paths=[], emsg="", **kwargs):
     self.nm, self.emsg = nm, emsg
-    if (path:= DLL.findlib(nm, paths if isinstance(paths, list) else [paths], extra_paths)):
+    if (path:= DLL.findlib(nm, paths if isinstance(paths, list) else [paths], extra_paths if isinstance(extra_paths, list) else [extra_paths])):
       if DEBUG >= 3: print(f"loading {nm} from {path}")
       super().__init__(path, **kwargs)
       self.loaded = True
