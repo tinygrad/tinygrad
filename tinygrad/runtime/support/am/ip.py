@@ -39,7 +39,6 @@ class AM_GMC(AM_IP):
 
     # Memory controller aperture
     self.mc_base = self.fb_base + self.paddr_base
-    self.mc_end = self.mc_base + self.adev.mm.vram_size - 1
 
     # VM aperture
     self.vm_base = self.adev.mm.va_base
@@ -97,8 +96,8 @@ class AM_GMC(AM_IP):
       self.adev.reg(f"reg{ip}MC_VM_AGP_BOT").write(0xffffffffffff >> 24, inst=inst) # disable AGP
       self.adev.reg(f"reg{ip}MC_VM_AGP_TOP").write(0, inst=inst)
 
-      self.adev.reg(f"reg{ip}MC_VM_SYSTEM_APERTURE_LOW_ADDR").write(self.mc_base >> 18, inst=inst)
-      self.adev.reg(f"reg{ip}MC_VM_SYSTEM_APERTURE_HIGH_ADDR").write(self.mc_end >> 18, inst=inst)
+      self.adev.reg(f"reg{ip}MC_VM_SYSTEM_APERTURE_LOW_ADDR").write(self.fb_base >> 18, inst=inst)
+      self.adev.reg(f"reg{ip}MC_VM_SYSTEM_APERTURE_HIGH_ADDR").write(self.fb_end >> 18, inst=inst)
       self.adev.wreg_pair(f"reg{ip}MC_VM_SYSTEM_APERTURE_DEFAULT_ADDR", "_LSB", "_MSB", self.memscratch_xgmi_paddr >> 12, inst=inst)
       self.adev.wreg_pair(f"reg{ip}VM_L2_PROTECTION_FAULT_DEFAULT_ADDR", "_LO32", "_HI32", self.dummy_page_xgmi_paddr >> 12, inst=inst)
 
@@ -156,7 +155,7 @@ class AM_SMU(AM_IP):
     self._send_msg(self.smu_mod.PPSMC_MSG_EnableAllSmuFeatures, 0)
 
   def is_smu_alive(self):
-    with contextlib.suppress(RuntimeError): self._send_msg(self.smu_mod.PPSMC_MSG_GetSmuVersion, 0, timeout=100)
+    with contextlib.suppress(TimeoutError): self._send_msg(self.smu_mod.PPSMC_MSG_GetSmuVersion, 0, timeout=100)
     return self.adev.mmMP1_SMN_C2PMSG_90.read() != 0
 
   def mode1_reset(self):
@@ -235,9 +234,9 @@ class AM_GFX(AM_IP):
   def fini_hw(self):
     for xcc in range(self.xccs):
       self._grbm_select(me=1, pipe=0, queue=0, inst=xcc)
-      self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2, inst=xcc) # 1 - DRAIN_PIPE; 2 - RESET_WAVES
+      if self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1: self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2, inst=xcc) # 1 - DRAIN_PIPE; 2 - RESET_WAVES
       self._grbm_select(inst=xcc)
-      self.adev.regGCVM_CONTEXT0_CNTL.write(0, inst=xcc)
+    for xcc in range(self.xccs): self.adev.regGCVM_CONTEXT0_CNTL.write(0, inst=xcc)
 
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, doorbell:int, pipe:int, queue:int,
                  aql:bool):
