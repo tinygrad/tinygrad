@@ -39,7 +39,7 @@ def CEnum(typ: type[ctypes._SimpleCData]):
 
 class DLL(ctypes.CDLL):
   @staticmethod
-  def findlib(nm:str, paths:list[str]):
+  def findlib(nm:str, paths:list[str], extra_paths=[]):
     if nm == 'libc' and OSX: return '/usr/lib/libc.dylib'
     if pathlib.Path(path:=getenv(nm.replace('-', '_').upper()+"_PATH", '')).is_file(): return path
     for p in paths:
@@ -49,7 +49,7 @@ class DLL(ctypes.CDLL):
       if (pth:=pathlib.Path(p)).is_absolute():
         if pth.is_file(): return p
         else: continue
-      for pre in (pathlib.Path(pre) for pre in libpaths.get(os.name, []) + libpaths.get(sys.platform, [])):
+      for pre in (pathlib.Path(pre) for pre in libpaths.get(os.name, []) + libpaths.get(sys.platform, []) + extra_paths):
         if not pre.is_dir(): continue
         if WIN or OSX:
           for base in ([f"lib{p}.dylib", f"{p}.dylib", str(p)] if OSX else [f"{p}.dll"]):
@@ -60,9 +60,9 @@ class DLL(ctypes.CDLL):
             with open(l, 'rb') as f:
               if f.read(4) == b'\x7FELF': return str(l)
 
-  def __init__(self, nm:str, paths:str|list[str], emsg="", **kwargs):
+  def __init__(self, nm:str, paths:str|list[str], extra_paths=[], emsg="", **kwargs):
     self.nm, self.emsg = nm, emsg
-    if (path:= DLL.findlib(nm, paths if isinstance(paths, list) else [paths])):
+    if (path:= DLL.findlib(nm, paths if isinstance(paths, list) else [paths], extra_paths)):
       if DEBUG >= 3: print(f"loading {nm} from {path}")
       super().__init__(path, **kwargs)
       self.loaded = True

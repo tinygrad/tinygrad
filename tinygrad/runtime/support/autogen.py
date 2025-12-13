@@ -91,7 +91,7 @@ fns, specs = (clang.CXType_FunctionProto, clang.CXType_FunctionNoProto), (clang.
 # https://clang.llvm.org/docs/AutomaticReferenceCounting.html#arc-method-families
 arc_families = ['alloc', 'copy', 'mutableCopy', 'new']
 
-def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, use_errno=False, anon_names={}, types={}, parse_macros=True):
+def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, errno=False, anon_names={}, types={}, parse_macros=True, paths=[]):
   macros, lines, anoncnt, types, objc = [], [], itertools.count().__next__, {k:(v,True) for k,v in types.items()}, False
   def tname(t, suggested_name=None, typedef=None) -> str:
     suggested_name = anon_names.get(f"{loc_file(loc(decl:=clang.clang_getTypeDeclaration(t)))}:{loc_line(loc(decl))}", suggested_name)
@@ -258,7 +258,8 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
     clang.clang_disposeTranslationUnit(tu)
     clang.clang_disposeIndex(idx)
   main = '\n'.join(["# mypy: ignore-errors", "import ctypes", "from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR",
-                    *prolog, *(["from tinygrad.runtime.support import objc"]*objc), *([f"dll = DLL('{name}', {dll})"] if dll else []), *lines]) + '\n'
+                    *prolog, *(["from tinygrad.runtime.support import objc"]*objc),
+                    *([f"dll = DLL('{name}', {dll}{f', {paths}'}{', use_errno=True'*errno})"] if dll else []), *lines]) + '\n'
   macros = [r for m in macros if (r:=functools.reduce(lambda s,r:re.sub(r[0], r[1], s), rules + base_rules, m))]
   while True:
     try:

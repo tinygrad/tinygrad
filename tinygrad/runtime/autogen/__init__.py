@@ -12,6 +12,7 @@ llvm_lib = (r"'C:\\Program Files\\LLVM\\bin\\LLVM-C.dll' if WIN else '/opt/homeb
             repr(['LLVM'] + [f'LLVM-{i}' for i in reversed(range(14, 21+1))]))
 
 webgpu_lib = "os.path.join(sysconfig.get_paths()['purelib'], 'pydawn', 'lib', 'libwebgpu_dawn.dll') if WIN else 'webgpu_dawn'"
+nv_lib_path = "f'/usr/local/cuda/targets/{sysconfig.get_config_var('MULTIARCH')}/lib'"
 
 def load(name, dll, files, **kwargs):
   if not (f:=(root/(path:=kwargs.pop("path", __name__)).replace('.','/')/f"{name}.py")).exists() or getenv('REGEN'):
@@ -33,12 +34,12 @@ def __getattr__(nm):
   match nm:
     case "libc": return load("libc", "'c'", lambda: (
       [i for i in system("dpkg -L libc6-dev").split() if 'sys/mman.h' in i or 'sys/syscall.h' in i] +
-      ["/usr/include/string.h", "/usr/include/elf.h", "/usr/include/unistd.h", "/usr/include/asm-generic/mman-common.h"]), use_errno=True)
+      ["/usr/include/string.h", "/usr/include/elf.h", "/usr/include/unistd.h", "/usr/include/asm-generic/mman-common.h"]), errno=True)
     case "avcodec": return load("avcodec", None, ["{}/libavcodec/hevc/hevc.h", "{}/libavcodec/cbs_h265.h"], tarball=ffmpeg_src)
     case "opencl": return load("opencl", "'OpenCL'", ["/usr/include/CL/cl.h"])
     case "cuda": return load("cuda", "'cuda'", ["/usr/include/cuda.h"], args=["-D__CUDA_API_VERSION_INTERNAL"], parse_macros=False)
-    case "nvrtc": return load("nvrtc", "'nvrtc'", ["/usr/include/nvrtc.h"])
-    case "nvjitlink": load("nvjitlink", "'nvJitLink'", [root/"extra/nvJitLink.h"])
+    case "nvrtc": return load("nvrtc", "'nvrtc'", ["/usr/include/nvrtc.h"], path=nv_lib_path)
+    case "nvjitlink": load("nvjitlink", "'nvJitLink'", [root/"extra/nvJitLink.h"], paths=nv_lib_path)
     case "kfd": return load("kfd", None, ["/usr/include/linux/kfd_ioctl.h"])
     case "nv_570" | "nv_580":
       return load(nm, None, [
@@ -77,7 +78,7 @@ def __getattr__(nm):
     case "io_uring": return load("io_uring", None, ["/usr/include/liburing.h", "/usr/include/linux/io_uring.h", "/usr/include/asm-generic/unistd.h"],
                                  rules=[('__NR', 'NR')])
     case "ib": return load("ib", "'ibverbs'", ["/usr/include/infiniband/verbs.h", "/usr/include/infiniband/verbs_api.h",
-                                               "/usr/include/infiniband/ib_user_ioctl_verbs.h","/usr/include/rdma/ib_user_verbs.h"], use_errno=True)
+                                               "/usr/include/infiniband/ib_user_ioctl_verbs.h","/usr/include/rdma/ib_user_verbs.h"], errno=True)
     case "llvm": return load("llvm", llvm_lib, lambda: [system("llvm-config-20 --includedir")+"/llvm-c/**/*.h"],
                              args=lambda: system("llvm-config-20 --cflags").split(), recsym=True, prolog=["from tinygrad.helpers import WIN, OSX"])
     case "pci": return load("pci", None, ["/usr/include/linux/pci_regs.h"])
