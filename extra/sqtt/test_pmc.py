@@ -22,7 +22,7 @@ def copy_kernel(B, A, stride=1):
   index = (i * stride) % A.size
   return B[index].store(A[index]).sink(arg=KernelInfo(name=f"copy_{A.size}_stride_{stride}", opts_to_apply=()))
 
-def lds_kernel(offset:UOp, size:int, inst:int) -> UOp:
+def lds_kernel(offset:UOp, size:int, inst:str) -> UOp:
   tid = UOp.range(offset.size, 0, AxisType.LOCAL)
   dst = UOp.placeholder((size,), dtypes.float32, 1, AddrSpace.REG)
   #lds = UOp.placeholder((1024,), dtypes.float32, 2, AddrSpace.LOCAL)
@@ -70,13 +70,13 @@ class TestPMC(unittest.TestCase):
       # TODO: llvm eliminates lds definition from the ELF, is there another way to pin lds size?
       runner._prg.group_segment_size = 160000
       for offset in offsets: runner([offset.uop.buffer])
-    # find bank conflicts from the pmc counters
-    found:list[tuple] = []
+    # find read offsets that created bank conflicts from the pmc counters
+    found:list[Tensor] = []
     for i,e in enumerate(pmc_events):
       pmc = unpack_pmc(e)["rows"]
       # SQ on gfx9, renamed to SQC after gfx10
       val = next(total for name,total,_all_instances in pmc if name in {"SQ_LDS_BANK_CONFLICT", "SQC_LDS_BANK_CONFLICT"})
-      if val: found.append(offsets[i])
+      if val > 0: found.append(offsets[i])
     print("Found bank conflicts at offsets:", [s.numpy() for s in found])
 
   def test_ds_read_b64(self): self.test_ds_read(2, 'ds_read_b64')
