@@ -1,5 +1,5 @@
 from __future__ import annotations
-import sys, argparse, typing, re, unicodedata, json, uuid
+import sys, argparse, typing, re, unicodedata, json, uuid, time
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv
 from tinygrad.helpers import partition, TCPServerWithReuse, HTTPRequestHandler, tqdm, DEBUG
 
@@ -174,18 +174,18 @@ class Transformer:
       yield next_id
 
 models = {
-  "1B": "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf",
-  "3B": "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q6_K.gguf",
-  "3B_f16": "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-f16.gguf",
-  "8B": "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf",
+  "llama3.2:1b": "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf",
+  "llama3.2:3b": "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q6_K.gguf",
+  "llama3.2:3b-f16": "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-f16.gguf",
+  "llama3.1:8b": "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf",
 }
 
 # *** simple OpenAI compatible server on 11434 to match ollama ***
 # OPENAI_BASE_URL=http://localhost:11434/v1 OPENAI_API_KEY=ollama uvx --from gpt-command-line gpt
 
 class Handler(HTTPRequestHandler):
-  def run_model(self, ids:list[int], include_usage=False):
-    tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk"}
+  def run_model(self, ids:list[int], model_name:str, include_usage=False):
+    tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
     yield {"choices": [{"index":0, "delta":{"role":"assistant","content":""}, "finish_reason":None}], **tmpl}
     out = []
     for next_id in tqdm(model.generate(ids), disable=not DEBUG>=1):
@@ -194,7 +194,7 @@ class Handler(HTTPRequestHandler):
       yield {"choices": [{"index":0, "delta":{"content":tok.decode([next_id])}, "finish_reason":None}], **tmpl}
     yield {"choices": [{"index":0, "delta":{},"finish_reason":"stop"}], **tmpl}
     if include_usage:
-      yield {"choices": [], "usage": {"prompt_tokens": len(ids), "completion_tokens": len(out), "total_tokens": len(ids) + len(out)}}
+      yield {"choices": [], "usage": {"prompt_tokens": len(ids), "completion_tokens": len(out), "total_tokens": len(ids) + len(out)}, **tmpl}
 
   def do_POST(self):
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
@@ -203,8 +203,6 @@ class Handler(HTTPRequestHandler):
       print(self.path)
       print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
-      assert body["stream"], "we only support stream mode"
-
       # extract tokens
       ids = [bos_id]
       for msg in body["messages"]:
@@ -219,20 +217,27 @@ class Handler(HTTPRequestHandler):
         else: raise RuntimeError(f"unknown content type: {type(content)}")
         ids += tok.role("assistant")
 
-      # stream reply
-      self.stream_json(self.run_model(ids, include_usage=body.get("stream_options",{}).get("include_usage", False)))
+      # reply
+      chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False))
+      if body.get("stream"): self.stream_json(chunks)
+      else:
+        out = []
+        for c in chunks: out.append(c["choices"][0]["delta"].get("content", "") if c["choices"] else "")
+        self.send_data(json.dumps({**c, "object":"chat.completion",
+          "choices":[{"index":0, "message":{"role":"assistant","content":"".join(out)}, "finish_reason":"stop"}]}).encode())
     else:
       raise RuntimeError(f"unhandled path {self.path}")
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
-  parser.add_argument("--size", choices=list(models.keys()), default=list(models.keys())[0], help="Model size")
+  parser.add_argument("--model", choices=list(models.keys()), default=list(models.keys())[0], help="Model choice")
   parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
   parser.add_argument("--serve", action="store_true", help="Run OpenAI compatible API")
   args = parser.parse_args()
 
   # load the model
-  model, kv = Transformer.from_gguf(Tensor.from_url(models[args.size]), args.max_context)
+  model, kv = Transformer.from_gguf(Tensor.from_url(models[args.model]), args.max_context)
+  if DEBUG >= 1: print(f"using model {args.model}")
 
   # extract some metadata
   tok = SimpleTokenizer.from_gguf_kv(kv)

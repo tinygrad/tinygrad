@@ -50,7 +50,6 @@ class AM_GMC(AM_IP):
 
     # Memory controller aperture
     self.mc_base = self.fb_base + self.paddr_base
-    self.mc_end = self.mc_base + self.adev.mm.vram_size - 1
 
     # VM aperture
     self.vm_base = self.adev.mm.va_base
@@ -106,27 +105,27 @@ class AM_GMC(AM_IP):
 
   def init_hub(self, ip:Literal["MM", "GC"], inst_cnt:int):
     # Init system apertures
-    for i in range(inst_cnt):
-      self.adev.reg(f"reg{ip}MC_VM_AGP_BASE").write(0, inst=i)
-      self.adev.reg(f"reg{ip}MC_VM_AGP_BOT").write(0xffffffffffff >> 24, inst=i) # disable AGP
-      self.adev.reg(f"reg{ip}MC_VM_AGP_TOP").write(0, inst=i)
+    for inst in range(inst_cnt):
+      self.adev.reg(f"reg{ip}MC_VM_AGP_BASE").write(0, inst=inst)
+      self.adev.reg(f"reg{ip}MC_VM_AGP_BOT").write(0xffffffffffff >> 24, inst=inst) # disable AGP
+      self.adev.reg(f"reg{ip}MC_VM_AGP_TOP").write(0, inst=inst)
 
-      self.adev.reg(f"reg{ip}MC_VM_SYSTEM_APERTURE_LOW_ADDR").write(self.fb_base >> 18, inst=i)
-      self.adev.reg(f"reg{ip}MC_VM_SYSTEM_APERTURE_HIGH_ADDR").write(self.fb_end >> 18, inst=i)
-      self.adev.wreg_pair(f"reg{ip}MC_VM_SYSTEM_APERTURE_DEFAULT_ADDR", "_LSB", "_MSB", self.memscratch_xgmi_paddr >> 12, inst=i)
-      self.adev.wreg_pair(f"reg{ip}VM_L2_PROTECTION_FAULT_DEFAULT_ADDR", "_LO32", "_HI32", self.dummy_page_xgmi_paddr >> 12, inst=i)
+      self.adev.reg(f"reg{ip}MC_VM_SYSTEM_APERTURE_LOW_ADDR").write(self.fb_base >> 18, inst=inst)
+      self.adev.reg(f"reg{ip}MC_VM_SYSTEM_APERTURE_HIGH_ADDR").write(self.fb_end >> 18, inst=inst)
+      self.adev.wreg_pair(f"reg{ip}MC_VM_SYSTEM_APERTURE_DEFAULT_ADDR", "_LSB", "_MSB", self.memscratch_xgmi_paddr >> 12, inst=inst)
+      self.adev.wreg_pair(f"reg{ip}VM_L2_PROTECTION_FAULT_DEFAULT_ADDR", "_LO32", "_HI32", self.dummy_page_xgmi_paddr >> 12, inst=inst)
 
-      self.adev.reg(f"reg{ip}VM_L2_PROTECTION_FAULT_CNTL2").update(active_page_migration_pte_read_retry=1, inst=i)
+      self.adev.reg(f"reg{ip}VM_L2_PROTECTION_FAULT_CNTL2").update(active_page_migration_pte_read_retry=1, inst=inst)
 
       # Init TLB and cache
       self.adev.reg(f"reg{ip}MC_VM_MX_L1_TLB_CNTL").update(enable_l1_tlb=1, system_access_mode=3, enable_advanced_driver_model=1,
-        system_aperture_unmapped_access=0, mtype=self.adev.soc.module.MTYPE_UC, atc_en=1, inst=i)
+        system_aperture_unmapped_access=0, mtype=self.adev.soc.module.MTYPE_UC, atc_en=1, inst=inst)
 
-      self.adev.reg(f"reg{ip}VM_L2_CNTL").update(enable_l2_cache=1, enable_l2_fragment_processing=1, context1_identity_access_mode=1, inst=i)
-      self.adev.reg(f"reg{ip}VM_L2_CNTL2").update(invalidate_all_l1_tlbs=1, invalidate_l2_cache=1, inst=i)
+      self.adev.reg(f"reg{ip}VM_L2_CNTL").update(enable_l2_cache=1, enable_l2_fragment_processing=1, context1_identity_access_mode=1, inst=inst)
+      self.adev.reg(f"reg{ip}VM_L2_CNTL2").update(invalidate_all_l1_tlbs=1, invalidate_l2_cache=1, inst=inst)
       self.adev.reg(f"reg{ip}VM_L2_CNTL3").update(bank_select=12 if self.translate_further else 9,
-        l2_cache_bigk_fragment_size=9 if self.translate_further else 6, inst=i)
-      self.adev.reg(f"reg{ip}VM_L2_CNTL4").write(0x1, inst=i)
+        l2_cache_bigk_fragment_size=9 if self.translate_further else 6, inst=inst)
+      self.adev.reg(f"reg{ip}VM_L2_CNTL4").write(0x1, inst=inst)
 
       # self.adev.reg(f"reg{ip}VM_L2_CNTL").write(0x80603, inst=i)
       # self.adev.reg(f"reg{ip}VM_L2_CNTL2").write(0x3, inst=i)
@@ -134,14 +133,14 @@ class AM_GMC(AM_IP):
       # self.adev.reg(f"reg{ip}VM_L2_CNTL4").write(0x1, inst=i)
       # self.adev.reg(f"reg{ip}VM_L2_CNTL5").write(inst=i, walker_priority_client_id=0x1ff)
 
-      self.enable_vm_addressing(self.adev.mm.root_page_table, ip, vmid=0, inst=i)
+      self.enable_vm_addressing(self.adev.mm.root_page_table, ip, vmid=0, inst=inst)
 
       # Disable identity aperture
-      self.adev.wreg_pair(f"reg{ip}VM_L2_CONTEXT1_IDENTITY_APERTURE_LOW_ADDR", "_LO32", "_HI32", 0xfffffffff, inst=i)
-      self.adev.wreg_pair(f"reg{ip}VM_L2_CONTEXT1_IDENTITY_APERTURE_HIGH_ADDR", "_LO32", "_HI32", 0x0, inst=i)
-      self.adev.wreg_pair(f"reg{ip}VM_L2_CONTEXT_IDENTITY_PHYSICAL_OFFSET", "_LO32", "_HI32", 0x0, inst=i)
+      self.adev.wreg_pair(f"reg{ip}VM_L2_CONTEXT1_IDENTITY_APERTURE_LOW_ADDR", "_LO32", "_HI32", 0xfffffffff, inst=inst)
+      self.adev.wreg_pair(f"reg{ip}VM_L2_CONTEXT1_IDENTITY_APERTURE_HIGH_ADDR", "_LO32", "_HI32", 0x0, inst=inst)
+      self.adev.wreg_pair(f"reg{ip}VM_L2_CONTEXT_IDENTITY_PHYSICAL_OFFSET", "_LO32", "_HI32", 0x0, inst=inst)
 
-      for eng_i in range(18): self.adev.wreg_pair(f"reg{ip}VM_INVALIDATE_ENG{eng_i}_ADDR_RANGE", "_LO32", "_HI32", 0x1fffffffff, inst=i)
+      for eng_i in range(18): self.adev.wreg_pair(f"reg{ip}VM_INVALIDATE_ENG{eng_i}_ADDR_RANGE", "_LO32", "_HI32", 0x1fffffffff, inst=inst)
     self.hub_initted[ip] = True
 
   @functools.cache  # pylint: disable=method-cache-max-size-none
@@ -335,13 +334,13 @@ class AM_GFX(AM_IP):
   def fini_hw(self):
     for xcc in range(self.xccs):
       self._grbm_select(me=1, pipe=0, queue=0, inst=xcc)
-      self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2, inst=xcc) # 1 - DRAIN_PIPE; 2 - RESET_WAVES
-      self.adev.regGCVM_CONTEXT0_CNTL.write(0, inst=xcc)
-    self._grbm_select(inst=xcc)
+      if self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1: self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2, inst=xcc) # 1 - DRAIN_PIPE; 2 - RESET_WAVES
+      self._grbm_select(inst=xcc)
+    for xcc in range(self.xccs): self.adev.regGCVM_CONTEXT0_CNTL.write(0, inst=xcc)
 
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, doorbell:int, pipe:int, queue:int,
                  aql:bool):
-    for xcc in range(self.xccs):
+    for xcc in range(self.xccs if aql else 1):
       mqd = self.adev.mm.valloc(0x1000, uncached=True, contiguous=True)
 
       struct_t = getattr(am, f"struct_v{self.adev.ip_ver[am.GC_HWIP][0]}_compute_mqd")
@@ -365,16 +364,16 @@ class AM_GFX(AM_IP):
       self.adev.vram.view(mqd.paddrs[0][0], ctypes.sizeof(mqd_struct))[:] = memoryview(mqd_struct).cast('B')
       self.adev.gmc.flush_hdp()
 
-      self._grbm_select(inst=xcc, me=1, pipe=pipe, queue=queue)
+      self._grbm_select(me=1, pipe=pipe, queue=queue, inst=xcc)
 
       mqd_st_mv = to_mv(ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct)).cast('I')
       for i, reg in enumerate(range(self.adev.regCP_MQD_BASE_ADDR.addr[xcc], self.adev.regCP_HQD_PQ_WPTR_HI.addr[xcc] + 1)):
         self.adev.wreg(reg, mqd_st_mv[0x80 + i])
       self.adev.regCP_HQD_ACTIVE.write(0x1, inst=xcc)
 
-    self._grbm_select()
+      self._grbm_select(inst=xcc)
 
-    # self.adev.reg(f"regCP_ME1_PIPE{pipe}_INT_CNTL").update(time_stamp_int_enable=1, generic0_int_enable=1)
+      # self.adev.reg(f"regCP_ME1_PIPE{pipe}_INT_CNTL").update(time_stamp_int_enable=1, generic0_int_enable=1, inst=xcc)
 
   def set_clockgating_state(self):
     for xcc in range(self.xccs):

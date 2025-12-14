@@ -413,6 +413,12 @@ class TCPServerWithReuse(socketserver.TCPServer):
     super().__init__(server_address, RequestHandlerClass)
 
 class HTTPRequestHandler(BaseHTTPRequestHandler):
+  def send_data(self, data:bytes, content_type:str="application/json", status_code:int=200):
+    self.send_response(status_code)
+    self.send_header("Content-Type", content_type)
+    self.send_header("Content-Length", str(len(data)))
+    self.end_headers()
+    return self.wfile.write(data)
   def stream_json(self, source:Generator):
     try:
       self.send_response(200)
