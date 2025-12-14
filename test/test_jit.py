@@ -503,7 +503,7 @@ class TestJit(unittest.TestCase):
     assert abs((a - b).item()) > 0.5
 
   def test_jit_mapping_failures(self):
-    with Context(LRU=0): # TODO: this test fails if the one above, test_jit_init_with_empty_different_types, is ran together, with LRU=1
+    with Context(LRU=0): # TODO: this test fails if the one below, test_jit_init_with_empty_different_types, is ran together, with LRU=1
       def new_f():
         @TinyJit
         # see jit.py, _prepare_jit_inputs for mapping info
@@ -550,18 +550,19 @@ class TestJit(unittest.TestCase):
       assert contig_f(Tensor([3.0]).contiguous()).item() == 4.0
 
   def test_jit_init_with_empty_different_types(self):
-    @TinyJit
-    def f(x:Tensor) -> Tensor: return (x + 1).realize()
-    # Tensor.empty.realize() is unrealized
-    def _empty(): return Tensor.empty(1) + 0
+    with Context(LRU=0): # TODO: see above
+      @TinyJit
+      def f(x:Tensor) -> Tensor: return (x + 1).realize()
+      # Tensor.empty.realize() is unrealized
+      def _empty(): return Tensor.empty(1) + 0
 
-    f(_empty())
-    # maps realized -> realized
-    f(_empty())
-    # (type(realize(Tensor([10.0]))) = realized), realized -> realized
-    assert f(Tensor([10.0])).item() == 11.0
-    # this should fail since jit recorded a realized tensor and this is a const tensor
-    with self.assertRaises(AssertionError): f(Tensor(2.0)).item()
+      f(_empty())
+      # maps realized -> realized
+      f(_empty())
+      # (type(realize(Tensor([10.0]))) = realized), realized -> realized
+      assert f(Tensor([10.0])).item() == 11.0
+      # this should fail since jit recorded a realized tensor and this is a const tensor
+      with self.assertRaises(AssertionError): f(Tensor(2.0)).item()
 
 @unittest.skip("Pending multioutput implementation #3607")
 class TestMultioutputJit(unittest.TestCase):
