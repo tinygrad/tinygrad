@@ -41,40 +41,62 @@ class AMFirmware:
     self.ucode_start: dict[str, int] = {}
     self.descs: list[tuple[list[int], memoryview]] = []
 
-    blob, hdr = self.load_fw(f"smu_{fmt_ver(am.MP1_HWIP)}.bin", am.struct_smc_firmware_header_v1_0)
-    self.smu_psp_desc = self.desc(blob, hdr.header.ucode_array_offset_bytes, hdr.header.ucode_size_bytes, am.GFX_FW_TYPE_SMU)
+    # SMU firmware
+    blob, hdr = self.load_fw(f"smu_{fmt_ver(am.MP1_HWIP)}.bin", versioned_header="struct_smc_firmware_header")
+    if self.adev.ip_ver[am.GC_HWIP] >= (11,0,0):
+      self.smu_psp_desc = self.desc(blob, hdr.v1_0.header.ucode_array_offset_bytes, hdr.v1_0.header.ucode_size_bytes, am.GFX_FW_TYPE_SMU)
+    else:
+      p2stables = (am.struct_smc_soft_pptable_entry * hdr.pptable_count).from_buffer(blob[hdr.pptable_entry_offset:])
+      for p2stable in p2stables:
+        if p2stable.id == (__P2S_TABLE_ID_X:=0x50325358):
+          self.descs += [self.desc(blob, p2stable.ppt_offset_bytes, p2stable.ppt_size_bytes, am.GFX_FW_TYPE_P2S_TABLE)]
 
     # SDMA firmware
-    blob, hdr = self.load_fw(f"sdma_{fmt_ver(am.SDMA0_HWIP)}.bin", versioned_header='struct_sdma_firmware_header')
-    if hdr.header.header_version_major < 3:
+    blob, hdr = self.load_fw(f"sdma_{fmt_ver(am.SDMA0_HWIP)}.bin", versioned_header="struct_sdma_firmware_header")
+    if hdr.header.header_version_major == 1:
+      self.descs += [self.desc(blob, hdr.header.ucode_array_offset_bytes, hdr.header.ucode_size_bytes, am.GFX_FW_TYPE_SDMA0)]
+    elif hdr.header.header_version_major == 2:
       self.descs += [self.desc(blob, hdr.ctl_ucode_offset, hdr.ctl_ucode_size_bytes, am.GFX_FW_TYPE_SDMA_UCODE_TH1)]
       self.descs += [self.desc(blob, hdr.header.ucode_array_offset_bytes, hdr.ctx_ucode_size_bytes, am.GFX_FW_TYPE_SDMA_UCODE_TH0)]
     else: self.descs += [self.desc(blob, hdr.header.ucode_array_offset_bytes, hdr.ucode_size_bytes, am.GFX_FW_TYPE_SDMA_UCODE_TH0)]
 
     # PFP, ME, MEC firmware
     for (fw_name, fw_cnt) in ([('PFP', 1), ('ME', 1)] if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else []) + [('MEC', 1)]:
-      blob, hdr = self.load_fw(f"gc_{fmt_ver(am.GC_HWIP)}_{fw_name.lower()}.bin", am.struct_gfx_firmware_header_v2_0)
+      blob, hdr = self.load_fw(f"gc_{fmt_ver(am.GC_HWIP)}_{fw_name.lower()}.bin", versioned_header="struct_gfx_firmware_header")
 
-      # Code part
-      self.descs += [self.desc(blob, hdr.header.ucode_array_offset_bytes, hdr.ucode_size_bytes, getattr(am, f'GFX_FW_TYPE_RS64_{fw_name}'))]
-
-      # Stack
-      stack_fws = [getattr(am, f'GFX_FW_TYPE_RS64_{fw_name}_P{fwnum}_STACK') for fwnum in range(fw_cnt)]
-      self.descs += [self.desc(blob, hdr.data_offset_bytes, hdr.data_size_bytes, *stack_fws)]
-      self.ucode_start[fw_name] = hdr.ucode_start_addr_lo | (hdr.ucode_start_addr_hi << 32)
+      ucode_off = hdr.header.ucode_array_offset_bytes
+      if hdr.header.header_version_major == 1:
+        # Code
+        self.descs += [self.desc(blob, ucode_off, hdr.header.ucode_size_bytes - hdr.jt_size * 4, getattr(am, f'GFX_FW_TYPE_CP_{fw_name}'))]
+        # JT
+        self.descs += [self.desc(blob, ucode_off + hdr.jt_offset * 4, hdr.jt_size * 4, getattr(am, f'GFX_FW_TYPE_CP_{fw_name}_ME1'))]
+      else:
+        # Code
+        self.descs += [self.desc(blob, ucode_off, hdr.ucode_size_bytes, getattr(am, f'GFX_FW_TYPE_RS64_{fw_name}'))]
+        # Stack
+        stack_fws = [getattr(am, f'GFX_FW_TYPE_RS64_{fw_name}_P{fwnum}_STACK') for fwnum in range(fw_cnt)]
+        self.descs += [self.desc(blob, hdr.data_offset_bytes, hdr.data_size_bytes, *stack_fws)]
+        self.ucode_start[fw_name] = hdr.ucode_start_addr_lo | (hdr.ucode_start_addr_hi << 32)
 
     # IMU firmware
-    blob, hdr = self.load_fw(f"gc_{fmt_ver(am.GC_HWIP)}_imu.bin", am.struct_imu_firmware_header_v1_0)
-    imu_i_off, imu_i_sz, imu_d_sz = hdr.header.ucode_array_offset_bytes, hdr.imu_iram_ucode_size_bytes, hdr.imu_dram_ucode_size_bytes
-    self.descs += [self.desc(blob, imu_i_off, imu_i_sz, am.GFX_FW_TYPE_IMU_I), self.desc(blob, imu_i_off + imu_i_sz, imu_d_sz, am.GFX_FW_TYPE_IMU_D)]
+    if self.adev.ip_ver[am.GC_HWIP] >= (11,0,0):
+      blob, hdr = self.load_fw(f"gc_{fmt_ver(am.GC_HWIP)}_imu.bin", am.struct_imu_firmware_header_v1_0)
+      imu_i_off, imu_i_sz, imu_d_sz = hdr.header.ucode_array_offset_bytes, hdr.imu_iram_ucode_size_bytes, hdr.imu_dram_ucode_size_bytes
+      self.descs += [self.desc(blob, imu_i_off, imu_i_sz, am.GFX_FW_TYPE_IMU_I), self.desc(blob, imu_i_off+imu_i_sz, imu_d_sz, am.GFX_FW_TYPE_IMU_D)]
 
     # RLC firmware
-    blob, hdr0, _hdr1, hdr2, hdr3 = self.load_fw(f"gc_{fmt_ver(am.GC_HWIP)}_rlc.bin", am.struct_rlc_firmware_header_v2_0,
+    blob, hdr0, hdr1, hdr2, hdr3 = self.load_fw(f"gc_{fmt_ver(am.GC_HWIP)}_rlc.bin", am.struct_rlc_firmware_header_v2_0,
       am.struct_rlc_firmware_header_v2_1, am.struct_rlc_firmware_header_v2_2, am.struct_rlc_firmware_header_v2_3)
 
-    for mem,fmem in [('IRAM', 'iram'), ('DRAM_BOOT', 'dram')]:
-      off, sz = getattr(hdr2, f'rlc_{fmem}_ucode_offset_bytes'), getattr(hdr2, f'rlc_{fmem}_ucode_size_bytes')
-      self.descs += [self.desc(blob, off, sz, getattr(am, f'GFX_FW_TYPE_RLC_{mem}'))]
+    if hdr0.header.header_version_minor == 1:
+      for mem,fmem in [('LIST_SRM_CNTL', 'list_cntl'), ('LIST_GPM_MEM', 'list_gpm'), ('LIST_SRM_MEM', 'list_srm')]:
+        off, sz = getattr(hdr1, f'save_restore_{fmem}_offset_bytes'), getattr(hdr1, f'save_restore_{fmem}_size_bytes')
+        self.descs += [self.desc(blob, off, sz, getattr(am, f'GFX_FW_TYPE_RLC_RESTORE_{mem}'))]
+
+    if hdr0.header.header_version_minor >= 2:
+      for mem,fmem in [('IRAM', 'iram'), ('DRAM_BOOT', 'dram')]:
+        off, sz = getattr(hdr2, f'rlc_{fmem}_ucode_offset_bytes'), getattr(hdr2, f'rlc_{fmem}_ucode_size_bytes')
+        self.descs += [self.desc(blob, off, sz, getattr(am, f'GFX_FW_TYPE_RLC_{mem}'))]
 
     if hdr0.header.header_version_minor == 3:
       for mem in ['P', 'V']:
@@ -199,14 +221,14 @@ class AMDev(PCIDevImplBase):
   def reg(self, reg:str) -> AMRegister: return self.__dict__[reg]
 
   def rreg(self, reg:int) -> int:
-    val = self.indirect_rreg(reg * 4) if reg > len(self.mmio) else self.mmio[reg]
+    val = self.indirect_rreg(reg) if reg > len(self.mmio) else self.mmio[reg]
     if AM_DEBUG >= 4 and getattr(self, '_prev_rreg', None) != (reg, val): print(f"am {self.devfmt}: Reading register {reg:#x} with value {val:#x}")
     self._prev_rreg = (reg, val)
     return val
 
   def wreg(self, reg:int, val:int):
     if AM_DEBUG >= 4: print(f"am {self.devfmt}: Writing register {reg:#x} with value {val:#x}")
-    if reg > len(self.mmio): self.indirect_wreg(reg * 4, val)
+    if reg > len(self.mmio): self.indirect_wreg(reg, val)
     else: self.mmio[reg] = val
 
   def wreg_pair(self, reg_base:str, lo_suffix:str, hi_suffix:str, val:int, inst:int=0):
@@ -214,12 +236,16 @@ class AMDev(PCIDevImplBase):
     self.reg(f"{reg_base}{hi_suffix}").write(val >> 32, inst=inst)
 
   def indirect_rreg(self, reg:int) -> int:
-    self.reg("regBIF_BX_PF0_RSMU_INDEX").write(reg)
+    self.reg("regBIF_BX_PF0_RSMU_INDEX").write(reg * 4)
     return self.reg("regBIF_BX_PF0_RSMU_DATA").read()
 
   def indirect_wreg(self, reg:int, val:int):
-    self.reg("regBIF_BX_PF0_RSMU_INDEX").write(reg)
+    self.reg("regBIF_BX_PF0_RSMU_INDEX").write(reg * 4)
     self.reg("regBIF_BX_PF0_RSMU_DATA").write(val)
+
+  def indirect_wreg_pcie(self, reg:int, val:int, aid:int=0):
+    self.reg("regBIF_BX0_PCIE_INDEX2").write(reg * 4 + ((((aid & 0b11) << 32) | (1 << 34)) if aid > 0 else 0))
+    self.reg("regBIF_BX0_PCIE_DATA2").write(val)
 
   def _read_vram(self, addr, size) -> bytes:
     assert addr % 4 == 0 and size % 4 == 0, f"Invalid address {addr:#x} or size {size:#x}"
