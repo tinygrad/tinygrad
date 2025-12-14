@@ -1,8 +1,14 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-import sysconfig
-dll = DLL('nvjitlink', 'nvJitLink', f'/usr/local/cuda/targets/{sysconfig.get_config_var("MULTIARCH").rsplit("-", 1)[0]}/lib')
+from tinygrad.helpers import unwrap
+from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from ctypes.util import find_library
+def dll():
+  try: return ctypes.CDLL(unwrap(find_library('nvJitLink')))
+  except: pass
+  return None
+dll = dll()
+
 nvJitLinkResult = CEnum(ctypes.c_uint32)
 NVJITLINK_SUCCESS = nvJitLinkResult.define('NVJITLINK_SUCCESS', 0)
 NVJITLINK_ERROR_UNRECOGNIZED_OPTION = nvJitLinkResult.define('NVJITLINK_ERROR_UNRECOGNIZED_OPTION', 1)
