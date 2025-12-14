@@ -550,17 +550,17 @@ class TestJit(unittest.TestCase):
 
   @unittest.skipIf(Device.DEFAULT == "REMOTE", "somehow this test inherits values from the above test")
   def test_jit_init_with_empty_different_types(self):
-      @TinyJit
-      def f(x:Tensor) -> Tensor: return (x + 1).realize()
-      # Tensor.empty.realize() is unrealized
-      def _empty(): return Tensor.empty(1) + 0
-      f(_empty())
-      # maps realized -> realized
-      f(_empty())
-      # (type(realize(Tensor([10.0]))) = realized), realized -> realized
-      assert f(Tensor([17.0])).item() == 18.0
-      # this should fail since jit recorded a realized tensor and this is a const tensor
-      with self.assertRaises(AssertionError): f(Tensor(2.0)).item()
+    @TinyJit
+    def f(x:Tensor) -> Tensor: return (x + 1).realize()
+    # Tensor.empty.realize() is unrealized
+    def _empty(): return Tensor.empty(1) + 0
+    f(_empty())
+    # maps realized -> realized
+    f(_empty())
+    # (type(realize(Tensor([10.0]))) = realized), realized -> realized
+    assert f(Tensor([17.0])).item() == 18.0
+    # this should fail since jit recorded a realized tensor and this is a const tensor
+    with self.assertRaises(AssertionError): f(Tensor(2.0)).item()
 
 @unittest.skip("Pending multioutput implementation #3607")
 class TestMultioutputJit(unittest.TestCase):
