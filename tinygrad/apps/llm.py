@@ -1,7 +1,7 @@
 from __future__ import annotations
 import sys, argparse, typing, re, unicodedata, json, uuid, time
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv
-from tinygrad.helpers import partition, TCPServerWithReuse, HTTPRequestHandler, tqdm, DEBUG
+from tinygrad.helpers import partition, TCPServerWithReuse, HTTPRequestHandler, tqdm, DEBUG, Timing, GlobalCounters
 
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int]):
@@ -10,6 +10,7 @@ class SimpleTokenizer:
     self._byte_decoder = {chr(b): b for b in bs} | {chr(256+i): b for i,b in enumerate(b for b in range(256) if b not in bs)}
 
     # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L286
+    # TODO: ucat_range is slow
     def ucat_range(pre: str): return "".join(re.escape(chr(cp)) for cp in range(sys.maxunicode + 1) if unicodedata.category(chr(cp)).startswith(pre))
     r_ws, r_p_N, r_p_L = r"\t\n\x0b\x0c\r\x85" + ucat_range("Z"), ucat_range("N"), ucat_range("L")
     self._split_to_word = re.compile("(?i:'s|'t|'re|'ve|'m|'ll|'d)|" + \
@@ -233,11 +234,21 @@ if __name__ == "__main__":
   parser.add_argument("--model", choices=list(models.keys()), default=list(models.keys())[0], help="Model choice")
   parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
   parser.add_argument("--serve", action="store_true", help="Run OpenAI compatible API")
+  parser.add_argument("--benchmark", action="store_true", help="Benchmark tok/s")
   args = parser.parse_args()
 
   # load the model
   model, kv = Transformer.from_gguf(Tensor.from_url(models[args.model]), args.max_context)
   if DEBUG >= 1: print(f"using model {args.model}")
+
+  # do benchmark
+  if args.benchmark:
+    param_bytes = sum(x.nbytes() for x in nn.state.get_parameters(model))
+    gen = model.generate([0], 0)
+    for _ in range(20):
+      GlobalCounters.reset()
+      with Timing(on_exit=lambda x: f", {1e9/x:6.2f} tok/s, {GlobalCounters.global_mem/x:7.2f} GB/s, param {param_bytes/x:7.2f} GB/s"): next(gen)
+    exit(0)
 
   # extract some metadata
   tok = SimpleTokenizer.from_gguf_kv(kv)
