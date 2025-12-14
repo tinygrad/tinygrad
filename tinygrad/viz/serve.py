@@ -234,69 +234,23 @@ def unpack_pmc(e) -> dict:
     rows.append(row)
   return {"rows":rows, "cols":agg_cols}
 
-@soft_err(lambda err: ctxs.append({"name":"ERR", "steps":[create_step("Loader error", ("render",len(ctxs),0), err)]}))
-def load_sqtt(profile:list[ProfileEvent]) -> None:
+# ** on startup, list all the performance counter traces
+
+def load_counters(profile:list[ProfileEvent]) -> None:
   from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
-  counter_events:dict[tuple[str, int], list[ProfileSQTTEvent|ProfilePMCEvent]] = {}
+  counter_events:dict[tuple[str, int], dict] = {}
   durations:dict[str, list[float]] = {}
   for e in profile:
     if isinstance(e, (ProfilePMCEvent, ProfileSQTTEvent)): counter_events.setdefault((e.kern, e.exec_tag), []).append(e)
     if isinstance(e, ProfileRangeEvent) and e.device.startswith("AMD") and e.en is not None:
       durations.setdefault(str(e.name), []).append(float(e.en-e.st))
-  if not counter_events: return
-  # ** init decoder
-  from extra.sqtt.roc import decode
-  rctx = decode(profile)
-  if getenv("SQTT_PARSE"):
-    from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
-    for counters in counter_events.values():
-      for e in counters:
-        if isinstance(e, ProfileSQTTEvent): parse_sqtt_print_packets(e.blob)
-  # ** decode traces for each run
-  all_runs:dict = {"cols":{}, "rows":[]}
-  steps:list[dict] = [create_step("All", ("/all", len(ctxs), 0), data=all_runs)]
-  for key,counters in counter_events.items():
-    # ** Run summary
-    program = trace.keys[r].ret if (r:=ref_map.get(key[0])) else None
-    summary = [f"{program.global_size=} {program.local_size=}"] if program else [repr(key)]
-    # ** SQTT events
-    disasm = rctx.disasms[key[0]]
-    cu_events:dict[str, list[ProfileEvent]] = {}
-    # * INST waves
-    wave_insts:dict[str, dict[str, dict]] = {}
-    inst_units:dict[str, itertools.count] = {}
-    for w in rctx.inst_execs.get(key, []):
-      if (u:=w.wave_loc) not in inst_units: inst_units[u] = itertools.count(0)
-      n = next(inst_units[u])
-      if (events:=cu_events.get(w.cu_loc)) is None: cu_events[w.cu_loc] = events = []
-      events.append(ProfileRangeEvent(w.simd_loc, loc:=f"INST WAVE:{w.wave_id} N:{n}", Decimal(w.begin_time), Decimal(w.end_time)))
-      wave_insts.setdefault(w.cu_loc, {})[f"{u} N:{n}"] = {"wave":w, "disasm":disasm, "run_number":n, "loc":loc}
-    # * OCC waves
-    units:dict[str, itertools.count] = {}
-    wave_start:dict[str, int] = {}
-    for occ in rctx.occ_events.get(key, []):
-      if (u:=occ.wave_loc) not in units: units[u] = itertools.count(0)
-      if u in inst_units: continue
-      if occ.start: wave_start[u] = occ.time
-      else:
-        if (events:=cu_events.get(occ.cu_loc)) is None: cu_events[occ.cu_loc] = events = []
-        events.append(ProfileRangeEvent(occ.simd_loc, f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)), Decimal(occ.time)))
-    prg_cu = sorted(cu_events, key=row_tuple)
-    if cu_events: summary.append(f"Scheduled on {len(prg_cu)} CUs")
-    steps.append(create_step(program.name if program else key[0], ("/prg-run", len(ctxs), len(steps)), {"src":"\n\n".join(summary)}, depth=0))
-    # ** PMC events
-    if (pmc_event:=next((e for e in counters if isinstance(e, ProfilePMCEvent)), None)) is not None:
-      steps.append(create_step("PMC", ("/pmc", len(ctxs), len(steps)), pmc_table:=unpack_pmc(pmc_event), depth=1))
-      all_runs["cols"].update([(r[0], None) for r in pmc_table["rows"]])
-      all_runs["rows"].append((key[0], durations[key[0]].pop(0), *[r[1] for r in pmc_table["rows"]]))
-    for cu in prg_cu:
-      events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]
-      steps.append(create_step(f"{cu} {len(cu_events[cu])}", ("/counters", len(ctxs), len(steps)),
-                               {"value":get_profile(events, sort_fn=row_tuple), "content_type":"application/octet-stream"}, depth=1))
-      for k in sorted(wave_insts.get(cu, []), key=row_tuple):
-        data = wave_insts[cu][k]
-        steps.append(create_step(k.replace(cu, ""), ("/sqtt-insts", len(ctxs), len(steps)), data, loc=data["loc"], depth=2))
-  all_runs["cols"] = ["Kernel", "Duration", *all_runs["cols"]]
+    if getenv("SQTT_PARSE") and isinstance(e, ProfileSQTTEvent):
+      from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
+      parse_sqtt_print_packets(e.blob)
+  steps:list[dict] = [create_step("All", ("/all-counters", len(ctxs), 0), (durations, counter_events))]
+  for k,v in counter_events.items():
+    prg = trace.keys[r].ret if (r:=ref_map.get(k[0])) else None
+    steps.append(create_step(prg.name if prg is not None else str(k), ("/prg-counters", len(ctxs), len(steps))))
   ctxs.append({"name":"Counters", "steps":steps})
 
 def device_sort_fn(k:str) -> tuple[int, str, int]:
@@ -313,7 +267,7 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_
   device_decoders:dict[str, Callable[[list[ProfileEvent]], None]] = {}
   for device in device_ts_diffs:
     d = device.split(":")[0]
-    if d == "AMD": device_decoders[d] = load_sqtt
+    if d == "AMD": device_decoders[d] = load_counters
   for fxn in device_decoders.values(): fxn(profile)
   # map events per device
   dev_events:dict[str, list[tuple[int, int, float, DevEvent]]] = {}
@@ -381,6 +335,8 @@ def amd_readelf(lib:bytes) -> list[dict]:
           ".group_segment_fixed_size":"LDS size", ".private_segment_fixed_size":"Scratch size"}
   return [{"label":label, "value":v} for k,label in keys.items() if (v:=notes["amdhsa.kernels"][0][k]) > 0]
 
+# ** Main render function to get the complete details about a trace event
+
 def get_render(i:int, j:int, fmt:str) -> dict:
   data = ctxs[i]["steps"][j]["data"]
   if fmt == "uops": return {"src":get_stdout(lambda: print_uops(data.uops or [])), "lang":"txt"}
@@ -397,6 +353,17 @@ def get_render(i:int, j:int, fmt:str) -> dict:
       with soft_err(lambda err: metadata.append(err)):
         metadata.append(amd_readelf(compiler.compile(data.src)))
     return {"src":disasm_str, "lang":"amdgpu" if data.device.startswith("AMD") else None, "metadata":metadata}
+  if fmt == "all-counters":
+    durations, counters = data
+    ret = {"cols":{}, "rows":[]}
+    for k,events in counters.items():
+      from tinygrad.runtime.ops_amd import ProfilePMCEvent
+      if (pmc_event:=next(e for e in events if isinstance(e, ProfilePMCEvent))) is None: continue
+      pmc_table = unpack_pmc(pmc_event)
+      ret["cols"].update([(r[0], None) for r in pmc_table["rows"]])
+      ret["rows"].append((k[0], durations[k[0]].pop(0), *[r[1] for r in pmc_table["rows"]]))
+    ret["cols"] = ["Kernel", "Duration", *ret["cols"]]
+    return ret
   if fmt == "sqtt-insts":
     columns = ["PC", "Instruction", "Hits", "Cycles", "Stall", "Type"]
     inst_columns = ["N", "Clk", "Idle", "Dur", "Stall"]
