@@ -1,7 +1,14 @@
 # mypy: ignore-errors
-import ctypes
-from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-dll = DLL('libclang', 'clang-20')
+import ctypes, os
+from tinygrad.helpers import unwrap
+from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from ctypes.util import find_library
+def dll():
+  try: return ctypes.CDLL(unwrap(os.getenv('LIBCLANG_PATH', find_library('clang-20'))))
+  except: pass
+  return None
+dll = dll()
+
 CXIndex = ctypes.c_void_p
 class struct_CXTargetInfoImpl(Struct): pass
 CXTargetInfo = ctypes.POINTER(struct_CXTargetInfoImpl)
