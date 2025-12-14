@@ -1,11 +1,11 @@
 from __future__ import annotations
-import ctypes, collections, dataclasses, functools, hashlib, array
+import ctypes, collections, dataclasses, functools, hashlib, array, time
 from tinygrad.helpers import mv_address, getenv, DEBUG, fetch
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.amd import AMDReg, import_module, import_asic_regs
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager
-from tinygrad.runtime.support.system import PCIDevice, PCIDevImplBase
+from tinygrad.runtime.support.system import System, PCIDevice, PCIDevImplBase
 from tinygrad.runtime.support.am.ip import AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
@@ -126,7 +126,7 @@ class AMPageTableEntry:
   def entry(self, entry_id:int) -> int: return self.entries[entry_id]
   def valid(self, entry_id:int) -> bool: return (self.entries[entry_id] & am.AMDGPU_PTE_VALID) != 0
   def address(self, entry_id:int) -> int:
-    assert self.entries[entry_id] & am.AMDGPU_PTE_SYSTEM == 0, "should not be system address"
+    assert self.entries[entry_id] & am.AMDGPU_PTE_SYSTEM == 0, f"should not be system address {self.entries[entry_id]:#x}"
     return self.adev.xgmi2paddr(self.entries[entry_id] & 0x0000FFFFFFFFF000)
   def is_page(self, entry_id:int) -> bool: return self.lv == am.AMDGPU_VM_PTB or self.adev.gmc.is_pte_huge_page(self.lv, self.entries[entry_id])
   def supports_huge_page(self, paddr:int): return self.lv >= am.AMDGPU_VM_PDB2
@@ -142,18 +142,8 @@ class AMMemoryManager(MemoryManager):
 class AMDev(PCIDevImplBase):
   Version = 0xA0000006
 
-  def __init__(self, pci_dev:PCIDevice, dma_regions:list[tuple[int, MMIOInterface]]|None=None):
+  def __init__(self, pci_dev:PCIDevice, dma_regions:list[tuple[int, MMIOInterface]]|None=None, reset_mode=False):
     self.pci_dev, self.devfmt, self.dma_regions = pci_dev, pci_dev.pcibus, dma_regions
-
-    # import time
-    # print(self.devfmt)
-    # x = [self.pci_dev.read_config(off, 4) for off in range(0, 256, 4)]
-    # self.pci_dev.reset()
-    # time.sleep(1.0)
-    # for off, val in enumerate(x):
-    #   if self.pci_dev.read_config(off * 4, 4) != val: print(f"am {self.devfmt}: PCI config space mismatch at offset {off * 4:#x}")
-    #   self.pci_dev.write_config(off * 4, val, 4)
-
     self.vram, self.doorbell64, self.mmio = self.pci_dev.map_bar(0), self.pci_dev.map_bar(2, fmt='Q'), self.pci_dev.map_bar(5, fmt='I')
 
     self._run_discovery()
@@ -178,7 +168,11 @@ class AMDev(PCIDevImplBase):
 
     # Init hw for IP blocks where it is needed
     if not self.partial_boot:
-      if self.psp.is_sos_alive() and self.smu.is_smu_alive(): self.smu.mode1_reset()
+      if self.psp.is_sos_alive() and self.smu.is_smu_alive():
+        if self.gmc.xgmi_seg_sz > 0:
+          if reset_mode: return # in reset mode, do not raise
+          raise RuntimeError("Malformed state. Use extra/amdpci/hive_reset.py to reset the hive")
+        self.smu.mode1_reset()
       for ip in [self.soc, self.gmc, self.ih, self.psp, self.smu]:
         ip.init_hw()
         if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
@@ -192,7 +186,7 @@ class AMDev(PCIDevImplBase):
       if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
 
     # self.smu.set_clocks(level=-1) # last level, max perf.
-    for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
+    # for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
     self.reg("regSCRATCH_REG7").write(AMDev.Version)
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
 
@@ -221,8 +215,8 @@ class AMDev(PCIDevImplBase):
     if DEBUG >= 2: print(f"am {self.devfmt}: Finalizing")
     for ip in [self.sdma, self.gfx]: ip.fini_hw()
     # self.smu.set_clocks(level=0)
-    self.gmc.on_interrupt()
-    self.ih.interrupt_handler()
+    # self.gmc.on_interrupt()
+    # self.ih.interrupt_handler()
 
   def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr
   def paddr2xgmi(self, paddr:int) -> int: return self.gmc.paddr_base + paddr

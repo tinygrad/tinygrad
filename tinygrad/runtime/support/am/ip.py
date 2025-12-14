@@ -40,10 +40,10 @@ class AM_GMC(AM_IP):
     self.vmhubs = len(self.adev.regs_offset[am.MMHUB_HWIP])
 
     # XGMI (for supported systems)
-    xgmi_phys_id = self.adev.regMMMC_VM_XGMI_LFB_CNTL.read_bitfields()['pf_lfb_region'] if hasattr(self.adev, 'regMMMC_VM_XGMI_LFB_CNTL') else 0
-    xgmi_seg_sz = (self.adev.regMMMC_VM_XGMI_LFB_SIZE.read_bitfields()['pf_lfb_size'] << 24) if hasattr(self.adev, 'regMMMC_VM_XGMI_LFB_SIZE') else 0
+    self.xgmi_phys_id = self.adev.regMMMC_VM_XGMI_LFB_CNTL.read_bitfields()['pf_lfb_region'] if hasattr(self.adev, 'regMMMC_VM_XGMI_LFB_CNTL') else 0
+    self.xgmi_seg_sz = self.adev.regMMMC_VM_XGMI_LFB_SIZE.read_bitfields()['pf_lfb_size']<<24 if hasattr(self.adev, 'regMMMC_VM_XGMI_LFB_SIZE') else 0
 
-    self.paddr_base = xgmi_phys_id * xgmi_seg_sz
+    self.paddr_base = self.xgmi_phys_id * self.xgmi_seg_sz
 
     self.fb_base = (self.adev.regMMMC_VM_FB_LOCATION_BASE.read() & 0xFFFFFF) << 24
     self.fb_end = (self.adev.regMMMC_VM_FB_LOCATION_TOP.read() & 0xFFFFFF) << 24
@@ -60,13 +60,11 @@ class AM_GMC(AM_IP):
 
     self.memscratch_xgmi_paddr = self.adev.paddr2xgmi(self.adev.mm.palloc(0x1000, zero=False, boot=True))
     self.dummy_page_xgmi_paddr = self.adev.paddr2xgmi(self.adev.mm.palloc(0x1000, zero=False, boot=True))
-    self.hub_initted = {"MM": False, "GC": False}
+    self.hub_initted = {"MM": False, "GC": False} # MM is already initted during partial boot
 
     self.pf_status_reg = lambda ip: f"reg{ip}VM_L2_PROTECTION_FAULT_STATUS{'_LO32' if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else ''}"
 
-  def init_hw(self):
-    self.init_hub("MM", inst_cnt=self.vmhubs)
-    for xcc in range(self.adev.gfx.xccs): self.adev.regRLC_SPM_MC_CNTL.write(0xf, inst=xcc)
+  def init_hw(self): self.init_hub("MM", inst_cnt=self.vmhubs)
 
   def flush_hdp(self): self.adev.wreg(self.adev.reg("regBIF_BX0_REMAP_HDP_MEM_FLUSH_CNTL").read() // 4, 0x0)
   def flush_tlb(self, ip:Literal["MM", "GC"], vmid, flush_type=0):
@@ -232,16 +230,15 @@ class AM_SMU(AM_IP):
     return self.adev.mmMP1_SMN_C2PMSG_90.read() != 0
 
   def mode1_reset(self):
-    # self.adev.regSDMA_GB_ADDR_CONFIG.read(0x0)
     if DEBUG >= 2: print(f"am {self.adev.devfmt}: mode1 reset")
-    # if self.adev.ip_ver[am.MP0_HWIP] >= (14,0,0): self._send_msg(__DEBUGSMC_MSG_Mode1Reset:=2, 0, debug=True)
-    # elif self.adev.ip_ver[am.MP0_HWIP] == (13,0,6): self._send_msg(self.smu_mod.PPSMC_MSG_GfxDriverReset, 2)
-    # else: self._send_msg(self.smu_mod.PPSMC_MSG_Mode1Reset, 0)
-    # time.sleep(0.5) # 500ms
-    self.adev.smu._send_msg(self.adev.smu.smu_mod.PPSMC_MSG_ResetSDMA, 0xff)
-    self.adev.regGRBM_SOFT_RESET.write(soft_reset_cp=1, soft_reset_gfx=1, soft_reset_cpc=1)
-    time.sleep(0.01)
-    self.adev.regGRBM_SOFT_RESET.write(0x0)
+    if self.adev.ip_ver[am.MP0_HWIP] >= (14,0,0): self._send_msg(__DEBUGSMC_MSG_Mode1Reset:=2, 0, debug=True)
+    elif self.adev.ip_ver[am.MP0_HWIP] == (13,0,6): self._send_msg(self.smu_mod.PPSMC_MSG_GfxDriverReset, 1)
+    else: self._send_msg(self.smu_mod.PPSMC_MSG_Mode1Reset, 0)
+    time.sleep(0.5) # 500ms
+    # self.adev.smu._send_msg(self.adev.smu.smu_mod.PPSMC_MSG_ResetSDMA, 0xff)
+    # self.adev.regGRBM_SOFT_RESET.write(soft_reset_cp=1, soft_reset_gfx=1, soft_reset_cpc=1)
+    # time.sleep(0.01)
+    # self.adev.regGRBM_SOFT_RESET.write(0x0)
 
   def read_table(self, table_t, cmd):
     self._send_msg(self.smu_mod.PPSMC_MSG_TransferTableSmu2Dram, cmd)
@@ -249,15 +246,16 @@ class AM_SMU(AM_IP):
   def read_metrics(self): return self.read_table(self.smu_mod.SmuMetricsExternal_t, self.smu_mod.TABLE_SMU_METRICS)
 
   def set_clocks(self, level):
-    if not hasattr(self, 'clcks'):
-      self.clcks = {}
-      for clck in [self.smu_mod.PPCLK_GFXCLK, self.smu_mod.PPCLK_UCLK, self.smu_mod.PPCLK_FCLK, self.smu_mod.PPCLK_SOCCLK]:
-        cnt = self._send_msg(self.smu_mod.PPSMC_MSG_GetDpmFreqByIndex, (clck<<16)|0xff, read_back_arg=True)&0x7fffffff
-        self.clcks[clck] = [self._send_msg(self.smu_mod.PPSMC_MSG_GetDpmFreqByIndex, (clck<<16)|i, read_back_arg=True)&0x7fffffff for i in range(cnt)]
+    pass
+    # if not hasattr(self, 'clcks'):
+    #   self.clcks = {}
+    #   for clck in [self.smu_mod.PPCLK_GFXCLK, self.smu_mod.PPCLK_UCLK, self.smu_mod.PPCLK_FCLK, self.smu_mod.PPCLK_SOCCLK]:
+    #     cnt = self._send_msg(self.smu_mod.PPSMC_MSG_GetDpmFreqByIndex, (clck<<16)|0xff, read_back_arg=True)&0x7fffffff
+    #     self.clcks[clck] = [self._send_msg(self.smu_mod.PPSMC_MSG_GetDpmFreqByIndex, (clck<<16)|i, read_back_arg=True)&0x7fffffff for i in range(cnt)]
 
-    for clck, vals in self.clcks.items():
-      self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMinByFreq, clck << 16 | (vals[level]))
-      self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMaxByFreq, clck << 16 | (vals[level]))
+    # for clck, vals in self.clcks.items():
+    #   self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMinByFreq, clck << 16 | (vals[level]))
+    #   self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMaxByFreq, clck << 16 | (vals[level]))
 
   def _smu_cmn_send_msg(self, msg:int, param=0, debug=False):
     (self.adev.mmMP1_SMN_C2PMSG_90 if not debug else self.adev.mmMP1_SMN_C2PMSG_54).write(0) # resp reg
@@ -285,13 +283,15 @@ class AM_GFX(AM_IP):
 
     for xcc in range(self.xccs): self.adev.regRLC_SRM_CNTL.update(srm_enable=1, auto_incr_addr=1, inst=xcc)
 
+    for xcc in range(self.xccs): self.adev.regRLC_SPM_MC_CNTL.write(0xf, inst=xcc)
+
     self.adev.soc.doorbell_enable(port=0, awid=0x3, awaddr_31_28_value=0x3)
     self.adev.soc.doorbell_enable(port=3, awid=0x6, awaddr_31_28_value=0x3)
 
     for xcc in range(self.xccs):
       self.adev.regGB_ADDR_CONFIG.write(0x2a114042, inst=xcc)
       self.adev.regTCP_UTCL1_CNTL2.write(0x18000001, inst=xcc)
-    
+
       self.adev.regGRBM_CNTL.update(read_timeout=0xff, inst=xcc)
       for i in range(0, 16):
         self._grbm_select(vmid=i, inst=xcc)
@@ -325,8 +325,8 @@ class AM_GFX(AM_IP):
       self.adev.regRLC_SAFE_MODE.write(message=0, cmd=1, inst=xcc)
 
     # Program xcc
-    for xcc in range(self.xccs): self.adev.regCP_HYP_XCP_CTL.write(num_xcc_in_xcp=self.xccs, virtual_xcc_id=xcc, inst=xcc)
-    # self.adev.psp._spatial_partition_cmd(1)
+    # for xcc in range(self.xccs): self.adev.regCP_HYP_XCP_CTL.write(num_xcc_in_xcp=self.xccs, virtual_xcc_id=xcc, inst=xcc)
+    self.adev.psp._spatial_partition_cmd(1)
 
     # NOTE: Wait for MEC to be ready. The kernel does udelay here as well.
     time.sleep(0.05)
@@ -470,21 +470,20 @@ class AM_SDMA(AM_IP):
   def init_sw(self): self.sdma_name = "F32" if self.adev.ip_ver[am.SDMA0_HWIP] < (7,0,0) else "MCU"
   def init_hw(self):
     # self.adev.smu._send_msg(self.adev.smu.smu_mod.PPSMC_MSG_ResetSDMA, 0xff)
-    for inst in range(16):
-      self.adev.regSDMA_GB_ADDR_CONFIG.write(0x104002, inst=inst)
-      self.adev.regSDMA_GB_ADDR_CONFIG_READ.write(0x104002, inst=inst)
-      self.adev.regSDMA_PHASE0_QUANTUM.write(0x2000, inst=inst)
-      self.adev.regSDMA_PHASE1_QUANTUM.write(0x2000, inst=inst)
-      self.adev.regSDMA_PHASE2_QUANTUM.write(0x2000, inst=inst)
+    for inst in range(1):
+      # self.adev.regSDMA_GB_ADDR_CONFIG.write(0x104002, inst=inst)
+      # self.adev.regSDMA_GB_ADDR_CONFIG_READ.write(0x104002, inst=inst)
+      # self.adev.regSDMA_PHASE0_QUANTUM.write(0x2000, inst=inst)
+      # self.adev.regSDMA_PHASE1_QUANTUM.write(0x2000, inst=inst)
+      # self.adev.regSDMA_PHASE2_QUANTUM.write(0x2000, inst=inst)
       self.adev.regSDMA_UTCL1_TIMEOUT.write(0x800080, inst=inst)
       self.adev.regSDMA_SEM_WAIT_FAIL_TIMER_CNTL.write(0x0, inst=inst)
-      # self.adev.regSDMA_F32_CNTL.update(halt=0, inst=inst)
-      print(inst, self.adev.regSDMA_F32_CNTL.read_bitfields(inst=inst))
-      # self.adev.regSDMA_CNTL.update(utc_l1_enable=1, ctxempty_int_enable=1, auto_ctxsw_enable=1, inst=inst)
-      self.adev.regSDMA_CNTL.write(0x10046382, inst=inst)
-
-    self.adev.indirect_wreg_pcie(0x141ea04, 0x1028071d)
-    self.adev.reg(f"regDOORBELL0_CTRL_ENTRY_1").write(0x5200)
+      # self.adev.regSDMA_F32_CNTL.update(reset=1, inst=inst)
+      # time.sleep(0.1)
+      # self.adev.regSDMA_F32_CNTL.update(reset=0, halt=0, inst=inst)
+      # print(inst, self.adev.regSDMA_F32_CNTL.read_bitfields(inst=inst))
+      self.adev.regSDMA_CNTL.update(utc_l1_enable=1, ctxempty_int_enable=1, auto_ctxsw_enable=1, inst=inst)
+      # self.adev.regSDMA_CNTL.write(0x10046382, inst=inst)
 
     # for pipe in range(2):
       
@@ -498,16 +497,36 @@ class AM_SDMA(AM_IP):
       # self.adev.reg(f"regSDMA_{self.sdma_name}_CNTL").update(halt=0, **{f"{'th1_' if self.sdma_name == 'F32' else ''}reset":0})
       # self.adev.reg(f"regSDMA_CNTL").update(ctxempty_int_enable=1, trap_enable=1)
     # self.adev.soc.doorbell_enable(port=2, awid=0xe, awaddr_31_28_value=0x3, offset=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0, size=4)
+    
+    # self.adev.soc.doorbell_enable(port=1, awid=0xe, awaddr_31_28_value=0x3, offset=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0, size=4)
+    
+  #   doorbell_ctrl =
+	# 	REG_SET_FIELD(doorbell_ctrl, S2A_DOORBELL_ENTRY_1_CTRL,
+	# 		S2A_DOORBELL_PORT1_ENABLE, 1);
+	# doorbell_ctrl =
+	# 	REG_SET_FIELD(doorbell_ctrl, S2A_DOORBELL_ENTRY_1_CTRL,
+	# 		S2A_DOORBELL_PORT1_RANGE_SIZE, doorbell_size);
+    x = self.adev.regS2A_DOORBELL_ENTRY_1_CTRL.encode(s2a_doorbell_port1_enable=1, s2a_doorbell_port1_range_size=4, s2a_doorbell_port1_awaddr_31_28_value=1,
+      s2a_doorbell_port1_range_offset=0xe, s2a_doorbell_port1_awid=0xe)
+    print(hex(x), hex(0x1028071d))
+    self.adev.indirect_wreg_pcie(0x141ea04, x)
+    self.adev.reg(f"regDOORBELL0_CTRL_ENTRY_1").write(0x5200)
 
   def fini_hw(self):
     self.adev.regSDMA_GFX_RB_CNTL.update(rb_enable=0)
     self.adev.regSDMA_GFX_IB_CNTL.update(ib_enable=0)
+    self.adev.reg(f"regSDMA_GFX_MINOR_PTR_UPDATE").write(0x1, inst=0)
     self.adev.reg(f"regSDMA_GFX_DOORBELL").update(enable=0, inst=0)
     self.adev.reg(f"regSDMA_GFX_DOORBELL_OFFSET").update(offset=0, inst=0)
-    # self.adev.smu._send_msg(self.adev.smu.smu_mod.PPSMC_MSG_ResetSDMA, 0xff)
-    # self.adev.regGRBM_SOFT_RESET.write(soft_reset_cp=1, soft_reset_gfx=1, soft_reset_cpc=1)
-    # time.sleep(0.01)
-    # self.adev.regGRBM_SOFT_RESET.write(0x0)
+    self.adev.reg(f"regSDMA_GFX_MINOR_PTR_UPDATE").write(0x0, inst=0)
+
+    # self.adev.indirect_wreg_pcie(0x141ea04, 0x0)
+    self.adev.reg(f"regDOORBELL0_CTRL_ENTRY_1").write(0x0)
+    # x = self.adev.regS2A_DOORBELL_ENTRY_1_CTRL.encode(s2a_doorbell_port1_enable=0, s2a_doorbell_port1_range_size=4, s2a_doorbell_port1_awaddr_31_28_value=1,
+    #   s2a_doorbell_port1_range_offset=0xe, s2a_doorbell_port1_awid=0xe)
+    # self.adev.indirect_wreg_pcie(0x141ea04, x)
+
+    # self.adev.smu._send_msg(self.adev.smu.smu_mod.PPSMC_MSG_ResetSDMA, (1 << 0))
 
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, doorbell:int, pipe:int, queue:int):
     # Setup the ring
@@ -521,7 +540,7 @@ class AM_SDMA(AM_IP):
     self.adev.reg(f"regSDMA_GFX_DOORBELL_OFFSET").update(offset=doorbell * 2, inst=inst)
     self.adev.reg(f"regSDMA_GFX_DOORBELL").update(enable=1, inst=inst)
     self.adev.reg(f"regSDMA_GFX_MINOR_PTR_UPDATE").write(0x0, inst=inst)
-    self.adev.regSDMA_GFX_RB_WPTR_POLL_CNTL.update(f32_poll_enable=0, inst=inst)
+    # self.adev.regSDMA_GFX_RB_WPTR_POLL_CNTL.update(f32_poll_enable=0, inst=inst)
     self.adev.reg(f"regSDMA_GFX_RB_CNTL").write(rb_vmid=0, rptr_writeback_enable=1, rptr_writeback_timer=6,
       rb_size=(ring_size//4).bit_length()-1, rb_enable=1, inst=inst)
     self.adev.reg(f"regSDMA_GFX_IB_CNTL").update(ib_enable=1, inst=inst)
@@ -674,7 +693,7 @@ class AM_PSP(AM_IP):
   def _tmr_load_cmd(self) -> am.struct_psp_gfx_cmd_resp:
     cmd = am.struct_psp_gfx_cmd_resp(cmd_id=am.GFX_CMD_ID_SETUP_TMR)
     cmd.cmd.cmd_setup_tmr.buf_phy_addr_hi, cmd.cmd.cmd_setup_tmr.buf_phy_addr_lo = data64(self.adev.paddr2mc(self.tmr_paddr) if self.tmr_paddr else 0)
-    cmd.cmd.cmd_setup_tmr.system_phy_addr_hi, cmd.cmd.cmd_setup_tmr.system_phy_addr_lo = data64(self.adev.paddr2xgmi(self.tmr_paddr))
+    cmd.cmd.cmd_setup_tmr.system_phy_addr_hi, cmd.cmd.cmd_setup_tmr.system_phy_addr_lo = data64(self.adev.paddr2xgmi(self.tmr_paddr) if self.tmr_paddr else 0)
     cmd.cmd.cmd_setup_tmr.bitfield.virt_phy_addr = 1
     cmd.cmd.cmd_setup_tmr.buf_size = 0 # self.tmr_size
     return self._ring_submit(cmd)
