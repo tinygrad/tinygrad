@@ -1,5 +1,5 @@
 from __future__ import annotations
-import sys, argparse, typing, re, unicodedata, json, uuid, time
+import sys, argparse, typing, re, unicodedata, json, uuid, time, functools
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv
 from tinygrad.helpers import partition, TCPServerWithReuse, HTTPRequestHandler, tqdm, DEBUG, Timing, GlobalCounters
 
@@ -52,15 +52,18 @@ class SimpleTokenizer:
   def decode(self, ids:list[int]) -> str: return b''.join(self._tok2bytes[tid] for tid in ids).decode()
   def role(self, role:str): return self.encode("<|start_header_id|>" + role + "<|end_header_id|>\n\n")
 
-def apply_rope(x:Tensor, start_pos:int|UOp, base:float = 10000.0) -> Tensor:
+@functools.cache
+def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
+  freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2)[:(dim // 2)] / dim))
+  freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
+  return Tensor.stack(freqs.cos(), freqs.sin(), dim=-1).contiguous()
+
+def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
   B, H, T, Hd = x.shape
   assert isinstance(Hd, int) and (Hd & 1) == 0, "RoPE requires an even head dimension"
-  half = Hd // 2
-  t_start_pos = start_pos if isinstance(start_pos, int) else Tensor(start_pos)
-  angles = (Tensor.arange(T, dtype="float32") + t_start_pos)[:, None] * (base ** (-(Tensor.arange(half, dtype="float32") / half)))[None, :]
-  # contiguous here allows RoPE to be pruned in the JIT
-  cos, sin = angles.cos().reshape(1, 1, T, half).cast(x.dtype).contiguous(), angles.sin().reshape(1, 1, T, half).cast(x.dtype).contiguous()
-  x_pairs = x.reshape(B, H, T, half, 2)
+  x_pairs     = x.reshape(B, H, T, Hd//2, 2)
+  cos = freqs_cis.reshape(1, 1, T, Hd//2, 2)[..., 0]
+  sin = freqs_cis.reshape(1, 1, T, Hd//2, 2)[..., 1]
   return Tensor.stack(x_pairs[..., 0] * cos - x_pairs[..., 1] * sin,
                       x_pairs[..., 0] * sin + x_pairs[..., 1] * cos, dim=-1).reshape(B, H, T, Hd)
 
@@ -96,8 +99,9 @@ class TransformerBlock:
     k = k.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
     v = v.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
 
-    q = apply_rope(q, start_pos)
-    k = apply_rope(k, start_pos)
+    freqs_cis = precompute_freqs_cis(self.head_dim, self.max_context)[start_pos:start_pos+T]
+    q = apply_rope(q, freqs_cis)
+    k = apply_rope(k, freqs_cis)
 
     # TODO: remove these kv cache realizes
     if not hasattr(self, "cache_kv"):
@@ -115,7 +119,8 @@ class TransformerBlock:
 
   def _feed_forward(self, h: Tensor) -> Tensor:
     h_norm = self.ffn_norm(h)
-    gated  = self.ffn_gate(h_norm).silu() * self.ffn_up(h_norm)
+    # TODO: remove the need for this contiguous
+    gated  = self.ffn_gate(h_norm).silu().contiguous() * self.ffn_up(h_norm)
     return h + self.ffn_down(gated)
 
   def __call__(self, x: Tensor, start_pos: int|UOp):
