@@ -241,7 +241,7 @@ def load_counters(profile:list[ProfileEvent]) -> None:
   counter_events:dict[tuple[str, int], dict] = {}
   durations:dict[str, list[float]] = {}
   for e in profile:
-    if isinstance(e, (ProfilePMCEvent, ProfileSQTTEvent)): counter_events.setdefault((e.kern, e.exec_tag), []).append(e)
+    if isinstance(e, (ProfilePMCEvent, ProfileSQTTEvent)): counter_events.setdefault((e.kern, e.exec_tag), {}).setdefault(type(e), []).append(e)
     if isinstance(e, ProfileRangeEvent) and e.device.startswith("AMD") and e.en is not None:
       durations.setdefault(str(e.name), []).append(float(e.en-e.st))
     if getenv("SQTT_PARSE") and isinstance(e, ProfileSQTTEvent):
@@ -250,7 +250,7 @@ def load_counters(profile:list[ProfileEvent]) -> None:
   steps:list[dict] = [create_step("All", ("/all-counters", len(ctxs), 0), (durations, counter_events))]
   for k,v in counter_events.items():
     prg = trace.keys[r].ret if (r:=ref_map.get(k[0])) else None
-    steps.append(create_step(prg.name if prg is not None else str(k), ("/prg-counters", len(ctxs), len(steps))))
+    steps.append(create_step(prg.name if prg is not None else str(k), ("/prg-counters", len(ctxs), len(steps)), v))
   ctxs.append({"name":"Counters", "steps":steps})
 
 def device_sort_fn(k:str) -> tuple[int, str, int]:
@@ -355,14 +355,18 @@ def get_render(i:int, j:int, fmt:str) -> dict:
     return {"src":disasm_str, "lang":"amdgpu" if data.device.startswith("AMD") else None, "metadata":metadata}
   if fmt == "all-counters":
     durations, counters = data
-    ret = {"cols":{}, "rows":[]}
+    ret:dict = {"cols":{}, "rows":[]}
     for k,events in counters.items():
       from tinygrad.runtime.ops_amd import ProfilePMCEvent
-      if (pmc_event:=next(e for e in events if isinstance(e, ProfilePMCEvent))) is None: continue
-      pmc_table = unpack_pmc(pmc_event)
+      pmc_table = unpack_pmc(events[ProfilePMCEvent][0])
       ret["cols"].update([(r[0], None) for r in pmc_table["rows"]])
       ret["rows"].append((k[0], durations[k[0]].pop(0), *[r[1] for r in pmc_table["rows"]]))
     ret["cols"] = ["Kernel", "Duration", *ret["cols"]]
+    return ret
+  if fmt == "prg-counters":
+    from tinygrad.runtime.ops_amd import ProfilePMCEvent #, ProfileSQTTEvent
+    ret = unpack_pmc(data[ProfilePMCEvent][0])
+    #if data.get(ProfileSQTTEvent) is not None: ret["steps"] = create_step("SQTT", ("/sqtt-occ", len(ctxs), len(steps)))
     return ret
   if fmt == "sqtt-insts":
     columns = ["PC", "Instruction", "Hits", "Cycles", "Stall", "Type"]
