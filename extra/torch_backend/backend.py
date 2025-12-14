@@ -461,6 +461,7 @@ decomps = [
   # this needs copy_strided
   #aten.lerp,
   aten.norm,
+  aten._native_batch_norm_legit,
 ]
 for k,v in get_decompositions(decomps).items():
   key = str(k._schema).split("(")[0]
