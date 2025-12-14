@@ -514,6 +514,7 @@ class TestJit(unittest.TestCase):
     # (type(realize(Tensor([2.0]))) = realized), realized -> realized
     a = Tensor([10.0])
     assert f(a).item() == 11.0
+    del f
     # this should fail since jit recorded a realized tensor and this is a const tensor
     with self.assertRaises(AssertionError): f(Tensor(2.0)).item()
 
@@ -521,14 +522,16 @@ class TestJit(unittest.TestCase):
     def new_f():
       @TinyJit
       # see jit.py, _prepare_jit_inputs for mapping info
-      def f(x:Tensor) -> Tensor: return (x + 1).realize()
-      return f
+      def _f(x:Tensor) -> Tensor: return (x + 1).realize()
+      return _f
     def _empty(): return Tensor.empty(1) + 0
     # unrealized -> unrealized. assumes empty is unrealizable
     unrealized_f = new_f()
     assert Tensor.empty(1).uop.base_state is RState.UNREALIZED
     assert Tensor.empty(1).realize().uop.base_state is RState.UNREALIZED
     assert unrealized_f(Tensor.empty(1)).item() == 1.0
+    # for some reason python doesnt destroy the objects in the above test, so top inherits value above
+    del unrealized_f
     # const -> const
     const_f = new_f()
     assert Tensor(1.0).uop.base_state is RState.CONST
@@ -536,6 +539,7 @@ class TestJit(unittest.TestCase):
     const_f(Tensor(1.0))
     # maps here, and should throw error since consts alone do not map to buffers
     with self.assertRaises(AssertionError): const_f(Tensor(1.0))
+    del const_f
     # unrealized -> realized. should always work
     assert Tensor([1.0]).uop.base_state is RState.UNREALIZED
     assert Tensor([1.0]).realize().uop.base_state is RState.REALIZED
