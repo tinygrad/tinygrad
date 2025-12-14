@@ -30,7 +30,7 @@ range_start = {Ops.BUFFERIZE: 1, Ops.REDUCE: 1, Ops.STORE: 2, Ops.WMMA: 3, Ops.E
 class RState(Enum):
   def __repr__(self): return str(self)
   # allocated buffer, unallocated buffer, force allocate, and device const
-  REALIZED = auto(); UNREALIZED = auto(); CONTIGUOUS = auto(); CONST = auto()
+  REALIZED = auto(); UNREALIZED = auto(); CONST = auto()
 
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> ConstType: return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
