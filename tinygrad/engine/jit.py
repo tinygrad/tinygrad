@@ -340,7 +340,7 @@ class TinyJit(Generic[ReturnType]):
       # jit exec
       assert self.captured is not None
       assert self.captured.rmap == rmap, \
-        f"realize type violation: for {self.captured.rmap.keys()}. expected {rmap.values()}, got {self.captured.rmap.values()}"
+        f"realize type violation: for realize({self.captured.rmap.keys()}), expected {rmap.values()}, got {self.captured.rmap.values()}"
       assert self.captured.expected_st_vars_dtype_device == st_vars_dtype_device, \
         f"args mismatch in JIT: {self.captured.expected_st_vars_dtype_device=} != {st_vars_dtype_device=}"
       ret = self.captured(input_buffers, var_vals)
