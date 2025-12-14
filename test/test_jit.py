@@ -506,9 +506,11 @@ class TestJit(unittest.TestCase):
     @TinyJit
     def f(x:Tensor) -> Tensor: return (x + 1).realize()
 
-    f(Tensor.empty(1).contiguous())# TODO: should realizing empty w/o contiguous realize the buffer?
+    def _empty(): return Tensor.empty(1) + 0
+
+    f(_empty())# TODO: should realizing empty.contiguous() realize the buffer?
     # maps realized -> realized
-    f(Tensor.empty(1).contiguous())
+    f(_empty())
     # (type(realize(Tensor([2.0]))) = realized), realized -> realized
     assert f(Tensor([10.0])).item() == 11.0
     # this should fail since jit recorded a realized tensor and this is a const tensor
@@ -520,6 +522,7 @@ class TestJit(unittest.TestCase):
       # see jit.py, _prepare_jit_inputs for mapping info
       def f(x:Tensor) -> Tensor: return (x + 1).realize()
       return f
+    def _empty(): return Tensor.empty(1) + 0
     # unrealized -> unrealized. jit should raise error. assumes empty is unrealizable
     unrealized_f = new_f()
     assert Tensor.empty(1).uop.base_state is RState.UNREALIZED
@@ -543,7 +546,7 @@ class TestJit(unittest.TestCase):
     contig_f = new_f()
     assert Tensor([1.0]).uop.base_state is RState.UNREALIZED
     assert Tensor([1.0]).contiguous().realize().uop.base_state is RState.REALIZED
-    contig_f(Tensor.empty(1).contiguous()).item()
+    contig_f(_empty().contiguous()).item()
     assert contig_f(Tensor([2.0]).contiguous()).item() == 3.0
     assert contig_f(Tensor([3.0]).contiguous()).item() == 4.0
 
