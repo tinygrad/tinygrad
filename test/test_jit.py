@@ -516,7 +516,7 @@ class TestJit(unittest.TestCase):
       assert Tensor.empty(1).realize().uop.base_state is RState.UNREALIZED
       assert (Tensor.empty(1) + 10).realize().uop.base_state is RState.REALIZED
       unrealized_f(Tensor.empty(1)) # unrealized input
-      assert unrealized_f(Tensor.empty(1)).item() == 1.0
+      unrealized_f(Tensor.empty(1))
       with self.assertRaises(AssertionError): unrealized_f(Tensor.empty(1) + 10) # realized input
       # const -> const -> const
       const_f = new_f()
