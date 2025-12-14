@@ -218,9 +218,8 @@ class CapturedJit(Generic[ReturnType]):
 def _prepare_jit_inputs(args, kwargs):
   # there are 3 realize states: (unrealized, realized, const). jit maps (unrealized, realized, const) -> B:=(unrealized, realized, const)
   # and records the outer mapping B only. input mapping can be any combination of these tensors
-  # if B is unrealized, then the scheduler will not record the tensor, so its ops will be ignored aka failure
-  # if B is const, then it will also be ignored / fail, unless tied to a buffer (empty + 0)
-  # otherwise, B is scheduled inside the JIT.
+  # JIT requires that for a uop A, its output mapping is the same, etc realized -> realized and unrealized -> realized are valid
+  # but unrealized -> unrealized and unrealized -> realized are not allowed.
   # NOTE: the JIT will record the mapping on the second run
   input_tensors: list[tuple[str, Tensor]] = [('arg'+str(name),t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]
   names, tensors = [name for name,_ in input_tensors], [t for _,t in input_tensors]

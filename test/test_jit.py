@@ -512,7 +512,8 @@ class TestJit(unittest.TestCase):
     # maps realized -> realized
     f(_empty())
     # (type(realize(Tensor([2.0]))) = realized), realized -> realized
-    assert f(Tensor([10.0])).item() == 11.0
+    a = Tensor([10.0])
+    assert f(a).item() == 11.0
     # this should fail since jit recorded a realized tensor and this is a const tensor
     with self.assertRaises(AssertionError): f(Tensor(2.0)).item()
 
