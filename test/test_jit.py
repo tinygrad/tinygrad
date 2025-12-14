@@ -523,11 +523,11 @@ class TestJit(unittest.TestCase):
       def f(x:Tensor) -> Tensor: return (x + 1).realize()
       return f
     def _empty(): return Tensor.empty(1) + 0
-    # unrealized -> unrealized. jit should raise error. assumes empty is unrealizable
+    # unrealized -> unrealized. assumes empty is unrealizable
     unrealized_f = new_f()
     assert Tensor.empty(1).uop.base_state is RState.UNREALIZED
     assert Tensor.empty(1).realize().uop.base_state is RState.UNREALIZED
-    with self.assertRaises(AssertionError): unrealized_f(Tensor.empty(1))
+    assert unrealized_f(Tensor.empty(1)).item() == 1.0
     # const -> const
     const_f = new_f()
     assert Tensor(1.0).uop.base_state is RState.CONST

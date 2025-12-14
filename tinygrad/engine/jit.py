@@ -163,7 +163,7 @@ class CapturedJit(Generic[ReturnType]):
   def __reduce__(self):
     # TODO: free_intermediates here? replan_buffers_memory_layout here?
     return self.__class__, (self.ret, self.jit_cache, self.input_replace, self.extra_view_inputs,
-                            self.expected_names, self.expected_st_vars_dtype_device)
+                            self.rmap, self.expected_st_vars_dtype_device)
 
   def __post_init__(self):
     self._jit_cache: list[ExecItem] = self.jit_cache
@@ -225,7 +225,6 @@ def _prepare_jit_inputs(args, kwargs):
   input_tensors: list[tuple[str, Tensor]] = [('arg'+str(name),t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]
   names, tensors = [name for name,_ in input_tensors], [t for _,t in input_tensors]
   if len(unrealized_tensors := [x for x in tensors if not x.uop.is_realized]): Tensor.realize(*unrealized_tensors)
-  assert all(u.uop.base_state in (RState.CONST, RState.REALIZED) for u in unrealized_tensors), "some tensors w/ buffers havent realized"
   rmap = dict(zip(names, [x.uop.base_state for x in tensors]))
   # TODO: this multi unpack stuff is not well tested.
   lbs: list[UOp] = flatten([t.uop.src if t.uop.op is Ops.MULTI else [t.uop] for t in tensors])
