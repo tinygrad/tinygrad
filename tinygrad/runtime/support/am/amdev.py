@@ -98,12 +98,15 @@ class AMPageTableEntry:
   def __init__(self, adev, paddr, lv): self.adev, self.paddr, self.lv, self.entries = adev, paddr, lv, adev.vram.view(paddr, 0x1000, fmt='Q')
 
   def set_entry(self, entry_id:int, paddr:int, table=False, uncached=False, system=False, snooped=False, frag=0, valid=True):
+    if not system: paddr = self.adev.paddr2xgmi(paddr)
     assert paddr & self.adev.gmc.address_space_mask == paddr, f"Invalid physical address {paddr:#x}"
     self.entries[entry_id] = self.adev.gmc.get_pte_flags(self.lv, table, frag, uncached, system, snooped, valid) | (paddr & 0x0000FFFFFFFFF000)
 
   def entry(self, entry_id:int) -> int: return self.entries[entry_id]
   def valid(self, entry_id:int) -> bool: return (self.entries[entry_id] & am.AMDGPU_PTE_VALID) != 0
-  def address(self, entry_id:int) -> int: return self.entries[entry_id] & 0x0000FFFFFFFFF000
+  def address(self, entry_id:int) -> int:
+    assert self.entries[entry_id] & am.AMDGPU_PTE_SYSTEM == 0, "should not be system address"
+    return self.adev.xgmi2paddr(self.entries[entry_id] & 0x0000FFFFFFFFF000)
   def is_page(self, entry_id:int) -> bool: return self.lv == am.AMDGPU_VM_PTB or self.adev.gmc.is_pte_huge_page(self.entries[entry_id])
   def supports_huge_page(self, paddr:int): return self.lv >= am.AMDGPU_VM_PDB2
 
@@ -190,6 +193,8 @@ class AMDev(PCIDevImplBase):
     self.ih.interrupt_handler()
 
   def paddr2mc(self, paddr:int) -> int: return self.gmc.mc_base + paddr
+  def paddr2xgmi(self, paddr:int) -> int: return self.gmc.paddr_base + paddr
+  def xgmi2paddr(self, xgmi_paddr:int) -> int: return xgmi_paddr - self.gmc.paddr_base
 
   def reg(self, reg:str) -> AMRegister: return self.__dict__[reg]
 
@@ -204,9 +209,9 @@ class AMDev(PCIDevImplBase):
     if reg > len(self.mmio): self.indirect_wreg(reg * 4, val)
     else: self.mmio[reg] = val
 
-  def wreg_pair(self, reg_base:str, lo_suffix:str, hi_suffix:str, val:int):
-    self.reg(f"{reg_base}{lo_suffix}").write(val & 0xffffffff)
-    self.reg(f"{reg_base}{hi_suffix}").write(val >> 32)
+  def wreg_pair(self, reg_base:str, lo_suffix:str, hi_suffix:str, val:int, inst:int=0):
+    self.reg(f"{reg_base}{lo_suffix}").write(val & 0xffffffff, inst=inst)
+    self.reg(f"{reg_base}{hi_suffix}").write(val >> 32, inst=inst)
 
   def indirect_rreg(self, reg:int) -> int:
     self.reg("regBIF_BX_PF0_RSMU_INDEX").write(reg)
@@ -238,8 +243,6 @@ class AMDev(PCIDevImplBase):
     ihdr = am.struct_ip_discovery_header.from_address(ctypes.addressof(self.bhdr) + self.bhdr.table_list[am.IP_DISCOVERY].offset)
     assert self.bhdr.binary_signature == am.BINARY_SIGNATURE and ihdr.signature == am.DISCOVERY_TABLE_SIGNATURE, "discovery signatures mismatch"
 
-    # Mapping of HW IP to Discovery HW IP
-    hw_id_map = {am.__dict__[x]: int(y) for x,y in am.hw_id_map}
     self.regs_offset:dict[int, dict[int, tuple]] = collections.defaultdict(dict)
     self.ip_ver:dict[int, tuple[int, int, int]] = {}
 
@@ -251,7 +254,7 @@ class AMDev(PCIDevImplBase):
         ip = am.struct_ip_v4.from_address(ip_offset)
         ba = ((ctypes.c_uint64 if ihdr.base_addr_64_bit else ctypes.c_uint32) * ip.num_base_address).from_address(ip_offset + 8)
         for hw_ip in range(1, am.MAX_HWIP):
-          if hw_ip in hw_id_map and hw_id_map[hw_ip] == ip.hw_id:
+          if hw_ip in am.hw_id_map and am.hw_id_map[hw_ip] == ip.hw_id:
             self.regs_offset[hw_ip][ip.instance_number] = tuple(list(ba))
             self.ip_ver[hw_ip] = (ip.major, ip.minor, ip.revision)
 

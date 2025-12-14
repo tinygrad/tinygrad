@@ -46,26 +46,9 @@ bool TinyGPUDriverUserClient::init()
 
 void TinyGPUDriverUserClient::free()
 {
-	// release all DMA allocations for this client
 	if (ivars) {
-		for (uint32_t i = 0; i < ivars->dmaCount; i++) {
-			auto &d = ivars->dmas[i];
-			if (d.dmaCmd) {
-				d.dmaCmd->CompleteDMA(kIODMACommandCompleteDMANoOptions);
-				d.dmaCmd->release();
-				d.dmaCmd = nullptr;
-			}
-			if (d.sharedBuf) {
-				d.sharedBuf->release();
-				d.sharedBuf = nullptr;
-			}
-		}
-		ivars->dmaCount = 0;
-
-		ivars->provider.reset();
+		IOSafeDeleteNULL(ivars, TinyGPUDriverUserClient_IVars, 1);
 	}
-
-	IOSafeDeleteNULL(ivars, TinyGPUDriverUserClient_IVars, 1);
 	super::free();
 }
 
@@ -94,6 +77,22 @@ error:
 
 kern_return_t TinyGPUDriverUserClient::Stop_Impl(IOService* in_provider)
 {
+	// release all DMA allocations for this client
+	if (ivars) {
+		for (size_t i = 0; i < ivars->dmaCount; i++) {
+			auto &d = ivars->dmas[i];
+			if (d.dmaCmd) {
+				d.dmaCmd->CompleteDMA(kIODMACommandCompleteDMANoOptions);
+				d.dmaCmd->release();
+				d.dmaCmd = nullptr;
+			}
+		}
+		ivars->dmaCount = 0;
+		IOSafeDeleteNULL(ivars->dmas, TinyGPUCreateDMAResp, ivars->dmaCap);
+		ivars->dmas = nullptr;
+		ivars->provider.reset();
+	}
+
 	return Stop(in_provider, SUPERDISPATCH);
 }
 

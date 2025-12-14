@@ -2,20 +2,19 @@
 import itertools
 from tinygrad.helpers import dedup, flatten, getenv, unwrap, FUSE_OPTIM
 from tinygrad.tensor import Tensor
-from tinygrad.dtype import dtypes, least_upper_dtype
+from tinygrad.dtype import dtypes, least_upper_dtype, to_dtype
 
 class Optimizer:
   """
   Base class for all optimizers.
   """
   def __init__(self, params: list[Tensor], lr: float, fused=FUSE_OPTIM):
-    # if it's None, but being put into an optimizer, set it to True
+    # if requires_grad is None, but being put into an optimizer, set it to True
     for x in params:
       if x.requires_grad is None: x.requires_grad = True
 
     self.params: list[Tensor] = dedup([x for x in params if x.requires_grad])
     assert len(self.params) != 0, "optimizer must have at least one param"
-    self.device = self.params[0].device
     self.buffers: list[Tensor] = dedup([x for x in params if not x.requires_grad])   # buffers are still realized
     self.fused = fused
     # store lr in at least float32 precision
@@ -23,10 +22,13 @@ class Optimizer:
                      dtype=least_upper_dtype(dtypes.default_float, dtypes.float32))
     if self.fused: self.pos_params = list(itertools.accumulate(self.params, lambda x,y: x+y.numel(), initial=0))
 
+  @property
+  def device(self): return self.params[0].device
+
   def _new_optim_param(self) -> list[Tensor]:
-    param_dtype = getenv("OPTIM_DTYPE", "float32")
+    param_dtype = to_dtype(getenv("OPTIM_DTYPE", "float32"))
     if self.fused: return [Tensor.zeros(self.pos_params[-1], dtype=param_dtype, device=self.device, requires_grad=False).contiguous()]
-    return [Tensor.zeros(*t.shape, dtype=param_dtype, device=t.device, requires_grad=False).contiguous() for t in self.params]
+    return [Tensor.zeros_like(t, dtype=param_dtype, requires_grad=False).contiguous() for t in self.params]
 
   def zero_grad(self):
     """
@@ -49,6 +51,7 @@ class Optimizer:
                 - help: Consider setting Tensor.training=True before calling Optimizer.step().""")
     if self.fused:
       # optimizer fusion just concatenates all the buffers, runs the _step, then splits them back up
+      # NOTE: contiguous is for speed
       out, extra = self._step([Tensor.cat(*[t.flatten() for t in self.params], dim=0)],
                               [Tensor.cat(*[unwrap(t.grad).contiguous().flatten() for t in self.params], dim=0)])
       updated_params = [out[0][self.pos_params[i]:self.pos_params[i+1]].reshape(tt.shape) for i, tt in enumerate(self.params)]

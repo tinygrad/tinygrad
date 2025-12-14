@@ -115,7 +115,7 @@ if __name__ == "__main__":
 
   with WallTimeEvent(BenchEvent.LOAD_WEIGHTS):
     if not args.fakeweights:
-      default_weights_url = 'https://huggingface.co/stabilityai/stable-diffusion-2-1/resolve/main/v2-1_768-ema-pruned.safetensors'
+      default_weights_url = 'https://huggingface.co/sd2-community/stable-diffusion-2-1/resolve/main/v2-1_768-ema-pruned.safetensors'
       weights_fn = args.weights_fn
       if not weights_fn:
         weights_url = args.weights_url if args.weights_url else default_weights_url

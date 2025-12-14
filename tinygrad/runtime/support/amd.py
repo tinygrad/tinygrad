@@ -1,4 +1,4 @@
-import functools, importlib, re, urllib
+import functools, re, urllib, tinygrad.runtime.autogen
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.helpers import getbits, fetch
@@ -53,8 +53,8 @@ def import_header(path:str, url=AMDGPU_URL):
 
 def import_module(name:str, version:tuple[int, ...], version_prefix:str=""):
   for ver in fixup_ip_version(name, version):
-    try: return importlib.import_module(f"tinygrad.runtime.autogen.am.{name}_{version_prefix}{'_'.join(map(str, ver))}")
-    except ImportError: pass
+    try: return getattr(tinygrad.runtime.autogen.am, f"{name}_{version_prefix}{'_'.join(map(str, ver))}")
+    except AttributeError: pass
   raise ImportError(f"Failed to load autogen module for {name.upper()} {'.'.join(map(str, version))}")
 
 def import_soc(ip):
@@ -65,7 +65,9 @@ def import_ip_offsets(ip): return type("IPOFF", (object,), import_header(f"inclu
 
 def import_pmc(ip) -> dict[str, tuple[str, int]]:
   res:dict[str, tuple[str, int]] = {}
-  arch = f"gfx{ip[0]}{ip[1]:x}{ip[2]:x}"
+
+  # NOTE: precise arch for mi300+, generic for others, since rocm headers lack some archs
+  arch = f"gfx{ip[0]}{ip[1]:x}{ip[2]:x}" if ip[0] == 9 else f"gfx{ip[0]}"
 
   for sec in header_download("rocprofiler-compute/src/rocprof_compute_soc/profile_configs/counter_defs.yaml", url=ROCM_URL).split('- name: ')[1:]:
     for arch_spec in sec.split('- architectures:')[1:]:

@@ -41,7 +41,7 @@ def linearize(sink:UOp) -> list[UOp]:
   # number the uops in "ideal" order
   nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: priorities[x]+(x.tuplize if TUPLE_ORDER else ())))}
 
-  # then force then to be toposorted in as close to the ideal order as possible
+  # then force them to be toposorted in as close to the ideal order as possible
   heap = [(-nkey[sink], sink)]
   newlst = []
   while heap:

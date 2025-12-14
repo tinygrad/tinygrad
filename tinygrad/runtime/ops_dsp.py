@@ -1,11 +1,11 @@
 from __future__ import annotations
 import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys, subprocess, struct
 assert sys.platform != 'win32'
-from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler
+from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler, CompilerSet, CompilerPair
 from tinygrad.runtime.ops_cpu import CPUAllocator
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.helpers import getenv, round_up, mv_address, to_mv, cpu_objdump, DEBUG
+from tinygrad.helpers import getenv, round_up, mv_address, to_mv, cpu_objdump, system, DEBUG
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.autogen import libc, qcom_dsp
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
@@ -123,10 +123,9 @@ class ClangCompiler(Compiler):
 
   def compile(self, src:str) -> bytes:
     # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
-    with tempfile.NamedTemporaryFile(delete=True) as output_file:
-      subprocess.check_output([getenv("CC", 'clang'), *self.args, '-O2', '-Wall', '-Werror', '-x', 'c', '-fPIC', '-ffreestanding', '-nostdlib',
-                               '-', '-o', str(output_file.name)], input=src.encode('utf-8'))
-      return pathlib.Path(output_file.name).read_bytes()
+    with tempfile.NamedTemporaryFile(delete=True) as f:
+      system(f"{getenv('CC','clang')} {' '.join(self.args)} -O2 -Wall -Werror -x c -fPIC -ffreestanding -nostdlib - -o {f.name}", input=src.encode())
+      return pathlib.Path(f.name).read_bytes()
 
   def disassemble(self, lib:bytes): return cpu_objdump(lib, self.objdump_tool)
 
@@ -134,7 +133,7 @@ class DSPDevice(Compiled):
   def __init__(self, device:str=""):
     compiler_args = ["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib",  "-mhvx=v65", "-mhvx-length=128b"]
     if getenv("MOCKDSP"):
-      mock_compilers = [(MockDSPRenderer, functools.partial(ClangCompiler, None, ["-static"] + compiler_args, 'llvm-objdump'))]
+      mock_compilers = CompilerSet([CompilerPair(MockDSPRenderer, functools.partial(ClangCompiler, None, ["-static"]+compiler_args, 'llvm-objdump'))])
       super().__init__(device, CPUAllocator(self), mock_compilers, MockDSPProgram)
     else:
       self.ion_fd = os.open('/dev/ion', os.O_RDONLY)
@@ -146,9 +145,8 @@ class DSPDevice(Compiled):
         self.link_ld.write(f"SECTIONS {{ . = 0x0; {sections_link}\n /DISCARD/ : {{ *(.note .note.* .gnu.hash .comment) }} }}".encode())
         self.link_ld.flush()
 
-      compilers = [(DSPRenderer, functools.partial(ClangCompiler, "compile_dsp", ["-shared"] + compiler_args + [f"-T{self.link_ld.name}"],
-                                                   'llvm-objdump'))]
-      super().__init__(device, DSPAllocator(self), compilers, functools.partial(DSPProgram, self))
+      compiler = functools.partial(ClangCompiler, "compile_dsp", ["-shared"] + compiler_args + [f"-T{self.link_ld.name}"], 'llvm-objdump')
+      super().__init__(device, DSPAllocator(self), CompilerSet([CompilerPair(DSPRenderer, compiler)]), functools.partial(DSPProgram, self))
       fastrpc_shell = memoryview(bytearray(pathlib.Path('/dsp/cdsp/fastrpc_shell_3').read_bytes()))
       self.shell_buf = self.allocator.alloc(round_up(fastrpc_shell.nbytes, 0x1000), BufferSpec(nolru=True))
       ctypes.memmove(self.shell_buf.va_addr, mv_address(fastrpc_shell), fastrpc_shell.nbytes)
