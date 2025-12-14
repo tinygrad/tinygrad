@@ -5,6 +5,7 @@ import numpy as np
 from hypothesis import given, settings, strategies as strat
 from test.helpers import assert_jit_cache_len, not_support_multi_device, REAL_DEV, needs_second_gpu
 from tinygrad.tensor import Tensor
+from tinygrad.uop.ops import RState
 from tinygrad.engine.jit import TinyJit, GraphRunner, MultiGraphRunner, graph_class
 from tinygrad.engine.realize import CompiledRunner, BufferCopy, BufferXfer
 from tinygrad.device import Device
@@ -501,17 +502,50 @@ class TestJit(unittest.TestCase):
     b = f(Tensor([2.0]))
     assert abs((a - b).item()) > 0.5
 
-  def test_jit_init_with_empty_different_size(self):
+  def test_jit_init_with_empty_different_types(self):
     @TinyJit
     def f(x:Tensor) -> Tensor: return (x + 1).realize()
 
-    f(Tensor.empty(1))
-    f(Tensor.empty(1))
-    # TODO: this should fail since input has a different size
-    f(Tensor(2.0)).item()
-    # TODO: this should not fail, and should return 3
-    with self.assertRaises(AssertionError):
-      f(Tensor([2.0])).item()
+    f(Tensor.empty(1).contiguous())# TODO: should realizing empty w/o contiguous realize the buffer?
+    # maps realized -> realized
+    f(Tensor.empty(1).contiguous())
+    # (type(realize(Tensor([2.0]))) = realized), realized -> realized
+    assert f(Tensor([10.0])).item() == 11.0
+    # this should fail since jit recorded a realized tensor and this is a const tensor
+    with self.assertRaises(AssertionError): f(Tensor(2.0)).item()
+
+  def test_jit_mapping_failures(self):
+    def new_f():
+      @TinyJit
+      # see jit.py, _prepare_jit_inputs for mapping info
+      def f(x:Tensor) -> Tensor: return (x + 1).realize()
+      return f
+    # unrealized -> unrealized. jit should raise error. assumes empty is unrealizable
+    unrealized_f = new_f()
+    assert Tensor.empty(1).uop.base_state is RState.UNREALIZED
+    assert Tensor.empty(1).realize().uop.base_state is RState.UNREALIZED
+    with self.assertRaises(AssertionError): unrealized_f(Tensor.empty(1))
+    # const -> const
+    const_f = new_f()
+    assert Tensor(1.0).uop.base_state is RState.CONST
+    assert Tensor(1.0).realize().uop.base_state is RState.CONST
+    const_f(Tensor(1.0))
+    # maps here, and should throw error since consts alone do not map to buffers
+    with self.assertRaises(AssertionError): const_f(Tensor(1.0))
+    # unrealized -> realized. should always work
+    assert Tensor([1.0]).uop.base_state is RState.UNREALIZED
+    assert Tensor([1.0]).realize().uop.base_state is RState.REALIZED
+    realized_f = new_f()
+    assert realized_f(Tensor([1.0])).item() == 2.0
+    assert realized_f(Tensor([2.0])).item() == 3.0
+    assert realized_f(Tensor([3.0])).item() == 4.0
+    # adding .contiguous() ensures buffer allocation and so tensor.contiguous() should always work
+    contig_f = new_f()
+    assert Tensor([1.0]).uop.base_state is RState.UNREALIZED
+    assert Tensor([1.0]).contiguous().realize().uop.base_state is RState.REALIZED
+    contig_f(Tensor.empty(1).contiguous()).item()
+    assert contig_f(Tensor([2.0]).contiguous()).item() == 3.0
+    assert contig_f(Tensor([3.0]).contiguous()).item() == 4.0
 
 @unittest.skip("Pending multioutput implementation #3607")
 class TestMultioutputJit(unittest.TestCase):

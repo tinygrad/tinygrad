@@ -27,6 +27,11 @@ axis_to_pos = {AxisType.LOOP: -1, AxisType.THREAD: 0, AxisType.GLOBAL: 0, AxisTy
 
 range_start = {Ops.BUFFERIZE: 1, Ops.REDUCE: 1, Ops.STORE: 2, Ops.WMMA: 3, Ops.END: 1}
 
+class RState(Enum):
+  def __repr__(self): return str(self)
+  # allocated buffer, unallocated buffer, force allocate, and device const
+  REALIZED = auto(); UNREALIZED = auto(); CONTIGUOUS = auto(); CONST = auto()
+
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> ConstType: return dtypes.as_const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dtypes.min(dt)}[op], dt)
 
@@ -468,7 +473,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def is_contiguous(self):
     # TODO: this is is_realized
     if self.op is Ops.RESHAPE: return self.src[0].is_contiguous()
-    return self.op is Ops.BUFFER
+    return self.op is Ops.BUFFER and self.buffer.is_allocated() # realize unallocated tensors
 
   def contiguous(self, *args, **kwargs):
     if self.op is Ops.CONTIGUOUS: return self
@@ -670,16 +675,19 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     buffers[self] = ret
     return ret
   @property
-  def realized(self) -> Buffer|MultiBuffer|None:
-    # only these can be realized
-    if self.op not in (Ops.BUFFER, Ops.MSTACK): return None
-    # LUNIQUEs are never realized
-    if self.op_in_backward_slice_with_self(Ops.LUNIQUE): return None
-    # NOTE: this is used by the JIT to determine which inputs we capture
-    return self.buffer if self.buffer.is_allocated() else None
+  def realized(self) -> Buffer|MultiBuffer|None: return self.buffer if self.base_state is RState.REALIZED else None
+
+  @property
+  def base_state(self) -> RState:
+    base = self.base
+    if base.op_in_backward_slice_with_self(Ops.LUNIQUE): return RState.UNREALIZED
+    if base.op in (Ops.BUFFER, Ops.MSTACK) and base.buffer.is_allocated(): return RState.REALIZED
+    if base.op is Ops.CONST: return RState.CONST
+    else: return RState.UNREALIZED
+
   @property
   def is_realized(self) -> bool:
-    return all(x.base.realized is not None for x in self.base.src) if self.base.op is Ops.MULTI else self.base.realized is not None
+    return all(x.base_state is RState.REALIZED for x in self.base.src) if self.base.op is Ops.MULTI else self.base_state is RState.REALIZED
 
   # *** uop Variable stuff ***
 

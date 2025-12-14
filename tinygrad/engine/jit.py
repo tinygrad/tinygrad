@@ -4,7 +4,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, JIT_BATCH_SIZE, dedup, partition, unwrap
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType
-from tinygrad.uop.ops import UOp, Variable, sym_infer, Ops
+from tinygrad.uop.ops import UOp, Variable, sym_infer, Ops, RState
 from tinygrad.engine.realize import ExecItem, capturing, ViewOp, BufferCopy, BufferXfer, EncDec, CompiledRunner, Runner, Estimates
 from tinygrad.engine.memory import _internal_memory_planner
 from tinygrad.nn.state import get_parameters
@@ -157,7 +157,7 @@ class CapturedJit(Generic[ReturnType]):
   jit_cache: list[ExecItem]
   input_replace: dict[tuple[int, int], int]
   extra_view_inputs: list[tuple[int, int, str, int, DType]]
-  expected_names: list[int|str]
+  rmap: dict[str, RState]
   expected_st_vars_dtype_device: list[tuple[UOp, tuple[Variable, ...], DType, str]]
 
   def __reduce__(self):
@@ -216,19 +216,27 @@ class CapturedJit(Generic[ReturnType]):
     return self.ret
 
 def _prepare_jit_inputs(args, kwargs):
-  input_tensors: list[tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]
+  # there are 3 realize states: (unrealized, realized, const). jit maps (unrealized, realized, const) -> B:=(unrealized, realized, const)
+  # and records the outer mapping B only. input mapping can be any combination of these tensors
+  # if B is unrealized, then the scheduler will not record the tensor, so its ops will be ignored aka failure
+  # if B is const, then it will also be ignored / fail, unless tied to a buffer (empty + 0)
+  # otherwise, B is scheduled inside the JIT.
+  # NOTE: the JIT will record the mapping on the second run
+  input_tensors: list[tuple[str, Tensor]] = [('arg'+str(name),t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]
   names, tensors = [name for name,_ in input_tensors], [t for _,t in input_tensors]
   if len(unrealized_tensors := [x for x in tensors if not x.uop.is_realized]): Tensor.realize(*unrealized_tensors)
+  assert all(u.uop.base_state in (RState.CONST, RState.REALIZED) for u in unrealized_tensors), "some tensors w/ buffers havent realized"
+  rmap = dict(zip(names, [x.uop.base_state for x in tensors]))
   # TODO: this multi unpack stuff is not well tested.
   lbs: list[UOp] = flatten([t.uop.src if t.uop.op is Ops.MULTI else [t.uop] for t in tensors])
   input_buffers: list[Buffer] = flatten([rb.bufs if isinstance(rb:=lb.base.realized, MultiBuffer) else [rb]
-                                         for lb in lbs if lb.base.realized is not None])
+                                         for lb in lbs if lb.base_state is RState.REALIZED])
   assert len(set(input_buffers)) == len(input_buffers), "duplicate inputs to JIT"
   st_varval_dtype_device = [(*(lb.substitute({lb.base:UOp(Ops.NOOP)}, extra_pm=mop_cleanup).unbind_all()), lb.dtype, lb.device) for lb in lbs]
   _var_vals = merge_dicts([x[1] for x in st_varval_dtype_device] + [dict(v.unbind() for v in (args + tuple(kwargs.values())) if isinstance(v, UOp))])
   var_vals = {k.expr:v for k,v in _var_vals.items()}
   st_vars_dtype_device = [(x[0], tuple(sorted(x[1].keys(), key=lambda v: v.expr)), x[2], x[3]) for x in st_varval_dtype_device]
-  return input_buffers, var_vals, names, st_vars_dtype_device
+  return input_buffers, var_vals, rmap, st_vars_dtype_device
 
 class TinyJit(Generic[ReturnType]):
   def __init__(self, fxn:Callable[..., ReturnType]|None, captured:CapturedJit|None=None, prune=False, optimize=False):
@@ -269,7 +277,7 @@ class TinyJit(Generic[ReturnType]):
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj) # add support for instance methods
 
   def __call__(self, *args, **kwargs) -> ReturnType:
-    input_buffers, var_vals, names, st_vars_dtype_device = _prepare_jit_inputs(args, kwargs)
+    input_buffers, var_vals, rmap, st_vars_dtype_device = _prepare_jit_inputs(args, kwargs)
     if not JIT or self.cnt == 0:
       # jit ignore
       assert self.fxn is not None
@@ -327,12 +335,12 @@ class TinyJit(Generic[ReturnType]):
       if DEBUG >= 1 and len(set(input_replace.values())) != len(input_buffers): print("WARNING: some input tensors not found")
 
       # set this for next run
-      self.captured = CapturedJit(ret, jit_cache, input_replace, extra_view_inputs, names, st_vars_dtype_device)
+      self.captured = CapturedJit(ret, jit_cache, input_replace, extra_view_inputs, rmap, st_vars_dtype_device)
       if self.optimize: self.captured.replan_buffers_memory_layout()
     elif self.cnt >= 2:
       # jit exec
       assert self.captured is not None
-      assert self.captured.expected_names == names, f"args mismatch in JIT: {self.captured.expected_names=} != {names}"
+      assert self.captured.rmap == rmap, f"realize type violation:{self.captured.rmap.keys()} -> {self.captured.rmap.values()} != {rmap.values()}"
       assert self.captured.expected_st_vars_dtype_device == st_vars_dtype_device, \
         f"args mismatch in JIT: {self.captured.expected_st_vars_dtype_device=} != {st_vars_dtype_device=}"
       ret = self.captured(input_buffers, var_vals)
