@@ -9,7 +9,7 @@ from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA
 from tinygrad.helpers import printable, system, TCPServerWithReuse, HTTPRequestHandler
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, pyrender
 from tinygrad.uop.ops import print_uops, range_start, multirange_str
-from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device
+from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device, ProfileProgramEvent
 from tinygrad.renderer import ProgramSpec
 from tinygrad.dtype import dtypes
 
@@ -240,18 +240,54 @@ def load_counters(profile:list[ProfileEvent]) -> None:
   from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
   counter_events:dict[tuple[str, int], dict] = {}
   durations:dict[str, list[float]] = {}
+  prg_events:dict[str, ProfileProgramEvent] = {}
+  dev_events:list[ProfileDeviceEvent] = []
   for e in profile:
     if isinstance(e, (ProfilePMCEvent, ProfileSQTTEvent)): counter_events.setdefault((e.kern, e.exec_tag), {}).setdefault(type(e), []).append(e)
     if isinstance(e, ProfileRangeEvent) and e.device.startswith("AMD") and e.en is not None:
       durations.setdefault(str(e.name), []).append(float(e.en-e.st))
-    if getenv("SQTT_PARSE") and isinstance(e, ProfileSQTTEvent):
-      from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
-      parse_sqtt_print_packets(e.blob)
+    if isinstance(e, ProfileProgramEvent): prg_events[str(e.name)] = e
+    if isinstance(e, ProfileDeviceEvent): dev_events.append(e)
   steps:list[dict] = [create_step("All", ("/all-counters", len(ctxs), 0), (durations, counter_events))]
   for k,v in counter_events.items():
     prg = trace.keys[r].ret if (r:=ref_map.get(k[0])) else None
-    steps.append(create_step(prg.name if prg is not None else str(k), ("/prg-counters", len(ctxs), len(steps)), v))
+    steps.append(create_step(prg.name if prg is not None else str(k), ("/prg-counters",len(ctxs),len(steps)), (k, [prg_events[k[0]]]+dev_events, v)))
   ctxs.append({"name":"Counters", "steps":steps})
+
+# ** SQTT OCC only unpacks wave start, end time and SIMD location
+
+@soft_err(lambda err: ctxs.append({"name":"ERR", "steps":[create_step("SQTT decoder error", ("render", len(ctxs), 0), err)]}))
+def unpack_sqtt(key:tuple[str, int], profile:list[ProfileEvent]) -> dict[str, list[ProfileEvent]]:
+  # ** init decoder
+  from extra.sqtt.roc import decode
+  rctx = decode(profile)
+  """
+  if getenv("SQTT_PARSE"):
+    from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
+    for e in profile: parse_sqtt_print_packets(e.blob)
+  """
+  disasm = rctx.disasms[key[0]]
+  cu_events:dict[str, list[ProfileEvent]] = {}
+  # * INST waves
+  wave_insts:dict[str, dict[str, dict]] = {}
+  inst_units:dict[str, itertools.count] = {}
+  for w in rctx.inst_execs.get(key, []):
+    if (u:=w.wave_loc) not in inst_units: inst_units[u] = itertools.count(0)
+    n = next(inst_units[u])
+    if (events:=cu_events.get(w.cu_loc)) is None: cu_events[w.cu_loc] = events = []
+    events.append(ProfileRangeEvent(w.simd_loc, loc:=f"INST WAVE:{w.wave_id} N:{n}", Decimal(w.begin_time), Decimal(w.end_time)))
+    wave_insts.setdefault(w.cu_loc, {})[f"{u} N:{n}"] = {"wave":w, "disasm":disasm, "run_number":n, "loc":loc}
+  # * OCC waves
+  units:dict[str, itertools.count] = {}
+  wave_start:dict[str, int] = {}
+  for occ in rctx.occ_events.get(key, []):
+    if (u:=occ.wave_loc) not in units: units[u] = itertools.count(0)
+    if u in inst_units: continue
+    if occ.start: wave_start[u] = occ.time
+    else:
+      if (events:=cu_events.get(occ.cu_loc)) is None: cu_events[occ.cu_loc] = events = []
+      events.append(ProfileRangeEvent(occ.simd_loc, f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)), Decimal(occ.time)))
+  return cu_events
 
 def device_sort_fn(k:str) -> tuple[int, str, int]:
   order = {"GC": 0, "USER": 1, "TINY": 2, "DISK": 999}
@@ -364,9 +400,12 @@ def get_render(i:int, j:int, fmt:str) -> dict:
     ret["cols"] = ["Kernel", "Duration", *ret["cols"]]
     return ret
   if fmt == "prg-counters":
-    from tinygrad.runtime.ops_amd import ProfilePMCEvent #, ProfileSQTTEvent
-    ret = unpack_pmc(data[ProfilePMCEvent][0])
-    #if data.get(ProfileSQTTEvent) is not None: ret["steps"] = create_step("SQTT", ("/sqtt-occ", len(ctxs), len(steps)))
+    prg, dev_events, events = data
+    from tinygrad.runtime.ops_amd import ProfilePMCEvent, ProfileSQTTEvent
+    ret = unpack_pmc(events[ProfilePMCEvent][0])
+    unpack_sqtt(prg, events[ProfileSQTTEvent]+dev_events)
+    # TODO: requires UI work
+    #ret["steps"] = create_step("SQTT", ("/sqtt-occ", len(ctxs), len(steps)))
     return ret
   if fmt == "sqtt-insts":
     columns = ["PC", "Instruction", "Hits", "Cycles", "Stall", "Type"]
