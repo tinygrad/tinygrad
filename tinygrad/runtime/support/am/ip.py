@@ -435,14 +435,16 @@ class AM_PSP(AM_IP):
       while not self.is_sos_alive(): time.sleep(0.01)
 
     self._ring_create()
-    self._tmr_init()
+    if am.PSP_FW_TYPE_PSP_TOC in self.adev.fw.sos_fw: self._tmr_init()
 
     # SMU fw should be loaded before TMR.
     if hasattr(self.adev.fw, 'smu_psp_desc'): self._load_ip_fw_cmd(*self.adev.fw.smu_psp_desc)
     if not self.boot_time_tmr or not self.autoload_tmr: self._tmr_load_cmd()
 
     for psp_desc in self.adev.fw.descs: self._load_ip_fw_cmd(*psp_desc)
-    self._rlc_autoload_cmd()
+
+    if self.adev.ip_ver[am.GC_HWIP] >= (11,0,0): self._rlc_autoload_cmd()
+    else: self._load_ip_fw_cmd((am.GFX_FW_TYPE_REG_LIST,), self.adev.fw.sos_fw[am.PSP_FW_TYPE_PSP_RL])
 
   def is_sos_alive(self): return self.adev.reg(f"{self.reg_pref}_81").read() != 0x0
 
@@ -535,6 +537,11 @@ class AM_PSP(AM_IP):
     cmd = am.struct_psp_gfx_cmd_resp(cmd_id=am.GFX_CMD_ID_LOAD_TOC)
     cmd.cmd.cmd_load_toc.toc_phy_addr_hi, cmd.cmd.cmd_load_toc.toc_phy_addr_lo = data64(self.msg1_addr)
     cmd.cmd.cmd_load_toc.toc_size = toc_size
+    return self._ring_submit(cmd)
+
+  def _spatial_partition_cmd(self, mode):
+    cmd = am.struct_psp_gfx_cmd_resp(cmd_id=am.GFX_CMD_ID_SRIOV_SPATIAL_PART)
+    cmd.cmd.cmd_spatial_part.mode = mode
     return self._ring_submit(cmd)
 
   def _rlc_autoload_cmd(self): return self._ring_submit(am.struct_psp_gfx_cmd_resp(cmd_id=am.GFX_CMD_ID_AUTOLOAD_RLC))
