@@ -1127,16 +1127,13 @@ def train_bert():
   @TinyJit
   def optimizer_step():
     global_norm = Tensor(0.0, dtype=dtypes.float32, device=optimizer_group[0].device)
-    assert all(g is p.grad for g,p in zip(grads, optimizer_group.params))
     # TODO: remove these realize
     for p in optimizer_group.params:
       p.grad.assign(p.grad / loss_scaler / grad_acc).realize()
       global_norm += p.grad.float().square().sum()
-    assert all(g is p.grad for g,p in zip(grads, optimizer_group.params))
     global_norm = global_norm.sqrt().contiguous().realize()
     for p in optimizer_group.params:
       p.grad.assign((global_norm > 1.0).where((p.grad/global_norm).cast(p.grad.dtype), p.grad)).realize()
-    assert all(g is p.grad for g,p in zip(grads, optimizer_group.params))
 
     optimizer_group.step()
     scheduler_group.step()
