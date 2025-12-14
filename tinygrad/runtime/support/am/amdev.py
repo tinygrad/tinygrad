@@ -129,7 +129,7 @@ class AMPageTableEntry:
   def address(self, entry_id:int) -> int:
     assert self.entries[entry_id] & am.AMDGPU_PTE_SYSTEM == 0, "should not be system address"
     return self.adev.xgmi2paddr(self.entries[entry_id] & 0x0000FFFFFFFFF000)
-  def is_page(self, entry_id:int) -> bool: return self.lv == am.AMDGPU_VM_PTB or self.adev.gmc.is_pte_huge_page(self.entries[entry_id])
+  def is_page(self, entry_id:int) -> bool: return self.lv == am.AMDGPU_VM_PTB or self.adev.gmc.is_pte_huge_page(self.lv, self.entries[entry_id])
   def supports_huge_page(self, paddr:int): return self.lv >= am.AMDGPU_VM_PDB2
 
 class AMMemoryManager(MemoryManager):
