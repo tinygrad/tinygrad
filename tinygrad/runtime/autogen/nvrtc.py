@@ -1,8 +1,14 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-import sysconfig
-dll = DLL('nvrtc', 'nvrtc', f'/usr/local/cuda/targets/{sysconfig.get_config_var("MULTIARCH").rsplit("-", 1)[0]}/lib')
+from tinygrad.helpers import unwrap
+from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from ctypes.util import find_library
+def dll():
+  try: return ctypes.CDLL(unwrap(find_library('nvrtc')))
+  except: pass
+  return None
+dll = dll()
+
 nvrtcResult = CEnum(ctypes.c_uint32)
 NVRTC_SUCCESS = nvrtcResult.define('NVRTC_SUCCESS', 0)
 NVRTC_ERROR_OUT_OF_MEMORY = nvrtcResult.define('NVRTC_ERROR_OUT_OF_MEMORY', 1)
