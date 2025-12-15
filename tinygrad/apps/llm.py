@@ -55,12 +55,10 @@ class SimpleTokenizer:
   def role(self, role:str):
     if self.preset == 'qwen2': return self.encode("<|im_start|>" + role + "\n")
     return self.encode("<|start_header_id|>" + role + "<|end_header_id|>\n\n")
-  def end_turn(self, eos_id:int):
-    if self.preset == 'qwen2': return [eos_id] + self.encode("\n")  # Qwen uses <|im_end|>\n, Llama uses <|eot_id|>
-    return [eos_id]
+  def end_turn(self, eos_id:int): return [eos_id] + self.encode("\n") if self.preset == 'qwen2' else [eos_id]
 
 @functools.cache
-def precompute_freqs_cis(dim: int, end: int, theta: float) -> Tensor:
+def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
   freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2)[:(dim // 2)] / dim))
   freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
   return Tensor.stack(freqs.cos(), freqs.sin(), dim=-1).contiguous()
@@ -68,19 +66,12 @@ def precompute_freqs_cis(dim: int, end: int, theta: float) -> Tensor:
 def apply_rope(x:Tensor, freqs_cis:Tensor, interleaved:bool=True) -> Tensor:
   B, H, T, Hd = x.shape
   assert isinstance(Hd, int) and (Hd & 1) == 0, "RoPE requires an even head dimension"
-  cos = freqs_cis.reshape(1, 1, T, Hd//2, 2)[..., 0]
-  sin = freqs_cis.reshape(1, 1, T, Hd//2, 2)[..., 1]
-  if interleaved:
-    # Interleaved: pairs are (x[0], x[1]), (x[2], x[3]), ... - used by Llama
-    x_pairs = x.reshape(B, H, T, Hd//2, 2)
-    return Tensor.stack(x_pairs[..., 0] * cos - x_pairs[..., 1] * sin,
-                        x_pairs[..., 0] * sin + x_pairs[..., 1] * cos, dim=-1).reshape(B, H, T, Hd)
-  else:
-    # Half-split: pairs are (x[0], x[d/2]), (x[1], x[d/2+1]), ... - used by Qwen3/HF transformers
-    x1, x2 = x[..., :Hd//2], x[..., Hd//2:]
-    out1 = x1 * cos - x2 * sin
-    out2 = x2 * cos + x1 * sin
-    return out1.cat(out2, dim=-1)
+  cos, sin = freqs_cis.reshape(1, 1, T, Hd//2, 2)[..., 0], freqs_cis.reshape(1, 1, T, Hd//2, 2)[..., 1]
+  if interleaved:  # Llama-style: pairs (x[0],x[1]), (x[2],x[3])...
+    xp = x.reshape(B, H, T, Hd//2, 2)
+    return Tensor.stack(xp[..., 0] * cos - xp[..., 1] * sin, xp[..., 0] * sin + xp[..., 1] * cos, dim=-1).reshape(B, H, T, Hd)
+  x1, x2 = x[..., :Hd//2], x[..., Hd//2:]  # Qwen-style: pairs (x[0],x[d/2]), (x[1],x[d/2+1])...
+  return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
 
 class TransformerBlock:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, max_context:int=0, head_dim:int|None=None,
@@ -103,10 +94,7 @@ class TransformerBlock:
     # --- RMSNorms --------------------------------------------------------
     self.attn_norm   = nn.RMSNorm(dim, norm_eps)
     self.ffn_norm    = nn.RMSNorm(dim, norm_eps)
-    # QK normalization (used by Qwen3)
-    if qk_norm:
-      self.attn_q_norm = nn.RMSNorm(self.head_dim, norm_eps)
-      self.attn_k_norm = nn.RMSNorm(self.head_dim, norm_eps)
+    if qk_norm: self.attn_q_norm, self.attn_k_norm = nn.RMSNorm(self.head_dim, norm_eps), nn.RMSNorm(self.head_dim, norm_eps)
 
     # --- feed-forward ----------------------------------------------------
     self.ffn_gate    = nn.Linear(dim, hidden_dim, bias=False)
@@ -122,10 +110,7 @@ class TransformerBlock:
     k = k.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
     v = v.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
 
-    # Apply QK normalization if present (Qwen3)
-    if hasattr(self, 'attn_q_norm'):
-      q = self.attn_q_norm(q)
-      k = self.attn_k_norm(k)
+    if hasattr(self, 'attn_q_norm'): q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
     # TODO: make UOp have SupportsIndex
     freqs_cis = precompute_freqs_cis(self.head_dim, self.max_context, self.rope_theta)[start_pos:start_pos+T]  # type: ignore
@@ -189,12 +174,8 @@ class Transformer:
 
     arch = kv['general.architecture']
     max_context = min(max_context, kv[f'{arch}.context_length']) if max_context is not None else kv[f'{arch}.context_length']
-    # Qwen3 and similar architectures use explicit head_dim, rope_theta, and QK normalization
-    head_dim = kv.get(f'{arch}.attention.key_length')  # None for Llama (uses dim // n_heads)
-    rope_theta = kv.get(f'{arch}.rope.freq_base', 10000.0)
-    qk_norm = 'blk.0.attn_q_norm.weight' in state_dict
-    # Llama uses interleaved RoPE (pairs: x0,x1,x2,x3...), Qwen3 uses half-split (pairs: x0,x_d/2,x1,x_d/2+1...)
-    rope_interleaved = arch != 'qwen3'
+    head_dim, rope_theta = kv.get(f'{arch}.attention.key_length'), kv.get(f'{arch}.rope.freq_base', 10000.0)
+    qk_norm, rope_interleaved = 'blk.0.attn_q_norm.weight' in state_dict, arch != 'qwen3'
     model = Transformer(num_blocks=kv[f'{arch}.block_count'], dim=kv[f'{arch}.embedding_length'], hidden_dim=kv[f'{arch}.feed_forward_length'],
                         n_heads=kv[f'{arch}.attention.head_count'], n_kv_heads=kv[f'{arch}.attention.head_count_kv'],
                         norm_eps=kv[f'{arch}.attention.layer_norm_rms_epsilon'], vocab_size=len(kv['tokenizer.ggml.tokens']), max_context=max_context,
@@ -253,7 +234,7 @@ class Handler(HTTPRequestHandler):
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
       # extract tokens
-      ids: list[int] = [bos_id] if bos_id is not None and add_bos else []
+      ids: list[int] = [bos_id] if add_bos else []
       for msg in body["messages"]:
         ids += tok.role(msg["role"])
         # content can be a str or a list
@@ -301,14 +282,14 @@ if __name__ == "__main__":
 
   # extract some metadata
   tok = SimpleTokenizer.from_gguf_kv(kv)
-  bos_id: int|None = kv.get('tokenizer.ggml.bos_token_id')
+  bos_id: int = kv.get('tokenizer.ggml.bos_token_id', 0)
   eos_id: int = kv['tokenizer.ggml.eos_token_id']
-  add_bos: bool = kv.get('tokenizer.ggml.add_bos_token', True) and bos_id is not None
+  add_bos: bool = kv.get('tokenizer.ggml.add_bos_token', True) and 'tokenizer.ggml.bos_token_id' in kv
 
   # start server
   if args.serve: TCPServerWithReuse(('', 11434), Handler).serve_forever()
 
-  ids: list[int] = [bos_id] if bos_id is not None and add_bos else []
+  ids: list[int] = [bos_id] if add_bos else []
   while 1:
     start_pos = max(len(ids) - 1, 0)
     try:
