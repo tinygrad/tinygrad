@@ -169,8 +169,6 @@ class Transformer:
     arch = kv['general.architecture']
     max_context = min(max_context, kv[f'{arch}.context_length']) if max_context is not None else kv[f'{arch}.context_length']
     n_heads, n_kv_heads = kv[f'{arch}.attention.head_count'], kv[f'{arch}.attention.head_count_kv']
-    head_dim, rope_theta = kv[f'{arch}.attention.key_length'], kv[f'{arch}.rope.freq_base']
-    qk_norm = 'blk.0.attn_q_norm.weight' in state_dict
 
     # permute Q/K weights from interleaved to half-split RoPE layout: [0,1,2,3,4,5...] -> [0,2,4,...,1,3,5,...]
     if arch != 'qwen3':
@@ -180,7 +178,8 @@ class Transformer:
 
     model = Transformer(num_blocks=kv[f'{arch}.block_count'], dim=kv[f'{arch}.embedding_length'], hidden_dim=kv[f'{arch}.feed_forward_length'],
                         n_heads=n_heads, n_kv_heads=n_kv_heads, norm_eps=kv[f'{arch}.attention.layer_norm_rms_epsilon'],
-                        vocab_size=len(kv['tokenizer.ggml.tokens']), head_dim=head_dim, rope_theta=rope_theta, max_context=max_context, qk_norm=qk_norm)
+                        vocab_size=len(kv['tokenizer.ggml.tokens']), head_dim=kv[f'{arch}.attention.key_length'], rope_theta=kv[f'{arch}.rope.freq_base'],
+                        max_context=max_context, qk_norm='blk.0.attn_q_norm.weight' in state_dict)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
     for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())
