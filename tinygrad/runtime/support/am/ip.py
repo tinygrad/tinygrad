@@ -267,7 +267,10 @@ class AM_GFX(AM_IP):
       self._grbm_select(me=1, pipe=0, queue=0, inst=xcc)
       if self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1: self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2, inst=xcc) # 1 - DRAIN_PIPE; 2 - RESET_WAVES
       self._grbm_select(inst=xcc)
-    for xcc in range(self.xccs): self.adev.regGCVM_CONTEXT0_CNTL.write(0, inst=xcc)
+
+    # TODO: fix warm boot on mi300
+    if self.adev.ip_ver[am.GC_HWIP] != (9,4,3):
+      for xcc in range(self.xccs): self.adev.regGCVM_CONTEXT0_CNTL.write(0, inst=xcc)
 
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, doorbell:int, pipe:int, queue:int,
                  aql:bool):
