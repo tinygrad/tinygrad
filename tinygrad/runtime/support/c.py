@@ -67,7 +67,7 @@ class DLL(ctypes.CDLL):
       try:
         super().__init__(path, **kwargs)
         self.loaded = True
-      except OSError as e: self.emsg = e
+      except OSError as e: self.emsg = str(e)
 
   def __getattr__(self, nm):
     if not self.loaded: raise AttributeError(f"failed to load library {self.nm}: " + (self.emsg or f"try setting {self.nm.upper()+'_PATH'}?"))
