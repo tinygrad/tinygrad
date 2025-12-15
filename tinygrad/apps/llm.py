@@ -50,7 +50,7 @@ class SimpleTokenizer:
       pos = match.end(0)
     return tokens + self._encode_sentence(text[pos:])
 
-  def decode(self, ids:list[int]) -> str: return b''.join(self._tok2bytes[tid] for tid in ids).decode()
+  def decode(self, ids:list[int]) -> str: return b''.join(self._tok2bytes[tid] for tid in ids).decode(errors='replace')
   def role(self, role:str):
     if self.preset == 'qwen2': return self.encode("<|im_start|>" + role + "\n")
     return self.encode("<|start_header_id|>" + role + "<|end_header_id|>\n\n")
