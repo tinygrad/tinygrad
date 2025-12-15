@@ -15,14 +15,21 @@ class AM_SOC(AM_IP):
   def init_sw(self): self.module = import_soc(self.adev.ip_ver[am.GC_HWIP])
 
   def init_hw(self):
-    self.adev.regRCC_DEV0_EPF2_STRAP2.update(strap_no_soft_reset_dev0_f2=0x0)
+    if self.adev.ip_ver[am.NBIO_HWIP] == (7,9,0):
+      self.adev.regXCC_DOORBELL_FENCE.write(0x0)
+      self.adev.regBIFC_GFX_INT_MONITOR_MASK.write(0x7ff)
+    else: self.adev.regRCC_DEV0_EPF2_STRAP2.update(strap_no_soft_reset_dev0_f2=0x0)
     self.adev.regRCC_DEV0_EPF0_RCC_DOORBELL_APER_EN.write(0x1)
-  def set_clockgating_state(self): self.adev.regHDP_MEM_POWER_CTRL.update(atomic_mem_power_ctrl_en=1, atomic_mem_power_ds_en=1)
+  def set_clockgating_state(self):
+    if self.adev.ip_ver[am.HDP_HWIP] >= (5,2,1): self.adev.regHDP_MEM_POWER_CTRL.update(atomic_mem_power_ctrl_en=1, atomic_mem_power_ds_en=1)
 
   def doorbell_enable(self, port, awid=0, awaddr_31_28_value=0, offset=0, size=0):
-    self.adev.reg(f"{'regGDC_S2A0_S2A' if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else 'regS2A'}_DOORBELL_ENTRY_{port}_CTRL").update(
-      **{f"s2a_doorbell_port{port}_enable":1, f"s2a_doorbell_port{port}_awid":awid, f"s2a_doorbell_port{port}_awaddr_31_28_value":awaddr_31_28_value,
-         f"s2a_doorbell_port{port}_range_offset":offset, f"s2a_doorbell_port{port}_range_size":size})
+    reg = self.adev.reg(f"{'regGDC_S2A0_S2A' if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else 'regS2A'}_DOORBELL_ENTRY_{port}_CTRL")
+    val = reg.encode(**{f"s2a_doorbell_port{port}_enable":1, f"s2a_doorbell_port{port}_awid":awid,  f"s2a_doorbell_port{port}_range_size":size,
+      f"s2a_doorbell_port{port}_awaddr_31_28_value":awaddr_31_28_value, f"s2a_doorbell_port{port}_range_offset":offset})
+
+    if self.adev.ip_ver[am.NBIO_HWIP] == (7,9,0): self.adev.indirect_wreg_pcie(reg.addr[0], val)
+    else: reg.write(val)
 
 class AM_GMC(AM_IP):
   def init_sw(self):
@@ -206,8 +213,9 @@ class AM_GFX(AM_IP):
 
     for xcc in range(self.xccs): self.adev.regRLC_SRM_CNTL.update(srm_enable=1, auto_incr_addr=1, inst=xcc)
 
-    self.adev.soc.doorbell_enable(port=0, awid=0x3, awaddr_31_28_value=0x3)
-    self.adev.soc.doorbell_enable(port=3, awid=0x6, awaddr_31_28_value=0x3)
+    if self.adev.ip_ver[am.NBIO_HWIP] != (7,9,0):
+      self.adev.soc.doorbell_enable(port=0, awid=0x3, awaddr_31_28_value=0x3)
+      self.adev.soc.doorbell_enable(port=3, awid=0x6, awaddr_31_28_value=0x3)
 
     for xcc in range(self.xccs):
       self.adev.regGRBM_CNTL.update(read_timeout=0xff, inst=xcc)
@@ -339,7 +347,8 @@ class AM_IH(AM_IP):
     for _, rwptr_vm, suf, ring_id in self.rings:
       self.adev.reg(f"regIH_RB_CNTL{suf}").update(rb_enable=1, **({'enable_intr': 1} if ring_id == 0 else {}))
 
-    self.adev.soc.doorbell_enable(port=1, awid=0x0, awaddr_31_28_value=0x0, offset=am.AMDGPU_NAVI10_DOORBELL_IH*2, size=2)
+    if self.adev.ip_ver[am.NBIO_HWIP] != (7,9,0):
+      self.adev.soc.doorbell_enable(port=1, awid=0x0, awaddr_31_28_value=0x0, offset=am.AMDGPU_NAVI10_DOORBELL_IH*2, size=2)
 
   def interrupt_handler(self):
     _, rwptr_vm, suf, _ = self.rings[0]
@@ -362,7 +371,12 @@ class AM_SDMA(AM_IP):
       self.adev.reg(f"regSDMA{pipe}_UTCL1_PAGE").update(rd_l2_policy=0x2, wr_l2_policy=0x3, **({'llc_noalloc':1} if self.sdma_name == "F32" else {}))
       self.adev.reg(f"regSDMA{pipe}_{self.sdma_name}_CNTL").update(halt=0, **{f"{'th1_' if self.sdma_name == 'F32' else ''}reset":0})
       self.adev.reg(f"regSDMA{pipe}_CNTL").update(ctxempty_int_enable=1, trap_enable=1)
-    self.adev.soc.doorbell_enable(port=2, awid=0xe, awaddr_31_28_value=0x3, offset=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0*2, size=4)
+
+    if self.adev.ip_ver[am.NBIO_HWIP] == (7,9,0):
+      self.adev.regDOORBELL0_CTRL_ENTRY_1.write(bif_doorbell1_range_offset_entry=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0*2,
+        bif_doorbell1_range_size_entry=4)
+      self.adev.soc.doorbell_enable(port=2, awid=0xe, awaddr_31_28_value=0x1, offset=0xe, size=4)
+    else: self.adev.soc.doorbell_enable(port=2, awid=0xe, awaddr_31_28_value=0x3, offset=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0*2, size=4)
 
   def fini_hw(self):
     self.adev.regSDMA0_QUEUE0_RB_CNTL.update(rb_enable=0)
@@ -404,10 +418,10 @@ class AM_PSP(AM_IP):
     self.ring_size = 0x10000
     self.ring_paddr = self.adev.mm.palloc(self.ring_size, zero=False, boot=True)
 
-    self.max_tmr_size = 0x1300000
-    self.boot_time_tmr = self.adev.ip_ver[am.GC_HWIP] >= (12,0,0)
-    if not self.boot_time_tmr:
-      self.tmr_paddr = self.adev.mm.palloc(self.max_tmr_size, align=am.PSP_TMR_ALIGNMENT, zero=False, boot=True)
+    self.max_tmr_size, self.tmr_size = 0x1300000, 0
+    self.boot_time_tmr = self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6), (13,0,14), (14,0,2), (14,0,3)}
+    self.autoload_tmr = self.adev.ip_ver[am.MP0_HWIP] not in {(13,0,6), (13,0,14)}
+    self.tmr_paddr = self.adev.mm.palloc(self.max_tmr_size, align=am.PSP_TMR_ALIGNMENT, zero=False, boot=True) if not self.boot_time_tmr else 0
 
   def init_hw(self):
     spl_key = am.PSP_FW_TYPE_PSP_SPL if self.adev.ip_ver[am.MP0_HWIP] >= (14,0,0) else am.PSP_FW_TYPE_PSP_KDB
@@ -424,8 +438,8 @@ class AM_PSP(AM_IP):
     self._tmr_init()
 
     # SMU fw should be loaded before TMR.
-    self._load_ip_fw_cmd(*self.adev.fw.smu_psp_desc)
-    if not self.boot_time_tmr: self._tmr_load_cmd()
+    if hasattr(self.adev.fw, 'smu_psp_desc'): self._load_ip_fw_cmd(*self.adev.fw.smu_psp_desc)
+    if not self.boot_time_tmr or not self.autoload_tmr: self._tmr_load_cmd()
 
     for psp_desc in self.adev.fw.descs: self._load_ip_fw_cmd(*psp_desc)
     self._rlc_autoload_cmd()
@@ -508,11 +522,13 @@ class AM_PSP(AM_IP):
       self._ring_submit(cmd)
 
   def _tmr_load_cmd(self) -> am.struct_psp_gfx_cmd_resp:
+    tmr_paddr = self.adev.paddr2xgmi(self.tmr_paddr) if self.tmr_paddr else 0
+
     cmd = am.struct_psp_gfx_cmd_resp(cmd_id=am.GFX_CMD_ID_SETUP_TMR)
-    cmd.cmd.cmd_setup_tmr.buf_phy_addr_hi, cmd.cmd.cmd_setup_tmr.buf_phy_addr_lo = data64(self.adev.paddr2mc(self.tmr_paddr))
-    cmd.cmd.cmd_setup_tmr.system_phy_addr_hi, cmd.cmd.cmd_setup_tmr.system_phy_addr_lo = data64(self.adev.paddr2xgmi(self.tmr_paddr))
+    cmd.cmd.cmd_setup_tmr.buf_phy_addr_hi, cmd.cmd.cmd_setup_tmr.buf_phy_addr_lo = data64(self.adev.paddr2mc(self.tmr_paddr) if self.tmr_paddr else 0)
+    cmd.cmd.cmd_setup_tmr.system_phy_addr_hi, cmd.cmd.cmd_setup_tmr.system_phy_addr_lo = data64(tmr_paddr)
     cmd.cmd.cmd_setup_tmr.bitfield.virt_phy_addr = 1
-    cmd.cmd.cmd_setup_tmr.buf_size = self.tmr_size
+    cmd.cmd.cmd_setup_tmr.buf_size = self.tmr_size if self.tmr_paddr else 0
     return self._ring_submit(cmd)
 
   def _load_toc_cmd(self, toc_size:int) -> am.struct_psp_gfx_cmd_resp:
