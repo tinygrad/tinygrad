@@ -195,8 +195,47 @@ models = {
 # *** simple OpenAI compatible server on 11434 to match ollama ***
 # OPENAI_BASE_URL=http://localhost:11434/v1 OPENAI_API_KEY=ollama uvx --from gpt-command-line gpt
 
+CHAT_HTML = b'''<!DOCTYPE html><html><head><style>
+  * { margin: 0 }
+  body { background: #212121; color: #e3e3e3; font-family: system-ui;
+         height: 100vh; display: flex; flex-direction: column }
+
+  #chat { flex: 1; overflow-y: auto; padding: 20px }
+  .msg { padding: 10px 16px; margin: 8px 0; max-width: 70%; white-space: pre-wrap; border-radius: 18px }
+  .user { background: #2f2f2f; margin-left: auto }
+
+  #input { max-width: 768px; width: 100%; margin: 20px auto; padding: 14px 20px;
+           background: #2f2f2f; color: inherit; font: inherit;
+           border: none; outline: none; resize: none; border-radius: 24px; field-sizing: content }
+</style></head><body>
+<div id="chat"></div>
+<textarea id="input" rows="1" placeholder="Ask anything"></textarea>
+<script>
+  input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }
+  const msgs = [];
+  async function send() {
+    if (!input.value.trim()) return;
+    msgs.push({role: 'user', content: input.value.trim()});
+    chat.innerHTML += '<div class="msg user">' + input.value.trim().replace(/</g, '&lt;') + '</div>';
+    input.value = '';
+    const d = document.createElement('div'); d.className = 'msg'; chat.appendChild(d);
+    const r = await fetch('/v1/chat/completions', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({model: 'llama', messages: msgs, stream: true})});
+    for (const rd = r.body.getReader(), dec = new TextDecoder();;) {
+      const {done, value} = await rd.read();
+      if (done) break;
+      for (const ln of dec.decode(value).split('\\n'))
+        if (ln.startsWith('data: ') && !ln.includes('[DONE]'))
+          try { d.textContent += JSON.parse(ln.slice(6)).choices[0]?.delta?.content || '' } catch {}
+      chat.scrollTop = chat.scrollHeight;
+    }
+    msgs.push({role: 'assistant', content: d.textContent});
+  }
+</script></body></html>'''
+
 class Handler(HTTPRequestHandler):
   def log_request(self, code='-', size='-'): pass
+  def do_GET(self): self.send_data(CHAT_HTML, content_type="text/html")
   def run_model(self, ids:list[int], model_name:str, include_usage=False):
     stderr_log(f"{self.path}  {colored('--', 'BLACK')}  in:{len(ids):5d}  {colored('--', 'BLACK')}  ")
     tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
