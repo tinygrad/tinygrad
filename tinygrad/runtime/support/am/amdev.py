@@ -143,7 +143,7 @@ class AMMemoryManager(MemoryManager):
 class AMDev(PCIDevImplBase):
   Version = 0xA0000006
 
-  def __init__(self, pci_dev:PCIDevice, dma_regions:list[tuple[int, MMIOInterface]]|None=None):
+  def __init__(self, pci_dev:PCIDevice, dma_regions:list[tuple[int, MMIOInterface]]|None=None, reset_mode=False):
     self.pci_dev, self.devfmt, self.dma_regions = pci_dev, pci_dev.pcibus, dma_regions
     self.vram, self.doorbell64, self.mmio = self.pci_dev.map_bar(0), self.pci_dev.map_bar(2, fmt='Q'), self.pci_dev.map_bar(5, fmt='I')
 
@@ -169,7 +169,11 @@ class AMDev(PCIDevImplBase):
 
     # Init hw for IP blocks where it is needed
     if not self.partial_boot:
-      if self.psp.is_sos_alive() and self.smu.is_smu_alive(): self.smu.mode1_reset()
+      if self.psp.is_sos_alive() and self.smu.is_smu_alive():
+        if self.gmc.xgmi_seg_sz > 0:
+          if reset_mode: return # in reset mode, do not raise
+          raise RuntimeError("Malformed state. Use extra/amdpci/hive_reset.py to reset the hive")
+        self.smu.mode1_reset()
       for ip in [self.soc, self.gmc, self.ih, self.psp, self.smu]:
         ip.init_hw()
         if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
