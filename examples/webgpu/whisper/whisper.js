@@ -2,6 +2,7 @@
 const SAMPLES_PER_SEGMENT = 480000;
 const MEL_SPEC_CHUNK_LENGTH = 80 * 3000;
 
+// TODO: rename to EOT - end of transcription
 const TOK_EOS = 50256;
 const TOK_BEGIN_TRANSCRIPTION = 50257;
 const TOK_NO_TIMESTAMPS = 50362;
@@ -110,11 +111,6 @@ const getDevice = async (GPU) => {
     if (!GPU) return false;
     const adapter = await GPU.requestAdapter();
     if (!adapter) return false;
-    // let limits = Object.fromEntries(LIMITS_KEYS.map(x => [x, adapter.limits[x]]));
-    // let limits = adapter.limits;
-    // console.log(limits);
-    // console.log(Object.entries(adapter.limits));
-    // console.log(Object.entries(adapter.features));
     let maxStorageBufferBindingSize = adapter.limits.maxStorageBufferBindingSize;
 
     const _2GB = 2 ** 31; // 2GB
@@ -178,15 +174,6 @@ async function decoder_upload_audio_features(nets, audio_features_batch, decoder
     }
 }
 
-function rebuild_cache_tail_index(c1, c2) {
-    let i = 0;
-    for (; i < c1.length && i < c2.length; ++i) {
-        if (c1[i] !== c2[i]) break;
-    }
-    return i;
-}
-
-const suppress = [1, 2, 7, 8, 9, 10, 14, 25, 26, 27, 28, 29, 31, 58, 59, 60, 61, 62, 63, 90, 91, 92, 93, 357, 366, 438, 532, 685, 705, 796, 930, 1058, 1220, 1267, 1279, 1303, 1343, 1377, 1391, 1635, 1782, 1875, 2162, 2361, 2488, 3467, 4008, 4211, 4600, 4808, 5299, 5855, 6329, 7203, 9609, 9959, 10563, 10786, 11420, 11709, 11907, 13163, 13697, 13700, 14808, 15306, 16410, 16791, 17992, 19203, 19510, 20724, 22305, 22935, 27007, 30109, 30420, 33409, 34949, 40283, 40493, 40549, 47282, 49146, 50257, 50357, 50358, 50359, 50360, 50361];
 
 /** @typedef {number} integer */
 /** @typedef {number} float */
@@ -224,6 +211,8 @@ const suppress = [1, 2, 7, 8, 9, 10, 14, 25, 26, 27, 28, 29, 31, 58, 59, 60, 61,
  * @returns {Promise<Decoder_Result[]>}
  */
 async function decodeOneBatch(nets, decode_sequences, decoder_state, audio_features_batch) {
+    // TODO: poor name
+    // this really should just pack batches, call decoder, unpack results, nothing more
     let audio_features = audio_features_batch[0];
 
     let results = [];
@@ -242,7 +231,8 @@ async function decodeOneBatch(nets, decode_sequences, decoder_state, audio_featu
 
     let [sorted] = await decoder_helper(nets, context_inputs, audio_features, max_context_length - 1, decoder_state);
 
-    let logprobs_topk = 10;
+    // NOTE: unpack batched top k indices
+    // TODO: dehardcode
     let indices_topk = 10;
     for (let i = 0; i < results.length; ++i) {
         results[i].sorted = sorted.slice(i*indices_topk, (i+1)*indices_topk);
@@ -256,16 +246,13 @@ async function decodeOneBatch(nets, decode_sequences, decoder_state, audio_featu
  * @returns {Promise<Decoder_Result>}
  */
 async function applyDecoderResults(decode_sequence, decodeOne_result) {
+    // TODO: this function is too vague. it mutates decode_sequence's context and logprobs fields,
+    // does some random-looking segment_cumlogprob logic, and enforces TOK_EOS as final token
+    // when reached max decoded tokens even if we don't know if we even want to do that...
     const { context, context_prompt_length, max_context_length } = decode_sequence;
 
     let result = decodeOne_result;
-    let decoder_output = decodeOne_result.decoder_output;
-
-    let nextLogprobs;
-    let nextTokens;
-
-    nextLogprobs = decoder_output;
-    nextTokens = decodeOne_result.sorted;
+    let nextTokens = decodeOne_result.sorted;
 
     let nextTokenIndex = 0;
 
@@ -297,7 +284,7 @@ async function inferLoop(nets, log_specs_full, previous_context, audio_features_
             if (NO_TIMESTAMPS) suffix.push(TOK_NO_TIMESTAMPS);
             let max_context_to_take = MAX_TOKENS_TO_DECODE - prefix.length - suffix.length;
             context.push(...prefix);
-            context.push(...previous_context.filter((tok) => tok < TOK_EOS /*|| (tok >= TOK_TS_FIRST && tok <= TOK_TS_LAST)*/).slice(-max_context_to_take));
+            context.push(...previous_context.filter((tok) => tok < TOK_EOS).slice(-max_context_to_take));
             context.push(...suffix);
         } else {
             context = [TOK_BEGIN_TRANSCRIPTION];
@@ -412,8 +399,6 @@ async function inferLoop(nets, log_specs_full, previous_context, audio_features_
             console.log(cumlogprob);
             console.log(cumlogprob / seq.logprobs.length);
         }
-        let segment_cumlogprobs = sequences.map(s => s.segment_cumlogprob);
-        let idx = segment_cumlogprobs.indexOf(Math.min.apply(null, segment_cumlogprobs));
 
         inferLoopContext.is_done = true;
         inferLoopContext.state = "DONE";
@@ -564,7 +549,6 @@ export {
 
     batch_repeat_helper,
     decoder_helper,
-    rebuild_cache_tail_index,
     decodeOneBatch,
     inferLoop,
     transcribeAudio
