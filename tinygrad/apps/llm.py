@@ -247,8 +247,8 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument("--model", choices=list(models.keys()), default=list(models.keys())[0], help="Model choice")
   parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
-  parser.add_argument("--serve", action="store_true", help="Run OpenAI compatible API")
-  parser.add_argument("--benchmark", action="store_true", help="Benchmark tok/s")
+  parser.add_argument("--serve", nargs='?', type=int, const=11434, metavar="PORT", help="Run OpenAI compatible API (optionally specify port, default 11434)")
+  parser.add_argument("--benchmark", nargs='?', type=int, const=20, metavar="COUNT", help="Benchmark tok/s (optionally specify count, default 20)")
   args = parser.parse_args()
 
   # load the model
@@ -259,7 +259,7 @@ if __name__ == "__main__":
   if args.benchmark:
     param_bytes = sum(x.nbytes() for x in nn.state.get_parameters(model))
     gen = model.generate([0], 0)
-    for _ in range(20):
+    for _ in range(args.benchmark):
       GlobalCounters.reset()
       with Timing(on_exit=lambda x: f", {1e9/x:6.2f} tok/s, {GlobalCounters.global_mem/x:7.2f} GB/s, param {param_bytes/x:7.2f} GB/s"): next(gen)
     exit(0)
@@ -270,7 +270,7 @@ if __name__ == "__main__":
   eos_id: int = kv['tokenizer.ggml.eos_token_id']
 
   # start server
-  if args.serve: TCPServerWithReuse(('', 11434), Handler).serve_forever()
+  if args.serve: TCPServerWithReuse(('', args.serve), Handler).serve_forever()
 
   ids: list[int] = [bos_id]
   while 1:
