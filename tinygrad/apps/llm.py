@@ -212,8 +212,44 @@ models = {
 # *** simple OpenAI compatible server on 11434 to match ollama ***
 # OPENAI_BASE_URL=http://localhost:11434/v1 OPENAI_API_KEY=ollama uvx --from gpt-command-line gpt
 
+CHAT_HTML = b'''<!DOCTYPE html><html><head><title>tinygrad chat</title><style>
+  * { margin: 0 }
+  body { background: #212121; color: #e3e3e3; font-family: system-ui;
+         height: 100vh; display: flex; flex-direction: column }
+  #chat { flex: 1; overflow-y: auto; padding: 20px }
+  .msg { padding: 10px 16px; margin: 8px 0; white-space: pre-wrap; border-radius: 18px }
+  .user { background: #2f2f2f; margin-left: auto; width: fit-content; max-width: 70% }
+  #input { max-width: 768px; width: 100%; margin: 20px auto; padding: 14px 20px;
+           background: #2f2f2f; color: inherit; font: inherit;
+           border: none; outline: none; resize: none; border-radius: 24px; field-sizing: content }
+</style></head><body><div id="chat"></div>
+<textarea id="input" rows="1" placeholder="Ask anything"></textarea>
+<script>
+  input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }
+  const msgs = [];
+  async function send() {
+    if (!input.value.trim()) return;
+    msgs.push({role: 'user', content: input.value.trim()});
+    chat.innerHTML += '<div class="msg user">' + input.value.trim().replace(/</g, '&lt;') + '</div>';
+    input.value = '';
+    const d = document.createElement('div'); d.className = 'msg'; chat.appendChild(d);
+    const r = await fetch('/v1/chat/completions', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({model: 'llama', messages: msgs, stream: true})});
+    for (const rd = r.body.getReader(), dec = new TextDecoder();;) {
+      const {done, value} = await rd.read();
+      if (done) break;
+      for (const ln of dec.decode(value).split('\\n'))
+        if (ln.startsWith('data: ') && !ln.includes('[DONE]'))
+          try { d.textContent += JSON.parse(ln.slice(6)).choices[0]?.delta?.content || '' } catch {}
+      chat.scrollTop = chat.scrollHeight;
+    }
+    msgs.push({role: 'assistant', content: d.textContent});
+  }
+</script></body></html>'''
+
 class Handler(HTTPRequestHandler):
   def log_request(self, code='-', size='-'): pass
+  def do_GET(self): self.send_data(CHAT_HTML, content_type="text/html")
   def run_model(self, ids:list[int], model_name:str, include_usage=False):
     stderr_log(f"{self.path}  {colored('--', 'BLACK')}  in:{len(ids):5d}  {colored('--', 'BLACK')}  ")
     tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
@@ -265,8 +301,8 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument("--model", choices=list(models.keys()), default=list(models.keys())[0], help="Model choice")
   parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
-  parser.add_argument("--serve", action="store_true", help="Run OpenAI compatible API")
-  parser.add_argument("--benchmark", action="store_true", help="Benchmark tok/s")
+  parser.add_argument("--serve", nargs='?', type=int, const=11434, metavar="PORT", help="Run OpenAI compatible API (optional port, default 11434)")
+  parser.add_argument("--benchmark", nargs='?', type=int, const=20, metavar="COUNT", help="Benchmark tok/s (optional count, default 20)")
   args = parser.parse_args()
 
   # load the model
@@ -277,7 +313,7 @@ if __name__ == "__main__":
   if args.benchmark:
     param_bytes = sum(x.nbytes() for x in nn.state.get_parameters(model))
     gen = model.generate([0], 0)
-    for _ in range(20):
+    for _ in range(args.benchmark):
       GlobalCounters.reset()
       with Timing(on_exit=lambda x: f", {1e9/x:6.2f} tok/s, {GlobalCounters.global_mem/x:7.2f} GB/s, param {param_bytes/x:7.2f} GB/s"): next(gen)
     exit(0)
@@ -288,7 +324,7 @@ if __name__ == "__main__":
   eos_id: int = kv['tokenizer.ggml.eos_token_id']
 
   # start server
-  if args.serve: TCPServerWithReuse(('', 11434), Handler).serve_forever()
+  if args.serve: TCPServerWithReuse(('', args.serve), Handler).serve_forever()
 
   ids: list[int] = [bos_id] if bos_id is not None else []
   while 1:
