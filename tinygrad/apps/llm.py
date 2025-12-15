@@ -199,16 +199,13 @@ CHAT_HTML = b'''<!DOCTYPE html><html><head><style>
   * { margin: 0 }
   body { background: #212121; color: #e3e3e3; font-family: system-ui;
          height: 100vh; display: flex; flex-direction: column }
-
   #chat { flex: 1; overflow-y: auto; padding: 20px }
   .msg { padding: 10px 16px; margin: 8px 0; max-width: 70%; white-space: pre-wrap; border-radius: 18px }
   .user { background: #2f2f2f; margin-left: auto }
-
   #input { max-width: 768px; width: 100%; margin: 20px auto; padding: 14px 20px;
            background: #2f2f2f; color: inherit; font: inherit;
            border: none; outline: none; resize: none; border-radius: 24px; field-sizing: content }
-</style></head><body>
-<div id="chat"></div>
+</style></head><body><div id="chat"></div>
 <textarea id="input" rows="1" placeholder="Ask anything"></textarea>
 <script>
   input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }
