@@ -21,12 +21,12 @@ constexpr int HALF_REG_BLOCK_N = REG_BLOCK_N / 2;
 
 using _gl_A = gl<half, -1, -1, -1, -1>;
 using _gl_B = gl<half, -1, -1, -1, -1>;
-using _gl_C = gl<half, -1, -1, -1, -1>;
+using _gl_C = gl<float, -1, -1, -1, -1>;
 
 using G = kittens::group<NUM_WARPS>;
 
 extern "C" __global__ __launch_bounds__(NUM_THREADS, 2)
-void matmul(half *c_ptr, half *a_ptr, half *b_ptr) {
+void matmul(float *c_ptr, half *a_ptr, half *b_ptr) {
   using ST_A = st_hf<HALF_BLOCK_SIZE, K_STEP, st_16x32_s>;
   using ST_B = st_hf<HALF_BLOCK_SIZE, K_STEP, st_16x32_s>;
 
