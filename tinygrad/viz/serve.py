@@ -405,7 +405,7 @@ def get_render(i:int, j:int, fmt:str) -> dict:
     return ret
   if fmt == "prg-pmc": return unpack_pmc(data[0])
   if fmt == "prg-sqtt":
-    ret:dict = {}
+    ret = {}
     if len((steps:=ctxs[i]["steps"])[j+1:]) == 0:
       with soft_err(lambda err: ret.update(err)):
         cu_events, units, wave_insts = unpack_sqtt(*data)
