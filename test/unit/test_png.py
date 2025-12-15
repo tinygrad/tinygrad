@@ -17,5 +17,15 @@ class TestPNGLoad(unittest.TestCase):
     result = png_load(Tensor(np.frombuffer(png_bytes, dtype=np.uint8))).numpy()
     np.testing.assert_array_equal(result, expected)
 
+  def test_roundtrip_png(self):
+    # horizontal stripes pattern uses only filters 0, 1
+    img_array = np.zeros((32, 32, 3), dtype=np.uint8)
+    img_array[::2] = 255  # white stripes on black
+    buf = io.BytesIO()
+    Image.fromarray(img_array).save(buf, format='PNG')
+    png_bytes = buf.getvalue()
+    result = png_load(Tensor(np.frombuffer(png_bytes, dtype=np.uint8))).numpy()
+    np.testing.assert_array_equal(result, img_array)
+
 if __name__ == '__main__':
   unittest.main()
