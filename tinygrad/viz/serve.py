@@ -256,8 +256,8 @@ def load_counters(profile:list[ProfileEvent]) -> None:
     name = prg.name if prg is not None else k[0]
     run_number[k[0]] += 1
     steps:list[dict] = []
-    if (pmc:=v[ProfilePMCEvent]): steps.append(create_step("PMC", ("/prg-pmc", len(ctxs), len(steps)), pmc))
-    if (sqtt:=v[ProfileSQTTEvent]):
+    if (pmc:=v.get(ProfilePMCEvent)): steps.append(create_step("PMC", ("/prg-pmc", len(ctxs), len(steps)), pmc))
+    if (sqtt:=v.get(ProfileSQTTEvent)):
       # to decode a SQTT trace, we need the raw stream, program binary and device properties
       steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), (k, [*sqtt, prg_events[k[0]], dev_events[sqtt[0].device]])))
       if getenv("SQTT_PARSE"):
