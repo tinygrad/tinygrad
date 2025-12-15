@@ -1,5 +1,5 @@
 import ctypes, itertools, re, functools, os
-from tinygrad.helpers import flatten, unwrap
+from tinygrad.helpers import unwrap
 import tinygrad.runtime.autogen.libclang as clang # use REGEN=1 to regenerate libclang bindings
 
 def unwrap_cursor(c: clang.CXCursor) -> clang.CXCursor:
@@ -26,12 +26,12 @@ def fields(t: clang.CXType) -> list[clang.CXCursor]:
   clang.clang_Type_visitFields(t, visitor, None)
   return ret
 
-# flattens anonymous fields
+# flattens anonymous structs/unions
 def all_fields(t, off=0):
   for f in fields(t):
     if clang.clang_Cursor_isAnonymousRecordDecl(clang.clang_getTypeDeclaration(clang.clang_getCursorType(f))):
       yield from all_fields(clang.clang_getCursorType(f), clang.clang_Cursor_getOffsetOfField(f) // 8)
-    elif nm(f): yield f, off+clang.clang_Cursor_getOffsetOfField(f) // 8
+    elif nm(f): yield f, off+clang.clang_Cursor_getOffsetOfField(f) // 8 # ignores unnamed fields
 
 def arguments(c: clang.CXCursor|clang.CXType):
   yield from ((clang.clang_Cursor_getArgument if isinstance(c, clang.CXCursor) else clang.clang_getArgType)(c, i)
@@ -128,10 +128,10 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
           if clang.clang_Cursor_isAnonymous(decl):
             types[_nm] = (tnm:=(suggested_name or (f"_anon{'struct' if decl.kind==clang.CXCursor_StructDecl else 'union'}{anoncnt()}")), True)
           else: types[_nm] = (tnm:=_nm.replace(' ', '_').replace('::', '_')), len(fields(t)) != 0
-          lines.append(f"class {tnm}({'Struct' if decl.kind==clang.CXCursor_StructDecl else 'ctypes.Union'}): pass")
+          lines.append(f"class {tnm}({'Struct' if decl.kind==clang.CXCursor_StructDecl else 'Union'}): pass")
           if typedef: lines.append(f"{typedef} = {tnm}")
-        ff=[(nm(f), offset, tname(clang.clang_getCursorType(f)))+ ((clang.clang_getFieldDeclBitWidth(f), clang.clang_Cursor_getOffsetOfField(f) % 8)
-                                                                   *clang.clang_Cursor_isBitField(f)) for f,offset in all_fields(t)]
+        ff=[(nm(f), offset, tname(clang.clang_getCursorType(f))) + ((clang.clang_getFieldDeclBitWidth(f), clang.clang_Cursor_getOffsetOfField(f) % 8)
+                                                                    *clang.clang_Cursor_isBitField(f)) for f,offset in all_fields(t)]
         if ff: lines.extend([f"{tnm}.SIZE = {clang.clang_Type_getSizeOf(t)}", f"{tnm}._fields_ = [{', '.join(repr(f) for f,*_ in ff)}]",
                              *[f"{tnm}.{f} = field({', '.join(str(a) for a in args)})" for f,*args in ff]])
         return tnm
