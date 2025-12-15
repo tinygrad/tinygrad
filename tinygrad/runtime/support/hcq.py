@@ -1,10 +1,10 @@
 from __future__ import annotations
-from typing import cast, Callable, Type, TypeVar, Generic, Any, Sequence
+from typing import cast, Callable, Type, TypeVar, Generic, Any
 import contextlib, decimal, statistics, time, ctypes, array, os, struct, collections, functools
 try: import fcntl # windows misses that
 except ImportError: fcntl = None #type:ignore[assignment]
-from tinygrad.helpers import PROFILE, getenv, to_mv, ProfileRangeEvent, select_first_inited
-from tinygrad.device import BufferSpec, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent, CompilerPairT
+from tinygrad.helpers import PROFILE, getenv, to_mv, ProfileRangeEvent, select_first_inited, unwrap, suppress_finalizing
+from tinygrad.device import BufferSpec, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent, CompilerSet
 from tinygrad.uop.ops import sym_infer, sint, UOp
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.memory import BumpAllocator
@@ -15,7 +15,7 @@ class MMIOInterface:
   def __getitem__(self, k): return (bytes(self.mv[k]) if self.fmt == 'B' else self.mv[k].tolist()) if isinstance(k, slice) else self.mv[k]
   def __setitem__(self, k, v): self.mv[k] = v
   def view(self, offset:int=0, size:int|None=None, fmt=None) -> MMIOInterface:
-    return MMIOInterface(self.addr+offset, size or (self.nbytes - offset), fmt=fmt or self.fmt)
+    return MMIOInterface(self.addr+offset, (self.nbytes - offset) if size is None else size, fmt=fmt or self.fmt)
 
 class FileIOInterface:
   """
@@ -276,8 +276,7 @@ def hcq_profile(dev:HCQCompiled, enabled, desc, queue_type:Callable[[], HWQueue]
     elif enabled and queue_type is not None:
       queue_type().wait(dev.timeline_signal, dev.timeline_value - 1).timestamp(en).signal(dev.timeline_signal, dev.next_timeline()).submit(dev)
 
-    if enabled and PROFILE:
-      dev.sig_prof_records.append((cast(HCQSignal, st), cast(HCQSignal, en), desc, (queue_type or type(queue)) is dev.hw_copy_queue_t))
+    if enabled and PROFILE: dev.sig_prof_records.append((unwrap(st), unwrap(en), desc, (queue_type or type(queue)) is dev.hw_copy_queue_t))
 
 class HCQArgsState(Generic[ProgramType]):
   def __init__(self, buf:HCQBuffer, prg:ProgramType, bufs:tuple[HCQBuffer, ...], vals:tuple[sint, ...]=()):
@@ -336,6 +335,7 @@ class HCQProgram(Generic[HCQDeviceType]):
     kernargs = self.fill_kernargs(bufs, vals)
     q = self.dev.hw_compute_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1).memory_barrier()
 
+    self.dev.prof_exec_counter += 1
     with hcq_profile(self.dev, queue=q, desc=self.name, enabled=wait or PROFILE) as (sig_st, sig_en):
       q.exec(self, kernargs, global_size, local_size)
 
@@ -353,7 +353,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
   signal_pool: dict[str, list[HCQBuffer]] = collections.defaultdict(list) # per peer group
   cpu_devices: list[HCQCompiled] = []
 
-  def __init__(self, device:str, allocator:HCQAllocatorBase, compilers:Sequence[CompilerPairT], runtime, signal_t:Type[SignalType],
+  def __init__(self, device:str, allocator:HCQAllocatorBase, compilers:CompilerSet, runtime, signal_t:Type[SignalType],
                comp_queue_t:Callable[[], HWQueue], copy_queue_t:Callable[[], HWQueue]|None=None, kernargs_size=(16 << 20), sigalloc_size=0x1000):
     self.device_id:int = int(device.split(":")[1]) if ":" in device else 0
 
@@ -372,6 +372,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     self.timeline_value:int = 1
     self.timeline_signal, self._shadow_timeline_signal = self.new_signal(value=0, is_timeline=True), self.new_signal(value=0, is_timeline=True)
     self.sig_prof_records:list[tuple[HCQSignal, HCQSignal, str, bool]] = []
+    self.prof_exec_counter:int = 0
 
     self.kernargs_buf:HCQBuffer = self.allocator.alloc(kernargs_size, BufferSpec(cpu_access=True))
     self.kernargs_offset_allocator:BumpAllocator = BumpAllocator(self.kernargs_buf.size, wrap=True)
@@ -431,10 +432,12 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     self.timeline_signal.value = 0
     cast(HCQAllocatorBase, self.allocator).b_timeline = [0] * len(cast(HCQAllocatorBase, self.allocator).b)
 
-  def _realloc(self, oldbuf:HCQBuffer|None, new_size:int, options:BufferSpec|None=None) -> tuple[HCQBuffer, bool]:
+  def _realloc(self, oldbuf:HCQBuffer|None, new_size:int, options:BufferSpec|None=None, force=False) -> tuple[HCQBuffer, bool]:
     if oldbuf is not None: self.allocator.free(oldbuf, oldbuf.size, options=options)
     try: buf, realloced = self.allocator.alloc(new_size, options=options), True
-    except MemoryError: buf, realloced = self.allocator.alloc(oldbuf.size if oldbuf is not None else new_size, options=options), False
+    except MemoryError:
+      if force: raise
+      buf, realloced = self.allocator.alloc(oldbuf.size if oldbuf is not None else new_size, options=options), False
     return buf, realloced
 
   def _select_iface(self, *ifaces:Type):
@@ -493,6 +496,11 @@ class HCQAllocatorBase(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
     # Devices can save mappings and internal metadata as a new buffer.
     if (mb:=self._map(buf)) is not None: buf.mappings[self.dev] = mb
     buf.mapped_devs.append(self.dev)
+
+  @suppress_finalizing
+  def _free(self, buf:HCQBuffer, options:BufferSpec|None=None):
+    for dev in buf.mapped_devs: dev.synchronize()
+    if hasattr(self, '_do_free'): self._do_free(buf, options)
 
   def _offset(self, buf, size:int, offset:int) -> HCQBuffer: return buf.offset(offset=offset, size=size)
 

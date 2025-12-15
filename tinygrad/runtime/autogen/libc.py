@@ -13,115 +13,87 @@ off_t = ctypes.c_int64
 mode_t = ctypes.c_uint32
 size_t = ctypes.c_uint64
 __off_t = ctypes.c_int64
-# extern void *mmap(void *__addr, size_t __len, int __prot, int __flags, int __fd, __off_t __offset) __attribute__((nothrow))
 try: (mmap:=dll.mmap).restype, mmap.argtypes = ctypes.c_void_p, [ctypes.c_void_p, size_t, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_int64]
 except AttributeError: pass
 
-# extern int munmap(void *__addr, size_t __len) __attribute__((nothrow))
 try: (munmap:=dll.munmap).restype, munmap.argtypes = ctypes.c_int32, [ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-# extern int mprotect(void *__addr, size_t __len, int __prot) __attribute__((nothrow))
 try: (mprotect:=dll.mprotect).restype, mprotect.argtypes = ctypes.c_int32, [ctypes.c_void_p, size_t, ctypes.c_int32]
 except AttributeError: pass
 
-# extern int msync(void *__addr, size_t __len, int __flags)
 try: (msync:=dll.msync).restype, msync.argtypes = ctypes.c_int32, [ctypes.c_void_p, size_t, ctypes.c_int32]
 except AttributeError: pass
 
-# extern int madvise(void *__addr, size_t __len, int __advice) __attribute__((nothrow))
 try: (madvise:=dll.madvise).restype, madvise.argtypes = ctypes.c_int32, [ctypes.c_void_p, size_t, ctypes.c_int32]
 except AttributeError: pass
 
-# extern int posix_madvise(void *__addr, size_t __len, int __advice) __attribute__((nothrow))
 try: (posix_madvise:=dll.posix_madvise).restype, posix_madvise.argtypes = ctypes.c_int32, [ctypes.c_void_p, size_t, ctypes.c_int32]
 except AttributeError: pass
 
-# extern int mlock(const void *__addr, size_t __len) __attribute__((nothrow))
 try: (mlock:=dll.mlock).restype, mlock.argtypes = ctypes.c_int32, [ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-# extern int munlock(const void *__addr, size_t __len) __attribute__((nothrow))
 try: (munlock:=dll.munlock).restype, munlock.argtypes = ctypes.c_int32, [ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-# extern int mlockall(int __flags) __attribute__((nothrow))
 try: (mlockall:=dll.mlockall).restype, mlockall.argtypes = ctypes.c_int32, [ctypes.c_int32]
 except AttributeError: pass
 
-# extern int munlockall(void) __attribute__((nothrow))
 try: (munlockall:=dll.munlockall).restype, munlockall.argtypes = ctypes.c_int32, []
 except AttributeError: pass
 
-# extern int mincore(void *__start, size_t __len, unsigned char *__vec) __attribute__((nothrow))
 try: (mincore:=dll.mincore).restype, mincore.argtypes = ctypes.c_int32, [ctypes.c_void_p, size_t, ctypes.POINTER(ctypes.c_ubyte)]
 except AttributeError: pass
 
-# extern int shm_open(const char *__name, int __oflag, mode_t __mode)
 try: (shm_open:=dll.shm_open).restype, shm_open.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.c_int32, mode_t]
 except AttributeError: pass
 
-# extern int shm_unlink(const char *__name)
 try: (shm_unlink:=dll.shm_unlink).restype, shm_unlink.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern void *memcpy(void *restrict __dest, const void *restrict __src, size_t __n) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
 try: (memcpy:=dll.memcpy).restype, memcpy.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-# extern void *memmove(void *__dest, const void *__src, size_t __n) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
 try: (memmove:=dll.memmove).restype, memmove.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-# extern void *memccpy(void *restrict __dest, const void *restrict __src, int __c, size_t __n) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
 try: (memccpy:=dll.memccpy).restype, memccpy.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int32, size_t]
 except AttributeError: pass
 
-# extern void *memset(void *__s, int __c, size_t __n) __attribute__((nothrow)) __attribute__((nonnull(1)))
 try: (memset:=dll.memset).restype, memset.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_int32, size_t]
 except AttributeError: pass
 
-# extern int memcmp(const void *__s1, const void *__s2, size_t __n) __attribute__((nothrow)) __attribute__((pure)) __attribute__((nonnull(1, 2)))
 try: (memcmp:=dll.memcmp).restype, memcmp.argtypes = ctypes.c_int32, [ctypes.c_void_p, ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-# extern int __memcmpeq(const void *__s1, const void *__s2, size_t __n) __attribute__((nothrow)) __attribute__((pure)) __attribute__((nonnull(1, 2)))
 try: (__memcmpeq:=dll.__memcmpeq).restype, __memcmpeq.argtypes = ctypes.c_int32, [ctypes.c_void_p, ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-# extern void *memchr(const void *__s, int __c, size_t __n) __attribute__((nothrow)) __attribute__((pure)) __attribute__((nonnull(1)))
 try: (memchr:=dll.memchr).restype, memchr.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_int32, size_t]
 except AttributeError: pass
 
-# extern char *strcpy(char *restrict __dest, const char *restrict __src) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
 try: (strcpy:=dll.strcpy).restype, strcpy.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern char *strncpy(char *restrict __dest, const char *restrict __src, size_t __n) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
 try: (strncpy:=dll.strncpy).restype, strncpy.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
-# extern char *strcat(char *restrict __dest, const char *restrict __src) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
 try: (strcat:=dll.strcat).restype, strcat.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern char *strncat(char *restrict __dest, const char *restrict __src, size_t __n) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
 try: (strncat:=dll.strncat).restype, strncat.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
-# extern int strcmp(const char *__s1, const char *__s2) __attribute__((nothrow)) __attribute__((pure)) __attribute__((nonnull(1, 2)))
 try: (strcmp:=dll.strcmp).restype, strcmp.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern int strncmp(const char *__s1, const char *__s2, size_t __n) __attribute__((nothrow)) __attribute__((pure)) __attribute__((nonnull(1, 2)))
 try: (strncmp:=dll.strncmp).restype, strncmp.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
-# extern int strcoll(const char *__s1, const char *__s2) __attribute__((nothrow)) __attribute__((pure)) __attribute__((nonnull(1, 2)))
 try: (strcoll:=dll.strcoll).restype, strcoll.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern unsigned long strxfrm(char *restrict __dest, const char *restrict __src, size_t __n) __attribute__((nothrow)) __attribute__((nonnull(2)))
 try: (strxfrm:=dll.strxfrm).restype, strxfrm.argtypes = ctypes.c_uint64, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
@@ -135,131 +107,99 @@ struct___locale_struct._fields_ = [
   ('__names', (ctypes.POINTER(ctypes.c_char) * 13)),
 ]
 locale_t = ctypes.POINTER(struct___locale_struct)
-# extern int strcoll_l(const char *__s1, const char *__s2, locale_t __l) __attribute__((nothrow)) __attribute__((pure)) __attribute__((nonnull(1, 2, 3)))
 try: (strcoll_l:=dll.strcoll_l).restype, strcoll_l.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), locale_t]
 except AttributeError: pass
 
-# extern size_t strxfrm_l(char *__dest, const char *__src, size_t __n, locale_t __l) __attribute__((nothrow)) __attribute__((nonnull(2, 4)))
 try: (strxfrm_l:=dll.strxfrm_l).restype, strxfrm_l.argtypes = size_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), size_t, locale_t]
 except AttributeError: pass
 
-# extern char *strdup(const char *__s) __attribute__((nothrow)) __attribute__((malloc)) __attribute__((nonnull(1)))
 try: (strdup:=dll.strdup).restype, strdup.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern char *strndup(const char *__string, size_t __n) __attribute__((nothrow)) __attribute__((malloc)) __attribute__((nonnull(1)))
 try: (strndup:=dll.strndup).restype, strndup.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
-# extern char *strchr(const char *__s, int __c) __attribute__((nothrow)) __attribute__((pure)) __attribute__((nonnull(1)))
 try: (strchr:=dll.strchr).restype, strchr.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
 except AttributeError: pass
 
-# extern char *strrchr(const char *__s, int __c) __attribute__((nothrow)) __attribute__((pure)) __attribute__((nonnull(1)))
 try: (strrchr:=dll.strrchr).restype, strrchr.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
 except AttributeError: pass
 
-# extern char *strchrnul(const char *__s, int __c) __attribute__((nothrow)) __attribute__((pure)) __attribute__((nonnull(1)))
 try: (strchrnul:=dll.strchrnul).restype, strchrnul.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
 except AttributeError: pass
 
-# extern unsigned long strcspn(const char *__s, const char *__reject) __attribute__((nothrow)) __attribute__((pure)) __attribute__((nonnull(1, 2)))
 try: (strcspn:=dll.strcspn).restype, strcspn.argtypes = ctypes.c_uint64, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern unsigned long strspn(const char *__s, const char *__accept) __attribute__((nothrow)) __attribute__((pure)) __attribute__((nonnull(1, 2)))
 try: (strspn:=dll.strspn).restype, strspn.argtypes = ctypes.c_uint64, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern char *strpbrk(const char *__s, const char *__accept) __attribute__((nothrow)) __attribute__((pure)) __attribute__((nonnull(1, 2)))
 try: (strpbrk:=dll.strpbrk).restype, strpbrk.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern char *strstr(const char *__haystack, const char *__needle) __attribute__((nothrow)) __attribute__((pure)) __attribute__((nonnull(1, 2)))
 try: (strstr:=dll.strstr).restype, strstr.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern char *strtok(char *restrict __s, const char *restrict __delim) __attribute__((nothrow)) __attribute__((nonnull(2)))
 try: (strtok:=dll.strtok).restype, strtok.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern char *__strtok_r(char *restrict __s, const char *restrict __delim, char **restrict __save_ptr) __attribute__((nothrow)) __attribute__((nonnull(2, 3)))
 try: (__strtok_r:=dll.__strtok_r).restype, __strtok_r.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
 
-# extern char *strtok_r(char *restrict __s, const char *restrict __delim, char **restrict __save_ptr) __attribute__((nothrow)) __attribute__((nonnull(2, 3)))
 try: (strtok_r:=dll.strtok_r).restype, strtok_r.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
 
-# extern char *strcasestr(const char *__haystack, const char *__needle) __attribute__((nothrow)) __attribute__((pure)) __attribute__((nonnull(1, 2)))
 try: (strcasestr:=dll.strcasestr).restype, strcasestr.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern void *memmem(const void *__haystack, size_t __haystacklen, const void *__needle, size_t __needlelen) __attribute__((nothrow)) __attribute__((pure)) __attribute__((nonnull(1, 3)))
 try: (memmem:=dll.memmem).restype, memmem.argtypes = ctypes.c_void_p, [ctypes.c_void_p, size_t, ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-# extern void *__mempcpy(void *restrict __dest, const void *restrict __src, size_t __n) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
 try: (__mempcpy:=dll.__mempcpy).restype, __mempcpy.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-# extern void *mempcpy(void *restrict __dest, const void *restrict __src, size_t __n) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
 try: (mempcpy:=dll.mempcpy).restype, mempcpy.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-# extern unsigned long strlen(const char *__s) __attribute__((nothrow)) __attribute__((pure)) __attribute__((nonnull(1)))
 try: (strlen:=dll.strlen).restype, strlen.argtypes = ctypes.c_uint64, [ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern size_t strnlen(const char *__string, size_t __maxlen) __attribute__((nothrow)) __attribute__((pure)) __attribute__((nonnull(1)))
 try: (strnlen:=dll.strnlen).restype, strnlen.argtypes = size_t, [ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
-# extern char *strerror(int __errnum) __attribute__((nothrow))
 try: (strerror:=dll.strerror).restype, strerror.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.c_int32]
 except AttributeError: pass
 
-# extern int strerror_r(int __errnum, char *__buf, size_t __buflen) asm("__xpg_strerror_r") __attribute__((nothrow)) __attribute__((nonnull(2)))
 try: (strerror_r:=dll.strerror_r).restype, strerror_r.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
-# extern char *strerror_l(int __errnum, locale_t __l) __attribute__((nothrow))
 try: (strerror_l:=dll.strerror_l).restype, strerror_l.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.c_int32, locale_t]
 except AttributeError: pass
 
-# extern void explicit_bzero(void *__s, size_t __n) __attribute__((nothrow)) __attribute__((nonnull(1)))
 try: (explicit_bzero:=dll.explicit_bzero).restype, explicit_bzero.argtypes = None, [ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-# extern char *strsep(char **restrict __stringp, const char *restrict __delim) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
 try: (strsep:=dll.strsep).restype, strsep.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern char *strsignal(int __sig) __attribute__((nothrow))
 try: (strsignal:=dll.strsignal).restype, strsignal.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.c_int32]
 except AttributeError: pass
 
-# extern char *__stpcpy(char *restrict __dest, const char *restrict __src) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
 try: (__stpcpy:=dll.__stpcpy).restype, __stpcpy.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern char *stpcpy(char *restrict __dest, const char *restrict __src) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
 try: (stpcpy:=dll.stpcpy).restype, stpcpy.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern char *__stpncpy(char *restrict __dest, const char *restrict __src, size_t __n) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
 try: (__stpncpy:=dll.__stpncpy).restype, __stpncpy.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
-# extern char *stpncpy(char *restrict __dest, const char *restrict __src, size_t __n) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
 try: (stpncpy:=dll.stpncpy).restype, stpncpy.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
-# extern size_t strlcpy(char *restrict __dest, const char *restrict __src, size_t __n) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
 try: (strlcpy:=dll.strlcpy).restype, strlcpy.argtypes = size_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
-# extern size_t strlcat(char *restrict __dest, const char *restrict __src, size_t __n) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
 try: (strlcat:=dll.strlcat).restype, strlcat.argtypes = size_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
@@ -640,437 +580,330 @@ useconds_t = ctypes.c_uint32
 pid_t = ctypes.c_int32
 intptr_t = ctypes.c_int64
 socklen_t = ctypes.c_uint32
-# extern int access(const char *__name, int __type) __attribute__((nothrow)) __attribute__((nonnull(1)))
 try: (access:=dll.access).restype, access.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
 except AttributeError: pass
 
-# extern int faccessat(int __fd, const char *__file, int __type, int __flag) __attribute__((nothrow)) __attribute__((nonnull(2)))
 try: (faccessat:=dll.faccessat).restype, faccessat.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(ctypes.c_char), ctypes.c_int32, ctypes.c_int32]
 except AttributeError: pass
 
-# extern __off_t lseek(int __fd, __off_t __offset, int __whence) __attribute__((nothrow))
 try: (lseek:=dll.lseek).restype, lseek.argtypes = ctypes.c_int64, [ctypes.c_int32, ctypes.c_int64, ctypes.c_int32]
 except AttributeError: pass
 
-# extern int close(int __fd)
 try: (close:=dll.close).restype, close.argtypes = ctypes.c_int32, [ctypes.c_int32]
 except AttributeError: pass
 
-# extern void closefrom(int __lowfd) __attribute__((nothrow))
 try: (closefrom:=dll.closefrom).restype, closefrom.argtypes = None, [ctypes.c_int32]
 except AttributeError: pass
 
-# extern ssize_t read(int __fd, void *__buf, size_t __nbytes)
 try: (read:=dll.read).restype, read.argtypes = ssize_t, [ctypes.c_int32, ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-# extern ssize_t write(int __fd, const void *__buf, size_t __n)
 try: (write:=dll.write).restype, write.argtypes = ssize_t, [ctypes.c_int32, ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-# extern ssize_t pread(int __fd, void *__buf, size_t __nbytes, __off_t __offset)
 try: (pread:=dll.pread).restype, pread.argtypes = ssize_t, [ctypes.c_int32, ctypes.c_void_p, size_t, ctypes.c_int64]
 except AttributeError: pass
 
-# extern ssize_t pwrite(int __fd, const void *__buf, size_t __n, __off_t __offset)
 try: (pwrite:=dll.pwrite).restype, pwrite.argtypes = ssize_t, [ctypes.c_int32, ctypes.c_void_p, size_t, ctypes.c_int64]
 except AttributeError: pass
 
-# extern int pipe(int __pipedes[2]) __attribute__((nothrow))
 try: (pipe:=dll.pipe).restype, pipe.argtypes = ctypes.c_int32, [(ctypes.c_int32 * 2)]
 except AttributeError: pass
 
-# extern unsigned int alarm(unsigned int __seconds) __attribute__((nothrow))
 try: (alarm:=dll.alarm).restype, alarm.argtypes = ctypes.c_uint32, [ctypes.c_uint32]
 except AttributeError: pass
 
-# extern unsigned int sleep(unsigned int __seconds)
 try: (sleep:=dll.sleep).restype, sleep.argtypes = ctypes.c_uint32, [ctypes.c_uint32]
 except AttributeError: pass
 
 __useconds_t = ctypes.c_uint32
-# extern __useconds_t ualarm(__useconds_t __value, __useconds_t __interval) __attribute__((nothrow))
 try: (ualarm:=dll.ualarm).restype, ualarm.argtypes = ctypes.c_uint32, [ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-# extern int usleep(__useconds_t __useconds)
 try: (usleep:=dll.usleep).restype, usleep.argtypes = ctypes.c_int32, [ctypes.c_uint32]
 except AttributeError: pass
 
-# extern int pause(void)
 try: (pause:=dll.pause).restype, pause.argtypes = ctypes.c_int32, []
 except AttributeError: pass
 
 __uid_t = ctypes.c_uint32
 __gid_t = ctypes.c_uint32
-# extern int chown(const char *__file, __uid_t __owner, __gid_t __group) __attribute__((nothrow)) __attribute__((nonnull(1)))
 try: (chown:=dll.chown).restype, chown.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-# extern int fchown(int __fd, __uid_t __owner, __gid_t __group) __attribute__((nothrow))
 try: (fchown:=dll.fchown).restype, fchown.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-# extern int lchown(const char *__file, __uid_t __owner, __gid_t __group) __attribute__((nothrow)) __attribute__((nonnull(1)))
 try: (lchown:=dll.lchown).restype, lchown.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-# extern int fchownat(int __fd, const char *__file, __uid_t __owner, __gid_t __group, int __flag) __attribute__((nothrow)) __attribute__((nonnull(2)))
 try: (fchownat:=dll.fchownat).restype, fchownat.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int32]
 except AttributeError: pass
 
-# extern int chdir(const char *__path) __attribute__((nothrow)) __attribute__((nonnull(1)))
 try: (chdir:=dll.chdir).restype, chdir.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern int fchdir(int __fd) __attribute__((nothrow))
 try: (fchdir:=dll.fchdir).restype, fchdir.argtypes = ctypes.c_int32, [ctypes.c_int32]
 except AttributeError: pass
 
-# extern char *getcwd(char *__buf, size_t __size) __attribute__((nothrow))
 try: (getcwd:=dll.getcwd).restype, getcwd.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
-# extern char *getwd(char *__buf) __attribute__((nothrow)) __attribute__((nonnull(1))) __attribute__((deprecated("")))
 try: (getwd:=dll.getwd).restype, getwd.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern int dup(int __fd) __attribute__((nothrow))
 try: (dup:=dll.dup).restype, dup.argtypes = ctypes.c_int32, [ctypes.c_int32]
 except AttributeError: pass
 
-# extern int dup2(int __fd, int __fd2) __attribute__((nothrow))
 try: (dup2:=dll.dup2).restype, dup2.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.c_int32]
 except AttributeError: pass
 
 try: __environ = ctypes.POINTER(ctypes.POINTER(ctypes.c_char)).in_dll(dll, '__environ')
 except (ValueError,AttributeError): pass
-# extern int execve(const char *__path, char *const __argv[], char *const __envp[]) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
 try: (execve:=dll.execve).restype, execve.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), (ctypes.POINTER(ctypes.c_char) * 0), (ctypes.POINTER(ctypes.c_char) * 0)]
 except AttributeError: pass
 
-# extern int fexecve(int __fd, char *const __argv[], char *const __envp[]) __attribute__((nothrow)) __attribute__((nonnull(2)))
 try: (fexecve:=dll.fexecve).restype, fexecve.argtypes = ctypes.c_int32, [ctypes.c_int32, (ctypes.POINTER(ctypes.c_char) * 0), (ctypes.POINTER(ctypes.c_char) * 0)]
 except AttributeError: pass
 
-# extern int execv(const char *__path, char *const __argv[]) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
 try: (execv:=dll.execv).restype, execv.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), (ctypes.POINTER(ctypes.c_char) * 0)]
 except AttributeError: pass
 
-# extern int execle(const char *__path, const char *__arg, ...) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
 try: (execle:=dll.execle).restype, execle.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern int execl(const char *__path, const char *__arg, ...) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
 try: (execl:=dll.execl).restype, execl.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern int execvp(const char *__file, char *const __argv[]) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
 try: (execvp:=dll.execvp).restype, execvp.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), (ctypes.POINTER(ctypes.c_char) * 0)]
 except AttributeError: pass
 
-# extern int execlp(const char *__file, const char *__arg, ...) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
 try: (execlp:=dll.execlp).restype, execlp.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern int nice(int __inc) __attribute__((nothrow))
 try: (nice:=dll.nice).restype, nice.argtypes = ctypes.c_int32, [ctypes.c_int32]
 except AttributeError: pass
 
-# extern void _exit(int __status)
 try: (_exit:=dll._exit).restype, _exit.argtypes = None, [ctypes.c_int32]
 except AttributeError: pass
 
-# extern long pathconf(const char *__path, int __name) __attribute__((nothrow)) __attribute__((nonnull(1)))
 try: (pathconf:=dll.pathconf).restype, pathconf.argtypes = ctypes.c_int64, [ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
 except AttributeError: pass
 
-# extern long fpathconf(int __fd, int __name) __attribute__((nothrow))
 try: (fpathconf:=dll.fpathconf).restype, fpathconf.argtypes = ctypes.c_int64, [ctypes.c_int32, ctypes.c_int32]
 except AttributeError: pass
 
-# extern long sysconf(int __name) __attribute__((nothrow))
 try: (sysconf:=dll.sysconf).restype, sysconf.argtypes = ctypes.c_int64, [ctypes.c_int32]
 except AttributeError: pass
 
-# extern size_t confstr(int __name, char *__buf, size_t __len) __attribute__((nothrow))
 try: (confstr:=dll.confstr).restype, confstr.argtypes = size_t, [ctypes.c_int32, ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
 __pid_t = ctypes.c_int32
-# extern __pid_t getpid(void) __attribute__((nothrow))
 try: (getpid:=dll.getpid).restype, getpid.argtypes = ctypes.c_int32, []
 except AttributeError: pass
 
-# extern __pid_t getppid(void) __attribute__((nothrow))
 try: (getppid:=dll.getppid).restype, getppid.argtypes = ctypes.c_int32, []
 except AttributeError: pass
 
-# extern __pid_t getpgrp(void) __attribute__((nothrow))
 try: (getpgrp:=dll.getpgrp).restype, getpgrp.argtypes = ctypes.c_int32, []
 except AttributeError: pass
 
-# extern __pid_t __getpgid(__pid_t __pid) __attribute__((nothrow))
 try: (__getpgid:=dll.__getpgid).restype, __getpgid.argtypes = ctypes.c_int32, [ctypes.c_int32]
 except AttributeError: pass
 
-# extern __pid_t getpgid(__pid_t __pid) __attribute__((nothrow))
 try: (getpgid:=dll.getpgid).restype, getpgid.argtypes = ctypes.c_int32, [ctypes.c_int32]
 except AttributeError: pass
 
-# extern int setpgid(__pid_t __pid, __pid_t __pgid) __attribute__((nothrow))
 try: (setpgid:=dll.setpgid).restype, setpgid.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.c_int32]
 except AttributeError: pass
 
-# extern int setpgrp(void) __attribute__((nothrow))
 try: (setpgrp:=dll.setpgrp).restype, setpgrp.argtypes = ctypes.c_int32, []
 except AttributeError: pass
 
-# extern __pid_t setsid(void) __attribute__((nothrow))
 try: (setsid:=dll.setsid).restype, setsid.argtypes = ctypes.c_int32, []
 except AttributeError: pass
 
-# extern __pid_t getsid(__pid_t __pid) __attribute__((nothrow))
 try: (getsid:=dll.getsid).restype, getsid.argtypes = ctypes.c_int32, [ctypes.c_int32]
 except AttributeError: pass
 
-# extern __uid_t getuid(void) __attribute__((nothrow))
 try: (getuid:=dll.getuid).restype, getuid.argtypes = ctypes.c_uint32, []
 except AttributeError: pass
 
-# extern __uid_t geteuid(void) __attribute__((nothrow))
 try: (geteuid:=dll.geteuid).restype, geteuid.argtypes = ctypes.c_uint32, []
 except AttributeError: pass
 
-# extern __gid_t getgid(void) __attribute__((nothrow))
 try: (getgid:=dll.getgid).restype, getgid.argtypes = ctypes.c_uint32, []
 except AttributeError: pass
 
-# extern __gid_t getegid(void) __attribute__((nothrow))
 try: (getegid:=dll.getegid).restype, getegid.argtypes = ctypes.c_uint32, []
 except AttributeError: pass
 
-# extern int getgroups(int __size, __gid_t __list[]) __attribute__((nothrow))
 try: (getgroups:=dll.getgroups).restype, getgroups.argtypes = ctypes.c_int32, [ctypes.c_int32, (ctypes.c_uint32 * 0)]
 except AttributeError: pass
 
-# extern int setuid(__uid_t __uid) __attribute__((nothrow))
 try: (setuid:=dll.setuid).restype, setuid.argtypes = ctypes.c_int32, [ctypes.c_uint32]
 except AttributeError: pass
 
-# extern int setreuid(__uid_t __ruid, __uid_t __euid) __attribute__((nothrow))
 try: (setreuid:=dll.setreuid).restype, setreuid.argtypes = ctypes.c_int32, [ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-# extern int seteuid(__uid_t __uid) __attribute__((nothrow))
 try: (seteuid:=dll.seteuid).restype, seteuid.argtypes = ctypes.c_int32, [ctypes.c_uint32]
 except AttributeError: pass
 
-# extern int setgid(__gid_t __gid) __attribute__((nothrow))
 try: (setgid:=dll.setgid).restype, setgid.argtypes = ctypes.c_int32, [ctypes.c_uint32]
 except AttributeError: pass
 
-# extern int setregid(__gid_t __rgid, __gid_t __egid) __attribute__((nothrow))
 try: (setregid:=dll.setregid).restype, setregid.argtypes = ctypes.c_int32, [ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-# extern int setegid(__gid_t __gid) __attribute__((nothrow))
 try: (setegid:=dll.setegid).restype, setegid.argtypes = ctypes.c_int32, [ctypes.c_uint32]
 except AttributeError: pass
 
-# extern __pid_t fork(void) __attribute__((nothrow))
 try: (fork:=dll.fork).restype, fork.argtypes = ctypes.c_int32, []
 except AttributeError: pass
 
-# extern int vfork(void) __attribute__((nothrow))
 try: (vfork:=dll.vfork).restype, vfork.argtypes = ctypes.c_int32, []
 except AttributeError: pass
 
-# extern char *ttyname(int __fd) __attribute__((nothrow))
 try: (ttyname:=dll.ttyname).restype, ttyname.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.c_int32]
 except AttributeError: pass
 
-# extern int ttyname_r(int __fd, char *__buf, size_t __buflen) __attribute__((nothrow)) __attribute__((nonnull(2)))
 try: (ttyname_r:=dll.ttyname_r).restype, ttyname_r.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
-# extern int isatty(int __fd) __attribute__((nothrow))
 try: (isatty:=dll.isatty).restype, isatty.argtypes = ctypes.c_int32, [ctypes.c_int32]
 except AttributeError: pass
 
-# extern int ttyslot(void) __attribute__((nothrow))
 try: (ttyslot:=dll.ttyslot).restype, ttyslot.argtypes = ctypes.c_int32, []
 except AttributeError: pass
 
-# extern int link(const char *__from, const char *__to) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
 try: (link:=dll.link).restype, link.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern int linkat(int __fromfd, const char *__from, int __tofd, const char *__to, int __flags) __attribute__((nothrow)) __attribute__((nonnull(2, 4)))
 try: (linkat:=dll.linkat).restype, linkat.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(ctypes.c_char), ctypes.c_int32, ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
 except AttributeError: pass
 
-# extern int symlink(const char *__from, const char *__to) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
 try: (symlink:=dll.symlink).restype, symlink.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern ssize_t readlink(const char *restrict __path, char *restrict __buf, size_t __len) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
 try: (readlink:=dll.readlink).restype, readlink.argtypes = ssize_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
-# extern int symlinkat(const char *__from, int __tofd, const char *__to) __attribute__((nothrow)) __attribute__((nonnull(1, 3)))
 try: (symlinkat:=dll.symlinkat).restype, symlinkat.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.c_int32, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern ssize_t readlinkat(int __fd, const char *restrict __path, char *restrict __buf, size_t __len) __attribute__((nothrow)) __attribute__((nonnull(2, 3)))
 try: (readlinkat:=dll.readlinkat).restype, readlinkat.argtypes = ssize_t, [ctypes.c_int32, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
-# extern int unlink(const char *__name) __attribute__((nothrow)) __attribute__((nonnull(1)))
 try: (unlink:=dll.unlink).restype, unlink.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern int unlinkat(int __fd, const char *__name, int __flag) __attribute__((nothrow)) __attribute__((nonnull(2)))
 try: (unlinkat:=dll.unlinkat).restype, unlinkat.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
 except AttributeError: pass
 
-# extern int rmdir(const char *__path) __attribute__((nothrow)) __attribute__((nonnull(1)))
 try: (rmdir:=dll.rmdir).restype, rmdir.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern __pid_t tcgetpgrp(int __fd) __attribute__((nothrow))
 try: (tcgetpgrp:=dll.tcgetpgrp).restype, tcgetpgrp.argtypes = ctypes.c_int32, [ctypes.c_int32]
 except AttributeError: pass
 
-# extern int tcsetpgrp(int __fd, __pid_t __pgrp_id) __attribute__((nothrow))
 try: (tcsetpgrp:=dll.tcsetpgrp).restype, tcsetpgrp.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.c_int32]
 except AttributeError: pass
 
-# extern char *getlogin(void)
 try: (getlogin:=dll.getlogin).restype, getlogin.argtypes = ctypes.POINTER(ctypes.c_char), []
 except AttributeError: pass
 
-# extern int getlogin_r(char *__name, size_t __name_len) __attribute__((nonnull(1)))
 try: (getlogin_r:=dll.getlogin_r).restype, getlogin_r.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
-# extern int setlogin(const char *__name) __attribute__((nothrow)) __attribute__((nonnull(1)))
 try: (setlogin:=dll.setlogin).restype, setlogin.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern int gethostname(char *__name, size_t __len) __attribute__((nothrow)) __attribute__((nonnull(1)))
 try: (gethostname:=dll.gethostname).restype, gethostname.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
-# extern int sethostname(const char *__name, size_t __len) __attribute__((nothrow)) __attribute__((nonnull(1)))
 try: (sethostname:=dll.sethostname).restype, sethostname.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
-# extern int sethostid(long __id) __attribute__((nothrow))
 try: (sethostid:=dll.sethostid).restype, sethostid.argtypes = ctypes.c_int32, [ctypes.c_int64]
 except AttributeError: pass
 
-# extern int getdomainname(char *__name, size_t __len) __attribute__((nothrow)) __attribute__((nonnull(1)))
 try: (getdomainname:=dll.getdomainname).restype, getdomainname.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
-# extern int setdomainname(const char *__name, size_t __len) __attribute__((nothrow)) __attribute__((nonnull(1)))
 try: (setdomainname:=dll.setdomainname).restype, setdomainname.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
-# extern int vhangup(void) __attribute__((nothrow))
 try: (vhangup:=dll.vhangup).restype, vhangup.argtypes = ctypes.c_int32, []
 except AttributeError: pass
 
-# extern int revoke(const char *__file) __attribute__((nothrow)) __attribute__((nonnull(1)))
 try: (revoke:=dll.revoke).restype, revoke.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern int profil(unsigned short *__sample_buffer, size_t __size, size_t __offset, unsigned int __scale) __attribute__((nothrow)) __attribute__((nonnull(1)))
 try: (profil:=dll.profil).restype, profil.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_uint16), size_t, size_t, ctypes.c_uint32]
 except AttributeError: pass
 
-# extern int acct(const char *__name) __attribute__((nothrow))
 try: (acct:=dll.acct).restype, acct.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern char *getusershell(void) __attribute__((nothrow))
 try: (getusershell:=dll.getusershell).restype, getusershell.argtypes = ctypes.POINTER(ctypes.c_char), []
 except AttributeError: pass
 
-# extern void endusershell(void) __attribute__((nothrow))
 try: (endusershell:=dll.endusershell).restype, endusershell.argtypes = None, []
 except AttributeError: pass
 
-# extern void setusershell(void) __attribute__((nothrow))
 try: (setusershell:=dll.setusershell).restype, setusershell.argtypes = None, []
 except AttributeError: pass
 
-# extern int daemon(int __nochdir, int __noclose) __attribute__((nothrow))
 try: (daemon:=dll.daemon).restype, daemon.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.c_int32]
 except AttributeError: pass
 
-# extern int chroot(const char *__path) __attribute__((nothrow)) __attribute__((nonnull(1)))
 try: (chroot:=dll.chroot).restype, chroot.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern char *getpass(const char *__prompt) __attribute__((nonnull(1)))
 try: (getpass:=dll.getpass).restype, getpass.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# extern int fsync(int __fd)
 try: (fsync:=dll.fsync).restype, fsync.argtypes = ctypes.c_int32, [ctypes.c_int32]
 except AttributeError: pass
 
-# extern long gethostid(void)
 try: (gethostid:=dll.gethostid).restype, gethostid.argtypes = ctypes.c_int64, []
 except AttributeError: pass
 
-# extern void sync(void) __attribute__((nothrow))
 try: (sync:=dll.sync).restype, sync.argtypes = None, []
 except AttributeError: pass
 
-# extern int getpagesize(void) __attribute__((nothrow)) __attribute__((const))
 try: (getpagesize:=dll.getpagesize).restype, getpagesize.argtypes = ctypes.c_int32, []
 except AttributeError: pass
 
-# extern int getdtablesize(void) __attribute__((nothrow))
 try: (getdtablesize:=dll.getdtablesize).restype, getdtablesize.argtypes = ctypes.c_int32, []
 except AttributeError: pass
 
-# extern int truncate(const char *__file, __off_t __length) __attribute__((nothrow)) __attribute__((nonnull(1)))
 try: (truncate:=dll.truncate).restype, truncate.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.c_int64]
 except AttributeError: pass
 
-# extern int ftruncate(int __fd, __off_t __length) __attribute__((nothrow))
 try: (ftruncate:=dll.ftruncate).restype, ftruncate.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.c_int64]
 except AttributeError: pass
 
-# extern int brk(void *__addr) __attribute__((nothrow))
 try: (brk:=dll.brk).restype, brk.argtypes = ctypes.c_int32, [ctypes.c_void_p]
 except AttributeError: pass
 
-# extern void *sbrk(intptr_t __delta) __attribute__((nothrow))
 try: (sbrk:=dll.sbrk).restype, sbrk.argtypes = ctypes.c_void_p, [intptr_t]
 except AttributeError: pass
 
-# extern long syscall(long __sysno, ...) __attribute__((nothrow))
 try: (syscall:=dll.syscall).restype, syscall.argtypes = ctypes.c_int64, [ctypes.c_int64]
 except AttributeError: pass
 
-# extern int lockf(int __fd, int __cmd, __off_t __len)
 try: (lockf:=dll.lockf).restype, lockf.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.c_int32, ctypes.c_int64]
 except AttributeError: pass
 
-# extern int fdatasync(int __fildes)
 try: (fdatasync:=dll.fdatasync).restype, fdatasync.argtypes = ctypes.c_int32, [ctypes.c_int32]
 except AttributeError: pass
 
-# extern char *crypt(const char *__key, const char *__salt) __attribute__((nothrow)) __attribute__((nonnull(1, 2)))
 try: (crypt:=dll.crypt).restype, crypt.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-# int getentropy(void *__buffer, size_t __length)
 try: (getentropy:=dll.getentropy).restype, getentropy.argtypes = ctypes.c_int32, [ctypes.c_void_p, size_t]
 except AttributeError: pass
 

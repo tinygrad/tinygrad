@@ -5,25 +5,39 @@ from tinygrad.helpers import CI, Context, getenv
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.realize import CompiledRunner, ExecItem, get_program
 from tinygrad.uop.ops import Ops
+from tinygrad.renderer import Estimates
+from tinygrad.renderer.ptx import PTXRenderer
 
 class TestArange(unittest.TestCase):
-  def _get_flops(self, N):
+  def _get_flops(self, tensor, desired):
     GlobalCounters.reset()
-    tt = Tensor.arange(N)
-    sched = tt.schedule()
+    sched = tensor.schedule()
     self.assertEqual(len(sched), 1)
-    p = get_program(sched[-1].ast)
-    ExecItem(CompiledRunner(p), [tt.uop.buffer]).run()
-    np.testing.assert_equal(tt.numpy(), np.arange(N))
+    p = get_program(sched[-1].ast, renderer=Device[Device.DEFAULT].renderer)
+    ExecItem(CompiledRunner(p), [tensor.uop.buffer]).run()
+    np.testing.assert_equal(tensor.numpy(), desired)
     return p.estimates.ops
 
-  def test_complexity(self):
-    self.assertEqual(self._get_flops(256), 0)
-    self.assertEqual(self._get_flops(2560), 0)
+  def test_arange_complexity(self):
+    self.assertEqual(self._get_flops(Tensor.arange(256), np.arange(256)), 0)
+    self.assertEqual(self._get_flops(Tensor.arange(2560), np.arange(2560)), 0)
 
   def test_arange_cat(self):
     t = Tensor.arange(2, dtype=dtypes.int)+Tensor([3])
     self.assertEqual(t.cat(t).tolist(), [3, 4, 3, 4])
+
+  def test_eye_complexity(self):
+    with Context(NOOPT=1):
+      # NOTE: not every backend supports CMPEQ
+      self.assertLessEqual(self._get_flops(Tensor.eye(2560).contiguous(), np.eye(2560)), 2*2560*2560)
+
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX indexing is weird")
+  def test_tri_complexity(self):
+    with Context(NOOPT=1):
+      t = Tensor.ones(256, 256).contiguous().realize()
+      sched = t.triu().schedule()
+      p = get_program(sched[-1].ast, renderer=Device[Device.DEFAULT].renderer)
+      self.assertLessEqual(Estimates.from_uops(p.uops).ops, 4 * 256 * 256)
 
 DSET, DDIM = 2048, 32
 

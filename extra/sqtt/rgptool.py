@@ -166,6 +166,7 @@ class RGP:
           se=ev.se,
           itrace=merged_sqtt_events[ev.se].itrace or ev.itrace,
           blob=merged_sqtt_events[ev.se].blob + ev.blob,
+          exec_tag=0,
         )
     sqtt_events = list(merged_sqtt_events.values())
 
@@ -185,9 +186,7 @@ class RGP:
       magic_number=sqtt.SQTT_FILE_MAGIC_NUMBER,
       version_major=sqtt.SQTT_FILE_VERSION_MAJOR,
       version_minor=sqtt.SQTT_FILE_VERSION_MINOR,
-      flags=sqtt.struct_sqtt_file_header_flags(
-        _0=sqtt.union_sqtt_file_header_flags_0(value=1),
-      ),
+      flags=sqtt.struct_sqtt_file_header_flags(value=1,),
       chunk_offset=ctypes.sizeof(sqtt.struct_sqtt_file_header),
     )
     chunks = [
@@ -265,7 +264,7 @@ class RGP:
         profiling_mode=sqtt.SQTT_PROFILING_MODE_PRESENT,
         instruction_trace_mode=sqtt.SQTT_INSTRUCTION_TRACE_FULL_FRAME if sqtt_itrace_enabled else sqtt.SQTT_INSTRUCTION_TRACE_DISABLED,
         instruction_trace_data=sqtt.union_sqtt_instruction_trace_data(
-          shader_engine_filter=sqtt.struct_sqtt_instruction_trace_data_shader_engine_filter(mask=sqtt_itrace_se_mask),
+          shader_engine_filter=sqtt.union_sqtt_instruction_trace_data_shader_engine_filter(mask=sqtt_itrace_se_mask),
         ),
       )),
       *flatten([(
@@ -276,13 +275,11 @@ class RGP:
           ),
           shader_engine_index=sqtt_event.se,
           sqtt_version={11: sqtt.SQTT_VERSION_3_2, 12: sqtt.SQTT_VERSION_3_3}.get(gfx_ver),
-          _0=sqtt.union_sqtt_file_chunk_sqtt_desc_0(
-            v1=sqtt.struct_sqtt_file_chunk_sqtt_desc_0_v1(
-              instrumentation_spec_version=1,
-              instrumentation_api_version=0,
-              compute_unit_index=0,
-            )
-          ),
+          v1=sqtt.struct_sqtt_file_chunk_sqtt_desc_0_v1(
+            instrumentation_spec_version=1,
+            instrumentation_api_version=0,
+            compute_unit_index=0,
+          )
         )),
         RGPChunk(sqtt.struct_sqtt_file_chunk_sqtt_data(
           header=sqtt.struct_sqtt_file_chunk_header(

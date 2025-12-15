@@ -1,8 +1,10 @@
-import pathlib
+import os, pathlib
+
+# TODO: there is a timing bug without this
+os.environ["AMD_AQL"] = "1"
+
 from tinygrad.device import Device
 from tinygrad.runtime.ops_amd import AMDProgram, HIPCompiler
-import time
-import os
 
 NUM_WORKGROUPS = 96
 WAVE_SIZE = 32
@@ -32,7 +34,7 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, extra="")
   src = src.replace("DIRECTIVE", DIRECTIVE)
   lib = COMPILER.compile(src)
   fxn = AMDProgram(DEV, "matmul", lib)
-  elapsed = fxn(global_size=(NUM_WORKGROUPS,1,1), local_size=(WAVE_SIZE*NUM_WAVES,1,1), wait=True)
+  elapsed = min([fxn(global_size=(NUM_WORKGROUPS,1,1), local_size=(WAVE_SIZE*NUM_WAVES,1,1), wait=True) for _ in range(2)])
   FLOPs = FLOPS_PER_MATMUL * NUM_WAVES * NUM_WORKGROUPS * INTERNAL_LOOP * INSTRUCTIONS_PER_LOOP
   print(f"{instruction:<29} : {FLOPs/elapsed/10**12:.2f} T(FL)OPS")
 
@@ -44,9 +46,9 @@ if __name__=="__main__":
     raise RuntimeError("Error while initiating AMD device")
 
   COMPILER = HIPCompiler(DEV.arch)
-  if DEV.arch in {'gfx1100', 'gfx1103'}:
-    if DEV.arch == 'gfx1103':
-      NUM_WORKGROUPS = 8
+  if DEV.arch in {'gfx1100', 'gfx1103', 'gfx1151'}:
+    if DEV.arch == 'gfx1103': NUM_WORKGROUPS = 8
+    if DEV.arch == 'gfx1151': NUM_WORKGROUPS = 32
     launchBenchmark("v_wmma_bf16_16x16x16_bf16", (7,8,15))
     launchBenchmark("v_wmma_f16_16x16x16_f16", (7,8,15))
     launchBenchmark("v_wmma_f32_16x16x16_bf16", (7,8,15))

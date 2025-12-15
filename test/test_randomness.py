@@ -7,7 +7,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.engine.realize import lower_schedule, CompiledRunner
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
-from test.helpers import not_support_multi_device
+from test.helpers import not_support_multi_device, needs_second_gpu
 
 import numpy as np
 import torch
@@ -141,6 +141,7 @@ class TestRandomness(unittest.TestCase):
     r = Tensor.rand(10).numpy()
     np.testing.assert_allclose(r, jr, atol=1e-5, rtol=1e-5)
 
+  @needs_second_gpu
   @unittest.skipIf(not_support_multi_device(), "no multi")
   def test_threefry_tensors_cnt(self):
     Tensor.manual_seed(1337)
@@ -160,6 +161,7 @@ class TestRandomness(unittest.TestCase):
     assert len(Tensor._device_rng_counters) == 0
     assert len(Tensor._device_seeds) == 0
 
+  @needs_second_gpu
   @unittest.skipIf(not_support_multi_device(), "no multi")
   def test_threefry_same_kernels(self):
     Tensor.manual_seed(0)

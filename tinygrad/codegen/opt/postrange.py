@@ -2,25 +2,24 @@ from __future__ import annotations
 import math, itertools
 from collections import defaultdict
 from typing import cast, Final
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, GroupOp, axis_letters, axis_colors
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, GroupOp
+from tinygrad.uop.ops import axis_letters, axis_colors, axis_to_pos
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes, ImageDType
 from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element, flatten
+from tinygrad.helpers import ALLOW_TF32
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
 from tinygrad.codegen.simplify import pm_flatten_range
 from tinygrad.renderer import Renderer
 
 remove_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
-# NOTE: LOCAL and GROUP_REDUCE have the same priority. the order here matters
-axis_to_pos = {AxisType.LOOP: -1, AxisType.THREAD: 0, AxisType.GLOBAL: 0, AxisType.WARP: 1, AxisType.LOCAL: 2, AxisType.UPCAST: 3,
-               AxisType.GROUP_REDUCE: 2, AxisType.REDUCE: 4, AxisType.UNROLL: 5}
-
 class Scheduler:
   def __init__(self, ast:UOp, ren:Renderer):
     self.ast, self.ren = ast, ren
     self.dont_use_locals = self.ast.arg.dont_use_locals if self.ast.arg is not None else False
     self.applied_opts = list(self.ast.arg.applied_opts) if self.ast.arg is not None else []
+    self.opt_range = itertools.count(start=max([x.arg[0] for x in self.rngs], default=0)+1)
 
   @property
   def rngs(self):
@@ -32,8 +31,6 @@ class Scheduler:
   def full_shape(self): return [ssimplify(x.src[0]) for x in self.rngs]
   @property
   def axis_types(self): return [x.arg[-1] for x in self.rngs]
-  @property
-  def maxarg(self): return max([x.arg[0] for x in self.rngs], default=0)
 
   # strings like ['g0', 'g1', 'l0', 'l1', 'l2', 'l3', 'l4', 'l5', 'R0', 'r0', 'r1', 'r2', 'u0', 'u1', 'u2']
   def shape_str(self) -> list[str]:
@@ -55,8 +52,10 @@ class Scheduler:
   def get_optimized_ast(self, name_override:str|None=None):
     if name_override is not None: name = name_override
     else:
-      kernel_type = "r" if self.reduceop is not None else "E"
-      name = kernel_type + colored('_', 'BLACK').join(['']+[colored(x.src[0].render(), color) for x,color in zip(self.rngs, self.colors())])
+      k_type = "r" if self.reduceop is not None else "E"
+      special_uops = sorted([x for x in self.ast.toposort() if x.op is Ops.SPECIAL], key=lambda x: x.arg)
+      special_ops = [colored(str(x.vmax+1), "blue" if x.arg[0] == "g" else "cyan") for x in special_uops]
+      name = k_type + colored('_', 'BLACK').join(['']+special_ops+[colored(x.src[0].render(), color) for x,color in zip(self.rngs, self.colors())])
       Scheduler.kernel_cnt[(function_name := to_function_name(name))] += 1
       num = f"n{Scheduler.kernel_cnt[function_name]-1}" if Scheduler.kernel_cnt[function_name] > 1 else ""
       name += colored(num, 'BLACK')
@@ -96,7 +95,7 @@ class Scheduler:
   def shift_to(self, rng:UOp, amount:int, new_type:AxisType, top:bool=False, input_new_rng=None):
     if (old_sz:=rng.src[0].divides(amount)) is None:
       raise KernelOptError(f"{amount} can't divide {rng.src[0]} in {self.colored_shape()}")
-    new_rng = UOp.range(amount, self.maxarg+1, new_type) if input_new_rng is None else input_new_rng
+    new_rng = UOp.range(amount, next(self.opt_range), new_type) if input_new_rng is None else input_new_rng
     replaced_rng = rng.replace(src=(UOp.const(dtypes.int, old_sz),))
     sub_axis = (new_rng * old_sz + replaced_rng) if top else (replaced_rng * amount + new_rng)
     self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {rng.arg[:-1]} {amount} {str(new_type).split('.')[1].lower()}")
@@ -230,11 +229,12 @@ class Scheduler:
       except IndexError:
         raise KernelOptError(f"invalid tensor core choice {tc_select}")
       for tc in tensor_cores:
+        if self.ren.device in ("CUDA", "NV") and tc.dtype_in == dtypes.float and not ALLOW_TF32: continue
         if tc.dtype_in == in0.dtype.scalar() and tc.dtype_in == in1.dtype.scalar() and tc.dtype_out == reduceop.dtype.scalar():
           # tensor cores have three ranges. X, Y, and REDUCE
-          in0_ranges = sorted([u for u in in0.ranges if u not in in1.ranges], key=lambda x: -x.arg[0])
-          in1_ranges = sorted([u for u in in1.ranges if u not in in0.ranges], key=lambda x: -x.arg[0])
-          red_ranges = sorted(reduceop.src[1:], key=lambda x: -x.arg[0])
+          in0_ranges = sorted([u for u in in0.ranges if u not in in1.ranges], key=lambda x: x.arg[0], reverse=True)
+          in1_ranges = sorted([u for u in in1.ranges if u not in in0.ranges], key=lambda x: x.arg[0], reverse=True)
+          red_ranges = sorted(reduceop.src[1:], key=lambda x: x.arg[0], reverse=True)
           if DEBUG >= 3:
             print(f"TC({axis}): {[(x.arg[0],x.vmax+1) for x in in0_ranges]}",
                               f"{[(x.arg[0],x.vmax+1) for x in in1_ranges]} {[(x.arg[0],x.vmax+1) for x in red_ranges]}")

@@ -1,4 +1,4 @@
-import time, struct
+import time, struct, functools
 from typing import Any, Callable
 import numpy as np
 from tinygrad import Tensor, dtypes, Device
@@ -59,6 +59,15 @@ def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None):
 def not_support_multi_device():
   # CL and CUDA don't support multi device if in CI
   return CI and REAL_DEV in ("CL", "CUDA")
+
+def needs_second_gpu(fn):
+  @functools.wraps(fn)
+  def wrapper(self, *args, **kwargs):
+    # check if there's a second GPU, if not, skip multi tests
+    try: Tensor.zeros(10, device=f"{Device.DEFAULT}:1").contiguous().realize()
+    except Exception as e: self.skipTest(f"second device not available: {e}")
+    return fn(self, *args, **kwargs)
+  return wrapper
 
 # NOTE: This will open REMOTE if it's the default device
 REAL_DEV = (Device.DEFAULT if Device.DEFAULT != "REMOTE" else Device['REMOTE'].properties.real_device)

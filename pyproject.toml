@@ -30,7 +30,6 @@ packages = [
   'tinygrad.runtime',
   'tinygrad.runtime.autogen',
   'tinygrad.runtime.autogen.am',
-  'tinygrad.runtime.autogen.nv',
   'tinygrad.runtime.graph',
   'tinygrad.runtime.support',
   'tinygrad.runtime.support.am',
@@ -70,17 +69,14 @@ testing_minimal = [
   "hypothesis",
   "z3-solver",
 ]
-testing_unit = ["tinygrad[testing_minimal]", "tqdm", "safetensors", "tabulate"]
+testing_unit = ["tinygrad[testing_minimal]", "tqdm", "safetensors", "tabulate", "openai"]
 testing = [
-  "tinygrad[testing_minimal]",
+  "tinygrad[testing_unit]",
   "pillow",
-  "onnx==1.18.0",
+  "onnx==1.19.0",
   "onnx2torch",
   "onnxruntime",
   "opencv-python",
-  "tabulate",
-  "tqdm",
-  "safetensors",
   "transformers",
   "sentencepiece",
   "tiktoken",
@@ -162,7 +158,6 @@ exclude = [
   ".git/",
   "docs/",
   "extra/",
-  "tinygrad/runtime/autogen",
   "test/external/mlperf_resnet",
   "test/external/mlperf_unet3d",
 ]
@@ -228,6 +223,7 @@ select = [
   "F541",
   "F841",
 ]
+"tinygrad/runtime/autogen/**/*.py" = ["E501", "F401", "E722", "E731", "F821", "A006"]
 
 [tool.ruff.format]
 exclude = ["*"]

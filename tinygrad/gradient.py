@@ -3,14 +3,15 @@ import math, dataclasses
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata
 from tinygrad.helpers import argsort
 
-def reduce_gradient(ctx:UOp, ret:UOp):
+def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
   def broadcast_to_input(x): return x.reshape(x.shape+(1,)*(len(ret.src[0].shape)-len(x.shape))).expand(ret.src[0].shape)
-  if ret.arg[0] == Ops.ADD: return (broadcast_to_input(ctx),)
-  if ret.arg[0] == Ops.MAX:
+  if op == Ops.ADD: return (broadcast_to_input(ctx),)
+  if op == Ops.MAX:
+    assert ret.op is Ops.REDUCE_AXIS, "only works on REDUCE_AXIS"
     mask = ret.src[0].eq(broadcast_to_input(ret)).cast(ctx.dtype)
     count = mask.r(Ops.ADD, ret.arg[1])
     return ((mask/broadcast_to_input(count)) * broadcast_to_input(ctx),)
-  if ret.arg[0] == Ops.MUL: return (broadcast_to_input(ctx * ret) / ret.src[0],)
+  if op == Ops.MUL: return (broadcast_to_input(ctx * ret) / ret.src[0],)
 
 # ctx is grad_output
 pm_gradient = PatternMatcher([
@@ -28,7 +29,8 @@ pm_gradient = PatternMatcher([
     ((x>y).where(ctx, (x.eq(y)).where(ctx * 0.5, 0)), (x<y).where(ctx, (x.eq(y)).where(ctx * 0.5, 0)))),
   (UPat(Ops.MUL, name="ret"), lambda ctx, ret: (ret.src[1]*ctx, ret.src[0]*ctx)),
   (UPat(Ops.WHERE, name="ret"), lambda ctx, ret: (None, ret.src[0].where(ctx, ctx.const_like(0)), ret.src[0].where(ctx.const_like(0), ctx))),
-  (UPat(Ops.REDUCE_AXIS, name="ret"), reduce_gradient),
+  (UPat(Ops.REDUCE_AXIS, name="ret"), lambda ctx, ret: reduce_gradient(ctx, ret, ret.arg[0])),
+  (UPat(Ops.REDUCE, name="ret"), lambda ctx, ret: reduce_gradient(ctx, ret, ret.arg) + (None,)*(len(ret.src)-1)),
   (UPat(Ops.CONTIGUOUS), lambda ctx: (ctx,)),
   (UPat(Ops.CONTIGUOUS_BACKWARD), lambda ctx: (ctx.contiguous(),)),
   (UPat(Ops.RESHAPE, name="ret"), lambda ctx, ret: (ctx.reshape(ret.src[0].shape), None)),
@@ -68,4 +70,8 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
         # we add the backward metadata to everything new in the graph
         for bw_uop in v.toposort(lambda x: x not in (t0, *t0.src, grads[t0])):
           all_metadata[bw_uop] = all_metadata.get(bw_uop, ())+backward_metadata
+  # end any ranges on grads with a reduce sum
+  for k,v in grads.items():
+    if len(v.ranges):
+      grads[k] = v.reduce(*v.ranges, arg=Ops.ADD)
   return grads

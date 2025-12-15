@@ -7,7 +7,7 @@ from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.realize import lower_schedule, BufferCopy, CompiledRunner, run_schedule
 import numpy as np
 from hypothesis import given, strategies as strat, settings
-from test.helpers import REAL_DEV, not_support_multi_device
+from test.helpers import REAL_DEV, not_support_multi_device, needs_second_gpu
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -35,6 +35,9 @@ def _test_allreduce(t:Tensor):
 
 @unittest.skipIf(not_support_multi_device(), "no multi")
 class TestMultiTensor(unittest.TestCase):
+  @needs_second_gpu
+  def setUp(self): pass
+
   def test_to(self):
     X = Tensor.ones(256).contiguous().realize()
     X.to_(devices_2)
@@ -52,6 +55,12 @@ class TestMultiTensor(unittest.TestCase):
     X.shard_(devices_2, 0)
     for lb in X.uop.src:
       assert lb.shape == (128,)
+    (X + X).realize()
+
+  def test_shard_empty(self):
+    GlobalCounters.reset()
+    X = Tensor.empty(256).shard(devices_2, 0).realize()
+    assert GlobalCounters.kernel_count == 0
     (X + X).realize()
 
   def _test_shard_op(self, op, out, n=4):
@@ -765,6 +774,16 @@ class TestMultiTensor(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       Tensor.rand_like(t, device=(d3, d4))
 
+  def test_full_like_on_shard(self, axis=None):
+    t = Tensor.empty((16, 16)).shard(devices_2, axis=axis)
+    t2 = Tensor.full_like(t, 1.0)
+    self.assertEqual(t.shape, t2.shape)
+    self.assertEqual(t.device, t2.device)
+    self.assertEqual(t.dtype, t2.dtype)
+    self.assertEqual(t.uop.axis, t2.uop.axis)
+    t2.realize()
+  def test_full_like_on_shard_axis(self): self.test_full_like_on_shard(0)
+
   def test_dropout_on_shard(self):
     with Tensor.train():
       X = Tensor.ones(256).to(devices_2)
@@ -817,6 +836,7 @@ class TestMultiTensor(unittest.TestCase):
 
 @unittest.skipIf(not_support_multi_device(), "no multi")
 class TestHandleData(unittest.TestCase):
+  @needs_second_gpu
   def test_copied_to_device(self):
     device = (d0, d1, d2, d3)
     t = Tensor([1, 2, 3, 4]).shard(device).realize()
@@ -841,6 +861,9 @@ class TestHandleData(unittest.TestCase):
 
 @unittest.skipIf(not_support_multi_device(), "no multi")
 class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
+  @needs_second_gpu
+  def setUp(self): pass
+
   # shrink a multitensor on sharded axis
   def test_shrink_bad_args(self):
     t = Tensor.arange(64).reshape(8, 8).contiguous().realize()
@@ -962,6 +985,9 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
 
 @unittest.skipIf(not_support_multi_device(), "no multi")
 class TestBatchNorm(unittest.TestCase):
+  @needs_second_gpu
+  def setUp(self): pass
+
   def test_unsynced_backprop_conv_bn(self):
     with Tensor.train():
       from extra.lr_scheduler import OneCycleLR
@@ -1116,9 +1142,11 @@ def helper_test_shard_op(shps, fxn, atol=1e-6, rtol=1e-3):
 
 @unittest.skipIf(not_support_multi_device(), "no multi")
 class TestTensorOps(unittest.TestCase):
+  @needs_second_gpu
   def test_interpolate(self):
     helper_test_shard_op([(4,16,16),(4,24,24)], lambda x: Tensor.interpolate(x, (19,19)))
 
+  @needs_second_gpu
   def test_bitcast(self):
     helper_test_shard_op([(256,), (256,)], lambda x: x.bitcast(dtypes.int))
 
@@ -1161,6 +1189,7 @@ class TestMultiRamUsage(unittest.TestCase):
 
 @unittest.skipIf(not_support_multi_device(), "need multi")
 class TestMultiFromUnrenderable(unittest.TestCase):
+  @needs_second_gpu
   def test_from_npy(self):
     t = Tensor(np.arange(100, dtype=np.uint32))
     ll = t.shard((d0, d1), axis=0) + 1
@@ -1169,6 +1198,9 @@ class TestMultiFromUnrenderable(unittest.TestCase):
 @unittest.skipIf(not_support_multi_device(), "need multi")
 class TestMultiAssign(unittest.TestCase):
   device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
+
+  @needs_second_gpu
+  def setUp(self): pass
 
   def test_multi_assign_realized(self):
     out = Tensor.zeros(4).shard(self.device, 0).contiguous().realize()
@@ -1232,6 +1264,7 @@ class TestMultiAssign(unittest.TestCase):
 
 @unittest.skipIf(not_support_multi_device(), "need multi")
 class TestMultiTransformer(unittest.TestCase):
+  @needs_second_gpu
   def test_transformer(self):
     device = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
 
