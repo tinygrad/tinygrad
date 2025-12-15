@@ -268,7 +268,7 @@ def load_counters(profile:list[ProfileEvent]) -> None:
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
 
-def unpack_sqtt(key:tuple[str, int], profile:list[ProfileEvent]) -> dict[str, list[ProfileEvent]]:
+def unpack_sqtt(key:tuple[str, int], profile:list[ProfileEvent]) -> tuple[dict[str, list[ProfileEvent]], list[str], dict[str, dict[str, dict]]]:
   # * init decoder
   from extra.sqtt.roc import decode
   rctx = decode(profile)
@@ -293,7 +293,7 @@ def unpack_sqtt(key:tuple[str, int], profile:list[ProfileEvent]) -> dict[str, li
     else:
       if (events:=cu_events.get(occ.cu_loc)) is None: cu_events[occ.cu_loc] = events = []
       events.append(ProfileRangeEvent(occ.simd_loc, f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)), Decimal(occ.time)))
-  return cu_events
+  return cu_events, list(units), wave_insts
 
 def device_sort_fn(k:str) -> tuple[int, str, int]:
   order = {"GC": 0, "USER": 1, "TINY": 2, "DISK": 999}
@@ -407,9 +407,14 @@ def get_render(i:int, j:int, fmt:str) -> dict:
   if fmt == "prg-sqtt":
     ret = {"steps":[]}
     with soft_err(lambda err: ret.update(err)):
-      for cu,events in unpack_sqtt(*data).items():
-        ret["steps"].append(s:=create_step(f"{cu} {len(events)}", ("/cu-sqtt", i, len(ctxs[i]["steps"])), depth=1))
-        ctxs[i]["steps"].append({**s, "data":events})
+      cu_events, units, wave_insts = unpack_sqtt(*data)
+      steps = ctxs[i]["steps"]
+      for cu in sorted(cu_events, key=row_tuple):
+        ret["steps"].append(s:=create_step(f"{cu} {len(cu_events[cu])}", ("/cu-sqtt", i, len(steps)), depth=1))
+        steps.append({**s, "data":[ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]})
+        for k in sorted(wave_insts.get(cu, []), key=row_tuple):
+          ret["steps"].append(create_step(k.replace(cu, ""), ("/sqtt-insts", i, len(steps)), loc=(data:=wave_insts[cu][k])["loc"], depth=2))
+          steps.append({**s, "data":data})
     return ret
   if fmt == "cu-sqtt": return {"value":get_profile(data, sort_fn=row_tuple), "content_type":"application/octet-stream"}
   if fmt == "sqtt-insts":
