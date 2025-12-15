@@ -118,44 +118,14 @@
 
     <script type="module">
         import {
-                SAMPLES_PER_SEGMENT, MEL_SPEC_CHUNK_LENGTH, TOK_EOS,
-                TOK_BEGIN_TRANSCRIPTION,
-                TOK_NO_TIMESTAMPS,
-                TOK_STARTOFPREV,
-                TOK_TRANSCRIBE,
-                TOK_NOSPEECH,
-                TOK_TS_FIRST,
-                TOK_TS_LAST,
-                MAX_TOKENS_TO_DECODE,
-
-                NO_TIMESTAMPS,
-                NO_CONTEXT,
-                SUPPRESS_NONSPEECH_TOKENS,
-
                 tensorStore,
                 initDb,
                 getDevice,
-
-                argsort,
-                logSoftmax,
-                softmax,
-                sample,
-                normalize,
-
-                format_seek,
-                format_text,
-                tokensToText,
 
                 fetchMonoFloat32Array,
                 fetchMonoFloat32ArrayFile,
                 getProgressDlForPart,
 
-                handle_timestamp_tokens,
-                batch_double_helper,
-                decoder_helper,
-                rebuild_cache_tail_index,
-                decodeOne,
-                inferLoop,
                 transcribeAudio
             } from "./whisper.js";
 

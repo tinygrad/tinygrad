@@ -12,8 +12,6 @@ const navigator = { gpu: create([]) };
 
 // #region imports
 import {
-  SAMPLES_PER_SEGMENT, MEL_SPEC_CHUNK_LENGTH, TOK_EOS,
-
   tensorStore,
   initDb,
 
@@ -22,7 +20,6 @@ import {
   fetchMonoFloat32Array,
   getProgressDlForPart,
 
-  inferLoop,
   transcribeAudio
 } from "../whisper.js";
 // #endregion imports
@@ -154,9 +151,7 @@ function onTranscriptionEvent(event, data) {
 }
 
 currentCancel = { cancelled: false };
-// let temperature = 0.1;
-let temperature = 0.0;
-await transcribeAudio(nets, async () => await fetchMonoFloat32Array(`${BASE_URL}/${AUDIO_PATH}`, AudioContext), currentCancel, onTranscriptionEvent, async () => {}, temperature);
+await transcribeAudio(nets, async () => await fetchMonoFloat32Array(`${BASE_URL}/${AUDIO_PATH}`, AudioContext), currentCancel, onTranscriptionEvent, async () => {});
 console.log("we're supposed to be done here");
 
 delete globalThis.mel;
