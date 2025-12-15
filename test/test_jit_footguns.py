@@ -4,6 +4,19 @@ JIT Footguns: Documenting unexpected behavior changes when using @TinyJit
 
 Each test shows behavior that works without JIT but changes with JIT.
 Comments marked "should be X!" indicate the intuitively expected value.
+
+SILENT MISMATCHES (highest priority - wrong results, no error):
+  tensors_in_containers_ignored      EASY   only checks t.__class__ is Tensor, could scan lists/dicts
+  non_tensor_outputs_frozen          EASY   could warn/error if return contains non-Tensor values
+  class_method_shared_across_instances EASY could check if first arg is self and warn
+  output_buffer_reuse                MED    performance tradeoff, could add option or better docs
+  python_constants_frozen            HARD   inherent to tracing JITs
+  conditional_branches_frozen        HARD   inherent to tracing JITs
+
+ERRORS RAISED (lower priority - at least users know):
+  positional_kwargs_cannot_mix       EASY   normalize positional args to kwargs using function signature
+  duplicate_inputs_fail              MED    would need to handle aliasing in input_replace
+  nested_jit_fails_on_second_call    MED    could fail on first call instead of second
 """
 import unittest
 import numpy as np
