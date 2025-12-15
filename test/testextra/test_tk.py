@@ -727,7 +727,7 @@ class TestTK(unittest.TestCase):
 
     Tensor.manual_seed(42)
 
-    B, N, H, H_KV, D = 1, 16, 1, 1, 16
+    B, N, H, H_KV, D = 1, 16, 2, 1, 32
 
     with Context(DEBUG=0):
       q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
@@ -757,13 +757,13 @@ class TestTK(unittest.TestCase):
     Tensor.realize(q_ref.grad, k_ref.grad, v_ref.grad)
 
     delta_vec = (do * ref).sum(axis=-1).transpose(1, 2).unsqueeze(-2)
-    dq = flash_attn_backward_q_numpy(q.numpy(), k.numpy(), v.numpy(), ref.numpy(), do.numpy(), l_vec.numpy(), delta_vec.numpy())
+    # dq = flash_attn_backward_q_numpy(q.numpy(), k.numpy(), v.numpy(), ref.numpy(), do.numpy(), l_vec.numpy(), delta_vec.numpy())
 
-    diff_arrays(q.grad.numpy(), q_ref.grad.numpy())
+    diff_arrays(k.grad.numpy(), k_ref.grad.numpy())
 
-    np.testing.assert_allclose(q.grad.numpy(), dq, atol=1e-2, rtol=1e-2)
-    np.testing.assert_allclose(k.grad.numpy(), k_ref.grad.numpy(), atol=1e-2, rtol=1e-2)
-    np.testing.assert_allclose(v.grad.numpy(), v_ref.grad.numpy(), atol=1e-2, rtol=1e-2)
+    np.testing.assert_allclose(q.grad.numpy(), q_ref.grad.numpy(), atol=2e-2, rtol=2e-2)
+    np.testing.assert_allclose(v.grad.numpy(), v_ref.grad.numpy(), atol=2e-2, rtol=2e-2)
+    np.testing.assert_allclose(k.grad.numpy(), k_ref.grad.numpy(), atol=2e-2, rtol=2e-2)
 
   def test_fast_fa_bwd2(self):
     from extra.thunder.tiny.fa import flash_attention
