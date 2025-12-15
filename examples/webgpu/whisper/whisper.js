@@ -13,11 +13,6 @@ const TOK_NOSPEECH = 50361;
 const TOK_TS_FIRST = 50363;
 const TOK_TS_LAST = 51863;
 
-// TODO(irwin): remove or allow setting those from outside
-const NO_TIMESTAMPS = true;
-const NO_CONTEXT = true;
-const SUPPRESS_NONSPEECH_TOKENS = true;
-
 const MAX_TOKENS_TO_DECODE = 224;
 // #endregion constants
 
@@ -34,7 +29,6 @@ async function fetchMonoFloat32ArrayFile(response, AudioContextImplementation = 
     await audioCtx.close?.();
     const mono = new Float32Array(audioBuffer.length);
     for (let c = 0; c < audioBuffer.numberOfChannels; c++) {
-        // const data = audioBuffer.getChannelData(c);
         const data = new Float32Array(audioBuffer.length);
         audioBuffer.copyFromChannel(data, c);
         for (let i = 0; i < data.length; i++) mono[i] += data[i] / audioBuffer.numberOfChannels;
@@ -275,21 +269,11 @@ async function applyDecoderResults(decode_sequence, decodeOne_result) {
 }
 
 /** @returns {Promise<Decode_Sequence[]|undefined>} */
-async function inferLoop(nets, log_specs_full, previous_context, audio_features_batch, seeks_batch, cancelToken, inferLoopContext) {
+async function inferLoop(nets, log_specs_full, audio_features_batch, seeks_batch, cancelToken, inferLoopContext) {
     if (inferLoopContext.state === "INIT") {
         let context = [];
-        if (!NO_CONTEXT && previous_context.length > 0 && previous_context.at(-1) == TOK_EOS) {
-            let prefix = [TOK_STARTOFPREV];
-            let suffix = [TOK_BEGIN_TRANSCRIPTION];
-            if (NO_TIMESTAMPS) suffix.push(TOK_NO_TIMESTAMPS);
-            let max_context_to_take = MAX_TOKENS_TO_DECODE - prefix.length - suffix.length;
-            context.push(...prefix);
-            context.push(...previous_context.filter((tok) => tok < TOK_EOS).slice(-max_context_to_take));
-            context.push(...suffix);
-        } else {
-            context = [TOK_BEGIN_TRANSCRIPTION];
-            if (NO_TIMESTAMPS) context.push(TOK_NO_TIMESTAMPS);
-        }
+        context = [TOK_BEGIN_TRANSCRIPTION];
+        context.push(TOK_NO_TIMESTAMPS);
 
         const context_prompt_length = context.length;
         if (context_prompt_length > MAX_TOKENS_TO_DECODE) {
@@ -437,7 +421,6 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
     onEvent("inferenceBegin", {chunkCount, sampleCount: samples.length});
     console.log("begin new transcription");
 
-    let previous_context = [];
     let seek_ranges = [];
     for (let seek = 0; seek < log_specs_full.length; seek += MEL_SPEC_CHUNK_LENGTH) {
         seek_ranges.push(seek);
@@ -477,7 +460,7 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
         };
         let sequences;
         while (!inferLoopContext.is_done) {
-            sequences = await inferLoop(nets, log_specs_full, previous_context, audio_features_batch, seeks_batch, cancelToken, inferLoopContext);
+            sequences = await inferLoop(nets, log_specs_full, audio_features_batch, seeks_batch, cancelToken, inferLoopContext);
             if (inferLoopContext.state === "INIT") {
             } else if (inferLoopContext.state === "DECODE_INIT") {
             } else if (inferLoopContext.state === "DECODE") {
@@ -500,7 +483,6 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
             } else {
                 let sequence = sequences[i];
                 let {avg_logprob, segment_cumlogprob, context, context_prompt_length: offset} = sequence;
-                previous_context = context.slice();
 
                 onEvent("chunkDone", { avg_logprob, segment_cumlogprob, context, offset, index: i, pendingText: pendingTexts[i] });
                 pendingTexts[i] = '';
@@ -531,10 +513,6 @@ export {
     TOK_TS_FIRST,
     TOK_TS_LAST,
     MAX_TOKENS_TO_DECODE,
-
-    NO_TIMESTAMPS,
-    NO_CONTEXT,
-    SUPPRESS_NONSPEECH_TOKENS,
 
     tensorStore,
     initDb,
