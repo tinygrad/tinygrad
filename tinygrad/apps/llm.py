@@ -60,7 +60,8 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
 
 def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
   assert x.shape[-1] % 2 == 0
-  cos, sin = freqs_cis[..., 0].reshape(1, 1, x.shape[2], -1), freqs_cis[..., 1].reshape(1, 1, x.shape[2], -1)
+  freqs_cis = freqs_cis.reshape(1, 1, x.shape[2], -1, 2)
+  cos, sin = freqs_cis[..., 0], freqs_cis[..., 1]
   x1, x2 = x.chunk(2, dim=-1)
   return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
 
