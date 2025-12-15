@@ -59,7 +59,8 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
   return Tensor.stack(freqs.cos(), freqs.sin(), dim=-1).contiguous()
 
 def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
-  cos, sin = freqs_cis[..., 0], freqs_cis[..., 1]
+  assert x.shape[-1] % 2 == 0
+  cos, sin = freqs_cis[..., 0].reshape(1, 1, x.shape[2], -1), freqs_cis[..., 1].reshape(1, 1, x.shape[2], -1)
   x1, x2 = x.chunk(2, dim=-1)
   return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
 
@@ -96,7 +97,7 @@ class TransformerBlock:
     v = v.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
 
     # TODO: make UOp have SupportsIndex
-    freqs_cis = precompute_freqs_cis(self.head_dim, self.max_context)[start_pos:start_pos+T].reshape(1, 1, T, -1, 2)  # type: ignore
+    freqs_cis = precompute_freqs_cis(self.head_dim, self.max_context)[start_pos:start_pos+T]  # type: ignore
     q = apply_rope(q, freqs_cis)
     k = apply_rope(k, freqs_cis)
 
