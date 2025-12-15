@@ -3,7 +3,7 @@
 import sys, base64, multiprocessing, itertools, collections, math
 from typing import Optional, Union, Literal, List
 
-from examples.webgpu.whisper.audio_helpers import stft_full, mel, resample_batched
+from examples.webgpu.whisper.audio_helpers import stft_full, mel, resample_batched_helper
 from tinygrad import Tensor, TinyJit, Variable, nn
 from tinygrad.nn.state import torch_load, load_state_dict
 from tinygrad.helpers import getenv, fetch
@@ -141,7 +141,7 @@ def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False, sr=
   :param sr: Sample rate of all waveforms. Waveforms will be resampled to 16000Hz if different.
   :return: mel spectrogram of the given waveforms
   """
-  waveforms = [(resample_batched(Tensor(wv), sr, RATE) if sr != RATE else Tensor(wv)).flatten()[:wv.shape[-1]] for wv in waveforms]
+  waveforms = [(resample_batched_helper(Tensor(wv), sr, RATE) if sr != RATE else Tensor(wv)).flatten()[:wv.shape[-1]] for wv in waveforms]
   max_len = max(len(wav) for wav in waveforms)
   waveforms = Tensor.cat(*[wv.pad((0, max_len-wv.shape[-1]))[None] for wv in waveforms])
   max_len = SAMPLES_PER_SEGMENT if truncate else max_len
