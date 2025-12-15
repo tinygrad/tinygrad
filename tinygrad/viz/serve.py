@@ -304,11 +304,10 @@ def device_sort_fn(k:str) -> tuple[int, str, int]:
 def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_sort_fn) -> bytes|None:
   # start by getting the time diffs
   device_decoders:dict[str, Callable[[list[ProfileEvent]], None]] = {}
-  if not device_ts_diffs:
-    for ev in profile:
-      if isinstance(ev, ProfileDeviceEvent):
-        device_ts_diffs[ev.device] = (ev.comp_tdiff,ev.copy_tdiff if ev.copy_tdiff is not None else ev.comp_tdiff)
-        if (d:=ev.device.split(":")[0]) == "AMD": device_decoders[d] = load_counters
+  for ev in profile:
+    if isinstance(ev, ProfileDeviceEvent) and ev.device not in device_ts_diffs:
+      device_ts_diffs[ev.device] = (ev.comp_tdiff,ev.copy_tdiff if ev.copy_tdiff is not None else ev.comp_tdiff)
+      if (d:=ev.device.split(":")[0]) == "AMD": device_decoders[d] = load_counters
   # load device specific counters
   for fxn in device_decoders.values(): fxn(profile)
   # map events per device
