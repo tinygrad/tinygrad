@@ -766,8 +766,7 @@ async function main() {
       ctx.steps.push(...ret.steps);
       while (el.ctx.children.length > 1) el.ctx.children[1].remove();
       appendSteps(el.ctx, state.currentCtx, ctx.steps);
-      // return setState({ currentStep:state.currentStep+1, expandSteps:true });
-      return;
+      return setState({ currentStep:state.currentStep+1, expandSteps:true });
     }
     // cycles on the x axis
     if (ret instanceof ArrayBuffer) {
