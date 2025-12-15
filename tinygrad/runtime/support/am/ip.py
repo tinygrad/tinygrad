@@ -37,7 +37,7 @@ class AM_GMC(AM_IP):
 
     # XGMI (for supported systems)
     self.xgmi_phys_id = self.adev.regMMMC_VM_XGMI_LFB_CNTL.read_bitfields()['pf_lfb_region'] if hasattr(self.adev, 'regMMMC_VM_XGMI_LFB_CNTL') else 0
-    self.xgmi_seg_sz = (self.adev.regMMMC_VM_XGMI_LFB_SIZE.read_bitfields()['pf_lfb_size']<<24) if hasattr(self.adev, 'regMMMC_VM_XGMI_LFB_SIZE') else 0
+    self.xgmi_seg_sz = self.adev.regMMMC_VM_XGMI_LFB_SIZE.read_bitfields()['pf_lfb_size']<<24 if hasattr(self.adev, 'regMMMC_VM_XGMI_LFB_SIZE') else 0
 
     self.paddr_base = self.xgmi_phys_id * self.xgmi_seg_sz
 
