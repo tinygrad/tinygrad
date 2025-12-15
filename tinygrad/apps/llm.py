@@ -69,11 +69,11 @@ def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
   return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
 
 class TransformerBlock:
-  def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, max_context:int=0, head_dim:int|None=None,
-               rope_theta:float=10000.0, qk_norm:bool=False):
+  def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, head_dim:int, rope_theta:float,
+               max_context:int=0, qk_norm:bool=False):
     self.n_heads      = n_heads
     self.n_kv_heads   = n_kv_heads
-    self.head_dim     = head_dim if head_dim is not None else dim // n_heads
+    self.head_dim     = head_dim
     self.max_context  = max_context
     self.rope_theta   = rope_theta
 
@@ -135,9 +135,9 @@ class TransformerBlock:
     return self._feed_forward(self._attention(x, start_pos)).contiguous()
 
 class Transformer:
-  def __init__(self, *, num_blocks, dim, hidden_dim, n_heads, n_kv_heads, norm_eps, vocab_size, max_context, head_dim:int|None=None,
-               rope_theta:float=10000.0, qk_norm:bool=False):
-    self.blk = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, max_context, head_dim, rope_theta, qk_norm)
+  def __init__(self, *, num_blocks, dim, hidden_dim, n_heads, n_kv_heads, norm_eps, vocab_size, head_dim:int, rope_theta:float,
+               max_context:int=0, qk_norm:bool=False):
+    self.blk = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, head_dim, rope_theta, max_context, qk_norm)
                 for _ in range(num_blocks)]
     self.token_embd  = nn.Embedding(vocab_size, dim)
     self.output_norm = nn.RMSNorm(dim, norm_eps)
@@ -169,7 +169,7 @@ class Transformer:
     arch = kv['general.architecture']
     max_context = min(max_context, kv[f'{arch}.context_length']) if max_context is not None else kv[f'{arch}.context_length']
     n_heads, n_kv_heads = kv[f'{arch}.attention.head_count'], kv[f'{arch}.attention.head_count_kv']
-    head_dim, rope_theta = kv.get(f'{arch}.attention.key_length'), kv.get(f'{arch}.rope.freq_base', 10000.0)
+    head_dim, rope_theta = kv[f'{arch}.attention.key_length'], kv[f'{arch}.rope.freq_base']
     qk_norm = 'blk.0.attn_q_norm.weight' in state_dict
 
     # permute Q/K weights from interleaved to half-split RoPE layout: [0,1,2,3,4,5...] -> [0,2,4,...,1,3,5,...]
@@ -179,8 +179,8 @@ class Transformer:
         if 'attn_k.weight' in name: state_dict[name] = state_dict[name].rearrange("(n h two) d -> (n two h) d", n=n_kv_heads, two=2)
 
     model = Transformer(num_blocks=kv[f'{arch}.block_count'], dim=kv[f'{arch}.embedding_length'], hidden_dim=kv[f'{arch}.feed_forward_length'],
-                        n_heads=n_heads, n_kv_heads=n_kv_heads, norm_eps=kv[f'{arch}.attention.layer_norm_rms_epsilon'], head_dim=head_dim,
-                        vocab_size=len(kv['tokenizer.ggml.tokens']), max_context=max_context, rope_theta=rope_theta, qk_norm=qk_norm)
+                        n_heads=n_heads, n_kv_heads=n_kv_heads, norm_eps=kv[f'{arch}.attention.layer_norm_rms_epsilon'],
+                        vocab_size=len(kv['tokenizer.ggml.tokens']), head_dim=head_dim, rope_theta=rope_theta, max_context=max_context, qk_norm=qk_norm)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
     for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())
