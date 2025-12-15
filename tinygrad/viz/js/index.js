@@ -762,7 +762,8 @@ async function main() {
     if (!(ckey in cache)) cache[ckey] = ret = await fetchValue(ckey);
     if (ret.steps?.length > 0) {
       const el = select(state.currentCtx, state.currentStep);
-      if (el.step.children.length > ret.steps.length) return;
+      if (el.step.querySelectorAll("ul").length === ret.steps.length) return;
+      // re render the list with new items
       ctx.steps.push(...ret.steps);
       while (el.ctx.children.length > 1) el.ctx.children[1].remove();
       appendSteps(el.ctx, state.currentCtx, ctx.steps);
