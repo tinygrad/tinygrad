@@ -405,17 +405,16 @@ def get_render(i:int, j:int, fmt:str) -> dict:
     return ret
   if fmt == "prg-pmc": return unpack_pmc(data[0])
   if fmt == "prg-sqtt":
-    ret = {"steps":[]}
-    with soft_err(lambda err: ret.update(err)):
-      cu_events, units, wave_insts = unpack_sqtt(*data)
-      steps = ctxs[i]["steps"]
-      for cu in sorted(cu_events, key=row_tuple):
-        ret["steps"].append(s:=create_step(f"{cu} {len(cu_events[cu])}", ("/cu-sqtt", i, len(steps)), depth=1))
-        steps.append({**s, "data":[ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]})
-        for k in sorted(wave_insts.get(cu, []), key=row_tuple):
-          ret["steps"].append(create_step(k.replace(cu, ""), ("/sqtt-insts", i, len(steps)), loc=(data:=wave_insts[cu][k])["loc"], depth=2))
-          steps.append({**s, "data":data})
-    return ret
+    ret:dict = {}
+    if len((steps:=ctxs[i]["steps"])[j+1:]) == 0:
+      with soft_err(lambda err: ret.update(err)):
+        cu_events, units, wave_insts = unpack_sqtt(*data)
+        for cu in sorted(cu_events, key=row_tuple):
+          steps.append(create_step(f"{cu} {len(cu_events[cu])}", ("/cu-sqtt", i, len(steps)), depth=1,
+                                   data=[ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]))
+          for k in sorted(wave_insts.get(cu, []), key=row_tuple):
+            steps.append(create_step(k.replace(cu, ""), ("/sqtt-insts", i, len(steps)), loc=(data:=wave_insts[cu][k])["loc"], depth=2, data=data))
+    return {**ret, "steps":[{k:v for k,v in s.items() if k != "data"} for s in steps[j+1:]]}
   if fmt == "cu-sqtt": return {"value":get_profile(data, sort_fn=row_tuple), "content_type":"application/octet-stream"}
   if fmt == "sqtt-insts":
     columns = ["PC", "Instruction", "Hits", "Cycles", "Stall", "Type"]
