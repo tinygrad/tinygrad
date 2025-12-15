@@ -237,7 +237,7 @@ class Handler(HTTPRequestHandler):
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
       # extract tokens
-      ids: list[int] = [bos_id] if add_bos else []
+      ids: list[int] = [bos_id] if bos_id is not None else []
       for msg in body["messages"]:
         ids += tok.role(msg["role"])
         # content can be a str or a list
@@ -285,14 +285,13 @@ if __name__ == "__main__":
 
   # extract some metadata
   tok = SimpleTokenizer.from_gguf_kv(kv)
-  bos_id: int = kv.get('tokenizer.ggml.bos_token_id', 0)
+  bos_id: int|None = kv.get('tokenizer.ggml.bos_token_id') if kv.get('tokenizer.ggml.add_bos_token', True) else None
   eos_id: int = kv['tokenizer.ggml.eos_token_id']
-  add_bos: bool = kv.get('tokenizer.ggml.add_bos_token', True) and 'tokenizer.ggml.bos_token_id' in kv
 
   # start server
   if args.serve: TCPServerWithReuse(('', 11434), Handler).serve_forever()
 
-  ids: list[int] = [bos_id] if add_bos else []
+  ids: list[int] = [bos_id] if bos_id is not None else []
   while 1:
     start_pos = max(len(ids) - 1, 0)
     try:
