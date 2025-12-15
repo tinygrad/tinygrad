@@ -36,7 +36,7 @@ def autowrap(source_cls, blacklist=None):
         def proxy(*args, **kwargs):
           return wrap(val(*unwrap(args), **unwrap(kwargs)), self)
         return proxy
-      if name in UOp.__slots__: return val
+      if name in UOp.__slots__: return val # type: ignore
       return wrap(val, self)
     cls.__getattr__ = __getattr__
 
@@ -250,11 +250,12 @@ class RT(TileMathMixin):
 
 @autowrap(UOp)
 class RV(TileMathMixin):
-  def __init__(self, uop:UOp, layout:VecLayout, ker):
-    self._uop, self.layout, self.ker = uop, layout, ker
+  def __init__(self, uop:UOp, length:int, layout:VecLayout, base_shape:RTBaseShape, ker):
+    self._uop, self.ker = uop, ker
+    self.length, self.layout, self.base_shape = length, layout, base_shape
 
   def ruop(self, uop:UOp):
-    return RV(uop, self.layout, self.ker)
+    return RV(uop, self.length, self.layout, self.base_shape, self.ker)
 
   @classmethod
   def create(cls, length, dtype:DType, layout:VecLayout, base_shape:RTBaseShape, ker):
@@ -266,6 +267,6 @@ class RV(TileMathMixin):
         outer_dim = tiles
 
     uop = ker.alloc((outer_dim, inner_dim), dtype, AddrSpace.REG)
-    return RV(uop, layout, ker)
+    return RV(uop, length, layout, base_shape, ker)
 
 ALL_TILES = UOp | GL | ST | RT | RV

@@ -636,6 +636,9 @@ hljs.registerLanguage("cpp", (hljs) => ({
   ...hljs.getLanguage('cpp'),
   contains: [{ begin: '\\b(?:float|half)[0-9]+\\b', className: 'type' }, ...hljs.getLanguage('cpp').contains]
 }));
+hljs.registerLanguage("amdgpu", (hljs) => ({
+  contains: [hljs.COMMENT("//", "$"), { begin:/\b(?:s_|v_|global_|buffer_|scratch_|flat_|ds_)[a-z0-9_]*\b/, className:"code" }]
+}));
 
 async function fetchValue(path) {
   const res = await fetch(path);
@@ -695,6 +698,29 @@ const toggleLabel = d3.create("label").text("Show indexing (r)").node();
 const toggle = d3.create("input").attr("type", "checkbox").attr("id", "show-indexing").property("checked", true).node();
 toggleLabel.prepend(toggle);
 
+function appendSteps(root, idx, steps) {
+  const stack = [];
+  for (const [j,u] of steps.entries()) {
+    while (stack.length && stack.at(-1).depth >= u.depth) stack.pop();
+    const list = stack.length > 0 ? stack.at(-1).li : root;
+    u.li = list.appendChild(document.createElement("ul"));
+    u.li.id = `step-${idx}-${j}`
+    const p = u.li.appendChild(document.createElement("p"));
+    p.appendChild(colored(`${u.name}`+(u.match_count ? ` - ${u.match_count}` : '')));
+    p.onclick = (e) => {
+      e.stopPropagation();
+      const subrewrites = getSubrewrites(e.currentTarget.parentElement);
+      if (subrewrites.length) { e.currentTarget.parentElement.classList.toggle("expanded"); }
+      setState({ currentStep:j, currentCtx:idx, currentRewrite:0 });
+    }
+    stack.push(u);
+  }
+  for (const l of root.querySelectorAll("ul > ul > p")) {
+    const subrewrites = getSubrewrites(l.parentElement);
+    if (subrewrites.length > 0) { l.appendChild(d3.create("span").text(` (${subrewrites.length})`).node()); l.parentElement.classList.add("has-children"); }
+  }
+}
+
 async function main() {
   // ** left sidebar context list
   if (ctxs == null) {
@@ -709,26 +735,7 @@ async function main() {
       p.onclick = () => {
         setState(i === state.currentCtx ? { expandSteps:!state.expandSteps } : { expandSteps:true, currentCtx:i, currentStep:0, currentRewrite:0 });
       }
-      const stack = []; let list = ul;
-      for (const [j,u] of steps.entries()) {
-        while (stack.length && stack.at(-1).depth >= u.depth) stack.pop();
-        const list = stack.length > 0 ? stack.at(-1).li : ul;
-        u.li = list.appendChild(document.createElement("ul"));
-        u.li.id = `step-${i}-${j}`
-        const p = u.li.appendChild(document.createElement("p"));
-        p.appendChild(colored(`${u.name}`+(u.match_count ? ` - ${u.match_count}` : '')));
-        p.onclick = (e) => {
-          e.stopPropagation();
-          const subrewrites = getSubrewrites(e.currentTarget.parentElement);
-          if (subrewrites.length) { e.currentTarget.parentElement.classList.toggle("expanded"); }
-          setState({ currentStep:j, currentCtx:i, currentRewrite:0 });
-        }
-        stack.push(u);
-      }
-      for (const l of ul.querySelectorAll("ul > ul > p")) {
-        const subrewrites = getSubrewrites(l.parentElement);
-        if (subrewrites.length > 0) { l.appendChild(d3.create("span").text(` (${subrewrites.length})`).node()); l.parentElement.classList.add("has-children"); }
-      }
+      appendSteps(ul, i, steps);
     }
     return setState({ currentCtx:-1 });
   }
@@ -753,6 +760,15 @@ async function main() {
   // ** Disassembly view
   if (!ckey.startsWith("/rewrites")) {
     if (!(ckey in cache)) cache[ckey] = ret = await fetchValue(ckey);
+    if (ret.steps?.length > 0) {
+      const el = select(state.currentCtx, state.currentStep);
+      if (el.step.querySelectorAll("ul").length === ret.steps.length) return;
+      // re render the list with new items
+      ctx.steps.push(...ret.steps);
+      while (el.ctx.children.length > 1) el.ctx.children[1].remove();
+      appendSteps(el.ctx, state.currentCtx, ctx.steps);
+      return setState({ currentStep:state.currentStep+1, expandSteps:true });
+    }
     // cycles on the x axis
     if (ret instanceof ArrayBuffer) {
       opts = {heightScale:0.5, hideLabels:true, levelKey:(e) => parseInt(e.name.split(" ")[1].split(":")[1])};
@@ -784,7 +800,7 @@ async function main() {
           }
           const td = tr.append("td").classed(ret.cols[i], true);
           // string format scalar values
-          if (!Array.isArray(value)) { td.text(value); continue; }
+          if (!Array.isArray(value)) { td.text(typeof value === "string" ? value : ret.cols[i] === "Duration" ? formatMicroseconds(value) : formatUnit(value)); continue; }
           // display arrays in a bar graph
           td.classed("pct-row", true);
           const bar = td.append("div");
@@ -796,11 +812,14 @@ async function main() {
     }
     if (ret.cols != null) {
       renderTable(root, ret);
-      metadata.appendChild(tabulate(ret.summary.map(s => {
-        const div = d3.create("div").style("background", cycleColors(colorScheme.CATEGORICAL, s.idx)).style("width", "100%").style("height", "100%");
-        return [s.label.trim(), div.text(s.value.toLocaleString()).node()];
-      })).node());
     } else root.append(() => codeBlock(ret.src, ret.lang || "txt"));
+    ret.metadata?.forEach(m => {
+      if (Array.isArray(m)) return metadata.appendChild(tabulate(m.map(({ label, value, idx }) => {
+        const div = d3.create("div").style("background", cycleColors(colorScheme.CATEGORICAL, idx)).style("width", "100%").style("height", "100%");
+        return [label.trim(), div.text(typeof value === "string" ? value : formatUnit(value)).node()];
+      })).node());
+      metadata.appendChild(codeBlock(m.src, "txt")).classList.add("full-height")
+    });
     return document.querySelector("#custom").replaceChildren(root.node());
   }
   // ** UOp view (default)
@@ -811,7 +830,7 @@ async function main() {
     const eventSource = new EventSource(ckey);
     evtSources.push(eventSource);
     eventSource.onmessage = (e) => {
-      if (e.data === "END") return eventSource.close();
+      if (e.data === "[DONE]") return eventSource.close();
       const chunk = JSON.parse(e.data);
       ret.push(chunk);
       // if it's the first one render this new rgaph

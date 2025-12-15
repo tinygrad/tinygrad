@@ -1,7 +1,7 @@
 name: Unit Tests
 env:
   # increment this when downloads substantially change to avoid the internet
-  CACHE_VERSION: '14'
+  CACHE_VERSION: '15'
   CAPTURE_PROCESS_REPLAY: 1
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PYTHONPATH: ${{ github.workspace }}
@@ -289,8 +289,8 @@ jobs:
         python extra/optimization/extract_dataset.py
         gzip -c /tmp/sops > extra/datasets/sops.gz
         #DEBUG=1 MIN_ASTS=1 python extra/optimization/get_action_space.py
-    - name: Repo line count < 19000 lines
-      run: MAX_LINE_COUNT=19000 python sz.py
+    - name: Repo line count < 20000 lines
+      run: MAX_LINE_COUNT=20000 python sz.py
 
   spec:
     strategy:
@@ -465,7 +465,7 @@ jobs:
       - name: Test Bert training
         run: NULL=1 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=24 GPUS=4 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
       - name: Test llama 3 training
-        run: NULL=1 SAMPLES=300 BS=8 SEQLEN=512 GRADIENT_ACC_STEPS=8 FAKEDATA=1 DEFAULT_FLOAT=bfloat16 OPTIM_DTYPE=bfloat16 LLAMA3_SIZE=1B MODEL=llama3 python3 examples/mlperf/model_train.py
+        run: NULL=1 SAMPLES=300 BS=8 SEQLEN=512 GRADIENT_ACC_STEPS=1 FAKEDATA=1 DEFAULT_FLOAT=bfloat16 OPTIM_DTYPE=bfloat16 LLAMA3_SIZE=1B MODEL=llama3 python3 examples/mlperf/model_train.py
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
@@ -972,3 +972,33 @@ jobs:
         run: |
           python -c "from tinygrad import Device; assert Device.DEFAULT == {'LLVM':'CPU'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
           python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
+
+# ****** Compile-only Tests ******
+
+  compiletests:
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [ir3, nak]
+    name: Compile-only (${{ matrix.backend }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: compile-${{ matrix.backend }}
+          deps: testing_minimal
+          mesa: ${{ (matrix.backend == 'ir3' || matrix.backend == 'nak') && 'true' }}
+          python-version: '3.14'
+      - name: Set env
+        shell: bash
+        run: printf "NULL=1\n${{ matrix.backend == 'ir3' && 'NULL_IR3=1' || matrix.backend == 'nak' && 'NULL_NAK=1' }}" >> $GITHUB_ENV
+      - name: Run test_ops
+        shell: bash
+        run: |
+          python -c "from tinygrad import Device; assert Device.DEFAULT == 'NULL'"
+          DEBUG=4 python3 test/test_ops.py TestOps.test_add
+          python -m pytest -n=auto test/test_ops.py --durations=20

@@ -69,17 +69,14 @@ testing_minimal = [
   "hypothesis",
   "z3-solver",
 ]
-testing_unit = ["tinygrad[testing_minimal]", "tqdm", "safetensors", "tabulate"]
+testing_unit = ["tinygrad[testing_minimal]", "tqdm", "safetensors", "tabulate", "openai"]
 testing = [
-  "tinygrad[testing_minimal]",
+  "tinygrad[testing_unit]",
   "pillow",
-  "onnx==1.18.0",
+  "onnx==1.19.0",
   "onnx2torch",
   "onnxruntime",
   "opencv-python",
-  "tabulate",
-  "tqdm",
-  "safetensors",
   "transformers",
   "sentencepiece",
   "tiktoken",

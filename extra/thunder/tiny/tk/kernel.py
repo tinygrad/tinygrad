@@ -25,14 +25,14 @@ class Kernel(AbstractContextManager):
     self.blockIdx_z = UOp.special(grid_size[2], "gidx2")
     self.threadIdx_x = UOp.special(block_size, "lidx0")
 
-    self.range_stack = []
-    self.store_stack = []
+    self.range_stack: list[_tk_range] = []
+    self.store_stack: list[tuple[UOp, UOp]] = []
 
     self.global_slot = 0
     self.shared_slot = 0
     self.register_slot = 0
     self.range_id = 0
-    self.allocs = {}
+    self.allocs: dict[tuple[str, tuple], UOp] = {}
 
   @property
   def warpid(self): return self.threadIdx_x // WARP_THREADS

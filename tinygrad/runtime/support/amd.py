@@ -1,4 +1,4 @@
-import functools, importlib, re, urllib
+import functools, re, urllib, tinygrad.runtime.autogen
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.helpers import getbits, fetch
@@ -53,8 +53,8 @@ def import_header(path:str, url=AMDGPU_URL):
 
 def import_module(name:str, version:tuple[int, ...], version_prefix:str=""):
   for ver in fixup_ip_version(name, version):
-    try: return importlib.import_module(f"tinygrad.runtime.autogen.am.{name}_{version_prefix}{'_'.join(map(str, ver))}")
-    except ImportError: pass
+    try: return getattr(tinygrad.runtime.autogen.am, f"{name}_{version_prefix}{'_'.join(map(str, ver))}")
+    except AttributeError: pass
   raise ImportError(f"Failed to load autogen module for {name.upper()} {'.'.join(map(str, version))}")
 
 def import_soc(ip):
@@ -79,7 +79,12 @@ def import_pmc(ip) -> dict[str, tuple[str, int]]:
 def import_asic_regs(prefix:str, version:tuple[int, ...], cls=AMDReg) -> dict[str, AMDReg]:
   def _split_name(name): return name[:(pos:=next((i for i,c in enumerate(name) if c.isupper()), len(name)))], name[pos:]
   def _extract_regs(txt):
-    return {m.group(1): int(m.group(2), 0) for line in txt.splitlines() if (m:=re.match(r'#define\s+(\S+)\s+(0x[\da-fA-F]+|\d+)', line))}
+    x = {}
+    for k,v in {m.group(1): int(m.group(2), 0) for line in txt.splitlines() if (m:=re.match(r'#define\s+(\S+)\s+(0x[\da-fA-F]+|\d+)', line))}.items():
+      if k.startswith('VM_') or k.startswith('MC_'): x[prefix.upper()[:2]+k] = v
+      elif k.startswith('regVM_') or k.startswith('regMC_'): x["reg"+prefix.upper()[:2]+k[3:]] = v
+      else: x[k] = v
+    return x
   def _download_file(ver, suff) -> str:
     dir_prefix = {"osssys": "oss"}.get(prefix, prefix)
     fetch_name, file_name = f"{prefix}_{'_'.join(map(str, ver))}_{suff}.h", f"{prefix}_{'_'.join(map(str, version))}_{suff}.h"
@@ -98,6 +103,7 @@ def import_asic_regs(prefix:str, version:tuple[int, ...], cls=AMDReg) -> dict[st
     for field_name, field_mask in sh_masks.items():
       if not ('__' in field_name and field_name.endswith('_MASK')): continue
       reg_name, reg_field_name = field_name[:-len('_MASK')].split('__')
+      if reg_name.startswith('MC_') or reg_name.startswith('VM_'): reg_name = f"{prefix.upper()[:2]}{reg_name}"
       fields[reg_name][reg_field_name.lower()] = ((field_mask & -field_mask).bit_length()-1, field_mask.bit_length()-1)
 
     # NOTE: Some registers like regGFX_IMU_FUSESTRAP in gc_11_0_0 are missing base idx, just skip them

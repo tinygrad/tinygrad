@@ -239,7 +239,7 @@ class HCQGraph(MultiGraphRunner):
     cpu_support = all(isinstance(d.timeline_signal.base_buf.view, MMIOInterface) for d in all_devs)
 
     # Check if all devices are within the same peer group. If CPU is supported, don't count it as a separate peer group.
-    if len(set(d.peer_group for d in all_devs if cpu_support and not d._is_cpu())) > 1: return False
+    if len(set(d.peer_group for d in all_devs if not (cpu_support and d._is_cpu()))) > 1: return False
 
     # MOCKGPU is not supported, since it can't execute commands in parallel
     copy = (isinstance(ei.prg, BufferCopy) and cast(HCQCompiled, devs[0]).hw_copy_queue_t is not None) and not getenv("MOCKGPU")

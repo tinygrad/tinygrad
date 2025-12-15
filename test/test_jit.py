@@ -501,6 +501,18 @@ class TestJit(unittest.TestCase):
     b = f(Tensor([2.0]))
     assert abs((a - b).item()) > 0.5
 
+  def test_jit_init_with_empty_different_size(self):
+    @TinyJit
+    def f(x:Tensor) -> Tensor: return (x + 1).realize()
+
+    f(Tensor.empty(1))
+    f(Tensor.empty(1))
+    # TODO: this should fail since input has a different size
+    f(Tensor(2.0)).item()
+    # TODO: this should not fail, and should return 3
+    with self.assertRaises(AssertionError):
+      f(Tensor([2.0])).item()
+
 @unittest.skip("Pending multioutput implementation #3607")
 class TestMultioutputJit(unittest.TestCase):
   def _test(self, f):

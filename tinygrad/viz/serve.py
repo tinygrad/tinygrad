@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, socketserver, functools, codecs, io, struct
+import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, functools, codecs, io, struct
 import ctypes, pathlib, traceback, itertools
-from contextlib import redirect_stdout, redirect_stderr
+from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from decimal import Decimal
-from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, TypeVar, Generator, Callable
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
-from tinygrad.helpers import printable, system
+from tinygrad.helpers import printable, system, TCPServerWithReuse, HTTPRequestHandler
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, pyrender
 from tinygrad.uop.ops import print_uops, range_start, multirange_str
-from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device
+from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device, ProfileProgramEvent
 from tinygrad.renderer import ProgramSpec
 from tinygrad.dtype import dtypes
 
@@ -59,7 +58,8 @@ class GraphRewriteDetails(TypedDict):
 
 def shape_to_str(s:tuple[sint, ...]): return "(" + ','.join(srender(x) for x in s) + ")"
 def mask_to_str(s:tuple[tuple[sint, sint], ...]): return "(" + ','.join(shape_to_str(x) for x in s) + ")"
-def pystr(u:UOp, i:int) -> str:
+def pystr(u:UOp) -> str:
+   # pyrender may check for shape mismatch
   try: return pyrender(u)
   except Exception: return str(u)
 
@@ -112,19 +112,18 @@ def _reconstruct(a:int):
   arg = type(arg)(_reconstruct(arg.ast), arg.metadata) if op is Ops.KERNEL else arg
   return UOp(op, dtype, tuple(_reconstruct(s) for s in src), arg, *rest)
 
-def get_full_rewrite(ctx:TrackedGraphRewrite, i:int=0) -> Generator[GraphRewriteDetails, None, None]:
+def get_full_rewrite(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
   next_sink = _reconstruct(ctx.sink)
   # in the schedule graph we don't show indexing ops (unless it's in a kernel AST or rewriting dtypes.index sink)
-  yield {"graph":uop_to_json(next_sink), "uop":pystr(next_sink,i), "changed_nodes":None, "diff":None, "upat":None}
+  yield {"graph":uop_to_json(next_sink), "uop":pystr(next_sink), "changed_nodes":None, "diff":None, "upat":None}
   replaces: dict[UOp, UOp] = {}
   for u0_num,u1_num,upat_loc,dur in tqdm(ctx.matches):
     replaces[u0:=_reconstruct(u0_num)] = u1 = _reconstruct(u1_num)
     try: new_sink = next_sink.substitute(replaces)
     except RuntimeError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
     match_repr = f"# {dur*1e6:.2f} us\n"+printable(upat_loc)
-    yield {"graph":(sink_json:=uop_to_json(new_sink)), "uop":pystr(new_sink,i),
-           "changed_nodes":[id(x) for x in u1.toposort() if id(x) in sink_json],
-           "diff":list(difflib.unified_diff(pystr(u0,i).splitlines(),pystr(u1,i).splitlines())), "upat":(upat_loc, match_repr)}
+    yield {"graph":(sink_json:=uop_to_json(new_sink)), "uop":pystr(new_sink), "changed_nodes":[id(x) for x in u1.toposort() if id(x) in sink_json],
+           "diff":list(difflib.unified_diff(pystr(u0).splitlines(), pystr(u1).splitlines())), "upat":(upat_loc, match_repr)}
     if not ctx.bottom_up: next_sink = new_sink
 
 # encoder helpers
@@ -210,69 +209,91 @@ def mem_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, 
   peaks.append(peak)
   return struct.pack("<BIQ", 1, len(events), peak)+b"".join(events) if events else None
 
-def err(name:str, msg:str|None=None) -> None:
-  ctxs.append({"name":"ERR", "steps":[create_step(name, ("render",len(ctxs),0), {"src":msg or traceback.format_exc()})]})
+# by default, VIZ does not start when there is an error
+# use this to instead display the traceback to the user
+@contextmanager
+def soft_err(fn:Callable):
+  try: yield
+  except Exception: fn({"src":traceback.format_exc()})
 
 def row_tuple(row:str) -> tuple[int, ...]: return tuple(int(x.split(":")[1]) for x in row.split())
 
-def load_sqtt(profile:list[ProfileEvent]) -> None:
+# *** Performance counters
+
+def unpack_pmc(e) -> dict:
+  agg_cols = ["Name", "Sum"]
+  sample_cols = ["XCC", "INST", "SE", "SA", "WGP", "Value"]
+  rows:list[list] = []
+  view, ptr = memoryview(e.blob).cast('Q'), 0
+  for s in e.sched:
+    row:list = [s.name, 0, {"cols":sample_cols, "rows":[]}]
+    for sample in itertools.product(range(s.xcc), range(s.inst), range(s.se), range(s.sa), range(s.wgp)):
+      row[1] += (val:=int(view[ptr]))
+      row[2]["rows"].append(sample+(val,))
+      ptr += 1
+    rows.append(row)
+  return {"rows":rows, "cols":agg_cols}
+
+# ** on startup, list all the performance counter traces
+
+def load_counters(profile:list[ProfileEvent]) -> None:
   from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
-  counter_events:dict[tuple[str, int], list[ProfileSQTTEvent|ProfilePMCEvent]] = {}
+  counter_events:dict[tuple[str, int], dict] = {}
+  durations:dict[str, list[float]] = {}
+  prg_events:dict[str, ProfileProgramEvent] = {}
+  dev_events:dict[str, ProfileDeviceEvent] = {}
   for e in profile:
-    if isinstance(e, (ProfilePMCEvent, ProfileSQTTEvent)): counter_events.setdefault((e.kern, e.exec_tag), []).append(e)
-  if not counter_events: return
-  # ** init decoder
-  try: from extra.sqtt.roc import decode, print_pmc
-  except Exception: return err("DECODER IMPORT ISSUE")
-  try: rctx = decode(profile)
-  except Exception: return err("DECODER ERROR")
-  if getenv("SQTT_PARSE"):
-    from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
-    for counters in counter_events.values():
-      for e in counters:
-        if isinstance(e, ProfileSQTTEvent): parse_sqtt_print_packets(e.blob)
-  # ** decode traces for each run
-  steps:list[dict] = []
-  for key,counters in counter_events.items():
-    # ** Run summary
-    program = trace.keys[r].ret if (r:=ref_map.get(key[0])) else None
-    summary = [f"{program.global_size=} {program.local_size=}"] if program else [repr(key)]
-    # ** PMC events
-    pmc_events = [e for e in counters if isinstance(e, ProfilePMCEvent)]
-    if pmc_events: summary.append("PMC:\n"+"\n".join([get_stdout(lambda: print_pmc(e)) for e in pmc_events]))
-    # ** SQTT events
-    disasm = rctx.disasms[key[0]]
-    cu_events:dict[str, list[ProfileEvent]] = {}
-    # * INST waves
-    wave_insts:dict[str, dict[str, dict]] = {}
-    inst_units:dict[str, itertools.count] = {}
-    for w in rctx.inst_execs.get(key, []):
-      if (u:=w.wave_loc) not in inst_units: inst_units[u] = itertools.count(0)
-      n = next(inst_units[u])
-      if (events:=cu_events.get(w.cu_loc)) is None: cu_events[w.cu_loc] = events = []
-      events.append(ProfileRangeEvent(w.simd_loc, loc:=f"INST WAVE:{w.wave_id} N:{n}", Decimal(w.begin_time), Decimal(w.end_time)))
-      wave_insts.setdefault(w.cu_loc, {})[f"{u} N:{n}"] = {"wave":w, "disasm":disasm, "run_number":n, "loc":loc}
-    # * OCC waves
-    units:dict[str, itertools.count] = {}
-    wave_start:dict[str, int] = {}
-    for occ in rctx.occ_events.get(key, []):
-      if (u:=occ.wave_loc) not in units: units[u] = itertools.count(0)
-      if u in inst_units: continue
-      if occ.start: wave_start[u] = occ.time
-      else:
-        if (events:=cu_events.get(occ.cu_loc)) is None: cu_events[occ.cu_loc] = events = []
-        events.append(ProfileRangeEvent(occ.simd_loc, f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)), Decimal(occ.time)))
-    prg_cu = sorted(cu_events, key=row_tuple)
-    if cu_events: summary.append(f"Scheduled on {len(prg_cu)} CUs")
-    steps.append(create_step(program.name if program else key[0], ("/counters", len(ctxs), len(steps)), {"src":"\n\n".join(summary)}, depth=1))
-    for cu in prg_cu:
-      events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]
-      steps.append(create_step(f"{cu} {len(cu_events[cu])}", ("/counters", len(ctxs), len(steps)),
-                               {"value":get_profile(events, sort_fn=row_tuple), "content_type":"application/octet-stream"}, depth=2))
-      for k in sorted(wave_insts.get(cu, []), key=row_tuple):
-        data = wave_insts[cu][k]
-        steps.append(create_step(k.replace(cu, ""), ("/sqtt-insts", len(ctxs), len(steps)), data, loc=data["loc"], depth=3))
-  ctxs.append({"name":"Counters", "steps":steps})
+    if isinstance(e, (ProfilePMCEvent, ProfileSQTTEvent)): counter_events.setdefault((e.kern, e.exec_tag), {}).setdefault(type(e), []).append(e)
+    if isinstance(e, ProfileRangeEvent) and e.device.startswith("AMD") and e.en is not None:
+      durations.setdefault(str(e.name), []).append(float(e.en-e.st))
+    if isinstance(e, ProfileProgramEvent): prg_events[str(e.name)] = e
+    if isinstance(e, ProfileDeviceEvent): dev_events[e.device] = e
+  ctxs.append({"name":"All Counters", "steps":[create_step("PMC", ("/all-pmc", len(ctxs), 0), \
+      (durations, {k:v[ProfilePMCEvent][0] for k,v in counter_events.items()}))]})
+  run_number = {n:0 for n,_ in counter_events}
+  for k,v in counter_events.items():
+    prg = trace.keys[r].ret if (r:=ref_map.get(k[0])) else None
+    name = prg.name if prg is not None else k[0]
+    run_number[k[0]] += 1
+    steps:list[dict] = []
+    if (pmc:=v.get(ProfilePMCEvent)): steps.append(create_step("PMC", ("/prg-pmc", len(ctxs), len(steps)), pmc))
+    if (sqtt:=v.get(ProfileSQTTEvent)):
+      # to decode a SQTT trace, we need the raw stream, program binary and device properties
+      steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), (k, [*sqtt, prg_events[k[0]], dev_events[sqtt[0].device]])))
+      if getenv("SQTT_PARSE"):
+        # run our decoder on startup, we don't use this since it only works on gfx11
+        from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
+        for e in sqtt: parse_sqtt_print_packets(e.blob)
+    ctxs.append({"name":f"Exec {name} n{run_number[k[0]]}", "steps":steps})
+
+# ** SQTT OCC only unpacks wave start, end time and SIMD location
+
+def unpack_sqtt(key:tuple[str, int], profile:list[ProfileEvent]) -> tuple[dict[str, list[ProfileEvent]], list[str], dict[str, dict[str, dict]]]:
+  # * init decoder
+  from extra.sqtt.roc import decode
+  rctx = decode(profile)
+  disasm = rctx.disasms[key[0]]
+  cu_events:dict[str, list[ProfileEvent]] = {}
+  # * INST waves
+  wave_insts:dict[str, dict[str, dict]] = {}
+  inst_units:dict[str, itertools.count] = {}
+  for w in rctx.inst_execs.get(key, []):
+    if (u:=w.wave_loc) not in inst_units: inst_units[u] = itertools.count(0)
+    n = next(inst_units[u])
+    if (events:=cu_events.get(w.cu_loc)) is None: cu_events[w.cu_loc] = events = []
+    events.append(ProfileRangeEvent(w.simd_loc, loc:=f"INST WAVE:{w.wave_id} N:{n}", Decimal(w.begin_time), Decimal(w.end_time)))
+    wave_insts.setdefault(w.cu_loc, {})[f"{u} N:{n}"] = {"wave":w, "disasm":disasm, "run_number":n, "loc":loc}
+  # * OCC waves
+  units:dict[str, itertools.count] = {}
+  wave_start:dict[str, int] = {}
+  for occ in rctx.occ_events.get(key, []):
+    if (u:=occ.wave_loc) not in units: units[u] = itertools.count(0)
+    if u in inst_units: continue
+    if occ.start: wave_start[u] = occ.time
+    else:
+      if (events:=cu_events.get(occ.cu_loc)) is None: cu_events[occ.cu_loc] = events = []
+      events.append(ProfileRangeEvent(occ.simd_loc, f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)), Decimal(occ.time)))
+  return cu_events, list(units), wave_insts
 
 def device_sort_fn(k:str) -> tuple[int, str, int]:
   order = {"GC": 0, "USER": 1, "TINY": 2, "DISK": 999}
@@ -282,13 +303,12 @@ def device_sort_fn(k:str) -> tuple[int, str, int]:
 
 def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_sort_fn) -> bytes|None:
   # start by getting the time diffs
-  for ev in profile:
-    if isinstance(ev,ProfileDeviceEvent): device_ts_diffs[ev.device] = (ev.comp_tdiff, ev.copy_tdiff if ev.copy_tdiff is not None else ev.comp_tdiff)
-  # load device specific counters
   device_decoders:dict[str, Callable[[list[ProfileEvent]], None]] = {}
-  for device in device_ts_diffs:
-    d = device.split(":")[0]
-    if d == "AMD": device_decoders[d] = load_sqtt
+  for ev in profile:
+    if isinstance(ev, ProfileDeviceEvent):
+      device_ts_diffs[ev.device] = (ev.comp_tdiff,ev.copy_tdiff if ev.copy_tdiff is not None else ev.comp_tdiff)
+      if (d:=ev.device.split(":")[0]) == "AMD": device_decoders[d] = load_counters
+  # load device specific counters
   for fxn in device_decoders.values(): fxn(profile)
   # map events per device
   dev_events:dict[str, list[tuple[int, int, float, DevEvent]]] = {}
@@ -315,7 +335,7 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_
   index = json.dumps({"strings":list(scache), "dtypeSize":dtype_size, "markers":[{"ts":int(e.ts-start_ts), **e.arg} for e in markers]}).encode()
   return struct.pack("<IQII", unwrap(end_ts)-start_ts, max(peaks,default=0), len(index), len(ret))+index+b"".join(ret)
 
-# ** Assembly analyzers
+# ** Assembly static analyzers
 
 def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
   target_args = f"-mtriple={mtriple} -mcpu={mcpu}"
@@ -335,7 +355,7 @@ def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
   summary = [{"idx":k, "label":resource_labels[k], "value":v} for k,v in instr_usage.pop(len(rows), {}).items()]
   max_usage = max([sum(v.values()) for i,v in instr_usage.items() if i<len(rows)], default=0)
   for i,usage in instr_usage.items(): rows[i].append([[k, v, (v/max_usage)*100] for k,v in usage.items()])
-  return {"rows":rows, "cols":["Instruction", "Latency", {"title":"HW Resources", "labels":resource_labels}], "summary":summary}
+  return {"rows":rows, "cols":["Instruction", "Latency", {"title":"HW Resources", "labels":resource_labels}], "metadata":[summary]}
 
 def get_stdout(f: Callable) -> str:
   buf = io.StringIO()
@@ -343,6 +363,20 @@ def get_stdout(f: Callable) -> str:
     with redirect_stdout(buf), redirect_stderr(buf): f()
   except Exception: traceback.print_exc(file=buf)
   return buf.getvalue()
+
+def amd_readelf(lib:bytes) -> list[dict]:
+  from tinygrad.runtime.support.elf import elf_loader
+  import msgpack
+  _, sections, __ = elf_loader(lib)
+  data = next((s for s in sections if s.name.startswith(".note"))).content
+  namesz, descsz, typ = struct.unpack_from(hdr:="<III", data, 0)
+  offset = (struct.calcsize(hdr)+namesz+3) & -4
+  notes = msgpack.unpackb(data[offset:offset+descsz])
+  keys = {".sgpr_count":"SGPRs", ".vgpr_count":"VGPRs", ".max_flat_workgroup_size":"Max WGP size",
+          ".group_segment_fixed_size":"LDS size", ".private_segment_fixed_size":"Scratch size"}
+  return [{"label":label, "value":v} for k,label in keys.items() if (v:=notes["amdhsa.kernels"][0][k]) > 0]
+
+# ** Main render function to get the complete details about a trace event
 
 def get_render(i:int, j:int, fmt:str) -> dict:
   data = ctxs[i]["steps"][j]["data"]
@@ -355,9 +389,35 @@ def get_render(i:int, j:int, fmt:str) -> dict:
     if isinstance(compiler, LLVMCompiler):
       return get_llvm_mca(disasm_str, ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode(),
                           ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode())
-    return {"src":disasm_str, "lang":"x86asm"}
+    metadata:list = []
+    if data.device.startswith("AMD"):
+      with soft_err(lambda err: metadata.append(err)):
+        metadata.append(amd_readelf(compiler.compile(data.src)))
+    return {"src":disasm_str, "lang":"amdgpu" if data.device.startswith("AMD") else None, "metadata":metadata}
+  if fmt == "all-pmc":
+    durations, pmc = data
+    ret:dict = {"cols":{}, "rows":[]}
+    for (prg,_),events in pmc.items():
+      pmc_table = unpack_pmc(events)
+      ret["cols"].update([(r[0], None) for r in pmc_table["rows"]])
+      ret["rows"].append((prg, durations[prg].pop(0), *[r[1] for r in pmc_table["rows"]]))
+    ret["cols"] = ["Kernel", "Duration", *ret["cols"]]
+    return ret
+  if fmt == "prg-pmc": return unpack_pmc(data[0])
+  if fmt == "prg-sqtt":
+    ret = {}
+    if len((steps:=ctxs[i]["steps"])[j+1:]) == 0:
+      with soft_err(lambda err: ret.update(err)):
+        cu_events, units, wave_insts = unpack_sqtt(*data)
+        for cu in sorted(cu_events, key=row_tuple):
+          steps.append(create_step(f"{cu} {len(cu_events[cu])}", ("/cu-sqtt", i, len(steps)), depth=1,
+                                   data=[ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]))
+          for k in sorted(wave_insts.get(cu, []), key=row_tuple):
+            steps.append(create_step(k.replace(cu, ""), ("/sqtt-insts", i, len(steps)), loc=(data:=wave_insts[cu][k])["loc"], depth=2, data=data))
+    return {**ret, "steps":[{k:v for k,v in s.items() if k != "data"} for s in steps[j+1:]]}
+  if fmt == "cu-sqtt": return {"value":get_profile(data, sort_fn=row_tuple), "content_type":"application/octet-stream"}
   if fmt == "sqtt-insts":
-    columns = ["PC", "Instruction", "Hits", "Duration", "Stall", "Type"]
+    columns = ["PC", "Instruction", "Hits", "Cycles", "Stall", "Type"]
     inst_columns = ["N", "Clk", "Idle", "Dur", "Stall"]
     # Idle:     The total time gap between the completion of previous instruction and the beginning of the current instruction.
     #           The idle time can be caused by:
@@ -382,14 +442,14 @@ def get_render(i:int, j:int, fmt:str) -> dict:
       prev_instr = max(prev_instr, e.time + e.dur)
     summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
                {"label":"SIMD", "value":w.simd}, {"label":"Wave ID", "value":w.wave_id}, {"label":"Run number", "value":data["run_number"]}]
-    return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "summary":summary}
+    return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":[summary]}
   return data
 
 # ** HTTP server
 
 def get_int(query:dict[str, list[str]], k:str) -> int: return int(query.get(k,["0"])[0])
 
-class Handler(BaseHTTPRequestHandler):
+class Handler(HTTPRequestHandler):
   def do_GET(self):
     ret, status_code, content_type = b"", 200, "text/html"
 
@@ -404,7 +464,7 @@ class Handler(BaseHTTPRequestHandler):
     elif (query:=parse_qs(url.query)):
       i, j = get_int(query, "ctx"), get_int(query, "step")
       if (fmt:=url.path.lstrip("/")) == "rewrites":
-        try: return self.stream_json(get_full_rewrite(trace.rewrites[i][j], i))
+        try: return self.stream_json(get_full_rewrite(trace.rewrites[i][j]))
         except (KeyError, IndexError): status_code = 404
       else:
         render_src = get_render(i, j, fmt)
@@ -416,25 +476,7 @@ class Handler(BaseHTTPRequestHandler):
     elif url.path == "/get_profile" and profile_ret: ret, content_type = profile_ret, "application/octet-stream"
     else: status_code = 404
 
-    # send response
-    self.send_response(status_code)
-    self.send_header('Content-Type', content_type)
-    self.send_header('Content-Length', str(len(ret)))
-    self.end_headers()
-    return self.wfile.write(ret)
-
-  def stream_json(self, source:Generator):
-    try:
-      self.send_response(200)
-      self.send_header("Content-Type", "text/event-stream")
-      self.send_header("Cache-Control", "no-cache")
-      self.end_headers()
-      for r in source:
-        self.wfile.write(f"data: {json.dumps(r)}\n\n".encode("utf-8"))
-        self.wfile.flush()
-      self.wfile.write("data: END\n\n".encode("utf-8"))
-    # pass if client closed connection
-    except (BrokenPipeError, ConnectionResetError): return
+    return self.send_data(ret, content_type, status_code)
 
 # ** main loop
 
@@ -451,9 +493,6 @@ def load_pickle(path:pathlib.Path, default:T) -> T:
   if not path.exists(): return default
   with path.open("rb") as f: return pickle.load(f)
 
-# NOTE: using HTTPServer forces a potentially slow socket.getfqdn
-class TCPServerWithReuse(socketserver.TCPServer): allow_reuse_address = True
-
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument('--kernels', type=pathlib.Path, help='Path to kernels', default=pathlib.Path(temp("rewrites.pkl", append_user=True)))
@@ -468,13 +507,12 @@ if __name__ == "__main__":
   st = time.perf_counter()
   print("*** viz is starting")
 
-  ctxs = get_rewrites(trace:=load_pickle(args.kernels, default=RewriteTrace([], [], {})))
+  ctxs:list[dict] = get_rewrites(trace:=load_pickle(args.kernels, default=RewriteTrace([], [], {})))
   profile_ret = get_profile(load_pickle(args.profile, default=[]))
 
   server = TCPServerWithReuse(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)
   reloader_thread.start()
-  print(f"*** started viz on {HOST}:{PORT}")
   print(colored(f"*** ready in {(time.perf_counter()-st)*1e3:4.2f}ms", "green"), flush=True)
   if len(getenv("BROWSER", "")) > 0: webbrowser.open(f"{HOST}:{PORT}")
   try: server.serve_forever()
