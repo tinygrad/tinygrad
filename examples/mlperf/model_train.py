@@ -1177,7 +1177,8 @@ def train_bert():
       if MLLOGGER and RUNMLPERF:
         MLLOGGER.start(key=mllog_constants.EVAL_START, value=None, metadata={"epoch_num": i*GBS, "step_num": i})
       if getenv("RESET_STEP"): train_step_bert.reset()
-      elif getenv("FREE_INTERMEDIATE", 1) and train_step_bert.captured is not None:
+      elif getenv("FREE_INTERMEDIATE") and train_step_bert.captured is not None:
+        # TODO: this hangs on tiny green after 90 minutes of training
         train_step_bert.captured.free_intermediates()
       eval_lm_losses = []
       eval_clsf_losses = []
@@ -1212,7 +1213,7 @@ def train_bert():
           return
 
       if getenv("RESET_STEP"): eval_step_bert.reset()
-      elif getenv("FREE_INTERMEDIATE", 1) and eval_step_bert.captured is not None: eval_step_bert.captured.free_intermediates()
+      elif getenv("FREE_INTERMEDIATE") and eval_step_bert.captured is not None: eval_step_bert.captured.free_intermediates()
 
       del eval_data
       avg_lm_loss = sum(eval_lm_losses) / len(eval_lm_losses)
