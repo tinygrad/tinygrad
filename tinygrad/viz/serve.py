@@ -218,7 +218,7 @@ def soft_err(fn:Callable):
 
 def row_tuple(row:str) -> tuple[int, ...]: return tuple(int(x.split(":")[1]) for x in row.split())
 
-# *** Performance pmc
+# *** Performance counters
 
 def unpack_pmc(e) -> dict:
   agg_cols = ["Name", "Sum"]
@@ -248,7 +248,8 @@ def load_counters(profile:list[ProfileEvent]) -> None:
       durations.setdefault(str(e.name), []).append(float(e.en-e.st))
     if isinstance(e, ProfileProgramEvent): prg_events[str(e.name)] = e
     if isinstance(e, ProfileDeviceEvent): dev_events[e.device] = e
-  ctxs.append({"name":"All Counters", "steps":[create_step("PMC", ("/all-pmc", len(ctxs), 0), (durations, counter_events))]})
+  ctxs.append({"name":"All Counters", "steps":[create_step("PMC", ("/all-pmc", len(ctxs), 0), \
+      (durations, {k:v[ProfilePMCEvent][0] for k,v in counter_events.items()}))]})
   run_number = {n:0 for n,_ in counter_events}
   for k,v in counter_events.items():
     prg = trace.keys[r].ret if (r:=ref_map.get(k[0])) else None
@@ -257,23 +258,20 @@ def load_counters(profile:list[ProfileEvent]) -> None:
     steps:list[dict] = []
     if (pmc:=v[ProfilePMCEvent]): steps.append(create_step("PMC", ("/prg-pmc", len(ctxs), len(steps)), pmc))
     if (sqtt:=v[ProfileSQTTEvent]):
-      # to decode a SQTT trace, we need the raw blobs, program binary and the device properties
-      decoder_data = [*sqtt, prg_events[k[0]], dev_events[sqtt[0].device]]
-      steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), (k, decoder_data)))
+      # to decode a SQTT trace, we need the raw stream, program binary and device properties
+      steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), (k, [*sqtt, prg_events[k[0]], dev_events[sqtt[0].device]])))
+      if getenv("SQTT_PARSE"):
+        # run our decoder on startup, we don't use this since it only works on gfx11
+        from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
+        for e in sqtt: parse_sqtt_print_packets(e.blob)
     ctxs.append({"name":f"Exec {name} n{run_number[k[0]]}", "steps":steps})
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
 
-@soft_err(lambda err: ctxs.append({"name":"ERR", "steps":[create_step("SQTT decoder error", ("render", len(ctxs), 0), err)]}))
 def unpack_sqtt(key:tuple[str, int], profile:list[ProfileEvent]) -> dict[str, list[ProfileEvent]]:
-  # ** init decoder
+  # * init decoder
   from extra.sqtt.roc import decode
   rctx = decode(profile)
-  """
-  if getenv("SQTT_PARSE"):
-    from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
-    for e in profile: parse_sqtt_print_packets(e.blob)
-  """
   disasm = rctx.disasms[key[0]]
   cu_events:dict[str, list[ProfileEvent]] = {}
   # * INST waves
@@ -400,20 +398,20 @@ def get_render(i:int, j:int, fmt:str) -> dict:
   if fmt == "all-pmc":
     durations, pmc = data
     ret:dict = {"cols":{}, "rows":[]}
-    for k,events in pmc.items():
-      from tinygrad.runtime.ops_amd import ProfilePMCEvent
-      pmc_table = unpack_pmc(events[ProfilePMCEvent][0])
+    for (prg,_),events in pmc.items():
+      pmc_table = unpack_pmc(events)
       ret["cols"].update([(r[0], None) for r in pmc_table["rows"]])
-      ret["rows"].append((k[0], durations[k[0]].pop(0), *[r[1] for r in pmc_table["rows"]]))
+      ret["rows"].append((prg, durations[prg].pop(0), *[r[1] for r in pmc_table["rows"]]))
     ret["cols"] = ["Kernel", "Duration", *ret["cols"]]
     return ret
   if fmt == "prg-pmc": return unpack_pmc(data[0])
   if fmt == "prg-sqtt":
-    cus:list[dict] = []
-    for cu,events in unpack_sqtt(*data).items():
-      cus.append(s:=create_step(f"{cu} {len(events)}", ("/cu-sqtt", i, len(ctxs[i]["steps"])), depth=1))
-      ctxs[i]["steps"].append({**s, "data":events})
-    return {"steps":cus}
+    ret:dict = {"steps":[]}
+    with soft_err(lambda err: ret.update(err)):
+      for cu,events in unpack_sqtt(*data).items():
+        ret["steps"].append(s:=create_step(f"{cu} {len(events)}", ("/cu-sqtt", i, len(ctxs[i]["steps"])), depth=1))
+        ctxs[i]["steps"].append({**s, "data":events})
+    return ret
   if fmt == "cu-sqtt": return {"value":get_profile(data, sort_fn=row_tuple), "content_type":"application/octet-stream"}
   if fmt == "sqtt-insts":
     columns = ["PC", "Instruction", "Hits", "Cycles", "Stall", "Type"]

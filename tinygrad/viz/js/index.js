@@ -760,7 +760,7 @@ async function main() {
   // ** Disassembly view
   if (!ckey.startsWith("/rewrites")) {
     if (!(ckey in cache)) cache[ckey] = ret = await fetchValue(ckey);
-    if (ret.steps != null) {
+    if (ret.steps?.length > 0) {
       const el = select(state.currentCtx, state.currentStep);
       if (el.step.children.length > ret.steps.length) return;
       ctx.steps.push(...ret.steps);
