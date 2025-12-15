@@ -817,7 +817,7 @@ async function main() {
     const eventSource = new EventSource(ckey);
     evtSources.push(eventSource);
     eventSource.onmessage = (e) => {
-      if (e.data === "END") return eventSource.close();
+      if (e.data === "[DONE]") return eventSource.close();
       const chunk = JSON.parse(e.data);
       ret.push(chunk);
       // if it's the first one render this new rgaph
