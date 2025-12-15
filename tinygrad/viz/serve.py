@@ -9,7 +9,7 @@ from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA
 from tinygrad.helpers import printable, system, TCPServerWithReuse, HTTPRequestHandler
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, pyrender
 from tinygrad.uop.ops import print_uops, range_start, multirange_str
-from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device
+from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device, ProfileProgramEvent
 from tinygrad.renderer import ProgramSpec
 from tinygrad.dtype import dtypes
 
@@ -58,7 +58,8 @@ class GraphRewriteDetails(TypedDict):
 
 def shape_to_str(s:tuple[sint, ...]): return "(" + ','.join(srender(x) for x in s) + ")"
 def mask_to_str(s:tuple[tuple[sint, sint], ...]): return "(" + ','.join(shape_to_str(x) for x in s) + ")"
-def pystr(u:UOp, i:int) -> str:
+def pystr(u:UOp) -> str:
+   # pyrender may check for shape mismatch
   try: return pyrender(u)
   except Exception: return str(u)
 
@@ -111,19 +112,18 @@ def _reconstruct(a:int):
   arg = type(arg)(_reconstruct(arg.ast), arg.metadata) if op is Ops.KERNEL else arg
   return UOp(op, dtype, tuple(_reconstruct(s) for s in src), arg, *rest)
 
-def get_full_rewrite(ctx:TrackedGraphRewrite, i:int=0) -> Generator[GraphRewriteDetails, None, None]:
+def get_full_rewrite(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
   next_sink = _reconstruct(ctx.sink)
   # in the schedule graph we don't show indexing ops (unless it's in a kernel AST or rewriting dtypes.index sink)
-  yield {"graph":uop_to_json(next_sink), "uop":pystr(next_sink,i), "changed_nodes":None, "diff":None, "upat":None}
+  yield {"graph":uop_to_json(next_sink), "uop":pystr(next_sink), "changed_nodes":None, "diff":None, "upat":None}
   replaces: dict[UOp, UOp] = {}
   for u0_num,u1_num,upat_loc,dur in tqdm(ctx.matches):
     replaces[u0:=_reconstruct(u0_num)] = u1 = _reconstruct(u1_num)
     try: new_sink = next_sink.substitute(replaces)
     except RuntimeError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
     match_repr = f"# {dur*1e6:.2f} us\n"+printable(upat_loc)
-    yield {"graph":(sink_json:=uop_to_json(new_sink)), "uop":pystr(new_sink,i),
-           "changed_nodes":[id(x) for x in u1.toposort() if id(x) in sink_json],
-           "diff":list(difflib.unified_diff(pystr(u0,i).splitlines(),pystr(u1,i).splitlines())), "upat":(upat_loc, match_repr)}
+    yield {"graph":(sink_json:=uop_to_json(new_sink)), "uop":pystr(new_sink), "changed_nodes":[id(x) for x in u1.toposort() if id(x) in sink_json],
+           "diff":list(difflib.unified_diff(pystr(u0).splitlines(), pystr(u1).splitlines())), "upat":(upat_loc, match_repr)}
     if not ctx.bottom_up: next_sink = new_sink
 
 # encoder helpers
@@ -234,70 +234,66 @@ def unpack_pmc(e) -> dict:
     rows.append(row)
   return {"rows":rows, "cols":agg_cols}
 
-@soft_err(lambda err: ctxs.append({"name":"ERR", "steps":[create_step("Loader error", ("render",len(ctxs),0), err)]}))
-def load_sqtt(profile:list[ProfileEvent]) -> None:
+# ** on startup, list all the performance counter traces
+
+def load_counters(profile:list[ProfileEvent]) -> None:
   from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
-  counter_events:dict[tuple[str, int], list[ProfileSQTTEvent|ProfilePMCEvent]] = {}
+  counter_events:dict[tuple[str, int], dict] = {}
   durations:dict[str, list[float]] = {}
+  prg_events:dict[str, ProfileProgramEvent] = {}
+  dev_events:dict[str, ProfileDeviceEvent] = {}
   for e in profile:
-    if isinstance(e, (ProfilePMCEvent, ProfileSQTTEvent)): counter_events.setdefault((e.kern, e.exec_tag), []).append(e)
+    if isinstance(e, (ProfilePMCEvent, ProfileSQTTEvent)): counter_events.setdefault((e.kern, e.exec_tag), {}).setdefault(type(e), []).append(e)
     if isinstance(e, ProfileRangeEvent) and e.device.startswith("AMD") and e.en is not None:
       durations.setdefault(str(e.name), []).append(float(e.en-e.st))
-  if not counter_events: return
-  # ** init decoder
+    if isinstance(e, ProfileProgramEvent): prg_events[str(e.name)] = e
+    if isinstance(e, ProfileDeviceEvent): dev_events[e.device] = e
+  ctxs.append({"name":"All Counters", "steps":[create_step("PMC", ("/all-pmc", len(ctxs), 0), \
+      (durations, {k:v[ProfilePMCEvent][0] for k,v in counter_events.items()}))]})
+  run_number = {n:0 for n,_ in counter_events}
+  for k,v in counter_events.items():
+    prg = trace.keys[r].ret if (r:=ref_map.get(k[0])) else None
+    name = prg.name if prg is not None else k[0]
+    run_number[k[0]] += 1
+    steps:list[dict] = []
+    if (pmc:=v.get(ProfilePMCEvent)): steps.append(create_step("PMC", ("/prg-pmc", len(ctxs), len(steps)), pmc))
+    if (sqtt:=v.get(ProfileSQTTEvent)):
+      # to decode a SQTT trace, we need the raw stream, program binary and device properties
+      steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), (k, [*sqtt, prg_events[k[0]], dev_events[sqtt[0].device]])))
+      if getenv("SQTT_PARSE"):
+        # run our decoder on startup, we don't use this since it only works on gfx11
+        from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
+        for e in sqtt: parse_sqtt_print_packets(e.blob)
+    ctxs.append({"name":f"Exec {name} n{run_number[k[0]]}", "steps":steps})
+
+# ** SQTT OCC only unpacks wave start, end time and SIMD location
+
+def unpack_sqtt(key:tuple[str, int], profile:list[ProfileEvent]) -> tuple[dict[str, list[ProfileEvent]], list[str], dict[str, dict[str, dict]]]:
+  # * init decoder
   from extra.sqtt.roc import decode
   rctx = decode(profile)
-  if getenv("SQTT_PARSE"):
-    from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
-    for counters in counter_events.values():
-      for e in counters:
-        if isinstance(e, ProfileSQTTEvent): parse_sqtt_print_packets(e.blob)
-  # ** decode traces for each run
-  all_runs:dict = {"cols":{}, "rows":[]}
-  steps:list[dict] = [create_step("All", ("/all", len(ctxs), 0), data=all_runs)]
-  for key,counters in counter_events.items():
-    # ** Run summary
-    program = trace.keys[r].ret if (r:=ref_map.get(key[0])) else None
-    summary = [f"{program.global_size=} {program.local_size=}"] if program else [repr(key)]
-    # ** SQTT events
-    disasm = rctx.disasms[key[0]]
-    cu_events:dict[str, list[ProfileEvent]] = {}
-    # * INST waves
-    wave_insts:dict[str, dict[str, dict]] = {}
-    inst_units:dict[str, itertools.count] = {}
-    for w in rctx.inst_execs.get(key, []):
-      if (u:=w.wave_loc) not in inst_units: inst_units[u] = itertools.count(0)
-      n = next(inst_units[u])
-      if (events:=cu_events.get(w.cu_loc)) is None: cu_events[w.cu_loc] = events = []
-      events.append(ProfileRangeEvent(w.simd_loc, loc:=f"INST WAVE:{w.wave_id} N:{n}", Decimal(w.begin_time), Decimal(w.end_time)))
-      wave_insts.setdefault(w.cu_loc, {})[f"{u} N:{n}"] = {"wave":w, "disasm":disasm, "run_number":n, "loc":loc}
-    # * OCC waves
-    units:dict[str, itertools.count] = {}
-    wave_start:dict[str, int] = {}
-    for occ in rctx.occ_events.get(key, []):
-      if (u:=occ.wave_loc) not in units: units[u] = itertools.count(0)
-      if u in inst_units: continue
-      if occ.start: wave_start[u] = occ.time
-      else:
-        if (events:=cu_events.get(occ.cu_loc)) is None: cu_events[occ.cu_loc] = events = []
-        events.append(ProfileRangeEvent(occ.simd_loc, f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)), Decimal(occ.time)))
-    prg_cu = sorted(cu_events, key=row_tuple)
-    if cu_events: summary.append(f"Scheduled on {len(prg_cu)} CUs")
-    steps.append(create_step(program.name if program else key[0], ("/prg-run", len(ctxs), len(steps)), {"src":"\n\n".join(summary)}, depth=0))
-    # ** PMC events
-    if (pmc_event:=next((e for e in counters if isinstance(e, ProfilePMCEvent)), None)) is not None:
-      steps.append(create_step("PMC", ("/pmc", len(ctxs), len(steps)), pmc_table:=unpack_pmc(pmc_event), depth=1))
-      all_runs["cols"].update([(r[0], None) for r in pmc_table["rows"]])
-      all_runs["rows"].append((key[0], durations[key[0]].pop(0), *[r[1] for r in pmc_table["rows"]]))
-    for cu in prg_cu:
-      events = [ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]
-      steps.append(create_step(f"{cu} {len(cu_events[cu])}", ("/counters", len(ctxs), len(steps)),
-                               {"value":get_profile(events, sort_fn=row_tuple), "content_type":"application/octet-stream"}, depth=1))
-      for k in sorted(wave_insts.get(cu, []), key=row_tuple):
-        data = wave_insts[cu][k]
-        steps.append(create_step(k.replace(cu, ""), ("/sqtt-insts", len(ctxs), len(steps)), data, loc=data["loc"], depth=2))
-  all_runs["cols"] = ["Kernel", "Duration", *all_runs["cols"]]
-  ctxs.append({"name":"Counters", "steps":steps})
+  disasm = rctx.disasms[key[0]]
+  cu_events:dict[str, list[ProfileEvent]] = {}
+  # * INST waves
+  wave_insts:dict[str, dict[str, dict]] = {}
+  inst_units:dict[str, itertools.count] = {}
+  for w in rctx.inst_execs.get(key, []):
+    if (u:=w.wave_loc) not in inst_units: inst_units[u] = itertools.count(0)
+    n = next(inst_units[u])
+    if (events:=cu_events.get(w.cu_loc)) is None: cu_events[w.cu_loc] = events = []
+    events.append(ProfileRangeEvent(w.simd_loc, loc:=f"INST WAVE:{w.wave_id} N:{n}", Decimal(w.begin_time), Decimal(w.end_time)))
+    wave_insts.setdefault(w.cu_loc, {})[f"{u} N:{n}"] = {"wave":w, "disasm":disasm, "run_number":n, "loc":loc}
+  # * OCC waves
+  units:dict[str, itertools.count] = {}
+  wave_start:dict[str, int] = {}
+  for occ in rctx.occ_events.get(key, []):
+    if (u:=occ.wave_loc) not in units: units[u] = itertools.count(0)
+    if u in inst_units: continue
+    if occ.start: wave_start[u] = occ.time
+    else:
+      if (events:=cu_events.get(occ.cu_loc)) is None: cu_events[occ.cu_loc] = events = []
+      events.append(ProfileRangeEvent(occ.simd_loc, f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)), Decimal(occ.time)))
+  return cu_events, list(units), wave_insts
 
 def device_sort_fn(k:str) -> tuple[int, str, int]:
   order = {"GC": 0, "USER": 1, "TINY": 2, "DISK": 999}
@@ -307,13 +303,12 @@ def device_sort_fn(k:str) -> tuple[int, str, int]:
 
 def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_sort_fn) -> bytes|None:
   # start by getting the time diffs
-  for ev in profile:
-    if isinstance(ev,ProfileDeviceEvent): device_ts_diffs[ev.device] = (ev.comp_tdiff, ev.copy_tdiff if ev.copy_tdiff is not None else ev.comp_tdiff)
-  # load device specific counters
   device_decoders:dict[str, Callable[[list[ProfileEvent]], None]] = {}
-  for device in device_ts_diffs:
-    d = device.split(":")[0]
-    if d == "AMD": device_decoders[d] = load_sqtt
+  for ev in profile:
+    if isinstance(ev, ProfileDeviceEvent):
+      device_ts_diffs[ev.device] = (ev.comp_tdiff,ev.copy_tdiff if ev.copy_tdiff is not None else ev.comp_tdiff)
+      if (d:=ev.device.split(":")[0]) == "AMD": device_decoders[d] = load_counters
+  # load device specific counters
   for fxn in device_decoders.values(): fxn(profile)
   # map events per device
   dev_events:dict[str, list[tuple[int, int, float, DevEvent]]] = {}
@@ -381,6 +376,8 @@ def amd_readelf(lib:bytes) -> list[dict]:
           ".group_segment_fixed_size":"LDS size", ".private_segment_fixed_size":"Scratch size"}
   return [{"label":label, "value":v} for k,label in keys.items() if (v:=notes["amdhsa.kernels"][0][k]) > 0]
 
+# ** Main render function to get the complete details about a trace event
+
 def get_render(i:int, j:int, fmt:str) -> dict:
   data = ctxs[i]["steps"][j]["data"]
   if fmt == "uops": return {"src":get_stdout(lambda: print_uops(data.uops or [])), "lang":"txt"}
@@ -397,8 +394,30 @@ def get_render(i:int, j:int, fmt:str) -> dict:
       with soft_err(lambda err: metadata.append(err)):
         metadata.append(amd_readelf(compiler.compile(data.src)))
     return {"src":disasm_str, "lang":"amdgpu" if data.device.startswith("AMD") else None, "metadata":metadata}
+  if fmt == "all-pmc":
+    durations, pmc = data
+    ret:dict = {"cols":{}, "rows":[]}
+    for (prg,_),events in pmc.items():
+      pmc_table = unpack_pmc(events)
+      ret["cols"].update([(r[0], None) for r in pmc_table["rows"]])
+      ret["rows"].append((prg, durations[prg].pop(0), *[r[1] for r in pmc_table["rows"]]))
+    ret["cols"] = ["Kernel", "Duration", *ret["cols"]]
+    return ret
+  if fmt == "prg-pmc": return unpack_pmc(data[0])
+  if fmt == "prg-sqtt":
+    ret = {}
+    if len((steps:=ctxs[i]["steps"])[j+1:]) == 0:
+      with soft_err(lambda err: ret.update(err)):
+        cu_events, units, wave_insts = unpack_sqtt(*data)
+        for cu in sorted(cu_events, key=row_tuple):
+          steps.append(create_step(f"{cu} {len(cu_events[cu])}", ("/cu-sqtt", i, len(steps)), depth=1,
+                                   data=[ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]))
+          for k in sorted(wave_insts.get(cu, []), key=row_tuple):
+            steps.append(create_step(k.replace(cu, ""), ("/sqtt-insts", i, len(steps)), loc=(data:=wave_insts[cu][k])["loc"], depth=2, data=data))
+    return {**ret, "steps":[{k:v for k,v in s.items() if k != "data"} for s in steps[j+1:]]}
+  if fmt == "cu-sqtt": return {"value":get_profile(data, sort_fn=row_tuple), "content_type":"application/octet-stream"}
   if fmt == "sqtt-insts":
-    columns = ["PC", "Instruction", "Hits", "Duration", "Stall", "Type"]
+    columns = ["PC", "Instruction", "Hits", "Cycles", "Stall", "Type"]
     inst_columns = ["N", "Clk", "Idle", "Dur", "Stall"]
     # Idle:     The total time gap between the completion of previous instruction and the beginning of the current instruction.
     #           The idle time can be caused by:
@@ -445,7 +464,7 @@ class Handler(HTTPRequestHandler):
     elif (query:=parse_qs(url.query)):
       i, j = get_int(query, "ctx"), get_int(query, "step")
       if (fmt:=url.path.lstrip("/")) == "rewrites":
-        try: return self.stream_json(get_full_rewrite(trace.rewrites[i][j], i))
+        try: return self.stream_json(get_full_rewrite(trace.rewrites[i][j]))
         except (KeyError, IndexError): status_code = 404
       else:
         render_src = get_render(i, j, fmt)

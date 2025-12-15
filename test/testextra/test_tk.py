@@ -31,14 +31,16 @@ class TestTK(unittest.TestCase):
 
       a_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
       b_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
+      c_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
       a_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
       b_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
-      c_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32, TileLayout.COL)
+      c_reg_col = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32, TileLayout.COL)
+      c_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
       col, row = ker.blockIdx_x, ker.blockIdx_y
 
-      c_reg = warp.zero(c_reg)
+      c_reg_col = warp.zero(c_reg_col)
       for tile in ker.range(N // BLOCK_SIZE):
         a_smem = warp.load(a_smem, a, (), (0, 0, row, tile), axis=2)
         b_smem = warp.load(b_smem, b, (), (0, 0, tile, col), axis=2)
@@ -46,8 +48,11 @@ class TestTK(unittest.TestCase):
         a_reg = warp.load(a_reg, a_smem)
         b_reg = warp.load(b_reg, b_smem)
 
-        c_reg = warp.mma_AB(c_reg, a_reg, b_reg)
-      c_reg = ker.endrange()
+        c_reg_col = warp.mma_AB(c_reg_col, a_reg, b_reg)
+      c_reg_col = ker.endrange()
+
+      c_smem = warp.store(c_smem, c_reg_col)
+      c_reg = warp.load(c_reg, c_smem)
 
       c = warp.store(c, c_reg, (0, 0, row, col), (), axis=2)
 
@@ -151,6 +156,89 @@ class TestTK(unittest.TestCase):
     ref = a.float()
 
     np.testing.assert_allclose(b.numpy(), ref.numpy())
+
+  def test_load_store_local_hop(self):
+    N = 64
+    BLOCK_SIZE = 32
+    with Kernel("load_store_local_hop", (N // BLOCK_SIZE, N // BLOCK_SIZE, 1), WARP_THREADS) as ker:
+      warp = ker.warp
+
+      b = ker.gl((1, 1, N, N), dtypes.float32)
+      a = ker.gl((1, 1, N, N), dtypes.float32)
+
+      a_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      b_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+
+      a_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      b_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+
+      col, row = ker.blockIdx_x, ker.blockIdx_y
+
+      a_smem = warp.load(a_smem, a, (), (0, 0, row, col), axis=2)
+      a_reg = warp.load(a_reg, a_smem)
+      b_reg = warp.copy(b_reg, a_reg)
+      b_smem = warp.store(b_smem, b_reg)
+      b_reg = warp.load(b_reg, b_smem)
+      b = warp.store(b, b_reg, (0, 0, row, col), (), axis=2)
+
+      sink = ker.finish()
+
+    with Context(DEBUG=0):
+      a = Tensor.rand(1, 1, N, N, dtype="float32").contiguous()
+      b = Tensor.empty(1, 1, N, N, dtype="float32")
+      Tensor.realize(a, b)
+
+    ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (b, a)])
+    for _ in range(5): ei.run(wait=True)
+    b = b.float()
+
+    ref = a.float()
+
+    np.testing.assert_allclose(b.numpy(), ref.numpy())
+
+  def test_load_store_multioutput(self):
+    N = 64
+    BLOCK_SIZE = 32
+    with Kernel("load_store_multioutput", (N // BLOCK_SIZE, N // BLOCK_SIZE, 1), WARP_THREADS) as ker:
+      warp = ker.warp
+
+      b = ker.gl((1, 1, N, N), dtypes.float32)
+      c = ker.gl((1, 1, N, N), dtypes.float32)
+      a = ker.gl((1, 1, N, N), dtypes.float32)
+
+      a_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      b_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+
+      a_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      b_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+
+      col, row = ker.blockIdx_x, ker.blockIdx_y
+
+      a_smem = warp.load(a_smem, a, (), (0, 0, row, col), axis=2)
+      a_reg = warp.load(a_reg, a_smem)
+      b_reg = warp.copy(b_reg, a_reg)
+      b_smem = warp.store(b_smem, b_reg)
+      b_reg = warp.load(b_reg, b_smem)
+      b = warp.store(b, b_reg, (0, 0, row, col), (), axis=2)
+      c = warp.store(c, b_reg, (0, 0, row, col), (), axis=2)
+
+      sink = ker.finish(2)
+
+    with Context(DEBUG=0):
+      a = Tensor.rand(1, 1, N, N, dtype="float32").contiguous()
+      b = Tensor.empty(1, 1, N, N, dtype="float32")
+      c = Tensor.empty(1, 1, N, N, dtype="float32")
+      Tensor.realize(a, b, c)
+
+    ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (b, c, a)])
+    for _ in range(5): ei.run(wait=True)
+    b = b.float()
+    c = c.float()
+
+    ref = a.float()
+
+    np.testing.assert_allclose(b.numpy(), ref.numpy())
+    np.testing.assert_allclose(c.numpy(), ref.numpy())
 
   @unittest.skip("TODO")
   def test_load_store_group(self):
