@@ -218,7 +218,7 @@ def soft_err(fn:Callable):
 
 def row_tuple(row:str) -> tuple[int, ...]: return tuple(int(x.split(":")[1]) for x in row.split())
 
-# *** Performance counters
+# *** Performance pmc
 
 def unpack_pmc(e) -> dict:
   agg_cols = ["Name", "Sum"]
@@ -241,18 +241,26 @@ def load_counters(profile:list[ProfileEvent]) -> None:
   counter_events:dict[tuple[str, int], dict] = {}
   durations:dict[str, list[float]] = {}
   prg_events:dict[str, ProfileProgramEvent] = {}
-  dev_events:list[ProfileDeviceEvent] = []
+  dev_events:dict[str, ProfileDeviceEvent] = {}
   for e in profile:
     if isinstance(e, (ProfilePMCEvent, ProfileSQTTEvent)): counter_events.setdefault((e.kern, e.exec_tag), {}).setdefault(type(e), []).append(e)
     if isinstance(e, ProfileRangeEvent) and e.device.startswith("AMD") and e.en is not None:
       durations.setdefault(str(e.name), []).append(float(e.en-e.st))
     if isinstance(e, ProfileProgramEvent): prg_events[str(e.name)] = e
-    if isinstance(e, ProfileDeviceEvent): dev_events.append(e)
-  steps:list[dict] = [create_step("All", ("/all-counters", len(ctxs), 0), (durations, counter_events))]
+    if isinstance(e, ProfileDeviceEvent): dev_events[e.device] = e
+  ctxs.append({"name":"All Counters", "steps":[create_step("PMC", ("/all-pmc", len(ctxs), 0), (durations, counter_events))]})
+  run_number = {n:0 for n,_ in counter_events}
   for k,v in counter_events.items():
     prg = trace.keys[r].ret if (r:=ref_map.get(k[0])) else None
-    steps.append(create_step(prg.name if prg is not None else str(k), ("/prg-counters",len(ctxs),len(steps)), (k, [prg_events[k[0]]]+dev_events, v)))
-  ctxs.append({"name":"Counters", "steps":steps})
+    name = prg.name if prg is not None else k[0]
+    run_number[k[0]] += 1
+    steps:list[dict] = []
+    if (pmc:=v[ProfilePMCEvent]): steps.append(create_step("PMC", ("/prg-pmc", len(ctxs), len(steps)), pmc))
+    if (sqtt:=v[ProfileSQTTEvent]):
+      # to decode a SQTT trace, we need the raw blobs, program binary and the device properties
+      decoder_data = [*sqtt, prg_events[k[0]], dev_events[sqtt[0].device]]
+      steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), (k, decoder_data)))
+    ctxs.append({"name":f"Exec {name} n{run_number[k[0]]}", "steps":steps})
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
 
@@ -299,7 +307,7 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_
   # start by getting the time diffs
   for ev in profile:
     if isinstance(ev,ProfileDeviceEvent): device_ts_diffs[ev.device] = (ev.comp_tdiff, ev.copy_tdiff if ev.copy_tdiff is not None else ev.comp_tdiff)
-  # load device specific counters
+  # load device specific pmc
   device_decoders:dict[str, Callable[[list[ProfileEvent]], None]] = {}
   for device in device_ts_diffs:
     d = device.split(":")[0]
@@ -389,23 +397,24 @@ def get_render(i:int, j:int, fmt:str) -> dict:
       with soft_err(lambda err: metadata.append(err)):
         metadata.append(amd_readelf(compiler.compile(data.src)))
     return {"src":disasm_str, "lang":"amdgpu" if data.device.startswith("AMD") else None, "metadata":metadata}
-  if fmt == "all-counters":
-    durations, counters = data
+  if fmt == "all-pmc":
+    durations, pmc = data
     ret:dict = {"cols":{}, "rows":[]}
-    for k,events in counters.items():
+    for k,events in pmc.items():
       from tinygrad.runtime.ops_amd import ProfilePMCEvent
       pmc_table = unpack_pmc(events[ProfilePMCEvent][0])
       ret["cols"].update([(r[0], None) for r in pmc_table["rows"]])
       ret["rows"].append((k[0], durations[k[0]].pop(0), *[r[1] for r in pmc_table["rows"]]))
     ret["cols"] = ["Kernel", "Duration", *ret["cols"]]
     return ret
-  if fmt == "prg-counters":
-    prg, dev_events, events = data
-    from tinygrad.runtime.ops_amd import ProfilePMCEvent, ProfileSQTTEvent
-    ret = unpack_pmc(events[ProfilePMCEvent][0])
-    unpack_sqtt(prg, events[ProfileSQTTEvent]+dev_events)
-    # TODO: requires UI work
-    #ret["steps"] = create_step("SQTT", ("/sqtt-occ", len(ctxs), len(steps)))
+  if fmt == "prg-pmc": return unpack_pmc(data[0])
+  if fmt == "prg-sqtt":
+    #ret = {"steps":[]}
+    for cu,events in unpack_sqtt(*data).items():
+      return {"value":get_profile(events, sort_fn=row_tuple), "content_type":"application/octet-stream"}
+      # TODO: this still needs ui work
+      #ret["steps"].append(create_step(f"{cu} {len(events)}", ("/pmc", i, len(ret["steps"])),
+      #                                {"value":get_profile(events, sort_fn=row_tuple), "content_type":"application/octet-stream"}, depth=1))
     return ret
   if fmt == "sqtt-insts":
     columns = ["PC", "Instruction", "Hits", "Cycles", "Stall", "Type"]
