@@ -17,7 +17,10 @@ def _from_torch_device(device: torch.device): return f"{Device.DEFAULT}:{device.
 def _to_torch_device(device: str): return torch.device("tiny", int(device.partition(":")[2] or 0))
 
 import torch.utils.cpp_extension
-mod = torch.utils.cpp_extension.load(name="custom_device_extension", sources=[str(pathlib.Path(__file__).parent / "wrapped_tensor.cpp")])
+_build_dir = pathlib.Path(__file__).parent / "build"
+_build_dir.mkdir(exist_ok=True)
+mod = torch.utils.cpp_extension.load(name="custom_device_extension", sources=[str(pathlib.Path(__file__).parent / "wrapped_tensor.cpp")],
+                                     build_directory=str(_build_dir))
 def calculate_storage_offset(x: Tensor) -> int:
   offset = 0
   for u in x.uop.toposort():
@@ -49,9 +52,28 @@ def canonical_base(view: Tensor): return getattr(view, "_view_base", view)
 def derived_views(base: Tensor): return [t for tref in getattr(base, "_views", set()) if (t:=tref()) is not None]
 def unwrap_args(args, kwargs):
   return [unwrap(x) if isinstance(x, torch.Tensor) else x for x in args], {k:unwrap(v) if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()}
-def wrap_view_op(fn):
+
+def _call_aten(aten_name: str, *args, **kwargs):
+  op = aten
+  for part in aten_name.split('.')[1:]:
+    op = getattr(op, part)
+  if hasattr(op, "default"): op = op.default
+  with torch._C._PreserveDispatchKeyGuard():
+    torch._C._dispatch_tls_set_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView, True)
+    torch._C._dispatch_tls_set_dispatch_key_excluded(torch._C.DispatchKey.AutocastPrivateUse1, True)
+    torch._C._dispatch_tls_set_dispatch_key_excluded(torch._C.DispatchKey.AutogradPrivateUse1, True)
+    torch._C._dispatch_tls_set_dispatch_key_excluded(torch._C.DispatchKey.PrivateUse1, True)
+    return op(*args, **kwargs)
+
+def wrap_view_op(fn=None, *, aten_name: str|None=None):
+  if fn is None: return functools.partial(wrap_view_op, aten_name=aten_name)
   @functools.wraps(fn)
   def _wrap(*args, **kwargs):
+    if torch._C._meta_in_tls_dispatch_include() or (isinstance(args[0], torch.Tensor) and args[0].device.type == "meta"):
+      if aten_name is not None: return _call_aten(aten_name, *args, **kwargs)
+      if fn.__name__ == "_as_strided": return _call_aten("aten.as_strided", *args, **kwargs)
+      if fn.__name__ == "slice_tensor": return _slice_tensor_meta(*args, **kwargs)
+      if fn.__name__ == "diagonal": return _diagonal_meta(*args, **kwargs)
     args, kwargs = unwrap_args(args, kwargs)
     ret = fn(*args, **kwargs)
     base = canonical_base(args[0])
@@ -76,10 +98,7 @@ view_ops = {
   "aten.alias": lambda self: self,
   }
 
-# torch 2.10 handles this natively
-if tuple(map(int, torch.__version__.split('.')[:2])) < (2, 10): view_ops.update({"aten.detach": Tensor.detach})
-
-for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(v))
+for k,v in view_ops.items(): torch.library.impl(k.replace("aten.", "aten::"), "privateuseone")(wrap_view_op(v, aten_name=k))
 
 def _get_view_ops(view): return getattr(view, "_view_ops", [])
 
@@ -219,10 +238,24 @@ def _as_strided(tensor:Tensor, size, stride, storage_offset=0):
 @torch.library.impl("aten::as_strided", "privateuseone")
 def as_strided(tensor:torch.Tensor, size, stride, storage_offset=None):
   storage_offset = storage_offset or tensor.storage_offset()
+  if torch._C._meta_in_tls_dispatch_include():
+    with torch._C._PreserveDispatchKeyGuard():
+      torch._C._dispatch_tls_set_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView, True)
+      torch._C._dispatch_tls_set_dispatch_key_excluded(torch._C.DispatchKey.AutocastPrivateUse1, True)
+      torch._C._dispatch_tls_set_dispatch_key_excluded(torch._C.DispatchKey.AutogradPrivateUse1, True)
+      torch._C._dispatch_tls_set_dispatch_key_excluded(torch._C.DispatchKey.PrivateUse1, True)
+      return aten.as_strided(tensor, size, stride, storage_offset)
   return _as_strided(tensor, size, stride, storage_offset)
 
 @torch.library.impl("aten::_reshape_alias", "privateuseone")
 def _reshape_alias(tensor:torch.Tensor, size, stride):
+  if torch._C._meta_in_tls_dispatch_include():
+    with torch._C._PreserveDispatchKeyGuard():
+      torch._C._dispatch_tls_set_dispatch_key_excluded(torch._C.DispatchKey.ADInplaceOrView, True)
+      torch._C._dispatch_tls_set_dispatch_key_excluded(torch._C.DispatchKey.AutocastPrivateUse1, True)
+      torch._C._dispatch_tls_set_dispatch_key_excluded(torch._C.DispatchKey.AutogradPrivateUse1, True)
+      torch._C._dispatch_tls_set_dispatch_key_excluded(torch._C.DispatchKey.PrivateUse1, True)
+      return aten._reshape_alias(tensor, size, stride)
   return _as_strided(tensor, size, stride)
 
 @torch.library.impl("aten::empty_strided", "privateuseone")
@@ -291,9 +324,28 @@ def convolution_backward_overrideable(grad_out, input, weight, stride, padding, 
 @torch.library.impl("aten::slice.Tensor", "privateuseone")
 @wrap_view_op
 def slice_tensor(self, dim=0, start=None, end=None, step=1):
+  if torch._C._meta_in_tls_dispatch_include(): return _slice_tensor_meta(self, dim, start, end, step)
   slices = [slice(None)] * self.ndim
   slices[dim] = slice(start, end, step)
   return self[slices]
+
+def _slice_tensor_meta(self, dim=0, start=None, end=None, step=1):
+  dim = dim % self.ndim
+  dim_sz = self.size(dim)
+  start = 0 if start is None else start
+  end = dim_sz if end is None else end
+  if start < 0: start += dim_sz
+  if end < 0: end += dim_sz
+  if step <= 0: raise NotImplementedError(f"slice with {step=} not implemented")
+  start = torch.sym_max(0, torch.sym_min(start, dim_sz))
+  end = torch.sym_max(0, torch.sym_min(end, dim_sz))
+  new_sz = torch.sym_max(0, (end - start + (step - 1)) // step)
+  sizes, strides = list(self.size()), list(self.stride())
+  storage_offset = self.storage_offset() + start * strides[dim]
+  sizes[dim], strides[dim] = new_sz, strides[dim] * step
+  return aten.as_strided(self, sizes, strides, storage_offset)
+
+torch.library.impl("aten::slice.Tensor", "Meta")(_slice_tensor_meta)
 
 @torch.library.impl("aten::slice_backward", "privateuseone")
 def slice_backward(grad_out, input_sizes, dim, start, end, step):
@@ -697,8 +749,7 @@ if TORCH_DEBUG:
 
 # this implementation is needed to allow the batchnorm kernels to fuse in e.g. mnist training
 # aten::native_batch_norm does more than Tensor.batchnorm
-@torch.library.impl("aten::native_batch_norm", "privateuseone")
-def native_batch_norm(input, weight, bias, running_mean, running_var, training, momentum, eps):
+def _native_batch_norm_impl(input, weight, bias, running_mean, running_var, training, momentum, eps):
   input_t, weight_t, bias_t = unwrap(input), unwrap(weight) if weight is not None else None, unwrap(bias) if bias is not None else None
   running_mean_t, running_var_t = unwrap(running_mean) if running_mean is not None else None, unwrap(running_var) if running_var is not None else None
   if training:
@@ -713,6 +764,13 @@ def native_batch_norm(input, weight, bias, running_mean, running_var, training, 
   else:
     out = input_t.batchnorm(weight_t, bias_t, running_mean_t, running_var_t.add(eps).rsqrt())
     return wrap(out), wrap(running_mean_t), wrap(running_var_t.add(eps).rsqrt())
+
+def _native_batch_norm_legit_no_stats_impl(input, weight, bias, training, momentum, eps):
+  return _native_batch_norm_impl(input, weight, bias, None, None, True, momentum, eps)
+
+torch.library.impl("aten::native_batch_norm", "privateuseone")(_native_batch_norm_impl)
+torch.library.impl("aten::_native_batch_norm_legit", "privateuseone")(_native_batch_norm_impl)
+torch.library.impl("aten::_native_batch_norm_legit.no_stats", "privateuseone")(_native_batch_norm_legit_no_stats_impl)
 
 @torch.library.impl("aten::native_batch_norm_backward", "privateuseone")
 def native_batch_norm_backward(grad_out, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps, output_mask):
@@ -758,9 +816,22 @@ def _pad_circular_autograd(self, padding): return _PadCircular.apply(self, paddi
 @torch.library.impl("aten::diagonal", "privateuseone")
 @wrap_view_op
 def diagonal(self, offset=0, dim1=0, dim2=1):
+  if torch._C._meta_in_tls_dispatch_include(): return _diagonal_meta(self, offset, dim1, dim2)
   if offset != 0: raise NotImplementedError(f"diagonal with {offset=} not implemented")
   dim1, dim2 = dim1 % self.ndim, dim2 % self.ndim
   if dim1 != self.ndim - 2 or dim2 != self.ndim - 1: raise NotImplementedError(f"diagonal with {dim1=}, {dim2=} not implemented, only last two dims supported")
   batch_shape, m, n = self.shape[:-2], self.shape[-2], self.shape[-1]
   diag_len = min(m, n)
   return self.reshape(*batch_shape, m*n).pad(tuple((0,0) for _ in batch_shape) + ((0, diag_len),)).reshape(*batch_shape, diag_len, n+1)[..., :, 0]
+
+def _diagonal_meta(self, offset=0, dim1=0, dim2=1):
+  if offset != 0: raise NotImplementedError(f"diagonal with {offset=} not implemented")
+  dim1, dim2 = dim1 % self.ndim, dim2 % self.ndim
+  if dim1 != self.ndim - 2 or dim2 != self.ndim - 1:
+    raise NotImplementedError(f"diagonal with {dim1=}, {dim2=} not implemented, only last two dims supported")
+  batch_shape, batch_stride = list(self.shape[:-2]), list(self.stride()[:-2])
+  diag_len = torch.sym_min(self.size(-2), self.size(-1))
+  return aten.as_strided(self, batch_shape + [diag_len], batch_stride + [self.stride(-2) + self.stride(-1)],
+                         self.storage_offset())
+
+torch.library.impl("aten::diagonal", "Meta")(_diagonal_meta)

@@ -914,5 +914,32 @@ class TestBackendHelpers(unittest.TestCase):
     assert ret is x
     np.testing.assert_equal(x.cpu().numpy(), [2.0, 4.0, 6.0, 8.0])
 
+  def test_torch_compile_tinyjit_batchnorm(self):
+    from torch._dynamo.backends.registry import register_backend
+    from torch._functorch.aot_autograd import aot_module_simplified
+    from torch.utils._pytree import tree_flatten
+
+    from tinygrad import Tensor, TinyJit
+    from extra.torch_backend.backend import unwrap, wrap
+
+    @register_backend
+    def tinyjit_test(gm:torch.fx.GraphModule, sample_inputs):
+      def my_compiler(gm:torch.fx.GraphModule, sample_inputs):
+        @TinyJit
+        def tiny_function(*args:Tensor):
+          outs = gm(*[wrap(x) for x in args])
+          for x in tree_flatten(outs)[0]:
+            if isinstance(x, torch.Tensor): unwrap(x).realize()
+          return outs
+        def torch_function(*args:torch.Tensor): return tiny_function(*[unwrap(x.tiny()) for x in args])
+        return torch_function
+      return aot_module_simplified(gm, sample_inputs, decompositions={}, fw_compiler=my_compiler)
+
+    bn = torch.nn.BatchNorm2d(4).to(device)
+    x = torch.randn(2, 4, 8, 8, device=device, requires_grad=True)
+    compiled_f = torch.compile(lambda x: bn(x).sum(), backend="tinyjit_test")
+    compiled_f(x).backward()
+    assert x.grad is not None
+
 if __name__ == "__main__":
   unittest.main()

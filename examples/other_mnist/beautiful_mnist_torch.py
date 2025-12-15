@@ -1,8 +1,31 @@
+import sys, pathlib
+sys.path.append(str(pathlib.Path(__file__).parent.parent.parent))
+
 from tinygrad import dtypes, getenv, Device
 from tinygrad.helpers import trange, colored, DEBUG, temp
 from tinygrad.nn.datasets import mnist
 import torch
 from torch import nn, optim
+if getenv("TINY_BACKEND"):
+  # Register torch.compile "tiny" backend
+  from torch._dynamo.backends.registry import register_backend
+  from torch._functorch.aot_autograd import aot_module_simplified
+  from torch.utils._pytree import tree_flatten
+  from tinygrad import Tensor, TinyJit
+  from extra.torch_backend.backend import unwrap, wrap
+
+  @register_backend
+  def tiny(gm:torch.fx.GraphModule, sample_inputs):
+    def my_compiler(gm:torch.fx.GraphModule, sample_inputs):
+      @TinyJit
+      def tiny_function(*args:Tensor):
+        outs = gm(*[wrap(x) for x in args])
+        for x in tree_flatten(outs)[0]:
+          if isinstance(x, torch.Tensor): unwrap(x).realize()
+        return outs
+      def torch_function(*args:torch.Tensor): return tiny_function(*[unwrap(x.tiny()) for x in args])
+      return torch_function
+    return aot_module_simplified(gm, sample_inputs, decompositions={}, fw_compiler=my_compiler)
 
 class Model(nn.Module):
   def __init__(self):
@@ -43,7 +66,6 @@ if __name__ == "__main__":
   optimizer = optim.Adam(model.parameters(), 1e-3)
 
   loss_fn = nn.CrossEntropyLoss()
-  #@torch.compile
   def step(samples):
     X,Y = X_train[samples], Y_train[samples]
     out = model(X)
@@ -52,6 +74,7 @@ if __name__ == "__main__":
     loss.backward()
     optimizer.step()
     return loss
+  if getenv("TINY_BACKEND"): step = torch.compile(step, backend="tiny")
 
   test_acc = float('nan')
   for i in (t:=trange(getenv("STEPS", 70))):

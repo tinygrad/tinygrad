@@ -97,6 +97,47 @@ struct TinyOpaqueTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
       : OpaqueTensorImpl<OpaqueHandle>(key_set, data_type, device, opaque_handle, sizes) {
     this->sizes_and_strides_.set_strides(strides);
     this->storage_offset_ = storage_offset;
+    this->storage_ = c10::Storage::create_legacy(at::Device(at::kCPU));
+    int64_t max_offset = storage_offset;
+    for (size_t i = 0; i < sizes.size(); i++) {
+      if (sizes[i] == 0) { max_offset = -1; break; }
+      if (strides[i] > 0) max_offset += (sizes[i] - 1) * strides[i];
+    }
+    if (max_offset >= 0) this->storage_.set_nbytes(size_t(max_offset + 1) * data_type.itemsize());
+  }
+
+  const c10::Storage& storage() const override { return this->storage_; }
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
+      const c10::VariableVersion& version_counter,
+      bool allow_tensor_metadata_change) const override {
+    auto impl = c10::make_intrusive<TinyOpaqueTensorImpl<OpaqueHandle>>(
+        this->key_set(),
+        this->dtype(),
+        this->device(),
+        this->opaque_handle(),
+        this->sizes_and_strides_.sizes_arrayref(),
+        this->sizes_and_strides_.strides_arrayref(),
+        this->storage_offset_);
+    OpaqueTensorImpl<OpaqueHandle>::copy_tensor_metadata(
+        this, impl.get(), version_counter, allow_tensor_metadata_change);
+    impl->refresh_numel();
+    return impl;
+  }
+  c10::intrusive_ptr<TensorImpl> shallow_copy_and_detach(
+      c10::VariableVersion&& version_counter,
+      bool allow_tensor_metadata_change) const override {
+    auto impl = c10::make_intrusive<TinyOpaqueTensorImpl<OpaqueHandle>>(
+        this->key_set(),
+        this->dtype(),
+        this->device(),
+        this->opaque_handle(),
+        this->sizes_and_strides_.sizes_arrayref(),
+        this->sizes_and_strides_.strides_arrayref(),
+        this->storage_offset_);
+    OpaqueTensorImpl<OpaqueHandle>::copy_tensor_metadata(
+        this, impl.get(), std::move(version_counter), allow_tensor_metadata_change);
+    impl->refresh_numel();
+    return impl;
   }
 };
 }
@@ -126,7 +167,8 @@ at::Tensor wrap_tensor(py::object &py_obj, c10::ScalarType dtype, c10::DeviceInd
 
 py::object unwrap_tensor(const at::Tensor &tensor) {
   auto* impl = tensor.unsafeGetTensorImpl();
-  auto* opaque_impl = static_cast<at::TinyOpaqueTensorImpl<std::shared_ptr<c10::SafePyObject>>*>(impl);
+  auto* opaque_impl = dynamic_cast<at::TinyOpaqueTensorImpl<std::shared_ptr<c10::SafePyObject>>*>(impl);
+  TORCH_CHECK(opaque_impl != nullptr, "unwrap expected TinyOpaqueTensorImpl");
   std::shared_ptr<c10::SafePyObject> tiny = opaque_impl->opaque_handle();
   return py::reinterpret_borrow<py::object>(tiny->ptr(getPyInterpreter()));
 }
