@@ -390,17 +390,17 @@ def png_load(t:Tensor) -> Tensor:
   assert f.read(8) == b'\x89PNG\r\n\x1a\n', "not a PNG"
   idats = []
   while (slen:=f.read(4)):
-    ilen, typ = struct.unpack(">I", slen)[0], f.read(4)
-    dat = f.read(ilen)
-    if DEBUG >= 3: print(ilen, typ)
+    typ, dat = f.read(4), f.read(struct.unpack(">I", slen)[0])
+    if DEBUG >= 3: print(len(dat), typ)
     if typ == b'IHDR':
-      width, height, depth, color_type, compression, filter_method, interlace = struct.unpack(">IIBBBBB", dat)
-      assert compression == 0 and filter_method == 0 and interlace == 0, "weird PNG"
-      assert depth == 8 and color_type in [2, 6], f"only RGB/RGBA PNG is supported {depth=} {color_type=}"
-      real_depth = 3 if color_type == 2 else 4
-    if typ == b'IDAT':
-      idats.append(dat)
+      width, height, depth, color_type = struct.unpack(">IIBB", dat[:10])
+      assert depth == 8 and color_type in [2, 6], f"only 8-bit RGB/RGBA PNG supported {depth=} {color_type=}"
+      bpp = 3 if color_type == 2 else 4
+    if typ == b'IDAT': idats.append(dat)
     f.seek(4, 1)
-  decompressed = Tensor(zlib.decompress(b''.join(idats)))
-  # the first pixel in each scanline is a filter pixel
-  return decompressed.reshape(height, width*real_depth+1)[:, 1:].reshape(height, width, real_depth)[:, :, :3]
+  data = Tensor(zlib.decompress(b''.join(idats))).reshape(height, width * bpp + 1)
+  filters, pixels = data[:, 0], data[:, 1:].reshape(height, width, bpp)
+  assert set(filters.tolist()) <= {0, 1}, f"only PNG filters 0/1 supported, got {set(filters.tolist())}"
+  # Sub filter (type 1): each pixel adds the pixel to its left, which is cumsum along width
+  pixels = (filters == 1).reshape(height, 1, 1).where(pixels.cast(dtypes.int16).cumsum(axis=1).bitwise_and(0xff).cast(dtypes.uint8), pixels)
+  return pixels[:, :, :3]
