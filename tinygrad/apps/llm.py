@@ -59,13 +59,9 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
   return Tensor.stack(freqs.cos(), freqs.sin(), dim=-1).contiguous()
 
 def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
-  B, H, T, Hd = x.shape
-  assert isinstance(Hd, int) and (Hd & 1) == 0, "RoPE requires an even head dimension"
-  x_pairs     = x.reshape(B, H, T, Hd//2, 2)
-  cos = freqs_cis.reshape(1, 1, T, Hd//2, 2)[..., 0]
-  sin = freqs_cis.reshape(1, 1, T, Hd//2, 2)[..., 1]
-  return Tensor.stack(x_pairs[..., 0] * cos - x_pairs[..., 1] * sin,
-                      x_pairs[..., 0] * sin + x_pairs[..., 1] * cos, dim=-1).reshape(B, H, T, Hd)
+  cos, sin = freqs_cis[..., 0], freqs_cis[..., 1]
+  x1, x2 = x.chunk(2, dim=-1)
+  return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
 
 class TransformerBlock:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, max_context:int=0):
@@ -100,7 +96,7 @@ class TransformerBlock:
     v = v.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
 
     # TODO: make UOp have SupportsIndex
-    freqs_cis = precompute_freqs_cis(self.head_dim, self.max_context)[start_pos:start_pos+T]  # type: ignore
+    freqs_cis = precompute_freqs_cis(self.head_dim, self.max_context)[start_pos:start_pos+T].reshape(1, 1, T, -1, 2)  # type: ignore
     q = apply_rope(q, freqs_cis)
     k = apply_rope(k, freqs_cis)
 
@@ -159,8 +155,17 @@ class Transformer:
 
     arch = kv['general.architecture']
     max_context = min(max_context, kv[f'{arch}.context_length']) if max_context is not None else kv[f'{arch}.context_length']
+    n_heads, n_kv_heads = kv[f'{arch}.attention.head_count'], kv[f'{arch}.attention.head_count_kv']
+    dim, head_dim = kv[f'{arch}.embedding_length'], kv[f'{arch}.embedding_length'] // n_heads
+
+    # permute Q/K weights from interleaved to half-split RoPE layout: [0,1,2,3,4,5...] -> [0,2,4,...,1,3,5,...]
+    perm = list(range(0, head_dim, 2)) + list(range(1, head_dim, 2))
+    for k in state_dict:
+      if 'attn_q.weight' in k: state_dict[k] = state_dict[k].reshape(n_heads, head_dim, dim)[:, perm].reshape(dim, dim)
+      if 'attn_k.weight' in k: state_dict[k] = state_dict[k].reshape(n_kv_heads, head_dim, dim)[:, perm].reshape(n_kv_heads * head_dim, dim)
+
     model = Transformer(num_blocks=kv[f'{arch}.block_count'], dim=kv[f'{arch}.embedding_length'], hidden_dim=kv[f'{arch}.feed_forward_length'],
-                        n_heads=kv[f'{arch}.attention.head_count'], n_kv_heads=kv[f'{arch}.attention.head_count_kv'],
+                        n_heads=n_heads, n_kv_heads=n_kv_heads,
                         norm_eps=kv[f'{arch}.attention.layer_norm_rms_epsilon'], vocab_size=len(kv['tokenizer.ggml.tokens']), max_context=max_context)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
