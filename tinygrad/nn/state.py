@@ -400,7 +400,7 @@ def png_load(t:Tensor) -> Tensor:
     f.seek(4, 1)
   data = Tensor(zlib.decompress(b''.join(idats))).reshape(height, width * bpp + 1)
   filters, pixels = data[:, 0], data[:, 1:].reshape(height, width, bpp)
-  assert set(filters.tolist()) <= {0, 1}, f"only PNG filters 0/1 supported, got {set(filters.tolist())}"
+  assert filters.max().item() <= 1, f"only PNG filters 0/1 supported, got {set(filters.tolist())}"  # type: ignore[arg-type]
   # Sub filter (type 1): each pixel adds the pixel to its left, which is cumsum along width
   pixels = (filters == 1).reshape(height, 1, 1).where(pixels.cast(dtypes.int16).cumsum(axis=1).bitwise_and(0xff).cast(dtypes.uint8), pixels)
   return pixels[:, :, :3]
