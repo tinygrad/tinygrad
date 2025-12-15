@@ -298,6 +298,7 @@ class AMDev(PCIDevImplBase):
   def _build_regs(self):
     mods = [("mp", am.MP0_HWIP), ("hdp", am.HDP_HWIP), ("gc", am.GC_HWIP), ("mmhub", am.MMHUB_HWIP), ("osssys", am.OSSSYS_HWIP),
       ("nbio" if self.ip_ver[am.GC_HWIP] < (12,0,0) else "nbif", am.NBIO_HWIP)]
+    if self.ip_ver[am.SDMA0_HWIP] == (4,4,2): mods += [("sdma", am.SDMA0_HWIP)]
 
     for prefix, hwip in mods:
       self.__dict__.update(import_asic_regs(prefix, self.ip_ver[hwip], cls=functools.partial(AMRegister, adev=self, bases=self.regs_offset[hwip])))

@@ -18,6 +18,7 @@ class AM_SOC(AM_IP):
     if self.adev.ip_ver[am.NBIO_HWIP] == (7,9,0):
       self.adev.regXCC_DOORBELL_FENCE.write(0x0)
       self.adev.regBIFC_GFX_INT_MONITOR_MASK.write(0x7ff)
+      self.adev.regBIFC_DOORBELL_ACCESS_EN_PF.write(0xfffff)
     else: self.adev.regRCC_DEV0_EPF2_STRAP2.update(strap_no_soft_reset_dev0_f2=0x0)
     self.adev.regRCC_DEV0_EPF0_RCC_DOORBELL_APER_EN.write(0x1)
   def set_clockgating_state(self):
@@ -273,7 +274,7 @@ class AM_GFX(AM_IP):
     for xcc in range(self.xccs if aql else 1):
       mqd = self.adev.mm.valloc(0x1000, uncached=True, contiguous=True)
 
-      struct_t = getattr(am, f"struct_v{self.adev.ip_ver[am.GC_HWIP][0]}_compute_mqd")
+      struct_t = getattr(am, f"struct_v{self.adev.ip_ver[am.GC_HWIP][0]}{'_compute' if self.adev.ip_ver[am.GC_HWIP][0] >= 10 else ''}_mqd")
       mqd_struct = struct_t(header=0xC0310800, cp_mqd_base_addr_lo=lo32(mqd.va_addr), cp_mqd_base_addr_hi=hi32(mqd.va_addr),
         cp_hqd_persistent_state=self.adev.regCP_HQD_PERSISTENT_STATE.encode(preload_size=0x55, preload_req=1),
         cp_hqd_pipe_priority=0x2, cp_hqd_queue_priority=0xf, cp_hqd_quantum=0x111,

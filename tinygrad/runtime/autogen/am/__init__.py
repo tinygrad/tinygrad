@@ -6,9 +6,9 @@ inc = ["-include", "stdint.h"]
 
 def __getattr__(nm):
   match nm:
-    case "am": return load("am/am", [], [root/f"extra/amdpci/headers/{s}.h" for s in ["v9_structs", "v11_structs", "v12_structs", "amdgpu_vm",
-      "discovery", "amdgpu_ucode", "psp_gfx_if", "amdgpu_psp", "amdgpu_irq", "amdgpu_doorbell"]]+[f"{AMD}/include/soc15_ih_clientid.h"],
-      args=inc, tarball=am_src)
+    case "am": return load("am/am", [], [root/f"extra/amdpci/headers/{s}.h" for s in ["v11_structs", "v12_structs", "amdgpu_vm",
+      "discovery", "amdgpu_ucode", "psp_gfx_if", "amdgpu_psp", "amdgpu_irq", "amdgpu_doorbell"]] + \
+      [f"{AMD}/include/{s}.h" for s in ["v9_structs", "soc15_ih_clientid"]], args=inc, tarball=am_src)
     case "pm4_soc15": return load("am/pm4_soc15", [], [f"{AMD}/amdkfd/kfd_pm4_headers_ai.h", f"{AMD}/amdgpu/soc15d.h"], tarball=am_src)
     case "pm4_nv": return load("am/pm4_nv", [], [f"{AMD}/amdkfd/kfd_pm4_headers_ai.h", f"{AMD}/amdgpu/nvd.h"], tarball=am_src)
     case "sdma_4_0_0": return load("am/sdma_4_0_0", [], [root/"extra/hip_gpu_driver/sdma_registers.h", f"{AMD}/amdgpu/vega10_sdma_pkt_open.h"],
