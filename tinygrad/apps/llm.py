@@ -61,13 +61,12 @@ class SimpleTokenizer:
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
   freqs = 1.0 / (theta ** (Tensor.arange(0, dim, 2)[:(dim // 2)] / dim))
   freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
-  return Tensor.stack(freqs.cos(), freqs.sin(), dim=-1).contiguous()
+  return freqs.cos().cat(freqs.sin(), dim=-1).contiguous()
 
 def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
-  B, H, T, Hd = x.shape
-  assert isinstance(Hd, int) and (Hd & 1) == 0, "RoPE requires an even head dimension"
-  cos, sin = freqs_cis.reshape(1, 1, T, Hd//2, 2)[..., 0], freqs_cis.reshape(1, 1, T, Hd//2, 2)[..., 1]
-  x1, x2 = x[..., :Hd//2], x[..., Hd//2:]
+  assert x.shape[-1] % 2 == 0
+  cos, sin = freqs_cis.reshape(1, 1, x.shape[2], -1).chunk(2, dim=-1)
+  x1, x2 = x.chunk(2, dim=-1)
   return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
 
 class TransformerBlock:
@@ -170,22 +169,19 @@ class Transformer:
 
     arch = kv['general.architecture']
     max_context = min(max_context, kv[f'{arch}.context_length']) if max_context is not None else kv[f'{arch}.context_length']
+    n_heads, n_kv_heads = kv[f'{arch}.attention.head_count'], kv[f'{arch}.attention.head_count_kv']
     head_dim, rope_theta = kv.get(f'{arch}.attention.key_length'), kv.get(f'{arch}.rope.freq_base', 10000.0)
     qk_norm = 'blk.0.attn_q_norm.weight' in state_dict
 
-    # permute Q/K weights from interleaved to half-split RoPE layout for non-qwen3 models
+    # permute Q/K weights from interleaved to half-split RoPE layout: [0,1,2,3,4,5...] -> [0,2,4,...,1,3,5,...]
     if arch != 'qwen3':
-      n_heads, n_kv_heads = kv[f'{arch}.attention.head_count'], kv[f'{arch}.attention.head_count_kv']
-      hd = head_dim or kv[f'{arch}.embedding_length'] // n_heads
-      perm = list(range(0, hd, 2)) + list(range(1, hd, 2))  # [0,2,4,...,1,3,5,...] interleaved->half-split
-      for k in state_dict:
-        if 'attn_q.weight' in k: state_dict[k] = state_dict[k].reshape(n_heads, hd, -1)[:, perm, :].reshape(-1, state_dict[k].shape[-1])
-        if 'attn_k.weight' in k: state_dict[k] = state_dict[k].reshape(n_kv_heads, hd, -1)[:, perm, :].reshape(-1, state_dict[k].shape[-1])
+      for name in state_dict:
+        if 'attn_q.weight' in name: state_dict[name] = state_dict[name].rearrange("(n h two) d -> (n two h) d", n=n_heads, two=2)
+        if 'attn_k.weight' in name: state_dict[name] = state_dict[name].rearrange("(n h two) d -> (n two h) d", n=n_kv_heads, two=2)
 
     model = Transformer(num_blocks=kv[f'{arch}.block_count'], dim=kv[f'{arch}.embedding_length'], hidden_dim=kv[f'{arch}.feed_forward_length'],
-                        n_heads=kv[f'{arch}.attention.head_count'], n_kv_heads=kv[f'{arch}.attention.head_count_kv'],
-                        norm_eps=kv[f'{arch}.attention.layer_norm_rms_epsilon'], vocab_size=len(kv['tokenizer.ggml.tokens']), max_context=max_context,
-                        head_dim=head_dim, rope_theta=rope_theta, qk_norm=qk_norm)
+                        n_heads=n_heads, n_kv_heads=n_kv_heads, norm_eps=kv[f'{arch}.attention.layer_norm_rms_epsilon'], head_dim=head_dim,
+                        vocab_size=len(kv['tokenizer.ggml.tokens']), max_context=max_context, rope_theta=rope_theta, qk_norm=qk_norm)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
     for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())
