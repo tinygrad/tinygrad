@@ -1,5 +1,6 @@
-import ctypes, functools, os, pathlib, re, struct, sys, sysconfig
-from tinygrad.helpers import ceildiv, getenv, to_mv, DEBUG, OSX, WIN
+import ctypes, functools, os, pathlib, re, sys, sysconfig
+from _ctypes import _SimpleCData
+from tinygrad.helpers import ceildiv, getenv, mv_address, to_mv, DEBUG, OSX, WIN
 
 def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
   assert not WIN, "ioctl not supported"
@@ -34,6 +35,94 @@ def CEnum(typ: type[ctypes._SimpleCData]):
     def __hash__(self): return hash(self.value)
 
   return _CEnum
+
+class _CBuffer:
+  __slots__, SIZE = ('_mem_',), 0
+
+  def __init__(self, src=None):
+    if src is None: self._mem_ = memoryview(bytearray(self.SIZE))
+    else: self._mem_ = src if isinstance(src, memoryview) else (to_mv(src, self.SIZE) if isinstance(src, int) else memoryview(src).cast('B'))
+
+  def __buffer__(self, flags): return self._mem_
+
+  @classmethod
+  @functools.cache # this should be a "cached_classproperty"
+  def _shadow(self): return type(f'{self.__class__.__name__}_shadow', (ctypes.Structure,), {'_fields_': [('a', ctypes.c_char * self.SIZE)]})
+
+  @classmethod
+  def from_param(cls, obj):
+    if obj is None: return None
+    assert isinstance(obj, cls)
+    # TODO: remove this
+    return cls._shadow().from_buffer(obj._mem_)
+
+class Union(_CBuffer): pass
+class Struct(_CBuffer):
+  __slots__ = ('_fields_',)
+  def __init__(self, *args, **kwargs):
+    super().__init__()
+    for f,v in [*zip(self._fields_, args), *kwargs.items()]: setattr(self, f, v)
+
+  @classmethod
+  def from_buf(cls, src):
+    super(Struct, ret:=cls()).__init__(src)
+    return ret
+
+@functools.cache
+def Array(typ, cnt):
+  if (prim:=issubclass(typ, _SimpleCData)): stride = ctypes.sizeof(typ)
+  else: stride = typ.SIZE
+
+  def chkidx(idx):
+    if idx >= cnt or idx <= -cnt: raise IndexError(f"{idx} out of range")
+    return cnt + idx if idx < 0 else idx
+
+  class _Array(_CBuffer):
+    SIZE = stride * cnt
+
+    def __init__(self, src=None):
+      if isinstance(src, (list, tuple)):
+        super().__init__()
+        self[:] = src
+      else: super().__init__(src)
+
+    def __len__(self): return cnt
+
+    def __getitem__(self, idx):
+      offset = chkidx(idx) * stride
+      return typ.from_buffer(self._mem_[offset:offset+stride]).value if prim else typ(src=self._mem_[offset:offset+stride])
+
+    def __setitem__(self, idx, v):
+      if isinstance(idx, slice):
+        for i, v in zip(range(*idx.indices(cnt)), v): self[i] = v
+        return
+      offset = chkidx(idx) * stride
+      if prim: v = typ(v)
+      self._mem_[offset:offset+stride] = bytes(v)
+
+    def __iter__(self):
+      for i in range(cnt): yield self[i]
+
+    @classmethod
+    def from_param(cls, obj):
+      if obj is None: return None
+      assert isinstance(obj, cls)
+      return ctypes.c_void_p(mv_address(obj._mem_))
+
+  _Array.__name__ = f"Array_{typ if prim else typ.__name__}_Array_{cnt}"
+  return _Array
+
+def field(off:int, typ:type[_CBuffer, _SimpleCData], bit_width=None, bit_off=0):
+  if bit_width is not None:
+    sl, set_mask = slice(off,off+(sz:=ceildiv(bit_width, 8))), ~((mask:=(1 << bit_width) - 1) << bit_off)
+    # FIXME: signedness
+    return property(lambda self: (int.from_bytes(self._mem_[sl], sys.byteorder) >> bit_off) & mask,
+                    lambda self,v: self._mem_.__setitem__(sl, ((int.from_bytes(self._mem_[sl])&set_mask)|(v << bit_off)).to_bytes(sz, sys.byteorder)))
+
+  sl = slice(off, off + (typ.SIZE if issubclass(typ, _CBuffer) else ctypes.sizeof(typ)))
+  if issubclass(typ, _CBuffer): return property(lambda self: typ.from_buf(self._mem_[sl]),
+                                                lambda self, v: self._mem_.__setitem__(sl, bytes(v if isinstance(v, _CBuffer) else typ(v))))
+  return property(lambda self: typ.from_buffer(self._mem_[sl]).value, lambda self, v: self._mem_.__setitem__(sl, bytes(typ(v))))
 
 class DLL(ctypes.CDLL):
   @staticmethod
@@ -70,88 +159,20 @@ class DLL(ctypes.CDLL):
         if DEBUG >= 3: print(f"loading {nm} failed: {e}")
     elif DEBUG >= 3: print(f"loading {nm} failed: not found on system")
 
+  @functools.cache
+  def _get_func(self, name:str, args:tuple[_SimpleCData|_CBuffer], res:_SimpleCData|_CBuffer):
+    (fn:=getattr(self, name)).argtypes, fn.restype = args, (res if res is None or issubclass(res, _SimpleCData) else res._shadow())
+    return fn
+
+  def bind(self, argtypes:tuple[_SimpleCData|_CBuffer], restype:_SimpleCData|_CBuffer):
+    def wrap(fn):
+      if restype is None or issubclass(restype, _SimpleCData):
+        def wrapper(*args): return self._get_func(fn.__name__, argtypes, restype)(*args)
+      else:
+        def wrapper(*args): return restype.from_buf(self._get_func(fn.__name__, argtypes, restype)(*args))
+      return wrapper
+    return wrap
+
   def __getattr__(self, nm):
     if not self.loaded: raise AttributeError(f"failed to load library {self.nm}: " + (self.emsg or f"try setting {self.nm.upper()+'_PATH'}?"))
     return super().__getattr__(nm)
-
-class _CBuffer:
-  __slots__, SIZE = ('_mem_',), 0
-
-  def __init__(self, src=None):
-    if src is None: self._mem_ = memoryview(bytearray(self.SIZE))
-    else: self._mem_ = src if isinstance(src, memoryview) else (to_mv(src, self.SIZE) if isinstance(src, int) else memoryview(src))
-
-  @property
-  def _as_parameter_(self): return self._mem_
-
-  @classmethod
-  def from_param(cls, obj):
-    if obj is None: return None
-    assert isinstance(obj, cls)
-    # TODO: remove this
-    return type('_shadow', (ctypes.Structure,), {'_fields_': [('a', ctypes.c_char * cls.SIZE)]}).from_buffer(obj._mem_)
-
-class Union(_CBuffer): pass
-
-class Struct(_CBuffer):
-  __slots__ = ('_fields_',)
-  def __init__(self, *args, **kwargs):
-    super().__init__()
-    for f,v in [*zip(self._fields_, args), *kwargs.items()]: setattr(self, f, v)
-
-  @staticmethod
-  def from_buf(cls, src):
-    ret = super().__init__(src)
-    super(Struct, ret).__init__(src)
-    return ret
-
-@functools.cache
-def Array(typ, cnt):
-  if (prim:=isinstance(typ, str)): stride, s = struct.calcsize(typ), struct.Struct(typ)
-  else: stride = typ.SIZE
-
-  def chkidx(idx):
-    if idx >= cnt or idx <= -cnt: raise IndexError(f"{idx} out of range")
-    return cnt + idx if idx < 0 else idx
-
-  class _Array(_CBuffer):
-    SIZE = stride * cnt
-
-    def __init__(self, src=None):
-      if isinstance(src, (list, tuple)):
-        super().__init__()
-        self[:] = src
-      else: super().__init__(src)
-
-    def __len__(self): return cnt
-
-    def __getitem__(self, idx):
-      offset = chkidx(idx) * stride
-      return s.unpack_from(self._mem_, offset)[0] if prim else typ(src=self._mem_[offset:offset+stride])
-
-    def __setitem__(self, idx, v):
-      if isinstance(idx, slice):
-        # TODO: if prim and step == 1, we can struct.pack_into everything at once
-        for i, v in zip(range(*idx.indices(cnt)), v): self[i] = v
-      offset = chkidx(idx) * stride
-      if prim: s.pack_into(self._mem_, offset, v)
-      else: self._mem_[offset:offset+stride] = bytes(v)
-
-    def __iter__(self):
-      for i in range(cnt): yield self[i]
-
-  _Array.__name__ = f"Array_{typ if prim else typ.__name__}_Array_{cnt}"
-  return _Array
-
-def field(off, typ, bit_width=None, bit_off=0):
-  if bit_width is not None:
-    sl, set_mask = slice(off,off+(sz:=ceildiv(bit_width, 8))), ~((mask:=(1 << bit_width) - 1) << bit_off)
-    # FIXME: signedness
-    return property(lambda self: (int.from_bytes(self._mem_[sl], sys.byteorder) >> bit_off) & mask,
-                    lambda self,v: self._mem_.__setitem__(sl, ((int.from_bytes(self._mem_[sl])&set_mask)|(v << bit_off)).to_bytes(sz, sys.byteorder)))
-
-  if isinstance(typ, str):
-    s = struct.Struct(typ)
-    return property(lambda self: s.unpack_from(self._mem_, off)[0], lambda self, v: s.pack_into(self._mem_, off, v))
-
-  return property(lambda self: typ(self._mem_[off:off+typ.SIZE]), lambda self, v: self._mem_.__setitem__(slice(off,off+typ.SIZE), bytes(v)))
