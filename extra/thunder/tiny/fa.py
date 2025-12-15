@@ -144,46 +144,39 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       k_smem = ker.st((KV_BLOCK_SIZE, D), dtypes.bfloat16)
       v_smem = ker.st((KV_BLOCK_SIZE, D), dtypes.bfloat16)
 
-      dq_reg = ker.rt((D, Q_BLOCK_SIZE), dtypes.float32, TileLayout.COL)
-      dq_reg_transposed = ker.rt((Q_BLOCK_SIZE, D), dtypes.float32)
-      # dq_reg = ker.rt((Q_BLOCK_SIZE, D), dtypes.float32, TileLayout.COL)
-      # dq_reg_transposed = ker.rt((D, Q_BLOCK_SIZE), dtypes.float32)
-      q_reg_fl = ker.rt((Q_BLOCK_SIZE, D), dtypes.float32)
       q_reg = ker.rt((Q_BLOCK_SIZE, D), dtypes.bfloat16)
-      q_reg_transposed = ker.rt((D, Q_BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
+      q_reg_t = ker.rt((D, Q_BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
       k_reg = ker.rt((KV_BLOCK_SIZE, D), dtypes.bfloat16)
-      k_reg_transposed = ker.rt((D, KV_BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
-      v_reg = ker.rt((KV_BLOCK_SIZE, D), dtypes.bfloat16, TileLayout.COL)
-      v_reg_transposed = ker.rt((D, KV_BLOCK_SIZE), dtypes.bfloat16)
-      att_block = ker.rt((KV_BLOCK_SIZE, Q_BLOCK_SIZE), dtypes.float32, TileLayout.COL)
-      att_block_mma = ker.rt((KV_BLOCK_SIZE, Q_BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
-      att_block_transposed = ker.rt((Q_BLOCK_SIZE, KV_BLOCK_SIZE), dtypes.bfloat16)
+      k_reg_t = ker.rt((D, KV_BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
+      k_reg_col = ker.rt((KV_BLOCK_SIZE, D), dtypes.bfloat16, TileLayout.COL)
+      k_reg_col_t = ker.rt((D, KV_BLOCK_SIZE), dtypes.bfloat16)
+      v_reg = ker.rt((KV_BLOCK_SIZE, D), dtypes.bfloat16)
       mask_reg = ker.rt((Q_BLOCK_SIZE, KV_BLOCK_SIZE), dtypes.float32)
       mask_reg_transposed = ker.rt((KV_BLOCK_SIZE, Q_BLOCK_SIZE), dtypes.float32, TileLayout.COL)
 
+      dq_reg = ker.rt((D, Q_BLOCK_SIZE), dtypes.float32, TileLayout.COL)
+      dq_reg_transposed = ker.rt((Q_BLOCK_SIZE, D), dtypes.float32)
       do_reg = ker.rt((Q_BLOCK_SIZE, D), dtypes.bfloat16)
-      do_reg_transposed = ker.rt((D, Q_BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
 
       dp_block = ker.rt((KV_BLOCK_SIZE, Q_BLOCK_SIZE), dtypes.float32, TileLayout.COL)
+      att_block = ker.rt((KV_BLOCK_SIZE, Q_BLOCK_SIZE), dtypes.float32, TileLayout.COL)
+      att_block_mma = ker.rt((KV_BLOCK_SIZE, Q_BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
 
-      l_vec_reg = ker.rv(KV_BLOCK_SIZE, dtypes.float32)
-      delta_vec_reg = ker.rv(KV_BLOCK_SIZE, dtypes.float32)
+      l_vec_reg = ker.rv(Q_BLOCK_SIZE, dtypes.float32)
+      delta_vec_reg = ker.rv(Q_BLOCK_SIZE, dtypes.float32)
 
       dq_reg = warp.zero(dq_reg)
 
       # load q tile
-      q_reg_fl = warp.load(q_reg_fl, q, (), (batch, q_seq, head, 0), axis=1)
-      q_reg_fl *= (1.0 / math.sqrt(D)) * (1.0 / math.log(2))
-      q_reg = warp.copy(q_reg, q_reg_fl)
-      q_reg_transposed = warp.transpose(q_reg_transposed, q_reg)
+      q_reg = warp.load(q_reg, q, (), (batch, q_seq, head, 0), axis=1)
+      q_reg_t = warp.transpose(q_reg_t, q_reg)
 
       # load do tile
       do_reg = warp.load(do_reg, do, (), (batch, q_seq, head, 0), axis=1)
-      do_reg_transposed = warp.transpose(do_reg_transposed, do_reg)
 
       # load l_vec
       l_vec_reg = warp.load(l_vec_reg, l_vec, (), (batch, head, 0, q_seq), axis=2)
-      l_vec_reg /= math.log(2)
+      l_vec_reg *= 1.0 / math.log(2)
       delta_vec_reg = warp.load(delta_vec_reg, delta_vec, (), (batch, head, 0, q_seq), axis=2)
 
       for kv_idx in ker.range(N // KV_BLOCK_SIZE):
@@ -191,32 +184,34 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
         v_smem = warp.load(v_smem, v, (), (batch, kv_idx, head_kv, 0), axis=1)
 
         k_reg = warp.load(k_reg, k_smem)
+        k_reg_t = warp.transpose(k_reg_t, k_reg)
+        k_reg_col = warp.load(k_reg_col, k_smem)
+        k_reg_col_t = warp.transpose(k_reg_col_t, k_reg_col)
         v_reg = warp.load(v_reg, v_smem)
 
         # mma qk^t
         att_block = warp.zero(att_block.after(kv_idx))
-        k_reg_transposed = warp.transpose(k_reg_transposed, k_reg)
-        att_block = warp.mma_AtB(att_block, k_reg_transposed, q_reg_transposed)
+        att_block = warp.mma_AtB(att_block, k_reg_t, q_reg_t)
 
         # apply attention mask
         mask_reg = warp.load(mask_reg, mask, (), (batch, 0, q_seq, kv_idx), axis=2)
         mask_reg_transposed = warp.transpose(mask_reg_transposed, mask_reg)
         att_block += mask_reg_transposed
 
+        att_block *= (1.0 / math.sqrt(D)) * (1.0 / math.log(2))
         att_block -= l_vec_reg
         att_block = att_block.exp2()
 
         dp_block = warp.zero(dp_block.after(kv_idx, att_block))
-        v_reg_transposed = warp.transpose(v_reg_transposed, v_reg)
-        dp_block = warp.mma_AtB(dp_block, v_reg, do_reg_transposed)
+        dp_block = warp.mma_ABt(dp_block, v_reg, do_reg)
         dp_block -= delta_vec_reg
         att_block *= dp_block
 
         att_block_mma = warp.copy(att_block_mma.after(att_block), att_block)
-        dq_reg = warp.mma_AtB(dq_reg, k_reg, att_block_mma)
+        dq_reg = warp.mma_AB(dq_reg, k_reg_col_t, att_block_mma)
       dq_reg = ker.endrange()
 
-      dq_reg *= (1.0 / math.sqrt(D)) * (1.0 / math.log(2))
+      dq_reg *= 1.0 / math.sqrt(D)
       dq_reg_transposed = warp.transpose(dq_reg_transposed, dq_reg)
       dq = warp.store(dq, dq_reg_transposed, (batch, q_seq, head, 0), axis=1)
 
@@ -336,7 +331,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
     grad_v = Tensor.empty_like(v := Tensor(kernel.src[4]))
     mask = Tensor(kernel.src[5])
 
-    delta_vec = (grad * attn).sum(-1).permute(0, 2, 1).unsqueeze(-2).detach()
+    delta_vec = (grad * attn).sum(-1).transpose(1, 2).unsqueeze(-2).detach()
     print(l_vec.shape, delta_vec.shape, grad.shape, attn.shape)
 
     grad_q = Tensor.custom_kernel(grad_q, grad, q, k, v, mask, l_vec, delta_vec, fxn=custom_backward_q)[0]
@@ -346,4 +341,4 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
   attn, l_vec = Tensor.custom_kernel(attn, l_vec, xq, xk, xv, attn_mask, fxn=custom_forward, grad_fxn=grad)[:2]
   attn = attn[:, :N_, :, :D_]
 
-  return attn.transpose(1, 2).cast(odtype)
+  return attn.transpose(1, 2).cast(odtype), l_vec
