@@ -409,13 +409,13 @@ def get_render(i:int, j:int, fmt:str) -> dict:
     return ret
   if fmt == "prg-pmc": return unpack_pmc(data[0])
   if fmt == "prg-sqtt":
-    #ret = {"steps":[]}
+    cus:list[dict] = []
     for cu,events in unpack_sqtt(*data).items():
-      return {"value":get_profile(events, sort_fn=row_tuple), "content_type":"application/octet-stream"}
-      # TODO: this still needs ui work
-      #ret["steps"].append(create_step(f"{cu} {len(events)}", ("/pmc", i, len(ret["steps"])),
-      #                                {"value":get_profile(events, sort_fn=row_tuple), "content_type":"application/octet-stream"}, depth=1))
-    return ret
+      cus.append(s:=create_step(f"{cu} {len(events)}", ("/cu-sqtt", i, len(ctxs[i]["steps"])), {"src":"hi"}, depth=1))
+      ctxs[i]["steps"].append(s)
+    return {"steps":cus}
+  if fmt == "cu-sqtt":
+    return {"src":"hi!"}
   if fmt == "sqtt-insts":
     columns = ["PC", "Instruction", "Hits", "Cycles", "Stall", "Type"]
     inst_columns = ["N", "Clk", "Idle", "Dur", "Stall"]
