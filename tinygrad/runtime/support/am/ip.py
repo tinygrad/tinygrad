@@ -364,9 +364,10 @@ class AM_IH(AM_IP):
 
       self.adev.reg(f"regIH_DOORBELL_RPTR{suf}").write(offset=(am.AMDGPU_NAVI10_DOORBELL_IH + ring_id) * 2, enable=1)
 
-    self.adev.regIH_STORM_CLIENT_LIST_CNTL.update(client18_is_storm_client=1)
-    self.adev.regIH_INT_FLOOD_CNTL.update(flood_cntl_enable=1)
-    self.adev.regIH_MSI_STORM_CTRL.update(delay=3)
+    if self.adev.ip_ver[am.OSSSYS_HWIP] != (4,2,0):
+      self.adev.regIH_STORM_CLIENT_LIST_CNTL.update(client18_is_storm_client=1)
+      self.adev.regIH_INT_FLOOD_CNTL.update(flood_cntl_enable=1)
+      self.adev.regIH_MSI_STORM_CTRL.update(delay=3)
 
     # toggle interrupts
     for _, rwptr_vm, suf, ring_id in self.rings:
