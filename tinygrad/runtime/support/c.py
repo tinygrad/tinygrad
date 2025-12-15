@@ -61,15 +61,16 @@ class DLL(ctypes.CDLL):
               if f.read(4) == b'\x7FELF': return str(l)
 
   def __init__(self, nm:str, paths:str|list[str], extra_paths=[], emsg="", **kwargs):
-    self.nm, self.emsg = nm, emsg
+    self.nm, self.emsg, self.loaded = nm, emsg, False
     if (path:= DLL.findlib(nm, paths if isinstance(paths, list) else [paths], extra_paths if isinstance(extra_paths, list) else [extra_paths])):
       if DEBUG >= 3: print(f"loading {nm} from {path}")
-      super().__init__(path, **kwargs)
-      self.loaded = True
-    else: self.loaded = False
+      try:
+        super().__init__(path, **kwargs)
+        self.loaded = True
+      except OSError as e: self.emsg = e
 
   def __getattr__(self, nm):
-    if not self.loaded: raise AttributeError(f"failed to find library {self.nm}: " + (self.emsg or f"try setting {self.nm.upper()+'_PATH'}?"))
+    if not self.loaded: raise AttributeError(f"failed to load library {self.nm}: " + (self.emsg or f"try setting {self.nm.upper()+'_PATH'}?"))
     return super().__getattr__(nm)
 
 # supports gcc (C11) __attribute__((packed))
