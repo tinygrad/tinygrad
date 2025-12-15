@@ -195,13 +195,13 @@ models = {
 # *** simple OpenAI compatible server on 11434 to match ollama ***
 # OPENAI_BASE_URL=http://localhost:11434/v1 OPENAI_API_KEY=ollama uvx --from gpt-command-line gpt
 
-CHAT_HTML = b'''<!DOCTYPE html><html><head><style>
+CHAT_HTML = b'''<!DOCTYPE html><html><head><title>tinygrad chat</title><style>
   * { margin: 0 }
   body { background: #212121; color: #e3e3e3; font-family: system-ui;
          height: 100vh; display: flex; flex-direction: column }
   #chat { flex: 1; overflow-y: auto; padding: 20px }
-  .msg { padding: 10px 16px; margin: 8px 0; max-width: 70%; white-space: pre-wrap; border-radius: 18px }
-  .user { background: #2f2f2f; margin-left: auto }
+  .msg { padding: 10px 16px; margin: 8px 0; white-space: pre-wrap; border-radius: 18px }
+  .user { background: #2f2f2f; margin-left: auto; width: fit-content; max-width: 70% }
   #input { max-width: 768px; width: 100%; margin: 20px auto; padding: 14px 20px;
            background: #2f2f2f; color: inherit; font: inherit;
            border: none; outline: none; resize: none; border-radius: 24px; field-sizing: content }
