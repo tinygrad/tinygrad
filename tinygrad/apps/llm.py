@@ -4,7 +4,7 @@ from tinygrad import Tensor, nn, UOp, TinyJit, getenv
 from tinygrad.helpers import partition, TCPServerWithReuse, HTTPRequestHandler, DEBUG, Timing, GlobalCounters, stderr_log, colored
 
 class SimpleTokenizer:
-  def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int]):
+  def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3"):
     # https://github.com/openai/gpt-2/blob/9b63575ef42771a015060c964af2c3da4cf7c8ab/src/encoder.py#L9
     bs = [*range(33, 127), *range(161, 173), *range(174, 256)]  # bytes that map to themselves
     self._byte_decoder = {chr(b): b for b in bs} | {chr(256+i): b for i,b in enumerate(b for b in range(256) if b not in bs)}
@@ -20,16 +20,16 @@ class SimpleTokenizer:
     self._normal_tokens = {bytes(self._byte_decoder[c] for c in tok): tid for tok, tid in normal_tokens.items()}
     self._special_tokens = special_tokens
     self._tok2bytes = {tid: tok for tok, tid in self._normal_tokens.items()} | {tid: tok.encode() for tok, tid in self._special_tokens.items()}
+    self.preset = preset
 
   @staticmethod
   def from_gguf_kv(kv:dict):
     # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L1818-L1820
-    if kv["tokenizer.ggml.pre"] not in ("llama3","llama-v3","llama-bpe","qwen2"): raise ValueError(f"Invalid tokenizer preset '{kv['tokenizer.ggml.pre']}'")
+    preset = kv["tokenizer.ggml.pre"]
+    if preset not in ("llama3","llama-v3","llama-bpe","qwen2"): raise ValueError(f"Invalid tokenizer preset '{preset}'")
     vocab: typing.Iterable[tuple[str, int]] = ((tok, idx) for idx, tok in enumerate(kv["tokenizer.ggml.tokens"]))
     normal_tokens, special_tokens = partition(vocab, lambda e: kv["tokenizer.ggml.token_type"][e[1]] == 1)
-    ret = SimpleTokenizer(dict(normal_tokens), dict(special_tokens))
-    ret.preset = kv["tokenizer.ggml.pre"]
-    return ret
+    return SimpleTokenizer(dict(normal_tokens), dict(special_tokens), preset)
 
   def _encode_word(self, word:bytes) -> list[int]:
     if (early_token:=self._normal_tokens.get(word)) is not None: return [early_token]
@@ -53,11 +53,10 @@ class SimpleTokenizer:
 
   def decode(self, ids:list[int]) -> str: return b''.join(self._tok2bytes[tid] for tid in ids).decode()
   def role(self, role:str):
-    if getattr(self, 'preset', 'llama3') == 'qwen2': return self.encode("<|im_start|>" + role + "\n")
+    if self.preset == 'qwen2': return self.encode("<|im_start|>" + role + "\n")
     return self.encode("<|start_header_id|>" + role + "<|end_header_id|>\n\n")
   def end_turn(self, eos_id:int):
-    # Qwen uses <|im_end|>\n, Llama uses <|eot_id|>
-    if getattr(self, 'preset', 'llama3') == 'qwen2': return [eos_id] + self.encode("\n")
+    if self.preset == 'qwen2': return [eos_id] + self.encode("\n")  # Qwen uses <|im_end|>\n, Llama uses <|eot_id|>
     return [eos_id]
 
 @functools.cache
@@ -159,7 +158,8 @@ class TransformerBlock:
 class Transformer:
   def __init__(self, *, num_blocks, dim, hidden_dim, n_heads, n_kv_heads, norm_eps, vocab_size, max_context, head_dim:int|None=None,
                rope_theta:float=10000.0, qk_norm:bool=False, rope_interleaved:bool=True):
-    self.blk = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, max_context, head_dim, rope_theta, qk_norm, rope_interleaved) for _ in range(num_blocks)]
+    blk_args = (dim, hidden_dim, n_heads, n_kv_heads, norm_eps, max_context, head_dim, rope_theta, qk_norm, rope_interleaved)
+    self.blk = [TransformerBlock(*blk_args) for _ in range(num_blocks)]
     self.token_embd  = nn.Embedding(vocab_size, dim)
     self.output_norm = nn.RMSNorm(dim, norm_eps)
     self.output = nn.Linear(dim, vocab_size, bias=False)
@@ -223,6 +223,7 @@ models = {
   "llama3.2:3b-f16": "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-f16.gguf",
   "llama3.1:8b": "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf",
   "qwen3:0.6b": "https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf",
+  "qwen3:1.7b": "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf",
 }
 
 # *** simple OpenAI compatible server on 11434 to match ollama ***
@@ -252,7 +253,7 @@ class Handler(HTTPRequestHandler):
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
       # extract tokens
-      ids = [bos_id] if add_bos else []
+      ids: list[int] = [bos_id] if bos_id is not None and add_bos else []
       for msg in body["messages"]:
         ids += tok.role(msg["role"])
         # content can be a str or a list
@@ -300,14 +301,14 @@ if __name__ == "__main__":
 
   # extract some metadata
   tok = SimpleTokenizer.from_gguf_kv(kv)
-  bos_id: int = kv['tokenizer.ggml.bos_token_id']
+  bos_id: int|None = kv.get('tokenizer.ggml.bos_token_id')
   eos_id: int = kv['tokenizer.ggml.eos_token_id']
-  add_bos: bool = kv.get('tokenizer.ggml.add_bos_token', True)
+  add_bos: bool = kv.get('tokenizer.ggml.add_bos_token', True) and bos_id is not None
 
   # start server
   if args.serve: TCPServerWithReuse(('', 11434), Handler).serve_forever()
 
-  ids: list[int] = [bos_id] if add_bos else []
+  ids: list[int] = [bos_id] if bos_id is not None and add_bos else []
   while 1:
     start_pos = max(len(ids) - 1, 0)
     try:
