@@ -411,11 +411,10 @@ def get_render(i:int, j:int, fmt:str) -> dict:
   if fmt == "prg-sqtt":
     cus:list[dict] = []
     for cu,events in unpack_sqtt(*data).items():
-      cus.append(s:=create_step(f"{cu} {len(events)}", ("/cu-sqtt", i, len(ctxs[i]["steps"])), {"src":"hi"}, depth=1))
-      ctxs[i]["steps"].append(s)
+      cus.append(s:=create_step(f"{cu} {len(events)}", ("/cu-sqtt", i, len(ctxs[i]["steps"])), depth=1))
+      ctxs[i]["steps"].append({**s, "data":events})
     return {"steps":cus}
-  if fmt == "cu-sqtt":
-    return {"src":"hi!"}
+  if fmt == "cu-sqtt": return {"value":get_profile(data, sort_fn=row_tuple), "content_type":"application/octet-stream"}
   if fmt == "sqtt-insts":
     columns = ["PC", "Instruction", "Hits", "Cycles", "Stall", "Type"]
     inst_columns = ["N", "Clk", "Idle", "Dur", "Stall"]
