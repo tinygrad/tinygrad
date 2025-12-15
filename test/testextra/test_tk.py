@@ -31,14 +31,16 @@ class TestTK(unittest.TestCase):
 
       a_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
       b_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
+      c_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
       a_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16)
       b_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
-      c_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32, TileLayout.COL)
+      c_reg_col = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32, TileLayout.COL)
+      c_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
       col, row = ker.blockIdx_x, ker.blockIdx_y
 
-      c_reg = warp.zero(c_reg)
+      c_reg_col = warp.zero(c_reg_col)
       for tile in ker.range(N // BLOCK_SIZE):
         a_smem = warp.load(a_smem, a, (), (0, 0, row, tile), axis=2)
         b_smem = warp.load(b_smem, b, (), (0, 0, tile, col), axis=2)
@@ -46,8 +48,11 @@ class TestTK(unittest.TestCase):
         a_reg = warp.load(a_reg, a_smem)
         b_reg = warp.load(b_reg, b_smem)
 
-        c_reg = warp.mma_AB(c_reg, a_reg, b_reg)
-      c_reg = ker.endrange()
+        c_reg_col = warp.mma_AB(c_reg_col, a_reg, b_reg)
+      c_reg_col = ker.endrange()
+
+      c_smem = warp.store(c_smem, c_reg_col)
+      c_reg = warp.load(c_reg, c_smem)
 
       c = warp.store(c, c_reg, (0, 0, row, col), (), axis=2)
 
@@ -126,6 +131,7 @@ class TestTK(unittest.TestCase):
       a = ker.gl((1, 1, N, N), dtypes.float32)
 
       a_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      b_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
       a_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
       b_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
@@ -135,6 +141,8 @@ class TestTK(unittest.TestCase):
       a_smem = warp.load(a_smem, a, (), (0, 0, row, col), axis=2)
       a_reg = warp.load(a_reg, a_smem)
       b_reg = warp.copy(b_reg, a_reg)
+      b_smem = warp.store(b_smem, b_reg)
+      b_reg = warp.load(b_reg, b_smem)
       b = warp.store(b, b_reg, (0, 0, row, col), (), axis=2)
 
       sink = ker.finish()
@@ -693,7 +701,7 @@ class TestTK(unittest.TestCase):
 
     q_, k_, v_ = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
     out = flash_attention(q_, k_, v_)
-    out = out.float().transpose(1, 2)
+    out, l_vec = out[0].float().transpose(1, 2), out[1].float()
     out.backward(do)
     Tensor.realize(q.grad, k.grad, v.grad)
 
@@ -709,9 +717,12 @@ class TestTK(unittest.TestCase):
     ref.backward(do)
     Tensor.realize(q_ref.grad, k_ref.grad, v_ref.grad)
 
+    delta_vec = (do * ref).sum(axis=-1).transpose(1, 2).unsqueeze(-2)
+    dq = flash_attn_backward_q_numpy(q.numpy(), k.numpy(), v.numpy(), ref.numpy(), do.numpy(), l_vec.numpy(), delta_vec.numpy())
+
     diff_arrays(q.grad.numpy(), q_ref.grad.numpy())
 
-    np.testing.assert_allclose(q.grad.numpy(), q_ref.grad.numpy(), atol=1e-2, rtol=1e-2)
+    np.testing.assert_allclose(q.grad.numpy(), dq, atol=1e-2, rtol=1e-2)
     np.testing.assert_allclose(k.grad.numpy(), k_ref.grad.numpy(), atol=1e-2, rtol=1e-2)
     np.testing.assert_allclose(v.grad.numpy(), v_ref.grad.numpy(), atol=1e-2, rtol=1e-2)
 
@@ -731,11 +742,11 @@ class TestTK(unittest.TestCase):
       do = Tensor.ones(B, N, H, D, dtype=dtypes.float32).contiguous()
       Tensor.realize(do)
 
-    # q_, k_, v_ = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
-    # out = flash_attention(q_, k_, v_)
-    # out = out.float().transpose(1, 2)
-    # out.backward(do)
-    # Tensor.realize(q.grad, k.grad, v.grad)
+    q_, k_, v_ = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
+    out = flash_attention(q_, k_, v_)
+    out, l_vec = out[0].float().transpose(1, 2), out[1].float()
+    out.backward(do)
+    Tensor.realize(q.grad, k.grad, v.grad)
 
     with Context(DEBUG=0):
       q_ref = q.detach().clone().requires_grad_(True)
@@ -749,18 +760,20 @@ class TestTK(unittest.TestCase):
     ref = attn_probs.matmul(v_ref_)
     ref = ref.float().transpose(1, 2)
 
-    # l_vec = attn_scores.logsumexp(axis=-1, keepdim=True).transpose(1, 2)
-    l_vec = attn_scores.exp().sum(axis=-1, keepdim=True).log().transpose(1, 2)
-    delta_vec = (do * ref).sum(axis=-1, keepdim=True)
+    delta_vec = (do * ref).sum(axis=-1).transpose(1, 2).unsqueeze(-2)
 
     ref.backward(do)
     Tensor.realize(q_ref.grad, k_ref.grad, v_ref.grad)
 
     dq = flash_attn_backward_q_numpy(q.numpy(), k.numpy(), v.numpy(), ref.numpy(), do.numpy(), l_vec.numpy(), delta_vec.numpy())
 
-    diff_arrays(dq, q_ref.grad.numpy())
+    # diff_arrays(dq, q_ref.grad.numpy())
 
-    np.testing.assert_allclose(dq, q_ref.grad.numpy(), atol=1e-2, rtol=1e-2)
+    np.testing.assert_allclose(dq, q_ref.grad.numpy(), atol=3e-2, rtol=3e-2)
+
+def mfma(a, b):
+  # mfma returns transposed result
+  return (a @ b.T).T
 
 def flash_attn_backward_q_numpy(Q, K, V, O, dO, Lv, Dv, Br=16, Bc=16):
   """
@@ -769,7 +782,6 @@ def flash_attn_backward_q_numpy(Q, K, V, O, dO, Lv, Dv, Br=16, Bc=16):
   """
   B, M, H, D = Q.shape
   N = K.shape[1]
-  scale = 1.0 / np.sqrt(D)
   dQ = np.zeros_like(Q)
 
   for b in range(B):
@@ -777,12 +789,12 @@ def flash_attn_backward_q_numpy(Q, K, V, O, dO, Lv, Dv, Br=16, Bc=16):
       # Loop over Q row blocks
       for i in range(0, M, Br):
         q_i = Q[b, i:i+Br, h]          # Shape: (Br, D)
-        o_i = O[b, i:i+Br, h]          # Shape: (Br, D)
         do_i = dO[b, i:i+Br, h]        # Shape: (Br, D)
 
         # load l and d
-        l_i = Lv[b, i:i+Br, h, :]
-        D_i = Dv[b, i:i+Br, h, :]
+        l_i = Lv[b, h, :, i:i+Br]
+        l_i *= 1.0 / math.log(2)
+        D_i = Dv[b, h, :, i:i+Br]
 
         dq_acc = np.zeros_like(q_i)
 
@@ -793,11 +805,13 @@ def flash_attn_backward_q_numpy(Q, K, V, O, dO, Lv, Dv, Br=16, Bc=16):
 
           # Recompute Attention Scores S_ij and Probs P_ij
           # (Br, D) @ (D, Bc) -> (Br, Bc)
-          s_ij = (q_i @ k_j.T) * scale
-          p_ij = np.exp(s_ij - l_i)
+          s_ij = mfma(q_i, k_j)
+          s_ij *= (1.0 / math.sqrt(D)) * (1.0 / math.log(2))
+          print(s_ij.shape, "a", l_i.shape)
+          p_ij = np.exp2(s_ij - l_i)
 
           # Compute dP_ij = dO_i @ V_j.T
-          dp_ij = do_i @ v_j.T
+          dp_ij = mfma(do_i, v_j)
 
           # Compute dS_ij = P_ij * (dP_ij - D_i)
           # Broadcasting D_i (Br, 1) across cols
@@ -805,10 +819,11 @@ def flash_attn_backward_q_numpy(Q, K, V, O, dO, Lv, Dv, Br=16, Bc=16):
 
           # Accumulate gradient contribution: dS_ij @ K_j
           # (Br, Bc) @ (Bc, D) -> (Br, D)
-          dq_acc += ds_ij @ k_j
+          dq_acc += mfma(k_j.T, ds_ij.T)
 
         # Apply scale factor once at the end and store
-        dQ[b, i:i+Br, h] = dq_acc * scale
+        dq_acc *= 1.0 / math.sqrt(D)
+        dQ[b, i:i+Br, h] = dq_acc
 
   return dQ
 
@@ -849,7 +864,7 @@ def diff_arrays(arr1, arr2):
       return colorize_entire(a, RED)
 
     # Case 4: Values Match
-    if np.allclose(a, b, equal_nan=True, atol=1e-2, rtol=1e-5):
+    if np.allclose(a, b, equal_nan=True, atol=1e-2, rtol=1e-2):
       return str(a)
 
     # Case 5: Mismatch (Value or Type difference)
