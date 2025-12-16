@@ -616,7 +616,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op is Ops.BUFFERIZE: return self.arg.device
     if self.op is Ops.AFTER: return self.src[0]._device
     if self.op is Ops.MSELECT:
-      assert isinstance(self.src[0].device, tuple), "mselect must be on tuple device"
+      assert isinstance(self.src[0].device, tuple), f"mselect must be on tuple device, getting {self.src[0].device}"
       return self.src[0].device[self.arg]
     if self.op is Ops.MSTACK: return tuple(cast(str, x.device) for x in self.src)
     if self.op in {Ops.COPY, Ops.BUFFER, Ops.ALLREDUCE}: return self.src[1].device
