@@ -49,6 +49,15 @@ class DLL(ctypes.CDLL):
       if (pth:=pathlib.Path(p)).is_absolute():
         if pth.is_file(): return p
         else: continue
+      # Let the platform dynamic loader resolve sonames first.
+      # This avoids picking the "wrong" absolute lib when multiple copies exist.
+      if not (WIN or OSX):
+        for cand in (f"lib{p}.so.1", f"lib{p}.so"):
+          try:
+            ctypes.CDLL(cand)
+            return cand
+          except OSError:
+            pass
       for pre in (pathlib.Path(pre) for pre in libpaths.get(os.name, []) + libpaths.get(sys.platform, []) + extra_paths):
         if not pre.is_dir(): continue
         if WIN or OSX:
