@@ -91,6 +91,13 @@ def panic(e:Exception|None=None):
   if e is None: raise RuntimeError("PANIC!")
   raise e
 
+class cached_classproperty:
+  def __init__(self, fn): self.fn, self.nm = fn, None
+  def __set_name__(self, _, nm): self.nm = nm
+  def __get__(self, obj, objtype=None):
+    setattr(objtype or type(obj), self.nm, val:=self.fn(objtype or type(obj)))
+    return val
+
 @functools.cache
 def canonicalize_strides(shape:tuple[T, ...], strides:tuple[T, ...]) -> tuple[T, ...]:
   return tuple(cast(T, 0) if s == 1 else st for s, st in zip(shape, strides))
