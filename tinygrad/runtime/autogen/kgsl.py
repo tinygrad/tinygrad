@@ -1,6 +1,6 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support.c import Array, DLL, Pointer, Struct, Union, field, CEnum, _IO, _IOW, _IOR, _IOWR
 enum_kgsl_user_mem_type = CEnum(ctypes.c_uint32)
 KGSL_USER_MEM_TYPE_PMEM = enum_kgsl_user_mem_type.define('KGSL_USER_MEM_TYPE_PMEM', 0)
 KGSL_USER_MEM_TYPE_ASHMEM = enum_kgsl_user_mem_type.define('KGSL_USER_MEM_TYPE_ASHMEM', 1)
@@ -20,202 +20,202 @@ KGSL_DEVICE_3D0 = enum_kgsl_deviceid.define('KGSL_DEVICE_3D0', 0)
 KGSL_DEVICE_MAX = enum_kgsl_deviceid.define('KGSL_DEVICE_MAX', 1)
 
 class struct_kgsl_devinfo(Struct): pass
-struct_kgsl_devinfo._fields_ = [
-  ('device_id', ctypes.c_uint32),
-  ('chip_id', ctypes.c_uint32),
-  ('mmu_enabled', ctypes.c_uint32),
-  ('gmem_gpubaseaddr', ctypes.c_uint64),
-  ('gpu_id', ctypes.c_uint32),
-  ('gmem_sizebytes', ctypes.c_uint64),
-]
+struct_kgsl_devinfo.SIZE = 40
+struct_kgsl_devinfo._fields_ = ['device_id', 'chip_id', 'mmu_enabled', 'gmem_gpubaseaddr', 'gpu_id', 'gmem_sizebytes']
+setattr(struct_kgsl_devinfo, 'device_id', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_devinfo, 'chip_id', field(4, ctypes.c_uint32))
+setattr(struct_kgsl_devinfo, 'mmu_enabled', field(8, ctypes.c_uint32))
+setattr(struct_kgsl_devinfo, 'gmem_gpubaseaddr', field(16, ctypes.c_uint64))
+setattr(struct_kgsl_devinfo, 'gpu_id', field(24, ctypes.c_uint32))
+setattr(struct_kgsl_devinfo, 'gmem_sizebytes', field(32, ctypes.c_uint64))
 class struct_kgsl_devmemstore(Struct): pass
-struct_kgsl_devmemstore._fields_ = [
-  ('soptimestamp', ctypes.c_uint32),
-  ('sbz', ctypes.c_uint32),
-  ('eoptimestamp', ctypes.c_uint32),
-  ('sbz2', ctypes.c_uint32),
-  ('preempted', ctypes.c_uint32),
-  ('sbz3', ctypes.c_uint32),
-  ('ref_wait_ts', ctypes.c_uint32),
-  ('sbz4', ctypes.c_uint32),
-  ('current_context', ctypes.c_uint32),
-  ('sbz5', ctypes.c_uint32),
-]
+struct_kgsl_devmemstore.SIZE = 40
+struct_kgsl_devmemstore._fields_ = ['soptimestamp', 'sbz', 'eoptimestamp', 'sbz2', 'preempted', 'sbz3', 'ref_wait_ts', 'sbz4', 'current_context', 'sbz5']
+setattr(struct_kgsl_devmemstore, 'soptimestamp', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_devmemstore, 'sbz', field(4, ctypes.c_uint32))
+setattr(struct_kgsl_devmemstore, 'eoptimestamp', field(8, ctypes.c_uint32))
+setattr(struct_kgsl_devmemstore, 'sbz2', field(12, ctypes.c_uint32))
+setattr(struct_kgsl_devmemstore, 'preempted', field(16, ctypes.c_uint32))
+setattr(struct_kgsl_devmemstore, 'sbz3', field(20, ctypes.c_uint32))
+setattr(struct_kgsl_devmemstore, 'ref_wait_ts', field(24, ctypes.c_uint32))
+setattr(struct_kgsl_devmemstore, 'sbz4', field(28, ctypes.c_uint32))
+setattr(struct_kgsl_devmemstore, 'current_context', field(32, ctypes.c_uint32))
+setattr(struct_kgsl_devmemstore, 'sbz5', field(36, ctypes.c_uint32))
 enum_kgsl_timestamp_type = CEnum(ctypes.c_uint32)
 KGSL_TIMESTAMP_CONSUMED = enum_kgsl_timestamp_type.define('KGSL_TIMESTAMP_CONSUMED', 1)
 KGSL_TIMESTAMP_RETIRED = enum_kgsl_timestamp_type.define('KGSL_TIMESTAMP_RETIRED', 2)
 KGSL_TIMESTAMP_QUEUED = enum_kgsl_timestamp_type.define('KGSL_TIMESTAMP_QUEUED', 3)
 
 class struct_kgsl_shadowprop(Struct): pass
-struct_kgsl_shadowprop._fields_ = [
-  ('gpuaddr', ctypes.c_uint64),
-  ('size', ctypes.c_uint64),
-  ('flags', ctypes.c_uint32),
-]
+struct_kgsl_shadowprop.SIZE = 24
+struct_kgsl_shadowprop._fields_ = ['gpuaddr', 'size', 'flags']
+setattr(struct_kgsl_shadowprop, 'gpuaddr', field(0, ctypes.c_uint64))
+setattr(struct_kgsl_shadowprop, 'size', field(8, ctypes.c_uint64))
+setattr(struct_kgsl_shadowprop, 'flags', field(16, ctypes.c_uint32))
 class struct_kgsl_version(Struct): pass
-struct_kgsl_version._fields_ = [
-  ('drv_major', ctypes.c_uint32),
-  ('drv_minor', ctypes.c_uint32),
-  ('dev_major', ctypes.c_uint32),
-  ('dev_minor', ctypes.c_uint32),
-]
+struct_kgsl_version.SIZE = 16
+struct_kgsl_version._fields_ = ['drv_major', 'drv_minor', 'dev_major', 'dev_minor']
+setattr(struct_kgsl_version, 'drv_major', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_version, 'drv_minor', field(4, ctypes.c_uint32))
+setattr(struct_kgsl_version, 'dev_major', field(8, ctypes.c_uint32))
+setattr(struct_kgsl_version, 'dev_minor', field(12, ctypes.c_uint32))
 class struct_kgsl_sp_generic_mem(Struct): pass
-struct_kgsl_sp_generic_mem._fields_ = [
-  ('local', ctypes.c_uint64),
-  ('pvt', ctypes.c_uint64),
-]
+struct_kgsl_sp_generic_mem.SIZE = 16
+struct_kgsl_sp_generic_mem._fields_ = ['local', 'pvt']
+setattr(struct_kgsl_sp_generic_mem, 'local', field(0, ctypes.c_uint64))
+setattr(struct_kgsl_sp_generic_mem, 'pvt', field(8, ctypes.c_uint64))
 class struct_kgsl_ucode_version(Struct): pass
-struct_kgsl_ucode_version._fields_ = [
-  ('pfp', ctypes.c_uint32),
-  ('pm4', ctypes.c_uint32),
-]
+struct_kgsl_ucode_version.SIZE = 8
+struct_kgsl_ucode_version._fields_ = ['pfp', 'pm4']
+setattr(struct_kgsl_ucode_version, 'pfp', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_ucode_version, 'pm4', field(4, ctypes.c_uint32))
 class struct_kgsl_gpmu_version(Struct): pass
-struct_kgsl_gpmu_version._fields_ = [
-  ('major', ctypes.c_uint32),
-  ('minor', ctypes.c_uint32),
-  ('features', ctypes.c_uint32),
-]
+struct_kgsl_gpmu_version.SIZE = 12
+struct_kgsl_gpmu_version._fields_ = ['major', 'minor', 'features']
+setattr(struct_kgsl_gpmu_version, 'major', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_gpmu_version, 'minor', field(4, ctypes.c_uint32))
+setattr(struct_kgsl_gpmu_version, 'features', field(8, ctypes.c_uint32))
 class struct_kgsl_ibdesc(Struct): pass
-struct_kgsl_ibdesc._fields_ = [
-  ('gpuaddr', ctypes.c_uint64),
-  ('__pad', ctypes.c_uint64),
-  ('sizedwords', ctypes.c_uint64),
-  ('ctrl', ctypes.c_uint32),
-]
+struct_kgsl_ibdesc.SIZE = 32
+struct_kgsl_ibdesc._fields_ = ['gpuaddr', '__pad', 'sizedwords', 'ctrl']
+setattr(struct_kgsl_ibdesc, 'gpuaddr', field(0, ctypes.c_uint64))
+setattr(struct_kgsl_ibdesc, '__pad', field(8, ctypes.c_uint64))
+setattr(struct_kgsl_ibdesc, 'sizedwords', field(16, ctypes.c_uint64))
+setattr(struct_kgsl_ibdesc, 'ctrl', field(24, ctypes.c_uint32))
 class struct_kgsl_cmdbatch_profiling_buffer(Struct): pass
-struct_kgsl_cmdbatch_profiling_buffer._fields_ = [
-  ('wall_clock_s', ctypes.c_uint64),
-  ('wall_clock_ns', ctypes.c_uint64),
-  ('gpu_ticks_queued', ctypes.c_uint64),
-  ('gpu_ticks_submitted', ctypes.c_uint64),
-  ('gpu_ticks_retired', ctypes.c_uint64),
-]
+struct_kgsl_cmdbatch_profiling_buffer.SIZE = 40
+struct_kgsl_cmdbatch_profiling_buffer._fields_ = ['wall_clock_s', 'wall_clock_ns', 'gpu_ticks_queued', 'gpu_ticks_submitted', 'gpu_ticks_retired']
+setattr(struct_kgsl_cmdbatch_profiling_buffer, 'wall_clock_s', field(0, ctypes.c_uint64))
+setattr(struct_kgsl_cmdbatch_profiling_buffer, 'wall_clock_ns', field(8, ctypes.c_uint64))
+setattr(struct_kgsl_cmdbatch_profiling_buffer, 'gpu_ticks_queued', field(16, ctypes.c_uint64))
+setattr(struct_kgsl_cmdbatch_profiling_buffer, 'gpu_ticks_submitted', field(24, ctypes.c_uint64))
+setattr(struct_kgsl_cmdbatch_profiling_buffer, 'gpu_ticks_retired', field(32, ctypes.c_uint64))
 class struct_kgsl_device_getproperty(Struct): pass
-struct_kgsl_device_getproperty._fields_ = [
-  ('type', ctypes.c_uint32),
-  ('value', ctypes.c_void_p),
-  ('sizebytes', ctypes.c_uint64),
-]
+struct_kgsl_device_getproperty.SIZE = 24
+struct_kgsl_device_getproperty._fields_ = ['type', 'value', 'sizebytes']
+setattr(struct_kgsl_device_getproperty, 'type', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_device_getproperty, 'value', field(8, ctypes.c_void_p))
+setattr(struct_kgsl_device_getproperty, 'sizebytes', field(16, ctypes.c_uint64))
 class struct_kgsl_device_waittimestamp(Struct): pass
-struct_kgsl_device_waittimestamp._fields_ = [
-  ('timestamp', ctypes.c_uint32),
-  ('timeout', ctypes.c_uint32),
-]
+struct_kgsl_device_waittimestamp.SIZE = 8
+struct_kgsl_device_waittimestamp._fields_ = ['timestamp', 'timeout']
+setattr(struct_kgsl_device_waittimestamp, 'timestamp', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_device_waittimestamp, 'timeout', field(4, ctypes.c_uint32))
 class struct_kgsl_device_waittimestamp_ctxtid(Struct): pass
-struct_kgsl_device_waittimestamp_ctxtid._fields_ = [
-  ('context_id', ctypes.c_uint32),
-  ('timestamp', ctypes.c_uint32),
-  ('timeout', ctypes.c_uint32),
-]
+struct_kgsl_device_waittimestamp_ctxtid.SIZE = 12
+struct_kgsl_device_waittimestamp_ctxtid._fields_ = ['context_id', 'timestamp', 'timeout']
+setattr(struct_kgsl_device_waittimestamp_ctxtid, 'context_id', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_device_waittimestamp_ctxtid, 'timestamp', field(4, ctypes.c_uint32))
+setattr(struct_kgsl_device_waittimestamp_ctxtid, 'timeout', field(8, ctypes.c_uint32))
 class struct_kgsl_ringbuffer_issueibcmds(Struct): pass
-struct_kgsl_ringbuffer_issueibcmds._fields_ = [
-  ('drawctxt_id', ctypes.c_uint32),
-  ('ibdesc_addr', ctypes.c_uint64),
-  ('numibs', ctypes.c_uint32),
-  ('timestamp', ctypes.c_uint32),
-  ('flags', ctypes.c_uint32),
-]
+struct_kgsl_ringbuffer_issueibcmds.SIZE = 32
+struct_kgsl_ringbuffer_issueibcmds._fields_ = ['drawctxt_id', 'ibdesc_addr', 'numibs', 'timestamp', 'flags']
+setattr(struct_kgsl_ringbuffer_issueibcmds, 'drawctxt_id', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_ringbuffer_issueibcmds, 'ibdesc_addr', field(8, ctypes.c_uint64))
+setattr(struct_kgsl_ringbuffer_issueibcmds, 'numibs', field(16, ctypes.c_uint32))
+setattr(struct_kgsl_ringbuffer_issueibcmds, 'timestamp', field(20, ctypes.c_uint32))
+setattr(struct_kgsl_ringbuffer_issueibcmds, 'flags', field(24, ctypes.c_uint32))
 class struct_kgsl_cmdstream_readtimestamp(Struct): pass
-struct_kgsl_cmdstream_readtimestamp._fields_ = [
-  ('type', ctypes.c_uint32),
-  ('timestamp', ctypes.c_uint32),
-]
+struct_kgsl_cmdstream_readtimestamp.SIZE = 8
+struct_kgsl_cmdstream_readtimestamp._fields_ = ['type', 'timestamp']
+setattr(struct_kgsl_cmdstream_readtimestamp, 'type', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_cmdstream_readtimestamp, 'timestamp', field(4, ctypes.c_uint32))
 class struct_kgsl_cmdstream_freememontimestamp(Struct): pass
-struct_kgsl_cmdstream_freememontimestamp._fields_ = [
-  ('gpuaddr', ctypes.c_uint64),
-  ('type', ctypes.c_uint32),
-  ('timestamp', ctypes.c_uint32),
-]
+struct_kgsl_cmdstream_freememontimestamp.SIZE = 16
+struct_kgsl_cmdstream_freememontimestamp._fields_ = ['gpuaddr', 'type', 'timestamp']
+setattr(struct_kgsl_cmdstream_freememontimestamp, 'gpuaddr', field(0, ctypes.c_uint64))
+setattr(struct_kgsl_cmdstream_freememontimestamp, 'type', field(8, ctypes.c_uint32))
+setattr(struct_kgsl_cmdstream_freememontimestamp, 'timestamp', field(12, ctypes.c_uint32))
 class struct_kgsl_drawctxt_create(Struct): pass
-struct_kgsl_drawctxt_create._fields_ = [
-  ('flags', ctypes.c_uint32),
-  ('drawctxt_id', ctypes.c_uint32),
-]
+struct_kgsl_drawctxt_create.SIZE = 8
+struct_kgsl_drawctxt_create._fields_ = ['flags', 'drawctxt_id']
+setattr(struct_kgsl_drawctxt_create, 'flags', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_drawctxt_create, 'drawctxt_id', field(4, ctypes.c_uint32))
 class struct_kgsl_drawctxt_destroy(Struct): pass
-struct_kgsl_drawctxt_destroy._fields_ = [
-  ('drawctxt_id', ctypes.c_uint32),
-]
+struct_kgsl_drawctxt_destroy.SIZE = 4
+struct_kgsl_drawctxt_destroy._fields_ = ['drawctxt_id']
+setattr(struct_kgsl_drawctxt_destroy, 'drawctxt_id', field(0, ctypes.c_uint32))
 class struct_kgsl_map_user_mem(Struct): pass
-struct_kgsl_map_user_mem._fields_ = [
-  ('fd', ctypes.c_int32),
-  ('gpuaddr', ctypes.c_uint64),
-  ('len', ctypes.c_uint64),
-  ('offset', ctypes.c_uint64),
-  ('hostptr', ctypes.c_uint64),
-  ('memtype', enum_kgsl_user_mem_type),
-  ('flags', ctypes.c_uint32),
-]
+struct_kgsl_map_user_mem.SIZE = 48
+struct_kgsl_map_user_mem._fields_ = ['fd', 'gpuaddr', 'len', 'offset', 'hostptr', 'memtype', 'flags']
+setattr(struct_kgsl_map_user_mem, 'fd', field(0, ctypes.c_int32))
+setattr(struct_kgsl_map_user_mem, 'gpuaddr', field(8, ctypes.c_uint64))
+setattr(struct_kgsl_map_user_mem, 'len', field(16, ctypes.c_uint64))
+setattr(struct_kgsl_map_user_mem, 'offset', field(24, ctypes.c_uint64))
+setattr(struct_kgsl_map_user_mem, 'hostptr', field(32, ctypes.c_uint64))
+setattr(struct_kgsl_map_user_mem, 'memtype', field(40, enum_kgsl_user_mem_type))
+setattr(struct_kgsl_map_user_mem, 'flags', field(44, ctypes.c_uint32))
 class struct_kgsl_cmdstream_readtimestamp_ctxtid(Struct): pass
-struct_kgsl_cmdstream_readtimestamp_ctxtid._fields_ = [
-  ('context_id', ctypes.c_uint32),
-  ('type', ctypes.c_uint32),
-  ('timestamp', ctypes.c_uint32),
-]
+struct_kgsl_cmdstream_readtimestamp_ctxtid.SIZE = 12
+struct_kgsl_cmdstream_readtimestamp_ctxtid._fields_ = ['context_id', 'type', 'timestamp']
+setattr(struct_kgsl_cmdstream_readtimestamp_ctxtid, 'context_id', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_cmdstream_readtimestamp_ctxtid, 'type', field(4, ctypes.c_uint32))
+setattr(struct_kgsl_cmdstream_readtimestamp_ctxtid, 'timestamp', field(8, ctypes.c_uint32))
 class struct_kgsl_cmdstream_freememontimestamp_ctxtid(Struct): pass
-struct_kgsl_cmdstream_freememontimestamp_ctxtid._fields_ = [
-  ('context_id', ctypes.c_uint32),
-  ('gpuaddr', ctypes.c_uint64),
-  ('type', ctypes.c_uint32),
-  ('timestamp', ctypes.c_uint32),
-]
+struct_kgsl_cmdstream_freememontimestamp_ctxtid.SIZE = 24
+struct_kgsl_cmdstream_freememontimestamp_ctxtid._fields_ = ['context_id', 'gpuaddr', 'type', 'timestamp']
+setattr(struct_kgsl_cmdstream_freememontimestamp_ctxtid, 'context_id', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_cmdstream_freememontimestamp_ctxtid, 'gpuaddr', field(8, ctypes.c_uint64))
+setattr(struct_kgsl_cmdstream_freememontimestamp_ctxtid, 'type', field(16, ctypes.c_uint32))
+setattr(struct_kgsl_cmdstream_freememontimestamp_ctxtid, 'timestamp', field(20, ctypes.c_uint32))
 class struct_kgsl_sharedmem_from_pmem(Struct): pass
-struct_kgsl_sharedmem_from_pmem._fields_ = [
-  ('pmem_fd', ctypes.c_int32),
-  ('gpuaddr', ctypes.c_uint64),
-  ('len', ctypes.c_uint32),
-  ('offset', ctypes.c_uint32),
-]
+struct_kgsl_sharedmem_from_pmem.SIZE = 24
+struct_kgsl_sharedmem_from_pmem._fields_ = ['pmem_fd', 'gpuaddr', 'len', 'offset']
+setattr(struct_kgsl_sharedmem_from_pmem, 'pmem_fd', field(0, ctypes.c_int32))
+setattr(struct_kgsl_sharedmem_from_pmem, 'gpuaddr', field(8, ctypes.c_uint64))
+setattr(struct_kgsl_sharedmem_from_pmem, 'len', field(16, ctypes.c_uint32))
+setattr(struct_kgsl_sharedmem_from_pmem, 'offset', field(20, ctypes.c_uint32))
 class struct_kgsl_sharedmem_free(Struct): pass
-struct_kgsl_sharedmem_free._fields_ = [
-  ('gpuaddr', ctypes.c_uint64),
-]
+struct_kgsl_sharedmem_free.SIZE = 8
+struct_kgsl_sharedmem_free._fields_ = ['gpuaddr']
+setattr(struct_kgsl_sharedmem_free, 'gpuaddr', field(0, ctypes.c_uint64))
 class struct_kgsl_cff_user_event(Struct): pass
-struct_kgsl_cff_user_event._fields_ = [
-  ('cff_opcode', ctypes.c_ubyte),
-  ('op1', ctypes.c_uint32),
-  ('op2', ctypes.c_uint32),
-  ('op3', ctypes.c_uint32),
-  ('op4', ctypes.c_uint32),
-  ('op5', ctypes.c_uint32),
-  ('__pad', (ctypes.c_uint32 * 2)),
-]
+struct_kgsl_cff_user_event.SIZE = 32
+struct_kgsl_cff_user_event._fields_ = ['cff_opcode', 'op1', 'op2', 'op3', 'op4', 'op5', '__pad']
+setattr(struct_kgsl_cff_user_event, 'cff_opcode', field(0, ctypes.c_ubyte))
+setattr(struct_kgsl_cff_user_event, 'op1', field(4, ctypes.c_uint32))
+setattr(struct_kgsl_cff_user_event, 'op2', field(8, ctypes.c_uint32))
+setattr(struct_kgsl_cff_user_event, 'op3', field(12, ctypes.c_uint32))
+setattr(struct_kgsl_cff_user_event, 'op4', field(16, ctypes.c_uint32))
+setattr(struct_kgsl_cff_user_event, 'op5', field(20, ctypes.c_uint32))
+setattr(struct_kgsl_cff_user_event, '__pad', field(24, Array(ctypes.c_uint32, 2)))
 class struct_kgsl_gmem_desc(Struct): pass
-struct_kgsl_gmem_desc._fields_ = [
-  ('x', ctypes.c_uint32),
-  ('y', ctypes.c_uint32),
-  ('width', ctypes.c_uint32),
-  ('height', ctypes.c_uint32),
-  ('pitch', ctypes.c_uint32),
-]
+struct_kgsl_gmem_desc.SIZE = 20
+struct_kgsl_gmem_desc._fields_ = ['x', 'y', 'width', 'height', 'pitch']
+setattr(struct_kgsl_gmem_desc, 'x', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_gmem_desc, 'y', field(4, ctypes.c_uint32))
+setattr(struct_kgsl_gmem_desc, 'width', field(8, ctypes.c_uint32))
+setattr(struct_kgsl_gmem_desc, 'height', field(12, ctypes.c_uint32))
+setattr(struct_kgsl_gmem_desc, 'pitch', field(16, ctypes.c_uint32))
 class struct_kgsl_buffer_desc(Struct): pass
-struct_kgsl_buffer_desc._fields_ = [
-  ('hostptr', ctypes.c_void_p),
-  ('gpuaddr', ctypes.c_uint64),
-  ('size', ctypes.c_int32),
-  ('format', ctypes.c_uint32),
-  ('pitch', ctypes.c_uint32),
-  ('enabled', ctypes.c_uint32),
-]
+struct_kgsl_buffer_desc.SIZE = 32
+struct_kgsl_buffer_desc._fields_ = ['hostptr', 'gpuaddr', 'size', 'format', 'pitch', 'enabled']
+setattr(struct_kgsl_buffer_desc, 'hostptr', field(0, ctypes.c_void_p))
+setattr(struct_kgsl_buffer_desc, 'gpuaddr', field(8, ctypes.c_uint64))
+setattr(struct_kgsl_buffer_desc, 'size', field(16, ctypes.c_int32))
+setattr(struct_kgsl_buffer_desc, 'format', field(20, ctypes.c_uint32))
+setattr(struct_kgsl_buffer_desc, 'pitch', field(24, ctypes.c_uint32))
+setattr(struct_kgsl_buffer_desc, 'enabled', field(28, ctypes.c_uint32))
 class struct_kgsl_bind_gmem_shadow(Struct): pass
-struct_kgsl_bind_gmem_shadow._fields_ = [
-  ('drawctxt_id', ctypes.c_uint32),
-  ('gmem_desc', struct_kgsl_gmem_desc),
-  ('shadow_x', ctypes.c_uint32),
-  ('shadow_y', ctypes.c_uint32),
-  ('shadow_buffer', struct_kgsl_buffer_desc),
-  ('buffer_id', ctypes.c_uint32),
-]
+struct_kgsl_bind_gmem_shadow.SIZE = 72
+struct_kgsl_bind_gmem_shadow._fields_ = ['drawctxt_id', 'gmem_desc', 'shadow_x', 'shadow_y', 'shadow_buffer', 'buffer_id']
+setattr(struct_kgsl_bind_gmem_shadow, 'drawctxt_id', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_bind_gmem_shadow, 'gmem_desc', field(4, struct_kgsl_gmem_desc))
+setattr(struct_kgsl_bind_gmem_shadow, 'shadow_x', field(24, ctypes.c_uint32))
+setattr(struct_kgsl_bind_gmem_shadow, 'shadow_y', field(28, ctypes.c_uint32))
+setattr(struct_kgsl_bind_gmem_shadow, 'shadow_buffer', field(32, struct_kgsl_buffer_desc))
+setattr(struct_kgsl_bind_gmem_shadow, 'buffer_id', field(64, ctypes.c_uint32))
 class struct_kgsl_sharedmem_from_vmalloc(Struct): pass
-struct_kgsl_sharedmem_from_vmalloc._fields_ = [
-  ('gpuaddr', ctypes.c_uint64),
-  ('hostptr', ctypes.c_uint32),
-  ('flags', ctypes.c_uint32),
-]
+struct_kgsl_sharedmem_from_vmalloc.SIZE = 16
+struct_kgsl_sharedmem_from_vmalloc._fields_ = ['gpuaddr', 'hostptr', 'flags']
+setattr(struct_kgsl_sharedmem_from_vmalloc, 'gpuaddr', field(0, ctypes.c_uint64))
+setattr(struct_kgsl_sharedmem_from_vmalloc, 'hostptr', field(8, ctypes.c_uint32))
+setattr(struct_kgsl_sharedmem_from_vmalloc, 'flags', field(12, ctypes.c_uint32))
 class struct_kgsl_drawctxt_set_bin_base_offset(Struct): pass
-struct_kgsl_drawctxt_set_bin_base_offset._fields_ = [
-  ('drawctxt_id', ctypes.c_uint32),
-  ('offset', ctypes.c_uint32),
-]
+struct_kgsl_drawctxt_set_bin_base_offset.SIZE = 8
+struct_kgsl_drawctxt_set_bin_base_offset._fields_ = ['drawctxt_id', 'offset']
+setattr(struct_kgsl_drawctxt_set_bin_base_offset, 'drawctxt_id', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_drawctxt_set_bin_base_offset, 'offset', field(4, ctypes.c_uint32))
 enum_kgsl_cmdwindow_type = CEnum(ctypes.c_uint32)
 KGSL_CMDWINDOW_MIN = enum_kgsl_cmdwindow_type.define('KGSL_CMDWINDOW_MIN', 0)
 KGSL_CMDWINDOW_2D = enum_kgsl_cmdwindow_type.define('KGSL_CMDWINDOW_2D', 0)
@@ -225,286 +225,286 @@ KGSL_CMDWINDOW_ARBITER = enum_kgsl_cmdwindow_type.define('KGSL_CMDWINDOW_ARBITER
 KGSL_CMDWINDOW_MAX = enum_kgsl_cmdwindow_type.define('KGSL_CMDWINDOW_MAX', 255)
 
 class struct_kgsl_cmdwindow_write(Struct): pass
-struct_kgsl_cmdwindow_write._fields_ = [
-  ('target', enum_kgsl_cmdwindow_type),
-  ('addr', ctypes.c_uint32),
-  ('data', ctypes.c_uint32),
-]
+struct_kgsl_cmdwindow_write.SIZE = 12
+struct_kgsl_cmdwindow_write._fields_ = ['target', 'addr', 'data']
+setattr(struct_kgsl_cmdwindow_write, 'target', field(0, enum_kgsl_cmdwindow_type))
+setattr(struct_kgsl_cmdwindow_write, 'addr', field(4, ctypes.c_uint32))
+setattr(struct_kgsl_cmdwindow_write, 'data', field(8, ctypes.c_uint32))
 class struct_kgsl_gpumem_alloc(Struct): pass
-struct_kgsl_gpumem_alloc._fields_ = [
-  ('gpuaddr', ctypes.c_uint64),
-  ('size', ctypes.c_uint64),
-  ('flags', ctypes.c_uint32),
-]
+struct_kgsl_gpumem_alloc.SIZE = 24
+struct_kgsl_gpumem_alloc._fields_ = ['gpuaddr', 'size', 'flags']
+setattr(struct_kgsl_gpumem_alloc, 'gpuaddr', field(0, ctypes.c_uint64))
+setattr(struct_kgsl_gpumem_alloc, 'size', field(8, ctypes.c_uint64))
+setattr(struct_kgsl_gpumem_alloc, 'flags', field(16, ctypes.c_uint32))
 class struct_kgsl_cff_syncmem(Struct): pass
-struct_kgsl_cff_syncmem._fields_ = [
-  ('gpuaddr', ctypes.c_uint64),
-  ('len', ctypes.c_uint64),
-  ('__pad', (ctypes.c_uint32 * 2)),
-]
+struct_kgsl_cff_syncmem.SIZE = 24
+struct_kgsl_cff_syncmem._fields_ = ['gpuaddr', 'len', '__pad']
+setattr(struct_kgsl_cff_syncmem, 'gpuaddr', field(0, ctypes.c_uint64))
+setattr(struct_kgsl_cff_syncmem, 'len', field(8, ctypes.c_uint64))
+setattr(struct_kgsl_cff_syncmem, '__pad', field(16, Array(ctypes.c_uint32, 2)))
 class struct_kgsl_timestamp_event(Struct): pass
-struct_kgsl_timestamp_event._fields_ = [
-  ('type', ctypes.c_int32),
-  ('timestamp', ctypes.c_uint32),
-  ('context_id', ctypes.c_uint32),
-  ('priv', ctypes.c_void_p),
-  ('len', ctypes.c_uint64),
-]
+struct_kgsl_timestamp_event.SIZE = 32
+struct_kgsl_timestamp_event._fields_ = ['type', 'timestamp', 'context_id', 'priv', 'len']
+setattr(struct_kgsl_timestamp_event, 'type', field(0, ctypes.c_int32))
+setattr(struct_kgsl_timestamp_event, 'timestamp', field(4, ctypes.c_uint32))
+setattr(struct_kgsl_timestamp_event, 'context_id', field(8, ctypes.c_uint32))
+setattr(struct_kgsl_timestamp_event, 'priv', field(16, ctypes.c_void_p))
+setattr(struct_kgsl_timestamp_event, 'len', field(24, ctypes.c_uint64))
 class struct_kgsl_timestamp_event_genlock(Struct): pass
-struct_kgsl_timestamp_event_genlock._fields_ = [
-  ('handle', ctypes.c_int32),
-]
+struct_kgsl_timestamp_event_genlock.SIZE = 4
+struct_kgsl_timestamp_event_genlock._fields_ = ['handle']
+setattr(struct_kgsl_timestamp_event_genlock, 'handle', field(0, ctypes.c_int32))
 class struct_kgsl_timestamp_event_fence(Struct): pass
-struct_kgsl_timestamp_event_fence._fields_ = [
-  ('fence_fd', ctypes.c_int32),
-]
+struct_kgsl_timestamp_event_fence.SIZE = 4
+struct_kgsl_timestamp_event_fence._fields_ = ['fence_fd']
+setattr(struct_kgsl_timestamp_event_fence, 'fence_fd', field(0, ctypes.c_int32))
 class struct_kgsl_gpumem_alloc_id(Struct): pass
-struct_kgsl_gpumem_alloc_id._fields_ = [
-  ('id', ctypes.c_uint32),
-  ('flags', ctypes.c_uint32),
-  ('size', ctypes.c_uint64),
-  ('mmapsize', ctypes.c_uint64),
-  ('gpuaddr', ctypes.c_uint64),
-  ('__pad', (ctypes.c_uint64 * 2)),
-]
+struct_kgsl_gpumem_alloc_id.SIZE = 48
+struct_kgsl_gpumem_alloc_id._fields_ = ['id', 'flags', 'size', 'mmapsize', 'gpuaddr', '__pad']
+setattr(struct_kgsl_gpumem_alloc_id, 'id', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_gpumem_alloc_id, 'flags', field(4, ctypes.c_uint32))
+setattr(struct_kgsl_gpumem_alloc_id, 'size', field(8, ctypes.c_uint64))
+setattr(struct_kgsl_gpumem_alloc_id, 'mmapsize', field(16, ctypes.c_uint64))
+setattr(struct_kgsl_gpumem_alloc_id, 'gpuaddr', field(24, ctypes.c_uint64))
+setattr(struct_kgsl_gpumem_alloc_id, '__pad', field(32, Array(ctypes.c_uint64, 2)))
 class struct_kgsl_gpumem_free_id(Struct): pass
-struct_kgsl_gpumem_free_id._fields_ = [
-  ('id', ctypes.c_uint32),
-  ('__pad', ctypes.c_uint32),
-]
+struct_kgsl_gpumem_free_id.SIZE = 8
+struct_kgsl_gpumem_free_id._fields_ = ['id', '__pad']
+setattr(struct_kgsl_gpumem_free_id, 'id', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_gpumem_free_id, '__pad', field(4, ctypes.c_uint32))
 class struct_kgsl_gpumem_get_info(Struct): pass
-struct_kgsl_gpumem_get_info._fields_ = [
-  ('gpuaddr', ctypes.c_uint64),
-  ('id', ctypes.c_uint32),
-  ('flags', ctypes.c_uint32),
-  ('size', ctypes.c_uint64),
-  ('mmapsize', ctypes.c_uint64),
-  ('useraddr', ctypes.c_uint64),
-  ('__pad', (ctypes.c_uint64 * 4)),
-]
+struct_kgsl_gpumem_get_info.SIZE = 72
+struct_kgsl_gpumem_get_info._fields_ = ['gpuaddr', 'id', 'flags', 'size', 'mmapsize', 'useraddr', '__pad']
+setattr(struct_kgsl_gpumem_get_info, 'gpuaddr', field(0, ctypes.c_uint64))
+setattr(struct_kgsl_gpumem_get_info, 'id', field(8, ctypes.c_uint32))
+setattr(struct_kgsl_gpumem_get_info, 'flags', field(12, ctypes.c_uint32))
+setattr(struct_kgsl_gpumem_get_info, 'size', field(16, ctypes.c_uint64))
+setattr(struct_kgsl_gpumem_get_info, 'mmapsize', field(24, ctypes.c_uint64))
+setattr(struct_kgsl_gpumem_get_info, 'useraddr', field(32, ctypes.c_uint64))
+setattr(struct_kgsl_gpumem_get_info, '__pad', field(40, Array(ctypes.c_uint64, 4)))
 class struct_kgsl_gpumem_sync_cache(Struct): pass
-struct_kgsl_gpumem_sync_cache._fields_ = [
-  ('gpuaddr', ctypes.c_uint64),
-  ('id', ctypes.c_uint32),
-  ('op', ctypes.c_uint32),
-  ('offset', ctypes.c_uint64),
-  ('length', ctypes.c_uint64),
-]
+struct_kgsl_gpumem_sync_cache.SIZE = 32
+struct_kgsl_gpumem_sync_cache._fields_ = ['gpuaddr', 'id', 'op', 'offset', 'length']
+setattr(struct_kgsl_gpumem_sync_cache, 'gpuaddr', field(0, ctypes.c_uint64))
+setattr(struct_kgsl_gpumem_sync_cache, 'id', field(8, ctypes.c_uint32))
+setattr(struct_kgsl_gpumem_sync_cache, 'op', field(12, ctypes.c_uint32))
+setattr(struct_kgsl_gpumem_sync_cache, 'offset', field(16, ctypes.c_uint64))
+setattr(struct_kgsl_gpumem_sync_cache, 'length', field(24, ctypes.c_uint64))
 class struct_kgsl_perfcounter_get(Struct): pass
-struct_kgsl_perfcounter_get._fields_ = [
-  ('groupid', ctypes.c_uint32),
-  ('countable', ctypes.c_uint32),
-  ('offset', ctypes.c_uint32),
-  ('offset_hi', ctypes.c_uint32),
-  ('__pad', ctypes.c_uint32),
-]
+struct_kgsl_perfcounter_get.SIZE = 20
+struct_kgsl_perfcounter_get._fields_ = ['groupid', 'countable', 'offset', 'offset_hi', '__pad']
+setattr(struct_kgsl_perfcounter_get, 'groupid', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_perfcounter_get, 'countable', field(4, ctypes.c_uint32))
+setattr(struct_kgsl_perfcounter_get, 'offset', field(8, ctypes.c_uint32))
+setattr(struct_kgsl_perfcounter_get, 'offset_hi', field(12, ctypes.c_uint32))
+setattr(struct_kgsl_perfcounter_get, '__pad', field(16, ctypes.c_uint32))
 class struct_kgsl_perfcounter_put(Struct): pass
-struct_kgsl_perfcounter_put._fields_ = [
-  ('groupid', ctypes.c_uint32),
-  ('countable', ctypes.c_uint32),
-  ('__pad', (ctypes.c_uint32 * 2)),
-]
+struct_kgsl_perfcounter_put.SIZE = 16
+struct_kgsl_perfcounter_put._fields_ = ['groupid', 'countable', '__pad']
+setattr(struct_kgsl_perfcounter_put, 'groupid', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_perfcounter_put, 'countable', field(4, ctypes.c_uint32))
+setattr(struct_kgsl_perfcounter_put, '__pad', field(8, Array(ctypes.c_uint32, 2)))
 class struct_kgsl_perfcounter_query(Struct): pass
-struct_kgsl_perfcounter_query._fields_ = [
-  ('groupid', ctypes.c_uint32),
-  ('countables', ctypes.POINTER(ctypes.c_uint32)),
-  ('count', ctypes.c_uint32),
-  ('max_counters', ctypes.c_uint32),
-  ('__pad', (ctypes.c_uint32 * 2)),
-]
+struct_kgsl_perfcounter_query.SIZE = 32
+struct_kgsl_perfcounter_query._fields_ = ['groupid', 'countables', 'count', 'max_counters', '__pad']
+setattr(struct_kgsl_perfcounter_query, 'groupid', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_perfcounter_query, 'countables', field(8, Pointer(ctypes.c_uint32)))
+setattr(struct_kgsl_perfcounter_query, 'count', field(16, ctypes.c_uint32))
+setattr(struct_kgsl_perfcounter_query, 'max_counters', field(20, ctypes.c_uint32))
+setattr(struct_kgsl_perfcounter_query, '__pad', field(24, Array(ctypes.c_uint32, 2)))
 class struct_kgsl_perfcounter_read_group(Struct): pass
-struct_kgsl_perfcounter_read_group._fields_ = [
-  ('groupid', ctypes.c_uint32),
-  ('countable', ctypes.c_uint32),
-  ('value', ctypes.c_uint64),
-]
+struct_kgsl_perfcounter_read_group.SIZE = 16
+struct_kgsl_perfcounter_read_group._fields_ = ['groupid', 'countable', 'value']
+setattr(struct_kgsl_perfcounter_read_group, 'groupid', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_perfcounter_read_group, 'countable', field(4, ctypes.c_uint32))
+setattr(struct_kgsl_perfcounter_read_group, 'value', field(8, ctypes.c_uint64))
 class struct_kgsl_perfcounter_read(Struct): pass
-struct_kgsl_perfcounter_read._fields_ = [
-  ('reads', ctypes.POINTER(struct_kgsl_perfcounter_read_group)),
-  ('count', ctypes.c_uint32),
-  ('__pad', (ctypes.c_uint32 * 2)),
-]
+struct_kgsl_perfcounter_read.SIZE = 24
+struct_kgsl_perfcounter_read._fields_ = ['reads', 'count', '__pad']
+setattr(struct_kgsl_perfcounter_read, 'reads', field(0, Pointer(struct_kgsl_perfcounter_read_group)))
+setattr(struct_kgsl_perfcounter_read, 'count', field(8, ctypes.c_uint32))
+setattr(struct_kgsl_perfcounter_read, '__pad', field(12, Array(ctypes.c_uint32, 2)))
 class struct_kgsl_gpumem_sync_cache_bulk(Struct): pass
-struct_kgsl_gpumem_sync_cache_bulk._fields_ = [
-  ('id_list', ctypes.POINTER(ctypes.c_uint32)),
-  ('count', ctypes.c_uint32),
-  ('op', ctypes.c_uint32),
-  ('__pad', (ctypes.c_uint32 * 2)),
-]
+struct_kgsl_gpumem_sync_cache_bulk.SIZE = 24
+struct_kgsl_gpumem_sync_cache_bulk._fields_ = ['id_list', 'count', 'op', '__pad']
+setattr(struct_kgsl_gpumem_sync_cache_bulk, 'id_list', field(0, Pointer(ctypes.c_uint32)))
+setattr(struct_kgsl_gpumem_sync_cache_bulk, 'count', field(8, ctypes.c_uint32))
+setattr(struct_kgsl_gpumem_sync_cache_bulk, 'op', field(12, ctypes.c_uint32))
+setattr(struct_kgsl_gpumem_sync_cache_bulk, '__pad', field(16, Array(ctypes.c_uint32, 2)))
 class struct_kgsl_cmd_syncpoint_timestamp(Struct): pass
-struct_kgsl_cmd_syncpoint_timestamp._fields_ = [
-  ('context_id', ctypes.c_uint32),
-  ('timestamp', ctypes.c_uint32),
-]
+struct_kgsl_cmd_syncpoint_timestamp.SIZE = 8
+struct_kgsl_cmd_syncpoint_timestamp._fields_ = ['context_id', 'timestamp']
+setattr(struct_kgsl_cmd_syncpoint_timestamp, 'context_id', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_cmd_syncpoint_timestamp, 'timestamp', field(4, ctypes.c_uint32))
 class struct_kgsl_cmd_syncpoint_fence(Struct): pass
-struct_kgsl_cmd_syncpoint_fence._fields_ = [
-  ('fd', ctypes.c_int32),
-]
+struct_kgsl_cmd_syncpoint_fence.SIZE = 4
+struct_kgsl_cmd_syncpoint_fence._fields_ = ['fd']
+setattr(struct_kgsl_cmd_syncpoint_fence, 'fd', field(0, ctypes.c_int32))
 class struct_kgsl_cmd_syncpoint(Struct): pass
-struct_kgsl_cmd_syncpoint._fields_ = [
-  ('type', ctypes.c_int32),
-  ('priv', ctypes.c_void_p),
-  ('size', ctypes.c_uint64),
-]
+struct_kgsl_cmd_syncpoint.SIZE = 24
+struct_kgsl_cmd_syncpoint._fields_ = ['type', 'priv', 'size']
+setattr(struct_kgsl_cmd_syncpoint, 'type', field(0, ctypes.c_int32))
+setattr(struct_kgsl_cmd_syncpoint, 'priv', field(8, ctypes.c_void_p))
+setattr(struct_kgsl_cmd_syncpoint, 'size', field(16, ctypes.c_uint64))
 class struct_kgsl_submit_commands(Struct): pass
-struct_kgsl_submit_commands._fields_ = [
-  ('context_id', ctypes.c_uint32),
-  ('flags', ctypes.c_uint32),
-  ('cmdlist', ctypes.POINTER(struct_kgsl_ibdesc)),
-  ('numcmds', ctypes.c_uint32),
-  ('synclist', ctypes.POINTER(struct_kgsl_cmd_syncpoint)),
-  ('numsyncs', ctypes.c_uint32),
-  ('timestamp', ctypes.c_uint32),
-  ('__pad', (ctypes.c_uint32 * 4)),
-]
+struct_kgsl_submit_commands.SIZE = 56
+struct_kgsl_submit_commands._fields_ = ['context_id', 'flags', 'cmdlist', 'numcmds', 'synclist', 'numsyncs', 'timestamp', '__pad']
+setattr(struct_kgsl_submit_commands, 'context_id', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_submit_commands, 'flags', field(4, ctypes.c_uint32))
+setattr(struct_kgsl_submit_commands, 'cmdlist', field(8, Pointer(struct_kgsl_ibdesc)))
+setattr(struct_kgsl_submit_commands, 'numcmds', field(16, ctypes.c_uint32))
+setattr(struct_kgsl_submit_commands, 'synclist', field(24, Pointer(struct_kgsl_cmd_syncpoint)))
+setattr(struct_kgsl_submit_commands, 'numsyncs', field(32, ctypes.c_uint32))
+setattr(struct_kgsl_submit_commands, 'timestamp', field(36, ctypes.c_uint32))
+setattr(struct_kgsl_submit_commands, '__pad', field(40, Array(ctypes.c_uint32, 4)))
 class struct_kgsl_device_constraint(Struct): pass
-struct_kgsl_device_constraint._fields_ = [
-  ('type', ctypes.c_uint32),
-  ('context_id', ctypes.c_uint32),
-  ('data', ctypes.c_void_p),
-  ('size', ctypes.c_uint64),
-]
+struct_kgsl_device_constraint.SIZE = 24
+struct_kgsl_device_constraint._fields_ = ['type', 'context_id', 'data', 'size']
+setattr(struct_kgsl_device_constraint, 'type', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_device_constraint, 'context_id', field(4, ctypes.c_uint32))
+setattr(struct_kgsl_device_constraint, 'data', field(8, ctypes.c_void_p))
+setattr(struct_kgsl_device_constraint, 'size', field(16, ctypes.c_uint64))
 class struct_kgsl_device_constraint_pwrlevel(Struct): pass
-struct_kgsl_device_constraint_pwrlevel._fields_ = [
-  ('level', ctypes.c_uint32),
-]
+struct_kgsl_device_constraint_pwrlevel.SIZE = 4
+struct_kgsl_device_constraint_pwrlevel._fields_ = ['level']
+setattr(struct_kgsl_device_constraint_pwrlevel, 'level', field(0, ctypes.c_uint32))
 class struct_kgsl_syncsource_create(Struct): pass
-struct_kgsl_syncsource_create._fields_ = [
-  ('id', ctypes.c_uint32),
-  ('__pad', (ctypes.c_uint32 * 3)),
-]
+struct_kgsl_syncsource_create.SIZE = 16
+struct_kgsl_syncsource_create._fields_ = ['id', '__pad']
+setattr(struct_kgsl_syncsource_create, 'id', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_syncsource_create, '__pad', field(4, Array(ctypes.c_uint32, 3)))
 class struct_kgsl_syncsource_destroy(Struct): pass
-struct_kgsl_syncsource_destroy._fields_ = [
-  ('id', ctypes.c_uint32),
-  ('__pad', (ctypes.c_uint32 * 3)),
-]
+struct_kgsl_syncsource_destroy.SIZE = 16
+struct_kgsl_syncsource_destroy._fields_ = ['id', '__pad']
+setattr(struct_kgsl_syncsource_destroy, 'id', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_syncsource_destroy, '__pad', field(4, Array(ctypes.c_uint32, 3)))
 class struct_kgsl_syncsource_create_fence(Struct): pass
-struct_kgsl_syncsource_create_fence._fields_ = [
-  ('id', ctypes.c_uint32),
-  ('fence_fd', ctypes.c_int32),
-  ('__pad', (ctypes.c_uint32 * 4)),
-]
+struct_kgsl_syncsource_create_fence.SIZE = 24
+struct_kgsl_syncsource_create_fence._fields_ = ['id', 'fence_fd', '__pad']
+setattr(struct_kgsl_syncsource_create_fence, 'id', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_syncsource_create_fence, 'fence_fd', field(4, ctypes.c_int32))
+setattr(struct_kgsl_syncsource_create_fence, '__pad', field(8, Array(ctypes.c_uint32, 4)))
 class struct_kgsl_syncsource_signal_fence(Struct): pass
-struct_kgsl_syncsource_signal_fence._fields_ = [
-  ('id', ctypes.c_uint32),
-  ('fence_fd', ctypes.c_int32),
-  ('__pad', (ctypes.c_uint32 * 4)),
-]
+struct_kgsl_syncsource_signal_fence.SIZE = 24
+struct_kgsl_syncsource_signal_fence._fields_ = ['id', 'fence_fd', '__pad']
+setattr(struct_kgsl_syncsource_signal_fence, 'id', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_syncsource_signal_fence, 'fence_fd', field(4, ctypes.c_int32))
+setattr(struct_kgsl_syncsource_signal_fence, '__pad', field(8, Array(ctypes.c_uint32, 4)))
 class struct_kgsl_cff_sync_gpuobj(Struct): pass
-struct_kgsl_cff_sync_gpuobj._fields_ = [
-  ('offset', ctypes.c_uint64),
-  ('length', ctypes.c_uint64),
-  ('id', ctypes.c_uint32),
-]
+struct_kgsl_cff_sync_gpuobj.SIZE = 24
+struct_kgsl_cff_sync_gpuobj._fields_ = ['offset', 'length', 'id']
+setattr(struct_kgsl_cff_sync_gpuobj, 'offset', field(0, ctypes.c_uint64))
+setattr(struct_kgsl_cff_sync_gpuobj, 'length', field(8, ctypes.c_uint64))
+setattr(struct_kgsl_cff_sync_gpuobj, 'id', field(16, ctypes.c_uint32))
 class struct_kgsl_gpuobj_alloc(Struct): pass
-struct_kgsl_gpuobj_alloc._fields_ = [
-  ('size', ctypes.c_uint64),
-  ('flags', ctypes.c_uint64),
-  ('va_len', ctypes.c_uint64),
-  ('mmapsize', ctypes.c_uint64),
-  ('id', ctypes.c_uint32),
-  ('metadata_len', ctypes.c_uint32),
-  ('metadata', ctypes.c_uint64),
-]
+struct_kgsl_gpuobj_alloc.SIZE = 48
+struct_kgsl_gpuobj_alloc._fields_ = ['size', 'flags', 'va_len', 'mmapsize', 'id', 'metadata_len', 'metadata']
+setattr(struct_kgsl_gpuobj_alloc, 'size', field(0, ctypes.c_uint64))
+setattr(struct_kgsl_gpuobj_alloc, 'flags', field(8, ctypes.c_uint64))
+setattr(struct_kgsl_gpuobj_alloc, 'va_len', field(16, ctypes.c_uint64))
+setattr(struct_kgsl_gpuobj_alloc, 'mmapsize', field(24, ctypes.c_uint64))
+setattr(struct_kgsl_gpuobj_alloc, 'id', field(32, ctypes.c_uint32))
+setattr(struct_kgsl_gpuobj_alloc, 'metadata_len', field(36, ctypes.c_uint32))
+setattr(struct_kgsl_gpuobj_alloc, 'metadata', field(40, ctypes.c_uint64))
 class struct_kgsl_gpuobj_free(Struct): pass
-struct_kgsl_gpuobj_free._fields_ = [
-  ('flags', ctypes.c_uint64),
-  ('priv', ctypes.c_uint64),
-  ('id', ctypes.c_uint32),
-  ('type', ctypes.c_uint32),
-  ('len', ctypes.c_uint32),
-]
+struct_kgsl_gpuobj_free.SIZE = 32
+struct_kgsl_gpuobj_free._fields_ = ['flags', 'priv', 'id', 'type', 'len']
+setattr(struct_kgsl_gpuobj_free, 'flags', field(0, ctypes.c_uint64))
+setattr(struct_kgsl_gpuobj_free, 'priv', field(8, ctypes.c_uint64))
+setattr(struct_kgsl_gpuobj_free, 'id', field(16, ctypes.c_uint32))
+setattr(struct_kgsl_gpuobj_free, 'type', field(20, ctypes.c_uint32))
+setattr(struct_kgsl_gpuobj_free, 'len', field(24, ctypes.c_uint32))
 class struct_kgsl_gpu_event_timestamp(Struct): pass
-struct_kgsl_gpu_event_timestamp._fields_ = [
-  ('context_id', ctypes.c_uint32),
-  ('timestamp', ctypes.c_uint32),
-]
+struct_kgsl_gpu_event_timestamp.SIZE = 8
+struct_kgsl_gpu_event_timestamp._fields_ = ['context_id', 'timestamp']
+setattr(struct_kgsl_gpu_event_timestamp, 'context_id', field(0, ctypes.c_uint32))
+setattr(struct_kgsl_gpu_event_timestamp, 'timestamp', field(4, ctypes.c_uint32))
 class struct_kgsl_gpu_event_fence(Struct): pass
-struct_kgsl_gpu_event_fence._fields_ = [
-  ('fd', ctypes.c_int32),
-]
+struct_kgsl_gpu_event_fence.SIZE = 4
+struct_kgsl_gpu_event_fence._fields_ = ['fd']
+setattr(struct_kgsl_gpu_event_fence, 'fd', field(0, ctypes.c_int32))
 class struct_kgsl_gpuobj_info(Struct): pass
-struct_kgsl_gpuobj_info._fields_ = [
-  ('gpuaddr', ctypes.c_uint64),
-  ('flags', ctypes.c_uint64),
-  ('size', ctypes.c_uint64),
-  ('va_len', ctypes.c_uint64),
-  ('va_addr', ctypes.c_uint64),
-  ('id', ctypes.c_uint32),
-]
+struct_kgsl_gpuobj_info.SIZE = 48
+struct_kgsl_gpuobj_info._fields_ = ['gpuaddr', 'flags', 'size', 'va_len', 'va_addr', 'id']
+setattr(struct_kgsl_gpuobj_info, 'gpuaddr', field(0, ctypes.c_uint64))
+setattr(struct_kgsl_gpuobj_info, 'flags', field(8, ctypes.c_uint64))
+setattr(struct_kgsl_gpuobj_info, 'size', field(16, ctypes.c_uint64))
+setattr(struct_kgsl_gpuobj_info, 'va_len', field(24, ctypes.c_uint64))
+setattr(struct_kgsl_gpuobj_info, 'va_addr', field(32, ctypes.c_uint64))
+setattr(struct_kgsl_gpuobj_info, 'id', field(40, ctypes.c_uint32))
 class struct_kgsl_gpuobj_import(Struct): pass
-struct_kgsl_gpuobj_import._fields_ = [
-  ('priv', ctypes.c_uint64),
-  ('priv_len', ctypes.c_uint64),
-  ('flags', ctypes.c_uint64),
-  ('type', ctypes.c_uint32),
-  ('id', ctypes.c_uint32),
-]
+struct_kgsl_gpuobj_import.SIZE = 32
+struct_kgsl_gpuobj_import._fields_ = ['priv', 'priv_len', 'flags', 'type', 'id']
+setattr(struct_kgsl_gpuobj_import, 'priv', field(0, ctypes.c_uint64))
+setattr(struct_kgsl_gpuobj_import, 'priv_len', field(8, ctypes.c_uint64))
+setattr(struct_kgsl_gpuobj_import, 'flags', field(16, ctypes.c_uint64))
+setattr(struct_kgsl_gpuobj_import, 'type', field(24, ctypes.c_uint32))
+setattr(struct_kgsl_gpuobj_import, 'id', field(28, ctypes.c_uint32))
 class struct_kgsl_gpuobj_import_dma_buf(Struct): pass
-struct_kgsl_gpuobj_import_dma_buf._fields_ = [
-  ('fd', ctypes.c_int32),
-]
+struct_kgsl_gpuobj_import_dma_buf.SIZE = 4
+struct_kgsl_gpuobj_import_dma_buf._fields_ = ['fd']
+setattr(struct_kgsl_gpuobj_import_dma_buf, 'fd', field(0, ctypes.c_int32))
 class struct_kgsl_gpuobj_import_useraddr(Struct): pass
-struct_kgsl_gpuobj_import_useraddr._fields_ = [
-  ('virtaddr', ctypes.c_uint64),
-]
+struct_kgsl_gpuobj_import_useraddr.SIZE = 8
+struct_kgsl_gpuobj_import_useraddr._fields_ = ['virtaddr']
+setattr(struct_kgsl_gpuobj_import_useraddr, 'virtaddr', field(0, ctypes.c_uint64))
 class struct_kgsl_gpuobj_sync_obj(Struct): pass
-struct_kgsl_gpuobj_sync_obj._fields_ = [
-  ('offset', ctypes.c_uint64),
-  ('length', ctypes.c_uint64),
-  ('id', ctypes.c_uint32),
-  ('op', ctypes.c_uint32),
-]
+struct_kgsl_gpuobj_sync_obj.SIZE = 24
+struct_kgsl_gpuobj_sync_obj._fields_ = ['offset', 'length', 'id', 'op']
+setattr(struct_kgsl_gpuobj_sync_obj, 'offset', field(0, ctypes.c_uint64))
+setattr(struct_kgsl_gpuobj_sync_obj, 'length', field(8, ctypes.c_uint64))
+setattr(struct_kgsl_gpuobj_sync_obj, 'id', field(16, ctypes.c_uint32))
+setattr(struct_kgsl_gpuobj_sync_obj, 'op', field(20, ctypes.c_uint32))
 class struct_kgsl_gpuobj_sync(Struct): pass
-struct_kgsl_gpuobj_sync._fields_ = [
-  ('objs', ctypes.c_uint64),
-  ('obj_len', ctypes.c_uint32),
-  ('count', ctypes.c_uint32),
-]
+struct_kgsl_gpuobj_sync.SIZE = 16
+struct_kgsl_gpuobj_sync._fields_ = ['objs', 'obj_len', 'count']
+setattr(struct_kgsl_gpuobj_sync, 'objs', field(0, ctypes.c_uint64))
+setattr(struct_kgsl_gpuobj_sync, 'obj_len', field(8, ctypes.c_uint32))
+setattr(struct_kgsl_gpuobj_sync, 'count', field(12, ctypes.c_uint32))
 class struct_kgsl_command_object(Struct): pass
-struct_kgsl_command_object._fields_ = [
-  ('offset', ctypes.c_uint64),
-  ('gpuaddr', ctypes.c_uint64),
-  ('size', ctypes.c_uint64),
-  ('flags', ctypes.c_uint32),
-  ('id', ctypes.c_uint32),
-]
+struct_kgsl_command_object.SIZE = 32
+struct_kgsl_command_object._fields_ = ['offset', 'gpuaddr', 'size', 'flags', 'id']
+setattr(struct_kgsl_command_object, 'offset', field(0, ctypes.c_uint64))
+setattr(struct_kgsl_command_object, 'gpuaddr', field(8, ctypes.c_uint64))
+setattr(struct_kgsl_command_object, 'size', field(16, ctypes.c_uint64))
+setattr(struct_kgsl_command_object, 'flags', field(24, ctypes.c_uint32))
+setattr(struct_kgsl_command_object, 'id', field(28, ctypes.c_uint32))
 class struct_kgsl_command_syncpoint(Struct): pass
-struct_kgsl_command_syncpoint._fields_ = [
-  ('priv', ctypes.c_uint64),
-  ('size', ctypes.c_uint64),
-  ('type', ctypes.c_uint32),
-]
+struct_kgsl_command_syncpoint.SIZE = 24
+struct_kgsl_command_syncpoint._fields_ = ['priv', 'size', 'type']
+setattr(struct_kgsl_command_syncpoint, 'priv', field(0, ctypes.c_uint64))
+setattr(struct_kgsl_command_syncpoint, 'size', field(8, ctypes.c_uint64))
+setattr(struct_kgsl_command_syncpoint, 'type', field(16, ctypes.c_uint32))
 class struct_kgsl_gpu_command(Struct): pass
-struct_kgsl_gpu_command._fields_ = [
-  ('flags', ctypes.c_uint64),
-  ('cmdlist', ctypes.c_uint64),
-  ('cmdsize', ctypes.c_uint32),
-  ('numcmds', ctypes.c_uint32),
-  ('objlist', ctypes.c_uint64),
-  ('objsize', ctypes.c_uint32),
-  ('numobjs', ctypes.c_uint32),
-  ('synclist', ctypes.c_uint64),
-  ('syncsize', ctypes.c_uint32),
-  ('numsyncs', ctypes.c_uint32),
-  ('context_id', ctypes.c_uint32),
-  ('timestamp', ctypes.c_uint32),
-]
+struct_kgsl_gpu_command.SIZE = 64
+struct_kgsl_gpu_command._fields_ = ['flags', 'cmdlist', 'cmdsize', 'numcmds', 'objlist', 'objsize', 'numobjs', 'synclist', 'syncsize', 'numsyncs', 'context_id', 'timestamp']
+setattr(struct_kgsl_gpu_command, 'flags', field(0, ctypes.c_uint64))
+setattr(struct_kgsl_gpu_command, 'cmdlist', field(8, ctypes.c_uint64))
+setattr(struct_kgsl_gpu_command, 'cmdsize', field(16, ctypes.c_uint32))
+setattr(struct_kgsl_gpu_command, 'numcmds', field(20, ctypes.c_uint32))
+setattr(struct_kgsl_gpu_command, 'objlist', field(24, ctypes.c_uint64))
+setattr(struct_kgsl_gpu_command, 'objsize', field(32, ctypes.c_uint32))
+setattr(struct_kgsl_gpu_command, 'numobjs', field(36, ctypes.c_uint32))
+setattr(struct_kgsl_gpu_command, 'synclist', field(40, ctypes.c_uint64))
+setattr(struct_kgsl_gpu_command, 'syncsize', field(48, ctypes.c_uint32))
+setattr(struct_kgsl_gpu_command, 'numsyncs', field(52, ctypes.c_uint32))
+setattr(struct_kgsl_gpu_command, 'context_id', field(56, ctypes.c_uint32))
+setattr(struct_kgsl_gpu_command, 'timestamp', field(60, ctypes.c_uint32))
 class struct_kgsl_preemption_counters_query(Struct): pass
-struct_kgsl_preemption_counters_query._fields_ = [
-  ('counters', ctypes.c_uint64),
-  ('size_user', ctypes.c_uint32),
-  ('size_priority_level', ctypes.c_uint32),
-  ('max_priority_level', ctypes.c_uint32),
-]
+struct_kgsl_preemption_counters_query.SIZE = 24
+struct_kgsl_preemption_counters_query._fields_ = ['counters', 'size_user', 'size_priority_level', 'max_priority_level']
+setattr(struct_kgsl_preemption_counters_query, 'counters', field(0, ctypes.c_uint64))
+setattr(struct_kgsl_preemption_counters_query, 'size_user', field(8, ctypes.c_uint32))
+setattr(struct_kgsl_preemption_counters_query, 'size_priority_level', field(12, ctypes.c_uint32))
+setattr(struct_kgsl_preemption_counters_query, 'max_priority_level', field(16, ctypes.c_uint32))
 class struct_kgsl_gpuobj_set_info(Struct): pass
-struct_kgsl_gpuobj_set_info._fields_ = [
-  ('flags', ctypes.c_uint64),
-  ('metadata', ctypes.c_uint64),
-  ('id', ctypes.c_uint32),
-  ('metadata_len', ctypes.c_uint32),
-  ('type', ctypes.c_uint32),
-]
+struct_kgsl_gpuobj_set_info.SIZE = 32
+struct_kgsl_gpuobj_set_info._fields_ = ['flags', 'metadata', 'id', 'metadata_len', 'type']
+setattr(struct_kgsl_gpuobj_set_info, 'flags', field(0, ctypes.c_uint64))
+setattr(struct_kgsl_gpuobj_set_info, 'metadata', field(8, ctypes.c_uint64))
+setattr(struct_kgsl_gpuobj_set_info, 'id', field(16, ctypes.c_uint32))
+setattr(struct_kgsl_gpuobj_set_info, 'metadata_len', field(20, ctypes.c_uint32))
+setattr(struct_kgsl_gpuobj_set_info, 'type', field(24, ctypes.c_uint32))
 KGSL_VERSION_MAJOR = 3
 KGSL_VERSION_MINOR = 14
 KGSL_CONTEXT_SAVE_GMEM = 0x00000001

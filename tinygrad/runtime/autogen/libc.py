@@ -1,6 +1,6 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support.c import Array, DLL, Pointer, Struct, Union, field, CEnum, _IO, _IOW, _IOR, _IOWR
 dll = DLL('libc', 'c', use_errno=True)
 off_t = ctypes.c_int64
 mode_t = ctypes.c_uint32
@@ -36,13 +36,13 @@ except AttributeError: pass
 try: (munlockall:=dll.munlockall).restype, munlockall.argtypes = ctypes.c_int32, []
 except AttributeError: pass
 
-try: (mincore:=dll.mincore).restype, mincore.argtypes = ctypes.c_int32, [ctypes.c_void_p, size_t, ctypes.POINTER(ctypes.c_ubyte)]
+try: (mincore:=dll.mincore).restype, mincore.argtypes = ctypes.c_int32, [ctypes.c_void_p, size_t, Pointer(ctypes.c_ubyte)]
 except AttributeError: pass
 
-try: (shm_open:=dll.shm_open).restype, shm_open.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.c_int32, mode_t]
+try: (shm_open:=dll.shm_open).restype, shm_open.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), ctypes.c_int32, mode_t]
 except AttributeError: pass
 
-try: (shm_unlink:=dll.shm_unlink).restype, shm_unlink.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char)]
+try: (shm_unlink:=dll.shm_unlink).restype, shm_unlink.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char)]
 except AttributeError: pass
 
 try: (memcpy:=dll.memcpy).restype, memcpy.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p, size_t]
@@ -66,83 +66,83 @@ except AttributeError: pass
 try: (memchr:=dll.memchr).restype, memchr.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_int32, size_t]
 except AttributeError: pass
 
-try: (strcpy:=dll.strcpy).restype, strcpy.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
+try: (strcpy:=dll.strcpy).restype, strcpy.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (strncpy:=dll.strncpy).restype, strncpy.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), size_t]
+try: (strncpy:=dll.strncpy).restype, strncpy.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t]
 except AttributeError: pass
 
-try: (strcat:=dll.strcat).restype, strcat.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
+try: (strcat:=dll.strcat).restype, strcat.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (strncat:=dll.strncat).restype, strncat.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), size_t]
+try: (strncat:=dll.strncat).restype, strncat.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t]
 except AttributeError: pass
 
-try: (strcmp:=dll.strcmp).restype, strcmp.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
+try: (strcmp:=dll.strcmp).restype, strcmp.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (strncmp:=dll.strncmp).restype, strncmp.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), size_t]
+try: (strncmp:=dll.strncmp).restype, strncmp.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t]
 except AttributeError: pass
 
-try: (strcoll:=dll.strcoll).restype, strcoll.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
+try: (strcoll:=dll.strcoll).restype, strcoll.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (strxfrm:=dll.strxfrm).restype, strxfrm.argtypes = ctypes.c_uint64, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), size_t]
+try: (strxfrm:=dll.strxfrm).restype, strxfrm.argtypes = ctypes.c_uint64, [Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t]
 except AttributeError: pass
 
 class struct___locale_struct(Struct): pass
 class struct___locale_data(Struct): pass
-struct___locale_struct._fields_ = [
-  ('__locales', (ctypes.POINTER(struct___locale_data) * 13)),
-  ('__ctype_b', ctypes.POINTER(ctypes.c_uint16)),
-  ('__ctype_tolower', ctypes.POINTER(ctypes.c_int32)),
-  ('__ctype_toupper', ctypes.POINTER(ctypes.c_int32)),
-  ('__names', (ctypes.POINTER(ctypes.c_char) * 13)),
-]
-locale_t = ctypes.POINTER(struct___locale_struct)
-try: (strcoll_l:=dll.strcoll_l).restype, strcoll_l.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), locale_t]
+struct___locale_struct.SIZE = 232
+struct___locale_struct._fields_ = ['__locales', '__ctype_b', '__ctype_tolower', '__ctype_toupper', '__names']
+setattr(struct___locale_struct, '__locales', field(0, Array(Pointer(struct___locale_data), 13)))
+setattr(struct___locale_struct, '__ctype_b', field(104, Pointer(ctypes.c_uint16)))
+setattr(struct___locale_struct, '__ctype_tolower', field(112, Pointer(ctypes.c_int32)))
+setattr(struct___locale_struct, '__ctype_toupper', field(120, Pointer(ctypes.c_int32)))
+setattr(struct___locale_struct, '__names', field(128, Array(Pointer(ctypes.c_char), 13)))
+locale_t = Pointer(struct___locale_struct)
+try: (strcoll_l:=dll.strcoll_l).restype, strcoll_l.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), Pointer(ctypes.c_char), locale_t]
 except AttributeError: pass
 
-try: (strxfrm_l:=dll.strxfrm_l).restype, strxfrm_l.argtypes = size_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), size_t, locale_t]
+try: (strxfrm_l:=dll.strxfrm_l).restype, strxfrm_l.argtypes = size_t, [Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t, locale_t]
 except AttributeError: pass
 
-try: (strdup:=dll.strdup).restype, strdup.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char)]
+try: (strdup:=dll.strdup).restype, strdup.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (strndup:=dll.strndup).restype, strndup.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), size_t]
+try: (strndup:=dll.strndup).restype, strndup.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), size_t]
 except AttributeError: pass
 
-try: (strchr:=dll.strchr).restype, strchr.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
+try: (strchr:=dll.strchr).restype, strchr.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), ctypes.c_int32]
 except AttributeError: pass
 
-try: (strrchr:=dll.strrchr).restype, strrchr.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
+try: (strrchr:=dll.strrchr).restype, strrchr.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), ctypes.c_int32]
 except AttributeError: pass
 
-try: (strchrnul:=dll.strchrnul).restype, strchrnul.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
+try: (strchrnul:=dll.strchrnul).restype, strchrnul.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), ctypes.c_int32]
 except AttributeError: pass
 
-try: (strcspn:=dll.strcspn).restype, strcspn.argtypes = ctypes.c_uint64, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
+try: (strcspn:=dll.strcspn).restype, strcspn.argtypes = ctypes.c_uint64, [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (strspn:=dll.strspn).restype, strspn.argtypes = ctypes.c_uint64, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
+try: (strspn:=dll.strspn).restype, strspn.argtypes = ctypes.c_uint64, [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (strpbrk:=dll.strpbrk).restype, strpbrk.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
+try: (strpbrk:=dll.strpbrk).restype, strpbrk.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (strstr:=dll.strstr).restype, strstr.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
+try: (strstr:=dll.strstr).restype, strstr.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (strtok:=dll.strtok).restype, strtok.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
+try: (strtok:=dll.strtok).restype, strtok.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (__strtok_r:=dll.__strtok_r).restype, __strtok_r.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
+try: (__strtok_r:=dll.__strtok_r).restype, __strtok_r.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char), Pointer(Pointer(ctypes.c_char))]
 except AttributeError: pass
 
-try: (strtok_r:=dll.strtok_r).restype, strtok_r.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
+try: (strtok_r:=dll.strtok_r).restype, strtok_r.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char), Pointer(Pointer(ctypes.c_char))]
 except AttributeError: pass
 
-try: (strcasestr:=dll.strcasestr).restype, strcasestr.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
+try: (strcasestr:=dll.strcasestr).restype, strcasestr.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
 try: (memmem:=dll.memmem).restype, memmem.argtypes = ctypes.c_void_p, [ctypes.c_void_p, size_t, ctypes.c_void_p, size_t]
@@ -154,46 +154,46 @@ except AttributeError: pass
 try: (mempcpy:=dll.mempcpy).restype, mempcpy.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-try: (strlen:=dll.strlen).restype, strlen.argtypes = ctypes.c_uint64, [ctypes.POINTER(ctypes.c_char)]
+try: (strlen:=dll.strlen).restype, strlen.argtypes = ctypes.c_uint64, [Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (strnlen:=dll.strnlen).restype, strnlen.argtypes = size_t, [ctypes.POINTER(ctypes.c_char), size_t]
+try: (strnlen:=dll.strnlen).restype, strnlen.argtypes = size_t, [Pointer(ctypes.c_char), size_t]
 except AttributeError: pass
 
-try: (strerror:=dll.strerror).restype, strerror.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.c_int32]
+try: (strerror:=dll.strerror).restype, strerror.argtypes = Pointer(ctypes.c_char), [ctypes.c_int32]
 except AttributeError: pass
 
-try: (strerror_r:=dll.strerror_r).restype, strerror_r.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(ctypes.c_char), size_t]
+try: (strerror_r:=dll.strerror_r).restype, strerror_r.argtypes = ctypes.c_int32, [ctypes.c_int32, Pointer(ctypes.c_char), size_t]
 except AttributeError: pass
 
-try: (strerror_l:=dll.strerror_l).restype, strerror_l.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.c_int32, locale_t]
+try: (strerror_l:=dll.strerror_l).restype, strerror_l.argtypes = Pointer(ctypes.c_char), [ctypes.c_int32, locale_t]
 except AttributeError: pass
 
 try: (explicit_bzero:=dll.explicit_bzero).restype, explicit_bzero.argtypes = None, [ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-try: (strsep:=dll.strsep).restype, strsep.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char)]
+try: (strsep:=dll.strsep).restype, strsep.argtypes = Pointer(ctypes.c_char), [Pointer(Pointer(ctypes.c_char)), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (strsignal:=dll.strsignal).restype, strsignal.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.c_int32]
+try: (strsignal:=dll.strsignal).restype, strsignal.argtypes = Pointer(ctypes.c_char), [ctypes.c_int32]
 except AttributeError: pass
 
-try: (__stpcpy:=dll.__stpcpy).restype, __stpcpy.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
+try: (__stpcpy:=dll.__stpcpy).restype, __stpcpy.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (stpcpy:=dll.stpcpy).restype, stpcpy.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
+try: (stpcpy:=dll.stpcpy).restype, stpcpy.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (__stpncpy:=dll.__stpncpy).restype, __stpncpy.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), size_t]
+try: (__stpncpy:=dll.__stpncpy).restype, __stpncpy.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t]
 except AttributeError: pass
 
-try: (stpncpy:=dll.stpncpy).restype, stpncpy.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), size_t]
+try: (stpncpy:=dll.stpncpy).restype, stpncpy.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t]
 except AttributeError: pass
 
-try: (strlcpy:=dll.strlcpy).restype, strlcpy.argtypes = size_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), size_t]
+try: (strlcpy:=dll.strlcpy).restype, strlcpy.argtypes = size_t, [Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t]
 except AttributeError: pass
 
-try: (strlcat:=dll.strlcat).restype, strlcat.argtypes = size_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), size_t]
+try: (strlcat:=dll.strlcat).restype, strlcat.argtypes = size_t, [Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t]
 except AttributeError: pass
 
 Elf32_Half = ctypes.c_uint16
@@ -215,356 +215,356 @@ Elf64_Section = ctypes.c_uint16
 Elf32_Versym = ctypes.c_uint16
 Elf64_Versym = ctypes.c_uint16
 class Elf32_Ehdr(Struct): pass
-Elf32_Ehdr._fields_ = [
-  ('e_ident', (ctypes.c_ubyte * 16)),
-  ('e_type', Elf32_Half),
-  ('e_machine', Elf32_Half),
-  ('e_version', Elf32_Word),
-  ('e_entry', Elf32_Addr),
-  ('e_phoff', Elf32_Off),
-  ('e_shoff', Elf32_Off),
-  ('e_flags', Elf32_Word),
-  ('e_ehsize', Elf32_Half),
-  ('e_phentsize', Elf32_Half),
-  ('e_phnum', Elf32_Half),
-  ('e_shentsize', Elf32_Half),
-  ('e_shnum', Elf32_Half),
-  ('e_shstrndx', Elf32_Half),
-]
+Elf32_Ehdr.SIZE = 52
+Elf32_Ehdr._fields_ = ['e_ident', 'e_type', 'e_machine', 'e_version', 'e_entry', 'e_phoff', 'e_shoff', 'e_flags', 'e_ehsize', 'e_phentsize', 'e_phnum', 'e_shentsize', 'e_shnum', 'e_shstrndx']
+setattr(Elf32_Ehdr, 'e_ident', field(0, Array(ctypes.c_ubyte, 16)))
+setattr(Elf32_Ehdr, 'e_type', field(16, Elf32_Half))
+setattr(Elf32_Ehdr, 'e_machine', field(18, Elf32_Half))
+setattr(Elf32_Ehdr, 'e_version', field(20, Elf32_Word))
+setattr(Elf32_Ehdr, 'e_entry', field(24, Elf32_Addr))
+setattr(Elf32_Ehdr, 'e_phoff', field(28, Elf32_Off))
+setattr(Elf32_Ehdr, 'e_shoff', field(32, Elf32_Off))
+setattr(Elf32_Ehdr, 'e_flags', field(36, Elf32_Word))
+setattr(Elf32_Ehdr, 'e_ehsize', field(40, Elf32_Half))
+setattr(Elf32_Ehdr, 'e_phentsize', field(42, Elf32_Half))
+setattr(Elf32_Ehdr, 'e_phnum', field(44, Elf32_Half))
+setattr(Elf32_Ehdr, 'e_shentsize', field(46, Elf32_Half))
+setattr(Elf32_Ehdr, 'e_shnum', field(48, Elf32_Half))
+setattr(Elf32_Ehdr, 'e_shstrndx', field(50, Elf32_Half))
 class Elf64_Ehdr(Struct): pass
-Elf64_Ehdr._fields_ = [
-  ('e_ident', (ctypes.c_ubyte * 16)),
-  ('e_type', Elf64_Half),
-  ('e_machine', Elf64_Half),
-  ('e_version', Elf64_Word),
-  ('e_entry', Elf64_Addr),
-  ('e_phoff', Elf64_Off),
-  ('e_shoff', Elf64_Off),
-  ('e_flags', Elf64_Word),
-  ('e_ehsize', Elf64_Half),
-  ('e_phentsize', Elf64_Half),
-  ('e_phnum', Elf64_Half),
-  ('e_shentsize', Elf64_Half),
-  ('e_shnum', Elf64_Half),
-  ('e_shstrndx', Elf64_Half),
-]
+Elf64_Ehdr.SIZE = 64
+Elf64_Ehdr._fields_ = ['e_ident', 'e_type', 'e_machine', 'e_version', 'e_entry', 'e_phoff', 'e_shoff', 'e_flags', 'e_ehsize', 'e_phentsize', 'e_phnum', 'e_shentsize', 'e_shnum', 'e_shstrndx']
+setattr(Elf64_Ehdr, 'e_ident', field(0, Array(ctypes.c_ubyte, 16)))
+setattr(Elf64_Ehdr, 'e_type', field(16, Elf64_Half))
+setattr(Elf64_Ehdr, 'e_machine', field(18, Elf64_Half))
+setattr(Elf64_Ehdr, 'e_version', field(20, Elf64_Word))
+setattr(Elf64_Ehdr, 'e_entry', field(24, Elf64_Addr))
+setattr(Elf64_Ehdr, 'e_phoff', field(32, Elf64_Off))
+setattr(Elf64_Ehdr, 'e_shoff', field(40, Elf64_Off))
+setattr(Elf64_Ehdr, 'e_flags', field(48, Elf64_Word))
+setattr(Elf64_Ehdr, 'e_ehsize', field(52, Elf64_Half))
+setattr(Elf64_Ehdr, 'e_phentsize', field(54, Elf64_Half))
+setattr(Elf64_Ehdr, 'e_phnum', field(56, Elf64_Half))
+setattr(Elf64_Ehdr, 'e_shentsize', field(58, Elf64_Half))
+setattr(Elf64_Ehdr, 'e_shnum', field(60, Elf64_Half))
+setattr(Elf64_Ehdr, 'e_shstrndx', field(62, Elf64_Half))
 class Elf32_Shdr(Struct): pass
-Elf32_Shdr._fields_ = [
-  ('sh_name', Elf32_Word),
-  ('sh_type', Elf32_Word),
-  ('sh_flags', Elf32_Word),
-  ('sh_addr', Elf32_Addr),
-  ('sh_offset', Elf32_Off),
-  ('sh_size', Elf32_Word),
-  ('sh_link', Elf32_Word),
-  ('sh_info', Elf32_Word),
-  ('sh_addralign', Elf32_Word),
-  ('sh_entsize', Elf32_Word),
-]
+Elf32_Shdr.SIZE = 40
+Elf32_Shdr._fields_ = ['sh_name', 'sh_type', 'sh_flags', 'sh_addr', 'sh_offset', 'sh_size', 'sh_link', 'sh_info', 'sh_addralign', 'sh_entsize']
+setattr(Elf32_Shdr, 'sh_name', field(0, Elf32_Word))
+setattr(Elf32_Shdr, 'sh_type', field(4, Elf32_Word))
+setattr(Elf32_Shdr, 'sh_flags', field(8, Elf32_Word))
+setattr(Elf32_Shdr, 'sh_addr', field(12, Elf32_Addr))
+setattr(Elf32_Shdr, 'sh_offset', field(16, Elf32_Off))
+setattr(Elf32_Shdr, 'sh_size', field(20, Elf32_Word))
+setattr(Elf32_Shdr, 'sh_link', field(24, Elf32_Word))
+setattr(Elf32_Shdr, 'sh_info', field(28, Elf32_Word))
+setattr(Elf32_Shdr, 'sh_addralign', field(32, Elf32_Word))
+setattr(Elf32_Shdr, 'sh_entsize', field(36, Elf32_Word))
 class Elf64_Shdr(Struct): pass
-Elf64_Shdr._fields_ = [
-  ('sh_name', Elf64_Word),
-  ('sh_type', Elf64_Word),
-  ('sh_flags', Elf64_Xword),
-  ('sh_addr', Elf64_Addr),
-  ('sh_offset', Elf64_Off),
-  ('sh_size', Elf64_Xword),
-  ('sh_link', Elf64_Word),
-  ('sh_info', Elf64_Word),
-  ('sh_addralign', Elf64_Xword),
-  ('sh_entsize', Elf64_Xword),
-]
+Elf64_Shdr.SIZE = 64
+Elf64_Shdr._fields_ = ['sh_name', 'sh_type', 'sh_flags', 'sh_addr', 'sh_offset', 'sh_size', 'sh_link', 'sh_info', 'sh_addralign', 'sh_entsize']
+setattr(Elf64_Shdr, 'sh_name', field(0, Elf64_Word))
+setattr(Elf64_Shdr, 'sh_type', field(4, Elf64_Word))
+setattr(Elf64_Shdr, 'sh_flags', field(8, Elf64_Xword))
+setattr(Elf64_Shdr, 'sh_addr', field(16, Elf64_Addr))
+setattr(Elf64_Shdr, 'sh_offset', field(24, Elf64_Off))
+setattr(Elf64_Shdr, 'sh_size', field(32, Elf64_Xword))
+setattr(Elf64_Shdr, 'sh_link', field(40, Elf64_Word))
+setattr(Elf64_Shdr, 'sh_info', field(44, Elf64_Word))
+setattr(Elf64_Shdr, 'sh_addralign', field(48, Elf64_Xword))
+setattr(Elf64_Shdr, 'sh_entsize', field(56, Elf64_Xword))
 class Elf32_Chdr(Struct): pass
-Elf32_Chdr._fields_ = [
-  ('ch_type', Elf32_Word),
-  ('ch_size', Elf32_Word),
-  ('ch_addralign', Elf32_Word),
-]
+Elf32_Chdr.SIZE = 12
+Elf32_Chdr._fields_ = ['ch_type', 'ch_size', 'ch_addralign']
+setattr(Elf32_Chdr, 'ch_type', field(0, Elf32_Word))
+setattr(Elf32_Chdr, 'ch_size', field(4, Elf32_Word))
+setattr(Elf32_Chdr, 'ch_addralign', field(8, Elf32_Word))
 class Elf64_Chdr(Struct): pass
-Elf64_Chdr._fields_ = [
-  ('ch_type', Elf64_Word),
-  ('ch_reserved', Elf64_Word),
-  ('ch_size', Elf64_Xword),
-  ('ch_addralign', Elf64_Xword),
-]
+Elf64_Chdr.SIZE = 24
+Elf64_Chdr._fields_ = ['ch_type', 'ch_reserved', 'ch_size', 'ch_addralign']
+setattr(Elf64_Chdr, 'ch_type', field(0, Elf64_Word))
+setattr(Elf64_Chdr, 'ch_reserved', field(4, Elf64_Word))
+setattr(Elf64_Chdr, 'ch_size', field(8, Elf64_Xword))
+setattr(Elf64_Chdr, 'ch_addralign', field(16, Elf64_Xword))
 class Elf32_Sym(Struct): pass
-Elf32_Sym._fields_ = [
-  ('st_name', Elf32_Word),
-  ('st_value', Elf32_Addr),
-  ('st_size', Elf32_Word),
-  ('st_info', ctypes.c_ubyte),
-  ('st_other', ctypes.c_ubyte),
-  ('st_shndx', Elf32_Section),
-]
+Elf32_Sym.SIZE = 16
+Elf32_Sym._fields_ = ['st_name', 'st_value', 'st_size', 'st_info', 'st_other', 'st_shndx']
+setattr(Elf32_Sym, 'st_name', field(0, Elf32_Word))
+setattr(Elf32_Sym, 'st_value', field(4, Elf32_Addr))
+setattr(Elf32_Sym, 'st_size', field(8, Elf32_Word))
+setattr(Elf32_Sym, 'st_info', field(12, ctypes.c_ubyte))
+setattr(Elf32_Sym, 'st_other', field(13, ctypes.c_ubyte))
+setattr(Elf32_Sym, 'st_shndx', field(14, Elf32_Section))
 class Elf64_Sym(Struct): pass
-Elf64_Sym._fields_ = [
-  ('st_name', Elf64_Word),
-  ('st_info', ctypes.c_ubyte),
-  ('st_other', ctypes.c_ubyte),
-  ('st_shndx', Elf64_Section),
-  ('st_value', Elf64_Addr),
-  ('st_size', Elf64_Xword),
-]
+Elf64_Sym.SIZE = 24
+Elf64_Sym._fields_ = ['st_name', 'st_info', 'st_other', 'st_shndx', 'st_value', 'st_size']
+setattr(Elf64_Sym, 'st_name', field(0, Elf64_Word))
+setattr(Elf64_Sym, 'st_info', field(4, ctypes.c_ubyte))
+setattr(Elf64_Sym, 'st_other', field(5, ctypes.c_ubyte))
+setattr(Elf64_Sym, 'st_shndx', field(6, Elf64_Section))
+setattr(Elf64_Sym, 'st_value', field(8, Elf64_Addr))
+setattr(Elf64_Sym, 'st_size', field(16, Elf64_Xword))
 class Elf32_Syminfo(Struct): pass
-Elf32_Syminfo._fields_ = [
-  ('si_boundto', Elf32_Half),
-  ('si_flags', Elf32_Half),
-]
+Elf32_Syminfo.SIZE = 4
+Elf32_Syminfo._fields_ = ['si_boundto', 'si_flags']
+setattr(Elf32_Syminfo, 'si_boundto', field(0, Elf32_Half))
+setattr(Elf32_Syminfo, 'si_flags', field(2, Elf32_Half))
 class Elf64_Syminfo(Struct): pass
-Elf64_Syminfo._fields_ = [
-  ('si_boundto', Elf64_Half),
-  ('si_flags', Elf64_Half),
-]
+Elf64_Syminfo.SIZE = 4
+Elf64_Syminfo._fields_ = ['si_boundto', 'si_flags']
+setattr(Elf64_Syminfo, 'si_boundto', field(0, Elf64_Half))
+setattr(Elf64_Syminfo, 'si_flags', field(2, Elf64_Half))
 class Elf32_Rel(Struct): pass
-Elf32_Rel._fields_ = [
-  ('r_offset', Elf32_Addr),
-  ('r_info', Elf32_Word),
-]
+Elf32_Rel.SIZE = 8
+Elf32_Rel._fields_ = ['r_offset', 'r_info']
+setattr(Elf32_Rel, 'r_offset', field(0, Elf32_Addr))
+setattr(Elf32_Rel, 'r_info', field(4, Elf32_Word))
 class Elf64_Rel(Struct): pass
-Elf64_Rel._fields_ = [
-  ('r_offset', Elf64_Addr),
-  ('r_info', Elf64_Xword),
-]
+Elf64_Rel.SIZE = 16
+Elf64_Rel._fields_ = ['r_offset', 'r_info']
+setattr(Elf64_Rel, 'r_offset', field(0, Elf64_Addr))
+setattr(Elf64_Rel, 'r_info', field(8, Elf64_Xword))
 class Elf32_Rela(Struct): pass
-Elf32_Rela._fields_ = [
-  ('r_offset', Elf32_Addr),
-  ('r_info', Elf32_Word),
-  ('r_addend', Elf32_Sword),
-]
+Elf32_Rela.SIZE = 12
+Elf32_Rela._fields_ = ['r_offset', 'r_info', 'r_addend']
+setattr(Elf32_Rela, 'r_offset', field(0, Elf32_Addr))
+setattr(Elf32_Rela, 'r_info', field(4, Elf32_Word))
+setattr(Elf32_Rela, 'r_addend', field(8, Elf32_Sword))
 class Elf64_Rela(Struct): pass
-Elf64_Rela._fields_ = [
-  ('r_offset', Elf64_Addr),
-  ('r_info', Elf64_Xword),
-  ('r_addend', Elf64_Sxword),
-]
+Elf64_Rela.SIZE = 24
+Elf64_Rela._fields_ = ['r_offset', 'r_info', 'r_addend']
+setattr(Elf64_Rela, 'r_offset', field(0, Elf64_Addr))
+setattr(Elf64_Rela, 'r_info', field(8, Elf64_Xword))
+setattr(Elf64_Rela, 'r_addend', field(16, Elf64_Sxword))
 Elf32_Relr = ctypes.c_uint32
 Elf64_Relr = ctypes.c_uint64
 class Elf32_Phdr(Struct): pass
-Elf32_Phdr._fields_ = [
-  ('p_type', Elf32_Word),
-  ('p_offset', Elf32_Off),
-  ('p_vaddr', Elf32_Addr),
-  ('p_paddr', Elf32_Addr),
-  ('p_filesz', Elf32_Word),
-  ('p_memsz', Elf32_Word),
-  ('p_flags', Elf32_Word),
-  ('p_align', Elf32_Word),
-]
+Elf32_Phdr.SIZE = 32
+Elf32_Phdr._fields_ = ['p_type', 'p_offset', 'p_vaddr', 'p_paddr', 'p_filesz', 'p_memsz', 'p_flags', 'p_align']
+setattr(Elf32_Phdr, 'p_type', field(0, Elf32_Word))
+setattr(Elf32_Phdr, 'p_offset', field(4, Elf32_Off))
+setattr(Elf32_Phdr, 'p_vaddr', field(8, Elf32_Addr))
+setattr(Elf32_Phdr, 'p_paddr', field(12, Elf32_Addr))
+setattr(Elf32_Phdr, 'p_filesz', field(16, Elf32_Word))
+setattr(Elf32_Phdr, 'p_memsz', field(20, Elf32_Word))
+setattr(Elf32_Phdr, 'p_flags', field(24, Elf32_Word))
+setattr(Elf32_Phdr, 'p_align', field(28, Elf32_Word))
 class Elf64_Phdr(Struct): pass
-Elf64_Phdr._fields_ = [
-  ('p_type', Elf64_Word),
-  ('p_flags', Elf64_Word),
-  ('p_offset', Elf64_Off),
-  ('p_vaddr', Elf64_Addr),
-  ('p_paddr', Elf64_Addr),
-  ('p_filesz', Elf64_Xword),
-  ('p_memsz', Elf64_Xword),
-  ('p_align', Elf64_Xword),
-]
+Elf64_Phdr.SIZE = 56
+Elf64_Phdr._fields_ = ['p_type', 'p_flags', 'p_offset', 'p_vaddr', 'p_paddr', 'p_filesz', 'p_memsz', 'p_align']
+setattr(Elf64_Phdr, 'p_type', field(0, Elf64_Word))
+setattr(Elf64_Phdr, 'p_flags', field(4, Elf64_Word))
+setattr(Elf64_Phdr, 'p_offset', field(8, Elf64_Off))
+setattr(Elf64_Phdr, 'p_vaddr', field(16, Elf64_Addr))
+setattr(Elf64_Phdr, 'p_paddr', field(24, Elf64_Addr))
+setattr(Elf64_Phdr, 'p_filesz', field(32, Elf64_Xword))
+setattr(Elf64_Phdr, 'p_memsz', field(40, Elf64_Xword))
+setattr(Elf64_Phdr, 'p_align', field(48, Elf64_Xword))
 class Elf32_Dyn(Struct): pass
-class Elf32_Dyn_d_un(ctypes.Union): pass
-Elf32_Dyn_d_un._fields_ = [
-  ('d_val', Elf32_Word),
-  ('d_ptr', Elf32_Addr),
-]
-Elf32_Dyn._fields_ = [
-  ('d_tag', Elf32_Sword),
-  ('d_un', Elf32_Dyn_d_un),
-]
+class _anonunion0(Union): pass
+_anonunion0.SIZE = 4
+_anonunion0._fields_ = ['d_val', 'd_ptr']
+setattr(_anonunion0, 'd_val', field(0, Elf32_Word))
+setattr(_anonunion0, 'd_ptr', field(0, Elf32_Addr))
+Elf32_Dyn.SIZE = 8
+Elf32_Dyn._fields_ = ['d_tag', 'd_un']
+setattr(Elf32_Dyn, 'd_tag', field(0, Elf32_Sword))
+setattr(Elf32_Dyn, 'd_un', field(4, _anonunion0))
 class Elf64_Dyn(Struct): pass
-class Elf64_Dyn_d_un(ctypes.Union): pass
-Elf64_Dyn_d_un._fields_ = [
-  ('d_val', Elf64_Xword),
-  ('d_ptr', Elf64_Addr),
-]
-Elf64_Dyn._fields_ = [
-  ('d_tag', Elf64_Sxword),
-  ('d_un', Elf64_Dyn_d_un),
-]
+class _anonunion1(Union): pass
+_anonunion1.SIZE = 8
+_anonunion1._fields_ = ['d_val', 'd_ptr']
+setattr(_anonunion1, 'd_val', field(0, Elf64_Xword))
+setattr(_anonunion1, 'd_ptr', field(0, Elf64_Addr))
+Elf64_Dyn.SIZE = 16
+Elf64_Dyn._fields_ = ['d_tag', 'd_un']
+setattr(Elf64_Dyn, 'd_tag', field(0, Elf64_Sxword))
+setattr(Elf64_Dyn, 'd_un', field(8, _anonunion1))
 class Elf32_Verdef(Struct): pass
-Elf32_Verdef._fields_ = [
-  ('vd_version', Elf32_Half),
-  ('vd_flags', Elf32_Half),
-  ('vd_ndx', Elf32_Half),
-  ('vd_cnt', Elf32_Half),
-  ('vd_hash', Elf32_Word),
-  ('vd_aux', Elf32_Word),
-  ('vd_next', Elf32_Word),
-]
+Elf32_Verdef.SIZE = 20
+Elf32_Verdef._fields_ = ['vd_version', 'vd_flags', 'vd_ndx', 'vd_cnt', 'vd_hash', 'vd_aux', 'vd_next']
+setattr(Elf32_Verdef, 'vd_version', field(0, Elf32_Half))
+setattr(Elf32_Verdef, 'vd_flags', field(2, Elf32_Half))
+setattr(Elf32_Verdef, 'vd_ndx', field(4, Elf32_Half))
+setattr(Elf32_Verdef, 'vd_cnt', field(6, Elf32_Half))
+setattr(Elf32_Verdef, 'vd_hash', field(8, Elf32_Word))
+setattr(Elf32_Verdef, 'vd_aux', field(12, Elf32_Word))
+setattr(Elf32_Verdef, 'vd_next', field(16, Elf32_Word))
 class Elf64_Verdef(Struct): pass
-Elf64_Verdef._fields_ = [
-  ('vd_version', Elf64_Half),
-  ('vd_flags', Elf64_Half),
-  ('vd_ndx', Elf64_Half),
-  ('vd_cnt', Elf64_Half),
-  ('vd_hash', Elf64_Word),
-  ('vd_aux', Elf64_Word),
-  ('vd_next', Elf64_Word),
-]
+Elf64_Verdef.SIZE = 20
+Elf64_Verdef._fields_ = ['vd_version', 'vd_flags', 'vd_ndx', 'vd_cnt', 'vd_hash', 'vd_aux', 'vd_next']
+setattr(Elf64_Verdef, 'vd_version', field(0, Elf64_Half))
+setattr(Elf64_Verdef, 'vd_flags', field(2, Elf64_Half))
+setattr(Elf64_Verdef, 'vd_ndx', field(4, Elf64_Half))
+setattr(Elf64_Verdef, 'vd_cnt', field(6, Elf64_Half))
+setattr(Elf64_Verdef, 'vd_hash', field(8, Elf64_Word))
+setattr(Elf64_Verdef, 'vd_aux', field(12, Elf64_Word))
+setattr(Elf64_Verdef, 'vd_next', field(16, Elf64_Word))
 class Elf32_Verdaux(Struct): pass
-Elf32_Verdaux._fields_ = [
-  ('vda_name', Elf32_Word),
-  ('vda_next', Elf32_Word),
-]
+Elf32_Verdaux.SIZE = 8
+Elf32_Verdaux._fields_ = ['vda_name', 'vda_next']
+setattr(Elf32_Verdaux, 'vda_name', field(0, Elf32_Word))
+setattr(Elf32_Verdaux, 'vda_next', field(4, Elf32_Word))
 class Elf64_Verdaux(Struct): pass
-Elf64_Verdaux._fields_ = [
-  ('vda_name', Elf64_Word),
-  ('vda_next', Elf64_Word),
-]
+Elf64_Verdaux.SIZE = 8
+Elf64_Verdaux._fields_ = ['vda_name', 'vda_next']
+setattr(Elf64_Verdaux, 'vda_name', field(0, Elf64_Word))
+setattr(Elf64_Verdaux, 'vda_next', field(4, Elf64_Word))
 class Elf32_Verneed(Struct): pass
-Elf32_Verneed._fields_ = [
-  ('vn_version', Elf32_Half),
-  ('vn_cnt', Elf32_Half),
-  ('vn_file', Elf32_Word),
-  ('vn_aux', Elf32_Word),
-  ('vn_next', Elf32_Word),
-]
+Elf32_Verneed.SIZE = 16
+Elf32_Verneed._fields_ = ['vn_version', 'vn_cnt', 'vn_file', 'vn_aux', 'vn_next']
+setattr(Elf32_Verneed, 'vn_version', field(0, Elf32_Half))
+setattr(Elf32_Verneed, 'vn_cnt', field(2, Elf32_Half))
+setattr(Elf32_Verneed, 'vn_file', field(4, Elf32_Word))
+setattr(Elf32_Verneed, 'vn_aux', field(8, Elf32_Word))
+setattr(Elf32_Verneed, 'vn_next', field(12, Elf32_Word))
 class Elf64_Verneed(Struct): pass
-Elf64_Verneed._fields_ = [
-  ('vn_version', Elf64_Half),
-  ('vn_cnt', Elf64_Half),
-  ('vn_file', Elf64_Word),
-  ('vn_aux', Elf64_Word),
-  ('vn_next', Elf64_Word),
-]
+Elf64_Verneed.SIZE = 16
+Elf64_Verneed._fields_ = ['vn_version', 'vn_cnt', 'vn_file', 'vn_aux', 'vn_next']
+setattr(Elf64_Verneed, 'vn_version', field(0, Elf64_Half))
+setattr(Elf64_Verneed, 'vn_cnt', field(2, Elf64_Half))
+setattr(Elf64_Verneed, 'vn_file', field(4, Elf64_Word))
+setattr(Elf64_Verneed, 'vn_aux', field(8, Elf64_Word))
+setattr(Elf64_Verneed, 'vn_next', field(12, Elf64_Word))
 class Elf32_Vernaux(Struct): pass
-Elf32_Vernaux._fields_ = [
-  ('vna_hash', Elf32_Word),
-  ('vna_flags', Elf32_Half),
-  ('vna_other', Elf32_Half),
-  ('vna_name', Elf32_Word),
-  ('vna_next', Elf32_Word),
-]
+Elf32_Vernaux.SIZE = 16
+Elf32_Vernaux._fields_ = ['vna_hash', 'vna_flags', 'vna_other', 'vna_name', 'vna_next']
+setattr(Elf32_Vernaux, 'vna_hash', field(0, Elf32_Word))
+setattr(Elf32_Vernaux, 'vna_flags', field(4, Elf32_Half))
+setattr(Elf32_Vernaux, 'vna_other', field(6, Elf32_Half))
+setattr(Elf32_Vernaux, 'vna_name', field(8, Elf32_Word))
+setattr(Elf32_Vernaux, 'vna_next', field(12, Elf32_Word))
 class Elf64_Vernaux(Struct): pass
-Elf64_Vernaux._fields_ = [
-  ('vna_hash', Elf64_Word),
-  ('vna_flags', Elf64_Half),
-  ('vna_other', Elf64_Half),
-  ('vna_name', Elf64_Word),
-  ('vna_next', Elf64_Word),
-]
+Elf64_Vernaux.SIZE = 16
+Elf64_Vernaux._fields_ = ['vna_hash', 'vna_flags', 'vna_other', 'vna_name', 'vna_next']
+setattr(Elf64_Vernaux, 'vna_hash', field(0, Elf64_Word))
+setattr(Elf64_Vernaux, 'vna_flags', field(4, Elf64_Half))
+setattr(Elf64_Vernaux, 'vna_other', field(6, Elf64_Half))
+setattr(Elf64_Vernaux, 'vna_name', field(8, Elf64_Word))
+setattr(Elf64_Vernaux, 'vna_next', field(12, Elf64_Word))
 class Elf32_auxv_t(Struct): pass
 uint32_t = ctypes.c_uint32
-class Elf32_auxv_t_a_un(ctypes.Union): pass
-Elf32_auxv_t_a_un._fields_ = [
-  ('a_val', uint32_t),
-]
-Elf32_auxv_t._fields_ = [
-  ('a_type', uint32_t),
-  ('a_un', Elf32_auxv_t_a_un),
-]
+class _anonunion2(Union): pass
+_anonunion2.SIZE = 4
+_anonunion2._fields_ = ['a_val']
+setattr(_anonunion2, 'a_val', field(0, uint32_t))
+Elf32_auxv_t.SIZE = 8
+Elf32_auxv_t._fields_ = ['a_type', 'a_un']
+setattr(Elf32_auxv_t, 'a_type', field(0, uint32_t))
+setattr(Elf32_auxv_t, 'a_un', field(4, _anonunion2))
 class Elf64_auxv_t(Struct): pass
 uint64_t = ctypes.c_uint64
-class Elf64_auxv_t_a_un(ctypes.Union): pass
-Elf64_auxv_t_a_un._fields_ = [
-  ('a_val', uint64_t),
-]
-Elf64_auxv_t._fields_ = [
-  ('a_type', uint64_t),
-  ('a_un', Elf64_auxv_t_a_un),
-]
+class _anonunion3(Union): pass
+_anonunion3.SIZE = 8
+_anonunion3._fields_ = ['a_val']
+setattr(_anonunion3, 'a_val', field(0, uint64_t))
+Elf64_auxv_t.SIZE = 16
+Elf64_auxv_t._fields_ = ['a_type', 'a_un']
+setattr(Elf64_auxv_t, 'a_type', field(0, uint64_t))
+setattr(Elf64_auxv_t, 'a_un', field(8, _anonunion3))
 class Elf32_Nhdr(Struct): pass
-Elf32_Nhdr._fields_ = [
-  ('n_namesz', Elf32_Word),
-  ('n_descsz', Elf32_Word),
-  ('n_type', Elf32_Word),
-]
+Elf32_Nhdr.SIZE = 12
+Elf32_Nhdr._fields_ = ['n_namesz', 'n_descsz', 'n_type']
+setattr(Elf32_Nhdr, 'n_namesz', field(0, Elf32_Word))
+setattr(Elf32_Nhdr, 'n_descsz', field(4, Elf32_Word))
+setattr(Elf32_Nhdr, 'n_type', field(8, Elf32_Word))
 class Elf64_Nhdr(Struct): pass
-Elf64_Nhdr._fields_ = [
-  ('n_namesz', Elf64_Word),
-  ('n_descsz', Elf64_Word),
-  ('n_type', Elf64_Word),
-]
+Elf64_Nhdr.SIZE = 12
+Elf64_Nhdr._fields_ = ['n_namesz', 'n_descsz', 'n_type']
+setattr(Elf64_Nhdr, 'n_namesz', field(0, Elf64_Word))
+setattr(Elf64_Nhdr, 'n_descsz', field(4, Elf64_Word))
+setattr(Elf64_Nhdr, 'n_type', field(8, Elf64_Word))
 class Elf32_Move(Struct): pass
-Elf32_Move._fields_ = [
-  ('m_value', Elf32_Xword),
-  ('m_info', Elf32_Word),
-  ('m_poffset', Elf32_Word),
-  ('m_repeat', Elf32_Half),
-  ('m_stride', Elf32_Half),
-]
+Elf32_Move.SIZE = 24
+Elf32_Move._fields_ = ['m_value', 'm_info', 'm_poffset', 'm_repeat', 'm_stride']
+setattr(Elf32_Move, 'm_value', field(0, Elf32_Xword))
+setattr(Elf32_Move, 'm_info', field(8, Elf32_Word))
+setattr(Elf32_Move, 'm_poffset', field(12, Elf32_Word))
+setattr(Elf32_Move, 'm_repeat', field(16, Elf32_Half))
+setattr(Elf32_Move, 'm_stride', field(18, Elf32_Half))
 class Elf64_Move(Struct): pass
-Elf64_Move._fields_ = [
-  ('m_value', Elf64_Xword),
-  ('m_info', Elf64_Xword),
-  ('m_poffset', Elf64_Xword),
-  ('m_repeat', Elf64_Half),
-  ('m_stride', Elf64_Half),
-]
-class Elf32_gptab(ctypes.Union): pass
-class Elf32_gptab_gt_header(Struct): pass
-Elf32_gptab_gt_header._fields_ = [
-  ('gt_current_g_value', Elf32_Word),
-  ('gt_unused', Elf32_Word),
-]
-class Elf32_gptab_gt_entry(Struct): pass
-Elf32_gptab_gt_entry._fields_ = [
-  ('gt_g_value', Elf32_Word),
-  ('gt_bytes', Elf32_Word),
-]
-Elf32_gptab._fields_ = [
-  ('gt_header', Elf32_gptab_gt_header),
-  ('gt_entry', Elf32_gptab_gt_entry),
-]
+Elf64_Move.SIZE = 32
+Elf64_Move._fields_ = ['m_value', 'm_info', 'm_poffset', 'm_repeat', 'm_stride']
+setattr(Elf64_Move, 'm_value', field(0, Elf64_Xword))
+setattr(Elf64_Move, 'm_info', field(8, Elf64_Xword))
+setattr(Elf64_Move, 'm_poffset', field(16, Elf64_Xword))
+setattr(Elf64_Move, 'm_repeat', field(24, Elf64_Half))
+setattr(Elf64_Move, 'm_stride', field(26, Elf64_Half))
+class Elf32_gptab(Union): pass
+class _anonstruct4(Struct): pass
+_anonstruct4.SIZE = 8
+_anonstruct4._fields_ = ['gt_current_g_value', 'gt_unused']
+setattr(_anonstruct4, 'gt_current_g_value', field(0, Elf32_Word))
+setattr(_anonstruct4, 'gt_unused', field(4, Elf32_Word))
+class _anonstruct5(Struct): pass
+_anonstruct5.SIZE = 8
+_anonstruct5._fields_ = ['gt_g_value', 'gt_bytes']
+setattr(_anonstruct5, 'gt_g_value', field(0, Elf32_Word))
+setattr(_anonstruct5, 'gt_bytes', field(4, Elf32_Word))
+Elf32_gptab.SIZE = 8
+Elf32_gptab._fields_ = ['gt_header', 'gt_entry']
+setattr(Elf32_gptab, 'gt_header', field(0, _anonstruct4))
+setattr(Elf32_gptab, 'gt_entry', field(0, _anonstruct5))
 class Elf32_RegInfo(Struct): pass
-Elf32_RegInfo._fields_ = [
-  ('ri_gprmask', Elf32_Word),
-  ('ri_cprmask', (Elf32_Word * 4)),
-  ('ri_gp_value', Elf32_Sword),
-]
+Elf32_RegInfo.SIZE = 24
+Elf32_RegInfo._fields_ = ['ri_gprmask', 'ri_cprmask', 'ri_gp_value']
+setattr(Elf32_RegInfo, 'ri_gprmask', field(0, Elf32_Word))
+setattr(Elf32_RegInfo, 'ri_cprmask', field(4, Array(Elf32_Word, 4)))
+setattr(Elf32_RegInfo, 'ri_gp_value', field(20, Elf32_Sword))
 class Elf_Options(Struct): pass
-Elf_Options._fields_ = [
-  ('kind', ctypes.c_ubyte),
-  ('size', ctypes.c_ubyte),
-  ('section', Elf32_Section),
-  ('info', Elf32_Word),
-]
+Elf_Options.SIZE = 8
+Elf_Options._fields_ = ['kind', 'size', 'section', 'info']
+setattr(Elf_Options, 'kind', field(0, ctypes.c_ubyte))
+setattr(Elf_Options, 'size', field(1, ctypes.c_ubyte))
+setattr(Elf_Options, 'section', field(2, Elf32_Section))
+setattr(Elf_Options, 'info', field(4, Elf32_Word))
 class Elf_Options_Hw(Struct): pass
-Elf_Options_Hw._fields_ = [
-  ('hwp_flags1', Elf32_Word),
-  ('hwp_flags2', Elf32_Word),
-]
+Elf_Options_Hw.SIZE = 8
+Elf_Options_Hw._fields_ = ['hwp_flags1', 'hwp_flags2']
+setattr(Elf_Options_Hw, 'hwp_flags1', field(0, Elf32_Word))
+setattr(Elf_Options_Hw, 'hwp_flags2', field(4, Elf32_Word))
 class Elf32_Lib(Struct): pass
-Elf32_Lib._fields_ = [
-  ('l_name', Elf32_Word),
-  ('l_time_stamp', Elf32_Word),
-  ('l_checksum', Elf32_Word),
-  ('l_version', Elf32_Word),
-  ('l_flags', Elf32_Word),
-]
+Elf32_Lib.SIZE = 20
+Elf32_Lib._fields_ = ['l_name', 'l_time_stamp', 'l_checksum', 'l_version', 'l_flags']
+setattr(Elf32_Lib, 'l_name', field(0, Elf32_Word))
+setattr(Elf32_Lib, 'l_time_stamp', field(4, Elf32_Word))
+setattr(Elf32_Lib, 'l_checksum', field(8, Elf32_Word))
+setattr(Elf32_Lib, 'l_version', field(12, Elf32_Word))
+setattr(Elf32_Lib, 'l_flags', field(16, Elf32_Word))
 class Elf64_Lib(Struct): pass
-Elf64_Lib._fields_ = [
-  ('l_name', Elf64_Word),
-  ('l_time_stamp', Elf64_Word),
-  ('l_checksum', Elf64_Word),
-  ('l_version', Elf64_Word),
-  ('l_flags', Elf64_Word),
-]
+Elf64_Lib.SIZE = 20
+Elf64_Lib._fields_ = ['l_name', 'l_time_stamp', 'l_checksum', 'l_version', 'l_flags']
+setattr(Elf64_Lib, 'l_name', field(0, Elf64_Word))
+setattr(Elf64_Lib, 'l_time_stamp', field(4, Elf64_Word))
+setattr(Elf64_Lib, 'l_checksum', field(8, Elf64_Word))
+setattr(Elf64_Lib, 'l_version', field(12, Elf64_Word))
+setattr(Elf64_Lib, 'l_flags', field(16, Elf64_Word))
 Elf32_Conflict = ctypes.c_uint32
 class Elf_MIPS_ABIFlags_v0(Struct): pass
-Elf_MIPS_ABIFlags_v0._fields_ = [
-  ('version', Elf32_Half),
-  ('isa_level', ctypes.c_ubyte),
-  ('isa_rev', ctypes.c_ubyte),
-  ('gpr_size', ctypes.c_ubyte),
-  ('cpr1_size', ctypes.c_ubyte),
-  ('cpr2_size', ctypes.c_ubyte),
-  ('fp_abi', ctypes.c_ubyte),
-  ('isa_ext', Elf32_Word),
-  ('ases', Elf32_Word),
-  ('flags1', Elf32_Word),
-  ('flags2', Elf32_Word),
-]
-_anonenum0 = CEnum(ctypes.c_uint32)
-Val_GNU_MIPS_ABI_FP_ANY = _anonenum0.define('Val_GNU_MIPS_ABI_FP_ANY', 0)
-Val_GNU_MIPS_ABI_FP_DOUBLE = _anonenum0.define('Val_GNU_MIPS_ABI_FP_DOUBLE', 1)
-Val_GNU_MIPS_ABI_FP_SINGLE = _anonenum0.define('Val_GNU_MIPS_ABI_FP_SINGLE', 2)
-Val_GNU_MIPS_ABI_FP_SOFT = _anonenum0.define('Val_GNU_MIPS_ABI_FP_SOFT', 3)
-Val_GNU_MIPS_ABI_FP_OLD_64 = _anonenum0.define('Val_GNU_MIPS_ABI_FP_OLD_64', 4)
-Val_GNU_MIPS_ABI_FP_XX = _anonenum0.define('Val_GNU_MIPS_ABI_FP_XX', 5)
-Val_GNU_MIPS_ABI_FP_64 = _anonenum0.define('Val_GNU_MIPS_ABI_FP_64', 6)
-Val_GNU_MIPS_ABI_FP_64A = _anonenum0.define('Val_GNU_MIPS_ABI_FP_64A', 7)
-Val_GNU_MIPS_ABI_FP_MAX = _anonenum0.define('Val_GNU_MIPS_ABI_FP_MAX', 7)
+Elf_MIPS_ABIFlags_v0.SIZE = 24
+Elf_MIPS_ABIFlags_v0._fields_ = ['version', 'isa_level', 'isa_rev', 'gpr_size', 'cpr1_size', 'cpr2_size', 'fp_abi', 'isa_ext', 'ases', 'flags1', 'flags2']
+setattr(Elf_MIPS_ABIFlags_v0, 'version', field(0, Elf32_Half))
+setattr(Elf_MIPS_ABIFlags_v0, 'isa_level', field(2, ctypes.c_ubyte))
+setattr(Elf_MIPS_ABIFlags_v0, 'isa_rev', field(3, ctypes.c_ubyte))
+setattr(Elf_MIPS_ABIFlags_v0, 'gpr_size', field(4, ctypes.c_ubyte))
+setattr(Elf_MIPS_ABIFlags_v0, 'cpr1_size', field(5, ctypes.c_ubyte))
+setattr(Elf_MIPS_ABIFlags_v0, 'cpr2_size', field(6, ctypes.c_ubyte))
+setattr(Elf_MIPS_ABIFlags_v0, 'fp_abi', field(7, ctypes.c_ubyte))
+setattr(Elf_MIPS_ABIFlags_v0, 'isa_ext', field(8, Elf32_Word))
+setattr(Elf_MIPS_ABIFlags_v0, 'ases', field(12, Elf32_Word))
+setattr(Elf_MIPS_ABIFlags_v0, 'flags1', field(16, Elf32_Word))
+setattr(Elf_MIPS_ABIFlags_v0, 'flags2', field(20, Elf32_Word))
+_anonenum6 = CEnum(ctypes.c_uint32)
+Val_GNU_MIPS_ABI_FP_ANY = _anonenum6.define('Val_GNU_MIPS_ABI_FP_ANY', 0)
+Val_GNU_MIPS_ABI_FP_DOUBLE = _anonenum6.define('Val_GNU_MIPS_ABI_FP_DOUBLE', 1)
+Val_GNU_MIPS_ABI_FP_SINGLE = _anonenum6.define('Val_GNU_MIPS_ABI_FP_SINGLE', 2)
+Val_GNU_MIPS_ABI_FP_SOFT = _anonenum6.define('Val_GNU_MIPS_ABI_FP_SOFT', 3)
+Val_GNU_MIPS_ABI_FP_OLD_64 = _anonenum6.define('Val_GNU_MIPS_ABI_FP_OLD_64', 4)
+Val_GNU_MIPS_ABI_FP_XX = _anonenum6.define('Val_GNU_MIPS_ABI_FP_XX', 5)
+Val_GNU_MIPS_ABI_FP_64 = _anonenum6.define('Val_GNU_MIPS_ABI_FP_64', 6)
+Val_GNU_MIPS_ABI_FP_64A = _anonenum6.define('Val_GNU_MIPS_ABI_FP_64A', 7)
+Val_GNU_MIPS_ABI_FP_MAX = _anonenum6.define('Val_GNU_MIPS_ABI_FP_MAX', 7)
 
 ssize_t = ctypes.c_int64
 gid_t = ctypes.c_uint32
@@ -573,10 +573,10 @@ useconds_t = ctypes.c_uint32
 pid_t = ctypes.c_int32
 intptr_t = ctypes.c_int64
 socklen_t = ctypes.c_uint32
-try: (access:=dll.access).restype, access.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
+try: (access:=dll.access).restype, access.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), ctypes.c_int32]
 except AttributeError: pass
 
-try: (faccessat:=dll.faccessat).restype, faccessat.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(ctypes.c_char), ctypes.c_int32, ctypes.c_int32]
+try: (faccessat:=dll.faccessat).restype, faccessat.argtypes = ctypes.c_int32, [ctypes.c_int32, Pointer(ctypes.c_char), ctypes.c_int32, ctypes.c_int32]
 except AttributeError: pass
 
 try: (lseek:=dll.lseek).restype, lseek.argtypes = ctypes.c_int64, [ctypes.c_int32, ctypes.c_int64, ctypes.c_int32]
@@ -600,7 +600,7 @@ except AttributeError: pass
 try: (pwrite:=dll.pwrite).restype, pwrite.argtypes = ssize_t, [ctypes.c_int32, ctypes.c_void_p, size_t, ctypes.c_int64]
 except AttributeError: pass
 
-try: (pipe:=dll.pipe).restype, pipe.argtypes = ctypes.c_int32, [(ctypes.c_int32 * 2)]
+try: (pipe:=dll.pipe).restype, pipe.argtypes = ctypes.c_int32, [Array(ctypes.c_int32, 2)]
 except AttributeError: pass
 
 try: (alarm:=dll.alarm).restype, alarm.argtypes = ctypes.c_uint32, [ctypes.c_uint32]
@@ -621,28 +621,28 @@ except AttributeError: pass
 
 __uid_t = ctypes.c_uint32
 __gid_t = ctypes.c_uint32
-try: (chown:=dll.chown).restype, chown.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, ctypes.c_uint32]
+try: (chown:=dll.chown).restype, chown.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
 try: (fchown:=dll.fchown).restype, fchown.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-try: (lchown:=dll.lchown).restype, lchown.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, ctypes.c_uint32]
+try: (lchown:=dll.lchown).restype, lchown.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-try: (fchownat:=dll.fchownat).restype, fchownat.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int32]
+try: (fchownat:=dll.fchownat).restype, fchownat.argtypes = ctypes.c_int32, [ctypes.c_int32, Pointer(ctypes.c_char), ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int32]
 except AttributeError: pass
 
-try: (chdir:=dll.chdir).restype, chdir.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char)]
+try: (chdir:=dll.chdir).restype, chdir.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char)]
 except AttributeError: pass
 
 try: (fchdir:=dll.fchdir).restype, fchdir.argtypes = ctypes.c_int32, [ctypes.c_int32]
 except AttributeError: pass
 
-try: (getcwd:=dll.getcwd).restype, getcwd.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), size_t]
+try: (getcwd:=dll.getcwd).restype, getcwd.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), size_t]
 except AttributeError: pass
 
-try: (getwd:=dll.getwd).restype, getwd.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char)]
+try: (getwd:=dll.getwd).restype, getwd.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char)]
 except AttributeError: pass
 
 try: (dup:=dll.dup).restype, dup.argtypes = ctypes.c_int32, [ctypes.c_int32]
@@ -651,27 +651,27 @@ except AttributeError: pass
 try: (dup2:=dll.dup2).restype, dup2.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.c_int32]
 except AttributeError: pass
 
-try: __environ = ctypes.POINTER(ctypes.POINTER(ctypes.c_char)).in_dll(dll, '__environ')
+try: __environ = Pointer(Pointer(ctypes.c_char)).in_dll(dll, '__environ')
 except (ValueError,AttributeError): pass
-try: (execve:=dll.execve).restype, execve.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), (ctypes.POINTER(ctypes.c_char) * 0), (ctypes.POINTER(ctypes.c_char) * 0)]
+try: (execve:=dll.execve).restype, execve.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), Array(Pointer(ctypes.c_char), 0), Array(Pointer(ctypes.c_char), 0)]
 except AttributeError: pass
 
-try: (fexecve:=dll.fexecve).restype, fexecve.argtypes = ctypes.c_int32, [ctypes.c_int32, (ctypes.POINTER(ctypes.c_char) * 0), (ctypes.POINTER(ctypes.c_char) * 0)]
+try: (fexecve:=dll.fexecve).restype, fexecve.argtypes = ctypes.c_int32, [ctypes.c_int32, Array(Pointer(ctypes.c_char), 0), Array(Pointer(ctypes.c_char), 0)]
 except AttributeError: pass
 
-try: (execv:=dll.execv).restype, execv.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), (ctypes.POINTER(ctypes.c_char) * 0)]
+try: (execv:=dll.execv).restype, execv.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), Array(Pointer(ctypes.c_char), 0)]
 except AttributeError: pass
 
-try: (execle:=dll.execle).restype, execle.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
+try: (execle:=dll.execle).restype, execle.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (execl:=dll.execl).restype, execl.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
+try: (execl:=dll.execl).restype, execl.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (execvp:=dll.execvp).restype, execvp.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), (ctypes.POINTER(ctypes.c_char) * 0)]
+try: (execvp:=dll.execvp).restype, execvp.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), Array(Pointer(ctypes.c_char), 0)]
 except AttributeError: pass
 
-try: (execlp:=dll.execlp).restype, execlp.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
+try: (execlp:=dll.execlp).restype, execlp.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
 try: (nice:=dll.nice).restype, nice.argtypes = ctypes.c_int32, [ctypes.c_int32]
@@ -680,7 +680,7 @@ except AttributeError: pass
 try: (_exit:=dll._exit).restype, _exit.argtypes = None, [ctypes.c_int32]
 except AttributeError: pass
 
-try: (pathconf:=dll.pathconf).restype, pathconf.argtypes = ctypes.c_int64, [ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
+try: (pathconf:=dll.pathconf).restype, pathconf.argtypes = ctypes.c_int64, [Pointer(ctypes.c_char), ctypes.c_int32]
 except AttributeError: pass
 
 try: (fpathconf:=dll.fpathconf).restype, fpathconf.argtypes = ctypes.c_int64, [ctypes.c_int32, ctypes.c_int32]
@@ -689,7 +689,7 @@ except AttributeError: pass
 try: (sysconf:=dll.sysconf).restype, sysconf.argtypes = ctypes.c_int64, [ctypes.c_int32]
 except AttributeError: pass
 
-try: (confstr:=dll.confstr).restype, confstr.argtypes = size_t, [ctypes.c_int32, ctypes.POINTER(ctypes.c_char), size_t]
+try: (confstr:=dll.confstr).restype, confstr.argtypes = size_t, [ctypes.c_int32, Pointer(ctypes.c_char), size_t]
 except AttributeError: pass
 
 __pid_t = ctypes.c_int32
@@ -732,7 +732,7 @@ except AttributeError: pass
 try: (getegid:=dll.getegid).restype, getegid.argtypes = ctypes.c_uint32, []
 except AttributeError: pass
 
-try: (getgroups:=dll.getgroups).restype, getgroups.argtypes = ctypes.c_int32, [ctypes.c_int32, (ctypes.c_uint32 * 0)]
+try: (getgroups:=dll.getgroups).restype, getgroups.argtypes = ctypes.c_int32, [ctypes.c_int32, Array(ctypes.c_uint32, 0)]
 except AttributeError: pass
 
 try: (setuid:=dll.setuid).restype, setuid.argtypes = ctypes.c_int32, [ctypes.c_uint32]
@@ -759,10 +759,10 @@ except AttributeError: pass
 try: (vfork:=dll.vfork).restype, vfork.argtypes = ctypes.c_int32, []
 except AttributeError: pass
 
-try: (ttyname:=dll.ttyname).restype, ttyname.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.c_int32]
+try: (ttyname:=dll.ttyname).restype, ttyname.argtypes = Pointer(ctypes.c_char), [ctypes.c_int32]
 except AttributeError: pass
 
-try: (ttyname_r:=dll.ttyname_r).restype, ttyname_r.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(ctypes.c_char), size_t]
+try: (ttyname_r:=dll.ttyname_r).restype, ttyname_r.argtypes = ctypes.c_int32, [ctypes.c_int32, Pointer(ctypes.c_char), size_t]
 except AttributeError: pass
 
 try: (isatty:=dll.isatty).restype, isatty.argtypes = ctypes.c_int32, [ctypes.c_int32]
@@ -771,31 +771,31 @@ except AttributeError: pass
 try: (ttyslot:=dll.ttyslot).restype, ttyslot.argtypes = ctypes.c_int32, []
 except AttributeError: pass
 
-try: (link:=dll.link).restype, link.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
+try: (link:=dll.link).restype, link.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (linkat:=dll.linkat).restype, linkat.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(ctypes.c_char), ctypes.c_int32, ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
+try: (linkat:=dll.linkat).restype, linkat.argtypes = ctypes.c_int32, [ctypes.c_int32, Pointer(ctypes.c_char), ctypes.c_int32, Pointer(ctypes.c_char), ctypes.c_int32]
 except AttributeError: pass
 
-try: (symlink:=dll.symlink).restype, symlink.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
+try: (symlink:=dll.symlink).restype, symlink.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (readlink:=dll.readlink).restype, readlink.argtypes = ssize_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), size_t]
+try: (readlink:=dll.readlink).restype, readlink.argtypes = ssize_t, [Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t]
 except AttributeError: pass
 
-try: (symlinkat:=dll.symlinkat).restype, symlinkat.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.c_int32, ctypes.POINTER(ctypes.c_char)]
+try: (symlinkat:=dll.symlinkat).restype, symlinkat.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), ctypes.c_int32, Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (readlinkat:=dll.readlinkat).restype, readlinkat.argtypes = ssize_t, [ctypes.c_int32, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), size_t]
+try: (readlinkat:=dll.readlinkat).restype, readlinkat.argtypes = ssize_t, [ctypes.c_int32, Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t]
 except AttributeError: pass
 
-try: (unlink:=dll.unlink).restype, unlink.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char)]
+try: (unlink:=dll.unlink).restype, unlink.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (unlinkat:=dll.unlinkat).restype, unlinkat.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
+try: (unlinkat:=dll.unlinkat).restype, unlinkat.argtypes = ctypes.c_int32, [ctypes.c_int32, Pointer(ctypes.c_char), ctypes.c_int32]
 except AttributeError: pass
 
-try: (rmdir:=dll.rmdir).restype, rmdir.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char)]
+try: (rmdir:=dll.rmdir).restype, rmdir.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char)]
 except AttributeError: pass
 
 try: (tcgetpgrp:=dll.tcgetpgrp).restype, tcgetpgrp.argtypes = ctypes.c_int32, [ctypes.c_int32]
@@ -804,43 +804,43 @@ except AttributeError: pass
 try: (tcsetpgrp:=dll.tcsetpgrp).restype, tcsetpgrp.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.c_int32]
 except AttributeError: pass
 
-try: (getlogin:=dll.getlogin).restype, getlogin.argtypes = ctypes.POINTER(ctypes.c_char), []
+try: (getlogin:=dll.getlogin).restype, getlogin.argtypes = Pointer(ctypes.c_char), []
 except AttributeError: pass
 
-try: (getlogin_r:=dll.getlogin_r).restype, getlogin_r.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), size_t]
+try: (getlogin_r:=dll.getlogin_r).restype, getlogin_r.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), size_t]
 except AttributeError: pass
 
-try: (setlogin:=dll.setlogin).restype, setlogin.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char)]
+try: (setlogin:=dll.setlogin).restype, setlogin.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (gethostname:=dll.gethostname).restype, gethostname.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), size_t]
+try: (gethostname:=dll.gethostname).restype, gethostname.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), size_t]
 except AttributeError: pass
 
-try: (sethostname:=dll.sethostname).restype, sethostname.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), size_t]
+try: (sethostname:=dll.sethostname).restype, sethostname.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), size_t]
 except AttributeError: pass
 
 try: (sethostid:=dll.sethostid).restype, sethostid.argtypes = ctypes.c_int32, [ctypes.c_int64]
 except AttributeError: pass
 
-try: (getdomainname:=dll.getdomainname).restype, getdomainname.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), size_t]
+try: (getdomainname:=dll.getdomainname).restype, getdomainname.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), size_t]
 except AttributeError: pass
 
-try: (setdomainname:=dll.setdomainname).restype, setdomainname.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), size_t]
+try: (setdomainname:=dll.setdomainname).restype, setdomainname.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), size_t]
 except AttributeError: pass
 
 try: (vhangup:=dll.vhangup).restype, vhangup.argtypes = ctypes.c_int32, []
 except AttributeError: pass
 
-try: (revoke:=dll.revoke).restype, revoke.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char)]
+try: (revoke:=dll.revoke).restype, revoke.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (profil:=dll.profil).restype, profil.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_uint16), size_t, size_t, ctypes.c_uint32]
+try: (profil:=dll.profil).restype, profil.argtypes = ctypes.c_int32, [Pointer(ctypes.c_uint16), size_t, size_t, ctypes.c_uint32]
 except AttributeError: pass
 
-try: (acct:=dll.acct).restype, acct.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char)]
+try: (acct:=dll.acct).restype, acct.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (getusershell:=dll.getusershell).restype, getusershell.argtypes = ctypes.POINTER(ctypes.c_char), []
+try: (getusershell:=dll.getusershell).restype, getusershell.argtypes = Pointer(ctypes.c_char), []
 except AttributeError: pass
 
 try: (endusershell:=dll.endusershell).restype, endusershell.argtypes = None, []
@@ -852,10 +852,10 @@ except AttributeError: pass
 try: (daemon:=dll.daemon).restype, daemon.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.c_int32]
 except AttributeError: pass
 
-try: (chroot:=dll.chroot).restype, chroot.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char)]
+try: (chroot:=dll.chroot).restype, chroot.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (getpass:=dll.getpass).restype, getpass.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char)]
+try: (getpass:=dll.getpass).restype, getpass.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char)]
 except AttributeError: pass
 
 try: (fsync:=dll.fsync).restype, fsync.argtypes = ctypes.c_int32, [ctypes.c_int32]
@@ -873,7 +873,7 @@ except AttributeError: pass
 try: (getdtablesize:=dll.getdtablesize).restype, getdtablesize.argtypes = ctypes.c_int32, []
 except AttributeError: pass
 
-try: (truncate:=dll.truncate).restype, truncate.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.c_int64]
+try: (truncate:=dll.truncate).restype, truncate.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), ctypes.c_int64]
 except AttributeError: pass
 
 try: (ftruncate:=dll.ftruncate).restype, ftruncate.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.c_int64]
@@ -894,7 +894,7 @@ except AttributeError: pass
 try: (fdatasync:=dll.fdatasync).restype, fdatasync.argtypes = ctypes.c_int32, [ctypes.c_int32]
 except AttributeError: pass
 
-try: (crypt:=dll.crypt).restype, crypt.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
+try: (crypt:=dll.crypt).restype, crypt.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
 try: (getentropy:=dll.getentropy).restype, getentropy.argtypes = ctypes.c_int32, [ctypes.c_void_p, size_t]
