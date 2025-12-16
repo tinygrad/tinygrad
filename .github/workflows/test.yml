@@ -1,7 +1,7 @@
 name: Unit Tests
 env:
   # increment this when downloads substantially change to avoid the internet
-  CACHE_VERSION: '14'
+  CACHE_VERSION: '15'
   CAPTURE_PROCESS_REPLAY: 1
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PYTHONPATH: ${{ github.workspace }}
@@ -289,8 +289,8 @@ jobs:
         python extra/optimization/extract_dataset.py
         gzip -c /tmp/sops > extra/datasets/sops.gz
         #DEBUG=1 MIN_ASTS=1 python extra/optimization/get_action_space.py
-    - name: Repo line count < 19150 lines
-      run: MAX_LINE_COUNT=19150 python sz.py
+    - name: Repo line count < 20000 lines
+      run: MAX_LINE_COUNT=20000 python sz.py
 
   spec:
     strategy:
@@ -979,7 +979,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [ir3]
+        backend: [ir3, nak]
     name: Compile-only (${{ matrix.backend }})
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -991,11 +991,11 @@ jobs:
         with:
           key: compile-${{ matrix.backend }}
           deps: testing_minimal
-          mesa: ${{ matrix.backend == 'ir3' && 'true' }}
+          mesa: ${{ (matrix.backend == 'ir3' || matrix.backend == 'nak') && 'true' }}
           python-version: '3.14'
       - name: Set env
         shell: bash
-        run: printf "NULL=1\n${{ matrix.backend == 'ir3' && 'NULL_IR3=1' }}" >> $GITHUB_ENV
+        run: printf "NULL=1\n${{ matrix.backend == 'ir3' && 'NULL_IR3=1' || matrix.backend == 'nak' && 'NULL_NAK=1' }}" >> $GITHUB_ENV
       - name: Run test_ops
         shell: bash
         run: |

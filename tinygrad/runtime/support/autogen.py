@@ -1,7 +1,6 @@
 import ctypes, itertools, re, functools, os
-from tinygrad.helpers import flatten, unwrap
+from tinygrad.helpers import unwrap
 from tinygrad.runtime.autogen import libclang as clang # use REGEN=1 to regenerate libclang bindings
-from typing import Iterator
 
 def unwrap_cursor(c: clang.CXCursor) -> clang.CXCursor:
   assert c != clang.clang_getNullCursor()
@@ -27,9 +26,13 @@ def fields(t: clang.CXType) -> list[clang.CXCursor]:
   clang.clang_Type_visitFields(t, visitor, None)
   return ret
 
-def walk(c: clang.CXCursor) -> Iterator[clang.CXCursor]:
-  yield c
-  for child in children(c): yield from walk(child)
+# flattens anonymous fields
+def all_fields(t, kind):
+  for f in fields(t):
+    if (clang.clang_Cursor_isAnonymousRecordDecl(clang.clang_getTypeDeclaration(clang.clang_getCursorType(f))) and
+        clang.clang_getTypeDeclaration(clang.clang_getCursorType(f)).kind == kind):
+      yield from all_fields(clang.clang_getCursorType(f), kind)
+    else: yield f
 
 def arguments(c: clang.CXCursor|clang.CXType):
   yield from ((clang.clang_Cursor_getArgument if isinstance(c, clang.CXCursor) else clang.clang_getArgType)(c, i)
@@ -88,7 +91,7 @@ fns, specs = (clang.CXType_FunctionProto, clang.CXType_FunctionNoProto), (clang.
 # https://clang.llvm.org/docs/AutomaticReferenceCounting.html#arc-method-families
 arc_families = ['alloc', 'copy', 'mutableCopy', 'new']
 
-def gen(dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, use_errno=False, anon_names={}, types={}, parse_macros=True):
+def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, errno=False, anon_names={}, types={}, parse_macros=True, paths=[]):
   macros, lines, anoncnt, types, objc = [], [], itertools.count().__next__, {k:(v,True) for k,v in types.items()}, False
   def tname(t, suggested_name=None, typedef=None) -> str:
     suggested_name = anon_names.get(f"{loc_file(loc(decl:=clang.clang_getTypeDeclaration(t)))}:{loc_line(loc(decl))}", suggested_name)
@@ -137,7 +140,7 @@ def gen(dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, use_e
         def is_anon(f): return clang.clang_Cursor_isAnonymousRecordDecl(clang.clang_getTypeDeclaration(clang.clang_getCursorType(f)))
         ll=["  ("+((fn:=f"'_{acnt()}'")+f", {tname(clang.clang_getCursorType(f), tnm+fn[1:-1])}" if is_anon(f) else f"'{nm(f)}', "+
             tname(clang.clang_getCursorType(f), f'{tnm}_{nm(f)}'))+(f',{clang.clang_getFieldDeclBitWidth(f)}' * clang.clang_Cursor_isBitField(f))+"),"
-            for f in fields(t)]
+            for f in all_fields(t, decl.kind)]
         lines.extend(([f"{tnm}._anonymous_ = ["+", ".join(f"'_{i}'" for i in range(n))+"]"] if (n:=acnt()) else [])+
                      ([f"{tnm}._packed_ = True"] * is_packed)+([f"{tnm}._fields_ = [",*ll,"]"] if ll else []))
         return tnm
@@ -215,8 +218,9 @@ def gen(dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, use_e
     aa = ctypes.cast((ctypes.c_char_p * len(args))(*[x.encode() for x in args]), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))) if len(args) else None
     tu = clang.clang_parseTranslationUnit(idx:=clang.clang_createIndex(False, 0), os.fspath(f).encode(), aa, len(args), None, 0,
                                           clang.CXTranslationUnit_DetailedPreprocessingRecord)
-    # FIXME: deep walk is not neccesary...
-    for c in walk(unwrap_cursor(clang.clang_getTranslationUnitCursor(tu))):
+    q = list(children(unwrap_cursor(clang.clang_getTranslationUnitCursor(tu))))[::-1]
+    while q:
+      c = q.pop()
       if loc_file(loc(c)) != str(f) and (not recsym or c.kind not in (clang.CXCursor_FunctionDecl,)): continue
       rollback = lines, types
       try:
@@ -247,16 +251,15 @@ def gen(dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, use_e
           case clang.CXCursor_VarDecl if clang.clang_getCursorLinkage(c) == clang.CXLinkage_External and dll:
             lines.append(f"try: {nm(c)} = {tname(clang.clang_getCursorType(c))}.in_dll(dll, '{nm(c)}')\nexcept (ValueError,AttributeError): pass")
           case clang.CXCursor_ObjCProtocolDecl: proto(c)
+          case clang.CXCursor_Namespace | clang.CXCursor_LinkageSpec: q.extend(list(children(c))[::-1])
       except NotImplementedError as e:
         print(f"skipping {nm(c)}: {e}")
         lines, types = rollback
     clang.clang_disposeTranslationUnit(tu)
     clang.clang_disposeIndex(idx)
-  main = (f"# mypy: ignore-errors\nimport ctypes{', os' if any('os' in s for s in dll) else ''}\n"
-    "from tinygrad.helpers import unwrap\nfrom tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR\n" + '\n'.join([*prolog,
-      *(["from ctypes.util import find_library"]*any('find_library' in s for s in dll)), *(["from tinygrad.runtime.support import objc"]*objc),
-      *(["def dll():",*flatten([[f"  try: return ctypes.CDLL(unwrap({d}){', use_errno=True' if use_errno else ''})",'  except: pass'] for d in dll]),
-         "  return None", "dll = dll()\n"]*bool(dll)), *lines]) + '\n')
+  main = '\n'.join(["# mypy: ignore-errors", "import ctypes", "from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR",
+                    *prolog, *(["from tinygrad.runtime.support import objc"]*objc),
+                    *([f"dll = DLL('{name}', {dll}{f', {paths}'*bool(paths)}{', use_errno=True'*errno})"] if dll else []), *lines]) + '\n'
   macros = [r for m in macros if (r:=functools.reduce(lambda s,r:re.sub(r[0], r[1], s), rules + base_rules, m))]
   while True:
     try:

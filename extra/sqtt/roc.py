@@ -158,14 +158,13 @@ def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
   t.join()
   return ROCParseCtx
 
-def print_pmc(ev:ProfilePMCEvent) -> None:
-  ptr = 0
-  view = memoryview(ev.blob).cast('Q')
-  for s in ev.sched:
-    print(f"\t{s.name}")
-    for xcc, inst, se_idx, sa_idx, wgp_idx in itertools.product(range(s.xcc), range(s.inst), range(s.se), range(s.sa), range(s.wgp)):
-      print(f"\t\tXCC {xcc} Inst {inst:<2} SE {se_idx} SA {sa_idx} WGP {wgp_idx}: {view[ptr]:#x}")
-      ptr += 1
+def print_pmc(events:list[ProfilePMCEvent]) -> None:
+  from tinygrad.viz.serve import unpack_pmc
+  from tabulate import tabulate
+  for e in events:
+    print("**", e.kern)
+    data = unpack_pmc(e)
+    print(tabulate([r[:-1] for r in data["rows"]], headers=data["cols"], tablefmt="github"))
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
@@ -176,7 +175,4 @@ if __name__ == "__main__":
   rctx = decode(profile)
   print('SQTT:', rctx.inst_execs.keys())
 
-  for ev in profile:
-    if not isinstance(ev, ProfilePMCEvent): continue
-    print(f"PMC Event: dev={ev.device} kern={ev.kern}")
-    print_pmc(ev)
+  print_pmc([ev for ev in profile if isinstance(ev, ProfilePMCEvent)])

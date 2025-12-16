@@ -64,16 +64,15 @@ def consumer_map_from_toposort(lst:Iterable[UOp]):
     for s in u.src: ret[s][u] = None
   return ret
 
-# used for UOp and UPat
-def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->str:
-  def dfs(x:Any, cache:dict):
-    for s in srcfn(x) or []:
+def pretty_print(x:UOp, cache=None, d=0)->str:
+  def dfs(x:UOp, cache:dict):
+    for s in x.src:
       cache.setdefault(s, [len(cache), 0, False])[1] += 1
       if cache[s][1] == 1: dfs(s, cache)
   if cache is None: dfs(x, cache:={})
   if (cx:=cache.setdefault(x, [0,0,False]))[2]: return f"{' '*d} x{cx[0]}"
-  cx[2], srcs = True, ('None' if srcfn(x) is None else ''.join(f'\n{pretty_print(s, rep, srcfn, cache, d+2)},' for s in srcfn(x)))
-  return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{rep(x)}" % srcs
+  cx[2], srcs = True, (''.join(f'\n{pretty_print(s, cache, d+2)},' for s in x.src))
+  return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{type(x).__name__}({x.op}, {x.dtype}, arg={x.argstr()}{x.tagstr()}, src=({srcs}))"
 
 class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
@@ -145,7 +144,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @functools.cached_property
   def key(self) -> bytes:
     return hashlib.sha256(str((self.op, self.dtype, self.arg)).encode() + b"".join([s.key for s in self.src])).digest()
-  def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}{x.tagstr()}, src=(%s))")
+  def __repr__(self): return pretty_print(self)
   def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is Ops.REDUCE_AXIS else repr(self.arg)
   def tagstr(self): return f", tag={self.tag}" if self.tag is not None else ""
 
@@ -159,7 +158,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   @property
   def backward_slice_with_self(self:UOp) -> dict[UOp, None]: return {self:None, **self.backward_slice}
-  def op_in_backward_slice_with_self(self, *ops:Ops): return any(x.op in ops for x in self.backward_slice_with_self)
+  def op_in_backward_slice_with_self(self, *ops:Ops) -> bool:
+    # Check self first, then iterate backward_slice (avoids creating intermediate dict)
+    return self.op in ops or any(x.op in ops for x in self.backward_slice)
 
   def toposort(self, gate:Callable|None=None) -> dict[UOp, None]:
     cache: dict[UOp, None] = {}
@@ -341,6 +342,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   # *** uop evaluation ***
 
   def simplify(self, tracked=False):
+    if self.op in {Ops.CONST, Ops.VCONST}: return self
     # late import!
     from tinygrad.uop.symbolic import symbolic
     with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
@@ -1192,16 +1194,13 @@ class BottomUpGate(Exception): pass
 class RewriteContext:
   def __init__(self, pm, bpm, ctx=None):
     self.pm: PatternMatcher|None = pm
-    self.pm_cache: dict[UOp, UOp|None] = {}
     self.bpm: PatternMatcher|None = bpm
     self.bpm_cache: dict[UOp, UOp|None] = {}
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
 
-  def cached_pm_rewrite(self, x:UOp) -> UOp|None:
-    if (ret:=self.pm_cache.get(x,SENTINEL)) is not SENTINEL: return ret
-    ret = self.pm_cache[x] = unwrap(self.pm).rewrite(x, self.ctx)
-    return ret
+  # no cache needed: pm_rewrite is called at most once per UOp due to the replace dict check in unified_rewrite
+  def pm_rewrite(self, x:UOp) -> UOp|None: return unwrap(self.pm).rewrite(x, self.ctx)
 
   def cached_bpm_rewrite(self, x:UOp) -> UOp|None:
     if (ret:=self.bpm_cache.get(x,SENTINEL)) is not SENTINEL: return ret
@@ -1248,7 +1247,7 @@ class RewriteContext:
           # in stage 1, once all srcs are rewritten, rebuild (if changed) or run top-down rewrite
           if (new_src:=tuple(tmp)) == new_n.src:
             # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node so we add it to the dict
-            if self.pm is None or (new_src_n:=self.cached_pm_rewrite(new_n)) is None:
+            if self.pm is None or (new_src_n:=self.pm_rewrite(new_n)) is None:
               self.replace[n] = new_n
               continue
           else:
