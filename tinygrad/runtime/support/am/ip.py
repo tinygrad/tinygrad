@@ -213,6 +213,8 @@ class AM_GFX(AM_IP):
   def init_sw(self): self.xccs = len(self.adev.regs_offset[am.GC_HWIP])
 
   def init_hw(self):
+    self.adev.gmc.hub_initted["MM"] = True  # MM hub must be initialized before GFX hub
+
     # Wait for RLC autoload to complete
     while self.adev.regCP_STAT.read() != 0 and self.adev.regRLC_RLCS_BOOTLOAD_STATUS.read_bitfields()['bootload_complete'] != 0: pass
 
