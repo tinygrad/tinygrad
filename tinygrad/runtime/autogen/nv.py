@@ -1,60 +1,58 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support.c import Array, DLL, Pointer, Struct, Union, field, CEnum, _IO, _IOW, _IOR, _IOWR
 class MCTP_HEADER(Struct): pass
 NvU32 = ctypes.c_uint32
 NvU8 = ctypes.c_ubyte
 NvU16 = ctypes.c_uint16
-MCTP_HEADER._packed_ = True
-MCTP_HEADER._fields_ = [
-  ('constBlob', NvU32),
-  ('msgType', NvU8),
-  ('vendorId', NvU16),
-]
+MCTP_HEADER.SIZE = 7
+MCTP_HEADER._fields_ = ['constBlob', 'msgType', 'vendorId']
+setattr(MCTP_HEADER, 'constBlob', field(0, NvU32))
+setattr(MCTP_HEADER, 'msgType', field(4, NvU8))
+setattr(MCTP_HEADER, 'vendorId', field(5, NvU16))
 class NVDM_PAYLOAD_COT(Struct): pass
 NvU64 = ctypes.c_uint64
-NVDM_PAYLOAD_COT._packed_ = True
-NVDM_PAYLOAD_COT._fields_ = [
-  ('version', NvU16),
-  ('size', NvU16),
-  ('gspFmcSysmemOffset', NvU64),
-  ('frtsSysmemOffset', NvU64),
-  ('frtsSysmemSize', NvU32),
-  ('frtsVidmemOffset', NvU64),
-  ('frtsVidmemSize', NvU32),
-  ('hash384', (NvU32 * 12)),
-  ('publicKey', (NvU32 * 96)),
-  ('signature', (NvU32 * 96)),
-  ('gspBootArgsSysmemOffset', NvU64),
-]
+NVDM_PAYLOAD_COT.SIZE = 860
+NVDM_PAYLOAD_COT._fields_ = ['version', 'size', 'gspFmcSysmemOffset', 'frtsSysmemOffset', 'frtsSysmemSize', 'frtsVidmemOffset', 'frtsVidmemSize', 'hash384', 'publicKey', 'signature', 'gspBootArgsSysmemOffset']
+setattr(NVDM_PAYLOAD_COT, 'version', field(0, NvU16))
+setattr(NVDM_PAYLOAD_COT, 'size', field(2, NvU16))
+setattr(NVDM_PAYLOAD_COT, 'gspFmcSysmemOffset', field(4, NvU64))
+setattr(NVDM_PAYLOAD_COT, 'frtsSysmemOffset', field(12, NvU64))
+setattr(NVDM_PAYLOAD_COT, 'frtsSysmemSize', field(20, NvU32))
+setattr(NVDM_PAYLOAD_COT, 'frtsVidmemOffset', field(24, NvU64))
+setattr(NVDM_PAYLOAD_COT, 'frtsVidmemSize', field(32, NvU32))
+setattr(NVDM_PAYLOAD_COT, 'hash384', field(36, Array(NvU32, 12)))
+setattr(NVDM_PAYLOAD_COT, 'publicKey', field(84, Array(NvU32, 96)))
+setattr(NVDM_PAYLOAD_COT, 'signature', field(468, Array(NvU32, 96)))
+setattr(NVDM_PAYLOAD_COT, 'gspBootArgsSysmemOffset', field(852, NvU64))
 class MESSAGE_QUEUE_INIT_ARGUMENTS(Struct): pass
 NvLength = ctypes.c_uint64
-MESSAGE_QUEUE_INIT_ARGUMENTS._fields_ = [
-  ('sharedMemPhysAddr', NvU64),
-  ('pageTableEntryCount', NvU32),
-  ('cmdQueueOffset', NvLength),
-  ('statQueueOffset', NvLength),
-]
+MESSAGE_QUEUE_INIT_ARGUMENTS.SIZE = 32
+MESSAGE_QUEUE_INIT_ARGUMENTS._fields_ = ['sharedMemPhysAddr', 'pageTableEntryCount', 'cmdQueueOffset', 'statQueueOffset']
+setattr(MESSAGE_QUEUE_INIT_ARGUMENTS, 'sharedMemPhysAddr', field(0, NvU64))
+setattr(MESSAGE_QUEUE_INIT_ARGUMENTS, 'pageTableEntryCount', field(8, NvU32))
+setattr(MESSAGE_QUEUE_INIT_ARGUMENTS, 'cmdQueueOffset', field(16, NvLength))
+setattr(MESSAGE_QUEUE_INIT_ARGUMENTS, 'statQueueOffset', field(24, NvLength))
 class GSP_SR_INIT_ARGUMENTS(Struct): pass
 NvBool = ctypes.c_ubyte
-GSP_SR_INIT_ARGUMENTS._fields_ = [
-  ('oldLevel', NvU32),
-  ('flags', NvU32),
-  ('bInPMTransition', NvBool),
-]
+GSP_SR_INIT_ARGUMENTS.SIZE = 12
+GSP_SR_INIT_ARGUMENTS._fields_ = ['oldLevel', 'flags', 'bInPMTransition']
+setattr(GSP_SR_INIT_ARGUMENTS, 'oldLevel', field(0, NvU32))
+setattr(GSP_SR_INIT_ARGUMENTS, 'flags', field(4, NvU32))
+setattr(GSP_SR_INIT_ARGUMENTS, 'bInPMTransition', field(8, NvBool))
 class GSP_ARGUMENTS_CACHED(Struct): pass
-class GSP_ARGUMENTS_CACHED_profilerArgs(Struct): pass
-GSP_ARGUMENTS_CACHED_profilerArgs._fields_ = [
-  ('pa', NvU64),
-  ('size', NvU64),
-]
-GSP_ARGUMENTS_CACHED._fields_ = [
-  ('messageQueueInitArguments', MESSAGE_QUEUE_INIT_ARGUMENTS),
-  ('srInitArguments', GSP_SR_INIT_ARGUMENTS),
-  ('gpuInstance', NvU32),
-  ('bDmemStack', NvBool),
-  ('profilerArgs', GSP_ARGUMENTS_CACHED_profilerArgs),
-]
+class _anonstruct0(Struct): pass
+_anonstruct0.SIZE = 16
+_anonstruct0._fields_ = ['pa', 'size']
+setattr(_anonstruct0, 'pa', field(0, NvU64))
+setattr(_anonstruct0, 'size', field(8, NvU64))
+GSP_ARGUMENTS_CACHED.SIZE = 72
+GSP_ARGUMENTS_CACHED._fields_ = ['messageQueueInitArguments', 'srInitArguments', 'gpuInstance', 'bDmemStack', 'profilerArgs']
+setattr(GSP_ARGUMENTS_CACHED, 'messageQueueInitArguments', field(0, MESSAGE_QUEUE_INIT_ARGUMENTS))
+setattr(GSP_ARGUMENTS_CACHED, 'srInitArguments', field(32, GSP_SR_INIT_ARGUMENTS))
+setattr(GSP_ARGUMENTS_CACHED, 'gpuInstance', field(44, NvU32))
+setattr(GSP_ARGUMENTS_CACHED, 'bDmemStack', field(48, NvBool))
+setattr(GSP_ARGUMENTS_CACHED, 'profilerArgs', field(56, _anonstruct0))
 GSP_DMA_TARGET = CEnum(ctypes.c_uint32)
 GSP_DMA_TARGET_LOCAL_FB = GSP_DMA_TARGET.define('GSP_DMA_TARGET_LOCAL_FB', 0)
 GSP_DMA_TARGET_COHERENT_SYSTEM = GSP_DMA_TARGET.define('GSP_DMA_TARGET_COHERENT_SYSTEM', 1)
@@ -62,163 +60,136 @@ GSP_DMA_TARGET_NONCOHERENT_SYSTEM = GSP_DMA_TARGET.define('GSP_DMA_TARGET_NONCOH
 GSP_DMA_TARGET_COUNT = GSP_DMA_TARGET.define('GSP_DMA_TARGET_COUNT', 3)
 
 class struct_GSP_FMC_INIT_PARAMS(Struct): pass
-struct_GSP_FMC_INIT_PARAMS._fields_ = [
-  ('regkeys', NvU32),
-]
+struct_GSP_FMC_INIT_PARAMS.SIZE = 4
+struct_GSP_FMC_INIT_PARAMS._fields_ = ['regkeys']
+setattr(struct_GSP_FMC_INIT_PARAMS, 'regkeys', field(0, NvU32))
 GSP_FMC_INIT_PARAMS = struct_GSP_FMC_INIT_PARAMS
 class struct_GSP_ACR_BOOT_GSP_RM_PARAMS(Struct): pass
-struct_GSP_ACR_BOOT_GSP_RM_PARAMS._fields_ = [
-  ('target', GSP_DMA_TARGET),
-  ('gspRmDescSize', NvU32),
-  ('gspRmDescOffset', NvU64),
-  ('wprCarveoutOffset', NvU64),
-  ('wprCarveoutSize', NvU32),
-  ('bIsGspRmBoot', NvBool),
-]
+struct_GSP_ACR_BOOT_GSP_RM_PARAMS.SIZE = 32
+struct_GSP_ACR_BOOT_GSP_RM_PARAMS._fields_ = ['target', 'gspRmDescSize', 'gspRmDescOffset', 'wprCarveoutOffset', 'wprCarveoutSize', 'bIsGspRmBoot']
+setattr(struct_GSP_ACR_BOOT_GSP_RM_PARAMS, 'target', field(0, GSP_DMA_TARGET))
+setattr(struct_GSP_ACR_BOOT_GSP_RM_PARAMS, 'gspRmDescSize', field(4, NvU32))
+setattr(struct_GSP_ACR_BOOT_GSP_RM_PARAMS, 'gspRmDescOffset', field(8, NvU64))
+setattr(struct_GSP_ACR_BOOT_GSP_RM_PARAMS, 'wprCarveoutOffset', field(16, NvU64))
+setattr(struct_GSP_ACR_BOOT_GSP_RM_PARAMS, 'wprCarveoutSize', field(24, NvU32))
+setattr(struct_GSP_ACR_BOOT_GSP_RM_PARAMS, 'bIsGspRmBoot', field(28, NvBool))
 GSP_ACR_BOOT_GSP_RM_PARAMS = struct_GSP_ACR_BOOT_GSP_RM_PARAMS
 class struct_GSP_RM_PARAMS(Struct): pass
-struct_GSP_RM_PARAMS._fields_ = [
-  ('target', GSP_DMA_TARGET),
-  ('bootArgsOffset', NvU64),
-]
+struct_GSP_RM_PARAMS.SIZE = 16
+struct_GSP_RM_PARAMS._fields_ = ['target', 'bootArgsOffset']
+setattr(struct_GSP_RM_PARAMS, 'target', field(0, GSP_DMA_TARGET))
+setattr(struct_GSP_RM_PARAMS, 'bootArgsOffset', field(8, NvU64))
 GSP_RM_PARAMS = struct_GSP_RM_PARAMS
 class struct_GSP_SPDM_PARAMS(Struct): pass
-struct_GSP_SPDM_PARAMS._fields_ = [
-  ('target', GSP_DMA_TARGET),
-  ('payloadBufferOffset', NvU64),
-  ('payloadBufferSize', NvU32),
-]
+struct_GSP_SPDM_PARAMS.SIZE = 24
+struct_GSP_SPDM_PARAMS._fields_ = ['target', 'payloadBufferOffset', 'payloadBufferSize']
+setattr(struct_GSP_SPDM_PARAMS, 'target', field(0, GSP_DMA_TARGET))
+setattr(struct_GSP_SPDM_PARAMS, 'payloadBufferOffset', field(8, NvU64))
+setattr(struct_GSP_SPDM_PARAMS, 'payloadBufferSize', field(16, NvU32))
 GSP_SPDM_PARAMS = struct_GSP_SPDM_PARAMS
 class struct_GSP_FMC_BOOT_PARAMS(Struct): pass
-struct_GSP_FMC_BOOT_PARAMS._fields_ = [
-  ('initParams', GSP_FMC_INIT_PARAMS),
-  ('bootGspRmParams', GSP_ACR_BOOT_GSP_RM_PARAMS),
-  ('gspRmParams', GSP_RM_PARAMS),
-  ('gspSpdmParams', GSP_SPDM_PARAMS),
-]
+struct_GSP_FMC_BOOT_PARAMS.SIZE = 80
+struct_GSP_FMC_BOOT_PARAMS._fields_ = ['initParams', 'bootGspRmParams', 'gspRmParams', 'gspSpdmParams']
+setattr(struct_GSP_FMC_BOOT_PARAMS, 'initParams', field(0, GSP_FMC_INIT_PARAMS))
+setattr(struct_GSP_FMC_BOOT_PARAMS, 'bootGspRmParams', field(8, GSP_ACR_BOOT_GSP_RM_PARAMS))
+setattr(struct_GSP_FMC_BOOT_PARAMS, 'gspRmParams', field(40, GSP_RM_PARAMS))
+setattr(struct_GSP_FMC_BOOT_PARAMS, 'gspSpdmParams', field(56, GSP_SPDM_PARAMS))
 GSP_FMC_BOOT_PARAMS = struct_GSP_FMC_BOOT_PARAMS
 class GspFwWprMeta(Struct): pass
-class GspFwWprMeta_0(ctypes.Union): pass
-class GspFwWprMeta_0_0(Struct): pass
-GspFwWprMeta_0_0._fields_ = [
-  ('sysmemAddrOfSignature', NvU64),
-  ('sizeOfSignature', NvU64),
-]
-class GspFwWprMeta_0_1(Struct): pass
-GspFwWprMeta_0_1._fields_ = [
-  ('gspFwHeapFreeListWprOffset', NvU32),
-  ('unused0', NvU32),
-  ('unused1', NvU64),
-]
-GspFwWprMeta_0._anonymous_ = ['_0', '_1']
-GspFwWprMeta_0._fields_ = [
-  ('_0', GspFwWprMeta_0_0),
-  ('_1', GspFwWprMeta_0_1),
-]
-class GspFwWprMeta_1(ctypes.Union): pass
-class GspFwWprMeta_1_0(Struct): pass
-GspFwWprMeta_1_0._fields_ = [
-  ('partitionRpcAddr', NvU64),
-  ('partitionRpcRequestOffset', NvU16),
-  ('partitionRpcReplyOffset', NvU16),
-  ('elfCodeOffset', NvU32),
-  ('elfDataOffset', NvU32),
-  ('elfCodeSize', NvU32),
-  ('elfDataSize', NvU32),
-  ('lsUcodeVersion', NvU32),
-]
-class GspFwWprMeta_1_1(Struct): pass
-GspFwWprMeta_1_1._fields_ = [
-  ('partitionRpcPadding', (NvU32 * 4)),
-  ('sysmemAddrOfCrashReportQueue', NvU64),
-  ('sizeOfCrashReportQueue', NvU32),
-  ('lsUcodeVersionPadding', (NvU32 * 1)),
-]
-GspFwWprMeta_1._anonymous_ = ['_0', '_1']
-GspFwWprMeta_1._fields_ = [
-  ('_0', GspFwWprMeta_1_0),
-  ('_1', GspFwWprMeta_1_1),
-]
-GspFwWprMeta._anonymous_ = ['_0', '_1']
-GspFwWprMeta._fields_ = [
-  ('magic', NvU64),
-  ('revision', NvU64),
-  ('sysmemAddrOfRadix3Elf', NvU64),
-  ('sizeOfRadix3Elf', NvU64),
-  ('sysmemAddrOfBootloader', NvU64),
-  ('sizeOfBootloader', NvU64),
-  ('bootloaderCodeOffset', NvU64),
-  ('bootloaderDataOffset', NvU64),
-  ('bootloaderManifestOffset', NvU64),
-  ('_0', GspFwWprMeta_0),
-  ('gspFwRsvdStart', NvU64),
-  ('nonWprHeapOffset', NvU64),
-  ('nonWprHeapSize', NvU64),
-  ('gspFwWprStart', NvU64),
-  ('gspFwHeapOffset', NvU64),
-  ('gspFwHeapSize', NvU64),
-  ('gspFwOffset', NvU64),
-  ('bootBinOffset', NvU64),
-  ('frtsOffset', NvU64),
-  ('frtsSize', NvU64),
-  ('gspFwWprEnd', NvU64),
-  ('fbSize', NvU64),
-  ('vgaWorkspaceOffset', NvU64),
-  ('vgaWorkspaceSize', NvU64),
-  ('bootCount', NvU64),
-  ('_1', GspFwWprMeta_1),
-  ('gspFwHeapVfPartitionCount', NvU8),
-  ('flags', NvU8),
-  ('padding', (NvU8 * 2)),
-  ('pmuReservedSize', NvU32),
-  ('verified', NvU64),
-]
+GspFwWprMeta.SIZE = 256
+GspFwWprMeta._fields_ = ['magic', 'revision', 'sysmemAddrOfRadix3Elf', 'sizeOfRadix3Elf', 'sysmemAddrOfBootloader', 'sizeOfBootloader', 'bootloaderCodeOffset', 'bootloaderDataOffset', 'bootloaderManifestOffset', 'sysmemAddrOfSignature', 'sizeOfSignature', 'gspFwHeapFreeListWprOffset', 'unused0', 'unused1', 'gspFwRsvdStart', 'nonWprHeapOffset', 'nonWprHeapSize', 'gspFwWprStart', 'gspFwHeapOffset', 'gspFwHeapSize', 'gspFwOffset', 'bootBinOffset', 'frtsOffset', 'frtsSize', 'gspFwWprEnd', 'fbSize', 'vgaWorkspaceOffset', 'vgaWorkspaceSize', 'bootCount', 'partitionRpcAddr', 'partitionRpcRequestOffset', 'partitionRpcReplyOffset', 'elfCodeOffset', 'elfDataOffset', 'elfCodeSize', 'elfDataSize', 'lsUcodeVersion', 'partitionRpcPadding', 'sysmemAddrOfCrashReportQueue', 'sizeOfCrashReportQueue', 'lsUcodeVersionPadding', 'gspFwHeapVfPartitionCount', 'flags', 'padding', 'pmuReservedSize', 'verified']
+setattr(GspFwWprMeta, 'magic', field(0, NvU64))
+setattr(GspFwWprMeta, 'revision', field(8, NvU64))
+setattr(GspFwWprMeta, 'sysmemAddrOfRadix3Elf', field(16, NvU64))
+setattr(GspFwWprMeta, 'sizeOfRadix3Elf', field(24, NvU64))
+setattr(GspFwWprMeta, 'sysmemAddrOfBootloader', field(32, NvU64))
+setattr(GspFwWprMeta, 'sizeOfBootloader', field(40, NvU64))
+setattr(GspFwWprMeta, 'bootloaderCodeOffset', field(48, NvU64))
+setattr(GspFwWprMeta, 'bootloaderDataOffset', field(56, NvU64))
+setattr(GspFwWprMeta, 'bootloaderManifestOffset', field(64, NvU64))
+setattr(GspFwWprMeta, 'sysmemAddrOfSignature', field(0, NvU64))
+setattr(GspFwWprMeta, 'sizeOfSignature', field(8, NvU64))
+setattr(GspFwWprMeta, 'gspFwHeapFreeListWprOffset', field(0, NvU32))
+setattr(GspFwWprMeta, 'unused0', field(4, NvU32))
+setattr(GspFwWprMeta, 'unused1', field(8, NvU64))
+setattr(GspFwWprMeta, 'gspFwRsvdStart', field(88, NvU64))
+setattr(GspFwWprMeta, 'nonWprHeapOffset', field(96, NvU64))
+setattr(GspFwWprMeta, 'nonWprHeapSize', field(104, NvU64))
+setattr(GspFwWprMeta, 'gspFwWprStart', field(112, NvU64))
+setattr(GspFwWprMeta, 'gspFwHeapOffset', field(120, NvU64))
+setattr(GspFwWprMeta, 'gspFwHeapSize', field(128, NvU64))
+setattr(GspFwWprMeta, 'gspFwOffset', field(136, NvU64))
+setattr(GspFwWprMeta, 'bootBinOffset', field(144, NvU64))
+setattr(GspFwWprMeta, 'frtsOffset', field(152, NvU64))
+setattr(GspFwWprMeta, 'frtsSize', field(160, NvU64))
+setattr(GspFwWprMeta, 'gspFwWprEnd', field(168, NvU64))
+setattr(GspFwWprMeta, 'fbSize', field(176, NvU64))
+setattr(GspFwWprMeta, 'vgaWorkspaceOffset', field(184, NvU64))
+setattr(GspFwWprMeta, 'vgaWorkspaceSize', field(192, NvU64))
+setattr(GspFwWprMeta, 'bootCount', field(200, NvU64))
+setattr(GspFwWprMeta, 'partitionRpcAddr', field(0, NvU64))
+setattr(GspFwWprMeta, 'partitionRpcRequestOffset', field(8, NvU16))
+setattr(GspFwWprMeta, 'partitionRpcReplyOffset', field(10, NvU16))
+setattr(GspFwWprMeta, 'elfCodeOffset', field(12, NvU32))
+setattr(GspFwWprMeta, 'elfDataOffset', field(16, NvU32))
+setattr(GspFwWprMeta, 'elfCodeSize', field(20, NvU32))
+setattr(GspFwWprMeta, 'elfDataSize', field(24, NvU32))
+setattr(GspFwWprMeta, 'lsUcodeVersion', field(28, NvU32))
+setattr(GspFwWprMeta, 'partitionRpcPadding', field(0, Array(NvU32, 4)))
+setattr(GspFwWprMeta, 'sysmemAddrOfCrashReportQueue', field(16, NvU64))
+setattr(GspFwWprMeta, 'sizeOfCrashReportQueue', field(24, NvU32))
+setattr(GspFwWprMeta, 'lsUcodeVersionPadding', field(28, Array(NvU32, 1)))
+setattr(GspFwWprMeta, 'gspFwHeapVfPartitionCount', field(240, NvU8))
+setattr(GspFwWprMeta, 'flags', field(241, NvU8))
+setattr(GspFwWprMeta, 'padding', field(242, Array(NvU8, 2)))
+setattr(GspFwWprMeta, 'pmuReservedSize', field(244, NvU32))
+setattr(GspFwWprMeta, 'verified', field(248, NvU64))
 class GspFwHeapFreeRegion(Struct): pass
-GspFwHeapFreeRegion._fields_ = [
-  ('offs', NvU32),
-  ('length', NvU32),
-]
+GspFwHeapFreeRegion.SIZE = 8
+GspFwHeapFreeRegion._fields_ = ['offs', 'length']
+setattr(GspFwHeapFreeRegion, 'offs', field(0, NvU32))
+setattr(GspFwHeapFreeRegion, 'length', field(4, NvU32))
 class GspFwHeapFreeList(Struct): pass
-GspFwHeapFreeList._fields_ = [
-  ('magic', NvU64),
-  ('nregions', NvU32),
-  ('regions', (GspFwHeapFreeRegion * 128)),
-]
+GspFwHeapFreeList.SIZE = 1040
+GspFwHeapFreeList._fields_ = ['magic', 'nregions', 'regions']
+setattr(GspFwHeapFreeList, 'magic', field(0, NvU64))
+setattr(GspFwHeapFreeList, 'nregions', field(8, NvU32))
+setattr(GspFwHeapFreeList, 'regions', field(12, Array(GspFwHeapFreeRegion, 128)))
 class GspFwSRMeta(Struct): pass
-GspFwSRMeta._fields_ = [
-  ('magic', NvU64),
-  ('revision', NvU64),
-  ('sysmemAddrOfSuspendResumeData', NvU64),
-  ('sizeOfSuspendResumeData', NvU64),
-  ('internal', (NvU32 * 32)),
-  ('flags', NvU32),
-  ('subrevision', NvU32),
-  ('padding', (NvU32 * 22)),
-]
+GspFwSRMeta.SIZE = 256
+GspFwSRMeta._fields_ = ['magic', 'revision', 'sysmemAddrOfSuspendResumeData', 'sizeOfSuspendResumeData', 'internal', 'flags', 'subrevision', 'padding']
+setattr(GspFwSRMeta, 'magic', field(0, NvU64))
+setattr(GspFwSRMeta, 'revision', field(8, NvU64))
+setattr(GspFwSRMeta, 'sysmemAddrOfSuspendResumeData', field(16, NvU64))
+setattr(GspFwSRMeta, 'sizeOfSuspendResumeData', field(24, NvU64))
+setattr(GspFwSRMeta, 'internal', field(32, Array(NvU32, 32)))
+setattr(GspFwSRMeta, 'flags', field(160, NvU32))
+setattr(GspFwSRMeta, 'subrevision', field(164, NvU32))
+setattr(GspFwSRMeta, 'padding', field(168, Array(NvU32, 22)))
 class RM_RISCV_UCODE_DESC(Struct): pass
-RM_RISCV_UCODE_DESC._fields_ = [
-  ('version', NvU32),
-  ('bootloaderOffset', NvU32),
-  ('bootloaderSize', NvU32),
-  ('bootloaderParamOffset', NvU32),
-  ('bootloaderParamSize', NvU32),
-  ('riscvElfOffset', NvU32),
-  ('riscvElfSize', NvU32),
-  ('appVersion', NvU32),
-  ('manifestOffset', NvU32),
-  ('manifestSize', NvU32),
-  ('monitorDataOffset', NvU32),
-  ('monitorDataSize', NvU32),
-  ('monitorCodeOffset', NvU32),
-  ('monitorCodeSize', NvU32),
-  ('bIsMonitorEnabled', NvU32),
-  ('swbromCodeOffset', NvU32),
-  ('swbromCodeSize', NvU32),
-  ('swbromDataOffset', NvU32),
-  ('swbromDataSize', NvU32),
-  ('fbReservedSize', NvU32),
-  ('bSignedAsCode', NvU32),
-]
+RM_RISCV_UCODE_DESC.SIZE = 84
+RM_RISCV_UCODE_DESC._fields_ = ['version', 'bootloaderOffset', 'bootloaderSize', 'bootloaderParamOffset', 'bootloaderParamSize', 'riscvElfOffset', 'riscvElfSize', 'appVersion', 'manifestOffset', 'manifestSize', 'monitorDataOffset', 'monitorDataSize', 'monitorCodeOffset', 'monitorCodeSize', 'bIsMonitorEnabled', 'swbromCodeOffset', 'swbromCodeSize', 'swbromDataOffset', 'swbromDataSize', 'fbReservedSize', 'bSignedAsCode']
+setattr(RM_RISCV_UCODE_DESC, 'version', field(0, NvU32))
+setattr(RM_RISCV_UCODE_DESC, 'bootloaderOffset', field(4, NvU32))
+setattr(RM_RISCV_UCODE_DESC, 'bootloaderSize', field(8, NvU32))
+setattr(RM_RISCV_UCODE_DESC, 'bootloaderParamOffset', field(12, NvU32))
+setattr(RM_RISCV_UCODE_DESC, 'bootloaderParamSize', field(16, NvU32))
+setattr(RM_RISCV_UCODE_DESC, 'riscvElfOffset', field(20, NvU32))
+setattr(RM_RISCV_UCODE_DESC, 'riscvElfSize', field(24, NvU32))
+setattr(RM_RISCV_UCODE_DESC, 'appVersion', field(28, NvU32))
+setattr(RM_RISCV_UCODE_DESC, 'manifestOffset', field(32, NvU32))
+setattr(RM_RISCV_UCODE_DESC, 'manifestSize', field(36, NvU32))
+setattr(RM_RISCV_UCODE_DESC, 'monitorDataOffset', field(40, NvU32))
+setattr(RM_RISCV_UCODE_DESC, 'monitorDataSize', field(44, NvU32))
+setattr(RM_RISCV_UCODE_DESC, 'monitorCodeOffset', field(48, NvU32))
+setattr(RM_RISCV_UCODE_DESC, 'monitorCodeSize', field(52, NvU32))
+setattr(RM_RISCV_UCODE_DESC, 'bIsMonitorEnabled', field(56, NvU32))
+setattr(RM_RISCV_UCODE_DESC, 'swbromCodeOffset', field(60, NvU32))
+setattr(RM_RISCV_UCODE_DESC, 'swbromCodeSize', field(64, NvU32))
+setattr(RM_RISCV_UCODE_DESC, 'swbromDataOffset', field(68, NvU32))
+setattr(RM_RISCV_UCODE_DESC, 'swbromDataSize', field(72, NvU32))
+setattr(RM_RISCV_UCODE_DESC, 'fbReservedSize', field(76, NvU32))
+setattr(RM_RISCV_UCODE_DESC, 'bSignedAsCode', field(80, NvU32))
 RPC_GR_BUFFER_TYPE = CEnum(ctypes.c_uint32)
 RPC_GR_BUFFER_TYPE_GRAPHICS = RPC_GR_BUFFER_TYPE.define('RPC_GR_BUFFER_TYPE_GRAPHICS', 0)
 RPC_GR_BUFFER_TYPE_GRAPHICS_ZCULL = RPC_GR_BUFFER_TYPE.define('RPC_GR_BUFFER_TYPE_GRAPHICS_ZCULL', 1)
@@ -247,17 +218,17 @@ NV_RPC_UPDATE_PDE_BAR_2 = NV_RPC_UPDATE_PDE_BAR_TYPE.define('NV_RPC_UPDATE_PDE_B
 NV_RPC_UPDATE_PDE_BAR_INVALID = NV_RPC_UPDATE_PDE_BAR_TYPE.define('NV_RPC_UPDATE_PDE_BAR_INVALID', 2)
 
 class struct_VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS(Struct): pass
-struct_VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS._fields_ = [
-  ('headIndex', NvU32),
-  ('maxHResolution', NvU32),
-  ('maxVResolution', NvU32),
-]
+struct_VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS.SIZE = 12
+struct_VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS._fields_ = ['headIndex', 'maxHResolution', 'maxVResolution']
+setattr(struct_VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS, 'headIndex', field(0, NvU32))
+setattr(struct_VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS, 'maxHResolution', field(4, NvU32))
+setattr(struct_VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS, 'maxVResolution', field(8, NvU32))
 VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS = struct_VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS
 class struct_VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS(Struct): pass
-struct_VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS._fields_ = [
-  ('numHeads', NvU32),
-  ('maxNumHeads', NvU32),
-]
+struct_VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS.SIZE = 8
+struct_VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS._fields_ = ['numHeads', 'maxNumHeads']
+setattr(struct_VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS, 'numHeads', field(0, NvU32))
+setattr(struct_VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS, 'maxNumHeads', field(4, NvU32))
 VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS = struct_VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS
 GPU_RECOVERY_EVENT_TYPE = CEnum(ctypes.c_uint32)
 GPU_RECOVERY_EVENT_TYPE_REFRESH = GPU_RECOVERY_EVENT_TYPE.define('GPU_RECOVERY_EVENT_TYPE_REFRESH', 0)
@@ -540,128 +511,128 @@ LIBOS_MEMORY_REGION_LOC_SYSMEM = LibosMemoryRegionLoc.define('LIBOS_MEMORY_REGIO
 LIBOS_MEMORY_REGION_LOC_FB = LibosMemoryRegionLoc.define('LIBOS_MEMORY_REGION_LOC_FB', 2)
 
 class LibosMemoryRegionInitArgument(Struct): pass
-LibosMemoryRegionInitArgument._fields_ = [
-  ('id8', LibosAddress),
-  ('pa', LibosAddress),
-  ('size', LibosAddress),
-  ('kind', NvU8),
-  ('loc', NvU8),
-]
+LibosMemoryRegionInitArgument.SIZE = 32
+LibosMemoryRegionInitArgument._fields_ = ['id8', 'pa', 'size', 'kind', 'loc']
+setattr(LibosMemoryRegionInitArgument, 'id8', field(0, LibosAddress))
+setattr(LibosMemoryRegionInitArgument, 'pa', field(8, LibosAddress))
+setattr(LibosMemoryRegionInitArgument, 'size', field(16, LibosAddress))
+setattr(LibosMemoryRegionInitArgument, 'kind', field(24, NvU8))
+setattr(LibosMemoryRegionInitArgument, 'loc', field(25, NvU8))
 class msgqTxHeader(Struct): pass
-msgqTxHeader._fields_ = [
-  ('version', NvU32),
-  ('size', NvU32),
-  ('msgSize', NvU32),
-  ('msgCount', NvU32),
-  ('writePtr', NvU32),
-  ('flags', NvU32),
-  ('rxHdrOff', NvU32),
-  ('entryOff', NvU32),
-]
+msgqTxHeader.SIZE = 32
+msgqTxHeader._fields_ = ['version', 'size', 'msgSize', 'msgCount', 'writePtr', 'flags', 'rxHdrOff', 'entryOff']
+setattr(msgqTxHeader, 'version', field(0, NvU32))
+setattr(msgqTxHeader, 'size', field(4, NvU32))
+setattr(msgqTxHeader, 'msgSize', field(8, NvU32))
+setattr(msgqTxHeader, 'msgCount', field(12, NvU32))
+setattr(msgqTxHeader, 'writePtr', field(16, NvU32))
+setattr(msgqTxHeader, 'flags', field(20, NvU32))
+setattr(msgqTxHeader, 'rxHdrOff', field(24, NvU32))
+setattr(msgqTxHeader, 'entryOff', field(28, NvU32))
 class msgqRxHeader(Struct): pass
-msgqRxHeader._fields_ = [
-  ('readPtr', NvU32),
-]
+msgqRxHeader.SIZE = 4
+msgqRxHeader._fields_ = ['readPtr']
+setattr(msgqRxHeader, 'readPtr', field(0, NvU32))
 class msgqMetadata(Struct): pass
 msgqFcnNotifyRemote = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_int32, ctypes.c_void_p)
 msgqFcnBackendRw = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p)
 msgqFcnCacheOp = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint32)
 msgqFcnBarrier = ctypes.CFUNCTYPE(None, )
-msgqMetadata._fields_ = [
-  ('pOurTxHdr', ctypes.POINTER(msgqTxHeader)),
-  ('pTheirTxHdr', ctypes.POINTER(msgqTxHeader)),
-  ('pOurRxHdr', ctypes.POINTER(msgqRxHeader)),
-  ('pTheirRxHdr', ctypes.POINTER(msgqRxHeader)),
-  ('pOurEntries', ctypes.POINTER(NvU8)),
-  ('pTheirEntries', ctypes.POINTER(NvU8)),
-  ('pReadIncoming', ctypes.POINTER(NvU32)),
-  ('pWriteIncoming', ctypes.POINTER(NvU32)),
-  ('pReadOutgoing', ctypes.POINTER(NvU32)),
-  ('pWriteOutgoing', ctypes.POINTER(NvU32)),
-  ('tx', msgqTxHeader),
-  ('txReadPtr', NvU32),
-  ('txFree', NvU32),
-  ('txLinked', NvBool),
-  ('rx', msgqTxHeader),
-  ('rxReadPtr', NvU32),
-  ('rxAvail', NvU32),
-  ('rxLinked', NvBool),
-  ('rxSwapped', NvBool),
-  ('fcnNotify', msgqFcnNotifyRemote),
-  ('fcnNotifyArg', ctypes.c_void_p),
-  ('fcnBackendRw', msgqFcnBackendRw),
-  ('fcnBackendRwArg', ctypes.c_void_p),
-  ('fcnInvalidate', msgqFcnCacheOp),
-  ('fcnFlush', msgqFcnCacheOp),
-  ('fcnZero', msgqFcnCacheOp),
-  ('fcnBarrier', msgqFcnBarrier),
-]
+msgqMetadata.SIZE = 232
+msgqMetadata._fields_ = ['pOurTxHdr', 'pTheirTxHdr', 'pOurRxHdr', 'pTheirRxHdr', 'pOurEntries', 'pTheirEntries', 'pReadIncoming', 'pWriteIncoming', 'pReadOutgoing', 'pWriteOutgoing', 'tx', 'txReadPtr', 'txFree', 'txLinked', 'rx', 'rxReadPtr', 'rxAvail', 'rxLinked', 'rxSwapped', 'fcnNotify', 'fcnNotifyArg', 'fcnBackendRw', 'fcnBackendRwArg', 'fcnInvalidate', 'fcnFlush', 'fcnZero', 'fcnBarrier']
+setattr(msgqMetadata, 'pOurTxHdr', field(0, Pointer(msgqTxHeader)))
+setattr(msgqMetadata, 'pTheirTxHdr', field(8, Pointer(msgqTxHeader)))
+setattr(msgqMetadata, 'pOurRxHdr', field(16, Pointer(msgqRxHeader)))
+setattr(msgqMetadata, 'pTheirRxHdr', field(24, Pointer(msgqRxHeader)))
+setattr(msgqMetadata, 'pOurEntries', field(32, Pointer(NvU8)))
+setattr(msgqMetadata, 'pTheirEntries', field(40, Pointer(NvU8)))
+setattr(msgqMetadata, 'pReadIncoming', field(48, Pointer(NvU32)))
+setattr(msgqMetadata, 'pWriteIncoming', field(56, Pointer(NvU32)))
+setattr(msgqMetadata, 'pReadOutgoing', field(64, Pointer(NvU32)))
+setattr(msgqMetadata, 'pWriteOutgoing', field(72, Pointer(NvU32)))
+setattr(msgqMetadata, 'tx', field(80, msgqTxHeader))
+setattr(msgqMetadata, 'txReadPtr', field(112, NvU32))
+setattr(msgqMetadata, 'txFree', field(116, NvU32))
+setattr(msgqMetadata, 'txLinked', field(120, NvBool))
+setattr(msgqMetadata, 'rx', field(124, msgqTxHeader))
+setattr(msgqMetadata, 'rxReadPtr', field(156, NvU32))
+setattr(msgqMetadata, 'rxAvail', field(160, NvU32))
+setattr(msgqMetadata, 'rxLinked', field(164, NvBool))
+setattr(msgqMetadata, 'rxSwapped', field(165, NvBool))
+setattr(msgqMetadata, 'fcnNotify', field(168, msgqFcnNotifyRemote))
+setattr(msgqMetadata, 'fcnNotifyArg', field(176, ctypes.c_void_p))
+setattr(msgqMetadata, 'fcnBackendRw', field(184, msgqFcnBackendRw))
+setattr(msgqMetadata, 'fcnBackendRwArg', field(192, ctypes.c_void_p))
+setattr(msgqMetadata, 'fcnInvalidate', field(200, msgqFcnCacheOp))
+setattr(msgqMetadata, 'fcnFlush', field(208, msgqFcnCacheOp))
+setattr(msgqMetadata, 'fcnZero', field(216, msgqFcnCacheOp))
+setattr(msgqMetadata, 'fcnBarrier', field(224, msgqFcnBarrier))
 class struct_rpc_set_guest_system_info_v03_00(Struct): pass
-struct_rpc_set_guest_system_info_v03_00._fields_ = [
-  ('vgxVersionMajorNum', NvU32),
-  ('vgxVersionMinorNum', NvU32),
-  ('guestDriverVersionBufferLength', NvU32),
-  ('guestVersionBufferLength', NvU32),
-  ('guestTitleBufferLength', NvU32),
-  ('guestClNum', NvU32),
-  ('guestDriverVersion', (ctypes.c_char * 256)),
-  ('guestVersion', (ctypes.c_char * 256)),
-  ('guestTitle', (ctypes.c_char * 256)),
-]
+struct_rpc_set_guest_system_info_v03_00.SIZE = 792
+struct_rpc_set_guest_system_info_v03_00._fields_ = ['vgxVersionMajorNum', 'vgxVersionMinorNum', 'guestDriverVersionBufferLength', 'guestVersionBufferLength', 'guestTitleBufferLength', 'guestClNum', 'guestDriverVersion', 'guestVersion', 'guestTitle']
+setattr(struct_rpc_set_guest_system_info_v03_00, 'vgxVersionMajorNum', field(0, NvU32))
+setattr(struct_rpc_set_guest_system_info_v03_00, 'vgxVersionMinorNum', field(4, NvU32))
+setattr(struct_rpc_set_guest_system_info_v03_00, 'guestDriverVersionBufferLength', field(8, NvU32))
+setattr(struct_rpc_set_guest_system_info_v03_00, 'guestVersionBufferLength', field(12, NvU32))
+setattr(struct_rpc_set_guest_system_info_v03_00, 'guestTitleBufferLength', field(16, NvU32))
+setattr(struct_rpc_set_guest_system_info_v03_00, 'guestClNum', field(20, NvU32))
+setattr(struct_rpc_set_guest_system_info_v03_00, 'guestDriverVersion', field(24, Array(ctypes.c_char, 256)))
+setattr(struct_rpc_set_guest_system_info_v03_00, 'guestVersion', field(280, Array(ctypes.c_char, 256)))
+setattr(struct_rpc_set_guest_system_info_v03_00, 'guestTitle', field(536, Array(ctypes.c_char, 256)))
 rpc_set_guest_system_info_v03_00 = struct_rpc_set_guest_system_info_v03_00
 rpc_set_guest_system_info_v = struct_rpc_set_guest_system_info_v03_00
 class struct_rpc_set_guest_system_info_ext_v15_02(Struct): pass
-struct_rpc_set_guest_system_info_ext_v15_02._fields_ = [
-  ('guestDriverBranch', (ctypes.c_char * 256)),
-  ('domain', NvU32),
-  ('bus', NvU16),
-  ('device', NvU16),
-]
+struct_rpc_set_guest_system_info_ext_v15_02.SIZE = 264
+struct_rpc_set_guest_system_info_ext_v15_02._fields_ = ['guestDriverBranch', 'domain', 'bus', 'device']
+setattr(struct_rpc_set_guest_system_info_ext_v15_02, 'guestDriverBranch', field(0, Array(ctypes.c_char, 256)))
+setattr(struct_rpc_set_guest_system_info_ext_v15_02, 'domain', field(256, NvU32))
+setattr(struct_rpc_set_guest_system_info_ext_v15_02, 'bus', field(260, NvU16))
+setattr(struct_rpc_set_guest_system_info_ext_v15_02, 'device', field(262, NvU16))
 rpc_set_guest_system_info_ext_v15_02 = struct_rpc_set_guest_system_info_ext_v15_02
 class struct_rpc_set_guest_system_info_ext_v25_1B(Struct): pass
-struct_rpc_set_guest_system_info_ext_v25_1B._fields_ = [
-  ('guestDriverBranch', (ctypes.c_char * 256)),
-  ('domain', NvU32),
-  ('bus', NvU16),
-  ('device', NvU16),
-  ('gridBuildCsp', NvU32),
-]
+struct_rpc_set_guest_system_info_ext_v25_1B.SIZE = 268
+struct_rpc_set_guest_system_info_ext_v25_1B._fields_ = ['guestDriverBranch', 'domain', 'bus', 'device', 'gridBuildCsp']
+setattr(struct_rpc_set_guest_system_info_ext_v25_1B, 'guestDriverBranch', field(0, Array(ctypes.c_char, 256)))
+setattr(struct_rpc_set_guest_system_info_ext_v25_1B, 'domain', field(256, NvU32))
+setattr(struct_rpc_set_guest_system_info_ext_v25_1B, 'bus', field(260, NvU16))
+setattr(struct_rpc_set_guest_system_info_ext_v25_1B, 'device', field(262, NvU16))
+setattr(struct_rpc_set_guest_system_info_ext_v25_1B, 'gridBuildCsp', field(264, NvU32))
 rpc_set_guest_system_info_ext_v25_1B = struct_rpc_set_guest_system_info_ext_v25_1B
 rpc_set_guest_system_info_ext_v = struct_rpc_set_guest_system_info_ext_v25_1B
 class struct_rpc_alloc_root_v07_00(Struct): pass
 NvHandle = ctypes.c_uint32
-struct_rpc_alloc_root_v07_00._fields_ = [
-  ('hClient', NvHandle),
-  ('processID', NvU32),
-  ('processName', (ctypes.c_char * 100)),
-]
+struct_rpc_alloc_root_v07_00.SIZE = 108
+struct_rpc_alloc_root_v07_00._fields_ = ['hClient', 'processID', 'processName']
+setattr(struct_rpc_alloc_root_v07_00, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_alloc_root_v07_00, 'processID', field(4, NvU32))
+setattr(struct_rpc_alloc_root_v07_00, 'processName', field(8, Array(ctypes.c_char, 100)))
 rpc_alloc_root_v07_00 = struct_rpc_alloc_root_v07_00
 rpc_alloc_root_v = struct_rpc_alloc_root_v07_00
 class struct_rpc_alloc_memory_v13_01(Struct): pass
 class struct_pte_desc(Struct): pass
-class struct_pte_desc_pte_pde(ctypes.Union): pass
-struct_pte_desc_pte_pde._fields_ = [
-  ('pte', NvU64),
-  ('pde', NvU64),
-]
-struct_pte_desc._fields_ = [
-  ('idr', NvU32,2),
-  ('reserved1', NvU32,14),
-  ('length', NvU32,16),
-  ('pte_pde', (struct_pte_desc_pte_pde * 0)),
-]
-struct_rpc_alloc_memory_v13_01._fields_ = [
-  ('hClient', NvHandle),
-  ('hDevice', NvHandle),
-  ('hMemory', NvHandle),
-  ('hClass', NvU32),
-  ('flags', NvU32),
-  ('pteAdjust', NvU32),
-  ('format', NvU32),
-  ('length', NvU64),
-  ('pageCount', NvU32),
-  ('pteDesc', struct_pte_desc),
-]
+class _anonunion1(Union): pass
+_anonunion1.SIZE = 8
+_anonunion1._fields_ = ['pte', 'pde']
+setattr(_anonunion1, 'pte', field(0, NvU64))
+setattr(_anonunion1, 'pde', field(0, NvU64))
+struct_pte_desc.SIZE = 8
+struct_pte_desc._fields_ = ['idr', 'reserved1', 'length', 'pte_pde']
+setattr(struct_pte_desc, 'idr', field(0, NvU32, 2, 0))
+setattr(struct_pte_desc, 'reserved1', field(0, NvU32, 14, 2))
+setattr(struct_pte_desc, 'length', field(2, NvU32, 16, 0))
+setattr(struct_pte_desc, 'pte_pde', field(8, Array(_anonunion1, 0)))
+struct_rpc_alloc_memory_v13_01.SIZE = 56
+struct_rpc_alloc_memory_v13_01._fields_ = ['hClient', 'hDevice', 'hMemory', 'hClass', 'flags', 'pteAdjust', 'format', 'length', 'pageCount', 'pteDesc']
+setattr(struct_rpc_alloc_memory_v13_01, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_alloc_memory_v13_01, 'hDevice', field(4, NvHandle))
+setattr(struct_rpc_alloc_memory_v13_01, 'hMemory', field(8, NvHandle))
+setattr(struct_rpc_alloc_memory_v13_01, 'hClass', field(12, NvU32))
+setattr(struct_rpc_alloc_memory_v13_01, 'flags', field(16, NvU32))
+setattr(struct_rpc_alloc_memory_v13_01, 'pteAdjust', field(20, NvU32))
+setattr(struct_rpc_alloc_memory_v13_01, 'format', field(24, NvU32))
+setattr(struct_rpc_alloc_memory_v13_01, 'length', field(32, NvU64))
+setattr(struct_rpc_alloc_memory_v13_01, 'pageCount', field(40, NvU32))
+setattr(struct_rpc_alloc_memory_v13_01, 'pteDesc', field(48, struct_pte_desc))
 rpc_alloc_memory_v13_01 = struct_rpc_alloc_memory_v13_01
 rpc_alloc_memory_v = struct_rpc_alloc_memory_v13_01
 class struct_rpc_alloc_channel_dma_v1F_04(Struct): pass
@@ -669,640 +640,640 @@ class struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04(Struct): pass
 NV_CHANNEL_ALLOC_PARAMS_v1F_04 = struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04
 class struct_NV_MEMORY_DESC_PARAMS_v18_01(Struct): pass
 NV_MEMORY_DESC_PARAMS_v18_01 = struct_NV_MEMORY_DESC_PARAMS_v18_01
-struct_NV_MEMORY_DESC_PARAMS_v18_01._fields_ = [
-  ('base', NvU64),
-  ('size', NvU64),
-  ('addressSpace', NvU32),
-  ('cacheAttrib', NvU32),
-]
-struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04._fields_ = [
-  ('hObjectError', NvHandle),
-  ('hObjectBuffer', NvHandle),
-  ('gpFifoOffset', NvU64),
-  ('gpFifoEntries', NvU32),
-  ('flags', NvU32),
-  ('hContextShare', NvHandle),
-  ('hVASpace', NvHandle),
-  ('hUserdMemory', (NvHandle * 1)),
-  ('userdOffset', (NvU64 * 1)),
-  ('engineType', NvU32),
-  ('hObjectEccError', NvHandle),
-  ('instanceMem', NV_MEMORY_DESC_PARAMS_v18_01),
-  ('ramfcMem', NV_MEMORY_DESC_PARAMS_v18_01),
-  ('userdMem', NV_MEMORY_DESC_PARAMS_v18_01),
-  ('mthdbufMem', NV_MEMORY_DESC_PARAMS_v18_01),
-  ('hPhysChannelGroup', NvHandle),
-  ('subDeviceId', NvHandle),
-  ('internalFlags', NvU32),
-  ('errorNotifierMem', NV_MEMORY_DESC_PARAMS_v18_01),
-  ('eccErrorNotifierMem', NV_MEMORY_DESC_PARAMS_v18_01),
-]
-struct_rpc_alloc_channel_dma_v1F_04._fields_ = [
-  ('hClient', NvHandle),
-  ('hDevice', NvHandle),
-  ('hChannel', NvHandle),
-  ('hClass', NvU32),
-  ('flags', NvU32),
-  ('params', NV_CHANNEL_ALLOC_PARAMS_v1F_04),
-  ('chid', NvU32),
-]
+struct_NV_MEMORY_DESC_PARAMS_v18_01.SIZE = 24
+struct_NV_MEMORY_DESC_PARAMS_v18_01._fields_ = ['base', 'size', 'addressSpace', 'cacheAttrib']
+setattr(struct_NV_MEMORY_DESC_PARAMS_v18_01, 'base', field(0, NvU64))
+setattr(struct_NV_MEMORY_DESC_PARAMS_v18_01, 'size', field(8, NvU64))
+setattr(struct_NV_MEMORY_DESC_PARAMS_v18_01, 'addressSpace', field(16, NvU32))
+setattr(struct_NV_MEMORY_DESC_PARAMS_v18_01, 'cacheAttrib', field(20, NvU32))
+struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04.SIZE = 216
+struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04._fields_ = ['hObjectError', 'hObjectBuffer', 'gpFifoOffset', 'gpFifoEntries', 'flags', 'hContextShare', 'hVASpace', 'hUserdMemory', 'userdOffset', 'engineType', 'hObjectEccError', 'instanceMem', 'ramfcMem', 'userdMem', 'mthdbufMem', 'hPhysChannelGroup', 'subDeviceId', 'internalFlags', 'errorNotifierMem', 'eccErrorNotifierMem']
+setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'hObjectError', field(0, NvHandle))
+setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'hObjectBuffer', field(4, NvHandle))
+setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'gpFifoOffset', field(8, NvU64))
+setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'gpFifoEntries', field(16, NvU32))
+setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'flags', field(20, NvU32))
+setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'hContextShare', field(24, NvHandle))
+setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'hVASpace', field(28, NvHandle))
+setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'hUserdMemory', field(32, Array(NvHandle, 1)))
+setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'userdOffset', field(40, Array(NvU64, 1)))
+setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'engineType', field(48, NvU32))
+setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'hObjectEccError', field(52, NvHandle))
+setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'instanceMem', field(56, NV_MEMORY_DESC_PARAMS_v18_01))
+setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'ramfcMem', field(80, NV_MEMORY_DESC_PARAMS_v18_01))
+setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'userdMem', field(104, NV_MEMORY_DESC_PARAMS_v18_01))
+setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'mthdbufMem', field(128, NV_MEMORY_DESC_PARAMS_v18_01))
+setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'hPhysChannelGroup', field(152, NvHandle))
+setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'subDeviceId', field(156, NvHandle))
+setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'internalFlags', field(160, NvU32))
+setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'errorNotifierMem', field(168, NV_MEMORY_DESC_PARAMS_v18_01))
+setattr(struct_NV_CHANNEL_ALLOC_PARAMS_v1F_04, 'eccErrorNotifierMem', field(192, NV_MEMORY_DESC_PARAMS_v18_01))
+struct_rpc_alloc_channel_dma_v1F_04.SIZE = 248
+struct_rpc_alloc_channel_dma_v1F_04._fields_ = ['hClient', 'hDevice', 'hChannel', 'hClass', 'flags', 'params', 'chid']
+setattr(struct_rpc_alloc_channel_dma_v1F_04, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_alloc_channel_dma_v1F_04, 'hDevice', field(4, NvHandle))
+setattr(struct_rpc_alloc_channel_dma_v1F_04, 'hChannel', field(8, NvHandle))
+setattr(struct_rpc_alloc_channel_dma_v1F_04, 'hClass', field(12, NvU32))
+setattr(struct_rpc_alloc_channel_dma_v1F_04, 'flags', field(16, NvU32))
+setattr(struct_rpc_alloc_channel_dma_v1F_04, 'params', field(24, NV_CHANNEL_ALLOC_PARAMS_v1F_04))
+setattr(struct_rpc_alloc_channel_dma_v1F_04, 'chid', field(240, NvU32))
 rpc_alloc_channel_dma_v1F_04 = struct_rpc_alloc_channel_dma_v1F_04
 rpc_alloc_channel_dma_v = struct_rpc_alloc_channel_dma_v1F_04
 class struct_rpc_alloc_object_v25_08(Struct): pass
-class union_alloc_object_params_v25_08(ctypes.Union): pass
+class union_alloc_object_params_v25_08(Union): pass
 alloc_object_params_v25_08 = union_alloc_object_params_v25_08
 class struct_alloc_object_NV50_TESLA_v03_00(Struct): pass
 alloc_object_NV50_TESLA_v03_00 = struct_alloc_object_NV50_TESLA_v03_00
-struct_alloc_object_NV50_TESLA_v03_00._fields_ = [
-  ('version', NvU32),
-  ('flags', NvU32),
-  ('size', NvU32),
-  ('caps', NvU32),
-]
+struct_alloc_object_NV50_TESLA_v03_00.SIZE = 16
+struct_alloc_object_NV50_TESLA_v03_00._fields_ = ['version', 'flags', 'size', 'caps']
+setattr(struct_alloc_object_NV50_TESLA_v03_00, 'version', field(0, NvU32))
+setattr(struct_alloc_object_NV50_TESLA_v03_00, 'flags', field(4, NvU32))
+setattr(struct_alloc_object_NV50_TESLA_v03_00, 'size', field(8, NvU32))
+setattr(struct_alloc_object_NV50_TESLA_v03_00, 'caps', field(12, NvU32))
 class struct_alloc_object_GT212_DMA_COPY_v03_00(Struct): pass
 alloc_object_GT212_DMA_COPY_v03_00 = struct_alloc_object_GT212_DMA_COPY_v03_00
-struct_alloc_object_GT212_DMA_COPY_v03_00._fields_ = [
-  ('version', NvU32),
-  ('engineInstance', NvU32),
-]
+struct_alloc_object_GT212_DMA_COPY_v03_00.SIZE = 8
+struct_alloc_object_GT212_DMA_COPY_v03_00._fields_ = ['version', 'engineInstance']
+setattr(struct_alloc_object_GT212_DMA_COPY_v03_00, 'version', field(0, NvU32))
+setattr(struct_alloc_object_GT212_DMA_COPY_v03_00, 'engineInstance', field(4, NvU32))
 class struct_alloc_object_GF100_DISP_SW_v03_00(Struct): pass
 alloc_object_GF100_DISP_SW_v03_00 = struct_alloc_object_GF100_DISP_SW_v03_00
-struct_alloc_object_GF100_DISP_SW_v03_00._fields_ = [
-  ('_reserved1', NvU32),
-  ('_reserved2', NvU64),
-  ('logicalHeadId', NvU32),
-  ('displayMask', NvU32),
-  ('caps', NvU32),
-]
+struct_alloc_object_GF100_DISP_SW_v03_00.SIZE = 32
+struct_alloc_object_GF100_DISP_SW_v03_00._fields_ = ['_reserved1', '_reserved2', 'logicalHeadId', 'displayMask', 'caps']
+setattr(struct_alloc_object_GF100_DISP_SW_v03_00, '_reserved1', field(0, NvU32))
+setattr(struct_alloc_object_GF100_DISP_SW_v03_00, '_reserved2', field(8, NvU64))
+setattr(struct_alloc_object_GF100_DISP_SW_v03_00, 'logicalHeadId', field(16, NvU32))
+setattr(struct_alloc_object_GF100_DISP_SW_v03_00, 'displayMask', field(20, NvU32))
+setattr(struct_alloc_object_GF100_DISP_SW_v03_00, 'caps', field(24, NvU32))
 class struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08(Struct): pass
 alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08 = struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08
-struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08._fields_ = [
-  ('hObjectError', NvU32),
-  ('hVASpace', NvU32),
-  ('engineType', NvU32),
-]
+struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08.SIZE = 12
+struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08._fields_ = ['hObjectError', 'hVASpace', 'engineType']
+setattr(struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08, 'hObjectError', field(0, NvU32))
+setattr(struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08, 'hVASpace', field(4, NvU32))
+setattr(struct_alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08, 'engineType', field(8, NvU32))
 class struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00(Struct): pass
 alloc_object_FERMI_CONTEXT_SHARE_A_v04_00 = struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00
-struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00._fields_ = [
-  ('hVASpace', NvU32),
-  ('flags', NvU32),
-  ('subctxId', NvU32),
-]
+struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00.SIZE = 12
+struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00._fields_ = ['hVASpace', 'flags', 'subctxId']
+setattr(struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00, 'hVASpace', field(0, NvU32))
+setattr(struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00, 'flags', field(4, NvU32))
+setattr(struct_alloc_object_FERMI_CONTEXT_SHARE_A_v04_00, 'subctxId', field(8, NvU32))
 class struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00(Struct): pass
 alloc_object_NVD0B7_VIDEO_ENCODER_v03_00 = struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00
-struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00._fields_ = [
-  ('size', NvU32),
-  ('prohibitMultipleInstances', NvU32),
-  ('engineInstance', NvU32),
-]
+struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00.SIZE = 12
+struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00._fields_ = ['size', 'prohibitMultipleInstances', 'engineInstance']
+setattr(struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00, 'size', field(0, NvU32))
+setattr(struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00, 'prohibitMultipleInstances', field(4, NvU32))
+setattr(struct_alloc_object_NVD0B7_VIDEO_ENCODER_v03_00, 'engineInstance', field(8, NvU32))
 class struct_alloc_object_FERMI_VASPACE_A_v03_00(Struct): pass
 alloc_object_FERMI_VASPACE_A_v03_00 = struct_alloc_object_FERMI_VASPACE_A_v03_00
-struct_alloc_object_FERMI_VASPACE_A_v03_00._fields_ = [
-  ('index', NvU32),
-  ('flags', NvU32),
-  ('vaSize', NvU64),
-  ('bigPageSize', NvU32),
-  ('vaBase', NvU64),
-]
+struct_alloc_object_FERMI_VASPACE_A_v03_00.SIZE = 32
+struct_alloc_object_FERMI_VASPACE_A_v03_00._fields_ = ['index', 'flags', 'vaSize', 'bigPageSize', 'vaBase']
+setattr(struct_alloc_object_FERMI_VASPACE_A_v03_00, 'index', field(0, NvU32))
+setattr(struct_alloc_object_FERMI_VASPACE_A_v03_00, 'flags', field(4, NvU32))
+setattr(struct_alloc_object_FERMI_VASPACE_A_v03_00, 'vaSize', field(8, NvU64))
+setattr(struct_alloc_object_FERMI_VASPACE_A_v03_00, 'bigPageSize', field(16, NvU32))
+setattr(struct_alloc_object_FERMI_VASPACE_A_v03_00, 'vaBase', field(24, NvU64))
 class struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00(Struct): pass
 alloc_object_NVB0B0_VIDEO_DECODER_v03_00 = struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00
-struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00._fields_ = [
-  ('size', NvU32),
-  ('prohibitMultipleInstances', NvU32),
-]
+struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00.SIZE = 8
+struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00._fields_ = ['size', 'prohibitMultipleInstances']
+setattr(struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00, 'size', field(0, NvU32))
+setattr(struct_alloc_object_NVB0B0_VIDEO_DECODER_v03_00, 'prohibitMultipleInstances', field(4, NvU32))
 class struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00(Struct): pass
 alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00 = struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00
-struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00._fields_ = [
-  ('hDebuggerClient', NvHandle),
-  ('hAppClient', NvHandle),
-  ('hClass3dObject', NvHandle),
-]
+struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00.SIZE = 12
+struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00._fields_ = ['hDebuggerClient', 'hAppClient', 'hClass3dObject']
+setattr(struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00, 'hDebuggerClient', field(0, NvHandle))
+setattr(struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00, 'hAppClient', field(4, NvHandle))
+setattr(struct_alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00, 'hClass3dObject', field(8, NvHandle))
 class struct_alloc_object_NVENC_SW_SESSION_v06_01(Struct): pass
 alloc_object_NVENC_SW_SESSION_v06_01 = struct_alloc_object_NVENC_SW_SESSION_v06_01
-struct_alloc_object_NVENC_SW_SESSION_v06_01._fields_ = [
-  ('codecType', NvU32),
-  ('hResolution', NvU32),
-  ('vResolution', NvU32),
-]
+struct_alloc_object_NVENC_SW_SESSION_v06_01.SIZE = 12
+struct_alloc_object_NVENC_SW_SESSION_v06_01._fields_ = ['codecType', 'hResolution', 'vResolution']
+setattr(struct_alloc_object_NVENC_SW_SESSION_v06_01, 'codecType', field(0, NvU32))
+setattr(struct_alloc_object_NVENC_SW_SESSION_v06_01, 'hResolution', field(4, NvU32))
+setattr(struct_alloc_object_NVENC_SW_SESSION_v06_01, 'vResolution', field(8, NvU32))
 class struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02(Struct): pass
 alloc_object_NVC4B0_VIDEO_DECODER_v12_02 = struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02
-struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02._fields_ = [
-  ('size', NvU32),
-  ('prohibitMultipleInstances', NvU32),
-  ('engineInstance', NvU32),
-]
+struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02.SIZE = 12
+struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02._fields_ = ['size', 'prohibitMultipleInstances', 'engineInstance']
+setattr(struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02, 'size', field(0, NvU32))
+setattr(struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02, 'prohibitMultipleInstances', field(4, NvU32))
+setattr(struct_alloc_object_NVC4B0_VIDEO_DECODER_v12_02, 'engineInstance', field(8, NvU32))
 class struct_alloc_object_NVFBC_SW_SESSION_v12_04(Struct): pass
 alloc_object_NVFBC_SW_SESSION_v12_04 = struct_alloc_object_NVFBC_SW_SESSION_v12_04
-struct_alloc_object_NVFBC_SW_SESSION_v12_04._fields_ = [
-  ('displayOrdinal', NvU32),
-  ('sessionType', NvU32),
-  ('sessionFlags', NvU32),
-  ('hMaxResolution', NvU32),
-  ('vMaxResolution', NvU32),
-]
+struct_alloc_object_NVFBC_SW_SESSION_v12_04.SIZE = 20
+struct_alloc_object_NVFBC_SW_SESSION_v12_04._fields_ = ['displayOrdinal', 'sessionType', 'sessionFlags', 'hMaxResolution', 'vMaxResolution']
+setattr(struct_alloc_object_NVFBC_SW_SESSION_v12_04, 'displayOrdinal', field(0, NvU32))
+setattr(struct_alloc_object_NVFBC_SW_SESSION_v12_04, 'sessionType', field(4, NvU32))
+setattr(struct_alloc_object_NVFBC_SW_SESSION_v12_04, 'sessionFlags', field(8, NvU32))
+setattr(struct_alloc_object_NVFBC_SW_SESSION_v12_04, 'hMaxResolution', field(12, NvU32))
+setattr(struct_alloc_object_NVFBC_SW_SESSION_v12_04, 'vMaxResolution', field(16, NvU32))
 class struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02(Struct): pass
 alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02 = struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02
-struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02._fields_ = [
-  ('size', NvU32),
-  ('prohibitMultipleInstances', NvU32),
-  ('engineInstance', NvU32),
-]
+struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02.SIZE = 12
+struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02._fields_ = ['size', 'prohibitMultipleInstances', 'engineInstance']
+setattr(struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02, 'size', field(0, NvU32))
+setattr(struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02, 'prohibitMultipleInstances', field(4, NvU32))
+setattr(struct_alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02, 'engineInstance', field(8, NvU32))
 class struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02(Struct): pass
 alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02 = struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02
-struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02._fields_ = [
-  ('hSubDevice', NvHandle),
-  ('hPeerSubDevice', NvHandle),
-  ('subDevicePeerIdMask', NvU32),
-  ('peerSubDevicePeerIdMask', NvU32),
-  ('mailboxBar1Addr', NvU64),
-  ('mailboxTotalSize', NvU32),
-  ('flags', NvU32),
-]
+struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02.SIZE = 32
+struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02._fields_ = ['hSubDevice', 'hPeerSubDevice', 'subDevicePeerIdMask', 'peerSubDevicePeerIdMask', 'mailboxBar1Addr', 'mailboxTotalSize', 'flags']
+setattr(struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02, 'hSubDevice', field(0, NvHandle))
+setattr(struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02, 'hPeerSubDevice', field(4, NvHandle))
+setattr(struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02, 'subDevicePeerIdMask', field(8, NvU32))
+setattr(struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02, 'peerSubDevicePeerIdMask', field(12, NvU32))
+setattr(struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02, 'mailboxBar1Addr', field(16, NvU64))
+setattr(struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02, 'mailboxTotalSize', field(24, NvU32))
+setattr(struct_alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02, 'flags', field(28, NvU32))
 class struct_alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00(Struct): pass
 alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00 = struct_alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00
-struct_alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00._fields_ = [
-  ('swizzId', NvU32),
-]
+struct_alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00.SIZE = 4
+struct_alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00._fields_ = ['swizzId']
+setattr(struct_alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00, 'swizzId', field(0, NvU32))
 class struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03(Struct): pass
 alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03 = struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03
-struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03._fields_ = [
-  ('offset', NvU64),
-  ('limit', NvU64),
-  ('hVASpace', NvHandle),
-]
+struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03.SIZE = 24
+struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03._fields_ = ['offset', 'limit', 'hVASpace']
+setattr(struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03, 'offset', field(0, NvU64))
+setattr(struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03, 'limit', field(8, NvU64))
+setattr(struct_alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03, 'hVASpace', field(16, NvHandle))
 class struct_alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06(Struct): pass
 alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06 = struct_alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06
-struct_alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06._fields_ = [
-  ('execPartitionId', NvU32),
-]
+struct_alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06.SIZE = 4
+struct_alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06._fields_ = ['execPartitionId']
+setattr(struct_alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06, 'execPartitionId', field(0, NvU32))
 class struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15(Struct): pass
 alloc_object_NV503C_ALLOC_PARAMETERS_v18_15 = struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15
-struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15._fields_ = [
-  ('flags', NvU32),
-  ('p2pToken', NvU64),
-]
+struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15.SIZE = 16
+struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15._fields_ = ['flags', 'p2pToken']
+setattr(struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15, 'flags', field(0, NvU32))
+setattr(struct_alloc_object_NV503C_ALLOC_PARAMETERS_v18_15, 'p2pToken', field(8, NvU64))
 class struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01(Struct): pass
 alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01 = struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01
-struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01._fields_ = [
-  ('numHeads', NvU32),
-  ('numSors', NvU32),
-  ('numDsis', NvU32),
-]
+struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01.SIZE = 12
+struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01._fields_ = ['numHeads', 'numSors', 'numDsis']
+setattr(struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01, 'numHeads', field(0, NvU32))
+setattr(struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01, 'numSors', field(4, NvU32))
+setattr(struct_alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01, 'numDsis', field(8, NvU32))
 class struct_alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03(Struct): pass
 alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03 = struct_alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03
-struct_alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03._fields_ = [
-  ('hSubDevice', NvHandle),
-]
+struct_alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03.SIZE = 4
+struct_alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03._fields_ = ['hSubDevice']
+setattr(struct_alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03, 'hSubDevice', field(0, NvHandle))
 class struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03(Struct): pass
 alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03 = struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03
-struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03._fields_ = [
-  ('hClientTarget', NvHandle),
-  ('hContextTarget', NvHandle),
-]
+struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03.SIZE = 8
+struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03._fields_ = ['hClientTarget', 'hContextTarget']
+setattr(struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03, 'hClientTarget', field(0, NvHandle))
+setattr(struct_alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03, 'hContextTarget', field(4, NvHandle))
 class struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17(Struct): pass
 NV_GR_ALLOCATION_PARAMETERS_v1A_17 = struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17
-struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17._fields_ = [
-  ('version', NvU32),
-  ('flags', NvU32),
-  ('size', NvU32),
-  ('caps', NvU32),
-]
+struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17.SIZE = 16
+struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17._fields_ = ['version', 'flags', 'size', 'caps']
+setattr(struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17, 'version', field(0, NvU32))
+setattr(struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17, 'flags', field(4, NvU32))
+setattr(struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17, 'size', field(8, NvU32))
+setattr(struct_NV_GR_ALLOCATION_PARAMETERS_v1A_17, 'caps', field(12, NvU32))
 class struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B(Struct): pass
 alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B = struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B
-struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B._fields_ = [
-  ('hClient', NvHandle),
-  ('hChannel', NvHandle),
-]
+struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B.SIZE = 8
+struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B._fields_ = ['hClient', 'hChannel']
+setattr(struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B, 'hClient', field(0, NvHandle))
+setattr(struct_alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B, 'hChannel', field(4, NvHandle))
 class struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C(Struct): pass
 alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C = struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C
 class struct_NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C(Struct): pass
 NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C = struct_NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C
-struct_NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C._fields_ = [
-  ('offset', NvU64),
-  ('hVidMem', NvHandle),
-  ('flags', NvU32),
-]
-struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C._fields_ = [
-  ('alignment', NvU64),
-  ('allocSize', NvU64),
-  ('pageSize', NvU32),
-  ('allocFlags', NvU32),
-  ('map', NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C),
-]
+struct_NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C.SIZE = 16
+struct_NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C._fields_ = ['offset', 'hVidMem', 'flags']
+setattr(struct_NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C, 'offset', field(0, NvU64))
+setattr(struct_NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C, 'hVidMem', field(8, NvHandle))
+setattr(struct_NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C, 'flags', field(12, NvU32))
+struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C.SIZE = 40
+struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C._fields_ = ['alignment', 'allocSize', 'pageSize', 'allocFlags', 'map']
+setattr(struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C, 'alignment', field(0, NvU64))
+setattr(struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C, 'allocSize', field(8, NvU64))
+setattr(struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C, 'pageSize', field(16, NvU32))
+setattr(struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C, 'allocFlags', field(20, NvU32))
+setattr(struct_alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C, 'map', field(24, NV00F8_ALLOCATION_PARAMETERS_MAP_STRUCT_v1E_0C))
 class struct_alloc_object_NVC9FA_VIDEO_OFA_v1F_00(Struct): pass
 alloc_object_NVC9FA_VIDEO_OFA_v1F_00 = struct_alloc_object_NVC9FA_VIDEO_OFA_v1F_00
-struct_alloc_object_NVC9FA_VIDEO_OFA_v1F_00._fields_ = [
-  ('size', NvU32),
-  ('prohibitMultipleInstances', NvU32),
-]
+struct_alloc_object_NVC9FA_VIDEO_OFA_v1F_00.SIZE = 8
+struct_alloc_object_NVC9FA_VIDEO_OFA_v1F_00._fields_ = ['size', 'prohibitMultipleInstances']
+setattr(struct_alloc_object_NVC9FA_VIDEO_OFA_v1F_00, 'size', field(0, NvU32))
+setattr(struct_alloc_object_NVC9FA_VIDEO_OFA_v1F_00, 'prohibitMultipleInstances', field(4, NvU32))
 class struct_alloc_object_NV2081_ALLOC_PARAMETERS_v25_08(Struct): pass
 alloc_object_NV2081_ALLOC_PARAMETERS_v25_08 = struct_alloc_object_NV2081_ALLOC_PARAMETERS_v25_08
-struct_alloc_object_NV2081_ALLOC_PARAMETERS_v25_08._fields_ = [
-  ('reserved', NvU32),
-]
-union_alloc_object_params_v25_08._fields_ = [
-  ('param_NV50_TESLA', alloc_object_NV50_TESLA_v03_00),
-  ('param_GT212_DMA_COPY', alloc_object_GT212_DMA_COPY_v03_00),
-  ('param_GF100_DISP_SW', alloc_object_GF100_DISP_SW_v03_00),
-  ('param_KEPLER_CHANNEL_GROUP_A', alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08),
-  ('param_FERMI_CONTEXT_SHARE_A', alloc_object_FERMI_CONTEXT_SHARE_A_v04_00),
-  ('param_NVD0B7_VIDEO_ENCODER', alloc_object_NVD0B7_VIDEO_ENCODER_v03_00),
-  ('param_FERMI_VASPACE_A', alloc_object_FERMI_VASPACE_A_v03_00),
-  ('param_NVB0B0_VIDEO_DECODER', alloc_object_NVB0B0_VIDEO_DECODER_v03_00),
-  ('param_NV83DE_ALLOC_PARAMETERS', alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00),
-  ('param_NVENC_SW_SESSION', alloc_object_NVENC_SW_SESSION_v06_01),
-  ('param_NVC4B0_VIDEO_DECODER', alloc_object_NVC4B0_VIDEO_DECODER_v12_02),
-  ('param_NVFBC_SW_SESSION', alloc_object_NVFBC_SW_SESSION_v12_04),
-  ('param_NV_NVJPG_ALLOCATION_PARAMETERS', alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02),
-  ('param_NV503B_ALLOC_PARAMETERS', alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02),
-  ('param_NVC637_ALLOCATION_PARAMETERS', alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00),
-  ('param_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS', alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03),
-  ('param_NVC638_ALLOCATION_PARAMETERS', alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06),
-  ('param_NV503C_ALLOC_PARAMETERS', alloc_object_NV503C_ALLOC_PARAMETERS_v18_15),
-  ('param_NVC670_ALLOCATION_PARAMETERS', alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01),
-  ('param_NVB1CC_ALLOC_PARAMETERS', alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03),
-  ('param_NVB2CC_ALLOC_PARAMETERS', alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03),
-  ('param_NV_GR_ALLOCATION_PARAMETERS', NV_GR_ALLOCATION_PARAMETERS_v1A_17),
-  ('param_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS', alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B),
-  ('param_NV00F8_ALLOCATION_PARAMETERS', alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C),
-  ('param_NVC9FA_VIDEO_OFA', alloc_object_NVC9FA_VIDEO_OFA_v1F_00),
-  ('param_NV2081_ALLOC_PARAMETERS', alloc_object_NV2081_ALLOC_PARAMETERS_v25_08),
-]
-struct_rpc_alloc_object_v25_08._fields_ = [
-  ('hClient', NvHandle),
-  ('hParent', NvHandle),
-  ('hObject', NvHandle),
-  ('hClass', NvU32),
-  ('param_len', NvU32),
-  ('params', alloc_object_params_v25_08),
-]
+struct_alloc_object_NV2081_ALLOC_PARAMETERS_v25_08.SIZE = 4
+struct_alloc_object_NV2081_ALLOC_PARAMETERS_v25_08._fields_ = ['reserved']
+setattr(struct_alloc_object_NV2081_ALLOC_PARAMETERS_v25_08, 'reserved', field(0, NvU32))
+union_alloc_object_params_v25_08.SIZE = 40
+union_alloc_object_params_v25_08._fields_ = ['param_NV50_TESLA', 'param_GT212_DMA_COPY', 'param_GF100_DISP_SW', 'param_KEPLER_CHANNEL_GROUP_A', 'param_FERMI_CONTEXT_SHARE_A', 'param_NVD0B7_VIDEO_ENCODER', 'param_FERMI_VASPACE_A', 'param_NVB0B0_VIDEO_DECODER', 'param_NV83DE_ALLOC_PARAMETERS', 'param_NVENC_SW_SESSION', 'param_NVC4B0_VIDEO_DECODER', 'param_NVFBC_SW_SESSION', 'param_NV_NVJPG_ALLOCATION_PARAMETERS', 'param_NV503B_ALLOC_PARAMETERS', 'param_NVC637_ALLOCATION_PARAMETERS', 'param_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS', 'param_NVC638_ALLOCATION_PARAMETERS', 'param_NV503C_ALLOC_PARAMETERS', 'param_NVC670_ALLOCATION_PARAMETERS', 'param_NVB1CC_ALLOC_PARAMETERS', 'param_NVB2CC_ALLOC_PARAMETERS', 'param_NV_GR_ALLOCATION_PARAMETERS', 'param_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS', 'param_NV00F8_ALLOCATION_PARAMETERS', 'param_NVC9FA_VIDEO_OFA', 'param_NV2081_ALLOC_PARAMETERS']
+setattr(union_alloc_object_params_v25_08, 'param_NV50_TESLA', field(0, alloc_object_NV50_TESLA_v03_00))
+setattr(union_alloc_object_params_v25_08, 'param_GT212_DMA_COPY', field(0, alloc_object_GT212_DMA_COPY_v03_00))
+setattr(union_alloc_object_params_v25_08, 'param_GF100_DISP_SW', field(0, alloc_object_GF100_DISP_SW_v03_00))
+setattr(union_alloc_object_params_v25_08, 'param_KEPLER_CHANNEL_GROUP_A', field(0, alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08))
+setattr(union_alloc_object_params_v25_08, 'param_FERMI_CONTEXT_SHARE_A', field(0, alloc_object_FERMI_CONTEXT_SHARE_A_v04_00))
+setattr(union_alloc_object_params_v25_08, 'param_NVD0B7_VIDEO_ENCODER', field(0, alloc_object_NVD0B7_VIDEO_ENCODER_v03_00))
+setattr(union_alloc_object_params_v25_08, 'param_FERMI_VASPACE_A', field(0, alloc_object_FERMI_VASPACE_A_v03_00))
+setattr(union_alloc_object_params_v25_08, 'param_NVB0B0_VIDEO_DECODER', field(0, alloc_object_NVB0B0_VIDEO_DECODER_v03_00))
+setattr(union_alloc_object_params_v25_08, 'param_NV83DE_ALLOC_PARAMETERS', field(0, alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00))
+setattr(union_alloc_object_params_v25_08, 'param_NVENC_SW_SESSION', field(0, alloc_object_NVENC_SW_SESSION_v06_01))
+setattr(union_alloc_object_params_v25_08, 'param_NVC4B0_VIDEO_DECODER', field(0, alloc_object_NVC4B0_VIDEO_DECODER_v12_02))
+setattr(union_alloc_object_params_v25_08, 'param_NVFBC_SW_SESSION', field(0, alloc_object_NVFBC_SW_SESSION_v12_04))
+setattr(union_alloc_object_params_v25_08, 'param_NV_NVJPG_ALLOCATION_PARAMETERS', field(0, alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02))
+setattr(union_alloc_object_params_v25_08, 'param_NV503B_ALLOC_PARAMETERS', field(0, alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02))
+setattr(union_alloc_object_params_v25_08, 'param_NVC637_ALLOCATION_PARAMETERS', field(0, alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00))
+setattr(union_alloc_object_params_v25_08, 'param_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS', field(0, alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03))
+setattr(union_alloc_object_params_v25_08, 'param_NVC638_ALLOCATION_PARAMETERS', field(0, alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06))
+setattr(union_alloc_object_params_v25_08, 'param_NV503C_ALLOC_PARAMETERS', field(0, alloc_object_NV503C_ALLOC_PARAMETERS_v18_15))
+setattr(union_alloc_object_params_v25_08, 'param_NVC670_ALLOCATION_PARAMETERS', field(0, alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01))
+setattr(union_alloc_object_params_v25_08, 'param_NVB1CC_ALLOC_PARAMETERS', field(0, alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03))
+setattr(union_alloc_object_params_v25_08, 'param_NVB2CC_ALLOC_PARAMETERS', field(0, alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03))
+setattr(union_alloc_object_params_v25_08, 'param_NV_GR_ALLOCATION_PARAMETERS', field(0, NV_GR_ALLOCATION_PARAMETERS_v1A_17))
+setattr(union_alloc_object_params_v25_08, 'param_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS', field(0, alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B))
+setattr(union_alloc_object_params_v25_08, 'param_NV00F8_ALLOCATION_PARAMETERS', field(0, alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C))
+setattr(union_alloc_object_params_v25_08, 'param_NVC9FA_VIDEO_OFA', field(0, alloc_object_NVC9FA_VIDEO_OFA_v1F_00))
+setattr(union_alloc_object_params_v25_08, 'param_NV2081_ALLOC_PARAMETERS', field(0, alloc_object_NV2081_ALLOC_PARAMETERS_v25_08))
+struct_rpc_alloc_object_v25_08.SIZE = 64
+struct_rpc_alloc_object_v25_08._fields_ = ['hClient', 'hParent', 'hObject', 'hClass', 'param_len', 'params']
+setattr(struct_rpc_alloc_object_v25_08, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_alloc_object_v25_08, 'hParent', field(4, NvHandle))
+setattr(struct_rpc_alloc_object_v25_08, 'hObject', field(8, NvHandle))
+setattr(struct_rpc_alloc_object_v25_08, 'hClass', field(12, NvU32))
+setattr(struct_rpc_alloc_object_v25_08, 'param_len', field(16, NvU32))
+setattr(struct_rpc_alloc_object_v25_08, 'params', field(24, alloc_object_params_v25_08))
 rpc_alloc_object_v25_08 = struct_rpc_alloc_object_v25_08
 class struct_rpc_alloc_object_v26_00(Struct): pass
-class union_alloc_object_params_v26_00(ctypes.Union): pass
+class union_alloc_object_params_v26_00(Union): pass
 alloc_object_params_v26_00 = union_alloc_object_params_v26_00
-union_alloc_object_params_v26_00._fields_ = [
-  ('param_NV50_TESLA', alloc_object_NV50_TESLA_v03_00),
-  ('param_GT212_DMA_COPY', alloc_object_GT212_DMA_COPY_v03_00),
-  ('param_GF100_DISP_SW', alloc_object_GF100_DISP_SW_v03_00),
-  ('param_KEPLER_CHANNEL_GROUP_A', alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08),
-  ('param_FERMI_CONTEXT_SHARE_A', alloc_object_FERMI_CONTEXT_SHARE_A_v04_00),
-  ('param_NVD0B7_VIDEO_ENCODER', alloc_object_NVD0B7_VIDEO_ENCODER_v03_00),
-  ('param_FERMI_VASPACE_A', alloc_object_FERMI_VASPACE_A_v03_00),
-  ('param_NVB0B0_VIDEO_DECODER', alloc_object_NVB0B0_VIDEO_DECODER_v03_00),
-  ('param_NV83DE_ALLOC_PARAMETERS', alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00),
-  ('param_NVENC_SW_SESSION', alloc_object_NVENC_SW_SESSION_v06_01),
-  ('param_NVC4B0_VIDEO_DECODER', alloc_object_NVC4B0_VIDEO_DECODER_v12_02),
-  ('param_NVFBC_SW_SESSION', alloc_object_NVFBC_SW_SESSION_v12_04),
-  ('param_NV_NVJPG_ALLOCATION_PARAMETERS', alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02),
-  ('param_NV503B_ALLOC_PARAMETERS', alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02),
-  ('param_NVC637_ALLOCATION_PARAMETERS', alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00),
-  ('param_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS', alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03),
-  ('param_NVC638_ALLOCATION_PARAMETERS', alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06),
-  ('param_NV503C_ALLOC_PARAMETERS', alloc_object_NV503C_ALLOC_PARAMETERS_v18_15),
-  ('param_NVC670_ALLOCATION_PARAMETERS', alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01),
-  ('param_NVB1CC_ALLOC_PARAMETERS', alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03),
-  ('param_NVB2CC_ALLOC_PARAMETERS', alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03),
-  ('param_NV_GR_ALLOCATION_PARAMETERS', NV_GR_ALLOCATION_PARAMETERS_v1A_17),
-  ('param_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS', alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B),
-  ('param_NV00F8_ALLOCATION_PARAMETERS', alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C),
-  ('param_NVC9FA_VIDEO_OFA', alloc_object_NVC9FA_VIDEO_OFA_v1F_00),
-  ('param_NV2081_ALLOC_PARAMETERS', alloc_object_NV2081_ALLOC_PARAMETERS_v25_08),
-  ('param_padding', (NvU8 * 56)),
-]
-struct_rpc_alloc_object_v26_00._fields_ = [
-  ('hClient', NvHandle),
-  ('hParent', NvHandle),
-  ('hObject', NvHandle),
-  ('hClass', NvU32),
-  ('param_len', NvU32),
-  ('params', alloc_object_params_v26_00),
-]
+union_alloc_object_params_v26_00.SIZE = 56
+union_alloc_object_params_v26_00._fields_ = ['param_NV50_TESLA', 'param_GT212_DMA_COPY', 'param_GF100_DISP_SW', 'param_KEPLER_CHANNEL_GROUP_A', 'param_FERMI_CONTEXT_SHARE_A', 'param_NVD0B7_VIDEO_ENCODER', 'param_FERMI_VASPACE_A', 'param_NVB0B0_VIDEO_DECODER', 'param_NV83DE_ALLOC_PARAMETERS', 'param_NVENC_SW_SESSION', 'param_NVC4B0_VIDEO_DECODER', 'param_NVFBC_SW_SESSION', 'param_NV_NVJPG_ALLOCATION_PARAMETERS', 'param_NV503B_ALLOC_PARAMETERS', 'param_NVC637_ALLOCATION_PARAMETERS', 'param_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS', 'param_NVC638_ALLOCATION_PARAMETERS', 'param_NV503C_ALLOC_PARAMETERS', 'param_NVC670_ALLOCATION_PARAMETERS', 'param_NVB1CC_ALLOC_PARAMETERS', 'param_NVB2CC_ALLOC_PARAMETERS', 'param_NV_GR_ALLOCATION_PARAMETERS', 'param_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS', 'param_NV00F8_ALLOCATION_PARAMETERS', 'param_NVC9FA_VIDEO_OFA', 'param_NV2081_ALLOC_PARAMETERS', 'param_padding']
+setattr(union_alloc_object_params_v26_00, 'param_NV50_TESLA', field(0, alloc_object_NV50_TESLA_v03_00))
+setattr(union_alloc_object_params_v26_00, 'param_GT212_DMA_COPY', field(0, alloc_object_GT212_DMA_COPY_v03_00))
+setattr(union_alloc_object_params_v26_00, 'param_GF100_DISP_SW', field(0, alloc_object_GF100_DISP_SW_v03_00))
+setattr(union_alloc_object_params_v26_00, 'param_KEPLER_CHANNEL_GROUP_A', field(0, alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08))
+setattr(union_alloc_object_params_v26_00, 'param_FERMI_CONTEXT_SHARE_A', field(0, alloc_object_FERMI_CONTEXT_SHARE_A_v04_00))
+setattr(union_alloc_object_params_v26_00, 'param_NVD0B7_VIDEO_ENCODER', field(0, alloc_object_NVD0B7_VIDEO_ENCODER_v03_00))
+setattr(union_alloc_object_params_v26_00, 'param_FERMI_VASPACE_A', field(0, alloc_object_FERMI_VASPACE_A_v03_00))
+setattr(union_alloc_object_params_v26_00, 'param_NVB0B0_VIDEO_DECODER', field(0, alloc_object_NVB0B0_VIDEO_DECODER_v03_00))
+setattr(union_alloc_object_params_v26_00, 'param_NV83DE_ALLOC_PARAMETERS', field(0, alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00))
+setattr(union_alloc_object_params_v26_00, 'param_NVENC_SW_SESSION', field(0, alloc_object_NVENC_SW_SESSION_v06_01))
+setattr(union_alloc_object_params_v26_00, 'param_NVC4B0_VIDEO_DECODER', field(0, alloc_object_NVC4B0_VIDEO_DECODER_v12_02))
+setattr(union_alloc_object_params_v26_00, 'param_NVFBC_SW_SESSION', field(0, alloc_object_NVFBC_SW_SESSION_v12_04))
+setattr(union_alloc_object_params_v26_00, 'param_NV_NVJPG_ALLOCATION_PARAMETERS', field(0, alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02))
+setattr(union_alloc_object_params_v26_00, 'param_NV503B_ALLOC_PARAMETERS', field(0, alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02))
+setattr(union_alloc_object_params_v26_00, 'param_NVC637_ALLOCATION_PARAMETERS', field(0, alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00))
+setattr(union_alloc_object_params_v26_00, 'param_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS', field(0, alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03))
+setattr(union_alloc_object_params_v26_00, 'param_NVC638_ALLOCATION_PARAMETERS', field(0, alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06))
+setattr(union_alloc_object_params_v26_00, 'param_NV503C_ALLOC_PARAMETERS', field(0, alloc_object_NV503C_ALLOC_PARAMETERS_v18_15))
+setattr(union_alloc_object_params_v26_00, 'param_NVC670_ALLOCATION_PARAMETERS', field(0, alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01))
+setattr(union_alloc_object_params_v26_00, 'param_NVB1CC_ALLOC_PARAMETERS', field(0, alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03))
+setattr(union_alloc_object_params_v26_00, 'param_NVB2CC_ALLOC_PARAMETERS', field(0, alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03))
+setattr(union_alloc_object_params_v26_00, 'param_NV_GR_ALLOCATION_PARAMETERS', field(0, NV_GR_ALLOCATION_PARAMETERS_v1A_17))
+setattr(union_alloc_object_params_v26_00, 'param_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS', field(0, alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B))
+setattr(union_alloc_object_params_v26_00, 'param_NV00F8_ALLOCATION_PARAMETERS', field(0, alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C))
+setattr(union_alloc_object_params_v26_00, 'param_NVC9FA_VIDEO_OFA', field(0, alloc_object_NVC9FA_VIDEO_OFA_v1F_00))
+setattr(union_alloc_object_params_v26_00, 'param_NV2081_ALLOC_PARAMETERS', field(0, alloc_object_NV2081_ALLOC_PARAMETERS_v25_08))
+setattr(union_alloc_object_params_v26_00, 'param_padding', field(0, Array(NvU8, 56)))
+struct_rpc_alloc_object_v26_00.SIZE = 80
+struct_rpc_alloc_object_v26_00._fields_ = ['hClient', 'hParent', 'hObject', 'hClass', 'param_len', 'params']
+setattr(struct_rpc_alloc_object_v26_00, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_alloc_object_v26_00, 'hParent', field(4, NvHandle))
+setattr(struct_rpc_alloc_object_v26_00, 'hObject', field(8, NvHandle))
+setattr(struct_rpc_alloc_object_v26_00, 'hClass', field(12, NvU32))
+setattr(struct_rpc_alloc_object_v26_00, 'param_len', field(16, NvU32))
+setattr(struct_rpc_alloc_object_v26_00, 'params', field(24, alloc_object_params_v26_00))
 rpc_alloc_object_v26_00 = struct_rpc_alloc_object_v26_00
 class struct_rpc_alloc_object_v27_00(Struct): pass
-class union_alloc_object_params_v27_00(ctypes.Union): pass
+class union_alloc_object_params_v27_00(Union): pass
 alloc_object_params_v27_00 = union_alloc_object_params_v27_00
-union_alloc_object_params_v27_00._fields_ = [
-  ('param_NV50_TESLA', alloc_object_NV50_TESLA_v03_00),
-  ('param_GT212_DMA_COPY', alloc_object_GT212_DMA_COPY_v03_00),
-  ('param_GF100_DISP_SW', alloc_object_GF100_DISP_SW_v03_00),
-  ('param_KEPLER_CHANNEL_GROUP_A', alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08),
-  ('param_FERMI_CONTEXT_SHARE_A', alloc_object_FERMI_CONTEXT_SHARE_A_v04_00),
-  ('param_NVD0B7_VIDEO_ENCODER', alloc_object_NVD0B7_VIDEO_ENCODER_v03_00),
-  ('param_FERMI_VASPACE_A', alloc_object_FERMI_VASPACE_A_v03_00),
-  ('param_NVB0B0_VIDEO_DECODER', alloc_object_NVB0B0_VIDEO_DECODER_v03_00),
-  ('param_NV83DE_ALLOC_PARAMETERS', alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00),
-  ('param_NVENC_SW_SESSION', alloc_object_NVENC_SW_SESSION_v06_01),
-  ('param_NVC4B0_VIDEO_DECODER', alloc_object_NVC4B0_VIDEO_DECODER_v12_02),
-  ('param_NVFBC_SW_SESSION', alloc_object_NVFBC_SW_SESSION_v12_04),
-  ('param_NV_NVJPG_ALLOCATION_PARAMETERS', alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02),
-  ('param_NV503B_ALLOC_PARAMETERS', alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02),
-  ('param_NVC637_ALLOCATION_PARAMETERS', alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00),
-  ('param_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS', alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03),
-  ('param_NVC638_ALLOCATION_PARAMETERS', alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06),
-  ('param_NV503C_ALLOC_PARAMETERS', alloc_object_NV503C_ALLOC_PARAMETERS_v18_15),
-  ('param_NVC670_ALLOCATION_PARAMETERS', alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01),
-  ('param_NVB1CC_ALLOC_PARAMETERS', alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03),
-  ('param_NVB2CC_ALLOC_PARAMETERS', alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03),
-  ('param_NV_GR_ALLOCATION_PARAMETERS', NV_GR_ALLOCATION_PARAMETERS_v1A_17),
-  ('param_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS', alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B),
-  ('param_NV00F8_ALLOCATION_PARAMETERS', alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C),
-  ('param_NVC9FA_VIDEO_OFA', alloc_object_NVC9FA_VIDEO_OFA_v1F_00),
-  ('param_NV2081_ALLOC_PARAMETERS', alloc_object_NV2081_ALLOC_PARAMETERS_v25_08),
-  ('param_padding', (NvU8 * 56)),
-]
-struct_rpc_alloc_object_v27_00._fields_ = [
-  ('hClient', NvHandle),
-  ('hParent', NvHandle),
-  ('hObject', NvHandle),
-  ('hClass', NvU32),
-  ('param_len', NvU32),
-  ('params', alloc_object_params_v27_00),
-]
+union_alloc_object_params_v27_00.SIZE = 56
+union_alloc_object_params_v27_00._fields_ = ['param_NV50_TESLA', 'param_GT212_DMA_COPY', 'param_GF100_DISP_SW', 'param_KEPLER_CHANNEL_GROUP_A', 'param_FERMI_CONTEXT_SHARE_A', 'param_NVD0B7_VIDEO_ENCODER', 'param_FERMI_VASPACE_A', 'param_NVB0B0_VIDEO_DECODER', 'param_NV83DE_ALLOC_PARAMETERS', 'param_NVENC_SW_SESSION', 'param_NVC4B0_VIDEO_DECODER', 'param_NVFBC_SW_SESSION', 'param_NV_NVJPG_ALLOCATION_PARAMETERS', 'param_NV503B_ALLOC_PARAMETERS', 'param_NVC637_ALLOCATION_PARAMETERS', 'param_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS', 'param_NVC638_ALLOCATION_PARAMETERS', 'param_NV503C_ALLOC_PARAMETERS', 'param_NVC670_ALLOCATION_PARAMETERS', 'param_NVB1CC_ALLOC_PARAMETERS', 'param_NVB2CC_ALLOC_PARAMETERS', 'param_NV_GR_ALLOCATION_PARAMETERS', 'param_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS', 'param_NV00F8_ALLOCATION_PARAMETERS', 'param_NVC9FA_VIDEO_OFA', 'param_NV2081_ALLOC_PARAMETERS', 'param_padding']
+setattr(union_alloc_object_params_v27_00, 'param_NV50_TESLA', field(0, alloc_object_NV50_TESLA_v03_00))
+setattr(union_alloc_object_params_v27_00, 'param_GT212_DMA_COPY', field(0, alloc_object_GT212_DMA_COPY_v03_00))
+setattr(union_alloc_object_params_v27_00, 'param_GF100_DISP_SW', field(0, alloc_object_GF100_DISP_SW_v03_00))
+setattr(union_alloc_object_params_v27_00, 'param_KEPLER_CHANNEL_GROUP_A', field(0, alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08))
+setattr(union_alloc_object_params_v27_00, 'param_FERMI_CONTEXT_SHARE_A', field(0, alloc_object_FERMI_CONTEXT_SHARE_A_v04_00))
+setattr(union_alloc_object_params_v27_00, 'param_NVD0B7_VIDEO_ENCODER', field(0, alloc_object_NVD0B7_VIDEO_ENCODER_v03_00))
+setattr(union_alloc_object_params_v27_00, 'param_FERMI_VASPACE_A', field(0, alloc_object_FERMI_VASPACE_A_v03_00))
+setattr(union_alloc_object_params_v27_00, 'param_NVB0B0_VIDEO_DECODER', field(0, alloc_object_NVB0B0_VIDEO_DECODER_v03_00))
+setattr(union_alloc_object_params_v27_00, 'param_NV83DE_ALLOC_PARAMETERS', field(0, alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00))
+setattr(union_alloc_object_params_v27_00, 'param_NVENC_SW_SESSION', field(0, alloc_object_NVENC_SW_SESSION_v06_01))
+setattr(union_alloc_object_params_v27_00, 'param_NVC4B0_VIDEO_DECODER', field(0, alloc_object_NVC4B0_VIDEO_DECODER_v12_02))
+setattr(union_alloc_object_params_v27_00, 'param_NVFBC_SW_SESSION', field(0, alloc_object_NVFBC_SW_SESSION_v12_04))
+setattr(union_alloc_object_params_v27_00, 'param_NV_NVJPG_ALLOCATION_PARAMETERS', field(0, alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02))
+setattr(union_alloc_object_params_v27_00, 'param_NV503B_ALLOC_PARAMETERS', field(0, alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02))
+setattr(union_alloc_object_params_v27_00, 'param_NVC637_ALLOCATION_PARAMETERS', field(0, alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00))
+setattr(union_alloc_object_params_v27_00, 'param_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS', field(0, alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03))
+setattr(union_alloc_object_params_v27_00, 'param_NVC638_ALLOCATION_PARAMETERS', field(0, alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06))
+setattr(union_alloc_object_params_v27_00, 'param_NV503C_ALLOC_PARAMETERS', field(0, alloc_object_NV503C_ALLOC_PARAMETERS_v18_15))
+setattr(union_alloc_object_params_v27_00, 'param_NVC670_ALLOCATION_PARAMETERS', field(0, alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01))
+setattr(union_alloc_object_params_v27_00, 'param_NVB1CC_ALLOC_PARAMETERS', field(0, alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03))
+setattr(union_alloc_object_params_v27_00, 'param_NVB2CC_ALLOC_PARAMETERS', field(0, alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03))
+setattr(union_alloc_object_params_v27_00, 'param_NV_GR_ALLOCATION_PARAMETERS', field(0, NV_GR_ALLOCATION_PARAMETERS_v1A_17))
+setattr(union_alloc_object_params_v27_00, 'param_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS', field(0, alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B))
+setattr(union_alloc_object_params_v27_00, 'param_NV00F8_ALLOCATION_PARAMETERS', field(0, alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C))
+setattr(union_alloc_object_params_v27_00, 'param_NVC9FA_VIDEO_OFA', field(0, alloc_object_NVC9FA_VIDEO_OFA_v1F_00))
+setattr(union_alloc_object_params_v27_00, 'param_NV2081_ALLOC_PARAMETERS', field(0, alloc_object_NV2081_ALLOC_PARAMETERS_v25_08))
+setattr(union_alloc_object_params_v27_00, 'param_padding', field(0, Array(NvU8, 56)))
+struct_rpc_alloc_object_v27_00.SIZE = 80
+struct_rpc_alloc_object_v27_00._fields_ = ['hClient', 'hParent', 'hObject', 'hClass', 'param_len', 'params']
+setattr(struct_rpc_alloc_object_v27_00, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_alloc_object_v27_00, 'hParent', field(4, NvHandle))
+setattr(struct_rpc_alloc_object_v27_00, 'hObject', field(8, NvHandle))
+setattr(struct_rpc_alloc_object_v27_00, 'hClass', field(12, NvU32))
+setattr(struct_rpc_alloc_object_v27_00, 'param_len', field(16, NvU32))
+setattr(struct_rpc_alloc_object_v27_00, 'params', field(24, alloc_object_params_v27_00))
 rpc_alloc_object_v27_00 = struct_rpc_alloc_object_v27_00
 class struct_rpc_alloc_object_v29_06(Struct): pass
-class union_alloc_object_params_v29_06(ctypes.Union): pass
+class union_alloc_object_params_v29_06(Union): pass
 alloc_object_params_v29_06 = union_alloc_object_params_v29_06
 class struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06(Struct): pass
 alloc_object_NVC9FA_VIDEO_OFA_v29_06 = struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06
-struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06._fields_ = [
-  ('size', NvU32),
-  ('prohibitMultipleInstances', NvU32),
-  ('engineInstance', NvU32),
-]
-union_alloc_object_params_v29_06._fields_ = [
-  ('param_NV50_TESLA', alloc_object_NV50_TESLA_v03_00),
-  ('param_GT212_DMA_COPY', alloc_object_GT212_DMA_COPY_v03_00),
-  ('param_GF100_DISP_SW', alloc_object_GF100_DISP_SW_v03_00),
-  ('param_KEPLER_CHANNEL_GROUP_A', alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08),
-  ('param_FERMI_CONTEXT_SHARE_A', alloc_object_FERMI_CONTEXT_SHARE_A_v04_00),
-  ('param_NVD0B7_VIDEO_ENCODER', alloc_object_NVD0B7_VIDEO_ENCODER_v03_00),
-  ('param_FERMI_VASPACE_A', alloc_object_FERMI_VASPACE_A_v03_00),
-  ('param_NVB0B0_VIDEO_DECODER', alloc_object_NVB0B0_VIDEO_DECODER_v03_00),
-  ('param_NV83DE_ALLOC_PARAMETERS', alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00),
-  ('param_NVENC_SW_SESSION', alloc_object_NVENC_SW_SESSION_v06_01),
-  ('param_NVC4B0_VIDEO_DECODER', alloc_object_NVC4B0_VIDEO_DECODER_v12_02),
-  ('param_NVFBC_SW_SESSION', alloc_object_NVFBC_SW_SESSION_v12_04),
-  ('param_NV_NVJPG_ALLOCATION_PARAMETERS', alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02),
-  ('param_NV503B_ALLOC_PARAMETERS', alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02),
-  ('param_NVC637_ALLOCATION_PARAMETERS', alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00),
-  ('param_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS', alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03),
-  ('param_NVC638_ALLOCATION_PARAMETERS', alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06),
-  ('param_NV503C_ALLOC_PARAMETERS', alloc_object_NV503C_ALLOC_PARAMETERS_v18_15),
-  ('param_NVC670_ALLOCATION_PARAMETERS', alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01),
-  ('param_NVB1CC_ALLOC_PARAMETERS', alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03),
-  ('param_NVB2CC_ALLOC_PARAMETERS', alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03),
-  ('param_NV_GR_ALLOCATION_PARAMETERS', NV_GR_ALLOCATION_PARAMETERS_v1A_17),
-  ('param_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS', alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B),
-  ('param_NV00F8_ALLOCATION_PARAMETERS', alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C),
-  ('param_NVC9FA_VIDEO_OFA', alloc_object_NVC9FA_VIDEO_OFA_v29_06),
-  ('param_NV2081_ALLOC_PARAMETERS', alloc_object_NV2081_ALLOC_PARAMETERS_v25_08),
-  ('param_padding', (NvU8 * 56)),
-]
-struct_rpc_alloc_object_v29_06._fields_ = [
-  ('hClient', NvHandle),
-  ('hParent', NvHandle),
-  ('hObject', NvHandle),
-  ('hClass', NvU32),
-  ('param_len', NvU32),
-  ('params', alloc_object_params_v29_06),
-]
+struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06.SIZE = 12
+struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06._fields_ = ['size', 'prohibitMultipleInstances', 'engineInstance']
+setattr(struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06, 'size', field(0, NvU32))
+setattr(struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06, 'prohibitMultipleInstances', field(4, NvU32))
+setattr(struct_alloc_object_NVC9FA_VIDEO_OFA_v29_06, 'engineInstance', field(8, NvU32))
+union_alloc_object_params_v29_06.SIZE = 56
+union_alloc_object_params_v29_06._fields_ = ['param_NV50_TESLA', 'param_GT212_DMA_COPY', 'param_GF100_DISP_SW', 'param_KEPLER_CHANNEL_GROUP_A', 'param_FERMI_CONTEXT_SHARE_A', 'param_NVD0B7_VIDEO_ENCODER', 'param_FERMI_VASPACE_A', 'param_NVB0B0_VIDEO_DECODER', 'param_NV83DE_ALLOC_PARAMETERS', 'param_NVENC_SW_SESSION', 'param_NVC4B0_VIDEO_DECODER', 'param_NVFBC_SW_SESSION', 'param_NV_NVJPG_ALLOCATION_PARAMETERS', 'param_NV503B_ALLOC_PARAMETERS', 'param_NVC637_ALLOCATION_PARAMETERS', 'param_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS', 'param_NVC638_ALLOCATION_PARAMETERS', 'param_NV503C_ALLOC_PARAMETERS', 'param_NVC670_ALLOCATION_PARAMETERS', 'param_NVB1CC_ALLOC_PARAMETERS', 'param_NVB2CC_ALLOC_PARAMETERS', 'param_NV_GR_ALLOCATION_PARAMETERS', 'param_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS', 'param_NV00F8_ALLOCATION_PARAMETERS', 'param_NVC9FA_VIDEO_OFA', 'param_NV2081_ALLOC_PARAMETERS', 'param_padding']
+setattr(union_alloc_object_params_v29_06, 'param_NV50_TESLA', field(0, alloc_object_NV50_TESLA_v03_00))
+setattr(union_alloc_object_params_v29_06, 'param_GT212_DMA_COPY', field(0, alloc_object_GT212_DMA_COPY_v03_00))
+setattr(union_alloc_object_params_v29_06, 'param_GF100_DISP_SW', field(0, alloc_object_GF100_DISP_SW_v03_00))
+setattr(union_alloc_object_params_v29_06, 'param_KEPLER_CHANNEL_GROUP_A', field(0, alloc_object_KEPLER_CHANNEL_GROUP_A_v12_08))
+setattr(union_alloc_object_params_v29_06, 'param_FERMI_CONTEXT_SHARE_A', field(0, alloc_object_FERMI_CONTEXT_SHARE_A_v04_00))
+setattr(union_alloc_object_params_v29_06, 'param_NVD0B7_VIDEO_ENCODER', field(0, alloc_object_NVD0B7_VIDEO_ENCODER_v03_00))
+setattr(union_alloc_object_params_v29_06, 'param_FERMI_VASPACE_A', field(0, alloc_object_FERMI_VASPACE_A_v03_00))
+setattr(union_alloc_object_params_v29_06, 'param_NVB0B0_VIDEO_DECODER', field(0, alloc_object_NVB0B0_VIDEO_DECODER_v03_00))
+setattr(union_alloc_object_params_v29_06, 'param_NV83DE_ALLOC_PARAMETERS', field(0, alloc_object_NV83DE_ALLOC_PARAMETERS_v03_00))
+setattr(union_alloc_object_params_v29_06, 'param_NVENC_SW_SESSION', field(0, alloc_object_NVENC_SW_SESSION_v06_01))
+setattr(union_alloc_object_params_v29_06, 'param_NVC4B0_VIDEO_DECODER', field(0, alloc_object_NVC4B0_VIDEO_DECODER_v12_02))
+setattr(union_alloc_object_params_v29_06, 'param_NVFBC_SW_SESSION', field(0, alloc_object_NVFBC_SW_SESSION_v12_04))
+setattr(union_alloc_object_params_v29_06, 'param_NV_NVJPG_ALLOCATION_PARAMETERS', field(0, alloc_object_NV_NVJPG_ALLOCATION_PARAMETERS_v20_02))
+setattr(union_alloc_object_params_v29_06, 'param_NV503B_ALLOC_PARAMETERS', field(0, alloc_object_NV503B_ALLOC_PARAMETERS_v1D_02))
+setattr(union_alloc_object_params_v29_06, 'param_NVC637_ALLOCATION_PARAMETERS', field(0, alloc_object_NVC637_ALLOCATION_PARAMETERS_v13_00))
+setattr(union_alloc_object_params_v29_06, 'param_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS', field(0, alloc_object_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_v13_03))
+setattr(union_alloc_object_params_v29_06, 'param_NVC638_ALLOCATION_PARAMETERS', field(0, alloc_object_NVC638_ALLOCATION_PARAMETERS_v18_06))
+setattr(union_alloc_object_params_v29_06, 'param_NV503C_ALLOC_PARAMETERS', field(0, alloc_object_NV503C_ALLOC_PARAMETERS_v18_15))
+setattr(union_alloc_object_params_v29_06, 'param_NVC670_ALLOCATION_PARAMETERS', field(0, alloc_object_NVC670_ALLOCATION_PARAMETERS_v1A_01))
+setattr(union_alloc_object_params_v29_06, 'param_NVB1CC_ALLOC_PARAMETERS', field(0, alloc_object_NVB1CC_ALLOC_PARAMETERS_v1A_03))
+setattr(union_alloc_object_params_v29_06, 'param_NVB2CC_ALLOC_PARAMETERS', field(0, alloc_object_NVB2CC_ALLOC_PARAMETERS_v1A_03))
+setattr(union_alloc_object_params_v29_06, 'param_NV_GR_ALLOCATION_PARAMETERS', field(0, NV_GR_ALLOCATION_PARAMETERS_v1A_17))
+setattr(union_alloc_object_params_v29_06, 'param_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS', field(0, alloc_object_NV_UVM_CHANNEL_RETAINER_ALLOC_PARAMS_v1A_1B))
+setattr(union_alloc_object_params_v29_06, 'param_NV00F8_ALLOCATION_PARAMETERS', field(0, alloc_object_NV00F8_ALLOCATION_PARAMETERS_v1E_0C))
+setattr(union_alloc_object_params_v29_06, 'param_NVC9FA_VIDEO_OFA', field(0, alloc_object_NVC9FA_VIDEO_OFA_v29_06))
+setattr(union_alloc_object_params_v29_06, 'param_NV2081_ALLOC_PARAMETERS', field(0, alloc_object_NV2081_ALLOC_PARAMETERS_v25_08))
+setattr(union_alloc_object_params_v29_06, 'param_padding', field(0, Array(NvU8, 56)))
+struct_rpc_alloc_object_v29_06.SIZE = 80
+struct_rpc_alloc_object_v29_06._fields_ = ['hClient', 'hParent', 'hObject', 'hClass', 'param_len', 'params']
+setattr(struct_rpc_alloc_object_v29_06, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_alloc_object_v29_06, 'hParent', field(4, NvHandle))
+setattr(struct_rpc_alloc_object_v29_06, 'hObject', field(8, NvHandle))
+setattr(struct_rpc_alloc_object_v29_06, 'hClass', field(12, NvU32))
+setattr(struct_rpc_alloc_object_v29_06, 'param_len', field(16, NvU32))
+setattr(struct_rpc_alloc_object_v29_06, 'params', field(24, alloc_object_params_v29_06))
 rpc_alloc_object_v29_06 = struct_rpc_alloc_object_v29_06
 rpc_alloc_object_v = struct_rpc_alloc_object_v29_06
 class struct_rpc_free_v03_00(Struct): pass
 class struct_NVOS00_PARAMETERS_v03_00(Struct): pass
 NVOS00_PARAMETERS_v03_00 = struct_NVOS00_PARAMETERS_v03_00
 NvV32 = ctypes.c_uint32
-struct_NVOS00_PARAMETERS_v03_00._fields_ = [
-  ('hRoot', NvHandle),
-  ('hObjectParent', NvHandle),
-  ('hObjectOld', NvHandle),
-  ('status', NvV32),
-]
-struct_rpc_free_v03_00._fields_ = [
-  ('params', NVOS00_PARAMETERS_v03_00),
-]
+struct_NVOS00_PARAMETERS_v03_00.SIZE = 16
+struct_NVOS00_PARAMETERS_v03_00._fields_ = ['hRoot', 'hObjectParent', 'hObjectOld', 'status']
+setattr(struct_NVOS00_PARAMETERS_v03_00, 'hRoot', field(0, NvHandle))
+setattr(struct_NVOS00_PARAMETERS_v03_00, 'hObjectParent', field(4, NvHandle))
+setattr(struct_NVOS00_PARAMETERS_v03_00, 'hObjectOld', field(8, NvHandle))
+setattr(struct_NVOS00_PARAMETERS_v03_00, 'status', field(12, NvV32))
+struct_rpc_free_v03_00.SIZE = 16
+struct_rpc_free_v03_00._fields_ = ['params']
+setattr(struct_rpc_free_v03_00, 'params', field(0, NVOS00_PARAMETERS_v03_00))
 rpc_free_v03_00 = struct_rpc_free_v03_00
 rpc_free_v = struct_rpc_free_v03_00
 class struct_rpc_log_v03_00(Struct): pass
-struct_rpc_log_v03_00._fields_ = [
-  ('level', NvU32),
-  ('log_len', NvU32),
-  ('log_msg', (ctypes.c_char * 0)),
-]
+struct_rpc_log_v03_00.SIZE = 8
+struct_rpc_log_v03_00._fields_ = ['level', 'log_len', 'log_msg']
+setattr(struct_rpc_log_v03_00, 'level', field(0, NvU32))
+setattr(struct_rpc_log_v03_00, 'log_len', field(4, NvU32))
+setattr(struct_rpc_log_v03_00, 'log_msg', field(8, Array(ctypes.c_char, 0)))
 rpc_log_v03_00 = struct_rpc_log_v03_00
 rpc_log_v = struct_rpc_log_v03_00
 class struct_rpc_map_memory_dma_v03_00(Struct): pass
 class struct_NVOS46_PARAMETERS_v03_00(Struct): pass
 NVOS46_PARAMETERS_v03_00 = struct_NVOS46_PARAMETERS_v03_00
-struct_NVOS46_PARAMETERS_v03_00._fields_ = [
-  ('hClient', NvHandle),
-  ('hDevice', NvHandle),
-  ('hDma', NvHandle),
-  ('hMemory', NvHandle),
-  ('offset', NvU64),
-  ('length', NvU64),
-  ('flags', NvV32),
-  ('dmaOffset', NvU64),
-  ('status', NvV32),
-]
-struct_rpc_map_memory_dma_v03_00._fields_ = [
-  ('params', NVOS46_PARAMETERS_v03_00),
-]
+struct_NVOS46_PARAMETERS_v03_00.SIZE = 56
+struct_NVOS46_PARAMETERS_v03_00._fields_ = ['hClient', 'hDevice', 'hDma', 'hMemory', 'offset', 'length', 'flags', 'dmaOffset', 'status']
+setattr(struct_NVOS46_PARAMETERS_v03_00, 'hClient', field(0, NvHandle))
+setattr(struct_NVOS46_PARAMETERS_v03_00, 'hDevice', field(4, NvHandle))
+setattr(struct_NVOS46_PARAMETERS_v03_00, 'hDma', field(8, NvHandle))
+setattr(struct_NVOS46_PARAMETERS_v03_00, 'hMemory', field(12, NvHandle))
+setattr(struct_NVOS46_PARAMETERS_v03_00, 'offset', field(16, NvU64))
+setattr(struct_NVOS46_PARAMETERS_v03_00, 'length', field(24, NvU64))
+setattr(struct_NVOS46_PARAMETERS_v03_00, 'flags', field(32, NvV32))
+setattr(struct_NVOS46_PARAMETERS_v03_00, 'dmaOffset', field(40, NvU64))
+setattr(struct_NVOS46_PARAMETERS_v03_00, 'status', field(48, NvV32))
+struct_rpc_map_memory_dma_v03_00.SIZE = 56
+struct_rpc_map_memory_dma_v03_00._fields_ = ['params']
+setattr(struct_rpc_map_memory_dma_v03_00, 'params', field(0, NVOS46_PARAMETERS_v03_00))
 rpc_map_memory_dma_v03_00 = struct_rpc_map_memory_dma_v03_00
 rpc_map_memory_dma_v = struct_rpc_map_memory_dma_v03_00
 class struct_rpc_unmap_memory_dma_v03_00(Struct): pass
 class struct_NVOS47_PARAMETERS_v03_00(Struct): pass
 NVOS47_PARAMETERS_v03_00 = struct_NVOS47_PARAMETERS_v03_00
-struct_NVOS47_PARAMETERS_v03_00._fields_ = [
-  ('hClient', NvHandle),
-  ('hDevice', NvHandle),
-  ('hDma', NvHandle),
-  ('hMemory', NvHandle),
-  ('flags', NvV32),
-  ('dmaOffset', NvU64),
-  ('status', NvV32),
-]
-struct_rpc_unmap_memory_dma_v03_00._fields_ = [
-  ('params', NVOS47_PARAMETERS_v03_00),
-]
+struct_NVOS47_PARAMETERS_v03_00.SIZE = 40
+struct_NVOS47_PARAMETERS_v03_00._fields_ = ['hClient', 'hDevice', 'hDma', 'hMemory', 'flags', 'dmaOffset', 'status']
+setattr(struct_NVOS47_PARAMETERS_v03_00, 'hClient', field(0, NvHandle))
+setattr(struct_NVOS47_PARAMETERS_v03_00, 'hDevice', field(4, NvHandle))
+setattr(struct_NVOS47_PARAMETERS_v03_00, 'hDma', field(8, NvHandle))
+setattr(struct_NVOS47_PARAMETERS_v03_00, 'hMemory', field(12, NvHandle))
+setattr(struct_NVOS47_PARAMETERS_v03_00, 'flags', field(16, NvV32))
+setattr(struct_NVOS47_PARAMETERS_v03_00, 'dmaOffset', field(24, NvU64))
+setattr(struct_NVOS47_PARAMETERS_v03_00, 'status', field(32, NvV32))
+struct_rpc_unmap_memory_dma_v03_00.SIZE = 40
+struct_rpc_unmap_memory_dma_v03_00._fields_ = ['params']
+setattr(struct_rpc_unmap_memory_dma_v03_00, 'params', field(0, NVOS47_PARAMETERS_v03_00))
 rpc_unmap_memory_dma_v03_00 = struct_rpc_unmap_memory_dma_v03_00
 rpc_unmap_memory_dma_v = struct_rpc_unmap_memory_dma_v03_00
 class struct_rpc_alloc_subdevice_v08_01(Struct): pass
 class struct_NVOS21_PARAMETERS_v03_00(Struct): pass
 NVOS21_PARAMETERS_v03_00 = struct_NVOS21_PARAMETERS_v03_00
 NvP64 = ctypes.c_void_p
-struct_NVOS21_PARAMETERS_v03_00._fields_ = [
-  ('hRoot', NvHandle),
-  ('hObjectParent', NvHandle),
-  ('hObjectNew', NvHandle),
-  ('hClass', NvV32),
-  ('pAllocParms', NvP64),
-  ('status', NvV32),
-]
-struct_rpc_alloc_subdevice_v08_01._fields_ = [
-  ('subDeviceInst', NvU32),
-  ('params', NVOS21_PARAMETERS_v03_00),
-]
+struct_NVOS21_PARAMETERS_v03_00.SIZE = 32
+struct_NVOS21_PARAMETERS_v03_00._fields_ = ['hRoot', 'hObjectParent', 'hObjectNew', 'hClass', 'pAllocParms', 'status']
+setattr(struct_NVOS21_PARAMETERS_v03_00, 'hRoot', field(0, NvHandle))
+setattr(struct_NVOS21_PARAMETERS_v03_00, 'hObjectParent', field(4, NvHandle))
+setattr(struct_NVOS21_PARAMETERS_v03_00, 'hObjectNew', field(8, NvHandle))
+setattr(struct_NVOS21_PARAMETERS_v03_00, 'hClass', field(12, NvV32))
+setattr(struct_NVOS21_PARAMETERS_v03_00, 'pAllocParms', field(16, NvP64))
+setattr(struct_NVOS21_PARAMETERS_v03_00, 'status', field(24, NvV32))
+struct_rpc_alloc_subdevice_v08_01.SIZE = 40
+struct_rpc_alloc_subdevice_v08_01._fields_ = ['subDeviceInst', 'params']
+setattr(struct_rpc_alloc_subdevice_v08_01, 'subDeviceInst', field(0, NvU32))
+setattr(struct_rpc_alloc_subdevice_v08_01, 'params', field(8, NVOS21_PARAMETERS_v03_00))
 rpc_alloc_subdevice_v08_01 = struct_rpc_alloc_subdevice_v08_01
 rpc_alloc_subdevice_v = struct_rpc_alloc_subdevice_v08_01
 class struct_rpc_dup_object_v03_00(Struct): pass
 class struct_NVOS55_PARAMETERS_v03_00(Struct): pass
 NVOS55_PARAMETERS_v03_00 = struct_NVOS55_PARAMETERS_v03_00
-struct_NVOS55_PARAMETERS_v03_00._fields_ = [
-  ('hClient', NvHandle),
-  ('hParent', NvHandle),
-  ('hObject', NvHandle),
-  ('hClientSrc', NvHandle),
-  ('hObjectSrc', NvHandle),
-  ('flags', NvU32),
-  ('status', NvU32),
-]
-struct_rpc_dup_object_v03_00._fields_ = [
-  ('params', NVOS55_PARAMETERS_v03_00),
-]
+struct_NVOS55_PARAMETERS_v03_00.SIZE = 28
+struct_NVOS55_PARAMETERS_v03_00._fields_ = ['hClient', 'hParent', 'hObject', 'hClientSrc', 'hObjectSrc', 'flags', 'status']
+setattr(struct_NVOS55_PARAMETERS_v03_00, 'hClient', field(0, NvHandle))
+setattr(struct_NVOS55_PARAMETERS_v03_00, 'hParent', field(4, NvHandle))
+setattr(struct_NVOS55_PARAMETERS_v03_00, 'hObject', field(8, NvHandle))
+setattr(struct_NVOS55_PARAMETERS_v03_00, 'hClientSrc', field(12, NvHandle))
+setattr(struct_NVOS55_PARAMETERS_v03_00, 'hObjectSrc', field(16, NvHandle))
+setattr(struct_NVOS55_PARAMETERS_v03_00, 'flags', field(20, NvU32))
+setattr(struct_NVOS55_PARAMETERS_v03_00, 'status', field(24, NvU32))
+struct_rpc_dup_object_v03_00.SIZE = 28
+struct_rpc_dup_object_v03_00._fields_ = ['params']
+setattr(struct_rpc_dup_object_v03_00, 'params', field(0, NVOS55_PARAMETERS_v03_00))
 rpc_dup_object_v03_00 = struct_rpc_dup_object_v03_00
 rpc_dup_object_v = struct_rpc_dup_object_v03_00
 class struct_rpc_idle_channels_v03_00(Struct): pass
 class struct_idle_channel_list_v03_00(Struct): pass
 idle_channel_list_v03_00 = struct_idle_channel_list_v03_00
-struct_idle_channel_list_v03_00._fields_ = [
-  ('phClient', NvU32),
-  ('phDevice', NvU32),
-  ('phChannel', NvU32),
-]
-struct_rpc_idle_channels_v03_00._fields_ = [
-  ('flags', NvU32),
-  ('timeout', NvU32),
-  ('nchannels', NvU32),
-  ('channel_list', (idle_channel_list_v03_00 * 0)),
-]
+struct_idle_channel_list_v03_00.SIZE = 12
+struct_idle_channel_list_v03_00._fields_ = ['phClient', 'phDevice', 'phChannel']
+setattr(struct_idle_channel_list_v03_00, 'phClient', field(0, NvU32))
+setattr(struct_idle_channel_list_v03_00, 'phDevice', field(4, NvU32))
+setattr(struct_idle_channel_list_v03_00, 'phChannel', field(8, NvU32))
+struct_rpc_idle_channels_v03_00.SIZE = 12
+struct_rpc_idle_channels_v03_00._fields_ = ['flags', 'timeout', 'nchannels', 'channel_list']
+setattr(struct_rpc_idle_channels_v03_00, 'flags', field(0, NvU32))
+setattr(struct_rpc_idle_channels_v03_00, 'timeout', field(4, NvU32))
+setattr(struct_rpc_idle_channels_v03_00, 'nchannels', field(8, NvU32))
+setattr(struct_rpc_idle_channels_v03_00, 'channel_list', field(12, Array(idle_channel_list_v03_00, 0)))
 rpc_idle_channels_v03_00 = struct_rpc_idle_channels_v03_00
 rpc_idle_channels_v = struct_rpc_idle_channels_v03_00
 class struct_rpc_alloc_event_v03_00(Struct): pass
-struct_rpc_alloc_event_v03_00._fields_ = [
-  ('hClient', NvHandle),
-  ('hParentClient', NvHandle),
-  ('hChannel', NvHandle),
-  ('hObject', NvHandle),
-  ('hEvent', NvHandle),
-  ('hClass', NvU32),
-  ('notifyIndex', NvU32),
-]
+struct_rpc_alloc_event_v03_00.SIZE = 28
+struct_rpc_alloc_event_v03_00._fields_ = ['hClient', 'hParentClient', 'hChannel', 'hObject', 'hEvent', 'hClass', 'notifyIndex']
+setattr(struct_rpc_alloc_event_v03_00, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_alloc_event_v03_00, 'hParentClient', field(4, NvHandle))
+setattr(struct_rpc_alloc_event_v03_00, 'hChannel', field(8, NvHandle))
+setattr(struct_rpc_alloc_event_v03_00, 'hObject', field(12, NvHandle))
+setattr(struct_rpc_alloc_event_v03_00, 'hEvent', field(16, NvHandle))
+setattr(struct_rpc_alloc_event_v03_00, 'hClass', field(20, NvU32))
+setattr(struct_rpc_alloc_event_v03_00, 'notifyIndex', field(24, NvU32))
 rpc_alloc_event_v03_00 = struct_rpc_alloc_event_v03_00
 rpc_alloc_event_v = struct_rpc_alloc_event_v03_00
 class struct_rpc_rm_api_control_v25_0D(Struct): pass
 class struct_NVOS54_PARAMETERS_v03_00(Struct): pass
 NVOS54_PARAMETERS_v03_00 = struct_NVOS54_PARAMETERS_v03_00
 NvRmctrlCmd = ctypes.c_uint32
-struct_NVOS54_PARAMETERS_v03_00._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('cmd', NvRmctrlCmd),
-  ('params', NvP64),
-  ('paramsSize', NvU32),
-  ('status', NvV32),
-]
-struct_rpc_rm_api_control_v25_0D._fields_ = [
-  ('params', NVOS54_PARAMETERS_v03_00),
-  ('rm_api_params', NvP64),
-]
+struct_NVOS54_PARAMETERS_v03_00.SIZE = 32
+struct_NVOS54_PARAMETERS_v03_00._fields_ = ['hClient', 'hObject', 'cmd', 'params', 'paramsSize', 'status']
+setattr(struct_NVOS54_PARAMETERS_v03_00, 'hClient', field(0, NvHandle))
+setattr(struct_NVOS54_PARAMETERS_v03_00, 'hObject', field(4, NvHandle))
+setattr(struct_NVOS54_PARAMETERS_v03_00, 'cmd', field(8, NvRmctrlCmd))
+setattr(struct_NVOS54_PARAMETERS_v03_00, 'params', field(16, NvP64))
+setattr(struct_NVOS54_PARAMETERS_v03_00, 'paramsSize', field(24, NvU32))
+setattr(struct_NVOS54_PARAMETERS_v03_00, 'status', field(28, NvV32))
+struct_rpc_rm_api_control_v25_0D.SIZE = 40
+struct_rpc_rm_api_control_v25_0D._fields_ = ['params', 'rm_api_params']
+setattr(struct_rpc_rm_api_control_v25_0D, 'params', field(0, NVOS54_PARAMETERS_v03_00))
+setattr(struct_rpc_rm_api_control_v25_0D, 'rm_api_params', field(32, NvP64))
 rpc_rm_api_control_v25_0D = struct_rpc_rm_api_control_v25_0D
 class struct_rpc_rm_api_control_v25_0F(Struct): pass
-struct_rpc_rm_api_control_v25_0F._fields_ = [
-  ('params', NVOS54_PARAMETERS_v03_00),
-  ('rm_api_params', NvP64),
-]
+struct_rpc_rm_api_control_v25_0F.SIZE = 40
+struct_rpc_rm_api_control_v25_0F._fields_ = ['params', 'rm_api_params']
+setattr(struct_rpc_rm_api_control_v25_0F, 'params', field(0, NVOS54_PARAMETERS_v03_00))
+setattr(struct_rpc_rm_api_control_v25_0F, 'rm_api_params', field(32, NvP64))
 rpc_rm_api_control_v25_0F = struct_rpc_rm_api_control_v25_0F
 class struct_rpc_rm_api_control_v25_10(Struct): pass
-struct_rpc_rm_api_control_v25_10._fields_ = [
-  ('params', NVOS54_PARAMETERS_v03_00),
-  ('rm_api_params', NvP64),
-]
+struct_rpc_rm_api_control_v25_10.SIZE = 40
+struct_rpc_rm_api_control_v25_10._fields_ = ['params', 'rm_api_params']
+setattr(struct_rpc_rm_api_control_v25_10, 'params', field(0, NVOS54_PARAMETERS_v03_00))
+setattr(struct_rpc_rm_api_control_v25_10, 'rm_api_params', field(32, NvP64))
 rpc_rm_api_control_v25_10 = struct_rpc_rm_api_control_v25_10
 class struct_rpc_rm_api_control_v25_14(Struct): pass
-struct_rpc_rm_api_control_v25_14._fields_ = [
-  ('params', NVOS54_PARAMETERS_v03_00),
-  ('rm_api_params', NvP64),
-]
+struct_rpc_rm_api_control_v25_14.SIZE = 40
+struct_rpc_rm_api_control_v25_14._fields_ = ['params', 'rm_api_params']
+setattr(struct_rpc_rm_api_control_v25_14, 'params', field(0, NVOS54_PARAMETERS_v03_00))
+setattr(struct_rpc_rm_api_control_v25_14, 'rm_api_params', field(32, NvP64))
 rpc_rm_api_control_v25_14 = struct_rpc_rm_api_control_v25_14
 class struct_rpc_rm_api_control_v25_15(Struct): pass
-struct_rpc_rm_api_control_v25_15._fields_ = [
-  ('params', NVOS54_PARAMETERS_v03_00),
-  ('rm_api_params', NvP64),
-]
+struct_rpc_rm_api_control_v25_15.SIZE = 40
+struct_rpc_rm_api_control_v25_15._fields_ = ['params', 'rm_api_params']
+setattr(struct_rpc_rm_api_control_v25_15, 'params', field(0, NVOS54_PARAMETERS_v03_00))
+setattr(struct_rpc_rm_api_control_v25_15, 'rm_api_params', field(32, NvP64))
 rpc_rm_api_control_v25_15 = struct_rpc_rm_api_control_v25_15
 class struct_rpc_rm_api_control_v25_16(Struct): pass
-struct_rpc_rm_api_control_v25_16._fields_ = [
-  ('params', NVOS54_PARAMETERS_v03_00),
-  ('rm_api_params', NvP64),
-]
+struct_rpc_rm_api_control_v25_16.SIZE = 40
+struct_rpc_rm_api_control_v25_16._fields_ = ['params', 'rm_api_params']
+setattr(struct_rpc_rm_api_control_v25_16, 'params', field(0, NVOS54_PARAMETERS_v03_00))
+setattr(struct_rpc_rm_api_control_v25_16, 'rm_api_params', field(32, NvP64))
 rpc_rm_api_control_v25_16 = struct_rpc_rm_api_control_v25_16
 class struct_rpc_rm_api_control_v25_17(Struct): pass
-struct_rpc_rm_api_control_v25_17._fields_ = [
-  ('params', NVOS54_PARAMETERS_v03_00),
-  ('rm_api_params', NvP64),
-]
+struct_rpc_rm_api_control_v25_17.SIZE = 40
+struct_rpc_rm_api_control_v25_17._fields_ = ['params', 'rm_api_params']
+setattr(struct_rpc_rm_api_control_v25_17, 'params', field(0, NVOS54_PARAMETERS_v03_00))
+setattr(struct_rpc_rm_api_control_v25_17, 'rm_api_params', field(32, NvP64))
 rpc_rm_api_control_v25_17 = struct_rpc_rm_api_control_v25_17
 class struct_rpc_rm_api_control_v25_18(Struct): pass
-struct_rpc_rm_api_control_v25_18._fields_ = [
-  ('params', NVOS54_PARAMETERS_v03_00),
-  ('rm_api_params', NvP64),
-]
+struct_rpc_rm_api_control_v25_18.SIZE = 40
+struct_rpc_rm_api_control_v25_18._fields_ = ['params', 'rm_api_params']
+setattr(struct_rpc_rm_api_control_v25_18, 'params', field(0, NVOS54_PARAMETERS_v03_00))
+setattr(struct_rpc_rm_api_control_v25_18, 'rm_api_params', field(32, NvP64))
 rpc_rm_api_control_v25_18 = struct_rpc_rm_api_control_v25_18
 class struct_rpc_rm_api_control_v25_19(Struct): pass
-struct_rpc_rm_api_control_v25_19._fields_ = [
-  ('params', NVOS54_PARAMETERS_v03_00),
-  ('rm_api_params', NvP64),
-]
+struct_rpc_rm_api_control_v25_19.SIZE = 40
+struct_rpc_rm_api_control_v25_19._fields_ = ['params', 'rm_api_params']
+setattr(struct_rpc_rm_api_control_v25_19, 'params', field(0, NVOS54_PARAMETERS_v03_00))
+setattr(struct_rpc_rm_api_control_v25_19, 'rm_api_params', field(32, NvP64))
 rpc_rm_api_control_v25_19 = struct_rpc_rm_api_control_v25_19
 class struct_rpc_rm_api_control_v25_1A(Struct): pass
-struct_rpc_rm_api_control_v25_1A._fields_ = [
-  ('params', NVOS54_PARAMETERS_v03_00),
-  ('rm_api_params', NvP64),
-]
+struct_rpc_rm_api_control_v25_1A.SIZE = 40
+struct_rpc_rm_api_control_v25_1A._fields_ = ['params', 'rm_api_params']
+setattr(struct_rpc_rm_api_control_v25_1A, 'params', field(0, NVOS54_PARAMETERS_v03_00))
+setattr(struct_rpc_rm_api_control_v25_1A, 'rm_api_params', field(32, NvP64))
 rpc_rm_api_control_v25_1A = struct_rpc_rm_api_control_v25_1A
 class struct_rpc_rm_api_control_v27_03(Struct): pass
-struct_rpc_rm_api_control_v27_03._fields_ = [
-  ('params', NVOS54_PARAMETERS_v03_00),
-  ('rm_api_params', NvP64),
-]
+struct_rpc_rm_api_control_v27_03.SIZE = 40
+struct_rpc_rm_api_control_v27_03._fields_ = ['params', 'rm_api_params']
+setattr(struct_rpc_rm_api_control_v27_03, 'params', field(0, NVOS54_PARAMETERS_v03_00))
+setattr(struct_rpc_rm_api_control_v27_03, 'rm_api_params', field(32, NvP64))
 rpc_rm_api_control_v27_03 = struct_rpc_rm_api_control_v27_03
 class struct_rpc_rm_api_control_v29_04(Struct): pass
-struct_rpc_rm_api_control_v29_04._fields_ = [
-  ('params', NVOS54_PARAMETERS_v03_00),
-  ('rm_api_params', NvP64),
-]
+struct_rpc_rm_api_control_v29_04.SIZE = 40
+struct_rpc_rm_api_control_v29_04._fields_ = ['params', 'rm_api_params']
+setattr(struct_rpc_rm_api_control_v29_04, 'params', field(0, NVOS54_PARAMETERS_v03_00))
+setattr(struct_rpc_rm_api_control_v29_04, 'rm_api_params', field(32, NvP64))
 rpc_rm_api_control_v29_04 = struct_rpc_rm_api_control_v29_04
 class struct_rpc_rm_api_control_v29_09(Struct): pass
-struct_rpc_rm_api_control_v29_09._fields_ = [
-  ('params', NVOS54_PARAMETERS_v03_00),
-  ('rm_api_params', NvP64),
-]
+struct_rpc_rm_api_control_v29_09.SIZE = 40
+struct_rpc_rm_api_control_v29_09._fields_ = ['params', 'rm_api_params']
+setattr(struct_rpc_rm_api_control_v29_09, 'params', field(0, NVOS54_PARAMETERS_v03_00))
+setattr(struct_rpc_rm_api_control_v29_09, 'rm_api_params', field(32, NvP64))
 rpc_rm_api_control_v29_09 = struct_rpc_rm_api_control_v29_09
 rpc_rm_api_control_v = struct_rpc_rm_api_control_v29_09
 class struct_rpc_alloc_share_device_v03_00(Struct): pass
 class struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00(Struct): pass
 NV_DEVICE_ALLOCATION_PARAMETERS_v03_00 = struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00
-struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00._fields_ = [
-  ('szName', NvP64),
-  ('hClientShare', NvHandle),
-  ('hTargetClient', NvHandle),
-  ('hTargetDevice', NvHandle),
-  ('flags', NvV32),
-  ('vaSpaceSize', NvU64),
-  ('vaMode', NvV32),
-  ('vaBase', NvU64),
-]
-struct_rpc_alloc_share_device_v03_00._fields_ = [
-  ('hClient', NvHandle),
-  ('hDevice', NvHandle),
-  ('hClass', NvU32),
-  ('params', NV_DEVICE_ALLOCATION_PARAMETERS_v03_00),
-]
+struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00.SIZE = 48
+struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00._fields_ = ['szName', 'hClientShare', 'hTargetClient', 'hTargetDevice', 'flags', 'vaSpaceSize', 'vaMode', 'vaBase']
+setattr(struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00, 'szName', field(0, NvP64))
+setattr(struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00, 'hClientShare', field(8, NvHandle))
+setattr(struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00, 'hTargetClient', field(12, NvHandle))
+setattr(struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00, 'hTargetDevice', field(16, NvHandle))
+setattr(struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00, 'flags', field(20, NvV32))
+setattr(struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00, 'vaSpaceSize', field(24, NvU64))
+setattr(struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00, 'vaMode', field(32, NvV32))
+setattr(struct_NV_DEVICE_ALLOCATION_PARAMETERS_v03_00, 'vaBase', field(40, NvU64))
+struct_rpc_alloc_share_device_v03_00.SIZE = 64
+struct_rpc_alloc_share_device_v03_00._fields_ = ['hClient', 'hDevice', 'hClass', 'params']
+setattr(struct_rpc_alloc_share_device_v03_00, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_alloc_share_device_v03_00, 'hDevice', field(4, NvHandle))
+setattr(struct_rpc_alloc_share_device_v03_00, 'hClass', field(8, NvU32))
+setattr(struct_rpc_alloc_share_device_v03_00, 'params', field(16, NV_DEVICE_ALLOCATION_PARAMETERS_v03_00))
 rpc_alloc_share_device_v03_00 = struct_rpc_alloc_share_device_v03_00
 rpc_alloc_share_device_v = struct_rpc_alloc_share_device_v03_00
 class struct_rpc_get_engine_utilization_v1F_0E(Struct): pass
-class union_vgpuGetEngineUtilization_data_v1F_0E(ctypes.Union): pass
+class union_vgpuGetEngineUtilization_data_v1F_0E(Union): pass
 vgpuGetEngineUtilization_data_v1F_0E = union_vgpuGetEngineUtilization_data_v1F_0E
 class struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00(Struct): pass
 NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00 = struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00
@@ -1313,144 +1284,144 @@ NV2080_CTRL_CMD_PERF_VID_ENG_NVJPG = enum_NV2080_CTRL_CMD_PERF_VID_ENG.define('N
 NV2080_CTRL_CMD_PERF_VID_ENG_NVOFA = enum_NV2080_CTRL_CMD_PERF_VID_ENG.define('NV2080_CTRL_CMD_PERF_VID_ENG_NVOFA', 4)
 
 NV2080_CTRL_CMD_PERF_VID_ENG = enum_NV2080_CTRL_CMD_PERF_VID_ENG
-struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00._fields_ = [
-  ('engineType', NV2080_CTRL_CMD_PERF_VID_ENG),
-  ('clkPercentBusy', NvU32),
-  ('samplingPeriodUs', NvU32),
-]
+struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00.SIZE = 12
+struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00._fields_ = ['engineType', 'clkPercentBusy', 'samplingPeriodUs']
+setattr(struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00, 'engineType', field(0, NV2080_CTRL_CMD_PERF_VID_ENG))
+setattr(struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00, 'clkPercentBusy', field(4, NvU32))
+setattr(struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00, 'samplingPeriodUs', field(8, NvU32))
 class struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C(Struct): pass
 NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C = struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C
-struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C._fields_ = [
-  ('gpuId', NvU32),
-  ('vmPid', NvU32),
-  ('state', NvU32),
-]
+struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C.SIZE = 12
+struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C._fields_ = ['gpuId', 'vmPid', 'state']
+setattr(struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C, 'gpuId', field(0, NvU32))
+setattr(struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C, 'vmPid', field(4, NvU32))
+setattr(struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C, 'state', field(8, NvU32))
 class struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C(Struct): pass
 NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C = struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C
-struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C._fields_ = [
-  ('gpuId', NvU32),
-  ('vmPid', NvU32),
-  ('newState', NvU32),
-]
+struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C.SIZE = 12
+struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C._fields_ = ['gpuId', 'vmPid', 'newState']
+setattr(struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C, 'gpuId', field(0, NvU32))
+setattr(struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C, 'vmPid', field(4, NvU32))
+setattr(struct_NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C, 'newState', field(8, NvU32))
 class struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C(Struct): pass
 NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C = struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C
-struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C._fields_ = [
-  ('gpuId', NvU32),
-  ('vmPid', NvU32),
-  ('passIndex', NvU32),
-  ('pidCount', NvU32),
-  ('pidTable', (NvU32 * 1000)),
-]
+struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C.SIZE = 4016
+struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C._fields_ = ['gpuId', 'vmPid', 'passIndex', 'pidCount', 'pidTable']
+setattr(struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C, 'gpuId', field(0, NvU32))
+setattr(struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C, 'vmPid', field(4, NvU32))
+setattr(struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C, 'passIndex', field(8, NvU32))
+setattr(struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C, 'pidCount', field(12, NvU32))
+setattr(struct_NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C, 'pidTable', field(16, Array(NvU32, 1000)))
 class struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C(Struct): pass
 NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C = struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C
-struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C._fields_ = [
-  ('gpuId', NvU32),
-  ('pid', NvU32),
-  ('subPid', NvU32),
-  ('gpuUtil', NvU32),
-  ('fbUtil', NvU32),
-  ('maxFbUsage', NvU64),
-  ('startTime', NvU64),
-  ('endTime', NvU64),
-]
+struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C.SIZE = 48
+struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C._fields_ = ['gpuId', 'pid', 'subPid', 'gpuUtil', 'fbUtil', 'maxFbUsage', 'startTime', 'endTime']
+setattr(struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C, 'gpuId', field(0, NvU32))
+setattr(struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C, 'pid', field(4, NvU32))
+setattr(struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C, 'subPid', field(8, NvU32))
+setattr(struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C, 'gpuUtil', field(12, NvU32))
+setattr(struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C, 'fbUtil', field(16, NvU32))
+setattr(struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C, 'maxFbUsage', field(24, NvU64))
+setattr(struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C, 'startTime', field(32, NvU64))
+setattr(struct_NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C, 'endTime', field(40, NvU64))
 class struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C(Struct): pass
 NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C = struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C
-struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C._fields_ = [
-  ('gpuId', NvU32),
-  ('vmPid', NvU32),
-]
+struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C.SIZE = 8
+struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C._fields_ = ['gpuId', 'vmPid']
+setattr(struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C, 'gpuId', field(0, NvU32))
+setattr(struct_NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C, 'vmPid', field(4, NvU32))
 class struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E(Struct): pass
 NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E = struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E
 class struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00(Struct): pass
 NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00 = struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00
-struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00._fields_ = [
-  ('util', NvU32),
-  ('procId', NvU32),
-  ('subProcessID', NvU32),
-]
-struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E._fields_ = [
-  ('timeStamp', NvU64),
-  ('fb', NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00),
-  ('gr', NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00),
-  ('nvenc', NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00),
-  ('nvdec', NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00),
-]
-union_vgpuGetEngineUtilization_data_v1F_0E._fields_ = [
-  ('vidPerfmonSample', NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00),
-  ('getAccountingState', NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C),
-  ('setAccountingState', NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C),
-  ('getAccountingPidList', NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C),
-  ('procAccountingInfo', NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C),
-  ('clearAccountingInfo', NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C),
-  ('gpumonPerfmonsampleV2', (NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E * 72)),
-]
-struct_rpc_get_engine_utilization_v1F_0E._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('cmd', NvU32),
-  ('params', vgpuGetEngineUtilization_data_v1F_0E),
-]
+struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00.SIZE = 12
+struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00._fields_ = ['util', 'procId', 'subProcessID']
+setattr(struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00, 'util', field(0, NvU32))
+setattr(struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00, 'procId', field(4, NvU32))
+setattr(struct_NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00, 'subProcessID', field(8, NvU32))
+struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E.SIZE = 56
+struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E._fields_ = ['timeStamp', 'fb', 'gr', 'nvenc', 'nvdec']
+setattr(struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E, 'timeStamp', field(0, NvU64))
+setattr(struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E, 'fb', field(8, NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00))
+setattr(struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E, 'gr', field(20, NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00))
+setattr(struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E, 'nvenc', field(32, NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00))
+setattr(struct_NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E, 'nvdec', field(44, NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE_v17_00))
+union_vgpuGetEngineUtilization_data_v1F_0E.SIZE = 4032
+union_vgpuGetEngineUtilization_data_v1F_0E._fields_ = ['vidPerfmonSample', 'getAccountingState', 'setAccountingState', 'getAccountingPidList', 'procAccountingInfo', 'clearAccountingInfo', 'gpumonPerfmonsampleV2']
+setattr(union_vgpuGetEngineUtilization_data_v1F_0E, 'vidPerfmonSample', field(0, NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00))
+setattr(union_vgpuGetEngineUtilization_data_v1F_0E, 'getAccountingState', field(0, NV0000_CTRL_GPUACCT_GET_ACCOUNTING_STATE_PARAMS_v09_0C))
+setattr(union_vgpuGetEngineUtilization_data_v1F_0E, 'setAccountingState', field(0, NV0000_CTRL_GPUACCT_SET_ACCOUNTING_STATE_PARAMS_v09_0C))
+setattr(union_vgpuGetEngineUtilization_data_v1F_0E, 'getAccountingPidList', field(0, NV0000_CTRL_GPUACCT_GET_ACCOUNTING_PIDS_PARAMS_v09_0C))
+setattr(union_vgpuGetEngineUtilization_data_v1F_0E, 'procAccountingInfo', field(0, NV0000_CTRL_GPUACCT_GET_PROC_ACCOUNTING_INFO_PARAMS_v09_0C))
+setattr(union_vgpuGetEngineUtilization_data_v1F_0E, 'clearAccountingInfo', field(0, NV0000_CTRL_GPUACCT_CLEAR_ACCOUNTING_DATA_PARAMS_v09_0C))
+setattr(union_vgpuGetEngineUtilization_data_v1F_0E, 'gpumonPerfmonsampleV2', field(0, Array(NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E, 72)))
+struct_rpc_get_engine_utilization_v1F_0E.SIZE = 4048
+struct_rpc_get_engine_utilization_v1F_0E._fields_ = ['hClient', 'hObject', 'cmd', 'params']
+setattr(struct_rpc_get_engine_utilization_v1F_0E, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_get_engine_utilization_v1F_0E, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_get_engine_utilization_v1F_0E, 'cmd', field(8, NvU32))
+setattr(struct_rpc_get_engine_utilization_v1F_0E, 'params', field(16, vgpuGetEngineUtilization_data_v1F_0E))
 rpc_get_engine_utilization_v1F_0E = struct_rpc_get_engine_utilization_v1F_0E
 rpc_get_engine_utilization_v = struct_rpc_get_engine_utilization_v1F_0E
 class struct_rpc_perf_get_level_info_v03_00(Struct): pass
-struct_rpc_perf_get_level_info_v03_00._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('level', NvU32),
-  ('flags', NvU32),
-  ('perfGetClkInfoListSize', NvU32),
-  ('param_size', NvU32),
-  ('params', (NvU32 * 0)),
-]
+struct_rpc_perf_get_level_info_v03_00.SIZE = 24
+struct_rpc_perf_get_level_info_v03_00._fields_ = ['hClient', 'hObject', 'level', 'flags', 'perfGetClkInfoListSize', 'param_size', 'params']
+setattr(struct_rpc_perf_get_level_info_v03_00, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_perf_get_level_info_v03_00, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_perf_get_level_info_v03_00, 'level', field(8, NvU32))
+setattr(struct_rpc_perf_get_level_info_v03_00, 'flags', field(12, NvU32))
+setattr(struct_rpc_perf_get_level_info_v03_00, 'perfGetClkInfoListSize', field(16, NvU32))
+setattr(struct_rpc_perf_get_level_info_v03_00, 'param_size', field(20, NvU32))
+setattr(struct_rpc_perf_get_level_info_v03_00, 'params', field(24, Array(NvU32, 0)))
 rpc_perf_get_level_info_v03_00 = struct_rpc_perf_get_level_info_v03_00
 rpc_perf_get_level_info_v = struct_rpc_perf_get_level_info_v03_00
 class struct_rpc_set_surface_properties_v07_07(Struct): pass
 class struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07(Struct): pass
 NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07 = struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07
-struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07._fields_ = [
-  ('headIndex', NvU32),
-  ('isPrimary', NvU32),
-  ('offset', NvU32),
-  ('surfaceType', NvU32),
-  ('surfaceBlockHeight', NvU32),
-  ('surfacePitch', NvU32),
-  ('surfaceFormat', NvU32),
-  ('surfaceWidth', NvU32),
-  ('surfaceHeight', NvU32),
-  ('rectX', NvU32),
-  ('rectY', NvU32),
-  ('rectWidth', NvU32),
-  ('rectHeight', NvU32),
-  ('surfaceSize', NvU32),
-  ('surfaceKind', NvU32),
-  ('hHwResDevice', NvU32),
-  ('hHwResHandle', NvU32),
-  ('effectiveFbPageSize', NvU32),
-]
-struct_rpc_set_surface_properties_v07_07._fields_ = [
-  ('hClient', NvHandle),
-  ('params', NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07),
-]
+struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07.SIZE = 72
+struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07._fields_ = ['headIndex', 'isPrimary', 'offset', 'surfaceType', 'surfaceBlockHeight', 'surfacePitch', 'surfaceFormat', 'surfaceWidth', 'surfaceHeight', 'rectX', 'rectY', 'rectWidth', 'rectHeight', 'surfaceSize', 'surfaceKind', 'hHwResDevice', 'hHwResHandle', 'effectiveFbPageSize']
+setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'headIndex', field(0, NvU32))
+setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'isPrimary', field(4, NvU32))
+setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'offset', field(8, NvU32))
+setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'surfaceType', field(12, NvU32))
+setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'surfaceBlockHeight', field(16, NvU32))
+setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'surfacePitch', field(20, NvU32))
+setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'surfaceFormat', field(24, NvU32))
+setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'surfaceWidth', field(28, NvU32))
+setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'surfaceHeight', field(32, NvU32))
+setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'rectX', field(36, NvU32))
+setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'rectY', field(40, NvU32))
+setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'rectWidth', field(44, NvU32))
+setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'rectHeight', field(48, NvU32))
+setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'surfaceSize', field(52, NvU32))
+setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'surfaceKind', field(56, NvU32))
+setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'hHwResDevice', field(60, NvU32))
+setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'hHwResHandle', field(64, NvU32))
+setattr(struct_NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07, 'effectiveFbPageSize', field(68, NvU32))
+struct_rpc_set_surface_properties_v07_07.SIZE = 76
+struct_rpc_set_surface_properties_v07_07._fields_ = ['hClient', 'params']
+setattr(struct_rpc_set_surface_properties_v07_07, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_set_surface_properties_v07_07, 'params', field(4, NVA080_CTRL_VGPU_DISPLAY_SET_SURFACE_PROPERTIES_v07_07))
 rpc_set_surface_properties_v07_07 = struct_rpc_set_surface_properties_v07_07
 rpc_set_surface_properties_v = struct_rpc_set_surface_properties_v07_07
 class struct_rpc_cleanup_surface_v03_00(Struct): pass
 class struct_NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00(Struct): pass
 NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00 = struct_NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00
-struct_NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00._fields_ = [
-  ('headIndex', NvU32),
-  ('blankingEnabled', NvU32),
-]
-struct_rpc_cleanup_surface_v03_00._fields_ = [
-  ('params', NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00),
-]
+struct_NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00.SIZE = 8
+struct_NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00._fields_ = ['headIndex', 'blankingEnabled']
+setattr(struct_NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00, 'headIndex', field(0, NvU32))
+setattr(struct_NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00, 'blankingEnabled', field(4, NvU32))
+struct_rpc_cleanup_surface_v03_00.SIZE = 8
+struct_rpc_cleanup_surface_v03_00._fields_ = ['params']
+setattr(struct_rpc_cleanup_surface_v03_00, 'params', field(0, NVA080_CTRL_VGPU_DISPLAY_CLEANUP_SURFACE_PARAMS_v03_00))
 rpc_cleanup_surface_v03_00 = struct_rpc_cleanup_surface_v03_00
 rpc_cleanup_surface_v = struct_rpc_cleanup_surface_v03_00
 class struct_rpc_unloading_guest_driver_v1F_07(Struct): pass
-struct_rpc_unloading_guest_driver_v1F_07._fields_ = [
-  ('bInPMTransition', NvBool),
-  ('bGc6Entering', NvBool),
-  ('newLevel', NvU32),
-]
+struct_rpc_unloading_guest_driver_v1F_07.SIZE = 8
+struct_rpc_unloading_guest_driver_v1F_07._fields_ = ['bInPMTransition', 'bGc6Entering', 'newLevel']
+setattr(struct_rpc_unloading_guest_driver_v1F_07, 'bInPMTransition', field(0, NvBool))
+setattr(struct_rpc_unloading_guest_driver_v1F_07, 'bGc6Entering', field(1, NvBool))
+setattr(struct_rpc_unloading_guest_driver_v1F_07, 'newLevel', field(4, NvU32))
 rpc_unloading_guest_driver_v1F_07 = struct_rpc_unloading_guest_driver_v1F_07
 rpc_unloading_guest_driver_v = struct_rpc_unloading_guest_driver_v1F_07
 class struct_rpc_gpu_exec_reg_ops_v12_01(Struct): pass
@@ -1460,219 +1431,219 @@ class struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01(Struct): pass
 NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01 = struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01
 class struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01(Struct): pass
 NV2080_CTRL_GR_ROUTE_INFO_v12_01 = struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01
-struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01._fields_ = [
-  ('flags', NvU32),
-  ('route', NvU64),
-]
-struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01._fields_ = [
-  ('hClientTarget', NvHandle),
-  ('hChannelTarget', NvHandle),
-  ('reserved00', (NvU32 * 3)),
-  ('regOpCount', NvU32),
-  ('grRouteInfo', NV2080_CTRL_GR_ROUTE_INFO_v12_01),
-  ('regOps', NvP64),
-]
+struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01.SIZE = 16
+struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01._fields_ = ['flags', 'route']
+setattr(struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01, 'flags', field(0, NvU32))
+setattr(struct_NV2080_CTRL_GR_ROUTE_INFO_v12_01, 'route', field(8, NvU64))
+struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01.SIZE = 48
+struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01._fields_ = ['hClientTarget', 'hChannelTarget', 'reserved00', 'regOpCount', 'grRouteInfo', 'regOps']
+setattr(struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01, 'hClientTarget', field(0, NvHandle))
+setattr(struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01, 'hChannelTarget', field(4, NvHandle))
+setattr(struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01, 'reserved00', field(8, Array(NvU32, 3)))
+setattr(struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01, 'regOpCount', field(20, NvU32))
+setattr(struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01, 'grRouteInfo', field(24, NV2080_CTRL_GR_ROUTE_INFO_v12_01))
+setattr(struct_NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01, 'regOps', field(40, NvP64))
 class struct_NV2080_CTRL_GPU_REG_OP_v03_00(Struct): pass
 NV2080_CTRL_GPU_REG_OP_v03_00 = struct_NV2080_CTRL_GPU_REG_OP_v03_00
-struct_NV2080_CTRL_GPU_REG_OP_v03_00._fields_ = [
-  ('regOp', NvU8),
-  ('regType', NvU8),
-  ('regStatus', NvU8),
-  ('regQuad', NvU8),
-  ('regGroupMask', NvU32),
-  ('regSubGroupMask', NvU32),
-  ('regOffset', NvU32),
-  ('regValueHi', NvU32),
-  ('regValueLo', NvU32),
-  ('regAndNMaskHi', NvU32),
-  ('regAndNMaskLo', NvU32),
-]
-struct_gpu_exec_reg_ops_v12_01._fields_ = [
-  ('reg_op_params', NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01),
-  ('operations', (NV2080_CTRL_GPU_REG_OP_v03_00 * 0)),
-]
-struct_rpc_gpu_exec_reg_ops_v12_01._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', gpu_exec_reg_ops_v12_01),
-]
+struct_NV2080_CTRL_GPU_REG_OP_v03_00.SIZE = 32
+struct_NV2080_CTRL_GPU_REG_OP_v03_00._fields_ = ['regOp', 'regType', 'regStatus', 'regQuad', 'regGroupMask', 'regSubGroupMask', 'regOffset', 'regValueHi', 'regValueLo', 'regAndNMaskHi', 'regAndNMaskLo']
+setattr(struct_NV2080_CTRL_GPU_REG_OP_v03_00, 'regOp', field(0, NvU8))
+setattr(struct_NV2080_CTRL_GPU_REG_OP_v03_00, 'regType', field(1, NvU8))
+setattr(struct_NV2080_CTRL_GPU_REG_OP_v03_00, 'regStatus', field(2, NvU8))
+setattr(struct_NV2080_CTRL_GPU_REG_OP_v03_00, 'regQuad', field(3, NvU8))
+setattr(struct_NV2080_CTRL_GPU_REG_OP_v03_00, 'regGroupMask', field(4, NvU32))
+setattr(struct_NV2080_CTRL_GPU_REG_OP_v03_00, 'regSubGroupMask', field(8, NvU32))
+setattr(struct_NV2080_CTRL_GPU_REG_OP_v03_00, 'regOffset', field(12, NvU32))
+setattr(struct_NV2080_CTRL_GPU_REG_OP_v03_00, 'regValueHi', field(16, NvU32))
+setattr(struct_NV2080_CTRL_GPU_REG_OP_v03_00, 'regValueLo', field(20, NvU32))
+setattr(struct_NV2080_CTRL_GPU_REG_OP_v03_00, 'regAndNMaskHi', field(24, NvU32))
+setattr(struct_NV2080_CTRL_GPU_REG_OP_v03_00, 'regAndNMaskLo', field(28, NvU32))
+struct_gpu_exec_reg_ops_v12_01.SIZE = 48
+struct_gpu_exec_reg_ops_v12_01._fields_ = ['reg_op_params', 'operations']
+setattr(struct_gpu_exec_reg_ops_v12_01, 'reg_op_params', field(0, NV2080_CTRL_GPU_EXEC_REG_OPS_PARAMS_v12_01))
+setattr(struct_gpu_exec_reg_ops_v12_01, 'operations', field(48, Array(NV2080_CTRL_GPU_REG_OP_v03_00, 0)))
+struct_rpc_gpu_exec_reg_ops_v12_01.SIZE = 56
+struct_rpc_gpu_exec_reg_ops_v12_01._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_gpu_exec_reg_ops_v12_01, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_gpu_exec_reg_ops_v12_01, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_gpu_exec_reg_ops_v12_01, 'params', field(8, gpu_exec_reg_ops_v12_01))
 rpc_gpu_exec_reg_ops_v12_01 = struct_rpc_gpu_exec_reg_ops_v12_01
 rpc_gpu_exec_reg_ops_v = struct_rpc_gpu_exec_reg_ops_v12_01
 class struct_rpc_get_static_data_v25_0E(Struct): pass
-struct_rpc_get_static_data_v25_0E._fields_ = [
-  ('offset', NvU32),
-  ('size', NvU32),
-  ('payload', (NvU8 * 0)),
-]
+struct_rpc_get_static_data_v25_0E.SIZE = 8
+struct_rpc_get_static_data_v25_0E._fields_ = ['offset', 'size', 'payload']
+setattr(struct_rpc_get_static_data_v25_0E, 'offset', field(0, NvU32))
+setattr(struct_rpc_get_static_data_v25_0E, 'size', field(4, NvU32))
+setattr(struct_rpc_get_static_data_v25_0E, 'payload', field(8, Array(NvU8, 0)))
 rpc_get_static_data_v25_0E = struct_rpc_get_static_data_v25_0E
 class struct_rpc_get_static_data_v27_01(Struct): pass
-struct_rpc_get_static_data_v27_01._fields_ = [
-  ('offset', NvU32),
-  ('size', NvU32),
-  ('payload', (NvU8 * 0)),
-]
+struct_rpc_get_static_data_v27_01.SIZE = 8
+struct_rpc_get_static_data_v27_01._fields_ = ['offset', 'size', 'payload']
+setattr(struct_rpc_get_static_data_v27_01, 'offset', field(0, NvU32))
+setattr(struct_rpc_get_static_data_v27_01, 'size', field(4, NvU32))
+setattr(struct_rpc_get_static_data_v27_01, 'payload', field(8, Array(NvU8, 0)))
 rpc_get_static_data_v27_01 = struct_rpc_get_static_data_v27_01
 rpc_get_static_data_v = struct_rpc_get_static_data_v27_01
 class struct_rpc_get_consolidated_gr_static_info_v1B_04(Struct): pass
-struct_rpc_get_consolidated_gr_static_info_v1B_04._fields_ = [
-  ('offset', NvU32),
-  ('size', NvU32),
-  ('payload', (NvU8 * 0)),
-]
+struct_rpc_get_consolidated_gr_static_info_v1B_04.SIZE = 8
+struct_rpc_get_consolidated_gr_static_info_v1B_04._fields_ = ['offset', 'size', 'payload']
+setattr(struct_rpc_get_consolidated_gr_static_info_v1B_04, 'offset', field(0, NvU32))
+setattr(struct_rpc_get_consolidated_gr_static_info_v1B_04, 'size', field(4, NvU32))
+setattr(struct_rpc_get_consolidated_gr_static_info_v1B_04, 'payload', field(8, Array(NvU8, 0)))
 rpc_get_consolidated_gr_static_info_v1B_04 = struct_rpc_get_consolidated_gr_static_info_v1B_04
 rpc_get_consolidated_gr_static_info_v = struct_rpc_get_consolidated_gr_static_info_v1B_04
 class struct_rpc_set_page_directory_v1E_05(Struct): pass
 class struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05(Struct): pass
 NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05 = struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05
-struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05._fields_ = [
-  ('physAddress', NvU64),
-  ('numEntries', NvU32),
-  ('flags', NvU32),
-  ('hVASpace', NvHandle),
-  ('chId', NvU32),
-  ('subDeviceId', NvU32),
-  ('pasid', NvU32),
-]
-struct_rpc_set_page_directory_v1E_05._fields_ = [
-  ('hClient', NvHandle),
-  ('hDevice', NvHandle),
-  ('pasid', NvU32),
-  ('params', NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05),
-]
+struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05.SIZE = 32
+struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05._fields_ = ['physAddress', 'numEntries', 'flags', 'hVASpace', 'chId', 'subDeviceId', 'pasid']
+setattr(struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05, 'physAddress', field(0, NvU64))
+setattr(struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05, 'numEntries', field(8, NvU32))
+setattr(struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05, 'flags', field(12, NvU32))
+setattr(struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05, 'hVASpace', field(16, NvHandle))
+setattr(struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05, 'chId', field(20, NvU32))
+setattr(struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05, 'subDeviceId', field(24, NvU32))
+setattr(struct_NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05, 'pasid', field(28, NvU32))
+struct_rpc_set_page_directory_v1E_05.SIZE = 48
+struct_rpc_set_page_directory_v1E_05._fields_ = ['hClient', 'hDevice', 'pasid', 'params']
+setattr(struct_rpc_set_page_directory_v1E_05, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_set_page_directory_v1E_05, 'hDevice', field(4, NvHandle))
+setattr(struct_rpc_set_page_directory_v1E_05, 'pasid', field(8, NvU32))
+setattr(struct_rpc_set_page_directory_v1E_05, 'params', field(16, NV0080_CTRL_DMA_SET_PAGE_DIRECTORY_PARAMS_v1E_05))
 rpc_set_page_directory_v1E_05 = struct_rpc_set_page_directory_v1E_05
 rpc_set_page_directory_v = struct_rpc_set_page_directory_v1E_05
 class struct_rpc_unset_page_directory_v1E_05(Struct): pass
 class struct_NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05(Struct): pass
 NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05 = struct_NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05
-struct_NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05._fields_ = [
-  ('hVASpace', NvHandle),
-  ('subDeviceId', NvU32),
-]
-struct_rpc_unset_page_directory_v1E_05._fields_ = [
-  ('hClient', NvHandle),
-  ('hDevice', NvHandle),
-  ('params', NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05),
-]
+struct_NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05.SIZE = 8
+struct_NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05._fields_ = ['hVASpace', 'subDeviceId']
+setattr(struct_NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05, 'hVASpace', field(0, NvHandle))
+setattr(struct_NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05, 'subDeviceId', field(4, NvU32))
+struct_rpc_unset_page_directory_v1E_05.SIZE = 16
+struct_rpc_unset_page_directory_v1E_05._fields_ = ['hClient', 'hDevice', 'params']
+setattr(struct_rpc_unset_page_directory_v1E_05, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_unset_page_directory_v1E_05, 'hDevice', field(4, NvHandle))
+setattr(struct_rpc_unset_page_directory_v1E_05, 'params', field(8, NV0080_CTRL_DMA_UNSET_PAGE_DIRECTORY_PARAMS_v1E_05))
 rpc_unset_page_directory_v1E_05 = struct_rpc_unset_page_directory_v1E_05
 rpc_unset_page_directory_v = struct_rpc_unset_page_directory_v1E_05
 class struct_rpc_get_gsp_static_info_v14_00(Struct): pass
-struct_rpc_get_gsp_static_info_v14_00._fields_ = [
-  ('data', NvU32),
-]
+struct_rpc_get_gsp_static_info_v14_00.SIZE = 4
+struct_rpc_get_gsp_static_info_v14_00._fields_ = ['data']
+setattr(struct_rpc_get_gsp_static_info_v14_00, 'data', field(0, NvU32))
 rpc_get_gsp_static_info_v14_00 = struct_rpc_get_gsp_static_info_v14_00
 rpc_get_gsp_static_info_v = struct_rpc_get_gsp_static_info_v14_00
 class struct_rpc_update_bar_pde_v15_00(Struct): pass
 class struct_UpdateBarPde_v15_00(Struct): pass
 UpdateBarPde_v15_00 = struct_UpdateBarPde_v15_00
-struct_UpdateBarPde_v15_00._fields_ = [
-  ('barType', NV_RPC_UPDATE_PDE_BAR_TYPE),
-  ('entryValue', NvU64),
-  ('entryLevelShift', NvU64),
-]
-struct_rpc_update_bar_pde_v15_00._fields_ = [
-  ('info', UpdateBarPde_v15_00),
-]
+struct_UpdateBarPde_v15_00.SIZE = 24
+struct_UpdateBarPde_v15_00._fields_ = ['barType', 'entryValue', 'entryLevelShift']
+setattr(struct_UpdateBarPde_v15_00, 'barType', field(0, NV_RPC_UPDATE_PDE_BAR_TYPE))
+setattr(struct_UpdateBarPde_v15_00, 'entryValue', field(8, NvU64))
+setattr(struct_UpdateBarPde_v15_00, 'entryLevelShift', field(16, NvU64))
+struct_rpc_update_bar_pde_v15_00.SIZE = 24
+struct_rpc_update_bar_pde_v15_00._fields_ = ['info']
+setattr(struct_rpc_update_bar_pde_v15_00, 'info', field(0, UpdateBarPde_v15_00))
 rpc_update_bar_pde_v15_00 = struct_rpc_update_bar_pde_v15_00
 rpc_update_bar_pde_v = struct_rpc_update_bar_pde_v15_00
 class struct_rpc_get_encoder_capacity_v07_00(Struct): pass
-struct_rpc_get_encoder_capacity_v07_00._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('encoderCapacity', NvU32),
-]
+struct_rpc_get_encoder_capacity_v07_00.SIZE = 12
+struct_rpc_get_encoder_capacity_v07_00._fields_ = ['hClient', 'hObject', 'encoderCapacity']
+setattr(struct_rpc_get_encoder_capacity_v07_00, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_get_encoder_capacity_v07_00, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_get_encoder_capacity_v07_00, 'encoderCapacity', field(8, NvU32))
 rpc_get_encoder_capacity_v07_00 = struct_rpc_get_encoder_capacity_v07_00
 rpc_get_encoder_capacity_v = struct_rpc_get_encoder_capacity_v07_00
 class struct_rpc_vgpu_pf_reg_read32_v15_00(Struct): pass
-struct_rpc_vgpu_pf_reg_read32_v15_00._fields_ = [
-  ('address', NvU64),
-  ('value', NvU32),
-  ('grEngId', NvU32),
-]
+struct_rpc_vgpu_pf_reg_read32_v15_00.SIZE = 16
+struct_rpc_vgpu_pf_reg_read32_v15_00._fields_ = ['address', 'value', 'grEngId']
+setattr(struct_rpc_vgpu_pf_reg_read32_v15_00, 'address', field(0, NvU64))
+setattr(struct_rpc_vgpu_pf_reg_read32_v15_00, 'value', field(8, NvU32))
+setattr(struct_rpc_vgpu_pf_reg_read32_v15_00, 'grEngId', field(12, NvU32))
 rpc_vgpu_pf_reg_read32_v15_00 = struct_rpc_vgpu_pf_reg_read32_v15_00
 rpc_vgpu_pf_reg_read32_v = struct_rpc_vgpu_pf_reg_read32_v15_00
 class struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08(Struct): pass
 class struct_NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02(Struct): pass
 NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02 = struct_NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02
-struct_NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02._fields_ = [
-  ('fbUsed', NvU64),
-]
-struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08._fields_ = [
-  ('setFbUsage', NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02),
-]
+struct_NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02.SIZE = 8
+struct_NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02._fields_ = ['fbUsed']
+setattr(struct_NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02, 'fbUsed', field(0, NvU64))
+struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08.SIZE = 8
+struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08._fields_ = ['setFbUsage']
+setattr(struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08, 'setFbUsage', field(0, NVA080_CTRL_SET_FB_USAGE_PARAMS_v07_02))
 rpc_ctrl_set_vgpu_fb_usage_v1A_08 = struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08
 rpc_ctrl_set_vgpu_fb_usage_v = struct_rpc_ctrl_set_vgpu_fb_usage_v1A_08
 class struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09(Struct): pass
 class struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01(Struct): pass
 NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01 = struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01
-struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01._fields_ = [
-  ('hResolution', NvU32),
-  ('vResolution', NvU32),
-  ('averageEncodeLatency', NvU32),
-  ('averageEncodeFps', NvU32),
-  ('timestampBufferSize', NvU32),
-  ('timestampBuffer', NvP64),
-]
-struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('nvencSessionUpdate', NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01),
-]
+struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01.SIZE = 32
+struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01._fields_ = ['hResolution', 'vResolution', 'averageEncodeLatency', 'averageEncodeFps', 'timestampBufferSize', 'timestampBuffer']
+setattr(struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01, 'hResolution', field(0, NvU32))
+setattr(struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01, 'vResolution', field(4, NvU32))
+setattr(struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01, 'averageEncodeLatency', field(8, NvU32))
+setattr(struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01, 'averageEncodeFps', field(12, NvU32))
+setattr(struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01, 'timestampBufferSize', field(16, NvU32))
+setattr(struct_NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01, 'timestampBuffer', field(24, NvP64))
+struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09.SIZE = 40
+struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09._fields_ = ['hClient', 'hObject', 'nvencSessionUpdate']
+setattr(struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09, 'nvencSessionUpdate', field(8, NVA0BC_CTRL_NVENC_SW_SESSION_UPDATE_INFO_PARAMS_v06_01))
 rpc_ctrl_nvenc_sw_session_update_info_v1A_09 = struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09
 rpc_ctrl_nvenc_sw_session_update_info_v = struct_rpc_ctrl_nvenc_sw_session_update_info_v1A_09
 class struct_rpc_ctrl_reset_channel_v1A_09(Struct): pass
 class struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01(Struct): pass
 NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01 = struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01
-struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01._fields_ = [
-  ('engineID', NvU32),
-  ('subdeviceInstance', NvU32),
-  ('resetReason', NvU32),
-]
-struct_rpc_ctrl_reset_channel_v1A_09._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('resetChannel', NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01),
-]
+struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01.SIZE = 12
+struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01._fields_ = ['engineID', 'subdeviceInstance', 'resetReason']
+setattr(struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01, 'engineID', field(0, NvU32))
+setattr(struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01, 'subdeviceInstance', field(4, NvU32))
+setattr(struct_NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01, 'resetReason', field(8, NvU32))
+struct_rpc_ctrl_reset_channel_v1A_09.SIZE = 20
+struct_rpc_ctrl_reset_channel_v1A_09._fields_ = ['hClient', 'hObject', 'resetChannel']
+setattr(struct_rpc_ctrl_reset_channel_v1A_09, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_reset_channel_v1A_09, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_reset_channel_v1A_09, 'resetChannel', field(8, NV906F_CTRL_CMD_RESET_CHANNEL_PARAMS_v10_01))
 rpc_ctrl_reset_channel_v1A_09 = struct_rpc_ctrl_reset_channel_v1A_09
 rpc_ctrl_reset_channel_v = struct_rpc_ctrl_reset_channel_v1A_09
 class struct_rpc_ctrl_reset_isolated_channel_v1A_09(Struct): pass
 class struct_NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00(Struct): pass
 NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00 = struct_NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00
-struct_NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00._fields_ = [
-  ('exceptType', NvU32),
-  ('engineID', NvU32),
-]
-struct_rpc_ctrl_reset_isolated_channel_v1A_09._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('resetIsolatedChannel', NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00),
-]
+struct_NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00.SIZE = 8
+struct_NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00._fields_ = ['exceptType', 'engineID']
+setattr(struct_NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00, 'exceptType', field(0, NvU32))
+setattr(struct_NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00, 'engineID', field(4, NvU32))
+struct_rpc_ctrl_reset_isolated_channel_v1A_09.SIZE = 16
+struct_rpc_ctrl_reset_isolated_channel_v1A_09._fields_ = ['hClient', 'hObject', 'resetIsolatedChannel']
+setattr(struct_rpc_ctrl_reset_isolated_channel_v1A_09, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_reset_isolated_channel_v1A_09, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_reset_isolated_channel_v1A_09, 'resetIsolatedChannel', field(8, NV506F_CTRL_CMD_RESET_ISOLATED_CHANNEL_PARAMS_v03_00))
 rpc_ctrl_reset_isolated_channel_v1A_09 = struct_rpc_ctrl_reset_isolated_channel_v1A_09
 rpc_ctrl_reset_isolated_channel_v = struct_rpc_ctrl_reset_isolated_channel_v1A_09
 class struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09(Struct): pass
 class struct_NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09(Struct): pass
 NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09 = struct_NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09
-struct_NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09._fields_ = [
-  ('faultType', NvU32),
-]
-struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('handleVfPriFault', NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09),
-]
+struct_NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09.SIZE = 4
+struct_NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09._fields_ = ['faultType']
+setattr(struct_NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09, 'faultType', field(0, NvU32))
+struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09.SIZE = 12
+struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09._fields_ = ['hClient', 'hObject', 'handleVfPriFault']
+setattr(struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09, 'handleVfPriFault', field(8, NV2080_CTRL_CMD_GPU_HANDLE_VF_PRI_FAULT_PARAMS_v18_09))
 rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09 = struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09
 rpc_ctrl_gpu_handle_vf_pri_fault_v = struct_rpc_ctrl_gpu_handle_vf_pri_fault_v1A_09
 class struct_rpc_ctrl_perf_boost_v1A_09(Struct): pass
 class struct_NV2080_CTRL_PERF_BOOST_PARAMS_v03_00(Struct): pass
 NV2080_CTRL_PERF_BOOST_PARAMS_v03_00 = struct_NV2080_CTRL_PERF_BOOST_PARAMS_v03_00
-struct_NV2080_CTRL_PERF_BOOST_PARAMS_v03_00._fields_ = [
-  ('flags', NvU32),
-  ('duration', NvU32),
-]
-struct_rpc_ctrl_perf_boost_v1A_09._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('perfBoost', NV2080_CTRL_PERF_BOOST_PARAMS_v03_00),
-]
+struct_NV2080_CTRL_PERF_BOOST_PARAMS_v03_00.SIZE = 8
+struct_NV2080_CTRL_PERF_BOOST_PARAMS_v03_00._fields_ = ['flags', 'duration']
+setattr(struct_NV2080_CTRL_PERF_BOOST_PARAMS_v03_00, 'flags', field(0, NvU32))
+setattr(struct_NV2080_CTRL_PERF_BOOST_PARAMS_v03_00, 'duration', field(4, NvU32))
+struct_rpc_ctrl_perf_boost_v1A_09.SIZE = 16
+struct_rpc_ctrl_perf_boost_v1A_09._fields_ = ['hClient', 'hObject', 'perfBoost']
+setattr(struct_rpc_ctrl_perf_boost_v1A_09, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_perf_boost_v1A_09, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_perf_boost_v1A_09, 'perfBoost', field(8, NV2080_CTRL_PERF_BOOST_PARAMS_v03_00))
 rpc_ctrl_perf_boost_v1A_09 = struct_rpc_ctrl_perf_boost_v1A_09
 rpc_ctrl_perf_boost_v = struct_rpc_ctrl_perf_boost_v1A_09
 class struct_rpc_ctrl_get_zbc_clear_table_v1A_09(Struct): pass
@@ -1680,248 +1651,248 @@ class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00(Struct): pass
 NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00 = struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00
 class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00(Struct): pass
 NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00 = struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00
-struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00._fields_ = [
-  ('colorFB', (NvU32 * 4)),
-  ('colorDS', (NvU32 * 4)),
-  ('depth', NvU32),
-  ('stencil', NvU32),
-]
-struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00._fields_ = [
-  ('value', NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00),
-  ('indexSize', NvU32),
-  ('indexUsed', NvU32),
-  ('format', NvU32),
-  ('valType', NvU32),
-]
-struct_rpc_ctrl_get_zbc_clear_table_v1A_09._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('getZbcClearTable', NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00),
-]
+struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00.SIZE = 40
+struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00._fields_ = ['colorFB', 'colorDS', 'depth', 'stencil']
+setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00, 'colorFB', field(0, Array(NvU32, 4)))
+setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00, 'colorDS', field(16, Array(NvU32, 4)))
+setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00, 'depth', field(32, NvU32))
+setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00, 'stencil', field(36, NvU32))
+struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00.SIZE = 56
+struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00._fields_ = ['value', 'indexSize', 'indexUsed', 'format', 'valType']
+setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00, 'value', field(0, NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_value_v04_00))
+setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00, 'indexSize', field(40, NvU32))
+setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00, 'indexUsed', field(44, NvU32))
+setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00, 'format', field(48, NvU32))
+setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00, 'valType', field(52, NvU32))
+struct_rpc_ctrl_get_zbc_clear_table_v1A_09.SIZE = 64
+struct_rpc_ctrl_get_zbc_clear_table_v1A_09._fields_ = ['hClient', 'hObject', 'getZbcClearTable']
+setattr(struct_rpc_ctrl_get_zbc_clear_table_v1A_09, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_get_zbc_clear_table_v1A_09, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_get_zbc_clear_table_v1A_09, 'getZbcClearTable', field(8, NV9096_CTRL_GET_ZBC_CLEAR_TABLE_PARAMS_v04_00))
 rpc_ctrl_get_zbc_clear_table_v1A_09 = struct_rpc_ctrl_get_zbc_clear_table_v1A_09
 rpc_ctrl_get_zbc_clear_table_v = struct_rpc_ctrl_get_zbc_clear_table_v1A_09
 class struct_rpc_ctrl_set_zbc_color_clear_v1A_09(Struct): pass
 class struct_NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00(Struct): pass
 NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00 = struct_NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00
-struct_NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00._fields_ = [
-  ('colorFB', (NvU32 * 4)),
-  ('colorDS', (NvU32 * 4)),
-  ('format', NvU32),
-]
-struct_rpc_ctrl_set_zbc_color_clear_v1A_09._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('setZbcColorClr', NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00),
-]
+struct_NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00.SIZE = 36
+struct_NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00._fields_ = ['colorFB', 'colorDS', 'format']
+setattr(struct_NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00, 'colorFB', field(0, Array(NvU32, 4)))
+setattr(struct_NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00, 'colorDS', field(16, Array(NvU32, 4)))
+setattr(struct_NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00, 'format', field(32, NvU32))
+struct_rpc_ctrl_set_zbc_color_clear_v1A_09.SIZE = 44
+struct_rpc_ctrl_set_zbc_color_clear_v1A_09._fields_ = ['hClient', 'hObject', 'setZbcColorClr']
+setattr(struct_rpc_ctrl_set_zbc_color_clear_v1A_09, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_set_zbc_color_clear_v1A_09, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_set_zbc_color_clear_v1A_09, 'setZbcColorClr', field(8, NV9096_CTRL_SET_ZBC_COLOR_CLEAR_PARAMS_v03_00))
 rpc_ctrl_set_zbc_color_clear_v1A_09 = struct_rpc_ctrl_set_zbc_color_clear_v1A_09
 rpc_ctrl_set_zbc_color_clear_v = struct_rpc_ctrl_set_zbc_color_clear_v1A_09
 class struct_rpc_ctrl_set_zbc_depth_clear_v1A_09(Struct): pass
 class struct_NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00(Struct): pass
 NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00 = struct_NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00
-struct_NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00._fields_ = [
-  ('depth', NvU32),
-  ('format', NvU32),
-]
-struct_rpc_ctrl_set_zbc_depth_clear_v1A_09._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('setZbcDepthClr', NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00),
-]
+struct_NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00.SIZE = 8
+struct_NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00._fields_ = ['depth', 'format']
+setattr(struct_NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00, 'depth', field(0, NvU32))
+setattr(struct_NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00, 'format', field(4, NvU32))
+struct_rpc_ctrl_set_zbc_depth_clear_v1A_09.SIZE = 16
+struct_rpc_ctrl_set_zbc_depth_clear_v1A_09._fields_ = ['hClient', 'hObject', 'setZbcDepthClr']
+setattr(struct_rpc_ctrl_set_zbc_depth_clear_v1A_09, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_set_zbc_depth_clear_v1A_09, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_set_zbc_depth_clear_v1A_09, 'setZbcDepthClr', field(8, NV9096_CTRL_SET_ZBC_DEPTH_CLEAR_PARAMS_v03_00))
 rpc_ctrl_set_zbc_depth_clear_v1A_09 = struct_rpc_ctrl_set_zbc_depth_clear_v1A_09
 rpc_ctrl_set_zbc_depth_clear_v = struct_rpc_ctrl_set_zbc_depth_clear_v1A_09
 class struct_rpc_ctrl_set_zbc_stencil_clear_v27_06(Struct): pass
 class struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06(Struct): pass
 NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06 = struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06
-struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06._fields_ = [
-  ('stencil', NvU32),
-  ('format', NvU32),
-  ('bSkipL2Table', NvBool),
-]
-struct_rpc_ctrl_set_zbc_stencil_clear_v27_06._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('setZbcStencilClr', NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06),
-]
+struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06.SIZE = 12
+struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06._fields_ = ['stencil', 'format', 'bSkipL2Table']
+setattr(struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06, 'stencil', field(0, NvU32))
+setattr(struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06, 'format', field(4, NvU32))
+setattr(struct_NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06, 'bSkipL2Table', field(8, NvBool))
+struct_rpc_ctrl_set_zbc_stencil_clear_v27_06.SIZE = 20
+struct_rpc_ctrl_set_zbc_stencil_clear_v27_06._fields_ = ['hClient', 'hObject', 'setZbcStencilClr']
+setattr(struct_rpc_ctrl_set_zbc_stencil_clear_v27_06, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_set_zbc_stencil_clear_v27_06, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_set_zbc_stencil_clear_v27_06, 'setZbcStencilClr', field(8, NV9096_CTRL_SET_ZBC_STENCIL_CLEAR_PARAMS_v27_06))
 rpc_ctrl_set_zbc_stencil_clear_v27_06 = struct_rpc_ctrl_set_zbc_stencil_clear_v27_06
 rpc_ctrl_set_zbc_stencil_clear_v = struct_rpc_ctrl_set_zbc_stencil_clear_v27_06
 class struct_rpc_ctrl_gpfifo_schedule_v1A_0A(Struct): pass
 class struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00(Struct): pass
 NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00 = struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00
-struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00._fields_ = [
-  ('bEnable', NvBool),
-]
-struct_rpc_ctrl_gpfifo_schedule_v1A_0A._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('cmd', NvU32),
-  ('gpfifoSchedule', NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00),
-]
+struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00.SIZE = 1
+struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00._fields_ = ['bEnable']
+setattr(struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00, 'bEnable', field(0, NvBool))
+struct_rpc_ctrl_gpfifo_schedule_v1A_0A.SIZE = 16
+struct_rpc_ctrl_gpfifo_schedule_v1A_0A._fields_ = ['hClient', 'hObject', 'cmd', 'gpfifoSchedule']
+setattr(struct_rpc_ctrl_gpfifo_schedule_v1A_0A, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_gpfifo_schedule_v1A_0A, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_gpfifo_schedule_v1A_0A, 'cmd', field(8, NvU32))
+setattr(struct_rpc_ctrl_gpfifo_schedule_v1A_0A, 'gpfifoSchedule', field(12, NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_v03_00))
 rpc_ctrl_gpfifo_schedule_v1A_0A = struct_rpc_ctrl_gpfifo_schedule_v1A_0A
 rpc_ctrl_gpfifo_schedule_v = struct_rpc_ctrl_gpfifo_schedule_v1A_0A
 class struct_rpc_ctrl_set_timeslice_v1A_0A(Struct): pass
 class struct_NVA06C_CTRL_TIMESLICE_PARAMS_v06_00(Struct): pass
 NVA06C_CTRL_TIMESLICE_PARAMS_v06_00 = struct_NVA06C_CTRL_TIMESLICE_PARAMS_v06_00
-struct_NVA06C_CTRL_TIMESLICE_PARAMS_v06_00._fields_ = [
-  ('timesliceUs', NvU64),
-]
-struct_rpc_ctrl_set_timeslice_v1A_0A._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('setTimeSlice', NVA06C_CTRL_TIMESLICE_PARAMS_v06_00),
-]
+struct_NVA06C_CTRL_TIMESLICE_PARAMS_v06_00.SIZE = 8
+struct_NVA06C_CTRL_TIMESLICE_PARAMS_v06_00._fields_ = ['timesliceUs']
+setattr(struct_NVA06C_CTRL_TIMESLICE_PARAMS_v06_00, 'timesliceUs', field(0, NvU64))
+struct_rpc_ctrl_set_timeslice_v1A_0A.SIZE = 16
+struct_rpc_ctrl_set_timeslice_v1A_0A._fields_ = ['hClient', 'hObject', 'setTimeSlice']
+setattr(struct_rpc_ctrl_set_timeslice_v1A_0A, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_set_timeslice_v1A_0A, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_set_timeslice_v1A_0A, 'setTimeSlice', field(8, NVA06C_CTRL_TIMESLICE_PARAMS_v06_00))
 rpc_ctrl_set_timeslice_v1A_0A = struct_rpc_ctrl_set_timeslice_v1A_0A
 rpc_ctrl_set_timeslice_v = struct_rpc_ctrl_set_timeslice_v1A_0A
 class struct_rpc_ctrl_fifo_disable_channels_v1A_0A(Struct): pass
 class struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00(Struct): pass
 NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00 = struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00
-struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00._fields_ = [
-  ('bDisable', NvBool),
-  ('numChannels', NvU32),
-  ('bOnlyDisableScheduling', NvBool),
-  ('bRewindGpPut', NvBool),
-  ('pRunlistPreemptEvent', NvP64),
-  ('hClientList', (NvHandle * 64)),
-  ('hChannelList', (NvHandle * 64)),
-]
-struct_rpc_ctrl_fifo_disable_channels_v1A_0A._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('fifoDisableChannels', NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00),
-]
+struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00.SIZE = 536
+struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00._fields_ = ['bDisable', 'numChannels', 'bOnlyDisableScheduling', 'bRewindGpPut', 'pRunlistPreemptEvent', 'hClientList', 'hChannelList']
+setattr(struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00, 'bDisable', field(0, NvBool))
+setattr(struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00, 'numChannels', field(4, NvU32))
+setattr(struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00, 'bOnlyDisableScheduling', field(8, NvBool))
+setattr(struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00, 'bRewindGpPut', field(9, NvBool))
+setattr(struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00, 'pRunlistPreemptEvent', field(16, NvP64))
+setattr(struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00, 'hClientList', field(24, Array(NvHandle, 64)))
+setattr(struct_NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00, 'hChannelList', field(280, Array(NvHandle, 64)))
+struct_rpc_ctrl_fifo_disable_channels_v1A_0A.SIZE = 544
+struct_rpc_ctrl_fifo_disable_channels_v1A_0A._fields_ = ['hClient', 'hObject', 'fifoDisableChannels']
+setattr(struct_rpc_ctrl_fifo_disable_channels_v1A_0A, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_fifo_disable_channels_v1A_0A, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_fifo_disable_channels_v1A_0A, 'fifoDisableChannels', field(8, NV2080_CTRL_FIFO_DISABLE_CHANNELS_PARAMS_v06_00))
 rpc_ctrl_fifo_disable_channels_v1A_0A = struct_rpc_ctrl_fifo_disable_channels_v1A_0A
 rpc_ctrl_fifo_disable_channels_v = struct_rpc_ctrl_fifo_disable_channels_v1A_0A
 class struct_rpc_ctrl_preempt_v1A_0A(Struct): pass
 class struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A(Struct): pass
 NVA06C_CTRL_PREEMPT_PARAMS_v09_0A = struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A
-struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A._fields_ = [
-  ('bWait', NvBool),
-  ('bManualTimeout', NvBool),
-  ('timeoutUs', NvU32),
-]
-struct_rpc_ctrl_preempt_v1A_0A._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('cmdPreempt', NVA06C_CTRL_PREEMPT_PARAMS_v09_0A),
-]
+struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A.SIZE = 8
+struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A._fields_ = ['bWait', 'bManualTimeout', 'timeoutUs']
+setattr(struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A, 'bWait', field(0, NvBool))
+setattr(struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A, 'bManualTimeout', field(1, NvBool))
+setattr(struct_NVA06C_CTRL_PREEMPT_PARAMS_v09_0A, 'timeoutUs', field(4, NvU32))
+struct_rpc_ctrl_preempt_v1A_0A.SIZE = 16
+struct_rpc_ctrl_preempt_v1A_0A._fields_ = ['hClient', 'hObject', 'cmdPreempt']
+setattr(struct_rpc_ctrl_preempt_v1A_0A, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_preempt_v1A_0A, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_preempt_v1A_0A, 'cmdPreempt', field(8, NVA06C_CTRL_PREEMPT_PARAMS_v09_0A))
 rpc_ctrl_preempt_v1A_0A = struct_rpc_ctrl_preempt_v1A_0A
 rpc_ctrl_preempt_v = struct_rpc_ctrl_preempt_v1A_0A
 class struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A(Struct): pass
 class struct_NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02(Struct): pass
 NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02 = struct_NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02
-struct_NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02._fields_ = [
-  ('tsgInterleaveLevel', NvU32),
-]
-struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('interleaveLevelTSG', NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02),
-]
+struct_NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02.SIZE = 4
+struct_NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02._fields_ = ['tsgInterleaveLevel']
+setattr(struct_NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02, 'tsgInterleaveLevel', field(0, NvU32))
+struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A.SIZE = 12
+struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A._fields_ = ['hClient', 'hObject', 'interleaveLevelTSG']
+setattr(struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A, 'interleaveLevelTSG', field(8, NVA06C_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02))
 rpc_ctrl_set_tsg_interleave_level_v1A_0A = struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A
 rpc_ctrl_set_tsg_interleave_level_v = struct_rpc_ctrl_set_tsg_interleave_level_v1A_0A
 class struct_rpc_ctrl_set_channel_interleave_level_v1A_0A(Struct): pass
 class struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02(Struct): pass
 NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02 = struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02
-struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02._fields_ = [
-  ('channelInterleaveLevel', NvU32),
-]
-struct_rpc_ctrl_set_channel_interleave_level_v1A_0A._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('interleaveLevelChannel', NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02),
-]
+struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02.SIZE = 4
+struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02._fields_ = ['channelInterleaveLevel']
+setattr(struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02, 'channelInterleaveLevel', field(0, NvU32))
+struct_rpc_ctrl_set_channel_interleave_level_v1A_0A.SIZE = 12
+struct_rpc_ctrl_set_channel_interleave_level_v1A_0A._fields_ = ['hClient', 'hObject', 'interleaveLevelChannel']
+setattr(struct_rpc_ctrl_set_channel_interleave_level_v1A_0A, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_set_channel_interleave_level_v1A_0A, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_set_channel_interleave_level_v1A_0A, 'interleaveLevelChannel', field(8, NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS_v17_02))
 rpc_ctrl_set_channel_interleave_level_v1A_0A = struct_rpc_ctrl_set_channel_interleave_level_v1A_0A
 rpc_ctrl_set_channel_interleave_level_v = struct_rpc_ctrl_set_channel_interleave_level_v1A_0A
 class struct_rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E(Struct): pass
 class struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01(Struct): pass
 NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01 = struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01
-struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01._fields_ = [
-  ('flags', NvU32),
-  ('hClient', NvHandle),
-  ('hChannel', NvHandle),
-  ('vMemPtrs', (NvU64 * 8)),
-  ('gfxpPreemptMode', NvU32),
-  ('cilpPreemptMode', NvU32),
-  ('grRouteInfo', NV2080_CTRL_GR_ROUTE_INFO_v12_01),
-]
-struct_rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01),
-]
+struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01.SIZE = 104
+struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01._fields_ = ['flags', 'hClient', 'hChannel', 'vMemPtrs', 'gfxpPreemptMode', 'cilpPreemptMode', 'grRouteInfo']
+setattr(struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01, 'flags', field(0, NvU32))
+setattr(struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01, 'hClient', field(4, NvHandle))
+setattr(struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01, 'hChannel', field(8, NvHandle))
+setattr(struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01, 'vMemPtrs', field(16, Array(NvU64, 8)))
+setattr(struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01, 'gfxpPreemptMode', field(80, NvU32))
+setattr(struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01, 'cilpPreemptMode', field(84, NvU32))
+setattr(struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01, 'grRouteInfo', field(88, NV2080_CTRL_GR_ROUTE_INFO_v12_01))
+struct_rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E.SIZE = 112
+struct_rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E, 'ctrlParams', field(8, NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v12_01))
 rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E = struct_rpc_ctrl_gr_ctxsw_preemption_bind_v1A_0E
 class struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07(Struct): pass
 class struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07(Struct): pass
 NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07 = struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07
-struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07._fields_ = [
-  ('flags', NvU32),
-  ('hClient', NvHandle),
-  ('hChannel', NvHandle),
-  ('vMemPtrs', (NvU64 * 9)),
-  ('gfxpPreemptMode', NvU32),
-  ('cilpPreemptMode', NvU32),
-  ('grRouteInfo', NV2080_CTRL_GR_ROUTE_INFO_v12_01),
-]
-struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07),
-]
+struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07.SIZE = 112
+struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07._fields_ = ['flags', 'hClient', 'hChannel', 'vMemPtrs', 'gfxpPreemptMode', 'cilpPreemptMode', 'grRouteInfo']
+setattr(struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07, 'flags', field(0, NvU32))
+setattr(struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07, 'hClient', field(4, NvHandle))
+setattr(struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07, 'hChannel', field(8, NvHandle))
+setattr(struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07, 'vMemPtrs', field(16, Array(NvU64, 9)))
+setattr(struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07, 'gfxpPreemptMode', field(88, NvU32))
+setattr(struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07, 'cilpPreemptMode', field(92, NvU32))
+setattr(struct_NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07, 'grRouteInfo', field(96, NV2080_CTRL_GR_ROUTE_INFO_v12_01))
+struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07.SIZE = 120
+struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07, 'ctrlParams', field(8, NV2080_CTRL_GR_CTXSW_PREEMPTION_BIND_PARAMS_v28_07))
 rpc_ctrl_gr_ctxsw_preemption_bind_v28_07 = struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07
 rpc_ctrl_gr_ctxsw_preemption_bind_v = struct_rpc_ctrl_gr_ctxsw_preemption_bind_v28_07
 class struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E(Struct): pass
 class struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01(Struct): pass
 NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01 = struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01
-struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01._fields_ = [
-  ('flags', NvU32),
-  ('hChannel', NvHandle),
-  ('gfxpPreemptMode', NvU32),
-  ('cilpPreemptMode', NvU32),
-  ('grRouteInfo', NV2080_CTRL_GR_ROUTE_INFO_v12_01),
-]
-struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01),
-]
+struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01.SIZE = 32
+struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01._fields_ = ['flags', 'hChannel', 'gfxpPreemptMode', 'cilpPreemptMode', 'grRouteInfo']
+setattr(struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01, 'flags', field(0, NvU32))
+setattr(struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01, 'hChannel', field(4, NvHandle))
+setattr(struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01, 'gfxpPreemptMode', field(8, NvU32))
+setattr(struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01, 'cilpPreemptMode', field(12, NvU32))
+setattr(struct_NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01, 'grRouteInfo', field(16, NV2080_CTRL_GR_ROUTE_INFO_v12_01))
+struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E.SIZE = 40
+struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E, 'ctrlParams', field(8, NV2080_CTRL_GR_SET_CTXSW_PREEMPTION_MODE_PARAMS_v12_01))
 rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E = struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E
 rpc_ctrl_gr_set_ctxsw_preemption_mode_v = struct_rpc_ctrl_gr_set_ctxsw_preemption_mode_v1A_0E
 class struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E(Struct): pass
 class struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00(Struct): pass
 NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00 = struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00
-struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00._fields_ = [
-  ('hClient', NvHandle),
-  ('hChannel', NvHandle),
-  ('vMemPtr', NvU64),
-  ('zcullMode', NvU32),
-]
-struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00),
-]
+struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00.SIZE = 24
+struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00._fields_ = ['hClient', 'hChannel', 'vMemPtr', 'zcullMode']
+setattr(struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00, 'hClient', field(0, NvHandle))
+setattr(struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00, 'hChannel', field(4, NvHandle))
+setattr(struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00, 'vMemPtr', field(8, NvU64))
+setattr(struct_NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00, 'zcullMode', field(16, NvU32))
+struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E.SIZE = 32
+struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E, 'ctrlParams', field(8, NV2080_CTRL_GR_CTXSW_ZCULL_BIND_PARAMS_v03_00))
 rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E = struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E
 rpc_ctrl_gr_ctxsw_zcull_bind_v = struct_rpc_ctrl_gr_ctxsw_zcull_bind_v1A_0E
 class struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E(Struct): pass
 class struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00(Struct): pass
 NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00 = struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00
-struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00._fields_ = [
-  ('engineType', NvU32),
-  ('hClient', NvHandle),
-  ('ChID', NvU32),
-  ('hChanClient', NvHandle),
-  ('hObject', NvHandle),
-  ('hVirtMemory', NvHandle),
-  ('physAddress', NvU64),
-  ('physAttr', NvU32),
-  ('hDmaHandle', NvHandle),
-  ('index', NvU32),
-  ('size', NvU64),
-]
-struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00),
-]
+struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00.SIZE = 56
+struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00._fields_ = ['engineType', 'hClient', 'ChID', 'hChanClient', 'hObject', 'hVirtMemory', 'physAddress', 'physAttr', 'hDmaHandle', 'index', 'size']
+setattr(struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00, 'engineType', field(0, NvU32))
+setattr(struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00, 'hClient', field(4, NvHandle))
+setattr(struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00, 'ChID', field(8, NvU32))
+setattr(struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00, 'hChanClient', field(12, NvHandle))
+setattr(struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00, 'hObject', field(16, NvHandle))
+setattr(struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00, 'hVirtMemory', field(20, NvHandle))
+setattr(struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00, 'physAddress', field(24, NvU64))
+setattr(struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00, 'physAttr', field(32, NvU32))
+setattr(struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00, 'hDmaHandle', field(36, NvHandle))
+setattr(struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00, 'index', field(40, NvU32))
+setattr(struct_NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00, 'size', field(48, NvU64))
+struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E.SIZE = 64
+struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E, 'ctrlParams', field(8, NV2080_CTRL_GPU_INITIALIZE_CTX_PARAMS_v03_00))
 rpc_ctrl_gpu_initialize_ctx_v1A_0E = struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E
 rpc_ctrl_gpu_initialize_ctx_v = struct_rpc_ctrl_gpu_initialize_ctx_v1A_0E
 class struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04(Struct): pass
@@ -1929,52 +1900,52 @@ class struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04(Struct)
 NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04 = struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04
 class struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04(Struct): pass
 NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04 = struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04
-struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04._fields_ = [
-  ('physAddress', NvU64),
-  ('size', NvU64),
-  ('aperture', NvU32),
-  ('pageShift', NvU8),
-]
-struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04._fields_ = [
-  ('hSubDevice', NvHandle),
-  ('subDeviceId', NvU32),
-  ('pageSize', NvU64),
-  ('virtAddrLo', NvU64),
-  ('virtAddrHi', NvU64),
-  ('numLevelsToCopy', NvU32),
-  ('levels', (NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04 * 6)),
-]
-struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04),
-]
+struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04.SIZE = 24
+struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04._fields_ = ['physAddress', 'size', 'aperture', 'pageShift']
+setattr(struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04, 'physAddress', field(0, NvU64))
+setattr(struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04, 'size', field(8, NvU64))
+setattr(struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04, 'aperture', field(16, NvU32))
+setattr(struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04, 'pageShift', field(20, NvU8))
+struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04.SIZE = 184
+struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04._fields_ = ['hSubDevice', 'subDeviceId', 'pageSize', 'virtAddrLo', 'virtAddrHi', 'numLevelsToCopy', 'levels']
+setattr(struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04, 'hSubDevice', field(0, NvHandle))
+setattr(struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04, 'subDeviceId', field(4, NvU32))
+setattr(struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04, 'pageSize', field(8, NvU64))
+setattr(struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04, 'virtAddrLo', field(16, NvU64))
+setattr(struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04, 'virtAddrHi', field(24, NvU64))
+setattr(struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04, 'numLevelsToCopy', field(32, NvU32))
+setattr(struct_NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04, 'levels', field(40, Array(NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_levels_v1E_04, 6)))
+struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04.SIZE = 192
+struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04, 'ctrlParams', field(8, NV90F1_CTRL_VASPACE_COPY_SERVER_RESERVED_PDES_PARAMS_v1E_04))
 rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04 = struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04
 rpc_ctrl_vaspace_copy_server_reserved_pdes_v = struct_rpc_ctrl_vaspace_copy_server_reserved_pdes_v1E_04
 class struct_rpc_ctrl_mc_service_interrupts_v1A_0E(Struct): pass
 class struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01(Struct): pass
 NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01 = struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01
-struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01._fields_ = [
-  ('engines', NvU32),
-]
-struct_rpc_ctrl_mc_service_interrupts_v1A_0E._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01),
-]
+struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01.SIZE = 4
+struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01._fields_ = ['engines']
+setattr(struct_NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01, 'engines', field(0, NvU32))
+struct_rpc_ctrl_mc_service_interrupts_v1A_0E.SIZE = 12
+struct_rpc_ctrl_mc_service_interrupts_v1A_0E._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_mc_service_interrupts_v1A_0E, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_mc_service_interrupts_v1A_0E, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_mc_service_interrupts_v1A_0E, 'ctrlParams', field(8, NV2080_CTRL_MC_SERVICE_INTERRUPTS_PARAMS_v15_01))
 rpc_ctrl_mc_service_interrupts_v1A_0E = struct_rpc_ctrl_mc_service_interrupts_v1A_0E
 rpc_ctrl_mc_service_interrupts_v = struct_rpc_ctrl_mc_service_interrupts_v1A_0E
 class struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D(Struct): pass
-struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D._fields_ = [
-  ('iter', NvU8),
-  ('gpuIds', (NvU32 * 32)),
-  ('gpuCount', NvU32),
-  ('p2pCaps', NvU32),
-  ('p2pOptimalReadCEs', NvU32),
-  ('p2pOptimalWriteCEs', NvU32),
-  ('p2pCapsStatus', (NvU8 * 9)),
-  ('busPeerIds', (NvU32 * 512)),
-]
+struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D.SIZE = 2208
+struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D._fields_ = ['iter', 'gpuIds', 'gpuCount', 'p2pCaps', 'p2pOptimalReadCEs', 'p2pOptimalWriteCEs', 'p2pCapsStatus', 'busPeerIds']
+setattr(struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D, 'iter', field(0, NvU8))
+setattr(struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D, 'gpuIds', field(4, Array(NvU32, 32)))
+setattr(struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D, 'gpuCount', field(132, NvU32))
+setattr(struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D, 'p2pCaps', field(136, NvU32))
+setattr(struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D, 'p2pOptimalReadCEs', field(140, NvU32))
+setattr(struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D, 'p2pOptimalWriteCEs', field(144, NvU32))
+setattr(struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D, 'p2pCapsStatus', field(148, Array(NvU8, 9)))
+setattr(struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D, 'busPeerIds', field(160, Array(NvU32, 512)))
 rpc_ctrl_get_p2p_caps_v2_v1F_0D = struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D
 rpc_ctrl_get_p2p_caps_v2_v = struct_rpc_ctrl_get_p2p_caps_v2_v1F_0D
 class struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02(Struct): pass
@@ -1982,72 +1953,72 @@ class struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02(Struct): pass
 NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02 = struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02
 class struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02(Struct): pass
 NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02 = struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02
-struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02._fields_ = [
-  ('gpuId', NvU32),
-  ('gpuUuid', (NvU8 * 16)),
-  ('p2pCaps', NvU32),
-  ('p2pOptimalReadCEs', NvU32),
-  ('p2pOptimalWriteCEs', NvU32),
-  ('p2pCapsStatus', (NvU8 * 9)),
-  ('busPeerId', NvU32),
-]
-struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02._fields_ = [
-  ('bAllCaps', NvBool),
-  ('bUseUuid', NvBool),
-  ('peerGpuCount', NvU32),
-  ('peerGpuCaps', (NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02 * 32)),
-]
-struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02._fields_ = [
-  ('ctrlParams', NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02),
-]
+struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02.SIZE = 48
+struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02._fields_ = ['gpuId', 'gpuUuid', 'p2pCaps', 'p2pOptimalReadCEs', 'p2pOptimalWriteCEs', 'p2pCapsStatus', 'busPeerId']
+setattr(struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02, 'gpuId', field(0, NvU32))
+setattr(struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02, 'gpuUuid', field(4, Array(NvU8, 16)))
+setattr(struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02, 'p2pCaps', field(20, NvU32))
+setattr(struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02, 'p2pOptimalReadCEs', field(24, NvU32))
+setattr(struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02, 'p2pOptimalWriteCEs', field(28, NvU32))
+setattr(struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02, 'p2pCapsStatus', field(32, Array(NvU8, 9)))
+setattr(struct_NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02, 'busPeerId', field(44, NvU32))
+struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02.SIZE = 1544
+struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02._fields_ = ['bAllCaps', 'bUseUuid', 'peerGpuCount', 'peerGpuCaps']
+setattr(struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02, 'bAllCaps', field(0, NvBool))
+setattr(struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02, 'bUseUuid', field(1, NvBool))
+setattr(struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02, 'peerGpuCount', field(4, NvU32))
+setattr(struct_NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02, 'peerGpuCaps', field(8, Array(NV2080_CTRL_GPU_P2P_PEER_CAPS_PEER_INFO_v21_02, 32)))
+struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02.SIZE = 1544
+struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02._fields_ = ['ctrlParams']
+setattr(struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02, 'ctrlParams', field(0, NV2080_CTRL_GET_P2P_CAPS_PARAMS_v21_02))
 rpc_ctrl_subdevice_get_p2p_caps_v21_02 = struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02
 rpc_ctrl_subdevice_get_p2p_caps_v = struct_rpc_ctrl_subdevice_get_p2p_caps_v21_02
 class struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03(Struct): pass
 class struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03(Struct): pass
 NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03 = struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03
-struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03._fields_ = [
-  ('allocatedSize', NvU64),
-  ('peakAllocatedSize', NvU64),
-  ('managedSize', NvU64),
-  ('allocationCount', NvU32),
-  ('peakAllocationCount', NvU32),
-]
-struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03),
-]
+struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03.SIZE = 32
+struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03._fields_ = ['allocatedSize', 'peakAllocatedSize', 'managedSize', 'allocationCount', 'peakAllocationCount']
+setattr(struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03, 'allocatedSize', field(0, NvU64))
+setattr(struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03, 'peakAllocatedSize', field(8, NvU64))
+setattr(struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03, 'managedSize', field(16, NvU64))
+setattr(struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03, 'allocationCount', field(24, NvU32))
+setattr(struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03, 'peakAllocationCount', field(28, NvU32))
+struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03.SIZE = 40
+struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03, 'ctrlParams', field(8, NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_03))
 rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03 = struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_03
 class struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06(Struct): pass
 class struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06(Struct): pass
 NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06 = struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06
-struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06._fields_ = [
-  ('allocatedSize', NvU64),
-  ('peakAllocatedSize', NvU64),
-  ('managedSize', NvU64),
-  ('allocationCount', NvU32),
-  ('peakAllocationCount', NvU32),
-  ('largestFreeChunkSize', NvU64),
-]
-struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06),
-]
+struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06.SIZE = 40
+struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06._fields_ = ['allocatedSize', 'peakAllocatedSize', 'managedSize', 'allocationCount', 'peakAllocationCount', 'largestFreeChunkSize']
+setattr(struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06, 'allocatedSize', field(0, NvU64))
+setattr(struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06, 'peakAllocatedSize', field(8, NvU64))
+setattr(struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06, 'managedSize', field(16, NvU64))
+setattr(struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06, 'allocationCount', field(24, NvU32))
+setattr(struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06, 'peakAllocationCount', field(28, NvU32))
+setattr(struct_NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06, 'largestFreeChunkSize', field(32, NvU64))
+struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06.SIZE = 48
+struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06, 'ctrlParams', field(8, NV2080_CTRL_CMD_GSP_GET_VGPU_HEAP_STATS_PARAMS_v28_06))
 rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06 = struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06
 rpc_ctrl_subdevice_get_vgpu_heap_stats_v = struct_rpc_ctrl_subdevice_get_vgpu_heap_stats_v28_06
 class struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C(Struct): pass
 class struct_NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00(Struct): pass
 NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00 = struct_NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00
-struct_NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00._fields_ = [
-  ('hTargetChannel', NvHandle),
-  ('numSMsToClear', NvU32),
-]
-struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00),
-]
+struct_NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00.SIZE = 8
+struct_NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00._fields_ = ['hTargetChannel', 'numSMsToClear']
+setattr(struct_NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00, 'hTargetChannel', field(0, NvHandle))
+setattr(struct_NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00, 'numSMsToClear', field(4, NvU32))
+struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C.SIZE = 16
+struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C, 'ctrlParams', field(8, NV83DE_CTRL_DEBUG_CLEAR_ALL_SM_ERROR_STATES_PARAMS_v03_00))
 rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C = struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C
 rpc_ctrl_dbg_clear_all_sm_error_states_v = struct_rpc_ctrl_dbg_clear_all_sm_error_states_v1A_0C
 class struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06(Struct): pass
@@ -2055,49 +2026,49 @@ class struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06(Struct): p
 NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06 = struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06
 class struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06(Struct): pass
 NV83DE_SM_ERROR_STATE_REGISTERS_v21_06 = struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06
-struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06._fields_ = [
-  ('hwwGlobalEsr', NvU32),
-  ('hwwWarpEsr', NvU32),
-  ('hwwWarpEsrPc', NvU32),
-  ('hwwGlobalEsrReportMask', NvU32),
-  ('hwwWarpEsrReportMask', NvU32),
-  ('hwwEsrAddr', NvU64),
-  ('hwwWarpEsrPc64', NvU64),
-  ('hwwCgaEsr', NvU32),
-  ('hwwCgaEsrReportMask', NvU32),
-]
+struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06.SIZE = 48
+struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06._fields_ = ['hwwGlobalEsr', 'hwwWarpEsr', 'hwwWarpEsrPc', 'hwwGlobalEsrReportMask', 'hwwWarpEsrReportMask', 'hwwEsrAddr', 'hwwWarpEsrPc64', 'hwwCgaEsr', 'hwwCgaEsrReportMask']
+setattr(struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06, 'hwwGlobalEsr', field(0, NvU32))
+setattr(struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06, 'hwwWarpEsr', field(4, NvU32))
+setattr(struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06, 'hwwWarpEsrPc', field(8, NvU32))
+setattr(struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06, 'hwwGlobalEsrReportMask', field(12, NvU32))
+setattr(struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06, 'hwwWarpEsrReportMask', field(16, NvU32))
+setattr(struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06, 'hwwEsrAddr', field(24, NvU64))
+setattr(struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06, 'hwwWarpEsrPc64', field(32, NvU64))
+setattr(struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06, 'hwwCgaEsr', field(40, NvU32))
+setattr(struct_NV83DE_SM_ERROR_STATE_REGISTERS_v21_06, 'hwwCgaEsrReportMask', field(44, NvU32))
 class struct_NV83DE_MMU_FAULT_INFO_v16_03(Struct): pass
 NV83DE_MMU_FAULT_INFO_v16_03 = struct_NV83DE_MMU_FAULT_INFO_v16_03
-struct_NV83DE_MMU_FAULT_INFO_v16_03._fields_ = [
-  ('valid', NvBool),
-  ('faultInfo', NvU32),
-]
-struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06._fields_ = [
-  ('hTargetChannel', NvHandle),
-  ('numSMsToRead', NvU32),
-  ('smErrorStateArray', (NV83DE_SM_ERROR_STATE_REGISTERS_v21_06 * 80)),
-  ('mmuFaultInfo', NvU32),
-  ('mmuFault', NV83DE_MMU_FAULT_INFO_v16_03),
-  ('startingSM', NvU32),
-]
-struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06),
-]
+struct_NV83DE_MMU_FAULT_INFO_v16_03.SIZE = 8
+struct_NV83DE_MMU_FAULT_INFO_v16_03._fields_ = ['valid', 'faultInfo']
+setattr(struct_NV83DE_MMU_FAULT_INFO_v16_03, 'valid', field(0, NvBool))
+setattr(struct_NV83DE_MMU_FAULT_INFO_v16_03, 'faultInfo', field(4, NvU32))
+struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06.SIZE = 3864
+struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06._fields_ = ['hTargetChannel', 'numSMsToRead', 'smErrorStateArray', 'mmuFaultInfo', 'mmuFault', 'startingSM']
+setattr(struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06, 'hTargetChannel', field(0, NvHandle))
+setattr(struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06, 'numSMsToRead', field(4, NvU32))
+setattr(struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06, 'smErrorStateArray', field(8, Array(NV83DE_SM_ERROR_STATE_REGISTERS_v21_06, 80)))
+setattr(struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06, 'mmuFaultInfo', field(3848, NvU32))
+setattr(struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06, 'mmuFault', field(3852, NV83DE_MMU_FAULT_INFO_v16_03))
+setattr(struct_NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06, 'startingSM', field(3860, NvU32))
+struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06.SIZE = 3872
+struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06, 'ctrlParams', field(8, NV83DE_CTRL_DEBUG_READ_ALL_SM_ERROR_STATES_PARAMS_v21_06))
 rpc_ctrl_dbg_read_all_sm_error_states_v21_06 = struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06
 rpc_ctrl_dbg_read_all_sm_error_states_v = struct_rpc_ctrl_dbg_read_all_sm_error_states_v21_06
 class struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C(Struct): pass
 class struct_NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00(Struct): pass
 NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00 = struct_NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00
-struct_NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00._fields_ = [
-  ('exceptionMask', NvU32),
-]
-struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00),
-]
+struct_NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00.SIZE = 4
+struct_NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00._fields_ = ['exceptionMask']
+setattr(struct_NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00, 'exceptionMask', field(0, NvU32))
+struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C.SIZE = 12
+struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C, 'ctrlParams', field(8, NV83DE_CTRL_DEBUG_SET_EXCEPTION_MASK_PARAMS_v03_00))
 rpc_ctrl_dbg_set_exception_mask_v1A_0C = struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C
 rpc_ctrl_dbg_set_exception_mask_v = struct_rpc_ctrl_dbg_set_exception_mask_v1A_0C
 class struct_rpc_ctrl_gpu_promote_ctx_v1A_20(Struct): pass
@@ -2105,176 +2076,176 @@ class struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20(Struct): pass
 NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20 = struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20
 class struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20(Struct): pass
 NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20 = struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20
-struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20._fields_ = [
-  ('gpuPhysAddr', NvU64),
-  ('gpuVirtAddr', NvU64),
-  ('size', NvU64),
-  ('physAttr', NvU32),
-  ('bufferId', NvU16),
-  ('bInitialize', NvU8),
-  ('bNonmapped', NvU8),
-]
-struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20._fields_ = [
-  ('engineType', NvU32),
-  ('hClient', NvHandle),
-  ('ChID', NvU32),
-  ('hChanClient', NvHandle),
-  ('hObject', NvHandle),
-  ('hVirtMemory', NvHandle),
-  ('virtAddress', NvU64),
-  ('size', NvU64),
-  ('entryCount', NvU32),
-  ('promoteEntry', (NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20 * 16)),
-]
-struct_rpc_ctrl_gpu_promote_ctx_v1A_20._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('promoteCtx', NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20),
-]
+struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20.SIZE = 32
+struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20._fields_ = ['gpuPhysAddr', 'gpuVirtAddr', 'size', 'physAttr', 'bufferId', 'bInitialize', 'bNonmapped']
+setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20, 'gpuPhysAddr', field(0, NvU64))
+setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20, 'gpuVirtAddr', field(8, NvU64))
+setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20, 'size', field(16, NvU64))
+setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20, 'physAttr', field(24, NvU32))
+setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20, 'bufferId', field(28, NvU16))
+setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20, 'bInitialize', field(30, NvU8))
+setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20, 'bNonmapped', field(31, NvU8))
+struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20.SIZE = 560
+struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20._fields_ = ['engineType', 'hClient', 'ChID', 'hChanClient', 'hObject', 'hVirtMemory', 'virtAddress', 'size', 'entryCount', 'promoteEntry']
+setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20, 'engineType', field(0, NvU32))
+setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20, 'hClient', field(4, NvHandle))
+setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20, 'ChID', field(8, NvU32))
+setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20, 'hChanClient', field(12, NvHandle))
+setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20, 'hObject', field(16, NvHandle))
+setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20, 'hVirtMemory', field(20, NvHandle))
+setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20, 'virtAddress', field(24, NvU64))
+setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20, 'size', field(32, NvU64))
+setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20, 'entryCount', field(40, NvU32))
+setattr(struct_NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20, 'promoteEntry', field(48, Array(NV2080_CTRL_GPU_PROMOTE_CTX_BUFFER_ENTRY_v1A_20, 16)))
+struct_rpc_ctrl_gpu_promote_ctx_v1A_20.SIZE = 568
+struct_rpc_ctrl_gpu_promote_ctx_v1A_20._fields_ = ['hClient', 'hObject', 'promoteCtx']
+setattr(struct_rpc_ctrl_gpu_promote_ctx_v1A_20, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_gpu_promote_ctx_v1A_20, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_gpu_promote_ctx_v1A_20, 'promoteCtx', field(8, NV2080_CTRL_GPU_PROMOTE_CTX_PARAMS_v1A_20))
 rpc_ctrl_gpu_promote_ctx_v1A_20 = struct_rpc_ctrl_gpu_promote_ctx_v1A_20
 rpc_ctrl_gpu_promote_ctx_v = struct_rpc_ctrl_gpu_promote_ctx_v1A_20
 class struct_rpc_ctrl_dbg_suspend_context_v1A_10(Struct): pass
 class struct_NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06(Struct): pass
 NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06 = struct_NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06
-struct_NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06._fields_ = [
-  ('waitForEvent', NvU32),
-  ('hResidentChannel', NvHandle),
-]
-struct_rpc_ctrl_dbg_suspend_context_v1A_10._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06),
-]
+struct_NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06.SIZE = 8
+struct_NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06._fields_ = ['waitForEvent', 'hResidentChannel']
+setattr(struct_NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06, 'waitForEvent', field(0, NvU32))
+setattr(struct_NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06, 'hResidentChannel', field(4, NvHandle))
+struct_rpc_ctrl_dbg_suspend_context_v1A_10.SIZE = 16
+struct_rpc_ctrl_dbg_suspend_context_v1A_10._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_dbg_suspend_context_v1A_10, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_dbg_suspend_context_v1A_10, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_dbg_suspend_context_v1A_10, 'ctrlParams', field(8, NV83DE_CTRL_CMD_DEBUG_SUSPEND_CONTEXT_PARAMS_v1A_06))
 rpc_ctrl_dbg_suspend_context_v1A_10 = struct_rpc_ctrl_dbg_suspend_context_v1A_10
 rpc_ctrl_dbg_suspend_context_v = struct_rpc_ctrl_dbg_suspend_context_v1A_10
 class struct_rpc_ctrl_dbg_resume_context_v1A_10(Struct): pass
-struct_rpc_ctrl_dbg_resume_context_v1A_10._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-]
+struct_rpc_ctrl_dbg_resume_context_v1A_10.SIZE = 8
+struct_rpc_ctrl_dbg_resume_context_v1A_10._fields_ = ['hClient', 'hObject']
+setattr(struct_rpc_ctrl_dbg_resume_context_v1A_10, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_dbg_resume_context_v1A_10, 'hObject', field(4, NvHandle))
 rpc_ctrl_dbg_resume_context_v1A_10 = struct_rpc_ctrl_dbg_resume_context_v1A_10
 rpc_ctrl_dbg_resume_context_v = struct_rpc_ctrl_dbg_resume_context_v1A_10
 class struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10(Struct): pass
 class struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06(Struct): pass
 NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06 = struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06
-struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06._fields_ = [
-  ('bNonTransactional', NvBool),
-  ('regOpCount', NvU32),
-  ('regOps', (NV2080_CTRL_GPU_REG_OP_v03_00 * 100)),
-]
-struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06),
-]
+struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06.SIZE = 3208
+struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06._fields_ = ['bNonTransactional', 'regOpCount', 'regOps']
+setattr(struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06, 'bNonTransactional', field(0, NvBool))
+setattr(struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06, 'regOpCount', field(4, NvU32))
+setattr(struct_NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06, 'regOps', field(8, Array(NV2080_CTRL_GPU_REG_OP_v03_00, 100)))
+struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10.SIZE = 3216
+struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10, 'ctrlParams', field(8, NV83DE_CTRL_DEBUG_EXEC_REG_OPS_PARAMS_v1A_06))
 rpc_ctrl_dbg_exec_reg_ops_v1A_10 = struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10
 rpc_ctrl_dbg_exec_reg_ops_v = struct_rpc_ctrl_dbg_exec_reg_ops_v1A_10
 class struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10(Struct): pass
 class struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06(Struct): pass
 NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06 = struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06
-struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06._fields_ = [
-  ('action', NvU32),
-]
-struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06),
-]
+struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06.SIZE = 4
+struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06._fields_ = ['action']
+setattr(struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06, 'action', field(0, NvU32))
+struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10.SIZE = 12
+struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10, 'ctrlParams', field(8, NV83DE_CTRL_DEBUG_SET_MODE_MMU_DEBUG_PARAMS_v1A_06))
 rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10 = struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10
 rpc_ctrl_dbg_set_mode_mmu_debug_v = struct_rpc_ctrl_dbg_set_mode_mmu_debug_v1A_10
 class struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07(Struct): pass
 class struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07(Struct): pass
 NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07 = struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07
-struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07._fields_ = [
-  ('action', NvU32),
-]
-struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07),
-]
+struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07.SIZE = 4
+struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07._fields_ = ['action']
+setattr(struct_NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07, 'action', field(0, NvU32))
+struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07.SIZE = 12
+struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07, 'ctrlParams', field(8, NV83DE_CTRL_DEBUG_SET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07))
 rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07 = struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07
 rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v = struct_rpc_ctrl_dbg_set_mode_mmu_gcc_debug_v29_07
 class struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06(Struct): pass
 class struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06(Struct): pass
 NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06 = struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06
-struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06._fields_ = [
-  ('hTargetChannel', NvHandle),
-  ('smID', NvU32),
-  ('smErrorState', NV83DE_SM_ERROR_STATE_REGISTERS_v21_06),
-]
-struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06),
-]
+struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06.SIZE = 56
+struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06._fields_ = ['hTargetChannel', 'smID', 'smErrorState']
+setattr(struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06, 'hTargetChannel', field(0, NvHandle))
+setattr(struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06, 'smID', field(4, NvU32))
+setattr(struct_NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06, 'smErrorState', field(8, NV83DE_SM_ERROR_STATE_REGISTERS_v21_06))
+struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06.SIZE = 64
+struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06, 'ctrlParams', field(8, NV83DE_CTRL_DEBUG_READ_SINGLE_SM_ERROR_STATE_PARAMS_v21_06))
 rpc_ctrl_dbg_read_single_sm_error_state_v21_06 = struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06
 rpc_ctrl_dbg_read_single_sm_error_state_v = struct_rpc_ctrl_dbg_read_single_sm_error_state_v21_06
 class struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10(Struct): pass
 class struct_NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06(Struct): pass
 NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06 = struct_NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06
-struct_NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06._fields_ = [
-  ('hTargetChannel', NvHandle),
-  ('smID', NvU32),
-]
-struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06),
-]
+struct_NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06.SIZE = 8
+struct_NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06._fields_ = ['hTargetChannel', 'smID']
+setattr(struct_NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06, 'hTargetChannel', field(0, NvHandle))
+setattr(struct_NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06, 'smID', field(4, NvU32))
+struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10.SIZE = 16
+struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10, 'ctrlParams', field(8, NV83DE_CTRL_DEBUG_CLEAR_SINGLE_SM_ERROR_STATE_PARAMS_v1A_06))
 rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10 = struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10
 rpc_ctrl_dbg_clear_single_sm_error_state_v = struct_rpc_ctrl_dbg_clear_single_sm_error_state_v1A_10
 class struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10(Struct): pass
 class struct_NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06(Struct): pass
 NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06 = struct_NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06
-struct_NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06._fields_ = [
-  ('action', NvU32),
-]
-struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06),
-]
+struct_NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06.SIZE = 4
+struct_NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06._fields_ = ['action']
+setattr(struct_NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06, 'action', field(0, NvU32))
+struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10.SIZE = 12
+struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10, 'ctrlParams', field(8, NV83DE_CTRL_DEBUG_SET_MODE_ERRBAR_DEBUG_PARAMS_v1A_06))
 rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10 = struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10
 rpc_ctrl_dbg_set_mode_errbar_debug_v = struct_rpc_ctrl_dbg_set_mode_errbar_debug_v1A_10
 class struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10(Struct): pass
 class struct_NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06(Struct): pass
 NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06 = struct_NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06
-struct_NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06._fields_ = [
-  ('stopTriggerType', NvU32),
-]
-struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06),
-]
+struct_NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06.SIZE = 4
+struct_NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06._fields_ = ['stopTriggerType']
+setattr(struct_NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06, 'stopTriggerType', field(0, NvU32))
+struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10.SIZE = 12
+struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10, 'ctrlParams', field(8, NV83DE_CTRL_DEBUG_SET_NEXT_STOP_TRIGGER_TYPE_PARAMS_v1A_06))
 rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10 = struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10
 rpc_ctrl_dbg_set_next_stop_trigger_type_v = struct_rpc_ctrl_dbg_set_next_stop_trigger_type_v1A_10
 class struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E(Struct): pass
 class struct_NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00(Struct): pass
 NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00 = struct_NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00
-struct_NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00._fields_ = [
-  ('hVASpace', NvHandle),
-]
-struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00),
-]
+struct_NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00.SIZE = 4
+struct_NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00._fields_ = ['hVASpace']
+setattr(struct_NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00, 'hVASpace', field(0, NvHandle))
+struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E.SIZE = 12
+struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E, 'ctrlParams', field(8, NV0080_CTRL_DMA_SET_DEFAULT_VASPACE_PARAMS_v03_00))
 rpc_ctrl_dma_set_default_vaspace_v1A_0E = struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E
 rpc_ctrl_dma_set_default_vaspace_v = struct_rpc_ctrl_dma_set_default_vaspace_v1A_0E
 class struct_rpc_ctrl_get_ce_pce_mask_v1A_0E(Struct): pass
 class struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07(Struct): pass
 NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07 = struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07
-struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07._fields_ = [
-  ('ceEngineType', NvU32),
-  ('pceMask', NvU32),
-]
-struct_rpc_ctrl_get_ce_pce_mask_v1A_0E._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07),
-]
+struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07.SIZE = 8
+struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07._fields_ = ['ceEngineType', 'pceMask']
+setattr(struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07, 'ceEngineType', field(0, NvU32))
+setattr(struct_NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07, 'pceMask', field(4, NvU32))
+struct_rpc_ctrl_get_ce_pce_mask_v1A_0E.SIZE = 16
+struct_rpc_ctrl_get_ce_pce_mask_v1A_0E._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_get_ce_pce_mask_v1A_0E, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_get_ce_pce_mask_v1A_0E, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_get_ce_pce_mask_v1A_0E, 'ctrlParams', field(8, NV2080_CTRL_CE_GET_CE_PCE_MASK_PARAMS_v1A_07))
 rpc_ctrl_get_ce_pce_mask_v1A_0E = struct_rpc_ctrl_get_ce_pce_mask_v1A_0E
 rpc_ctrl_get_ce_pce_mask_v = struct_rpc_ctrl_get_ce_pce_mask_v1A_0E
 class struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E(Struct): pass
@@ -2282,12 +2253,12 @@ class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07(Struct): pass
 NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07 = struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07
 class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07(Struct): pass
 NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07 = struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07
-struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07._fields_ = [
-  ('colorFB', (NvU32 * 4)),
-  ('colorDS', (NvU32 * 4)),
-  ('depth', NvU32),
-  ('stencil', NvU32),
-]
+struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07.SIZE = 40
+struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07._fields_ = ['colorFB', 'colorDS', 'depth', 'stencil']
+setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07, 'colorFB', field(0, Array(NvU32, 4)))
+setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07, 'colorDS', field(16, Array(NvU32, 4)))
+setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07, 'depth', field(32, NvU32))
+setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07, 'stencil', field(36, NvU32))
 enum_NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE = CEnum(ctypes.c_uint32)
 NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_INVALID = enum_NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE.define('NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_INVALID', 0)
 NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_COLOR = enum_NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE.define('NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_COLOR', 1)
@@ -2296,18 +2267,18 @@ NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_STENCIL = enum_NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE
 NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_COUNT = enum_NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE.define('NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE_COUNT', 4)
 
 NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE = enum_NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE
-struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07._fields_ = [
-  ('value', NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07),
-  ('format', NvU32),
-  ('index', NvU32),
-  ('bIndexValid', NvBool),
-  ('tableType', NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE),
-]
-struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07),
-]
+struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07.SIZE = 56
+struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07._fields_ = ['value', 'format', 'index', 'bIndexValid', 'tableType']
+setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07, 'value', field(0, NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07))
+setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07, 'format', field(40, NvU32))
+setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07, 'index', field(44, NvU32))
+setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07, 'bIndexValid', field(48, NvBool))
+setattr(struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07, 'tableType', field(52, NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE))
+struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E.SIZE = 64
+struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E, 'ctrlParams', field(8, NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07))
 rpc_ctrl_get_zbc_clear_table_entry_v1A_0E = struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E
 rpc_ctrl_get_zbc_clear_table_entry_v = struct_rpc_ctrl_get_zbc_clear_table_entry_v1A_0E
 class struct_rpc_ctrl_get_nvlink_status_v23_04(Struct): pass
@@ -2317,43 +2288,43 @@ class struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D(Struct): pass
 NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D = struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D
 class struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02(Struct): pass
 NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02 = struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02
-struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02._fields_ = [
-  ('deviceIdFlags', NvU32),
-  ('domain', NvU32),
-  ('bus', NvU16),
-  ('device', NvU16),
-  ('function', NvU16),
-  ('pciDeviceId', NvU32),
-  ('deviceType', NvU64),
-  ('deviceUUID', (NvU8 * 16)),
-]
-struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D._fields_ = [
-  ('capsTbl', NvU32),
-  ('phyType', NvU8),
-  ('subLinkWidth', NvU8),
-  ('linkState', NvU32),
-  ('rxSublinkStatus', NvU8),
-  ('txSublinkStatus', NvU8),
-  ('nvlinkVersion', NvU8),
-  ('nciVersion', NvU8),
-  ('phyVersion', NvU8),
-  ('nvlinkLinkClockKHz', NvU32),
-  ('nvlinkLineRateMbps', NvU32),
-  ('connected', NvBool),
-  ('remoteDeviceLinkNumber', NvU8),
-  ('localDeviceLinkNumber', NvU8),
-  ('remoteDeviceInfo', NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02),
-  ('localDeviceInfo', NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02),
-]
-struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04._fields_ = [
-  ('enabledLinkMask', NvU32),
-  ('linkInfo', (NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D * 24)),
-]
-struct_rpc_ctrl_get_nvlink_status_v23_04._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04),
-]
+struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02.SIZE = 48
+struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02._fields_ = ['deviceIdFlags', 'domain', 'bus', 'device', 'function', 'pciDeviceId', 'deviceType', 'deviceUUID']
+setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02, 'deviceIdFlags', field(0, NvU32))
+setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02, 'domain', field(4, NvU32))
+setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02, 'bus', field(8, NvU16))
+setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02, 'device', field(10, NvU16))
+setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02, 'function', field(12, NvU16))
+setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02, 'pciDeviceId', field(16, NvU32))
+setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02, 'deviceType', field(24, NvU64))
+setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02, 'deviceUUID', field(32, Array(NvU8, 16)))
+struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D.SIZE = 128
+struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D._fields_ = ['capsTbl', 'phyType', 'subLinkWidth', 'linkState', 'rxSublinkStatus', 'txSublinkStatus', 'nvlinkVersion', 'nciVersion', 'phyVersion', 'nvlinkLinkClockKHz', 'nvlinkLineRateMbps', 'connected', 'remoteDeviceLinkNumber', 'localDeviceLinkNumber', 'remoteDeviceInfo', 'localDeviceInfo']
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'capsTbl', field(0, NvU32))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'phyType', field(4, NvU8))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'subLinkWidth', field(5, NvU8))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'linkState', field(8, NvU32))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'rxSublinkStatus', field(12, NvU8))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'txSublinkStatus', field(13, NvU8))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'nvlinkVersion', field(14, NvU8))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'nciVersion', field(15, NvU8))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'phyVersion', field(16, NvU8))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'nvlinkLinkClockKHz', field(20, NvU32))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'nvlinkLineRateMbps', field(24, NvU32))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'connected', field(28, NvBool))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'remoteDeviceLinkNumber', field(29, NvU8))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'localDeviceLinkNumber', field(30, NvU8))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'remoteDeviceInfo', field(32, NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 'localDeviceInfo', field(80, NV2080_CTRL_NVLINK_DEVICE_INFO_v15_02))
+struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04.SIZE = 3080
+struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04._fields_ = ['enabledLinkMask', 'linkInfo']
+setattr(struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04, 'enabledLinkMask', field(0, NvU32))
+setattr(struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04, 'linkInfo', field(8, Array(NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v18_0D, 24)))
+struct_rpc_ctrl_get_nvlink_status_v23_04.SIZE = 3088
+struct_rpc_ctrl_get_nvlink_status_v23_04._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_get_nvlink_status_v23_04, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_get_nvlink_status_v23_04, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_get_nvlink_status_v23_04, 'ctrlParams', field(8, NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v23_04))
 rpc_ctrl_get_nvlink_status_v23_04 = struct_rpc_ctrl_get_nvlink_status_v23_04
 class struct_rpc_ctrl_get_nvlink_status_v28_09(Struct): pass
 class struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09(Struct): pass
@@ -2362,62 +2333,62 @@ class struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09(Struct): pass
 NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09 = struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09
 class struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09(Struct): pass
 NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09 = struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09
-struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09._fields_ = [
-  ('deviceIdFlags', NvU32),
-  ('domain', NvU32),
-  ('bus', NvU16),
-  ('device', NvU16),
-  ('function', NvU16),
-  ('pciDeviceId', NvU32),
-  ('deviceType', NvU64),
-  ('deviceUUID', (NvU8 * 16)),
-  ('fabricRecoveryStatusMask', NvU32),
-]
-struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09._fields_ = [
-  ('capsTbl', NvU32),
-  ('phyType', NvU8),
-  ('subLinkWidth', NvU8),
-  ('linkState', NvU32),
-  ('rxSublinkStatus', NvU8),
-  ('txSublinkStatus', NvU8),
-  ('nvlinkVersion', NvU8),
-  ('nciVersion', NvU8),
-  ('phyVersion', NvU8),
-  ('nvlinkLinkClockKHz', NvU32),
-  ('nvlinkLineRateMbps', NvU32),
-  ('connected', NvBool),
-  ('remoteDeviceLinkNumber', NvU8),
-  ('localDeviceLinkNumber', NvU8),
-  ('remoteDeviceInfo', NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09),
-  ('localDeviceInfo', NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09),
-]
-struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09._fields_ = [
-  ('enabledLinkMask', NvU32),
-  ('linkInfo', (NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09 * 24)),
-]
-struct_rpc_ctrl_get_nvlink_status_v28_09._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09),
-]
+struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09.SIZE = 56
+struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09._fields_ = ['deviceIdFlags', 'domain', 'bus', 'device', 'function', 'pciDeviceId', 'deviceType', 'deviceUUID', 'fabricRecoveryStatusMask']
+setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09, 'deviceIdFlags', field(0, NvU32))
+setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09, 'domain', field(4, NvU32))
+setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09, 'bus', field(8, NvU16))
+setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09, 'device', field(10, NvU16))
+setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09, 'function', field(12, NvU16))
+setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09, 'pciDeviceId', field(16, NvU32))
+setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09, 'deviceType', field(24, NvU64))
+setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09, 'deviceUUID', field(32, Array(NvU8, 16)))
+setattr(struct_NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09, 'fabricRecoveryStatusMask', field(48, NvU32))
+struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09.SIZE = 144
+struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09._fields_ = ['capsTbl', 'phyType', 'subLinkWidth', 'linkState', 'rxSublinkStatus', 'txSublinkStatus', 'nvlinkVersion', 'nciVersion', 'phyVersion', 'nvlinkLinkClockKHz', 'nvlinkLineRateMbps', 'connected', 'remoteDeviceLinkNumber', 'localDeviceLinkNumber', 'remoteDeviceInfo', 'localDeviceInfo']
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'capsTbl', field(0, NvU32))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'phyType', field(4, NvU8))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'subLinkWidth', field(5, NvU8))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'linkState', field(8, NvU32))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'rxSublinkStatus', field(12, NvU8))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'txSublinkStatus', field(13, NvU8))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'nvlinkVersion', field(14, NvU8))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'nciVersion', field(15, NvU8))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'phyVersion', field(16, NvU8))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'nvlinkLinkClockKHz', field(20, NvU32))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'nvlinkLineRateMbps', field(24, NvU32))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'connected', field(28, NvBool))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'remoteDeviceLinkNumber', field(29, NvU8))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'localDeviceLinkNumber', field(30, NvU8))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'remoteDeviceInfo', field(32, NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09))
+setattr(struct_NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 'localDeviceInfo', field(88, NV2080_CTRL_NVLINK_DEVICE_INFO_v28_09))
+struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09.SIZE = 3464
+struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09._fields_ = ['enabledLinkMask', 'linkInfo']
+setattr(struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09, 'enabledLinkMask', field(0, NvU32))
+setattr(struct_NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09, 'linkInfo', field(8, Array(NV2080_CTRL_NVLINK_LINK_STATUS_INFO_v28_09, 24)))
+struct_rpc_ctrl_get_nvlink_status_v28_09.SIZE = 3472
+struct_rpc_ctrl_get_nvlink_status_v28_09._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_get_nvlink_status_v28_09, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_get_nvlink_status_v28_09, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_get_nvlink_status_v28_09, 'ctrlParams', field(8, NV2080_CTRL_CMD_NVLINK_GET_NVLINK_STATUS_PARAMS_v28_09))
 rpc_ctrl_get_nvlink_status_v28_09 = struct_rpc_ctrl_get_nvlink_status_v28_09
 rpc_ctrl_get_nvlink_status_v = struct_rpc_ctrl_get_nvlink_status_v28_09
 class struct_rpc_ctrl_get_p2p_caps_v1F_0D(Struct): pass
 class struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D(Struct): pass
 NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D = struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D
-struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D._fields_ = [
-  ('gpuIds', (NvU32 * 32)),
-  ('gpuCount', NvU32),
-  ('p2pCaps', NvU32),
-  ('p2pOptimalReadCEs', NvU32),
-  ('p2pOptimalWriteCEs', NvU32),
-  ('p2pCapsStatus', (NvU8 * 9)),
-]
-struct_rpc_ctrl_get_p2p_caps_v1F_0D._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D),
-]
+struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D.SIZE = 156
+struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D._fields_ = ['gpuIds', 'gpuCount', 'p2pCaps', 'p2pOptimalReadCEs', 'p2pOptimalWriteCEs', 'p2pCapsStatus']
+setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D, 'gpuIds', field(0, Array(NvU32, 32)))
+setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D, 'gpuCount', field(128, NvU32))
+setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D, 'p2pCaps', field(132, NvU32))
+setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D, 'p2pOptimalReadCEs', field(136, NvU32))
+setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D, 'p2pOptimalWriteCEs', field(140, NvU32))
+setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D, 'p2pCapsStatus', field(144, Array(NvU8, 9)))
+struct_rpc_ctrl_get_p2p_caps_v1F_0D.SIZE = 164
+struct_rpc_ctrl_get_p2p_caps_v1F_0D._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_get_p2p_caps_v1F_0D, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_get_p2p_caps_v1F_0D, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_get_p2p_caps_v1F_0D, 'ctrlParams', field(8, NV0000_CTRL_SYSTEM_GET_P2P_CAPS_PARAMS_v1F_0D))
 rpc_ctrl_get_p2p_caps_v1F_0D = struct_rpc_ctrl_get_p2p_caps_v1F_0D
 rpc_ctrl_get_p2p_caps_v = struct_rpc_ctrl_get_p2p_caps_v1F_0D
 class struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E(Struct): pass
@@ -2425,51 +2396,51 @@ class struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A(Struct): pass
 NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A = struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A
 class struct_NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A(Struct): pass
 NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A = struct_NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A
-struct_NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A._fields_ = [
-  ('array', (NvU32 * 8)),
-]
-struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A._fields_ = [
-  ('grpACount', NvU32),
-  ('grpBCount', NvU32),
-  ('gpuIdGrpA', (NvU32 * 8)),
-  ('gpuIdGrpB', (NvU32 * 8)),
-  ('p2pCaps', (NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A * 8)),
-  ('a2bOptimalReadCes', (NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A * 8)),
-  ('a2bOptimalWriteCes', (NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A * 8)),
-  ('b2aOptimalReadCes', (NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A * 8)),
-  ('b2aOptimalWriteCes', (NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A * 8)),
-]
-struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A),
-]
+struct_NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A.SIZE = 32
+struct_NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A._fields_ = ['array']
+setattr(struct_NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A, 'array', field(0, Array(NvU32, 8)))
+struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A.SIZE = 1352
+struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A._fields_ = ['grpACount', 'grpBCount', 'gpuIdGrpA', 'gpuIdGrpB', 'p2pCaps', 'a2bOptimalReadCes', 'a2bOptimalWriteCes', 'b2aOptimalReadCes', 'b2aOptimalWriteCes']
+setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A, 'grpACount', field(0, NvU32))
+setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A, 'grpBCount', field(4, NvU32))
+setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A, 'gpuIdGrpA', field(8, Array(NvU32, 8)))
+setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A, 'gpuIdGrpB', field(40, Array(NvU32, 8)))
+setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A, 'p2pCaps', field(72, Array(NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A, 8)))
+setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A, 'a2bOptimalReadCes', field(328, Array(NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A, 8)))
+setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A, 'a2bOptimalWriteCes', field(584, Array(NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A, 8)))
+setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A, 'b2aOptimalReadCes', field(840, Array(NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A, 8)))
+setattr(struct_NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A, 'b2aOptimalWriteCes', field(1096, Array(NV0000_CTRL_P2P_CAPS_MATRIX_ROW_v18_0A, 8)))
+struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E.SIZE = 1360
+struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E, 'ctrlParams', field(8, NV0000_CTRL_SYSTEM_GET_P2P_CAPS_MATRIX_PARAMS_v18_0A))
 rpc_ctrl_get_p2p_caps_matrix_v1A_0E = struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E
 rpc_ctrl_get_p2p_caps_matrix_v = struct_rpc_ctrl_get_p2p_caps_matrix_v1A_0E
 class struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F(Struct): pass
 class struct_NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F(Struct): pass
 NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F = struct_NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F
-struct_NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F._fields_ = [
-  ('ctxsw', NvBool),
-]
-struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F),
-]
+struct_NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F.SIZE = 1
+struct_NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F._fields_ = ['ctxsw']
+setattr(struct_NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F, 'ctxsw', field(0, NvBool))
+struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F.SIZE = 12
+struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F, 'params', field(8, NVB0CC_CTRL_RESERVE_PM_AREA_SMPC_PARAMS_v1A_0F))
 rpc_ctrl_reserve_pm_area_smpc_v1A_0F = struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F
 rpc_ctrl_reserve_pm_area_smpc_v = struct_rpc_ctrl_reserve_pm_area_smpc_v1A_0F
 class struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F(Struct): pass
 class struct_NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F(Struct): pass
 NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F = struct_NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F
-struct_NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F._fields_ = [
-  ('ctxsw', NvBool),
-]
-struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F),
-]
+struct_NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F.SIZE = 1
+struct_NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F._fields_ = ['ctxsw']
+setattr(struct_NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F, 'ctxsw', field(0, NvBool))
+struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F.SIZE = 12
+struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F, 'params', field(8, NVB0CC_CTRL_RESERVE_HWPM_LEGACY_PARAMS_v1A_0F))
 rpc_ctrl_reserve_hwpm_legacy_v1A_0F = struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F
 rpc_ctrl_reserve_hwpm_legacy_v = struct_rpc_ctrl_reserve_hwpm_legacy_v1A_0F
 class struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F(Struct): pass
@@ -2480,64 +2451,64 @@ NVB0CC_REGOPS_MODE_ALL_OR_NONE = enum_NVB0CC_REGOPS_MODE.define('NVB0CC_REGOPS_M
 NVB0CC_REGOPS_MODE_CONTINUE_ON_ERROR = enum_NVB0CC_REGOPS_MODE.define('NVB0CC_REGOPS_MODE_CONTINUE_ON_ERROR', 1)
 
 NVB0CC_REGOPS_MODE = enum_NVB0CC_REGOPS_MODE
-struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F._fields_ = [
-  ('regOpCount', NvU32),
-  ('mode', NVB0CC_REGOPS_MODE),
-  ('bPassed', NvBool),
-  ('bDirect', NvBool),
-  ('regOps', (NV2080_CTRL_GPU_REG_OP_v03_00 * 124)),
-]
-struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F),
-]
+struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F.SIZE = 3980
+struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F._fields_ = ['regOpCount', 'mode', 'bPassed', 'bDirect', 'regOps']
+setattr(struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F, 'regOpCount', field(0, NvU32))
+setattr(struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F, 'mode', field(4, NVB0CC_REGOPS_MODE))
+setattr(struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F, 'bPassed', field(8, NvBool))
+setattr(struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F, 'bDirect', field(9, NvBool))
+setattr(struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F, 'regOps', field(12, Array(NV2080_CTRL_GPU_REG_OP_v03_00, 124)))
+struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F.SIZE = 3988
+struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F, 'params', field(8, NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F))
 rpc_ctrl_b0cc_exec_reg_ops_v1A_0F = struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F
 rpc_ctrl_b0cc_exec_reg_ops_v = struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F
 class struct_rpc_ctrl_bind_pm_resources_v1A_0F(Struct): pass
-struct_rpc_ctrl_bind_pm_resources_v1A_0F._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-]
+struct_rpc_ctrl_bind_pm_resources_v1A_0F.SIZE = 8
+struct_rpc_ctrl_bind_pm_resources_v1A_0F._fields_ = ['hClient', 'hObject']
+setattr(struct_rpc_ctrl_bind_pm_resources_v1A_0F, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_bind_pm_resources_v1A_0F, 'hObject', field(4, NvHandle))
 rpc_ctrl_bind_pm_resources_v1A_0F = struct_rpc_ctrl_bind_pm_resources_v1A_0F
 rpc_ctrl_bind_pm_resources_v = struct_rpc_ctrl_bind_pm_resources_v1A_0F
 class struct_rpc_ctrl_alloc_pma_stream_v1A_14(Struct): pass
 class struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14(Struct): pass
 NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14 = struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14
-struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14._fields_ = [
-  ('hMemPmaBuffer', NvHandle),
-  ('pmaBufferOffset', NvU64),
-  ('pmaBufferSize', NvU64),
-  ('hMemPmaBytesAvailable', NvHandle),
-  ('pmaBytesAvailableOffset', NvU64),
-  ('ctxsw', NvBool),
-  ('pmaChannelIdx', NvU32),
-  ('pmaBufferVA', NvU64),
-]
-struct_rpc_ctrl_alloc_pma_stream_v1A_14._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14),
-]
+struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14.SIZE = 56
+struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14._fields_ = ['hMemPmaBuffer', 'pmaBufferOffset', 'pmaBufferSize', 'hMemPmaBytesAvailable', 'pmaBytesAvailableOffset', 'ctxsw', 'pmaChannelIdx', 'pmaBufferVA']
+setattr(struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14, 'hMemPmaBuffer', field(0, NvHandle))
+setattr(struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14, 'pmaBufferOffset', field(8, NvU64))
+setattr(struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14, 'pmaBufferSize', field(16, NvU64))
+setattr(struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14, 'hMemPmaBytesAvailable', field(24, NvHandle))
+setattr(struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14, 'pmaBytesAvailableOffset', field(32, NvU64))
+setattr(struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14, 'ctxsw', field(40, NvBool))
+setattr(struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14, 'pmaChannelIdx', field(44, NvU32))
+setattr(struct_NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14, 'pmaBufferVA', field(48, NvU64))
+struct_rpc_ctrl_alloc_pma_stream_v1A_14.SIZE = 64
+struct_rpc_ctrl_alloc_pma_stream_v1A_14._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_alloc_pma_stream_v1A_14, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_alloc_pma_stream_v1A_14, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_alloc_pma_stream_v1A_14, 'params', field(8, NVB0CC_CTRL_ALLOC_PMA_STREAM_PARAMS_v1A_14))
 rpc_ctrl_alloc_pma_stream_v1A_14 = struct_rpc_ctrl_alloc_pma_stream_v1A_14
 rpc_ctrl_alloc_pma_stream_v = struct_rpc_ctrl_alloc_pma_stream_v1A_14
 class struct_rpc_ctrl_pma_stream_update_get_put_v1A_14(Struct): pass
 class struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14(Struct): pass
 NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14 = struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14
-struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14._fields_ = [
-  ('bytesConsumed', NvU64),
-  ('bUpdateAvailableBytes', NvBool),
-  ('bWait', NvBool),
-  ('bytesAvailable', NvU64),
-  ('bReturnPut', NvBool),
-  ('putPtr', NvU64),
-  ('pmaChannelIdx', NvU32),
-]
-struct_rpc_ctrl_pma_stream_update_get_put_v1A_14._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14),
-]
+struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14.SIZE = 48
+struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14._fields_ = ['bytesConsumed', 'bUpdateAvailableBytes', 'bWait', 'bytesAvailable', 'bReturnPut', 'putPtr', 'pmaChannelIdx']
+setattr(struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14, 'bytesConsumed', field(0, NvU64))
+setattr(struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14, 'bUpdateAvailableBytes', field(8, NvBool))
+setattr(struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14, 'bWait', field(9, NvBool))
+setattr(struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14, 'bytesAvailable', field(16, NvU64))
+setattr(struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14, 'bReturnPut', field(24, NvBool))
+setattr(struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14, 'putPtr', field(32, NvU64))
+setattr(struct_NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14, 'pmaChannelIdx', field(40, NvU32))
+struct_rpc_ctrl_pma_stream_update_get_put_v1A_14.SIZE = 56
+struct_rpc_ctrl_pma_stream_update_get_put_v1A_14._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_pma_stream_update_get_put_v1A_14, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_pma_stream_update_get_put_v1A_14, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_pma_stream_update_get_put_v1A_14, 'params', field(8, NVB0CC_CTRL_PMA_STREAM_UPDATE_GET_PUT_PARAMS_v1A_14))
 rpc_ctrl_pma_stream_update_get_put_v1A_14 = struct_rpc_ctrl_pma_stream_update_get_put_v1A_14
 rpc_ctrl_pma_stream_update_get_put_v = struct_rpc_ctrl_pma_stream_update_get_put_v1A_14
 class struct_rpc_ctrl_fb_get_info_v2_v25_0A(Struct): pass
@@ -2545,64 +2516,64 @@ class struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A(Struct): pass
 NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A = struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A
 class struct_NV2080_CTRL_FB_INFO_v1A_15(Struct): pass
 NV2080_CTRL_FB_INFO_v1A_15 = struct_NV2080_CTRL_FB_INFO_v1A_15
-struct_NV2080_CTRL_FB_INFO_v1A_15._fields_ = [
-  ('index', NvU32),
-  ('data', NvU32),
-]
-struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A._fields_ = [
-  ('fbInfoListSize', NvU32),
-  ('fbInfoList', (NV2080_CTRL_FB_INFO_v1A_15 * 55)),
-]
-struct_rpc_ctrl_fb_get_info_v2_v25_0A._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A),
-]
+struct_NV2080_CTRL_FB_INFO_v1A_15.SIZE = 8
+struct_NV2080_CTRL_FB_INFO_v1A_15._fields_ = ['index', 'data']
+setattr(struct_NV2080_CTRL_FB_INFO_v1A_15, 'index', field(0, NvU32))
+setattr(struct_NV2080_CTRL_FB_INFO_v1A_15, 'data', field(4, NvU32))
+struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A.SIZE = 444
+struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A._fields_ = ['fbInfoListSize', 'fbInfoList']
+setattr(struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A, 'fbInfoListSize', field(0, NvU32))
+setattr(struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A, 'fbInfoList', field(4, Array(NV2080_CTRL_FB_INFO_v1A_15, 55)))
+struct_rpc_ctrl_fb_get_info_v2_v25_0A.SIZE = 452
+struct_rpc_ctrl_fb_get_info_v2_v25_0A._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_fb_get_info_v2_v25_0A, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_fb_get_info_v2_v25_0A, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_fb_get_info_v2_v25_0A, 'ctrlParams', field(8, NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v25_0A))
 rpc_ctrl_fb_get_info_v2_v25_0A = struct_rpc_ctrl_fb_get_info_v2_v25_0A
 class struct_rpc_ctrl_fb_get_info_v2_v27_00(Struct): pass
 class struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00(Struct): pass
 NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00 = struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00
-struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00._fields_ = [
-  ('fbInfoListSize', NvU32),
-  ('fbInfoList', (NV2080_CTRL_FB_INFO_v1A_15 * 57)),
-]
-struct_rpc_ctrl_fb_get_info_v2_v27_00._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00),
-]
+struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00.SIZE = 460
+struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00._fields_ = ['fbInfoListSize', 'fbInfoList']
+setattr(struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00, 'fbInfoListSize', field(0, NvU32))
+setattr(struct_NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00, 'fbInfoList', field(4, Array(NV2080_CTRL_FB_INFO_v1A_15, 57)))
+struct_rpc_ctrl_fb_get_info_v2_v27_00.SIZE = 468
+struct_rpc_ctrl_fb_get_info_v2_v27_00._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_fb_get_info_v2_v27_00, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_fb_get_info_v2_v27_00, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_fb_get_info_v2_v27_00, 'ctrlParams', field(8, NV2080_CTRL_FB_GET_INFO_V2_PARAMS_v27_00))
 rpc_ctrl_fb_get_info_v2_v27_00 = struct_rpc_ctrl_fb_get_info_v2_v27_00
 rpc_ctrl_fb_get_info_v2_v = struct_rpc_ctrl_fb_get_info_v2_v27_00
 class struct_rpc_ctrl_fifo_set_channel_properties_v1A_16(Struct): pass
 class struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00(Struct): pass
 NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00 = struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00
-struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00._fields_ = [
-  ('hChannel', NvHandle),
-  ('property', NvU32),
-  ('value', NvU64),
-]
-struct_rpc_ctrl_fifo_set_channel_properties_v1A_16._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00),
-]
+struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00.SIZE = 16
+struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00._fields_ = ['hChannel', 'property', 'value']
+setattr(struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00, 'hChannel', field(0, NvHandle))
+setattr(struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00, 'property', field(4, NvU32))
+setattr(struct_NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00, 'value', field(8, NvU64))
+struct_rpc_ctrl_fifo_set_channel_properties_v1A_16.SIZE = 24
+struct_rpc_ctrl_fifo_set_channel_properties_v1A_16._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_fifo_set_channel_properties_v1A_16, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_fifo_set_channel_properties_v1A_16, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_fifo_set_channel_properties_v1A_16, 'ctrlParams', field(8, NV0080_CTRL_FIFO_SET_CHANNEL_PROPERTIES_PARAMS_v03_00))
 rpc_ctrl_fifo_set_channel_properties_v1A_16 = struct_rpc_ctrl_fifo_set_channel_properties_v1A_16
 rpc_ctrl_fifo_set_channel_properties_v = struct_rpc_ctrl_fifo_set_channel_properties_v1A_16
 class struct_rpc_ctrl_gpu_evict_ctx_v1A_1C(Struct): pass
 class struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00(Struct): pass
 NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00 = struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00
-struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00._fields_ = [
-  ('engineType', NvU32),
-  ('hClient', NvHandle),
-  ('ChID', NvU32),
-  ('hChanClient', NvHandle),
-  ('hObject', NvHandle),
-]
-struct_rpc_ctrl_gpu_evict_ctx_v1A_1C._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00),
-]
+struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00.SIZE = 20
+struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00._fields_ = ['engineType', 'hClient', 'ChID', 'hChanClient', 'hObject']
+setattr(struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00, 'engineType', field(0, NvU32))
+setattr(struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00, 'hClient', field(4, NvHandle))
+setattr(struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00, 'ChID', field(8, NvU32))
+setattr(struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00, 'hChanClient', field(12, NvHandle))
+setattr(struct_NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00, 'hObject', field(16, NvHandle))
+struct_rpc_ctrl_gpu_evict_ctx_v1A_1C.SIZE = 28
+struct_rpc_ctrl_gpu_evict_ctx_v1A_1C._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_gpu_evict_ctx_v1A_1C, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_gpu_evict_ctx_v1A_1C, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_gpu_evict_ctx_v1A_1C, 'params', field(8, NV2080_CTRL_GPU_EVICT_CTX_PARAMS_v03_00))
 rpc_ctrl_gpu_evict_ctx_v1A_1C = struct_rpc_ctrl_gpu_evict_ctx_v1A_1C
 rpc_ctrl_gpu_evict_ctx_v = struct_rpc_ctrl_gpu_evict_ctx_v1A_1C
 class struct_rpc_ctrl_fb_get_fs_info_v24_00(Struct): pass
@@ -2610,189 +2581,189 @@ class struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00(Struct): pass
 NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00 = struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00
 class struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D(Struct): pass
 NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D
-class union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D(ctypes.Union): pass
+class union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D(Union): pass
 NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D = union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D
 class struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D
-struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D._fields_ = [
-  ('data', (NvU8 * 24)),
-]
+struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D.SIZE = 24
+struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D._fields_ = ['data']
+setattr(struct_NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D, 'data', field(0, Array(NvU8, 24)))
 class struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D._fields_ = [
-  ('swizzId', NvU32),
-  ('fbpEnMask', NvU64),
-]
+struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D.SIZE = 16
+struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D._fields_ = ['swizzId', 'fbpEnMask']
+setattr(struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D, 'swizzId', field(0, NvU32))
+setattr(struct_NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D, 'fbpEnMask', field(8, NvU64))
 class struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D._fields_ = [
-  ('fbpIndex', NvU32),
-  ('ltcEnMask', NvU32),
-]
+struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D.SIZE = 8
+struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D._fields_ = ['fbpIndex', 'ltcEnMask']
+setattr(struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D, 'fbpIndex', field(0, NvU32))
+setattr(struct_NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D, 'ltcEnMask', field(4, NvU32))
 class struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D._fields_ = [
-  ('fbpIndex', NvU32),
-  ('ltsEnMask', NvU32),
-]
+struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D.SIZE = 8
+struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D._fields_ = ['fbpIndex', 'ltsEnMask']
+setattr(struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D, 'fbpIndex', field(0, NvU32))
+setattr(struct_NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D, 'ltsEnMask', field(4, NvU32))
 class struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D._fields_ = [
-  ('fbpIndex', NvU32),
-  ('fbpaEnMask', NvU32),
-]
+struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D.SIZE = 8
+struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D._fields_ = ['fbpIndex', 'fbpaEnMask']
+setattr(struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D, 'fbpIndex', field(0, NvU32))
+setattr(struct_NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D, 'fbpaEnMask', field(4, NvU32))
 class struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D._fields_ = [
-  ('fbpIndex', NvU32),
-  ('ropEnMask', NvU32),
-]
+struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D.SIZE = 8
+struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D._fields_ = ['fbpIndex', 'ropEnMask']
+setattr(struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D, 'fbpIndex', field(0, NvU32))
+setattr(struct_NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D, 'ropEnMask', field(4, NvU32))
 class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D._fields_ = [
-  ('fbpIndex', NvU32),
-  ('swizzId', NvU32),
-  ('ltcEnMask', NvU32),
-]
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D.SIZE = 12
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D._fields_ = ['fbpIndex', 'swizzId', 'ltcEnMask']
+setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D, 'fbpIndex', field(0, NvU32))
+setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D, 'swizzId', field(4, NvU32))
+setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D, 'ltcEnMask', field(8, NvU32))
 class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D._fields_ = [
-  ('fbpIndex', NvU32),
-  ('swizzId', NvU32),
-  ('ltsEnMask', NvU32),
-]
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D.SIZE = 12
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D._fields_ = ['fbpIndex', 'swizzId', 'ltsEnMask']
+setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D, 'fbpIndex', field(0, NvU32))
+setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D, 'swizzId', field(4, NvU32))
+setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D, 'ltsEnMask', field(8, NvU32))
 class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D._fields_ = [
-  ('fbpIndex', NvU32),
-  ('swizzId', NvU32),
-  ('fbpaEnMask', NvU32),
-]
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D.SIZE = 12
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D._fields_ = ['fbpIndex', 'swizzId', 'fbpaEnMask']
+setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D, 'fbpIndex', field(0, NvU32))
+setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D, 'swizzId', field(4, NvU32))
+setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D, 'fbpaEnMask', field(8, NvU32))
 class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D._fields_ = [
-  ('fbpIndex', NvU32),
-  ('swizzId', NvU32),
-  ('ropEnMask', NvU32),
-]
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D.SIZE = 12
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D._fields_ = ['fbpIndex', 'swizzId', 'ropEnMask']
+setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D, 'fbpIndex', field(0, NvU32))
+setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D, 'swizzId', field(4, NvU32))
+setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D, 'ropEnMask', field(8, NvU32))
 class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D._fields_ = [
-  ('fbpIndex', NvU32),
-  ('swizzId', NvU32),
-  ('fbpaSubpEnMask', NvU64),
-]
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D.SIZE = 16
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D._fields_ = ['fbpIndex', 'swizzId', 'fbpaSubpEnMask']
+setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D, 'fbpIndex', field(0, NvU32))
+setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D, 'swizzId', field(4, NvU32))
+setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D, 'fbpaSubpEnMask', field(8, NvU64))
 class struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D._fields_ = [
-  ('fbpIndex', NvU32),
-  ('fbpaSubpEnMask', NvU32),
-]
+struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D.SIZE = 8
+struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D._fields_ = ['fbpIndex', 'fbpaSubpEnMask']
+setattr(struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D, 'fbpIndex', field(0, NvU32))
+setattr(struct_NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D, 'fbpaSubpEnMask', field(4, NvU32))
 class struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D = struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D
-struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D._fields_ = [
-  ('fbpIndex', NvU32),
-  ('fbpLogicalIndex', NvU32),
-]
-union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D._fields_ = [
-  ('inv', NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D),
-  ('fbp', NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D),
-  ('ltc', NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D),
-  ('lts', NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D),
-  ('fbpa', NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D),
-  ('rop', NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D),
-  ('dmLtc', NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D),
-  ('dmLts', NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D),
-  ('dmFbpa', NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D),
-  ('dmRop', NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D),
-  ('dmFbpaSubp', NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D),
-  ('fbpaSubp', NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D),
-  ('fbpLogicalMap', NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D),
-]
-struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D._fields_ = [
-  ('queryType', NvU16),
-  ('reserved', (NvU8 * 2)),
-  ('status', NvU32),
-  ('queryParams', NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D),
-]
-struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00._fields_ = [
-  ('numQueries', NvU16),
-  ('reserved', (NvU8 * 6)),
-  ('queries', (NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D * 120)),
-]
-struct_rpc_ctrl_fb_get_fs_info_v24_00._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00),
-]
+struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D.SIZE = 8
+struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D._fields_ = ['fbpIndex', 'fbpLogicalIndex']
+setattr(struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D, 'fbpIndex', field(0, NvU32))
+setattr(struct_NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D, 'fbpLogicalIndex', field(4, NvU32))
+union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D.SIZE = 24
+union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D._fields_ = ['inv', 'fbp', 'ltc', 'lts', 'fbpa', 'rop', 'dmLtc', 'dmLts', 'dmFbpa', 'dmRop', 'dmFbpaSubp', 'fbpaSubp', 'fbpLogicalMap']
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D, 'inv', field(0, NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D, 'fbp', field(0, NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D, 'ltc', field(0, NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D, 'lts', field(0, NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D, 'fbpa', field(0, NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D, 'rop', field(0, NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D, 'dmLtc', field(0, NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D, 'dmLts', field(0, NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D, 'dmFbpa', field(0, NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D, 'dmRop', field(0, NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D, 'dmFbpaSubp', field(0, NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D, 'fbpaSubp', field(0, NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D, 'fbpLogicalMap', field(0, NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D))
+struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D.SIZE = 32
+struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D._fields_ = ['queryType', 'reserved', 'status', 'queryParams']
+setattr(struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D, 'queryType', field(0, NvU16))
+setattr(struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D, 'reserved', field(2, Array(NvU8, 2)))
+setattr(struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D, 'status', field(4, NvU32))
+setattr(struct_NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D, 'queryParams', field(8, NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v1A_1D))
+struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00.SIZE = 3848
+struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00._fields_ = ['numQueries', 'reserved', 'queries']
+setattr(struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00, 'numQueries', field(0, NvU16))
+setattr(struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00, 'reserved', field(2, Array(NvU8, 6)))
+setattr(struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00, 'queries', field(8, Array(NV2080_CTRL_FB_FS_INFO_QUERY_v1A_1D, 120)))
+struct_rpc_ctrl_fb_get_fs_info_v24_00.SIZE = 3856
+struct_rpc_ctrl_fb_get_fs_info_v24_00._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_fb_get_fs_info_v24_00, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_fb_get_fs_info_v24_00, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_fb_get_fs_info_v24_00, 'params', field(8, NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v24_00))
 rpc_ctrl_fb_get_fs_info_v24_00 = struct_rpc_ctrl_fb_get_fs_info_v24_00
 class struct_rpc_ctrl_fb_get_fs_info_v26_04(Struct): pass
 class struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04(Struct): pass
 NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04 = struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04
 class struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04(Struct): pass
 NV2080_CTRL_FB_FS_INFO_QUERY_v26_04 = struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04
-class union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04(ctypes.Union): pass
+class union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04(Union): pass
 NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04 = union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04
 class struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04(Struct): pass
 NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04 = struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04
-struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04._fields_ = [
-  ('sysIdx', NvU32),
-  ('sysl2LtcEnMask', NvU32),
-]
+struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04.SIZE = 8
+struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04._fields_ = ['sysIdx', 'sysl2LtcEnMask']
+setattr(struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04, 'sysIdx', field(0, NvU32))
+setattr(struct_NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04, 'sysl2LtcEnMask', field(4, NvU32))
 class struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04(Struct): pass
 NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04 = struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04
-struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04._fields_ = [
-  ('fbpIndex', NvU32),
-  ('pacEnMask', NvU32),
-]
+struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04.SIZE = 8
+struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04._fields_ = ['fbpIndex', 'pacEnMask']
+setattr(struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04, 'fbpIndex', field(0, NvU32))
+setattr(struct_NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04, 'pacEnMask', field(4, NvU32))
 class struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04(Struct): pass
 NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04 = struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04
-struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04._fields_ = [
-  ('fbpIndex', NvU32),
-  ('logicalLtcEnMask', NvU64),
-]
+struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04.SIZE = 16
+struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04._fields_ = ['fbpIndex', 'logicalLtcEnMask']
+setattr(struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04, 'fbpIndex', field(0, NvU32))
+setattr(struct_NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04, 'logicalLtcEnMask', field(8, NvU64))
 class struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04(Struct): pass
 NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04 = struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04
-struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04._fields_ = [
-  ('fbpIndex', NvU32),
-  ('swizzId', NvU32),
-  ('logicalLtcEnMask', NvU64),
-]
-union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04._fields_ = [
-  ('inv', NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D),
-  ('fbp', NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D),
-  ('ltc', NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D),
-  ('lts', NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D),
-  ('fbpa', NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D),
-  ('rop', NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D),
-  ('dmLtc', NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D),
-  ('dmLts', NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D),
-  ('dmFbpa', NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D),
-  ('dmRop', NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D),
-  ('dmFbpaSubp', NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D),
-  ('fbpaSubp', NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D),
-  ('fbpLogicalMap', NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D),
-  ('sysl2Ltc', NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04),
-  ('pac', NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04),
-  ('logicalLtc', NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04),
-  ('dmLogicalLtc', NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04),
-]
-struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04._fields_ = [
-  ('queryType', NvU16),
-  ('reserved', (NvU8 * 2)),
-  ('status', NvU32),
-  ('queryParams', NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04),
-]
-struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04._fields_ = [
-  ('numQueries', NvU16),
-  ('reserved', (NvU8 * 6)),
-  ('queries', (NV2080_CTRL_FB_FS_INFO_QUERY_v26_04 * 120)),
-]
-struct_rpc_ctrl_fb_get_fs_info_v26_04._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04),
-]
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04.SIZE = 16
+struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04._fields_ = ['fbpIndex', 'swizzId', 'logicalLtcEnMask']
+setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04, 'fbpIndex', field(0, NvU32))
+setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04, 'swizzId', field(4, NvU32))
+setattr(struct_NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04, 'logicalLtcEnMask', field(8, NvU64))
+union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04.SIZE = 24
+union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04._fields_ = ['inv', 'fbp', 'ltc', 'lts', 'fbpa', 'rop', 'dmLtc', 'dmLts', 'dmFbpa', 'dmRop', 'dmFbpaSubp', 'fbpaSubp', 'fbpLogicalMap', 'sysl2Ltc', 'pac', 'logicalLtc', 'dmLogicalLtc']
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'inv', field(0, NV2080_CTRL_FB_FS_INFO_INVALID_QUERY_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'fbp', field(0, NV2080_CTRL_FB_FS_INFO_FBP_MASK_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'ltc', field(0, NV2080_CTRL_FB_FS_INFO_LTC_MASK_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'lts', field(0, NV2080_CTRL_FB_FS_INFO_LTS_MASK_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'fbpa', field(0, NV2080_CTRL_FB_FS_INFO_FBPA_MASK_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'rop', field(0, NV2080_CTRL_FB_FS_INFO_ROP_MASK_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'dmLtc', field(0, NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTC_MASK_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'dmLts', field(0, NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LTS_MASK_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'dmFbpa', field(0, NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_MASK_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'dmRop', field(0, NV2080_CTRL_FB_FS_INFO_PROFILER_MON_ROP_MASK_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'dmFbpaSubp', field(0, NV2080_CTRL_FB_FS_INFO_PROFILER_MON_FBPA_SUBP_MASK_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'fbpaSubp', field(0, NV2080_CTRL_FB_FS_INFO_FBPA_SUBP_MASK_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'fbpLogicalMap', field(0, NV2080_CTRL_FB_FS_INFO_FBP_LOGICAL_MAP_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'sysl2Ltc', field(0, NV2080_CTRL_SYSL2_FS_INFO_SYSLTC_MASK_PARAMS_v26_04))
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'pac', field(0, NV2080_CTRL_FB_FS_INFO_PAC_MASK_PARAMS_v26_04))
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'logicalLtc', field(0, NV2080_CTRL_FB_FS_INFO_LOGICAL_LTC_MASK_PARAMS_v26_04))
+setattr(union_NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04, 'dmLogicalLtc', field(0, NV2080_CTRL_FB_FS_INFO_PROFILER_MON_LOGICAL_LTC_MASK_PARAMS_v26_04))
+struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04.SIZE = 32
+struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04._fields_ = ['queryType', 'reserved', 'status', 'queryParams']
+setattr(struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04, 'queryType', field(0, NvU16))
+setattr(struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04, 'reserved', field(2, Array(NvU8, 2)))
+setattr(struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04, 'status', field(4, NvU32))
+setattr(struct_NV2080_CTRL_FB_FS_INFO_QUERY_v26_04, 'queryParams', field(8, NV2080_CTRL_FB_FS_INFO_QUERY_DATA_v26_04))
+struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04.SIZE = 3848
+struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04._fields_ = ['numQueries', 'reserved', 'queries']
+setattr(struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04, 'numQueries', field(0, NvU16))
+setattr(struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04, 'reserved', field(2, Array(NvU8, 6)))
+setattr(struct_NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04, 'queries', field(8, Array(NV2080_CTRL_FB_FS_INFO_QUERY_v26_04, 120)))
+struct_rpc_ctrl_fb_get_fs_info_v26_04.SIZE = 3856
+struct_rpc_ctrl_fb_get_fs_info_v26_04._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_fb_get_fs_info_v26_04, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_fb_get_fs_info_v26_04, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_fb_get_fs_info_v26_04, 'params', field(8, NV2080_CTRL_FB_GET_FS_INFO_PARAMS_v26_04))
 rpc_ctrl_fb_get_fs_info_v26_04 = struct_rpc_ctrl_fb_get_fs_info_v26_04
 rpc_ctrl_fb_get_fs_info_v = struct_rpc_ctrl_fb_get_fs_info_v26_04
 class struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D(Struct): pass
@@ -2800,124 +2771,124 @@ class struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D
 class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D
-class union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D(ctypes.Union): pass
+class union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D(Union): pass
 NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D = union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D
 class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D._fields_ = [
-  ('gpcCount', NvU32),
-]
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D.SIZE = 4
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D._fields_ = ['gpcCount']
+setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D, 'gpcCount', field(0, NvU32))
 class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D._fields_ = [
-  ('gpcId', NvU32),
-  ('chipletGpcMap', NvU32),
-]
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D.SIZE = 8
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D._fields_ = ['gpcId', 'chipletGpcMap']
+setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D, 'gpcId', field(0, NvU32))
+setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D, 'chipletGpcMap', field(4, NvU32))
 class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D._fields_ = [
-  ('gpcId', NvU32),
-  ('tpcMask', NvU32),
-]
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D.SIZE = 8
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D._fields_ = ['gpcId', 'tpcMask']
+setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D, 'gpcId', field(0, NvU32))
+setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D, 'tpcMask', field(4, NvU32))
 class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D._fields_ = [
-  ('gpcId', NvU32),
-  ('ppcMask', NvU32),
-]
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D.SIZE = 8
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D._fields_ = ['gpcId', 'ppcMask']
+setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D, 'gpcId', field(0, NvU32))
+setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D, 'ppcMask', field(4, NvU32))
 class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D._fields_ = [
-  ('swizzId', NvU32),
-  ('gpcId', NvU32),
-  ('chipletGpcMap', NvU32),
-]
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D.SIZE = 12
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D._fields_ = ['swizzId', 'gpcId', 'chipletGpcMap']
+setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D, 'swizzId', field(0, NvU32))
+setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D, 'gpcId', field(4, NvU32))
+setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D, 'chipletGpcMap', field(8, NvU32))
 class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D._fields_ = [
-  ('chipletSyspipeMask', NvU32),
-]
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D.SIZE = 4
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D._fields_ = ['chipletSyspipeMask']
+setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D, 'chipletSyspipeMask', field(0, NvU32))
 class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D._fields_ = [
-  ('swizzId', NvU16),
-  ('physSyspipeIdCount', NvU16),
-  ('physSyspipeId', (NvU8 * 8)),
-]
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D.SIZE = 12
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D._fields_ = ['swizzId', 'physSyspipeIdCount', 'physSyspipeId']
+setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D, 'swizzId', field(0, NvU16))
+setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D, 'physSyspipeIdCount', field(2, NvU16))
+setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D, 'physSyspipeId', field(4, Array(NvU8, 8)))
 class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D._fields_ = [
-  ('swizzId', NvU32),
-  ('grIdx', NvU32),
-  ('gpcEnMask', NvU32),
-]
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D.SIZE = 12
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D._fields_ = ['swizzId', 'grIdx', 'gpcEnMask']
+setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D, 'swizzId', field(0, NvU32))
+setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D, 'grIdx', field(4, NvU32))
+setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D, 'gpcEnMask', field(8, NvU32))
 class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D._fields_ = [
-  ('syspipeId', NvU32),
-]
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D.SIZE = 4
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D._fields_ = ['syspipeId']
+setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D, 'syspipeId', field(0, NvU32))
 class struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D(Struct): pass
 NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D = struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D._fields_ = [
-  ('gpcId', NvU32),
-  ('ropMask', NvU32),
-]
-union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D._fields_ = [
-  ('gpcCountData', NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D),
-  ('chipletGpcMapData', NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D),
-  ('tpcMaskData', NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D),
-  ('ppcMaskData', NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D),
-  ('partitionGpcMapData', NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D),
-  ('syspipeMaskData', NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D),
-  ('partitionChipletSyspipeData', NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D),
-  ('dmGpcMaskData', NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D),
-  ('partitionSyspipeIdData', NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D),
-  ('ropMaskData', NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D),
-]
-struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D._fields_ = [
-  ('queryType', NvU16),
-  ('reserved', (NvU8 * 2)),
-  ('status', NvU32),
-  ('queryData', NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D),
-]
-struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D._fields_ = [
-  ('numQueries', NvU16),
-  ('reserved', (NvU8 * 6)),
-  ('queries', (NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D * 96)),
-]
-struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D),
-]
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D.SIZE = 8
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D._fields_ = ['gpcId', 'ropMask']
+setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D, 'gpcId', field(0, NvU32))
+setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D, 'ropMask', field(4, NvU32))
+union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D.SIZE = 12
+union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D._fields_ = ['gpcCountData', 'chipletGpcMapData', 'tpcMaskData', 'ppcMaskData', 'partitionGpcMapData', 'syspipeMaskData', 'partitionChipletSyspipeData', 'dmGpcMaskData', 'partitionSyspipeIdData', 'ropMaskData']
+setattr(union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D, 'gpcCountData', field(0, NV2080_CTRL_GRMGR_GR_FS_INFO_GPC_COUNT_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D, 'chipletGpcMapData', field(0, NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_GPC_MAP_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D, 'tpcMaskData', field(0, NV2080_CTRL_GRMGR_GR_FS_INFO_TPC_MASK_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D, 'ppcMaskData', field(0, NV2080_CTRL_GRMGR_GR_FS_INFO_PPC_MASK_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D, 'partitionGpcMapData', field(0, NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_GPC_MAP_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D, 'syspipeMaskData', field(0, NV2080_CTRL_GRMGR_GR_FS_INFO_CHIPLET_SYSPIPE_MASK_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D, 'partitionChipletSyspipeData', field(0, NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_CHIPLET_SYSPIPE_IDS_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D, 'dmGpcMaskData', field(0, NV2080_CTRL_GRMGR_GR_FS_INFO_PROFILER_MON_GPC_MASK_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D, 'partitionSyspipeIdData', field(0, NV2080_CTRL_GRMGR_GR_FS_INFO_PARTITION_SYSPIPE_ID_PARAMS_v1A_1D))
+setattr(union_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D, 'ropMaskData', field(0, NV2080_CTRL_GRMGR_GR_FS_INFO_ROP_MASK_PARAMS_v1A_1D))
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D.SIZE = 20
+struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D._fields_ = ['queryType', 'reserved', 'status', 'queryData']
+setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D, 'queryType', field(0, NvU16))
+setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D, 'reserved', field(2, Array(NvU8, 2)))
+setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D, 'status', field(4, NvU32))
+setattr(struct_NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D, 'queryData', field(8, NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_DATA_v1A_1D))
+struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D.SIZE = 1928
+struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D._fields_ = ['numQueries', 'reserved', 'queries']
+setattr(struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D, 'numQueries', field(0, NvU16))
+setattr(struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D, 'reserved', field(2, Array(NvU8, 6)))
+setattr(struct_NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D, 'queries', field(8, Array(NV2080_CTRL_GRMGR_GR_FS_INFO_QUERY_PARAMS_v1A_1D, 96)))
+struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D.SIZE = 1936
+struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D, 'params', field(8, NV2080_CTRL_GRMGR_GET_GR_FS_INFO_PARAMS_v1A_1D))
 rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D = struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D
 rpc_ctrl_grmgr_get_gr_fs_info_v = struct_rpc_ctrl_grmgr_get_gr_fs_info_v1A_1D
 class struct_rpc_ctrl_stop_channel_v1A_1E(Struct): pass
 class struct_NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E(Struct): pass
 NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E = struct_NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E
-struct_NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E._fields_ = [
-  ('bImmediate', NvBool),
-]
-struct_rpc_ctrl_stop_channel_v1A_1E._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E),
-]
+struct_NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E.SIZE = 1
+struct_NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E._fields_ = ['bImmediate']
+setattr(struct_NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E, 'bImmediate', field(0, NvBool))
+struct_rpc_ctrl_stop_channel_v1A_1E.SIZE = 12
+struct_rpc_ctrl_stop_channel_v1A_1E._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_stop_channel_v1A_1E, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_stop_channel_v1A_1E, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_stop_channel_v1A_1E, 'params', field(8, NVA06F_CTRL_STOP_CHANNEL_PARAMS_v1A_1E))
 rpc_ctrl_stop_channel_v1A_1E = struct_rpc_ctrl_stop_channel_v1A_1E
 rpc_ctrl_stop_channel_v = struct_rpc_ctrl_stop_channel_v1A_1E
 class struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F(Struct): pass
 class struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F(Struct): pass
 NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F = struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F
-struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F._fields_ = [
-  ('hChannel', NvHandle),
-  ('samplingMode', NvU32),
-  ('grRouteInfo', NV2080_CTRL_GR_ROUTE_INFO_v12_01),
-]
-struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F),
-]
+struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F.SIZE = 24
+struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F._fields_ = ['hChannel', 'samplingMode', 'grRouteInfo']
+setattr(struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F, 'hChannel', field(0, NvHandle))
+setattr(struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F, 'samplingMode', field(4, NvU32))
+setattr(struct_NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F, 'grRouteInfo', field(8, NV2080_CTRL_GR_ROUTE_INFO_v12_01))
+struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F.SIZE = 32
+struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F, 'params', field(8, NV2080_CTRL_GR_PC_SAMPLING_MODE_PARAMS_v1A_1F))
 rpc_ctrl_gr_pc_sampling_mode_v1A_1F = struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F
 rpc_ctrl_gr_pc_sampling_mode_v = struct_rpc_ctrl_gr_pc_sampling_mode_v1A_1F
 class struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F(Struct): pass
@@ -2925,10 +2896,10 @@ class struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F(Struct): pass
 NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F = struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F
 class struct_PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F(Struct): pass
 PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F = struct_PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F
-struct_PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F._fields_ = [
-  ('clientActiveMask', NvU32),
-  ('bRegkeyLimitRatedTdp', NvU8),
-]
+struct_PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F.SIZE = 8
+struct_PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F._fields_ = ['clientActiveMask', 'bRegkeyLimitRatedTdp']
+setattr(struct_PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F, 'clientActiveMask', field(0, NvU32))
+setattr(struct_PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F, 'bRegkeyLimitRatedTdp', field(4, NvU8))
 enum_NV2080_CTRL_PERF_RATED_TDP_ACTION = CEnum(ctypes.c_uint32)
 NV2080_CTRL_PERF_RATED_TDP_ACTION_DEFAULT = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION.define('NV2080_CTRL_PERF_RATED_TDP_ACTION_DEFAULT', 0)
 NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_EXCEED = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION.define('NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_EXCEED', 1)
@@ -2937,16 +2908,16 @@ NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_LOCK = enum_NV2080_CTRL_PERF_RATED_TDP_A
 NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_FLOOR = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION.define('NV2080_CTRL_PERF_RATED_TDP_ACTION_FORCE_FLOOR', 4)
 
 NV2080_CTRL_PERF_RATED_TDP_ACTION = enum_NV2080_CTRL_PERF_RATED_TDP_ACTION
-struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F._fields_ = [
-  ('rm', PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F),
-  ('output', NV2080_CTRL_PERF_RATED_TDP_ACTION),
-  ('inputs', (NV2080_CTRL_PERF_RATED_TDP_ACTION * 5)),
-]
-struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F),
-]
+struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F.SIZE = 32
+struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F._fields_ = ['rm', 'output', 'inputs']
+setattr(struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F, 'rm', field(0, PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F))
+setattr(struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F, 'output', field(8, NV2080_CTRL_PERF_RATED_TDP_ACTION))
+setattr(struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F, 'inputs', field(12, Array(NV2080_CTRL_PERF_RATED_TDP_ACTION, 5)))
+struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F.SIZE = 40
+struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F, 'params', field(8, NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F))
 rpc_ctrl_perf_rated_tdp_get_status_v1A_1F = struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F
 rpc_ctrl_perf_rated_tdp_get_status_v = struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F
 class struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F(Struct): pass
@@ -2961,71 +2932,71 @@ NV2080_CTRL_PERF_RATED_TDP_CLIENT_PROFILE = enum_NV2080_CTRL_PERF_RATED_TDP_CLIE
 NV2080_CTRL_PERF_RATED_TDP_CLIENT_NUM_CLIENTS = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT.define('NV2080_CTRL_PERF_RATED_TDP_CLIENT_NUM_CLIENTS', 5)
 
 NV2080_CTRL_PERF_RATED_TDP_CLIENT = enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT
-struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F._fields_ = [
-  ('client', NV2080_CTRL_PERF_RATED_TDP_CLIENT),
-  ('input', NV2080_CTRL_PERF_RATED_TDP_ACTION),
-]
-struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F),
-]
+struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F.SIZE = 8
+struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F._fields_ = ['client', 'input']
+setattr(struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F, 'client', field(0, NV2080_CTRL_PERF_RATED_TDP_CLIENT))
+setattr(struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F, 'input', field(4, NV2080_CTRL_PERF_RATED_TDP_ACTION))
+struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F.SIZE = 16
+struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F, 'params', field(8, NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F))
 rpc_ctrl_perf_rated_tdp_set_control_v1A_1F = struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F
 rpc_ctrl_perf_rated_tdp_set_control_v = struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F
 class struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F(Struct): pass
 class struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F(Struct): pass
 NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F = struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F
-struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F._fields_ = [
-  ('bSetMaxFreq', NvBool),
-]
-struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F),
-]
+struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F.SIZE = 1
+struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F._fields_ = ['bSetMaxFreq']
+setattr(struct_NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F, 'bSetMaxFreq', field(0, NvBool))
+struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F.SIZE = 12
+struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F, 'params', field(8, NV2080_CTRL_CMD_TIMER_SET_GR_TICK_FREQ_PARAMS_v1A_1F))
 rpc_ctrl_timer_set_gr_tick_freq_v1A_1F = struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F
 rpc_ctrl_timer_set_gr_tick_freq_v = struct_rpc_ctrl_timer_set_gr_tick_freq_v1A_1F
 class struct_rpc_ctrl_free_pma_stream_v1A_1F(Struct): pass
 class struct_NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F(Struct): pass
 NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F = struct_NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F
-struct_NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F._fields_ = [
-  ('pmaChannelIdx', NvU32),
-]
-struct_rpc_ctrl_free_pma_stream_v1A_1F._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F),
-]
+struct_NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F.SIZE = 4
+struct_NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F._fields_ = ['pmaChannelIdx']
+setattr(struct_NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F, 'pmaChannelIdx', field(0, NvU32))
+struct_rpc_ctrl_free_pma_stream_v1A_1F.SIZE = 12
+struct_rpc_ctrl_free_pma_stream_v1A_1F._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_free_pma_stream_v1A_1F, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_free_pma_stream_v1A_1F, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_free_pma_stream_v1A_1F, 'params', field(8, NVB0CC_CTRL_FREE_PMA_STREAM_PARAMS_v1A_1F))
 rpc_ctrl_free_pma_stream_v1A_1F = struct_rpc_ctrl_free_pma_stream_v1A_1F
 rpc_ctrl_free_pma_stream_v = struct_rpc_ctrl_free_pma_stream_v1A_1F
 class struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23(Struct): pass
 class struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23(Struct): pass
 NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23 = struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23
-struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23._fields_ = [
-  ('base', NvU64),
-  ('size', NvU64),
-  ('addressSpace', NvU32),
-  ('cacheAttrib', NvU32),
-]
-struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23),
-]
+struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23.SIZE = 24
+struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23._fields_ = ['base', 'size', 'addressSpace', 'cacheAttrib']
+setattr(struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23, 'base', field(0, NvU64))
+setattr(struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23, 'size', field(8, NvU64))
+setattr(struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23, 'addressSpace', field(16, NvU32))
+setattr(struct_NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23, 'cacheAttrib', field(20, NvU32))
+struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23.SIZE = 32
+struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23, 'params', field(8, NV2080_CTRL_FIFO_SETUP_VF_ZOMBIE_SUBCTX_PDB_PARAMS_v1A_23))
 rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23 = struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23
 rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v = struct_rpc_ctrl_fifo_setup_vf_zombie_subctx_pdb_v1A_23
 class struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02(Struct): pass
 class struct_NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02(Struct): pass
 NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02 = struct_NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02
-struct_NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02._fields_ = [
-  ('smID', NvU32),
-  ('bSingleStep', NvBool),
-]
-struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02),
-]
+struct_NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02.SIZE = 8
+struct_NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02._fields_ = ['smID', 'bSingleStep']
+setattr(struct_NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02, 'smID', field(0, NvU32))
+setattr(struct_NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02, 'bSingleStep', field(4, NvBool))
+struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02.SIZE = 16
+struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02, 'params', field(8, NV83DE_CTRL_DEBUG_SET_SINGLE_SM_SINGLE_STEP_PARAMS_v1C_02))
 rpc_ctrl_dbg_set_single_sm_single_step_v1C_02 = struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02
 rpc_ctrl_dbg_set_single_sm_single_step_v = struct_rpc_ctrl_dbg_set_single_sm_single_step_v1C_02
 class struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04(Struct): pass
@@ -3037,25 +3008,25 @@ NV0080_CTRL_GR_TPC_PARTITION_MODE_STATIC = enum_NV0080_CTRL_GR_TPC_PARTITION_MOD
 NV0080_CTRL_GR_TPC_PARTITION_MODE_DYNAMIC = enum_NV0080_CTRL_GR_TPC_PARTITION_MODE.define('NV0080_CTRL_GR_TPC_PARTITION_MODE_DYNAMIC', 2)
 
 NV0080_CTRL_GR_TPC_PARTITION_MODE = enum_NV0080_CTRL_GR_TPC_PARTITION_MODE
-struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04._fields_ = [
-  ('hChannelGroup', NvHandle),
-  ('mode', NV0080_CTRL_GR_TPC_PARTITION_MODE),
-  ('bEnableAllTpcs', NvBool),
-  ('grRouteInfo', NV2080_CTRL_GR_ROUTE_INFO_v12_01),
-]
-struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04),
-]
+struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04.SIZE = 32
+struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04._fields_ = ['hChannelGroup', 'mode', 'bEnableAllTpcs', 'grRouteInfo']
+setattr(struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04, 'hChannelGroup', field(0, NvHandle))
+setattr(struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04, 'mode', field(4, NV0080_CTRL_GR_TPC_PARTITION_MODE))
+setattr(struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04, 'bEnableAllTpcs', field(8, NvBool))
+setattr(struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04, 'grRouteInfo', field(16, NV2080_CTRL_GR_ROUTE_INFO_v12_01))
+struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04.SIZE = 40
+struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04, 'params', field(8, NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04))
 rpc_ctrl_gr_get_tpc_partition_mode_v1C_04 = struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04
 rpc_ctrl_gr_get_tpc_partition_mode_v = struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04
 class struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04(Struct): pass
-struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04),
-]
+struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04.SIZE = 40
+struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04, 'params', field(8, NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04))
 rpc_ctrl_gr_set_tpc_partition_mode_v1C_04 = struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04
 rpc_ctrl_gr_set_tpc_partition_mode_v = struct_rpc_ctrl_gr_set_tpc_partition_mode_v1C_04
 class struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07(Struct): pass
@@ -3063,119 +3034,119 @@ class struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07(Str
 NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07 = struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07
 class struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07(Struct): pass
 NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07 = struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07
-struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07._fields_ = [
-  ('base', NvU64),
-  ('size', NvU64),
-  ('alignment', NvU64),
-  ('addressSpace', NvU32),
-  ('cpuCacheAttrib', NvU32),
-]
-struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07._fields_ = [
-  ('methodBufferMemdesc', (NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07 * 2)),
-  ('bar2Addr', (NvU64 * 2)),
-  ('numValidEntries', NvU32),
-]
-struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07),
-]
+struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07.SIZE = 32
+struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07._fields_ = ['base', 'size', 'alignment', 'addressSpace', 'cpuCacheAttrib']
+setattr(struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07, 'base', field(0, NvU64))
+setattr(struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07, 'size', field(8, NvU64))
+setattr(struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07, 'alignment', field(16, NvU64))
+setattr(struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07, 'addressSpace', field(24, NvU32))
+setattr(struct_NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07, 'cpuCacheAttrib', field(28, NvU32))
+struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07.SIZE = 88
+struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07._fields_ = ['methodBufferMemdesc', 'bar2Addr', 'numValidEntries']
+setattr(struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07, 'methodBufferMemdesc', field(0, Array(NV2080_CTRL_INTERNAL_MEMDESC_INFO_v1E_07, 2)))
+setattr(struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07, 'bar2Addr', field(64, Array(NvU64, 2)))
+setattr(struct_NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07, 'numValidEntries', field(80, NvU32))
+struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07.SIZE = 96
+struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07, 'params', field(8, NVA06C_CTRL_INTERNAL_PROMOTE_FAULT_METHOD_BUFFERS_PARAMS_v1E_07))
 rpc_ctrl_internal_promote_fault_method_buffers_v1E_07 = struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07
 rpc_ctrl_internal_promote_fault_method_buffers_v = struct_rpc_ctrl_internal_promote_fault_method_buffers_v1E_07
 class struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05(Struct): pass
 class struct_NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05(Struct): pass
 NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05 = struct_NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05
-struct_NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05._fields_ = [
-  ('bZbcSurfacesExist', NvBool),
-]
-struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05),
-]
+struct_NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05.SIZE = 1
+struct_NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05._fields_ = ['bZbcSurfacesExist']
+setattr(struct_NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05, 'bZbcSurfacesExist', field(0, NvBool))
+struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05.SIZE = 12
+struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05, 'params', field(8, NV2080_CTRL_CMD_INTERNAL_MEMSYS_SET_ZBC_REFERENCED_v1F_05))
 rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05 = struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05
 rpc_ctrl_internal_memsys_set_zbc_referenced_v = struct_rpc_ctrl_internal_memsys_set_zbc_referenced_v1F_05
 class struct_rpc_ctrl_fabric_memory_describe_v1E_0C(Struct): pass
 class struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C(Struct): pass
 NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C = struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C
-struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C._fields_ = [
-  ('offset', NvU64),
-  ('totalPfns', NvU64),
-  ('pfnArray', (NvU32 * 512)),
-  ('numPfns', NvU32),
-]
-struct_rpc_ctrl_fabric_memory_describe_v1E_0C._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C),
-]
+struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C.SIZE = 2072
+struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C._fields_ = ['offset', 'totalPfns', 'pfnArray', 'numPfns']
+setattr(struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C, 'offset', field(0, NvU64))
+setattr(struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C, 'totalPfns', field(8, NvU64))
+setattr(struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C, 'pfnArray', field(16, Array(NvU32, 512)))
+setattr(struct_NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C, 'numPfns', field(2064, NvU32))
+struct_rpc_ctrl_fabric_memory_describe_v1E_0C.SIZE = 2080
+struct_rpc_ctrl_fabric_memory_describe_v1E_0C._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_fabric_memory_describe_v1E_0C, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_fabric_memory_describe_v1E_0C, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_fabric_memory_describe_v1E_0C, 'params', field(8, NV00F8_CTRL_DESCRIBE_PARAMS_v1E_0C))
 rpc_ctrl_fabric_memory_describe_v1E_0C = struct_rpc_ctrl_fabric_memory_describe_v1E_0C
 rpc_ctrl_fabric_memory_describe_v = struct_rpc_ctrl_fabric_memory_describe_v1E_0C
 class struct_rpc_ctrl_fabric_mem_stats_v1E_0C(Struct): pass
 class struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C(Struct): pass
 NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C = struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C
-struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C._fields_ = [
-  ('totalSize', NvU64),
-  ('freeSize', NvU64),
-]
-struct_rpc_ctrl_fabric_mem_stats_v1E_0C._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C),
-]
+struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C.SIZE = 16
+struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C._fields_ = ['totalSize', 'freeSize']
+setattr(struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C, 'totalSize', field(0, NvU64))
+setattr(struct_NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C, 'freeSize', field(8, NvU64))
+struct_rpc_ctrl_fabric_mem_stats_v1E_0C.SIZE = 24
+struct_rpc_ctrl_fabric_mem_stats_v1E_0C._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_fabric_mem_stats_v1E_0C, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_fabric_mem_stats_v1E_0C, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_fabric_mem_stats_v1E_0C, 'params', field(8, NV2080_CTRL_FLA_GET_FABRIC_MEM_STATS_PARAMS_v1E_0C))
 rpc_ctrl_fabric_mem_stats_v1E_0C = struct_rpc_ctrl_fabric_mem_stats_v1E_0C
 rpc_ctrl_fabric_mem_stats_v = struct_rpc_ctrl_fabric_mem_stats_v1E_0C
 class struct_rpc_ctrl_bus_set_p2p_mapping_v21_03(Struct): pass
 class struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03(Struct): pass
 NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03 = struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03
-struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03._fields_ = [
-  ('connectionType', NvU32),
-  ('peerId', NvU32),
-  ('bSpaAccessOnly', NvU32),
-  ('bUseUuid', NvBool),
-  ('remoteGpuId', NvU32),
-  ('remoteGpuUuid', (NvU8 * 16)),
-]
-struct_rpc_ctrl_bus_set_p2p_mapping_v21_03._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03),
-]
+struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03.SIZE = 36
+struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03._fields_ = ['connectionType', 'peerId', 'bSpaAccessOnly', 'bUseUuid', 'remoteGpuId', 'remoteGpuUuid']
+setattr(struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03, 'connectionType', field(0, NvU32))
+setattr(struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03, 'peerId', field(4, NvU32))
+setattr(struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03, 'bSpaAccessOnly', field(8, NvU32))
+setattr(struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03, 'bUseUuid', field(12, NvBool))
+setattr(struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03, 'remoteGpuId', field(16, NvU32))
+setattr(struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03, 'remoteGpuUuid', field(20, Array(NvU8, 16)))
+struct_rpc_ctrl_bus_set_p2p_mapping_v21_03.SIZE = 44
+struct_rpc_ctrl_bus_set_p2p_mapping_v21_03._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_bus_set_p2p_mapping_v21_03, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_bus_set_p2p_mapping_v21_03, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_bus_set_p2p_mapping_v21_03, 'params', field(8, NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v21_03))
 rpc_ctrl_bus_set_p2p_mapping_v21_03 = struct_rpc_ctrl_bus_set_p2p_mapping_v21_03
 class struct_rpc_ctrl_bus_set_p2p_mapping_v29_08(Struct): pass
 class struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08(Struct): pass
 NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08 = struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08
-struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08._fields_ = [
-  ('connectionType', NvU32),
-  ('peerId', NvU32),
-  ('bEgmPeer', NvBool),
-  ('bSpaAccessOnly', NvU32),
-  ('bUseUuid', NvBool),
-  ('remoteGpuId', NvU32),
-  ('remoteGpuUuid', (NvU8 * 16)),
-]
-struct_rpc_ctrl_bus_set_p2p_mapping_v29_08._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08),
-]
+struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08.SIZE = 40
+struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08._fields_ = ['connectionType', 'peerId', 'bEgmPeer', 'bSpaAccessOnly', 'bUseUuid', 'remoteGpuId', 'remoteGpuUuid']
+setattr(struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08, 'connectionType', field(0, NvU32))
+setattr(struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08, 'peerId', field(4, NvU32))
+setattr(struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08, 'bEgmPeer', field(8, NvBool))
+setattr(struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08, 'bSpaAccessOnly', field(12, NvU32))
+setattr(struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08, 'bUseUuid', field(16, NvBool))
+setattr(struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08, 'remoteGpuId', field(20, NvU32))
+setattr(struct_NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08, 'remoteGpuUuid', field(24, Array(NvU8, 16)))
+struct_rpc_ctrl_bus_set_p2p_mapping_v29_08.SIZE = 48
+struct_rpc_ctrl_bus_set_p2p_mapping_v29_08._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_bus_set_p2p_mapping_v29_08, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_bus_set_p2p_mapping_v29_08, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_bus_set_p2p_mapping_v29_08, 'params', field(8, NV2080_CTRL_BUS_SET_P2P_MAPPING_PARAMS_v29_08))
 rpc_ctrl_bus_set_p2p_mapping_v29_08 = struct_rpc_ctrl_bus_set_p2p_mapping_v29_08
 rpc_ctrl_bus_set_p2p_mapping_v = struct_rpc_ctrl_bus_set_p2p_mapping_v29_08
 class struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03(Struct): pass
 class struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03(Struct): pass
 NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03 = struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03
-struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03._fields_ = [
-  ('connectionType', NvU32),
-  ('peerId', NvU32),
-  ('bUseUuid', NvBool),
-  ('remoteGpuId', NvU32),
-  ('remoteGpuUuid', (NvU8 * 16)),
-]
-struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03),
-]
+struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03.SIZE = 32
+struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03._fields_ = ['connectionType', 'peerId', 'bUseUuid', 'remoteGpuId', 'remoteGpuUuid']
+setattr(struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03, 'connectionType', field(0, NvU32))
+setattr(struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03, 'peerId', field(4, NvU32))
+setattr(struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03, 'bUseUuid', field(8, NvBool))
+setattr(struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03, 'remoteGpuId', field(12, NvU32))
+setattr(struct_NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03, 'remoteGpuUuid', field(16, Array(NvU8, 16)))
+struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03.SIZE = 40
+struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03, 'params', field(8, NV2080_CTRL_BUS_UNSET_P2P_MAPPING_PARAMS_v21_03))
 rpc_ctrl_bus_unset_p2p_mapping_v21_03 = struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03
 rpc_ctrl_bus_unset_p2p_mapping_v = struct_rpc_ctrl_bus_unset_p2p_mapping_v21_03
 class struct_rpc_ctrl_gpu_get_info_v2_v25_11(Struct): pass
@@ -3183,61 +3154,61 @@ class struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11(Struct): pass
 NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11 = struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11
 class struct_NV2080_CTRL_GPU_INFO_v25_11(Struct): pass
 NV2080_CTRL_GPU_INFO_v25_11 = struct_NV2080_CTRL_GPU_INFO_v25_11
-struct_NV2080_CTRL_GPU_INFO_v25_11._fields_ = [
-  ('index', NvU32),
-  ('data', NvU32),
-]
-struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11._fields_ = [
-  ('gpuInfoListSize', NvU32),
-  ('gpuInfoList', (NV2080_CTRL_GPU_INFO_v25_11 * 65)),
-]
-struct_rpc_ctrl_gpu_get_info_v2_v25_11._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11),
-]
+struct_NV2080_CTRL_GPU_INFO_v25_11.SIZE = 8
+struct_NV2080_CTRL_GPU_INFO_v25_11._fields_ = ['index', 'data']
+setattr(struct_NV2080_CTRL_GPU_INFO_v25_11, 'index', field(0, NvU32))
+setattr(struct_NV2080_CTRL_GPU_INFO_v25_11, 'data', field(4, NvU32))
+struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11.SIZE = 524
+struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11._fields_ = ['gpuInfoListSize', 'gpuInfoList']
+setattr(struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11, 'gpuInfoListSize', field(0, NvU32))
+setattr(struct_NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11, 'gpuInfoList', field(4, Array(NV2080_CTRL_GPU_INFO_v25_11, 65)))
+struct_rpc_ctrl_gpu_get_info_v2_v25_11.SIZE = 532
+struct_rpc_ctrl_gpu_get_info_v2_v25_11._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_gpu_get_info_v2_v25_11, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_gpu_get_info_v2_v25_11, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_gpu_get_info_v2_v25_11, 'params', field(8, NV2080_CTRL_GPU_GET_INFO_V2_PARAMS_v25_11))
 rpc_ctrl_gpu_get_info_v2_v25_11 = struct_rpc_ctrl_gpu_get_info_v2_v25_11
 rpc_ctrl_gpu_get_info_v2_v = struct_rpc_ctrl_gpu_get_info_v2_v25_11
 class struct_rpc_update_gpm_guest_buffer_info_v27_01(Struct): pass
-struct_rpc_update_gpm_guest_buffer_info_v27_01._fields_ = [
-  ('gpfn', NvU64),
-  ('swizzId', NvU32),
-  ('computeId', NvU32),
-  ('bufSize', NvU32),
-  ('bMap', NvBool),
-]
+struct_rpc_update_gpm_guest_buffer_info_v27_01.SIZE = 24
+struct_rpc_update_gpm_guest_buffer_info_v27_01._fields_ = ['gpfn', 'swizzId', 'computeId', 'bufSize', 'bMap']
+setattr(struct_rpc_update_gpm_guest_buffer_info_v27_01, 'gpfn', field(0, NvU64))
+setattr(struct_rpc_update_gpm_guest_buffer_info_v27_01, 'swizzId', field(8, NvU32))
+setattr(struct_rpc_update_gpm_guest_buffer_info_v27_01, 'computeId', field(12, NvU32))
+setattr(struct_rpc_update_gpm_guest_buffer_info_v27_01, 'bufSize', field(16, NvU32))
+setattr(struct_rpc_update_gpm_guest_buffer_info_v27_01, 'bMap', field(20, NvBool))
 rpc_update_gpm_guest_buffer_info_v27_01 = struct_rpc_update_gpm_guest_buffer_info_v27_01
 rpc_update_gpm_guest_buffer_info_v = struct_rpc_update_gpm_guest_buffer_info_v27_01
 class struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08(Struct): pass
 class struct_NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08(Struct): pass
 NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08 = struct_NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08
-struct_NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08._fields_ = [
-  ('pmaChannelIdx', NvU32),
-  ('bMembytesPollingRequired', NvBool),
-]
-struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08),
-]
+struct_NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08.SIZE = 8
+struct_NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08._fields_ = ['pmaChannelIdx', 'bMembytesPollingRequired']
+setattr(struct_NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08, 'pmaChannelIdx', field(0, NvU32))
+setattr(struct_NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08, 'bMembytesPollingRequired', field(4, NvBool))
+struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08.SIZE = 16
+struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08, 'params', field(8, NVB0CC_CTRL_INTERNAL_QUIESCE_PMA_CHANNEL_PARAMS_v1C_08))
 rpc_ctrl_internal_quiesce_pma_channel_v1C_08 = struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08
 rpc_ctrl_internal_quiesce_pma_channel_v = struct_rpc_ctrl_internal_quiesce_pma_channel_v1C_08
 class struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C(Struct): pass
 class struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C(Struct): pass
 NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C = struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C
-struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C._fields_ = [
-  ('pmaChannelIdx', NvU32),
-  ('pmaBufferVA', NvU64),
-  ('pmaBufferSize', NvU64),
-  ('membytesVA', NvU64),
-  ('hwpmIBPA', NvU64),
-  ('hwpmIBAperture', NvU8),
-]
-struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C),
-]
+struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C.SIZE = 48
+struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C._fields_ = ['pmaChannelIdx', 'pmaBufferVA', 'pmaBufferSize', 'membytesVA', 'hwpmIBPA', 'hwpmIBAperture']
+setattr(struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C, 'pmaChannelIdx', field(0, NvU32))
+setattr(struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C, 'pmaBufferVA', field(8, NvU64))
+setattr(struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C, 'pmaBufferSize', field(16, NvU64))
+setattr(struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C, 'membytesVA', field(24, NvU64))
+setattr(struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C, 'hwpmIBPA', field(32, NvU64))
+setattr(struct_NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C, 'hwpmIBAperture', field(40, NvU8))
+struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C.SIZE = 56
+struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C, 'params', field(8, NVB0CC_CTRL_INTERNAL_SRIOV_PROMOTE_PMA_STREAM_PARAMS_v1C_0C))
 rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C = struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C
 rpc_ctrl_internal_sriov_promote_pma_stream_v = struct_rpc_ctrl_internal_sriov_promote_pma_stream_v1C_0C
 class struct_rpc_ctrl_exec_partitions_create_v24_05(Struct): pass
@@ -3245,60 +3216,60 @@ class struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05(Struct): pass
 NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05 = struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05
 class struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05(Struct): pass
 NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05 = struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05
-struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05._fields_ = [
-  ('gpcCount', NvU32),
-  ('gfxGpcCount', NvU32),
-  ('veidCount', NvU32),
-  ('ceCount', NvU32),
-  ('nvEncCount', NvU32),
-  ('nvDecCount', NvU32),
-  ('nvJpgCount', NvU32),
-  ('ofaCount', NvU32),
-  ('sharedEngFlag', NvU32),
-  ('smCount', NvU32),
-  ('spanStart', NvU32),
-  ('computeSize', NvU32),
-]
-struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05._fields_ = [
-  ('bQuery', NvBool),
-  ('execPartCount', NvU32),
-  ('execPartInfo', (NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05 * 8)),
-  ('execPartId', (NvU32 * 8)),
-]
-struct_rpc_ctrl_exec_partitions_create_v24_05._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('status', NvU32),
-  ('execPartitionsCreate', NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05),
-]
+struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05.SIZE = 48
+struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05._fields_ = ['gpcCount', 'gfxGpcCount', 'veidCount', 'ceCount', 'nvEncCount', 'nvDecCount', 'nvJpgCount', 'ofaCount', 'sharedEngFlag', 'smCount', 'spanStart', 'computeSize']
+setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05, 'gpcCount', field(0, NvU32))
+setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05, 'gfxGpcCount', field(4, NvU32))
+setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05, 'veidCount', field(8, NvU32))
+setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05, 'ceCount', field(12, NvU32))
+setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05, 'nvEncCount', field(16, NvU32))
+setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05, 'nvDecCount', field(20, NvU32))
+setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05, 'nvJpgCount', field(24, NvU32))
+setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05, 'ofaCount', field(28, NvU32))
+setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05, 'sharedEngFlag', field(32, NvU32))
+setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05, 'smCount', field(36, NvU32))
+setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05, 'spanStart', field(40, NvU32))
+setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05, 'computeSize', field(44, NvU32))
+struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05.SIZE = 424
+struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05._fields_ = ['bQuery', 'execPartCount', 'execPartInfo', 'execPartId']
+setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05, 'bQuery', field(0, NvBool))
+setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05, 'execPartCount', field(4, NvU32))
+setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05, 'execPartInfo', field(8, Array(NVC637_CTRL_EXEC_PARTITIONS_INFO_v24_05, 8)))
+setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05, 'execPartId', field(392, Array(NvU32, 8)))
+struct_rpc_ctrl_exec_partitions_create_v24_05.SIZE = 436
+struct_rpc_ctrl_exec_partitions_create_v24_05._fields_ = ['hClient', 'hObject', 'status', 'execPartitionsCreate']
+setattr(struct_rpc_ctrl_exec_partitions_create_v24_05, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_exec_partitions_create_v24_05, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_exec_partitions_create_v24_05, 'status', field(8, NvU32))
+setattr(struct_rpc_ctrl_exec_partitions_create_v24_05, 'execPartitionsCreate', field(12, NVC637_CTRL_EXEC_PARTITIONS_CREATE_PARAMS_v24_05))
 rpc_ctrl_exec_partitions_create_v24_05 = struct_rpc_ctrl_exec_partitions_create_v24_05
 rpc_ctrl_exec_partitions_create_v = struct_rpc_ctrl_exec_partitions_create_v24_05
 class struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05(Struct): pass
 class struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04(Struct): pass
 NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04 = struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04
-struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04._fields_ = [
-  ('imbPhysAddr', NvU64),
-  ('addrSpace', NvU32),
-  ('flaAction', NvU32),
-]
-struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04),
-]
+struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04.SIZE = 16
+struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04._fields_ = ['imbPhysAddr', 'addrSpace', 'flaAction']
+setattr(struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04, 'imbPhysAddr', field(0, NvU64))
+setattr(struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04, 'addrSpace', field(8, NvU32))
+setattr(struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04, 'flaAction', field(12, NvU32))
+struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05.SIZE = 24
+struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05, 'params', field(8, NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS_v13_04))
 rpc_ctrl_fla_setup_instance_mem_block_v21_05 = struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05
 rpc_ctrl_fla_setup_instance_mem_block_v = struct_rpc_ctrl_fla_setup_instance_mem_block_v21_05
 class struct_rpc_ctrl_get_total_hs_credits_v21_08(Struct): pass
 class struct_NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08(Struct): pass
 NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08 = struct_NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08
-struct_NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08._fields_ = [
-  ('numCredits', NvU32),
-]
-struct_rpc_ctrl_get_total_hs_credits_v21_08._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08),
-]
+struct_NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08.SIZE = 4
+struct_NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08._fields_ = ['numCredits']
+setattr(struct_NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08, 'numCredits', field(0, NvU32))
+struct_rpc_ctrl_get_total_hs_credits_v21_08.SIZE = 12
+struct_rpc_ctrl_get_total_hs_credits_v21_08._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_get_total_hs_credits_v21_08, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_get_total_hs_credits_v21_08, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_get_total_hs_credits_v21_08, 'params', field(8, NVB0CC_CTRL_GET_TOTAL_HS_CREDITS_PARAMS_v21_08))
 rpc_ctrl_get_total_hs_credits_v21_08 = struct_rpc_ctrl_get_total_hs_credits_v21_08
 rpc_ctrl_get_total_hs_credits_v = struct_rpc_ctrl_get_total_hs_credits_v21_08
 class struct_rpc_ctrl_get_hs_credits_v21_08(Struct): pass
@@ -3306,28 +3277,28 @@ class struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08(Struct): pass
 NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08 = struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08
 class struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08(Struct): pass
 NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08 = struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08
-struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08._fields_ = [
-  ('status', NvU8),
-  ('entryIndex', NvU8),
-]
+struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08.SIZE = 2
+struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08._fields_ = ['status', 'entryIndex']
+setattr(struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08, 'status', field(0, NvU8))
+setattr(struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08, 'entryIndex', field(1, NvU8))
 class struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08(Struct): pass
 NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08 = struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08
-struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08._fields_ = [
-  ('chipletType', NvU8),
-  ('chipletIndex', NvU8),
-  ('numCredits', NvU16),
-]
-struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08._fields_ = [
-  ('pmaChannelIdx', NvU8),
-  ('numEntries', NvU8),
-  ('statusInfo', NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08),
-  ('creditInfo', (NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08 * 63)),
-]
-struct_rpc_ctrl_get_hs_credits_v21_08._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08),
-]
+struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08.SIZE = 4
+struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08._fields_ = ['chipletType', 'chipletIndex', 'numCredits']
+setattr(struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08, 'chipletType', field(0, NvU8))
+setattr(struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08, 'chipletIndex', field(1, NvU8))
+setattr(struct_NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08, 'numCredits', field(2, NvU16))
+struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08.SIZE = 256
+struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08._fields_ = ['pmaChannelIdx', 'numEntries', 'statusInfo', 'creditInfo']
+setattr(struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08, 'pmaChannelIdx', field(0, NvU8))
+setattr(struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08, 'numEntries', field(1, NvU8))
+setattr(struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08, 'statusInfo', field(2, NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08))
+setattr(struct_NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08, 'creditInfo', field(4, Array(NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08, 63)))
+struct_rpc_ctrl_get_hs_credits_v21_08.SIZE = 264
+struct_rpc_ctrl_get_hs_credits_v21_08._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_get_hs_credits_v21_08, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_get_hs_credits_v21_08, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_get_hs_credits_v21_08, 'params', field(8, NVB0CC_CTRL_GET_HS_CREDITS_PARAMS_v21_08))
 rpc_ctrl_get_hs_credits_v21_08 = struct_rpc_ctrl_get_hs_credits_v21_08
 rpc_ctrl_get_hs_credits_v = struct_rpc_ctrl_get_hs_credits_v21_08
 class struct_rpc_ctrl_reserve_hes_v29_07(Struct): pass
@@ -3337,527 +3308,527 @@ class struct_NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07(Struct): pass
 NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07 = struct_NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07
 class struct_NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07(Struct): pass
 NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07 = struct_NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07
-struct_NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07._fields_ = [
-  ('ctxsw', NvBool),
-]
-struct_NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07._fields_ = [
-  ('cwd', NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07),
-]
-struct_NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07._fields_ = [
-  ('type', NvU32),
-  ('reserveParams', NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07),
-]
-struct_rpc_ctrl_reserve_hes_v29_07._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07),
-]
+struct_NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07.SIZE = 1
+struct_NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07._fields_ = ['ctxsw']
+setattr(struct_NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07, 'ctxsw', field(0, NvBool))
+struct_NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07.SIZE = 1
+struct_NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07._fields_ = ['cwd']
+setattr(struct_NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07, 'cwd', field(0, NVB0CC_CTRL_RESERVE_HES_CWD_PARAMS_v29_07))
+struct_NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07.SIZE = 8
+struct_NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07._fields_ = ['type', 'reserveParams']
+setattr(struct_NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07, 'type', field(0, NvU32))
+setattr(struct_NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07, 'reserveParams', field(4, NVB0CC_CTRL_HES_RESERVATION_UNION_v29_07))
+struct_rpc_ctrl_reserve_hes_v29_07.SIZE = 16
+struct_rpc_ctrl_reserve_hes_v29_07._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_reserve_hes_v29_07, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_reserve_hes_v29_07, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_reserve_hes_v29_07, 'params', field(8, NVB0CC_CTRL_RESERVE_HES_PARAMS_v29_07))
 rpc_ctrl_reserve_hes_v29_07 = struct_rpc_ctrl_reserve_hes_v29_07
 rpc_ctrl_reserve_hes_v = struct_rpc_ctrl_reserve_hes_v29_07
 class struct_rpc_ctrl_release_hes_v29_07(Struct): pass
 class struct_NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07(Struct): pass
 NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07 = struct_NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07
-struct_NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07._fields_ = [
-  ('type', NvU32),
-]
-struct_rpc_ctrl_release_hes_v29_07._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07),
-]
+struct_NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07.SIZE = 4
+struct_NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07._fields_ = ['type']
+setattr(struct_NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07, 'type', field(0, NvU32))
+struct_rpc_ctrl_release_hes_v29_07.SIZE = 12
+struct_rpc_ctrl_release_hes_v29_07._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_release_hes_v29_07, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_release_hes_v29_07, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_release_hes_v29_07, 'params', field(8, NVB0CC_CTRL_RELEASE_HES_PARAMS_v29_07))
 rpc_ctrl_release_hes_v29_07 = struct_rpc_ctrl_release_hes_v29_07
 rpc_ctrl_release_hes_v = struct_rpc_ctrl_release_hes_v29_07
 class struct_rpc_ctrl_reserve_ccu_prof_v29_07(Struct): pass
 class struct_NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07(Struct): pass
 NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07 = struct_NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07
-struct_NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07._fields_ = [
-  ('ctxsw', NvBool),
-]
-struct_rpc_ctrl_reserve_ccu_prof_v29_07._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07),
-]
+struct_NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07.SIZE = 1
+struct_NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07._fields_ = ['ctxsw']
+setattr(struct_NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07, 'ctxsw', field(0, NvBool))
+struct_rpc_ctrl_reserve_ccu_prof_v29_07.SIZE = 12
+struct_rpc_ctrl_reserve_ccu_prof_v29_07._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_reserve_ccu_prof_v29_07, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_reserve_ccu_prof_v29_07, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_reserve_ccu_prof_v29_07, 'params', field(8, NVB0CC_CTRL_RESERVE_CCUPROF_PARAMS_v29_07))
 rpc_ctrl_reserve_ccu_prof_v29_07 = struct_rpc_ctrl_reserve_ccu_prof_v29_07
 rpc_ctrl_reserve_ccu_prof_v = struct_rpc_ctrl_reserve_ccu_prof_v29_07
 class struct_rpc_ctrl_release_ccu_prof_v29_07(Struct): pass
-struct_rpc_ctrl_release_ccu_prof_v29_07._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-]
+struct_rpc_ctrl_release_ccu_prof_v29_07.SIZE = 8
+struct_rpc_ctrl_release_ccu_prof_v29_07._fields_ = ['hClient', 'hObject']
+setattr(struct_rpc_ctrl_release_ccu_prof_v29_07, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_release_ccu_prof_v29_07, 'hObject', field(4, NvHandle))
 rpc_ctrl_release_ccu_prof_v29_07 = struct_rpc_ctrl_release_ccu_prof_v29_07
 rpc_ctrl_release_ccu_prof_v = struct_rpc_ctrl_release_ccu_prof_v29_07
 class struct_rpc_ctrl_set_hs_credits_v21_08(Struct): pass
 class struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08(Struct): pass
 NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08 = struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08
-struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08._fields_ = [
-  ('pmaChannelIdx', NvU8),
-  ('numEntries', NvU8),
-  ('statusInfo', NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08),
-  ('creditInfo', (NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08 * 63)),
-]
-struct_rpc_ctrl_set_hs_credits_v21_08._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08),
-]
+struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08.SIZE = 256
+struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08._fields_ = ['pmaChannelIdx', 'numEntries', 'statusInfo', 'creditInfo']
+setattr(struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08, 'pmaChannelIdx', field(0, NvU8))
+setattr(struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08, 'numEntries', field(1, NvU8))
+setattr(struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08, 'statusInfo', field(2, NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_STATUS_v21_08))
+setattr(struct_NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08, 'creditInfo', field(4, Array(NVB0CC_CTRL_PMA_STREAM_HS_CREDITS_INFO_v21_08, 63)))
+struct_rpc_ctrl_set_hs_credits_v21_08.SIZE = 264
+struct_rpc_ctrl_set_hs_credits_v21_08._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_set_hs_credits_v21_08, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_set_hs_credits_v21_08, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_set_hs_credits_v21_08, 'params', field(8, NVB0CC_CTRL_SET_HS_CREDITS_PARAMS_v21_08))
 rpc_ctrl_set_hs_credits_v21_08 = struct_rpc_ctrl_set_hs_credits_v21_08
 rpc_ctrl_set_hs_credits_v = struct_rpc_ctrl_set_hs_credits_v21_08
 class struct_rpc_ctrl_pm_area_pc_sampler_v21_0B(Struct): pass
-struct_rpc_ctrl_pm_area_pc_sampler_v21_0B._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('cmd', NvU32),
-]
+struct_rpc_ctrl_pm_area_pc_sampler_v21_0B.SIZE = 12
+struct_rpc_ctrl_pm_area_pc_sampler_v21_0B._fields_ = ['hClient', 'hObject', 'cmd']
+setattr(struct_rpc_ctrl_pm_area_pc_sampler_v21_0B, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_pm_area_pc_sampler_v21_0B, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_pm_area_pc_sampler_v21_0B, 'cmd', field(8, NvU32))
 rpc_ctrl_pm_area_pc_sampler_v21_0B = struct_rpc_ctrl_pm_area_pc_sampler_v21_0B
 rpc_ctrl_pm_area_pc_sampler_v = struct_rpc_ctrl_pm_area_pc_sampler_v21_0B
 class struct_rpc_ctrl_exec_partitions_delete_v1F_0A(Struct): pass
 class struct_NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05(Struct): pass
 NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05 = struct_NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05
-struct_NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05._fields_ = [
-  ('execPartCount', NvU32),
-  ('execPartId', (NvU32 * 8)),
-]
-struct_rpc_ctrl_exec_partitions_delete_v1F_0A._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('execPartitionsDelete', NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05),
-]
+struct_NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05.SIZE = 36
+struct_NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05._fields_ = ['execPartCount', 'execPartId']
+setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05, 'execPartCount', field(0, NvU32))
+setattr(struct_NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05, 'execPartId', field(4, Array(NvU32, 8)))
+struct_rpc_ctrl_exec_partitions_delete_v1F_0A.SIZE = 44
+struct_rpc_ctrl_exec_partitions_delete_v1F_0A._fields_ = ['hClient', 'hObject', 'execPartitionsDelete']
+setattr(struct_rpc_ctrl_exec_partitions_delete_v1F_0A, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_exec_partitions_delete_v1F_0A, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_exec_partitions_delete_v1F_0A, 'execPartitionsDelete', field(8, NVC637_CTRL_EXEC_PARTITIONS_DELETE_PARAMS_v18_05))
 rpc_ctrl_exec_partitions_delete_v1F_0A = struct_rpc_ctrl_exec_partitions_delete_v1F_0A
 rpc_ctrl_exec_partitions_delete_v = struct_rpc_ctrl_exec_partitions_delete_v1F_0A
 class struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A(Struct): pass
 class struct_NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00(Struct): pass
 NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00 = struct_NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00
-struct_NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00._fields_ = [
-  ('workSubmitToken', NvU32),
-]
-struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('workSubmitToken', NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00),
-]
+struct_NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00.SIZE = 4
+struct_NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00._fields_ = ['workSubmitToken']
+setattr(struct_NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00, 'workSubmitToken', field(0, NvU32))
+struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A.SIZE = 12
+struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A._fields_ = ['hClient', 'hObject', 'workSubmitToken']
+setattr(struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A, 'workSubmitToken', field(8, NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS_v08_00))
 rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A = struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A
 rpc_ctrl_gpfifo_get_work_submit_token_v = struct_rpc_ctrl_gpfifo_get_work_submit_token_v1F_0A
 class struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A(Struct): pass
 class struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04(Struct): pass
 NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04 = struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04
-struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04._fields_ = [
-  ('index', NvU32),
-]
-struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('setWorkSubmitTokenIndex', NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04),
-]
+struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04.SIZE = 4
+struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04._fields_ = ['index']
+setattr(struct_NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04, 'index', field(0, NvU32))
+struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A.SIZE = 12
+struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A._fields_ = ['hClient', 'hObject', 'setWorkSubmitTokenIndex']
+setattr(struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A, 'setWorkSubmitTokenIndex', field(8, NVC36F_CTRL_GPFIFO_SET_WORK_SUBMIT_TOKEN_NOTIF_INDEX_PARAMS_v16_04))
 rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A = struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A
 rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v = struct_rpc_ctrl_gpfifo_set_work_submit_token_notif_index_v1F_0A
 class struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D(Struct): pass
 class struct_NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B(Struct): pass
 NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B = struct_NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B
-struct_NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B._fields_ = [
-  ('eccMask', NvU32),
-  ('nvlinkMask', NvU32),
-]
-struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('vfErrContIntrMask', NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B),
-]
+struct_NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B.SIZE = 8
+struct_NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B._fields_ = ['eccMask', 'nvlinkMask']
+setattr(struct_NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B, 'eccMask', field(0, NvU32))
+setattr(struct_NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B, 'nvlinkMask', field(4, NvU32))
+struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D.SIZE = 16
+struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D._fields_ = ['hClient', 'hObject', 'vfErrContIntrMask']
+setattr(struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D, 'vfErrContIntrMask', field(8, NV90E6_CTRL_MASTER_GET_VIRTUAL_FUNCTION_ERROR_CONT_INTR_MASK_PARAMS_v18_0B))
 rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D = struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D
 rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v = struct_rpc_ctrl_master_get_virtual_function_error_cont_intr_mask_v1F_0D
 class struct_rpc_save_hibernation_data_v1E_0E(Struct): pass
-struct_rpc_save_hibernation_data_v1E_0E._fields_ = [
-  ('remainedBytes', NvU32),
-  ('payload', (NvU8 * 0)),
-]
+struct_rpc_save_hibernation_data_v1E_0E.SIZE = 4
+struct_rpc_save_hibernation_data_v1E_0E._fields_ = ['remainedBytes', 'payload']
+setattr(struct_rpc_save_hibernation_data_v1E_0E, 'remainedBytes', field(0, NvU32))
+setattr(struct_rpc_save_hibernation_data_v1E_0E, 'payload', field(4, Array(NvU8, 0)))
 rpc_save_hibernation_data_v1E_0E = struct_rpc_save_hibernation_data_v1E_0E
 rpc_save_hibernation_data_v = struct_rpc_save_hibernation_data_v1E_0E
 class struct_rpc_restore_hibernation_data_v1E_0E(Struct): pass
-struct_rpc_restore_hibernation_data_v1E_0E._fields_ = [
-  ('remainedBytes', NvU32),
-  ('payload', (NvU8 * 0)),
-]
+struct_rpc_restore_hibernation_data_v1E_0E.SIZE = 4
+struct_rpc_restore_hibernation_data_v1E_0E._fields_ = ['remainedBytes', 'payload']
+setattr(struct_rpc_restore_hibernation_data_v1E_0E, 'remainedBytes', field(0, NvU32))
+setattr(struct_rpc_restore_hibernation_data_v1E_0E, 'payload', field(4, Array(NvU8, 0)))
 rpc_restore_hibernation_data_v1E_0E = struct_rpc_restore_hibernation_data_v1E_0E
 rpc_restore_hibernation_data_v = struct_rpc_restore_hibernation_data_v1E_0E
 class struct_rpc_ctrl_get_mmu_debug_mode_v1E_06(Struct): pass
 class struct_NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06(Struct): pass
 NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06 = struct_NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06
-struct_NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06._fields_ = [
-  ('bMode', NvBool),
-]
-struct_rpc_ctrl_get_mmu_debug_mode_v1E_06._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06),
-]
+struct_NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06.SIZE = 1
+struct_NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06._fields_ = ['bMode']
+setattr(struct_NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06, 'bMode', field(0, NvBool))
+struct_rpc_ctrl_get_mmu_debug_mode_v1E_06.SIZE = 12
+struct_rpc_ctrl_get_mmu_debug_mode_v1E_06._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_get_mmu_debug_mode_v1E_06, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_get_mmu_debug_mode_v1E_06, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_get_mmu_debug_mode_v1E_06, 'params', field(8, NV0090_CTRL_GET_MMU_DEBUG_MODE_PARAMS_v1E_06))
 rpc_ctrl_get_mmu_debug_mode_v1E_06 = struct_rpc_ctrl_get_mmu_debug_mode_v1E_06
 rpc_ctrl_get_mmu_debug_mode_v = struct_rpc_ctrl_get_mmu_debug_mode_v1E_06
 class struct_rpc_disable_channels_v1E_0B(Struct): pass
-struct_rpc_disable_channels_v1E_0B._fields_ = [
-  ('bDisable', NvU32),
-]
+struct_rpc_disable_channels_v1E_0B.SIZE = 4
+struct_rpc_disable_channels_v1E_0B._fields_ = ['bDisable']
+setattr(struct_rpc_disable_channels_v1E_0B, 'bDisable', field(0, NvU32))
 rpc_disable_channels_v1E_0B = struct_rpc_disable_channels_v1E_0B
 rpc_disable_channels_v = struct_rpc_disable_channels_v1E_0B
 class struct_rpc_ctrl_gpu_migratable_ops_v21_07(Struct): pass
 class struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07(Struct): pass
 NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07 = struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07
-struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07._fields_ = [
-  ('hClientTarget', NvHandle),
-  ('hChannelTarget', NvHandle),
-  ('bNonTransactional', NvU32),
-  ('regOpCount', NvU32),
-  ('smIds', (NvU32 * 50)),
-  ('regOps', (NV2080_CTRL_GPU_REG_OP_v03_00 * 50)),
-  ('grRouteInfo', NV2080_CTRL_GR_ROUTE_INFO_v12_01),
-]
-struct_rpc_ctrl_gpu_migratable_ops_v21_07._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07),
-]
+struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07.SIZE = 1832
+struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07._fields_ = ['hClientTarget', 'hChannelTarget', 'bNonTransactional', 'regOpCount', 'smIds', 'regOps', 'grRouteInfo']
+setattr(struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07, 'hClientTarget', field(0, NvHandle))
+setattr(struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07, 'hChannelTarget', field(4, NvHandle))
+setattr(struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07, 'bNonTransactional', field(8, NvU32))
+setattr(struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07, 'regOpCount', field(12, NvU32))
+setattr(struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07, 'smIds', field(16, Array(NvU32, 50)))
+setattr(struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07, 'regOps', field(216, Array(NV2080_CTRL_GPU_REG_OP_v03_00, 50)))
+setattr(struct_NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07, 'grRouteInfo', field(1816, NV2080_CTRL_GR_ROUTE_INFO_v12_01))
+struct_rpc_ctrl_gpu_migratable_ops_v21_07.SIZE = 1840
+struct_rpc_ctrl_gpu_migratable_ops_v21_07._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_gpu_migratable_ops_v21_07, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_gpu_migratable_ops_v21_07, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_gpu_migratable_ops_v21_07, 'ctrlParams', field(8, NV2080_CTRL_GPU_MIGRATABLE_OPS_PARAMS_v21_07))
 rpc_ctrl_gpu_migratable_ops_v21_07 = struct_rpc_ctrl_gpu_migratable_ops_v21_07
 rpc_ctrl_gpu_migratable_ops_v = struct_rpc_ctrl_gpu_migratable_ops_v21_07
 class struct_rpc_invalidate_tlb_v23_03(Struct): pass
-struct_rpc_invalidate_tlb_v23_03._fields_ = [
-  ('pdbAddress', NvU64),
-  ('regVal', NvU32),
-]
+struct_rpc_invalidate_tlb_v23_03.SIZE = 16
+struct_rpc_invalidate_tlb_v23_03._fields_ = ['pdbAddress', 'regVal']
+setattr(struct_rpc_invalidate_tlb_v23_03, 'pdbAddress', field(0, NvU64))
+setattr(struct_rpc_invalidate_tlb_v23_03, 'regVal', field(8, NvU32))
 rpc_invalidate_tlb_v23_03 = struct_rpc_invalidate_tlb_v23_03
 rpc_invalidate_tlb_v = struct_rpc_invalidate_tlb_v23_03
 class struct_rpc_get_brand_caps_v25_12(Struct): pass
-struct_rpc_get_brand_caps_v25_12._fields_ = [
-  ('brands', NvU32),
-]
+struct_rpc_get_brand_caps_v25_12.SIZE = 4
+struct_rpc_get_brand_caps_v25_12._fields_ = ['brands']
+setattr(struct_rpc_get_brand_caps_v25_12, 'brands', field(0, NvU32))
 rpc_get_brand_caps_v25_12 = struct_rpc_get_brand_caps_v25_12
 rpc_get_brand_caps_v = struct_rpc_get_brand_caps_v25_12
 class struct_rpc_gsp_set_system_info_v17_00(Struct): pass
-struct_rpc_gsp_set_system_info_v17_00._fields_ = [
-  ('data', NvU32),
-]
+struct_rpc_gsp_set_system_info_v17_00.SIZE = 4
+struct_rpc_gsp_set_system_info_v17_00._fields_ = ['data']
+setattr(struct_rpc_gsp_set_system_info_v17_00, 'data', field(0, NvU32))
 rpc_gsp_set_system_info_v17_00 = struct_rpc_gsp_set_system_info_v17_00
 rpc_gsp_set_system_info_v = struct_rpc_gsp_set_system_info_v17_00
 class struct_rpc_gsp_rm_alloc_v03_00(Struct): pass
-struct_rpc_gsp_rm_alloc_v03_00._fields_ = [
-  ('hClient', NvHandle),
-  ('hParent', NvHandle),
-  ('hObject', NvHandle),
-  ('hClass', NvU32),
-  ('status', NvU32),
-  ('paramsSize', NvU32),
-  ('flags', NvU32),
-  ('reserved', (NvU8 * 4)),
-  ('params', (NvU8 * 0)),
-]
+struct_rpc_gsp_rm_alloc_v03_00.SIZE = 32
+struct_rpc_gsp_rm_alloc_v03_00._fields_ = ['hClient', 'hParent', 'hObject', 'hClass', 'status', 'paramsSize', 'flags', 'reserved', 'params']
+setattr(struct_rpc_gsp_rm_alloc_v03_00, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_gsp_rm_alloc_v03_00, 'hParent', field(4, NvHandle))
+setattr(struct_rpc_gsp_rm_alloc_v03_00, 'hObject', field(8, NvHandle))
+setattr(struct_rpc_gsp_rm_alloc_v03_00, 'hClass', field(12, NvU32))
+setattr(struct_rpc_gsp_rm_alloc_v03_00, 'status', field(16, NvU32))
+setattr(struct_rpc_gsp_rm_alloc_v03_00, 'paramsSize', field(20, NvU32))
+setattr(struct_rpc_gsp_rm_alloc_v03_00, 'flags', field(24, NvU32))
+setattr(struct_rpc_gsp_rm_alloc_v03_00, 'reserved', field(28, Array(NvU8, 4)))
+setattr(struct_rpc_gsp_rm_alloc_v03_00, 'params', field(32, Array(NvU8, 0)))
 rpc_gsp_rm_alloc_v03_00 = struct_rpc_gsp_rm_alloc_v03_00
 rpc_gsp_rm_alloc_v = struct_rpc_gsp_rm_alloc_v03_00
 class struct_rpc_gsp_rm_control_v03_00(Struct): pass
-struct_rpc_gsp_rm_control_v03_00._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('cmd', NvU32),
-  ('status', NvU32),
-  ('paramsSize', NvU32),
-  ('flags', NvU32),
-  ('params', (NvU8 * 0)),
-]
+struct_rpc_gsp_rm_control_v03_00.SIZE = 24
+struct_rpc_gsp_rm_control_v03_00._fields_ = ['hClient', 'hObject', 'cmd', 'status', 'paramsSize', 'flags', 'params']
+setattr(struct_rpc_gsp_rm_control_v03_00, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_gsp_rm_control_v03_00, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_gsp_rm_control_v03_00, 'cmd', field(8, NvU32))
+setattr(struct_rpc_gsp_rm_control_v03_00, 'status', field(12, NvU32))
+setattr(struct_rpc_gsp_rm_control_v03_00, 'paramsSize', field(16, NvU32))
+setattr(struct_rpc_gsp_rm_control_v03_00, 'flags', field(20, NvU32))
+setattr(struct_rpc_gsp_rm_control_v03_00, 'params', field(24, Array(NvU8, 0)))
 rpc_gsp_rm_control_v03_00 = struct_rpc_gsp_rm_control_v03_00
 rpc_gsp_rm_control_v = struct_rpc_gsp_rm_control_v03_00
 class struct_rpc_dump_protobuf_component_v18_12(Struct): pass
-struct_rpc_dump_protobuf_component_v18_12._fields_ = [
-  ('component', NvU16),
-  ('nvDumpType', NvU8),
-  ('countOnly', NvBool),
-  ('bugCheckCode', NvU32),
-  ('internalCode', NvU32),
-  ('bufferSize', NvU32),
-  ('blob', (NvU8 * 0)),
-]
+struct_rpc_dump_protobuf_component_v18_12.SIZE = 16
+struct_rpc_dump_protobuf_component_v18_12._fields_ = ['component', 'nvDumpType', 'countOnly', 'bugCheckCode', 'internalCode', 'bufferSize', 'blob']
+setattr(struct_rpc_dump_protobuf_component_v18_12, 'component', field(0, NvU16))
+setattr(struct_rpc_dump_protobuf_component_v18_12, 'nvDumpType', field(2, NvU8))
+setattr(struct_rpc_dump_protobuf_component_v18_12, 'countOnly', field(3, NvBool))
+setattr(struct_rpc_dump_protobuf_component_v18_12, 'bugCheckCode', field(4, NvU32))
+setattr(struct_rpc_dump_protobuf_component_v18_12, 'internalCode', field(8, NvU32))
+setattr(struct_rpc_dump_protobuf_component_v18_12, 'bufferSize', field(12, NvU32))
+setattr(struct_rpc_dump_protobuf_component_v18_12, 'blob', field(16, Array(NvU8, 0)))
 rpc_dump_protobuf_component_v18_12 = struct_rpc_dump_protobuf_component_v18_12
 rpc_dump_protobuf_component_v = struct_rpc_dump_protobuf_component_v18_12
 class struct_rpc_run_cpu_sequencer_v17_00(Struct): pass
-struct_rpc_run_cpu_sequencer_v17_00._fields_ = [
-  ('bufferSizeDWord', NvU32),
-  ('cmdIndex', NvU32),
-  ('regSaveArea', (NvU32 * 8)),
-  ('commandBuffer', (NvU32 * 0)),
-]
+struct_rpc_run_cpu_sequencer_v17_00.SIZE = 40
+struct_rpc_run_cpu_sequencer_v17_00._fields_ = ['bufferSizeDWord', 'cmdIndex', 'regSaveArea', 'commandBuffer']
+setattr(struct_rpc_run_cpu_sequencer_v17_00, 'bufferSizeDWord', field(0, NvU32))
+setattr(struct_rpc_run_cpu_sequencer_v17_00, 'cmdIndex', field(4, NvU32))
+setattr(struct_rpc_run_cpu_sequencer_v17_00, 'regSaveArea', field(8, Array(NvU32, 8)))
+setattr(struct_rpc_run_cpu_sequencer_v17_00, 'commandBuffer', field(40, Array(NvU32, 0)))
 rpc_run_cpu_sequencer_v17_00 = struct_rpc_run_cpu_sequencer_v17_00
 rpc_run_cpu_sequencer_v = struct_rpc_run_cpu_sequencer_v17_00
 class struct_rpc_post_event_v17_00(Struct): pass
-struct_rpc_post_event_v17_00._fields_ = [
-  ('hClient', NvHandle),
-  ('hEvent', NvHandle),
-  ('notifyIndex', NvU32),
-  ('data', NvU32),
-  ('info16', NvU16),
-  ('status', NvU32),
-  ('eventDataSize', NvU32),
-  ('bNotifyList', NvBool),
-  ('eventData', (NvU8 * 0)),
-]
+struct_rpc_post_event_v17_00.SIZE = 32
+struct_rpc_post_event_v17_00._fields_ = ['hClient', 'hEvent', 'notifyIndex', 'data', 'info16', 'status', 'eventDataSize', 'bNotifyList', 'eventData']
+setattr(struct_rpc_post_event_v17_00, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_post_event_v17_00, 'hEvent', field(4, NvHandle))
+setattr(struct_rpc_post_event_v17_00, 'notifyIndex', field(8, NvU32))
+setattr(struct_rpc_post_event_v17_00, 'data', field(12, NvU32))
+setattr(struct_rpc_post_event_v17_00, 'info16', field(16, NvU16))
+setattr(struct_rpc_post_event_v17_00, 'status', field(20, NvU32))
+setattr(struct_rpc_post_event_v17_00, 'eventDataSize', field(24, NvU32))
+setattr(struct_rpc_post_event_v17_00, 'bNotifyList', field(28, NvBool))
+setattr(struct_rpc_post_event_v17_00, 'eventData', field(29, Array(NvU8, 0)))
 rpc_post_event_v17_00 = struct_rpc_post_event_v17_00
 rpc_post_event_v = struct_rpc_post_event_v17_00
 class struct_rpc_rc_triggered_v17_02(Struct): pass
-struct_rpc_rc_triggered_v17_02._fields_ = [
-  ('nv2080EngineType', NvU32),
-  ('chid', NvU32),
-  ('gfid', NvU32),
-  ('exceptLevel', NvU32),
-  ('exceptType', NvU32),
-  ('scope', NvU32),
-  ('partitionAttributionId', NvU16),
-  ('mmuFaultAddrLo', NvU32),
-  ('mmuFaultAddrHi', NvU32),
-  ('mmuFaultType', NvU32),
-  ('bCallbackNeeded', NvBool),
-  ('rcJournalBufferSize', NvU32),
-  ('rcJournalBuffer', (NvU8 * 0)),
-]
+struct_rpc_rc_triggered_v17_02.SIZE = 48
+struct_rpc_rc_triggered_v17_02._fields_ = ['nv2080EngineType', 'chid', 'gfid', 'exceptLevel', 'exceptType', 'scope', 'partitionAttributionId', 'mmuFaultAddrLo', 'mmuFaultAddrHi', 'mmuFaultType', 'bCallbackNeeded', 'rcJournalBufferSize', 'rcJournalBuffer']
+setattr(struct_rpc_rc_triggered_v17_02, 'nv2080EngineType', field(0, NvU32))
+setattr(struct_rpc_rc_triggered_v17_02, 'chid', field(4, NvU32))
+setattr(struct_rpc_rc_triggered_v17_02, 'gfid', field(8, NvU32))
+setattr(struct_rpc_rc_triggered_v17_02, 'exceptLevel', field(12, NvU32))
+setattr(struct_rpc_rc_triggered_v17_02, 'exceptType', field(16, NvU32))
+setattr(struct_rpc_rc_triggered_v17_02, 'scope', field(20, NvU32))
+setattr(struct_rpc_rc_triggered_v17_02, 'partitionAttributionId', field(24, NvU16))
+setattr(struct_rpc_rc_triggered_v17_02, 'mmuFaultAddrLo', field(28, NvU32))
+setattr(struct_rpc_rc_triggered_v17_02, 'mmuFaultAddrHi', field(32, NvU32))
+setattr(struct_rpc_rc_triggered_v17_02, 'mmuFaultType', field(36, NvU32))
+setattr(struct_rpc_rc_triggered_v17_02, 'bCallbackNeeded', field(40, NvBool))
+setattr(struct_rpc_rc_triggered_v17_02, 'rcJournalBufferSize', field(44, NvU32))
+setattr(struct_rpc_rc_triggered_v17_02, 'rcJournalBuffer', field(48, Array(NvU8, 0)))
 rpc_rc_triggered_v17_02 = struct_rpc_rc_triggered_v17_02
 rpc_rc_triggered_v = struct_rpc_rc_triggered_v17_02
 class struct_rpc_os_error_log_v17_00(Struct): pass
-struct_rpc_os_error_log_v17_00._fields_ = [
-  ('exceptType', NvU32),
-  ('runlistId', NvU32),
-  ('chid', NvU32),
-  ('errString', (ctypes.c_char * 256)),
-]
+struct_rpc_os_error_log_v17_00.SIZE = 268
+struct_rpc_os_error_log_v17_00._fields_ = ['exceptType', 'runlistId', 'chid', 'errString']
+setattr(struct_rpc_os_error_log_v17_00, 'exceptType', field(0, NvU32))
+setattr(struct_rpc_os_error_log_v17_00, 'runlistId', field(4, NvU32))
+setattr(struct_rpc_os_error_log_v17_00, 'chid', field(8, NvU32))
+setattr(struct_rpc_os_error_log_v17_00, 'errString', field(12, Array(ctypes.c_char, 256)))
 rpc_os_error_log_v17_00 = struct_rpc_os_error_log_v17_00
 rpc_os_error_log_v = struct_rpc_os_error_log_v17_00
 class struct_rpc_rg_line_intr_v17_00(Struct): pass
-struct_rpc_rg_line_intr_v17_00._fields_ = [
-  ('head', NvU32),
-  ('rgIntr', NvU32),
-]
+struct_rpc_rg_line_intr_v17_00.SIZE = 8
+struct_rpc_rg_line_intr_v17_00._fields_ = ['head', 'rgIntr']
+setattr(struct_rpc_rg_line_intr_v17_00, 'head', field(0, NvU32))
+setattr(struct_rpc_rg_line_intr_v17_00, 'rgIntr', field(4, NvU32))
 rpc_rg_line_intr_v17_00 = struct_rpc_rg_line_intr_v17_00
 rpc_rg_line_intr_v = struct_rpc_rg_line_intr_v17_00
 class struct_rpc_display_modeset_v01_00(Struct): pass
-struct_rpc_display_modeset_v01_00._fields_ = [
-  ('bModesetStart', NvBool),
-  ('minRequiredIsoBandwidthKBPS', NvU32),
-  ('minRequiredFloorBandwidthKBPS', NvU32),
-]
+struct_rpc_display_modeset_v01_00.SIZE = 12
+struct_rpc_display_modeset_v01_00._fields_ = ['bModesetStart', 'minRequiredIsoBandwidthKBPS', 'minRequiredFloorBandwidthKBPS']
+setattr(struct_rpc_display_modeset_v01_00, 'bModesetStart', field(0, NvBool))
+setattr(struct_rpc_display_modeset_v01_00, 'minRequiredIsoBandwidthKBPS', field(4, NvU32))
+setattr(struct_rpc_display_modeset_v01_00, 'minRequiredFloorBandwidthKBPS', field(8, NvU32))
 rpc_display_modeset_v01_00 = struct_rpc_display_modeset_v01_00
 rpc_display_modeset_v = struct_rpc_display_modeset_v01_00
 class struct_rpc_gpuacct_perfmon_util_samples_v1F_0E(Struct): pass
 class struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E(Struct): pass
 NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E = struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E
-struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E._fields_ = [
-  ('type', NvU8),
-  ('bufSize', NvU32),
-  ('count', NvU32),
-  ('tracker', NvU32),
-  ('samples', (NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E * 72)),
-]
-struct_rpc_gpuacct_perfmon_util_samples_v1F_0E._fields_ = [
-  ('params', NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E),
-]
+struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E.SIZE = 4048
+struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E._fields_ = ['type', 'bufSize', 'count', 'tracker', 'samples']
+setattr(struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E, 'type', field(0, NvU8))
+setattr(struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E, 'bufSize', field(4, NvU32))
+setattr(struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E, 'count', field(8, NvU32))
+setattr(struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E, 'tracker', field(12, NvU32))
+setattr(struct_NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E, 'samples', field(16, Array(NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE_v1F_0E, 72)))
+struct_rpc_gpuacct_perfmon_util_samples_v1F_0E.SIZE = 4048
+struct_rpc_gpuacct_perfmon_util_samples_v1F_0E._fields_ = ['params']
+setattr(struct_rpc_gpuacct_perfmon_util_samples_v1F_0E, 'params', field(0, NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS_v1F_0E))
 rpc_gpuacct_perfmon_util_samples_v1F_0E = struct_rpc_gpuacct_perfmon_util_samples_v1F_0E
 rpc_gpuacct_perfmon_util_samples_v = struct_rpc_gpuacct_perfmon_util_samples_v1F_0E
 class struct_rpc_vgpu_gsp_plugin_triggered_v17_00(Struct): pass
-struct_rpc_vgpu_gsp_plugin_triggered_v17_00._fields_ = [
-  ('gfid', NvU32),
-  ('notifyIndex', NvU32),
-]
+struct_rpc_vgpu_gsp_plugin_triggered_v17_00.SIZE = 8
+struct_rpc_vgpu_gsp_plugin_triggered_v17_00._fields_ = ['gfid', 'notifyIndex']
+setattr(struct_rpc_vgpu_gsp_plugin_triggered_v17_00, 'gfid', field(0, NvU32))
+setattr(struct_rpc_vgpu_gsp_plugin_triggered_v17_00, 'notifyIndex', field(4, NvU32))
 rpc_vgpu_gsp_plugin_triggered_v17_00 = struct_rpc_vgpu_gsp_plugin_triggered_v17_00
 rpc_vgpu_gsp_plugin_triggered_v = struct_rpc_vgpu_gsp_plugin_triggered_v17_00
 class struct_rpc_vgpu_config_event_v17_00(Struct): pass
-struct_rpc_vgpu_config_event_v17_00._fields_ = [
-  ('notifyIndex', NvU32),
-]
+struct_rpc_vgpu_config_event_v17_00.SIZE = 4
+struct_rpc_vgpu_config_event_v17_00._fields_ = ['notifyIndex']
+setattr(struct_rpc_vgpu_config_event_v17_00, 'notifyIndex', field(0, NvU32))
 rpc_vgpu_config_event_v17_00 = struct_rpc_vgpu_config_event_v17_00
 rpc_vgpu_config_event_v = struct_rpc_vgpu_config_event_v17_00
 class struct_rpc_dce_rm_init_v01_00(Struct): pass
-struct_rpc_dce_rm_init_v01_00._fields_ = [
-  ('bInit', NvBool),
-  ('hInternalClient', NvU32),
-]
+struct_rpc_dce_rm_init_v01_00.SIZE = 8
+struct_rpc_dce_rm_init_v01_00._fields_ = ['bInit', 'hInternalClient']
+setattr(struct_rpc_dce_rm_init_v01_00, 'bInit', field(0, NvBool))
+setattr(struct_rpc_dce_rm_init_v01_00, 'hInternalClient', field(4, NvU32))
 rpc_dce_rm_init_v01_00 = struct_rpc_dce_rm_init_v01_00
 rpc_dce_rm_init_v = struct_rpc_dce_rm_init_v01_00
 class struct_rpc_sim_read_v1E_01(Struct): pass
-struct_rpc_sim_read_v1E_01._fields_ = [
-  ('path', (ctypes.c_char * 256)),
-  ('index', NvU32),
-  ('count', NvU32),
-]
+struct_rpc_sim_read_v1E_01.SIZE = 264
+struct_rpc_sim_read_v1E_01._fields_ = ['path', 'index', 'count']
+setattr(struct_rpc_sim_read_v1E_01, 'path', field(0, Array(ctypes.c_char, 256)))
+setattr(struct_rpc_sim_read_v1E_01, 'index', field(256, NvU32))
+setattr(struct_rpc_sim_read_v1E_01, 'count', field(260, NvU32))
 rpc_sim_read_v1E_01 = struct_rpc_sim_read_v1E_01
 rpc_sim_read_v = struct_rpc_sim_read_v1E_01
 class struct_rpc_sim_write_v1E_01(Struct): pass
-struct_rpc_sim_write_v1E_01._fields_ = [
-  ('path', (ctypes.c_char * 256)),
-  ('index', NvU32),
-  ('count', NvU32),
-  ('data', NvU32),
-]
+struct_rpc_sim_write_v1E_01.SIZE = 268
+struct_rpc_sim_write_v1E_01._fields_ = ['path', 'index', 'count', 'data']
+setattr(struct_rpc_sim_write_v1E_01, 'path', field(0, Array(ctypes.c_char, 256)))
+setattr(struct_rpc_sim_write_v1E_01, 'index', field(256, NvU32))
+setattr(struct_rpc_sim_write_v1E_01, 'count', field(260, NvU32))
+setattr(struct_rpc_sim_write_v1E_01, 'data', field(264, NvU32))
 rpc_sim_write_v1E_01 = struct_rpc_sim_write_v1E_01
 rpc_sim_write_v = struct_rpc_sim_write_v1E_01
 class struct_rpc_ucode_libos_print_v1E_08(Struct): pass
-struct_rpc_ucode_libos_print_v1E_08._fields_ = [
-  ('ucodeEngDesc', NvU32),
-  ('libosPrintBufSize', NvU32),
-  ('libosPrintBuf', (NvU8 * 0)),
-]
+struct_rpc_ucode_libos_print_v1E_08.SIZE = 8
+struct_rpc_ucode_libos_print_v1E_08._fields_ = ['ucodeEngDesc', 'libosPrintBufSize', 'libosPrintBuf']
+setattr(struct_rpc_ucode_libos_print_v1E_08, 'ucodeEngDesc', field(0, NvU32))
+setattr(struct_rpc_ucode_libos_print_v1E_08, 'libosPrintBufSize', field(4, NvU32))
+setattr(struct_rpc_ucode_libos_print_v1E_08, 'libosPrintBuf', field(8, Array(NvU8, 0)))
 rpc_ucode_libos_print_v1E_08 = struct_rpc_ucode_libos_print_v1E_08
 rpc_ucode_libos_print_v = struct_rpc_ucode_libos_print_v1E_08
 class struct_rpc_init_done_v17_00(Struct): pass
-struct_rpc_init_done_v17_00._fields_ = [
-  ('not_used', NvU32),
-]
+struct_rpc_init_done_v17_00.SIZE = 4
+struct_rpc_init_done_v17_00._fields_ = ['not_used']
+setattr(struct_rpc_init_done_v17_00, 'not_used', field(0, NvU32))
 rpc_init_done_v17_00 = struct_rpc_init_done_v17_00
 rpc_init_done_v = struct_rpc_init_done_v17_00
 class struct_rpc_semaphore_schedule_callback_v17_00(Struct): pass
-struct_rpc_semaphore_schedule_callback_v17_00._fields_ = [
-  ('GPUVA', NvU64),
-  ('hVASpace', NvU32),
-  ('ReleaseValue', NvU32),
-  ('Flags', NvU32),
-  ('completionStatus', NvU32),
-  ('hClient', NvHandle),
-  ('hEvent', NvHandle),
-]
+struct_rpc_semaphore_schedule_callback_v17_00.SIZE = 32
+struct_rpc_semaphore_schedule_callback_v17_00._fields_ = ['GPUVA', 'hVASpace', 'ReleaseValue', 'Flags', 'completionStatus', 'hClient', 'hEvent']
+setattr(struct_rpc_semaphore_schedule_callback_v17_00, 'GPUVA', field(0, NvU64))
+setattr(struct_rpc_semaphore_schedule_callback_v17_00, 'hVASpace', field(8, NvU32))
+setattr(struct_rpc_semaphore_schedule_callback_v17_00, 'ReleaseValue', field(12, NvU32))
+setattr(struct_rpc_semaphore_schedule_callback_v17_00, 'Flags', field(16, NvU32))
+setattr(struct_rpc_semaphore_schedule_callback_v17_00, 'completionStatus', field(20, NvU32))
+setattr(struct_rpc_semaphore_schedule_callback_v17_00, 'hClient', field(24, NvHandle))
+setattr(struct_rpc_semaphore_schedule_callback_v17_00, 'hEvent', field(28, NvHandle))
 rpc_semaphore_schedule_callback_v17_00 = struct_rpc_semaphore_schedule_callback_v17_00
 rpc_semaphore_schedule_callback_v = struct_rpc_semaphore_schedule_callback_v17_00
 class struct_rpc_timed_semaphore_release_v01_00(Struct): pass
-struct_rpc_timed_semaphore_release_v01_00._fields_ = [
-  ('semaphoreVA', NvU64),
-  ('notifierVA', NvU64),
-  ('hVASpace', NvU32),
-  ('releaseValue', NvU32),
-  ('completionStatus', NvU32),
-  ('hClient', NvHandle),
-  ('hDevice', NvHandle),
-]
+struct_rpc_timed_semaphore_release_v01_00.SIZE = 40
+struct_rpc_timed_semaphore_release_v01_00._fields_ = ['semaphoreVA', 'notifierVA', 'hVASpace', 'releaseValue', 'completionStatus', 'hClient', 'hDevice']
+setattr(struct_rpc_timed_semaphore_release_v01_00, 'semaphoreVA', field(0, NvU64))
+setattr(struct_rpc_timed_semaphore_release_v01_00, 'notifierVA', field(8, NvU64))
+setattr(struct_rpc_timed_semaphore_release_v01_00, 'hVASpace', field(16, NvU32))
+setattr(struct_rpc_timed_semaphore_release_v01_00, 'releaseValue', field(20, NvU32))
+setattr(struct_rpc_timed_semaphore_release_v01_00, 'completionStatus', field(24, NvU32))
+setattr(struct_rpc_timed_semaphore_release_v01_00, 'hClient', field(28, NvHandle))
+setattr(struct_rpc_timed_semaphore_release_v01_00, 'hDevice', field(32, NvHandle))
 rpc_timed_semaphore_release_v01_00 = struct_rpc_timed_semaphore_release_v01_00
 rpc_timed_semaphore_release_v = struct_rpc_timed_semaphore_release_v01_00
 class struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00(Struct): pass
 class struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00(Struct): pass
 NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00 = struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00
-struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00._fields_ = [
-  ('flags', NvU32),
-  ('bBridgeless', NvBool),
-  ('currLimits', (NvU32 * 2)),
-]
-struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00._fields_ = [
-  ('params', NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00),
-]
+struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00.SIZE = 16
+struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00._fields_ = ['flags', 'bBridgeless', 'currLimits']
+setattr(struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00, 'flags', field(0, NvU32))
+setattr(struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00, 'bBridgeless', field(4, NvBool))
+setattr(struct_NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00, 'currLimits', field(8, Array(NvU32, 2)))
+struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00.SIZE = 16
+struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00._fields_ = ['params']
+setattr(struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00, 'params', field(0, NV2080_CTRL_INTERNAL_PERF_GPU_BOOST_SYNC_SET_LIMITS_PARAMS_v17_00))
 rpc_perf_gpu_boost_sync_limits_callback_v17_00 = struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00
 rpc_perf_gpu_boost_sync_limits_callback_v = struct_rpc_perf_gpu_boost_sync_limits_callback_v17_00
 class struct_rpc_perf_bridgeless_info_update_v17_00(Struct): pass
-struct_rpc_perf_bridgeless_info_update_v17_00._fields_ = [
-  ('bBridgeless', NvU64),
-]
+struct_rpc_perf_bridgeless_info_update_v17_00.SIZE = 8
+struct_rpc_perf_bridgeless_info_update_v17_00._fields_ = ['bBridgeless']
+setattr(struct_rpc_perf_bridgeless_info_update_v17_00, 'bBridgeless', field(0, NvU64))
 rpc_perf_bridgeless_info_update_v17_00 = struct_rpc_perf_bridgeless_info_update_v17_00
 rpc_perf_bridgeless_info_update_v = struct_rpc_perf_bridgeless_info_update_v17_00
 class struct_rpc_nvlink_fault_up_v17_00(Struct): pass
-struct_rpc_nvlink_fault_up_v17_00._fields_ = [
-  ('linkId', NvU32),
-]
+struct_rpc_nvlink_fault_up_v17_00.SIZE = 4
+struct_rpc_nvlink_fault_up_v17_00._fields_ = ['linkId']
+setattr(struct_rpc_nvlink_fault_up_v17_00, 'linkId', field(0, NvU32))
 rpc_nvlink_fault_up_v17_00 = struct_rpc_nvlink_fault_up_v17_00
 rpc_nvlink_fault_up_v = struct_rpc_nvlink_fault_up_v17_00
 class struct_rpc_nvlink_inband_received_data_256_v17_00(Struct): pass
 class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00(Struct): pass
 NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00 = struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00
-struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00._fields_ = [
-  ('dataSize', NvU32),
-  ('data', (NvU8 * 256)),
-]
-struct_rpc_nvlink_inband_received_data_256_v17_00._fields_ = [
-  ('params', NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00),
-]
+struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00.SIZE = 260
+struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00._fields_ = ['dataSize', 'data']
+setattr(struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00, 'dataSize', field(0, NvU32))
+setattr(struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00, 'data', field(4, Array(NvU8, 256)))
+struct_rpc_nvlink_inband_received_data_256_v17_00.SIZE = 260
+struct_rpc_nvlink_inband_received_data_256_v17_00._fields_ = ['params']
+setattr(struct_rpc_nvlink_inband_received_data_256_v17_00, 'params', field(0, NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_256_PARAMS_v17_00))
 rpc_nvlink_inband_received_data_256_v17_00 = struct_rpc_nvlink_inband_received_data_256_v17_00
 rpc_nvlink_inband_received_data_256_v = struct_rpc_nvlink_inband_received_data_256_v17_00
 class struct_rpc_nvlink_inband_received_data_512_v17_00(Struct): pass
 class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00(Struct): pass
 NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00 = struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00
-struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00._fields_ = [
-  ('dataSize', NvU32),
-  ('data', (NvU8 * 512)),
-]
-struct_rpc_nvlink_inband_received_data_512_v17_00._fields_ = [
-  ('params', NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00),
-]
+struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00.SIZE = 516
+struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00._fields_ = ['dataSize', 'data']
+setattr(struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00, 'dataSize', field(0, NvU32))
+setattr(struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00, 'data', field(4, Array(NvU8, 512)))
+struct_rpc_nvlink_inband_received_data_512_v17_00.SIZE = 516
+struct_rpc_nvlink_inband_received_data_512_v17_00._fields_ = ['params']
+setattr(struct_rpc_nvlink_inband_received_data_512_v17_00, 'params', field(0, NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_512_PARAMS_v17_00))
 rpc_nvlink_inband_received_data_512_v17_00 = struct_rpc_nvlink_inband_received_data_512_v17_00
 rpc_nvlink_inband_received_data_512_v = struct_rpc_nvlink_inband_received_data_512_v17_00
 class struct_rpc_nvlink_inband_received_data_1024_v17_00(Struct): pass
 class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00(Struct): pass
 NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00 = struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00
-struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00._fields_ = [
-  ('dataSize', NvU32),
-  ('data', (NvU8 * 1024)),
-]
-struct_rpc_nvlink_inband_received_data_1024_v17_00._fields_ = [
-  ('params', NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00),
-]
+struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00.SIZE = 1028
+struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00._fields_ = ['dataSize', 'data']
+setattr(struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00, 'dataSize', field(0, NvU32))
+setattr(struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00, 'data', field(4, Array(NvU8, 1024)))
+struct_rpc_nvlink_inband_received_data_1024_v17_00.SIZE = 1028
+struct_rpc_nvlink_inband_received_data_1024_v17_00._fields_ = ['params']
+setattr(struct_rpc_nvlink_inband_received_data_1024_v17_00, 'params', field(0, NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_1024_PARAMS_v17_00))
 rpc_nvlink_inband_received_data_1024_v17_00 = struct_rpc_nvlink_inband_received_data_1024_v17_00
 rpc_nvlink_inband_received_data_1024_v = struct_rpc_nvlink_inband_received_data_1024_v17_00
 class struct_rpc_nvlink_inband_received_data_2048_v17_00(Struct): pass
 class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00(Struct): pass
 NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00 = struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00
-struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00._fields_ = [
-  ('dataSize', NvU32),
-  ('data', (NvU8 * 2048)),
-]
-struct_rpc_nvlink_inband_received_data_2048_v17_00._fields_ = [
-  ('params', NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00),
-]
+struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00.SIZE = 2052
+struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00._fields_ = ['dataSize', 'data']
+setattr(struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00, 'dataSize', field(0, NvU32))
+setattr(struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00, 'data', field(4, Array(NvU8, 2048)))
+struct_rpc_nvlink_inband_received_data_2048_v17_00.SIZE = 2052
+struct_rpc_nvlink_inband_received_data_2048_v17_00._fields_ = ['params']
+setattr(struct_rpc_nvlink_inband_received_data_2048_v17_00, 'params', field(0, NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_2048_PARAMS_v17_00))
 rpc_nvlink_inband_received_data_2048_v17_00 = struct_rpc_nvlink_inband_received_data_2048_v17_00
 rpc_nvlink_inband_received_data_2048_v = struct_rpc_nvlink_inband_received_data_2048_v17_00
 class struct_rpc_nvlink_inband_received_data_4096_v17_00(Struct): pass
 class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00(Struct): pass
 NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00 = struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00
-struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00._fields_ = [
-  ('dataSize', NvU32),
-  ('data', (NvU8 * 4096)),
-]
-struct_rpc_nvlink_inband_received_data_4096_v17_00._fields_ = [
-  ('params', NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00),
-]
+struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00.SIZE = 4100
+struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00._fields_ = ['dataSize', 'data']
+setattr(struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00, 'dataSize', field(0, NvU32))
+setattr(struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00, 'data', field(4, Array(NvU8, 4096)))
+struct_rpc_nvlink_inband_received_data_4096_v17_00.SIZE = 4100
+struct_rpc_nvlink_inband_received_data_4096_v17_00._fields_ = ['params']
+setattr(struct_rpc_nvlink_inband_received_data_4096_v17_00, 'params', field(0, NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_4096_PARAMS_v17_00))
 rpc_nvlink_inband_received_data_4096_v17_00 = struct_rpc_nvlink_inband_received_data_4096_v17_00
 rpc_nvlink_inband_received_data_4096_v = struct_rpc_nvlink_inband_received_data_4096_v17_00
 class struct_rpc_nvlink_is_gpu_degraded_v17_00(Struct): pass
 class struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00(Struct): pass
 NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00 = struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00
-struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00._fields_ = [
-  ('linkId', NvU32),
-  ('bIsGpuDegraded', NvBool),
-]
-struct_rpc_nvlink_is_gpu_degraded_v17_00._fields_ = [
-  ('params', NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00),
-]
+struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00.SIZE = 8
+struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00._fields_ = ['linkId', 'bIsGpuDegraded']
+setattr(struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00, 'linkId', field(0, NvU32))
+setattr(struct_NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00, 'bIsGpuDegraded', field(4, NvBool))
+struct_rpc_nvlink_is_gpu_degraded_v17_00.SIZE = 8
+struct_rpc_nvlink_is_gpu_degraded_v17_00._fields_ = ['params']
+setattr(struct_rpc_nvlink_is_gpu_degraded_v17_00, 'params', field(0, NV2080_CTRL_NVLINK_IS_GPU_DEGRADED_PARAMS_v17_00))
 rpc_nvlink_is_gpu_degraded_v17_00 = struct_rpc_nvlink_is_gpu_degraded_v17_00
 rpc_nvlink_is_gpu_degraded_v = struct_rpc_nvlink_is_gpu_degraded_v17_00
 class struct_rpc_nvlink_fatal_error_recovery_v17_00(Struct): pass
 class struct_NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00(Struct): pass
 NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00 = struct_NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00
-struct_NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00._fields_ = [
-  ('bRecoverable', NvBool),
-  ('bLazy', NvBool),
-]
-struct_rpc_nvlink_fatal_error_recovery_v17_00._fields_ = [
-  ('params', NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00),
-]
+struct_NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00.SIZE = 2
+struct_NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00._fields_ = ['bRecoverable', 'bLazy']
+setattr(struct_NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00, 'bRecoverable', field(0, NvBool))
+setattr(struct_NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00, 'bLazy', field(1, NvBool))
+struct_rpc_nvlink_fatal_error_recovery_v17_00.SIZE = 2
+struct_rpc_nvlink_fatal_error_recovery_v17_00._fields_ = ['params']
+setattr(struct_rpc_nvlink_fatal_error_recovery_v17_00, 'params', field(0, NV2080_CTRL_NVLINK_FATAL_ERROR_RECOVERY_PARAMS_v17_00))
 rpc_nvlink_fatal_error_recovery_v17_00 = struct_rpc_nvlink_fatal_error_recovery_v17_00
 rpc_nvlink_fatal_error_recovery_v = struct_rpc_nvlink_fatal_error_recovery_v17_00
 class struct_rpc_update_gsp_trace_v01_00(Struct): pass
-struct_rpc_update_gsp_trace_v01_00._fields_ = [
-  ('records', NvU32),
-  ('data', NvU32),
-]
+struct_rpc_update_gsp_trace_v01_00.SIZE = 8
+struct_rpc_update_gsp_trace_v01_00._fields_ = ['records', 'data']
+setattr(struct_rpc_update_gsp_trace_v01_00, 'records', field(0, NvU32))
+setattr(struct_rpc_update_gsp_trace_v01_00, 'data', field(4, NvU32))
 rpc_update_gsp_trace_v01_00 = struct_rpc_update_gsp_trace_v01_00
 rpc_update_gsp_trace_v = struct_rpc_update_gsp_trace_v01_00
 class struct_rpc_gsp_post_nocat_record_v01_00(Struct): pass
-struct_rpc_gsp_post_nocat_record_v01_00._fields_ = [
-  ('data', NvU32),
-]
+struct_rpc_gsp_post_nocat_record_v01_00.SIZE = 4
+struct_rpc_gsp_post_nocat_record_v01_00._fields_ = ['data']
+setattr(struct_rpc_gsp_post_nocat_record_v01_00, 'data', field(0, NvU32))
 rpc_gsp_post_nocat_record_v01_00 = struct_rpc_gsp_post_nocat_record_v01_00
 rpc_gsp_post_nocat_record_v = struct_rpc_gsp_post_nocat_record_v01_00
 class struct_rpc_extdev_intr_service_v17_00(Struct): pass
-struct_rpc_extdev_intr_service_v17_00._fields_ = [
-  ('lossRegStatus', NvU8),
-  ('gainRegStatus', NvU8),
-  ('miscRegStatus', NvU8),
-  ('rmStatus', NvBool),
-]
+struct_rpc_extdev_intr_service_v17_00.SIZE = 4
+struct_rpc_extdev_intr_service_v17_00._fields_ = ['lossRegStatus', 'gainRegStatus', 'miscRegStatus', 'rmStatus']
+setattr(struct_rpc_extdev_intr_service_v17_00, 'lossRegStatus', field(0, NvU8))
+setattr(struct_rpc_extdev_intr_service_v17_00, 'gainRegStatus', field(1, NvU8))
+setattr(struct_rpc_extdev_intr_service_v17_00, 'miscRegStatus', field(2, NvU8))
+setattr(struct_rpc_extdev_intr_service_v17_00, 'rmStatus', field(3, NvBool))
 rpc_extdev_intr_service_v17_00 = struct_rpc_extdev_intr_service_v17_00
 rpc_extdev_intr_service_v = struct_rpc_extdev_intr_service_v17_00
 class struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04(Struct): pass
@@ -3865,43 +3836,43 @@ class struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04(Struct)
 NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04 = struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04
 class struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04(Struct): pass
 NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04 = struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04
-class union_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04(ctypes.Union): pass
+class union_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04(Union): pass
 NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04 = union_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04
 class struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04(Struct): pass
 NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04 = struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04
-struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04._fields_ = [
-  ('sensorId', NvU32),
-  ('limit', NvU32),
-]
-union_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04._fields_ = [
-  ('smbpbi', NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04),
-]
-struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04._fields_ = [
-  ('type', NvU8),
-  ('data', NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04),
-]
-struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04._fields_ = [
-  ('flags', NvU8),
-  ('syncData', NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04),
-]
-struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04._fields_ = [
-  ('params', NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04),
-]
+struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04.SIZE = 8
+struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04._fields_ = ['sensorId', 'limit']
+setattr(struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04, 'sensorId', field(0, NvU32))
+setattr(struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04, 'limit', field(4, NvU32))
+union_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04.SIZE = 8
+union_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04._fields_ = ['smbpbi']
+setattr(union_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04, 'smbpbi', field(0, NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_SMBPBI_v21_04))
+struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04.SIZE = 12
+struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04._fields_ = ['type', 'data']
+setattr(struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04, 'type', field(0, NvU8))
+setattr(struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04, 'data', field(4, NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_DATA_type_v21_04))
+struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04.SIZE = 16
+struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04._fields_ = ['flags', 'syncData']
+setattr(struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04, 'flags', field(0, NvU8))
+setattr(struct_NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04, 'syncData', field(4, NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_data_v21_04))
+struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04.SIZE = 16
+struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04._fields_ = ['params']
+setattr(struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04, 'params', field(0, NV2080_CTRL_INTERNAL_PFM_REQ_HNDLR_STATE_SYNC_PARAMS_v21_04))
 rpc_pfm_req_hndlr_state_sync_callback_v21_04 = struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04
 rpc_pfm_req_hndlr_state_sync_callback_v = struct_rpc_pfm_req_hndlr_state_sync_callback_v21_04
 class struct_rpc_vgpu_gsp_mig_ci_config_v21_03(Struct): pass
-struct_rpc_vgpu_gsp_mig_ci_config_v21_03._fields_ = [
-  ('execPartCount', NvU32),
-  ('execPartId', (NvU32 * 8)),
-  ('gfid', NvU32),
-  ('bDelete', NvBool),
-]
+struct_rpc_vgpu_gsp_mig_ci_config_v21_03.SIZE = 44
+struct_rpc_vgpu_gsp_mig_ci_config_v21_03._fields_ = ['execPartCount', 'execPartId', 'gfid', 'bDelete']
+setattr(struct_rpc_vgpu_gsp_mig_ci_config_v21_03, 'execPartCount', field(0, NvU32))
+setattr(struct_rpc_vgpu_gsp_mig_ci_config_v21_03, 'execPartId', field(4, Array(NvU32, 8)))
+setattr(struct_rpc_vgpu_gsp_mig_ci_config_v21_03, 'gfid', field(36, NvU32))
+setattr(struct_rpc_vgpu_gsp_mig_ci_config_v21_03, 'bDelete', field(40, NvBool))
 rpc_vgpu_gsp_mig_ci_config_v21_03 = struct_rpc_vgpu_gsp_mig_ci_config_v21_03
 rpc_vgpu_gsp_mig_ci_config_v = struct_rpc_vgpu_gsp_mig_ci_config_v21_03
 class struct_rpc_gsp_lockdown_notice_v17_00(Struct): pass
-struct_rpc_gsp_lockdown_notice_v17_00._fields_ = [
-  ('bLockdownEngaging', NvBool),
-]
+struct_rpc_gsp_lockdown_notice_v17_00.SIZE = 1
+struct_rpc_gsp_lockdown_notice_v17_00._fields_ = ['bLockdownEngaging']
+setattr(struct_rpc_gsp_lockdown_notice_v17_00, 'bLockdownEngaging', field(0, NvBool))
 rpc_gsp_lockdown_notice_v17_00 = struct_rpc_gsp_lockdown_notice_v17_00
 rpc_gsp_lockdown_notice_v = struct_rpc_gsp_lockdown_notice_v17_00
 class struct_rpc_ctrl_gpu_query_ecc_status_v24_06(Struct): pass
@@ -3911,119 +3882,119 @@ class struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01(Struct): pass
 NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01 = struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01
 class struct_NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01(Struct): pass
 NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01 = struct_NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01
-struct_NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01._fields_ = [
-  ('count', NvU64),
-]
-struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01._fields_ = [
-  ('enabled', NvBool),
-  ('scrubComplete', NvBool),
-  ('supported', NvBool),
-  ('dbe', NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01),
-  ('dbeNonResettable', NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01),
-  ('sbe', NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01),
-  ('sbeNonResettable', NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01),
-]
-struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06._fields_ = [
-  ('units', (NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01 * 25)),
-  ('bFatalPoisonError', NvBool),
-  ('flags', NvU32),
-]
-struct_rpc_ctrl_gpu_query_ecc_status_v24_06._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06),
-]
+struct_NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01.SIZE = 8
+struct_NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01._fields_ = ['count']
+setattr(struct_NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01, 'count', field(0, NvU64))
+struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01.SIZE = 40
+struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01._fields_ = ['enabled', 'scrubComplete', 'supported', 'dbe', 'dbeNonResettable', 'sbe', 'sbeNonResettable']
+setattr(struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01, 'enabled', field(0, NvBool))
+setattr(struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01, 'scrubComplete', field(1, NvBool))
+setattr(struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01, 'supported', field(2, NvBool))
+setattr(struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01, 'dbe', field(8, NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01))
+setattr(struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01, 'dbeNonResettable', field(16, NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01))
+setattr(struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01, 'sbe', field(24, NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01))
+setattr(struct_NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01, 'sbeNonResettable', field(32, NV2080_CTRL_GPU_QUERY_ECC_EXCEPTION_STATUS_v15_01))
+struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06.SIZE = 1008
+struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06._fields_ = ['units', 'bFatalPoisonError', 'flags']
+setattr(struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06, 'units', field(0, Array(NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01, 25)))
+setattr(struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06, 'bFatalPoisonError', field(1000, NvBool))
+setattr(struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06, 'flags', field(1004, NvU32))
+struct_rpc_ctrl_gpu_query_ecc_status_v24_06.SIZE = 1016
+struct_rpc_ctrl_gpu_query_ecc_status_v24_06._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_gpu_query_ecc_status_v24_06, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_gpu_query_ecc_status_v24_06, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_gpu_query_ecc_status_v24_06, 'params', field(8, NV2080_CTRL_GPU_QUERY_ECC_STATUS_DEPRECATED_RPC_PARAMS_v24_06))
 rpc_ctrl_gpu_query_ecc_status_v24_06 = struct_rpc_ctrl_gpu_query_ecc_status_v24_06
 class struct_rpc_ctrl_gpu_query_ecc_status_v26_02(Struct): pass
 class struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02(Struct): pass
 NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02 = struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02
-struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02._fields_ = [
-  ('units', (NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01 * 30)),
-  ('bFatalPoisonError', NvBool),
-  ('flags', NvU32),
-]
-struct_rpc_ctrl_gpu_query_ecc_status_v26_02._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('params', NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02),
-]
+struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02.SIZE = 1208
+struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02._fields_ = ['units', 'bFatalPoisonError', 'flags']
+setattr(struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02, 'units', field(0, Array(NV2080_CTRL_GPU_QUERY_ECC_UNIT_STATUS_v15_01, 30)))
+setattr(struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02, 'bFatalPoisonError', field(1200, NvBool))
+setattr(struct_NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02, 'flags', field(1204, NvU32))
+struct_rpc_ctrl_gpu_query_ecc_status_v26_02.SIZE = 1216
+struct_rpc_ctrl_gpu_query_ecc_status_v26_02._fields_ = ['hClient', 'hObject', 'params']
+setattr(struct_rpc_ctrl_gpu_query_ecc_status_v26_02, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_gpu_query_ecc_status_v26_02, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_gpu_query_ecc_status_v26_02, 'params', field(8, NV2080_CTRL_GPU_QUERY_ECC_STATUS_PARAMS_v26_02))
 rpc_ctrl_gpu_query_ecc_status_v26_02 = struct_rpc_ctrl_gpu_query_ecc_status_v26_02
 rpc_ctrl_gpu_query_ecc_status_v = struct_rpc_ctrl_gpu_query_ecc_status_v26_02
 class struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04(Struct): pass
 class struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04(Struct): pass
 NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04 = struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04
-struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04._fields_ = [
-  ('value', NvU32),
-]
-struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04),
-]
+struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04.SIZE = 4
+struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04._fields_ = ['value']
+setattr(struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04, 'value', field(0, NvU32))
+struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04.SIZE = 12
+struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04, 'ctrlParams', field(8, NV83DE_CTRL_DEBUG_GET_MODE_MMU_DEBUG_PARAMS_v25_04))
 rpc_ctrl_dbg_get_mode_mmu_debug_v25_04 = struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04
 rpc_ctrl_dbg_get_mode_mmu_debug_v = struct_rpc_ctrl_dbg_get_mode_mmu_debug_v25_04
 class struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07(Struct): pass
 class struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07(Struct): pass
 NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07 = struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07
-struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07._fields_ = [
-  ('value', NvU32),
-]
-struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07),
-]
+struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07.SIZE = 4
+struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07._fields_ = ['value']
+setattr(struct_NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07, 'value', field(0, NvU32))
+struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07.SIZE = 12
+struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07, 'ctrlParams', field(8, NV83DE_CTRL_DEBUG_GET_MODE_MMU_GCC_DEBUG_PARAMS_v29_07))
 rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07 = struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07
 rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v = struct_rpc_ctrl_dbg_get_mode_mmu_gcc_debug_v29_07
 class struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09(Struct): pass
-struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09._fields_ = [
-  ('bwMode', NvU8),
-]
+struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09.SIZE = 1
+struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09._fields_ = ['bwMode']
+setattr(struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09, 'bwMode', field(0, NvU8))
 rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09 = struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09
 rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v = struct_rpc_ctrl_cmd_internal_gpu_start_fabric_probe_v25_09
 class struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C(Struct): pass
 class struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C(Struct): pass
 NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C = struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C
-struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C._fields_ = [
-  ('dataSize', NvU32),
-  ('data', (NvU8 * 512)),
-]
-struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C._fields_ = [
-  ('message_type', NvU16),
-  ('more', NvBool),
-  ('payload', NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C),
-]
+struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C.SIZE = 516
+struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C._fields_ = ['dataSize', 'data']
+setattr(struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C, 'dataSize', field(0, NvU32))
+setattr(struct_NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C, 'data', field(4, Array(NvU8, 512)))
+struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C.SIZE = 520
+struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C._fields_ = ['message_type', 'more', 'payload']
+setattr(struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C, 'message_type', field(0, NvU16))
+setattr(struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C, 'more', field(2, NvBool))
+setattr(struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C, 'payload', field(4, NV2080_CTRL_NVLINK_INBAND_RECEIVED_DATA_PARAMS_v25_0C))
 rpc_ctrl_nvlink_get_inband_received_data_v25_0C = struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C
 rpc_ctrl_nvlink_get_inband_received_data_v = struct_rpc_ctrl_nvlink_get_inband_received_data_v25_0C
 class struct_rpc_fecs_error_v26_02(Struct): pass
-struct_rpc_fecs_error_v26_02._fields_ = [
-  ('grIdx', NvU32),
-  ('error_type', NvU8),
-]
+struct_rpc_fecs_error_v26_02.SIZE = 8
+struct_rpc_fecs_error_v26_02._fields_ = ['grIdx', 'error_type']
+setattr(struct_rpc_fecs_error_v26_02, 'grIdx', field(0, NvU32))
+setattr(struct_rpc_fecs_error_v26_02, 'error_type', field(4, NvU8))
 rpc_fecs_error_v26_02 = struct_rpc_fecs_error_v26_02
 rpc_fecs_error_v = struct_rpc_fecs_error_v26_02
 class struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05(Struct): pass
-struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05._fields_ = [
-  ('buffer', (NvU8 * 1024)),
-  ('dataSize', NvU32),
-]
+struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05.SIZE = 1028
+struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05._fields_ = ['buffer', 'dataSize']
+setattr(struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05, 'buffer', field(0, Array(NvU8, 1024)))
+setattr(struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05, 'dataSize', field(1024, NvU32))
 rpc_ctrl_cmd_nvlink_inband_send_data_v26_05 = struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05
 rpc_ctrl_cmd_nvlink_inband_send_data_v = struct_rpc_ctrl_cmd_nvlink_inband_send_data_v26_05
 class struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00(Struct): pass
-struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00._fields_ = [
-  ('bufferSize', NvU32),
-  ('tracepointMask', NvU32),
-  ('bufferWatermark', NvU32),
-  ('bufferAddr', NvU64),
-  ('flag', NvU8),
-]
+struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00.SIZE = 32
+struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00._fields_ = ['bufferSize', 'tracepointMask', 'bufferWatermark', 'bufferAddr', 'flag']
+setattr(struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00, 'bufferSize', field(0, NvU32))
+setattr(struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00, 'tracepointMask', field(4, NvU32))
+setattr(struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00, 'bufferWatermark', field(8, NvU32))
+setattr(struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00, 'bufferAddr', field(16, NvU64))
+setattr(struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00, 'flag', field(24, NvU8))
 rpc_ctrl_cmd_internal_control_gsp_trace_v28_00 = struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00
 rpc_ctrl_cmd_internal_control_gsp_trace_v = struct_rpc_ctrl_cmd_internal_control_gsp_trace_v28_00
 class struct_rpc_recovery_action_v28_01(Struct): pass
-struct_rpc_recovery_action_v28_01._fields_ = [
-  ('type', NvU32),
-  ('value', NvBool),
-]
+struct_rpc_recovery_action_v28_01.SIZE = 8
+struct_rpc_recovery_action_v28_01._fields_ = ['type', 'value']
+setattr(struct_rpc_recovery_action_v28_01, 'type', field(0, NvU32))
+setattr(struct_rpc_recovery_action_v28_01, 'value', field(4, NvBool))
 rpc_recovery_action_v28_01 = struct_rpc_recovery_action_v28_01
 rpc_recovery_action_v = struct_rpc_recovery_action_v28_01
 class struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02(Struct): pass
@@ -4031,66 +4002,66 @@ class struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02(Struct): pas
 NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02 = struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02
 class struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02(Struct): pass
 NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02 = struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02
-struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02._fields_ = [
-  ('allocations', NvU32),
-  ('peakAllocations', NvU32),
-  ('objectSize', NvU64),
-]
-struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02._fields_ = [
-  ('poolStats', (NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02 * 64)),
-  ('totalHeapSize', NvU64),
-  ('poolCount', NvU8),
-]
-struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02._fields_ = [
-  ('hClient', NvHandle),
-  ('hObject', NvHandle),
-  ('ctrlParams', NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02),
-]
+struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02.SIZE = 16
+struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02._fields_ = ['allocations', 'peakAllocations', 'objectSize']
+setattr(struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02, 'allocations', field(0, NvU32))
+setattr(struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02, 'peakAllocations', field(4, NvU32))
+setattr(struct_NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02, 'objectSize', field(8, NvU64))
+struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02.SIZE = 1040
+struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02._fields_ = ['poolStats', 'totalHeapSize', 'poolCount']
+setattr(struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02, 'poolStats', field(0, Array(NV2080_CTRL_GSP_LIBOS_POOL_STATS_v29_02, 64)))
+setattr(struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02, 'totalHeapSize', field(1024, NvU64))
+setattr(struct_NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02, 'poolCount', field(1032, NvU8))
+struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02.SIZE = 1048
+struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02._fields_ = ['hClient', 'hObject', 'ctrlParams']
+setattr(struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02, 'hClient', field(0, NvHandle))
+setattr(struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02, 'hObject', field(4, NvHandle))
+setattr(struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02, 'ctrlParams', field(8, NV2080_CTRL_CMD_GSP_GET_LIBOS_HEAP_STATS_PARAMS_v29_02))
 rpc_ctrl_subdevice_get_libos_heap_stats_v29_02 = struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02
 rpc_ctrl_subdevice_get_libos_heap_stats_v = struct_rpc_ctrl_subdevice_get_libos_heap_stats_v29_02
 class struct_GSP_MSG_QUEUE_ELEMENT(Struct): pass
-struct_GSP_MSG_QUEUE_ELEMENT._fields_ = [
-  ('authTagBuffer', (NvU8 * 16)),
-  ('aadBuffer', (NvU8 * 16)),
-  ('checkSum', NvU32),
-  ('seqNum', NvU32),
-  ('elemCount', NvU32),
-  ('padding', NvU32),
-]
+struct_GSP_MSG_QUEUE_ELEMENT.SIZE = 48
+struct_GSP_MSG_QUEUE_ELEMENT._fields_ = ['authTagBuffer', 'aadBuffer', 'checkSum', 'seqNum', 'elemCount', 'padding']
+setattr(struct_GSP_MSG_QUEUE_ELEMENT, 'authTagBuffer', field(0, Array(NvU8, 16)))
+setattr(struct_GSP_MSG_QUEUE_ELEMENT, 'aadBuffer', field(16, Array(NvU8, 16)))
+setattr(struct_GSP_MSG_QUEUE_ELEMENT, 'checkSum', field(32, NvU32))
+setattr(struct_GSP_MSG_QUEUE_ELEMENT, 'seqNum', field(36, NvU32))
+setattr(struct_GSP_MSG_QUEUE_ELEMENT, 'elemCount', field(40, NvU32))
+setattr(struct_GSP_MSG_QUEUE_ELEMENT, 'padding', field(44, NvU32))
 GSP_MSG_QUEUE_ELEMENT = struct_GSP_MSG_QUEUE_ELEMENT
-class union_rpc_message_rpc_union_field_v03_00(ctypes.Union): pass
-union_rpc_message_rpc_union_field_v03_00._fields_ = [
-  ('spare', NvU32),
-  ('cpuRmGfid', NvU32),
-]
+class union_rpc_message_rpc_union_field_v03_00(Union): pass
+union_rpc_message_rpc_union_field_v03_00.SIZE = 4
+union_rpc_message_rpc_union_field_v03_00._fields_ = ['spare', 'cpuRmGfid']
+setattr(union_rpc_message_rpc_union_field_v03_00, 'spare', field(0, NvU32))
+setattr(union_rpc_message_rpc_union_field_v03_00, 'cpuRmGfid', field(0, NvU32))
 rpc_message_rpc_union_field_v03_00 = union_rpc_message_rpc_union_field_v03_00
 rpc_message_rpc_union_field_v = union_rpc_message_rpc_union_field_v03_00
 class struct_rpc_message_header_v03_00(Struct): pass
-struct_rpc_message_header_v03_00._fields_ = [
-  ('header_version', NvU32),
-  ('signature', NvU32),
-  ('length', NvU32),
-  ('function', NvU32),
-  ('rpc_result', NvU32),
-  ('rpc_result_private', NvU32),
-  ('sequence', NvU32),
-  ('u', rpc_message_rpc_union_field_v),
-]
+struct_rpc_message_header_v03_00.SIZE = 32
+struct_rpc_message_header_v03_00._fields_ = ['header_version', 'signature', 'length', 'function', 'rpc_result', 'rpc_result_private', 'sequence', 'u']
+setattr(struct_rpc_message_header_v03_00, 'header_version', field(0, NvU32))
+setattr(struct_rpc_message_header_v03_00, 'signature', field(4, NvU32))
+setattr(struct_rpc_message_header_v03_00, 'length', field(8, NvU32))
+setattr(struct_rpc_message_header_v03_00, 'function', field(12, NvU32))
+setattr(struct_rpc_message_header_v03_00, 'rpc_result', field(16, NvU32))
+setattr(struct_rpc_message_header_v03_00, 'rpc_result_private', field(20, NvU32))
+setattr(struct_rpc_message_header_v03_00, 'sequence', field(24, NvU32))
+setattr(struct_rpc_message_header_v03_00, 'u', field(28, rpc_message_rpc_union_field_v))
 rpc_message_header_v03_00 = struct_rpc_message_header_v03_00
 rpc_message_header_v = struct_rpc_message_header_v03_00
 class struct_PACKED_REGISTRY_ENTRY(Struct): pass
-struct_PACKED_REGISTRY_ENTRY._fields_ = [
-  ('nameOffset', NvU32),
-  ('type', NvU8),
-  ('data', NvU32),
-  ('length', NvU32),
-]
+struct_PACKED_REGISTRY_ENTRY.SIZE = 16
+struct_PACKED_REGISTRY_ENTRY._fields_ = ['nameOffset', 'type', 'data', 'length']
+setattr(struct_PACKED_REGISTRY_ENTRY, 'nameOffset', field(0, NvU32))
+setattr(struct_PACKED_REGISTRY_ENTRY, 'type', field(4, NvU8))
+setattr(struct_PACKED_REGISTRY_ENTRY, 'data', field(8, NvU32))
+setattr(struct_PACKED_REGISTRY_ENTRY, 'length', field(12, NvU32))
 PACKED_REGISTRY_ENTRY = struct_PACKED_REGISTRY_ENTRY
 class struct_PACKED_REGISTRY_TABLE(Struct): pass
-struct_PACKED_REGISTRY_TABLE._fields_ = [
-  ('size', NvU32),
-  ('numEntries', NvU32),
-]
+struct_PACKED_REGISTRY_TABLE.SIZE = 8
+struct_PACKED_REGISTRY_TABLE._fields_ = ['size', 'numEntries']
+setattr(struct_PACKED_REGISTRY_TABLE, 'size', field(0, NvU32))
+setattr(struct_PACKED_REGISTRY_TABLE, 'numEntries', field(4, NvU32))
 PACKED_REGISTRY_TABLE = struct_PACKED_REGISTRY_TABLE
 DISPMUXSTATE = CEnum(ctypes.c_uint32)
 dispMuxState_None = DISPMUXSTATE.define('dispMuxState_None', 0)
@@ -4098,14 +4069,14 @@ dispMuxState_IntegratedGPU = DISPMUXSTATE.define('dispMuxState_IntegratedGPU', 1
 dispMuxState_DiscreteGPU = DISPMUXSTATE.define('dispMuxState_DiscreteGPU', 2)
 
 class ACPI_DSM_CACHE(Struct): pass
-ACPI_DSM_CACHE._fields_ = [
-  ('suppFuncStatus', NvU32),
-  ('suppFuncs', (NvU8 * 8)),
-  ('suppFuncsLen', NvU32),
-  ('bArg3isInteger', NvBool),
-  ('callbackStatus', NvU32),
-  ('callback', NvU32),
-]
+ACPI_DSM_CACHE.SIZE = 28
+ACPI_DSM_CACHE._fields_ = ['suppFuncStatus', 'suppFuncs', 'suppFuncsLen', 'bArg3isInteger', 'callbackStatus', 'callback']
+setattr(ACPI_DSM_CACHE, 'suppFuncStatus', field(0, NvU32))
+setattr(ACPI_DSM_CACHE, 'suppFuncs', field(4, Array(NvU8, 8)))
+setattr(ACPI_DSM_CACHE, 'suppFuncsLen', field(12, NvU32))
+setattr(ACPI_DSM_CACHE, 'bArg3isInteger', field(16, NvBool))
+setattr(ACPI_DSM_CACHE, 'callbackStatus', field(20, NvU32))
+setattr(ACPI_DSM_CACHE, 'callback', field(24, NvU32))
 class ACPI_DATA(Struct): pass
 enum__ACPI_DSM_FUNCTION = CEnum(ctypes.c_uint32)
 ACPI_DSM_FUNCTION_NBSI = enum__ACPI_DSM_FUNCTION.define('ACPI_DSM_FUNCTION_NBSI', 0)
@@ -4125,63 +4096,63 @@ ACPI_DSM_FUNCTION_CURRENT = enum__ACPI_DSM_FUNCTION.define('ACPI_DSM_FUNCTION_CU
 ACPI_DSM_FUNCTION_INVALID = enum__ACPI_DSM_FUNCTION.define('ACPI_DSM_FUNCTION_INVALID', 255)
 
 ACPI_DSM_FUNCTION = enum__ACPI_DSM_FUNCTION
-ACPI_DATA._fields_ = [
-  ('dsm', (ACPI_DSM_CACHE * 12)),
-  ('dispStatusHotplugFunc', ACPI_DSM_FUNCTION),
-  ('dispStatusConfigFunc', ACPI_DSM_FUNCTION),
-  ('perfPostPowerStateFunc', ACPI_DSM_FUNCTION),
-  ('stereo3dStateActiveFunc', ACPI_DSM_FUNCTION),
-  ('dsmPlatCapsCache', (NvU32 * 12)),
-  ('MDTLFeatureSupport', NvU32),
-  ('dsmCurrentFunc', (ACPI_DSM_FUNCTION * 8)),
-  ('dsmCurrentSubFunc', (NvU32 * 8)),
-  ('dsmCurrentFuncSupport', NvU32),
-]
+ACPI_DATA.SIZE = 472
+ACPI_DATA._fields_ = ['dsm', 'dispStatusHotplugFunc', 'dispStatusConfigFunc', 'perfPostPowerStateFunc', 'stereo3dStateActiveFunc', 'dsmPlatCapsCache', 'MDTLFeatureSupport', 'dsmCurrentFunc', 'dsmCurrentSubFunc', 'dsmCurrentFuncSupport']
+setattr(ACPI_DATA, 'dsm', field(0, Array(ACPI_DSM_CACHE, 12)))
+setattr(ACPI_DATA, 'dispStatusHotplugFunc', field(336, ACPI_DSM_FUNCTION))
+setattr(ACPI_DATA, 'dispStatusConfigFunc', field(340, ACPI_DSM_FUNCTION))
+setattr(ACPI_DATA, 'perfPostPowerStateFunc', field(344, ACPI_DSM_FUNCTION))
+setattr(ACPI_DATA, 'stereo3dStateActiveFunc', field(348, ACPI_DSM_FUNCTION))
+setattr(ACPI_DATA, 'dsmPlatCapsCache', field(352, Array(NvU32, 12)))
+setattr(ACPI_DATA, 'MDTLFeatureSupport', field(400, NvU32))
+setattr(ACPI_DATA, 'dsmCurrentFunc', field(404, Array(ACPI_DSM_FUNCTION, 8)))
+setattr(ACPI_DATA, 'dsmCurrentSubFunc', field(436, Array(NvU32, 8)))
+setattr(ACPI_DATA, 'dsmCurrentFuncSupport', field(468, NvU32))
 class struct_DOD_METHOD_DATA(Struct): pass
 NV_STATUS = ctypes.c_uint32
-struct_DOD_METHOD_DATA._fields_ = [
-  ('status', NV_STATUS),
-  ('acpiIdListLen', NvU32),
-  ('acpiIdList', (NvU32 * 16)),
-]
+struct_DOD_METHOD_DATA.SIZE = 72
+struct_DOD_METHOD_DATA._fields_ = ['status', 'acpiIdListLen', 'acpiIdList']
+setattr(struct_DOD_METHOD_DATA, 'status', field(0, NV_STATUS))
+setattr(struct_DOD_METHOD_DATA, 'acpiIdListLen', field(4, NvU32))
+setattr(struct_DOD_METHOD_DATA, 'acpiIdList', field(8, Array(NvU32, 16)))
 DOD_METHOD_DATA = struct_DOD_METHOD_DATA
 class struct_JT_METHOD_DATA(Struct): pass
-struct_JT_METHOD_DATA._fields_ = [
-  ('status', NV_STATUS),
-  ('jtCaps', NvU32),
-  ('jtRevId', NvU16),
-  ('bSBIOSCaps', NvBool),
-]
+struct_JT_METHOD_DATA.SIZE = 12
+struct_JT_METHOD_DATA._fields_ = ['status', 'jtCaps', 'jtRevId', 'bSBIOSCaps']
+setattr(struct_JT_METHOD_DATA, 'status', field(0, NV_STATUS))
+setattr(struct_JT_METHOD_DATA, 'jtCaps', field(4, NvU32))
+setattr(struct_JT_METHOD_DATA, 'jtRevId', field(8, NvU16))
+setattr(struct_JT_METHOD_DATA, 'bSBIOSCaps', field(10, NvBool))
 JT_METHOD_DATA = struct_JT_METHOD_DATA
 class struct_MUX_METHOD_DATA_ELEMENT(Struct): pass
-struct_MUX_METHOD_DATA_ELEMENT._fields_ = [
-  ('acpiId', NvU32),
-  ('mode', NvU32),
-  ('status', NV_STATUS),
-]
+struct_MUX_METHOD_DATA_ELEMENT.SIZE = 12
+struct_MUX_METHOD_DATA_ELEMENT._fields_ = ['acpiId', 'mode', 'status']
+setattr(struct_MUX_METHOD_DATA_ELEMENT, 'acpiId', field(0, NvU32))
+setattr(struct_MUX_METHOD_DATA_ELEMENT, 'mode', field(4, NvU32))
+setattr(struct_MUX_METHOD_DATA_ELEMENT, 'status', field(8, NV_STATUS))
 MUX_METHOD_DATA_ELEMENT = struct_MUX_METHOD_DATA_ELEMENT
 class struct_MUX_METHOD_DATA(Struct): pass
-struct_MUX_METHOD_DATA._fields_ = [
-  ('tableLen', NvU32),
-  ('acpiIdMuxModeTable', (MUX_METHOD_DATA_ELEMENT * 16)),
-  ('acpiIdMuxPartTable', (MUX_METHOD_DATA_ELEMENT * 16)),
-  ('acpiIdMuxStateTable', (MUX_METHOD_DATA_ELEMENT * 16)),
-]
+struct_MUX_METHOD_DATA.SIZE = 580
+struct_MUX_METHOD_DATA._fields_ = ['tableLen', 'acpiIdMuxModeTable', 'acpiIdMuxPartTable', 'acpiIdMuxStateTable']
+setattr(struct_MUX_METHOD_DATA, 'tableLen', field(0, NvU32))
+setattr(struct_MUX_METHOD_DATA, 'acpiIdMuxModeTable', field(4, Array(MUX_METHOD_DATA_ELEMENT, 16)))
+setattr(struct_MUX_METHOD_DATA, 'acpiIdMuxPartTable', field(196, Array(MUX_METHOD_DATA_ELEMENT, 16)))
+setattr(struct_MUX_METHOD_DATA, 'acpiIdMuxStateTable', field(388, Array(MUX_METHOD_DATA_ELEMENT, 16)))
 MUX_METHOD_DATA = struct_MUX_METHOD_DATA
 class struct_CAPS_METHOD_DATA(Struct): pass
-struct_CAPS_METHOD_DATA._fields_ = [
-  ('status', NV_STATUS),
-  ('optimusCaps', NvU32),
-]
+struct_CAPS_METHOD_DATA.SIZE = 8
+struct_CAPS_METHOD_DATA._fields_ = ['status', 'optimusCaps']
+setattr(struct_CAPS_METHOD_DATA, 'status', field(0, NV_STATUS))
+setattr(struct_CAPS_METHOD_DATA, 'optimusCaps', field(4, NvU32))
 CAPS_METHOD_DATA = struct_CAPS_METHOD_DATA
 class struct_ACPI_METHOD_DATA(Struct): pass
-struct_ACPI_METHOD_DATA._fields_ = [
-  ('bValid', NvBool),
-  ('dodMethodData', DOD_METHOD_DATA),
-  ('jtMethodData', JT_METHOD_DATA),
-  ('muxMethodData', MUX_METHOD_DATA),
-  ('capsMethodData', CAPS_METHOD_DATA),
-]
+struct_ACPI_METHOD_DATA.SIZE = 676
+struct_ACPI_METHOD_DATA._fields_ = ['bValid', 'dodMethodData', 'jtMethodData', 'muxMethodData', 'capsMethodData']
+setattr(struct_ACPI_METHOD_DATA, 'bValid', field(0, NvBool))
+setattr(struct_ACPI_METHOD_DATA, 'dodMethodData', field(4, DOD_METHOD_DATA))
+setattr(struct_ACPI_METHOD_DATA, 'jtMethodData', field(76, JT_METHOD_DATA))
+setattr(struct_ACPI_METHOD_DATA, 'muxMethodData', field(88, MUX_METHOD_DATA))
+setattr(struct_ACPI_METHOD_DATA, 'capsMethodData', field(668, CAPS_METHOD_DATA))
 ACPI_METHOD_DATA = struct_ACPI_METHOD_DATA
 RM_ENGINE_TYPE = CEnum(ctypes.c_uint32)
 RM_ENGINE_TYPE_NULL = RM_ENGINE_TYPE.define('RM_ENGINE_TYPE_NULL', 0)
@@ -4271,399 +4242,382 @@ RM_ENGINE_TYPE_RESERVED53 = RM_ENGINE_TYPE.define('RM_ENGINE_TYPE_RESERVED53', 8
 RM_ENGINE_TYPE_LAST = RM_ENGINE_TYPE.define('RM_ENGINE_TYPE_LAST', 84)
 
 class BUSINFO(Struct): pass
-BUSINFO._fields_ = [
-  ('deviceID', NvU16),
-  ('vendorID', NvU16),
-  ('subdeviceID', NvU16),
-  ('subvendorID', NvU16),
-  ('revisionID', NvU8),
-]
+BUSINFO.SIZE = 10
+BUSINFO._fields_ = ['deviceID', 'vendorID', 'subdeviceID', 'subvendorID', 'revisionID']
+setattr(BUSINFO, 'deviceID', field(0, NvU16))
+setattr(BUSINFO, 'vendorID', field(2, NvU16))
+setattr(BUSINFO, 'subdeviceID', field(4, NvU16))
+setattr(BUSINFO, 'subvendorID', field(6, NvU16))
+setattr(BUSINFO, 'revisionID', field(8, NvU8))
 class struct_GSP_VF_INFO(Struct): pass
-struct_GSP_VF_INFO._fields_ = [
-  ('totalVFs', NvU32),
-  ('firstVFOffset', NvU32),
-  ('FirstVFBar0Address', NvU64),
-  ('FirstVFBar1Address', NvU64),
-  ('FirstVFBar2Address', NvU64),
-  ('b64bitBar0', NvBool),
-  ('b64bitBar1', NvBool),
-  ('b64bitBar2', NvBool),
-]
+struct_GSP_VF_INFO.SIZE = 40
+struct_GSP_VF_INFO._fields_ = ['totalVFs', 'firstVFOffset', 'FirstVFBar0Address', 'FirstVFBar1Address', 'FirstVFBar2Address', 'b64bitBar0', 'b64bitBar1', 'b64bitBar2']
+setattr(struct_GSP_VF_INFO, 'totalVFs', field(0, NvU32))
+setattr(struct_GSP_VF_INFO, 'firstVFOffset', field(4, NvU32))
+setattr(struct_GSP_VF_INFO, 'FirstVFBar0Address', field(8, NvU64))
+setattr(struct_GSP_VF_INFO, 'FirstVFBar1Address', field(16, NvU64))
+setattr(struct_GSP_VF_INFO, 'FirstVFBar2Address', field(24, NvU64))
+setattr(struct_GSP_VF_INFO, 'b64bitBar0', field(32, NvBool))
+setattr(struct_GSP_VF_INFO, 'b64bitBar1', field(33, NvBool))
+setattr(struct_GSP_VF_INFO, 'b64bitBar2', field(34, NvBool))
 GSP_VF_INFO = struct_GSP_VF_INFO
 class GSP_PCIE_CONFIG_REG(Struct): pass
-GSP_PCIE_CONFIG_REG._fields_ = [
-  ('linkCap', NvU32),
-]
+GSP_PCIE_CONFIG_REG.SIZE = 4
+GSP_PCIE_CONFIG_REG._fields_ = ['linkCap']
+setattr(GSP_PCIE_CONFIG_REG, 'linkCap', field(0, NvU32))
 class EcidManufacturingInfo(Struct): pass
-EcidManufacturingInfo._fields_ = [
-  ('ecidLow', NvU32),
-  ('ecidHigh', NvU32),
-  ('ecidExtended', NvU32),
-]
+EcidManufacturingInfo.SIZE = 12
+EcidManufacturingInfo._fields_ = ['ecidLow', 'ecidHigh', 'ecidExtended']
+setattr(EcidManufacturingInfo, 'ecidLow', field(0, NvU32))
+setattr(EcidManufacturingInfo, 'ecidHigh', field(4, NvU32))
+setattr(EcidManufacturingInfo, 'ecidExtended', field(8, NvU32))
 class FW_WPR_LAYOUT_OFFSET(Struct): pass
-FW_WPR_LAYOUT_OFFSET._fields_ = [
-  ('nonWprHeapOffset', NvU64),
-  ('frtsOffset', NvU64),
-]
+FW_WPR_LAYOUT_OFFSET.SIZE = 16
+FW_WPR_LAYOUT_OFFSET._fields_ = ['nonWprHeapOffset', 'frtsOffset']
+setattr(FW_WPR_LAYOUT_OFFSET, 'nonWprHeapOffset', field(0, NvU64))
+setattr(FW_WPR_LAYOUT_OFFSET, 'frtsOffset', field(8, NvU64))
 class struct_GspStaticConfigInfo_t(Struct): pass
 class struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS(Struct): pass
 NV2080_CTRL_GPU_GET_GID_INFO_PARAMS = struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS
-struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS._fields_ = [
-  ('index', NvU32),
-  ('flags', NvU32),
-  ('length', NvU32),
-  ('data', (NvU8 * 256)),
-]
+struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS.SIZE = 268
+struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS._fields_ = ['index', 'flags', 'length', 'data']
+setattr(struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS, 'index', field(0, NvU32))
+setattr(struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS, 'flags', field(4, NvU32))
+setattr(struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS, 'length', field(8, NvU32))
+setattr(struct_NV2080_CTRL_GPU_GET_GID_INFO_PARAMS, 'data', field(12, Array(NvU8, 256)))
 class struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS(Struct): pass
 NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS = struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS
-struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS._fields_ = [
-  ('BoardID', NvU32),
-  ('chipSKU', (ctypes.c_char * 9)),
-  ('chipSKUMod', (ctypes.c_char * 5)),
-  ('skuConfigVersion', NvU32),
-  ('project', (ctypes.c_char * 5)),
-  ('projectSKU', (ctypes.c_char * 5)),
-  ('CDP', (ctypes.c_char * 6)),
-  ('projectSKUMod', (ctypes.c_char * 2)),
-  ('businessCycle', NvU32),
-]
+struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS.SIZE = 48
+struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS._fields_ = ['BoardID', 'chipSKU', 'chipSKUMod', 'skuConfigVersion', 'project', 'projectSKU', 'CDP', 'projectSKUMod', 'businessCycle']
+setattr(struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS, 'BoardID', field(0, NvU32))
+setattr(struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS, 'chipSKU', field(4, Array(ctypes.c_char, 9)))
+setattr(struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS, 'chipSKUMod', field(13, Array(ctypes.c_char, 5)))
+setattr(struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS, 'skuConfigVersion', field(20, NvU32))
+setattr(struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS, 'project', field(24, Array(ctypes.c_char, 5)))
+setattr(struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS, 'projectSKU', field(29, Array(ctypes.c_char, 5)))
+setattr(struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS, 'CDP', field(34, Array(ctypes.c_char, 6)))
+setattr(struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS, 'projectSKUMod', field(40, Array(ctypes.c_char, 2)))
+setattr(struct_NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS, 'businessCycle', field(44, NvU32))
 class struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS(Struct): pass
 NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS = struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS
 class struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO(Struct): pass
 NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO = struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO
-NV2080_CTRL_CMD_FB_GET_FB_REGION_SURFACE_MEM_TYPE_FLAG = (ctypes.c_ubyte * 17)
-struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO._fields_ = [
-  ('base', NvU64),
-  ('limit', NvU64),
-  ('reserved', NvU64),
-  ('performance', NvU32),
-  ('supportCompressed', NvBool),
-  ('supportISO', NvBool),
-  ('bProtected', NvBool),
-  ('blackList', NV2080_CTRL_CMD_FB_GET_FB_REGION_SURFACE_MEM_TYPE_FLAG),
-]
-struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS._fields_ = [
-  ('numFBRegions', NvU32),
-  ('fbRegion', (NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO * 16)),
-]
+NV2080_CTRL_CMD_FB_GET_FB_REGION_SURFACE_MEM_TYPE_FLAG = Array(ctypes.c_ubyte, 17)
+struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO.SIZE = 48
+struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO._fields_ = ['base', 'limit', 'reserved', 'performance', 'supportCompressed', 'supportISO', 'bProtected', 'blackList']
+setattr(struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO, 'base', field(0, NvU64))
+setattr(struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO, 'limit', field(8, NvU64))
+setattr(struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO, 'reserved', field(16, NvU64))
+setattr(struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO, 'performance', field(24, NvU32))
+setattr(struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO, 'supportCompressed', field(28, NvBool))
+setattr(struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO, 'supportISO', field(29, NvBool))
+setattr(struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO, 'bProtected', field(30, NvBool))
+setattr(struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO, 'blackList', field(31, NV2080_CTRL_CMD_FB_GET_FB_REGION_SURFACE_MEM_TYPE_FLAG))
+struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS.SIZE = 776
+struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS._fields_ = ['numFBRegions', 'fbRegion']
+setattr(struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS, 'numFBRegions', field(0, NvU32))
+setattr(struct_NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS, 'fbRegion', field(8, Array(NV2080_CTRL_CMD_FB_GET_FB_REGION_FB_REGION_INFO, 16)))
 class struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS(Struct): pass
 NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS = struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS
-struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS._fields_ = [
-  ('totalVFs', NvU32),
-  ('firstVfOffset', NvU32),
-  ('vfFeatureMask', NvU32),
-  ('FirstVFBar0Address', NvU64),
-  ('FirstVFBar1Address', NvU64),
-  ('FirstVFBar2Address', NvU64),
-  ('bar0Size', NvU64),
-  ('bar1Size', NvU64),
-  ('bar2Size', NvU64),
-  ('b64bitBar0', NvBool),
-  ('b64bitBar1', NvBool),
-  ('b64bitBar2', NvBool),
-  ('bSriovEnabled', NvBool),
-  ('bSriovHeavyEnabled', NvBool),
-  ('bEmulateVFBar0TlbInvalidationRegister', NvBool),
-  ('bClientRmAllocatedCtxBuffer', NvBool),
-  ('bNonPowerOf2ChannelCountSupported', NvBool),
-  ('bVfResizableBAR1Supported', NvBool),
-]
-struct_GspStaticConfigInfo_t._fields_ = [
-  ('grCapsBits', (NvU8 * 23)),
-  ('gidInfo', NV2080_CTRL_GPU_GET_GID_INFO_PARAMS),
-  ('SKUInfo', NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS),
-  ('fbRegionInfoParams', NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS),
-  ('sriovCaps', NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS),
-  ('sriovMaxGfid', NvU32),
-  ('engineCaps', (NvU32 * 3)),
-  ('poisonFuseEnabled', NvBool),
-  ('fb_length', NvU64),
-  ('fbio_mask', NvU64),
-  ('fb_bus_width', NvU32),
-  ('fb_ram_type', NvU32),
-  ('fbp_mask', NvU64),
-  ('l2_cache_size', NvU32),
-  ('gpuNameString', (NvU8 * 64)),
-  ('gpuShortNameString', (NvU8 * 64)),
-  ('gpuNameString_Unicode', (NvU16 * 64)),
-  ('bGpuInternalSku', NvBool),
-  ('bIsQuadroGeneric', NvBool),
-  ('bIsQuadroAd', NvBool),
-  ('bIsNvidiaNvs', NvBool),
-  ('bIsVgx', NvBool),
-  ('bGeforceSmb', NvBool),
-  ('bIsTitan', NvBool),
-  ('bIsTesla', NvBool),
-  ('bIsMobile', NvBool),
-  ('bIsGc6Rtd3Allowed', NvBool),
-  ('bIsGc8Rtd3Allowed', NvBool),
-  ('bIsGcOffRtd3Allowed', NvBool),
-  ('bIsGcoffLegacyAllowed', NvBool),
-  ('bIsMigSupported', NvBool),
-  ('RTD3GC6TotalBoardPower', NvU16),
-  ('RTD3GC6PerstDelay', NvU16),
-  ('bar1PdeBase', NvU64),
-  ('bar2PdeBase', NvU64),
-  ('bVbiosValid', NvBool),
-  ('vbiosSubVendor', NvU32),
-  ('vbiosSubDevice', NvU32),
-  ('bPageRetirementSupported', NvBool),
-  ('bSplitVasBetweenServerClientRm', NvBool),
-  ('bClRootportNeedsNosnoopWAR', NvBool),
-  ('displaylessMaxHeads', VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS),
-  ('displaylessMaxResolution', VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS),
-  ('displaylessMaxPixels', NvU64),
-  ('hInternalClient', NvHandle),
-  ('hInternalDevice', NvHandle),
-  ('hInternalSubdevice', NvHandle),
-  ('bSelfHostedMode', NvBool),
-  ('bAtsSupported', NvBool),
-  ('bIsGpuUefi', NvBool),
-  ('bIsEfiInit', NvBool),
-  ('ecidInfo', (EcidManufacturingInfo * 2)),
-  ('fwWprLayoutOffset', FW_WPR_LAYOUT_OFFSET),
-]
+struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS.SIZE = 80
+struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS._fields_ = ['totalVFs', 'firstVfOffset', 'vfFeatureMask', 'FirstVFBar0Address', 'FirstVFBar1Address', 'FirstVFBar2Address', 'bar0Size', 'bar1Size', 'bar2Size', 'b64bitBar0', 'b64bitBar1', 'b64bitBar2', 'bSriovEnabled', 'bSriovHeavyEnabled', 'bEmulateVFBar0TlbInvalidationRegister', 'bClientRmAllocatedCtxBuffer', 'bNonPowerOf2ChannelCountSupported', 'bVfResizableBAR1Supported']
+setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'totalVFs', field(0, NvU32))
+setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'firstVfOffset', field(4, NvU32))
+setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'vfFeatureMask', field(8, NvU32))
+setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'FirstVFBar0Address', field(16, NvU64))
+setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'FirstVFBar1Address', field(24, NvU64))
+setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'FirstVFBar2Address', field(32, NvU64))
+setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'bar0Size', field(40, NvU64))
+setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'bar1Size', field(48, NvU64))
+setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'bar2Size', field(56, NvU64))
+setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'b64bitBar0', field(64, NvBool))
+setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'b64bitBar1', field(65, NvBool))
+setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'b64bitBar2', field(66, NvBool))
+setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'bSriovEnabled', field(67, NvBool))
+setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'bSriovHeavyEnabled', field(68, NvBool))
+setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'bEmulateVFBar0TlbInvalidationRegister', field(69, NvBool))
+setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'bClientRmAllocatedCtxBuffer', field(70, NvBool))
+setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'bNonPowerOf2ChannelCountSupported', field(71, NvBool))
+setattr(struct_NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS, 'bVfResizableBAR1Supported', field(72, NvBool))
+struct_GspStaticConfigInfo_t.SIZE = 1656
+struct_GspStaticConfigInfo_t._fields_ = ['grCapsBits', 'gidInfo', 'SKUInfo', 'fbRegionInfoParams', 'sriovCaps', 'sriovMaxGfid', 'engineCaps', 'poisonFuseEnabled', 'fb_length', 'fbio_mask', 'fb_bus_width', 'fb_ram_type', 'fbp_mask', 'l2_cache_size', 'gpuNameString', 'gpuShortNameString', 'gpuNameString_Unicode', 'bGpuInternalSku', 'bIsQuadroGeneric', 'bIsQuadroAd', 'bIsNvidiaNvs', 'bIsVgx', 'bGeforceSmb', 'bIsTitan', 'bIsTesla', 'bIsMobile', 'bIsGc6Rtd3Allowed', 'bIsGc8Rtd3Allowed', 'bIsGcOffRtd3Allowed', 'bIsGcoffLegacyAllowed', 'bIsMigSupported', 'RTD3GC6TotalBoardPower', 'RTD3GC6PerstDelay', 'bar1PdeBase', 'bar2PdeBase', 'bVbiosValid', 'vbiosSubVendor', 'vbiosSubDevice', 'bPageRetirementSupported', 'bSplitVasBetweenServerClientRm', 'bClRootportNeedsNosnoopWAR', 'displaylessMaxHeads', 'displaylessMaxResolution', 'displaylessMaxPixels', 'hInternalClient', 'hInternalDevice', 'hInternalSubdevice', 'bSelfHostedMode', 'bAtsSupported', 'bIsGpuUefi', 'bIsEfiInit', 'ecidInfo', 'fwWprLayoutOffset']
+setattr(struct_GspStaticConfigInfo_t, 'grCapsBits', field(0, Array(NvU8, 23)))
+setattr(struct_GspStaticConfigInfo_t, 'gidInfo', field(24, NV2080_CTRL_GPU_GET_GID_INFO_PARAMS))
+setattr(struct_GspStaticConfigInfo_t, 'SKUInfo', field(292, NV2080_CTRL_BIOS_GET_SKU_INFO_PARAMS))
+setattr(struct_GspStaticConfigInfo_t, 'fbRegionInfoParams', field(344, NV2080_CTRL_CMD_FB_GET_FB_REGION_INFO_PARAMS))
+setattr(struct_GspStaticConfigInfo_t, 'sriovCaps', field(1120, NV0080_CTRL_GPU_GET_SRIOV_CAPS_PARAMS))
+setattr(struct_GspStaticConfigInfo_t, 'sriovMaxGfid', field(1200, NvU32))
+setattr(struct_GspStaticConfigInfo_t, 'engineCaps', field(1204, Array(NvU32, 3)))
+setattr(struct_GspStaticConfigInfo_t, 'poisonFuseEnabled', field(1216, NvBool))
+setattr(struct_GspStaticConfigInfo_t, 'fb_length', field(1224, NvU64))
+setattr(struct_GspStaticConfigInfo_t, 'fbio_mask', field(1232, NvU64))
+setattr(struct_GspStaticConfigInfo_t, 'fb_bus_width', field(1240, NvU32))
+setattr(struct_GspStaticConfigInfo_t, 'fb_ram_type', field(1244, NvU32))
+setattr(struct_GspStaticConfigInfo_t, 'fbp_mask', field(1248, NvU64))
+setattr(struct_GspStaticConfigInfo_t, 'l2_cache_size', field(1256, NvU32))
+setattr(struct_GspStaticConfigInfo_t, 'gpuNameString', field(1260, Array(NvU8, 64)))
+setattr(struct_GspStaticConfigInfo_t, 'gpuShortNameString', field(1324, Array(NvU8, 64)))
+setattr(struct_GspStaticConfigInfo_t, 'gpuNameString_Unicode', field(1388, Array(NvU16, 64)))
+setattr(struct_GspStaticConfigInfo_t, 'bGpuInternalSku', field(1516, NvBool))
+setattr(struct_GspStaticConfigInfo_t, 'bIsQuadroGeneric', field(1517, NvBool))
+setattr(struct_GspStaticConfigInfo_t, 'bIsQuadroAd', field(1518, NvBool))
+setattr(struct_GspStaticConfigInfo_t, 'bIsNvidiaNvs', field(1519, NvBool))
+setattr(struct_GspStaticConfigInfo_t, 'bIsVgx', field(1520, NvBool))
+setattr(struct_GspStaticConfigInfo_t, 'bGeforceSmb', field(1521, NvBool))
+setattr(struct_GspStaticConfigInfo_t, 'bIsTitan', field(1522, NvBool))
+setattr(struct_GspStaticConfigInfo_t, 'bIsTesla', field(1523, NvBool))
+setattr(struct_GspStaticConfigInfo_t, 'bIsMobile', field(1524, NvBool))
+setattr(struct_GspStaticConfigInfo_t, 'bIsGc6Rtd3Allowed', field(1525, NvBool))
+setattr(struct_GspStaticConfigInfo_t, 'bIsGc8Rtd3Allowed', field(1526, NvBool))
+setattr(struct_GspStaticConfigInfo_t, 'bIsGcOffRtd3Allowed', field(1527, NvBool))
+setattr(struct_GspStaticConfigInfo_t, 'bIsGcoffLegacyAllowed', field(1528, NvBool))
+setattr(struct_GspStaticConfigInfo_t, 'bIsMigSupported', field(1529, NvBool))
+setattr(struct_GspStaticConfigInfo_t, 'RTD3GC6TotalBoardPower', field(1530, NvU16))
+setattr(struct_GspStaticConfigInfo_t, 'RTD3GC6PerstDelay', field(1532, NvU16))
+setattr(struct_GspStaticConfigInfo_t, 'bar1PdeBase', field(1536, NvU64))
+setattr(struct_GspStaticConfigInfo_t, 'bar2PdeBase', field(1544, NvU64))
+setattr(struct_GspStaticConfigInfo_t, 'bVbiosValid', field(1552, NvBool))
+setattr(struct_GspStaticConfigInfo_t, 'vbiosSubVendor', field(1556, NvU32))
+setattr(struct_GspStaticConfigInfo_t, 'vbiosSubDevice', field(1560, NvU32))
+setattr(struct_GspStaticConfigInfo_t, 'bPageRetirementSupported', field(1564, NvBool))
+setattr(struct_GspStaticConfigInfo_t, 'bSplitVasBetweenServerClientRm', field(1565, NvBool))
+setattr(struct_GspStaticConfigInfo_t, 'bClRootportNeedsNosnoopWAR', field(1566, NvBool))
+setattr(struct_GspStaticConfigInfo_t, 'displaylessMaxHeads', field(1568, VIRTUAL_DISPLAY_GET_NUM_HEADS_PARAMS))
+setattr(struct_GspStaticConfigInfo_t, 'displaylessMaxResolution', field(1576, VIRTUAL_DISPLAY_GET_MAX_RESOLUTION_PARAMS))
+setattr(struct_GspStaticConfigInfo_t, 'displaylessMaxPixels', field(1592, NvU64))
+setattr(struct_GspStaticConfigInfo_t, 'hInternalClient', field(1600, NvHandle))
+setattr(struct_GspStaticConfigInfo_t, 'hInternalDevice', field(1604, NvHandle))
+setattr(struct_GspStaticConfigInfo_t, 'hInternalSubdevice', field(1608, NvHandle))
+setattr(struct_GspStaticConfigInfo_t, 'bSelfHostedMode', field(1612, NvBool))
+setattr(struct_GspStaticConfigInfo_t, 'bAtsSupported', field(1613, NvBool))
+setattr(struct_GspStaticConfigInfo_t, 'bIsGpuUefi', field(1614, NvBool))
+setattr(struct_GspStaticConfigInfo_t, 'bIsEfiInit', field(1615, NvBool))
+setattr(struct_GspStaticConfigInfo_t, 'ecidInfo', field(1616, Array(EcidManufacturingInfo, 2)))
+setattr(struct_GspStaticConfigInfo_t, 'fwWprLayoutOffset', field(1640, FW_WPR_LAYOUT_OFFSET))
 GspStaticConfigInfo = struct_GspStaticConfigInfo_t
 class struct_GspSystemInfo(Struct): pass
-struct_GspSystemInfo._fields_ = [
-  ('gpuPhysAddr', NvU64),
-  ('gpuPhysFbAddr', NvU64),
-  ('gpuPhysInstAddr', NvU64),
-  ('gpuPhysIoAddr', NvU64),
-  ('nvDomainBusDeviceFunc', NvU64),
-  ('simAccessBufPhysAddr', NvU64),
-  ('notifyOpSharedSurfacePhysAddr', NvU64),
-  ('pcieAtomicsOpMask', NvU64),
-  ('consoleMemSize', NvU64),
-  ('maxUserVa', NvU64),
-  ('pciConfigMirrorBase', NvU32),
-  ('pciConfigMirrorSize', NvU32),
-  ('PCIDeviceID', NvU32),
-  ('PCISubDeviceID', NvU32),
-  ('PCIRevisionID', NvU32),
-  ('pcieAtomicsCplDeviceCapMask', NvU32),
-  ('oorArch', NvU8),
-  ('clPdbProperties', NvU64),
-  ('Chipset', NvU32),
-  ('bGpuBehindBridge', NvBool),
-  ('bFlrSupported', NvBool),
-  ('b64bBar0Supported', NvBool),
-  ('bMnocAvailable', NvBool),
-  ('chipsetL1ssEnable', NvU32),
-  ('bUpstreamL0sUnsupported', NvBool),
-  ('bUpstreamL1Unsupported', NvBool),
-  ('bUpstreamL1PorSupported', NvBool),
-  ('bUpstreamL1PorMobileOnly', NvBool),
-  ('bSystemHasMux', NvBool),
-  ('upstreamAddressValid', NvU8),
-  ('FHBBusInfo', BUSINFO),
-  ('chipsetIDInfo', BUSINFO),
-  ('acpiMethodData', ACPI_METHOD_DATA),
-  ('hypervisorType', NvU32),
-  ('bIsPassthru', NvBool),
-  ('sysTimerOffsetNs', NvU64),
-  ('gspVFInfo', GSP_VF_INFO),
-  ('bIsPrimary', NvBool),
-  ('isGridBuild', NvBool),
-  ('pcieConfigReg', GSP_PCIE_CONFIG_REG),
-  ('gridBuildCsp', NvU32),
-  ('bPreserveVideoMemoryAllocations', NvBool),
-  ('bTdrEventSupported', NvBool),
-  ('bFeatureStretchVblankCapable', NvBool),
-  ('bEnableDynamicGranularityPageArrays', NvBool),
-  ('bClockBoostSupported', NvBool),
-  ('bRouteDispIntrsToCPU', NvBool),
-  ('hostPageSize', NvU64),
-]
+struct_GspSystemInfo.SIZE = 928
+struct_GspSystemInfo._fields_ = ['gpuPhysAddr', 'gpuPhysFbAddr', 'gpuPhysInstAddr', 'gpuPhysIoAddr', 'nvDomainBusDeviceFunc', 'simAccessBufPhysAddr', 'notifyOpSharedSurfacePhysAddr', 'pcieAtomicsOpMask', 'consoleMemSize', 'maxUserVa', 'pciConfigMirrorBase', 'pciConfigMirrorSize', 'PCIDeviceID', 'PCISubDeviceID', 'PCIRevisionID', 'pcieAtomicsCplDeviceCapMask', 'oorArch', 'clPdbProperties', 'Chipset', 'bGpuBehindBridge', 'bFlrSupported', 'b64bBar0Supported', 'bMnocAvailable', 'chipsetL1ssEnable', 'bUpstreamL0sUnsupported', 'bUpstreamL1Unsupported', 'bUpstreamL1PorSupported', 'bUpstreamL1PorMobileOnly', 'bSystemHasMux', 'upstreamAddressValid', 'FHBBusInfo', 'chipsetIDInfo', 'acpiMethodData', 'hypervisorType', 'bIsPassthru', 'sysTimerOffsetNs', 'gspVFInfo', 'bIsPrimary', 'isGridBuild', 'pcieConfigReg', 'gridBuildCsp', 'bPreserveVideoMemoryAllocations', 'bTdrEventSupported', 'bFeatureStretchVblankCapable', 'bEnableDynamicGranularityPageArrays', 'bClockBoostSupported', 'bRouteDispIntrsToCPU', 'hostPageSize']
+setattr(struct_GspSystemInfo, 'gpuPhysAddr', field(0, NvU64))
+setattr(struct_GspSystemInfo, 'gpuPhysFbAddr', field(8, NvU64))
+setattr(struct_GspSystemInfo, 'gpuPhysInstAddr', field(16, NvU64))
+setattr(struct_GspSystemInfo, 'gpuPhysIoAddr', field(24, NvU64))
+setattr(struct_GspSystemInfo, 'nvDomainBusDeviceFunc', field(32, NvU64))
+setattr(struct_GspSystemInfo, 'simAccessBufPhysAddr', field(40, NvU64))
+setattr(struct_GspSystemInfo, 'notifyOpSharedSurfacePhysAddr', field(48, NvU64))
+setattr(struct_GspSystemInfo, 'pcieAtomicsOpMask', field(56, NvU64))
+setattr(struct_GspSystemInfo, 'consoleMemSize', field(64, NvU64))
+setattr(struct_GspSystemInfo, 'maxUserVa', field(72, NvU64))
+setattr(struct_GspSystemInfo, 'pciConfigMirrorBase', field(80, NvU32))
+setattr(struct_GspSystemInfo, 'pciConfigMirrorSize', field(84, NvU32))
+setattr(struct_GspSystemInfo, 'PCIDeviceID', field(88, NvU32))
+setattr(struct_GspSystemInfo, 'PCISubDeviceID', field(92, NvU32))
+setattr(struct_GspSystemInfo, 'PCIRevisionID', field(96, NvU32))
+setattr(struct_GspSystemInfo, 'pcieAtomicsCplDeviceCapMask', field(100, NvU32))
+setattr(struct_GspSystemInfo, 'oorArch', field(104, NvU8))
+setattr(struct_GspSystemInfo, 'clPdbProperties', field(112, NvU64))
+setattr(struct_GspSystemInfo, 'Chipset', field(120, NvU32))
+setattr(struct_GspSystemInfo, 'bGpuBehindBridge', field(124, NvBool))
+setattr(struct_GspSystemInfo, 'bFlrSupported', field(125, NvBool))
+setattr(struct_GspSystemInfo, 'b64bBar0Supported', field(126, NvBool))
+setattr(struct_GspSystemInfo, 'bMnocAvailable', field(127, NvBool))
+setattr(struct_GspSystemInfo, 'chipsetL1ssEnable', field(128, NvU32))
+setattr(struct_GspSystemInfo, 'bUpstreamL0sUnsupported', field(132, NvBool))
+setattr(struct_GspSystemInfo, 'bUpstreamL1Unsupported', field(133, NvBool))
+setattr(struct_GspSystemInfo, 'bUpstreamL1PorSupported', field(134, NvBool))
+setattr(struct_GspSystemInfo, 'bUpstreamL1PorMobileOnly', field(135, NvBool))
+setattr(struct_GspSystemInfo, 'bSystemHasMux', field(136, NvBool))
+setattr(struct_GspSystemInfo, 'upstreamAddressValid', field(137, NvU8))
+setattr(struct_GspSystemInfo, 'FHBBusInfo', field(138, BUSINFO))
+setattr(struct_GspSystemInfo, 'chipsetIDInfo', field(148, BUSINFO))
+setattr(struct_GspSystemInfo, 'acpiMethodData', field(160, ACPI_METHOD_DATA))
+setattr(struct_GspSystemInfo, 'hypervisorType', field(836, NvU32))
+setattr(struct_GspSystemInfo, 'bIsPassthru', field(840, NvBool))
+setattr(struct_GspSystemInfo, 'sysTimerOffsetNs', field(848, NvU64))
+setattr(struct_GspSystemInfo, 'gspVFInfo', field(856, GSP_VF_INFO))
+setattr(struct_GspSystemInfo, 'bIsPrimary', field(896, NvBool))
+setattr(struct_GspSystemInfo, 'isGridBuild', field(897, NvBool))
+setattr(struct_GspSystemInfo, 'pcieConfigReg', field(900, GSP_PCIE_CONFIG_REG))
+setattr(struct_GspSystemInfo, 'gridBuildCsp', field(904, NvU32))
+setattr(struct_GspSystemInfo, 'bPreserveVideoMemoryAllocations', field(908, NvBool))
+setattr(struct_GspSystemInfo, 'bTdrEventSupported', field(909, NvBool))
+setattr(struct_GspSystemInfo, 'bFeatureStretchVblankCapable', field(910, NvBool))
+setattr(struct_GspSystemInfo, 'bEnableDynamicGranularityPageArrays', field(911, NvBool))
+setattr(struct_GspSystemInfo, 'bClockBoostSupported', field(912, NvBool))
+setattr(struct_GspSystemInfo, 'bRouteDispIntrsToCPU', field(913, NvBool))
+setattr(struct_GspSystemInfo, 'hostPageSize', field(920, NvU64))
 GspSystemInfo = struct_GspSystemInfo
 class FALCON_APPLICATION_INTERFACE_HEADER_V1(Struct): pass
-FALCON_APPLICATION_INTERFACE_HEADER_V1._packed_ = True
-FALCON_APPLICATION_INTERFACE_HEADER_V1._fields_ = [
-  ('version', NvU8),
-  ('headerSize', NvU8),
-  ('entrySize', NvU8),
-  ('entryCount', NvU8),
-]
+FALCON_APPLICATION_INTERFACE_HEADER_V1.SIZE = 4
+FALCON_APPLICATION_INTERFACE_HEADER_V1._fields_ = ['version', 'headerSize', 'entrySize', 'entryCount']
+setattr(FALCON_APPLICATION_INTERFACE_HEADER_V1, 'version', field(0, NvU8))
+setattr(FALCON_APPLICATION_INTERFACE_HEADER_V1, 'headerSize', field(1, NvU8))
+setattr(FALCON_APPLICATION_INTERFACE_HEADER_V1, 'entrySize', field(2, NvU8))
+setattr(FALCON_APPLICATION_INTERFACE_HEADER_V1, 'entryCount', field(3, NvU8))
 class FALCON_APPLICATION_INTERFACE_ENTRY_V1(Struct): pass
-FALCON_APPLICATION_INTERFACE_ENTRY_V1._packed_ = True
-FALCON_APPLICATION_INTERFACE_ENTRY_V1._fields_ = [
-  ('id', NvU32),
-  ('dmemOffset', NvU32),
-]
+FALCON_APPLICATION_INTERFACE_ENTRY_V1.SIZE = 8
+FALCON_APPLICATION_INTERFACE_ENTRY_V1._fields_ = ['id', 'dmemOffset']
+setattr(FALCON_APPLICATION_INTERFACE_ENTRY_V1, 'id', field(0, NvU32))
+setattr(FALCON_APPLICATION_INTERFACE_ENTRY_V1, 'dmemOffset', field(4, NvU32))
 class FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3(Struct): pass
-FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3._packed_ = True
-FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3._fields_ = [
-  ('signature', NvU32),
-  ('version', NvU16),
-  ('size', NvU16),
-  ('cmd_in_buffer_offset', NvU32),
-  ('cmd_in_buffer_size', NvU32),
-  ('cmd_out_buffer_offset', NvU32),
-  ('cmd_out_buffer_size', NvU32),
-  ('nvf_img_data_buffer_offset', NvU32),
-  ('nvf_img_data_buffer_size', NvU32),
-  ('printfBufferHdr', NvU32),
-  ('ucode_build_time_stamp', NvU32),
-  ('ucode_signature', NvU32),
-  ('init_cmd', NvU32),
-  ('ucode_feature', NvU32),
-  ('ucode_cmd_mask0', NvU32),
-  ('ucode_cmd_mask1', NvU32),
-  ('multiTgtTbl', NvU32),
-]
+FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3.SIZE = 64
+FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3._fields_ = ['signature', 'version', 'size', 'cmd_in_buffer_offset', 'cmd_in_buffer_size', 'cmd_out_buffer_offset', 'cmd_out_buffer_size', 'nvf_img_data_buffer_offset', 'nvf_img_data_buffer_size', 'printfBufferHdr', 'ucode_build_time_stamp', 'ucode_signature', 'init_cmd', 'ucode_feature', 'ucode_cmd_mask0', 'ucode_cmd_mask1', 'multiTgtTbl']
+setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'signature', field(0, NvU32))
+setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'version', field(4, NvU16))
+setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'size', field(6, NvU16))
+setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'cmd_in_buffer_offset', field(8, NvU32))
+setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'cmd_in_buffer_size', field(12, NvU32))
+setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'cmd_out_buffer_offset', field(16, NvU32))
+setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'cmd_out_buffer_size', field(20, NvU32))
+setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'nvf_img_data_buffer_offset', field(24, NvU32))
+setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'nvf_img_data_buffer_size', field(28, NvU32))
+setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'printfBufferHdr', field(32, NvU32))
+setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'ucode_build_time_stamp', field(36, NvU32))
+setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'ucode_signature', field(40, NvU32))
+setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'init_cmd', field(44, NvU32))
+setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'ucode_feature', field(48, NvU32))
+setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'ucode_cmd_mask0', field(52, NvU32))
+setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'ucode_cmd_mask1', field(56, NvU32))
+setattr(FALCON_APPLICATION_INTERFACE_DMEM_MAPPER_V3, 'multiTgtTbl', field(60, NvU32))
 class struct_BIT_HEADER_V1_00(Struct): pass
-struct_BIT_HEADER_V1_00._packed_ = True
-struct_BIT_HEADER_V1_00._fields_ = [
-  ('Id', ctypes.c_uint16),
-  ('Signature', ctypes.c_uint32),
-  ('BCD_Version', ctypes.c_uint16),
-  ('HeaderSize', ctypes.c_ubyte),
-  ('TokenSize', ctypes.c_ubyte),
-  ('TokenEntries', ctypes.c_ubyte),
-  ('HeaderChksum', ctypes.c_ubyte),
-]
+struct_BIT_HEADER_V1_00.SIZE = 12
+struct_BIT_HEADER_V1_00._fields_ = ['Id', 'Signature', 'BCD_Version', 'HeaderSize', 'TokenSize', 'TokenEntries', 'HeaderChksum']
+setattr(struct_BIT_HEADER_V1_00, 'Id', field(0, ctypes.c_uint16))
+setattr(struct_BIT_HEADER_V1_00, 'Signature', field(2, ctypes.c_uint32))
+setattr(struct_BIT_HEADER_V1_00, 'BCD_Version', field(6, ctypes.c_uint16))
+setattr(struct_BIT_HEADER_V1_00, 'HeaderSize', field(8, ctypes.c_ubyte))
+setattr(struct_BIT_HEADER_V1_00, 'TokenSize', field(9, ctypes.c_ubyte))
+setattr(struct_BIT_HEADER_V1_00, 'TokenEntries', field(10, ctypes.c_ubyte))
+setattr(struct_BIT_HEADER_V1_00, 'HeaderChksum', field(11, ctypes.c_ubyte))
 BIT_HEADER_V1_00 = struct_BIT_HEADER_V1_00
 class struct_BIT_TOKEN_V1_00(Struct): pass
-struct_BIT_TOKEN_V1_00._packed_ = True
-struct_BIT_TOKEN_V1_00._fields_ = [
-  ('TokenId', ctypes.c_ubyte),
-  ('DataVersion', ctypes.c_ubyte),
-  ('DataSize', ctypes.c_uint16),
-  ('DataPtr', ctypes.c_uint32),
-]
+struct_BIT_TOKEN_V1_00.SIZE = 8
+struct_BIT_TOKEN_V1_00._fields_ = ['TokenId', 'DataVersion', 'DataSize', 'DataPtr']
+setattr(struct_BIT_TOKEN_V1_00, 'TokenId', field(0, ctypes.c_ubyte))
+setattr(struct_BIT_TOKEN_V1_00, 'DataVersion', field(1, ctypes.c_ubyte))
+setattr(struct_BIT_TOKEN_V1_00, 'DataSize', field(2, ctypes.c_uint16))
+setattr(struct_BIT_TOKEN_V1_00, 'DataPtr', field(4, ctypes.c_uint32))
 BIT_TOKEN_V1_00 = struct_BIT_TOKEN_V1_00
 class BIT_DATA_BIOSDATA_BINVER(Struct): pass
-BIT_DATA_BIOSDATA_BINVER._packed_ = True
-BIT_DATA_BIOSDATA_BINVER._fields_ = [
-  ('Version', ctypes.c_uint32),
-  ('OemVersion', ctypes.c_ubyte),
-]
+BIT_DATA_BIOSDATA_BINVER.SIZE = 5
+BIT_DATA_BIOSDATA_BINVER._fields_ = ['Version', 'OemVersion']
+setattr(BIT_DATA_BIOSDATA_BINVER, 'Version', field(0, ctypes.c_uint32))
+setattr(BIT_DATA_BIOSDATA_BINVER, 'OemVersion', field(4, ctypes.c_ubyte))
 class BIT_DATA_FALCON_DATA_V2(Struct): pass
-BIT_DATA_FALCON_DATA_V2._packed_ = True
-BIT_DATA_FALCON_DATA_V2._fields_ = [
-  ('FalconUcodeTablePtr', ctypes.c_uint32),
-]
+BIT_DATA_FALCON_DATA_V2.SIZE = 4
+BIT_DATA_FALCON_DATA_V2._fields_ = ['FalconUcodeTablePtr']
+setattr(BIT_DATA_FALCON_DATA_V2, 'FalconUcodeTablePtr', field(0, ctypes.c_uint32))
 class FALCON_UCODE_TABLE_HDR_V1(Struct): pass
-FALCON_UCODE_TABLE_HDR_V1._packed_ = True
-FALCON_UCODE_TABLE_HDR_V1._fields_ = [
-  ('Version', ctypes.c_ubyte),
-  ('HeaderSize', ctypes.c_ubyte),
-  ('EntrySize', ctypes.c_ubyte),
-  ('EntryCount', ctypes.c_ubyte),
-  ('DescVersion', ctypes.c_ubyte),
-  ('DescSize', ctypes.c_ubyte),
-]
+FALCON_UCODE_TABLE_HDR_V1.SIZE = 6
+FALCON_UCODE_TABLE_HDR_V1._fields_ = ['Version', 'HeaderSize', 'EntrySize', 'EntryCount', 'DescVersion', 'DescSize']
+setattr(FALCON_UCODE_TABLE_HDR_V1, 'Version', field(0, ctypes.c_ubyte))
+setattr(FALCON_UCODE_TABLE_HDR_V1, 'HeaderSize', field(1, ctypes.c_ubyte))
+setattr(FALCON_UCODE_TABLE_HDR_V1, 'EntrySize', field(2, ctypes.c_ubyte))
+setattr(FALCON_UCODE_TABLE_HDR_V1, 'EntryCount', field(3, ctypes.c_ubyte))
+setattr(FALCON_UCODE_TABLE_HDR_V1, 'DescVersion', field(4, ctypes.c_ubyte))
+setattr(FALCON_UCODE_TABLE_HDR_V1, 'DescSize', field(5, ctypes.c_ubyte))
 class FALCON_UCODE_TABLE_ENTRY_V1(Struct): pass
-FALCON_UCODE_TABLE_ENTRY_V1._packed_ = True
-FALCON_UCODE_TABLE_ENTRY_V1._fields_ = [
-  ('ApplicationID', ctypes.c_ubyte),
-  ('TargetID', ctypes.c_ubyte),
-  ('DescPtr', ctypes.c_uint32),
-]
+FALCON_UCODE_TABLE_ENTRY_V1.SIZE = 6
+FALCON_UCODE_TABLE_ENTRY_V1._fields_ = ['ApplicationID', 'TargetID', 'DescPtr']
+setattr(FALCON_UCODE_TABLE_ENTRY_V1, 'ApplicationID', field(0, ctypes.c_ubyte))
+setattr(FALCON_UCODE_TABLE_ENTRY_V1, 'TargetID', field(1, ctypes.c_ubyte))
+setattr(FALCON_UCODE_TABLE_ENTRY_V1, 'DescPtr', field(2, ctypes.c_uint32))
 class FALCON_UCODE_DESC_HEADER(Struct): pass
-FALCON_UCODE_DESC_HEADER._packed_ = True
-FALCON_UCODE_DESC_HEADER._fields_ = [
-  ('vDesc', ctypes.c_uint32),
-]
+FALCON_UCODE_DESC_HEADER.SIZE = 4
+FALCON_UCODE_DESC_HEADER._fields_ = ['vDesc']
+setattr(FALCON_UCODE_DESC_HEADER, 'vDesc', field(0, ctypes.c_uint32))
 class FALCON_UCODE_DESC_V3(Struct): pass
-FALCON_UCODE_DESC_V3._fields_ = [
-  ('Hdr', FALCON_UCODE_DESC_HEADER),
-  ('StoredSize', ctypes.c_uint32),
-  ('PKCDataOffset', ctypes.c_uint32),
-  ('InterfaceOffset', ctypes.c_uint32),
-  ('IMEMPhysBase', ctypes.c_uint32),
-  ('IMEMLoadSize', ctypes.c_uint32),
-  ('IMEMVirtBase', ctypes.c_uint32),
-  ('DMEMPhysBase', ctypes.c_uint32),
-  ('DMEMLoadSize', ctypes.c_uint32),
-  ('EngineIdMask', ctypes.c_uint16),
-  ('UcodeId', ctypes.c_ubyte),
-  ('SignatureCount', ctypes.c_ubyte),
-  ('SignatureVersions', ctypes.c_uint16),
-  ('Reserved', ctypes.c_uint16),
-]
+FALCON_UCODE_DESC_V3.SIZE = 44
+FALCON_UCODE_DESC_V3._fields_ = ['Hdr', 'StoredSize', 'PKCDataOffset', 'InterfaceOffset', 'IMEMPhysBase', 'IMEMLoadSize', 'IMEMVirtBase', 'DMEMPhysBase', 'DMEMLoadSize', 'EngineIdMask', 'UcodeId', 'SignatureCount', 'SignatureVersions', 'Reserved']
+setattr(FALCON_UCODE_DESC_V3, 'Hdr', field(0, FALCON_UCODE_DESC_HEADER))
+setattr(FALCON_UCODE_DESC_V3, 'StoredSize', field(4, ctypes.c_uint32))
+setattr(FALCON_UCODE_DESC_V3, 'PKCDataOffset', field(8, ctypes.c_uint32))
+setattr(FALCON_UCODE_DESC_V3, 'InterfaceOffset', field(12, ctypes.c_uint32))
+setattr(FALCON_UCODE_DESC_V3, 'IMEMPhysBase', field(16, ctypes.c_uint32))
+setattr(FALCON_UCODE_DESC_V3, 'IMEMLoadSize', field(20, ctypes.c_uint32))
+setattr(FALCON_UCODE_DESC_V3, 'IMEMVirtBase', field(24, ctypes.c_uint32))
+setattr(FALCON_UCODE_DESC_V3, 'DMEMPhysBase', field(28, ctypes.c_uint32))
+setattr(FALCON_UCODE_DESC_V3, 'DMEMLoadSize', field(32, ctypes.c_uint32))
+setattr(FALCON_UCODE_DESC_V3, 'EngineIdMask', field(36, ctypes.c_uint16))
+setattr(FALCON_UCODE_DESC_V3, 'UcodeId', field(38, ctypes.c_ubyte))
+setattr(FALCON_UCODE_DESC_V3, 'SignatureCount', field(39, ctypes.c_ubyte))
+setattr(FALCON_UCODE_DESC_V3, 'SignatureVersions', field(40, ctypes.c_uint16))
+setattr(FALCON_UCODE_DESC_V3, 'Reserved', field(42, ctypes.c_uint16))
 class FWSECLIC_READ_VBIOS_DESC(Struct): pass
-FWSECLIC_READ_VBIOS_DESC._packed_ = True
-FWSECLIC_READ_VBIOS_DESC._fields_ = [
-  ('version', NvU32),
-  ('size', NvU32),
-  ('gfwImageOffset', NvU64),
-  ('gfwImageSize', NvU32),
-  ('flags', NvU32),
-]
+FWSECLIC_READ_VBIOS_DESC.SIZE = 24
+FWSECLIC_READ_VBIOS_DESC._fields_ = ['version', 'size', 'gfwImageOffset', 'gfwImageSize', 'flags']
+setattr(FWSECLIC_READ_VBIOS_DESC, 'version', field(0, NvU32))
+setattr(FWSECLIC_READ_VBIOS_DESC, 'size', field(4, NvU32))
+setattr(FWSECLIC_READ_VBIOS_DESC, 'gfwImageOffset', field(8, NvU64))
+setattr(FWSECLIC_READ_VBIOS_DESC, 'gfwImageSize', field(16, NvU32))
+setattr(FWSECLIC_READ_VBIOS_DESC, 'flags', field(20, NvU32))
 class FWSECLIC_FRTS_REGION_DESC(Struct): pass
-FWSECLIC_FRTS_REGION_DESC._packed_ = True
-FWSECLIC_FRTS_REGION_DESC._fields_ = [
-  ('version', NvU32),
-  ('size', NvU32),
-  ('frtsRegionOffset4K', NvU32),
-  ('frtsRegionSize', NvU32),
-  ('frtsRegionMediaType', NvU32),
-]
+FWSECLIC_FRTS_REGION_DESC.SIZE = 20
+FWSECLIC_FRTS_REGION_DESC._fields_ = ['version', 'size', 'frtsRegionOffset4K', 'frtsRegionSize', 'frtsRegionMediaType']
+setattr(FWSECLIC_FRTS_REGION_DESC, 'version', field(0, NvU32))
+setattr(FWSECLIC_FRTS_REGION_DESC, 'size', field(4, NvU32))
+setattr(FWSECLIC_FRTS_REGION_DESC, 'frtsRegionOffset4K', field(8, NvU32))
+setattr(FWSECLIC_FRTS_REGION_DESC, 'frtsRegionSize', field(12, NvU32))
+setattr(FWSECLIC_FRTS_REGION_DESC, 'frtsRegionMediaType', field(16, NvU32))
 class FWSECLIC_FRTS_CMD(Struct): pass
-FWSECLIC_FRTS_CMD._packed_ = True
-FWSECLIC_FRTS_CMD._fields_ = [
-  ('readVbiosDesc', FWSECLIC_READ_VBIOS_DESC),
-  ('frtsRegionDesc', FWSECLIC_FRTS_REGION_DESC),
-]
+FWSECLIC_FRTS_CMD.SIZE = 44
+FWSECLIC_FRTS_CMD._fields_ = ['readVbiosDesc', 'frtsRegionDesc']
+setattr(FWSECLIC_FRTS_CMD, 'readVbiosDesc', field(0, FWSECLIC_READ_VBIOS_DESC))
+setattr(FWSECLIC_FRTS_CMD, 'frtsRegionDesc', field(24, FWSECLIC_FRTS_REGION_DESC))
 class struct__PCI_EXP_ROM_STANDARD(Struct): pass
-struct__PCI_EXP_ROM_STANDARD._packed_ = True
-struct__PCI_EXP_ROM_STANDARD._fields_ = [
-  ('sig', NvU16),
-  ('reserved', (NvU8 * 22)),
-  ('pciDataStrucPtr', NvU16),
-  ('sizeOfBlock', NvU32),
-]
+struct__PCI_EXP_ROM_STANDARD.SIZE = 30
+struct__PCI_EXP_ROM_STANDARD._fields_ = ['sig', 'reserved', 'pciDataStrucPtr', 'sizeOfBlock']
+setattr(struct__PCI_EXP_ROM_STANDARD, 'sig', field(0, NvU16))
+setattr(struct__PCI_EXP_ROM_STANDARD, 'reserved', field(2, Array(NvU8, 22)))
+setattr(struct__PCI_EXP_ROM_STANDARD, 'pciDataStrucPtr', field(24, NvU16))
+setattr(struct__PCI_EXP_ROM_STANDARD, 'sizeOfBlock', field(26, NvU32))
 PCI_EXP_ROM_STANDARD = struct__PCI_EXP_ROM_STANDARD
-PPCI_EXP_ROM_STANDARD = ctypes.POINTER(struct__PCI_EXP_ROM_STANDARD)
+PPCI_EXP_ROM_STANDARD = Pointer(struct__PCI_EXP_ROM_STANDARD)
 class struct__PCI_EXP_ROM_NBSI(Struct): pass
-struct__PCI_EXP_ROM_NBSI._packed_ = True
-struct__PCI_EXP_ROM_NBSI._fields_ = [
-  ('sig', NvU16),
-  ('reserved', (NvU8 * 20)),
-  ('nbsiDataOffset', NvU16),
-  ('pciDataStrucPtr', NvU16),
-  ('sizeOfBlock', NvU32),
-]
+struct__PCI_EXP_ROM_NBSI.SIZE = 30
+struct__PCI_EXP_ROM_NBSI._fields_ = ['sig', 'reserved', 'nbsiDataOffset', 'pciDataStrucPtr', 'sizeOfBlock']
+setattr(struct__PCI_EXP_ROM_NBSI, 'sig', field(0, NvU16))
+setattr(struct__PCI_EXP_ROM_NBSI, 'reserved', field(2, Array(NvU8, 20)))
+setattr(struct__PCI_EXP_ROM_NBSI, 'nbsiDataOffset', field(22, NvU16))
+setattr(struct__PCI_EXP_ROM_NBSI, 'pciDataStrucPtr', field(24, NvU16))
+setattr(struct__PCI_EXP_ROM_NBSI, 'sizeOfBlock', field(26, NvU32))
 PCI_EXP_ROM_NBSI = struct__PCI_EXP_ROM_NBSI
-PPCI_EXP_ROM_NBSI = ctypes.POINTER(struct__PCI_EXP_ROM_NBSI)
-class union__PCI_EXP_ROM(ctypes.Union): pass
-union__PCI_EXP_ROM._fields_ = [
-  ('standard', PCI_EXP_ROM_STANDARD),
-  ('nbsi', PCI_EXP_ROM_NBSI),
-]
+PPCI_EXP_ROM_NBSI = Pointer(struct__PCI_EXP_ROM_NBSI)
+class union__PCI_EXP_ROM(Union): pass
+union__PCI_EXP_ROM.SIZE = 30
+union__PCI_EXP_ROM._fields_ = ['standard', 'nbsi']
+setattr(union__PCI_EXP_ROM, 'standard', field(0, PCI_EXP_ROM_STANDARD))
+setattr(union__PCI_EXP_ROM, 'nbsi', field(0, PCI_EXP_ROM_NBSI))
 PCI_EXP_ROM = union__PCI_EXP_ROM
-PPCI_EXP_ROM = ctypes.POINTER(union__PCI_EXP_ROM)
+PPCI_EXP_ROM = Pointer(union__PCI_EXP_ROM)
 class struct__PCI_DATA_STRUCT(Struct): pass
-struct__PCI_DATA_STRUCT._packed_ = True
-struct__PCI_DATA_STRUCT._fields_ = [
-  ('sig', NvU32),
-  ('vendorID', NvU16),
-  ('deviceID', NvU16),
-  ('deviceListPtr', NvU16),
-  ('pciDataStructLen', NvU16),
-  ('pciDataStructRev', NvU8),
-  ('classCode', (NvU8 * 3)),
-  ('imageLen', NvU16),
-  ('vendorRomRev', NvU16),
-  ('codeType', NvU8),
-  ('lastImage', NvU8),
-  ('maxRunTimeImageLen', NvU16),
-]
+struct__PCI_DATA_STRUCT.SIZE = 24
+struct__PCI_DATA_STRUCT._fields_ = ['sig', 'vendorID', 'deviceID', 'deviceListPtr', 'pciDataStructLen', 'pciDataStructRev', 'classCode', 'imageLen', 'vendorRomRev', 'codeType', 'lastImage', 'maxRunTimeImageLen']
+setattr(struct__PCI_DATA_STRUCT, 'sig', field(0, NvU32))
+setattr(struct__PCI_DATA_STRUCT, 'vendorID', field(4, NvU16))
+setattr(struct__PCI_DATA_STRUCT, 'deviceID', field(6, NvU16))
+setattr(struct__PCI_DATA_STRUCT, 'deviceListPtr', field(8, NvU16))
+setattr(struct__PCI_DATA_STRUCT, 'pciDataStructLen', field(10, NvU16))
+setattr(struct__PCI_DATA_STRUCT, 'pciDataStructRev', field(12, NvU8))
+setattr(struct__PCI_DATA_STRUCT, 'classCode', field(13, Array(NvU8, 3)))
+setattr(struct__PCI_DATA_STRUCT, 'imageLen', field(16, NvU16))
+setattr(struct__PCI_DATA_STRUCT, 'vendorRomRev', field(18, NvU16))
+setattr(struct__PCI_DATA_STRUCT, 'codeType', field(20, NvU8))
+setattr(struct__PCI_DATA_STRUCT, 'lastImage', field(21, NvU8))
+setattr(struct__PCI_DATA_STRUCT, 'maxRunTimeImageLen', field(22, NvU16))
 PCI_DATA_STRUCT = struct__PCI_DATA_STRUCT
-PPCI_DATA_STRUCT = ctypes.POINTER(struct__PCI_DATA_STRUCT)
+PPCI_DATA_STRUCT = Pointer(struct__PCI_DATA_STRUCT)
 class struct__NV_PCI_DATA_EXT_STRUCT(Struct): pass
-struct__NV_PCI_DATA_EXT_STRUCT._packed_ = True
-struct__NV_PCI_DATA_EXT_STRUCT._fields_ = [
-  ('signature', NvU32),
-  ('nvPciDataExtRev', NvU16),
-  ('nvPciDataExtLen', NvU16),
-  ('subimageLen', NvU16),
-  ('privLastImage', NvU8),
-  ('flags', NvU8),
-]
+struct__NV_PCI_DATA_EXT_STRUCT.SIZE = 12
+struct__NV_PCI_DATA_EXT_STRUCT._fields_ = ['signature', 'nvPciDataExtRev', 'nvPciDataExtLen', 'subimageLen', 'privLastImage', 'flags']
+setattr(struct__NV_PCI_DATA_EXT_STRUCT, 'signature', field(0, NvU32))
+setattr(struct__NV_PCI_DATA_EXT_STRUCT, 'nvPciDataExtRev', field(4, NvU16))
+setattr(struct__NV_PCI_DATA_EXT_STRUCT, 'nvPciDataExtLen', field(6, NvU16))
+setattr(struct__NV_PCI_DATA_EXT_STRUCT, 'subimageLen', field(8, NvU16))
+setattr(struct__NV_PCI_DATA_EXT_STRUCT, 'privLastImage', field(10, NvU8))
+setattr(struct__NV_PCI_DATA_EXT_STRUCT, 'flags', field(11, NvU8))
 NV_PCI_DATA_EXT_STRUCT = struct__NV_PCI_DATA_EXT_STRUCT
-PNV_PCI_DATA_EXT_STRUCT = ctypes.POINTER(struct__NV_PCI_DATA_EXT_STRUCT)
+PNV_PCI_DATA_EXT_STRUCT = Pointer(struct__NV_PCI_DATA_EXT_STRUCT)
 GSP_FW_WPR_META_VERIFIED = 0xa0a0a0a0a0a0a0a0
 GSP_FW_WPR_META_REVISION = 1
 GSP_FW_WPR_META_MAGIC = 0xdc3aae21371a60b3

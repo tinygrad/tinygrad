@@ -1,25 +1,25 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support.c import Array, DLL, Pointer, Struct, Union, field, CEnum, _IO, _IOW, _IOR, _IOWR
 dll = DLL('opencl', 'OpenCL')
 class struct__cl_platform_id(Struct): pass
-cl_platform_id = ctypes.POINTER(struct__cl_platform_id)
+cl_platform_id = Pointer(struct__cl_platform_id)
 class struct__cl_device_id(Struct): pass
-cl_device_id = ctypes.POINTER(struct__cl_device_id)
+cl_device_id = Pointer(struct__cl_device_id)
 class struct__cl_context(Struct): pass
-cl_context = ctypes.POINTER(struct__cl_context)
+cl_context = Pointer(struct__cl_context)
 class struct__cl_command_queue(Struct): pass
-cl_command_queue = ctypes.POINTER(struct__cl_command_queue)
+cl_command_queue = Pointer(struct__cl_command_queue)
 class struct__cl_mem(Struct): pass
-cl_mem = ctypes.POINTER(struct__cl_mem)
+cl_mem = Pointer(struct__cl_mem)
 class struct__cl_program(Struct): pass
-cl_program = ctypes.POINTER(struct__cl_program)
+cl_program = Pointer(struct__cl_program)
 class struct__cl_kernel(Struct): pass
-cl_kernel = ctypes.POINTER(struct__cl_kernel)
+cl_kernel = Pointer(struct__cl_kernel)
 class struct__cl_event(Struct): pass
-cl_event = ctypes.POINTER(struct__cl_event)
+cl_event = Pointer(struct__cl_event)
 class struct__cl_sampler(Struct): pass
-cl_sampler = ctypes.POINTER(struct__cl_sampler)
+cl_sampler = Pointer(struct__cl_sampler)
 cl_bool = ctypes.c_uint32
 cl_bitfield = ctypes.c_uint64
 cl_properties = ctypes.c_uint64
@@ -75,59 +75,54 @@ cl_khronos_vendor_id = ctypes.c_uint32
 cl_mem_properties = ctypes.c_uint64
 cl_version = ctypes.c_uint32
 class struct__cl_image_format(Struct): pass
-struct__cl_image_format._fields_ = [
-  ('image_channel_order', cl_channel_order),
-  ('image_channel_data_type', cl_channel_type),
-]
+struct__cl_image_format.SIZE = 8
+struct__cl_image_format._fields_ = ['image_channel_order', 'image_channel_data_type']
+setattr(struct__cl_image_format, 'image_channel_order', field(0, cl_channel_order))
+setattr(struct__cl_image_format, 'image_channel_data_type', field(4, cl_channel_type))
 cl_image_format = struct__cl_image_format
 class struct__cl_image_desc(Struct): pass
 size_t = ctypes.c_uint64
 cl_uint = ctypes.c_uint32
-class struct__cl_image_desc_0(ctypes.Union): pass
-struct__cl_image_desc_0._fields_ = [
-  ('buffer', cl_mem),
-  ('mem_object', cl_mem),
-]
-struct__cl_image_desc._anonymous_ = ['_0']
-struct__cl_image_desc._fields_ = [
-  ('image_type', cl_mem_object_type),
-  ('image_width', size_t),
-  ('image_height', size_t),
-  ('image_depth', size_t),
-  ('image_array_size', size_t),
-  ('image_row_pitch', size_t),
-  ('image_slice_pitch', size_t),
-  ('num_mip_levels', cl_uint),
-  ('num_samples', cl_uint),
-  ('_0', struct__cl_image_desc_0),
-]
+struct__cl_image_desc.SIZE = 72
+struct__cl_image_desc._fields_ = ['image_type', 'image_width', 'image_height', 'image_depth', 'image_array_size', 'image_row_pitch', 'image_slice_pitch', 'num_mip_levels', 'num_samples', 'buffer', 'mem_object']
+setattr(struct__cl_image_desc, 'image_type', field(0, cl_mem_object_type))
+setattr(struct__cl_image_desc, 'image_width', field(8, size_t))
+setattr(struct__cl_image_desc, 'image_height', field(16, size_t))
+setattr(struct__cl_image_desc, 'image_depth', field(24, size_t))
+setattr(struct__cl_image_desc, 'image_array_size', field(32, size_t))
+setattr(struct__cl_image_desc, 'image_row_pitch', field(40, size_t))
+setattr(struct__cl_image_desc, 'image_slice_pitch', field(48, size_t))
+setattr(struct__cl_image_desc, 'num_mip_levels', field(56, cl_uint))
+setattr(struct__cl_image_desc, 'num_samples', field(60, cl_uint))
+setattr(struct__cl_image_desc, 'buffer', field(64, cl_mem))
+setattr(struct__cl_image_desc, 'mem_object', field(64, cl_mem))
 cl_image_desc = struct__cl_image_desc
 class struct__cl_buffer_region(Struct): pass
-struct__cl_buffer_region._fields_ = [
-  ('origin', size_t),
-  ('size', size_t),
-]
+struct__cl_buffer_region.SIZE = 16
+struct__cl_buffer_region._fields_ = ['origin', 'size']
+setattr(struct__cl_buffer_region, 'origin', field(0, size_t))
+setattr(struct__cl_buffer_region, 'size', field(8, size_t))
 cl_buffer_region = struct__cl_buffer_region
 class struct__cl_name_version(Struct): pass
-struct__cl_name_version._fields_ = [
-  ('version', cl_version),
-  ('name', (ctypes.c_char * 64)),
-]
+struct__cl_name_version.SIZE = 68
+struct__cl_name_version._fields_ = ['version', 'name']
+setattr(struct__cl_name_version, 'version', field(0, cl_version))
+setattr(struct__cl_name_version, 'name', field(4, Array(ctypes.c_char, 64)))
 cl_name_version = struct__cl_name_version
 cl_int = ctypes.c_int32
-try: (clGetPlatformIDs:=dll.clGetPlatformIDs).restype, clGetPlatformIDs.argtypes = cl_int, [cl_uint, ctypes.POINTER(cl_platform_id), ctypes.POINTER(cl_uint)]
+try: (clGetPlatformIDs:=dll.clGetPlatformIDs).restype, clGetPlatformIDs.argtypes = cl_int, [cl_uint, Pointer(cl_platform_id), Pointer(cl_uint)]
 except AttributeError: pass
 
-try: (clGetPlatformInfo:=dll.clGetPlatformInfo).restype, clGetPlatformInfo.argtypes = cl_int, [cl_platform_id, cl_platform_info, size_t, ctypes.c_void_p, ctypes.POINTER(size_t)]
+try: (clGetPlatformInfo:=dll.clGetPlatformInfo).restype, clGetPlatformInfo.argtypes = cl_int, [cl_platform_id, cl_platform_info, size_t, ctypes.c_void_p, Pointer(size_t)]
 except AttributeError: pass
 
-try: (clGetDeviceIDs:=dll.clGetDeviceIDs).restype, clGetDeviceIDs.argtypes = cl_int, [cl_platform_id, cl_device_type, cl_uint, ctypes.POINTER(cl_device_id), ctypes.POINTER(cl_uint)]
+try: (clGetDeviceIDs:=dll.clGetDeviceIDs).restype, clGetDeviceIDs.argtypes = cl_int, [cl_platform_id, cl_device_type, cl_uint, Pointer(cl_device_id), Pointer(cl_uint)]
 except AttributeError: pass
 
-try: (clGetDeviceInfo:=dll.clGetDeviceInfo).restype, clGetDeviceInfo.argtypes = cl_int, [cl_device_id, cl_device_info, size_t, ctypes.c_void_p, ctypes.POINTER(size_t)]
+try: (clGetDeviceInfo:=dll.clGetDeviceInfo).restype, clGetDeviceInfo.argtypes = cl_int, [cl_device_id, cl_device_info, size_t, ctypes.c_void_p, Pointer(size_t)]
 except AttributeError: pass
 
-try: (clCreateSubDevices:=dll.clCreateSubDevices).restype, clCreateSubDevices.argtypes = cl_int, [cl_device_id, ctypes.POINTER(cl_device_partition_property), cl_uint, ctypes.POINTER(cl_device_id), ctypes.POINTER(cl_uint)]
+try: (clCreateSubDevices:=dll.clCreateSubDevices).restype, clCreateSubDevices.argtypes = cl_int, [cl_device_id, Pointer(cl_device_partition_property), cl_uint, Pointer(cl_device_id), Pointer(cl_uint)]
 except AttributeError: pass
 
 try: (clRetainDevice:=dll.clRetainDevice).restype, clRetainDevice.argtypes = cl_int, [cl_device_id]
@@ -140,16 +135,16 @@ try: (clSetDefaultDeviceCommandQueue:=dll.clSetDefaultDeviceCommandQueue).restyp
 except AttributeError: pass
 
 cl_ulong = ctypes.c_uint64
-try: (clGetDeviceAndHostTimer:=dll.clGetDeviceAndHostTimer).restype, clGetDeviceAndHostTimer.argtypes = cl_int, [cl_device_id, ctypes.POINTER(cl_ulong), ctypes.POINTER(cl_ulong)]
+try: (clGetDeviceAndHostTimer:=dll.clGetDeviceAndHostTimer).restype, clGetDeviceAndHostTimer.argtypes = cl_int, [cl_device_id, Pointer(cl_ulong), Pointer(cl_ulong)]
 except AttributeError: pass
 
-try: (clGetHostTimer:=dll.clGetHostTimer).restype, clGetHostTimer.argtypes = cl_int, [cl_device_id, ctypes.POINTER(cl_ulong)]
+try: (clGetHostTimer:=dll.clGetHostTimer).restype, clGetHostTimer.argtypes = cl_int, [cl_device_id, Pointer(cl_ulong)]
 except AttributeError: pass
 
-try: (clCreateContext:=dll.clCreateContext).restype, clCreateContext.argtypes = cl_context, [ctypes.POINTER(cl_context_properties), cl_uint, ctypes.POINTER(cl_device_id), ctypes.CFUNCTYPE(None, ctypes.POINTER(ctypes.c_char), ctypes.c_void_p, size_t, ctypes.c_void_p), ctypes.c_void_p, ctypes.POINTER(cl_int)]
+try: (clCreateContext:=dll.clCreateContext).restype, clCreateContext.argtypes = cl_context, [Pointer(cl_context_properties), cl_uint, Pointer(cl_device_id), ctypes.CFUNCTYPE(None, Pointer(ctypes.c_char), ctypes.c_void_p, size_t, ctypes.c_void_p), ctypes.c_void_p, Pointer(cl_int)]
 except AttributeError: pass
 
-try: (clCreateContextFromType:=dll.clCreateContextFromType).restype, clCreateContextFromType.argtypes = cl_context, [ctypes.POINTER(cl_context_properties), cl_device_type, ctypes.CFUNCTYPE(None, ctypes.POINTER(ctypes.c_char), ctypes.c_void_p, size_t, ctypes.c_void_p), ctypes.c_void_p, ctypes.POINTER(cl_int)]
+try: (clCreateContextFromType:=dll.clCreateContextFromType).restype, clCreateContextFromType.argtypes = cl_context, [Pointer(cl_context_properties), cl_device_type, ctypes.CFUNCTYPE(None, Pointer(ctypes.c_char), ctypes.c_void_p, size_t, ctypes.c_void_p), ctypes.c_void_p, Pointer(cl_int)]
 except AttributeError: pass
 
 try: (clRetainContext:=dll.clRetainContext).restype, clRetainContext.argtypes = cl_int, [cl_context]
@@ -158,13 +153,13 @@ except AttributeError: pass
 try: (clReleaseContext:=dll.clReleaseContext).restype, clReleaseContext.argtypes = cl_int, [cl_context]
 except AttributeError: pass
 
-try: (clGetContextInfo:=dll.clGetContextInfo).restype, clGetContextInfo.argtypes = cl_int, [cl_context, cl_context_info, size_t, ctypes.c_void_p, ctypes.POINTER(size_t)]
+try: (clGetContextInfo:=dll.clGetContextInfo).restype, clGetContextInfo.argtypes = cl_int, [cl_context, cl_context_info, size_t, ctypes.c_void_p, Pointer(size_t)]
 except AttributeError: pass
 
 try: (clSetContextDestructorCallback:=dll.clSetContextDestructorCallback).restype, clSetContextDestructorCallback.argtypes = cl_int, [cl_context, ctypes.CFUNCTYPE(None, cl_context, ctypes.c_void_p), ctypes.c_void_p]
 except AttributeError: pass
 
-try: (clCreateCommandQueueWithProperties:=dll.clCreateCommandQueueWithProperties).restype, clCreateCommandQueueWithProperties.argtypes = cl_command_queue, [cl_context, cl_device_id, ctypes.POINTER(cl_queue_properties), ctypes.POINTER(cl_int)]
+try: (clCreateCommandQueueWithProperties:=dll.clCreateCommandQueueWithProperties).restype, clCreateCommandQueueWithProperties.argtypes = cl_command_queue, [cl_context, cl_device_id, Pointer(cl_queue_properties), Pointer(cl_int)]
 except AttributeError: pass
 
 try: (clRetainCommandQueue:=dll.clRetainCommandQueue).restype, clRetainCommandQueue.argtypes = cl_int, [cl_command_queue]
@@ -173,25 +168,25 @@ except AttributeError: pass
 try: (clReleaseCommandQueue:=dll.clReleaseCommandQueue).restype, clReleaseCommandQueue.argtypes = cl_int, [cl_command_queue]
 except AttributeError: pass
 
-try: (clGetCommandQueueInfo:=dll.clGetCommandQueueInfo).restype, clGetCommandQueueInfo.argtypes = cl_int, [cl_command_queue, cl_command_queue_info, size_t, ctypes.c_void_p, ctypes.POINTER(size_t)]
+try: (clGetCommandQueueInfo:=dll.clGetCommandQueueInfo).restype, clGetCommandQueueInfo.argtypes = cl_int, [cl_command_queue, cl_command_queue_info, size_t, ctypes.c_void_p, Pointer(size_t)]
 except AttributeError: pass
 
-try: (clCreateBuffer:=dll.clCreateBuffer).restype, clCreateBuffer.argtypes = cl_mem, [cl_context, cl_mem_flags, size_t, ctypes.c_void_p, ctypes.POINTER(cl_int)]
+try: (clCreateBuffer:=dll.clCreateBuffer).restype, clCreateBuffer.argtypes = cl_mem, [cl_context, cl_mem_flags, size_t, ctypes.c_void_p, Pointer(cl_int)]
 except AttributeError: pass
 
-try: (clCreateSubBuffer:=dll.clCreateSubBuffer).restype, clCreateSubBuffer.argtypes = cl_mem, [cl_mem, cl_mem_flags, cl_buffer_create_type, ctypes.c_void_p, ctypes.POINTER(cl_int)]
+try: (clCreateSubBuffer:=dll.clCreateSubBuffer).restype, clCreateSubBuffer.argtypes = cl_mem, [cl_mem, cl_mem_flags, cl_buffer_create_type, ctypes.c_void_p, Pointer(cl_int)]
 except AttributeError: pass
 
-try: (clCreateImage:=dll.clCreateImage).restype, clCreateImage.argtypes = cl_mem, [cl_context, cl_mem_flags, ctypes.POINTER(cl_image_format), ctypes.POINTER(cl_image_desc), ctypes.c_void_p, ctypes.POINTER(cl_int)]
+try: (clCreateImage:=dll.clCreateImage).restype, clCreateImage.argtypes = cl_mem, [cl_context, cl_mem_flags, Pointer(cl_image_format), Pointer(cl_image_desc), ctypes.c_void_p, Pointer(cl_int)]
 except AttributeError: pass
 
-try: (clCreatePipe:=dll.clCreatePipe).restype, clCreatePipe.argtypes = cl_mem, [cl_context, cl_mem_flags, cl_uint, cl_uint, ctypes.POINTER(cl_pipe_properties), ctypes.POINTER(cl_int)]
+try: (clCreatePipe:=dll.clCreatePipe).restype, clCreatePipe.argtypes = cl_mem, [cl_context, cl_mem_flags, cl_uint, cl_uint, Pointer(cl_pipe_properties), Pointer(cl_int)]
 except AttributeError: pass
 
-try: (clCreateBufferWithProperties:=dll.clCreateBufferWithProperties).restype, clCreateBufferWithProperties.argtypes = cl_mem, [cl_context, ctypes.POINTER(cl_mem_properties), cl_mem_flags, size_t, ctypes.c_void_p, ctypes.POINTER(cl_int)]
+try: (clCreateBufferWithProperties:=dll.clCreateBufferWithProperties).restype, clCreateBufferWithProperties.argtypes = cl_mem, [cl_context, Pointer(cl_mem_properties), cl_mem_flags, size_t, ctypes.c_void_p, Pointer(cl_int)]
 except AttributeError: pass
 
-try: (clCreateImageWithProperties:=dll.clCreateImageWithProperties).restype, clCreateImageWithProperties.argtypes = cl_mem, [cl_context, ctypes.POINTER(cl_mem_properties), cl_mem_flags, ctypes.POINTER(cl_image_format), ctypes.POINTER(cl_image_desc), ctypes.c_void_p, ctypes.POINTER(cl_int)]
+try: (clCreateImageWithProperties:=dll.clCreateImageWithProperties).restype, clCreateImageWithProperties.argtypes = cl_mem, [cl_context, Pointer(cl_mem_properties), cl_mem_flags, Pointer(cl_image_format), Pointer(cl_image_desc), ctypes.c_void_p, Pointer(cl_int)]
 except AttributeError: pass
 
 try: (clRetainMemObject:=dll.clRetainMemObject).restype, clRetainMemObject.argtypes = cl_int, [cl_mem]
@@ -200,16 +195,16 @@ except AttributeError: pass
 try: (clReleaseMemObject:=dll.clReleaseMemObject).restype, clReleaseMemObject.argtypes = cl_int, [cl_mem]
 except AttributeError: pass
 
-try: (clGetSupportedImageFormats:=dll.clGetSupportedImageFormats).restype, clGetSupportedImageFormats.argtypes = cl_int, [cl_context, cl_mem_flags, cl_mem_object_type, cl_uint, ctypes.POINTER(cl_image_format), ctypes.POINTER(cl_uint)]
+try: (clGetSupportedImageFormats:=dll.clGetSupportedImageFormats).restype, clGetSupportedImageFormats.argtypes = cl_int, [cl_context, cl_mem_flags, cl_mem_object_type, cl_uint, Pointer(cl_image_format), Pointer(cl_uint)]
 except AttributeError: pass
 
-try: (clGetMemObjectInfo:=dll.clGetMemObjectInfo).restype, clGetMemObjectInfo.argtypes = cl_int, [cl_mem, cl_mem_info, size_t, ctypes.c_void_p, ctypes.POINTER(size_t)]
+try: (clGetMemObjectInfo:=dll.clGetMemObjectInfo).restype, clGetMemObjectInfo.argtypes = cl_int, [cl_mem, cl_mem_info, size_t, ctypes.c_void_p, Pointer(size_t)]
 except AttributeError: pass
 
-try: (clGetImageInfo:=dll.clGetImageInfo).restype, clGetImageInfo.argtypes = cl_int, [cl_mem, cl_image_info, size_t, ctypes.c_void_p, ctypes.POINTER(size_t)]
+try: (clGetImageInfo:=dll.clGetImageInfo).restype, clGetImageInfo.argtypes = cl_int, [cl_mem, cl_image_info, size_t, ctypes.c_void_p, Pointer(size_t)]
 except AttributeError: pass
 
-try: (clGetPipeInfo:=dll.clGetPipeInfo).restype, clGetPipeInfo.argtypes = cl_int, [cl_mem, cl_pipe_info, size_t, ctypes.c_void_p, ctypes.POINTER(size_t)]
+try: (clGetPipeInfo:=dll.clGetPipeInfo).restype, clGetPipeInfo.argtypes = cl_int, [cl_mem, cl_pipe_info, size_t, ctypes.c_void_p, Pointer(size_t)]
 except AttributeError: pass
 
 try: (clSetMemObjectDestructorCallback:=dll.clSetMemObjectDestructorCallback).restype, clSetMemObjectDestructorCallback.argtypes = cl_int, [cl_mem, ctypes.CFUNCTYPE(None, cl_mem, ctypes.c_void_p), ctypes.c_void_p]
@@ -221,7 +216,7 @@ except AttributeError: pass
 try: (clSVMFree:=dll.clSVMFree).restype, clSVMFree.argtypes = None, [cl_context, ctypes.c_void_p]
 except AttributeError: pass
 
-try: (clCreateSamplerWithProperties:=dll.clCreateSamplerWithProperties).restype, clCreateSamplerWithProperties.argtypes = cl_sampler, [cl_context, ctypes.POINTER(cl_sampler_properties), ctypes.POINTER(cl_int)]
+try: (clCreateSamplerWithProperties:=dll.clCreateSamplerWithProperties).restype, clCreateSamplerWithProperties.argtypes = cl_sampler, [cl_context, Pointer(cl_sampler_properties), Pointer(cl_int)]
 except AttributeError: pass
 
 try: (clRetainSampler:=dll.clRetainSampler).restype, clRetainSampler.argtypes = cl_int, [cl_sampler]
@@ -230,19 +225,19 @@ except AttributeError: pass
 try: (clReleaseSampler:=dll.clReleaseSampler).restype, clReleaseSampler.argtypes = cl_int, [cl_sampler]
 except AttributeError: pass
 
-try: (clGetSamplerInfo:=dll.clGetSamplerInfo).restype, clGetSamplerInfo.argtypes = cl_int, [cl_sampler, cl_sampler_info, size_t, ctypes.c_void_p, ctypes.POINTER(size_t)]
+try: (clGetSamplerInfo:=dll.clGetSamplerInfo).restype, clGetSamplerInfo.argtypes = cl_int, [cl_sampler, cl_sampler_info, size_t, ctypes.c_void_p, Pointer(size_t)]
 except AttributeError: pass
 
-try: (clCreateProgramWithSource:=dll.clCreateProgramWithSource).restype, clCreateProgramWithSource.argtypes = cl_program, [cl_context, cl_uint, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(size_t), ctypes.POINTER(cl_int)]
+try: (clCreateProgramWithSource:=dll.clCreateProgramWithSource).restype, clCreateProgramWithSource.argtypes = cl_program, [cl_context, cl_uint, Pointer(Pointer(ctypes.c_char)), Pointer(size_t), Pointer(cl_int)]
 except AttributeError: pass
 
-try: (clCreateProgramWithBinary:=dll.clCreateProgramWithBinary).restype, clCreateProgramWithBinary.argtypes = cl_program, [cl_context, cl_uint, ctypes.POINTER(cl_device_id), ctypes.POINTER(size_t), ctypes.POINTER(ctypes.POINTER(ctypes.c_ubyte)), ctypes.POINTER(cl_int), ctypes.POINTER(cl_int)]
+try: (clCreateProgramWithBinary:=dll.clCreateProgramWithBinary).restype, clCreateProgramWithBinary.argtypes = cl_program, [cl_context, cl_uint, Pointer(cl_device_id), Pointer(size_t), Pointer(Pointer(ctypes.c_ubyte)), Pointer(cl_int), Pointer(cl_int)]
 except AttributeError: pass
 
-try: (clCreateProgramWithBuiltInKernels:=dll.clCreateProgramWithBuiltInKernels).restype, clCreateProgramWithBuiltInKernels.argtypes = cl_program, [cl_context, cl_uint, ctypes.POINTER(cl_device_id), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(cl_int)]
+try: (clCreateProgramWithBuiltInKernels:=dll.clCreateProgramWithBuiltInKernels).restype, clCreateProgramWithBuiltInKernels.argtypes = cl_program, [cl_context, cl_uint, Pointer(cl_device_id), Pointer(ctypes.c_char), Pointer(cl_int)]
 except AttributeError: pass
 
-try: (clCreateProgramWithIL:=dll.clCreateProgramWithIL).restype, clCreateProgramWithIL.argtypes = cl_program, [cl_context, ctypes.c_void_p, size_t, ctypes.POINTER(cl_int)]
+try: (clCreateProgramWithIL:=dll.clCreateProgramWithIL).restype, clCreateProgramWithIL.argtypes = cl_program, [cl_context, ctypes.c_void_p, size_t, Pointer(cl_int)]
 except AttributeError: pass
 
 try: (clRetainProgram:=dll.clRetainProgram).restype, clRetainProgram.argtypes = cl_int, [cl_program]
@@ -251,13 +246,13 @@ except AttributeError: pass
 try: (clReleaseProgram:=dll.clReleaseProgram).restype, clReleaseProgram.argtypes = cl_int, [cl_program]
 except AttributeError: pass
 
-try: (clBuildProgram:=dll.clBuildProgram).restype, clBuildProgram.argtypes = cl_int, [cl_program, cl_uint, ctypes.POINTER(cl_device_id), ctypes.POINTER(ctypes.c_char), ctypes.CFUNCTYPE(None, cl_program, ctypes.c_void_p), ctypes.c_void_p]
+try: (clBuildProgram:=dll.clBuildProgram).restype, clBuildProgram.argtypes = cl_int, [cl_program, cl_uint, Pointer(cl_device_id), Pointer(ctypes.c_char), ctypes.CFUNCTYPE(None, cl_program, ctypes.c_void_p), ctypes.c_void_p]
 except AttributeError: pass
 
-try: (clCompileProgram:=dll.clCompileProgram).restype, clCompileProgram.argtypes = cl_int, [cl_program, cl_uint, ctypes.POINTER(cl_device_id), ctypes.POINTER(ctypes.c_char), cl_uint, ctypes.POINTER(cl_program), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.CFUNCTYPE(None, cl_program, ctypes.c_void_p), ctypes.c_void_p]
+try: (clCompileProgram:=dll.clCompileProgram).restype, clCompileProgram.argtypes = cl_int, [cl_program, cl_uint, Pointer(cl_device_id), Pointer(ctypes.c_char), cl_uint, Pointer(cl_program), Pointer(Pointer(ctypes.c_char)), ctypes.CFUNCTYPE(None, cl_program, ctypes.c_void_p), ctypes.c_void_p]
 except AttributeError: pass
 
-try: (clLinkProgram:=dll.clLinkProgram).restype, clLinkProgram.argtypes = cl_program, [cl_context, cl_uint, ctypes.POINTER(cl_device_id), ctypes.POINTER(ctypes.c_char), cl_uint, ctypes.POINTER(cl_program), ctypes.CFUNCTYPE(None, cl_program, ctypes.c_void_p), ctypes.c_void_p, ctypes.POINTER(cl_int)]
+try: (clLinkProgram:=dll.clLinkProgram).restype, clLinkProgram.argtypes = cl_program, [cl_context, cl_uint, Pointer(cl_device_id), Pointer(ctypes.c_char), cl_uint, Pointer(cl_program), ctypes.CFUNCTYPE(None, cl_program, ctypes.c_void_p), ctypes.c_void_p, Pointer(cl_int)]
 except AttributeError: pass
 
 try: (clSetProgramReleaseCallback:=dll.clSetProgramReleaseCallback).restype, clSetProgramReleaseCallback.argtypes = cl_int, [cl_program, ctypes.CFUNCTYPE(None, cl_program, ctypes.c_void_p), ctypes.c_void_p]
@@ -269,19 +264,19 @@ except AttributeError: pass
 try: (clUnloadPlatformCompiler:=dll.clUnloadPlatformCompiler).restype, clUnloadPlatformCompiler.argtypes = cl_int, [cl_platform_id]
 except AttributeError: pass
 
-try: (clGetProgramInfo:=dll.clGetProgramInfo).restype, clGetProgramInfo.argtypes = cl_int, [cl_program, cl_program_info, size_t, ctypes.c_void_p, ctypes.POINTER(size_t)]
+try: (clGetProgramInfo:=dll.clGetProgramInfo).restype, clGetProgramInfo.argtypes = cl_int, [cl_program, cl_program_info, size_t, ctypes.c_void_p, Pointer(size_t)]
 except AttributeError: pass
 
-try: (clGetProgramBuildInfo:=dll.clGetProgramBuildInfo).restype, clGetProgramBuildInfo.argtypes = cl_int, [cl_program, cl_device_id, cl_program_build_info, size_t, ctypes.c_void_p, ctypes.POINTER(size_t)]
+try: (clGetProgramBuildInfo:=dll.clGetProgramBuildInfo).restype, clGetProgramBuildInfo.argtypes = cl_int, [cl_program, cl_device_id, cl_program_build_info, size_t, ctypes.c_void_p, Pointer(size_t)]
 except AttributeError: pass
 
-try: (clCreateKernel:=dll.clCreateKernel).restype, clCreateKernel.argtypes = cl_kernel, [cl_program, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(cl_int)]
+try: (clCreateKernel:=dll.clCreateKernel).restype, clCreateKernel.argtypes = cl_kernel, [cl_program, Pointer(ctypes.c_char), Pointer(cl_int)]
 except AttributeError: pass
 
-try: (clCreateKernelsInProgram:=dll.clCreateKernelsInProgram).restype, clCreateKernelsInProgram.argtypes = cl_int, [cl_program, cl_uint, ctypes.POINTER(cl_kernel), ctypes.POINTER(cl_uint)]
+try: (clCreateKernelsInProgram:=dll.clCreateKernelsInProgram).restype, clCreateKernelsInProgram.argtypes = cl_int, [cl_program, cl_uint, Pointer(cl_kernel), Pointer(cl_uint)]
 except AttributeError: pass
 
-try: (clCloneKernel:=dll.clCloneKernel).restype, clCloneKernel.argtypes = cl_kernel, [cl_kernel, ctypes.POINTER(cl_int)]
+try: (clCloneKernel:=dll.clCloneKernel).restype, clCloneKernel.argtypes = cl_kernel, [cl_kernel, Pointer(cl_int)]
 except AttributeError: pass
 
 try: (clRetainKernel:=dll.clRetainKernel).restype, clRetainKernel.argtypes = cl_int, [cl_kernel]
@@ -299,25 +294,25 @@ except AttributeError: pass
 try: (clSetKernelExecInfo:=dll.clSetKernelExecInfo).restype, clSetKernelExecInfo.argtypes = cl_int, [cl_kernel, cl_kernel_exec_info, size_t, ctypes.c_void_p]
 except AttributeError: pass
 
-try: (clGetKernelInfo:=dll.clGetKernelInfo).restype, clGetKernelInfo.argtypes = cl_int, [cl_kernel, cl_kernel_info, size_t, ctypes.c_void_p, ctypes.POINTER(size_t)]
+try: (clGetKernelInfo:=dll.clGetKernelInfo).restype, clGetKernelInfo.argtypes = cl_int, [cl_kernel, cl_kernel_info, size_t, ctypes.c_void_p, Pointer(size_t)]
 except AttributeError: pass
 
-try: (clGetKernelArgInfo:=dll.clGetKernelArgInfo).restype, clGetKernelArgInfo.argtypes = cl_int, [cl_kernel, cl_uint, cl_kernel_arg_info, size_t, ctypes.c_void_p, ctypes.POINTER(size_t)]
+try: (clGetKernelArgInfo:=dll.clGetKernelArgInfo).restype, clGetKernelArgInfo.argtypes = cl_int, [cl_kernel, cl_uint, cl_kernel_arg_info, size_t, ctypes.c_void_p, Pointer(size_t)]
 except AttributeError: pass
 
-try: (clGetKernelWorkGroupInfo:=dll.clGetKernelWorkGroupInfo).restype, clGetKernelWorkGroupInfo.argtypes = cl_int, [cl_kernel, cl_device_id, cl_kernel_work_group_info, size_t, ctypes.c_void_p, ctypes.POINTER(size_t)]
+try: (clGetKernelWorkGroupInfo:=dll.clGetKernelWorkGroupInfo).restype, clGetKernelWorkGroupInfo.argtypes = cl_int, [cl_kernel, cl_device_id, cl_kernel_work_group_info, size_t, ctypes.c_void_p, Pointer(size_t)]
 except AttributeError: pass
 
-try: (clGetKernelSubGroupInfo:=dll.clGetKernelSubGroupInfo).restype, clGetKernelSubGroupInfo.argtypes = cl_int, [cl_kernel, cl_device_id, cl_kernel_sub_group_info, size_t, ctypes.c_void_p, size_t, ctypes.c_void_p, ctypes.POINTER(size_t)]
+try: (clGetKernelSubGroupInfo:=dll.clGetKernelSubGroupInfo).restype, clGetKernelSubGroupInfo.argtypes = cl_int, [cl_kernel, cl_device_id, cl_kernel_sub_group_info, size_t, ctypes.c_void_p, size_t, ctypes.c_void_p, Pointer(size_t)]
 except AttributeError: pass
 
-try: (clWaitForEvents:=dll.clWaitForEvents).restype, clWaitForEvents.argtypes = cl_int, [cl_uint, ctypes.POINTER(cl_event)]
+try: (clWaitForEvents:=dll.clWaitForEvents).restype, clWaitForEvents.argtypes = cl_int, [cl_uint, Pointer(cl_event)]
 except AttributeError: pass
 
-try: (clGetEventInfo:=dll.clGetEventInfo).restype, clGetEventInfo.argtypes = cl_int, [cl_event, cl_event_info, size_t, ctypes.c_void_p, ctypes.POINTER(size_t)]
+try: (clGetEventInfo:=dll.clGetEventInfo).restype, clGetEventInfo.argtypes = cl_int, [cl_event, cl_event_info, size_t, ctypes.c_void_p, Pointer(size_t)]
 except AttributeError: pass
 
-try: (clCreateUserEvent:=dll.clCreateUserEvent).restype, clCreateUserEvent.argtypes = cl_event, [cl_context, ctypes.POINTER(cl_int)]
+try: (clCreateUserEvent:=dll.clCreateUserEvent).restype, clCreateUserEvent.argtypes = cl_event, [cl_context, Pointer(cl_int)]
 except AttributeError: pass
 
 try: (clRetainEvent:=dll.clRetainEvent).restype, clRetainEvent.argtypes = cl_int, [cl_event]
@@ -332,7 +327,7 @@ except AttributeError: pass
 try: (clSetEventCallback:=dll.clSetEventCallback).restype, clSetEventCallback.argtypes = cl_int, [cl_event, cl_int, ctypes.CFUNCTYPE(None, cl_event, cl_int, ctypes.c_void_p), ctypes.c_void_p]
 except AttributeError: pass
 
-try: (clGetEventProfilingInfo:=dll.clGetEventProfilingInfo).restype, clGetEventProfilingInfo.argtypes = cl_int, [cl_event, cl_profiling_info, size_t, ctypes.c_void_p, ctypes.POINTER(size_t)]
+try: (clGetEventProfilingInfo:=dll.clGetEventProfilingInfo).restype, clGetEventProfilingInfo.argtypes = cl_int, [cl_event, cl_profiling_info, size_t, ctypes.c_void_p, Pointer(size_t)]
 except AttributeError: pass
 
 try: (clFlush:=dll.clFlush).restype, clFlush.argtypes = cl_int, [cl_command_queue]
@@ -341,100 +336,100 @@ except AttributeError: pass
 try: (clFinish:=dll.clFinish).restype, clFinish.argtypes = cl_int, [cl_command_queue]
 except AttributeError: pass
 
-try: (clEnqueueReadBuffer:=dll.clEnqueueReadBuffer).restype, clEnqueueReadBuffer.argtypes = cl_int, [cl_command_queue, cl_mem, cl_bool, size_t, size_t, ctypes.c_void_p, cl_uint, ctypes.POINTER(cl_event), ctypes.POINTER(cl_event)]
+try: (clEnqueueReadBuffer:=dll.clEnqueueReadBuffer).restype, clEnqueueReadBuffer.argtypes = cl_int, [cl_command_queue, cl_mem, cl_bool, size_t, size_t, ctypes.c_void_p, cl_uint, Pointer(cl_event), Pointer(cl_event)]
 except AttributeError: pass
 
-try: (clEnqueueReadBufferRect:=dll.clEnqueueReadBufferRect).restype, clEnqueueReadBufferRect.argtypes = cl_int, [cl_command_queue, cl_mem, cl_bool, ctypes.POINTER(size_t), ctypes.POINTER(size_t), ctypes.POINTER(size_t), size_t, size_t, size_t, size_t, ctypes.c_void_p, cl_uint, ctypes.POINTER(cl_event), ctypes.POINTER(cl_event)]
+try: (clEnqueueReadBufferRect:=dll.clEnqueueReadBufferRect).restype, clEnqueueReadBufferRect.argtypes = cl_int, [cl_command_queue, cl_mem, cl_bool, Pointer(size_t), Pointer(size_t), Pointer(size_t), size_t, size_t, size_t, size_t, ctypes.c_void_p, cl_uint, Pointer(cl_event), Pointer(cl_event)]
 except AttributeError: pass
 
-try: (clEnqueueWriteBuffer:=dll.clEnqueueWriteBuffer).restype, clEnqueueWriteBuffer.argtypes = cl_int, [cl_command_queue, cl_mem, cl_bool, size_t, size_t, ctypes.c_void_p, cl_uint, ctypes.POINTER(cl_event), ctypes.POINTER(cl_event)]
+try: (clEnqueueWriteBuffer:=dll.clEnqueueWriteBuffer).restype, clEnqueueWriteBuffer.argtypes = cl_int, [cl_command_queue, cl_mem, cl_bool, size_t, size_t, ctypes.c_void_p, cl_uint, Pointer(cl_event), Pointer(cl_event)]
 except AttributeError: pass
 
-try: (clEnqueueWriteBufferRect:=dll.clEnqueueWriteBufferRect).restype, clEnqueueWriteBufferRect.argtypes = cl_int, [cl_command_queue, cl_mem, cl_bool, ctypes.POINTER(size_t), ctypes.POINTER(size_t), ctypes.POINTER(size_t), size_t, size_t, size_t, size_t, ctypes.c_void_p, cl_uint, ctypes.POINTER(cl_event), ctypes.POINTER(cl_event)]
+try: (clEnqueueWriteBufferRect:=dll.clEnqueueWriteBufferRect).restype, clEnqueueWriteBufferRect.argtypes = cl_int, [cl_command_queue, cl_mem, cl_bool, Pointer(size_t), Pointer(size_t), Pointer(size_t), size_t, size_t, size_t, size_t, ctypes.c_void_p, cl_uint, Pointer(cl_event), Pointer(cl_event)]
 except AttributeError: pass
 
-try: (clEnqueueFillBuffer:=dll.clEnqueueFillBuffer).restype, clEnqueueFillBuffer.argtypes = cl_int, [cl_command_queue, cl_mem, ctypes.c_void_p, size_t, size_t, size_t, cl_uint, ctypes.POINTER(cl_event), ctypes.POINTER(cl_event)]
+try: (clEnqueueFillBuffer:=dll.clEnqueueFillBuffer).restype, clEnqueueFillBuffer.argtypes = cl_int, [cl_command_queue, cl_mem, ctypes.c_void_p, size_t, size_t, size_t, cl_uint, Pointer(cl_event), Pointer(cl_event)]
 except AttributeError: pass
 
-try: (clEnqueueCopyBuffer:=dll.clEnqueueCopyBuffer).restype, clEnqueueCopyBuffer.argtypes = cl_int, [cl_command_queue, cl_mem, cl_mem, size_t, size_t, size_t, cl_uint, ctypes.POINTER(cl_event), ctypes.POINTER(cl_event)]
+try: (clEnqueueCopyBuffer:=dll.clEnqueueCopyBuffer).restype, clEnqueueCopyBuffer.argtypes = cl_int, [cl_command_queue, cl_mem, cl_mem, size_t, size_t, size_t, cl_uint, Pointer(cl_event), Pointer(cl_event)]
 except AttributeError: pass
 
-try: (clEnqueueCopyBufferRect:=dll.clEnqueueCopyBufferRect).restype, clEnqueueCopyBufferRect.argtypes = cl_int, [cl_command_queue, cl_mem, cl_mem, ctypes.POINTER(size_t), ctypes.POINTER(size_t), ctypes.POINTER(size_t), size_t, size_t, size_t, size_t, cl_uint, ctypes.POINTER(cl_event), ctypes.POINTER(cl_event)]
+try: (clEnqueueCopyBufferRect:=dll.clEnqueueCopyBufferRect).restype, clEnqueueCopyBufferRect.argtypes = cl_int, [cl_command_queue, cl_mem, cl_mem, Pointer(size_t), Pointer(size_t), Pointer(size_t), size_t, size_t, size_t, size_t, cl_uint, Pointer(cl_event), Pointer(cl_event)]
 except AttributeError: pass
 
-try: (clEnqueueReadImage:=dll.clEnqueueReadImage).restype, clEnqueueReadImage.argtypes = cl_int, [cl_command_queue, cl_mem, cl_bool, ctypes.POINTER(size_t), ctypes.POINTER(size_t), size_t, size_t, ctypes.c_void_p, cl_uint, ctypes.POINTER(cl_event), ctypes.POINTER(cl_event)]
+try: (clEnqueueReadImage:=dll.clEnqueueReadImage).restype, clEnqueueReadImage.argtypes = cl_int, [cl_command_queue, cl_mem, cl_bool, Pointer(size_t), Pointer(size_t), size_t, size_t, ctypes.c_void_p, cl_uint, Pointer(cl_event), Pointer(cl_event)]
 except AttributeError: pass
 
-try: (clEnqueueWriteImage:=dll.clEnqueueWriteImage).restype, clEnqueueWriteImage.argtypes = cl_int, [cl_command_queue, cl_mem, cl_bool, ctypes.POINTER(size_t), ctypes.POINTER(size_t), size_t, size_t, ctypes.c_void_p, cl_uint, ctypes.POINTER(cl_event), ctypes.POINTER(cl_event)]
+try: (clEnqueueWriteImage:=dll.clEnqueueWriteImage).restype, clEnqueueWriteImage.argtypes = cl_int, [cl_command_queue, cl_mem, cl_bool, Pointer(size_t), Pointer(size_t), size_t, size_t, ctypes.c_void_p, cl_uint, Pointer(cl_event), Pointer(cl_event)]
 except AttributeError: pass
 
-try: (clEnqueueFillImage:=dll.clEnqueueFillImage).restype, clEnqueueFillImage.argtypes = cl_int, [cl_command_queue, cl_mem, ctypes.c_void_p, ctypes.POINTER(size_t), ctypes.POINTER(size_t), cl_uint, ctypes.POINTER(cl_event), ctypes.POINTER(cl_event)]
+try: (clEnqueueFillImage:=dll.clEnqueueFillImage).restype, clEnqueueFillImage.argtypes = cl_int, [cl_command_queue, cl_mem, ctypes.c_void_p, Pointer(size_t), Pointer(size_t), cl_uint, Pointer(cl_event), Pointer(cl_event)]
 except AttributeError: pass
 
-try: (clEnqueueCopyImage:=dll.clEnqueueCopyImage).restype, clEnqueueCopyImage.argtypes = cl_int, [cl_command_queue, cl_mem, cl_mem, ctypes.POINTER(size_t), ctypes.POINTER(size_t), ctypes.POINTER(size_t), cl_uint, ctypes.POINTER(cl_event), ctypes.POINTER(cl_event)]
+try: (clEnqueueCopyImage:=dll.clEnqueueCopyImage).restype, clEnqueueCopyImage.argtypes = cl_int, [cl_command_queue, cl_mem, cl_mem, Pointer(size_t), Pointer(size_t), Pointer(size_t), cl_uint, Pointer(cl_event), Pointer(cl_event)]
 except AttributeError: pass
 
-try: (clEnqueueCopyImageToBuffer:=dll.clEnqueueCopyImageToBuffer).restype, clEnqueueCopyImageToBuffer.argtypes = cl_int, [cl_command_queue, cl_mem, cl_mem, ctypes.POINTER(size_t), ctypes.POINTER(size_t), size_t, cl_uint, ctypes.POINTER(cl_event), ctypes.POINTER(cl_event)]
+try: (clEnqueueCopyImageToBuffer:=dll.clEnqueueCopyImageToBuffer).restype, clEnqueueCopyImageToBuffer.argtypes = cl_int, [cl_command_queue, cl_mem, cl_mem, Pointer(size_t), Pointer(size_t), size_t, cl_uint, Pointer(cl_event), Pointer(cl_event)]
 except AttributeError: pass
 
-try: (clEnqueueCopyBufferToImage:=dll.clEnqueueCopyBufferToImage).restype, clEnqueueCopyBufferToImage.argtypes = cl_int, [cl_command_queue, cl_mem, cl_mem, size_t, ctypes.POINTER(size_t), ctypes.POINTER(size_t), cl_uint, ctypes.POINTER(cl_event), ctypes.POINTER(cl_event)]
+try: (clEnqueueCopyBufferToImage:=dll.clEnqueueCopyBufferToImage).restype, clEnqueueCopyBufferToImage.argtypes = cl_int, [cl_command_queue, cl_mem, cl_mem, size_t, Pointer(size_t), Pointer(size_t), cl_uint, Pointer(cl_event), Pointer(cl_event)]
 except AttributeError: pass
 
-try: (clEnqueueMapBuffer:=dll.clEnqueueMapBuffer).restype, clEnqueueMapBuffer.argtypes = ctypes.c_void_p, [cl_command_queue, cl_mem, cl_bool, cl_map_flags, size_t, size_t, cl_uint, ctypes.POINTER(cl_event), ctypes.POINTER(cl_event), ctypes.POINTER(cl_int)]
+try: (clEnqueueMapBuffer:=dll.clEnqueueMapBuffer).restype, clEnqueueMapBuffer.argtypes = ctypes.c_void_p, [cl_command_queue, cl_mem, cl_bool, cl_map_flags, size_t, size_t, cl_uint, Pointer(cl_event), Pointer(cl_event), Pointer(cl_int)]
 except AttributeError: pass
 
-try: (clEnqueueMapImage:=dll.clEnqueueMapImage).restype, clEnqueueMapImage.argtypes = ctypes.c_void_p, [cl_command_queue, cl_mem, cl_bool, cl_map_flags, ctypes.POINTER(size_t), ctypes.POINTER(size_t), ctypes.POINTER(size_t), ctypes.POINTER(size_t), cl_uint, ctypes.POINTER(cl_event), ctypes.POINTER(cl_event), ctypes.POINTER(cl_int)]
+try: (clEnqueueMapImage:=dll.clEnqueueMapImage).restype, clEnqueueMapImage.argtypes = ctypes.c_void_p, [cl_command_queue, cl_mem, cl_bool, cl_map_flags, Pointer(size_t), Pointer(size_t), Pointer(size_t), Pointer(size_t), cl_uint, Pointer(cl_event), Pointer(cl_event), Pointer(cl_int)]
 except AttributeError: pass
 
-try: (clEnqueueUnmapMemObject:=dll.clEnqueueUnmapMemObject).restype, clEnqueueUnmapMemObject.argtypes = cl_int, [cl_command_queue, cl_mem, ctypes.c_void_p, cl_uint, ctypes.POINTER(cl_event), ctypes.POINTER(cl_event)]
+try: (clEnqueueUnmapMemObject:=dll.clEnqueueUnmapMemObject).restype, clEnqueueUnmapMemObject.argtypes = cl_int, [cl_command_queue, cl_mem, ctypes.c_void_p, cl_uint, Pointer(cl_event), Pointer(cl_event)]
 except AttributeError: pass
 
-try: (clEnqueueMigrateMemObjects:=dll.clEnqueueMigrateMemObjects).restype, clEnqueueMigrateMemObjects.argtypes = cl_int, [cl_command_queue, cl_uint, ctypes.POINTER(cl_mem), cl_mem_migration_flags, cl_uint, ctypes.POINTER(cl_event), ctypes.POINTER(cl_event)]
+try: (clEnqueueMigrateMemObjects:=dll.clEnqueueMigrateMemObjects).restype, clEnqueueMigrateMemObjects.argtypes = cl_int, [cl_command_queue, cl_uint, Pointer(cl_mem), cl_mem_migration_flags, cl_uint, Pointer(cl_event), Pointer(cl_event)]
 except AttributeError: pass
 
-try: (clEnqueueNDRangeKernel:=dll.clEnqueueNDRangeKernel).restype, clEnqueueNDRangeKernel.argtypes = cl_int, [cl_command_queue, cl_kernel, cl_uint, ctypes.POINTER(size_t), ctypes.POINTER(size_t), ctypes.POINTER(size_t), cl_uint, ctypes.POINTER(cl_event), ctypes.POINTER(cl_event)]
+try: (clEnqueueNDRangeKernel:=dll.clEnqueueNDRangeKernel).restype, clEnqueueNDRangeKernel.argtypes = cl_int, [cl_command_queue, cl_kernel, cl_uint, Pointer(size_t), Pointer(size_t), Pointer(size_t), cl_uint, Pointer(cl_event), Pointer(cl_event)]
 except AttributeError: pass
 
-try: (clEnqueueNativeKernel:=dll.clEnqueueNativeKernel).restype, clEnqueueNativeKernel.argtypes = cl_int, [cl_command_queue, ctypes.CFUNCTYPE(None, ctypes.c_void_p), ctypes.c_void_p, size_t, cl_uint, ctypes.POINTER(cl_mem), ctypes.POINTER(ctypes.c_void_p), cl_uint, ctypes.POINTER(cl_event), ctypes.POINTER(cl_event)]
+try: (clEnqueueNativeKernel:=dll.clEnqueueNativeKernel).restype, clEnqueueNativeKernel.argtypes = cl_int, [cl_command_queue, ctypes.CFUNCTYPE(None, ctypes.c_void_p), ctypes.c_void_p, size_t, cl_uint, Pointer(cl_mem), Pointer(ctypes.c_void_p), cl_uint, Pointer(cl_event), Pointer(cl_event)]
 except AttributeError: pass
 
-try: (clEnqueueMarkerWithWaitList:=dll.clEnqueueMarkerWithWaitList).restype, clEnqueueMarkerWithWaitList.argtypes = cl_int, [cl_command_queue, cl_uint, ctypes.POINTER(cl_event), ctypes.POINTER(cl_event)]
+try: (clEnqueueMarkerWithWaitList:=dll.clEnqueueMarkerWithWaitList).restype, clEnqueueMarkerWithWaitList.argtypes = cl_int, [cl_command_queue, cl_uint, Pointer(cl_event), Pointer(cl_event)]
 except AttributeError: pass
 
-try: (clEnqueueBarrierWithWaitList:=dll.clEnqueueBarrierWithWaitList).restype, clEnqueueBarrierWithWaitList.argtypes = cl_int, [cl_command_queue, cl_uint, ctypes.POINTER(cl_event), ctypes.POINTER(cl_event)]
+try: (clEnqueueBarrierWithWaitList:=dll.clEnqueueBarrierWithWaitList).restype, clEnqueueBarrierWithWaitList.argtypes = cl_int, [cl_command_queue, cl_uint, Pointer(cl_event), Pointer(cl_event)]
 except AttributeError: pass
 
-try: (clEnqueueSVMFree:=dll.clEnqueueSVMFree).restype, clEnqueueSVMFree.argtypes = cl_int, [cl_command_queue, cl_uint, (ctypes.c_void_p * 0), ctypes.CFUNCTYPE(None, cl_command_queue, cl_uint, (ctypes.c_void_p * 0), ctypes.c_void_p), ctypes.c_void_p, cl_uint, ctypes.POINTER(cl_event), ctypes.POINTER(cl_event)]
+try: (clEnqueueSVMFree:=dll.clEnqueueSVMFree).restype, clEnqueueSVMFree.argtypes = cl_int, [cl_command_queue, cl_uint, Array(ctypes.c_void_p, 0), ctypes.CFUNCTYPE(None, cl_command_queue, cl_uint, Array(ctypes.c_void_p, 0), ctypes.c_void_p), ctypes.c_void_p, cl_uint, Pointer(cl_event), Pointer(cl_event)]
 except AttributeError: pass
 
-try: (clEnqueueSVMMemcpy:=dll.clEnqueueSVMMemcpy).restype, clEnqueueSVMMemcpy.argtypes = cl_int, [cl_command_queue, cl_bool, ctypes.c_void_p, ctypes.c_void_p, size_t, cl_uint, ctypes.POINTER(cl_event), ctypes.POINTER(cl_event)]
+try: (clEnqueueSVMMemcpy:=dll.clEnqueueSVMMemcpy).restype, clEnqueueSVMMemcpy.argtypes = cl_int, [cl_command_queue, cl_bool, ctypes.c_void_p, ctypes.c_void_p, size_t, cl_uint, Pointer(cl_event), Pointer(cl_event)]
 except AttributeError: pass
 
-try: (clEnqueueSVMMemFill:=dll.clEnqueueSVMMemFill).restype, clEnqueueSVMMemFill.argtypes = cl_int, [cl_command_queue, ctypes.c_void_p, ctypes.c_void_p, size_t, size_t, cl_uint, ctypes.POINTER(cl_event), ctypes.POINTER(cl_event)]
+try: (clEnqueueSVMMemFill:=dll.clEnqueueSVMMemFill).restype, clEnqueueSVMMemFill.argtypes = cl_int, [cl_command_queue, ctypes.c_void_p, ctypes.c_void_p, size_t, size_t, cl_uint, Pointer(cl_event), Pointer(cl_event)]
 except AttributeError: pass
 
-try: (clEnqueueSVMMap:=dll.clEnqueueSVMMap).restype, clEnqueueSVMMap.argtypes = cl_int, [cl_command_queue, cl_bool, cl_map_flags, ctypes.c_void_p, size_t, cl_uint, ctypes.POINTER(cl_event), ctypes.POINTER(cl_event)]
+try: (clEnqueueSVMMap:=dll.clEnqueueSVMMap).restype, clEnqueueSVMMap.argtypes = cl_int, [cl_command_queue, cl_bool, cl_map_flags, ctypes.c_void_p, size_t, cl_uint, Pointer(cl_event), Pointer(cl_event)]
 except AttributeError: pass
 
-try: (clEnqueueSVMUnmap:=dll.clEnqueueSVMUnmap).restype, clEnqueueSVMUnmap.argtypes = cl_int, [cl_command_queue, ctypes.c_void_p, cl_uint, ctypes.POINTER(cl_event), ctypes.POINTER(cl_event)]
+try: (clEnqueueSVMUnmap:=dll.clEnqueueSVMUnmap).restype, clEnqueueSVMUnmap.argtypes = cl_int, [cl_command_queue, ctypes.c_void_p, cl_uint, Pointer(cl_event), Pointer(cl_event)]
 except AttributeError: pass
 
-try: (clEnqueueSVMMigrateMem:=dll.clEnqueueSVMMigrateMem).restype, clEnqueueSVMMigrateMem.argtypes = cl_int, [cl_command_queue, cl_uint, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(size_t), cl_mem_migration_flags, cl_uint, ctypes.POINTER(cl_event), ctypes.POINTER(cl_event)]
+try: (clEnqueueSVMMigrateMem:=dll.clEnqueueSVMMigrateMem).restype, clEnqueueSVMMigrateMem.argtypes = cl_int, [cl_command_queue, cl_uint, Pointer(ctypes.c_void_p), Pointer(size_t), cl_mem_migration_flags, cl_uint, Pointer(cl_event), Pointer(cl_event)]
 except AttributeError: pass
 
-try: (clGetExtensionFunctionAddressForPlatform:=dll.clGetExtensionFunctionAddressForPlatform).restype, clGetExtensionFunctionAddressForPlatform.argtypes = ctypes.c_void_p, [cl_platform_id, ctypes.POINTER(ctypes.c_char)]
+try: (clGetExtensionFunctionAddressForPlatform:=dll.clGetExtensionFunctionAddressForPlatform).restype, clGetExtensionFunctionAddressForPlatform.argtypes = ctypes.c_void_p, [cl_platform_id, Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (clCreateImage2D:=dll.clCreateImage2D).restype, clCreateImage2D.argtypes = cl_mem, [cl_context, cl_mem_flags, ctypes.POINTER(cl_image_format), size_t, size_t, size_t, ctypes.c_void_p, ctypes.POINTER(cl_int)]
+try: (clCreateImage2D:=dll.clCreateImage2D).restype, clCreateImage2D.argtypes = cl_mem, [cl_context, cl_mem_flags, Pointer(cl_image_format), size_t, size_t, size_t, ctypes.c_void_p, Pointer(cl_int)]
 except AttributeError: pass
 
-try: (clCreateImage3D:=dll.clCreateImage3D).restype, clCreateImage3D.argtypes = cl_mem, [cl_context, cl_mem_flags, ctypes.POINTER(cl_image_format), size_t, size_t, size_t, size_t, size_t, ctypes.c_void_p, ctypes.POINTER(cl_int)]
+try: (clCreateImage3D:=dll.clCreateImage3D).restype, clCreateImage3D.argtypes = cl_mem, [cl_context, cl_mem_flags, Pointer(cl_image_format), size_t, size_t, size_t, size_t, size_t, ctypes.c_void_p, Pointer(cl_int)]
 except AttributeError: pass
 
-try: (clEnqueueMarker:=dll.clEnqueueMarker).restype, clEnqueueMarker.argtypes = cl_int, [cl_command_queue, ctypes.POINTER(cl_event)]
+try: (clEnqueueMarker:=dll.clEnqueueMarker).restype, clEnqueueMarker.argtypes = cl_int, [cl_command_queue, Pointer(cl_event)]
 except AttributeError: pass
 
-try: (clEnqueueWaitForEvents:=dll.clEnqueueWaitForEvents).restype, clEnqueueWaitForEvents.argtypes = cl_int, [cl_command_queue, cl_uint, ctypes.POINTER(cl_event)]
+try: (clEnqueueWaitForEvents:=dll.clEnqueueWaitForEvents).restype, clEnqueueWaitForEvents.argtypes = cl_int, [cl_command_queue, cl_uint, Pointer(cl_event)]
 except AttributeError: pass
 
 try: (clEnqueueBarrier:=dll.clEnqueueBarrier).restype, clEnqueueBarrier.argtypes = cl_int, [cl_command_queue]
@@ -443,16 +438,16 @@ except AttributeError: pass
 try: (clUnloadCompiler:=dll.clUnloadCompiler).restype, clUnloadCompiler.argtypes = cl_int, []
 except AttributeError: pass
 
-try: (clGetExtensionFunctionAddress:=dll.clGetExtensionFunctionAddress).restype, clGetExtensionFunctionAddress.argtypes = ctypes.c_void_p, [ctypes.POINTER(ctypes.c_char)]
+try: (clGetExtensionFunctionAddress:=dll.clGetExtensionFunctionAddress).restype, clGetExtensionFunctionAddress.argtypes = ctypes.c_void_p, [Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (clCreateCommandQueue:=dll.clCreateCommandQueue).restype, clCreateCommandQueue.argtypes = cl_command_queue, [cl_context, cl_device_id, cl_command_queue_properties, ctypes.POINTER(cl_int)]
+try: (clCreateCommandQueue:=dll.clCreateCommandQueue).restype, clCreateCommandQueue.argtypes = cl_command_queue, [cl_context, cl_device_id, cl_command_queue_properties, Pointer(cl_int)]
 except AttributeError: pass
 
-try: (clCreateSampler:=dll.clCreateSampler).restype, clCreateSampler.argtypes = cl_sampler, [cl_context, cl_bool, cl_addressing_mode, cl_filter_mode, ctypes.POINTER(cl_int)]
+try: (clCreateSampler:=dll.clCreateSampler).restype, clCreateSampler.argtypes = cl_sampler, [cl_context, cl_bool, cl_addressing_mode, cl_filter_mode, Pointer(cl_int)]
 except AttributeError: pass
 
-try: (clEnqueueTask:=dll.clEnqueueTask).restype, clEnqueueTask.argtypes = cl_int, [cl_command_queue, cl_kernel, cl_uint, ctypes.POINTER(cl_event), ctypes.POINTER(cl_event)]
+try: (clEnqueueTask:=dll.clEnqueueTask).restype, clEnqueueTask.argtypes = cl_int, [cl_command_queue, cl_kernel, cl_uint, Pointer(cl_event), Pointer(cl_event)]
 except AttributeError: pass
 
 CL_NAME_VERSION_MAX_NAME_SIZE = 64

@@ -132,6 +132,8 @@ class _Pointer(_CData):
 
 @functools.cache
 def Pointer(typ):
+  if typ is None: return ctypes.c_void_p
+
   sz = ctypes.sizeof(typ) if (prim:=issubclass(typ, _SimpleCData)) else typ.SIZE
   class PTR(_Pointer):
     @property

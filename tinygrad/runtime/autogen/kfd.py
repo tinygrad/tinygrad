@@ -1,310 +1,305 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support.c import Array, DLL, Pointer, Struct, Union, field, CEnum, _IO, _IOW, _IOR, _IOWR
 class struct_kfd_ioctl_get_version_args(Struct): pass
 __u32 = ctypes.c_uint32
-struct_kfd_ioctl_get_version_args._fields_ = [
-  ('major_version', ctypes.c_uint32),
-  ('minor_version', ctypes.c_uint32),
-]
+struct_kfd_ioctl_get_version_args.SIZE = 8
+struct_kfd_ioctl_get_version_args._fields_ = ['major_version', 'minor_version']
+setattr(struct_kfd_ioctl_get_version_args, 'major_version', field(0, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_get_version_args, 'minor_version', field(4, ctypes.c_uint32))
 class struct_kfd_ioctl_create_queue_args(Struct): pass
 __u64 = ctypes.c_uint64
-struct_kfd_ioctl_create_queue_args._fields_ = [
-  ('ring_base_address', ctypes.c_uint64),
-  ('write_pointer_address', ctypes.c_uint64),
-  ('read_pointer_address', ctypes.c_uint64),
-  ('doorbell_offset', ctypes.c_uint64),
-  ('ring_size', ctypes.c_uint32),
-  ('gpu_id', ctypes.c_uint32),
-  ('queue_type', ctypes.c_uint32),
-  ('queue_percentage', ctypes.c_uint32),
-  ('queue_priority', ctypes.c_uint32),
-  ('queue_id', ctypes.c_uint32),
-  ('eop_buffer_address', ctypes.c_uint64),
-  ('eop_buffer_size', ctypes.c_uint64),
-  ('ctx_save_restore_address', ctypes.c_uint64),
-  ('ctx_save_restore_size', ctypes.c_uint32),
-  ('ctl_stack_size', ctypes.c_uint32),
-]
+struct_kfd_ioctl_create_queue_args.SIZE = 88
+struct_kfd_ioctl_create_queue_args._fields_ = ['ring_base_address', 'write_pointer_address', 'read_pointer_address', 'doorbell_offset', 'ring_size', 'gpu_id', 'queue_type', 'queue_percentage', 'queue_priority', 'queue_id', 'eop_buffer_address', 'eop_buffer_size', 'ctx_save_restore_address', 'ctx_save_restore_size', 'ctl_stack_size']
+setattr(struct_kfd_ioctl_create_queue_args, 'ring_base_address', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_create_queue_args, 'write_pointer_address', field(8, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_create_queue_args, 'read_pointer_address', field(16, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_create_queue_args, 'doorbell_offset', field(24, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_create_queue_args, 'ring_size', field(32, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_create_queue_args, 'gpu_id', field(36, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_create_queue_args, 'queue_type', field(40, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_create_queue_args, 'queue_percentage', field(44, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_create_queue_args, 'queue_priority', field(48, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_create_queue_args, 'queue_id', field(52, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_create_queue_args, 'eop_buffer_address', field(56, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_create_queue_args, 'eop_buffer_size', field(64, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_create_queue_args, 'ctx_save_restore_address', field(72, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_create_queue_args, 'ctx_save_restore_size', field(80, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_create_queue_args, 'ctl_stack_size', field(84, ctypes.c_uint32))
 class struct_kfd_ioctl_destroy_queue_args(Struct): pass
-struct_kfd_ioctl_destroy_queue_args._fields_ = [
-  ('queue_id', ctypes.c_uint32),
-  ('pad', ctypes.c_uint32),
-]
+struct_kfd_ioctl_destroy_queue_args.SIZE = 8
+struct_kfd_ioctl_destroy_queue_args._fields_ = ['queue_id', 'pad']
+setattr(struct_kfd_ioctl_destroy_queue_args, 'queue_id', field(0, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_destroy_queue_args, 'pad', field(4, ctypes.c_uint32))
 class struct_kfd_ioctl_update_queue_args(Struct): pass
-struct_kfd_ioctl_update_queue_args._fields_ = [
-  ('ring_base_address', ctypes.c_uint64),
-  ('queue_id', ctypes.c_uint32),
-  ('ring_size', ctypes.c_uint32),
-  ('queue_percentage', ctypes.c_uint32),
-  ('queue_priority', ctypes.c_uint32),
-]
+struct_kfd_ioctl_update_queue_args.SIZE = 24
+struct_kfd_ioctl_update_queue_args._fields_ = ['ring_base_address', 'queue_id', 'ring_size', 'queue_percentage', 'queue_priority']
+setattr(struct_kfd_ioctl_update_queue_args, 'ring_base_address', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_update_queue_args, 'queue_id', field(8, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_update_queue_args, 'ring_size', field(12, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_update_queue_args, 'queue_percentage', field(16, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_update_queue_args, 'queue_priority', field(20, ctypes.c_uint32))
 class struct_kfd_ioctl_set_cu_mask_args(Struct): pass
-struct_kfd_ioctl_set_cu_mask_args._fields_ = [
-  ('queue_id', ctypes.c_uint32),
-  ('num_cu_mask', ctypes.c_uint32),
-  ('cu_mask_ptr', ctypes.c_uint64),
-]
+struct_kfd_ioctl_set_cu_mask_args.SIZE = 16
+struct_kfd_ioctl_set_cu_mask_args._fields_ = ['queue_id', 'num_cu_mask', 'cu_mask_ptr']
+setattr(struct_kfd_ioctl_set_cu_mask_args, 'queue_id', field(0, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_set_cu_mask_args, 'num_cu_mask', field(4, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_set_cu_mask_args, 'cu_mask_ptr', field(8, ctypes.c_uint64))
 class struct_kfd_ioctl_get_queue_wave_state_args(Struct): pass
-struct_kfd_ioctl_get_queue_wave_state_args._fields_ = [
-  ('ctl_stack_address', ctypes.c_uint64),
-  ('ctl_stack_used_size', ctypes.c_uint32),
-  ('save_area_used_size', ctypes.c_uint32),
-  ('queue_id', ctypes.c_uint32),
-  ('pad', ctypes.c_uint32),
-]
+struct_kfd_ioctl_get_queue_wave_state_args.SIZE = 24
+struct_kfd_ioctl_get_queue_wave_state_args._fields_ = ['ctl_stack_address', 'ctl_stack_used_size', 'save_area_used_size', 'queue_id', 'pad']
+setattr(struct_kfd_ioctl_get_queue_wave_state_args, 'ctl_stack_address', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_get_queue_wave_state_args, 'ctl_stack_used_size', field(8, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_get_queue_wave_state_args, 'save_area_used_size', field(12, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_get_queue_wave_state_args, 'queue_id', field(16, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_get_queue_wave_state_args, 'pad', field(20, ctypes.c_uint32))
 class struct_kfd_ioctl_get_available_memory_args(Struct): pass
-struct_kfd_ioctl_get_available_memory_args._fields_ = [
-  ('available', ctypes.c_uint64),
-  ('gpu_id', ctypes.c_uint32),
-  ('pad', ctypes.c_uint32),
-]
+struct_kfd_ioctl_get_available_memory_args.SIZE = 16
+struct_kfd_ioctl_get_available_memory_args._fields_ = ['available', 'gpu_id', 'pad']
+setattr(struct_kfd_ioctl_get_available_memory_args, 'available', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_get_available_memory_args, 'gpu_id', field(8, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_get_available_memory_args, 'pad', field(12, ctypes.c_uint32))
 class struct_kfd_dbg_device_info_entry(Struct): pass
-struct_kfd_dbg_device_info_entry._fields_ = [
-  ('exception_status', ctypes.c_uint64),
-  ('lds_base', ctypes.c_uint64),
-  ('lds_limit', ctypes.c_uint64),
-  ('scratch_base', ctypes.c_uint64),
-  ('scratch_limit', ctypes.c_uint64),
-  ('gpuvm_base', ctypes.c_uint64),
-  ('gpuvm_limit', ctypes.c_uint64),
-  ('gpu_id', ctypes.c_uint32),
-  ('location_id', ctypes.c_uint32),
-  ('vendor_id', ctypes.c_uint32),
-  ('device_id', ctypes.c_uint32),
-  ('revision_id', ctypes.c_uint32),
-  ('subsystem_vendor_id', ctypes.c_uint32),
-  ('subsystem_device_id', ctypes.c_uint32),
-  ('fw_version', ctypes.c_uint32),
-  ('gfx_target_version', ctypes.c_uint32),
-  ('simd_count', ctypes.c_uint32),
-  ('max_waves_per_simd', ctypes.c_uint32),
-  ('array_count', ctypes.c_uint32),
-  ('simd_arrays_per_engine', ctypes.c_uint32),
-  ('num_xcc', ctypes.c_uint32),
-  ('capability', ctypes.c_uint32),
-  ('debug_prop', ctypes.c_uint32),
-]
+struct_kfd_dbg_device_info_entry.SIZE = 120
+struct_kfd_dbg_device_info_entry._fields_ = ['exception_status', 'lds_base', 'lds_limit', 'scratch_base', 'scratch_limit', 'gpuvm_base', 'gpuvm_limit', 'gpu_id', 'location_id', 'vendor_id', 'device_id', 'revision_id', 'subsystem_vendor_id', 'subsystem_device_id', 'fw_version', 'gfx_target_version', 'simd_count', 'max_waves_per_simd', 'array_count', 'simd_arrays_per_engine', 'num_xcc', 'capability', 'debug_prop']
+setattr(struct_kfd_dbg_device_info_entry, 'exception_status', field(0, ctypes.c_uint64))
+setattr(struct_kfd_dbg_device_info_entry, 'lds_base', field(8, ctypes.c_uint64))
+setattr(struct_kfd_dbg_device_info_entry, 'lds_limit', field(16, ctypes.c_uint64))
+setattr(struct_kfd_dbg_device_info_entry, 'scratch_base', field(24, ctypes.c_uint64))
+setattr(struct_kfd_dbg_device_info_entry, 'scratch_limit', field(32, ctypes.c_uint64))
+setattr(struct_kfd_dbg_device_info_entry, 'gpuvm_base', field(40, ctypes.c_uint64))
+setattr(struct_kfd_dbg_device_info_entry, 'gpuvm_limit', field(48, ctypes.c_uint64))
+setattr(struct_kfd_dbg_device_info_entry, 'gpu_id', field(56, ctypes.c_uint32))
+setattr(struct_kfd_dbg_device_info_entry, 'location_id', field(60, ctypes.c_uint32))
+setattr(struct_kfd_dbg_device_info_entry, 'vendor_id', field(64, ctypes.c_uint32))
+setattr(struct_kfd_dbg_device_info_entry, 'device_id', field(68, ctypes.c_uint32))
+setattr(struct_kfd_dbg_device_info_entry, 'revision_id', field(72, ctypes.c_uint32))
+setattr(struct_kfd_dbg_device_info_entry, 'subsystem_vendor_id', field(76, ctypes.c_uint32))
+setattr(struct_kfd_dbg_device_info_entry, 'subsystem_device_id', field(80, ctypes.c_uint32))
+setattr(struct_kfd_dbg_device_info_entry, 'fw_version', field(84, ctypes.c_uint32))
+setattr(struct_kfd_dbg_device_info_entry, 'gfx_target_version', field(88, ctypes.c_uint32))
+setattr(struct_kfd_dbg_device_info_entry, 'simd_count', field(92, ctypes.c_uint32))
+setattr(struct_kfd_dbg_device_info_entry, 'max_waves_per_simd', field(96, ctypes.c_uint32))
+setattr(struct_kfd_dbg_device_info_entry, 'array_count', field(100, ctypes.c_uint32))
+setattr(struct_kfd_dbg_device_info_entry, 'simd_arrays_per_engine', field(104, ctypes.c_uint32))
+setattr(struct_kfd_dbg_device_info_entry, 'num_xcc', field(108, ctypes.c_uint32))
+setattr(struct_kfd_dbg_device_info_entry, 'capability', field(112, ctypes.c_uint32))
+setattr(struct_kfd_dbg_device_info_entry, 'debug_prop', field(116, ctypes.c_uint32))
 class struct_kfd_ioctl_set_memory_policy_args(Struct): pass
-struct_kfd_ioctl_set_memory_policy_args._fields_ = [
-  ('alternate_aperture_base', ctypes.c_uint64),
-  ('alternate_aperture_size', ctypes.c_uint64),
-  ('gpu_id', ctypes.c_uint32),
-  ('default_policy', ctypes.c_uint32),
-  ('alternate_policy', ctypes.c_uint32),
-  ('pad', ctypes.c_uint32),
-]
+struct_kfd_ioctl_set_memory_policy_args.SIZE = 32
+struct_kfd_ioctl_set_memory_policy_args._fields_ = ['alternate_aperture_base', 'alternate_aperture_size', 'gpu_id', 'default_policy', 'alternate_policy', 'pad']
+setattr(struct_kfd_ioctl_set_memory_policy_args, 'alternate_aperture_base', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_set_memory_policy_args, 'alternate_aperture_size', field(8, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_set_memory_policy_args, 'gpu_id', field(16, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_set_memory_policy_args, 'default_policy', field(20, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_set_memory_policy_args, 'alternate_policy', field(24, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_set_memory_policy_args, 'pad', field(28, ctypes.c_uint32))
 class struct_kfd_ioctl_get_clock_counters_args(Struct): pass
-struct_kfd_ioctl_get_clock_counters_args._fields_ = [
-  ('gpu_clock_counter', ctypes.c_uint64),
-  ('cpu_clock_counter', ctypes.c_uint64),
-  ('system_clock_counter', ctypes.c_uint64),
-  ('system_clock_freq', ctypes.c_uint64),
-  ('gpu_id', ctypes.c_uint32),
-  ('pad', ctypes.c_uint32),
-]
+struct_kfd_ioctl_get_clock_counters_args.SIZE = 40
+struct_kfd_ioctl_get_clock_counters_args._fields_ = ['gpu_clock_counter', 'cpu_clock_counter', 'system_clock_counter', 'system_clock_freq', 'gpu_id', 'pad']
+setattr(struct_kfd_ioctl_get_clock_counters_args, 'gpu_clock_counter', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_get_clock_counters_args, 'cpu_clock_counter', field(8, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_get_clock_counters_args, 'system_clock_counter', field(16, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_get_clock_counters_args, 'system_clock_freq', field(24, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_get_clock_counters_args, 'gpu_id', field(32, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_get_clock_counters_args, 'pad', field(36, ctypes.c_uint32))
 class struct_kfd_process_device_apertures(Struct): pass
-struct_kfd_process_device_apertures._fields_ = [
-  ('lds_base', ctypes.c_uint64),
-  ('lds_limit', ctypes.c_uint64),
-  ('scratch_base', ctypes.c_uint64),
-  ('scratch_limit', ctypes.c_uint64),
-  ('gpuvm_base', ctypes.c_uint64),
-  ('gpuvm_limit', ctypes.c_uint64),
-  ('gpu_id', ctypes.c_uint32),
-  ('pad', ctypes.c_uint32),
-]
+struct_kfd_process_device_apertures.SIZE = 56
+struct_kfd_process_device_apertures._fields_ = ['lds_base', 'lds_limit', 'scratch_base', 'scratch_limit', 'gpuvm_base', 'gpuvm_limit', 'gpu_id', 'pad']
+setattr(struct_kfd_process_device_apertures, 'lds_base', field(0, ctypes.c_uint64))
+setattr(struct_kfd_process_device_apertures, 'lds_limit', field(8, ctypes.c_uint64))
+setattr(struct_kfd_process_device_apertures, 'scratch_base', field(16, ctypes.c_uint64))
+setattr(struct_kfd_process_device_apertures, 'scratch_limit', field(24, ctypes.c_uint64))
+setattr(struct_kfd_process_device_apertures, 'gpuvm_base', field(32, ctypes.c_uint64))
+setattr(struct_kfd_process_device_apertures, 'gpuvm_limit', field(40, ctypes.c_uint64))
+setattr(struct_kfd_process_device_apertures, 'gpu_id', field(48, ctypes.c_uint32))
+setattr(struct_kfd_process_device_apertures, 'pad', field(52, ctypes.c_uint32))
 class struct_kfd_ioctl_get_process_apertures_args(Struct): pass
-struct_kfd_ioctl_get_process_apertures_args._fields_ = [
-  ('process_apertures', (struct_kfd_process_device_apertures * 7)),
-  ('num_of_nodes', ctypes.c_uint32),
-  ('pad', ctypes.c_uint32),
-]
+struct_kfd_ioctl_get_process_apertures_args.SIZE = 400
+struct_kfd_ioctl_get_process_apertures_args._fields_ = ['process_apertures', 'num_of_nodes', 'pad']
+setattr(struct_kfd_ioctl_get_process_apertures_args, 'process_apertures', field(0, Array(struct_kfd_process_device_apertures, 7)))
+setattr(struct_kfd_ioctl_get_process_apertures_args, 'num_of_nodes', field(392, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_get_process_apertures_args, 'pad', field(396, ctypes.c_uint32))
 class struct_kfd_ioctl_get_process_apertures_new_args(Struct): pass
-struct_kfd_ioctl_get_process_apertures_new_args._fields_ = [
-  ('kfd_process_device_apertures_ptr', ctypes.c_uint64),
-  ('num_of_nodes', ctypes.c_uint32),
-  ('pad', ctypes.c_uint32),
-]
+struct_kfd_ioctl_get_process_apertures_new_args.SIZE = 16
+struct_kfd_ioctl_get_process_apertures_new_args._fields_ = ['kfd_process_device_apertures_ptr', 'num_of_nodes', 'pad']
+setattr(struct_kfd_ioctl_get_process_apertures_new_args, 'kfd_process_device_apertures_ptr', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_get_process_apertures_new_args, 'num_of_nodes', field(8, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_get_process_apertures_new_args, 'pad', field(12, ctypes.c_uint32))
 class struct_kfd_ioctl_dbg_register_args(Struct): pass
-struct_kfd_ioctl_dbg_register_args._fields_ = [
-  ('gpu_id', ctypes.c_uint32),
-  ('pad', ctypes.c_uint32),
-]
+struct_kfd_ioctl_dbg_register_args.SIZE = 8
+struct_kfd_ioctl_dbg_register_args._fields_ = ['gpu_id', 'pad']
+setattr(struct_kfd_ioctl_dbg_register_args, 'gpu_id', field(0, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_dbg_register_args, 'pad', field(4, ctypes.c_uint32))
 class struct_kfd_ioctl_dbg_unregister_args(Struct): pass
-struct_kfd_ioctl_dbg_unregister_args._fields_ = [
-  ('gpu_id', ctypes.c_uint32),
-  ('pad', ctypes.c_uint32),
-]
+struct_kfd_ioctl_dbg_unregister_args.SIZE = 8
+struct_kfd_ioctl_dbg_unregister_args._fields_ = ['gpu_id', 'pad']
+setattr(struct_kfd_ioctl_dbg_unregister_args, 'gpu_id', field(0, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_dbg_unregister_args, 'pad', field(4, ctypes.c_uint32))
 class struct_kfd_ioctl_dbg_address_watch_args(Struct): pass
-struct_kfd_ioctl_dbg_address_watch_args._fields_ = [
-  ('content_ptr', ctypes.c_uint64),
-  ('gpu_id', ctypes.c_uint32),
-  ('buf_size_in_bytes', ctypes.c_uint32),
-]
+struct_kfd_ioctl_dbg_address_watch_args.SIZE = 16
+struct_kfd_ioctl_dbg_address_watch_args._fields_ = ['content_ptr', 'gpu_id', 'buf_size_in_bytes']
+setattr(struct_kfd_ioctl_dbg_address_watch_args, 'content_ptr', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_dbg_address_watch_args, 'gpu_id', field(8, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_dbg_address_watch_args, 'buf_size_in_bytes', field(12, ctypes.c_uint32))
 class struct_kfd_ioctl_dbg_wave_control_args(Struct): pass
-struct_kfd_ioctl_dbg_wave_control_args._fields_ = [
-  ('content_ptr', ctypes.c_uint64),
-  ('gpu_id', ctypes.c_uint32),
-  ('buf_size_in_bytes', ctypes.c_uint32),
-]
+struct_kfd_ioctl_dbg_wave_control_args.SIZE = 16
+struct_kfd_ioctl_dbg_wave_control_args._fields_ = ['content_ptr', 'gpu_id', 'buf_size_in_bytes']
+setattr(struct_kfd_ioctl_dbg_wave_control_args, 'content_ptr', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_dbg_wave_control_args, 'gpu_id', field(8, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_dbg_wave_control_args, 'buf_size_in_bytes', field(12, ctypes.c_uint32))
 class struct_kfd_ioctl_create_event_args(Struct): pass
-struct_kfd_ioctl_create_event_args._fields_ = [
-  ('event_page_offset', ctypes.c_uint64),
-  ('event_trigger_data', ctypes.c_uint32),
-  ('event_type', ctypes.c_uint32),
-  ('auto_reset', ctypes.c_uint32),
-  ('node_id', ctypes.c_uint32),
-  ('event_id', ctypes.c_uint32),
-  ('event_slot_index', ctypes.c_uint32),
-]
+struct_kfd_ioctl_create_event_args.SIZE = 32
+struct_kfd_ioctl_create_event_args._fields_ = ['event_page_offset', 'event_trigger_data', 'event_type', 'auto_reset', 'node_id', 'event_id', 'event_slot_index']
+setattr(struct_kfd_ioctl_create_event_args, 'event_page_offset', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_create_event_args, 'event_trigger_data', field(8, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_create_event_args, 'event_type', field(12, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_create_event_args, 'auto_reset', field(16, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_create_event_args, 'node_id', field(20, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_create_event_args, 'event_id', field(24, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_create_event_args, 'event_slot_index', field(28, ctypes.c_uint32))
 class struct_kfd_ioctl_destroy_event_args(Struct): pass
-struct_kfd_ioctl_destroy_event_args._fields_ = [
-  ('event_id', ctypes.c_uint32),
-  ('pad', ctypes.c_uint32),
-]
+struct_kfd_ioctl_destroy_event_args.SIZE = 8
+struct_kfd_ioctl_destroy_event_args._fields_ = ['event_id', 'pad']
+setattr(struct_kfd_ioctl_destroy_event_args, 'event_id', field(0, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_destroy_event_args, 'pad', field(4, ctypes.c_uint32))
 class struct_kfd_ioctl_set_event_args(Struct): pass
-struct_kfd_ioctl_set_event_args._fields_ = [
-  ('event_id', ctypes.c_uint32),
-  ('pad', ctypes.c_uint32),
-]
+struct_kfd_ioctl_set_event_args.SIZE = 8
+struct_kfd_ioctl_set_event_args._fields_ = ['event_id', 'pad']
+setattr(struct_kfd_ioctl_set_event_args, 'event_id', field(0, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_set_event_args, 'pad', field(4, ctypes.c_uint32))
 class struct_kfd_ioctl_reset_event_args(Struct): pass
-struct_kfd_ioctl_reset_event_args._fields_ = [
-  ('event_id', ctypes.c_uint32),
-  ('pad', ctypes.c_uint32),
-]
+struct_kfd_ioctl_reset_event_args.SIZE = 8
+struct_kfd_ioctl_reset_event_args._fields_ = ['event_id', 'pad']
+setattr(struct_kfd_ioctl_reset_event_args, 'event_id', field(0, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_reset_event_args, 'pad', field(4, ctypes.c_uint32))
 class struct_kfd_memory_exception_failure(Struct): pass
-struct_kfd_memory_exception_failure._fields_ = [
-  ('NotPresent', ctypes.c_uint32),
-  ('ReadOnly', ctypes.c_uint32),
-  ('NoExecute', ctypes.c_uint32),
-  ('imprecise', ctypes.c_uint32),
-]
+struct_kfd_memory_exception_failure.SIZE = 16
+struct_kfd_memory_exception_failure._fields_ = ['NotPresent', 'ReadOnly', 'NoExecute', 'imprecise']
+setattr(struct_kfd_memory_exception_failure, 'NotPresent', field(0, ctypes.c_uint32))
+setattr(struct_kfd_memory_exception_failure, 'ReadOnly', field(4, ctypes.c_uint32))
+setattr(struct_kfd_memory_exception_failure, 'NoExecute', field(8, ctypes.c_uint32))
+setattr(struct_kfd_memory_exception_failure, 'imprecise', field(12, ctypes.c_uint32))
 class struct_kfd_hsa_memory_exception_data(Struct): pass
-struct_kfd_hsa_memory_exception_data._fields_ = [
-  ('failure', struct_kfd_memory_exception_failure),
-  ('va', ctypes.c_uint64),
-  ('gpu_id', ctypes.c_uint32),
-  ('ErrorType', ctypes.c_uint32),
-]
+struct_kfd_hsa_memory_exception_data.SIZE = 32
+struct_kfd_hsa_memory_exception_data._fields_ = ['failure', 'va', 'gpu_id', 'ErrorType']
+setattr(struct_kfd_hsa_memory_exception_data, 'failure', field(0, struct_kfd_memory_exception_failure))
+setattr(struct_kfd_hsa_memory_exception_data, 'va', field(16, ctypes.c_uint64))
+setattr(struct_kfd_hsa_memory_exception_data, 'gpu_id', field(24, ctypes.c_uint32))
+setattr(struct_kfd_hsa_memory_exception_data, 'ErrorType', field(28, ctypes.c_uint32))
 class struct_kfd_hsa_hw_exception_data(Struct): pass
-struct_kfd_hsa_hw_exception_data._fields_ = [
-  ('reset_type', ctypes.c_uint32),
-  ('reset_cause', ctypes.c_uint32),
-  ('memory_lost', ctypes.c_uint32),
-  ('gpu_id', ctypes.c_uint32),
-]
+struct_kfd_hsa_hw_exception_data.SIZE = 16
+struct_kfd_hsa_hw_exception_data._fields_ = ['reset_type', 'reset_cause', 'memory_lost', 'gpu_id']
+setattr(struct_kfd_hsa_hw_exception_data, 'reset_type', field(0, ctypes.c_uint32))
+setattr(struct_kfd_hsa_hw_exception_data, 'reset_cause', field(4, ctypes.c_uint32))
+setattr(struct_kfd_hsa_hw_exception_data, 'memory_lost', field(8, ctypes.c_uint32))
+setattr(struct_kfd_hsa_hw_exception_data, 'gpu_id', field(12, ctypes.c_uint32))
 class struct_kfd_hsa_signal_event_data(Struct): pass
-struct_kfd_hsa_signal_event_data._fields_ = [
-  ('last_event_age', ctypes.c_uint64),
-]
+struct_kfd_hsa_signal_event_data.SIZE = 8
+struct_kfd_hsa_signal_event_data._fields_ = ['last_event_age']
+setattr(struct_kfd_hsa_signal_event_data, 'last_event_age', field(0, ctypes.c_uint64))
 class struct_kfd_event_data(Struct): pass
-class struct_kfd_event_data_0(ctypes.Union): pass
-struct_kfd_event_data_0._fields_ = [
-  ('memory_exception_data', struct_kfd_hsa_memory_exception_data),
-  ('hw_exception_data', struct_kfd_hsa_hw_exception_data),
-  ('signal_event_data', struct_kfd_hsa_signal_event_data),
-]
-struct_kfd_event_data._anonymous_ = ['_0']
-struct_kfd_event_data._fields_ = [
-  ('_0', struct_kfd_event_data_0),
-  ('kfd_event_data_ext', ctypes.c_uint64),
-  ('event_id', ctypes.c_uint32),
-  ('pad', ctypes.c_uint32),
-]
+struct_kfd_event_data.SIZE = 48
+struct_kfd_event_data._fields_ = ['memory_exception_data', 'hw_exception_data', 'signal_event_data', 'kfd_event_data_ext', 'event_id', 'pad']
+setattr(struct_kfd_event_data, 'memory_exception_data', field(0, struct_kfd_hsa_memory_exception_data))
+setattr(struct_kfd_event_data, 'hw_exception_data', field(0, struct_kfd_hsa_hw_exception_data))
+setattr(struct_kfd_event_data, 'signal_event_data', field(0, struct_kfd_hsa_signal_event_data))
+setattr(struct_kfd_event_data, 'kfd_event_data_ext', field(32, ctypes.c_uint64))
+setattr(struct_kfd_event_data, 'event_id', field(40, ctypes.c_uint32))
+setattr(struct_kfd_event_data, 'pad', field(44, ctypes.c_uint32))
 class struct_kfd_ioctl_wait_events_args(Struct): pass
-struct_kfd_ioctl_wait_events_args._fields_ = [
-  ('events_ptr', ctypes.c_uint64),
-  ('num_events', ctypes.c_uint32),
-  ('wait_for_all', ctypes.c_uint32),
-  ('timeout', ctypes.c_uint32),
-  ('wait_result', ctypes.c_uint32),
-]
+struct_kfd_ioctl_wait_events_args.SIZE = 24
+struct_kfd_ioctl_wait_events_args._fields_ = ['events_ptr', 'num_events', 'wait_for_all', 'timeout', 'wait_result']
+setattr(struct_kfd_ioctl_wait_events_args, 'events_ptr', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_wait_events_args, 'num_events', field(8, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_wait_events_args, 'wait_for_all', field(12, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_wait_events_args, 'timeout', field(16, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_wait_events_args, 'wait_result', field(20, ctypes.c_uint32))
 class struct_kfd_ioctl_set_scratch_backing_va_args(Struct): pass
-struct_kfd_ioctl_set_scratch_backing_va_args._fields_ = [
-  ('va_addr', ctypes.c_uint64),
-  ('gpu_id', ctypes.c_uint32),
-  ('pad', ctypes.c_uint32),
-]
+struct_kfd_ioctl_set_scratch_backing_va_args.SIZE = 16
+struct_kfd_ioctl_set_scratch_backing_va_args._fields_ = ['va_addr', 'gpu_id', 'pad']
+setattr(struct_kfd_ioctl_set_scratch_backing_va_args, 'va_addr', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_set_scratch_backing_va_args, 'gpu_id', field(8, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_set_scratch_backing_va_args, 'pad', field(12, ctypes.c_uint32))
 class struct_kfd_ioctl_get_tile_config_args(Struct): pass
-struct_kfd_ioctl_get_tile_config_args._fields_ = [
-  ('tile_config_ptr', ctypes.c_uint64),
-  ('macro_tile_config_ptr', ctypes.c_uint64),
-  ('num_tile_configs', ctypes.c_uint32),
-  ('num_macro_tile_configs', ctypes.c_uint32),
-  ('gpu_id', ctypes.c_uint32),
-  ('gb_addr_config', ctypes.c_uint32),
-  ('num_banks', ctypes.c_uint32),
-  ('num_ranks', ctypes.c_uint32),
-]
+struct_kfd_ioctl_get_tile_config_args.SIZE = 40
+struct_kfd_ioctl_get_tile_config_args._fields_ = ['tile_config_ptr', 'macro_tile_config_ptr', 'num_tile_configs', 'num_macro_tile_configs', 'gpu_id', 'gb_addr_config', 'num_banks', 'num_ranks']
+setattr(struct_kfd_ioctl_get_tile_config_args, 'tile_config_ptr', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_get_tile_config_args, 'macro_tile_config_ptr', field(8, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_get_tile_config_args, 'num_tile_configs', field(16, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_get_tile_config_args, 'num_macro_tile_configs', field(20, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_get_tile_config_args, 'gpu_id', field(24, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_get_tile_config_args, 'gb_addr_config', field(28, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_get_tile_config_args, 'num_banks', field(32, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_get_tile_config_args, 'num_ranks', field(36, ctypes.c_uint32))
 class struct_kfd_ioctl_set_trap_handler_args(Struct): pass
-struct_kfd_ioctl_set_trap_handler_args._fields_ = [
-  ('tba_addr', ctypes.c_uint64),
-  ('tma_addr', ctypes.c_uint64),
-  ('gpu_id', ctypes.c_uint32),
-  ('pad', ctypes.c_uint32),
-]
+struct_kfd_ioctl_set_trap_handler_args.SIZE = 24
+struct_kfd_ioctl_set_trap_handler_args._fields_ = ['tba_addr', 'tma_addr', 'gpu_id', 'pad']
+setattr(struct_kfd_ioctl_set_trap_handler_args, 'tba_addr', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_set_trap_handler_args, 'tma_addr', field(8, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_set_trap_handler_args, 'gpu_id', field(16, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_set_trap_handler_args, 'pad', field(20, ctypes.c_uint32))
 class struct_kfd_ioctl_acquire_vm_args(Struct): pass
-struct_kfd_ioctl_acquire_vm_args._fields_ = [
-  ('drm_fd', ctypes.c_uint32),
-  ('gpu_id', ctypes.c_uint32),
-]
+struct_kfd_ioctl_acquire_vm_args.SIZE = 8
+struct_kfd_ioctl_acquire_vm_args._fields_ = ['drm_fd', 'gpu_id']
+setattr(struct_kfd_ioctl_acquire_vm_args, 'drm_fd', field(0, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_acquire_vm_args, 'gpu_id', field(4, ctypes.c_uint32))
 class struct_kfd_ioctl_alloc_memory_of_gpu_args(Struct): pass
-struct_kfd_ioctl_alloc_memory_of_gpu_args._fields_ = [
-  ('va_addr', ctypes.c_uint64),
-  ('size', ctypes.c_uint64),
-  ('handle', ctypes.c_uint64),
-  ('mmap_offset', ctypes.c_uint64),
-  ('gpu_id', ctypes.c_uint32),
-  ('flags', ctypes.c_uint32),
-]
+struct_kfd_ioctl_alloc_memory_of_gpu_args.SIZE = 40
+struct_kfd_ioctl_alloc_memory_of_gpu_args._fields_ = ['va_addr', 'size', 'handle', 'mmap_offset', 'gpu_id', 'flags']
+setattr(struct_kfd_ioctl_alloc_memory_of_gpu_args, 'va_addr', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_alloc_memory_of_gpu_args, 'size', field(8, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_alloc_memory_of_gpu_args, 'handle', field(16, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_alloc_memory_of_gpu_args, 'mmap_offset', field(24, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_alloc_memory_of_gpu_args, 'gpu_id', field(32, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_alloc_memory_of_gpu_args, 'flags', field(36, ctypes.c_uint32))
 class struct_kfd_ioctl_free_memory_of_gpu_args(Struct): pass
-struct_kfd_ioctl_free_memory_of_gpu_args._fields_ = [
-  ('handle', ctypes.c_uint64),
-]
+struct_kfd_ioctl_free_memory_of_gpu_args.SIZE = 8
+struct_kfd_ioctl_free_memory_of_gpu_args._fields_ = ['handle']
+setattr(struct_kfd_ioctl_free_memory_of_gpu_args, 'handle', field(0, ctypes.c_uint64))
 class struct_kfd_ioctl_map_memory_to_gpu_args(Struct): pass
-struct_kfd_ioctl_map_memory_to_gpu_args._fields_ = [
-  ('handle', ctypes.c_uint64),
-  ('device_ids_array_ptr', ctypes.c_uint64),
-  ('n_devices', ctypes.c_uint32),
-  ('n_success', ctypes.c_uint32),
-]
+struct_kfd_ioctl_map_memory_to_gpu_args.SIZE = 24
+struct_kfd_ioctl_map_memory_to_gpu_args._fields_ = ['handle', 'device_ids_array_ptr', 'n_devices', 'n_success']
+setattr(struct_kfd_ioctl_map_memory_to_gpu_args, 'handle', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_map_memory_to_gpu_args, 'device_ids_array_ptr', field(8, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_map_memory_to_gpu_args, 'n_devices', field(16, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_map_memory_to_gpu_args, 'n_success', field(20, ctypes.c_uint32))
 class struct_kfd_ioctl_unmap_memory_from_gpu_args(Struct): pass
-struct_kfd_ioctl_unmap_memory_from_gpu_args._fields_ = [
-  ('handle', ctypes.c_uint64),
-  ('device_ids_array_ptr', ctypes.c_uint64),
-  ('n_devices', ctypes.c_uint32),
-  ('n_success', ctypes.c_uint32),
-]
+struct_kfd_ioctl_unmap_memory_from_gpu_args.SIZE = 24
+struct_kfd_ioctl_unmap_memory_from_gpu_args._fields_ = ['handle', 'device_ids_array_ptr', 'n_devices', 'n_success']
+setattr(struct_kfd_ioctl_unmap_memory_from_gpu_args, 'handle', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_unmap_memory_from_gpu_args, 'device_ids_array_ptr', field(8, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_unmap_memory_from_gpu_args, 'n_devices', field(16, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_unmap_memory_from_gpu_args, 'n_success', field(20, ctypes.c_uint32))
 class struct_kfd_ioctl_alloc_queue_gws_args(Struct): pass
-struct_kfd_ioctl_alloc_queue_gws_args._fields_ = [
-  ('queue_id', ctypes.c_uint32),
-  ('num_gws', ctypes.c_uint32),
-  ('first_gws', ctypes.c_uint32),
-  ('pad', ctypes.c_uint32),
-]
+struct_kfd_ioctl_alloc_queue_gws_args.SIZE = 16
+struct_kfd_ioctl_alloc_queue_gws_args._fields_ = ['queue_id', 'num_gws', 'first_gws', 'pad']
+setattr(struct_kfd_ioctl_alloc_queue_gws_args, 'queue_id', field(0, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_alloc_queue_gws_args, 'num_gws', field(4, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_alloc_queue_gws_args, 'first_gws', field(8, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_alloc_queue_gws_args, 'pad', field(12, ctypes.c_uint32))
 class struct_kfd_ioctl_get_dmabuf_info_args(Struct): pass
-struct_kfd_ioctl_get_dmabuf_info_args._fields_ = [
-  ('size', ctypes.c_uint64),
-  ('metadata_ptr', ctypes.c_uint64),
-  ('metadata_size', ctypes.c_uint32),
-  ('gpu_id', ctypes.c_uint32),
-  ('flags', ctypes.c_uint32),
-  ('dmabuf_fd', ctypes.c_uint32),
-]
+struct_kfd_ioctl_get_dmabuf_info_args.SIZE = 32
+struct_kfd_ioctl_get_dmabuf_info_args._fields_ = ['size', 'metadata_ptr', 'metadata_size', 'gpu_id', 'flags', 'dmabuf_fd']
+setattr(struct_kfd_ioctl_get_dmabuf_info_args, 'size', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_get_dmabuf_info_args, 'metadata_ptr', field(8, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_get_dmabuf_info_args, 'metadata_size', field(16, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_get_dmabuf_info_args, 'gpu_id', field(20, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_get_dmabuf_info_args, 'flags', field(24, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_get_dmabuf_info_args, 'dmabuf_fd', field(28, ctypes.c_uint32))
 class struct_kfd_ioctl_import_dmabuf_args(Struct): pass
-struct_kfd_ioctl_import_dmabuf_args._fields_ = [
-  ('va_addr', ctypes.c_uint64),
-  ('handle', ctypes.c_uint64),
-  ('gpu_id', ctypes.c_uint32),
-  ('dmabuf_fd', ctypes.c_uint32),
-]
+struct_kfd_ioctl_import_dmabuf_args.SIZE = 24
+struct_kfd_ioctl_import_dmabuf_args._fields_ = ['va_addr', 'handle', 'gpu_id', 'dmabuf_fd']
+setattr(struct_kfd_ioctl_import_dmabuf_args, 'va_addr', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_import_dmabuf_args, 'handle', field(8, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_import_dmabuf_args, 'gpu_id', field(16, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_import_dmabuf_args, 'dmabuf_fd', field(20, ctypes.c_uint32))
 class struct_kfd_ioctl_export_dmabuf_args(Struct): pass
-struct_kfd_ioctl_export_dmabuf_args._fields_ = [
-  ('handle', ctypes.c_uint64),
-  ('flags', ctypes.c_uint32),
-  ('dmabuf_fd', ctypes.c_uint32),
-]
+struct_kfd_ioctl_export_dmabuf_args.SIZE = 16
+struct_kfd_ioctl_export_dmabuf_args._fields_ = ['handle', 'flags', 'dmabuf_fd']
+setattr(struct_kfd_ioctl_export_dmabuf_args, 'handle', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_export_dmabuf_args, 'flags', field(8, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_export_dmabuf_args, 'dmabuf_fd', field(12, ctypes.c_uint32))
 enum_kfd_smi_event = CEnum(ctypes.c_uint32)
 KFD_SMI_EVENT_NONE = enum_kfd_smi_event.define('KFD_SMI_EVENT_NONE', 0)
 KFD_SMI_EVENT_VMFAULT = enum_kfd_smi_event.define('KFD_SMI_EVENT_VMFAULT', 1)
@@ -340,10 +335,10 @@ KFD_SVM_UNMAP_TRIGGER_MMU_NOTIFY_MIGRATE = enum_KFD_SVM_UNMAP_TRIGGERS.define('K
 KFD_SVM_UNMAP_TRIGGER_UNMAP_FROM_CPU = enum_KFD_SVM_UNMAP_TRIGGERS.define('KFD_SVM_UNMAP_TRIGGER_UNMAP_FROM_CPU', 2)
 
 class struct_kfd_ioctl_smi_events_args(Struct): pass
-struct_kfd_ioctl_smi_events_args._fields_ = [
-  ('gpuid', ctypes.c_uint32),
-  ('anon_fd', ctypes.c_uint32),
-]
+struct_kfd_ioctl_smi_events_args.SIZE = 8
+struct_kfd_ioctl_smi_events_args._fields_ = ['gpuid', 'anon_fd']
+setattr(struct_kfd_ioctl_smi_events_args, 'gpuid', field(0, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_smi_events_args, 'anon_fd', field(4, ctypes.c_uint32))
 enum_kfd_criu_op = CEnum(ctypes.c_uint32)
 KFD_CRIU_OP_PROCESS_INFO = enum_kfd_criu_op.define('KFD_CRIU_OP_PROCESS_INFO', 0)
 KFD_CRIU_OP_CHECKPOINT = enum_kfd_criu_op.define('KFD_CRIU_OP_CHECKPOINT', 1)
@@ -352,35 +347,35 @@ KFD_CRIU_OP_RESTORE = enum_kfd_criu_op.define('KFD_CRIU_OP_RESTORE', 3)
 KFD_CRIU_OP_RESUME = enum_kfd_criu_op.define('KFD_CRIU_OP_RESUME', 4)
 
 class struct_kfd_ioctl_criu_args(Struct): pass
-struct_kfd_ioctl_criu_args._fields_ = [
-  ('devices', ctypes.c_uint64),
-  ('bos', ctypes.c_uint64),
-  ('priv_data', ctypes.c_uint64),
-  ('priv_data_size', ctypes.c_uint64),
-  ('num_devices', ctypes.c_uint32),
-  ('num_bos', ctypes.c_uint32),
-  ('num_objects', ctypes.c_uint32),
-  ('pid', ctypes.c_uint32),
-  ('op', ctypes.c_uint32),
-]
+struct_kfd_ioctl_criu_args.SIZE = 56
+struct_kfd_ioctl_criu_args._fields_ = ['devices', 'bos', 'priv_data', 'priv_data_size', 'num_devices', 'num_bos', 'num_objects', 'pid', 'op']
+setattr(struct_kfd_ioctl_criu_args, 'devices', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_criu_args, 'bos', field(8, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_criu_args, 'priv_data', field(16, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_criu_args, 'priv_data_size', field(24, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_criu_args, 'num_devices', field(32, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_criu_args, 'num_bos', field(36, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_criu_args, 'num_objects', field(40, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_criu_args, 'pid', field(44, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_criu_args, 'op', field(48, ctypes.c_uint32))
 class struct_kfd_criu_device_bucket(Struct): pass
-struct_kfd_criu_device_bucket._fields_ = [
-  ('user_gpu_id', ctypes.c_uint32),
-  ('actual_gpu_id', ctypes.c_uint32),
-  ('drm_fd', ctypes.c_uint32),
-  ('pad', ctypes.c_uint32),
-]
+struct_kfd_criu_device_bucket.SIZE = 16
+struct_kfd_criu_device_bucket._fields_ = ['user_gpu_id', 'actual_gpu_id', 'drm_fd', 'pad']
+setattr(struct_kfd_criu_device_bucket, 'user_gpu_id', field(0, ctypes.c_uint32))
+setattr(struct_kfd_criu_device_bucket, 'actual_gpu_id', field(4, ctypes.c_uint32))
+setattr(struct_kfd_criu_device_bucket, 'drm_fd', field(8, ctypes.c_uint32))
+setattr(struct_kfd_criu_device_bucket, 'pad', field(12, ctypes.c_uint32))
 class struct_kfd_criu_bo_bucket(Struct): pass
-struct_kfd_criu_bo_bucket._fields_ = [
-  ('addr', ctypes.c_uint64),
-  ('size', ctypes.c_uint64),
-  ('offset', ctypes.c_uint64),
-  ('restored_offset', ctypes.c_uint64),
-  ('gpu_id', ctypes.c_uint32),
-  ('alloc_flags', ctypes.c_uint32),
-  ('dmabuf_fd', ctypes.c_uint32),
-  ('pad', ctypes.c_uint32),
-]
+struct_kfd_criu_bo_bucket.SIZE = 48
+struct_kfd_criu_bo_bucket._fields_ = ['addr', 'size', 'offset', 'restored_offset', 'gpu_id', 'alloc_flags', 'dmabuf_fd', 'pad']
+setattr(struct_kfd_criu_bo_bucket, 'addr', field(0, ctypes.c_uint64))
+setattr(struct_kfd_criu_bo_bucket, 'size', field(8, ctypes.c_uint64))
+setattr(struct_kfd_criu_bo_bucket, 'offset', field(16, ctypes.c_uint64))
+setattr(struct_kfd_criu_bo_bucket, 'restored_offset', field(24, ctypes.c_uint64))
+setattr(struct_kfd_criu_bo_bucket, 'gpu_id', field(32, ctypes.c_uint32))
+setattr(struct_kfd_criu_bo_bucket, 'alloc_flags', field(36, ctypes.c_uint32))
+setattr(struct_kfd_criu_bo_bucket, 'dmabuf_fd', field(40, ctypes.c_uint32))
+setattr(struct_kfd_criu_bo_bucket, 'pad', field(44, ctypes.c_uint32))
 enum_kfd_mmio_remap = CEnum(ctypes.c_uint32)
 KFD_MMIO_REMAP_HDP_MEM_FLUSH_CNTL = enum_kfd_mmio_remap.define('KFD_MMIO_REMAP_HDP_MEM_FLUSH_CNTL', 0)
 KFD_MMIO_REMAP_HDP_REG_FLUSH_CNTL = enum_kfd_mmio_remap.define('KFD_MMIO_REMAP_HDP_REG_FLUSH_CNTL', 4)
@@ -404,23 +399,23 @@ KFD_IOCTL_SVM_ATTR_CLR_FLAGS = enum_kfd_ioctl_svm_attr_type.define('KFD_IOCTL_SV
 KFD_IOCTL_SVM_ATTR_GRANULARITY = enum_kfd_ioctl_svm_attr_type.define('KFD_IOCTL_SVM_ATTR_GRANULARITY', 7)
 
 class struct_kfd_ioctl_svm_attribute(Struct): pass
-struct_kfd_ioctl_svm_attribute._fields_ = [
-  ('type', ctypes.c_uint32),
-  ('value', ctypes.c_uint32),
-]
+struct_kfd_ioctl_svm_attribute.SIZE = 8
+struct_kfd_ioctl_svm_attribute._fields_ = ['type', 'value']
+setattr(struct_kfd_ioctl_svm_attribute, 'type', field(0, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_svm_attribute, 'value', field(4, ctypes.c_uint32))
 class struct_kfd_ioctl_svm_args(Struct): pass
-struct_kfd_ioctl_svm_args._fields_ = [
-  ('start_addr', ctypes.c_uint64),
-  ('size', ctypes.c_uint64),
-  ('op', ctypes.c_uint32),
-  ('nattr', ctypes.c_uint32),
-  ('attrs', (struct_kfd_ioctl_svm_attribute * 0)),
-]
+struct_kfd_ioctl_svm_args.SIZE = 24
+struct_kfd_ioctl_svm_args._fields_ = ['start_addr', 'size', 'op', 'nattr', 'attrs']
+setattr(struct_kfd_ioctl_svm_args, 'start_addr', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_svm_args, 'size', field(8, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_svm_args, 'op', field(16, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_svm_args, 'nattr', field(20, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_svm_args, 'attrs', field(24, Array(struct_kfd_ioctl_svm_attribute, 0)))
 class struct_kfd_ioctl_set_xnack_mode_args(Struct): pass
 __s32 = ctypes.c_int32
-struct_kfd_ioctl_set_xnack_mode_args._fields_ = [
-  ('xnack_enabled', ctypes.c_int32),
-]
+struct_kfd_ioctl_set_xnack_mode_args.SIZE = 4
+struct_kfd_ioctl_set_xnack_mode_args._fields_ = ['xnack_enabled']
+setattr(struct_kfd_ioctl_set_xnack_mode_args, 'xnack_enabled', field(0, ctypes.c_int32))
 enum_kfd_dbg_trap_override_mode = CEnum(ctypes.c_uint32)
 KFD_DBG_TRAP_OVERRIDE_OR = enum_kfd_dbg_trap_override_mode.define('KFD_DBG_TRAP_OVERRIDE_OR', 0)
 KFD_DBG_TRAP_OVERRIDE_REPLACE = enum_kfd_dbg_trap_override_mode.define('KFD_DBG_TRAP_OVERRIDE_REPLACE', 1)
@@ -486,47 +481,47 @@ DEBUG_RUNTIME_STATE_ENABLED_BUSY = enum_kfd_dbg_runtime_state.define('DEBUG_RUNT
 DEBUG_RUNTIME_STATE_ENABLED_ERROR = enum_kfd_dbg_runtime_state.define('DEBUG_RUNTIME_STATE_ENABLED_ERROR', 3)
 
 class struct_kfd_runtime_info(Struct): pass
-struct_kfd_runtime_info._fields_ = [
-  ('r_debug', ctypes.c_uint64),
-  ('runtime_state', ctypes.c_uint32),
-  ('ttmp_setup', ctypes.c_uint32),
-]
+struct_kfd_runtime_info.SIZE = 16
+struct_kfd_runtime_info._fields_ = ['r_debug', 'runtime_state', 'ttmp_setup']
+setattr(struct_kfd_runtime_info, 'r_debug', field(0, ctypes.c_uint64))
+setattr(struct_kfd_runtime_info, 'runtime_state', field(8, ctypes.c_uint32))
+setattr(struct_kfd_runtime_info, 'ttmp_setup', field(12, ctypes.c_uint32))
 class struct_kfd_ioctl_runtime_enable_args(Struct): pass
-struct_kfd_ioctl_runtime_enable_args._fields_ = [
-  ('r_debug', ctypes.c_uint64),
-  ('mode_mask', ctypes.c_uint32),
-  ('capabilities_mask', ctypes.c_uint32),
-]
+struct_kfd_ioctl_runtime_enable_args.SIZE = 16
+struct_kfd_ioctl_runtime_enable_args._fields_ = ['r_debug', 'mode_mask', 'capabilities_mask']
+setattr(struct_kfd_ioctl_runtime_enable_args, 'r_debug', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_runtime_enable_args, 'mode_mask', field(8, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_runtime_enable_args, 'capabilities_mask', field(12, ctypes.c_uint32))
 class struct_kfd_queue_snapshot_entry(Struct): pass
-struct_kfd_queue_snapshot_entry._fields_ = [
-  ('exception_status', ctypes.c_uint64),
-  ('ring_base_address', ctypes.c_uint64),
-  ('write_pointer_address', ctypes.c_uint64),
-  ('read_pointer_address', ctypes.c_uint64),
-  ('ctx_save_restore_address', ctypes.c_uint64),
-  ('queue_id', ctypes.c_uint32),
-  ('gpu_id', ctypes.c_uint32),
-  ('ring_size', ctypes.c_uint32),
-  ('queue_type', ctypes.c_uint32),
-  ('ctx_save_restore_area_size', ctypes.c_uint32),
-  ('reserved', ctypes.c_uint32),
-]
+struct_kfd_queue_snapshot_entry.SIZE = 64
+struct_kfd_queue_snapshot_entry._fields_ = ['exception_status', 'ring_base_address', 'write_pointer_address', 'read_pointer_address', 'ctx_save_restore_address', 'queue_id', 'gpu_id', 'ring_size', 'queue_type', 'ctx_save_restore_area_size', 'reserved']
+setattr(struct_kfd_queue_snapshot_entry, 'exception_status', field(0, ctypes.c_uint64))
+setattr(struct_kfd_queue_snapshot_entry, 'ring_base_address', field(8, ctypes.c_uint64))
+setattr(struct_kfd_queue_snapshot_entry, 'write_pointer_address', field(16, ctypes.c_uint64))
+setattr(struct_kfd_queue_snapshot_entry, 'read_pointer_address', field(24, ctypes.c_uint64))
+setattr(struct_kfd_queue_snapshot_entry, 'ctx_save_restore_address', field(32, ctypes.c_uint64))
+setattr(struct_kfd_queue_snapshot_entry, 'queue_id', field(40, ctypes.c_uint32))
+setattr(struct_kfd_queue_snapshot_entry, 'gpu_id', field(44, ctypes.c_uint32))
+setattr(struct_kfd_queue_snapshot_entry, 'ring_size', field(48, ctypes.c_uint32))
+setattr(struct_kfd_queue_snapshot_entry, 'queue_type', field(52, ctypes.c_uint32))
+setattr(struct_kfd_queue_snapshot_entry, 'ctx_save_restore_area_size', field(56, ctypes.c_uint32))
+setattr(struct_kfd_queue_snapshot_entry, 'reserved', field(60, ctypes.c_uint32))
 class struct_kfd_context_save_area_header(Struct): pass
-class struct_kfd_context_save_area_header_wave_state(Struct): pass
-struct_kfd_context_save_area_header_wave_state._fields_ = [
-  ('control_stack_offset', ctypes.c_uint32),
-  ('control_stack_size', ctypes.c_uint32),
-  ('wave_state_offset', ctypes.c_uint32),
-  ('wave_state_size', ctypes.c_uint32),
-]
-struct_kfd_context_save_area_header._fields_ = [
-  ('wave_state', struct_kfd_context_save_area_header_wave_state),
-  ('debug_offset', ctypes.c_uint32),
-  ('debug_size', ctypes.c_uint32),
-  ('err_payload_addr', ctypes.c_uint64),
-  ('err_event_id', ctypes.c_uint32),
-  ('reserved1', ctypes.c_uint32),
-]
+class _anonstruct0(Struct): pass
+_anonstruct0.SIZE = 16
+_anonstruct0._fields_ = ['control_stack_offset', 'control_stack_size', 'wave_state_offset', 'wave_state_size']
+setattr(_anonstruct0, 'control_stack_offset', field(0, ctypes.c_uint32))
+setattr(_anonstruct0, 'control_stack_size', field(4, ctypes.c_uint32))
+setattr(_anonstruct0, 'wave_state_offset', field(8, ctypes.c_uint32))
+setattr(_anonstruct0, 'wave_state_size', field(12, ctypes.c_uint32))
+struct_kfd_context_save_area_header.SIZE = 40
+struct_kfd_context_save_area_header._fields_ = ['wave_state', 'debug_offset', 'debug_size', 'err_payload_addr', 'err_event_id', 'reserved1']
+setattr(struct_kfd_context_save_area_header, 'wave_state', field(0, _anonstruct0))
+setattr(struct_kfd_context_save_area_header, 'debug_offset', field(16, ctypes.c_uint32))
+setattr(struct_kfd_context_save_area_header, 'debug_size', field(20, ctypes.c_uint32))
+setattr(struct_kfd_context_save_area_header, 'err_payload_addr', field(24, ctypes.c_uint64))
+setattr(struct_kfd_context_save_area_header, 'err_event_id', field(32, ctypes.c_uint32))
+setattr(struct_kfd_context_save_area_header, 'reserved1', field(36, ctypes.c_uint32))
 enum_kfd_dbg_trap_operations = CEnum(ctypes.c_uint32)
 KFD_IOC_DBG_TRAP_ENABLE = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_ENABLE', 0)
 KFD_IOC_DBG_TRAP_DISABLE = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_DISABLE', 1)
@@ -545,117 +540,112 @@ KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT = enum_kfd_dbg_trap_operations.define('KFD_I
 KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT = enum_kfd_dbg_trap_operations.define('KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT', 14)
 
 class struct_kfd_ioctl_dbg_trap_enable_args(Struct): pass
-struct_kfd_ioctl_dbg_trap_enable_args._fields_ = [
-  ('exception_mask', ctypes.c_uint64),
-  ('rinfo_ptr', ctypes.c_uint64),
-  ('rinfo_size', ctypes.c_uint32),
-  ('dbg_fd', ctypes.c_uint32),
-]
+struct_kfd_ioctl_dbg_trap_enable_args.SIZE = 24
+struct_kfd_ioctl_dbg_trap_enable_args._fields_ = ['exception_mask', 'rinfo_ptr', 'rinfo_size', 'dbg_fd']
+setattr(struct_kfd_ioctl_dbg_trap_enable_args, 'exception_mask', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_dbg_trap_enable_args, 'rinfo_ptr', field(8, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_dbg_trap_enable_args, 'rinfo_size', field(16, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_dbg_trap_enable_args, 'dbg_fd', field(20, ctypes.c_uint32))
 class struct_kfd_ioctl_dbg_trap_send_runtime_event_args(Struct): pass
-struct_kfd_ioctl_dbg_trap_send_runtime_event_args._fields_ = [
-  ('exception_mask', ctypes.c_uint64),
-  ('gpu_id', ctypes.c_uint32),
-  ('queue_id', ctypes.c_uint32),
-]
+struct_kfd_ioctl_dbg_trap_send_runtime_event_args.SIZE = 16
+struct_kfd_ioctl_dbg_trap_send_runtime_event_args._fields_ = ['exception_mask', 'gpu_id', 'queue_id']
+setattr(struct_kfd_ioctl_dbg_trap_send_runtime_event_args, 'exception_mask', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_dbg_trap_send_runtime_event_args, 'gpu_id', field(8, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_dbg_trap_send_runtime_event_args, 'queue_id', field(12, ctypes.c_uint32))
 class struct_kfd_ioctl_dbg_trap_set_exceptions_enabled_args(Struct): pass
-struct_kfd_ioctl_dbg_trap_set_exceptions_enabled_args._fields_ = [
-  ('exception_mask', ctypes.c_uint64),
-]
+struct_kfd_ioctl_dbg_trap_set_exceptions_enabled_args.SIZE = 8
+struct_kfd_ioctl_dbg_trap_set_exceptions_enabled_args._fields_ = ['exception_mask']
+setattr(struct_kfd_ioctl_dbg_trap_set_exceptions_enabled_args, 'exception_mask', field(0, ctypes.c_uint64))
 class struct_kfd_ioctl_dbg_trap_set_wave_launch_override_args(Struct): pass
-struct_kfd_ioctl_dbg_trap_set_wave_launch_override_args._fields_ = [
-  ('override_mode', ctypes.c_uint32),
-  ('enable_mask', ctypes.c_uint32),
-  ('support_request_mask', ctypes.c_uint32),
-  ('pad', ctypes.c_uint32),
-]
+struct_kfd_ioctl_dbg_trap_set_wave_launch_override_args.SIZE = 16
+struct_kfd_ioctl_dbg_trap_set_wave_launch_override_args._fields_ = ['override_mode', 'enable_mask', 'support_request_mask', 'pad']
+setattr(struct_kfd_ioctl_dbg_trap_set_wave_launch_override_args, 'override_mode', field(0, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_dbg_trap_set_wave_launch_override_args, 'enable_mask', field(4, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_dbg_trap_set_wave_launch_override_args, 'support_request_mask', field(8, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_dbg_trap_set_wave_launch_override_args, 'pad', field(12, ctypes.c_uint32))
 class struct_kfd_ioctl_dbg_trap_set_wave_launch_mode_args(Struct): pass
-struct_kfd_ioctl_dbg_trap_set_wave_launch_mode_args._fields_ = [
-  ('launch_mode', ctypes.c_uint32),
-  ('pad', ctypes.c_uint32),
-]
+struct_kfd_ioctl_dbg_trap_set_wave_launch_mode_args.SIZE = 8
+struct_kfd_ioctl_dbg_trap_set_wave_launch_mode_args._fields_ = ['launch_mode', 'pad']
+setattr(struct_kfd_ioctl_dbg_trap_set_wave_launch_mode_args, 'launch_mode', field(0, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_dbg_trap_set_wave_launch_mode_args, 'pad', field(4, ctypes.c_uint32))
 class struct_kfd_ioctl_dbg_trap_suspend_queues_args(Struct): pass
-struct_kfd_ioctl_dbg_trap_suspend_queues_args._fields_ = [
-  ('exception_mask', ctypes.c_uint64),
-  ('queue_array_ptr', ctypes.c_uint64),
-  ('num_queues', ctypes.c_uint32),
-  ('grace_period', ctypes.c_uint32),
-]
+struct_kfd_ioctl_dbg_trap_suspend_queues_args.SIZE = 24
+struct_kfd_ioctl_dbg_trap_suspend_queues_args._fields_ = ['exception_mask', 'queue_array_ptr', 'num_queues', 'grace_period']
+setattr(struct_kfd_ioctl_dbg_trap_suspend_queues_args, 'exception_mask', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_dbg_trap_suspend_queues_args, 'queue_array_ptr', field(8, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_dbg_trap_suspend_queues_args, 'num_queues', field(16, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_dbg_trap_suspend_queues_args, 'grace_period', field(20, ctypes.c_uint32))
 class struct_kfd_ioctl_dbg_trap_resume_queues_args(Struct): pass
-struct_kfd_ioctl_dbg_trap_resume_queues_args._fields_ = [
-  ('queue_array_ptr', ctypes.c_uint64),
-  ('num_queues', ctypes.c_uint32),
-  ('pad', ctypes.c_uint32),
-]
+struct_kfd_ioctl_dbg_trap_resume_queues_args.SIZE = 16
+struct_kfd_ioctl_dbg_trap_resume_queues_args._fields_ = ['queue_array_ptr', 'num_queues', 'pad']
+setattr(struct_kfd_ioctl_dbg_trap_resume_queues_args, 'queue_array_ptr', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_dbg_trap_resume_queues_args, 'num_queues', field(8, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_dbg_trap_resume_queues_args, 'pad', field(12, ctypes.c_uint32))
 class struct_kfd_ioctl_dbg_trap_set_node_address_watch_args(Struct): pass
-struct_kfd_ioctl_dbg_trap_set_node_address_watch_args._fields_ = [
-  ('address', ctypes.c_uint64),
-  ('mode', ctypes.c_uint32),
-  ('mask', ctypes.c_uint32),
-  ('gpu_id', ctypes.c_uint32),
-  ('id', ctypes.c_uint32),
-]
+struct_kfd_ioctl_dbg_trap_set_node_address_watch_args.SIZE = 24
+struct_kfd_ioctl_dbg_trap_set_node_address_watch_args._fields_ = ['address', 'mode', 'mask', 'gpu_id', 'id']
+setattr(struct_kfd_ioctl_dbg_trap_set_node_address_watch_args, 'address', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_dbg_trap_set_node_address_watch_args, 'mode', field(8, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_dbg_trap_set_node_address_watch_args, 'mask', field(12, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_dbg_trap_set_node_address_watch_args, 'gpu_id', field(16, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_dbg_trap_set_node_address_watch_args, 'id', field(20, ctypes.c_uint32))
 class struct_kfd_ioctl_dbg_trap_clear_node_address_watch_args(Struct): pass
-struct_kfd_ioctl_dbg_trap_clear_node_address_watch_args._fields_ = [
-  ('gpu_id', ctypes.c_uint32),
-  ('id', ctypes.c_uint32),
-]
+struct_kfd_ioctl_dbg_trap_clear_node_address_watch_args.SIZE = 8
+struct_kfd_ioctl_dbg_trap_clear_node_address_watch_args._fields_ = ['gpu_id', 'id']
+setattr(struct_kfd_ioctl_dbg_trap_clear_node_address_watch_args, 'gpu_id', field(0, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_dbg_trap_clear_node_address_watch_args, 'id', field(4, ctypes.c_uint32))
 class struct_kfd_ioctl_dbg_trap_set_flags_args(Struct): pass
-struct_kfd_ioctl_dbg_trap_set_flags_args._fields_ = [
-  ('flags', ctypes.c_uint32),
-  ('pad', ctypes.c_uint32),
-]
+struct_kfd_ioctl_dbg_trap_set_flags_args.SIZE = 8
+struct_kfd_ioctl_dbg_trap_set_flags_args._fields_ = ['flags', 'pad']
+setattr(struct_kfd_ioctl_dbg_trap_set_flags_args, 'flags', field(0, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_dbg_trap_set_flags_args, 'pad', field(4, ctypes.c_uint32))
 class struct_kfd_ioctl_dbg_trap_query_debug_event_args(Struct): pass
-struct_kfd_ioctl_dbg_trap_query_debug_event_args._fields_ = [
-  ('exception_mask', ctypes.c_uint64),
-  ('gpu_id', ctypes.c_uint32),
-  ('queue_id', ctypes.c_uint32),
-]
+struct_kfd_ioctl_dbg_trap_query_debug_event_args.SIZE = 16
+struct_kfd_ioctl_dbg_trap_query_debug_event_args._fields_ = ['exception_mask', 'gpu_id', 'queue_id']
+setattr(struct_kfd_ioctl_dbg_trap_query_debug_event_args, 'exception_mask', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_dbg_trap_query_debug_event_args, 'gpu_id', field(8, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_dbg_trap_query_debug_event_args, 'queue_id', field(12, ctypes.c_uint32))
 class struct_kfd_ioctl_dbg_trap_query_exception_info_args(Struct): pass
-struct_kfd_ioctl_dbg_trap_query_exception_info_args._fields_ = [
-  ('info_ptr', ctypes.c_uint64),
-  ('info_size', ctypes.c_uint32),
-  ('source_id', ctypes.c_uint32),
-  ('exception_code', ctypes.c_uint32),
-  ('clear_exception', ctypes.c_uint32),
-]
+struct_kfd_ioctl_dbg_trap_query_exception_info_args.SIZE = 24
+struct_kfd_ioctl_dbg_trap_query_exception_info_args._fields_ = ['info_ptr', 'info_size', 'source_id', 'exception_code', 'clear_exception']
+setattr(struct_kfd_ioctl_dbg_trap_query_exception_info_args, 'info_ptr', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_dbg_trap_query_exception_info_args, 'info_size', field(8, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_dbg_trap_query_exception_info_args, 'source_id', field(12, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_dbg_trap_query_exception_info_args, 'exception_code', field(16, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_dbg_trap_query_exception_info_args, 'clear_exception', field(20, ctypes.c_uint32))
 class struct_kfd_ioctl_dbg_trap_queue_snapshot_args(Struct): pass
-struct_kfd_ioctl_dbg_trap_queue_snapshot_args._fields_ = [
-  ('exception_mask', ctypes.c_uint64),
-  ('snapshot_buf_ptr', ctypes.c_uint64),
-  ('num_queues', ctypes.c_uint32),
-  ('entry_size', ctypes.c_uint32),
-]
+struct_kfd_ioctl_dbg_trap_queue_snapshot_args.SIZE = 24
+struct_kfd_ioctl_dbg_trap_queue_snapshot_args._fields_ = ['exception_mask', 'snapshot_buf_ptr', 'num_queues', 'entry_size']
+setattr(struct_kfd_ioctl_dbg_trap_queue_snapshot_args, 'exception_mask', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_dbg_trap_queue_snapshot_args, 'snapshot_buf_ptr', field(8, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_dbg_trap_queue_snapshot_args, 'num_queues', field(16, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_dbg_trap_queue_snapshot_args, 'entry_size', field(20, ctypes.c_uint32))
 class struct_kfd_ioctl_dbg_trap_device_snapshot_args(Struct): pass
-struct_kfd_ioctl_dbg_trap_device_snapshot_args._fields_ = [
-  ('exception_mask', ctypes.c_uint64),
-  ('snapshot_buf_ptr', ctypes.c_uint64),
-  ('num_devices', ctypes.c_uint32),
-  ('entry_size', ctypes.c_uint32),
-]
+struct_kfd_ioctl_dbg_trap_device_snapshot_args.SIZE = 24
+struct_kfd_ioctl_dbg_trap_device_snapshot_args._fields_ = ['exception_mask', 'snapshot_buf_ptr', 'num_devices', 'entry_size']
+setattr(struct_kfd_ioctl_dbg_trap_device_snapshot_args, 'exception_mask', field(0, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_dbg_trap_device_snapshot_args, 'snapshot_buf_ptr', field(8, ctypes.c_uint64))
+setattr(struct_kfd_ioctl_dbg_trap_device_snapshot_args, 'num_devices', field(16, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_dbg_trap_device_snapshot_args, 'entry_size', field(20, ctypes.c_uint32))
 class struct_kfd_ioctl_dbg_trap_args(Struct): pass
-class struct_kfd_ioctl_dbg_trap_args_0(ctypes.Union): pass
-struct_kfd_ioctl_dbg_trap_args_0._fields_ = [
-  ('enable', struct_kfd_ioctl_dbg_trap_enable_args),
-  ('send_runtime_event', struct_kfd_ioctl_dbg_trap_send_runtime_event_args),
-  ('set_exceptions_enabled', struct_kfd_ioctl_dbg_trap_set_exceptions_enabled_args),
-  ('launch_override', struct_kfd_ioctl_dbg_trap_set_wave_launch_override_args),
-  ('launch_mode', struct_kfd_ioctl_dbg_trap_set_wave_launch_mode_args),
-  ('suspend_queues', struct_kfd_ioctl_dbg_trap_suspend_queues_args),
-  ('resume_queues', struct_kfd_ioctl_dbg_trap_resume_queues_args),
-  ('set_node_address_watch', struct_kfd_ioctl_dbg_trap_set_node_address_watch_args),
-  ('clear_node_address_watch', struct_kfd_ioctl_dbg_trap_clear_node_address_watch_args),
-  ('set_flags', struct_kfd_ioctl_dbg_trap_set_flags_args),
-  ('query_debug_event', struct_kfd_ioctl_dbg_trap_query_debug_event_args),
-  ('query_exception_info', struct_kfd_ioctl_dbg_trap_query_exception_info_args),
-  ('queue_snapshot', struct_kfd_ioctl_dbg_trap_queue_snapshot_args),
-  ('device_snapshot', struct_kfd_ioctl_dbg_trap_device_snapshot_args),
-]
-struct_kfd_ioctl_dbg_trap_args._anonymous_ = ['_0']
-struct_kfd_ioctl_dbg_trap_args._fields_ = [
-  ('pid', ctypes.c_uint32),
-  ('op', ctypes.c_uint32),
-  ('_0', struct_kfd_ioctl_dbg_trap_args_0),
-]
+struct_kfd_ioctl_dbg_trap_args.SIZE = 32
+struct_kfd_ioctl_dbg_trap_args._fields_ = ['pid', 'op', 'enable', 'send_runtime_event', 'set_exceptions_enabled', 'launch_override', 'launch_mode', 'suspend_queues', 'resume_queues', 'set_node_address_watch', 'clear_node_address_watch', 'set_flags', 'query_debug_event', 'query_exception_info', 'queue_snapshot', 'device_snapshot']
+setattr(struct_kfd_ioctl_dbg_trap_args, 'pid', field(0, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_dbg_trap_args, 'op', field(4, ctypes.c_uint32))
+setattr(struct_kfd_ioctl_dbg_trap_args, 'enable', field(8, struct_kfd_ioctl_dbg_trap_enable_args))
+setattr(struct_kfd_ioctl_dbg_trap_args, 'send_runtime_event', field(8, struct_kfd_ioctl_dbg_trap_send_runtime_event_args))
+setattr(struct_kfd_ioctl_dbg_trap_args, 'set_exceptions_enabled', field(8, struct_kfd_ioctl_dbg_trap_set_exceptions_enabled_args))
+setattr(struct_kfd_ioctl_dbg_trap_args, 'launch_override', field(8, struct_kfd_ioctl_dbg_trap_set_wave_launch_override_args))
+setattr(struct_kfd_ioctl_dbg_trap_args, 'launch_mode', field(8, struct_kfd_ioctl_dbg_trap_set_wave_launch_mode_args))
+setattr(struct_kfd_ioctl_dbg_trap_args, 'suspend_queues', field(8, struct_kfd_ioctl_dbg_trap_suspend_queues_args))
+setattr(struct_kfd_ioctl_dbg_trap_args, 'resume_queues', field(8, struct_kfd_ioctl_dbg_trap_resume_queues_args))
+setattr(struct_kfd_ioctl_dbg_trap_args, 'set_node_address_watch', field(8, struct_kfd_ioctl_dbg_trap_set_node_address_watch_args))
+setattr(struct_kfd_ioctl_dbg_trap_args, 'clear_node_address_watch', field(8, struct_kfd_ioctl_dbg_trap_clear_node_address_watch_args))
+setattr(struct_kfd_ioctl_dbg_trap_args, 'set_flags', field(8, struct_kfd_ioctl_dbg_trap_set_flags_args))
+setattr(struct_kfd_ioctl_dbg_trap_args, 'query_debug_event', field(8, struct_kfd_ioctl_dbg_trap_query_debug_event_args))
+setattr(struct_kfd_ioctl_dbg_trap_args, 'query_exception_info', field(8, struct_kfd_ioctl_dbg_trap_query_exception_info_args))
+setattr(struct_kfd_ioctl_dbg_trap_args, 'queue_snapshot', field(8, struct_kfd_ioctl_dbg_trap_queue_snapshot_args))
+setattr(struct_kfd_ioctl_dbg_trap_args, 'device_snapshot', field(8, struct_kfd_ioctl_dbg_trap_device_snapshot_args))
 KFD_IOCTL_MAJOR_VERSION = 1
 KFD_IOCTL_MINOR_VERSION = 14
 KFD_IOC_QUEUE_TYPE_COMPUTE = 0x0

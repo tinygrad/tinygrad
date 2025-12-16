@@ -1,6 +1,6 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support.c import Array, DLL, Pointer, Struct, Union, field, CEnum, _IO, _IOW, _IOR, _IOWR
 import os
 dll = DLL('comgr', [os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libamd_comgr.so', 'amd_comgr'])
 amd_comgr_status_s = CEnum(ctypes.c_uint32)
@@ -20,11 +20,11 @@ AMD_COMGR_LANGUAGE_LLVM_IR = amd_comgr_language_s.define('AMD_COMGR_LANGUAGE_LLV
 AMD_COMGR_LANGUAGE_LAST = amd_comgr_language_s.define('AMD_COMGR_LANGUAGE_LAST', 5)
 
 amd_comgr_language_t = amd_comgr_language_s
-try: (amd_comgr_status_string:=dll.amd_comgr_status_string).restype, amd_comgr_status_string.argtypes = amd_comgr_status_t, [amd_comgr_status_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
+try: (amd_comgr_status_string:=dll.amd_comgr_status_string).restype, amd_comgr_status_string.argtypes = amd_comgr_status_t, [amd_comgr_status_t, Pointer(Pointer(ctypes.c_char))]
 except AttributeError: pass
 
 size_t = ctypes.c_uint64
-try: (amd_comgr_get_version:=dll.amd_comgr_get_version).restype, amd_comgr_get_version.argtypes = None, [ctypes.POINTER(size_t), ctypes.POINTER(size_t)]
+try: (amd_comgr_get_version:=dll.amd_comgr_get_version).restype, amd_comgr_get_version.argtypes = None, [Pointer(size_t), Pointer(size_t)]
 except AttributeError: pass
 
 amd_comgr_data_kind_s = CEnum(ctypes.c_uint32)
@@ -48,77 +48,77 @@ AMD_COMGR_DATA_KIND_LAST = amd_comgr_data_kind_s.define('AMD_COMGR_DATA_KIND_LAS
 amd_comgr_data_kind_t = amd_comgr_data_kind_s
 class amd_comgr_data_s(Struct): pass
 uint64_t = ctypes.c_uint64
-amd_comgr_data_s._fields_ = [
-  ('handle', uint64_t),
-]
+amd_comgr_data_s.SIZE = 8
+amd_comgr_data_s._fields_ = ['handle']
+setattr(amd_comgr_data_s, 'handle', field(0, uint64_t))
 amd_comgr_data_t = amd_comgr_data_s
 class amd_comgr_data_set_s(Struct): pass
-amd_comgr_data_set_s._fields_ = [
-  ('handle', uint64_t),
-]
+amd_comgr_data_set_s.SIZE = 8
+amd_comgr_data_set_s._fields_ = ['handle']
+setattr(amd_comgr_data_set_s, 'handle', field(0, uint64_t))
 amd_comgr_data_set_t = amd_comgr_data_set_s
 class amd_comgr_action_info_s(Struct): pass
-amd_comgr_action_info_s._fields_ = [
-  ('handle', uint64_t),
-]
+amd_comgr_action_info_s.SIZE = 8
+amd_comgr_action_info_s._fields_ = ['handle']
+setattr(amd_comgr_action_info_s, 'handle', field(0, uint64_t))
 amd_comgr_action_info_t = amd_comgr_action_info_s
 class amd_comgr_metadata_node_s(Struct): pass
-amd_comgr_metadata_node_s._fields_ = [
-  ('handle', uint64_t),
-]
+amd_comgr_metadata_node_s.SIZE = 8
+amd_comgr_metadata_node_s._fields_ = ['handle']
+setattr(amd_comgr_metadata_node_s, 'handle', field(0, uint64_t))
 amd_comgr_metadata_node_t = amd_comgr_metadata_node_s
 class amd_comgr_symbol_s(Struct): pass
-amd_comgr_symbol_s._fields_ = [
-  ('handle', uint64_t),
-]
+amd_comgr_symbol_s.SIZE = 8
+amd_comgr_symbol_s._fields_ = ['handle']
+setattr(amd_comgr_symbol_s, 'handle', field(0, uint64_t))
 amd_comgr_symbol_t = amd_comgr_symbol_s
 class amd_comgr_disassembly_info_s(Struct): pass
-amd_comgr_disassembly_info_s._fields_ = [
-  ('handle', uint64_t),
-]
+amd_comgr_disassembly_info_s.SIZE = 8
+amd_comgr_disassembly_info_s._fields_ = ['handle']
+setattr(amd_comgr_disassembly_info_s, 'handle', field(0, uint64_t))
 amd_comgr_disassembly_info_t = amd_comgr_disassembly_info_s
 class amd_comgr_symbolizer_info_s(Struct): pass
-amd_comgr_symbolizer_info_s._fields_ = [
-  ('handle', uint64_t),
-]
+amd_comgr_symbolizer_info_s.SIZE = 8
+amd_comgr_symbolizer_info_s._fields_ = ['handle']
+setattr(amd_comgr_symbolizer_info_s, 'handle', field(0, uint64_t))
 amd_comgr_symbolizer_info_t = amd_comgr_symbolizer_info_s
-try: (amd_comgr_get_isa_count:=dll.amd_comgr_get_isa_count).restype, amd_comgr_get_isa_count.argtypes = amd_comgr_status_t, [ctypes.POINTER(size_t)]
+try: (amd_comgr_get_isa_count:=dll.amd_comgr_get_isa_count).restype, amd_comgr_get_isa_count.argtypes = amd_comgr_status_t, [Pointer(size_t)]
 except AttributeError: pass
 
-try: (amd_comgr_get_isa_name:=dll.amd_comgr_get_isa_name).restype, amd_comgr_get_isa_name.argtypes = amd_comgr_status_t, [size_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
+try: (amd_comgr_get_isa_name:=dll.amd_comgr_get_isa_name).restype, amd_comgr_get_isa_name.argtypes = amd_comgr_status_t, [size_t, Pointer(Pointer(ctypes.c_char))]
 except AttributeError: pass
 
-try: (amd_comgr_get_isa_metadata:=dll.amd_comgr_get_isa_metadata).restype, amd_comgr_get_isa_metadata.argtypes = amd_comgr_status_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(amd_comgr_metadata_node_t)]
+try: (amd_comgr_get_isa_metadata:=dll.amd_comgr_get_isa_metadata).restype, amd_comgr_get_isa_metadata.argtypes = amd_comgr_status_t, [Pointer(ctypes.c_char), Pointer(amd_comgr_metadata_node_t)]
 except AttributeError: pass
 
-try: (amd_comgr_create_data:=dll.amd_comgr_create_data).restype, amd_comgr_create_data.argtypes = amd_comgr_status_t, [amd_comgr_data_kind_t, ctypes.POINTER(amd_comgr_data_t)]
+try: (amd_comgr_create_data:=dll.amd_comgr_create_data).restype, amd_comgr_create_data.argtypes = amd_comgr_status_t, [amd_comgr_data_kind_t, Pointer(amd_comgr_data_t)]
 except AttributeError: pass
 
 try: (amd_comgr_release_data:=dll.amd_comgr_release_data).restype, amd_comgr_release_data.argtypes = amd_comgr_status_t, [amd_comgr_data_t]
 except AttributeError: pass
 
-try: (amd_comgr_get_data_kind:=dll.amd_comgr_get_data_kind).restype, amd_comgr_get_data_kind.argtypes = amd_comgr_status_t, [amd_comgr_data_t, ctypes.POINTER(amd_comgr_data_kind_t)]
+try: (amd_comgr_get_data_kind:=dll.amd_comgr_get_data_kind).restype, amd_comgr_get_data_kind.argtypes = amd_comgr_status_t, [amd_comgr_data_t, Pointer(amd_comgr_data_kind_t)]
 except AttributeError: pass
 
-try: (amd_comgr_set_data:=dll.amd_comgr_set_data).restype, amd_comgr_set_data.argtypes = amd_comgr_status_t, [amd_comgr_data_t, size_t, ctypes.POINTER(ctypes.c_char)]
+try: (amd_comgr_set_data:=dll.amd_comgr_set_data).restype, amd_comgr_set_data.argtypes = amd_comgr_status_t, [amd_comgr_data_t, size_t, Pointer(ctypes.c_char)]
 except AttributeError: pass
 
 try: (amd_comgr_set_data_from_file_slice:=dll.amd_comgr_set_data_from_file_slice).restype, amd_comgr_set_data_from_file_slice.argtypes = amd_comgr_status_t, [amd_comgr_data_t, ctypes.c_int32, uint64_t, uint64_t]
 except AttributeError: pass
 
-try: (amd_comgr_set_data_name:=dll.amd_comgr_set_data_name).restype, amd_comgr_set_data_name.argtypes = amd_comgr_status_t, [amd_comgr_data_t, ctypes.POINTER(ctypes.c_char)]
+try: (amd_comgr_set_data_name:=dll.amd_comgr_set_data_name).restype, amd_comgr_set_data_name.argtypes = amd_comgr_status_t, [amd_comgr_data_t, Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (amd_comgr_get_data:=dll.amd_comgr_get_data).restype, amd_comgr_get_data.argtypes = amd_comgr_status_t, [amd_comgr_data_t, ctypes.POINTER(size_t), ctypes.POINTER(ctypes.c_char)]
+try: (amd_comgr_get_data:=dll.amd_comgr_get_data).restype, amd_comgr_get_data.argtypes = amd_comgr_status_t, [amd_comgr_data_t, Pointer(size_t), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (amd_comgr_get_data_name:=dll.amd_comgr_get_data_name).restype, amd_comgr_get_data_name.argtypes = amd_comgr_status_t, [amd_comgr_data_t, ctypes.POINTER(size_t), ctypes.POINTER(ctypes.c_char)]
+try: (amd_comgr_get_data_name:=dll.amd_comgr_get_data_name).restype, amd_comgr_get_data_name.argtypes = amd_comgr_status_t, [amd_comgr_data_t, Pointer(size_t), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (amd_comgr_get_data_isa_name:=dll.amd_comgr_get_data_isa_name).restype, amd_comgr_get_data_isa_name.argtypes = amd_comgr_status_t, [amd_comgr_data_t, ctypes.POINTER(size_t), ctypes.POINTER(ctypes.c_char)]
+try: (amd_comgr_get_data_isa_name:=dll.amd_comgr_get_data_isa_name).restype, amd_comgr_get_data_isa_name.argtypes = amd_comgr_status_t, [amd_comgr_data_t, Pointer(size_t), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (amd_comgr_create_symbolizer_info:=dll.amd_comgr_create_symbolizer_info).restype, amd_comgr_create_symbolizer_info.argtypes = amd_comgr_status_t, [amd_comgr_data_t, ctypes.CFUNCTYPE(None, ctypes.POINTER(ctypes.c_char), ctypes.c_void_p), ctypes.POINTER(amd_comgr_symbolizer_info_t)]
+try: (amd_comgr_create_symbolizer_info:=dll.amd_comgr_create_symbolizer_info).restype, amd_comgr_create_symbolizer_info.argtypes = amd_comgr_status_t, [amd_comgr_data_t, ctypes.CFUNCTYPE(None, Pointer(ctypes.c_char), ctypes.c_void_p), Pointer(amd_comgr_symbolizer_info_t)]
 except AttributeError: pass
 
 try: (amd_comgr_destroy_symbolizer_info:=dll.amd_comgr_destroy_symbolizer_info).restype, amd_comgr_destroy_symbolizer_info.argtypes = amd_comgr_status_t, [amd_comgr_symbolizer_info_t]
@@ -127,13 +127,13 @@ except AttributeError: pass
 try: (amd_comgr_symbolize:=dll.amd_comgr_symbolize).restype, amd_comgr_symbolize.argtypes = amd_comgr_status_t, [amd_comgr_symbolizer_info_t, uint64_t, ctypes.c_bool, ctypes.c_void_p]
 except AttributeError: pass
 
-try: (amd_comgr_get_data_metadata:=dll.amd_comgr_get_data_metadata).restype, amd_comgr_get_data_metadata.argtypes = amd_comgr_status_t, [amd_comgr_data_t, ctypes.POINTER(amd_comgr_metadata_node_t)]
+try: (amd_comgr_get_data_metadata:=dll.amd_comgr_get_data_metadata).restype, amd_comgr_get_data_metadata.argtypes = amd_comgr_status_t, [amd_comgr_data_t, Pointer(amd_comgr_metadata_node_t)]
 except AttributeError: pass
 
 try: (amd_comgr_destroy_metadata:=dll.amd_comgr_destroy_metadata).restype, amd_comgr_destroy_metadata.argtypes = amd_comgr_status_t, [amd_comgr_metadata_node_t]
 except AttributeError: pass
 
-try: (amd_comgr_create_data_set:=dll.amd_comgr_create_data_set).restype, amd_comgr_create_data_set.argtypes = amd_comgr_status_t, [ctypes.POINTER(amd_comgr_data_set_t)]
+try: (amd_comgr_create_data_set:=dll.amd_comgr_create_data_set).restype, amd_comgr_create_data_set.argtypes = amd_comgr_status_t, [Pointer(amd_comgr_data_set_t)]
 except AttributeError: pass
 
 try: (amd_comgr_destroy_data_set:=dll.amd_comgr_destroy_data_set).restype, amd_comgr_destroy_data_set.argtypes = amd_comgr_status_t, [amd_comgr_data_set_t]
@@ -145,64 +145,64 @@ except AttributeError: pass
 try: (amd_comgr_data_set_remove:=dll.amd_comgr_data_set_remove).restype, amd_comgr_data_set_remove.argtypes = amd_comgr_status_t, [amd_comgr_data_set_t, amd_comgr_data_kind_t]
 except AttributeError: pass
 
-try: (amd_comgr_action_data_count:=dll.amd_comgr_action_data_count).restype, amd_comgr_action_data_count.argtypes = amd_comgr_status_t, [amd_comgr_data_set_t, amd_comgr_data_kind_t, ctypes.POINTER(size_t)]
+try: (amd_comgr_action_data_count:=dll.amd_comgr_action_data_count).restype, amd_comgr_action_data_count.argtypes = amd_comgr_status_t, [amd_comgr_data_set_t, amd_comgr_data_kind_t, Pointer(size_t)]
 except AttributeError: pass
 
-try: (amd_comgr_action_data_get_data:=dll.amd_comgr_action_data_get_data).restype, amd_comgr_action_data_get_data.argtypes = amd_comgr_status_t, [amd_comgr_data_set_t, amd_comgr_data_kind_t, size_t, ctypes.POINTER(amd_comgr_data_t)]
+try: (amd_comgr_action_data_get_data:=dll.amd_comgr_action_data_get_data).restype, amd_comgr_action_data_get_data.argtypes = amd_comgr_status_t, [amd_comgr_data_set_t, amd_comgr_data_kind_t, size_t, Pointer(amd_comgr_data_t)]
 except AttributeError: pass
 
-try: (amd_comgr_create_action_info:=dll.amd_comgr_create_action_info).restype, amd_comgr_create_action_info.argtypes = amd_comgr_status_t, [ctypes.POINTER(amd_comgr_action_info_t)]
+try: (amd_comgr_create_action_info:=dll.amd_comgr_create_action_info).restype, amd_comgr_create_action_info.argtypes = amd_comgr_status_t, [Pointer(amd_comgr_action_info_t)]
 except AttributeError: pass
 
 try: (amd_comgr_destroy_action_info:=dll.amd_comgr_destroy_action_info).restype, amd_comgr_destroy_action_info.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t]
 except AttributeError: pass
 
-try: (amd_comgr_action_info_set_isa_name:=dll.amd_comgr_action_info_set_isa_name).restype, amd_comgr_action_info_set_isa_name.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, ctypes.POINTER(ctypes.c_char)]
+try: (amd_comgr_action_info_set_isa_name:=dll.amd_comgr_action_info_set_isa_name).restype, amd_comgr_action_info_set_isa_name.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (amd_comgr_action_info_get_isa_name:=dll.amd_comgr_action_info_get_isa_name).restype, amd_comgr_action_info_get_isa_name.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, ctypes.POINTER(size_t), ctypes.POINTER(ctypes.c_char)]
+try: (amd_comgr_action_info_get_isa_name:=dll.amd_comgr_action_info_get_isa_name).restype, amd_comgr_action_info_get_isa_name.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, Pointer(size_t), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
 try: (amd_comgr_action_info_set_language:=dll.amd_comgr_action_info_set_language).restype, amd_comgr_action_info_set_language.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, amd_comgr_language_t]
 except AttributeError: pass
 
-try: (amd_comgr_action_info_get_language:=dll.amd_comgr_action_info_get_language).restype, amd_comgr_action_info_get_language.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, ctypes.POINTER(amd_comgr_language_t)]
+try: (amd_comgr_action_info_get_language:=dll.amd_comgr_action_info_get_language).restype, amd_comgr_action_info_get_language.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, Pointer(amd_comgr_language_t)]
 except AttributeError: pass
 
-try: (amd_comgr_action_info_set_options:=dll.amd_comgr_action_info_set_options).restype, amd_comgr_action_info_set_options.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, ctypes.POINTER(ctypes.c_char)]
+try: (amd_comgr_action_info_set_options:=dll.amd_comgr_action_info_set_options).restype, amd_comgr_action_info_set_options.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (amd_comgr_action_info_get_options:=dll.amd_comgr_action_info_get_options).restype, amd_comgr_action_info_get_options.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, ctypes.POINTER(size_t), ctypes.POINTER(ctypes.c_char)]
+try: (amd_comgr_action_info_get_options:=dll.amd_comgr_action_info_get_options).restype, amd_comgr_action_info_get_options.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, Pointer(size_t), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (amd_comgr_action_info_set_option_list:=dll.amd_comgr_action_info_set_option_list).restype, amd_comgr_action_info_set_option_list.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, (ctypes.POINTER(ctypes.c_char) * 0), size_t]
+try: (amd_comgr_action_info_set_option_list:=dll.amd_comgr_action_info_set_option_list).restype, amd_comgr_action_info_set_option_list.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, Array(Pointer(ctypes.c_char), 0), size_t]
 except AttributeError: pass
 
-try: (amd_comgr_action_info_get_option_list_count:=dll.amd_comgr_action_info_get_option_list_count).restype, amd_comgr_action_info_get_option_list_count.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, ctypes.POINTER(size_t)]
+try: (amd_comgr_action_info_get_option_list_count:=dll.amd_comgr_action_info_get_option_list_count).restype, amd_comgr_action_info_get_option_list_count.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, Pointer(size_t)]
 except AttributeError: pass
 
-try: (amd_comgr_action_info_get_option_list_item:=dll.amd_comgr_action_info_get_option_list_item).restype, amd_comgr_action_info_get_option_list_item.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, size_t, ctypes.POINTER(size_t), ctypes.POINTER(ctypes.c_char)]
+try: (amd_comgr_action_info_get_option_list_item:=dll.amd_comgr_action_info_get_option_list_item).restype, amd_comgr_action_info_get_option_list_item.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, size_t, Pointer(size_t), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (amd_comgr_action_info_set_bundle_entry_ids:=dll.amd_comgr_action_info_set_bundle_entry_ids).restype, amd_comgr_action_info_set_bundle_entry_ids.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, (ctypes.POINTER(ctypes.c_char) * 0), size_t]
+try: (amd_comgr_action_info_set_bundle_entry_ids:=dll.amd_comgr_action_info_set_bundle_entry_ids).restype, amd_comgr_action_info_set_bundle_entry_ids.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, Array(Pointer(ctypes.c_char), 0), size_t]
 except AttributeError: pass
 
-try: (amd_comgr_action_info_get_bundle_entry_id_count:=dll.amd_comgr_action_info_get_bundle_entry_id_count).restype, amd_comgr_action_info_get_bundle_entry_id_count.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, ctypes.POINTER(size_t)]
+try: (amd_comgr_action_info_get_bundle_entry_id_count:=dll.amd_comgr_action_info_get_bundle_entry_id_count).restype, amd_comgr_action_info_get_bundle_entry_id_count.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, Pointer(size_t)]
 except AttributeError: pass
 
-try: (amd_comgr_action_info_get_bundle_entry_id:=dll.amd_comgr_action_info_get_bundle_entry_id).restype, amd_comgr_action_info_get_bundle_entry_id.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, size_t, ctypes.POINTER(size_t), ctypes.POINTER(ctypes.c_char)]
+try: (amd_comgr_action_info_get_bundle_entry_id:=dll.amd_comgr_action_info_get_bundle_entry_id).restype, amd_comgr_action_info_get_bundle_entry_id.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, size_t, Pointer(size_t), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (amd_comgr_action_info_set_working_directory_path:=dll.amd_comgr_action_info_set_working_directory_path).restype, amd_comgr_action_info_set_working_directory_path.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, ctypes.POINTER(ctypes.c_char)]
+try: (amd_comgr_action_info_set_working_directory_path:=dll.amd_comgr_action_info_set_working_directory_path).restype, amd_comgr_action_info_set_working_directory_path.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (amd_comgr_action_info_get_working_directory_path:=dll.amd_comgr_action_info_get_working_directory_path).restype, amd_comgr_action_info_get_working_directory_path.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, ctypes.POINTER(size_t), ctypes.POINTER(ctypes.c_char)]
+try: (amd_comgr_action_info_get_working_directory_path:=dll.amd_comgr_action_info_get_working_directory_path).restype, amd_comgr_action_info_get_working_directory_path.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, Pointer(size_t), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
 try: (amd_comgr_action_info_set_logging:=dll.amd_comgr_action_info_set_logging).restype, amd_comgr_action_info_set_logging.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, ctypes.c_bool]
 except AttributeError: pass
 
-try: (amd_comgr_action_info_get_logging:=dll.amd_comgr_action_info_get_logging).restype, amd_comgr_action_info_get_logging.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, ctypes.POINTER(ctypes.c_bool)]
+try: (amd_comgr_action_info_get_logging:=dll.amd_comgr_action_info_get_logging).restype, amd_comgr_action_info_get_logging.argtypes = amd_comgr_status_t, [amd_comgr_action_info_t, Pointer(ctypes.c_bool)]
 except AttributeError: pass
 
 amd_comgr_action_kind_s = CEnum(ctypes.c_uint32)
@@ -239,31 +239,31 @@ AMD_COMGR_METADATA_KIND_LIST = amd_comgr_metadata_kind_s.define('AMD_COMGR_METAD
 AMD_COMGR_METADATA_KIND_LAST = amd_comgr_metadata_kind_s.define('AMD_COMGR_METADATA_KIND_LAST', 3)
 
 amd_comgr_metadata_kind_t = amd_comgr_metadata_kind_s
-try: (amd_comgr_get_metadata_kind:=dll.amd_comgr_get_metadata_kind).restype, amd_comgr_get_metadata_kind.argtypes = amd_comgr_status_t, [amd_comgr_metadata_node_t, ctypes.POINTER(amd_comgr_metadata_kind_t)]
+try: (amd_comgr_get_metadata_kind:=dll.amd_comgr_get_metadata_kind).restype, amd_comgr_get_metadata_kind.argtypes = amd_comgr_status_t, [amd_comgr_metadata_node_t, Pointer(amd_comgr_metadata_kind_t)]
 except AttributeError: pass
 
-try: (amd_comgr_get_metadata_string:=dll.amd_comgr_get_metadata_string).restype, amd_comgr_get_metadata_string.argtypes = amd_comgr_status_t, [amd_comgr_metadata_node_t, ctypes.POINTER(size_t), ctypes.POINTER(ctypes.c_char)]
+try: (amd_comgr_get_metadata_string:=dll.amd_comgr_get_metadata_string).restype, amd_comgr_get_metadata_string.argtypes = amd_comgr_status_t, [amd_comgr_metadata_node_t, Pointer(size_t), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (amd_comgr_get_metadata_map_size:=dll.amd_comgr_get_metadata_map_size).restype, amd_comgr_get_metadata_map_size.argtypes = amd_comgr_status_t, [amd_comgr_metadata_node_t, ctypes.POINTER(size_t)]
+try: (amd_comgr_get_metadata_map_size:=dll.amd_comgr_get_metadata_map_size).restype, amd_comgr_get_metadata_map_size.argtypes = amd_comgr_status_t, [amd_comgr_metadata_node_t, Pointer(size_t)]
 except AttributeError: pass
 
 try: (amd_comgr_iterate_map_metadata:=dll.amd_comgr_iterate_map_metadata).restype, amd_comgr_iterate_map_metadata.argtypes = amd_comgr_status_t, [amd_comgr_metadata_node_t, ctypes.CFUNCTYPE(amd_comgr_status_t, amd_comgr_metadata_node_t, amd_comgr_metadata_node_t, ctypes.c_void_p), ctypes.c_void_p]
 except AttributeError: pass
 
-try: (amd_comgr_metadata_lookup:=dll.amd_comgr_metadata_lookup).restype, amd_comgr_metadata_lookup.argtypes = amd_comgr_status_t, [amd_comgr_metadata_node_t, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(amd_comgr_metadata_node_t)]
+try: (amd_comgr_metadata_lookup:=dll.amd_comgr_metadata_lookup).restype, amd_comgr_metadata_lookup.argtypes = amd_comgr_status_t, [amd_comgr_metadata_node_t, Pointer(ctypes.c_char), Pointer(amd_comgr_metadata_node_t)]
 except AttributeError: pass
 
-try: (amd_comgr_get_metadata_list_size:=dll.amd_comgr_get_metadata_list_size).restype, amd_comgr_get_metadata_list_size.argtypes = amd_comgr_status_t, [amd_comgr_metadata_node_t, ctypes.POINTER(size_t)]
+try: (amd_comgr_get_metadata_list_size:=dll.amd_comgr_get_metadata_list_size).restype, amd_comgr_get_metadata_list_size.argtypes = amd_comgr_status_t, [amd_comgr_metadata_node_t, Pointer(size_t)]
 except AttributeError: pass
 
-try: (amd_comgr_index_list_metadata:=dll.amd_comgr_index_list_metadata).restype, amd_comgr_index_list_metadata.argtypes = amd_comgr_status_t, [amd_comgr_metadata_node_t, size_t, ctypes.POINTER(amd_comgr_metadata_node_t)]
+try: (amd_comgr_index_list_metadata:=dll.amd_comgr_index_list_metadata).restype, amd_comgr_index_list_metadata.argtypes = amd_comgr_status_t, [amd_comgr_metadata_node_t, size_t, Pointer(amd_comgr_metadata_node_t)]
 except AttributeError: pass
 
 try: (amd_comgr_iterate_symbols:=dll.amd_comgr_iterate_symbols).restype, amd_comgr_iterate_symbols.argtypes = amd_comgr_status_t, [amd_comgr_data_t, ctypes.CFUNCTYPE(amd_comgr_status_t, amd_comgr_symbol_t, ctypes.c_void_p), ctypes.c_void_p]
 except AttributeError: pass
 
-try: (amd_comgr_symbol_lookup:=dll.amd_comgr_symbol_lookup).restype, amd_comgr_symbol_lookup.argtypes = amd_comgr_status_t, [amd_comgr_data_t, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(amd_comgr_symbol_t)]
+try: (amd_comgr_symbol_lookup:=dll.amd_comgr_symbol_lookup).restype, amd_comgr_symbol_lookup.argtypes = amd_comgr_status_t, [amd_comgr_data_t, Pointer(ctypes.c_char), Pointer(amd_comgr_symbol_t)]
 except AttributeError: pass
 
 amd_comgr_symbol_type_s = CEnum(ctypes.c_int32)
@@ -290,41 +290,41 @@ amd_comgr_symbol_info_t = amd_comgr_symbol_info_s
 try: (amd_comgr_symbol_get_info:=dll.amd_comgr_symbol_get_info).restype, amd_comgr_symbol_get_info.argtypes = amd_comgr_status_t, [amd_comgr_symbol_t, amd_comgr_symbol_info_t, ctypes.c_void_p]
 except AttributeError: pass
 
-try: (amd_comgr_create_disassembly_info:=dll.amd_comgr_create_disassembly_info).restype, amd_comgr_create_disassembly_info.argtypes = amd_comgr_status_t, [ctypes.POINTER(ctypes.c_char), ctypes.CFUNCTYPE(uint64_t, uint64_t, ctypes.POINTER(ctypes.c_char), uint64_t, ctypes.c_void_p), ctypes.CFUNCTYPE(None, ctypes.POINTER(ctypes.c_char), ctypes.c_void_p), ctypes.CFUNCTYPE(None, uint64_t, ctypes.c_void_p), ctypes.POINTER(amd_comgr_disassembly_info_t)]
+try: (amd_comgr_create_disassembly_info:=dll.amd_comgr_create_disassembly_info).restype, amd_comgr_create_disassembly_info.argtypes = amd_comgr_status_t, [Pointer(ctypes.c_char), ctypes.CFUNCTYPE(uint64_t, uint64_t, Pointer(ctypes.c_char), uint64_t, ctypes.c_void_p), ctypes.CFUNCTYPE(None, Pointer(ctypes.c_char), ctypes.c_void_p), ctypes.CFUNCTYPE(None, uint64_t, ctypes.c_void_p), Pointer(amd_comgr_disassembly_info_t)]
 except AttributeError: pass
 
 try: (amd_comgr_destroy_disassembly_info:=dll.amd_comgr_destroy_disassembly_info).restype, amd_comgr_destroy_disassembly_info.argtypes = amd_comgr_status_t, [amd_comgr_disassembly_info_t]
 except AttributeError: pass
 
-try: (amd_comgr_disassemble_instruction:=dll.amd_comgr_disassemble_instruction).restype, amd_comgr_disassemble_instruction.argtypes = amd_comgr_status_t, [amd_comgr_disassembly_info_t, uint64_t, ctypes.c_void_p, ctypes.POINTER(uint64_t)]
+try: (amd_comgr_disassemble_instruction:=dll.amd_comgr_disassemble_instruction).restype, amd_comgr_disassemble_instruction.argtypes = amd_comgr_status_t, [amd_comgr_disassembly_info_t, uint64_t, ctypes.c_void_p, Pointer(uint64_t)]
 except AttributeError: pass
 
-try: (amd_comgr_demangle_symbol_name:=dll.amd_comgr_demangle_symbol_name).restype, amd_comgr_demangle_symbol_name.argtypes = amd_comgr_status_t, [amd_comgr_data_t, ctypes.POINTER(amd_comgr_data_t)]
+try: (amd_comgr_demangle_symbol_name:=dll.amd_comgr_demangle_symbol_name).restype, amd_comgr_demangle_symbol_name.argtypes = amd_comgr_status_t, [amd_comgr_data_t, Pointer(amd_comgr_data_t)]
 except AttributeError: pass
 
-try: (amd_comgr_populate_mangled_names:=dll.amd_comgr_populate_mangled_names).restype, amd_comgr_populate_mangled_names.argtypes = amd_comgr_status_t, [amd_comgr_data_t, ctypes.POINTER(size_t)]
+try: (amd_comgr_populate_mangled_names:=dll.amd_comgr_populate_mangled_names).restype, amd_comgr_populate_mangled_names.argtypes = amd_comgr_status_t, [amd_comgr_data_t, Pointer(size_t)]
 except AttributeError: pass
 
-try: (amd_comgr_get_mangled_name:=dll.amd_comgr_get_mangled_name).restype, amd_comgr_get_mangled_name.argtypes = amd_comgr_status_t, [amd_comgr_data_t, size_t, ctypes.POINTER(size_t), ctypes.POINTER(ctypes.c_char)]
+try: (amd_comgr_get_mangled_name:=dll.amd_comgr_get_mangled_name).restype, amd_comgr_get_mangled_name.argtypes = amd_comgr_status_t, [amd_comgr_data_t, size_t, Pointer(size_t), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (amd_comgr_populate_name_expression_map:=dll.amd_comgr_populate_name_expression_map).restype, amd_comgr_populate_name_expression_map.argtypes = amd_comgr_status_t, [amd_comgr_data_t, ctypes.POINTER(size_t)]
+try: (amd_comgr_populate_name_expression_map:=dll.amd_comgr_populate_name_expression_map).restype, amd_comgr_populate_name_expression_map.argtypes = amd_comgr_status_t, [amd_comgr_data_t, Pointer(size_t)]
 except AttributeError: pass
 
-try: (amd_comgr_map_name_expression_to_symbol_name:=dll.amd_comgr_map_name_expression_to_symbol_name).restype, amd_comgr_map_name_expression_to_symbol_name.argtypes = amd_comgr_status_t, [amd_comgr_data_t, ctypes.POINTER(size_t), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
+try: (amd_comgr_map_name_expression_to_symbol_name:=dll.amd_comgr_map_name_expression_to_symbol_name).restype, amd_comgr_map_name_expression_to_symbol_name.argtypes = amd_comgr_status_t, [amd_comgr_data_t, Pointer(size_t), Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
 class code_object_info_s(Struct): pass
-code_object_info_s._fields_ = [
-  ('isa', ctypes.POINTER(ctypes.c_char)),
-  ('size', size_t),
-  ('offset', uint64_t),
-]
+code_object_info_s.SIZE = 24
+code_object_info_s._fields_ = ['isa', 'size', 'offset']
+setattr(code_object_info_s, 'isa', field(0, Pointer(ctypes.c_char)))
+setattr(code_object_info_s, 'size', field(8, size_t))
+setattr(code_object_info_s, 'offset', field(16, uint64_t))
 amd_comgr_code_object_info_t = code_object_info_s
-try: (amd_comgr_lookup_code_object:=dll.amd_comgr_lookup_code_object).restype, amd_comgr_lookup_code_object.argtypes = amd_comgr_status_t, [amd_comgr_data_t, ctypes.POINTER(amd_comgr_code_object_info_t), size_t]
+try: (amd_comgr_lookup_code_object:=dll.amd_comgr_lookup_code_object).restype, amd_comgr_lookup_code_object.argtypes = amd_comgr_status_t, [amd_comgr_data_t, Pointer(amd_comgr_code_object_info_t), size_t]
 except AttributeError: pass
 
-try: (amd_comgr_map_elf_virtual_address_to_code_object_offset:=dll.amd_comgr_map_elf_virtual_address_to_code_object_offset).restype, amd_comgr_map_elf_virtual_address_to_code_object_offset.argtypes = amd_comgr_status_t, [amd_comgr_data_t, uint64_t, ctypes.POINTER(uint64_t), ctypes.POINTER(uint64_t), ctypes.POINTER(ctypes.c_bool)]
+try: (amd_comgr_map_elf_virtual_address_to_code_object_offset:=dll.amd_comgr_map_elf_virtual_address_to_code_object_offset).restype, amd_comgr_map_elf_virtual_address_to_code_object_offset.argtypes = amd_comgr_status_t, [amd_comgr_data_t, uint64_t, Pointer(uint64_t), Pointer(uint64_t), Pointer(ctypes.c_bool)]
 except AttributeError: pass
 
 AMD_COMGR_DEPRECATED = lambda msg: __attribute__((deprecated(msg)))
