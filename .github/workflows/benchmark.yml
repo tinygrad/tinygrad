@@ -118,18 +118,6 @@ jobs:
     # TODO: too slow
     # - name: Run 10 CIFAR training steps w winograd
     #   run: BENCHMARK_LOG=cifar_10steps_wino JIT=1 ASSERT_MIN_STEP_TIME=150 WINO=1 STEPS=10 python3.11 examples/hlb_cifar10.py | tee train_cifar_wino.txt
-    - name: UsbGPU boot time
-      run: sudo -E PYTHONPATH=. DEBUG=2 AM_RESET=1 AMD=1 AMD_IFACE=USB time python3.11 test/test_tiny.py TestTiny.test_plus
-    - name: UsbGPU tiny tests
-      run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB python3.11 test/test_tiny.py
-    - name: UsbGPU copy speeds
-      run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB python3.11 test/external/external_test_usb_asm24.py TestDevCopySpeeds
-    #- name: UsbGPU openpilot test
-    #  run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB GRAPH_ONE_KERNEL=1 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
-    - name: UsbGPU (USB4/TB) boot time
-      run: PYTHONPATH=. DEBUG=3 NV=1 NV_IFACE=PCI NV_NAK=1 time python3.11 test/test_tiny.py TestTiny.test_plus
-    - name: UsbGPU (USB4/TB) tiny tests
-      run: PYTHONPATH=. NV=1 NV_IFACE=PCI NV_NAK=1 python3.11 test/test_tiny.py
     - uses: actions/upload-artifact@v4
       with:
         name: Speed (Mac)
@@ -162,6 +150,37 @@ jobs:
           train_cifar_wino.txt
     - name: Run process replay tests
       run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3.11 process_replay.py
+
+  testusbgpu:
+    name: UsbGPU Benchmark
+    env:
+      PYTHONPYCACHEPREFIX: /tmp/tiny_python_pycache
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash -e -o pipefail {0}
+    if: github.repository_owner == 'tinygrad'
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: setup staging db
+      if: github.ref == 'refs/heads/update_benchmark_staging'
+      run: |
+        echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
+        rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
+    - name: UsbGPU boot time
+      run: sudo -E PYTHONPATH=. DEBUG=2 AM_RESET=1 AMD=1 AMD_IFACE=USB time python3.11 test/test_tiny.py TestTiny.test_plus
+    - name: UsbGPU tiny tests
+      run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB python3.11 test/test_tiny.py
+    - name: UsbGPU copy speeds
+      run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB python3.11 test/external/external_test_usb_asm24.py TestDevCopySpeeds
+    #- name: UsbGPU openpilot test
+    #  run: sudo -E PYTHONPATH=. AMD=1 AMD_IFACE=USB GRAPH_ONE_KERNEL=1 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
+    - name: UsbGPU (USB4/TB) boot time
+      run: PYTHONPATH=. DEBUG=3 NV=1 NV_IFACE=PCI NV_NAK=1 time python3.11 test/test_tiny.py TestTiny.test_plus
+    - name: UsbGPU (USB4/TB) tiny tests
+      run: PYTHONPATH=. NV=1 NV_IFACE=PCI NV_NAK=1 python3.11 test/test_tiny.py
 
   testnvidiabenchmark:
     name: tinybox green Benchmark
