@@ -117,14 +117,14 @@ class TestCustomKernel(unittest.TestCase):
     out = c.flatten().tolist()
     assert all(x == 2 for x in out), "all 2"
 
-  @unittest.skip("doesn't work yet")
+  #@unittest.skip("doesn't work yet")
   def test_simple_sharded(self):
-    devs = ["CPU:0", "CPU:1"]
+    devs = ("CPU:0", "CPU:1")
 
     a = Tensor.ones(16, 16).contiguous().shard(devs, axis=0)
     b = Tensor.ones(16, 16).contiguous().shard(devs, axis=0)
-    c = Tensor.empty(16, 16).shard(devs, axis=0)
-
+    c = Tensor.empty(8, 16, device=devs)
+    c = Tensor(c.uop.multi(0), device=devs)
     c = Tensor.custom_kernel(c,a,b, fxn=custom_elementwise_add_kernel)[0]
     out = c.flatten().tolist()
     assert all(x == 2 for x in out), "all 2"

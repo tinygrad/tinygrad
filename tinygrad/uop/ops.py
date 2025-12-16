@@ -470,7 +470,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   def is_contiguous(self):
     # TODO: this is is_realized
-    if self.op is Ops.RESHAPE: return self.src[0].is_contiguous()
+    if self.op in {Ops.RESHAPE, Ops.MULTI}: return self.src[0].is_contiguous()
     return self.op is Ops.BUFFER
 
   def contiguous(self, *args, **kwargs):

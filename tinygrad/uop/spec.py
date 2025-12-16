@@ -54,7 +54,7 @@ movement_ops = PatternMatcher([
   (UPat({Ops.ADD, Ops.MUL, Ops.IDIV}, dtype=dtypes.index), lambda: True),
 
   # AFTER on Movement Op
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement),), allow_any_len=True), lambda: True),
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.MULTI})),), allow_any_len=True), lambda: True),
 
   # custom kernels allowed here
   (UPat(Ops.CUSTOM_KERNEL), lambda: True),
