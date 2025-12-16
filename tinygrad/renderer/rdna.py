@@ -20,6 +20,7 @@ asm_for_op: dict[Ops, Callable] = {
   Ops.EXP2: lambda d,a,dt,name: f"v_exp_{name} {d}, {a}", Ops.LOG2: lambda d,a,dt,name: f"v_log_{name} {d}, {a}",
   Ops.SIN: lambda d,a,dt,name: f"v_sin_{name} {d}, {a}", Ops.SQRT: lambda d,a,dt,name: f"v_sqrt_{name} {d}, {a}",
   Ops.TRUNC: lambda d,a,dt,name: f"v_trunc_{name} {d}, {a}",
+  Ops.NEG: lambda d,a,dt,name: f"v_sub_{name} {d}, 0, {a}" if dtypes.is_float(dt) else f"v_sub_nc_u32 {d}, 0, {a}",
   Ops.SHR: lambda d,a,b,dt,name: f"v_lshrrev_b32 {d}, {b}, {a}",  # Note: operand order is reversed
   Ops.SHL: lambda d,a,b,dt,name: f"v_lshlrev_b32 {d}, {b}, {a}",  # Note: operand order is reversed
   Ops.ADD: lambda d,a,b,dt,name: f"v_add_{name} {d}, {a}, {b}" if dtypes.is_float(dt) else f"v_add_nc_u32 {d}, {a}, {b}",
@@ -29,6 +30,7 @@ asm_for_op: dict[Ops, Callable] = {
   Ops.AND: lambda d,a,b,dt,name: f"v_and_b32 {d}, {a}, {b}",
   Ops.OR: lambda d,a,b,dt,name: f"v_or_b32 {d}, {a}, {b}",
   Ops.MAX: lambda d,a,b,dt,name: f"v_max_{name} {d}, {a}, {b}",
+  Ops.MOD: lambda d,a,b,dt,name: f"v_mod_{name} {d}, {a}, {b}" if dtypes.is_float(dt) else None,  # int mod handled separately
   Ops.CMPEQ: lambda d,a,b,dt,name: f"v_cmp_eq_{name} {d}, {a}, {b}",
   Ops.CMPLT: lambda d,a,b,dt,name: f"v_cmp_lt_{name} {d}, {a}, {b}",
   # RDNA uses v_cmp_ne for integers, v_cmp_neq for floats
@@ -92,6 +94,15 @@ string_rewrite = PatternMatcher([
      if ctx.r[cond].startswith('s') else [
        f"v_cmp_ne_u32 vcc_lo, {ctx.r[cond]}, 0",
        f"v_cndmask_b32 {ctx.r[x]}, {ctx.r[false_val]}, {ctx.r[true_val]}, vcc_lo"]),
+  # IDIV: integer division via float conversion (a // b = trunc(float(a) / float(b)))
+  (UPat(Ops.IDIV, name="x", src=(UPat.var("a"), UPat.var("b"))),
+   lambda ctx, x, a, b: [
+     f"v_cvt_f32_i32 v{ctx.get_scratch_vgpr()}, {ctx.r[a]}",
+     f"v_cvt_f32_i32 v{ctx.get_scratch_vgpr()+1}, {ctx.r[b]}",
+     f"v_rcp_f32 v{ctx.get_scratch_vgpr()+1}, v{ctx.get_scratch_vgpr()+1}",
+     f"v_mul_f32 v{ctx.get_scratch_vgpr()}, v{ctx.get_scratch_vgpr()}, v{ctx.get_scratch_vgpr()+1}",
+     f"v_trunc_f32 v{ctx.get_scratch_vgpr()}, v{ctx.get_scratch_vgpr()}",
+     f"v_cvt_i32_f32 {ctx.r[x]}, v{ctx.get_scratch_vgpr()}"]),
   # alu ops
   (UPat(GroupOp.ALU, name="x"), lambda ctx, x: ctx.code_for_op[x.op](ctx.r[x], *[ctx.r[v] for v in x.src], x.dtype, ctx.types[x.dtype])),
   # bitcast/cast
@@ -468,13 +479,13 @@ class RDNARenderer(Renderer):
       sgpr_pairs.add(reg+1)
       return f"s[{reg}:{reg+1}]"
 
-    def get_scratch_vgpr() -> int:
-      """Get or allocate a scratch VGPR for temporary operations"""
+    def get_scratch_vgpr(count:int=1) -> int:
+      """Get or allocate scratch VGPRs for temporary operations. Returns the base register number."""
       nonlocal next_vgpr, max_vgpr
       if self.scratch_vgpr < 0:
-        # Allocate a new scratch VGPR (not tracked in owner map, stays allocated)
+        # Allocate scratch VGPRs (not tracked in owner map, stays allocated)
         self.scratch_vgpr = next_vgpr
-        next_vgpr += 1
+        next_vgpr += 2  # Allocate 2 scratch registers for IDIV etc.
         max_vgpr = max(max_vgpr, next_vgpr)
       return self.scratch_vgpr
 
