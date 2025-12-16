@@ -33,7 +33,8 @@ asm_for_op: dict[Ops, Callable] = {
   Ops.CMPLT: lambda d,a,b,dt,name: f"v_cmp_lt_{name} {d}, {a}, {b}",
   # RDNA uses v_cmp_ne for integers, v_cmp_neq for floats
   Ops.CMPNE: lambda d,a,b,dt,name: f"v_cmp_neq_{name} {d}, {a}, {b}" if dtypes.is_float(dt) else f"v_cmp_ne_{name} {d}, {a}, {b}",
-  Ops.MULACC: lambda d,a,b,c,dt,name: f"v_fma_{name} {d}, {a}, {b}, {c}" if dtypes.is_float(dt) else f"v_mad_u32_u24 {d}, {a}, {b}, {c}",
+  # v_mad_u32_u24 only handles 24-bit unsigned operands; for signed ints, use v_mad_i32_i24
+  Ops.MULACC: lambda d,a,b,c,dt,name: f"v_fma_{name} {d}, {a}, {b}, {c}" if dtypes.is_float(dt) else f"v_mad_i32_i24 {d}, {a}, {b}, {c}",
   Ops.WHERE: lambda d,a,b,c,dt,name: f"v_cndmask_b32 {d}, {c}, {b}, {a}",
 }
 
@@ -56,6 +57,24 @@ def mem_type(x:UOp) -> str:
     case Ops.DEFINE_GLOBAL: return 'global'
     case _: raise RuntimeError(f"{x.op} needs to be memory")
 
+def mem_size_suffix(dt:DType) -> str:
+  """Get memory instruction suffix based on dtype size"""
+  if dt.itemsize == 1: return "byte"
+  if dt.itemsize == 2: return "short"
+  if dt.itemsize == 4: return "dword"
+  if dt.itemsize == 8: return "dwordx2"
+  raise RuntimeError(f"Unsupported dtype size: {dt.itemsize}")
+
+def global_store(addr:str, data:str, base:str, dt:DType) -> str:
+  suffix = mem_size_suffix(dt)
+  return f"global_store_{suffix} {addr}, {data}, {base}"
+
+def global_load(dest:str, addr:str, base:str, dt:DType) -> str:
+  suffix = mem_size_suffix(dt)
+  if dt.itemsize == 1:
+    return f"global_load_ubyte {dest}, {addr}, {base}"  # unsigned byte load
+  return f"global_load_{suffix} {dest}, {addr}, {base}"
+
 string_rewrite = PatternMatcher([
   # const rendering
   (UPat.cvar("x", dtypes.bool), lambda ctx, x: f"v_mov_b32 {ctx.r[x]}, {1 if x.arg else 0}"),
@@ -67,27 +86,44 @@ string_rewrite = PatternMatcher([
   # comparison ops
   (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ), name="x", allow_any_len=True, src=(UPat.var("src0"),)),
     lambda ctx, x, src0: ctx.code_for_op[x.op](ctx.r[x], *[ctx.r[v] for v in x.src], src0.dtype, ctx.types[src0.dtype])),
+  # WHERE: if condition is SGPR, use directly; if VGPR, compare to 0 first to get VCC
+  (UPat(Ops.WHERE, name="x", src=(UPat.var("cond"), UPat.var("true_val"), UPat.var("false_val"))),
+   lambda ctx, x, cond, true_val, false_val: f"v_cndmask_b32 {ctx.r[x]}, {ctx.r[false_val]}, {ctx.r[true_val]}, {ctx.r[cond]}"
+     if ctx.r[cond].startswith('s') else [
+       f"v_cmp_ne_u32 vcc_lo, {ctx.r[cond]}, 0",
+       f"v_cndmask_b32 {ctx.r[x]}, {ctx.r[false_val]}, {ctx.r[true_val]}, vcc_lo"]),
   # alu ops
   (UPat(GroupOp.ALU, name="x"), lambda ctx, x: ctx.code_for_op[x.op](ctx.r[x], *[ctx.r[v] for v in x.src], x.dtype, ctx.types[x.dtype])),
   # bitcast/cast
   (UPat(Ops.BITCAST, name="x", src=(UPat.var("a"),), allow_any_len=True), lambda ctx, x, a: f"v_mov_b32 {ctx.r[x]}, {ctx.r[a]}"),
+  # cast from bool: if bool is in SGPR (comparison result), use v_cndmask_b32; if in VGPR (loaded from memory), convert directly
   (UPat(Ops.CAST, name="x", src=(UPat(dtype=dtypes.bool, name="a"),)),
-   lambda ctx, x, a: f"v_cndmask_b32 {ctx.r[x]}, {render_val(0, x.dtype)}, {render_val(1, x.dtype)}, {ctx.r[a]}"),
+   lambda ctx, x, a: f"v_cndmask_b32 {ctx.r[x]}, {render_val(0, x.dtype)}, {render_val(1, x.dtype)}, {ctx.r[a]}"
+     if ctx.r[a].startswith('s') else f"v_cvt_f32_u32 {ctx.r[x]}, {ctx.r[a]}" if dtypes.is_float(x.dtype) else f"v_mov_b32 {ctx.r[x]}, {ctx.r[a]}"),
+  # cast TO bool: compare to 0, result to vcc_lo, then cndmask to VGPR
   (UPat(Ops.CAST, name="x", dtype=dtypes.bool, src=(UPat.var("a"),)),
-   lambda ctx, x, a: f"v_cmp_{'neq' if dtypes.is_float(a.dtype) else 'ne'}_{ctx.types[a.dtype]} {ctx.r[x]}, {ctx.r[a]}, 0"),
+   lambda ctx, x, a: [
+     f"v_cmp_{'neq' if dtypes.is_float(a.dtype) else 'ne'}_{ctx.types[a.dtype]} vcc_lo, {ctx.r[a]}, 0",
+     f"v_cndmask_b32 {ctx.r[x]}, 0, 1, vcc_lo"]),
   (UPat(Ops.CAST, name="x", src=(UPat.var("a"),)), lambda ctx, x, a: ctx.render_cast(x, a)),
   # store / load for global memory
+  # store boolean value - if SGPR (comparison result), convert via cndmask; if VGPR, store directly
+  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_GLOBAL, name="buf"), UPat.var("idx")), name="index_op", allow_any_len=True), UPat.var("var", dtype=dtypes.bool))),
+   lambda ctx, idx, var, buf, index_op: [
+     f"v_cndmask_b32 v{ctx.get_scratch_vgpr()}, 0, 1, {ctx.r[var]}",
+     f"global_store_byte {ctx.r[index_op]}, v{ctx.get_scratch_vgpr()}, {ctx.r[buf]}"]
+       if ctx.r[var].startswith('s') else f"global_store_byte {ctx.r[index_op]}, {ctx.r[var]}, {ctx.r[buf]}"),
   (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_GLOBAL, name="buf"), UPat.var("idx")), name="index_op", allow_any_len=True), UPat.var("var"))),
-   lambda ctx, idx, var, buf, index_op: f"global_store_b32 {ctx.r[index_op]}, {ctx.r[var]}, {ctx.r[buf]}"),
+   lambda ctx, idx, var, buf, index_op: global_store(ctx.r[index_op], ctx.r[var], ctx.r[buf], buf.dtype.base)),
   (UPat(Ops.LOAD, name="x", src=(UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_GLOBAL, name="buf"), UPat.var("idx"), UPat.var("gate")), name="index_op"), UPat.var("alt")), allow_any_len=True),
     lambda ctx, x, idx, alt, gate, buf, index_op: [
     f"v_mov_b32 {ctx.r[x]}, {ctx.r[alt]}",
     f"s_and_b32 vcc_lo, exec_lo, {ctx.r[gate]}",
     f"s_and_saveexec_b32 s{ctx.scratch_sgpr}, vcc_lo",
-    f"global_load_b32 {ctx.r[x]}, {ctx.r[index_op]}, {ctx.r[buf]}",
+    global_load(ctx.r[x], ctx.r[index_op], ctx.r[buf], buf.dtype.base),
     f"s_mov_b32 exec_lo, s{ctx.scratch_sgpr}"]),
   (UPat(Ops.LOAD, name="x", src=(UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_GLOBAL, name="buf"), UPat.var("idx")), name="index_op"),), allow_any_len=True),
-    lambda ctx, x, idx, buf, index_op: f"global_load_b32 {ctx.r[x]}, {ctx.r[index_op]}, {ctx.r[buf]}"),
+    lambda ctx, x, idx, buf, index_op: global_load(ctx.r[x], ctx.r[index_op], ctx.r[buf], buf.dtype.base)),
   # store / load for local memory (LDS) - DEFINE_LOCAL directly
   (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_LOCAL), UPat.var("idx")), name="index_op", allow_any_len=True), UPat.var("var"))),
    lambda ctx, idx, var, index_op: f"ds_write_b32 {ctx.r[index_op]}, {ctx.r[var]}"),
@@ -273,12 +309,26 @@ class RDNARenderer(Renderer):
     self.uops = uops
     self.scratch_sgpr = 100  # scratch register for exec manipulation
     self.lds_size = 0  # track local memory (LDS) usage
+    # Scratch VGPR will be allocated after we know how many VGPRs the kernel uses
+    self.scratch_vgpr = -1  # will be set after register allocation
 
     # === LIVENESS ANALYSIS ===
     # Compute last use position for each UOp
     last_use: dict[UOp, int] = {}
     # Track which UOps alias to other UOps (share registers)
     aliases: dict[UOp, UOp] = {}
+
+    # First pass: find all RANGE/END pairs to identify loop ranges
+    # Map from RANGE position to END position
+    loop_ranges: dict[int, int] = {}
+    range_positions: dict[UOp, int] = {}
+    for i, u in enumerate(uops):
+      if u.op is Ops.RANGE:
+        range_positions[u] = i
+      if u.op is Ops.END and len(u.src) >= 2 and u.src[1].op is Ops.RANGE:
+        range_op = u.src[1]
+        if range_op in range_positions:
+          loop_ranges[range_positions[range_op]] = i
 
     for i, u in enumerate(uops):
       for src in u.src:
@@ -305,10 +355,31 @@ class RDNARenderer(Renderer):
           elif u.op is Ops.LOAD:
             aliases[u] = u.src[0]  # LOAD from REG aliases to INDEX (which aliases to DEFINE_REG)
 
+    # Second pass: extend last_use for values used inside loops
+    # Values used inside a loop must stay alive until the END of the loop
+    uop_positions = {u: i for i, u in enumerate(uops)}
+    for uop, use_pos in list(last_use.items()):
+      # Check if this use position is inside any loop
+      for range_pos, end_pos in loop_ranges.items():
+        if range_pos < use_pos <= end_pos:
+          # This value is used inside a loop, extend its lifetime to loop END
+          last_use[uop] = max(last_use[uop], end_pos)
+      # Also check if the uop itself is defined inside a loop
+      if uop in uop_positions:
+        def_pos = uop_positions[uop]
+        for range_pos, end_pos in loop_ranges.items():
+          if range_pos < def_pos <= end_pos:
+            # This value is defined inside a loop
+            # If it's used inside the loop, extend to END
+            if use_pos <= end_pos:
+              last_use[uop] = max(last_use[uop], end_pos)
+
     # === REGISTER ALLOCATOR ===
     # Track free registers (available for reuse)
     free_vgprs: list[int] = []
     free_sgprs: list[int] = []
+    # Track SGPR pairs to prevent individual registers from being freed
+    sgpr_pairs: set[int] = set()
     # Track which UOp uses which register (for freeing)
     vgpr_owner: dict[int, UOp] = {}
     sgpr_owner: dict[int, UOp] = {}
@@ -353,6 +424,9 @@ class RDNARenderer(Renderer):
         del vgpr_owner[reg]
         free_vgprs.append(reg)
       for reg in dead_sgprs:
+        # Don't free SGPRs that are part of a pair (used for 64-bit values like buffer addresses)
+        if reg in sgpr_pairs:
+          continue
         del sgpr_owner[reg]
         free_sgprs.append(reg)
 
@@ -389,7 +463,23 @@ class RDNARenderer(Renderer):
       max_sgpr = max(max_sgpr, next_sgpr)
       sgpr_owner[reg] = owner
       sgpr_owner[reg+1] = owner
+      # Mark these as part of a pair - never free individually
+      sgpr_pairs.add(reg)
+      sgpr_pairs.add(reg+1)
       return f"s[{reg}:{reg+1}]"
+
+    def get_scratch_vgpr() -> int:
+      """Get or allocate a scratch VGPR for temporary operations"""
+      nonlocal next_vgpr, max_vgpr
+      if self.scratch_vgpr < 0:
+        # Allocate a new scratch VGPR (not tracked in owner map, stays allocated)
+        self.scratch_vgpr = next_vgpr
+        next_vgpr += 1
+        max_vgpr = max(max_vgpr, next_vgpr)
+      return self.scratch_vgpr
+
+    # Make get_scratch_vgpr available to pattern matcher via self
+    self.get_scratch_vgpr = get_scratch_vgpr
 
     name = "test"
     pending_waits = set()  # track which ops need waits
@@ -447,7 +537,9 @@ class RDNARenderer(Renderer):
             kernel.append("s_waitcnt vmcnt(0) lgkmcnt(0)")
             pending_waits.clear()
             break
-        if u.dtype == dtypes.bool:
+        # Only direct comparison ops go to SGPR; other bool ops stay in VGPR
+        # because their inputs might be in VGPR (from memory loads)
+        if u.dtype == dtypes.bool and u.op in {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ}:
           r[u] = alloc_sgpr(u)  # comparison results go in SGPR
         else:
           r[u] = alloc_vgpr(u)
@@ -515,9 +607,8 @@ class RDNARenderer(Renderer):
       if u.op is Ops.DEFINE_GLOBAL:
         kernel.append("s_waitcnt lgkmcnt(0)")
 
-    # Final waitcnt and end program
-    if pending_waits:
-      kernel.append("s_waitcnt vmcnt(0) lgkmcnt(0)")
+    # Final waitcnt and end program - always wait to ensure stores complete
+    kernel.append("s_waitcnt vmcnt(0) lgkmcnt(0)")
     kernel.extend(['s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)', 's_endpgm', 's_code_end'])
 
     return self.render_kernel(kernel, name, bufs, max_vgpr, max_sgpr, uops)
