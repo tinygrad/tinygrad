@@ -858,7 +858,9 @@ class KernelInfo:
 class CustomKernel:
   fxn: Callable|None = None
   grad_fxn: Callable|None = None
+  # sadly CustomKernel can't be pickled or reconstructed as a str
   def __reduce__(self): return (CustomKernel, ())
+  def __repr__(self): return "CustomKernel()"
 
 @dataclass(frozen=True)
 class Kernel:

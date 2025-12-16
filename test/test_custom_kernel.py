@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Tensor, UOp, Context
+from tinygrad import Tensor, UOp
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import KernelInfo, AxisType
 
@@ -123,8 +123,8 @@ class TestCustomKernel(unittest.TestCase):
 
     a = Tensor.ones(16, 16).contiguous().shard(devs, axis=0)
     b = Tensor.ones(16, 16).contiguous().shard(devs, axis=0)
-    c = Tensor.empty(8, 16, device=devs)
-    c = Tensor(c.uop.multi(0), device=devs)
+    # ugly construction to get a sharded empty tensor
+    c = Tensor(Tensor.empty(8, 16, device=devs).uop.multi(0), device=devs)
     c = Tensor.custom_kernel(c,a,b, fxn=custom_elementwise_add_kernel)[0]
     out = c.flatten().tolist()
     assert all(x == 2 for x in out), "all 2"
@@ -196,7 +196,6 @@ class TestCustomKernel(unittest.TestCase):
 
   def test_gemm_backward_custom(self): self.test_gemm_backward(True)
   # NOTE: grad_fxn doesn't work with pyrender
-  @Context(SPEC=1)
   def test_gemm_backward(self, custom_backward_gemm=False):
     N = 4
     a_rand = Tensor.randn(N, 8)
