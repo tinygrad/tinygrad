@@ -1,6 +1,6 @@
 import time
 from typing import cast
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from collections import deque
 from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites
 from tinygrad.uop.ops import PatternMatcher, UPat, graph_rewrite, graph_rewrite_map
@@ -17,17 +17,9 @@ class ScheduleItem:
   metadata: tuple[Metadata, ...] = ()
   fixedvars: dict[str, int] = field(default_factory=dict)
 
-@dataclass(frozen=True)
-class PreScheduleItem:
-  ast: UOp
-  buf_uops: tuple[UOp, ...]
-  metadata: tuple[Metadata, ...] = ()
-  fixedvars: dict[str, int] = field(default_factory=dict)
-  bound_ranges: tuple[UOp, ...] = ()
-
 # **** schedule linearizer
 
-def create_schedule(sched_sink:UOp) -> list[PreScheduleItem]:
+def create_schedule(sched_sink:UOp) -> tuple[list[tuple[UOp, tuple[Metadata, ...], dict[str, int]]], UOp]:
   with cpu_profile(TracingKey("toposort sched_sink")):
     # construct the KERNEL children graph based on assigns
     children: dict[UOp, list[UOp]] = {}
@@ -55,12 +47,12 @@ def create_schedule(sched_sink:UOp) -> list[PreScheduleItem]:
         else:
           raise RuntimeError(f"input to kernel must be AFTER or BUFFER, not {s.op}")
 
-  with cpu_profile(TracingKey("linearize to PreScheduleItem")):
+  with cpu_profile(TracingKey("linearize schedule")):
     queue: deque[UOp] = deque()
     for k,v in in_degree.items():
       if v == 0: queue.append(k)
 
-    schedule: list[PreScheduleItem|UOp] = []
+    schedule: list[tuple|UOp] = []
     while len(queue):
       k = rk = queue.popleft()
       if k.op is Ops.END: k = k.src[0]
@@ -69,7 +61,7 @@ def create_schedule(sched_sink:UOp) -> list[PreScheduleItem]:
         ast = k.arg.ast
         buf_uops = tuple(s.buf_uop for s in k.src if s.op is not Ops.BIND)
         bound_ranges = tuple(s for s in k.src if s.op is Ops.BIND and len(s.src) > 1 and s.src[1].op is Ops.RANGE)
-        schedule.append(PreScheduleItem(ast, buf_uops, k.arg.metadata, bound_ranges=bound_ranges))
+        schedule.append((ast, buf_uops, k.arg.metadata, {}, bound_ranges))
         if rk.op is Ops.END: schedule.append(rk)
       else:
         raise RuntimeError(f"can't schedule {k.op}")
@@ -78,10 +70,11 @@ def create_schedule(sched_sink:UOp) -> list[PreScheduleItem]:
         if in_degree[x] == 0: queue.append(x)
 
   with cpu_profile(TracingKey("expand ranges")):
-    real_schedule: list[PreScheduleItem] = []
+    pre_schedule_meta: list[tuple[UOp, tuple[Metadata, ...], dict[str, int]]] = []
+    buf_uops_list: list[UOp] = []
     sched_ptr = 0
-    in_ranges = {}
-    range_ptrs = {}
+    in_ranges: dict[UOp, int] = {}
+    range_ptrs: dict[UOp, int] = {}
     while sched_ptr < len(schedule):
       si = schedule[sched_ptr]
       if isinstance(si, UOp):
@@ -94,9 +87,12 @@ def create_schedule(sched_sink:UOp) -> list[PreScheduleItem]:
             sched_ptr = range_ptrs[si.src[1]]
             continue
       else:
-        real_schedule.append(replace(si, fixedvars=si.fixedvars | {s.src[0].arg[0]:in_ranges[s.src[1]] for s in si.bound_ranges}, bound_ranges=()))
+        ast, buf_uops, metadata, fixedvars, bound_ranges = si
+        fixedvars = fixedvars | {s.src[0].arg[0]:in_ranges[s.src[1]] for s in bound_ranges}
+        pre_schedule_meta.append((ast, metadata, fixedvars))
+        buf_uops_list.append(UOp.sink(*buf_uops))
       sched_ptr += 1
-  return real_schedule
+  return pre_schedule_meta, UOp.sink(*buf_uops_list)
 
 from tinygrad.engine.memory import memory_planner
 from tinygrad.schedule.rangeify import get_rangeify_map
@@ -164,11 +160,9 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
     tensor_map |= get_rangeify_map(big_sink_cache)
     big_sink = big_sink_cache.substitute(tensor_map, name="Apply Kernelize Map")
 
-    pre_schedule = create_schedule(big_sink)
+    pre_schedule_meta, buf_uops_sink = create_schedule(big_sink)
 
-    # save in schedule cache: encode buf_uops as nested SINKs so one graph_rewrite transforms everything
-    pre_schedule_meta = [(psi.ast, psi.metadata, psi.fixedvars) for psi in pre_schedule]
-    buf_uops_sink = UOp.sink(*[UOp.sink(*psi.buf_uops) for psi in pre_schedule])
+    # save in schedule cache
     tensor_map_sink = UOp.sink(*flatten([(k,v) for k,v in tensor_map.items()]))
     combined_sink = UOp.sink(big_sink, tensor_map_sink, buf_uops_sink)
     schedule_cache[sched_cache_key] = (pre_schedule_meta, combined_sink)
