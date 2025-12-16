@@ -59,9 +59,12 @@ class _CData:
     return cls._shadow.from_buffer(obj._mem_)
 
   @classmethod
-  def from_buf(cls, src):
+  def from_buffer(cls, src):
     _CData.__init__(ret:=cls.__new__(cls), src)
     return ret
+
+  @classmethod
+  def from_buffer_copy(cls, src): return cls.from_buffer(bytearray(src))
 
 class Union(_CData): pass
 class Struct(_CData):
@@ -128,7 +131,7 @@ class _Pointer(_CData):
   def from_param(cls, obj): return ctypes.c_void_p(obj.value)
 
   @classmethod
-  def from_buf(cls, src): return cls(src)
+  def from_buffer(cls, src): return cls(src)
 
 @functools.cache
 def Pointer(typ):
@@ -139,7 +142,7 @@ def Pointer(typ):
     @property
     def contents(self):
       assert self.value, "null pointer dereference"
-      return typ.from_buffer(to_mv(self.value, sz)) if prim else typ.from_buf(self.value)
+      return typ.from_buffer(to_mv(self.value, sz)) if prim else typ.from_buffer(self.value)
 
   PTR.__name__ = f"Pointer_{typ.__name__}"
   return PTR
@@ -155,7 +158,7 @@ def field(off:int, typ:type[_CData, _SimpleCData], bit_width=None, bit_off=0):
                     lambda self,v: self._mem_.__setitem__(sl, ((int.from_bytes(self._mem_[sl])&set_mask)|(v << bit_off)).to_bytes(sz, sys.byteorder)))
 
   sl = slice(off, off + (typ.SIZE if issubclass(typ, _CData) else ctypes.sizeof(typ)))
-  if issubclass(typ, _CData): return property(lambda self: typ.from_buf(self._mem_[sl]),
+  if issubclass(typ, _CData): return property(lambda self: typ.from_buffer(self._mem_[sl]),
                                                 lambda self, v: self._mem_.__setitem__(sl, bytes(v if isinstance(v, _CData) else typ(v))))
   return property(lambda self: typ.from_buffer(self._mem_[sl]).value, lambda self, v: self._mem_.__setitem__(sl, bytes(typ(v))))
 
@@ -204,7 +207,7 @@ class DLL(ctypes.CDLL):
       def wrapper(*args):
         out = self._get_func(fn.__name__, argtypes, restype)(*(pointer(a) if issubclass(t, _Pointer) and not isinstance(a, _Pointer) else a
                                                                for a,t in zip(args, argtypes)))
-        return out if restype is None or issubclass(restype, _SimpleCData) else restype.from_buf(out)
+        return out if restype is None or issubclass(restype, _SimpleCData) else restype.from_buffer(out)
       return wrapper
     return wrap
 
