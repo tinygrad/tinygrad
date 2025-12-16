@@ -134,6 +134,18 @@ The schedule cache strips values from BIND nodes so different bound values (e.g.
 - Only extract var_vals when schedule is non-empty (no kernels = no vars needed)
 - PatternMatchers are slow to construct - define at module level, not in functions
 
+### Readability Over Speed
+Don't add complexity for marginal performance gains. Simpler code that's slightly slower is often better:
+```python
+# BAD: "optimized" with extra complexity
+if has_afters:  # skip toposort if no AFTERs
+  after_map = [(u, u.buf_uop) for u in big_sink.toposort() if u.op is Ops.AFTER]
+
+# GOOD: simple, always works
+after_map = [(u, u.buf_uop) for u in big_sink.toposort() if u.op is Ops.AFTER]
+```
+The conditional check adds complexity, potential bugs, and often negligible speedup. Only optimize when profiling shows a real bottleneck.
+
 ### Testing LLM Changes
 ```bash
 # Quick smoke test
