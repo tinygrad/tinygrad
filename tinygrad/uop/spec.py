@@ -55,6 +55,9 @@ movement_ops = PatternMatcher([
 
   # AFTER on Movement Op
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement),), allow_any_len=True), lambda: True),
+
+  # custom kernels allowed here
+  (UPat(Ops.CUSTOM_KERNEL), lambda: True),
 ])
 
 _tensor_spec = PatternMatcher([

@@ -840,12 +840,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return self.src[0].after(self.store(val).end(*argfix(end)))
 
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
-    placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(srcs)]
-    #contig_srcs = tuple(x.contiguous() for x in srcs)
-    #kernel = UOp(Ops.KERNEL, src=tuple(x.base for x in contig_srcs), arg=Kernel(fxn(*placeholders), grad_fxn=grad_fxn))
-    #kernel = UOp(Ops.CUSTOM_KERNEL, src=tuple(x.base for x in contig_srcs), arg=CustomKernel(fxns=(fxn, grad_fxn)))
-    kernel = UOp(Ops.CUSTOM_KERNEL, src=srcs, arg=CustomKernel(fxns=(fxn, grad_fxn)))
-    return [s.after(kernel) for s in srcs]
+    contig_srcs = tuple(x.contiguous() for x in srcs)
+    kernel = UOp(Ops.CUSTOM_KERNEL, src=contig_srcs, arg=CustomKernel(fxn=fxn, grad_fxn=grad_fxn))
+    return [s.after(kernel) for s in contig_srcs]
 
 @dataclass(frozen=True)
 class KernelInfo:
@@ -859,7 +856,8 @@ class KernelInfo:
 
 @dataclass(frozen=True)
 class CustomKernel:
-  fxns: tuple[Callable|None, ...] = ()
+  fxn: Callable|None = None
+  grad_fxn: Callable|None = None
   def __reduce__(self): return (CustomKernel, ())
 
 @dataclass(frozen=True)

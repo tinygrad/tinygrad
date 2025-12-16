@@ -42,7 +42,8 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.MULTI, name="ret"), lambda ctx, ret: ctx.shard(ret.device, ret.axis).src),
   # NOTE: this is only correct when the KERNEL has a single output
   (UPat(Ops.AFTER), lambda ctx: (ctx, ctx)),
-  (UPat(Ops.KERNEL, name="k"), lambda ctx, k: k.arg.grad_fxn(ctx, k)),
+  (UPat(Ops.CUSTOM_KERNEL, name="k"), lambda ctx, k: k.arg.grad_fxn(ctx, k)),
+  #(UPat(Ops.KERNEL, name="k"), lambda ctx, k: k.arg.grad_fxn(ctx, k)),
   # there's no gradient for bitcast
   (UPat(Ops.BITCAST), lambda: (None,)),
 ])

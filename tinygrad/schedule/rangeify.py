@@ -65,7 +65,7 @@ mop_cleanup = PatternMatcher([
 
 def resolve_custom_kernel(ck:UOp) -> UOp:
   placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(ck.src)]
-  return UOp(Ops.KERNEL, src=ck.src, arg=Kernel(ck.arg.fxns[0](*placeholders)))
+  return UOp(Ops.KERNEL, src=ck.src, arg=Kernel(ck.arg.fxn(*placeholders)))
 
 earliest_rewrites = mop_cleanup+PatternMatcher([
   # just removing it works...
