@@ -1,19 +1,19 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.runtime.support.old_c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support.c import Array, DLL, Pointer, Struct, Union, field, CEnum, _IO, _IOW, _IOR, _IOWR
 dll = DLL('libclang', ['clang-20', 'clang'])
 CXIndex = ctypes.c_void_p
 class struct_CXTargetInfoImpl(Struct): pass
-CXTargetInfo = ctypes.POINTER(struct_CXTargetInfoImpl)
+CXTargetInfo = Pointer(struct_CXTargetInfoImpl)
 class struct_CXTranslationUnitImpl(Struct): pass
-CXTranslationUnit = ctypes.POINTER(struct_CXTranslationUnitImpl)
+CXTranslationUnit = Pointer(struct_CXTranslationUnitImpl)
 CXClientData = ctypes.c_void_p
 class struct_CXUnsavedFile(Struct): pass
-struct_CXUnsavedFile._fields_ = [
-  ('Filename', ctypes.POINTER(ctypes.c_char)),
-  ('Contents', ctypes.POINTER(ctypes.c_char)),
-  ('Length', ctypes.c_uint64),
-]
+struct_CXUnsavedFile.SIZE = 24
+struct_CXUnsavedFile._fields_ = ['Filename', 'Contents', 'Length']
+setattr(struct_CXUnsavedFile, 'Filename', field(0, Pointer(ctypes.c_char)))
+setattr(struct_CXUnsavedFile, 'Contents', field(8, Pointer(ctypes.c_char)))
+setattr(struct_CXUnsavedFile, 'Length', field(16, ctypes.c_uint64))
 enum_CXAvailabilityKind = CEnum(ctypes.c_uint32)
 CXAvailability_Available = enum_CXAvailabilityKind.define('CXAvailability_Available', 0)
 CXAvailability_Deprecated = enum_CXAvailabilityKind.define('CXAvailability_Deprecated', 1)
@@ -21,11 +21,11 @@ CXAvailability_NotAvailable = enum_CXAvailabilityKind.define('CXAvailability_Not
 CXAvailability_NotAccessible = enum_CXAvailabilityKind.define('CXAvailability_NotAccessible', 3)
 
 class struct_CXVersion(Struct): pass
-struct_CXVersion._fields_ = [
-  ('Major', ctypes.c_int32),
-  ('Minor', ctypes.c_int32),
-  ('Subminor', ctypes.c_int32),
-]
+struct_CXVersion.SIZE = 12
+struct_CXVersion._fields_ = ['Major', 'Minor', 'Subminor']
+setattr(struct_CXVersion, 'Major', field(0, ctypes.c_int32))
+setattr(struct_CXVersion, 'Minor', field(4, ctypes.c_int32))
+setattr(struct_CXVersion, 'Subminor', field(8, ctypes.c_int32))
 CXVersion = struct_CXVersion
 enum_CXCursor_ExceptionSpecificationKind = CEnum(ctypes.c_uint32)
 CXCursor_ExceptionSpecificationKind_None = enum_CXCursor_ExceptionSpecificationKind.define('CXCursor_ExceptionSpecificationKind_None', 0)
@@ -57,19 +57,18 @@ CXGlobalOpt_ThreadBackgroundPriorityForEditing = CXGlobalOptFlags.define('CXGlob
 CXGlobalOpt_ThreadBackgroundPriorityForAll = CXGlobalOptFlags.define('CXGlobalOpt_ThreadBackgroundPriorityForAll', 3)
 
 class struct_CXIndexOptions(Struct): pass
-struct_CXIndexOptions._fields_ = [
-  ('Size', ctypes.c_uint32),
-  ('ThreadBackgroundPriorityForIndexing', ctypes.c_ubyte),
-  ('ThreadBackgroundPriorityForEditing', ctypes.c_ubyte),
-  ('ExcludeDeclarationsFromPCH', ctypes.c_uint32,1),
-  ('DisplayDiagnostics', ctypes.c_uint32,1),
-  ('StorePreamblesInMemory', ctypes.c_uint32,1),
-  ('', ctypes.c_uint32,13),
-  ('PreambleStoragePath', ctypes.POINTER(ctypes.c_char)),
-  ('InvocationEmissionPath', ctypes.POINTER(ctypes.c_char)),
-]
+struct_CXIndexOptions.SIZE = 24
+struct_CXIndexOptions._fields_ = ['Size', 'ThreadBackgroundPriorityForIndexing', 'ThreadBackgroundPriorityForEditing', 'ExcludeDeclarationsFromPCH', 'DisplayDiagnostics', 'StorePreamblesInMemory', 'PreambleStoragePath', 'InvocationEmissionPath']
+setattr(struct_CXIndexOptions, 'Size', field(0, ctypes.c_uint32))
+setattr(struct_CXIndexOptions, 'ThreadBackgroundPriorityForIndexing', field(4, ctypes.c_ubyte))
+setattr(struct_CXIndexOptions, 'ThreadBackgroundPriorityForEditing', field(5, ctypes.c_ubyte))
+setattr(struct_CXIndexOptions, 'ExcludeDeclarationsFromPCH', field(6, ctypes.c_uint32, 1, 0))
+setattr(struct_CXIndexOptions, 'DisplayDiagnostics', field(6, ctypes.c_uint32, 1, 1))
+setattr(struct_CXIndexOptions, 'StorePreamblesInMemory', field(6, ctypes.c_uint32, 1, 2))
+setattr(struct_CXIndexOptions, 'PreambleStoragePath', field(8, Pointer(ctypes.c_char)))
+setattr(struct_CXIndexOptions, 'InvocationEmissionPath', field(16, Pointer(ctypes.c_char)))
 CXIndexOptions = struct_CXIndexOptions
-try: (clang_createIndexWithOptions:=dll.clang_createIndexWithOptions).restype, clang_createIndexWithOptions.argtypes = CXIndex, [ctypes.POINTER(CXIndexOptions)]
+try: (clang_createIndexWithOptions:=dll.clang_createIndexWithOptions).restype, clang_createIndexWithOptions.argtypes = CXIndex, [Pointer(CXIndexOptions)]
 except AttributeError: pass
 
 try: (clang_CXIndex_setGlobalOptions:=dll.clang_CXIndex_setGlobalOptions).restype, clang_CXIndex_setGlobalOptions.argtypes = None, [CXIndex, ctypes.c_uint32]
@@ -78,25 +77,25 @@ except AttributeError: pass
 try: (clang_CXIndex_getGlobalOptions:=dll.clang_CXIndex_getGlobalOptions).restype, clang_CXIndex_getGlobalOptions.argtypes = ctypes.c_uint32, [CXIndex]
 except AttributeError: pass
 
-try: (clang_CXIndex_setInvocationEmissionPathOption:=dll.clang_CXIndex_setInvocationEmissionPathOption).restype, clang_CXIndex_setInvocationEmissionPathOption.argtypes = None, [CXIndex, ctypes.POINTER(ctypes.c_char)]
+try: (clang_CXIndex_setInvocationEmissionPathOption:=dll.clang_CXIndex_setInvocationEmissionPathOption).restype, clang_CXIndex_setInvocationEmissionPathOption.argtypes = None, [CXIndex, Pointer(ctypes.c_char)]
 except AttributeError: pass
 
 CXFile = ctypes.c_void_p
 try: (clang_isFileMultipleIncludeGuarded:=dll.clang_isFileMultipleIncludeGuarded).restype, clang_isFileMultipleIncludeGuarded.argtypes = ctypes.c_uint32, [CXTranslationUnit, CXFile]
 except AttributeError: pass
 
-try: (clang_getFile:=dll.clang_getFile).restype, clang_getFile.argtypes = CXFile, [CXTranslationUnit, ctypes.POINTER(ctypes.c_char)]
+try: (clang_getFile:=dll.clang_getFile).restype, clang_getFile.argtypes = CXFile, [CXTranslationUnit, Pointer(ctypes.c_char)]
 except AttributeError: pass
 
 size_t = ctypes.c_uint64
-try: (clang_getFileContents:=dll.clang_getFileContents).restype, clang_getFileContents.argtypes = ctypes.POINTER(ctypes.c_char), [CXTranslationUnit, CXFile, ctypes.POINTER(size_t)]
+try: (clang_getFileContents:=dll.clang_getFileContents).restype, clang_getFileContents.argtypes = Pointer(ctypes.c_char), [CXTranslationUnit, CXFile, Pointer(size_t)]
 except AttributeError: pass
 
 class CXSourceLocation(Struct): pass
-CXSourceLocation._fields_ = [
-  ('ptr_data', (ctypes.c_void_p * 2)),
-  ('int_data', ctypes.c_uint32),
-]
+CXSourceLocation.SIZE = 24
+CXSourceLocation._fields_ = ['ptr_data', 'int_data']
+setattr(CXSourceLocation, 'ptr_data', field(0, Array(ctypes.c_void_p, 2)))
+setattr(CXSourceLocation, 'int_data', field(16, ctypes.c_uint32))
 try: (clang_getLocation:=dll.clang_getLocation).restype, clang_getLocation.argtypes = CXSourceLocation, [CXTranslationUnit, CXFile, ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
@@ -105,19 +104,19 @@ except AttributeError: pass
 
 class CXSourceRangeList(Struct): pass
 class CXSourceRange(Struct): pass
-CXSourceRange._fields_ = [
-  ('ptr_data', (ctypes.c_void_p * 2)),
-  ('begin_int_data', ctypes.c_uint32),
-  ('end_int_data', ctypes.c_uint32),
-]
-CXSourceRangeList._fields_ = [
-  ('count', ctypes.c_uint32),
-  ('ranges', ctypes.POINTER(CXSourceRange)),
-]
-try: (clang_getSkippedRanges:=dll.clang_getSkippedRanges).restype, clang_getSkippedRanges.argtypes = ctypes.POINTER(CXSourceRangeList), [CXTranslationUnit, CXFile]
+CXSourceRange.SIZE = 24
+CXSourceRange._fields_ = ['ptr_data', 'begin_int_data', 'end_int_data']
+setattr(CXSourceRange, 'ptr_data', field(0, Array(ctypes.c_void_p, 2)))
+setattr(CXSourceRange, 'begin_int_data', field(16, ctypes.c_uint32))
+setattr(CXSourceRange, 'end_int_data', field(20, ctypes.c_uint32))
+CXSourceRangeList.SIZE = 16
+CXSourceRangeList._fields_ = ['count', 'ranges']
+setattr(CXSourceRangeList, 'count', field(0, ctypes.c_uint32))
+setattr(CXSourceRangeList, 'ranges', field(8, Pointer(CXSourceRange)))
+try: (clang_getSkippedRanges:=dll.clang_getSkippedRanges).restype, clang_getSkippedRanges.argtypes = Pointer(CXSourceRangeList), [CXTranslationUnit, CXFile]
 except AttributeError: pass
 
-try: (clang_getAllSkippedRanges:=dll.clang_getAllSkippedRanges).restype, clang_getAllSkippedRanges.argtypes = ctypes.POINTER(CXSourceRangeList), [CXTranslationUnit]
+try: (clang_getAllSkippedRanges:=dll.clang_getAllSkippedRanges).restype, clang_getAllSkippedRanges.argtypes = Pointer(CXSourceRangeList), [CXTranslationUnit]
 except AttributeError: pass
 
 try: (clang_getNumDiagnostics:=dll.clang_getNumDiagnostics).restype, clang_getNumDiagnostics.argtypes = ctypes.c_uint32, [CXTranslationUnit]
@@ -132,17 +131,17 @@ try: (clang_getDiagnosticSetFromTU:=dll.clang_getDiagnosticSetFromTU).restype, c
 except AttributeError: pass
 
 class CXString(Struct): pass
-CXString._fields_ = [
-  ('data', ctypes.c_void_p),
-  ('private_flags', ctypes.c_uint32),
-]
+CXString.SIZE = 16
+CXString._fields_ = ['data', 'private_flags']
+setattr(CXString, 'data', field(0, ctypes.c_void_p))
+setattr(CXString, 'private_flags', field(8, ctypes.c_uint32))
 try: (clang_getTranslationUnitSpelling:=dll.clang_getTranslationUnitSpelling).restype, clang_getTranslationUnitSpelling.argtypes = CXString, [CXTranslationUnit]
 except AttributeError: pass
 
-try: (clang_createTranslationUnitFromSourceFile:=dll.clang_createTranslationUnitFromSourceFile).restype, clang_createTranslationUnitFromSourceFile.argtypes = CXTranslationUnit, [CXIndex, ctypes.POINTER(ctypes.c_char), ctypes.c_int32, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_uint32, ctypes.POINTER(struct_CXUnsavedFile)]
+try: (clang_createTranslationUnitFromSourceFile:=dll.clang_createTranslationUnitFromSourceFile).restype, clang_createTranslationUnitFromSourceFile.argtypes = CXTranslationUnit, [CXIndex, Pointer(ctypes.c_char), ctypes.c_int32, Pointer(Pointer(ctypes.c_char)), ctypes.c_uint32, Pointer(struct_CXUnsavedFile)]
 except AttributeError: pass
 
-try: (clang_createTranslationUnit:=dll.clang_createTranslationUnit).restype, clang_createTranslationUnit.argtypes = CXTranslationUnit, [CXIndex, ctypes.POINTER(ctypes.c_char)]
+try: (clang_createTranslationUnit:=dll.clang_createTranslationUnit).restype, clang_createTranslationUnit.argtypes = CXTranslationUnit, [CXIndex, Pointer(ctypes.c_char)]
 except AttributeError: pass
 
 enum_CXErrorCode = CEnum(ctypes.c_uint32)
@@ -152,7 +151,7 @@ CXError_Crashed = enum_CXErrorCode.define('CXError_Crashed', 2)
 CXError_InvalidArguments = enum_CXErrorCode.define('CXError_InvalidArguments', 3)
 CXError_ASTReadError = enum_CXErrorCode.define('CXError_ASTReadError', 4)
 
-try: (clang_createTranslationUnit2:=dll.clang_createTranslationUnit2).restype, clang_createTranslationUnit2.argtypes = enum_CXErrorCode, [CXIndex, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(CXTranslationUnit)]
+try: (clang_createTranslationUnit2:=dll.clang_createTranslationUnit2).restype, clang_createTranslationUnit2.argtypes = enum_CXErrorCode, [CXIndex, Pointer(ctypes.c_char), Pointer(CXTranslationUnit)]
 except AttributeError: pass
 
 enum_CXTranslationUnit_Flags = CEnum(ctypes.c_uint32)
@@ -177,13 +176,13 @@ CXTranslationUnit_RetainExcludedConditionalBlocks = enum_CXTranslationUnit_Flags
 try: (clang_defaultEditingTranslationUnitOptions:=dll.clang_defaultEditingTranslationUnitOptions).restype, clang_defaultEditingTranslationUnitOptions.argtypes = ctypes.c_uint32, []
 except AttributeError: pass
 
-try: (clang_parseTranslationUnit:=dll.clang_parseTranslationUnit).restype, clang_parseTranslationUnit.argtypes = CXTranslationUnit, [CXIndex, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32, ctypes.POINTER(struct_CXUnsavedFile), ctypes.c_uint32, ctypes.c_uint32]
+try: (clang_parseTranslationUnit:=dll.clang_parseTranslationUnit).restype, clang_parseTranslationUnit.argtypes = CXTranslationUnit, [CXIndex, Pointer(ctypes.c_char), Pointer(Pointer(ctypes.c_char)), ctypes.c_int32, Pointer(struct_CXUnsavedFile), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-try: (clang_parseTranslationUnit2:=dll.clang_parseTranslationUnit2).restype, clang_parseTranslationUnit2.argtypes = enum_CXErrorCode, [CXIndex, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32, ctypes.POINTER(struct_CXUnsavedFile), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(CXTranslationUnit)]
+try: (clang_parseTranslationUnit2:=dll.clang_parseTranslationUnit2).restype, clang_parseTranslationUnit2.argtypes = enum_CXErrorCode, [CXIndex, Pointer(ctypes.c_char), Pointer(Pointer(ctypes.c_char)), ctypes.c_int32, Pointer(struct_CXUnsavedFile), ctypes.c_uint32, ctypes.c_uint32, Pointer(CXTranslationUnit)]
 except AttributeError: pass
 
-try: (clang_parseTranslationUnit2FullArgv:=dll.clang_parseTranslationUnit2FullArgv).restype, clang_parseTranslationUnit2FullArgv.argtypes = enum_CXErrorCode, [CXIndex, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32, ctypes.POINTER(struct_CXUnsavedFile), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(CXTranslationUnit)]
+try: (clang_parseTranslationUnit2FullArgv:=dll.clang_parseTranslationUnit2FullArgv).restype, clang_parseTranslationUnit2FullArgv.argtypes = enum_CXErrorCode, [CXIndex, Pointer(ctypes.c_char), Pointer(Pointer(ctypes.c_char)), ctypes.c_int32, Pointer(struct_CXUnsavedFile), ctypes.c_uint32, ctypes.c_uint32, Pointer(CXTranslationUnit)]
 except AttributeError: pass
 
 enum_CXSaveTranslationUnit_Flags = CEnum(ctypes.c_uint32)
@@ -198,7 +197,7 @@ CXSaveError_Unknown = enum_CXSaveError.define('CXSaveError_Unknown', 1)
 CXSaveError_TranslationErrors = enum_CXSaveError.define('CXSaveError_TranslationErrors', 2)
 CXSaveError_InvalidTU = enum_CXSaveError.define('CXSaveError_InvalidTU', 3)
 
-try: (clang_saveTranslationUnit:=dll.clang_saveTranslationUnit).restype, clang_saveTranslationUnit.argtypes = ctypes.c_int32, [CXTranslationUnit, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32]
+try: (clang_saveTranslationUnit:=dll.clang_saveTranslationUnit).restype, clang_saveTranslationUnit.argtypes = ctypes.c_int32, [CXTranslationUnit, Pointer(ctypes.c_char), ctypes.c_uint32]
 except AttributeError: pass
 
 try: (clang_suspendTranslationUnit:=dll.clang_suspendTranslationUnit).restype, clang_suspendTranslationUnit.argtypes = ctypes.c_uint32, [CXTranslationUnit]
@@ -213,7 +212,7 @@ CXReparse_None = enum_CXReparse_Flags.define('CXReparse_None', 0)
 try: (clang_defaultReparseOptions:=dll.clang_defaultReparseOptions).restype, clang_defaultReparseOptions.argtypes = ctypes.c_uint32, [CXTranslationUnit]
 except AttributeError: pass
 
-try: (clang_reparseTranslationUnit:=dll.clang_reparseTranslationUnit).restype, clang_reparseTranslationUnit.argtypes = ctypes.c_int32, [CXTranslationUnit, ctypes.c_uint32, ctypes.POINTER(struct_CXUnsavedFile), ctypes.c_uint32]
+try: (clang_reparseTranslationUnit:=dll.clang_reparseTranslationUnit).restype, clang_reparseTranslationUnit.argtypes = ctypes.c_int32, [CXTranslationUnit, ctypes.c_uint32, Pointer(struct_CXUnsavedFile), ctypes.c_uint32]
 except AttributeError: pass
 
 enum_CXTUResourceUsageKind = CEnum(ctypes.c_uint32)
@@ -236,21 +235,21 @@ CXTUResourceUsage_MEMORY_IN_BYTES_END = enum_CXTUResourceUsageKind.define('CXTUR
 CXTUResourceUsage_First = enum_CXTUResourceUsageKind.define('CXTUResourceUsage_First', 1)
 CXTUResourceUsage_Last = enum_CXTUResourceUsageKind.define('CXTUResourceUsage_Last', 14)
 
-try: (clang_getTUResourceUsageName:=dll.clang_getTUResourceUsageName).restype, clang_getTUResourceUsageName.argtypes = ctypes.POINTER(ctypes.c_char), [enum_CXTUResourceUsageKind]
+try: (clang_getTUResourceUsageName:=dll.clang_getTUResourceUsageName).restype, clang_getTUResourceUsageName.argtypes = Pointer(ctypes.c_char), [enum_CXTUResourceUsageKind]
 except AttributeError: pass
 
 class struct_CXTUResourceUsageEntry(Struct): pass
-struct_CXTUResourceUsageEntry._fields_ = [
-  ('kind', enum_CXTUResourceUsageKind),
-  ('amount', ctypes.c_uint64),
-]
+struct_CXTUResourceUsageEntry.SIZE = 16
+struct_CXTUResourceUsageEntry._fields_ = ['kind', 'amount']
+setattr(struct_CXTUResourceUsageEntry, 'kind', field(0, enum_CXTUResourceUsageKind))
+setattr(struct_CXTUResourceUsageEntry, 'amount', field(8, ctypes.c_uint64))
 CXTUResourceUsageEntry = struct_CXTUResourceUsageEntry
 class struct_CXTUResourceUsage(Struct): pass
-struct_CXTUResourceUsage._fields_ = [
-  ('data', ctypes.c_void_p),
-  ('numEntries', ctypes.c_uint32),
-  ('entries', ctypes.POINTER(CXTUResourceUsageEntry)),
-]
+struct_CXTUResourceUsage.SIZE = 24
+struct_CXTUResourceUsage._fields_ = ['data', 'numEntries', 'entries']
+setattr(struct_CXTUResourceUsage, 'data', field(0, ctypes.c_void_p))
+setattr(struct_CXTUResourceUsage, 'numEntries', field(8, ctypes.c_uint32))
+setattr(struct_CXTUResourceUsage, 'entries', field(16, Pointer(CXTUResourceUsageEntry)))
 CXTUResourceUsage = struct_CXTUResourceUsage
 try: (clang_getCXTUResourceUsage:=dll.clang_getCXTUResourceUsage).restype, clang_getCXTUResourceUsage.argtypes = CXTUResourceUsage, [CXTranslationUnit]
 except AttributeError: pass
@@ -577,11 +576,11 @@ CXCursor_LastExtraDecl = enum_CXCursorKind.define('CXCursor_LastExtraDecl', 604)
 CXCursor_OverloadCandidate = enum_CXCursorKind.define('CXCursor_OverloadCandidate', 700)
 
 class CXCursor(Struct): pass
-CXCursor._fields_ = [
-  ('kind', enum_CXCursorKind),
-  ('xdata', ctypes.c_int32),
-  ('data', (ctypes.c_void_p * 3)),
-]
+CXCursor.SIZE = 32
+CXCursor._fields_ = ['kind', 'xdata', 'data']
+setattr(CXCursor, 'kind', field(0, enum_CXCursorKind))
+setattr(CXCursor, 'xdata', field(4, ctypes.c_int32))
+setattr(CXCursor, 'data', field(8, Array(ctypes.c_void_p, 3)))
 try: (clang_getNullCursor:=dll.clang_getNullCursor).restype, clang_getNullCursor.argtypes = CXCursor, []
 except AttributeError: pass
 
@@ -656,19 +655,19 @@ try: (clang_getCursorAvailability:=dll.clang_getCursorAvailability).restype, cla
 except AttributeError: pass
 
 class struct_CXPlatformAvailability(Struct): pass
-struct_CXPlatformAvailability._fields_ = [
-  ('Platform', CXString),
-  ('Introduced', CXVersion),
-  ('Deprecated', CXVersion),
-  ('Obsoleted', CXVersion),
-  ('Unavailable', ctypes.c_int32),
-  ('Message', CXString),
-]
+struct_CXPlatformAvailability.SIZE = 72
+struct_CXPlatformAvailability._fields_ = ['Platform', 'Introduced', 'Deprecated', 'Obsoleted', 'Unavailable', 'Message']
+setattr(struct_CXPlatformAvailability, 'Platform', field(0, CXString))
+setattr(struct_CXPlatformAvailability, 'Introduced', field(16, CXVersion))
+setattr(struct_CXPlatformAvailability, 'Deprecated', field(28, CXVersion))
+setattr(struct_CXPlatformAvailability, 'Obsoleted', field(40, CXVersion))
+setattr(struct_CXPlatformAvailability, 'Unavailable', field(52, ctypes.c_int32))
+setattr(struct_CXPlatformAvailability, 'Message', field(56, CXString))
 CXPlatformAvailability = struct_CXPlatformAvailability
-try: (clang_getCursorPlatformAvailability:=dll.clang_getCursorPlatformAvailability).restype, clang_getCursorPlatformAvailability.argtypes = ctypes.c_int32, [CXCursor, ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(CXString), ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(CXString), ctypes.POINTER(CXPlatformAvailability), ctypes.c_int32]
+try: (clang_getCursorPlatformAvailability:=dll.clang_getCursorPlatformAvailability).restype, clang_getCursorPlatformAvailability.argtypes = ctypes.c_int32, [CXCursor, Pointer(ctypes.c_int32), Pointer(CXString), Pointer(ctypes.c_int32), Pointer(CXString), Pointer(CXPlatformAvailability), ctypes.c_int32]
 except AttributeError: pass
 
-try: (clang_disposeCXPlatformAvailability:=dll.clang_disposeCXPlatformAvailability).restype, clang_disposeCXPlatformAvailability.argtypes = None, [ctypes.POINTER(CXPlatformAvailability)]
+try: (clang_disposeCXPlatformAvailability:=dll.clang_disposeCXPlatformAvailability).restype, clang_disposeCXPlatformAvailability.argtypes = None, [Pointer(CXPlatformAvailability)]
 except AttributeError: pass
 
 try: (clang_Cursor_getVarDeclInitializer:=dll.clang_Cursor_getVarDeclInitializer).restype, clang_Cursor_getVarDeclInitializer.argtypes = CXCursor, [CXCursor]
@@ -701,7 +700,7 @@ try: (clang_Cursor_getTranslationUnit:=dll.clang_Cursor_getTranslationUnit).rest
 except AttributeError: pass
 
 class struct_CXCursorSetImpl(Struct): pass
-CXCursorSet = ctypes.POINTER(struct_CXCursorSetImpl)
+CXCursorSet = Pointer(struct_CXCursorSetImpl)
 try: (clang_createCXCursorSet:=dll.clang_createCXCursorSet).restype, clang_createCXCursorSet.argtypes = CXCursorSet, []
 except AttributeError: pass
 
@@ -720,10 +719,10 @@ except AttributeError: pass
 try: (clang_getCursorLexicalParent:=dll.clang_getCursorLexicalParent).restype, clang_getCursorLexicalParent.argtypes = CXCursor, [CXCursor]
 except AttributeError: pass
 
-try: (clang_getOverriddenCursors:=dll.clang_getOverriddenCursors).restype, clang_getOverriddenCursors.argtypes = None, [CXCursor, ctypes.POINTER(ctypes.POINTER(CXCursor)), ctypes.POINTER(ctypes.c_uint32)]
+try: (clang_getOverriddenCursors:=dll.clang_getOverriddenCursors).restype, clang_getOverriddenCursors.argtypes = None, [CXCursor, Pointer(Pointer(CXCursor)), Pointer(ctypes.c_uint32)]
 except AttributeError: pass
 
-try: (clang_disposeOverriddenCursors:=dll.clang_disposeOverriddenCursors).restype, clang_disposeOverriddenCursors.argtypes = None, [ctypes.POINTER(CXCursor)]
+try: (clang_disposeOverriddenCursors:=dll.clang_disposeOverriddenCursors).restype, clang_disposeOverriddenCursors.argtypes = None, [Pointer(CXCursor)]
 except AttributeError: pass
 
 try: (clang_getIncludedFile:=dll.clang_getIncludedFile).restype, clang_getIncludedFile.argtypes = CXFile, [CXCursor]
@@ -896,10 +895,10 @@ CXCallingConv_Invalid = enum_CXCallingConv.define('CXCallingConv_Invalid', 100)
 CXCallingConv_Unexposed = enum_CXCallingConv.define('CXCallingConv_Unexposed', 200)
 
 class CXType(Struct): pass
-CXType._fields_ = [
-  ('kind', enum_CXTypeKind),
-  ('data', (ctypes.c_void_p * 2)),
-]
+CXType.SIZE = 24
+CXType._fields_ = ['kind', 'data']
+setattr(CXType, 'kind', field(0, enum_CXTypeKind))
+setattr(CXType, 'data', field(8, Array(ctypes.c_void_p, 2)))
 try: (clang_getCursorType:=dll.clang_getCursorType).restype, clang_getCursorType.argtypes = CXType, [CXCursor]
 except AttributeError: pass
 
@@ -1095,7 +1094,7 @@ except AttributeError: pass
 try: (clang_Type_getSizeOf:=dll.clang_Type_getSizeOf).restype, clang_Type_getSizeOf.argtypes = ctypes.c_int64, [CXType]
 except AttributeError: pass
 
-try: (clang_Type_getOffsetOf:=dll.clang_Type_getOffsetOf).restype, clang_Type_getOffsetOf.argtypes = ctypes.c_int64, [CXType, ctypes.POINTER(ctypes.c_char)]
+try: (clang_Type_getOffsetOf:=dll.clang_Type_getOffsetOf).restype, clang_Type_getOffsetOf.argtypes = ctypes.c_int64, [CXType, Pointer(ctypes.c_char)]
 except AttributeError: pass
 
 try: (clang_Type_getModifiedType:=dll.clang_Type_getModifiedType).restype, clang_Type_getModifiedType.argtypes = CXType, [CXType]
@@ -1220,29 +1219,29 @@ try: (clang_visitChildren:=dll.clang_visitChildren).restype, clang_visitChildren
 except AttributeError: pass
 
 class struct__CXChildVisitResult(Struct): pass
-CXCursorVisitorBlock = ctypes.POINTER(struct__CXChildVisitResult)
+CXCursorVisitorBlock = Pointer(struct__CXChildVisitResult)
 try: (clang_visitChildrenWithBlock:=dll.clang_visitChildrenWithBlock).restype, clang_visitChildrenWithBlock.argtypes = ctypes.c_uint32, [CXCursor, CXCursorVisitorBlock]
 except AttributeError: pass
 
 try: (clang_getCursorUSR:=dll.clang_getCursorUSR).restype, clang_getCursorUSR.argtypes = CXString, [CXCursor]
 except AttributeError: pass
 
-try: (clang_constructUSR_ObjCClass:=dll.clang_constructUSR_ObjCClass).restype, clang_constructUSR_ObjCClass.argtypes = CXString, [ctypes.POINTER(ctypes.c_char)]
+try: (clang_constructUSR_ObjCClass:=dll.clang_constructUSR_ObjCClass).restype, clang_constructUSR_ObjCClass.argtypes = CXString, [Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (clang_constructUSR_ObjCCategory:=dll.clang_constructUSR_ObjCCategory).restype, clang_constructUSR_ObjCCategory.argtypes = CXString, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
+try: (clang_constructUSR_ObjCCategory:=dll.clang_constructUSR_ObjCCategory).restype, clang_constructUSR_ObjCCategory.argtypes = CXString, [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (clang_constructUSR_ObjCProtocol:=dll.clang_constructUSR_ObjCProtocol).restype, clang_constructUSR_ObjCProtocol.argtypes = CXString, [ctypes.POINTER(ctypes.c_char)]
+try: (clang_constructUSR_ObjCProtocol:=dll.clang_constructUSR_ObjCProtocol).restype, clang_constructUSR_ObjCProtocol.argtypes = CXString, [Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (clang_constructUSR_ObjCIvar:=dll.clang_constructUSR_ObjCIvar).restype, clang_constructUSR_ObjCIvar.argtypes = CXString, [ctypes.POINTER(ctypes.c_char), CXString]
+try: (clang_constructUSR_ObjCIvar:=dll.clang_constructUSR_ObjCIvar).restype, clang_constructUSR_ObjCIvar.argtypes = CXString, [Pointer(ctypes.c_char), CXString]
 except AttributeError: pass
 
-try: (clang_constructUSR_ObjCMethod:=dll.clang_constructUSR_ObjCMethod).restype, clang_constructUSR_ObjCMethod.argtypes = CXString, [ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, CXString]
+try: (clang_constructUSR_ObjCMethod:=dll.clang_constructUSR_ObjCMethod).restype, clang_constructUSR_ObjCMethod.argtypes = CXString, [Pointer(ctypes.c_char), ctypes.c_uint32, CXString]
 except AttributeError: pass
 
-try: (clang_constructUSR_ObjCProperty:=dll.clang_constructUSR_ObjCProperty).restype, clang_constructUSR_ObjCProperty.argtypes = CXString, [ctypes.POINTER(ctypes.c_char), CXString]
+try: (clang_constructUSR_ObjCProperty:=dll.clang_constructUSR_ObjCProperty).restype, clang_constructUSR_ObjCProperty.argtypes = CXString, [Pointer(ctypes.c_char), CXString]
 except AttributeError: pass
 
 try: (clang_getCursorSpelling:=dll.clang_getCursorSpelling).restype, clang_getCursorSpelling.argtypes = CXString, [CXCursor]
@@ -1366,7 +1365,7 @@ except AttributeError: pass
 try: (clang_Cursor_isVariadic:=dll.clang_Cursor_isVariadic).restype, clang_Cursor_isVariadic.argtypes = ctypes.c_uint32, [CXCursor]
 except AttributeError: pass
 
-try: (clang_Cursor_isExternalSymbol:=dll.clang_Cursor_isExternalSymbol).restype, clang_Cursor_isExternalSymbol.argtypes = ctypes.c_uint32, [CXCursor, ctypes.POINTER(CXString), ctypes.POINTER(CXString), ctypes.POINTER(ctypes.c_uint32)]
+try: (clang_Cursor_isExternalSymbol:=dll.clang_Cursor_isExternalSymbol).restype, clang_Cursor_isExternalSymbol.argtypes = ctypes.c_uint32, [CXCursor, Pointer(CXString), Pointer(CXString), Pointer(ctypes.c_uint32)]
 except AttributeError: pass
 
 try: (clang_Cursor_getCommentRange:=dll.clang_Cursor_getCommentRange).restype, clang_Cursor_getCommentRange.argtypes = CXSourceRange, [CXCursor]
@@ -1382,14 +1381,14 @@ try: (clang_Cursor_getMangling:=dll.clang_Cursor_getMangling).restype, clang_Cur
 except AttributeError: pass
 
 class CXStringSet(Struct): pass
-CXStringSet._fields_ = [
-  ('Strings', ctypes.POINTER(CXString)),
-  ('Count', ctypes.c_uint32),
-]
-try: (clang_Cursor_getCXXManglings:=dll.clang_Cursor_getCXXManglings).restype, clang_Cursor_getCXXManglings.argtypes = ctypes.POINTER(CXStringSet), [CXCursor]
+CXStringSet.SIZE = 16
+CXStringSet._fields_ = ['Strings', 'Count']
+setattr(CXStringSet, 'Strings', field(0, Pointer(CXString)))
+setattr(CXStringSet, 'Count', field(8, ctypes.c_uint32))
+try: (clang_Cursor_getCXXManglings:=dll.clang_Cursor_getCXXManglings).restype, clang_Cursor_getCXXManglings.argtypes = Pointer(CXStringSet), [CXCursor]
 except AttributeError: pass
 
-try: (clang_Cursor_getObjCManglings:=dll.clang_Cursor_getObjCManglings).restype, clang_Cursor_getObjCManglings.argtypes = ctypes.POINTER(CXStringSet), [CXCursor]
+try: (clang_Cursor_getObjCManglings:=dll.clang_Cursor_getObjCManglings).restype, clang_Cursor_getObjCManglings.argtypes = Pointer(CXStringSet), [CXCursor]
 except AttributeError: pass
 
 CXModule = ctypes.c_void_p
@@ -1491,11 +1490,11 @@ CXToken_Comment = enum_CXTokenKind.define('CXToken_Comment', 4)
 
 CXTokenKind = enum_CXTokenKind
 class CXToken(Struct): pass
-CXToken._fields_ = [
-  ('int_data', (ctypes.c_uint32 * 4)),
-  ('ptr_data', ctypes.c_void_p),
-]
-try: (clang_getToken:=dll.clang_getToken).restype, clang_getToken.argtypes = ctypes.POINTER(CXToken), [CXTranslationUnit, CXSourceLocation]
+CXToken.SIZE = 24
+CXToken._fields_ = ['int_data', 'ptr_data']
+setattr(CXToken, 'int_data', field(0, Array(ctypes.c_uint32, 4)))
+setattr(CXToken, 'ptr_data', field(16, ctypes.c_void_p))
+try: (clang_getToken:=dll.clang_getToken).restype, clang_getToken.argtypes = Pointer(CXToken), [CXTranslationUnit, CXSourceLocation]
 except AttributeError: pass
 
 try: (clang_getTokenKind:=dll.clang_getTokenKind).restype, clang_getTokenKind.argtypes = CXTokenKind, [CXToken]
@@ -1510,19 +1509,19 @@ except AttributeError: pass
 try: (clang_getTokenExtent:=dll.clang_getTokenExtent).restype, clang_getTokenExtent.argtypes = CXSourceRange, [CXTranslationUnit, CXToken]
 except AttributeError: pass
 
-try: (clang_tokenize:=dll.clang_tokenize).restype, clang_tokenize.argtypes = None, [CXTranslationUnit, CXSourceRange, ctypes.POINTER(ctypes.POINTER(CXToken)), ctypes.POINTER(ctypes.c_uint32)]
+try: (clang_tokenize:=dll.clang_tokenize).restype, clang_tokenize.argtypes = None, [CXTranslationUnit, CXSourceRange, Pointer(Pointer(CXToken)), Pointer(ctypes.c_uint32)]
 except AttributeError: pass
 
-try: (clang_annotateTokens:=dll.clang_annotateTokens).restype, clang_annotateTokens.argtypes = None, [CXTranslationUnit, ctypes.POINTER(CXToken), ctypes.c_uint32, ctypes.POINTER(CXCursor)]
+try: (clang_annotateTokens:=dll.clang_annotateTokens).restype, clang_annotateTokens.argtypes = None, [CXTranslationUnit, Pointer(CXToken), ctypes.c_uint32, Pointer(CXCursor)]
 except AttributeError: pass
 
-try: (clang_disposeTokens:=dll.clang_disposeTokens).restype, clang_disposeTokens.argtypes = None, [CXTranslationUnit, ctypes.POINTER(CXToken), ctypes.c_uint32]
+try: (clang_disposeTokens:=dll.clang_disposeTokens).restype, clang_disposeTokens.argtypes = None, [CXTranslationUnit, Pointer(CXToken), ctypes.c_uint32]
 except AttributeError: pass
 
 try: (clang_getCursorKindSpelling:=dll.clang_getCursorKindSpelling).restype, clang_getCursorKindSpelling.argtypes = CXString, [enum_CXCursorKind]
 except AttributeError: pass
 
-try: (clang_getDefinitionSpellingAndExtent:=dll.clang_getDefinitionSpellingAndExtent).restype, clang_getDefinitionSpellingAndExtent.argtypes = None, [CXCursor, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
+try: (clang_getDefinitionSpellingAndExtent:=dll.clang_getDefinitionSpellingAndExtent).restype, clang_getDefinitionSpellingAndExtent.argtypes = None, [CXCursor, Pointer(Pointer(ctypes.c_char)), Pointer(Pointer(ctypes.c_char)), Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32)]
 except AttributeError: pass
 
 try: (clang_enableStackTraces:=dll.clang_enableStackTraces).restype, clang_enableStackTraces.argtypes = None, []
@@ -1533,10 +1532,10 @@ except AttributeError: pass
 
 CXCompletionString = ctypes.c_void_p
 class CXCompletionResult(Struct): pass
-CXCompletionResult._fields_ = [
-  ('CursorKind', enum_CXCursorKind),
-  ('CompletionString', CXCompletionString),
-]
+CXCompletionResult.SIZE = 16
+CXCompletionResult._fields_ = ['CursorKind', 'CompletionString']
+setattr(CXCompletionResult, 'CursorKind', field(0, enum_CXCursorKind))
+setattr(CXCompletionResult, 'CompletionString', field(8, CXCompletionString))
 enum_CXCompletionChunkKind = CEnum(ctypes.c_uint32)
 CXCompletionChunk_Optional = enum_CXCompletionChunkKind.define('CXCompletionChunk_Optional', 0)
 CXCompletionChunk_TypedText = enum_CXCompletionChunkKind.define('CXCompletionChunk_TypedText', 1)
@@ -1584,7 +1583,7 @@ except AttributeError: pass
 try: (clang_getCompletionAnnotation:=dll.clang_getCompletionAnnotation).restype, clang_getCompletionAnnotation.argtypes = CXString, [CXCompletionString, ctypes.c_uint32]
 except AttributeError: pass
 
-try: (clang_getCompletionParent:=dll.clang_getCompletionParent).restype, clang_getCompletionParent.argtypes = CXString, [CXCompletionString, ctypes.POINTER(enum_CXCursorKind)]
+try: (clang_getCompletionParent:=dll.clang_getCompletionParent).restype, clang_getCompletionParent.argtypes = CXString, [CXCompletionString, Pointer(enum_CXCursorKind)]
 except AttributeError: pass
 
 try: (clang_getCompletionBriefComment:=dll.clang_getCompletionBriefComment).restype, clang_getCompletionBriefComment.argtypes = CXString, [CXCompletionString]
@@ -1594,14 +1593,14 @@ try: (clang_getCursorCompletionString:=dll.clang_getCursorCompletionString).rest
 except AttributeError: pass
 
 class CXCodeCompleteResults(Struct): pass
-CXCodeCompleteResults._fields_ = [
-  ('Results', ctypes.POINTER(CXCompletionResult)),
-  ('NumResults', ctypes.c_uint32),
-]
-try: (clang_getCompletionNumFixIts:=dll.clang_getCompletionNumFixIts).restype, clang_getCompletionNumFixIts.argtypes = ctypes.c_uint32, [ctypes.POINTER(CXCodeCompleteResults), ctypes.c_uint32]
+CXCodeCompleteResults.SIZE = 16
+CXCodeCompleteResults._fields_ = ['Results', 'NumResults']
+setattr(CXCodeCompleteResults, 'Results', field(0, Pointer(CXCompletionResult)))
+setattr(CXCodeCompleteResults, 'NumResults', field(8, ctypes.c_uint32))
+try: (clang_getCompletionNumFixIts:=dll.clang_getCompletionNumFixIts).restype, clang_getCompletionNumFixIts.argtypes = ctypes.c_uint32, [Pointer(CXCodeCompleteResults), ctypes.c_uint32]
 except AttributeError: pass
 
-try: (clang_getCompletionFixIt:=dll.clang_getCompletionFixIt).restype, clang_getCompletionFixIt.argtypes = CXString, [ctypes.POINTER(CXCodeCompleteResults), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(CXSourceRange)]
+try: (clang_getCompletionFixIt:=dll.clang_getCompletionFixIt).restype, clang_getCompletionFixIt.argtypes = CXString, [Pointer(CXCodeCompleteResults), ctypes.c_uint32, ctypes.c_uint32, Pointer(CXSourceRange)]
 except AttributeError: pass
 
 enum_CXCodeComplete_Flags = CEnum(ctypes.c_uint32)
@@ -1641,31 +1640,31 @@ CXCompletionContext_Unknown = enum_CXCompletionContext.define('CXCompletionConte
 try: (clang_defaultCodeCompleteOptions:=dll.clang_defaultCodeCompleteOptions).restype, clang_defaultCodeCompleteOptions.argtypes = ctypes.c_uint32, []
 except AttributeError: pass
 
-try: (clang_codeCompleteAt:=dll.clang_codeCompleteAt).restype, clang_codeCompleteAt.argtypes = ctypes.POINTER(CXCodeCompleteResults), [CXTranslationUnit, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(struct_CXUnsavedFile), ctypes.c_uint32, ctypes.c_uint32]
+try: (clang_codeCompleteAt:=dll.clang_codeCompleteAt).restype, clang_codeCompleteAt.argtypes = Pointer(CXCodeCompleteResults), [CXTranslationUnit, Pointer(ctypes.c_char), ctypes.c_uint32, ctypes.c_uint32, Pointer(struct_CXUnsavedFile), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
-try: (clang_sortCodeCompletionResults:=dll.clang_sortCodeCompletionResults).restype, clang_sortCodeCompletionResults.argtypes = None, [ctypes.POINTER(CXCompletionResult), ctypes.c_uint32]
+try: (clang_sortCodeCompletionResults:=dll.clang_sortCodeCompletionResults).restype, clang_sortCodeCompletionResults.argtypes = None, [Pointer(CXCompletionResult), ctypes.c_uint32]
 except AttributeError: pass
 
-try: (clang_disposeCodeCompleteResults:=dll.clang_disposeCodeCompleteResults).restype, clang_disposeCodeCompleteResults.argtypes = None, [ctypes.POINTER(CXCodeCompleteResults)]
+try: (clang_disposeCodeCompleteResults:=dll.clang_disposeCodeCompleteResults).restype, clang_disposeCodeCompleteResults.argtypes = None, [Pointer(CXCodeCompleteResults)]
 except AttributeError: pass
 
-try: (clang_codeCompleteGetNumDiagnostics:=dll.clang_codeCompleteGetNumDiagnostics).restype, clang_codeCompleteGetNumDiagnostics.argtypes = ctypes.c_uint32, [ctypes.POINTER(CXCodeCompleteResults)]
+try: (clang_codeCompleteGetNumDiagnostics:=dll.clang_codeCompleteGetNumDiagnostics).restype, clang_codeCompleteGetNumDiagnostics.argtypes = ctypes.c_uint32, [Pointer(CXCodeCompleteResults)]
 except AttributeError: pass
 
-try: (clang_codeCompleteGetDiagnostic:=dll.clang_codeCompleteGetDiagnostic).restype, clang_codeCompleteGetDiagnostic.argtypes = CXDiagnostic, [ctypes.POINTER(CXCodeCompleteResults), ctypes.c_uint32]
+try: (clang_codeCompleteGetDiagnostic:=dll.clang_codeCompleteGetDiagnostic).restype, clang_codeCompleteGetDiagnostic.argtypes = CXDiagnostic, [Pointer(CXCodeCompleteResults), ctypes.c_uint32]
 except AttributeError: pass
 
-try: (clang_codeCompleteGetContexts:=dll.clang_codeCompleteGetContexts).restype, clang_codeCompleteGetContexts.argtypes = ctypes.c_uint64, [ctypes.POINTER(CXCodeCompleteResults)]
+try: (clang_codeCompleteGetContexts:=dll.clang_codeCompleteGetContexts).restype, clang_codeCompleteGetContexts.argtypes = ctypes.c_uint64, [Pointer(CXCodeCompleteResults)]
 except AttributeError: pass
 
-try: (clang_codeCompleteGetContainerKind:=dll.clang_codeCompleteGetContainerKind).restype, clang_codeCompleteGetContainerKind.argtypes = enum_CXCursorKind, [ctypes.POINTER(CXCodeCompleteResults), ctypes.POINTER(ctypes.c_uint32)]
+try: (clang_codeCompleteGetContainerKind:=dll.clang_codeCompleteGetContainerKind).restype, clang_codeCompleteGetContainerKind.argtypes = enum_CXCursorKind, [Pointer(CXCodeCompleteResults), Pointer(ctypes.c_uint32)]
 except AttributeError: pass
 
-try: (clang_codeCompleteGetContainerUSR:=dll.clang_codeCompleteGetContainerUSR).restype, clang_codeCompleteGetContainerUSR.argtypes = CXString, [ctypes.POINTER(CXCodeCompleteResults)]
+try: (clang_codeCompleteGetContainerUSR:=dll.clang_codeCompleteGetContainerUSR).restype, clang_codeCompleteGetContainerUSR.argtypes = CXString, [Pointer(CXCodeCompleteResults)]
 except AttributeError: pass
 
-try: (clang_codeCompleteGetObjCSelector:=dll.clang_codeCompleteGetObjCSelector).restype, clang_codeCompleteGetObjCSelector.argtypes = CXString, [ctypes.POINTER(CXCodeCompleteResults)]
+try: (clang_codeCompleteGetObjCSelector:=dll.clang_codeCompleteGetObjCSelector).restype, clang_codeCompleteGetObjCSelector.argtypes = CXString, [Pointer(CXCodeCompleteResults)]
 except AttributeError: pass
 
 try: (clang_getClangVersion:=dll.clang_getClangVersion).restype, clang_getClangVersion.argtypes = CXString, []
@@ -1674,7 +1673,7 @@ except AttributeError: pass
 try: (clang_toggleCrashRecovery:=dll.clang_toggleCrashRecovery).restype, clang_toggleCrashRecovery.argtypes = None, [ctypes.c_uint32]
 except AttributeError: pass
 
-CXInclusionVisitor = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.POINTER(CXSourceLocation), ctypes.c_uint32, ctypes.c_void_p)
+CXInclusionVisitor = ctypes.CFUNCTYPE(None, ctypes.c_void_p, Pointer(CXSourceLocation), ctypes.c_uint32, ctypes.c_void_p)
 try: (clang_getInclusions:=dll.clang_getInclusions).restype, clang_getInclusions.argtypes = None, [CXTranslationUnit, CXInclusionVisitor, CXClientData]
 except AttributeError: pass
 
@@ -1709,23 +1708,23 @@ except AttributeError: pass
 try: (clang_EvalResult_getAsDouble:=dll.clang_EvalResult_getAsDouble).restype, clang_EvalResult_getAsDouble.argtypes = ctypes.c_double, [CXEvalResult]
 except AttributeError: pass
 
-try: (clang_EvalResult_getAsStr:=dll.clang_EvalResult_getAsStr).restype, clang_EvalResult_getAsStr.argtypes = ctypes.POINTER(ctypes.c_char), [CXEvalResult]
+try: (clang_EvalResult_getAsStr:=dll.clang_EvalResult_getAsStr).restype, clang_EvalResult_getAsStr.argtypes = Pointer(ctypes.c_char), [CXEvalResult]
 except AttributeError: pass
 
 try: (clang_EvalResult_dispose:=dll.clang_EvalResult_dispose).restype, clang_EvalResult_dispose.argtypes = None, [CXEvalResult]
 except AttributeError: pass
 
 CXRemapping = ctypes.c_void_p
-try: (clang_getRemappings:=dll.clang_getRemappings).restype, clang_getRemappings.argtypes = CXRemapping, [ctypes.POINTER(ctypes.c_char)]
+try: (clang_getRemappings:=dll.clang_getRemappings).restype, clang_getRemappings.argtypes = CXRemapping, [Pointer(ctypes.c_char)]
 except AttributeError: pass
 
-try: (clang_getRemappingsFromFileList:=dll.clang_getRemappingsFromFileList).restype, clang_getRemappingsFromFileList.argtypes = CXRemapping, [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_uint32]
+try: (clang_getRemappingsFromFileList:=dll.clang_getRemappingsFromFileList).restype, clang_getRemappingsFromFileList.argtypes = CXRemapping, [Pointer(Pointer(ctypes.c_char)), ctypes.c_uint32]
 except AttributeError: pass
 
 try: (clang_remap_getNumFiles:=dll.clang_remap_getNumFiles).restype, clang_remap_getNumFiles.argtypes = ctypes.c_uint32, [CXRemapping]
 except AttributeError: pass
 
-try: (clang_remap_getFilenames:=dll.clang_remap_getFilenames).restype, clang_remap_getFilenames.argtypes = None, [CXRemapping, ctypes.c_uint32, ctypes.POINTER(CXString), ctypes.POINTER(CXString)]
+try: (clang_remap_getFilenames:=dll.clang_remap_getFilenames).restype, clang_remap_getFilenames.argtypes = None, [CXRemapping, ctypes.c_uint32, Pointer(CXString), Pointer(CXString)]
 except AttributeError: pass
 
 try: (clang_remap_dispose:=dll.clang_remap_dispose).restype, clang_remap_dispose.argtypes = None, [CXRemapping]
@@ -1736,10 +1735,10 @@ CXVisit_Break = enum_CXVisitorResult.define('CXVisit_Break', 0)
 CXVisit_Continue = enum_CXVisitorResult.define('CXVisit_Continue', 1)
 
 class struct_CXCursorAndRangeVisitor(Struct): pass
-struct_CXCursorAndRangeVisitor._fields_ = [
-  ('context', ctypes.c_void_p),
-  ('visit', ctypes.CFUNCTYPE(enum_CXVisitorResult, ctypes.c_void_p, CXCursor, CXSourceRange)),
-]
+struct_CXCursorAndRangeVisitor.SIZE = 16
+struct_CXCursorAndRangeVisitor._fields_ = ['context', 'visit']
+setattr(struct_CXCursorAndRangeVisitor, 'context', field(0, ctypes.c_void_p))
+setattr(struct_CXCursorAndRangeVisitor, 'visit', field(8, ctypes.CFUNCTYPE(enum_CXVisitorResult, ctypes.c_void_p, CXCursor, CXSourceRange)))
 CXCursorAndRangeVisitor = struct_CXCursorAndRangeVisitor
 CXResult = CEnum(ctypes.c_uint32)
 CXResult_Success = CXResult.define('CXResult_Success', 0)
@@ -1753,7 +1752,7 @@ try: (clang_findIncludesInFile:=dll.clang_findIncludesInFile).restype, clang_fin
 except AttributeError: pass
 
 class struct__CXCursorAndRangeVisitorBlock(Struct): pass
-CXCursorAndRangeVisitorBlock = ctypes.POINTER(struct__CXCursorAndRangeVisitorBlock)
+CXCursorAndRangeVisitorBlock = Pointer(struct__CXCursorAndRangeVisitorBlock)
 try: (clang_findReferencesInFileWithBlock:=dll.clang_findReferencesInFileWithBlock).restype, clang_findReferencesInFileWithBlock.argtypes = CXResult, [CXCursor, CXFile, CXCursorAndRangeVisitorBlock]
 except AttributeError: pass
 
@@ -1765,26 +1764,26 @@ CXIdxClientEntity = ctypes.c_void_p
 CXIdxClientContainer = ctypes.c_void_p
 CXIdxClientASTFile = ctypes.c_void_p
 class CXIdxLoc(Struct): pass
-CXIdxLoc._fields_ = [
-  ('ptr_data', (ctypes.c_void_p * 2)),
-  ('int_data', ctypes.c_uint32),
-]
+CXIdxLoc.SIZE = 24
+CXIdxLoc._fields_ = ['ptr_data', 'int_data']
+setattr(CXIdxLoc, 'ptr_data', field(0, Array(ctypes.c_void_p, 2)))
+setattr(CXIdxLoc, 'int_data', field(16, ctypes.c_uint32))
 class CXIdxIncludedFileInfo(Struct): pass
-CXIdxIncludedFileInfo._fields_ = [
-  ('hashLoc', CXIdxLoc),
-  ('filename', ctypes.POINTER(ctypes.c_char)),
-  ('file', CXFile),
-  ('isImport', ctypes.c_int32),
-  ('isAngled', ctypes.c_int32),
-  ('isModuleImport', ctypes.c_int32),
-]
+CXIdxIncludedFileInfo.SIZE = 56
+CXIdxIncludedFileInfo._fields_ = ['hashLoc', 'filename', 'file', 'isImport', 'isAngled', 'isModuleImport']
+setattr(CXIdxIncludedFileInfo, 'hashLoc', field(0, CXIdxLoc))
+setattr(CXIdxIncludedFileInfo, 'filename', field(24, Pointer(ctypes.c_char)))
+setattr(CXIdxIncludedFileInfo, 'file', field(32, CXFile))
+setattr(CXIdxIncludedFileInfo, 'isImport', field(40, ctypes.c_int32))
+setattr(CXIdxIncludedFileInfo, 'isAngled', field(44, ctypes.c_int32))
+setattr(CXIdxIncludedFileInfo, 'isModuleImport', field(48, ctypes.c_int32))
 class CXIdxImportedASTFileInfo(Struct): pass
-CXIdxImportedASTFileInfo._fields_ = [
-  ('file', CXFile),
-  ('module', CXModule),
-  ('loc', CXIdxLoc),
-  ('isImplicit', ctypes.c_int32),
-]
+CXIdxImportedASTFileInfo.SIZE = 48
+CXIdxImportedASTFileInfo._fields_ = ['file', 'module', 'loc', 'isImplicit']
+setattr(CXIdxImportedASTFileInfo, 'file', field(0, CXFile))
+setattr(CXIdxImportedASTFileInfo, 'module', field(8, CXModule))
+setattr(CXIdxImportedASTFileInfo, 'loc', field(16, CXIdxLoc))
+setattr(CXIdxImportedASTFileInfo, 'isImplicit', field(40, ctypes.c_int32))
 CXIdxEntityKind = CEnum(ctypes.c_uint32)
 CXIdxEntity_Unexposed = CXIdxEntityKind.define('CXIdxEntity_Unexposed', 0)
 CXIdxEntity_Typedef = CXIdxEntityKind.define('CXIdxEntity_Typedef', 1)
@@ -1835,105 +1834,105 @@ CXIdxAttr_IBOutlet = CXIdxAttrKind.define('CXIdxAttr_IBOutlet', 2)
 CXIdxAttr_IBOutletCollection = CXIdxAttrKind.define('CXIdxAttr_IBOutletCollection', 3)
 
 class CXIdxAttrInfo(Struct): pass
-CXIdxAttrInfo._fields_ = [
-  ('kind', CXIdxAttrKind),
-  ('cursor', CXCursor),
-  ('loc', CXIdxLoc),
-]
+CXIdxAttrInfo.SIZE = 64
+CXIdxAttrInfo._fields_ = ['kind', 'cursor', 'loc']
+setattr(CXIdxAttrInfo, 'kind', field(0, CXIdxAttrKind))
+setattr(CXIdxAttrInfo, 'cursor', field(8, CXCursor))
+setattr(CXIdxAttrInfo, 'loc', field(40, CXIdxLoc))
 class CXIdxEntityInfo(Struct): pass
-CXIdxEntityInfo._fields_ = [
-  ('kind', CXIdxEntityKind),
-  ('templateKind', CXIdxEntityCXXTemplateKind),
-  ('lang', CXIdxEntityLanguage),
-  ('name', ctypes.POINTER(ctypes.c_char)),
-  ('USR', ctypes.POINTER(ctypes.c_char)),
-  ('cursor', CXCursor),
-  ('attributes', ctypes.POINTER(ctypes.POINTER(CXIdxAttrInfo))),
-  ('numAttributes', ctypes.c_uint32),
-]
+CXIdxEntityInfo.SIZE = 80
+CXIdxEntityInfo._fields_ = ['kind', 'templateKind', 'lang', 'name', 'USR', 'cursor', 'attributes', 'numAttributes']
+setattr(CXIdxEntityInfo, 'kind', field(0, CXIdxEntityKind))
+setattr(CXIdxEntityInfo, 'templateKind', field(4, CXIdxEntityCXXTemplateKind))
+setattr(CXIdxEntityInfo, 'lang', field(8, CXIdxEntityLanguage))
+setattr(CXIdxEntityInfo, 'name', field(16, Pointer(ctypes.c_char)))
+setattr(CXIdxEntityInfo, 'USR', field(24, Pointer(ctypes.c_char)))
+setattr(CXIdxEntityInfo, 'cursor', field(32, CXCursor))
+setattr(CXIdxEntityInfo, 'attributes', field(64, Pointer(Pointer(CXIdxAttrInfo))))
+setattr(CXIdxEntityInfo, 'numAttributes', field(72, ctypes.c_uint32))
 class CXIdxContainerInfo(Struct): pass
-CXIdxContainerInfo._fields_ = [
-  ('cursor', CXCursor),
-]
+CXIdxContainerInfo.SIZE = 32
+CXIdxContainerInfo._fields_ = ['cursor']
+setattr(CXIdxContainerInfo, 'cursor', field(0, CXCursor))
 class CXIdxIBOutletCollectionAttrInfo(Struct): pass
-CXIdxIBOutletCollectionAttrInfo._fields_ = [
-  ('attrInfo', ctypes.POINTER(CXIdxAttrInfo)),
-  ('objcClass', ctypes.POINTER(CXIdxEntityInfo)),
-  ('classCursor', CXCursor),
-  ('classLoc', CXIdxLoc),
-]
+CXIdxIBOutletCollectionAttrInfo.SIZE = 72
+CXIdxIBOutletCollectionAttrInfo._fields_ = ['attrInfo', 'objcClass', 'classCursor', 'classLoc']
+setattr(CXIdxIBOutletCollectionAttrInfo, 'attrInfo', field(0, Pointer(CXIdxAttrInfo)))
+setattr(CXIdxIBOutletCollectionAttrInfo, 'objcClass', field(8, Pointer(CXIdxEntityInfo)))
+setattr(CXIdxIBOutletCollectionAttrInfo, 'classCursor', field(16, CXCursor))
+setattr(CXIdxIBOutletCollectionAttrInfo, 'classLoc', field(48, CXIdxLoc))
 CXIdxDeclInfoFlags = CEnum(ctypes.c_uint32)
 CXIdxDeclFlag_Skipped = CXIdxDeclInfoFlags.define('CXIdxDeclFlag_Skipped', 1)
 
 class CXIdxDeclInfo(Struct): pass
-CXIdxDeclInfo._fields_ = [
-  ('entityInfo', ctypes.POINTER(CXIdxEntityInfo)),
-  ('cursor', CXCursor),
-  ('loc', CXIdxLoc),
-  ('semanticContainer', ctypes.POINTER(CXIdxContainerInfo)),
-  ('lexicalContainer', ctypes.POINTER(CXIdxContainerInfo)),
-  ('isRedeclaration', ctypes.c_int32),
-  ('isDefinition', ctypes.c_int32),
-  ('isContainer', ctypes.c_int32),
-  ('declAsContainer', ctypes.POINTER(CXIdxContainerInfo)),
-  ('isImplicit', ctypes.c_int32),
-  ('attributes', ctypes.POINTER(ctypes.POINTER(CXIdxAttrInfo))),
-  ('numAttributes', ctypes.c_uint32),
-  ('flags', ctypes.c_uint32),
-]
+CXIdxDeclInfo.SIZE = 128
+CXIdxDeclInfo._fields_ = ['entityInfo', 'cursor', 'loc', 'semanticContainer', 'lexicalContainer', 'isRedeclaration', 'isDefinition', 'isContainer', 'declAsContainer', 'isImplicit', 'attributes', 'numAttributes', 'flags']
+setattr(CXIdxDeclInfo, 'entityInfo', field(0, Pointer(CXIdxEntityInfo)))
+setattr(CXIdxDeclInfo, 'cursor', field(8, CXCursor))
+setattr(CXIdxDeclInfo, 'loc', field(40, CXIdxLoc))
+setattr(CXIdxDeclInfo, 'semanticContainer', field(64, Pointer(CXIdxContainerInfo)))
+setattr(CXIdxDeclInfo, 'lexicalContainer', field(72, Pointer(CXIdxContainerInfo)))
+setattr(CXIdxDeclInfo, 'isRedeclaration', field(80, ctypes.c_int32))
+setattr(CXIdxDeclInfo, 'isDefinition', field(84, ctypes.c_int32))
+setattr(CXIdxDeclInfo, 'isContainer', field(88, ctypes.c_int32))
+setattr(CXIdxDeclInfo, 'declAsContainer', field(96, Pointer(CXIdxContainerInfo)))
+setattr(CXIdxDeclInfo, 'isImplicit', field(104, ctypes.c_int32))
+setattr(CXIdxDeclInfo, 'attributes', field(112, Pointer(Pointer(CXIdxAttrInfo))))
+setattr(CXIdxDeclInfo, 'numAttributes', field(120, ctypes.c_uint32))
+setattr(CXIdxDeclInfo, 'flags', field(124, ctypes.c_uint32))
 CXIdxObjCContainerKind = CEnum(ctypes.c_uint32)
 CXIdxObjCContainer_ForwardRef = CXIdxObjCContainerKind.define('CXIdxObjCContainer_ForwardRef', 0)
 CXIdxObjCContainer_Interface = CXIdxObjCContainerKind.define('CXIdxObjCContainer_Interface', 1)
 CXIdxObjCContainer_Implementation = CXIdxObjCContainerKind.define('CXIdxObjCContainer_Implementation', 2)
 
 class CXIdxObjCContainerDeclInfo(Struct): pass
-CXIdxObjCContainerDeclInfo._fields_ = [
-  ('declInfo', ctypes.POINTER(CXIdxDeclInfo)),
-  ('kind', CXIdxObjCContainerKind),
-]
+CXIdxObjCContainerDeclInfo.SIZE = 16
+CXIdxObjCContainerDeclInfo._fields_ = ['declInfo', 'kind']
+setattr(CXIdxObjCContainerDeclInfo, 'declInfo', field(0, Pointer(CXIdxDeclInfo)))
+setattr(CXIdxObjCContainerDeclInfo, 'kind', field(8, CXIdxObjCContainerKind))
 class CXIdxBaseClassInfo(Struct): pass
-CXIdxBaseClassInfo._fields_ = [
-  ('base', ctypes.POINTER(CXIdxEntityInfo)),
-  ('cursor', CXCursor),
-  ('loc', CXIdxLoc),
-]
+CXIdxBaseClassInfo.SIZE = 64
+CXIdxBaseClassInfo._fields_ = ['base', 'cursor', 'loc']
+setattr(CXIdxBaseClassInfo, 'base', field(0, Pointer(CXIdxEntityInfo)))
+setattr(CXIdxBaseClassInfo, 'cursor', field(8, CXCursor))
+setattr(CXIdxBaseClassInfo, 'loc', field(40, CXIdxLoc))
 class CXIdxObjCProtocolRefInfo(Struct): pass
-CXIdxObjCProtocolRefInfo._fields_ = [
-  ('protocol', ctypes.POINTER(CXIdxEntityInfo)),
-  ('cursor', CXCursor),
-  ('loc', CXIdxLoc),
-]
+CXIdxObjCProtocolRefInfo.SIZE = 64
+CXIdxObjCProtocolRefInfo._fields_ = ['protocol', 'cursor', 'loc']
+setattr(CXIdxObjCProtocolRefInfo, 'protocol', field(0, Pointer(CXIdxEntityInfo)))
+setattr(CXIdxObjCProtocolRefInfo, 'cursor', field(8, CXCursor))
+setattr(CXIdxObjCProtocolRefInfo, 'loc', field(40, CXIdxLoc))
 class CXIdxObjCProtocolRefListInfo(Struct): pass
-CXIdxObjCProtocolRefListInfo._fields_ = [
-  ('protocols', ctypes.POINTER(ctypes.POINTER(CXIdxObjCProtocolRefInfo))),
-  ('numProtocols', ctypes.c_uint32),
-]
+CXIdxObjCProtocolRefListInfo.SIZE = 16
+CXIdxObjCProtocolRefListInfo._fields_ = ['protocols', 'numProtocols']
+setattr(CXIdxObjCProtocolRefListInfo, 'protocols', field(0, Pointer(Pointer(CXIdxObjCProtocolRefInfo))))
+setattr(CXIdxObjCProtocolRefListInfo, 'numProtocols', field(8, ctypes.c_uint32))
 class CXIdxObjCInterfaceDeclInfo(Struct): pass
-CXIdxObjCInterfaceDeclInfo._fields_ = [
-  ('containerInfo', ctypes.POINTER(CXIdxObjCContainerDeclInfo)),
-  ('superInfo', ctypes.POINTER(CXIdxBaseClassInfo)),
-  ('protocols', ctypes.POINTER(CXIdxObjCProtocolRefListInfo)),
-]
+CXIdxObjCInterfaceDeclInfo.SIZE = 24
+CXIdxObjCInterfaceDeclInfo._fields_ = ['containerInfo', 'superInfo', 'protocols']
+setattr(CXIdxObjCInterfaceDeclInfo, 'containerInfo', field(0, Pointer(CXIdxObjCContainerDeclInfo)))
+setattr(CXIdxObjCInterfaceDeclInfo, 'superInfo', field(8, Pointer(CXIdxBaseClassInfo)))
+setattr(CXIdxObjCInterfaceDeclInfo, 'protocols', field(16, Pointer(CXIdxObjCProtocolRefListInfo)))
 class CXIdxObjCCategoryDeclInfo(Struct): pass
-CXIdxObjCCategoryDeclInfo._fields_ = [
-  ('containerInfo', ctypes.POINTER(CXIdxObjCContainerDeclInfo)),
-  ('objcClass', ctypes.POINTER(CXIdxEntityInfo)),
-  ('classCursor', CXCursor),
-  ('classLoc', CXIdxLoc),
-  ('protocols', ctypes.POINTER(CXIdxObjCProtocolRefListInfo)),
-]
+CXIdxObjCCategoryDeclInfo.SIZE = 80
+CXIdxObjCCategoryDeclInfo._fields_ = ['containerInfo', 'objcClass', 'classCursor', 'classLoc', 'protocols']
+setattr(CXIdxObjCCategoryDeclInfo, 'containerInfo', field(0, Pointer(CXIdxObjCContainerDeclInfo)))
+setattr(CXIdxObjCCategoryDeclInfo, 'objcClass', field(8, Pointer(CXIdxEntityInfo)))
+setattr(CXIdxObjCCategoryDeclInfo, 'classCursor', field(16, CXCursor))
+setattr(CXIdxObjCCategoryDeclInfo, 'classLoc', field(48, CXIdxLoc))
+setattr(CXIdxObjCCategoryDeclInfo, 'protocols', field(72, Pointer(CXIdxObjCProtocolRefListInfo)))
 class CXIdxObjCPropertyDeclInfo(Struct): pass
-CXIdxObjCPropertyDeclInfo._fields_ = [
-  ('declInfo', ctypes.POINTER(CXIdxDeclInfo)),
-  ('getter', ctypes.POINTER(CXIdxEntityInfo)),
-  ('setter', ctypes.POINTER(CXIdxEntityInfo)),
-]
+CXIdxObjCPropertyDeclInfo.SIZE = 24
+CXIdxObjCPropertyDeclInfo._fields_ = ['declInfo', 'getter', 'setter']
+setattr(CXIdxObjCPropertyDeclInfo, 'declInfo', field(0, Pointer(CXIdxDeclInfo)))
+setattr(CXIdxObjCPropertyDeclInfo, 'getter', field(8, Pointer(CXIdxEntityInfo)))
+setattr(CXIdxObjCPropertyDeclInfo, 'setter', field(16, Pointer(CXIdxEntityInfo)))
 class CXIdxCXXClassDeclInfo(Struct): pass
-CXIdxCXXClassDeclInfo._fields_ = [
-  ('declInfo', ctypes.POINTER(CXIdxDeclInfo)),
-  ('bases', ctypes.POINTER(ctypes.POINTER(CXIdxBaseClassInfo))),
-  ('numBases', ctypes.c_uint32),
-]
+CXIdxCXXClassDeclInfo.SIZE = 24
+CXIdxCXXClassDeclInfo._fields_ = ['declInfo', 'bases', 'numBases']
+setattr(CXIdxCXXClassDeclInfo, 'declInfo', field(0, Pointer(CXIdxDeclInfo)))
+setattr(CXIdxCXXClassDeclInfo, 'bases', field(8, Pointer(Pointer(CXIdxBaseClassInfo))))
+setattr(CXIdxCXXClassDeclInfo, 'numBases', field(16, ctypes.c_uint32))
 CXIdxEntityRefKind = CEnum(ctypes.c_uint32)
 CXIdxEntityRef_Direct = CXIdxEntityRefKind.define('CXIdxEntityRef_Direct', 1)
 CXIdxEntityRef_Implicit = CXIdxEntityRefKind.define('CXIdxEntityRef_Implicit', 2)
@@ -1951,60 +1950,60 @@ CXSymbolRole_AddressOf = CXSymbolRole.define('CXSymbolRole_AddressOf', 128)
 CXSymbolRole_Implicit = CXSymbolRole.define('CXSymbolRole_Implicit', 256)
 
 class CXIdxEntityRefInfo(Struct): pass
-CXIdxEntityRefInfo._fields_ = [
-  ('kind', CXIdxEntityRefKind),
-  ('cursor', CXCursor),
-  ('loc', CXIdxLoc),
-  ('referencedEntity', ctypes.POINTER(CXIdxEntityInfo)),
-  ('parentEntity', ctypes.POINTER(CXIdxEntityInfo)),
-  ('container', ctypes.POINTER(CXIdxContainerInfo)),
-  ('role', CXSymbolRole),
-]
+CXIdxEntityRefInfo.SIZE = 96
+CXIdxEntityRefInfo._fields_ = ['kind', 'cursor', 'loc', 'referencedEntity', 'parentEntity', 'container', 'role']
+setattr(CXIdxEntityRefInfo, 'kind', field(0, CXIdxEntityRefKind))
+setattr(CXIdxEntityRefInfo, 'cursor', field(8, CXCursor))
+setattr(CXIdxEntityRefInfo, 'loc', field(40, CXIdxLoc))
+setattr(CXIdxEntityRefInfo, 'referencedEntity', field(64, Pointer(CXIdxEntityInfo)))
+setattr(CXIdxEntityRefInfo, 'parentEntity', field(72, Pointer(CXIdxEntityInfo)))
+setattr(CXIdxEntityRefInfo, 'container', field(80, Pointer(CXIdxContainerInfo)))
+setattr(CXIdxEntityRefInfo, 'role', field(88, CXSymbolRole))
 class IndexerCallbacks(Struct): pass
-IndexerCallbacks._fields_ = [
-  ('abortQuery', ctypes.CFUNCTYPE(ctypes.c_int32, CXClientData, ctypes.c_void_p)),
-  ('diagnostic', ctypes.CFUNCTYPE(None, CXClientData, CXDiagnosticSet, ctypes.c_void_p)),
-  ('enteredMainFile', ctypes.CFUNCTYPE(CXIdxClientFile, CXClientData, CXFile, ctypes.c_void_p)),
-  ('ppIncludedFile', ctypes.CFUNCTYPE(CXIdxClientFile, CXClientData, ctypes.POINTER(CXIdxIncludedFileInfo))),
-  ('importedASTFile', ctypes.CFUNCTYPE(CXIdxClientASTFile, CXClientData, ctypes.POINTER(CXIdxImportedASTFileInfo))),
-  ('startedTranslationUnit', ctypes.CFUNCTYPE(CXIdxClientContainer, CXClientData, ctypes.c_void_p)),
-  ('indexDeclaration', ctypes.CFUNCTYPE(None, CXClientData, ctypes.POINTER(CXIdxDeclInfo))),
-  ('indexEntityReference', ctypes.CFUNCTYPE(None, CXClientData, ctypes.POINTER(CXIdxEntityRefInfo))),
-]
+IndexerCallbacks.SIZE = 64
+IndexerCallbacks._fields_ = ['abortQuery', 'diagnostic', 'enteredMainFile', 'ppIncludedFile', 'importedASTFile', 'startedTranslationUnit', 'indexDeclaration', 'indexEntityReference']
+setattr(IndexerCallbacks, 'abortQuery', field(0, ctypes.CFUNCTYPE(ctypes.c_int32, CXClientData, ctypes.c_void_p)))
+setattr(IndexerCallbacks, 'diagnostic', field(8, ctypes.CFUNCTYPE(None, CXClientData, CXDiagnosticSet, ctypes.c_void_p)))
+setattr(IndexerCallbacks, 'enteredMainFile', field(16, ctypes.CFUNCTYPE(CXIdxClientFile, CXClientData, CXFile, ctypes.c_void_p)))
+setattr(IndexerCallbacks, 'ppIncludedFile', field(24, ctypes.CFUNCTYPE(CXIdxClientFile, CXClientData, Pointer(CXIdxIncludedFileInfo))))
+setattr(IndexerCallbacks, 'importedASTFile', field(32, ctypes.CFUNCTYPE(CXIdxClientASTFile, CXClientData, Pointer(CXIdxImportedASTFileInfo))))
+setattr(IndexerCallbacks, 'startedTranslationUnit', field(40, ctypes.CFUNCTYPE(CXIdxClientContainer, CXClientData, ctypes.c_void_p)))
+setattr(IndexerCallbacks, 'indexDeclaration', field(48, ctypes.CFUNCTYPE(None, CXClientData, Pointer(CXIdxDeclInfo))))
+setattr(IndexerCallbacks, 'indexEntityReference', field(56, ctypes.CFUNCTYPE(None, CXClientData, Pointer(CXIdxEntityRefInfo))))
 try: (clang_index_isEntityObjCContainerKind:=dll.clang_index_isEntityObjCContainerKind).restype, clang_index_isEntityObjCContainerKind.argtypes = ctypes.c_int32, [CXIdxEntityKind]
 except AttributeError: pass
 
-try: (clang_index_getObjCContainerDeclInfo:=dll.clang_index_getObjCContainerDeclInfo).restype, clang_index_getObjCContainerDeclInfo.argtypes = ctypes.POINTER(CXIdxObjCContainerDeclInfo), [ctypes.POINTER(CXIdxDeclInfo)]
+try: (clang_index_getObjCContainerDeclInfo:=dll.clang_index_getObjCContainerDeclInfo).restype, clang_index_getObjCContainerDeclInfo.argtypes = Pointer(CXIdxObjCContainerDeclInfo), [Pointer(CXIdxDeclInfo)]
 except AttributeError: pass
 
-try: (clang_index_getObjCInterfaceDeclInfo:=dll.clang_index_getObjCInterfaceDeclInfo).restype, clang_index_getObjCInterfaceDeclInfo.argtypes = ctypes.POINTER(CXIdxObjCInterfaceDeclInfo), [ctypes.POINTER(CXIdxDeclInfo)]
+try: (clang_index_getObjCInterfaceDeclInfo:=dll.clang_index_getObjCInterfaceDeclInfo).restype, clang_index_getObjCInterfaceDeclInfo.argtypes = Pointer(CXIdxObjCInterfaceDeclInfo), [Pointer(CXIdxDeclInfo)]
 except AttributeError: pass
 
-try: (clang_index_getObjCCategoryDeclInfo:=dll.clang_index_getObjCCategoryDeclInfo).restype, clang_index_getObjCCategoryDeclInfo.argtypes = ctypes.POINTER(CXIdxObjCCategoryDeclInfo), [ctypes.POINTER(CXIdxDeclInfo)]
+try: (clang_index_getObjCCategoryDeclInfo:=dll.clang_index_getObjCCategoryDeclInfo).restype, clang_index_getObjCCategoryDeclInfo.argtypes = Pointer(CXIdxObjCCategoryDeclInfo), [Pointer(CXIdxDeclInfo)]
 except AttributeError: pass
 
-try: (clang_index_getObjCProtocolRefListInfo:=dll.clang_index_getObjCProtocolRefListInfo).restype, clang_index_getObjCProtocolRefListInfo.argtypes = ctypes.POINTER(CXIdxObjCProtocolRefListInfo), [ctypes.POINTER(CXIdxDeclInfo)]
+try: (clang_index_getObjCProtocolRefListInfo:=dll.clang_index_getObjCProtocolRefListInfo).restype, clang_index_getObjCProtocolRefListInfo.argtypes = Pointer(CXIdxObjCProtocolRefListInfo), [Pointer(CXIdxDeclInfo)]
 except AttributeError: pass
 
-try: (clang_index_getObjCPropertyDeclInfo:=dll.clang_index_getObjCPropertyDeclInfo).restype, clang_index_getObjCPropertyDeclInfo.argtypes = ctypes.POINTER(CXIdxObjCPropertyDeclInfo), [ctypes.POINTER(CXIdxDeclInfo)]
+try: (clang_index_getObjCPropertyDeclInfo:=dll.clang_index_getObjCPropertyDeclInfo).restype, clang_index_getObjCPropertyDeclInfo.argtypes = Pointer(CXIdxObjCPropertyDeclInfo), [Pointer(CXIdxDeclInfo)]
 except AttributeError: pass
 
-try: (clang_index_getIBOutletCollectionAttrInfo:=dll.clang_index_getIBOutletCollectionAttrInfo).restype, clang_index_getIBOutletCollectionAttrInfo.argtypes = ctypes.POINTER(CXIdxIBOutletCollectionAttrInfo), [ctypes.POINTER(CXIdxAttrInfo)]
+try: (clang_index_getIBOutletCollectionAttrInfo:=dll.clang_index_getIBOutletCollectionAttrInfo).restype, clang_index_getIBOutletCollectionAttrInfo.argtypes = Pointer(CXIdxIBOutletCollectionAttrInfo), [Pointer(CXIdxAttrInfo)]
 except AttributeError: pass
 
-try: (clang_index_getCXXClassDeclInfo:=dll.clang_index_getCXXClassDeclInfo).restype, clang_index_getCXXClassDeclInfo.argtypes = ctypes.POINTER(CXIdxCXXClassDeclInfo), [ctypes.POINTER(CXIdxDeclInfo)]
+try: (clang_index_getCXXClassDeclInfo:=dll.clang_index_getCXXClassDeclInfo).restype, clang_index_getCXXClassDeclInfo.argtypes = Pointer(CXIdxCXXClassDeclInfo), [Pointer(CXIdxDeclInfo)]
 except AttributeError: pass
 
-try: (clang_index_getClientContainer:=dll.clang_index_getClientContainer).restype, clang_index_getClientContainer.argtypes = CXIdxClientContainer, [ctypes.POINTER(CXIdxContainerInfo)]
+try: (clang_index_getClientContainer:=dll.clang_index_getClientContainer).restype, clang_index_getClientContainer.argtypes = CXIdxClientContainer, [Pointer(CXIdxContainerInfo)]
 except AttributeError: pass
 
-try: (clang_index_setClientContainer:=dll.clang_index_setClientContainer).restype, clang_index_setClientContainer.argtypes = None, [ctypes.POINTER(CXIdxContainerInfo), CXIdxClientContainer]
+try: (clang_index_setClientContainer:=dll.clang_index_setClientContainer).restype, clang_index_setClientContainer.argtypes = None, [Pointer(CXIdxContainerInfo), CXIdxClientContainer]
 except AttributeError: pass
 
-try: (clang_index_getClientEntity:=dll.clang_index_getClientEntity).restype, clang_index_getClientEntity.argtypes = CXIdxClientEntity, [ctypes.POINTER(CXIdxEntityInfo)]
+try: (clang_index_getClientEntity:=dll.clang_index_getClientEntity).restype, clang_index_getClientEntity.argtypes = CXIdxClientEntity, [Pointer(CXIdxEntityInfo)]
 except AttributeError: pass
 
-try: (clang_index_setClientEntity:=dll.clang_index_setClientEntity).restype, clang_index_setClientEntity.argtypes = None, [ctypes.POINTER(CXIdxEntityInfo), CXIdxClientEntity]
+try: (clang_index_setClientEntity:=dll.clang_index_setClientEntity).restype, clang_index_setClientEntity.argtypes = None, [Pointer(CXIdxEntityInfo), CXIdxClientEntity]
 except AttributeError: pass
 
 CXIndexAction = ctypes.c_void_p
@@ -2022,16 +2021,16 @@ CXIndexOpt_IndexImplicitTemplateInstantiations = CXIndexOptFlags.define('CXIndex
 CXIndexOpt_SuppressWarnings = CXIndexOptFlags.define('CXIndexOpt_SuppressWarnings', 8)
 CXIndexOpt_SkipParsedBodiesInSession = CXIndexOptFlags.define('CXIndexOpt_SkipParsedBodiesInSession', 16)
 
-try: (clang_indexSourceFile:=dll.clang_indexSourceFile).restype, clang_indexSourceFile.argtypes = ctypes.c_int32, [CXIndexAction, CXClientData, ctypes.POINTER(IndexerCallbacks), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32, ctypes.POINTER(struct_CXUnsavedFile), ctypes.c_uint32, ctypes.POINTER(CXTranslationUnit), ctypes.c_uint32]
+try: (clang_indexSourceFile:=dll.clang_indexSourceFile).restype, clang_indexSourceFile.argtypes = ctypes.c_int32, [CXIndexAction, CXClientData, Pointer(IndexerCallbacks), ctypes.c_uint32, ctypes.c_uint32, Pointer(ctypes.c_char), Pointer(Pointer(ctypes.c_char)), ctypes.c_int32, Pointer(struct_CXUnsavedFile), ctypes.c_uint32, Pointer(CXTranslationUnit), ctypes.c_uint32]
 except AttributeError: pass
 
-try: (clang_indexSourceFileFullArgv:=dll.clang_indexSourceFileFullArgv).restype, clang_indexSourceFileFullArgv.argtypes = ctypes.c_int32, [CXIndexAction, CXClientData, ctypes.POINTER(IndexerCallbacks), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32, ctypes.POINTER(struct_CXUnsavedFile), ctypes.c_uint32, ctypes.POINTER(CXTranslationUnit), ctypes.c_uint32]
+try: (clang_indexSourceFileFullArgv:=dll.clang_indexSourceFileFullArgv).restype, clang_indexSourceFileFullArgv.argtypes = ctypes.c_int32, [CXIndexAction, CXClientData, Pointer(IndexerCallbacks), ctypes.c_uint32, ctypes.c_uint32, Pointer(ctypes.c_char), Pointer(Pointer(ctypes.c_char)), ctypes.c_int32, Pointer(struct_CXUnsavedFile), ctypes.c_uint32, Pointer(CXTranslationUnit), ctypes.c_uint32]
 except AttributeError: pass
 
-try: (clang_indexTranslationUnit:=dll.clang_indexTranslationUnit).restype, clang_indexTranslationUnit.argtypes = ctypes.c_int32, [CXIndexAction, CXClientData, ctypes.POINTER(IndexerCallbacks), ctypes.c_uint32, ctypes.c_uint32, CXTranslationUnit]
+try: (clang_indexTranslationUnit:=dll.clang_indexTranslationUnit).restype, clang_indexTranslationUnit.argtypes = ctypes.c_int32, [CXIndexAction, CXClientData, Pointer(IndexerCallbacks), ctypes.c_uint32, ctypes.c_uint32, CXTranslationUnit]
 except AttributeError: pass
 
-try: (clang_indexLoc_getFileLocation:=dll.clang_indexLoc_getFileLocation).restype, clang_indexLoc_getFileLocation.argtypes = None, [CXIdxLoc, ctypes.POINTER(CXIdxClientFile), ctypes.POINTER(CXFile), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
+try: (clang_indexLoc_getFileLocation:=dll.clang_indexLoc_getFileLocation).restype, clang_indexLoc_getFileLocation.argtypes = None, [CXIdxLoc, Pointer(CXIdxClientFile), Pointer(CXFile), Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32)]
 except AttributeError: pass
 
 try: (clang_indexLoc_getCXSourceLocation:=dll.clang_indexLoc_getCXSourceLocation).restype, clang_indexLoc_getCXSourceLocation.argtypes = CXSourceLocation, [CXIdxLoc]
@@ -2109,13 +2108,13 @@ except AttributeError: pass
 try: (clang_getCursorUnaryOperatorKind:=dll.clang_getCursorUnaryOperatorKind).restype, clang_getCursorUnaryOperatorKind.argtypes = enum_CXUnaryOperatorKind, [CXCursor]
 except AttributeError: pass
 
-try: (clang_getCString:=dll.clang_getCString).restype, clang_getCString.argtypes = ctypes.POINTER(ctypes.c_char), [CXString]
+try: (clang_getCString:=dll.clang_getCString).restype, clang_getCString.argtypes = Pointer(ctypes.c_char), [CXString]
 except AttributeError: pass
 
 try: (clang_disposeString:=dll.clang_disposeString).restype, clang_disposeString.argtypes = None, [CXString]
 except AttributeError: pass
 
-try: (clang_disposeStringSet:=dll.clang_disposeStringSet).restype, clang_disposeStringSet.argtypes = None, [ctypes.POINTER(CXStringSet)]
+try: (clang_disposeStringSet:=dll.clang_disposeStringSet).restype, clang_disposeStringSet.argtypes = None, [Pointer(CXStringSet)]
 except AttributeError: pass
 
 try: (clang_getNullLocation:=dll.clang_getNullLocation).restype, clang_getNullLocation.argtypes = CXSourceLocation, []
@@ -2145,19 +2144,19 @@ except AttributeError: pass
 try: (clang_Range_isNull:=dll.clang_Range_isNull).restype, clang_Range_isNull.argtypes = ctypes.c_int32, [CXSourceRange]
 except AttributeError: pass
 
-try: (clang_getExpansionLocation:=dll.clang_getExpansionLocation).restype, clang_getExpansionLocation.argtypes = None, [CXSourceLocation, ctypes.POINTER(CXFile), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
+try: (clang_getExpansionLocation:=dll.clang_getExpansionLocation).restype, clang_getExpansionLocation.argtypes = None, [CXSourceLocation, Pointer(CXFile), Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32)]
 except AttributeError: pass
 
-try: (clang_getPresumedLocation:=dll.clang_getPresumedLocation).restype, clang_getPresumedLocation.argtypes = None, [CXSourceLocation, ctypes.POINTER(CXString), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
+try: (clang_getPresumedLocation:=dll.clang_getPresumedLocation).restype, clang_getPresumedLocation.argtypes = None, [CXSourceLocation, Pointer(CXString), Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32)]
 except AttributeError: pass
 
-try: (clang_getInstantiationLocation:=dll.clang_getInstantiationLocation).restype, clang_getInstantiationLocation.argtypes = None, [CXSourceLocation, ctypes.POINTER(CXFile), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
+try: (clang_getInstantiationLocation:=dll.clang_getInstantiationLocation).restype, clang_getInstantiationLocation.argtypes = None, [CXSourceLocation, Pointer(CXFile), Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32)]
 except AttributeError: pass
 
-try: (clang_getSpellingLocation:=dll.clang_getSpellingLocation).restype, clang_getSpellingLocation.argtypes = None, [CXSourceLocation, ctypes.POINTER(CXFile), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
+try: (clang_getSpellingLocation:=dll.clang_getSpellingLocation).restype, clang_getSpellingLocation.argtypes = None, [CXSourceLocation, Pointer(CXFile), Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32)]
 except AttributeError: pass
 
-try: (clang_getFileLocation:=dll.clang_getFileLocation).restype, clang_getFileLocation.argtypes = None, [CXSourceLocation, ctypes.POINTER(CXFile), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
+try: (clang_getFileLocation:=dll.clang_getFileLocation).restype, clang_getFileLocation.argtypes = None, [CXSourceLocation, Pointer(CXFile), Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32)]
 except AttributeError: pass
 
 try: (clang_getRangeStart:=dll.clang_getRangeStart).restype, clang_getRangeStart.argtypes = CXSourceLocation, [CXSourceRange]
@@ -2166,7 +2165,7 @@ except AttributeError: pass
 try: (clang_getRangeEnd:=dll.clang_getRangeEnd).restype, clang_getRangeEnd.argtypes = CXSourceLocation, [CXSourceRange]
 except AttributeError: pass
 
-try: (clang_disposeSourceRangeList:=dll.clang_disposeSourceRangeList).restype, clang_disposeSourceRangeList.argtypes = None, [ctypes.POINTER(CXSourceRangeList)]
+try: (clang_disposeSourceRangeList:=dll.clang_disposeSourceRangeList).restype, clang_disposeSourceRangeList.argtypes = None, [Pointer(CXSourceRangeList)]
 except AttributeError: pass
 
 try: (clang_getFileName:=dll.clang_getFileName).restype, clang_getFileName.argtypes = CXString, [CXFile]
@@ -2177,10 +2176,10 @@ try: (clang_getFileTime:=dll.clang_getFileTime).restype, clang_getFileTime.argty
 except AttributeError: pass
 
 class CXFileUniqueID(Struct): pass
-CXFileUniqueID._fields_ = [
-  ('data', (ctypes.c_uint64 * 3)),
-]
-try: (clang_getFileUniqueID:=dll.clang_getFileUniqueID).restype, clang_getFileUniqueID.argtypes = ctypes.c_int32, [CXFile, ctypes.POINTER(CXFileUniqueID)]
+CXFileUniqueID.SIZE = 24
+CXFileUniqueID._fields_ = ['data']
+setattr(CXFileUniqueID, 'data', field(0, Array(ctypes.c_uint64, 3)))
+try: (clang_getFileUniqueID:=dll.clang_getFileUniqueID).restype, clang_getFileUniqueID.argtypes = ctypes.c_int32, [CXFile, Pointer(CXFileUniqueID)]
 except AttributeError: pass
 
 try: (clang_File_isEqual:=dll.clang_File_isEqual).restype, clang_File_isEqual.argtypes = ctypes.c_int32, [CXFile, CXFile]
