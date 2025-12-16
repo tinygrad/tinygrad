@@ -11,7 +11,5 @@ runs:
         git fetch origin $CURRENT_SHA
         export COMMIT_MESSAGE=$(git show -s --format=%B "$CURRENT_SHA")
         export CURRENT_HEAD=$(git rev-parse HEAD)
-        echo $PR_TITLE
-        echo $COMMIT_MESSAGE
         cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && IGNORE_OOB=1 PYTHONPATH=. python3 process_replay.py
         git checkout $CURRENT_HEAD  # restore to branch
