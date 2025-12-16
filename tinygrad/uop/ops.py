@@ -7,7 +7,7 @@ from tinygrad.uop import Ops, GroupOp
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType, least_upper_dtype, Invalid, InvalidType, AddrSpace
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, VIZ, SPEC, CI
-from tinygrad.helpers import strip_parens, colored, ansilen, printable
+from tinygrad.helpers import strip_parens, colored, ansilen, printable, panic
 if TYPE_CHECKING:
   from tinygrad.device import Buffer, MultiBuffer
 
@@ -856,11 +856,11 @@ class KernelInfo:
 
 @dataclass(frozen=True)
 class CustomKernel:
-  fxn: Callable|None = None
+  fxn: Callable
   grad_fxn: Callable|None = None
   # sadly CustomKernel can't be pickled or reconstructed as a str
-  def __reduce__(self): return (CustomKernel, ())
-  def __repr__(self): return "CustomKernel()"
+  def __reduce__(self): return (CustomKernel, (panic,))
+  def __repr__(self): return "CustomKernel(panic)"
 
 @dataclass(frozen=True)
 class Kernel:
