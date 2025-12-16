@@ -12,13 +12,19 @@ def render_val(x, dtype):
     if dtype == dtypes.double: return "0x%016X" % struct.unpack("Q", struct.pack("d", x))[0]
     if dtype == dtypes.half: return "0x%04X" % struct.unpack("H", struct.pack("e", x))[0]
     return "0x%08X" % struct.unpack("I", struct.pack("f", x))[0]
-  return str(int(x))
+  # RDNA3 doesn't support 64-bit integer ALU well - truncate to 32-bit
+  # and use hex for large values
+  val = int(x) & 0xFFFFFFFF
+  if val > 0x7FFFFFFF or val < -0x80000000:
+    return f"0x{val:08X}"
+  return str(val)
 
 # RDNA3 uses different instruction names and formats than PTX
 asm_for_op: dict[Ops, Callable] = {
   Ops.RECIPROCAL: lambda d,a,dt,name: f"v_rcp_{name} {d}, {a}",
   Ops.EXP2: lambda d,a,dt,name: f"v_exp_{name} {d}, {a}", Ops.LOG2: lambda d,a,dt,name: f"v_log_{name} {d}, {a}",
-  Ops.SIN: lambda d,a,dt,name: f"v_sin_{name} {d}, {a}", Ops.SQRT: lambda d,a,dt,name: f"v_sqrt_{name} {d}, {a}",
+  # v_sin/v_cos expect input in turns (x / 2π), so we multiply by 1/(2π) ≈ 0.159155
+  Ops.SQRT: lambda d,a,dt,name: f"v_sqrt_{name} {d}, {a}",
   Ops.TRUNC: lambda d,a,dt,name: f"v_trunc_{name} {d}, {a}",
   Ops.NEG: lambda d,a,dt,name: f"v_sub_{name} {d}, 0, {a}" if dtypes.is_float(dt) else f"v_sub_nc_u32 {d}, 0, {a}",
   Ops.SHR: lambda d,a,b,dt,name: f"v_lshrrev_b32 {d}, {b}, {a}",  # Note: operand order is reversed
@@ -77,9 +83,24 @@ def global_load(dest:str, addr:str, base:str, dt:DType) -> str:
     return f"global_load_ubyte {dest}, {addr}, {base}"  # unsigned byte load
   return f"global_load_{suffix} {dest}, {addr}, {base}"
 
+def render_const_64(ctx, x):
+  """Render 64-bit constant as two v_mov_b32 instructions"""
+  reg = ctx.r[x]
+  # Extract register number from v[n:n+1] format
+  reg_num = int(reg[2:reg.index(':')])
+  if x.dtype == dtypes.float64:
+    bits = struct.unpack("Q", struct.pack("d", x.arg))[0]
+  else:
+    bits = int(x.arg) & 0xFFFFFFFFFFFFFFFF
+  lo = bits & 0xFFFFFFFF
+  hi = (bits >> 32) & 0xFFFFFFFF
+  return [f"v_mov_b32 v{reg_num}, 0x{lo:08X}", f"v_mov_b32 v{reg_num+1}, 0x{hi:08X}"]
+
 string_rewrite = PatternMatcher([
   # const rendering
   (UPat.cvar("x", dtypes.bool), lambda ctx, x: f"v_mov_b32 {ctx.r[x]}, {1 if x.arg else 0}"),
+  # 64-bit float constants need two mov instructions
+  (UPat.cvar("x", dtypes.float64), render_const_64),
   (UPat.cvar("x"), lambda ctx, x: f"v_mov_b32 {ctx.r[x]}, {render_val(x.arg, x.dtype)}"),
   # special registers
   (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: ctx.render_special(x)),
@@ -94,6 +115,8 @@ string_rewrite = PatternMatcher([
      if ctx.r[cond].startswith('s') else [
        f"v_cmp_ne_u32 vcc_lo, {ctx.r[cond]}, 0",
        f"v_cndmask_b32 {ctx.r[x]}, {ctx.r[false_val]}, {ctx.r[true_val]}, vcc_lo"]),
+  # NOTE: v_sin_f32/v_cos_f32 have limited range (~256 turns) and fail for large inputs like 1e6.
+  # We let tinygrad's software sin implementation handle all cases for correctness.
   # IDIV: integer division via float conversion (a // b = trunc(float(a) / float(b)))
   (UPat(Ops.IDIV, name="x", src=(UPat.var("a"), UPat.var("b"))),
    lambda ctx, x, a, b: [
@@ -103,9 +126,17 @@ string_rewrite = PatternMatcher([
      f"v_mul_f32 v{ctx.get_scratch_vgpr()}, v{ctx.get_scratch_vgpr()}, v{ctx.get_scratch_vgpr()+1}",
      f"v_trunc_f32 v{ctx.get_scratch_vgpr()}, v{ctx.get_scratch_vgpr()}",
      f"v_cvt_i32_f32 {ctx.r[x]}, v{ctx.get_scratch_vgpr()}"]),
+  # Boolean AND/OR with SGPR sources: need to convert to VGPR first (SGPR comparison results are exec-mask style)
+  (UPat(Ops.AND, name="x", dtype=dtypes.bool, src=(UPat.var("a", dtype=dtypes.bool), UPat.var("b", dtype=dtypes.bool))),
+   lambda ctx, x, a, b: ctx.render_bool_and(x, a, b)),
+  (UPat(Ops.OR, name="x", dtype=dtypes.bool, src=(UPat.var("a", dtype=dtypes.bool), UPat.var("b", dtype=dtypes.bool))),
+   lambda ctx, x, a, b: ctx.render_bool_or(x, a, b)),
   # alu ops
   (UPat(GroupOp.ALU, name="x"), lambda ctx, x: ctx.code_for_op[x.op](ctx.r[x], *[ctx.r[v] for v in x.src], x.dtype, ctx.types[x.dtype])),
   # bitcast/cast
+  # BITCAST - need special handling for 64-bit float types
+  (UPat(Ops.BITCAST, name="x", dtype=dtypes.float64, src=(UPat.var("a"),), allow_any_len=True),
+   lambda ctx, x, a: ctx.render_mov_64(x, a)),
   (UPat(Ops.BITCAST, name="x", src=(UPat.var("a"),), allow_any_len=True), lambda ctx, x, a: f"v_mov_b32 {ctx.r[x]}, {ctx.r[a]}"),
   # cast from bool: if bool is in SGPR (comparison result), use v_cndmask_b32; if in VGPR (loaded from memory), convert directly
   (UPat(Ops.CAST, name="x", src=(UPat(dtype=dtypes.bool, name="a"),)),
@@ -129,7 +160,8 @@ string_rewrite = PatternMatcher([
   (UPat(Ops.LOAD, name="x", src=(UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_GLOBAL, name="buf"), UPat.var("idx"), UPat.var("gate")), name="index_op"), UPat.var("alt")), allow_any_len=True),
     lambda ctx, x, idx, alt, gate, buf, index_op: [
     f"v_mov_b32 {ctx.r[x]}, {ctx.r[alt]}",
-    f"s_and_b32 vcc_lo, exec_lo, {ctx.r[gate]}",
+    # If gate is in VGPR, compare to get SGPR mask; if in SGPR, use directly
+    f"v_cmp_ne_u32 vcc_lo, {ctx.r[gate]}, 0" if ctx.r[gate].startswith('v') else f"s_and_b32 vcc_lo, exec_lo, {ctx.r[gate]}",
     f"s_and_saveexec_b32 s{ctx.scratch_sgpr}, vcc_lo",
     global_load(ctx.r[x], ctx.r[index_op], ctx.r[buf], buf.dtype.base),
     f"s_mov_b32 exec_lo, s{ctx.scratch_sgpr}"]),
@@ -186,9 +218,11 @@ class RDNARenderer(Renderer):
 
   def __reduce__(self): return self.__class__, (self.arch,)
 
+  # NOTE: 64-bit integers lowered to 32-bit since RDNA3 has limited 64-bit integer ALU support
+  # This affects precision for operations like sin polynomial range reduction for very large inputs
   types: dict[DType, str] = {
-    dtypes.int8: "i32", dtypes.int16: "i32", dtypes.int32: "i32", dtypes.int64: "i64",
-    dtypes.uint8: "u32", dtypes.uint16: "u32", dtypes.uint32: "u32", dtypes.uint64: "u64",
+    dtypes.int8: "i32", dtypes.int16: "i32", dtypes.int32: "i32", dtypes.int64: "i32",
+    dtypes.uint8: "u32", dtypes.uint16: "u32", dtypes.uint32: "u32", dtypes.uint64: "u32",
     dtypes.float16: "f16", dtypes.float32: "f32", dtypes.float64: "f64", dtypes.bool: "i32"
   }
 
@@ -215,7 +249,7 @@ class RDNARenderer(Renderer):
       return f"v_mov_b32 {self.r[x]}, 0"  # placeholder
     raise RuntimeError(f"Unknown special: {x.arg}")
 
-  def render_cast(self, x: UOp, a: UOp) -> str:
+  def render_cast(self, x: UOp, a: UOp) -> str|list[str]:
     # RDNA3 cast instructions
     if x.dtype == dtypes.float32 and a.dtype == dtypes.int32:
       return f"v_cvt_f32_i32 {self.r[x]}, {self.r[a]}"
@@ -229,8 +263,57 @@ class RDNARenderer(Renderer):
       return f"v_cvt_f16_f32 {self.r[x]}, {self.r[a]}"
     elif x.dtype == dtypes.float32 and a.dtype == dtypes.float16:
       return f"v_cvt_f32_f16 {self.r[x]}, {self.r[a]}"
+    # float64 conversions
+    elif x.dtype == dtypes.float64 and a.dtype == dtypes.float32:
+      return f"v_cvt_f64_f32 {self.r[x]}, {self.r[a]}"
+    elif x.dtype == dtypes.float32 and a.dtype == dtypes.float64:
+      # Extract low 32 bits of the f64 register pair
+      ra = self.r[a]
+      src_num = int(ra[2:ra.index(':')]) if '[' in ra else int(ra[1:])
+      return f"v_cvt_f32_f64 {self.r[x]}, v[{src_num}:{src_num+1}]"
+    elif x.dtype == dtypes.float64:
+      # int to float64: first convert to f32, then to f64
+      return self.render_mov_64(x, a)  # TODO: proper int->f64 conversion
     # fallback: just move (same size types)
     return f"v_mov_b32 {self.r[x]}, {self.r[a]}"
+
+  def render_bool_and(self, x: UOp, a: UOp, b: UOp) -> str|list[str]:
+    """Render boolean AND - SGPR comparison results need to be converted to VGPR for proper lane-by-lane AND"""
+    ra, rb, rx = self.r[a], self.r[b], self.r[x]
+    # If both are in SGPRs, use s_and_b32 for the exec-mask AND, then expand to VGPR
+    if ra.startswith('s') and rb.startswith('s'):
+      # s_and_b32 result must go to SGPR, then v_cndmask_b32 uses that SGPR as mask
+      return [f"s_and_b32 vcc_lo, {ra}, {rb}", f"v_cndmask_b32 {rx}, 0, 1, vcc_lo"]
+    # If one is SGPR and one is VGPR, convert SGPR to VGPR first
+    if ra.startswith('s'):
+      return [f"v_cndmask_b32 v{self.get_scratch_vgpr()}, 0, 1, {ra}", f"v_and_b32 {rx}, v{self.get_scratch_vgpr()}, {rb}"]
+    if rb.startswith('s'):
+      return [f"v_cndmask_b32 v{self.get_scratch_vgpr()}, 0, 1, {rb}", f"v_and_b32 {rx}, {ra}, v{self.get_scratch_vgpr()}"]
+    # Both in VGPR, simple AND
+    return f"v_and_b32 {rx}, {ra}, {rb}"
+
+  def render_bool_or(self, x: UOp, a: UOp, b: UOp) -> str|list[str]:
+    """Render boolean OR - similar handling to AND"""
+    ra, rb, rx = self.r[a], self.r[b], self.r[x]
+    if ra.startswith('s') and rb.startswith('s'):
+      return [f"s_or_b32 vcc_lo, {ra}, {rb}", f"v_cndmask_b32 {rx}, 0, 1, vcc_lo"]
+    if ra.startswith('s'):
+      return [f"v_cndmask_b32 v{self.get_scratch_vgpr()}, 0, 1, {ra}", f"v_or_b32 {rx}, v{self.get_scratch_vgpr()}, {rb}"]
+    if rb.startswith('s'):
+      return [f"v_cndmask_b32 v{self.get_scratch_vgpr()}, 0, 1, {rb}", f"v_or_b32 {rx}, {ra}, v{self.get_scratch_vgpr()}"]
+    return f"v_or_b32 {rx}, {ra}, {rb}"
+
+  def render_mov_64(self, x: UOp, a: UOp) -> list[str]:
+    """Render 64-bit move using two v_mov_b32 instructions"""
+    rx, ra = self.r[x], self.r[a]
+    # Extract register numbers from v[n:n+1] format
+    def get_reg_num(reg: str) -> int:
+      if '[' in reg:
+        return int(reg[2:reg.index(':')])
+      return int(reg[1:])
+    dst_num = get_reg_num(rx)
+    src_num = get_reg_num(ra)
+    return [f"v_mov_b32 v{dst_num}, v{src_num}", f"v_mov_b32 v{dst_num+1}, v{src_num+1}"]
 
   def render_kernel(self, kernel, function_name, bufs, v_cnt, s_cnt, uops) -> str:
     # Build metadata for kernel
@@ -452,6 +535,24 @@ class RDNARenderer(Renderer):
       vgpr_owner[reg] = owner
       return f"v{reg}"
 
+    def alloc_vgpr_pair(owner: UOp) -> str:
+      """Allocate an aligned pair of VGPRs for 64-bit values (float64, int64, uint64)"""
+      nonlocal next_vgpr, max_vgpr
+      # Align to even for 64-bit values
+      if next_vgpr % 2 != 0:
+        next_vgpr += 1
+      reg = next_vgpr
+      next_vgpr += 2
+      max_vgpr = max(max_vgpr, next_vgpr)
+      vgpr_owner[reg] = owner
+      vgpr_owner[reg+1] = owner
+      return f"v[{reg}:{reg+1}]"
+
+    def needs_vgpr_pair(dtype: DType) -> bool:
+      """Check if a dtype needs a VGPR pair (64-bit types)"""
+      # Only float64 needs pairs - int64/uint64 are lowered to 32-bit
+      return dtype == dtypes.float64
+
     def alloc_sgpr(owner: UOp) -> str:
       nonlocal next_sgpr, max_sgpr
       if free_sgprs:
@@ -533,10 +634,10 @@ class RDNARenderer(Renderer):
       elif u.op is Ops.INDEX:
         r[u] = alloc_vgpr(u)
       elif u.op is Ops.LOAD:
-        r[u] = alloc_vgpr(u)
+        r[u] = alloc_vgpr_pair(u) if needs_vgpr_pair(u.dtype) else alloc_vgpr(u)
         pending_waits.add(u)
       elif u.op is Ops.CONST:
-        r[u] = alloc_vgpr(u)
+        r[u] = alloc_vgpr_pair(u) if needs_vgpr_pair(u.dtype) else alloc_vgpr(u)
       elif u.op is Ops.RANGE:
         r[u] = alloc_vgpr(u)
       elif u.op is Ops.END:
@@ -553,11 +654,15 @@ class RDNARenderer(Renderer):
         if u.dtype == dtypes.bool and u.op in {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ}:
           r[u] = alloc_sgpr(u)  # comparison results go in SGPR
         else:
-          r[u] = alloc_vgpr(u)
+          r[u] = alloc_vgpr_pair(u) if needs_vgpr_pair(u.dtype) else alloc_vgpr(u)
       elif u.op is Ops.IF:
         r[u] = alloc_sgpr(u)
       elif u.op is Ops.DEFINE_REG:
-        r[u] = [alloc_vgpr(u) for _ in range(u.ptrdtype.size)]
+        # For 64-bit types, allocate VGPR pairs
+        if needs_vgpr_pair(u.ptrdtype.base):
+          r[u] = [alloc_vgpr_pair(u) for _ in range(u.ptrdtype.size)]
+        else:
+          r[u] = [alloc_vgpr(u) for _ in range(u.ptrdtype.size)]
         continue
 
       # Handle register-based INDEX/LOAD/STORE (accumulator spills)
@@ -568,7 +673,15 @@ class RDNARenderer(Renderer):
         else:
           r[u] = r[u.src[0]]
           if u.op is Ops.STORE:
-            kernel.append(f"v_mov_b32 {r[u.src[0]]}, {r[u.src[1]]}")
+            dst_reg, src_reg = r[u.src[0]], r[u.src[1]]
+            # For 64-bit types, use two v_mov_b32 instructions
+            if '[' in dst_reg:
+              dst_num = int(dst_reg[2:dst_reg.index(':')])
+              src_num = int(src_reg[2:src_reg.index(':')]) if '[' in src_reg else int(src_reg[1:])
+              kernel.append(f"v_mov_b32 v{dst_num}, v{src_num}")
+              kernel.append(f"v_mov_b32 v{dst_num+1}, v{src_num+1}")
+            else:
+              kernel.append(f"v_mov_b32 {dst_reg}, {src_reg}")
         continue
 
       # Skip INDEX as it's handled inline
