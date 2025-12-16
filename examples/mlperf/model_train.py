@@ -1032,7 +1032,7 @@ def train_bert():
   parameters = get_parameters(model)
   if len(GPUS) > 1:
     for p in parameters:
-      p.to_(GPUS).realize()
+      p.to_(GPUS)
 
   # ** Log run config **
   for key, value in config.items(): print(f'HParam: "{key}": {value}')
@@ -1125,7 +1125,7 @@ def train_bert():
   def optimizer_step():
     global_norm = Tensor([0.0], dtype=dtypes.float32, device=optimizer_group[0].device)
     for p in optimizer_group.params:
-      p.grad.assign(p.grad / loss_scaler / grad_acc).realize()
+      p.grad.assign(p.grad / loss_scaler / grad_acc)
       global_norm += p.grad.float().square().sum()
     global_norm = global_norm.sqrt().contiguous().realize()
     for p in optimizer_group.params:
