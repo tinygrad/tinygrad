@@ -14,12 +14,6 @@ on:
       - update_benchmark
       - update_benchmark_staging
   workflow_dispatch:
-    inputs:
-      run_process_replay:
-        description: "Run process replay tests"
-        required: false
-        default: false
-        type: boolean
 
 jobs:
   testmacbenchmark:
