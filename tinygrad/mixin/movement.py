@@ -1,9 +1,10 @@
 # mixins add syntactic sugar to Tensor and UOp
 import functools
-from typing import TypeAlias, TYPE_CHECKING, Self
+from typing import TypeAlias, TYPE_CHECKING, Self, Sequence, cast
 from tinygrad.uop import Ops
-from tinygrad.helpers import prod, argfix, flatten, dedup, make_tuple, ceildiv
-from tinygrad.uop.ops import resolve, smax
+from tinygrad.helpers import prod, argfix, flatten, dedup, make_tuple, ceildiv, all_int
+from tinygrad.uop.ops import resolve, smax, smin
+from tinygrad.dtype import ConstType
 
 if TYPE_CHECKING:
   from tinygrad.uop.ops import UOp
@@ -16,6 +17,10 @@ def _align_left(*shapes: tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
   return tuple((1,) * (max_dim - len(shape)) + shape for shape in shapes)
 
 
+#  `(padding_left, padding_right, padding_top, padding_bottom, ...)` ->  `(..., (padding_top, padding_bottom), (padding_left, padding_right))`
+def _flat_to_grouped(padding:Sequence[sint]) -> tuple[tuple[sint, sint], ...]: return tuple(zip(padding[-2::-2], padding[::-2]))
+
+
 class MovementMixin:
   # required to implement
   def _mop(self, op: Ops, arg) -> Self:
@@ -23,6 +28,12 @@ class MovementMixin:
 
   @property
   def shape(self) -> tuple[sint, ...]:
+    raise NotImplementedError
+
+  def _full_like(self, fill_value: ConstType) -> Self:
+    raise NotImplementedError
+
+  def _cat(self, *args: Self, dim: int) -> Self:
     raise NotImplementedError
 
   # great functions you get!
@@ -374,3 +385,82 @@ class MovementMixin:
     x = x.shrink_to(noop + flatten((k, o, 1) for k, o in zip(k_, o_))).reshape(noop + flatten((k, o) for k, o in zip(k_, o_)))
     # permute to move reduce to the end
     return x.permute(*range(len(noop)), *[len(noop) + i * 2 + 1 for i in range(len(i_))], *[len(noop) + i * 2 for i in range(len(i_))])
+
+  # **** pad ****
+
+  def pad(self, padding:Sequence[sint]|Sequence[tuple[sint, sint]|None], mode:str="constant", value:float=0.0) -> Self:
+    """
+    Returns a tensor with padding applied based on the input `padding`.
+
+    `padding` supports two padding structures:
+
+    1. Flat padding: `(padding_left, padding_right, padding_top, padding_bottom, ...)`
+        - This structure matches PyTorch's pad.
+        - `padding` length must be even.
+
+    2. Group padding: `(..., (padding_top, padding_bottom), (padding_left, padding_right))`
+        - This structure matches pad for JAX, NumPy, TensorFlow, and others.
+        - For each axis, padding can be `None`, meaning no padding, or a tuple `(start, end)`.
+        - `padding` must have the same length as `self.ndim`.
+
+    Padding values can be negative, resulting in dimension shrinks that work similarly to Python negative slices.
+    Padding modes is selected with `mode` which supports `constant`, `reflect` and `replicate`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(9).reshape(1, 1, 3, 3)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.pad((1, 2, 0, -1)).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.pad(((None, None, (0, -1), (1, 2)))).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.pad((1, 2, 0, -1), value=-float('inf')).numpy())
+    ```
+    """
+    if mode not in {"constant", "reflect", "replicate", "circular"}: raise NotImplementedError(f"{mode=} is not supported")
+    # flat padding
+    if all(isinstance(p, (int, type(self.shape[0]))) for p in padding):
+      if len(padding)%2 != 0: raise ValueError("Flat padding must have even number of pads")
+      pX = _flat_to_grouped(tuple(cast(Sequence[sint], padding)) + (0,0)*(self.ndim - len(padding)//2))
+    # group padding
+    else: pX = tuple((0,0) if p is None else p for p in cast(Sequence[tuple[sint, sint]|None], padding))
+    if len(pX) != self.ndim: raise ValueError(f"padding length is improper, {padding=} {self.ndim=}")
+    X, pads = self, tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX)
+    if mode == "constant":
+      def _constant(x:Self, px, v) -> Self:
+        padded = x._mop(Ops.PAD, px)
+        if v == 0: return padded
+        mask = x._full_like(1)._mop(Ops.PAD, px)
+        return padded + mask.where(0, v)  # type: ignore[attr-defined,return-value]
+      return _constant(X, pX, value) if all(resolve(p >= 0) for p in flatten(pX)) else \
+             _constant(X.shrink(tuple((-smin(pB,0),smin(pA+s,s)) for (pB,pA),s in zip(pX, X.shape))), pads, value)
+    assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
+    if mode == "circular":
+      if any(pB>sh or pA>sh for (pB,pA),sh in zip(pX, X.shape)): raise ValueError('Padding value causes wrapping around more than once.')
+      if any(pB<0 or pA<0 for pB,pA in pX): raise NotImplementedError("Negative pads with circular pads is not supported")
+      orig_shape, X = X.shape, X.repeat(tuple(1 + bool(pB) + bool(pA) for pB,pA in pads))
+      return X.shrink(tuple((0 if pB == 0 else osh-pB, xsh if pA == 0 else xsh-osh+pA) for (pB,pA),osh,xsh in zip(pads, orig_shape, X.shape)))
+    for d,(pB,pA) in enumerate(pads):
+      if mode == "reflect":
+        if pB >= (s:=X.shape[d]) or pA>=s: raise ValueError(f"Padding ({pB}, {pA}) should be less than the input size={s} for dim={d}.")
+        # slice(pB, 0, -1) means elements [1..pB] reversed -> shrink to [1, pB+1) then flip
+        xB = X.shrink(tuple((1, pB+1) if i == d else None for i in range(X.ndim))).flip(d) if pB > 0 else None
+        # slice(s-2, s-2-pA, -1) means elements [s-pA-1..s-2] reversed -> shrink to [s-pA-1, s-1) then flip
+        xA = X.shrink(tuple((s-pA-1, s-1) if i == d else None for i in range(X.ndim))).flip(d) if pA > 0 else None
+      if mode == "replicate":
+        shrB, shrA = tuple((0,1) if i==d else None for i in range(X.ndim)), tuple((X.shape[i]-1,X.shape[i]) if i==d else None for i in range(X.ndim))
+        xB = X.shrink(shrB).expand(tuple(pB if i==d else None for i in range(X.ndim))) if pB > 0 else None
+        xA = X.shrink(shrA).expand(tuple(pA if i==d else None for i in range(X.ndim))) if pA > 0 else None
+      # cat only when there's something to cat (xB or xA present)
+      if xB is not None or xA is not None:
+        to_cat = [x for x in (xB, X, xA) if x is not None]
+        X = to_cat[0]._cat(*to_cat[1:], dim=d)
+    return X.shrink(tuple((-min(pB,0), min(pA+s,s)) for (pB,pA),s in zip(pX, X.shape)))
+
+  # convenience
+  def pad_to(self, shape, *args) -> Self:
+    if len(new_shape := argfix(shape, *args)) != self.ndim: raise ValueError(f"dim mismatch, cannot pad {self.shape} to {new_shape}")
+    return self.pad(tuple([None if ns is None else (0, ns-s) for s,ns in zip(self.shape, new_shape)]))
