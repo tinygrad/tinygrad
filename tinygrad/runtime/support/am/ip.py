@@ -59,7 +59,9 @@ class AM_GMC(AM_IP):
 
     self.memscratch_xgmi_paddr = self.adev.paddr2xgmi(self.adev.mm.palloc(0x1000, zero=False, boot=True))
     self.dummy_page_xgmi_paddr = self.adev.paddr2xgmi(self.adev.mm.palloc(0x1000, zero=False, boot=True))
-    self.hub_initted = {"MM": False, "GC": False}
+
+    # MM hub is inited before any tlb flushes and is still valid during partial_boot, so set it to true
+    self.hub_initted = {"MM": True, "GC": False}
 
     self.pf_status_reg = lambda ip: f"reg{ip}VM_L2_PROTECTION_FAULT_STATUS{'_LO32' if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else ''}"
 
@@ -213,8 +215,6 @@ class AM_GFX(AM_IP):
   def init_sw(self): self.xccs = len(self.adev.regs_offset[am.GC_HWIP])
 
   def init_hw(self):
-    self.adev.gmc.hub_initted["MM"] = True  # MM hub must be initialized before GFX hub
-
     # Wait for RLC autoload to complete
     while self.adev.regCP_STAT.read() != 0 and self.adev.regRLC_RLCS_BOOTLOAD_STATUS.read_bitfields()['bootload_complete'] != 0: pass
 
