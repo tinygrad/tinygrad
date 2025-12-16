@@ -16,11 +16,18 @@ class ScheduleItem:
   bufs: tuple[Buffer, ...]
   metadata: tuple[Metadata, ...] = ()
   fixedvars: dict[str, int] = field(default_factory=dict)
+
+@dataclass(frozen=True)
+class PreScheduleItem:
+  ast: UOp
+  buf_uops: tuple[UOp, ...]
+  metadata: tuple[Metadata, ...] = ()
+  fixedvars: dict[str, int] = field(default_factory=dict)
   bound_ranges: tuple[UOp, ...] = ()
 
 # **** schedule linearizer
 
-def create_schedule(sched_sink:UOp) -> list[ScheduleItem]:
+def create_schedule(sched_sink:UOp) -> list[PreScheduleItem]:
   with cpu_profile(TracingKey("toposort sched_sink")):
     # construct the KERNEL children graph based on assigns
     children: dict[UOp, list[UOp]] = {}
@@ -48,33 +55,21 @@ def create_schedule(sched_sink:UOp) -> list[ScheduleItem]:
         else:
           raise RuntimeError(f"input to kernel must be AFTER or BUFFER, not {s.op}")
 
-  with cpu_profile(TracingKey("linearize to ScheduleItem")):
+  with cpu_profile(TracingKey("linearize to PreScheduleItem")):
     queue: deque[UOp] = deque()
     for k,v in in_degree.items():
       if v == 0: queue.append(k)
 
-    schedule: list[ScheduleItem|UOp] = []
+    schedule: list[PreScheduleItem|UOp] = []
     while len(queue):
       k = rk = queue.popleft()
       if k.op is Ops.END: k = k.src[0]
       if k.op is Ops.RANGE: schedule.append(k)
       elif k.op is Ops.KERNEL:
         ast = k.arg.ast
-        # create subbuffers if needed
-        if ast.op is Ops.BUFFER_VIEW:
-          base = k.src[1].buf_uop.buffer
-          assert isinstance(base, Buffer), "base can't be MultiBuffer"
-          buffers[k.src[0]] = base.view(k.size, ast.dtype, ast.arg[1]*base.dtype.itemsize)
-        ubufs = tuple(s.buf_uop.buffer for s in k.src if s.op is not Ops.BIND)
+        buf_uops = tuple(s.buf_uop for s in k.src if s.op is not Ops.BIND)
         bound_ranges = tuple(s for s in k.src if s.op is Ops.BIND and len(s.src) > 1 and s.src[1].op is Ops.RANGE)
-        if any(isinstance(x, MultiBuffer) for x in ubufs):
-          assert all(isinstance(x, MultiBuffer) for x in ubufs), "kernel must all be multibuffer"
-          dnums = [x for x in ast.variables() if x.arg[0] == '_device_num']
-          for i,bufs in enumerate(zip(*[x.bufs for x in cast(tuple[MultiBuffer, ...], ubufs)])):
-            schedule.append(ScheduleItem(ast, bufs, k.arg.metadata, {dnums[0].expr:i} if len(dnums) else {}, bound_ranges=bound_ranges))
-        else:
-          # ONE -> ONE
-          schedule.append(ScheduleItem(ast, cast(tuple[Buffer, ...], ubufs), k.arg.metadata, bound_ranges=bound_ranges))
+        schedule.append(PreScheduleItem(ast, buf_uops, k.arg.metadata, bound_ranges=bound_ranges))
         if rk.op is Ops.END: schedule.append(rk)
       else:
         raise RuntimeError(f"can't schedule {k.op}")
@@ -83,7 +78,7 @@ def create_schedule(sched_sink:UOp) -> list[ScheduleItem]:
         if in_degree[x] == 0: queue.append(x)
 
   with cpu_profile(TracingKey("expand ranges")):
-    real_schedule: list[ScheduleItem] = []
+    real_schedule: list[PreScheduleItem] = []
     sched_ptr = 0
     in_ranges = {}
     range_ptrs = {}
@@ -106,6 +101,50 @@ def create_schedule(sched_sink:UOp) -> list[ScheduleItem]:
 from tinygrad.engine.memory import memory_planner
 from tinygrad.schedule.rangeify import get_rangeify_map
 from tinygrad.schedule.multi import get_multi_map
+
+def resolve_buf_uop(buf_uop: UOp, ctx: dict[UOp, UOp]) -> UOp:
+  """Resolve a LUNIQUE buf_uop to its UNIQUE version."""
+  if buf_uop.op is Ops.BUFFER:
+    if buf_uop in ctx:
+      return ctx[buf_uop]
+    # New buffer created during rangeify - create with UNIQUE
+    ctx[buf_uop] = ret = UOp.new_buffer(buf_uop.device, buf_uop.arg, buf_uop.dtype)
+    return ret
+  elif buf_uop.op is Ops.MSELECT:
+    resolved_src = resolve_buf_uop(buf_uop.src[0], ctx)
+    return resolved_src.mselect(buf_uop.arg)
+  elif buf_uop.op is Ops.MSTACK:
+    resolved_srcs = tuple(resolve_buf_uop(s, ctx) for s in buf_uop.src)
+    return UOp(Ops.MSTACK, buf_uop.dtype, src=resolved_srcs)
+  else:
+    raise RuntimeError(f"unexpected buf_uop op: {buf_uop.op}")
+
+def finalize_schedule(pre_schedule: list[PreScheduleItem], input_buffers_reverse: dict[UOp, UOp]) -> list[ScheduleItem]:
+  """Convert PreScheduleItems to ScheduleItems by replacing LUNIQUE with UNIQUE and resolving Buffers."""
+  schedule: list[ScheduleItem] = []
+  for psi in pre_schedule:
+    # Resolve LUNIQUE buf_uops to UNIQUE
+    buf_uops = tuple(resolve_buf_uop(b, input_buffers_reverse) for b in psi.buf_uops)
+
+    # Handle BUFFER_VIEW: create subbuffer
+    if psi.ast.op is Ops.BUFFER_VIEW:
+      base = buf_uops[1].buffer
+      assert isinstance(base, Buffer), "base can't be MultiBuffer"
+      buffers[buf_uops[0]] = base.view(buf_uops[0].arg, psi.ast.dtype, psi.ast.arg[1]*base.dtype.itemsize)
+
+    # Get actual Buffer objects
+    ubufs = tuple(b.buffer for b in buf_uops)
+
+    # Handle MultiBuffer: expand to multiple ScheduleItems
+    if any(isinstance(x, MultiBuffer) for x in ubufs):
+      assert all(isinstance(x, MultiBuffer) for x in ubufs), "kernel must all be multibuffer"
+      dnums = [x for x in psi.ast.variables() if x.arg[0] == '_device_num']
+      for i, bufs in enumerate(zip(*[x.bufs for x in cast(tuple[MultiBuffer, ...], ubufs)])):
+        schedule.append(ScheduleItem(psi.ast, bufs, psi.metadata, psi.fixedvars | ({dnums[0].expr:i} if len(dnums) else {})))
+    else:
+      schedule.append(ScheduleItem(psi.ast, cast(tuple[Buffer, ...], ubufs), psi.metadata, psi.fixedvars))
+
+  return schedule
 
 def replace_input_buffer(ctx:dict[UOp, UOp], b:UOp):
   if (ret:=ctx.get(b, None)) is None:
@@ -177,14 +216,12 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
     del big_sink_cache
     big_sink, tensor_map_sink = sc_ret
 
-  # replace all the LUNIQUEs with UNIQUEs
-  input_buffers_reverse = {v:k for k,v in input_buffers.items()}
-  big_sink = graph_rewrite(big_sink, pm_post_sched_cache, ctx=input_buffers_reverse, name="unrewrite for sched cache")
-  tm_src = graph_rewrite(tensor_map_sink, pm_post_sched_cache, ctx=input_buffers_reverse, name="unrewrite for tensor map").src
-  tensor_map = {tm_src[i]:tm_src[i+1] for i in range(0, len(tm_src), 2)}
+  # create the schedule with LUNIQUE placeholders
+  pre_schedule = create_schedule(big_sink)
 
-  # create the schedule
-  schedule = create_schedule(big_sink)
+  # replace LUNIQUE with UNIQUE in ScheduleItems
+  input_buffers_reverse = {v:k for k,v in input_buffers.items()}
+  schedule = finalize_schedule(pre_schedule, input_buffers_reverse)
   with cpu_profile(TracingKey("memory planner")): schedule = memory_planner(schedule)
 
   # extract var_vals from BINDs that were stripped (only if there are kernels)
@@ -196,7 +233,12 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
         assert var.expr not in var_vals or var_vals[var.expr] == val, f"bind mismatch on {var}, {var_vals[var.expr]} != {val}"
         var_vals[var.expr] = val
 
+  # replace LUNIQUE in tensor_map_sink and big_sink for tensor_map
+  tm_src = graph_rewrite(tensor_map_sink, pm_post_sched_cache, ctx=input_buffers_reverse, name="unrewrite for tensor map").src
+  tensor_map = {tm_src[i]:tm_src[i+1] for i in range(0, len(tm_src), 2)}
+
   # remove all AFTERs, after scheduling, the tensors are just buffers
+  big_sink = graph_rewrite(big_sink, pm_post_sched_cache, ctx=input_buffers_reverse, name="unrewrite for sched cache")
   tensor_map |= {u:u.buf_uop for u in big_sink.toposort() if u.op is Ops.AFTER}
 
   if (DEBUG >= 1 and len(schedule) > 1) or DEBUG >= 3:
