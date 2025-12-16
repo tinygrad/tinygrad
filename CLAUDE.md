@@ -95,6 +95,8 @@ VIZ=1 python -c "from tinygrad import Tensor; Tensor.ones(10).sum().realize()"
 ## Workflow Rules
 
 - **NEVER commit without explicit user approval** - always show the diff and wait for approval
+- **NEVER amend commits** - always create a new commit instead
+- Run `pre-commit run --all-files` before committing to catch linting/type errors
 - Run tests before proposing commits
 - Test with `SPEC=2` when modifying UOp-related code
 
