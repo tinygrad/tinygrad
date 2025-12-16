@@ -774,9 +774,8 @@ struct_ibv_async_event.SIZE = 16
 struct_ibv_async_event._fields_ = ['element', 'event_type']
 setattr(struct_ibv_async_event, 'element', field(0, _anonunion12))
 setattr(struct_ibv_async_event, 'event_type', field(8, enum_ibv_event_type))
-try: (ibv_wc_status_str:=dll.ibv_wc_status_str).restype, ibv_wc_status_str.argtypes = Pointer(ctypes.c_char), [enum_ibv_wc_status]
-except AttributeError: pass
-
+@dll.bind((enum_ibv_wc_status), Pointer(ctypes.c_char))
+def ibv_wc_status_str(status): ...
 _anonenum13 = CEnum(ctypes.c_uint32)
 IBV_WC_IP_CSUM_OK_SHIFT = _anonenum13.define('IBV_WC_IP_CSUM_OK_SHIFT', 2)
 
@@ -895,18 +894,14 @@ IBV_RATE_600_GBPS = enum_ibv_rate.define('IBV_RATE_600_GBPS', 22)
 IBV_RATE_800_GBPS = enum_ibv_rate.define('IBV_RATE_800_GBPS', 23)
 IBV_RATE_1200_GBPS = enum_ibv_rate.define('IBV_RATE_1200_GBPS', 24)
 
-try: (ibv_rate_to_mult:=dll.ibv_rate_to_mult).restype, ibv_rate_to_mult.argtypes = ctypes.c_int32, [enum_ibv_rate]
-except AttributeError: pass
-
-try: (mult_to_ibv_rate:=dll.mult_to_ibv_rate).restype, mult_to_ibv_rate.argtypes = enum_ibv_rate, [ctypes.c_int32]
-except AttributeError: pass
-
-try: (ibv_rate_to_mbps:=dll.ibv_rate_to_mbps).restype, ibv_rate_to_mbps.argtypes = ctypes.c_int32, [enum_ibv_rate]
-except AttributeError: pass
-
-try: (mbps_to_ibv_rate:=dll.mbps_to_ibv_rate).restype, mbps_to_ibv_rate.argtypes = enum_ibv_rate, [ctypes.c_int32]
-except AttributeError: pass
-
+@dll.bind((enum_ibv_rate), ctypes.c_int32)
+def ibv_rate_to_mult(rate): ...
+@dll.bind((ctypes.c_int32), enum_ibv_rate)
+def mult_to_ibv_rate(mult): ...
+@dll.bind((enum_ibv_rate), ctypes.c_int32)
+def ibv_rate_to_mbps(rate): ...
+@dll.bind((ctypes.c_int32), enum_ibv_rate)
+def mbps_to_ibv_rate(mbps): ...
 class struct_ibv_ah_attr(Struct): pass
 struct_ibv_ah_attr.SIZE = 32
 struct_ibv_ah_attr._fields_ = ['grh', 'dlid', 'sl', 'src_path_bits', 'static_rate', 'is_global', 'port_num']
@@ -1175,9 +1170,8 @@ setattr(struct_ibv_qp_rate_limit_attr, 'rate_limit', field(0, uint32_t))
 setattr(struct_ibv_qp_rate_limit_attr, 'max_burst_sz', field(4, uint32_t))
 setattr(struct_ibv_qp_rate_limit_attr, 'typical_pkt_sz', field(8, uint16_t))
 setattr(struct_ibv_qp_rate_limit_attr, 'comp_mask', field(12, uint32_t))
-try: (ibv_wr_opcode_str:=dll.ibv_wr_opcode_str).restype, ibv_wr_opcode_str.argtypes = Pointer(ctypes.c_char), [enum_ibv_wr_opcode]
-except AttributeError: pass
-
+@dll.bind((enum_ibv_wr_opcode), Pointer(ctypes.c_char))
+def ibv_wr_opcode_str(opcode): ...
 enum_ibv_send_flags = CEnum(ctypes.c_uint32)
 IBV_SEND_FENCE = enum_ibv_send_flags.define('IBV_SEND_FENCE', 1)
 IBV_SEND_SIGNALED = enum_ibv_send_flags.define('IBV_SEND_SIGNALED', 2)
@@ -1258,9 +1252,8 @@ setattr(struct_ibv_qp_ex, 'wr_complete', field(328, ctypes.CFUNCTYPE(ctypes.c_in
 setattr(struct_ibv_qp_ex, 'wr_abort', field(336, ctypes.CFUNCTYPE(None, Pointer(struct_ibv_qp_ex))))
 setattr(struct_ibv_qp_ex, 'wr_atomic_write', field(344, ctypes.CFUNCTYPE(None, Pointer(struct_ibv_qp_ex), uint32_t, uint64_t, ctypes.c_void_p)))
 setattr(struct_ibv_qp_ex, 'wr_flush', field(352, ctypes.CFUNCTYPE(None, Pointer(struct_ibv_qp_ex), uint32_t, uint64_t, size_t, uint8_t, uint8_t)))
-try: (ibv_qp_to_qp_ex:=dll.ibv_qp_to_qp_ex).restype, ibv_qp_to_qp_ex.argtypes = Pointer(struct_ibv_qp_ex), [Pointer(struct_ibv_qp)]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_ibv_qp)), Pointer(struct_ibv_qp_ex))
+def ibv_qp_to_qp_ex(qp): ...
 class struct_ibv_ece(Struct): pass
 struct_ibv_ece.SIZE = 12
 struct_ibv_ece._fields_ = ['vendor_id', 'options', 'comp_mask']
@@ -1698,94 +1691,65 @@ setattr(struct_verbs_context, 'close_xrcd', field(296, ctypes.CFUNCTYPE(ctypes.c
 setattr(struct_verbs_context, '_ABI_placeholder3', field(304, uint64_t))
 setattr(struct_verbs_context, 'sz', field(312, size_t))
 setattr(struct_verbs_context, 'context', field(320, struct_ibv_context))
-try: (ibv_get_device_list:=dll.ibv_get_device_list).restype, ibv_get_device_list.argtypes = Pointer(Pointer(struct_ibv_device)), [Pointer(ctypes.c_int32)]
-except AttributeError: pass
-
-try: (ibv_free_device_list:=dll.ibv_free_device_list).restype, ibv_free_device_list.argtypes = None, [Pointer(Pointer(struct_ibv_device))]
-except AttributeError: pass
-
-try: (ibv_get_device_name:=dll.ibv_get_device_name).restype, ibv_get_device_name.argtypes = Pointer(ctypes.c_char), [Pointer(struct_ibv_device)]
-except AttributeError: pass
-
-try: (ibv_get_device_index:=dll.ibv_get_device_index).restype, ibv_get_device_index.argtypes = ctypes.c_int32, [Pointer(struct_ibv_device)]
-except AttributeError: pass
-
-try: (ibv_get_device_guid:=dll.ibv_get_device_guid).restype, ibv_get_device_guid.argtypes = ctypes.c_uint64, [Pointer(struct_ibv_device)]
-except AttributeError: pass
-
-try: (ibv_open_device:=dll.ibv_open_device).restype, ibv_open_device.argtypes = Pointer(struct_ibv_context), [Pointer(struct_ibv_device)]
-except AttributeError: pass
-
-try: (ibv_close_device:=dll.ibv_close_device).restype, ibv_close_device.argtypes = ctypes.c_int32, [Pointer(struct_ibv_context)]
-except AttributeError: pass
-
-try: (ibv_import_device:=dll.ibv_import_device).restype, ibv_import_device.argtypes = Pointer(struct_ibv_context), [ctypes.c_int32]
-except AttributeError: pass
-
-try: (ibv_import_pd:=dll.ibv_import_pd).restype, ibv_import_pd.argtypes = Pointer(struct_ibv_pd), [Pointer(struct_ibv_context), uint32_t]
-except AttributeError: pass
-
-try: (ibv_unimport_pd:=dll.ibv_unimport_pd).restype, ibv_unimport_pd.argtypes = None, [Pointer(struct_ibv_pd)]
-except AttributeError: pass
-
-try: (ibv_import_mr:=dll.ibv_import_mr).restype, ibv_import_mr.argtypes = Pointer(struct_ibv_mr), [Pointer(struct_ibv_pd), uint32_t]
-except AttributeError: pass
-
-try: (ibv_unimport_mr:=dll.ibv_unimport_mr).restype, ibv_unimport_mr.argtypes = None, [Pointer(struct_ibv_mr)]
-except AttributeError: pass
-
-try: (ibv_import_dm:=dll.ibv_import_dm).restype, ibv_import_dm.argtypes = Pointer(struct_ibv_dm), [Pointer(struct_ibv_context), uint32_t]
-except AttributeError: pass
-
-try: (ibv_unimport_dm:=dll.ibv_unimport_dm).restype, ibv_unimport_dm.argtypes = None, [Pointer(struct_ibv_dm)]
-except AttributeError: pass
-
-try: (ibv_get_async_event:=dll.ibv_get_async_event).restype, ibv_get_async_event.argtypes = ctypes.c_int32, [Pointer(struct_ibv_context), Pointer(struct_ibv_async_event)]
-except AttributeError: pass
-
-try: (ibv_ack_async_event:=dll.ibv_ack_async_event).restype, ibv_ack_async_event.argtypes = None, [Pointer(struct_ibv_async_event)]
-except AttributeError: pass
-
-try: (ibv_query_device:=dll.ibv_query_device).restype, ibv_query_device.argtypes = ctypes.c_int32, [Pointer(struct_ibv_context), Pointer(struct_ibv_device_attr)]
-except AttributeError: pass
-
-try: (ibv_query_port:=dll.ibv_query_port).restype, ibv_query_port.argtypes = ctypes.c_int32, [Pointer(struct_ibv_context), uint8_t, Pointer(struct__compat_ibv_port_attr)]
-except AttributeError: pass
-
-try: (ibv_query_gid:=dll.ibv_query_gid).restype, ibv_query_gid.argtypes = ctypes.c_int32, [Pointer(struct_ibv_context), uint8_t, ctypes.c_int32, Pointer(union_ibv_gid)]
-except AttributeError: pass
-
-try: (_ibv_query_gid_ex:=dll._ibv_query_gid_ex).restype, _ibv_query_gid_ex.argtypes = ctypes.c_int32, [Pointer(struct_ibv_context), uint32_t, uint32_t, Pointer(struct_ibv_gid_entry), uint32_t, size_t]
-except AttributeError: pass
-
+@dll.bind((Pointer(ctypes.c_int32)), Pointer(Pointer(struct_ibv_device)))
+def ibv_get_device_list(num_devices): ...
+@dll.bind((Pointer(Pointer(struct_ibv_device))), None)
+def ibv_free_device_list(list): ...
+@dll.bind((Pointer(struct_ibv_device)), Pointer(ctypes.c_char))
+def ibv_get_device_name(device): ...
+@dll.bind((Pointer(struct_ibv_device)), ctypes.c_int32)
+def ibv_get_device_index(device): ...
+@dll.bind((Pointer(struct_ibv_device)), ctypes.c_uint64)
+def ibv_get_device_guid(device): ...
+@dll.bind((Pointer(struct_ibv_device)), Pointer(struct_ibv_context))
+def ibv_open_device(device): ...
+@dll.bind((Pointer(struct_ibv_context)), ctypes.c_int32)
+def ibv_close_device(context): ...
+@dll.bind((ctypes.c_int32), Pointer(struct_ibv_context))
+def ibv_import_device(cmd_fd): ...
+@dll.bind((Pointer(struct_ibv_context), uint32_t), Pointer(struct_ibv_pd))
+def ibv_import_pd(context, pd_handle): ...
+@dll.bind((Pointer(struct_ibv_pd)), None)
+def ibv_unimport_pd(pd): ...
+@dll.bind((Pointer(struct_ibv_pd), uint32_t), Pointer(struct_ibv_mr))
+def ibv_import_mr(pd, mr_handle): ...
+@dll.bind((Pointer(struct_ibv_mr)), None)
+def ibv_unimport_mr(mr): ...
+@dll.bind((Pointer(struct_ibv_context), uint32_t), Pointer(struct_ibv_dm))
+def ibv_import_dm(context, dm_handle): ...
+@dll.bind((Pointer(struct_ibv_dm)), None)
+def ibv_unimport_dm(dm): ...
+@dll.bind((Pointer(struct_ibv_context), Pointer(struct_ibv_async_event)), ctypes.c_int32)
+def ibv_get_async_event(context, event): ...
+@dll.bind((Pointer(struct_ibv_async_event)), None)
+def ibv_ack_async_event(event): ...
+@dll.bind((Pointer(struct_ibv_context), Pointer(struct_ibv_device_attr)), ctypes.c_int32)
+def ibv_query_device(context, device_attr): ...
+@dll.bind((Pointer(struct_ibv_context), uint8_t, Pointer(struct__compat_ibv_port_attr)), ctypes.c_int32)
+def ibv_query_port(context, port_num, port_attr): ...
+@dll.bind((Pointer(struct_ibv_context), uint8_t, ctypes.c_int32, Pointer(union_ibv_gid)), ctypes.c_int32)
+def ibv_query_gid(context, port_num, index, gid): ...
+@dll.bind((Pointer(struct_ibv_context), uint32_t, uint32_t, Pointer(struct_ibv_gid_entry), uint32_t, size_t), ctypes.c_int32)
+def _ibv_query_gid_ex(context, port_num, gid_index, entry, flags, entry_size): ...
 ssize_t = ctypes.c_int64
-try: (_ibv_query_gid_table:=dll._ibv_query_gid_table).restype, _ibv_query_gid_table.argtypes = ssize_t, [Pointer(struct_ibv_context), Pointer(struct_ibv_gid_entry), size_t, uint32_t, size_t]
-except AttributeError: pass
-
-try: (ibv_query_pkey:=dll.ibv_query_pkey).restype, ibv_query_pkey.argtypes = ctypes.c_int32, [Pointer(struct_ibv_context), uint8_t, ctypes.c_int32, Pointer(ctypes.c_uint16)]
-except AttributeError: pass
-
-try: (ibv_get_pkey_index:=dll.ibv_get_pkey_index).restype, ibv_get_pkey_index.argtypes = ctypes.c_int32, [Pointer(struct_ibv_context), uint8_t, ctypes.c_uint16]
-except AttributeError: pass
-
-try: (ibv_alloc_pd:=dll.ibv_alloc_pd).restype, ibv_alloc_pd.argtypes = Pointer(struct_ibv_pd), [Pointer(struct_ibv_context)]
-except AttributeError: pass
-
-try: (ibv_dealloc_pd:=dll.ibv_dealloc_pd).restype, ibv_dealloc_pd.argtypes = ctypes.c_int32, [Pointer(struct_ibv_pd)]
-except AttributeError: pass
-
-try: (ibv_reg_mr_iova2:=dll.ibv_reg_mr_iova2).restype, ibv_reg_mr_iova2.argtypes = Pointer(struct_ibv_mr), [Pointer(struct_ibv_pd), ctypes.c_void_p, size_t, uint64_t, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (ibv_reg_mr:=dll.ibv_reg_mr).restype, ibv_reg_mr.argtypes = Pointer(struct_ibv_mr), [Pointer(struct_ibv_pd), ctypes.c_void_p, size_t, ctypes.c_int32]
-except AttributeError: pass
-
-try: (ibv_reg_mr_iova:=dll.ibv_reg_mr_iova).restype, ibv_reg_mr_iova.argtypes = Pointer(struct_ibv_mr), [Pointer(struct_ibv_pd), ctypes.c_void_p, size_t, uint64_t, ctypes.c_int32]
-except AttributeError: pass
-
-try: (ibv_reg_dmabuf_mr:=dll.ibv_reg_dmabuf_mr).restype, ibv_reg_dmabuf_mr.argtypes = Pointer(struct_ibv_mr), [Pointer(struct_ibv_pd), uint64_t, size_t, uint64_t, ctypes.c_int32, ctypes.c_int32]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_ibv_context), Pointer(struct_ibv_gid_entry), size_t, uint32_t, size_t), ssize_t)
+def _ibv_query_gid_table(context, entries, max_entries, flags, entry_size): ...
+@dll.bind((Pointer(struct_ibv_context), uint8_t, ctypes.c_int32, Pointer(ctypes.c_uint16)), ctypes.c_int32)
+def ibv_query_pkey(context, port_num, index, pkey): ...
+@dll.bind((Pointer(struct_ibv_context), uint8_t, ctypes.c_uint16), ctypes.c_int32)
+def ibv_get_pkey_index(context, port_num, pkey): ...
+@dll.bind((Pointer(struct_ibv_context)), Pointer(struct_ibv_pd))
+def ibv_alloc_pd(context): ...
+@dll.bind((Pointer(struct_ibv_pd)), ctypes.c_int32)
+def ibv_dealloc_pd(pd): ...
+@dll.bind((Pointer(struct_ibv_pd), ctypes.c_void_p, size_t, uint64_t, ctypes.c_uint32), Pointer(struct_ibv_mr))
+def ibv_reg_mr_iova2(pd, addr, length, iova, access): ...
+@dll.bind((Pointer(struct_ibv_pd), ctypes.c_void_p, size_t, ctypes.c_int32), Pointer(struct_ibv_mr))
+def ibv_reg_mr(pd, addr, length, access): ...
+@dll.bind((Pointer(struct_ibv_pd), ctypes.c_void_p, size_t, uint64_t, ctypes.c_int32), Pointer(struct_ibv_mr))
+def ibv_reg_mr_iova(pd, addr, length, iova, access): ...
+@dll.bind((Pointer(struct_ibv_pd), uint64_t, size_t, uint64_t, ctypes.c_int32, ctypes.c_int32), Pointer(struct_ibv_mr))
+def ibv_reg_dmabuf_mr(pd, offset, length, iova, fd, access): ...
 enum_ibv_rereg_mr_err_code = CEnum(ctypes.c_int32)
 IBV_REREG_MR_ERR_INPUT = enum_ibv_rereg_mr_err_code.define('IBV_REREG_MR_ERR_INPUT', -1)
 IBV_REREG_MR_ERR_DONT_FORK_NEW = enum_ibv_rereg_mr_err_code.define('IBV_REREG_MR_ERR_DONT_FORK_NEW', -2)
@@ -1793,102 +1757,70 @@ IBV_REREG_MR_ERR_DO_FORK_OLD = enum_ibv_rereg_mr_err_code.define('IBV_REREG_MR_E
 IBV_REREG_MR_ERR_CMD = enum_ibv_rereg_mr_err_code.define('IBV_REREG_MR_ERR_CMD', -4)
 IBV_REREG_MR_ERR_CMD_AND_DO_FORK_NEW = enum_ibv_rereg_mr_err_code.define('IBV_REREG_MR_ERR_CMD_AND_DO_FORK_NEW', -5)
 
-try: (ibv_rereg_mr:=dll.ibv_rereg_mr).restype, ibv_rereg_mr.argtypes = ctypes.c_int32, [Pointer(struct_ibv_mr), ctypes.c_int32, Pointer(struct_ibv_pd), ctypes.c_void_p, size_t, ctypes.c_int32]
-except AttributeError: pass
-
-try: (ibv_dereg_mr:=dll.ibv_dereg_mr).restype, ibv_dereg_mr.argtypes = ctypes.c_int32, [Pointer(struct_ibv_mr)]
-except AttributeError: pass
-
-try: (ibv_create_comp_channel:=dll.ibv_create_comp_channel).restype, ibv_create_comp_channel.argtypes = Pointer(struct_ibv_comp_channel), [Pointer(struct_ibv_context)]
-except AttributeError: pass
-
-try: (ibv_destroy_comp_channel:=dll.ibv_destroy_comp_channel).restype, ibv_destroy_comp_channel.argtypes = ctypes.c_int32, [Pointer(struct_ibv_comp_channel)]
-except AttributeError: pass
-
-try: (ibv_create_cq:=dll.ibv_create_cq).restype, ibv_create_cq.argtypes = Pointer(struct_ibv_cq), [Pointer(struct_ibv_context), ctypes.c_int32, ctypes.c_void_p, Pointer(struct_ibv_comp_channel), ctypes.c_int32]
-except AttributeError: pass
-
-try: (ibv_resize_cq:=dll.ibv_resize_cq).restype, ibv_resize_cq.argtypes = ctypes.c_int32, [Pointer(struct_ibv_cq), ctypes.c_int32]
-except AttributeError: pass
-
-try: (ibv_destroy_cq:=dll.ibv_destroy_cq).restype, ibv_destroy_cq.argtypes = ctypes.c_int32, [Pointer(struct_ibv_cq)]
-except AttributeError: pass
-
-try: (ibv_get_cq_event:=dll.ibv_get_cq_event).restype, ibv_get_cq_event.argtypes = ctypes.c_int32, [Pointer(struct_ibv_comp_channel), Pointer(Pointer(struct_ibv_cq)), Pointer(ctypes.c_void_p)]
-except AttributeError: pass
-
-try: (ibv_ack_cq_events:=dll.ibv_ack_cq_events).restype, ibv_ack_cq_events.argtypes = None, [Pointer(struct_ibv_cq), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (ibv_create_srq:=dll.ibv_create_srq).restype, ibv_create_srq.argtypes = Pointer(struct_ibv_srq), [Pointer(struct_ibv_pd), Pointer(struct_ibv_srq_init_attr)]
-except AttributeError: pass
-
-try: (ibv_modify_srq:=dll.ibv_modify_srq).restype, ibv_modify_srq.argtypes = ctypes.c_int32, [Pointer(struct_ibv_srq), Pointer(struct_ibv_srq_attr), ctypes.c_int32]
-except AttributeError: pass
-
-try: (ibv_query_srq:=dll.ibv_query_srq).restype, ibv_query_srq.argtypes = ctypes.c_int32, [Pointer(struct_ibv_srq), Pointer(struct_ibv_srq_attr)]
-except AttributeError: pass
-
-try: (ibv_destroy_srq:=dll.ibv_destroy_srq).restype, ibv_destroy_srq.argtypes = ctypes.c_int32, [Pointer(struct_ibv_srq)]
-except AttributeError: pass
-
-try: (ibv_create_qp:=dll.ibv_create_qp).restype, ibv_create_qp.argtypes = Pointer(struct_ibv_qp), [Pointer(struct_ibv_pd), Pointer(struct_ibv_qp_init_attr)]
-except AttributeError: pass
-
-try: (ibv_modify_qp:=dll.ibv_modify_qp).restype, ibv_modify_qp.argtypes = ctypes.c_int32, [Pointer(struct_ibv_qp), Pointer(struct_ibv_qp_attr), ctypes.c_int32]
-except AttributeError: pass
-
-try: (ibv_query_qp_data_in_order:=dll.ibv_query_qp_data_in_order).restype, ibv_query_qp_data_in_order.argtypes = ctypes.c_int32, [Pointer(struct_ibv_qp), enum_ibv_wr_opcode, uint32_t]
-except AttributeError: pass
-
-try: (ibv_query_qp:=dll.ibv_query_qp).restype, ibv_query_qp.argtypes = ctypes.c_int32, [Pointer(struct_ibv_qp), Pointer(struct_ibv_qp_attr), ctypes.c_int32, Pointer(struct_ibv_qp_init_attr)]
-except AttributeError: pass
-
-try: (ibv_destroy_qp:=dll.ibv_destroy_qp).restype, ibv_destroy_qp.argtypes = ctypes.c_int32, [Pointer(struct_ibv_qp)]
-except AttributeError: pass
-
-try: (ibv_create_ah:=dll.ibv_create_ah).restype, ibv_create_ah.argtypes = Pointer(struct_ibv_ah), [Pointer(struct_ibv_pd), Pointer(struct_ibv_ah_attr)]
-except AttributeError: pass
-
-try: (ibv_init_ah_from_wc:=dll.ibv_init_ah_from_wc).restype, ibv_init_ah_from_wc.argtypes = ctypes.c_int32, [Pointer(struct_ibv_context), uint8_t, Pointer(struct_ibv_wc), Pointer(struct_ibv_grh), Pointer(struct_ibv_ah_attr)]
-except AttributeError: pass
-
-try: (ibv_create_ah_from_wc:=dll.ibv_create_ah_from_wc).restype, ibv_create_ah_from_wc.argtypes = Pointer(struct_ibv_ah), [Pointer(struct_ibv_pd), Pointer(struct_ibv_wc), Pointer(struct_ibv_grh), uint8_t]
-except AttributeError: pass
-
-try: (ibv_destroy_ah:=dll.ibv_destroy_ah).restype, ibv_destroy_ah.argtypes = ctypes.c_int32, [Pointer(struct_ibv_ah)]
-except AttributeError: pass
-
-try: (ibv_attach_mcast:=dll.ibv_attach_mcast).restype, ibv_attach_mcast.argtypes = ctypes.c_int32, [Pointer(struct_ibv_qp), Pointer(union_ibv_gid), uint16_t]
-except AttributeError: pass
-
-try: (ibv_detach_mcast:=dll.ibv_detach_mcast).restype, ibv_detach_mcast.argtypes = ctypes.c_int32, [Pointer(struct_ibv_qp), Pointer(union_ibv_gid), uint16_t]
-except AttributeError: pass
-
-try: (ibv_fork_init:=dll.ibv_fork_init).restype, ibv_fork_init.argtypes = ctypes.c_int32, []
-except AttributeError: pass
-
-try: (ibv_is_fork_initialized:=dll.ibv_is_fork_initialized).restype, ibv_is_fork_initialized.argtypes = enum_ibv_fork_status, []
-except AttributeError: pass
-
-try: (ibv_node_type_str:=dll.ibv_node_type_str).restype, ibv_node_type_str.argtypes = Pointer(ctypes.c_char), [enum_ibv_node_type]
-except AttributeError: pass
-
-try: (ibv_port_state_str:=dll.ibv_port_state_str).restype, ibv_port_state_str.argtypes = Pointer(ctypes.c_char), [enum_ibv_port_state]
-except AttributeError: pass
-
-try: (ibv_event_type_str:=dll.ibv_event_type_str).restype, ibv_event_type_str.argtypes = Pointer(ctypes.c_char), [enum_ibv_event_type]
-except AttributeError: pass
-
-try: (ibv_resolve_eth_l2_from_gid:=dll.ibv_resolve_eth_l2_from_gid).restype, ibv_resolve_eth_l2_from_gid.argtypes = ctypes.c_int32, [Pointer(struct_ibv_context), Pointer(struct_ibv_ah_attr), Array(uint8_t, 6), Pointer(uint16_t)]
-except AttributeError: pass
-
-try: (ibv_set_ece:=dll.ibv_set_ece).restype, ibv_set_ece.argtypes = ctypes.c_int32, [Pointer(struct_ibv_qp), Pointer(struct_ibv_ece)]
-except AttributeError: pass
-
-try: (ibv_query_ece:=dll.ibv_query_ece).restype, ibv_query_ece.argtypes = ctypes.c_int32, [Pointer(struct_ibv_qp), Pointer(struct_ibv_ece)]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_ibv_mr), ctypes.c_int32, Pointer(struct_ibv_pd), ctypes.c_void_p, size_t, ctypes.c_int32), ctypes.c_int32)
+def ibv_rereg_mr(mr, flags, pd, addr, length, access): ...
+@dll.bind((Pointer(struct_ibv_mr)), ctypes.c_int32)
+def ibv_dereg_mr(mr): ...
+@dll.bind((Pointer(struct_ibv_context)), Pointer(struct_ibv_comp_channel))
+def ibv_create_comp_channel(context): ...
+@dll.bind((Pointer(struct_ibv_comp_channel)), ctypes.c_int32)
+def ibv_destroy_comp_channel(channel): ...
+@dll.bind((Pointer(struct_ibv_context), ctypes.c_int32, ctypes.c_void_p, Pointer(struct_ibv_comp_channel), ctypes.c_int32), Pointer(struct_ibv_cq))
+def ibv_create_cq(context, cqe, cq_context, channel, comp_vector): ...
+@dll.bind((Pointer(struct_ibv_cq), ctypes.c_int32), ctypes.c_int32)
+def ibv_resize_cq(cq, cqe): ...
+@dll.bind((Pointer(struct_ibv_cq)), ctypes.c_int32)
+def ibv_destroy_cq(cq): ...
+@dll.bind((Pointer(struct_ibv_comp_channel), Pointer(Pointer(struct_ibv_cq)), Pointer(ctypes.c_void_p)), ctypes.c_int32)
+def ibv_get_cq_event(channel, cq, cq_context): ...
+@dll.bind((Pointer(struct_ibv_cq), ctypes.c_uint32), None)
+def ibv_ack_cq_events(cq, nevents): ...
+@dll.bind((Pointer(struct_ibv_pd), Pointer(struct_ibv_srq_init_attr)), Pointer(struct_ibv_srq))
+def ibv_create_srq(pd, srq_init_attr): ...
+@dll.bind((Pointer(struct_ibv_srq), Pointer(struct_ibv_srq_attr), ctypes.c_int32), ctypes.c_int32)
+def ibv_modify_srq(srq, srq_attr, srq_attr_mask): ...
+@dll.bind((Pointer(struct_ibv_srq), Pointer(struct_ibv_srq_attr)), ctypes.c_int32)
+def ibv_query_srq(srq, srq_attr): ...
+@dll.bind((Pointer(struct_ibv_srq)), ctypes.c_int32)
+def ibv_destroy_srq(srq): ...
+@dll.bind((Pointer(struct_ibv_pd), Pointer(struct_ibv_qp_init_attr)), Pointer(struct_ibv_qp))
+def ibv_create_qp(pd, qp_init_attr): ...
+@dll.bind((Pointer(struct_ibv_qp), Pointer(struct_ibv_qp_attr), ctypes.c_int32), ctypes.c_int32)
+def ibv_modify_qp(qp, attr, attr_mask): ...
+@dll.bind((Pointer(struct_ibv_qp), enum_ibv_wr_opcode, uint32_t), ctypes.c_int32)
+def ibv_query_qp_data_in_order(qp, op, flags): ...
+@dll.bind((Pointer(struct_ibv_qp), Pointer(struct_ibv_qp_attr), ctypes.c_int32, Pointer(struct_ibv_qp_init_attr)), ctypes.c_int32)
+def ibv_query_qp(qp, attr, attr_mask, init_attr): ...
+@dll.bind((Pointer(struct_ibv_qp)), ctypes.c_int32)
+def ibv_destroy_qp(qp): ...
+@dll.bind((Pointer(struct_ibv_pd), Pointer(struct_ibv_ah_attr)), Pointer(struct_ibv_ah))
+def ibv_create_ah(pd, attr): ...
+@dll.bind((Pointer(struct_ibv_context), uint8_t, Pointer(struct_ibv_wc), Pointer(struct_ibv_grh), Pointer(struct_ibv_ah_attr)), ctypes.c_int32)
+def ibv_init_ah_from_wc(context, port_num, wc, grh, ah_attr): ...
+@dll.bind((Pointer(struct_ibv_pd), Pointer(struct_ibv_wc), Pointer(struct_ibv_grh), uint8_t), Pointer(struct_ibv_ah))
+def ibv_create_ah_from_wc(pd, wc, grh, port_num): ...
+@dll.bind((Pointer(struct_ibv_ah)), ctypes.c_int32)
+def ibv_destroy_ah(ah): ...
+@dll.bind((Pointer(struct_ibv_qp), Pointer(union_ibv_gid), uint16_t), ctypes.c_int32)
+def ibv_attach_mcast(qp, gid, lid): ...
+@dll.bind((Pointer(struct_ibv_qp), Pointer(union_ibv_gid), uint16_t), ctypes.c_int32)
+def ibv_detach_mcast(qp, gid, lid): ...
+@dll.bind((), ctypes.c_int32)
+def ibv_fork_init(): ...
+@dll.bind((), enum_ibv_fork_status)
+def ibv_is_fork_initialized(): ...
+@dll.bind((enum_ibv_node_type), Pointer(ctypes.c_char))
+def ibv_node_type_str(node_type): ...
+@dll.bind((enum_ibv_port_state), Pointer(ctypes.c_char))
+def ibv_port_state_str(port_state): ...
+@dll.bind((enum_ibv_event_type), Pointer(ctypes.c_char))
+def ibv_event_type_str(event): ...
+@dll.bind((Pointer(struct_ibv_context), Pointer(struct_ibv_ah_attr), Array(uint8_t, 6), Pointer(uint16_t)), ctypes.c_int32)
+def ibv_resolve_eth_l2_from_gid(context, attr, eth_mac, vid): ...
+@dll.bind((Pointer(struct_ibv_qp), Pointer(struct_ibv_ece)), ctypes.c_int32)
+def ibv_set_ece(qp, ece): ...
+@dll.bind((Pointer(struct_ibv_qp), Pointer(struct_ibv_ece)), ctypes.c_int32)
+def ibv_query_ece(qp, ece): ...
 enum_ib_uverbs_core_support = CEnum(ctypes.c_uint32)
 IB_UVERBS_CORE_SUPPORT_OPTIONAL_MR_ACCESS = enum_ib_uverbs_core_support.define('IB_UVERBS_CORE_SUPPORT_OPTIONAL_MR_ACCESS', 1)
 

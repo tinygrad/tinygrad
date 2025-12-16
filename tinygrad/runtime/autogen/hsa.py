@@ -279,9 +279,8 @@ HSA_STATUS_ERROR_INVALID_SIGNAL_GROUP = hsa_status_t.define('HSA_STATUS_ERROR_IN
 HSA_STATUS_ERROR_INVALID_RUNTIME_STATE = hsa_status_t.define('HSA_STATUS_ERROR_INVALID_RUNTIME_STATE', 4133)
 HSA_STATUS_ERROR_FATAL = hsa_status_t.define('HSA_STATUS_ERROR_FATAL', 4134)
 
-try: (hsa_status_string:=dll.hsa_status_string).restype, hsa_status_string.argtypes = hsa_status_t, [hsa_status_t, Pointer(Pointer(ctypes.c_char))]
-except AttributeError: pass
-
+@dll.bind((hsa_status_t, Pointer(Pointer(ctypes.c_char))), hsa_status_t)
+def hsa_status_string(status, status_string): ...
 class struct_hsa_dim3_s(Struct): pass
 uint32_t = ctypes.c_uint32
 struct_hsa_dim3_s.SIZE = 12
@@ -297,12 +296,10 @@ HSA_ACCESS_PERMISSION_WO = hsa_access_permission_t.define('HSA_ACCESS_PERMISSION
 HSA_ACCESS_PERMISSION_RW = hsa_access_permission_t.define('HSA_ACCESS_PERMISSION_RW', 3)
 
 hsa_file_t = ctypes.c_int32
-try: (hsa_init:=dll.hsa_init).restype, hsa_init.argtypes = hsa_status_t, []
-except AttributeError: pass
-
-try: (hsa_shut_down:=dll.hsa_shut_down).restype, hsa_shut_down.argtypes = hsa_status_t, []
-except AttributeError: pass
-
+@dll.bind((), hsa_status_t)
+def hsa_init(): ...
+@dll.bind((), hsa_status_t)
+def hsa_shut_down(): ...
 hsa_endianness_t = CEnum(ctypes.c_uint32)
 HSA_ENDIANNESS_LITTLE = hsa_endianness_t.define('HSA_ENDIANNESS_LITTLE', 0)
 HSA_ENDIANNESS_BIG = hsa_endianness_t.define('HSA_ENDIANNESS_BIG', 1)
@@ -334,9 +331,8 @@ HSA_AMD_SYSTEM_INFO_XNACK_ENABLED = hsa_system_info_t.define('HSA_AMD_SYSTEM_INF
 HSA_AMD_SYSTEM_INFO_EXT_VERSION_MAJOR = hsa_system_info_t.define('HSA_AMD_SYSTEM_INFO_EXT_VERSION_MAJOR', 519)
 HSA_AMD_SYSTEM_INFO_EXT_VERSION_MINOR = hsa_system_info_t.define('HSA_AMD_SYSTEM_INFO_EXT_VERSION_MINOR', 520)
 
-try: (hsa_system_get_info:=dll.hsa_system_get_info).restype, hsa_system_get_info.argtypes = hsa_status_t, [hsa_system_info_t, ctypes.c_void_p]
-except AttributeError: pass
-
+@dll.bind((hsa_system_info_t, ctypes.c_void_p), hsa_status_t)
+def hsa_system_get_info(attribute, value): ...
 hsa_extension_t = CEnum(ctypes.c_uint32)
 HSA_EXTENSION_FINALIZER = hsa_extension_t.define('HSA_EXTENSION_FINALIZER', 0)
 HSA_EXTENSION_IMAGES = hsa_extension_t.define('HSA_EXTENSION_IMAGES', 1)
@@ -351,22 +347,17 @@ HSA_EXTENSION_AMD_PC_SAMPLING = hsa_extension_t.define('HSA_EXTENSION_AMD_PC_SAM
 HSA_AMD_LAST_EXTENSION = hsa_extension_t.define('HSA_AMD_LAST_EXTENSION', 515)
 
 uint16_t = ctypes.c_uint16
-try: (hsa_extension_get_name:=dll.hsa_extension_get_name).restype, hsa_extension_get_name.argtypes = hsa_status_t, [uint16_t, Pointer(Pointer(ctypes.c_char))]
-except AttributeError: pass
-
-try: (hsa_system_extension_supported:=dll.hsa_system_extension_supported).restype, hsa_system_extension_supported.argtypes = hsa_status_t, [uint16_t, uint16_t, uint16_t, Pointer(ctypes.c_bool)]
-except AttributeError: pass
-
-try: (hsa_system_major_extension_supported:=dll.hsa_system_major_extension_supported).restype, hsa_system_major_extension_supported.argtypes = hsa_status_t, [uint16_t, uint16_t, Pointer(uint16_t), Pointer(ctypes.c_bool)]
-except AttributeError: pass
-
-try: (hsa_system_get_extension_table:=dll.hsa_system_get_extension_table).restype, hsa_system_get_extension_table.argtypes = hsa_status_t, [uint16_t, uint16_t, uint16_t, ctypes.c_void_p]
-except AttributeError: pass
-
+@dll.bind((uint16_t, Pointer(Pointer(ctypes.c_char))), hsa_status_t)
+def hsa_extension_get_name(extension, name): ...
+@dll.bind((uint16_t, uint16_t, uint16_t, Pointer(ctypes.c_bool)), hsa_status_t)
+def hsa_system_extension_supported(extension, version_major, version_minor, result): ...
+@dll.bind((uint16_t, uint16_t, Pointer(uint16_t), Pointer(ctypes.c_bool)), hsa_status_t)
+def hsa_system_major_extension_supported(extension, version_major, version_minor, result): ...
+@dll.bind((uint16_t, uint16_t, uint16_t, ctypes.c_void_p), hsa_status_t)
+def hsa_system_get_extension_table(extension, version_major, version_minor, table): ...
 size_t = ctypes.c_uint64
-try: (hsa_system_get_major_extension_table:=dll.hsa_system_get_major_extension_table).restype, hsa_system_get_major_extension_table.argtypes = hsa_status_t, [uint16_t, uint16_t, size_t, ctypes.c_void_p]
-except AttributeError: pass
-
+@dll.bind((uint16_t, uint16_t, size_t, ctypes.c_void_p), hsa_status_t)
+def hsa_system_get_major_extension_table(extension, version_major, table_length, table): ...
 class struct_hsa_agent_s(Struct): pass
 uint64_t = ctypes.c_uint64
 struct_hsa_agent_s.SIZE = 8
@@ -416,19 +407,16 @@ HSA_AGENT_INFO_VERSION_MAJOR = hsa_agent_info_t.define('HSA_AGENT_INFO_VERSION_M
 HSA_AGENT_INFO_VERSION_MINOR = hsa_agent_info_t.define('HSA_AGENT_INFO_VERSION_MINOR', 22)
 HSA_AGENT_INFO_LAST = hsa_agent_info_t.define('HSA_AGENT_INFO_LAST', 2147483647)
 
-try: (hsa_agent_get_info:=dll.hsa_agent_get_info).restype, hsa_agent_get_info.argtypes = hsa_status_t, [hsa_agent_t, hsa_agent_info_t, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_iterate_agents:=dll.hsa_iterate_agents).restype, hsa_iterate_agents.argtypes = hsa_status_t, [ctypes.CFUNCTYPE(hsa_status_t, hsa_agent_t, ctypes.c_void_p), ctypes.c_void_p]
-except AttributeError: pass
-
+@dll.bind((hsa_agent_t, hsa_agent_info_t, ctypes.c_void_p), hsa_status_t)
+def hsa_agent_get_info(agent, attribute, value): ...
+@dll.bind((ctypes.CFUNCTYPE(hsa_status_t, hsa_agent_t, ctypes.c_void_p), ctypes.c_void_p), hsa_status_t)
+def hsa_iterate_agents(callback, data): ...
 hsa_exception_policy_t = CEnum(ctypes.c_uint32)
 HSA_EXCEPTION_POLICY_BREAK = hsa_exception_policy_t.define('HSA_EXCEPTION_POLICY_BREAK', 1)
 HSA_EXCEPTION_POLICY_DETECT = hsa_exception_policy_t.define('HSA_EXCEPTION_POLICY_DETECT', 2)
 
-try: (hsa_agent_get_exception_policies:=dll.hsa_agent_get_exception_policies).restype, hsa_agent_get_exception_policies.argtypes = hsa_status_t, [hsa_agent_t, hsa_profile_t, Pointer(uint16_t)]
-except AttributeError: pass
-
+@dll.bind((hsa_agent_t, hsa_profile_t, Pointer(uint16_t)), hsa_status_t)
+def hsa_agent_get_exception_policies(agent, profile, mask): ...
 class struct_hsa_cache_s(Struct): pass
 struct_hsa_cache_s.SIZE = 8
 struct_hsa_cache_s._fields_ = ['handle']
@@ -440,201 +428,138 @@ HSA_CACHE_INFO_NAME = hsa_cache_info_t.define('HSA_CACHE_INFO_NAME', 1)
 HSA_CACHE_INFO_LEVEL = hsa_cache_info_t.define('HSA_CACHE_INFO_LEVEL', 2)
 HSA_CACHE_INFO_SIZE = hsa_cache_info_t.define('HSA_CACHE_INFO_SIZE', 3)
 
-try: (hsa_cache_get_info:=dll.hsa_cache_get_info).restype, hsa_cache_get_info.argtypes = hsa_status_t, [hsa_cache_t, hsa_cache_info_t, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_agent_iterate_caches:=dll.hsa_agent_iterate_caches).restype, hsa_agent_iterate_caches.argtypes = hsa_status_t, [hsa_agent_t, ctypes.CFUNCTYPE(hsa_status_t, hsa_cache_t, ctypes.c_void_p), ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_agent_extension_supported:=dll.hsa_agent_extension_supported).restype, hsa_agent_extension_supported.argtypes = hsa_status_t, [uint16_t, hsa_agent_t, uint16_t, uint16_t, Pointer(ctypes.c_bool)]
-except AttributeError: pass
-
-try: (hsa_agent_major_extension_supported:=dll.hsa_agent_major_extension_supported).restype, hsa_agent_major_extension_supported.argtypes = hsa_status_t, [uint16_t, hsa_agent_t, uint16_t, Pointer(uint16_t), Pointer(ctypes.c_bool)]
-except AttributeError: pass
-
+@dll.bind((hsa_cache_t, hsa_cache_info_t, ctypes.c_void_p), hsa_status_t)
+def hsa_cache_get_info(cache, attribute, value): ...
+@dll.bind((hsa_agent_t, ctypes.CFUNCTYPE(hsa_status_t, hsa_cache_t, ctypes.c_void_p), ctypes.c_void_p), hsa_status_t)
+def hsa_agent_iterate_caches(agent, callback, data): ...
+@dll.bind((uint16_t, hsa_agent_t, uint16_t, uint16_t, Pointer(ctypes.c_bool)), hsa_status_t)
+def hsa_agent_extension_supported(extension, agent, version_major, version_minor, result): ...
+@dll.bind((uint16_t, hsa_agent_t, uint16_t, Pointer(uint16_t), Pointer(ctypes.c_bool)), hsa_status_t)
+def hsa_agent_major_extension_supported(extension, agent, version_major, version_minor, result): ...
 class struct_hsa_signal_s(Struct): pass
 struct_hsa_signal_s.SIZE = 8
 struct_hsa_signal_s._fields_ = ['handle']
 setattr(struct_hsa_signal_s, 'handle', field(0, uint64_t))
 hsa_signal_t = struct_hsa_signal_s
 hsa_signal_value_t = ctypes.c_int64
-try: (hsa_signal_create:=dll.hsa_signal_create).restype, hsa_signal_create.argtypes = hsa_status_t, [hsa_signal_value_t, uint32_t, Pointer(hsa_agent_t), Pointer(hsa_signal_t)]
-except AttributeError: pass
-
-try: (hsa_signal_destroy:=dll.hsa_signal_destroy).restype, hsa_signal_destroy.argtypes = hsa_status_t, [hsa_signal_t]
-except AttributeError: pass
-
-try: (hsa_signal_load_scacquire:=dll.hsa_signal_load_scacquire).restype, hsa_signal_load_scacquire.argtypes = hsa_signal_value_t, [hsa_signal_t]
-except AttributeError: pass
-
-try: (hsa_signal_load_relaxed:=dll.hsa_signal_load_relaxed).restype, hsa_signal_load_relaxed.argtypes = hsa_signal_value_t, [hsa_signal_t]
-except AttributeError: pass
-
-try: (hsa_signal_load_acquire:=dll.hsa_signal_load_acquire).restype, hsa_signal_load_acquire.argtypes = hsa_signal_value_t, [hsa_signal_t]
-except AttributeError: pass
-
-try: (hsa_signal_store_relaxed:=dll.hsa_signal_store_relaxed).restype, hsa_signal_store_relaxed.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_store_screlease:=dll.hsa_signal_store_screlease).restype, hsa_signal_store_screlease.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_store_release:=dll.hsa_signal_store_release).restype, hsa_signal_store_release.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_silent_store_relaxed:=dll.hsa_signal_silent_store_relaxed).restype, hsa_signal_silent_store_relaxed.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_silent_store_screlease:=dll.hsa_signal_silent_store_screlease).restype, hsa_signal_silent_store_screlease.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_exchange_scacq_screl:=dll.hsa_signal_exchange_scacq_screl).restype, hsa_signal_exchange_scacq_screl.argtypes = hsa_signal_value_t, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_exchange_acq_rel:=dll.hsa_signal_exchange_acq_rel).restype, hsa_signal_exchange_acq_rel.argtypes = hsa_signal_value_t, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_exchange_scacquire:=dll.hsa_signal_exchange_scacquire).restype, hsa_signal_exchange_scacquire.argtypes = hsa_signal_value_t, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_exchange_acquire:=dll.hsa_signal_exchange_acquire).restype, hsa_signal_exchange_acquire.argtypes = hsa_signal_value_t, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_exchange_relaxed:=dll.hsa_signal_exchange_relaxed).restype, hsa_signal_exchange_relaxed.argtypes = hsa_signal_value_t, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_exchange_screlease:=dll.hsa_signal_exchange_screlease).restype, hsa_signal_exchange_screlease.argtypes = hsa_signal_value_t, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_exchange_release:=dll.hsa_signal_exchange_release).restype, hsa_signal_exchange_release.argtypes = hsa_signal_value_t, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_cas_scacq_screl:=dll.hsa_signal_cas_scacq_screl).restype, hsa_signal_cas_scacq_screl.argtypes = hsa_signal_value_t, [hsa_signal_t, hsa_signal_value_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_cas_acq_rel:=dll.hsa_signal_cas_acq_rel).restype, hsa_signal_cas_acq_rel.argtypes = hsa_signal_value_t, [hsa_signal_t, hsa_signal_value_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_cas_scacquire:=dll.hsa_signal_cas_scacquire).restype, hsa_signal_cas_scacquire.argtypes = hsa_signal_value_t, [hsa_signal_t, hsa_signal_value_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_cas_acquire:=dll.hsa_signal_cas_acquire).restype, hsa_signal_cas_acquire.argtypes = hsa_signal_value_t, [hsa_signal_t, hsa_signal_value_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_cas_relaxed:=dll.hsa_signal_cas_relaxed).restype, hsa_signal_cas_relaxed.argtypes = hsa_signal_value_t, [hsa_signal_t, hsa_signal_value_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_cas_screlease:=dll.hsa_signal_cas_screlease).restype, hsa_signal_cas_screlease.argtypes = hsa_signal_value_t, [hsa_signal_t, hsa_signal_value_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_cas_release:=dll.hsa_signal_cas_release).restype, hsa_signal_cas_release.argtypes = hsa_signal_value_t, [hsa_signal_t, hsa_signal_value_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_add_scacq_screl:=dll.hsa_signal_add_scacq_screl).restype, hsa_signal_add_scacq_screl.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_add_acq_rel:=dll.hsa_signal_add_acq_rel).restype, hsa_signal_add_acq_rel.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_add_scacquire:=dll.hsa_signal_add_scacquire).restype, hsa_signal_add_scacquire.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_add_acquire:=dll.hsa_signal_add_acquire).restype, hsa_signal_add_acquire.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_add_relaxed:=dll.hsa_signal_add_relaxed).restype, hsa_signal_add_relaxed.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_add_screlease:=dll.hsa_signal_add_screlease).restype, hsa_signal_add_screlease.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_add_release:=dll.hsa_signal_add_release).restype, hsa_signal_add_release.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_subtract_scacq_screl:=dll.hsa_signal_subtract_scacq_screl).restype, hsa_signal_subtract_scacq_screl.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_subtract_acq_rel:=dll.hsa_signal_subtract_acq_rel).restype, hsa_signal_subtract_acq_rel.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_subtract_scacquire:=dll.hsa_signal_subtract_scacquire).restype, hsa_signal_subtract_scacquire.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_subtract_acquire:=dll.hsa_signal_subtract_acquire).restype, hsa_signal_subtract_acquire.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_subtract_relaxed:=dll.hsa_signal_subtract_relaxed).restype, hsa_signal_subtract_relaxed.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_subtract_screlease:=dll.hsa_signal_subtract_screlease).restype, hsa_signal_subtract_screlease.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_subtract_release:=dll.hsa_signal_subtract_release).restype, hsa_signal_subtract_release.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_and_scacq_screl:=dll.hsa_signal_and_scacq_screl).restype, hsa_signal_and_scacq_screl.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_and_acq_rel:=dll.hsa_signal_and_acq_rel).restype, hsa_signal_and_acq_rel.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_and_scacquire:=dll.hsa_signal_and_scacquire).restype, hsa_signal_and_scacquire.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_and_acquire:=dll.hsa_signal_and_acquire).restype, hsa_signal_and_acquire.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_and_relaxed:=dll.hsa_signal_and_relaxed).restype, hsa_signal_and_relaxed.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_and_screlease:=dll.hsa_signal_and_screlease).restype, hsa_signal_and_screlease.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_and_release:=dll.hsa_signal_and_release).restype, hsa_signal_and_release.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_or_scacq_screl:=dll.hsa_signal_or_scacq_screl).restype, hsa_signal_or_scacq_screl.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_or_acq_rel:=dll.hsa_signal_or_acq_rel).restype, hsa_signal_or_acq_rel.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_or_scacquire:=dll.hsa_signal_or_scacquire).restype, hsa_signal_or_scacquire.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_or_acquire:=dll.hsa_signal_or_acquire).restype, hsa_signal_or_acquire.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_or_relaxed:=dll.hsa_signal_or_relaxed).restype, hsa_signal_or_relaxed.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_or_screlease:=dll.hsa_signal_or_screlease).restype, hsa_signal_or_screlease.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_or_release:=dll.hsa_signal_or_release).restype, hsa_signal_or_release.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_xor_scacq_screl:=dll.hsa_signal_xor_scacq_screl).restype, hsa_signal_xor_scacq_screl.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_xor_acq_rel:=dll.hsa_signal_xor_acq_rel).restype, hsa_signal_xor_acq_rel.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_xor_scacquire:=dll.hsa_signal_xor_scacquire).restype, hsa_signal_xor_scacquire.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_xor_acquire:=dll.hsa_signal_xor_acquire).restype, hsa_signal_xor_acquire.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_xor_relaxed:=dll.hsa_signal_xor_relaxed).restype, hsa_signal_xor_relaxed.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_xor_screlease:=dll.hsa_signal_xor_screlease).restype, hsa_signal_xor_screlease.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
-try: (hsa_signal_xor_release:=dll.hsa_signal_xor_release).restype, hsa_signal_xor_release.argtypes = None, [hsa_signal_t, hsa_signal_value_t]
-except AttributeError: pass
-
+@dll.bind((hsa_signal_value_t, uint32_t, Pointer(hsa_agent_t), Pointer(hsa_signal_t)), hsa_status_t)
+def hsa_signal_create(initial_value, num_consumers, consumers, signal): ...
+@dll.bind((hsa_signal_t,), hsa_status_t)
+def hsa_signal_destroy(signal): ...
+@dll.bind((hsa_signal_t,), hsa_signal_value_t)
+def hsa_signal_load_scacquire(signal): ...
+@dll.bind((hsa_signal_t,), hsa_signal_value_t)
+def hsa_signal_load_relaxed(signal): ...
+@dll.bind((hsa_signal_t,), hsa_signal_value_t)
+def hsa_signal_load_acquire(signal): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_store_relaxed(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_store_screlease(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_store_release(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_silent_store_relaxed(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_silent_store_screlease(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), hsa_signal_value_t)
+def hsa_signal_exchange_scacq_screl(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), hsa_signal_value_t)
+def hsa_signal_exchange_acq_rel(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), hsa_signal_value_t)
+def hsa_signal_exchange_scacquire(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), hsa_signal_value_t)
+def hsa_signal_exchange_acquire(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), hsa_signal_value_t)
+def hsa_signal_exchange_relaxed(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), hsa_signal_value_t)
+def hsa_signal_exchange_screlease(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), hsa_signal_value_t)
+def hsa_signal_exchange_release(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t, hsa_signal_value_t), hsa_signal_value_t)
+def hsa_signal_cas_scacq_screl(signal, expected, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t, hsa_signal_value_t), hsa_signal_value_t)
+def hsa_signal_cas_acq_rel(signal, expected, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t, hsa_signal_value_t), hsa_signal_value_t)
+def hsa_signal_cas_scacquire(signal, expected, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t, hsa_signal_value_t), hsa_signal_value_t)
+def hsa_signal_cas_acquire(signal, expected, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t, hsa_signal_value_t), hsa_signal_value_t)
+def hsa_signal_cas_relaxed(signal, expected, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t, hsa_signal_value_t), hsa_signal_value_t)
+def hsa_signal_cas_screlease(signal, expected, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t, hsa_signal_value_t), hsa_signal_value_t)
+def hsa_signal_cas_release(signal, expected, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_add_scacq_screl(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_add_acq_rel(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_add_scacquire(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_add_acquire(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_add_relaxed(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_add_screlease(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_add_release(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_subtract_scacq_screl(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_subtract_acq_rel(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_subtract_scacquire(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_subtract_acquire(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_subtract_relaxed(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_subtract_screlease(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_subtract_release(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_and_scacq_screl(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_and_acq_rel(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_and_scacquire(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_and_acquire(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_and_relaxed(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_and_screlease(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_and_release(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_or_scacq_screl(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_or_acq_rel(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_or_scacquire(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_or_acquire(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_or_relaxed(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_or_screlease(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_or_release(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_xor_scacq_screl(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_xor_acq_rel(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_xor_scacquire(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_xor_acquire(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_xor_relaxed(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_xor_screlease(signal, value): ...
+@dll.bind((hsa_signal_t, hsa_signal_value_t), None)
+def hsa_signal_xor_release(signal, value): ...
 hsa_signal_condition_t = CEnum(ctypes.c_uint32)
 HSA_SIGNAL_CONDITION_EQ = hsa_signal_condition_t.define('HSA_SIGNAL_CONDITION_EQ', 0)
 HSA_SIGNAL_CONDITION_NE = hsa_signal_condition_t.define('HSA_SIGNAL_CONDITION_NE', 1)
@@ -645,32 +570,25 @@ hsa_wait_state_t = CEnum(ctypes.c_uint32)
 HSA_WAIT_STATE_BLOCKED = hsa_wait_state_t.define('HSA_WAIT_STATE_BLOCKED', 0)
 HSA_WAIT_STATE_ACTIVE = hsa_wait_state_t.define('HSA_WAIT_STATE_ACTIVE', 1)
 
-try: (hsa_signal_wait_scacquire:=dll.hsa_signal_wait_scacquire).restype, hsa_signal_wait_scacquire.argtypes = hsa_signal_value_t, [hsa_signal_t, hsa_signal_condition_t, hsa_signal_value_t, uint64_t, hsa_wait_state_t]
-except AttributeError: pass
-
-try: (hsa_signal_wait_relaxed:=dll.hsa_signal_wait_relaxed).restype, hsa_signal_wait_relaxed.argtypes = hsa_signal_value_t, [hsa_signal_t, hsa_signal_condition_t, hsa_signal_value_t, uint64_t, hsa_wait_state_t]
-except AttributeError: pass
-
-try: (hsa_signal_wait_acquire:=dll.hsa_signal_wait_acquire).restype, hsa_signal_wait_acquire.argtypes = hsa_signal_value_t, [hsa_signal_t, hsa_signal_condition_t, hsa_signal_value_t, uint64_t, hsa_wait_state_t]
-except AttributeError: pass
-
+@dll.bind((hsa_signal_t, hsa_signal_condition_t, hsa_signal_value_t, uint64_t, hsa_wait_state_t), hsa_signal_value_t)
+def hsa_signal_wait_scacquire(signal, condition, compare_value, timeout_hint, wait_state_hint): ...
+@dll.bind((hsa_signal_t, hsa_signal_condition_t, hsa_signal_value_t, uint64_t, hsa_wait_state_t), hsa_signal_value_t)
+def hsa_signal_wait_relaxed(signal, condition, compare_value, timeout_hint, wait_state_hint): ...
+@dll.bind((hsa_signal_t, hsa_signal_condition_t, hsa_signal_value_t, uint64_t, hsa_wait_state_t), hsa_signal_value_t)
+def hsa_signal_wait_acquire(signal, condition, compare_value, timeout_hint, wait_state_hint): ...
 class struct_hsa_signal_group_s(Struct): pass
 struct_hsa_signal_group_s.SIZE = 8
 struct_hsa_signal_group_s._fields_ = ['handle']
 setattr(struct_hsa_signal_group_s, 'handle', field(0, uint64_t))
 hsa_signal_group_t = struct_hsa_signal_group_s
-try: (hsa_signal_group_create:=dll.hsa_signal_group_create).restype, hsa_signal_group_create.argtypes = hsa_status_t, [uint32_t, Pointer(hsa_signal_t), uint32_t, Pointer(hsa_agent_t), Pointer(hsa_signal_group_t)]
-except AttributeError: pass
-
-try: (hsa_signal_group_destroy:=dll.hsa_signal_group_destroy).restype, hsa_signal_group_destroy.argtypes = hsa_status_t, [hsa_signal_group_t]
-except AttributeError: pass
-
-try: (hsa_signal_group_wait_any_scacquire:=dll.hsa_signal_group_wait_any_scacquire).restype, hsa_signal_group_wait_any_scacquire.argtypes = hsa_status_t, [hsa_signal_group_t, Pointer(hsa_signal_condition_t), Pointer(hsa_signal_value_t), hsa_wait_state_t, Pointer(hsa_signal_t), Pointer(hsa_signal_value_t)]
-except AttributeError: pass
-
-try: (hsa_signal_group_wait_any_relaxed:=dll.hsa_signal_group_wait_any_relaxed).restype, hsa_signal_group_wait_any_relaxed.argtypes = hsa_status_t, [hsa_signal_group_t, Pointer(hsa_signal_condition_t), Pointer(hsa_signal_value_t), hsa_wait_state_t, Pointer(hsa_signal_t), Pointer(hsa_signal_value_t)]
-except AttributeError: pass
-
+@dll.bind((uint32_t, Pointer(hsa_signal_t), uint32_t, Pointer(hsa_agent_t), Pointer(hsa_signal_group_t)), hsa_status_t)
+def hsa_signal_group_create(num_signals, signals, num_consumers, consumers, signal_group): ...
+@dll.bind((hsa_signal_group_t,), hsa_status_t)
+def hsa_signal_group_destroy(signal_group): ...
+@dll.bind((hsa_signal_group_t, Pointer(hsa_signal_condition_t), Pointer(hsa_signal_value_t), hsa_wait_state_t, Pointer(hsa_signal_t), Pointer(hsa_signal_value_t)), hsa_status_t)
+def hsa_signal_group_wait_any_scacquire(signal_group, conditions, compare_values, wait_state_hint, signal, value): ...
+@dll.bind((hsa_signal_group_t, Pointer(hsa_signal_condition_t), Pointer(hsa_signal_value_t), hsa_wait_state_t, Pointer(hsa_signal_t), Pointer(hsa_signal_value_t)), hsa_status_t)
+def hsa_signal_group_wait_any_relaxed(signal_group, conditions, compare_values, wait_state_hint, signal, value): ...
 class struct_hsa_region_s(Struct): pass
 struct_hsa_region_s.SIZE = 8
 struct_hsa_region_s._fields_ = ['handle']
@@ -697,96 +615,66 @@ setattr(struct_hsa_queue_s, 'size', field(24, uint32_t))
 setattr(struct_hsa_queue_s, 'reserved1', field(28, uint32_t))
 setattr(struct_hsa_queue_s, 'id', field(32, uint64_t))
 hsa_queue_t = struct_hsa_queue_s
-try: (hsa_queue_create:=dll.hsa_queue_create).restype, hsa_queue_create.argtypes = hsa_status_t, [hsa_agent_t, uint32_t, hsa_queue_type32_t, ctypes.CFUNCTYPE(None, hsa_status_t, Pointer(hsa_queue_t), ctypes.c_void_p), ctypes.c_void_p, uint32_t, uint32_t, Pointer(Pointer(hsa_queue_t))]
-except AttributeError: pass
-
-try: (hsa_soft_queue_create:=dll.hsa_soft_queue_create).restype, hsa_soft_queue_create.argtypes = hsa_status_t, [hsa_region_t, uint32_t, hsa_queue_type32_t, uint32_t, hsa_signal_t, Pointer(Pointer(hsa_queue_t))]
-except AttributeError: pass
-
-try: (hsa_queue_destroy:=dll.hsa_queue_destroy).restype, hsa_queue_destroy.argtypes = hsa_status_t, [Pointer(hsa_queue_t)]
-except AttributeError: pass
-
-try: (hsa_queue_inactivate:=dll.hsa_queue_inactivate).restype, hsa_queue_inactivate.argtypes = hsa_status_t, [Pointer(hsa_queue_t)]
-except AttributeError: pass
-
-try: (hsa_queue_load_read_index_acquire:=dll.hsa_queue_load_read_index_acquire).restype, hsa_queue_load_read_index_acquire.argtypes = uint64_t, [Pointer(hsa_queue_t)]
-except AttributeError: pass
-
-try: (hsa_queue_load_read_index_scacquire:=dll.hsa_queue_load_read_index_scacquire).restype, hsa_queue_load_read_index_scacquire.argtypes = uint64_t, [Pointer(hsa_queue_t)]
-except AttributeError: pass
-
-try: (hsa_queue_load_read_index_relaxed:=dll.hsa_queue_load_read_index_relaxed).restype, hsa_queue_load_read_index_relaxed.argtypes = uint64_t, [Pointer(hsa_queue_t)]
-except AttributeError: pass
-
-try: (hsa_queue_load_write_index_acquire:=dll.hsa_queue_load_write_index_acquire).restype, hsa_queue_load_write_index_acquire.argtypes = uint64_t, [Pointer(hsa_queue_t)]
-except AttributeError: pass
-
-try: (hsa_queue_load_write_index_scacquire:=dll.hsa_queue_load_write_index_scacquire).restype, hsa_queue_load_write_index_scacquire.argtypes = uint64_t, [Pointer(hsa_queue_t)]
-except AttributeError: pass
-
-try: (hsa_queue_load_write_index_relaxed:=dll.hsa_queue_load_write_index_relaxed).restype, hsa_queue_load_write_index_relaxed.argtypes = uint64_t, [Pointer(hsa_queue_t)]
-except AttributeError: pass
-
-try: (hsa_queue_store_write_index_relaxed:=dll.hsa_queue_store_write_index_relaxed).restype, hsa_queue_store_write_index_relaxed.argtypes = None, [Pointer(hsa_queue_t), uint64_t]
-except AttributeError: pass
-
-try: (hsa_queue_store_write_index_release:=dll.hsa_queue_store_write_index_release).restype, hsa_queue_store_write_index_release.argtypes = None, [Pointer(hsa_queue_t), uint64_t]
-except AttributeError: pass
-
-try: (hsa_queue_store_write_index_screlease:=dll.hsa_queue_store_write_index_screlease).restype, hsa_queue_store_write_index_screlease.argtypes = None, [Pointer(hsa_queue_t), uint64_t]
-except AttributeError: pass
-
-try: (hsa_queue_cas_write_index_acq_rel:=dll.hsa_queue_cas_write_index_acq_rel).restype, hsa_queue_cas_write_index_acq_rel.argtypes = uint64_t, [Pointer(hsa_queue_t), uint64_t, uint64_t]
-except AttributeError: pass
-
-try: (hsa_queue_cas_write_index_scacq_screl:=dll.hsa_queue_cas_write_index_scacq_screl).restype, hsa_queue_cas_write_index_scacq_screl.argtypes = uint64_t, [Pointer(hsa_queue_t), uint64_t, uint64_t]
-except AttributeError: pass
-
-try: (hsa_queue_cas_write_index_acquire:=dll.hsa_queue_cas_write_index_acquire).restype, hsa_queue_cas_write_index_acquire.argtypes = uint64_t, [Pointer(hsa_queue_t), uint64_t, uint64_t]
-except AttributeError: pass
-
-try: (hsa_queue_cas_write_index_scacquire:=dll.hsa_queue_cas_write_index_scacquire).restype, hsa_queue_cas_write_index_scacquire.argtypes = uint64_t, [Pointer(hsa_queue_t), uint64_t, uint64_t]
-except AttributeError: pass
-
-try: (hsa_queue_cas_write_index_relaxed:=dll.hsa_queue_cas_write_index_relaxed).restype, hsa_queue_cas_write_index_relaxed.argtypes = uint64_t, [Pointer(hsa_queue_t), uint64_t, uint64_t]
-except AttributeError: pass
-
-try: (hsa_queue_cas_write_index_release:=dll.hsa_queue_cas_write_index_release).restype, hsa_queue_cas_write_index_release.argtypes = uint64_t, [Pointer(hsa_queue_t), uint64_t, uint64_t]
-except AttributeError: pass
-
-try: (hsa_queue_cas_write_index_screlease:=dll.hsa_queue_cas_write_index_screlease).restype, hsa_queue_cas_write_index_screlease.argtypes = uint64_t, [Pointer(hsa_queue_t), uint64_t, uint64_t]
-except AttributeError: pass
-
-try: (hsa_queue_add_write_index_acq_rel:=dll.hsa_queue_add_write_index_acq_rel).restype, hsa_queue_add_write_index_acq_rel.argtypes = uint64_t, [Pointer(hsa_queue_t), uint64_t]
-except AttributeError: pass
-
-try: (hsa_queue_add_write_index_scacq_screl:=dll.hsa_queue_add_write_index_scacq_screl).restype, hsa_queue_add_write_index_scacq_screl.argtypes = uint64_t, [Pointer(hsa_queue_t), uint64_t]
-except AttributeError: pass
-
-try: (hsa_queue_add_write_index_acquire:=dll.hsa_queue_add_write_index_acquire).restype, hsa_queue_add_write_index_acquire.argtypes = uint64_t, [Pointer(hsa_queue_t), uint64_t]
-except AttributeError: pass
-
-try: (hsa_queue_add_write_index_scacquire:=dll.hsa_queue_add_write_index_scacquire).restype, hsa_queue_add_write_index_scacquire.argtypes = uint64_t, [Pointer(hsa_queue_t), uint64_t]
-except AttributeError: pass
-
-try: (hsa_queue_add_write_index_relaxed:=dll.hsa_queue_add_write_index_relaxed).restype, hsa_queue_add_write_index_relaxed.argtypes = uint64_t, [Pointer(hsa_queue_t), uint64_t]
-except AttributeError: pass
-
-try: (hsa_queue_add_write_index_release:=dll.hsa_queue_add_write_index_release).restype, hsa_queue_add_write_index_release.argtypes = uint64_t, [Pointer(hsa_queue_t), uint64_t]
-except AttributeError: pass
-
-try: (hsa_queue_add_write_index_screlease:=dll.hsa_queue_add_write_index_screlease).restype, hsa_queue_add_write_index_screlease.argtypes = uint64_t, [Pointer(hsa_queue_t), uint64_t]
-except AttributeError: pass
-
-try: (hsa_queue_store_read_index_relaxed:=dll.hsa_queue_store_read_index_relaxed).restype, hsa_queue_store_read_index_relaxed.argtypes = None, [Pointer(hsa_queue_t), uint64_t]
-except AttributeError: pass
-
-try: (hsa_queue_store_read_index_release:=dll.hsa_queue_store_read_index_release).restype, hsa_queue_store_read_index_release.argtypes = None, [Pointer(hsa_queue_t), uint64_t]
-except AttributeError: pass
-
-try: (hsa_queue_store_read_index_screlease:=dll.hsa_queue_store_read_index_screlease).restype, hsa_queue_store_read_index_screlease.argtypes = None, [Pointer(hsa_queue_t), uint64_t]
-except AttributeError: pass
-
+@dll.bind((hsa_agent_t, uint32_t, hsa_queue_type32_t, ctypes.CFUNCTYPE(None, hsa_status_t, Pointer(hsa_queue_t), ctypes.c_void_p), ctypes.c_void_p, uint32_t, uint32_t, Pointer(Pointer(hsa_queue_t))), hsa_status_t)
+def hsa_queue_create(agent, size, type, callback, data, private_segment_size, group_segment_size, queue): ...
+@dll.bind((hsa_region_t, uint32_t, hsa_queue_type32_t, uint32_t, hsa_signal_t, Pointer(Pointer(hsa_queue_t))), hsa_status_t)
+def hsa_soft_queue_create(region, size, type, features, doorbell_signal, queue): ...
+@dll.bind((Pointer(hsa_queue_t),), hsa_status_t)
+def hsa_queue_destroy(queue): ...
+@dll.bind((Pointer(hsa_queue_t),), hsa_status_t)
+def hsa_queue_inactivate(queue): ...
+@dll.bind((Pointer(hsa_queue_t),), uint64_t)
+def hsa_queue_load_read_index_acquire(queue): ...
+@dll.bind((Pointer(hsa_queue_t),), uint64_t)
+def hsa_queue_load_read_index_scacquire(queue): ...
+@dll.bind((Pointer(hsa_queue_t),), uint64_t)
+def hsa_queue_load_read_index_relaxed(queue): ...
+@dll.bind((Pointer(hsa_queue_t),), uint64_t)
+def hsa_queue_load_write_index_acquire(queue): ...
+@dll.bind((Pointer(hsa_queue_t),), uint64_t)
+def hsa_queue_load_write_index_scacquire(queue): ...
+@dll.bind((Pointer(hsa_queue_t),), uint64_t)
+def hsa_queue_load_write_index_relaxed(queue): ...
+@dll.bind((Pointer(hsa_queue_t), uint64_t), None)
+def hsa_queue_store_write_index_relaxed(queue, value): ...
+@dll.bind((Pointer(hsa_queue_t), uint64_t), None)
+def hsa_queue_store_write_index_release(queue, value): ...
+@dll.bind((Pointer(hsa_queue_t), uint64_t), None)
+def hsa_queue_store_write_index_screlease(queue, value): ...
+@dll.bind((Pointer(hsa_queue_t), uint64_t, uint64_t), uint64_t)
+def hsa_queue_cas_write_index_acq_rel(queue, expected, value): ...
+@dll.bind((Pointer(hsa_queue_t), uint64_t, uint64_t), uint64_t)
+def hsa_queue_cas_write_index_scacq_screl(queue, expected, value): ...
+@dll.bind((Pointer(hsa_queue_t), uint64_t, uint64_t), uint64_t)
+def hsa_queue_cas_write_index_acquire(queue, expected, value): ...
+@dll.bind((Pointer(hsa_queue_t), uint64_t, uint64_t), uint64_t)
+def hsa_queue_cas_write_index_scacquire(queue, expected, value): ...
+@dll.bind((Pointer(hsa_queue_t), uint64_t, uint64_t), uint64_t)
+def hsa_queue_cas_write_index_relaxed(queue, expected, value): ...
+@dll.bind((Pointer(hsa_queue_t), uint64_t, uint64_t), uint64_t)
+def hsa_queue_cas_write_index_release(queue, expected, value): ...
+@dll.bind((Pointer(hsa_queue_t), uint64_t, uint64_t), uint64_t)
+def hsa_queue_cas_write_index_screlease(queue, expected, value): ...
+@dll.bind((Pointer(hsa_queue_t), uint64_t), uint64_t)
+def hsa_queue_add_write_index_acq_rel(queue, value): ...
+@dll.bind((Pointer(hsa_queue_t), uint64_t), uint64_t)
+def hsa_queue_add_write_index_scacq_screl(queue, value): ...
+@dll.bind((Pointer(hsa_queue_t), uint64_t), uint64_t)
+def hsa_queue_add_write_index_acquire(queue, value): ...
+@dll.bind((Pointer(hsa_queue_t), uint64_t), uint64_t)
+def hsa_queue_add_write_index_scacquire(queue, value): ...
+@dll.bind((Pointer(hsa_queue_t), uint64_t), uint64_t)
+def hsa_queue_add_write_index_relaxed(queue, value): ...
+@dll.bind((Pointer(hsa_queue_t), uint64_t), uint64_t)
+def hsa_queue_add_write_index_release(queue, value): ...
+@dll.bind((Pointer(hsa_queue_t), uint64_t), uint64_t)
+def hsa_queue_add_write_index_screlease(queue, value): ...
+@dll.bind((Pointer(hsa_queue_t), uint64_t), None)
+def hsa_queue_store_read_index_relaxed(queue, value): ...
+@dll.bind((Pointer(hsa_queue_t), uint64_t), None)
+def hsa_queue_store_read_index_release(queue, value): ...
+@dll.bind((Pointer(hsa_queue_t), uint64_t), None)
+def hsa_queue_store_read_index_screlease(queue, value): ...
 hsa_packet_type_t = CEnum(ctypes.c_uint32)
 HSA_PACKET_TYPE_VENDOR_SPECIFIC = hsa_packet_type_t.define('HSA_PACKET_TYPE_VENDOR_SPECIFIC', 0)
 HSA_PACKET_TYPE_INVALID = hsa_packet_type_t.define('HSA_PACKET_TYPE_INVALID', 1)
@@ -896,41 +784,31 @@ HSA_REGION_INFO_RUNTIME_ALLOC_ALLOWED = hsa_region_info_t.define('HSA_REGION_INF
 HSA_REGION_INFO_RUNTIME_ALLOC_GRANULE = hsa_region_info_t.define('HSA_REGION_INFO_RUNTIME_ALLOC_GRANULE', 6)
 HSA_REGION_INFO_RUNTIME_ALLOC_ALIGNMENT = hsa_region_info_t.define('HSA_REGION_INFO_RUNTIME_ALLOC_ALIGNMENT', 7)
 
-try: (hsa_region_get_info:=dll.hsa_region_get_info).restype, hsa_region_get_info.argtypes = hsa_status_t, [hsa_region_t, hsa_region_info_t, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_agent_iterate_regions:=dll.hsa_agent_iterate_regions).restype, hsa_agent_iterate_regions.argtypes = hsa_status_t, [hsa_agent_t, ctypes.CFUNCTYPE(hsa_status_t, hsa_region_t, ctypes.c_void_p), ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_memory_allocate:=dll.hsa_memory_allocate).restype, hsa_memory_allocate.argtypes = hsa_status_t, [hsa_region_t, size_t, Pointer(ctypes.c_void_p)]
-except AttributeError: pass
-
-try: (hsa_memory_free:=dll.hsa_memory_free).restype, hsa_memory_free.argtypes = hsa_status_t, [ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_memory_copy:=dll.hsa_memory_copy).restype, hsa_memory_copy.argtypes = hsa_status_t, [ctypes.c_void_p, ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-try: (hsa_memory_assign_agent:=dll.hsa_memory_assign_agent).restype, hsa_memory_assign_agent.argtypes = hsa_status_t, [ctypes.c_void_p, hsa_agent_t, hsa_access_permission_t]
-except AttributeError: pass
-
-try: (hsa_memory_register:=dll.hsa_memory_register).restype, hsa_memory_register.argtypes = hsa_status_t, [ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-try: (hsa_memory_deregister:=dll.hsa_memory_deregister).restype, hsa_memory_deregister.argtypes = hsa_status_t, [ctypes.c_void_p, size_t]
-except AttributeError: pass
-
+@dll.bind((hsa_region_t, hsa_region_info_t, ctypes.c_void_p), hsa_status_t)
+def hsa_region_get_info(region, attribute, value): ...
+@dll.bind((hsa_agent_t, ctypes.CFUNCTYPE(hsa_status_t, hsa_region_t, ctypes.c_void_p), ctypes.c_void_p), hsa_status_t)
+def hsa_agent_iterate_regions(agent, callback, data): ...
+@dll.bind((hsa_region_t, size_t, Pointer(ctypes.c_void_p)), hsa_status_t)
+def hsa_memory_allocate(region, size, ptr): ...
+@dll.bind((ctypes.c_void_p,), hsa_status_t)
+def hsa_memory_free(ptr): ...
+@dll.bind((ctypes.c_void_p, ctypes.c_void_p, size_t), hsa_status_t)
+def hsa_memory_copy(dst, src, size): ...
+@dll.bind((ctypes.c_void_p, hsa_agent_t, hsa_access_permission_t), hsa_status_t)
+def hsa_memory_assign_agent(ptr, agent, access): ...
+@dll.bind((ctypes.c_void_p, size_t), hsa_status_t)
+def hsa_memory_register(ptr, size): ...
+@dll.bind((ctypes.c_void_p, size_t), hsa_status_t)
+def hsa_memory_deregister(ptr, size): ...
 class struct_hsa_isa_s(Struct): pass
 struct_hsa_isa_s.SIZE = 8
 struct_hsa_isa_s._fields_ = ['handle']
 setattr(struct_hsa_isa_s, 'handle', field(0, uint64_t))
 hsa_isa_t = struct_hsa_isa_s
-try: (hsa_isa_from_name:=dll.hsa_isa_from_name).restype, hsa_isa_from_name.argtypes = hsa_status_t, [Pointer(ctypes.c_char), Pointer(hsa_isa_t)]
-except AttributeError: pass
-
-try: (hsa_agent_iterate_isas:=dll.hsa_agent_iterate_isas).restype, hsa_agent_iterate_isas.argtypes = hsa_status_t, [hsa_agent_t, ctypes.CFUNCTYPE(hsa_status_t, hsa_isa_t, ctypes.c_void_p), ctypes.c_void_p]
-except AttributeError: pass
-
+@dll.bind((Pointer(ctypes.c_char), Pointer(hsa_isa_t)), hsa_status_t)
+def hsa_isa_from_name(name, isa): ...
+@dll.bind((hsa_agent_t, ctypes.CFUNCTYPE(hsa_status_t, hsa_isa_t, ctypes.c_void_p), ctypes.c_void_p), hsa_status_t)
+def hsa_agent_iterate_isas(agent, callback, data): ...
 hsa_isa_info_t = CEnum(ctypes.c_uint32)
 HSA_ISA_INFO_NAME_LENGTH = hsa_isa_info_t.define('HSA_ISA_INFO_NAME_LENGTH', 0)
 HSA_ISA_INFO_NAME = hsa_isa_info_t.define('HSA_ISA_INFO_NAME', 1)
@@ -948,15 +826,12 @@ HSA_ISA_INFO_GRID_MAX_DIM = hsa_isa_info_t.define('HSA_ISA_INFO_GRID_MAX_DIM', 1
 HSA_ISA_INFO_GRID_MAX_SIZE = hsa_isa_info_t.define('HSA_ISA_INFO_GRID_MAX_SIZE', 16)
 HSA_ISA_INFO_FBARRIER_MAX_SIZE = hsa_isa_info_t.define('HSA_ISA_INFO_FBARRIER_MAX_SIZE', 17)
 
-try: (hsa_isa_get_info:=dll.hsa_isa_get_info).restype, hsa_isa_get_info.argtypes = hsa_status_t, [hsa_isa_t, hsa_isa_info_t, uint32_t, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_isa_get_info_alt:=dll.hsa_isa_get_info_alt).restype, hsa_isa_get_info_alt.argtypes = hsa_status_t, [hsa_isa_t, hsa_isa_info_t, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_isa_get_exception_policies:=dll.hsa_isa_get_exception_policies).restype, hsa_isa_get_exception_policies.argtypes = hsa_status_t, [hsa_isa_t, hsa_profile_t, Pointer(uint16_t)]
-except AttributeError: pass
-
+@dll.bind((hsa_isa_t, hsa_isa_info_t, uint32_t, ctypes.c_void_p), hsa_status_t)
+def hsa_isa_get_info(isa, attribute, index, value): ...
+@dll.bind((hsa_isa_t, hsa_isa_info_t, ctypes.c_void_p), hsa_status_t)
+def hsa_isa_get_info_alt(isa, attribute, value): ...
+@dll.bind((hsa_isa_t, hsa_profile_t, Pointer(uint16_t)), hsa_status_t)
+def hsa_isa_get_exception_policies(isa, profile, mask): ...
 hsa_fp_type_t = CEnum(ctypes.c_uint32)
 HSA_FP_TYPE_16 = hsa_fp_type_t.define('HSA_FP_TYPE_16', 1)
 HSA_FP_TYPE_32 = hsa_fp_type_t.define('HSA_FP_TYPE_32', 2)
@@ -970,9 +845,8 @@ hsa_round_method_t = CEnum(ctypes.c_uint32)
 HSA_ROUND_METHOD_SINGLE = hsa_round_method_t.define('HSA_ROUND_METHOD_SINGLE', 1)
 HSA_ROUND_METHOD_DOUBLE = hsa_round_method_t.define('HSA_ROUND_METHOD_DOUBLE', 2)
 
-try: (hsa_isa_get_round_method:=dll.hsa_isa_get_round_method).restype, hsa_isa_get_round_method.argtypes = hsa_status_t, [hsa_isa_t, hsa_fp_type_t, hsa_flush_mode_t, Pointer(hsa_round_method_t)]
-except AttributeError: pass
-
+@dll.bind((hsa_isa_t, hsa_fp_type_t, hsa_flush_mode_t, Pointer(hsa_round_method_t)), hsa_status_t)
+def hsa_isa_get_round_method(isa, fp_type, flush_mode, round_method): ...
 class struct_hsa_wavefront_s(Struct): pass
 struct_hsa_wavefront_s.SIZE = 8
 struct_hsa_wavefront_s._fields_ = ['handle']
@@ -981,29 +855,23 @@ hsa_wavefront_t = struct_hsa_wavefront_s
 hsa_wavefront_info_t = CEnum(ctypes.c_uint32)
 HSA_WAVEFRONT_INFO_SIZE = hsa_wavefront_info_t.define('HSA_WAVEFRONT_INFO_SIZE', 0)
 
-try: (hsa_wavefront_get_info:=dll.hsa_wavefront_get_info).restype, hsa_wavefront_get_info.argtypes = hsa_status_t, [hsa_wavefront_t, hsa_wavefront_info_t, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_isa_iterate_wavefronts:=dll.hsa_isa_iterate_wavefronts).restype, hsa_isa_iterate_wavefronts.argtypes = hsa_status_t, [hsa_isa_t, ctypes.CFUNCTYPE(hsa_status_t, hsa_wavefront_t, ctypes.c_void_p), ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_isa_compatible:=dll.hsa_isa_compatible).restype, hsa_isa_compatible.argtypes = hsa_status_t, [hsa_isa_t, hsa_isa_t, Pointer(ctypes.c_bool)]
-except AttributeError: pass
-
+@dll.bind((hsa_wavefront_t, hsa_wavefront_info_t, ctypes.c_void_p), hsa_status_t)
+def hsa_wavefront_get_info(wavefront, attribute, value): ...
+@dll.bind((hsa_isa_t, ctypes.CFUNCTYPE(hsa_status_t, hsa_wavefront_t, ctypes.c_void_p), ctypes.c_void_p), hsa_status_t)
+def hsa_isa_iterate_wavefronts(isa, callback, data): ...
+@dll.bind((hsa_isa_t, hsa_isa_t, Pointer(ctypes.c_bool)), hsa_status_t)
+def hsa_isa_compatible(code_object_isa, agent_isa, result): ...
 class struct_hsa_code_object_reader_s(Struct): pass
 struct_hsa_code_object_reader_s.SIZE = 8
 struct_hsa_code_object_reader_s._fields_ = ['handle']
 setattr(struct_hsa_code_object_reader_s, 'handle', field(0, uint64_t))
 hsa_code_object_reader_t = struct_hsa_code_object_reader_s
-try: (hsa_code_object_reader_create_from_file:=dll.hsa_code_object_reader_create_from_file).restype, hsa_code_object_reader_create_from_file.argtypes = hsa_status_t, [hsa_file_t, Pointer(hsa_code_object_reader_t)]
-except AttributeError: pass
-
-try: (hsa_code_object_reader_create_from_memory:=dll.hsa_code_object_reader_create_from_memory).restype, hsa_code_object_reader_create_from_memory.argtypes = hsa_status_t, [ctypes.c_void_p, size_t, Pointer(hsa_code_object_reader_t)]
-except AttributeError: pass
-
-try: (hsa_code_object_reader_destroy:=dll.hsa_code_object_reader_destroy).restype, hsa_code_object_reader_destroy.argtypes = hsa_status_t, [hsa_code_object_reader_t]
-except AttributeError: pass
-
+@dll.bind((hsa_file_t, Pointer(hsa_code_object_reader_t)), hsa_status_t)
+def hsa_code_object_reader_create_from_file(file, code_object_reader): ...
+@dll.bind((ctypes.c_void_p, size_t, Pointer(hsa_code_object_reader_t)), hsa_status_t)
+def hsa_code_object_reader_create_from_memory(code_object, size, code_object_reader): ...
+@dll.bind((hsa_code_object_reader_t,), hsa_status_t)
+def hsa_code_object_reader_destroy(code_object_reader): ...
 class struct_hsa_executable_s(Struct): pass
 struct_hsa_executable_s.SIZE = 8
 struct_hsa_executable_s._fields_ = ['handle']
@@ -1013,64 +881,50 @@ hsa_executable_state_t = CEnum(ctypes.c_uint32)
 HSA_EXECUTABLE_STATE_UNFROZEN = hsa_executable_state_t.define('HSA_EXECUTABLE_STATE_UNFROZEN', 0)
 HSA_EXECUTABLE_STATE_FROZEN = hsa_executable_state_t.define('HSA_EXECUTABLE_STATE_FROZEN', 1)
 
-try: (hsa_executable_create:=dll.hsa_executable_create).restype, hsa_executable_create.argtypes = hsa_status_t, [hsa_profile_t, hsa_executable_state_t, Pointer(ctypes.c_char), Pointer(hsa_executable_t)]
-except AttributeError: pass
-
-try: (hsa_executable_create_alt:=dll.hsa_executable_create_alt).restype, hsa_executable_create_alt.argtypes = hsa_status_t, [hsa_profile_t, hsa_default_float_rounding_mode_t, Pointer(ctypes.c_char), Pointer(hsa_executable_t)]
-except AttributeError: pass
-
-try: (hsa_executable_destroy:=dll.hsa_executable_destroy).restype, hsa_executable_destroy.argtypes = hsa_status_t, [hsa_executable_t]
-except AttributeError: pass
-
+@dll.bind((hsa_profile_t, hsa_executable_state_t, Pointer(ctypes.c_char), Pointer(hsa_executable_t)), hsa_status_t)
+def hsa_executable_create(profile, executable_state, options, executable): ...
+@dll.bind((hsa_profile_t, hsa_default_float_rounding_mode_t, Pointer(ctypes.c_char), Pointer(hsa_executable_t)), hsa_status_t)
+def hsa_executable_create_alt(profile, default_float_rounding_mode, options, executable): ...
+@dll.bind((hsa_executable_t,), hsa_status_t)
+def hsa_executable_destroy(executable): ...
 class struct_hsa_loaded_code_object_s(Struct): pass
 struct_hsa_loaded_code_object_s.SIZE = 8
 struct_hsa_loaded_code_object_s._fields_ = ['handle']
 setattr(struct_hsa_loaded_code_object_s, 'handle', field(0, uint64_t))
 hsa_loaded_code_object_t = struct_hsa_loaded_code_object_s
-try: (hsa_executable_load_program_code_object:=dll.hsa_executable_load_program_code_object).restype, hsa_executable_load_program_code_object.argtypes = hsa_status_t, [hsa_executable_t, hsa_code_object_reader_t, Pointer(ctypes.c_char), Pointer(hsa_loaded_code_object_t)]
-except AttributeError: pass
-
-try: (hsa_executable_load_agent_code_object:=dll.hsa_executable_load_agent_code_object).restype, hsa_executable_load_agent_code_object.argtypes = hsa_status_t, [hsa_executable_t, hsa_agent_t, hsa_code_object_reader_t, Pointer(ctypes.c_char), Pointer(hsa_loaded_code_object_t)]
-except AttributeError: pass
-
-try: (hsa_executable_freeze:=dll.hsa_executable_freeze).restype, hsa_executable_freeze.argtypes = hsa_status_t, [hsa_executable_t, Pointer(ctypes.c_char)]
-except AttributeError: pass
-
+@dll.bind((hsa_executable_t, hsa_code_object_reader_t, Pointer(ctypes.c_char), Pointer(hsa_loaded_code_object_t)), hsa_status_t)
+def hsa_executable_load_program_code_object(executable, code_object_reader, options, loaded_code_object): ...
+@dll.bind((hsa_executable_t, hsa_agent_t, hsa_code_object_reader_t, Pointer(ctypes.c_char), Pointer(hsa_loaded_code_object_t)), hsa_status_t)
+def hsa_executable_load_agent_code_object(executable, agent, code_object_reader, options, loaded_code_object): ...
+@dll.bind((hsa_executable_t, Pointer(ctypes.c_char)), hsa_status_t)
+def hsa_executable_freeze(executable, options): ...
 hsa_executable_info_t = CEnum(ctypes.c_uint32)
 HSA_EXECUTABLE_INFO_PROFILE = hsa_executable_info_t.define('HSA_EXECUTABLE_INFO_PROFILE', 1)
 HSA_EXECUTABLE_INFO_STATE = hsa_executable_info_t.define('HSA_EXECUTABLE_INFO_STATE', 2)
 HSA_EXECUTABLE_INFO_DEFAULT_FLOAT_ROUNDING_MODE = hsa_executable_info_t.define('HSA_EXECUTABLE_INFO_DEFAULT_FLOAT_ROUNDING_MODE', 3)
 
-try: (hsa_executable_get_info:=dll.hsa_executable_get_info).restype, hsa_executable_get_info.argtypes = hsa_status_t, [hsa_executable_t, hsa_executable_info_t, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_executable_global_variable_define:=dll.hsa_executable_global_variable_define).restype, hsa_executable_global_variable_define.argtypes = hsa_status_t, [hsa_executable_t, Pointer(ctypes.c_char), ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_executable_agent_global_variable_define:=dll.hsa_executable_agent_global_variable_define).restype, hsa_executable_agent_global_variable_define.argtypes = hsa_status_t, [hsa_executable_t, hsa_agent_t, Pointer(ctypes.c_char), ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_executable_readonly_variable_define:=dll.hsa_executable_readonly_variable_define).restype, hsa_executable_readonly_variable_define.argtypes = hsa_status_t, [hsa_executable_t, hsa_agent_t, Pointer(ctypes.c_char), ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_executable_validate:=dll.hsa_executable_validate).restype, hsa_executable_validate.argtypes = hsa_status_t, [hsa_executable_t, Pointer(uint32_t)]
-except AttributeError: pass
-
-try: (hsa_executable_validate_alt:=dll.hsa_executable_validate_alt).restype, hsa_executable_validate_alt.argtypes = hsa_status_t, [hsa_executable_t, Pointer(ctypes.c_char), Pointer(uint32_t)]
-except AttributeError: pass
-
+@dll.bind((hsa_executable_t, hsa_executable_info_t, ctypes.c_void_p), hsa_status_t)
+def hsa_executable_get_info(executable, attribute, value): ...
+@dll.bind((hsa_executable_t, Pointer(ctypes.c_char), ctypes.c_void_p), hsa_status_t)
+def hsa_executable_global_variable_define(executable, variable_name, address): ...
+@dll.bind((hsa_executable_t, hsa_agent_t, Pointer(ctypes.c_char), ctypes.c_void_p), hsa_status_t)
+def hsa_executable_agent_global_variable_define(executable, agent, variable_name, address): ...
+@dll.bind((hsa_executable_t, hsa_agent_t, Pointer(ctypes.c_char), ctypes.c_void_p), hsa_status_t)
+def hsa_executable_readonly_variable_define(executable, agent, variable_name, address): ...
+@dll.bind((hsa_executable_t, Pointer(uint32_t)), hsa_status_t)
+def hsa_executable_validate(executable, result): ...
+@dll.bind((hsa_executable_t, Pointer(ctypes.c_char), Pointer(uint32_t)), hsa_status_t)
+def hsa_executable_validate_alt(executable, options, result): ...
 class struct_hsa_executable_symbol_s(Struct): pass
 struct_hsa_executable_symbol_s.SIZE = 8
 struct_hsa_executable_symbol_s._fields_ = ['handle']
 setattr(struct_hsa_executable_symbol_s, 'handle', field(0, uint64_t))
 hsa_executable_symbol_t = struct_hsa_executable_symbol_s
 int32_t = ctypes.c_int32
-try: (hsa_executable_get_symbol:=dll.hsa_executable_get_symbol).restype, hsa_executable_get_symbol.argtypes = hsa_status_t, [hsa_executable_t, Pointer(ctypes.c_char), Pointer(ctypes.c_char), hsa_agent_t, int32_t, Pointer(hsa_executable_symbol_t)]
-except AttributeError: pass
-
-try: (hsa_executable_get_symbol_by_name:=dll.hsa_executable_get_symbol_by_name).restype, hsa_executable_get_symbol_by_name.argtypes = hsa_status_t, [hsa_executable_t, Pointer(ctypes.c_char), Pointer(hsa_agent_t), Pointer(hsa_executable_symbol_t)]
-except AttributeError: pass
-
+@dll.bind((hsa_executable_t, Pointer(ctypes.c_char), Pointer(ctypes.c_char), hsa_agent_t, int32_t, Pointer(hsa_executable_symbol_t)), hsa_status_t)
+def hsa_executable_get_symbol(executable, module_name, symbol_name, agent, call_convention, symbol): ...
+@dll.bind((hsa_executable_t, Pointer(ctypes.c_char), Pointer(hsa_agent_t), Pointer(hsa_executable_symbol_t)), hsa_status_t)
+def hsa_executable_get_symbol_by_name(executable, symbol_name, agent, symbol): ...
 hsa_symbol_kind_t = CEnum(ctypes.c_uint32)
 HSA_SYMBOL_KIND_VARIABLE = hsa_symbol_kind_t.define('HSA_SYMBOL_KIND_VARIABLE', 0)
 HSA_SYMBOL_KIND_KERNEL = hsa_symbol_kind_t.define('HSA_SYMBOL_KIND_KERNEL', 1)
@@ -1113,18 +967,14 @@ HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_CALL_CONVENTION = hsa_executable_symbol_info_t
 HSA_EXECUTABLE_SYMBOL_INFO_INDIRECT_FUNCTION_OBJECT = hsa_executable_symbol_info_t.define('HSA_EXECUTABLE_SYMBOL_INFO_INDIRECT_FUNCTION_OBJECT', 23)
 HSA_EXECUTABLE_SYMBOL_INFO_INDIRECT_FUNCTION_CALL_CONVENTION = hsa_executable_symbol_info_t.define('HSA_EXECUTABLE_SYMBOL_INFO_INDIRECT_FUNCTION_CALL_CONVENTION', 16)
 
-try: (hsa_executable_symbol_get_info:=dll.hsa_executable_symbol_get_info).restype, hsa_executable_symbol_get_info.argtypes = hsa_status_t, [hsa_executable_symbol_t, hsa_executable_symbol_info_t, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_executable_iterate_symbols:=dll.hsa_executable_iterate_symbols).restype, hsa_executable_iterate_symbols.argtypes = hsa_status_t, [hsa_executable_t, ctypes.CFUNCTYPE(hsa_status_t, hsa_executable_t, hsa_executable_symbol_t, ctypes.c_void_p), ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_executable_iterate_agent_symbols:=dll.hsa_executable_iterate_agent_symbols).restype, hsa_executable_iterate_agent_symbols.argtypes = hsa_status_t, [hsa_executable_t, hsa_agent_t, ctypes.CFUNCTYPE(hsa_status_t, hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t, ctypes.c_void_p), ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_executable_iterate_program_symbols:=dll.hsa_executable_iterate_program_symbols).restype, hsa_executable_iterate_program_symbols.argtypes = hsa_status_t, [hsa_executable_t, ctypes.CFUNCTYPE(hsa_status_t, hsa_executable_t, hsa_executable_symbol_t, ctypes.c_void_p), ctypes.c_void_p]
-except AttributeError: pass
-
+@dll.bind((hsa_executable_symbol_t, hsa_executable_symbol_info_t, ctypes.c_void_p), hsa_status_t)
+def hsa_executable_symbol_get_info(executable_symbol, attribute, value): ...
+@dll.bind((hsa_executable_t, ctypes.CFUNCTYPE(hsa_status_t, hsa_executable_t, hsa_executable_symbol_t, ctypes.c_void_p), ctypes.c_void_p), hsa_status_t)
+def hsa_executable_iterate_symbols(executable, callback, data): ...
+@dll.bind((hsa_executable_t, hsa_agent_t, ctypes.CFUNCTYPE(hsa_status_t, hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t, ctypes.c_void_p), ctypes.c_void_p), hsa_status_t)
+def hsa_executable_iterate_agent_symbols(executable, agent, callback, data): ...
+@dll.bind((hsa_executable_t, ctypes.CFUNCTYPE(hsa_status_t, hsa_executable_t, hsa_executable_symbol_t, ctypes.c_void_p), ctypes.c_void_p), hsa_status_t)
+def hsa_executable_iterate_program_symbols(executable, callback, data): ...
 class struct_hsa_code_object_s(Struct): pass
 struct_hsa_code_object_s.SIZE = 8
 struct_hsa_code_object_s._fields_ = ['handle']
@@ -1135,15 +985,12 @@ struct_hsa_callback_data_s.SIZE = 8
 struct_hsa_callback_data_s._fields_ = ['handle']
 setattr(struct_hsa_callback_data_s, 'handle', field(0, uint64_t))
 hsa_callback_data_t = struct_hsa_callback_data_s
-try: (hsa_code_object_serialize:=dll.hsa_code_object_serialize).restype, hsa_code_object_serialize.argtypes = hsa_status_t, [hsa_code_object_t, ctypes.CFUNCTYPE(hsa_status_t, size_t, hsa_callback_data_t, Pointer(ctypes.c_void_p)), hsa_callback_data_t, Pointer(ctypes.c_char), Pointer(ctypes.c_void_p), Pointer(size_t)]
-except AttributeError: pass
-
-try: (hsa_code_object_deserialize:=dll.hsa_code_object_deserialize).restype, hsa_code_object_deserialize.argtypes = hsa_status_t, [ctypes.c_void_p, size_t, Pointer(ctypes.c_char), Pointer(hsa_code_object_t)]
-except AttributeError: pass
-
-try: (hsa_code_object_destroy:=dll.hsa_code_object_destroy).restype, hsa_code_object_destroy.argtypes = hsa_status_t, [hsa_code_object_t]
-except AttributeError: pass
-
+@dll.bind((hsa_code_object_t, ctypes.CFUNCTYPE(hsa_status_t, size_t, hsa_callback_data_t, Pointer(ctypes.c_void_p)), hsa_callback_data_t, Pointer(ctypes.c_char), Pointer(ctypes.c_void_p), Pointer(size_t)), hsa_status_t)
+def hsa_code_object_serialize(code_object, alloc_callback, callback_data, options, serialized_code_object, serialized_code_object_size): ...
+@dll.bind((ctypes.c_void_p, size_t, Pointer(ctypes.c_char), Pointer(hsa_code_object_t)), hsa_status_t)
+def hsa_code_object_deserialize(serialized_code_object, serialized_code_object_size, options, code_object): ...
+@dll.bind((hsa_code_object_t,), hsa_status_t)
+def hsa_code_object_destroy(code_object): ...
 hsa_code_object_type_t = CEnum(ctypes.c_uint32)
 HSA_CODE_OBJECT_TYPE_PROGRAM = hsa_code_object_type_t.define('HSA_CODE_OBJECT_TYPE_PROGRAM', 0)
 
@@ -1155,23 +1002,19 @@ HSA_CODE_OBJECT_INFO_MACHINE_MODEL = hsa_code_object_info_t.define('HSA_CODE_OBJ
 HSA_CODE_OBJECT_INFO_PROFILE = hsa_code_object_info_t.define('HSA_CODE_OBJECT_INFO_PROFILE', 4)
 HSA_CODE_OBJECT_INFO_DEFAULT_FLOAT_ROUNDING_MODE = hsa_code_object_info_t.define('HSA_CODE_OBJECT_INFO_DEFAULT_FLOAT_ROUNDING_MODE', 5)
 
-try: (hsa_code_object_get_info:=dll.hsa_code_object_get_info).restype, hsa_code_object_get_info.argtypes = hsa_status_t, [hsa_code_object_t, hsa_code_object_info_t, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_executable_load_code_object:=dll.hsa_executable_load_code_object).restype, hsa_executable_load_code_object.argtypes = hsa_status_t, [hsa_executable_t, hsa_agent_t, hsa_code_object_t, Pointer(ctypes.c_char)]
-except AttributeError: pass
-
+@dll.bind((hsa_code_object_t, hsa_code_object_info_t, ctypes.c_void_p), hsa_status_t)
+def hsa_code_object_get_info(code_object, attribute, value): ...
+@dll.bind((hsa_executable_t, hsa_agent_t, hsa_code_object_t, Pointer(ctypes.c_char)), hsa_status_t)
+def hsa_executable_load_code_object(executable, agent, code_object, options): ...
 class struct_hsa_code_symbol_s(Struct): pass
 struct_hsa_code_symbol_s.SIZE = 8
 struct_hsa_code_symbol_s._fields_ = ['handle']
 setattr(struct_hsa_code_symbol_s, 'handle', field(0, uint64_t))
 hsa_code_symbol_t = struct_hsa_code_symbol_s
-try: (hsa_code_object_get_symbol:=dll.hsa_code_object_get_symbol).restype, hsa_code_object_get_symbol.argtypes = hsa_status_t, [hsa_code_object_t, Pointer(ctypes.c_char), Pointer(hsa_code_symbol_t)]
-except AttributeError: pass
-
-try: (hsa_code_object_get_symbol_from_name:=dll.hsa_code_object_get_symbol_from_name).restype, hsa_code_object_get_symbol_from_name.argtypes = hsa_status_t, [hsa_code_object_t, Pointer(ctypes.c_char), Pointer(ctypes.c_char), Pointer(hsa_code_symbol_t)]
-except AttributeError: pass
-
+@dll.bind((hsa_code_object_t, Pointer(ctypes.c_char), Pointer(hsa_code_symbol_t)), hsa_status_t)
+def hsa_code_object_get_symbol(code_object, symbol_name, symbol): ...
+@dll.bind((hsa_code_object_t, Pointer(ctypes.c_char), Pointer(ctypes.c_char), Pointer(hsa_code_symbol_t)), hsa_status_t)
+def hsa_code_object_get_symbol_from_name(code_object, module_name, symbol_name, symbol): ...
 hsa_code_symbol_info_t = CEnum(ctypes.c_uint32)
 HSA_CODE_SYMBOL_INFO_TYPE = hsa_code_symbol_info_t.define('HSA_CODE_SYMBOL_INFO_TYPE', 0)
 HSA_CODE_SYMBOL_INFO_NAME_LENGTH = hsa_code_symbol_info_t.define('HSA_CODE_SYMBOL_INFO_NAME_LENGTH', 1)
@@ -1194,12 +1037,10 @@ HSA_CODE_SYMBOL_INFO_KERNEL_CALL_CONVENTION = hsa_code_symbol_info_t.define('HSA
 HSA_CODE_SYMBOL_INFO_INDIRECT_FUNCTION_CALL_CONVENTION = hsa_code_symbol_info_t.define('HSA_CODE_SYMBOL_INFO_INDIRECT_FUNCTION_CALL_CONVENTION', 16)
 HSA_CODE_SYMBOL_INFO_KERNEL_WAVEFRONT_SIZE = hsa_code_symbol_info_t.define('HSA_CODE_SYMBOL_INFO_KERNEL_WAVEFRONT_SIZE', 19)
 
-try: (hsa_code_symbol_get_info:=dll.hsa_code_symbol_get_info).restype, hsa_code_symbol_get_info.argtypes = hsa_status_t, [hsa_code_symbol_t, hsa_code_symbol_info_t, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_code_object_iterate_symbols:=dll.hsa_code_object_iterate_symbols).restype, hsa_code_object_iterate_symbols.argtypes = hsa_status_t, [hsa_code_object_t, ctypes.CFUNCTYPE(hsa_status_t, hsa_code_object_t, hsa_code_symbol_t, ctypes.c_void_p), ctypes.c_void_p]
-except AttributeError: pass
-
+@dll.bind((hsa_code_symbol_t, hsa_code_symbol_info_t, ctypes.c_void_p), hsa_status_t)
+def hsa_code_symbol_get_info(code_symbol, attribute, value): ...
+@dll.bind((hsa_code_object_t, ctypes.CFUNCTYPE(hsa_status_t, hsa_code_object_t, hsa_code_symbol_t, ctypes.c_void_p), ctypes.c_void_p), hsa_status_t)
+def hsa_code_object_iterate_symbols(code_object, callback, data): ...
 hsa_signal_condition32_t = ctypes.c_uint32
 hsa_amd_packet_type_t = CEnum(ctypes.c_uint32)
 HSA_AMD_PACKET_TYPE_BARRIER_VALUE = hsa_amd_packet_type_t.define('HSA_AMD_PACKET_TYPE_BARRIER_VALUE', 2)
@@ -1397,12 +1238,10 @@ HSA_AMD_DMABUF_MAPPING_TYPE_NONE = enum_hsa_amd_dma_buf_mapping_type_s.define('H
 HSA_AMD_DMABUF_MAPPING_TYPE_PCIE = enum_hsa_amd_dma_buf_mapping_type_s.define('HSA_AMD_DMABUF_MAPPING_TYPE_PCIE', 1)
 
 hsa_amd_dma_buf_mapping_type_t = enum_hsa_amd_dma_buf_mapping_type_s
-try: (hsa_amd_coherency_get_type:=dll.hsa_amd_coherency_get_type).restype, hsa_amd_coherency_get_type.argtypes = hsa_status_t, [hsa_agent_t, Pointer(hsa_amd_coherency_type_t)]
-except AttributeError: pass
-
-try: (hsa_amd_coherency_set_type:=dll.hsa_amd_coherency_set_type).restype, hsa_amd_coherency_set_type.argtypes = hsa_status_t, [hsa_agent_t, hsa_amd_coherency_type_t]
-except AttributeError: pass
-
+@dll.bind((hsa_agent_t, Pointer(hsa_amd_coherency_type_t)), hsa_status_t)
+def hsa_amd_coherency_get_type(agent, type): ...
+@dll.bind((hsa_agent_t, hsa_amd_coherency_type_t), hsa_status_t)
+def hsa_amd_coherency_set_type(agent, type): ...
 class struct_hsa_amd_profiling_dispatch_time_s(Struct): pass
 struct_hsa_amd_profiling_dispatch_time_s.SIZE = 16
 struct_hsa_amd_profiling_dispatch_time_s._fields_ = ['start', 'end']
@@ -1415,44 +1254,33 @@ struct_hsa_amd_profiling_async_copy_time_s._fields_ = ['start', 'end']
 setattr(struct_hsa_amd_profiling_async_copy_time_s, 'start', field(0, uint64_t))
 setattr(struct_hsa_amd_profiling_async_copy_time_s, 'end', field(8, uint64_t))
 hsa_amd_profiling_async_copy_time_t = struct_hsa_amd_profiling_async_copy_time_s
-try: (hsa_amd_profiling_set_profiler_enabled:=dll.hsa_amd_profiling_set_profiler_enabled).restype, hsa_amd_profiling_set_profiler_enabled.argtypes = hsa_status_t, [Pointer(hsa_queue_t), ctypes.c_int32]
-except AttributeError: pass
-
-try: (hsa_amd_profiling_async_copy_enable:=dll.hsa_amd_profiling_async_copy_enable).restype, hsa_amd_profiling_async_copy_enable.argtypes = hsa_status_t, [ctypes.c_bool]
-except AttributeError: pass
-
-try: (hsa_amd_profiling_get_dispatch_time:=dll.hsa_amd_profiling_get_dispatch_time).restype, hsa_amd_profiling_get_dispatch_time.argtypes = hsa_status_t, [hsa_agent_t, hsa_signal_t, Pointer(hsa_amd_profiling_dispatch_time_t)]
-except AttributeError: pass
-
-try: (hsa_amd_profiling_get_async_copy_time:=dll.hsa_amd_profiling_get_async_copy_time).restype, hsa_amd_profiling_get_async_copy_time.argtypes = hsa_status_t, [hsa_signal_t, Pointer(hsa_amd_profiling_async_copy_time_t)]
-except AttributeError: pass
-
-try: (hsa_amd_profiling_convert_tick_to_system_domain:=dll.hsa_amd_profiling_convert_tick_to_system_domain).restype, hsa_amd_profiling_convert_tick_to_system_domain.argtypes = hsa_status_t, [hsa_agent_t, uint64_t, Pointer(uint64_t)]
-except AttributeError: pass
-
+@dll.bind((Pointer(hsa_queue_t), ctypes.c_int32), hsa_status_t)
+def hsa_amd_profiling_set_profiler_enabled(queue, enable): ...
+@dll.bind((ctypes.c_bool,), hsa_status_t)
+def hsa_amd_profiling_async_copy_enable(enable): ...
+@dll.bind((hsa_agent_t, hsa_signal_t, Pointer(hsa_amd_profiling_dispatch_time_t)), hsa_status_t)
+def hsa_amd_profiling_get_dispatch_time(agent, signal, time): ...
+@dll.bind((hsa_signal_t, Pointer(hsa_amd_profiling_async_copy_time_t)), hsa_status_t)
+def hsa_amd_profiling_get_async_copy_time(signal, time): ...
+@dll.bind((hsa_agent_t, uint64_t, Pointer(uint64_t)), hsa_status_t)
+def hsa_amd_profiling_convert_tick_to_system_domain(agent, agent_tick, system_tick): ...
 hsa_amd_signal_attribute_t = CEnum(ctypes.c_uint32)
 HSA_AMD_SIGNAL_AMD_GPU_ONLY = hsa_amd_signal_attribute_t.define('HSA_AMD_SIGNAL_AMD_GPU_ONLY', 1)
 HSA_AMD_SIGNAL_IPC = hsa_amd_signal_attribute_t.define('HSA_AMD_SIGNAL_IPC', 2)
 
-try: (hsa_amd_signal_create:=dll.hsa_amd_signal_create).restype, hsa_amd_signal_create.argtypes = hsa_status_t, [hsa_signal_value_t, uint32_t, Pointer(hsa_agent_t), uint64_t, Pointer(hsa_signal_t)]
-except AttributeError: pass
-
-try: (hsa_amd_signal_value_pointer:=dll.hsa_amd_signal_value_pointer).restype, hsa_amd_signal_value_pointer.argtypes = hsa_status_t, [hsa_signal_t, Pointer(Pointer(hsa_signal_value_t))]
-except AttributeError: pass
-
+@dll.bind((hsa_signal_value_t, uint32_t, Pointer(hsa_agent_t), uint64_t, Pointer(hsa_signal_t)), hsa_status_t)
+def hsa_amd_signal_create(initial_value, num_consumers, consumers, attributes, signal): ...
+@dll.bind((hsa_signal_t, Pointer(Pointer(hsa_signal_value_t))), hsa_status_t)
+def hsa_amd_signal_value_pointer(signal, value_ptr): ...
 hsa_amd_signal_handler = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_int64, ctypes.c_void_p)
-try: (hsa_amd_signal_async_handler:=dll.hsa_amd_signal_async_handler).restype, hsa_amd_signal_async_handler.argtypes = hsa_status_t, [hsa_signal_t, hsa_signal_condition_t, hsa_signal_value_t, hsa_amd_signal_handler, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_amd_signal_wait_all:=dll.hsa_amd_signal_wait_all).restype, hsa_amd_signal_wait_all.argtypes = uint32_t, [uint32_t, Pointer(hsa_signal_t), Pointer(hsa_signal_condition_t), Pointer(hsa_signal_value_t), uint64_t, hsa_wait_state_t, Pointer(hsa_signal_value_t)]
-except AttributeError: pass
-
-try: (hsa_amd_signal_wait_any:=dll.hsa_amd_signal_wait_any).restype, hsa_amd_signal_wait_any.argtypes = uint32_t, [uint32_t, Pointer(hsa_signal_t), Pointer(hsa_signal_condition_t), Pointer(hsa_signal_value_t), uint64_t, hsa_wait_state_t, Pointer(hsa_signal_value_t)]
-except AttributeError: pass
-
-try: (hsa_amd_async_function:=dll.hsa_amd_async_function).restype, hsa_amd_async_function.argtypes = hsa_status_t, [ctypes.CFUNCTYPE(None, ctypes.c_void_p), ctypes.c_void_p]
-except AttributeError: pass
-
+@dll.bind((hsa_signal_t, hsa_signal_condition_t, hsa_signal_value_t, hsa_amd_signal_handler, ctypes.c_void_p), hsa_status_t)
+def hsa_amd_signal_async_handler(signal, cond, value, handler, arg): ...
+@dll.bind((uint32_t, Pointer(hsa_signal_t), Pointer(hsa_signal_condition_t), Pointer(hsa_signal_value_t), uint64_t, hsa_wait_state_t, Pointer(hsa_signal_value_t)), uint32_t)
+def hsa_amd_signal_wait_all(signal_count, signals, conds, values, timeout_hint, wait_hint, satisfying_values): ...
+@dll.bind((uint32_t, Pointer(hsa_signal_t), Pointer(hsa_signal_condition_t), Pointer(hsa_signal_value_t), uint64_t, hsa_wait_state_t, Pointer(hsa_signal_value_t)), uint32_t)
+def hsa_amd_signal_wait_any(signal_count, signals, conds, values, timeout_hint, wait_hint, satisfying_value): ...
+@dll.bind((ctypes.CFUNCTYPE(None, ctypes.c_void_p), ctypes.c_void_p), hsa_status_t)
+def hsa_amd_async_function(callback, arg): ...
 class struct_hsa_amd_image_descriptor_s(Struct): pass
 struct_hsa_amd_image_descriptor_s.SIZE = 12
 struct_hsa_amd_image_descriptor_s._fields_ = ['version', 'deviceID', 'data']
@@ -1493,18 +1321,14 @@ hsa_ext_image_t = struct_hsa_ext_image_s
 struct_hsa_ext_image_s.SIZE = 8
 struct_hsa_ext_image_s._fields_ = ['handle']
 setattr(struct_hsa_ext_image_s, 'handle', field(0, uint64_t))
-try: (hsa_amd_image_create:=dll.hsa_amd_image_create).restype, hsa_amd_image_create.argtypes = hsa_status_t, [hsa_agent_t, Pointer(hsa_ext_image_descriptor_t), Pointer(hsa_amd_image_descriptor_t), ctypes.c_void_p, hsa_access_permission_t, Pointer(hsa_ext_image_t)]
-except AttributeError: pass
-
-try: (hsa_amd_image_get_info_max_dim:=dll.hsa_amd_image_get_info_max_dim).restype, hsa_amd_image_get_info_max_dim.argtypes = hsa_status_t, [hsa_agent_t, hsa_agent_info_t, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_amd_queue_cu_set_mask:=dll.hsa_amd_queue_cu_set_mask).restype, hsa_amd_queue_cu_set_mask.argtypes = hsa_status_t, [Pointer(hsa_queue_t), uint32_t, Pointer(uint32_t)]
-except AttributeError: pass
-
-try: (hsa_amd_queue_cu_get_mask:=dll.hsa_amd_queue_cu_get_mask).restype, hsa_amd_queue_cu_get_mask.argtypes = hsa_status_t, [Pointer(hsa_queue_t), uint32_t, Pointer(uint32_t)]
-except AttributeError: pass
-
+@dll.bind((hsa_agent_t, Pointer(hsa_ext_image_descriptor_t), Pointer(hsa_amd_image_descriptor_t), ctypes.c_void_p, hsa_access_permission_t, Pointer(hsa_ext_image_t)), hsa_status_t)
+def hsa_amd_image_create(agent, image_descriptor, image_layout, image_data, access_permission, image): ...
+@dll.bind((hsa_agent_t, hsa_agent_info_t, ctypes.c_void_p), hsa_status_t)
+def hsa_amd_image_get_info_max_dim(agent, attribute, value): ...
+@dll.bind((Pointer(hsa_queue_t), uint32_t, Pointer(uint32_t)), hsa_status_t)
+def hsa_amd_queue_cu_set_mask(queue, num_cu_mask_count, cu_mask): ...
+@dll.bind((Pointer(hsa_queue_t), uint32_t, Pointer(uint32_t)), hsa_status_t)
+def hsa_amd_queue_cu_get_mask(queue, num_cu_mask_count, cu_mask): ...
 hsa_amd_segment_t = CEnum(ctypes.c_uint32)
 HSA_AMD_SEGMENT_GLOBAL = hsa_amd_segment_t.define('HSA_AMD_SEGMENT_GLOBAL', 0)
 HSA_AMD_SEGMENT_READONLY = hsa_amd_segment_t.define('HSA_AMD_SEGMENT_READONLY', 1)
@@ -1548,30 +1372,22 @@ HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG = enum_hsa_amd_memory_pool_flag_s.define('HS
 HSA_AMD_MEMORY_POOL_UNCACHED_FLAG = enum_hsa_amd_memory_pool_flag_s.define('HSA_AMD_MEMORY_POOL_UNCACHED_FLAG', 8)
 
 hsa_amd_memory_pool_flag_t = enum_hsa_amd_memory_pool_flag_s
-try: (hsa_amd_memory_pool_get_info:=dll.hsa_amd_memory_pool_get_info).restype, hsa_amd_memory_pool_get_info.argtypes = hsa_status_t, [hsa_amd_memory_pool_t, hsa_amd_memory_pool_info_t, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_amd_agent_iterate_memory_pools:=dll.hsa_amd_agent_iterate_memory_pools).restype, hsa_amd_agent_iterate_memory_pools.argtypes = hsa_status_t, [hsa_agent_t, ctypes.CFUNCTYPE(hsa_status_t, hsa_amd_memory_pool_t, ctypes.c_void_p), ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_amd_memory_pool_allocate:=dll.hsa_amd_memory_pool_allocate).restype, hsa_amd_memory_pool_allocate.argtypes = hsa_status_t, [hsa_amd_memory_pool_t, size_t, uint32_t, Pointer(ctypes.c_void_p)]
-except AttributeError: pass
-
-try: (hsa_amd_memory_pool_free:=dll.hsa_amd_memory_pool_free).restype, hsa_amd_memory_pool_free.argtypes = hsa_status_t, [ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_amd_memory_async_copy:=dll.hsa_amd_memory_async_copy).restype, hsa_amd_memory_async_copy.argtypes = hsa_status_t, [ctypes.c_void_p, hsa_agent_t, ctypes.c_void_p, hsa_agent_t, size_t, uint32_t, Pointer(hsa_signal_t), hsa_signal_t]
-except AttributeError: pass
-
-try: (hsa_amd_memory_async_copy_on_engine:=dll.hsa_amd_memory_async_copy_on_engine).restype, hsa_amd_memory_async_copy_on_engine.argtypes = hsa_status_t, [ctypes.c_void_p, hsa_agent_t, ctypes.c_void_p, hsa_agent_t, size_t, uint32_t, Pointer(hsa_signal_t), hsa_signal_t, hsa_amd_sdma_engine_id_t, ctypes.c_bool]
-except AttributeError: pass
-
-try: (hsa_amd_memory_copy_engine_status:=dll.hsa_amd_memory_copy_engine_status).restype, hsa_amd_memory_copy_engine_status.argtypes = hsa_status_t, [hsa_agent_t, hsa_agent_t, Pointer(uint32_t)]
-except AttributeError: pass
-
-try: (hsa_amd_memory_get_preferred_copy_engine:=dll.hsa_amd_memory_get_preferred_copy_engine).restype, hsa_amd_memory_get_preferred_copy_engine.argtypes = hsa_status_t, [hsa_agent_t, hsa_agent_t, Pointer(uint32_t)]
-except AttributeError: pass
-
+@dll.bind((hsa_amd_memory_pool_t, hsa_amd_memory_pool_info_t, ctypes.c_void_p), hsa_status_t)
+def hsa_amd_memory_pool_get_info(memory_pool, attribute, value): ...
+@dll.bind((hsa_agent_t, ctypes.CFUNCTYPE(hsa_status_t, hsa_amd_memory_pool_t, ctypes.c_void_p), ctypes.c_void_p), hsa_status_t)
+def hsa_amd_agent_iterate_memory_pools(agent, callback, data): ...
+@dll.bind((hsa_amd_memory_pool_t, size_t, uint32_t, Pointer(ctypes.c_void_p)), hsa_status_t)
+def hsa_amd_memory_pool_allocate(memory_pool, size, flags, ptr): ...
+@dll.bind((ctypes.c_void_p,), hsa_status_t)
+def hsa_amd_memory_pool_free(ptr): ...
+@dll.bind((ctypes.c_void_p, hsa_agent_t, ctypes.c_void_p, hsa_agent_t, size_t, uint32_t, Pointer(hsa_signal_t), hsa_signal_t), hsa_status_t)
+def hsa_amd_memory_async_copy(dst, dst_agent, src, src_agent, size, num_dep_signals, dep_signals, completion_signal): ...
+@dll.bind((ctypes.c_void_p, hsa_agent_t, ctypes.c_void_p, hsa_agent_t, size_t, uint32_t, Pointer(hsa_signal_t), hsa_signal_t, hsa_amd_sdma_engine_id_t, ctypes.c_bool), hsa_status_t)
+def hsa_amd_memory_async_copy_on_engine(dst, dst_agent, src, src_agent, size, num_dep_signals, dep_signals, completion_signal, engine_id, force_copy_on_sdma): ...
+@dll.bind((hsa_agent_t, hsa_agent_t, Pointer(uint32_t)), hsa_status_t)
+def hsa_amd_memory_copy_engine_status(dst_agent, src_agent, engine_ids_mask): ...
+@dll.bind((hsa_agent_t, hsa_agent_t, Pointer(uint32_t)), hsa_status_t)
+def hsa_amd_memory_get_preferred_copy_engine(dst_agent, src_agent, recommended_ids_mask): ...
 class struct_hsa_pitched_ptr_s(Struct): pass
 struct_hsa_pitched_ptr_s.SIZE = 24
 struct_hsa_pitched_ptr_s._fields_ = ['base', 'pitch', 'slice']
@@ -1585,9 +1401,8 @@ hsaHostToDevice = hsa_amd_copy_direction_t.define('hsaHostToDevice', 1)
 hsaDeviceToHost = hsa_amd_copy_direction_t.define('hsaDeviceToHost', 2)
 hsaDeviceToDevice = hsa_amd_copy_direction_t.define('hsaDeviceToDevice', 3)
 
-try: (hsa_amd_memory_async_copy_rect:=dll.hsa_amd_memory_async_copy_rect).restype, hsa_amd_memory_async_copy_rect.argtypes = hsa_status_t, [Pointer(hsa_pitched_ptr_t), Pointer(hsa_dim3_t), Pointer(hsa_pitched_ptr_t), Pointer(hsa_dim3_t), Pointer(hsa_dim3_t), hsa_agent_t, hsa_amd_copy_direction_t, uint32_t, Pointer(hsa_signal_t), hsa_signal_t]
-except AttributeError: pass
-
+@dll.bind((Pointer(hsa_pitched_ptr_t), Pointer(hsa_dim3_t), Pointer(hsa_pitched_ptr_t), Pointer(hsa_dim3_t), Pointer(hsa_dim3_t), hsa_agent_t, hsa_amd_copy_direction_t, uint32_t, Pointer(hsa_signal_t), hsa_signal_t), hsa_status_t)
+def hsa_amd_memory_async_copy_rect(dst, dst_offset, src, src_offset, range, copy_agent, dir, num_dep_signals, dep_signals, completion_signal): ...
 hsa_amd_memory_pool_access_t = CEnum(ctypes.c_uint32)
 HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED = hsa_amd_memory_pool_access_t.define('HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED', 0)
 HSA_AMD_MEMORY_POOL_ACCESS_ALLOWED_BY_DEFAULT = hsa_amd_memory_pool_access_t.define('HSA_AMD_MEMORY_POOL_ACCESS_ALLOWED_BY_DEFAULT', 1)
@@ -1618,36 +1433,26 @@ HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS = hsa_amd_agent_memory_pool_info_t.define(
 HSA_AMD_AGENT_MEMORY_POOL_INFO_NUM_LINK_HOPS = hsa_amd_agent_memory_pool_info_t.define('HSA_AMD_AGENT_MEMORY_POOL_INFO_NUM_LINK_HOPS', 1)
 HSA_AMD_AGENT_MEMORY_POOL_INFO_LINK_INFO = hsa_amd_agent_memory_pool_info_t.define('HSA_AMD_AGENT_MEMORY_POOL_INFO_LINK_INFO', 2)
 
-try: (hsa_amd_agent_memory_pool_get_info:=dll.hsa_amd_agent_memory_pool_get_info).restype, hsa_amd_agent_memory_pool_get_info.argtypes = hsa_status_t, [hsa_agent_t, hsa_amd_memory_pool_t, hsa_amd_agent_memory_pool_info_t, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_amd_agents_allow_access:=dll.hsa_amd_agents_allow_access).restype, hsa_amd_agents_allow_access.argtypes = hsa_status_t, [uint32_t, Pointer(hsa_agent_t), Pointer(uint32_t), ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_amd_memory_pool_can_migrate:=dll.hsa_amd_memory_pool_can_migrate).restype, hsa_amd_memory_pool_can_migrate.argtypes = hsa_status_t, [hsa_amd_memory_pool_t, hsa_amd_memory_pool_t, Pointer(ctypes.c_bool)]
-except AttributeError: pass
-
-try: (hsa_amd_memory_migrate:=dll.hsa_amd_memory_migrate).restype, hsa_amd_memory_migrate.argtypes = hsa_status_t, [ctypes.c_void_p, hsa_amd_memory_pool_t, uint32_t]
-except AttributeError: pass
-
-try: (hsa_amd_memory_lock:=dll.hsa_amd_memory_lock).restype, hsa_amd_memory_lock.argtypes = hsa_status_t, [ctypes.c_void_p, size_t, Pointer(hsa_agent_t), ctypes.c_int32, Pointer(ctypes.c_void_p)]
-except AttributeError: pass
-
-try: (hsa_amd_memory_lock_to_pool:=dll.hsa_amd_memory_lock_to_pool).restype, hsa_amd_memory_lock_to_pool.argtypes = hsa_status_t, [ctypes.c_void_p, size_t, Pointer(hsa_agent_t), ctypes.c_int32, hsa_amd_memory_pool_t, uint32_t, Pointer(ctypes.c_void_p)]
-except AttributeError: pass
-
-try: (hsa_amd_memory_unlock:=dll.hsa_amd_memory_unlock).restype, hsa_amd_memory_unlock.argtypes = hsa_status_t, [ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_amd_memory_fill:=dll.hsa_amd_memory_fill).restype, hsa_amd_memory_fill.argtypes = hsa_status_t, [ctypes.c_void_p, uint32_t, size_t]
-except AttributeError: pass
-
-try: (hsa_amd_interop_map_buffer:=dll.hsa_amd_interop_map_buffer).restype, hsa_amd_interop_map_buffer.argtypes = hsa_status_t, [uint32_t, Pointer(hsa_agent_t), ctypes.c_int32, uint32_t, Pointer(size_t), Pointer(ctypes.c_void_p), Pointer(size_t), Pointer(ctypes.c_void_p)]
-except AttributeError: pass
-
-try: (hsa_amd_interop_unmap_buffer:=dll.hsa_amd_interop_unmap_buffer).restype, hsa_amd_interop_unmap_buffer.argtypes = hsa_status_t, [ctypes.c_void_p]
-except AttributeError: pass
-
+@dll.bind((hsa_agent_t, hsa_amd_memory_pool_t, hsa_amd_agent_memory_pool_info_t, ctypes.c_void_p), hsa_status_t)
+def hsa_amd_agent_memory_pool_get_info(agent, memory_pool, attribute, value): ...
+@dll.bind((uint32_t, Pointer(hsa_agent_t), Pointer(uint32_t), ctypes.c_void_p), hsa_status_t)
+def hsa_amd_agents_allow_access(num_agents, agents, flags, ptr): ...
+@dll.bind((hsa_amd_memory_pool_t, hsa_amd_memory_pool_t, Pointer(ctypes.c_bool)), hsa_status_t)
+def hsa_amd_memory_pool_can_migrate(src_memory_pool, dst_memory_pool, result): ...
+@dll.bind((ctypes.c_void_p, hsa_amd_memory_pool_t, uint32_t), hsa_status_t)
+def hsa_amd_memory_migrate(ptr, memory_pool, flags): ...
+@dll.bind((ctypes.c_void_p, size_t, Pointer(hsa_agent_t), ctypes.c_int32, Pointer(ctypes.c_void_p)), hsa_status_t)
+def hsa_amd_memory_lock(host_ptr, size, agents, num_agent, agent_ptr): ...
+@dll.bind((ctypes.c_void_p, size_t, Pointer(hsa_agent_t), ctypes.c_int32, hsa_amd_memory_pool_t, uint32_t, Pointer(ctypes.c_void_p)), hsa_status_t)
+def hsa_amd_memory_lock_to_pool(host_ptr, size, agents, num_agent, pool, flags, agent_ptr): ...
+@dll.bind((ctypes.c_void_p,), hsa_status_t)
+def hsa_amd_memory_unlock(host_ptr): ...
+@dll.bind((ctypes.c_void_p, uint32_t, size_t), hsa_status_t)
+def hsa_amd_memory_fill(ptr, value, count): ...
+@dll.bind((uint32_t, Pointer(hsa_agent_t), ctypes.c_int32, uint32_t, Pointer(size_t), Pointer(ctypes.c_void_p), Pointer(size_t), Pointer(ctypes.c_void_p)), hsa_status_t)
+def hsa_amd_interop_map_buffer(num_agents, agents, interop_handle, flags, size, ptr, metadata_size, metadata): ...
+@dll.bind((ctypes.c_void_p,), hsa_status_t)
+def hsa_amd_interop_unmap_buffer(ptr): ...
 hsa_amd_pointer_type_t = CEnum(ctypes.c_uint32)
 HSA_EXT_POINTER_TYPE_UNKNOWN = hsa_amd_pointer_type_t.define('HSA_EXT_POINTER_TYPE_UNKNOWN', 0)
 HSA_EXT_POINTER_TYPE_HSA = hsa_amd_pointer_type_t.define('HSA_EXT_POINTER_TYPE_HSA', 1)
@@ -1670,33 +1475,26 @@ setattr(struct_hsa_amd_pointer_info_s, 'agentOwner', field(40, hsa_agent_t))
 setattr(struct_hsa_amd_pointer_info_s, 'global_flags', field(48, uint32_t))
 setattr(struct_hsa_amd_pointer_info_s, 'registered', field(52, ctypes.c_bool))
 hsa_amd_pointer_info_t = struct_hsa_amd_pointer_info_s
-try: (hsa_amd_pointer_info:=dll.hsa_amd_pointer_info).restype, hsa_amd_pointer_info.argtypes = hsa_status_t, [ctypes.c_void_p, Pointer(hsa_amd_pointer_info_t), ctypes.CFUNCTYPE(ctypes.c_void_p, size_t), Pointer(uint32_t), Pointer(Pointer(hsa_agent_t))]
-except AttributeError: pass
-
-try: (hsa_amd_pointer_info_set_userdata:=dll.hsa_amd_pointer_info_set_userdata).restype, hsa_amd_pointer_info_set_userdata.argtypes = hsa_status_t, [ctypes.c_void_p, ctypes.c_void_p]
-except AttributeError: pass
-
+@dll.bind((ctypes.c_void_p, Pointer(hsa_amd_pointer_info_t), ctypes.CFUNCTYPE(ctypes.c_void_p, size_t), Pointer(uint32_t), Pointer(Pointer(hsa_agent_t))), hsa_status_t)
+def hsa_amd_pointer_info(ptr, info, alloc, num_agents_accessible, accessible): ...
+@dll.bind((ctypes.c_void_p, ctypes.c_void_p), hsa_status_t)
+def hsa_amd_pointer_info_set_userdata(ptr, userdata): ...
 class struct_hsa_amd_ipc_memory_s(Struct): pass
 struct_hsa_amd_ipc_memory_s.SIZE = 32
 struct_hsa_amd_ipc_memory_s._fields_ = ['handle']
 setattr(struct_hsa_amd_ipc_memory_s, 'handle', field(0, Array(uint32_t, 8)))
 hsa_amd_ipc_memory_t = struct_hsa_amd_ipc_memory_s
-try: (hsa_amd_ipc_memory_create:=dll.hsa_amd_ipc_memory_create).restype, hsa_amd_ipc_memory_create.argtypes = hsa_status_t, [ctypes.c_void_p, size_t, Pointer(hsa_amd_ipc_memory_t)]
-except AttributeError: pass
-
-try: (hsa_amd_ipc_memory_attach:=dll.hsa_amd_ipc_memory_attach).restype, hsa_amd_ipc_memory_attach.argtypes = hsa_status_t, [Pointer(hsa_amd_ipc_memory_t), size_t, uint32_t, Pointer(hsa_agent_t), Pointer(ctypes.c_void_p)]
-except AttributeError: pass
-
-try: (hsa_amd_ipc_memory_detach:=dll.hsa_amd_ipc_memory_detach).restype, hsa_amd_ipc_memory_detach.argtypes = hsa_status_t, [ctypes.c_void_p]
-except AttributeError: pass
-
+@dll.bind((ctypes.c_void_p, size_t, Pointer(hsa_amd_ipc_memory_t)), hsa_status_t)
+def hsa_amd_ipc_memory_create(ptr, len, handle): ...
+@dll.bind((Pointer(hsa_amd_ipc_memory_t), size_t, uint32_t, Pointer(hsa_agent_t), Pointer(ctypes.c_void_p)), hsa_status_t)
+def hsa_amd_ipc_memory_attach(handle, len, num_agents, mapping_agents, mapped_ptr): ...
+@dll.bind((ctypes.c_void_p,), hsa_status_t)
+def hsa_amd_ipc_memory_detach(mapped_ptr): ...
 hsa_amd_ipc_signal_t = struct_hsa_amd_ipc_memory_s
-try: (hsa_amd_ipc_signal_create:=dll.hsa_amd_ipc_signal_create).restype, hsa_amd_ipc_signal_create.argtypes = hsa_status_t, [hsa_signal_t, Pointer(hsa_amd_ipc_signal_t)]
-except AttributeError: pass
-
-try: (hsa_amd_ipc_signal_attach:=dll.hsa_amd_ipc_signal_attach).restype, hsa_amd_ipc_signal_attach.argtypes = hsa_status_t, [Pointer(hsa_amd_ipc_signal_t), Pointer(hsa_signal_t)]
-except AttributeError: pass
-
+@dll.bind((hsa_signal_t, Pointer(hsa_amd_ipc_signal_t)), hsa_status_t)
+def hsa_amd_ipc_signal_create(signal, handle): ...
+@dll.bind((Pointer(hsa_amd_ipc_signal_t), Pointer(hsa_signal_t)), hsa_status_t)
+def hsa_amd_ipc_signal_attach(handle, signal): ...
 enum_hsa_amd_event_type_s = CEnum(ctypes.c_uint32)
 HSA_AMD_GPU_MEMORY_FAULT_EVENT = enum_hsa_amd_event_type_s.define('HSA_AMD_GPU_MEMORY_FAULT_EVENT', 0)
 HSA_AMD_GPU_HW_EXCEPTION_EVENT = enum_hsa_amd_event_type_s.define('HSA_AMD_GPU_HW_EXCEPTION_EVENT', 1)
@@ -1753,30 +1551,26 @@ setattr(struct_hsa_amd_event_s, 'hw_exception', field(8, hsa_amd_gpu_hw_exceptio
 setattr(struct_hsa_amd_event_s, 'memory_error', field(8, hsa_amd_gpu_memory_error_info_t))
 hsa_amd_event_t = struct_hsa_amd_event_s
 hsa_amd_system_event_callback_t = ctypes.CFUNCTYPE(hsa_status_t, Pointer(struct_hsa_amd_event_s), ctypes.c_void_p)
-try: (hsa_amd_register_system_event_handler:=dll.hsa_amd_register_system_event_handler).restype, hsa_amd_register_system_event_handler.argtypes = hsa_status_t, [hsa_amd_system_event_callback_t, ctypes.c_void_p]
-except AttributeError: pass
-
+@dll.bind((hsa_amd_system_event_callback_t, ctypes.c_void_p), hsa_status_t)
+def hsa_amd_register_system_event_handler(callback, data): ...
 enum_hsa_amd_queue_priority_s = CEnum(ctypes.c_uint32)
 HSA_AMD_QUEUE_PRIORITY_LOW = enum_hsa_amd_queue_priority_s.define('HSA_AMD_QUEUE_PRIORITY_LOW', 0)
 HSA_AMD_QUEUE_PRIORITY_NORMAL = enum_hsa_amd_queue_priority_s.define('HSA_AMD_QUEUE_PRIORITY_NORMAL', 1)
 HSA_AMD_QUEUE_PRIORITY_HIGH = enum_hsa_amd_queue_priority_s.define('HSA_AMD_QUEUE_PRIORITY_HIGH', 2)
 
 hsa_amd_queue_priority_t = enum_hsa_amd_queue_priority_s
-try: (hsa_amd_queue_set_priority:=dll.hsa_amd_queue_set_priority).restype, hsa_amd_queue_set_priority.argtypes = hsa_status_t, [Pointer(hsa_queue_t), hsa_amd_queue_priority_t]
-except AttributeError: pass
-
+@dll.bind((Pointer(hsa_queue_t), hsa_amd_queue_priority_t), hsa_status_t)
+def hsa_amd_queue_set_priority(queue, priority): ...
 hsa_amd_queue_create_flag_t = CEnum(ctypes.c_uint32)
 HSA_AMD_QUEUE_CREATE_SYSTEM_MEM = hsa_amd_queue_create_flag_t.define('HSA_AMD_QUEUE_CREATE_SYSTEM_MEM', 0)
 HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF = hsa_amd_queue_create_flag_t.define('HSA_AMD_QUEUE_CREATE_DEVICE_MEM_RING_BUF', 1)
 HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR = hsa_amd_queue_create_flag_t.define('HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR', 2)
 
 hsa_amd_deallocation_callback_t = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_void_p)
-try: (hsa_amd_register_deallocation_callback:=dll.hsa_amd_register_deallocation_callback).restype, hsa_amd_register_deallocation_callback.argtypes = hsa_status_t, [ctypes.c_void_p, hsa_amd_deallocation_callback_t, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_amd_deregister_deallocation_callback:=dll.hsa_amd_deregister_deallocation_callback).restype, hsa_amd_deregister_deallocation_callback.argtypes = hsa_status_t, [ctypes.c_void_p, hsa_amd_deallocation_callback_t]
-except AttributeError: pass
-
+@dll.bind((ctypes.c_void_p, hsa_amd_deallocation_callback_t, ctypes.c_void_p), hsa_status_t)
+def hsa_amd_register_deallocation_callback(ptr, callback, user_data): ...
+@dll.bind((ctypes.c_void_p, hsa_amd_deallocation_callback_t), hsa_status_t)
+def hsa_amd_deregister_deallocation_callback(ptr, callback): ...
 enum_hsa_amd_svm_model_s = CEnum(ctypes.c_uint32)
 HSA_AMD_SVM_GLOBAL_FLAG_FINE_GRAINED = enum_hsa_amd_svm_model_s.define('HSA_AMD_SVM_GLOBAL_FLAG_FINE_GRAINED', 0)
 HSA_AMD_SVM_GLOBAL_FLAG_COARSE_GRAINED = enum_hsa_amd_svm_model_s.define('HSA_AMD_SVM_GLOBAL_FLAG_COARSE_GRAINED', 1)
@@ -1804,46 +1598,34 @@ struct_hsa_amd_svm_attribute_pair_s._fields_ = ['attribute', 'value']
 setattr(struct_hsa_amd_svm_attribute_pair_s, 'attribute', field(0, uint64_t))
 setattr(struct_hsa_amd_svm_attribute_pair_s, 'value', field(8, uint64_t))
 hsa_amd_svm_attribute_pair_t = struct_hsa_amd_svm_attribute_pair_s
-try: (hsa_amd_svm_attributes_set:=dll.hsa_amd_svm_attributes_set).restype, hsa_amd_svm_attributes_set.argtypes = hsa_status_t, [ctypes.c_void_p, size_t, Pointer(hsa_amd_svm_attribute_pair_t), size_t]
-except AttributeError: pass
-
-try: (hsa_amd_svm_attributes_get:=dll.hsa_amd_svm_attributes_get).restype, hsa_amd_svm_attributes_get.argtypes = hsa_status_t, [ctypes.c_void_p, size_t, Pointer(hsa_amd_svm_attribute_pair_t), size_t]
-except AttributeError: pass
-
-try: (hsa_amd_svm_prefetch_async:=dll.hsa_amd_svm_prefetch_async).restype, hsa_amd_svm_prefetch_async.argtypes = hsa_status_t, [ctypes.c_void_p, size_t, hsa_agent_t, uint32_t, Pointer(hsa_signal_t), hsa_signal_t]
-except AttributeError: pass
-
-try: (hsa_amd_spm_acquire:=dll.hsa_amd_spm_acquire).restype, hsa_amd_spm_acquire.argtypes = hsa_status_t, [hsa_agent_t]
-except AttributeError: pass
-
-try: (hsa_amd_spm_release:=dll.hsa_amd_spm_release).restype, hsa_amd_spm_release.argtypes = hsa_status_t, [hsa_agent_t]
-except AttributeError: pass
-
-try: (hsa_amd_spm_set_dest_buffer:=dll.hsa_amd_spm_set_dest_buffer).restype, hsa_amd_spm_set_dest_buffer.argtypes = hsa_status_t, [hsa_agent_t, size_t, Pointer(uint32_t), Pointer(uint32_t), ctypes.c_void_p, Pointer(ctypes.c_bool)]
-except AttributeError: pass
-
-try: (hsa_amd_portable_export_dmabuf:=dll.hsa_amd_portable_export_dmabuf).restype, hsa_amd_portable_export_dmabuf.argtypes = hsa_status_t, [ctypes.c_void_p, size_t, Pointer(ctypes.c_int32), Pointer(uint64_t)]
-except AttributeError: pass
-
-try: (hsa_amd_portable_export_dmabuf_v2:=dll.hsa_amd_portable_export_dmabuf_v2).restype, hsa_amd_portable_export_dmabuf_v2.argtypes = hsa_status_t, [ctypes.c_void_p, size_t, Pointer(ctypes.c_int32), Pointer(uint64_t), uint64_t]
-except AttributeError: pass
-
-try: (hsa_amd_portable_close_dmabuf:=dll.hsa_amd_portable_close_dmabuf).restype, hsa_amd_portable_close_dmabuf.argtypes = hsa_status_t, [ctypes.c_int32]
-except AttributeError: pass
-
+@dll.bind((ctypes.c_void_p, size_t, Pointer(hsa_amd_svm_attribute_pair_t), size_t), hsa_status_t)
+def hsa_amd_svm_attributes_set(ptr, size, attribute_list, attribute_count): ...
+@dll.bind((ctypes.c_void_p, size_t, Pointer(hsa_amd_svm_attribute_pair_t), size_t), hsa_status_t)
+def hsa_amd_svm_attributes_get(ptr, size, attribute_list, attribute_count): ...
+@dll.bind((ctypes.c_void_p, size_t, hsa_agent_t, uint32_t, Pointer(hsa_signal_t), hsa_signal_t), hsa_status_t)
+def hsa_amd_svm_prefetch_async(ptr, size, agent, num_dep_signals, dep_signals, completion_signal): ...
+@dll.bind((hsa_agent_t,), hsa_status_t)
+def hsa_amd_spm_acquire(preferred_agent): ...
+@dll.bind((hsa_agent_t,), hsa_status_t)
+def hsa_amd_spm_release(preferred_agent): ...
+@dll.bind((hsa_agent_t, size_t, Pointer(uint32_t), Pointer(uint32_t), ctypes.c_void_p, Pointer(ctypes.c_bool)), hsa_status_t)
+def hsa_amd_spm_set_dest_buffer(preferred_agent, size_in_bytes, timeout, size_copied, dest, is_data_loss): ...
+@dll.bind((ctypes.c_void_p, size_t, Pointer(ctypes.c_int32), Pointer(uint64_t)), hsa_status_t)
+def hsa_amd_portable_export_dmabuf(ptr, size, dmabuf, offset): ...
+@dll.bind((ctypes.c_void_p, size_t, Pointer(ctypes.c_int32), Pointer(uint64_t), uint64_t), hsa_status_t)
+def hsa_amd_portable_export_dmabuf_v2(ptr, size, dmabuf, offset, flags): ...
+@dll.bind((ctypes.c_int32,), hsa_status_t)
+def hsa_amd_portable_close_dmabuf(dmabuf): ...
 enum_hsa_amd_vmem_address_reserve_flag_s = CEnum(ctypes.c_uint32)
 HSA_AMD_VMEM_ADDRESS_NO_REGISTER = enum_hsa_amd_vmem_address_reserve_flag_s.define('HSA_AMD_VMEM_ADDRESS_NO_REGISTER', 1)
 
 hsa_amd_vmem_address_reserve_flag_t = enum_hsa_amd_vmem_address_reserve_flag_s
-try: (hsa_amd_vmem_address_reserve:=dll.hsa_amd_vmem_address_reserve).restype, hsa_amd_vmem_address_reserve.argtypes = hsa_status_t, [Pointer(ctypes.c_void_p), size_t, uint64_t, uint64_t]
-except AttributeError: pass
-
-try: (hsa_amd_vmem_address_reserve_align:=dll.hsa_amd_vmem_address_reserve_align).restype, hsa_amd_vmem_address_reserve_align.argtypes = hsa_status_t, [Pointer(ctypes.c_void_p), size_t, uint64_t, uint64_t, uint64_t]
-except AttributeError: pass
-
-try: (hsa_amd_vmem_address_free:=dll.hsa_amd_vmem_address_free).restype, hsa_amd_vmem_address_free.argtypes = hsa_status_t, [ctypes.c_void_p, size_t]
-except AttributeError: pass
-
+@dll.bind((Pointer(ctypes.c_void_p), size_t, uint64_t, uint64_t), hsa_status_t)
+def hsa_amd_vmem_address_reserve(va, size, address, flags): ...
+@dll.bind((Pointer(ctypes.c_void_p), size_t, uint64_t, uint64_t, uint64_t), hsa_status_t)
+def hsa_amd_vmem_address_reserve_align(va, size, address, alignment, flags): ...
+@dll.bind((ctypes.c_void_p, size_t), hsa_status_t)
+def hsa_amd_vmem_address_free(va, size): ...
 class struct_hsa_amd_vmem_alloc_handle_s(Struct): pass
 struct_hsa_amd_vmem_alloc_handle_s.SIZE = 8
 struct_hsa_amd_vmem_alloc_handle_s._fields_ = ['handle']
@@ -1853,52 +1635,40 @@ hsa_amd_memory_type_t = CEnum(ctypes.c_uint32)
 MEMORY_TYPE_NONE = hsa_amd_memory_type_t.define('MEMORY_TYPE_NONE', 0)
 MEMORY_TYPE_PINNED = hsa_amd_memory_type_t.define('MEMORY_TYPE_PINNED', 1)
 
-try: (hsa_amd_vmem_handle_create:=dll.hsa_amd_vmem_handle_create).restype, hsa_amd_vmem_handle_create.argtypes = hsa_status_t, [hsa_amd_memory_pool_t, size_t, hsa_amd_memory_type_t, uint64_t, Pointer(hsa_amd_vmem_alloc_handle_t)]
-except AttributeError: pass
-
-try: (hsa_amd_vmem_handle_release:=dll.hsa_amd_vmem_handle_release).restype, hsa_amd_vmem_handle_release.argtypes = hsa_status_t, [hsa_amd_vmem_alloc_handle_t]
-except AttributeError: pass
-
-try: (hsa_amd_vmem_map:=dll.hsa_amd_vmem_map).restype, hsa_amd_vmem_map.argtypes = hsa_status_t, [ctypes.c_void_p, size_t, size_t, hsa_amd_vmem_alloc_handle_t, uint64_t]
-except AttributeError: pass
-
-try: (hsa_amd_vmem_unmap:=dll.hsa_amd_vmem_unmap).restype, hsa_amd_vmem_unmap.argtypes = hsa_status_t, [ctypes.c_void_p, size_t]
-except AttributeError: pass
-
+@dll.bind((hsa_amd_memory_pool_t, size_t, hsa_amd_memory_type_t, uint64_t, Pointer(hsa_amd_vmem_alloc_handle_t)), hsa_status_t)
+def hsa_amd_vmem_handle_create(pool, size, type, flags, memory_handle): ...
+@dll.bind((hsa_amd_vmem_alloc_handle_t,), hsa_status_t)
+def hsa_amd_vmem_handle_release(memory_handle): ...
+@dll.bind((ctypes.c_void_p, size_t, size_t, hsa_amd_vmem_alloc_handle_t, uint64_t), hsa_status_t)
+def hsa_amd_vmem_map(va, size, in_offset, memory_handle, flags): ...
+@dll.bind((ctypes.c_void_p, size_t), hsa_status_t)
+def hsa_amd_vmem_unmap(va, size): ...
 class struct_hsa_amd_memory_access_desc_s(Struct): pass
 struct_hsa_amd_memory_access_desc_s.SIZE = 16
 struct_hsa_amd_memory_access_desc_s._fields_ = ['permissions', 'agent_handle']
 setattr(struct_hsa_amd_memory_access_desc_s, 'permissions', field(0, hsa_access_permission_t))
 setattr(struct_hsa_amd_memory_access_desc_s, 'agent_handle', field(8, hsa_agent_t))
 hsa_amd_memory_access_desc_t = struct_hsa_amd_memory_access_desc_s
-try: (hsa_amd_vmem_set_access:=dll.hsa_amd_vmem_set_access).restype, hsa_amd_vmem_set_access.argtypes = hsa_status_t, [ctypes.c_void_p, size_t, Pointer(hsa_amd_memory_access_desc_t), size_t]
-except AttributeError: pass
-
-try: (hsa_amd_vmem_get_access:=dll.hsa_amd_vmem_get_access).restype, hsa_amd_vmem_get_access.argtypes = hsa_status_t, [ctypes.c_void_p, Pointer(hsa_access_permission_t), hsa_agent_t]
-except AttributeError: pass
-
-try: (hsa_amd_vmem_export_shareable_handle:=dll.hsa_amd_vmem_export_shareable_handle).restype, hsa_amd_vmem_export_shareable_handle.argtypes = hsa_status_t, [Pointer(ctypes.c_int32), hsa_amd_vmem_alloc_handle_t, uint64_t]
-except AttributeError: pass
-
-try: (hsa_amd_vmem_import_shareable_handle:=dll.hsa_amd_vmem_import_shareable_handle).restype, hsa_amd_vmem_import_shareable_handle.argtypes = hsa_status_t, [ctypes.c_int32, Pointer(hsa_amd_vmem_alloc_handle_t)]
-except AttributeError: pass
-
-try: (hsa_amd_vmem_retain_alloc_handle:=dll.hsa_amd_vmem_retain_alloc_handle).restype, hsa_amd_vmem_retain_alloc_handle.argtypes = hsa_status_t, [Pointer(hsa_amd_vmem_alloc_handle_t), ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_amd_vmem_get_alloc_properties_from_handle:=dll.hsa_amd_vmem_get_alloc_properties_from_handle).restype, hsa_amd_vmem_get_alloc_properties_from_handle.argtypes = hsa_status_t, [hsa_amd_vmem_alloc_handle_t, Pointer(hsa_amd_memory_pool_t), Pointer(hsa_amd_memory_type_t)]
-except AttributeError: pass
-
-try: (hsa_amd_agent_set_async_scratch_limit:=dll.hsa_amd_agent_set_async_scratch_limit).restype, hsa_amd_agent_set_async_scratch_limit.argtypes = hsa_status_t, [hsa_agent_t, size_t]
-except AttributeError: pass
-
+@dll.bind((ctypes.c_void_p, size_t, Pointer(hsa_amd_memory_access_desc_t), size_t), hsa_status_t)
+def hsa_amd_vmem_set_access(va, size, desc, desc_cnt): ...
+@dll.bind((ctypes.c_void_p, Pointer(hsa_access_permission_t), hsa_agent_t), hsa_status_t)
+def hsa_amd_vmem_get_access(va, perms, agent_handle): ...
+@dll.bind((Pointer(ctypes.c_int32), hsa_amd_vmem_alloc_handle_t, uint64_t), hsa_status_t)
+def hsa_amd_vmem_export_shareable_handle(dmabuf_fd, handle, flags): ...
+@dll.bind((ctypes.c_int32, Pointer(hsa_amd_vmem_alloc_handle_t)), hsa_status_t)
+def hsa_amd_vmem_import_shareable_handle(dmabuf_fd, handle): ...
+@dll.bind((Pointer(hsa_amd_vmem_alloc_handle_t), ctypes.c_void_p), hsa_status_t)
+def hsa_amd_vmem_retain_alloc_handle(memory_handle, addr): ...
+@dll.bind((hsa_amd_vmem_alloc_handle_t, Pointer(hsa_amd_memory_pool_t), Pointer(hsa_amd_memory_type_t)), hsa_status_t)
+def hsa_amd_vmem_get_alloc_properties_from_handle(memory_handle, pool, type): ...
+@dll.bind((hsa_agent_t, size_t), hsa_status_t)
+def hsa_amd_agent_set_async_scratch_limit(agent, threshold): ...
 hsa_queue_info_attribute_t = CEnum(ctypes.c_uint32)
 HSA_AMD_QUEUE_INFO_AGENT = hsa_queue_info_attribute_t.define('HSA_AMD_QUEUE_INFO_AGENT', 0)
 HSA_AMD_QUEUE_INFO_DOORBELL_ID = hsa_queue_info_attribute_t.define('HSA_AMD_QUEUE_INFO_DOORBELL_ID', 1)
 
-try: (hsa_amd_queue_get_info:=dll.hsa_amd_queue_get_info).restype, hsa_amd_queue_get_info.argtypes = hsa_status_t, [Pointer(hsa_queue_t), hsa_queue_info_attribute_t, ctypes.c_void_p]
-except AttributeError: pass
-
+@dll.bind((Pointer(hsa_queue_t), hsa_queue_info_attribute_t, ctypes.c_void_p), hsa_status_t)
+def hsa_amd_queue_get_info(queue, attribute, value): ...
 class struct_hsa_amd_ais_file_handle_s(Struct): pass
 struct_hsa_amd_ais_file_handle_s.SIZE = 8
 struct_hsa_amd_ais_file_handle_s._fields_ = ['handle', 'fd', 'pad']
@@ -1907,12 +1677,10 @@ setattr(struct_hsa_amd_ais_file_handle_s, 'fd', field(0, ctypes.c_int32))
 setattr(struct_hsa_amd_ais_file_handle_s, 'pad', field(0, Array(uint8_t, 8)))
 hsa_amd_ais_file_handle_t = struct_hsa_amd_ais_file_handle_s
 int64_t = ctypes.c_int64
-try: (hsa_amd_ais_file_write:=dll.hsa_amd_ais_file_write).restype, hsa_amd_ais_file_write.argtypes = hsa_status_t, [hsa_amd_ais_file_handle_t, ctypes.c_void_p, uint64_t, int64_t, Pointer(uint64_t), Pointer(int32_t)]
-except AttributeError: pass
-
-try: (hsa_amd_ais_file_read:=dll.hsa_amd_ais_file_read).restype, hsa_amd_ais_file_read.argtypes = hsa_status_t, [hsa_amd_ais_file_handle_t, ctypes.c_void_p, uint64_t, int64_t, Pointer(uint64_t), Pointer(int32_t)]
-except AttributeError: pass
-
+@dll.bind((hsa_amd_ais_file_handle_t, ctypes.c_void_p, uint64_t, int64_t, Pointer(uint64_t), Pointer(int32_t)), hsa_status_t)
+def hsa_amd_ais_file_write(handle, devicePtr, size, file_offset, size_copied, status): ...
+@dll.bind((hsa_amd_ais_file_handle_t, ctypes.c_void_p, uint64_t, int64_t, Pointer(uint64_t), Pointer(int32_t)), hsa_status_t)
+def hsa_amd_ais_file_read(handle, devicePtr, size, file_offset, size_copied, status): ...
 enum_hsa_amd_log_flag_s = CEnum(ctypes.c_uint32)
 HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS = enum_hsa_amd_log_flag_s.define('HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS', 0)
 HSA_AMD_LOG_FLAG_AQL = enum_hsa_amd_log_flag_s.define('HSA_AMD_LOG_FLAG_AQL', 0)
@@ -1920,9 +1688,8 @@ HSA_AMD_LOG_FLAG_SDMA = enum_hsa_amd_log_flag_s.define('HSA_AMD_LOG_FLAG_SDMA', 
 HSA_AMD_LOG_FLAG_INFO = enum_hsa_amd_log_flag_s.define('HSA_AMD_LOG_FLAG_INFO', 2)
 
 hsa_amd_log_flag_t = enum_hsa_amd_log_flag_s
-try: (hsa_amd_enable_logging:=dll.hsa_amd_enable_logging).restype, hsa_amd_enable_logging.argtypes = hsa_status_t, [Pointer(uint8_t), ctypes.c_void_p]
-except AttributeError: pass
-
+@dll.bind((Pointer(uint8_t), ctypes.c_void_p), hsa_status_t)
+def hsa_amd_enable_logging(flags, file): ...
 amd_signal_kind64_t = ctypes.c_int64
 enum_amd_signal_kind_t = CEnum(ctypes.c_int32)
 AMD_SIGNAL_KIND_INVALID = enum_amd_signal_kind_t.define('AMD_SIGNAL_KIND_INVALID', 0)
@@ -2352,26 +2119,21 @@ struct_hsa_ext_program_s.SIZE = 8
 struct_hsa_ext_program_s._fields_ = ['handle']
 setattr(struct_hsa_ext_program_s, 'handle', field(0, uint64_t))
 hsa_ext_program_t = struct_hsa_ext_program_s
-try: (hsa_ext_program_create:=dll.hsa_ext_program_create).restype, hsa_ext_program_create.argtypes = hsa_status_t, [hsa_machine_model_t, hsa_profile_t, hsa_default_float_rounding_mode_t, Pointer(ctypes.c_char), Pointer(hsa_ext_program_t)]
-except AttributeError: pass
-
-try: (hsa_ext_program_destroy:=dll.hsa_ext_program_destroy).restype, hsa_ext_program_destroy.argtypes = hsa_status_t, [hsa_ext_program_t]
-except AttributeError: pass
-
-try: (hsa_ext_program_add_module:=dll.hsa_ext_program_add_module).restype, hsa_ext_program_add_module.argtypes = hsa_status_t, [hsa_ext_program_t, hsa_ext_module_t]
-except AttributeError: pass
-
-try: (hsa_ext_program_iterate_modules:=dll.hsa_ext_program_iterate_modules).restype, hsa_ext_program_iterate_modules.argtypes = hsa_status_t, [hsa_ext_program_t, ctypes.CFUNCTYPE(hsa_status_t, hsa_ext_program_t, hsa_ext_module_t, ctypes.c_void_p), ctypes.c_void_p]
-except AttributeError: pass
-
+@dll.bind((hsa_machine_model_t, hsa_profile_t, hsa_default_float_rounding_mode_t, Pointer(ctypes.c_char), Pointer(hsa_ext_program_t)), hsa_status_t)
+def hsa_ext_program_create(machine_model, profile, default_float_rounding_mode, options, program): ...
+@dll.bind((hsa_ext_program_t,), hsa_status_t)
+def hsa_ext_program_destroy(program): ...
+@dll.bind((hsa_ext_program_t, hsa_ext_module_t), hsa_status_t)
+def hsa_ext_program_add_module(program, module): ...
+@dll.bind((hsa_ext_program_t, ctypes.CFUNCTYPE(hsa_status_t, hsa_ext_program_t, hsa_ext_module_t, ctypes.c_void_p), ctypes.c_void_p), hsa_status_t)
+def hsa_ext_program_iterate_modules(program, callback, data): ...
 hsa_ext_program_info_t = CEnum(ctypes.c_uint32)
 HSA_EXT_PROGRAM_INFO_MACHINE_MODEL = hsa_ext_program_info_t.define('HSA_EXT_PROGRAM_INFO_MACHINE_MODEL', 0)
 HSA_EXT_PROGRAM_INFO_PROFILE = hsa_ext_program_info_t.define('HSA_EXT_PROGRAM_INFO_PROFILE', 1)
 HSA_EXT_PROGRAM_INFO_DEFAULT_FLOAT_ROUNDING_MODE = hsa_ext_program_info_t.define('HSA_EXT_PROGRAM_INFO_DEFAULT_FLOAT_ROUNDING_MODE', 2)
 
-try: (hsa_ext_program_get_info:=dll.hsa_ext_program_get_info).restype, hsa_ext_program_get_info.argtypes = hsa_status_t, [hsa_ext_program_t, hsa_ext_program_info_t, ctypes.c_void_p]
-except AttributeError: pass
-
+@dll.bind((hsa_ext_program_t, hsa_ext_program_info_t, ctypes.c_void_p), hsa_status_t)
+def hsa_ext_program_get_info(program, attribute, value): ...
 hsa_ext_finalizer_call_convention_t = CEnum(ctypes.c_int32)
 HSA_EXT_FINALIZER_CALL_CONVENTION_AUTO = hsa_ext_finalizer_call_convention_t.define('HSA_EXT_FINALIZER_CALL_CONVENTION_AUTO', -1)
 
@@ -2390,9 +2152,8 @@ setattr(struct_hsa_ext_control_directives_s, 'required_workgroup_size', field(56
 setattr(struct_hsa_ext_control_directives_s, 'required_dim', field(68, uint8_t))
 setattr(struct_hsa_ext_control_directives_s, 'reserved2', field(69, Array(uint8_t, 75)))
 hsa_ext_control_directives_t = struct_hsa_ext_control_directives_s
-try: (hsa_ext_program_finalize:=dll.hsa_ext_program_finalize).restype, hsa_ext_program_finalize.argtypes = hsa_status_t, [hsa_ext_program_t, hsa_isa_t, int32_t, hsa_ext_control_directives_t, Pointer(ctypes.c_char), hsa_code_object_type_t, Pointer(hsa_code_object_t)]
-except AttributeError: pass
-
+@dll.bind((hsa_ext_program_t, hsa_isa_t, int32_t, hsa_ext_control_directives_t, Pointer(ctypes.c_char), hsa_code_object_type_t, Pointer(hsa_code_object_t)), hsa_status_t)
+def hsa_ext_program_finalize(program, isa, call_convention, control_directives, options, code_object_type, code_object): ...
 class struct_hsa_ext_finalizer_1_00_pfn_s(Struct): pass
 struct_hsa_ext_finalizer_1_00_pfn_s.SIZE = 48
 struct_hsa_ext_finalizer_1_00_pfn_s._fields_ = ['hsa_ext_program_create', 'hsa_ext_program_destroy', 'hsa_ext_program_add_module', 'hsa_ext_program_iterate_modules', 'hsa_ext_program_get_info', 'hsa_ext_program_finalize']
@@ -2476,51 +2237,40 @@ hsa_ext_image_data_layout_t = CEnum(ctypes.c_uint32)
 HSA_EXT_IMAGE_DATA_LAYOUT_OPAQUE = hsa_ext_image_data_layout_t.define('HSA_EXT_IMAGE_DATA_LAYOUT_OPAQUE', 0)
 HSA_EXT_IMAGE_DATA_LAYOUT_LINEAR = hsa_ext_image_data_layout_t.define('HSA_EXT_IMAGE_DATA_LAYOUT_LINEAR', 1)
 
-try: (hsa_ext_image_get_capability:=dll.hsa_ext_image_get_capability).restype, hsa_ext_image_get_capability.argtypes = hsa_status_t, [hsa_agent_t, hsa_ext_image_geometry_t, Pointer(hsa_ext_image_format_t), Pointer(uint32_t)]
-except AttributeError: pass
-
-try: (hsa_ext_image_get_capability_with_layout:=dll.hsa_ext_image_get_capability_with_layout).restype, hsa_ext_image_get_capability_with_layout.argtypes = hsa_status_t, [hsa_agent_t, hsa_ext_image_geometry_t, Pointer(hsa_ext_image_format_t), hsa_ext_image_data_layout_t, Pointer(uint32_t)]
-except AttributeError: pass
-
+@dll.bind((hsa_agent_t, hsa_ext_image_geometry_t, Pointer(hsa_ext_image_format_t), Pointer(uint32_t)), hsa_status_t)
+def hsa_ext_image_get_capability(agent, geometry, image_format, capability_mask): ...
+@dll.bind((hsa_agent_t, hsa_ext_image_geometry_t, Pointer(hsa_ext_image_format_t), hsa_ext_image_data_layout_t, Pointer(uint32_t)), hsa_status_t)
+def hsa_ext_image_get_capability_with_layout(agent, geometry, image_format, image_data_layout, capability_mask): ...
 class struct_hsa_ext_image_data_info_s(Struct): pass
 struct_hsa_ext_image_data_info_s.SIZE = 16
 struct_hsa_ext_image_data_info_s._fields_ = ['size', 'alignment']
 setattr(struct_hsa_ext_image_data_info_s, 'size', field(0, size_t))
 setattr(struct_hsa_ext_image_data_info_s, 'alignment', field(8, size_t))
 hsa_ext_image_data_info_t = struct_hsa_ext_image_data_info_s
-try: (hsa_ext_image_data_get_info:=dll.hsa_ext_image_data_get_info).restype, hsa_ext_image_data_get_info.argtypes = hsa_status_t, [hsa_agent_t, Pointer(hsa_ext_image_descriptor_t), hsa_access_permission_t, Pointer(hsa_ext_image_data_info_t)]
-except AttributeError: pass
-
-try: (hsa_ext_image_data_get_info_with_layout:=dll.hsa_ext_image_data_get_info_with_layout).restype, hsa_ext_image_data_get_info_with_layout.argtypes = hsa_status_t, [hsa_agent_t, Pointer(hsa_ext_image_descriptor_t), hsa_access_permission_t, hsa_ext_image_data_layout_t, size_t, size_t, Pointer(hsa_ext_image_data_info_t)]
-except AttributeError: pass
-
-try: (hsa_ext_image_create:=dll.hsa_ext_image_create).restype, hsa_ext_image_create.argtypes = hsa_status_t, [hsa_agent_t, Pointer(hsa_ext_image_descriptor_t), ctypes.c_void_p, hsa_access_permission_t, Pointer(hsa_ext_image_t)]
-except AttributeError: pass
-
-try: (hsa_ext_image_create_with_layout:=dll.hsa_ext_image_create_with_layout).restype, hsa_ext_image_create_with_layout.argtypes = hsa_status_t, [hsa_agent_t, Pointer(hsa_ext_image_descriptor_t), ctypes.c_void_p, hsa_access_permission_t, hsa_ext_image_data_layout_t, size_t, size_t, Pointer(hsa_ext_image_t)]
-except AttributeError: pass
-
-try: (hsa_ext_image_destroy:=dll.hsa_ext_image_destroy).restype, hsa_ext_image_destroy.argtypes = hsa_status_t, [hsa_agent_t, hsa_ext_image_t]
-except AttributeError: pass
-
-try: (hsa_ext_image_copy:=dll.hsa_ext_image_copy).restype, hsa_ext_image_copy.argtypes = hsa_status_t, [hsa_agent_t, hsa_ext_image_t, Pointer(hsa_dim3_t), hsa_ext_image_t, Pointer(hsa_dim3_t), Pointer(hsa_dim3_t)]
-except AttributeError: pass
-
+@dll.bind((hsa_agent_t, Pointer(hsa_ext_image_descriptor_t), hsa_access_permission_t, Pointer(hsa_ext_image_data_info_t)), hsa_status_t)
+def hsa_ext_image_data_get_info(agent, image_descriptor, access_permission, image_data_info): ...
+@dll.bind((hsa_agent_t, Pointer(hsa_ext_image_descriptor_t), hsa_access_permission_t, hsa_ext_image_data_layout_t, size_t, size_t, Pointer(hsa_ext_image_data_info_t)), hsa_status_t)
+def hsa_ext_image_data_get_info_with_layout(agent, image_descriptor, access_permission, image_data_layout, image_data_row_pitch, image_data_slice_pitch, image_data_info): ...
+@dll.bind((hsa_agent_t, Pointer(hsa_ext_image_descriptor_t), ctypes.c_void_p, hsa_access_permission_t, Pointer(hsa_ext_image_t)), hsa_status_t)
+def hsa_ext_image_create(agent, image_descriptor, image_data, access_permission, image): ...
+@dll.bind((hsa_agent_t, Pointer(hsa_ext_image_descriptor_t), ctypes.c_void_p, hsa_access_permission_t, hsa_ext_image_data_layout_t, size_t, size_t, Pointer(hsa_ext_image_t)), hsa_status_t)
+def hsa_ext_image_create_with_layout(agent, image_descriptor, image_data, access_permission, image_data_layout, image_data_row_pitch, image_data_slice_pitch, image): ...
+@dll.bind((hsa_agent_t, hsa_ext_image_t), hsa_status_t)
+def hsa_ext_image_destroy(agent, image): ...
+@dll.bind((hsa_agent_t, hsa_ext_image_t, Pointer(hsa_dim3_t), hsa_ext_image_t, Pointer(hsa_dim3_t), Pointer(hsa_dim3_t)), hsa_status_t)
+def hsa_ext_image_copy(agent, src_image, src_offset, dst_image, dst_offset, range): ...
 class struct_hsa_ext_image_region_s(Struct): pass
 struct_hsa_ext_image_region_s.SIZE = 24
 struct_hsa_ext_image_region_s._fields_ = ['offset', 'range']
 setattr(struct_hsa_ext_image_region_s, 'offset', field(0, hsa_dim3_t))
 setattr(struct_hsa_ext_image_region_s, 'range', field(12, hsa_dim3_t))
 hsa_ext_image_region_t = struct_hsa_ext_image_region_s
-try: (hsa_ext_image_import:=dll.hsa_ext_image_import).restype, hsa_ext_image_import.argtypes = hsa_status_t, [hsa_agent_t, ctypes.c_void_p, size_t, size_t, hsa_ext_image_t, Pointer(hsa_ext_image_region_t)]
-except AttributeError: pass
-
-try: (hsa_ext_image_export:=dll.hsa_ext_image_export).restype, hsa_ext_image_export.argtypes = hsa_status_t, [hsa_agent_t, hsa_ext_image_t, ctypes.c_void_p, size_t, size_t, Pointer(hsa_ext_image_region_t)]
-except AttributeError: pass
-
-try: (hsa_ext_image_clear:=dll.hsa_ext_image_clear).restype, hsa_ext_image_clear.argtypes = hsa_status_t, [hsa_agent_t, hsa_ext_image_t, ctypes.c_void_p, Pointer(hsa_ext_image_region_t)]
-except AttributeError: pass
-
+@dll.bind((hsa_agent_t, ctypes.c_void_p, size_t, size_t, hsa_ext_image_t, Pointer(hsa_ext_image_region_t)), hsa_status_t)
+def hsa_ext_image_import(agent, src_memory, src_row_pitch, src_slice_pitch, dst_image, image_region): ...
+@dll.bind((hsa_agent_t, hsa_ext_image_t, ctypes.c_void_p, size_t, size_t, Pointer(hsa_ext_image_region_t)), hsa_status_t)
+def hsa_ext_image_export(agent, src_image, dst_memory, dst_row_pitch, dst_slice_pitch, image_region): ...
+@dll.bind((hsa_agent_t, hsa_ext_image_t, ctypes.c_void_p, Pointer(hsa_ext_image_region_t)), hsa_status_t)
+def hsa_ext_image_clear(agent, image, data, image_region): ...
 class struct_hsa_ext_sampler_s(Struct): pass
 struct_hsa_ext_sampler_s.SIZE = 8
 struct_hsa_ext_sampler_s._fields_ = ['handle']
@@ -2558,15 +2308,12 @@ setattr(struct_hsa_ext_sampler_descriptor_v2_s, 'coordinate_mode', field(0, hsa_
 setattr(struct_hsa_ext_sampler_descriptor_v2_s, 'filter_mode', field(4, hsa_ext_sampler_filter_mode32_t))
 setattr(struct_hsa_ext_sampler_descriptor_v2_s, 'address_modes', field(8, Array(hsa_ext_sampler_addressing_mode32_t, 3)))
 hsa_ext_sampler_descriptor_v2_t = struct_hsa_ext_sampler_descriptor_v2_s
-try: (hsa_ext_sampler_create:=dll.hsa_ext_sampler_create).restype, hsa_ext_sampler_create.argtypes = hsa_status_t, [hsa_agent_t, Pointer(hsa_ext_sampler_descriptor_t), Pointer(hsa_ext_sampler_t)]
-except AttributeError: pass
-
-try: (hsa_ext_sampler_create_v2:=dll.hsa_ext_sampler_create_v2).restype, hsa_ext_sampler_create_v2.argtypes = hsa_status_t, [hsa_agent_t, Pointer(hsa_ext_sampler_descriptor_v2_t), Pointer(hsa_ext_sampler_t)]
-except AttributeError: pass
-
-try: (hsa_ext_sampler_destroy:=dll.hsa_ext_sampler_destroy).restype, hsa_ext_sampler_destroy.argtypes = hsa_status_t, [hsa_agent_t, hsa_ext_sampler_t]
-except AttributeError: pass
-
+@dll.bind((hsa_agent_t, Pointer(hsa_ext_sampler_descriptor_t), Pointer(hsa_ext_sampler_t)), hsa_status_t)
+def hsa_ext_sampler_create(agent, sampler_descriptor, sampler): ...
+@dll.bind((hsa_agent_t, Pointer(hsa_ext_sampler_descriptor_v2_t), Pointer(hsa_ext_sampler_t)), hsa_status_t)
+def hsa_ext_sampler_create_v2(agent, sampler_descriptor, sampler): ...
+@dll.bind((hsa_agent_t, hsa_ext_sampler_t), hsa_status_t)
+def hsa_ext_sampler_destroy(agent, sampler): ...
 class struct_hsa_ext_images_1_00_pfn_s(Struct): pass
 struct_hsa_ext_images_1_00_pfn_s.SIZE = 80
 struct_hsa_ext_images_1_00_pfn_s._fields_ = ['hsa_ext_image_get_capability', 'hsa_ext_image_data_get_info', 'hsa_ext_image_create', 'hsa_ext_image_destroy', 'hsa_ext_image_copy', 'hsa_ext_image_import', 'hsa_ext_image_export', 'hsa_ext_image_clear', 'hsa_ext_sampler_create', 'hsa_ext_sampler_destroy']
@@ -2599,12 +2346,10 @@ setattr(struct_hsa_ext_images_1_pfn_s, 'hsa_ext_image_data_get_info_with_layout'
 setattr(struct_hsa_ext_images_1_pfn_s, 'hsa_ext_image_create_with_layout', field(96, ctypes.CFUNCTYPE(hsa_status_t, hsa_agent_t, Pointer(hsa_ext_image_descriptor_t), ctypes.c_void_p, hsa_access_permission_t, hsa_ext_image_data_layout_t, size_t, size_t, Pointer(hsa_ext_image_t))))
 setattr(struct_hsa_ext_images_1_pfn_s, 'hsa_ext_sampler_create_v2', field(104, ctypes.CFUNCTYPE(hsa_status_t, hsa_agent_t, Pointer(hsa_ext_sampler_descriptor_v2_t), Pointer(hsa_ext_sampler_t))))
 hsa_ext_images_1_pfn_t = struct_hsa_ext_images_1_pfn_s
-try: (hsa_ven_amd_aqlprofile_version_major:=dll.hsa_ven_amd_aqlprofile_version_major).restype, hsa_ven_amd_aqlprofile_version_major.argtypes = uint32_t, []
-except AttributeError: pass
-
-try: (hsa_ven_amd_aqlprofile_version_minor:=dll.hsa_ven_amd_aqlprofile_version_minor).restype, hsa_ven_amd_aqlprofile_version_minor.argtypes = uint32_t, []
-except AttributeError: pass
-
+@dll.bind((), uint32_t)
+def hsa_ven_amd_aqlprofile_version_major(): ...
+@dll.bind((), uint32_t)
+def hsa_ven_amd_aqlprofile_version_minor(): ...
 hsa_ven_amd_aqlprofile_event_type_t = CEnum(ctypes.c_uint32)
 HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC = hsa_ven_amd_aqlprofile_event_type_t.define('HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC', 0)
 HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE = hsa_ven_amd_aqlprofile_event_type_t.define('HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE', 1)
@@ -2652,9 +2397,8 @@ hsa_ven_amd_aqlprofile_event_t._fields_ = ['block_name', 'block_index', 'counter
 setattr(hsa_ven_amd_aqlprofile_event_t, 'block_name', field(0, hsa_ven_amd_aqlprofile_block_name_t))
 setattr(hsa_ven_amd_aqlprofile_event_t, 'block_index', field(4, uint32_t))
 setattr(hsa_ven_amd_aqlprofile_event_t, 'counter_id', field(8, uint32_t))
-try: (hsa_ven_amd_aqlprofile_validate_event:=dll.hsa_ven_amd_aqlprofile_validate_event).restype, hsa_ven_amd_aqlprofile_validate_event.argtypes = hsa_status_t, [hsa_agent_t, Pointer(hsa_ven_amd_aqlprofile_event_t), Pointer(ctypes.c_bool)]
-except AttributeError: pass
-
+@dll.bind((hsa_agent_t, Pointer(hsa_ven_amd_aqlprofile_event_t), Pointer(ctypes.c_bool)), hsa_status_t)
+def hsa_ven_amd_aqlprofile_validate_event(agent, event, result): ...
 hsa_ven_amd_aqlprofile_parameter_name_t = CEnum(ctypes.c_uint32)
 HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET = hsa_ven_amd_aqlprofile_parameter_name_t.define('HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET', 0)
 HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_VM_ID_MASK = hsa_ven_amd_aqlprofile_parameter_name_t.define('HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_VM_ID_MASK', 1)
@@ -2704,23 +2448,18 @@ hsa_ext_amd_aql_pm4_packet_t._fields_ = ['header', 'pm4_command', 'completion_si
 setattr(hsa_ext_amd_aql_pm4_packet_t, 'header', field(0, uint16_t))
 setattr(hsa_ext_amd_aql_pm4_packet_t, 'pm4_command', field(2, Array(uint16_t, 27)))
 setattr(hsa_ext_amd_aql_pm4_packet_t, 'completion_signal', field(56, hsa_signal_t))
-try: (hsa_ven_amd_aqlprofile_start:=dll.hsa_ven_amd_aqlprofile_start).restype, hsa_ven_amd_aqlprofile_start.argtypes = hsa_status_t, [Pointer(hsa_ven_amd_aqlprofile_profile_t), Pointer(hsa_ext_amd_aql_pm4_packet_t)]
-except AttributeError: pass
-
-try: (hsa_ven_amd_aqlprofile_stop:=dll.hsa_ven_amd_aqlprofile_stop).restype, hsa_ven_amd_aqlprofile_stop.argtypes = hsa_status_t, [Pointer(hsa_ven_amd_aqlprofile_profile_t), Pointer(hsa_ext_amd_aql_pm4_packet_t)]
-except AttributeError: pass
-
-try: (hsa_ven_amd_aqlprofile_read:=dll.hsa_ven_amd_aqlprofile_read).restype, hsa_ven_amd_aqlprofile_read.argtypes = hsa_status_t, [Pointer(hsa_ven_amd_aqlprofile_profile_t), Pointer(hsa_ext_amd_aql_pm4_packet_t)]
-except AttributeError: pass
-
+@dll.bind((Pointer(hsa_ven_amd_aqlprofile_profile_t), Pointer(hsa_ext_amd_aql_pm4_packet_t)), hsa_status_t)
+def hsa_ven_amd_aqlprofile_start(profile, aql_start_packet): ...
+@dll.bind((Pointer(hsa_ven_amd_aqlprofile_profile_t), Pointer(hsa_ext_amd_aql_pm4_packet_t)), hsa_status_t)
+def hsa_ven_amd_aqlprofile_stop(profile, aql_stop_packet): ...
+@dll.bind((Pointer(hsa_ven_amd_aqlprofile_profile_t), Pointer(hsa_ext_amd_aql_pm4_packet_t)), hsa_status_t)
+def hsa_ven_amd_aqlprofile_read(profile, aql_read_packet): ...
 try: HSA_VEN_AMD_AQLPROFILE_LEGACY_PM4_PACKET_SIZE = ctypes.c_uint32.in_dll(dll, 'HSA_VEN_AMD_AQLPROFILE_LEGACY_PM4_PACKET_SIZE')
 except (ValueError,AttributeError): pass
-try: (hsa_ven_amd_aqlprofile_legacy_get_pm4:=dll.hsa_ven_amd_aqlprofile_legacy_get_pm4).restype, hsa_ven_amd_aqlprofile_legacy_get_pm4.argtypes = hsa_status_t, [Pointer(hsa_ext_amd_aql_pm4_packet_t), ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_ven_amd_aqlprofile_att_marker:=dll.hsa_ven_amd_aqlprofile_att_marker).restype, hsa_ven_amd_aqlprofile_att_marker.argtypes = hsa_status_t, [Pointer(hsa_ven_amd_aqlprofile_profile_t), Pointer(hsa_ext_amd_aql_pm4_packet_t), uint32_t, hsa_ven_amd_aqlprofile_att_marker_channel_t]
-except AttributeError: pass
-
+@dll.bind((Pointer(hsa_ext_amd_aql_pm4_packet_t), ctypes.c_void_p), hsa_status_t)
+def hsa_ven_amd_aqlprofile_legacy_get_pm4(aql_packet, data): ...
+@dll.bind((Pointer(hsa_ven_amd_aqlprofile_profile_t), Pointer(hsa_ext_amd_aql_pm4_packet_t), uint32_t, hsa_ven_amd_aqlprofile_att_marker_channel_t), hsa_status_t)
+def hsa_ven_amd_aqlprofile_att_marker(profile, aql_marker_packet, data, channel): ...
 class hsa_ven_amd_aqlprofile_info_data_t(Struct): pass
 class _anonstruct15(Struct): pass
 _anonstruct15.SIZE = 24
@@ -2749,23 +2488,18 @@ HSA_VEN_AMD_AQLPROFILE_INFO_ENABLE_CMD = hsa_ven_amd_aqlprofile_info_type_t.defi
 HSA_VEN_AMD_AQLPROFILE_INFO_DISABLE_CMD = hsa_ven_amd_aqlprofile_info_type_t.define('HSA_VEN_AMD_AQLPROFILE_INFO_DISABLE_CMD', 7)
 
 hsa_ven_amd_aqlprofile_data_callback_t = ctypes.CFUNCTYPE(hsa_status_t, hsa_ven_amd_aqlprofile_info_type_t, Pointer(hsa_ven_amd_aqlprofile_info_data_t), ctypes.c_void_p)
-try: (hsa_ven_amd_aqlprofile_get_info:=dll.hsa_ven_amd_aqlprofile_get_info).restype, hsa_ven_amd_aqlprofile_get_info.argtypes = hsa_status_t, [Pointer(hsa_ven_amd_aqlprofile_profile_t), hsa_ven_amd_aqlprofile_info_type_t, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_ven_amd_aqlprofile_iterate_data:=dll.hsa_ven_amd_aqlprofile_iterate_data).restype, hsa_ven_amd_aqlprofile_iterate_data.argtypes = hsa_status_t, [Pointer(hsa_ven_amd_aqlprofile_profile_t), hsa_ven_amd_aqlprofile_data_callback_t, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (hsa_ven_amd_aqlprofile_error_string:=dll.hsa_ven_amd_aqlprofile_error_string).restype, hsa_ven_amd_aqlprofile_error_string.argtypes = hsa_status_t, [Pointer(Pointer(ctypes.c_char))]
-except AttributeError: pass
-
+@dll.bind((Pointer(hsa_ven_amd_aqlprofile_profile_t), hsa_ven_amd_aqlprofile_info_type_t, ctypes.c_void_p), hsa_status_t)
+def hsa_ven_amd_aqlprofile_get_info(profile, attribute, value): ...
+@dll.bind((Pointer(hsa_ven_amd_aqlprofile_profile_t), hsa_ven_amd_aqlprofile_data_callback_t, ctypes.c_void_p), hsa_status_t)
+def hsa_ven_amd_aqlprofile_iterate_data(profile, callback, data): ...
+@dll.bind((Pointer(Pointer(ctypes.c_char)),), hsa_status_t)
+def hsa_ven_amd_aqlprofile_error_string(str): ...
 hsa_ven_amd_aqlprofile_eventname_callback_t = ctypes.CFUNCTYPE(hsa_status_t, ctypes.c_int32, Pointer(ctypes.c_char))
-try: (hsa_ven_amd_aqlprofile_iterate_event_ids:=dll.hsa_ven_amd_aqlprofile_iterate_event_ids).restype, hsa_ven_amd_aqlprofile_iterate_event_ids.argtypes = hsa_status_t, [hsa_ven_amd_aqlprofile_eventname_callback_t]
-except AttributeError: pass
-
+@dll.bind((hsa_ven_amd_aqlprofile_eventname_callback_t,), hsa_status_t)
+def hsa_ven_amd_aqlprofile_iterate_event_ids(_0): ...
 hsa_ven_amd_aqlprofile_coordinate_callback_t = ctypes.CFUNCTYPE(hsa_status_t, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, Pointer(ctypes.c_char), ctypes.c_void_p)
-try: (hsa_ven_amd_aqlprofile_iterate_event_coord:=dll.hsa_ven_amd_aqlprofile_iterate_event_coord).restype, hsa_ven_amd_aqlprofile_iterate_event_coord.argtypes = hsa_status_t, [hsa_agent_t, hsa_ven_amd_aqlprofile_event_t, uint32_t, hsa_ven_amd_aqlprofile_coordinate_callback_t, ctypes.c_void_p]
-except AttributeError: pass
-
+@dll.bind((hsa_agent_t, hsa_ven_amd_aqlprofile_event_t, uint32_t, hsa_ven_amd_aqlprofile_coordinate_callback_t, ctypes.c_void_p), hsa_status_t)
+def hsa_ven_amd_aqlprofile_iterate_event_coord(agent, event, sample_id, callback, userdata): ...
 class struct_hsa_ven_amd_aqlprofile_1_00_pfn_s(Struct): pass
 struct_hsa_ven_amd_aqlprofile_1_00_pfn_s.SIZE = 104
 struct_hsa_ven_amd_aqlprofile_1_00_pfn_s._fields_ = ['hsa_ven_amd_aqlprofile_version_major', 'hsa_ven_amd_aqlprofile_version_minor', 'hsa_ven_amd_aqlprofile_error_string', 'hsa_ven_amd_aqlprofile_validate_event', 'hsa_ven_amd_aqlprofile_start', 'hsa_ven_amd_aqlprofile_stop', 'hsa_ven_amd_aqlprofile_read', 'hsa_ven_amd_aqlprofile_legacy_get_pm4', 'hsa_ven_amd_aqlprofile_get_info', 'hsa_ven_amd_aqlprofile_iterate_data', 'hsa_ven_amd_aqlprofile_iterate_event_ids', 'hsa_ven_amd_aqlprofile_iterate_event_coord', 'hsa_ven_amd_aqlprofile_att_marker']
