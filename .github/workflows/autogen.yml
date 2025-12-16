@@ -93,14 +93,12 @@ jobs:
         mv tinygrad/runtime/autogen/libc.py /tmp/libc.py.bak
         mv tinygrad/runtime/autogen/kfd.py /tmp/kfd.py.bak
         mv tinygrad/runtime/autogen/io_uring.py /tmp/io_uring.py.bak
-        mv tinygrad/runtime/autogen/ib.py /tmp/ib.py.bak
         mv tinygrad/runtime/autogen/pci.py /tmp/pci.py.bak
         mv tinygrad/runtime/autogen/vfio.py /tmp/vfio.py.bak
-        python3 -c "from tinygrad.runtime.autogen import libc, kfd, io_uring, ib, pci, vfio"
+        python3 -c "from tinygrad.runtime.autogen import libc, kfd, io_uring, pci, vfio"
         diff /tmp/libc.py.bak tinygrad/runtime/autogen/libc.py
         diff /tmp/kfd.py.bak tinygrad/runtime/autogen/kfd.py
         diff /tmp/io_uring.py.bak tinygrad/runtime/autogen/io_uring.py
-        diff /tmp/ib.py.bak tinygrad/runtime/autogen/ib.py
         diff /tmp/pci.py.bak tinygrad/runtime/autogen/pci.py
         diff /tmp/vfio.py.bak tinygrad/runtime/autogen/vfio.py
     - name: Verify LLVM autogen

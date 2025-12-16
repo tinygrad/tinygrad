@@ -69,5 +69,4 @@ def needs_second_gpu(fn):
     return fn(self, *args, **kwargs)
   return wrapper
 
-# NOTE: This will open REMOTE if it's the default device
-REAL_DEV = (Device.DEFAULT if Device.DEFAULT != "REMOTE" else Device['REMOTE'].properties.real_device)
+REAL_DEV = Device.DEFAULT

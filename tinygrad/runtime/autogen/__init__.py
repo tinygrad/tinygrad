@@ -77,8 +77,6 @@ def __getattr__(nm):
     # this defines all syscall numbers. should probably unify linux autogen?
     case "io_uring": return load("io_uring", None, ["/usr/include/liburing.h", "/usr/include/linux/io_uring.h", "/usr/include/asm-generic/unistd.h"],
                                  rules=[('__NR', 'NR')])
-    case "ib": return load("ib", "'ibverbs'", ["/usr/include/infiniband/verbs.h", "/usr/include/infiniband/verbs_api.h",
-                                               "/usr/include/infiniband/ib_user_ioctl_verbs.h","/usr/include/rdma/ib_user_verbs.h"], errno=True)
     case "llvm": return load("llvm", llvm_lib, lambda: [system("llvm-config-20 --includedir")+"/llvm-c/**/*.h"],
                              args=lambda: system("llvm-config-20 --cflags").split(), recsym=True, prolog=["from tinygrad.helpers import WIN, OSX"])
     case "pci": return load("pci", None, ["/usr/include/linux/pci_regs.h"])
