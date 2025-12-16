@@ -249,7 +249,9 @@ class AMDev(PCIDevImplBase):
 
   def indirect_wreg_pcie(self, reg:int, val:int, aid:int=0):
     self.reg("regBIF_BX0_PCIE_INDEX2").write(reg * 4 + ((((aid & 0b11) << 32) | (1 << 34)) if aid > 0 else 0))
+    self.reg("regBIF_BX0_PCIE_INDEX2").read()
     self.reg("regBIF_BX0_PCIE_DATA2").write(val)
+    self.reg("regBIF_BX0_PCIE_DATA2").read()
 
   def _read_vram(self, addr, size) -> bytes:
     assert addr % 4 == 0 and size % 4 == 0, f"Invalid address {addr:#x} or size {size:#x}"
