@@ -29,6 +29,7 @@ C_asm.uop.buffer.allocate()
 with open(pathlib.Path(__file__).parent/"lib", "rb") as f: lib = f.read()
 prg = CompiledRunner(precompiled=lib, p=replace(eis[0].prg.p, src=lib, name="matmul", global_size=(128, 86, 1), local_size=(256, 1, 1)))
 #Device[Device.DEFAULT].compiler.disassemble(lib)
-eis.append(ExecItem(prg, [C_asm.uop.buffer, A.uop.buffer, B.uop.buffer]))
+# TODO: re assemble lib without the custom KernelArgs struct
+#eis.append(ExecItem(prg, [C_asm.uop.buffer, A.uop.buffer, B.uop.buffer]))
 
 for ei in eis: ei.run(wait=True)
