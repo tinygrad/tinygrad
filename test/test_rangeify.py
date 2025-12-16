@@ -339,7 +339,7 @@ class TestRangeify(unittest.TestCase):
   def test_transformer_ffn(self):
     from tinygrad.apps.llm import TransformerBlock
     from tinygrad import nn
-    blk = TransformerBlock(1024, 4096, 1, 1, 1e-5)
+    blk = TransformerBlock(1024, 4096, 1, 1, 1e-5, head_dim=1024, rope_theta=10000.0)
     for p in nn.state.get_parameters(blk): p.replace(Tensor.empty(p.shape))
 
     x = Tensor.empty(128, 1024)

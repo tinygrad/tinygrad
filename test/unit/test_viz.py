@@ -232,7 +232,7 @@ import gc
 
 def bufs_allocated() -> int:
   gc.collect()
-  return sum([isinstance(x, Buffer) for x in gc.get_objects()])
+  return sum([type(x).__name__ == "Buffer" and type(x).__module__ == "tinygrad.device" for x in gc.get_objects()])
 
 class TestVizGC(BaseTestViz):
   def test_gc(self):
