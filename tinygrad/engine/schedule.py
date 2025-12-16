@@ -179,7 +179,7 @@ pm_post_sched_cache = PatternMatcher([
   (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR),), name="b"), lambda ctx,b: ctx.get(b)),
 ])
 
-schedule_cache: dict[bytes, tuple[UOp, UOp]] = {}
+schedule_cache: dict[bytes, tuple[list[PreScheduleItem], UOp, UOp]] = {}
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[1]))}")
 def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], list[ScheduleItem], dict[str, int]]:
   # big_sink srcs are all the Tensors
@@ -208,16 +208,16 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
     tensor_map |= get_rangeify_map(big_sink_cache)
     big_sink = big_sink_cache.substitute(tensor_map, name="Apply Kernelize Map")
 
-    # save in schedule cache
-    tensor_map_sink = UOp.sink(*flatten([(k,v) for k,v in tensor_map.items()]))
-    schedule_cache[sched_cache_key] = (big_sink, tensor_map_sink)
-  else:
-    # schedule cache hit
-    del big_sink_cache
-    big_sink, tensor_map_sink = sc_ret
+    # create the schedule with LUNIQUE placeholders
+    pre_schedule = create_schedule(big_sink)
 
-  # create the schedule with LUNIQUE placeholders
-  pre_schedule = create_schedule(big_sink)
+    # save in schedule cache: pre_schedule, tensor_map_sink, big_sink
+    tensor_map_sink = UOp.sink(*flatten([(k,v) for k,v in tensor_map.items()]))
+    schedule_cache[sched_cache_key] = (pre_schedule, tensor_map_sink, big_sink)
+  else:
+    # schedule cache hit - skip create_schedule
+    del big_sink_cache
+    pre_schedule, tensor_map_sink, big_sink = sc_ret
 
   # replace LUNIQUE with UNIQUE in ScheduleItems
   input_buffers_reverse = {v:k for k,v in input_buffers.items()}
