@@ -2812,16 +2812,6 @@ class Tensor(OpMixin):
     """
     return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.sqrt)
 
-  def rsqrt(self) -> Tensor:
-    """
-    Computes the reciprocal of the square root of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 3., 4.]).rsqrt().numpy())
-    ```
-    """
-    return self.sqrt().reciprocal()
-
   def sin(self) -> Tensor:
     """
     Computes the sine of the tensor element-wise.
@@ -2988,30 +2978,6 @@ class Tensor(OpMixin):
     ```
     """
     return gamma * (self >= 0).detach().where(self, alpha * (self.exp() - 1))
-
-  def swish(self) -> Tensor:
-    """
-    See `.silu()`
-
-    - Paper: https://arxiv.org/abs/1710.05941v1
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).swish().numpy())
-    ```
-    """
-    return self * self.sigmoid()
-
-  def silu(self) -> Tensor:
-    """
-    Applies the Sigmoid Linear Unit (SiLU) function element-wise.
-
-    - Paper: https://arxiv.org/abs/1606.08415
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).silu().numpy())
-    ```
-    """
-    return self.swish()   # The SiLU function is also known as the swish function.
 
   def sinh(self) -> Tensor:
     """
