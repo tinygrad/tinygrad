@@ -1,3 +1,4 @@
+import math
 from typing import Self
 from tinygrad.uop import Ops
 from tinygrad.dtype import dtypes, ConstType
@@ -277,3 +278,198 @@ class MathMixin:
 
   def __pow__(self, x: Self | ConstType):
     return self.pow(x)
+
+  def square(self):
+    """
+    Squares the tensor element-wise.
+    Equivalent to `self*self`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).square().numpy())
+    ```
+    """
+    return self * self
+
+  def clamp(self, min_=None, max_=None):
+    """
+    Clips (clamps) the values in the tensor between `min_` and `max_` element-wise.
+    If `min_` is `None`, there is no lower bound. If `max_` is None, there is no upper bound.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).clip(-1, 1).numpy())
+    ```
+    """
+    if min_ is None and max_ is None: raise RuntimeError("at least one of 'min_' or 'max_' must not be None")
+    ret = (self < min_).where(min_, self) if min_ is not None else self
+    return (ret > max_).where(max_, ret) if max_ is not None else ret
+
+  def clip(self, min_=None, max_=None):
+    """Alias for `Tensor.clamp`."""
+    return self.clamp(min_, max_)
+
+  def isnan(self):
+    """
+    Checks the tensor element-wise to return True where the element is NaN, otherwise returns False
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1, float('inf'), 2, float('-inf'), float('nan')]).isnan().numpy())
+    ```
+    """
+    return self != self
+
+  def isinf(self, detect_positive: bool = True, detect_negative: bool = True):
+    """
+    Checks the tensor element-wise to return True where the element is infinity, otherwise returns False
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1, float('inf'), 2, float('-inf'), float('nan')]).isinf().numpy())
+    ```
+    """
+    return self.eq(float("inf")) * detect_positive + self.eq(float("-inf")) * detect_negative
+
+  def isfinite(self):
+    """
+    Checks the tensor element-wise to return True where the element is finite, otherwise returns False
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1, float('inf'), 2, float('-inf'), float('nan')]).isfinite().numpy())
+    ```
+    """
+    return (self.isinf() | self.isnan()).logical_not()
+
+  def ceil(self):
+    """
+    Rounds the tensor element-wise towards positive infinity.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5]).ceil().numpy())
+    ```
+    """
+    return (self > (b := self.trunc())).where(b+1, b)
+
+  def floor(self):
+    """
+    Rounds the tensor element-wise towards negative infinity.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5]).floor().numpy())
+    ```
+    """
+    return (self < (b := self.trunc())).where(b-1, b)
+
+  def relu(self):
+    """
+    Applies the Rectified Linear Unit (ReLU) function element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).relu().numpy())
+    ```
+    """
+    # NOTE: if you write this as self.maximum(0) the gradient is wrong, passing through half when self is 0
+    return (self > 0).where(self, 0)
+
+  def sigmoid(self):
+    """
+    Applies the Sigmoid function element-wise.
+
+    - Described: https://en.wikipedia.org/wiki/Sigmoid_function
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).sigmoid().numpy())
+    ```
+    """
+    return (1 + (self * (-1/math.log(2))).exp2()).reciprocal()
+
+  def relu6(self):
+    """
+    Applies the ReLU6 function element-wise.
+
+    - Paper: https://arxiv.org/abs/1704.04861v1
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-9., -6., -3., 0., 3., 6., 9.]).relu6().numpy())
+    ```
+    """
+    return self.relu() - (self-6).relu()
+
+  def hardswish(self):
+    """
+    Applies the Hardswish function element-wise.
+
+    - Paper: https://arxiv.org/abs/1905.02244v5
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).hardswish().numpy())
+    ```
+    """
+    return self * (self+3).relu6() * (1/6)
+
+  def hardsigmoid(self, alpha: float = 1/6, beta: float = 0.5):
+    """
+    Applies the Hardsigmoid function element-wise.
+    NOTE: default `alpha` and `beta` values are taken from torch
+
+    - See: https://pytorch.org/docs/stable/generated/torch.nn.functional.hardsigmoid.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).hardsigmoid().numpy())
+    ```
+    """
+    return (alpha * self + beta).relu() - (alpha * self + beta - 1).relu()
+
+  def hardtanh(self, min_val=-1, max_val=1):
+    """
+    Applies the Hardtanh function element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-1.5, -1.0, -0.5, 0., 0.5, 1.0, 1.5]).hardtanh().numpy())
+    ```
+    """
+    return self.clip(min_val, max_val)
+
+  def leaky_relu(self, neg_slope=0.01):
+    """
+    Applies the Leaky ReLU function element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).leaky_relu().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).leaky_relu(neg_slope=0.42).numpy())
+    ```
+    """
+    return (self < 0).where(neg_slope*self, self)
+
+  def tanh(self):
+    """
+    Applies the Hyperbolic Tangent (tanh) function element-wise.
+
+    - Described: https://en.wikipedia.org/wiki/Hyperbolic_functions#Tanh
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).tanh().numpy())
+    ```
+    """
+    return 2.0 * ((2.0 * self).sigmoid()) - 1.0
+
+  def quick_gelu(self):
+    """
+    Applies the Sigmoid GELU approximation element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).quick_gelu().numpy())
+    ```
+    """
+    return self * (self * 1.702).sigmoid()
+
+  def gelu(self):
+    """
+    Applies the Gaussian Error Linear Unit (GELU) function element-wise.
+
+    - Paper: https://arxiv.org/abs/1606.08415v5
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).gelu().numpy())
+    ```
+    """
+    return 0.5 * self * (1 + (math.sqrt(2 / math.pi) * (self + 0.044715 * self ** 3)).tanh())
