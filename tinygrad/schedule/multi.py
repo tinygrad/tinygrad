@@ -131,16 +131,15 @@ def _get_multi_axis(mlb:UOp) -> int|None:
   return mlb.arg if mlb.op in (Ops.MULTI, Ops.MSTACK) else None
 
 def _is_sharded(uop:UOp) -> bool:
-  """Check if UOp has sharded device (Sharding or MULTI). MSTACK is handled separately by replace_allreduce."""
-  if uop.op is Ops.MULTI: return True
-  # NOTE: MSTACK is NOT included here - it has multiple single-device sources, handled by mstack_early_shrink
-  dev = uop._device  # Use _device to avoid unwrap assertion
-  return isinstance(dev, Sharding)
+  """Check if UOp is wrapped in MULTI. Only MULTI indicates sharding for multi_pm patterns.
+  NOTE: MSTACK is NOT included here - it represents already-split data that should be handled by replace_allreduce
+  patterns (mstack_early_shrink etc.) and scheduling, not by alu_multi/reshape_multi etc.
+  We also don't check Sharding device because that would cause infinite loops - regular ops with Sharding
+  device are NOT multi-wrapped, so _get_inner returns them as-is and transforms keep re-matching."""
+  return uop.op is Ops.MULTI
 
 def _get_axis(uop:UOp) -> int|None:
-  """Get sharding axis from either Sharding device or MULTI/MSTACK op."""
-  dev = uop._device  # Use _device to avoid unwrap assertion
-  if isinstance(dev, Sharding): return dev.axis
+  """Get sharding axis from MULTI or MSTACK op. Used by multi_pm patterns."""
   if uop.op in (Ops.MULTI, Ops.MSTACK): return uop.arg
   return None
 
@@ -149,10 +148,8 @@ def _get_inner(uop:UOp) -> UOp:
   return uop.src[0] if uop.op is Ops.MULTI else uop
 
 def _get_device(uop:UOp) -> tuple[str, ...]:
-  """Get devices tuple from sharded UOp."""
-  dev = uop._device  # Use _device to avoid unwrap assertion
-  if isinstance(dev, Sharding): return dev.devices
-  return cast(tuple, dev)
+  """Get devices tuple from MULTI-wrapped UOp. Assumes uop is MULTI."""
+  return _underlying_devices(uop.device)
 
 def alu_multi(root:UOp):
   msrcs = root.src
@@ -177,10 +174,17 @@ def alu_multi(root:UOp):
       # not sharded, copy to target devices first, then shard
       if not isinstance(mlb.device, (tuple, Sharding)):
         mlb = mlb.copy_to_device(target_devices)
+      # Check if axis is valid for this tensor (can be out of bounds when reshaping to fewer dimensions)
+      if axis >= len(mlb.shape): return None
       srcs.append(mlb._shard(axis))
     else:
       # axis mismatch, unshard and reshard
-      srcs.append(_get_inner(mlb)._unshard(mlb_axis).allreduce(Ops.ADD, mlb.device)._shard(axis))
+      inner = _get_inner(mlb)
+      unsharded = inner._unshard(mlb_axis)
+      allreduced = unsharded.allreduce(Ops.ADD, mlb.device)
+      # Check if axis is valid for allreduced shape (can be out of bounds when reshaping to fewer dimensions)
+      if axis >= len(allreduced.shape): return None
+      srcs.append(allreduced._shard(axis))
   return srcs[0].alu(root.op, *srcs[1:]).multi(axis)
 
 def reduce_multi(root:UOp, src:UOp):

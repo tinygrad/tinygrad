@@ -238,13 +238,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.DEFINE_GLOBAL | Ops.DEFINE_LOCAL | Ops.DEFINE_REG: return (self.ptrdtype.size,)
 
       # passthrough ops
-      case Ops.REDUCE | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.END:
+      case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.END:
         return self.src[0]._shape
-      # MSTACK: if axis in arg, scale shape like MULTI does
-      case Ops.MSTACK:
-        ps = self.src[0]._shape
-        if self.arg is None or ps is None: return ps
-        return tuple(s*len(self.src) if a == self.arg else s for a,s in enumerate(ps))
 
       # ops with custom handling
       case Ops.KERNEL: return self.arg.ast._shape
@@ -527,7 +522,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       arg_acc:list[sint] = list(itertools.accumulate(self.marg, operator.mul, initial=1))
       # new_axis is the last one that preserves prod(prior to new_axis) and must not move items between shards
       # TODO: what to do about shrinking to self.shape[self.axis]==1 len(self.real_lbs)==1?
-      return len(arg_acc) - arg_acc[::-1].index(prod(self.src[0].shape[:src_axis])) - 1
+      calc_axis = len(arg_acc) - arg_acc[::-1].index(prod(self.src[0].shape[:src_axis])) - 1
+      # clamp to valid range - can be out of bounds when reshaping to fewer dimensions
+      return calc_axis if calc_axis < len(self.marg) else None
     if self.op is Ops.PERMUTE: return self.marg.index(src_axis) if src_axis is not None else None
     return src_axis
 
@@ -636,12 +633,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       if isinstance(src_dev, Sharding): return src_dev[self.arg]
       assert isinstance(src_dev, tuple), "mselect must be on tuple or Sharding device"
       return src_dev[self.arg]
-    if self.op is Ops.MSTACK:
-      devices = tuple(cast(str, x.device) for x in self.src)
-      if self.arg is not None:
-        from tinygrad.device import Sharding
-        return Sharding(devices, self.arg)
-      return devices
+    if self.op is Ops.MSTACK: return tuple(cast(str, x.device) for x in self.src)
     if self.op in {Ops.COPY, Ops.BUFFER, Ops.ALLREDUCE}: return self.src[1].device
     # transform Sharding axis for movement ops
     if self.src and (src_dev := self.src[0]._device) is not None:
