@@ -6,90 +6,62 @@ off_t = ctypes.c_int64
 mode_t = ctypes.c_uint32
 size_t = ctypes.c_uint64
 __off_t = ctypes.c_int64
-try: (mmap:=dll.mmap).restype, mmap.argtypes = ctypes.c_void_p, [ctypes.c_void_p, size_t, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_int64]
-except AttributeError: pass
-
-try: (munmap:=dll.munmap).restype, munmap.argtypes = ctypes.c_int32, [ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-try: (mprotect:=dll.mprotect).restype, mprotect.argtypes = ctypes.c_int32, [ctypes.c_void_p, size_t, ctypes.c_int32]
-except AttributeError: pass
-
-try: (msync:=dll.msync).restype, msync.argtypes = ctypes.c_int32, [ctypes.c_void_p, size_t, ctypes.c_int32]
-except AttributeError: pass
-
-try: (madvise:=dll.madvise).restype, madvise.argtypes = ctypes.c_int32, [ctypes.c_void_p, size_t, ctypes.c_int32]
-except AttributeError: pass
-
-try: (posix_madvise:=dll.posix_madvise).restype, posix_madvise.argtypes = ctypes.c_int32, [ctypes.c_void_p, size_t, ctypes.c_int32]
-except AttributeError: pass
-
-try: (mlock:=dll.mlock).restype, mlock.argtypes = ctypes.c_int32, [ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-try: (munlock:=dll.munlock).restype, munlock.argtypes = ctypes.c_int32, [ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-try: (mlockall:=dll.mlockall).restype, mlockall.argtypes = ctypes.c_int32, [ctypes.c_int32]
-except AttributeError: pass
-
-try: (munlockall:=dll.munlockall).restype, munlockall.argtypes = ctypes.c_int32, []
-except AttributeError: pass
-
-try: (mincore:=dll.mincore).restype, mincore.argtypes = ctypes.c_int32, [ctypes.c_void_p, size_t, Pointer(ctypes.c_ubyte)]
-except AttributeError: pass
-
-try: (shm_open:=dll.shm_open).restype, shm_open.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), ctypes.c_int32, mode_t]
-except AttributeError: pass
-
-try: (shm_unlink:=dll.shm_unlink).restype, shm_unlink.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (memcpy:=dll.memcpy).restype, memcpy.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-try: (memmove:=dll.memmove).restype, memmove.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-try: (memccpy:=dll.memccpy).restype, memccpy.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int32, size_t]
-except AttributeError: pass
-
-try: (memset:=dll.memset).restype, memset.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_int32, size_t]
-except AttributeError: pass
-
-try: (memcmp:=dll.memcmp).restype, memcmp.argtypes = ctypes.c_int32, [ctypes.c_void_p, ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-try: (__memcmpeq:=dll.__memcmpeq).restype, __memcmpeq.argtypes = ctypes.c_int32, [ctypes.c_void_p, ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-try: (memchr:=dll.memchr).restype, memchr.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_int32, size_t]
-except AttributeError: pass
-
-try: (strcpy:=dll.strcpy).restype, strcpy.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (strncpy:=dll.strncpy).restype, strncpy.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (strcat:=dll.strcat).restype, strcat.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (strncat:=dll.strncat).restype, strncat.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (strcmp:=dll.strcmp).restype, strcmp.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (strncmp:=dll.strncmp).restype, strncmp.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (strcoll:=dll.strcoll).restype, strcoll.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (strxfrm:=dll.strxfrm).restype, strxfrm.argtypes = ctypes.c_uint64, [Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t]
-except AttributeError: pass
-
+@dll.bind((ctypes.c_void_p, size_t, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_int64), ctypes.c_void_p)
+def mmap(__addr, __len, __prot, __flags, __fd, __offset): ...
+@dll.bind((ctypes.c_void_p, size_t), ctypes.c_int32)
+def munmap(__addr, __len): ...
+@dll.bind((ctypes.c_void_p, size_t, ctypes.c_int32), ctypes.c_int32)
+def mprotect(__addr, __len, __prot): ...
+@dll.bind((ctypes.c_void_p, size_t, ctypes.c_int32), ctypes.c_int32)
+def msync(__addr, __len, __flags): ...
+@dll.bind((ctypes.c_void_p, size_t, ctypes.c_int32), ctypes.c_int32)
+def madvise(__addr, __len, __advice): ...
+@dll.bind((ctypes.c_void_p, size_t, ctypes.c_int32), ctypes.c_int32)
+def posix_madvise(__addr, __len, __advice): ...
+@dll.bind((ctypes.c_void_p, size_t), ctypes.c_int32)
+def mlock(__addr, __len): ...
+@dll.bind((ctypes.c_void_p, size_t), ctypes.c_int32)
+def munlock(__addr, __len): ...
+@dll.bind((ctypes.c_int32), ctypes.c_int32)
+def mlockall(__flags): ...
+@dll.bind((), ctypes.c_int32)
+def munlockall(): ...
+@dll.bind((ctypes.c_void_p, size_t, Pointer(ctypes.c_ubyte)), ctypes.c_int32)
+def mincore(__start, __len, __vec): ...
+@dll.bind((Pointer(ctypes.c_char), ctypes.c_int32, mode_t), ctypes.c_int32)
+def shm_open(__name, __oflag, __mode): ...
+@dll.bind((Pointer(ctypes.c_char)), ctypes.c_int32)
+def shm_unlink(__name): ...
+@dll.bind((ctypes.c_void_p, ctypes.c_void_p, size_t), ctypes.c_void_p)
+def memcpy(__dest, __src, __n): ...
+@dll.bind((ctypes.c_void_p, ctypes.c_void_p, size_t), ctypes.c_void_p)
+def memmove(__dest, __src, __n): ...
+@dll.bind((ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int32, size_t), ctypes.c_void_p)
+def memccpy(__dest, __src, __c, __n): ...
+@dll.bind((ctypes.c_void_p, ctypes.c_int32, size_t), ctypes.c_void_p)
+def memset(__s, __c, __n): ...
+@dll.bind((ctypes.c_void_p, ctypes.c_void_p, size_t), ctypes.c_int32)
+def memcmp(__s1, __s2, __n): ...
+@dll.bind((ctypes.c_void_p, ctypes.c_void_p, size_t), ctypes.c_int32)
+def __memcmpeq(__s1, __s2, __n): ...
+@dll.bind((ctypes.c_void_p, ctypes.c_int32, size_t), ctypes.c_void_p)
+def memchr(__s, __c, __n): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char)), Pointer(ctypes.c_char))
+def strcpy(__dest, __src): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t), Pointer(ctypes.c_char))
+def strncpy(__dest, __src, __n): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char)), Pointer(ctypes.c_char))
+def strcat(__dest, __src): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t), Pointer(ctypes.c_char))
+def strncat(__dest, __src, __n): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char)), ctypes.c_int32)
+def strcmp(__s1, __s2): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t), ctypes.c_int32)
+def strncmp(__s1, __s2, __n): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char)), ctypes.c_int32)
+def strcoll(__s1, __s2): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t), ctypes.c_uint64)
+def strxfrm(__dest, __src, __n): ...
 class struct___locale_struct(Struct): pass
 class struct___locale_data(Struct): pass
 struct___locale_struct.SIZE = 232
@@ -100,102 +72,70 @@ setattr(struct___locale_struct, '__ctype_tolower', field(112, Pointer(ctypes.c_i
 setattr(struct___locale_struct, '__ctype_toupper', field(120, Pointer(ctypes.c_int32)))
 setattr(struct___locale_struct, '__names', field(128, Array(Pointer(ctypes.c_char), 13)))
 locale_t = Pointer(struct___locale_struct)
-try: (strcoll_l:=dll.strcoll_l).restype, strcoll_l.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), Pointer(ctypes.c_char), locale_t]
-except AttributeError: pass
-
-try: (strxfrm_l:=dll.strxfrm_l).restype, strxfrm_l.argtypes = size_t, [Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t, locale_t]
-except AttributeError: pass
-
-try: (strdup:=dll.strdup).restype, strdup.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (strndup:=dll.strndup).restype, strndup.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (strchr:=dll.strchr).restype, strchr.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strrchr:=dll.strrchr).restype, strrchr.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strchrnul:=dll.strchrnul).restype, strchrnul.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), ctypes.c_int32]
-except AttributeError: pass
-
-try: (strcspn:=dll.strcspn).restype, strcspn.argtypes = ctypes.c_uint64, [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (strspn:=dll.strspn).restype, strspn.argtypes = ctypes.c_uint64, [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (strpbrk:=dll.strpbrk).restype, strpbrk.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (strstr:=dll.strstr).restype, strstr.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (strtok:=dll.strtok).restype, strtok.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (__strtok_r:=dll.__strtok_r).restype, __strtok_r.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char), Pointer(Pointer(ctypes.c_char))]
-except AttributeError: pass
-
-try: (strtok_r:=dll.strtok_r).restype, strtok_r.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char), Pointer(Pointer(ctypes.c_char))]
-except AttributeError: pass
-
-try: (strcasestr:=dll.strcasestr).restype, strcasestr.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (memmem:=dll.memmem).restype, memmem.argtypes = ctypes.c_void_p, [ctypes.c_void_p, size_t, ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-try: (__mempcpy:=dll.__mempcpy).restype, __mempcpy.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-try: (mempcpy:=dll.mempcpy).restype, mempcpy.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-try: (strlen:=dll.strlen).restype, strlen.argtypes = ctypes.c_uint64, [Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (strnlen:=dll.strnlen).restype, strnlen.argtypes = size_t, [Pointer(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (strerror:=dll.strerror).restype, strerror.argtypes = Pointer(ctypes.c_char), [ctypes.c_int32]
-except AttributeError: pass
-
-try: (strerror_r:=dll.strerror_r).restype, strerror_r.argtypes = ctypes.c_int32, [ctypes.c_int32, Pointer(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (strerror_l:=dll.strerror_l).restype, strerror_l.argtypes = Pointer(ctypes.c_char), [ctypes.c_int32, locale_t]
-except AttributeError: pass
-
-try: (explicit_bzero:=dll.explicit_bzero).restype, explicit_bzero.argtypes = None, [ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-try: (strsep:=dll.strsep).restype, strsep.argtypes = Pointer(ctypes.c_char), [Pointer(Pointer(ctypes.c_char)), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (strsignal:=dll.strsignal).restype, strsignal.argtypes = Pointer(ctypes.c_char), [ctypes.c_int32]
-except AttributeError: pass
-
-try: (__stpcpy:=dll.__stpcpy).restype, __stpcpy.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (stpcpy:=dll.stpcpy).restype, stpcpy.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (__stpncpy:=dll.__stpncpy).restype, __stpncpy.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (stpncpy:=dll.stpncpy).restype, stpncpy.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (strlcpy:=dll.strlcpy).restype, strlcpy.argtypes = size_t, [Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (strlcat:=dll.strlcat).restype, strlcat.argtypes = size_t, [Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t]
-except AttributeError: pass
-
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char), locale_t), ctypes.c_int32)
+def strcoll_l(__s1, __s2, __l): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t, locale_t), size_t)
+def strxfrm_l(__dest, __src, __n, __l): ...
+@dll.bind((Pointer(ctypes.c_char)), Pointer(ctypes.c_char))
+def strdup(__s): ...
+@dll.bind((Pointer(ctypes.c_char), size_t), Pointer(ctypes.c_char))
+def strndup(__string, __n): ...
+@dll.bind((Pointer(ctypes.c_char), ctypes.c_int32), Pointer(ctypes.c_char))
+def strchr(__s, __c): ...
+@dll.bind((Pointer(ctypes.c_char), ctypes.c_int32), Pointer(ctypes.c_char))
+def strrchr(__s, __c): ...
+@dll.bind((Pointer(ctypes.c_char), ctypes.c_int32), Pointer(ctypes.c_char))
+def strchrnul(__s, __c): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char)), ctypes.c_uint64)
+def strcspn(__s, __reject): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char)), ctypes.c_uint64)
+def strspn(__s, __accept): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char)), Pointer(ctypes.c_char))
+def strpbrk(__s, __accept): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char)), Pointer(ctypes.c_char))
+def strstr(__haystack, __needle): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char)), Pointer(ctypes.c_char))
+def strtok(__s, __delim): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char), Pointer(Pointer(ctypes.c_char))), Pointer(ctypes.c_char))
+def __strtok_r(__s, __delim, __save_ptr): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char), Pointer(Pointer(ctypes.c_char))), Pointer(ctypes.c_char))
+def strtok_r(__s, __delim, __save_ptr): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char)), Pointer(ctypes.c_char))
+def strcasestr(__haystack, __needle): ...
+@dll.bind((ctypes.c_void_p, size_t, ctypes.c_void_p, size_t), ctypes.c_void_p)
+def memmem(__haystack, __haystacklen, __needle, __needlelen): ...
+@dll.bind((ctypes.c_void_p, ctypes.c_void_p, size_t), ctypes.c_void_p)
+def __mempcpy(__dest, __src, __n): ...
+@dll.bind((ctypes.c_void_p, ctypes.c_void_p, size_t), ctypes.c_void_p)
+def mempcpy(__dest, __src, __n): ...
+@dll.bind((Pointer(ctypes.c_char)), ctypes.c_uint64)
+def strlen(__s): ...
+@dll.bind((Pointer(ctypes.c_char), size_t), size_t)
+def strnlen(__string, __maxlen): ...
+@dll.bind((ctypes.c_int32), Pointer(ctypes.c_char))
+def strerror(__errnum): ...
+@dll.bind((ctypes.c_int32, Pointer(ctypes.c_char), size_t), ctypes.c_int32)
+def strerror_r(__errnum, __buf, __buflen): ...
+@dll.bind((ctypes.c_int32, locale_t), Pointer(ctypes.c_char))
+def strerror_l(__errnum, __l): ...
+@dll.bind((ctypes.c_void_p, size_t), None)
+def explicit_bzero(__s, __n): ...
+@dll.bind((Pointer(Pointer(ctypes.c_char)), Pointer(ctypes.c_char)), Pointer(ctypes.c_char))
+def strsep(__stringp, __delim): ...
+@dll.bind((ctypes.c_int32), Pointer(ctypes.c_char))
+def strsignal(__sig): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char)), Pointer(ctypes.c_char))
+def __stpcpy(__dest, __src): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char)), Pointer(ctypes.c_char))
+def stpcpy(__dest, __src): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t), Pointer(ctypes.c_char))
+def __stpncpy(__dest, __src, __n): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t), Pointer(ctypes.c_char))
+def stpncpy(__dest, __src, __n): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t), size_t)
+def strlcpy(__dest, __src, __n): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t), size_t)
+def strlcat(__dest, __src, __n): ...
 Elf32_Half = ctypes.c_uint16
 Elf64_Half = ctypes.c_uint16
 Elf32_Word = ctypes.c_uint32
@@ -573,333 +513,226 @@ useconds_t = ctypes.c_uint32
 pid_t = ctypes.c_int32
 intptr_t = ctypes.c_int64
 socklen_t = ctypes.c_uint32
-try: (access:=dll.access).restype, access.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), ctypes.c_int32]
-except AttributeError: pass
-
-try: (faccessat:=dll.faccessat).restype, faccessat.argtypes = ctypes.c_int32, [ctypes.c_int32, Pointer(ctypes.c_char), ctypes.c_int32, ctypes.c_int32]
-except AttributeError: pass
-
-try: (lseek:=dll.lseek).restype, lseek.argtypes = ctypes.c_int64, [ctypes.c_int32, ctypes.c_int64, ctypes.c_int32]
-except AttributeError: pass
-
-try: (close:=dll.close).restype, close.argtypes = ctypes.c_int32, [ctypes.c_int32]
-except AttributeError: pass
-
-try: (closefrom:=dll.closefrom).restype, closefrom.argtypes = None, [ctypes.c_int32]
-except AttributeError: pass
-
-try: (read:=dll.read).restype, read.argtypes = ssize_t, [ctypes.c_int32, ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-try: (write:=dll.write).restype, write.argtypes = ssize_t, [ctypes.c_int32, ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-try: (pread:=dll.pread).restype, pread.argtypes = ssize_t, [ctypes.c_int32, ctypes.c_void_p, size_t, ctypes.c_int64]
-except AttributeError: pass
-
-try: (pwrite:=dll.pwrite).restype, pwrite.argtypes = ssize_t, [ctypes.c_int32, ctypes.c_void_p, size_t, ctypes.c_int64]
-except AttributeError: pass
-
-try: (pipe:=dll.pipe).restype, pipe.argtypes = ctypes.c_int32, [Array(ctypes.c_int32, 2)]
-except AttributeError: pass
-
-try: (alarm:=dll.alarm).restype, alarm.argtypes = ctypes.c_uint32, [ctypes.c_uint32]
-except AttributeError: pass
-
-try: (sleep:=dll.sleep).restype, sleep.argtypes = ctypes.c_uint32, [ctypes.c_uint32]
-except AttributeError: pass
-
+@dll.bind((Pointer(ctypes.c_char), ctypes.c_int32), ctypes.c_int32)
+def access(__name, __type): ...
+@dll.bind((ctypes.c_int32, Pointer(ctypes.c_char), ctypes.c_int32, ctypes.c_int32), ctypes.c_int32)
+def faccessat(__fd, __file, __type, __flag): ...
+@dll.bind((ctypes.c_int32, ctypes.c_int64, ctypes.c_int32), ctypes.c_int64)
+def lseek(__fd, __offset, __whence): ...
+@dll.bind((ctypes.c_int32), ctypes.c_int32)
+def close(__fd): ...
+@dll.bind((ctypes.c_int32), None)
+def closefrom(__lowfd): ...
+@dll.bind((ctypes.c_int32, ctypes.c_void_p, size_t), ssize_t)
+def read(__fd, __buf, __nbytes): ...
+@dll.bind((ctypes.c_int32, ctypes.c_void_p, size_t), ssize_t)
+def write(__fd, __buf, __n): ...
+@dll.bind((ctypes.c_int32, ctypes.c_void_p, size_t, ctypes.c_int64), ssize_t)
+def pread(__fd, __buf, __nbytes, __offset): ...
+@dll.bind((ctypes.c_int32, ctypes.c_void_p, size_t, ctypes.c_int64), ssize_t)
+def pwrite(__fd, __buf, __n, __offset): ...
+@dll.bind((Array(ctypes.c_int32, 2)), ctypes.c_int32)
+def pipe(__pipedes): ...
+@dll.bind((ctypes.c_uint32), ctypes.c_uint32)
+def alarm(__seconds): ...
+@dll.bind((ctypes.c_uint32), ctypes.c_uint32)
+def sleep(__seconds): ...
 __useconds_t = ctypes.c_uint32
-try: (ualarm:=dll.ualarm).restype, ualarm.argtypes = ctypes.c_uint32, [ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (usleep:=dll.usleep).restype, usleep.argtypes = ctypes.c_int32, [ctypes.c_uint32]
-except AttributeError: pass
-
-try: (pause:=dll.pause).restype, pause.argtypes = ctypes.c_int32, []
-except AttributeError: pass
-
+@dll.bind((ctypes.c_uint32, ctypes.c_uint32), ctypes.c_uint32)
+def ualarm(__value, __interval): ...
+@dll.bind((ctypes.c_uint32), ctypes.c_int32)
+def usleep(__useconds): ...
+@dll.bind((), ctypes.c_int32)
+def pause(): ...
 __uid_t = ctypes.c_uint32
 __gid_t = ctypes.c_uint32
-try: (chown:=dll.chown).restype, chown.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (fchown:=dll.fchown).restype, fchown.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (lchown:=dll.lchown).restype, lchown.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (fchownat:=dll.fchownat).restype, fchownat.argtypes = ctypes.c_int32, [ctypes.c_int32, Pointer(ctypes.c_char), ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int32]
-except AttributeError: pass
-
-try: (chdir:=dll.chdir).restype, chdir.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (fchdir:=dll.fchdir).restype, fchdir.argtypes = ctypes.c_int32, [ctypes.c_int32]
-except AttributeError: pass
-
-try: (getcwd:=dll.getcwd).restype, getcwd.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (getwd:=dll.getwd).restype, getwd.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (dup:=dll.dup).restype, dup.argtypes = ctypes.c_int32, [ctypes.c_int32]
-except AttributeError: pass
-
-try: (dup2:=dll.dup2).restype, dup2.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.c_int32]
-except AttributeError: pass
-
+@dll.bind((Pointer(ctypes.c_char), ctypes.c_uint32, ctypes.c_uint32), ctypes.c_int32)
+def chown(__file, __owner, __group): ...
+@dll.bind((ctypes.c_int32, ctypes.c_uint32, ctypes.c_uint32), ctypes.c_int32)
+def fchown(__fd, __owner, __group): ...
+@dll.bind((Pointer(ctypes.c_char), ctypes.c_uint32, ctypes.c_uint32), ctypes.c_int32)
+def lchown(__file, __owner, __group): ...
+@dll.bind((ctypes.c_int32, Pointer(ctypes.c_char), ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int32), ctypes.c_int32)
+def fchownat(__fd, __file, __owner, __group, __flag): ...
+@dll.bind((Pointer(ctypes.c_char)), ctypes.c_int32)
+def chdir(__path): ...
+@dll.bind((ctypes.c_int32), ctypes.c_int32)
+def fchdir(__fd): ...
+@dll.bind((Pointer(ctypes.c_char), size_t), Pointer(ctypes.c_char))
+def getcwd(__buf, __size): ...
+@dll.bind((Pointer(ctypes.c_char)), Pointer(ctypes.c_char))
+def getwd(__buf): ...
+@dll.bind((ctypes.c_int32), ctypes.c_int32)
+def dup(__fd): ...
+@dll.bind((ctypes.c_int32, ctypes.c_int32), ctypes.c_int32)
+def dup2(__fd, __fd2): ...
 try: __environ = Pointer(Pointer(ctypes.c_char)).in_dll(dll, '__environ')
 except (ValueError,AttributeError): pass
-try: (execve:=dll.execve).restype, execve.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), Array(Pointer(ctypes.c_char), 0), Array(Pointer(ctypes.c_char), 0)]
-except AttributeError: pass
-
-try: (fexecve:=dll.fexecve).restype, fexecve.argtypes = ctypes.c_int32, [ctypes.c_int32, Array(Pointer(ctypes.c_char), 0), Array(Pointer(ctypes.c_char), 0)]
-except AttributeError: pass
-
-try: (execv:=dll.execv).restype, execv.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), Array(Pointer(ctypes.c_char), 0)]
-except AttributeError: pass
-
-try: (execle:=dll.execle).restype, execle.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (execl:=dll.execl).restype, execl.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (execvp:=dll.execvp).restype, execvp.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), Array(Pointer(ctypes.c_char), 0)]
-except AttributeError: pass
-
-try: (execlp:=dll.execlp).restype, execlp.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (nice:=dll.nice).restype, nice.argtypes = ctypes.c_int32, [ctypes.c_int32]
-except AttributeError: pass
-
-try: (_exit:=dll._exit).restype, _exit.argtypes = None, [ctypes.c_int32]
-except AttributeError: pass
-
-try: (pathconf:=dll.pathconf).restype, pathconf.argtypes = ctypes.c_int64, [Pointer(ctypes.c_char), ctypes.c_int32]
-except AttributeError: pass
-
-try: (fpathconf:=dll.fpathconf).restype, fpathconf.argtypes = ctypes.c_int64, [ctypes.c_int32, ctypes.c_int32]
-except AttributeError: pass
-
-try: (sysconf:=dll.sysconf).restype, sysconf.argtypes = ctypes.c_int64, [ctypes.c_int32]
-except AttributeError: pass
-
-try: (confstr:=dll.confstr).restype, confstr.argtypes = size_t, [ctypes.c_int32, Pointer(ctypes.c_char), size_t]
-except AttributeError: pass
-
+@dll.bind((Pointer(ctypes.c_char), Array(Pointer(ctypes.c_char), 0), Array(Pointer(ctypes.c_char), 0)), ctypes.c_int32)
+def execve(__path, __argv, __envp): ...
+@dll.bind((ctypes.c_int32, Array(Pointer(ctypes.c_char), 0), Array(Pointer(ctypes.c_char), 0)), ctypes.c_int32)
+def fexecve(__fd, __argv, __envp): ...
+@dll.bind((Pointer(ctypes.c_char), Array(Pointer(ctypes.c_char), 0)), ctypes.c_int32)
+def execv(__path, __argv): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char)), ctypes.c_int32)
+def execle(__path, __arg): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char)), ctypes.c_int32)
+def execl(__path, __arg): ...
+@dll.bind((Pointer(ctypes.c_char), Array(Pointer(ctypes.c_char), 0)), ctypes.c_int32)
+def execvp(__file, __argv): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char)), ctypes.c_int32)
+def execlp(__file, __arg): ...
+@dll.bind((ctypes.c_int32), ctypes.c_int32)
+def nice(__inc): ...
+@dll.bind((ctypes.c_int32), None)
+def _exit(__status): ...
+@dll.bind((Pointer(ctypes.c_char), ctypes.c_int32), ctypes.c_int64)
+def pathconf(__path, __name): ...
+@dll.bind((ctypes.c_int32, ctypes.c_int32), ctypes.c_int64)
+def fpathconf(__fd, __name): ...
+@dll.bind((ctypes.c_int32), ctypes.c_int64)
+def sysconf(__name): ...
+@dll.bind((ctypes.c_int32, Pointer(ctypes.c_char), size_t), size_t)
+def confstr(__name, __buf, __len): ...
 __pid_t = ctypes.c_int32
-try: (getpid:=dll.getpid).restype, getpid.argtypes = ctypes.c_int32, []
-except AttributeError: pass
-
-try: (getppid:=dll.getppid).restype, getppid.argtypes = ctypes.c_int32, []
-except AttributeError: pass
-
-try: (getpgrp:=dll.getpgrp).restype, getpgrp.argtypes = ctypes.c_int32, []
-except AttributeError: pass
-
-try: (__getpgid:=dll.__getpgid).restype, __getpgid.argtypes = ctypes.c_int32, [ctypes.c_int32]
-except AttributeError: pass
-
-try: (getpgid:=dll.getpgid).restype, getpgid.argtypes = ctypes.c_int32, [ctypes.c_int32]
-except AttributeError: pass
-
-try: (setpgid:=dll.setpgid).restype, setpgid.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.c_int32]
-except AttributeError: pass
-
-try: (setpgrp:=dll.setpgrp).restype, setpgrp.argtypes = ctypes.c_int32, []
-except AttributeError: pass
-
-try: (setsid:=dll.setsid).restype, setsid.argtypes = ctypes.c_int32, []
-except AttributeError: pass
-
-try: (getsid:=dll.getsid).restype, getsid.argtypes = ctypes.c_int32, [ctypes.c_int32]
-except AttributeError: pass
-
-try: (getuid:=dll.getuid).restype, getuid.argtypes = ctypes.c_uint32, []
-except AttributeError: pass
-
-try: (geteuid:=dll.geteuid).restype, geteuid.argtypes = ctypes.c_uint32, []
-except AttributeError: pass
-
-try: (getgid:=dll.getgid).restype, getgid.argtypes = ctypes.c_uint32, []
-except AttributeError: pass
-
-try: (getegid:=dll.getegid).restype, getegid.argtypes = ctypes.c_uint32, []
-except AttributeError: pass
-
-try: (getgroups:=dll.getgroups).restype, getgroups.argtypes = ctypes.c_int32, [ctypes.c_int32, Array(ctypes.c_uint32, 0)]
-except AttributeError: pass
-
-try: (setuid:=dll.setuid).restype, setuid.argtypes = ctypes.c_int32, [ctypes.c_uint32]
-except AttributeError: pass
-
-try: (setreuid:=dll.setreuid).restype, setreuid.argtypes = ctypes.c_int32, [ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (seteuid:=dll.seteuid).restype, seteuid.argtypes = ctypes.c_int32, [ctypes.c_uint32]
-except AttributeError: pass
-
-try: (setgid:=dll.setgid).restype, setgid.argtypes = ctypes.c_int32, [ctypes.c_uint32]
-except AttributeError: pass
-
-try: (setregid:=dll.setregid).restype, setregid.argtypes = ctypes.c_int32, [ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (setegid:=dll.setegid).restype, setegid.argtypes = ctypes.c_int32, [ctypes.c_uint32]
-except AttributeError: pass
-
-try: (fork:=dll.fork).restype, fork.argtypes = ctypes.c_int32, []
-except AttributeError: pass
-
-try: (vfork:=dll.vfork).restype, vfork.argtypes = ctypes.c_int32, []
-except AttributeError: pass
-
-try: (ttyname:=dll.ttyname).restype, ttyname.argtypes = Pointer(ctypes.c_char), [ctypes.c_int32]
-except AttributeError: pass
-
-try: (ttyname_r:=dll.ttyname_r).restype, ttyname_r.argtypes = ctypes.c_int32, [ctypes.c_int32, Pointer(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (isatty:=dll.isatty).restype, isatty.argtypes = ctypes.c_int32, [ctypes.c_int32]
-except AttributeError: pass
-
-try: (ttyslot:=dll.ttyslot).restype, ttyslot.argtypes = ctypes.c_int32, []
-except AttributeError: pass
-
-try: (link:=dll.link).restype, link.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (linkat:=dll.linkat).restype, linkat.argtypes = ctypes.c_int32, [ctypes.c_int32, Pointer(ctypes.c_char), ctypes.c_int32, Pointer(ctypes.c_char), ctypes.c_int32]
-except AttributeError: pass
-
-try: (symlink:=dll.symlink).restype, symlink.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (readlink:=dll.readlink).restype, readlink.argtypes = ssize_t, [Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (symlinkat:=dll.symlinkat).restype, symlinkat.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), ctypes.c_int32, Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (readlinkat:=dll.readlinkat).restype, readlinkat.argtypes = ssize_t, [ctypes.c_int32, Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (unlink:=dll.unlink).restype, unlink.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (unlinkat:=dll.unlinkat).restype, unlinkat.argtypes = ctypes.c_int32, [ctypes.c_int32, Pointer(ctypes.c_char), ctypes.c_int32]
-except AttributeError: pass
-
-try: (rmdir:=dll.rmdir).restype, rmdir.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (tcgetpgrp:=dll.tcgetpgrp).restype, tcgetpgrp.argtypes = ctypes.c_int32, [ctypes.c_int32]
-except AttributeError: pass
-
-try: (tcsetpgrp:=dll.tcsetpgrp).restype, tcsetpgrp.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.c_int32]
-except AttributeError: pass
-
-try: (getlogin:=dll.getlogin).restype, getlogin.argtypes = Pointer(ctypes.c_char), []
-except AttributeError: pass
-
-try: (getlogin_r:=dll.getlogin_r).restype, getlogin_r.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (setlogin:=dll.setlogin).restype, setlogin.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (gethostname:=dll.gethostname).restype, gethostname.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (sethostname:=dll.sethostname).restype, sethostname.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (sethostid:=dll.sethostid).restype, sethostid.argtypes = ctypes.c_int32, [ctypes.c_int64]
-except AttributeError: pass
-
-try: (getdomainname:=dll.getdomainname).restype, getdomainname.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (setdomainname:=dll.setdomainname).restype, setdomainname.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (vhangup:=dll.vhangup).restype, vhangup.argtypes = ctypes.c_int32, []
-except AttributeError: pass
-
-try: (revoke:=dll.revoke).restype, revoke.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (profil:=dll.profil).restype, profil.argtypes = ctypes.c_int32, [Pointer(ctypes.c_uint16), size_t, size_t, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (acct:=dll.acct).restype, acct.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (getusershell:=dll.getusershell).restype, getusershell.argtypes = Pointer(ctypes.c_char), []
-except AttributeError: pass
-
-try: (endusershell:=dll.endusershell).restype, endusershell.argtypes = None, []
-except AttributeError: pass
-
-try: (setusershell:=dll.setusershell).restype, setusershell.argtypes = None, []
-except AttributeError: pass
-
-try: (daemon:=dll.daemon).restype, daemon.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.c_int32]
-except AttributeError: pass
-
-try: (chroot:=dll.chroot).restype, chroot.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (getpass:=dll.getpass).restype, getpass.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (fsync:=dll.fsync).restype, fsync.argtypes = ctypes.c_int32, [ctypes.c_int32]
-except AttributeError: pass
-
-try: (gethostid:=dll.gethostid).restype, gethostid.argtypes = ctypes.c_int64, []
-except AttributeError: pass
-
-try: (sync:=dll.sync).restype, sync.argtypes = None, []
-except AttributeError: pass
-
-try: (getpagesize:=dll.getpagesize).restype, getpagesize.argtypes = ctypes.c_int32, []
-except AttributeError: pass
-
-try: (getdtablesize:=dll.getdtablesize).restype, getdtablesize.argtypes = ctypes.c_int32, []
-except AttributeError: pass
-
-try: (truncate:=dll.truncate).restype, truncate.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char), ctypes.c_int64]
-except AttributeError: pass
-
-try: (ftruncate:=dll.ftruncate).restype, ftruncate.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.c_int64]
-except AttributeError: pass
-
-try: (brk:=dll.brk).restype, brk.argtypes = ctypes.c_int32, [ctypes.c_void_p]
-except AttributeError: pass
-
-try: (sbrk:=dll.sbrk).restype, sbrk.argtypes = ctypes.c_void_p, [intptr_t]
-except AttributeError: pass
-
-try: (syscall:=dll.syscall).restype, syscall.argtypes = ctypes.c_int64, [ctypes.c_int64]
-except AttributeError: pass
-
-try: (lockf:=dll.lockf).restype, lockf.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.c_int32, ctypes.c_int64]
-except AttributeError: pass
-
-try: (fdatasync:=dll.fdatasync).restype, fdatasync.argtypes = ctypes.c_int32, [ctypes.c_int32]
-except AttributeError: pass
-
-try: (crypt:=dll.crypt).restype, crypt.argtypes = Pointer(ctypes.c_char), [Pointer(ctypes.c_char), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (getentropy:=dll.getentropy).restype, getentropy.argtypes = ctypes.c_int32, [ctypes.c_void_p, size_t]
-except AttributeError: pass
-
+@dll.bind((), ctypes.c_int32)
+def getpid(): ...
+@dll.bind((), ctypes.c_int32)
+def getppid(): ...
+@dll.bind((), ctypes.c_int32)
+def getpgrp(): ...
+@dll.bind((ctypes.c_int32), ctypes.c_int32)
+def __getpgid(__pid): ...
+@dll.bind((ctypes.c_int32), ctypes.c_int32)
+def getpgid(__pid): ...
+@dll.bind((ctypes.c_int32, ctypes.c_int32), ctypes.c_int32)
+def setpgid(__pid, __pgid): ...
+@dll.bind((), ctypes.c_int32)
+def setpgrp(): ...
+@dll.bind((), ctypes.c_int32)
+def setsid(): ...
+@dll.bind((ctypes.c_int32), ctypes.c_int32)
+def getsid(__pid): ...
+@dll.bind((), ctypes.c_uint32)
+def getuid(): ...
+@dll.bind((), ctypes.c_uint32)
+def geteuid(): ...
+@dll.bind((), ctypes.c_uint32)
+def getgid(): ...
+@dll.bind((), ctypes.c_uint32)
+def getegid(): ...
+@dll.bind((ctypes.c_int32, Array(ctypes.c_uint32, 0)), ctypes.c_int32)
+def getgroups(__size, __list): ...
+@dll.bind((ctypes.c_uint32), ctypes.c_int32)
+def setuid(__uid): ...
+@dll.bind((ctypes.c_uint32, ctypes.c_uint32), ctypes.c_int32)
+def setreuid(__ruid, __euid): ...
+@dll.bind((ctypes.c_uint32), ctypes.c_int32)
+def seteuid(__uid): ...
+@dll.bind((ctypes.c_uint32), ctypes.c_int32)
+def setgid(__gid): ...
+@dll.bind((ctypes.c_uint32, ctypes.c_uint32), ctypes.c_int32)
+def setregid(__rgid, __egid): ...
+@dll.bind((ctypes.c_uint32), ctypes.c_int32)
+def setegid(__gid): ...
+@dll.bind((), ctypes.c_int32)
+def fork(): ...
+@dll.bind((), ctypes.c_int32)
+def vfork(): ...
+@dll.bind((ctypes.c_int32), Pointer(ctypes.c_char))
+def ttyname(__fd): ...
+@dll.bind((ctypes.c_int32, Pointer(ctypes.c_char), size_t), ctypes.c_int32)
+def ttyname_r(__fd, __buf, __buflen): ...
+@dll.bind((ctypes.c_int32), ctypes.c_int32)
+def isatty(__fd): ...
+@dll.bind((), ctypes.c_int32)
+def ttyslot(): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char)), ctypes.c_int32)
+def link(__from, __to): ...
+@dll.bind((ctypes.c_int32, Pointer(ctypes.c_char), ctypes.c_int32, Pointer(ctypes.c_char), ctypes.c_int32), ctypes.c_int32)
+def linkat(__fromfd, __from, __tofd, __to, __flags): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char)), ctypes.c_int32)
+def symlink(__from, __to): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t), ssize_t)
+def readlink(__path, __buf, __len): ...
+@dll.bind((Pointer(ctypes.c_char), ctypes.c_int32, Pointer(ctypes.c_char)), ctypes.c_int32)
+def symlinkat(__from, __tofd, __to): ...
+@dll.bind((ctypes.c_int32, Pointer(ctypes.c_char), Pointer(ctypes.c_char), size_t), ssize_t)
+def readlinkat(__fd, __path, __buf, __len): ...
+@dll.bind((Pointer(ctypes.c_char)), ctypes.c_int32)
+def unlink(__name): ...
+@dll.bind((ctypes.c_int32, Pointer(ctypes.c_char), ctypes.c_int32), ctypes.c_int32)
+def unlinkat(__fd, __name, __flag): ...
+@dll.bind((Pointer(ctypes.c_char)), ctypes.c_int32)
+def rmdir(__path): ...
+@dll.bind((ctypes.c_int32), ctypes.c_int32)
+def tcgetpgrp(__fd): ...
+@dll.bind((ctypes.c_int32, ctypes.c_int32), ctypes.c_int32)
+def tcsetpgrp(__fd, __pgrp_id): ...
+@dll.bind((), Pointer(ctypes.c_char))
+def getlogin(): ...
+@dll.bind((Pointer(ctypes.c_char), size_t), ctypes.c_int32)
+def getlogin_r(__name, __name_len): ...
+@dll.bind((Pointer(ctypes.c_char)), ctypes.c_int32)
+def setlogin(__name): ...
+@dll.bind((Pointer(ctypes.c_char), size_t), ctypes.c_int32)
+def gethostname(__name, __len): ...
+@dll.bind((Pointer(ctypes.c_char), size_t), ctypes.c_int32)
+def sethostname(__name, __len): ...
+@dll.bind((ctypes.c_int64), ctypes.c_int32)
+def sethostid(__id): ...
+@dll.bind((Pointer(ctypes.c_char), size_t), ctypes.c_int32)
+def getdomainname(__name, __len): ...
+@dll.bind((Pointer(ctypes.c_char), size_t), ctypes.c_int32)
+def setdomainname(__name, __len): ...
+@dll.bind((), ctypes.c_int32)
+def vhangup(): ...
+@dll.bind((Pointer(ctypes.c_char)), ctypes.c_int32)
+def revoke(__file): ...
+@dll.bind((Pointer(ctypes.c_uint16), size_t, size_t, ctypes.c_uint32), ctypes.c_int32)
+def profil(__sample_buffer, __size, __offset, __scale): ...
+@dll.bind((Pointer(ctypes.c_char)), ctypes.c_int32)
+def acct(__name): ...
+@dll.bind((), Pointer(ctypes.c_char))
+def getusershell(): ...
+@dll.bind((), None)
+def endusershell(): ...
+@dll.bind((), None)
+def setusershell(): ...
+@dll.bind((ctypes.c_int32, ctypes.c_int32), ctypes.c_int32)
+def daemon(__nochdir, __noclose): ...
+@dll.bind((Pointer(ctypes.c_char)), ctypes.c_int32)
+def chroot(__path): ...
+@dll.bind((Pointer(ctypes.c_char)), Pointer(ctypes.c_char))
+def getpass(__prompt): ...
+@dll.bind((ctypes.c_int32), ctypes.c_int32)
+def fsync(__fd): ...
+@dll.bind((), ctypes.c_int64)
+def gethostid(): ...
+@dll.bind((), None)
+def sync(): ...
+@dll.bind((), ctypes.c_int32)
+def getpagesize(): ...
+@dll.bind((), ctypes.c_int32)
+def getdtablesize(): ...
+@dll.bind((Pointer(ctypes.c_char), ctypes.c_int64), ctypes.c_int32)
+def truncate(__file, __length): ...
+@dll.bind((ctypes.c_int32, ctypes.c_int64), ctypes.c_int32)
+def ftruncate(__fd, __length): ...
+@dll.bind((ctypes.c_void_p), ctypes.c_int32)
+def brk(__addr): ...
+@dll.bind((intptr_t), ctypes.c_void_p)
+def sbrk(__delta): ...
+@dll.bind((ctypes.c_int64), ctypes.c_int64)
+def syscall(__sysno): ...
+@dll.bind((ctypes.c_int32, ctypes.c_int32, ctypes.c_int64), ctypes.c_int32)
+def lockf(__fd, __cmd, __len): ...
+@dll.bind((ctypes.c_int32), ctypes.c_int32)
+def fdatasync(__fildes): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(ctypes.c_char)), Pointer(ctypes.c_char))
+def crypt(__key, __salt): ...
+@dll.bind((ctypes.c_void_p, size_t), ctypes.c_int32)
+def getentropy(__buffer, __length): ...
 _SYS_MMAN_H = 1
 _SYSCALL_H = 1
 _STRING_H = 1

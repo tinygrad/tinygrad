@@ -375,255 +375,173 @@ struct_libusb_init_option.SIZE = 16
 struct_libusb_init_option._fields_ = ['option', 'value']
 setattr(struct_libusb_init_option, 'option', field(0, enum_libusb_option))
 setattr(struct_libusb_init_option, 'value', field(8, _anonunion0))
-try: (libusb_init:=dll.libusb_init).restype, libusb_init.argtypes = ctypes.c_int32, [Pointer(Pointer(libusb_context))]
-except AttributeError: pass
-
-try: (libusb_init_context:=dll.libusb_init_context).restype, libusb_init_context.argtypes = ctypes.c_int32, [Pointer(Pointer(libusb_context)), Array(struct_libusb_init_option, 0), ctypes.c_int32]
-except AttributeError: pass
-
-try: (libusb_exit:=dll.libusb_exit).restype, libusb_exit.argtypes = None, [Pointer(libusb_context)]
-except AttributeError: pass
-
-try: (libusb_set_debug:=dll.libusb_set_debug).restype, libusb_set_debug.argtypes = None, [Pointer(libusb_context), ctypes.c_int32]
-except AttributeError: pass
-
-try: (libusb_set_log_cb:=dll.libusb_set_log_cb).restype, libusb_set_log_cb.argtypes = None, [Pointer(libusb_context), libusb_log_cb, ctypes.c_int32]
-except AttributeError: pass
-
-try: (libusb_get_version:=dll.libusb_get_version).restype, libusb_get_version.argtypes = Pointer(struct_libusb_version), []
-except AttributeError: pass
-
-try: (libusb_has_capability:=dll.libusb_has_capability).restype, libusb_has_capability.argtypes = ctypes.c_int32, [uint32_t]
-except AttributeError: pass
-
-try: (libusb_error_name:=dll.libusb_error_name).restype, libusb_error_name.argtypes = Pointer(ctypes.c_char), [ctypes.c_int32]
-except AttributeError: pass
-
-try: (libusb_setlocale:=dll.libusb_setlocale).restype, libusb_setlocale.argtypes = ctypes.c_int32, [Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (libusb_strerror:=dll.libusb_strerror).restype, libusb_strerror.argtypes = Pointer(ctypes.c_char), [ctypes.c_int32]
-except AttributeError: pass
-
+@dll.bind((Pointer(Pointer(libusb_context)),), ctypes.c_int32)
+def libusb_init(ctx): ...
+@dll.bind((Pointer(Pointer(libusb_context)), Array(struct_libusb_init_option, 0), ctypes.c_int32,), ctypes.c_int32)
+def libusb_init_context(ctx, options, num_options): ...
+@dll.bind((Pointer(libusb_context),), None)
+def libusb_exit(ctx): ...
+@dll.bind((Pointer(libusb_context), ctypes.c_int32,), None)
+def libusb_set_debug(ctx, level): ...
+@dll.bind((Pointer(libusb_context), libusb_log_cb, ctypes.c_int32,), None)
+def libusb_set_log_cb(ctx, cb, mode): ...
+@dll.bind((), Pointer(struct_libusb_version))
+def libusb_get_version(): ...
+@dll.bind((uint32_t,), ctypes.c_int32)
+def libusb_has_capability(capability): ...
+@dll.bind((ctypes.c_int32,), Pointer(ctypes.c_char))
+def libusb_error_name(errcode): ...
+@dll.bind((Pointer(ctypes.c_char),), ctypes.c_int32)
+def libusb_setlocale(locale): ...
+@dll.bind((ctypes.c_int32,), Pointer(ctypes.c_char))
+def libusb_strerror(errcode): ...
 ssize_t = ctypes.c_int64
-try: (libusb_get_device_list:=dll.libusb_get_device_list).restype, libusb_get_device_list.argtypes = ssize_t, [Pointer(libusb_context), Pointer(Pointer(Pointer(libusb_device)))]
-except AttributeError: pass
-
-try: (libusb_free_device_list:=dll.libusb_free_device_list).restype, libusb_free_device_list.argtypes = None, [Pointer(Pointer(libusb_device)), ctypes.c_int32]
-except AttributeError: pass
-
-try: (libusb_ref_device:=dll.libusb_ref_device).restype, libusb_ref_device.argtypes = Pointer(libusb_device), [Pointer(libusb_device)]
-except AttributeError: pass
-
-try: (libusb_unref_device:=dll.libusb_unref_device).restype, libusb_unref_device.argtypes = None, [Pointer(libusb_device)]
-except AttributeError: pass
-
-try: (libusb_get_configuration:=dll.libusb_get_configuration).restype, libusb_get_configuration.argtypes = ctypes.c_int32, [Pointer(libusb_device_handle), Pointer(ctypes.c_int32)]
-except AttributeError: pass
-
-try: (libusb_get_device_descriptor:=dll.libusb_get_device_descriptor).restype, libusb_get_device_descriptor.argtypes = ctypes.c_int32, [Pointer(libusb_device), Pointer(struct_libusb_device_descriptor)]
-except AttributeError: pass
-
-try: (libusb_get_active_config_descriptor:=dll.libusb_get_active_config_descriptor).restype, libusb_get_active_config_descriptor.argtypes = ctypes.c_int32, [Pointer(libusb_device), Pointer(Pointer(struct_libusb_config_descriptor))]
-except AttributeError: pass
-
-try: (libusb_get_config_descriptor:=dll.libusb_get_config_descriptor).restype, libusb_get_config_descriptor.argtypes = ctypes.c_int32, [Pointer(libusb_device), uint8_t, Pointer(Pointer(struct_libusb_config_descriptor))]
-except AttributeError: pass
-
-try: (libusb_get_config_descriptor_by_value:=dll.libusb_get_config_descriptor_by_value).restype, libusb_get_config_descriptor_by_value.argtypes = ctypes.c_int32, [Pointer(libusb_device), uint8_t, Pointer(Pointer(struct_libusb_config_descriptor))]
-except AttributeError: pass
-
-try: (libusb_free_config_descriptor:=dll.libusb_free_config_descriptor).restype, libusb_free_config_descriptor.argtypes = None, [Pointer(struct_libusb_config_descriptor)]
-except AttributeError: pass
-
-try: (libusb_get_ss_endpoint_companion_descriptor:=dll.libusb_get_ss_endpoint_companion_descriptor).restype, libusb_get_ss_endpoint_companion_descriptor.argtypes = ctypes.c_int32, [Pointer(libusb_context), Pointer(struct_libusb_endpoint_descriptor), Pointer(Pointer(struct_libusb_ss_endpoint_companion_descriptor))]
-except AttributeError: pass
-
-try: (libusb_free_ss_endpoint_companion_descriptor:=dll.libusb_free_ss_endpoint_companion_descriptor).restype, libusb_free_ss_endpoint_companion_descriptor.argtypes = None, [Pointer(struct_libusb_ss_endpoint_companion_descriptor)]
-except AttributeError: pass
-
-try: (libusb_get_bos_descriptor:=dll.libusb_get_bos_descriptor).restype, libusb_get_bos_descriptor.argtypes = ctypes.c_int32, [Pointer(libusb_device_handle), Pointer(Pointer(struct_libusb_bos_descriptor))]
-except AttributeError: pass
-
-try: (libusb_free_bos_descriptor:=dll.libusb_free_bos_descriptor).restype, libusb_free_bos_descriptor.argtypes = None, [Pointer(struct_libusb_bos_descriptor)]
-except AttributeError: pass
-
-try: (libusb_get_usb_2_0_extension_descriptor:=dll.libusb_get_usb_2_0_extension_descriptor).restype, libusb_get_usb_2_0_extension_descriptor.argtypes = ctypes.c_int32, [Pointer(libusb_context), Pointer(struct_libusb_bos_dev_capability_descriptor), Pointer(Pointer(struct_libusb_usb_2_0_extension_descriptor))]
-except AttributeError: pass
-
-try: (libusb_free_usb_2_0_extension_descriptor:=dll.libusb_free_usb_2_0_extension_descriptor).restype, libusb_free_usb_2_0_extension_descriptor.argtypes = None, [Pointer(struct_libusb_usb_2_0_extension_descriptor)]
-except AttributeError: pass
-
-try: (libusb_get_ss_usb_device_capability_descriptor:=dll.libusb_get_ss_usb_device_capability_descriptor).restype, libusb_get_ss_usb_device_capability_descriptor.argtypes = ctypes.c_int32, [Pointer(libusb_context), Pointer(struct_libusb_bos_dev_capability_descriptor), Pointer(Pointer(struct_libusb_ss_usb_device_capability_descriptor))]
-except AttributeError: pass
-
-try: (libusb_free_ss_usb_device_capability_descriptor:=dll.libusb_free_ss_usb_device_capability_descriptor).restype, libusb_free_ss_usb_device_capability_descriptor.argtypes = None, [Pointer(struct_libusb_ss_usb_device_capability_descriptor)]
-except AttributeError: pass
-
-try: (libusb_get_container_id_descriptor:=dll.libusb_get_container_id_descriptor).restype, libusb_get_container_id_descriptor.argtypes = ctypes.c_int32, [Pointer(libusb_context), Pointer(struct_libusb_bos_dev_capability_descriptor), Pointer(Pointer(struct_libusb_container_id_descriptor))]
-except AttributeError: pass
-
-try: (libusb_free_container_id_descriptor:=dll.libusb_free_container_id_descriptor).restype, libusb_free_container_id_descriptor.argtypes = None, [Pointer(struct_libusb_container_id_descriptor)]
-except AttributeError: pass
-
-try: (libusb_get_platform_descriptor:=dll.libusb_get_platform_descriptor).restype, libusb_get_platform_descriptor.argtypes = ctypes.c_int32, [Pointer(libusb_context), Pointer(struct_libusb_bos_dev_capability_descriptor), Pointer(Pointer(struct_libusb_platform_descriptor))]
-except AttributeError: pass
-
-try: (libusb_free_platform_descriptor:=dll.libusb_free_platform_descriptor).restype, libusb_free_platform_descriptor.argtypes = None, [Pointer(struct_libusb_platform_descriptor)]
-except AttributeError: pass
-
-try: (libusb_get_bus_number:=dll.libusb_get_bus_number).restype, libusb_get_bus_number.argtypes = uint8_t, [Pointer(libusb_device)]
-except AttributeError: pass
-
-try: (libusb_get_port_number:=dll.libusb_get_port_number).restype, libusb_get_port_number.argtypes = uint8_t, [Pointer(libusb_device)]
-except AttributeError: pass
-
-try: (libusb_get_port_numbers:=dll.libusb_get_port_numbers).restype, libusb_get_port_numbers.argtypes = ctypes.c_int32, [Pointer(libusb_device), Pointer(uint8_t), ctypes.c_int32]
-except AttributeError: pass
-
-try: (libusb_get_port_path:=dll.libusb_get_port_path).restype, libusb_get_port_path.argtypes = ctypes.c_int32, [Pointer(libusb_context), Pointer(libusb_device), Pointer(uint8_t), uint8_t]
-except AttributeError: pass
-
-try: (libusb_get_parent:=dll.libusb_get_parent).restype, libusb_get_parent.argtypes = Pointer(libusb_device), [Pointer(libusb_device)]
-except AttributeError: pass
-
-try: (libusb_get_device_address:=dll.libusb_get_device_address).restype, libusb_get_device_address.argtypes = uint8_t, [Pointer(libusb_device)]
-except AttributeError: pass
-
-try: (libusb_get_device_speed:=dll.libusb_get_device_speed).restype, libusb_get_device_speed.argtypes = ctypes.c_int32, [Pointer(libusb_device)]
-except AttributeError: pass
-
-try: (libusb_get_max_packet_size:=dll.libusb_get_max_packet_size).restype, libusb_get_max_packet_size.argtypes = ctypes.c_int32, [Pointer(libusb_device), ctypes.c_ubyte]
-except AttributeError: pass
-
-try: (libusb_get_max_iso_packet_size:=dll.libusb_get_max_iso_packet_size).restype, libusb_get_max_iso_packet_size.argtypes = ctypes.c_int32, [Pointer(libusb_device), ctypes.c_ubyte]
-except AttributeError: pass
-
-try: (libusb_get_max_alt_packet_size:=dll.libusb_get_max_alt_packet_size).restype, libusb_get_max_alt_packet_size.argtypes = ctypes.c_int32, [Pointer(libusb_device), ctypes.c_int32, ctypes.c_int32, ctypes.c_ubyte]
-except AttributeError: pass
-
-try: (libusb_get_interface_association_descriptors:=dll.libusb_get_interface_association_descriptors).restype, libusb_get_interface_association_descriptors.argtypes = ctypes.c_int32, [Pointer(libusb_device), uint8_t, Pointer(Pointer(struct_libusb_interface_association_descriptor_array))]
-except AttributeError: pass
-
-try: (libusb_get_active_interface_association_descriptors:=dll.libusb_get_active_interface_association_descriptors).restype, libusb_get_active_interface_association_descriptors.argtypes = ctypes.c_int32, [Pointer(libusb_device), Pointer(Pointer(struct_libusb_interface_association_descriptor_array))]
-except AttributeError: pass
-
-try: (libusb_free_interface_association_descriptors:=dll.libusb_free_interface_association_descriptors).restype, libusb_free_interface_association_descriptors.argtypes = None, [Pointer(struct_libusb_interface_association_descriptor_array)]
-except AttributeError: pass
-
+@dll.bind((Pointer(libusb_context), Pointer(Pointer(Pointer(libusb_device))),), ssize_t)
+def libusb_get_device_list(ctx, list): ...
+@dll.bind((Pointer(Pointer(libusb_device)), ctypes.c_int32,), None)
+def libusb_free_device_list(list, unref_devices): ...
+@dll.bind((Pointer(libusb_device),), Pointer(libusb_device))
+def libusb_ref_device(dev): ...
+@dll.bind((Pointer(libusb_device),), None)
+def libusb_unref_device(dev): ...
+@dll.bind((Pointer(libusb_device_handle), Pointer(ctypes.c_int32),), ctypes.c_int32)
+def libusb_get_configuration(dev, config): ...
+@dll.bind((Pointer(libusb_device), Pointer(struct_libusb_device_descriptor),), ctypes.c_int32)
+def libusb_get_device_descriptor(dev, desc): ...
+@dll.bind((Pointer(libusb_device), Pointer(Pointer(struct_libusb_config_descriptor)),), ctypes.c_int32)
+def libusb_get_active_config_descriptor(dev, config): ...
+@dll.bind((Pointer(libusb_device), uint8_t, Pointer(Pointer(struct_libusb_config_descriptor)),), ctypes.c_int32)
+def libusb_get_config_descriptor(dev, config_index, config): ...
+@dll.bind((Pointer(libusb_device), uint8_t, Pointer(Pointer(struct_libusb_config_descriptor)),), ctypes.c_int32)
+def libusb_get_config_descriptor_by_value(dev, bConfigurationValue, config): ...
+@dll.bind((Pointer(struct_libusb_config_descriptor),), None)
+def libusb_free_config_descriptor(config): ...
+@dll.bind((Pointer(libusb_context), Pointer(struct_libusb_endpoint_descriptor), Pointer(Pointer(struct_libusb_ss_endpoint_companion_descriptor)),), ctypes.c_int32)
+def libusb_get_ss_endpoint_companion_descriptor(ctx, endpoint, ep_comp): ...
+@dll.bind((Pointer(struct_libusb_ss_endpoint_companion_descriptor),), None)
+def libusb_free_ss_endpoint_companion_descriptor(ep_comp): ...
+@dll.bind((Pointer(libusb_device_handle), Pointer(Pointer(struct_libusb_bos_descriptor)),), ctypes.c_int32)
+def libusb_get_bos_descriptor(dev_handle, bos): ...
+@dll.bind((Pointer(struct_libusb_bos_descriptor),), None)
+def libusb_free_bos_descriptor(bos): ...
+@dll.bind((Pointer(libusb_context), Pointer(struct_libusb_bos_dev_capability_descriptor), Pointer(Pointer(struct_libusb_usb_2_0_extension_descriptor)),), ctypes.c_int32)
+def libusb_get_usb_2_0_extension_descriptor(ctx, dev_cap, usb_2_0_extension): ...
+@dll.bind((Pointer(struct_libusb_usb_2_0_extension_descriptor),), None)
+def libusb_free_usb_2_0_extension_descriptor(usb_2_0_extension): ...
+@dll.bind((Pointer(libusb_context), Pointer(struct_libusb_bos_dev_capability_descriptor), Pointer(Pointer(struct_libusb_ss_usb_device_capability_descriptor)),), ctypes.c_int32)
+def libusb_get_ss_usb_device_capability_descriptor(ctx, dev_cap, ss_usb_device_cap): ...
+@dll.bind((Pointer(struct_libusb_ss_usb_device_capability_descriptor),), None)
+def libusb_free_ss_usb_device_capability_descriptor(ss_usb_device_cap): ...
+@dll.bind((Pointer(libusb_context), Pointer(struct_libusb_bos_dev_capability_descriptor), Pointer(Pointer(struct_libusb_container_id_descriptor)),), ctypes.c_int32)
+def libusb_get_container_id_descriptor(ctx, dev_cap, container_id): ...
+@dll.bind((Pointer(struct_libusb_container_id_descriptor),), None)
+def libusb_free_container_id_descriptor(container_id): ...
+@dll.bind((Pointer(libusb_context), Pointer(struct_libusb_bos_dev_capability_descriptor), Pointer(Pointer(struct_libusb_platform_descriptor)),), ctypes.c_int32)
+def libusb_get_platform_descriptor(ctx, dev_cap, platform_descriptor): ...
+@dll.bind((Pointer(struct_libusb_platform_descriptor),), None)
+def libusb_free_platform_descriptor(platform_descriptor): ...
+@dll.bind((Pointer(libusb_device),), uint8_t)
+def libusb_get_bus_number(dev): ...
+@dll.bind((Pointer(libusb_device),), uint8_t)
+def libusb_get_port_number(dev): ...
+@dll.bind((Pointer(libusb_device), Pointer(uint8_t), ctypes.c_int32,), ctypes.c_int32)
+def libusb_get_port_numbers(dev, port_numbers, port_numbers_len): ...
+@dll.bind((Pointer(libusb_context), Pointer(libusb_device), Pointer(uint8_t), uint8_t,), ctypes.c_int32)
+def libusb_get_port_path(ctx, dev, path, path_length): ...
+@dll.bind((Pointer(libusb_device),), Pointer(libusb_device))
+def libusb_get_parent(dev): ...
+@dll.bind((Pointer(libusb_device),), uint8_t)
+def libusb_get_device_address(dev): ...
+@dll.bind((Pointer(libusb_device),), ctypes.c_int32)
+def libusb_get_device_speed(dev): ...
+@dll.bind((Pointer(libusb_device), ctypes.c_ubyte,), ctypes.c_int32)
+def libusb_get_max_packet_size(dev, endpoint): ...
+@dll.bind((Pointer(libusb_device), ctypes.c_ubyte,), ctypes.c_int32)
+def libusb_get_max_iso_packet_size(dev, endpoint): ...
+@dll.bind((Pointer(libusb_device), ctypes.c_int32, ctypes.c_int32, ctypes.c_ubyte,), ctypes.c_int32)
+def libusb_get_max_alt_packet_size(dev, interface_number, alternate_setting, endpoint): ...
+@dll.bind((Pointer(libusb_device), uint8_t, Pointer(Pointer(struct_libusb_interface_association_descriptor_array)),), ctypes.c_int32)
+def libusb_get_interface_association_descriptors(dev, config_index, iad_array): ...
+@dll.bind((Pointer(libusb_device), Pointer(Pointer(struct_libusb_interface_association_descriptor_array)),), ctypes.c_int32)
+def libusb_get_active_interface_association_descriptors(dev, iad_array): ...
+@dll.bind((Pointer(struct_libusb_interface_association_descriptor_array),), None)
+def libusb_free_interface_association_descriptors(iad_array): ...
 intptr_t = ctypes.c_int64
-try: (libusb_wrap_sys_device:=dll.libusb_wrap_sys_device).restype, libusb_wrap_sys_device.argtypes = ctypes.c_int32, [Pointer(libusb_context), intptr_t, Pointer(Pointer(libusb_device_handle))]
-except AttributeError: pass
-
-try: (libusb_open:=dll.libusb_open).restype, libusb_open.argtypes = ctypes.c_int32, [Pointer(libusb_device), Pointer(Pointer(libusb_device_handle))]
-except AttributeError: pass
-
-try: (libusb_close:=dll.libusb_close).restype, libusb_close.argtypes = None, [Pointer(libusb_device_handle)]
-except AttributeError: pass
-
-try: (libusb_get_device:=dll.libusb_get_device).restype, libusb_get_device.argtypes = Pointer(libusb_device), [Pointer(libusb_device_handle)]
-except AttributeError: pass
-
-try: (libusb_set_configuration:=dll.libusb_set_configuration).restype, libusb_set_configuration.argtypes = ctypes.c_int32, [Pointer(libusb_device_handle), ctypes.c_int32]
-except AttributeError: pass
-
-try: (libusb_claim_interface:=dll.libusb_claim_interface).restype, libusb_claim_interface.argtypes = ctypes.c_int32, [Pointer(libusb_device_handle), ctypes.c_int32]
-except AttributeError: pass
-
-try: (libusb_release_interface:=dll.libusb_release_interface).restype, libusb_release_interface.argtypes = ctypes.c_int32, [Pointer(libusb_device_handle), ctypes.c_int32]
-except AttributeError: pass
-
-try: (libusb_open_device_with_vid_pid:=dll.libusb_open_device_with_vid_pid).restype, libusb_open_device_with_vid_pid.argtypes = Pointer(libusb_device_handle), [Pointer(libusb_context), uint16_t, uint16_t]
-except AttributeError: pass
-
-try: (libusb_set_interface_alt_setting:=dll.libusb_set_interface_alt_setting).restype, libusb_set_interface_alt_setting.argtypes = ctypes.c_int32, [Pointer(libusb_device_handle), ctypes.c_int32, ctypes.c_int32]
-except AttributeError: pass
-
-try: (libusb_clear_halt:=dll.libusb_clear_halt).restype, libusb_clear_halt.argtypes = ctypes.c_int32, [Pointer(libusb_device_handle), ctypes.c_ubyte]
-except AttributeError: pass
-
-try: (libusb_reset_device:=dll.libusb_reset_device).restype, libusb_reset_device.argtypes = ctypes.c_int32, [Pointer(libusb_device_handle)]
-except AttributeError: pass
-
-try: (libusb_alloc_streams:=dll.libusb_alloc_streams).restype, libusb_alloc_streams.argtypes = ctypes.c_int32, [Pointer(libusb_device_handle), uint32_t, Pointer(ctypes.c_ubyte), ctypes.c_int32]
-except AttributeError: pass
-
-try: (libusb_free_streams:=dll.libusb_free_streams).restype, libusb_free_streams.argtypes = ctypes.c_int32, [Pointer(libusb_device_handle), Pointer(ctypes.c_ubyte), ctypes.c_int32]
-except AttributeError: pass
-
+@dll.bind((Pointer(libusb_context), intptr_t, Pointer(Pointer(libusb_device_handle)),), ctypes.c_int32)
+def libusb_wrap_sys_device(ctx, sys_dev, dev_handle): ...
+@dll.bind((Pointer(libusb_device), Pointer(Pointer(libusb_device_handle)),), ctypes.c_int32)
+def libusb_open(dev, dev_handle): ...
+@dll.bind((Pointer(libusb_device_handle),), None)
+def libusb_close(dev_handle): ...
+@dll.bind((Pointer(libusb_device_handle),), Pointer(libusb_device))
+def libusb_get_device(dev_handle): ...
+@dll.bind((Pointer(libusb_device_handle), ctypes.c_int32,), ctypes.c_int32)
+def libusb_set_configuration(dev_handle, configuration): ...
+@dll.bind((Pointer(libusb_device_handle), ctypes.c_int32,), ctypes.c_int32)
+def libusb_claim_interface(dev_handle, interface_number): ...
+@dll.bind((Pointer(libusb_device_handle), ctypes.c_int32,), ctypes.c_int32)
+def libusb_release_interface(dev_handle, interface_number): ...
+@dll.bind((Pointer(libusb_context), uint16_t, uint16_t,), Pointer(libusb_device_handle))
+def libusb_open_device_with_vid_pid(ctx, vendor_id, product_id): ...
+@dll.bind((Pointer(libusb_device_handle), ctypes.c_int32, ctypes.c_int32,), ctypes.c_int32)
+def libusb_set_interface_alt_setting(dev_handle, interface_number, alternate_setting): ...
+@dll.bind((Pointer(libusb_device_handle), ctypes.c_ubyte,), ctypes.c_int32)
+def libusb_clear_halt(dev_handle, endpoint): ...
+@dll.bind((Pointer(libusb_device_handle),), ctypes.c_int32)
+def libusb_reset_device(dev_handle): ...
+@dll.bind((Pointer(libusb_device_handle), uint32_t, Pointer(ctypes.c_ubyte), ctypes.c_int32,), ctypes.c_int32)
+def libusb_alloc_streams(dev_handle, num_streams, endpoints, num_endpoints): ...
+@dll.bind((Pointer(libusb_device_handle), Pointer(ctypes.c_ubyte), ctypes.c_int32,), ctypes.c_int32)
+def libusb_free_streams(dev_handle, endpoints, num_endpoints): ...
 size_t = ctypes.c_uint64
-try: (libusb_dev_mem_alloc:=dll.libusb_dev_mem_alloc).restype, libusb_dev_mem_alloc.argtypes = Pointer(ctypes.c_ubyte), [Pointer(libusb_device_handle), size_t]
-except AttributeError: pass
-
-try: (libusb_dev_mem_free:=dll.libusb_dev_mem_free).restype, libusb_dev_mem_free.argtypes = ctypes.c_int32, [Pointer(libusb_device_handle), Pointer(ctypes.c_ubyte), size_t]
-except AttributeError: pass
-
-try: (libusb_kernel_driver_active:=dll.libusb_kernel_driver_active).restype, libusb_kernel_driver_active.argtypes = ctypes.c_int32, [Pointer(libusb_device_handle), ctypes.c_int32]
-except AttributeError: pass
-
-try: (libusb_detach_kernel_driver:=dll.libusb_detach_kernel_driver).restype, libusb_detach_kernel_driver.argtypes = ctypes.c_int32, [Pointer(libusb_device_handle), ctypes.c_int32]
-except AttributeError: pass
-
-try: (libusb_attach_kernel_driver:=dll.libusb_attach_kernel_driver).restype, libusb_attach_kernel_driver.argtypes = ctypes.c_int32, [Pointer(libusb_device_handle), ctypes.c_int32]
-except AttributeError: pass
-
-try: (libusb_set_auto_detach_kernel_driver:=dll.libusb_set_auto_detach_kernel_driver).restype, libusb_set_auto_detach_kernel_driver.argtypes = ctypes.c_int32, [Pointer(libusb_device_handle), ctypes.c_int32]
-except AttributeError: pass
-
-try: (libusb_alloc_transfer:=dll.libusb_alloc_transfer).restype, libusb_alloc_transfer.argtypes = Pointer(struct_libusb_transfer), [ctypes.c_int32]
-except AttributeError: pass
-
-try: (libusb_submit_transfer:=dll.libusb_submit_transfer).restype, libusb_submit_transfer.argtypes = ctypes.c_int32, [Pointer(struct_libusb_transfer)]
-except AttributeError: pass
-
-try: (libusb_cancel_transfer:=dll.libusb_cancel_transfer).restype, libusb_cancel_transfer.argtypes = ctypes.c_int32, [Pointer(struct_libusb_transfer)]
-except AttributeError: pass
-
-try: (libusb_free_transfer:=dll.libusb_free_transfer).restype, libusb_free_transfer.argtypes = None, [Pointer(struct_libusb_transfer)]
-except AttributeError: pass
-
-try: (libusb_transfer_set_stream_id:=dll.libusb_transfer_set_stream_id).restype, libusb_transfer_set_stream_id.argtypes = None, [Pointer(struct_libusb_transfer), uint32_t]
-except AttributeError: pass
-
-try: (libusb_transfer_get_stream_id:=dll.libusb_transfer_get_stream_id).restype, libusb_transfer_get_stream_id.argtypes = uint32_t, [Pointer(struct_libusb_transfer)]
-except AttributeError: pass
-
-try: (libusb_control_transfer:=dll.libusb_control_transfer).restype, libusb_control_transfer.argtypes = ctypes.c_int32, [Pointer(libusb_device_handle), uint8_t, uint8_t, uint16_t, uint16_t, Pointer(ctypes.c_ubyte), uint16_t, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (libusb_bulk_transfer:=dll.libusb_bulk_transfer).restype, libusb_bulk_transfer.argtypes = ctypes.c_int32, [Pointer(libusb_device_handle), ctypes.c_ubyte, Pointer(ctypes.c_ubyte), ctypes.c_int32, Pointer(ctypes.c_int32), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (libusb_interrupt_transfer:=dll.libusb_interrupt_transfer).restype, libusb_interrupt_transfer.argtypes = ctypes.c_int32, [Pointer(libusb_device_handle), ctypes.c_ubyte, Pointer(ctypes.c_ubyte), ctypes.c_int32, Pointer(ctypes.c_int32), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (libusb_get_string_descriptor_ascii:=dll.libusb_get_string_descriptor_ascii).restype, libusb_get_string_descriptor_ascii.argtypes = ctypes.c_int32, [Pointer(libusb_device_handle), uint8_t, Pointer(ctypes.c_ubyte), ctypes.c_int32]
-except AttributeError: pass
-
-try: (libusb_try_lock_events:=dll.libusb_try_lock_events).restype, libusb_try_lock_events.argtypes = ctypes.c_int32, [Pointer(libusb_context)]
-except AttributeError: pass
-
-try: (libusb_lock_events:=dll.libusb_lock_events).restype, libusb_lock_events.argtypes = None, [Pointer(libusb_context)]
-except AttributeError: pass
-
-try: (libusb_unlock_events:=dll.libusb_unlock_events).restype, libusb_unlock_events.argtypes = None, [Pointer(libusb_context)]
-except AttributeError: pass
-
-try: (libusb_event_handling_ok:=dll.libusb_event_handling_ok).restype, libusb_event_handling_ok.argtypes = ctypes.c_int32, [Pointer(libusb_context)]
-except AttributeError: pass
-
-try: (libusb_event_handler_active:=dll.libusb_event_handler_active).restype, libusb_event_handler_active.argtypes = ctypes.c_int32, [Pointer(libusb_context)]
-except AttributeError: pass
-
-try: (libusb_interrupt_event_handler:=dll.libusb_interrupt_event_handler).restype, libusb_interrupt_event_handler.argtypes = None, [Pointer(libusb_context)]
-except AttributeError: pass
-
-try: (libusb_lock_event_waiters:=dll.libusb_lock_event_waiters).restype, libusb_lock_event_waiters.argtypes = None, [Pointer(libusb_context)]
-except AttributeError: pass
-
-try: (libusb_unlock_event_waiters:=dll.libusb_unlock_event_waiters).restype, libusb_unlock_event_waiters.argtypes = None, [Pointer(libusb_context)]
-except AttributeError: pass
-
+@dll.bind((Pointer(libusb_device_handle), size_t,), Pointer(ctypes.c_ubyte))
+def libusb_dev_mem_alloc(dev_handle, length): ...
+@dll.bind((Pointer(libusb_device_handle), Pointer(ctypes.c_ubyte), size_t,), ctypes.c_int32)
+def libusb_dev_mem_free(dev_handle, buffer, length): ...
+@dll.bind((Pointer(libusb_device_handle), ctypes.c_int32,), ctypes.c_int32)
+def libusb_kernel_driver_active(dev_handle, interface_number): ...
+@dll.bind((Pointer(libusb_device_handle), ctypes.c_int32,), ctypes.c_int32)
+def libusb_detach_kernel_driver(dev_handle, interface_number): ...
+@dll.bind((Pointer(libusb_device_handle), ctypes.c_int32,), ctypes.c_int32)
+def libusb_attach_kernel_driver(dev_handle, interface_number): ...
+@dll.bind((Pointer(libusb_device_handle), ctypes.c_int32,), ctypes.c_int32)
+def libusb_set_auto_detach_kernel_driver(dev_handle, enable): ...
+@dll.bind((ctypes.c_int32,), Pointer(struct_libusb_transfer))
+def libusb_alloc_transfer(iso_packets): ...
+@dll.bind((Pointer(struct_libusb_transfer),), ctypes.c_int32)
+def libusb_submit_transfer(transfer): ...
+@dll.bind((Pointer(struct_libusb_transfer),), ctypes.c_int32)
+def libusb_cancel_transfer(transfer): ...
+@dll.bind((Pointer(struct_libusb_transfer),), None)
+def libusb_free_transfer(transfer): ...
+@dll.bind((Pointer(struct_libusb_transfer), uint32_t,), None)
+def libusb_transfer_set_stream_id(transfer, stream_id): ...
+@dll.bind((Pointer(struct_libusb_transfer),), uint32_t)
+def libusb_transfer_get_stream_id(transfer): ...
+@dll.bind((Pointer(libusb_device_handle), uint8_t, uint8_t, uint16_t, uint16_t, Pointer(ctypes.c_ubyte), uint16_t, ctypes.c_uint32,), ctypes.c_int32)
+def libusb_control_transfer(dev_handle, request_type, bRequest, wValue, wIndex, data, wLength, timeout): ...
+@dll.bind((Pointer(libusb_device_handle), ctypes.c_ubyte, Pointer(ctypes.c_ubyte), ctypes.c_int32, Pointer(ctypes.c_int32), ctypes.c_uint32,), ctypes.c_int32)
+def libusb_bulk_transfer(dev_handle, endpoint, data, length, actual_length, timeout): ...
+@dll.bind((Pointer(libusb_device_handle), ctypes.c_ubyte, Pointer(ctypes.c_ubyte), ctypes.c_int32, Pointer(ctypes.c_int32), ctypes.c_uint32,), ctypes.c_int32)
+def libusb_interrupt_transfer(dev_handle, endpoint, data, length, actual_length, timeout): ...
+@dll.bind((Pointer(libusb_device_handle), uint8_t, Pointer(ctypes.c_ubyte), ctypes.c_int32,), ctypes.c_int32)
+def libusb_get_string_descriptor_ascii(dev_handle, desc_index, data, length): ...
+@dll.bind((Pointer(libusb_context),), ctypes.c_int32)
+def libusb_try_lock_events(ctx): ...
+@dll.bind((Pointer(libusb_context),), None)
+def libusb_lock_events(ctx): ...
+@dll.bind((Pointer(libusb_context),), None)
+def libusb_unlock_events(ctx): ...
+@dll.bind((Pointer(libusb_context),), ctypes.c_int32)
+def libusb_event_handling_ok(ctx): ...
+@dll.bind((Pointer(libusb_context),), ctypes.c_int32)
+def libusb_event_handler_active(ctx): ...
+@dll.bind((Pointer(libusb_context),), None)
+def libusb_interrupt_event_handler(ctx): ...
+@dll.bind((Pointer(libusb_context),), None)
+def libusb_lock_event_waiters(ctx): ...
+@dll.bind((Pointer(libusb_context),), None)
+def libusb_unlock_event_waiters(ctx): ...
 class struct_timeval(Struct): pass
 __time_t = ctypes.c_int64
 __suseconds_t = ctypes.c_int64
@@ -631,30 +549,22 @@ struct_timeval.SIZE = 16
 struct_timeval._fields_ = ['tv_sec', 'tv_usec']
 setattr(struct_timeval, 'tv_sec', field(0, ctypes.c_int64))
 setattr(struct_timeval, 'tv_usec', field(8, ctypes.c_int64))
-try: (libusb_wait_for_event:=dll.libusb_wait_for_event).restype, libusb_wait_for_event.argtypes = ctypes.c_int32, [Pointer(libusb_context), Pointer(struct_timeval)]
-except AttributeError: pass
-
-try: (libusb_handle_events_timeout:=dll.libusb_handle_events_timeout).restype, libusb_handle_events_timeout.argtypes = ctypes.c_int32, [Pointer(libusb_context), Pointer(struct_timeval)]
-except AttributeError: pass
-
-try: (libusb_handle_events_timeout_completed:=dll.libusb_handle_events_timeout_completed).restype, libusb_handle_events_timeout_completed.argtypes = ctypes.c_int32, [Pointer(libusb_context), Pointer(struct_timeval), Pointer(ctypes.c_int32)]
-except AttributeError: pass
-
-try: (libusb_handle_events:=dll.libusb_handle_events).restype, libusb_handle_events.argtypes = ctypes.c_int32, [Pointer(libusb_context)]
-except AttributeError: pass
-
-try: (libusb_handle_events_completed:=dll.libusb_handle_events_completed).restype, libusb_handle_events_completed.argtypes = ctypes.c_int32, [Pointer(libusb_context), Pointer(ctypes.c_int32)]
-except AttributeError: pass
-
-try: (libusb_handle_events_locked:=dll.libusb_handle_events_locked).restype, libusb_handle_events_locked.argtypes = ctypes.c_int32, [Pointer(libusb_context), Pointer(struct_timeval)]
-except AttributeError: pass
-
-try: (libusb_pollfds_handle_timeouts:=dll.libusb_pollfds_handle_timeouts).restype, libusb_pollfds_handle_timeouts.argtypes = ctypes.c_int32, [Pointer(libusb_context)]
-except AttributeError: pass
-
-try: (libusb_get_next_timeout:=dll.libusb_get_next_timeout).restype, libusb_get_next_timeout.argtypes = ctypes.c_int32, [Pointer(libusb_context), Pointer(struct_timeval)]
-except AttributeError: pass
-
+@dll.bind((Pointer(libusb_context), Pointer(struct_timeval),), ctypes.c_int32)
+def libusb_wait_for_event(ctx, tv): ...
+@dll.bind((Pointer(libusb_context), Pointer(struct_timeval),), ctypes.c_int32)
+def libusb_handle_events_timeout(ctx, tv): ...
+@dll.bind((Pointer(libusb_context), Pointer(struct_timeval), Pointer(ctypes.c_int32),), ctypes.c_int32)
+def libusb_handle_events_timeout_completed(ctx, tv, completed): ...
+@dll.bind((Pointer(libusb_context),), ctypes.c_int32)
+def libusb_handle_events(ctx): ...
+@dll.bind((Pointer(libusb_context), Pointer(ctypes.c_int32),), ctypes.c_int32)
+def libusb_handle_events_completed(ctx, completed): ...
+@dll.bind((Pointer(libusb_context), Pointer(struct_timeval),), ctypes.c_int32)
+def libusb_handle_events_locked(ctx, tv): ...
+@dll.bind((Pointer(libusb_context),), ctypes.c_int32)
+def libusb_pollfds_handle_timeouts(ctx): ...
+@dll.bind((Pointer(libusb_context), Pointer(struct_timeval),), ctypes.c_int32)
+def libusb_get_next_timeout(ctx, tv): ...
 class struct_libusb_pollfd(Struct): pass
 struct_libusb_pollfd.SIZE = 8
 struct_libusb_pollfd._fields_ = ['fd', 'events']
@@ -662,15 +572,12 @@ setattr(struct_libusb_pollfd, 'fd', field(0, ctypes.c_int32))
 setattr(struct_libusb_pollfd, 'events', field(4, ctypes.c_int16))
 libusb_pollfd_added_cb = ctypes.CFUNCTYPE(None, ctypes.c_int32, ctypes.c_int16, ctypes.c_void_p)
 libusb_pollfd_removed_cb = ctypes.CFUNCTYPE(None, ctypes.c_int32, ctypes.c_void_p)
-try: (libusb_get_pollfds:=dll.libusb_get_pollfds).restype, libusb_get_pollfds.argtypes = Pointer(Pointer(struct_libusb_pollfd)), [Pointer(libusb_context)]
-except AttributeError: pass
-
-try: (libusb_free_pollfds:=dll.libusb_free_pollfds).restype, libusb_free_pollfds.argtypes = None, [Pointer(Pointer(struct_libusb_pollfd))]
-except AttributeError: pass
-
-try: (libusb_set_pollfd_notifiers:=dll.libusb_set_pollfd_notifiers).restype, libusb_set_pollfd_notifiers.argtypes = None, [Pointer(libusb_context), libusb_pollfd_added_cb, libusb_pollfd_removed_cb, ctypes.c_void_p]
-except AttributeError: pass
-
+@dll.bind((Pointer(libusb_context),), Pointer(Pointer(struct_libusb_pollfd)))
+def libusb_get_pollfds(ctx): ...
+@dll.bind((Pointer(Pointer(struct_libusb_pollfd)),), None)
+def libusb_free_pollfds(pollfds): ...
+@dll.bind((Pointer(libusb_context), libusb_pollfd_added_cb, libusb_pollfd_removed_cb, ctypes.c_void_p,), None)
+def libusb_set_pollfd_notifiers(ctx, added_cb, removed_cb, user_data): ...
 libusb_hotplug_callback_handle = ctypes.c_int32
 libusb_hotplug_event = CEnum(ctypes.c_uint32)
 LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED = libusb_hotplug_event.define('LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED', 1)
@@ -680,18 +587,14 @@ libusb_hotplug_flag = CEnum(ctypes.c_uint32)
 LIBUSB_HOTPLUG_ENUMERATE = libusb_hotplug_flag.define('LIBUSB_HOTPLUG_ENUMERATE', 1)
 
 libusb_hotplug_callback_fn = ctypes.CFUNCTYPE(ctypes.c_int32, Pointer(struct_libusb_context), Pointer(struct_libusb_device), libusb_hotplug_event, ctypes.c_void_p)
-try: (libusb_hotplug_register_callback:=dll.libusb_hotplug_register_callback).restype, libusb_hotplug_register_callback.argtypes = ctypes.c_int32, [Pointer(libusb_context), ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, libusb_hotplug_callback_fn, ctypes.c_void_p, Pointer(libusb_hotplug_callback_handle)]
-except AttributeError: pass
-
-try: (libusb_hotplug_deregister_callback:=dll.libusb_hotplug_deregister_callback).restype, libusb_hotplug_deregister_callback.argtypes = None, [Pointer(libusb_context), libusb_hotplug_callback_handle]
-except AttributeError: pass
-
-try: (libusb_hotplug_get_user_data:=dll.libusb_hotplug_get_user_data).restype, libusb_hotplug_get_user_data.argtypes = ctypes.c_void_p, [Pointer(libusb_context), libusb_hotplug_callback_handle]
-except AttributeError: pass
-
-try: (libusb_set_option:=dll.libusb_set_option).restype, libusb_set_option.argtypes = ctypes.c_int32, [Pointer(libusb_context), enum_libusb_option]
-except AttributeError: pass
-
+@dll.bind((Pointer(libusb_context), ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, libusb_hotplug_callback_fn, ctypes.c_void_p, Pointer(libusb_hotplug_callback_handle),), ctypes.c_int32)
+def libusb_hotplug_register_callback(ctx, events, flags, vendor_id, product_id, dev_class, cb_fn, user_data, callback_handle): ...
+@dll.bind((Pointer(libusb_context), libusb_hotplug_callback_handle,), None)
+def libusb_hotplug_deregister_callback(ctx, callback_handle): ...
+@dll.bind((Pointer(libusb_context), libusb_hotplug_callback_handle,), ctypes.c_void_p)
+def libusb_hotplug_get_user_data(ctx, callback_handle): ...
+@dll.bind((Pointer(libusb_context), enum_libusb_option,), ctypes.c_int32)
+def libusb_set_option(ctx, option): ...
 LIBUSB_DEPRECATED_FOR = lambda f: __attribute__ ((deprecated))
 LIBUSB_API_VERSION = 0x0100010A
 LIBUSBX_API_VERSION = LIBUSB_API_VERSION

@@ -11,15 +11,12 @@ except (ValueError,AttributeError): pass
 try: nir_debug_print_shader = Array(ctypes.c_bool, 15).in_dll(dll, 'nir_debug_print_shader')
 except (ValueError,AttributeError): pass
 nir_component_mask_t = ctypes.c_uint16
-try: (nir_process_debug_variable:=dll.nir_process_debug_variable).restype, nir_process_debug_variable.argtypes = None, []
-except AttributeError: pass
-
-try: (nir_component_mask_can_reinterpret:=dll.nir_component_mask_can_reinterpret).restype, nir_component_mask_can_reinterpret.argtypes = ctypes.c_bool, [nir_component_mask_t, ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_component_mask_reinterpret:=dll.nir_component_mask_reinterpret).restype, nir_component_mask_reinterpret.argtypes = nir_component_mask_t, [nir_component_mask_t, ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError: pass
-
+@dll.bind((), None)
+def nir_process_debug_variable(): ...
+@dll.bind((nir_component_mask_t, ctypes.c_uint32, ctypes.c_uint32), ctypes.c_bool)
+def nir_component_mask_can_reinterpret(mask, old_bit_size, new_bit_size): ...
+@dll.bind((nir_component_mask_t, ctypes.c_uint32, ctypes.c_uint32), nir_component_mask_t)
+def nir_component_mask_reinterpret(mask, old_bit_size, new_bit_size): ...
 class struct_nir_state_slot(Struct): pass
 gl_state_index16 = ctypes.c_int16
 struct_nir_state_slot.SIZE = 8
@@ -93,12 +90,10 @@ setattr(nir_const_value, 'i32', field(0, int32_t))
 setattr(nir_const_value, 'u32', field(0, uint32_t))
 setattr(nir_const_value, 'i64', field(0, int64_t))
 setattr(nir_const_value, 'u64', field(0, uint64_t))
-try: (nir_const_value_for_float:=dll.nir_const_value_for_float).restype, nir_const_value_for_float.argtypes = nir_const_value, [ctypes.c_double, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_const_value_as_float:=dll.nir_const_value_as_float).restype, nir_const_value_as_float.argtypes = ctypes.c_double, [nir_const_value, ctypes.c_uint32]
-except AttributeError: pass
-
+@dll.bind((ctypes.c_double, ctypes.c_uint32), nir_const_value)
+def nir_const_value_for_float(b, bit_size): ...
+@dll.bind((nir_const_value, ctypes.c_uint32), ctypes.c_double)
+def nir_const_value_as_float(value, bit_size): ...
 class struct_nir_constant(Struct): pass
 nir_constant = struct_nir_constant
 struct_nir_constant.SIZE = 144
@@ -879,9 +874,8 @@ setattr(struct_nir_src, '_parent', field(0, uintptr_t))
 setattr(struct_nir_src, 'use_link', field(8, struct_list_head))
 setattr(struct_nir_src, 'ssa', field(24, Pointer(nir_def)))
 nir_src = struct_nir_src
-try: (nir_src_is_divergent:=dll.nir_src_is_divergent).restype, nir_src_is_divergent.argtypes = ctypes.c_bool, [Pointer(nir_src)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_src),), ctypes.c_bool)
+def nir_src_is_divergent(src): ...
 class struct_nir_alu_src(Struct): pass
 struct_nir_alu_src.SIZE = 48
 struct_nir_alu_src._fields_ = ['src', 'swizzle']
@@ -912,12 +906,10 @@ nir_type_float16 = nir_alu_type.define('nir_type_float16', 144)
 nir_type_float32 = nir_alu_type.define('nir_type_float32', 160)
 nir_type_float64 = nir_alu_type.define('nir_type_float64', 192)
 
-try: (nir_get_nir_type_for_glsl_base_type:=dll.nir_get_nir_type_for_glsl_base_type).restype, nir_get_nir_type_for_glsl_base_type.argtypes = nir_alu_type, [enum_glsl_base_type]
-except AttributeError: pass
-
-try: (nir_get_glsl_base_type_for_nir_type:=dll.nir_get_glsl_base_type_for_nir_type).restype, nir_get_glsl_base_type_for_nir_type.argtypes = enum_glsl_base_type, [nir_alu_type]
-except AttributeError: pass
-
+@dll.bind((enum_glsl_base_type,), nir_alu_type)
+def nir_get_nir_type_for_glsl_base_type(base_type): ...
+@dll.bind((nir_alu_type,), enum_glsl_base_type)
+def nir_get_glsl_base_type_for_nir_type(base_type): ...
 nir_op = CEnum(ctypes.c_uint32)
 nir_op_alignbyte_amd = nir_op.define('nir_op_alignbyte_amd', 0)
 nir_op_amul = nir_op.define('nir_op_amul', 1)
@@ -1411,9 +1403,8 @@ nir_op_vec8 = nir_op.define('nir_op_vec8', 488)
 nir_last_opcode = nir_op.define('nir_last_opcode', 488)
 nir_num_opcodes = nir_op.define('nir_num_opcodes', 489)
 
-try: (nir_type_conversion_op:=dll.nir_type_conversion_op).restype, nir_type_conversion_op.argtypes = nir_op, [nir_alu_type, nir_alu_type, nir_rounding_mode]
-except AttributeError: pass
-
+@dll.bind((nir_alu_type, nir_alu_type, nir_rounding_mode), nir_op)
+def nir_type_conversion_op(src, dst, rnd): ...
 nir_atomic_op = CEnum(ctypes.c_uint32)
 nir_atomic_op_iadd = nir_atomic_op.define('nir_atomic_op_iadd', 0)
 nir_atomic_op_imin = nir_atomic_op.define('nir_atomic_op_imin', 1)
@@ -1433,15 +1424,12 @@ nir_atomic_op_inc_wrap = nir_atomic_op.define('nir_atomic_op_inc_wrap', 14)
 nir_atomic_op_dec_wrap = nir_atomic_op.define('nir_atomic_op_dec_wrap', 15)
 nir_atomic_op_ordered_add_gfx12_amd = nir_atomic_op.define('nir_atomic_op_ordered_add_gfx12_amd', 16)
 
-try: (nir_atomic_op_to_alu:=dll.nir_atomic_op_to_alu).restype, nir_atomic_op_to_alu.argtypes = nir_op, [nir_atomic_op]
-except AttributeError: pass
-
-try: (nir_op_vec:=dll.nir_op_vec).restype, nir_op_vec.argtypes = nir_op, [ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_op_is_vec:=dll.nir_op_is_vec).restype, nir_op_is_vec.argtypes = ctypes.c_bool, [nir_op]
-except AttributeError: pass
-
+@dll.bind((nir_atomic_op,), nir_op)
+def nir_atomic_op_to_alu(op): ...
+@dll.bind((ctypes.c_uint32,), nir_op)
+def nir_op_vec(num_components): ...
+@dll.bind((nir_op,), ctypes.c_bool)
+def nir_op_is_vec(op): ...
 nir_op_algebraic_property = CEnum(ctypes.c_uint32)
 NIR_OP_IS_2SRC_COMMUTATIVE = nir_op_algebraic_property.define('NIR_OP_IS_2SRC_COMMUTATIVE', 1)
 NIR_OP_IS_ASSOCIATIVE = nir_op_algebraic_property.define('NIR_OP_IS_ASSOCIATIVE', 2)
@@ -1473,33 +1461,24 @@ setattr(struct_nir_alu_instr, 'fp_fast_math', field(36, uint32_t, 9, 3))
 setattr(struct_nir_alu_instr, 'def', field(40, nir_def))
 setattr(struct_nir_alu_instr, 'src', field(72, Array(nir_alu_src, 0)))
 nir_alu_instr = struct_nir_alu_instr
-try: (nir_alu_src_copy:=dll.nir_alu_src_copy).restype, nir_alu_src_copy.argtypes = None, [Pointer(nir_alu_src), Pointer(nir_alu_src)]
-except AttributeError: pass
-
-try: (nir_alu_instr_src_read_mask:=dll.nir_alu_instr_src_read_mask).restype, nir_alu_instr_src_read_mask.argtypes = nir_component_mask_t, [Pointer(nir_alu_instr), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_ssa_alu_instr_src_components:=dll.nir_ssa_alu_instr_src_components).restype, nir_ssa_alu_instr_src_components.argtypes = ctypes.c_uint32, [Pointer(nir_alu_instr), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_alu_instr_is_comparison:=dll.nir_alu_instr_is_comparison).restype, nir_alu_instr_is_comparison.argtypes = ctypes.c_bool, [Pointer(nir_alu_instr)]
-except AttributeError: pass
-
-try: (nir_const_value_negative_equal:=dll.nir_const_value_negative_equal).restype, nir_const_value_negative_equal.argtypes = ctypes.c_bool, [nir_const_value, nir_const_value, nir_alu_type]
-except AttributeError: pass
-
-try: (nir_alu_srcs_equal:=dll.nir_alu_srcs_equal).restype, nir_alu_srcs_equal.argtypes = ctypes.c_bool, [Pointer(nir_alu_instr), Pointer(nir_alu_instr), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_alu_srcs_negative_equal_typed:=dll.nir_alu_srcs_negative_equal_typed).restype, nir_alu_srcs_negative_equal_typed.argtypes = ctypes.c_bool, [Pointer(nir_alu_instr), Pointer(nir_alu_instr), ctypes.c_uint32, ctypes.c_uint32, nir_alu_type]
-except AttributeError: pass
-
-try: (nir_alu_srcs_negative_equal:=dll.nir_alu_srcs_negative_equal).restype, nir_alu_srcs_negative_equal.argtypes = ctypes.c_bool, [Pointer(nir_alu_instr), Pointer(nir_alu_instr), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_alu_src_is_trivial_ssa:=dll.nir_alu_src_is_trivial_ssa).restype, nir_alu_src_is_trivial_ssa.argtypes = ctypes.c_bool, [Pointer(nir_alu_instr), ctypes.c_uint32]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_alu_src), Pointer(nir_alu_src)), None)
+def nir_alu_src_copy(dest, src): ...
+@dll.bind((Pointer(nir_alu_instr), ctypes.c_uint32), nir_component_mask_t)
+def nir_alu_instr_src_read_mask(instr, src): ...
+@dll.bind((Pointer(nir_alu_instr), ctypes.c_uint32), ctypes.c_uint32)
+def nir_ssa_alu_instr_src_components(instr, src): ...
+@dll.bind((Pointer(nir_alu_instr),), ctypes.c_bool)
+def nir_alu_instr_is_comparison(instr): ...
+@dll.bind((nir_const_value, nir_const_value, nir_alu_type), ctypes.c_bool)
+def nir_const_value_negative_equal(c1, c2, full_type): ...
+@dll.bind((Pointer(nir_alu_instr), Pointer(nir_alu_instr), ctypes.c_uint32, ctypes.c_uint32), ctypes.c_bool)
+def nir_alu_srcs_equal(alu1, alu2, src1, src2): ...
+@dll.bind((Pointer(nir_alu_instr), Pointer(nir_alu_instr), ctypes.c_uint32, ctypes.c_uint32, nir_alu_type), ctypes.c_bool)
+def nir_alu_srcs_negative_equal_typed(alu1, alu2, src1, src2, base_type): ...
+@dll.bind((Pointer(nir_alu_instr), Pointer(nir_alu_instr), ctypes.c_uint32, ctypes.c_uint32), ctypes.c_bool)
+def nir_alu_srcs_negative_equal(alu1, alu2, src1, src2): ...
+@dll.bind((Pointer(nir_alu_instr), ctypes.c_uint32), ctypes.c_bool)
+def nir_alu_src_is_trivial_ssa(alu, srcn): ...
 nir_deref_type = CEnum(ctypes.c_uint32)
 nir_deref_type_var = nir_deref_type.define('nir_deref_type_var', 0)
 nir_deref_type_array = nir_deref_type.define('nir_deref_type_array', 1)
@@ -1565,29 +1544,23 @@ setattr(struct_nir_deref_instr, 'strct', field(80, _anonstruct5))
 setattr(struct_nir_deref_instr, 'cast', field(80, _anonstruct6))
 setattr(struct_nir_deref_instr, 'def', field(120, nir_def))
 nir_deref_instr = struct_nir_deref_instr
-try: (nir_deref_cast_is_trivial:=dll.nir_deref_cast_is_trivial).restype, nir_deref_cast_is_trivial.argtypes = ctypes.c_bool, [Pointer(nir_deref_instr)]
-except AttributeError: pass
-
-try: (nir_deref_instr_has_indirect:=dll.nir_deref_instr_has_indirect).restype, nir_deref_instr_has_indirect.argtypes = ctypes.c_bool, [Pointer(nir_deref_instr)]
-except AttributeError: pass
-
-try: (nir_deref_instr_is_known_out_of_bounds:=dll.nir_deref_instr_is_known_out_of_bounds).restype, nir_deref_instr_is_known_out_of_bounds.argtypes = ctypes.c_bool, [Pointer(nir_deref_instr)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_deref_instr),), ctypes.c_bool)
+def nir_deref_cast_is_trivial(cast): ...
+@dll.bind((Pointer(nir_deref_instr),), ctypes.c_bool)
+def nir_deref_instr_has_indirect(instr): ...
+@dll.bind((Pointer(nir_deref_instr),), ctypes.c_bool)
+def nir_deref_instr_is_known_out_of_bounds(instr): ...
 nir_deref_instr_has_complex_use_options = CEnum(ctypes.c_uint32)
 nir_deref_instr_has_complex_use_allow_memcpy_src = nir_deref_instr_has_complex_use_options.define('nir_deref_instr_has_complex_use_allow_memcpy_src', 1)
 nir_deref_instr_has_complex_use_allow_memcpy_dst = nir_deref_instr_has_complex_use_options.define('nir_deref_instr_has_complex_use_allow_memcpy_dst', 2)
 nir_deref_instr_has_complex_use_allow_atomics = nir_deref_instr_has_complex_use_options.define('nir_deref_instr_has_complex_use_allow_atomics', 4)
 
-try: (nir_deref_instr_has_complex_use:=dll.nir_deref_instr_has_complex_use).restype, nir_deref_instr_has_complex_use.argtypes = ctypes.c_bool, [Pointer(nir_deref_instr), nir_deref_instr_has_complex_use_options]
-except AttributeError: pass
-
-try: (nir_deref_instr_remove_if_unused:=dll.nir_deref_instr_remove_if_unused).restype, nir_deref_instr_remove_if_unused.argtypes = ctypes.c_bool, [Pointer(nir_deref_instr)]
-except AttributeError: pass
-
-try: (nir_deref_instr_array_stride:=dll.nir_deref_instr_array_stride).restype, nir_deref_instr_array_stride.argtypes = ctypes.c_uint32, [Pointer(nir_deref_instr)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_deref_instr), nir_deref_instr_has_complex_use_options), ctypes.c_bool)
+def nir_deref_instr_has_complex_use(instr, opts): ...
+@dll.bind((Pointer(nir_deref_instr),), ctypes.c_bool)
+def nir_deref_instr_remove_if_unused(instr): ...
+@dll.bind((Pointer(nir_deref_instr),), ctypes.c_uint32)
+def nir_deref_instr_array_stride(instr): ...
 class struct_nir_call_instr(Struct): pass
 class struct_nir_function(Struct): pass
 nir_function = struct_nir_function
@@ -2991,9 +2964,8 @@ struct_nir_io_xfb.SIZE = 4
 struct_nir_io_xfb._fields_ = ['out']
 setattr(struct_nir_io_xfb, 'out', field(0, Array(_anonstruct13, 2)))
 nir_io_xfb = struct_nir_io_xfb
-try: (nir_instr_xfb_write_mask:=dll.nir_instr_xfb_write_mask).restype, nir_instr_xfb_write_mask.argtypes = ctypes.c_uint32, [Pointer(nir_intrinsic_instr)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_intrinsic_instr),), ctypes.c_uint32)
+def nir_instr_xfb_write_mask(instr): ...
 class struct_nir_intrinsic_info(Struct): pass
 struct_nir_intrinsic_info.SIZE = 112
 struct_nir_intrinsic_info._fields_ = ['name', 'num_srcs', 'src_components', 'has_dest', 'dest_components', 'dest_bit_sizes', 'bit_size_src', 'num_indices', 'indices', 'index_map', 'flags']
@@ -3011,33 +2983,24 @@ setattr(struct_nir_intrinsic_info, 'flags', field(108, nir_intrinsic_semantic_fl
 nir_intrinsic_info = struct_nir_intrinsic_info
 try: nir_intrinsic_infos = Array(nir_intrinsic_info, 732).in_dll(dll, 'nir_intrinsic_infos')
 except (ValueError,AttributeError): pass
-try: (nir_intrinsic_src_components:=dll.nir_intrinsic_src_components).restype, nir_intrinsic_src_components.argtypes = ctypes.c_uint32, [Pointer(nir_intrinsic_instr), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_intrinsic_dest_components:=dll.nir_intrinsic_dest_components).restype, nir_intrinsic_dest_components.argtypes = ctypes.c_uint32, [Pointer(nir_intrinsic_instr)]
-except AttributeError: pass
-
-try: (nir_intrinsic_instr_src_type:=dll.nir_intrinsic_instr_src_type).restype, nir_intrinsic_instr_src_type.argtypes = nir_alu_type, [Pointer(nir_intrinsic_instr), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_intrinsic_instr_dest_type:=dll.nir_intrinsic_instr_dest_type).restype, nir_intrinsic_instr_dest_type.argtypes = nir_alu_type, [Pointer(nir_intrinsic_instr)]
-except AttributeError: pass
-
-try: (nir_intrinsic_copy_const_indices:=dll.nir_intrinsic_copy_const_indices).restype, nir_intrinsic_copy_const_indices.argtypes = None, [Pointer(nir_intrinsic_instr), Pointer(nir_intrinsic_instr)]
-except AttributeError: pass
-
-try: (nir_image_intrinsic_coord_components:=dll.nir_image_intrinsic_coord_components).restype, nir_image_intrinsic_coord_components.argtypes = ctypes.c_uint32, [Pointer(nir_intrinsic_instr)]
-except AttributeError: pass
-
-try: (nir_rewrite_image_intrinsic:=dll.nir_rewrite_image_intrinsic).restype, nir_rewrite_image_intrinsic.argtypes = None, [Pointer(nir_intrinsic_instr), Pointer(nir_def), ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_intrinsic_can_reorder:=dll.nir_intrinsic_can_reorder).restype, nir_intrinsic_can_reorder.argtypes = ctypes.c_bool, [Pointer(nir_intrinsic_instr)]
-except AttributeError: pass
-
-try: (nir_intrinsic_writes_external_memory:=dll.nir_intrinsic_writes_external_memory).restype, nir_intrinsic_writes_external_memory.argtypes = ctypes.c_bool, [Pointer(nir_intrinsic_instr)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_intrinsic_instr), ctypes.c_uint32), ctypes.c_uint32)
+def nir_intrinsic_src_components(intr, srcn): ...
+@dll.bind((Pointer(nir_intrinsic_instr),), ctypes.c_uint32)
+def nir_intrinsic_dest_components(intr): ...
+@dll.bind((Pointer(nir_intrinsic_instr), ctypes.c_uint32), nir_alu_type)
+def nir_intrinsic_instr_src_type(intrin, src): ...
+@dll.bind((Pointer(nir_intrinsic_instr),), nir_alu_type)
+def nir_intrinsic_instr_dest_type(intrin): ...
+@dll.bind((Pointer(nir_intrinsic_instr), Pointer(nir_intrinsic_instr)), None)
+def nir_intrinsic_copy_const_indices(dst, src): ...
+@dll.bind((Pointer(nir_intrinsic_instr),), ctypes.c_uint32)
+def nir_image_intrinsic_coord_components(instr): ...
+@dll.bind((Pointer(nir_intrinsic_instr), Pointer(nir_def), ctypes.c_bool), None)
+def nir_rewrite_image_intrinsic(instr, handle, bindless): ...
+@dll.bind((Pointer(nir_intrinsic_instr),), ctypes.c_bool)
+def nir_intrinsic_can_reorder(instr): ...
+@dll.bind((Pointer(nir_intrinsic_instr),), ctypes.c_bool)
+def nir_intrinsic_writes_external_memory(instr): ...
 enum_nir_tex_src_type = CEnum(ctypes.c_uint32)
 nir_tex_src_coord = enum_nir_tex_src_type.define('nir_tex_src_coord', 0)
 nir_tex_src_projector = enum_nir_tex_src_type.define('nir_tex_src_projector', 1)
@@ -3138,33 +3101,24 @@ setattr(struct_nir_tex_instr, 'texture_index', field(112, ctypes.c_uint32))
 setattr(struct_nir_tex_instr, 'sampler_index', field(116, ctypes.c_uint32))
 setattr(struct_nir_tex_instr, 'backend_flags', field(120, uint32_t))
 nir_tex_instr = struct_nir_tex_instr
-try: (nir_tex_instr_need_sampler:=dll.nir_tex_instr_need_sampler).restype, nir_tex_instr_need_sampler.argtypes = ctypes.c_bool, [Pointer(nir_tex_instr)]
-except AttributeError: pass
-
-try: (nir_tex_instr_result_size:=dll.nir_tex_instr_result_size).restype, nir_tex_instr_result_size.argtypes = ctypes.c_uint32, [Pointer(nir_tex_instr)]
-except AttributeError: pass
-
-try: (nir_tex_instr_is_query:=dll.nir_tex_instr_is_query).restype, nir_tex_instr_is_query.argtypes = ctypes.c_bool, [Pointer(nir_tex_instr)]
-except AttributeError: pass
-
-try: (nir_tex_instr_has_implicit_derivative:=dll.nir_tex_instr_has_implicit_derivative).restype, nir_tex_instr_has_implicit_derivative.argtypes = ctypes.c_bool, [Pointer(nir_tex_instr)]
-except AttributeError: pass
-
-try: (nir_tex_instr_src_type:=dll.nir_tex_instr_src_type).restype, nir_tex_instr_src_type.argtypes = nir_alu_type, [Pointer(nir_tex_instr), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_tex_instr_src_size:=dll.nir_tex_instr_src_size).restype, nir_tex_instr_src_size.argtypes = ctypes.c_uint32, [Pointer(nir_tex_instr), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_tex_instr_add_src:=dll.nir_tex_instr_add_src).restype, nir_tex_instr_add_src.argtypes = None, [Pointer(nir_tex_instr), nir_tex_src_type, Pointer(nir_def)]
-except AttributeError: pass
-
-try: (nir_tex_instr_remove_src:=dll.nir_tex_instr_remove_src).restype, nir_tex_instr_remove_src.argtypes = None, [Pointer(nir_tex_instr), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_tex_instr_has_explicit_tg4_offsets:=dll.nir_tex_instr_has_explicit_tg4_offsets).restype, nir_tex_instr_has_explicit_tg4_offsets.argtypes = ctypes.c_bool, [Pointer(nir_tex_instr)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_tex_instr),), ctypes.c_bool)
+def nir_tex_instr_need_sampler(instr): ...
+@dll.bind((Pointer(nir_tex_instr),), ctypes.c_uint32)
+def nir_tex_instr_result_size(instr): ...
+@dll.bind((Pointer(nir_tex_instr),), ctypes.c_bool)
+def nir_tex_instr_is_query(instr): ...
+@dll.bind((Pointer(nir_tex_instr),), ctypes.c_bool)
+def nir_tex_instr_has_implicit_derivative(instr): ...
+@dll.bind((Pointer(nir_tex_instr), ctypes.c_uint32), nir_alu_type)
+def nir_tex_instr_src_type(instr, src): ...
+@dll.bind((Pointer(nir_tex_instr), ctypes.c_uint32), ctypes.c_uint32)
+def nir_tex_instr_src_size(instr, src): ...
+@dll.bind((Pointer(nir_tex_instr), nir_tex_src_type, Pointer(nir_def)), None)
+def nir_tex_instr_add_src(tex, src_type, src): ...
+@dll.bind((Pointer(nir_tex_instr), ctypes.c_uint32), None)
+def nir_tex_instr_remove_src(tex, src_idx): ...
+@dll.bind((Pointer(nir_tex_instr),), ctypes.c_bool)
+def nir_tex_instr_has_explicit_tg4_offsets(tex): ...
 class struct_nir_load_const_instr(Struct): pass
 struct_nir_load_const_instr.SIZE = 64
 struct_nir_load_const_instr._fields_ = ['instr', 'def', 'value']
@@ -3246,9 +3200,8 @@ struct_nir_scalar._fields_ = ['def', 'comp']
 setattr(struct_nir_scalar, 'def', field(0, Pointer(nir_def)))
 setattr(struct_nir_scalar, 'comp', field(8, ctypes.c_uint32))
 nir_scalar = struct_nir_scalar
-try: (nir_scalar_chase_movs:=dll.nir_scalar_chase_movs).restype, nir_scalar_chase_movs.argtypes = nir_scalar, [nir_scalar]
-except AttributeError: pass
-
+@dll.bind((nir_scalar,), nir_scalar)
+def nir_scalar_chase_movs(s): ...
 class struct_nir_binding(Struct): pass
 struct_nir_binding.SIZE = 168
 struct_nir_binding._fields_ = ['success', 'var', 'desc_set', 'binding', 'num_indices', 'indices', 'read_first_invocation']
@@ -3260,15 +3213,12 @@ setattr(struct_nir_binding, 'num_indices', field(24, ctypes.c_uint32))
 setattr(struct_nir_binding, 'indices', field(32, Array(nir_src, 4)))
 setattr(struct_nir_binding, 'read_first_invocation', field(160, ctypes.c_bool))
 nir_binding = struct_nir_binding
-try: (nir_chase_binding:=dll.nir_chase_binding).restype, nir_chase_binding.argtypes = nir_binding, [nir_src]
-except AttributeError: pass
-
-try: (nir_get_binding_variable:=dll.nir_get_binding_variable).restype, nir_get_binding_variable.argtypes = Pointer(nir_variable), [Pointer(nir_shader), nir_binding]
-except AttributeError: pass
-
-try: (nir_block_contains_work:=dll.nir_block_contains_work).restype, nir_block_contains_work.argtypes = ctypes.c_bool, [Pointer(nir_block)]
-except AttributeError: pass
-
+@dll.bind((nir_src,), nir_binding)
+def nir_chase_binding(rsrc): ...
+@dll.bind((Pointer(nir_shader), nir_binding), Pointer(nir_variable))
+def nir_get_binding_variable(shader, binding): ...
+@dll.bind((Pointer(nir_block),), ctypes.c_bool)
+def nir_block_contains_work(block): ...
 nir_selection_control = CEnum(ctypes.c_uint32)
 nir_selection_control_none = nir_selection_control.define('nir_selection_control_none', 0)
 nir_selection_control_flatten = nir_selection_control.define('nir_selection_control_flatten', 1)
@@ -3358,124 +3308,85 @@ setattr(struct_nir_loop, 'divergent_break', field(110, ctypes.c_bool))
 nir_loop = struct_nir_loop
 nir_intrin_filter_cb = ctypes.CFUNCTYPE(ctypes.c_bool, Pointer(struct_nir_intrinsic_instr), ctypes.c_void_p)
 nir_vectorize_cb = ctypes.CFUNCTYPE(ctypes.c_ubyte, Pointer(struct_nir_instr), ctypes.c_void_p)
-try: (nir_remove_non_entrypoints:=dll.nir_remove_non_entrypoints).restype, nir_remove_non_entrypoints.argtypes = None, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_remove_non_exported:=dll.nir_remove_non_exported).restype, nir_remove_non_exported.argtypes = None, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_remove_entrypoints:=dll.nir_remove_entrypoints).restype, nir_remove_entrypoints.argtypes = None, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_fixup_is_exported:=dll.nir_fixup_is_exported).restype, nir_fixup_is_exported.argtypes = None, [Pointer(nir_shader)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader),), None)
+def nir_remove_non_entrypoints(shader): ...
+@dll.bind((Pointer(nir_shader),), None)
+def nir_remove_non_exported(shader): ...
+@dll.bind((Pointer(nir_shader),), None)
+def nir_remove_entrypoints(shader): ...
+@dll.bind((Pointer(nir_shader),), None)
+def nir_fixup_is_exported(shader): ...
 shader_info = struct_shader_info
-try: (nir_shader_create:=dll.nir_shader_create).restype, nir_shader_create.argtypes = Pointer(nir_shader), [ctypes.c_void_p, gl_shader_stage, Pointer(nir_shader_compiler_options), Pointer(shader_info)]
-except AttributeError: pass
-
-try: (nir_shader_add_variable:=dll.nir_shader_add_variable).restype, nir_shader_add_variable.argtypes = None, [Pointer(nir_shader), Pointer(nir_variable)]
-except AttributeError: pass
-
-try: (nir_variable_create:=dll.nir_variable_create).restype, nir_variable_create.argtypes = Pointer(nir_variable), [Pointer(nir_shader), nir_variable_mode, Pointer(struct_glsl_type), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (nir_local_variable_create:=dll.nir_local_variable_create).restype, nir_local_variable_create.argtypes = Pointer(nir_variable), [Pointer(nir_function_impl), Pointer(struct_glsl_type), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (nir_state_variable_create:=dll.nir_state_variable_create).restype, nir_state_variable_create.argtypes = Pointer(nir_variable), [Pointer(nir_shader), Pointer(struct_glsl_type), Pointer(ctypes.c_char), Array(gl_state_index16, 4)]
-except AttributeError: pass
-
-try: (nir_get_variable_with_location:=dll.nir_get_variable_with_location).restype, nir_get_variable_with_location.argtypes = Pointer(nir_variable), [Pointer(nir_shader), nir_variable_mode, ctypes.c_int32, Pointer(struct_glsl_type)]
-except AttributeError: pass
-
-try: (nir_create_variable_with_location:=dll.nir_create_variable_with_location).restype, nir_create_variable_with_location.argtypes = Pointer(nir_variable), [Pointer(nir_shader), nir_variable_mode, ctypes.c_int32, Pointer(struct_glsl_type)]
-except AttributeError: pass
-
-try: (nir_find_variable_with_location:=dll.nir_find_variable_with_location).restype, nir_find_variable_with_location.argtypes = Pointer(nir_variable), [Pointer(nir_shader), nir_variable_mode, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_find_variable_with_driver_location:=dll.nir_find_variable_with_driver_location).restype, nir_find_variable_with_driver_location.argtypes = Pointer(nir_variable), [Pointer(nir_shader), nir_variable_mode, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_find_state_variable:=dll.nir_find_state_variable).restype, nir_find_state_variable.argtypes = Pointer(nir_variable), [Pointer(nir_shader), Array(gl_state_index16, 4)]
-except AttributeError: pass
-
-try: (nir_find_sampler_variable_with_tex_index:=dll.nir_find_sampler_variable_with_tex_index).restype, nir_find_sampler_variable_with_tex_index.argtypes = Pointer(nir_variable), [Pointer(nir_shader), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_sort_variables_with_modes:=dll.nir_sort_variables_with_modes).restype, nir_sort_variables_with_modes.argtypes = None, [Pointer(nir_shader), ctypes.CFUNCTYPE(ctypes.c_int32, Pointer(nir_variable), Pointer(nir_variable)), nir_variable_mode]
-except AttributeError: pass
-
-try: (nir_function_create:=dll.nir_function_create).restype, nir_function_create.argtypes = Pointer(nir_function), [Pointer(nir_shader), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (nir_function_impl_create:=dll.nir_function_impl_create).restype, nir_function_impl_create.argtypes = Pointer(nir_function_impl), [Pointer(nir_function)]
-except AttributeError: pass
-
-try: (nir_function_impl_create_bare:=dll.nir_function_impl_create_bare).restype, nir_function_impl_create_bare.argtypes = Pointer(nir_function_impl), [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_block_create:=dll.nir_block_create).restype, nir_block_create.argtypes = Pointer(nir_block), [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_if_create:=dll.nir_if_create).restype, nir_if_create.argtypes = Pointer(nir_if), [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_loop_create:=dll.nir_loop_create).restype, nir_loop_create.argtypes = Pointer(nir_loop), [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_cf_node_get_function:=dll.nir_cf_node_get_function).restype, nir_cf_node_get_function.argtypes = Pointer(nir_function_impl), [Pointer(nir_cf_node)]
-except AttributeError: pass
-
-try: (nir_metadata_require:=dll.nir_metadata_require).restype, nir_metadata_require.argtypes = None, [Pointer(nir_function_impl), nir_metadata]
-except AttributeError: pass
-
-try: (nir_shader_preserve_all_metadata:=dll.nir_shader_preserve_all_metadata).restype, nir_shader_preserve_all_metadata.argtypes = None, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_metadata_invalidate:=dll.nir_metadata_invalidate).restype, nir_metadata_invalidate.argtypes = None, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_progress:=dll.nir_progress).restype, nir_progress.argtypes = ctypes.c_bool, [ctypes.c_bool, Pointer(nir_function_impl), nir_metadata]
-except AttributeError: pass
-
-try: (nir_alu_instr_create:=dll.nir_alu_instr_create).restype, nir_alu_instr_create.argtypes = Pointer(nir_alu_instr), [Pointer(nir_shader), nir_op]
-except AttributeError: pass
-
-try: (nir_deref_instr_create:=dll.nir_deref_instr_create).restype, nir_deref_instr_create.argtypes = Pointer(nir_deref_instr), [Pointer(nir_shader), nir_deref_type]
-except AttributeError: pass
-
-try: (nir_jump_instr_create:=dll.nir_jump_instr_create).restype, nir_jump_instr_create.argtypes = Pointer(nir_jump_instr), [Pointer(nir_shader), nir_jump_type]
-except AttributeError: pass
-
-try: (nir_load_const_instr_create:=dll.nir_load_const_instr_create).restype, nir_load_const_instr_create.argtypes = Pointer(nir_load_const_instr), [Pointer(nir_shader), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_intrinsic_instr_create:=dll.nir_intrinsic_instr_create).restype, nir_intrinsic_instr_create.argtypes = Pointer(nir_intrinsic_instr), [Pointer(nir_shader), nir_intrinsic_op]
-except AttributeError: pass
-
-try: (nir_call_instr_create:=dll.nir_call_instr_create).restype, nir_call_instr_create.argtypes = Pointer(nir_call_instr), [Pointer(nir_shader), Pointer(nir_function)]
-except AttributeError: pass
-
-try: (nir_tex_instr_create:=dll.nir_tex_instr_create).restype, nir_tex_instr_create.argtypes = Pointer(nir_tex_instr), [Pointer(nir_shader), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_phi_instr_create:=dll.nir_phi_instr_create).restype, nir_phi_instr_create.argtypes = Pointer(nir_phi_instr), [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_phi_instr_add_src:=dll.nir_phi_instr_add_src).restype, nir_phi_instr_add_src.argtypes = Pointer(nir_phi_src), [Pointer(nir_phi_instr), Pointer(nir_block), Pointer(nir_def)]
-except AttributeError: pass
-
-try: (nir_parallel_copy_instr_create:=dll.nir_parallel_copy_instr_create).restype, nir_parallel_copy_instr_create.argtypes = Pointer(nir_parallel_copy_instr), [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_undef_instr_create:=dll.nir_undef_instr_create).restype, nir_undef_instr_create.argtypes = Pointer(nir_undef_instr), [Pointer(nir_shader), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_alu_binop_identity:=dll.nir_alu_binop_identity).restype, nir_alu_binop_identity.argtypes = nir_const_value, [nir_op, ctypes.c_uint32]
-except AttributeError: pass
-
+@dll.bind((ctypes.c_void_p, gl_shader_stage, Pointer(nir_shader_compiler_options), Pointer(shader_info)), Pointer(nir_shader))
+def nir_shader_create(mem_ctx, stage, options, si): ...
+@dll.bind((Pointer(nir_shader), Pointer(nir_variable)), None)
+def nir_shader_add_variable(shader, var): ...
+@dll.bind((Pointer(nir_shader), nir_variable_mode, Pointer(struct_glsl_type), Pointer(ctypes.c_char)), Pointer(nir_variable))
+def nir_variable_create(shader, mode, type, name): ...
+@dll.bind((Pointer(nir_function_impl), Pointer(struct_glsl_type), Pointer(ctypes.c_char)), Pointer(nir_variable))
+def nir_local_variable_create(impl, type, name): ...
+@dll.bind((Pointer(nir_shader), Pointer(struct_glsl_type), Pointer(ctypes.c_char), Array(gl_state_index16, 4)), Pointer(nir_variable))
+def nir_state_variable_create(shader, type, name, tokens): ...
+@dll.bind((Pointer(nir_shader), nir_variable_mode, ctypes.c_int32, Pointer(struct_glsl_type)), Pointer(nir_variable))
+def nir_get_variable_with_location(shader, mode, location, type): ...
+@dll.bind((Pointer(nir_shader), nir_variable_mode, ctypes.c_int32, Pointer(struct_glsl_type)), Pointer(nir_variable))
+def nir_create_variable_with_location(shader, mode, location, type): ...
+@dll.bind((Pointer(nir_shader), nir_variable_mode, ctypes.c_uint32), Pointer(nir_variable))
+def nir_find_variable_with_location(shader, mode, location): ...
+@dll.bind((Pointer(nir_shader), nir_variable_mode, ctypes.c_uint32), Pointer(nir_variable))
+def nir_find_variable_with_driver_location(shader, mode, location): ...
+@dll.bind((Pointer(nir_shader), Array(gl_state_index16, 4)), Pointer(nir_variable))
+def nir_find_state_variable(s, tokens): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_uint32), Pointer(nir_variable))
+def nir_find_sampler_variable_with_tex_index(shader, texture_index): ...
+@dll.bind((Pointer(nir_shader), ctypes.CFUNCTYPE(ctypes.c_int32, Pointer(nir_variable), Pointer(nir_variable)), nir_variable_mode), None)
+def nir_sort_variables_with_modes(shader, compar, modes): ...
+@dll.bind((Pointer(nir_shader), Pointer(ctypes.c_char)), Pointer(nir_function))
+def nir_function_create(shader, name): ...
+@dll.bind((Pointer(nir_function),), Pointer(nir_function_impl))
+def nir_function_impl_create(func): ...
+@dll.bind((Pointer(nir_shader),), Pointer(nir_function_impl))
+def nir_function_impl_create_bare(shader): ...
+@dll.bind((Pointer(nir_shader),), Pointer(nir_block))
+def nir_block_create(shader): ...
+@dll.bind((Pointer(nir_shader),), Pointer(nir_if))
+def nir_if_create(shader): ...
+@dll.bind((Pointer(nir_shader),), Pointer(nir_loop))
+def nir_loop_create(shader): ...
+@dll.bind((Pointer(nir_cf_node),), Pointer(nir_function_impl))
+def nir_cf_node_get_function(node): ...
+@dll.bind((Pointer(nir_function_impl), nir_metadata), None)
+def nir_metadata_require(impl, required): ...
+@dll.bind((Pointer(nir_shader),), None)
+def nir_shader_preserve_all_metadata(shader): ...
+@dll.bind((Pointer(nir_shader),), None)
+def nir_metadata_invalidate(shader): ...
+@dll.bind((ctypes.c_bool, Pointer(nir_function_impl), nir_metadata), ctypes.c_bool)
+def nir_progress(progress, impl, preserved): ...
+@dll.bind((Pointer(nir_shader), nir_op), Pointer(nir_alu_instr))
+def nir_alu_instr_create(shader, op): ...
+@dll.bind((Pointer(nir_shader), nir_deref_type), Pointer(nir_deref_instr))
+def nir_deref_instr_create(shader, deref_type): ...
+@dll.bind((Pointer(nir_shader), nir_jump_type), Pointer(nir_jump_instr))
+def nir_jump_instr_create(shader, type): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_uint32, ctypes.c_uint32), Pointer(nir_load_const_instr))
+def nir_load_const_instr_create(shader, num_components, bit_size): ...
+@dll.bind((Pointer(nir_shader), nir_intrinsic_op), Pointer(nir_intrinsic_instr))
+def nir_intrinsic_instr_create(shader, op): ...
+@dll.bind((Pointer(nir_shader), Pointer(nir_function)), Pointer(nir_call_instr))
+def nir_call_instr_create(shader, callee): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_uint32), Pointer(nir_tex_instr))
+def nir_tex_instr_create(shader, num_srcs): ...
+@dll.bind((Pointer(nir_shader),), Pointer(nir_phi_instr))
+def nir_phi_instr_create(shader): ...
+@dll.bind((Pointer(nir_phi_instr), Pointer(nir_block), Pointer(nir_def)), Pointer(nir_phi_src))
+def nir_phi_instr_add_src(instr, pred, src): ...
+@dll.bind((Pointer(nir_shader),), Pointer(nir_parallel_copy_instr))
+def nir_parallel_copy_instr_create(shader): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_uint32, ctypes.c_uint32), Pointer(nir_undef_instr))
+def nir_undef_instr_create(shader, num_components, bit_size): ...
+@dll.bind((nir_op, ctypes.c_uint32), nir_const_value)
+def nir_alu_binop_identity(binop, bit_size): ...
 nir_cursor_option = CEnum(ctypes.c_uint32)
 nir_cursor_before_block = nir_cursor_option.define('nir_cursor_before_block', 0)
 nir_cursor_after_block = nir_cursor_option.define('nir_cursor_after_block', 1)
@@ -3489,143 +3400,98 @@ setattr(struct_nir_cursor, 'option', field(0, nir_cursor_option))
 setattr(struct_nir_cursor, 'block', field(8, Pointer(nir_block)))
 setattr(struct_nir_cursor, 'instr', field(8, Pointer(nir_instr)))
 nir_cursor = struct_nir_cursor
-try: (nir_cursors_equal:=dll.nir_cursors_equal).restype, nir_cursors_equal.argtypes = ctypes.c_bool, [nir_cursor, nir_cursor]
-except AttributeError: pass
-
-try: (nir_instr_insert:=dll.nir_instr_insert).restype, nir_instr_insert.argtypes = None, [nir_cursor, Pointer(nir_instr)]
-except AttributeError: pass
-
-try: (nir_instr_move:=dll.nir_instr_move).restype, nir_instr_move.argtypes = ctypes.c_bool, [nir_cursor, Pointer(nir_instr)]
-except AttributeError: pass
-
-try: (nir_instr_remove_v:=dll.nir_instr_remove_v).restype, nir_instr_remove_v.argtypes = None, [Pointer(nir_instr)]
-except AttributeError: pass
-
-try: (nir_instr_free:=dll.nir_instr_free).restype, nir_instr_free.argtypes = None, [Pointer(nir_instr)]
-except AttributeError: pass
-
-try: (nir_instr_free_list:=dll.nir_instr_free_list).restype, nir_instr_free_list.argtypes = None, [Pointer(struct_exec_list)]
-except AttributeError: pass
-
-try: (nir_instr_free_and_dce:=dll.nir_instr_free_and_dce).restype, nir_instr_free_and_dce.argtypes = nir_cursor, [Pointer(nir_instr)]
-except AttributeError: pass
-
-try: (nir_instr_def:=dll.nir_instr_def).restype, nir_instr_def.argtypes = Pointer(nir_def), [Pointer(nir_instr)]
-except AttributeError: pass
-
+@dll.bind((nir_cursor, nir_cursor), ctypes.c_bool)
+def nir_cursors_equal(a, b): ...
+@dll.bind((nir_cursor, Pointer(nir_instr)), None)
+def nir_instr_insert(cursor, instr): ...
+@dll.bind((nir_cursor, Pointer(nir_instr)), ctypes.c_bool)
+def nir_instr_move(cursor, instr): ...
+@dll.bind((Pointer(nir_instr),), None)
+def nir_instr_remove_v(instr): ...
+@dll.bind((Pointer(nir_instr),), None)
+def nir_instr_free(instr): ...
+@dll.bind((Pointer(struct_exec_list),), None)
+def nir_instr_free_list(list): ...
+@dll.bind((Pointer(nir_instr),), nir_cursor)
+def nir_instr_free_and_dce(instr): ...
+@dll.bind((Pointer(nir_instr),), Pointer(nir_def))
+def nir_instr_def(instr): ...
 nir_foreach_def_cb = ctypes.CFUNCTYPE(ctypes.c_bool, Pointer(struct_nir_def), ctypes.c_void_p)
 nir_foreach_src_cb = ctypes.CFUNCTYPE(ctypes.c_bool, Pointer(struct_nir_src), ctypes.c_void_p)
-try: (nir_foreach_phi_src_leaving_block:=dll.nir_foreach_phi_src_leaving_block).restype, nir_foreach_phi_src_leaving_block.argtypes = ctypes.c_bool, [Pointer(nir_block), nir_foreach_src_cb, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (nir_src_as_const_value:=dll.nir_src_as_const_value).restype, nir_src_as_const_value.argtypes = Pointer(nir_const_value), [nir_src]
-except AttributeError: pass
-
-try: (nir_src_as_string:=dll.nir_src_as_string).restype, nir_src_as_string.argtypes = Pointer(ctypes.c_char), [nir_src]
-except AttributeError: pass
-
-try: (nir_src_is_always_uniform:=dll.nir_src_is_always_uniform).restype, nir_src_is_always_uniform.argtypes = ctypes.c_bool, [nir_src]
-except AttributeError: pass
-
-try: (nir_srcs_equal:=dll.nir_srcs_equal).restype, nir_srcs_equal.argtypes = ctypes.c_bool, [nir_src, nir_src]
-except AttributeError: pass
-
-try: (nir_instrs_equal:=dll.nir_instrs_equal).restype, nir_instrs_equal.argtypes = ctypes.c_bool, [Pointer(nir_instr), Pointer(nir_instr)]
-except AttributeError: pass
-
-try: (nir_src_get_block:=dll.nir_src_get_block).restype, nir_src_get_block.argtypes = Pointer(nir_block), [Pointer(nir_src)]
-except AttributeError: pass
-
-try: (nir_instr_init_src:=dll.nir_instr_init_src).restype, nir_instr_init_src.argtypes = None, [Pointer(nir_instr), Pointer(nir_src), Pointer(nir_def)]
-except AttributeError: pass
-
-try: (nir_instr_clear_src:=dll.nir_instr_clear_src).restype, nir_instr_clear_src.argtypes = None, [Pointer(nir_instr), Pointer(nir_src)]
-except AttributeError: pass
-
-try: (nir_instr_move_src:=dll.nir_instr_move_src).restype, nir_instr_move_src.argtypes = None, [Pointer(nir_instr), Pointer(nir_src), Pointer(nir_src)]
-except AttributeError: pass
-
-try: (nir_instr_is_before:=dll.nir_instr_is_before).restype, nir_instr_is_before.argtypes = ctypes.c_bool, [Pointer(nir_instr), Pointer(nir_instr)]
-except AttributeError: pass
-
-try: (nir_def_init:=dll.nir_def_init).restype, nir_def_init.argtypes = None, [Pointer(nir_instr), Pointer(nir_def), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_def_rewrite_uses:=dll.nir_def_rewrite_uses).restype, nir_def_rewrite_uses.argtypes = None, [Pointer(nir_def), Pointer(nir_def)]
-except AttributeError: pass
-
-try: (nir_def_rewrite_uses_src:=dll.nir_def_rewrite_uses_src).restype, nir_def_rewrite_uses_src.argtypes = None, [Pointer(nir_def), nir_src]
-except AttributeError: pass
-
-try: (nir_def_rewrite_uses_after:=dll.nir_def_rewrite_uses_after).restype, nir_def_rewrite_uses_after.argtypes = None, [Pointer(nir_def), Pointer(nir_def), Pointer(nir_instr)]
-except AttributeError: pass
-
-try: (nir_src_components_read:=dll.nir_src_components_read).restype, nir_src_components_read.argtypes = nir_component_mask_t, [Pointer(nir_src)]
-except AttributeError: pass
-
-try: (nir_def_components_read:=dll.nir_def_components_read).restype, nir_def_components_read.argtypes = nir_component_mask_t, [Pointer(nir_def)]
-except AttributeError: pass
-
-try: (nir_def_all_uses_are_fsat:=dll.nir_def_all_uses_are_fsat).restype, nir_def_all_uses_are_fsat.argtypes = ctypes.c_bool, [Pointer(nir_def)]
-except AttributeError: pass
-
-try: (nir_def_all_uses_ignore_sign_bit:=dll.nir_def_all_uses_ignore_sign_bit).restype, nir_def_all_uses_ignore_sign_bit.argtypes = ctypes.c_bool, [Pointer(nir_def)]
-except AttributeError: pass
-
-try: (nir_sort_unstructured_blocks:=dll.nir_sort_unstructured_blocks).restype, nir_sort_unstructured_blocks.argtypes = None, [Pointer(nir_function_impl)]
-except AttributeError: pass
-
-try: (nir_block_unstructured_next:=dll.nir_block_unstructured_next).restype, nir_block_unstructured_next.argtypes = Pointer(nir_block), [Pointer(nir_block)]
-except AttributeError: pass
-
-try: (nir_unstructured_start_block:=dll.nir_unstructured_start_block).restype, nir_unstructured_start_block.argtypes = Pointer(nir_block), [Pointer(nir_function_impl)]
-except AttributeError: pass
-
-try: (nir_block_cf_tree_next:=dll.nir_block_cf_tree_next).restype, nir_block_cf_tree_next.argtypes = Pointer(nir_block), [Pointer(nir_block)]
-except AttributeError: pass
-
-try: (nir_block_cf_tree_prev:=dll.nir_block_cf_tree_prev).restype, nir_block_cf_tree_prev.argtypes = Pointer(nir_block), [Pointer(nir_block)]
-except AttributeError: pass
-
-try: (nir_cf_node_cf_tree_first:=dll.nir_cf_node_cf_tree_first).restype, nir_cf_node_cf_tree_first.argtypes = Pointer(nir_block), [Pointer(nir_cf_node)]
-except AttributeError: pass
-
-try: (nir_cf_node_cf_tree_last:=dll.nir_cf_node_cf_tree_last).restype, nir_cf_node_cf_tree_last.argtypes = Pointer(nir_block), [Pointer(nir_cf_node)]
-except AttributeError: pass
-
-try: (nir_cf_node_cf_tree_next:=dll.nir_cf_node_cf_tree_next).restype, nir_cf_node_cf_tree_next.argtypes = Pointer(nir_block), [Pointer(nir_cf_node)]
-except AttributeError: pass
-
-try: (nir_cf_node_cf_tree_prev:=dll.nir_cf_node_cf_tree_prev).restype, nir_cf_node_cf_tree_prev.argtypes = Pointer(nir_block), [Pointer(nir_cf_node)]
-except AttributeError: pass
-
-try: (nir_block_get_following_if:=dll.nir_block_get_following_if).restype, nir_block_get_following_if.argtypes = Pointer(nir_if), [Pointer(nir_block)]
-except AttributeError: pass
-
-try: (nir_block_get_following_loop:=dll.nir_block_get_following_loop).restype, nir_block_get_following_loop.argtypes = Pointer(nir_loop), [Pointer(nir_block)]
-except AttributeError: pass
-
-try: (nir_block_get_predecessors_sorted:=dll.nir_block_get_predecessors_sorted).restype, nir_block_get_predecessors_sorted.argtypes = Pointer(Pointer(nir_block)), [Pointer(nir_block), ctypes.c_void_p]
-except AttributeError: pass
-
-try: (nir_index_ssa_defs:=dll.nir_index_ssa_defs).restype, nir_index_ssa_defs.argtypes = None, [Pointer(nir_function_impl)]
-except AttributeError: pass
-
-try: (nir_index_instrs:=dll.nir_index_instrs).restype, nir_index_instrs.argtypes = ctypes.c_uint32, [Pointer(nir_function_impl)]
-except AttributeError: pass
-
-try: (nir_index_blocks:=dll.nir_index_blocks).restype, nir_index_blocks.argtypes = None, [Pointer(nir_function_impl)]
-except AttributeError: pass
-
-try: (nir_shader_clear_pass_flags:=dll.nir_shader_clear_pass_flags).restype, nir_shader_clear_pass_flags.argtypes = None, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_shader_index_vars:=dll.nir_shader_index_vars).restype, nir_shader_index_vars.argtypes = ctypes.c_uint32, [Pointer(nir_shader), nir_variable_mode]
-except AttributeError: pass
-
-try: (nir_function_impl_index_vars:=dll.nir_function_impl_index_vars).restype, nir_function_impl_index_vars.argtypes = ctypes.c_uint32, [Pointer(nir_function_impl)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_block), nir_foreach_src_cb, ctypes.c_void_p), ctypes.c_bool)
+def nir_foreach_phi_src_leaving_block(instr, cb, state): ...
+@dll.bind((nir_src,), Pointer(nir_const_value))
+def nir_src_as_const_value(src): ...
+@dll.bind((nir_src,), Pointer(ctypes.c_char))
+def nir_src_as_string(src): ...
+@dll.bind((nir_src,), ctypes.c_bool)
+def nir_src_is_always_uniform(src): ...
+@dll.bind((nir_src, nir_src), ctypes.c_bool)
+def nir_srcs_equal(src1, src2): ...
+@dll.bind((Pointer(nir_instr), Pointer(nir_instr)), ctypes.c_bool)
+def nir_instrs_equal(instr1, instr2): ...
+@dll.bind((Pointer(nir_src),), Pointer(nir_block))
+def nir_src_get_block(src): ...
+@dll.bind((Pointer(nir_instr), Pointer(nir_src), Pointer(nir_def)), None)
+def nir_instr_init_src(instr, src, _ndef): ...
+@dll.bind((Pointer(nir_instr), Pointer(nir_src)), None)
+def nir_instr_clear_src(instr, src): ...
+@dll.bind((Pointer(nir_instr), Pointer(nir_src), Pointer(nir_src)), None)
+def nir_instr_move_src(dest_instr, dest, src): ...
+@dll.bind((Pointer(nir_instr), Pointer(nir_instr)), ctypes.c_bool)
+def nir_instr_is_before(first, second): ...
+@dll.bind((Pointer(nir_instr), Pointer(nir_def), ctypes.c_uint32, ctypes.c_uint32), None)
+def nir_def_init(instr, _ndef, num_components, bit_size): ...
+@dll.bind((Pointer(nir_def), Pointer(nir_def)), None)
+def nir_def_rewrite_uses(_ndef, new_ssa): ...
+@dll.bind((Pointer(nir_def), nir_src), None)
+def nir_def_rewrite_uses_src(_ndef, new_src): ...
+@dll.bind((Pointer(nir_def), Pointer(nir_def), Pointer(nir_instr)), None)
+def nir_def_rewrite_uses_after(_ndef, new_ssa, after_me): ...
+@dll.bind((Pointer(nir_src),), nir_component_mask_t)
+def nir_src_components_read(src): ...
+@dll.bind((Pointer(nir_def),), nir_component_mask_t)
+def nir_def_components_read(_ndef): ...
+@dll.bind((Pointer(nir_def),), ctypes.c_bool)
+def nir_def_all_uses_are_fsat(_ndef): ...
+@dll.bind((Pointer(nir_def),), ctypes.c_bool)
+def nir_def_all_uses_ignore_sign_bit(_ndef): ...
+@dll.bind((Pointer(nir_function_impl),), None)
+def nir_sort_unstructured_blocks(impl): ...
+@dll.bind((Pointer(nir_block),), Pointer(nir_block))
+def nir_block_unstructured_next(block): ...
+@dll.bind((Pointer(nir_function_impl),), Pointer(nir_block))
+def nir_unstructured_start_block(impl): ...
+@dll.bind((Pointer(nir_block),), Pointer(nir_block))
+def nir_block_cf_tree_next(block): ...
+@dll.bind((Pointer(nir_block),), Pointer(nir_block))
+def nir_block_cf_tree_prev(block): ...
+@dll.bind((Pointer(nir_cf_node),), Pointer(nir_block))
+def nir_cf_node_cf_tree_first(node): ...
+@dll.bind((Pointer(nir_cf_node),), Pointer(nir_block))
+def nir_cf_node_cf_tree_last(node): ...
+@dll.bind((Pointer(nir_cf_node),), Pointer(nir_block))
+def nir_cf_node_cf_tree_next(node): ...
+@dll.bind((Pointer(nir_cf_node),), Pointer(nir_block))
+def nir_cf_node_cf_tree_prev(node): ...
+@dll.bind((Pointer(nir_block),), Pointer(nir_if))
+def nir_block_get_following_if(block): ...
+@dll.bind((Pointer(nir_block),), Pointer(nir_loop))
+def nir_block_get_following_loop(block): ...
+@dll.bind((Pointer(nir_block), ctypes.c_void_p), Pointer(Pointer(nir_block)))
+def nir_block_get_predecessors_sorted(block, mem_ctx): ...
+@dll.bind((Pointer(nir_function_impl),), None)
+def nir_index_ssa_defs(impl): ...
+@dll.bind((Pointer(nir_function_impl),), ctypes.c_uint32)
+def nir_index_instrs(impl): ...
+@dll.bind((Pointer(nir_function_impl),), None)
+def nir_index_blocks(impl): ...
+@dll.bind((Pointer(nir_shader),), None)
+def nir_shader_clear_pass_flags(shader): ...
+@dll.bind((Pointer(nir_shader), nir_variable_mode), ctypes.c_uint32)
+def nir_shader_index_vars(shader, modes): ...
+@dll.bind((Pointer(nir_function_impl),), ctypes.c_uint32)
+def nir_function_impl_index_vars(impl): ...
 class struct__IO_FILE(Struct): pass
 FILE = struct__IO_FILE
 class struct__IO_marker(Struct): pass
@@ -3666,289 +3532,203 @@ setattr(struct__IO_FILE, '_freeres_buf', field(176, ctypes.c_void_p))
 setattr(struct__IO_FILE, '__pad5', field(184, size_t))
 setattr(struct__IO_FILE, '_mode', field(192, ctypes.c_int32))
 setattr(struct__IO_FILE, '_unused2', field(196, Array(ctypes.c_char, 20)))
-try: (nir_print_shader:=dll.nir_print_shader).restype, nir_print_shader.argtypes = None, [Pointer(nir_shader), Pointer(FILE)]
-except AttributeError: pass
-
-try: (nir_print_function_body:=dll.nir_print_function_body).restype, nir_print_function_body.argtypes = None, [Pointer(nir_function_impl), Pointer(FILE)]
-except AttributeError: pass
-
-try: (nir_print_shader_annotated:=dll.nir_print_shader_annotated).restype, nir_print_shader_annotated.argtypes = None, [Pointer(nir_shader), Pointer(FILE), Pointer(struct_hash_table)]
-except AttributeError: pass
-
-try: (nir_print_instr:=dll.nir_print_instr).restype, nir_print_instr.argtypes = None, [Pointer(nir_instr), Pointer(FILE)]
-except AttributeError: pass
-
-try: (nir_print_deref:=dll.nir_print_deref).restype, nir_print_deref.argtypes = None, [Pointer(nir_deref_instr), Pointer(FILE)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(FILE)), None)
+def nir_print_shader(shader, fp): ...
+@dll.bind((Pointer(nir_function_impl), Pointer(FILE)), None)
+def nir_print_function_body(impl, fp): ...
+@dll.bind((Pointer(nir_shader), Pointer(FILE), Pointer(struct_hash_table)), None)
+def nir_print_shader_annotated(shader, fp, errors): ...
+@dll.bind((Pointer(nir_instr), Pointer(FILE)), None)
+def nir_print_instr(instr, fp): ...
+@dll.bind((Pointer(nir_deref_instr), Pointer(FILE)), None)
+def nir_print_deref(deref, fp): ...
 enum_mesa_log_level = CEnum(ctypes.c_uint32)
 MESA_LOG_ERROR = enum_mesa_log_level.define('MESA_LOG_ERROR', 0)
 MESA_LOG_WARN = enum_mesa_log_level.define('MESA_LOG_WARN', 1)
 MESA_LOG_INFO = enum_mesa_log_level.define('MESA_LOG_INFO', 2)
 MESA_LOG_DEBUG = enum_mesa_log_level.define('MESA_LOG_DEBUG', 3)
 
-try: (nir_log_shader_annotated_tagged:=dll.nir_log_shader_annotated_tagged).restype, nir_log_shader_annotated_tagged.argtypes = None, [enum_mesa_log_level, Pointer(ctypes.c_char), Pointer(nir_shader), Pointer(struct_hash_table)]
-except AttributeError: pass
-
-try: (nir_shader_as_str:=dll.nir_shader_as_str).restype, nir_shader_as_str.argtypes = Pointer(ctypes.c_char), [Pointer(nir_shader), ctypes.c_void_p]
-except AttributeError: pass
-
-try: (nir_shader_as_str_annotated:=dll.nir_shader_as_str_annotated).restype, nir_shader_as_str_annotated.argtypes = Pointer(ctypes.c_char), [Pointer(nir_shader), Pointer(struct_hash_table), ctypes.c_void_p]
-except AttributeError: pass
-
-try: (nir_instr_as_str:=dll.nir_instr_as_str).restype, nir_instr_as_str.argtypes = Pointer(ctypes.c_char), [Pointer(nir_instr), ctypes.c_void_p]
-except AttributeError: pass
-
-try: (nir_shader_gather_debug_info:=dll.nir_shader_gather_debug_info).restype, nir_shader_gather_debug_info.argtypes = Pointer(ctypes.c_char), [Pointer(nir_shader), Pointer(ctypes.c_char), uint32_t]
-except AttributeError: pass
-
-try: (nir_instr_clone:=dll.nir_instr_clone).restype, nir_instr_clone.argtypes = Pointer(nir_instr), [Pointer(nir_shader), Pointer(nir_instr)]
-except AttributeError: pass
-
-try: (nir_instr_clone_deep:=dll.nir_instr_clone_deep).restype, nir_instr_clone_deep.argtypes = Pointer(nir_instr), [Pointer(nir_shader), Pointer(nir_instr), Pointer(struct_hash_table)]
-except AttributeError: pass
-
-try: (nir_alu_instr_clone:=dll.nir_alu_instr_clone).restype, nir_alu_instr_clone.argtypes = Pointer(nir_alu_instr), [Pointer(nir_shader), Pointer(nir_alu_instr)]
-except AttributeError: pass
-
-try: (nir_shader_clone:=dll.nir_shader_clone).restype, nir_shader_clone.argtypes = Pointer(nir_shader), [ctypes.c_void_p, Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_function_clone:=dll.nir_function_clone).restype, nir_function_clone.argtypes = Pointer(nir_function), [Pointer(nir_shader), Pointer(nir_function)]
-except AttributeError: pass
-
-try: (nir_function_impl_clone:=dll.nir_function_impl_clone).restype, nir_function_impl_clone.argtypes = Pointer(nir_function_impl), [Pointer(nir_shader), Pointer(nir_function_impl)]
-except AttributeError: pass
-
-try: (nir_function_impl_clone_remap_globals:=dll.nir_function_impl_clone_remap_globals).restype, nir_function_impl_clone_remap_globals.argtypes = Pointer(nir_function_impl), [Pointer(nir_shader), Pointer(nir_function_impl), Pointer(struct_hash_table)]
-except AttributeError: pass
-
-try: (nir_constant_clone:=dll.nir_constant_clone).restype, nir_constant_clone.argtypes = Pointer(nir_constant), [Pointer(nir_constant), Pointer(nir_variable)]
-except AttributeError: pass
-
-try: (nir_variable_clone:=dll.nir_variable_clone).restype, nir_variable_clone.argtypes = Pointer(nir_variable), [Pointer(nir_variable), Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_shader_replace:=dll.nir_shader_replace).restype, nir_shader_replace.argtypes = None, [Pointer(nir_shader), Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_shader_serialize_deserialize:=dll.nir_shader_serialize_deserialize).restype, nir_shader_serialize_deserialize.argtypes = None, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_validate_shader:=dll.nir_validate_shader).restype, nir_validate_shader.argtypes = None, [Pointer(nir_shader), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (nir_validate_ssa_dominance:=dll.nir_validate_ssa_dominance).restype, nir_validate_ssa_dominance.argtypes = None, [Pointer(nir_shader), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (nir_metadata_set_validation_flag:=dll.nir_metadata_set_validation_flag).restype, nir_metadata_set_validation_flag.argtypes = None, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_metadata_check_validation_flag:=dll.nir_metadata_check_validation_flag).restype, nir_metadata_check_validation_flag.argtypes = None, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_metadata_require_all:=dll.nir_metadata_require_all).restype, nir_metadata_require_all.argtypes = None, [Pointer(nir_shader)]
-except AttributeError: pass
-
+@dll.bind((enum_mesa_log_level, Pointer(ctypes.c_char), Pointer(nir_shader), Pointer(struct_hash_table)), None)
+def nir_log_shader_annotated_tagged(level, tag, shader, annotations): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_void_p), Pointer(ctypes.c_char))
+def nir_shader_as_str(nir, mem_ctx): ...
+@dll.bind((Pointer(nir_shader), Pointer(struct_hash_table), ctypes.c_void_p), Pointer(ctypes.c_char))
+def nir_shader_as_str_annotated(nir, annotations, mem_ctx): ...
+@dll.bind((Pointer(nir_instr), ctypes.c_void_p), Pointer(ctypes.c_char))
+def nir_instr_as_str(instr, mem_ctx): ...
+@dll.bind((Pointer(nir_shader), Pointer(ctypes.c_char), uint32_t), Pointer(ctypes.c_char))
+def nir_shader_gather_debug_info(shader, filename, first_line): ...
+@dll.bind((Pointer(nir_shader), Pointer(nir_instr)), Pointer(nir_instr))
+def nir_instr_clone(s, orig): ...
+@dll.bind((Pointer(nir_shader), Pointer(nir_instr), Pointer(struct_hash_table)), Pointer(nir_instr))
+def nir_instr_clone_deep(s, orig, remap_table): ...
+@dll.bind((Pointer(nir_shader), Pointer(nir_alu_instr)), Pointer(nir_alu_instr))
+def nir_alu_instr_clone(s, orig): ...
+@dll.bind((ctypes.c_void_p, Pointer(nir_shader)), Pointer(nir_shader))
+def nir_shader_clone(mem_ctx, s): ...
+@dll.bind((Pointer(nir_shader), Pointer(nir_function)), Pointer(nir_function))
+def nir_function_clone(ns, fxn): ...
+@dll.bind((Pointer(nir_shader), Pointer(nir_function_impl)), Pointer(nir_function_impl))
+def nir_function_impl_clone(shader, fi): ...
+@dll.bind((Pointer(nir_shader), Pointer(nir_function_impl), Pointer(struct_hash_table)), Pointer(nir_function_impl))
+def nir_function_impl_clone_remap_globals(shader, fi, remap_table): ...
+@dll.bind((Pointer(nir_constant), Pointer(nir_variable)), Pointer(nir_constant))
+def nir_constant_clone(c, var): ...
+@dll.bind((Pointer(nir_variable), Pointer(nir_shader)), Pointer(nir_variable))
+def nir_variable_clone(c, shader): ...
+@dll.bind((Pointer(nir_shader), Pointer(nir_shader)), None)
+def nir_shader_replace(dest, src): ...
+@dll.bind((Pointer(nir_shader),), None)
+def nir_shader_serialize_deserialize(s): ...
+@dll.bind((Pointer(nir_shader), Pointer(ctypes.c_char)), None)
+def nir_validate_shader(shader, when): ...
+@dll.bind((Pointer(nir_shader), Pointer(ctypes.c_char)), None)
+def nir_validate_ssa_dominance(shader, when): ...
+@dll.bind((Pointer(nir_shader),), None)
+def nir_metadata_set_validation_flag(shader): ...
+@dll.bind((Pointer(nir_shader),), None)
+def nir_metadata_check_validation_flag(shader): ...
+@dll.bind((Pointer(nir_shader),), None)
+def nir_metadata_require_all(shader): ...
 nir_instr_writemask_filter_cb = ctypes.CFUNCTYPE(ctypes.c_bool, Pointer(struct_nir_instr), ctypes.c_uint32, ctypes.c_void_p)
 class struct_nir_builder(Struct): pass
 nir_lower_instr_cb = ctypes.CFUNCTYPE(Pointer(struct_nir_def), Pointer(struct_nir_builder), Pointer(struct_nir_instr), ctypes.c_void_p)
-try: (nir_function_impl_lower_instructions:=dll.nir_function_impl_lower_instructions).restype, nir_function_impl_lower_instructions.argtypes = ctypes.c_bool, [Pointer(nir_function_impl), nir_instr_filter_cb, nir_lower_instr_cb, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (nir_shader_lower_instructions:=dll.nir_shader_lower_instructions).restype, nir_shader_lower_instructions.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_instr_filter_cb, nir_lower_instr_cb, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (nir_calc_dominance_impl:=dll.nir_calc_dominance_impl).restype, nir_calc_dominance_impl.argtypes = None, [Pointer(nir_function_impl)]
-except AttributeError: pass
-
-try: (nir_calc_dominance:=dll.nir_calc_dominance).restype, nir_calc_dominance.argtypes = None, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_dominance_lca:=dll.nir_dominance_lca).restype, nir_dominance_lca.argtypes = Pointer(nir_block), [Pointer(nir_block), Pointer(nir_block)]
-except AttributeError: pass
-
-try: (nir_block_dominates:=dll.nir_block_dominates).restype, nir_block_dominates.argtypes = ctypes.c_bool, [Pointer(nir_block), Pointer(nir_block)]
-except AttributeError: pass
-
-try: (nir_block_is_unreachable:=dll.nir_block_is_unreachable).restype, nir_block_is_unreachable.argtypes = ctypes.c_bool, [Pointer(nir_block)]
-except AttributeError: pass
-
-try: (nir_dump_dom_tree_impl:=dll.nir_dump_dom_tree_impl).restype, nir_dump_dom_tree_impl.argtypes = None, [Pointer(nir_function_impl), Pointer(FILE)]
-except AttributeError: pass
-
-try: (nir_dump_dom_tree:=dll.nir_dump_dom_tree).restype, nir_dump_dom_tree.argtypes = None, [Pointer(nir_shader), Pointer(FILE)]
-except AttributeError: pass
-
-try: (nir_dump_dom_frontier_impl:=dll.nir_dump_dom_frontier_impl).restype, nir_dump_dom_frontier_impl.argtypes = None, [Pointer(nir_function_impl), Pointer(FILE)]
-except AttributeError: pass
-
-try: (nir_dump_dom_frontier:=dll.nir_dump_dom_frontier).restype, nir_dump_dom_frontier.argtypes = None, [Pointer(nir_shader), Pointer(FILE)]
-except AttributeError: pass
-
-try: (nir_dump_cfg_impl:=dll.nir_dump_cfg_impl).restype, nir_dump_cfg_impl.argtypes = None, [Pointer(nir_function_impl), Pointer(FILE)]
-except AttributeError: pass
-
-try: (nir_dump_cfg:=dll.nir_dump_cfg).restype, nir_dump_cfg.argtypes = None, [Pointer(nir_shader), Pointer(FILE)]
-except AttributeError: pass
-
-try: (nir_gs_count_vertices_and_primitives:=dll.nir_gs_count_vertices_and_primitives).restype, nir_gs_count_vertices_and_primitives.argtypes = None, [Pointer(nir_shader), Pointer(ctypes.c_int32), Pointer(ctypes.c_int32), Pointer(ctypes.c_int32), ctypes.c_uint32]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_function_impl), nir_instr_filter_cb, nir_lower_instr_cb, ctypes.c_void_p), ctypes.c_bool)
+def nir_function_impl_lower_instructions(impl, filter, lower, cb_data): ...
+@dll.bind((Pointer(nir_shader), nir_instr_filter_cb, nir_lower_instr_cb, ctypes.c_void_p), ctypes.c_bool)
+def nir_shader_lower_instructions(shader, filter, lower, cb_data): ...
+@dll.bind((Pointer(nir_function_impl),), None)
+def nir_calc_dominance_impl(impl): ...
+@dll.bind((Pointer(nir_shader),), None)
+def nir_calc_dominance(shader): ...
+@dll.bind((Pointer(nir_block), Pointer(nir_block)), Pointer(nir_block))
+def nir_dominance_lca(b1, b2): ...
+@dll.bind((Pointer(nir_block), Pointer(nir_block)), ctypes.c_bool)
+def nir_block_dominates(parent, child): ...
+@dll.bind((Pointer(nir_block),), ctypes.c_bool)
+def nir_block_is_unreachable(block): ...
+@dll.bind((Pointer(nir_function_impl), Pointer(FILE)), None)
+def nir_dump_dom_tree_impl(impl, fp): ...
+@dll.bind((Pointer(nir_shader), Pointer(FILE)), None)
+def nir_dump_dom_tree(shader, fp): ...
+@dll.bind((Pointer(nir_function_impl), Pointer(FILE)), None)
+def nir_dump_dom_frontier_impl(impl, fp): ...
+@dll.bind((Pointer(nir_shader), Pointer(FILE)), None)
+def nir_dump_dom_frontier(shader, fp): ...
+@dll.bind((Pointer(nir_function_impl), Pointer(FILE)), None)
+def nir_dump_cfg_impl(impl, fp): ...
+@dll.bind((Pointer(nir_shader), Pointer(FILE)), None)
+def nir_dump_cfg(shader, fp): ...
+@dll.bind((Pointer(nir_shader), Pointer(ctypes.c_int32), Pointer(ctypes.c_int32), Pointer(ctypes.c_int32), ctypes.c_uint32), None)
+def nir_gs_count_vertices_and_primitives(shader, out_vtxcnt, out_prmcnt, out_decomposed_prmcnt, num_streams): ...
 nir_load_grouping = CEnum(ctypes.c_uint32)
 nir_group_all = nir_load_grouping.define('nir_group_all', 0)
 nir_group_same_resource_only = nir_load_grouping.define('nir_group_same_resource_only', 1)
 
-try: (nir_group_loads:=dll.nir_group_loads).restype, nir_group_loads.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_load_grouping, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_shrink_vec_array_vars:=dll.nir_shrink_vec_array_vars).restype, nir_shrink_vec_array_vars.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_variable_mode]
-except AttributeError: pass
-
-try: (nir_split_array_vars:=dll.nir_split_array_vars).restype, nir_split_array_vars.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_variable_mode]
-except AttributeError: pass
-
-try: (nir_split_var_copies:=dll.nir_split_var_copies).restype, nir_split_var_copies.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_split_per_member_structs:=dll.nir_split_per_member_structs).restype, nir_split_per_member_structs.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_split_struct_vars:=dll.nir_split_struct_vars).restype, nir_split_struct_vars.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_variable_mode]
-except AttributeError: pass
-
-try: (nir_lower_returns_impl:=dll.nir_lower_returns_impl).restype, nir_lower_returns_impl.argtypes = ctypes.c_bool, [Pointer(nir_function_impl)]
-except AttributeError: pass
-
-try: (nir_lower_returns:=dll.nir_lower_returns).restype, nir_lower_returns.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), nir_load_grouping, ctypes.c_uint32), ctypes.c_bool)
+def nir_group_loads(shader, grouping, max_distance): ...
+@dll.bind((Pointer(nir_shader), nir_variable_mode), ctypes.c_bool)
+def nir_shrink_vec_array_vars(shader, modes): ...
+@dll.bind((Pointer(nir_shader), nir_variable_mode), ctypes.c_bool)
+def nir_split_array_vars(shader, modes): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_split_var_copies(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_split_per_member_structs(shader): ...
+@dll.bind((Pointer(nir_shader), nir_variable_mode), ctypes.c_bool)
+def nir_split_struct_vars(shader, modes): ...
+@dll.bind((Pointer(nir_function_impl),), ctypes.c_bool)
+def nir_lower_returns_impl(impl): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_returns(shader): ...
 nir_builder = struct_nir_builder
-try: (nir_inline_function_impl:=dll.nir_inline_function_impl).restype, nir_inline_function_impl.argtypes = Pointer(nir_def), [Pointer(nir_builder), Pointer(nir_function_impl), Pointer(Pointer(nir_def)), Pointer(struct_hash_table)]
-except AttributeError: pass
-
-try: (nir_inline_functions:=dll.nir_inline_functions).restype, nir_inline_functions.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_cleanup_functions:=dll.nir_cleanup_functions).restype, nir_cleanup_functions.argtypes = None, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_link_shader_functions:=dll.nir_link_shader_functions).restype, nir_link_shader_functions.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_calls_to_builtins:=dll.nir_lower_calls_to_builtins).restype, nir_lower_calls_to_builtins.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_find_inlinable_uniforms:=dll.nir_find_inlinable_uniforms).restype, nir_find_inlinable_uniforms.argtypes = None, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_inline_uniforms:=dll.nir_inline_uniforms).restype, nir_inline_uniforms.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_uint32, Pointer(uint32_t), Pointer(uint16_t)]
-except AttributeError: pass
-
-try: (nir_collect_src_uniforms:=dll.nir_collect_src_uniforms).restype, nir_collect_src_uniforms.argtypes = ctypes.c_bool, [Pointer(nir_src), ctypes.c_int32, Pointer(uint32_t), Pointer(uint8_t), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_add_inlinable_uniforms:=dll.nir_add_inlinable_uniforms).restype, nir_add_inlinable_uniforms.argtypes = None, [Pointer(nir_src), Pointer(nir_loop_info), Pointer(uint32_t), Pointer(uint8_t), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_propagate_invariant:=dll.nir_propagate_invariant).restype, nir_propagate_invariant.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_lower_var_copy_instr:=dll.nir_lower_var_copy_instr).restype, nir_lower_var_copy_instr.argtypes = None, [Pointer(nir_intrinsic_instr), Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_deref_copy_instr:=dll.nir_lower_deref_copy_instr).restype, nir_lower_deref_copy_instr.argtypes = None, [Pointer(nir_builder), Pointer(nir_intrinsic_instr)]
-except AttributeError: pass
-
-try: (nir_lower_var_copies:=dll.nir_lower_var_copies).restype, nir_lower_var_copies.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_memcpy:=dll.nir_opt_memcpy).restype, nir_opt_memcpy.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_memcpy:=dll.nir_lower_memcpy).restype, nir_lower_memcpy.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_fixup_deref_modes:=dll.nir_fixup_deref_modes).restype, nir_fixup_deref_modes.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_fixup_deref_types:=dll.nir_fixup_deref_types).restype, nir_fixup_deref_types.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_global_vars_to_local:=dll.nir_lower_global_vars_to_local).restype, nir_lower_global_vars_to_local.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_constant_to_temp:=dll.nir_lower_constant_to_temp).restype, nir_lower_constant_to_temp.argtypes = None, [Pointer(nir_shader)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_builder), Pointer(nir_function_impl), Pointer(Pointer(nir_def)), Pointer(struct_hash_table)), Pointer(nir_def))
+def nir_inline_function_impl(b, impl, params, shader_var_remap): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_inline_functions(shader): ...
+@dll.bind((Pointer(nir_shader),), None)
+def nir_cleanup_functions(shader): ...
+@dll.bind((Pointer(nir_shader), Pointer(nir_shader)), ctypes.c_bool)
+def nir_link_shader_functions(shader, link_shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_calls_to_builtins(s): ...
+@dll.bind((Pointer(nir_shader),), None)
+def nir_find_inlinable_uniforms(shader): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_uint32, Pointer(uint32_t), Pointer(uint16_t)), ctypes.c_bool)
+def nir_inline_uniforms(shader, num_uniforms, uniform_values, uniform_dw_offsets): ...
+@dll.bind((Pointer(nir_src), ctypes.c_int32, Pointer(uint32_t), Pointer(uint8_t), ctypes.c_uint32, ctypes.c_uint32), ctypes.c_bool)
+def nir_collect_src_uniforms(src, component, uni_offsets, num_offsets, max_num_bo, max_offset): ...
+@dll.bind((Pointer(nir_src), Pointer(nir_loop_info), Pointer(uint32_t), Pointer(uint8_t), ctypes.c_uint32, ctypes.c_uint32), None)
+def nir_add_inlinable_uniforms(cond, info, uni_offsets, num_offsets, max_num_bo, max_offset): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_bool), ctypes.c_bool)
+def nir_propagate_invariant(shader, invariant_prim): ...
+@dll.bind((Pointer(nir_intrinsic_instr), Pointer(nir_shader)), None)
+def nir_lower_var_copy_instr(copy, shader): ...
+@dll.bind((Pointer(nir_builder), Pointer(nir_intrinsic_instr)), None)
+def nir_lower_deref_copy_instr(b, copy): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_var_copies(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_memcpy(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_memcpy(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_fixup_deref_modes(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_fixup_deref_types(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_global_vars_to_local(shader): ...
+@dll.bind((Pointer(nir_shader),), None)
+def nir_lower_constant_to_temp(shader): ...
 nir_lower_array_deref_of_vec_options = CEnum(ctypes.c_uint32)
 nir_lower_direct_array_deref_of_vec_load = nir_lower_array_deref_of_vec_options.define('nir_lower_direct_array_deref_of_vec_load', 1)
 nir_lower_indirect_array_deref_of_vec_load = nir_lower_array_deref_of_vec_options.define('nir_lower_indirect_array_deref_of_vec_load', 2)
 nir_lower_direct_array_deref_of_vec_store = nir_lower_array_deref_of_vec_options.define('nir_lower_direct_array_deref_of_vec_store', 4)
 nir_lower_indirect_array_deref_of_vec_store = nir_lower_array_deref_of_vec_options.define('nir_lower_indirect_array_deref_of_vec_store', 8)
 
-try: (nir_lower_array_deref_of_vec:=dll.nir_lower_array_deref_of_vec).restype, nir_lower_array_deref_of_vec.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_variable_mode, ctypes.CFUNCTYPE(ctypes.c_bool, Pointer(nir_variable)), nir_lower_array_deref_of_vec_options]
-except AttributeError: pass
-
-try: (nir_lower_indirect_derefs:=dll.nir_lower_indirect_derefs).restype, nir_lower_indirect_derefs.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_variable_mode, uint32_t]
-except AttributeError: pass
-
-try: (nir_lower_indirect_var_derefs:=dll.nir_lower_indirect_var_derefs).restype, nir_lower_indirect_var_derefs.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(struct_set)]
-except AttributeError: pass
-
-try: (nir_lower_locals_to_regs:=dll.nir_lower_locals_to_regs).restype, nir_lower_locals_to_regs.argtypes = ctypes.c_bool, [Pointer(nir_shader), uint8_t]
-except AttributeError: pass
-
-try: (nir_lower_io_vars_to_temporaries:=dll.nir_lower_io_vars_to_temporaries).restype, nir_lower_io_vars_to_temporaries.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_function_impl), ctypes.c_bool, ctypes.c_bool]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), nir_variable_mode, ctypes.CFUNCTYPE(ctypes.c_bool, Pointer(nir_variable)), nir_lower_array_deref_of_vec_options), ctypes.c_bool)
+def nir_lower_array_deref_of_vec(shader, modes, filter, options): ...
+@dll.bind((Pointer(nir_shader), nir_variable_mode, uint32_t), ctypes.c_bool)
+def nir_lower_indirect_derefs(shader, modes, max_lower_array_len): ...
+@dll.bind((Pointer(nir_shader), Pointer(struct_set)), ctypes.c_bool)
+def nir_lower_indirect_var_derefs(shader, vars): ...
+@dll.bind((Pointer(nir_shader), uint8_t), ctypes.c_bool)
+def nir_lower_locals_to_regs(shader, bool_bitsize): ...
+@dll.bind((Pointer(nir_shader), Pointer(nir_function_impl), ctypes.c_bool, ctypes.c_bool), ctypes.c_bool)
+def nir_lower_io_vars_to_temporaries(shader, entrypoint, outputs, inputs): ...
 glsl_type_size_align_func = ctypes.CFUNCTYPE(None, Pointer(struct_glsl_type), Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32))
-try: (nir_lower_vars_to_scratch:=dll.nir_lower_vars_to_scratch).restype, nir_lower_vars_to_scratch.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_variable_mode, ctypes.c_int32, glsl_type_size_align_func, glsl_type_size_align_func]
-except AttributeError: pass
-
-try: (nir_lower_scratch_to_var:=dll.nir_lower_scratch_to_var).restype, nir_lower_scratch_to_var.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_clip_halfz:=dll.nir_lower_clip_halfz).restype, nir_lower_clip_halfz.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_shader_gather_info:=dll.nir_shader_gather_info).restype, nir_shader_gather_info.argtypes = None, [Pointer(nir_shader), Pointer(nir_function_impl)]
-except AttributeError: pass
-
-try: (nir_gather_types:=dll.nir_gather_types).restype, nir_gather_types.argtypes = None, [Pointer(nir_function_impl), Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32)]
-except AttributeError: pass
-
-try: (nir_remove_unused_varyings:=dll.nir_remove_unused_varyings).restype, nir_remove_unused_varyings.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_remove_unused_io_vars:=dll.nir_remove_unused_io_vars).restype, nir_remove_unused_io_vars.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_variable_mode, Pointer(uint64_t), Pointer(uint64_t)]
-except AttributeError: pass
-
-try: (nir_compact_varyings:=dll.nir_compact_varyings).restype, nir_compact_varyings.argtypes = None, [Pointer(nir_shader), Pointer(nir_shader), ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_link_xfb_varyings:=dll.nir_link_xfb_varyings).restype, nir_link_xfb_varyings.argtypes = None, [Pointer(nir_shader), Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_link_opt_varyings:=dll.nir_link_opt_varyings).restype, nir_link_opt_varyings.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_link_varying_precision:=dll.nir_link_varying_precision).restype, nir_link_varying_precision.argtypes = None, [Pointer(nir_shader), Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_clone_uniform_variable:=dll.nir_clone_uniform_variable).restype, nir_clone_uniform_variable.argtypes = Pointer(nir_variable), [Pointer(nir_shader), Pointer(nir_variable), ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_clone_deref_instr:=dll.nir_clone_deref_instr).restype, nir_clone_deref_instr.argtypes = Pointer(nir_deref_instr), [Pointer(nir_builder), Pointer(nir_variable), Pointer(nir_deref_instr)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), nir_variable_mode, ctypes.c_int32, glsl_type_size_align_func, glsl_type_size_align_func), ctypes.c_bool)
+def nir_lower_vars_to_scratch(shader, modes, size_threshold, variable_size_align, scratch_layout_size_align): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_scratch_to_var(nir): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_clip_halfz(shader): ...
+@dll.bind((Pointer(nir_shader), Pointer(nir_function_impl)), None)
+def nir_shader_gather_info(shader, entrypoint): ...
+@dll.bind((Pointer(nir_function_impl), Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32)), None)
+def nir_gather_types(impl, float_types, int_types): ...
+@dll.bind((Pointer(nir_shader), Pointer(nir_shader)), ctypes.c_bool)
+def nir_remove_unused_varyings(producer, consumer): ...
+@dll.bind((Pointer(nir_shader), nir_variable_mode, Pointer(uint64_t), Pointer(uint64_t)), ctypes.c_bool)
+def nir_remove_unused_io_vars(shader, mode, used_by_other_stage, used_by_other_stage_patches): ...
+@dll.bind((Pointer(nir_shader), Pointer(nir_shader), ctypes.c_bool), None)
+def nir_compact_varyings(producer, consumer, default_to_smooth_interp): ...
+@dll.bind((Pointer(nir_shader), Pointer(nir_shader)), None)
+def nir_link_xfb_varyings(producer, consumer): ...
+@dll.bind((Pointer(nir_shader), Pointer(nir_shader)), ctypes.c_bool)
+def nir_link_opt_varyings(producer, consumer): ...
+@dll.bind((Pointer(nir_shader), Pointer(nir_shader)), None)
+def nir_link_varying_precision(producer, consumer): ...
+@dll.bind((Pointer(nir_shader), Pointer(nir_variable), ctypes.c_bool), Pointer(nir_variable))
+def nir_clone_uniform_variable(nir, uniform, spirv): ...
+@dll.bind((Pointer(nir_builder), Pointer(nir_variable), Pointer(nir_deref_instr)), Pointer(nir_deref_instr))
+def nir_clone_deref_instr(b, var, deref): ...
 nir_opt_varyings_progress = CEnum(ctypes.c_uint32)
 nir_progress_producer = nir_opt_varyings_progress.define('nir_progress_producer', 1)
 nir_progress_consumer = nir_opt_varyings_progress.define('nir_progress_consumer', 2)
 
-try: (nir_opt_varyings:=dll.nir_opt_varyings).restype, nir_opt_varyings.argtypes = nir_opt_varyings_progress, [Pointer(nir_shader), Pointer(nir_shader), ctypes.c_bool, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(nir_shader), ctypes.c_bool, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool), nir_opt_varyings_progress)
+def nir_opt_varyings(producer, consumer, spirv, max_uniform_components, max_ubos_per_stage, debug_no_algebraic): ...
 gl_varying_slot = CEnum(ctypes.c_uint32)
 VARYING_SLOT_POS = gl_varying_slot.define('VARYING_SLOT_POS', 0)
 VARYING_SLOT_COL0 = gl_varying_slot.define('VARYING_SLOT_COL0', 1)
@@ -4069,66 +3849,48 @@ VARYING_SLOT_VAR14_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR14_16BIT', 11
 VARYING_SLOT_VAR15_16BIT = gl_varying_slot.define('VARYING_SLOT_VAR15_16BIT', 111)
 NUM_TOTAL_VARYING_SLOTS = gl_varying_slot.define('NUM_TOTAL_VARYING_SLOTS', 112)
 
-try: (nir_slot_is_sysval_output:=dll.nir_slot_is_sysval_output).restype, nir_slot_is_sysval_output.argtypes = ctypes.c_bool, [gl_varying_slot, gl_shader_stage]
-except AttributeError: pass
-
-try: (nir_slot_is_varying:=dll.nir_slot_is_varying).restype, nir_slot_is_varying.argtypes = ctypes.c_bool, [gl_varying_slot, gl_shader_stage]
-except AttributeError: pass
-
-try: (nir_slot_is_sysval_output_and_varying:=dll.nir_slot_is_sysval_output_and_varying).restype, nir_slot_is_sysval_output_and_varying.argtypes = ctypes.c_bool, [gl_varying_slot, gl_shader_stage]
-except AttributeError: pass
-
-try: (nir_remove_varying:=dll.nir_remove_varying).restype, nir_remove_varying.argtypes = ctypes.c_bool, [Pointer(nir_intrinsic_instr), gl_shader_stage]
-except AttributeError: pass
-
-try: (nir_remove_sysval_output:=dll.nir_remove_sysval_output).restype, nir_remove_sysval_output.argtypes = ctypes.c_bool, [Pointer(nir_intrinsic_instr), gl_shader_stage]
-except AttributeError: pass
-
-try: (nir_lower_amul:=dll.nir_lower_amul).restype, nir_lower_amul.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.CFUNCTYPE(ctypes.c_int32, Pointer(struct_glsl_type), ctypes.c_bool)]
-except AttributeError: pass
-
-try: (nir_lower_ubo_vec4:=dll.nir_lower_ubo_vec4).restype, nir_lower_ubo_vec4.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_sort_variables_by_location:=dll.nir_sort_variables_by_location).restype, nir_sort_variables_by_location.argtypes = None, [Pointer(nir_shader), nir_variable_mode]
-except AttributeError: pass
-
-try: (nir_assign_io_var_locations:=dll.nir_assign_io_var_locations).restype, nir_assign_io_var_locations.argtypes = None, [Pointer(nir_shader), nir_variable_mode, Pointer(ctypes.c_uint32), gl_shader_stage]
-except AttributeError: pass
-
-try: (nir_opt_clip_cull_const:=dll.nir_opt_clip_cull_const).restype, nir_opt_clip_cull_const.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
+@dll.bind((gl_varying_slot, gl_shader_stage), ctypes.c_bool)
+def nir_slot_is_sysval_output(slot, next_shader): ...
+@dll.bind((gl_varying_slot, gl_shader_stage), ctypes.c_bool)
+def nir_slot_is_varying(slot, next_shader): ...
+@dll.bind((gl_varying_slot, gl_shader_stage), ctypes.c_bool)
+def nir_slot_is_sysval_output_and_varying(slot, next_shader): ...
+@dll.bind((Pointer(nir_intrinsic_instr), gl_shader_stage), ctypes.c_bool)
+def nir_remove_varying(intr, next_shader): ...
+@dll.bind((Pointer(nir_intrinsic_instr), gl_shader_stage), ctypes.c_bool)
+def nir_remove_sysval_output(intr, next_shader): ...
+@dll.bind((Pointer(nir_shader), ctypes.CFUNCTYPE(ctypes.c_int32, Pointer(struct_glsl_type), ctypes.c_bool)), ctypes.c_bool)
+def nir_lower_amul(shader, type_size): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_ubo_vec4(shader): ...
+@dll.bind((Pointer(nir_shader), nir_variable_mode), None)
+def nir_sort_variables_by_location(shader, mode): ...
+@dll.bind((Pointer(nir_shader), nir_variable_mode, Pointer(ctypes.c_uint32), gl_shader_stage), None)
+def nir_assign_io_var_locations(shader, mode, size, stage): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_clip_cull_const(shader): ...
 nir_lower_io_options = CEnum(ctypes.c_uint32)
 nir_lower_io_lower_64bit_to_32 = nir_lower_io_options.define('nir_lower_io_lower_64bit_to_32', 1)
 nir_lower_io_lower_64bit_float_to_32 = nir_lower_io_options.define('nir_lower_io_lower_64bit_float_to_32', 2)
 nir_lower_io_lower_64bit_to_32_new = nir_lower_io_options.define('nir_lower_io_lower_64bit_to_32_new', 4)
 nir_lower_io_use_interpolated_input_intrinsics = nir_lower_io_options.define('nir_lower_io_use_interpolated_input_intrinsics', 8)
 
-try: (nir_lower_io:=dll.nir_lower_io).restype, nir_lower_io.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_variable_mode, ctypes.CFUNCTYPE(ctypes.c_int32, Pointer(struct_glsl_type), ctypes.c_bool), nir_lower_io_options]
-except AttributeError: pass
-
-try: (nir_io_add_const_offset_to_base:=dll.nir_io_add_const_offset_to_base).restype, nir_io_add_const_offset_to_base.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_variable_mode]
-except AttributeError: pass
-
-try: (nir_lower_io_passes:=dll.nir_lower_io_passes).restype, nir_lower_io_passes.argtypes = None, [Pointer(nir_shader), ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_io_add_intrinsic_xfb_info:=dll.nir_io_add_intrinsic_xfb_info).restype, nir_io_add_intrinsic_xfb_info.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_io_indirect_loads:=dll.nir_lower_io_indirect_loads).restype, nir_lower_io_indirect_loads.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_variable_mode]
-except AttributeError: pass
-
-try: (nir_lower_vars_to_explicit_types:=dll.nir_lower_vars_to_explicit_types).restype, nir_lower_vars_to_explicit_types.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_variable_mode, glsl_type_size_align_func]
-except AttributeError: pass
-
-try: (nir_gather_explicit_io_initializers:=dll.nir_gather_explicit_io_initializers).restype, nir_gather_explicit_io_initializers.argtypes = None, [Pointer(nir_shader), ctypes.c_void_p, size_t, nir_variable_mode]
-except AttributeError: pass
-
-try: (nir_lower_vec3_to_vec4:=dll.nir_lower_vec3_to_vec4).restype, nir_lower_vec3_to_vec4.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_variable_mode]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), nir_variable_mode, ctypes.CFUNCTYPE(ctypes.c_int32, Pointer(struct_glsl_type), ctypes.c_bool), nir_lower_io_options), ctypes.c_bool)
+def nir_lower_io(shader, modes, type_size, _3): ...
+@dll.bind((Pointer(nir_shader), nir_variable_mode), ctypes.c_bool)
+def nir_io_add_const_offset_to_base(nir, modes): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_bool), None)
+def nir_lower_io_passes(nir, renumber_vs_inputs): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_io_add_intrinsic_xfb_info(nir): ...
+@dll.bind((Pointer(nir_shader), nir_variable_mode), ctypes.c_bool)
+def nir_lower_io_indirect_loads(nir, modes): ...
+@dll.bind((Pointer(nir_shader), nir_variable_mode, glsl_type_size_align_func), ctypes.c_bool)
+def nir_lower_vars_to_explicit_types(shader, modes, type_info): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_void_p, size_t, nir_variable_mode), None)
+def nir_gather_explicit_io_initializers(shader, dst, dst_size, mode): ...
+@dll.bind((Pointer(nir_shader), nir_variable_mode), ctypes.c_bool)
+def nir_lower_vec3_to_vec4(shader, modes): ...
 nir_address_format = CEnum(ctypes.c_uint32)
 nir_address_format_32bit_global = nir_address_format.define('nir_address_format_32bit_global', 0)
 nir_address_format_64bit_global = nir_address_format.define('nir_address_format_64bit_global', 1)
@@ -4143,39 +3905,28 @@ nir_address_format_32bit_offset = nir_address_format.define('nir_address_format_
 nir_address_format_32bit_offset_as_64bit = nir_address_format.define('nir_address_format_32bit_offset_as_64bit', 10)
 nir_address_format_logical = nir_address_format.define('nir_address_format_logical', 11)
 
-try: (nir_address_format_bit_size:=dll.nir_address_format_bit_size).restype, nir_address_format_bit_size.argtypes = ctypes.c_uint32, [nir_address_format]
-except AttributeError: pass
-
-try: (nir_address_format_num_components:=dll.nir_address_format_num_components).restype, nir_address_format_num_components.argtypes = ctypes.c_uint32, [nir_address_format]
-except AttributeError: pass
-
-try: (nir_address_format_null_value:=dll.nir_address_format_null_value).restype, nir_address_format_null_value.argtypes = Pointer(nir_const_value), [nir_address_format]
-except AttributeError: pass
-
-try: (nir_build_addr_iadd:=dll.nir_build_addr_iadd).restype, nir_build_addr_iadd.argtypes = Pointer(nir_def), [Pointer(nir_builder), Pointer(nir_def), nir_address_format, nir_variable_mode, Pointer(nir_def)]
-except AttributeError: pass
-
-try: (nir_build_addr_iadd_imm:=dll.nir_build_addr_iadd_imm).restype, nir_build_addr_iadd_imm.argtypes = Pointer(nir_def), [Pointer(nir_builder), Pointer(nir_def), nir_address_format, nir_variable_mode, int64_t]
-except AttributeError: pass
-
-try: (nir_build_addr_ieq:=dll.nir_build_addr_ieq).restype, nir_build_addr_ieq.argtypes = Pointer(nir_def), [Pointer(nir_builder), Pointer(nir_def), Pointer(nir_def), nir_address_format]
-except AttributeError: pass
-
-try: (nir_build_addr_isub:=dll.nir_build_addr_isub).restype, nir_build_addr_isub.argtypes = Pointer(nir_def), [Pointer(nir_builder), Pointer(nir_def), Pointer(nir_def), nir_address_format]
-except AttributeError: pass
-
-try: (nir_explicit_io_address_from_deref:=dll.nir_explicit_io_address_from_deref).restype, nir_explicit_io_address_from_deref.argtypes = Pointer(nir_def), [Pointer(nir_builder), Pointer(nir_deref_instr), Pointer(nir_def), nir_address_format]
-except AttributeError: pass
-
-try: (nir_get_explicit_deref_align:=dll.nir_get_explicit_deref_align).restype, nir_get_explicit_deref_align.argtypes = ctypes.c_bool, [Pointer(nir_deref_instr), ctypes.c_bool, Pointer(uint32_t), Pointer(uint32_t)]
-except AttributeError: pass
-
-try: (nir_lower_explicit_io_instr:=dll.nir_lower_explicit_io_instr).restype, nir_lower_explicit_io_instr.argtypes = None, [Pointer(nir_builder), Pointer(nir_intrinsic_instr), Pointer(nir_def), nir_address_format]
-except AttributeError: pass
-
-try: (nir_lower_explicit_io:=dll.nir_lower_explicit_io).restype, nir_lower_explicit_io.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_variable_mode, nir_address_format]
-except AttributeError: pass
-
+@dll.bind((nir_address_format,), ctypes.c_uint32)
+def nir_address_format_bit_size(addr_format): ...
+@dll.bind((nir_address_format,), ctypes.c_uint32)
+def nir_address_format_num_components(addr_format): ...
+@dll.bind((nir_address_format,), Pointer(nir_const_value))
+def nir_address_format_null_value(addr_format): ...
+@dll.bind((Pointer(nir_builder), Pointer(nir_def), nir_address_format, nir_variable_mode, Pointer(nir_def)), Pointer(nir_def))
+def nir_build_addr_iadd(b, addr, addr_format, modes, offset): ...
+@dll.bind((Pointer(nir_builder), Pointer(nir_def), nir_address_format, nir_variable_mode, int64_t), Pointer(nir_def))
+def nir_build_addr_iadd_imm(b, addr, addr_format, modes, offset): ...
+@dll.bind((Pointer(nir_builder), Pointer(nir_def), Pointer(nir_def), nir_address_format), Pointer(nir_def))
+def nir_build_addr_ieq(b, addr0, addr1, addr_format): ...
+@dll.bind((Pointer(nir_builder), Pointer(nir_def), Pointer(nir_def), nir_address_format), Pointer(nir_def))
+def nir_build_addr_isub(b, addr0, addr1, addr_format): ...
+@dll.bind((Pointer(nir_builder), Pointer(nir_deref_instr), Pointer(nir_def), nir_address_format), Pointer(nir_def))
+def nir_explicit_io_address_from_deref(b, deref, base_addr, addr_format): ...
+@dll.bind((Pointer(nir_deref_instr), ctypes.c_bool, Pointer(uint32_t), Pointer(uint32_t)), ctypes.c_bool)
+def nir_get_explicit_deref_align(deref, default_to_type_align, align_mul, align_offset): ...
+@dll.bind((Pointer(nir_builder), Pointer(nir_intrinsic_instr), Pointer(nir_def), nir_address_format), None)
+def nir_lower_explicit_io_instr(b, io_instr, addr, addr_format): ...
+@dll.bind((Pointer(nir_shader), nir_variable_mode, nir_address_format), ctypes.c_bool)
+def nir_lower_explicit_io(shader, modes, _2): ...
 nir_mem_access_shift_method = CEnum(ctypes.c_uint32)
 nir_mem_access_shift_method_scalar = nir_mem_access_shift_method.define('nir_mem_access_shift_method_scalar', 0)
 nir_mem_access_shift_method_shift64 = nir_mem_access_shift_method.define('nir_mem_access_shift_method_shift64', 1)
@@ -4217,12 +3968,10 @@ setattr(struct_nir_lower_mem_access_bit_sizes_options, 'modes', field(8, nir_var
 setattr(struct_nir_lower_mem_access_bit_sizes_options, 'may_lower_unaligned_stores_to_atomics', field(12, ctypes.c_bool))
 setattr(struct_nir_lower_mem_access_bit_sizes_options, 'cb_data', field(16, ctypes.c_void_p))
 nir_lower_mem_access_bit_sizes_options = struct_nir_lower_mem_access_bit_sizes_options
-try: (nir_lower_mem_access_bit_sizes:=dll.nir_lower_mem_access_bit_sizes).restype, nir_lower_mem_access_bit_sizes.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_lower_mem_access_bit_sizes_options)]
-except AttributeError: pass
-
-try: (nir_lower_robust_access:=dll.nir_lower_robust_access).restype, nir_lower_robust_access.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_intrin_filter_cb, ctypes.c_void_p]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(nir_lower_mem_access_bit_sizes_options)), ctypes.c_bool)
+def nir_lower_mem_access_bit_sizes(shader, options): ...
+@dll.bind((Pointer(nir_shader), nir_intrin_filter_cb, ctypes.c_void_p), ctypes.c_bool)
+def nir_lower_robust_access(s, filter, data): ...
 nir_should_vectorize_mem_func = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int64, Pointer(struct_nir_intrinsic_instr), Pointer(struct_nir_intrinsic_instr), ctypes.c_void_p)
 class struct_nir_load_store_vectorize_options(Struct): pass
 struct_nir_load_store_vectorize_options.SIZE = 32
@@ -4233,12 +3982,10 @@ setattr(struct_nir_load_store_vectorize_options, 'robust_modes', field(12, nir_v
 setattr(struct_nir_load_store_vectorize_options, 'cb_data', field(16, ctypes.c_void_p))
 setattr(struct_nir_load_store_vectorize_options, 'has_shared2_amd', field(24, ctypes.c_bool))
 nir_load_store_vectorize_options = struct_nir_load_store_vectorize_options
-try: (nir_opt_load_store_vectorize:=dll.nir_opt_load_store_vectorize).restype, nir_opt_load_store_vectorize.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_load_store_vectorize_options)]
-except AttributeError: pass
-
-try: (nir_opt_load_store_update_alignments:=dll.nir_opt_load_store_update_alignments).restype, nir_opt_load_store_update_alignments.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(nir_load_store_vectorize_options)), ctypes.c_bool)
+def nir_opt_load_store_vectorize(shader, options): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_load_store_update_alignments(shader): ...
 nir_lower_shader_calls_should_remat_func = ctypes.CFUNCTYPE(ctypes.c_bool, Pointer(struct_nir_instr), ctypes.c_void_p)
 class struct_nir_lower_shader_calls_options(Struct): pass
 struct_nir_lower_shader_calls_options.SIZE = 48
@@ -4251,86 +3998,63 @@ setattr(struct_nir_lower_shader_calls_options, 'vectorizer_data', field(24, ctyp
 setattr(struct_nir_lower_shader_calls_options, 'should_remat_callback', field(32, nir_lower_shader_calls_should_remat_func))
 setattr(struct_nir_lower_shader_calls_options, 'should_remat_data', field(40, ctypes.c_void_p))
 nir_lower_shader_calls_options = struct_nir_lower_shader_calls_options
-try: (nir_lower_shader_calls:=dll.nir_lower_shader_calls).restype, nir_lower_shader_calls.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_lower_shader_calls_options), Pointer(Pointer(Pointer(nir_shader))), Pointer(uint32_t), ctypes.c_void_p]
-except AttributeError: pass
-
-try: (nir_get_io_offset_src_number:=dll.nir_get_io_offset_src_number).restype, nir_get_io_offset_src_number.argtypes = ctypes.c_int32, [Pointer(nir_intrinsic_instr)]
-except AttributeError: pass
-
-try: (nir_get_io_index_src_number:=dll.nir_get_io_index_src_number).restype, nir_get_io_index_src_number.argtypes = ctypes.c_int32, [Pointer(nir_intrinsic_instr)]
-except AttributeError: pass
-
-try: (nir_get_io_arrayed_index_src_number:=dll.nir_get_io_arrayed_index_src_number).restype, nir_get_io_arrayed_index_src_number.argtypes = ctypes.c_int32, [Pointer(nir_intrinsic_instr)]
-except AttributeError: pass
-
-try: (nir_get_io_offset_src:=dll.nir_get_io_offset_src).restype, nir_get_io_offset_src.argtypes = Pointer(nir_src), [Pointer(nir_intrinsic_instr)]
-except AttributeError: pass
-
-try: (nir_get_io_index_src:=dll.nir_get_io_index_src).restype, nir_get_io_index_src.argtypes = Pointer(nir_src), [Pointer(nir_intrinsic_instr)]
-except AttributeError: pass
-
-try: (nir_get_io_arrayed_index_src:=dll.nir_get_io_arrayed_index_src).restype, nir_get_io_arrayed_index_src.argtypes = Pointer(nir_src), [Pointer(nir_intrinsic_instr)]
-except AttributeError: pass
-
-try: (nir_get_shader_call_payload_src:=dll.nir_get_shader_call_payload_src).restype, nir_get_shader_call_payload_src.argtypes = Pointer(nir_src), [Pointer(nir_intrinsic_instr)]
-except AttributeError: pass
-
-try: (nir_is_output_load:=dll.nir_is_output_load).restype, nir_is_output_load.argtypes = ctypes.c_bool, [Pointer(nir_intrinsic_instr)]
-except AttributeError: pass
-
-try: (nir_is_arrayed_io:=dll.nir_is_arrayed_io).restype, nir_is_arrayed_io.argtypes = ctypes.c_bool, [Pointer(nir_variable), gl_shader_stage]
-except AttributeError: pass
-
-try: (nir_lower_reg_intrinsics_to_ssa_impl:=dll.nir_lower_reg_intrinsics_to_ssa_impl).restype, nir_lower_reg_intrinsics_to_ssa_impl.argtypes = ctypes.c_bool, [Pointer(nir_function_impl)]
-except AttributeError: pass
-
-try: (nir_lower_reg_intrinsics_to_ssa:=dll.nir_lower_reg_intrinsics_to_ssa).restype, nir_lower_reg_intrinsics_to_ssa.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_vars_to_ssa:=dll.nir_lower_vars_to_ssa).restype, nir_lower_vars_to_ssa.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_remove_dead_derefs:=dll.nir_remove_dead_derefs).restype, nir_remove_dead_derefs.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_remove_dead_derefs_impl:=dll.nir_remove_dead_derefs_impl).restype, nir_remove_dead_derefs_impl.argtypes = ctypes.c_bool, [Pointer(nir_function_impl)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(nir_lower_shader_calls_options), Pointer(Pointer(Pointer(nir_shader))), Pointer(uint32_t), ctypes.c_void_p), ctypes.c_bool)
+def nir_lower_shader_calls(shader, options, resume_shaders_out, num_resume_shaders_out, mem_ctx): ...
+@dll.bind((Pointer(nir_intrinsic_instr),), ctypes.c_int32)
+def nir_get_io_offset_src_number(instr): ...
+@dll.bind((Pointer(nir_intrinsic_instr),), ctypes.c_int32)
+def nir_get_io_index_src_number(instr): ...
+@dll.bind((Pointer(nir_intrinsic_instr),), ctypes.c_int32)
+def nir_get_io_arrayed_index_src_number(instr): ...
+@dll.bind((Pointer(nir_intrinsic_instr),), Pointer(nir_src))
+def nir_get_io_offset_src(instr): ...
+@dll.bind((Pointer(nir_intrinsic_instr),), Pointer(nir_src))
+def nir_get_io_index_src(instr): ...
+@dll.bind((Pointer(nir_intrinsic_instr),), Pointer(nir_src))
+def nir_get_io_arrayed_index_src(instr): ...
+@dll.bind((Pointer(nir_intrinsic_instr),), Pointer(nir_src))
+def nir_get_shader_call_payload_src(call): ...
+@dll.bind((Pointer(nir_intrinsic_instr),), ctypes.c_bool)
+def nir_is_output_load(intr): ...
+@dll.bind((Pointer(nir_variable), gl_shader_stage), ctypes.c_bool)
+def nir_is_arrayed_io(var, stage): ...
+@dll.bind((Pointer(nir_function_impl),), ctypes.c_bool)
+def nir_lower_reg_intrinsics_to_ssa_impl(impl): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_reg_intrinsics_to_ssa(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_vars_to_ssa(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_remove_dead_derefs(shader): ...
+@dll.bind((Pointer(nir_function_impl),), ctypes.c_bool)
+def nir_remove_dead_derefs_impl(impl): ...
 class struct_nir_remove_dead_variables_options(Struct): pass
 struct_nir_remove_dead_variables_options.SIZE = 16
 struct_nir_remove_dead_variables_options._fields_ = ['can_remove_var', 'can_remove_var_data']
 setattr(struct_nir_remove_dead_variables_options, 'can_remove_var', field(0, ctypes.CFUNCTYPE(ctypes.c_bool, Pointer(nir_variable), ctypes.c_void_p)))
 setattr(struct_nir_remove_dead_variables_options, 'can_remove_var_data', field(8, ctypes.c_void_p))
 nir_remove_dead_variables_options = struct_nir_remove_dead_variables_options
-try: (nir_remove_dead_variables:=dll.nir_remove_dead_variables).restype, nir_remove_dead_variables.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_variable_mode, Pointer(nir_remove_dead_variables_options)]
-except AttributeError: pass
-
-try: (nir_lower_variable_initializers:=dll.nir_lower_variable_initializers).restype, nir_lower_variable_initializers.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_variable_mode]
-except AttributeError: pass
-
-try: (nir_zero_initialize_shared_memory:=dll.nir_zero_initialize_shared_memory).restype, nir_zero_initialize_shared_memory.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_clear_shared_memory:=dll.nir_clear_shared_memory).restype, nir_clear_shared_memory.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), nir_variable_mode, Pointer(nir_remove_dead_variables_options)), ctypes.c_bool)
+def nir_remove_dead_variables(shader, modes, options): ...
+@dll.bind((Pointer(nir_shader), nir_variable_mode), ctypes.c_bool)
+def nir_lower_variable_initializers(shader, modes): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_uint32, ctypes.c_uint32), ctypes.c_bool)
+def nir_zero_initialize_shared_memory(shader, shared_size, chunk_size): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_uint32, ctypes.c_uint32), ctypes.c_bool)
+def nir_clear_shared_memory(shader, shared_size, chunk_size): ...
 nir_opt_move_to_top_options = CEnum(ctypes.c_uint32)
 nir_move_to_entry_block_only = nir_opt_move_to_top_options.define('nir_move_to_entry_block_only', 1)
 nir_move_to_top_input_loads = nir_opt_move_to_top_options.define('nir_move_to_top_input_loads', 2)
 nir_move_to_top_load_smem_amd = nir_opt_move_to_top_options.define('nir_move_to_top_load_smem_amd', 4)
 
-try: (nir_opt_move_to_top:=dll.nir_opt_move_to_top).restype, nir_opt_move_to_top.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_opt_move_to_top_options]
-except AttributeError: pass
-
-try: (nir_move_vec_src_uses_to_dest:=dll.nir_move_vec_src_uses_to_dest).restype, nir_move_vec_src_uses_to_dest.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_move_output_stores_to_end:=dll.nir_move_output_stores_to_end).restype, nir_move_output_stores_to_end.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_vec_to_regs:=dll.nir_lower_vec_to_regs).restype, nir_lower_vec_to_regs.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_instr_writemask_filter_cb, ctypes.c_void_p]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), nir_opt_move_to_top_options), ctypes.c_bool)
+def nir_opt_move_to_top(nir, options): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_bool), ctypes.c_bool)
+def nir_move_vec_src_uses_to_dest(shader, skip_const_srcs): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_move_output_stores_to_end(nir): ...
+@dll.bind((Pointer(nir_shader), nir_instr_writemask_filter_cb, ctypes.c_void_p), ctypes.c_bool)
+def nir_lower_vec_to_regs(shader, cb, _data): ...
 enum_compare_func = CEnum(ctypes.c_uint32)
 COMPARE_FUNC_NEVER = enum_compare_func.define('COMPARE_FUNC_NEVER', 0)
 COMPARE_FUNC_LESS = enum_compare_func.define('COMPARE_FUNC_LESS', 1)
@@ -4341,126 +4065,86 @@ COMPARE_FUNC_NOTEQUAL = enum_compare_func.define('COMPARE_FUNC_NOTEQUAL', 5)
 COMPARE_FUNC_GEQUAL = enum_compare_func.define('COMPARE_FUNC_GEQUAL', 6)
 COMPARE_FUNC_ALWAYS = enum_compare_func.define('COMPARE_FUNC_ALWAYS', 7)
 
-try: (nir_lower_alpha_test:=dll.nir_lower_alpha_test).restype, nir_lower_alpha_test.argtypes = ctypes.c_bool, [Pointer(nir_shader), enum_compare_func, ctypes.c_bool, Pointer(gl_state_index16)]
-except AttributeError: pass
-
-try: (nir_lower_alpha_to_coverage:=dll.nir_lower_alpha_to_coverage).restype, nir_lower_alpha_to_coverage.argtypes = ctypes.c_bool, [Pointer(nir_shader), uint8_t, ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_lower_alpha_to_one:=dll.nir_lower_alpha_to_one).restype, nir_lower_alpha_to_one.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_alu:=dll.nir_lower_alu).restype, nir_lower_alu.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_flrp:=dll.nir_lower_flrp).restype, nir_lower_flrp.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_uint32, ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_scale_fdiv:=dll.nir_scale_fdiv).restype, nir_scale_fdiv.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_alu_to_scalar:=dll.nir_lower_alu_to_scalar).restype, nir_lower_alu_to_scalar.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_instr_filter_cb, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (nir_lower_alu_width:=dll.nir_lower_alu_width).restype, nir_lower_alu_width.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_vectorize_cb, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (nir_lower_alu_vec8_16_srcs:=dll.nir_lower_alu_vec8_16_srcs).restype, nir_lower_alu_vec8_16_srcs.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_bool_to_bitsize:=dll.nir_lower_bool_to_bitsize).restype, nir_lower_bool_to_bitsize.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_bool_to_float:=dll.nir_lower_bool_to_float).restype, nir_lower_bool_to_float.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_lower_bool_to_int32:=dll.nir_lower_bool_to_int32).restype, nir_lower_bool_to_int32.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_simplify_convert_alu_types:=dll.nir_opt_simplify_convert_alu_types).restype, nir_opt_simplify_convert_alu_types.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_const_arrays_to_uniforms:=dll.nir_lower_const_arrays_to_uniforms).restype, nir_lower_const_arrays_to_uniforms.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_lower_convert_alu_types:=dll.nir_lower_convert_alu_types).restype, nir_lower_convert_alu_types.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.CFUNCTYPE(ctypes.c_bool, Pointer(nir_intrinsic_instr))]
-except AttributeError: pass
-
-try: (nir_lower_constant_convert_alu_types:=dll.nir_lower_constant_convert_alu_types).restype, nir_lower_constant_convert_alu_types.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_alu_conversion_to_intrinsic:=dll.nir_lower_alu_conversion_to_intrinsic).restype, nir_lower_alu_conversion_to_intrinsic.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_int_to_float:=dll.nir_lower_int_to_float).restype, nir_lower_int_to_float.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_load_const_to_scalar:=dll.nir_lower_load_const_to_scalar).restype, nir_lower_load_const_to_scalar.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_read_invocation_to_scalar:=dll.nir_lower_read_invocation_to_scalar).restype, nir_lower_read_invocation_to_scalar.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_phis_to_scalar:=dll.nir_lower_phis_to_scalar).restype, nir_lower_phis_to_scalar.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_vectorize_cb, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (nir_lower_all_phis_to_scalar:=dll.nir_lower_all_phis_to_scalar).restype, nir_lower_all_phis_to_scalar.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_io_array_vars_to_elements:=dll.nir_lower_io_array_vars_to_elements).restype, nir_lower_io_array_vars_to_elements.argtypes = None, [Pointer(nir_shader), Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_io_array_vars_to_elements_no_indirects:=dll.nir_lower_io_array_vars_to_elements_no_indirects).restype, nir_lower_io_array_vars_to_elements_no_indirects.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_lower_io_to_scalar:=dll.nir_lower_io_to_scalar).restype, nir_lower_io_to_scalar.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_variable_mode, nir_instr_filter_cb, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (nir_lower_io_vars_to_scalar:=dll.nir_lower_io_vars_to_scalar).restype, nir_lower_io_vars_to_scalar.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_variable_mode]
-except AttributeError: pass
-
-try: (nir_opt_vectorize_io_vars:=dll.nir_opt_vectorize_io_vars).restype, nir_opt_vectorize_io_vars.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_variable_mode]
-except AttributeError: pass
-
-try: (nir_lower_tess_level_array_vars_to_vec:=dll.nir_lower_tess_level_array_vars_to_vec).restype, nir_lower_tess_level_array_vars_to_vec.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_create_passthrough_tcs_impl:=dll.nir_create_passthrough_tcs_impl).restype, nir_create_passthrough_tcs_impl.argtypes = Pointer(nir_shader), [Pointer(nir_shader_compiler_options), Pointer(ctypes.c_uint32), ctypes.c_uint32, uint8_t]
-except AttributeError: pass
-
-try: (nir_create_passthrough_tcs:=dll.nir_create_passthrough_tcs).restype, nir_create_passthrough_tcs.argtypes = Pointer(nir_shader), [Pointer(nir_shader_compiler_options), Pointer(nir_shader), uint8_t]
-except AttributeError: pass
-
-try: (nir_create_passthrough_gs:=dll.nir_create_passthrough_gs).restype, nir_create_passthrough_gs.argtypes = Pointer(nir_shader), [Pointer(nir_shader_compiler_options), Pointer(nir_shader), enum_mesa_prim, enum_mesa_prim, ctypes.c_bool, ctypes.c_bool, ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_lower_fragcolor:=dll.nir_lower_fragcolor).restype, nir_lower_fragcolor.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_lower_fragcoord_wtrans:=dll.nir_lower_fragcoord_wtrans).restype, nir_lower_fragcoord_wtrans.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_frag_coord_to_pixel_coord:=dll.nir_opt_frag_coord_to_pixel_coord).restype, nir_opt_frag_coord_to_pixel_coord.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_frag_coord_to_pixel_coord:=dll.nir_lower_frag_coord_to_pixel_coord).restype, nir_lower_frag_coord_to_pixel_coord.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_viewport_transform:=dll.nir_lower_viewport_transform).restype, nir_lower_viewport_transform.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_uniforms_to_ubo:=dll.nir_lower_uniforms_to_ubo).restype, nir_lower_uniforms_to_ubo.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_bool, ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_lower_is_helper_invocation:=dll.nir_lower_is_helper_invocation).restype, nir_lower_is_helper_invocation.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_single_sampled:=dll.nir_lower_single_sampled).restype, nir_lower_single_sampled.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_atomics:=dll.nir_lower_atomics).restype, nir_lower_atomics.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_instr_filter_cb]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), enum_compare_func, ctypes.c_bool, Pointer(gl_state_index16)), ctypes.c_bool)
+def nir_lower_alpha_test(shader, func, alpha_to_one, alpha_ref_state_tokens): ...
+@dll.bind((Pointer(nir_shader), uint8_t, ctypes.c_bool), ctypes.c_bool)
+def nir_lower_alpha_to_coverage(shader, nr_samples, has_intrinsic): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_alpha_to_one(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_alu(shader): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_uint32, ctypes.c_bool), ctypes.c_bool)
+def nir_lower_flrp(shader, lowering_mask, always_precise): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_scale_fdiv(shader): ...
+@dll.bind((Pointer(nir_shader), nir_instr_filter_cb, ctypes.c_void_p), ctypes.c_bool)
+def nir_lower_alu_to_scalar(shader, cb, data): ...
+@dll.bind((Pointer(nir_shader), nir_vectorize_cb, ctypes.c_void_p), ctypes.c_bool)
+def nir_lower_alu_width(shader, cb, data): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_alu_vec8_16_srcs(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_bool_to_bitsize(shader): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_bool), ctypes.c_bool)
+def nir_lower_bool_to_float(shader, has_fcsel_ne): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_bool_to_int32(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_simplify_convert_alu_types(shader): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_uint32), ctypes.c_bool)
+def nir_lower_const_arrays_to_uniforms(shader, max_uniform_components): ...
+@dll.bind((Pointer(nir_shader), ctypes.CFUNCTYPE(ctypes.c_bool, Pointer(nir_intrinsic_instr))), ctypes.c_bool)
+def nir_lower_convert_alu_types(shader, should_lower): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_constant_convert_alu_types(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_alu_conversion_to_intrinsic(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_int_to_float(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_load_const_to_scalar(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_read_invocation_to_scalar(shader): ...
+@dll.bind((Pointer(nir_shader), nir_vectorize_cb, ctypes.c_void_p), ctypes.c_bool)
+def nir_lower_phis_to_scalar(shader, cb, data): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_all_phis_to_scalar(shader): ...
+@dll.bind((Pointer(nir_shader), Pointer(nir_shader)), None)
+def nir_lower_io_array_vars_to_elements(producer, consumer): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_bool), ctypes.c_bool)
+def nir_lower_io_array_vars_to_elements_no_indirects(shader, outputs_only): ...
+@dll.bind((Pointer(nir_shader), nir_variable_mode, nir_instr_filter_cb, ctypes.c_void_p), ctypes.c_bool)
+def nir_lower_io_to_scalar(shader, mask, filter, filter_data): ...
+@dll.bind((Pointer(nir_shader), nir_variable_mode), ctypes.c_bool)
+def nir_lower_io_vars_to_scalar(shader, mask): ...
+@dll.bind((Pointer(nir_shader), nir_variable_mode), ctypes.c_bool)
+def nir_opt_vectorize_io_vars(shader, mask): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_tess_level_array_vars_to_vec(shader): ...
+@dll.bind((Pointer(nir_shader_compiler_options), Pointer(ctypes.c_uint32), ctypes.c_uint32, uint8_t), Pointer(nir_shader))
+def nir_create_passthrough_tcs_impl(options, locations, num_locations, patch_vertices): ...
+@dll.bind((Pointer(nir_shader_compiler_options), Pointer(nir_shader), uint8_t), Pointer(nir_shader))
+def nir_create_passthrough_tcs(options, vs, patch_vertices): ...
+@dll.bind((Pointer(nir_shader_compiler_options), Pointer(nir_shader), enum_mesa_prim, enum_mesa_prim, ctypes.c_bool, ctypes.c_bool, ctypes.c_bool), Pointer(nir_shader))
+def nir_create_passthrough_gs(options, prev_stage, primitive_type, output_primitive_type, emulate_edgeflags, force_line_strip_out, passthrough_prim_id): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_uint32), ctypes.c_bool)
+def nir_lower_fragcolor(shader, max_cbufs): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_fragcoord_wtrans(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_frag_coord_to_pixel_coord(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_frag_coord_to_pixel_coord(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_viewport_transform(shader): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_bool, ctypes.c_bool), ctypes.c_bool)
+def nir_lower_uniforms_to_ubo(shader, dword_packed, load_vec4): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_is_helper_invocation(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_single_sampled(shader): ...
+@dll.bind((Pointer(nir_shader), nir_instr_filter_cb), ctypes.c_bool)
+def nir_lower_atomics(shader, filter): ...
 class struct_nir_lower_subgroups_options(Struct): pass
 struct_nir_lower_subgroups_options.SIZE = 24
 struct_nir_lower_subgroups_options._fields_ = ['filter', 'filter_data', 'subgroup_size', 'ballot_bit_size', 'ballot_components', 'lower_to_scalar', 'lower_vote_trivial', 'lower_vote_feq', 'lower_vote_ieq', 'lower_vote_bool_eq', 'lower_first_invocation_to_ballot', 'lower_read_first_invocation', 'lower_subgroup_masks', 'lower_relative_shuffle', 'lower_shuffle_to_32bit', 'lower_shuffle_to_swizzle_amd', 'lower_shuffle', 'lower_quad', 'lower_quad_broadcast_dynamic', 'lower_quad_broadcast_dynamic_to_const', 'lower_quad_vote', 'lower_elect', 'lower_read_invocation_to_cond', 'lower_rotate_to_shuffle', 'lower_rotate_clustered_to_shuffle', 'lower_ballot_bit_count_to_mbcnt_amd', 'lower_inverse_ballot', 'lower_reduce', 'lower_boolean_reduce', 'lower_boolean_shuffle']
@@ -4495,15 +4179,12 @@ setattr(struct_nir_lower_subgroups_options, 'lower_reduce', field(21, ctypes.c_b
 setattr(struct_nir_lower_subgroups_options, 'lower_boolean_reduce', field(21, ctypes.c_bool, 1, 7))
 setattr(struct_nir_lower_subgroups_options, 'lower_boolean_shuffle', field(22, ctypes.c_bool, 1, 0))
 nir_lower_subgroups_options = struct_nir_lower_subgroups_options
-try: (nir_lower_subgroups:=dll.nir_lower_subgroups).restype, nir_lower_subgroups.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_lower_subgroups_options)]
-except AttributeError: pass
-
-try: (nir_lower_system_values:=dll.nir_lower_system_values).restype, nir_lower_system_values.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_build_lowered_load_helper_invocation:=dll.nir_build_lowered_load_helper_invocation).restype, nir_build_lowered_load_helper_invocation.argtypes = Pointer(nir_def), [Pointer(nir_builder)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(nir_lower_subgroups_options)), ctypes.c_bool)
+def nir_lower_subgroups(shader, options): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_system_values(shader): ...
+@dll.bind((Pointer(nir_builder),), Pointer(nir_def))
+def nir_build_lowered_load_helper_invocation(b): ...
 class struct_nir_lower_compute_system_values_options(Struct): pass
 struct_nir_lower_compute_system_values_options.SIZE = 16
 struct_nir_lower_compute_system_values_options._fields_ = ['has_base_global_invocation_id', 'has_base_workgroup_id', 'has_global_size', 'shuffle_local_ids_for_quad_derivatives', 'lower_local_invocation_index', 'lower_cs_local_id_to_index', 'lower_workgroup_id_to_index', 'global_id_is_32bit', 'shortcut_1d_workgroup_id', 'num_workgroups']
@@ -4518,9 +4199,8 @@ setattr(struct_nir_lower_compute_system_values_options, 'global_id_is_32bit', fi
 setattr(struct_nir_lower_compute_system_values_options, 'shortcut_1d_workgroup_id', field(1, ctypes.c_bool, 1, 0))
 setattr(struct_nir_lower_compute_system_values_options, 'num_workgroups', field(4, Array(uint32_t, 3)))
 nir_lower_compute_system_values_options = struct_nir_lower_compute_system_values_options
-try: (nir_lower_compute_system_values:=dll.nir_lower_compute_system_values).restype, nir_lower_compute_system_values.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_lower_compute_system_values_options)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(nir_lower_compute_system_values_options)), ctypes.c_bool)
+def nir_lower_compute_system_values(shader, options): ...
 class struct_nir_lower_sysvals_to_varyings_options(Struct): pass
 struct_nir_lower_sysvals_to_varyings_options.SIZE = 1
 struct_nir_lower_sysvals_to_varyings_options._fields_ = ['frag_coord', 'front_face', 'point_coord']
@@ -4528,9 +4208,8 @@ setattr(struct_nir_lower_sysvals_to_varyings_options, 'frag_coord', field(0, cty
 setattr(struct_nir_lower_sysvals_to_varyings_options, 'front_face', field(0, ctypes.c_bool, 1, 1))
 setattr(struct_nir_lower_sysvals_to_varyings_options, 'point_coord', field(0, ctypes.c_bool, 1, 2))
 nir_lower_sysvals_to_varyings_options = struct_nir_lower_sysvals_to_varyings_options
-try: (nir_lower_sysvals_to_varyings:=dll.nir_lower_sysvals_to_varyings).restype, nir_lower_sysvals_to_varyings.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_lower_sysvals_to_varyings_options)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(nir_lower_sysvals_to_varyings_options)), ctypes.c_bool)
+def nir_lower_sysvals_to_varyings(shader, options): ...
 enum_nir_lower_tex_packing = CEnum(ctypes.c_ubyte)
 nir_lower_tex_packing_none = enum_nir_lower_tex_packing.define('nir_lower_tex_packing_none', 0)
 nir_lower_tex_packing_16 = enum_nir_lower_tex_packing.define('nir_lower_tex_packing_16', 1)
@@ -4596,9 +4275,8 @@ setattr(struct_nir_lower_tex_options, 'lower_invalid_implicit_lod', field(402, c
 setattr(struct_nir_lower_tex_options, 'lower_index_to_offset', field(403, ctypes.c_bool))
 setattr(struct_nir_lower_tex_options, 'callback_data', field(408, ctypes.c_void_p))
 nir_lower_tex_options = struct_nir_lower_tex_options
-try: (nir_lower_tex:=dll.nir_lower_tex).restype, nir_lower_tex.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_lower_tex_options)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(nir_lower_tex_options)), ctypes.c_bool)
+def nir_lower_tex(shader, options): ...
 class struct_nir_lower_tex_shadow_swizzle(Struct): pass
 struct_nir_lower_tex_shadow_swizzle.SIZE = 4
 struct_nir_lower_tex_shadow_swizzle._fields_ = ['swizzle_r', 'swizzle_g', 'swizzle_b', 'swizzle_a']
@@ -4607,9 +4285,8 @@ setattr(struct_nir_lower_tex_shadow_swizzle, 'swizzle_g', field(0, ctypes.c_uint
 setattr(struct_nir_lower_tex_shadow_swizzle, 'swizzle_b', field(0, ctypes.c_uint32, 3, 6))
 setattr(struct_nir_lower_tex_shadow_swizzle, 'swizzle_a', field(1, ctypes.c_uint32, 3, 1))
 nir_lower_tex_shadow_swizzle = struct_nir_lower_tex_shadow_swizzle
-try: (nir_lower_tex_shadow:=dll.nir_lower_tex_shadow).restype, nir_lower_tex_shadow.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_uint32, Pointer(enum_compare_func), Pointer(nir_lower_tex_shadow_swizzle), ctypes.c_bool]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), ctypes.c_uint32, Pointer(enum_compare_func), Pointer(nir_lower_tex_shadow_swizzle), ctypes.c_bool), ctypes.c_bool)
+def nir_lower_tex_shadow(s, n_states, compare_func, tex_swizzles, is_fixed_point_format): ...
 class struct_nir_lower_image_options(Struct): pass
 struct_nir_lower_image_options.SIZE = 3
 struct_nir_lower_image_options._fields_ = ['lower_cube_size', 'lower_to_fragment_mask_load_amd', 'lower_image_samples_to_one']
@@ -4617,15 +4294,12 @@ setattr(struct_nir_lower_image_options, 'lower_cube_size', field(0, ctypes.c_boo
 setattr(struct_nir_lower_image_options, 'lower_to_fragment_mask_load_amd', field(1, ctypes.c_bool))
 setattr(struct_nir_lower_image_options, 'lower_image_samples_to_one', field(2, ctypes.c_bool))
 nir_lower_image_options = struct_nir_lower_image_options
-try: (nir_lower_image:=dll.nir_lower_image).restype, nir_lower_image.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_lower_image_options)]
-except AttributeError: pass
-
-try: (nir_lower_image_atomics_to_global:=dll.nir_lower_image_atomics_to_global).restype, nir_lower_image_atomics_to_global.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_intrin_filter_cb, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (nir_lower_readonly_images_to_tex:=dll.nir_lower_readonly_images_to_tex).restype, nir_lower_readonly_images_to_tex.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_bool]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(nir_lower_image_options)), ctypes.c_bool)
+def nir_lower_image(nir, options): ...
+@dll.bind((Pointer(nir_shader), nir_intrin_filter_cb, ctypes.c_void_p), ctypes.c_bool)
+def nir_lower_image_atomics_to_global(s, filter, data): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_bool), ctypes.c_bool)
+def nir_lower_readonly_images_to_tex(shader, per_variable): ...
 enum_nir_lower_non_uniform_access_type = CEnum(ctypes.c_uint32)
 nir_lower_non_uniform_ubo_access = enum_nir_lower_non_uniform_access_type.define('nir_lower_non_uniform_ubo_access', 1)
 nir_lower_non_uniform_ssbo_access = enum_nir_lower_non_uniform_access_type.define('nir_lower_non_uniform_ssbo_access', 2)
@@ -4645,23 +4319,19 @@ setattr(struct_nir_lower_non_uniform_access_options, 'tex_src_callback', field(8
 setattr(struct_nir_lower_non_uniform_access_options, 'callback', field(16, nir_lower_non_uniform_access_callback))
 setattr(struct_nir_lower_non_uniform_access_options, 'callback_data', field(24, ctypes.c_void_p))
 nir_lower_non_uniform_access_options = struct_nir_lower_non_uniform_access_options
-try: (nir_has_non_uniform_access:=dll.nir_has_non_uniform_access).restype, nir_has_non_uniform_access.argtypes = ctypes.c_bool, [Pointer(nir_shader), enum_nir_lower_non_uniform_access_type]
-except AttributeError: pass
-
-try: (nir_opt_non_uniform_access:=dll.nir_opt_non_uniform_access).restype, nir_opt_non_uniform_access.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_non_uniform_access:=dll.nir_lower_non_uniform_access).restype, nir_lower_non_uniform_access.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_lower_non_uniform_access_options)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), enum_nir_lower_non_uniform_access_type), ctypes.c_bool)
+def nir_has_non_uniform_access(shader, types): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_non_uniform_access(shader): ...
+@dll.bind((Pointer(nir_shader), Pointer(nir_lower_non_uniform_access_options)), ctypes.c_bool)
+def nir_lower_non_uniform_access(shader, options): ...
 class struct_nir_lower_idiv_options(Struct): pass
 struct_nir_lower_idiv_options.SIZE = 1
 struct_nir_lower_idiv_options._fields_ = ['allow_fp16']
 setattr(struct_nir_lower_idiv_options, 'allow_fp16', field(0, ctypes.c_bool))
 nir_lower_idiv_options = struct_nir_lower_idiv_options
-try: (nir_lower_idiv:=dll.nir_lower_idiv).restype, nir_lower_idiv.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_lower_idiv_options)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(nir_lower_idiv_options)), ctypes.c_bool)
+def nir_lower_idiv(shader, options): ...
 class struct_nir_input_attachment_options(Struct): pass
 struct_nir_input_attachment_options.SIZE = 12
 struct_nir_input_attachment_options._fields_ = ['use_ia_coord_intrin', 'use_fragcoord_sysval', 'use_layer_id_sysval', 'use_view_id_for_layer', 'unscaled_depth_stencil_ir3', 'unscaled_input_attachment_ir3']
@@ -4672,48 +4342,34 @@ setattr(struct_nir_input_attachment_options, 'use_view_id_for_layer', field(3, c
 setattr(struct_nir_input_attachment_options, 'unscaled_depth_stencil_ir3', field(4, ctypes.c_bool))
 setattr(struct_nir_input_attachment_options, 'unscaled_input_attachment_ir3', field(8, uint32_t))
 nir_input_attachment_options = struct_nir_input_attachment_options
-try: (nir_lower_input_attachments:=dll.nir_lower_input_attachments).restype, nir_lower_input_attachments.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_input_attachment_options)]
-except AttributeError: pass
-
-try: (nir_lower_clip_vs:=dll.nir_lower_clip_vs).restype, nir_lower_clip_vs.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_uint32, ctypes.c_bool, ctypes.c_bool, Array(Array(gl_state_index16, 4), 0)]
-except AttributeError: pass
-
-try: (nir_lower_clip_gs:=dll.nir_lower_clip_gs).restype, nir_lower_clip_gs.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_uint32, ctypes.c_bool, Array(Array(gl_state_index16, 4), 0)]
-except AttributeError: pass
-
-try: (nir_lower_clip_fs:=dll.nir_lower_clip_fs).restype, nir_lower_clip_fs.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_uint32, ctypes.c_bool, ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_lower_clip_cull_distance_to_vec4s:=dll.nir_lower_clip_cull_distance_to_vec4s).restype, nir_lower_clip_cull_distance_to_vec4s.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_clip_cull_distance_array_vars:=dll.nir_lower_clip_cull_distance_array_vars).restype, nir_lower_clip_cull_distance_array_vars.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_clip_disable:=dll.nir_lower_clip_disable).restype, nir_lower_clip_disable.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_lower_point_size_mov:=dll.nir_lower_point_size_mov).restype, nir_lower_point_size_mov.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(gl_state_index16)]
-except AttributeError: pass
-
-try: (nir_lower_frexp:=dll.nir_lower_frexp).restype, nir_lower_frexp.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_two_sided_color:=dll.nir_lower_two_sided_color).restype, nir_lower_two_sided_color.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_lower_clamp_color_outputs:=dll.nir_lower_clamp_color_outputs).restype, nir_lower_clamp_color_outputs.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_flatshade:=dll.nir_lower_flatshade).restype, nir_lower_flatshade.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_passthrough_edgeflags:=dll.nir_lower_passthrough_edgeflags).restype, nir_lower_passthrough_edgeflags.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_patch_vertices:=dll.nir_lower_patch_vertices).restype, nir_lower_patch_vertices.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_uint32, Pointer(gl_state_index16)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(nir_input_attachment_options)), ctypes.c_bool)
+def nir_lower_input_attachments(shader, options): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_uint32, ctypes.c_bool, ctypes.c_bool, Array(Array(gl_state_index16, 4), 0)), ctypes.c_bool)
+def nir_lower_clip_vs(shader, ucp_enables, use_vars, use_clipdist_array, clipplane_state_tokens): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_uint32, ctypes.c_bool, Array(Array(gl_state_index16, 4), 0)), ctypes.c_bool)
+def nir_lower_clip_gs(shader, ucp_enables, use_clipdist_array, clipplane_state_tokens): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_uint32, ctypes.c_bool, ctypes.c_bool), ctypes.c_bool)
+def nir_lower_clip_fs(shader, ucp_enables, use_clipdist_array, use_load_interp): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_clip_cull_distance_to_vec4s(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_clip_cull_distance_array_vars(nir): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_uint32), ctypes.c_bool)
+def nir_lower_clip_disable(shader, clip_plane_enable): ...
+@dll.bind((Pointer(nir_shader), Pointer(gl_state_index16)), ctypes.c_bool)
+def nir_lower_point_size_mov(shader, pointsize_state_tokens): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_frexp(nir): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_bool), ctypes.c_bool)
+def nir_lower_two_sided_color(shader, face_sysval): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_clamp_color_outputs(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_flatshade(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_passthrough_edgeflags(shader): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_uint32, Pointer(gl_state_index16)), ctypes.c_bool)
+def nir_lower_patch_vertices(nir, static_count, uniform_state_tokens): ...
 class struct_nir_lower_wpos_ytransform_options(Struct): pass
 struct_nir_lower_wpos_ytransform_options.SIZE = 10
 struct_nir_lower_wpos_ytransform_options._fields_ = ['state_tokens', 'fs_coord_origin_upper_left', 'fs_coord_origin_lower_left', 'fs_coord_pixel_center_integer', 'fs_coord_pixel_center_half_integer']
@@ -4723,21 +4379,16 @@ setattr(struct_nir_lower_wpos_ytransform_options, 'fs_coord_origin_lower_left', 
 setattr(struct_nir_lower_wpos_ytransform_options, 'fs_coord_pixel_center_integer', field(8, ctypes.c_bool, 1, 2))
 setattr(struct_nir_lower_wpos_ytransform_options, 'fs_coord_pixel_center_half_integer', field(8, ctypes.c_bool, 1, 3))
 nir_lower_wpos_ytransform_options = struct_nir_lower_wpos_ytransform_options
-try: (nir_lower_wpos_ytransform:=dll.nir_lower_wpos_ytransform).restype, nir_lower_wpos_ytransform.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_lower_wpos_ytransform_options)]
-except AttributeError: pass
-
-try: (nir_lower_wpos_center:=dll.nir_lower_wpos_center).restype, nir_lower_wpos_center.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_pntc_ytransform:=dll.nir_lower_pntc_ytransform).restype, nir_lower_pntc_ytransform.argtypes = ctypes.c_bool, [Pointer(nir_shader), Array(Array(gl_state_index16, 4), 0)]
-except AttributeError: pass
-
-try: (nir_lower_wrmasks:=dll.nir_lower_wrmasks).restype, nir_lower_wrmasks.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_instr_filter_cb, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (nir_lower_fb_read:=dll.nir_lower_fb_read).restype, nir_lower_fb_read.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(nir_lower_wpos_ytransform_options)), ctypes.c_bool)
+def nir_lower_wpos_ytransform(shader, options): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_wpos_center(shader): ...
+@dll.bind((Pointer(nir_shader), Array(Array(gl_state_index16, 4), 0)), ctypes.c_bool)
+def nir_lower_pntc_ytransform(shader, clipplane_state_tokens): ...
+@dll.bind((Pointer(nir_shader), nir_instr_filter_cb, ctypes.c_void_p), ctypes.c_bool)
+def nir_lower_wrmasks(shader, cb, data): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_fb_read(shader): ...
 class struct_nir_lower_drawpixels_options(Struct): pass
 struct_nir_lower_drawpixels_options.SIZE = 36
 struct_nir_lower_drawpixels_options._fields_ = ['texcoord_state_tokens', 'scale_state_tokens', 'bias_state_tokens', 'drawpix_sampler', 'pixelmap_sampler', 'pixel_maps', 'scale_and_bias']
@@ -4749,36 +4400,30 @@ setattr(struct_nir_lower_drawpixels_options, 'pixelmap_sampler', field(28, ctype
 setattr(struct_nir_lower_drawpixels_options, 'pixel_maps', field(32, ctypes.c_bool, 1, 0))
 setattr(struct_nir_lower_drawpixels_options, 'scale_and_bias', field(32, ctypes.c_bool, 1, 1))
 nir_lower_drawpixels_options = struct_nir_lower_drawpixels_options
-try: (nir_lower_drawpixels:=dll.nir_lower_drawpixels).restype, nir_lower_drawpixels.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_lower_drawpixels_options)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(nir_lower_drawpixels_options)), ctypes.c_bool)
+def nir_lower_drawpixels(shader, options): ...
 class struct_nir_lower_bitmap_options(Struct): pass
 struct_nir_lower_bitmap_options.SIZE = 8
 struct_nir_lower_bitmap_options._fields_ = ['sampler', 'swizzle_xxxx']
 setattr(struct_nir_lower_bitmap_options, 'sampler', field(0, ctypes.c_uint32))
 setattr(struct_nir_lower_bitmap_options, 'swizzle_xxxx', field(4, ctypes.c_bool))
 nir_lower_bitmap_options = struct_nir_lower_bitmap_options
-try: (nir_lower_bitmap:=dll.nir_lower_bitmap).restype, nir_lower_bitmap.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_lower_bitmap_options)]
-except AttributeError: pass
-
-try: (nir_lower_atomics_to_ssbo:=dll.nir_lower_atomics_to_ssbo).restype, nir_lower_atomics_to_ssbo.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_uint32]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(nir_lower_bitmap_options)), ctypes.c_bool)
+def nir_lower_bitmap(shader, options): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_uint32), ctypes.c_bool)
+def nir_lower_atomics_to_ssbo(shader, offset_align_state): ...
 nir_lower_gs_intrinsics_flags = CEnum(ctypes.c_uint32)
 nir_lower_gs_intrinsics_per_stream = nir_lower_gs_intrinsics_flags.define('nir_lower_gs_intrinsics_per_stream', 1)
 nir_lower_gs_intrinsics_count_primitives = nir_lower_gs_intrinsics_flags.define('nir_lower_gs_intrinsics_count_primitives', 2)
 nir_lower_gs_intrinsics_count_vertices_per_primitive = nir_lower_gs_intrinsics_flags.define('nir_lower_gs_intrinsics_count_vertices_per_primitive', 4)
 nir_lower_gs_intrinsics_overwrite_incomplete = nir_lower_gs_intrinsics_flags.define('nir_lower_gs_intrinsics_overwrite_incomplete', 8)
 
-try: (nir_lower_gs_intrinsics:=dll.nir_lower_gs_intrinsics).restype, nir_lower_gs_intrinsics.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_lower_gs_intrinsics_flags]
-except AttributeError: pass
-
-try: (nir_lower_halt_to_return:=dll.nir_lower_halt_to_return).restype, nir_lower_halt_to_return.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_tess_coord_z:=dll.nir_lower_tess_coord_z).restype, nir_lower_tess_coord_z.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_bool]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), nir_lower_gs_intrinsics_flags), ctypes.c_bool)
+def nir_lower_gs_intrinsics(shader, options): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_halt_to_return(nir): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_bool), ctypes.c_bool)
+def nir_lower_tess_coord_z(shader, triangles): ...
 class struct_nir_lower_task_shader_options(Struct): pass
 struct_nir_lower_task_shader_options.SIZE = 8
 struct_nir_lower_task_shader_options._fields_ = ['payload_to_shared_for_atomics', 'payload_to_shared_for_small_types', 'payload_offset_in_bytes']
@@ -4786,16 +4431,13 @@ setattr(struct_nir_lower_task_shader_options, 'payload_to_shared_for_atomics', f
 setattr(struct_nir_lower_task_shader_options, 'payload_to_shared_for_small_types', field(0, ctypes.c_bool, 1, 1))
 setattr(struct_nir_lower_task_shader_options, 'payload_offset_in_bytes', field(4, uint32_t))
 nir_lower_task_shader_options = struct_nir_lower_task_shader_options
-try: (nir_lower_task_shader:=dll.nir_lower_task_shader).restype, nir_lower_task_shader.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_lower_task_shader_options]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), nir_lower_task_shader_options), ctypes.c_bool)
+def nir_lower_task_shader(shader, options): ...
 nir_lower_bit_size_callback = ctypes.CFUNCTYPE(ctypes.c_uint32, Pointer(struct_nir_instr), ctypes.c_void_p)
-try: (nir_lower_bit_size:=dll.nir_lower_bit_size).restype, nir_lower_bit_size.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_lower_bit_size_callback, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (nir_lower_64bit_phis:=dll.nir_lower_64bit_phis).restype, nir_lower_64bit_phis.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), nir_lower_bit_size_callback, ctypes.c_void_p), ctypes.c_bool)
+def nir_lower_bit_size(shader, callback, callback_data): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_64bit_phis(shader): ...
 class struct_nir_split_conversions_options(Struct): pass
 struct_nir_split_conversions_options.SIZE = 24
 struct_nir_split_conversions_options._fields_ = ['callback', 'callback_data', 'has_convert_alu_types']
@@ -4803,45 +4445,32 @@ setattr(struct_nir_split_conversions_options, 'callback', field(0, nir_lower_bit
 setattr(struct_nir_split_conversions_options, 'callback_data', field(8, ctypes.c_void_p))
 setattr(struct_nir_split_conversions_options, 'has_convert_alu_types', field(16, ctypes.c_bool))
 nir_split_conversions_options = struct_nir_split_conversions_options
-try: (nir_split_conversions:=dll.nir_split_conversions).restype, nir_split_conversions.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_split_conversions_options)]
-except AttributeError: pass
-
-try: (nir_split_64bit_vec3_and_vec4:=dll.nir_split_64bit_vec3_and_vec4).restype, nir_split_64bit_vec3_and_vec4.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_int64_op_to_options_mask:=dll.nir_lower_int64_op_to_options_mask).restype, nir_lower_int64_op_to_options_mask.argtypes = nir_lower_int64_options, [nir_op]
-except AttributeError: pass
-
-try: (nir_lower_int64:=dll.nir_lower_int64).restype, nir_lower_int64.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_int64_float_conversions:=dll.nir_lower_int64_float_conversions).restype, nir_lower_int64_float_conversions.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_doubles_op_to_options_mask:=dll.nir_lower_doubles_op_to_options_mask).restype, nir_lower_doubles_op_to_options_mask.argtypes = nir_lower_doubles_options, [nir_op]
-except AttributeError: pass
-
-try: (nir_lower_doubles:=dll.nir_lower_doubles).restype, nir_lower_doubles.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_shader), nir_lower_doubles_options]
-except AttributeError: pass
-
-try: (nir_lower_pack:=dll.nir_lower_pack).restype, nir_lower_pack.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_get_io_intrinsic:=dll.nir_get_io_intrinsic).restype, nir_get_io_intrinsic.argtypes = Pointer(nir_intrinsic_instr), [Pointer(nir_instr), nir_variable_mode, Pointer(nir_variable_mode)]
-except AttributeError: pass
-
-try: (nir_recompute_io_bases:=dll.nir_recompute_io_bases).restype, nir_recompute_io_bases.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_variable_mode]
-except AttributeError: pass
-
-try: (nir_lower_mediump_vars:=dll.nir_lower_mediump_vars).restype, nir_lower_mediump_vars.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_variable_mode]
-except AttributeError: pass
-
-try: (nir_lower_mediump_io:=dll.nir_lower_mediump_io).restype, nir_lower_mediump_io.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_variable_mode, uint64_t, ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_clear_mediump_io_flag:=dll.nir_clear_mediump_io_flag).restype, nir_clear_mediump_io_flag.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(nir_split_conversions_options)), ctypes.c_bool)
+def nir_split_conversions(shader, options): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_split_64bit_vec3_and_vec4(shader): ...
+@dll.bind((nir_op,), nir_lower_int64_options)
+def nir_lower_int64_op_to_options_mask(opcode): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_int64(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_int64_float_conversions(shader): ...
+@dll.bind((nir_op,), nir_lower_doubles_options)
+def nir_lower_doubles_op_to_options_mask(opcode): ...
+@dll.bind((Pointer(nir_shader), Pointer(nir_shader), nir_lower_doubles_options), ctypes.c_bool)
+def nir_lower_doubles(shader, softfp64, options): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_pack(shader): ...
+@dll.bind((Pointer(nir_instr), nir_variable_mode, Pointer(nir_variable_mode)), Pointer(nir_intrinsic_instr))
+def nir_get_io_intrinsic(instr, modes, out_mode): ...
+@dll.bind((Pointer(nir_shader), nir_variable_mode), ctypes.c_bool)
+def nir_recompute_io_bases(nir, modes): ...
+@dll.bind((Pointer(nir_shader), nir_variable_mode), ctypes.c_bool)
+def nir_lower_mediump_vars(nir, modes): ...
+@dll.bind((Pointer(nir_shader), nir_variable_mode, uint64_t, ctypes.c_bool), ctypes.c_bool)
+def nir_lower_mediump_io(nir, modes, varying_mask, use_16bit_slots): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_clear_mediump_io_flag(nir): ...
 class struct_nir_opt_tex_srcs_options(Struct): pass
 struct_nir_opt_tex_srcs_options.SIZE = 8
 struct_nir_opt_tex_srcs_options._fields_ = ['sampler_dims', 'src_types']
@@ -4860,9 +4489,8 @@ setattr(struct_nir_opt_16bit_tex_image_options, 'opt_image_srcs', field(8, ctype
 setattr(struct_nir_opt_16bit_tex_image_options, 'opt_srcs_options_count', field(12, ctypes.c_uint32))
 setattr(struct_nir_opt_16bit_tex_image_options, 'opt_srcs_options', field(16, Pointer(nir_opt_tex_srcs_options)))
 nir_opt_16bit_tex_image_options = struct_nir_opt_16bit_tex_image_options
-try: (nir_opt_16bit_tex_image:=dll.nir_opt_16bit_tex_image).restype, nir_opt_16bit_tex_image.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_opt_16bit_tex_image_options)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(nir_opt_16bit_tex_image_options)), ctypes.c_bool)
+def nir_opt_16bit_tex_image(nir, options): ...
 class struct_nir_tex_src_type_constraint(Struct): pass
 struct_nir_tex_src_type_constraint.SIZE = 8
 struct_nir_tex_src_type_constraint._fields_ = ['legalize_type', 'bit_size', 'match_src']
@@ -4871,21 +4499,16 @@ setattr(struct_nir_tex_src_type_constraint, 'bit_size', field(1, uint8_t))
 setattr(struct_nir_tex_src_type_constraint, 'match_src', field(4, nir_tex_src_type))
 nir_tex_src_type_constraint = struct_nir_tex_src_type_constraint
 nir_tex_src_type_constraints = Array(struct_nir_tex_src_type_constraint, 23)
-try: (nir_legalize_16bit_sampler_srcs:=dll.nir_legalize_16bit_sampler_srcs).restype, nir_legalize_16bit_sampler_srcs.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_tex_src_type_constraints]
-except AttributeError: pass
-
-try: (nir_lower_point_size:=dll.nir_lower_point_size).restype, nir_lower_point_size.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_float, ctypes.c_float]
-except AttributeError: pass
-
-try: (nir_lower_default_point_size:=dll.nir_lower_default_point_size).restype, nir_lower_default_point_size.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_texcoord_replace:=dll.nir_lower_texcoord_replace).restype, nir_lower_texcoord_replace.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_uint32, ctypes.c_bool, ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_lower_texcoord_replace_late:=dll.nir_lower_texcoord_replace_late).restype, nir_lower_texcoord_replace_late.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_uint32, ctypes.c_bool]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), nir_tex_src_type_constraints), ctypes.c_bool)
+def nir_legalize_16bit_sampler_srcs(nir, constraints): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_float, ctypes.c_float), ctypes.c_bool)
+def nir_lower_point_size(shader, min, max): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_default_point_size(nir): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_uint32, ctypes.c_bool, ctypes.c_bool), ctypes.c_bool)
+def nir_lower_texcoord_replace(s, coord_replace, point_coord_is_sysval, yinvert): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_uint32, ctypes.c_bool), ctypes.c_bool)
+def nir_lower_texcoord_replace_late(s, coord_replace, point_coord_is_sysval): ...
 nir_lower_interpolation_options = CEnum(ctypes.c_uint32)
 nir_lower_interpolation_at_sample = nir_lower_interpolation_options.define('nir_lower_interpolation_at_sample', 2)
 nir_lower_interpolation_at_offset = nir_lower_interpolation_options.define('nir_lower_interpolation_at_offset', 4)
@@ -4893,47 +4516,37 @@ nir_lower_interpolation_centroid = nir_lower_interpolation_options.define('nir_l
 nir_lower_interpolation_pixel = nir_lower_interpolation_options.define('nir_lower_interpolation_pixel', 16)
 nir_lower_interpolation_sample = nir_lower_interpolation_options.define('nir_lower_interpolation_sample', 32)
 
-try: (nir_lower_interpolation:=dll.nir_lower_interpolation).restype, nir_lower_interpolation.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_lower_interpolation_options]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), nir_lower_interpolation_options), ctypes.c_bool)
+def nir_lower_interpolation(shader, options): ...
 nir_lower_discard_if_options = CEnum(ctypes.c_uint32)
 nir_lower_demote_if_to_cf = nir_lower_discard_if_options.define('nir_lower_demote_if_to_cf', 1)
 nir_lower_terminate_if_to_cf = nir_lower_discard_if_options.define('nir_lower_terminate_if_to_cf', 2)
 nir_move_terminate_out_of_loops = nir_lower_discard_if_options.define('nir_move_terminate_out_of_loops', 4)
 
-try: (nir_lower_discard_if:=dll.nir_lower_discard_if).restype, nir_lower_discard_if.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_lower_discard_if_options]
-except AttributeError: pass
-
-try: (nir_lower_terminate_to_demote:=dll.nir_lower_terminate_to_demote).restype, nir_lower_terminate_to_demote.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_memory_model:=dll.nir_lower_memory_model).restype, nir_lower_memory_model.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_goto_ifs:=dll.nir_lower_goto_ifs).restype, nir_lower_goto_ifs.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_continue_constructs:=dll.nir_lower_continue_constructs).restype, nir_lower_continue_constructs.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), nir_lower_discard_if_options), ctypes.c_bool)
+def nir_lower_discard_if(shader, options): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_terminate_to_demote(nir): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_memory_model(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_goto_ifs(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_continue_constructs(shader): ...
 class struct_nir_lower_multiview_options(Struct): pass
 struct_nir_lower_multiview_options.SIZE = 16
 struct_nir_lower_multiview_options._fields_ = ['view_mask', 'allowed_per_view_outputs']
 setattr(struct_nir_lower_multiview_options, 'view_mask', field(0, uint32_t))
 setattr(struct_nir_lower_multiview_options, 'allowed_per_view_outputs', field(8, uint64_t))
 nir_lower_multiview_options = struct_nir_lower_multiview_options
-try: (nir_shader_uses_view_index:=dll.nir_shader_uses_view_index).restype, nir_shader_uses_view_index.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_can_lower_multiview:=dll.nir_can_lower_multiview).restype, nir_can_lower_multiview.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_lower_multiview_options]
-except AttributeError: pass
-
-try: (nir_lower_multiview:=dll.nir_lower_multiview).restype, nir_lower_multiview.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_lower_multiview_options]
-except AttributeError: pass
-
-try: (nir_lower_view_index_to_device_index:=dll.nir_lower_view_index_to_device_index).restype, nir_lower_view_index_to_device_index.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_shader_uses_view_index(shader): ...
+@dll.bind((Pointer(nir_shader), nir_lower_multiview_options), ctypes.c_bool)
+def nir_can_lower_multiview(shader, options): ...
+@dll.bind((Pointer(nir_shader), nir_lower_multiview_options), ctypes.c_bool)
+def nir_lower_multiview(shader, options): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_view_index_to_device_index(shader): ...
 nir_lower_fp16_cast_options = CEnum(ctypes.c_uint32)
 nir_lower_fp16_rtz = nir_lower_fp16_cast_options.define('nir_lower_fp16_rtz', 1)
 nir_lower_fp16_rtne = nir_lower_fp16_cast_options.define('nir_lower_fp16_rtne', 2)
@@ -4942,90 +4555,64 @@ nir_lower_fp16_rd = nir_lower_fp16_cast_options.define('nir_lower_fp16_rd', 8)
 nir_lower_fp16_all = nir_lower_fp16_cast_options.define('nir_lower_fp16_all', 15)
 nir_lower_fp16_split_fp64 = nir_lower_fp16_cast_options.define('nir_lower_fp16_split_fp64', 16)
 
-try: (nir_lower_fp16_casts:=dll.nir_lower_fp16_casts).restype, nir_lower_fp16_casts.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_lower_fp16_cast_options]
-except AttributeError: pass
-
-try: (nir_normalize_cubemap_coords:=dll.nir_normalize_cubemap_coords).restype, nir_normalize_cubemap_coords.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_shader_supports_implicit_lod:=dll.nir_shader_supports_implicit_lod).restype, nir_shader_supports_implicit_lod.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_live_defs_impl:=dll.nir_live_defs_impl).restype, nir_live_defs_impl.argtypes = None, [Pointer(nir_function_impl)]
-except AttributeError: pass
-
-try: (nir_get_live_defs:=dll.nir_get_live_defs).restype, nir_get_live_defs.argtypes = Pointer(ctypes.c_uint32), [nir_cursor, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (nir_loop_analyze_impl:=dll.nir_loop_analyze_impl).restype, nir_loop_analyze_impl.argtypes = None, [Pointer(nir_function_impl), nir_variable_mode, ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_defs_interfere:=dll.nir_defs_interfere).restype, nir_defs_interfere.argtypes = ctypes.c_bool, [Pointer(nir_def), Pointer(nir_def)]
-except AttributeError: pass
-
-try: (nir_repair_ssa_impl:=dll.nir_repair_ssa_impl).restype, nir_repair_ssa_impl.argtypes = ctypes.c_bool, [Pointer(nir_function_impl)]
-except AttributeError: pass
-
-try: (nir_repair_ssa:=dll.nir_repair_ssa).restype, nir_repair_ssa.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_convert_loop_to_lcssa:=dll.nir_convert_loop_to_lcssa).restype, nir_convert_loop_to_lcssa.argtypes = None, [Pointer(nir_loop)]
-except AttributeError: pass
-
-try: (nir_convert_to_lcssa:=dll.nir_convert_to_lcssa).restype, nir_convert_to_lcssa.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_bool, ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_divergence_analysis_impl:=dll.nir_divergence_analysis_impl).restype, nir_divergence_analysis_impl.argtypes = None, [Pointer(nir_function_impl), nir_divergence_options]
-except AttributeError: pass
-
-try: (nir_divergence_analysis:=dll.nir_divergence_analysis).restype, nir_divergence_analysis.argtypes = None, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_vertex_divergence_analysis:=dll.nir_vertex_divergence_analysis).restype, nir_vertex_divergence_analysis.argtypes = None, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_has_divergent_loop:=dll.nir_has_divergent_loop).restype, nir_has_divergent_loop.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_rewrite_uses_to_load_reg:=dll.nir_rewrite_uses_to_load_reg).restype, nir_rewrite_uses_to_load_reg.argtypes = None, [Pointer(nir_builder), Pointer(nir_def), Pointer(nir_def)]
-except AttributeError: pass
-
-try: (nir_convert_from_ssa:=dll.nir_convert_from_ssa).restype, nir_convert_from_ssa.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_bool, ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_lower_phis_to_regs_block:=dll.nir_lower_phis_to_regs_block).restype, nir_lower_phis_to_regs_block.argtypes = ctypes.c_bool, [Pointer(nir_block), ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_lower_ssa_defs_to_regs_block:=dll.nir_lower_ssa_defs_to_regs_block).restype, nir_lower_ssa_defs_to_regs_block.argtypes = ctypes.c_bool, [Pointer(nir_block)]
-except AttributeError: pass
-
-try: (nir_rematerialize_deref_in_use_blocks:=dll.nir_rematerialize_deref_in_use_blocks).restype, nir_rematerialize_deref_in_use_blocks.argtypes = ctypes.c_bool, [Pointer(nir_deref_instr)]
-except AttributeError: pass
-
-try: (nir_rematerialize_derefs_in_use_blocks_impl:=dll.nir_rematerialize_derefs_in_use_blocks_impl).restype, nir_rematerialize_derefs_in_use_blocks_impl.argtypes = ctypes.c_bool, [Pointer(nir_function_impl)]
-except AttributeError: pass
-
-try: (nir_lower_samplers:=dll.nir_lower_samplers).restype, nir_lower_samplers.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_cl_images:=dll.nir_lower_cl_images).restype, nir_lower_cl_images.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_bool, ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_dedup_inline_samplers:=dll.nir_dedup_inline_samplers).restype, nir_dedup_inline_samplers.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), nir_lower_fp16_cast_options), ctypes.c_bool)
+def nir_lower_fp16_casts(shader, options): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_normalize_cubemap_coords(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_shader_supports_implicit_lod(shader): ...
+@dll.bind((Pointer(nir_function_impl),), None)
+def nir_live_defs_impl(impl): ...
+@dll.bind((nir_cursor, ctypes.c_void_p), Pointer(ctypes.c_uint32))
+def nir_get_live_defs(cursor, mem_ctx): ...
+@dll.bind((Pointer(nir_function_impl), nir_variable_mode, ctypes.c_bool), None)
+def nir_loop_analyze_impl(impl, indirect_mask, force_unroll_sampler_indirect): ...
+@dll.bind((Pointer(nir_def), Pointer(nir_def)), ctypes.c_bool)
+def nir_defs_interfere(a, b): ...
+@dll.bind((Pointer(nir_function_impl),), ctypes.c_bool)
+def nir_repair_ssa_impl(impl): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_repair_ssa(shader): ...
+@dll.bind((Pointer(nir_loop),), None)
+def nir_convert_loop_to_lcssa(loop): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_bool, ctypes.c_bool), ctypes.c_bool)
+def nir_convert_to_lcssa(shader, skip_invariants, skip_bool_invariants): ...
+@dll.bind((Pointer(nir_function_impl), nir_divergence_options), None)
+def nir_divergence_analysis_impl(impl, options): ...
+@dll.bind((Pointer(nir_shader),), None)
+def nir_divergence_analysis(shader): ...
+@dll.bind((Pointer(nir_shader),), None)
+def nir_vertex_divergence_analysis(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_has_divergent_loop(shader): ...
+@dll.bind((Pointer(nir_builder), Pointer(nir_def), Pointer(nir_def)), None)
+def nir_rewrite_uses_to_load_reg(b, old, reg): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_bool, ctypes.c_bool), ctypes.c_bool)
+def nir_convert_from_ssa(shader, phi_webs_only, consider_divergence): ...
+@dll.bind((Pointer(nir_block), ctypes.c_bool), ctypes.c_bool)
+def nir_lower_phis_to_regs_block(block, place_writes_in_imm_preds): ...
+@dll.bind((Pointer(nir_block),), ctypes.c_bool)
+def nir_lower_ssa_defs_to_regs_block(block): ...
+@dll.bind((Pointer(nir_deref_instr),), ctypes.c_bool)
+def nir_rematerialize_deref_in_use_blocks(instr): ...
+@dll.bind((Pointer(nir_function_impl),), ctypes.c_bool)
+def nir_rematerialize_derefs_in_use_blocks_impl(impl): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_samplers(shader): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_bool, ctypes.c_bool), ctypes.c_bool)
+def nir_lower_cl_images(shader, lower_image_derefs, lower_sampler_derefs): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_dedup_inline_samplers(shader): ...
 class struct_nir_lower_ssbo_options(Struct): pass
 struct_nir_lower_ssbo_options.SIZE = 2
 struct_nir_lower_ssbo_options._fields_ = ['native_loads', 'native_offset']
 setattr(struct_nir_lower_ssbo_options, 'native_loads', field(0, ctypes.c_bool))
 setattr(struct_nir_lower_ssbo_options, 'native_offset', field(1, ctypes.c_bool))
 nir_lower_ssbo_options = struct_nir_lower_ssbo_options
-try: (nir_lower_ssbo:=dll.nir_lower_ssbo).restype, nir_lower_ssbo.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_lower_ssbo_options)]
-except AttributeError: pass
-
-try: (nir_lower_helper_writes:=dll.nir_lower_helper_writes).restype, nir_lower_helper_writes.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_bool]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(nir_lower_ssbo_options)), ctypes.c_bool)
+def nir_lower_ssbo(shader, opts): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_bool), ctypes.c_bool)
+def nir_lower_helper_writes(shader, lower_plain_stores): ...
 class struct_nir_lower_printf_options(Struct): pass
 struct_nir_lower_printf_options.SIZE = 12
 struct_nir_lower_printf_options._fields_ = ['max_buffer_size', 'ptr_bit_size', 'hash_format_strings']
@@ -5033,54 +4620,40 @@ setattr(struct_nir_lower_printf_options, 'max_buffer_size', field(0, ctypes.c_ui
 setattr(struct_nir_lower_printf_options, 'ptr_bit_size', field(4, ctypes.c_uint32))
 setattr(struct_nir_lower_printf_options, 'hash_format_strings', field(8, ctypes.c_bool))
 nir_lower_printf_options = struct_nir_lower_printf_options
-try: (nir_lower_printf:=dll.nir_lower_printf).restype, nir_lower_printf.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_lower_printf_options)]
-except AttributeError: pass
-
-try: (nir_lower_printf_buffer:=dll.nir_lower_printf_buffer).restype, nir_lower_printf_buffer.argtypes = ctypes.c_bool, [Pointer(nir_shader), uint64_t, uint32_t]
-except AttributeError: pass
-
-try: (nir_opt_comparison_pre_impl:=dll.nir_opt_comparison_pre_impl).restype, nir_opt_comparison_pre_impl.argtypes = ctypes.c_bool, [Pointer(nir_function_impl)]
-except AttributeError: pass
-
-try: (nir_opt_comparison_pre:=dll.nir_opt_comparison_pre).restype, nir_opt_comparison_pre.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(nir_lower_printf_options)), ctypes.c_bool)
+def nir_lower_printf(nir, options): ...
+@dll.bind((Pointer(nir_shader), uint64_t, uint32_t), ctypes.c_bool)
+def nir_lower_printf_buffer(nir, address, size): ...
+@dll.bind((Pointer(nir_function_impl),), ctypes.c_bool)
+def nir_opt_comparison_pre_impl(impl): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_comparison_pre(shader): ...
 class struct_nir_opt_access_options(Struct): pass
 struct_nir_opt_access_options.SIZE = 1
 struct_nir_opt_access_options._fields_ = ['is_vulkan']
 setattr(struct_nir_opt_access_options, 'is_vulkan', field(0, ctypes.c_bool))
 nir_opt_access_options = struct_nir_opt_access_options
-try: (nir_opt_access:=dll.nir_opt_access).restype, nir_opt_access.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_opt_access_options)]
-except AttributeError: pass
-
-try: (nir_opt_algebraic:=dll.nir_opt_algebraic).restype, nir_opt_algebraic.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_algebraic_before_ffma:=dll.nir_opt_algebraic_before_ffma).restype, nir_opt_algebraic_before_ffma.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_algebraic_before_lower_int64:=dll.nir_opt_algebraic_before_lower_int64).restype, nir_opt_algebraic_before_lower_int64.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_algebraic_late:=dll.nir_opt_algebraic_late).restype, nir_opt_algebraic_late.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_algebraic_distribute_src_mods:=dll.nir_opt_algebraic_distribute_src_mods).restype, nir_opt_algebraic_distribute_src_mods.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_algebraic_integer_promotion:=dll.nir_opt_algebraic_integer_promotion).restype, nir_opt_algebraic_integer_promotion.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_reassociate_matrix_mul:=dll.nir_opt_reassociate_matrix_mul).restype, nir_opt_reassociate_matrix_mul.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_constant_folding:=dll.nir_opt_constant_folding).restype, nir_opt_constant_folding.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(nir_opt_access_options)), ctypes.c_bool)
+def nir_opt_access(shader, options): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_algebraic(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_algebraic_before_ffma(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_algebraic_before_lower_int64(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_algebraic_late(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_algebraic_distribute_src_mods(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_algebraic_integer_promotion(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_reassociate_matrix_mul(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_constant_folding(shader): ...
 nir_combine_barrier_cb = ctypes.CFUNCTYPE(ctypes.c_bool, Pointer(struct_nir_intrinsic_instr), Pointer(struct_nir_intrinsic_instr), ctypes.c_void_p)
-try: (nir_opt_combine_barriers:=dll.nir_opt_combine_barriers).restype, nir_opt_combine_barriers.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_combine_barrier_cb, ctypes.c_void_p]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), nir_combine_barrier_cb, ctypes.c_void_p), ctypes.c_bool)
+def nir_opt_combine_barriers(shader, combine_cb, data): ...
 mesa_scope = CEnum(ctypes.c_uint32)
 SCOPE_NONE = mesa_scope.define('SCOPE_NONE', 0)
 SCOPE_INVOCATION = mesa_scope.define('SCOPE_INVOCATION', 1)
@@ -5090,88 +4663,62 @@ SCOPE_WORKGROUP = mesa_scope.define('SCOPE_WORKGROUP', 4)
 SCOPE_QUEUE_FAMILY = mesa_scope.define('SCOPE_QUEUE_FAMILY', 5)
 SCOPE_DEVICE = mesa_scope.define('SCOPE_DEVICE', 6)
 
-try: (nir_opt_acquire_release_barriers:=dll.nir_opt_acquire_release_barriers).restype, nir_opt_acquire_release_barriers.argtypes = ctypes.c_bool, [Pointer(nir_shader), mesa_scope]
-except AttributeError: pass
-
-try: (nir_opt_barrier_modes:=dll.nir_opt_barrier_modes).restype, nir_opt_barrier_modes.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_minimize_call_live_states:=dll.nir_minimize_call_live_states).restype, nir_minimize_call_live_states.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_combine_stores:=dll.nir_opt_combine_stores).restype, nir_opt_combine_stores.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_variable_mode]
-except AttributeError: pass
-
-try: (nir_copy_prop_impl:=dll.nir_copy_prop_impl).restype, nir_copy_prop_impl.argtypes = ctypes.c_bool, [Pointer(nir_function_impl)]
-except AttributeError: pass
-
-try: (nir_copy_prop:=dll.nir_copy_prop).restype, nir_copy_prop.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_copy_prop_vars:=dll.nir_opt_copy_prop_vars).restype, nir_opt_copy_prop_vars.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_cse:=dll.nir_opt_cse).restype, nir_opt_cse.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_dce:=dll.nir_opt_dce).restype, nir_opt_dce.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_dead_cf:=dll.nir_opt_dead_cf).restype, nir_opt_dead_cf.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_dead_write_vars:=dll.nir_opt_dead_write_vars).restype, nir_opt_dead_write_vars.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_deref_impl:=dll.nir_opt_deref_impl).restype, nir_opt_deref_impl.argtypes = ctypes.c_bool, [Pointer(nir_function_impl)]
-except AttributeError: pass
-
-try: (nir_opt_deref:=dll.nir_opt_deref).restype, nir_opt_deref.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_find_array_copies:=dll.nir_opt_find_array_copies).restype, nir_opt_find_array_copies.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_def_is_frag_coord_z:=dll.nir_def_is_frag_coord_z).restype, nir_def_is_frag_coord_z.argtypes = ctypes.c_bool, [Pointer(nir_def)]
-except AttributeError: pass
-
-try: (nir_opt_fragdepth:=dll.nir_opt_fragdepth).restype, nir_opt_fragdepth.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_gcm:=dll.nir_opt_gcm).restype, nir_opt_gcm.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_opt_generate_bfi:=dll.nir_opt_generate_bfi).restype, nir_opt_generate_bfi.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_idiv_const:=dll.nir_opt_idiv_const).restype, nir_opt_idiv_const.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_opt_mqsad:=dll.nir_opt_mqsad).restype, nir_opt_mqsad.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), mesa_scope), ctypes.c_bool)
+def nir_opt_acquire_release_barriers(shader, max_scope): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_barrier_modes(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_minimize_call_live_states(shader): ...
+@dll.bind((Pointer(nir_shader), nir_variable_mode), ctypes.c_bool)
+def nir_opt_combine_stores(shader, modes): ...
+@dll.bind((Pointer(nir_function_impl),), ctypes.c_bool)
+def nir_copy_prop_impl(impl): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_copy_prop(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_copy_prop_vars(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_cse(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_dce(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_dead_cf(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_dead_write_vars(shader): ...
+@dll.bind((Pointer(nir_function_impl),), ctypes.c_bool)
+def nir_opt_deref_impl(impl): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_deref(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_find_array_copies(shader): ...
+@dll.bind((Pointer(nir_def),), ctypes.c_bool)
+def nir_def_is_frag_coord_z(_ndef): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_fragdepth(shader): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_bool), ctypes.c_bool)
+def nir_opt_gcm(shader, value_number): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_generate_bfi(shader): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_uint32), ctypes.c_bool)
+def nir_opt_idiv_const(shader, min_bit_size): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_mqsad(shader): ...
 nir_opt_if_options = CEnum(ctypes.c_uint32)
 nir_opt_if_optimize_phi_true_false = nir_opt_if_options.define('nir_opt_if_optimize_phi_true_false', 1)
 nir_opt_if_avoid_64bit_phis = nir_opt_if_options.define('nir_opt_if_avoid_64bit_phis', 2)
 
-try: (nir_opt_if:=dll.nir_opt_if).restype, nir_opt_if.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_opt_if_options]
-except AttributeError: pass
-
-try: (nir_opt_intrinsics:=dll.nir_opt_intrinsics).restype, nir_opt_intrinsics.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_large_constants:=dll.nir_opt_large_constants).restype, nir_opt_large_constants.argtypes = ctypes.c_bool, [Pointer(nir_shader), glsl_type_size_align_func, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_opt_licm:=dll.nir_opt_licm).restype, nir_opt_licm.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_loop:=dll.nir_opt_loop).restype, nir_opt_loop.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_loop_unroll:=dll.nir_opt_loop_unroll).restype, nir_opt_loop_unroll.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), nir_opt_if_options), ctypes.c_bool)
+def nir_opt_if(shader, options): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_intrinsics(shader): ...
+@dll.bind((Pointer(nir_shader), glsl_type_size_align_func, ctypes.c_uint32), ctypes.c_bool)
+def nir_opt_large_constants(shader, size_align, threshold): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_licm(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_loop(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_loop_unroll(shader): ...
 nir_move_options = CEnum(ctypes.c_uint32)
 nir_move_const_undef = nir_move_options.define('nir_move_const_undef', 1)
 nir_move_load_ubo = nir_move_options.define('nir_move_load_ubo', 2)
@@ -5183,15 +4730,12 @@ nir_move_load_uniform = nir_move_options.define('nir_move_load_uniform', 64)
 nir_move_alu = nir_move_options.define('nir_move_alu', 128)
 nir_dont_move_byte_word_vecs = nir_move_options.define('nir_dont_move_byte_word_vecs', 256)
 
-try: (nir_can_move_instr:=dll.nir_can_move_instr).restype, nir_can_move_instr.argtypes = ctypes.c_bool, [Pointer(nir_instr), nir_move_options]
-except AttributeError: pass
-
-try: (nir_opt_sink:=dll.nir_opt_sink).restype, nir_opt_sink.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_move_options]
-except AttributeError: pass
-
-try: (nir_opt_move:=dll.nir_opt_move).restype, nir_opt_move.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_move_options]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_instr), nir_move_options), ctypes.c_bool)
+def nir_can_move_instr(instr, options): ...
+@dll.bind((Pointer(nir_shader), nir_move_options), ctypes.c_bool)
+def nir_opt_sink(shader, options): ...
+@dll.bind((Pointer(nir_shader), nir_move_options), ctypes.c_bool)
+def nir_opt_move(shader, options): ...
 class struct_nir_opt_offsets_options(Struct): pass
 struct_nir_opt_offsets_options.SIZE = 48
 struct_nir_opt_offsets_options._fields_ = ['uniform_max', 'ubo_vec4_max', 'shared_max', 'shared_atomic_max', 'buffer_max', 'max_offset_cb', 'max_offset_data', 'allow_offset_wrap']
@@ -5204,9 +4748,8 @@ setattr(struct_nir_opt_offsets_options, 'max_offset_cb', field(24, ctypes.CFUNCT
 setattr(struct_nir_opt_offsets_options, 'max_offset_data', field(32, ctypes.c_void_p))
 setattr(struct_nir_opt_offsets_options, 'allow_offset_wrap', field(40, ctypes.c_bool))
 nir_opt_offsets_options = struct_nir_opt_offsets_options
-try: (nir_opt_offsets:=dll.nir_opt_offsets).restype, nir_opt_offsets.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_opt_offsets_options)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(nir_opt_offsets_options)), ctypes.c_bool)
+def nir_opt_offsets(shader, options): ...
 class struct_nir_opt_peephole_select_options(Struct): pass
 struct_nir_opt_peephole_select_options.SIZE = 8
 struct_nir_opt_peephole_select_options._fields_ = ['limit', 'indirect_load_ok', 'expensive_alu_ok', 'discard_ok']
@@ -5215,66 +4758,46 @@ setattr(struct_nir_opt_peephole_select_options, 'indirect_load_ok', field(4, cty
 setattr(struct_nir_opt_peephole_select_options, 'expensive_alu_ok', field(5, ctypes.c_bool))
 setattr(struct_nir_opt_peephole_select_options, 'discard_ok', field(6, ctypes.c_bool))
 nir_opt_peephole_select_options = struct_nir_opt_peephole_select_options
-try: (nir_opt_peephole_select:=dll.nir_opt_peephole_select).restype, nir_opt_peephole_select.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_opt_peephole_select_options)]
-except AttributeError: pass
-
-try: (nir_opt_reassociate_bfi:=dll.nir_opt_reassociate_bfi).restype, nir_opt_reassociate_bfi.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_rematerialize_compares:=dll.nir_opt_rematerialize_compares).restype, nir_opt_rematerialize_compares.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_remove_phis:=dll.nir_opt_remove_phis).restype, nir_opt_remove_phis.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_remove_single_src_phis_block:=dll.nir_remove_single_src_phis_block).restype, nir_remove_single_src_phis_block.argtypes = ctypes.c_bool, [Pointer(nir_block)]
-except AttributeError: pass
-
-try: (nir_opt_phi_precision:=dll.nir_opt_phi_precision).restype, nir_opt_phi_precision.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_phi_to_bool:=dll.nir_opt_phi_to_bool).restype, nir_opt_phi_to_bool.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_shrink_stores:=dll.nir_opt_shrink_stores).restype, nir_opt_shrink_stores.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_opt_shrink_vectors:=dll.nir_opt_shrink_vectors).restype, nir_opt_shrink_vectors.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_opt_undef:=dll.nir_opt_undef).restype, nir_opt_undef.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_undef_to_zero:=dll.nir_lower_undef_to_zero).restype, nir_lower_undef_to_zero.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_uniform_atomics:=dll.nir_opt_uniform_atomics).restype, nir_opt_uniform_atomics.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_opt_uniform_subgroup:=dll.nir_opt_uniform_subgroup).restype, nir_opt_uniform_subgroup.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_lower_subgroups_options)]
-except AttributeError: pass
-
-try: (nir_opt_vectorize:=dll.nir_opt_vectorize).restype, nir_opt_vectorize.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_vectorize_cb, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (nir_opt_vectorize_io:=dll.nir_opt_vectorize_io).restype, nir_opt_vectorize_io.argtypes = ctypes.c_bool, [Pointer(nir_shader), nir_variable_mode, ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_opt_move_discards_to_top:=dll.nir_opt_move_discards_to_top).restype, nir_opt_move_discards_to_top.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_ray_queries:=dll.nir_opt_ray_queries).restype, nir_opt_ray_queries.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_ray_query_ranges:=dll.nir_opt_ray_query_ranges).restype, nir_opt_ray_query_ranges.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_opt_tex_skip_helpers:=dll.nir_opt_tex_skip_helpers).restype, nir_opt_tex_skip_helpers.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_sweep:=dll.nir_sweep).restype, nir_sweep.argtypes = None, [Pointer(nir_shader)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(nir_opt_peephole_select_options)), ctypes.c_bool)
+def nir_opt_peephole_select(shader, options): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_reassociate_bfi(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_rematerialize_compares(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_remove_phis(shader): ...
+@dll.bind((Pointer(nir_block),), ctypes.c_bool)
+def nir_remove_single_src_phis_block(block): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_phi_precision(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_phi_to_bool(shader): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_bool), ctypes.c_bool)
+def nir_opt_shrink_stores(shader, shrink_image_store): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_bool), ctypes.c_bool)
+def nir_opt_shrink_vectors(shader, shrink_start): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_undef(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_lower_undef_to_zero(shader): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_bool), ctypes.c_bool)
+def nir_opt_uniform_atomics(shader, fs_atomics_predicated): ...
+@dll.bind((Pointer(nir_shader), Pointer(nir_lower_subgroups_options)), ctypes.c_bool)
+def nir_opt_uniform_subgroup(shader, _1): ...
+@dll.bind((Pointer(nir_shader), nir_vectorize_cb, ctypes.c_void_p), ctypes.c_bool)
+def nir_opt_vectorize(shader, filter, data): ...
+@dll.bind((Pointer(nir_shader), nir_variable_mode, ctypes.c_bool), ctypes.c_bool)
+def nir_opt_vectorize_io(shader, modes, allow_holes): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_move_discards_to_top(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_ray_queries(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_opt_ray_query_ranges(shader): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_bool), ctypes.c_bool)
+def nir_opt_tex_skip_helpers(shader, no_add_divergence): ...
+@dll.bind((Pointer(nir_shader),), None)
+def nir_sweep(shader): ...
 gl_system_value = CEnum(ctypes.c_uint32)
 SYSTEM_VALUE_SUBGROUP_SIZE = gl_system_value.define('SYSTEM_VALUE_SUBGROUP_SIZE', 0)
 SYSTEM_VALUE_SUBGROUP_INVOCATION = gl_system_value.define('SYSTEM_VALUE_SUBGROUP_INVOCATION', 1)
@@ -5377,12 +4900,10 @@ SYSTEM_VALUE_WARP_ID_NV = gl_system_value.define('SYSTEM_VALUE_WARP_ID_NV', 97)
 SYSTEM_VALUE_SM_ID_NV = gl_system_value.define('SYSTEM_VALUE_SM_ID_NV', 98)
 SYSTEM_VALUE_MAX = gl_system_value.define('SYSTEM_VALUE_MAX', 99)
 
-try: (nir_intrinsic_from_system_value:=dll.nir_intrinsic_from_system_value).restype, nir_intrinsic_from_system_value.argtypes = nir_intrinsic_op, [gl_system_value]
-except AttributeError: pass
-
-try: (nir_system_value_from_intrinsic:=dll.nir_system_value_from_intrinsic).restype, nir_system_value_from_intrinsic.argtypes = gl_system_value, [nir_intrinsic_op]
-except AttributeError: pass
-
+@dll.bind((gl_system_value,), nir_intrinsic_op)
+def nir_intrinsic_from_system_value(val): ...
+@dll.bind((nir_intrinsic_op,), gl_system_value)
+def nir_system_value_from_intrinsic(intrin): ...
 class struct_nir_unsigned_upper_bound_config(Struct): pass
 struct_nir_unsigned_upper_bound_config.SIZE = 164
 struct_nir_unsigned_upper_bound_config._fields_ = ['min_subgroup_size', 'max_subgroup_size', 'max_workgroup_invocations', 'max_workgroup_count', 'max_workgroup_size', 'vertex_attrib_max']
@@ -5393,12 +4914,10 @@ setattr(struct_nir_unsigned_upper_bound_config, 'max_workgroup_count', field(12,
 setattr(struct_nir_unsigned_upper_bound_config, 'max_workgroup_size', field(24, Array(ctypes.c_uint32, 3)))
 setattr(struct_nir_unsigned_upper_bound_config, 'vertex_attrib_max', field(36, Array(uint32_t, 32)))
 nir_unsigned_upper_bound_config = struct_nir_unsigned_upper_bound_config
-try: (nir_unsigned_upper_bound:=dll.nir_unsigned_upper_bound).restype, nir_unsigned_upper_bound.argtypes = uint32_t, [Pointer(nir_shader), Pointer(struct_hash_table), nir_scalar, Pointer(nir_unsigned_upper_bound_config)]
-except AttributeError: pass
-
-try: (nir_addition_might_overflow:=dll.nir_addition_might_overflow).restype, nir_addition_might_overflow.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(struct_hash_table), nir_scalar, ctypes.c_uint32, Pointer(nir_unsigned_upper_bound_config)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(struct_hash_table), nir_scalar, Pointer(nir_unsigned_upper_bound_config)), uint32_t)
+def nir_unsigned_upper_bound(shader, range_ht, scalar, config): ...
+@dll.bind((Pointer(nir_shader), Pointer(struct_hash_table), nir_scalar, ctypes.c_uint32, Pointer(nir_unsigned_upper_bound_config)), ctypes.c_bool)
+def nir_addition_might_overflow(shader, range_ht, ssa, const_val, config): ...
 class struct_nir_opt_preamble_options(Struct): pass
 struct_nir_opt_preamble_options.SIZE = 56
 struct_nir_opt_preamble_options._fields_ = ['drawid_uniform', 'subgroup_size_uniform', 'load_workgroup_size_allowed', 'def_size', 'preamble_storage_size', 'instr_cost_cb', 'rewrite_cost_cb', 'avoid_instr_cb', 'cb_data']
@@ -5412,47 +4931,34 @@ setattr(struct_nir_opt_preamble_options, 'rewrite_cost_cb', field(32, ctypes.CFU
 setattr(struct_nir_opt_preamble_options, 'avoid_instr_cb', field(40, nir_instr_filter_cb))
 setattr(struct_nir_opt_preamble_options, 'cb_data', field(48, ctypes.c_void_p))
 nir_opt_preamble_options = struct_nir_opt_preamble_options
-try: (nir_opt_preamble:=dll.nir_opt_preamble).restype, nir_opt_preamble.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_opt_preamble_options), Pointer(ctypes.c_uint32)]
-except AttributeError: pass
-
-try: (nir_shader_get_preamble:=dll.nir_shader_get_preamble).restype, nir_shader_get_preamble.argtypes = Pointer(nir_function_impl), [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_lower_point_smooth:=dll.nir_lower_point_smooth).restype, nir_lower_point_smooth.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_lower_poly_line_smooth:=dll.nir_lower_poly_line_smooth).restype, nir_lower_poly_line_smooth.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_mod_analysis:=dll.nir_mod_analysis).restype, nir_mod_analysis.argtypes = ctypes.c_bool, [nir_scalar, nir_alu_type, ctypes.c_uint32, Pointer(ctypes.c_uint32)]
-except AttributeError: pass
-
-try: (nir_remove_tex_shadow:=dll.nir_remove_tex_shadow).restype, nir_remove_tex_shadow.argtypes = ctypes.c_bool, [Pointer(nir_shader), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_trivialize_registers:=dll.nir_trivialize_registers).restype, nir_trivialize_registers.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (nir_static_workgroup_size:=dll.nir_static_workgroup_size).restype, nir_static_workgroup_size.argtypes = ctypes.c_uint32, [Pointer(nir_shader)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(nir_opt_preamble_options), Pointer(ctypes.c_uint32)), ctypes.c_bool)
+def nir_opt_preamble(shader, options, size): ...
+@dll.bind((Pointer(nir_shader),), Pointer(nir_function_impl))
+def nir_shader_get_preamble(shader): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_bool), ctypes.c_bool)
+def nir_lower_point_smooth(shader, set_barycentrics): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_uint32), ctypes.c_bool)
+def nir_lower_poly_line_smooth(shader, num_smooth_aa_sample): ...
+@dll.bind((nir_scalar, nir_alu_type, ctypes.c_uint32, Pointer(ctypes.c_uint32)), ctypes.c_bool)
+def nir_mod_analysis(val, val_type, div, mod): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_uint32), ctypes.c_bool)
+def nir_remove_tex_shadow(shader, textures_bitmask): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def nir_trivialize_registers(s): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_uint32)
+def nir_static_workgroup_size(s): ...
 class struct_nir_use_dominance_state(Struct): pass
 nir_use_dominance_state = struct_nir_use_dominance_state
-try: (nir_calc_use_dominance_impl:=dll.nir_calc_use_dominance_impl).restype, nir_calc_use_dominance_impl.argtypes = Pointer(nir_use_dominance_state), [Pointer(nir_function_impl), ctypes.c_bool]
-except AttributeError: pass
-
-try: (nir_get_immediate_use_dominator:=dll.nir_get_immediate_use_dominator).restype, nir_get_immediate_use_dominator.argtypes = Pointer(nir_instr), [Pointer(nir_use_dominance_state), Pointer(nir_instr)]
-except AttributeError: pass
-
-try: (nir_use_dominance_lca:=dll.nir_use_dominance_lca).restype, nir_use_dominance_lca.argtypes = Pointer(nir_instr), [Pointer(nir_use_dominance_state), Pointer(nir_instr), Pointer(nir_instr)]
-except AttributeError: pass
-
-try: (nir_instr_dominates_use:=dll.nir_instr_dominates_use).restype, nir_instr_dominates_use.argtypes = ctypes.c_bool, [Pointer(nir_use_dominance_state), Pointer(nir_instr), Pointer(nir_instr)]
-except AttributeError: pass
-
-try: (nir_print_use_dominators:=dll.nir_print_use_dominators).restype, nir_print_use_dominators.argtypes = None, [Pointer(nir_use_dominance_state), Pointer(Pointer(nir_instr)), ctypes.c_uint32]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_function_impl), ctypes.c_bool), Pointer(nir_use_dominance_state))
+def nir_calc_use_dominance_impl(impl, post_dominance): ...
+@dll.bind((Pointer(nir_use_dominance_state), Pointer(nir_instr)), Pointer(nir_instr))
+def nir_get_immediate_use_dominator(state, instr): ...
+@dll.bind((Pointer(nir_use_dominance_state), Pointer(nir_instr), Pointer(nir_instr)), Pointer(nir_instr))
+def nir_use_dominance_lca(state, i1, i2): ...
+@dll.bind((Pointer(nir_use_dominance_state), Pointer(nir_instr), Pointer(nir_instr)), ctypes.c_bool)
+def nir_instr_dominates_use(state, parent, child): ...
+@dll.bind((Pointer(nir_use_dominance_state), Pointer(Pointer(nir_instr)), ctypes.c_uint32), None)
+def nir_print_use_dominators(state, instructions, num_instructions): ...
 class nir_output_deps(Struct): pass
 class _anonstruct15(Struct): pass
 _anonstruct15.SIZE = 16
@@ -5462,12 +4968,10 @@ setattr(_anonstruct15, 'num_instr', field(8, ctypes.c_uint32))
 nir_output_deps.SIZE = 1792
 nir_output_deps._fields_ = ['output']
 setattr(nir_output_deps, 'output', field(0, Array(_anonstruct15, 112)))
-try: (nir_gather_output_dependencies:=dll.nir_gather_output_dependencies).restype, nir_gather_output_dependencies.argtypes = None, [Pointer(nir_shader), Pointer(nir_output_deps)]
-except AttributeError: pass
-
-try: (nir_free_output_dependencies:=dll.nir_free_output_dependencies).restype, nir_free_output_dependencies.argtypes = None, [Pointer(nir_output_deps)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(nir_output_deps)), None)
+def nir_gather_output_dependencies(nir, deps): ...
+@dll.bind((Pointer(nir_output_deps),), None)
+def nir_free_output_dependencies(deps): ...
 class nir_input_to_output_deps(Struct): pass
 class _anonstruct16(Struct): pass
 _anonstruct16.SIZE = 116
@@ -5479,21 +4983,18 @@ setattr(_anonstruct16, 'uses_image_reads', field(114, ctypes.c_bool))
 nir_input_to_output_deps.SIZE = 12992
 nir_input_to_output_deps._fields_ = ['output']
 setattr(nir_input_to_output_deps, 'output', field(0, Array(_anonstruct16, 112)))
-try: (nir_gather_input_to_output_dependencies:=dll.nir_gather_input_to_output_dependencies).restype, nir_gather_input_to_output_dependencies.argtypes = None, [Pointer(nir_shader), Pointer(nir_input_to_output_deps)]
-except AttributeError: pass
-
-try: (nir_print_input_to_output_deps:=dll.nir_print_input_to_output_deps).restype, nir_print_input_to_output_deps.argtypes = None, [Pointer(nir_input_to_output_deps), Pointer(nir_shader), Pointer(FILE)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(nir_input_to_output_deps)), None)
+def nir_gather_input_to_output_dependencies(nir, out_deps): ...
+@dll.bind((Pointer(nir_input_to_output_deps), Pointer(nir_shader), Pointer(FILE)), None)
+def nir_print_input_to_output_deps(deps, nir, f): ...
 class nir_output_clipper_var_groups(Struct): pass
 nir_output_clipper_var_groups.SIZE = 336
 nir_output_clipper_var_groups._fields_ = ['pos_only', 'var_only', 'both']
 setattr(nir_output_clipper_var_groups, 'pos_only', field(0, Array(ctypes.c_uint32, 28)))
 setattr(nir_output_clipper_var_groups, 'var_only', field(112, Array(ctypes.c_uint32, 28)))
 setattr(nir_output_clipper_var_groups, 'both', field(224, Array(ctypes.c_uint32, 28)))
-try: (nir_gather_output_clipper_var_groups:=dll.nir_gather_output_clipper_var_groups).restype, nir_gather_output_clipper_var_groups.argtypes = None, [Pointer(nir_shader), Pointer(nir_output_clipper_var_groups)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(nir_output_clipper_var_groups)), None)
+def nir_gather_output_clipper_var_groups(nir, groups): ...
 struct_nir_builder.SIZE = 40
 struct_nir_builder._fields_ = ['cursor', 'exact', 'fp_fast_math', 'shader', 'impl']
 setattr(struct_nir_builder, 'cursor', field(0, nir_cursor))
@@ -5501,104 +5002,73 @@ setattr(struct_nir_builder, 'exact', field(16, ctypes.c_bool))
 setattr(struct_nir_builder, 'fp_fast_math', field(20, uint32_t))
 setattr(struct_nir_builder, 'shader', field(24, Pointer(nir_shader)))
 setattr(struct_nir_builder, 'impl', field(32, Pointer(nir_function_impl)))
-try: (nir_builder_init_simple_shader:=dll.nir_builder_init_simple_shader).restype, nir_builder_init_simple_shader.argtypes = nir_builder, [gl_shader_stage, Pointer(nir_shader_compiler_options), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
+@dll.bind((gl_shader_stage, Pointer(nir_shader_compiler_options), Pointer(ctypes.c_char)), nir_builder)
+def nir_builder_init_simple_shader(stage, options, name): ...
 nir_instr_pass_cb = ctypes.CFUNCTYPE(ctypes.c_bool, Pointer(struct_nir_builder), Pointer(struct_nir_instr), ctypes.c_void_p)
 nir_intrinsic_pass_cb = ctypes.CFUNCTYPE(ctypes.c_bool, Pointer(struct_nir_builder), Pointer(struct_nir_intrinsic_instr), ctypes.c_void_p)
 nir_alu_pass_cb = ctypes.CFUNCTYPE(ctypes.c_bool, Pointer(struct_nir_builder), Pointer(struct_nir_alu_instr), ctypes.c_void_p)
 nir_tex_pass_cb = ctypes.CFUNCTYPE(ctypes.c_bool, Pointer(struct_nir_builder), Pointer(struct_nir_tex_instr), ctypes.c_void_p)
 nir_phi_pass_cb = ctypes.CFUNCTYPE(ctypes.c_bool, Pointer(struct_nir_builder), Pointer(struct_nir_phi_instr), ctypes.c_void_p)
-try: (nir_builder_instr_insert:=dll.nir_builder_instr_insert).restype, nir_builder_instr_insert.argtypes = None, [Pointer(nir_builder), Pointer(nir_instr)]
-except AttributeError: pass
-
-try: (nir_builder_instr_insert_at_top:=dll.nir_builder_instr_insert_at_top).restype, nir_builder_instr_insert_at_top.argtypes = None, [Pointer(nir_builder), Pointer(nir_instr)]
-except AttributeError: pass
-
-try: (nir_build_alu:=dll.nir_build_alu).restype, nir_build_alu.argtypes = Pointer(nir_def), [Pointer(nir_builder), nir_op, Pointer(nir_def), Pointer(nir_def), Pointer(nir_def), Pointer(nir_def)]
-except AttributeError: pass
-
-try: (nir_build_alu1:=dll.nir_build_alu1).restype, nir_build_alu1.argtypes = Pointer(nir_def), [Pointer(nir_builder), nir_op, Pointer(nir_def)]
-except AttributeError: pass
-
-try: (nir_build_alu2:=dll.nir_build_alu2).restype, nir_build_alu2.argtypes = Pointer(nir_def), [Pointer(nir_builder), nir_op, Pointer(nir_def), Pointer(nir_def)]
-except AttributeError: pass
-
-try: (nir_build_alu3:=dll.nir_build_alu3).restype, nir_build_alu3.argtypes = Pointer(nir_def), [Pointer(nir_builder), nir_op, Pointer(nir_def), Pointer(nir_def), Pointer(nir_def)]
-except AttributeError: pass
-
-try: (nir_build_alu4:=dll.nir_build_alu4).restype, nir_build_alu4.argtypes = Pointer(nir_def), [Pointer(nir_builder), nir_op, Pointer(nir_def), Pointer(nir_def), Pointer(nir_def), Pointer(nir_def)]
-except AttributeError: pass
-
-try: (nir_build_alu_src_arr:=dll.nir_build_alu_src_arr).restype, nir_build_alu_src_arr.argtypes = Pointer(nir_def), [Pointer(nir_builder), nir_op, Pointer(Pointer(nir_def))]
-except AttributeError: pass
-
-try: (nir_build_tex_deref_instr:=dll.nir_build_tex_deref_instr).restype, nir_build_tex_deref_instr.argtypes = Pointer(nir_def), [Pointer(nir_builder), nir_texop, Pointer(nir_deref_instr), Pointer(nir_deref_instr), ctypes.c_uint32, Pointer(nir_tex_src)]
-except AttributeError: pass
-
-try: (nir_builder_cf_insert:=dll.nir_builder_cf_insert).restype, nir_builder_cf_insert.argtypes = None, [Pointer(nir_builder), Pointer(nir_cf_node)]
-except AttributeError: pass
-
-try: (nir_builder_is_inside_cf:=dll.nir_builder_is_inside_cf).restype, nir_builder_is_inside_cf.argtypes = ctypes.c_bool, [Pointer(nir_builder), Pointer(nir_cf_node)]
-except AttributeError: pass
-
-try: (nir_push_if:=dll.nir_push_if).restype, nir_push_if.argtypes = Pointer(nir_if), [Pointer(nir_builder), Pointer(nir_def)]
-except AttributeError: pass
-
-try: (nir_push_else:=dll.nir_push_else).restype, nir_push_else.argtypes = Pointer(nir_if), [Pointer(nir_builder), Pointer(nir_if)]
-except AttributeError: pass
-
-try: (nir_pop_if:=dll.nir_pop_if).restype, nir_pop_if.argtypes = None, [Pointer(nir_builder), Pointer(nir_if)]
-except AttributeError: pass
-
-try: (nir_if_phi:=dll.nir_if_phi).restype, nir_if_phi.argtypes = Pointer(nir_def), [Pointer(nir_builder), Pointer(nir_def), Pointer(nir_def)]
-except AttributeError: pass
-
-try: (nir_push_loop:=dll.nir_push_loop).restype, nir_push_loop.argtypes = Pointer(nir_loop), [Pointer(nir_builder)]
-except AttributeError: pass
-
-try: (nir_push_continue:=dll.nir_push_continue).restype, nir_push_continue.argtypes = Pointer(nir_loop), [Pointer(nir_builder), Pointer(nir_loop)]
-except AttributeError: pass
-
-try: (nir_pop_loop:=dll.nir_pop_loop).restype, nir_pop_loop.argtypes = None, [Pointer(nir_builder), Pointer(nir_loop)]
-except AttributeError: pass
-
-try: (nir_builder_alu_instr_finish_and_insert:=dll.nir_builder_alu_instr_finish_and_insert).restype, nir_builder_alu_instr_finish_and_insert.argtypes = Pointer(nir_def), [Pointer(nir_builder), Pointer(nir_alu_instr)]
-except AttributeError: pass
-
-try: (nir_build_alu_src_arr:=dll.nir_build_alu_src_arr).restype, nir_build_alu_src_arr.argtypes = Pointer(nir_def), [Pointer(nir_builder), nir_op, Pointer(Pointer(nir_def))]
-except AttributeError: pass
-
-try: (nir_load_system_value:=dll.nir_load_system_value).restype, nir_load_system_value.argtypes = Pointer(nir_def), [Pointer(nir_builder), nir_intrinsic_op, ctypes.c_int32, ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_type_convert:=dll.nir_type_convert).restype, nir_type_convert.argtypes = Pointer(nir_def), [Pointer(nir_builder), Pointer(nir_def), nir_alu_type, nir_alu_type, nir_rounding_mode]
-except AttributeError: pass
-
-try: (nir_vec_scalars:=dll.nir_vec_scalars).restype, nir_vec_scalars.argtypes = Pointer(nir_def), [Pointer(nir_builder), Pointer(nir_scalar), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_ssa_for_alu_src:=dll.nir_ssa_for_alu_src).restype, nir_ssa_for_alu_src.argtypes = Pointer(nir_def), [Pointer(nir_builder), Pointer(nir_alu_instr), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (nir_build_string:=dll.nir_build_string).restype, nir_build_string.argtypes = Pointer(nir_def), [Pointer(nir_builder), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (nir_compare_func:=dll.nir_compare_func).restype, nir_compare_func.argtypes = Pointer(nir_def), [Pointer(nir_builder), enum_compare_func, Pointer(nir_def), Pointer(nir_def)]
-except AttributeError: pass
-
-try: (nir_gen_rect_vertices:=dll.nir_gen_rect_vertices).restype, nir_gen_rect_vertices.argtypes = Pointer(nir_def), [Pointer(nir_builder), Pointer(nir_def), Pointer(nir_def)]
-except AttributeError: pass
-
-try: (nir_printf_fmt:=dll.nir_printf_fmt).restype, nir_printf_fmt.argtypes = None, [Pointer(nir_builder), ctypes.c_uint32, Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (nir_printf_fmt_at_px:=dll.nir_printf_fmt_at_px).restype, nir_printf_fmt_at_px.argtypes = None, [Pointer(nir_builder), ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (nir_call_serialized:=dll.nir_call_serialized).restype, nir_call_serialized.argtypes = Pointer(nir_def), [Pointer(nir_builder), Pointer(uint32_t), size_t, Pointer(Pointer(nir_def))]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_builder), Pointer(nir_instr)), None)
+def nir_builder_instr_insert(build, instr): ...
+@dll.bind((Pointer(nir_builder), Pointer(nir_instr)), None)
+def nir_builder_instr_insert_at_top(build, instr): ...
+@dll.bind((Pointer(nir_builder), nir_op, Pointer(nir_def), Pointer(nir_def), Pointer(nir_def), Pointer(nir_def)), Pointer(nir_def))
+def nir_build_alu(build, op, src0, src1, src2, src3): ...
+@dll.bind((Pointer(nir_builder), nir_op, Pointer(nir_def)), Pointer(nir_def))
+def nir_build_alu1(build, op, src0): ...
+@dll.bind((Pointer(nir_builder), nir_op, Pointer(nir_def), Pointer(nir_def)), Pointer(nir_def))
+def nir_build_alu2(build, op, src0, src1): ...
+@dll.bind((Pointer(nir_builder), nir_op, Pointer(nir_def), Pointer(nir_def), Pointer(nir_def)), Pointer(nir_def))
+def nir_build_alu3(build, op, src0, src1, src2): ...
+@dll.bind((Pointer(nir_builder), nir_op, Pointer(nir_def), Pointer(nir_def), Pointer(nir_def), Pointer(nir_def)), Pointer(nir_def))
+def nir_build_alu4(build, op, src0, src1, src2, src3): ...
+@dll.bind((Pointer(nir_builder), nir_op, Pointer(Pointer(nir_def))), Pointer(nir_def))
+def nir_build_alu_src_arr(build, op, srcs): ...
+@dll.bind((Pointer(nir_builder), nir_texop, Pointer(nir_deref_instr), Pointer(nir_deref_instr), ctypes.c_uint32, Pointer(nir_tex_src)), Pointer(nir_def))
+def nir_build_tex_deref_instr(build, op, texture, sampler, num_extra_srcs, extra_srcs): ...
+@dll.bind((Pointer(nir_builder), Pointer(nir_cf_node)), None)
+def nir_builder_cf_insert(build, cf): ...
+@dll.bind((Pointer(nir_builder), Pointer(nir_cf_node)), ctypes.c_bool)
+def nir_builder_is_inside_cf(build, cf_node): ...
+@dll.bind((Pointer(nir_builder), Pointer(nir_def)), Pointer(nir_if))
+def nir_push_if(build, condition): ...
+@dll.bind((Pointer(nir_builder), Pointer(nir_if)), Pointer(nir_if))
+def nir_push_else(build, nif): ...
+@dll.bind((Pointer(nir_builder), Pointer(nir_if)), None)
+def nir_pop_if(build, nif): ...
+@dll.bind((Pointer(nir_builder), Pointer(nir_def), Pointer(nir_def)), Pointer(nir_def))
+def nir_if_phi(build, then_def, else_def): ...
+@dll.bind((Pointer(nir_builder),), Pointer(nir_loop))
+def nir_push_loop(build): ...
+@dll.bind((Pointer(nir_builder), Pointer(nir_loop)), Pointer(nir_loop))
+def nir_push_continue(build, loop): ...
+@dll.bind((Pointer(nir_builder), Pointer(nir_loop)), None)
+def nir_pop_loop(build, loop): ...
+@dll.bind((Pointer(nir_builder), Pointer(nir_alu_instr)), Pointer(nir_def))
+def nir_builder_alu_instr_finish_and_insert(build, instr): ...
+@dll.bind((Pointer(nir_builder), nir_op, Pointer(Pointer(nir_def))), Pointer(nir_def))
+def nir_build_alu_src_arr(build, op, srcs): ...
+@dll.bind((Pointer(nir_builder), nir_intrinsic_op, ctypes.c_int32, ctypes.c_uint32, ctypes.c_uint32), Pointer(nir_def))
+def nir_load_system_value(build, op, index, num_components, bit_size): ...
+@dll.bind((Pointer(nir_builder), Pointer(nir_def), nir_alu_type, nir_alu_type, nir_rounding_mode), Pointer(nir_def))
+def nir_type_convert(b, src, src_type, dest_type, rnd): ...
+@dll.bind((Pointer(nir_builder), Pointer(nir_scalar), ctypes.c_uint32), Pointer(nir_def))
+def nir_vec_scalars(build, comp, num_components): ...
+@dll.bind((Pointer(nir_builder), Pointer(nir_alu_instr), ctypes.c_uint32), Pointer(nir_def))
+def nir_ssa_for_alu_src(build, instr, srcn): ...
+@dll.bind((Pointer(nir_builder), Pointer(ctypes.c_char)), Pointer(nir_def))
+def nir_build_string(build, value): ...
+@dll.bind((Pointer(nir_builder), enum_compare_func, Pointer(nir_def), Pointer(nir_def)), Pointer(nir_def))
+def nir_compare_func(b, func, src0, src1): ...
+@dll.bind((Pointer(nir_builder), Pointer(nir_def), Pointer(nir_def)), Pointer(nir_def))
+def nir_gen_rect_vertices(b, z, w): ...
+@dll.bind((Pointer(nir_builder), ctypes.c_uint32, Pointer(ctypes.c_char)), None)
+def nir_printf_fmt(b, ptr_bit_size, fmt): ...
+@dll.bind((Pointer(nir_builder), ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, Pointer(ctypes.c_char)), None)
+def nir_printf_fmt_at_px(b, ptr_bit_size, x, y, fmt): ...
+@dll.bind((Pointer(nir_builder), Pointer(uint32_t), size_t, Pointer(Pointer(nir_def))), Pointer(nir_def))
+def nir_call_serialized(build, serialized, serialized_size_B, args): ...
 nir_lower_packing_op = CEnum(ctypes.c_uint32)
 nir_lower_packing_op_pack_64_2x32 = nir_lower_packing_op.define('nir_lower_packing_op_pack_64_2x32', 0)
 nir_lower_packing_op_unpack_64_2x32 = nir_lower_packing_op.define('nir_lower_packing_op_unpack_64_2x32', 1)
@@ -5618,9 +5088,8 @@ setattr(struct_blob, 'allocated', field(8, size_t))
 setattr(struct_blob, 'size', field(16, size_t))
 setattr(struct_blob, 'fixed_allocation', field(24, ctypes.c_bool))
 setattr(struct_blob, 'out_of_memory', field(25, ctypes.c_bool))
-try: (nir_serialize:=dll.nir_serialize).restype, nir_serialize.argtypes = None, [Pointer(struct_blob), Pointer(nir_shader), ctypes.c_bool]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_blob), Pointer(nir_shader), ctypes.c_bool), None)
+def nir_serialize(blob, nir, strip): ...
 class struct_blob_reader(Struct): pass
 struct_blob_reader.SIZE = 32
 struct_blob_reader._fields_ = ['data', 'end', 'current', 'overrun']
@@ -5628,15 +5097,12 @@ setattr(struct_blob_reader, 'data', field(0, Pointer(uint8_t)))
 setattr(struct_blob_reader, 'end', field(8, Pointer(uint8_t)))
 setattr(struct_blob_reader, 'current', field(16, Pointer(uint8_t)))
 setattr(struct_blob_reader, 'overrun', field(24, ctypes.c_bool))
-try: (nir_deserialize:=dll.nir_deserialize).restype, nir_deserialize.argtypes = Pointer(nir_shader), [ctypes.c_void_p, Pointer(struct_nir_shader_compiler_options), Pointer(struct_blob_reader)]
-except AttributeError: pass
-
-try: (nir_serialize_function:=dll.nir_serialize_function).restype, nir_serialize_function.argtypes = None, [Pointer(struct_blob), Pointer(nir_function)]
-except AttributeError: pass
-
-try: (nir_deserialize_function:=dll.nir_deserialize_function).restype, nir_deserialize_function.argtypes = Pointer(nir_function), [ctypes.c_void_p, Pointer(struct_nir_shader_compiler_options), Pointer(struct_blob_reader)]
-except AttributeError: pass
-
+@dll.bind((ctypes.c_void_p, Pointer(struct_nir_shader_compiler_options), Pointer(struct_blob_reader)), Pointer(nir_shader))
+def nir_deserialize(mem_ctx, options, blob): ...
+@dll.bind((Pointer(struct_blob), Pointer(nir_function)), None)
+def nir_serialize_function(blob, fxn): ...
+@dll.bind((ctypes.c_void_p, Pointer(struct_nir_shader_compiler_options), Pointer(struct_blob_reader)), Pointer(nir_function))
+def nir_deserialize_function(mem_ctx, options, blob): ...
 nir_intrinsic_index_flag = CEnum(ctypes.c_uint32)
 NIR_INTRINSIC_BASE = nir_intrinsic_index_flag.define('NIR_INTRINSIC_BASE', 0)
 NIR_INTRINSIC_WRITE_MASK = nir_intrinsic_index_flag.define('NIR_INTRINSIC_WRITE_MASK', 1)
@@ -5752,24 +5218,18 @@ setattr(struct_nv_device_info, 'cls_compute', field(106, uint16_t))
 setattr(struct_nv_device_info, 'vram_size_B', field(112, uint64_t))
 setattr(struct_nv_device_info, 'bar_size_B', field(120, uint64_t))
 class struct_nak_compiler(Struct): pass
-try: (nak_compiler_create:=dll.nak_compiler_create).restype, nak_compiler_create.argtypes = Pointer(struct_nak_compiler), [Pointer(struct_nv_device_info)]
-except AttributeError: pass
-
-try: (nak_compiler_destroy:=dll.nak_compiler_destroy).restype, nak_compiler_destroy.argtypes = None, [Pointer(struct_nak_compiler)]
-except AttributeError: pass
-
-try: (nak_debug_flags:=dll.nak_debug_flags).restype, nak_debug_flags.argtypes = uint64_t, [Pointer(struct_nak_compiler)]
-except AttributeError: pass
-
-try: (nak_nir_options:=dll.nak_nir_options).restype, nak_nir_options.argtypes = Pointer(struct_nir_shader_compiler_options), [Pointer(struct_nak_compiler)]
-except AttributeError: pass
-
-try: (nak_preprocess_nir:=dll.nak_preprocess_nir).restype, nak_preprocess_nir.argtypes = None, [Pointer(nir_shader), Pointer(struct_nak_compiler)]
-except AttributeError: pass
-
-try: (nak_nir_lower_image_addrs:=dll.nak_nir_lower_image_addrs).restype, nak_nir_lower_image_addrs.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(struct_nak_compiler)]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_nv_device_info),), Pointer(struct_nak_compiler))
+def nak_compiler_create(dev): ...
+@dll.bind((Pointer(struct_nak_compiler),), None)
+def nak_compiler_destroy(nak): ...
+@dll.bind((Pointer(struct_nak_compiler),), uint64_t)
+def nak_debug_flags(nak): ...
+@dll.bind((Pointer(struct_nak_compiler),), Pointer(struct_nir_shader_compiler_options))
+def nak_nir_options(nak): ...
+@dll.bind((Pointer(nir_shader), Pointer(struct_nak_compiler)), None)
+def nak_preprocess_nir(nir, nak): ...
+@dll.bind((Pointer(nir_shader), Pointer(struct_nak_compiler)), ctypes.c_bool)
+def nak_nir_lower_image_addrs(nir, nak): ...
 class struct_nak_sample_location(Struct): pass
 struct_nak_sample_location.SIZE = 1
 struct_nak_sample_location._fields_ = ['x_u4', 'y_u4']
@@ -5788,9 +5248,8 @@ setattr(struct_nak_fs_key, 'uses_underestimate', field(2, ctypes.c_bool))
 setattr(struct_nak_fs_key, 'sample_info_cb', field(3, uint8_t))
 setattr(struct_nak_fs_key, 'sample_locations_offset', field(4, uint32_t))
 setattr(struct_nak_fs_key, 'sample_masks_offset', field(8, uint32_t))
-try: (nak_postprocess_nir:=dll.nak_postprocess_nir).restype, nak_postprocess_nir.argtypes = None, [Pointer(nir_shader), Pointer(struct_nak_compiler), nir_variable_mode, Pointer(struct_nak_fs_key)]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(struct_nak_compiler), nir_variable_mode, Pointer(struct_nak_fs_key)), None)
+def nak_postprocess_nir(nir, nak, robust2_modes, fs_key): ...
 enum_nak_ts_domain = CEnum(ctypes.c_ubyte)
 NAK_TS_DOMAIN_ISOLINE = enum_nak_ts_domain.define('NAK_TS_DOMAIN_ISOLINE', 0)
 NAK_TS_DOMAIN_TRIANGLE = enum_nak_ts_domain.define('NAK_TS_DOMAIN_TRIANGLE', 1)
@@ -5876,12 +5335,10 @@ setattr(struct_nak_shader_bin, 'info', field(0, struct_nak_shader_info))
 setattr(struct_nak_shader_bin, 'code_size', field(728, uint32_t))
 setattr(struct_nak_shader_bin, 'code', field(736, ctypes.c_void_p))
 setattr(struct_nak_shader_bin, 'asm_str', field(744, Pointer(ctypes.c_char)))
-try: (nak_shader_bin_destroy:=dll.nak_shader_bin_destroy).restype, nak_shader_bin_destroy.argtypes = None, [Pointer(struct_nak_shader_bin)]
-except AttributeError: pass
-
-try: (nak_compile_shader:=dll.nak_compile_shader).restype, nak_compile_shader.argtypes = Pointer(struct_nak_shader_bin), [Pointer(nir_shader), ctypes.c_bool, Pointer(struct_nak_compiler), nir_variable_mode, Pointer(struct_nak_fs_key)]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_nak_shader_bin),), None)
+def nak_shader_bin_destroy(bin): ...
+@dll.bind((Pointer(nir_shader), ctypes.c_bool, Pointer(struct_nak_compiler), nir_variable_mode, Pointer(struct_nak_fs_key)), Pointer(struct_nak_shader_bin))
+def nak_compile_shader(nir, dump_asm, nak, robust2_modes, fs_key): ...
 class struct_nak_qmd_cbuf(Struct): pass
 struct_nak_qmd_cbuf.SIZE = 16
 struct_nak_qmd_cbuf._fields_ = ['index', 'size', 'addr']
@@ -5897,12 +5354,10 @@ setattr(struct_nak_qmd_info, 'smem_max', field(10, uint16_t))
 setattr(struct_nak_qmd_info, 'global_size', field(12, Array(uint32_t, 3)))
 setattr(struct_nak_qmd_info, 'num_cbufs', field(24, uint32_t))
 setattr(struct_nak_qmd_info, 'cbufs', field(32, Array(struct_nak_qmd_cbuf, 8)))
-try: (nak_qmd_size_B:=dll.nak_qmd_size_B).restype, nak_qmd_size_B.argtypes = uint32_t, [Pointer(struct_nv_device_info)]
-except AttributeError: pass
-
-try: (nak_fill_qmd:=dll.nak_fill_qmd).restype, nak_fill_qmd.argtypes = None, [Pointer(struct_nv_device_info), Pointer(struct_nak_shader_info), Pointer(struct_nak_qmd_info), ctypes.c_void_p, size_t]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_nv_device_info),), uint32_t)
+def nak_qmd_size_B(dev): ...
+@dll.bind((Pointer(struct_nv_device_info), Pointer(struct_nak_shader_info), Pointer(struct_nak_qmd_info), ctypes.c_void_p, size_t), None)
+def nak_fill_qmd(dev, info, qmd_info, qmd_out, qmd_size): ...
 class struct_nak_qmd_dispatch_size_layout(Struct): pass
 struct_nak_qmd_dispatch_size_layout.SIZE = 12
 struct_nak_qmd_dispatch_size_layout._fields_ = ['x_start', 'x_end', 'y_start', 'y_end', 'z_start', 'z_end']
@@ -5912,9 +5367,8 @@ setattr(struct_nak_qmd_dispatch_size_layout, 'y_start', field(4, uint16_t))
 setattr(struct_nak_qmd_dispatch_size_layout, 'y_end', field(6, uint16_t))
 setattr(struct_nak_qmd_dispatch_size_layout, 'z_start', field(8, uint16_t))
 setattr(struct_nak_qmd_dispatch_size_layout, 'z_end', field(10, uint16_t))
-try: (nak_get_qmd_dispatch_size_layout:=dll.nak_get_qmd_dispatch_size_layout).restype, nak_get_qmd_dispatch_size_layout.argtypes = struct_nak_qmd_dispatch_size_layout, [Pointer(struct_nv_device_info)]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_nv_device_info),), struct_nak_qmd_dispatch_size_layout)
+def nak_get_qmd_dispatch_size_layout(dev): ...
 class struct_nak_qmd_cbuf_desc_layout(Struct): pass
 struct_nak_qmd_cbuf_desc_layout.SIZE = 10
 struct_nak_qmd_cbuf_desc_layout._fields_ = ['addr_shift', 'addr_lo_start', 'addr_lo_end', 'addr_hi_start', 'addr_hi_end']
@@ -5923,9 +5377,8 @@ setattr(struct_nak_qmd_cbuf_desc_layout, 'addr_lo_start', field(2, uint16_t))
 setattr(struct_nak_qmd_cbuf_desc_layout, 'addr_lo_end', field(4, uint16_t))
 setattr(struct_nak_qmd_cbuf_desc_layout, 'addr_hi_start', field(6, uint16_t))
 setattr(struct_nak_qmd_cbuf_desc_layout, 'addr_hi_end', field(8, uint16_t))
-try: (nak_get_qmd_cbuf_desc_layout:=dll.nak_get_qmd_cbuf_desc_layout).restype, nak_get_qmd_cbuf_desc_layout.argtypes = struct_nak_qmd_cbuf_desc_layout, [Pointer(struct_nv_device_info), uint8_t]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_nv_device_info), uint8_t), struct_nak_qmd_cbuf_desc_layout)
+def nak_get_qmd_cbuf_desc_layout(dev, idx): ...
 class struct_lp_context_ref(Struct): pass
 class struct_LLVMOpaqueContext(Struct): pass
 LLVMContextRef = Pointer(struct_LLVMOpaqueContext)
@@ -5937,17 +5390,14 @@ lp_context_ref = struct_lp_context_ref
 class struct_lp_passmgr(Struct): pass
 class struct_LLVMOpaqueModule(Struct): pass
 LLVMModuleRef = Pointer(struct_LLVMOpaqueModule)
-try: (lp_passmgr_create:=dll.lp_passmgr_create).restype, lp_passmgr_create.argtypes = ctypes.c_bool, [LLVMModuleRef, Pointer(Pointer(struct_lp_passmgr))]
-except AttributeError: pass
-
+@dll.bind((LLVMModuleRef, Pointer(Pointer(struct_lp_passmgr))), ctypes.c_bool)
+def lp_passmgr_create(module, mgr): ...
 class struct_LLVMOpaqueTargetMachine(Struct): pass
 LLVMTargetMachineRef = Pointer(struct_LLVMOpaqueTargetMachine)
-try: (lp_passmgr_run:=dll.lp_passmgr_run).restype, lp_passmgr_run.argtypes = None, [Pointer(struct_lp_passmgr), LLVMModuleRef, LLVMTargetMachineRef, Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (lp_passmgr_dispose:=dll.lp_passmgr_dispose).restype, lp_passmgr_dispose.argtypes = None, [Pointer(struct_lp_passmgr)]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_lp_passmgr), LLVMModuleRef, LLVMTargetMachineRef, Pointer(ctypes.c_char)), None)
+def lp_passmgr_run(mgr, module, tm, module_name): ...
+@dll.bind((Pointer(struct_lp_passmgr),), None)
+def lp_passmgr_dispose(mgr): ...
 class struct_lp_cached_code(Struct): pass
 struct_lp_cached_code.SIZE = 32
 struct_lp_cached_code._fields_ = ['data', 'data_size', 'dont_cache', 'jit_obj_cache']
@@ -5958,48 +5408,36 @@ setattr(struct_lp_cached_code, 'jit_obj_cache', field(24, ctypes.c_void_p))
 class struct_lp_generated_code(Struct): pass
 class struct_LLVMOpaqueTargetLibraryInfotData(Struct): pass
 LLVMTargetLibraryInfoRef = Pointer(struct_LLVMOpaqueTargetLibraryInfotData)
-try: (gallivm_create_target_library_info:=dll.gallivm_create_target_library_info).restype, gallivm_create_target_library_info.argtypes = LLVMTargetLibraryInfoRef, [Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (gallivm_dispose_target_library_info:=dll.gallivm_dispose_target_library_info).restype, gallivm_dispose_target_library_info.argtypes = None, [LLVMTargetLibraryInfoRef]
-except AttributeError: pass
-
-try: (lp_set_target_options:=dll.lp_set_target_options).restype, lp_set_target_options.argtypes = None, []
-except AttributeError: pass
-
-try: (lp_bld_init_native_targets:=dll.lp_bld_init_native_targets).restype, lp_bld_init_native_targets.argtypes = None, []
-except AttributeError: pass
-
+@dll.bind((Pointer(ctypes.c_char),), LLVMTargetLibraryInfoRef)
+def gallivm_create_target_library_info(triple): ...
+@dll.bind((LLVMTargetLibraryInfoRef,), None)
+def gallivm_dispose_target_library_info(library_info): ...
+@dll.bind((), None)
+def lp_set_target_options(): ...
+@dll.bind((), None)
+def lp_bld_init_native_targets(): ...
 class struct_LLVMOpaqueExecutionEngine(Struct): pass
 LLVMExecutionEngineRef = Pointer(struct_LLVMOpaqueExecutionEngine)
 class struct_LLVMOpaqueMCJITMemoryManager(Struct): pass
 LLVMMCJITMemoryManagerRef = Pointer(struct_LLVMOpaqueMCJITMemoryManager)
-try: (lp_build_create_jit_compiler_for_module:=dll.lp_build_create_jit_compiler_for_module).restype, lp_build_create_jit_compiler_for_module.argtypes = ctypes.c_int32, [Pointer(LLVMExecutionEngineRef), Pointer(Pointer(struct_lp_generated_code)), Pointer(struct_lp_cached_code), LLVMModuleRef, LLVMMCJITMemoryManagerRef, ctypes.c_uint32, Pointer(Pointer(ctypes.c_char))]
-except AttributeError: pass
-
-try: (lp_free_generated_code:=dll.lp_free_generated_code).restype, lp_free_generated_code.argtypes = None, [Pointer(struct_lp_generated_code)]
-except AttributeError: pass
-
-try: (lp_get_default_memory_manager:=dll.lp_get_default_memory_manager).restype, lp_get_default_memory_manager.argtypes = LLVMMCJITMemoryManagerRef, []
-except AttributeError: pass
-
-try: (lp_free_memory_manager:=dll.lp_free_memory_manager).restype, lp_free_memory_manager.argtypes = None, [LLVMMCJITMemoryManagerRef]
-except AttributeError: pass
-
+@dll.bind((Pointer(LLVMExecutionEngineRef), Pointer(Pointer(struct_lp_generated_code)), Pointer(struct_lp_cached_code), LLVMModuleRef, LLVMMCJITMemoryManagerRef, ctypes.c_uint32, Pointer(Pointer(ctypes.c_char))), ctypes.c_int32)
+def lp_build_create_jit_compiler_for_module(OutJIT, OutCode, cache_out, M, MM, OptLevel, OutError): ...
+@dll.bind((Pointer(struct_lp_generated_code),), None)
+def lp_free_generated_code(code): ...
+@dll.bind((), LLVMMCJITMemoryManagerRef)
+def lp_get_default_memory_manager(): ...
+@dll.bind((LLVMMCJITMemoryManagerRef,), None)
+def lp_free_memory_manager(memorymgr): ...
 class struct_LLVMOpaqueValue(Struct): pass
 LLVMValueRef = Pointer(struct_LLVMOpaqueValue)
-try: (lp_get_called_value:=dll.lp_get_called_value).restype, lp_get_called_value.argtypes = LLVMValueRef, [LLVMValueRef]
-except AttributeError: pass
-
-try: (lp_is_function:=dll.lp_is_function).restype, lp_is_function.argtypes = ctypes.c_bool, [LLVMValueRef]
-except AttributeError: pass
-
-try: (lp_free_objcache:=dll.lp_free_objcache).restype, lp_free_objcache.argtypes = None, [ctypes.c_void_p]
-except AttributeError: pass
-
-try: (lp_set_module_stack_alignment_override:=dll.lp_set_module_stack_alignment_override).restype, lp_set_module_stack_alignment_override.argtypes = None, [LLVMModuleRef, ctypes.c_uint32]
-except AttributeError: pass
-
+@dll.bind((LLVMValueRef,), LLVMValueRef)
+def lp_get_called_value(call): ...
+@dll.bind((LLVMValueRef,), ctypes.c_bool)
+def lp_is_function(v): ...
+@dll.bind((ctypes.c_void_p,), None)
+def lp_free_objcache(objcache): ...
+@dll.bind((LLVMModuleRef, ctypes.c_uint32), None)
+def lp_set_module_stack_alignment_override(M, align): ...
 try: lp_native_vector_width = ctypes.c_uint32.in_dll(dll, 'lp_native_vector_width')
 except (ValueError,AttributeError): pass
 class struct_lp_type(Struct): pass
@@ -6028,42 +5466,30 @@ setattr(struct_lp_build_context, 'int_vec_type', field(40, LLVMTypeRef))
 setattr(struct_lp_build_context, 'undef', field(48, LLVMValueRef))
 setattr(struct_lp_build_context, 'zero', field(56, LLVMValueRef))
 setattr(struct_lp_build_context, 'one', field(64, LLVMValueRef))
-try: (lp_build_elem_type:=dll.lp_build_elem_type).restype, lp_build_elem_type.argtypes = LLVMTypeRef, [Pointer(struct_gallivm_state), struct_lp_type]
-except AttributeError: pass
-
-try: (lp_build_vec_type:=dll.lp_build_vec_type).restype, lp_build_vec_type.argtypes = LLVMTypeRef, [Pointer(struct_gallivm_state), struct_lp_type]
-except AttributeError: pass
-
-try: (lp_check_elem_type:=dll.lp_check_elem_type).restype, lp_check_elem_type.argtypes = ctypes.c_bool, [struct_lp_type, LLVMTypeRef]
-except AttributeError: pass
-
-try: (lp_check_vec_type:=dll.lp_check_vec_type).restype, lp_check_vec_type.argtypes = ctypes.c_bool, [struct_lp_type, LLVMTypeRef]
-except AttributeError: pass
-
-try: (lp_check_value:=dll.lp_check_value).restype, lp_check_value.argtypes = ctypes.c_bool, [struct_lp_type, LLVMValueRef]
-except AttributeError: pass
-
-try: (lp_build_int_elem_type:=dll.lp_build_int_elem_type).restype, lp_build_int_elem_type.argtypes = LLVMTypeRef, [Pointer(struct_gallivm_state), struct_lp_type]
-except AttributeError: pass
-
-try: (lp_build_int_vec_type:=dll.lp_build_int_vec_type).restype, lp_build_int_vec_type.argtypes = LLVMTypeRef, [Pointer(struct_gallivm_state), struct_lp_type]
-except AttributeError: pass
-
-try: (lp_elem_type:=dll.lp_elem_type).restype, lp_elem_type.argtypes = struct_lp_type, [struct_lp_type]
-except AttributeError: pass
-
-try: (lp_uint_type:=dll.lp_uint_type).restype, lp_uint_type.argtypes = struct_lp_type, [struct_lp_type]
-except AttributeError: pass
-
-try: (lp_int_type:=dll.lp_int_type).restype, lp_int_type.argtypes = struct_lp_type, [struct_lp_type]
-except AttributeError: pass
-
-try: (lp_wider_type:=dll.lp_wider_type).restype, lp_wider_type.argtypes = struct_lp_type, [struct_lp_type]
-except AttributeError: pass
-
-try: (lp_sizeof_llvm_type:=dll.lp_sizeof_llvm_type).restype, lp_sizeof_llvm_type.argtypes = ctypes.c_uint32, [LLVMTypeRef]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_gallivm_state), struct_lp_type), LLVMTypeRef)
+def lp_build_elem_type(gallivm, type): ...
+@dll.bind((Pointer(struct_gallivm_state), struct_lp_type), LLVMTypeRef)
+def lp_build_vec_type(gallivm, type): ...
+@dll.bind((struct_lp_type, LLVMTypeRef), ctypes.c_bool)
+def lp_check_elem_type(type, elem_type): ...
+@dll.bind((struct_lp_type, LLVMTypeRef), ctypes.c_bool)
+def lp_check_vec_type(type, vec_type): ...
+@dll.bind((struct_lp_type, LLVMValueRef), ctypes.c_bool)
+def lp_check_value(type, val): ...
+@dll.bind((Pointer(struct_gallivm_state), struct_lp_type), LLVMTypeRef)
+def lp_build_int_elem_type(gallivm, type): ...
+@dll.bind((Pointer(struct_gallivm_state), struct_lp_type), LLVMTypeRef)
+def lp_build_int_vec_type(gallivm, type): ...
+@dll.bind((struct_lp_type,), struct_lp_type)
+def lp_elem_type(type): ...
+@dll.bind((struct_lp_type,), struct_lp_type)
+def lp_uint_type(type): ...
+@dll.bind((struct_lp_type,), struct_lp_type)
+def lp_int_type(type): ...
+@dll.bind((struct_lp_type,), struct_lp_type)
+def lp_wider_type(type): ...
+@dll.bind((LLVMTypeRef,), ctypes.c_uint32)
+def lp_sizeof_llvm_type(t): ...
 LLVMTypeKind = CEnum(ctypes.c_uint32)
 LLVMVoidTypeKind = LLVMTypeKind.define('LLVMVoidTypeKind', 0)
 LLVMHalfTypeKind = LLVMTypeKind.define('LLVMHalfTypeKind', 1)
@@ -6086,18 +5512,14 @@ LLVMBFloatTypeKind = LLVMTypeKind.define('LLVMBFloatTypeKind', 18)
 LLVMX86_AMXTypeKind = LLVMTypeKind.define('LLVMX86_AMXTypeKind', 19)
 LLVMTargetExtTypeKind = LLVMTypeKind.define('LLVMTargetExtTypeKind', 20)
 
-try: (lp_typekind_name:=dll.lp_typekind_name).restype, lp_typekind_name.argtypes = Pointer(ctypes.c_char), [LLVMTypeKind]
-except AttributeError: pass
-
-try: (lp_dump_llvmtype:=dll.lp_dump_llvmtype).restype, lp_dump_llvmtype.argtypes = None, [LLVMTypeRef]
-except AttributeError: pass
-
-try: (lp_build_context_init:=dll.lp_build_context_init).restype, lp_build_context_init.argtypes = None, [Pointer(struct_lp_build_context), Pointer(struct_gallivm_state), struct_lp_type]
-except AttributeError: pass
-
-try: (lp_build_count_ir_module:=dll.lp_build_count_ir_module).restype, lp_build_count_ir_module.argtypes = ctypes.c_uint32, [LLVMModuleRef]
-except AttributeError: pass
-
+@dll.bind((LLVMTypeKind,), Pointer(ctypes.c_char))
+def lp_typekind_name(t): ...
+@dll.bind((LLVMTypeRef,), None)
+def lp_dump_llvmtype(t): ...
+@dll.bind((Pointer(struct_lp_build_context), Pointer(struct_gallivm_state), struct_lp_type), None)
+def lp_build_context_init(bld, gallivm, type): ...
+@dll.bind((LLVMModuleRef,), ctypes.c_uint32)
+def lp_build_count_ir_module(module): ...
 class struct_lp_jit_texture(Struct): pass
 class struct_LLVMOpaqueTargetData(Struct): pass
 LLVMTargetDataRef = Pointer(struct_LLVMOpaqueTargetData)
@@ -6133,46 +5555,33 @@ setattr(struct_gallivm_state, 'get_time_hook', field(160, LLVMValueRef))
 setattr(struct_gallivm_state, 'texture_descriptor', field(168, LLVMValueRef))
 setattr(struct_gallivm_state, 'texture_dynamic_state', field(176, Pointer(struct_lp_jit_texture)))
 setattr(struct_gallivm_state, 'sampler_descriptor', field(184, LLVMValueRef))
-try: (lp_build_init_native_width:=dll.lp_build_init_native_width).restype, lp_build_init_native_width.argtypes = ctypes.c_uint32, []
-except AttributeError: pass
-
-try: (lp_build_init:=dll.lp_build_init).restype, lp_build_init.argtypes = ctypes.c_bool, []
-except AttributeError: pass
-
-try: (gallivm_create:=dll.gallivm_create).restype, gallivm_create.argtypes = Pointer(struct_gallivm_state), [Pointer(ctypes.c_char), Pointer(lp_context_ref), Pointer(struct_lp_cached_code)]
-except AttributeError: pass
-
-try: (gallivm_destroy:=dll.gallivm_destroy).restype, gallivm_destroy.argtypes = None, [Pointer(struct_gallivm_state)]
-except AttributeError: pass
-
-try: (gallivm_free_ir:=dll.gallivm_free_ir).restype, gallivm_free_ir.argtypes = None, [Pointer(struct_gallivm_state)]
-except AttributeError: pass
-
-try: (gallivm_verify_function:=dll.gallivm_verify_function).restype, gallivm_verify_function.argtypes = None, [Pointer(struct_gallivm_state), LLVMValueRef]
-except AttributeError: pass
-
-try: (gallivm_add_global_mapping:=dll.gallivm_add_global_mapping).restype, gallivm_add_global_mapping.argtypes = None, [Pointer(struct_gallivm_state), LLVMValueRef, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (gallivm_compile_module:=dll.gallivm_compile_module).restype, gallivm_compile_module.argtypes = None, [Pointer(struct_gallivm_state)]
-except AttributeError: pass
-
+@dll.bind((), ctypes.c_uint32)
+def lp_build_init_native_width(): ...
+@dll.bind((), ctypes.c_bool)
+def lp_build_init(): ...
+@dll.bind((Pointer(ctypes.c_char), Pointer(lp_context_ref), Pointer(struct_lp_cached_code)), Pointer(struct_gallivm_state))
+def gallivm_create(name, context, cache): ...
+@dll.bind((Pointer(struct_gallivm_state),), None)
+def gallivm_destroy(gallivm): ...
+@dll.bind((Pointer(struct_gallivm_state),), None)
+def gallivm_free_ir(gallivm): ...
+@dll.bind((Pointer(struct_gallivm_state), LLVMValueRef), None)
+def gallivm_verify_function(gallivm, func): ...
+@dll.bind((Pointer(struct_gallivm_state), LLVMValueRef, ctypes.c_void_p), None)
+def gallivm_add_global_mapping(gallivm, sym, addr): ...
+@dll.bind((Pointer(struct_gallivm_state),), None)
+def gallivm_compile_module(gallivm): ...
 func_pointer = ctypes.CFUNCTYPE(None, )
-try: (gallivm_jit_function:=dll.gallivm_jit_function).restype, gallivm_jit_function.argtypes = func_pointer, [Pointer(struct_gallivm_state), LLVMValueRef, Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (gallivm_stub_func:=dll.gallivm_stub_func).restype, gallivm_stub_func.argtypes = None, [Pointer(struct_gallivm_state), LLVMValueRef]
-except AttributeError: pass
-
-try: (gallivm_get_perf_flags:=dll.gallivm_get_perf_flags).restype, gallivm_get_perf_flags.argtypes = ctypes.c_uint32, []
-except AttributeError: pass
-
-try: (lp_init_clock_hook:=dll.lp_init_clock_hook).restype, lp_init_clock_hook.argtypes = None, [Pointer(struct_gallivm_state)]
-except AttributeError: pass
-
-try: (lp_init_env_options:=dll.lp_init_env_options).restype, lp_init_env_options.argtypes = None, []
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_gallivm_state), LLVMValueRef, Pointer(ctypes.c_char)), func_pointer)
+def gallivm_jit_function(gallivm, func, func_name): ...
+@dll.bind((Pointer(struct_gallivm_state), LLVMValueRef), None)
+def gallivm_stub_func(gallivm, func): ...
+@dll.bind((), ctypes.c_uint32)
+def gallivm_get_perf_flags(): ...
+@dll.bind((Pointer(struct_gallivm_state),), None)
+def lp_init_clock_hook(gallivm): ...
+@dll.bind((), None)
+def lp_init_env_options(): ...
 class struct_lp_build_tgsi_params(Struct): pass
 class struct_lp_build_mask_context(Struct): pass
 class struct_lp_build_skip_context(Struct): pass
@@ -6456,12 +5865,10 @@ setattr(struct_lp_build_tgsi_params, 'current_func', field(216, LLVMValueRef))
 setattr(struct_lp_build_tgsi_params, 'fns', field(224, Pointer(struct_hash_table)))
 setattr(struct_lp_build_tgsi_params, 'scratch_ptr', field(232, LLVMValueRef))
 setattr(struct_lp_build_tgsi_params, 'call_context_ptr', field(240, LLVMValueRef))
-try: (lp_build_nir_soa:=dll.lp_build_nir_soa).restype, lp_build_nir_soa.argtypes = None, [Pointer(struct_gallivm_state), Pointer(struct_nir_shader), Pointer(struct_lp_build_tgsi_params), Pointer(Array(LLVMValueRef, 4))]
-except AttributeError: pass
-
-try: (lp_build_nir_soa_func:=dll.lp_build_nir_soa_func).restype, lp_build_nir_soa_func.argtypes = None, [Pointer(struct_gallivm_state), Pointer(struct_nir_shader), Pointer(nir_function_impl), Pointer(struct_lp_build_tgsi_params), Pointer(Array(LLVMValueRef, 4))]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_gallivm_state), Pointer(struct_nir_shader), Pointer(struct_lp_build_tgsi_params), Pointer(Array(LLVMValueRef, 4))), None)
+def lp_build_nir_soa(gallivm, shader, params, outputs): ...
+@dll.bind((Pointer(struct_gallivm_state), Pointer(struct_nir_shader), Pointer(nir_function_impl), Pointer(struct_lp_build_tgsi_params), Pointer(Array(LLVMValueRef, 4))), None)
+def lp_build_nir_soa_func(gallivm, shader, impl, params, outputs): ...
 class struct_lp_build_sampler_aos(Struct): pass
 enum_tgsi_texture_type = CEnum(ctypes.c_uint32)
 TGSI_TEXTURE_BUFFER = enum_tgsi_texture_type.define('TGSI_TEXTURE_BUFFER', 0)
@@ -6496,32 +5903,25 @@ LP_BLD_TEX_MODIFIER_LOD_ZERO = enum_lp_build_tex_modifier.define('LP_BLD_TEX_MOD
 struct_lp_build_sampler_aos.SIZE = 8
 struct_lp_build_sampler_aos._fields_ = ['emit_fetch_texel']
 setattr(struct_lp_build_sampler_aos, 'emit_fetch_texel', field(0, ctypes.CFUNCTYPE(LLVMValueRef, Pointer(struct_lp_build_sampler_aos), Pointer(struct_lp_build_context), enum_tgsi_texture_type, ctypes.c_uint32, LLVMValueRef, struct_lp_derivatives, enum_lp_build_tex_modifier)))
-try: (lp_build_nir_aos:=dll.lp_build_nir_aos).restype, lp_build_nir_aos.argtypes = None, [Pointer(struct_gallivm_state), Pointer(struct_nir_shader), struct_lp_type, Array(ctypes.c_ubyte, 4), LLVMValueRef, Pointer(LLVMValueRef), Pointer(LLVMValueRef), Pointer(struct_lp_build_sampler_aos)]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_gallivm_state), Pointer(struct_nir_shader), struct_lp_type, Array(ctypes.c_ubyte, 4), LLVMValueRef, Pointer(LLVMValueRef), Pointer(LLVMValueRef), Pointer(struct_lp_build_sampler_aos)), None)
+def lp_build_nir_aos(gallivm, shader, type, swizzles, consts_ptr, inputs, outputs, sampler): ...
 class struct_lp_build_fn(Struct): pass
 struct_lp_build_fn.SIZE = 16
 struct_lp_build_fn._fields_ = ['fn_type', 'fn']
 setattr(struct_lp_build_fn, 'fn_type', field(0, LLVMTypeRef))
 setattr(struct_lp_build_fn, 'fn', field(8, LLVMValueRef))
-try: (lp_build_nir_soa_prepasses:=dll.lp_build_nir_soa_prepasses).restype, lp_build_nir_soa_prepasses.argtypes = None, [Pointer(struct_nir_shader)]
-except AttributeError: pass
-
-try: (lp_build_opt_nir:=dll.lp_build_opt_nir).restype, lp_build_opt_nir.argtypes = None, [Pointer(struct_nir_shader)]
-except AttributeError: pass
-
-try: (lp_translate_atomic_op:=dll.lp_translate_atomic_op).restype, lp_translate_atomic_op.argtypes = LLVMAtomicRMWBinOp, [nir_atomic_op]
-except AttributeError: pass
-
-try: (lp_build_nir_sample_key:=dll.lp_build_nir_sample_key).restype, lp_build_nir_sample_key.argtypes = uint32_t, [gl_shader_stage, Pointer(nir_tex_instr)]
-except AttributeError: pass
-
-try: (lp_img_op_from_intrinsic:=dll.lp_img_op_from_intrinsic).restype, lp_img_op_from_intrinsic.argtypes = None, [Pointer(struct_lp_img_params), Pointer(nir_intrinsic_instr)]
-except AttributeError: pass
-
-try: (lp_packed_img_op_from_intrinsic:=dll.lp_packed_img_op_from_intrinsic).restype, lp_packed_img_op_from_intrinsic.argtypes = uint32_t, [Pointer(nir_intrinsic_instr)]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_nir_shader),), None)
+def lp_build_nir_soa_prepasses(nir): ...
+@dll.bind((Pointer(struct_nir_shader),), None)
+def lp_build_opt_nir(nir): ...
+@dll.bind((nir_atomic_op,), LLVMAtomicRMWBinOp)
+def lp_translate_atomic_op(op): ...
+@dll.bind((gl_shader_stage, Pointer(nir_tex_instr)), uint32_t)
+def lp_build_nir_sample_key(stage, instr): ...
+@dll.bind((Pointer(struct_lp_img_params), Pointer(nir_intrinsic_instr)), None)
+def lp_img_op_from_intrinsic(params, instr): ...
+@dll.bind((Pointer(nir_intrinsic_instr),), uint32_t)
+def lp_packed_img_op_from_intrinsic(instr): ...
 enum_lp_nir_call_context_args = CEnum(ctypes.c_uint32)
 LP_NIR_CALL_CONTEXT_CONTEXT = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_CONTEXT', 0)
 LP_NIR_CALL_CONTEXT_RESOURCES = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_RESOURCES', 1)
@@ -6542,33 +5942,24 @@ LP_NIR_CALL_CONTEXT_BLOCK_SIZE_1 = enum_lp_nir_call_context_args.define('LP_NIR_
 LP_NIR_CALL_CONTEXT_BLOCK_SIZE_2 = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_BLOCK_SIZE_2', 16)
 LP_NIR_CALL_CONTEXT_MAX_ARGS = enum_lp_nir_call_context_args.define('LP_NIR_CALL_CONTEXT_MAX_ARGS', 17)
 
-try: (lp_build_cs_func_call_context:=dll.lp_build_cs_func_call_context).restype, lp_build_cs_func_call_context.argtypes = LLVMTypeRef, [Pointer(struct_gallivm_state), ctypes.c_int32, LLVMTypeRef, LLVMTypeRef]
-except AttributeError: pass
-
-try: (lp_build_struct_get_ptr2:=dll.lp_build_struct_get_ptr2).restype, lp_build_struct_get_ptr2.argtypes = LLVMValueRef, [Pointer(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (lp_build_struct_get2:=dll.lp_build_struct_get2).restype, lp_build_struct_get2.argtypes = LLVMValueRef, [Pointer(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (lp_build_array_get_ptr2:=dll.lp_build_array_get_ptr2).restype, lp_build_array_get_ptr2.argtypes = LLVMValueRef, [Pointer(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (lp_build_array_get2:=dll.lp_build_array_get2).restype, lp_build_array_get2.argtypes = LLVMValueRef, [Pointer(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (lp_build_pointer_get2:=dll.lp_build_pointer_get2).restype, lp_build_pointer_get2.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (lp_build_pointer_get_unaligned2:=dll.lp_build_pointer_get_unaligned2).restype, lp_build_pointer_get_unaligned2.argtypes = LLVMValueRef, [LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, LLVMValueRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (lp_build_pointer_set:=dll.lp_build_pointer_set).restype, lp_build_pointer_set.argtypes = None, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (lp_build_pointer_set_unaligned:=dll.lp_build_pointer_set_unaligned).restype, lp_build_pointer_set_unaligned.argtypes = None, [LLVMBuilderRef, LLVMValueRef, LLVMValueRef, LLVMValueRef, ctypes.c_uint32]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_gallivm_state), ctypes.c_int32, LLVMTypeRef, LLVMTypeRef), LLVMTypeRef)
+def lp_build_cs_func_call_context(gallivm, length, context_type, resources_type): ...
+@dll.bind((Pointer(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, Pointer(ctypes.c_char)), LLVMValueRef)
+def lp_build_struct_get_ptr2(gallivm, ptr_type, ptr, member, name): ...
+@dll.bind((Pointer(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, Pointer(ctypes.c_char)), LLVMValueRef)
+def lp_build_struct_get2(gallivm, ptr_type, ptr, member, name): ...
+@dll.bind((Pointer(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, LLVMValueRef), LLVMValueRef)
+def lp_build_array_get_ptr2(gallivm, array_type, ptr, index): ...
+@dll.bind((Pointer(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, LLVMValueRef), LLVMValueRef)
+def lp_build_array_get2(gallivm, array_type, ptr, index): ...
+@dll.bind((LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, LLVMValueRef), LLVMValueRef)
+def lp_build_pointer_get2(builder, ptr_type, ptr, index): ...
+@dll.bind((LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, LLVMValueRef, ctypes.c_uint32), LLVMValueRef)
+def lp_build_pointer_get_unaligned2(builder, ptr_type, ptr, index, alignment): ...
+@dll.bind((LLVMBuilderRef, LLVMValueRef, LLVMValueRef, LLVMValueRef), None)
+def lp_build_pointer_set(builder, ptr, index, value): ...
+@dll.bind((LLVMBuilderRef, LLVMValueRef, LLVMValueRef, LLVMValueRef, ctypes.c_uint32), None)
+def lp_build_pointer_set_unaligned(builder, ptr, index, value, alignment): ...
 class struct_lp_sampler_dynamic_state(Struct): pass
 struct_lp_sampler_dynamic_state.SIZE = 144
 struct_lp_sampler_dynamic_state._fields_ = ['width', 'height', 'depth', 'first_level', 'last_level', 'row_stride', 'img_stride', 'base_ptr', 'mip_offsets', 'num_samples', 'sample_stride', 'min_lod', 'max_lod', 'lod_bias', 'border_color', 'cache_ptr', 'residency', 'base_offset']
@@ -6601,15 +5992,12 @@ LP_JIT_BUFFER_BASE = _anonenum22.define('LP_JIT_BUFFER_BASE', 0)
 LP_JIT_BUFFER_NUM_ELEMENTS = _anonenum22.define('LP_JIT_BUFFER_NUM_ELEMENTS', 1)
 LP_JIT_BUFFER_NUM_FIELDS = _anonenum22.define('LP_JIT_BUFFER_NUM_FIELDS', 2)
 
-try: (lp_llvm_descriptor_base:=dll.lp_llvm_descriptor_base).restype, lp_llvm_descriptor_base.argtypes = LLVMValueRef, [Pointer(struct_gallivm_state), LLVMValueRef, LLVMValueRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (lp_llvm_buffer_base:=dll.lp_llvm_buffer_base).restype, lp_llvm_buffer_base.argtypes = LLVMValueRef, [Pointer(struct_gallivm_state), LLVMValueRef, LLVMValueRef, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (lp_llvm_buffer_num_elements:=dll.lp_llvm_buffer_num_elements).restype, lp_llvm_buffer_num_elements.argtypes = LLVMValueRef, [Pointer(struct_gallivm_state), LLVMValueRef, LLVMValueRef, ctypes.c_uint32]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_gallivm_state), LLVMValueRef, LLVMValueRef, ctypes.c_uint32), LLVMValueRef)
+def lp_llvm_descriptor_base(gallivm, buffers_ptr, index, buffers_limit): ...
+@dll.bind((Pointer(struct_gallivm_state), LLVMValueRef, LLVMValueRef, ctypes.c_uint32), LLVMValueRef)
+def lp_llvm_buffer_base(gallivm, buffers_ptr, buffers_offset, buffers_limit): ...
+@dll.bind((Pointer(struct_gallivm_state), LLVMValueRef, LLVMValueRef, ctypes.c_uint32), LLVMValueRef)
+def lp_llvm_buffer_num_elements(gallivm, buffers_ptr, buffers_offset, buffers_limit): ...
 struct_lp_jit_texture.SIZE = 216
 struct_lp_jit_texture._fields_ = ['base', 'width', 'height', 'depth', 'row_stride', 'img_stride', 'residency', 'first_level', 'last_level', 'mip_offsets', 'sampler_index']
 setattr(struct_lp_jit_texture, 'base', field(0, ctypes.c_void_p))
@@ -6692,32 +6080,25 @@ LP_JIT_RES_SAMPLERS = _anonenum26.define('LP_JIT_RES_SAMPLERS', 3)
 LP_JIT_RES_IMAGES = _anonenum26.define('LP_JIT_RES_IMAGES', 4)
 LP_JIT_RES_COUNT = _anonenum26.define('LP_JIT_RES_COUNT', 5)
 
-try: (lp_build_jit_resources_type:=dll.lp_build_jit_resources_type).restype, lp_build_jit_resources_type.argtypes = LLVMTypeRef, [Pointer(struct_gallivm_state)]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_gallivm_state),), LLVMTypeRef)
+def lp_build_jit_resources_type(gallivm): ...
 _anonenum27 = CEnum(ctypes.c_uint32)
 LP_JIT_VERTEX_HEADER_VERTEX_ID = _anonenum27.define('LP_JIT_VERTEX_HEADER_VERTEX_ID', 0)
 LP_JIT_VERTEX_HEADER_CLIP_POS = _anonenum27.define('LP_JIT_VERTEX_HEADER_CLIP_POS', 1)
 LP_JIT_VERTEX_HEADER_DATA = _anonenum27.define('LP_JIT_VERTEX_HEADER_DATA', 2)
 
-try: (lp_build_create_jit_vertex_header_type:=dll.lp_build_create_jit_vertex_header_type).restype, lp_build_create_jit_vertex_header_type.argtypes = LLVMTypeRef, [Pointer(struct_gallivm_state), ctypes.c_int32]
-except AttributeError: pass
-
-try: (lp_build_jit_fill_sampler_dynamic_state:=dll.lp_build_jit_fill_sampler_dynamic_state).restype, lp_build_jit_fill_sampler_dynamic_state.argtypes = None, [Pointer(struct_lp_sampler_dynamic_state)]
-except AttributeError: pass
-
-try: (lp_build_jit_fill_image_dynamic_state:=dll.lp_build_jit_fill_image_dynamic_state).restype, lp_build_jit_fill_image_dynamic_state.argtypes = None, [Pointer(struct_lp_sampler_dynamic_state)]
-except AttributeError: pass
-
-try: (lp_build_sample_function_type:=dll.lp_build_sample_function_type).restype, lp_build_sample_function_type.argtypes = LLVMTypeRef, [Pointer(struct_gallivm_state), uint32_t]
-except AttributeError: pass
-
-try: (lp_build_size_function_type:=dll.lp_build_size_function_type).restype, lp_build_size_function_type.argtypes = LLVMTypeRef, [Pointer(struct_gallivm_state), Pointer(struct_lp_sampler_size_query_params)]
-except AttributeError: pass
-
-try: (lp_build_image_function_type:=dll.lp_build_image_function_type).restype, lp_build_image_function_type.argtypes = LLVMTypeRef, [Pointer(struct_gallivm_state), Pointer(struct_lp_img_params), ctypes.c_bool, ctypes.c_bool]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_gallivm_state), ctypes.c_int32), LLVMTypeRef)
+def lp_build_create_jit_vertex_header_type(gallivm, data_elems): ...
+@dll.bind((Pointer(struct_lp_sampler_dynamic_state),), None)
+def lp_build_jit_fill_sampler_dynamic_state(state): ...
+@dll.bind((Pointer(struct_lp_sampler_dynamic_state),), None)
+def lp_build_jit_fill_image_dynamic_state(state): ...
+@dll.bind((Pointer(struct_gallivm_state), uint32_t), LLVMTypeRef)
+def lp_build_sample_function_type(gallivm, sample_key): ...
+@dll.bind((Pointer(struct_gallivm_state), Pointer(struct_lp_sampler_size_query_params)), LLVMTypeRef)
+def lp_build_size_function_type(gallivm, params): ...
+@dll.bind((Pointer(struct_gallivm_state), Pointer(struct_lp_img_params), ctypes.c_bool, ctypes.c_bool), LLVMTypeRef)
+def lp_build_image_function_type(gallivm, params, ms, is64): ...
 class struct_lp_texture_handle_state(Struct): pass
 class struct_lp_static_texture_state(Struct): pass
 enum_pipe_texture_target = CEnum(ctypes.c_uint32)
@@ -6785,33 +6166,24 @@ setattr(struct_lp_descriptor, 'image', field(0, struct_lp_jit_image))
 setattr(struct_lp_descriptor, 'buffer', field(0, struct_lp_jit_buffer))
 setattr(struct_lp_descriptor, 'accel_struct', field(0, uint64_t))
 setattr(struct_lp_descriptor, 'functions', field(56, ctypes.c_void_p))
-try: (lp_build_flow_skip_begin:=dll.lp_build_flow_skip_begin).restype, lp_build_flow_skip_begin.argtypes = None, [Pointer(struct_lp_build_skip_context), Pointer(struct_gallivm_state)]
-except AttributeError: pass
-
-try: (lp_build_flow_skip_cond_break:=dll.lp_build_flow_skip_cond_break).restype, lp_build_flow_skip_cond_break.argtypes = None, [Pointer(struct_lp_build_skip_context), LLVMValueRef]
-except AttributeError: pass
-
-try: (lp_build_flow_skip_end:=dll.lp_build_flow_skip_end).restype, lp_build_flow_skip_end.argtypes = None, [Pointer(struct_lp_build_skip_context)]
-except AttributeError: pass
-
-try: (lp_build_mask_begin:=dll.lp_build_mask_begin).restype, lp_build_mask_begin.argtypes = None, [Pointer(struct_lp_build_mask_context), Pointer(struct_gallivm_state), struct_lp_type, LLVMValueRef]
-except AttributeError: pass
-
-try: (lp_build_mask_value:=dll.lp_build_mask_value).restype, lp_build_mask_value.argtypes = LLVMValueRef, [Pointer(struct_lp_build_mask_context)]
-except AttributeError: pass
-
-try: (lp_build_mask_update:=dll.lp_build_mask_update).restype, lp_build_mask_update.argtypes = None, [Pointer(struct_lp_build_mask_context), LLVMValueRef]
-except AttributeError: pass
-
-try: (lp_build_mask_force:=dll.lp_build_mask_force).restype, lp_build_mask_force.argtypes = None, [Pointer(struct_lp_build_mask_context), LLVMValueRef]
-except AttributeError: pass
-
-try: (lp_build_mask_check:=dll.lp_build_mask_check).restype, lp_build_mask_check.argtypes = None, [Pointer(struct_lp_build_mask_context)]
-except AttributeError: pass
-
-try: (lp_build_mask_end:=dll.lp_build_mask_end).restype, lp_build_mask_end.argtypes = LLVMValueRef, [Pointer(struct_lp_build_mask_context)]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_lp_build_skip_context), Pointer(struct_gallivm_state)), None)
+def lp_build_flow_skip_begin(ctx, gallivm): ...
+@dll.bind((Pointer(struct_lp_build_skip_context), LLVMValueRef), None)
+def lp_build_flow_skip_cond_break(ctx, cond): ...
+@dll.bind((Pointer(struct_lp_build_skip_context),), None)
+def lp_build_flow_skip_end(ctx): ...
+@dll.bind((Pointer(struct_lp_build_mask_context), Pointer(struct_gallivm_state), struct_lp_type, LLVMValueRef), None)
+def lp_build_mask_begin(mask, gallivm, type, value): ...
+@dll.bind((Pointer(struct_lp_build_mask_context),), LLVMValueRef)
+def lp_build_mask_value(mask): ...
+@dll.bind((Pointer(struct_lp_build_mask_context), LLVMValueRef), None)
+def lp_build_mask_update(mask, value): ...
+@dll.bind((Pointer(struct_lp_build_mask_context), LLVMValueRef), None)
+def lp_build_mask_force(mask, value): ...
+@dll.bind((Pointer(struct_lp_build_mask_context),), None)
+def lp_build_mask_check(mask): ...
+@dll.bind((Pointer(struct_lp_build_mask_context),), LLVMValueRef)
+def lp_build_mask_end(mask): ...
 class struct_lp_build_loop_state(Struct): pass
 struct_lp_build_loop_state.SIZE = 40
 struct_lp_build_loop_state._fields_ = ['block', 'counter_var', 'counter', 'counter_type', 'gallivm']
@@ -6820,18 +6192,14 @@ setattr(struct_lp_build_loop_state, 'counter_var', field(8, LLVMValueRef))
 setattr(struct_lp_build_loop_state, 'counter', field(16, LLVMValueRef))
 setattr(struct_lp_build_loop_state, 'counter_type', field(24, LLVMTypeRef))
 setattr(struct_lp_build_loop_state, 'gallivm', field(32, Pointer(struct_gallivm_state)))
-try: (lp_build_loop_begin:=dll.lp_build_loop_begin).restype, lp_build_loop_begin.argtypes = None, [Pointer(struct_lp_build_loop_state), Pointer(struct_gallivm_state), LLVMValueRef]
-except AttributeError: pass
-
-try: (lp_build_loop_end:=dll.lp_build_loop_end).restype, lp_build_loop_end.argtypes = None, [Pointer(struct_lp_build_loop_state), LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (lp_build_loop_force_set_counter:=dll.lp_build_loop_force_set_counter).restype, lp_build_loop_force_set_counter.argtypes = None, [Pointer(struct_lp_build_loop_state), LLVMValueRef]
-except AttributeError: pass
-
-try: (lp_build_loop_force_reload_counter:=dll.lp_build_loop_force_reload_counter).restype, lp_build_loop_force_reload_counter.argtypes = None, [Pointer(struct_lp_build_loop_state)]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_lp_build_loop_state), Pointer(struct_gallivm_state), LLVMValueRef), None)
+def lp_build_loop_begin(state, gallivm, start): ...
+@dll.bind((Pointer(struct_lp_build_loop_state), LLVMValueRef, LLVMValueRef), None)
+def lp_build_loop_end(state, end, step): ...
+@dll.bind((Pointer(struct_lp_build_loop_state), LLVMValueRef), None)
+def lp_build_loop_force_set_counter(state, end): ...
+@dll.bind((Pointer(struct_lp_build_loop_state),), None)
+def lp_build_loop_force_reload_counter(state): ...
 LLVMIntPredicate = CEnum(ctypes.c_uint32)
 LLVMIntEQ = LLVMIntPredicate.define('LLVMIntEQ', 32)
 LLVMIntNE = LLVMIntPredicate.define('LLVMIntNE', 33)
@@ -6844,9 +6212,8 @@ LLVMIntSGE = LLVMIntPredicate.define('LLVMIntSGE', 39)
 LLVMIntSLT = LLVMIntPredicate.define('LLVMIntSLT', 40)
 LLVMIntSLE = LLVMIntPredicate.define('LLVMIntSLE', 41)
 
-try: (lp_build_loop_end_cond:=dll.lp_build_loop_end_cond).restype, lp_build_loop_end_cond.argtypes = None, [Pointer(struct_lp_build_loop_state), LLVMValueRef, LLVMValueRef, LLVMIntPredicate]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_lp_build_loop_state), LLVMValueRef, LLVMValueRef, LLVMIntPredicate), None)
+def lp_build_loop_end_cond(state, end, step, cond): ...
 class struct_lp_build_for_loop_state(Struct): pass
 struct_lp_build_for_loop_state.SIZE = 80
 struct_lp_build_for_loop_state._fields_ = ['begin', 'body', 'exit', 'counter_var', 'counter', 'counter_type', 'step', 'cond', 'end', 'gallivm']
@@ -6860,12 +6227,10 @@ setattr(struct_lp_build_for_loop_state, 'step', field(48, LLVMValueRef))
 setattr(struct_lp_build_for_loop_state, 'cond', field(56, LLVMIntPredicate))
 setattr(struct_lp_build_for_loop_state, 'end', field(64, LLVMValueRef))
 setattr(struct_lp_build_for_loop_state, 'gallivm', field(72, Pointer(struct_gallivm_state)))
-try: (lp_build_for_loop_begin:=dll.lp_build_for_loop_begin).restype, lp_build_for_loop_begin.argtypes = None, [Pointer(struct_lp_build_for_loop_state), Pointer(struct_gallivm_state), LLVMValueRef, LLVMIntPredicate, LLVMValueRef, LLVMValueRef]
-except AttributeError: pass
-
-try: (lp_build_for_loop_end:=dll.lp_build_for_loop_end).restype, lp_build_for_loop_end.argtypes = None, [Pointer(struct_lp_build_for_loop_state)]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_lp_build_for_loop_state), Pointer(struct_gallivm_state), LLVMValueRef, LLVMIntPredicate, LLVMValueRef, LLVMValueRef), None)
+def lp_build_for_loop_begin(state, gallivm, start, llvm_cond, end, step): ...
+@dll.bind((Pointer(struct_lp_build_for_loop_state),), None)
+def lp_build_for_loop_end(state): ...
 class struct_lp_build_if_state(Struct): pass
 struct_lp_build_if_state.SIZE = 48
 struct_lp_build_if_state._fields_ = ['gallivm', 'condition', 'entry_block', 'true_block', 'false_block', 'merge_block']
@@ -6875,90 +6240,62 @@ setattr(struct_lp_build_if_state, 'entry_block', field(16, LLVMBasicBlockRef))
 setattr(struct_lp_build_if_state, 'true_block', field(24, LLVMBasicBlockRef))
 setattr(struct_lp_build_if_state, 'false_block', field(32, LLVMBasicBlockRef))
 setattr(struct_lp_build_if_state, 'merge_block', field(40, LLVMBasicBlockRef))
-try: (lp_build_if:=dll.lp_build_if).restype, lp_build_if.argtypes = None, [Pointer(struct_lp_build_if_state), Pointer(struct_gallivm_state), LLVMValueRef]
-except AttributeError: pass
-
-try: (lp_build_else:=dll.lp_build_else).restype, lp_build_else.argtypes = None, [Pointer(struct_lp_build_if_state)]
-except AttributeError: pass
-
-try: (lp_build_endif:=dll.lp_build_endif).restype, lp_build_endif.argtypes = None, [Pointer(struct_lp_build_if_state)]
-except AttributeError: pass
-
-try: (lp_build_insert_new_block:=dll.lp_build_insert_new_block).restype, lp_build_insert_new_block.argtypes = LLVMBasicBlockRef, [Pointer(struct_gallivm_state), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (lp_create_builder_at_entry:=dll.lp_create_builder_at_entry).restype, lp_create_builder_at_entry.argtypes = LLVMBuilderRef, [Pointer(struct_gallivm_state)]
-except AttributeError: pass
-
-try: (lp_build_alloca:=dll.lp_build_alloca).restype, lp_build_alloca.argtypes = LLVMValueRef, [Pointer(struct_gallivm_state), LLVMTypeRef, Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (lp_build_alloca_undef:=dll.lp_build_alloca_undef).restype, lp_build_alloca_undef.argtypes = LLVMValueRef, [Pointer(struct_gallivm_state), LLVMTypeRef, Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (lp_build_array_alloca:=dll.lp_build_array_alloca).restype, lp_build_array_alloca.argtypes = LLVMValueRef, [Pointer(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (lp_mantissa:=dll.lp_mantissa).restype, lp_mantissa.argtypes = ctypes.c_uint32, [struct_lp_type]
-except AttributeError: pass
-
-try: (lp_const_shift:=dll.lp_const_shift).restype, lp_const_shift.argtypes = ctypes.c_uint32, [struct_lp_type]
-except AttributeError: pass
-
-try: (lp_const_offset:=dll.lp_const_offset).restype, lp_const_offset.argtypes = ctypes.c_uint32, [struct_lp_type]
-except AttributeError: pass
-
-try: (lp_const_scale:=dll.lp_const_scale).restype, lp_const_scale.argtypes = ctypes.c_double, [struct_lp_type]
-except AttributeError: pass
-
-try: (lp_const_min:=dll.lp_const_min).restype, lp_const_min.argtypes = ctypes.c_double, [struct_lp_type]
-except AttributeError: pass
-
-try: (lp_const_max:=dll.lp_const_max).restype, lp_const_max.argtypes = ctypes.c_double, [struct_lp_type]
-except AttributeError: pass
-
-try: (lp_const_eps:=dll.lp_const_eps).restype, lp_const_eps.argtypes = ctypes.c_double, [struct_lp_type]
-except AttributeError: pass
-
-try: (lp_build_undef:=dll.lp_build_undef).restype, lp_build_undef.argtypes = LLVMValueRef, [Pointer(struct_gallivm_state), struct_lp_type]
-except AttributeError: pass
-
-try: (lp_build_zero:=dll.lp_build_zero).restype, lp_build_zero.argtypes = LLVMValueRef, [Pointer(struct_gallivm_state), struct_lp_type]
-except AttributeError: pass
-
-try: (lp_build_one:=dll.lp_build_one).restype, lp_build_one.argtypes = LLVMValueRef, [Pointer(struct_gallivm_state), struct_lp_type]
-except AttributeError: pass
-
-try: (lp_build_const_elem:=dll.lp_build_const_elem).restype, lp_build_const_elem.argtypes = LLVMValueRef, [Pointer(struct_gallivm_state), struct_lp_type, ctypes.c_double]
-except AttributeError: pass
-
-try: (lp_build_const_vec:=dll.lp_build_const_vec).restype, lp_build_const_vec.argtypes = LLVMValueRef, [Pointer(struct_gallivm_state), struct_lp_type, ctypes.c_double]
-except AttributeError: pass
-
-try: (lp_build_const_int_vec:=dll.lp_build_const_int_vec).restype, lp_build_const_int_vec.argtypes = LLVMValueRef, [Pointer(struct_gallivm_state), struct_lp_type, ctypes.c_int64]
-except AttributeError: pass
-
-try: (lp_build_const_channel_vec:=dll.lp_build_const_channel_vec).restype, lp_build_const_channel_vec.argtypes = LLVMValueRef, [Pointer(struct_gallivm_state), struct_lp_type]
-except AttributeError: pass
-
-try: (lp_build_const_aos:=dll.lp_build_const_aos).restype, lp_build_const_aos.argtypes = LLVMValueRef, [Pointer(struct_gallivm_state), struct_lp_type, ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double, Pointer(ctypes.c_ubyte)]
-except AttributeError: pass
-
-try: (lp_build_const_mask_aos:=dll.lp_build_const_mask_aos).restype, lp_build_const_mask_aos.argtypes = LLVMValueRef, [Pointer(struct_gallivm_state), struct_lp_type, ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (lp_build_const_mask_aos_swizzled:=dll.lp_build_const_mask_aos_swizzled).restype, lp_build_const_mask_aos_swizzled.argtypes = LLVMValueRef, [Pointer(struct_gallivm_state), struct_lp_type, ctypes.c_uint32, ctypes.c_uint32, Pointer(ctypes.c_ubyte)]
-except AttributeError: pass
-
-try: (lp_build_const_string:=dll.lp_build_const_string).restype, lp_build_const_string.argtypes = LLVMValueRef, [Pointer(struct_gallivm_state), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (lp_build_const_func_pointer:=dll.lp_build_const_func_pointer).restype, lp_build_const_func_pointer.argtypes = LLVMValueRef, [Pointer(struct_gallivm_state), ctypes.c_void_p, LLVMTypeRef, Pointer(LLVMTypeRef), ctypes.c_uint32, Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (lp_build_const_func_pointer_from_type:=dll.lp_build_const_func_pointer_from_type).restype, lp_build_const_func_pointer_from_type.argtypes = LLVMValueRef, [Pointer(struct_gallivm_state), ctypes.c_void_p, LLVMTypeRef, Pointer(ctypes.c_char)]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_lp_build_if_state), Pointer(struct_gallivm_state), LLVMValueRef), None)
+def lp_build_if(ctx, gallivm, condition): ...
+@dll.bind((Pointer(struct_lp_build_if_state),), None)
+def lp_build_else(ctx): ...
+@dll.bind((Pointer(struct_lp_build_if_state),), None)
+def lp_build_endif(ctx): ...
+@dll.bind((Pointer(struct_gallivm_state), Pointer(ctypes.c_char)), LLVMBasicBlockRef)
+def lp_build_insert_new_block(gallivm, name): ...
+@dll.bind((Pointer(struct_gallivm_state),), LLVMBuilderRef)
+def lp_create_builder_at_entry(gallivm): ...
+@dll.bind((Pointer(struct_gallivm_state), LLVMTypeRef, Pointer(ctypes.c_char)), LLVMValueRef)
+def lp_build_alloca(gallivm, type, name): ...
+@dll.bind((Pointer(struct_gallivm_state), LLVMTypeRef, Pointer(ctypes.c_char)), LLVMValueRef)
+def lp_build_alloca_undef(gallivm, type, name): ...
+@dll.bind((Pointer(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, Pointer(ctypes.c_char)), LLVMValueRef)
+def lp_build_array_alloca(gallivm, type, count, name): ...
+@dll.bind((struct_lp_type,), ctypes.c_uint32)
+def lp_mantissa(type): ...
+@dll.bind((struct_lp_type,), ctypes.c_uint32)
+def lp_const_shift(type): ...
+@dll.bind((struct_lp_type,), ctypes.c_uint32)
+def lp_const_offset(type): ...
+@dll.bind((struct_lp_type,), ctypes.c_double)
+def lp_const_scale(type): ...
+@dll.bind((struct_lp_type,), ctypes.c_double)
+def lp_const_min(type): ...
+@dll.bind((struct_lp_type,), ctypes.c_double)
+def lp_const_max(type): ...
+@dll.bind((struct_lp_type,), ctypes.c_double)
+def lp_const_eps(type): ...
+@dll.bind((Pointer(struct_gallivm_state), struct_lp_type), LLVMValueRef)
+def lp_build_undef(gallivm, type): ...
+@dll.bind((Pointer(struct_gallivm_state), struct_lp_type), LLVMValueRef)
+def lp_build_zero(gallivm, type): ...
+@dll.bind((Pointer(struct_gallivm_state), struct_lp_type), LLVMValueRef)
+def lp_build_one(gallivm, type): ...
+@dll.bind((Pointer(struct_gallivm_state), struct_lp_type, ctypes.c_double), LLVMValueRef)
+def lp_build_const_elem(gallivm, type, val): ...
+@dll.bind((Pointer(struct_gallivm_state), struct_lp_type, ctypes.c_double), LLVMValueRef)
+def lp_build_const_vec(gallivm, type, val): ...
+@dll.bind((Pointer(struct_gallivm_state), struct_lp_type, ctypes.c_int64), LLVMValueRef)
+def lp_build_const_int_vec(gallivm, type, val): ...
+@dll.bind((Pointer(struct_gallivm_state), struct_lp_type), LLVMValueRef)
+def lp_build_const_channel_vec(gallivm, type): ...
+@dll.bind((Pointer(struct_gallivm_state), struct_lp_type, ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double, Pointer(ctypes.c_ubyte)), LLVMValueRef)
+def lp_build_const_aos(gallivm, type, r, g, b, a, swizzle): ...
+@dll.bind((Pointer(struct_gallivm_state), struct_lp_type, ctypes.c_uint32, ctypes.c_uint32), LLVMValueRef)
+def lp_build_const_mask_aos(gallivm, type, mask, channels): ...
+@dll.bind((Pointer(struct_gallivm_state), struct_lp_type, ctypes.c_uint32, ctypes.c_uint32, Pointer(ctypes.c_ubyte)), LLVMValueRef)
+def lp_build_const_mask_aos_swizzled(gallivm, type, mask, channels, swizzle): ...
+@dll.bind((Pointer(struct_gallivm_state), Pointer(ctypes.c_char)), LLVMValueRef)
+def lp_build_const_string(gallivm, str): ...
+@dll.bind((Pointer(struct_gallivm_state), ctypes.c_void_p, LLVMTypeRef, Pointer(LLVMTypeRef), ctypes.c_uint32, Pointer(ctypes.c_char)), LLVMValueRef)
+def lp_build_const_func_pointer(gallivm, ptr, ret_type, arg_types, num_args, name): ...
+@dll.bind((Pointer(struct_gallivm_state), ctypes.c_void_p, LLVMTypeRef, Pointer(ctypes.c_char)), LLVMValueRef)
+def lp_build_const_func_pointer_from_type(gallivm, ptr, function_type, name): ...
 class struct_fd_dev_info(Struct): pass
 class _anonstruct28(Struct): pass
 class _anonstruct29(Struct): pass
@@ -7099,21 +6436,16 @@ struct_fd_dev_id.SIZE = 16
 struct_fd_dev_id._fields_ = ['gpu_id', 'chip_id']
 setattr(struct_fd_dev_id, 'gpu_id', field(0, uint32_t))
 setattr(struct_fd_dev_id, 'chip_id', field(8, uint64_t))
-try: (fd_dev_info_raw:=dll.fd_dev_info_raw).restype, fd_dev_info_raw.argtypes = Pointer(struct_fd_dev_info), [Pointer(struct_fd_dev_id)]
-except AttributeError: pass
-
-try: (fd_dev_info:=dll.fd_dev_info).restype, fd_dev_info.argtypes = struct_fd_dev_info, [Pointer(struct_fd_dev_id)]
-except AttributeError: pass
-
-try: (fd_dev_info_raw_by_name:=dll.fd_dev_info_raw_by_name).restype, fd_dev_info_raw_by_name.argtypes = Pointer(struct_fd_dev_info), [Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (fd_dev_name:=dll.fd_dev_name).restype, fd_dev_name.argtypes = Pointer(ctypes.c_char), [Pointer(struct_fd_dev_id)]
-except AttributeError: pass
-
-try: (fd_dev_info_apply_dbg_options:=dll.fd_dev_info_apply_dbg_options).restype, fd_dev_info_apply_dbg_options.argtypes = None, [Pointer(struct_fd_dev_info)]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_fd_dev_id),), Pointer(struct_fd_dev_info))
+def fd_dev_info_raw(id): ...
+@dll.bind((Pointer(struct_fd_dev_id),), struct_fd_dev_info)
+def fd_dev_info(id): ...
+@dll.bind((Pointer(ctypes.c_char),), Pointer(struct_fd_dev_info))
+def fd_dev_info_raw_by_name(name): ...
+@dll.bind((Pointer(struct_fd_dev_id),), Pointer(ctypes.c_char))
+def fd_dev_name(id): ...
+@dll.bind((Pointer(struct_fd_dev_info),), None)
+def fd_dev_info_apply_dbg_options(info): ...
 class struct_ir3_ra_reg_set(Struct): pass
 class struct_ir3_shader(Struct): pass
 class struct_ir3_compiler_options(Struct): pass
@@ -7220,37 +6552,27 @@ setattr(struct_ir3_compiler, 'has_alias_tex', field(440, ctypes.c_bool))
 setattr(struct_ir3_compiler, 'has_alias_rt', field(441, ctypes.c_bool))
 setattr(struct_ir3_compiler, 'reading_shading_rate_requires_smask_quirk', field(442, ctypes.c_bool))
 setattr(struct_ir3_compiler, 'delay_slots', field(444, _anonstruct32))
-try: (ir3_compiler_destroy:=dll.ir3_compiler_destroy).restype, ir3_compiler_destroy.argtypes = None, [Pointer(struct_ir3_compiler)]
-except AttributeError: pass
-
-try: (ir3_compiler_create:=dll.ir3_compiler_create).restype, ir3_compiler_create.argtypes = Pointer(struct_ir3_compiler), [Pointer(struct_fd_device), Pointer(struct_fd_dev_id), Pointer(struct_fd_dev_info), Pointer(struct_ir3_compiler_options)]
-except AttributeError: pass
-
-try: (ir3_disk_cache_init:=dll.ir3_disk_cache_init).restype, ir3_disk_cache_init.argtypes = None, [Pointer(struct_ir3_compiler)]
-except AttributeError: pass
-
-try: (ir3_disk_cache_init_shader_key:=dll.ir3_disk_cache_init_shader_key).restype, ir3_disk_cache_init_shader_key.argtypes = None, [Pointer(struct_ir3_compiler), Pointer(struct_ir3_shader)]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_ir3_compiler),), None)
+def ir3_compiler_destroy(compiler): ...
+@dll.bind((Pointer(struct_fd_device), Pointer(struct_fd_dev_id), Pointer(struct_fd_dev_info), Pointer(struct_ir3_compiler_options)), Pointer(struct_ir3_compiler))
+def ir3_compiler_create(dev, dev_id, dev_info, options): ...
+@dll.bind((Pointer(struct_ir3_compiler),), None)
+def ir3_disk_cache_init(compiler): ...
+@dll.bind((Pointer(struct_ir3_compiler), Pointer(struct_ir3_shader)), None)
+def ir3_disk_cache_init_shader_key(compiler, shader): ...
 class struct_ir3_shader_variant(Struct): pass
-try: (ir3_retrieve_variant:=dll.ir3_retrieve_variant).restype, ir3_retrieve_variant.argtypes = Pointer(struct_ir3_shader_variant), [Pointer(struct_blob_reader), Pointer(struct_ir3_compiler), ctypes.c_void_p]
-except AttributeError: pass
-
-try: (ir3_store_variant:=dll.ir3_store_variant).restype, ir3_store_variant.argtypes = None, [Pointer(struct_blob), Pointer(struct_ir3_shader_variant)]
-except AttributeError: pass
-
-try: (ir3_disk_cache_retrieve:=dll.ir3_disk_cache_retrieve).restype, ir3_disk_cache_retrieve.argtypes = ctypes.c_bool, [Pointer(struct_ir3_shader), Pointer(struct_ir3_shader_variant)]
-except AttributeError: pass
-
-try: (ir3_disk_cache_store:=dll.ir3_disk_cache_store).restype, ir3_disk_cache_store.argtypes = None, [Pointer(struct_ir3_shader), Pointer(struct_ir3_shader_variant)]
-except AttributeError: pass
-
-try: (ir3_get_compiler_options:=dll.ir3_get_compiler_options).restype, ir3_get_compiler_options.argtypes = Pointer(nir_shader_compiler_options), [Pointer(struct_ir3_compiler)]
-except AttributeError: pass
-
-try: (ir3_compile_shader_nir:=dll.ir3_compile_shader_nir).restype, ir3_compile_shader_nir.argtypes = ctypes.c_int32, [Pointer(struct_ir3_compiler), Pointer(struct_ir3_shader), Pointer(struct_ir3_shader_variant)]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_blob_reader), Pointer(struct_ir3_compiler), ctypes.c_void_p), Pointer(struct_ir3_shader_variant))
+def ir3_retrieve_variant(blob, compiler, mem_ctx): ...
+@dll.bind((Pointer(struct_blob), Pointer(struct_ir3_shader_variant)), None)
+def ir3_store_variant(blob, v): ...
+@dll.bind((Pointer(struct_ir3_shader), Pointer(struct_ir3_shader_variant)), ctypes.c_bool)
+def ir3_disk_cache_retrieve(shader, v): ...
+@dll.bind((Pointer(struct_ir3_shader), Pointer(struct_ir3_shader_variant)), None)
+def ir3_disk_cache_store(shader, v): ...
+@dll.bind((Pointer(struct_ir3_compiler),), Pointer(nir_shader_compiler_options))
+def ir3_get_compiler_options(compiler): ...
+@dll.bind((Pointer(struct_ir3_compiler), Pointer(struct_ir3_shader), Pointer(struct_ir3_shader_variant)), ctypes.c_int32)
+def ir3_compile_shader_nir(compiler, shader, so): ...
 enum_ir3_shader_debug = CEnum(ctypes.c_uint32)
 IR3_DBG_SHADER_VS = enum_ir3_shader_debug.define('IR3_DBG_SHADER_VS', 1)
 IR3_DBG_SHADER_TCS = enum_ir3_shader_debug.define('IR3_DBG_SHADER_TCS', 2)
@@ -7282,9 +6604,8 @@ try: ir3_shader_debug = enum_ir3_shader_debug.in_dll(dll, 'ir3_shader_debug')
 except (ValueError,AttributeError): pass
 try: ir3_shader_override_path = Pointer(ctypes.c_char).in_dll(dll, 'ir3_shader_override_path')
 except (ValueError,AttributeError): pass
-try: (ir3_shader_debug_as_string:=dll.ir3_shader_debug_as_string).restype, ir3_shader_debug_as_string.argtypes = Pointer(ctypes.c_char), []
-except AttributeError: pass
-
+@dll.bind((), Pointer(ctypes.c_char))
+def ir3_shader_debug_as_string(): ...
 class struct_ir3_driver_params_cs(Struct): pass
 struct_ir3_driver_params_cs.SIZE = 64
 struct_ir3_driver_params_cs._fields_ = ['num_work_groups_x', 'num_work_groups_y', 'num_work_groups_z', 'work_dim', 'base_group_x', 'base_group_y', 'base_group_z', 'subgroup_size', 'local_group_size_x', 'local_group_size_y', 'local_group_size_z', 'subgroup_id_shift', 'workgroup_id_x', 'workgroup_id_y', 'workgroup_id_z', '__pad']
@@ -8385,51 +7706,36 @@ setattr(struct_ir3_shader, 'variants', field(1064, Pointer(struct_ir3_shader_var
 setattr(struct_ir3_shader, 'variants_lock', field(1072, mtx_t))
 setattr(struct_ir3_shader, 'cache_key', field(1112, cache_key))
 setattr(struct_ir3_shader, 'key_mask', field(1132, struct_ir3_shader_key))
-try: (ir3_const_ensure_imm_size:=dll.ir3_const_ensure_imm_size).restype, ir3_const_ensure_imm_size.argtypes = ctypes.c_bool, [Pointer(struct_ir3_shader_variant), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (ir3_const_imm_index_to_reg:=dll.ir3_const_imm_index_to_reg).restype, ir3_const_imm_index_to_reg.argtypes = uint16_t, [Pointer(struct_ir3_const_state), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (ir3_const_find_imm:=dll.ir3_const_find_imm).restype, ir3_const_find_imm.argtypes = uint16_t, [Pointer(struct_ir3_shader_variant), uint32_t]
-except AttributeError: pass
-
-try: (ir3_const_add_imm:=dll.ir3_const_add_imm).restype, ir3_const_add_imm.argtypes = uint16_t, [Pointer(struct_ir3_shader_variant), uint32_t]
-except AttributeError: pass
-
-try: (ir3_shader_assemble:=dll.ir3_shader_assemble).restype, ir3_shader_assemble.argtypes = ctypes.c_void_p, [Pointer(struct_ir3_shader_variant)]
-except AttributeError: pass
-
-try: (ir3_shader_create_variant:=dll.ir3_shader_create_variant).restype, ir3_shader_create_variant.argtypes = Pointer(struct_ir3_shader_variant), [Pointer(struct_ir3_shader), Pointer(struct_ir3_shader_key), ctypes.c_bool]
-except AttributeError: pass
-
-try: (ir3_shader_get_variant:=dll.ir3_shader_get_variant).restype, ir3_shader_get_variant.argtypes = Pointer(struct_ir3_shader_variant), [Pointer(struct_ir3_shader), Pointer(struct_ir3_shader_key), ctypes.c_bool, ctypes.c_bool, Pointer(ctypes.c_bool)]
-except AttributeError: pass
-
-try: (ir3_shader_from_nir:=dll.ir3_shader_from_nir).restype, ir3_shader_from_nir.argtypes = Pointer(struct_ir3_shader), [Pointer(struct_ir3_compiler), Pointer(nir_shader), Pointer(struct_ir3_shader_options), Pointer(struct_ir3_stream_output_info)]
-except AttributeError: pass
-
-try: (ir3_trim_constlen:=dll.ir3_trim_constlen).restype, ir3_trim_constlen.argtypes = uint32_t, [Pointer(Pointer(struct_ir3_shader_variant)), Pointer(struct_ir3_compiler)]
-except AttributeError: pass
-
-try: (ir3_shader_passthrough_tcs:=dll.ir3_shader_passthrough_tcs).restype, ir3_shader_passthrough_tcs.argtypes = Pointer(struct_ir3_shader), [Pointer(struct_ir3_shader), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (ir3_shader_destroy:=dll.ir3_shader_destroy).restype, ir3_shader_destroy.argtypes = None, [Pointer(struct_ir3_shader)]
-except AttributeError: pass
-
-try: (ir3_shader_disasm:=dll.ir3_shader_disasm).restype, ir3_shader_disasm.argtypes = None, [Pointer(struct_ir3_shader_variant), Pointer(uint32_t), Pointer(FILE)]
-except AttributeError: pass
-
-try: (ir3_shader_outputs:=dll.ir3_shader_outputs).restype, ir3_shader_outputs.argtypes = uint64_t, [Pointer(struct_ir3_shader)]
-except AttributeError: pass
-
-try: (ir3_glsl_type_size:=dll.ir3_glsl_type_size).restype, ir3_glsl_type_size.argtypes = ctypes.c_int32, [Pointer(struct_glsl_type), ctypes.c_bool]
-except AttributeError: pass
-
-try: (ir3_shader_get_subgroup_size:=dll.ir3_shader_get_subgroup_size).restype, ir3_shader_get_subgroup_size.argtypes = None, [Pointer(struct_ir3_compiler), Pointer(struct_ir3_shader_options), gl_shader_stage, Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32)]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_ir3_shader_variant), ctypes.c_uint32), ctypes.c_bool)
+def ir3_const_ensure_imm_size(v, size): ...
+@dll.bind((Pointer(struct_ir3_const_state), ctypes.c_uint32), uint16_t)
+def ir3_const_imm_index_to_reg(const_state, i): ...
+@dll.bind((Pointer(struct_ir3_shader_variant), uint32_t), uint16_t)
+def ir3_const_find_imm(v, imm): ...
+@dll.bind((Pointer(struct_ir3_shader_variant), uint32_t), uint16_t)
+def ir3_const_add_imm(v, imm): ...
+@dll.bind((Pointer(struct_ir3_shader_variant),), ctypes.c_void_p)
+def ir3_shader_assemble(v): ...
+@dll.bind((Pointer(struct_ir3_shader), Pointer(struct_ir3_shader_key), ctypes.c_bool), Pointer(struct_ir3_shader_variant))
+def ir3_shader_create_variant(shader, key, keep_ir): ...
+@dll.bind((Pointer(struct_ir3_shader), Pointer(struct_ir3_shader_key), ctypes.c_bool, ctypes.c_bool, Pointer(ctypes.c_bool)), Pointer(struct_ir3_shader_variant))
+def ir3_shader_get_variant(shader, key, binning_pass, keep_ir, created): ...
+@dll.bind((Pointer(struct_ir3_compiler), Pointer(nir_shader), Pointer(struct_ir3_shader_options), Pointer(struct_ir3_stream_output_info)), Pointer(struct_ir3_shader))
+def ir3_shader_from_nir(compiler, nir, options, stream_output): ...
+@dll.bind((Pointer(Pointer(struct_ir3_shader_variant)), Pointer(struct_ir3_compiler)), uint32_t)
+def ir3_trim_constlen(variants, compiler): ...
+@dll.bind((Pointer(struct_ir3_shader), ctypes.c_uint32), Pointer(struct_ir3_shader))
+def ir3_shader_passthrough_tcs(vs, patch_vertices): ...
+@dll.bind((Pointer(struct_ir3_shader),), None)
+def ir3_shader_destroy(shader): ...
+@dll.bind((Pointer(struct_ir3_shader_variant), Pointer(uint32_t), Pointer(FILE)), None)
+def ir3_shader_disasm(so, bin, out): ...
+@dll.bind((Pointer(struct_ir3_shader),), uint64_t)
+def ir3_shader_outputs(so): ...
+@dll.bind((Pointer(struct_glsl_type), ctypes.c_bool), ctypes.c_int32)
+def ir3_glsl_type_size(type, bindless): ...
+@dll.bind((Pointer(struct_ir3_compiler), Pointer(struct_ir3_shader_options), gl_shader_stage, Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32)), None)
+def ir3_shader_get_subgroup_size(compiler, options, stage, subgroup_size, max_subgroup_size): ...
 class struct_ir3_shader_linkage(Struct): pass
 class _anonstruct62(Struct): pass
 _anonstruct62.SIZE = 4
@@ -8448,227 +7754,155 @@ setattr(struct_ir3_shader_linkage, 'primid_loc', field(148, uint8_t))
 setattr(struct_ir3_shader_linkage, 'viewid_loc', field(149, uint8_t))
 setattr(struct_ir3_shader_linkage, 'clip0_loc', field(150, uint8_t))
 setattr(struct_ir3_shader_linkage, 'clip1_loc', field(151, uint8_t))
-try: (print_raw:=dll.print_raw).restype, print_raw.argtypes = None, [Pointer(FILE), Pointer(ctypes.c_uint32), size_t]
-except AttributeError: pass
-
-try: (ir3_link_stream_out:=dll.ir3_link_stream_out).restype, ir3_link_stream_out.argtypes = None, [Pointer(struct_ir3_shader_linkage), Pointer(struct_ir3_shader_variant)]
-except AttributeError: pass
-
-try: (ir3_nir_apply_trig_workarounds:=dll.ir3_nir_apply_trig_workarounds).restype, ir3_nir_apply_trig_workarounds.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (ir3_nir_lower_imul:=dll.ir3_nir_lower_imul).restype, ir3_nir_lower_imul.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (ir3_nir_lower_io_offsets:=dll.ir3_nir_lower_io_offsets).restype, ir3_nir_lower_io_offsets.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (ir3_nir_lower_load_barycentric_at_sample:=dll.ir3_nir_lower_load_barycentric_at_sample).restype, ir3_nir_lower_load_barycentric_at_sample.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (ir3_nir_lower_load_barycentric_at_offset:=dll.ir3_nir_lower_load_barycentric_at_offset).restype, ir3_nir_lower_load_barycentric_at_offset.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (ir3_nir_lower_push_consts_to_preamble:=dll.ir3_nir_lower_push_consts_to_preamble).restype, ir3_nir_lower_push_consts_to_preamble.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(struct_ir3_shader_variant)]
-except AttributeError: pass
-
-try: (ir3_nir_lower_driver_params_to_ubo:=dll.ir3_nir_lower_driver_params_to_ubo).restype, ir3_nir_lower_driver_params_to_ubo.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(struct_ir3_shader_variant)]
-except AttributeError: pass
-
-try: (ir3_nir_move_varying_inputs:=dll.ir3_nir_move_varying_inputs).restype, ir3_nir_move_varying_inputs.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (ir3_nir_coord_offset:=dll.ir3_nir_coord_offset).restype, ir3_nir_coord_offset.argtypes = ctypes.c_int32, [Pointer(nir_def), Pointer(gl_system_value)]
-except AttributeError: pass
-
-try: (ir3_nir_lower_tex_prefetch:=dll.ir3_nir_lower_tex_prefetch).restype, ir3_nir_lower_tex_prefetch.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(enum_ir3_bary)]
-except AttributeError: pass
-
-try: (ir3_nir_lower_layer_id:=dll.ir3_nir_lower_layer_id).restype, ir3_nir_lower_layer_id.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (ir3_nir_lower_frag_shading_rate:=dll.ir3_nir_lower_frag_shading_rate).restype, ir3_nir_lower_frag_shading_rate.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (ir3_nir_lower_primitive_shading_rate:=dll.ir3_nir_lower_primitive_shading_rate).restype, ir3_nir_lower_primitive_shading_rate.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (ir3_nir_lower_to_explicit_output:=dll.ir3_nir_lower_to_explicit_output).restype, ir3_nir_lower_to_explicit_output.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(struct_ir3_shader_variant), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (ir3_nir_lower_to_explicit_input:=dll.ir3_nir_lower_to_explicit_input).restype, ir3_nir_lower_to_explicit_input.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(struct_ir3_shader_variant)]
-except AttributeError: pass
-
-try: (ir3_nir_lower_tess_ctrl:=dll.ir3_nir_lower_tess_ctrl).restype, ir3_nir_lower_tess_ctrl.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(struct_ir3_shader_variant), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (ir3_nir_lower_tess_eval:=dll.ir3_nir_lower_tess_eval).restype, ir3_nir_lower_tess_eval.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(struct_ir3_shader_variant), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (ir3_nir_lower_gs:=dll.ir3_nir_lower_gs).restype, ir3_nir_lower_gs.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (ir3_supports_vectorized_nir_op:=dll.ir3_supports_vectorized_nir_op).restype, ir3_supports_vectorized_nir_op.argtypes = ctypes.c_bool, [nir_op]
-except AttributeError: pass
-
-try: (ir3_nir_vectorize_filter:=dll.ir3_nir_vectorize_filter).restype, ir3_nir_vectorize_filter.argtypes = uint8_t, [Pointer(nir_instr), ctypes.c_void_p]
-except AttributeError: pass
-
-try: (ir3_nir_lower_64b_intrinsics:=dll.ir3_nir_lower_64b_intrinsics).restype, ir3_nir_lower_64b_intrinsics.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (ir3_nir_lower_64b_undef:=dll.ir3_nir_lower_64b_undef).restype, ir3_nir_lower_64b_undef.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (ir3_nir_lower_64b_global:=dll.ir3_nir_lower_64b_global).restype, ir3_nir_lower_64b_global.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (ir3_nir_lower_64b_regs:=dll.ir3_nir_lower_64b_regs).restype, ir3_nir_lower_64b_regs.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (ir3_mem_access_size_align:=dll.ir3_mem_access_size_align).restype, ir3_mem_access_size_align.argtypes = nir_mem_access_size_align, [nir_intrinsic_op, uint8_t, uint8_t, uint32_t, uint32_t, ctypes.c_bool, enum_gl_access_qualifier, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (ir3_nir_opt_branch_and_or_not:=dll.ir3_nir_opt_branch_and_or_not).restype, ir3_nir_opt_branch_and_or_not.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (ir3_nir_opt_triops_bitwise:=dll.ir3_nir_opt_triops_bitwise).restype, ir3_nir_opt_triops_bitwise.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (ir3_optimize_loop:=dll.ir3_optimize_loop).restype, ir3_optimize_loop.argtypes = ctypes.c_bool, [Pointer(struct_ir3_compiler), Pointer(struct_ir3_shader_nir_options), Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (ir3_nir_lower_io_vars_to_temporaries:=dll.ir3_nir_lower_io_vars_to_temporaries).restype, ir3_nir_lower_io_vars_to_temporaries.argtypes = None, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (ir3_finalize_nir:=dll.ir3_finalize_nir).restype, ir3_finalize_nir.argtypes = None, [Pointer(struct_ir3_compiler), Pointer(struct_ir3_shader_nir_options), Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (ir3_nir_post_finalize:=dll.ir3_nir_post_finalize).restype, ir3_nir_post_finalize.argtypes = None, [Pointer(struct_ir3_shader)]
-except AttributeError: pass
-
-try: (ir3_nir_lower_variant:=dll.ir3_nir_lower_variant).restype, ir3_nir_lower_variant.argtypes = None, [Pointer(struct_ir3_shader_variant), Pointer(struct_ir3_shader_nir_options), Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (ir3_setup_const_state:=dll.ir3_setup_const_state).restype, ir3_setup_const_state.argtypes = None, [Pointer(nir_shader), Pointer(struct_ir3_shader_variant), Pointer(struct_ir3_const_state)]
-except AttributeError: pass
-
-try: (ir3_const_state_get_free_space:=dll.ir3_const_state_get_free_space).restype, ir3_const_state_get_free_space.argtypes = uint32_t, [Pointer(struct_ir3_shader_variant), Pointer(struct_ir3_const_state), uint32_t]
-except AttributeError: pass
-
-try: (ir3_const_alloc:=dll.ir3_const_alloc).restype, ir3_const_alloc.argtypes = None, [Pointer(struct_ir3_const_allocations), enum_ir3_const_alloc_type, uint32_t, uint32_t]
-except AttributeError: pass
-
-try: (ir3_const_reserve_space:=dll.ir3_const_reserve_space).restype, ir3_const_reserve_space.argtypes = None, [Pointer(struct_ir3_const_allocations), enum_ir3_const_alloc_type, uint32_t, uint32_t]
-except AttributeError: pass
-
-try: (ir3_const_free_reserved_space:=dll.ir3_const_free_reserved_space).restype, ir3_const_free_reserved_space.argtypes = None, [Pointer(struct_ir3_const_allocations), enum_ir3_const_alloc_type]
-except AttributeError: pass
-
-try: (ir3_const_alloc_all_reserved_space:=dll.ir3_const_alloc_all_reserved_space).restype, ir3_const_alloc_all_reserved_space.argtypes = None, [Pointer(struct_ir3_const_allocations)]
-except AttributeError: pass
-
-try: (ir3_nir_scan_driver_consts:=dll.ir3_nir_scan_driver_consts).restype, ir3_nir_scan_driver_consts.argtypes = uint32_t, [Pointer(struct_ir3_compiler), Pointer(nir_shader), Pointer(struct_ir3_const_image_dims)]
-except AttributeError: pass
-
-try: (ir3_alloc_driver_params:=dll.ir3_alloc_driver_params).restype, ir3_alloc_driver_params.argtypes = None, [Pointer(struct_ir3_const_allocations), Pointer(uint32_t), Pointer(struct_ir3_compiler), enum_pipe_shader_type]
-except AttributeError: pass
-
-try: (ir3_nir_lower_load_constant:=dll.ir3_nir_lower_load_constant).restype, ir3_nir_lower_load_constant.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(struct_ir3_shader_variant)]
-except AttributeError: pass
-
-try: (ir3_nir_analyze_ubo_ranges:=dll.ir3_nir_analyze_ubo_ranges).restype, ir3_nir_analyze_ubo_ranges.argtypes = None, [Pointer(nir_shader), Pointer(struct_ir3_shader_variant)]
-except AttributeError: pass
-
-try: (ir3_nir_lower_ubo_loads:=dll.ir3_nir_lower_ubo_loads).restype, ir3_nir_lower_ubo_loads.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(struct_ir3_shader_variant)]
-except AttributeError: pass
-
-try: (ir3_nir_lower_const_global_loads:=dll.ir3_nir_lower_const_global_loads).restype, ir3_nir_lower_const_global_loads.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(struct_ir3_shader_variant)]
-except AttributeError: pass
-
-try: (ir3_nir_fixup_load_const_ir3:=dll.ir3_nir_fixup_load_const_ir3).restype, ir3_nir_fixup_load_const_ir3.argtypes = ctypes.c_bool, [Pointer(nir_shader)]
-except AttributeError: pass
-
-try: (ir3_nir_opt_preamble:=dll.ir3_nir_opt_preamble).restype, ir3_nir_opt_preamble.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(struct_ir3_shader_variant)]
-except AttributeError: pass
-
-try: (ir3_nir_opt_prefetch_descriptors:=dll.ir3_nir_opt_prefetch_descriptors).restype, ir3_nir_opt_prefetch_descriptors.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(struct_ir3_shader_variant)]
-except AttributeError: pass
-
-try: (ir3_nir_lower_preamble:=dll.ir3_nir_lower_preamble).restype, ir3_nir_lower_preamble.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(struct_ir3_shader_variant)]
-except AttributeError: pass
-
-try: (ir3_nir_try_propagate_bit_shift:=dll.ir3_nir_try_propagate_bit_shift).restype, ir3_nir_try_propagate_bit_shift.argtypes = Pointer(nir_def), [Pointer(nir_builder), Pointer(nir_def), int32_t]
-except AttributeError: pass
-
-try: (ir3_nir_lower_subgroups_filter:=dll.ir3_nir_lower_subgroups_filter).restype, ir3_nir_lower_subgroups_filter.argtypes = ctypes.c_bool, [Pointer(nir_instr), ctypes.c_void_p]
-except AttributeError: pass
-
-try: (ir3_nir_lower_shuffle:=dll.ir3_nir_lower_shuffle).restype, ir3_nir_lower_shuffle.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(struct_ir3_shader)]
-except AttributeError: pass
-
-try: (ir3_nir_opt_subgroups:=dll.ir3_nir_opt_subgroups).restype, ir3_nir_opt_subgroups.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(struct_ir3_shader_variant)]
-except AttributeError: pass
-
-try: (ir3_get_shared_driver_ubo:=dll.ir3_get_shared_driver_ubo).restype, ir3_get_shared_driver_ubo.argtypes = Pointer(nir_def), [Pointer(nir_builder), Pointer(struct_ir3_driver_ubo)]
-except AttributeError: pass
-
-try: (ir3_get_driver_ubo:=dll.ir3_get_driver_ubo).restype, ir3_get_driver_ubo.argtypes = Pointer(nir_def), [Pointer(nir_builder), Pointer(struct_ir3_driver_ubo)]
-except AttributeError: pass
-
-try: (ir3_get_driver_consts_ubo:=dll.ir3_get_driver_consts_ubo).restype, ir3_get_driver_consts_ubo.argtypes = Pointer(nir_def), [Pointer(nir_builder), Pointer(struct_ir3_shader_variant)]
-except AttributeError: pass
-
-try: (ir3_update_driver_ubo:=dll.ir3_update_driver_ubo).restype, ir3_update_driver_ubo.argtypes = None, [Pointer(nir_shader), Pointer(struct_ir3_driver_ubo), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (ir3_load_shared_driver_ubo:=dll.ir3_load_shared_driver_ubo).restype, ir3_load_shared_driver_ubo.argtypes = Pointer(nir_def), [Pointer(nir_builder), ctypes.c_uint32, Pointer(struct_ir3_driver_ubo), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (ir3_load_driver_ubo:=dll.ir3_load_driver_ubo).restype, ir3_load_driver_ubo.argtypes = Pointer(nir_def), [Pointer(nir_builder), ctypes.c_uint32, Pointer(struct_ir3_driver_ubo), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (ir3_load_driver_ubo_indirect:=dll.ir3_load_driver_ubo_indirect).restype, ir3_load_driver_ubo_indirect.argtypes = Pointer(nir_def), [Pointer(nir_builder), ctypes.c_uint32, Pointer(struct_ir3_driver_ubo), ctypes.c_uint32, Pointer(nir_def), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (ir3_def_is_rematerializable_for_preamble:=dll.ir3_def_is_rematerializable_for_preamble).restype, ir3_def_is_rematerializable_for_preamble.argtypes = ctypes.c_bool, [Pointer(nir_def), Pointer(Pointer(nir_def))]
-except AttributeError: pass
-
-try: (ir3_rematerialize_def_for_preamble:=dll.ir3_rematerialize_def_for_preamble).restype, ir3_rematerialize_def_for_preamble.argtypes = Pointer(nir_def), [Pointer(nir_builder), Pointer(nir_def), Pointer(struct_set), Pointer(Pointer(nir_def))]
-except AttributeError: pass
-
+@dll.bind((Pointer(FILE), Pointer(ctypes.c_uint32), size_t), None)
+def print_raw(out, data, size): ...
+@dll.bind((Pointer(struct_ir3_shader_linkage), Pointer(struct_ir3_shader_variant)), None)
+def ir3_link_stream_out(l, v): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def ir3_nir_apply_trig_workarounds(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def ir3_nir_lower_imul(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def ir3_nir_lower_io_offsets(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def ir3_nir_lower_load_barycentric_at_sample(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def ir3_nir_lower_load_barycentric_at_offset(shader): ...
+@dll.bind((Pointer(nir_shader), Pointer(struct_ir3_shader_variant)), ctypes.c_bool)
+def ir3_nir_lower_push_consts_to_preamble(nir, v): ...
+@dll.bind((Pointer(nir_shader), Pointer(struct_ir3_shader_variant)), ctypes.c_bool)
+def ir3_nir_lower_driver_params_to_ubo(nir, v): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def ir3_nir_move_varying_inputs(shader): ...
+@dll.bind((Pointer(nir_def), Pointer(gl_system_value)), ctypes.c_int32)
+def ir3_nir_coord_offset(ssa, bary_type): ...
+@dll.bind((Pointer(nir_shader), Pointer(enum_ir3_bary)), ctypes.c_bool)
+def ir3_nir_lower_tex_prefetch(shader, prefetch_bary_type): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def ir3_nir_lower_layer_id(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def ir3_nir_lower_frag_shading_rate(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def ir3_nir_lower_primitive_shading_rate(shader): ...
+@dll.bind((Pointer(nir_shader), Pointer(struct_ir3_shader_variant), ctypes.c_uint32), ctypes.c_bool)
+def ir3_nir_lower_to_explicit_output(shader, v, topology): ...
+@dll.bind((Pointer(nir_shader), Pointer(struct_ir3_shader_variant)), ctypes.c_bool)
+def ir3_nir_lower_to_explicit_input(shader, v): ...
+@dll.bind((Pointer(nir_shader), Pointer(struct_ir3_shader_variant), ctypes.c_uint32), ctypes.c_bool)
+def ir3_nir_lower_tess_ctrl(shader, v, topology): ...
+@dll.bind((Pointer(nir_shader), Pointer(struct_ir3_shader_variant), ctypes.c_uint32), ctypes.c_bool)
+def ir3_nir_lower_tess_eval(shader, v, topology): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def ir3_nir_lower_gs(shader): ...
+@dll.bind((nir_op,), ctypes.c_bool)
+def ir3_supports_vectorized_nir_op(op): ...
+@dll.bind((Pointer(nir_instr), ctypes.c_void_p), uint8_t)
+def ir3_nir_vectorize_filter(instr, data): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def ir3_nir_lower_64b_intrinsics(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def ir3_nir_lower_64b_undef(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def ir3_nir_lower_64b_global(shader): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def ir3_nir_lower_64b_regs(shader): ...
+@dll.bind((nir_intrinsic_op, uint8_t, uint8_t, uint32_t, uint32_t, ctypes.c_bool, enum_gl_access_qualifier, ctypes.c_void_p), nir_mem_access_size_align)
+def ir3_mem_access_size_align(intrin, bytes, bit_size, align, align_offset, offset_is_const, access, cb_data): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def ir3_nir_opt_branch_and_or_not(nir): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def ir3_nir_opt_triops_bitwise(nir): ...
+@dll.bind((Pointer(struct_ir3_compiler), Pointer(struct_ir3_shader_nir_options), Pointer(nir_shader)), ctypes.c_bool)
+def ir3_optimize_loop(compiler, options, s): ...
+@dll.bind((Pointer(nir_shader),), None)
+def ir3_nir_lower_io_vars_to_temporaries(s): ...
+@dll.bind((Pointer(struct_ir3_compiler), Pointer(struct_ir3_shader_nir_options), Pointer(nir_shader)), None)
+def ir3_finalize_nir(compiler, options, s): ...
+@dll.bind((Pointer(struct_ir3_shader),), None)
+def ir3_nir_post_finalize(shader): ...
+@dll.bind((Pointer(struct_ir3_shader_variant), Pointer(struct_ir3_shader_nir_options), Pointer(nir_shader)), None)
+def ir3_nir_lower_variant(so, options, s): ...
+@dll.bind((Pointer(nir_shader), Pointer(struct_ir3_shader_variant), Pointer(struct_ir3_const_state)), None)
+def ir3_setup_const_state(nir, v, const_state): ...
+@dll.bind((Pointer(struct_ir3_shader_variant), Pointer(struct_ir3_const_state), uint32_t), uint32_t)
+def ir3_const_state_get_free_space(v, const_state, align_vec4): ...
+@dll.bind((Pointer(struct_ir3_const_allocations), enum_ir3_const_alloc_type, uint32_t, uint32_t), None)
+def ir3_const_alloc(const_alloc, type, size_vec4, align_vec4): ...
+@dll.bind((Pointer(struct_ir3_const_allocations), enum_ir3_const_alloc_type, uint32_t, uint32_t), None)
+def ir3_const_reserve_space(const_alloc, type, size_vec4, align_vec4): ...
+@dll.bind((Pointer(struct_ir3_const_allocations), enum_ir3_const_alloc_type), None)
+def ir3_const_free_reserved_space(const_alloc, type): ...
+@dll.bind((Pointer(struct_ir3_const_allocations),), None)
+def ir3_const_alloc_all_reserved_space(const_alloc): ...
+@dll.bind((Pointer(struct_ir3_compiler), Pointer(nir_shader), Pointer(struct_ir3_const_image_dims)), uint32_t)
+def ir3_nir_scan_driver_consts(compiler, shader, image_dims): ...
+@dll.bind((Pointer(struct_ir3_const_allocations), Pointer(uint32_t), Pointer(struct_ir3_compiler), enum_pipe_shader_type), None)
+def ir3_alloc_driver_params(const_alloc, num_driver_params, compiler, shader_type): ...
+@dll.bind((Pointer(nir_shader), Pointer(struct_ir3_shader_variant)), ctypes.c_bool)
+def ir3_nir_lower_load_constant(nir, v): ...
+@dll.bind((Pointer(nir_shader), Pointer(struct_ir3_shader_variant)), None)
+def ir3_nir_analyze_ubo_ranges(nir, v): ...
+@dll.bind((Pointer(nir_shader), Pointer(struct_ir3_shader_variant)), ctypes.c_bool)
+def ir3_nir_lower_ubo_loads(nir, v): ...
+@dll.bind((Pointer(nir_shader), Pointer(struct_ir3_shader_variant)), ctypes.c_bool)
+def ir3_nir_lower_const_global_loads(nir, v): ...
+@dll.bind((Pointer(nir_shader),), ctypes.c_bool)
+def ir3_nir_fixup_load_const_ir3(nir): ...
+@dll.bind((Pointer(nir_shader), Pointer(struct_ir3_shader_variant)), ctypes.c_bool)
+def ir3_nir_opt_preamble(nir, v): ...
+@dll.bind((Pointer(nir_shader), Pointer(struct_ir3_shader_variant)), ctypes.c_bool)
+def ir3_nir_opt_prefetch_descriptors(nir, v): ...
+@dll.bind((Pointer(nir_shader), Pointer(struct_ir3_shader_variant)), ctypes.c_bool)
+def ir3_nir_lower_preamble(nir, v): ...
+@dll.bind((Pointer(nir_builder), Pointer(nir_def), int32_t), Pointer(nir_def))
+def ir3_nir_try_propagate_bit_shift(b, offset, shift): ...
+@dll.bind((Pointer(nir_instr), ctypes.c_void_p), ctypes.c_bool)
+def ir3_nir_lower_subgroups_filter(instr, data): ...
+@dll.bind((Pointer(nir_shader), Pointer(struct_ir3_shader)), ctypes.c_bool)
+def ir3_nir_lower_shuffle(nir, shader): ...
+@dll.bind((Pointer(nir_shader), Pointer(struct_ir3_shader_variant)), ctypes.c_bool)
+def ir3_nir_opt_subgroups(nir, v): ...
+@dll.bind((Pointer(nir_builder), Pointer(struct_ir3_driver_ubo)), Pointer(nir_def))
+def ir3_get_shared_driver_ubo(b, ubo): ...
+@dll.bind((Pointer(nir_builder), Pointer(struct_ir3_driver_ubo)), Pointer(nir_def))
+def ir3_get_driver_ubo(b, ubo): ...
+@dll.bind((Pointer(nir_builder), Pointer(struct_ir3_shader_variant)), Pointer(nir_def))
+def ir3_get_driver_consts_ubo(b, v): ...
+@dll.bind((Pointer(nir_shader), Pointer(struct_ir3_driver_ubo), Pointer(ctypes.c_char)), None)
+def ir3_update_driver_ubo(nir, ubo, name): ...
+@dll.bind((Pointer(nir_builder), ctypes.c_uint32, Pointer(struct_ir3_driver_ubo), ctypes.c_uint32), Pointer(nir_def))
+def ir3_load_shared_driver_ubo(b, components, ubo, offset): ...
+@dll.bind((Pointer(nir_builder), ctypes.c_uint32, Pointer(struct_ir3_driver_ubo), ctypes.c_uint32), Pointer(nir_def))
+def ir3_load_driver_ubo(b, components, ubo, offset): ...
+@dll.bind((Pointer(nir_builder), ctypes.c_uint32, Pointer(struct_ir3_driver_ubo), ctypes.c_uint32, Pointer(nir_def), ctypes.c_uint32), Pointer(nir_def))
+def ir3_load_driver_ubo_indirect(b, components, ubo, base, offset, range): ...
+@dll.bind((Pointer(nir_def), Pointer(Pointer(nir_def))), ctypes.c_bool)
+def ir3_def_is_rematerializable_for_preamble(_ndef, preamble_defs): ...
+@dll.bind((Pointer(nir_builder), Pointer(nir_def), Pointer(struct_set), Pointer(Pointer(nir_def))), Pointer(nir_def))
+def ir3_rematerialize_def_for_preamble(b, _ndef, instr_set, preamble_defs): ...
 class struct_driver_param_info(Struct): pass
 struct_driver_param_info.SIZE = 8
 struct_driver_param_info._fields_ = ['offset', 'extra_size']
 setattr(struct_driver_param_info, 'offset', field(0, uint32_t))
 setattr(struct_driver_param_info, 'extra_size', field(4, uint32_t))
-try: (ir3_get_driver_param_info:=dll.ir3_get_driver_param_info).restype, ir3_get_driver_param_info.argtypes = ctypes.c_bool, [Pointer(nir_shader), Pointer(nir_intrinsic_instr), Pointer(struct_driver_param_info)]
-except AttributeError: pass
-
-try: (ir3_nir_max_imm_offset:=dll.ir3_nir_max_imm_offset).restype, ir3_nir_max_imm_offset.argtypes = uint32_t, [Pointer(nir_intrinsic_instr), ctypes.c_void_p]
-except AttributeError: pass
-
-try: (ir3_nir_intrinsic_barycentric_sysval:=dll.ir3_nir_intrinsic_barycentric_sysval).restype, ir3_nir_intrinsic_barycentric_sysval.argtypes = gl_system_value, [Pointer(nir_intrinsic_instr)]
-except AttributeError: pass
-
-try: (glsl_type_singleton_init_or_ref:=dll.glsl_type_singleton_init_or_ref).restype, glsl_type_singleton_init_or_ref.argtypes = None, []
-except AttributeError: pass
-
-try: (glsl_type_singleton_decref:=dll.glsl_type_singleton_decref).restype, glsl_type_singleton_decref.argtypes = None, []
-except AttributeError: pass
-
-try: (encode_type_to_blob:=dll.encode_type_to_blob).restype, encode_type_to_blob.argtypes = None, [Pointer(struct_blob), Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (decode_type_from_blob:=dll.decode_type_from_blob).restype, decode_type_from_blob.argtypes = Pointer(glsl_type), [Pointer(struct_blob_reader)]
-except AttributeError: pass
-
-try: (glsl_apply_signedness_to_base_type:=dll.glsl_apply_signedness_to_base_type).restype, glsl_apply_signedness_to_base_type.argtypes = enum_glsl_base_type, [enum_glsl_base_type, ctypes.c_bool]
-except AttributeError: pass
-
-try: (glsl_get_sampler_dim_coordinate_components:=dll.glsl_get_sampler_dim_coordinate_components).restype, glsl_get_sampler_dim_coordinate_components.argtypes = ctypes.c_int32, [enum_glsl_sampler_dim]
-except AttributeError: pass
-
+@dll.bind((Pointer(nir_shader), Pointer(nir_intrinsic_instr), Pointer(struct_driver_param_info)), ctypes.c_bool)
+def ir3_get_driver_param_info(shader, intr, param_info): ...
+@dll.bind((Pointer(nir_intrinsic_instr), ctypes.c_void_p), uint32_t)
+def ir3_nir_max_imm_offset(intrin, data): ...
+@dll.bind((Pointer(nir_intrinsic_instr),), gl_system_value)
+def ir3_nir_intrinsic_barycentric_sysval(intr): ...
+@dll.bind((), None)
+def glsl_type_singleton_init_or_ref(): ...
+@dll.bind((), None)
+def glsl_type_singleton_decref(): ...
+@dll.bind((Pointer(struct_blob), Pointer(glsl_type)), None)
+def encode_type_to_blob(blob, type): ...
+@dll.bind((Pointer(struct_blob_reader),), Pointer(glsl_type))
+def decode_type_from_blob(blob): ...
+@dll.bind((enum_glsl_base_type, ctypes.c_bool), enum_glsl_base_type)
+def glsl_apply_signedness_to_base_type(type, signedness): ...
+@dll.bind((enum_glsl_sampler_dim,), ctypes.c_int32)
+def glsl_get_sampler_dim_coordinate_components(dim): ...
 enum_glsl_matrix_layout = CEnum(ctypes.c_uint32)
 GLSL_MATRIX_LAYOUT_INHERITED = enum_glsl_matrix_layout.define('GLSL_MATRIX_LAYOUT_INHERITED', 0)
 GLSL_MATRIX_LAYOUT_COLUMN_MAJOR = enum_glsl_matrix_layout.define('GLSL_MATRIX_LAYOUT_COLUMN_MAJOR', 1)
@@ -8686,466 +7920,315 @@ GLSL_CMAT_USE_A = enum_glsl_cmat_use.define('GLSL_CMAT_USE_A', 1)
 GLSL_CMAT_USE_B = enum_glsl_cmat_use.define('GLSL_CMAT_USE_B', 2)
 GLSL_CMAT_USE_ACCUMULATOR = enum_glsl_cmat_use.define('GLSL_CMAT_USE_ACCUMULATOR', 3)
 
-try: (glsl_get_type_name:=dll.glsl_get_type_name).restype, glsl_get_type_name.argtypes = Pointer(ctypes.c_char), [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_type_is_vector:=dll.glsl_type_is_vector).restype, glsl_type_is_vector.argtypes = ctypes.c_bool, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_type_is_scalar:=dll.glsl_type_is_scalar).restype, glsl_type_is_scalar.argtypes = ctypes.c_bool, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_type_is_vector_or_scalar:=dll.glsl_type_is_vector_or_scalar).restype, glsl_type_is_vector_or_scalar.argtypes = ctypes.c_bool, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_type_is_matrix:=dll.glsl_type_is_matrix).restype, glsl_type_is_matrix.argtypes = ctypes.c_bool, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_type_is_array_or_matrix:=dll.glsl_type_is_array_or_matrix).restype, glsl_type_is_array_or_matrix.argtypes = ctypes.c_bool, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_type_is_dual_slot:=dll.glsl_type_is_dual_slot).restype, glsl_type_is_dual_slot.argtypes = ctypes.c_bool, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_type_is_leaf:=dll.glsl_type_is_leaf).restype, glsl_type_is_leaf.argtypes = ctypes.c_bool, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_get_bare_type:=dll.glsl_get_bare_type).restype, glsl_get_bare_type.argtypes = Pointer(glsl_type), [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_get_scalar_type:=dll.glsl_get_scalar_type).restype, glsl_get_scalar_type.argtypes = Pointer(glsl_type), [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_get_base_glsl_type:=dll.glsl_get_base_glsl_type).restype, glsl_get_base_glsl_type.argtypes = Pointer(glsl_type), [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_get_length:=dll.glsl_get_length).restype, glsl_get_length.argtypes = ctypes.c_uint32, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_type_wrap_in_arrays:=dll.glsl_type_wrap_in_arrays).restype, glsl_type_wrap_in_arrays.argtypes = Pointer(glsl_type), [Pointer(glsl_type), Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_get_aoa_size:=dll.glsl_get_aoa_size).restype, glsl_get_aoa_size.argtypes = ctypes.c_uint32, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_get_array_element:=dll.glsl_get_array_element).restype, glsl_get_array_element.argtypes = Pointer(glsl_type), [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_without_array:=dll.glsl_without_array).restype, glsl_without_array.argtypes = Pointer(glsl_type), [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_without_array_or_matrix:=dll.glsl_without_array_or_matrix).restype, glsl_without_array_or_matrix.argtypes = Pointer(glsl_type), [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_type_wrap_in_arrays:=dll.glsl_type_wrap_in_arrays).restype, glsl_type_wrap_in_arrays.argtypes = Pointer(glsl_type), [Pointer(glsl_type), Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_get_cmat_element:=dll.glsl_get_cmat_element).restype, glsl_get_cmat_element.argtypes = Pointer(glsl_type), [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_get_cmat_description:=dll.glsl_get_cmat_description).restype, glsl_get_cmat_description.argtypes = Pointer(struct_glsl_cmat_description), [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_atomic_size:=dll.glsl_atomic_size).restype, glsl_atomic_size.argtypes = ctypes.c_uint32, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_type_contains_32bit:=dll.glsl_type_contains_32bit).restype, glsl_type_contains_32bit.argtypes = ctypes.c_bool, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_type_contains_64bit:=dll.glsl_type_contains_64bit).restype, glsl_type_contains_64bit.argtypes = ctypes.c_bool, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_type_contains_image:=dll.glsl_type_contains_image).restype, glsl_type_contains_image.argtypes = ctypes.c_bool, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_contains_atomic:=dll.glsl_contains_atomic).restype, glsl_contains_atomic.argtypes = ctypes.c_bool, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_contains_double:=dll.glsl_contains_double).restype, glsl_contains_double.argtypes = ctypes.c_bool, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_contains_integer:=dll.glsl_contains_integer).restype, glsl_contains_integer.argtypes = ctypes.c_bool, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_contains_opaque:=dll.glsl_contains_opaque).restype, glsl_contains_opaque.argtypes = ctypes.c_bool, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_contains_sampler:=dll.glsl_contains_sampler).restype, glsl_contains_sampler.argtypes = ctypes.c_bool, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_contains_array:=dll.glsl_contains_array).restype, glsl_contains_array.argtypes = ctypes.c_bool, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_contains_subroutine:=dll.glsl_contains_subroutine).restype, glsl_contains_subroutine.argtypes = ctypes.c_bool, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_get_sampler_coordinate_components:=dll.glsl_get_sampler_coordinate_components).restype, glsl_get_sampler_coordinate_components.argtypes = ctypes.c_int32, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_type_compare_no_precision:=dll.glsl_type_compare_no_precision).restype, glsl_type_compare_no_precision.argtypes = ctypes.c_bool, [Pointer(glsl_type), Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_record_compare:=dll.glsl_record_compare).restype, glsl_record_compare.argtypes = ctypes.c_bool, [Pointer(glsl_type), Pointer(glsl_type), ctypes.c_bool, ctypes.c_bool, ctypes.c_bool]
-except AttributeError: pass
-
-try: (glsl_get_struct_field:=dll.glsl_get_struct_field).restype, glsl_get_struct_field.argtypes = Pointer(glsl_type), [Pointer(glsl_type), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (glsl_get_struct_field_data:=dll.glsl_get_struct_field_data).restype, glsl_get_struct_field_data.argtypes = Pointer(glsl_struct_field), [Pointer(glsl_type), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (glsl_get_struct_location_offset:=dll.glsl_get_struct_location_offset).restype, glsl_get_struct_location_offset.argtypes = ctypes.c_uint32, [Pointer(glsl_type), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (glsl_get_field_index:=dll.glsl_get_field_index).restype, glsl_get_field_index.argtypes = ctypes.c_int32, [Pointer(glsl_type), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (glsl_get_field_type:=dll.glsl_get_field_type).restype, glsl_get_field_type.argtypes = Pointer(glsl_type), [Pointer(glsl_type), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (glsl_vec_type:=dll.glsl_vec_type).restype, glsl_vec_type.argtypes = Pointer(glsl_type), [ctypes.c_uint32]
-except AttributeError: pass
-
-try: (glsl_f16vec_type:=dll.glsl_f16vec_type).restype, glsl_f16vec_type.argtypes = Pointer(glsl_type), [ctypes.c_uint32]
-except AttributeError: pass
-
-try: (glsl_bf16vec_type:=dll.glsl_bf16vec_type).restype, glsl_bf16vec_type.argtypes = Pointer(glsl_type), [ctypes.c_uint32]
-except AttributeError: pass
-
-try: (glsl_e4m3fnvec_type:=dll.glsl_e4m3fnvec_type).restype, glsl_e4m3fnvec_type.argtypes = Pointer(glsl_type), [ctypes.c_uint32]
-except AttributeError: pass
-
-try: (glsl_e5m2vec_type:=dll.glsl_e5m2vec_type).restype, glsl_e5m2vec_type.argtypes = Pointer(glsl_type), [ctypes.c_uint32]
-except AttributeError: pass
-
-try: (glsl_dvec_type:=dll.glsl_dvec_type).restype, glsl_dvec_type.argtypes = Pointer(glsl_type), [ctypes.c_uint32]
-except AttributeError: pass
-
-try: (glsl_ivec_type:=dll.glsl_ivec_type).restype, glsl_ivec_type.argtypes = Pointer(glsl_type), [ctypes.c_uint32]
-except AttributeError: pass
-
-try: (glsl_uvec_type:=dll.glsl_uvec_type).restype, glsl_uvec_type.argtypes = Pointer(glsl_type), [ctypes.c_uint32]
-except AttributeError: pass
-
-try: (glsl_bvec_type:=dll.glsl_bvec_type).restype, glsl_bvec_type.argtypes = Pointer(glsl_type), [ctypes.c_uint32]
-except AttributeError: pass
-
-try: (glsl_i64vec_type:=dll.glsl_i64vec_type).restype, glsl_i64vec_type.argtypes = Pointer(glsl_type), [ctypes.c_uint32]
-except AttributeError: pass
-
-try: (glsl_u64vec_type:=dll.glsl_u64vec_type).restype, glsl_u64vec_type.argtypes = Pointer(glsl_type), [ctypes.c_uint32]
-except AttributeError: pass
-
-try: (glsl_i16vec_type:=dll.glsl_i16vec_type).restype, glsl_i16vec_type.argtypes = Pointer(glsl_type), [ctypes.c_uint32]
-except AttributeError: pass
-
-try: (glsl_u16vec_type:=dll.glsl_u16vec_type).restype, glsl_u16vec_type.argtypes = Pointer(glsl_type), [ctypes.c_uint32]
-except AttributeError: pass
-
-try: (glsl_i8vec_type:=dll.glsl_i8vec_type).restype, glsl_i8vec_type.argtypes = Pointer(glsl_type), [ctypes.c_uint32]
-except AttributeError: pass
-
-try: (glsl_u8vec_type:=dll.glsl_u8vec_type).restype, glsl_u8vec_type.argtypes = Pointer(glsl_type), [ctypes.c_uint32]
-except AttributeError: pass
-
-try: (glsl_simple_explicit_type:=dll.glsl_simple_explicit_type).restype, glsl_simple_explicit_type.argtypes = Pointer(glsl_type), [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (glsl_sampler_type:=dll.glsl_sampler_type).restype, glsl_sampler_type.argtypes = Pointer(glsl_type), [enum_glsl_sampler_dim, ctypes.c_bool, ctypes.c_bool, enum_glsl_base_type]
-except AttributeError: pass
-
-try: (glsl_bare_sampler_type:=dll.glsl_bare_sampler_type).restype, glsl_bare_sampler_type.argtypes = Pointer(glsl_type), []
-except AttributeError: pass
-
-try: (glsl_bare_shadow_sampler_type:=dll.glsl_bare_shadow_sampler_type).restype, glsl_bare_shadow_sampler_type.argtypes = Pointer(glsl_type), []
-except AttributeError: pass
-
-try: (glsl_texture_type:=dll.glsl_texture_type).restype, glsl_texture_type.argtypes = Pointer(glsl_type), [enum_glsl_sampler_dim, ctypes.c_bool, enum_glsl_base_type]
-except AttributeError: pass
-
-try: (glsl_image_type:=dll.glsl_image_type).restype, glsl_image_type.argtypes = Pointer(glsl_type), [enum_glsl_sampler_dim, ctypes.c_bool, enum_glsl_base_type]
-except AttributeError: pass
-
-try: (glsl_array_type:=dll.glsl_array_type).restype, glsl_array_type.argtypes = Pointer(glsl_type), [Pointer(glsl_type), ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (glsl_cmat_type:=dll.glsl_cmat_type).restype, glsl_cmat_type.argtypes = Pointer(glsl_type), [Pointer(struct_glsl_cmat_description)]
-except AttributeError: pass
-
-try: (glsl_struct_type_with_explicit_alignment:=dll.glsl_struct_type_with_explicit_alignment).restype, glsl_struct_type_with_explicit_alignment.argtypes = Pointer(glsl_type), [Pointer(glsl_struct_field), ctypes.c_uint32, Pointer(ctypes.c_char), ctypes.c_bool, ctypes.c_uint32]
-except AttributeError: pass
-
+@dll.bind((Pointer(glsl_type),), Pointer(ctypes.c_char))
+def glsl_get_type_name(type): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_bool)
+def glsl_type_is_vector(t): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_bool)
+def glsl_type_is_scalar(t): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_bool)
+def glsl_type_is_vector_or_scalar(t): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_bool)
+def glsl_type_is_matrix(t): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_bool)
+def glsl_type_is_array_or_matrix(t): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_bool)
+def glsl_type_is_dual_slot(t): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_bool)
+def glsl_type_is_leaf(type): ...
+@dll.bind((Pointer(glsl_type),), Pointer(glsl_type))
+def glsl_get_bare_type(t): ...
+@dll.bind((Pointer(glsl_type),), Pointer(glsl_type))
+def glsl_get_scalar_type(t): ...
+@dll.bind((Pointer(glsl_type),), Pointer(glsl_type))
+def glsl_get_base_glsl_type(t): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_uint32)
+def glsl_get_length(t): ...
+@dll.bind((Pointer(glsl_type), Pointer(glsl_type)), Pointer(glsl_type))
+def glsl_type_wrap_in_arrays(t, arrays): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_uint32)
+def glsl_get_aoa_size(t): ...
+@dll.bind((Pointer(glsl_type),), Pointer(glsl_type))
+def glsl_get_array_element(t): ...
+@dll.bind((Pointer(glsl_type),), Pointer(glsl_type))
+def glsl_without_array(t): ...
+@dll.bind((Pointer(glsl_type),), Pointer(glsl_type))
+def glsl_without_array_or_matrix(t): ...
+@dll.bind((Pointer(glsl_type), Pointer(glsl_type)), Pointer(glsl_type))
+def glsl_type_wrap_in_arrays(t, arrays): ...
+@dll.bind((Pointer(glsl_type),), Pointer(glsl_type))
+def glsl_get_cmat_element(t): ...
+@dll.bind((Pointer(glsl_type),), Pointer(struct_glsl_cmat_description))
+def glsl_get_cmat_description(t): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_uint32)
+def glsl_atomic_size(type): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_bool)
+def glsl_type_contains_32bit(t): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_bool)
+def glsl_type_contains_64bit(t): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_bool)
+def glsl_type_contains_image(t): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_bool)
+def glsl_contains_atomic(t): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_bool)
+def glsl_contains_double(t): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_bool)
+def glsl_contains_integer(t): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_bool)
+def glsl_contains_opaque(t): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_bool)
+def glsl_contains_sampler(t): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_bool)
+def glsl_contains_array(t): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_bool)
+def glsl_contains_subroutine(t): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_int32)
+def glsl_get_sampler_coordinate_components(t): ...
+@dll.bind((Pointer(glsl_type), Pointer(glsl_type)), ctypes.c_bool)
+def glsl_type_compare_no_precision(a, b): ...
+@dll.bind((Pointer(glsl_type), Pointer(glsl_type), ctypes.c_bool, ctypes.c_bool, ctypes.c_bool), ctypes.c_bool)
+def glsl_record_compare(a, b, match_name, match_locations, match_precision): ...
+@dll.bind((Pointer(glsl_type), ctypes.c_uint32), Pointer(glsl_type))
+def glsl_get_struct_field(t, index): ...
+@dll.bind((Pointer(glsl_type), ctypes.c_uint32), Pointer(glsl_struct_field))
+def glsl_get_struct_field_data(t, index): ...
+@dll.bind((Pointer(glsl_type), ctypes.c_uint32), ctypes.c_uint32)
+def glsl_get_struct_location_offset(t, length): ...
+@dll.bind((Pointer(glsl_type), Pointer(ctypes.c_char)), ctypes.c_int32)
+def glsl_get_field_index(t, name): ...
+@dll.bind((Pointer(glsl_type), Pointer(ctypes.c_char)), Pointer(glsl_type))
+def glsl_get_field_type(t, name): ...
+@dll.bind((ctypes.c_uint32,), Pointer(glsl_type))
+def glsl_vec_type(components): ...
+@dll.bind((ctypes.c_uint32,), Pointer(glsl_type))
+def glsl_f16vec_type(components): ...
+@dll.bind((ctypes.c_uint32,), Pointer(glsl_type))
+def glsl_bf16vec_type(components): ...
+@dll.bind((ctypes.c_uint32,), Pointer(glsl_type))
+def glsl_e4m3fnvec_type(components): ...
+@dll.bind((ctypes.c_uint32,), Pointer(glsl_type))
+def glsl_e5m2vec_type(components): ...
+@dll.bind((ctypes.c_uint32,), Pointer(glsl_type))
+def glsl_dvec_type(components): ...
+@dll.bind((ctypes.c_uint32,), Pointer(glsl_type))
+def glsl_ivec_type(components): ...
+@dll.bind((ctypes.c_uint32,), Pointer(glsl_type))
+def glsl_uvec_type(components): ...
+@dll.bind((ctypes.c_uint32,), Pointer(glsl_type))
+def glsl_bvec_type(components): ...
+@dll.bind((ctypes.c_uint32,), Pointer(glsl_type))
+def glsl_i64vec_type(components): ...
+@dll.bind((ctypes.c_uint32,), Pointer(glsl_type))
+def glsl_u64vec_type(components): ...
+@dll.bind((ctypes.c_uint32,), Pointer(glsl_type))
+def glsl_i16vec_type(components): ...
+@dll.bind((ctypes.c_uint32,), Pointer(glsl_type))
+def glsl_u16vec_type(components): ...
+@dll.bind((ctypes.c_uint32,), Pointer(glsl_type))
+def glsl_i8vec_type(components): ...
+@dll.bind((ctypes.c_uint32,), Pointer(glsl_type))
+def glsl_u8vec_type(components): ...
+@dll.bind((ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool, ctypes.c_uint32), Pointer(glsl_type))
+def glsl_simple_explicit_type(base_type, rows, columns, explicit_stride, row_major, explicit_alignment): ...
+@dll.bind((enum_glsl_sampler_dim, ctypes.c_bool, ctypes.c_bool, enum_glsl_base_type), Pointer(glsl_type))
+def glsl_sampler_type(dim, shadow, array, type): ...
+@dll.bind((), Pointer(glsl_type))
+def glsl_bare_sampler_type(): ...
+@dll.bind((), Pointer(glsl_type))
+def glsl_bare_shadow_sampler_type(): ...
+@dll.bind((enum_glsl_sampler_dim, ctypes.c_bool, enum_glsl_base_type), Pointer(glsl_type))
+def glsl_texture_type(dim, array, type): ...
+@dll.bind((enum_glsl_sampler_dim, ctypes.c_bool, enum_glsl_base_type), Pointer(glsl_type))
+def glsl_image_type(dim, array, type): ...
+@dll.bind((Pointer(glsl_type), ctypes.c_uint32, ctypes.c_uint32), Pointer(glsl_type))
+def glsl_array_type(element, array_size, explicit_stride): ...
+@dll.bind((Pointer(struct_glsl_cmat_description),), Pointer(glsl_type))
+def glsl_cmat_type(desc): ...
+@dll.bind((Pointer(glsl_struct_field), ctypes.c_uint32, Pointer(ctypes.c_char), ctypes.c_bool, ctypes.c_uint32), Pointer(glsl_type))
+def glsl_struct_type_with_explicit_alignment(fields, num_fields, name, packed, explicit_alignment): ...
 enum_glsl_interface_packing = CEnum(ctypes.c_uint32)
 GLSL_INTERFACE_PACKING_STD140 = enum_glsl_interface_packing.define('GLSL_INTERFACE_PACKING_STD140', 0)
 GLSL_INTERFACE_PACKING_SHARED = enum_glsl_interface_packing.define('GLSL_INTERFACE_PACKING_SHARED', 1)
 GLSL_INTERFACE_PACKING_PACKED = enum_glsl_interface_packing.define('GLSL_INTERFACE_PACKING_PACKED', 2)
 GLSL_INTERFACE_PACKING_STD430 = enum_glsl_interface_packing.define('GLSL_INTERFACE_PACKING_STD430', 3)
 
-try: (glsl_interface_type:=dll.glsl_interface_type).restype, glsl_interface_type.argtypes = Pointer(glsl_type), [Pointer(glsl_struct_field), ctypes.c_uint32, enum_glsl_interface_packing, ctypes.c_bool, Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (glsl_subroutine_type:=dll.glsl_subroutine_type).restype, glsl_subroutine_type.argtypes = Pointer(glsl_type), [Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (glsl_get_row_type:=dll.glsl_get_row_type).restype, glsl_get_row_type.argtypes = Pointer(glsl_type), [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_get_column_type:=dll.glsl_get_column_type).restype, glsl_get_column_type.argtypes = Pointer(glsl_type), [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_get_explicit_type_for_size_align:=dll.glsl_get_explicit_type_for_size_align).restype, glsl_get_explicit_type_for_size_align.argtypes = Pointer(glsl_type), [Pointer(glsl_type), glsl_type_size_align_func, Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32)]
-except AttributeError: pass
-
-try: (glsl_type_replace_vec3_with_vec4:=dll.glsl_type_replace_vec3_with_vec4).restype, glsl_type_replace_vec3_with_vec4.argtypes = Pointer(glsl_type), [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_float16_type:=dll.glsl_float16_type).restype, glsl_float16_type.argtypes = Pointer(glsl_type), [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_int16_type:=dll.glsl_int16_type).restype, glsl_int16_type.argtypes = Pointer(glsl_type), [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_uint16_type:=dll.glsl_uint16_type).restype, glsl_uint16_type.argtypes = Pointer(glsl_type), [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_type_to_16bit:=dll.glsl_type_to_16bit).restype, glsl_type_to_16bit.argtypes = Pointer(glsl_type), [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_replace_vector_type:=dll.glsl_replace_vector_type).restype, glsl_replace_vector_type.argtypes = Pointer(glsl_type), [Pointer(glsl_type), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (glsl_channel_type:=dll.glsl_channel_type).restype, glsl_channel_type.argtypes = Pointer(glsl_type), [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_get_mul_type:=dll.glsl_get_mul_type).restype, glsl_get_mul_type.argtypes = Pointer(glsl_type), [Pointer(glsl_type), Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_type_get_sampler_count:=dll.glsl_type_get_sampler_count).restype, glsl_type_get_sampler_count.argtypes = ctypes.c_uint32, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_type_get_texture_count:=dll.glsl_type_get_texture_count).restype, glsl_type_get_texture_count.argtypes = ctypes.c_uint32, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_type_get_image_count:=dll.glsl_type_get_image_count).restype, glsl_type_get_image_count.argtypes = ctypes.c_uint32, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_count_vec4_slots:=dll.glsl_count_vec4_slots).restype, glsl_count_vec4_slots.argtypes = ctypes.c_uint32, [Pointer(glsl_type), ctypes.c_bool, ctypes.c_bool]
-except AttributeError: pass
-
-try: (glsl_count_dword_slots:=dll.glsl_count_dword_slots).restype, glsl_count_dword_slots.argtypes = ctypes.c_uint32, [Pointer(glsl_type), ctypes.c_bool]
-except AttributeError: pass
-
-try: (glsl_get_component_slots:=dll.glsl_get_component_slots).restype, glsl_get_component_slots.argtypes = ctypes.c_uint32, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_get_component_slots_aligned:=dll.glsl_get_component_slots_aligned).restype, glsl_get_component_slots_aligned.argtypes = ctypes.c_uint32, [Pointer(glsl_type), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (glsl_varying_count:=dll.glsl_varying_count).restype, glsl_varying_count.argtypes = ctypes.c_uint32, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_type_uniform_locations:=dll.glsl_type_uniform_locations).restype, glsl_type_uniform_locations.argtypes = ctypes.c_uint32, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_get_cl_size:=dll.glsl_get_cl_size).restype, glsl_get_cl_size.argtypes = ctypes.c_uint32, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_get_cl_alignment:=dll.glsl_get_cl_alignment).restype, glsl_get_cl_alignment.argtypes = ctypes.c_uint32, [Pointer(glsl_type)]
-except AttributeError: pass
-
-try: (glsl_get_cl_type_size_align:=dll.glsl_get_cl_type_size_align).restype, glsl_get_cl_type_size_align.argtypes = None, [Pointer(glsl_type), Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32)]
-except AttributeError: pass
-
-try: (glsl_get_internal_ifc_packing:=dll.glsl_get_internal_ifc_packing).restype, glsl_get_internal_ifc_packing.argtypes = enum_glsl_interface_packing, [Pointer(glsl_type), ctypes.c_bool]
-except AttributeError: pass
-
-try: (glsl_get_std140_base_alignment:=dll.glsl_get_std140_base_alignment).restype, glsl_get_std140_base_alignment.argtypes = ctypes.c_uint32, [Pointer(glsl_type), ctypes.c_bool]
-except AttributeError: pass
-
-try: (glsl_get_std140_size:=dll.glsl_get_std140_size).restype, glsl_get_std140_size.argtypes = ctypes.c_uint32, [Pointer(glsl_type), ctypes.c_bool]
-except AttributeError: pass
-
-try: (glsl_get_std430_array_stride:=dll.glsl_get_std430_array_stride).restype, glsl_get_std430_array_stride.argtypes = ctypes.c_uint32, [Pointer(glsl_type), ctypes.c_bool]
-except AttributeError: pass
-
-try: (glsl_get_std430_base_alignment:=dll.glsl_get_std430_base_alignment).restype, glsl_get_std430_base_alignment.argtypes = ctypes.c_uint32, [Pointer(glsl_type), ctypes.c_bool]
-except AttributeError: pass
-
-try: (glsl_get_std430_size:=dll.glsl_get_std430_size).restype, glsl_get_std430_size.argtypes = ctypes.c_uint32, [Pointer(glsl_type), ctypes.c_bool]
-except AttributeError: pass
-
-try: (glsl_get_explicit_size:=dll.glsl_get_explicit_size).restype, glsl_get_explicit_size.argtypes = ctypes.c_uint32, [Pointer(glsl_type), ctypes.c_bool]
-except AttributeError: pass
-
-try: (glsl_get_explicit_std140_type:=dll.glsl_get_explicit_std140_type).restype, glsl_get_explicit_std140_type.argtypes = Pointer(glsl_type), [Pointer(glsl_type), ctypes.c_bool]
-except AttributeError: pass
-
-try: (glsl_get_explicit_std430_type:=dll.glsl_get_explicit_std430_type).restype, glsl_get_explicit_std430_type.argtypes = Pointer(glsl_type), [Pointer(glsl_type), ctypes.c_bool]
-except AttributeError: pass
-
-try: (glsl_size_align_handle_array_and_structs:=dll.glsl_size_align_handle_array_and_structs).restype, glsl_size_align_handle_array_and_structs.argtypes = None, [Pointer(glsl_type), glsl_type_size_align_func, Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32)]
-except AttributeError: pass
-
-try: (glsl_get_natural_size_align_bytes:=dll.glsl_get_natural_size_align_bytes).restype, glsl_get_natural_size_align_bytes.argtypes = None, [Pointer(glsl_type), Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32)]
-except AttributeError: pass
-
-try: (glsl_get_word_size_align_bytes:=dll.glsl_get_word_size_align_bytes).restype, glsl_get_word_size_align_bytes.argtypes = None, [Pointer(glsl_type), Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32)]
-except AttributeError: pass
-
-try: (glsl_get_vec4_size_align_bytes:=dll.glsl_get_vec4_size_align_bytes).restype, glsl_get_vec4_size_align_bytes.argtypes = None, [Pointer(glsl_type), Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32)]
-except AttributeError: pass
-
-try: (blob_init:=dll.blob_init).restype, blob_init.argtypes = None, [Pointer(struct_blob)]
-except AttributeError: pass
-
-try: (blob_init_fixed:=dll.blob_init_fixed).restype, blob_init_fixed.argtypes = None, [Pointer(struct_blob), ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-try: (blob_finish_get_buffer:=dll.blob_finish_get_buffer).restype, blob_finish_get_buffer.argtypes = None, [Pointer(struct_blob), Pointer(ctypes.c_void_p), Pointer(size_t)]
-except AttributeError: pass
-
-try: (blob_align:=dll.blob_align).restype, blob_align.argtypes = ctypes.c_bool, [Pointer(struct_blob), size_t]
-except AttributeError: pass
-
-try: (blob_write_bytes:=dll.blob_write_bytes).restype, blob_write_bytes.argtypes = ctypes.c_bool, [Pointer(struct_blob), ctypes.c_void_p, size_t]
-except AttributeError: pass
-
+@dll.bind((Pointer(glsl_struct_field), ctypes.c_uint32, enum_glsl_interface_packing, ctypes.c_bool, Pointer(ctypes.c_char)), Pointer(glsl_type))
+def glsl_interface_type(fields, num_fields, packing, row_major, block_name): ...
+@dll.bind((Pointer(ctypes.c_char),), Pointer(glsl_type))
+def glsl_subroutine_type(subroutine_name): ...
+@dll.bind((Pointer(glsl_type),), Pointer(glsl_type))
+def glsl_get_row_type(t): ...
+@dll.bind((Pointer(glsl_type),), Pointer(glsl_type))
+def glsl_get_column_type(t): ...
+@dll.bind((Pointer(glsl_type), glsl_type_size_align_func, Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32)), Pointer(glsl_type))
+def glsl_get_explicit_type_for_size_align(type, type_info, size, alignment): ...
+@dll.bind((Pointer(glsl_type),), Pointer(glsl_type))
+def glsl_type_replace_vec3_with_vec4(type): ...
+@dll.bind((Pointer(glsl_type),), Pointer(glsl_type))
+def glsl_float16_type(t): ...
+@dll.bind((Pointer(glsl_type),), Pointer(glsl_type))
+def glsl_int16_type(t): ...
+@dll.bind((Pointer(glsl_type),), Pointer(glsl_type))
+def glsl_uint16_type(t): ...
+@dll.bind((Pointer(glsl_type),), Pointer(glsl_type))
+def glsl_type_to_16bit(old_type): ...
+@dll.bind((Pointer(glsl_type), ctypes.c_uint32), Pointer(glsl_type))
+def glsl_replace_vector_type(t, components): ...
+@dll.bind((Pointer(glsl_type),), Pointer(glsl_type))
+def glsl_channel_type(t): ...
+@dll.bind((Pointer(glsl_type), Pointer(glsl_type)), Pointer(glsl_type))
+def glsl_get_mul_type(type_a, type_b): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_uint32)
+def glsl_type_get_sampler_count(t): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_uint32)
+def glsl_type_get_texture_count(t): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_uint32)
+def glsl_type_get_image_count(t): ...
+@dll.bind((Pointer(glsl_type), ctypes.c_bool, ctypes.c_bool), ctypes.c_uint32)
+def glsl_count_vec4_slots(t, is_gl_vertex_input, is_bindless): ...
+@dll.bind((Pointer(glsl_type), ctypes.c_bool), ctypes.c_uint32)
+def glsl_count_dword_slots(t, is_bindless): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_uint32)
+def glsl_get_component_slots(t): ...
+@dll.bind((Pointer(glsl_type), ctypes.c_uint32), ctypes.c_uint32)
+def glsl_get_component_slots_aligned(t, offset): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_uint32)
+def glsl_varying_count(t): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_uint32)
+def glsl_type_uniform_locations(t): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_uint32)
+def glsl_get_cl_size(t): ...
+@dll.bind((Pointer(glsl_type),), ctypes.c_uint32)
+def glsl_get_cl_alignment(t): ...
+@dll.bind((Pointer(glsl_type), Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32)), None)
+def glsl_get_cl_type_size_align(t, size, align): ...
+@dll.bind((Pointer(glsl_type), ctypes.c_bool), enum_glsl_interface_packing)
+def glsl_get_internal_ifc_packing(t, std430_supported): ...
+@dll.bind((Pointer(glsl_type), ctypes.c_bool), ctypes.c_uint32)
+def glsl_get_std140_base_alignment(t, row_major): ...
+@dll.bind((Pointer(glsl_type), ctypes.c_bool), ctypes.c_uint32)
+def glsl_get_std140_size(t, row_major): ...
+@dll.bind((Pointer(glsl_type), ctypes.c_bool), ctypes.c_uint32)
+def glsl_get_std430_array_stride(t, row_major): ...
+@dll.bind((Pointer(glsl_type), ctypes.c_bool), ctypes.c_uint32)
+def glsl_get_std430_base_alignment(t, row_major): ...
+@dll.bind((Pointer(glsl_type), ctypes.c_bool), ctypes.c_uint32)
+def glsl_get_std430_size(t, row_major): ...
+@dll.bind((Pointer(glsl_type), ctypes.c_bool), ctypes.c_uint32)
+def glsl_get_explicit_size(t, align_to_stride): ...
+@dll.bind((Pointer(glsl_type), ctypes.c_bool), Pointer(glsl_type))
+def glsl_get_explicit_std140_type(t, row_major): ...
+@dll.bind((Pointer(glsl_type), ctypes.c_bool), Pointer(glsl_type))
+def glsl_get_explicit_std430_type(t, row_major): ...
+@dll.bind((Pointer(glsl_type), glsl_type_size_align_func, Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32)), None)
+def glsl_size_align_handle_array_and_structs(type, size_align, size, align): ...
+@dll.bind((Pointer(glsl_type), Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32)), None)
+def glsl_get_natural_size_align_bytes(t, size, align): ...
+@dll.bind((Pointer(glsl_type), Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32)), None)
+def glsl_get_word_size_align_bytes(type, size, align): ...
+@dll.bind((Pointer(glsl_type), Pointer(ctypes.c_uint32), Pointer(ctypes.c_uint32)), None)
+def glsl_get_vec4_size_align_bytes(type, size, align): ...
+@dll.bind((Pointer(struct_blob),), None)
+def blob_init(blob): ...
+@dll.bind((Pointer(struct_blob), ctypes.c_void_p, size_t), None)
+def blob_init_fixed(blob, data, size): ...
+@dll.bind((Pointer(struct_blob), Pointer(ctypes.c_void_p), Pointer(size_t)), None)
+def blob_finish_get_buffer(blob, buffer, size): ...
+@dll.bind((Pointer(struct_blob), size_t), ctypes.c_bool)
+def blob_align(blob, alignment): ...
+@dll.bind((Pointer(struct_blob), ctypes.c_void_p, size_t), ctypes.c_bool)
+def blob_write_bytes(blob, bytes, to_write): ...
 intptr_t = ctypes.c_int64
-try: (blob_reserve_bytes:=dll.blob_reserve_bytes).restype, blob_reserve_bytes.argtypes = intptr_t, [Pointer(struct_blob), size_t]
-except AttributeError: pass
-
-try: (blob_reserve_uint32:=dll.blob_reserve_uint32).restype, blob_reserve_uint32.argtypes = intptr_t, [Pointer(struct_blob)]
-except AttributeError: pass
-
-try: (blob_reserve_intptr:=dll.blob_reserve_intptr).restype, blob_reserve_intptr.argtypes = intptr_t, [Pointer(struct_blob)]
-except AttributeError: pass
-
-try: (blob_overwrite_bytes:=dll.blob_overwrite_bytes).restype, blob_overwrite_bytes.argtypes = ctypes.c_bool, [Pointer(struct_blob), size_t, ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-try: (blob_write_uint8:=dll.blob_write_uint8).restype, blob_write_uint8.argtypes = ctypes.c_bool, [Pointer(struct_blob), uint8_t]
-except AttributeError: pass
-
-try: (blob_overwrite_uint8:=dll.blob_overwrite_uint8).restype, blob_overwrite_uint8.argtypes = ctypes.c_bool, [Pointer(struct_blob), size_t, uint8_t]
-except AttributeError: pass
-
-try: (blob_write_uint16:=dll.blob_write_uint16).restype, blob_write_uint16.argtypes = ctypes.c_bool, [Pointer(struct_blob), uint16_t]
-except AttributeError: pass
-
-try: (blob_write_uint32:=dll.blob_write_uint32).restype, blob_write_uint32.argtypes = ctypes.c_bool, [Pointer(struct_blob), uint32_t]
-except AttributeError: pass
-
-try: (blob_overwrite_uint32:=dll.blob_overwrite_uint32).restype, blob_overwrite_uint32.argtypes = ctypes.c_bool, [Pointer(struct_blob), size_t, uint32_t]
-except AttributeError: pass
-
-try: (blob_write_uint64:=dll.blob_write_uint64).restype, blob_write_uint64.argtypes = ctypes.c_bool, [Pointer(struct_blob), uint64_t]
-except AttributeError: pass
-
-try: (blob_write_intptr:=dll.blob_write_intptr).restype, blob_write_intptr.argtypes = ctypes.c_bool, [Pointer(struct_blob), intptr_t]
-except AttributeError: pass
-
-try: (blob_overwrite_intptr:=dll.blob_overwrite_intptr).restype, blob_overwrite_intptr.argtypes = ctypes.c_bool, [Pointer(struct_blob), size_t, intptr_t]
-except AttributeError: pass
-
-try: (blob_write_string:=dll.blob_write_string).restype, blob_write_string.argtypes = ctypes.c_bool, [Pointer(struct_blob), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (blob_reader_init:=dll.blob_reader_init).restype, blob_reader_init.argtypes = None, [Pointer(struct_blob_reader), ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-try: (blob_reader_align:=dll.blob_reader_align).restype, blob_reader_align.argtypes = None, [Pointer(struct_blob_reader), size_t]
-except AttributeError: pass
-
-try: (blob_read_bytes:=dll.blob_read_bytes).restype, blob_read_bytes.argtypes = ctypes.c_void_p, [Pointer(struct_blob_reader), size_t]
-except AttributeError: pass
-
-try: (blob_copy_bytes:=dll.blob_copy_bytes).restype, blob_copy_bytes.argtypes = None, [Pointer(struct_blob_reader), ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-try: (blob_skip_bytes:=dll.blob_skip_bytes).restype, blob_skip_bytes.argtypes = None, [Pointer(struct_blob_reader), size_t]
-except AttributeError: pass
-
-try: (blob_read_uint8:=dll.blob_read_uint8).restype, blob_read_uint8.argtypes = uint8_t, [Pointer(struct_blob_reader)]
-except AttributeError: pass
-
-try: (blob_read_uint16:=dll.blob_read_uint16).restype, blob_read_uint16.argtypes = uint16_t, [Pointer(struct_blob_reader)]
-except AttributeError: pass
-
-try: (blob_read_uint32:=dll.blob_read_uint32).restype, blob_read_uint32.argtypes = uint32_t, [Pointer(struct_blob_reader)]
-except AttributeError: pass
-
-try: (blob_read_uint64:=dll.blob_read_uint64).restype, blob_read_uint64.argtypes = uint64_t, [Pointer(struct_blob_reader)]
-except AttributeError: pass
-
-try: (blob_read_intptr:=dll.blob_read_intptr).restype, blob_read_intptr.argtypes = intptr_t, [Pointer(struct_blob_reader)]
-except AttributeError: pass
-
-try: (blob_read_string:=dll.blob_read_string).restype, blob_read_string.argtypes = Pointer(ctypes.c_char), [Pointer(struct_blob_reader)]
-except AttributeError: pass
-
-try: (ralloc_context:=dll.ralloc_context).restype, ralloc_context.argtypes = ctypes.c_void_p, [ctypes.c_void_p]
-except AttributeError: pass
-
-try: (ralloc_size:=dll.ralloc_size).restype, ralloc_size.argtypes = ctypes.c_void_p, [ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-try: (rzalloc_size:=dll.rzalloc_size).restype, rzalloc_size.argtypes = ctypes.c_void_p, [ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-try: (reralloc_size:=dll.reralloc_size).restype, reralloc_size.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-try: (rerzalloc_size:=dll.rerzalloc_size).restype, rerzalloc_size.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p, size_t, size_t]
-except AttributeError: pass
-
-try: (ralloc_array_size:=dll.ralloc_array_size).restype, ralloc_array_size.argtypes = ctypes.c_void_p, [ctypes.c_void_p, size_t, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (rzalloc_array_size:=dll.rzalloc_array_size).restype, rzalloc_array_size.argtypes = ctypes.c_void_p, [ctypes.c_void_p, size_t, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (reralloc_array_size:=dll.reralloc_array_size).restype, reralloc_array_size.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p, size_t, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (rerzalloc_array_size:=dll.rerzalloc_array_size).restype, rerzalloc_array_size.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p, size_t, ctypes.c_uint32, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (ralloc_free:=dll.ralloc_free).restype, ralloc_free.argtypes = None, [ctypes.c_void_p]
-except AttributeError: pass
-
-try: (ralloc_steal:=dll.ralloc_steal).restype, ralloc_steal.argtypes = None, [ctypes.c_void_p, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (ralloc_adopt:=dll.ralloc_adopt).restype, ralloc_adopt.argtypes = None, [ctypes.c_void_p, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (ralloc_parent:=dll.ralloc_parent).restype, ralloc_parent.argtypes = ctypes.c_void_p, [ctypes.c_void_p]
-except AttributeError: pass
-
-try: (ralloc_set_destructor:=dll.ralloc_set_destructor).restype, ralloc_set_destructor.argtypes = None, [ctypes.c_void_p, ctypes.CFUNCTYPE(None, ctypes.c_void_p)]
-except AttributeError: pass
-
-try: (ralloc_memdup:=dll.ralloc_memdup).restype, ralloc_memdup.argtypes = ctypes.c_void_p, [ctypes.c_void_p, ctypes.c_void_p, size_t]
-except AttributeError: pass
-
-try: (ralloc_strdup:=dll.ralloc_strdup).restype, ralloc_strdup.argtypes = Pointer(ctypes.c_char), [ctypes.c_void_p, Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (ralloc_strndup:=dll.ralloc_strndup).restype, ralloc_strndup.argtypes = Pointer(ctypes.c_char), [ctypes.c_void_p, Pointer(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (ralloc_strcat:=dll.ralloc_strcat).restype, ralloc_strcat.argtypes = ctypes.c_bool, [Pointer(Pointer(ctypes.c_char)), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (ralloc_strncat:=dll.ralloc_strncat).restype, ralloc_strncat.argtypes = ctypes.c_bool, [Pointer(Pointer(ctypes.c_char)), Pointer(ctypes.c_char), size_t]
-except AttributeError: pass
-
-try: (ralloc_str_append:=dll.ralloc_str_append).restype, ralloc_str_append.argtypes = ctypes.c_bool, [Pointer(Pointer(ctypes.c_char)), Pointer(ctypes.c_char), size_t, size_t]
-except AttributeError: pass
-
-try: (ralloc_asprintf:=dll.ralloc_asprintf).restype, ralloc_asprintf.argtypes = Pointer(ctypes.c_char), [ctypes.c_void_p, Pointer(ctypes.c_char)]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_blob), size_t), intptr_t)
+def blob_reserve_bytes(blob, to_write): ...
+@dll.bind((Pointer(struct_blob),), intptr_t)
+def blob_reserve_uint32(blob): ...
+@dll.bind((Pointer(struct_blob),), intptr_t)
+def blob_reserve_intptr(blob): ...
+@dll.bind((Pointer(struct_blob), size_t, ctypes.c_void_p, size_t), ctypes.c_bool)
+def blob_overwrite_bytes(blob, offset, bytes, to_write): ...
+@dll.bind((Pointer(struct_blob), uint8_t), ctypes.c_bool)
+def blob_write_uint8(blob, value): ...
+@dll.bind((Pointer(struct_blob), size_t, uint8_t), ctypes.c_bool)
+def blob_overwrite_uint8(blob, offset, value): ...
+@dll.bind((Pointer(struct_blob), uint16_t), ctypes.c_bool)
+def blob_write_uint16(blob, value): ...
+@dll.bind((Pointer(struct_blob), uint32_t), ctypes.c_bool)
+def blob_write_uint32(blob, value): ...
+@dll.bind((Pointer(struct_blob), size_t, uint32_t), ctypes.c_bool)
+def blob_overwrite_uint32(blob, offset, value): ...
+@dll.bind((Pointer(struct_blob), uint64_t), ctypes.c_bool)
+def blob_write_uint64(blob, value): ...
+@dll.bind((Pointer(struct_blob), intptr_t), ctypes.c_bool)
+def blob_write_intptr(blob, value): ...
+@dll.bind((Pointer(struct_blob), size_t, intptr_t), ctypes.c_bool)
+def blob_overwrite_intptr(blob, offset, value): ...
+@dll.bind((Pointer(struct_blob), Pointer(ctypes.c_char)), ctypes.c_bool)
+def blob_write_string(blob, str): ...
+@dll.bind((Pointer(struct_blob_reader), ctypes.c_void_p, size_t), None)
+def blob_reader_init(blob, data, size): ...
+@dll.bind((Pointer(struct_blob_reader), size_t), None)
+def blob_reader_align(blob, alignment): ...
+@dll.bind((Pointer(struct_blob_reader), size_t), ctypes.c_void_p)
+def blob_read_bytes(blob, size): ...
+@dll.bind((Pointer(struct_blob_reader), ctypes.c_void_p, size_t), None)
+def blob_copy_bytes(blob, dest, size): ...
+@dll.bind((Pointer(struct_blob_reader), size_t), None)
+def blob_skip_bytes(blob, size): ...
+@dll.bind((Pointer(struct_blob_reader),), uint8_t)
+def blob_read_uint8(blob): ...
+@dll.bind((Pointer(struct_blob_reader),), uint16_t)
+def blob_read_uint16(blob): ...
+@dll.bind((Pointer(struct_blob_reader),), uint32_t)
+def blob_read_uint32(blob): ...
+@dll.bind((Pointer(struct_blob_reader),), uint64_t)
+def blob_read_uint64(blob): ...
+@dll.bind((Pointer(struct_blob_reader),), intptr_t)
+def blob_read_intptr(blob): ...
+@dll.bind((Pointer(struct_blob_reader),), Pointer(ctypes.c_char))
+def blob_read_string(blob): ...
+@dll.bind((ctypes.c_void_p,), ctypes.c_void_p)
+def ralloc_context(ctx): ...
+@dll.bind((ctypes.c_void_p, size_t), ctypes.c_void_p)
+def ralloc_size(ctx, size): ...
+@dll.bind((ctypes.c_void_p, size_t), ctypes.c_void_p)
+def rzalloc_size(ctx, size): ...
+@dll.bind((ctypes.c_void_p, ctypes.c_void_p, size_t), ctypes.c_void_p)
+def reralloc_size(ctx, ptr, size): ...
+@dll.bind((ctypes.c_void_p, ctypes.c_void_p, size_t, size_t), ctypes.c_void_p)
+def rerzalloc_size(ctx, ptr, old_size, new_size): ...
+@dll.bind((ctypes.c_void_p, size_t, ctypes.c_uint32), ctypes.c_void_p)
+def ralloc_array_size(ctx, size, count): ...
+@dll.bind((ctypes.c_void_p, size_t, ctypes.c_uint32), ctypes.c_void_p)
+def rzalloc_array_size(ctx, size, count): ...
+@dll.bind((ctypes.c_void_p, ctypes.c_void_p, size_t, ctypes.c_uint32), ctypes.c_void_p)
+def reralloc_array_size(ctx, ptr, size, count): ...
+@dll.bind((ctypes.c_void_p, ctypes.c_void_p, size_t, ctypes.c_uint32, ctypes.c_uint32), ctypes.c_void_p)
+def rerzalloc_array_size(ctx, ptr, size, old_count, new_count): ...
+@dll.bind((ctypes.c_void_p,), None)
+def ralloc_free(ptr): ...
+@dll.bind((ctypes.c_void_p, ctypes.c_void_p), None)
+def ralloc_steal(new_ctx, ptr): ...
+@dll.bind((ctypes.c_void_p, ctypes.c_void_p), None)
+def ralloc_adopt(new_ctx, old_ctx): ...
+@dll.bind((ctypes.c_void_p,), ctypes.c_void_p)
+def ralloc_parent(ptr): ...
+@dll.bind((ctypes.c_void_p, ctypes.CFUNCTYPE(None, ctypes.c_void_p)), None)
+def ralloc_set_destructor(ptr, destructor): ...
+@dll.bind((ctypes.c_void_p, ctypes.c_void_p, size_t), ctypes.c_void_p)
+def ralloc_memdup(ctx, mem, n): ...
+@dll.bind((ctypes.c_void_p, Pointer(ctypes.c_char)), Pointer(ctypes.c_char))
+def ralloc_strdup(ctx, str): ...
+@dll.bind((ctypes.c_void_p, Pointer(ctypes.c_char), size_t), Pointer(ctypes.c_char))
+def ralloc_strndup(ctx, str, n): ...
+@dll.bind((Pointer(Pointer(ctypes.c_char)), Pointer(ctypes.c_char)), ctypes.c_bool)
+def ralloc_strcat(dest, str): ...
+@dll.bind((Pointer(Pointer(ctypes.c_char)), Pointer(ctypes.c_char), size_t), ctypes.c_bool)
+def ralloc_strncat(dest, str, n): ...
+@dll.bind((Pointer(Pointer(ctypes.c_char)), Pointer(ctypes.c_char), size_t, size_t), ctypes.c_bool)
+def ralloc_str_append(dest, str, existing_length, str_size): ...
+@dll.bind((ctypes.c_void_p, Pointer(ctypes.c_char)), Pointer(ctypes.c_char))
+def ralloc_asprintf(ctx, fmt): ...
 class struct___va_list_tag(Struct): pass
 struct___va_list_tag.SIZE = 24
 struct___va_list_tag._fields_ = ['gp_offset', 'fp_offset', 'overflow_arg_area', 'reg_save_area']
@@ -9154,111 +8237,79 @@ setattr(struct___va_list_tag, 'fp_offset', field(4, ctypes.c_uint32))
 setattr(struct___va_list_tag, 'overflow_arg_area', field(8, ctypes.c_void_p))
 setattr(struct___va_list_tag, 'reg_save_area', field(16, ctypes.c_void_p))
 va_list = Array(struct___va_list_tag, 1)
-try: (ralloc_vasprintf:=dll.ralloc_vasprintf).restype, ralloc_vasprintf.argtypes = Pointer(ctypes.c_char), [ctypes.c_void_p, Pointer(ctypes.c_char), va_list]
-except AttributeError: pass
-
-try: (ralloc_asprintf_rewrite_tail:=dll.ralloc_asprintf_rewrite_tail).restype, ralloc_asprintf_rewrite_tail.argtypes = ctypes.c_bool, [Pointer(Pointer(ctypes.c_char)), Pointer(size_t), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (ralloc_vasprintf_rewrite_tail:=dll.ralloc_vasprintf_rewrite_tail).restype, ralloc_vasprintf_rewrite_tail.argtypes = ctypes.c_bool, [Pointer(Pointer(ctypes.c_char)), Pointer(size_t), Pointer(ctypes.c_char), va_list]
-except AttributeError: pass
-
-try: (ralloc_asprintf_append:=dll.ralloc_asprintf_append).restype, ralloc_asprintf_append.argtypes = ctypes.c_bool, [Pointer(Pointer(ctypes.c_char)), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (ralloc_vasprintf_append:=dll.ralloc_vasprintf_append).restype, ralloc_vasprintf_append.argtypes = ctypes.c_bool, [Pointer(Pointer(ctypes.c_char)), Pointer(ctypes.c_char), va_list]
-except AttributeError: pass
-
-try: (ralloc_total_size:=dll.ralloc_total_size).restype, ralloc_total_size.argtypes = size_t, [ctypes.c_void_p]
-except AttributeError: pass
-
-try: (gc_context:=dll.gc_context).restype, gc_context.argtypes = Pointer(gc_ctx), [ctypes.c_void_p]
-except AttributeError: pass
-
-try: (gc_alloc_size:=dll.gc_alloc_size).restype, gc_alloc_size.argtypes = ctypes.c_void_p, [Pointer(gc_ctx), size_t, size_t]
-except AttributeError: pass
-
-try: (gc_zalloc_size:=dll.gc_zalloc_size).restype, gc_zalloc_size.argtypes = ctypes.c_void_p, [Pointer(gc_ctx), size_t, size_t]
-except AttributeError: pass
-
-try: (gc_free:=dll.gc_free).restype, gc_free.argtypes = None, [ctypes.c_void_p]
-except AttributeError: pass
-
-try: (gc_get_context:=dll.gc_get_context).restype, gc_get_context.argtypes = Pointer(gc_ctx), [ctypes.c_void_p]
-except AttributeError: pass
-
-try: (gc_sweep_start:=dll.gc_sweep_start).restype, gc_sweep_start.argtypes = None, [Pointer(gc_ctx)]
-except AttributeError: pass
-
-try: (gc_mark_live:=dll.gc_mark_live).restype, gc_mark_live.argtypes = None, [Pointer(gc_ctx), ctypes.c_void_p]
-except AttributeError: pass
-
-try: (gc_sweep_end:=dll.gc_sweep_end).restype, gc_sweep_end.argtypes = None, [Pointer(gc_ctx)]
-except AttributeError: pass
-
+@dll.bind((ctypes.c_void_p, Pointer(ctypes.c_char), va_list), Pointer(ctypes.c_char))
+def ralloc_vasprintf(ctx, fmt, args): ...
+@dll.bind((Pointer(Pointer(ctypes.c_char)), Pointer(size_t), Pointer(ctypes.c_char)), ctypes.c_bool)
+def ralloc_asprintf_rewrite_tail(str, start, fmt): ...
+@dll.bind((Pointer(Pointer(ctypes.c_char)), Pointer(size_t), Pointer(ctypes.c_char), va_list), ctypes.c_bool)
+def ralloc_vasprintf_rewrite_tail(str, start, fmt, args): ...
+@dll.bind((Pointer(Pointer(ctypes.c_char)), Pointer(ctypes.c_char)), ctypes.c_bool)
+def ralloc_asprintf_append(str, fmt): ...
+@dll.bind((Pointer(Pointer(ctypes.c_char)), Pointer(ctypes.c_char), va_list), ctypes.c_bool)
+def ralloc_vasprintf_append(str, fmt, args): ...
+@dll.bind((ctypes.c_void_p,), size_t)
+def ralloc_total_size(ptr): ...
+@dll.bind((ctypes.c_void_p,), Pointer(gc_ctx))
+def gc_context(parent): ...
+@dll.bind((Pointer(gc_ctx), size_t, size_t), ctypes.c_void_p)
+def gc_alloc_size(ctx, size, alignment): ...
+@dll.bind((Pointer(gc_ctx), size_t, size_t), ctypes.c_void_p)
+def gc_zalloc_size(ctx, size, alignment): ...
+@dll.bind((ctypes.c_void_p,), None)
+def gc_free(ptr): ...
+@dll.bind((ctypes.c_void_p,), Pointer(gc_ctx))
+def gc_get_context(ptr): ...
+@dll.bind((Pointer(gc_ctx),), None)
+def gc_sweep_start(ctx): ...
+@dll.bind((Pointer(gc_ctx), ctypes.c_void_p), None)
+def gc_mark_live(ctx, mem): ...
+@dll.bind((Pointer(gc_ctx),), None)
+def gc_sweep_end(ctx): ...
 class struct_linear_ctx(Struct): pass
 linear_ctx = struct_linear_ctx
-try: (linear_alloc_child:=dll.linear_alloc_child).restype, linear_alloc_child.argtypes = ctypes.c_void_p, [Pointer(linear_ctx), ctypes.c_uint32]
-except AttributeError: pass
-
+@dll.bind((Pointer(linear_ctx), ctypes.c_uint32), ctypes.c_void_p)
+def linear_alloc_child(ctx, size): ...
 class linear_opts(Struct): pass
 linear_opts.SIZE = 4
 linear_opts._fields_ = ['min_buffer_size']
 setattr(linear_opts, 'min_buffer_size', field(0, ctypes.c_uint32))
-try: (linear_context:=dll.linear_context).restype, linear_context.argtypes = Pointer(linear_ctx), [ctypes.c_void_p]
-except AttributeError: pass
-
-try: (linear_context_with_opts:=dll.linear_context_with_opts).restype, linear_context_with_opts.argtypes = Pointer(linear_ctx), [ctypes.c_void_p, Pointer(linear_opts)]
-except AttributeError: pass
-
-try: (linear_zalloc_child:=dll.linear_zalloc_child).restype, linear_zalloc_child.argtypes = ctypes.c_void_p, [Pointer(linear_ctx), ctypes.c_uint32]
-except AttributeError: pass
-
-try: (linear_free_context:=dll.linear_free_context).restype, linear_free_context.argtypes = None, [Pointer(linear_ctx)]
-except AttributeError: pass
-
-try: (ralloc_steal_linear_context:=dll.ralloc_steal_linear_context).restype, ralloc_steal_linear_context.argtypes = None, [ctypes.c_void_p, Pointer(linear_ctx)]
-except AttributeError: pass
-
-try: (ralloc_parent_of_linear_context:=dll.ralloc_parent_of_linear_context).restype, ralloc_parent_of_linear_context.argtypes = ctypes.c_void_p, [Pointer(linear_ctx)]
-except AttributeError: pass
-
-try: (linear_alloc_child_array:=dll.linear_alloc_child_array).restype, linear_alloc_child_array.argtypes = ctypes.c_void_p, [Pointer(linear_ctx), size_t, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (linear_zalloc_child_array:=dll.linear_zalloc_child_array).restype, linear_zalloc_child_array.argtypes = ctypes.c_void_p, [Pointer(linear_ctx), size_t, ctypes.c_uint32]
-except AttributeError: pass
-
-try: (linear_strdup:=dll.linear_strdup).restype, linear_strdup.argtypes = Pointer(ctypes.c_char), [Pointer(linear_ctx), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (linear_asprintf:=dll.linear_asprintf).restype, linear_asprintf.argtypes = Pointer(ctypes.c_char), [Pointer(linear_ctx), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (linear_vasprintf:=dll.linear_vasprintf).restype, linear_vasprintf.argtypes = Pointer(ctypes.c_char), [Pointer(linear_ctx), Pointer(ctypes.c_char), va_list]
-except AttributeError: pass
-
-try: (linear_asprintf_append:=dll.linear_asprintf_append).restype, linear_asprintf_append.argtypes = ctypes.c_bool, [Pointer(linear_ctx), Pointer(Pointer(ctypes.c_char)), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (linear_vasprintf_append:=dll.linear_vasprintf_append).restype, linear_vasprintf_append.argtypes = ctypes.c_bool, [Pointer(linear_ctx), Pointer(Pointer(ctypes.c_char)), Pointer(ctypes.c_char), va_list]
-except AttributeError: pass
-
-try: (linear_asprintf_rewrite_tail:=dll.linear_asprintf_rewrite_tail).restype, linear_asprintf_rewrite_tail.argtypes = ctypes.c_bool, [Pointer(linear_ctx), Pointer(Pointer(ctypes.c_char)), Pointer(size_t), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
-try: (linear_vasprintf_rewrite_tail:=dll.linear_vasprintf_rewrite_tail).restype, linear_vasprintf_rewrite_tail.argtypes = ctypes.c_bool, [Pointer(linear_ctx), Pointer(Pointer(ctypes.c_char)), Pointer(size_t), Pointer(ctypes.c_char), va_list]
-except AttributeError: pass
-
-try: (linear_strcat:=dll.linear_strcat).restype, linear_strcat.argtypes = ctypes.c_bool, [Pointer(linear_ctx), Pointer(Pointer(ctypes.c_char)), Pointer(ctypes.c_char)]
-except AttributeError: pass
-
+@dll.bind((ctypes.c_void_p,), Pointer(linear_ctx))
+def linear_context(ralloc_ctx): ...
+@dll.bind((ctypes.c_void_p, Pointer(linear_opts)), Pointer(linear_ctx))
+def linear_context_with_opts(ralloc_ctx, opts): ...
+@dll.bind((Pointer(linear_ctx), ctypes.c_uint32), ctypes.c_void_p)
+def linear_zalloc_child(ctx, size): ...
+@dll.bind((Pointer(linear_ctx),), None)
+def linear_free_context(ctx): ...
+@dll.bind((ctypes.c_void_p, Pointer(linear_ctx)), None)
+def ralloc_steal_linear_context(new_ralloc_ctx, ctx): ...
+@dll.bind((Pointer(linear_ctx),), ctypes.c_void_p)
+def ralloc_parent_of_linear_context(ctx): ...
+@dll.bind((Pointer(linear_ctx), size_t, ctypes.c_uint32), ctypes.c_void_p)
+def linear_alloc_child_array(ctx, size, count): ...
+@dll.bind((Pointer(linear_ctx), size_t, ctypes.c_uint32), ctypes.c_void_p)
+def linear_zalloc_child_array(ctx, size, count): ...
+@dll.bind((Pointer(linear_ctx), Pointer(ctypes.c_char)), Pointer(ctypes.c_char))
+def linear_strdup(ctx, str): ...
+@dll.bind((Pointer(linear_ctx), Pointer(ctypes.c_char)), Pointer(ctypes.c_char))
+def linear_asprintf(ctx, fmt): ...
+@dll.bind((Pointer(linear_ctx), Pointer(ctypes.c_char), va_list), Pointer(ctypes.c_char))
+def linear_vasprintf(ctx, fmt, args): ...
+@dll.bind((Pointer(linear_ctx), Pointer(Pointer(ctypes.c_char)), Pointer(ctypes.c_char)), ctypes.c_bool)
+def linear_asprintf_append(ctx, str, fmt): ...
+@dll.bind((Pointer(linear_ctx), Pointer(Pointer(ctypes.c_char)), Pointer(ctypes.c_char), va_list), ctypes.c_bool)
+def linear_vasprintf_append(ctx, str, fmt, args): ...
+@dll.bind((Pointer(linear_ctx), Pointer(Pointer(ctypes.c_char)), Pointer(size_t), Pointer(ctypes.c_char)), ctypes.c_bool)
+def linear_asprintf_rewrite_tail(ctx, str, start, fmt): ...
+@dll.bind((Pointer(linear_ctx), Pointer(Pointer(ctypes.c_char)), Pointer(size_t), Pointer(ctypes.c_char), va_list), ctypes.c_bool)
+def linear_vasprintf_rewrite_tail(ctx, str, start, fmt, args): ...
+@dll.bind((Pointer(linear_ctx), Pointer(Pointer(ctypes.c_char)), Pointer(ctypes.c_char)), ctypes.c_bool)
+def linear_strcat(ctx, dest, str): ...
 _anonenum64 = CEnum(ctypes.c_uint32)
 RALLOC_PRINT_INFO_SUMMARY_ONLY = _anonenum64.define('RALLOC_PRINT_INFO_SUMMARY_ONLY', 1)
 
-try: (ralloc_print_info:=dll.ralloc_print_info).restype, ralloc_print_info.argtypes = None, [Pointer(FILE), ctypes.c_void_p, ctypes.c_uint32]
-except AttributeError: pass
-
+@dll.bind((Pointer(FILE), ctypes.c_void_p, ctypes.c_uint32), None)
+def ralloc_print_info(f, p, flags): ...
 class struct_isa_decode_options(Struct): pass
 class struct_isa_decode_value(Struct): pass
 struct_isa_decode_value.SIZE = 16
@@ -9290,16 +8341,13 @@ setattr(struct_isa_decode_options, 'post_instr_cb', field(48, ctypes.CFUNCTYPE(N
 setattr(struct_isa_decode_options, 'no_match_cb', field(56, ctypes.CFUNCTYPE(None, Pointer(FILE), Pointer(ctypes.c_uint32), size_t)))
 setattr(struct_isa_decode_options, 'entrypoint_count', field(64, ctypes.c_uint32))
 setattr(struct_isa_decode_options, 'entrypoints', field(72, Pointer(struct_isa_entrypoint)))
-try: (ir3_isa_disasm:=dll.ir3_isa_disasm).restype, ir3_isa_disasm.argtypes = None, [ctypes.c_void_p, ctypes.c_int32, Pointer(FILE), Pointer(struct_isa_decode_options)]
-except AttributeError: pass
-
-try: (ir3_isa_decode:=dll.ir3_isa_decode).restype, ir3_isa_decode.argtypes = ctypes.c_bool, [ctypes.c_void_p, ctypes.c_void_p, Pointer(struct_isa_decode_options)]
-except AttributeError: pass
-
+@dll.bind((ctypes.c_void_p, ctypes.c_int32, Pointer(FILE), Pointer(struct_isa_decode_options)), None)
+def ir3_isa_disasm(bin, sz, out, options): ...
+@dll.bind((ctypes.c_void_p, ctypes.c_void_p, Pointer(struct_isa_decode_options)), ctypes.c_bool)
+def ir3_isa_decode(out, bin, options): ...
 class struct_decode_scope(Struct): pass
-try: (ir3_isa_get_gpu_id:=dll.ir3_isa_get_gpu_id).restype, ir3_isa_get_gpu_id.argtypes = uint32_t, [Pointer(struct_decode_scope)]
-except AttributeError: pass
-
+@dll.bind((Pointer(struct_decode_scope),), uint32_t)
+def ir3_isa_get_gpu_id(scope): ...
 try: glsl_type_builtin_error = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_error')
 except (ValueError,AttributeError): pass
 try: glsl_type_builtin_void = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_void')

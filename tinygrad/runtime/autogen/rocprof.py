@@ -31,9 +31,8 @@ setattr(struct_rocprofiler_thread_trace_decoder_pc_t, 'address', field(0, uint64
 setattr(struct_rocprofiler_thread_trace_decoder_pc_t, 'code_object_id', field(8, uint64_t))
 rocprof_trace_decoder_isa_callback_t = ctypes.CFUNCTYPE(rocprofiler_thread_trace_decoder_status_t, Pointer(ctypes.c_char), Pointer(ctypes.c_uint64), Pointer(ctypes.c_uint64), struct_rocprofiler_thread_trace_decoder_pc_t, ctypes.c_void_p)
 rocprof_trace_decoder_se_data_callback_t = ctypes.CFUNCTYPE(ctypes.c_uint64, Pointer(Pointer(ctypes.c_ubyte)), Pointer(ctypes.c_uint64), ctypes.c_void_p)
-try: (rocprof_trace_decoder_parse_data:=dll.rocprof_trace_decoder_parse_data).restype, rocprof_trace_decoder_parse_data.argtypes = rocprofiler_thread_trace_decoder_status_t, [rocprof_trace_decoder_se_data_callback_t, rocprof_trace_decoder_trace_callback_t, rocprof_trace_decoder_isa_callback_t, ctypes.c_void_p]
-except AttributeError: pass
-
+@dll.bind((rocprof_trace_decoder_se_data_callback_t, rocprof_trace_decoder_trace_callback_t, rocprof_trace_decoder_isa_callback_t, ctypes.c_void_p), rocprofiler_thread_trace_decoder_status_t)
+def rocprof_trace_decoder_parse_data(se_data_callback, trace_callback, isa_callback, userdata): ...
 enum_rocprofiler_thread_trace_decoder_info_t = CEnum(ctypes.c_uint32)
 ROCPROFILER_THREAD_TRACE_DECODER_INFO_NONE = enum_rocprofiler_thread_trace_decoder_info_t.define('ROCPROFILER_THREAD_TRACE_DECODER_INFO_NONE', 0)
 ROCPROFILER_THREAD_TRACE_DECODER_INFO_DATA_LOST = enum_rocprofiler_thread_trace_decoder_info_t.define('ROCPROFILER_THREAD_TRACE_DECODER_INFO_DATA_LOST', 1)
@@ -42,16 +41,13 @@ ROCPROFILER_THREAD_TRACE_DECODER_INFO_WAVE_INCOMPLETE = enum_rocprofiler_thread_
 ROCPROFILER_THREAD_TRACE_DECODER_INFO_LAST = enum_rocprofiler_thread_trace_decoder_info_t.define('ROCPROFILER_THREAD_TRACE_DECODER_INFO_LAST', 4)
 
 rocprofiler_thread_trace_decoder_info_t = enum_rocprofiler_thread_trace_decoder_info_t
-try: (rocprof_trace_decoder_get_info_string:=dll.rocprof_trace_decoder_get_info_string).restype, rocprof_trace_decoder_get_info_string.argtypes = Pointer(ctypes.c_char), [rocprofiler_thread_trace_decoder_info_t]
-except AttributeError: pass
-
-try: (rocprof_trace_decoder_get_status_string:=dll.rocprof_trace_decoder_get_status_string).restype, rocprof_trace_decoder_get_status_string.argtypes = Pointer(ctypes.c_char), [rocprofiler_thread_trace_decoder_status_t]
-except AttributeError: pass
-
+@dll.bind((rocprofiler_thread_trace_decoder_info_t,), Pointer(ctypes.c_char))
+def rocprof_trace_decoder_get_info_string(info): ...
+@dll.bind((rocprofiler_thread_trace_decoder_status_t,), Pointer(ctypes.c_char))
+def rocprof_trace_decoder_get_status_string(status): ...
 rocprofiler_thread_trace_decoder_debug_callback_t = ctypes.CFUNCTYPE(None, ctypes.c_int64, Pointer(ctypes.c_char), Pointer(ctypes.c_char), ctypes.c_void_p)
-try: (rocprof_trace_decoder_dump_data:=dll.rocprof_trace_decoder_dump_data).restype, rocprof_trace_decoder_dump_data.argtypes = rocprofiler_thread_trace_decoder_status_t, [Pointer(ctypes.c_char), uint64_t, rocprofiler_thread_trace_decoder_debug_callback_t, ctypes.c_void_p]
-except AttributeError: pass
-
+@dll.bind((Pointer(ctypes.c_char), uint64_t, rocprofiler_thread_trace_decoder_debug_callback_t, ctypes.c_void_p), rocprofiler_thread_trace_decoder_status_t)
+def rocprof_trace_decoder_dump_data(data, data_size, cb, userdata): ...
 class union_rocprof_trace_decoder_gfx9_header_t(Union): pass
 union_rocprof_trace_decoder_gfx9_header_t.SIZE = 8
 union_rocprof_trace_decoder_gfx9_header_t._fields_ = ['legacy_version', 'gfx9_version2', 'DSIMDM', 'DCU', 'reserved1', 'SEID', 'reserved2', 'raw']
