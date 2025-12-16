@@ -11,7 +11,9 @@ if MOCKGPU:=getenv("MOCKGPU"): from test.mockgpu.cuda import cuda # type: ignore
 
 def check(status):
   if status != 0:
-    error = ctypes.string_at(init_c_var(ctypes.c_char_p(), lambda x: cuda.cuGetErrorString(status, x))).decode()
+    # cuGetErrorString expects a char** out parameter
+    err_ptr = init_c_var(ctypes.POINTER(ctypes.c_char)(), lambda x: cuda.cuGetErrorString(status, ctypes.byref(x)))
+    error = ctypes.string_at(err_ptr).decode()
     raise RuntimeError(f"CUDA Error {status}, {error}")
 
 def encode_args(args, vals) -> tuple[ctypes.Structure, ctypes.Array]:
@@ -39,10 +41,23 @@ class CUDAProgram:
 
     check(cuda.cuCtxSetCurrent(self.dev.context))
     self.module = cuda.CUmodule()
-    status = cuda.cuModuleLoadData(ctypes.byref(self.module), lib)
+    error_log = ctypes.create_string_buffer(16384)
+    info_log = ctypes.create_string_buffer(16384)
+    options = (cuda.CUjit_option*4)(
+      cuda.CU_JIT_INFO_LOG_BUFFER, cuda.CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES,
+      cuda.CU_JIT_ERROR_LOG_BUFFER, cuda.CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES,
+    )
+    option_vals = (ctypes.c_void_p*4)(
+      ctypes.cast(info_log, ctypes.c_void_p), ctypes.c_void_p(len(info_log)),
+      ctypes.cast(error_log, ctypes.c_void_p), ctypes.c_void_p(len(error_log)),
+    )
+    status = cuda.cuModuleLoadDataEx(ctypes.byref(self.module), lib, len(options), options, option_vals)
     if status != 0:
       del self.module
-      raise RuntimeError(f"module load failed with status code {status}: {cuda.CUresult.get(status)}")
+      err = error_log.value.decode(errors="ignore").strip()
+      info = info_log.value.decode(errors="ignore").strip()
+      logs = "\n".join([x for x in (err, info) if x])
+      raise RuntimeError(f"module load failed with status code {status}: {cuda.CUresult.get(status)}" + (f"\n{logs}" if logs else ""))
     check(cuda.cuModuleGetFunction(ctypes.byref(prg := cuda.CUfunction()), self.module, name.encode("utf-8")))
     self.prg = prg
     if self.smem > 0: check(cuda.cuFuncSetAttribute(self.prg, cuda.CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, self.smem))
