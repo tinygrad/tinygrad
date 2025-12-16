@@ -218,7 +218,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.RANGE | Ops.LOAD | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
-           Ops.VECTORIZE | Ops.VCONST | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.CONTRACT:
+           Ops.VECTORIZE | Ops.VCONST | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.CONTRACT | Ops.CUSTOM_KERNEL:
         return None
 
       case Ops.INDEX:
@@ -841,9 +841,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
     placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(srcs)]
-    contig_srcs = tuple(x.contiguous() for x in srcs)
-    kernel = UOp(Ops.KERNEL, src=tuple(x.base for x in contig_srcs), arg=Kernel(fxn(*placeholders), grad_fxn=grad_fxn))
-    return [s.after(kernel) for s in contig_srcs]
+    #contig_srcs = tuple(x.contiguous() for x in srcs)
+    #kernel = UOp(Ops.KERNEL, src=tuple(x.base for x in contig_srcs), arg=Kernel(fxn(*placeholders), grad_fxn=grad_fxn))
+    #kernel = UOp(Ops.CUSTOM_KERNEL, src=tuple(x.base for x in contig_srcs), arg=CustomKernel(fxns=(fxn, grad_fxn)))
+    kernel = UOp(Ops.CUSTOM_KERNEL, src=srcs, arg=CustomKernel(fxns=(fxn, grad_fxn)))
+    return [s.after(kernel) for s in srcs]
 
 @dataclass(frozen=True)
 class KernelInfo:
@@ -854,6 +856,11 @@ class KernelInfo:
   opts_to_apply: tuple|None = None
   @property
   def function_name(self): return to_function_name(self.name)
+
+@dataclass(frozen=True)
+class CustomKernel:
+  fxns: tuple[Callable|None, ...] = ()
+  def __reduce__(self): return (CustomKernel, ())
 
 @dataclass(frozen=True)
 class Kernel:
