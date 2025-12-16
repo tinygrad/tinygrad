@@ -6,7 +6,70 @@ This document describes a refactor to simplify multi-device support in tinygrad 
 
 **Key insight**: Sharding should be metadata that flows through the graph via the device property, not wrapper ops that require explicit pattern matching for every operation type.
 
-## Current Architecture
+## Current Progress
+
+### Completed
+
+- [x] **Phase 1**: `Sharding` dataclass added to `device.py`
+- [x] **Phase 2**: `MSTACK` creates `Sharding` device directly when `axis` is in arg
+- [x] **Phase 3**: `_device` property propagates `Sharding` through ops and transforms axis for `PERMUTE`, `RESHAPE`, `REDUCE_AXIS`
+- [x] **Phase 4**: Updated `alu_multi()` and `reduce_multi()` to work with Sharding device
+- [x] **Phase 5**: Fixed `isinstance` checks throughout codebase to handle `(tuple, Sharding)`
+
+### In Progress
+
+None - initial implementation complete. Tests pass with SPEC=2.
+
+### Pending (Future Work)
+
+- [ ] **Phase 6**: Remove `MULTI` op (make `.shard()` return Sharding device)
+- [ ] **Phase 7**: Simplify `multi_pm` (remove patterns now handled by propagation)
+- [ ] **Phase 8**: Update type hints throughout (make device always `str | Sharding`, not tuple)
+- [ ] **Phase 9**: Cleanup and testing
+
+### Test Results
+
+- 86 tests pass with `SPEC=2`
+- 4 tests fail due to device comparison (`tuple` vs `Sharding`) - expected during transition
+- All pre-commit checks pass
+
+### Key Changes Made
+
+1. **`Sharding` class** in `device.py`:
+   ```python
+   @dataclass(frozen=True)
+   class Sharding:
+     devices: tuple[str, ...]
+     axis: int
+   ```
+
+2. **`MSTACK` with axis** creates `Sharding` device:
+   ```python
+   UOp(Ops.MSTACK, dtype, srcs, arg=axis)  # device is Sharding(devices, axis)
+   ```
+
+3. **`_device` transforms axis** for movement ops:
+   - `PERMUTE`: axis becomes `marg.index(src_axis)`
+   - `RESHAPE`: axis computed from shape accumulation
+   - `REDUCE_AXIS`: returns tuple (not Sharding) if axis is reduced away
+
+4. **`axis` property** checks `Sharding` first:
+   ```python
+   if isinstance(self._device, Sharding): return self._device.axis
+   ```
+
+5. **`isinstance` checks** updated throughout to handle `(tuple, Sharding)`:
+   - `tinygrad/tensor.py`: `__init__`, `assign`, `_buffer`, `full_like`, `rand_like`
+   - `tinygrad/uop/ops.py`: `multi()`, `buffer` property
+   - `tinygrad/schedule/multi.py`: `alu_multi()`, `reduce_multi()`
+   - `tinygrad/schedule/indexing.py`: `BufferizeOpts`
+   - `tinygrad/nn/state.py`: `load_state_dict()`
+
+6. **`alu_multi` updated** to use `_get_multi_axis()` helper that only returns axis for MULTI/MSTACK ops, ignoring Sharding axis on regular ops
+
+7. **`spec.py` updated** to validate DEVICE op with Sharding arg and add Sharding to pyrender globals
+
+## Original Architecture
 
 ### The MULTI/MSELECT/MSTACK Model
 

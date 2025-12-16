@@ -2,6 +2,7 @@ from typing import Iterator
 import functools, operator, itertools
 from dataclasses import dataclass, field
 from tinygrad.dtype import dtypes, AddrSpace
+from tinygrad.device import Sharding
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, profile_matches
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
 from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored
@@ -37,7 +38,7 @@ pm_generate_realize_map = PatternMatcher([
 @dataclass(frozen=True)
 class BufferizeOpts:
   # on AddrSpace.LOCAL, device is the id
-  device: str|tuple[str, ...]|int|None
+  device: str|tuple[str, ...]|Sharding|int|None
   addrspace: AddrSpace = AddrSpace.GLOBAL
   removable: bool = True
 

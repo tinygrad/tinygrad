@@ -3,6 +3,7 @@ from collections import OrderedDict
 from typing import Any, Callable, BinaryIO, Iterable, cast
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
+from tinygrad.device import Sharding
 from tinygrad.helpers import prod, argsort, DEBUG, Timing, CI, unwrap, GlobalCounters, tqdm, round_up, T, strides_for_shape
 
 class TensorIO(io.RawIOBase, BinaryIO):
@@ -153,9 +154,9 @@ def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=Tr
       if v.shape != state_dict[k].shape:
         if {(), (1,)} == {state_dict[k].shape, v.shape}: state_dict[k] = state_dict[k].reshape(v.shape)
         else: raise ValueError(f'Shape mismatch in layer `{k}`: Expected shape {v.shape}, but found {state_dict[k].shape} in state dict.')
-      if isinstance(v.device, tuple):
-        if isinstance(state_dict[k].device, tuple): v.replace(state_dict[k])
-        else: v.replace(state_dict[k].shard(v.device, v.uop.axis))
+      if isinstance(v.device, (tuple, Sharding)):
+        if isinstance(state_dict[k].device, (tuple, Sharding)): v.replace(state_dict[k])
+        else: v.replace(state_dict[k].shard(v.device.devices if isinstance(v.device, Sharding) else v.device, v.uop.axis))
       else: v.replace(state_dict[k].to(v.device))
       if realize: v.realize()
       if consume: del state_dict[k]

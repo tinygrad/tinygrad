@@ -77,9 +77,19 @@ class BufferSpec:
   nolru: bool = False
   external_ptr: int|None = None
 
+@dataclass(frozen=True)
+class Sharding:
+  """Represents a sharded device: data is split across devices along an axis."""
+  devices: tuple[str, ...]
+  axis: int
+  def __len__(self) -> int: return len(self.devices)
+  def __iter__(self): return iter(self.devices)
+  def __getitem__(self, i: int) -> str: return self.devices[i]
+
 class MultiBuffer:
-  def __init__(self, device:tuple[str, ...], size:int, dtype:DType):
-    self.bufs = [Buffer(d, size, dtype) for d in device]
+  def __init__(self, device: tuple[str, ...] | Sharding, size:int, dtype:DType):
+    devs = device.devices if isinstance(device, Sharding) else device
+    self.bufs = [Buffer(d, size, dtype) for d in devs]
   @property
   def size(self): return self.bufs[0].size
   @property

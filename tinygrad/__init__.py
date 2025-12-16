@@ -8,4 +8,4 @@ from tinygrad.uop.ops import UOp
 Variable = UOp.variable
 from tinygrad.dtype import dtypes                                     # noqa: F401
 from tinygrad.helpers import GlobalCounters, fetch, Context, getenv   # noqa: F401
-from tinygrad.device import Device                                    # noqa: F401
+from tinygrad.device import Device, Sharding                          # noqa: F401

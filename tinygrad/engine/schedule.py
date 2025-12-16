@@ -5,7 +5,7 @@ from collections import deque
 from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites
 from tinygrad.uop.ops import PatternMatcher, UPat, graph_rewrite, graph_rewrite_map
 from tinygrad.uop.spec import type_verify, tensor_spec
-from tinygrad.device import Buffer, MultiBuffer
+from tinygrad.device import Buffer, MultiBuffer, Sharding
 from tinygrad.helpers import Metadata, DEBUG, cpu_profile, TracingKey, SPEC, flatten, pluralize
 
 # **** ScheduleItem return type
@@ -152,7 +152,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
     # tensor map is what we return
     tensor_map: dict[UOp, UOp] = {}
 
-    if any(isinstance(x._device, tuple) for x in big_sink_cache.toposort()):
+    if any(isinstance(x._device, (tuple, Sharding)) for x in big_sink_cache.toposort()):
       tensor_map |= get_multi_map(big_sink_cache)
       big_sink_cache = big_sink_cache.substitute(tensor_map, name="Apply Multi Map")
       big_sink_cache = UOp.sink(*flatten([x.src if x.op is Ops.MULTI else [x] for x in big_sink_cache.src]))

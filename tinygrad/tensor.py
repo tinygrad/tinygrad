@@ -13,7 +13,7 @@ from tinygrad.mixin import OpMixin
 from tinygrad.mixin.movement import _align_left
 from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop, Variable
 from tinygrad.engine.schedule import ScheduleItem, complete_create_schedule_with_vars
-from tinygrad.device import Device, Buffer
+from tinygrad.device import Device, Buffer, Sharding
 from tinygrad.engine.realize import run_schedule
 
 # TODO: this should be the only usage of Device
@@ -63,7 +63,7 @@ def _frompy(x:list|tuple|bytes, dtype:DType) -> UOp:
   ret.buffer.allocate(memoryview(data if Device.DEFAULT != "PYTHON" else bytearray(data)))
   return ret
 
-def _get_winograd_matcols(mat, dims:int, shp:tuple[sint, ...], device:str|tuple[str, ...], dtype:DType) -> list[list[Tensor]]:
+def _get_winograd_matcols(mat, dims:int, shp:tuple[sint, ...], device:"str|tuple[str, ...]|Sharding", dtype:DType) -> list[list[Tensor]]:
   return [[Tensor.cat(*[Tensor.full(shp[:dim] + (1,) + shp[dim+1:], float(m[k]), device=device, dtype=dtype) for m in mat], dim=dim)
            for k in range(len(mat[0]))] for dim in range(dims)]
 
@@ -111,10 +111,11 @@ class Tensor(OpMixin):
   training: ClassVar[bool] = False
 
   def __init__(self, data:ConstType|bytes|list|tuple|UOp|'np.ndarray'|pathlib.Path|None,  # type: ignore [name-defined] # noqa: F821
-               device:str|tuple|list|None=None, dtype:DTypeLike|None=None, requires_grad:bool|None=None, _force_unique:bool=False):
+               device:str|tuple|list|Sharding|None=None, dtype:DTypeLike|None=None, requires_grad:bool|None=None, _force_unique:bool=False):
     if device is None and isinstance(data, pathlib.Path): device = f"DISK:{data.resolve()}"  # keep it on the disk if device is None
     _dtype:DType|None = to_dtype(dtype) if dtype is not None else None
-    _device:str|tuple[str, ...] = tuple(canonicalize_device(x) for x in device) if isinstance(device, (tuple, list)) else canonicalize_device(device)
+    _device:str|tuple[str, ...]|Sharding = device if isinstance(device, Sharding) else \
+      (tuple(canonicalize_device(x) for x in device) if isinstance(device, (tuple, list)) else canonicalize_device(device))
     del device, dtype
 
     # tensors can have gradients if you have called .backward
@@ -161,10 +162,15 @@ class Tensor(OpMixin):
 
     # data might be on a different device
     if isinstance(_device, str): self.uop:UOp = data if data.device == _device else data.copy_to_device(_device)
-    # if device is a tuple, we should have/construct a MultiLazyBuffer
-    elif isinstance(data.device, str): self.uop = Tensor(data).shard(_device).uop
+    # if device is a tuple or Sharding, we should have/construct a MultiLazyBuffer
+    elif isinstance(data.device, str):
+      shard_devs = _device.devices if isinstance(_device, Sharding) else _device
+      self.uop = Tensor(data).shard(shard_devs).uop
     else:
-      assert data.device == _device, f"MultiLazyBuffer device mismatch, {data.device} != {_device}"
+      # Sharding device is equivalent to its underlying tuple for compatibility
+      data_devs = data.device.devices if isinstance(data.device, Sharding) else data.device
+      exp_devs = _device.devices if isinstance(_device, Sharding) else _device
+      assert data_devs == exp_devs, f"MultiLazyBuffer device mismatch, {data.device} != {_device}"
       self.uop = data
 
     # add to all_tensors after construction succeeds
@@ -217,7 +223,7 @@ class Tensor(OpMixin):
     return self.shape[0]
 
   @property
-  def device(self) -> str|tuple[str, ...]: return self.uop.device
+  def device(self) -> str|tuple[str, ...]|Sharding: return self.uop.device
 
   @property
   def shape(self) -> tuple[sint, ...]: return self.uop.shape
@@ -282,9 +288,13 @@ class Tensor(OpMixin):
     # broadcast x
     if least_upper_dtype(self.dtype, x.dtype) == self.dtype: x = x._broadcast_to(self.shape).cast(self.dtype)
     assert self.shape == x.shape, f"assign shape mismatch {self.shape} != {x.shape}"
-    assert self.device == x.device, f"assign device mismatch {self.device} != {x.device}"
+    # compare underlying devices for Sharding compatibility
+    self_devs = self.device.devices if isinstance(self.device, Sharding) else self.device
+    x_devs = x.device.devices if isinstance(x.device, Sharding) else x.device
+    assert self_devs == x_devs, f"assign device mismatch {self.device} != {x.device}"
     assert self.dtype == x.dtype, f"assign dtype mismatch {self.dtype} != {x.dtype}"
-    assert not isinstance(self.device, tuple) or self.uop.axis == x.uop.axis, f"multi assign axis mismatch {self.uop.axis} != {x.uop.axis}"
+    if isinstance(self.device, (tuple, Sharding)):
+      assert self.uop.axis == x.uop.axis, f"multi assign axis mismatch {self.uop.axis} != {x.uop.axis}"
     return self.replace(self._apply_uop(UOp.assign, x))
 
   def detach(self) -> Tensor:
@@ -295,7 +305,7 @@ class Tensor(OpMixin):
 
   def _buffer(self) -> Buffer:
     x = self.cast(self.dtype.base).contiguous()
-    if isinstance(self.device, tuple): x = x.to("CPU")
+    if isinstance(self.device, (tuple, Sharding)): x = x.to("CPU")
     return cast(Buffer, x.realize().uop.base.buffer).ensure_allocated()
   def _data(self) -> memoryview: return self._buffer().as_buffer()
 
@@ -367,10 +377,11 @@ class Tensor(OpMixin):
     if self.grad is not None: ret.grad = self.grad.clone()
     return ret.assign(self)
 
-  def to(self, device:str|tuple[str, ...]|None) -> Tensor:
+  def to(self, device:str|tuple[str, ...]|Sharding|None) -> Tensor:
     """
     Moves the tensor to the given device.
     """
+    if isinstance(device, Sharding): return self.shard(device.devices, device.axis)
     device = tuple(canonicalize_device(x) for x in device) if isinstance(device, (tuple, list)) else canonicalize_device(device)
     if device == self.device: return self
     if not isinstance(device, str): return self.shard(device)
@@ -378,7 +389,7 @@ class Tensor(OpMixin):
     if self.grad is not None: ret.grad = self.grad.to(device)
     return ret
 
-  def to_(self, device:str|tuple[str, ...]|None) -> Tensor:
+  def to_(self, device:str|tuple[str, ...]|Sharding|None) -> Tensor:
     """
     Moves the tensor to the given device in place.
     """
@@ -471,7 +482,7 @@ class Tensor(OpMixin):
   # ***** creation entrypoint *****
 
   @staticmethod
-  def empty(*shape, device:str|tuple[str, ...]|None=None, dtype:DTypeLike|None=None, **kwargs) -> Tensor:
+  def empty(*shape, device:str|tuple[str, ...]|Sharding|None=None, dtype:DTypeLike|None=None, **kwargs) -> Tensor:
     """
     Creates an empty tensor with the given shape.
 
@@ -486,8 +497,9 @@ class Tensor(OpMixin):
     dtype, shape = to_dtype(dtype) if dtype is not None else dtypes.default_float, argfix(*shape)
     if not isinstance(size:=prod([x.vmax if isinstance(x, UOp) else x for x in shape]), int): raise ValueError(f"size must be int {size}")
     # TODO: add test for multidevice tensor
-    device = tuple(canonicalize_device(d) for d in device) if isinstance(device, tuple) else canonicalize_device(device)
-    return Tensor(UOp.new_buffer(device, size, dtype), device, dtype, **kwargs).shrink(((0,prod(shape)),)).reshape(shape)
+    _device: str|tuple[str, ...]|Sharding = device if isinstance(device, Sharding) else \
+      (tuple(canonicalize_device(d) for d in device) if isinstance(device, tuple) else canonicalize_device(device))
+    return Tensor(UOp.new_buffer(_device, size, dtype), _device, dtype, **kwargs).shrink(((0,prod(shape)),)).reshape(shape)
 
   def empty_like(self, **kwargs) -> Tensor:
     """
@@ -730,8 +742,9 @@ class Tensor(OpMixin):
     if kwargs.get("device") is not None: raise RuntimeError("cannot specify `device` on `*_like` of a multi device tensor")
     if self.uop.axis is None: return fxn(self.shape, *args, dtype=dtype, **kwargs).shard(self.device)
     sharded_shape = tuple(s//len(self.device) if a==self.uop.axis else s for a,s in enumerate(self.shape))
-    stacked = UOp(Ops.MSTACK, dtype=dtype, src=tuple([fxn(sharded_shape, *args, device=d, dtype=dtype, **kwargs).uop for d in self.device]))
-    return Tensor(UOp.multi(stacked, axis=self.uop.axis), device=self.device, dtype=dtype)
+    stacked = UOp(Ops.MSTACK, dtype=dtype, src=tuple([fxn(sharded_shape, *args, device=d, dtype=dtype, **kwargs).uop for d in self.device]),
+                  arg=self.uop.axis)
+    return Tensor(stacked, device=stacked.device, dtype=dtype)
 
   def full_like(self, fill_value:ConstType, **kwargs) -> Tensor:
     """
@@ -746,7 +759,7 @@ class Tensor(OpMixin):
     print(Tensor.full_like(t, 42).numpy())
     ```
     """
-    if isinstance(self.device, tuple): return self._multi_like(Tensor.full, fill_value, **kwargs)
+    if isinstance(self.device, (tuple, Sharding)): return self._multi_like(Tensor.full, fill_value, **kwargs)
     return Tensor.full(self.shape, fill_value, dtype=kwargs.pop("dtype", self.dtype), device=kwargs.pop("device", self.device), **kwargs)
 
   def zeros_like(self, **kwargs) -> Tensor:
@@ -789,7 +802,7 @@ class Tensor(OpMixin):
     print(Tensor.rand_like(t).numpy())
     ```
     """
-    if isinstance(self.device, tuple): return self._multi_like(Tensor.rand, **kwargs)
+    if isinstance(self.device, (tuple, Sharding)): return self._multi_like(Tensor.rand, **kwargs)
     return Tensor.rand(*self.shape, device=kwargs.pop("device", self.device), dtype=kwargs.pop("dtype", self.dtype), **kwargs)
 
   # ***** rng hlops *****

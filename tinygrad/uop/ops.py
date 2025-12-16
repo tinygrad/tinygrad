@@ -9,7 +9,7 @@ from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Contex
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, VIZ, SPEC, CI
 from tinygrad.helpers import strip_parens, colored, ansilen, printable, panic
 if TYPE_CHECKING:
-  from tinygrad.device import Buffer, MultiBuffer
+  from tinygrad.device import Buffer, MultiBuffer, Sharding
 
 class AxisType(Enum):
   def __repr__(self): return str(self)
@@ -238,8 +238,13 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.DEFINE_GLOBAL | Ops.DEFINE_LOCAL | Ops.DEFINE_REG: return (self.ptrdtype.size,)
 
       # passthrough ops
-      case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.END:
+      case Ops.REDUCE | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.END:
         return self.src[0]._shape
+      # MSTACK: if axis in arg, scale shape like MULTI does
+      case Ops.MSTACK:
+        ps = self.src[0]._shape
+        if self.arg is None or ps is None: return ps
+        return tuple(s*len(self.src) if a == self.arg else s for a,s in enumerate(ps))
 
       # ops with custom handling
       case Ops.KERNEL: return self.arg.ast._shape
@@ -434,7 +439,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return UOp(op, out_dtype, (self,)+src, **kwargs)
   @staticmethod
   @functools.cache
-  def const(dtype:DType, b:ConstLike, device:str|tuple[str, ...]|None=None, shape:tuple[sint, ...]|None=None, unique:bool|int=False):
+  def const(dtype:DType, b:ConstLike, device:"str|tuple[str, ...]|Sharding|None"=None, shape:tuple[sint, ...]|None=None, unique:bool|int=False):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is Ops.BIND else b
     if isinstance(b, tuple) and all_same(b):
       assert len(b) > 0, "can't create const from empty tuple"
@@ -444,7 +449,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
               src=(UOp(Ops.DEVICE, arg=device),) if device is not None else ())
     return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None else ret
   @staticmethod
-  def unique_const(dtype:DType, b:ConstType, device:str|tuple[str, ...], unique=True):
+  def unique_const(dtype:DType, b:ConstType, device:"str|tuple[str, ...]|Sharding", unique=True):
     # NOTE: b is ConstType, not ConstLike, so UOps and tuples aren't allowed
     assert not isinstance(b, (UOp, tuple)), "unique const only works on numbers"
     ret = UOp.const(dtype, b, device)
@@ -479,8 +484,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return UOp(Ops.CONTIGUOUS, dtype=self.dtype, src=(self,)+args, **kwargs)
   def contiguous_backward(self): return self.alu(Ops.CONTIGUOUS_BACKWARD)
   def bufferize(self, *args, **kwargs): return UOp(Ops.BUFFERIZE, dtype=self.dtype, src=(self,)+args, **kwargs)
-  def allreduce(self, op, device:str|tuple[str, ...]|UOp):
-    assert isinstance(self.device, tuple), f"allreduce must be on tuple {self.device} isn't"
+  def allreduce(self, op, device:str|tuple[str, ...]|Sharding|UOp):
+    from tinygrad.device import Sharding
+    assert isinstance(self.device, (tuple, Sharding)), f"allreduce must be on tuple or Sharding {self.device} isn't"
     return UOp(Ops.ALLREDUCE, self.dtype, (self, UOp(Ops.DEVICE, arg=device) if not isinstance(device, UOp) else device), op)
   def overflows(self, dtype:DType) -> bool: return self.vmin < dtype.min or dtype.max < self.vmax
 
@@ -494,7 +500,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   # *** from MultiLazyBuffer ***
 
   def multi(self, axis:int|None):
-    assert isinstance(self.device, tuple), f"multi device must be tuple, {self.device} isn't"
+    from tinygrad.device import Sharding
+    assert isinstance(self.device, (tuple, Sharding)), f"multi device must be tuple or Sharding, {self.device} isn't"
     assert axis is not None, "multi None is no longer supported"
     return UOp(Ops.MULTI, self.dtype, (self,), axis)
 
@@ -505,10 +512,14 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def axis(self) -> int|None:
+    # MULTI stores axis in arg
     if self.op is Ops.MULTI: return self.arg
     # NOTE: they all have to share an axis, we always choose [-1]
     if self.op in GroupOp.ALU: return axes[-1] if (axes := dedup([x.axis for x in self.src if x.axis is not None])) else None
-    if len(self.src) == 0: return None
+    # for leaf nodes (CONST, etc.), use Sharding axis if available
+    if len(self.src) == 0:
+      from tinygrad.device import Sharding
+      return self._device.axis if isinstance(self._device, Sharding) else None
     src_axis = self.src[0].axis
     if self.op is Ops.REDUCE_AXIS: return None if src_axis is not None and src_axis in self.arg[1] else src_axis
     if self.op is Ops.RESHAPE:
@@ -531,12 +542,16 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.shape[axis] % dcount != 0: raise RuntimeError(f"multi axis uneven: {self.shape[axis]=} {axis=} {dcount=}")
     sz = self.shape[axis] // dcount
     return self.shrink(tuple((0,s) if i != axis else (dnum*sz,dnum*sz+sz) for i,s in enumerate(self.shape)))
-  def shard(self, devices:tuple[str, ...], axis:int) -> UOp: return self.copy_to_device(devices)._shard(axis).multi(axis)
+  def shard(self, devices:tuple[str, ...], axis:int) -> UOp:
+    from tinygrad.device import Sharding
+    # Sharding device carries the axis, MULTI still needed for shape scaling
+    return self.copy_to_device(Sharding(devices, axis))._shard(axis).multi(axis)
 
   # *** from LazyBuffer ***
 
-  def copy_to_device(self, device:str|tuple[str, ...]|UOp, arg=None):
-    assert arg is None or isinstance(self.device, tuple)
+  def copy_to_device(self, device:str|tuple[str, ...]|Sharding|UOp, arg=None):
+    from tinygrad.device import Sharding
+    assert arg is None or isinstance(self.device, (tuple, Sharding))
     inp = self if arg is None else UOp(Ops.MSELECT, self.dtype, src=(self,), arg=arg)
     return UOp(Ops.COPY, self.dtype, (inp, UOp(Ops.DEVICE, arg=device) if not isinstance(device, UOp) else device))
   def mselect(self, arg:int) -> UOp: return UOp(Ops.MSELECT, self.dtype, (self,), arg)
@@ -606,20 +621,48 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   # *** uop Buffer stuff ***
 
   @staticmethod
-  def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType, num=None):
+  def new_buffer(device:str|tuple[str, ...]|Sharding, size:int, dtype:DType, num=None):
     return UOp(Ops.BUFFER, dtype, (UOp.unique(num), UOp(Ops.DEVICE, arg=device)), size)
   @property
-  def device(self) -> str|tuple[str, ...]: return unwrap(self._device)
+  def device(self) -> str|tuple[str, ...]|Sharding: return unwrap(self._device)
   @recursive_property
-  def _device(self) -> str|tuple[str, ...]|None:
+  def _device(self) -> str|tuple[str, ...]|Sharding|None:
     if self.op is Ops.DEVICE: return self.arg
     if self.op is Ops.BUFFERIZE: return self.arg.device
     if self.op is Ops.AFTER: return self.src[0]._device
     if self.op is Ops.MSELECT:
-      assert isinstance(self.src[0].device, tuple), "mselect must be on tuple device"
-      return self.src[0].device[self.arg]
-    if self.op is Ops.MSTACK: return tuple(cast(str, x.device) for x in self.src)
+      src_dev = self.src[0].device
+      from tinygrad.device import Sharding
+      if isinstance(src_dev, Sharding): return src_dev[self.arg]
+      assert isinstance(src_dev, tuple), "mselect must be on tuple or Sharding device"
+      return src_dev[self.arg]
+    if self.op is Ops.MSTACK:
+      devices = tuple(cast(str, x.device) for x in self.src)
+      if self.arg is not None:
+        from tinygrad.device import Sharding
+        return Sharding(devices, self.arg)
+      return devices
     if self.op in {Ops.COPY, Ops.BUFFER, Ops.ALLREDUCE}: return self.src[1].device
+    # transform Sharding axis for movement ops
+    if self.src and (src_dev := self.src[0]._device) is not None:
+      from tinygrad.device import Sharding
+      if isinstance(src_dev, Sharding):
+        src_axis = src_dev.axis
+        new_axis: int|None = src_axis
+        if self.op is Ops.PERMUTE:
+          # src_axis must be in marg for valid permute
+          new_axis = self.marg.index(src_axis) if src_axis in self.marg else None
+        elif self.op is Ops.RESHAPE:
+          arg_acc: list[sint] = list(itertools.accumulate(self.marg, operator.mul, initial=1))
+          calc_axis = len(arg_acc) - arg_acc[::-1].index(prod(self.src[0].shape[:src_axis])) - 1
+          # clamp to valid range
+          new_axis = calc_axis if calc_axis < len(self.marg) else None
+        elif self.op is Ops.REDUCE_AXIS:
+          if src_axis in self.arg[1]:
+            return tuple(src_dev.devices)  # reduced away, no longer sharded
+        if new_axis != src_axis:
+          return Sharding(src_dev.devices, new_axis) if new_axis is not None else tuple(src_dev.devices)
+        return src_dev
     for x in self.src:
       if x._device is not None: return x._device
     return None
@@ -668,7 +711,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     assert self.src[0].op is Ops.UNIQUE, f"buffer src[0] must be UNIQUE, not {self.src[0].op}"
     if (cret:=buffers.get(self)) is not None: return cret
     rdtype = self.dtype if isinstance(self.dtype, ImageDType) else self.dtype.base
-    if isinstance(self.device, tuple): ret = MultiBuffer(self.device, self.size, rdtype).ref(1)
+    from tinygrad.device import Sharding
+    if isinstance(self.device, (tuple, Sharding)): ret = MultiBuffer(self.device, self.size, rdtype).ref(1)
     else: ret = Buffer(self.device, self.size, rdtype).ref(1)
     buffers[self] = ret
     return ret
