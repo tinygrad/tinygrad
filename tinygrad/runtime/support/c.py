@@ -1,6 +1,6 @@
-import ctypes, functools, os, pathlib, re, sys, sysconfig
+import ctypes, functools, os, pathlib, re, struct, sys, sysconfig
+from tinygrad.helpers import cached_classproperty, ceildiv, getenv, mv_address, to_mv, DEBUG, OSX, WIN
 from _ctypes import _SimpleCData
-from tinygrad.helpers import ceildiv, getenv, mv_address, to_mv, DEBUG, OSX, WIN
 
 def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
   assert not WIN, "ioctl not supported"
@@ -36,7 +36,7 @@ def CEnum(typ: type[ctypes._SimpleCData]):
 
   return _CEnum
 
-class _CBuffer:
+class _CData:
   __slots__, SIZE = ('_mem_',), 0
 
   def __init__(self, src=None):
@@ -45,8 +45,10 @@ class _CBuffer:
 
   def __buffer__(self, flags): return self._mem_
 
-  @classmethod
-  @functools.cache # this should be a "cached_classproperty"
+  @property
+  def addr(self): return mv_address(self._mem_)
+
+  @cached_classproperty
   def _shadow(self): return type(f'{self.__class__.__name__}_shadow', (ctypes.Structure,), {'_fields_': [('a', ctypes.c_char * self.SIZE)]})
 
   @classmethod
@@ -54,30 +56,29 @@ class _CBuffer:
     if obj is None: return None
     assert isinstance(obj, cls)
     # TODO: remove this
-    return cls._shadow().from_buffer(obj._mem_)
+    return cls._shadow.from_buffer(obj._mem_)
 
-class Union(_CBuffer): pass
-class Struct(_CBuffer):
+  @classmethod
+  def from_buf(cls, src):
+    _CData.__init__(ret:=cls.__new__(cls), src)
+    return ret
+
+class Union(_CData): pass
+class Struct(_CData):
   __slots__ = ('_fields_',)
   def __init__(self, *args, **kwargs):
     super().__init__()
     for f,v in [*zip(self._fields_, args), *kwargs.items()]: setattr(self, f, v)
 
-  @classmethod
-  def from_buf(cls, src):
-    super(Struct, ret:=cls()).__init__(src)
-    return ret
-
 @functools.cache
 def Array(typ, cnt):
-  if (prim:=issubclass(typ, _SimpleCData)): stride = ctypes.sizeof(typ)
-  else: stride = typ.SIZE
+  stride = ctypes.sizeof(typ) if (prim:=issubclass(typ, _SimpleCData)) else typ.SIZE
 
   def chkidx(idx):
     if idx >= cnt or idx <= -cnt: raise IndexError(f"{idx} out of range")
     return cnt + idx if idx < 0 else idx
 
-  class _Array(_CBuffer):
+  class _Array(_CData):
     SIZE = stride * cnt
 
     def __init__(self, src=None):
@@ -109,19 +110,51 @@ def Array(typ, cnt):
       assert isinstance(obj, cls)
       return ctypes.c_void_p(mv_address(obj._mem_))
 
-  _Array.__name__ = f"Array_{typ if prim else typ.__name__}_Array_{cnt}"
+  _Array.__name__ = f"Array_{typ.__name__}_{cnt}"
   return _Array
 
-def field(off:int, typ:type[_CBuffer, _SimpleCData], bit_width=None, bit_off=0):
+class _Pointer(_CData):
+  SIZE, _shadow = struct.calcsize("P"), ctypes.c_void_p
+
+  def __init__(self, src=0):
+    super().__init__(bytearray((src if isinstance(src, int) else ctypes.addressof(src) if isinstance(src, _SimpleCData)
+                                else src.addr).to_bytes(self.SIZE, sys.byteorder)))
+    if isinstance(src, _CData): self.__dict__["contents"] = src
+
+  @property
+  def value(self): return struct.unpack("P", self._mem_)[0]
+
+  @classmethod
+  def from_param(cls, obj): return ctypes.c_void_p(obj.value)
+
+  @classmethod
+  def from_buf(cls, src): return cls(src)
+
+@functools.cache
+def Pointer(typ):
+  sz = ctypes.sizeof(typ) if (prim:=issubclass(typ, _SimpleCData)) else typ.SIZE
+  class PTR(_Pointer):
+    @property
+    def contents(self):
+      assert self.value, "null pointer dereference"
+      return typ.from_buffer(to_mv(self.value, sz)) if prim else typ.from_buf(self.value)
+
+  PTR.__name__ = f"Pointer_{typ.__name__}"
+  return PTR
+
+# replace this with a method once ctypes is removed completely
+def pointer(val): return Pointer(val.__class__)(val)
+
+def field(off:int, typ:type[_CData, _SimpleCData], bit_width=None, bit_off=0):
   if bit_width is not None:
     sl, set_mask = slice(off,off+(sz:=ceildiv(bit_width, 8))), ~((mask:=(1 << bit_width) - 1) << bit_off)
     # FIXME: signedness
     return property(lambda self: (int.from_bytes(self._mem_[sl], sys.byteorder) >> bit_off) & mask,
                     lambda self,v: self._mem_.__setitem__(sl, ((int.from_bytes(self._mem_[sl])&set_mask)|(v << bit_off)).to_bytes(sz, sys.byteorder)))
 
-  sl = slice(off, off + (typ.SIZE if issubclass(typ, _CBuffer) else ctypes.sizeof(typ)))
-  if issubclass(typ, _CBuffer): return property(lambda self: typ.from_buf(self._mem_[sl]),
-                                                lambda self, v: self._mem_.__setitem__(sl, bytes(v if isinstance(v, _CBuffer) else typ(v))))
+  sl = slice(off, off + (typ.SIZE if issubclass(typ, _CData) else ctypes.sizeof(typ)))
+  if issubclass(typ, _CData): return property(lambda self: typ.from_buf(self._mem_[sl]),
+                                                lambda self, v: self._mem_.__setitem__(sl, bytes(v if isinstance(v, _CData) else typ(v))))
   return property(lambda self: typ.from_buffer(self._mem_[sl]).value, lambda self, v: self._mem_.__setitem__(sl, bytes(typ(v))))
 
 class DLL(ctypes.CDLL):
@@ -160,16 +193,16 @@ class DLL(ctypes.CDLL):
     elif DEBUG >= 3: print(f"loading {nm} failed: not found on system")
 
   @functools.cache
-  def _get_func(self, name:str, args:tuple[_SimpleCData|_CBuffer], res:_SimpleCData|_CBuffer):
-    (fn:=getattr(self, name)).argtypes, fn.restype = args, (res if res is None or issubclass(res, _SimpleCData) else res._shadow())
+  def _get_func(self, name:str, args:tuple[_SimpleCData|_CData], res:_SimpleCData|_CData):
+    (fn:=getattr(self, name)).argtypes, fn.restype = args, (res if res is None or issubclass(res, _SimpleCData) else res._shadow)
     return fn
 
-  def bind(self, argtypes:tuple[_SimpleCData|_CBuffer], restype:_SimpleCData|_CBuffer):
+  def bind(self, argtypes:tuple[_SimpleCData|_CData], restype:_SimpleCData|_CData):
     def wrap(fn):
-      if restype is None or issubclass(restype, _SimpleCData):
-        def wrapper(*args): return self._get_func(fn.__name__, argtypes, restype)(*args)
-      else:
-        def wrapper(*args): return restype.from_buf(self._get_func(fn.__name__, argtypes, restype)(*args))
+      def wrapper(*args):
+        out = self._get_func(fn.__name__, argtypes, restype)(*(pointer(a) if issubclass(t, _Pointer) and not isinstance(a, _Pointer) else a
+                                                               for a,t in zip(args, argtypes)))
+        return out if restype is None or issubclass(restype, _SimpleCData) else restype.from_buf(out)
       return wrapper
     return wrap
 

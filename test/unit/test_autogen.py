@@ -1,6 +1,6 @@
 import ctypes, struct, subprocess, tempfile, unittest
 from tinygrad.helpers import WIN
-from tinygrad.runtime.support.c import Array, DLL, Struct, field
+from tinygrad.runtime.support.c import Array, DLL, Pointer, Struct, field, pointer
 from tinygrad.runtime.support.autogen import gen
 
 class TestAutogen(unittest.TestCase):
@@ -149,6 +149,41 @@ class TestAutogen(unittest.TestCase):
     o = test(Outer(Inner(10), 20))
     self.assertEqual(o.inner.a, 20)
     self.assertEqual(o.b, 10)
+
+  def test_pointer_interop(self):
+    src = """
+      int test(int *p) {
+        return (*p)++;
+      }
+    """
+    dll = self.compile(src)
+    @dll.bind((Pointer(ctypes.c_int),), ctypes.c_int)
+    def test(_): ...
+    self.assertEqual(test(pointer(i:=ctypes.c_int(10))), 10)
+    self.assertEqual(i.value, 11)
+
+  def test_struct_pointer_interop(self):
+    class Foo(Struct): SIZE = 8
+    Foo._fields_ = ['a', 'b']
+    Foo.a = field(0, ctypes.c_int)
+    Foo.b = field(4, ctypes.c_int)
+    src = """
+      struct foo { int a, b; };
+      struct foo *test(struct foo *f) {
+        int x = f->a;
+        f->a = f->b;
+        f->b = x;
+        return f;
+      }
+    """
+    dll = self.compile(src)
+    @dll.bind((Pointer(Foo),), Pointer(Foo))
+    def test(_): ...
+    inp = pointer(Foo(10, 20))
+    out = test(inp)
+    self.assertEqual(inp.value, out.value)
+    self.assertEqual(out.contents.a, 20)
+    self.assertEqual(out.contents.b, 10)
 
   @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_packed_structs(self):
