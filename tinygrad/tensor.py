@@ -1334,10 +1334,10 @@ class Tensor(OpMixin):
     print("\\n".join([repr(x.numpy()) for x in split]))
     ```
     """
-    assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
-    dim = self._resolve_dim(dim)
-    if isinstance(sizes, int): sizes = [min(sizes, self.shape[dim]-i) for i in range(0, max(1, self.shape[dim]), max(1, sizes))]
-    assert sum(sizes) == self.shape[dim], f"expect sizes to sum exactly to {self.shape[dim]}, but got {sum(sizes)}"
+    dim, dim_sz = self._resolve_dim(dim), self.shape[dim]
+    assert isinstance(dim_sz, int), f"does not support symbolic shape in split dimension {dim}: {self.shape}"
+    if isinstance(sizes, int): sizes = [min(sizes, dim_sz-i) for i in range(0, max(1, dim_sz), max(1, sizes))]
+    assert sum(sizes) == dim_sz, f"expect sizes to sum exactly to {dim_sz}, but got {sum(sizes)}"
     return tuple(self[sl] for sl in [tuple([slice(None)]*dim + [slice(sum(sizes[:i]), sum(sizes[:i + 1]))]) for i in range(len(sizes))])
 
   def chunk(self, chunks:int, dim:int=0) -> list[Tensor]:
@@ -1359,10 +1359,10 @@ class Tensor(OpMixin):
     print("\\n".join([repr(x.numpy()) for x in chunked]))
     ```
     """
-    assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
+    dim, dim_sz = self._resolve_dim(dim), self.shape[dim]
+    assert isinstance(dim_sz, int), f"does not support symbolic shape in split dimension {dim}: {self.shape}"
     assert chunks > 0, f"expect chunks to be greater than 0, got: {chunks}"
-    dim = self._resolve_dim(dim)
-    return list(self.split(ceildiv(self.shape[dim], chunks) if self.shape[dim] else [0]*chunks, dim=dim))
+    return list(self.split(ceildiv(dim_sz, chunks) if dim_sz else [0]*chunks, dim=dim))
 
   def unfold(self, dim:int, size:sint, step:int) -> Tensor:
     """
