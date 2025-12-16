@@ -259,6 +259,13 @@ class MathMixin:
     return self.alu(Ops.RECIPROCAL)
 
   def trunc(self):
+    """
+    Truncates the tensor element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5]).trunc().numpy())
+    ```
+    """
     return self.alu(Ops.TRUNC)
 
   def sqrt(self):
