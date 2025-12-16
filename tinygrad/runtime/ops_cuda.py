@@ -41,21 +41,31 @@ class CUDAProgram:
 
     check(cuda.cuCtxSetCurrent(self.dev.context))
     self.module = cuda.CUmodule()
-    error_log = ctypes.create_string_buffer(16384)
-    info_log = ctypes.create_string_buffer(16384)
-    options = (cuda.CUjit_option*4)(
-      cuda.CU_JIT_INFO_LOG_BUFFER, cuda.CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES,
-      cuda.CU_JIT_ERROR_LOG_BUFFER, cuda.CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES,
-    )
-    option_vals = (ctypes.c_void_p*4)(
-      ctypes.cast(info_log, ctypes.c_void_p), ctypes.c_void_p(len(info_log)),
-      ctypes.cast(error_log, ctypes.c_void_p), ctypes.c_void_p(len(error_log)),
-    )
-    status = cuda.cuModuleLoadDataEx(ctypes.byref(self.module), lib, len(options), options, option_vals)
+    info_log = error_log = None
+    status = None
+    try:
+      # Prefer the Ex path when available so we can surface JIT diagnostics.
+      info_log = ctypes.create_string_buffer(16384)
+      error_log = ctypes.create_string_buffer(16384)
+      info_sz = ctypes.c_uint(len(info_log))
+      err_sz  = ctypes.c_uint(len(error_log))
+      options = (cuda.CUjit_option*4)(
+        cuda.CU_JIT_INFO_LOG_BUFFER, cuda.CU_JIT_INFO_LOG_BUFFER_SIZE_BYTES,
+        cuda.CU_JIT_ERROR_LOG_BUFFER, cuda.CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES,
+      )
+      option_vals = (ctypes.c_void_p*4)(
+        ctypes.cast(info_log, ctypes.c_void_p), ctypes.cast(ctypes.byref(info_sz), ctypes.c_void_p),
+        ctypes.cast(error_log, ctypes.c_void_p), ctypes.cast(ctypes.byref(err_sz), ctypes.c_void_p),
+      )
+      status = cuda.cuModuleLoadDataEx(ctypes.byref(self.module), lib, 4, options, option_vals)
+    except Exception:
+      status = None
+    if status is None or status == cuda.CUDA_ERROR_NOT_INITIALIZED:
+      status = cuda.cuModuleLoadData(ctypes.byref(self.module), lib)
     if status != 0:
       del self.module
-      err = error_log.value.decode(errors="ignore").strip()
-      info = info_log.value.decode(errors="ignore").strip()
+      err = error_log.value.decode(errors="ignore").strip() if error_log is not None else ""
+      info = info_log.value.decode(errors="ignore").strip() if info_log is not None else ""
       logs = "\n".join([x for x in (err, info) if x])
       raise RuntimeError(f"module load failed with status code {status}: {cuda.CUresult.get(status)}" + (f"\n{logs}" if logs else ""))
     check(cuda.cuModuleGetFunction(ctypes.byref(prg := cuda.CUfunction()), self.module, name.encode("utf-8")))
