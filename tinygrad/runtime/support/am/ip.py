@@ -267,13 +267,10 @@ class AM_GFX(AM_IP):
       self._grbm_select(me=1, pipe=0, queue=0, inst=xcc)
       if self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1: self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2, inst=xcc) # 1 - DRAIN_PIPE; 2 - RESET_WAVES
       self._grbm_select(inst=xcc)
-
-    # TODO: fix warm boot on mi300
-    if self.adev.ip_ver[am.GC_HWIP] != (9,4,3):
-      for xcc in range(self.xccs): self.adev.regGCVM_CONTEXT0_CNTL.write(0, inst=xcc)
+    for xcc in range(self.xccs): self.adev.regGCVM_CONTEXT0_CNTL.write(0, inst=xcc)
 
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, doorbell:int, pipe:int, queue:int,
-                 aql:bool):
+                 aql:bool) -> int:
     for xcc in range(self.xccs if aql else 1):
       mqd = self.adev.mm.valloc(0x1000, uncached=True, contiguous=True)
 
@@ -308,6 +305,7 @@ class AM_GFX(AM_IP):
       self._grbm_select(inst=xcc)
 
       self.adev.reg(f"regCP_ME1_PIPE{pipe}_INT_CNTL").update(time_stamp_int_enable=1, generic0_int_enable=1, inst=xcc)
+    return 0
 
   def set_clockgating_state(self):
     if hasattr(self.adev, 'regMM_ATC_L2_MISC_CG'): self.adev.regMM_ATC_L2_MISC_CG.write(enable=1, mem_ls_enable=1)
@@ -426,7 +424,7 @@ class AM_SDMA(AM_IP):
       time.sleep(0.01)
       self.adev.regGRBM_SOFT_RESET.write(0x0)
 
-  def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, doorbell:int, pipe:int, queue:int):
+  def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, doorbell:int, pipe:int, queue:int) -> int:
     # Setup the ring
     reg, inst = ("regSDMA_GFX", pipe*4+queue) if self.adev.ip_ver[am.SDMA0_HWIP] == (4,4,2) else (f"regSDMA{pipe}_QUEUE{queue}", 0)
 
@@ -442,6 +440,7 @@ class AM_SDMA(AM_IP):
     self.adev.reg(f"{reg}_RB_CNTL").write(**({f'{self.sdma_name.lower()}_wptr_poll_enable':1} if self.adev.ip_ver[am.SDMA0_HWIP] != (4,4,2) else {}),
       rb_vmid=0, rptr_writeback_enable=1, rptr_writeback_timer=4, rb_enable=1, rb_priv=1, rb_size=(ring_size//4).bit_length()-1, inst=inst)
     self.adev.reg(f"{reg}_IB_CNTL").update(ib_enable=1, inst=inst)
+    return self.adev.reg(f"{reg}_RB_WPTR").read() | (self.adev.reg(f"{reg}_RB_WPTR_HI").read() << 32)
 
 class AM_PSP(AM_IP):
   def init_sw(self):
