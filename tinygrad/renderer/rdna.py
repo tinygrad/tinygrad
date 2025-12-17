@@ -965,15 +965,11 @@ class RDNARenderer(Renderer):
 
     # === DEFERRED STORE ADDRESS COMPUTATION ===
     # Pre-scan to identify INDEX ops that are ONLY used by global STOREs
-    # These can have their address computed inline at store time, saving VGPRs
+    # These can defer address allocation to save VGPRs during computation
     store_only_indices: set[UOp] = set()
     index_users: dict[UOp, list[UOp]] = {}  # INDEX -> list of users
-    # For inline address computation: track stores with pattern SHL(ADD(base, CONST), 2)
-    # These can share the base VGPR and compute offset inline
-    store_inline_addr: dict[UOp, tuple[UOp, int]] = {}  # INDEX -> (base_uop, const_offset)
-    store_addr_skip_alloc: set[UOp] = set()  # ALU ops to skip allocation for (ADD, SHL in pattern)
 
-    # First pass: collect all INDEX ops for global memory (src[0] is DEFINE_GLOBAL)
+    # First pass: collect all INDEX ops for global memory and track users
     for u in uops:
       if u.op is Ops.INDEX and len(u.src) >= 1:
         src0_dtype = u.src[0].dtype
@@ -993,34 +989,52 @@ class RDNARenderer(Renderer):
       all_stores = all(u.op is Ops.STORE for u in users)
       if all_stores:
         store_only_indices.add(idx_op)
-        # Check for inline address pattern: idx = SHL(ADD(base, CONST), CONST(2))
-        idx = idx_op.src[1]
-        if idx.op is Ops.SHL and len(idx.src) == 2:
-          shift_val = idx.src[1]
-          add_op = idx.src[0]
-          if shift_val.op is Ops.CONST and shift_val.arg == 2 and add_op.op is Ops.ADD:
-            add_left, add_right = add_op.src
-            if add_right.op is Ops.CONST:
-              # Pattern: SHL(ADD(base, CONST), 2) - can compute inline
-              store_inline_addr[idx_op] = (add_left, add_right.arg)
-              store_addr_skip_alloc.add(idx)  # Skip SHL
-              store_addr_skip_alloc.add(add_op)  # Skip ADD
-            elif add_left.op is Ops.CONST:
-              # Pattern: SHL(ADD(CONST, base), 2) - can compute inline
-              store_inline_addr[idx_op] = (add_right, add_left.arg)
-              store_addr_skip_alloc.add(idx)
-              store_addr_skip_alloc.add(add_op)
 
-    # Shared temp VGPR for deferred store address computation
-    store_addr_vgpr: str|None = None
+    # Third pass: identify SHL(ADD(base, const), shift) ops used ONLY by store-only indices
+    # These can be recomputed inline at store time, saving VGPRs
+    recomputable_shls: set[UOp] = set()
+    uop_users: dict[UOp, list[UOp]] = {}  # Track UOp users
+    for u in uops:
+      for src in u.src:
+        if src not in uop_users:
+          uop_users[src] = []
+        uop_users[src].append(u)
+    # Track base UOps that need extended liveness (for recomputation at store time)
+    recompute_base_uops: set[UOp] = set()
+    for idx_op in store_only_indices:
+      if len(idx_op.src) > 1:
+        byte_offset = idx_op.src[1]
+        # Check if it's SHL(ADD(a, b), shift) - handles both ADD(base, CONST) and ADD(reg, reg) patterns
+        if (byte_offset.op is Ops.SHL and len(byte_offset.src) == 2 and
+            byte_offset.src[0].op is Ops.ADD and byte_offset.src[1].op is Ops.CONST):
+          add_op = byte_offset.src[0]
+          # Check if this SHL is ONLY used by store-only indices
+          shl_users = uop_users.get(byte_offset, [])
+          if all(user in store_only_indices for user in shl_users):
+            recomputable_shls.add(byte_offset)
+            # Check if ADD has a constant operand (either position) - these can skip allocation
+            if len(add_op.src) == 2 and (add_op.src[0].op is Ops.CONST or add_op.src[1].op is Ops.CONST):
+              # Also mark the ADD as skippable if only used by this SHL
+              add_users = uop_users.get(add_op, [])
+              if all(user == byte_offset or user in store_only_indices for user in add_users):
+                recomputable_shls.add(add_op)
+              # Track the base UOp (non-constant operand of ADD) for liveness extension
+              base_uop = add_op.src[1] if add_op.src[0].op is Ops.CONST else add_op.src[0]
+              recompute_base_uops.add(base_uop)
+            else:
+              # ADD(reg, reg) pattern - need to extend liveness of BOTH operands
+              for src in add_op.src:
+                if src.op is not Ops.CONST:
+                  recompute_base_uops.add(src)
 
-    def get_store_addr_vgpr() -> str:
-      """Get or allocate a shared VGPR for store address computation"""
-      nonlocal store_addr_vgpr, next_vgpr, max_vgpr
-      if store_addr_vgpr is None:
-        # Allocate a single VGPR for all store address computations
-        store_addr_vgpr = alloc_vgpr(uops[0])  # Use first UOp as owner (doesn't matter)
-      return store_addr_vgpr
+    # Extend liveness of base UOps to the end of the kernel (they're needed for store-time recomputation)
+    if recompute_base_uops:
+      max_uop_pos = len(uops) - 1
+      for base_uop in recompute_base_uops:
+        last_use[base_uop] = max_uop_pos
+
+    # Shared temp VGPR for deferred store address computation (allocated lazily, reused for all stores)
+    deferred_store_addr_vgpr: str | None = None
 
     def get_half16_range(vec_uop: UOp) -> str:
       """Lazily allocate the 8-VGPR range for a half16 VECTORIZE"""
@@ -1250,26 +1264,43 @@ class RDNARenderer(Renderer):
       elif u.op is Ops.END:
         r[u] = "vcc_lo"  # comparison result
       elif u.op in GroupOp.ALU or u.op in {Ops.CAST, Ops.BITCAST}:
-        # Skip allocation for ALU ops that will be computed inline at store time
-        if u in store_addr_skip_alloc:
-          r[u] = "INLINE_STORE_ADDR"
-          continue  # Skip rendering - will be computed inline at store
+        # Skip allocation for SHL/ADD ops that will be recomputed inline at store time
+        if u in recomputable_shls:
+          r[u] = "RECOMPUTE_AT_STORE"
+          continue
         # Check if any source needs a wait
         for src in u.src:
           if src in pending_waits:
             kernel.append("s_waitcnt vmcnt(0) lgkmcnt(0)")
             pending_waits.clear()
             break
-        # Only direct comparison ops go to SGPR; other bool ops stay in VGPR
-        # because their inputs might be in VGPR (from memory loads)
-        if u.dtype == dtypes.bool and u.op in {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ}:
-          r[u] = alloc_sgpr(u)  # comparison results go in SGPR
-        elif isinstance(u.dtype, DType) and u.dtype.count > 1:
-          # Vector types need contiguous register ranges - size based on total bytes
-          vgpr_count = (u.dtype.itemsize + 3) // 4  # Round up to 32-bit chunks
-          r[u] = alloc_vgpr_range(u, vgpr_count)
-        else:
-          r[u] = alloc_vgpr_pair(u) if needs_vgpr_pair(u.dtype) else alloc_vgpr(u)
+        # CAST optimization: reuse source register when this is its last use and dest fits
+        # This avoids allocating 128 extra VGPRs for float32→half conversions
+        cast_reused_src = False
+        if u.op is Ops.CAST and len(u.src) == 1:
+          src = u.src[0]
+          src_reg = r.get(src)
+          # Can reuse if: single VGPR source, this is last use, dest fits in 32 bits
+          if (src_reg and isinstance(src_reg, str) and src_reg.startswith('v') and '[' not in src_reg
+              and last_use.get(src, -1) == i and isinstance(u.dtype, DType) and u.dtype.itemsize <= 4):
+            r[u] = src_reg  # Reuse source register - in-place conversion
+            # Mark source as freed since we're taking over its register
+            reg_num = int(src_reg[1:])
+            if reg_num in vgpr_owner:
+              del vgpr_owner[reg_num]
+            cast_reused_src = True
+        # Only allocate if we didn't already reuse source register for CAST
+        if not cast_reused_src:
+          # Only direct comparison ops go to SGPR; other bool ops stay in VGPR
+          # because their inputs might be in VGPR (from memory loads)
+          if u.dtype == dtypes.bool and u.op in {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ}:
+            r[u] = alloc_sgpr(u)  # comparison results go in SGPR
+          elif isinstance(u.dtype, DType) and u.dtype.count > 1:
+            # Vector types need contiguous register ranges - size based on total bytes
+            vgpr_count = (u.dtype.itemsize + 3) // 4  # Round up to 32-bit chunks
+            r[u] = alloc_vgpr_range(u, vgpr_count)
+          else:
+            r[u] = alloc_vgpr_pair(u) if needs_vgpr_pair(u.dtype) else alloc_vgpr(u)
       elif u.op is Ops.IF:
         r[u] = alloc_sgpr(u)
       elif u.op is Ops.WMMA:
@@ -1350,32 +1381,44 @@ class RDNARenderer(Renderer):
             pending_waits.clear()
             break
 
-        # Handle deferred store address computation
+        # Handle deferred store address computation - reuse single shared temp VGPR
         if u.src[0].op is Ops.INDEX and r.get(u.src[0]) == "DEFERRED_STORE_ADDR":
           index_op = u.src[0]
           buf, idx = index_op.src[0], index_op.src[1]
-          addr_vgpr = get_store_addr_vgpr()
-
-          # Check for inline address pattern: (base + const) << 2
-          if index_op in store_inline_addr:
-            base_uop, const_offset = store_inline_addr[index_op]
-            base_reg = r[base_uop]
-            # Compute: addr = (base + const_offset) << 2 = (base << 2) + (const_offset << 2)
-            byte_offset = const_offset << 2  # Pre-compute constant byte offset
-            if byte_offset == 0:
-              kernel.append(f"v_lshlrev_b32 {addr_vgpr}, 2, {base_reg}")
+          # Use shared temp VGPR for all deferred store addresses (stores are sequential)
+          if deferred_store_addr_vgpr is None:
+            deferred_store_addr_vgpr = alloc_vgpr(index_op)  # Only allocate once
+          # Compute the byte offset - detect pattern SHL(ADD(base, const), shift) for inline recompute
+          if idx.op is Ops.CONST and idx.arg == 0:
+            kernel.append(f"v_mov_b32 {deferred_store_addr_vgpr}, 0")
+          elif idx.op is Ops.SHL and idx.src[0].op is Ops.ADD and idx.src[1].op is Ops.CONST:
+            # Pattern: SHL(ADD(base, offset), shift) - recompute inline to avoid holding SHL result
+            add_op = idx.src[0]
+            shift_val = idx.src[1].arg
+            add_src0, add_src1 = add_op.src[0], add_op.src[1]
+            # Handle both ADD(base, const) and ADD(const, base)
+            if add_src1.op is Ops.CONST:
+              const_val, base_uop = add_src1.arg, add_src0
+            elif add_src0.op is Ops.CONST:
+              const_val, base_uop = add_src0.arg, add_src1
             else:
-              # v_lshl_add_u32: dst = (src0 << src1) + src2
-              kernel.append(f"v_lshl_add_u32 {addr_vgpr}, {base_reg}, 2, {byte_offset}")
-          # Fallback: compute address from pre-computed idx
-          elif idx.op is Ops.CONST and idx.arg == 0:
-            kernel.append(f"v_mov_b32 {addr_vgpr}, 0")
+              const_val, base_uop = None, None
+            if const_val is not None:
+              # ADD(base, const) - use v_lshl_add_u32 to compute (base << shift) + (const << shift)
+              base_reg = r.get(base_uop)
+              if base_reg and isinstance(base_reg, str) and base_reg.startswith('v'):
+                kernel.append(f"v_lshl_add_u32 {deferred_store_addr_vgpr}, {base_reg}, {shift_val}, {const_val << shift_val}")
+              else:
+                # Fallback: copy from pre-computed
+                kernel.append(f"v_mov_b32 {deferred_store_addr_vgpr}, {r[idx]}")
+            else:
+              # ADD(reg, reg) - compute ADD then SHL
+              kernel.append(f"v_add_nc_u32 {deferred_store_addr_vgpr}, {r[add_src0]}, {r[add_src1]}")
+              kernel.append(f"v_lshlrev_b32 {deferred_store_addr_vgpr}, {shift_val}, {deferred_store_addr_vgpr}")
           else:
-            # idx is already the byte offset (computed at UOp level by rdna_matcher)
-            kernel.append(f"v_mov_b32 {addr_vgpr}, {r[idx]}")
-
+            kernel.append(f"v_mov_b32 {deferred_store_addr_vgpr}, {r[idx]}")
           # Update r[index_op] to point to the temp VGPR so pattern matcher can use it
-          r[index_op] = addr_vgpr
+          r[index_op] = deferred_store_addr_vgpr
 
       # Render the instruction
       if (l:=cast(str|list[str], string_rewrite.rewrite(u, ctx=self))) is None:
