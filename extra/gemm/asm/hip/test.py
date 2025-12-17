@@ -6,7 +6,8 @@ from tinygrad.helpers import system, temp, getenv
 # ** assemble
 
 if getenv("ASM", 0): # TODO: still broken
-  asm = pathlib.Path(__file__).parent.parent/"gemm"
+  asm = pathlib.Path(__file__).parent.parent/"gemm.s"
+  if getenv("MIN"): asm = asm.parent/"gemm_min.s"
   system(f"clang -x assembler -target amdgcn-amd-amdhsa -mcpu=gfx950 -mcode-object-version=5 -c {str(asm)} -o {temp('test.o')}")
   system(f"ld.lld -shared -o {temp('test.hsaco')} {temp('test.o')}")
   with open(temp('test.hsaco'), 'rb') as f: lib:bytes = f.read()

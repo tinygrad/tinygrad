@@ -1,7 +1,7 @@
 .amdgcn_target "amdgcn-amd-amdhsa--gfx950"
 
 .text
-.globl gemm
+.global gemm
 .p2align 8
 .type gemm,@function
 
