@@ -396,7 +396,7 @@ class Tensor(OpMixin):
     print(t.shard((t.device, t.device), axis=1).uop)
     ```
     """
-    assert isinstance(self.device, str), "can't shard a MultiLazyBuffer"
+    if not isinstance(self.device, str): raise RuntimeError("can't shard a MultiLazyBuffer")
     if len(devices) == 1: return self.to(devices[0])
     devices = tuple(canonicalize_device(x) for x in devices)
     mlb = self.uop.shard(devices, self._resolve_dim(axis)) if axis is not None else self.uop.copy_to_device(devices)
@@ -407,6 +407,13 @@ class Tensor(OpMixin):
     Shards the tensor across the given devices in place.
     """
     return self.replace(self.shard(devices, axis))
+
+  def shard_like(self, y:Tensor) -> Tensor:
+    """
+    Shards the tensor the same way as `y` (same devices and axis).
+    """
+    if isinstance(y.device, str): return self.to(y.device)
+    return self if isinstance(self.device, tuple) and (y.device, y.uop.axis) == (self.device, self.uop.axis) else self.shard(y.device, y.uop.axis)
 
   CHUNK_SIZE = 2**20
   def fs_load(self, size:int) -> Tensor:
