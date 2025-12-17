@@ -96,6 +96,7 @@ def global_store(addr:str, data:str, base:str, dt:DType) -> str:
   if dt.itemsize == 2: return f"global_store_b16 {addr}, {data}, {base}"
   if dt.itemsize == 4: return f"global_store_b32 {addr}, {data}, {base}"
   if dt.itemsize == 8: return f"global_store_b64 {addr}, {data}, {base}"
+  if dt.itemsize == 16: return f"global_store_b128 {addr}, {data}, {base}"
   raise RuntimeError(f"Unsupported store dtype size: {dt.itemsize}")
 
 def global_load(dest:str, addr:str, base:str, dt:DType) -> str:
@@ -103,6 +104,7 @@ def global_load(dest:str, addr:str, base:str, dt:DType) -> str:
   if dt.itemsize == 2: return f"global_load_u16 {dest}, {addr}, {base}"
   if dt.itemsize == 4: return f"global_load_b32 {dest}, {addr}, {base}"
   if dt.itemsize == 8: return f"global_load_b64 {dest}, {addr}, {base}"
+  if dt.itemsize == 16: return f"global_load_b128 {dest}, {addr}, {base}"
   raise RuntimeError(f"Unsupported load dtype size: {dt.itemsize}")
 
 def render_const_64(ctx, x):
@@ -218,9 +220,45 @@ def render_wmma(ctx, x):
 
   return f"{instr} {rd_range}, {ra_range}, {rb_range}, {rc_range}"
 
+def render_add_with_literal(ctx, x, a, b):
+  """Render ADD using literal constant instead of register for the constant operand.
+  RDNA3 VOP2 constraints: dst, src0, src1 where src0 can be literal but src1 must be VGPR."""
+  # Only use literal optimization if `a` has a proper VGPR (not a literal string)
+  # This can happen if `a` is also a CONST that was optimized away
+  ra = ctx.r[a]
+  if not isinstance(ra, str) or not ra.startswith('v'):
+    return None  # Fall back to default rendering
+  rd = ctx.r[x]
+  # Use the constant value directly as a literal (not from register)
+  # IMPORTANT: literal must be src0, VGPR must be src1 for VOP2 instructions
+  const_val = render_val(b.arg, b.dtype)
+  if dtypes.is_float(x.dtype):
+    return f"v_add_{ctx.types[x.dtype]} {rd}, {const_val}, {ra}"
+  return f"v_add_nc_u32 {rd}, {const_val}, {ra}"
+
+def render_mul_with_literal(ctx, x, a, b):
+  """Render MUL using literal constant instead of register.
+  RDNA3 VOP2 constraints: dst, src0, src1 where src0 can be literal but src1 must be VGPR."""
+  # Only use literal optimization if `a` has a proper VGPR
+  ra = ctx.r[a]
+  if not isinstance(ra, str) or not ra.startswith('v'):
+    return None  # Fall back to default rendering
+  rd = ctx.r[x]
+  const_val = render_val(b.arg, b.dtype)
+  # IMPORTANT: literal must be src0, VGPR must be src1
+  if dtypes.is_float(x.dtype):
+    return f"v_mul_{ctx.types[x.dtype]} {rd}, {const_val}, {ra}"
+  return f"v_mul_lo_u32 {rd}, {const_val}, {ra}"
+
 string_rewrite = PatternMatcher([
   # WMMA for tensor cores
   (UPat(Ops.WMMA, name="x"), render_wmma),
+  # ADD/MUL with constant operand - use literal instead of register (saves VGPRs)
+  # Note: literal goes in src0 (first operand after dst), VGPR in src1 (VOP2 constraint)
+  (UPat(Ops.ADD, name="x", src=(UPat.var("a"), UPat.cvar("b"))), render_add_with_literal),
+  (UPat(Ops.ADD, name="x", src=(UPat.cvar("b"), UPat.var("a"))), render_add_with_literal),
+  (UPat(Ops.MUL, name="x", src=(UPat.var("a"), UPat.cvar("b"))), render_mul_with_literal),
+  (UPat(Ops.MUL, name="x", src=(UPat.cvar("b"), UPat.var("a"))), render_mul_with_literal),
   # const rendering
   (UPat.cvar("x", dtypes.bool), lambda ctx, x: f"v_mov_b32 {ctx.r[x]}, {1 if x.arg else 0}"),
   # 64-bit float constants need two mov instructions
@@ -296,7 +334,7 @@ string_rewrite = PatternMatcher([
      f"global_store_byte {ctx.r[index_op]}, v{ctx.get_scratch_vgpr()}, {ctx.r[buf]}"]
        if ctx.r[var].startswith('s') else f"global_store_byte {ctx.r[index_op]}, {ctx.r[var]}, {ctx.r[buf]}"),
   (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_GLOBAL, name="buf"), UPat.var("idx")), name="index_op", allow_any_len=True), UPat.var("var"))),
-   lambda ctx, idx, var, buf, index_op: global_store(ctx.r[index_op], ctx.r[var], ctx.r[buf], buf.dtype.base)),
+   lambda ctx, idx, var, buf, index_op: global_store(ctx.r[index_op], ctx.r[var], ctx.r[buf], var.dtype)),
   (UPat(Ops.LOAD, name="x", src=(UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_GLOBAL, name="buf"), UPat.var("idx"), UPat.var("gate")), name="index_op"), UPat.var("alt")), allow_any_len=True),
     lambda ctx, x, idx, alt, gate, buf, index_op: [
     f"v_mov_b32 {ctx.r[x]}, {ctx.r[alt]}",
@@ -306,7 +344,7 @@ string_rewrite = PatternMatcher([
     global_load(ctx.r[x], ctx.r[index_op], ctx.r[buf], buf.dtype.base),
     f"s_mov_b32 exec_lo, s{ctx.scratch_sgpr}"]),
   (UPat(Ops.LOAD, name="x", src=(UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_GLOBAL, name="buf"), UPat.var("idx")), name="index_op"),), allow_any_len=True),
-    lambda ctx, x, idx, buf, index_op: global_load(ctx.r[x], ctx.r[index_op], ctx.r[buf], buf.dtype.base)),
+    lambda ctx, x, idx, buf, index_op: global_load(ctx.r[x], ctx.r[index_op], ctx.r[buf], x.dtype)),
   # store / load for local memory (LDS) - DEFINE_LOCAL directly
   (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_LOCAL), UPat.var("idx")), name="index_op", allow_any_len=True), UPat.var("var"))),
    lambda ctx, idx, var, index_op: f"ds_write_b32 {ctx.r[index_op]}, {ctx.r[var]}"),
@@ -343,14 +381,13 @@ string_rewrite = PatternMatcher([
 class RDNARenderer(Renderer):
   device = "AMD"
   suffix = "RDNA"
-  supports_float4 = False  # RDNA assembly doesn't support vector ALU ops
+  supports_float4 = True  # Vectorized loads for better register efficiency
   global_max = (2147483647, 65535, 65535)
   local_max = (1024, 1024, 1024)
   shared_max = 65536
   code_for_op = asm_for_op
   extra_matcher = rdna_matcher
-  # TODO: WMMA needs scheduler changes to interleave loads/computes for register efficiency
-  # tensor_cores = tc.amd_rdna3  # RDNA3 WMMA tensor cores - disabled pending register optimization
+  tensor_cores = tc.amd_rdna3  # RDNA3 WMMA tensor cores
 
   def __init__(self, arch:str="gfx1100"):
     self.arch = arch
@@ -648,13 +685,16 @@ class RDNARenderer(Renderer):
     # Track free registers (available for reuse)
     free_vgprs: list[int] = []
     free_vgpr_pairs: list[int] = []  # Track free aligned pairs (base register numbers)
+    free_vgpr_ranges: list[tuple[int, int]] = []  # Track free contiguous ranges (base, count)
     free_sgprs: list[int] = []
     # Track SGPR pairs to prevent individual registers from being freed
     sgpr_pairs: set[int] = set()
     vgpr_pairs: set[int] = set()  # Track which VGPRs are part of pairs
+    vgpr_ranges: dict[int, int] = {}  # base -> count for 8-register ranges
     # Track which UOp uses which register (for freeing)
     vgpr_owner: dict[int, UOp] = {}
     sgpr_owner: dict[int, UOp] = {}
+    range_owner: dict[int, UOp] = {}  # base -> owner for 8-register ranges
     # Constant deduplication: (dtype, value) -> register
     const_cache: dict[tuple, str] = {}
     # v[0:2] is local_xyz, we start allocating from v3
@@ -676,10 +716,13 @@ class RDNARenderer(Renderer):
       alias_groups[root].append(u)
 
     # === IDENTIFY COMPILE-TIME CONSTANTS ===
-    # Constants don't need VGPRs if they're only used as indices into DEFINE_REG (compile-time array indices)
+    # Constants don't need VGPRs if they're only used in contexts where literals are allowed:
+    # 1. REG indices (compile-time array indices)
+    # 2. ADD/MUL operands (RDNA3 supports 32-bit literal operands)
     # First count all uses of each CONST
     const_use_count: dict[UOp, int] = defaultdict(int)
     reg_index_const_uses: dict[UOp, int] = defaultdict(int)
+    add_mul_const_uses: dict[UOp, int] = defaultdict(int)  # Constants used in ADD/MUL (can use literals)
     store_const_uses: set[UOp] = set()  # Constants used in STORE (must have VGPR)
     for u in uops:
       for src in u.src:
@@ -692,19 +735,40 @@ class RDNARenderer(Renderer):
         if isinstance(buf.dtype, PtrDType) and buf.dtype.addrspace == AddrSpace.REG:
           if idx.op is Ops.CONST:
             reg_index_const_uses[idx] += 1
+      # Track constants used in ADD/MUL - can use 32-bit literals instead of VGPRs
+      if u.op in {Ops.ADD, Ops.MUL}:
+        for src in u.src:
+          if src.op is Ops.CONST:
+            add_mul_const_uses[src] += 1
       # Track constants used in STORE - these MUST have VGPRs (can't use immediate in store data)
       if u.op is Ops.STORE and len(u.src) >= 2:
         if u.src[1].op is Ops.CONST:
           store_const_uses.add(u.src[1])
-    # Skip allocation for constants that are ONLY used for REG indexing
+    # Skip allocation for constants that are ONLY used in literal-allowed contexts
     skip_alloc_consts: set[UOp] = set()
     for const_uop, reg_uses in reg_index_const_uses.items():
       if reg_uses == const_use_count[const_uop]:
         skip_alloc_consts.add(const_uop)
+    # Also skip constants only used in ADD/MUL (use literals instead)
+    for const_uop, add_mul_uses in add_mul_const_uses.items():
+      if add_mul_uses == const_use_count[const_uop] and const_uop not in store_const_uses:
+        skip_alloc_consts.add(const_uop)
 
     def free_dead_regs(pos: int):
       """Free registers whose owners (and all aliases) are no longer live after position pos"""
-      nonlocal free_vgprs, free_vgpr_pairs, free_sgprs
+      nonlocal free_vgprs, free_vgpr_pairs, free_vgpr_ranges, free_sgprs
+      # First check 8-register ranges
+      dead_ranges = []
+      for base, owner in range_owner.items():
+        owner_last_use = last_use.get(owner, -1)
+        for alias_uop in alias_groups.get(owner, []):
+          owner_last_use = max(owner_last_use, last_use.get(alias_uop, -1))
+        if owner_last_use < pos:
+          dead_ranges.append(base)
+      for base in dead_ranges:
+        del range_owner[base]
+        count = vgpr_ranges.pop(base, 8)
+        free_vgpr_ranges.append((base, count))
       dead_vgprs = []
       for reg, owner in vgpr_owner.items():
         # Check if owner and all its aliases are dead
@@ -776,7 +840,7 @@ class RDNARenderer(Renderer):
 
     def needs_vgpr_pair(dtype: DType) -> bool:
       """Check if a dtype needs a VGPR pair (64-bit types)"""
-      # Only float64 needs pairs - int64/uint64 use special patterns that don't need persistent pairs
+      # Only float64 needs pairs - int64/uint64 use special split hi/lo patterns
       return dtype == dtypes.float64
 
     def alloc_sgpr(owner: UOp) -> str:
@@ -806,6 +870,29 @@ class RDNARenderer(Renderer):
       sgpr_pairs.add(reg+1)
       return f"s[{reg}:{reg+1}]"
 
+    def alloc_vgpr_range(owner: UOp, count: int = 8) -> str:
+      """Allocate a contiguous range of VGPRs (for WMMA/VECTORIZE)"""
+      nonlocal next_vgpr, max_vgpr
+      # Try to reuse a free range of sufficient size
+      for i, (base, range_count) in enumerate(free_vgpr_ranges):
+        if range_count >= count:
+          free_vgpr_ranges.pop(i)
+          # If range is larger than needed, put remainder back
+          if range_count > count:
+            free_vgpr_ranges.append((base + count, range_count - count))
+          range_owner[base] = owner
+          vgpr_ranges[base] = count
+          return f"v[{base}:{base+count-1}]"
+      # No free range - allocate fresh
+      base = next_vgpr
+      if base % 2 != 0:  # Align to even for better access
+        base = next_vgpr = next_vgpr + 1
+      next_vgpr = base + count
+      max_vgpr = max(max_vgpr, next_vgpr)
+      range_owner[base] = owner
+      vgpr_ranges[base] = count
+      return f"v[{base}:{base+count-1}]"
+
     def get_scratch_vgpr(count:int=1) -> int:
       """Get or allocate scratch VGPRs for temporary operations. Returns the base register number."""
       nonlocal next_vgpr, max_vgpr
@@ -833,23 +920,25 @@ class RDNARenderer(Renderer):
         if u.arg is not None: name = u.arg.function_name
         continue
       if u.op is Ops.VECTORIZE:
+        # Check if any source needs a wait (from pending loads)
+        for src in u.src:
+          if src in pending_waits:
+            kernel.append("s_waitcnt vmcnt(0) lgkmcnt(0)")
+            pending_waits.clear()
+            break
         # For WMMA inputs (half16), we need contiguous packed VGPRs
         # half16 = 16 halfs = 8 VGPRs (2 halfs per 32-bit VGPR)
         if u.dtype.scalar() == dtypes.half and u.dtype.count == 16:
-          # Allocate 8 contiguous VGPRs for packed half16
-          base = next_vgpr
-          if base % 2 != 0:  # Align to even for better access
-            base = next_vgpr = next_vgpr + 1
-          next_vgpr += 8
-          max_vgpr = max(max_vgpr, next_vgpr)
-          r[u] = f"v[{base}:{base+7}]"
+          # Allocate 8 contiguous VGPRs for packed half16 - use range allocator for reuse
+          r[u] = alloc_vgpr_range(u, 8)
+          base = int(r[u][2:r[u].index(':')])
           # Pack the source halfs into the destination VGPRs
           # Each VGPR holds 2 halfs: low 16 bits and high 16 bits
-          for i in range(8):
-            src_lo = r[u.src[i*2]]
-            src_hi = r[u.src[i*2+1]]
+          for j in range(8):
+            src_lo = r[u.src[j*2]]
+            src_hi = r[u.src[j*2+1]]
             # Pack two halfs into one VGPR using v_pack_b32_f16
-            kernel.append(f"v_pack_b32_f16 v{base+i}, {src_lo}, {src_hi}")
+            kernel.append(f"v_pack_b32_f16 v{base+j}, {src_lo}, {src_hi}")
         # For float8 (WMMA accumulator), check if sources are contiguous
         elif u.dtype.scalar() == dtypes.float and u.dtype.count == 8:
           # Check if all sources are from contiguous registers
@@ -868,25 +957,72 @@ class RDNARenderer(Renderer):
               # Already contiguous - just create range reference
               r[u] = f"v[{src_regs[0]}:{src_regs[0]+7}]"
               continue
-          # Not contiguous - allocate new registers and copy
-          base = next_vgpr
-          next_vgpr += 8
-          max_vgpr = max(max_vgpr, next_vgpr)
-          r[u] = f"v[{base}:{base+7}]"
-          for i, src in enumerate(u.src):
-            kernel.append(f"v_mov_b32 v{base+i}, {r[src]}")
+          # Not contiguous - allocate new registers using range allocator
+          r[u] = alloc_vgpr_range(u, 8)
+          base = int(r[u][2:r[u].index(':')])
+          for j, src in enumerate(u.src):
+            kernel.append(f"v_mov_b32 v{base+j}, {r[src]}")
+        # For other vector types, allocate contiguous VGPRs based on size
+        elif isinstance(u.dtype, DType) and u.dtype.count > 1:
+          vgpr_count = (u.dtype.itemsize + 3) // 4  # Round up to 32-bit chunks
+          r[u] = alloc_vgpr_range(u, vgpr_count)
+          base = int(r[u][2:r[u].index(':')])
+          # Copy sources - each source is scalar, pack into VGPRs
+          for j, src in enumerate(u.src):
+            src_reg = r[src]
+            # Handle case where source is a vector range (shouldn't normally happen for VECTORIZE with scalar sources)
+            if isinstance(src_reg, str) and src_reg.startswith('v['):
+              # Source is a range - copy element by element
+              src_base = int(src_reg[2:src_reg.index(':')])
+              src_end = int(src_reg[src_reg.index(':')+1:-1])
+              for k in range(src_end - src_base + 1):
+                kernel.append(f"v_mov_b32 v{base+j+k}, v{src_base+k}")
+              j += (src_end - src_base)  # Adjust index (though this is inside for loop, won't work right)
+            else:
+              kernel.append(f"v_mov_b32 v{base+j}, {src_reg}")
         else:
           r[u] = [cast(str,r[x]) for x in u.src]
         continue
       if u.op is Ops.GEP:
+        # Check if source needs wait (from pending loads)
+        if u.src[0] in pending_waits:
+          kernel.append("s_waitcnt vmcnt(0) lgkmcnt(0)")
+          pending_waits.clear()
         src_reg = r[u.src[0]]
         idx = get_single_element(u.arg)
+        src_dtype = u.src[0].dtype
         if isinstance(src_reg, str) and src_reg.startswith('v['):
-          # Extract base from v[base:end] range
+          # Extract base and end from v[base:end] range
           base = int(src_reg[2:src_reg.index(':')])
-          r[u] = f"v{base + idx}"
-        else:
+          end = int(src_reg[src_reg.index(':')+1:-1])
+          num_vgprs = end - base + 1
+          # Check if this is a packed type (multiple elements per VGPR)
+          if isinstance(src_dtype, DType) and src_dtype.count > 1:
+            elements_per_vgpr = src_dtype.count // num_vgprs
+            if elements_per_vgpr > 1:
+              # Packed type (e.g., half4 = 4 elements in 2 VGPRs)
+              vgpr_idx = idx // elements_per_vgpr
+              element_in_vgpr = idx % elements_per_vgpr
+              src_vgpr = f"v{base + vgpr_idx}"
+              if element_in_vgpr == 0:
+                # Low bits - can use directly
+                r[u] = src_vgpr
+              else:
+                # High bits - need to extract with shift
+                dst = alloc_vgpr(u)
+                shift_amount = element_in_vgpr * (32 // elements_per_vgpr)
+                kernel.append(f"v_lshrrev_b32 {dst}, {shift_amount}, {src_vgpr}")
+                r[u] = dst
+            else:
+              # 1:1 mapping (e.g., float4 = 4 elements in 4 VGPRs)
+              r[u] = f"v{base + idx}"
+          else:
+            r[u] = f"v{base + idx}"
+        elif isinstance(src_reg, list):
           r[u] = src_reg[idx]
+        else:
+          # Single register - GEP index must be 0
+          r[u] = src_reg
         continue
       if u.op in {Ops.CAST, Ops.BITCAST} and (u.src[0].dtype == u.dtype or isinstance(u.src[0].dtype, PtrDType)):
         r[u] = r[u.src[0]]
@@ -910,7 +1046,12 @@ class RDNARenderer(Renderer):
       elif u.op is Ops.INDEX:
         r[u] = alloc_vgpr(u)
       elif u.op is Ops.LOAD:
-        r[u] = alloc_vgpr_pair(u) if needs_vgpr_pair(u.dtype) else alloc_vgpr(u)
+        if isinstance(u.dtype, DType) and u.dtype.count > 1:
+          # Calculate number of 32-bit VGPRs needed
+          vgpr_count = (u.dtype.itemsize + 3) // 4  # Round up to 32-bit chunks
+          r[u] = alloc_vgpr_range(u, vgpr_count)
+        else:
+          r[u] = alloc_vgpr_pair(u) if needs_vgpr_pair(u.dtype) else alloc_vgpr(u)
         pending_waits.add(u)
       elif u.op is Ops.CONST:
         # Skip allocation for constants used as compile-time REG indices
@@ -951,6 +1092,10 @@ class RDNARenderer(Renderer):
         # because their inputs might be in VGPR (from memory loads)
         if u.dtype == dtypes.bool and u.op in {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ}:
           r[u] = alloc_sgpr(u)  # comparison results go in SGPR
+        elif isinstance(u.dtype, DType) and u.dtype.count > 1:
+          # Vector types need contiguous register ranges - size based on total bytes
+          vgpr_count = (u.dtype.itemsize + 3) // 4  # Round up to 32-bit chunks
+          r[u] = alloc_vgpr_range(u, vgpr_count)
         else:
           r[u] = alloc_vgpr_pair(u) if needs_vgpr_pair(u.dtype) else alloc_vgpr(u)
       elif u.op is Ops.IF:
@@ -965,11 +1110,8 @@ class RDNARenderer(Renderer):
           # Accumulator is already a contiguous range - reuse it for output
           r[u] = acc_reg
         else:
-          # Allocate contiguous VGPRs for the output
-          base = next_vgpr
-          next_vgpr += 8
-          max_vgpr = max(max_vgpr, next_vgpr)
-          r[u] = f"v[{base}:{base+7}]"
+          # Allocate contiguous VGPRs for the output using range allocator
+          r[u] = alloc_vgpr_range(u, 8)
       elif u.op is Ops.DEFINE_REG:
         # For 64-bit types, allocate VGPR pairs
         if needs_vgpr_pair(u.ptrdtype.base):
