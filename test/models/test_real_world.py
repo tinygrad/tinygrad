@@ -5,12 +5,12 @@ from tinygrad.nn import optim
 from tinygrad.nn.state import get_parameters
 from tinygrad.engine.jit import TinyJit
 from tinygrad import Tensor, Device, GlobalCounters, dtypes, Variable
-from tinygrad.helpers import CI, Context
+from tinygrad.helpers import Context
 from test.helpers import slow
 from extra.lr_scheduler import OneCycleLR
 from test.helpers import derandomize_model
 
-from examples.gpt2 import Transformer as GPT2Transformer, MODEL_PARAMS as GPT2_MODEL_PARAMS
+from examples.gpt2 import Transformer as GPT2Transformer
 from examples.hlb_cifar10 import SpeedyResNet, hyp
 from examples.llama import Transformer as LLaMaTransformer
 from examples.stable_diffusion import UNetModel, unet_params
@@ -21,7 +21,7 @@ global_mem_used = 0
 def helper_test(nm, gen, model, max_memory_allowed, max_kernels_allowed, all_jitted=False):
   with Context(JIT=2):
     tms = []
-    for _ in range(2 if CI else 4):
+    for _ in range(2):
       early_gen = [x.realize() if isinstance(x, Tensor) else x for x in gen()]
       GlobalCounters.reset()
       Device[Device.DEFAULT].synchronize()
@@ -93,12 +93,12 @@ class TestRealWorld(unittest.TestCase):
     dtypes.default_float = dtypes.float16
 
     args_tiny = {"dim": 1024, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-5, "vocab_size": 1000}
-    model = GPT2Transformer(**(args_tiny if CI else GPT2_MODEL_PARAMS["gpt2-medium"]))
+    model = GPT2Transformer(**args_tiny)
     derandomize_model(model)
     @TinyJit
     def test(t, v):
       with Context(JIT=0): return model(t, v).realize()
-    helper_test("test_gpt2", lambda: (Tensor([[1,]]),Variable("pos", 1, 100).bind(1)), test, 0.23 if CI else 0.9, 160 if CI else 468, all_jitted=True)
+    helper_test("test_gpt2", lambda: (Tensor([[1,]]),Variable("pos", 1, 100).bind(1)), test, 0.23, 160, all_jitted=True)
 
   @slow
   def test_train_mnist(self):
