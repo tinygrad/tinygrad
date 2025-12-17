@@ -3925,7 +3925,7 @@ class Tensor(OpMixin):
     if IMAGE >= 2: x,w = x.cast(base_image_type((bs*iy, ix*groups*cin//4, 4))), w.cast(base_image_type((cout//4, H*W*cin, 4)))
     x, w = x.contiguous(), w.contiguous()
 
-    if added_weight: w, H = w[:, :-added_weight, :, :, :, :], H - added_weight
+    if added_weight: w, H = w[:, :-added_weight, ...], H - added_weight
 
     # expand out
     rcin_hi, rcin_lo = (cin//4, 4) if cin >= 4 else (1, 1)
@@ -3942,7 +3942,7 @@ class Tensor(OpMixin):
     w = w.permute(0,4,2,5,1,3).reshape((1, 1, 1, *group_shape, *rcout_expand, rcin_hi, rcin_lo, H, W))
 
     # the conv!
-    ret = (x*w).cast(base_image_type((bs*oy, ox*cout//4, 4)) if IMAGE >= 2 else dtypes.float32).sum((-4, -3, -2, -1), dtype=dtype)
+    ret = (x*w).cast(dtypes.float32).sum((-4, -3, -2, -1), dtype=dtype)
 
     # undo hack for non multiples of 4 on C.rcout
     if added_output_channels != 0:
