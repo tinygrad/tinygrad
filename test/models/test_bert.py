@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 import unittest
-from tinygrad import Tensor, Device
-from tinygrad.helpers import AMD_LLVM
+from tinygrad import Tensor
 import numpy as np
 import torch
 
@@ -22,7 +21,6 @@ def set_equal_weights(mdl, torch_mdl):
   torch_mdl.eval()
 
 class TestBert(unittest.TestCase):
-  @unittest.skipIf(Device.DEFAULT == "AMD" and AMD_LLVM, "AMD LLVM backend has compiler segfault issues")
   def test_questions(self):
     from extra.models.bert import BertForQuestionAnswering
     from transformers import BertForQuestionAnswering as TorchBertForQuestionAnswering
