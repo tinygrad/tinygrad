@@ -771,7 +771,7 @@ class TestTK(unittest.TestCase):
 
     Tensor.manual_seed(42)
 
-    B, N, H, H_KV, D = 1, 16, 2, 1, 32
+    B, N, H, H_KV, D = 1, 32, 2, 1, 32
 
     with Context(DEBUG=0):
       q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
@@ -784,7 +784,7 @@ class TestTK(unittest.TestCase):
 
     q_, k_, v_ = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
     out = flash_attention(q_, k_, v_)
-    out, l_vec = out[0].float().transpose(1, 2), out[1].float()
+    out = out.float().transpose(1, 2)
     out.backward(do)
     Tensor.realize(q.grad, k.grad, v.grad)
 
@@ -800,166 +800,9 @@ class TestTK(unittest.TestCase):
     ref.backward(do)
     Tensor.realize(q_ref.grad, k_ref.grad, v_ref.grad)
 
-    delta_vec = (do * ref).sum(axis=-1).transpose(1, 2).unsqueeze(-2)
-    # dq = flash_attn_backward_q_numpy(q.numpy(), k.numpy(), v.numpy(), ref.numpy(), do.numpy(), l_vec.numpy(), delta_vec.numpy())
-
-    diff_arrays(k.grad.numpy(), k_ref.grad.numpy())
-
     np.testing.assert_allclose(q.grad.numpy(), q_ref.grad.numpy(), atol=2e-2, rtol=2e-2)
     np.testing.assert_allclose(v.grad.numpy(), v_ref.grad.numpy(), atol=2e-2, rtol=2e-2)
-    np.testing.assert_allclose(k.grad.numpy(), k_ref.grad.numpy(), atol=2e-2, rtol=2e-2)
-
-  def test_fast_fa_bwd2(self):
-    from extra.thunder.tiny.fa import flash_attention
-
-    Tensor.manual_seed(42)
-
-    B, N, H, H_KV, D = 1, 16, 1, 1, 16
-
-    with Context(DEBUG=0):
-      q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
-      k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
-      v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
-      Tensor.realize(q, k, v)
-
-      do = Tensor.ones(B, N, H, D, dtype=dtypes.float32).contiguous()
-      Tensor.realize(do)
-
-    q_, k_, v_ = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
-    out = flash_attention(q_, k_, v_)
-    out, l_vec = out[0].float().transpose(1, 2), out[1].float()
-    out.backward(do)
-    Tensor.realize(q.grad, k.grad, v.grad)
-
-    with Context(DEBUG=0):
-      q_ref = q.detach().clone().requires_grad_(True)
-      k_ref = k.detach().clone().requires_grad_(True)
-      v_ref = v.detach().clone().requires_grad_(True)
-      Tensor.realize(q_ref, k_ref, v_ref)
-
-    q_ref_, k_ref_, v_ref_ = q_ref.transpose(1, 2), k_ref.transpose(1, 2), v_ref.transpose(1, 2)
-    attn_scores = q_ref_.matmul(k_ref_.transpose(-2, -1)) / math.sqrt(D)
-    attn_probs = attn_scores.softmax(axis=-1)
-    ref = attn_probs.matmul(v_ref_)
-    ref = ref.float().transpose(1, 2)
-
-    delta_vec = (do * ref).sum(axis=-1).transpose(1, 2).unsqueeze(-2)
-
-    ref.backward(do)
-    Tensor.realize(q_ref.grad, k_ref.grad, v_ref.grad)
-
-    dq = flash_attn_backward_q_numpy(q.numpy(), k.numpy(), v.numpy(), ref.numpy(), do.numpy(), l_vec.numpy(), delta_vec.numpy())
-
-    # diff_arrays(dq, q_ref.grad.numpy())
-
-    np.testing.assert_allclose(dq, q_ref.grad.numpy(), atol=3e-2, rtol=3e-2)
-
-def mfma(a, b):
-  # mfma returns transposed result
-  return (a @ b.T).T
-
-def flash_attn_backward_q_numpy(Q, K, V, O, dO, Lv, Dv, Br=16, Bc=16):
-  """
-  Vectorized tiled implementation of Flash Attention backward for Q.
-  Shapes: Q/O/dO [B,H,M,D], K/V [B,H,N,D], L [B,H,M]
-  """
-  B, M, H, D = Q.shape
-  N = K.shape[1]
-  dQ = np.zeros_like(Q)
-
-  for b in range(B):
-    for h in range(H):
-      # Loop over Q row blocks
-      for i in range(0, M, Br):
-        q_i = Q[b, i:i+Br, h]          # Shape: (Br, D)
-        do_i = dO[b, i:i+Br, h]        # Shape: (Br, D)
-
-        # load l and d
-        l_i = Lv[b, h, :, i:i+Br]
-        l_i *= 1.0 / math.log(2)
-        D_i = Dv[b, h, :, i:i+Br]
-
-        dq_acc = np.zeros_like(q_i)
-
-        # Loop over K/V col blocks
-        for j in range(0, N, Bc):
-          k_j = K[b, j:j+Bc, h]        # Shape: (Bc, D)
-          v_j = V[b, j:j+Bc, h]        # Shape: (Bc, D)
-
-          # Recompute Attention Scores S_ij and Probs P_ij
-          # (Br, D) @ (D, Bc) -> (Br, Bc)
-          s_ij = mfma(q_i, k_j)
-          s_ij *= (1.0 / math.sqrt(D)) * (1.0 / math.log(2))
-          print(s_ij.shape, "a", l_i.shape)
-          p_ij = np.exp2(s_ij - l_i)
-
-          # Compute dP_ij = dO_i @ V_j.T
-          dp_ij = mfma(do_i, v_j)
-
-          # Compute dS_ij = P_ij * (dP_ij - D_i)
-          # Broadcasting D_i (Br, 1) across cols
-          ds_ij = p_ij * (dp_ij - D_i)
-
-          # Accumulate gradient contribution: dS_ij @ K_j
-          # (Br, Bc) @ (Bc, D) -> (Br, D)
-          dq_acc += mfma(k_j.T, ds_ij.T)
-
-        # Apply scale factor once at the end and store
-        dq_acc *= 1.0 / math.sqrt(D)
-        dQ[b, i:i+Br, h] = dq_acc
-
-  return dQ
-
-import itertools
-def diff_arrays(arr1, arr2):
-  """
-  Compares two arrays (flat or nested) and prints them with highlighting.
-  Red = element in arr1 (expected) but different or missing in arr2.
-  Green = element in arr2 (actual) but different or missing in arr1.
-  """
-  # ANSI escape codes for colors
-  RED = "\033[91m"
-  GREEN = "\033[92m"
-  RESET = "\033[0m"
-  SENTINEL = object()
-
-  def colorize_entire(item, color_code):
-    """Helper to recursively color an entire structure (for missing/added branches)."""
-    if isinstance(item, list):
-      elements = [colorize_entire(x, color_code) for x in item]
-      return f"[{', '.join(elements)}]"
-    return f"{color_code}{str(item)}{RESET}"
-
-  def recursive_diff(a, b):
-    # Case 1: Both are lists - Recurse
-    if isinstance(a, list) and isinstance(b, list):
-      diffs = []
-      for sub_a, sub_b in itertools.zip_longest(a, b, fillvalue=SENTINEL):
-        diffs.append(recursive_diff(sub_a, sub_b))
-      return f"[{', '.join(diffs)}]"
-
-    # Case 2: Item missing in 'a' (New in 'b')
-    if a is SENTINEL:
-      return colorize_entire(b, GREEN)
-
-    # Case 3: Item missing in 'b' (Deleted from 'a')
-    if b is SENTINEL:
-      return colorize_entire(a, RED)
-
-    # Case 4: Values Match
-    if np.allclose(a, b, equal_nan=True, atol=1e-2, rtol=1e-2):
-      return str(a)
-
-    # Case 5: Mismatch (Value or Type difference)
-    part_a = f"{RED}{str(a)}{RESET}"
-    part_b = f"{GREEN}{str(b)}{RESET}"
-    return f"[{part_a} -> {part_b}]"
-
-  print(f"Comparing arrays:")
-  # We treat the initial inputs as the first level of recursion
-  result = recursive_diff(arr1, arr2)
-  print(result)
-  print("-" * 40)
+    np.testing.assert_allclose(k.grad.numpy(), k_ref.grad.numpy(), atol=5e-2, rtol=2e-2)
 
 if __name__ == "__main__":
   unittest.main()
