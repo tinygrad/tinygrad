@@ -113,7 +113,7 @@ class FeedForward:
     self.w3 = linear(dim, hidden_dim, bias=False) # the gate in Gated Linear Unit
 
   def __call__(self, x:Tensor) -> Tensor:
-    w1 = self.w1(x).contiguous().silu()
+    w1 = self.w1(x).silu()
     w3 = self.w3(x.contiguous_backward())  # this fixes a strange fusion that makes tensor cores miss
     return self.w2(w1 * w3)
 
