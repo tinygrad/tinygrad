@@ -1,6 +1,6 @@
 import ctypes, gzip, unittest, timeit
 from tinygrad import Variable
-from tinygrad.helpers import Context, ContextVar, argfix, colored, word_wrap, is_numpy_ndarray, CI, mv_address, get_contraction
+from tinygrad.helpers import Context, ContextVar, argfix, colored, word_wrap, is_numpy_ndarray, mv_address, get_contraction
 from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str, cdiv, cmod, getbits
 from tinygrad.tensor import Tensor, get_shape
 import numpy as np
@@ -198,7 +198,7 @@ class TestMemoryview(unittest.TestCase):
     mv[0] = 2
     assert base[0] == 2
 
-  @unittest.skipIf(CI, "dangerous for CI, it allocates tons of memory")
+  @unittest.skip("allocates tons of memory")
   def test_to_mv(self):
     sizes = [
       (16, "16 B"),
