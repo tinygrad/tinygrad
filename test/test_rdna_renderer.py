@@ -90,15 +90,121 @@ class TestRDNAKernelGeneration(unittest.TestCase):
 class TestRDNAVGPRLimits(unittest.TestCase):
   """Tests documenting VGPR limits"""
 
-  @unittest.skip("64x64 WMMA exceeds 256 VGPR limit - needs further register allocator improvements")
   def test_wmma_64x64_vgpr_limit(self):
-    """64x64 WMMA currently exceeds VGPR limit.
-    Look-ahead packing helps but additional optimizations needed for larger matrices.
-    """
+    """64x64 WMMA - tests if VGPR limit is respected"""
     a = Tensor(np.random.randn(64, 64).astype(np.float16))
     b = Tensor(np.random.randn(64, 64).astype(np.float16))
     c = a.matmul(b, dtype=dtypes.float)
+    c_np = a.numpy().astype(np.float32) @ b.numpy().astype(np.float32)
     c.realize()
+    np.testing.assert_allclose(c.numpy(), c_np, rtol=1e-2, atol=1e-2)
+
+class TestWMMAVGPRUsage(unittest.TestCase):
+  """Tests for WMMA VGPR usage analysis - run without device"""
+
+  def test_64x64_wmma_vgpr_count(self):
+    """Test that 64x64 WMMA fits within 256 VGPR limit.
+
+    Root cause analysis of VGPR usage:
+    - 128 VGPRs for accumulators (16 output tiles x 8 floats each)
+    - 128 VGPRs for store addresses (all computed upfront!)
+    - ~40 VGPRs for WMMA inputs (A and B matrices packed as half16)
+    - Plus temps for index computation
+
+    The main issue: store addresses are computed upfront and kept live
+    until all stores complete. This should be fixed by computing addresses
+    just-in-time or reusing address VGPRs.
+    """
+    import re
+    from tinygrad.codegen import full_rewrite
+    from tinygrad.device import Device
+    from tinygrad.uop.ops import Ops
+    from tinygrad.renderer.rdna import RDNARenderer
+    from tinygrad.helpers import Context
+
+    # Need TC=1 to enable tensor cores, TC_OPT=2 for padding support
+    with Context(TC=1, TC_OPT=2):
+      a = Tensor(np.random.randn(64, 64).astype(np.float16))
+      b = Tensor(np.random.randn(64, 64).astype(np.float16))
+      c = a.matmul(b, dtype=dtypes.float)
+
+      sched = c.schedule()
+
+      # Find the matmul kernel
+      for item in sched:
+        if hasattr(item, 'ast') and item.ast is not None:
+          has_reduce = any(u.op == Ops.REDUCE for u in item.ast.toposort())
+          if has_reduce:
+            # Use RDNARenderer for both full_rewrite and render
+            # (rdna_matcher needs to be applied during full_rewrite to handle pointer CASTs)
+            renderer = RDNARenderer('gfx1100')
+            uops = full_rewrite(item.ast, renderer)
+
+            # Verify we have WMMA ops
+            has_wmma = any(u.op == Ops.WMMA for u in uops)
+            self.assertTrue(has_wmma, "Should have WMMA ops with USE_TC=1")
+
+            # Count WMMA and stores
+            wmma_count = sum(1 for u in uops if u.op == Ops.WMMA)
+            self.assertEqual(wmma_count, 16, f"Should have 16 WMMA ops for 64x64, got {wmma_count}")
+
+            # Render and check VGPR count
+            asm = renderer.render(uops)
+
+            match = re.search(r'\.amdhsa_next_free_vgpr (\d+)', asm)
+            self.assertIsNotNone(match, "Should have .amdhsa_next_free_vgpr in metadata")
+            vgpr_count = int(match.group(1))
+
+            # The VGPR limit is 256. This test documents the current state
+            # and will pass once the register allocator is fixed.
+            self.assertLessEqual(vgpr_count, 256,
+              f"64x64 WMMA needs {vgpr_count} VGPRs but limit is 256. "
+              f"Main issue: 128 store addresses computed upfront. "
+              f"Fix: compute addresses just-in-time or reuse address VGPRs.")
+            return
+
+      self.fail("Should find a kernel with REDUCE op")
+
+  def test_32x32_wmma_fits_in_vgpr_limit(self):
+    """Verify 32x32 WMMA fits within VGPR limit"""
+    import re
+    from tinygrad.codegen import full_rewrite
+    from tinygrad.device import Device
+    from tinygrad.uop.ops import Ops
+    from tinygrad.renderer.rdna import RDNARenderer
+    from tinygrad.helpers import Context
+
+    with Context(TC=1, TC_OPT=2):
+      a = Tensor(np.random.randn(32, 32).astype(np.float16))
+      b = Tensor(np.random.randn(32, 32).astype(np.float16))
+      c = a.matmul(b, dtype=dtypes.float)
+
+      sched = c.schedule()
+
+      for item in sched:
+        if hasattr(item, 'ast') and item.ast is not None:
+          has_reduce = any(u.op == Ops.REDUCE for u in item.ast.toposort())
+          if has_reduce:
+            # Use RDNARenderer for both full_rewrite and render
+            renderer = RDNARenderer('gfx1100')
+            uops = full_rewrite(item.ast, renderer)
+
+            has_wmma = any(u.op == Ops.WMMA for u in uops)
+            self.assertTrue(has_wmma, "Should have WMMA ops")
+
+            asm = renderer.render(uops)
+
+            match = re.search(r'\.amdhsa_next_free_vgpr (\d+)', asm)
+            self.assertIsNotNone(match)
+            vgpr_count = int(match.group(1))
+
+            # 32x32 should use fewer VGPRs (4 tiles instead of 16)
+            # With perfect allocation: 4*8=32 accumulators + ~32 addresses + ~40 inputs = ~104
+            self.assertLessEqual(vgpr_count, 256,
+              f"32x32 WMMA needs {vgpr_count} VGPRs, should fit in 256")
+            return
+
+      self.fail("Should find a kernel with REDUCE op")
 
 class TestLookAheadPacking(unittest.TestCase):
   """Tests for the look-ahead packing optimization - these run without device"""

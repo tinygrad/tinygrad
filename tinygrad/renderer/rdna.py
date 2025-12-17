@@ -812,6 +812,12 @@ class RDNARenderer(Renderer):
       nonlocal next_vgpr, max_vgpr
       if free_vgprs:
         reg = free_vgprs.pop()
+      elif free_vgpr_ranges:
+        # Take one VGPR from a free range and put the remainder back
+        base, count = free_vgpr_ranges.pop()
+        reg = base
+        if count > 1:
+          free_vgpr_ranges.append((base + 1, count - 1))
       else:
         reg = next_vgpr
         next_vgpr += 1
@@ -910,12 +916,14 @@ class RDNARenderer(Renderer):
     pending_waits = set()  # track which ops need waits
 
     # === LOOK-AHEAD PACKING FOR HALF16 VECTORIZE ===
-    # Pre-scan to find scalar half LOADs that will be packed into half16 VECTORIZE
-    # This allows us to pack halfs immediately when loaded, reducing register pressure
+    # Pre-scan to find LOADs that will be packed into half16 VECTORIZE
+    # Key optimization: half.vec(4) LOADs can go directly into half16 destination range
     half16_vectorize_sources: dict[UOp, tuple[UOp, int]] = {}  # source -> (vectorize_uop, position)
-    half16_vectorize_ranges: dict[UOp, str] = {}  # vectorize_uop -> allocated v[base:end] range (lazy allocated)
+    half16_vectorize_ranges: dict[UOp, str] = {}  # vectorize_uop -> allocated v[base:end] range
     half16_packed: dict[UOp, set[int]] = {}  # vectorize_uop -> set of packed VGPR indices (0-7)
     half16_temp_regs: dict[UOp, str] = {}  # source_uop -> temp VGPR holding the loaded value
+    # Map half.vec(4) LOADs directly to their destination in half16 range
+    half16_direct_loads: dict[UOp, tuple[UOp, int]] = {}  # load -> (vectorize_uop, base_vgpr_idx)
 
     for u in uops:
       if u.op is Ops.VECTORIZE and u.dtype.scalar() == dtypes.half and u.dtype.count == 16:
@@ -924,6 +932,95 @@ class RDNARenderer(Renderer):
         for pos, src in enumerate(u.src):
           half16_vectorize_sources[src] = (u, pos)
         half16_packed[u] = set()
+        # Pre-allocate the 8-VGPR range NOW, before scalar temp allocations inflate next_vgpr
+        half16_vectorize_ranges[u] = alloc_vgpr_range(u, 8)
+
+        # Check if sources are GEPs from half.vec(4) LOADs - can load directly into destination
+        # Group sources by their underlying LOAD
+        load_positions: dict[UOp, list[tuple[int, int]]] = {}  # load -> [(pos, gep_idx), ...]
+        for pos, src in enumerate(u.src):
+          if src.op is Ops.GEP and src.src[0].op is Ops.LOAD:
+            load_op = src.src[0]
+            if hasattr(load_op.dtype, 'count') and load_op.dtype.count == 4 and load_op.dtype.scalar() == dtypes.half:
+              gep_idx = src.arg[0] if isinstance(src.arg, tuple) else src.arg
+              if load_op not in load_positions:
+                load_positions[load_op] = []
+              load_positions[load_op].append((pos, gep_idx))
+
+        # For LOADs that feed exactly 4 consecutive positions (0,1,2,3 -> vgprs 0,1), mark for direct load
+        for load_op, positions in load_positions.items():
+          if len(positions) == 4:
+            positions.sort(key=lambda x: x[0])
+            pos_list = [p for p, _ in positions]
+            gep_list = [g for _, g in positions]
+            # Check if positions are consecutive groups of 4 and GEP indices are 0,1,2,3
+            if gep_list == [0, 1, 2, 3] and pos_list[0] % 4 == 0:
+              # This LOAD can go directly into half16 range
+              # positions 0-3 -> vgprs 0-1, positions 4-7 -> vgprs 2-3, etc.
+              base_vgpr_idx = pos_list[0] // 2  # First of the 2 VGPRs this LOAD fills
+              half16_direct_loads[load_op] = (u, base_vgpr_idx)
+              # Mark all VGPRs as packed (since LOAD writes them directly)
+              half16_packed[u].add(base_vgpr_idx)
+              half16_packed[u].add(base_vgpr_idx + 1)
+
+    # === DEFERRED STORE ADDRESS COMPUTATION ===
+    # Pre-scan to identify INDEX ops that are ONLY used by global STOREs
+    # These can have their address computed inline at store time, saving VGPRs
+    store_only_indices: set[UOp] = set()
+    index_users: dict[UOp, list[UOp]] = {}  # INDEX -> list of users
+    # For inline address computation: track stores with pattern SHL(ADD(base, CONST), 2)
+    # These can share the base VGPR and compute offset inline
+    store_inline_addr: dict[UOp, tuple[UOp, int]] = {}  # INDEX -> (base_uop, const_offset)
+    store_addr_skip_alloc: set[UOp] = set()  # ALU ops to skip allocation for (ADD, SHL in pattern)
+
+    # First pass: collect all INDEX ops for global memory (src[0] is DEFINE_GLOBAL)
+    for u in uops:
+      if u.op is Ops.INDEX and len(u.src) >= 1:
+        src0_dtype = u.src[0].dtype
+        # Check if src[0] is a global buffer (PtrDType with GLOBAL addrspace)
+        if isinstance(src0_dtype, PtrDType) and src0_dtype.addrspace == AddrSpace.GLOBAL:
+          index_users[u] = []
+      # Track users of INDEX ops
+      for src in u.src:
+        if src in index_users:
+          index_users[src].append(u)
+
+    # Second pass: identify INDEX ops used ONLY by STOREs (not LOADs)
+    for idx_op, users in index_users.items():
+      if not users:
+        continue
+      # Check if all users are STOREs
+      all_stores = all(u.op is Ops.STORE for u in users)
+      if all_stores:
+        store_only_indices.add(idx_op)
+        # Check for inline address pattern: idx = SHL(ADD(base, CONST), CONST(2))
+        idx = idx_op.src[1]
+        if idx.op is Ops.SHL and len(idx.src) == 2:
+          shift_val = idx.src[1]
+          add_op = idx.src[0]
+          if shift_val.op is Ops.CONST and shift_val.arg == 2 and add_op.op is Ops.ADD:
+            add_left, add_right = add_op.src
+            if add_right.op is Ops.CONST:
+              # Pattern: SHL(ADD(base, CONST), 2) - can compute inline
+              store_inline_addr[idx_op] = (add_left, add_right.arg)
+              store_addr_skip_alloc.add(idx)  # Skip SHL
+              store_addr_skip_alloc.add(add_op)  # Skip ADD
+            elif add_left.op is Ops.CONST:
+              # Pattern: SHL(ADD(CONST, base), 2) - can compute inline
+              store_inline_addr[idx_op] = (add_right, add_left.arg)
+              store_addr_skip_alloc.add(idx)
+              store_addr_skip_alloc.add(add_op)
+
+    # Shared temp VGPR for deferred store address computation
+    store_addr_vgpr: str|None = None
+
+    def get_store_addr_vgpr() -> str:
+      """Get or allocate a shared VGPR for store address computation"""
+      nonlocal store_addr_vgpr, next_vgpr, max_vgpr
+      if store_addr_vgpr is None:
+        # Allocate a single VGPR for all store address computations
+        store_addr_vgpr = alloc_vgpr(uops[0])  # Use first UOp as owner (doesn't matter)
+      return store_addr_vgpr
 
     def get_half16_range(vec_uop: UOp) -> str:
       """Lazily allocate the 8-VGPR range for a half16 VECTORIZE"""
@@ -1024,6 +1121,19 @@ class RDNARenderer(Renderer):
         src_reg = r[u.src[0]]
         idx = get_single_element(u.arg)
         src_dtype = u.src[0].dtype
+
+        # Check if source LOAD is a direct-load into half16 range
+        # In this case, data is already in the correct packed format - no extraction needed
+        if u.src[0] in half16_direct_loads:
+          vec_uop, base_vgpr_idx = half16_direct_loads[u.src[0]]
+          range_str = half16_vectorize_ranges[vec_uop]
+          range_base = int(range_str[2:range_str.index(':')])
+          # idx 0,1 -> first VGPR, idx 2,3 -> second VGPR
+          vgpr_offset = idx // 2
+          dest_vgpr = f"v{range_base + base_vgpr_idx + vgpr_offset}"
+          r[u] = dest_vgpr  # Reference the packed VGPR directly
+          continue
+
         if isinstance(src_reg, str) and src_reg.startswith('v['):
           # Extract base and end from v[base:end] range
           base = int(src_reg[2:src_reg.index(':')])
@@ -1077,9 +1187,29 @@ class RDNARenderer(Renderer):
       elif u.op is Ops.SPECIAL:
         r[u] = alloc_vgpr(u)
       elif u.op is Ops.INDEX:
-        r[u] = alloc_vgpr(u)
+        # REG addrspace INDEX: index into register array from DEFINE_REG
+        if isinstance(u.src[0].dtype, PtrDType) and u.src[0].dtype.addrspace == AddrSpace.REG:
+          assert u.src[1].op == Ops.CONST, f"REG INDEX requires CONST index, not {u.src[1].op}"
+          r[u] = r[u.src[0]][u.src[1].arg]  # Get specific register from array
+          continue  # Skip rendering - handled inline
+        # Skip VGPR allocation for store-only indices - address computed inline at store time
+        if u in store_only_indices:
+          r[u] = "DEFERRED_STORE_ADDR"
+        else:
+          r[u] = alloc_vgpr(u)
       elif u.op is Ops.LOAD:
-        if isinstance(u.dtype, DType) and u.dtype.count > 1:
+        # REG addrspace LOAD: handled by REG handling code below, skip allocation
+        if u.src[0].op is Ops.INDEX and isinstance(u.src[0].src[0].dtype, PtrDType) and u.src[0].src[0].dtype.addrspace == AddrSpace.REG:
+          r[u] = r[u.src[0]]  # Use register from INDEX (which came from DEFINE_REG array)
+          continue  # Skip rendering - handled inline
+        if u in half16_direct_loads:
+          # half.vec(4) LOAD that goes directly into half16 destination range
+          vec_uop, base_vgpr_idx = half16_direct_loads[u]
+          range_str = half16_vectorize_ranges[vec_uop]
+          range_base = int(range_str[2:range_str.index(':')])
+          # This LOAD fills 2 VGPRs starting at base_vgpr_idx within the half16 range
+          r[u] = f"v[{range_base + base_vgpr_idx}:{range_base + base_vgpr_idx + 1}]"
+        elif isinstance(u.dtype, DType) and u.dtype.count > 1:
           # Calculate number of 32-bit VGPRs needed
           vgpr_count = (u.dtype.itemsize + 3) // 4  # Round up to 32-bit chunks
           r[u] = alloc_vgpr_range(u, vgpr_count)
@@ -1120,6 +1250,10 @@ class RDNARenderer(Renderer):
       elif u.op is Ops.END:
         r[u] = "vcc_lo"  # comparison result
       elif u.op in GroupOp.ALU or u.op in {Ops.CAST, Ops.BITCAST}:
+        # Skip allocation for ALU ops that will be computed inline at store time
+        if u in store_addr_skip_alloc:
+          r[u] = "INLINE_STORE_ADDR"
+          continue  # Skip rendering - will be computed inline at store
         # Check if any source needs a wait
         for src in u.src:
           if src in pending_waits:
@@ -1179,6 +1313,10 @@ class RDNARenderer(Renderer):
 
       # Skip INDEX as it's handled inline
       if u.op is Ops.INDEX:
+        # If this is a store-only index, skip - address computed inline at store time
+        if u in store_only_indices:
+          continue
+
         # The byte offset is already computed at UOp level by rdna_matcher
         # We just need to move it to the allocated register (and optionally add base offset for local)
         buf, idx = u.src[0], u.src[1]
@@ -1211,6 +1349,33 @@ class RDNARenderer(Renderer):
             kernel.append("s_waitcnt vmcnt(0) lgkmcnt(0)")
             pending_waits.clear()
             break
+
+        # Handle deferred store address computation
+        if u.src[0].op is Ops.INDEX and r.get(u.src[0]) == "DEFERRED_STORE_ADDR":
+          index_op = u.src[0]
+          buf, idx = index_op.src[0], index_op.src[1]
+          addr_vgpr = get_store_addr_vgpr()
+
+          # Check for inline address pattern: (base + const) << 2
+          if index_op in store_inline_addr:
+            base_uop, const_offset = store_inline_addr[index_op]
+            base_reg = r[base_uop]
+            # Compute: addr = (base + const_offset) << 2 = (base << 2) + (const_offset << 2)
+            byte_offset = const_offset << 2  # Pre-compute constant byte offset
+            if byte_offset == 0:
+              kernel.append(f"v_lshlrev_b32 {addr_vgpr}, 2, {base_reg}")
+            else:
+              # v_lshl_add_u32: dst = (src0 << src1) + src2
+              kernel.append(f"v_lshl_add_u32 {addr_vgpr}, {base_reg}, 2, {byte_offset}")
+          # Fallback: compute address from pre-computed idx
+          elif idx.op is Ops.CONST and idx.arg == 0:
+            kernel.append(f"v_mov_b32 {addr_vgpr}, 0")
+          else:
+            # idx is already the byte offset (computed at UOp level by rdna_matcher)
+            kernel.append(f"v_mov_b32 {addr_vgpr}, {r[idx]}")
+
+          # Update r[index_op] to point to the temp VGPR so pattern matcher can use it
+          r[index_op] = addr_vgpr
 
       # Render the instruction
       if (l:=cast(str|list[str], string_rewrite.rewrite(u, ctx=self))) is None:
@@ -1272,4 +1437,15 @@ class RDNARenderer(Renderer):
     kernel.append("s_waitcnt vmcnt(0) lgkmcnt(0)")
     kernel.extend(['s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)', 's_endpgm', 's_code_end'])
 
-    return self.render_kernel(kernel, name, bufs, max_vgpr, max_sgpr, uops)
+    # Compute actual max VGPR from assembly (not allocation high-water mark)
+    # This accounts for VGPRs that were allocated but then freed and reused
+    import re
+    actual_max_vgpr = 3  # v[0:2] are reserved for local_xyz
+    for line in kernel:
+      for m in re.finditer(r'v(\d+)', line):
+        actual_max_vgpr = max(actual_max_vgpr, int(m.group(1)) + 1)
+      # Also check for VGPR ranges v[a:b]
+      for m in re.finditer(r'v\[(\d+):(\d+)\]', line):
+        actual_max_vgpr = max(actual_max_vgpr, int(m.group(2)) + 1)
+
+    return self.render_kernel(kernel, name, bufs, actual_max_vgpr, max_sgpr, uops)
