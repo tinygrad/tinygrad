@@ -2554,9 +2554,9 @@ label_1098:
   .amdhsa_group_segment_fixed_size 65536
   .amdhsa_private_segment_fixed_size 0
   .amdhsa_kernarg_size 336
-  .amdhsa_next_free_vgpr .amdgcn.next_free_vgpr
+  .amdhsa_next_free_vgpr 512 // don't use .amdgcn.next_free_vgpr
   .amdhsa_next_free_sgpr .amdgcn.next_free_sgpr
-  .amdhsa_accum_offset 4 // TODO
+  .amdhsa_accum_offset 256 // it's compute_pgm_rsrc3 & 0x3f
 .end_amdhsa_kernel
 
 .amdgpu_metadata
