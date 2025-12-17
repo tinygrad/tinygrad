@@ -56,10 +56,10 @@ class TestDevice(unittest.TestCase):
                         shell=True, check=True, env={**os.environ, "DEV": "AMD", "AMD_LLVM": "1"})
       subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, HIPCompiler)"'],
                         shell=True, check=True, env={**os.environ, "DEV": "AMD", "AMD_LLVM": "0"})
+      subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, AMDLLVMCompiler)"'],
+                        shell=True, check=True, env={**os.environ, "DEV": "AMD", "AMD_CC": "LLVM"})
       subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, HIPCompiler)"'],
-                        shell=True, check=True, env={**os.environ, "DEV": "AMD", "AMD_HIP": "1"})
-      subprocess.run([f'python3 -c "{imports}; {expect_failure}"'],
-                        shell=True, check=True, env={**os.environ, "DEV": "AMD", "AMD_HIP": "1", "AMD_LLVM": "1"})
+                        shell=True, check=True, env={**os.environ, "DEV": "AMD", "AMD_CC": "HIP"})
     else: self.skipTest("only run on CPU/AMD")
 
   @unittest.skipIf((WIN and CI) or (not Device.DEFAULT == "CPU"), "skipping windows test")

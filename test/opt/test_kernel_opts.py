@@ -1,6 +1,7 @@
 import unittest
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
+from tinygrad.helpers import AMD_LLVM
 
 # TODO: write a clean version of this
 from test.test_linearizer import helper_linearizer_opt

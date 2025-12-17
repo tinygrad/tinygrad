@@ -1,6 +1,6 @@
 import unittest, ctypes, struct, os, random, numpy as np
 from tinygrad import Device, Tensor, dtypes
-from tinygrad.helpers import getenv, mv_address, DEBUG
+from tinygrad.helpers import getenv, mv_address, DEBUG, AMD_LLVM
 from test.helpers import slow
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQBuffer
@@ -157,6 +157,7 @@ class TestHCQ(unittest.TestCase):
     assert val == 0.0, f"got val {val}, should not be updated"
 
   @unittest.skipIf(Device.DEFAULT in {"CPU"}, "No globals/locals on LLVM/CPU")
+  @unittest.skipIf(Device.DEFAULT == "AMD" and AMD_LLVM, "AMD LLVM backend has compiler segfault issues")
   def test_exec_update_fuzz(self):
     virt_val = Variable("sig_val", 0, 0xffffffff, dtypes.uint32)
     virt_local = [Variable(f"local_{i}", 0, 0xffffffff, dtypes.uint32) for i in range(3)]
@@ -465,6 +466,7 @@ class TestHCQ(unittest.TestCase):
 
       assert buf2.as_buffer()[0] == i
 
+  @unittest.skipIf(Device.DEFAULT == "AMD" and AMD_LLVM, "AMD LLVM backend has compiler segfault issues")
   def test_memory_barrier(self):
     a = Tensor([0, 1], device=Device.DEFAULT, dtype=dtypes.int8).realize()
     b = a + 1

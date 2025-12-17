@@ -1,7 +1,7 @@
 import unittest, operator, math
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.dtype import DType, truncate
-from tinygrad.helpers import CI, getenv
+from tinygrad.helpers import CI, getenv, AMD_LLVM
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
 from tinygrad.runtime.ops_python import from_storage_scalar
