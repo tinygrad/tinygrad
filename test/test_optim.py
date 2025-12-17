@@ -3,9 +3,8 @@ import torch
 import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.nn.optim import Adam, SGD, AdamW, Muon, LAMB
-from tinygrad.helpers import CI
 from tinygrad.device import is_dtype_supported
-from test.helpers import needs_second_gpu
+from test.helpers import needs_second_gpu, slow
 
 np.random.seed(1337)
 x_init = np.random.randn(1,4).astype(np.float32)
@@ -42,7 +41,7 @@ def step(tensor, optim, steps=1, teeny=False, **kwargs):
     optim.step()
   return net.x.detach().numpy(), net.W.detach().numpy()
 
-@unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "slow")
+@slow
 class TestOptim(unittest.TestCase):
   def setUp(self):
     self.old_training = Tensor.training

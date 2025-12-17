@@ -1,8 +1,8 @@
 from typing_extensions import Callable
 import hashlib, random, unittest
 from tinygrad import Tensor, Device, getenv, dtypes
+from test.helpers import slow
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import CI
 from tinygrad.uop.ops import UOp
 from tinygrad.engine.jit import TinyJit
 
@@ -58,7 +58,7 @@ class TestKeccak(unittest.TestCase):
     self.assertEqual(bytes(Tensor(b"abc").keccak().tolist()),
                      bytearray.fromhex("3a985da74fe225b2 045c172d6bd390bd 855f086e3e9d525b 46bfe24511431532"))
 
-  @unittest.skipIf(CI, "times out in ci")
+  @slow
   def test_long(self):
     data = b"\x00" * 4
     self.assertEqual(bytes(Tensor(data).keccak("shake_128").tolist()), hashlib.shake_128(data).digest(16))
@@ -74,7 +74,7 @@ class TestKeccak(unittest.TestCase):
     self.assertEqual(bytes(out[1].tolist()), bytearray.fromhex("3a985da74fe225b2 045c172d6bd390bd 855f086e3e9d525b 46bfe24511431532"))
     self.assertEqual(bytes(out[2].tolist()), bytearray.fromhex("8e0d8f672252acb0 ffc5093db8653b18 1513bf9a2097e737 b4f73533dcaf46df"))
 
-  @unittest.skipIf(CI, "redundant with test_variable_bs")
+  @slow
   def test_variable_bs_jit(self):
     def f(data):
       return data.keccak()
