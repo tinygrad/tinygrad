@@ -387,7 +387,7 @@ class Group:
       idxs = tuple(idx * rv.length if i == 3 else idx for i, idx in enumerate(idxs))
       src_i = ((idxs[0] * src.shape[-3] + idxs[1]) * src.shape[-2] + idxs[2]) * src.shape[-1] + idxs[3]
 
-      for outer in self.ker.range(dst.shape[-2]):
+      for outer in self.ker.range(dst.shape[-2], track=False):
         src_i += outer * reductions + (laneid % reductions)
 
         src_load = srcf[src_i]
