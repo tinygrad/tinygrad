@@ -182,10 +182,10 @@ class AM_SMU(AM_IP):
     else: self._send_msg(self.smu_mod.PPSMC_MSG_Mode1Reset, 0)
     time.sleep(0.5) # 500ms
 
-  def read_table(self, table_t, cmd):
-    self._send_msg(self.smu_mod.PPSMC_MSG_TransferTableSmu2Dram, cmd)
+  def read_table(self, table_t, arg):
+    if self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6),(13,0,12)}: self._send_msg(self.smu_mod.PPSMC_MSG_GetMetricsTable, arg)
+    else: self._send_msg(self.smu_mod.PPSMC_MSG_TransferTableSmu2Dram, arg)
     return table_t.from_buffer(bytearray(self.adev.vram.view(self.driver_table_paddr, ctypes.sizeof(table_t))[:]))
-  def read_metrics(self): return self.read_table(self.smu_mod.SmuMetricsExternal_t, self.smu_mod.TABLE_SMU_METRICS)
 
   def set_clocks(self, level):
     if self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6), (13,0,12)}: return # TODO

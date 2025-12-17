@@ -1,9 +1,246 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import unwrap
-from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
 PPSMC_Result = ctypes.c_uint32
 PPSMC_MSG = ctypes.c_uint32
+FEATURE_LIST_e = CEnum(ctypes.c_uint32)
+FEATURE_DATA_CALCULATION = FEATURE_LIST_e.define('FEATURE_DATA_CALCULATION', 0)
+FEATURE_DPM_CCLK = FEATURE_LIST_e.define('FEATURE_DPM_CCLK', 1)
+FEATURE_DPM_FCLK = FEATURE_LIST_e.define('FEATURE_DPM_FCLK', 2)
+FEATURE_DPM_GFXCLK = FEATURE_LIST_e.define('FEATURE_DPM_GFXCLK', 3)
+FEATURE_DPM_LCLK = FEATURE_LIST_e.define('FEATURE_DPM_LCLK', 4)
+FEATURE_DPM_SOCCLK = FEATURE_LIST_e.define('FEATURE_DPM_SOCCLK', 5)
+FEATURE_DPM_UCLK = FEATURE_LIST_e.define('FEATURE_DPM_UCLK', 6)
+FEATURE_DPM_VCN = FEATURE_LIST_e.define('FEATURE_DPM_VCN', 7)
+FEATURE_DPM_XGMI = FEATURE_LIST_e.define('FEATURE_DPM_XGMI', 8)
+FEATURE_DS_FCLK = FEATURE_LIST_e.define('FEATURE_DS_FCLK', 9)
+FEATURE_DS_GFXCLK = FEATURE_LIST_e.define('FEATURE_DS_GFXCLK', 10)
+FEATURE_DS_LCLK = FEATURE_LIST_e.define('FEATURE_DS_LCLK', 11)
+FEATURE_DS_MP0CLK = FEATURE_LIST_e.define('FEATURE_DS_MP0CLK', 12)
+FEATURE_DS_MP1CLK = FEATURE_LIST_e.define('FEATURE_DS_MP1CLK', 13)
+FEATURE_DS_MPIOCLK = FEATURE_LIST_e.define('FEATURE_DS_MPIOCLK', 14)
+FEATURE_DS_SOCCLK = FEATURE_LIST_e.define('FEATURE_DS_SOCCLK', 15)
+FEATURE_DS_VCN = FEATURE_LIST_e.define('FEATURE_DS_VCN', 16)
+FEATURE_APCC_DFLL = FEATURE_LIST_e.define('FEATURE_APCC_DFLL', 17)
+FEATURE_APCC_PLUS = FEATURE_LIST_e.define('FEATURE_APCC_PLUS', 18)
+FEATURE_DF_CSTATE = FEATURE_LIST_e.define('FEATURE_DF_CSTATE', 19)
+FEATURE_CC6 = FEATURE_LIST_e.define('FEATURE_CC6', 20)
+FEATURE_PC6 = FEATURE_LIST_e.define('FEATURE_PC6', 21)
+FEATURE_CPPC = FEATURE_LIST_e.define('FEATURE_CPPC', 22)
+FEATURE_PPT = FEATURE_LIST_e.define('FEATURE_PPT', 23)
+FEATURE_TDC = FEATURE_LIST_e.define('FEATURE_TDC', 24)
+FEATURE_THERMAL = FEATURE_LIST_e.define('FEATURE_THERMAL', 25)
+FEATURE_SOC_PCC = FEATURE_LIST_e.define('FEATURE_SOC_PCC', 26)
+FEATURE_CCD_PCC = FEATURE_LIST_e.define('FEATURE_CCD_PCC', 27)
+FEATURE_CCD_EDC = FEATURE_LIST_e.define('FEATURE_CCD_EDC', 28)
+FEATURE_PROCHOT = FEATURE_LIST_e.define('FEATURE_PROCHOT', 29)
+FEATURE_DVO_CCLK = FEATURE_LIST_e.define('FEATURE_DVO_CCLK', 30)
+FEATURE_FDD_AID_HBM = FEATURE_LIST_e.define('FEATURE_FDD_AID_HBM', 31)
+FEATURE_FDD_AID_SOC = FEATURE_LIST_e.define('FEATURE_FDD_AID_SOC', 32)
+FEATURE_FDD_XCD_EDC = FEATURE_LIST_e.define('FEATURE_FDD_XCD_EDC', 33)
+FEATURE_FDD_XCD_XVMIN = FEATURE_LIST_e.define('FEATURE_FDD_XCD_XVMIN', 34)
+FEATURE_FW_CTF = FEATURE_LIST_e.define('FEATURE_FW_CTF', 35)
+FEATURE_GFXOFF = FEATURE_LIST_e.define('FEATURE_GFXOFF', 36)
+FEATURE_SMU_CG = FEATURE_LIST_e.define('FEATURE_SMU_CG', 37)
+FEATURE_PSI7 = FEATURE_LIST_e.define('FEATURE_PSI7', 38)
+FEATURE_CSTATE_BOOST = FEATURE_LIST_e.define('FEATURE_CSTATE_BOOST', 39)
+FEATURE_XGMI_PER_LINK_PWR_DOWN = FEATURE_LIST_e.define('FEATURE_XGMI_PER_LINK_PWR_DOWN', 40)
+FEATURE_CXL_QOS = FEATURE_LIST_e.define('FEATURE_CXL_QOS', 41)
+FEATURE_SOC_DC_RTC = FEATURE_LIST_e.define('FEATURE_SOC_DC_RTC', 42)
+FEATURE_GFX_DC_RTC = FEATURE_LIST_e.define('FEATURE_GFX_DC_RTC', 43)
+NUM_FEATURES = FEATURE_LIST_e.define('NUM_FEATURES', 44)
+
+PCIE_LINK_SPEED_INDEX_TABLE_e = CEnum(ctypes.c_uint32)
+PCIE_LINK_SPEED_INDEX_TABLE_GEN1 = PCIE_LINK_SPEED_INDEX_TABLE_e.define('PCIE_LINK_SPEED_INDEX_TABLE_GEN1', 0)
+PCIE_LINK_SPEED_INDEX_TABLE_GEN2 = PCIE_LINK_SPEED_INDEX_TABLE_e.define('PCIE_LINK_SPEED_INDEX_TABLE_GEN2', 1)
+PCIE_LINK_SPEED_INDEX_TABLE_GEN3 = PCIE_LINK_SPEED_INDEX_TABLE_e.define('PCIE_LINK_SPEED_INDEX_TABLE_GEN3', 2)
+PCIE_LINK_SPEED_INDEX_TABLE_GEN4 = PCIE_LINK_SPEED_INDEX_TABLE_e.define('PCIE_LINK_SPEED_INDEX_TABLE_GEN4', 3)
+PCIE_LINK_SPEED_INDEX_TABLE_GEN4_ESM = PCIE_LINK_SPEED_INDEX_TABLE_e.define('PCIE_LINK_SPEED_INDEX_TABLE_GEN4_ESM', 4)
+PCIE_LINK_SPEED_INDEX_TABLE_GEN5 = PCIE_LINK_SPEED_INDEX_TABLE_e.define('PCIE_LINK_SPEED_INDEX_TABLE_GEN5', 5)
+PCIE_LINK_SPEED_INDEX_TABLE_COUNT = PCIE_LINK_SPEED_INDEX_TABLE_e.define('PCIE_LINK_SPEED_INDEX_TABLE_COUNT', 6)
+
+GFX_GUARDBAND_e = CEnum(ctypes.c_uint32)
+VOLTAGE_COLD_0 = GFX_GUARDBAND_e.define('VOLTAGE_COLD_0', 0)
+VOLTAGE_COLD_1 = GFX_GUARDBAND_e.define('VOLTAGE_COLD_1', 1)
+VOLTAGE_COLD_2 = GFX_GUARDBAND_e.define('VOLTAGE_COLD_2', 2)
+VOLTAGE_COLD_3 = GFX_GUARDBAND_e.define('VOLTAGE_COLD_3', 3)
+VOLTAGE_COLD_4 = GFX_GUARDBAND_e.define('VOLTAGE_COLD_4', 4)
+VOLTAGE_COLD_5 = GFX_GUARDBAND_e.define('VOLTAGE_COLD_5', 5)
+VOLTAGE_COLD_6 = GFX_GUARDBAND_e.define('VOLTAGE_COLD_6', 6)
+VOLTAGE_COLD_7 = GFX_GUARDBAND_e.define('VOLTAGE_COLD_7', 7)
+VOLTAGE_MID_0 = GFX_GUARDBAND_e.define('VOLTAGE_MID_0', 8)
+VOLTAGE_MID_1 = GFX_GUARDBAND_e.define('VOLTAGE_MID_1', 9)
+VOLTAGE_MID_2 = GFX_GUARDBAND_e.define('VOLTAGE_MID_2', 10)
+VOLTAGE_MID_3 = GFX_GUARDBAND_e.define('VOLTAGE_MID_3', 11)
+VOLTAGE_MID_4 = GFX_GUARDBAND_e.define('VOLTAGE_MID_4', 12)
+VOLTAGE_MID_5 = GFX_GUARDBAND_e.define('VOLTAGE_MID_5', 13)
+VOLTAGE_MID_6 = GFX_GUARDBAND_e.define('VOLTAGE_MID_6', 14)
+VOLTAGE_MID_7 = GFX_GUARDBAND_e.define('VOLTAGE_MID_7', 15)
+VOLTAGE_HOT_0 = GFX_GUARDBAND_e.define('VOLTAGE_HOT_0', 16)
+VOLTAGE_HOT_1 = GFX_GUARDBAND_e.define('VOLTAGE_HOT_1', 17)
+VOLTAGE_HOT_2 = GFX_GUARDBAND_e.define('VOLTAGE_HOT_2', 18)
+VOLTAGE_HOT_3 = GFX_GUARDBAND_e.define('VOLTAGE_HOT_3', 19)
+VOLTAGE_HOT_4 = GFX_GUARDBAND_e.define('VOLTAGE_HOT_4', 20)
+VOLTAGE_HOT_5 = GFX_GUARDBAND_e.define('VOLTAGE_HOT_5', 21)
+VOLTAGE_HOT_6 = GFX_GUARDBAND_e.define('VOLTAGE_HOT_6', 22)
+VOLTAGE_HOT_7 = GFX_GUARDBAND_e.define('VOLTAGE_HOT_7', 23)
+VOLTAGE_GUARDBAND_COUNT = GFX_GUARDBAND_e.define('VOLTAGE_GUARDBAND_COUNT', 24)
+
+class MetricsTableX_t(Struct): pass
+uint32_t = ctypes.c_uint32
+uint64_t = ctypes.c_uint64
+MetricsTableX_t._fields_ = [
+  ('AccumulationCounter', uint32_t),
+  ('MaxSocketTemperature', uint32_t),
+  ('MaxVrTemperature', uint32_t),
+  ('MaxHbmTemperature', uint32_t),
+  ('MaxSocketTemperatureAcc', uint64_t),
+  ('MaxVrTemperatureAcc', uint64_t),
+  ('MaxHbmTemperatureAcc', uint64_t),
+  ('SocketPowerLimit', uint32_t),
+  ('MaxSocketPowerLimit', uint32_t),
+  ('SocketPower', uint32_t),
+  ('Timestamp', uint64_t),
+  ('SocketEnergyAcc', uint64_t),
+  ('CcdEnergyAcc', uint64_t),
+  ('XcdEnergyAcc', uint64_t),
+  ('AidEnergyAcc', uint64_t),
+  ('HbmEnergyAcc', uint64_t),
+  ('CclkFrequencyLimit', uint32_t),
+  ('GfxclkFrequencyLimit', uint32_t),
+  ('FclkFrequency', uint32_t),
+  ('UclkFrequency', uint32_t),
+  ('SocclkFrequency', (uint32_t * 4)),
+  ('VclkFrequency', (uint32_t * 4)),
+  ('DclkFrequency', (uint32_t * 4)),
+  ('LclkFrequency', (uint32_t * 4)),
+  ('GfxclkFrequencyAcc', (uint64_t * 8)),
+  ('CclkFrequencyAcc', (uint64_t * 96)),
+  ('MaxCclkFrequency', uint32_t),
+  ('MinCclkFrequency', uint32_t),
+  ('MaxGfxclkFrequency', uint32_t),
+  ('MinGfxclkFrequency', uint32_t),
+  ('FclkFrequencyTable', (uint32_t * 4)),
+  ('UclkFrequencyTable', (uint32_t * 4)),
+  ('SocclkFrequencyTable', (uint32_t * 4)),
+  ('VclkFrequencyTable', (uint32_t * 4)),
+  ('DclkFrequencyTable', (uint32_t * 4)),
+  ('LclkFrequencyTable', (uint32_t * 4)),
+  ('MaxLclkDpmRange', uint32_t),
+  ('MinLclkDpmRange', uint32_t),
+  ('XgmiWidth', uint32_t),
+  ('XgmiBitrate', uint32_t),
+  ('XgmiReadBandwidthAcc', (uint64_t * 8)),
+  ('XgmiWriteBandwidthAcc', (uint64_t * 8)),
+  ('SocketC0Residency', uint32_t),
+  ('SocketGfxBusy', uint32_t),
+  ('DramBandwidthUtilization', uint32_t),
+  ('SocketC0ResidencyAcc', uint64_t),
+  ('SocketGfxBusyAcc', uint64_t),
+  ('DramBandwidthAcc', uint64_t),
+  ('MaxDramBandwidth', uint32_t),
+  ('DramBandwidthUtilizationAcc', uint64_t),
+  ('PcieBandwidthAcc', (uint64_t * 4)),
+  ('ProchotResidencyAcc', uint32_t),
+  ('PptResidencyAcc', uint32_t),
+  ('SocketThmResidencyAcc', uint32_t),
+  ('VrThmResidencyAcc', uint32_t),
+  ('HbmThmResidencyAcc', uint32_t),
+  ('GfxLockXCDMak', uint32_t),
+  ('GfxclkFrequency', (uint32_t * 8)),
+  ('PublicSerialNumber_AID', (uint64_t * 4)),
+  ('PublicSerialNumber_XCD', (uint64_t * 8)),
+  ('PublicSerialNumber_CCD', (uint64_t * 12)),
+  ('XgmiReadDataSizeAcc', (uint64_t * 8)),
+  ('XgmiWriteDataSizeAcc', (uint64_t * 8)),
+  ('PcieBandwidth', (uint32_t * 4)),
+  ('PCIeL0ToRecoveryCountAcc', uint32_t),
+  ('PCIenReplayAAcc', uint32_t),
+  ('PCIenReplayARolloverCountAcc', uint32_t),
+  ('PCIeNAKSentCountAcc', uint32_t),
+  ('PCIeNAKReceivedCountAcc', uint32_t),
+  ('VcnBusy', (uint32_t * 4)),
+  ('JpegBusy', (uint32_t * 32)),
+  ('PCIeLinkSpeed', uint32_t),
+  ('PCIeLinkWidth', uint32_t),
+  ('GfxBusy', (uint32_t * 8)),
+  ('GfxBusyAcc', (uint64_t * 8)),
+]
+class MetricsTableA_t(Struct): pass
+MetricsTableA_t._fields_ = [
+  ('AccumulationCounter', uint32_t),
+  ('MaxSocketTemperature', uint32_t),
+  ('MaxVrTemperature', uint32_t),
+  ('MaxHbmTemperature', uint32_t),
+  ('MaxSocketTemperatureAcc', uint64_t),
+  ('MaxVrTemperatureAcc', uint64_t),
+  ('MaxHbmTemperatureAcc', uint64_t),
+  ('SocketPowerLimit', uint32_t),
+  ('MaxSocketPowerLimit', uint32_t),
+  ('SocketPower', uint32_t),
+  ('Timestamp', uint64_t),
+  ('SocketEnergyAcc', uint64_t),
+  ('CcdEnergyAcc', uint64_t),
+  ('XcdEnergyAcc', uint64_t),
+  ('AidEnergyAcc', uint64_t),
+  ('HbmEnergyAcc', uint64_t),
+  ('CclkFrequencyLimit', uint32_t),
+  ('GfxclkFrequencyLimit', uint32_t),
+  ('FclkFrequency', uint32_t),
+  ('UclkFrequency', uint32_t),
+  ('SocclkFrequency', (uint32_t * 4)),
+  ('VclkFrequency', (uint32_t * 4)),
+  ('DclkFrequency', (uint32_t * 4)),
+  ('LclkFrequency', (uint32_t * 4)),
+  ('GfxclkFrequencyAcc', (uint64_t * 8)),
+  ('CclkFrequencyAcc', (uint64_t * 96)),
+  ('MaxCclkFrequency', uint32_t),
+  ('MinCclkFrequency', uint32_t),
+  ('MaxGfxclkFrequency', uint32_t),
+  ('MinGfxclkFrequency', uint32_t),
+  ('FclkFrequencyTable', (uint32_t * 4)),
+  ('UclkFrequencyTable', (uint32_t * 4)),
+  ('SocclkFrequencyTable', (uint32_t * 4)),
+  ('VclkFrequencyTable', (uint32_t * 4)),
+  ('DclkFrequencyTable', (uint32_t * 4)),
+  ('LclkFrequencyTable', (uint32_t * 4)),
+  ('MaxLclkDpmRange', uint32_t),
+  ('MinLclkDpmRange', uint32_t),
+  ('XgmiWidth', uint32_t),
+  ('XgmiBitrate', uint32_t),
+  ('XgmiReadBandwidthAcc', (uint64_t * 8)),
+  ('XgmiWriteBandwidthAcc', (uint64_t * 8)),
+  ('SocketC0Residency', uint32_t),
+  ('SocketGfxBusy', uint32_t),
+  ('DramBandwidthUtilization', uint32_t),
+  ('SocketC0ResidencyAcc', uint64_t),
+  ('SocketGfxBusyAcc', uint64_t),
+  ('DramBandwidthAcc', uint64_t),
+  ('MaxDramBandwidth', uint32_t),
+  ('DramBandwidthUtilizationAcc', uint64_t),
+  ('PcieBandwidthAcc', (uint64_t * 4)),
+  ('ProchotResidencyAcc', uint32_t),
+  ('PptResidencyAcc', uint32_t),
+  ('SocketThmResidencyAcc', uint32_t),
+  ('VrThmResidencyAcc', uint32_t),
+  ('HbmThmResidencyAcc', uint32_t),
+  ('GfxLockXCDMak', uint32_t),
+  ('GfxclkFrequency', (uint32_t * 8)),
+  ('PublicSerialNumber_AID', (uint64_t * 4)),
+  ('PublicSerialNumber_XCD', (uint64_t * 8)),
+  ('PublicSerialNumber_CCD', (uint64_t * 12)),
+  ('XgmiReadDataSizeAcc', (uint64_t * 8)),
+  ('XgmiWriteDataSizeAcc', (uint64_t * 8)),
+  ('VcnBusy', (uint32_t * 4)),
+  ('JpegBusy', (uint32_t * 32)),
+]
+class VfMetricsTable_t(Struct): pass
+VfMetricsTable_t._fields_ = [
+  ('AccumulationCounter', uint32_t),
+  ('InstGfxclk_TargFreq', uint32_t),
+  ('AccGfxclk_TargFreq', uint64_t),
+  ('AccGfxRsmuDpm_Busy', uint64_t),
+]
 I2cControllerPort_e = CEnum(ctypes.c_uint32)
 I2C_CONTROLLER_PORT_0 = I2cControllerPort_e.define('I2C_CONTROLLER_PORT_0', 0)
 I2C_CONTROLLER_PORT_1 = I2cControllerPort_e.define('I2C_CONTROLLER_PORT_1', 1)
@@ -106,7 +343,6 @@ SwI2cRequest_t._fields_ = [
   ('SwI2cCmds', (SwI2cCmd_t * 24)),
 ]
 class SwI2cRequestExternal_t(Struct): pass
-uint32_t = ctypes.c_uint32
 SwI2cRequestExternal_t._fields_ = [
   ('SwI2cRequest', SwI2cRequest_t),
   ('Spare', (uint32_t * 8)),
@@ -467,6 +703,19 @@ PPSMC_XCD_THM_TYPE = 0x3
 PPSMC_HBM_THM_TYPE = 0x4
 PPSMC_PLPD_MODE_DEFAULT = 0x1
 PPSMC_PLPD_MODE_OPTIMIZED = 0x2
+NUM_VCLK_DPM_LEVELS = 4
+NUM_DCLK_DPM_LEVELS = 4
+NUM_SOCCLK_DPM_LEVELS = 4
+NUM_LCLK_DPM_LEVELS = 4
+NUM_UCLK_DPM_LEVELS = 4
+NUM_FCLK_DPM_LEVELS = 4
+NUM_XGMI_DPM_LEVELS = 2
+NUM_CXL_BITRATES = 4
+NUM_PCIE_BITRATES = 4
+NUM_XGMI_BITRATES = 4
+NUM_XGMI_WIDTHS = 3
+SMU_METRICS_TABLE_VERSION = 0xD
+SMU_VF_METRICS_TABLE_VERSION = 0x3
 SMU13_0_6_DRIVER_IF_VERSION = 0x08042024
 NUM_I2C_CONTROLLERS = 8
 I2C_CONTROLLER_ENABLED = 1
