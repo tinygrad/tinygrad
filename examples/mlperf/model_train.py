@@ -1044,6 +1044,11 @@ def train_bert():
   optimizer_no_wd = LAMB(parameters_no_wd, lr=max_lr, b1=opt_lamb_beta_1, b2=opt_lamb_beta_2, eps=epsilon, weight_decay=0.0, adam=False)
   optimizer_group = OptimizerGroup(optimizer_wd, optimizer_no_wd)
 
+  if getenv("OFFLOAD_OPTIM"):
+    for o in optimizer_group.optimizers:
+      for t in [o.b1_t, o.b2_t] + o.m + o.v:
+        t.to_("CPU")
+
   # init grads
   for p in optimizer_group.params:
     p.grad = p.zeros_like().contiguous().realize()
