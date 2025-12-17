@@ -7,7 +7,6 @@ from tinygrad.helpers import system, temp, getenv
 
 if getenv("ASM", 0): # TODO: still broken
   asm = pathlib.Path(__file__).parent.parent/"gemm.s"
-  if getenv("MIN"): asm = asm.parent/"gemm_min.s"
   system(f"clang -x assembler -target amdgcn-amd-amdhsa -mcpu=gfx950 -mcode-object-version=5 -c {str(asm)} -o {temp('test.o')}")
   system(f"ld.lld -shared -o {temp('test.hsaco')} {temp('test.o')}")
   with open(temp('test.hsaco'), 'rb') as f: lib:bytes = f.read()
@@ -91,4 +90,5 @@ print(f"gemm finished in {et*1e3:9.2f} ms")
 
 import torch
 asm_out = torch.from_numpy(out.numpy()).view(torch.bfloat16).reshape(ref_out.shape)
+print(asm_out)
 assert torch.allclose(asm_out, ref_out, rtol=1e-2, atol=1e-3)
