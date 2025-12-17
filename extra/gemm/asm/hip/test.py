@@ -79,7 +79,7 @@ extra, _blob_keep, _sz_keep = pack_kernel_args(args)
 
 # ** run
 
-prg = dev.runtime("_ZN5aiter37bf16gemm_fp32bf16_tn_96x64_pf3_splitkE", lib)
+prg = dev.runtime("gemm", lib)
 prg.vargs = extra
 et = prg(global_size=[128, 86, 1], local_size=[256, 1, 1], wait=True)
 print(f"gemm finished in {et*1e3:9.2f} ms")

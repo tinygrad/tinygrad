@@ -1,9 +1,9 @@
 .amdgcn_target "amdgcn-amd-amdhsa--gfx950"
 
 .text
-.globl _ZN5aiter37bf16gemm_fp32bf16_tn_96x64_pf3_splitkE
+.globl gemm
 .p2align 8
-.type _ZN5aiter37bf16gemm_fp32bf16_tn_96x64_pf3_splitkE,@function
+.type gemm,@function
 
 .amdgpu_metadata
 ---
@@ -388,15 +388,17 @@ amdhsa.kernels:
     .kernarg_segment_align: 4
     .kernarg_segment_size: 336
     .max_flat_workgroup_size: 256
-    .name:           _ZN5aiter37bf16gemm_fp32bf16_tn_96x64_pf3_splitkE
+    .name:           gemm
     .private_segment_fixed_size: 0
     .reqd_workgroup_size:
       - 256
       - 1
       - 1
     .sgpr_count:     112
-    .symbol:         _ZN5aiter37bf16gemm_fp32bf16_tn_96x64_pf3_splitkE.kd
+    .sgpr_spill_count: 0
+    .symbol:         gemm.kd // NOTE: HIP specifically looks for the .kd suffix
     .vgpr_count:     512
+    .vgpr_spill_count: 0
     .wavefront_size: 64
 amdhsa.version:
   - 1
@@ -404,7 +406,7 @@ amdhsa.version:
 ...
 .end_amdgpu_metadata
 
-.amdhsa_kernel _ZN5aiter37bf16gemm_fp32bf16_tn_96x64_pf3_splitkE
+.amdhsa_kernel gemm
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
   .amdhsa_system_sgpr_workgroup_id_x 1
   .amdhsa_system_sgpr_workgroup_id_y 1
@@ -416,7 +418,7 @@ amdhsa.version:
   .amdhsa_accum_offset 4
 .end_amdhsa_kernel
 
-_ZN5aiter37bf16gemm_fp32bf16_tn_96x64_pf3_splitkE:
+gemm:
   s_mov_b32 s49, s4
   s_and_b32 s1, s1, 0xffff
   s_load_dword s25, s[0:1], 0xe0
@@ -2954,5 +2956,3 @@ label_0FE4:
 label_1098:
   s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
   s_endpgm
-
-.size _ZN5aiter37bf16gemm_fp32bf16_tn_96x64_pf3_splitkE, .-_ZN5aiter37bf16gemm_fp32bf16_tn_96x64_pf3_splitkE
