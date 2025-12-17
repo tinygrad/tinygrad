@@ -442,7 +442,7 @@ class AMDRenderer(CStyleLanguage):
   def get_tensor_cores(arch):
     return {"gfx942": tc.amd_cdna3, "gfx950": tc.amd_cdna4, "gfx1200": tc.amd_rdna4, "gfx1201": tc.amd_rdna4}.get(arch.split(":")[0], tc.amd_rdna3)
   @staticmethod
-  def is_cdna(arch): return arch.split(":")[0] in {"gfx942", "gfx950"}
+  def is_cdna(arch): return arch.split(":")[0] in {"gfx942", "gfx950", "gfx1200", "gfx1201"}
   def __init__(self, arch:str): # gfx942 => MI300, gfx1100 => RX 7900, gfx1201 => RX 9700
     self.arch = arch
     self.tensor_cores = self.get_tensor_cores(arch)
