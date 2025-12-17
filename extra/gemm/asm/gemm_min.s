@@ -7,20 +7,30 @@
 .type	gemm,@function
 
 gemm:
-  s_nop 1
+  s_mov_b32 s49, s4
+  s_and_b32 s1, s1, 0xffff
+  s_load_dword s25, s[0:1], 0xe0
+  s_load_dword s26, s[0:1], 0xf0
+  s_load_dword s27, s[0:1], 0x100
+  s_load_dword s28, s[0:1], 0xa0
+  s_load_dword s29, s[0:1], 0xc0
+  s_load_dword s30, s[0:1], 0x80
+  s_load_dword s20, s[0:1], 0x40
+  s_load_dword s21, s[0:1], 0x50
   s_endpgm
 
 .section	.rodata,"a",@progbits
 .p2align	6, 0x0
 .amdhsa_kernel gemm
-    .amdhsa_user_sgpr_kernarg_segment_ptr 1
-    .amdhsa_group_segment_fixed_size 65536
-    .amdhsa_private_segment_fixed_size 0
-    .amdhsa_kernarg_size 336
-    .amdhsa_user_sgpr_dispatch_id 0
-    .amdhsa_next_free_vgpr 484
-    .amdhsa_next_free_sgpr 24
-    .amdhsa_accum_offset 228
+  .amdhsa_user_sgpr_kernarg_segment_ptr 1
+  .amdhsa_system_sgpr_workgroup_id_x 1
+  .amdhsa_system_sgpr_workgroup_id_y 1
+  .amdhsa_group_segment_fixed_size 65536
+  .amdhsa_private_segment_fixed_size 0
+  .amdhsa_kernarg_size 336
+  .amdhsa_next_free_vgpr .amdgcn.next_free_vgpr
+  .amdhsa_next_free_sgpr .amdgcn.next_free_sgpr
+  .amdhsa_accum_offset 4
 .end_amdhsa_kernel
 
 .amdgpu_metadata
