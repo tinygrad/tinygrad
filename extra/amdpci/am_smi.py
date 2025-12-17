@@ -160,8 +160,8 @@ class SMICtx:
     return tables
 
   def _pick_nonzero_avg(self, vals) -> int:
-     xs = [x for x in vals if x > 0]
-     return int(sum(xs) / len(xs)) if xs else 0
+    xs = [x for x in vals if x > 0]
+    return int(sum(xs) / len(xs)) if xs else 0
 
   def get_gfx_activity(self, dev, metrics):
     match dev.ip_ver[am.MP1_HWIP]:
@@ -233,24 +233,6 @@ class SMICtx:
     match dev.ip_ver[am.MP1_HWIP]:
       case (13,0,6): return self._smuq10_round(metrics.SocketPower), self._smuq10_round(metrics.MaxSocketPowerLimit)
       case _: return metrics.SmuMetrics.AverageSocketPower, metrics.SmuMetrics.dGPU_W_MAX
-
-  def get_xgmi_table(self, dev, metrics):
-    if dev.ip_ver[am.MP1_HWIP] != (13,0,6): return None, None
-
-    dram_bw_acc = self._smuq10_round(metrics.DramBandwidthUtilizationAcc)
-    dram_bw_max = self._smuq10_round(metrics.MaxDramBandwidth)
-
-    pcie_bw_acc = self._smuq10_round(metrics.PcieBandwidthAcc[0])
-    pcie_bw_inst = self._smuq10_round(metrics.PcieBandwidth[0])
-
-    if dram_bw_max > 0: dram_line = "HBM BW: " + draw_bar(dram_bw_acc / dram_bw_max, 16, opt_text=f"{dram_bw_acc}/{dram_bw_max}GB/s")
-    else: dram_line = None
-
-    table = ["=== Links ==="] + ([dram_line] if dram_line else []) + [
-             f"PCIe BW: {pcie_bw_inst} GB/s inst",
-             f"         {pcie_bw_acc} GB/s acc"]
-    compact = f"Link: HBM {dram_bw_acc}/{dram_bw_max}GB/s | PCIe {pcie_bw_inst}GB/s"
-    return table, compact
 
   def get_mem_usage(self, dev):
     return 0
@@ -324,28 +306,22 @@ class SMICtx:
       fclk_freq = self.get_fckl_freq(dev, metrics)
       frequency_table = ["=== Frequencies ===", f"GFXCLK: {gfx_freq:>4} MHz", f"FCLK  : {fclk_freq:>4} MHz", f"MCLK  : {mclk_freq:>4} MHz"]
 
-      link_table, link_compact = self.get_xgmi_table(dev, metrics)
-
       if self.prev_terminal_width >= 231:
         power_table += power_line
         if voltage_table is not None: power_table += [""] + voltage_table
-        if link_table is not None: temps_table += [""] + link_table
         activity_line += [""]
       elif self.prev_terminal_width >= 171:
         power_table += power_line + [""] + frequency_table
-        if link_table is not None: temps_table += [""] + link_table
         activity_line += [""]
         frequency_table = None
       elif self.prev_terminal_width >= 121:
         temps_table = None
         activity_line += power_line_compact
-        if link_compact is not None: activity_line += [link_compact]
       else:
         temps_table = None
         power_table = None
         frequency_table = None
         activity_line += power_line_compact
-        if link_compact is not None: activity_line += [link_compact]
 
       dev_content.append(device_line + activity_line + same_line([temps_table, power_table, frequency_table]))
 
