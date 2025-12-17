@@ -131,7 +131,6 @@ class TestTK(unittest.TestCase):
       a = ker.gl((1, 1, N, N), dtypes.float32)
 
       a_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
-      b_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
 
       a_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
       b_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
@@ -141,8 +140,6 @@ class TestTK(unittest.TestCase):
       a_smem = warp.load(a_smem, a, (), (0, 0, row, col), axis=2)
       a_reg = warp.load(a_reg, a_smem)
       b_reg = warp.copy(b_reg, a_reg)
-      b_smem = warp.store(b_smem, b_reg)
-      b_reg = warp.load(b_reg, b_smem)
       b = warp.store(b, b_reg, (0, 0, row, col), (), axis=2)
 
       sink = ker.finish()
