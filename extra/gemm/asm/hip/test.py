@@ -1,14 +1,17 @@
 import pathlib, ctypes
 from tinygrad import Tensor, Device, dtypes
 from extra.gemm.asm.hip.arg import KernelArgs
-from tinygrad.helpers import system, temp
+from tinygrad.helpers import system, temp, getenv
 
 # ** assemble
 
-asm = pathlib.Path(__file__).parent.parent/"gemm"
-system(f"clang -x assembler -target amdgcn-amd-amdhsa -mcpu=gfx950 -mcode-object-version=5 -c {str(asm)} -o {temp('test.o')}")
-system(f"ld.lld -shared -o {temp('test.hsaco')} {temp('test.o')}")
-with open(temp('test.hsaco'), 'rb') as f: lib:bytes = f.read()
+if getenv("ASM", 0): # TODO: still broken
+  asm = pathlib.Path(__file__).parent.parent/"gemm"
+  system(f"clang -x assembler -target amdgcn-amd-amdhsa -mcpu=gfx950 -mcode-object-version=5 -c {str(asm)} -o {temp('test.o')}")
+  system(f"ld.lld -shared -o {temp('test.hsaco')} {temp('test.o')}")
+  with open(temp('test.hsaco'), 'rb') as f: lib:bytes = f.read()
+else: # the literal hsaco dump
+  with open(pathlib.Path(__file__).parent.parent/"lib", "rb") as f: lib:bytes = f.read()
 
 Device.DEFAULT = "HIP"
 dev = Device[Device.DEFAULT]
