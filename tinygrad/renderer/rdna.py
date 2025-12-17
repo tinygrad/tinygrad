@@ -715,6 +715,41 @@ class RDNARenderer(Renderer):
       root = get_root_owner(u)
       alias_groups[root].append(u)
 
+    # Precompute effective death position for each root owner (max of all aliases' last_use)
+    effective_death: dict[UOp, int] = {}
+    for root, alias_list in alias_groups.items():
+      death_pos = last_use.get(root, -1)
+      for alias in alias_list:
+        death_pos = max(death_pos, last_use.get(alias, -1))
+      effective_death[root] = death_pos
+
+    # Pending register deaths: position -> list of (reg_type, reg_num) to free
+    # This avoids O(n²) scanning of all registers at each position
+    pending_vgpr_deaths: dict[int, list[int]] = defaultdict(list)
+    pending_sgpr_deaths: dict[int, list[int]] = defaultdict(list)
+    pending_range_deaths: dict[int, list[int]] = defaultdict(list)  # base register of range
+
+    def schedule_vgpr_death(reg: int, owner: UOp):
+      """Schedule a VGPR to be freed AFTER its owner's last use (death_pos + 1)"""
+      root = get_root_owner(owner)
+      death_pos = effective_death.get(root, last_use.get(owner, -1))
+      if death_pos >= 0:
+        pending_vgpr_deaths[death_pos + 1].append(reg)  # +1: free AFTER last use
+
+    def schedule_sgpr_death(reg: int, owner: UOp):
+      """Schedule an SGPR to be freed AFTER its owner's last use (death_pos + 1)"""
+      root = get_root_owner(owner)
+      death_pos = effective_death.get(root, last_use.get(owner, -1))
+      if death_pos >= 0:
+        pending_sgpr_deaths[death_pos + 1].append(reg)  # +1: free AFTER last use
+
+    def schedule_range_death(base: int, owner: UOp):
+      """Schedule an 8-VGPR range to be freed AFTER its owner's last use (death_pos + 1)"""
+      root = get_root_owner(owner)
+      death_pos = effective_death.get(root, last_use.get(owner, -1))
+      if death_pos >= 0:
+        pending_range_deaths[death_pos + 1].append(base)  # +1: free AFTER last use
+
     # === IDENTIFY COMPILE-TIME CONSTANTS ===
     # Constants don't need VGPRs if they're only used in contexts where literals are allowed:
     # 1. REG indices (compile-time array indices)
@@ -755,39 +790,19 @@ class RDNARenderer(Renderer):
         skip_alloc_consts.add(const_uop)
 
     def free_dead_regs(pos: int):
-      """Free registers whose owners (and all aliases) are no longer live after position pos"""
+      """Free registers scheduled to die at position pos - O(1) lookup instead of O(n) scan"""
       nonlocal free_vgprs, free_vgpr_pairs, free_vgpr_ranges, free_sgprs
-      # First check 8-register ranges
-      dead_ranges = []
-      for base, owner in range_owner.items():
-        owner_last_use = last_use.get(owner, -1)
-        for alias_uop in alias_groups.get(owner, []):
-          owner_last_use = max(owner_last_use, last_use.get(alias_uop, -1))
-        if owner_last_use < pos:
-          dead_ranges.append(base)
-      for base in dead_ranges:
-        del range_owner[base]
-        count = vgpr_ranges.pop(base, 8)
-        free_vgpr_ranges.append((base, count))
-      dead_vgprs = []
-      for reg, owner in vgpr_owner.items():
-        # Check if owner and all its aliases are dead
-        owner_last_use = last_use.get(owner, -1)
-        # Also check any UOps that alias to this owner
-        for alias_uop in alias_groups.get(owner, []):
-          owner_last_use = max(owner_last_use, last_use.get(alias_uop, -1))
-        if owner_last_use < pos:
-          dead_vgprs.append(reg)
-      dead_sgprs = []
-      for reg, owner in sgpr_owner.items():
-        owner_last_use = last_use.get(owner, -1)
-        for alias_uop in alias_groups.get(owner, []):
-          owner_last_use = max(owner_last_use, last_use.get(alias_uop, -1))
-        if owner_last_use < pos:
-          dead_sgprs.append(reg)
-      # Process dead VGPRs - handle pairs specially
+      # Free ranges scheduled to die at this position
+      for base in pending_range_deaths.get(pos, []):
+        if base in range_owner:
+          del range_owner[base]
+          count = vgpr_ranges.pop(base, 8)
+          free_vgpr_ranges.append((base, count))
+      # Free VGPRs scheduled to die at this position
+      dead_vgprs = pending_vgpr_deaths.get(pos, [])
       dead_vgprs_set = set(dead_vgprs)
       for reg in dead_vgprs:
+        if reg not in vgpr_owner: continue  # Already freed (e.g., as part of pair)
         del vgpr_owner[reg]
         # If this is part of a pair, check if both regs are dead and return as pair
         if reg in vgpr_pairs:
@@ -801,7 +816,9 @@ class RDNARenderer(Renderer):
           # Don't add to free_vgprs - pairs are handled separately
         else:
           free_vgprs.append(reg)
-      for reg in dead_sgprs:
+      # Free SGPRs scheduled to die at this position
+      for reg in pending_sgpr_deaths.get(pos, []):
+        if reg not in sgpr_owner: continue  # Already freed
         # Don't free SGPRs that are part of a pair (used for 64-bit values like buffer addresses)
         if reg in sgpr_pairs:
           continue
@@ -823,6 +840,7 @@ class RDNARenderer(Renderer):
         next_vgpr += 1
         max_vgpr = max(max_vgpr, next_vgpr)
       vgpr_owner[reg] = owner
+      schedule_vgpr_death(reg, owner)
       return f"v{reg}"
 
     def alloc_vgpr_pair(owner: UOp) -> str:
@@ -842,6 +860,8 @@ class RDNARenderer(Renderer):
       vgpr_owner[reg+1] = owner
       vgpr_pairs.add(reg)
       vgpr_pairs.add(reg+1)
+      schedule_vgpr_death(reg, owner)
+      schedule_vgpr_death(reg+1, owner)
       return f"v[{reg}:{reg+1}]"
 
     def needs_vgpr_pair(dtype: DType) -> bool:
@@ -858,6 +878,7 @@ class RDNARenderer(Renderer):
         next_sgpr += 1
         max_sgpr = max(max_sgpr, next_sgpr)
       sgpr_owner[reg] = owner
+      schedule_sgpr_death(reg, owner)
       return f"s{reg}"
 
     def alloc_sgpr_pair(owner: UOp) -> str:
@@ -888,6 +909,7 @@ class RDNARenderer(Renderer):
             free_vgpr_ranges.append((base + count, range_count - count))
           range_owner[base] = owner
           vgpr_ranges[base] = count
+          schedule_range_death(base, owner)
           return f"v[{base}:{base+count-1}]"
       # No free range - allocate fresh
       base = next_vgpr
@@ -897,6 +919,7 @@ class RDNARenderer(Renderer):
       max_vgpr = max(max_vgpr, next_vgpr)
       range_owner[base] = owner
       vgpr_ranges[base] = count
+      schedule_range_death(base, owner)
       return f"v[{base}:{base+count-1}]"
 
     def get_scratch_vgpr(count:int=1) -> int:
