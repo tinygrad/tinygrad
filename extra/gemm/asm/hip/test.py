@@ -10,8 +10,10 @@ if getenv("ASM", 0): # TODO: still broken
   system(f"clang -x assembler -target amdgcn-amd-amdhsa -mcpu=gfx950 -mcode-object-version=5 -c {str(asm)} -o {temp('test.o')}")
   system(f"ld.lld -shared -o {temp('test.hsaco')} {temp('test.o')}")
   with open(temp('test.hsaco'), 'rb') as f: lib:bytes = f.read()
+  name:str = "gemm"
 else: # the literal hsaco dump
   with open(pathlib.Path(__file__).parent.parent/"lib", "rb") as f: lib:bytes = f.read()
+  name:str = "_ZN5aiter37bf16gemm_fp32bf16_tn_96x64_pf3_splitkE"
 
 Device.DEFAULT = "HIP"
 dev = Device[Device.DEFAULT]
@@ -79,7 +81,7 @@ extra, _blob_keep, _sz_keep = pack_kernel_args(args)
 
 # ** run
 
-prg = dev.runtime("gemm", lib)
+prg = dev.runtime(name, lib)
 prg.vargs = extra
 et = prg(global_size=[128, 86, 1], local_size=[256, 1, 1], wait=True)
 print(f"gemm finished in {et*1e3:9.2f} ms")
