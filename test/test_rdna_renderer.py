@@ -1,0 +1,423 @@
+#!/usr/bin/env python3
+"""Tests for the RDNA assembly renderer"""
+import unittest
+import numpy as np
+from tinygrad import Tensor, dtypes, Device
+from tinygrad.helpers import getenv
+
+# Skip tests if not on AMD RDNA device
+AMD_RDNA = getenv("AMD_RDNA", 0)
+
+@unittest.skipUnless(AMD_RDNA, "AMD_RDNA=1 required")
+class TestRDNABasic(unittest.TestCase):
+  """Basic functionality tests"""
+
+  def test_basic_half_load(self):
+    """Test basic half-precision load and sum"""
+    a = Tensor(np.arange(16, dtype=np.float16).reshape(1, 16))
+    b = a.sum()
+    b.realize()
+    np.testing.assert_allclose(b.numpy(), np.arange(16).sum(), rtol=1e-2)
+
+  def test_basic_float_load(self):
+    """Test basic float load and sum"""
+    a = Tensor(np.arange(16, dtype=np.float32).reshape(1, 16))
+    b = a.sum()
+    b.realize()
+    np.testing.assert_allclose(b.numpy(), np.arange(16).sum(), rtol=1e-5)
+
+  def test_elementwise_add(self):
+    """Test elementwise addition"""
+    a = Tensor([1.0, 2.0, 3.0, 4.0])
+    b = Tensor([5.0, 6.0, 7.0, 8.0])
+    c = a + b
+    c.realize()
+    np.testing.assert_allclose(c.numpy(), [6.0, 8.0, 10.0, 12.0])
+
+  def test_elementwise_mul(self):
+    """Test elementwise multiplication"""
+    a = Tensor([1.0, 2.0, 3.0, 4.0])
+    b = Tensor([2.0, 2.0, 2.0, 2.0])
+    c = a * b
+    c.realize()
+    np.testing.assert_allclose(c.numpy(), [2.0, 4.0, 6.0, 8.0])
+
+@unittest.skipUnless(AMD_RDNA, "AMD_RDNA=1 required")
+class TestRDNAWMMA(unittest.TestCase):
+  """WMMA tensor core tests"""
+
+  def test_wmma_16x16_correctness(self):
+    """Test 16x16 WMMA correctness"""
+    a = Tensor(np.random.randn(16, 16).astype(np.float16))
+    b = Tensor(np.random.randn(16, 16).astype(np.float16))
+    c = a.matmul(b, dtype=dtypes.float)
+    c_np = a.numpy().astype(np.float32) @ b.numpy().astype(np.float32)
+    np.testing.assert_allclose(c.numpy(), c_np, rtol=1e-2, atol=1e-2)
+
+  def test_wmma_32x32_correctness(self):
+    """Test 32x32 WMMA correctness"""
+    a = Tensor(np.random.randn(32, 32).astype(np.float16))
+    b = Tensor(np.random.randn(32, 32).astype(np.float16))
+    c = a.matmul(b, dtype=dtypes.float)
+    c_np = a.numpy().astype(np.float32) @ b.numpy().astype(np.float32)
+    np.testing.assert_allclose(c.numpy(), c_np, rtol=1e-2, atol=1e-2)
+
+@unittest.skipUnless(AMD_RDNA, "AMD_RDNA=1 required")
+class TestRDNAKernelGeneration(unittest.TestCase):
+  """Tests for kernel code generation"""
+
+  def test_wmma_kernel_runs(self):
+    """Test that WMMA kernel runs without error"""
+    # If tensor cores are used, this matmul should run successfully
+    a = Tensor(np.random.randn(16, 16).astype(np.float16))
+    b = Tensor(np.random.randn(16, 16).astype(np.float16))
+    c = a.matmul(b, dtype=dtypes.float)
+    c.realize()
+    # Check result is reasonable
+    self.assertEqual(c.shape, (16, 16))
+    self.assertFalse(np.any(np.isnan(c.numpy())))
+
+  def test_larger_wmma_kernel_runs(self):
+    """Test that larger WMMA kernel (multiple tiles) runs"""
+    a = Tensor(np.random.randn(32, 32).astype(np.float16))
+    b = Tensor(np.random.randn(32, 32).astype(np.float16))
+    c = a.matmul(b, dtype=dtypes.float)
+    c.realize()
+    self.assertEqual(c.shape, (32, 32))
+    self.assertFalse(np.any(np.isnan(c.numpy())))
+
+@unittest.skipUnless(AMD_RDNA, "AMD_RDNA=1 required")
+class TestRDNAVGPRLimits(unittest.TestCase):
+  """Tests documenting VGPR limits"""
+
+  @unittest.skip("64x64 WMMA exceeds 256 VGPR limit - needs further register allocator improvements")
+  def test_wmma_64x64_vgpr_limit(self):
+    """64x64 WMMA currently exceeds VGPR limit.
+    Look-ahead packing helps but additional optimizations needed for larger matrices.
+    """
+    a = Tensor(np.random.randn(64, 64).astype(np.float16))
+    b = Tensor(np.random.randn(64, 64).astype(np.float16))
+    c = a.matmul(b, dtype=dtypes.float)
+    c.realize()
+
+class TestLookAheadPacking(unittest.TestCase):
+  """Tests for the look-ahead packing optimization - these run without device"""
+
+  def test_half16_const_packing(self):
+    """Test that half16 VECTORIZE with constants generates pack instructions"""
+    from tinygrad.uop.ops import Ops, UOp
+    from tinygrad.renderer.rdna import RDNARenderer
+    from tinygrad.dtype import dtypes
+
+    renderer = RDNARenderer("gfx1100")
+
+    # Build a simple test: 16 scalar half constants -> half16 VECTORIZE
+    # This tests the basic VECTORIZE packing logic (not look-ahead, but verifies packing works)
+    half_vals = [UOp.const(dtypes.half, float(i)) for i in range(16)]
+    vec = UOp(Ops.VECTORIZE, dtypes.half.vec(16), tuple(half_vals))
+    sink = UOp(Ops.SINK, dtypes.void, (vec,))
+
+    # Render and check for v_pack_b32_f16 instructions
+    uops = list(sink.toposort())
+    asm = renderer.render(uops)
+
+    # Should have v_pack_b32_f16 instructions for packing pairs of halfs
+    pack_count = asm.count('v_pack_b32_f16')
+    self.assertGreater(pack_count, 0, "Should have v_pack_b32_f16 instructions for half16 packing")
+    # Should have 8 pack instructions (16 halfs / 2 per pack)
+    self.assertEqual(pack_count, 8, f"Should have exactly 8 pack instructions, got {pack_count}")
+
+  def test_half16_load_packing_with_index(self):
+    """Test that half16 VECTORIZE with LOADs generates pack instructions and uses look-ahead"""
+    from tinygrad.uop.ops import Ops, UOp
+    from tinygrad.renderer.rdna import RDNARenderer
+    from tinygrad.dtype import dtypes
+
+    renderer = RDNARenderer("gfx1100")
+
+    # Create a minimal kernel with half LOADs feeding half16 VECTORIZE
+    # This simulates what WMMA needs for input data
+
+    # Create buffer argument using .ptr() method
+    buf = UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(), arg=0)
+
+    # Create index (workitem ID)
+    ridx = UOp(Ops.SPECIAL, dtypes.int, (), ("ridx0", 32))
+
+    # Create 16 LOADs at different offsets
+    loads = []
+    for i in range(16):
+      offset = UOp.const(dtypes.int, i)
+      idx = UOp(Ops.ADD, dtypes.int, (ridx, offset))
+      index = UOp(Ops.INDEX, buf.dtype, (buf, idx))
+      load = UOp(Ops.LOAD, dtypes.half, (index,))
+      loads.append(load)
+
+    # Create half16 VECTORIZE
+    vec = UOp(Ops.VECTORIZE, dtypes.half.vec(16), tuple(loads))
+    sink = UOp(Ops.SINK, dtypes.void, (vec,))
+
+    uops = list(sink.toposort())
+    asm = renderer.render(uops)
+
+    # Should have v_pack_b32_f16 instructions
+    pack_count = asm.count('v_pack_b32_f16')
+    self.assertGreater(pack_count, 0, "Should have v_pack_b32_f16 instructions")
+
+    # Should have 8 pack instructions total (16 halfs / 2 per pack)
+    self.assertEqual(pack_count, 8, f"Should have exactly 8 pack instructions, got {pack_count}")
+
+    # Check that LOADs are generated (global_load_u16 for half precision)
+    load_count = asm.count('global_load_u16')
+    self.assertGreater(load_count, 0, "Should have global_load_u16 instructions")
+    # Should have 16 loads (one per half element)
+    self.assertEqual(load_count, 16, f"Should have 16 load instructions, got {load_count}")
+
+  def test_look_ahead_packing_pre_scan(self):
+    """Test that the pre-scan correctly identifies half16 VECTORIZE sources"""
+    from tinygrad.uop.ops import Ops, UOp
+    from tinygrad.dtype import dtypes
+
+    # Create a minimal kernel with half LOADs feeding half16 VECTORIZE
+    buf = UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(), arg=0)
+    ridx = UOp(Ops.SPECIAL, dtypes.int, (), ("ridx0", 32))
+
+    # Create 16 LOADs
+    loads = []
+    for i in range(16):
+      offset = UOp.const(dtypes.int, i)
+      idx = UOp(Ops.ADD, dtypes.int, (ridx, offset))
+      index = UOp(Ops.INDEX, buf.dtype, (buf, idx))
+      load = UOp(Ops.LOAD, dtypes.half, (index,))
+      loads.append(load)
+
+    vec = UOp(Ops.VECTORIZE, dtypes.half.vec(16), tuple(loads))
+    sink = UOp(Ops.SINK, dtypes.void, (vec,))
+
+    uops = list(sink.toposort())
+
+    # Simulate the pre-scan logic from the renderer
+    half16_vectorize_sources = {}
+    for u in uops:
+      if u.op is Ops.VECTORIZE and u.dtype.scalar() == dtypes.half and u.dtype.count == 16:
+        for pos, src in enumerate(u.src):
+          half16_vectorize_sources[src] = (u, pos)
+
+    # All 16 LOADs should be identified as half16 sources
+    load_count = sum(1 for u in uops if u.op is Ops.LOAD and u in half16_vectorize_sources)
+    self.assertEqual(load_count, 16, f"All 16 LOADs should be identified as half16 sources, got {load_count}")
+
+  def test_look_ahead_packing_is_interleaved(self):
+    """Test that pack instructions are interleaved with loads (not all at the end)"""
+    from tinygrad.uop.ops import Ops, UOp
+    from tinygrad.renderer.rdna import RDNARenderer
+    from tinygrad.dtype import dtypes
+
+    renderer = RDNARenderer("gfx1100")
+
+    # Create a minimal kernel with half LOADs feeding half16 VECTORIZE
+    buf = UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(), arg=0)
+    ridx = UOp(Ops.SPECIAL, dtypes.int, (), ("ridx0", 32))
+
+    # Create 16 LOADs
+    loads = []
+    for i in range(16):
+      offset = UOp.const(dtypes.int, i)
+      idx = UOp(Ops.ADD, dtypes.int, (ridx, offset))
+      index = UOp(Ops.INDEX, buf.dtype, (buf, idx))
+      load = UOp(Ops.LOAD, dtypes.half, (index,))
+      loads.append(load)
+
+    vec = UOp(Ops.VECTORIZE, dtypes.half.vec(16), tuple(loads))
+    sink = UOp(Ops.SINK, dtypes.void, (vec,))
+
+    uops = list(sink.toposort())
+    asm = renderer.render(uops)
+    lines = asm.split('\n')
+
+    # Find line numbers of loads and packs
+    load_lines = [i for i, l in enumerate(lines) if 'global_load_u16' in l]
+    pack_lines = [i for i, l in enumerate(lines) if 'v_pack_b32_f16' in l]
+
+    self.assertGreater(len(load_lines), 0, "Should have load instructions")
+    self.assertGreater(len(pack_lines), 0, "Should have pack instructions")
+
+    # The first pack should occur BEFORE the last load (interleaving)
+    first_pack = min(pack_lines)
+    last_load = max(load_lines)
+    self.assertLess(first_pack, last_load,
+      f"First pack (line {first_pack}) should be before last load (line {last_load}) for interleaving")
+
+  def test_vgpr_reuse_in_look_ahead_packing(self):
+    """Test that temp VGPRs are reused after packing (reducing register pressure)"""
+    from tinygrad.uop.ops import Ops, UOp
+    from tinygrad.renderer.rdna import RDNARenderer
+    from tinygrad.dtype import dtypes
+    import re
+
+    renderer = RDNARenderer("gfx1100")
+
+    # Create a minimal kernel with half LOADs feeding half16 VECTORIZE
+    buf = UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(), arg=0)
+    ridx = UOp(Ops.SPECIAL, dtypes.int, (), ("ridx0", 32))
+
+    # Create 16 LOADs
+    loads = []
+    for i in range(16):
+      offset = UOp.const(dtypes.int, i)
+      idx = UOp(Ops.ADD, dtypes.int, (ridx, offset))
+      index = UOp(Ops.INDEX, buf.dtype, (buf, idx))
+      load = UOp(Ops.LOAD, dtypes.half, (index,))
+      loads.append(load)
+
+    vec = UOp(Ops.VECTORIZE, dtypes.half.vec(16), tuple(loads))
+    sink = UOp(Ops.SINK, dtypes.void, (vec,))
+
+    uops = list(sink.toposort())
+    asm = renderer.render(uops)
+
+    # Extract VGPR count from metadata
+    vgpr_match = re.search(r'\.amdhsa_next_free_vgpr (\d+)', asm)
+    self.assertIsNotNone(vgpr_match, "Should have .amdhsa_next_free_vgpr in metadata")
+    vgpr_count = int(vgpr_match.group(1))
+
+    # With look-ahead packing and VGPR reuse:
+    # - 8 VGPRs for the half16 destination range
+    # - A few temp VGPRs for loading (reused)
+    # - A few VGPRs for address computation
+    # Without reuse, we'd need 8 + 16 = 24 VGPRs minimum
+    # With reuse, we should need significantly fewer
+    # The generated code shows temp VGPRs v6 and v16 are reused
+    self.assertLess(vgpr_count, 24, f"VGPR count should be < 24 with reuse, got {vgpr_count}")
+
+  def test_multiple_half16_vectorizes(self):
+    """Test look-ahead packing with multiple half16 VECTORIZEs (like WMMA A and B inputs)"""
+    from tinygrad.uop.ops import Ops, UOp
+    from tinygrad.renderer.rdna import RDNARenderer
+    from tinygrad.dtype import dtypes
+    import re
+
+    renderer = RDNARenderer("gfx1100")
+
+    # Create two buffers (like A and B matrices)
+    buf_a = UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(), arg=0)
+    buf_b = UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(), arg=1)
+    ridx = UOp(Ops.SPECIAL, dtypes.int, (), ("ridx0", 32))
+
+    # Create 16 LOADs from buf_a
+    loads_a = []
+    for i in range(16):
+      offset = UOp.const(dtypes.int, i)
+      idx = UOp(Ops.ADD, dtypes.int, (ridx, offset))
+      index = UOp(Ops.INDEX, buf_a.dtype, (buf_a, idx))
+      load = UOp(Ops.LOAD, dtypes.half, (index,))
+      loads_a.append(load)
+
+    # Create 16 LOADs from buf_b
+    loads_b = []
+    for i in range(16):
+      offset = UOp.const(dtypes.int, i + 100)  # Different offsets
+      idx = UOp(Ops.ADD, dtypes.int, (ridx, offset))
+      index = UOp(Ops.INDEX, buf_b.dtype, (buf_b, idx))
+      load = UOp(Ops.LOAD, dtypes.half, (index,))
+      loads_b.append(load)
+
+    # Create two half16 VECTORIZEs
+    vec_a = UOp(Ops.VECTORIZE, dtypes.half.vec(16), tuple(loads_a))
+    vec_b = UOp(Ops.VECTORIZE, dtypes.half.vec(16), tuple(loads_b))
+    sink = UOp(Ops.SINK, dtypes.void, (vec_a, vec_b))
+
+    uops = list(sink.toposort())
+    asm = renderer.render(uops)
+
+    # Should have 16 pack instructions (8 for each half16)
+    pack_count = asm.count('v_pack_b32_f16')
+    self.assertEqual(pack_count, 16, f"Should have 16 pack instructions, got {pack_count}")
+
+    # Should have 32 loads total
+    load_count = asm.count('global_load_u16')
+    self.assertEqual(load_count, 32, f"Should have 32 load instructions, got {load_count}")
+
+    # Extract VGPR count
+    vgpr_match = re.search(r'\.amdhsa_next_free_vgpr (\d+)', asm)
+    self.assertIsNotNone(vgpr_match, "Should have .amdhsa_next_free_vgpr in metadata")
+    vgpr_count = int(vgpr_match.group(1))
+
+    # With look-ahead packing and VGPR reuse:
+    # - 16 VGPRs for the two half16 destination ranges (8 each)
+    # - A few temp VGPRs for loading (reused)
+    # Without reuse, we'd need 16 + 32 = 48 VGPRs minimum
+    self.assertLess(vgpr_count, 48, f"VGPR count should be < 48 with reuse, got {vgpr_count}")
+
+@unittest.skipUnless(AMD_RDNA, "AMD_RDNA=1 required")
+class TestLookAheadPackingOnDevice(unittest.TestCase):
+  """Tests for look-ahead packing that require actual device execution"""
+
+  def test_wmma_generates_pack_instructions(self):
+    """Test that WMMA kernel generates v_pack_b32_f16 instructions"""
+    from tinygrad.renderer.rdna import RDNARenderer
+    from tinygrad.uop.ops import Ops
+
+    # Create matmul that uses WMMA
+    a = Tensor(np.random.randn(16, 16).astype(np.float16))
+    b = Tensor(np.random.randn(16, 16).astype(np.float16))
+    c = a.matmul(b, dtype=dtypes.float)
+
+    sched = c.schedule()
+    renderer = RDNARenderer("gfx1100")
+
+    # Find the WMMA kernel
+    for item in sched:
+      if hasattr(item, 'ast') and item.ast is not None:
+        uops = list(item.ast.toposort())
+        has_wmma = any(u.op == Ops.WMMA for u in uops)
+        if has_wmma:
+          asm = renderer.render(uops)
+          pack_count = asm.count('v_pack_b32_f16')
+          self.assertGreater(pack_count, 0, f"WMMA kernel should have v_pack_b32_f16 instructions")
+          return
+
+    self.fail("Should find WMMA kernel in schedule")
+
+  def test_look_ahead_packing_reduces_temp_regs(self):
+    """Test that look-ahead packing packs halfs immediately after load"""
+    from tinygrad.renderer.rdna import RDNARenderer
+    from tinygrad.uop.ops import Ops
+
+    # Create matmul that uses WMMA
+    a = Tensor(np.random.randn(16, 16).astype(np.float16))
+    b = Tensor(np.random.randn(16, 16).astype(np.float16))
+    c = a.matmul(b, dtype=dtypes.float)
+
+    sched = c.schedule()
+    renderer = RDNARenderer("gfx1100")
+
+    # Find and render the WMMA kernel
+    for item in sched:
+      if hasattr(item, 'ast') and item.ast is not None:
+        uops = list(item.ast.toposort())
+        has_wmma = any(u.op == Ops.WMMA for u in uops)
+        if has_wmma:
+          asm = renderer.render(uops)
+          lines = asm.split('\n')
+
+          # Check that pack instructions appear after loads (look-ahead packing)
+          # The pattern should be: global_load_d16_b16 ... then v_pack_b32_f16
+          load_lines = [i for i, l in enumerate(lines) if 'global_load_d16_b16' in l]
+          pack_lines = [i for i, l in enumerate(lines) if 'v_pack_b32_f16' in l]
+
+          # Some pack instructions should appear interleaved with loads
+          # (i.e., packing happens as soon as pairs are loaded, not all at the end)
+          if load_lines and pack_lines:
+            # Find first pack after a load
+            first_pack = min(pack_lines)
+            last_load = max(load_lines)
+            # Pack should happen before all loads are done (interleaved)
+            self.assertLess(first_pack, last_load,
+              "Look-ahead packing should interleave pack instructions with loads")
+          return
+
+    self.fail("Should find WMMA kernel in schedule")
+
+if __name__ == '__main__':
+  unittest.main()

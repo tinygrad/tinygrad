@@ -909,6 +909,28 @@ class RDNARenderer(Renderer):
     name = "test"
     pending_waits = set()  # track which ops need waits
 
+    # === LOOK-AHEAD PACKING FOR HALF16 VECTORIZE ===
+    # Pre-scan to find scalar half LOADs that will be packed into half16 VECTORIZE
+    # This allows us to pack halfs immediately when loaded, reducing register pressure
+    half16_vectorize_sources: dict[UOp, tuple[UOp, int]] = {}  # source -> (vectorize_uop, position)
+    half16_vectorize_ranges: dict[UOp, str] = {}  # vectorize_uop -> allocated v[base:end] range (lazy allocated)
+    half16_packed: dict[UOp, set[int]] = {}  # vectorize_uop -> set of packed VGPR indices (0-7)
+    half16_temp_regs: dict[UOp, str] = {}  # source_uop -> temp VGPR holding the loaded value
+
+    for u in uops:
+      if u.op is Ops.VECTORIZE and u.dtype.scalar() == dtypes.half and u.dtype.count == 16:
+        # This is a half16 VECTORIZE for WMMA input
+        # Map each source to its position
+        for pos, src in enumerate(u.src):
+          half16_vectorize_sources[src] = (u, pos)
+        half16_packed[u] = set()
+
+    def get_half16_range(vec_uop: UOp) -> str:
+      """Lazily allocate the 8-VGPR range for a half16 VECTORIZE"""
+      if vec_uop not in half16_vectorize_ranges:
+        half16_vectorize_ranges[vec_uop] = alloc_vgpr_range(vec_uop, 8)
+      return half16_vectorize_ranges[vec_uop]
+
     for i, u in enumerate(uops):
       # Free registers that are no longer needed
       free_dead_regs(i)
@@ -929,16 +951,27 @@ class RDNARenderer(Renderer):
         # For WMMA inputs (half16), we need contiguous packed VGPRs
         # half16 = 16 halfs = 8 VGPRs (2 halfs per 32-bit VGPR)
         if u.dtype.scalar() == dtypes.half and u.dtype.count == 16:
-          # Allocate 8 contiguous VGPRs for packed half16 - use range allocator for reuse
-          r[u] = alloc_vgpr_range(u, 8)
-          base = int(r[u][2:r[u].index(':')])
-          # Pack the source halfs into the destination VGPRs
-          # Each VGPR holds 2 halfs: low 16 bits and high 16 bits
-          for j in range(8):
-            src_lo = r[u.src[j*2]]
-            src_hi = r[u.src[j*2+1]]
-            # Pack two halfs into one VGPR using v_pack_b32_f16
-            kernel.append(f"v_pack_b32_f16 v{base+j}, {src_lo}, {src_hi}")
+          # Check if we used look-ahead packing (range already allocated)
+          if u in half16_vectorize_ranges:
+            r[u] = half16_vectorize_ranges[u]
+            base = int(r[u][2:r[u].index(':')])
+            # Only pack VGPRs that weren't already packed by look-ahead
+            for j in range(8):
+              if j not in half16_packed.get(u, set()):
+                src_lo = r[u.src[j*2]]
+                src_hi = r[u.src[j*2+1]]
+                kernel.append(f"v_pack_b32_f16 v{base+j}, {src_lo}, {src_hi}")
+          else:
+            # No look-ahead - allocate and pack as before
+            r[u] = alloc_vgpr_range(u, 8)
+            base = int(r[u][2:r[u].index(':')])
+            # Pack the source halfs into the destination VGPRs
+            # Each VGPR holds 2 halfs: low 16 bits and high 16 bits
+            for j in range(8):
+              src_lo = r[u.src[j*2]]
+              src_hi = r[u.src[j*2+1]]
+              # Pack two halfs into one VGPR using v_pack_b32_f16
+              kernel.append(f"v_pack_b32_f16 v{base+j}, {src_lo}, {src_hi}")
         # For float8 (WMMA accumulator), check if sources are contiguous
         elif u.dtype.scalar() == dtypes.float and u.dtype.count == 8:
           # Check if all sources are from contiguous registers
@@ -1050,6 +1083,11 @@ class RDNARenderer(Renderer):
           # Calculate number of 32-bit VGPRs needed
           vgpr_count = (u.dtype.itemsize + 3) // 4  # Round up to 32-bit chunks
           r[u] = alloc_vgpr_range(u, vgpr_count)
+        elif u in half16_vectorize_sources:
+          # Scalar half LOAD destined for half16 VECTORIZE - use look-ahead packing
+          # Allocate a temp VGPR for the load, will pack immediately after
+          r[u] = alloc_vgpr(u)
+          half16_temp_regs[u] = r[u]
         else:
           r[u] = alloc_vgpr_pair(u) if needs_vgpr_pair(u.dtype) else alloc_vgpr(u)
         pending_waits.add(u)
@@ -1181,6 +1219,50 @@ class RDNARenderer(Renderer):
         kernel.append(l)
       else:
         kernel.extend(l)
+
+      # === LOOK-AHEAD PACKING: pack halfs immediately after load ===
+      if u.op is Ops.LOAD and u in half16_vectorize_sources:
+        vec_uop, pos = half16_vectorize_sources[u]
+        vgpr_idx = pos // 2  # Which VGPR in the 8-VGPR range (0-7)
+        is_high_half = pos % 2 == 1  # Even positions are low half, odd are high half
+        range_str = get_half16_range(vec_uop)  # Lazy allocate if needed
+        base = int(range_str[2:range_str.index(':')])
+        dst_vgpr = f"v{base + vgpr_idx}"
+
+        # Find the pair (the other half that shares this destination VGPR)
+        pair_pos = pos ^ 1  # XOR to toggle between even/odd
+        pair_src = vec_uop.src[pair_pos]
+
+        # Check if pair is already loaded (its temp reg exists in half16_temp_regs and it's been processed)
+        pair_loaded = pair_src in half16_temp_regs and pair_src in r
+
+        if pair_loaded:
+          # Both halves ready - wait for loads and pack immediately
+          kernel.append("s_waitcnt vmcnt(0)")
+          pending_waits.discard(u)
+          pending_waits.discard(pair_src)
+
+          # Determine which is low and which is high
+          if is_high_half:
+            lo_reg = half16_temp_regs[pair_src]
+            hi_reg = half16_temp_regs[u]
+          else:
+            lo_reg = half16_temp_regs[u]
+            hi_reg = half16_temp_regs[pair_src]
+
+          # Pack two halfs into destination VGPR
+          kernel.append(f"v_pack_b32_f16 {dst_vgpr}, {lo_reg}, {hi_reg}")
+          half16_packed[vec_uop].add(vgpr_idx)
+
+          # Immediately free the temp VGPRs since values are now in packed destination
+          # This is critical for reducing register pressure
+          for temp_src in [u, pair_src]:
+            temp_reg = half16_temp_regs[temp_src]
+            if temp_reg.startswith('v') and '[' not in temp_reg:
+              reg_num = int(temp_reg[1:])
+              if reg_num in vgpr_owner:
+                del vgpr_owner[reg_num]
+                free_vgprs.append(reg_num)
 
       # Add wait after loads
       if u.op is Ops.DEFINE_GLOBAL:
