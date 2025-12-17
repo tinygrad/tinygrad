@@ -30,8 +30,6 @@ class TestDevice(unittest.TestCase):
 
   @unittest.skipIf(WIN and CI, "skipping windows test") # TODO: subproccess causes memory violation?
   def test_env_overwrite_default_compiler(self):
-    expect_failure = "\ntry: assert Device[Device.DEFAULT].compiler is None;\nexcept Exception: pass"
-
     if Device.DEFAULT == "CPU":
       from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler
       try: _, _ = CPULLVMCompiler(), ClangJITCompiler()
