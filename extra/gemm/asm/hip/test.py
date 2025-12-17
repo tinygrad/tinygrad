@@ -1,6 +1,14 @@
 import pathlib, ctypes
 from tinygrad import Tensor, Device, dtypes
 from extra.gemm.asm.hip.arg import KernelArgs
+from tinygrad.helpers import system, temp
+
+# ** assemble
+
+asm = pathlib.Path(__file__).parent.parent/"gemm"
+system(f"clang -x assembler -target amdgcn-amd-amdhsa -mcpu=gfx950 -mcode-object-version=5 -c {str(asm)} -o {temp('test.o')}")
+system(f"ld.lld -shared -o {temp('test.hsaco')} {temp('test.o')}")
+with open(temp('test.hsaco'), 'rb') as f: lib:bytes = f.read()
 
 Device.DEFAULT = "HIP"
 dev = Device[Device.DEFAULT]
@@ -20,9 +28,7 @@ ref_out = A@B.t().contiguous()
 # bitcast to uint16 since there's no bf16 on numpy
 A, B = [t.view(torch.uint16).numpy() for t in [A, B]]
 
-# ** raw assembly gemm
-
-with open(pathlib.Path(__file__).parent.parent/"lib", "rb") as f: lib = f.read()
+# ** construct launch args
 
 def build_kernel_args(bufs):
   # bufs: [out, A, B]
