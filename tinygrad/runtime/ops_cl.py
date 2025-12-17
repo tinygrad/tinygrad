@@ -53,10 +53,10 @@ class CLProgram:
                vals:tuple[int, ...]=(), wait=False) -> float|None:
     for i,(b,_) in enumerate(bufs):
       if isinstance(dt:=self.buf_dtypes[i], ImageDType):
-        # TODO: verify this is zero copy
-        b = checked(
+        try: b = checked(
           cl.clCreateImage(self.dev.context, cl.CL_MEM_READ_WRITE, cl.cl_image_format(cl.CL_RGBA, {2:cl.CL_HALF_FLOAT, 4:cl.CL_FLOAT}[dt.itemsize]),
                            cl.cl_image_desc(cl.CL_MEM_OBJECT_IMAGE2D, dt.shape[1], dt.shape[0], buffer=b), None, status:=ctypes.c_int32()), status)
+        except RuntimeError as e: raise ValueError(f"{i=} {dt=}") from e
       check(cl.clSetKernelArg(self.kernel, i, ctypes.sizeof(b), ctypes.byref(b)))
     for i,v in enumerate(vals,start=len(bufs)): check(cl.clSetKernelArg(self.kernel, i, 4, ctypes.byref(ctypes.c_int32(v))))
     if local_size is not None: global_size = cast(tuple[int,int,int], tuple(int(g*l) for g,l in zip(global_size, local_size)))
