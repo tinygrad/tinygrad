@@ -7,7 +7,8 @@ from tinygrad.tensor import _to_np_dtype
 from tinygrad.uop.ops import Ops
 from tinygrad.dtype import DType
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import AMX, CI, AMD_LLVM, CPU_LLVM
+from tinygrad.helpers import AMX, AMD_LLVM, CPU_LLVM
+from test.helpers import slow
 from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 
@@ -119,7 +120,7 @@ class TestTensorCores(unittest.TestCase):
         helper_tc_ensure_uops_and_opts_count(tc.dims[0], tc.dims[1], tc.dims[2]//8, tc.dtype_in, tc.dtype_out, tc_opt=2, ensure_triggered=False)
 
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "not generated on EMULATED device")
-  @unittest.skipIf(CI and Device.DEFAULT in {"AMD"}, "AMD CI is really slow here")
+  @slow
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_multi_reduce(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
