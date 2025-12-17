@@ -5,7 +5,7 @@ set -o pipefail  # Make pipeline fail if any command fails
 export PYTHONPATH="." NV=1
 export MODEL="bert"
 export SUBMISSION_PLATFORM="tinybox_green"
-export DEFAULT_FLOAT="HALF" SUM_DTYPE="HALF" GPUS=6 BS=54 EVAL_BS=54
+export DEFAULT_FLOAT="BFLOAT16" GPUS=6 BS=12 EVAL_BS=12
 export GRADIENT_ACC_STEPS=8
 export OFFLOAD_OPTIM=1
 
