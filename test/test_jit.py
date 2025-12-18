@@ -5,12 +5,14 @@ import numpy as np
 from hypothesis import given, settings, strategies as strat
 from test.helpers import assert_jit_cache_len, not_support_multi_device, REAL_DEV, needs_second_gpu
 from tinygrad.tensor import Tensor
-from tinygrad.engine.jit import TinyJit, GraphRunner, MultiGraphRunner, graph_class
+from tinygrad.engine.jit import GraphRunner, MultiGraphRunner, graph_class
 from tinygrad.engine.realize import CompiledRunner, BufferCopy, BufferXfer
 from tinygrad.device import Device
 from tinygrad.helpers import Context, JIT, GlobalCounters, getenv
 from tinygrad.dtype import dtypes
 from extra.models.unet import ResBlock
+
+from tinygrad.engine.jit2 import TinyJit
 
 def _simple_test(add, extract=lambda x: x, N=10):
   for _ in range(5):
