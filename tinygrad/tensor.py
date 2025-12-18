@@ -3934,6 +3934,9 @@ class Tensor(OpMixin):
     if cin_last: w = w.reshape(cout//4, H, rcin_hi, W, 4, rcin_lo)
     else: w = w.reshape(cout//4, H, rcin_hi, W, rcin_lo, 4).permute(0,1,2,3,5,4)
 
+    # undo pitch alignment hack
+    if added_width: x = x[:, :, :-added_width, ...]
+
     # prepare input
     x = x.permute(0,3,4,5,1,2).pad(self._resolve_pool_pads(padding,2))._pool((H,W), stride, dilation)# -> (bs, groups, rcin_hi, rcin_lo, oy, ox, H, W)
     x = x.permute(0,4,5,1,2,3,6,7).reshape(bs, (oy := x.shape[4]), (ox := x.shape[5]), *group_shape, 1, 1, rcin_hi, rcin_lo, H, W)
@@ -3959,11 +3962,6 @@ class Tensor(OpMixin):
     if added_output_channels != 0:
       ret = ret.reshape(bs, oy, ox, groups, rcout)[:, :, :, :, :-added_output_channels]
       cout = groups * (rcout - added_output_channels)
-
-    # undo pitch alignment hack
-    if added_width:
-      ret = ret.reshape(bs, oy, ox, cout)[:, :, :-added_width, :]
-      ox = ox - added_width
 
     # NCHW output
     ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
