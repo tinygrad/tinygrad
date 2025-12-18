@@ -1,35 +1,58 @@
 import pathlib
-import numpy as np
 from dataclasses import replace
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.engine.realize import lower_schedule_item, ExecItem, CompiledRunner
+from tinygrad.helpers import system, temp
+from tinygrad.engine.realize import ExecItem, CompiledRunner, lower_schedule_item
+
+# ** assemble
+
+asm_fp = pathlib.Path(__file__).parent/"gemm.s"
+system(f"clang -x assembler -target amdgcn-amd-amdhsa -mcpu=gfx950 -mcode-object-version=5 -c {str(asm_fp)} -o {temp('test.o')}")
+system(f"ld.lld -shared -o {temp('test.hsaco')} {temp('test.o')}")
+with open(temp('test.hsaco'), 'rb') as f: lib:bytes = f.read()
+
+# ** generate inputs on CPU
 
 N = 8192
 scale = 10.0
-dtype = dtypes.bfloat16
 
-Tensor.manual_seed(0)
+import torch
+torch.manual_seed(0)
+A = (torch.randn(N, N, dtype=torch.float32, device="cpu") / scale).to(torch.bfloat16).contiguous()
+B = (torch.randn(N, N, dtype=torch.float32, device="cpu") / scale).to(torch.bfloat16).contiguous()
+Bt = B.t().contiguous() # transpose B for the baseline gemm
+C_torch = A@Bt
 
-A = (Tensor.randn(N, N) / scale).cast(dtypes.bfloat16).contiguous()
-B = (Tensor.randn(N, N) / scale).cast(dtypes.bfloat16).contiguous()
-Bt = B.T.contiguous()
-Tensor.realize(A, B, Bt)
+# ** copy buffers to AMD
 
-# ** tinygrad gemm
+# input creation and validation run on the copy engine for simpler tracing
 
-C_tiny = Tensor.matmul(A, Bt, dtype=dtypes.float32).cast(dtype)
-si = C_tiny.schedule()[-1]
-eis:list[ExecItem] = [lower_schedule_item(si)]
+def from_torch(t:torch.Tensor) -> Tensor:
+  return Tensor.from_blob(t.data_ptr(), t.shape, dtype=dtypes.bfloat16, device="cpu").to(Device.DEFAULT).realize()
 
-C_asm = Tensor.empty_like(A)
+C_tiny = Tensor.matmul(from_torch(A), from_torch(Bt), dtype=dtypes.float32).cast(dtypes.bfloat16)
+C_asm = Tensor.empty_like(C_tiny)
 C_asm.uop.buffer.allocate()
 
-# ** raw assembly gemm
+# ** run gemms
 
-with open(pathlib.Path(__file__).parent/"lib", "rb") as f: lib = f.read()
-prg = CompiledRunner(precompiled=lib, p=replace(eis[0].prg.p, src=lib, name="matmul", global_size=(128, 86, 1), local_size=(256, 1, 1)))
+sched = C_tiny.schedule()
+assert len(sched) == 1
+eis:list[ExecItem] = [lower_schedule_item(sched[-1])]
+prg = CompiledRunner(replace(eis[0].prg.p, name="gemm", global_size=(128, 86, 1), local_size=(256, 1, 1)), precompiled=lib)
 #Device[Device.DEFAULT].compiler.disassemble(lib)
-# TODO: re assemble lib without the custom KernelArgs struct
-#eis.append(ExecItem(prg, [C_asm.uop.buffer, A.uop.buffer, B.uop.buffer]))
+eis.append(ExecItem(prg, [C_asm.uop.buffer, from_torch(A).uop.buffer, from_torch(B).uop.buffer]))
 
 for ei in eis: ei.run(wait=True)
+
+# ** correctness
+
+import ctypes, torch
+
+def torch_bf16(t:Tensor) -> torch.tensor:
+  asm_out = t.to("cpu").realize().uop.buffer._buf
+  buf = (ctypes.c_uint16*C_asm.uop.size).from_address(asm_out.va_addr)
+  return torch.frombuffer(buf, dtype=torch.bfloat16, count=C_asm.uop.size).reshape(C_asm.shape)
+
+assert torch.allclose(torch_bf16(C_asm), C_torch, rtol=1e-2, atol=1e-3)
+assert torch.allclose(torch_bf16(C_tiny), C_torch, rtol=1e-2, atol=1e-3)
