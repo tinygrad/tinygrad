@@ -226,9 +226,9 @@ class IR3ArgsState(HCQArgsState):
     self.bind_sints_to_buf(*flatten([b.texture_info.ibo + ([0] * 8) for b in ibos]), buf=self.buf, fmt='I', offset=prg.ibo_off)
 
 class QCOMProgram(HCQProgram):
-  def __init__(self, dev: QCOMDevice, name: str, lib: bytes, aux_render=None):
+  def __init__(self, dev: QCOMDevice, name: str, lib: bytes, buf_dtypes=[]):
     self.tex_infos:list[QCOMTextureInfo|None] = []
-    for dtype in aux_render:
+    for dtype in buf_dtypes:
       if isinstance(dtype, ImageDType):
         imgw, imgh = dtype.shape[1], dtype.shape[0]
         stride = imgw * 4 * dtype.itemsize
