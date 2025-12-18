@@ -10,7 +10,6 @@ system(f"ld.lld -shared -o {temp('test.hsaco')} {temp('test.o')}")
 with open(temp('test.hsaco'), 'rb') as f: lib:bytes = f.read()
 name:str = "gemm"
 
-Device.DEFAULT = "HIP"
 dev = Device[Device.DEFAULT]
 
 N = 8192
