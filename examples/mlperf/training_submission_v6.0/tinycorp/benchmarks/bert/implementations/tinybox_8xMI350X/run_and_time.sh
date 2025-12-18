@@ -5,7 +5,7 @@ set -o pipefail  # Make pipeline fail if any command fails
 export PYTHONPATH="." AMD=1
 export MODEL="bert"
 export SUBMISSION_PLATFORM="tinybox_8xMI350X"
-export DEFAULT_FLOAT="BFLOAT16" GPUS=8 BS=1024 EVAL_BS=1024
+export DEFAULT_FLOAT="HALF" GPUS=8 BS=1024 EVAL_BS=1024
 export GRADIENT_ACC_STEPS=4
 
 # similar to https://github.com/mlcommons/training_results_v3.1/blob/d06288b2bd675a9d88e0e6181f5bb5626b71ec19/Quanta_Cloud_Technology/results/D54U-3U/bert/result_1.txt#L54
