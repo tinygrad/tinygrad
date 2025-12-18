@@ -1,0 +1,299 @@
+opened device PYTHON from pid:55710
+scheduled   11 kernels in    67.30 ms | CACHE MISS e9f86918 | 1438 uops in cache
+loading libc from /lib/x86_64-linux-gnu/libc.so.6
+loading hsa from /opt/rocm/lib/libhsa-runtime64.so
+loading comgr from /opt/rocm/lib/libamd_comgr.so
+loading comgr_3 from /opt/rocm/lib/libamd_comgr.so
+loading llvm from /lib/x86_64-linux-gnu/libLLVM-21.so
+loading libusb from /lib/x86_64-linux-gnu/libusb-1.0.so.0
+am 0000:03:00.0: AM_GFX initialized
+am 0000:03:00.0: AM_SDMA initialized
+am 0000:03:00.0: boot done
+AMDDevice: opening 0 with target (11, 0, 0) arch gfx1100
+opened device AMD from pid:55710
+[32m*** AMD        1[0m [33mcopy        4,     AMD <- PYTHON [0m              arg  2 mem   0.00 GB tm   4294.04us/     4.29ms (      0 GFLOPS    0|0      GB/s) 
+[32m*** AMD        2[0m [33mcopy        8,     AMD <- PYTHON [0m              arg  2 mem   0.00 GB tm     73.79us/     4.37ms (      0 GFLOPS    0|0      GB/s) 
+()
+.text
+.global E
+.type E,@function
+.p2align 8
+E:
+s_load_b64 s[6:7], s[0:1], 0
+s_waitcnt lgkmcnt(0)
+s_load_b64 s[8:9], s[0:1], 8
+s_waitcnt lgkmcnt(0)
+v_mov_b32 v3, 0
+global_load_b32 v4, v3, s[8:9]
+s_waitcnt vmcnt(0) lgkmcnt(0)
+v_add_nc_u32 v3, 1280, v4
+v_mov_b32 v4, 0
+global_store_b32 v4, v3, s[6:7]
+s_waitcnt vmcnt(0) lgkmcnt(0)
+s_sendmsg sendmsg(MSG_DEALLOC_VGPRS)
+s_endpgm
+s_code_end
+.size E, .-E
+
+.rodata
+.global E.kd
+.type E.kd,STT_OBJECT
+.align 0x10
+.amdhsa_kernel E
+.amdhsa_group_segment_fixed_size 0
+.amdhsa_private_segment_fixed_size 0
+.amdhsa_kernarg_size 16
+.amdhsa_next_free_vgpr 5
+.amdhsa_reserve_vcc 0
+.amdhsa_reserve_xnack_mask 0
+.amdhsa_next_free_sgpr 10
+.amdhsa_float_round_mode_32 0
+.amdhsa_float_round_mode_16_64 0
+.amdhsa_float_denorm_mode_32 3
+.amdhsa_float_denorm_mode_16_64 3
+.amdhsa_dx10_clamp 1
+.amdhsa_ieee_mode 1
+.amdhsa_fp16_overflow 0
+.amdhsa_workgroup_processor_mode 1
+.amdhsa_memory_ordered 1
+.amdhsa_forward_progress 0
+.amdhsa_enable_private_segment 0
+.amdhsa_system_sgpr_workgroup_id_x 1
+.amdhsa_system_sgpr_workgroup_id_y 1
+.amdhsa_system_sgpr_workgroup_id_z 1
+.amdhsa_system_sgpr_workgroup_info 0
+.amdhsa_system_vgpr_workitem_id 2
+.amdhsa_exception_fp_ieee_invalid_op 0
+.amdhsa_exception_fp_denorm_src 0
+.amdhsa_exception_fp_ieee_div_zero 0
+.amdhsa_exception_fp_ieee_overflow 0
+.amdhsa_exception_fp_ieee_underflow 0
+.amdhsa_exception_fp_ieee_inexact 0
+.amdhsa_exception_int_div_zero 0
+.amdhsa_user_sgpr_dispatch_ptr 0
+.amdhsa_user_sgpr_queue_ptr 0
+.amdhsa_user_sgpr_kernarg_segment_ptr 1
+.amdhsa_user_sgpr_dispatch_id 0
+.amdhsa_user_sgpr_private_segment_size 0
+.amdhsa_wavefront_size32 1
+.amdhsa_uses_dynamic_stack 0
+.end_amdhsa_kernel
+.amdgpu_metadata
+amdhsa.kernels:
+- .args:
+  - .address_space: global
+    .name: buf_0
+    .offset: 0
+    .size: 8
+    .type_name: void*
+    .value_kind: global_buffer
+  - .address_space: global
+    .name: buf_1
+    .offset: 8
+    .size: 8
+    .type_name: void*
+    .value_kind: global_buffer
+  .group_segment_fixed_size: 0
+  .kernarg_segment_align: 8
+  .kernarg_segment_size: 16
+  .language: OpenCL C
+  .language_version:
+  - 1
+  - 2
+  .max_flat_workgroup_size: 256
+  .name: E
+  .private_segment_fixed_size: 0
+  .sgpr_count: 10
+  .sgpr_spill_count: 0
+  .symbol: E.kd
+  .uses_dynamic_stack: false
+  .vgpr_count: 5
+  .vgpr_spill_count: 0
+  .wavefront_size: 32
+amdhsa.target: amdgcn-amd-amdhsa--gfx1100
+amdhsa.version:
+- 1
+- 2
+.end_amdgpu_metadata
+[32m*** AMD        3[0m E[90m[0m                                              arg  2 mem   0.00 GB tm      3.08us/     4.37ms (      0 GFLOPS    0|0      GB/s) ['uniform']
+more upcast axis : [(0, 1, 0, 4)]
+(Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.LOCAL, axis=0, arg=32))
+.text
+.global E_784_32_4
+.type E_784_32_4,@function
+.p2align 8
+E_784_32_4:
+s_load_b64 s[6:7], s[0:1], 0
+s_waitcnt lgkmcnt(0)
+s_load_b64 s[8:9], s[0:1], 8
+s_waitcnt lgkmcnt(0)
+s_load_b64 s[10:11], s[0:1], 16
+s_waitcnt lgkmcnt(0)
+v_mov_b32 v3, 392
+v_mov_b32 v4, 784
+v_mov_b32 v5, 466688986
+v_mov_b32 v6, 1065353216
+v_mov_b32 v7, 0
+global_load_b32 v8, v7, s[8:9]
+v_mov_b32 v7, 0
+global_load_b32 v9, v7, s[10:11]
+v_mov_b32 v7, 4
+global_load_b32 v10, v7, s[10:11]
+v_mov_b32 v7, s2
+v_and_b32 v4, 0x3ff, v0
+v_lshlrev_b32 v11, 7, v7
+v_lshlrev_b32 v12, 2, v4
+v_add_nc_u32 v4, v11, v12
+v_add_nc_u32 v13, 0xFFFF3C01, v4
+v_mov_b32 v13, v13
+v_add_nc_u32 v14, 0xFFFF3C02, v4
+v_mov_b32 v14, v14
+v_add_nc_u32 v15, 0xFFFF3C03, v4
+v_mov_b32 v15, v15
+v_add_nc_u32 v16, 0xFFFF3C04, v4
+v_mov_b32 v16, v16
+v_add_nc_u32 v17, 1, v4
+v_mov_b32 v17, v17
+v_add_nc_u32 v18, 2, v4
+v_mov_b32 v18, v18
+v_add_nc_u32 v19, 3, v4
+v_mov_b32 v19, v19
+v_add_nc_u32 v20, 4, v4
+v_mov_b32 v20, v20
+s_waitcnt vmcnt(0) lgkmcnt(0)
+v_add_nc_u32 v21, v8, v13
+v_add_nc_u32 v22, v8, v17
+v_add_nc_u32 v23, 0xFFFE77FF, v21
+v_add_nc_u32 v24, 0xFFFF3BFF, v21
+v_add_nc_u32 v21, 0xFFFE77FF, v22
+v_add_nc_u32 v25, 0xFFFF3BFF, v22
+v_add_nc_u32 v22, v23, v9
+v_add_nc_u32 v23, v24, v10
+v_add_nc_u32 v24, v21, v9
+v_add_nc_u32 v21, v25, v10
+v_add_nc_u32 v25, v22, v23
+v_add_nc_u32 v22, v24, v21
+v_lshlrev_b32 v24, 13, v23
+v_lshrrev_b32 v26, 19, v23
+v_add_nc_u32 v23, v24, v26
+v_xor_b32 v26, v25, v23
+v_add_nc_u32 v23, v25, v26
+v_lshlrev_b32 v25, 13, v21
+v_lshrrev_b32 v24, 19, v21
+v_add_nc_u32 v21, v25, v24
+v_xor_b32 v24, v22, v21
+v_add_nc_u32 v21, v22, v24
+v_lshlrev_b32 v22, 15, v26
+v_lshrrev_b32 v25, 17, v26
+v_add_nc_u32 v26, v22, v25
+v_xor_b32 v25, v23, v26
+v_add_nc_u32 v26, v23, v25
+v_lshlrev_b32 v23, 15, v24
+v_lshrrev_b32 v22, 17, v24
+v_add_nc_u32 v24, v23, v22
+v_xor_b32 v22, v21, v24
+v_add_nc_u32 v24, v21, v22
+v_lshlrev_b32 v21, 26, v25
+v_lshrrev_b32 v23, 6, v25
+v_add_nc_u32 v25, v21, v23
+v_xor_b32 v23, v26, v25
+v_add_nc_u32 v25, v26, v23
+v_lshlrev_b32 v26, 26, v22
+v_lshrrev_b32 v21, 6, v22
+v_add_nc_u32 v22, v26, v21
+v_xor_b32 v21, v24, v22
+v_add_nc_u32 v22, v24, v21
+v_add_nc_u32 v24, v25, v10
+v_add_nc_u32 v26, v22, v10
+v_lshlrev_b32 v27, 6, v23
+v_lshrrev_b32 v28, 26, v23
+v_add_nc_u32 v23, v27, v28
+v_xor_b32 v28, v9, v10
+v_xor_b32 v27, v25, v23
+v_xor_b32 v23, v28, v5
+v_add_nc_u32 v28, v27, v23
+v_add_nc_u32 v27, 1, v28
+v_add_nc_u32 v28, v24, v27
+v_lshlrev_b32 v24, 6, v21
+v_lshrrev_b32 v5, 26, v21
+v_add_nc_u32 v21, v24, v5
+v_xor_b32 v5, v22, v21
+v_add_nc_u32 v21, v5, v23
+v_add_nc_u32 v5, 1, v21
+v_add_nc_u32 v21, v26, v5
+v_lshlrev_b32 v26, 17, v27
+v_lshrrev_b32 v22, 15, v27
+v_add_nc_u32 v27, v26, v22
+v_xor_b32 v22, v28, v27
+v_add_nc_u32 v27, v28, v22
+v_lshlrev_b32 v28, 17, v5
+v_lshrrev_b32 v26, 15, v5
+v_add_nc_u32 v5, v28, v26
+v_xor_b32 v26, v21, v5
+v_add_nc_u32 v5, v21, v26
+v_lshlrev_b32 v21, 29, v22
+v_lshrrev_b32 v28, 3, v22
+v_add_nc_u32 v22, v21, v28
+v_xor_b32 v28, v27, v22
+v_add_nc_u32 v22, v27, v28
+v_lshlrev_b32 v27, 29, v26
+v_lshrrev_b32 v21, 3, v26
+v_add_nc_u32 v26, v27, v21
+v_xor_b32 v21, v5, v26
+v_add_nc_u32 v26, v5, v21
+v_lshlrev_b32 v5, 16, v28
+v_lshrrev_b32 v27, 16, v28
+v_add_nc_u32 v28, v5, v27
+v_xor_b32 v27, v22, v28
+v_add_nc_u32 v28, v22, v27
+v_lshlrev_b32 v22, 16, v21
+v_lshrrev_b32 v5, 16, v21
+v_add_nc_u32 v21, v22, v5
+v_xor_b32 v5, v26, v21
+v_add_nc_u32 v21, v26, v5
+v_add_nc_u32 v26, v28, v23
+v_add_nc_u32 v22, v21, v23
+v_lshlrev_b32 v24, 24, v27
+v_lshrrev_b32 v25, 8, v27
+v_add_nc_u32 v27, v24, v25
+v_xor_b32 v25, v28, v27
+v_add_nc_u32 v27, v25, v9
+v_add_nc_u32 v25, 1, v27
+v_add_nc_u32 v27, 1, v25
+v_add_nc_u32 v25, v26, v27
+v_lshlrev_b32 v26, 24, v5
+v_lshrrev_b32 v28, 8, v5
+v_add_nc_u32 v5, v26, v28
+v_xor_b32 v28, v21, v5
+v_add_nc_u32 v5, v28, v9
+v_add_nc_u32 v28, 1, v5
+v_add_nc_u32 v5, 1, v28
+v_add_nc_u32 v28, v22, v5
+v_lshlrev_b32 v22, 13, v27
+v_lshrrev_b32 v21, 19, v27
+v_add_nc_u32 v27, v22, v21
+v_xor_b32 v21, v25, v27
+v_add_nc_u32 v27, v25, v21
+v_lshlrev_b32 v25, 13, v5
+v_lshrrev_b32 v22, 19, v5
+v_add_nc_u32 v5, v25, v22
+v_xor_b32 v22, v28, v5
+v_add_nc_u32 v5, v28, v22
+v_lshlrev_b32 v28, 15, v21
+v_lshrrev_b32 v25, 17, v21
+v_add_nc_u32 v21, v28, v25
+v_xor_b32 v25, v27, v21
+v_add_nc_u32 v21, v27, v25
+v_lshlrev_b32 v27, 15, v22
+v_lshrrev_b32 v28, 17, v22
+v_add_nc_u32 v22, v27, v28
+v_xor_b32 v28, v5, v22
+v_add_nc_u32 v22, v5, v28
+v_lshlrev_b32 v5, 26, v25
+v_lshrrev_b32 v27, 6, v25
+v_add_nc_u32 v25, v5, v27
+v_xor_b32 v27, v21, v25
+v_add_nc_u32 v25, v21, v27
+v_lshlrev_b32 v21, 26, v28
+v_lshrrev_b32 v5, 6, v28
+v_add_nc_u32 v
