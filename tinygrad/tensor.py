@@ -3940,8 +3940,19 @@ class Tensor(OpMixin):
     # prepare weights
     w = w.permute(0,4,2,5,1,3).reshape((1, 1, 1, *group_shape, *rcout_expand, rcin_hi, rcin_lo, H, W))
 
+    added_ox = 0
+    if (ox * cout) % (64 // dtsz):
+      added_ox = round_up(ox, 64 // (dtsz * math.gcd(cout, 64 // dtsz))) - ox
+      ox = ox + added_ox
+      #         bs    oy   ox *group_shape  1     1,     *rcin,    H, W
+      x = x.pad_to(None, None, ox, None, None, None, None, None, None, None, None)
+
     # the conv!
-    ret = (x*w).cast(dtypes.float32).sum((-4, -3, -2, -1), dtype=dtype)
+    ret = (x*w).cast(base_image_type((bs*oy, ox*cout//4, 4)) if IMAGE >= 2 else dtypes.float32).sum((-4, -3, -2, -1), dtype=dtype)
+
+    if added_ox:
+      ret = ret.reshape(bs, oy, ox, groups, rcout)[:, :, :-added_ox, ...]
+      ox = ox - added_ox
 
     # undo hack for non multiples of 4 on C.rcout
     if added_output_channels != 0:
