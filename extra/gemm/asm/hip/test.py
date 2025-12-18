@@ -39,7 +39,6 @@ def build_kernel_args(bufs):
   # bufs: [out, A, B]
   args = KernelArgs()
   args.ptr_D = bufs[0].value
-  args.ptr_C = 0
   args.ptr_A = bufs[1].value
   args.ptr_B = bufs[2].value
 

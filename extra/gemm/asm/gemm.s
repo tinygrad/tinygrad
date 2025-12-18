@@ -24,7 +24,6 @@ gemm:
   // bufs
   s_load_dwordx2 s[4:5],   s[0:1], 0x20   // A
   s_load_dwordx2 s[8:9],   s[0:1], 0x30   // B
-  s_load_dwordx2 s[12:13], s[0:1], 0x10   // C (TODO: rm this)
   s_load_dwordx2 s[16:17], s[0:1], 0x00   // D
   // flags?
   s_mov_b32   s48, 1        // splitk
