@@ -143,36 +143,36 @@ class TestImageDType(unittest.TestCase):
 @unittest.skipUnless(REAL_DEV in IMAGE_SUPPORTED_DEVICES, "Images not supported")
 class TestImageRealization(unittest.TestCase):
   def test_image_dtype_expand(self):
-    data = Tensor.randn(9*27*4).realize()
-    it = data.cast(dtypes.imagef((9,27,4))).contiguous().realize()
-    self.assertEqual(it.dtype, dtypes.imagef((9,27,4)))
-    it_expanded = it.reshape((9,27,4,1)).expand((9,27,4,4)).contiguous().realize()
+    data = Tensor.randn(9*32*4).realize()
+    it = data.cast(dtypes.imagef((9,32,4))).contiguous().realize()
+    self.assertEqual(it.dtype, dtypes.imagef((9,32,4)))
+    it_expanded = it.reshape((9,32,4,1)).expand((9,32,4,4)).contiguous().realize()
     self.assertEqual(it_expanded.dtype, dtypes.float32)
 
   def test_image_dtype_expand_and_back(self):
-    data = Tensor.randn(9*27*4).realize()
-    it = data.cast(dtypes.imagef((9,27,4))).contiguous().realize()
-    self.assertEqual(it.dtype, dtypes.imagef((9,27,4)))
-    it_expanded = it.reshape((9,27,4,1)).expand((9,27,4,4))
+    data = Tensor.randn(9*32*4).realize()
+    it = data.cast(dtypes.imagef((9,32,4))).contiguous().realize()
+    self.assertEqual(it.dtype, dtypes.imagef((9,32,4)))
+    it_expanded = it.reshape((9,32,4,1)).expand((9,32,4,4))
     it2 = it_expanded.sum(3).realize()
-    self.assertEqual(it2.dtype, dtypes.imagef((9,27,4)))
+    self.assertEqual(it2.dtype, dtypes.imagef((9,32,4)))
 
   def test_image_alu_children(self):
-    data = Tensor.randn(9*27*4).realize()
-    it = data.cast(dtypes.imagef((9,27,4))).contiguous().realize()
-    self.assertEqual(it.dtype, dtypes.imagef((9,27,4)))
-    it_expanded = it.reshape((9,27,4,1)).expand((9,27,4,4)).contiguous()
+    data = Tensor.randn(9*32*4).realize()
+    it = data.cast(dtypes.imagef((9,32,4))).contiguous().realize()
+    self.assertEqual(it.dtype, dtypes.imagef((9,32,4)))
+    it_expanded = it.reshape((9,32,4,1)).expand((9,32,4,4)).contiguous()
     alu1 = it_expanded+1
     alu2 = it_expanded.sum(3)
     it_expanded.realize()
     # NOTE: the parent becomes float, but the alu child will stay image until its output cannot fit the image
-    self.assertEqual(alu1.dtype, dtypes.imagef((9,27,4)))
+    self.assertEqual(alu1.dtype, dtypes.imagef((9,32,4)))
     alu1.realize()
     self.assertEqual(alu1.dtype, dtypes.float32)
     # alu2 is back in image because it fits the dtype again
-    self.assertEqual(alu2.dtype, dtypes.imagef((9,27,4)))
+    self.assertEqual(alu2.dtype, dtypes.imagef((9,32,4)))
     alu2.realize()
-    self.assertEqual(alu2.dtype, dtypes.imagef((9,27,4)))
+    self.assertEqual(alu2.dtype, dtypes.imagef((9,32,4)))
 
 if __name__ == '__main__':
   unittest.main()
