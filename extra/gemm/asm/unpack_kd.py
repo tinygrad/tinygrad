@@ -6,7 +6,6 @@ from tinygrad.runtime.support.elf import elf_loader
 def bits(x, lo, hi): return (x >> lo) & ((1 << (hi - lo + 1)) - 1)
 def assert_zero(x, lo, hi): assert bits(x, lo, hi) == 0
 
-
 with open(fp:=pathlib.Path(__file__).parent/"lib", "rb") as f:
   lib = f.read()
 
@@ -65,6 +64,7 @@ vgpr_gran = bits(pgm_rsrc1, 0, 5)
 sgpr_gran = bits(pgm_rsrc1, 6, 9)
 assert_zero(pgm_rsrc1, 27, 28)
 
+# NOTE: this is vgprs + agprs
 vgprs_used = (vgpr_gran + 1) * 8
 assert 0 <= vgprs_used <= 512
 
