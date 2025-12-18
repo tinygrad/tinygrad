@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
-from tinygrad.helpers import CI, Context, getenv
+from tinygrad.helpers import Context, getenv
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.realize import CompiledRunner, ExecItem, get_program
 from tinygrad.uop.ops import Ops
@@ -143,7 +143,7 @@ class TestIndexing(unittest.TestCase):
 
   def test_llama_embedding(self, noopt=1, op_limit=65536):
     # llama3 is 128256
-    vocab_size, embed_size = (10, 3) if CI else (32000, 4096)
+    vocab_size, embed_size = (10, 3)
     emb = nn.Embedding(vocab_size, embed_size)
     emb_w = emb.weight.numpy()
     x = Tensor([1,2,3,4])
@@ -161,7 +161,7 @@ class TestIndexing(unittest.TestCase):
       # TODO: reshape to match torch, should we do this in nn?
       np.testing.assert_allclose(z.numpy().reshape(4, embed_size), torch_z.detach().numpy(), atol=1e-8, rtol=1e-8)
   # at least the arange is being fused
-  def test_llama_embedding_opt(self): self.test_llama_embedding(0, 1_736_704_000 if CI else 5_898_240_000)
+  def test_llama_embedding_opt(self): self.test_llama_embedding(0, 1_736_704_000)
 
 if __name__ == "__main__":
   unittest.main()

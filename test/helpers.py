@@ -1,4 +1,4 @@
-import time, struct, functools
+import os, time, struct, functools, unittest
 from typing import Any, Callable
 import numpy as np
 from tinygrad import Tensor, dtypes, Device
@@ -9,6 +9,9 @@ from tinygrad.dtype import DType
 from tinygrad.nn.state import get_parameters
 from tinygrad.helpers import T, CI
 from tinygrad.codegen import full_rewrite
+
+# decorator to skip slow tests by default, run with RUN_SLOW=1 to include them
+slow = unittest.skipUnless(os.getenv("RUN_SLOW"), "slow test, set RUN_SLOW=1 to run")
 from tinygrad.runtime.ops_python import PythonProgram, PythonRenderer, PythonCompiler
 
 def derandomize_model(model):

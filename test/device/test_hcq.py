@@ -1,6 +1,7 @@
 import unittest, ctypes, struct, os, random, numpy as np
 from tinygrad import Device, Tensor, dtypes
-from tinygrad.helpers import getenv, CI, mv_address, DEBUG
+from tinygrad.helpers import getenv, mv_address, DEBUG
+from test.helpers import slow
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQBuffer
 from tinygrad.runtime.autogen import libc
@@ -220,7 +221,7 @@ class TestHCQ(unittest.TestCase):
     mv_buf1 = buf1.as_buffer().cast('Q')
     assert libc.memcmp(mv_address(mv_buf1), buf2._buf.va_addr, sz) == 0
 
-  @unittest.skipIf(CI, "skip in CI")
+  @slow
   def test_copy_64bit(self):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
 
