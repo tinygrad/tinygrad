@@ -22,9 +22,9 @@ gemm:
   s_mov_b32   s20, 1.0        // alpha
   s_mov_b32   s21, 0.0        // beta
   // bufs
-  s_load_dwordx2 s[4:5],   s[0:1], 0x20   // A
-  s_load_dwordx2 s[8:9],   s[0:1], 0x30   // B
+  s_load_dwordx2 s[4:5],   s[0:1], 0x8    // A
   s_load_dwordx2 s[16:17], s[0:1], 0x00   // D
+  s_load_dwordx2 s[8:9],   s[0:1], 0x10   // B
   // flags?
   s_mov_b32   s48, 1        // splitk
   s_mov_b32   s50, 1        // is_out_b16

@@ -1,19 +1,14 @@
-import pathlib, ctypes
+import pathlib
 from tinygrad import Tensor, Device, dtypes
-from extra.gemm.asm.hip.arg import KernelArgs
-from tinygrad.helpers import system, temp, getenv
+from tinygrad.helpers import system, temp
 
 # ** assemble
 
-if getenv("ASM", 1): # re assemble
-  asm = pathlib.Path(__file__).parent.parent/"gemm.s"
-  system(f"clang -x assembler -target amdgcn-amd-amdhsa -mcpu=gfx950 -mcode-object-version=5 -c {str(asm)} -o {temp('test.o')}")
-  system(f"ld.lld -shared -o {temp('test.hsaco')} {temp('test.o')}")
-  with open(temp('test.hsaco'), 'rb') as f: lib:bytes = f.read()
-  name:str = "gemm"
-else: # the literal hsaco dump in the aiter repo, keep for reference
-  with open(pathlib.Path(__file__).parent.parent/"lib", "rb") as f: lib:bytes = f.read()
-  name:str = "_ZN5aiter37bf16gemm_fp32bf16_tn_96x64_pf3_splitkE"
+asm = pathlib.Path(__file__).parent.parent/"gemm.s"
+system(f"clang -x assembler -target amdgcn-amd-amdhsa -mcpu=gfx950 -mcode-object-version=5 -c {str(asm)} -o {temp('test.o')}")
+system(f"ld.lld -shared -o {temp('test.hsaco')} {temp('test.o')}")
+with open(temp('test.hsaco'), 'rb') as f: lib:bytes = f.read()
+name:str = "gemm"
 
 Device.DEFAULT = "HIP"
 dev = Device[Device.DEFAULT]
@@ -33,35 +28,13 @@ ref_out = A@B.t().contiguous()
 # bitcast to uint16 since there's no bf16 on numpy
 A, B = [t.view(torch.uint16).numpy() for t in [A, B]]
 
-# ** construct launch args
-
-def build_kernel_args(bufs):
-  # bufs: [out, A, B]
-  args = KernelArgs()
-  args.ptr_D = bufs[0].value
-  args.ptr_A = bufs[1].value
-  args.ptr_B = bufs[2].value
-
-  blob = ctypes.string_at(ctypes.addressof(args), ctypes.sizeof(args))
-  return args, blob
-
-def pack_kernel_args(args:KernelArgs):
-  arg_size = ctypes.c_size_t(ctypes.sizeof(args))
-  blob = (ctypes.c_ubyte * ctypes.sizeof(args)).from_buffer_copy(ctypes.string_at(ctypes.addressof(args), ctypes.sizeof(args)))
-  extra = (ctypes.c_void_p * 5)(1, ctypes.cast(ctypes.byref(blob), ctypes.c_void_p), 2,
-                                ctypes.cast(ctypes.pointer(arg_size), ctypes.c_void_p), 3)
-  return extra, blob, arg_size  # keepalives: blob + arg_size
-
 out = Tensor.empty(N, N, dtype=dtypes.uint16).uop.buffer.allocate()
 bufs = [b._buf for b in [out, Tensor(A).realize().uop.buffer, Tensor(B).realize().uop.buffer]]
-args, _ = build_kernel_args(bufs)
-extra, _blob_keep, _sz_keep = pack_kernel_args(args)
 
 # ** run
 
 prg = dev.runtime(name, lib)
-prg.vargs = extra
-et = prg(global_size=[128, 86, 1], local_size=[256, 1, 1], wait=True)
+et = prg(*bufs, global_size=[128, 86, 1], local_size=[256, 1, 1], wait=True)
 print(f"gemm finished in {et*1e3:9.2f} ms")
 
 # ** correctness
