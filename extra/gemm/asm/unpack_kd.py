@@ -1,26 +1,20 @@
-import msgpack, struct, pathlib
-from tinygrad.runtime.support.elf import elf_loader
-
-# ** notes section
-
-with open(fp:=pathlib.Path(__file__).parent/"lib", "rb") as f: lib = f.read()
-_, sections, __ = elf_loader(lib)
-data = next((s for s in sections if s.name.startswith(".note"))).content
-namesz, descsz, typ = struct.unpack_from(hdr:="<III", data, 0)
-offset = (struct.calcsize(hdr)+namesz+3) & -4
-notes = msgpack.unpackb(data[offset:offset+descsz])
-print(notes)
-
-# ** rodata section
-
+# unpack the complete kernel descriptor of an amdgpu ELF of for gfx950
 # https://rocm.docs.amd.com/projects/llvm-project/en/latest/LLVM/llvm/html/AMDGPUUsage.html#code-object-v3-kernel-descriptor
+import struct, pathlib
+from tinygrad.runtime.support.elf import elf_loader
 
 def bits(x, lo, hi): return (x >> lo) & ((1 << (hi - lo + 1)) - 1)
 def assert_zero(x, lo, hi): assert bits(x, lo, hi) == 0
 
-with open(fp, "rb") as f:
-  f.seek(0x1840)
-  kd = f.read(64)
+
+with open(fp:=pathlib.Path(__file__).parent/"lib", "rb") as f:
+  lib = f.read()
+
+image, sections, relocs = elf_loader(lib)
+rodata_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".rodata"))
+
+# rodata is exactly 64 bytes
+kd = image[rodata_entry:rodata_entry+64]
 desc = int.from_bytes(kd, byteorder="little")
 
 group_segment_fixed_size = bits(desc, 0, 31)
