@@ -27,9 +27,10 @@ def to_uops_list(u:list[UOp], ren=None) -> list[UOp]:
 def _uops_to_prg(uops_list):
   uops = full_rewrite(ast:=UOp.sink(*uops_list), ren=Device[Device.DEFAULT].renderer)
   src = Device[Device.DEFAULT].renderer.render(uops)
+  aux = Device[Device.DEFAULT].renderer.aux(uops) if Device[Device.DEFAULT].renderer.has_aux else {}
   has_local = Device[Device.DEFAULT].renderer.has_local
   return CompiledRunner(ProgramSpec(uops[-1].arg.name if uops[-1].arg is not None else "test", src, Device.DEFAULT, ast, uops=uops,
-                                global_size=[1,1,1] if has_local else None, local_size=[1,1,1] if has_local else None))
+                                    global_size=[1,1,1] if has_local else None, local_size=[1,1,1] if has_local else None, aux=aux))
 
 def uop(uops:list[UOp], uop:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
   uops.append(UOp(uop, dtype, tuple(src), arg))

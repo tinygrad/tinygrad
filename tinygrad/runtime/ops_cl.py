@@ -34,8 +34,8 @@ class CLCompiler(Compiler):
     return bytes(binary)
 
 class CLProgram:
-  def __init__(self, device:CLDevice, name:str, lib:bytes, aux_render=None):
-    self.dev, self.name, self.lib, self.buf_dtypes = device, name, lib, aux_render
+  def __init__(self, device:CLDevice, name:str, lib:bytes, buf_dtypes=[]):
+    self.dev, self.name, self.lib, self.buf_dtypes = device, name, lib, buf_dtypes
     self.program = checked(cl.clCreateProgramWithBinary(device.context, 1, device.device_id, (ctypes.c_size_t * 1)(len(lib)),
                                                         to_char_p_p([lib], ctypes.c_ubyte), binary_status := ctypes.c_int32(),
                                                         errcode_ret := ctypes.c_int32()), errcode_ret)
@@ -53,10 +53,9 @@ class CLProgram:
                vals:tuple[int, ...]=(), wait=False) -> float|None:
     for i,(b,_) in enumerate(bufs):
       if isinstance(dt:=self.buf_dtypes[i], ImageDType):
-        try: b = checked(
-          cl.clCreateImage(self.dev.context, cl.CL_MEM_READ_WRITE, cl.cl_image_format(cl.CL_RGBA, {2:cl.CL_HALF_FLOAT, 4:cl.CL_FLOAT}[dt.itemsize]),
-                           cl.cl_image_desc(cl.CL_MEM_OBJECT_IMAGE2D, dt.shape[1], dt.shape[0], buffer=b), None, status:=ctypes.c_int32()), status)
-        except RuntimeError as e: raise ValueError(f"{i=} {dt=}") from e
+        fmt = cl.cl_image_format(cl.CL_RGBA, {2:cl.CL_HALF_FLOAT, 4:cl.CL_FLOAT}[dt.itemsize])
+        desc = cl.cl_image_desc(cl.CL_MEM_OBJECT_IMAGE2D, dt.shape[1], dt.shape[0], buffer=b)
+        b = checked(cl.clCreateImage(self.dev.context, cl.CL_MEM_READ_WRITE, fmt, desc, None, status:=ctypes.c_int32()), status)
       check(cl.clSetKernelArg(self.kernel, i, ctypes.sizeof(b), ctypes.byref(b)))
     for i,v in enumerate(vals,start=len(bufs)): check(cl.clSetKernelArg(self.kernel, i, 4, ctypes.byref(ctypes.c_int32(v))))
     if local_size is not None: global_size = cast(tuple[int,int,int], tuple(int(g*l) for g,l in zip(global_size, local_size)))
