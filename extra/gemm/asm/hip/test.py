@@ -42,27 +42,6 @@ def build_kernel_args(bufs):
   args.ptr_C = 0
   args.ptr_A = bufs[1].value
   args.ptr_B = bufs[2].value
-  args.ptr_Bias = 0
-
-  args.alpha = 1.0
-  args.beta = 0.0
-
-  ld_bytes = N * 2  # bf16/u16
-  args.stride_D0 = 0
-  args.stride_D1 = 0
-  args.stride_C0 = ld_bytes
-  args.stride_C1 = 0
-  args.stride_A0 = ld_bytes
-  args.stride_A1 = 0
-  args.stride_B0 = ld_bytes
-  args.stride_B1 = 0
-
-  args.M = N
-  args.N = N
-  args.K = N
-  args.splitk = 1
-  args.is_out_b16 = 1
-  args.add_bias = 0
 
   blob = ctypes.string_at(ctypes.addressof(args), ctypes.sizeof(args))
   return args, blob

@@ -7,24 +7,32 @@
 .type	gemm,@function
 
 gemm:
+  // ** load kernel args
   s_mov_b32 s49, s4
   s_and_b32 s1, s1, 0xffff
-  s_load_dword s25, s[0:1], 0xe0
-  s_load_dword s26, s[0:1], 0xf0
-  s_load_dword s27, s[0:1], 0x100
-  s_load_dword s28, s[0:1], 0xa0
-  s_load_dword s29, s[0:1], 0xc0
-  s_load_dword s30, s[0:1], 0x80
-  s_load_dword s20, s[0:1], 0x40
-  s_load_dword s21, s[0:1], 0x50
-  s_load_dwordx2 s[4:5], s[0:1], 0x20
-  s_load_dwordx2 s[8:9], s[0:1], 0x30
-  s_load_dwordx2 s[12:13], s[0:1], 0x10
-  s_load_dwordx2 s[16:17], s[0:1], 0x0
-  s_load_dword s48, s[0:1], 0x110
-  s_load_dword s50, s[0:1], 0x120
-  s_load_dwordx2 s[36:37], s[0:1], 0x130
-  s_load_dword s57, s[0:1], 0x140
+  // M, N, K = N
+  s_mov_b32   s25, 8192
+  s_mov_b32   s26, 8192
+  s_mov_b32   s27, 8192
+  // strides in bytes (bf16 => N * 2)
+  s_mov_b32   s28, 16384        // stride_A0 = ld_bytes = 16384
+  s_mov_b32   s29, 16384        // stride_B0 = ld_bytes = 16384
+  s_mov_b32   s30, 16384        // stride_C0 = ld_bytes = 16384
+  // scalars
+  s_mov_b32   s20, 1.0        // alpha
+  s_mov_b32   s21, 0.0        // beta
+  // bufs
+  s_load_dwordx2 s[4:5],   s[0:1], 0x20   // A
+  s_load_dwordx2 s[8:9],   s[0:1], 0x30   // B
+  s_load_dwordx2 s[12:13], s[0:1], 0x10   // C (TODO: rm this)
+  s_load_dwordx2 s[16:17], s[0:1], 0x00   // D
+  // flags?
+  s_mov_b32   s48, 1        // splitk
+  s_mov_b32   s50, 1        // is_out_b16
+  // bias disabled
+  s_mov_b64   s[36:37], 0            // ptr_Bias = 0
+  s_mov_b32   s57, 0x00000000        // add_bias = 0
+  // ** gemm starts here
   v_lshrrev_b32_e32 v1, 10, v0
   v_lshrrev_b32_e32 v2, 10, v1
   v_and_b32_e32 v2, 0x3ff, v2
