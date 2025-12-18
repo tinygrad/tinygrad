@@ -134,7 +134,7 @@ class AMPageTableEntry:
   def supports_huge_page(self, paddr:int): return self.lv >= am.AMDGPU_VM_PDB2
 
 class AMMemoryManager(MemoryManager):
-  va_allocator = TLSFAllocator(512 * (1 << 30), base=0x200000000000) # global for all devices.
+  va_allocator = TLSFAllocator((1 << 44), base=0x200000000000) # global for all devices.
 
   def on_range_mapped(self):
     # Invalidate TLB after mappings.
