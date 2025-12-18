@@ -3951,7 +3951,7 @@ class Tensor(OpMixin):
 
     # undo pitch alignment hack
     if added_width:
-      ret = ret.reshape(bs, oy, ox, groups, cout)[:, :, :-added_width, :, :]
+      ret = ret.reshape(bs, oy, ox, cout)[:, :, :-added_width, :]
       ox = ox - added_width
 
     # NCHW output
