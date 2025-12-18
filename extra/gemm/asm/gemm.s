@@ -2562,8 +2562,7 @@ label_1098:
 .amdgpu_metadata
 ---
 amdhsa.kernels:
-  - .agpr_count:     256
-    .args:
+  - .args:
       - .actual_access:  read_write
         .address_space:  global
         .name:           D
@@ -2940,29 +2939,22 @@ amdhsa.kernels:
         .value_kind:     by_value
         .value_type:     i32
     .group_segment_fixed_size: 65536
-    .kernarg_segment_align: 8
+    .kernarg_segment_align: 4
     .kernarg_segment_size: 336
-    .language_version:
-      - 2
-      - 0
     .max_flat_workgroup_size: 256
+    .name:           gemm
+    .private_segment_fixed_size: 0
     .reqd_workgroup_size:
       - 256
       - 1
       - 1
-    .name:           gemm
-    .private_segment_fixed_size: 0
     .sgpr_count:     112
-    .sgpr_spill_count: 0
-    .symbol:         gemm.kd // NOTE: HIP specifically looks for the .kd suffix
-    .uniform_work_group_size: 1
-    .uses_dynamic_stack: false
+    .symbol:         gemm.kd
     .vgpr_count:     512
-    .vgpr_spill_count: 0
     .wavefront_size: 64
 amdhsa.version:
-  - 0
   - 1
+  - 0
 ...
 
     .end_amdgpu_metadata
