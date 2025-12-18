@@ -19,10 +19,16 @@ class ScheduleItem:
 
 # **** schedule linearizer
 
-from tinygrad.codegen.late.linearizer import linearize
+from tinygrad.codegen.late.linearizer import (
+  linearize, CFGContext, pm_add_control_flow, pm_split_ends
+)
 
 def create_schedule(sched_sink:UOp) -> tuple[list[ScheduleItem], UOp]:
   with cpu_profile(TracingKey("linearize schedule")):
+    # encode control-flow relationships
+    cfg = CFGContext(sched_sink)
+    sched_sink = graph_rewrite(sched_sink, pm_add_control_flow, ctx=cfg)
+    sched_sink = graph_rewrite(sched_sink, pm_split_ends)
     with Context(TUPLE_ORDER=0):
       uops = linearize(sched_sink)
 
@@ -32,7 +38,6 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ScheduleItem], UOp]:
     sched_ptr = 0
     in_ranges: dict[UOp, int] = {}
     range_ptrs: dict[UOp, int] = {}
-    
     # create the schedule
     schedule: list[tuple|UOp] = []
     for u in uops:
