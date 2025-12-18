@@ -299,9 +299,9 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
           att_block_transposed = warp.transpose(att_block_transposed, att_block_mma)
           att_smem = warp.store(att_smem, att_block_transposed)
           att_block_row = warp.load(att_block_row, att_smem)
-          dv_reg = warp.mma_AB(dv_reg, att_block_row, do_reg_col)
+          dv_reg_ = warp.mma_AB(dv_reg, att_block_row, do_reg_col)
 
-          dp_block = warp.zero(dp_block.after(g, q_idx))
+          dp_block = warp.zero(dp_block.after(g, q_idx, dv_reg_))
           dp_block = warp.mma_ABt(dp_block, v_reg, do_reg)
           dp_block -= delta_vec_reg
           att_block *= dp_block
