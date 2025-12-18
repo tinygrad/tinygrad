@@ -230,16 +230,12 @@ class QCOMProgram(HCQProgram):
     self.tex_infos:list[QCOMTextureInfo|None] = []
     for dtype in aux_render:
       if isinstance(dtype, ImageDType):
-        imgw, imgh, itemsize_log = dtype.shape[1], dtype.shape[0], int(math.log2(dtype.itemsize))
-        pitchalign, stride = max(6, 11 - int(math.log2(imgh))) if imgh > 1 else 6, imgw * 4 * dtype.itemsize
-        assert stride % (1 << pitchalign) == 0 or imgh == 0
-        align_up = max(1, (8 // itemsize_log + 1) - imgh // 32) if pitchalign == 6 else (2 ** (pitchalign - itemsize_log - 2))
-        granularity = 128 if dtype.itemsize == 4 else 256
-        assert not (min(next_power2(imgw), round_up(imgw, granularity)) - align_up + 1 <= imgw and imgw > granularity//2), \
-          f"{imgw=} {imgh=} {granularity=} {align_up=} {min(next_power2(imgw), round_up(imgw, granularity)) - align_up + 1}"
+        imgw, imgh = dtype.shape[1], dtype.shape[0]
+        stride = imgw * 4 * dtype.itemsize
+        assert stride % 64 == 0
         tex_fmt = mesa.FMT6_32_32_32_32_FLOAT if dtype.itemsize == 4 else mesa.FMT6_16_16_16_16_FLOAT
         desc = [qreg.a6xx_tex_const_0(0x8, swiz_x=0, swiz_y=1, swiz_z=2, swiz_w=3, fmt=tex_fmt), qreg.a6xx_tex_const_1(width=imgw, height=imgh),
-                qreg.a6xx_tex_const_2(type=mesa.A6XX_TEX_2D, pitch=stride, pitchalign=pitchalign-6), 0, 0, 0,
+                qreg.a6xx_tex_const_2(type=mesa.A6XX_TEX_2D, pitch=stride, pitchalign=0), 0, 0, 0,
                 qreg.a6xx_tex_const_6(plane_pitch=0x400000), qreg.a6xx_tex_const_7(13)]
         self.tex_infos.append(QCOMTextureInfo(stride, stride, desc, [desc[0] & (~0xffff), *desc[1:len(desc)]]))
       else: self.tex_infos.append(None)
