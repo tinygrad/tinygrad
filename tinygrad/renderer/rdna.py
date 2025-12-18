@@ -73,6 +73,8 @@ asm_for_op: dict[Ops, Callable] = {
 }
 
 # Pattern matcher for RDNA3-specific rewrites
+# NOTE: By the time rdna_matcher runs, gated loads have already been created by devectorize
+# (WHERE+LOAD → LOAD(INDEX(buf, idx, gate), alt)). We don't need to do that transformation here.
 rdna_matcher = PatternMatcher([
   # cast void does nothing
   (UPat(Ops.CAST, name="x"), lambda x: x.src[0] if isinstance(x.dtype, PtrDType) or x.src[0].dtype == dtypes.void else None),
@@ -196,10 +198,19 @@ def render_const_64(ctx, x):
   hi = (bits >> 32) & 0xFFFFFFFF
   return [f"v_mov_b32 v{reg_num}, 0x{lo:08X}", f"v_mov_b32 v{reg_num+1}, 0x{hi:08X}"]
 
+def extract_low_32(reg: str) -> str:
+  """Extract low 32 bits from a register (handles 64-bit register pairs v[n:m])"""
+  if isinstance(reg, str) and '[' in reg and ':' in reg:
+    # 64-bit register pair - extract low 32 bits
+    low_reg = int(reg[2:reg.index(':')])
+    return f"v{low_reg}"
+  return reg
+
 def render_comparison(ctx, x, src0):
   """Render comparison op. If dest is SGPR, use directly. If VGPR (fallback), use vcc_lo + v_cndmask_b32."""
   dest = ctx.r[x]
-  srcs = [ctx.r[v] for v in x.src]
+  # For 64-bit integer operands, extract low 32 bits (RDNA has limited 64-bit int ALU)
+  srcs = [extract_low_32(ctx.r[v]) for v in x.src]
   dtype, typename = src0.dtype, ctx.types[src0.dtype]
   cmp_instr = ctx.code_for_op[x.op]("vcc_lo" if dest.startswith('v') else dest, *srcs, dtype, typename)
   if dest.startswith('v'):
@@ -230,8 +241,14 @@ def render_endif(ctx, x):
 def render_64bit_mul(ctx, x):
   """Render 64-bit integer multiplication using scratch registers.
   For pattern (a * magic_const) used in division-by-multiplication.
-  Result: uses scratch registers, stores hi bits in destination for subsequent SHR."""
+  Result: uses scratch registers, stores hi bits in HIGH register of pair for subsequent SHR."""
   rx = ctx.r[x]
+  # For 64-bit pair v[n:n+1], store high bits in v(n+1) (the high register)
+  # This is consistent with render_64bit_shr which expects high bits in the high register
+  if '[' in rx:
+    rx_hi = f"v{int(rx[2:rx.index(':')]) + 1}"  # High register of pair
+  else:
+    rx_hi = rx  # Single register
   a, b = x.src[0], x.src[1]
   # Get source registers
   ra = ctx.r[a]
@@ -245,12 +262,15 @@ def render_64bit_mul(ctx, x):
     rb = render_val(b.arg, dtypes.uint32)
   elif '[' in rb:  # 64-bit reg pair - use low 32 bits
     rb = f"v{rb[2:rb.index(':')]}"
-  # Destination is single VGPR - we'll store high 32 bits there for subsequent SHR
+  # Destination: store high 32 bits in high register for subsequent SHR
   # Use scratch for low bits (usually not needed)
   scratch = ctx.get_scratch_vgpr()
-  # Full 64-bit multiply: lo in scratch, hi in destination
+  # Use signed multiply (v_mul_hi_i32) for dtypes.long, unsigned (v_mul_hi_u32) for dtypes.ulong
+  # This is critical for correct division-by-multiplication with negative numbers
+  mul_hi_instr = "v_mul_hi_i32" if x.dtype == dtypes.long else "v_mul_hi_u32"
+  # Full 64-bit multiply: lo in scratch, hi in destination's high register
   # This works because the common pattern is (x*magic)>>N where N>=32, so only hi bits matter
-  return [f"v_mul_lo_u32 v{scratch}, {ra}, {rb}", f"v_mul_hi_u32 {rx}, {ra}, {rb}"]
+  return [f"v_mul_lo_u32 v{scratch}, {ra}, {rb}", f"{mul_hi_instr} {rx_hi}, {ra}, {rb}"]
 
 def render_64bit_shr(ctx, x, a, b):
   """Render 64-bit right shift. For shifts >= 32, we just need the high 32 bits shifted.
@@ -346,6 +366,9 @@ def render_add_with_literal(ctx, x, a, b):
 def render_mul_with_literal(ctx, x, a, b):
   """Render MUL using literal constant instead of register.
   RDNA3 VOP2 constraints: dst, src0, src1 where src0 can be literal but src1 must be VGPR."""
+  # Skip 64-bit integer types - they need special handling (render_64bit_mul)
+  if x.dtype in (dtypes.long, dtypes.ulong):
+    return None  # Fall through to render_64bit_mul
   # Only use literal optimization if `a` has a proper VGPR
   ra = ctx.r[a]
   if not isinstance(ra, str) or not ra.startswith('v'):
@@ -382,6 +405,7 @@ string_rewrite = PatternMatcher([
   (UPat(Ops.DEFINE_VAR, name="x"), render_define_var),
   # comparison ops - uses SGPR if available, falls back to VGPR with vcc_lo + v_cndmask_b32
   (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ), name="x", allow_any_len=True, src=(UPat.var("src0"),)), render_comparison),
+  # NOTE: WHERE wrapping LOAD is transformed to gated LOAD at UOp level by rdna_matcher
   # WHERE: if condition is SGPR, use directly; if VGPR, compare to 0 first to get VCC
   (UPat(Ops.WHERE, name="x", src=(UPat.var("cond"), UPat.var("true_val"), UPat.var("false_val"))),
    lambda ctx, x, cond, true_val, false_val: f"v_cndmask_b32 {ctx.r[x]}, {ctx.r[false_val]}, {ctx.r[true_val]}, {ctx.r[cond]}"
@@ -410,8 +434,11 @@ string_rewrite = PatternMatcher([
   # 64-bit integer SHR: for shifts >= 32, use high bits only
   (UPat(Ops.SHR, name="x", dtype=dtypes.long, src=(UPat.var("a"), UPat.cvar("b"))), render_64bit_shr),
   (UPat(Ops.SHR, name="x", dtype=dtypes.ulong, src=(UPat.var("a"), UPat.cvar("b"))), render_64bit_shr),
-  # alu ops
-  (UPat(GroupOp.ALU, name="x"), lambda ctx, x: ctx.code_for_op[x.op](ctx.r[x], *[ctx.r[v] for v in x.src], x.dtype, ctx.types[x.dtype])),
+  # alu ops - extract low 32 bits for 64-bit integer operands since RDNA has limited 64-bit int ALU
+  (UPat(GroupOp.ALU, name="x"), lambda ctx, x: ctx.code_for_op[x.op](
+    extract_low_32(ctx.r[x]) if x.dtype in (dtypes.long, dtypes.ulong) else ctx.r[x],
+    *[extract_low_32(ctx.r[v]) if v.dtype in (dtypes.long, dtypes.ulong) else ctx.r[v] for v in x.src],
+    x.dtype, ctx.types[x.dtype])),
   # bitcast/cast
   # BITCAST - need special handling for 64-bit float types
   (UPat(Ops.BITCAST, name="x", dtype=dtypes.float64, src=(UPat.var("a"),), allow_any_len=True),
@@ -426,13 +453,11 @@ string_rewrite = PatternMatcher([
    lambda ctx, x, a: [
      f"v_cmp_{'neq' if dtypes.is_float(a.dtype) else 'ne'}_{ctx.types[a.dtype]} vcc_lo, {ctx.r[a]}, 0",
      f"v_cndmask_b32 {ctx.r[x]}, 0, 1, vcc_lo"]),
-  # cast TO 64-bit int: just move (we treat 64-bit ints as 32-bit for register allocation)
+  # cast TO 64-bit int: move low 32 bits, zero high 32 bits (for register pairs)
   (UPat(Ops.CAST, name="x", dtype=dtypes.long, src=(UPat.var("a"),)),
-   lambda ctx, x, a: f"v_mov_b32 {ctx.r[x]}, {ctx.r[a]}" if not ctx.r[a].startswith('s') else
-     f"v_cndmask_b32 {ctx.r[x]}, 0, 1, {ctx.r[a]}"),
+   lambda ctx, x, a: ctx.render_cast_to_64(x, a, signed=True)),
   (UPat(Ops.CAST, name="x", dtype=dtypes.ulong, src=(UPat.var("a"),)),
-   lambda ctx, x, a: f"v_mov_b32 {ctx.r[x]}, {ctx.r[a]}" if not ctx.r[a].startswith('s') else
-     f"v_cndmask_b32 {ctx.r[x]}, 0, 1, {ctx.r[a]}"),
+   lambda ctx, x, a: ctx.render_cast_to_64(x, a, signed=False)),
   (UPat(Ops.CAST, name="x", src=(UPat.var("a"),)), lambda ctx, x, a: ctx.render_cast(x, a)),
   # store / load for global memory
   # store boolean value - if SGPR (comparison result), convert via cndmask; if VGPR, store directly
@@ -599,11 +624,20 @@ class RDNARenderer(Renderer):
     src_num = get_reg_num(ra)
     return [f"v_mov_b32 v{dst_num}, v{src_num}", f"v_mov_b32 v{dst_num+1}, v{src_num+1}"]
 
-  def render_cast_to_64(self, x: UOp, a: UOp, signed: bool = False) -> list[str]:
+  def render_cast_to_64(self, x: UOp, a: UOp, signed: bool = False) -> str|list[str]:
     """Render cast from 32-bit to 64-bit integer (sign or zero extend)"""
     rx, ra = self.r[x], self.r[a]
+    # Check if destination is a register pair or single register
+    if '[' not in rx:
+      # Single register - just move the low 32 bits
+      src_reg = extract_low_32(ra)
+      if ra.startswith('s'):
+        return f"v_cndmask_b32 {rx}, 0, 1, {ra}"
+      return f"v_mov_b32 {rx}, {src_reg}"
     # Extract dest register number from v[n:n+1] format
     dst_num = int(rx[2:rx.index(':')])
+    # Extract source as single register
+    src_reg = extract_low_32(ra)
     # Source can be single reg (v5) or in SGPR for comparison results
     if ra.startswith('s'):
       # SGPR comparison result - expand to VGPR first
@@ -611,7 +645,6 @@ class RDNARenderer(Renderer):
         f"v_cndmask_b32 v{dst_num}, 0, 1, {ra}",
         f"v_mov_b32 v{dst_num+1}, 0"  # zero extend for bool/comparison results
       ]
-    src_reg = ra if ra.startswith('v') else f"v{ra}"
     # Low bits: copy from source
     # High bits: 0 for unsigned, or sign-extend for signed
     if signed:
@@ -990,8 +1023,9 @@ class RDNARenderer(Renderer):
 
     def needs_vgpr_pair(dtype: DType) -> bool:
       """Check if a dtype needs a VGPR pair (64-bit types)"""
-      # Only float64 needs pairs - int64/uint64 use special split hi/lo patterns
-      return dtype == dtypes.float64
+      # 64-bit types need register pairs for load/store
+      # Note: ALU operations will extract low 32 bits for int64/uint64 since RDNA has limited 64-bit int ALU
+      return dtype in (dtypes.float64, dtypes.long, dtypes.ulong) or (hasattr(dtype, 'itemsize') and dtype.itemsize == 8)
 
     def alloc_sgpr(owner: UOp) -> str|None:
       nonlocal next_sgpr, max_sgpr

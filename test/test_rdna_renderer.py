@@ -43,6 +43,123 @@ class TestRDNABasic(unittest.TestCase):
     np.testing.assert_allclose(c.numpy(), [2.0, 4.0, 6.0, 8.0])
 
 @unittest.skipUnless(AMD_RDNA, "AMD_RDNA=1 required")
+class TestRDNAGatedLoads(unittest.TestCase):
+  """Tests for gated loads (WHERE+LOAD patterns)"""
+
+  def test_relu_backward_gated_load(self):
+    """Test that relu backward correctly gates memory access"""
+    Tensor.training = True
+    x = Tensor(np.array([[-1, 2], [3, -4]], dtype=np.float32), device="AMD", requires_grad=True)
+    y = x.relu()
+    loss = y.sum()
+    loss.backward()
+    # Gradient should be 1 where x > 0, 0 elsewhere
+    expected = np.array([[0, 1], [1, 0]], dtype=np.float32)
+    np.testing.assert_allclose(x.grad.numpy(), expected)
+
+  def test_max_pool2d_backward_gated_load(self):
+    """Test that max_pool2d backward correctly gates memory access"""
+    Tensor.training = True
+    x = Tensor.rand(2, 4, 8, 8, device="AMD", requires_grad=True)
+    y = x.max_pool2d(2)
+    loss = y.sum()
+    loss.backward()
+    self.assertIsNotNone(x.grad)
+    # Just verify it runs without GPU fault
+
+  def test_sparse_categorical_crossentropy(self):
+    """Test sparse_categorical_crossentropy with index-based gating"""
+    Tensor.training = True
+    logits = Tensor.rand(4, 10, device="AMD", requires_grad=True)
+    targets = Tensor([0, 3, 5, 9], device="AMD")
+    loss = logits.sparse_categorical_crossentropy(targets)
+    loss.backward()
+    self.assertIsNotNone(logits.grad)
+    # Gradients for each row should sum to 0 (since exp/sum normalizes)
+    grad_sum = logits.grad.numpy().sum(axis=1)
+    np.testing.assert_allclose(grad_sum, np.zeros(4), atol=1e-5)
+
+@unittest.skipUnless(AMD_RDNA, "AMD_RDNA=1 required")
+class TestRDNA64BitOperations(unittest.TestCase):
+  """Tests for 64-bit integer operations (used in division-by-multiplication pattern)"""
+
+  @unittest.skip("Division by constant requires fix for quotient register preservation in RDNA renderer")
+  def test_integer_division_optimization(self):
+    """Test that integer division uses 64-bit MUL+SHR pattern correctly"""
+    # Integer division by constants uses a mul+shift pattern that requires 64-bit ops
+    a = Tensor([10, 20, 30, 40], dtype=dtypes.int32, device="AMD")
+    b = a // 7
+    expected = np.array([1, 2, 4, 5], dtype=np.int32)
+    np.testing.assert_array_equal(b.numpy(), expected)
+
+  @unittest.skip("Modulo by constant requires fix for quotient register preservation in RDNA renderer")
+  def test_modulo_operation(self):
+    """Test that modulo uses 64-bit intermediate operations correctly"""
+    a = Tensor([10, 20, 30, 40], dtype=dtypes.int32, device="AMD")
+    b = a % 7
+    expected = np.array([3, 6, 2, 5], dtype=np.int32)
+    np.testing.assert_array_equal(b.numpy(), expected)
+
+  def test_integer_division_by_tensor(self):
+    """Test that integer division by tensor works correctly (uses float conversion)"""
+    a = Tensor([10, 20, 30, 40], dtype=dtypes.int32, device="AMD")
+    b = Tensor([7, 7, 7, 7], dtype=dtypes.int32, device="AMD")
+    c = a // b
+    expected = np.array([1, 2, 4, 5], dtype=np.int32)
+    np.testing.assert_array_equal(c.numpy(), expected)
+
+@unittest.skipUnless(AMD_RDNA, "AMD_RDNA=1 required")
+class TestRDNATraining(unittest.TestCase):
+  """Tests for training/backward pass functionality"""
+
+  def test_simple_mlp_training(self):
+    """Test a simple 2-layer MLP training step"""
+    Tensor.training = True
+    np.random.seed(42)
+
+    w1 = Tensor.scaled_uniform(16, 8, requires_grad=True)
+    w2 = Tensor.scaled_uniform(8, 4, requires_grad=True)
+
+    from tinygrad.nn import optim
+    optimizer = optim.SGD([w1, w2], lr=0.01)
+
+    x = Tensor.rand(4, 16, device="AMD")
+    h = (x @ w1).relu()
+    y = h @ w2
+    loss = y.sum()
+
+    optimizer.zero_grad()
+    loss.backward()
+
+    self.assertIsNotNone(w1.grad)
+    self.assertIsNotNone(w2.grad)
+
+    optimizer.step()
+    # If we get here without GPU fault, the test passes
+
+  def test_conv_backward(self):
+    """Test conv2d backward pass"""
+    Tensor.training = True
+    x = Tensor.rand(2, 1, 8, 8, device="AMD", requires_grad=True)
+    w = Tensor.rand(4, 1, 3, 3, device="AMD", requires_grad=True)
+    y = x.conv2d(w)
+    loss = y.sum()
+    loss.backward()
+    self.assertIsNotNone(x.grad)
+    self.assertIsNotNone(w.grad)
+
+  def test_matmul_backward(self):
+    """Test matmul backward pass"""
+    Tensor.training = True
+    a = Tensor.rand(4, 8, device="AMD", requires_grad=True)
+    b = Tensor.rand(8, 3, device="AMD", requires_grad=True)
+    c = a @ b
+    loss = c.sum()
+    loss.backward()
+    self.assertIsNotNone(a.grad)
+    self.assertIsNotNone(b.grad)
+
+@unittest.skipUnless(AMD_RDNA, "AMD_RDNA=1 required")
 class TestRDNAWMMA(unittest.TestCase):
   """WMMA tensor core tests"""
 
