@@ -2548,15 +2548,35 @@ label_1098:
 .section	.rodata,"a",@progbits
 .p2align	6, 0x0
 .amdhsa_kernel gemm
-  .amdhsa_user_sgpr_kernarg_segment_ptr 1
-  .amdhsa_system_sgpr_workgroup_id_x 1
-  .amdhsa_system_sgpr_workgroup_id_y 1
+  # ---- basic memory requirements ----
   .amdhsa_group_segment_fixed_size 65536
   .amdhsa_private_segment_fixed_size 0
-  .amdhsa_kernarg_size 336
-  .amdhsa_next_free_vgpr 512 // don't use .amdgcn.next_free_vgpr
-  .amdhsa_next_free_sgpr .amdgcn.next_free_sgpr
-  .amdhsa_accum_offset 256 // it's compute_pgm_rsrc3 & 0x3f
+  .amdhsa_kernarg_size 0
+
+  # ---- register usage (RSRC1) ----
+  .amdhsa_next_free_vgpr 512
+  .amdhsa_next_free_sgpr 102
+
+  # ---- workgroup / workitem IDs (RSRC2) ----
+  .amdhsa_system_sgpr_workgroup_id_x 1
+  .amdhsa_system_sgpr_workgroup_id_y 1
+  .amdhsa_system_sgpr_workgroup_id_z 1
+
+  # ---- user SGPR enables (descriptor bits >448) ----
+  .amdhsa_user_sgpr_kernarg_segment_ptr 1
+
+  # (all others explicitly disabled by omission / zero)
+  # .amdhsa_user_sgpr_private_segment_buffer 0
+  # .amdhsa_user_sgpr_dispatch_ptr 0
+  # .amdhsa_user_sgpr_queue_ptr 0
+  # .amdhsa_user_sgpr_dispatch_id 0
+  # .amdhsa_user_sgpr_flat_scratch_init 0
+  # .amdhsa_user_sgpr_private_segment_size 0
+
+  # ---- gfx90a / gfx940 specific (RSRC3) ----
+  .amdhsa_accum_offset 256
+  .amdhsa_tg_split 0
+
 .end_amdhsa_kernel
 
 .amdgpu_metadata
