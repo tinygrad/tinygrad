@@ -45,9 +45,9 @@ class TestImageCopy(unittest.TestCase):
 @unittest.skipUnless(REAL_DEV in IMAGE_SUPPORTED_DEVICES, "Images not supported")
 class TestImageDType(unittest.TestCase):
   def test_image_and_back(self):
-    data = Tensor.randn(9*27*4).realize()
+    data = Tensor.randn(9*32*4).realize()
     tst = data.numpy()
-    it = data.cast(dtypes.imagef((9,27,4))).contiguous().realize()
+    it = data.cast(dtypes.imagef((9,32,4))).contiguous().realize()
     assert isinstance(it.uop.base.realized.dtype, ImageDType)
     np.testing.assert_equal(tst, it.numpy())
 
@@ -67,13 +67,13 @@ class TestImageDType(unittest.TestCase):
     np.testing.assert_equal(tst, it.numpy())
 
   def test_shrink_load_float(self):
-    it = Tensor.randn(4).cast(dtypes.imagef((1,1,4))).realize()
+    it = Tensor.randn(16).cast(dtypes.imagef((1,4,4))).realize()
     imgv = it.numpy()
     np.testing.assert_equal(imgv[0:2], it[0:2].numpy())
 
   def test_mul_stays_image(self):
     # NOTE: contiguous is needed otherwise this folds
-    it = Tensor.randn(4).cast(dtypes.imagef((1,1,4))).contiguous().realize()
+    it = Tensor.randn(16).cast(dtypes.imagef((1,4,4))).contiguous().realize()
     out = (it*2).realize()
     assert isinstance(out.uop.base.realized.dtype, ImageDType)
 
@@ -83,7 +83,7 @@ class TestImageDType(unittest.TestCase):
     np.testing.assert_allclose(np.sum(itn), it.sum().numpy(), rtol=1e-6)
 
   def test_shrink_max(self):
-    it = Tensor.randn(8).cast(dtypes.imagef((1,2,4))).realize()
+    it = Tensor.randn(16).cast(dtypes.imagef((1,4,4))).realize()
     imgv = it.numpy()
     np.testing.assert_equal(np.maximum(imgv[0:3], 0), it[0:3].relu().numpy())
 
@@ -102,19 +102,19 @@ class TestImageDType(unittest.TestCase):
     assert it.uop.base.realized._buf == b1
 
   def test_no_lru_alloc(self):
-    data = Tensor.randn(9*27*4).realize()
-    it = data.cast(dtypes.imagef((9,27,4))).contiguous().realize()
+    data = Tensor.randn(9*32*4).realize()
+    it = data.cast(dtypes.imagef((9,32,4))).contiguous().realize()
     b1 = it.uop.base.realized._buf
     del it
-    it = data.cast(dtypes.imagef((10,27,4))).contiguous().realize()
+    it = data.reshape(9,32,4).pad_to(10, None, None).cast(dtypes.imagef((10,32,4))).contiguous().realize()
     assert it.uop.base.realized._buf != b1
 
   def test_no_lru_alloc_dtype(self):
-    data = Tensor.randn(9*27*4).realize()
-    it = data.cast(dtypes.imagef((9,27,4))).contiguous().realize()
+    data = Tensor.randn(9*32*4).realize()
+    it = data.cast(dtypes.imagef((9,32,4))).contiguous().realize()
     b1 = it.uop.base.realized._buf
     del it
-    it = data.cast(dtypes.imageh((9,27,4))).realize()
+    it = data.cast(dtypes.imageh((9,32,4))).realize()
     assert it.uop.base.realized._buf != b1
 
   # issue caused by: don't realize image to image casts. this is part of a larger problem
