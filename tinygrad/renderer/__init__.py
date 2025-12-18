@@ -64,7 +64,7 @@ class ProgramSpec:
   device:str
   ast:UOp  # save the base ast (this is method cache key)
   uops:list[UOp]|None=None
-  aux:dict[str,...]=field(default_factory=dict)
+  aux:dict=field(default_factory=dict)
 
   # filled in from uops (if we have uops)
   global_size:list[int]|None=None
@@ -133,5 +133,5 @@ class Renderer:
   code_for_op: dict[Ops, Callable] = {}
 
   def __reduce__(self): return self.__class__, ()
-  def render(self, uops:list[UOp]) -> str|tuple[str,...]: raise NotImplementedError("needs a renderer")
-  def aux(self, uops:list[UOp]) -> dict[str,...]: raise NotImplementedError("needs aux")
+  def render(self, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")
+  def aux(self, uops:list[UOp]) -> dict: raise NotImplementedError("needs aux")
