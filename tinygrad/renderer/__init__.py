@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Callable, cast
+from typing import Callable, cast
 import functools
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup, prod
