@@ -221,71 +221,6 @@ async function initDecoder(nets, audio_features_batch) {
     return decoder_state;
 }
 
-/** @returns {Promise<Decode_Sequence[]|undefined>} */
-async function inference(nets, log_specs_full, audio_features_batch, seeks_batch, cancelToken, inferenceState) {
-    if (inferenceState.state === "DECODE") {
-        let pendingTexts = inferenceState.pendingTexts;
-        let sequences = inferenceState.sequences;
-        let decoder_state = inferenceState.decoder_state;
-        if (inferenceState.currentTokenIndex < MAX_TOKENS_TO_DECODE && sequences.some(x => x.context.at(-1) !== TOK_EOS)) {
-            if (cancelToken.cancelled) {
-                inferenceState.is_done = true;
-                return;
-            }
-
-            // NOTE: pack batch inputs
-            let context_inputs = [];
-            for (let idx = 0; idx < sequences.length; ++idx) {
-                let ctx = sequences[idx].context;
-                context_inputs.push(ctx.at(-1));
-            }
-            const max_context_batch_length = Math.max.apply(null, sequences.map(x => x.context.length));
-            let [sorted] = await decoder_helper(nets, context_inputs, audio_features_batch[0], max_context_batch_length - 1, decoder_state);
-
-            // NOTE: unpack batch results
-            // TODO: dehardcode
-            const indices_topk = 10;
-            let decode_results_topk = [];
-            for (let i = 0; i < sequences.length; ++i) {
-                decode_results_topk.push(sorted.slice(i*indices_topk, (i+1)*indices_topk));
-            }
-
-            for (let idx = 0; idx < sequences.length; ++idx) {
-                let current_sequence = sequences[idx];
-                let current_context = current_sequence.context;
-
-                if (current_context.at(-1) === TOK_EOS) continue;
-                let seek = seeks_batch[idx];
-
-                current_context.push(decode_results_topk[idx][0]);
-
-                if (current_context.length >= current_sequence.max_context_length) {
-                    current_context[current_context.length - 1] = TOK_EOS;
-                }
-
-                const detokenized = tokensToText(current_context.slice(current_sequence.context_prompt_length), nets.mapping);
-                const seek_end = Math.min(seek + MEL_SPEC_CHUNK_LENGTH, log_specs_full.length);
-                pendingTexts[idx] = format_text(detokenized, seek, seek_end);
-            }
-            ++inferenceState.currentTokenIndex;
-            return;
-
-        } else {
-            inferenceState.state = "POST_DECODE";
-            return;
-        }
-
-    } else if (inferenceState.state === "POST_DECODE") {
-        inferenceState.is_done = true;
-        inferenceState.state = "DONE";
-
-        return inferenceState.sequences;
-
-    } else if (inferenceState.state === "DONE") {
-        return inferenceState.sequences;
-    }
-}
-
 async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAndInitializeModels) {
     let before = performance.now();
     await loadAndInitializeModels();
@@ -347,26 +282,64 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
             seeks_batch.push(seek);
         }
 
+        let sequences = initSequences(audio_features_batch.length);
         let inferenceState = {
-            sequences: initSequences(audio_features_batch.length),
             decoder_state: await initDecoder(nets, audio_features_batch),
-            currentTokenIndex: 0,
             pendingTexts: [],
-            state: "DECODE",
             is_done: false
         };
-        let sequences;
+        let currentTokenIndex = 0;
         while (!inferenceState.is_done) {
-            sequences = await inference(nets, log_specs_full, audio_features_batch, seeks_batch, cancelToken, inferenceState);
-            if (inferenceState.state === "DECODE") {
-                if (inferenceState.currentTokenIndex !== 0) {
-                    // index was already incremented for the next decode iteration
-                    let currentTokenIndex = inferenceState.currentTokenIndex - 1;
-                    pendingTexts = inferenceState.pendingTexts.slice();
-                    onEvent("chunkUpdate", {pendingTexts, currentTokenIndex, sequenceStatus: inferenceState.sequences.map(x => x.context.at(-1) === TOK_EOS ? "done" : "running")});
+            let pendingTexts = inferenceState.pendingTexts;
+            let decoder_state = inferenceState.decoder_state;
+            if (currentTokenIndex < MAX_TOKENS_TO_DECODE && sequences.some(x => x.context.at(-1) !== TOK_EOS)) {
+                if (cancelToken.cancelled) {
+                    inferenceState.is_done = true;
+                    break;
                 }
-            } else if (inferenceState.state === "POST_DECODE") {
-            } else if (inferenceState.state === "DONE") {
+
+                // NOTE: pack batch inputs
+                let context_inputs = [];
+                for (let idx = 0; idx < sequences.length; ++idx) {
+                    let ctx = sequences[idx].context;
+                    context_inputs.push(ctx.at(-1));
+                }
+                const max_context_batch_length = Math.max.apply(null, sequences.map(x => x.context.length));
+                let [sorted] = await decoder_helper(nets, context_inputs, audio_features_batch[0], max_context_batch_length - 1, decoder_state);
+
+                // NOTE: unpack batch results
+                // TODO: dehardcode
+                const indices_topk = 10;
+                let decode_results_topk = [];
+                for (let i = 0; i < sequences.length; ++i) {
+                    decode_results_topk.push(sorted.slice(i*indices_topk, (i+1)*indices_topk));
+                }
+
+                for (let idx = 0; idx < sequences.length; ++idx) {
+                    let current_sequence = sequences[idx];
+                    let current_context = current_sequence.context;
+
+                    if (current_context.at(-1) === TOK_EOS) continue;
+                    let seek = seeks_batch[idx];
+
+                    current_context.push(decode_results_topk[idx][0]);
+
+                    if (current_context.length >= current_sequence.max_context_length) {
+                        current_context[current_context.length - 1] = TOK_EOS;
+                    }
+
+                    const detokenized = tokensToText(current_context.slice(current_sequence.context_prompt_length), nets.mapping);
+                    const seek_end = Math.min(seek + MEL_SPEC_CHUNK_LENGTH, log_specs_full.length);
+                    pendingTexts[idx] = format_text(detokenized, seek, seek_end);
+                }
+
+                pendingTexts = inferenceState.pendingTexts.slice();
+                onEvent("chunkUpdate", {pendingTexts, currentTokenIndex, sequenceStatus: sequences.map(x => x.context.at(-1) === TOK_EOS ? "done" : "running")});
+
+                ++currentTokenIndex;
+            } else {
+                inferenceState.is_done = true;
+                break;
             }
         }
 
@@ -422,6 +395,5 @@ export {
 
     batch_repeat_helper,
     decoder_helper,
-    inference,
     transcribeAudio
 };
