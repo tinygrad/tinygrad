@@ -30,6 +30,7 @@ class TinyJit(Generic[ReturnType]):
     # process schedule caches to be symbolic
     for k,v in input_state_dict.items(): print(k, v.uop.base)
     for input_buffers, sched_cache_key in self.schedule_caches:
+      pre_schedule, combined_sink = schedule_cache[sched_cache_key]
       for k,v in input_buffers.items():
         print(k.pyrender())
         print(v.pyrender())

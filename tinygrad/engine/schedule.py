@@ -89,7 +89,7 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ScheduleItem], UOp]:
       else:
         ast, buf_uops, metadata, fixedvars, bound_ranges = si
         fixedvars = fixedvars | {s.src[0].arg[0]:in_ranges[s.src[1]] for s in bound_ranges}
-        pre_schedule.append(ScheduleItem(ast, (), metadata, fixedvars))
+        pre_schedule.append(ScheduleItem(ast, buf_uops, metadata, fixedvars))
         buf_uops_list.append(UOp.sink(*buf_uops))
       sched_ptr += 1
   return pre_schedule, UOp.sink(*buf_uops_list)
