@@ -2,7 +2,7 @@
 """Tests for the RDNA assembly renderer"""
 import unittest
 import numpy as np
-from tinygrad import Tensor, dtypes, Device
+from tinygrad import Tensor, dtypes
 from tinygrad.helpers import getenv
 
 # Skip tests if not on AMD RDNA device
@@ -248,7 +248,6 @@ class TestWMMAVGPRUsage(unittest.TestCase):
     """
     import re
     from tinygrad.codegen import full_rewrite
-    from tinygrad.device import Device
     from tinygrad.uop.ops import Ops
     from tinygrad.renderer.rdna import RDNARenderer
     from tinygrad.helpers import Context
@@ -300,7 +299,6 @@ class TestWMMAVGPRUsage(unittest.TestCase):
     """Verify 32x32 WMMA fits within VGPR limit"""
     import re
     from tinygrad.codegen import full_rewrite
-    from tinygrad.device import Device
     from tinygrad.uop.ops import Ops
     from tinygrad.renderer.rdna import RDNARenderer
     from tinygrad.helpers import Context
@@ -612,7 +610,7 @@ class TestLookAheadPackingOnDevice(unittest.TestCase):
         if has_wmma:
           asm = renderer.render(uops)
           pack_count = asm.count('v_pack_b32_f16')
-          self.assertGreater(pack_count, 0, f"WMMA kernel should have v_pack_b32_f16 instructions")
+          self.assertGreater(pack_count, 0, "WMMA kernel should have v_pack_b32_f16 instructions")
           return
 
     self.fail("Should find WMMA kernel in schedule")
@@ -786,9 +784,6 @@ class TestVGPRRegressions(unittest.TestCase):
           if has_reduce:
             uops = full_rewrite(item.ast, renderer)
             asm = renderer.render(uops)
-
-            # Count v_cvt_f16_f32 instructions (CAST from float32 to half)
-            cvt_count = asm.count('v_cvt_f16_f32')
 
             # Verify the kernel still fits in VGPR limit
             match = re.search(r'\.amdhsa_next_free_vgpr (\d+)', asm)

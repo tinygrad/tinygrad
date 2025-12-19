@@ -501,26 +501,34 @@ string_rewrite = PatternMatcher([
   (UPat(Ops.CAST, name="x", src=(UPat.var("a"),)), lambda ctx, x, a: ctx.render_cast(x, a)),
   # store / load for global memory
   # store boolean value - if SGPR (comparison result), convert via cndmask; if VGPR, store directly
-  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_GLOBAL, name="buf"), UPat.var("idx")), name="index_op", allow_any_len=True), UPat.var("var", dtype=dtypes.bool))),
+  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_GLOBAL, name="buf"), UPat.var("idx")),
+    name="index_op", allow_any_len=True), UPat.var("var", dtype=dtypes.bool))),
    lambda ctx, idx, var, buf, index_op: [
      f"v_cndmask_b32 v{ctx.get_scratch_vgpr()}, 0, 1, {ctx.r[var]}",
      f"global_store_byte {ctx.r[index_op]}, v{ctx.get_scratch_vgpr()}, {ctx.r[buf]}"]
        if ctx.r[var].startswith('s') else f"global_store_byte {ctx.r[index_op]}, {ctx.r[var]}, {ctx.r[buf]}"),
-  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_GLOBAL, name="buf"), UPat.var("idx")), name="index_op", allow_any_len=True), UPat.var("var"))),
+  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_GLOBAL, name="buf"), UPat.var("idx")),
+    name="index_op", allow_any_len=True), UPat.var("var"))),
    lambda ctx, idx, var, buf, index_op: global_store(ctx.r[index_op], ctx.r[var], ctx.r[buf], var.dtype)),
-  (UPat(Ops.LOAD, name="x", src=(UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_GLOBAL, name="buf"), UPat.var("idx"), UPat.var("gate")), name="index_op"), UPat.var("alt")), allow_any_len=True),
+  (UPat(Ops.LOAD, name="x", src=(UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_GLOBAL, name="buf"), UPat.var("idx"),
+    UPat.var("gate")), name="index_op"), UPat.var("alt")), allow_any_len=True),
     lambda ctx, x, idx, alt, gate, buf, index_op: gated_load(ctx, x, idx, alt, gate, buf, index_op)),
-  (UPat(Ops.LOAD, name="x", src=(UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_GLOBAL, name="buf"), UPat.var("idx")), name="index_op"),), allow_any_len=True),
+  (UPat(Ops.LOAD, name="x", src=(UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_GLOBAL, name="buf"), UPat.var("idx")),
+    name="index_op"),), allow_any_len=True),
     lambda ctx, x, idx, buf, index_op: global_load(ctx.r[x], ctx.r[index_op], ctx.r[buf], x.dtype)),
   # store / load for local memory (LDS) - DEFINE_LOCAL directly
-  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_LOCAL), UPat.var("idx")), name="index_op", allow_any_len=True), UPat.var("var"))),
+  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_LOCAL), UPat.var("idx")),
+    name="index_op", allow_any_len=True), UPat.var("var"))),
    lambda ctx, idx, var, index_op: ds_write(ctx.r[index_op], ctx.r[var], var.dtype)),
-  (UPat(Ops.LOAD, name="x", src=(UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_LOCAL), UPat.var("idx")), name="index_op"),), allow_any_len=True),
+  (UPat(Ops.LOAD, name="x", src=(UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_LOCAL), UPat.var("idx")),
+    name="index_op"),), allow_any_len=True),
     lambda ctx, x, idx, index_op: ds_read(ctx.r[x], ctx.r[index_op], x.dtype)),
   # store / load for local memory (LDS) - DEFINE_LOCAL wrapped in AFTER
-  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat(Ops.AFTER, src=(UPat(Ops.DEFINE_LOCAL),), allow_any_len=True), UPat.var("idx")), name="index_op", allow_any_len=True), UPat.var("var"))),
+  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat(Ops.AFTER, src=(UPat(Ops.DEFINE_LOCAL),), allow_any_len=True),
+    UPat.var("idx")), name="index_op", allow_any_len=True), UPat.var("var"))),
    lambda ctx, idx, var, index_op: ds_write(ctx.r[index_op], ctx.r[var], var.dtype)),
-  (UPat(Ops.LOAD, name="x", src=(UPat(Ops.INDEX, src=(UPat(Ops.AFTER, src=(UPat(Ops.DEFINE_LOCAL),), allow_any_len=True), UPat.var("idx")), name="index_op"),), allow_any_len=True),
+  (UPat(Ops.LOAD, name="x", src=(UPat(Ops.INDEX, src=(UPat(Ops.AFTER, src=(UPat(Ops.DEFINE_LOCAL),),
+    allow_any_len=True), UPat.var("idx")), name="index_op"),), allow_any_len=True),
     lambda ctx, x, idx, index_op: ds_read(ctx.r[x], ctx.r[index_op], x.dtype)),
   # simple
   (UPat(Ops.DEFINE_REG, src=()), lambda ctx: []),
@@ -746,7 +754,7 @@ class RDNARenderer(Renderer):
            f".amdhsa_kernel {function_name}\n" + \
            f"  .amdhsa_group_segment_fixed_size {self.lds_size}\n" + \
            f"  .amdhsa_kernarg_size {kernarg_size}\n" + \
-           f"  .amdhsa_user_sgpr_count 2\n" + \
+           "  .amdhsa_user_sgpr_count 2\n" + \
            f"  .amdhsa_next_free_vgpr {v_cnt}\n" + \
            f"  .amdhsa_next_free_sgpr {s_cnt}\n" + \
            "  .amdhsa_wavefront_size32 1\n" + \
@@ -1396,7 +1404,7 @@ class RDNARenderer(Renderer):
         sgpr = alloc_sgpr(u)
         kernarg_offset[u] = current_kernarg_offset
         current_kernarg_offset += 4  # Variables are 4 bytes (int32)
-        r[u] = sgpr if sgpr else alloc_vgpr(u)  # Fall back to VGPR if SGPRs exhausted
+        r[u] = sgpr or alloc_vgpr(u)  # Fall back to VGPR if SGPRs exhausted
         bufs.append((u.arg[0], u.dtype))
       elif u.op is Ops.SPECIAL:
         r[u] = alloc_vgpr(u)
