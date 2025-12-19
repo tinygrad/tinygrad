@@ -5,7 +5,7 @@ from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQSignal, H
 from tinygrad.device import Buffer, BufferSpec, Compiled, Device, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Variable
-from tinygrad.engine.realize import BufferXfer, CompiledRunner, BufferCopy, ExecItem
+from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner, BufferCopy
 from tinygrad.engine.jit import MultiGraphRunner
 
 class HCQGraph(MultiGraphRunner):
