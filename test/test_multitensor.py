@@ -4,7 +4,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.helpers import getenv, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
-from tinygrad.engine.realize import lower_schedule, BufferCopy, CompiledRunner, run_schedule
+from tinygrad.engine.realize import BufferCopy, CompiledRunner, run_schedule
 import numpy as np
 from hypothesis import given, strategies as strat, settings
 from test.helpers import not_support_multi_device, needs_second_gpu, slow
@@ -123,9 +123,10 @@ class TestMultiTensor(unittest.TestCase):
     out = (X + X)
     sched = out.schedule()
     names = []
-    for si, ei in lower_schedule(sched):
-      if isinstance(ei.prg, CompiledRunner): names.append(ei.prg.p.name)
-      ei.run()
+    for si in sched:
+      si._lower()
+      if isinstance(si.prg, CompiledRunner): names.append(si.prg.p.name)
+      si.run()
     self.assertEqual(len(set(names)), 1, "function was relinearized")
 
   @unittest.skip("this doesn't fold because shard_ calls contiguous on all lbs")

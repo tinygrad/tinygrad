@@ -1,10 +1,9 @@
-from typing import cast, Generator, Callable
-import time, pprint, random, itertools, math
-from dataclasses import dataclass, replace, field
-from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
-from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context
-from tinygrad.helpers import unwrap
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, print_uops, track_rewrites, KernelInfo, pyrender
+from typing import Callable
+import time, random, itertools, math
+from dataclasses import replace
+from tinygrad.helpers import all_same, colored, DEBUG, BEAM, NOOPT, all_int, CAPTURING, TracingKey
+from tinygrad.helpers import DEVECTORIZE, VALIDATE_WITH_CPU, getenv, cpu_profile, prod, Context
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, graph_rewrite, print_uops, track_rewrites, KernelInfo, pyrender
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
 from tinygrad.engine.schedule import ScheduleItem
@@ -169,42 +168,7 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
     method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, device=device))
   return ret
 
-# **************** lowering functions ****************
-
-@dataclass(frozen=True)
-class ExecItem:
-  prg: Runner
-  bufs: list[Buffer|None]
-  metadata: tuple[Metadata, ...]|None = None
-  fixedvars: dict[str, int] = field(default_factory=dict)
-  def run(self, _var_vals:dict[str, int]|None=None, wait=False, jit=False, do_update_stats=True) -> float|None:
-    var_vals = self.fixedvars if _var_vals is None else (_var_vals|self.fixedvars)
-    bufs = [unwrap(x) for x in self.bufs] if jit else [unwrap(x).ensure_allocated() for x in self.bufs]
-    if PROFILE:
-      payload = {"metadata":self.metadata, "var_vals":var_vals, "bufs":[b.trace_num for b in bufs], "name":self.prg.display_name}
-      payload["outputs"], payload["inputs"] = (self.prg.p.outs, self.prg.p.ins) if isinstance(self.prg, CompiledRunner) else ([0], [1])
-      cpu_events.append(ProfilePointEvent(self.prg.device, "exec", len(cpu_events), payload))
-    et = self.prg(bufs, var_vals, wait=wait or DEBUG >= 2)
-    if do_update_stats:
-      GlobalCounters.kernel_count += 1
-      GlobalCounters.global_ops += (op_est:=sym_infer(self.prg.estimates.ops, var_vals))
-      GlobalCounters.global_mem += (mem_est:=sym_infer(self.prg.estimates.mem, var_vals))
-      if et is not None: GlobalCounters.time_sum_s += et
-      if DEBUG >= 2:
-        lds_est = sym_infer(self.prg.estimates.lds, var_vals)
-        mem_est = min(mem_est, lds_est)   # there can't be more memory accessed than loads/stores. remove this when symbolic is fixed
-        header_color = 'magenta' if jit else ('green' if self.prg.first_run else None)
-        ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None) if et is not None else ""
-        flops, membw, ldsbw = op_est/(et or 1e-20), mem_est/(et or 1e-20), lds_est/(et or 1e-20)
-        flops_str = f"{flops*1e-9:7.0f} GFLOPS" if flops < 1e14 else colored(f"{flops*1e-12:7.0f} TFLOPS", 'green')
-        mem_str = f"{membw*1e-9:4.0f}|{ldsbw*1e-9:<6.0f} GB/s" if membw < 1e13 and ldsbw < 1e15 else \
-          colored(f"{membw*1e-12:4.0f}|{ldsbw*1e-12:<6.0f} TB/s", 'green')
-        print(f"{colored(f'*** {self.prg.device[:7]:7s} {GlobalCounters.kernel_count:4d}', header_color)}"+
-          f" {self.prg.display_name+' '*(46-ansilen(self.prg.display_name))} arg {len(bufs):2d} mem {GlobalCounters.mem_used/1e9:6.2f} GB"+
-          ("" if et is None else f" tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({flops_str} {mem_str})")+
-          f" {[repr(m) if TRACEMETA >= 2 else str(m) for m in self.metadata] if self.metadata else ''}")
-      self.prg.first_run = False
-    return et
+# **************** lowering ****************
 
 # NOTE: ctx is the buffers
 si_lowerer = PatternMatcher([
@@ -215,39 +179,29 @@ si_lowerer = PatternMatcher([
       else BufferCopy(ctx[0].nbytes, ctx[0].device, ctx[1].device)), list(ctx))),
   (UPat(Ops.ENCDEC, name="encdec"), lambda ctx,encdec: ((EncDec(encdec, ctx[0].nbytes, ctx[1].device)), list(ctx))),
 ])
-def lower_schedule_item(si:ScheduleItem) -> ExecItem:
-  return ExecItem(*cast(tuple[Runner,list], si_lowerer.rewrite(si.ast, si.bufs)), si.metadata, si.fixedvars)
-
-def lower_schedule(schedule:list[ScheduleItem]) -> Generator[tuple[ScheduleItem, ExecItem], None, None]:
-  while len(schedule):
-    si = schedule.pop(0)
-    try: yield (si, lower_schedule_item(si))
-    except Exception as e:
-      if DEBUG >= 2:
-        print(f"error lowering {si.ast.op}")
-        print("tensor operations:")
-        pprint.pprint(si.metadata, indent=2)
-      raise e
 
 # **************** main run function ****************
 
 capturing: list = []  # put classes with an add method in here
 
 def run_schedule(schedule:list[ScheduleItem], var_vals:dict[str, int]|None=None, do_update_stats=True):
-  for si, ei in lower_schedule(schedule):
-    if len(capturing) and CAPTURING: capturing[0].add(ei)
+  for si in schedule:
+    si._lower()  # ensure prg is populated before capturing
+    if len(capturing) and CAPTURING: capturing[0].add(si)
     if VALIDATE_WITH_CPU and si.ast.op is Ops.SINK:
       # copy in allocated buffers from the GPU
-      nb: tuple[Buffer, ...] = tuple(Buffer("CPU", b.size, b.dtype) for b in si.bufs)
-      for cpu_b, gpu_b in zip(nb, si.bufs):
-        if gpu_b.is_allocated(): cpu_b.ensure_allocated().copyin(gpu_b.as_buffer())
+      bufs = [b for b in si.bufs if b is not None]
+      nb: list[Buffer|None] = [Buffer("CPU", b.size, b.dtype) for b in bufs]
+      for cpu_b, gpu_b in zip(nb, bufs):
+        if cpu_b is not None and gpu_b.is_allocated(): cpu_b.ensure_allocated().copyin(gpu_b.as_buffer())
 
       # run on GPU
-      ei.run(var_vals, do_update_stats=do_update_stats)
+      si.run(var_vals, do_update_stats=do_update_stats)
 
       # validate the output buffers match (NOTE: this is assuming the output is buffer 0)
-      with Context(BEAM=0): lower_schedule_item(ScheduleItem(si.ast, nb, si.metadata, si.fixedvars)).run(var_vals, do_update_stats=do_update_stats)
+      with Context(BEAM=0): ScheduleItem(si.ast, nb, si.metadata, si.fixedvars).run(var_vals, do_update_stats=do_update_stats)
       import numpy as np
-      np.testing.assert_allclose(si.bufs[0].numpy(), nb[0].numpy(), rtol=1e-3, atol=1e-3)
+      assert nb[0] is not None
+      np.testing.assert_allclose(bufs[0].numpy(), nb[0].numpy(), rtol=1e-3, atol=1e-3)
     else:
-      ei.run(var_vals, do_update_stats=do_update_stats)
+      si.run(var_vals, do_update_stats=do_update_stats)

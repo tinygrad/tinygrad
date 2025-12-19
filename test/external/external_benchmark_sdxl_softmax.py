@@ -23,6 +23,7 @@ if __name__ == "__main__":
   #k.apply_opt(Opt(OptOps.GROUP, 0, 32))
   #k.apply_opt(Opt(OptOps.GROUP, 1, 32))
   #k.apply_opt(Opt(OptOps.GROUP, 0, 32))
-  from tinygrad.engine.realize import CompiledRunner, ExecItem
+  from tinygrad.engine.realize import CompiledRunner
+  from tinygrad.engine.schedule import ScheduleItem
   run = CompiledRunner(prg:=get_program(k.ast, k.opts, k.applied_opts))
-  ExecItem(run, si.bufs).run()
+  ScheduleItem(k.ast, list(si.bufs), prg=run).run()

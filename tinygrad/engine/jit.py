@@ -5,7 +5,8 @@ from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv,
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, Variable, sym_infer, Ops
-from tinygrad.engine.realize import ExecItem, capturing, ViewOp, BufferCopy, BufferXfer, EncDec, CompiledRunner, Runner, Estimates
+from tinygrad.engine.schedule import ScheduleItem
+from tinygrad.engine.realize import capturing, ViewOp, BufferCopy, BufferXfer, EncDec, CompiledRunner, Runner, Estimates
 from tinygrad.engine.memory import _internal_memory_planner
 from tinygrad.nn.state import get_parameters
 from tinygrad.schedule.rangeify import mop_cleanup
@@ -16,11 +17,12 @@ class GraphException(Exception): pass
 
 def graph_class(dev): return dev.graph.func if isinstance(dev.graph, functools.partial) else dev.graph
 
-def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[str, int], max_batch_size=0) -> list[ExecItem]:
+def apply_graph_to_jit(jit_cache: list[ScheduleItem], input_rawbuffers: list[Buffer], var_vals: dict[str, int],
+                       max_batch_size=0) -> list[ScheduleItem]:
   # Split JIT cache into batches for faster graph execution.
   # This allows the accelerator to run some batches while subsequent graphs are still being updated.
-  graphed_jit_cache: list[ExecItem] = []
-  current_batch: list[ExecItem] = []
+  graphed_jit_cache: list[ScheduleItem] = []
+  current_batch: list[ScheduleItem] = []
   current_batch_devs: list[Compiled] = []
 
   def flush_batch():
@@ -31,7 +33,7 @@ def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer]
       graph_runner = current_batch_devs[0].graph(current_batch, input_rawbuffers, var_vals)
       # clear jit inputs to allow their memory to be freed/reused
       for (j,i) in graph_runner.input_replace.keys(): graph_runner.jit_cache[j].bufs[i] = None
-      graphed_jit_cache.append(ExecItem(graph_runner, cast(list[Buffer|None], input_rawbuffers)))
+      graphed_jit_cache.append(ScheduleItem(UOp(Ops.NOOP), cast(list[Buffer|None], input_rawbuffers), prg=graph_runner))
       max_batch_size *= 2
       if DEBUG >= 2: print(f"JIT GRAPHing batch with {len(current_batch)} kernels on device {current_batch_devs[0]}")
     except GraphException as e:
@@ -40,40 +42,41 @@ def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer]
     current_batch = []
     current_batch_devs = []
 
-  for ji in jit_cache:
-    match ji.prg:
-      case CompiledRunner(): ji_graph_dev = ji.prg.dev
-      case BufferXfer(): ji_graph_dev = Device[unwrap(ji.bufs[0]).device]
-      case BufferCopy(): ji_graph_dev = next((Device[unwrap(b).device] for b in ji.bufs if unwrap(b).device != "CPU"), None)
+  for si in jit_cache:
+    match si.prg:
+      case CompiledRunner(): si_graph_dev = si.prg.dev
+      case BufferXfer(): si_graph_dev = Device[unwrap(si.bufs[0]).device]
+      case BufferCopy(): si_graph_dev = next((Device[unwrap(b).device] for b in si.bufs if unwrap(b).device != "CPU"), None)
       case ViewOp(): continue # ViewOps are just ignored
-      case _: ji_graph_dev = None # Everything else is not graphed and flushes existing graph if it's being constructed
+      case _: si_graph_dev = None # Everything else is not graphed and flushes existing graph if it's being constructed
 
     # Check if this jit item can be graphed at all, so check if a new graph supports the current item.
-    can_be_graphed = ji_graph_dev is not None and ji_graph_dev.graph is not None and graph_class(ji_graph_dev).supports_exec_item([ji_graph_dev], ji)
+    can_be_graphed = si_graph_dev is not None and si_graph_dev.graph is not None and \
+                     graph_class(si_graph_dev).supports_exec_item([si_graph_dev], si)
 
     # Check if the current batch can be extended with this item.
     can_share_graph = can_be_graphed and len(current_batch_devs) > 0 and \
-                      graph_class(current_batch_devs[0]).supports_exec_item(dedup(current_batch_devs + [ji_graph_dev]), ji)
+                      graph_class(current_batch_devs[0]).supports_exec_item(dedup(current_batch_devs + [si_graph_dev]), si)
     can_extend_graph_batch = can_share_graph and (max_batch_size == 0 or len(current_batch) < max_batch_size)
 
     # Flush the current batch if any, since it can't be extended or is full.
     if not can_extend_graph_batch and len(current_batch) > 0: flush_batch()
-    (current_batch if can_be_graphed else graphed_jit_cache).append(ji)
-    current_batch_devs = dedup(current_batch_devs + [ji_graph_dev]) if can_be_graphed else []
+    (current_batch if can_be_graphed else graphed_jit_cache).append(si)
+    current_batch_devs = dedup(current_batch_devs + [si_graph_dev]) if can_be_graphed else []
 
   if len(current_batch) > 0: flush_batch()
   return graphed_jit_cache
 
-def get_input_replace(jit_cache: list[ExecItem], input_rawbuffers:list[Buffer]) -> dict[tuple[int, int], int]:
+def get_input_replace(jit_cache: list[ScheduleItem], input_rawbuffers:list[Buffer]) -> dict[tuple[int, int], int]:
   input_replace: dict[tuple[int, int], int] = {}
-  for j,ji in enumerate(jit_cache):
-    for i,a in enumerate(ji.bufs):
+  for j,si in enumerate(jit_cache):
+    for i,a in enumerate(si.bufs):
       if a in input_rawbuffers:
         input_replace[(j,i)] = input_rawbuffers.index(a)
   return input_replace
 
 class GraphRunner(Runner):
-  def __init__(self, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[str, int]):
+  def __init__(self, jit_cache: list[ScheduleItem], input_rawbuffers: list[Buffer], var_vals: dict[str, int]):
     self.jit_cache = jit_cache  # NOTE: this is not used, but you have to keep these objects alive for the Graph
     self.input_replace:dict[tuple[int, int], int] = get_input_replace(jit_cache, input_rawbuffers)
     self.var_vals_replace:dict[int, list[tuple[int, int]]] = {}
@@ -83,26 +86,28 @@ class GraphRunner(Runner):
     def is_sym_dim(dim) -> bool: return not all(isinstance(d, (int, float)) for d in dim)
 
     self.vars = sorted(var_vals.keys())
-    self.symbolic_dims = dedup([tuple(d) for ji in jit_cache if isinstance(ji.prg, CompiledRunner) and (d:=ji.prg.p.local_size) and is_sym_dim(d)] +
-                               [tuple(d) for ji in jit_cache if isinstance(ji.prg, CompiledRunner) and (d:=ji.prg.p.global_size) and is_sym_dim(d)])
+    self.symbolic_dims = dedup([tuple(d) for si in jit_cache if isinstance(si.prg, CompiledRunner) and (d:=si.prg.p.local_size) and is_sym_dim(d)] +
+                               [tuple(d) for si in jit_cache if isinstance(si.prg, CompiledRunner) and (d:=si.prg.p.global_size) and is_sym_dim(d)])
     def find_symbolic_dim(dim): return self.symbolic_dims.index(tuple(dim)) if dim is not None and tuple(dim) in self.symbolic_dims else None
 
     estimates = Estimates()
-    for j,ji in enumerate(jit_cache):
-      estimates += ji.prg.estimates
-      if isinstance(ji.prg, CompiledRunner):
-        if ji.prg.p.vars: self.var_vals_replace[j] = [(i, self.vars.index(v.expr)) for i, v in enumerate(ji.prg.p.vars) if v.expr not in ji.fixedvars]
+    for j,si in enumerate(jit_cache):
+      assert si.prg is not None
+      estimates += si.prg.estimates
+      if isinstance(si.prg, CompiledRunner):
+        if si.prg.p.vars: self.var_vals_replace[j] = [(i, self.vars.index(v.expr)) for i, v in enumerate(si.prg.p.vars) if v.expr not in si.fixedvars]
 
-        global_dim_idx, local_dim_idx = find_symbolic_dim(ji.prg.p.global_size), find_symbolic_dim(ji.prg.p.local_size)
+        global_dim_idx, local_dim_idx = find_symbolic_dim(si.prg.p.global_size), find_symbolic_dim(si.prg.p.local_size)
         if global_dim_idx is not None or local_dim_idx is not None:
           self.launch_dims_replace[j] = (global_dim_idx, local_dim_idx)
-          assert ji.prg.p.global_size is not None and ji.prg.p.local_size is not None
-          self.launch_dims_base[j] = (tuple(ji.prg.p.global_size), tuple(ji.prg.p.local_size))
+          assert si.prg.p.global_size is not None and si.prg.p.local_size is not None
+          self.launch_dims_base[j] = (tuple(si.prg.p.global_size), tuple(si.prg.p.local_size))
 
     # used in MultiGraphRunner. the ints are id() of _bufs
     self.w_dependency_map: dict[int, Any] = {}
     self.r_dependency_map: dict[int, list[Any]] = collections.defaultdict(list)
 
+    assert jit_cache[0].prg is not None
     super().__init__(colored(f"<batched {len(jit_cache)}>", "cyan"), jit_cache[0].prg.device.split(":")[0], estimates.simplify())
 
   def updated_vars(self, var_vals: dict[str, int]):
@@ -132,29 +137,29 @@ class GraphRunner(Runner):
     return list({id(x):x for x in wait_nodes}.values())
 
   @staticmethod
-  def supports_exec_item(devs:list[Compiled], ei:ExecItem) -> bool: return isinstance(ei.prg, CompiledRunner) and len(dedup(devs)) == 1
+  def supports_exec_item(devs:list[Compiled], si:ScheduleItem) -> bool: return isinstance(si.prg, CompiledRunner) and len(dedup(devs)) == 1
 
 # a marker for your graph supporting multiple devices of the same type
 class MultiGraphRunner(GraphRunner):
   @staticmethod
-  def supports_exec_item(devs:list[Compiled], ei:ExecItem) -> bool:
+  def supports_exec_item(devs:list[Compiled], si:ScheduleItem) -> bool:
     # Devices must be the same type
-    return isinstance(ei.prg, (CompiledRunner, BufferXfer)) and len(dedup([type(Device[b.device]) for b in ei.bufs if b]+[type(d) for d in devs]))==1
+    return isinstance(si.prg, (CompiledRunner, BufferXfer)) and len(dedup([type(Device[b.device]) for b in si.bufs if b]+[type(d) for d in devs]))==1
 
-def get_out_buffers_for_ei(ei:ExecItem) -> list[Buffer]:
-  if isinstance(ei.prg, CompiledRunner): return [cast(Buffer, ei.bufs[out]) for out in ei.prg.p.outs if out not in ei.prg.p.ins]
-  if isinstance(ei.prg, (BufferCopy, BufferXfer, EncDec)): return [cast(Buffer, ei.bufs[0])]
+def get_out_buffers(si:ScheduleItem) -> list[Buffer]:
+  if isinstance(si.prg, CompiledRunner): return [cast(Buffer, si.bufs[out]) for out in si.prg.p.outs if out not in si.prg.p.ins]
+  if isinstance(si.prg, (BufferCopy, BufferXfer, EncDec)): return [cast(Buffer, si.bufs[0])]
   return []
 
-def update_depends(depends:set[Buffer|None], jit_cache:list[ExecItem]):
-  for ei in jit_cache:
-    if any(b in depends for b in ei.bufs): depends.update(get_out_buffers_for_ei(ei))
+def update_depends(depends:set[Buffer|None], jit_cache:list[ScheduleItem]):
+  for si in jit_cache:
+    if any(b in depends for b in si.bufs): depends.update(get_out_buffers(si))
 
 ReturnType = TypeVar('ReturnType')
 @dataclass
 class CapturedJit(Generic[ReturnType]):
   ret: Any  # includes the Tensors or any other returned object
-  jit_cache: list[ExecItem]
+  jit_cache: list[ScheduleItem]
   input_replace: dict[tuple[int, int], int]
   extra_view_inputs: list[tuple[int, int, str, int, DType]]
   expected_names: list[int|str]
@@ -166,7 +171,7 @@ class CapturedJit(Generic[ReturnType]):
                             self.expected_names, self.expected_st_vars_dtype_device)
 
   def __post_init__(self):
-    self._jit_cache: list[ExecItem] = self.jit_cache
+    self._jit_cache: list[ScheduleItem] = self.jit_cache
     self._input_replace: dict[tuple[int, int], int] = self.input_replace
     self._first_run = True
     self._clear_inputs()
@@ -186,7 +191,8 @@ class CapturedJit(Generic[ReturnType]):
   def replan_buffers_memory_layout(self):
     blacklist = [t.uop.buffer for t in get_parameters(self.ret)]
     asgn = _internal_memory_planner([[b for item in self.jit_cache for b in item.bufs if b is not None and b not in blacklist]], ignore_checks=True)
-    self.jit_cache = [ExecItem(item.prg, [asgn.get(b,b) if b is not None else None for b in item.bufs]) for item in self.jit_cache]
+    self.jit_cache = [ScheduleItem(item.ast, [asgn.get(b,b) if b is not None else None for b in item.bufs], item.metadata, item.fixedvars, item.prg)
+                      for item in self.jit_cache]
     for old, new in asgn.items():
       if old.is_allocated(): new.ensure_allocated().copyin(old.as_buffer())
     self.__post_init__()
@@ -201,8 +207,8 @@ class CapturedJit(Generic[ReturnType]):
     # Condense the items into a graph executor.
     if self._first_run:
       # allocate intermediates if freed
-      for ji in self.jit_cache:
-        for b in ji.bufs:
+      for si in self.jit_cache:
+        for b in si.bufs:
           if b is not None: b.ensure_allocated()
       # create graph if needed
       if JIT < 2:
@@ -211,7 +217,7 @@ class CapturedJit(Generic[ReturnType]):
       self._first_run = False
 
     if DEBUG >= 1 and len(self._jit_cache) >= 10: print(f"jit execs {len(self._jit_cache)} kernels")
-    for ei in self._jit_cache: ei.run(var_vals, jit=True)
+    for si in self._jit_cache: si.run(var_vals, jit=True)
     self._clear_inputs()
     return self.ret
 
@@ -248,8 +254,8 @@ class TinyJit(Generic[ReturnType]):
       self._buffer_replace[b] = ret = Buffer(b.device, b.size, b.dtype, options=b.options)
     return ret
 
-  def add(self, ei:ExecItem):
-    self._jit_cache.append(ExecItem(ei.prg, [self.add_buffer(buf) for buf in ei.bufs if buf is not None], ei.metadata, ei.fixedvars))
+  def add(self, si:ScheduleItem):
+    self._jit_cache.append(ScheduleItem(si.ast, [self.add_buffer(buf) for buf in si.bufs if buf is not None], si.metadata, si.fixedvars, si.prg))
 
   def reset(self):
     assert self.fxn is not None, "can't reset without function"
@@ -262,7 +268,7 @@ class TinyJit(Generic[ReturnType]):
 
   # keep legacy code working
   @property
-  def jit_cache(self) -> list[ExecItem]: return self.captured._jit_cache if self.captured is not None else []
+  def jit_cache(self) -> list[ScheduleItem]: return self.captured._jit_cache if self.captured is not None else []
   @property
   def input_replace(self) -> dict[tuple[int, int], int]: return self.captured._input_replace if self.captured is not None else {}
 
@@ -280,7 +286,7 @@ class TinyJit(Generic[ReturnType]):
       # jit capture
       assert self.fxn is not None
       if capturing: raise RuntimeError(f"having TinyJit inside another TinyJit is not supported {len(capturing)=} {capturing=}")
-      self._jit_cache: list[ExecItem] = []
+      self._jit_cache: list[ScheduleItem] = []
       self._buffer_replace: WeakKeyDictionary[Buffer, Buffer] = WeakKeyDictionary()
       # TODO: should we always disable the memory planner here? it must be off for prune
       with Context(BEAM=getenv("JITBEAM", BEAM.value), NO_MEMORY_PLANNER=int(self.prune)):
@@ -296,7 +302,7 @@ class TinyJit(Generic[ReturnType]):
       if DEBUG >= 1: print(f"JIT captured {len(jit_cache)} kernels with {len(input_buffers)} inputs")
 
       # track inputs that are views of buffers
-      # TODO: eventually expected_buffers should live in ExecItem
+      # TODO: eventually expected_buffers should live in ScheduleItem
       extra_view_inputs: list[tuple[int, int, str, int, DType]] = []
       for item in jit_cache:
         for b in item.bufs:
@@ -308,20 +314,20 @@ class TinyJit(Generic[ReturnType]):
       if self.prune:
         depends = set(input_buffers)
         update_depends(depends, jit_cache)
-        pruned, onetime = partition(jit_cache, lambda ei: any(b in depends for b in get_out_buffers_for_ei(ei)))
+        pruned, onetime = partition(jit_cache, lambda si: any(b in depends for b in get_out_buffers(si)))
         if DEBUG >= 1: print(f"pruned from {len(jit_cache)} -> {len(pruned)} kernels")
         # run the onetime kernels here
-        for ei in onetime:
-          for b in ei.bufs: cast(Buffer, b).ensure_allocated()
-          ei.run(var_vals, jit=True)
+        for si in onetime:
+          for b in si.bufs: cast(Buffer, b).ensure_allocated()
+          si.run(var_vals, jit=True)
         jit_cache = pruned
 
       # memory planning (optional)
       # Exclude buffers involved in transfer ops to preserve parallelism.
-      noopt_buffers = {b for ji in jit_cache if isinstance(ji.prg, (BufferXfer, BufferCopy, EncDec)) for b in ji.bufs}
+      noopt_buffers = {b for si in jit_cache if isinstance(si.prg, (BufferXfer, BufferCopy, EncDec)) for b in si.bufs}
       assigned = _internal_memory_planner([cast(list[Buffer], item.bufs) for item in jit_cache], noopt_buffers, debug_prefix="JIT ")
-      jit_cache = [ExecItem(item.prg, [assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None],
-                            item.metadata, item.fixedvars) for item in jit_cache]
+      jit_cache = [ScheduleItem(item.ast, [assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None],
+                                item.metadata, item.fixedvars, item.prg) for item in jit_cache]
 
       input_replace = get_input_replace(jit_cache, input_buffers)
       if DEBUG >= 1 and len(set(input_replace.values())) != len(input_buffers): print("WARNING: some input tensors not found")

@@ -5,11 +5,11 @@ from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQSignal, H
 from tinygrad.device import Buffer, BufferSpec, Compiled, Device, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Variable
-from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner, BufferCopy
+from tinygrad.engine.realize import BufferXfer, CompiledRunner, BufferCopy, ScheduleItem
 from tinygrad.engine.jit import MultiGraphRunner
 
 class HCQGraph(MultiGraphRunner):
-  def __init__(self, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[str, int]):
+  def __init__(self, jit_cache: list[ScheduleItem], input_rawbuffers: list[Buffer], var_vals: dict[str, int]):
     super().__init__(jit_cache, input_rawbuffers, var_vals)
     self.devices = list(set(cast(HCQCompiled, d) for ji in jit_cache for d in [Device[cast(Buffer, x).device] for x in ji.bufs]))
 
@@ -230,7 +230,7 @@ class HCQGraph(MultiGraphRunner):
     for fdev, buf in self.kernargs_bufs.items(): fdev.allocator._free(buf, BufferSpec(cpu_access=True))
 
   @staticmethod
-  def supports_exec_item(devs:list[Compiled], ei:ExecItem) -> bool:
+  def supports_exec_item(devs:list[Compiled], ei:ScheduleItem) -> bool:
     # Check if all devices are HCQ
     all_devs = cast(list[HCQCompiled], dedup(devs + [Device[b.device] for b in ei.bufs if b]))
     if not all(issubclass(type(d), HCQCompiled) for d in all_devs): return False

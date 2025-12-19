@@ -13,7 +13,7 @@ from tinygrad.dtype import DType, ImageDType
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat
 from tinygrad.helpers import CI, DEBUG, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
 from tinygrad.schedule.rangeify import Kernel
-from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
+from tinygrad.engine.realize import CompiledRunner, run_schedule
 
 class KernelCountException(Exception): pass
 def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Tensor]|None=None, filter_sink=True):
@@ -24,8 +24,9 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
   else:
     assert isinstance(t, UOp), f"can't schedule {t}"
     sched = Tensor(t).schedule()
-  # test lowering all the ScheduleItems to ExecItems
-  kernel_cnt = len([si for si,ei in lower_schedule(sched.copy()) if isinstance(ei.prg, CompiledRunner) or not filter_sink])
+  # test lowering all the ScheduleItems
+  for si in sched: si._lower()
+  kernel_cnt = len([si for si in sched if isinstance(si.prg, CompiledRunner) or not filter_sink])
   if kernel_cnt != allowed:
     print(f"SCHEDULE ISSUE, expecting {allowed} got {kernel_cnt}")
     if DEBUG >= 3:
@@ -174,7 +175,7 @@ class TestSchedule(unittest.TestCase):
     child.realize()
     assert a.uop.is_realized
 
-  # NOTE: because empty does not have an ExecItem if realize is called on a childless empty, it never gets allocated.
+  # NOTE: because empty does not have a lowered ScheduleItem if realize is called on a childless empty, it never gets allocated.
   def test_childless_empty_never_allocates(self):
     a = Tensor.empty(10)
     a.realize()

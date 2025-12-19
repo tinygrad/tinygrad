@@ -2,7 +2,7 @@ import math, functools
 from typing import cast, Callable
 from tinygrad import Tensor, Device, Context, GlobalCounters, dtypes
 from tinygrad.uop.ops import AxisType, UOp, KernelInfo, Ops
-from tinygrad.engine.realize import ExecItem, get_runner
+from tinygrad.engine.realize import get_runner
 from tinygrad.dtype import AddrSpace, PtrDType
 from tinygrad.helpers import getenv, prod
 

@@ -2,13 +2,12 @@ import unittest, io
 from contextlib import redirect_stdout
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.helpers import OSX, CPU_LLVM, CPU_LVP
-from tinygrad.engine.realize import lower_schedule
 from tinygrad.device import is_dtype_supported
 from tinygrad.engine.realize import get_program
 
 class TestCompileFailures(unittest.TestCase):
   def compile(self, out:Tensor):
-    for _ in lower_schedule(out.schedule()): pass
+    for si in out.schedule(): si._lower()
 
   @unittest.skipUnless(is_dtype_supported(dtypes.uchar, Device.DEFAULT), f"no uint8 on {Device.DEFAULT}")
   def test_interpolate_atari(self):

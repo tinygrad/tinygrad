@@ -1,7 +1,8 @@
 import numpy as np
 from tinygrad import Tensor, Device, Context, GlobalCounters, dtypes
 from tinygrad.uop.ops import UOp, KernelInfo, sint, AxisType
-from tinygrad.engine.realize import ExecItem, get_runner
+from tinygrad.engine.realize import get_runner
+from tinygrad.engine.schedule import ScheduleItem
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import getenv
 

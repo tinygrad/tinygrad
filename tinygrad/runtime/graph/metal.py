@@ -3,14 +3,14 @@ import ctypes, re, decimal
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import dedup, getenv, merge_dicts, PROFILE
 from tinygrad.device import Buffer, ProfileGraphEntry, ProfileGraphEvent
-from tinygrad.engine.realize import ExecItem, CompiledRunner
+from tinygrad.engine.realize import CompiledRunner, ScheduleItem
 from tinygrad.engine.jit import GraphRunner, GraphException
 from tinygrad.runtime.ops_metal import wait_check, to_ns_str
 from tinygrad.runtime.autogen import metal
 from tinygrad.runtime.support import objc
 
 class MetalGraph(GraphRunner):
-  def __init__(self, jit_cache: list[ExecItem], input_rawbuffers: list[Buffer], var_vals: dict[str, int]):
+  def __init__(self, jit_cache: list[ScheduleItem], input_rawbuffers: list[Buffer], var_vals: dict[str, int]):
     super().__init__(jit_cache, input_rawbuffers, var_vals)
     if not all(isinstance(ji.prg, CompiledRunner) for ji in jit_cache): raise GraphException
 
