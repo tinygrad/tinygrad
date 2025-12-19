@@ -535,7 +535,8 @@ class RDNARenderer(Renderer):
     # SPECIAL arg is like 'g0', 'g1', 'g2' for global dims or 'l0', 'l1', 'l2' for local dims
     dim = int(x.arg[-1])
     if x.arg[0] == 'g':
-      # group id is in s2, s3, s4
+      # With .amdhsa_user_sgpr_count 2, system SGPRs start at s2
+      # s[0:1] = kernarg ptr, s2 = workgroup_id_x, s3 = y, s4 = z
       return f"v_mov_b32 {self.r[x]}, s{2+dim}"
     elif x.arg[0] == 'l':
       # local id: v0 contains packed xyz (v0.x = bits 0-9, v0.y = bits 10-19, v0.z = bits 20-29)
@@ -674,27 +675,6 @@ class RDNARenderer(Renderer):
 
     kernarg_size = (args[-1][".offset"] + args[-1][".size"]) if args else 0
 
-    # Kernel descriptor
-    kernel_desc = {
-      '.amdhsa_group_segment_fixed_size': self.lds_size, '.amdhsa_private_segment_fixed_size': 0, '.amdhsa_kernarg_size': kernarg_size,
-      '.amdhsa_next_free_vgpr': v_cnt,
-      '.amdhsa_reserve_vcc': 0, '.amdhsa_reserve_xnack_mask': 0,
-      '.amdhsa_next_free_sgpr': s_cnt,
-      '.amdhsa_float_round_mode_32': 0, '.amdhsa_float_round_mode_16_64': 0,
-      '.amdhsa_float_denorm_mode_32': 3, '.amdhsa_float_denorm_mode_16_64': 3,
-      '.amdhsa_dx10_clamp': 1, '.amdhsa_ieee_mode': 1, '.amdhsa_fp16_overflow': 0,
-      '.amdhsa_workgroup_processor_mode': 1, '.amdhsa_memory_ordered': 1, '.amdhsa_forward_progress': 0,
-      '.amdhsa_enable_private_segment': 0,
-      '.amdhsa_system_sgpr_workgroup_id_x': 1, '.amdhsa_system_sgpr_workgroup_id_y': 1, '.amdhsa_system_sgpr_workgroup_id_z': 1,
-      '.amdhsa_system_sgpr_workgroup_info': 0, '.amdhsa_system_vgpr_workitem_id': 2,
-      '.amdhsa_exception_fp_ieee_invalid_op': 0, '.amdhsa_exception_fp_denorm_src': 0,
-      '.amdhsa_exception_fp_ieee_div_zero': 0, '.amdhsa_exception_fp_ieee_overflow': 0,
-      '.amdhsa_exception_fp_ieee_underflow': 0, '.amdhsa_exception_fp_ieee_inexact': 0,
-      '.amdhsa_exception_int_div_zero': 0, '.amdhsa_user_sgpr_dispatch_ptr': 0, '.amdhsa_user_sgpr_queue_ptr': 0,
-      '.amdhsa_user_sgpr_kernarg_segment_ptr': 1, '.amdhsa_user_sgpr_dispatch_id': 0,
-      '.amdhsa_user_sgpr_private_segment_size': 0, '.amdhsa_wavefront_size32': 1, '.amdhsa_uses_dynamic_stack': 0
-    }
-
     metadata = {
       'amdhsa.kernels': [{
         '.args': args,
@@ -707,36 +687,31 @@ class RDNARenderer(Renderer):
       'amdhsa.target': f'amdgcn-amd-amdhsa--{self.arch}', 'amdhsa.version': [1, 2]
     }
 
-    boilerplate_start = f"""
-.rodata
-.global {function_name}.kd
-.type {function_name}.kd,STT_OBJECT
-.align 0x10
-.amdhsa_kernel {function_name}"""
-
-    code_start = f""".end_amdhsa_kernel
-.text
-.global {function_name}
-.type {function_name},@function
-.p2align 8
-{function_name}:
-"""
-
     kernel_str = '\n'.join(kernel)
     # NOTE: .text must be first line for HIPCompiler to detect as assembly
     return ".text\n" + \
+           f'.amdgcn_target "amdgcn-amd-amdhsa--{self.arch}"\n' + \
+           ".amdhsa_code_object_version 6\n" + \
            f".global {function_name}\n" + \
            f".type {function_name},@function\n" + \
            ".p2align 8\n" + \
            f"{function_name}:\n" + \
-           kernel_str + f"\n.size {function_name}, .-{function_name}\n" + \
-           "\n.rodata\n" + \
-           f".global {function_name}.kd\n" + \
-           f".type {function_name}.kd,STT_OBJECT\n" + \
-           ".align 0x10\n" + \
+           kernel_str + f"\n.size {function_name}, .-{function_name}\n\n" + \
+           ".rodata\n" + \
+           ".p2align 6\n" + \
            f".amdhsa_kernel {function_name}\n" + \
-           '\n'.join("%s %d" % x for x in kernel_desc.items()) + "\n" + \
-           ".end_amdhsa_kernel\n" + \
+           f"  .amdhsa_group_segment_fixed_size {self.lds_size}\n" + \
+           f"  .amdhsa_kernarg_size {kernarg_size}\n" + \
+           f"  .amdhsa_user_sgpr_count 2\n" + \
+           f"  .amdhsa_next_free_vgpr {v_cnt}\n" + \
+           f"  .amdhsa_next_free_sgpr {s_cnt}\n" + \
+           "  .amdhsa_wavefront_size32 1\n" + \
+           "  .amdhsa_user_sgpr_kernarg_segment_ptr 1\n" + \
+           "  .amdhsa_system_sgpr_workgroup_id_x 1\n" + \
+           "  .amdhsa_system_sgpr_workgroup_id_y 1\n" + \
+           "  .amdhsa_system_sgpr_workgroup_id_z 1\n" + \
+           "  .amdhsa_system_vgpr_workitem_id 2\n" + \
+           ".end_amdhsa_kernel\n\n" + \
            ".amdgpu_metadata\n" + yaml.dump(metadata) + ".end_amdgpu_metadata"
 
   def render(self, uops:list[UOp]) -> str:
