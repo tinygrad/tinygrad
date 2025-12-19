@@ -3879,7 +3879,7 @@ class Tensor(OpMixin):
     return cx.image_conv2d(cw, groups=groups, dtype=dtype).reshape(out_shape_t).transpose(self.ndim-1, self.ndim-2)
 
   def image_conv2d(self, weight:Tensor, bias:Tensor|None=None, groups=1, stride=1, dilation=1, padding=0, dtype=None) -> Tensor:
-    base_image_type, dtsz = (dtypes.imageh, 2) if getenv("FLOAT16", 0) else (dtypes.imagef, 4)
+    base_image_type = dtypes.imageh if getenv("FLOAT16", 0) else dtypes.imagef
 
     (bs,_,iy,ix), (cout,cin,H,W) = self.shape, weight.shape
     x, w = self, weight.reshape(groups, (rcout := cout//groups), cin, H, W)
@@ -3891,20 +3891,6 @@ class Tensor(OpMixin):
       cin = cin + added_input_channels
       w = w.pad_to(None, None, cin, None, None)
       x = x.pad_to(None, None, cin, None, None).reshape(bs, groups*cin, iy, ix)
-
-    # hacks for pitch alignment
-    assert isinstance(ix, int) and isinstance(H, int)
-    added_width = 0
-    if (ix*groups*cin) % (64 // dtsz):
-      added_width = round_up(ix, 64 // (dtsz * math.gcd(groups * cin, 64 // dtsz))) - ix
-      ix = ix + added_width
-      x = x.pad_to(None, None, None, ix)
-
-    added_weight = 0
-    if (H*W*cin) % (64 // dtsz):
-      added_weight = round_up(H, 64 // (dtsz * math.gcd(W * cin, 64 // dtsz))) - H
-      H = H + added_weight
-      w = w.pad_to(None, None, None, H, None)
 
     # hack for non multiples of 4 on rcout
     added_output_channels = 0
@@ -3925,17 +3911,12 @@ class Tensor(OpMixin):
     if IMAGE >= 2: x,w = x.cast(base_image_type((bs*iy, ix*groups*cin//4, 4))), w.cast(base_image_type((cout//4, H*W*cin, 4)))
     x, w = x.contiguous(), w.contiguous()
 
-    if added_weight: w, H = w[:, :-added_weight, ...], H - added_weight
-
     # expand out
     rcin_hi, rcin_lo = (cin//4, 4) if cin >= 4 else (1, 1)
     group_shape, rcout_expand = (groups//4, 4) if cin == 1 else (groups, 1), (rcout//4, 4) if rcout >= 4 else (1, 1)
-    x = x.reshape(bs, iy, -1, groups, rcin_hi, rcin_lo)
+    x = x.reshape(bs, iy, ix, groups, rcin_hi, rcin_lo)
     if cin_last: w = w.reshape(cout//4, H, rcin_hi, W, 4, rcin_lo)
     else: w = w.reshape(cout//4, H, rcin_hi, W, rcin_lo, 4).permute(0,1,2,3,5,4)
-
-    # undo pitch alignment hack
-    if added_width: x = x[:, :, :-added_width, ...]
 
     # prepare input
     x = x.permute(0,3,4,5,1,2).pad(self._resolve_pool_pads(padding,2))._pool((H,W), stride, dilation)# -> (bs, groups, rcin_hi, rcin_lo, oy, ox, H, W)
@@ -3944,19 +3925,8 @@ class Tensor(OpMixin):
     # prepare weights
     w = w.permute(0,4,2,5,1,3).reshape((1, 1, 1, *group_shape, *rcout_expand, rcin_hi, rcin_lo, H, W))
 
-    added_ox = 0
-    assert isinstance(ox, int) and isinstance(cout, int)
-    if (ox * cout) % (64 // dtsz):
-      added_ox = round_up(ox, 64 // (dtsz * math.gcd(cout, 64 // dtsz))) - ox
-      ox = ox + added_ox
-      x = x.pad_to(None, None, ox, None, None, None, None, None, None, None, None)
-
     # the conv!
     ret = (x*w).cast(base_image_type((bs*oy, ox*cout//4, 4)) if IMAGE >= 2 else dtypes.float32).sum((-4, -3, -2, -1), dtype=dtype)
-
-    if added_ox:
-      ret = ret.reshape(bs, oy, ox, groups, rcout)[:, :, :-added_ox, ...]
-      ox = ox - added_ox
 
     # undo hack for non multiples of 4 on C.rcout
     if added_output_channels != 0:
