@@ -35,13 +35,14 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
       pass
     # skip hand-coded TC opts if AMX, upcasting will make kernel slower
     if good_tc_opt and not AMX:
+      max_upcast = getattr(tk.ren, 'max_upcast_size', 64)
       if rngs is not None:
         for tc_dim in [1,0]: # attempt to upcast M and N
-          szs = [sz for sz in [5,4,3,2] if rngs[tc_dim].src[0].divides(sz) is not None]
+          szs = [sz for sz in [5,4,3,2] if rngs[tc_dim].src[0].divides(sz) is not None and tk.upcast_size() * sz < max_upcast]
           if szs:
             # set it to the replaced range
             rngs[tc_dim] = tk.apply_opt(Opt(OptOps.UPCAST, tk.rngs.index(rngs[tc_dim]), szs[0]))[0]
-        if (szs := [sz for sz in [4,2] if rngs[0].src[0].divides(sz) is not None]): # attempt to local N
+        if tk.upcast_size() < max_upcast and (szs := [sz for sz in [4,2] if rngs[0].src[0].divides(sz) is not None]): # attempt to local N
           tk.apply_opt(Opt(OptOps.LOCAL, tk.rngs.index(rngs[0]), szs[0]))
       return tk
 
@@ -135,11 +136,12 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # if last reduce dim is small(ish), loop unroll the reduce
   # NOTE: this can fail on multireduce with mismatching dimensions, this is okay
   try:
-    if k.unrollable_dims and (k.upcast_size() <= 4 or not k.axes_of(AxisType.UNROLL)) and (k.upcast_size() < 64):
+    max_upcast = getattr(k.ren, 'max_upcast_size', 64)
+    if k.unrollable_dims and (k.upcast_size() <= 4 or not k.axes_of(AxisType.UNROLL)) and (k.upcast_size() < max_upcast):
       if (s:=k.full_shape[k.unrollable_dims[-1]]) <= 32:
         k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, 0))
-        # if it's small, upcast a second reduce dimension too
-        if k.unrollable_dims and s <= 3 and k.full_shape[k.unrollable_dims[-1]] <= 3:
+        # if it's small, upcast a second reduce dimension too (but respect max_upcast_size)
+        if k.unrollable_dims and s <= 3 and k.full_shape[k.unrollable_dims[-1]] <= 3 and k.upcast_size() < max_upcast:
           k.apply_opt(Opt(OptOps.UNROLL, len(k.unrollable_dims)-1, 0))
       else:
         for splits in [4]:

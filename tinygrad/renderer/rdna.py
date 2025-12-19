@@ -33,13 +33,16 @@ def can_inline_const(val, dtype) -> bool:
 # NOTE: These are used via string_rewrite which passes r[v] (register strings), not UOps
 # For literal constant embedding, we handle ADD/MUL specially in string_rewrite
 asm_for_op: dict[Ops, Callable] = {
-  Ops.RECIPROCAL: lambda d,a,dt,name: f"v_rcp_{name} {d}, {a}",
+  # v_rcp_f32 is approximate - handled specially in string_rewrite's render_recip with Newton-Raphson refinement
+  Ops.RECIPROCAL: lambda d,a,dt,name: None,  # placeholder - actual render is in string_rewrite
   Ops.EXP2: lambda d,a,dt,name: f"v_exp_{name} {d}, {a}", Ops.LOG2: lambda d,a,dt,name: f"v_log_{name} {d}, {a}",
-  # v_sin/v_cos expect input in turns (x / 2π), so we multiply by 1/(2π) ≈ 0.159155
+  # v_sin_f32 expects input in turns (x / 2π) - handled specially in string_rewrite's render_sin
+  Ops.SIN: lambda d,a,dt,name: None,  # placeholder - actual render is in string_rewrite
   Ops.SQRT: lambda d,a,dt,name: f"v_sqrt_{name} {d}, {a}",
   Ops.TRUNC: lambda d,a,dt,name: f"v_trunc_{name} {d}, {a}",
   Ops.NEG: lambda d,a,dt,name: f"v_sub_{name} {d}, 0, {a}" if dtypes.is_float(dt) else f"v_sub_nc_u32 {d}, 0, {a}",
-  Ops.SHR: lambda d,a,b,dt,name: f"v_lshrrev_b32 {d}, {b}, {a}",  # Note: operand order is reversed
+  # SHR: Use arithmetic shift for signed types, logical shift for unsigned
+  Ops.SHR: lambda d,a,b,dt,name: f"v_ashrrev_i32 {d}, {b}, {a}" if dtypes.is_int(dt) and not dtypes.is_unsigned(dt) else f"v_lshrrev_b32 {d}, {b}, {a}",
   Ops.SHL: lambda d,a,b,dt,name: f"v_lshlrev_b32 {d}, {b}, {a}",  # Note: operand order is reversed
   Ops.ADD: lambda d,a,b,dt,name: f"v_add_{name} {d}, {a}, {b}" if dtypes.is_float(dt) else f"v_add_nc_u32 {d}, {a}, {b}",
   Ops.SUB: lambda d,a,b,dt,name: f"v_sub_{name} {d}, {a}, {b}" if dtypes.is_float(dt) else f"v_sub_nc_u32 {d}, {a}, {b}",
@@ -136,19 +139,47 @@ def extract_low_32(reg: str) -> str:
   return f"v{get_reg_base(reg)}" if isinstance(reg, str) and '[' in reg else reg
 
 def render_idiv(ctx, x, a, b):
-  """Render integer division via float conversion. For 64-bit types, operates on low 32 bits only."""
-  # Extract low 32 bits for 64-bit integer types (RDNA v_cvt only works with 32-bit)
+  """Render integer division via float conversion with correction for rounding errors.
+  v_rcp_f32 is approximate, so 6/-3 might compute as -1.999... truncating to -1 instead of -2.
+  Correction: if |remainder| >= |divisor|, we undershot and need to adjust q away from zero.
+  IMPORTANT: Uses output register {rx} for quotient. Scratch registers are only used for
+  temporary float values and intermediate computations that don't need to persist."""
   ra = extract_low_32(ctx.r[a]) if a.dtype in (dtypes.long, dtypes.ulong) else ctx.r[a]
   rb = extract_low_32(ctx.r[b]) if b.dtype in (dtypes.long, dtypes.ulong) else ctx.r[b]
   rx = extract_low_32(ctx.r[x]) if x.dtype in (dtypes.long, dtypes.ulong) else ctx.r[x]
-  scratch = ctx.get_scratch_vgpr()
+  s = ctx.get_scratch_vgpr()
+  # Use rx for the quotient throughout. Scratch registers s, s+1 are for float temporaries.
+  # We save/restore values carefully to avoid collisions when rx is in the scratch range.
   return [
-    f"v_cvt_f32_i32 v{scratch}, {ra}",
-    f"v_cvt_f32_i32 v{scratch+1}, {rb}",
-    f"v_rcp_f32 v{scratch+1}, v{scratch+1}",
-    f"v_mul_f32 v{scratch}, v{scratch}, v{scratch+1}",
-    f"v_trunc_f32 v{scratch}, v{scratch}",
-    f"v_cvt_i32_f32 {rx}, v{scratch}"]
+    f"v_cvt_f32_i32 v{s}, {ra}",           # s = float(a)
+    f"v_cvt_f32_i32 v{s+1}, {rb}",         # s+1 = float(b)
+    f"v_rcp_f32 v{s+1}, v{s+1}",           # s+1 = 1/float(b) (approx)
+    f"v_mul_f32 v{s}, v{s}, v{s+1}",       # s = float(a)/float(b) (approx)
+    f"v_trunc_f32 v{s}, v{s}",             # s = trunc(a/b)
+    f"v_cvt_i32_f32 {rx}, v{s}",           # rx = q (quotient in output register)
+    # Now compute remainder r = a - q*b to check if correction is needed
+    # Use s for q*b, s+1 for remainder
+    f"v_mul_lo_u32 v{s}, {rx}, {rb}",      # s = q*b
+    f"v_sub_nc_u32 v{s+1}, {ra}, v{s}",    # s+1 = r = a - q*b (remainder)
+    # Check if |r| >= |b| - this means we undershot and need to add/subtract 1
+    # Get |r|: abs(r) = (r xor sign(r)) - sign(r)
+    f"v_ashrrev_i32 v{s}, 31, v{s+1}",     # s = sign(r): -1 if r<0, 0 if r>=0
+    f"v_xor_b32 v{s+2}, v{s+1}, v{s}",     # s+2 = r xor sign(r)
+    f"v_sub_nc_u32 v{s+2}, v{s+2}, v{s}",  # s+2 = |r| = (r xor sign) - sign
+    # Get |b|: abs(b) = (b xor sign(b)) - sign(b)
+    f"v_ashrrev_i32 v{s}, 31, {rb}",       # s = sign(b)
+    f"v_xor_b32 v{s+3}, {rb}, v{s}",       # s+3 = b xor sign(b)
+    f"v_sub_nc_u32 v{s+3}, v{s+3}, v{s}",  # s+3 = |b|
+    # Compare |r| >= |b|
+    f"v_cmp_ge_u32 vcc_lo, v{s+2}, v{s+3}",# vcc = |r| >= |b| (need correction)
+    # Correction direction: sign(a) xor sign(b) gives sign of quotient
+    # If quotient is positive, add 1. If negative, subtract 1.
+    f"v_xor_b32 v{s}, {ra}, {rb}",         # s = a xor b
+    f"v_ashrrev_i32 v{s}, 31, v{s}",       # s = sign(a xor b): -1 if neg quotient, 0 if pos
+    f"v_or_b32 v{s}, v{s}, 1",             # s = -1 if neg, 1 if pos (correction)
+    f"v_cndmask_b32 v{s}, 0, v{s}, vcc_lo",# s = correction if needed, else 0
+    f"v_add_nc_u32 {rx}, {rx}, v{s}",      # result = q + correction
+  ]
 
 def render_mod(ctx, x, a, b):
   """Render integer modulo: a % b = a - (a // b) * b. For 64-bit types, operates on low 32 bits only."""
@@ -179,6 +210,44 @@ def render_comparison(ctx, x, src0):
     # VGPR fallback: compare to vcc_lo, then convert to 0/1 in VGPR
     return [cmp_instr, f"v_cndmask_b32 {dest}, 0, 1, vcc_lo"]
   return cmp_instr
+
+def render_sin(ctx, x, a):
+  """Render SIN using v_sin_f32 which expects input in turns (x / 2π).
+  v_sin_f32 has limited range, so we do range reduction via v_fract_f32.
+  Steps: 1) Convert to turns: t = x * (1/2π)
+         2) Reduce to [0, 1): t_frac = fract(t)  (v_fract gives x - floor(x))
+         3) Apply v_sin_f32(t_frac)
+  Note: For very large inputs (>1e6), float32 precision limits accuracy."""
+  dest, src = ctx.r[x], ctx.r[a]
+  # 1/(2π) = 0.15915494309189535 -> 0x3E22F983 in float32
+  return [f"v_mul_f32 {dest}, 0x3E22F983, {src}",  # radians to turns
+          f"v_fract_f32 {dest}, {dest}",           # reduce to [0, 1) via x - floor(x)
+          f"v_sin_f32 {dest}, {dest}"]
+
+def render_recip(ctx, x, a):
+  """Render RECIPROCAL using v_rcp_f32 with Newton-Raphson refinement using FMA for precision.
+  v_rcp_f32 is approximate (~1 ULP error), which causes issues when the result is truncated.
+  Using FMA: y' = y + y*(1 - x*y) = y*(2 - x*y) with better precision.
+  FMA computes a*b+c with only one rounding, avoiding intermediate precision loss.
+  Special handling: N-R corrupts special values (rcp(inf)=0, but inf*0=nan in N-R), so we
+  restore the raw rcp result when N-R produces NaN from a valid (non-NaN) rcp result."""
+  dest, src = ctx.r[x], ctx.r[a]
+  s = ctx.get_scratch_vgpr()  # get_scratch_vgpr returns base of 4 scratch regs
+  # s = N-R temp, s+1 = saved raw rcp result
+  # Newton-Raphson with FMA for maximum precision:
+  # y' = y + y*(1 - x*y) = y*(2 - x*y)
+  # Using FMA: tmp = fma(-x, y, 1.0), y' = fma(y, tmp, y)
+  return [f"v_rcp_f32 v{s+1}, {src}",                  # s+1 = y0 = rcp(x) (save raw result)
+          f"v_mov_b32 {dest}, v{s+1}",                 # dest = y0 (working copy)
+          # First N-R iteration with FMA
+          f"v_fma_f32 v{s}, -{src}, {dest}, 1.0",      # s = 1 - x*y0 = fma(-x, y0, 1)
+          f"v_fma_f32 {dest}, {dest}, v{s}, {dest}",   # dest = y0 + y0*s = y0*(2-x*y0)
+          # Second N-R iteration with FMA
+          f"v_fma_f32 v{s}, -{src}, {dest}, 1.0",      # s = 1 - x*y1 = fma(-x, y1, 1)
+          f"v_fma_f32 {dest}, {dest}, v{s}, {dest}",   # dest = y1 + y1*s = y1*(2-x*y1)
+          # Restore raw rcp if N-R produced NaN but raw rcp was valid (handles inf -> 0 case)
+          f"v_cmp_class_f32 vcc_lo, {dest}, 0x3",      # check if dest is NaN (class 0x1|0x2)
+          f"v_cndmask_b32 {dest}, {dest}, v{s+1}, vcc_lo"]  # if NaN, use raw rcp result
 
 def render_if(ctx, x):
   """Render IF with stack-based exec save for proper nesting."""
@@ -239,6 +308,21 @@ def render_64bit_shr(ctx, x, a, b):
     remaining = shift_amt - 32
     return f"v_mov_b32 v{dst_num}, v{src_hi}" if remaining == 0 else f"{shift_instr} v{dst_num}, {remaining}, v{src_hi}"
   return f"{shift_instr} v{dst_num}, {shift_amt}, v{src_hi}"
+
+def render_where_64(ctx, x, cond, true_val, false_val):
+  """Render WHERE for 64-bit types using two v_cndmask_b32 instructions.
+  v_cndmask_b32 only works with 32-bit registers, so we need to handle each half separately."""
+  dst, ra_t, ra_f = ctx.r[x], ctx.r[true_val], ctx.r[false_val]
+  dst_lo, dst_hi = get_reg_base(dst), get_reg_base(dst) + 1
+  t_lo, t_hi = get_reg_base(ra_t), get_reg_base(ra_t) + 1
+  f_lo, f_hi = get_reg_base(ra_f), get_reg_base(ra_f) + 1
+  cond_reg = ctx.r[cond]
+  if cond_reg.startswith('s'):
+    return [f"v_cndmask_b32 v{dst_lo}, v{f_lo}, v{t_lo}, {cond_reg}",
+            f"v_cndmask_b32 v{dst_hi}, v{f_hi}, v{t_hi}, {cond_reg}"]
+  return [f"v_cmp_ne_u32 vcc_lo, {cond_reg}, 0",
+          f"v_cndmask_b32 v{dst_lo}, v{f_lo}, v{t_lo}, vcc_lo",
+          f"v_cndmask_b32 v{dst_hi}, v{f_hi}, v{t_hi}, vcc_lo"]
 
 def render_wmma(ctx, x):
   """Render WMMA instruction for RDNA3.
@@ -347,14 +431,22 @@ string_rewrite = PatternMatcher([
   # comparison ops - uses SGPR if available, falls back to VGPR with vcc_lo + v_cndmask_b32
   (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ), name="x", allow_any_len=True, src=(UPat.var("src0"),)), render_comparison),
   # NOTE: WHERE wrapping LOAD is transformed to gated LOAD at UOp level by rdna_matcher
-  # WHERE: if condition is SGPR, use directly; if VGPR, compare to 0 first to get VCC
+  # WHERE 64-bit: need two v_cndmask_b32 for each half
+  (UPat(Ops.WHERE, name="x", dtype=dtypes.float64, src=(UPat.var("cond"), UPat.var("true_val"), UPat.var("false_val"))), render_where_64),
+  (UPat(Ops.WHERE, name="x", dtype=dtypes.long, src=(UPat.var("cond"), UPat.var("true_val"), UPat.var("false_val"))), render_where_64),
+  (UPat(Ops.WHERE, name="x", dtype=dtypes.ulong, src=(UPat.var("cond"), UPat.var("true_val"), UPat.var("false_val"))), render_where_64),
+  # WHERE: if condition is SGPR or vcc_lo, use directly; if VGPR, compare to 0 first to get VCC
   (UPat(Ops.WHERE, name="x", src=(UPat.var("cond"), UPat.var("true_val"), UPat.var("false_val"))),
    lambda ctx, x, cond, true_val, false_val: f"v_cndmask_b32 {ctx.r[x]}, {ctx.r[false_val]}, {ctx.r[true_val]}, {ctx.r[cond]}"
-     if ctx.r[cond].startswith('s') else [
+     if ctx.r[cond].startswith('s') or ctx.r[cond] == 'vcc_lo' else [
        f"v_cmp_ne_u32 vcc_lo, {ctx.r[cond]}, 0",
        f"v_cndmask_b32 {ctx.r[x]}, {ctx.r[false_val]}, {ctx.r[true_val]}, vcc_lo"]),
-  # NOTE: v_sin_f32/v_cos_f32 have limited range (~256 turns) and fail for large inputs like 1e6.
-  # We let tinygrad's software sin implementation handle all cases for correctness.
+  # RECIPROCAL: v_rcp_f32 is approximate, use Newton-Raphson refinement for better precision
+  # This ensures division results are exact when they should be (e.g., 6.0/3.0 = 2.0, not 1.999...)
+  (UPat(Ops.RECIPROCAL, name="x", src=(UPat.var("a"),)), render_recip),
+  # SIN: v_sin_f32 expects input in turns (1 turn = 2π radians), so we multiply by 1/(2π) first
+  # NOTE: v_sin_f32 has limited range (~256 turns) but we accept this for native instruction benefits
+  (UPat(Ops.SIN, name="x", src=(UPat.var("a"),)), render_sin),
   # IDIV: integer division via float conversion (a // b = trunc(float(a) / float(b)))
   (UPat(Ops.IDIV, name="x", src=(UPat.var("a"), UPat.var("b"))), render_idiv),
   # Integer MOD: a % b = a - (a // b) * b (floats use v_mod_f32 via code_for_op)
@@ -444,6 +536,7 @@ class RDNARenderer(Renderer):
   global_max = (2147483647, 65535, 65535)
   local_max = (1024, 1024, 1024)
   shared_max = 65536
+  max_upcast_size = 16  # RDNA3 has 256 VGPRs max, limit unrolling to reduce register pressure
   code_for_op = asm_for_op
   extra_matcher = rdna_matcher
   tensor_cores = tc.amd_rdna3  # RDNA3 WMMA tensor cores
@@ -497,6 +590,11 @@ class RDNARenderer(Renderer):
     elif x.dtype == dtypes.int32 and a.dtype == dtypes.float32:
       return f"v_cvt_i32_f32 {self.r[x]}, {self.r[a]}"
     elif x.dtype == dtypes.uint32 and a.dtype == dtypes.float32:
+      return f"v_cvt_u32_f32 {self.r[x]}, {self.r[a]}"
+    # float32 -> smaller int types: convert to int32 first, truncation happens via store
+    elif x.dtype in (dtypes.int8, dtypes.int16) and a.dtype == dtypes.float32:
+      return f"v_cvt_i32_f32 {self.r[x]}, {self.r[a]}"
+    elif x.dtype in (dtypes.uint8, dtypes.uint16) and a.dtype == dtypes.float32:
       return f"v_cvt_u32_f32 {self.r[x]}, {self.r[a]}"
     elif x.dtype == dtypes.float16 and a.dtype == dtypes.float32:
       return f"v_cvt_f16_f32 {self.r[x]}, {self.r[a]}"
@@ -962,8 +1060,9 @@ class RDNARenderer(Renderer):
       nonlocal next_vgpr, max_vgpr
       if self.scratch_vgpr < 0:
         # Allocate scratch VGPRs (not tracked in owner map, stays allocated)
+        # IDIV uses s, s+1, s+2, s+3 (4 registers) for float temps and abs value computation
         self.scratch_vgpr = next_vgpr
-        next_vgpr += 2  # Allocate 2 scratch registers for IDIV etc.
+        next_vgpr += 4  # Allocate 4 scratch registers for IDIV etc.
         max_vgpr = max(max_vgpr, next_vgpr)
       return self.scratch_vgpr
 

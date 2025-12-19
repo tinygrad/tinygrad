@@ -138,6 +138,7 @@ class Renderer:
   global_max: tuple[int, ...]|None = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now
   local_max: tuple[int, ...]|None = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now
   shared_max: int = 32768
+  max_upcast_size: int = 64  # Maximum total upcast size (upcast * unroll product), limits register pressure
   tensor_cores: list[TensorCore] = []
   pre_matcher: PatternMatcher|None = None
   extra_matcher: PatternMatcher|None = None
