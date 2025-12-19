@@ -8,6 +8,10 @@ from tinygrad.helpers import prod, get_single_element
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu
 from tinygrad.codegen.opt import tc
 
+def get_reg_base(reg: str) -> int:
+  """Extract base register number from register string (e.g., 'v5' -> 5, 'v[10:17]' -> 10)."""
+  return int(reg[2:reg.index(':')]) if '[' in reg else int(reg[1:])
+
 def render_val(x, dtype):
   if dtypes.is_float(dtype):
     # Check if this is an inlineable float constant
@@ -86,13 +90,6 @@ rdna_matcher = PatternMatcher([
       if op.dtype != dtypes.int32 and isinstance(buf.dtype, PtrDType) and buf.dtype.addrspace != AddrSpace.REG else None),
 ])
 
-def mem_type(x:UOp) -> str:
-  match x.op:
-    case Ops.AFTER: return mem_type(x.src[0])
-    case Ops.DEFINE_LOCAL: return 'ds'
-    case Ops.DEFINE_GLOBAL: return 'global'
-    case _: raise RuntimeError(f"{x.op} needs to be memory")
-
 def global_store(addr:str, data:str, base:str, dt:DType) -> str:
   if dt.itemsize == 1: return f"global_store_byte {addr}, {data}, {base}"
   if dt.itemsize == 2: return f"global_store_b16 {addr}, {data}, {base}"
@@ -108,21 +105,6 @@ def global_load(dest:str, addr:str, base:str, dt:DType) -> str:
   if dt.itemsize == 8: return f"global_load_b64 {dest}, {addr}, {base}"
   if dt.itemsize == 16: return f"global_load_b128 {dest}, {addr}, {base}"
   raise RuntimeError(f"Unsupported load dtype size: {dt.itemsize}")
-
-def vgpr_mov(dest:str, src:str, dt:DType) -> list[str]:
-  """Generate v_mov_b32 instructions for moving registers, handling vector types."""
-  def parse_reg(r:str) -> tuple[int, int]:
-    if '[' in r:
-      base = int(r[2:r.index(':')])
-      end = int(r[r.index(':')+1:-1])
-      return base, end - base + 1
-    else:
-      return int(r[1:]), 1
-  dest_base, dest_count = parse_reg(dest)
-  src_base, src_count = parse_reg(src)
-  vgpr_count = (dt.itemsize + 3) // 4
-  count = max(dest_count, src_count, vgpr_count)
-  return [f"v_mov_b32 v{dest_base+i}, v{src_base+i}" for i in range(count)]
 
 def gated_load(ctx, x, idx, alt, gate, buf, index_op) -> list[str]:
   """Generate gated load using v_cndmask for address selection.
@@ -140,18 +122,12 @@ def gated_load(ctx, x, idx, alt, gate, buf, index_op) -> list[str]:
   # Select address: use computed address if gate is true, else use 0 (safe address)
   addr_reg = ctx.r[index_op]
   result.append(f"v_cndmask_b32 {addr_reg}, 0, {addr_reg}, vcc_lo")
-  # Unconditionally load (address is always valid now - 0 when gate is false)
   result.append(global_load(ctx.r[x], addr_reg, ctx.r[buf], x.dtype))
-  # Wait for load to complete, then select result
   result.append("s_waitcnt vmcnt(0)")
-  # v_cndmask_b32 only works on 32-bit registers - handle vector types component-wise
-  dest_reg = ctx.r[x]
-  alt_reg = ctx.r[alt]
+  dest_reg, alt_reg = ctx.r[x], ctx.r[alt]
   if '[' in dest_reg:
-    # Vector register: v[n:m] -> extract base and count, do component-wise cndmask
-    base = int(dest_reg[2:dest_reg.index(':')])
-    end = int(dest_reg[dest_reg.index(':')+1:-1])
-    alt_base = int(alt_reg[2:alt_reg.index(':')]) if '[' in alt_reg else int(alt_reg[1:])
+    base, end = get_reg_base(dest_reg), int(dest_reg[dest_reg.index(':')+1:-1])
+    alt_base = get_reg_base(alt_reg)
     for i in range(end - base + 1):
       result.append(f"v_cndmask_b32 v{base+i}, v{alt_base+i}, v{base+i}, s{ctx.gated_sgpr}")
   else:
@@ -187,24 +163,13 @@ def render_define_var(ctx, x):
 
 def render_const_64(ctx, x):
   """Render 64-bit constant as two v_mov_b32 instructions"""
-  reg = ctx.r[x]
-  # Extract register number from v[n:n+1] format
-  reg_num = int(reg[2:reg.index(':')])
-  if x.dtype == dtypes.float64:
-    bits = struct.unpack("Q", struct.pack("d", x.arg))[0]
-  else:
-    bits = int(x.arg) & 0xFFFFFFFFFFFFFFFF
-  lo = bits & 0xFFFFFFFF
-  hi = (bits >> 32) & 0xFFFFFFFF
-  return [f"v_mov_b32 v{reg_num}, 0x{lo:08X}", f"v_mov_b32 v{reg_num+1}, 0x{hi:08X}"]
+  reg_num = get_reg_base(ctx.r[x])
+  bits = struct.unpack("Q", struct.pack("d", x.arg))[0] if x.dtype == dtypes.float64 else int(x.arg) & 0xFFFFFFFFFFFFFFFF
+  return [f"v_mov_b32 v{reg_num}, 0x{bits & 0xFFFFFFFF:08X}", f"v_mov_b32 v{reg_num+1}, 0x{(bits >> 32) & 0xFFFFFFFF:08X}"]
 
 def extract_low_32(reg: str) -> str:
   """Extract low 32 bits from a register (handles 64-bit register pairs v[n:m])"""
-  if isinstance(reg, str) and '[' in reg and ':' in reg:
-    # 64-bit register pair - extract low 32 bits
-    low_reg = int(reg[2:reg.index(':')])
-    return f"v{low_reg}"
-  return reg
+  return f"v{get_reg_base(reg)}" if isinstance(reg, str) and '[' in reg else reg
 
 def render_comparison(ctx, x, src0):
   """Render comparison op. If dest is SGPR, use directly. If VGPR (fallback), use vcc_lo + v_cndmask_b32."""
@@ -239,68 +204,27 @@ def render_endif(ctx, x):
     f"s_mov_b32 exec_lo, s{save_sgpr}"]
 
 def render_64bit_mul(ctx, x):
-  """Render 64-bit integer multiplication using scratch registers.
-  For pattern (a * magic_const) used in division-by-multiplication.
-  Result: uses scratch registers, stores hi bits in HIGH register of pair for subsequent SHR."""
+  """Render 64-bit integer multiplication for division-by-multiplication pattern.
+  Stores hi bits in HIGH register of pair for subsequent SHR."""
   rx = ctx.r[x]
-  # For 64-bit pair v[n:n+1], store high bits in v(n+1) (the high register)
-  # This is consistent with render_64bit_shr which expects high bits in the high register
-  if '[' in rx:
-    rx_hi = f"v{int(rx[2:rx.index(':')]) + 1}"  # High register of pair
-  else:
-    rx_hi = rx  # Single register
+  rx_hi = f"v{get_reg_base(rx) + 1}" if '[' in rx else rx
   a, b = x.src[0], x.src[1]
-  # Get source registers
-  ra = ctx.r[a]
-  # If a is a CAST from 32-bit, use the source register directly
-  if a.op is Ops.CAST and a.src[0].dtype.itemsize == 4:
-    ra = ctx.r[a.src[0]]
-  elif '[' in ra:  # 64-bit reg pair - use low 32 bits
-    ra = f"v{ra[2:ra.index(':')]}"
-  rb = ctx.r[b]
-  if b.op is Ops.CONST:
-    rb = render_val(b.arg, dtypes.uint32)
-  elif '[' in rb:  # 64-bit reg pair - use low 32 bits
-    rb = f"v{rb[2:rb.index(':')]}"
-  # Destination: store high 32 bits in high register for subsequent SHR
-  # Use scratch for low bits (usually not needed)
+  ra = ctx.r[a.src[0]] if a.op is Ops.CAST and a.src[0].dtype.itemsize == 4 else ctx.r[a]
+  ra = f"v{get_reg_base(ra)}" if '[' in ra else ra
+  rb = render_val(b.arg, dtypes.uint32) if b.op is Ops.CONST else (f"v{get_reg_base(ctx.r[b])}" if '[' in ctx.r[b] else ctx.r[b])
   scratch = ctx.get_scratch_vgpr()
-  # Use signed multiply (v_mul_hi_i32) for dtypes.long, unsigned (v_mul_hi_u32) for dtypes.ulong
-  # This is critical for correct division-by-multiplication with negative numbers
   mul_hi_instr = "v_mul_hi_i32" if x.dtype == dtypes.long else "v_mul_hi_u32"
-  # Full 64-bit multiply: lo in scratch, hi in destination's high register
-  # This works because the common pattern is (x*magic)>>N where N>=32, so only hi bits matter
   return [f"v_mul_lo_u32 v{scratch}, {ra}, {rb}", f"{mul_hi_instr} {rx_hi}, {ra}, {rb}"]
 
 def render_64bit_shr(ctx, x, a, b):
-  """Render 64-bit right shift. For shifts >= 32, we just need the high 32 bits shifted.
-  The source from render_64bit_mul is the high 32 bits in a single VGPR."""
-  rx = ctx.r[x]
-  ra = ctx.r[a]
-  shift_amt = b.arg if b.op is Ops.CONST else None
-  if shift_amt is None:
-    raise RuntimeError("64-bit SHR requires constant shift amount")
-  # Handle the result - always 32-bit destination
-  if '[' in rx:
-    dst_num = int(rx[2:rx.index(':')])
-  else:
-    dst_num = int(rx[1:])
-  # For source: if pair v[n:n+1], high bits in v(n+1); otherwise single reg has high bits
-  if '[' in ra:
-    src_hi = int(ra[2:ra.index(':')]) + 1
-  else:
-    src_hi = int(ra[1:])  # Single reg - this IS the high bits from MUL
+  """Render 64-bit right shift. For shifts >= 32, just shift the high 32 bits."""
+  if b.op is not Ops.CONST: raise RuntimeError("64-bit SHR requires constant shift amount")
+  dst_num, src_hi = get_reg_base(ctx.r[x]), get_reg_base(ctx.r[a]) + (1 if '[' in ctx.r[a] else 0)
+  shift_amt = b.arg
   if shift_amt >= 32:
-    # Just shift the high 32 bits by (shift_amt - 32)
-    remaining_shift = shift_amt - 32
-    if remaining_shift == 0:
-      return f"v_mov_b32 v{dst_num}, v{src_hi}"
-    return f"v_lshrrev_b32 v{dst_num}, {remaining_shift}, v{src_hi}"
-  else:
-    # For shift < 32, we'd need both halves, but our MUL only stores high bits
-    # This pattern shouldn't occur for division-by-multiplication
-    # Fall back to just using high bits (loses precision but avoids crash)
-    return f"v_lshrrev_b32 v{dst_num}, {shift_amt}, v{src_hi}"
+    remaining = shift_amt - 32
+    return f"v_mov_b32 v{dst_num}, v{src_hi}" if remaining == 0 else f"v_lshrrev_b32 v{dst_num}, {remaining}, v{src_hi}"
+  return f"v_lshrrev_b32 v{dst_num}, {shift_amt}, v{src_hi}"
 
 def render_wmma(ctx, x):
   """Render WMMA instruction for RDNA3.
@@ -423,11 +347,11 @@ string_rewrite = PatternMatcher([
      f"v_mul_f32 v{ctx.get_scratch_vgpr()}, v{ctx.get_scratch_vgpr()}, v{ctx.get_scratch_vgpr()+1}",
      f"v_trunc_f32 v{ctx.get_scratch_vgpr()}, v{ctx.get_scratch_vgpr()}",
      f"v_cvt_i32_f32 {ctx.r[x]}, v{ctx.get_scratch_vgpr()}"]),
-  # Boolean AND/OR with SGPR sources: need to convert to VGPR first (SGPR comparison results are exec-mask style)
+  # Boolean AND/OR with SGPR sources: need to convert to VGPR first
   (UPat(Ops.AND, name="x", dtype=dtypes.bool, src=(UPat.var("a", dtype=dtypes.bool), UPat.var("b", dtype=dtypes.bool))),
-   lambda ctx, x, a, b: ctx.render_bool_and(x, a, b)),
+   lambda ctx, x, a, b: ctx.render_bool_logic(x, a, b, "and")),
   (UPat(Ops.OR, name="x", dtype=dtypes.bool, src=(UPat.var("a", dtype=dtypes.bool), UPat.var("b", dtype=dtypes.bool))),
-   lambda ctx, x, a, b: ctx.render_bool_or(x, a, b)),
+   lambda ctx, x, a, b: ctx.render_bool_logic(x, a, b, "or")),
   # 64-bit integer MUL: need full 64-bit product for division-by-multiplication pattern
   (UPat(Ops.MUL, name="x", dtype=dtypes.long), render_64bit_mul),
   (UPat(Ops.MUL, name="x", dtype=dtypes.ulong), render_64bit_mul),
@@ -569,91 +493,44 @@ class RDNARenderer(Renderer):
     elif x.dtype == dtypes.float64 and a.dtype == dtypes.float32:
       return f"v_cvt_f64_f32 {self.r[x]}, {self.r[a]}"
     elif x.dtype == dtypes.float32 and a.dtype == dtypes.float64:
-      # Extract low 32 bits of the f64 register pair
-      ra = self.r[a]
-      src_num = int(ra[2:ra.index(':')]) if '[' in ra else int(ra[1:])
-      return f"v_cvt_f32_f64 {self.r[x]}, v[{src_num}:{src_num+1}]"
+      src = get_reg_base(self.r[a])
+      return f"v_cvt_f32_f64 {self.r[x]}, v[{src}:{src+1}]"
     elif x.dtype == dtypes.float64:
-      # int to float64: first convert to f32, then to f64
       return self.render_mov_64(x, a)  # TODO: proper int->f64 conversion
-    # 64-bit to 32-bit integer: just use low 32 bits
     elif x.dtype.itemsize == 4 and a.dtype in (dtypes.long, dtypes.ulong):
-      ra = self.r[a]
-      # Extract low register from pair v[n:n+1]
-      if '[' in ra:
-        src_num = int(ra[2:ra.index(':')])
-        return f"v_mov_b32 {self.r[x]}, v{src_num}"
-      return f"v_mov_b32 {self.r[x]}, {ra}"
+      return f"v_mov_b32 {self.r[x]}, v{get_reg_base(self.r[a])}" if '[' in self.r[a] else f"v_mov_b32 {self.r[x]}, {self.r[a]}"
     # fallback: just move (same size types)
     return f"v_mov_b32 {self.r[x]}, {self.r[a]}"
 
-  def render_bool_and(self, x: UOp, a: UOp, b: UOp) -> str|list[str]:
-    """Render boolean AND - SGPR comparison results need to be converted to VGPR for proper lane-by-lane AND"""
+  def render_bool_logic(self, x: UOp, a: UOp, b: UOp, op: str) -> str|list[str]:
+    """Render boolean AND/OR with proper SGPR to VGPR handling."""
     ra, rb, rx = self.r[a], self.r[b], self.r[x]
-    # If both are in SGPRs, use s_and_b32 for the exec-mask AND, then expand to VGPR
+    s_op, v_op = f"s_{op}_b32", f"v_{op}_b32"
     if ra.startswith('s') and rb.startswith('s'):
-      # s_and_b32 result must go to SGPR, then v_cndmask_b32 uses that SGPR as mask
-      return [f"s_and_b32 vcc_lo, {ra}, {rb}", f"v_cndmask_b32 {rx}, 0, 1, vcc_lo"]
-    # If one is SGPR and one is VGPR, convert SGPR to VGPR first
+      return [f"{s_op} vcc_lo, {ra}, {rb}", f"v_cndmask_b32 {rx}, 0, 1, vcc_lo"]
     if ra.startswith('s'):
-      return [f"v_cndmask_b32 v{self.get_scratch_vgpr()}, 0, 1, {ra}", f"v_and_b32 {rx}, v{self.get_scratch_vgpr()}, {rb}"]
+      return [f"v_cndmask_b32 v{self.get_scratch_vgpr()}, 0, 1, {ra}", f"{v_op} {rx}, v{self.get_scratch_vgpr()}, {rb}"]
     if rb.startswith('s'):
-      return [f"v_cndmask_b32 v{self.get_scratch_vgpr()}, 0, 1, {rb}", f"v_and_b32 {rx}, {ra}, v{self.get_scratch_vgpr()}"]
-    # Both in VGPR, simple AND
-    return f"v_and_b32 {rx}, {ra}, {rb}"
-
-  def render_bool_or(self, x: UOp, a: UOp, b: UOp) -> str|list[str]:
-    """Render boolean OR - similar handling to AND"""
-    ra, rb, rx = self.r[a], self.r[b], self.r[x]
-    if ra.startswith('s') and rb.startswith('s'):
-      return [f"s_or_b32 vcc_lo, {ra}, {rb}", f"v_cndmask_b32 {rx}, 0, 1, vcc_lo"]
-    if ra.startswith('s'):
-      return [f"v_cndmask_b32 v{self.get_scratch_vgpr()}, 0, 1, {ra}", f"v_or_b32 {rx}, v{self.get_scratch_vgpr()}, {rb}"]
-    if rb.startswith('s'):
-      return [f"v_cndmask_b32 v{self.get_scratch_vgpr()}, 0, 1, {rb}", f"v_or_b32 {rx}, {ra}, v{self.get_scratch_vgpr()}"]
-    return f"v_or_b32 {rx}, {ra}, {rb}"
+      return [f"v_cndmask_b32 v{self.get_scratch_vgpr()}, 0, 1, {rb}", f"{v_op} {rx}, {ra}, v{self.get_scratch_vgpr()}"]
+    return f"{v_op} {rx}, {ra}, {rb}"
 
   def render_mov_64(self, x: UOp, a: UOp) -> list[str]:
     """Render 64-bit move using two v_mov_b32 instructions"""
-    rx, ra = self.r[x], self.r[a]
-    # Extract register numbers from v[n:n+1] format
-    def get_reg_num(reg: str) -> int:
-      if '[' in reg:
-        return int(reg[2:reg.index(':')])
-      return int(reg[1:])
-    dst_num = get_reg_num(rx)
-    src_num = get_reg_num(ra)
-    return [f"v_mov_b32 v{dst_num}, v{src_num}", f"v_mov_b32 v{dst_num+1}, v{src_num+1}"]
+    dst, src = get_reg_base(self.r[x]), get_reg_base(self.r[a])
+    return [f"v_mov_b32 v{dst}, v{src}", f"v_mov_b32 v{dst+1}, v{src+1}"]
 
   def render_cast_to_64(self, x: UOp, a: UOp, signed: bool = False) -> str|list[str]:
     """Render cast from 32-bit to 64-bit integer (sign or zero extend)"""
     rx, ra = self.r[x], self.r[a]
-    # Check if destination is a register pair or single register
     if '[' not in rx:
-      # Single register - just move the low 32 bits
       src_reg = extract_low_32(ra)
-      if ra.startswith('s'):
-        return f"v_cndmask_b32 {rx}, 0, 1, {ra}"
+      if ra.startswith('s'): return f"v_cndmask_b32 {rx}, 0, 1, {ra}"
       return f"v_mov_b32 {rx}, {src_reg}"
-    # Extract dest register number from v[n:n+1] format
-    dst_num = int(rx[2:rx.index(':')])
-    # Extract source as single register
-    src_reg = extract_low_32(ra)
-    # Source can be single reg (v5) or in SGPR for comparison results
+    dst_num, src_reg = get_reg_base(rx), extract_low_32(ra)
     if ra.startswith('s'):
-      # SGPR comparison result - expand to VGPR first
-      return [
-        f"v_cndmask_b32 v{dst_num}, 0, 1, {ra}",
-        f"v_mov_b32 v{dst_num+1}, 0"  # zero extend for bool/comparison results
-      ]
-    # Low bits: copy from source
-    # High bits: 0 for unsigned, or sign-extend for signed
+      return [f"v_cndmask_b32 v{dst_num}, 0, 1, {ra}", f"v_mov_b32 v{dst_num+1}, 0"]
     if signed:
-      # Sign extend: copy bit 31 to all bits of high word
-      return [
-        f"v_mov_b32 v{dst_num}, {src_reg}",
-        f"v_ashrrev_i32 v{dst_num+1}, 31, {src_reg}"  # arithmetic shift right by 31 gets sign bit
-      ]
+      return [f"v_mov_b32 v{dst_num}, {src_reg}", f"v_ashrrev_i32 v{dst_num+1}, 31, {src_reg}"]
     else:
       # Zero extend
       return [
@@ -1217,69 +1094,37 @@ class RDNARenderer(Renderer):
             kernel.append("s_waitcnt vmcnt(0) lgkmcnt(0)")
             pending_waits.clear()
             break
-        # For WMMA inputs (half16), we need contiguous packed VGPRs
-        # half16 = 16 halfs = 8 VGPRs (2 halfs per 32-bit VGPR)
+        # For WMMA inputs (half16), we need contiguous packed VGPRs (2 halfs per 32-bit VGPR)
         if u.dtype.scalar() == dtypes.half and u.dtype.count == 16:
-          # Check if we used look-ahead packing (range already allocated)
           if u in half16_vectorize_ranges:
             r[u] = half16_vectorize_ranges[u]
-            base = int(r[u][2:r[u].index(':')])
-            # Only pack VGPRs that weren't already packed by look-ahead
-            for j in range(8):
-              if j not in half16_packed.get(u, set()):
-                src_lo = r[u.src[j*2]]
-                src_hi = r[u.src[j*2+1]]
-                kernel.append(f"v_pack_b32_f16 v{base+j}, {src_lo}, {src_hi}")
           else:
-            # No look-ahead - allocate and pack as before
             r[u] = alloc_vgpr_range(u, 8)
-            base = int(r[u][2:r[u].index(':')])
-            # Pack the source halfs into the destination VGPRs
-            # Each VGPR holds 2 halfs: low 16 bits and high 16 bits
-            for j in range(8):
-              src_lo = r[u.src[j*2]]
-              src_hi = r[u.src[j*2+1]]
-              # Pack two halfs into one VGPR using v_pack_b32_f16
-              kernel.append(f"v_pack_b32_f16 v{base+j}, {src_lo}, {src_hi}")
+          base = get_reg_base(r[u])
+          for j in range(8):
+            if j not in half16_packed.get(u, set()):
+              kernel.append(f"v_pack_b32_f16 v{base+j}, {r[u.src[j*2]]}, {r[u.src[j*2+1]]}")
         # For float8 (WMMA accumulator), check if sources are contiguous
         elif u.dtype.scalar() == dtypes.float and u.dtype.count == 8:
-          # Check if all sources are from contiguous registers
-          src_regs = []
-          all_contiguous = True
-          for src in u.src:
-            src_str = r[src]
-            if isinstance(src_str, str) and src_str.startswith('v') and '[' not in src_str:
-              src_regs.append(int(src_str[1:]))
-            else:
-              all_contiguous = False
-              break
-          if all_contiguous and len(src_regs) == 8:
-            # Check if contiguous
-            if src_regs == list(range(src_regs[0], src_regs[0] + 8)):
-              # Already contiguous - just create range reference
-              r[u] = f"v[{src_regs[0]}:{src_regs[0]+7}]"
-              continue
-          # Not contiguous - allocate new registers using range allocator
+          src_regs = [int(r[src][1:]) for src in u.src if isinstance(r[src], str) and r[src].startswith('v') and '[' not in r[src]]
+          if len(src_regs) == 8 and src_regs == list(range(src_regs[0], src_regs[0] + 8)):
+            r[u] = f"v[{src_regs[0]}:{src_regs[0]+7}]"
+            continue
           r[u] = alloc_vgpr_range(u, 8)
-          base = int(r[u][2:r[u].index(':')])
+          base = get_reg_base(r[u])
           for j, src in enumerate(u.src):
             kernel.append(f"v_mov_b32 v{base+j}, {r[src]}")
         # For other vector types, allocate contiguous VGPRs based on size
         elif isinstance(u.dtype, DType) and u.dtype.count > 1:
-          vgpr_count = (u.dtype.itemsize + 3) // 4  # Round up to 32-bit chunks
+          vgpr_count = (u.dtype.itemsize + 3) // 4
           r[u] = alloc_vgpr_range(u, vgpr_count)
-          base = int(r[u][2:r[u].index(':')])
-          # Copy sources - each source is scalar, pack into VGPRs
+          base = get_reg_base(r[u])
           for j, src in enumerate(u.src):
             src_reg = r[src]
-            # Handle case where source is a vector range (shouldn't normally happen for VECTORIZE with scalar sources)
             if isinstance(src_reg, str) and src_reg.startswith('v['):
-              # Source is a range - copy element by element
-              src_base = int(src_reg[2:src_reg.index(':')])
-              src_end = int(src_reg[src_reg.index(':')+1:-1])
+              src_base, src_end = get_reg_base(src_reg), int(src_reg[src_reg.index(':')+1:-1])
               for k in range(src_end - src_base + 1):
                 kernel.append(f"v_mov_b32 v{base+j+k}, v{src_base+k}")
-              j += (src_end - src_base)  # Adjust index (though this is inside for loop, won't work right)
             else:
               kernel.append(f"v_mov_b32 v{base+j}, {src_reg}")
         else:
@@ -1295,20 +1140,14 @@ class RDNARenderer(Renderer):
         src_dtype = u.src[0].dtype
 
         # Check if source LOAD is a direct-load into half16 range
-        # In this case, data is already in the correct packed format - no extraction needed
         if u.src[0] in half16_direct_loads:
           vec_uop, base_vgpr_idx = half16_direct_loads[u.src[0]]
-          range_str = half16_vectorize_ranges[vec_uop]
-          range_base = int(range_str[2:range_str.index(':')])
-          # idx 0,1 -> first VGPR, idx 2,3 -> second VGPR
-          vgpr_offset = idx // 2
-          dest_vgpr = f"v{range_base + base_vgpr_idx + vgpr_offset}"
-          r[u] = dest_vgpr  # Reference the packed VGPR directly
+          range_base = get_reg_base(half16_vectorize_ranges[vec_uop])
+          r[u] = f"v{range_base + base_vgpr_idx + idx // 2}"
           continue
 
         if isinstance(src_reg, str) and src_reg.startswith('v['):
-          # Extract base and end from v[base:end] range
-          base = int(src_reg[2:src_reg.index(':')])
+          base = get_reg_base(src_reg)
           end = int(src_reg[src_reg.index(':')+1:-1])
           num_vgprs = end - base + 1
           # Check if this is a packed type (multiple elements per VGPR)
@@ -1380,11 +1219,8 @@ class RDNARenderer(Renderer):
           r[u] = r[u.src[0]]  # Use register from INDEX (which came from DEFINE_REG array)
           continue  # Skip rendering - handled inline
         if u in half16_direct_loads:
-          # half.vec(4) LOAD that goes directly into half16 destination range
           vec_uop, base_vgpr_idx = half16_direct_loads[u]
-          range_str = half16_vectorize_ranges[vec_uop]
-          range_base = int(range_str[2:range_str.index(':')])
-          # This LOAD fills 2 VGPRs starting at base_vgpr_idx within the half16 range
+          range_base = get_reg_base(half16_vectorize_ranges[vec_uop])
           r[u] = f"v[{range_base + base_vgpr_idx}:{range_base + base_vgpr_idx + 1}]"
         elif isinstance(u.dtype, DType) and u.dtype.count > 1:
           # Calculate number of 32-bit VGPRs needed
@@ -1498,12 +1334,9 @@ class RDNARenderer(Renderer):
           r[u] = r[u.src[0]]
           if u.op is Ops.STORE:
             dst_reg, src_reg = r[u.src[0]], r[u.src[1]]
-            # For 64-bit types, use two v_mov_b32 instructions
             if '[' in dst_reg:
-              dst_num = int(dst_reg[2:dst_reg.index(':')])
-              src_num = int(src_reg[2:src_reg.index(':')]) if '[' in src_reg else int(src_reg[1:])
-              kernel.append(f"v_mov_b32 v{dst_num}, v{src_num}")
-              kernel.append(f"v_mov_b32 v{dst_num+1}, v{src_num+1}")
+              dst_num, src_num = get_reg_base(dst_reg), get_reg_base(src_reg)
+              kernel.extend([f"v_mov_b32 v{dst_num}, v{src_num}", f"v_mov_b32 v{dst_num+1}, v{src_num+1}"])
             else:
               kernel.append(f"v_mov_b32 {dst_reg}, {src_reg}")
         continue
@@ -1598,11 +1431,8 @@ class RDNARenderer(Renderer):
       # === LOOK-AHEAD PACKING: pack halfs immediately after load ===
       if u.op is Ops.LOAD and u in half16_vectorize_sources:
         vec_uop, pos = half16_vectorize_sources[u]
-        vgpr_idx = pos // 2  # Which VGPR in the 8-VGPR range (0-7)
-        is_high_half = pos % 2 == 1  # Even positions are low half, odd are high half
-        range_str = get_half16_range(vec_uop)  # Lazy allocate if needed
-        base = int(range_str[2:range_str.index(':')])
-        dst_vgpr = f"v{base + vgpr_idx}"
+        vgpr_idx, is_high_half = pos // 2, pos % 2 == 1
+        dst_vgpr = f"v{get_reg_base(get_half16_range(vec_uop)) + vgpr_idx}"
 
         # Find the pair (the other half that shares this destination VGPR)
         pair_pos = pos ^ 1  # XOR to toggle between even/odd
