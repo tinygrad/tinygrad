@@ -37,8 +37,8 @@ ref_map:dict[Any, int] = {}
 def get_rewrites(t:RewriteTrace) -> list[dict]:
   ret = []
   for i,(k,v) in enumerate(zip(t.keys, t.rewrites)):
-    steps = [create_step(s.name, ("/rewrites", i, j), loc=s.loc, match_count=len(s.matches), code_line=printable(s.loc), trace=k.tb if j==0 else None,
-                         depth=s.depth) for j,s in enumerate(v)]
+    steps = [create_step(s.name, ("/graph-rewrites", i, j), loc=s.loc, match_count=len(s.matches), code_line=printable(s.loc),
+                         trace=k.tb if j==0 else None, depth=s.depth) for j,s in enumerate(v)]
     if isinstance(k.ret, ProgramSpec):
       steps.append(create_step("View UOp List", ("/uops", i, len(steps)), k.ret))
       steps.append(create_step("View Program", ("/code", i, len(steps)), k.ret))
@@ -380,6 +380,7 @@ def amd_readelf(lib:bytes) -> list[dict]:
 
 def get_render(i:int, j:int, fmt:str) -> dict:
   data = ctxs[i]["steps"][j]["data"]
+  if fmt == "graph-rewrites": return {"value":get_full_rewrite(trace.rewrites[i][j]), "content_type":"text/event-stream"}
   if fmt == "uops": return {"src":get_stdout(lambda: print_uops(data.uops or [])), "lang":"txt"}
   if fmt == "code": return {"src":data.src, "lang":"cpp"}
   if fmt == "asm":
@@ -462,14 +463,10 @@ class Handler(HTTPRequestHandler):
         if url.path.endswith(".css"): content_type = "text/css"
       except FileNotFoundError: status_code = 404
     elif (query:=parse_qs(url.query)):
-      i, j = get_int(query, "ctx"), get_int(query, "step")
-      if (fmt:=url.path.lstrip("/")) == "rewrites":
-        try: return self.stream_json(get_full_rewrite(trace.rewrites[i][j]))
-        except (KeyError, IndexError): status_code = 404
-      else:
-        render_src = get_render(i, j, fmt)
-        if "content_type" in render_src: ret, content_type = render_src["value"], render_src["content_type"]
-        else: ret, content_type = json.dumps(render_src).encode(), "application/json"
+      render_src = get_render(get_int(query, "ctx"), get_int(query, "step"), url.path.lstrip("/"))
+      if "content_type" in render_src: ret, content_type = render_src["value"], render_src["content_type"]
+      else: ret, content_type = json.dumps(render_src).encode(), "application/json"
+      if content_type == "text/event-stream": return self.stream_json(render_src["value"])
     elif url.path == "/ctxs":
       lst = [{**c, "steps":[{k:v for k, v in s.items() if k != "data"} for s in c["steps"]]} for c in ctxs]
       ret, content_type = json.dumps(lst).encode(), "application/json"
