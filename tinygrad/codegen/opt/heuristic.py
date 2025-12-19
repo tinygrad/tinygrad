@@ -49,11 +49,10 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   k = k.copy()
 
   # upcast float4 images, this must be early so we don't accidentally add locals before the upcast
-  for buf_index,buf in enumerate(k.bufs):
+  for buf in k.bufs:
     if isinstance(buf.src[0].dtype, ImageDType):
       # part of is_expanded
-      unit_stride_axes_mul_4 = [k.rngs.index(c) for c in k.bufs[buf_index].src[1].get_idx().split_uop(Ops.ADD) if
-        c.op is Ops.RANGE and (c.vmax+1)%4 == 0]
+      unit_stride_axes_mul_4 = [k.rngs.index(c) for c in buf.src[1].get_idx().split_uop(Ops.ADD) if c.op is Ops.RANGE and (c.vmax+1)%4 == 0]
       if len(unit_stride_axes_mul_4):
         if (axis:=unit_stride_axes_mul_4[0]) in k.upcastable_dims:
           k.apply_opt(Opt(OptOps.UPCAST, axis, 4))
