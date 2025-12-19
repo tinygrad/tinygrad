@@ -3,15 +3,14 @@ import ctypes
 from tinygrad.helpers import dedup, cpu_time_execution, DEBUG
 from tinygrad.engine.jit import GraphRunner, GraphException
 from tinygrad.device import Buffer, Device
-from tinygrad.engine.realize import CompiledRunner
-from tinygrad.engine.schedule import ScheduleItem
+from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.uop.ops import Variable
 from tinygrad.runtime.ops_cpu import ClangProgram
 from tinygrad.renderer.cstyle import ClangRenderer
 render_dtype = ClangRenderer().render_dtype
 
 class ClangGraph(GraphRunner):
-  def __init__(self, jit_cache: List[ScheduleItem], input_rawbuffers: List[Buffer], var_vals: Dict[str, int]):
+  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[str, int]):
     super().__init__(jit_cache, input_rawbuffers, var_vals)
     if not all(isinstance(ji.prg, CompiledRunner) for ji in jit_cache): raise GraphException
 

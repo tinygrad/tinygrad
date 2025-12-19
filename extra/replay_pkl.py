@@ -4,8 +4,7 @@ from tinygrad import Device, Context, Tensor, GlobalCounters
 from tinygrad.device import Buffer
 from tinygrad.helpers import getenv, BEAM
 from tinygrad.engine.jit import TinyJit
-from tinygrad.engine.realize import CompiledRunner, get_program
-from tinygrad.engine.schedule import ScheduleItem
+from tinygrad.engine.realize import CompiledRunner, ExecItem, ScheduleItem, lower_schedule_item, get_program
 from tinygrad.renderer import ProgramSpec
 from tinygrad.codegen.opt.kernel import Kernel, Opt, OptOps
 from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
@@ -29,8 +28,7 @@ def move_jit_captured_to_dev(captured, device="DSP"):
   for item in captured.jit_cache:
     for b in item.bufs:
       if b is not None: move_buffer(b)
-  captured.jit_cache = [ScheduleItem(item.ast, [assign.get(b,b) for b in item.bufs], item.metadata, item.fixedvars, item.prg) \
-                        for item in captured.jit_cache]
+  captured.jit_cache = [ExecItem(item.prg, [assign.get(b,b) for b in item.bufs]) for item in captured.jit_cache]
   return captured
 
 if __name__ == "__main__":
@@ -54,16 +52,16 @@ if __name__ == "__main__":
 
         if getenv("VALIDATE"):
           with Context(NOOPT=1):
-            ScheduleItem(p.ast, list(ei.bufs)).run()
+            lower_schedule_item(ScheduleItem(p.ast, ei.bufs)).run()
             correct = ei.bufs[0].numpy()
             ei.bufs[0].copyin(memoryview(bytearray(b'\x00'*ei.bufs[0].nbytes)))
             GlobalCounters.kernel_count -= 1
 
         if not getenv("NOOPT"): k.apply_opts(hand_coded_optimizations(k))
         p2 = get_program(k.ast, k.opts, k.applied_opts)
-        new_si = replace(ei, prg=CompiledRunner(p2))
-        new_si.run()
-        new_jit.append(new_si)
+        new_ei = replace(ei, prg=CompiledRunner(p2))
+        new_ei.run()
+        new_jit.append(new_ei)
         test = ei.bufs[0].numpy()
 
         if getenv("VALIDATE"):

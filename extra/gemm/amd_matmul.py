@@ -4,9 +4,7 @@ import pathlib
 from dataclasses import replace
 from tinygrad import Tensor, Device, Context, GlobalCounters
 from tinygrad.helpers import getenv
-from tinygrad.engine.realize import CompiledRunner, get_program
-from tinygrad.engine.schedule import ScheduleItem
-from tinygrad.uop.ops import UOp, Ops
+from tinygrad.engine.realize import CompiledRunner, ExecItem, get_program
 
 N = 4096
 run_count = 5

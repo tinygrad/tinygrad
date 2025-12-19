@@ -5,8 +5,7 @@ from tinygrad.device import Buffer, BufferSpec
 from tinygrad.device import Compiled, Device
 from tinygrad.uop.ops import Variable
 from tinygrad.runtime.ops_hsa import HSADevice, PROFILE, Profiler
-from tinygrad.engine.realize import BufferXfer, CompiledRunner
-from tinygrad.engine.schedule import ScheduleItem
+from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner
 from tinygrad.engine.jit import MultiGraphRunner, GraphException
 import tinygrad.runtime.autogen.hsa as hsa
 from tinygrad.runtime.support.hsa import check, AQLQueue, AQL_PACKET_SIZE, EMPTY_SIGNAL
@@ -27,7 +26,7 @@ class VirtAQLQueue(AQLQueue):
     self.available_packet_slots -= 1
 
 class HSAGraph(MultiGraphRunner):
-  def __init__(self, jit_cache: List[ScheduleItem], input_rawbuffers: List[Buffer], var_vals: Dict[str, int]):
+  def __init__(self, jit_cache: List[ExecItem], input_rawbuffers: List[Buffer], var_vals: Dict[str, int]):
     super().__init__(jit_cache, input_rawbuffers, var_vals)
 
     # Check all jit items are compatible.
