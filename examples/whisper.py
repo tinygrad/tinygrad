@@ -8,6 +8,8 @@ from tinygrad import Tensor, TinyJit, Variable, nn
 from tinygrad.nn.state import torch_load, load_state_dict
 from tinygrad.helpers import getenv, fetch
 
+import math
+from examples.webgpu.whisper.audio_helpers import resample_batched_helper, stft_full, mel
 import numpy as np
 import librosa
 
@@ -162,6 +164,7 @@ def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False, sr=
   log_spec = log10(mel_spec.clip(1e-10, None))
   log_spec = log_spec.maximum(log_spec.max((1,2), keepdim=True) - 8.0)
   log_spec = (log_spec + 4.0) / 4.0
+  log_spec = log_spec.numpy()
 
   return log_spec
 
