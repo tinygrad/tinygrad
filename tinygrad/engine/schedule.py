@@ -214,6 +214,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
           f" | {' cache hit' if sc_ret is not None else 'CACHE MISS'} {sched_cache_key.hex()[:8]}"+\
           f" | {len(UOpMetaClass.ucache)} uops in cache")
 
-  if len(schedule_capturing):
-    schedule_capturing[0].add(input_buffers, sched_cache_key)
+  # for jit2
+  if len(schedule_capturing): schedule_capturing[0].add(input_buffers, sched_cache_key)
+
   return tensor_map, schedule, var_vals
