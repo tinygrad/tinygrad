@@ -212,16 +212,25 @@ def render_comparison(ctx, x, src0):
   return cmp_instr
 
 def render_sin(ctx, x, a):
-  """Render SIN using v_sin_f32 which expects input in turns (x / 2π).
-  v_sin_f32 has limited range, so we do range reduction via v_fract_f32.
-  Steps: 1) Convert to turns: t = x * (1/2π)
-         2) Reduce to [0, 1): t_frac = fract(t)  (v_fract gives x - floor(x))
-         3) Apply v_sin_f32(t_frac)
-  Note: For very large inputs (>1e6), float32 precision limits accuracy."""
+  """Render SIN using v_sin_f32 with extended precision range reduction.
+  v_sin_f32 expects input in turns (fraction of 2π cycle).
+  For precision with large inputs, we use the two-product algorithm:
+    1. t_hi = x * INV_2PI_HI (main turns value)
+    2. t_lo = fma(x, INV_2PI_HI, -t_hi) (error term from multiplication)
+    3. frac_hi = fract(t_hi)  (fractional part of main term)
+    4. frac = frac_hi + t_lo + x * INV_2PI_LO  (combined with corrections)
+    5. sin(fract(frac))"""
   dest, src = ctx.r[x], ctx.r[a]
-  # 1/(2π) = 0.15915494309189535 -> 0x3E22F983 in float32
-  return [f"v_mul_f32 {dest}, 0x3E22F983, {src}",  # radians to turns
-          f"v_fract_f32 {dest}, {dest}",           # reduce to [0, 1) via x - floor(x)
+  s = ctx.get_scratch_vgpr()
+  # Extended precision 1/(2π):
+  # INV_2PI_HI = 0.15915493667125702 -> 0x3E22F983
+  # INV_2PI_LO = 6.42e-9 -> 0x31DC9C88
+  return [f"v_mul_f32 {dest}, 0x3E22F983, {src}",         # dest = t_hi = x * INV_2PI_HI
+          f"v_fma_f32 v{s}, {src}, 0x3E22F983, -{dest}",  # s = t_lo = fma(x, INV_HI, -t_hi) = error
+          f"v_fract_f32 {dest}, {dest}",                  # dest = fract(t_hi)
+          f"v_add_f32 {dest}, {dest}, v{s}",              # dest += t_lo (add error term)
+          f"v_fma_f32 {dest}, {src}, 0x31DC9C88, {dest}", # dest += x * INV_2PI_LO
+          f"v_fract_f32 {dest}, {dest}",                  # ensure in [0, 1)
           f"v_sin_f32 {dest}, {dest}"]
 
 def render_recip(ctx, x, a):
