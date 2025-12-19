@@ -184,15 +184,13 @@ class HCQGraph(MultiGraphRunner):
     self.queue_signals_to_reset = [self.signals[q] for q in list(self.comp_queues.values()) + list(self.copy_queues.values()) if q in self.signals]
 
   def __call__(self, input_rawbuffers: list[Buffer], var_vals: dict[str, int], wait=False) -> float|None:
-    # Wait and restore signals
-    self.kickoff_value += 1
-    for dev in self.devices: self.last_timeline[dev][0].wait(self.last_timeline[dev][1])
-    for sig in self.queue_signals_to_reset: sig.value = 0
-    self.signals['KICK'].value = self.kickoff_value
-
+    # Map input rawbuffers
     for dev in self.devices:
       for idx_to_map in self.input_replace_map[dev]: cast(HCQAllocator, dev.allocator).map(input_rawbuffers[idx_to_map]._buf)
 
+    # Wait and restore signals
+    self.kickoff_value += 1
+    for dev in self.devices: self.last_timeline[dev][0].wait(self.last_timeline[dev][1])
     if PROFILE and self.kickoff_value > 1: self.collect_timestamps()
 
     hcq_var_vals = {self.kickoff_var.expr: self.kickoff_value, **var_vals,
@@ -208,6 +206,10 @@ class HCQGraph(MultiGraphRunner):
       if (copy_queue:=self.copy_queues.get(dev, None)) is not None: copy_queue.submit(dev, hcq_var_vals_local)
 
       self.last_timeline[dev] = (dev.timeline_signal, dev.next_timeline())
+
+    # Launch graph
+    for sig in self.queue_signals_to_reset: sig.value = 0
+    self.signals['KICK'].value = self.kickoff_value
 
     if wait:
       st = time.perf_counter()
