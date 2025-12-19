@@ -308,8 +308,8 @@ class Compiled:
     # select forced compiler from global env var.
     forced_comps = set([self.comp_sets[val][1]] if self.comps_ctrl_var is not None and (val:=self.comps_ctrl_var.value) else [])
 
-    # add forced compilers from individual env vars.
-    forced_comps |= set(rc for en, rc in self.comp_sets.values() if en is not None and en.value == 1)
+    # add forced compilers from individual env vars (only if global env var is not set, as it takes precedence).
+    if not forced_comps: forced_comps |= set(rc for en, rc in self.comp_sets.values() if en is not None and en.value == 1)
     if len(forced_comps) > 1: raise RuntimeError(f"{self.device}: multiple compilers set in env {forced_comps}")
 
     # select remaining compilers (all or forced only)

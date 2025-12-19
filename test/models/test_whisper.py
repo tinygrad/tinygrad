@@ -1,14 +1,11 @@
 import unittest
 import pathlib
-from examples.webgpu.whisper.audio_helpers import hann_window, stft_full
 from examples.whisper import init_whisper, load_file_waveform, transcribe_file, transcribe_waveform
 import examples.mlperf.metrics as metrics
-from tinygrad.helpers import CI, fetch, CPU_LLVM
-from tinygrad import Tensor, Device, dtypes
+from tinygrad.helpers import fetch
+from test.helpers import slow
+from tinygrad import Device, dtypes
 from tinygrad.device import is_dtype_supported
-import torch
-import numpy as np
-import librosa
 
 # Audio generated with the command on MacOS:
 # say "Could you please let me out of the box?" --file-format=WAVE  --data-format=LEUI8@16000 -o test
@@ -79,11 +76,11 @@ class TestWhisper(unittest.TestCase):
   def test_transcribe_file1(self):
     self.assertEqual(transcribe_file(self.model, self.enc, TEST_FILE_1),  TRANSCRIPTION_1)
 
-  @unittest.skipIf(CI or (Device.DEFAULT == "CPU" and CPU_LLVM), "too many tests for CI")
+  @slow
   def test_transcribe_file2(self):
     self.assertEqual(transcribe_file(self.model, self.enc, TEST_FILE_2),  TRANSCRIPTION_2)
 
-  @unittest.skipIf(CI or (Device.DEFAULT == "CPU" and CPU_LLVM), "too many tests for CI")
+  @slow
   def test_transcribe_batch12(self):
     waveforms = [load_file_waveform(TEST_FILE_1), load_file_waveform(TEST_FILE_2)]
     transcriptions = transcribe_waveform(self.model, self.enc, waveforms)
@@ -98,13 +95,15 @@ class TestWhisper(unittest.TestCase):
     self.assertEqual(TRANSCRIPTION_2,  transcriptions[0])
     self.assertEqual(TRANSCRIPTION_1,  transcriptions[1])
 
-  @unittest.skipIf(CI or (Device.DEFAULT == "CPU" and CPU_LLVM), "too long for CI")
+  @unittest.skip("file 3 url is broken")
+  @slow
   def test_transcribe_long(self):
     waveform = [load_file_waveform(fetch(TEST_FILE_3_URL))]
     transcription = transcribe_waveform(self.model, self.enc, waveform)
     self.assertWER(transcription, TRANSCRIPTION_3, 0.085)
 
-  @unittest.skipIf(CI or (Device.DEFAULT == "CPU" and CPU_LLVM), "too long for CI")
+  @unittest.skip("file 3 url is broken")
+  @slow
   def test_transcribe_long_no_batch(self):
     waveforms = [load_file_waveform(fetch(TEST_FILE_3_URL)), load_file_waveform(TEST_FILE_1)]
 
@@ -128,44 +127,6 @@ class TestWhisper(unittest.TestCase):
   def test_wer_different_3(self):
     reference = TRANSCRIPTION_3
     self.assertWER(reference[:len(reference)//2], reference, 0.524)
-
-class TestSample(unittest.TestCase):
-  def test_hann(self):
-    ref = torch.hann_window(256, False)
-    result = hann_window(256, False)
-    np.testing.assert_allclose(result.numpy(), ref.numpy(), atol=1e-6, rtol=1e-5)
-
-  def test_hann_periodic(self):
-    ref = torch.hann_window(256)
-    result = hann_window(256)
-    np.testing.assert_allclose(result.numpy(), ref.numpy(), atol=1e-6, rtol=1e-5)
-
-  def test_stft(self):
-    N_FFT = 400
-    HOP_LENGTH = 160
-    BS = 16
-
-    Tensor.manual_seed(42)
-    X = Tensor.rand(BS, 2400).realize()
-    reference = torch.stft(torch.Tensor(X.numpy()), N_FFT, HOP_LENGTH, center=False, return_complex=True, window=torch.hann_window(N_FFT))
-    reference = reference.abs()
-    result = stft_full(X, N_FFT, HOP_LENGTH, (0, 0), "hann")
-    np.testing.assert_allclose(result.numpy(), reference.numpy(), atol=1e-4, rtol=1e-2)
-
-  # @unittest.skipUnless(importlib.util.find_spec("librosa") is not None, "test needs librosa")
-  def test_stft_librosa(self):
-    # import librosa
-    N_FFT = 400
-    HOP_LENGTH = 160
-    BS = 16
-
-    Tensor.manual_seed(42)
-    X = Tensor.rand(BS, 2400).realize()
-    reference = librosa.stft(X.numpy(), n_fft=N_FFT, hop_length=HOP_LENGTH, center=False, window="hann", dtype=np.csingle)
-    reference = np.abs(reference)
-    result = stft_full(X, N_FFT, HOP_LENGTH, (0, 0), "hann")
-    # NOTE(irwin): why do we pass at atol=1e-7 here? it's much lower with librosa than torch.stft
-    np.testing.assert_allclose(result.numpy(), reference, atol=1e-7, rtol=1e-2)
 
 if __name__ == '__main__':
   unittest.main()

@@ -7,7 +7,7 @@ from tinygrad.uop import Ops, GroupOp
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType, least_upper_dtype, Invalid, InvalidType, AddrSpace
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, VIZ, SPEC, CI
-from tinygrad.helpers import strip_parens, colored, ansilen, printable
+from tinygrad.helpers import strip_parens, colored, ansilen, printable, panic
 if TYPE_CHECKING:
   from tinygrad.device import Buffer, MultiBuffer
 
@@ -218,7 +218,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.RANGE | Ops.LOAD | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
-           Ops.VECTORIZE | Ops.VCONST | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.CONTRACT:
+           Ops.VECTORIZE | Ops.VCONST | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.CONTRACT | Ops.CUSTOM_KERNEL:
         return None
 
       case Ops.INDEX:
@@ -470,7 +470,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   def is_contiguous(self):
     # TODO: this is is_realized
-    if self.op is Ops.RESHAPE: return self.src[0].is_contiguous()
+    if self.op in {Ops.RESHAPE, Ops.MULTI}: return self.src[0].is_contiguous()
     return self.op is Ops.BUFFER
 
   def contiguous(self, *args, **kwargs):
@@ -616,7 +616,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op is Ops.BUFFERIZE: return self.arg.device
     if self.op is Ops.AFTER: return self.src[0]._device
     if self.op is Ops.MSELECT:
-      assert isinstance(self.src[0].device, tuple), "mselect must be on tuple device"
+      assert isinstance(self.src[0].device, tuple), f"mselect must be on tuple device, getting {self.src[0].device}"
       return self.src[0].device[self.arg]
     if self.op is Ops.MSTACK: return tuple(cast(str, x.device) for x in self.src)
     if self.op in {Ops.COPY, Ops.BUFFER, Ops.ALLREDUCE}: return self.src[1].device
@@ -840,9 +840,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return self.src[0].after(self.store(val).end(*argfix(end)))
 
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
-    placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(srcs)]
     contig_srcs = tuple(x.contiguous() for x in srcs)
-    kernel = UOp(Ops.KERNEL, src=tuple(x.base for x in contig_srcs), arg=Kernel(fxn(*placeholders), grad_fxn=grad_fxn))
+    kernel = UOp(Ops.CUSTOM_KERNEL, src=contig_srcs, arg=CustomKernel(fxn=fxn, grad_fxn=grad_fxn))
     return [s.after(kernel) for s in contig_srcs]
 
 @dataclass(frozen=True)
@@ -854,6 +853,14 @@ class KernelInfo:
   opts_to_apply: tuple|None = None
   @property
   def function_name(self): return to_function_name(self.name)
+
+@dataclass(frozen=True)
+class CustomKernel:
+  fxn: Callable
+  grad_fxn: Callable|None = None
+  # sadly CustomKernel can't be pickled or reconstructed as a str
+  def __reduce__(self): return (CustomKernel, (panic,))
+  def __repr__(self): return "CustomKernel(panic)"
 
 @dataclass(frozen=True)
 class Kernel:
@@ -1054,6 +1061,7 @@ class PatternMatcher:
 # *** tracking pattern matcher ***
 
 TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if VIZ else 0)
+REWRITE_STACK_LIMIT = ContextVar("REWRITE_STACK_LIMIT", 250000)
 match_stats:dict[UPat, list[int|float]] = dict()
 
 # TRACK_MATCH_STATS>=2 or VIZ=1 saves all matches
@@ -1210,7 +1218,6 @@ class RewriteContext:
   def unified_rewrite(self, root:UOp) -> UOp:
     stack: collections.deque[tuple[UOp, int, UOp]] = collections.deque([(root, 0, root)])
     on_stack = {root}  # all UOps either on the stack or in self.replace, i.e. dont have to be placed again
-    REWRITE_STACK_LIMIT = getenv("REWRITE_STACK_LIMIT", 250000)
     while stack:
       if len(stack) > REWRITE_STACK_LIMIT: raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
       n, stage, new_n = stack.pop()

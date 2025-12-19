@@ -3,7 +3,8 @@ import numpy as np
 from tinygrad import Device
 from tinygrad.nn.state import get_parameters
 from tinygrad.nn import optim
-from tinygrad.helpers import getenv, CI
+from tinygrad.helpers import getenv
+from test.helpers import slow
 from extra.training import train
 from extra.models.convnext import ConvNeXt
 from extra.models.efficientnet import EfficientNet
@@ -38,7 +39,7 @@ class TestTrain(unittest.TestCase):
     train_one_step(model,X,Y)
     check_gc()
 
-  @unittest.skipIf(CI, "slow")
+  @slow
   def test_efficientnet(self):
     model = EfficientNet(0)
     X = np.zeros((BS,3,224,224), dtype=np.float32)
@@ -46,7 +47,7 @@ class TestTrain(unittest.TestCase):
     train_one_step(model,X,Y)
     check_gc()
 
-  @unittest.skipIf(CI, "slow")
+  @slow
   def test_vit(self):
     model = ViT()
     X = np.zeros((BS,3,224,224), dtype=np.float32)
@@ -54,7 +55,7 @@ class TestTrain(unittest.TestCase):
     train_one_step(model,X,Y)
     check_gc()
 
-  @unittest.skipIf(CI, "slow")
+  @slow
   def test_transformer(self):
     # this should be small GPT-2, but the param count is wrong
     # (real ff_dim is 768*4)
@@ -64,7 +65,7 @@ class TestTrain(unittest.TestCase):
     train_one_step(model,X,Y)
     check_gc()
 
-  @unittest.skipIf(CI, "slow")
+  @slow
   def test_resnet(self):
     X = np.zeros((BS, 3, 224, 224), dtype=np.float32)
     Y = np.zeros((BS), dtype=np.int32)

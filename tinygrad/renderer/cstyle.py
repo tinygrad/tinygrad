@@ -83,6 +83,19 @@ def create_non_native_float_pats(dts:tuple[DType, ...], casting:bool=True):
       (UPat(Ops.CAST, name="x", src=(UPat.var("y", dts),)), lambda x,y: y.cast(dtypes.float).cast(x.dtype) if x.dtype!=dtypes.float else None)])
   return patterns
 
+def cast_float_to_bf16(x: UOp) -> UOp:
+  assert x.dtype == dtypes.float, "cast float -> bf16 must start with float"
+  x = x.bitcast(dtypes.uint)
+  x = ((-x & 0x7f800000) != 0).where(x + ((x >> 16) & 1) + 0x7fff, ((x & 0xffff) != 0).where((x | 0x10000), x))
+  return (x >> 16).cast(dtypes.ushort).bitcast(dtypes.bfloat16)
+
+# manual bfloat16 casting patterns (shared between LLVM, Clang, and AMD renderers to avoid compiler intrinsics)
+pm_manual_bf16_cast = PatternMatcher([
+  (UPat(Ops.CAST, dtypes.float, (UPat.var("x", dtypes.bfloat16),)),
+   lambda x: (x.bitcast(dtypes.ushort).cast(dtypes.uint)<<16).bitcast(dtypes.float)),
+  (UPat(Ops.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float),)), cast_float_to_bf16),
+])
+
 def uops_to_dtypes(uops:list[UOp]) -> list[DType]: return dedup(u.dtype for u in uops if not isinstance(u.dtype, (ImageDType, PtrDType)))
 
 # (name, dims, dtype_in, dtype_out, device, threads, upcast_axes, reduce_axes)
@@ -230,7 +243,8 @@ class ClangRenderer(CStyleLanguage):
   extra_matcher = PatternMatcher([(UPat.var("x", dtypes.float64).cast(dtypes.float16), lambda x: x.cast(dtypes.float32).cast(dtypes.float16)),
                                  (UPat.var("x", dtypes.float64).cast(dtypes.bfloat16), lambda x: x.cast(dtypes.float32).cast(dtypes.bfloat16)),
                                  (UPat.var("x", dtypes.bfloat16).cast(dtypes.float16), lambda x: x.cast(dtypes.float32).cast(dtypes.float16)),
-    (UPat((Ops.SQRT, Ops.TRUNC), name="alu"), no_vectorized_alu)]) + CStyleLanguage.extra_matcher
+    (UPat((Ops.SQRT, Ops.TRUNC), name="alu"), no_vectorized_alu)]) + create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast + \
+    CStyleLanguage.extra_matcher
 
   if sys.platform == 'win32':
     kernel_typedef = "__attribute__((ms_abi)) void"
@@ -426,12 +440,6 @@ class CUDARenderer(CStyleLanguage):
 
     return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
 
-def cast_float_to_bf16(x: UOp) -> UOp:
-  assert x.dtype == dtypes.float, "cast float -> bf16 must start with float"
-  x = x.bitcast(dtypes.uint)
-  x = (-x & 0x7f800000).where(x + ((x >> 16) & 1) + 0x7fff, (x & 0xffff).where((x | 0x10000), x))
-  return (x >> 16).cast(dtypes.ushort).bitcast(dtypes.bfloat16)
-
 class AMDRenderer(CStyleLanguage):
   device = "AMD"
   shared_max = 65536
@@ -477,11 +485,9 @@ class AMDRenderer(CStyleLanguage):
     (UPat(Ops.WMMA, name="x", dtype=dtypes.float.vec(4)),
       lambda x: UOp(Ops.WMMA, x.dtype, (x.src[0].bitcast(dtypes.uint64), x.src[1].bitcast(dtypes.uint64),
         x.src[2]), (*x.arg,)) if x.src[0].dtype in (dtypes.fp8e4m3.vec(8), dtypes.fp8e5m2.vec(8)) else None),
-    # bfloat16 casting
+    # bfloat16 constant casting
     (UPat.cvar('x', dtypes.bfloat16), lambda x: cast_float_to_bf16(UOp.const(dtypes.float, x.arg))),
-    (UPat(Ops.CAST, dtypes.float, (UPat.var("x", dtypes.bfloat16),)),
-     lambda x: (x.bitcast(dtypes.ushort).cast(dtypes.uint)<<16).bitcast(dtypes.float)),
-    (UPat(Ops.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float),)), cast_float_to_bf16)]) + extra_pm
+  ]) + pm_manual_bf16_cast + extra_pm
 
   def render_vector_prefix(self, dtype:DType) -> str:
     vec, scal = self.render_dtype(dtype), self.render_dtype(dtype.scalar())
