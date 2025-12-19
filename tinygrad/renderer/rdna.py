@@ -4,7 +4,7 @@ from collections import defaultdict
 from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, AddrSpace
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import prod, get_single_element, getenv
+from tinygrad.helpers import get_single_element, getenv
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu
 from tinygrad.codegen.opt import tc
 
@@ -42,7 +42,8 @@ asm_for_op: dict[Ops, Callable] = {
   Ops.TRUNC: lambda d,a,dt,name: f"v_trunc_{name} {d}, {a}",
   Ops.NEG: lambda d,a,dt,name: f"v_sub_{name} {d}, 0, {a}" if dtypes.is_float(dt) else f"v_sub_nc_u32 {d}, 0, {a}",
   # SHR: Use arithmetic shift for signed types, logical shift for unsigned
-  Ops.SHR: lambda d,a,b,dt,name: f"v_ashrrev_i32 {d}, {b}, {a}" if dtypes.is_int(dt) and not dtypes.is_unsigned(dt) else f"v_lshrrev_b32 {d}, {b}, {a}",
+  Ops.SHR: lambda d,a,b,dt,name: (f"v_ashrrev_i32 {d}, {b}, {a}" if dtypes.is_int(dt) and not dtypes.is_unsigned(dt)
+    else f"v_lshrrev_b32 {d}, {b}, {a}"),
   Ops.SHL: lambda d,a,b,dt,name: f"v_lshlrev_b32 {d}, {b}, {a}",  # Note: operand order is reversed
   Ops.ADD: lambda d,a,b,dt,name: f"v_add_{name} {d}, {a}, {b}" if dtypes.is_float(dt) else f"v_add_nc_u32 {d}, {a}, {b}",
   Ops.SUB: lambda d,a,b,dt,name: f"v_sub_{name} {d}, {a}, {b}" if dtypes.is_float(dt) else f"v_sub_nc_u32 {d}, {a}, {b}",
@@ -425,8 +426,10 @@ string_rewrite = PatternMatcher([
   # 64-bit float constants need two mov instructions
   (UPat.cvar("x", dtypes.float64), render_const_64),
   # 64-bit integer constants: use render_const_64 for pairs, single mov for scalar
-  (UPat.cvar("x", dtypes.long), lambda ctx, x: render_const_64(ctx, x) if '[' in ctx.r[x] else f"v_mov_b32 {ctx.r[x]}, {render_val(x.arg, dtypes.int32)}"),
-  (UPat.cvar("x", dtypes.ulong), lambda ctx, x: render_const_64(ctx, x) if '[' in ctx.r[x] else f"v_mov_b32 {ctx.r[x]}, {render_val(x.arg, dtypes.uint32)}"),
+  (UPat.cvar("x", dtypes.long), lambda ctx, x: (render_const_64(ctx, x) if '[' in ctx.r[x]
+    else f"v_mov_b32 {ctx.r[x]}, {render_val(x.arg, dtypes.int32)}")),
+  (UPat.cvar("x", dtypes.ulong), lambda ctx, x: (render_const_64(ctx, x) if '[' in ctx.r[x]
+    else f"v_mov_b32 {ctx.r[x]}, {render_val(x.arg, dtypes.uint32)}")),
   (UPat.cvar("x"), lambda ctx, x: f"v_mov_b32 {ctx.r[x]}, {render_val(x.arg, x.dtype)}"),
   # special registers
   (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: ctx.render_special(x)),
@@ -664,7 +667,7 @@ class RDNARenderer(Renderer):
       result.append(f"v_cndmask_b32 v{scratch}, 0, 1, {rt}")
       rt = f"v{scratch}"
     if is_false_sgpr_mask:
-      scratch = scratch if scratch else self.get_scratch_vgpr()
+      scratch = scratch or self.get_scratch_vgpr()
       idx = scratch + 1 if is_true_sgpr_mask else scratch
       result.append(f"v_cndmask_b32 v{idx}, 0, 1, {rf}")
       rf = f"v{idx}"
