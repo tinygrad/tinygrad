@@ -1,5 +1,5 @@
 from typing import Callable, cast
-import struct, yaml
+import struct
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, AddrSpace
@@ -727,17 +727,37 @@ class RDNARenderer(Renderer):
 
     kernarg_size = (args[-1][".offset"] + args[-1][".size"]) if args else 0
 
-    metadata = {
-      'amdhsa.kernels': [{
-        '.args': args,
-        '.group_segment_fixed_size': self.lds_size, '.kernarg_segment_align': 8, '.kernarg_segment_size': kernarg_size,
-        '.language': 'OpenCL C', '.language_version': [1, 2], '.max_flat_workgroup_size': 256,
-        '.name': function_name, '.private_segment_fixed_size': 0, '.sgpr_count': s_cnt, '.sgpr_spill_count': 0,
-        '.symbol': f'{function_name}.kd', '.uses_dynamic_stack': False, '.vgpr_count': v_cnt, '.vgpr_spill_count': 0,
-        '.wavefront_size': 32
-      }],
-      'amdhsa.target': f'amdgcn-amd-amdhsa--{self.arch}', 'amdhsa.version': [1, 2]
-    }
+    # Build metadata YAML manually to avoid yaml dependency
+    args_yaml = []
+    for arg in args:
+      arg_lines = ['  - ' + '\n    '.join(f'{k}: {repr(v) if isinstance(v, str) else str(v).lower() if isinstance(v, bool) else v}'
+                                           for k, v in arg.items())]
+      args_yaml.extend(arg_lines)
+    metadata_yaml = f"""amdhsa.kernels:
+- .args:
+{chr(10).join(args_yaml)}
+  .group_segment_fixed_size: {self.lds_size}
+  .kernarg_segment_align: 8
+  .kernarg_segment_size: {kernarg_size}
+  .language: OpenCL C
+  .language_version:
+  - 1
+  - 2
+  .max_flat_workgroup_size: 256
+  .name: {function_name}
+  .private_segment_fixed_size: 0
+  .sgpr_count: {s_cnt}
+  .sgpr_spill_count: 0
+  .symbol: {function_name}.kd
+  .uses_dynamic_stack: false
+  .vgpr_count: {v_cnt}
+  .vgpr_spill_count: 0
+  .wavefront_size: 32
+amdhsa.target: amdgcn-amd-amdhsa--{self.arch}
+amdhsa.version:
+- 1
+- 2
+"""
 
     kernel_str = '\n'.join(kernel)
     # NOTE: .text must be first line for HIPCompiler to detect as assembly
@@ -764,7 +784,7 @@ class RDNARenderer(Renderer):
            "  .amdhsa_system_sgpr_workgroup_id_z 1\n" + \
            "  .amdhsa_system_vgpr_workitem_id 2\n" + \
            ".end_amdhsa_kernel\n\n" + \
-           ".amdgpu_metadata\n" + yaml.dump(metadata) + ".end_amdgpu_metadata"
+           ".amdgpu_metadata\n" + metadata_yaml + ".end_amdgpu_metadata"
 
   def render(self, uops:list[UOp]) -> str:
     kernel:list[str] = []

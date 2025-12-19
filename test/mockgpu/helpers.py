@@ -38,6 +38,9 @@ def _try_dlopen_remu():
       remu.run_asm.restype = ctypes.c_int32
       remu.run_asm.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32,
         ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
+      remu.run_asm_with_rsrc2.restype = ctypes.c_int32
+      remu.run_asm_with_rsrc2.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32,
+        ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_uint32]
     except OSError: pass
     else: return remu
   print("Could not find libremu.so")
