@@ -187,43 +187,6 @@ async function decoder_upload_audio_features(nets, audio_features_batch, decoder
  * @property {integer[][]} contexts
  */
 
-/**
- * @typedef Decoder_Result
- * @type {object}
- * @property {integer[]} context
- * @property {integer[]} sorted
- */
-
-/**
- * @param {Decode_Sequence[]} decode_sequences
- * @param {Decoder_State} decoder_state
- * @param {Float32Array[]} audio_features_batch
- * @returns {Promise<Decoder_Result[]>}
- */
-async function decodeOneBatch(nets, decode_sequences, decoder_state, audio_features_batch) {
-    // TODO: poor name
-    // this really should just pack batches, call decoder, unpack results, nothing more
-    let audio_features = audio_features_batch[0];
-
-    let results = [];
-    let context_inputs = [];
-    for (let i = 0; i < decode_sequences.length; ++i) {
-        context_inputs.push(decode_sequences[i].context.at(-1));
-        results.push({context: decode_sequences[i].context});
-    }
-    const max_context_length = Math.max.apply(null, decode_sequences.map(x => x.context.length));
-
-    let [sorted] = await decoder_helper(nets, context_inputs, audio_features, max_context_length - 1, decoder_state);
-
-    // NOTE: unpack batched top k indices
-    // TODO: dehardcode
-    let indices_topk = 10;
-    for (let i = 0; i < results.length; ++i) {
-        results[i].sorted = sorted.slice(i*indices_topk, (i+1)*indices_topk);
-    }
-    return results;
-}
-
 
 /** @returns {Promise<Decode_Sequence[]|undefined>} */
 async function inferLoop(nets, log_specs_full, audio_features_batch, seeks_batch, cancelToken, inferLoopContext) {
@@ -301,19 +264,31 @@ async function inferLoop(nets, log_specs_full, audio_features_batch, seeks_batch
                 return;
             }
 
-            let decode_results = await decodeOneBatch(nets, sequences, decoder_state, audio_features_batch);
+            // NOTE: pack batch inputs
+            let context_inputs = [];
             for (let idx = 0; idx < sequences.length; ++idx) {
-                if (cancelToken.cancelled) {
-                    inferLoopContext.is_done = true;
-                    return;
-                }
+                let ctx = sequences[idx].context;
+                context_inputs.push(ctx.at(-1));
+            }
+            const max_context_batch_length = Math.max.apply(null, sequences.map(x => x.context.length));
+            let [sorted] = await decoder_helper(nets, context_inputs, audio_features_batch[0], max_context_batch_length - 1, decoder_state);
+
+            // NOTE: unpack batch results
+            // TODO: dehardcode
+            const indices_topk = 10;
+            let decode_results_topk = [];
+            for (let i = 0; i < sequences.length; ++i) {
+                decode_results_topk.push(sorted.slice(i*indices_topk, (i+1)*indices_topk));
+            }
+
+            for (let idx = 0; idx < sequences.length; ++idx) {
                 let current_sequence = sequences[idx];
                 let current_context = current_sequence.context;
 
                 if (current_context.at(-1) === TOK_EOS) continue;
                 let seek = seeks_batch[idx];
 
-                current_context.push(decode_results[idx].sorted[0]);
+                current_context.push(decode_results_topk[idx][0]);
 
                 if (current_context.length >= current_sequence.max_context_length) {
                     current_context[current_context.length - 1] = TOK_EOS;
@@ -321,8 +296,7 @@ async function inferLoop(nets, log_specs_full, audio_features_batch, seeks_batch
 
                 const detokenized = tokensToText(current_context.slice(current_sequence.context_prompt_length), nets.mapping);
                 const seek_end = Math.min(seek + MEL_SPEC_CHUNK_LENGTH, log_specs_full.length);
-                let pendingText = format_text(detokenized, seek, seek_end);
-                pendingTexts[idx] = pendingText;
+                pendingTexts[idx] = format_text(detokenized, seek, seek_end);
             }
             ++inferLoopContext.currentTokenIndex;
             return;
@@ -477,7 +451,6 @@ export {
 
     batch_repeat_helper,
     decoder_helper,
-    decodeOneBatch,
     inferLoop,
     transcribeAudio
 };
