@@ -11,25 +11,25 @@ IMAGE_SUPPORTED_DEVICES = ("QCOM", "CL")
 
 @unittest.skipUnless(REAL_DEV in IMAGE_SUPPORTED_DEVICES, "Images not supported")
 class TestImageCopy(unittest.TestCase):
-  def test_image_copyout_1x1(self, img_type=dtypes.imagef):
-    it = Tensor.arange(4).cast(img_type((1,1,4))).realize()
+  def test_image_copyout_1x8(self, img_type=dtypes.imagef):
+    it = Tensor.arange(32).cast(img_type((1,8,4))).realize()
     buf = it.uop.buffer
     out = buf.as_buffer()
-    np.testing.assert_equal(out.cast(it.dtype.fmt).tolist(), np.arange(4))
+    np.testing.assert_equal(out.cast(it.dtype.fmt).tolist(), np.arange(32))
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half, device="PYTHON"), "need half")
-  def test_imageh_copyout_1x1(self): self.test_image_copyout_1x1(img_type=dtypes.imageh)
+  def test_imageh_copyout_1x8(self): self.test_image_copyout_1x8(img_type=dtypes.imageh)
 
-  def test_image_numpy_1x1(self, img_type=dtypes.imagef):
-    it = Tensor.arange(4).cast(img_type((1,1,4))).realize()
-    np.testing.assert_equal(it.numpy(), np.arange(4))
-  def test_imageh_numpy_1x1(self): self.test_image_numpy_1x1(img_type=dtypes.imageh)
+  def test_image_numpy_1x8(self, img_type=dtypes.imagef):
+    it = Tensor.arange(32).cast(img_type((1,8,4))).realize()
+    np.testing.assert_equal(it.numpy(), np.arange(32))
+  def test_imageh_numpy_1x8(self): self.test_image_numpy_1x8(img_type=dtypes.imageh)
 
-  def test_image_copyout_2x3(self):
-    it = Tensor.arange(2*3*4).cast(dtypes.imagef((2,3,4))).realize()
+  def test_image_copyout_2x4(self):
+    it = Tensor.arange(2*4*4).cast(dtypes.imagef((2,4,4))).realize()
     buf = it.uop.buffer
     out = buf.as_buffer()
-    np.testing.assert_equal(out.cast('f').tolist(), np.arange(2*3*4))
+    np.testing.assert_equal(out.cast('f').tolist(), np.arange(2*4*4))
 
   def test_image_roundtrip(self):
     sz = (4,2,4)
@@ -46,9 +46,9 @@ class TestImageCopy(unittest.TestCase):
 @unittest.skipUnless(REAL_DEV in IMAGE_SUPPORTED_DEVICES, "Images not supported")
 class TestImageDType(unittest.TestCase):
   def test_image_and_back(self):
-    data = Tensor.randn(9*27*4).realize()
+    data = Tensor.randn(9*32*4).realize()
     tst = data.numpy()
-    it = data.cast(dtypes.imagef((9,27,4))).contiguous().realize()
+    it = data.cast(dtypes.imagef((9,32,4))).contiguous().realize()
     assert isinstance(it.uop.base.realized.dtype, ImageDType)
     np.testing.assert_equal(tst, it.numpy())
 
@@ -68,13 +68,13 @@ class TestImageDType(unittest.TestCase):
     np.testing.assert_equal(tst, it.numpy())
 
   def test_shrink_load_float(self):
-    it = Tensor.randn(4).cast(dtypes.imagef((1,1,4))).realize()
+    it = Tensor.randn(16).cast(dtypes.imagef((1,4,4))).realize()
     imgv = it.numpy()
     np.testing.assert_equal(imgv[0:2], it[0:2].numpy())
 
   def test_mul_stays_image(self):
     # NOTE: contiguous is needed otherwise this folds
-    it = Tensor.randn(4).cast(dtypes.imagef((1,1,4))).contiguous().realize()
+    it = Tensor.randn(16).cast(dtypes.imagef((1,4,4))).contiguous().realize()
     out = (it*2).realize()
     assert isinstance(out.uop.base.realized.dtype, ImageDType)
 
@@ -84,7 +84,7 @@ class TestImageDType(unittest.TestCase):
     np.testing.assert_allclose(np.sum(itn), it.sum().numpy(), rtol=1e-6)
 
   def test_shrink_max(self):
-    it = Tensor.randn(8).cast(dtypes.imagef((1,2,4))).realize()
+    it = Tensor.randn(16).cast(dtypes.imagef((1,4,4))).realize()
     imgv = it.numpy()
     np.testing.assert_equal(np.maximum(imgv[0:3], 0), it[0:3].relu().numpy())
 
@@ -103,19 +103,19 @@ class TestImageDType(unittest.TestCase):
     assert it.uop.base.realized._buf == b1
 
   def test_no_lru_alloc(self):
-    data = Tensor.randn(9*27*4).realize()
-    it = data.cast(dtypes.imagef((9,27,4))).contiguous().realize()
+    data = Tensor.randn(9*32*4).realize()
+    it = data.cast(dtypes.imagef((9,32,4))).contiguous().realize()
     b1 = it.uop.base.realized._buf
     del it
-    it = data.cast(dtypes.imagef((10,27,4))).contiguous().realize()
+    it = data.reshape(9,32,4).pad_to(10, None, None).cast(dtypes.imagef((10,32,4))).contiguous().realize()
     assert it.uop.base.realized._buf != b1
 
   def test_no_lru_alloc_dtype(self):
-    data = Tensor.randn(9*27*4).realize()
-    it = data.cast(dtypes.imagef((9,27,4))).contiguous().realize()
+    data = Tensor.randn(9*32*4).realize()
+    it = data.cast(dtypes.imagef((9,32,4))).contiguous().realize()
     b1 = it.uop.base.realized._buf
     del it
-    it = data.cast(dtypes.imageh((9,27,4))).realize()
+    it = data.cast(dtypes.imageh((9,32,4))).realize()
     assert it.uop.base.realized._buf != b1
 
   # issue caused by: don't realize image to image casts. this is part of a larger problem
@@ -143,36 +143,36 @@ class TestImageDType(unittest.TestCase):
 @unittest.skipUnless(REAL_DEV in IMAGE_SUPPORTED_DEVICES, "Images not supported")
 class TestImageRealization(unittest.TestCase):
   def test_image_dtype_expand(self):
-    data = Tensor.randn(9*27*4).realize()
-    it = data.cast(dtypes.imagef((9,27,4))).contiguous().realize()
-    self.assertEqual(it.dtype, dtypes.imagef((9,27,4)))
-    it_expanded = it.reshape((9,27,4,1)).expand((9,27,4,4)).contiguous().realize()
+    data = Tensor.randn(9*32*4).realize()
+    it = data.cast(dtypes.imagef((9,32,4))).contiguous().realize()
+    self.assertEqual(it.dtype, dtypes.imagef((9,32,4)))
+    it_expanded = it.reshape((9,32,4,1)).expand((9,32,4,4)).contiguous().realize()
     self.assertEqual(it_expanded.dtype, dtypes.float32)
 
   def test_image_dtype_expand_and_back(self):
-    data = Tensor.randn(9*27*4).realize()
-    it = data.cast(dtypes.imagef((9,27,4))).contiguous().realize()
-    self.assertEqual(it.dtype, dtypes.imagef((9,27,4)))
-    it_expanded = it.reshape((9,27,4,1)).expand((9,27,4,4))
+    data = Tensor.randn(9*32*4).realize()
+    it = data.cast(dtypes.imagef((9,32,4))).contiguous().realize()
+    self.assertEqual(it.dtype, dtypes.imagef((9,32,4)))
+    it_expanded = it.reshape((9,32,4,1)).expand((9,32,4,4))
     it2 = it_expanded.sum(3).realize()
-    self.assertEqual(it2.dtype, dtypes.imagef((9,27,4)))
+    self.assertEqual(it2.dtype, dtypes.imagef((9,32,4)))
 
   def test_image_alu_children(self):
-    data = Tensor.randn(9*27*4).realize()
-    it = data.cast(dtypes.imagef((9,27,4))).contiguous().realize()
-    self.assertEqual(it.dtype, dtypes.imagef((9,27,4)))
-    it_expanded = it.reshape((9,27,4,1)).expand((9,27,4,4)).contiguous()
+    data = Tensor.randn(9*32*4).realize()
+    it = data.cast(dtypes.imagef((9,32,4))).contiguous().realize()
+    self.assertEqual(it.dtype, dtypes.imagef((9,32,4)))
+    it_expanded = it.reshape((9,32,4,1)).expand((9,32,4,4)).contiguous()
     alu1 = it_expanded+1
     alu2 = it_expanded.sum(3)
     it_expanded.realize()
     # NOTE: the parent becomes float, but the alu child will stay image until its output cannot fit the image
-    self.assertEqual(alu1.dtype, dtypes.imagef((9,27,4)))
+    self.assertEqual(alu1.dtype, dtypes.imagef((9,32,4)))
     alu1.realize()
     self.assertEqual(alu1.dtype, dtypes.float32)
     # alu2 is back in image because it fits the dtype again
-    self.assertEqual(alu2.dtype, dtypes.imagef((9,27,4)))
+    self.assertEqual(alu2.dtype, dtypes.imagef((9,32,4)))
     alu2.realize()
-    self.assertEqual(alu2.dtype, dtypes.imagef((9,27,4)))
+    self.assertEqual(alu2.dtype, dtypes.imagef((9,32,4)))
 
 if __name__ == '__main__':
   unittest.main()

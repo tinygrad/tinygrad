@@ -13,6 +13,7 @@ from tinygrad.renderer.nir import IR3Renderer
 from tinygrad.runtime.support.compiler_mesa import IR3Compiler
 from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, prod, fromimport, cpu_profile, lo32, PROFILE, suppress_finalizing
 from tinygrad.helpers import flatten, QCOM_IR3, QCOM_CC
+from tinygrad.dtype import ImageDType
 from tinygrad.runtime.support.system import System
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
@@ -28,6 +29,7 @@ def _qreg_exec(__reg, __val=0, **kwargs):
 qreg: Any = type("QREG", (object,), {name[4:].lower(): functools.partial(_qreg_exec, name) for name in mesa.__dict__.keys() if name[:4] == 'REG_'})
 
 def next_power2(x): return 1 if x == 0 else 1 << (x - 1).bit_length()
+def ctz(v): return (v & -v).bit_length() - 1
 
 def parity(val: int):
   for i in range(4,1,-1): val ^= val >> (1 << i)
@@ -202,8 +204,8 @@ class QCOMArgsState(HCQArgsState):
 
     if prg.samp_cnt > 0: to_mv(self.buf.va_addr + prg.samp_off, len(prg.samplers) * 4).cast('I')[:] = array.array('I', prg.samplers)
     for i, b in enumerate(bufs):
-      if prg.buf_info[i].type in {BUFTYPE_TEX, BUFTYPE_IBO}:
-        obj = b.texture_info.desc if prg.buf_info[i].type is BUFTYPE_TEX else b.texture_info.ibo
+      if (ti:=prg.tex_infos[i]) is not None:
+        obj = ti.desc if prg.buf_info[i].type is BUFTYPE_TEX else ti.ibo
         to_mv(self.buf.va_addr + prg.buf_info[i].offset, len(obj) * 4).cast('I')[:] = array.array('I', obj)
       self.bind_sints_to_buf(b.va_addr, buf=self.buf, fmt='Q', offset=self.buf_info[i].offset+(0 if self.buf_info[i].type is BUFTYPE_BUF else 16))
 
@@ -225,12 +227,24 @@ class IR3ArgsState(HCQArgsState):
     self.bind_sints_to_buf(*flatten([b.texture_info.ibo + ([0] * 8) for b in ibos]), buf=self.buf, fmt='I', offset=prg.ibo_off)
 
 class QCOMProgram(HCQProgram):
-  def __init__(self, dev: QCOMDevice, name: str, lib: bytes):
+  def __init__(self, dev: QCOMDevice, name: str, lib: bytes, buf_dtypes=[]):
+    self.tex_infos:list[QCOMTextureInfo|None] = []
+    for dtype in buf_dtypes:
+      if isinstance(dtype, ImageDType):
+        imgw, imgh = dtype.shape[1], dtype.shape[0]
+        stride = imgw * 4 * dtype.itemsize
+        assert stride % 64 == 0
+        tex_fmt = mesa.FMT6_32_32_32_32_FLOAT if dtype.itemsize == 4 else mesa.FMT6_16_16_16_16_FLOAT
+        desc = [qreg.a6xx_tex_const_0(0x8, swiz_x=0, swiz_y=1, swiz_z=2, swiz_w=3, fmt=tex_fmt), qreg.a6xx_tex_const_1(width=imgw, height=imgh),
+                qreg.a6xx_tex_const_2(type=mesa.A6XX_TEX_2D, pitch=stride, pitchalign=ctz(stride)-6), 0, 0, 0,
+                qreg.a6xx_tex_const_6(plane_pitch=0x400000), qreg.a6xx_tex_const_7(13)]
+        self.tex_infos.append(QCOMTextureInfo(stride, stride, desc, [desc[0] & (~0xffff), *desc[1:len(desc)]]))
+      else: self.tex_infos.append(None)
+
     self.dev: QCOMDevice = dev
     self.name, self.lib, self.NIR = name, lib, isinstance(dev.compiler, IR3Compiler)
 
     if self.NIR:
-      from tinygrad.runtime.autogen import mesa
       v, cs, self.imm_vals, self.image = IR3Compiler.unpack_lib(lib)
       self.prg_offset, self.brnchstck, self.image_size, self.pvtmem, self.shmem = 0, v.branchstack, v.info.size, v.pvtmem_size, v.shared_size
       self.wgsz = alloc.offset_vec4 * 4 + 8 if (alloc:=cs.allocs.consts[mesa.IR3_CONST_ALLOC_DRIVER_PARAMS]).size_vec4 else 0xfc
@@ -324,43 +338,17 @@ class QCOMTextureInfo:
 
 class QCOMAllocator(HCQAllocatorBase):
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
-    # Recalculate real size for texture
-    if options.image is not None:
-      imgw, imgh, itemsize_log = options.image.shape[1], options.image.shape[0], int(math.log2(options.image.itemsize))
-      pitchalign = max(6, 11 - int(math.log2(imgh))) if imgh > 1 else 6
-      align_up = max(1, (8 // itemsize_log + 1) - imgh // 32) if pitchalign == 6 else (2 ** (pitchalign - itemsize_log - 2))
+    return self.dev._gpu_map(options.external_ptr, size) if options.external_ptr else self.dev._gpu_alloc(size)
 
-      granularity = 128 if options.image.itemsize == 4 else 256
-      pitch_add = (1 << pitchalign) if min(next_power2(imgw), round_up(imgw, granularity)) - align_up + 1 <= imgw and imgw > granularity//2 else 0
-      pitch = round_up((real_stride:=imgw * 4 * options.image.itemsize), 1 << pitchalign) + pitch_add
-      size = pitch * imgh
+  def _do_copy(self, src_addr, dest_addr, src_size, prof_text):
+    with cpu_profile(prof_text, self.dev.device, is_copy=True): ctypes.memmove(dest_addr, src_addr, src_size)
 
-    buf = self.dev._gpu_map(options.external_ptr, size) if options.external_ptr else self.dev._gpu_alloc(size)
-
-    if options.image is not None:
-      tex_fmt = mesa.FMT6_32_32_32_32_FLOAT if options.image.itemsize == 4 else mesa.FMT6_16_16_16_16_FLOAT
-      desc = [qreg.a6xx_tex_const_0(0x8, swiz_x=0, swiz_y=1, swiz_z=2, swiz_w=3, fmt=tex_fmt), qreg.a6xx_tex_const_1(width=imgw, height=imgh),
-              qreg.a6xx_tex_const_2(type=mesa.A6XX_TEX_2D, pitch=pitch, pitchalign=pitchalign-6), 0,
-              *data64_le(buf.va_addr), qreg.a6xx_tex_const_6(plane_pitch=0x400000), qreg.a6xx_tex_const_7(13)]
-
-      buf.texture_info = QCOMTextureInfo(pitch, real_stride, desc, [desc[0] & (~0xffff), *desc[1:len(desc)]])
-    return buf
-
-  def _do_copy(self, src_addr, dest_addr, src_size, real_size, src_stride, dest_stride, prof_text, dest_off=0, src_off=0):
-    with cpu_profile(prof_text, self.dev.device, is_copy=True):
-      while src_off < src_size:
-        ctypes.memmove(dest_addr+dest_off, src_addr+src_off, real_size)
-        src_off, dest_off = src_off+src_stride, dest_off+dest_stride
-
-  def _copyin(self, dest:HCQBuffer, src:memoryview):
-    stride, pitch = (src.nbytes, src.nbytes) if (ti:=cast(QCOMTextureInfo, dest.texture_info)) is None else (ti.real_stride, ti.pitch)
-    self._do_copy(mv_address(src), dest.cpu_view().addr, src.nbytes, stride, stride, pitch, f"TINY -> {self.dev.device}")
+  def _copyin(self, dest:HCQBuffer, src:memoryview): self._do_copy(mv_address(src), dest.cpu_view().addr, src.nbytes, f"TINY -> {self.dev.device}")
 
   def _copyout(self, dest:memoryview, src:HCQBuffer):
     self.dev.synchronize()
 
-    stride, pitch = (src.size, src.size) if (ti:=cast(QCOMTextureInfo, src.texture_info)) is None else (ti.real_stride, ti.pitch)
-    self._do_copy(src.cpu_view().addr, mv_address(dest), src.size, stride, pitch, stride, f"{self.dev.device} -> TINY")
+    self._do_copy(src.cpu_view().addr, mv_address(dest), src.size, f"{self.dev.device} -> TINY")
 
   def _as_buffer(self, src:HCQBuffer) -> memoryview:
     self.dev.synchronize()
