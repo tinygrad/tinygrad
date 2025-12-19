@@ -4,7 +4,7 @@ from collections import defaultdict
 from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, AddrSpace
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import prod, get_single_element
+from tinygrad.helpers import prod, get_single_element, getenv
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu
 from tinygrad.codegen.opt import tc
 
@@ -15,9 +15,11 @@ def get_reg_base(reg: str) -> int:
 def render_val(x, dtype):
   if dtypes.is_float(dtype):
     fval = float(x)
+    # For half precision, always use hex format since literals are float32
+    if dtype == dtypes.half: return "0x%04X" % struct.unpack("H", struct.pack("e", x))[0]
+    # For float32, use inline literals for common values (RDNA3 supports these as immediate operands)
     if fval in (0.0, 0.5, 1.0, 2.0, 4.0, -0.5, -1.0, -2.0, -4.0): return str(fval) if fval != 0.0 else "0"
     if dtype == dtypes.double: return "0x%016X" % struct.unpack("Q", struct.pack("d", x))[0]
-    if dtype == dtypes.half: return "0x%04X" % struct.unpack("H", struct.pack("e", x))[0]
     return "0x%08X" % struct.unpack("I", struct.pack("f", x))[0]
   val = int(x) & 0xFFFFFFFF
   return f"0x{val:08X}" if val > 0x7FFFFFFF else str(val)
@@ -133,6 +135,39 @@ def extract_low_32(reg: str) -> str:
   """Extract low 32 bits from a register (handles 64-bit register pairs v[n:m])"""
   return f"v{get_reg_base(reg)}" if isinstance(reg, str) and '[' in reg else reg
 
+def render_idiv(ctx, x, a, b):
+  """Render integer division via float conversion. For 64-bit types, operates on low 32 bits only."""
+  # Extract low 32 bits for 64-bit integer types (RDNA v_cvt only works with 32-bit)
+  ra = extract_low_32(ctx.r[a]) if a.dtype in (dtypes.long, dtypes.ulong) else ctx.r[a]
+  rb = extract_low_32(ctx.r[b]) if b.dtype in (dtypes.long, dtypes.ulong) else ctx.r[b]
+  rx = extract_low_32(ctx.r[x]) if x.dtype in (dtypes.long, dtypes.ulong) else ctx.r[x]
+  scratch = ctx.get_scratch_vgpr()
+  return [
+    f"v_cvt_f32_i32 v{scratch}, {ra}",
+    f"v_cvt_f32_i32 v{scratch+1}, {rb}",
+    f"v_rcp_f32 v{scratch+1}, v{scratch+1}",
+    f"v_mul_f32 v{scratch}, v{scratch}, v{scratch+1}",
+    f"v_trunc_f32 v{scratch}, v{scratch}",
+    f"v_cvt_i32_f32 {rx}, v{scratch}"]
+
+def render_mod(ctx, x, a, b):
+  """Render integer modulo: a % b = a - (a // b) * b. For 64-bit types, operates on low 32 bits only."""
+  ra = extract_low_32(ctx.r[a]) if a.dtype in (dtypes.long, dtypes.ulong) else ctx.r[a]
+  rb = extract_low_32(ctx.r[b]) if b.dtype in (dtypes.long, dtypes.ulong) else ctx.r[b]
+  rx = extract_low_32(ctx.r[x]) if x.dtype in (dtypes.long, dtypes.ulong) else ctx.r[x]
+  scratch = ctx.get_scratch_vgpr()
+  # Compute a // b via float conversion
+  # Then compute a - (a // b) * b
+  return [
+    f"v_cvt_f32_i32 v{scratch}, {ra}",
+    f"v_cvt_f32_i32 v{scratch+1}, {rb}",
+    f"v_rcp_f32 v{scratch+1}, v{scratch+1}",
+    f"v_mul_f32 v{scratch}, v{scratch}, v{scratch+1}",
+    f"v_trunc_f32 v{scratch}, v{scratch}",
+    f"v_cvt_i32_f32 v{scratch}, v{scratch}",      # scratch = a // b
+    f"v_mul_lo_u32 v{scratch}, v{scratch}, {rb}", # scratch = (a // b) * b
+    f"v_sub_nc_u32 {rx}, {ra}, v{scratch}"]       # result = a - (a // b) * b
+
 def render_comparison(ctx, x, src0):
   """Render comparison op. If dest is SGPR, use directly. If VGPR (fallback), use vcc_lo + v_cndmask_b32."""
   dest = ctx.r[x]
@@ -167,7 +202,9 @@ def render_endif(ctx, x):
 
 def render_64bit_mul(ctx, x):
   """Render 64-bit integer multiplication for division-by-multiplication pattern.
-  Stores hi bits in HIGH register of pair for subsequent SHR."""
+  Stores hi bits in HIGH register of pair for subsequent SHR.
+  For signed (long) type with a positive constant that has bit 31 set, we need special handling
+  because v_mul_hi_i32 would misinterpret the constant as negative."""
   rx = ctx.r[x]
   rx_hi = f"v{get_reg_base(rx) + 1}" if '[' in rx else rx
   a, b = x.src[0], x.src[1]
@@ -175,18 +212,33 @@ def render_64bit_mul(ctx, x):
   ra = f"v{get_reg_base(ra)}" if '[' in ra else ra
   rb = render_val(b.arg, dtypes.uint32) if b.op is Ops.CONST else (f"v{get_reg_base(ctx.r[b])}" if '[' in ctx.r[b] else ctx.r[b])
   scratch = ctx.get_scratch_vgpr()
+
+  # For signed multiply (dtypes.long) with a constant that has bit 31 set,
+  # v_mul_hi_i32 treats the constant as negative (m - 2^32).
+  # We want: (a * m_unsigned) >> 32
+  # v_mul_hi_i32 gives: (a * m_signed) >> 32 = (a * (m - 2^32)) >> 32 = (a*m)>>32 - a
+  # Therefore: (a*m)>>32 = v_mul_hi_i32(a, m) + a
+  if x.dtype == dtypes.long and b.op is Ops.CONST and b.arg >= 0x80000000:
+    return [
+      f"v_mul_lo_u32 v{scratch}, {ra}, {rb}",
+      f"v_mul_hi_i32 {rx_hi}, {ra}, {rb}",
+      f"v_add_nc_u32 {rx_hi}, {rx_hi}, {ra}"]
+
   mul_hi_instr = "v_mul_hi_i32" if x.dtype == dtypes.long else "v_mul_hi_u32"
   return [f"v_mul_lo_u32 v{scratch}, {ra}, {rb}", f"{mul_hi_instr} {rx_hi}, {ra}, {rb}"]
 
 def render_64bit_shr(ctx, x, a, b):
-  """Render 64-bit right shift. For shifts >= 32, just shift the high 32 bits."""
+  """Render 64-bit right shift. For shifts >= 32, just shift the high 32 bits.
+  Use arithmetic shift (ashrrev) for signed types, logical shift (lshrrev) for unsigned."""
   if b.op is not Ops.CONST: raise RuntimeError("64-bit SHR requires constant shift amount")
   dst_num, src_hi = get_reg_base(ctx.r[x]), get_reg_base(ctx.r[a]) + (1 if '[' in ctx.r[a] else 0)
   shift_amt = b.arg
+  # Use arithmetic shift for signed types (long), logical for unsigned (ulong)
+  shift_instr = "v_ashrrev_i32" if x.dtype == dtypes.long else "v_lshrrev_b32"
   if shift_amt >= 32:
     remaining = shift_amt - 32
-    return f"v_mov_b32 v{dst_num}, v{src_hi}" if remaining == 0 else f"v_lshrrev_b32 v{dst_num}, {remaining}, v{src_hi}"
-  return f"v_lshrrev_b32 v{dst_num}, {shift_amt}, v{src_hi}"
+    return f"v_mov_b32 v{dst_num}, v{src_hi}" if remaining == 0 else f"{shift_instr} v{dst_num}, {remaining}, v{src_hi}"
+  return f"{shift_instr} v{dst_num}, {shift_amt}, v{src_hi}"
 
 def render_wmma(ctx, x):
   """Render WMMA instruction for RDNA3.
@@ -289,6 +341,9 @@ string_rewrite = PatternMatcher([
   (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda ctx, x: f"s_load_b64 {ctx.r[x]}, s[0:1], {ctx.kernarg_offset[x]}"),
   # define var - load variable from kernarg buffer
   (UPat(Ops.DEFINE_VAR, name="x"), render_define_var),
+  # Boolean inversion: CMPNE(bool, 1) -> s_not_b32 (invert wave mask)
+  (UPat(Ops.CMPNE, name="x", src=(UPat(dtype=dtypes.bool, name="a"), UPat.cvar("b"))),
+   lambda ctx, x, a, b: f"s_not_b32 {ctx.r[x]}, {ctx.r[a]}" if b.arg == 1 and ctx.r[a].startswith('s') else None),
   # comparison ops - uses SGPR if available, falls back to VGPR with vcc_lo + v_cndmask_b32
   (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ), name="x", allow_any_len=True, src=(UPat.var("src0"),)), render_comparison),
   # NOTE: WHERE wrapping LOAD is transformed to gated LOAD at UOp level by rdna_matcher
@@ -301,14 +356,10 @@ string_rewrite = PatternMatcher([
   # NOTE: v_sin_f32/v_cos_f32 have limited range (~256 turns) and fail for large inputs like 1e6.
   # We let tinygrad's software sin implementation handle all cases for correctness.
   # IDIV: integer division via float conversion (a // b = trunc(float(a) / float(b)))
-  (UPat(Ops.IDIV, name="x", src=(UPat.var("a"), UPat.var("b"))),
-   lambda ctx, x, a, b: [
-     f"v_cvt_f32_i32 v{ctx.get_scratch_vgpr()}, {ctx.r[a]}",
-     f"v_cvt_f32_i32 v{ctx.get_scratch_vgpr()+1}, {ctx.r[b]}",
-     f"v_rcp_f32 v{ctx.get_scratch_vgpr()+1}, v{ctx.get_scratch_vgpr()+1}",
-     f"v_mul_f32 v{ctx.get_scratch_vgpr()}, v{ctx.get_scratch_vgpr()}, v{ctx.get_scratch_vgpr()+1}",
-     f"v_trunc_f32 v{ctx.get_scratch_vgpr()}, v{ctx.get_scratch_vgpr()}",
-     f"v_cvt_i32_f32 {ctx.r[x]}, v{ctx.get_scratch_vgpr()}"]),
+  (UPat(Ops.IDIV, name="x", src=(UPat.var("a"), UPat.var("b"))), render_idiv),
+  # Integer MOD: a % b = a - (a // b) * b (floats use v_mod_f32 via code_for_op)
+  (UPat(Ops.MOD, name="x", src=(UPat.var("a"), UPat.var("b"))),
+   lambda ctx, x, a, b: render_mod(ctx, x, a, b) if dtypes.is_int(x.dtype) else None),
   # Boolean AND/OR with SGPR sources: need to convert to VGPR first
   (UPat(Ops.AND, name="x", dtype=dtypes.bool, src=(UPat.var("a", dtype=dtypes.bool), UPat.var("b", dtype=dtypes.bool))),
    lambda ctx, x, a, b: ctx.render_bool_logic(x, a, b, "and")),
@@ -372,13 +423,13 @@ string_rewrite = PatternMatcher([
   (UPat(Ops.DEFINE_REG, src=()), lambda ctx: []),
   (UPat(Ops.RANGE, name="r"), lambda ctx, r: [
     f"v_mov_b32 {ctx.r[r]}, -1",  # Start at -1, incremented to 0 on first iteration
-    f"s_branch LOOP_END_{ctx.r[r][1:]}",
-    f"LOOP_{ctx.r[r][1:]}:"]),
+    f"s_branch LOOP_END_{ctx.uops.index(r)}",
+    f"LOOP_{ctx.uops.index(r)}:"]),
   (UPat(Ops.END, name="x", src=(UPat(), UPat(Ops.RANGE, name="r"))), lambda ctx, x, r: [
-    f"LOOP_END_{ctx.r[r][1:]}:",
+    f"LOOP_END_{ctx.uops.index(r)}:",
     f"v_add_nc_u32 {ctx.r[r]}, {ctx.r[r]}, 1",
     f"v_cmp_lt_i32 vcc_lo, {ctx.r[r]}, {ctx.r[r.src[0]]}",
-    f"s_cbranch_vccnz LOOP_{ctx.r[r][1:]}"]),
+    f"s_cbranch_vccnz LOOP_{ctx.uops.index(r)}"]),
   (UPat(Ops.DEFINE_LOCAL, name="x"),
    lambda ctx, x: []),  # local memory is handled differently in RDNA
   (UPat(Ops.IF, name="x"), render_if),
@@ -573,6 +624,7 @@ class RDNARenderer(Renderer):
     self.lds_size = 0  # track local memory (LDS) usage
     # Scratch VGPR will be allocated after we know how many VGPRs the kernel uses
     self.scratch_vgpr = -1  # will be set after register allocation
+    self._deferred_store_vgpr = -1  # reset for each kernel - must NOT persist from previous kernel
 
     # === LIVENESS ANALYSIS ===
     # Compute last use position for each UOp
@@ -595,8 +647,9 @@ class RDNARenderer(Renderer):
     for i, u in enumerate(uops):
       for src in u.src:
         last_use[src] = i
-      # For INDEX inside LOAD/STORE, track the INDEX sources too
+      # For INDEX inside LOAD/STORE, track both the INDEX and its sources
       if u.op in {Ops.LOAD, Ops.STORE} and u.src[0].op is Ops.INDEX:
+        last_use[u.src[0]] = i  # INDEX's liveness extends to the LOAD/STORE that uses it
         for src in u.src[0].src:
           last_use[src] = i
       # For END, track RANGE.src[0] (loop bound) which is used in rendering
@@ -774,6 +827,7 @@ class RDNARenderer(Renderer):
       dead_vgprs_set = set(dead_vgprs)
       for reg in dead_vgprs:
         if reg not in vgpr_owner: continue  # Already freed (e.g., as part of pair)
+        owner = vgpr_owner[reg]
         del vgpr_owner[reg]
         # If this is part of a pair, check if both regs are dead and return as pair
         if reg in vgpr_pairs:
@@ -784,9 +838,13 @@ class RDNARenderer(Renderer):
             free_vgpr_pairs.append(base_reg)
             vgpr_pairs.discard(base_reg)
             vgpr_pairs.discard(other_reg)
+            # Also delete other_reg from vgpr_owner to prevent double-free
+            if other_reg in vgpr_owner: del vgpr_owner[other_reg]
+            if getenv('DEBUG_RDNA_REG'): print(f"  pos {pos}: freed pair v[{base_reg}:{base_reg+1}] (owner: {owner.op})")
           # Don't add to free_vgprs - pairs are handled separately
         else:
           free_vgprs.append(reg)
+          if getenv('DEBUG_RDNA_REG'): print(f"  pos {pos}: freed v{reg} (owner: {owner.op})")
       # Free SGPRs scheduled to die at this position
       for reg in pending_sgpr_deaths.get(pos, []):
         if reg not in sgpr_owner: continue  # Already freed
@@ -800,16 +858,19 @@ class RDNARenderer(Renderer):
       nonlocal next_vgpr, max_vgpr
       if free_vgprs:
         reg = free_vgprs.pop()
+        if getenv('DEBUG_RDNA_REG'): print(f"    alloc_vgpr({owner.op}): reused v{reg} from free_vgprs={free_vgprs}")
       elif free_vgpr_ranges:
         # Take one VGPR from a free range and put the remainder back
         base, count = free_vgpr_ranges.pop()
         reg = base
         if count > 1:
           free_vgpr_ranges.append((base + 1, count - 1))
+        if getenv('DEBUG_RDNA_REG'): print(f"    alloc_vgpr({owner.op}): took v{reg} from range")
       else:
         reg = next_vgpr
         next_vgpr += 1
         max_vgpr = max(max_vgpr, next_vgpr)
+        if getenv('DEBUG_RDNA_REG'): print(f"    alloc_vgpr({owner.op}): new v{reg}")
       vgpr_owner[reg] = owner
       schedule_vgpr_death(reg, owner)
       return f"v{reg}"
@@ -905,6 +966,16 @@ class RDNARenderer(Renderer):
         next_vgpr += 2  # Allocate 2 scratch registers for IDIV etc.
         max_vgpr = max(max_vgpr, next_vgpr)
       return self.scratch_vgpr
+
+    def get_deferred_store_vgpr() -> str:
+      """Get or allocate a scratch VGPR for deferred store address computation. Never freed."""
+      nonlocal next_vgpr, max_vgpr
+      if not hasattr(self, '_deferred_store_vgpr') or self._deferred_store_vgpr < 0:
+        # Allocate a dedicated VGPR for deferred store addresses (never freed, won't conflict with INDEX regs)
+        self._deferred_store_vgpr = next_vgpr
+        next_vgpr += 1
+        max_vgpr = max(max_vgpr, next_vgpr)
+      return f"v{self._deferred_store_vgpr}"
 
     # Make get_scratch_vgpr available to pattern matcher via self
     self.get_scratch_vgpr = get_scratch_vgpr
@@ -1081,14 +1152,24 @@ class RDNARenderer(Renderer):
           vgpr_count = (u.dtype.itemsize + 3) // 4
           r[u] = alloc_vgpr_range(u, vgpr_count)
           base = get_reg_base(r[u])
-          for j, src in enumerate(u.src):
-            src_reg = r[src]
-            if isinstance(src_reg, str) and src_reg.startswith('v['):
-              src_base, src_end = get_reg_base(src_reg), int(src_reg[src_reg.index(':')+1:-1])
-              for k in range(src_end - src_base + 1):
-                kernel.append(f"v_mov_b32 v{base+j+k}, v{src_base+k}")
-            else:
-              kernel.append(f"v_mov_b32 v{base+j}, {src_reg}")
+          # Check if this is a packed half type (2 halfs per VGPR)
+          if u.dtype.scalar() == dtypes.half and u.dtype.count > 1:
+            # Pack pairs of half values into each VGPR using v_pack_b32_f16
+            for j in range(vgpr_count):
+              lo_idx = j * 2
+              hi_idx = j * 2 + 1
+              lo_reg = r[u.src[lo_idx]] if lo_idx < len(u.src) else "0"
+              hi_reg = r[u.src[hi_idx]] if hi_idx < len(u.src) else "0"
+              kernel.append(f"v_pack_b32_f16 v{base+j}, {lo_reg}, {hi_reg}")
+          else:
+            for j, src in enumerate(u.src):
+              src_reg = r[src]
+              if isinstance(src_reg, str) and src_reg.startswith('v['):
+                src_base, src_end = get_reg_base(src_reg), int(src_reg[src_reg.index(':')+1:-1])
+                for k in range(src_end - src_base + 1):
+                  kernel.append(f"v_mov_b32 v{base+j+k}, v{src_base+k}")
+              else:
+                kernel.append(f"v_mov_b32 v{base+j}, {src_reg}")
         else:
           r[u] = [cast(str,r[x]) for x in u.src]
         continue
@@ -1346,9 +1427,9 @@ class RDNARenderer(Renderer):
         if u.src[0].op is Ops.INDEX and r.get(u.src[0]) == "DEFERRED_STORE_ADDR":
           index_op = u.src[0]
           buf, idx = index_op.src[0], index_op.src[1]
-          # Use shared temp VGPR for all deferred store addresses (stores are sequential)
+          # Use a dedicated scratch VGPR for all deferred store addresses (never freed, won't conflict)
           if deferred_store_addr_vgpr is None:
-            deferred_store_addr_vgpr = alloc_vgpr(index_op)  # Only allocate once
+            deferred_store_addr_vgpr = get_deferred_store_vgpr()
           # Compute the byte offset - detect pattern SHL(ADD(base, const), shift) for inline recompute
           # Only recompute if idx is marked as RECOMPUTE_AT_STORE - otherwise it has a valid register
           if idx.op is Ops.CONST and idx.arg == 0:
