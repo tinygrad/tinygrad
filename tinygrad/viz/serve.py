@@ -43,6 +43,7 @@ def get_rewrites(t:RewriteTrace) -> list[dict]:
       steps.append(create_step("View UOp List", ("/uops", i, len(steps)), k.ret))
       steps.append(create_step("View Program", ("/code", i, len(steps)), k.ret))
       steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), k.ret))
+      steps.append(create_step("View CFG", ("/graph-cfg", i, len(steps)), k.ret))
     for key in k.keys: ref_map[key] = i
     ret.append({"name":k.display_name, "steps":steps})
   return ret
@@ -376,6 +377,34 @@ def amd_readelf(lib:bytes) -> list[dict]:
           ".group_segment_fixed_size":"LDS size", ".private_segment_fixed_size":"Scratch size"}
   return [{"label":label, "value":v} for k,label in keys.items() if (v:=notes["amdhsa.kernels"][0][k]) > 0]
 
+def simm16(x:int) -> int:
+  x &= 0xffff
+  return x - 0x10000 if x & 0x8000 else x
+
+def amdgpu_cfg(lib:bytes, arch:str) -> dict:
+  SOPP_INSTS = {"s_branch", "s_cbranch_scc0", "s_cbranch_scc1", "s_cbranch_vccz", "s_cbranch_vccnz", "s_cbranch_execz", "s_cbranch_execnz"}
+  # disassemble
+  from extra.sqtt.roc import llvm_disasm
+  pc_table = llvm_disasm(arch, lib)
+  # get leaders
+  leaders:set[int] = set([next(iter(pc_table))])
+  for pc, (asm, sz) in pc_table.items():
+    inst, *operands = asm.split(" ")
+    if inst in SOPP_INSTS: leaders.update([pc+simm16(int(operands[0])), pc+sz])
+  # build basic blocks
+  blocks:dict[int, list[int]] = {}
+  cur:int|None = None
+  for pc in pc_table:
+    if pc in leaders: blocks[cur:=pc] = []
+    blocks[unwrap(cur)].append(pc)
+  # temp: translate to UOps
+  # TODO: cfg should have its own layout
+  uop:UOp|None = None
+  for insts in blocks.values():
+    arg = "\n".join([pc_table[p][0] for p in insts])
+    uop = UOp(Ops.CUSTOM, src=() if uop is None else (uop,), arg=arg)
+  return uop_to_json(unwrap(uop))
+
 # ** Main render function to get the complete details about a trace event
 
 def get_render(i:int, j:int, fmt:str) -> dict:
@@ -395,6 +424,10 @@ def get_render(i:int, j:int, fmt:str) -> dict:
       with soft_err(lambda err: metadata.append(err)):
         metadata.append(amd_readelf(compiler.compile(data.src)))
     return {"src":disasm_str, "lang":"amdgpu" if data.device.startswith("AMD") else None, "metadata":metadata}
+  if fmt == "graph-cfg":
+    # open the device to compile source code for static CFG builder
+    lib = Device[data.device].compiler.compile(data.src)
+    return {"value":[{"graph":amdgpu_cfg(lib, Device[data.device].arch), "dir":"TB"}], "content_type":"text/event-stream"}
   if fmt == "all-pmc":
     durations, pmc = data
     ret:dict = {"cols":{}, "rows":[]}

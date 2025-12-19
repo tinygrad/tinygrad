@@ -5,9 +5,9 @@ const ctx = canvas.getContext("2d");
 ctx.font = `350 ${LINE_HEIGHT}px sans-serif`;
 
 onmessage = (e) => {
-  const { graph, additions, opts } = e.data;
+  const { graph, additions, opts, dir } = e.data;
   const g = new dagre.graphlib.Graph({ compound: true });
-  g.setGraph({ rankdir: "LR" }).setDefaultEdgeLabel(function() { return {}; });
+  g.setGraph({ rankdir: dir }).setDefaultEdgeLabel(function() { return {}; });
   if (additions.length !== 0) g.setNode("addition", {label:"", labelWidth:0, labelHeight:0, className:"overlay"});
   for (let [k, {label, src, ref, ...rest }] of Object.entries(graph)) {
     // adjust node dims by label size (excluding escape codes) + add padding

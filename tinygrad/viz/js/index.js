@@ -115,12 +115,12 @@ async function initWorker() {
   workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
 }
 
-function renderDag(graph, additions, recenter, layoutOpts) {
+function renderDag(graph, additions, dir, recenter, layoutOpts) {
   // start calculating the new layout (non-blocking)
   updateProgress({ start:true });
   if (worker != null) worker.terminate();
   worker = new Worker(workerUrl);
-  worker.postMessage({graph, additions, opts:layoutOpts });
+  worker.postMessage({graph, additions, dir, opts:layoutOpts });
   worker.onmessage = (e) => {
     displaySelection("#graph");
     updateProgress({ start:false });
@@ -843,7 +843,7 @@ async function main() {
   if (ret.length === 0) return;
   // ** center graph
   const data = ret[currentRewrite];
-  const render = (opts) => renderDag(data.graph, data.changed_nodes ?? [], currentRewrite === 0, opts);
+  const render = (opts) => renderDag(data.graph, data.changed_nodes ?? [], data.dir ?? "LR", currentRewrite === 0, opts);
   render({ showIndexing:toggle.checked });
   toggle.onchange = (e) => render({ showIndexing:e.target.checked });
   // ** right sidebar metadata
