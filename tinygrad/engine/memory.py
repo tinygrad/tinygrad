@@ -1,6 +1,6 @@
 from typing import cast
 from collections import defaultdict
-from tinygrad.engine.schedule import ExecItem
+from tinygrad.engine.realize import ExecItem
 from tinygrad.device import Device, Buffer
 from tinygrad.helpers import NO_MEMORY_PLANNER, dedup, DEBUG, round_up
 from tinygrad.uop.ops import Ops
