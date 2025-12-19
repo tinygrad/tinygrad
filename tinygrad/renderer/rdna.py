@@ -14,38 +14,18 @@ def get_reg_base(reg: str) -> int:
 
 def render_val(x, dtype):
   if dtypes.is_float(dtype):
-    # Check if this is an inlineable float constant
     fval = float(x)
-    if fval == 0.0: return "0"
-    if fval == 0.5: return "0.5"
-    if fval == 1.0: return "1.0"
-    if fval == 2.0: return "2.0"
-    if fval == 4.0: return "4.0"
-    if fval == -0.5: return "-0.5"
-    if fval == -1.0: return "-1.0"
-    if fval == -2.0: return "-2.0"
-    if fval == -4.0: return "-4.0"
-    # Non-inlineable float - use hex representation
+    if fval in (0.0, 0.5, 1.0, 2.0, 4.0, -0.5, -1.0, -2.0, -4.0): return str(fval) if fval != 0.0 else "0"
     if dtype == dtypes.double: return "0x%016X" % struct.unpack("Q", struct.pack("d", x))[0]
     if dtype == dtypes.half: return "0x%04X" % struct.unpack("H", struct.pack("e", x))[0]
     return "0x%08X" % struct.unpack("I", struct.pack("f", x))[0]
-  # RDNA3 doesn't support 64-bit integer ALU well - truncate to 32-bit
-  # and use hex for large values
   val = int(x) & 0xFFFFFFFF
-  if val > 0x7FFFFFFF or val < -0x80000000:
-    return f"0x{val:08X}"
-  return str(val)
+  return f"0x{val:08X}" if val > 0x7FFFFFFF else str(val)
 
 def can_inline_const(val, dtype) -> bool:
-  """Check if a constant can be inlined in RDNA3 instructions."""
-  if dtypes.is_float(dtype):
-    # Float inline constants: 0.0, 0.5, 1.0, 2.0, 4.0, -0.5, -1.0, -2.0, -4.0
-    return float(val) in (0.0, 0.5, 1.0, 2.0, 4.0, -0.5, -1.0, -2.0, -4.0)
-  # Integer inline constants: -16 to 64
-  try:
-    return -16 <= int(val) <= 64
-  except (TypeError, ValueError):
-    return False
+  if dtypes.is_float(dtype): return float(val) in (0.0, 0.5, 1.0, 2.0, 4.0, -0.5, -1.0, -2.0, -4.0)
+  try: return -16 <= int(val) <= 64
+  except (TypeError, ValueError): return False
 
 # RDNA3 uses different instruction names and formats than PTX
 # NOTE: These are used via string_rewrite which passes r[v] (register strings), not UOps
@@ -91,20 +71,12 @@ rdna_matcher = PatternMatcher([
 ])
 
 def global_store(addr:str, data:str, base:str, dt:DType) -> str:
-  if dt.itemsize == 1: return f"global_store_byte {addr}, {data}, {base}"
-  if dt.itemsize == 2: return f"global_store_b16 {addr}, {data}, {base}"
-  if dt.itemsize == 4: return f"global_store_b32 {addr}, {data}, {base}"
-  if dt.itemsize == 8: return f"global_store_b64 {addr}, {data}, {base}"
-  if dt.itemsize == 16: return f"global_store_b128 {addr}, {data}, {base}"
-  raise RuntimeError(f"Unsupported store dtype size: {dt.itemsize}")
+  sz = {1: 'byte', 2: 'b16', 4: 'b32', 8: 'b64', 16: 'b128'}[dt.itemsize]
+  return f"global_store_{sz} {addr}, {data}, {base}"
 
 def global_load(dest:str, addr:str, base:str, dt:DType) -> str:
-  if dt.itemsize == 1: return f"global_load_ubyte {dest}, {addr}, {base}"
-  if dt.itemsize == 2: return f"global_load_u16 {dest}, {addr}, {base}"
-  if dt.itemsize == 4: return f"global_load_b32 {dest}, {addr}, {base}"
-  if dt.itemsize == 8: return f"global_load_b64 {dest}, {addr}, {base}"
-  if dt.itemsize == 16: return f"global_load_b128 {dest}, {addr}, {base}"
-  raise RuntimeError(f"Unsupported load dtype size: {dt.itemsize}")
+  sz = {1: 'ubyte', 2: 'u16', 4: 'b32', 8: 'b64', 16: 'b128'}[dt.itemsize]
+  return f"global_load_{sz} {dest}, {addr}, {base}"
 
 def gated_load(ctx, x, idx, alt, gate, buf, index_op) -> list[str]:
   """Generate gated load using v_cndmask for address selection.
@@ -135,22 +107,12 @@ def gated_load(ctx, x, idx, alt, gate, buf, index_op) -> list[str]:
   return result
 
 def ds_read(dest:str, addr:str, dt:DType) -> str:
-  """Generate LDS read instruction based on dtype size."""
-  if dt.itemsize == 1: return f"ds_read_u8 {dest}, {addr}"
-  if dt.itemsize == 2: return f"ds_read_u16 {dest}, {addr}"
-  if dt.itemsize == 4: return f"ds_read_b32 {dest}, {addr}"
-  if dt.itemsize == 8: return f"ds_read_b64 {dest}, {addr}"
-  if dt.itemsize == 16: return f"ds_read_b128 {dest}, {addr}"
-  raise RuntimeError(f"Unsupported LDS read dtype size: {dt.itemsize}")
+  sz = {1: 'u8', 2: 'u16', 4: 'b32', 8: 'b64', 16: 'b128'}[dt.itemsize]
+  return f"ds_read_{sz} {dest}, {addr}"
 
 def ds_write(addr:str, data:str, dt:DType) -> str:
-  """Generate LDS write instruction based on dtype size."""
-  if dt.itemsize == 1: return f"ds_write_b8 {addr}, {data}"
-  if dt.itemsize == 2: return f"ds_write_b16 {addr}, {data}"
-  if dt.itemsize == 4: return f"ds_write_b32 {addr}, {data}"
-  if dt.itemsize == 8: return f"ds_write_b64 {addr}, {data}"
-  if dt.itemsize == 16: return f"ds_write_b128 {addr}, {data}"
-  raise RuntimeError(f"Unsupported LDS write dtype size: {dt.itemsize}")
+  sz = {1: 'b8', 2: 'b16', 4: 'b32', 8: 'b64', 16: 'b128'}[dt.itemsize]
+  return f"ds_write_{sz} {addr}, {data}"
 
 def render_define_var(ctx, x):
   """Render DEFINE_VAR - load from kernarg buffer. Uses SGPR if available, else VGPR via scratch."""
