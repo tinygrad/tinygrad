@@ -89,7 +89,7 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ScheduleItem], UOp]:
       else:
         ast, buf_uops, metadata, fixedvars, bound_ranges = si
         fixedvars = fixedvars | {s.src[0].arg[0]:in_ranges[s.src[1]] for s in bound_ranges}
-        pre_schedule.append(ScheduleItem(ast, (), metadata, fixedvars))
+        pre_schedule.append(ScheduleItem(ast, buf_uops, metadata, fixedvars))
         buf_uops_list.append(UOp.sink(*buf_uops))
       sched_ptr += 1
   return pre_schedule, UOp.sink(*buf_uops_list)
@@ -131,6 +131,7 @@ pm_post_sched_cache = PatternMatcher([
   (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR),), name="b"), lambda ctx,b: ctx.get(b)),
 ])
 
+schedule_capturing = []
 schedule_cache: dict[bytes, tuple[list[ScheduleItem], UOp]] = {}
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[1]))}")
 def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], list[ScheduleItem], dict[str, int]]:
@@ -212,4 +213,8 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
     print(f"scheduled {len(schedule):4d} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
           f" | {' cache hit' if sc_ret is not None else 'CACHE MISS'} {sched_cache_key.hex()[:8]}"+\
           f" | {len(UOpMetaClass.ucache)} uops in cache")
+
+  # for jit2
+  if len(schedule_capturing): schedule_capturing[0].add(input_buffers, sched_cache_key)
+
   return tensor_map, schedule, var_vals
