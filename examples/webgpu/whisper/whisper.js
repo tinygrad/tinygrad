@@ -178,10 +178,7 @@ async function decoder_upload_audio_features(nets, audio_features_batch, decoder
  * @property {integer} index
  * @property {integer} context_prompt_length
  * @property {integer} max_context_length
- * @property {float} segment_cumlogprob
- * @property {float} avg_logprob
  * @property {integer[]} context
- * @property {float[]} logprobs
  */
 
 /**
@@ -194,8 +191,7 @@ async function decoder_upload_audio_features(nets, audio_features_batch, decoder
  * @typedef Decoder_Result
  * @type {object}
  * @property {integer[]} context
- * @property {number} avg_logprob
- * @property {number} segment_cumlogprob
+ * @property {integer[]} sorted
  */
 
 /**
@@ -213,13 +209,7 @@ async function decodeOneBatch(nets, decode_sequences, decoder_state, audio_featu
     let context_inputs = [];
     for (let i = 0; i < decode_sequences.length; ++i) {
         context_inputs.push(decode_sequences[i].context.at(-1));
-
-        let result = {
-            context: decode_sequences[i].context, // TODO(irwin): decide if we want to return the same context or a new copy  @ContextCopyOrReference
-            avg_logprob: undefined,
-            segment_cumlogprob: decode_sequences[i].segment_cumlogprob,
-        }
-        results.push(result);
+        results.push({context: decode_sequences[i].context});
     }
     const max_context_length = Math.max.apply(null, decode_sequences.map(x => x.context.length));
 
@@ -234,39 +224,6 @@ async function decodeOneBatch(nets, decode_sequences, decoder_state, audio_featu
     return results;
 }
 
-/**
- * @param {Decode_Sequence} decode_sequence
- * @param {Decoder_Result} decodeOne_result
- * @returns {Promise<Decoder_Result>}
- */
-async function applyDecoderResults(decode_sequence, decodeOne_result) {
-    // TODO: this function is too vague. it mutates decode_sequence's context and logprobs fields,
-    // does some random-looking segment_cumlogprob logic, and enforces TOK_EOS as final token
-    // when reached max decoded tokens even if we don't know if we even want to do that...
-    const { context, context_prompt_length, max_context_length } = decode_sequence;
-
-    let result = decodeOne_result;
-    let nextTokens = decodeOne_result.sorted;
-
-    let nextTokenIndex = 0;
-
-    // NOTE(irwin): up until here, context is not modified  @ContextCopyOrReference
-    context.push(nextTokens[nextTokenIndex]);
-
-    const decoded_tokens_so_far = context.length - context_prompt_length;
-    result.avg_logprob = result.segment_cumlogprob / (decoded_tokens_so_far - context_prompt_length);
-    let nextLogprob = -0.1;
-    decode_sequence.logprobs.push(nextLogprob);
-    result.segment_cumlogprob += nextLogprob;
-
-    if (nextTokens[nextTokenIndex] == TOK_EOS) {
-        return result;
-    } else if (context.length >= max_context_length) {
-        context[context.length - 1] = TOK_EOS;
-    }
-
-    return result;
-}
 
 /** @returns {Promise<Decode_Sequence[]|undefined>} */
 async function inferLoop(nets, log_specs_full, audio_features_batch, seeks_batch, cancelToken, inferLoopContext) {
@@ -290,10 +247,7 @@ async function inferLoop(nets, log_specs_full, audio_features_batch, seeks_batch
             index: 0,
             context_prompt_length: 1,
             max_context_length: 0,
-            segment_cumlogprob: 0,
-            avg_logprob: 0,
             context: undefined,
-            logprobs: undefined,
         };
 
         const SEQUENCE_COUNT = audio_features_batch.length;
@@ -304,7 +258,6 @@ async function inferLoop(nets, log_specs_full, audio_features_batch, seeks_batch
             sequence.context_prompt_length = context_prompt_length;
             sequence.max_context_length = max_context_length;
             sequence.context = context.slice();
-            sequence.logprobs = [];
             sequences.push(sequence);
         }
 
@@ -354,15 +307,19 @@ async function inferLoop(nets, log_specs_full, audio_features_batch, seeks_batch
                     inferLoopContext.is_done = true;
                     return;
                 }
-                if (sequences[idx].context.at(-1) === TOK_EOS) continue;
+                let current_sequence = sequences[idx];
+                let current_context = current_sequence.context;
+
+                if (current_context.at(-1) === TOK_EOS) continue;
                 let seek = seeks_batch[idx];
 
-                let decode_result = await applyDecoderResults(sequences[idx], decode_results[idx]);
-                sequences[idx].context = decode_result.context;
-                sequences[idx].avg_logprob = decode_result.avg_logprob;
-                sequences[idx].segment_cumlogprob = decode_result.segment_cumlogprob;
+                current_context.push(decode_results[idx].sorted[0]);
 
-                const detokenized = tokensToText(sequences[idx].context.slice(sequences[idx].context_prompt_length), nets.mapping);
+                if (current_context.length >= current_sequence.max_context_length) {
+                    current_context[current_context.length - 1] = TOK_EOS;
+                }
+
+                const detokenized = tokensToText(current_context.slice(current_sequence.context_prompt_length), nets.mapping);
                 const seek_end = Math.min(seek + MEL_SPEC_CHUNK_LENGTH, log_specs_full.length);
                 let pendingText = format_text(detokenized, seek, seek_end);
                 pendingTexts[idx] = pendingText;
@@ -376,18 +333,11 @@ async function inferLoop(nets, log_specs_full, audio_features_batch, seeks_batch
         }
 
     } else if (inferLoopContext.state === "POST_DECODE") {
-        let sequences = inferLoopContext.sequences;
-
-        for (let seq of sequences) {
-            let cumlogprob = seq.logprobs.reduce((a, b) => a + b);
-            console.log(cumlogprob);
-            console.log(cumlogprob / seq.logprobs.length);
-        }
-
         inferLoopContext.is_done = true;
         inferLoopContext.state = "DONE";
 
-        return sequences;
+        return inferLoopContext.sequences;
+
     } else if (inferLoopContext.state === "DONE") {
         return inferLoopContext.sequences;
     }
@@ -482,9 +432,9 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
                 return;
             } else {
                 let sequence = sequences[i];
-                let {avg_logprob, segment_cumlogprob, context, context_prompt_length: offset} = sequence;
+                let {context, context_prompt_length: offset} = sequence;
 
-                onEvent("chunkDone", { avg_logprob, segment_cumlogprob, context, offset, index: i, pendingText: pendingTexts[i] });
+                onEvent("chunkDone", { context, offset, index: i, pendingText: pendingTexts[i] });
                 pendingTexts[i] = '';
 
                 ++i;

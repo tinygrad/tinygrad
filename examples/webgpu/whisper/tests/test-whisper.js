@@ -146,7 +146,7 @@ function onTranscriptionEvent(event, data) {
   } else if (event === "chunkUpdate") {
     console.log(data.pendingTexts);
   } else if (event === "chunkDone") {
-    console.log(data.segment_cumlogprob.toFixed(2) + ' ' + data.pendingText);
+    // console.log(data.segment_cumlogprob.toFixed(2) + ' ' + data.pendingText);
   }
 }
 

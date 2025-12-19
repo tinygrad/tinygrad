@@ -241,9 +241,7 @@
                 current[data.index].style.display = 'none';
                 const newChunk = document.createElement('div');
                 newChunk.className = 'transcription-chunk';
-                // newChunk.innerText = data.segment_cumlogprob.toFixed(2) + ' ' + data.pendingText;
                 newChunk.innerText = data.pendingText;
-                console.log(data.segment_cumlogprob.toFixed(2) + ' ' + data.pendingText);
                 transcriptionLog.appendChild(newChunk);
                 currentTranscription.innerText = '';
                 pendingText = '';
