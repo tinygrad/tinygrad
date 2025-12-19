@@ -187,57 +187,43 @@ async function decoder_upload_audio_features(nets, audio_features_batch, decoder
  * @property {integer[][]} contexts
  */
 
+function initSequences(sequence_count) {
+    let context = [TOK_BEGIN_TRANSCRIPTION, TOK_NO_TIMESTAMPS];
+    const context_prompt_length = context.length;
+    const max_context_length = context_prompt_length + MAX_TOKENS_TO_DECODE;
+
+    /** @type {Decode_Sequence[]} */
+    let sequences = [];
+    for (let i = 0; i < sequence_count; ++i) {
+        let sequence = {};
+        sequence.index = context_prompt_length;
+        sequence.context_prompt_length = context_prompt_length;
+        sequence.max_context_length = max_context_length;
+        sequence.context = context.slice();
+        sequences.push(sequence);
+    }
+
+    return sequences;
+}
+
+async function initDecoder(nets, audio_features_batch) {
+    /** @type {Decoder_State} */
+    let decoder_state = {
+        contexts: []
+    };
+
+    for (let i = 0; i < nets.model_metadata.decoder_batch_size; ++i) {
+        decoder_state.contexts.push([]);
+    }
+
+    await decoder_upload_audio_features(nets, audio_features_batch, decoder_state);
+
+    return decoder_state;
+}
 
 /** @returns {Promise<Decode_Sequence[]|undefined>} */
 async function inference(nets, log_specs_full, audio_features_batch, seeks_batch, cancelToken, inferenceState) {
-    if (inferenceState.state === "INIT") {
-        let context = [TOK_BEGIN_TRANSCRIPTION, TOK_NO_TIMESTAMPS];
-        const context_prompt_length = context.length;
-        const max_context_length = context_prompt_length + MAX_TOKENS_TO_DECODE;
-        const SEQUENCE_COUNT = audio_features_batch.length;
-
-        /** @type {Decode_Sequence[]} */
-        let sequences = [];
-        for (let i = 0; i < SEQUENCE_COUNT; ++i) {
-            let sequence = {};
-            sequence.index = context_prompt_length;
-            sequence.context_prompt_length = context_prompt_length;
-            sequence.max_context_length = max_context_length;
-            sequence.context = context.slice();
-            sequences.push(sequence);
-        }
-
-        inferenceState.sequences = sequences;
-        inferenceState.state = "DECODE_INIT";
-        return;
-
-    } else if (inferenceState.state === "DECODE_INIT") {
-        let sequences = inferenceState.sequences;
-
-        /** @type {Decoder_State} */
-        let decoder_state = {
-            contexts: []
-        };
-
-        for (let i = 0; i < nets.model_metadata.decoder_batch_size; ++i) {
-            decoder_state.contexts.push([]);
-        }
-
-        await decoder_upload_audio_features(nets, audio_features_batch, decoder_state);
-
-
-        let pendingTexts = [];
-        for (let sequence_index = 0; sequence_index < sequences.length; ++sequence_index) {
-            pendingTexts.push('');
-        }
-
-        inferenceState.decoder_state = decoder_state;
-        inferenceState.pendingTexts = pendingTexts;
-        inferenceState.currentTokenIndex = 0;
-        inferenceState.state = "DECODE";
-        return;
-
-    } else if (inferenceState.state === "DECODE") {
+    if (inferenceState.state === "DECODE") {
         let pendingTexts = inferenceState.pendingTexts;
         let sequences = inferenceState.sequences;
         let decoder_state = inferenceState.decoder_state;
@@ -362,15 +348,17 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
         }
 
         let inferenceState = {
-            state: "INIT",
+            sequences: initSequences(audio_features_batch.length),
+            decoder_state: await initDecoder(nets, audio_features_batch),
+            currentTokenIndex: 0,
+            pendingTexts: [],
+            state: "DECODE",
             is_done: false
         };
         let sequences;
         while (!inferenceState.is_done) {
             sequences = await inference(nets, log_specs_full, audio_features_batch, seeks_batch, cancelToken, inferenceState);
-            if (inferenceState.state === "INIT") {
-            } else if (inferenceState.state === "DECODE_INIT") {
-            } else if (inferenceState.state === "DECODE") {
+            if (inferenceState.state === "DECODE") {
                 if (inferenceState.currentTokenIndex !== 0) {
                     // index was already incremented for the next decode iteration
                     let currentTokenIndex = inferenceState.currentTokenIndex - 1;
@@ -434,6 +422,6 @@ export {
 
     batch_repeat_helper,
     decoder_helper,
-    inference as inferLoop,
+    inference,
     transcribeAudio
 };
