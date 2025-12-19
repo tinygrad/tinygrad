@@ -173,12 +173,12 @@ class TextDecoder:
       # return logits.log_softmax(axis=-1), ((((logits / logits.max(axis=-1, keepdim=True) * 255).int() * (2**16))+Tensor.arange(51864)).sort(descending=True)[0] & 0x0000ffff)
       # logprobs = logits.log_softmax(axis=-1)
       sorted_indices = ((((logits / logits.abs().max(axis=-1, keepdim=True) * 255 + 256).cast(dtypes.uint).lshift(16).int())+Tensor.arange(51864)).sort(descending=True)[0] & 0x0000ffff)
-      # sorted_indices_topk = sorted_indices[..., 0:10]
-      sorted_indices_topk = sorted_indices.shrink((None, None, (0, 10)))
+      # sorted_indices_topk = sorted_indices[..., 0:DECODER_TOPK]
+      sorted_indices_topk = sorted_indices.shrink((None, None, (0, DECODER_TOPK)))
       # logprobs_topk = logprobs[sorted_indices_topk]
       # return logprobs, sorted_indices_topk
       return sorted_indices_topk.contiguous()
-      # return logits.topk(10)[1].contiguous()
+      # return logits.topk(DECODER_TOPK)[1].contiguous()
 
   def output_tok(self, x):
     return (self.ln(x) @ self.token_embedding.weight.T)
@@ -205,6 +205,7 @@ def init_whisper(model_name="tiny.en", batch_size=1):
 FLOAT16 = False
 MODEL_NAME = "tiny.en"
 DECODER_BATCH_SIZE = 32
+DECODER_TOPK = 10
 
 if __name__ == '__main__':
   try:
@@ -343,7 +344,12 @@ if __name__ == '__main__':
   export_decoder_2()
   export_vocab()
 
-  metadata_dict = {"model_name": MODEL_NAME, "decoder_batch_size": DECODER_BATCH_SIZE, "max_size_per_tensor_in_bytes": max_size_per_tensor_in_bytes}
+  metadata_dict = {
+    "model_name": MODEL_NAME,
+    "decoder_batch_size": DECODER_BATCH_SIZE,
+    "decoder_topk": DECODER_TOPK,
+    "max_size_per_tensor_in_bytes": max_size_per_tensor_in_bytes
+  }
   try:
     metadata_dict["tinygrad_revision"] = tinygrad_revision
   except NameError:
