@@ -23,9 +23,9 @@ The [scheduler](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/engine
 
 ## Lowering
 
-The code in [realize](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/engine/realize.py) lowers `ScheduleItem` to `ExecItem` with
+The code in [realize](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/engine/realize.py) lowers `ScheduleItem` by populating its `prg` field with
 
-::: tinygrad.engine.realize.lower_schedule
+::: tinygrad.engine.realize.run_schedule
 
 There's a ton of complexity hidden behind this, see the `codegen/` directory.
 

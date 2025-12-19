@@ -185,7 +185,8 @@ si_lowerer = PatternMatcher([
 capturing: list = []  # put classes with an add method in here
 
 def run_schedule(schedule:list[ScheduleItem], var_vals:dict[str, int]|None=None, do_update_stats=True):
-  for si in schedule:
+  while len(schedule):
+    si = schedule.pop(0)
     si._lower()  # ensure prg is populated before capturing
     if len(capturing) and CAPTURING: capturing[0].add(si)
     if VALIDATE_WITH_CPU and si.ast.op is Ops.SINK:
