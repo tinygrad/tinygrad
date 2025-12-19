@@ -537,6 +537,32 @@ def eval_stable_diffusion():
   # for testing
   return clip_score, fid_score, ckpt_iteration
 
+def eval_flux_text_to_image_tiny():
+  from examples.mlperf.model_spec import get_model_entry
+  entry = get_model_entry("flux_text_to_image_tiny")
+  model = entry["model_ctor"]()
+  if (ckpt := getenv("FLUX_CKPT", "")):
+    print(f"loading checkpoint from {ckpt}")
+    load_state_dict(model, safe_load(ckpt))
+  else:
+    print("warning: evaluating random initialization (set FLUX_CKPT to load trained weights)")
+  eval_bs = int(getenv("EVAL_BS", getenv("BS", 2)))
+  eval_loss_fn = entry["loss_fn"]("eval", eval_noise_seed=int(getenv("FLUX_EVAL_NOISE_SEED", 1337)))
+  eval_loader = entry["eval_dataloader"](batch_size=eval_bs)
+  payloads = []
+  for batch in eval_loader:
+    _, payload = eval_loss_fn(model, batch)
+    if payload is not None:
+      payloads.append(payload)
+  if not payloads:
+    print("no eval data available for flux_text_to_image_tiny")
+    return
+  value, bucket_means = entry["metric_fn"](payloads)
+  print(f"validation_loss: {value:.6f}")
+  for idx, bucket_val in enumerate(bucket_means):
+    print(f"  bucket_{idx}: {bucket_val:.6f}")
+  return value, bucket_means
+
 if __name__ == "__main__":
   # inference only
   Tensor.training = False

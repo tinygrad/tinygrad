@@ -1,6 +1,7 @@
 import os, time, math, functools, random, contextlib
 from pathlib import Path
 import multiprocessing
+import numpy as np
 
 from tinygrad import Device, GlobalCounters, Tensor, TinyJit, dtypes
 from tinygrad.helpers import getenv, BEAM, WINO, round_up, diskcache_clear, Profiling
@@ -1620,6 +1621,44 @@ def train_stable_diffusion():
   t3-t2: {t3-t2:.4f}, loss:{loss_item:.5f}, lr:{lr_item:.3e}, total_train_time:{total_train_time:.2f}
   """)
     t6 = time.perf_counter()
+
+def train_flux_text_to_image_tiny():
+  from examples.mlperf.model_spec import get_model_entry
+  entry = get_model_entry("flux_text_to_image_tiny")
+  seed = int(getenv("SEED", 0))
+  Tensor.manual_seed(seed)
+  model = entry["model_ctor"]()
+  if (ckpt := getenv("FLUX_CKPT", "")):
+    print(f"loading checkpoint from {ckpt}")
+    load_state_dict(model, safe_load(ckpt))
+  optimizer = AdamW(get_parameters(model), lr=float(getenv("FLUX_LR", 1e-4)))
+  steps = int(getenv("FLUX_STEPS", 50))
+  train_loader = entry["train_dataloader"](batch_size=int(getenv("BS", 2)))
+  train_iter = iter(train_loader)
+  log_interval = max(1, int(getenv("FLUX_LOG_INTERVAL", 10)))
+  train_loss_fn = entry["loss_fn"]("train", seed=seed)
+  final_loss = None
+
+  def next_train_batch():
+    nonlocal train_iter
+    try:
+      return next(train_iter)
+    except StopIteration:
+      train_iter = iter(train_loader)
+      return next(train_iter)
+
+  for step in range(1, steps + 1):
+    Tensor.training = True
+    batch = next_train_batch()
+    optimizer.zero_grad()
+    loss, _ = train_loss_fn(model, batch)
+    loss.backward()
+    optimizer.step()
+    final_loss = float(loss.item())
+    if step % log_interval == 0 or step == 1:
+      print(f"[flux_tiny] step {step}/{steps} loss={final_loss:.6f}")
+
+  return final_loss
 
 if __name__ == "__main__":
   multiprocessing.set_start_method('spawn')
