@@ -9,7 +9,7 @@ from tinygrad.engine.realize import ExecItem, capturing, ViewOp, BufferCopy, Buf
 from tinygrad.engine.memory import _internal_memory_planner
 from tinygrad.nn.state import get_parameters
 from tinygrad.schedule.rangeify import mop_cleanup
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from weakref import WeakKeyDictionary
 
 class GraphException(Exception): pass
@@ -31,7 +31,7 @@ def apply_graph_to_jit(jit_cache: list[ExecItem], input_rawbuffers: list[Buffer]
       graph_runner = current_batch_devs[0].graph(current_batch, input_rawbuffers, var_vals)
       # clear jit inputs to allow their memory to be freed/reused
       for (j,i) in graph_runner.input_replace.keys(): graph_runner.jit_cache[j].bufs[i] = None
-      graphed_jit_cache.append(ExecItem(graph_runner, cast(list[Buffer|None], input_rawbuffers)))
+      graphed_jit_cache.append(ExecItem(UOp(Ops.NOOP), cast(list[Buffer|None], input_rawbuffers), prg=graph_runner))
       max_batch_size *= 2
       if DEBUG >= 2: print(f"JIT GRAPHing batch with {len(current_batch)} kernels on device {current_batch_devs[0]}")
     except GraphException as e:
@@ -89,6 +89,7 @@ class GraphRunner(Runner):
 
     estimates = Estimates()
     for j,ji in enumerate(jit_cache):
+      assert ji.prg is not None
       estimates += ji.prg.estimates
       if isinstance(ji.prg, CompiledRunner):
         if ji.prg.p.vars: self.var_vals_replace[j] = [(i, self.vars.index(v.expr)) for i, v in enumerate(ji.prg.p.vars) if v.expr not in ji.fixedvars]
@@ -103,6 +104,7 @@ class GraphRunner(Runner):
     self.w_dependency_map: dict[int, Any] = {}
     self.r_dependency_map: dict[int, list[Any]] = collections.defaultdict(list)
 
+    assert jit_cache[0].prg is not None
     super().__init__(colored(f"<batched {len(jit_cache)}>", "cyan"), jit_cache[0].prg.device.split(":")[0], estimates.simplify())
 
   def updated_vars(self, var_vals: dict[str, int]):
@@ -186,7 +188,7 @@ class CapturedJit(Generic[ReturnType]):
   def replan_buffers_memory_layout(self):
     blacklist = [t.uop.buffer for t in get_parameters(self.ret)]
     asgn = _internal_memory_planner([[b for item in self.jit_cache for b in item.bufs if b is not None and b not in blacklist]], ignore_checks=True)
-    self.jit_cache = [ExecItem(item.prg, [asgn.get(b,b) if b is not None else None for b in item.bufs]) for item in self.jit_cache]
+    self.jit_cache = [replace(item, bufs=[asgn.get(b,b) if b is not None else None for b in item.bufs]) for item in self.jit_cache]
     for old, new in asgn.items():
       if old.is_allocated(): new.ensure_allocated().copyin(old.as_buffer())
     self.__post_init__()
@@ -249,7 +251,7 @@ class TinyJit(Generic[ReturnType]):
     return ret
 
   def add(self, ei:ExecItem):
-    self._jit_cache.append(ExecItem(ei.prg, [self.add_buffer(buf) for buf in ei.bufs if buf is not None], ei.metadata, ei.fixedvars))
+    self._jit_cache.append(ExecItem(ei.ast, [self.add_buffer(buf) for buf in ei.bufs if buf is not None], ei.metadata, ei.fixedvars, ei.prg))
 
   def reset(self):
     assert self.fxn is not None, "can't reset without function"
@@ -320,8 +322,7 @@ class TinyJit(Generic[ReturnType]):
       # Exclude buffers involved in transfer ops to preserve parallelism.
       noopt_buffers = {b for ji in jit_cache if isinstance(ji.prg, (BufferXfer, BufferCopy, EncDec)) for b in ji.bufs}
       assigned = _internal_memory_planner([cast(list[Buffer], item.bufs) for item in jit_cache], noopt_buffers, debug_prefix="JIT ")
-      jit_cache = [ExecItem(item.prg, [assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None],
-                            item.metadata, item.fixedvars) for item in jit_cache]
+      jit_cache = [replace(item, bufs=[assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None]) for item in jit_cache]
 
       input_replace = get_input_replace(jit_cache, input_buffers)
       if DEBUG >= 1 and len(set(input_replace.values())) != len(input_buffers): print("WARNING: some input tensors not found")

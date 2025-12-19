@@ -4,7 +4,9 @@ from tinygrad.device import Buffer, Device
 from tinygrad.helpers import Context, getenv, from_mv
 from tinygrad.dtype import dtypes
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.engine.realize import ExecItem, BufferXfer, get_runner
+from tinygrad.engine.realize import BufferXfer, get_runner
+from tinygrad.engine.schedule import ExecItem
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.engine.jit import apply_graph_to_jit
 
 BUF_LEN = getenv("BUF_LEN", 128)
@@ -35,13 +37,13 @@ def gen_kernel_ji(device, deps):
   assert len(deps) >= 2
   out = alloc_rawbuffer(device)
   prg = gen_prg(device, len(deps))
-  return ExecItem(prg, [out] + deps)
+  return ExecItem(UOp(Ops.NOOP), [out] + deps, prg=prg)
 
 def gen_copy_ji(device, deps):
   assert len(deps) == 1
   out = alloc_rawbuffer(device)
   prg = BufferXfer(deps[0].nbytes, device, deps[0].device)
-  return ExecItem(prg, [out] + deps)
+  return ExecItem(UOp(Ops.NOOP), [out] + deps, prg=prg)
 
 def gen_graph():
   input_buffers = []

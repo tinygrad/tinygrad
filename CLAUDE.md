@@ -88,7 +88,7 @@ VIZ=1 python -c "from tinygrad import Tensor; Tensor.ones(10).sum().realize()"
 ## Debugging Tips
 
 1. **Print UOp graphs**: `print(tensor.uop)` or `print(tensor.uop.sink())`
-2. **Check schedule**: `tensor.schedule()` returns list of ScheduleItems
+2. **Check schedule**: `tensor.schedule()` returns list of ExecItems
 3. **Trace graph rewrites**: Use `VIZ=1` or add print in PatternMatcher callbacks
 4. **Find UOps by type**: `[u for u in uop.toposort() if u.op is Ops.SOMETHING]`
 
