@@ -1,10 +1,10 @@
-from typing import Callable, cast
-import time, random, itertools, math, pprint
-from dataclasses import dataclass, field, replace
-from tinygrad.helpers import all_same, colored, DEBUG, BEAM, NOOPT, all_int, CAPTURING, TracingKey, Metadata
-from tinygrad.helpers import DEVECTORIZE, VALIDATE_WITH_CPU, getenv, cpu_profile, prod, Context, PROFILE, GlobalCounters, ansilen, TRACEMETA
-from tinygrad.helpers import time_to_str, unwrap, ProfilePointEvent, cpu_events
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, graph_rewrite, print_uops, track_rewrites, KernelInfo, pyrender, sym_infer
+from typing import cast, Callable
+import time, pprint, random, itertools, math
+from dataclasses import dataclass, replace, field
+from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
+from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context
+from tinygrad.helpers import unwrap
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, print_uops, track_rewrites, KernelInfo, pyrender
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
 from tinygrad.codegen import full_rewrite
@@ -168,7 +168,7 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
     method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, device=device))
   return ret
 
-# **************** lowering ****************
+# **************** lowering functions ****************
 
 # NOTE: ctx is the buffers
 si_lowerer = PatternMatcher([
@@ -188,9 +188,9 @@ class ExecItem:
   fixedvars: dict[str, int] = field(default_factory=dict)
   prg: Runner|None = None
 
-  def lower(self) -> None:
+  def lower(self):
     """Populate self.prg by lowering the AST."""
-    if self.prg is not None: return
+    if self.prg is not None: return self
     try: self.prg = cast(Runner, si_lowerer.rewrite(self.ast, self.bufs))
     except Exception as e:
       if DEBUG >= 2:
@@ -198,6 +198,7 @@ class ExecItem:
         print("tensor operations:")
         pprint.pprint(self.metadata, indent=2)
       raise e
+    return self
 
   def run(self, _var_vals:dict[str, int]|None=None, wait=False, jit=False, do_update_stats=True) -> float|None:
     if self.prg is None: self.lower()
@@ -238,8 +239,7 @@ capturing: list = []  # put classes with an add method in here
 
 def run_schedule(schedule:list[ExecItem], var_vals:dict[str, int]|None=None, do_update_stats=True):
   while len(schedule):
-    ei = schedule.pop(0)
-    ei.lower()
+    ei = schedule.pop(0).lower()
     if len(capturing) and CAPTURING: capturing[0].add(ei)
     if VALIDATE_WITH_CPU and ei.ast.op is Ops.SINK:
       # copy in allocated buffers from the GPU
