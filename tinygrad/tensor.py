@@ -13,7 +13,7 @@ from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
 from tinygrad.mixin.movement import _align_left
 from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop, Variable
-from tinygrad.engine.schedule import ScheduleItem, complete_create_schedule_with_vars
+from tinygrad.engine.schedule import ExecItem, complete_create_schedule_with_vars
 from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import run_schedule
 
@@ -237,7 +237,7 @@ class Tensor(OpMixin):
     """
     return [Tensor(u) for u in UOp.custom_kernel(*[t.uop for t in (self,)+lst], fxn=fxn, grad_fxn=grad_fxn)]
 
-  def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ScheduleItem], dict[str, int]]:
+  def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ExecItem], dict[str, int]]:
     """
     Creates the schedule needed to realize these Tensor(s), with Variables.
 
@@ -250,7 +250,7 @@ class Tensor(OpMixin):
     _apply_map_to_tensors(becomes_map, name="Apply Schedule Map")
     return schedule, var_vals
 
-  def schedule(self, *lst:Tensor) -> list[ScheduleItem]:
+  def schedule(self, *lst:Tensor) -> list[ExecItem]:
     """Creates the schedule needed to realize these Tensor(s)."""
     schedule, var_vals = self.schedule_with_vars(*lst)
     assert len(var_vals) == 0

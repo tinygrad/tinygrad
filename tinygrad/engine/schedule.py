@@ -1,25 +1,17 @@
+from __future__ import annotations
 import time
 from typing import cast
-from dataclasses import dataclass, field
 from collections import deque
 from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites
 from tinygrad.uop.ops import PatternMatcher, UPat, graph_rewrite, graph_rewrite_map
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.helpers import Metadata, DEBUG, cpu_profile, TracingKey, SPEC, flatten, pluralize
-
-# **** ScheduleItem return type
-
-@dataclass(frozen=True)
-class ScheduleItem:
-  ast: UOp
-  bufs: tuple[Buffer, ...] = ()
-  metadata: tuple[Metadata, ...] = ()
-  fixedvars: dict[str, int] = field(default_factory=dict)
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, flatten, pluralize
+from tinygrad.engine.realize import ExecItem
 
 # **** schedule linearizer
 
-def create_schedule(sched_sink:UOp) -> tuple[list[ScheduleItem], UOp]:
+def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
   with cpu_profile(TracingKey("toposort sched_sink")):
     # construct the KERNEL children graph based on assigns
     children: dict[UOp, list[UOp]] = {}
@@ -70,7 +62,7 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ScheduleItem], UOp]:
         if in_degree[x] == 0: queue.append(x)
 
   with cpu_profile(TracingKey("expand ranges")):
-    pre_schedule: list[ScheduleItem] = []
+    pre_schedule: list[ExecItem] = []
     buf_uops_list: list[UOp] = []
     sched_ptr = 0
     in_ranges: dict[UOp, int] = {}
@@ -89,7 +81,7 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ScheduleItem], UOp]:
       else:
         ast, buf_uops, metadata, fixedvars, bound_ranges = si
         fixedvars = fixedvars | {s.src[0].arg[0]:in_ranges[s.src[1]] for s in bound_ranges}
-        pre_schedule.append(ScheduleItem(ast, (), metadata, fixedvars))
+        pre_schedule.append(ExecItem(ast, [], metadata, fixedvars))
         buf_uops_list.append(UOp.sink(*buf_uops))
       sched_ptr += 1
   return pre_schedule, UOp.sink(*buf_uops_list)
@@ -131,9 +123,9 @@ pm_post_sched_cache = PatternMatcher([
   (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR),), name="b"), lambda ctx,b: ctx.get(b)),
 ])
 
-schedule_cache: dict[bytes, tuple[list[ScheduleItem], UOp]] = {}
+schedule_cache: dict[bytes, tuple[list[ExecItem], UOp]] = {}
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[1]))}")
-def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], list[ScheduleItem], dict[str, int]]:
+def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], list[ExecItem], dict[str, int]]:
   # big_sink srcs are all the Tensors
   st = time.perf_counter()
 
@@ -180,7 +172,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   tensor_map = {tm_src[i]:tm_src[i+1] for i in range(0, len(tm_src), 2)}
 
   # add bufs to pre_schedule
-  schedule: list[ScheduleItem] = []
+  schedule: list[ExecItem] = []
   for i, si in enumerate(pre_schedule):
     buf_uops = buf_uops_sink.src[i].src
     # create subbuffers if needed
@@ -193,10 +185,10 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
       assert all(isinstance(x, MultiBuffer) for x in ubufs), "kernel must all be multibuffer"
       dnums = [x for x in si.ast.variables() if x.arg[0] == '_device_num']
       for j, bufs in enumerate(zip(*[x.bufs for x in cast(tuple[MultiBuffer, ...], ubufs)])):
-        schedule.append(ScheduleItem(si.ast, bufs, si.metadata, si.fixedvars | ({dnums[0].expr:j} if len(dnums) else {})))
+        schedule.append(ExecItem(si.ast, list(bufs), si.metadata, si.fixedvars | ({dnums[0].expr:j} if len(dnums) else {})))
     else:
       # ONE -> ONE
-      schedule.append(ScheduleItem(si.ast, cast(tuple[Buffer, ...], ubufs), si.metadata, si.fixedvars))
+      schedule.append(ExecItem(si.ast, list(ubufs), si.metadata, si.fixedvars))
   with cpu_profile(TracingKey("memory planner")): schedule = memory_planner(schedule)
 
   # extract var_vals from BINDs that were stripped (only if there are kernels)

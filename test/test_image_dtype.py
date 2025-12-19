@@ -3,7 +3,6 @@ import numpy as np
 from tinygrad import Device, dtypes, Tensor, Context
 from tinygrad.device import LRUAllocator, is_dtype_supported
 from tinygrad.dtype import ImageDType
-from tinygrad.engine.realize import lower_schedule
 from tinygrad.helpers import prod, unwrap
 from test.helpers import REAL_DEV
 
@@ -129,8 +128,8 @@ class TestImageDType(unittest.TestCase):
       loss = x.image_dot(w1).image_dot(w2).float().max()
       loss.backward()
       sched = unwrap(w1.grad).schedule()
-      for s,(_,ei) in zip(sched, lower_schedule(sched[:])):
-        ei.run()
+      for s in sched:
+        s.run()
         if s.bufs[0].dtype == dtypes.float:
           lst = s.bufs[0].as_buffer().cast("f").tolist()
           print(lst)
