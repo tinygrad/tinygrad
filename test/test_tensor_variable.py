@@ -95,6 +95,37 @@ class TestTensorVariable(unittest.TestCase):
     assert t.uop.base.buffer.size == 30
     assert t.uop.shape == (3, vb)
 
+  def test_symbolic_chunk(self):
+    # chunk should work when split dimension is concrete, even if other dims are symbolic
+    vv = Variable("a", 1, 10).bind(4)
+    t = Tensor.ones(10, 8).contiguous()[:vv, :]  # shape (vv, 8)
+    chunks = t.chunk(2, dim=-1)  # split along concrete dim 8
+    assert len(chunks) == 2
+    assert chunks[0].shape[1] == 4
+    assert chunks[1].shape[1] == 4
+    # verify the values by shrinking to concrete shape first
+    np.testing.assert_equal(chunks[0].shrink(((0, 4), (0, 4))).numpy(), np.ones((4, 4)))
+    np.testing.assert_equal(chunks[1].shrink(((0, 4), (0, 4))).numpy(), np.ones((4, 4)))
+
+  def test_symbolic_split(self):
+    # split should work when split dimension is concrete, even if other dims are symbolic
+    vv = Variable("a", 1, 10).bind(3)
+    t = Tensor.arange(30).reshape(10, 3).contiguous()[:, :vv]  # shape (10, vv)
+    splits = t.split(5, dim=0)  # split along concrete dim 10
+    assert len(splits) == 2
+    assert splits[0].shape[0] == 5
+    assert splits[1].shape[0] == 5
+    # verify the values by shrinking to concrete shape first
+    np.testing.assert_equal(splits[0].shrink(((0, 5), (0, 3))).numpy(), np.arange(30).reshape(10, 3)[:5, :3])
+    np.testing.assert_equal(splits[1].shrink(((0, 5), (0, 3))).numpy(), np.arange(30).reshape(10, 3)[5:, :3])
+
+  def test_symbolic_chunk_error_on_symbolic_dim(self):
+    # chunk should fail when trying to split along a symbolic dimension
+    vv = Variable("a", 1, 10).bind(4)
+    t = Tensor.ones(10, 8).contiguous()[:vv, :]  # shape (vv, 8)
+    with self.assertRaises(AssertionError):
+      t.chunk(2, dim=0)  # can't split along symbolic dim
+
 
 if __name__ == '__main__':
   unittest.main()

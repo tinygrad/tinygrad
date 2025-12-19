@@ -149,6 +149,10 @@ def getenv(key:str, default:Any=0): return type(default)(os.getenv(key, default)
 def temp(x:str, append_user:bool=False) -> str:
   return (pathlib.Path(tempfile.gettempdir()) / (f"{x}.{getpass.getuser()}" if append_user else x)).as_posix()
 
+def stderr_log(msg):
+  sys.stderr.write(msg)
+  sys.stderr.flush()
+
 class Context(contextlib.ContextDecorator):
   def __init__(self, **kwargs): self.kwargs = kwargs
   def __enter__(self):

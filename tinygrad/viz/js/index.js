@@ -698,6 +698,29 @@ const toggleLabel = d3.create("label").text("Show indexing (r)").node();
 const toggle = d3.create("input").attr("type", "checkbox").attr("id", "show-indexing").property("checked", true).node();
 toggleLabel.prepend(toggle);
 
+function appendSteps(root, idx, steps) {
+  const stack = [];
+  for (const [j,u] of steps.entries()) {
+    while (stack.length && stack.at(-1).depth >= u.depth) stack.pop();
+    const list = stack.length > 0 ? stack.at(-1).li : root;
+    u.li = list.appendChild(document.createElement("ul"));
+    u.li.id = `step-${idx}-${j}`
+    const p = u.li.appendChild(document.createElement("p"));
+    p.appendChild(colored(`${u.name}`+(u.match_count ? ` - ${u.match_count}` : '')));
+    p.onclick = (e) => {
+      e.stopPropagation();
+      const subrewrites = getSubrewrites(e.currentTarget.parentElement);
+      if (subrewrites.length) { e.currentTarget.parentElement.classList.toggle("expanded"); }
+      setState({ currentStep:j, currentCtx:idx, currentRewrite:0 });
+    }
+    stack.push(u);
+  }
+  for (const l of root.querySelectorAll("ul > ul > p")) {
+    const subrewrites = getSubrewrites(l.parentElement);
+    if (subrewrites.length > 0) { l.appendChild(d3.create("span").text(` (${subrewrites.length})`).node()); l.parentElement.classList.add("has-children"); }
+  }
+}
+
 async function main() {
   // ** left sidebar context list
   if (ctxs == null) {
@@ -712,26 +735,7 @@ async function main() {
       p.onclick = () => {
         setState(i === state.currentCtx ? { expandSteps:!state.expandSteps } : { expandSteps:true, currentCtx:i, currentStep:0, currentRewrite:0 });
       }
-      const stack = []; let list = ul;
-      for (const [j,u] of steps.entries()) {
-        while (stack.length && stack.at(-1).depth >= u.depth) stack.pop();
-        const list = stack.length > 0 ? stack.at(-1).li : ul;
-        u.li = list.appendChild(document.createElement("ul"));
-        u.li.id = `step-${i}-${j}`
-        const p = u.li.appendChild(document.createElement("p"));
-        p.appendChild(colored(`${u.name}`+(u.match_count ? ` - ${u.match_count}` : '')));
-        p.onclick = (e) => {
-          e.stopPropagation();
-          const subrewrites = getSubrewrites(e.currentTarget.parentElement);
-          if (subrewrites.length) { e.currentTarget.parentElement.classList.toggle("expanded"); }
-          setState({ currentStep:j, currentCtx:i, currentRewrite:0 });
-        }
-        stack.push(u);
-      }
-      for (const l of ul.querySelectorAll("ul > ul > p")) {
-        const subrewrites = getSubrewrites(l.parentElement);
-        if (subrewrites.length > 0) { l.appendChild(d3.create("span").text(` (${subrewrites.length})`).node()); l.parentElement.classList.add("has-children"); }
-      }
+      appendSteps(ul, i, steps);
     }
     return setState({ currentCtx:-1 });
   }
@@ -753,9 +757,18 @@ async function main() {
   if (ckey in cache) {
     ret = cache[ckey];
   }
-  // ** Disassembly view
-  if (!ckey.startsWith("/rewrites")) {
+  // ** Text view
+  if (!ckey.startsWith("/graph")) {
     if (!(ckey in cache)) cache[ckey] = ret = await fetchValue(ckey);
+    if (ret.steps?.length > 0) {
+      const el = select(state.currentCtx, state.currentStep);
+      if (el.step.querySelectorAll("ul").length === ret.steps.length) return;
+      // re render the list with new items
+      ctx.steps.push(...ret.steps);
+      while (el.ctx.children.length > 1) el.ctx.children[1].remove();
+      appendSteps(el.ctx, state.currentCtx, ctx.steps);
+      return setState({ currentStep:state.currentStep+1, expandSteps:true });
+    }
     // cycles on the x axis
     if (ret instanceof ArrayBuffer) {
       opts = {heightScale:0.5, hideLabels:true, levelKey:(e) => parseInt(e.name.split(" ")[1].split(":")[1])};
@@ -809,15 +822,15 @@ async function main() {
     });
     return document.querySelector("#custom").replaceChildren(root.node());
   }
-  // ** UOp view (default)
-  // if we don't have a complete cache yet we start streaming rewrites in this step
+  // ** Graph view
+  // if we don't have a complete cache yet we start streaming graphs in this step
   if (!(ckey in cache) || (cache[ckey].length !== step.match_count+1 && activeSrc == null)) {
     ret = [];
     cache[ckey] = ret;
     const eventSource = new EventSource(ckey);
     evtSources.push(eventSource);
     eventSource.onmessage = (e) => {
-      if (e.data === "END") return eventSource.close();
+      if (e.data === "[DONE]") return eventSource.close();
       const chunk = JSON.parse(e.data);
       ret.push(chunk);
       // if it's the first one render this new rgaph
@@ -828,45 +841,47 @@ async function main() {
     };
   }
   if (ret.length === 0) return;
-  // ** center UOp graph
-  const render = (opts) => renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes ?? [], currentRewrite === 0, opts);
+  // ** center graph
+  const data = ret[currentRewrite];
+  const render = (opts) => renderDag(data.graph, data.changed_nodes ?? [], currentRewrite === 0, opts);
   render({ showIndexing:toggle.checked });
   toggle.onchange = (e) => render({ showIndexing:e.target.checked });
-  // ** right sidebar code blocks
-  const codeElement = codeBlock(ret[currentRewrite].uop, "python", { wrap:false });
-  metadata.replaceChildren(toggleLabel, codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeElement);
+  // ** right sidebar metadata
+  metadata.innerHTML = "";
+  if (ckey.includes("rewrites")) metadata.appendChild(toggleLabel);
+  if (step.code_line != null) metadata.appendChild(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }));
   if (step.trace) {
     const trace = d3.create("pre").append("code").classed("hljs", true);
     for (let i=step.trace.length-1; i>=0; i--) {
       const [fp, lineno, fn, code] = step.trace[i];
       trace.append("div").style("margin-bottom", "2px").style("display","flex").text(fn+" ").append(() => pathLink(fp, lineno).node());
       trace.append("div").html(hljs.highlight(code, { language: "python" }).value).style("margin-bottom", "1ex");
+      metadata.appendChild(trace.node().parentNode);
     }
-    metadata.insertBefore(trace.node().parentNode, codeElement);
   }
-  // ** rewrite steps
-  if (step.match_count >= 1) {
-    const rewriteList = metadata.appendChild(document.createElement("div"));
-    rewriteList.className = "rewrite-list";
-    for (let s=0; s<=step.match_count; s++) {
-      const ul = rewriteList.appendChild(document.createElement("ul"));
-      ul.id = `rewrite-${s}`;
-      const p = ul.appendChild(document.createElement("p"));
-      p.innerText = s;
-      ul.onclick = () => setState({ currentRewrite:s });
-      ul.className = s > ret.length-1 ? "disabled" : s === currentRewrite ? "active" : "";
-      if (s > 0 && s === currentRewrite) {
-        const { upat, diff } = ret[s];
-        metadata.appendChild(codeBlock(upat[1], "python", { loc:upat[0], wrap:true }));
-        const diffCode = metadata.appendChild(document.createElement("pre")).appendChild(document.createElement("code"));
-        for (const line of diff) {
-          diffCode.appendChild(colored([{st:line, color:line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5"}]));
-          diffCode.appendChild(document.createElement("br"));
-        }
-        diffCode.className = "wrap";
+  if (data.uop != null) metadata.appendChild(codeBlock(data.uop, "python", { wrap:false })).classList.toggle("full-height", step.match_count === 0);
+  // ** multi graph in one page
+  if (!step.match_count) return;
+  const rewriteList = metadata.appendChild(document.createElement("div"));
+  rewriteList.className = "rewrite-list";
+  for (let s=0; s<=step.match_count; s++) {
+    const ul = rewriteList.appendChild(document.createElement("ul"));
+    ul.id = `rewrite-${s}`;
+    const p = ul.appendChild(document.createElement("p"));
+    p.innerText = s;
+    ul.onclick = () => setState({ currentRewrite:s });
+    ul.className = s > ret.length-1 ? "disabled" : s === currentRewrite ? "active" : "";
+    if (s > 0 && s === currentRewrite) {
+      const { upat, diff } = ret[s];
+      metadata.appendChild(codeBlock(upat[1], "python", { loc:upat[0], wrap:true }));
+      const diffCode = metadata.appendChild(document.createElement("pre")).appendChild(document.createElement("code"));
+      for (const line of diff) {
+        diffCode.appendChild(colored([{st:line, color:line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5"}]));
+        diffCode.appendChild(document.createElement("br"));
       }
+      diffCode.className = "wrap";
     }
-  } else codeElement.classList.add("full-height");
+  }
 }
 
 // **** collapse/expand

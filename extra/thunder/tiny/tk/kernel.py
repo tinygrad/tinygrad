@@ -2,7 +2,7 @@ from contextlib import AbstractContextManager
 from tinygrad.uop.ops import UOp, KernelInfo, AxisType, AddrSpace
 from extra.thunder.tiny.tk import WARP_THREADS
 from extra.thunder.tiny.tk.group import Group
-from extra.thunder.tiny.tk.tiles import GL, ST_16X16, ST_16X16_SWIZZLED, ST, RT_16X16, RT, RV, TileLayout, VecLayout
+from extra.thunder.tiny.tk.tiles import GL, ST_16X16, ST, RT_16X16, RT, RV, TileLayout, VecLayout
 
 class _tk_range:
   def __init__(self, start:int, end:int, step:int, axis_type:AxisType, rid:int):
@@ -82,18 +82,27 @@ class Kernel(AbstractContextManager):
 
   def push_store(self, store:UOp, uop:UOp): self.store_stack.append((store, uop))
 
-  def finish(self):
+  def finish(self, stores:int=1):
     # end all ranges
     rngs = []
     while self.range_stack: rngs.append(self.range_stack.pop(0)._rng)
 
-    last_store = self.store_stack.pop()[0]
-    if hasattr(last_store, '_uop'): uop = last_store._uop
-    else: uop = last_store
+    # end stores stores
+    store_uops = []
+    for _ in range(stores):
+      store = self.store_stack.pop()[0]
+      if hasattr(store, '_uop'): store_uops.append(store._uop)
+      else: store_uops.append(store)
+    uop = UOp.group(*store_uops)
 
     return uop.end(*rngs).sink(arg=KernelInfo(name=self.name, opts_to_apply=())).simplify()
 
-  def endrange(self):
+  def endrange(self, ranges:int=1):
     last_store = self.store_stack.pop()
-    last_range = self.range_stack.pop()
-    return last_store[1].after(last_store[0].end(last_range._rng)).reshape(last_store[1].shape)
+
+    rngs = []
+    for _ in range(ranges):
+      last_range = self.range_stack.pop()
+      rngs.append(last_range._rng)
+
+    return last_store[1].after(last_store[0].end(*rngs)).reshape(last_store[1].shape)

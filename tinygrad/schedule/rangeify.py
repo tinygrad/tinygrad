@@ -63,9 +63,16 @@ mop_cleanup = PatternMatcher([
    lambda x,x2: x.replace(src=(x2.src[0], x.src[1])) if x.tag is None and x2.tag is None else None),
 ])
 
+def resolve_custom_kernel(ck:UOp) -> UOp:
+  placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(ck.src)]
+  return UOp(Ops.KERNEL, src=ck.src, arg=Kernel(ck.arg.fxn(*placeholders)))
+
 earliest_rewrites = mop_cleanup+PatternMatcher([
   # just removing it works...
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
+
+  # resolve custom kernels
+  (UPat(Ops.CUSTOM_KERNEL, name="ck"), resolve_custom_kernel),
 
   # remove CONTIGUOUS if the BUFFER is already contiguous
   (UPat(Ops.BUFFER).f(Ops.RESHAPE, allow_any_len=True, name="r").f(Ops.CONTIGUOUS, name="c"), lambda r,c: r.replace(tag=c.tag)),

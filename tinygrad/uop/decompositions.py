@@ -246,12 +246,10 @@ def xlog2(d:UOp) -> UOp:
 
   # log2(Inf) = Inf
   r = d.ne(math.inf).where(r, r.const_like(math.inf))
+  # log2(0) = -Inf (handle both +0.0 and -0.0)
+  r = d.ne(0.0).where(r, r.const_like(-math.inf))
   # log2(x) = NaN for x < 0
   r = (d<-0.0).where(r.const_like(math.nan), r)
-  # log2(0) = -Inf, but we will compare using the value of y because 1e-200==0 is true.
-  # log2_zero = the value of unmasked xlog2(0.0).
-  log2_zero = {dtypes.float64: -1087, dtypes.float32: -191, dtypes.float16: -79}[d.dtype.scalar()]
-  r = r.ne(log2_zero).where(r, r.const_like(-math.inf))
   # log2(NaN) = NaN
   r = d.ne(d).where(r.const_like(math.nan), r)
   # log2(-0.0) = -Inf. In certain devices like PTX, x == -0.0 won't be true. so making reciprocal.

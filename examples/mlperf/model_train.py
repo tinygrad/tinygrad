@@ -1177,7 +1177,8 @@ def train_bert():
       if MLLOGGER and RUNMLPERF:
         MLLOGGER.start(key=mllog_constants.EVAL_START, value=None, metadata={"epoch_num": i*GBS, "step_num": i})
       if getenv("RESET_STEP"): train_step_bert.reset()
-      elif getenv("FREE_INTERMEDIATE", 1) and train_step_bert.captured is not None:
+      elif getenv("FREE_INTERMEDIATE") and train_step_bert.captured is not None:
+        # TODO: this hangs on tiny green after 90 minutes of training
         train_step_bert.captured.free_intermediates()
       eval_lm_losses = []
       eval_clsf_losses = []
@@ -1212,7 +1213,7 @@ def train_bert():
           return
 
       if getenv("RESET_STEP"): eval_step_bert.reset()
-      elif getenv("FREE_INTERMEDIATE", 1) and eval_step_bert.captured is not None: eval_step_bert.captured.free_intermediates()
+      elif getenv("FREE_INTERMEDIATE") and eval_step_bert.captured is not None: eval_step_bert.captured.free_intermediates()
 
       del eval_data
       avg_lm_loss = sum(eval_lm_losses) / len(eval_lm_losses)
@@ -1313,12 +1314,14 @@ def train_llama3():
   opt_base_learning_rate = getenv("LR", 8e-5 * GBS / 1152)  # NOTE: cannot change for benchmark
   opt_end_learning_rate = getenv("END_LR", 8e-7)
 
-  # TODO: confirm weights are in bf16
+  model_params = MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"]
   # vocab_size from the mixtral tokenizer
-  params = MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"]
-  params = params | {"vocab_size": 32000} if not SMALL else params
-  if (llama_layers:=getenv("LLAMA_LAYERS")) != 0: params['n_layers'] = llama_layers
-  model = Transformer(**params, max_context=SEQLEN, jit=False, disable_kv_cache=True)
+  if not SMALL: model_params |= {"vocab_size": 32000}
+  if (llama_layers:=getenv("LLAMA_LAYERS")) != 0: model_params['n_layers'] = llama_layers
+  model = Transformer(**model_params, max_context=SEQLEN, jit=False, disable_kv_cache=True)
+  params = get_parameters(model)
+  # weights are all bfloat16 for now
+  assert params and all(p.dtype == dtypes.bfloat16 for p in params)
 
   if getenv("FAKEDATA"):
     for v in get_parameters(model):
@@ -1408,7 +1411,7 @@ def train_llama3():
   # ** data iters **
   def fake_data(bs, samples):
     for _ in range(samples // bs):
-      yield Tensor.randint(bs, SEQLEN + 1, low=0, high=params["vocab_size"], dtype=dtypes.int32, device=Device.DEFAULT)
+      yield Tensor.randint(bs, SEQLEN + 1, low=0, high=model_params["vocab_size"], dtype=dtypes.int32, device=Device.DEFAULT)
 
   def get_train_iter():
     if getenv("FAKEDATA", 0):

@@ -2,12 +2,11 @@ import unittest
 from tinygrad import Device
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import CI
 from tinygrad.runtime.ops_cl import CLDevice, CLAllocator, CLCompiler, CLProgram
 
 @unittest.skipUnless(Device.DEFAULT == "CL", "Runs only on OpenCL")
 class TestCLError(unittest.TestCase):
-  @unittest.skipIf(CI, "dangerous for CI, it allocates tons of memory")
+  @unittest.skip("allocates tons of memory")
   def test_oom(self):
     with self.assertRaises(RuntimeError) as err:
       allocator = CLAllocator(CLDevice())

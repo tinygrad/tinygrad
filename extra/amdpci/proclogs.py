@@ -2,12 +2,18 @@ import re, ctypes, sys, importlib
 from tinygrad.helpers import getenv
 
 from tinygrad.runtime.support.am.amdev import AMDev, AMRegister
+
+class GFXFake:
+  def __init__(self): self.xccs = 8
+
 class AMDFake(AMDev):
   def __init__(self, pci_dev, dma_regions=None):
     self.pci_dev, self.devfmt, self.dma_regions = pci_dev, pci_dev.pcibus, dma_regions
     self.vram, self.doorbell64, self.mmio = self.pci_dev.map_bar(0), self.pci_dev.map_bar(2, fmt='Q'), self.pci_dev.map_bar(5, fmt='I')
     self._run_discovery()
     self._build_regs()
+
+    self.gfx = GFXFake()
 
 amdev = importlib.import_module("tinygrad.runtime.support.am.amdev")
 amdev.AMDev = AMDFake

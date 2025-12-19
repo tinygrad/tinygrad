@@ -1755,7 +1755,7 @@ class TestSchedule(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_precompute_freqs_cis(self):
     from extra.models.llama import precompute_freqs_cis
-    args = {"dim":32 if CI else 128, "end":2048 if CI else 8192, "theta":10000}
+    args = {"dim":32, "end":2048, "theta":10000}
     fused = precompute_freqs_cis(**args)
     run_schedule(check_schedule(fused, 1))
     if getenv("CHECK", 1):

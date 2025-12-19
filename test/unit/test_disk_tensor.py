@@ -3,7 +3,8 @@ import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DType
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
-from tinygrad.helpers import Timing, fetch, temp, CI, OSX
+from tinygrad.helpers import Timing, fetch, temp, OSX
+from test.helpers import slow
 from tinygrad.device import is_dtype_supported
 
 def compare_weights_both(url):
@@ -340,8 +341,8 @@ class TestDiskTensor(unittest.TestCase):
       on_dev = t.to(Device.DEFAULT).realize()
       np.testing.assert_equal(on_dev.numpy(), t.numpy())
 
+  @slow
   def test_copy_from_disk_huge(self):
-    if CI and not hasattr(Device["DISK"], 'io_uring'): self.skipTest("slow on ci without iouring")
 
     fn = pathlib.Path(temp("dt_copy_from_disk_huge"))
     fn.unlink(missing_ok=True)
@@ -410,6 +411,7 @@ class TestPathTensor(unittest.TestCase):
     self.assertEqual(t_cpu.device, "CPU")
     np.testing.assert_array_equal(t_cpu.numpy(), np.frombuffer(self.test_data, dtype=np.uint8))
 
+  @unittest.skip("permission checks don't work in all environments")
   def test_path_tensor_disk_device_bug(self):
     test_file = pathlib.Path(self.temp_dir.name) / "disk_device_bug"
     with open(test_file, "wb") as f: f.write(bytes(range(10)))

@@ -4,14 +4,14 @@ import numpy as np
 import torch
 from tinygrad import Tensor, Device, TinyJit, dtypes
 from tinygrad.uop.ops import Ops
-from tinygrad.helpers import GlobalCounters, CI, Context
+from tinygrad.helpers import GlobalCounters, Context
 from tinygrad.nn import Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, Embedding
 from tinygrad.nn import BatchNorm, LayerNorm, LayerNorm2d, GroupNorm, InstanceNorm, RMSNorm, LSTMCell
 from tinygrad.nn.state import load_state_dict
 from tinygrad.engine.realize import run_schedule
-from test.helpers import not_support_multi_device, needs_second_gpu
+from test.helpers import not_support_multi_device, needs_second_gpu, slow
 
-@unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "slow")
+@slow
 class TestNN(unittest.TestCase):
   def test_batchnorm2d(self, training=False, threed=False, track_running_stats=True):
     with Tensor.train(training):

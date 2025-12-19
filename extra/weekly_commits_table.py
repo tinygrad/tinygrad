@@ -1,7 +1,7 @@
 # extra/weekly_commits_table.py
 import os, subprocess, datetime as dt
 
-NAMES = ["chenyu","George Hotz","nimlgen","qazal","wozeparrot"]
+NAMES = ["chenyu","George Hotz","nimlgen","qazal","wozeparrot","Christopher Milan"]
 REPO  = os.environ.get("REPO_PATH",".")
 today = dt.date.today()
 days  = [(today - dt.timedelta(i)).strftime("%Y-%m-%d") for i in range(6,-1,-1)]

@@ -1,6 +1,6 @@
 import time
 from typing import cast
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from collections import deque
 from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites
 from tinygrad.uop.ops import PatternMatcher, UPat, graph_rewrite, graph_rewrite_map
@@ -13,14 +13,13 @@ from tinygrad.helpers import Metadata, DEBUG, cpu_profile, TracingKey, SPEC, fla
 @dataclass(frozen=True)
 class ScheduleItem:
   ast: UOp
-  bufs: tuple[Buffer, ...]
+  bufs: tuple[Buffer, ...] = ()
   metadata: tuple[Metadata, ...] = ()
   fixedvars: dict[str, int] = field(default_factory=dict)
-  bound_ranges: tuple[UOp, ...] = ()
 
 # **** schedule linearizer
 
-def create_schedule(sched_sink:UOp) -> list[ScheduleItem]:
+def create_schedule(sched_sink:UOp) -> tuple[list[ScheduleItem], UOp]:
   with cpu_profile(TracingKey("toposort sched_sink")):
     # construct the KERNEL children graph based on assigns
     children: dict[UOp, list[UOp]] = {}
@@ -48,33 +47,21 @@ def create_schedule(sched_sink:UOp) -> list[ScheduleItem]:
         else:
           raise RuntimeError(f"input to kernel must be AFTER or BUFFER, not {s.op}")
 
-  with cpu_profile(TracingKey("linearize to ScheduleItem")):
+  with cpu_profile(TracingKey("linearize schedule")):
     queue: deque[UOp] = deque()
     for k,v in in_degree.items():
       if v == 0: queue.append(k)
 
-    schedule: list[ScheduleItem|UOp] = []
+    schedule: list[tuple|UOp] = []
     while len(queue):
       k = rk = queue.popleft()
       if k.op is Ops.END: k = k.src[0]
       if k.op is Ops.RANGE: schedule.append(k)
       elif k.op is Ops.KERNEL:
         ast = k.arg.ast
-        # create subbuffers if needed
-        if ast.op is Ops.BUFFER_VIEW:
-          base = k.src[1].buf_uop.buffer
-          assert isinstance(base, Buffer), "base can't be MultiBuffer"
-          buffers[k.src[0]] = base.view(k.size, ast.dtype, ast.arg[1]*base.dtype.itemsize)
-        ubufs = tuple(s.buf_uop.buffer for s in k.src if s.op is not Ops.BIND)
+        buf_uops = tuple(s.buf_uop for s in k.src if s.op is not Ops.BIND)
         bound_ranges = tuple(s for s in k.src if s.op is Ops.BIND and len(s.src) > 1 and s.src[1].op is Ops.RANGE)
-        if any(isinstance(x, MultiBuffer) for x in ubufs):
-          assert all(isinstance(x, MultiBuffer) for x in ubufs), "kernel must all be multibuffer"
-          dnums = [x for x in ast.variables() if x.arg[0] == '_device_num']
-          for i,bufs in enumerate(zip(*[x.bufs for x in cast(tuple[MultiBuffer, ...], ubufs)])):
-            schedule.append(ScheduleItem(ast, bufs, k.arg.metadata, {dnums[0].expr:i} if len(dnums) else {}, bound_ranges=bound_ranges))
-        else:
-          # ONE -> ONE
-          schedule.append(ScheduleItem(ast, cast(tuple[Buffer, ...], ubufs), k.arg.metadata, bound_ranges=bound_ranges))
+        schedule.append((ast, buf_uops, k.arg.metadata, {}, bound_ranges))
         if rk.op is Ops.END: schedule.append(rk)
       else:
         raise RuntimeError(f"can't schedule {k.op}")
@@ -83,10 +70,11 @@ def create_schedule(sched_sink:UOp) -> list[ScheduleItem]:
         if in_degree[x] == 0: queue.append(x)
 
   with cpu_profile(TracingKey("expand ranges")):
-    real_schedule: list[ScheduleItem] = []
+    pre_schedule: list[ScheduleItem] = []
+    buf_uops_list: list[UOp] = []
     sched_ptr = 0
-    in_ranges = {}
-    range_ptrs = {}
+    in_ranges: dict[UOp, int] = {}
+    range_ptrs: dict[UOp, int] = {}
     while sched_ptr < len(schedule):
       si = schedule[sched_ptr]
       if isinstance(si, UOp):
@@ -99,9 +87,12 @@ def create_schedule(sched_sink:UOp) -> list[ScheduleItem]:
             sched_ptr = range_ptrs[si.src[1]]
             continue
       else:
-        real_schedule.append(replace(si, fixedvars=si.fixedvars | {s.src[0].arg[0]:in_ranges[s.src[1]] for s in si.bound_ranges}, bound_ranges=()))
+        ast, buf_uops, metadata, fixedvars, bound_ranges = si
+        fixedvars = fixedvars | {s.src[0].arg[0]:in_ranges[s.src[1]] for s in bound_ranges}
+        pre_schedule.append(ScheduleItem(ast, (), metadata, fixedvars))
+        buf_uops_list.append(UOp.sink(*buf_uops))
       sched_ptr += 1
-  return real_schedule
+  return pre_schedule, UOp.sink(*buf_uops_list)
 
 from tinygrad.engine.memory import memory_planner
 from tinygrad.schedule.rangeify import get_rangeify_map
@@ -140,7 +131,7 @@ pm_post_sched_cache = PatternMatcher([
   (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR),), name="b"), lambda ctx,b: ctx.get(b)),
 ])
 
-schedule_cache: dict[bytes, tuple[UOp, UOp]] = {}
+schedule_cache: dict[bytes, tuple[list[ScheduleItem], UOp]] = {}
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[1]))}")
 def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], list[ScheduleItem], dict[str, int]]:
   # big_sink srcs are all the Tensors
@@ -169,22 +160,43 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
     tensor_map |= get_rangeify_map(big_sink_cache)
     big_sink = big_sink_cache.substitute(tensor_map, name="Apply Kernelize Map")
 
-    # save in schedule cache
-    tensor_map_sink = UOp.sink(*flatten([(k,v) for k,v in tensor_map.items()]))
-    schedule_cache[sched_cache_key] = (big_sink, tensor_map_sink)
+    pre_schedule, buf_uops_sink = create_schedule(big_sink)
+
+    # save in schedule cache (include AFTERs in tensor_map so we don't need big_sink)
+    after_map = [(u, u.buf_uop) for u in big_sink.toposort() if u.op is Ops.AFTER]
+    tensor_map_sink = UOp.sink(*flatten([(k,v) for k,v in tensor_map.items()]), *flatten(after_map))
+    combined_sink = UOp.sink(tensor_map_sink, buf_uops_sink)
+    schedule_cache[sched_cache_key] = (pre_schedule, combined_sink)
   else:
     # schedule cache hit
     del big_sink_cache
-    big_sink, tensor_map_sink = sc_ret
+    pre_schedule, combined_sink = sc_ret
 
-  # replace all the LUNIQUEs with UNIQUEs
+  # replace all the LUNIQUEs with UNIQUEs (single graph_rewrite for everything)
   input_buffers_reverse = {v:k for k,v in input_buffers.items()}
-  big_sink = graph_rewrite(big_sink, pm_post_sched_cache, ctx=input_buffers_reverse, name="unrewrite for sched cache")
-  tm_src = graph_rewrite(tensor_map_sink, pm_post_sched_cache, ctx=input_buffers_reverse, name="unrewrite for tensor map").src
+  combined = graph_rewrite(combined_sink, pm_post_sched_cache, ctx=input_buffers_reverse, name="unrewrite combined")
+  tensor_map_sink, buf_uops_sink = combined.src
+  tm_src = tensor_map_sink.src
   tensor_map = {tm_src[i]:tm_src[i+1] for i in range(0, len(tm_src), 2)}
 
-  # create the schedule
-  schedule = create_schedule(big_sink)
+  # add bufs to pre_schedule
+  schedule: list[ScheduleItem] = []
+  for i, si in enumerate(pre_schedule):
+    buf_uops = buf_uops_sink.src[i].src
+    # create subbuffers if needed
+    if si.ast.op is Ops.BUFFER_VIEW:
+      base = buf_uops[1].buffer
+      assert isinstance(base, Buffer), "base can't be MultiBuffer"
+      buffers[buf_uops[0]] = base.view(buf_uops[0].arg, si.ast.dtype, si.ast.arg[1]*base.dtype.itemsize)
+    ubufs = tuple(b.buffer for b in buf_uops)
+    if any(isinstance(x, MultiBuffer) for x in ubufs):
+      assert all(isinstance(x, MultiBuffer) for x in ubufs), "kernel must all be multibuffer"
+      dnums = [x for x in si.ast.variables() if x.arg[0] == '_device_num']
+      for j, bufs in enumerate(zip(*[x.bufs for x in cast(tuple[MultiBuffer, ...], ubufs)])):
+        schedule.append(ScheduleItem(si.ast, bufs, si.metadata, si.fixedvars | ({dnums[0].expr:j} if len(dnums) else {})))
+    else:
+      # ONE -> ONE
+      schedule.append(ScheduleItem(si.ast, cast(tuple[Buffer, ...], ubufs), si.metadata, si.fixedvars))
   with cpu_profile(TracingKey("memory planner")): schedule = memory_planner(schedule)
 
   # extract var_vals from BINDs that were stripped (only if there are kernels)
@@ -195,9 +207,6 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
         var, val = u.unbind()
         assert var.expr not in var_vals or var_vals[var.expr] == val, f"bind mismatch on {var}, {var_vals[var.expr]} != {val}"
         var_vals[var.expr] = val
-
-  # remove all AFTERs, after scheduling, the tensors are just buffers
-  tensor_map |= {u:u.buf_uop for u in big_sink.toposort() if u.op is Ops.AFTER}
 
   if (DEBUG >= 1 and len(schedule) > 1) or DEBUG >= 3:
     print(f"scheduled {len(schedule):4d} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
