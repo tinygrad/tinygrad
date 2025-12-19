@@ -70,13 +70,13 @@ runs:
       uses: actions/cache@v4
       with:
         path: ~/.cache/tinygrad/downloads/
-        key: downloads-cache-${{ inputs.key }}-${{ env.CACHE_VERSION }}
+        key: downloads-${{ github.job }}-${{ inputs.key }}-${{ env.CACHE_VERSION }}
     - name: Cache downloads (macOS)
       if: inputs.key != '' && runner.os == 'macOS'
       uses: actions/cache@v4
       with:
         path: ~/Library/Caches/tinygrad/downloads/
-        key: osx-downloads-cache-${{ inputs.key }}-${{ env.CACHE_VERSION }}
+        key: downloads-${{ github.job }}-${{ inputs.key }}-${{ env.CACHE_VERSION }}
 
     # **** Python deps ****
 

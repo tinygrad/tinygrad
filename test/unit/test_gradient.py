@@ -110,6 +110,18 @@ class TestTensorGradient(unittest.TestCase):
     with self.assertRaises(RuntimeError): x.sum().gradient(x)
     with self.assertRaises(RuntimeError): x.float().sum().gradient(x)
 
+  def test_multiple_backward(self):
+    x = Tensor([3.], requires_grad=True)
+    (x*2)[0].backward()
+    np.testing.assert_allclose(x.grad.numpy(), [2.0])
+    old_grad = x.grad
+    (x*3)[0].backward()
+    np.testing.assert_allclose(x.grad.numpy(), [2.0+3.0])
+    self.assertIs(x.grad, old_grad)
+    (x*x)[0].backward()
+    np.testing.assert_allclose(x.grad.numpy(), [2.0+3.0+2*3.0])
+    self.assertIs(x.grad, old_grad)
+
 class TestRealizeMeansRealize(unittest.TestCase):
   def test_randn_realizes(self):
     x = Tensor.randn(2, 3, 64, 64, requires_grad=True).realize()
