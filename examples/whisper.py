@@ -162,7 +162,6 @@ def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False, sr=
   log_spec = log10(mel_spec.clip(1e-10, None))
   log_spec = log_spec.maximum(log_spec.max((1,2), keepdim=True) - 8.0)
   log_spec = (log_spec + 4.0) / 4.0
-  log_spec = log_spec.numpy()
 
   return log_spec
 
