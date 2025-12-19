@@ -88,7 +88,7 @@ if __name__ == "__main__":
   prg = ProgramSpec("matmul_kernel", src, device=Device.DEFAULT,
                 global_size=[M//BLOCK_SIZE_M, N//BLOCK_SIZE_N, 1], local_size=[32*compiled.metadata.num_warps, 1, 1],
                 mem_estimate=A.nbytes() + B.nbytes() + C.nbytes())
-  ei = ExecItem(CompiledRunner(prg), [x.ensure_allocated() for x in si.bufs], si.metadata)
+  ei = ExecItem(si.ast, [x.ensure_allocated() for x in si.bufs], si.metadata, prg=CompiledRunner(prg))
   tflops = []
   for i in range(5):
     tm = ei.run(wait=True)

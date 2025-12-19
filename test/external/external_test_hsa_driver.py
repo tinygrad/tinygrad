@@ -1,10 +1,12 @@
 import ctypes, unittest
 from tinygrad.helpers import init_c_struct_t
-from tinygrad.device import Device, Buffer, BufferXfer
+from tinygrad.device import Device, Buffer
 from tinygrad.dtype import dtypes
 from tinygrad.runtime.support.hsa import AQLQueue
 from tinygrad.runtime.graph.hsa import VirtAQLQueue, HSAGraph
-from tinygrad.engine.realize import ExecItem
+from tinygrad.engine.schedule import ExecItem
+from tinygrad.engine.realize import BufferXfer
+from tinygrad.uop.ops import UOp, Ops
 
 def get_hsa_inc_prog(dev, inc=1):
   prg = f"""
@@ -102,7 +104,8 @@ class TestHSADriver(unittest.TestCase):
     test_buf1.copyin(memoryview(bytearray(1*4)))
     test_buf2.copyin(memoryview(bytearray(1*4)))
 
-    jit_cache = [ExecItem(BufferXfer(), [test_buf0, test_buf2]), ExecItem(BufferXfer(), [test_buf2, test_buf1])]
+    jit_cache = [ExecItem(UOp(Ops.NOOP), [test_buf0, test_buf2], prg=BufferXfer(test_buf0.nbytes, test_buf0.device, test_buf2.device)),
+                 ExecItem(UOp(Ops.NOOP), [test_buf2, test_buf1], prg=BufferXfer(test_buf2.nbytes, test_buf2.device, test_buf1.device))]
     graph = HSAGraph(jit_cache, [], {})
 
     for i in range(10000):
