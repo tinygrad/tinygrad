@@ -283,14 +283,13 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
         }
 
         let sequences = initSequences(audio_features_batch.length);
+        pendingTexts = Array(audio_features_batch.length).fill('');
         let inferenceState = {
             decoder_state: await initDecoder(nets, audio_features_batch),
-            pendingTexts: [],
             is_done: false
         };
         let currentTokenIndex = 0;
         while (!inferenceState.is_done) {
-            let pendingTexts = inferenceState.pendingTexts;
             let decoder_state = inferenceState.decoder_state;
             if (currentTokenIndex < MAX_TOKENS_TO_DECODE && sequences.some(x => x.context.at(-1) !== TOK_EOS)) {
                 if (cancelToken.cancelled) {
@@ -308,8 +307,7 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
                 let [sorted] = await decoder_helper(nets, context_inputs, audio_features_batch[0], max_context_batch_length - 1, decoder_state);
 
                 // NOTE: unpack batch results
-                // TODO: dehardcode
-                const indices_topk = 10;
+                const indices_topk = nets.model_metadata.decoder_topk ? nets.model_metadata.decoder_topk : 10;
                 let decode_results_topk = [];
                 for (let i = 0; i < sequences.length; ++i) {
                     decode_results_topk.push(sorted.slice(i*indices_topk, (i+1)*indices_topk));
@@ -333,8 +331,7 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
                     pendingTexts[idx] = format_text(detokenized, seek, seek_end);
                 }
 
-                pendingTexts = inferenceState.pendingTexts.slice();
-                onEvent("chunkUpdate", {pendingTexts, currentTokenIndex, sequenceStatus: sequences.map(x => x.context.at(-1) === TOK_EOS ? "done" : "running")});
+                onEvent("chunkUpdate", {pendingTexts: pendingTexts.slice(), currentTokenIndex, sequenceStatus: sequences.map(x => x.context.at(-1) === TOK_EOS ? "done" : "running")});
 
                 ++currentTokenIndex;
             } else {
@@ -353,7 +350,6 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
                 let {context, context_prompt_length: offset} = sequence;
 
                 onEvent("chunkDone", { context, offset, index: i, pendingText: pendingTexts[i] });
-                pendingTexts[i] = '';
 
                 ++i;
             }
