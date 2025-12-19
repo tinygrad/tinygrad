@@ -10,7 +10,7 @@ from tinygrad.uop.spec import shared_spec
 from tinygrad.renderer import ProgramSpec
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.engine.realize import CompiledRunner, get_program, get_runner
-from tinygrad.engine.schedule import ScheduleItem
+from tinygrad.engine.schedule import ExecItem
 from tinygrad.codegen import full_rewrite
 from tinygrad.uop.symbolic import sym
 from tinygrad.device import is_dtype_supported
@@ -569,7 +569,7 @@ class TestZeroRange(unittest.TestCase):
 
 class TestUOpPrograms(unittest.TestCase):
   def _run(self, prog:UOp, *tensors:Tensor):
-    ScheduleItem(prog, [t.uop.buffer for t in tensors], prg=get_runner(Device.DEFAULT, prog)).run(wait=True)
+    ExecItem(prog, [t.uop.buffer for t in tensors], prg=get_runner(Device.DEFAULT, prog)).run(wait=True)
 
   def test_simple(self):
     out = Tensor.empty(10,10,dtype=dtypes.int)

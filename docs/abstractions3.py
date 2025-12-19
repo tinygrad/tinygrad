@@ -38,8 +38,8 @@ optim.schedule_step()   # this will step the optimizer without running realize
 # The weight Tensors have been assigned to, but not yet realized. Everything is still lazy at this point
 # l1.uop and l2.uop define a computation graph
 
-from tinygrad.engine.schedule import ScheduleItem
-schedule: List[ScheduleItem] = Tensor.schedule(l1, l2)
+from tinygrad.engine.schedule import ExecItem
+schedule: List[ExecItem] = Tensor.schedule(l1, l2)
 
 print(f"The schedule contains {len(schedule)} items.")
 for si in schedule: print(str(si)[:80])

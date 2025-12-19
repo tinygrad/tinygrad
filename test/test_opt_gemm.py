@@ -4,7 +4,7 @@ from tinygrad import Tensor, Device
 from tinygrad.helpers import get_single_element
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.engine.realize import CompiledRunner, get_program
-from tinygrad.engine.schedule import ScheduleItem
+from tinygrad.engine.schedule import ExecItem
 
 class TestOptGemm(unittest.TestCase):
   @classmethod
@@ -19,7 +19,7 @@ class TestOptGemm(unittest.TestCase):
     # TODO: this should be a generic test helper
     si = get_single_element(t.schedule())
     run = CompiledRunner(get_program(si.ast, renderer=Device[Device.DEFAULT].renderer, opts=opts))
-    ScheduleItem(si.ast, list(si.bufs), prg=run).run()
+    ExecItem(si.ast, list(si.bufs), prg=run).run()
     test = si.bufs[0].numpy().reshape(self.res.shape)
     np.testing.assert_allclose(self.res, test, atol=1e-4)
 

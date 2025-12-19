@@ -3,7 +3,7 @@ import unittest, math, time
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.engine.realize import get_runner
-from tinygrad.engine.schedule import ScheduleItem
+from tinygrad.engine.schedule import ExecItem
 from tinygrad.engine.jit import TinyJit
 from tinygrad.helpers import CI
 import numpy as np
@@ -65,7 +65,7 @@ class TestTK(unittest.TestCase):
       c = Tensor.empty(1, 1, N, N, dtype="float32")
       Tensor.realize(a, b, c)
 
-    ei = ScheduleItem(sink, [t.uop.buffer for t in (c, a, b)], prg=get_runner(Device.DEFAULT, sink))
+    ei = ExecItem(sink, [t.uop.buffer for t in (c, a, b)], prg=get_runner(Device.DEFAULT, sink))
     for _ in range(5): ei.run(wait=True)
     c = c.float()
 
@@ -114,7 +114,7 @@ class TestTK(unittest.TestCase):
       c = Tensor.empty(1, 1, N, N, dtype="float32")
       Tensor.realize(a, b, c)
 
-    ei = ScheduleItem(sink, [t.uop.buffer for t in (c, a, b)], prg=get_runner(Device.DEFAULT, sink))
+    ei = ExecItem(sink, [t.uop.buffer for t in (c, a, b)], prg=get_runner(Device.DEFAULT, sink))
     for _ in range(5): ei.run(wait=True)
     c = c.float()
 
@@ -150,7 +150,7 @@ class TestTK(unittest.TestCase):
       b = Tensor.empty(1, 1, N, N, dtype="float32")
       Tensor.realize(a, b)
 
-    ei = ScheduleItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
+    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
     for _ in range(5): ei.run(wait=True)
     b = b.float()
 
@@ -189,7 +189,7 @@ class TestTK(unittest.TestCase):
       b = Tensor.empty(1, 1, N, N, dtype="float32")
       Tensor.realize(a, b)
 
-    ei = ScheduleItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
+    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
     for _ in range(5): ei.run(wait=True)
     b = b.float()
 
@@ -231,7 +231,7 @@ class TestTK(unittest.TestCase):
       c = Tensor.empty(1, 1, N, N, dtype="float32")
       Tensor.realize(a, b, c)
 
-    ei = ScheduleItem(sink, [t.uop.buffer for t in (b, c, a)], prg=get_runner(Device.DEFAULT, sink))
+    ei = ExecItem(sink, [t.uop.buffer for t in (b, c, a)], prg=get_runner(Device.DEFAULT, sink))
     for _ in range(5): ei.run(wait=True)
     b = b.float()
     c = c.float()
@@ -271,7 +271,7 @@ class TestTK(unittest.TestCase):
       b = Tensor.empty(1, 1, N, N, dtype="float32")
       Tensor.realize(a, b)
 
-    ei = ScheduleItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
+    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
     for _ in range(5): ei.run(wait=True)
     b = b.float()
 
@@ -308,7 +308,7 @@ class TestTK(unittest.TestCase):
         b = Tensor.empty(1, 1, N, N, dtype="float32")
         Tensor.realize(a, b)
 
-      ei = ScheduleItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
+      ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
       for _ in range(5): ei.run(wait=True)
       b = b.float()
 
@@ -353,7 +353,7 @@ class TestTK(unittest.TestCase):
       b = Tensor.empty(1, 1, N, N, dtype="float32")
       Tensor.realize(a, b)
 
-    ei = ScheduleItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
+    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
     for _ in range(5): ei.run(wait=True)
     b = b.float()
 
@@ -398,7 +398,7 @@ class TestTK(unittest.TestCase):
       b = Tensor.empty(1, 1, N, M, dtype="float32")
       Tensor.realize(a, b)
 
-    ei = ScheduleItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
+    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
     for _ in range(5): ei.run(wait=True)
     b = b.float()
 
@@ -443,7 +443,7 @@ class TestTK(unittest.TestCase):
       b = Tensor.empty(1, 1, N, N, dtype="float32")
       Tensor.realize(a, b)
 
-    ei = ScheduleItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
+    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
     for _ in range(5): ei.run(wait=True)
     b = b.float()
 
@@ -488,7 +488,7 @@ class TestTK(unittest.TestCase):
       b = Tensor.empty(1, 1, N, M, dtype="float32")
       Tensor.realize(a, b)
 
-    ei = ScheduleItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
+    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
     for _ in range(5): ei.run(wait=True)
     b = b.float()
 
@@ -548,7 +548,7 @@ class TestTK(unittest.TestCase):
       b = Tensor.empty(1, 1, BLOCK_SIZE, N, dtype="float32")
       Tensor.realize(a, b)
 
-    ei = ScheduleItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
+    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
     for _ in range(5): ei.run(wait=True)
     b = b.float()
 
@@ -608,7 +608,7 @@ class TestTK(unittest.TestCase):
       b = Tensor.empty(1, 1, N, BLOCK_SIZE, dtype="float32")
       Tensor.realize(a, b)
 
-    ei = ScheduleItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
+    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
     for _ in range(5): ei.run(wait=True)
     b = b.float()
 
@@ -718,7 +718,7 @@ class TestTK(unittest.TestCase):
       out = Tensor.empty(B, N, H, D, dtype=dtypes.bfloat16)
       Tensor.realize(q, k, v, out)
 
-    ei = ScheduleItem(sink, [t.uop.buffer for t in (out, q, k, v)], prg=get_runner(Device.DEFAULT, sink))
+    ei = ExecItem(sink, [t.uop.buffer for t in (out, q, k, v)], prg=get_runner(Device.DEFAULT, sink))
     for _ in range(5):
       et = ei.run(wait=True)
       attn_flops = 2 * B * H * N * N * D + \

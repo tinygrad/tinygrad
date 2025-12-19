@@ -7,7 +7,7 @@ from tinygrad.helpers import Context, dedup, from_mv
 from tinygrad.dtype import dtypes
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.engine.realize import BufferXfer, get_runner, CompiledRunner
-from tinygrad.engine.schedule import ScheduleItem
+from tinygrad.engine.schedule import ExecItem
 from tinygrad.uop.ops import UOp, Ops
 
 from test.helpers import needs_second_gpu
@@ -29,11 +29,11 @@ def helper_exec_op(device, outbuf, inbufs):
       prg = get_runner(device, si.ast)
     cached_prgs[(device, len(inbufs))] = prg
 
-  return ScheduleItem(UOp(Ops.NOOP), [outbuf] + inbufs, prg=cached_prgs[(device, len(inbufs))])
+  return ExecItem(UOp(Ops.NOOP), [outbuf] + inbufs, prg=cached_prgs[(device, len(inbufs))])
 
 def helper_copy_op(device, dest, src):
   prg = BufferXfer(dest.nbytes, device, src.device)
-  return ScheduleItem(UOp(Ops.NOOP), [dest, src], prg=prg)
+  return ExecItem(UOp(Ops.NOOP), [dest, src], prg=prg)
 
 def helper_alloc_rawbuffer(device, fill=False):
   rawbuf = Buffer(device, BUF_SIZE, dtypes.int).ensure_allocated()
@@ -71,7 +71,7 @@ def helper_test_graphs(graph_impl, graphs, runs=RUN_CNT):
   ground_truth_np = [np.frombuffer(x, _to_np_dtype(bufs[i].dtype)) for i,x in enumerate(ground_thruth_bufs)]
 
   # Build graphs
-  gr_ji = [ScheduleItem(UOp(Ops.NOOP), [], prg=graph_impl(graph, [], {})) for graph in graphs]
+  gr_ji = [ExecItem(UOp(Ops.NOOP), [], prg=graph_impl(graph, [], {})) for graph in graphs]
 
   for _ in range(runs):
     test_bufs = helper_run_jit(gr_ji, bufs, out_buffers)
