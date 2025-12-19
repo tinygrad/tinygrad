@@ -7,7 +7,7 @@ from tinygrad.engine.realize import get_program
 
 class TestCompileFailures(unittest.TestCase):
   def compile(self, out:Tensor):
-    for si in out.schedule(): si._lower()
+    for si in out.schedule(): si.lower()
 
   @unittest.skipUnless(is_dtype_supported(dtypes.uchar, Device.DEFAULT), f"no uint8 on {Device.DEFAULT}")
   def test_interpolate_atari(self):

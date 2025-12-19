@@ -75,7 +75,7 @@ class TestCStyleFailures(unittest.TestCase):
     for _ in range(5): ret = python_alu[op](ret, Tensor.empty(1, dtype=dtype))
     schedule = ret.schedule()
     assert len(schedule) == 1
-    schedule[0]._lower()
+    schedule[0].lower()
     src = schedule[0].prg.p.src
     self.assertEqual("("*5 not in src, should_strip_paren)
 

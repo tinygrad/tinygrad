@@ -19,7 +19,7 @@ def flops_mem(uops, ignore_indexing=False):
 
 def get_stats(x:Tensor):
   si = x.schedule()[-1]
-  si._lower()
+  si.lower()
   return si.prg.estimates.ops, si.prg.estimates.mem
 
 @unittest.skipIf(Device.DEFAULT == "WEBGPU", "webgpu does extra load/store for packed types")

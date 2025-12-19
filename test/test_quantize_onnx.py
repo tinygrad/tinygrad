@@ -75,7 +75,7 @@ class TestQuantizeOnnxCPU(unittest.TestCase):
     inp = Tensor(np.random.uniform(size=(sz, sz)).astype(np.float32))
     with Context(QUANTIZE=1):
       sched = run_onnx({"input":inp})["output"].schedule()
-      sched[-2]._lower()
+      sched[-2].lower()
       daccs = [u for u in sched[-2].prg.p.uops if u.op is Ops.DEFINE_REG]
       assert all(u.dtype.scalar() is dtypes.int for u in daccs)
 

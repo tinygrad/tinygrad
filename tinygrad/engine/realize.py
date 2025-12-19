@@ -180,22 +180,18 @@ si_lowerer = PatternMatcher([
   (UPat(Ops.ENCDEC, name="encdec"), lambda ctx,encdec: EncDec(encdec, ctx[0].nbytes, ctx[1].device)),
 ])
 
-# **** ExecItem return type
-
 @dataclass
 class ExecItem:
-  ast: UOp = field(default_factory=lambda: UOp(Ops.NOOP))
+  ast: UOp
   bufs: list[Buffer|None] = field(default_factory=list)
   metadata: tuple[Metadata, ...] = ()
   fixedvars: dict[str, int] = field(default_factory=dict)
   prg: Runner|None = None
 
-  def _lower(self) -> None:
+  def lower(self) -> None:
     """Populate self.prg by lowering the AST."""
-    if self.prg is not None:
-      return
-    try:
-      self.prg = cast(Runner, si_lowerer.rewrite(self.ast, self.bufs))
+    if self.prg is not None: return
+    try: self.prg = cast(Runner, si_lowerer.rewrite(self.ast, self.bufs))
     except Exception as e:
       if DEBUG >= 2:
         print(f"error lowering {self.ast.op}")
@@ -204,8 +200,7 @@ class ExecItem:
       raise e
 
   def run(self, _var_vals:dict[str, int]|None=None, wait=False, jit=False, do_update_stats=True) -> float|None:
-    if self.prg is None:
-      self._lower()
+    if self.prg is None: self.lower()
     assert self.prg is not None
     var_vals = self.fixedvars if _var_vals is None else (_var_vals|self.fixedvars)
     # reorder bufs to match program globals if needed
@@ -243,23 +238,23 @@ capturing: list = []  # put classes with an add method in here
 
 def run_schedule(schedule:list[ExecItem], var_vals:dict[str, int]|None=None, do_update_stats=True):
   while len(schedule):
-    si = schedule.pop(0)
-    si._lower()  # ensure prg is populated before capturing
-    if len(capturing) and CAPTURING: capturing[0].add(si)
-    if VALIDATE_WITH_CPU and si.ast.op is Ops.SINK:
+    ei = schedule.pop(0)
+    ei.lower()
+    if len(capturing) and CAPTURING: capturing[0].add(ei)
+    if VALIDATE_WITH_CPU and ei.ast.op is Ops.SINK:
       # copy in allocated buffers from the GPU
-      bufs = [b for b in si.bufs if b is not None]
+      bufs = [b for b in ei.bufs if b is not None]
       nb: list[Buffer|None] = [Buffer("CPU", b.size, b.dtype) for b in bufs]
       for cpu_b, gpu_b in zip(nb, bufs):
         if cpu_b is not None and gpu_b.is_allocated(): cpu_b.ensure_allocated().copyin(gpu_b.as_buffer())
 
       # run on GPU
-      si.run(var_vals, do_update_stats=do_update_stats)
+      ei.run(var_vals, do_update_stats=do_update_stats)
 
       # validate the output buffers match (NOTE: this is assuming the output is buffer 0)
-      with Context(BEAM=0): ExecItem(si.ast, nb, si.metadata, si.fixedvars).run(var_vals, do_update_stats=do_update_stats)
+      with Context(BEAM=0): ExecItem(ei.ast, nb, ei.metadata, ei.fixedvars).run(var_vals, do_update_stats=do_update_stats)
       import numpy as np
       assert nb[0] is not None
       np.testing.assert_allclose(bufs[0].numpy(), nb[0].numpy(), rtol=1e-3, atol=1e-3)
     else:
-      si.run(var_vals, do_update_stats=do_update_stats)
+      ei.run(var_vals, do_update_stats=do_update_stats)

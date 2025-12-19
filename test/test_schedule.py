@@ -25,7 +25,7 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
     assert isinstance(t, UOp), f"can't schedule {t}"
     sched = Tensor(t).schedule()
   # test lowering all the ExecItems
-  for si in sched: si._lower()
+  for si in sched: si.lower()
   kernel_cnt = len([si for si in sched if isinstance(si.prg, CompiledRunner) or not filter_sink])
   if kernel_cnt != allowed:
     print(f"SCHEDULE ISSUE, expecting {allowed} got {kernel_cnt}")

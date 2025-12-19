@@ -105,7 +105,7 @@ class TestRandomness(unittest.TestCase):
   def test_threefry_doesnt_use_long(self):
     sched = Tensor.rand(20).schedule()
     for si in sched:
-      si._lower()
+      si.lower()
       if isinstance(si.prg, CompiledRunner):
         for u in si.prg.p.uops:
           self.assertNotIn(u.dtype, {dtypes.long, dtypes.ulong}, msg=f"long found in {si.prg.p.name}")
