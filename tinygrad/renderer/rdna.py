@@ -445,11 +445,10 @@ string_rewrite = PatternMatcher([
   (UPat(Ops.WHERE, name="x", dtype=dtypes.long, src=(UPat.var("cond"), UPat.var("true_val"), UPat.var("false_val"))), render_where_64),
   (UPat(Ops.WHERE, name="x", dtype=dtypes.ulong, src=(UPat.var("cond"), UPat.var("true_val"), UPat.var("false_val"))), render_where_64),
   # WHERE: if condition is SGPR or vcc_lo, use directly; if VGPR, compare to 0 first to get VCC
+  # CRITICAL: When both cond AND true_val are SGPR lane masks (from comparisons), we must use s_and_b32
+  # to properly combine the masks, because v_cndmask_b32 treats SGPR operands as scalar values.
   (UPat(Ops.WHERE, name="x", src=(UPat.var("cond"), UPat.var("true_val"), UPat.var("false_val"))),
-   lambda ctx, x, cond, true_val, false_val: f"v_cndmask_b32 {ctx.r[x]}, {ctx.r[false_val]}, {ctx.r[true_val]}, {ctx.r[cond]}"
-     if ctx.r[cond].startswith('s') or ctx.r[cond] == 'vcc_lo' else [
-       f"v_cmp_ne_u32 vcc_lo, {ctx.r[cond]}, 0",
-       f"v_cndmask_b32 {ctx.r[x]}, {ctx.r[false_val]}, {ctx.r[true_val]}, vcc_lo"]),
+   lambda ctx, x, cond, true_val, false_val: ctx.render_where(x, cond, true_val, false_val)),
   # RECIPROCAL: v_rcp_f32 is approximate, use Newton-Raphson refinement for better precision
   # This ensures division results are exact when they should be (e.g., 6.0/3.0 = 2.0, not 1.999...)
   (UPat(Ops.RECIPROCAL, name="x", src=(UPat.var("a"),)), render_recip),
@@ -633,6 +632,51 @@ class RDNARenderer(Renderer):
     if rb.startswith('s'):
       return [f"v_cndmask_b32 v{self.get_scratch_vgpr()}, 0, 1, {rb}", f"{v_op} {rx}, {ra}, v{self.get_scratch_vgpr()}"]
     return f"{v_op} {rx}, {ra}, {rb}"
+
+  def render_where(self, x: UOp, cond: UOp, true_val: UOp, false_val: UOp) -> str|list[str]:
+    """Render WHERE with proper handling of SGPR lane masks.
+
+    CRITICAL: When true_val or false_val is an SGPR lane mask (from comparisons), v_cndmask_b32
+    would incorrectly treat it as a scalar. We must expand SGPR lane masks to VGPR 0/1 values first.
+
+    Cases:
+    - cond=SGPR, true_val=SGPR, false_val=0: use s_and_b32 to combine masks
+    - true_val or false_val is SGPR lane mask: expand to VGPR first
+    - Standard case: use v_cndmask_b32 directly
+    """
+    rc, rt, rf, rx = self.r[cond], self.r[true_val], self.r[false_val], self.r[x]
+    is_cond_sgpr = rc.startswith('s') or rc == 'vcc_lo'
+    is_true_sgpr_mask = rt.startswith('s') and true_val.dtype == dtypes.bool
+    is_false_sgpr_mask = rf.startswith('s') and false_val.dtype == dtypes.bool
+    is_false_zero = rf == '0' or (false_val.op is Ops.CONST and false_val.arg == 0)
+
+    # Special case: both cond and true_val are SGPR masks, false_val is 0
+    # This is equivalent to AND of the two masks, which we can do in SGPR
+    if is_cond_sgpr and is_true_sgpr_mask and is_false_zero:
+      return [f"s_and_b32 vcc_lo, {rc}, {rt}", f"v_cndmask_b32 {rx}, 0, 1, vcc_lo"]
+
+    # If true_val or false_val is an SGPR lane mask, expand it to VGPR 0/1 values first
+    # This is necessary because v_cndmask_b32 treats SGPR operands as scalar values
+    result = []
+    scratch = None
+    if is_true_sgpr_mask:
+      scratch = self.get_scratch_vgpr()
+      result.append(f"v_cndmask_b32 v{scratch}, 0, 1, {rt}")
+      rt = f"v{scratch}"
+    if is_false_sgpr_mask:
+      scratch = scratch if scratch else self.get_scratch_vgpr()
+      idx = scratch + 1 if is_true_sgpr_mask else scratch
+      result.append(f"v_cndmask_b32 v{idx}, 0, 1, {rf}")
+      rf = f"v{idx}"
+
+    # Now handle the condition
+    if is_cond_sgpr:
+      result.append(f"v_cndmask_b32 {rx}, {rf}, {rt}, {rc}")
+    else:
+      result.append(f"v_cmp_ne_u32 vcc_lo, {rc}, 0")
+      result.append(f"v_cndmask_b32 {rx}, {rf}, {rt}, vcc_lo")
+
+    return result if len(result) > 1 else result[0]
 
   def render_mov_64(self, x: UOp, a: UOp) -> list[str]:
     """Render 64-bit move using two v_mov_b32 instructions"""
