@@ -1,13 +1,12 @@
-import math, functools
+import math
 from typing import cast, Callable
-from tinygrad import Tensor, Device, Context, GlobalCounters, dtypes
-from tinygrad.uop.ops import AxisType, UOp, KernelInfo, Ops
-from tinygrad.engine.realize import ExecItem, get_runner
+from tinygrad import dtypes
+from tinygrad.uop.ops import AxisType, UOp, Ops
 from tinygrad.dtype import AddrSpace, PtrDType
-from tinygrad.helpers import getenv, prod
+from tinygrad.helpers import prod
 
 from extra.thunder.tiny.tk import WARP_THREADS
-from extra.thunder.tiny.tk.tiles import ALL_TILES, GL, RT_16X16, RT_16X32, ST, RT, RV, TileLayout, VecLayout
+from extra.thunder.tiny.tk.tiles import ALL_TILES, ST, RT, RV, TileLayout, VecLayout
 
 class Group:
   def __init__(self, warps:int, ker):
@@ -83,7 +82,7 @@ class Group:
       wmma_arg = ('WMMA_16_16_16___bf16_float', (16, 16, 16), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ()) # type: ignore
     elif a_base_shape.cols == 32:
       wmma_arg = ('WMMA_16_16_32___bf16_float', (16, 16, 32), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2))), ()) # type: ignore
-    else:  raise NotImplementedError(f"mma_AB not implemented for {a_base_shape.cols=}")
+    else: raise NotImplementedError(f"mma_AB not implemented for {a_base_shape.cols=}")
 
     for height in self.ker.range(c.shape[-3], track=False):
       for width in self.ker.range(c.shape[-2], track=False):
@@ -113,7 +112,7 @@ class Group:
       wmma_arg = ('WMMA_16_16_16___bf16_float', (16, 16, 16), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ()) # type: ignore
     elif a_base_shape.cols == 32:
       wmma_arg = ('WMMA_16_16_32___bf16_float', (16, 16, 32), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2))), ()) # type: ignore
-    else:  raise NotImplementedError(f"mma_ABt not implemented for {a_base_shape.cols=}")
+    else: raise NotImplementedError(f"mma_ABt not implemented for {a_base_shape.cols=}")
 
     for height in self.ker.range(c.shape[-3], track=False):
       for width in self.ker.range(c.shape[-2], track=False):
@@ -143,7 +142,7 @@ class Group:
       wmma_arg = ('WMMA_16_16_16___bf16_float', (16, 16, 16), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ()) # type: ignore
     elif a_base_shape.cols == 32:
       wmma_arg = ('WMMA_16_16_32___bf16_float', (16, 16, 32), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2))), ()) # type: ignore
-    else:  raise NotImplementedError(f"mma_AtB not implemented for {a_base_shape.cols=}")
+    else: raise NotImplementedError(f"mma_AtB not implemented for {a_base_shape.cols=}")
 
     for height in self.ker.range(c.shape[-3], track=False):
       for width in self.ker.range(c.shape[-2], track=False):
@@ -173,7 +172,7 @@ class Group:
       wmma_arg = ('WMMA_16_16_16___bf16_float', (16, 16, 16), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ()) # type: ignore
     elif a_base_shape.cols == 32:
       wmma_arg = ('WMMA_16_16_32___bf16_float', (16, 16, 32), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2))), ()) # type: ignore
-    else:  raise NotImplementedError(f"mma_AtBt not implemented for {a_base_shape.cols=}")
+    else: raise NotImplementedError(f"mma_AtBt not implemented for {a_base_shape.cols=}")
 
     for height in self.ker.range(c.shape[-3], track=False):
       for width in self.ker.range(c.shape[-2], track=False):
