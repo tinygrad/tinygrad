@@ -64,7 +64,6 @@ class ProgramSpec:
   device:str
   ast:UOp  # save the base ast (this is method cache key)
   uops:list[UOp]|None=None
-  aux:dict=field(default_factory=dict)
 
   # filled in from uops (if we have uops)
   global_size:list[int]|None=None
@@ -122,7 +121,6 @@ class Renderer:
   has_local: bool = True
   has_threads: bool = False
   has_shared: bool = True
-  has_aux: bool = False # additional program info, eg. image shapes
   # NOTE: these two should be in (x,y,z) order to match the max_sizes argument in get_grouped_dims
   global_max: tuple[int, ...]|None = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now
   local_max: tuple[int, ...]|None = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now
@@ -134,4 +132,3 @@ class Renderer:
 
   def __reduce__(self): return self.__class__, ()
   def render(self, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")
-  def aux(self, uops:list[UOp]) -> dict: raise NotImplementedError("needs aux")
