@@ -143,54 +143,28 @@ def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False, sr=
   :param sr: Sample rate of all waveforms. Waveforms will be resampled to 16000Hz if different.
   :return: mel spectrogram of the given waveforms
   """
-  if not getenv("WHISPER_NEW_STFT"):
-    def pad_or_trim(arr, target_len):
-      curr_len = len(arr)
-      if curr_len == target_len:
-        return arr
-      elif curr_len < target_len:
-        return np.pad(arr, (0, target_len - curr_len), 'constant')
-      else:
-        return arr[:target_len]
+  waveforms = [(resample_batched_helper(Tensor(wv), sr, RATE) if sr != RATE else Tensor(wv)).flatten()[:wv.shape[-1]] for wv in waveforms]
+  max_len = max(len(wav) for wav in waveforms)
+  waveforms = Tensor.cat(*[wv.pad((0, max_len-wv.shape[-1]))[None] for wv in waveforms])
+  max_len = SAMPLES_PER_SEGMENT if truncate else max_len
 
-    max_len = SAMPLES_PER_SEGMENT if truncate else max(len(wav) for wav in waveforms)
-    if (r := max_len % SAMPLES_PER_SEGMENT) > 0: max_len += SAMPLES_PER_SEGMENT - r
-    waveforms = np.array(list(map(lambda w: pad_or_trim(w, max_len), waveforms)))
-    assert waveforms.shape[0] <= batch_size
-    if waveforms.shape[0] < batch_size:
-      # we could have a symbolic batch_size dim instead of manually padding here if conv/layernorm supported symbolic shapes
-      waveforms = np.pad(waveforms, pad_width=((0, batch_size - waveforms.shape[0]), (0, 0)))
+  if (r := max_len % SAMPLES_PER_SEGMENT) > 0: max_len += SAMPLES_PER_SEGMENT - r
 
-    stft = librosa.stft(waveforms, n_fft=N_FFT, hop_length=HOP_LENGTH, window='hann', dtype=np.csingle)
-    magnitudes = np.absolute(stft[..., :-1]) ** 2
-    mel_spec = librosa.filters.mel(sr=RATE, n_fft=N_FFT, n_mels=N_MELS) @ magnitudes
+  assert waveforms.shape[0] <= batch_size
+  waveforms = waveforms.pad(((0, batch_size-waveforms.shape[0]), (0, max_len-waveforms.shape[-1])))
+  # we could have a symbolic batch_size dim instead of manually padding here if conv/layernorm supported symbolic shapes
+  # TODO: pad_mode="reflect" to match openai
+  stft = stft_full(waveforms, N_FFT, stride=HOP_LENGTH, pad=(200, 200))
+  magnitudes = (stft[..., :-1] ** 2)
+  mel_spec = mel(sr=RATE, n_fft=N_FFT, n_mels=N_MELS) @ magnitudes
 
-    log_spec = np.log10(np.clip(mel_spec, 1e-10, None))
-    log_spec = np.maximum(log_spec, log_spec.max((1,2), keepdims=True) - 8.0)
-    log_spec = (log_spec + 4.0) / 4.0
-  else:
-    waveforms = [(resample_batched_helper(Tensor(wv), sr, RATE) if sr != RATE else Tensor(wv)).flatten()[:wv.shape[-1]] for wv in waveforms]
-    max_len = max(len(wav) for wav in waveforms)
-    waveforms = Tensor.cat(*[wv.pad((0, max_len-wv.shape[-1]))[None] for wv in waveforms])
-    max_len = SAMPLES_PER_SEGMENT if truncate else max_len
+  def log10(x:Tensor):
+    return x.log2() * (math.log(2) / math.log(10))
 
-    if (r := max_len % SAMPLES_PER_SEGMENT) > 0: max_len += SAMPLES_PER_SEGMENT - r
-
-    assert waveforms.shape[0] <= batch_size
-    waveforms = waveforms.pad(((0, batch_size-waveforms.shape[0]), (0, max_len-waveforms.shape[-1])))
-    # we could have a symbolic batch_size dim instead of manually padding here if conv/layernorm supported symbolic shapes
-    # TODO: pad_mode="reflect" to match openai
-    stft = stft_full(waveforms, N_FFT, stride=HOP_LENGTH, pad=(200, 200))
-    magnitudes = (stft[..., :-1] ** 2)
-    mel_spec = mel(sr=RATE, n_fft=N_FFT, n_mels=N_MELS) @ magnitudes
-
-    def log10(x:Tensor):
-      return x.log2() * (math.log(2) / math.log(10))
-
-    log_spec = log10(mel_spec.clip(1e-10, None))
-    log_spec = log_spec.maximum(log_spec.max((1,2), keepdim=True) - 8.0)
-    log_spec = (log_spec + 4.0) / 4.0
-    log_spec = log_spec.numpy()
+  log_spec = log10(mel_spec.clip(1e-10, None))
+  log_spec = log_spec.maximum(log_spec.max((1,2), keepdim=True) - 8.0)
+  log_spec = (log_spec + 4.0) / 4.0
+  log_spec = log_spec.numpy()
 
   return log_spec
 
