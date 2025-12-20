@@ -6,7 +6,7 @@ from tinygrad.renderer.cstyle import AMDRenderer, create_non_native_float_pats, 
 from tinygrad.uop.decompositions import xexp2, xlog2
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
 from tinygrad.dtype import dtypes, float_to_fp8, DType, PtrDType, truncate
-from tinygrad.helpers import prod, AMX
+from tinygrad.helpers import prod, AMX, CPU_COUNT
 
 def ldt(dt:DType):
   if dt.vcount > 1: return f"<{dt.vcount} x {ldt(dt.scalar())}>"
@@ -137,8 +137,12 @@ class LLVMRenderer(Renderer):
   abi = 'win64cc' if sys.platform == 'win32' else None
   supports_float4 = True
   has_local = False
-  global_max: tuple[int, ...] | None = None
-  string_rewrite = base_rewrite + PatternMatcher([(UPat(Ops.WMMA, name="wmma"), render_wmma_amx)])
+  has_threads = True
+  global_max = (CPU_COUNT.value, 0, 0)
+  string_rewrite = base_rewrite + PatternMatcher([
+    (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: f"  {ctx[x]} = add {ldt(dtypes.int)} %core_id, 0"),
+    (UPat(Ops.WMMA, name="wmma"), render_wmma_amx)
+  ])
   code_for_op = {Ops.FDIV: lambda: None, Ops.CMPLT: lambda: None}
   if AMX: tensor_cores = tc.amx
 
@@ -148,6 +152,11 @@ class LLVMRenderer(Renderer):
   def _render_fn(self, name:str, args:list[tuple[str,DType]], kernel:list[str], prefix:list[str]|None=None) -> str:
     # NOTE: CPUAllocator promises 0x20 alignment
     sargs = ", ".join([f"{ldt(dt)}{' noalias align 32' if isinstance(dt, PtrDType) else ''} {name}" for name,dt in args])
+    # Add core_id for threading support
+    if hasattr(self, 'has_threads') and self.has_threads and sargs:
+      sargs += ", i32 %core_id"
+    elif hasattr(self, 'has_threads') and self.has_threads:
+      sargs = "i32 %core_id"
     return "\n".join((prefix or []) + [f"define{' ' + self.abi if self.abi else ''} void @{name}({sargs}) #0", "{"] + kernel + ["  ret void\n}"])
   def _render_kernel(self, uops: list[UOp], prefix:list[str]|None=None) -> tuple[tuple[str, ...], str]:
     r: dict[UOp, str] = {}
