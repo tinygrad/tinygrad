@@ -149,7 +149,7 @@ function renderDag(graph, additions, dir, recenter, layoutOpts) {
 }
 
 function renderCfg(data) {
-  console.log(data.blocks);
+  console.log(data);
   return renderDag(data.uop, [], "TD", true, {});
 }
 

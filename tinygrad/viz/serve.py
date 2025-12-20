@@ -388,22 +388,32 @@ def amdgpu_cfg(lib:bytes, arch:str) -> dict:
   pc_table = llvm_disasm(arch, lib)
   # get leaders
   leaders:set[int] = set([next(iter(pc_table))])
+  branch_offsets:dict[int, int] = {}
   for pc, (asm, sz) in pc_table.items():
     inst, *operands = asm.split(" ")
-    if inst in SOPP_INSTS: leaders |= {pc+sz+simm16(int(operands[0]))*4, pc+sz}
-  # build basic blocks
+    if inst in SOPP_INSTS:
+      branch_offsets[pc] = off = pc+sz+simm16(int(operands[0]))*4
+      leaders |= {off, pc+sz}
+  # build the cfg
+  curr:int|None = None
   blocks:dict[int, list[int]] = {}
-  cur:int|None = None
-  for pc in pc_table:
-    if pc in leaders: blocks[cur:=pc] = []
-    blocks[unwrap(cur)].append(pc)
+  cfg:dict[int, dict[int, None]] = {}
+  for pc, (asm, sz) in pc_table.items():
+    if pc in leaders:
+      cfg[curr:=pc] = {}
+      blocks[pc] = []
+    blocks[unwrap(curr)].append(pc)
+    if (o:=branch_offsets.get(pc)) is not None:
+      cfg[unwrap(curr)][o] = None
+      if not asm.startswith("s_branch"): cfg[unwrap(curr)][pc+sz] = None
+    if (nx:=pc+sz) in leaders: cfg[unwrap(curr)][nx] = None
   # temp: translate to UOps
   # TODO: cfg should have its own layout
   uop:UOp|None = None
   for insts in blocks.values():
     arg = "\n".join([pc_table[p][0] for p in insts])
     uop = UOp(Ops.CUSTOM, src=() if uop is None else (uop,), arg=arg)
-  return {"uop":uop_to_json(unwrap(uop)), "blocks":blocks, "pc_table":pc_table}
+  return {"uop":uop_to_json(unwrap(uop)), "blocks":blocks, "cfg":cfg, "pc_table":pc_table}
 
 # ** Main render function to get the complete details about a trace event
 
@@ -539,6 +549,8 @@ if __name__ == "__main__":
 
   ctxs:list[dict] = get_rewrites(trace:=load_pickle(args.kernels, default=RewriteTrace([], [], {})))
   profile_ret = get_profile(load_pickle(args.profile, default=[]))
+
+  #get_render(2, 23, "graph-cfg")
 
   server = TCPServerWithReuse(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)
