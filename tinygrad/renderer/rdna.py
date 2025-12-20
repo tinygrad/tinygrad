@@ -26,6 +26,8 @@ def render_val(x, dtype):
   return f"0x{val:08X}" if val > 0x7FFFFFFF else str(val)
 
 def can_inline_const(val, dtype) -> bool:
+  # 64-bit types can't be inlined - need register pairs for FMA/load/store
+  if dtype in (dtypes.float64, dtypes.long, dtypes.ulong): return False
   if dtypes.is_float(dtype): return float(val) in (0.0, 0.5, 1.0, 2.0, 4.0, -0.5, -1.0, -2.0, -4.0)
   try: return -16 <= int(val) <= 64
   except (TypeError, ValueError): return False
@@ -574,31 +576,35 @@ def render_endif(ctx, x):
     f"s_mov_b32 exec_lo, s{save_sgpr}"]
 
 def render_64bit_mul(ctx, x):
-  """Render 64-bit integer multiplication for division-by-multiplication pattern.
-  Stores hi bits in HIGH register of pair for subsequent SHR.
-  For signed (long) type with a positive constant that has bit 31 set, we need special handling
-  because v_mul_hi_i32 would misinterpret the constant as negative."""
+  """Render 64-bit integer multiplication. For full 64-bit result:
+  result_lo = (a_lo * b_lo) & 0xFFFFFFFF
+  result_hi = (a_lo * b_lo) >> 32 + a_hi * b_lo + a_lo * b_hi
+  Simplified for values where only low 32 bits of operands are used."""
   rx = ctx.r[x]
-  rx_hi = f"v{get_reg_base(rx) + 1}" if '[' in rx else rx
   a, b = x.src[0], x.src[1]
-  ra = ctx.r[a.src[0]] if a.op is Ops.CAST and a.src[0].dtype.itemsize == 4 else ctx.r[a]
-  ra = f"v{get_reg_base(ra)}" if '[' in ra else ra
-  rb = render_val(b.arg, dtypes.uint32) if b.op is Ops.CONST else (f"v{get_reg_base(ctx.r[b])}" if '[' in ctx.r[b] else ctx.r[b])
-  scratch = ctx.get_scratch_vgpr()
 
-  # For signed multiply (dtypes.long) with a constant that has bit 31 set,
-  # v_mul_hi_i32 treats the constant as negative (m - 2^32).
-  # We want: (a * m_unsigned) >> 32
-  # v_mul_hi_i32 gives: (a * m_signed) >> 32 = (a * (m - 2^32)) >> 32 = (a*m)>>32 - a
-  # Therefore: (a*m)>>32 = v_mul_hi_i32(a, m) + a
-  if x.dtype == dtypes.long and b.op is Ops.CONST and b.arg >= 0x80000000:
-    return [
-      f"v_mul_lo_u32 v{scratch}, {ra}, {rb}",
-      f"v_mul_hi_i32 {rx_hi}, {ra}, {rb}",
-      f"v_add_nc_u32 {rx_hi}, {rx_hi}, {ra}"]
+  # Get low 32 bits of operands
+  if a.op is Ops.CAST and a.src[0].dtype.itemsize == 4:
+    ra = ctx.r[a.src[0]]  # Use 32-bit source directly
+  else:
+    ra = ctx.r[a]
+  ra_lo = f"v{get_reg_base(ra)}" if '[' in ra else ra
 
-  mul_hi_instr = "v_mul_hi_i32" if x.dtype == dtypes.long else "v_mul_hi_u32"
-  return [f"v_mul_lo_u32 v{scratch}, {ra}, {rb}", f"{mul_hi_instr} {rx_hi}, {ra}, {rb}"]
+  if b.op is Ops.CONST:
+    rb_lo = render_val(b.arg & 0xFFFFFFFF, dtypes.uint32)
+  else:
+    rb = ctx.r[b]
+    rb_lo = f"v{get_reg_base(rb)}" if '[' in rb else rb
+
+  # Check if result is a pair or single register
+  if '[' in rx:
+    rx_lo = f"v{get_reg_base(rx)}"
+    rx_hi = f"v{get_reg_base(rx) + 1}"
+    mul_hi_instr = "v_mul_hi_i32" if x.dtype == dtypes.long else "v_mul_hi_u32"
+    return [f"v_mul_lo_u32 {rx_lo}, {ra_lo}, {rb_lo}", f"{mul_hi_instr} {rx_hi}, {ra_lo}, {rb_lo}"]
+  else:
+    # Single register output - just compute low 32 bits
+    return f"v_mul_lo_u32 {rx}, {ra_lo}, {rb_lo}"
 
 def render_64bit_shr(ctx, x, a, b):
   """Render 64-bit right shift. For shifts >= 32, just shift the high 32 bits.
@@ -929,6 +935,21 @@ class RDNARenderer(Renderer):
       s = self.get_scratch_vgpr()
       cvt_int = "v_cvt_i32_f32" if x.dtype in (dtypes.int8, dtypes.int16, dtypes.int32) else "v_cvt_u32_f32"
       return [f"v_cvt_f32_f16 v{s}, {self.r[a]}", f"{cvt_int} {self.r[x]}, v{s}"]
+    # 64-bit int -> float16: extract low 32 bits, convert to f32, then to f16
+    elif x.dtype == dtypes.float16 and a.dtype in (dtypes.long, dtypes.ulong):
+      ra = self.r[a]
+      assert isinstance(ra, str)
+      s = self.get_scratch_vgpr()
+      src_lo = f"v{get_reg_base(ra)}" if '[' in ra else ra
+      cvt_float = "v_cvt_f32_i32" if a.dtype == dtypes.long else "v_cvt_f32_u32"
+      return [f"{cvt_float} v{s}, {src_lo}", f"v_cvt_f16_f32 {self.r[x]}, v{s}"]
+    # float64 -> float16: convert to f32 first, then to f16
+    elif x.dtype == dtypes.float16 and a.dtype == dtypes.float64:
+      ra = self.r[a]
+      assert isinstance(ra, str)
+      s = self.get_scratch_vgpr()
+      src = get_reg_base(ra)
+      return [f"v_cvt_f32_f64 v{s}, v[{src}:{src+1}]", f"v_cvt_f16_f32 {self.r[x]}, v{s}"]
     # int types -> float16: go through float32
     elif x.dtype == dtypes.float16 and dtypes.is_int(a.dtype):
       s = self.get_scratch_vgpr()
@@ -940,6 +961,21 @@ class RDNARenderer(Renderer):
       cvt_int = "v_cvt_i32_f32" if x.dtype in (dtypes.int8, dtypes.int16, dtypes.int32) else "v_cvt_u32_f32"
       # bfloat16 to float32: shift left by 16 bits (bfloat16 is upper 16 bits of float32)
       return [f"v_lshlrev_b32 v{s}, 16, {self.r[a]}", f"{cvt_int} {self.r[x]}, v{s}"]
+    # 64-bit int -> bfloat16: extract low 32 bits, convert to f32, then shift right 16
+    elif x.dtype == dtypes.bfloat16 and a.dtype in (dtypes.long, dtypes.ulong):
+      ra = self.r[a]
+      assert isinstance(ra, str)
+      s = self.get_scratch_vgpr()
+      src_lo = f"v{get_reg_base(ra)}" if '[' in ra else ra
+      cvt_float = "v_cvt_f32_i32" if a.dtype == dtypes.long else "v_cvt_f32_u32"
+      return [f"{cvt_float} v{s}, {src_lo}", f"v_lshrrev_b32 {self.r[x]}, 16, v{s}"]
+    # float64 -> bfloat16: convert to f32 first, then shift right 16
+    elif x.dtype == dtypes.bfloat16 and a.dtype == dtypes.float64:
+      ra = self.r[a]
+      assert isinstance(ra, str)
+      s = self.get_scratch_vgpr()
+      src = get_reg_base(ra)
+      return [f"v_cvt_f32_f64 v{s}, v[{src}:{src+1}]", f"v_lshrrev_b32 {self.r[x]}, 16, v{s}"]
     # int types -> bfloat16: go through float32
     elif x.dtype == dtypes.bfloat16 and dtypes.is_int(a.dtype):
       s = self.get_scratch_vgpr()
@@ -962,6 +998,13 @@ class RDNARenderer(Renderer):
       return f"{cvt_int} {self.r[x]}, v[{src}:{src+1}]"
     elif x.dtype == dtypes.float64:
       return self.render_mov_64(x, a)  # TODO: proper int->f64 conversion
+    # 64-bit int -> float32: convert low 32 bits to float
+    elif x.dtype == dtypes.float32 and a.dtype in (dtypes.long, dtypes.ulong):
+      ra = self.r[a]
+      assert isinstance(ra, str)
+      src_lo = f"v{get_reg_base(ra)}" if '[' in ra else ra
+      cvt_float = "v_cvt_f32_i32" if a.dtype == dtypes.long else "v_cvt_f32_u32"
+      return f"{cvt_float} {self.r[x]}, {src_lo}"
     elif x.dtype.itemsize == 4 and a.dtype in (dtypes.long, dtypes.ulong):
       ra = self.r[a]
       assert isinstance(ra, str)
