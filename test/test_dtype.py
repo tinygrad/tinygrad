@@ -7,6 +7,7 @@ from tinygrad.helpers import getenv, DEBUG, CI
 from tinygrad.dtype import DType, DTYPES_DICT, least_upper_dtype, fp8_to_float, float_to_fp8, _to_np_dtype, _to_torch_dtype, truncate
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
+from tinygrad.renderer.rdna import RDNARenderer
 from tinygrad import Device, Tensor, dtypes
 from hypothesis import given, settings, strategies as strat
 from test.helpers import rand_for_dtype
@@ -260,7 +261,8 @@ class TestFloatDType(TestDType):
 class TestDoubleDType(TestDType):
   DTYPE = dtypes.double
   @unittest.skipIf((CI and Device.DEFAULT in {"CUDA", "NV"}) or \
-   isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer)), "conversion not supported on CI CUDA, PTX, and NIR")  # TODO: why not?
+   isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer, RDNARenderer)),
+   "conversion not supported on CI CUDA, PTX, NIR, and RDNA (no native f64 transcendentals)")
   def test_float64_increased_precision(self):
     for func in [
       lambda t: t.exp(),

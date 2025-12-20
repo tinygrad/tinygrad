@@ -7,7 +7,7 @@ from tinygrad.renderer import Renderer
 from tinygrad.helpers import get_single_element, getenv
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu
 from tinygrad.codegen.opt import tc
-from tinygrad.renderer.cstyle import create_non_native_float_pats, pm_manual_bf16_cast
+from tinygrad.renderer.cstyle import create_non_native_float_pats, cast_float_to_bf16
 
 def get_reg_base(reg: str) -> int:
   """Extract base register number from register string (e.g., 'v5' -> 5, 'v[10:17]' -> 10)."""
@@ -86,10 +86,11 @@ def global_store(addr:str, data:str, base:str, dt:DType) -> str:
   return f"global_store_{sz} {addr}, {data}, {base}"
 
 def global_load(dest:str, addr:str, base:str, dt:DType) -> str:
-  # Use signed (sbyte/i16) for signed types, unsigned (ubyte/u16) for unsigned types
-  # This ensures proper sign/zero extension when loading into 32-bit registers
-  if dt.itemsize == 1: sz = 'sbyte' if dt in (dtypes.int8, dtypes.char) else 'ubyte'
-  elif dt.itemsize == 2: sz = 'i16' if dt == dtypes.int16 else 'u16'
+  # Always use unsigned loads (ubyte/u16) to preserve raw bit patterns.
+  # Sign extension corrupts bit manipulation operations like SHL+ADD for bitcast.
+  # ALU operations have signed variants (v_cmp_lt_i32, v_mul_hi_i32) so we don't need sign extension at load.
+  if dt.itemsize == 1: sz = 'ubyte'
+  elif dt.itemsize == 2: sz = 'u16'
   else: sz = {4: 'b32', 8: 'b64', 16: 'b128'}[dt.itemsize]
   return f"global_load_{sz} {dest}, {addr}, {base}"
 
@@ -122,9 +123,9 @@ def gated_load(ctx, x, idx, alt, gate, buf, index_op) -> list[str]:
   return result
 
 def ds_read(dest:str, addr:str, dt:DType) -> str:
-  # Use signed (i8/i16) for signed types to get sign extension
-  if dt.itemsize == 1: sz = 'i8' if dt in (dtypes.int8, dtypes.char) else 'u8'
-  elif dt.itemsize == 2: sz = 'i16' if dt == dtypes.int16 else 'u16'
+  # Always use unsigned loads (u8/u16) to preserve raw bit patterns (same as global_load).
+  if dt.itemsize == 1: sz = 'u8'
+  elif dt.itemsize == 2: sz = 'u16'
   else: sz = {4: 'b32', 8: 'b64', 16: 'b128'}[dt.itemsize]
   return f"ds_read_{sz} {dest}, {addr}"
 
@@ -150,15 +151,72 @@ def render_const_64(ctx, x):
 # RDNA3 doesn't have v_add_f64/v_sub_f64/v_mul_f64, so we implement them via v_fma_f64
 # ADD(a, b) = FMA(1.0, a, b), SUB(a, b) = FMA(1.0, a, -b), MUL(a, b) = FMA(a, b, 0.0)
 def render_f64_add(ctx, x, a, b):
-  """Float64 add via FMA: a + b = 1.0 * a + b"""
-  rx, ra, rb = get_reg_base(ctx.r[x]), get_reg_base(ctx.r[a]), get_reg_base(ctx.r[b])
+  """Float64 add via FMA: a + b = 1.0 * a + b. Handles constants by loading into scratch regs."""
+  rx = get_reg_base(ctx.r[x])
+  ra_str, rb_str = ctx.r[a], ctx.r[b]
   s = ctx.get_scratch_vgpr()
+  instrs = []
+
+  # Helper to check if r_str is a register (not a constant)
+  def is_register(r_str):
+    return '[' in r_str or r_str.startswith('v') or r_str.startswith('s')
+
+  # Helper to get f64 register pair, loading constant if needed
+  def get_f64_reg(r_str, scratch_base):
+    if '[' in r_str:  # already a register pair
+      base = get_reg_base(r_str)
+      return f"v[{base}:{base+1}]", []
+    elif r_str.startswith('v'):  # single VGPR (shouldn't happen for f64, but handle it)
+      base = int(r_str[1:])
+      return f"v[{base}:{base+1}]", []
+    else:  # constant - need to load it
+      val = float(r_str)
+      bits = struct.pack('<d', val)
+      lo = int.from_bytes(bits[0:4], 'little')
+      hi = int.from_bytes(bits[4:8], 'little')
+      return f"v[{scratch_base}:{scratch_base+1}]", [
+        f"v_mov_b32 v{scratch_base}, 0x{lo:08x}",
+        f"v_mov_b32 v{scratch_base+1}, 0x{hi:08x}",
+      ]
+
+  # Use s+2/s+3 for first constant, s+2/s+3 reused or not needed based on what's a constant
+  # This ensures we stay within the 4-register scratch allocation (s, s+1, s+2, s+3)
+  a_is_reg = is_register(ra_str)
+  a_reg, a_load = get_f64_reg(ra_str, s+2)
+  # If a is a register, b can use s+2. If a is constant (uses s+2), b must use... but we can't!
+  # Actually: 1.0 uses s,s+1. a constant uses s+2,s+3. If b is also constant, we have a problem.
+  # For now, if both are constants, we need to load a first, do the FMA, then it's safe.
+  # But simpler: just ensure a uses s+2 only if needed, and b uses s+2 if a doesn't need it.
+  b_scratch = s+2 if a_is_reg else s+2  # Reuse s+2 for b if a is already a register
+  b_reg, b_load = get_f64_reg(rb_str, b_scratch if a_is_reg else s+2)
+
+  # Special case: both a and b are constants - need to load them sequentially and use dest as temp
+  if not a_is_reg and not is_register(rb_str):
+    # Load a into s+2:s+3, do FMA to dest, then load b into dest isn't right...
+    # Actually: load a into s+2:s+3, load b into rx (dest), then FMA overwrites rx
+    # Better: load both into scratch, but we only have 4 regs. Use rx as temp for one.
+    # Load b into destination first (will be overwritten by FMA result)
+    b_val = float(rb_str)
+    b_bits = struct.pack('<d', b_val)
+    b_lo = int.from_bytes(b_bits[0:4], 'little')
+    b_hi = int.from_bytes(b_bits[4:8], 'little')
+    instrs.extend([
+      f"v_mov_b32 v{rx}, 0x{b_lo:08x}",
+      f"v_mov_b32 v{rx+1}, 0x{b_hi:08x}",
+    ])
+    b_reg = f"v[{rx}:{rx+1}]"
+    b_load = []  # Already loaded
+
+  instrs.extend(a_load)
+  instrs.extend(b_load)
+
   # Load 1.0 as float64 (0x3FF0000000000000)
-  return [
+  instrs.extend([
     f"v_mov_b32 v{s}, 0x00000000",      # low 32 bits of 1.0
     f"v_mov_b32 v{s+1}, 0x3FF00000",    # high 32 bits of 1.0
-    f"v_fma_f64 v[{rx}:{rx+1}], v[{s}:{s+1}], v[{ra}:{ra+1}], v[{rb}:{rb+1}]"
-  ]
+    f"v_fma_f64 v[{rx}:{rx+1}], v[{s}:{s+1}], {a_reg}, {b_reg}"
+  ])
+  return instrs
 
 def render_f64_sub(ctx, x, a, b):
   """Float64 sub via FMA and neg: a - b = a + (-b)"""
@@ -627,17 +685,43 @@ def render_64bit_mul(ctx, x):
     return f"v_mul_lo_u32 {rx}, {ra_lo}, {rb_lo}"
 
 def render_64bit_shr(ctx, x, a, b):
-  """Render 64-bit right shift. For shifts >= 32, just shift the high 32 bits.
+  """Render 64-bit right shift.
+  For shifts >= 32: result is just high >> (shift-32), with high = 0 (or sign-extend for signed).
+  For shifts < 32: result_lo = (a_lo >> shift) | (a_hi << (32-shift)), result_hi = a_hi >> shift.
   Use arithmetic shift (ashrrev) for signed types, logical shift (lshrrev) for unsigned."""
   if b.op is not Ops.CONST: raise RuntimeError("64-bit SHR requires constant shift amount")
-  dst_num, src_hi = get_reg_base(ctx.r[x]), get_reg_base(ctx.r[a]) + (1 if '[' in ctx.r[a] else 0)
+  rx, ra = ctx.r[x], ctx.r[a]
+  dst_lo, dst_hi = get_reg_base(rx), get_reg_base(rx) + 1
+  src_lo = get_reg_base(ra)
+  src_hi = src_lo + 1 if '[' in ra else src_lo
   shift_amt = b.arg
   # Use arithmetic shift for signed types (long), logical for unsigned (ulong)
   shift_instr = "v_ashrrev_i32" if x.dtype == dtypes.long else "v_lshrrev_b32"
-  if shift_amt >= 32:
+
+  if shift_amt == 0:
+    # No shift needed, just copy
+    return [f"v_mov_b32 v{dst_lo}, v{src_lo}", f"v_mov_b32 v{dst_hi}, v{src_hi}"]
+  elif shift_amt >= 32:
     remaining = shift_amt - 32
-    return f"v_mov_b32 v{dst_num}, v{src_hi}" if remaining == 0 else f"{shift_instr} v{dst_num}, {remaining}, v{src_hi}"
-  return f"{shift_instr} v{dst_num}, {shift_amt}, v{src_hi}"
+    if x.dtype == dtypes.long:
+      # Signed: high bits get sign extension
+      if remaining == 0:
+        return [f"v_mov_b32 v{dst_lo}, v{src_hi}", f"v_ashrrev_i32 v{dst_hi}, 31, v{src_hi}"]
+      return [f"v_ashrrev_i32 v{dst_lo}, {remaining}, v{src_hi}", f"v_ashrrev_i32 v{dst_hi}, 31, v{src_hi}"]
+    else:
+      # Unsigned: high bits become 0
+      if remaining == 0:
+        return [f"v_mov_b32 v{dst_lo}, v{src_hi}", f"v_mov_b32 v{dst_hi}, 0"]
+      return [f"v_lshrrev_b32 v{dst_lo}, {remaining}, v{src_hi}", f"v_mov_b32 v{dst_hi}, 0"]
+  else:
+    # Need to combine bits from both halves
+    s = ctx.get_scratch_vgpr()
+    return [
+      f"v_lshrrev_b32 v{dst_lo}, {shift_amt}, v{src_lo}",  # low >> shift
+      f"v_lshlrev_b32 v{s}, {32-shift_amt}, v{src_hi}",     # high << (32-shift)
+      f"v_or_b32 v{dst_lo}, v{dst_lo}, v{s}",               # combine into low
+      f"{shift_instr} v{dst_hi}, {shift_amt}, v{src_hi}",   # high >> shift
+    ]
 
 def render_64bit_shl(ctx, x, a, b):
   """Render 64-bit left shift.
@@ -671,18 +755,30 @@ def render_64bit_shl(ctx, x, a, b):
 
 def render_64bit_add(ctx, x, a, b):
   """Render 64-bit integer addition with carry: dst = a + b.
-  Uses v_add_co_u32 for low 32 bits (produces carry), v_add_co_ci_u32 for high (consumes carry)."""
+  Uses v_add_co_u32 for low 32 bits (produces carry), v_add_co_ci_u32 for high (consumes carry).
+  Handles constants: for small constants, high part is 0; for register pairs, extracts lo/hi."""
   rx = ctx.r[x]
   ra = ctx.r[a]
   rb = ctx.r[b]
   dst_lo, dst_hi = get_reg_base(rx), get_reg_base(rx) + 1
-  a_lo = get_reg_base(ra) if '[' in ra else int(ra[1:])
-  a_hi = a_lo + 1 if '[' in ra else a_lo
-  b_lo = get_reg_base(rb) if '[' in rb else int(rb[1:])
-  b_hi = b_lo + 1 if '[' in rb else b_lo
+
+  # Helper to extract lo/hi from a 64-bit operand (register pair or constant)
+  def get_lo_hi(r):
+    if '[' in r:  # register pair like v[10:11]
+      base = get_reg_base(r)
+      return f"v{base}", f"v{base+1}"
+    elif r.startswith('v') or r.startswith('s'):  # single register
+      num = int(r[1:])
+      return f"v{num}", f"v{num}"  # same reg for both (shouldn't happen for 64-bit)
+    else:  # constant - high part is 0 for small constants
+      return r, "0"
+
+  a_lo, a_hi = get_lo_hi(ra)
+  b_lo, b_hi = get_lo_hi(rb)
+
   return [
-    f"v_add_co_u32 v{dst_lo}, vcc_lo, v{a_lo}, v{b_lo}",  # low + low, carry in vcc_lo
-    f"v_add_co_ci_u32 v{dst_hi}, vcc_lo, v{a_hi}, v{b_hi}, vcc_lo",  # high + high + carry
+    f"v_add_co_u32 v{dst_lo}, vcc_lo, {a_lo}, {b_lo}",  # low + low, carry in vcc_lo
+    f"v_add_co_ci_u32 v{dst_hi}, vcc_lo, {a_hi}, {b_hi}, vcc_lo",  # high + high + carry
   ]
 
 def render_64bit_or(ctx, x, a, b):
@@ -763,6 +859,9 @@ def render_wmma(ctx, x):
 def render_add_with_literal(ctx, x, a, b):
   """Render ADD using literal constant instead of register for the constant operand.
   RDNA3 VOP2 constraints: dst, src0, src1 where src0 can be literal but src1 must be VGPR."""
+  # Skip 64-bit types - they need special handling (render_64bit_add)
+  if x.dtype in (dtypes.long, dtypes.ulong, dtypes.float64):
+    return None  # Fall back to 64-bit specific pattern
   # Only use literal optimization if `a` has a proper VGPR (not a literal string)
   # This can happen if `a` is also a CONST that was optimized away
   ra = ctx.r[a]
@@ -882,13 +981,25 @@ string_rewrite = PatternMatcher([
     x.dtype, ctx.types[x.dtype])),
   # bitcast/cast
   # BITCAST - need special handling for 64-bit types (float64, long, ulong)
+  # Destination is 64-bit
   (UPat(Ops.BITCAST, name="x", dtype=dtypes.float64, src=(UPat.var("a"),), allow_any_len=True),
    lambda ctx, x, a: ctx.render_mov_64(x, a)),
   (UPat(Ops.BITCAST, name="x", dtype=dtypes.long, src=(UPat.var("a"),), allow_any_len=True),
    lambda ctx, x, a: ctx.render_mov_64(x, a)),
   (UPat(Ops.BITCAST, name="x", dtype=dtypes.ulong, src=(UPat.var("a"),), allow_any_len=True),
    lambda ctx, x, a: ctx.render_mov_64(x, a)),
-  (UPat(Ops.BITCAST, name="x", src=(UPat.var("a"),), allow_any_len=True), lambda ctx, x, a: f"v_mov_b32 {ctx.r[x]}, {ctx.r[a]}"),
+  # Source is 64-bit (destination must also be 64-bit for valid BITCAST)
+  (UPat(Ops.BITCAST, name="x", src=(UPat.var("a", dtype=dtypes.float64),), allow_any_len=True),
+   lambda ctx, x, a: ctx.render_mov_64(x, a)),
+  (UPat(Ops.BITCAST, name="x", src=(UPat.var("a", dtype=dtypes.long),), allow_any_len=True),
+   lambda ctx, x, a: ctx.render_mov_64(x, a)),
+  (UPat(Ops.BITCAST, name="x", src=(UPat.var("a", dtype=dtypes.ulong),), allow_any_len=True),
+   lambda ctx, x, a: ctx.render_mov_64(x, a)),
+  # Fallback - check register types and handle appropriately
+  (UPat(Ops.BITCAST, name="x", src=(UPat.var("a"),), allow_any_len=True),
+   lambda ctx, x, a: (ctx.render_mov_64(x, a) if isinstance(ctx.r[x], str) and ctx.r[x].startswith('v[') else
+                      f"v_mov_b32 {ctx.r[x]}, v{get_reg_base(ctx.r[a])}" if isinstance(ctx.r[a], str) and ctx.r[a].startswith('v[') else
+                      f"v_mov_b32 {ctx.r[x]}, {ctx.r[a]}")),
   # cast from bool to float16: SGPR->0/1->f32->f16, VGPR->f32->f16
   (UPat(Ops.CAST, name="x", dtype=dtypes.float16, src=(UPat(dtype=dtypes.bool, name="a"),)),
    lambda ctx, x, a: (lambda s=ctx.get_scratch_vgpr(): [
@@ -908,14 +1019,9 @@ string_rewrite = PatternMatcher([
      f"v_cvt_f32_u32 v{s}, {ctx.r[a]}",
      f"v_lshrrev_b32 {ctx.r[x]}, 16, v{s}"])()),
   # cast from bool (generic case): if bool is in SGPR (comparison result), use v_cndmask_b32; if in VGPR (loaded from memory), convert directly
-  (UPat(Ops.CAST, name="x", src=(UPat(dtype=dtypes.bool, name="a"),)),
-   lambda ctx, x, a: f"v_cndmask_b32 {ctx.r[x]}, {render_val(0, x.dtype)}, {render_val(1, x.dtype)}, {ctx.r[a]}"
-     if ctx.r[a].startswith('s') else f"v_cvt_f32_u32 {ctx.r[x]}, {ctx.r[a]}" if dtypes.is_float(x.dtype) else f"v_mov_b32 {ctx.r[x]}, {ctx.r[a]}"),
+  (UPat(Ops.CAST, name="x", src=(UPat(dtype=dtypes.bool, name="a"),)), lambda ctx, x, a: ctx.render_cast_from_bool(x, a)),
   # cast TO bool: compare to 0, result to vcc_lo, then cndmask to VGPR
-  (UPat(Ops.CAST, name="x", dtype=dtypes.bool, src=(UPat.var("a"),)),
-   lambda ctx, x, a: [
-     f"v_cmp_{'neq' if dtypes.is_float(a.dtype) else 'ne'}_{ctx.types[a.dtype]} vcc_lo, {ctx.r[a]}, 0",
-     f"v_cndmask_b32 {ctx.r[x]}, 0, 1, vcc_lo"]),
+  (UPat(Ops.CAST, name="x", dtype=dtypes.bool, src=(UPat.var("a"),)), lambda ctx, x, a: ctx.render_cast_to_bool(x, a)),
   # cast TO 64-bit int from ints: move low 32 bits, sign/zero extend high 32 bits
   # Float casts are handled in render_cast (need conversion first)
   (UPat(Ops.CAST, name="x", dtype=dtypes.long, src=(UPat.var("a", dtypes.sints),)),
@@ -924,7 +1030,10 @@ string_rewrite = PatternMatcher([
    lambda ctx, x, a: ctx.render_cast_to_64(x, a, signed=False)),
   (UPat(Ops.CAST, name="x", dtype=dtypes.long, src=(UPat.var("a", dtype=dtypes.bool),)),
    lambda ctx, x, a: ctx.render_cast_to_64(x, a, signed=False)),
-  (UPat(Ops.CAST, name="x", dtype=dtypes.ulong, src=(UPat.var("a", dtypes.ints),)),
+  # Cast to ulong: signed ints need sign-extension (to preserve value), unsigned just zero-extend
+  (UPat(Ops.CAST, name="x", dtype=dtypes.ulong, src=(UPat.var("a", dtypes.sints),)),
+   lambda ctx, x, a: ctx.render_cast_to_64(x, a, signed=True)),
+  (UPat(Ops.CAST, name="x", dtype=dtypes.ulong, src=(UPat.var("a", dtypes.uints),)),
    lambda ctx, x, a: ctx.render_cast_to_64(x, a, signed=False)),
   (UPat(Ops.CAST, name="x", dtype=dtypes.ulong, src=(UPat.var("a", dtype=dtypes.bool),)),
    lambda ctx, x, a: ctx.render_cast_to_64(x, a, signed=False)),
@@ -987,8 +1096,22 @@ class RDNARenderer(Renderer):
   shared_max = 65536
   max_upcast_size = 16  # RDNA3 has 256 VGPRs max, limit unrolling to reduce register pressure
   code_for_op = asm_for_op
-  extra_matcher = rdna_matcher + create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast
+  # RDNA-specific bf16 handling: only f32->bf16 needs the complex rounding pattern
+  # bf16->f32 is handled directly by render_cast with a simple shift
+  rdna_bf16_cast = PatternMatcher([
+    (UPat(Ops.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float),)), cast_float_to_bf16),
+  ])
+  extra_matcher = rdna_matcher + create_non_native_float_pats((dtypes.bfloat16,)) + rdna_bf16_cast
   tensor_cores = tc.amd_rdna3  # RDNA3 WMMA tensor cores
+
+  # Type classifications for cleaner dispatch
+  SIGNED_INTS = (dtypes.int8, dtypes.int16, dtypes.int32, dtypes.long)
+  UNSIGNED_INTS = (dtypes.uint8, dtypes.uint16, dtypes.uint32, dtypes.ulong)
+  SMALL_SIGNED_INTS = (dtypes.int8, dtypes.int16)
+  SMALL_UNSIGNED_INTS = (dtypes.uint8, dtypes.uint16)
+  SMALL_INTS = SMALL_SIGNED_INTS + SMALL_UNSIGNED_INTS
+  INT64_TYPES = (dtypes.long, dtypes.ulong)
+  FLOAT_TYPES = (dtypes.float16, dtypes.bfloat16, dtypes.float32, dtypes.float64)
 
   def __init__(self, arch:str="gfx1100"):
     self.arch = arch
@@ -1005,6 +1128,82 @@ class RDNARenderer(Renderer):
     dtypes.uint8: "u32", dtypes.uint16: "u32", dtypes.uint32: "u32", dtypes.uint64: "u32",
     dtypes.float16: "f16", dtypes.bfloat16: "bf16", dtypes.float32: "f32", dtypes.float64: "f64", dtypes.bool: "i32"
   }
+
+  # ==================== Type Conversion Helpers ====================
+  # These methods generate assembly for common type conversion patterns.
+  # They return lists of instructions that can be flattened into the final output.
+
+  def _get_dst_pair(self, rx: str) -> tuple[int, int]:
+    """Extract (lo, hi) register numbers from a 64-bit register pair like 'v[10:11]'."""
+    base = get_reg_base(rx)
+    return base, base + 1
+
+  def _get_src_low(self, ra: str) -> str:
+    """Get the low 32-bit register from a potentially 64-bit register."""
+    return f"v{get_reg_base(ra)}" if '[' in ra else ra
+
+  def _get_src_pair(self, ra: str) -> tuple[str, str]:
+    """Get (lo, hi) register strings from a 64-bit register pair."""
+    base = get_reg_base(ra)
+    return f"v{base}", f"v{base+1}"
+
+  def _sign_extend_32_to_64(self, dst_lo: int, dst_hi: int, src: str) -> list[str]:
+    """Sign extend a 32-bit value to 64-bit: high = arithmetic right shift by 31."""
+    return [f"v_mov_b32 v{dst_lo}, {src}", f"v_ashrrev_i32 v{dst_hi}, 31, {src}"]
+
+  def _zero_extend_32_to_64(self, dst_lo: int, dst_hi: int, src: str) -> list[str]:
+    """Zero extend a 32-bit value to 64-bit: high = 0."""
+    return [f"v_mov_b32 v{dst_lo}, {src}", f"v_mov_b32 v{dst_hi}, 0"]
+
+  def _sign_extend_small_int(self, dst: str, src: str, src_dtype) -> str:
+    """Sign extend int8/int16 to 32-bit. Uses v_bfe_i32 (bit field extract, signed)."""
+    bits = 8 if src_dtype.itemsize == 1 else 16
+    return f"v_bfe_i32 {dst}, {src}, 0, {bits}"
+
+  def _bf16_to_f32(self, dst: str, src: str) -> str:
+    """Convert bfloat16 to float32 by shifting left 16 bits."""
+    return f"v_lshlrev_b32 {dst}, 16, {src}"
+
+  def _f32_to_bf16(self, dst: str, src: str) -> str:
+    """Convert float32 to bfloat16 by shifting right 16 bits (truncation)."""
+    return f"v_lshrrev_b32 {dst}, 16, {src}"
+
+  def _cvt_f32_to_int(self, dst: str, src: str, signed: bool) -> str:
+    """Convert float32 to 32-bit integer."""
+    return f"v_cvt_{'i' if signed else 'u'}32_f32 {dst}, {src}"
+
+  def _cvt_int_to_f32(self, dst: str, src: str, signed: bool) -> str:
+    """Convert 32-bit integer to float32."""
+    return f"v_cvt_f32_{'i' if signed else 'u'}32 {dst}, {src}"
+
+  def _cvt_f64_to_f32(self, dst: str, src_lo: int) -> str:
+    """Convert float64 to float32."""
+    return f"v_cvt_f32_f64 {dst}, v[{src_lo}:{src_lo+1}]"
+
+  def _cvt_f32_to_f64(self, dst_lo: int, src: str) -> str:
+    """Convert float32 to float64."""
+    return f"v_cvt_f64_f32 v[{dst_lo}:{dst_lo+1}], {src}"
+
+  def _cvt_f64_to_int(self, dst: str, src_lo: int, signed: bool) -> str:
+    """Convert float64 to 32-bit integer."""
+    return f"v_cvt_{'i' if signed else 'u'}32_f64 {dst}, v[{src_lo}:{src_lo+1}]"
+
+  def _cvt_i64_to_f32(self, dst: str, src_lo: str, src_hi: str, signed: bool) -> list[str]:
+    """Convert 64-bit integer to float32 using f64 intermediate.
+    Formula: result = (float)(low_32_unsigned) + (float)(high_32) * 2^32
+    Uses f64 arithmetic to preserve precision before final conversion."""
+    # Get scratch VGPRs for f64 intermediates (need 2 pairs = 4 VGPRs)
+    # get_scratch_vgpr() returns base of 4 contiguous scratch registers
+    s = self.get_scratch_vgpr()
+    # Use s:s+1 for f64_low, s+2:s+3 for f64_high
+    instrs = [
+      f"v_cvt_f64_u32 v[{s}:{s+1}], {src_lo}",    # f64_low = (f64)(u32)low
+      f"v_cvt_f64_{'i' if signed else 'u'}32 v[{s+2}:{s+3}], {src_hi}",  # f64_high = (f64)high
+      f"v_ldexp_f64 v[{s+2}:{s+3}], v[{s+2}:{s+3}], 32",  # f64_high *= 2^32
+      f"v_add_f64 v[{s}:{s+1}], v[{s}:{s+1}], v[{s+2}:{s+3}]",  # f64_result = f64_low + f64_high
+      f"v_cvt_f32_f64 {dst}, v[{s}:{s+1}]",  # result = (f32)f64_result
+    ]
+    return instrs
 
   def is_local(self, index_op: UOp) -> bool:
     """Check if an INDEX operation is for local memory"""
@@ -1030,207 +1229,265 @@ class RDNARenderer(Renderer):
       return f"v_mov_b32 {self.r[x]}, 0"  # placeholder
     raise RuntimeError(f"Unknown special: {x.arg}")
 
+  def render_cast_from_bool(self, x: UOp, a: UOp) -> str|list[str]:
+    """Render cast from bool to other types."""
+    rx, ra = self.r[x], self.r[a]
+    dst_t = x.dtype
+    assert isinstance(rx, str) and isinstance(ra, str)
+
+    # SGPR case (comparison result): use v_cndmask_b32 to convert to 0/1
+    if ra.startswith('s'):
+      if dst_t == dtypes.float64:
+        # bool -> f64 via SGPR: cndmask to scratch, cvt to f32, then to f64
+        s = self.get_scratch_vgpr()
+        dst_lo, _ = self._get_dst_pair(rx)
+        return [f"v_cndmask_b32 v{s}, 0, 1, {ra}", f"v_cvt_f32_u32 v{s}, v{s}", self._cvt_f32_to_f64(dst_lo, f"v{s}")]
+      if dst_t in self.INT64_TYPES:
+        # bool -> long/ulong via SGPR: cndmask to low, zero high
+        dst_lo, dst_hi = self._get_dst_pair(rx)
+        return [f"v_cndmask_b32 v{dst_lo}, 0, 1, {ra}", f"v_mov_b32 v{dst_hi}, 0"]
+      return f"v_cndmask_b32 {rx}, {render_val(0, dst_t)}, {render_val(1, dst_t)}, {ra}"
+
+    # VGPR case: bool value is already 0/1 in a VGPR
+    if dst_t == dtypes.float64:
+      # bool -> f64: cvt u32 to f32, then f32 to f64
+      s = self.get_scratch_vgpr()
+      dst_lo, _ = self._get_dst_pair(rx)
+      return [f"v_cvt_f32_u32 v{s}, {ra}", self._cvt_f32_to_f64(dst_lo, f"v{s}")]
+    if dst_t in self.INT64_TYPES:
+      # bool -> long/ulong: move 0/1 to low, zero high
+      dst_lo, dst_hi = self._get_dst_pair(rx)
+      return [f"v_mov_b32 v{dst_lo}, {ra}", f"v_mov_b32 v{dst_hi}, 0"]
+    if dtypes.is_float(dst_t):
+      # bool -> f32/f16/bf16: use appropriate conversion
+      if dst_t == dtypes.float32:
+        return f"v_cvt_f32_u32 {rx}, {ra}"
+      # f16/bf16: go through f32
+      s = self.get_scratch_vgpr()
+      if dst_t == dtypes.float16:
+        return [f"v_cvt_f32_u32 v{s}, {ra}", f"v_cvt_f16_f32 {rx}, v{s}"]
+      if dst_t == dtypes.bfloat16:
+        return [f"v_cvt_f32_u32 v{s}, {ra}", self._f32_to_bf16(rx, f"v{s}")]
+    # bool -> int: just move the 0/1 value
+    return f"v_mov_b32 {rx}, {ra}"
+
+  def render_cast_to_bool(self, x: UOp, a: UOp) -> str|list[str]:
+    """Render cast to bool from other types."""
+    rx, ra = self.r[x], self.r[a]
+    src_t = a.dtype
+    assert isinstance(rx, str) and isinstance(ra, str)
+
+    # 64-bit int -> bool: OR high and low, then compare to 0
+    if src_t in self.INT64_TYPES:
+      s = self.get_scratch_vgpr()
+      src_lo, src_hi = self._get_src_pair(ra)
+      return [
+        f"v_or_b32 v{s}, {src_lo}, {src_hi}",
+        f"v_cmp_ne_u32 vcc_lo, v{s}, 0",
+        f"v_cndmask_b32 {rx}, 0, 1, vcc_lo"
+      ]
+    # f64 -> bool: compare to 0.0
+    if src_t == dtypes.float64:
+      src_base = get_reg_base(ra)
+      return [
+        f"v_cmp_neq_f64 vcc_lo, v[{src_base}:{src_base+1}], 0",
+        f"v_cndmask_b32 {rx}, 0, 1, vcc_lo"
+      ]
+    # Standard case: compare to 0
+    cmp_op = "neq" if dtypes.is_float(src_t) else "ne"
+    return [
+      f"v_cmp_{cmp_op}_{self.types[src_t]} vcc_lo, {ra}, 0",
+      f"v_cndmask_b32 {rx}, 0, 1, vcc_lo"
+    ]
+
   def render_cast(self, x: UOp, a: UOp) -> str|list[str]:
-    # RDNA3 cast instructions
-    if x.dtype == dtypes.float32 and a.dtype == dtypes.int32:
-      return f"v_cvt_f32_i32 {self.r[x]}, {self.r[a]}"
-    elif x.dtype == dtypes.float32 and a.dtype == dtypes.uint32:
-      return f"v_cvt_f32_u32 {self.r[x]}, {self.r[a]}"
-    elif x.dtype == dtypes.int32 and a.dtype == dtypes.float32:
-      return f"v_cvt_i32_f32 {self.r[x]}, {self.r[a]}"
-    elif x.dtype == dtypes.uint32 and a.dtype == dtypes.float32:
-      return f"v_cvt_u32_f32 {self.r[x]}, {self.r[a]}"
-    # float32 -> smaller int types: convert to int32 first, truncation happens via store
-    elif x.dtype in (dtypes.int8, dtypes.int16) and a.dtype == dtypes.float32:
-      return f"v_cvt_i32_f32 {self.r[x]}, {self.r[a]}"
-    elif x.dtype in (dtypes.uint8, dtypes.uint16) and a.dtype == dtypes.float32:
-      return f"v_cvt_u32_f32 {self.r[x]}, {self.r[a]}"
-    elif x.dtype == dtypes.float16 and a.dtype == dtypes.float32:
-      return f"v_cvt_f16_f32 {self.r[x]}, {self.r[a]}"
-    elif x.dtype == dtypes.float32 and a.dtype == dtypes.float16:
-      return f"v_cvt_f32_f16 {self.r[x]}, {self.r[a]}"
-    # float16 -> 64-bit int: go through float32 -> int32 -> extend to 64
-    elif x.dtype == dtypes.long and a.dtype == dtypes.float16:
-      rx = self.r[x]
-      assert isinstance(rx, str)
+    """Render type cast. Uses dispatch based on source and destination types."""
+    dst_t, src_t = x.dtype, a.dtype
+    rx, ra = self.r[x], self.r[a]
+    assert isinstance(rx, str) and isinstance(ra, str)
+
+    # Determine if source is signed (for int->float conversions)
+    src_signed = src_t in self.SIGNED_INTS
+
+    # ============ Direct f32 <-> int32 conversions ============
+    if dst_t == dtypes.float32 and src_t == dtypes.int32: return self._cvt_int_to_f32(rx, ra, signed=True)
+    if dst_t == dtypes.float32 and src_t == dtypes.uint32: return self._cvt_int_to_f32(rx, ra, signed=False)
+    if dst_t == dtypes.int32 and src_t == dtypes.float32: return self._cvt_f32_to_int(rx, ra, signed=True)
+    if dst_t == dtypes.uint32 and src_t == dtypes.float32: return self._cvt_f32_to_int(rx, ra, signed=False)
+
+    # ============ f32 <-> small int (int8/int16/uint8/uint16) ============
+    if dst_t in self.SMALL_SIGNED_INTS and src_t == dtypes.float32: return self._cvt_f32_to_int(rx, ra, signed=True)
+    if dst_t in self.SMALL_UNSIGNED_INTS and src_t == dtypes.float32: return self._cvt_f32_to_int(rx, ra, signed=False)
+    # Small signed int -> f32: need sign extension first (unsigned loads don't preserve sign)
+    if dst_t == dtypes.float32 and src_t in self.SMALL_SIGNED_INTS:
+      return [self._sign_extend_small_int(rx, ra, src_t), self._cvt_int_to_f32(rx, rx, signed=True)]
+    if dst_t == dtypes.float32 and src_t in self.SMALL_UNSIGNED_INTS: return self._cvt_int_to_f32(rx, ra, signed=False)
+
+    # ============ f32 <-> f16 direct conversions ============
+    if dst_t == dtypes.float16 and src_t == dtypes.float32: return f"v_cvt_f16_f32 {rx}, {ra}"
+    if dst_t == dtypes.float32 and src_t == dtypes.float16: return f"v_cvt_f32_f16 {rx}, {ra}"
+
+    # ============ f32 <-> bf16 direct conversions ============
+    if dst_t == dtypes.bfloat16 and src_t == dtypes.float32: return self._f32_to_bf16(rx, ra)
+    if dst_t == dtypes.float32 and src_t == dtypes.bfloat16: return self._bf16_to_f32(rx, ra)
+
+    # ============ f16 <-> bf16 (via f32 intermediate) ============
+    if dst_t == dtypes.bfloat16 and src_t == dtypes.float16:
       s = self.get_scratch_vgpr()
-      dst = get_reg_base(rx)
-      return [
-        f"v_cvt_f32_f16 v{s}, {self.r[a]}",      # half -> float32
-        f"v_cvt_i32_f32 v{dst}, v{s}",           # float32 -> int32
-        f"v_ashrrev_i32 v{dst+1}, 31, v{dst}",   # sign extend to 64-bit
-      ]
-    elif x.dtype == dtypes.ulong and a.dtype == dtypes.float16:
-      rx = self.r[x]
-      assert isinstance(rx, str)
+      return [f"v_cvt_f32_f16 v{s}, {ra}", self._f32_to_bf16(rx, f"v{s}")]
+    if dst_t == dtypes.float16 and src_t == dtypes.bfloat16:
       s = self.get_scratch_vgpr()
-      dst = get_reg_base(rx)
-      return [
-        f"v_cvt_f32_f16 v{s}, {self.r[a]}",      # half -> float32
-        f"v_cvt_u32_f32 v{dst}, v{s}",           # float32 -> uint32
-        f"v_mov_b32 v{dst+1}, 0",                # zero extend to 64-bit
-      ]
-    # float16 -> 32-bit int types: go through float32
-    elif dtypes.is_int(x.dtype) and a.dtype == dtypes.float16:
+      return [self._bf16_to_f32(f"v{s}", ra), f"v_cvt_f16_f32 {rx}, v{s}"]
+
+    # ============ f32 <-> f64 direct conversions ============
+    if dst_t == dtypes.float64 and src_t == dtypes.float32: return self._cvt_f32_to_f64(self._get_dst_pair(rx)[0], ra)
+    if dst_t == dtypes.float32 and src_t == dtypes.float64: return self._cvt_f64_to_f32(rx, get_reg_base(ra))
+
+    # ============ Conversions TO 64-bit int (long/ulong) ============
+    if dst_t in self.INT64_TYPES:
+      dst_lo, dst_hi = self._get_dst_pair(rx)
+      signed_dst = dst_t == dtypes.long
       s = self.get_scratch_vgpr()
-      cvt_int = "v_cvt_i32_f32" if x.dtype in (dtypes.int8, dtypes.int16, dtypes.int32) else "v_cvt_u32_f32"
-      return [f"v_cvt_f32_f16 v{s}, {self.r[a]}", f"{cvt_int} {self.r[x]}, v{s}"]
-    # 64-bit int -> float16: extract low 32 bits, convert to f32, then to f16
-    elif x.dtype == dtypes.float16 and a.dtype in (dtypes.long, dtypes.ulong):
-      ra = self.r[a]
-      assert isinstance(ra, str)
+
+      # float -> 64-bit int: convert to i32/u32, then extend
+      if src_t == dtypes.float32:
+        return [self._cvt_f32_to_int(f"v{dst_lo}", ra, signed_dst)] + \
+               (self._sign_extend_32_to_64(dst_lo, dst_hi, f"v{dst_lo}")[1:] if signed_dst else [f"v_mov_b32 v{dst_hi}, 0"])
+      if src_t == dtypes.float16:
+        return [f"v_cvt_f32_f16 v{s}, {ra}", self._cvt_f32_to_int(f"v{dst_lo}", f"v{s}", signed_dst)] + \
+               ([f"v_ashrrev_i32 v{dst_hi}, 31, v{dst_lo}"] if signed_dst else [f"v_mov_b32 v{dst_hi}, 0"])
+      if src_t == dtypes.bfloat16:
+        return [self._bf16_to_f32(f"v{s}", ra), self._cvt_f32_to_int(f"v{dst_lo}", f"v{s}", signed_dst)] + \
+               ([f"v_ashrrev_i32 v{dst_hi}, 31, v{dst_lo}"] if signed_dst else [f"v_mov_b32 v{dst_hi}, 0"])
+      if src_t == dtypes.float64:
+        return [self._cvt_f64_to_int(f"v{dst_lo}", get_reg_base(ra), signed_dst)] + \
+               ([f"v_ashrrev_i32 v{dst_hi}, 31, v{dst_lo}"] if signed_dst else [f"v_mov_b32 v{dst_hi}, 0"])
+      # Small signed int -> 64-bit: sign-extend to 32-bit first, then extend to 64-bit
+      if src_t in self.SMALL_SIGNED_INTS:
+        return [self._sign_extend_small_int(f"v{dst_lo}", ra, src_t)] + \
+               (self._sign_extend_32_to_64(dst_lo, dst_hi, f"v{dst_lo}")[1:] if signed_dst else [f"v_mov_b32 v{dst_hi}, 0"])
+      # 32-bit int -> 64-bit: sign/zero extend based on source signedness
+      if src_t == dtypes.int32:
+        return self._sign_extend_32_to_64(dst_lo, dst_hi, ra)
+      if src_t == dtypes.uint32:
+        return self._zero_extend_32_to_64(dst_lo, dst_hi, ra)
+      # Small unsigned int -> 64-bit: just zero extend (value already zero-extended from load)
+      if src_t in self.SMALL_UNSIGNED_INTS:
+        return self._zero_extend_32_to_64(dst_lo, dst_hi, ra)
+
+    # ============ Conversions FROM 64-bit int (long/ulong) ============
+    if src_t in self.INT64_TYPES:
+      src_lo, src_hi = self._get_src_pair(ra)
+      signed = src_t == dtypes.long
       s = self.get_scratch_vgpr()
-      src_lo = f"v{get_reg_base(ra)}" if '[' in ra else ra
-      cvt_float = "v_cvt_f32_i32" if a.dtype == dtypes.long else "v_cvt_f32_u32"
-      return [f"{cvt_float} v{s}, {src_lo}", f"v_cvt_f16_f32 {self.r[x]}, v{s}"]
-    # float64 -> float16: convert to f32 first, then to f16
-    elif x.dtype == dtypes.float16 and a.dtype == dtypes.float64:
-      ra = self.r[a]
-      assert isinstance(ra, str)
+
+      # 64-bit int -> float32: need full 64-bit precision via f64 intermediate
+      if dst_t == dtypes.float32: return self._cvt_i64_to_f32(rx, src_lo, src_hi, signed)
+      if dst_t == dtypes.float16:
+        # i64 -> f32 -> f16
+        instrs = self._cvt_i64_to_f32(f"v{s}", src_lo, src_hi, signed)
+        instrs.append(f"v_cvt_f16_f32 {rx}, v{s}")
+        return instrs
+      if dst_t == dtypes.bfloat16:
+        # i64 -> f32 -> bf16
+        instrs = self._cvt_i64_to_f32(f"v{s}", src_lo, src_hi, signed)
+        instrs.append(self._f32_to_bf16(rx, f"v{s}"))
+        return instrs
+      # 64-bit int -> 32-bit or smaller type: just extract low 32 bits (implicit truncation)
+      if dst_t.itemsize <= 4: return f"v_mov_b32 {rx}, {src_lo}"
+
+    # ============ Conversions via f32 (f16/bf16 <-> int) ============
+    # f16 -> int (non-64-bit): f16 -> f32 -> int
+    if dtypes.is_int(dst_t) and src_t == dtypes.float16:
       s = self.get_scratch_vgpr()
-      src = get_reg_base(ra)
-      return [f"v_cvt_f32_f64 v{s}, v[{src}:{src+1}]", f"v_cvt_f16_f32 {self.r[x]}, v{s}"]
-    # int types -> float16: go through float32
-    elif x.dtype == dtypes.float16 and dtypes.is_int(a.dtype):
+      return [f"v_cvt_f32_f16 v{s}, {ra}", self._cvt_f32_to_int(rx, f"v{s}", dst_t in self.SIGNED_INTS)]
+
+    # bf16 -> int (non-64-bit): bf16 -> f32 -> int
+    if dtypes.is_int(dst_t) and src_t == dtypes.bfloat16:
       s = self.get_scratch_vgpr()
-      cvt_float = "v_cvt_f32_i32" if a.dtype in (dtypes.int8, dtypes.int16, dtypes.int32) else "v_cvt_f32_u32"
-      return [f"{cvt_float} v{s}, {self.r[a]}", f"v_cvt_f16_f32 {self.r[x]}, v{s}"]
-    # bfloat16 -> 64-bit int types: go through float32 -> int32 -> extend to 64
-    elif x.dtype == dtypes.long and a.dtype == dtypes.bfloat16:
-      rx = self.r[x]
-      assert isinstance(rx, str)
+      return [self._bf16_to_f32(f"v{s}", ra), self._cvt_f32_to_int(rx, f"v{s}", dst_t in self.SIGNED_INTS)]
+
+    # int -> f16: int -> f32 -> f16 (sign-extend small signed ints first)
+    if dst_t == dtypes.float16 and dtypes.is_int(src_t):
       s = self.get_scratch_vgpr()
-      dst = get_reg_base(rx)
-      return [
-        f"v_lshlrev_b32 v{s}, 16, {self.r[a]}",  # bfloat16 -> float32
-        f"v_cvt_i32_f32 v{dst}, v{s}",            # float32 -> int32
-        f"v_ashrrev_i32 v{dst+1}, 31, v{dst}",    # sign extend to 64-bit
-      ]
-    elif x.dtype == dtypes.ulong and a.dtype == dtypes.bfloat16:
-      rx = self.r[x]
-      assert isinstance(rx, str)
+      instrs = []
+      src_reg = ra
+      if src_t in self.SMALL_SIGNED_INTS:
+        instrs.append(self._sign_extend_small_int(f"v{s}", ra, src_t))
+        src_reg = f"v{s}"
+      instrs.append(self._cvt_int_to_f32(f"v{s}", src_reg, src_signed))
+      instrs.append(f"v_cvt_f16_f32 {rx}, v{s}")
+      return instrs
+
+    # int -> bf16: int -> f32 -> bf16 (sign-extend small signed ints first)
+    if dst_t == dtypes.bfloat16 and dtypes.is_int(src_t):
       s = self.get_scratch_vgpr()
-      dst = get_reg_base(rx)
-      return [
-        f"v_lshlrev_b32 v{s}, 16, {self.r[a]}",  # bfloat16 -> float32
-        f"v_cvt_u32_f32 v{dst}, v{s}",            # float32 -> uint32
-        f"v_mov_b32 v{dst+1}, 0",                 # zero extend to 64-bit
-      ]
-    # bfloat16 -> 32-bit int types: go through float32
-    elif dtypes.is_int(x.dtype) and a.dtype == dtypes.bfloat16:
+      instrs = []
+      src_reg = ra
+      if src_t in self.SMALL_SIGNED_INTS:
+        instrs.append(self._sign_extend_small_int(f"v{s}", ra, src_t))
+        src_reg = f"v{s}"
+      instrs.append(self._cvt_int_to_f32(f"v{s}", src_reg, src_signed))
+      instrs.append(self._f32_to_bf16(rx, f"v{s}"))
+      return instrs
+
+    # ============ f64 conversions (via f32 intermediate) ============
+    # f16/bf16 -> f64: go through f32
+    if dst_t == dtypes.float64 and src_t == dtypes.float16:
       s = self.get_scratch_vgpr()
-      cvt_int = "v_cvt_i32_f32" if x.dtype in (dtypes.int8, dtypes.int16, dtypes.int32) else "v_cvt_u32_f32"
-      # bfloat16 to float32: shift left by 16 bits (bfloat16 is upper 16 bits of float32)
-      return [f"v_lshlrev_b32 v{s}, 16, {self.r[a]}", f"{cvt_int} {self.r[x]}, v{s}"]
-    # 64-bit int -> bfloat16: extract low 32 bits, convert to f32, then shift right 16
-    elif x.dtype == dtypes.bfloat16 and a.dtype in (dtypes.long, dtypes.ulong):
-      ra = self.r[a]
-      assert isinstance(ra, str)
+      dst_lo, _ = self._get_dst_pair(rx)
+      return [f"v_cvt_f32_f16 v{s}, {ra}", self._cvt_f32_to_f64(dst_lo, f"v{s}")]
+    if dst_t == dtypes.float64 and src_t == dtypes.bfloat16:
       s = self.get_scratch_vgpr()
-      src_lo = f"v{get_reg_base(ra)}" if '[' in ra else ra
-      cvt_float = "v_cvt_f32_i32" if a.dtype == dtypes.long else "v_cvt_f32_u32"
-      return [f"{cvt_float} v{s}, {src_lo}", f"v_lshrrev_b32 {self.r[x]}, 16, v{s}"]
-    # float64 -> bfloat16: convert to f32 first, then shift right 16
-    elif x.dtype == dtypes.bfloat16 and a.dtype == dtypes.float64:
-      ra = self.r[a]
-      assert isinstance(ra, str)
+      dst_lo, _ = self._get_dst_pair(rx)
+      return [self._bf16_to_f32(f"v{s}", ra), self._cvt_f32_to_f64(dst_lo, f"v{s}")]
+
+    # f64 -> f16/bf16: go through f32
+    if dst_t == dtypes.float16 and src_t == dtypes.float64:
       s = self.get_scratch_vgpr()
-      src = get_reg_base(ra)
-      return [f"v_cvt_f32_f64 v{s}, v[{src}:{src+1}]", f"v_lshrrev_b32 {self.r[x]}, 16, v{s}"]
-    # int types -> bfloat16: go through float32
-    elif x.dtype == dtypes.bfloat16 and dtypes.is_int(a.dtype):
+      return [self._cvt_f64_to_f32(f"v{s}", get_reg_base(ra)), f"v_cvt_f16_f32 {rx}, v{s}"]
+    if dst_t == dtypes.bfloat16 and src_t == dtypes.float64:
       s = self.get_scratch_vgpr()
-      cvt_float = "v_cvt_f32_i32" if a.dtype in (dtypes.int8, dtypes.int16, dtypes.int32) else "v_cvt_f32_u32"
-      # float32 to bfloat16: shift right by 16 bits (truncate to upper 16 bits)
-      return [f"{cvt_float} v{s}, {self.r[a]}", f"v_lshrrev_b32 {self.r[x]}, 16, v{s}"]
-    # float64 conversions
-    elif x.dtype == dtypes.float64 and a.dtype == dtypes.float32:
-      return f"v_cvt_f64_f32 {self.r[x]}, {self.r[a]}"
-    elif x.dtype == dtypes.float64 and a.dtype == dtypes.float16:
-      # float16 -> float32 -> float64
-      rx = self.r[x]
-      assert isinstance(rx, str)
-      s = self.get_scratch_vgpr()
-      dst = get_reg_base(rx)
-      return [
-        f"v_cvt_f32_f16 v{s}, {self.r[a]}",
-        f"v_cvt_f64_f32 v[{dst}:{dst+1}], v{s}",
-      ]
-    elif x.dtype == dtypes.float64 and a.dtype == dtypes.bfloat16:
-      # bfloat16 -> float32 -> float64
-      rx = self.r[x]
-      assert isinstance(rx, str)
-      s = self.get_scratch_vgpr()
-      dst = get_reg_base(rx)
-      return [
-        f"v_lshlrev_b32 v{s}, 16, {self.r[a]}",  # bfloat16 -> float32
-        f"v_cvt_f64_f32 v[{dst}:{dst+1}], v{s}",
-      ]
-    elif x.dtype == dtypes.float32 and a.dtype == dtypes.float64:
-      ra = self.r[a]
-      assert isinstance(ra, str)
-      return f"v_cvt_f32_f64 {self.r[x]}, v[{get_reg_base(ra)}:{get_reg_base(ra)+1}]"
-    # float64 -> 64-bit int types: convert to 32-bit first, then extend
-    elif x.dtype == dtypes.long and a.dtype == dtypes.float64:
-      ra, rx = self.r[a], self.r[x]
-      assert isinstance(ra, str) and isinstance(rx, str)
-      src, dst = get_reg_base(ra), get_reg_base(rx)
-      return [
-        f"v_cvt_i32_f64 v{dst}, v[{src}:{src+1}]",
-        f"v_ashrrev_i32 v{dst+1}, 31, v{dst}",
-      ]
-    elif x.dtype == dtypes.ulong and a.dtype == dtypes.float64:
-      ra, rx = self.r[a], self.r[x]
-      assert isinstance(ra, str) and isinstance(rx, str)
-      src, dst = get_reg_base(ra), get_reg_base(rx)
-      return [
-        f"v_cvt_u32_f64 v{dst}, v[{src}:{src+1}]",
-        f"v_mov_b32 v{dst+1}, 0",
-      ]
-    # float64 -> 32-bit int types: use direct conversion (v_cvt_i32_f64 / v_cvt_u32_f64)
-    elif dtypes.is_int(x.dtype) and a.dtype == dtypes.float64:
-      ra = self.r[a]
-      assert isinstance(ra, str)
-      src = get_reg_base(ra)
-      cvt_int = "v_cvt_i32_f64" if x.dtype in (dtypes.int8, dtypes.int16, dtypes.int32) else "v_cvt_u32_f64"
-      return f"{cvt_int} {self.r[x]}, v[{src}:{src+1}]"
-    elif x.dtype == dtypes.float64:
-      return self.render_mov_64(x, a)  # TODO: proper int->f64 conversion
-    # float32 -> 64-bit int types: convert to 32-bit first, then extend
-    elif x.dtype == dtypes.long and a.dtype == dtypes.float32:
-      rx = self.r[x]
-      assert isinstance(rx, str)
-      dst = get_reg_base(rx)
-      return [
-        f"v_cvt_i32_f32 v{dst}, {self.r[a]}",
-        f"v_ashrrev_i32 v{dst+1}, 31, v{dst}",
-      ]
-    elif x.dtype == dtypes.ulong and a.dtype == dtypes.float32:
-      rx = self.r[x]
-      assert isinstance(rx, str)
-      dst = get_reg_base(rx)
-      return [
-        f"v_cvt_u32_f32 v{dst}, {self.r[a]}",
-        f"v_mov_b32 v{dst+1}, 0",
-      ]
-    # 64-bit int -> float32: convert low 32 bits to float
-    elif x.dtype == dtypes.float32 and a.dtype in (dtypes.long, dtypes.ulong):
-      ra = self.r[a]
-      assert isinstance(ra, str)
-      src_lo = f"v{get_reg_base(ra)}" if '[' in ra else ra
-      cvt_float = "v_cvt_f32_i32" if a.dtype == dtypes.long else "v_cvt_f32_u32"
-      return f"{cvt_float} {self.r[x]}, {src_lo}"
-    elif x.dtype.itemsize == 4 and a.dtype in (dtypes.long, dtypes.ulong):
-      ra = self.r[a]
-      assert isinstance(ra, str)
-      return f"v_mov_b32 {self.r[x]}, v{get_reg_base(ra)}" if '[' in ra else f"v_mov_b32 {self.r[x]}, {ra}"
-    # small int types -> float32: use cvt instruction (int8/int16 are sign-extended on load, uint8/uint16 are zero-extended)
-    elif x.dtype == dtypes.float32 and a.dtype in (dtypes.int8, dtypes.int16):
-      return f"v_cvt_f32_i32 {self.r[x]}, {self.r[a]}"
-    elif x.dtype == dtypes.float32 and a.dtype in (dtypes.uint8, dtypes.uint16):
-      return f"v_cvt_f32_u32 {self.r[x]}, {self.r[a]}"
-    # fallback: just move (same size types)
-    return f"v_mov_b32 {self.r[x]}, {self.r[a]}"
+      return [self._cvt_f64_to_f32(f"v{s}", get_reg_base(ra)), self._f32_to_bf16(rx, f"v{s}")]
+
+    # f64 -> int (non-64-bit): direct conversion exists
+    if dtypes.is_int(dst_t) and src_t == dtypes.float64:
+      return self._cvt_f64_to_int(rx, get_reg_base(ra), dst_t in self.SIGNED_INTS)
+
+    # int -> f64: for 64-bit ints, use f64 arithmetic; for 32-bit, use cvt_f64_i32/u32
+    if dst_t == dtypes.float64:
+      dst_lo, _ = self._get_dst_pair(rx)
+      if src_t in self.INT64_TYPES:
+        # 64-bit int -> f64: similar to _cvt_i64_to_f32 but output directly to f64
+        # Formula: result = (f64)(low_32_unsigned) + (f64)(high_32) * 2^32
+        src_lo, src_hi = self._get_src_pair(ra)
+        s = self.get_scratch_vgpr()  # need 4 contiguous VGPRs for two f64s
+        signed = src_t == dtypes.long
+        return [
+          f"v_cvt_f64_u32 v[{s}:{s+1}], {src_lo}",    # f64_low = (f64)(u32)low
+          f"v_cvt_f64_{'i' if signed else 'u'}32 v[{s+2}:{s+3}], {src_hi}",  # f64_high = (f64)high
+          f"v_ldexp_f64 v[{s+2}:{s+3}], v[{s+2}:{s+3}], 32",  # f64_high *= 2^32
+          f"v_add_f64 v[{dst_lo}:{dst_lo+1}], v[{s}:{s+1}], v[{s+2}:{s+3}]",  # result = f64_low + f64_high
+        ]
+      elif src_t == dtypes.int32:
+        return f"v_cvt_f64_i32 v[{dst_lo}:{dst_lo+1}], {ra}"
+      elif src_t == dtypes.uint32:
+        return f"v_cvt_f64_u32 v[{dst_lo}:{dst_lo+1}], {ra}"
+      elif src_t in self.SMALL_SIGNED_INTS:
+        # Small signed int -> f64: sign-extend to 32-bit first
+        s = self.get_scratch_vgpr()
+        return [self._sign_extend_small_int(f"v{s}", ra, src_t), f"v_cvt_f64_i32 v[{dst_lo}:{dst_lo+1}], v{s}"]
+      else:
+        # Small unsigned int or other -> f64: convert as unsigned 32-bit
+        return f"v_cvt_f64_u32 v[{dst_lo}:{dst_lo+1}], {ra}"
+
+    # ============ Small signed int -> larger int (sign extension needed) ============
+    # When loading with unsigned byte/short, we need explicit sign extension when upcasting signed types
+    if src_t in self.SMALL_SIGNED_INTS and dtypes.is_int(dst_t) and dst_t.itemsize > src_t.itemsize and dst_t not in self.INT64_TYPES:
+      return self._sign_extend_small_int(rx, ra, src_t)
+
+    # ============ Fallback: just move (same size types, or no conversion needed) ============
+    return f"v_mov_b32 {rx}, {ra}"
 
   def render_bool_logic(self, x: UOp, a: UOp, b: UOp, op: str) -> str|list[str]:
     """Render boolean AND/OR with proper SGPR to VGPR handling."""
@@ -1318,9 +1575,15 @@ class RDNARenderer(Renderer):
     return [f"v_mov_b32 v{dst}, v{src}", f"v_mov_b32 v{dst+1}, v{src+1}"]
 
   def render_cast_to_64(self, x: UOp, a: UOp, signed: bool = False) -> str|list[str]:
-    """Render cast from 32-bit to 64-bit integer (sign or zero extend)"""
+    """Render cast from 32-bit or smaller to 64-bit integer (sign or zero extend)"""
     rx, ra = self.r[x], self.r[a]
+    src_t = a.dtype
     assert isinstance(rx, str) and isinstance(ra, str)
+
+    # 64-bit to 64-bit (long <-> ulong): just do a 64-bit move (bitcast)
+    if src_t in self.INT64_TYPES:
+      return self.render_mov_64(x, a)
+
     if '[' not in rx:
       src_reg = extract_low_32(ra)
       if ra.startswith('s'): return f"v_cndmask_b32 {rx}, 0, 1, {ra}"
@@ -1328,6 +1591,14 @@ class RDNARenderer(Renderer):
     dst_num, src_reg = get_reg_base(rx), extract_low_32(ra)
     if ra.startswith('s'):
       return [f"v_cndmask_b32 v{dst_num}, 0, 1, {ra}", f"v_mov_b32 v{dst_num+1}, 0"]
+
+    # Small signed int -> 64-bit: sign-extend from 8/16 bits to 32 bits first, then to 64 bits
+    if src_t in self.SMALL_SIGNED_INTS and signed:
+      return [
+        self._sign_extend_small_int(f"v{dst_num}", src_reg, src_t),
+        f"v_ashrrev_i32 v{dst_num+1}, 31, v{dst_num}"
+      ]
+
     if signed:
       return [f"v_mov_b32 v{dst_num}, {src_reg}", f"v_ashrrev_i32 v{dst_num+1}, 31, {src_reg}"]
     else:
@@ -1477,6 +1748,17 @@ amdhsa.version:
             aliases[u] = u.src[0]  # INDEX on REG aliases to DEFINE_REG
           elif u.op is Ops.LOAD:
             aliases[u] = u.src[0]  # LOAD from REG aliases to INDEX (which aliases to DEFINE_REG)
+      # VECTORIZE sources alias to the VECTORIZE - their lifetime extends to VECTORIZE's last use
+      # This ensures values collected into a VECTORIZE aren't freed before the VECTORIZE is consumed
+      # Note: VECTORIZE alias takes precedence over CAST->source alias to ensure correct lifetime
+      if u.op is Ops.VECTORIZE:
+        for src in u.src:
+          aliases[src] = u  # Overwrite any existing alias - VECTORIZE lifetime is what matters
+          # Also alias the sources of aliased operations (e.g., CAST -> ADD -> VECTORIZE)
+          # This ensures that when CAST repurposes a register, it gets VECTORIZE's lifetime
+          for src_src in src.src:
+            if src_src not in aliases:  # Don't overwrite existing aliases
+              aliases[src_src] = u
 
     # Second pass: extend last_use for values DEFINED OUTSIDE a loop but USED INSIDE
     # Only these need their lifetime extended to the END of the loop (for loop-carried dependencies)
@@ -1552,6 +1834,12 @@ amdhsa.version:
     pending_sgpr_deaths: dict[int, list[int]] = defaultdict(list)
     pending_range_deaths: dict[int, list[int]] = defaultdict(list)  # base register of range
 
+    def cancel_vgpr_death(reg: int):
+      """Cancel any pending death for a VGPR (used when register ownership is transferred)"""
+      for pos in list(pending_vgpr_deaths.keys()):
+        if reg in pending_vgpr_deaths[pos]:
+          pending_vgpr_deaths[pos].remove(reg)
+
     def schedule_vgpr_death(reg: int, owner: UOp):
       """Schedule a VGPR to be freed AFTER its owner's last use (death_pos + 1)"""
       root = get_root_owner(owner)
@@ -1626,7 +1914,18 @@ amdhsa.version:
         if base in range_owner:
           del range_owner[base]
           count = vgpr_ranges.pop(base, 8)
-          free_vgpr_ranges.append((base, count))
+          # Check if any registers in the range have been claimed by other operations
+          # (e.g., by CAST in-place optimization). Only free unclaimed registers.
+          claimed = [r for r in range(base, base + count) if r in vgpr_owner]
+          if not claimed:
+            # No registers claimed - return whole range
+            free_vgpr_ranges.append((base, count))
+          else:
+            # Some registers claimed - return individual unclaimed registers
+            for r in range(base, base + count):
+              if r not in vgpr_owner:
+                free_vgprs.append(r)
+                if getenv('DEBUG_RDNA_REG'): print(f"  pos {pos}: freed v{r} from range (base {base}, some claimed)")
       # Free VGPRs scheduled to die at this position
       dead_vgprs = pending_vgpr_deaths.get(pos, [])
       dead_vgprs_set = set(dead_vgprs)
@@ -1972,14 +2271,17 @@ amdhsa.version:
               hi_reg = r[u.src[hi_idx]] if hi_idx < len(u.src) else "0"
               kernel.append(f"v_pack_b32_f16 v{base+j}, {lo_reg}, {hi_reg}")
           else:
+            dst_offset = 0  # Track destination register offset
             for j, src in enumerate(u.src):
               src_reg = r[src]
               if isinstance(src_reg, str) and src_reg.startswith('v['):
                 src_base, src_end = get_reg_base(src_reg), int(src_reg[src_reg.index(':')+1:-1])
                 for k in range(src_end - src_base + 1):
-                  kernel.append(f"v_mov_b32 v{base+j+k}, v{src_base+k}")
+                  kernel.append(f"v_mov_b32 v{base+dst_offset+k}, v{src_base+k}")
+                dst_offset += src_end - src_base + 1  # Advance by the size of the source
               else:
-                kernel.append(f"v_mov_b32 v{base+j}, {src_reg}")
+                kernel.append(f"v_mov_b32 v{base+dst_offset}, {src_reg}")
+                dst_offset += 1
         else:
           r[u] = [cast(str,r[x]) for x in u.src]
         continue
@@ -2021,10 +2323,22 @@ amdhsa.version:
                 kernel.append(f"v_lshrrev_b32 {dst}, {shift_amount}, {src_vgpr}")
                 r[u] = dst
             else:
-              # 1:1 mapping (e.g., float4 = 4 elements in 4 VGPRs)
-              r[u] = f"v{base + elem_idx}"
+              # Check for 64-bit element types (2 VGPRs per element)
+              scalar_dtype = src_dtype.scalar() if hasattr(src_dtype, 'scalar') else src_dtype
+              if scalar_dtype.itemsize == 8:
+                # 64-bit element: return register pair
+                elem_base = base + elem_idx * 2
+                r[u] = f"v[{elem_base}:{elem_base + 1}]"
+              else:
+                # 1:1 mapping (e.g., float4 = 4 elements in 4 VGPRs)
+                r[u] = f"v{base + elem_idx}"
           else:
-            r[u] = f"v{base + elem_idx}"
+            # Check for 64-bit scalar types
+            if hasattr(src_dtype, 'itemsize') and src_dtype.itemsize == 8:
+              elem_base = base + elem_idx * 2
+              r[u] = f"v[{elem_base}:{elem_base + 1}]"
+            else:
+              r[u] = f"v{base + elem_idx}"
         elif isinstance(src_reg, list):
           r[u] = src_reg[elem_idx]
         else:
@@ -2140,10 +2454,12 @@ amdhsa.version:
           if (cast_src_reg and isinstance(cast_src_reg, str) and cast_src_reg.startswith('v') and '[' not in cast_src_reg
               and last_use.get(cast_src, -1) == i and isinstance(u.dtype, DType) and u.dtype.itemsize <= 4):
             r[u] = cast_src_reg  # Reuse source register - in-place conversion
-            # Mark source as freed since we're taking over its register
             reg_num = int(cast_src_reg[1:])
-            if reg_num in vgpr_owner:
-              del vgpr_owner[reg_num]
+            # Transfer ownership: old owner is gone, new owner (the CAST) takes over
+            vgpr_owner[reg_num] = u
+            # Cancel the old owner's death schedule and schedule based on CAST's lifetime
+            cancel_vgpr_death(reg_num)
+            schedule_vgpr_death(reg_num, u)
             cast_reused_src = True
         # Only allocate if we didn't already reuse source register for CAST
         if not cast_reused_src:
@@ -2194,8 +2510,10 @@ amdhsa.version:
           if u.op is Ops.STORE:
             dst_reg, src_reg = r[u.src[0]], r[u.src[1]]
             assert isinstance(dst_reg, str) and isinstance(src_reg, str)
-            if '[' in dst_reg:
-              dst_num, src_num = get_reg_base(dst_reg), get_reg_base(src_reg)
+            if '[' in dst_reg or '[' in src_reg:
+              # Either source or dest is a pair - handle both 32-bit parts
+              dst_num = get_reg_base(dst_reg)
+              src_num = get_reg_base(src_reg) if '[' in src_reg else int(src_reg[1:])
               kernel.extend([f"v_mov_b32 v{dst_num}, v{src_num}", f"v_mov_b32 v{dst_num+1}, v{src_num+1}"])
             else:
               kernel.append(f"v_mov_b32 {dst_reg}, {src_reg}")

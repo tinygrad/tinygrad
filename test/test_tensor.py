@@ -11,6 +11,7 @@ from tinygrad.uop.ops import Ops, UOp
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 from tinygrad.engine.realize import get_program
+from tinygrad.renderer.rdna import RDNARenderer
 from tinygrad.dtype import DType
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
@@ -878,8 +879,8 @@ class TestIdxUpcast(unittest.TestCase):
     store = next(uop for uop in uops if uop.op is Ops.STORE)
     assert store.op is Ops.STORE
     idx = self._find_op(store, Ops.INDEX)
-    # PTX and NIR turn Ops.INDEX into pointer arithmetic earlier than cstyle, plus it's already cast to int64
-    if not isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer)):
+    # PTX, NIR, and RDNA turn Ops.INDEX into pointer arithmetic earlier than cstyle
+    if not isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer, RDNARenderer)):
       assert idx.op is Ops.INDEX
       idx_val = idx.src[1]
       assert idx_val.dtype is dtype
