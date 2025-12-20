@@ -1,6 +1,6 @@
 from typing import cast
 import itertools
-from tinygrad.helpers import DEVECTORIZE, TRANSCENDENTAL, SPEC
+from tinygrad.helpers import DEVECTORIZE, TRANSCENDENTAL, SPEC, IMAGE
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat
 from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
 from tinygrad.renderer import Renderer
@@ -49,6 +49,17 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
 
     # split store range (only on CPU for now)
     sink = graph_rewrite(sink, pm_split_store, ctx=ren.device, name="cut store ranges")
+
+    def _tst(ctx, idx):
+      if (IMAGE and ctx == "QCOM" and idx.src[0].dtype.base in {dtypes.float, dtypes.half} and idx.src[0].dtype.nbytes() % 64 == 0
+          and any(c.op is Ops.RANGE and (c.vmax+1)%4 == 0 for c in idx.src[1].get_idx().split_uop(Ops.ADD))):
+        return idx.replace(src=(
+          idx.src[0].replace(dtype={dtypes.float:dtypes.imagef,dtypes.half:dtypes.imageh}[idx.src[0].dtype.base]((1, idx.src[0].dtype.size // 4, 4))),
+          idx.src[1]))
+
+    sink = graph_rewrite(sink, PatternMatcher([
+      (UPat(Ops.INDEX, name="idx"), _tst),
+    ]), ctx=ren.device, name="image upcast")
 
     # do postrange optimization, BEAM or hand_coded_optimizations
     sink = apply_opts(sink, ren)
