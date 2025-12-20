@@ -1105,7 +1105,6 @@ amdhsa.version:
     # NOTE: .text must be first line for HIPCompiler to detect as assembly
     return ".text\n" + \
            f'.amdgcn_target "amdgcn-amd-amdhsa--{self.arch}"\n' + \
-           ".amdhsa_code_object_version 4\n" + \
            f".global {function_name}\n" + \
            f".type {function_name},@function\n" + \
            ".p2align 8\n" + \
