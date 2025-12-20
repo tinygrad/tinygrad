@@ -1,5 +1,5 @@
 use half::f16;
-use num_traits::{float::FloatCore, PrimInt, Unsigned};
+use num_traits::{float::FloatCore, PrimInt, Unsigned, clamp};
 
 pub fn bits<T>(word: T, hi: usize, lo: usize) -> T where T: PrimInt + Unsigned {
     assert!(hi >= lo);
@@ -48,6 +48,7 @@ impl IEEEClass<u64> for f64 {
 pub trait VOPModifier<T> {
     fn negate(&self, pos: usize, modifier: usize) -> T;
     fn absolute(&self, pos: usize, modifier: usize) -> T;
+    fn clmp(&self, cm: bool) -> T;
 }
 impl<T> VOPModifier<T> for T
 where
@@ -64,6 +65,11 @@ where
             1 => self.abs(),
             _ => *self,
         }
+    }
+    fn clmp(&self, cm:bool) -> T {
+        if !cm { return *self }
+        let r = clamp(*self, T::zero(), T::one());
+        if r == T::zero() { T::zero() } else { r }
     }
 }
 

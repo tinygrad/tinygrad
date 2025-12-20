@@ -660,6 +660,18 @@ class TestUOpGraph(unittest.TestCase):
     bad_gate = UOp.const(dtypes.int, 1)
     with self.assertRaises(AssertionError): to_uops_list([UOp(Ops.STORE, dtypes.void, (glbl0, idx, UOp.const(dtypes.int, 42), bad_gate))])
 
+  def test_after_end(self):
+    r = UOp.range(10, 0)
+
+    c = r + 1
+    self.assertIn(r, c.ranges)
+
+    e = UOp.const(dtypes.void, None).end(r)
+    self.assertNotIn(r, e.ranges)
+
+    a = c.after(e)
+    self.assertNotIn(r, a.ranges)
+
 @track_rewrites()
 def expander_rewrite(sink): return graph_rewrite(sink, sym + expander)
 

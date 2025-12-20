@@ -1,7 +1,8 @@
 import unittest
 from tinygrad import Tensor
 from tinygrad.helpers import getenv, GlobalCounters, EMULATE
-from tinygrad.engine.realize import lower_schedule_item, ProgramSpec, get_program
+from tinygrad.engine.realize import get_program
+from tinygrad.renderer import ProgramSpec
 from tinygrad.renderer import Estimates
 from tinygrad.codegen import full_rewrite
 from tinygrad.uop.ops import Ops, UOp
@@ -17,9 +18,8 @@ def flops_mem(uops, ignore_indexing=False):
 # **************** new FlopCounter ****************
 
 def get_stats(x:Tensor):
-  si = x.schedule()[-1]
-  ei = lower_schedule_item(si)
-  return ei.prg.estimates.ops, ei.prg.estimates.mem
+  si = x.schedule()[-1].lower()
+  return si.prg.estimates.ops, si.prg.estimates.mem
 
 @unittest.skipIf(Device.DEFAULT == "WEBGPU", "webgpu does extra load/store for packed types")
 class TestMemoryCount(unittest.TestCase):
@@ -175,13 +175,13 @@ class TestStatsOptimized(unittest.TestCase):
     self.assertEqual(p.estimates.mem, 3*N*N*4) # 3 NxN mats with floats
 
   def test_gemm(self):
-    p = get_program(self.ast_gemm, opts=[])
+    p = get_program(self.ast_gemm, renderer=Device[Device.DEFAULT].renderer, opts=[])
     self.check_gemm(p)
     self.assertEqual(p.estimates.lds, 2*N*N*N*4 + 4*N*N)
 
   def test_gemm_tc_unroll(self):
     try:
-      p = get_program(self.ast_gemm, opts=[Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.UNROLL, 0, 2)])
+      p = get_program(self.ast_gemm, renderer=Device[Device.DEFAULT].renderer, opts=[Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.UNROLL, 0, 2)])
     except KernelOptError:
       raise unittest.SkipTest("no tensor cores")
     print(p.src)
@@ -190,18 +190,19 @@ class TestStatsOptimized(unittest.TestCase):
   # this is a good lesson about why UPCASTing is a good idea
 
   def test_gemm_one_upcasted(self):
-    p = get_program(self.ast_gemm, opts=[Opt(OptOps.UPCAST, 0, 4)])
+    p = get_program(self.ast_gemm, renderer=Device[Device.DEFAULT].renderer, opts=[Opt(OptOps.UPCAST, 0, 4)])
     self.check_gemm(p)
     self.assertEqual(p.estimates.lds, N*N*N*4 + N*N*N*4//4 + 4*N*N)
 
   def test_gemm_upcasted(self):
-    p = get_program(self.ast_gemm, opts=[Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4)])
+    p = get_program(self.ast_gemm, renderer=Device[Device.DEFAULT].renderer,
+                    opts=[Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4)])
     self.check_gemm(p)
     self.assertEqual(p.estimates.lds, 2*N*N*N*4//4 + 4*N*N)
 
   def test_gemm_upcasted_locals(self):
     try:
-      p = get_program(self.ast_gemm, opts=[Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4),
+      p = get_program(self.ast_gemm, renderer=Device[Device.DEFAULT].renderer, opts=[Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4),
                                            Opt(OptOps.LOCAL, 0, 4),  Opt(OptOps.LOCAL, 1, 4)])
     except KernelOptError:
       raise unittest.SkipTest("no locals")
@@ -210,7 +211,7 @@ class TestStatsOptimized(unittest.TestCase):
 
   def test_gemm_group(self):
     try:
-      p = get_program(self.ast_gemm, opts=[Opt(OptOps.GROUP, 0, 4)])
+      p = get_program(self.ast_gemm, renderer=Device[Device.DEFAULT].renderer, opts=[Opt(OptOps.GROUP, 0, 4)])
     except KernelOptError:
       raise unittest.SkipTest("no locals")
     SZ = N*N*4
@@ -219,14 +220,14 @@ class TestStatsOptimized(unittest.TestCase):
     self.assertEqual(p.estimates.lds, 2*N*N*N*4 + SZ*4 + (SZ*4 + 4*N*N)*4)
 
   def test_reduce(self):
-    p = get_program(self.ast_reduce, opts=[])
+    p = get_program(self.ast_reduce, renderer=Device[Device.DEFAULT].renderer, opts=[])
     print(p.name, p.estimates.ops, p.estimates.mem, p.estimates.lds)
     self.assertEqual(p.estimates.ops, N*N)
     self.assertEqual(p.estimates.mem, N*N*4 + 4)
 
   def test_reduce_group(self):
     try:
-      p = get_program(self.ast_reduce, opts=[Opt(OptOps.GROUP, 0, 50)])
+      p = get_program(self.ast_reduce, renderer=Device[Device.DEFAULT].renderer, opts=[Opt(OptOps.GROUP, 0, 50)])
     except KernelOptError:
       raise unittest.SkipTest("no locals")
     # NOTE: these are wrong, they don't respect the if statement

@@ -159,3 +159,38 @@ class TestFuzzFailure(unittest.TestCase):
     num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
     rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
     self.assertEqual(num, rn)
+
+  def test_fuzz_failure11(self):
+    v1=Variable("v1", 0, 16)
+    v2=Variable("v2", 0, 128)
+    v3=Variable("v3", 0, 5)
+    expr = UOp(Ops.MOD, dtypes.index, arg=None, src=(
+      UOp(Ops.ADD, dtypes.index, arg=None, src=(
+        UOp(Ops.MOD, dtypes.index, arg=None, src=(
+          UOp(Ops.ADD, dtypes.index, arg=None, src=(
+            UOp(Ops.MAX, dtypes.index, arg=None, src=(
+              UOp(Ops.MUL, dtypes.index, arg=None, src=(
+                x5:=UOp(Ops.DEFINE_VAR, dtypes.index, arg=('v2', 0, 128), src=()),
+                UOp(Ops.CONST, dtypes.index, arg=0, src=()),)),
+              UOp(Ops.CONST, dtypes.index, arg=8, src=()),)),
+            UOp(Ops.MUL, dtypes.index, arg=None, src=(
+              x5,
+              UOp(Ops.CONST, dtypes.index, arg=-2, src=()),)),)),
+          x10:=UOp(Ops.CONST, dtypes.index, arg=5, src=()),)),
+        UOp(Ops.ADD, dtypes.index, arg=None, src=(
+          UOp(Ops.ADD, dtypes.index, arg=None, src=(
+            UOp(Ops.IDIV, dtypes.index, arg=None, src=(
+              x14:=UOp(Ops.DEFINE_VAR, dtypes.index, arg=('v1', 0, 16), src=()),
+              UOp(Ops.CONST, dtypes.index, arg=6, src=()),)),
+            UOp(Ops.CONST, dtypes.index, arg=4, src=()),)),
+          UOp(Ops.ADD, dtypes.index, arg=None, src=(
+            x14,
+            UOp(Ops.CONST, dtypes.index, arg=1, src=()),)),)),)),
+      x10,))
+    v1_val, v2_val, v3_val = UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 7),UOp.const(dtypes.int, 0)
+    num = expr.simplify().substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    rn = expr.substitute({v1:v1_val, v2:v2_val, v3:v3_val}).ssimplify()
+    self.assertEqual(num, rn)
+
+if __name__ == '__main__':
+  unittest.main()

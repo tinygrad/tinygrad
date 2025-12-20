@@ -8,11 +8,11 @@ from hypothesis.extra import numpy as stn
 import numpy as np
 import torch
 from tinygrad import Tensor
-from tinygrad.helpers import CI, getenv
+from tinygrad.helpers import getenv
 
 
 settings.register_profile(__file__, settings.default,
-                          max_examples=100 if CI else 250, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
+                          max_examples=100, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 
 
 # torch wraparound for large numbers

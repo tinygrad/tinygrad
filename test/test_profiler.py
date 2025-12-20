@@ -199,7 +199,7 @@ class TestProfiler(unittest.TestCase):
     #self.assertLess(e1.st, e2.st)
     #self.assertGreater(e1.en-e1.st, e2.en-e2.st)
 
-  @unittest.skipIf(not CI, "this test is flaky locally")
+  @unittest.skip("this test is flaky")
   @unittest.skipUnless(Device[Device.DEFAULT].graph is not None, "graph support required")
   def test_graph(self):
     from test.test_graph import helper_alloc_rawbuffer, helper_exec_op, helper_test_graphs

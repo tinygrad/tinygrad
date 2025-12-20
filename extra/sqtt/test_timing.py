@@ -2,7 +2,9 @@ import os
 os.environ["PYTHONPATH"] = "."
 os.environ["SQTT"] = "1"
 if "DEV" not in os.environ: os.environ["DEV"] = "AMD"
-os.environ["VIZ"] = "1"
+os.environ["PROFILE"] = "1"
+# VIZ=1 to launch server
+# os.environ["VIZ"] = "1"
 os.environ["AMD_LLVM"] = "0"
 
 import unittest
@@ -128,6 +130,14 @@ class TestTiming(unittest.TestCase):
     print(len(waves), "waves decoded")
     for w in waves:
       print(f"{w.wave_id:<2} {w.simd=} {w.cu=} {w.se=} @ clk {w.begin_time}")
+
+  def test_ones(self):
+    N = getenv("N", 4096)
+    CNT = getenv("CNT", 2)
+    with save_sqtt() as sqtt:
+      for _ in range(CNT):
+        Tensor.ones(N, N).contiguous().realize()
+    self.assertEqual(len(sqtt), CNT)
 
 if __name__ == "__main__":
   unittest.main()

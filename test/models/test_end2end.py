@@ -113,7 +113,7 @@ class TestEnd2End(unittest.TestCase):
 
   def test_bn_linear(self):
     BS, K = 2, 1
-    eps = 0
+    eps = 1e-12  # torch asserts if this is 0
     X = Tensor([1,0]).reshape(BS, K, 1, 1)
     Y = Tensor([-1,0]).reshape(BS, K, 1, 1)
     class LinTiny:

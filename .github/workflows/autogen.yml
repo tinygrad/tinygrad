@@ -13,9 +13,11 @@ on:
   pull_request:
     paths:
     - 'tinygrad/runtime/autogen/**/*'
+    - 'tinygrad/runtime/support/autogen.py'
   workflow_dispatch:
     paths:
     - 'tinygrad/runtime/autogen/**/*'
+    - 'tinygrad/runtime/support/autogen.py'
 
 jobs:
   autogen:
@@ -114,11 +116,9 @@ jobs:
     - name: Verify Qualcomm autogen
       run: |
         mv tinygrad/runtime/autogen/kgsl.py /tmp/kgsl.py.bak
-        mv tinygrad/runtime/autogen/adreno.py /tmp/adreno.py.bak
         mv tinygrad/runtime/autogen/qcom_dsp.py /tmp/qcom_dsp.py.bak
-        python3 -c "from tinygrad.runtime.autogen import kgsl, adreno, qcom_dsp"
+        python3 -c "from tinygrad.runtime.autogen import kgsl, qcom_dsp"
         diff /tmp/kgsl.py.bak tinygrad/runtime/autogen/kgsl.py
-        diff /tmp/adreno.py.bak tinygrad/runtime/autogen/adreno.py
         diff /tmp/qcom_dsp.py.bak tinygrad/runtime/autogen/qcom_dsp.py
     - name: Verify libusb autogen
       run: |

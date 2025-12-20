@@ -13,25 +13,23 @@ class FastEnum(IntEnum):
 class Ops(FastEnum):
   # ** 1 -- defines/special **
 
-  # TODO: unify these ops into the levels of the memory hierarchy
-  DEFINE_GLOBAL = auto(); DEFINE_LOCAL = auto(); DEFINE_REG = auto()
-
-  # this is for symbolic shapes
-  DEFINE_VAR = auto(); BIND = auto()
+  # define GLOBAL/VAR are ptrs to outside the Kernel
+  DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); BIND = auto()
 
   # this is a RANGE for GPU dimensions, similar to symbolic shapes but not exactly
   SPECIAL = auto()
 
+  # define LOCAL/REG allocate things
+  DEFINE_LOCAL = auto(); DEFINE_REG = auto()
+
   # ** 2 -- non op uops **
 
   # uops that aren't rendered
-  NOOP = auto(); SINK = auto(); PRECAST = auto()
+  NOOP = auto(); REWRITE_ERROR = auto()
 
   # AFTER passes src[0] through and promises in the toposort that any consumers of the AFTER run after src[1:]
-  AFTER = auto()
-
   # GROUP is a NOOP that just merges things together
-  GROUP = auto()
+  SINK = auto(); AFTER = auto(); GROUP = auto()
 
   # vector creation / item selection
   GEP = auto(); VECTORIZE = auto()
@@ -76,25 +74,24 @@ class Ops(FastEnum):
   # ** 6 -- ops that don't exist in programs **
 
   # tensor graph ops
-  UNIQUE = auto(); DEVICE = auto(); KERNEL = auto()
-  ASSIGN = auto()
+  UNIQUE = auto(); DEVICE = auto(); KERNEL = auto(); ASSIGN = auto()
+  CUSTOM_KERNEL = auto()
 
-  # buffer ops
-  BUFFERIZE = auto(); COPY = auto(); BUFFER = auto(); BUFFER_VIEW = auto(); MSELECT = auto(); MSTACK = auto()
+  # local unique
+  LUNIQUE = auto()
 
   # ops that adjust the behavior of the scheduler
   CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto()
 
-  # movement ops! these only exist in the tensor graph
+  # buffer ops
+  BUFFERIZE = auto(); COPY = auto(); BUFFER = auto(); BUFFER_VIEW = auto(); MSELECT = auto(); MSTACK = auto(); ENCDEC = auto()
+
+  # the core 6 movement ops! these only exist in the tensor graph
   RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); FLIP = auto()
   MULTI = auto()  # MULTI is really a movement op
 
   # reduce
   REDUCE_AXIS = auto(); REDUCE = auto(); ALLREDUCE = auto()
-  REDUCE_BACKWARD = auto()
-
-  # errors/placeholders
-  REWRITE_ERROR = auto(); SENTINEL = auto()
 
   # expander ops
   UNROLL = auto(); CONTRACT = auto(); CAT = auto(); PTRCAT = auto()

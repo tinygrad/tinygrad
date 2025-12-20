@@ -61,7 +61,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: ${{ github.workspace }}/.venv
-        key: venv-${{ runner.os }}-python-${{ steps.setup-python.outputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ hashFiles('**/pyproject.toml') }}-${{ env.CACHE_VERSION }}
+        key: venv-${{ runner.os }}-python-${{ steps.setup-python.outputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ env.CACHE_VERSION }}
 
     # **** Caching downloads ****
 
@@ -70,13 +70,13 @@ runs:
       uses: actions/cache@v4
       with:
         path: ~/.cache/tinygrad/downloads/
-        key: downloads-cache-${{ inputs.key }}-${{ env.CACHE_VERSION }}
+        key: downloads-${{ github.job }}-${{ inputs.key }}-${{ env.CACHE_VERSION }}
     - name: Cache downloads (macOS)
       if: inputs.key != '' && runner.os == 'macOS'
       uses: actions/cache@v4
       with:
         path: ~/Library/Caches/tinygrad/downloads/
-        key: osx-downloads-cache-${{ inputs.key }}-${{ env.CACHE_VERSION }}
+        key: downloads-${{ github.job }}-${{ inputs.key }}-${{ env.CACHE_VERSION }}
 
     # **** Python deps ****
 
@@ -221,7 +221,7 @@ runs:
         sudo mkdir -p /usr/local/lib
         curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/nimlgen/amdcomgr_dylib/releases/latest | \
           jq -r '.assets[] | select(.name == "libamd_comgr.dylib").browser_download_url' | \
-          sudo xargs curl -L -o /usr/local/lib/libamd_comgr.dylib
+          sudo xargs curl -fL -o /usr/local/lib/libamd_comgr.dylib
         cargo build --release --manifest-path ./extra/remu/Cargo.toml
 
     # **** gpuocelot ****
@@ -278,7 +278,7 @@ runs:
       if: inputs.webgpu == 'true' && runner.os == 'Linux'
       shell: bash
       run: |
-        sudo curl -L https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/local/lib/libwebgpu_dawn.so
+        sudo curl -fL https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/local/lib/libwebgpu_dawn.so
         sudo ldconfig
     - name: Install WebGPU dawn (macOS)
       if: inputs.webgpu == 'true' && runner.os == 'macOS'
@@ -298,7 +298,7 @@ runs:
     - name: Install mesa (linux)
       if: inputs.mesa == 'true' && runner.os == 'Linux'
       shell: bash
-      run: sudo curl -L https://github.com/sirhcm/tinymesa/releases/download/tinymesa-32dc66c/libtinymesa_cpu-mesa-25.2.4-linux-amd64.so -o /usr/lib/libtinymesa_cpu.so
+      run: sudo curl -fL https://github.com/sirhcm/tinymesa/releases/download/v1/libtinymesa_cpu-mesa-25.2.7-linux-amd64.so -o /usr/lib/libtinymesa_cpu.so
     - name: Install mesa (macOS)
       if: inputs.mesa == 'true' && runner.os == 'macOS'
       shell: bash

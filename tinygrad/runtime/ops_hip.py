@@ -1,6 +1,6 @@
 import ctypes, functools
 from tinygrad.helpers import init_c_var, mv_address, init_c_struct_t, getenv
-from tinygrad.device import Compiled, LRUAllocator, BufferSpec
+from tinygrad.device import Compiled, LRUAllocator, BufferSpec, CompilerSet, CompilerPair
 from tinygrad.runtime.autogen import hip
 from tinygrad.runtime.support.compiler_amd import HIPCompiler
 from tinygrad.renderer.cstyle import HIPRenderer
@@ -15,7 +15,7 @@ class HIPDevice(Compiled):
     self.arch = init_c_var(hip.hipDeviceProp_t(), lambda x: check(hip.hipGetDeviceProperties(x, self.device_id))).gcnArchName.decode()
     self.time_event_st, self.time_event_en = [init_c_var(hip.hipEvent_t(), lambda x: hip.hipEventCreate(ctypes.byref(x), 0)) for _ in range(2)]
 
-    compilers = [(functools.partial(HIPRenderer, self.arch), functools.partial(HIPCompiler, self.arch))]
+    compilers = CompilerSet([CompilerPair(functools.partial(HIPRenderer, self.arch), functools.partial(HIPCompiler, self.arch))])
     super().__init__(device, HIPAllocator(self), compilers, functools.partial(HIPProgram, self))
   def synchronize(self):
     check(hip.hipSetDevice(self.device_id))

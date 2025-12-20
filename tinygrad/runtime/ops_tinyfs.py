@@ -1,10 +1,11 @@
-import socket, json, asyncio, threading
+import socket, json, asyncio, threading, math
 from contextlib import asynccontextmanager
 from tinygrad.device import Compiled, Allocator
 from tinygrad.helpers import DEBUG, getenv
 from tinygrad import Tensor
 
 TINYFS_ENDPOINT = getenv("TINYFS_ENDPOINT", "localhost:6767")
+TINYFS_TIMEOUT = getenv("TINYFS_TIMEOUT", 60)
 
 class TinyFSDevice(Compiled):
   def __init__(self, device:str):
@@ -13,7 +14,7 @@ class TinyFSDevice(Compiled):
 
     self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     self.sock.connect((TINYFS_ENDPOINT.rsplit(":", 1)[0], int(TINYFS_ENDPOINT.rsplit(":", 1)[1])))
-    self.sock.settimeout(10)
+    self.sock.settimeout(TINYFS_TIMEOUT)
     self.sfile = self.sock.makefile("rwb")
 
     # fetch node info
@@ -92,9 +93,9 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
     if dest.device.op == "LOAD":
       locs = self.dev.sfile.readline()
       dest.copyout_queue = json.loads(locs)
-      dest.hash_buf[:] = src.tobytes()
+      dest.hash_buf = src.tobytes()
     elif dest.device.op == "STORE":
-      expected_hashes = dest.size // Tensor.CHUNK_SIZE
+      expected_hashes = math.ceil(dest.size / Tensor.CHUNK_SIZE)
       dest.hash_buf = bytearray(expected_hashes * 16)
       self.dev.sfile.readinto(dest.hash_buf)
 
@@ -113,9 +114,9 @@ class TinyFSAllocator(Allocator[TinyFSDevice]):
 
         writer.write(f"CHUNK_OUT {size}\r\n".encode())
         writer.write(src.hash_buf[i*16:(i+1)*16])
-        await asyncio.wait_for(writer.drain(), timeout=10)
+        await asyncio.wait_for(writer.drain(), timeout=TINYFS_TIMEOUT)
 
-        chunk = await asyncio.wait_for(reader.readexactly(size), timeout=10)
+        chunk = await asyncio.wait_for(reader.readexactly(size), timeout=TINYFS_TIMEOUT)
 
         view = dest[ptr:ptr+len(chunk)]
         view[:] = chunk
