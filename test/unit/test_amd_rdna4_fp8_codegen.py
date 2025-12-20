@@ -7,6 +7,9 @@ from tinygrad.renderer.cstyle import AMDRenderer
 from tinygrad.uop.ops import UOp, Ops
 
 class TestAMDRDNA4FP8Codegen(unittest.TestCase):
+  def test_gfx1201_is_not_cdna(self):
+    self.assertFalse(AMDRenderer.is_cdna("gfx1201"))
+
   def _render_fp8_cast_kernel(self, fp8_dtype):
     a = UOp(Ops.DEFINE_GLOBAL, dtypes.float.ptr(), (), 0)
     b = UOp(Ops.DEFINE_GLOBAL, fp8_dtype.ptr(), (), 1)
