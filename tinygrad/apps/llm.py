@@ -62,6 +62,36 @@ def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
   freqs = Tensor.arange(end).unsqueeze(dim=1) * freqs.unsqueeze(dim=0)
   return freqs.cos().cat(freqs.sin(), dim=-1).contiguous()
 
+class MoEFeedForward:
+  """Mixture of Experts feed-forward layer, following olmoe pattern."""
+  def __init__(self, num_experts:int, num_experts_per_tok:int, dim:int, hidden_dim:int):
+    self.num_experts_per_tok = num_experts_per_tok
+    self.ffn_gate_inp = nn.Linear(dim, num_experts, bias=False)  # router
+    self.ffn_gate_exps = Tensor.zeros(num_experts, hidden_dim, dim)
+    self.ffn_up_exps = Tensor.zeros(num_experts, hidden_dim, dim)
+    self.ffn_down_exps = Tensor.zeros(num_experts, dim, hidden_dim)
+
+  def __call__(self, x:Tensor) -> Tensor:
+    B, T, D = x.shape
+    assert B == 1, "only BS=1"
+    if T == 1:
+      # fast path for generation
+      g = self.ffn_gate_inp(x).softmax(-1).squeeze()  # (num_experts,)
+      probs, sel = g.topk(self.num_experts_per_tok)
+      x_gate_up = x.dot(self.ffn_gate_exps[sel].permute(0,2,1)).silu() * x.dot(self.ffn_up_exps[sel].permute(0,2,1))
+      x_down = x_gate_up.dot(self.ffn_down_exps[sel].permute(0,2,1))
+      return (x_down * probs.reshape(self.num_experts_per_tok, 1, 1)).sum(axis=0)
+    # prefill: process each token position
+    outputs = []
+    for t in range(T):
+      xt = x[:, t:t+1, :]  # (1, 1, D)
+      g = self.ffn_gate_inp(xt).softmax(-1).squeeze()
+      probs, sel = g.topk(self.num_experts_per_tok)
+      x_gate_up = xt.dot(self.ffn_gate_exps[sel].permute(0,2,1)).silu() * xt.dot(self.ffn_up_exps[sel].permute(0,2,1))
+      x_down = x_gate_up.dot(self.ffn_down_exps[sel].permute(0,2,1))
+      outputs.append((x_down * probs.reshape(self.num_experts_per_tok, 1, 1)).sum(axis=0))
+    return Tensor.stack(*outputs, dim=1)
+
 def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
   assert x.shape[-1] % 2 == 0
   cos, sin = freqs_cis.reshape(1, 1, x.shape[2], -1).chunk(2, dim=-1)
@@ -70,7 +100,7 @@ def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
 
 class TransformerBlock:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_kv_heads:int, norm_eps:float, head_dim:int, rope_theta:float,
-               max_context:int=0, qk_norm:bool=False):
+               max_context:int=0, qk_norm:bool=False, num_experts:int=0, num_experts_per_tok:int=0):
     self.n_heads      = n_heads
     self.n_kv_heads   = n_kv_heads
     self.head_dim     = head_dim
@@ -90,10 +120,13 @@ class TransformerBlock:
     self.ffn_norm    = nn.RMSNorm(dim, norm_eps)
     if qk_norm: self.attn_q_norm, self.attn_k_norm = nn.RMSNorm(self.head_dim, norm_eps), nn.RMSNorm(self.head_dim, norm_eps)
 
-    # --- feed-forward ----------------------------------------------------
-    self.ffn_gate    = nn.Linear(dim, hidden_dim, bias=False)
-    self.ffn_up      = nn.Linear(dim, hidden_dim, bias=False)
-    self.ffn_down    = nn.Linear(hidden_dim, dim, bias=False)
+    # --- feed-forward (MoE or dense) -------------------------------------
+    if num_experts > 0:
+      self.moe = MoEFeedForward(num_experts, num_experts_per_tok, dim, hidden_dim)
+    else:
+      self.ffn_gate    = nn.Linear(dim, hidden_dim, bias=False)
+      self.ffn_up      = nn.Linear(dim, hidden_dim, bias=False)
+      self.ffn_down    = nn.Linear(hidden_dim, dim, bias=False)
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     x_norm = self.attn_norm(x)                       # (B,T,D)
@@ -127,6 +160,7 @@ class TransformerBlock:
 
   def _feed_forward(self, h: Tensor) -> Tensor:
     h_norm = self.ffn_norm(h)
+    if hasattr(self, 'moe'): return h + self.moe(h_norm)
     # TODO: remove the need for this contiguous
     gated  = self.ffn_gate(h_norm).silu().contiguous() * self.ffn_up(h_norm)
     return h + self.ffn_down(gated)
@@ -136,9 +170,9 @@ class TransformerBlock:
 
 class Transformer:
   def __init__(self, *, num_blocks, dim, hidden_dim, n_heads, n_kv_heads, norm_eps, vocab_size, head_dim:int, rope_theta:float,
-               max_context:int=0, qk_norm:bool=False):
-    self.blk = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, head_dim, rope_theta, max_context, qk_norm)
-                for _ in range(num_blocks)]
+               max_context:int=0, qk_norm:bool=False, num_experts:int=0, num_experts_per_tok:int=0):
+    self.blk = [TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, head_dim, rope_theta, max_context, qk_norm,
+                                 num_experts, num_experts_per_tok) for _ in range(num_blocks)]
     self.token_embd  = nn.Embedding(vocab_size, dim)
     self.output_norm = nn.RMSNorm(dim, norm_eps)
     self.output = nn.Linear(dim, vocab_size, bias=False)
@@ -170,16 +204,32 @@ class Transformer:
     max_context = min(max_context, kv[f'{arch}.context_length']) if max_context is not None else kv[f'{arch}.context_length']
     n_heads, n_kv_heads = kv[f'{arch}.attention.head_count'], kv[f'{arch}.attention.head_count_kv']
 
+    # MoE support: get expert counts if present
+    num_experts = kv.get(f'{arch}.expert_count', 0)
+    num_experts_per_tok = kv.get(f'{arch}.expert_used_count', 0)
+    # MoE models use expert_feed_forward_length for expert FFN hidden dim
+    hidden_dim = kv.get(f'{arch}.expert_feed_forward_length', kv[f'{arch}.feed_forward_length'])
+
     # permute Q/K weights from interleaved to half-split RoPE layout: [0,1,2,3,4,5...] -> [0,2,4,...,1,3,5,...]
-    if arch != 'qwen3':
+    if arch not in ('qwen3', 'qwen3moe'):
       for name in state_dict:
         if 'attn_q.weight' in name: state_dict[name] = state_dict[name].rearrange("(n h two) d -> (n two h) d", n=n_heads, two=2)
         if 'attn_k.weight' in name: state_dict[name] = state_dict[name].rearrange("(n h two) d -> (n two h) d", n=n_kv_heads, two=2)
 
-    model = Transformer(num_blocks=kv[f'{arch}.block_count'], dim=kv[f'{arch}.embedding_length'], hidden_dim=kv[f'{arch}.feed_forward_length'],
+    # MoE weight renaming: blk.X.ffn_*_exps.weight -> blk.X.moe.ffn_*_exps
+    if num_experts > 0:
+      def rename_moe(k):
+        for exp in ('ffn_gate_exps', 'ffn_up_exps', 'ffn_down_exps'):
+          if exp in k: return k.replace(exp, f'moe.{exp}').replace('.weight', '')
+        if 'ffn_gate_inp' in k: return k.replace('ffn_gate_inp', 'moe.ffn_gate_inp')
+        return k
+      state_dict = {rename_moe(k): v for k, v in state_dict.items()}
+
+    model = Transformer(num_blocks=kv[f'{arch}.block_count'], dim=kv[f'{arch}.embedding_length'], hidden_dim=hidden_dim,
                         n_heads=n_heads, n_kv_heads=n_kv_heads, norm_eps=kv[f'{arch}.attention.layer_norm_rms_epsilon'],
                         vocab_size=len(kv['tokenizer.ggml.tokens']), head_dim=kv[f'{arch}.attention.key_length'],
-                        rope_theta=kv[f'{arch}.rope.freq_base'], max_context=max_context, qk_norm='blk.0.attn_q_norm.weight' in state_dict)
+                        rope_theta=kv[f'{arch}.rope.freq_base'], max_context=max_context, qk_norm='blk.0.attn_q_norm.weight' in state_dict,
+                        num_experts=num_experts, num_experts_per_tok=num_experts_per_tok)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
     for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())
@@ -207,6 +257,7 @@ models = {
   "qwen3:0.6b": "https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf",
   "qwen3:1.7b": "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf",
   "qwen3:8b": "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf",
+  "qwen3:30b-a3b": "https://huggingface.co/Qwen/Qwen3-30B-A3B-GGUF/resolve/main/Qwen3-30B-A3B-Q4_K_M.gguf",
 }
 
 # *** simple OpenAI compatible server on 11434 to match ollama ***
