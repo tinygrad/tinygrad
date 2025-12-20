@@ -7,6 +7,7 @@ from tinygrad.renderer import Renderer
 from tinygrad.helpers import get_single_element, getenv
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu
 from tinygrad.codegen.opt import tc
+from tinygrad.renderer.cstyle import create_non_native_float_pats, pm_manual_bf16_cast
 
 def get_reg_base(reg: str) -> int:
   """Extract base register number from register string (e.g., 'v5' -> 5, 'v[10:17]' -> 10)."""
@@ -81,7 +82,11 @@ def global_store(addr:str, data:str, base:str, dt:DType) -> str:
   return f"global_store_{sz} {addr}, {data}, {base}"
 
 def global_load(dest:str, addr:str, base:str, dt:DType) -> str:
-  sz = {1: 'ubyte', 2: 'u16', 4: 'b32', 8: 'b64', 16: 'b128'}[dt.itemsize]
+  # Use signed (sbyte/i16) for signed types, unsigned (ubyte/u16) for unsigned types
+  # This ensures proper sign/zero extension when loading into 32-bit registers
+  if dt.itemsize == 1: sz = 'sbyte' if dt in (dtypes.int8, dtypes.char) else 'ubyte'
+  elif dt.itemsize == 2: sz = 'i16' if dt == dtypes.int16 else 'u16'
+  else: sz = {4: 'b32', 8: 'b64', 16: 'b128'}[dt.itemsize]
   return f"global_load_{sz} {dest}, {addr}, {base}"
 
 def gated_load(ctx, x, idx, alt, gate, buf, index_op) -> list[str]:
@@ -113,7 +118,10 @@ def gated_load(ctx, x, idx, alt, gate, buf, index_op) -> list[str]:
   return result
 
 def ds_read(dest:str, addr:str, dt:DType) -> str:
-  sz = {1: 'u8', 2: 'u16', 4: 'b32', 8: 'b64', 16: 'b128'}[dt.itemsize]
+  # Use signed (i8/i16) for signed types to get sign extension
+  if dt.itemsize == 1: sz = 'i8' if dt in (dtypes.int8, dtypes.char) else 'u8'
+  elif dt.itemsize == 2: sz = 'i16' if dt == dtypes.int16 else 'u16'
+  else: sz = {4: 'b32', 8: 'b64', 16: 'b128'}[dt.itemsize]
   return f"ds_read_{sz} {dest}, {addr}"
 
 def ds_write(addr:str, data:str, dt:DType) -> str:
@@ -135,70 +143,356 @@ def render_const_64(ctx, x):
   bits = struct.unpack("Q", struct.pack("d", x.arg))[0] if x.dtype == dtypes.float64 else int(x.arg) & 0xFFFFFFFFFFFFFFFF
   return [f"v_mov_b32 v{reg_num}, 0x{bits & 0xFFFFFFFF:08X}", f"v_mov_b32 v{reg_num+1}, 0x{(bits >> 32) & 0xFFFFFFFF:08X}"]
 
+# RDNA3 doesn't have v_add_f64/v_sub_f64/v_mul_f64, so we implement them via v_fma_f64
+# ADD(a, b) = FMA(1.0, a, b), SUB(a, b) = FMA(1.0, a, -b), MUL(a, b) = FMA(a, b, 0.0)
+def render_f64_add(ctx, x, a, b):
+  """Float64 add via FMA: a + b = 1.0 * a + b"""
+  rx, ra, rb = get_reg_base(ctx.r[x]), get_reg_base(ctx.r[a]), get_reg_base(ctx.r[b])
+  s = ctx.get_scratch_vgpr()
+  # Load 1.0 as float64 (0x3FF0000000000000)
+  return [
+    f"v_mov_b32 v{s}, 0x00000000",      # low 32 bits of 1.0
+    f"v_mov_b32 v{s+1}, 0x3FF00000",    # high 32 bits of 1.0
+    f"v_fma_f64 v[{rx}:{rx+1}], v[{s}:{s+1}], v[{ra}:{ra+1}], v[{rb}:{rb+1}]"
+  ]
+
+def render_f64_sub(ctx, x, a, b):
+  """Float64 sub via FMA and neg: a - b = a + (-b)"""
+  rx, ra, rb = get_reg_base(ctx.r[x]), get_reg_base(ctx.r[a]), get_reg_base(ctx.r[b])
+  s = ctx.get_scratch_vgpr()
+  # Load 1.0 and negate b by flipping sign bit
+  return [
+    f"v_mov_b32 v{s}, 0x00000000",      # low 32 bits of 1.0
+    f"v_mov_b32 v{s+1}, 0x3FF00000",    # high 32 bits of 1.0
+    f"v_mov_b32 v{s+2}, v{rb}",         # copy b low
+    f"v_xor_b32 v{s+3}, v{rb+1}, 0x80000000",  # negate b high (flip sign bit)
+    f"v_fma_f64 v[{rx}:{rx+1}], v[{s}:{s+1}], v[{ra}:{ra+1}], v[{s+2}:{s+3}]"
+  ]
+
+def render_f64_mul(ctx, x, a, b):
+  """Float64 mul via FMA: a * b = a * b + 0.0"""
+  rx, ra, rb = get_reg_base(ctx.r[x]), get_reg_base(ctx.r[a]), get_reg_base(ctx.r[b])
+  return f"v_fma_f64 v[{rx}:{rx+1}], v[{ra}:{ra+1}], v[{rb}:{rb+1}], 0"
+
+# Float64 comparisons need register pairs
+def render_f64_cmp(ctx, x, a, b, cmp_op):
+  """Float64 comparison - uses register pairs"""
+  ra, rb = get_reg_base(ctx.r[a]), get_reg_base(ctx.r[b])
+  dest = ctx.r[x]
+  cmp_instr = f"v_cmp_{cmp_op}_f64 {dest if dest.startswith('s') else 'vcc_lo'}, v[{ra}:{ra+1}], v[{rb}:{rb+1}]"
+  if dest.startswith('v'):
+    return [cmp_instr, f"v_cndmask_b32 {dest}, 0, 1, vcc_lo"]
+  return cmp_instr
+
+def render_f64_cmplt(ctx, x, a, b): return render_f64_cmp(ctx, x, a, b, "lt")
+def render_f64_cmpeq(ctx, x, a, b): return render_f64_cmp(ctx, x, a, b, "eq")
+def render_f64_cmpne(ctx, x, a, b): return render_f64_cmp(ctx, x, a, b, "neq")
+
 def extract_low_32(reg: str) -> str:
   """Extract low 32 bits from a register (handles 64-bit register pairs v[n:m])"""
   return f"v{get_reg_base(reg)}" if isinstance(reg, str) and '[' in reg else reg
 
 def render_idiv(ctx, x, a, b):
-  """Render integer division via float conversion with correction for rounding errors.
-  v_rcp_f32 is approximate, so 6/-3 might compute as -1.999... truncating to -1 instead of -2.
-  Correction: if |remainder| >= |divisor|, we undershot and need to adjust q away from zero.
-  IMPORTANT: Uses output register {rx} for quotient. Scratch registers are only used for
-  temporary float values and intermediate computations that don't need to persist."""
+  """Render signed integer division (truncation toward zero) via float conversion.
+  Float32 can only represent integers exactly up to 2^24. For larger values, the quotient
+  from float division may be off due to rounding. We use integer comparison to correct.
+  IMPORTANT: Uses output register {rx} for quotient."""
   ra = extract_low_32(ctx.r[a]) if a.dtype in (dtypes.long, dtypes.ulong) else ctx.r[a]
   rb = extract_low_32(ctx.r[b]) if b.dtype in (dtypes.long, dtypes.ulong) else ctx.r[b]
   rx = extract_low_32(ctx.r[x]) if x.dtype in (dtypes.long, dtypes.ulong) else ctx.r[x]
   s = ctx.get_scratch_vgpr()
-  # Use rx for the quotient throughout. Scratch registers s, s+1 are for float temporaries.
-  # We save/restore values carefully to avoid collisions when rx is in the scratch range.
+  # For small b, float approximation can be off by more than 1 unit (up to ~2^24/b).
+  # We use two-stage correction: first pass handles most cases, second pass uses
+  # float(r)/float(b) which is now exact since r < 2^24 after first pass.
   return [
     f"v_cvt_f32_i32 v{s}, {ra}",           # s = float(a)
     f"v_cvt_f32_i32 v{s+1}, {rb}",         # s+1 = float(b)
-    f"v_rcp_f32 v{s+1}, v{s+1}",           # s+1 = 1/float(b) (approx)
-    f"v_mul_f32 v{s}, v{s}, v{s+1}",       # s = float(a)/float(b) (approx)
+    f"v_rcp_f32 v{s+2}, v{s+1}",           # s+2 = 1/float(b) (approx)
+    f"v_mul_f32 v{s}, v{s}, v{s+2}",       # s = float(a)/float(b) (approx)
     f"v_trunc_f32 v{s}, v{s}",             # s = trunc(a/b)
-    f"v_cvt_i32_f32 {rx}, v{s}",           # rx = q (quotient in output register)
-    # Now compute remainder r = a - q*b to check if correction is needed
-    # Use s for q*b, s+1 for remainder
+    f"v_cvt_i32_f32 {rx}, v{s}",           # rx = q (initial quotient)
+    # Compute exact remainder r = a - q*b
     f"v_mul_lo_u32 v{s}, {rx}, {rb}",      # s = q*b
-    f"v_sub_nc_u32 v{s+1}, {ra}, v{s}",    # s+1 = r = a - q*b (remainder)
-    # Check if |r| >= |b| - this means we undershot and need to add/subtract 1
-    # Get |r|: abs(r) = (r xor sign(r)) - sign(r)
-    f"v_ashrrev_i32 v{s}, 31, v{s+1}",     # s = sign(r): -1 if r<0, 0 if r>=0
-    f"v_xor_b32 v{s+2}, v{s+1}, v{s}",     # s+2 = r xor sign(r)
-    f"v_sub_nc_u32 v{s+2}, v{s+2}, v{s}",  # s+2 = |r| = (r xor sign) - sign
-    # Get |b|: abs(b) = (b xor sign(b)) - sign(b)
-    f"v_ashrrev_i32 v{s}, 31, {rb}",       # s = sign(b)
-    f"v_xor_b32 v{s+3}, {rb}, v{s}",       # s+3 = b xor sign(b)
-    f"v_sub_nc_u32 v{s+3}, v{s+3}, v{s}",  # s+3 = |b|
-    # Compare |r| >= |b|
-    f"v_cmp_ge_u32 vcc_lo, v{s+2}, v{s+3}",# vcc = |r| >= |b| (need correction)
-    # Correction direction: sign(a) xor sign(b) gives sign of quotient
-    # If quotient is positive, add 1. If negative, subtract 1.
+    f"v_sub_nc_u32 v{s+1}, {ra}, v{s}",    # s+1 = r = a - q*b (exact remainder)
+    # First correction pass using float - r is now smaller than a, likely fits in float24
+    f"v_cvt_f32_i32 v{s}, v{s+1}",         # s = float(r)
+    f"v_mul_f32 v{s}, v{s}, v{s+2}",       # s = float(r)/float(b)
+    f"v_trunc_f32 v{s}, v{s}",             # s = trunc(r/b)
+    f"v_cvt_i32_f32 v{s}, v{s}",           # s = large correction
+    f"v_add_nc_u32 {rx}, {rx}, v{s}",      # q += large correction
+    # Recompute remainder after large correction
+    f"v_mul_lo_u32 v{s}, {rx}, {rb}",      # s = q*b
+    f"v_sub_nc_u32 v{s+1}, {ra}, v{s}",    # s+1 = r (after large correction)
+    # Second correction pass: Integer comparison for off-by-one cases
+    # Correction 1: If r >= b and b > 0, q is too low - increment q
+    f"v_cmp_ge_i32 vcc_lo, v{s+1}, {rb}",  # vcc = (r >= b)
+    f"v_cndmask_b32 v{s+3}, 0, 1, vcc_lo", # s+3 = 1 if r >= b
+    f"v_cmp_gt_i32 vcc_lo, {rb}, 0",       # vcc = (b > 0)
+    f"v_cndmask_b32 v{s+3}, 0, v{s+3}, vcc_lo", # s+3 = 1 if (r >= b AND b > 0)
+    f"v_add_nc_u32 {rx}, {rx}, v{s+3}",    # q += 1 if needed
+    # Correction 2: If r <= -b and b > 0 (r is too negative), q is too high - decrement q
+    # NOTE: Must also check r < 0 to avoid false positive from overflow (e.g., 1 + INT_MAX overflows)
+    f"v_cmp_lt_i32 vcc_lo, v{s+1}, 0",     # vcc = (r < 0)
+    f"v_cndmask_b32 v{s+3}, 0, 1, vcc_lo", # s+3 = 1 if r < 0
+    f"v_add_nc_u32 v{s}, v{s+1}, {rb}",    # s = r + b
+    f"v_cmp_le_i32 vcc_lo, v{s}, 0",       # vcc = (r + b <= 0), meaning r <= -b
+    f"v_cndmask_b32 v{s+3}, 0, v{s+3}, vcc_lo", # s+3 = 1 if (r < 0 AND r+b <= 0)
+    f"v_cmp_gt_i32 vcc_lo, {rb}, 0",       # vcc = (b > 0)
+    f"v_cndmask_b32 v{s+3}, 0, v{s+3}, vcc_lo",
+    f"v_sub_nc_u32 {rx}, {rx}, v{s+3}",    # q -= 1 if needed
+    # Correction 3: If r <= b and b < 0, q is too low - increment q
+    f"v_cmp_le_i32 vcc_lo, v{s+1}, {rb}",  # vcc = (r <= b) where b < 0
+    f"v_cndmask_b32 v{s+3}, 0, 1, vcc_lo",
+    f"v_cmp_lt_i32 vcc_lo, {rb}, 0",       # vcc = (b < 0)
+    f"v_cndmask_b32 v{s+3}, 0, v{s+3}, vcc_lo",
+    f"v_add_nc_u32 {rx}, {rx}, v{s+3}",    # q += 1 if needed
+    # Correction 4: If r >= -b and b < 0 (r is too positive), q is too high - decrement q
+    # NOTE: Must also check r > 0 to avoid false positive from overflow (e.g., -b overflows for b=INT_MIN)
+    f"v_cmp_gt_i32 vcc_lo, v{s+1}, 0",     # vcc = (r > 0)
+    f"v_cndmask_b32 v{s+3}, 0, 1, vcc_lo", # s+3 = 1 if r > 0
+    f"v_sub_nc_u32 v{s}, 0, {rb}",         # s = -b
+    f"v_cmp_ge_i32 vcc_lo, v{s+1}, v{s}",  # vcc = (r >= -b)
+    f"v_cndmask_b32 v{s+3}, 0, v{s+3}, vcc_lo", # s+3 = 1 if (r > 0 AND r >= -b)
+    f"v_cmp_lt_i32 vcc_lo, {rb}, 0",
+    f"v_cndmask_b32 v{s+3}, 0, v{s+3}, vcc_lo",
+    f"v_sub_nc_u32 {rx}, {rx}, v{s+3}",    # q -= 1 if needed
+    # Recompute remainder and fix sign mismatch
+    f"v_mul_lo_u32 v{s}, {rx}, {rb}",      # s = q*b
+    f"v_sub_nc_u32 v{s+1}, {ra}, v{s}",    # s+1 = new r
+    # For truncation div: remainder should have same sign as dividend (or be 0)
+    # If r and a have opposite signs and r != 0, we need to adjust q toward zero
+    f"v_xor_b32 v{s}, {ra}, v{s+1}",       # s = a xor r (check if signs differ)
+    f"v_cmp_lt_i32 vcc_lo, v{s}, 0",       # vcc = (a and r have opposite signs)
+    f"v_cndmask_b32 v{s}, 0, 1, vcc_lo",   # s = 1 if signs differ
+    f"v_cmp_ne_i32 vcc_lo, v{s+1}, 0",     # vcc = (r != 0)
+    f"v_cndmask_b32 v{s+3}, 0, v{s}, vcc_lo", # s+3 = 1 if (signs differ AND r != 0)
+    # Adjustment direction: toward zero means subtract sign of q
     f"v_xor_b32 v{s}, {ra}, {rb}",         # s = a xor b
-    f"v_ashrrev_i32 v{s}, 31, v{s}",       # s = sign(a xor b): -1 if neg quotient, 0 if pos
-    f"v_or_b32 v{s}, v{s}, 1",             # s = -1 if neg, 1 if pos (correction)
-    f"v_cndmask_b32 v{s}, 0, v{s}, vcc_lo",# s = correction if needed, else 0
-    f"v_add_nc_u32 {rx}, {rx}, v{s}",      # result = q + correction
+    f"v_ashrrev_i32 v{s}, 31, v{s}",       # s = -1 if opposite signs (q<0), 0 if same (q>=0)
+    f"v_or_b32 v{s}, v{s}, 1",             # s = -1 if q<0, 1 if q>=0
+    f"v_mul_lo_u32 v{s}, v{s}, v{s+3}",    # s = adjustment (s+3 is 0 or 1)
+    f"v_sub_nc_u32 {rx}, {rx}, v{s}",      # q -= adjustment (toward zero)
   ]
 
 def render_mod(ctx, x, a, b):
-  """Render integer modulo: a % b = a - (a // b) * b. For 64-bit types, operates on low 32 bits only."""
+  """Render signed integer modulo (truncation semantics): a % b. Result has same sign as dividend.
+  Uses float approximation for initial quotient, then corrects using integer comparisons."""
   ra = extract_low_32(ctx.r[a]) if a.dtype in (dtypes.long, dtypes.ulong) else ctx.r[a]
   rb = extract_low_32(ctx.r[b]) if b.dtype in (dtypes.long, dtypes.ulong) else ctx.r[b]
   rx = extract_low_32(ctx.r[x]) if x.dtype in (dtypes.long, dtypes.ulong) else ctx.r[x]
-  scratch = ctx.get_scratch_vgpr()
-  # Compute a // b via float conversion
-  # Then compute a - (a // b) * b
+  s = ctx.get_scratch_vgpr()
   return [
-    f"v_cvt_f32_i32 v{scratch}, {ra}",
-    f"v_cvt_f32_i32 v{scratch+1}, {rb}",
-    f"v_rcp_f32 v{scratch+1}, v{scratch+1}",
-    f"v_mul_f32 v{scratch}, v{scratch}, v{scratch+1}",
-    f"v_trunc_f32 v{scratch}, v{scratch}",
-    f"v_cvt_i32_f32 v{scratch}, v{scratch}",      # scratch = a // b
-    f"v_mul_lo_u32 v{scratch}, v{scratch}, {rb}", # scratch = (a // b) * b
-    f"v_sub_nc_u32 {rx}, {ra}, v{scratch}"]       # result = a - (a // b) * b
+    f"v_cvt_f32_i32 v{s}, {ra}",           # s = float(a)
+    f"v_cvt_f32_i32 v{s+1}, {rb}",         # s+1 = float(b)
+    f"v_rcp_f32 v{s+2}, v{s+1}",           # s+2 = 1/float(b) (approx)
+    f"v_mul_f32 v{s}, v{s}, v{s+2}",       # s = float(a)/float(b) (approx)
+    f"v_trunc_f32 v{s}, v{s}",             # s = trunc(a/b)
+    f"v_cvt_i32_f32 v{s}, v{s}",           # s = q (initial quotient)
+    # Compute initial remainder r = a - q*b
+    f"v_mul_lo_u32 v{s+1}, v{s}, {rb}",    # s+1 = q*b
+    f"v_sub_nc_u32 {rx}, {ra}, v{s+1}",    # rx = r = a - q*b (initial remainder)
+    # Correction 1: If r >= b and b > 0, we need r -= b (quotient was too low)
+    f"v_cmp_ge_i32 vcc_lo, {rx}, {rb}",    # vcc = (r >= b)
+    f"v_cndmask_b32 v{s+3}, 0, 1, vcc_lo", # s+3 = 1 if r >= b
+    f"v_cmp_gt_i32 vcc_lo, {rb}, 0",       # vcc = (b > 0)
+    f"v_cndmask_b32 v{s+3}, 0, v{s+3}, vcc_lo", # s+3 = 1 if (r >= b AND b > 0)
+    f"v_mul_lo_u32 v{s}, {rb}, v{s+3}",    # s = b if correction needed
+    f"v_sub_nc_u32 {rx}, {rx}, v{s}",      # r -= b if needed
+    # Correction 2: If r <= -b and b > 0 (r is too negative), we need r += b
+    # NOTE: Must also check r < 0 to avoid false positive from overflow
+    f"v_cmp_lt_i32 vcc_lo, {rx}, 0",       # vcc = (r < 0)
+    f"v_cndmask_b32 v{s+3}, 0, 1, vcc_lo", # s+3 = 1 if r < 0
+    f"v_add_nc_u32 v{s}, {rx}, {rb}",      # s = r + b
+    f"v_cmp_le_i32 vcc_lo, v{s}, 0",       # vcc = (r + b <= 0), meaning r <= -b
+    f"v_cndmask_b32 v{s+3}, 0, v{s+3}, vcc_lo", # s+3 = 1 if (r < 0 AND r+b <= 0)
+    f"v_cmp_gt_i32 vcc_lo, {rb}, 0",       # vcc = (b > 0)
+    f"v_cndmask_b32 v{s+3}, 0, v{s+3}, vcc_lo",
+    f"v_mul_lo_u32 v{s}, {rb}, v{s+3}",
+    f"v_add_nc_u32 {rx}, {rx}, v{s}",      # r += b if needed
+    # Correction 3: Handle negative b cases similarly
+    # If r <= b and b < 0, we need r -= b (since b is negative, this adds |b|)
+    f"v_cmp_le_i32 vcc_lo, {rx}, {rb}",    # vcc = (r <= b) where b < 0
+    f"v_cndmask_b32 v{s+3}, 0, 1, vcc_lo",
+    f"v_cmp_lt_i32 vcc_lo, {rb}, 0",       # vcc = (b < 0)
+    f"v_cndmask_b32 v{s+3}, 0, v{s+3}, vcc_lo",
+    f"v_mul_lo_u32 v{s}, {rb}, v{s+3}",
+    f"v_sub_nc_u32 {rx}, {rx}, v{s}",
+    # If r >= -b and b < 0 (r is too positive), we need r += b
+    # NOTE: Must also check r > 0 to avoid false positive from overflow
+    f"v_cmp_gt_i32 vcc_lo, {rx}, 0",       # vcc = (r > 0)
+    f"v_cndmask_b32 v{s+3}, 0, 1, vcc_lo", # s+3 = 1 if r > 0
+    f"v_sub_nc_u32 v{s}, 0, {rb}",         # s = -b
+    f"v_cmp_ge_i32 vcc_lo, {rx}, v{s}",    # vcc = (r >= -b)
+    f"v_cndmask_b32 v{s+3}, 0, v{s+3}, vcc_lo", # s+3 = 1 if (r > 0 AND r >= -b)
+    f"v_cmp_lt_i32 vcc_lo, {rb}, 0",
+    f"v_cndmask_b32 v{s+3}, 0, v{s+3}, vcc_lo",
+    f"v_mul_lo_u32 v{s}, {rb}, v{s+3}",
+    f"v_add_nc_u32 {rx}, {rx}, v{s}",
+    # Final sign correction: remainder must have same sign as dividend (or be 0)
+    # If r < 0 and a >= 0: add b to r
+    f"v_cmp_lt_i32 vcc_lo, {rx}, 0",
+    f"v_cndmask_b32 v{s+3}, 0, 1, vcc_lo",
+    f"v_cmp_ge_i32 vcc_lo, {ra}, 0",
+    f"v_cndmask_b32 v{s}, 0, {rb}, vcc_lo",
+    f"v_mul_lo_u32 v{s}, v{s}, v{s+3}",
+    f"v_add_nc_u32 {rx}, {rx}, v{s}",
+    # If r > 0 and a < 0: subtract b from r
+    f"v_cmp_gt_i32 vcc_lo, {rx}, 0",
+    f"v_cndmask_b32 v{s+3}, 0, 1, vcc_lo",
+    f"v_cmp_lt_i32 vcc_lo, {ra}, 0",
+    f"v_cndmask_b32 v{s}, 0, {rb}, vcc_lo",
+    f"v_mul_lo_u32 v{s}, v{s}, v{s+3}",
+    f"v_sub_nc_u32 {rx}, {rx}, v{s}",
+  ]
+
+def render_udiv(ctx, x, a, b):
+  """Render unsigned integer division via float conversion.
+  Uses v_cvt_f32_u32 for unsigned conversion. For large values where q*b overflows uint32,
+  we detect overflow using v_mul_hi_u32 and compute proper correction."""
+  ra = extract_low_32(ctx.r[a]) if a.dtype in (dtypes.long, dtypes.ulong) else ctx.r[a]
+  rb = extract_low_32(ctx.r[b]) if b.dtype in (dtypes.long, dtypes.ulong) else ctx.r[b]
+  rx = extract_low_32(ctx.r[x]) if x.dtype in (dtypes.long, dtypes.ulong) else ctx.r[x]
+  s = ctx.get_scratch_vgpr()
+  return [
+    f"v_cvt_f32_u32 v{s}, {ra}",           # s = float(a) unsigned
+    f"v_cvt_f32_u32 v{s+1}, {rb}",         # s+1 = float(b) unsigned
+    f"v_rcp_f32 v{s+2}, v{s+1}",           # s+2 = 1/float(b) (approx)
+    f"v_mul_f32 v{s}, v{s}, v{s+2}",       # s = float(a)/float(b) (approx)
+    f"v_trunc_f32 v{s}, v{s}",             # s = trunc(a/b)
+    f"v_cvt_u32_f32 {rx}, v{s}",           # rx = q (initial quotient)
+    # Correction: check for overflow (q*b > a) using 64-bit comparison
+    # P_hi = mul_hi(q, b), P_lo = mul_lo(q, b)
+    # overflow = (P_hi > 0) || (P_hi == 0 && P_lo > a)
+    f"v_mul_hi_u32 v{s+3}, {rx}, {rb}",    # s+3 = P_hi
+    f"v_mul_lo_u32 v{s}, {rx}, {rb}",      # s = P_lo
+    # Compute diff = P_lo - a (handles wrap correctly for computing correction)
+    f"v_sub_nc_u32 v{s+1}, v{s}, {ra}",    # s+1 = diff_lo = P_lo - a
+    # Compute correction = diff_lo / b + 1 (covers case when error comes from hi)
+    f"v_cvt_f32_u32 v{s+4}, v{s+1}",       # s+4 = float(diff_lo)
+    f"v_mul_f32 v{s+4}, v{s+4}, v{s+2}",   # s+4 = diff_lo / b
+    f"v_trunc_f32 v{s+4}, v{s+4}",
+    f"v_cvt_u32_f32 v{s+4}, v{s+4}",       # s+4 = floor(diff_lo / b)
+    f"v_add_nc_u32 v{s+4}, v{s+4}, 1",     # s+4 = correction (at least 1)
+    # Check if P_hi > 0 (64-bit overflow)
+    f"v_cmp_ne_u32 vcc_lo, v{s+3}, 0",     # vcc = (P_hi != 0)
+    f"v_cndmask_b32 v{s+5}, 0, v{s+4}, vcc_lo",  # s+5 = corr if P_hi overflow
+    # Check if P_lo > a (32-bit overflow, only matters when P_hi == 0)
+    f"v_cmp_gt_u32 vcc_lo, v{s}, {ra}",    # vcc = (P_lo > a)
+    f"v_cndmask_b32 v{s+6}, 0, v{s+4}, vcc_lo",  # s+6 = corr if P_lo > a
+    # Combine: apply corr if either overflow (when P_hi > 0, we already applied)
+    # If P_hi == 0 and P_lo > a, use s+6; if P_hi > 0, use s+5
+    f"v_cmp_eq_u32 vcc_lo, v{s+3}, 0",     # vcc = (P_hi == 0)
+    f"v_cndmask_b32 v{s+4}, v{s+5}, v{s+6}, vcc_lo",  # s+4 = s+6 if P_hi==0, else s+5
+    f"v_sub_nc_u32 {rx}, {rx}, v{s+4}",    # q -= correction
+    # Now compute remainder and check if r >= b (q too small)
+    f"v_mul_lo_u32 v{s}, {rx}, {rb}",      # s = q*b
+    f"v_sub_nc_u32 v{s+1}, {ra}, v{s}",    # s+1 = r = a - q*b
+    # Compute floor(r/b) to handle case where we over-corrected
+    f"v_cvt_f32_u32 v{s+4}, v{s+1}",       # s+4 = float(r)
+    f"v_mul_f32 v{s+4}, v{s+4}, v{s+2}",   # s+4 = r/b
+    f"v_trunc_f32 v{s+4}, v{s+4}",
+    f"v_cvt_u32_f32 v{s+4}, v{s+4}",       # s+4 = floor(r/b)
+    f"v_add_nc_u32 {rx}, {rx}, v{s+4}",    # q += floor(r/b)
+    # Iteration 2 - repeat for additional precision
+    f"v_mul_hi_u32 v{s+3}, {rx}, {rb}",
+    f"v_mul_lo_u32 v{s}, {rx}, {rb}",
+    f"v_sub_nc_u32 v{s+1}, v{s}, {ra}",
+    f"v_cvt_f32_u32 v{s+4}, v{s+1}",
+    f"v_mul_f32 v{s+4}, v{s+4}, v{s+2}",
+    f"v_trunc_f32 v{s+4}, v{s+4}",
+    f"v_cvt_u32_f32 v{s+4}, v{s+4}",
+    f"v_add_nc_u32 v{s+4}, v{s+4}, 1",
+    f"v_cmp_ne_u32 vcc_lo, v{s+3}, 0",
+    f"v_cndmask_b32 v{s+5}, 0, v{s+4}, vcc_lo",
+    f"v_cmp_gt_u32 vcc_lo, v{s}, {ra}",
+    f"v_cndmask_b32 v{s+6}, 0, v{s+4}, vcc_lo",
+    f"v_cmp_eq_u32 vcc_lo, v{s+3}, 0",
+    f"v_cndmask_b32 v{s+4}, v{s+5}, v{s+6}, vcc_lo",
+    f"v_sub_nc_u32 {rx}, {rx}, v{s+4}",
+    f"v_mul_lo_u32 v{s}, {rx}, {rb}",
+    f"v_sub_nc_u32 v{s+1}, {ra}, v{s}",
+    f"v_cvt_f32_u32 v{s+4}, v{s+1}",
+    f"v_mul_f32 v{s+4}, v{s+4}, v{s+2}",
+    f"v_trunc_f32 v{s+4}, v{s+4}",
+    f"v_cvt_u32_f32 v{s+4}, v{s+4}",
+    f"v_add_nc_u32 {rx}, {rx}, v{s+4}",
+    # Final check: ensure r < b (one more +1 if needed)
+    f"v_mul_lo_u32 v{s}, {rx}, {rb}",
+    f"v_sub_nc_u32 v{s+1}, {ra}, v{s}",
+    f"v_cmp_ge_u32 vcc_lo, v{s+1}, {rb}",
+    f"v_cndmask_b32 v{s+3}, 0, 1, vcc_lo",
+    f"v_add_nc_u32 {rx}, {rx}, v{s+3}",
+  ]
+
+def render_umod(ctx, x, a, b):
+  """Render unsigned integer modulo via float conversion.
+  Uses same approach as render_udiv to get correct quotient, then computes r = a - q*b."""
+  ra = extract_low_32(ctx.r[a]) if a.dtype in (dtypes.long, dtypes.ulong) else ctx.r[a]
+  rb = extract_low_32(ctx.r[b]) if b.dtype in (dtypes.long, dtypes.ulong) else ctx.r[b]
+  rx = extract_low_32(ctx.r[x]) if x.dtype in (dtypes.long, dtypes.ulong) else ctx.r[x]
+  s = ctx.get_scratch_vgpr()
+  return [
+    f"v_cvt_f32_u32 v{s}, {ra}",           # s = float(a) unsigned
+    f"v_cvt_f32_u32 v{s+1}, {rb}",         # s+1 = float(b) unsigned
+    f"v_rcp_f32 v{s+2}, v{s+1}",           # s+2 = 1/float(b) (approx)
+    f"v_mul_f32 v{s}, v{s}, v{s+2}",       # s = float(a)/float(b) (approx)
+    f"v_trunc_f32 v{s}, v{s}",
+    f"v_cvt_u32_f32 v{s}, v{s}",           # s = q (initial quotient)
+    # Correction: detect overflow using mul_hi
+    f"v_mul_hi_u32 v{s+3}, v{s}, {rb}",    # s+3 = P_hi
+    f"v_mul_lo_u32 v{s+1}, v{s}, {rb}",    # s+1 = P_lo
+    f"v_sub_nc_u32 v{s+4}, v{s+1}, {ra}",  # s+4 = diff_lo = P_lo - a
+    f"v_cvt_f32_u32 v{s+5}, v{s+4}",
+    f"v_mul_f32 v{s+5}, v{s+5}, v{s+2}",
+    f"v_trunc_f32 v{s+5}, v{s+5}",
+    f"v_cvt_u32_f32 v{s+5}, v{s+5}",
+    f"v_add_nc_u32 v{s+5}, v{s+5}, 1",     # s+5 = correction
+    # Apply correction if overflow
+    f"v_cmp_ne_u32 vcc_lo, v{s+3}, 0",     # vcc = (P_hi != 0)
+    f"v_cndmask_b32 v{s+6}, 0, v{s+5}, vcc_lo",
+    f"v_cmp_gt_u32 vcc_lo, v{s+1}, {ra}",  # vcc = (P_lo > a)
+    f"v_cndmask_b32 v{s+7}, 0, v{s+5}, vcc_lo",
+    f"v_cmp_eq_u32 vcc_lo, v{s+3}, 0",
+    f"v_cndmask_b32 v{s+5}, v{s+6}, v{s+7}, vcc_lo",
+    f"v_sub_nc_u32 v{s}, v{s}, v{s+5}",    # q -= correction
+    # Check if r >= b and correct
+    f"v_mul_lo_u32 v{s+1}, v{s}, {rb}",
+    f"v_sub_nc_u32 v{s+4}, {ra}, v{s+1}",  # s+4 = r = a - q*b
+    f"v_cvt_f32_u32 v{s+5}, v{s+4}",
+    f"v_mul_f32 v{s+5}, v{s+5}, v{s+2}",
+    f"v_trunc_f32 v{s+5}, v{s+5}",
+    f"v_cvt_u32_f32 v{s+5}, v{s+5}",
+    f"v_add_nc_u32 v{s}, v{s}, v{s+5}",    # q += floor(r/b)
+    # Repeat correction once more
+    f"v_mul_hi_u32 v{s+3}, v{s}, {rb}",
+    f"v_mul_lo_u32 v{s+1}, v{s}, {rb}",
+    f"v_sub_nc_u32 v{s+4}, v{s+1}, {ra}",
+    f"v_cvt_f32_u32 v{s+5}, v{s+4}",
+    f"v_mul_f32 v{s+5}, v{s+5}, v{s+2}",
+    f"v_trunc_f32 v{s+5}, v{s+5}",
+    f"v_cvt_u32_f32 v{s+5}, v{s+5}",
+    f"v_add_nc_u32 v{s+5}, v{s+5}, 1",
+    f"v_cmp_ne_u32 vcc_lo, v{s+3}, 0",
+    f"v_cndmask_b32 v{s+6}, 0, v{s+5}, vcc_lo",
+    f"v_cmp_gt_u32 vcc_lo, v{s+1}, {ra}",
+    f"v_cndmask_b32 v{s+7}, 0, v{s+5}, vcc_lo",
+    f"v_cmp_eq_u32 vcc_lo, v{s+3}, 0",
+    f"v_cndmask_b32 v{s+5}, v{s+6}, v{s+7}, vcc_lo",
+    f"v_sub_nc_u32 v{s}, v{s}, v{s+5}",
+    f"v_mul_lo_u32 v{s+1}, v{s}, {rb}",
+    f"v_sub_nc_u32 v{s+4}, {ra}, v{s+1}",
+    f"v_cvt_f32_u32 v{s+5}, v{s+4}",
+    f"v_mul_f32 v{s+5}, v{s+5}, v{s+2}",
+    f"v_trunc_f32 v{s+5}, v{s+5}",
+    f"v_cvt_u32_f32 v{s+5}, v{s+5}",
+    f"v_add_nc_u32 v{s}, v{s}, v{s+5}",
+    # Final: compute remainder and ensure r < b
+    f"v_mul_lo_u32 v{s+1}, v{s}, {rb}",
+    f"v_sub_nc_u32 {rx}, {ra}, v{s+1}",    # rx = r = a - q*b
+    f"v_cmp_ge_u32 vcc_lo, {rx}, {rb}",
+    f"v_cndmask_b32 v{s+3}, 0, {rb}, vcc_lo",
+    f"v_sub_nc_u32 {rx}, {rx}, v{s+3}",    # r -= b if r >= b
+  ]
 
 def render_comparison(ctx, x, src0):
   """Render comparison op. If dest is SGPR, use directly. If VGPR (fallback), use vcc_lo + v_cndmask_b32."""
@@ -440,6 +734,10 @@ string_rewrite = PatternMatcher([
   # Boolean inversion: CMPNE(bool, 1) -> s_not_b32 (invert wave mask)
   (UPat(Ops.CMPNE, name="x", src=(UPat(dtype=dtypes.bool, name="a"), UPat.cvar("b"))),
    lambda ctx, x, a, b: f"s_not_b32 {ctx.r[x]}, {ctx.r[a]}" if b.arg == 1 and ctx.r[a].startswith('s') else None),
+  # float64 comparisons need register pairs - must be before generic comparison pattern
+  (UPat(Ops.CMPLT, name="x", src=(UPat.var("a", dtype=dtypes.float64), UPat.var("b"))), render_f64_cmplt),
+  (UPat(Ops.CMPEQ, name="x", src=(UPat.var("a", dtype=dtypes.float64), UPat.var("b"))), render_f64_cmpeq),
+  (UPat(Ops.CMPNE, name="x", src=(UPat.var("a", dtype=dtypes.float64), UPat.var("b"))), render_f64_cmpne),
   # comparison ops - uses SGPR if available, falls back to VGPR with vcc_lo + v_cndmask_b32
   (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ), name="x", allow_any_len=True, src=(UPat.var("src0"),)), render_comparison),
   # NOTE: WHERE wrapping LOAD is transformed to gated LOAD at UOp level by rdna_matcher
@@ -459,10 +757,13 @@ string_rewrite = PatternMatcher([
   # NOTE: v_sin_f32 has limited range (~256 turns) but we accept this for native instruction benefits
   (UPat(Ops.SIN, name="x", src=(UPat.var("a"),)), render_sin),
   # IDIV: integer division via float conversion (a // b = trunc(float(a) / float(b)))
-  (UPat(Ops.IDIV, name="x", src=(UPat.var("a"), UPat.var("b"))), render_idiv),
+  # Use render_udiv for unsigned types, render_idiv for signed types
+  (UPat(Ops.IDIV, name="x", src=(UPat.var("a"), UPat.var("b"))),
+   lambda ctx, x, a, b: render_udiv(ctx, x, a, b) if dtypes.is_unsigned(x.dtype) else render_idiv(ctx, x, a, b)),
   # Integer MOD: a % b = a - (a // b) * b (floats use v_mod_f32 via code_for_op)
+  # Use render_umod for unsigned types, render_mod for signed types
   (UPat(Ops.MOD, name="x", src=(UPat.var("a"), UPat.var("b"))),
-   lambda ctx, x, a, b: render_mod(ctx, x, a, b) if dtypes.is_int(x.dtype) else None),
+   lambda ctx, x, a, b: render_umod(ctx, x, a, b) if dtypes.is_unsigned(x.dtype) else (render_mod(ctx, x, a, b) if dtypes.is_int(x.dtype) else None)),
   # Boolean AND/OR with SGPR sources: need to convert to VGPR first
   (UPat(Ops.AND, name="x", dtype=dtypes.bool, src=(UPat.var("a", dtype=dtypes.bool), UPat.var("b", dtype=dtypes.bool))),
    lambda ctx, x, a, b: ctx.render_bool_logic(x, a, b, "and")),
@@ -474,6 +775,10 @@ string_rewrite = PatternMatcher([
   # 64-bit integer SHR: for shifts >= 32, use high bits only
   (UPat(Ops.SHR, name="x", dtype=dtypes.long, src=(UPat.var("a"), UPat.cvar("b"))), render_64bit_shr),
   (UPat(Ops.SHR, name="x", dtype=dtypes.ulong, src=(UPat.var("a"), UPat.cvar("b"))), render_64bit_shr),
+  # float64 ALU ops - RDNA3 doesn't have v_add_f64/v_sub_f64/v_mul_f64, use FMA instead
+  (UPat(Ops.ADD, name="x", dtype=dtypes.float64, src=(UPat.var("a"), UPat.var("b"))), render_f64_add),
+  (UPat(Ops.SUB, name="x", dtype=dtypes.float64, src=(UPat.var("a"), UPat.var("b"))), render_f64_sub),
+  (UPat(Ops.MUL, name="x", dtype=dtypes.float64, src=(UPat.var("a"), UPat.var("b"))), render_f64_mul),
   # alu ops - extract low 32 bits for 64-bit integer operands since RDNA has limited 64-bit int ALU
   (UPat(GroupOp.ALU, name="x"), lambda ctx, x: ctx.code_for_op[x.op](
     extract_low_32(ctx.r[x]) if x.dtype in (dtypes.long, dtypes.ulong) else ctx.r[x],
@@ -557,7 +862,7 @@ class RDNARenderer(Renderer):
   shared_max = 65536
   max_upcast_size = 16  # RDNA3 has 256 VGPRs max, limit unrolling to reduce register pressure
   code_for_op = asm_for_op
-  extra_matcher = rdna_matcher
+  extra_matcher = rdna_matcher + create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast
   tensor_cores = tc.amd_rdna3  # RDNA3 WMMA tensor cores
 
   def __init__(self, arch:str="gfx1100"):
@@ -573,7 +878,7 @@ class RDNARenderer(Renderer):
   types: dict[DType, str] = {
     dtypes.int8: "i32", dtypes.int16: "i32", dtypes.int32: "i32", dtypes.int64: "i32",
     dtypes.uint8: "u32", dtypes.uint16: "u32", dtypes.uint32: "u32", dtypes.uint64: "u32",
-    dtypes.float16: "f16", dtypes.float32: "f32", dtypes.float64: "f64", dtypes.bool: "i32"
+    dtypes.float16: "f16", dtypes.bfloat16: "bf16", dtypes.float32: "f32", dtypes.float64: "f64", dtypes.bool: "i32"
   }
 
   def is_local(self, index_op: UOp) -> bool:
@@ -619,12 +924,39 @@ class RDNARenderer(Renderer):
       return f"v_cvt_f16_f32 {self.r[x]}, {self.r[a]}"
     elif x.dtype == dtypes.float32 and a.dtype == dtypes.float16:
       return f"v_cvt_f32_f16 {self.r[x]}, {self.r[a]}"
+    # float16 -> int types: go through float32
+    elif dtypes.is_int(x.dtype) and a.dtype == dtypes.float16:
+      s = self.get_scratch_vgpr()
+      cvt_int = "v_cvt_i32_f32" if x.dtype in (dtypes.int8, dtypes.int16, dtypes.int32) else "v_cvt_u32_f32"
+      return [f"v_cvt_f32_f16 v{s}, {self.r[a]}", f"{cvt_int} {self.r[x]}, v{s}"]
+    # int types -> float16: go through float32
+    elif x.dtype == dtypes.float16 and dtypes.is_int(a.dtype):
+      s = self.get_scratch_vgpr()
+      cvt_float = "v_cvt_f32_i32" if a.dtype in (dtypes.int8, dtypes.int16, dtypes.int32) else "v_cvt_f32_u32"
+      return [f"{cvt_float} v{s}, {self.r[a]}", f"v_cvt_f16_f32 {self.r[x]}, v{s}"]
+    # bfloat16 -> int types: go through float32
+    elif dtypes.is_int(x.dtype) and a.dtype == dtypes.bfloat16:
+      s = self.get_scratch_vgpr()
+      cvt_int = "v_cvt_i32_f32" if x.dtype in (dtypes.int8, dtypes.int16, dtypes.int32) else "v_cvt_u32_f32"
+      # bfloat16 to float32: shift left by 16 bits (bfloat16 is upper 16 bits of float32)
+      return [f"v_lshlrev_b32 v{s}, 16, {self.r[a]}", f"{cvt_int} {self.r[x]}, v{s}"]
+    # int types -> bfloat16: go through float32
+    elif x.dtype == dtypes.bfloat16 and dtypes.is_int(a.dtype):
+      s = self.get_scratch_vgpr()
+      cvt_float = "v_cvt_f32_i32" if a.dtype in (dtypes.int8, dtypes.int16, dtypes.int32) else "v_cvt_f32_u32"
+      # float32 to bfloat16: shift right by 16 bits (truncate to upper 16 bits)
+      return [f"{cvt_float} v{s}, {self.r[a]}", f"v_lshrrev_b32 {self.r[x]}, 16, v{s}"]
     # float64 conversions
     elif x.dtype == dtypes.float64 and a.dtype == dtypes.float32:
       return f"v_cvt_f64_f32 {self.r[x]}, {self.r[a]}"
     elif x.dtype == dtypes.float32 and a.dtype == dtypes.float64:
       src = get_reg_base(self.r[a])
       return f"v_cvt_f32_f64 {self.r[x]}, v[{src}:{src+1}]"
+    # float64 -> int types: use direct conversion (v_cvt_i32_f64 / v_cvt_u32_f64)
+    elif dtypes.is_int(x.dtype) and a.dtype == dtypes.float64:
+      src = get_reg_base(self.r[a])
+      cvt_int = "v_cvt_i32_f64" if x.dtype in (dtypes.int8, dtypes.int16, dtypes.int32) else "v_cvt_u32_f64"
+      return f"{cvt_int} {self.r[x]}, v[{src}:{src+1}]"
     elif x.dtype == dtypes.float64:
       return self.render_mov_64(x, a)  # TODO: proper int->f64 conversion
     elif x.dtype.itemsize == 4 and a.dtype in (dtypes.long, dtypes.ulong):
