@@ -454,14 +454,21 @@ class AMDRenderer(CStyleLanguage):
   def __init__(self, arch:str): # gfx942 => MI300, gfx1100 => RX 7900, gfx1201 => RX 9700
     self.arch = arch
     self.tensor_cores = self.get_tensor_cores(arch)
+    pm:list[tuple[UPat, Callable]] = []
+    # fp8 casts must lower to real conversion builtins on targets that support them.
+    # Without this, fp8 acts like uchar and breaks quant/dequant (most visible in attention).
     if self.is_cdna(self.arch):
-      self.string_rewrite = PatternMatcher([
+      pm += [
         (UPat(Ops.WMMA, name="x"), lambda ctx,x: f"__{x.arg[0]}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]}, 0, 0, 0)"),
-        (UPat(Ops.CAST, dtypes.fp8s, (UPat.var("y", dtypes.float),), name="x",),
-          lambda ctx,x, y: f"f32_to_fp8({ctx[x.src[0]]}, {'1' if x.dtype == dtypes.fp8e5m2 else '0'})"),
-        (UPat(Ops.CAST, dtypes.float, (UPat.var("y", dtypes.fp8s),), name="x",),
-          lambda ctx,x, y: f"__builtin_amdgcn_cvt_f32_{'bf8' if y.dtype == dtypes.fp8e5m2 else 'fp8'}((unsigned int){ctx[x.src[0]]}, 0)"),
-      ]) + base_rewrite
+      ]
+    if self.is_cdna(self.arch) or self.arch.split(":")[0] in {"gfx1200", "gfx1201"}:
+      pm += [
+        (UPat(Ops.CAST, dtypes.fp8s, (UPat.var("y", dtypes.float),), name="x"),
+          lambda ctx,x,y: f"f32_to_fp8({ctx[x.src[0]]}, {'1' if x.dtype == dtypes.fp8e5m2 else '0'})"),
+        (UPat(Ops.CAST, dtypes.float, (UPat.var("y", dtypes.fp8s),), name="x"),
+          lambda ctx,x,y: f"__builtin_amdgcn_cvt_f32_{'bf8' if y.dtype == dtypes.fp8e5m2 else 'fp8'}((unsigned int){ctx[x.src[0]]}, 0)"),
+      ]
+    if pm: self.string_rewrite = PatternMatcher(pm) + base_rewrite
   def __reduce__(self): return self.__class__, (self.arch,)
 
   # https://clang.llvm.org/docs/AttributeReference.html#amdgpu-flat-work-group-size
