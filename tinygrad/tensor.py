@@ -326,9 +326,7 @@ class Tensor(OpMixin):
     assert self.numel() == 1, "must have one element for item"
     return self.data()[(0,) * len(self.shape)]
 
-  # TODO: should be Tensor.tolist() -> Union[list[ConstType], ConstType]. The list is Sequence because mypy expects memoryview.tolist() -> list[int]
-  # src: https://github.com/python/mypy/blob/release-1.6/mypy/typeshed/stdlib/builtins.pyi#L803
-  def tolist(self) -> Sequence[ConstType]|ConstType:
+  def tolist(self) -> list|ConstType:
     """
     Returns the value of this tensor as a nested list.
     Returns single value for const tensor.
@@ -612,7 +610,7 @@ class Tensor(OpMixin):
   # ***** creation helper functions *****
 
   @staticmethod
-  def full(shape:tuple[sint, ...], fill_value:ConstType, **kwargs) -> Tensor:
+  def full(shape:tuple[sint, ...]|int, fill_value:ConstType, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with the given value.
 
@@ -1249,7 +1247,7 @@ class Tensor(OpMixin):
     """
     return self._getitem(indices)
 
-  def __setitem__(self, indices, v:Tensor|ConstType) -> None:
+  def __setitem__(self, indices, v:Tensor|ConstType|list) -> None:
     if isinstance(self.device, str) and self.device.startswith("DISK"):
       self.realize()._getitem(indices).assign(v)
       return
@@ -1289,7 +1287,7 @@ class Tensor(OpMixin):
     x = self.shrink(tuple((0, i) if d != dim else None for d,i in enumerate(index.shape))).unsqueeze(-1).transpose(-1, dim)
     return (index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim]).where(x, 0)).sum(-1, dtype=self.dtype)
 
-  def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
+  def cat(self:Tensor|tuple[Tensor, ...]|list[Tensor], *args:Tensor, dim:int=0) -> Tensor:
     """
     Concatenates self with other `Tensor` in `args` along an axis specified by `dim`.
     All tensors must have the same shape except in the concatenating dimension.
@@ -1309,7 +1307,7 @@ class Tensor(OpMixin):
     for i,t in enumerate(tensors): tensors[i] = t.pad([(dim_cumsum[i], dim_cumsum[-1]-dim_cumsum[i+1]) if j==dim else None for j in range(t.ndim)])
     return functools.reduce(Tensor.add, tensors)
 
-  def stack(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
+  def stack(self:Tensor|tuple[Tensor, ...]|list[Tensor], *args:Tensor, dim:int=0) -> Tensor:
     """
     Concatenates self with other `Tensor` in `args` along a new dimension specified by `dim`.
 
@@ -2114,7 +2112,7 @@ class Tensor(OpMixin):
     return pads
 
   # NOTE: these work for more than 2D
-  def avg_pool2d(self, kernel_size:tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0,
+  def avg_pool2d(self, kernel_size:int|tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]|list[int]=0,
                  ceil_mode=False, count_include_pad=True) -> Tensor:
     """
     Applies average pooling over a tensor.
@@ -2160,7 +2158,7 @@ class Tensor(OpMixin):
     if not ceil_mode: return pool(self, reg_pads).mean(axis)
     return pool(self, ceil_pads).sum(axis) / pool(self.pad(reg_pads).ones_like(), tuple(cp-rp for cp,rp in zip(ceil_pads, reg_pads))).sum(axis)
 
-  def max_pool2d(self, kernel_size:tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0,
+  def max_pool2d(self, kernel_size:int|tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]|list[int]=0,
                  ceil_mode=False, return_indices=False) -> Tensor | tuple[Tensor, Tensor]:
     """
     Applies max pooling over a tensor.
@@ -2204,7 +2202,7 @@ class Tensor(OpMixin):
     idx = m * idx.pad(pads, value=dtypes.min(idx.dtype))._pool(k_, stride if stride is not None else k_, dilation)
     return pooled.max(axis), spatial_sz - idx.max(axis)
 
-  def max_unpool2d(self, indices:Tensor, kernel_size:tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0, output_size=None):
+  def max_unpool2d(self, indices:Tensor, kernel_size:int|tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]|list[int]=0, output_size=None):
     """
     Performs a partial inverse of `max_pool2d` using the indices from the argmax.
 
@@ -2235,7 +2233,7 @@ class Tensor(OpMixin):
     ret = (indices.reshape(bs,c,1,-1)._one_hot_along_dim(prod(output_size), 2).where(self.reshape(bs,c,1,-1), 0)).sum(3)
     return ret.reshape(bs,c,*output_size)
 
-  def conv2d(self, weight:Tensor, bias:Tensor|None=None, groups=1, stride=1, dilation=1, padding:int|tuple[int, ...]=0,
+  def conv2d(self, weight:Tensor, bias:Tensor|None=None, groups=1, stride=1, dilation=1, padding:int|tuple[int, ...]|list[int]=0,
              dtype:DTypeLike|None=None) -> Tensor:
     """
     Applies a convolution over a tensor with a given `weight` and optional `bias`.
@@ -3614,7 +3612,7 @@ class Tensor(OpMixin):
     nll = -self.gather(1, Y.unsqueeze(1)).squeeze(1) * masked_weight
     return nll.sum() / masked_weight.sum() if reduction == "mean" else nll._do_reduction(reduction)
 
-  def newton_schulz(self, steps:int, params:tuple[int, ...], eps:float=1.0e-7) -> Tensor:
+  def newton_schulz(self, steps:int, params:tuple[float|int, ...], eps:float=1.0e-7) -> Tensor:
     """
     Performs the newton-schulz algorithm for odd polynomials. The degree of the odd polynomial depends on the number of params.
 

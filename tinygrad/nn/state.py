@@ -84,7 +84,7 @@ def safe_save(tensors:dict[str, Tensor], fn:str, metadata:dict[str, Any]|None=No
 
 # state dict
 
-def get_state_dict(obj, prefix:str='', tensor_type=Tensor) -> dict[str, Tensor]:
+def get_state_dict(obj, prefix:str='', tensor_type=Tensor) -> dict[str, Any]:
   """
   Returns a `state_dict` of the object, with optional prefix.
 
@@ -203,7 +203,7 @@ def tar_extract(t: Tensor) -> dict[str, Tensor]:
 
 # TODO: this should use tar_extract and zip_extract
 @accept_filename
-def torch_load(t:Tensor) -> dict[str, Tensor]:
+def torch_load(t:Tensor) -> dict[str, Any]:
   """
   ```python
   torch_load(fn: Tensor | str | Path) -> dict[str, Tensor]

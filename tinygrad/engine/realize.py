@@ -13,7 +13,7 @@ from tinygrad.codegen.opt import Opt
 # **************** Program Creation ****************
 
 @track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.name, (ret.function_name, ret.ast), ret=ret), replay=True)
-def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> ProgramSpec:
+def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|tuple[Opt, ...]|None=None) -> ProgramSpec:
   """
   Transform an AST into a ProgramSpec. May trigger BEAM search.
 
