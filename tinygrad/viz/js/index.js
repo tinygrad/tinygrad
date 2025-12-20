@@ -148,6 +148,11 @@ function renderDag(graph, additions, dir, recenter, layoutOpts) {
   }
 }
 
+function renderCfg(data) {
+  console.log(data.blocks);
+  return renderDag(data.uop, [], "TD", true, {});
+}
+
 // ** profiler graph
 
 function formatMicroseconds(ts, dur=ts) {
@@ -843,11 +848,13 @@ async function main() {
   if (ret.length === 0) return;
   // ** center graph
   const data = ret[currentRewrite];
+  metadata.innerHTML = "";
+  // CFG layout
+  if (ckey.startsWith("/graph-cfg")) return renderCfg(data);
   const render = (opts) => renderDag(data.graph, data.changed_nodes ?? [], data.dir ?? "LR", currentRewrite === 0, opts);
   render({ showIndexing:toggle.checked });
   toggle.onchange = (e) => render({ showIndexing:e.target.checked });
   // ** right sidebar metadata
-  metadata.innerHTML = "";
   if (ckey.includes("rewrites")) metadata.appendChild(toggleLabel);
   if (step.code_line != null) metadata.appendChild(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }));
   if (step.trace) {

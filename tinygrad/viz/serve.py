@@ -403,7 +403,7 @@ def amdgpu_cfg(lib:bytes, arch:str) -> dict:
   for insts in blocks.values():
     arg = "\n".join([pc_table[p][0] for p in insts])
     uop = UOp(Ops.CUSTOM, src=() if uop is None else (uop,), arg=arg)
-  return uop_to_json(unwrap(uop))
+  return {"uop":uop_to_json(unwrap(uop)), "blocks":blocks, "pc_table":pc_table}
 
 # ** Main render function to get the complete details about a trace event
 
@@ -427,7 +427,7 @@ def get_render(i:int, j:int, fmt:str) -> dict:
   if fmt == "graph-cfg":
     # open the device to compile source code for static CFG builder
     lib = Device[data.device].compiler.compile(data.src)
-    return {"value":[{"graph":amdgpu_cfg(lib, Device[data.device].arch), "dir":"TB"}], "content_type":"text/event-stream"}
+    return {"value":[amdgpu_cfg(lib, Device[data.device].arch)], "content_type":"text/event-stream"}
   if fmt == "all-pmc":
     durations, pmc = data
     ret:dict = {"cols":{}, "rows":[]}
