@@ -950,23 +950,29 @@ class RDNARenderer(Renderer):
     elif x.dtype == dtypes.float64 and a.dtype == dtypes.float32:
       return f"v_cvt_f64_f32 {self.r[x]}, {self.r[a]}"
     elif x.dtype == dtypes.float32 and a.dtype == dtypes.float64:
-      src = get_reg_base(self.r[a])
-      return f"v_cvt_f32_f64 {self.r[x]}, v[{src}:{src+1}]"
+      ra = self.r[a]
+      assert isinstance(ra, str)
+      return f"v_cvt_f32_f64 {self.r[x]}, v[{get_reg_base(ra)}:{get_reg_base(ra)+1}]"
     # float64 -> int types: use direct conversion (v_cvt_i32_f64 / v_cvt_u32_f64)
     elif dtypes.is_int(x.dtype) and a.dtype == dtypes.float64:
-      src = get_reg_base(self.r[a])
+      ra = self.r[a]
+      assert isinstance(ra, str)
+      src = get_reg_base(ra)
       cvt_int = "v_cvt_i32_f64" if x.dtype in (dtypes.int8, dtypes.int16, dtypes.int32) else "v_cvt_u32_f64"
       return f"{cvt_int} {self.r[x]}, v[{src}:{src+1}]"
     elif x.dtype == dtypes.float64:
       return self.render_mov_64(x, a)  # TODO: proper int->f64 conversion
     elif x.dtype.itemsize == 4 and a.dtype in (dtypes.long, dtypes.ulong):
-      return f"v_mov_b32 {self.r[x]}, v{get_reg_base(self.r[a])}" if '[' in self.r[a] else f"v_mov_b32 {self.r[x]}, {self.r[a]}"
+      ra = self.r[a]
+      assert isinstance(ra, str)
+      return f"v_mov_b32 {self.r[x]}, v{get_reg_base(ra)}" if '[' in ra else f"v_mov_b32 {self.r[x]}, {ra}"
     # fallback: just move (same size types)
     return f"v_mov_b32 {self.r[x]}, {self.r[a]}"
 
   def render_bool_logic(self, x: UOp, a: UOp, b: UOp, op: str) -> str|list[str]:
     """Render boolean AND/OR with proper SGPR to VGPR handling."""
     ra, rb, rx = self.r[a], self.r[b], self.r[x]
+    assert isinstance(ra, str) and isinstance(rb, str)
     s_op, v_op = f"s_{op}_b32", f"v_{op}_b32"
     if ra.startswith('s') and rb.startswith('s'):
       return [f"{s_op} vcc_lo, {ra}, {rb}", f"v_cndmask_b32 {rx}, 0, 1, vcc_lo"]
@@ -988,6 +994,7 @@ class RDNARenderer(Renderer):
     - Standard case: use v_cndmask_b32 directly
     """
     rc, rt, rf, rx = self.r[cond], self.r[true_val], self.r[false_val], self.r[x]
+    assert isinstance(rc, str) and isinstance(rt, str) and isinstance(rf, str)
     is_cond_sgpr = rc.startswith('s') or rc == 'vcc_lo'
     is_true_sgpr_mask = rt.startswith('s') and true_val.dtype == dtypes.bool
     is_false_sgpr_mask = rf.startswith('s') and false_val.dtype == dtypes.bool
@@ -1023,12 +1030,15 @@ class RDNARenderer(Renderer):
 
   def render_mov_64(self, x: UOp, a: UOp) -> list[str]:
     """Render 64-bit move using two v_mov_b32 instructions"""
-    dst, src = get_reg_base(self.r[x]), get_reg_base(self.r[a])
+    rx, ra = self.r[x], self.r[a]
+    assert isinstance(rx, str) and isinstance(ra, str)
+    dst, src = get_reg_base(rx), get_reg_base(ra)
     return [f"v_mov_b32 v{dst}, v{src}", f"v_mov_b32 v{dst+1}, v{src+1}"]
 
   def render_cast_to_64(self, x: UOp, a: UOp, signed: bool = False) -> str|list[str]:
     """Render cast from 32-bit to 64-bit integer (sign or zero extend)"""
     rx, ra = self.r[x], self.r[a]
+    assert isinstance(rx, str) and isinstance(ra, str)
     if '[' not in rx:
       src_reg = extract_low_32(ra)
       if ra.startswith('s'): return f"v_cndmask_b32 {rx}, 0, 1, {ra}"
@@ -1047,7 +1057,7 @@ class RDNARenderer(Renderer):
 
   def render_kernel(self, kernel, function_name, bufs, v_cnt, s_cnt, uops) -> str:
     # Build metadata for kernel
-    args = []
+    args: list[dict[str, str|int|bool]] = []
     for name, dtype in bufs:
       if name.startswith("data"):
         i = int(name[4:])
@@ -1057,7 +1067,7 @@ class RDNARenderer(Renderer):
         # variable
         args.append({'.name': name, '.offset': len(args)*8, '.size': 8, '.value_kind': 'by_value'})
 
-    kernarg_size = (args[-1][".offset"] + args[-1][".size"]) if args else 0
+    kernarg_size = (int(args[-1][".offset"]) + int(args[-1][".size"])) if args else 0  # type: ignore[arg-type]
 
     # Build metadata YAML manually to avoid yaml dependency
     args_yaml = []
@@ -1496,7 +1506,7 @@ amdhsa.version:
     self.get_scratch_vgpr = get_scratch_vgpr
 
     name = "test"
-    pending_waits = set()  # track which ops need waits
+    pending_waits: set[UOp] = set()  # track which ops need waits
 
     # === LOOK-AHEAD PACKING FOR HALF16 VECTORIZE ===
     # Pre-scan to find LOADs that will be packed into half16 VECTORIZE
@@ -1648,25 +1658,29 @@ amdhsa.version:
             r[u] = half16_vectorize_ranges[u]
           else:
             r[u] = alloc_vgpr_range(u, 8)
-          base = get_reg_base(r[u])
+          ru = r[u]
+          assert isinstance(ru, str)
+          base = get_reg_base(ru)
           for j in range(8):
             if j not in half16_packed.get(u, set()):
               kernel.append(f"v_pack_b32_f16 v{base+j}, {r[u.src[j*2]]}, {r[u.src[j*2+1]]}")
         # For float8 (WMMA accumulator), check if sources are contiguous
         elif u.dtype.scalar() == dtypes.float and u.dtype.count == 8:
-          src_regs = [int(r[src][1:]) for src in u.src if isinstance(r[src], str) and r[src].startswith('v') and '[' not in r[src]]
+          src_regs = [int(rs[1:]) for src in u.src if isinstance((rs := r[src]), str) and rs.startswith('v') and '[' not in rs]
           if len(src_regs) == 8 and src_regs == list(range(src_regs[0], src_regs[0] + 8)):
             r[u] = f"v[{src_regs[0]}:{src_regs[0]+7}]"
             continue
-          r[u] = alloc_vgpr_range(u, 8)
-          base = get_reg_base(r[u])
+          ru = alloc_vgpr_range(u, 8)
+          r[u] = ru
+          base = get_reg_base(ru)
           for j, src in enumerate(u.src):
             kernel.append(f"v_mov_b32 v{base+j}, {r[src]}")
         # For other vector types, allocate contiguous VGPRs based on size
         elif isinstance(u.dtype, DType) and u.dtype.count > 1:
           vgpr_count = (u.dtype.itemsize + 3) // 4
-          r[u] = alloc_vgpr_range(u, vgpr_count)
-          base = get_reg_base(r[u])
+          ru = alloc_vgpr_range(u, vgpr_count)
+          r[u] = ru
+          base = get_reg_base(ru)
           # Check if this is a packed half type (2 halfs per VGPR)
           if u.dtype.scalar() == dtypes.half and u.dtype.count > 1:
             # Pack pairs of half values into each VGPR using v_pack_b32_f16
@@ -1694,14 +1708,14 @@ amdhsa.version:
           kernel.append("s_waitcnt vmcnt(0) lgkmcnt(0)")
           pending_waits.clear()
         src_reg = r[u.src[0]]
-        idx = get_single_element(u.arg)
+        elem_idx: int = get_single_element(u.arg)  # type: ignore[assignment]
         src_dtype = u.src[0].dtype
 
         # Check if source LOAD is a direct-load into half16 range
         if u.src[0] in half16_direct_loads:
           vec_uop, base_vgpr_idx = half16_direct_loads[u.src[0]]
           range_base = get_reg_base(half16_vectorize_ranges[vec_uop])
-          r[u] = f"v{range_base + base_vgpr_idx + idx // 2}"
+          r[u] = f"v{range_base + base_vgpr_idx + elem_idx // 2}"
           continue
 
         if isinstance(src_reg, str) and src_reg.startswith('v['):
@@ -1713,8 +1727,8 @@ amdhsa.version:
             elements_per_vgpr = src_dtype.count // num_vgprs
             if elements_per_vgpr > 1:
               # Packed type (e.g., half4 = 4 elements in 2 VGPRs)
-              vgpr_idx = idx // elements_per_vgpr
-              element_in_vgpr = idx % elements_per_vgpr
+              vgpr_idx = elem_idx // elements_per_vgpr
+              element_in_vgpr = elem_idx % elements_per_vgpr
               src_vgpr = f"v{base + vgpr_idx}"
               if element_in_vgpr == 0:
                 # Low bits - can use directly
@@ -1727,11 +1741,11 @@ amdhsa.version:
                 r[u] = dst
             else:
               # 1:1 mapping (e.g., float4 = 4 elements in 4 VGPRs)
-              r[u] = f"v{base + idx}"
+              r[u] = f"v{base + elem_idx}"
           else:
-            r[u] = f"v{base + idx}"
+            r[u] = f"v{base + elem_idx}"
         elif isinstance(src_reg, list):
-          r[u] = src_reg[idx]
+          r[u] = src_reg[elem_idx]
         else:
           # Single register - GEP index must be 0
           r[u] = src_reg
@@ -1787,8 +1801,9 @@ amdhsa.version:
         elif u in half16_vectorize_sources:
           # Scalar half LOAD destined for half16 VECTORIZE - use look-ahead packing
           # Allocate a temp VGPR for the load, will pack immediately after
-          r[u] = alloc_vgpr(u)
-          half16_temp_regs[u] = r[u]
+          temp_vgpr = alloc_vgpr(u)
+          r[u] = temp_vgpr
+          half16_temp_regs[u] = temp_vgpr
         else:
           r[u] = alloc_vgpr_pair(u) if needs_vgpr_pair(u.dtype) else alloc_vgpr(u)
         pending_waits.add(u)
@@ -1816,8 +1831,9 @@ amdhsa.version:
           continue  # Skip rendering - already loaded
         # For 64-bit types used in STORE, need a pair for global_store_b64
         needs_pair = needs_vgpr_pair(u.dtype) or (u in store_const_uses and u.dtype.itemsize == 8)
-        r[u] = alloc_vgpr_pair(u) if needs_pair else alloc_vgpr(u)
-        const_cache[const_key] = r[u]
+        ru = alloc_vgpr_pair(u) if needs_pair else alloc_vgpr(u)
+        r[u] = ru
+        const_cache[const_key] = ru
       elif u.op is Ops.RANGE:
         r[u] = alloc_vgpr(u)
       elif u.op is Ops.END:
@@ -1837,14 +1853,14 @@ amdhsa.version:
         # This avoids allocating 128 extra VGPRs for float32→half conversions
         cast_reused_src = False
         if u.op is Ops.CAST and len(u.src) == 1:
-          src = u.src[0]
-          src_reg = r.get(src)
+          cast_src = u.src[0]
+          cast_src_reg = r.get(cast_src)
           # Can reuse if: single VGPR source, this is last use, dest fits in 32 bits
-          if (src_reg and isinstance(src_reg, str) and src_reg.startswith('v') and '[' not in src_reg
-              and last_use.get(src, -1) == i and isinstance(u.dtype, DType) and u.dtype.itemsize <= 4):
-            r[u] = src_reg  # Reuse source register - in-place conversion
+          if (cast_src_reg and isinstance(cast_src_reg, str) and cast_src_reg.startswith('v') and '[' not in cast_src_reg
+              and last_use.get(cast_src, -1) == i and isinstance(u.dtype, DType) and u.dtype.itemsize <= 4):
+            r[u] = cast_src_reg  # Reuse source register - in-place conversion
             # Mark source as freed since we're taking over its register
-            reg_num = int(src_reg[1:])
+            reg_num = int(cast_src_reg[1:])
             if reg_num in vgpr_owner:
               del vgpr_owner[reg_num]
             cast_reused_src = True
@@ -1862,7 +1878,9 @@ amdhsa.version:
           else:
             r[u] = alloc_vgpr_pair(u) if needs_vgpr_pair(u.dtype) else alloc_vgpr(u)
       elif u.op is Ops.IF:
-        r[u] = alloc_sgpr(u)
+        sgpr = alloc_sgpr(u)
+        assert sgpr is not None, "IF op requires SGPR"
+        r[u] = sgpr
       elif u.op is Ops.WMMA:
         # WMMA outputs a vector of floats (8 for RDNA3)
         # For RDNA3 WMMA, we can do in-place accumulation if dst == C source
@@ -1887,11 +1905,14 @@ amdhsa.version:
       if u.op in {Ops.INDEX, Ops.LOAD, Ops.STORE} and isinstance(u.src[0].dtype, PtrDType) and u.src[0].dtype.addrspace == AddrSpace.REG:
         if u.op is Ops.INDEX:
           assert u.src[1].op == Ops.CONST, f"index on REG in rdna only supported on CONST, not {u.src[1].op}"
-          r[u] = r[u.src[0]][u.src[1].arg]
+          reg_list = r[u.src[0]]
+          assert isinstance(reg_list, list)
+          r[u] = reg_list[u.src[1].arg]
         else:
           r[u] = r[u.src[0]]
           if u.op is Ops.STORE:
             dst_reg, src_reg = r[u.src[0]], r[u.src[1]]
+            assert isinstance(dst_reg, str) and isinstance(src_reg, str)
             if '[' in dst_reg:
               dst_num, src_num = get_reg_base(dst_reg), get_reg_base(src_reg)
               kernel.extend([f"v_mov_b32 v{dst_num}, v{src_num}", f"v_mov_b32 v{dst_num+1}, v{src_num+1}"])
@@ -1955,17 +1976,17 @@ amdhsa.version:
             shift_val = idx.src[1].arg
             add_src0, add_src1 = add_op.src[0], add_op.src[1]
             # Handle both ADD(base, const) and ADD(const, base)
+            recompute_const: int|None = None
+            recompute_base: UOp|None = None
             if add_src1.op is Ops.CONST:
-              const_val, base_uop = add_src1.arg, add_src0
+              recompute_const, recompute_base = add_src1.arg, add_src0
             elif add_src0.op is Ops.CONST:
-              const_val, base_uop = add_src0.arg, add_src1
-            else:
-              const_val, base_uop = None, None
-            if const_val is not None:
+              recompute_const, recompute_base = add_src0.arg, add_src1
+            if recompute_const is not None and recompute_base is not None:
               # ADD(base, const) - use v_lshl_add_u32 to compute (base << shift) + (const << shift)
-              base_reg = r.get(base_uop)
+              base_reg = r.get(recompute_base)
               if base_reg and isinstance(base_reg, str) and base_reg.startswith('v'):
-                kernel.append(f"v_lshl_add_u32 {deferred_store_addr_vgpr}, {base_reg}, {shift_val}, {const_val << shift_val}")
+                kernel.append(f"v_lshl_add_u32 {deferred_store_addr_vgpr}, {base_reg}, {shift_val}, {recompute_const << shift_val}")
               else:
                 # Fallback: copy from pre-computed
                 kernel.append(f"v_mov_b32 {deferred_store_addr_vgpr}, {r[idx]}")
