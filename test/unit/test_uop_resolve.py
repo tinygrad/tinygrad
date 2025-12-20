@@ -95,21 +95,24 @@ class TestUOpResolve(unittest.TestCase):
     x = UOp.variable("i", 1, 10)
     self.assertFalse(x < x)
 
-  @unittest.expectedFailure
   def test_x_lt_xp1(self):
     x = UOp.variable("i", 1, 10)
-    self.assertTrue(x < (x+1))
+    u = x < (x+1)
+    # TODO: improve
+    with self.assertRaises(ValueError):
+      bool(u)
 
   def test_and_true(self):
+    u = UOp.variable("b", False, True, dtypes.bool) & True
     with self.assertRaises(ValueError):
-      u = UOp.variable("b", False, True, dtypes.bool) & True
-      self.assertFalse(u)
+      bool(u)
 
-  @unittest.expectedFailure
   def test_var_cmp_range(self):
     v = UOp.variable("i", 1, 10)
     u = (v > 4) | (v < 6)
-    self.assertTrue(u)
+    # TODO: improve
+    with self.assertRaises(ValueError):
+      bool(u)
 
   def test_var_cmp_assert(self):
     with self.assertRaises(ValueError):
