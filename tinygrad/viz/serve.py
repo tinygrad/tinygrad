@@ -390,7 +390,7 @@ def amdgpu_cfg(lib:bytes, arch:str) -> dict:
   leaders:set[int] = set([next(iter(pc_table))])
   for pc, (asm, sz) in pc_table.items():
     inst, *operands = asm.split(" ")
-    if inst in SOPP_INSTS: leaders.update([pc+simm16(int(operands[0])), pc+sz])
+    if inst in SOPP_INSTS: leaders |= {pc+sz+simm16(int(operands[0]))*4, pc+sz}
   # build basic blocks
   blocks:dict[int, list[int]] = {}
   cur:int|None = None
