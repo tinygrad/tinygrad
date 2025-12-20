@@ -614,7 +614,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [amd, amdllvm]
+        backend: [amd, amdllvm, amdrdna]
 
     name: Linux (${{ matrix.backend }})
     runs-on: ubuntu-22.04
@@ -624,6 +624,7 @@ jobs:
       MOCKGPU: 1
       FORWARD_ONLY: 1
       AMD_LLVM: ${{ matrix.backend == 'amdllvm' && '1' || matrix.backend != 'amdllvm' && '0' }}
+      AMD_RDNA: ${{ matrix.backend == 'amdrdna' && '1' || matrix.backend != 'amdrdna' && '0' }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
