@@ -55,8 +55,7 @@ function addTags(root) {
   root.selectAll("text").data(d => [d]).join("text").text(d => d).attr("dy", "0.35em");
 }
 
-const drawGraph = (data) => {
-  const g = dagre.graphlib.json.read(data);
+const drawGraph = (g) => {
   // draw nodes
   d3.select("#graph-svg").on("click", () => d3.selectAll(".highlight").classed("highlight", false));
   const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g").attr("class", d => d.className ?? "node")
@@ -76,7 +75,7 @@ const drawGraph = (data) => {
     .attr("x", d => -d.width/2).attr("y", d => -d.height/2);
   const STROKE_WIDTH = 1.4;
   const labels = nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label");
-  const hasLabelDims = data.nodes[0]?.value.labelWidth != null;
+  const hasLabelDims = g.node(g.nodes()[0]).labelWidth != null;
   if (hasLabelDims) labels.attr("transform", d => `translate(-${d.labelWidth/2}, -${d.labelHeight/2+STROKE_WIDTH*2})`);
   labels.selectAll("text").data(d => {
     const ret = [[]];
@@ -114,16 +113,16 @@ async function initWorker() {
   workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
 }
 
-function renderDag(graph, additions, dir, recenter, layoutOpts) {
+function renderDag(graph, additions, recenter, layoutOpts) {
   // start calculating the new layout (non-blocking)
   updateProgress(Status.STARTED, "Rendering new graph...");
   if (worker != null) worker.terminate();
   worker = new Worker(workerUrl);
-  worker.postMessage({graph, additions, dir, opts:layoutOpts });
+  worker.postMessage({graph, additions, dir:"LR", opts:layoutOpts });
   worker.onmessage = (e) => {
     displaySelection("#graph");
     updateProgress(Status.COMPLETE);
-    drawGraph(e.data);
+    drawGraph(dagre.graphlib.json.read(e.data));
     addTags(d3.select("#edge-labels").selectAll("g").data(e.data.edges).join("g").attr("transform", (e) => {
       // get a point near the end
       const [p1, p2] = e.value.points.slice(-2);
@@ -147,9 +146,18 @@ function renderDag(graph, additions, dir, recenter, layoutOpts) {
   }
 }
 
+// TODO: temporarily copy paste from uop viz, unify nicely
 function renderCfg(data) {
-  console.log(data);
-  return renderDag(data.uop, [], "TD", true, {});
+  updateProgress(Status.STARTED, "Rendering new graph...");
+  if (worker != null) worker.terminate();
+  worker = new Worker(workerUrl);
+  worker.postMessage({graph:data.uop, additions:[], dir:"TD", opts:{} });
+  worker.onmessage = (e) => {
+    displaySelection("#graph");
+    updateProgress(Status.COMPLETE);
+    drawGraph(dagre.graphlib.json.read(e.data));
+    document.getElementById("zoom-to-fit-btn").click();
+  };
 }
 
 // ** profiler graph
@@ -850,7 +858,7 @@ async function main() {
   metadata.innerHTML = "";
   // CFG layout
   if (ckey.startsWith("/graph-cfg")) return renderCfg(data);
-  const render = (opts) => renderDag(data.graph, data.changed_nodes ?? [], data.dir ?? "LR", currentRewrite === 0, opts);
+  const render = (opts) => renderDag(data.graph, data.changed_nodes ?? [], currentRewrite === 0, opts);
   render({ showIndexing:toggle.checked });
   toggle.onchange = (e) => render({ showIndexing:e.target.checked });
   // ** right sidebar metadata
