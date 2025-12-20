@@ -171,6 +171,7 @@ class X86Ops(FastEnum):
   VPEXTRB = auto(); VPEXTRW = auto(); VPEXTRD = auto(); VPEXTRQ = auto() # noqa: E702
   VPINSRB = auto(); VPINSRW = auto(); VPINSRD = auto(); VPINSRQ = auto() # noqa: E702
   VPBROADCASTB = auto(); VPBROADCASTW = auto(); VPBROADCASTD = auto(); VPBROADCASTQ = auto() # noqa: E702
+  VBROADCASTSS = auto() # TODO: VBROADCASTSD is ymm only, add once they are supported
   # int division
   IDIV = auto()
   CBW = auto(); CWD = auto(); CDQ = auto(); CQO = auto() # noqa: E702
@@ -216,7 +217,7 @@ class X86GroupOp:
                 X86Ops.VCVTDQ2PS, X86Ops.VCVTDQ2PD, X86Ops.VCVTTPS2DQ, X86Ops.VCVTTPD2DQ, X86Ops.VCVTTSS2SI, X86Ops.VCVTTSD2SI,
                 X86Ops.VCVTPH2PS, X86Ops.VCVTPS2PD, X86Ops.VCVTPD2PS, X86Ops.CMOVNE, X86Ops.CMOVE, X86Ops.CMOVL, X86Ops.CMOVB,
                 X86Ops.VROUNDPS, X86Ops.VROUNDPD, X86Ops.VSQRTPS, X86Ops.VSQRTPD, X86Ops.CMPi, X86Ops.IMULi, X86Ops.IDIV, X86Ops.LEA,
-                X86Ops.VPBROADCASTB, X86Ops.VPBROADCASTW, X86Ops.VPBROADCASTD, X86Ops.VPBROADCASTQ}
+                X86Ops.VPBROADCASTB, X86Ops.VPBROADCASTW, X86Ops.VPBROADCASTD, X86Ops.VPBROADCASTQ, X86Ops.VBROADCASTSS}
 
   # X86Ops whose second src can read from memory NOTE: some of these are TwoAddress1st so the second src is actually the first
   ReadMem2nd = {X86Ops.ADD, X86Ops.SUB, X86Ops.AND, X86Ops.OR, X86Ops.XOR, X86Ops.SHL, X86Ops.SHR, X86Ops.SAR, X86Ops.IMUL, X86Ops.CMP,

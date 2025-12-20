@@ -213,7 +213,7 @@ def cmp(x:UOp): return UOp(X86Ops.CMP, src=x.src) if (i:=to_imm(x.src[1])) is No
 def def_reg(dt:DType): return UOp(X86Ops.DEFINE_REG, dt)
 
 # vshufps takes 2 registers, it gets its lower 64 bits from the first register and its upper 64 bits from the second
-# very useful, used for a lot of shuffles including broadcasts and cats
+# used for all shuffles with 1 or 2 src registers that are not broadcasts
 def vshufps(x:UOp) -> UOp:
   def _imm(src:tuple[UOp, ...]) -> UOp: return imm(dtypes.uint8, sum((s.arg[0] if s.op is Ops.GEP else 0) << (2*i) for i,s in enumerate(src)))
   rsrc = tuple(s.src[0] if s.op is Ops.GEP else s for s in x.src)
@@ -248,9 +248,6 @@ def fuse_index(ctx:IselContext, x:UOp) -> tuple[UOp, ...]:
   return (base, idx.cast(dtypes.int64) if idx.op is not Ops.NOOP and idx.vmin < 0 else idx, disp(x.src[1]))
 
 def fuse_load(ctx:IselContext, x:UOp, i:int) -> UOp|None:
-  # TODO: the rule is if size of load doesn't match size of x can't fuse, but there's some details to figure out
-  # like how vinsertps dtype is scalar
-  if x.op is X86Ops.VSHUFPS: return None
   # if the load is used multiple times we don't fuse
   return x.replace(src=x.src[:i] + fuse_index(ctx, x.src[i]) + x.src[i+1:]) if len(ctx.uses[x.src[i]]) == 1 else None
 
@@ -316,6 +313,7 @@ isel_matcher = PatternMatcher([
   (UPat.var("y", dtypes.int16s).broadcast(name="x"), lambda y,x: UOp(X86Ops.VPBROADCASTW, x.dtype, (y.bitcast(dtypes.float32),))),
   (UPat.var("y", dtypes.int32s).broadcast(name="x"), lambda y,x: UOp(X86Ops.VPBROADCASTD, x.dtype, (y.bitcast(dtypes.float32),))),
   (UPat.var("y", dtypes.int64s).broadcast(name="x"), lambda y,x: UOp(X86Ops.VPBROADCASTQ, x.dtype, (y.bitcast(dtypes.float64),))),
+  (UPat.var("y", dtypes.float32).broadcast(name="x"), lambda y,x: UOp(X86Ops.VBROADCASTSS, x.dtype, (y,))),
   # shufles
   (UPat.var("y", dtypes.int8s).bitcast(dtypes.mask8).named("x"), lambda y,x: UOp(X86Ops.VPINSRB, x.dtype, (def_reg(x.dtype), y, imm(dtypes.uint8, 0)))),
   (UPat.var("y", dtypes.int16s).bitcast((dtypes.float16, dtypes.mask16)).named("x"), lambda y,x: UOp(X86Ops.VPINSRW, x.dtype, (def_reg(x.dtype), y, imm(dtypes.uint8, 0)))), # noqa: E501
@@ -662,6 +660,7 @@ encodings = PatternMatcher([
   # shuffles
   (UPat(X86Ops.VPBROADCASTB, name="x"), lambda x: encode(x, 0x78, pp=1, sel=2)), (UPat(X86Ops.VPBROADCASTW, name="x"), lambda x: encode(x, 0x79, pp=1, sel=2)),
   (UPat(X86Ops.VPBROADCASTD, name="x"), lambda x: encode(x, 0x58, pp=1, sel=2)), (UPat(X86Ops.VPBROADCASTQ, name="x"), lambda x: encode(x, 0x59, pp=1, sel=2)),
+  (UPat(X86Ops.VBROADCASTSS, name="x"), lambda x: encode(x, 0x18, pp=1, sel=2)),
   (UPat(X86Ops.VPINSRB, name="x"), lambda x: encode(x, 0x20, pp=1, sel=3)), (UPat(X86Ops.VPINSRW, name="x"), lambda x: encode(x, 0xC4, pp=1, sel=1)),
   (UPat(X86Ops.VPINSRD, name="x"), lambda x: encode(x, 0x22, pp=1, sel=3)), (UPat(X86Ops.VPINSRQ, name="x"), lambda x: encode(x, 0x22, pp=1, sel=3, we=1)),
   (UPat(X86Ops.VSHUFPS, name="x"), lambda x: encode(x, 0xC6, pp=0, sel=1)), (UPat(X86Ops.VINSERTPS, name="x"), lambda x: encode(x, 0x21, pp=1, sel=3)),
