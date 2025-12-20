@@ -407,6 +407,8 @@ def amdgpu_cfg(lib:bytes, arch:str) -> dict:
       cfg[unwrap(curr)][o] = None
       if not asm.startswith("s_branch"): cfg[unwrap(curr)][pc+sz] = None
     if (nx:=pc+sz) in leaders: cfg[unwrap(curr)][nx] = None
+    # control flow ends in endpgm
+    if asm == "s_endpgm": break
   # temp: translate to UOps
   # TODO: cfg should have its own layout
   uop:UOp|None = None

@@ -25,8 +25,7 @@ def llvm_disasm(arch:str, lib:bytes) -> dict[int, tuple[str, int]]:
   while cur_off < sz + off:
     view = (ctypes.c_ubyte * ((sz + off) - cur_off)).from_buffer_copy(memoryview(image)[cur_off:])
     instr_sz = llvm.LLVMDisasmInstruction(ctx, view, ctypes.c_uint64(len(view)), ctypes.c_uint64(0), out, ctypes.c_size_t(128))
-    addr_table[cur_off] = (inst:=out.value.decode("utf-8", "replace").strip(), instr_sz)
-    if inst == "s_endpgm": break
+    addr_table[cur_off] = (out.value.decode("utf-8", "replace").strip(), instr_sz)
     cur_off += instr_sz
   return addr_table
 
