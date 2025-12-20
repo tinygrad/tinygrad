@@ -26,18 +26,17 @@ const colored = n => d3.create("span").call(s => s.selectAll("span").data(typeof
 const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 
 let timeout = null;
-const updateProgress = ({ start, err }) => {
+const Status = {STARTED:0, COMPLETE:1, ERR:2}
+const updateProgress = (st, msg) => {
   clearTimeout(timeout);
-  const msg = document.getElementById("progress-message");
-  msg.style.display = "none";
-  if (start) {
-    msg.innerText = "Rendering new graph...";
-    timeout = setTimeout(() => { msg.style.display = "block"; }, 2000);
-  }
-  d3.select("#custom").html("");
-  if (err) {
+  const msgEl = d3.select("#progress-message").style("display", "none");
+  const customEl = d3.select("#custom").html("");
+  if (st === Status.STARTED) {
+    msgEl.text(msg);
+    timeout = setTimeout(() => msgEl.style("display", "block"), 2000);
+  } else if (st === Status.ERR) {
     displaySelection("#custom");
-    d3.select("#custom").append("div").classed("raw-text", true).call(s => s.append(() => codeBlock(err, "txt"))).node();
+    customEl.append("div").classed("raw-text", true).append(() => codeBlock(msg));
   }
 }
 
@@ -117,13 +116,13 @@ async function initWorker() {
 
 function renderDag(graph, additions, dir, recenter, layoutOpts) {
   // start calculating the new layout (non-blocking)
-  updateProgress({ start:true });
+  updateProgress(Status.STARTED, "Rendering new graph...");
   if (worker != null) worker.terminate();
   worker = new Worker(workerUrl);
   worker.postMessage({graph, additions, dir, opts:layoutOpts });
   worker.onmessage = (e) => {
     displaySelection("#graph");
-    updateProgress({ start:false });
+    updateProgress(Status.COMPLETE);
     drawGraph(e.data);
     addTags(d3.select("#edge-labels").selectAll("g").data(e.data.edges).join("g").attr("transform", (e) => {
       // get a point near the end
@@ -144,7 +143,7 @@ function renderDag(graph, additions, dir, recenter, layoutOpts) {
   };
   worker.onerror = (e) => {
     e.preventDefault();
-    updateProgress({ err:"Error in graph layout:\n"+e.message });
+    updateProgress(Status.ERR, "Error in graph layout:\n"+e.message);
   }
 }
 
@@ -262,7 +261,7 @@ async function renderProfiler(path, unit, opts) {
   if (data?.path !== path) { data = {tracks:new Map(), axes:{}, path, first:null}; focusedDevice = null; focusedShape = null; }
   metadata.replaceChildren(getMetadata(focusedShape));
   // layout once!
-  if (data.tracks.size !== 0) return updateProgress({ start:false });
+  if (data.tracks.size !== 0) return updateProgress(Status.COMPLETE);
   const profiler = d3.select("#profiler").html("");
   const buf = cache[path] ?? await fetchValue(path);
   const view = new DataView(buf);
@@ -424,7 +423,7 @@ async function renderProfiler(path, unit, opts) {
     }
   }
   for (const m of markers) m.label = m.name.split(/(\s+)/).map(st => ({ st, color:m.color, width:ctx.measureText(st).width }));
-  updateProgress({ start:false });
+  updateProgress(Status.COMPLETE);
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
@@ -609,7 +608,7 @@ const pathLink = (fp, lineno) => d3.create("a").attr("href", "vscode://file/"+fp
 function codeBlock(st, language, { loc, wrap }={}) {
   const code = document.createElement("code");
   // plaintext renders like a terminal print, otherwise render with syntax highlighting
-  if (language === "txt") code.appendChild(colored(st));
+  if (!language || language === "txt") code.appendChild(colored(st));
   else code.innerHTML = hljs.highlight(st, { language }).value;
   code.className = "hljs";
   const ret = document.createElement("pre");
@@ -817,13 +816,13 @@ async function main() {
     }
     if (ret.cols != null) {
       renderTable(root, ret);
-    } else root.append(() => codeBlock(ret.src, ret.lang || "txt"));
+    } else root.append(() => codeBlock(ret.src, ret.lang));
     ret.metadata?.forEach(m => {
       if (Array.isArray(m)) return metadata.appendChild(tabulate(m.map(({ label, value, idx }) => {
         const div = d3.create("div").style("background", cycleColors(colorScheme.CATEGORICAL, idx)).style("width", "100%").style("height", "100%");
         return [label.trim(), div.text(typeof value === "string" ? value : formatUnit(value)).node()];
       })).node());
-      metadata.appendChild(codeBlock(m.src, "txt")).classList.add("full-height")
+      metadata.appendChild(codeBlock(m.src)).classList.add("full-height")
     });
     return document.querySelector("#custom").replaceChildren(root.node());
   }

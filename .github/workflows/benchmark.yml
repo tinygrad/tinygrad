@@ -33,6 +33,7 @@ jobs:
     - name: Symlink models and datasets
       run: |
         mkdir -p weights
+        mkdir -p extra/disassemblers
         ln -s ~/tinygrad/extra/disassemblers/applegpu extra/disassemblers/applegpu
         ln -s ~/tinygrad/weights/sd-v1-4.ckpt weights/sd-v1-4.ckpt
         ln -s ~/tinygrad/weights/bpe_simple_vocab_16e6.txt.gz weights/bpe_simple_vocab_16e6.txt.gz

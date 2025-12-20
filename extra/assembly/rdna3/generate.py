@@ -9,7 +9,6 @@ import xml.etree.ElementTree as ET
 
 from tinygrad import nn, Tensor, Device
 from tinygrad.helpers import get_single_element
-from tinygrad.engine.realize import lower_schedule
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent
 from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
@@ -118,7 +117,8 @@ if __name__ == "__main__":
   root = ET.fromstring(xml_str)
 
   a = Tensor.empty(16)+1
-  for si, ei in lower_schedule(a.schedule()):
+  for ei in a.schedule():
+    ei.lower()
     # get text
     _, hdr, _ = elf_loader(ei.prg.lib)
     text = get_single_element([x for x in hdr if x.name==".text"]).content
