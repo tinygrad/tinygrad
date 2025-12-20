@@ -3053,6 +3053,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.binary_cross_entropy_with_logits(x,y.clip(0,1),
                                                                                                         pos_weight=torch.tensor(pos_weight)),
                                        lambda x,y: x.binary_crossentropy_logits(y.clip(0,1),pos_weight=Tensor(pos_weight)))
+
   def test_cross_entropy_class_probabilities(self):
     helper_test_op([(32,), (32,)], lambda x,y: torch.nn.functional.cross_entropy(x, y), lambda x,y: x.cross_entropy(y))
     helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.cross_entropy(x, y), lambda x,y: x.cross_entropy(y))
@@ -3071,6 +3072,7 @@ class TestOps(unittest.TestCase):
                                          lambda x,y: x.cross_entropy(y, reduction=r))
     self.helper_test_exception([(32,10), (32,10)], lambda x,y: torch.nn.functional.cross_entropy(x, y, reduction="typo"),
                                                    lambda x,y: x.cross_entropy(y, reduction="typo"), expected=ValueError)
+
   def test_cross_entropy_smoothing(self):
     for ls in (0., 0.3, 0.7, 1.):
       helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.cross_entropy(x, y, label_smoothing=ls),

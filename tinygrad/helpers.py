@@ -190,7 +190,7 @@ ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE = ContextVar("ALLOW_DEVICE_USAGE", 1), Conte
 EMULATE = ContextVar("EMULATE", "")
 CPU_COUNT = ContextVar("CPU_COUNT", max(1, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)))
 # Compilers
-CPU_LLVM, CPU_LVP, AMD_LLVM = ContextVar("CPU_LLVM", 0), ContextVar("CPU_LVP", 0), ContextVar("AMD_LLVM", 0)
+CPU_LLVM, CPU_X86, CPU_LVP, AMD_LLVM = ContextVar("CPU_LLVM", 0), ContextVar("CPU_X86", 0), ContextVar("CPU_LVP", 0), ContextVar("AMD_LLVM", 0)
 NV_PTX, CUDA_PTX, NV_NAK, QCOM_IR3 = ContextVar("NV_PTX", 0), ContextVar("CUDA_PTX", 0), ContextVar("NV_NAK", 0), ContextVar("QCOM_IR3", 0)
 NULL_IR3, NULL_NAK = ContextVar("NULL_IR3", 0), ContextVar("NULL_NAK", 0)
 AMD_CC, CPU_CC, NV_CC, CUDA_CC = ContextVar("AMD_CC", ""), ContextVar("CPU_CC", ""), ContextVar("NV_CC", ""), ContextVar("CUDA_CC", "")
