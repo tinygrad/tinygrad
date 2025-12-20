@@ -476,7 +476,7 @@ class AM_PSP(AM_IP):
 
     if not self.is_sos_alive():
       for fw, compid in sos_components: self._bootloader_load_component(fw, compid)
-      while not self.is_sos_alive(): time.sleep(0.01)
+      wait_cond(self.is_sos_alive, value=True, msg="sOS failed to start")
 
     self._ring_create()
     if am.PSP_FW_TYPE_PSP_TOC in self.adev.fw.sos_fw: self._tmr_init()
