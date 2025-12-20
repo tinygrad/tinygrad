@@ -28,6 +28,8 @@ def render_val(x, dtype):
 def can_inline_const(val, dtype) -> bool:
   # 64-bit types can't be inlined - need register pairs for FMA/load/store
   if dtype in (dtypes.float64, dtypes.long, dtypes.ulong): return False
+  # Half precision can't use inline constants - always rendered as hex literals
+  if dtype == dtypes.half: return False
   if dtypes.is_float(dtype): return float(val) in (0.0, 0.5, 1.0, 2.0, 4.0, -0.5, -1.0, -2.0, -4.0)
   try: return -16 <= int(val) <= 64
   except (TypeError, ValueError): return False
@@ -583,6 +585,9 @@ def render_64bit_mul(ctx, x):
   rx = ctx.r[x]
   a, b = x.src[0], x.src[1]
 
+  # Check if this is a cast from signed 32-bit (magic number multiplication pattern)
+  a_is_signed_cast = a.op is Ops.CAST and a.src[0].dtype == dtypes.int32
+
   # Get low 32 bits of operands
   if a.op is Ops.CAST and a.src[0].dtype.itemsize == 4:
     ra = ctx.r[a.src[0]]  # Use 32-bit source directly
@@ -592,14 +597,29 @@ def render_64bit_mul(ctx, x):
 
   if b.op is Ops.CONST:
     rb_lo = render_val(b.arg & 0xFFFFFFFF, dtypes.uint32)
+    b_const_hi_bit_set = (b.arg & 0x80000000) != 0  # Would be negative as signed 32-bit
   else:
     rb = ctx.r[b]
     rb_lo = f"v{get_reg_base(rb)}" if '[' in rb else rb
+    b_const_hi_bit_set = False
 
   # Check if result is a pair or single register
   if '[' in rx:
     rx_lo = f"v{get_reg_base(rx)}"
     rx_hi = f"v{get_reg_base(rx) + 1}"
+    # For signed 64-bit with sign-extended 32-bit operand and large constant (high bit set):
+    # - v_mul_hi_i32 would interpret the constant as negative, giving wrong results
+    # - Use v_mul_hi_u32 and correct for sign extension: if a < 0, subtract constant from high bits
+    # Formula: high_signed = high_unsigned - (a < 0 ? b : 0)
+    if x.dtype == dtypes.long and a_is_signed_cast and b.op is Ops.CONST and b_const_hi_bit_set:
+      s = ctx.get_scratch_vgpr()
+      return [
+        f"v_mul_lo_u32 {rx_lo}, {ra_lo}, {rb_lo}",
+        f"v_mul_hi_u32 {rx_hi}, {ra_lo}, {rb_lo}",
+        f"v_cmp_lt_i32 vcc_lo, {ra_lo}, 0",  # Check if input was negative
+        f"v_cndmask_b32 v{s}, 0, {rb_lo}, vcc_lo",  # Select constant if negative, else 0
+        f"v_sub_nc_u32 {rx_hi}, {rx_hi}, v{s}",  # Correct for sign extension
+      ]
     mul_hi_instr = "v_mul_hi_i32" if x.dtype == dtypes.long else "v_mul_hi_u32"
     return [f"v_mul_lo_u32 {rx_lo}, {ra_lo}, {rb_lo}", f"{mul_hi_instr} {rx_hi}, {ra_lo}, {rb_lo}"]
   else:
@@ -618,6 +638,67 @@ def render_64bit_shr(ctx, x, a, b):
     remaining = shift_amt - 32
     return f"v_mov_b32 v{dst_num}, v{src_hi}" if remaining == 0 else f"{shift_instr} v{dst_num}, {remaining}, v{src_hi}"
   return f"{shift_instr} v{dst_num}, {shift_amt}, v{src_hi}"
+
+def render_64bit_shl(ctx, x, a, b):
+  """Render 64-bit left shift.
+  For shifts >= 32: low = 0, high = a_lo << (shift-32)
+  For shifts < 32: low = a_lo << shift, high = (a_hi << shift) | (a_lo >> (32-shift))"""
+  if b.op is not Ops.CONST: raise RuntimeError("64-bit SHL requires constant shift amount")
+  rx = ctx.r[x]
+  ra = ctx.r[a]
+  dst_lo, dst_hi = get_reg_base(rx), get_reg_base(rx) + 1
+  src_lo = get_reg_base(ra) if '[' in ra else int(ra[1:])
+  src_hi = src_lo + 1 if '[' in ra else src_lo
+  shift_amt = b.arg
+
+  if shift_amt == 0:
+    # No shift needed, just copy
+    return [f"v_mov_b32 v{dst_lo}, v{src_lo}", f"v_mov_b32 v{dst_hi}, v{src_hi}"]
+  elif shift_amt >= 32:
+    remaining = shift_amt - 32
+    if remaining == 0:
+      return [f"v_mov_b32 v{dst_hi}, v{src_lo}", f"v_mov_b32 v{dst_lo}, 0"]
+    return [f"v_lshlrev_b32 v{dst_hi}, {remaining}, v{src_lo}", f"v_mov_b32 v{dst_lo}, 0"]
+  else:
+    # Need to compute both halves
+    s = ctx.get_scratch_vgpr()
+    return [
+      f"v_lshlrev_b32 v{dst_lo}, {shift_amt}, v{src_lo}",  # low = a_lo << shift
+      f"v_lshlrev_b32 v{dst_hi}, {shift_amt}, v{src_hi}",  # high = a_hi << shift (partial)
+      f"v_lshrrev_b32 v{s}, {32-shift_amt}, v{src_lo}",    # temp = a_lo >> (32-shift)
+      f"v_or_b32 v{dst_hi}, v{dst_hi}, v{s}",              # high |= temp
+    ]
+
+def render_64bit_add(ctx, x, a, b):
+  """Render 64-bit integer addition with carry: dst = a + b.
+  Uses v_add_co_u32 for low 32 bits (produces carry), v_add_co_ci_u32 for high (consumes carry)."""
+  rx = ctx.r[x]
+  ra = ctx.r[a]
+  rb = ctx.r[b]
+  dst_lo, dst_hi = get_reg_base(rx), get_reg_base(rx) + 1
+  a_lo = get_reg_base(ra) if '[' in ra else int(ra[1:])
+  a_hi = a_lo + 1 if '[' in ra else a_lo
+  b_lo = get_reg_base(rb) if '[' in rb else int(rb[1:])
+  b_hi = b_lo + 1 if '[' in rb else b_lo
+  return [
+    f"v_add_co_u32 v{dst_lo}, vcc_lo, v{a_lo}, v{b_lo}",  # low + low, carry in vcc_lo
+    f"v_add_co_ci_u32 v{dst_hi}, vcc_lo, v{a_hi}, v{b_hi}, vcc_lo",  # high + high + carry
+  ]
+
+def render_64bit_or(ctx, x, a, b):
+  """Render 64-bit bitwise OR: dst = a | b."""
+  rx = ctx.r[x]
+  ra = ctx.r[a]
+  rb = ctx.r[b]
+  dst_lo, dst_hi = get_reg_base(rx), get_reg_base(rx) + 1
+  a_lo = get_reg_base(ra) if '[' in ra else int(ra[1:])
+  a_hi = a_lo + 1 if '[' in ra else a_lo
+  b_lo = get_reg_base(rb) if '[' in rb else int(rb[1:])
+  b_hi = b_lo + 1 if '[' in rb else b_lo
+  return [
+    f"v_or_b32 v{dst_lo}, v{a_lo}, v{b_lo}",
+    f"v_or_b32 v{dst_hi}, v{a_hi}, v{b_hi}",
+  ]
 
 def render_where_64(ctx, x, cond, true_val, false_val):
   """Render WHERE for 64-bit types using two v_cndmask_b32 instructions.
@@ -781,6 +862,15 @@ string_rewrite = PatternMatcher([
   # 64-bit integer SHR: for shifts >= 32, use high bits only
   (UPat(Ops.SHR, name="x", dtype=dtypes.long, src=(UPat.var("a"), UPat.cvar("b"))), render_64bit_shr),
   (UPat(Ops.SHR, name="x", dtype=dtypes.ulong, src=(UPat.var("a"), UPat.cvar("b"))), render_64bit_shr),
+  # 64-bit integer SHL: need full 64-bit shift for bitcast packing
+  (UPat(Ops.SHL, name="x", dtype=dtypes.long, src=(UPat.var("a"), UPat.cvar("b"))), render_64bit_shl),
+  (UPat(Ops.SHL, name="x", dtype=dtypes.ulong, src=(UPat.var("a"), UPat.cvar("b"))), render_64bit_shl),
+  # 64-bit integer ADD: need carry propagation for correct 64-bit arithmetic
+  (UPat(Ops.ADD, name="x", dtype=dtypes.long, src=(UPat.var("a"), UPat.var("b"))), render_64bit_add),
+  (UPat(Ops.ADD, name="x", dtype=dtypes.ulong, src=(UPat.var("a"), UPat.var("b"))), render_64bit_add),
+  # 64-bit bitwise OR: need to OR both halves
+  (UPat(Ops.OR, name="x", dtype=dtypes.long, src=(UPat.var("a"), UPat.var("b"))), render_64bit_or),
+  (UPat(Ops.OR, name="x", dtype=dtypes.ulong, src=(UPat.var("a"), UPat.var("b"))), render_64bit_or),
   # float64 ALU ops - RDNA3 doesn't have v_add_f64/v_sub_f64/v_mul_f64, use FMA instead
   (UPat(Ops.ADD, name="x", dtype=dtypes.float64, src=(UPat.var("a"), UPat.var("b"))), render_f64_add),
   (UPat(Ops.SUB, name="x", dtype=dtypes.float64, src=(UPat.var("a"), UPat.var("b"))), render_f64_sub),
@@ -791,11 +881,33 @@ string_rewrite = PatternMatcher([
     *[extract_low_32(ctx.r[v]) if v.dtype in (dtypes.long, dtypes.ulong) else ctx.r[v] for v in x.src],
     x.dtype, ctx.types[x.dtype])),
   # bitcast/cast
-  # BITCAST - need special handling for 64-bit float types
+  # BITCAST - need special handling for 64-bit types (float64, long, ulong)
   (UPat(Ops.BITCAST, name="x", dtype=dtypes.float64, src=(UPat.var("a"),), allow_any_len=True),
    lambda ctx, x, a: ctx.render_mov_64(x, a)),
+  (UPat(Ops.BITCAST, name="x", dtype=dtypes.long, src=(UPat.var("a"),), allow_any_len=True),
+   lambda ctx, x, a: ctx.render_mov_64(x, a)),
+  (UPat(Ops.BITCAST, name="x", dtype=dtypes.ulong, src=(UPat.var("a"),), allow_any_len=True),
+   lambda ctx, x, a: ctx.render_mov_64(x, a)),
   (UPat(Ops.BITCAST, name="x", src=(UPat.var("a"),), allow_any_len=True), lambda ctx, x, a: f"v_mov_b32 {ctx.r[x]}, {ctx.r[a]}"),
-  # cast from bool: if bool is in SGPR (comparison result), use v_cndmask_b32; if in VGPR (loaded from memory), convert directly
+  # cast from bool to float16: SGPR->0/1->f32->f16, VGPR->f32->f16
+  (UPat(Ops.CAST, name="x", dtype=dtypes.float16, src=(UPat(dtype=dtypes.bool, name="a"),)),
+   lambda ctx, x, a: (lambda s=ctx.get_scratch_vgpr(): [
+     f"v_cndmask_b32 v{s}, 0, 1, {ctx.r[a]}",
+     f"v_cvt_f32_u32 v{s}, v{s}",
+     f"v_cvt_f16_f32 {ctx.r[x]}, v{s}",
+   ] if ctx.r[a].startswith('s') else [
+     f"v_cvt_f32_u32 v{s}, {ctx.r[a]}",
+     f"v_cvt_f16_f32 {ctx.r[x]}, v{s}"])()),
+  # cast from bool to bfloat16: SGPR->0/1->f32->bf16, VGPR->f32->bf16
+  (UPat(Ops.CAST, name="x", dtype=dtypes.bfloat16, src=(UPat(dtype=dtypes.bool, name="a"),)),
+   lambda ctx, x, a: (lambda s=ctx.get_scratch_vgpr(): [
+     f"v_cndmask_b32 v{s}, 0, 1, {ctx.r[a]}",
+     f"v_cvt_f32_u32 v{s}, v{s}",
+     f"v_lshrrev_b32 {ctx.r[x]}, 16, v{s}",
+   ] if ctx.r[a].startswith('s') else [
+     f"v_cvt_f32_u32 v{s}, {ctx.r[a]}",
+     f"v_lshrrev_b32 {ctx.r[x]}, 16, v{s}"])()),
+  # cast from bool (generic case): if bool is in SGPR (comparison result), use v_cndmask_b32; if in VGPR (loaded from memory), convert directly
   (UPat(Ops.CAST, name="x", src=(UPat(dtype=dtypes.bool, name="a"),)),
    lambda ctx, x, a: f"v_cndmask_b32 {ctx.r[x]}, {render_val(0, x.dtype)}, {render_val(1, x.dtype)}, {ctx.r[a]}"
      if ctx.r[a].startswith('s') else f"v_cvt_f32_u32 {ctx.r[x]}, {ctx.r[a]}" if dtypes.is_float(x.dtype) else f"v_mov_b32 {ctx.r[x]}, {ctx.r[a]}"),
@@ -804,10 +916,17 @@ string_rewrite = PatternMatcher([
    lambda ctx, x, a: [
      f"v_cmp_{'neq' if dtypes.is_float(a.dtype) else 'ne'}_{ctx.types[a.dtype]} vcc_lo, {ctx.r[a]}, 0",
      f"v_cndmask_b32 {ctx.r[x]}, 0, 1, vcc_lo"]),
-  # cast TO 64-bit int: move low 32 bits, zero high 32 bits (for register pairs)
-  (UPat(Ops.CAST, name="x", dtype=dtypes.long, src=(UPat.var("a"),)),
+  # cast TO 64-bit int from ints: move low 32 bits, sign/zero extend high 32 bits
+  # Float casts are handled in render_cast (need conversion first)
+  (UPat(Ops.CAST, name="x", dtype=dtypes.long, src=(UPat.var("a", dtypes.sints),)),
    lambda ctx, x, a: ctx.render_cast_to_64(x, a, signed=True)),
-  (UPat(Ops.CAST, name="x", dtype=dtypes.ulong, src=(UPat.var("a"),)),
+  (UPat(Ops.CAST, name="x", dtype=dtypes.long, src=(UPat.var("a", dtypes.uints),)),
+   lambda ctx, x, a: ctx.render_cast_to_64(x, a, signed=False)),
+  (UPat(Ops.CAST, name="x", dtype=dtypes.long, src=(UPat.var("a", dtype=dtypes.bool),)),
+   lambda ctx, x, a: ctx.render_cast_to_64(x, a, signed=False)),
+  (UPat(Ops.CAST, name="x", dtype=dtypes.ulong, src=(UPat.var("a", dtypes.ints),)),
+   lambda ctx, x, a: ctx.render_cast_to_64(x, a, signed=False)),
+  (UPat(Ops.CAST, name="x", dtype=dtypes.ulong, src=(UPat.var("a", dtype=dtypes.bool),)),
    lambda ctx, x, a: ctx.render_cast_to_64(x, a, signed=False)),
   (UPat(Ops.CAST, name="x", src=(UPat.var("a"),)), lambda ctx, x, a: ctx.render_cast(x, a)),
   # store / load for global memory
@@ -930,7 +1049,28 @@ class RDNARenderer(Renderer):
       return f"v_cvt_f16_f32 {self.r[x]}, {self.r[a]}"
     elif x.dtype == dtypes.float32 and a.dtype == dtypes.float16:
       return f"v_cvt_f32_f16 {self.r[x]}, {self.r[a]}"
-    # float16 -> int types: go through float32
+    # float16 -> 64-bit int: go through float32 -> int32 -> extend to 64
+    elif x.dtype == dtypes.long and a.dtype == dtypes.float16:
+      rx = self.r[x]
+      assert isinstance(rx, str)
+      s = self.get_scratch_vgpr()
+      dst = get_reg_base(rx)
+      return [
+        f"v_cvt_f32_f16 v{s}, {self.r[a]}",      # half -> float32
+        f"v_cvt_i32_f32 v{dst}, v{s}",           # float32 -> int32
+        f"v_ashrrev_i32 v{dst+1}, 31, v{dst}",   # sign extend to 64-bit
+      ]
+    elif x.dtype == dtypes.ulong and a.dtype == dtypes.float16:
+      rx = self.r[x]
+      assert isinstance(rx, str)
+      s = self.get_scratch_vgpr()
+      dst = get_reg_base(rx)
+      return [
+        f"v_cvt_f32_f16 v{s}, {self.r[a]}",      # half -> float32
+        f"v_cvt_u32_f32 v{dst}, v{s}",           # float32 -> uint32
+        f"v_mov_b32 v{dst+1}, 0",                # zero extend to 64-bit
+      ]
+    # float16 -> 32-bit int types: go through float32
     elif dtypes.is_int(x.dtype) and a.dtype == dtypes.float16:
       s = self.get_scratch_vgpr()
       cvt_int = "v_cvt_i32_f32" if x.dtype in (dtypes.int8, dtypes.int16, dtypes.int32) else "v_cvt_u32_f32"
@@ -955,7 +1095,28 @@ class RDNARenderer(Renderer):
       s = self.get_scratch_vgpr()
       cvt_float = "v_cvt_f32_i32" if a.dtype in (dtypes.int8, dtypes.int16, dtypes.int32) else "v_cvt_f32_u32"
       return [f"{cvt_float} v{s}, {self.r[a]}", f"v_cvt_f16_f32 {self.r[x]}, v{s}"]
-    # bfloat16 -> int types: go through float32
+    # bfloat16 -> 64-bit int types: go through float32 -> int32 -> extend to 64
+    elif x.dtype == dtypes.long and a.dtype == dtypes.bfloat16:
+      rx = self.r[x]
+      assert isinstance(rx, str)
+      s = self.get_scratch_vgpr()
+      dst = get_reg_base(rx)
+      return [
+        f"v_lshlrev_b32 v{s}, 16, {self.r[a]}",  # bfloat16 -> float32
+        f"v_cvt_i32_f32 v{dst}, v{s}",            # float32 -> int32
+        f"v_ashrrev_i32 v{dst+1}, 31, v{dst}",    # sign extend to 64-bit
+      ]
+    elif x.dtype == dtypes.ulong and a.dtype == dtypes.bfloat16:
+      rx = self.r[x]
+      assert isinstance(rx, str)
+      s = self.get_scratch_vgpr()
+      dst = get_reg_base(rx)
+      return [
+        f"v_lshlrev_b32 v{s}, 16, {self.r[a]}",  # bfloat16 -> float32
+        f"v_cvt_u32_f32 v{dst}, v{s}",            # float32 -> uint32
+        f"v_mov_b32 v{dst+1}, 0",                 # zero extend to 64-bit
+      ]
+    # bfloat16 -> 32-bit int types: go through float32
     elif dtypes.is_int(x.dtype) and a.dtype == dtypes.bfloat16:
       s = self.get_scratch_vgpr()
       cvt_int = "v_cvt_i32_f32" if x.dtype in (dtypes.int8, dtypes.int16, dtypes.int32) else "v_cvt_u32_f32"
@@ -985,11 +1146,48 @@ class RDNARenderer(Renderer):
     # float64 conversions
     elif x.dtype == dtypes.float64 and a.dtype == dtypes.float32:
       return f"v_cvt_f64_f32 {self.r[x]}, {self.r[a]}"
+    elif x.dtype == dtypes.float64 and a.dtype == dtypes.float16:
+      # float16 -> float32 -> float64
+      rx = self.r[x]
+      assert isinstance(rx, str)
+      s = self.get_scratch_vgpr()
+      dst = get_reg_base(rx)
+      return [
+        f"v_cvt_f32_f16 v{s}, {self.r[a]}",
+        f"v_cvt_f64_f32 v[{dst}:{dst+1}], v{s}",
+      ]
+    elif x.dtype == dtypes.float64 and a.dtype == dtypes.bfloat16:
+      # bfloat16 -> float32 -> float64
+      rx = self.r[x]
+      assert isinstance(rx, str)
+      s = self.get_scratch_vgpr()
+      dst = get_reg_base(rx)
+      return [
+        f"v_lshlrev_b32 v{s}, 16, {self.r[a]}",  # bfloat16 -> float32
+        f"v_cvt_f64_f32 v[{dst}:{dst+1}], v{s}",
+      ]
     elif x.dtype == dtypes.float32 and a.dtype == dtypes.float64:
       ra = self.r[a]
       assert isinstance(ra, str)
       return f"v_cvt_f32_f64 {self.r[x]}, v[{get_reg_base(ra)}:{get_reg_base(ra)+1}]"
-    # float64 -> int types: use direct conversion (v_cvt_i32_f64 / v_cvt_u32_f64)
+    # float64 -> 64-bit int types: convert to 32-bit first, then extend
+    elif x.dtype == dtypes.long and a.dtype == dtypes.float64:
+      ra, rx = self.r[a], self.r[x]
+      assert isinstance(ra, str) and isinstance(rx, str)
+      src, dst = get_reg_base(ra), get_reg_base(rx)
+      return [
+        f"v_cvt_i32_f64 v{dst}, v[{src}:{src+1}]",
+        f"v_ashrrev_i32 v{dst+1}, 31, v{dst}",
+      ]
+    elif x.dtype == dtypes.ulong and a.dtype == dtypes.float64:
+      ra, rx = self.r[a], self.r[x]
+      assert isinstance(ra, str) and isinstance(rx, str)
+      src, dst = get_reg_base(ra), get_reg_base(rx)
+      return [
+        f"v_cvt_u32_f64 v{dst}, v[{src}:{src+1}]",
+        f"v_mov_b32 v{dst+1}, 0",
+      ]
+    # float64 -> 32-bit int types: use direct conversion (v_cvt_i32_f64 / v_cvt_u32_f64)
     elif dtypes.is_int(x.dtype) and a.dtype == dtypes.float64:
       ra = self.r[a]
       assert isinstance(ra, str)
@@ -998,6 +1196,23 @@ class RDNARenderer(Renderer):
       return f"{cvt_int} {self.r[x]}, v[{src}:{src+1}]"
     elif x.dtype == dtypes.float64:
       return self.render_mov_64(x, a)  # TODO: proper int->f64 conversion
+    # float32 -> 64-bit int types: convert to 32-bit first, then extend
+    elif x.dtype == dtypes.long and a.dtype == dtypes.float32:
+      rx = self.r[x]
+      assert isinstance(rx, str)
+      dst = get_reg_base(rx)
+      return [
+        f"v_cvt_i32_f32 v{dst}, {self.r[a]}",
+        f"v_ashrrev_i32 v{dst+1}, 31, v{dst}",
+      ]
+    elif x.dtype == dtypes.ulong and a.dtype == dtypes.float32:
+      rx = self.r[x]
+      assert isinstance(rx, str)
+      dst = get_reg_base(rx)
+      return [
+        f"v_cvt_u32_f32 v{dst}, {self.r[a]}",
+        f"v_mov_b32 v{dst+1}, 0",
+      ]
     # 64-bit int -> float32: convert low 32 bits to float
     elif x.dtype == dtypes.float32 and a.dtype in (dtypes.long, dtypes.ulong):
       ra = self.r[a]
@@ -1009,6 +1224,11 @@ class RDNARenderer(Renderer):
       ra = self.r[a]
       assert isinstance(ra, str)
       return f"v_mov_b32 {self.r[x]}, v{get_reg_base(ra)}" if '[' in ra else f"v_mov_b32 {self.r[x]}, {ra}"
+    # small int types -> float32: use cvt instruction (int8/int16 are sign-extended on load, uint8/uint16 are zero-extended)
+    elif x.dtype == dtypes.float32 and a.dtype in (dtypes.int8, dtypes.int16):
+      return f"v_cvt_f32_i32 {self.r[x]}, {self.r[a]}"
+    elif x.dtype == dtypes.float32 and a.dtype in (dtypes.uint8, dtypes.uint16):
+      return f"v_cvt_f32_u32 {self.r[x]}, {self.r[a]}"
     # fallback: just move (same size types)
     return f"v_mov_b32 {self.r[x]}, {self.r[a]}"
 
@@ -1031,9 +1251,13 @@ class RDNARenderer(Renderer):
     CRITICAL: When true_val or false_val is an SGPR lane mask (from comparisons), v_cndmask_b32
     would incorrectly treat it as a scalar. We must expand SGPR lane masks to VGPR 0/1 values first.
 
+    Also handles the case where both true_val and false_val are non-inlinable constants,
+    since RDNA3 only allows one literal operand per instruction.
+
     Cases:
     - cond=SGPR, true_val=SGPR, false_val=0: use s_and_b32 to combine masks
     - true_val or false_val is SGPR lane mask: expand to VGPR first
+    - Both operands are non-inlinable constants: move one to register first
     - Standard case: use v_cndmask_b32 directly
     """
     rc, rt, rf, rx = self.r[cond], self.r[true_val], self.r[false_val], self.r[x]
@@ -1042,6 +1266,14 @@ class RDNARenderer(Renderer):
     is_true_sgpr_mask = rt.startswith('s') and true_val.dtype == dtypes.bool
     is_false_sgpr_mask = rf.startswith('s') and false_val.dtype == dtypes.bool
     is_false_zero = rf == '0' or (false_val.op is Ops.CONST and false_val.arg == 0)
+
+    # Check if operands are non-inlinable constants (RDNA3 only allows one literal per instruction)
+    def is_noninline_const(val: str, uop: UOp) -> bool:
+      if not val.startswith('0x') and not (val.lstrip('-').isdigit() and not can_inline_const(int(val), uop.dtype)): return False
+      return uop.op is Ops.CONST and not can_inline_const(uop.arg, uop.dtype)
+
+    is_true_noninline = is_noninline_const(rt, true_val)
+    is_false_noninline = is_noninline_const(rf, false_val)
 
     # Special case: both cond and true_val are SGPR masks, false_val is 0
     # This is equivalent to AND of the two masks, which we can do in SGPR
@@ -1061,6 +1293,13 @@ class RDNARenderer(Renderer):
       idx = scratch + 1 if is_true_sgpr_mask else scratch
       result.append(f"v_cndmask_b32 v{idx}, 0, 1, {rf}")
       rf = f"v{idx}"
+
+    # Handle case where both operands are non-inlinable constants
+    # RDNA3 only allows one literal operand per instruction, so move one to a register
+    if is_true_noninline and is_false_noninline:
+      scratch = scratch or self.get_scratch_vgpr()
+      result.append(f"v_mov_b32 v{scratch}, {rt}")
+      rt = f"v{scratch}"
 
     # Now handle the condition
     if is_cond_sgpr:
