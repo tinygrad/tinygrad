@@ -248,6 +248,9 @@ def fuse_index(ctx:IselContext, x:UOp) -> tuple[UOp, ...]:
   return (base, idx.cast(dtypes.int64) if idx.op is not Ops.NOOP and idx.vmin < 0 else idx, disp(x.src[1]))
 
 def fuse_load(ctx:IselContext, x:UOp, i:int) -> UOp|None:
+  # TODO: the rule is if size of load doesn't match size of x can't fuse, but there's some details to figure out
+  # like how vinsertps dtype is scalar
+  if x.op is X86Ops.VSHUFPS: return None
   # if the load is used multiple times we don't fuse
   return x.replace(src=x.src[:i] + fuse_index(ctx, x.src[i]) + x.src[i+1:]) if len(ctx.uses[x.src[i]]) == 1 else None
 
@@ -255,8 +258,6 @@ def fuse_load(ctx:IselContext, x:UOp, i:int) -> UOp|None:
 def x86_abi(ctx:IselContext, x:UOp):
   reg = (RCX, RDX, GPR[8], GPR[9])[x.arg] if sys.platform == "win32" else (RDI, RSI, RDX, RCX, GPR[8], GPR[9])[x.arg]
   return x.replace(op=X86Ops.DEFINE_REG, arg=ctx.vreg((reg,)))
-
-vcmp_imm = {Ops.CMPLT: 1, Ops.CMPEQ: 0, Ops.CMPNE: 4}
 
 dts = dtypes.ints + dtypes.masks + (dtypes.bool, dtypes.float16, dtypes.float32, dtypes.float64)
 dt_16bit = tuple(dt.vec(l) for dt in dts for l in [2,1] if dt.vec(l).itemsize == 2 and dt.vec(l) not in dtypes.int16s)
@@ -330,8 +331,12 @@ isel_matcher = PatternMatcher([
   (UPat.var("y", dtypes.int32s).gep(name="x"), lambda y,x: UOp(X86Ops.VPEXTRD, x.dtype, (y, imm(dtypes.uint8, x.arg[0])))),
   (UPat.var("y", dtypes.int64s).gep(name="x"), lambda y,x: UOp(X86Ops.VPEXTRQ, x.dtype, (y, imm(dtypes.uint8, x.arg[0])))),
   # comparisons that produce masks
-  (UPat(GroupOp.Comparison, src=(UPat(dtype=dtypes.float32), UPat()), name="x"), lambda x: x.replace(op=X86Ops.VCMPSS if x.dtype.count == 1 else X86Ops.VCMPPS, src=x.src + (imm(dtypes.uint8, vcmp_imm[x.op]),))), # noqa: E501
-  (UPat(GroupOp.Comparison, src=(UPat(dtype=dtypes.float64), UPat()), name="x"), lambda x: x.replace(op=X86Ops.VCMPSD if x.dtype.count == 1 else X86Ops.VCMPPD, src=x.src + (imm(dtypes.uint8, vcmp_imm[x.op]),))), # noqa: E501
+  (UPat(Ops.CMPLT, src=(UPat(dtype=dtypes.float32), UPat()), name="x"), lambda x: x.replace(op=X86Ops.VCMPSS if x.dtype.count == 1 else X86Ops.VCMPPS, src=x.src + (imm(dtypes.uint8, 1),))), # noqa: E501
+  (UPat(Ops.CMPLT, src=(UPat(dtype=dtypes.float64), UPat()), name="x"), lambda x: x.replace(op=X86Ops.VCMPSD if x.dtype.count == 1 else X86Ops.VCMPPD, src=x.src + (imm(dtypes.uint8, 1),))), # noqa: E501
+  (UPat(Ops.CMPNE, src=(UPat(dtype=dtypes.float32), UPat()), name="x"), lambda x: x.replace(op=X86Ops.VCMPSS if x.dtype.count == 1 else X86Ops.VCMPPS, src=x.src + (imm(dtypes.uint8, 4),))), # noqa: E501
+  (UPat(Ops.CMPNE, src=(UPat(dtype=dtypes.float64), UPat()), name="x"), lambda x: x.replace(op=X86Ops.VCMPSD if x.dtype.count == 1 else X86Ops.VCMPPD, src=x.src + (imm(dtypes.uint8, 4),))), # noqa: E501
+  (UPat(Ops.CMPEQ, src=(UPat(dtype=dtypes.float32), UPat()), name="x"), lambda x: x.replace(op=X86Ops.VCMPSS if x.dtype.count == 1 else X86Ops.VCMPPS, src=x.src + (imm(dtypes.uint8, 0),))), # noqa: E501
+  (UPat(Ops.CMPEQ, src=(UPat(dtype=dtypes.float64), UPat()), name="x"), lambda x: x.replace(op=X86Ops.VCMPSD if x.dtype.count == 1 else X86Ops.VCMPPD, src=x.src + (imm(dtypes.uint8, 0),))), # noqa: E501
   (UPat(Ops.CMPEQ, src=(UPat(dtype=dtypes.int8s), UPat()), name="x"), lambda x: x.replace(op=X86Ops.VPCMPEQB)),
   (UPat(Ops.CMPEQ, src=(UPat(dtype=dtypes.int16s), UPat()), name="x"), lambda x: x.replace(op=X86Ops.VPCMPEQW)),
   (UPat(Ops.CMPEQ, src=(UPat(dtype=dtypes.int32s), UPat()), name="x"), lambda x: x.replace(op=X86Ops.VPCMPEQD)),

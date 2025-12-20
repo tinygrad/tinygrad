@@ -1,7 +1,7 @@
 import heapq
 from typing import Any
 from collections import defaultdict
-from tinygrad.uop import X86Ops
+from tinygrad.uop import X86Ops, X86GroupOp
 from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, multirange_str
 from tinygrad.helpers import prod, getenv, TUPLE_ORDER
 
@@ -39,12 +39,6 @@ def linearize(sink:UOp) -> list[UOp]:
       # x86 op version
       case X86Ops.DEFINE_REG: priority = -20
       case X86Ops.IMM: priority = -10
-      # HACK: this doesn't fix the issue just hides it, need to support rematerialization
-      case X86Ops.CMP | X86Ops.CMPi:
-        run_count = max([priorities[s][0] for s in consumers[u]])
-        priority = 5
-      case X86Ops.SETL | X86Ops.SETB | X86Ops.SETE | X86Ops.SETNE: priority = -5
-      case X86Ops.CMOVL | X86Ops.CMOVB | X86Ops.CMOVE | X86Ops.CMOVNE: priority = -5
       case _: priority = 0            # everything else has priority 0
     priorities[u] = (run_count, priority, extra)
 
@@ -54,8 +48,41 @@ def linearize(sink:UOp) -> list[UOp]:
   # then force them to be toposorted in as close to the ideal order as possible
   heap = [(-nkey[sink], sink)]
   newlst = []
-  while heap:
-    newlst.append(u:=heapq.heappop(heap)[1])
+  lock: UOp|None = None
+  stupid: int = 0
+  clobbers: set[UOp] = set()
+  while heap or clobbers:
+    # if heap is empty we have a cycle and the flag producer must be rematerialized
+    # we schedule the flag producer and free the clobbers
+    if not heap:
+      assert lock is not None and clobbers
+      newlst.append(lock)
+      for c in clobbers: heapq.heappush(heap, (-nkey[c],c))
+      clobbers.clear()
+      lock, stupid = None, 0
+
+    u = heapq.heappop(heap)[1]
+
+    # flags introduce state that must be dealt with, can't overwrite the flag until all its users and producer are scheduled
+    if lock is not None:
+      # if this is the flag producer we free the flag clobbers and release the lock
+      if lock is u:
+        for c in clobbers: heapq.heappush(heap, (-nkey[c],c))
+        clobbers.clear()
+        lock, stupid = None, 0
+      # if this is the user of or is another flag producer it can't be scheduled
+      # if this is a loop boundry or has a lower run count than the flag user that introduced the lock we also don't schedule
+      # loop boundries do clobber but we also don't want to insert stuff from outside the loop into the loop
+      # if there's no loop we also don't want to add IMM and DEFINE_REG in the middle of the kernel
+      elif u.op in X86GroupOp.ReadFlags and lock is not u.src[-1] or u.op in X86GroupOp.WriteFlags or \
+        u.op in {Ops.RANGE, Ops.END, X86Ops.IMM, X86Ops.DEFINE_REG} or priorities[u][0] < stupid:
+        clobbers.add(u)
+        continue
+    # if there's no lock and this is a flag user its flag producer becomes the lock
+    elif u.op in X86GroupOp.ReadFlags: lock, stupid = u.src[-1], priorities[u][0]
+
+    newlst.append(u)
+
     for v in u.src:
       out_degree[v] -= 1
       if out_degree[v] == 0: heapq.heappush(heap, (-nkey[v],v))
