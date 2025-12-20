@@ -20,8 +20,9 @@ from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_so
 from tinygrad.runtime.support.system import System, PCIIfaceBase, PCIAllocationMeta, PCIDevice, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
-SQTT, SQTT_ITRACE_SE_MASK, SQTT_LIMIT_SE = ContextVar("SQTT", VIZ.value>=2), ContextVar("SQTT_ITRACE_SE_MASK", 0b11), ContextVar("SQTT_LIMIT_SE", 0)
-PMC = ContextVar("PMC", VIZ.value>=2)
+SQTT = ContextVar("SQTT", abs(VIZ.value)>=2)
+SQTT_ITRACE_SE_MASK, SQTT_LIMIT_SE = ContextVar("SQTT_ITRACE_SE_MASK", 0b11), ContextVar("SQTT_LIMIT_SE", 0)
+PMC = ContextVar("PMC", abs(VIZ.value)>=2)
 EVENT_INDEX_PARTIAL_FLUSH = 4 # based on a comment in nvd.h
 WAIT_REG_MEM_FUNCTION_EQ  = 3 # ==
 WAIT_REG_MEM_FUNCTION_NEQ = 4 # !=
