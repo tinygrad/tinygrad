@@ -37,7 +37,7 @@ const updateProgress = ({ start, err }) => {
   d3.select("#custom").html("");
   if (err) {
     displaySelection("#custom");
-    d3.select("#custom").append("div").classed("raw-text", true).call(s => s.append(() => codeBlock(err, "txt"))).node();
+    d3.select("#custom").append("div").classed("raw-text", true).call(s => s.append(() => codeBlock(err))).node();
   }
 }
 
@@ -604,7 +604,7 @@ const pathLink = (fp, lineno) => d3.create("a").attr("href", "vscode://file/"+fp
 function codeBlock(st, language, { loc, wrap }={}) {
   const code = document.createElement("code");
   // plaintext renders like a terminal print, otherwise render with syntax highlighting
-  if (language === "txt") code.appendChild(colored(st));
+  if (!language || language === "txt") code.appendChild(colored(st));
   else code.innerHTML = hljs.highlight(st, { language }).value;
   code.className = "hljs";
   const ret = document.createElement("pre");
@@ -812,13 +812,13 @@ async function main() {
     }
     if (ret.cols != null) {
       renderTable(root, ret);
-    } else root.append(() => codeBlock(ret.src, ret.lang || "txt"));
+    } else root.append(() => codeBlock(ret.src, ret.lang));
     ret.metadata?.forEach(m => {
       if (Array.isArray(m)) return metadata.appendChild(tabulate(m.map(({ label, value, idx }) => {
         const div = d3.create("div").style("background", cycleColors(colorScheme.CATEGORICAL, idx)).style("width", "100%").style("height", "100%");
         return [label.trim(), div.text(typeof value === "string" ? value : formatUnit(value)).node()];
       })).node());
-      metadata.appendChild(codeBlock(m.src, "txt")).classList.add("full-height")
+      metadata.appendChild(codeBlock(m.src)).classList.add("full-height")
     });
     return document.querySelector("#custom").replaceChildren(root.node());
   }
