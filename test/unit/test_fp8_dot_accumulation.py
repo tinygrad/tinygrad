@@ -26,7 +26,8 @@ class TestFP8DotAccumulation(unittest.TestCase):
     bq = quantize_fp8_ref(b, fp8_dtype)
     ref = aq @ bq
 
-    out = Tensor(a, device=Device.DEFAULT).cast(fp8_dtype).matmul(Tensor(b, device=Device.DEFAULT).cast(fp8_dtype), dtype=dtypes.float).realize().numpy()
+    out = Tensor(a, device=Device.DEFAULT).cast(fp8_dtype).matmul(
+      Tensor(b, device=Device.DEFAULT).cast(fp8_dtype), dtype=dtypes.float).realize().numpy()
     np.testing.assert_allclose(out, ref, rtol=1e-5, atol=1e-5)
 
   def test_fp8e4m3(self):
