@@ -152,10 +152,10 @@ class LLVMRenderer(Renderer):
   def _render_fn(self, name:str, args:list[tuple[str,DType]], kernel:list[str], prefix:list[str]|None=None) -> str:
     # NOTE: CPUAllocator promises 0x20 alignment
     sargs = ", ".join([f"{ldt(dt)}{' noalias align 32' if isinstance(dt, PtrDType) else ''} {name}" for name,dt in args])
-    # Add core_id for threading support
-    if hasattr(self, 'has_threads') and self.has_threads and sargs:
+    # Add core_id for CPU threading support (AMD uses different workitem intrinsics)
+    if self.device == "CPU" and sargs:
       sargs += ", i32 %core_id"
-    elif hasattr(self, 'has_threads') and self.has_threads:
+    elif self.device == "CPU":
       sargs = "i32 %core_id"
     return "\n".join((prefix or []) + [f"define{' ' + self.abi if self.abi else ''} void @{name}({sargs}) #0", "{"] + kernel + ["  ret void\n}"])
   def _render_kernel(self, uops: list[UOp], prefix:list[str]|None=None) -> tuple[tuple[str, ...], str]:
