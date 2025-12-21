@@ -12,8 +12,29 @@ onmessage = (e) => {
   self.close();
 }
 
-const layoutCfg = ({ blocks, paths }) => {
-  g.setGraph({ rankdir:"TD" });
+const layoutCfg = (g, { blocks, paths, pc_table }) => {
+  g.setGraph({ rankdir:"TD", font:"monospace" });
+  ctx.font = `350 ${LINE_HEIGHT}px ${g.graph().font}`;
+  // basic blocks render the assembly in nodes
+  for (const [lead, members] of Object.entries(blocks)) {
+    let [width, height, label] = [0, 0, []];
+    for (const m of members) {
+      const text = pc_table[m][0];
+      width = Math.max(width, ctx.measureText(text).width);
+      height += LINE_HEIGHT;
+      const [inst, ...operands] = text.split(" ");
+      label.push([{st:inst+" ", color:"#7aa2f7"}, {st:operands.join(" "), color:"#9aa5ce"}]);
+    }
+    g.setNode(lead, {width:width+NODE_PADDING*2, height:height+NODE_PADDING*2, label,
+                     labelHeight:height, labelWidth:width, id:lead, color:"#1a1b26" });
+  }
+  for (const [lead, pathSet] of Object.entries(paths)) {
+    const paths = [...Object.keys(pathSet)];
+    for (let i=0; i < paths.length; i ++ ) {
+      g.setEdge(lead, paths[i].toString(), { i, label:{type:"port", text:i} });
+    }
+  }
+  dagre.layout(g);
   return g;
 }
 

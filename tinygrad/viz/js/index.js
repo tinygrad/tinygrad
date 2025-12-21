@@ -78,6 +78,7 @@ const drawGraph = (data) => {
   const labels = nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label");
   labels.attr("transform", d => `translate(-${d.labelWidth/2}, -${d.labelHeight/2+STROKE_WIDTH*2})`);
   labels.selectAll("text").data(d => {
+    if (Array.isArray(d.label)) return [d.label];
     const ret = [[]];
     for (const s of parseColors(d.label, defaultColor="initial")) {
       const color = darkenHex(s.color, 25);
@@ -837,11 +838,11 @@ async function main() {
   if (ret.length === 0) return;
   // ** center graph
   const data = ret[currentRewrite];
-  metadata.innerHTML = "";
   const render = (opts) => renderDag({ data, opts }, { recenter:currentRewrite === 0 });
   render({ showIndexing:toggle.checked });
   toggle.onchange = (e) => render({ showIndexing:e.target.checked });
   // ** right sidebar metadata
+  metadata.innerHTML = "";
   if (ckey.includes("rewrites")) metadata.appendChild(toggleLabel);
   if (step.code_line != null) metadata.appendChild(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }));
   if (step.trace) {

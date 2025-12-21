@@ -397,25 +397,20 @@ def amdgpu_cfg(lib:bytes, arch:str) -> dict:
   # build the cfg
   curr:int|None = None
   blocks:dict[int, list[int]] = {}
-  cfg:dict[int, dict[int, None]] = {}
+  paths:dict[int, dict[int, None]] = {}
   for pc, (asm, sz) in pc_table.items():
     if pc in leaders:
-      cfg[curr:=pc] = {}
+      paths[curr:=pc] = {}
       blocks[pc] = []
-    blocks[unwrap(curr)].append(pc)
+    else: assert curr is not None, f"no basic block found for {pc}"
+    blocks[curr].append(pc)
     if (o:=branch_offsets.get(pc)) is not None:
-      cfg[unwrap(curr)][o] = None
-      if not asm.startswith("s_branch"): cfg[unwrap(curr)][pc+sz] = None
-    if (nx:=pc+sz) in leaders: cfg[unwrap(curr)][nx] = None
+      paths[curr][o] = None
+      if not asm.startswith("s_branch"): paths[curr][pc+sz] = None
+    if (nx:=pc+sz) in leaders: paths[curr][nx] = None
     # control flow ends in endpgm
     if asm == "s_endpgm": break
-  # temp: translate to UOps
-  # TODO: cfg should have its own layout
-  uop:UOp|None = None
-  for insts in blocks.values():
-    arg = "\n".join([pc_table[p][0] for p in insts])
-    uop = UOp(Ops.CUSTOM, src=() if uop is None else (uop,), arg=arg)
-  return {"graph":uop_to_json(unwrap(uop)), "blocks":blocks, "cfg":cfg, "pc_table":pc_table}
+  return {"blocks":blocks, "paths":paths, "pc_table":pc_table}
 
 # ** Main render function to get the complete details about a trace event
 
