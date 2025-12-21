@@ -2,7 +2,7 @@ import pathlib
 from dataclasses import replace
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.helpers import system, temp
-from tinygrad.engine.realize import ExecItem, CompiledRunner, lower_schedule_item
+from tinygrad.engine.realize import ExecItem, CompiledRunner
 
 # ** assemble
 
@@ -38,10 +38,10 @@ C_asm.uop.buffer.allocate()
 
 sched = C_tiny.schedule()
 assert len(sched) == 1
-eis:list[ExecItem] = [lower_schedule_item(sched[-1])]
+eis:list[ExecItem] = [sched[-1].lower()]
 prg = CompiledRunner(replace(eis[0].prg.p, name="gemm", global_size=(128, 86, 1), local_size=(256, 1, 1)), precompiled=lib)
 #Device[Device.DEFAULT].compiler.disassemble(lib)
-eis.append(ExecItem(prg, [C_asm.uop.buffer, from_torch(A).uop.buffer, from_torch(B).uop.buffer]))
+eis.append(ExecItem(eis[0].ast, [C_asm.uop.buffer, from_torch(A).uop.buffer, from_torch(B).uop.buffer], prg=prg))
 
 for ei in eis: ei.run(wait=True)
 
