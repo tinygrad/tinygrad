@@ -4,7 +4,7 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 import unittest
-import time, math
+import time
 import numpy as np
 import torch
 import torch.nn as nn
@@ -221,7 +221,7 @@ class TestLlamaCorrectness(BaseLlamaTest):
     max_diff = np.abs(torch_out - tiny_out).max()
     mean_diff = np.abs(torch_out - tiny_out).mean()
 
-    print(f"\nCorrectness check:")
+    print("\nCorrectness check:")
     print(f"  max_diff={max_diff:.6e}, mean_diff={mean_diff:.6e}")
 
     self.assertLess(max_diff, 1e-5, "Outputs differ more than tolerance")
