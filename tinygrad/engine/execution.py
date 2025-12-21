@@ -1,6 +1,6 @@
 from __future__ import annotations
-from typing import Any
-from tinygrad.helpers import DEBUG, GlobalCounters, all_same, dedup, colored, ansilen, PROFILE, ProfilePointEvent, cpu_events, time_to_str, TRACEMETA
+from typing import Any, cast
+from tinygrad.helpers import DEBUG, GlobalCounters, all_same, colored, ansilen, PROFILE, ProfilePointEvent, cpu_events, time_to_str, TRACEMETA
 from tinygrad.uop.ops import UOp, Ops, sym_infer
 from tinygrad.device import Device, Buffer
 
@@ -37,15 +37,14 @@ class ExecutionUnit:
 
     self._bound_items = []
     for item in self.items:
-      # Get buffers - either from buffer_map (for UOps) or directly (for already-bound Buffers)
+      # Get buffers - prefer buf_uops with buffer_map, fall back to bufs for backwards compatibility
       bufs: list[Buffer] = []
-      for b in item.bufs:
-        if b is None:
-          continue
-        if isinstance(b, UOp):
-          bufs.append(self.buffer_map[b])
-        else:
-          bufs.append(b)
+      if item.buf_uops:
+        for uop in item.buf_uops:
+          bufs.append(cast(Buffer, self.buffer_map.get(uop) or uop.buffer))
+      else:
+        for buf in item.bufs:
+          if buf is not None: bufs.append(buf)
 
       # Create runner from lib or use existing prg
       if item.prg is not None:

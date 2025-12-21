@@ -63,8 +63,18 @@ def _internal_memory_planner(buffers:list[list[Buffer]], noopt_buffers=None, ign
 
   return assigned
 
-def memory_planner(schedule:list[ExecItem]) -> list[ExecItem]:
+from tinygrad.uop.ops import UOp
+
+def memory_planner(schedule:list[ExecItem]) -> tuple[list[ExecItem], dict[UOp, Buffer]]:
   # Exclude buffers involved in load ops (e.g transfers) to preserve parallelism in graphs.
   assigned = _internal_memory_planner([[b for b in si.bufs if b is not None] for si in schedule],
                                       noopt_buffers={b for si in schedule if si.ast.op is not Ops.SINK for b in si.bufs if b is not None})
-  return [ExecItem(si.ast, [assigned.get(x, x) if x is not None else None for x in si.bufs], si.metadata, si.fixedvars) for si in schedule]
+  new_schedule = [ExecItem(si.ast, [assigned.get(x, x) if x is not None else None for x in si.bufs], si.metadata, si.fixedvars, buf_uops=si.buf_uops)
+                  for si in schedule]
+  # Build buffer_map from buf_uops -> assigned buffers
+  buffer_map: dict[UOp, Buffer] = {}
+  for si in new_schedule:
+    for i, uop in enumerate(si.buf_uops):
+      if uop not in buffer_map and i < len(si.bufs) and si.bufs[i] is not None:
+        buffer_map[uop] = si.bufs[i]  # type: ignore
+  return new_schedule, buffer_map

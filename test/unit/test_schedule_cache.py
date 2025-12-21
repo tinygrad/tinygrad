@@ -23,7 +23,7 @@ class TestScheduleCache(unittest.TestCase):
     x = Tensor.ones(10).contiguous().realize()
 
     t = x + Tensor(v.bind(42))
-    _, var_vals = t.schedule_with_vars()
+    _, _, var_vals = t.schedule_with_vars()
     self.assertEqual(var_vals, {'pos': 42})
 
   def test_simple(self):

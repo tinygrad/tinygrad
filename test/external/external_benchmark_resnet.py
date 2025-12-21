@@ -71,8 +71,8 @@ class BenchmarkResnetTrain(unittest.TestCase):
 
       y = x.sequential(layer).contiguous().contiguous_backward()
       y.sum().backward()
-      if getenv("ASSIGN", 1): sched, _ = Tensor.schedule_with_vars(y, x.grad, *optim.schedule_step())
-      else: sched, _ = Tensor.schedule_with_vars(y, x.grad, *[t.grad for t in optim.params])
+      if getenv("ASSIGN", 1): sched, _, _ = Tensor.schedule_with_vars(y, x.grad, *optim.schedule_step())
+      else: sched, _, _ = Tensor.schedule_with_vars(y, x.grad, *[t.grad for t in optim.params])
 
       for _ in range(JITCNT):
         run_schedule(list(sched))

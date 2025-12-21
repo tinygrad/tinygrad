@@ -183,11 +183,12 @@ si_lowerer = PatternMatcher([
 @dataclass
 class ExecItem:
   ast: UOp
-  bufs: list[Buffer|None] = field(default_factory=list)
+  bufs: list[Buffer|None] = field(default_factory=list)  # TODO: deprecate, use buf_uops + buffer_map
   metadata: tuple[Metadata, ...] = ()
   fixedvars: dict[str, int] = field(default_factory=dict)
   lib: bytes|None = None  # compiled binary, None for COPY/VIEW/ENCDEC
   prg: Runner|None = None
+  buf_uops: tuple[UOp, ...] = ()  # buffer UOps, binding happens in ExecutionUnit
 
   def lower(self):
     """Populate self.prg and self.lib by lowering the AST."""
@@ -242,8 +243,9 @@ class ExecItem:
 
 capturing: list = []  # put classes with an add method in here
 
-def run_schedule(schedule:list[ExecItem], var_vals:dict[str, int]|None=None, do_update_stats=True):
+def run_schedule(schedule:list[ExecItem], buffer_map:dict[UOp, Buffer]|None=None, var_vals:dict[str, int]|None=None, do_update_stats=True):
   from tinygrad.engine.execution import ExecutionUnit
+  if buffer_map is None: buffer_map = {}
 
   # Lower all items first
   lowered: list[ExecItem] = []
@@ -263,7 +265,7 @@ def run_schedule(schedule:list[ExecItem], var_vals:dict[str, int]|None=None, do_
           if cpu_b is not None and gpu_b.is_allocated(): cpu_b.ensure_allocated().copyin(gpu_b.as_buffer())
 
         # run on GPU
-        ExecutionUnit([ei]).update(var_vals=var_vals)(do_update_stats=do_update_stats)
+        ExecutionUnit([ei]).update(buffers=buffer_map, var_vals=var_vals)(do_update_stats=do_update_stats)
 
         # validate the output buffers match (NOTE: this is assuming the output is buffer 0)
         with Context(BEAM=0):
@@ -272,8 +274,8 @@ def run_schedule(schedule:list[ExecItem], var_vals:dict[str, int]|None=None, do_
         assert nb[0] is not None
         np.testing.assert_allclose(bufs[0].numpy(), nb[0].numpy(), rtol=1e-3, atol=1e-3)
       else:
-        ExecutionUnit([ei]).update(var_vals=var_vals)(do_update_stats=do_update_stats)
+        ExecutionUnit([ei]).update(buffers=buffer_map, var_vals=var_vals)(do_update_stats=do_update_stats)
   else:
     # Use ExecutionUnit for batched execution
     if lowered:
-      ExecutionUnit(lowered).update(var_vals=var_vals)(do_update_stats=do_update_stats)
+      ExecutionUnit(lowered).update(buffers=buffer_map, var_vals=var_vals)(do_update_stats=do_update_stats)
