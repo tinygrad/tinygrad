@@ -16,7 +16,7 @@ class TestOpts(unittest.TestCase):
     if Device.DEFAULT in {"CPU", "CL", "METAL"} and not CPU_LLVM and not CPU_LVP:
       prg = get_program(s[-1].ast, renderer=Device[Device.DEFAULT].renderer)
       self.assertIn('float4', prg.src)
-  
+
   def test_opt_immutability(self):
     opt = Opt(OptOps.UPCAST, axis=0, arg=4)
     with self.assertRaises(dataclasses.FrozenInstanceError): opt.op = OptOps.UNROLL
