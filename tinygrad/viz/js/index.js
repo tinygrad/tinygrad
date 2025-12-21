@@ -109,12 +109,12 @@ async function initWorker() {
   workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
 }
 
-function renderDag(graph, additions, recenter, layoutOpts) {
+function renderDag(graph, change, recenter, layoutOpts) {
   // start calculating the new layout (non-blocking)
   updateProgress(Status.STARTED, "Rendering new graph...");
   if (worker != null) worker.terminate();
   worker = new Worker(workerUrl);
-  worker.postMessage({graph, additions, opts:layoutOpts });
+  worker.postMessage({graph, change, opts:layoutOpts });
   worker.onmessage = (e) => {
     displaySelection("#graph");
     updateProgress(Status.COMPLETE);
@@ -136,10 +136,6 @@ function renderDag(graph, additions, recenter, layoutOpts) {
     }).attr("class", e => e.value.label.type).attr("id", e => `${e.v}-${e.w}`).datum(e => e.value.label.text));
     if (recenter) document.getElementById("zoom-to-fit-btn").click();
   };
-  worker.onerror = (e) => {
-    e.preventDefault();
-    updateProgress(Status.ERR, "Error in graph layout:\n"+e.message);
-  }
 }
 
 // ** profiler graph
@@ -837,7 +833,7 @@ async function main() {
   if (ret.length === 0) return;
   // ** center graph
   const data = ret[currentRewrite];
-  const render = (opts) => renderDag(data.graph, data.changed_nodes ?? [], currentRewrite === 0, opts);
+  const render = (opts) => renderDag(data.graph, data.change, currentRewrite === 0, opts);
   render({ showIndexing:toggle.checked });
   toggle.onchange = (e) => render({ showIndexing:e.target.checked });
   // ** right sidebar metadata
