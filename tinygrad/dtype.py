@@ -218,9 +218,9 @@ DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if isinstance(v, DType) 
 INVERSE_DTYPES_DICT = {**{v.name:k for k,v in DTYPES_DICT.items()}, "void": "void", "index":"index"}
 
 @functools.cache
-def can_safe_cast(dt0:DType, dt1:DType) -> bool:
+def can_lossless_cast(dt0:DType, dt1:DType) -> bool:
   # return if dt1 preserves value of dt0
-  # https://numpy.org/doc/stable/reference/generated/numpy.can_cast.html
+  # similar to https://numpy.org/doc/stable/reference/generated/numpy.can_cast.html
   if dt0 == dt1 or dt0 == dtypes.bool: return True
   match dt1:
     case dtypes.index: return dt0 in dtypes.ints
