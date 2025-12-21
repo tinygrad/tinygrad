@@ -186,12 +186,17 @@ class ExecItem:
   bufs: list[Buffer|None] = field(default_factory=list)
   metadata: tuple[Metadata, ...] = ()
   fixedvars: dict[str, int] = field(default_factory=dict)
+  lib: bytes|None = None  # compiled binary, None for COPY/VIEW/ENCDEC
   prg: Runner|None = None
 
   def lower(self):
-    """Populate self.prg by lowering the AST."""
+    """Populate self.prg and self.lib by lowering the AST."""
     if self.prg is not None: return self
-    try: self.prg = cast(Runner, si_lowerer.rewrite(self.ast, self.bufs))
+    try:
+      self.prg = cast(Runner, si_lowerer.rewrite(self.ast, self.bufs))
+      # Store lib for SINK ops (compiled kernels)
+      if isinstance(self.prg, CompiledRunner):
+        self.lib = self.prg.lib
     except Exception as e:
       if DEBUG >= 2:
         print(f"error lowering {self.ast.op}")
@@ -238,23 +243,38 @@ class ExecItem:
 capturing: list = []  # put classes with an add method in here
 
 def run_schedule(schedule:list[ExecItem], var_vals:dict[str, int]|None=None, do_update_stats=True):
-  while len(schedule):
-    ei = schedule.pop(0).lower()
+  from tinygrad.engine.execution import ExecutionUnit
+
+  # Lower all items first
+  lowered: list[ExecItem] = []
+  for ei in schedule:
+    ei = ei.lower()
     if len(capturing) and CAPTURING: capturing[0].add(ei)
-    if VALIDATE_WITH_CPU and ei.ast.op is Ops.SINK:
-      # copy in allocated buffers from the GPU
-      bufs = [b for b in ei.bufs if b is not None]
-      nb: list[Buffer|None] = [Buffer("CPU", b.size, b.dtype) for b in bufs]
-      for cpu_b, gpu_b in zip(nb, bufs):
-        if cpu_b is not None and gpu_b.is_allocated(): cpu_b.ensure_allocated().copyin(gpu_b.as_buffer())
+    lowered.append(ei)
 
-      # run on GPU
-      ei.run(var_vals, do_update_stats=do_update_stats)
+  if VALIDATE_WITH_CPU:
+    # Run item by item with CPU validation
+    for ei in lowered:
+      if ei.ast.op is Ops.SINK:
+        # copy in allocated buffers from the GPU
+        bufs = [b for b in ei.bufs if b is not None]
+        nb: list[Buffer|None] = [Buffer("CPU", b.size, b.dtype) for b in bufs]
+        for cpu_b, gpu_b in zip(nb, bufs):
+          if cpu_b is not None and gpu_b.is_allocated(): cpu_b.ensure_allocated().copyin(gpu_b.as_buffer())
 
-      # validate the output buffers match (NOTE: this is assuming the output is buffer 0)
-      with Context(BEAM=0): ExecItem(ei.ast, nb, ei.metadata, ei.fixedvars).run(var_vals, do_update_stats=do_update_stats)
-      import numpy as np
-      assert nb[0] is not None
-      np.testing.assert_allclose(bufs[0].numpy(), nb[0].numpy(), rtol=1e-3, atol=1e-3)
-    else:
-      ei.run(var_vals, do_update_stats=do_update_stats)
+        # run on GPU
+        ei.run(var_vals, do_update_stats=do_update_stats)
+
+        # validate the output buffers match (NOTE: this is assuming the output is buffer 0)
+        with Context(BEAM=0): ExecItem(ei.ast, nb, ei.metadata, ei.fixedvars).run(var_vals, do_update_stats=do_update_stats)
+        import numpy as np
+        assert nb[0] is not None
+        np.testing.assert_allclose(bufs[0].numpy(), nb[0].numpy(), rtol=1e-3, atol=1e-3)
+      else:
+        ei.run(var_vals, do_update_stats=do_update_stats)
+  else:
+    # Use ExecutionUnit for batched execution
+    if lowered:
+      unit = ExecutionUnit(lowered)
+      unit.update(var_vals=var_vals)
+      unit(do_update_stats=do_update_stats)
