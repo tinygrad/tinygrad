@@ -55,7 +55,8 @@ function addTags(root) {
   root.selectAll("text").data(d => [d]).join("text").text(d => d).attr("dy", "0.35em");
 }
 
-const drawGraph = (g) => {
+const drawGraph = (data) => {
+  const g = dagre.graphlib.json.read(data);
   // draw nodes
   d3.select("#graph-svg").on("click", () => d3.selectAll(".highlight").classed("highlight", false));
   const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g").attr("class", d => d.className ?? "node")
@@ -117,7 +118,7 @@ function renderDag(graph, additions, recenter, layoutOpts) {
   worker.onmessage = (e) => {
     displaySelection("#graph");
     updateProgress(Status.COMPLETE);
-    drawGraph(dagre.graphlib.json.read(e.data));
+    drawGraph(e.data);
     addTags(d3.select("#edge-labels").selectAll("g").data(e.data.edges).join("g").attr("transform", (e) => {
       // get a point near the end
       const [p1, p2] = e.value.points.slice(-2);
@@ -139,20 +140,6 @@ function renderDag(graph, additions, recenter, layoutOpts) {
     e.preventDefault();
     updateProgress(Status.ERR, "Error in graph layout:\n"+e.message);
   }
-}
-
-// TODO: temporarily copy paste from uop viz, unify nicely
-function renderCfg(data) {
-  updateProgress(Status.STARTED, "Rendering new graph...");
-  if (worker != null) worker.terminate();
-  worker = new Worker(workerUrl);
-  worker.postMessage({graph:data.uop, additions:[], dir:"TD", opts:{} });
-  worker.onmessage = (e) => {
-    displaySelection("#graph");
-    updateProgress(Status.COMPLETE);
-    drawGraph(dagre.graphlib.json.read(e.data));
-    document.getElementById("zoom-to-fit-btn").click();
-  };
 }
 
 // ** profiler graph
@@ -851,8 +838,6 @@ async function main() {
   // ** center graph
   const data = ret[currentRewrite];
   metadata.innerHTML = "";
-  // CFG layout
-  if (ckey.startsWith("/graph-cfg")) return renderCfg(data);
   const render = (opts) => renderDag(data.graph, data.changed_nodes ?? [], currentRewrite === 0, opts);
   render({ showIndexing:toggle.checked });
   toggle.onchange = (e) => render({ showIndexing:e.target.checked });
