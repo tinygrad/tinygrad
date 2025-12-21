@@ -249,7 +249,7 @@ def fuse_index(ctx:IselContext, x:UOp) -> tuple[UOp, ...]:
 
 def fuse_load(ctx:IselContext, x:UOp, i:int) -> UOp|None:
   # if the load is used multiple times we don't fuse
-  return x.replace(src=x.src[:i] + fuse_index(ctx, x.src[i]) + x.src[i+1:]) if len(ctx.uses[x.src[i]]) == 1 else None
+  return x.replace(src=x.src[:i] + fuse_index(ctx, x.src[i]) + x.src[i+1:]) if len(ctx.uses[x.src[i]]) == 1 and x.src.count(x.src[i]) == 1 else None
 
 # TODO: args on the stack
 def x86_abi(ctx:IselContext, x:UOp):
