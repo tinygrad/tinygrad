@@ -26,18 +26,17 @@ const colored = n => d3.create("span").call(s => s.selectAll("span").data(typeof
 const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 
 let timeout = null;
-const updateProgress = ({ start, err }) => {
+const Status = {STARTED:0, COMPLETE:1, ERR:2}
+const updateProgress = (st, msg) => {
   clearTimeout(timeout);
-  const msg = document.getElementById("progress-message");
-  msg.style.display = "none";
-  if (start) {
-    msg.innerText = "Rendering new graph...";
-    timeout = setTimeout(() => { msg.style.display = "block"; }, 2000);
-  }
-  d3.select("#custom").html("");
-  if (err) {
+  const msgEl = d3.select("#progress-message").style("display", "none");
+  const customEl = d3.select("#custom").html("");
+  if (st === Status.STARTED) {
+    msgEl.text(msg);
+    timeout = setTimeout(() => msgEl.style("display", "block"), 2000);
+  } else if (st === Status.ERR) {
     displaySelection("#custom");
-    d3.select("#custom").append("div").classed("raw-text", true).call(s => s.append(() => codeBlock(err, "txt"))).node();
+    customEl.append("div").classed("raw-text", true).append(() => codeBlock(msg));
   }
 }
 
@@ -77,23 +76,18 @@ const drawGraph = (data) => {
     .attr("x", d => -d.width/2).attr("y", d => -d.height/2);
   const STROKE_WIDTH = 1.4;
   const labels = nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label");
-  const hasLabelDims = data.nodes[0]?.value.labelWidth != null;
-  if (hasLabelDims) labels.attr("transform", d => `translate(-${d.labelWidth/2}, -${d.labelHeight/2+STROKE_WIDTH*2})`);
+  labels.attr("transform", d => `translate(-${d.labelWidth/2}, -${d.labelHeight/2+STROKE_WIDTH*2})`);
   labels.selectAll("text").data(d => {
     const ret = [[]];
-    for (const { st, color } of parseColors(d.label, defaultColor="initial")) {
-      const lines = st.split("\n");
+    for (const s of parseColors(d.label, defaultColor="initial")) {
+      const color = darkenHex(s.color, 25);
+      const lines = s.st.split("\n");
       ret.at(-1).push({ st:lines[0], color });
       for (let i=1; i<lines.length; i++) ret.push([{ st:lines[i], color }]);
     }
     return [ret];
   }).join("text").selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", 14).selectAll("tspan").data(d => d).join("tspan")
-    .attr("fill", d => darkenHex(d.color, 25)).text(d => d.st).attr("xml:space", "preserve");
-  // recenter after drawing texts if needed
-  if (!hasLabelDims) labels.attr("transform", (_,i,els) => {
-    const b = els[i].getBBox();
-    return `translate(${-b.x-b.width/2}, ${-b.y-b.height/2})`
-  });
+    .attr("fill", d => d.color).text(d => d.st).attr("xml:space", "preserve");
   addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
   // draw edges
@@ -117,13 +111,13 @@ async function initWorker() {
 
 function renderDag(graph, additions, recenter, layoutOpts) {
   // start calculating the new layout (non-blocking)
-  updateProgress({ start:true });
+  updateProgress(Status.STARTED, "Rendering new graph...");
   if (worker != null) worker.terminate();
   worker = new Worker(workerUrl);
   worker.postMessage({graph, additions, opts:layoutOpts });
   worker.onmessage = (e) => {
     displaySelection("#graph");
-    updateProgress({ start:false });
+    updateProgress(Status.COMPLETE);
     drawGraph(e.data);
     addTags(d3.select("#edge-labels").selectAll("g").data(e.data.edges).join("g").attr("transform", (e) => {
       // get a point near the end
@@ -144,7 +138,7 @@ function renderDag(graph, additions, recenter, layoutOpts) {
   };
   worker.onerror = (e) => {
     e.preventDefault();
-    updateProgress({ err:"Error in graph layout:\n"+e.message });
+    updateProgress(Status.ERR, "Error in graph layout:\n"+e.message);
   }
 }
 
@@ -257,7 +251,7 @@ async function renderProfiler(path, unit, opts) {
   if (data?.path !== path) { data = {tracks:new Map(), axes:{}, path, first:null}; focusedDevice = null; focusedShape = null; }
   metadata.replaceChildren(getMetadata(focusedShape));
   // layout once!
-  if (data.tracks.size !== 0) return updateProgress({ start:false });
+  if (data.tracks.size !== 0) return updateProgress(Status.COMPLETE);
   const profiler = d3.select("#profiler").html("");
   const buf = cache[path] ?? await fetchValue(path);
   const view = new DataView(buf);
@@ -419,7 +413,7 @@ async function renderProfiler(path, unit, opts) {
     }
   }
   for (const m of markers) m.label = m.name.split(/(\s+)/).map(st => ({ st, color:m.color, width:ctx.measureText(st).width }));
-  updateProgress({ start:false });
+  updateProgress(Status.COMPLETE);
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
@@ -604,7 +598,7 @@ const pathLink = (fp, lineno) => d3.create("a").attr("href", "vscode://file/"+fp
 function codeBlock(st, language, { loc, wrap }={}) {
   const code = document.createElement("code");
   // plaintext renders like a terminal print, otherwise render with syntax highlighting
-  if (language === "txt") code.appendChild(colored(st));
+  if (!language || language === "txt") code.appendChild(colored(st));
   else code.innerHTML = hljs.highlight(st, { language }).value;
   code.className = "hljs";
   const ret = document.createElement("pre");
@@ -757,8 +751,8 @@ async function main() {
   if (ckey in cache) {
     ret = cache[ckey];
   }
-  // ** Disassembly view
-  if (!ckey.startsWith("/rewrites")) {
+  // ** Text view
+  if (!ckey.startsWith("/graph")) {
     if (!(ckey in cache)) cache[ckey] = ret = await fetchValue(ckey);
     if (ret.steps?.length > 0) {
       const el = select(state.currentCtx, state.currentStep);
@@ -812,18 +806,18 @@ async function main() {
     }
     if (ret.cols != null) {
       renderTable(root, ret);
-    } else root.append(() => codeBlock(ret.src, ret.lang || "txt"));
+    } else root.append(() => codeBlock(ret.src, ret.lang));
     ret.metadata?.forEach(m => {
       if (Array.isArray(m)) return metadata.appendChild(tabulate(m.map(({ label, value, idx }) => {
         const div = d3.create("div").style("background", cycleColors(colorScheme.CATEGORICAL, idx)).style("width", "100%").style("height", "100%");
         return [label.trim(), div.text(typeof value === "string" ? value : formatUnit(value)).node()];
       })).node());
-      metadata.appendChild(codeBlock(m.src, "txt")).classList.add("full-height")
+      metadata.appendChild(codeBlock(m.src)).classList.add("full-height")
     });
     return document.querySelector("#custom").replaceChildren(root.node());
   }
-  // ** UOp view (default)
-  // if we don't have a complete cache yet we start streaming rewrites in this step
+  // ** Graph view
+  // if we don't have a complete cache yet we start streaming graphs in this step
   if (!(ckey in cache) || (cache[ckey].length !== step.match_count+1 && activeSrc == null)) {
     ret = [];
     cache[ckey] = ret;
@@ -841,45 +835,47 @@ async function main() {
     };
   }
   if (ret.length === 0) return;
-  // ** center UOp graph
-  const render = (opts) => renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes ?? [], currentRewrite === 0, opts);
+  // ** center graph
+  const data = ret[currentRewrite];
+  const render = (opts) => renderDag(data.graph, data.changed_nodes ?? [], currentRewrite === 0, opts);
   render({ showIndexing:toggle.checked });
   toggle.onchange = (e) => render({ showIndexing:e.target.checked });
-  // ** right sidebar code blocks
-  const codeElement = codeBlock(ret[currentRewrite].uop, "python", { wrap:false });
-  metadata.replaceChildren(toggleLabel, codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeElement);
+  // ** right sidebar metadata
+  metadata.innerHTML = "";
+  if (ckey.includes("rewrites")) metadata.appendChild(toggleLabel);
+  if (step.code_line != null) metadata.appendChild(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }));
   if (step.trace) {
     const trace = d3.create("pre").append("code").classed("hljs", true);
     for (let i=step.trace.length-1; i>=0; i--) {
       const [fp, lineno, fn, code] = step.trace[i];
       trace.append("div").style("margin-bottom", "2px").style("display","flex").text(fn+" ").append(() => pathLink(fp, lineno).node());
       trace.append("div").html(hljs.highlight(code, { language: "python" }).value).style("margin-bottom", "1ex");
+      metadata.appendChild(trace.node().parentNode);
     }
-    metadata.insertBefore(trace.node().parentNode, codeElement);
   }
-  // ** rewrite steps
-  if (step.match_count >= 1) {
-    const rewriteList = metadata.appendChild(document.createElement("div"));
-    rewriteList.className = "rewrite-list";
-    for (let s=0; s<=step.match_count; s++) {
-      const ul = rewriteList.appendChild(document.createElement("ul"));
-      ul.id = `rewrite-${s}`;
-      const p = ul.appendChild(document.createElement("p"));
-      p.innerText = s;
-      ul.onclick = () => setState({ currentRewrite:s });
-      ul.className = s > ret.length-1 ? "disabled" : s === currentRewrite ? "active" : "";
-      if (s > 0 && s === currentRewrite) {
-        const { upat, diff } = ret[s];
-        metadata.appendChild(codeBlock(upat[1], "python", { loc:upat[0], wrap:true }));
-        const diffCode = metadata.appendChild(document.createElement("pre")).appendChild(document.createElement("code"));
-        for (const line of diff) {
-          diffCode.appendChild(colored([{st:line, color:line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5"}]));
-          diffCode.appendChild(document.createElement("br"));
-        }
-        diffCode.className = "wrap";
+  if (data.uop != null) metadata.appendChild(codeBlock(data.uop, "python", { wrap:false })).classList.toggle("full-height", step.match_count === 0);
+  // ** multi graph in one page
+  if (!step.match_count) return;
+  const rewriteList = metadata.appendChild(document.createElement("div"));
+  rewriteList.className = "rewrite-list";
+  for (let s=0; s<=step.match_count; s++) {
+    const ul = rewriteList.appendChild(document.createElement("ul"));
+    ul.id = `rewrite-${s}`;
+    const p = ul.appendChild(document.createElement("p"));
+    p.innerText = s;
+    ul.onclick = () => setState({ currentRewrite:s });
+    ul.className = s > ret.length-1 ? "disabled" : s === currentRewrite ? "active" : "";
+    if (s > 0 && s === currentRewrite) {
+      const { upat, diff } = ret[s];
+      metadata.appendChild(codeBlock(upat[1], "python", { loc:upat[0], wrap:true }));
+      const diffCode = metadata.appendChild(document.createElement("pre")).appendChild(document.createElement("code"));
+      for (const line of diff) {
+        diffCode.appendChild(colored([{st:line, color:line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5"}]));
+        diffCode.appendChild(document.createElement("br"));
       }
+      diffCode.className = "wrap";
     }
-  } else codeElement.classList.add("full-height");
+  }
 }
 
 // **** collapse/expand

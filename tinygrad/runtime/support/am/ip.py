@@ -15,7 +15,7 @@ class AM_SOC(AM_IP):
   def init_sw(self): self.module = import_soc(self.adev.ip_ver[am.GC_HWIP])
 
   def init_hw(self):
-    if self.adev.ip_ver[am.NBIO_HWIP] == (7,9,0):
+    if self.adev.ip_ver[am.NBIO_HWIP] in {(7,9,0), (7,9,1)}:
       self.adev.regXCC_DOORBELL_FENCE.write(0x0)
       self.adev.regBIFC_GFX_INT_MONITOR_MASK.write(0x7ff)
       self.adev.regBIFC_DOORBELL_ACCESS_EN_PF.write(0xfffff)
@@ -29,7 +29,7 @@ class AM_SOC(AM_IP):
     val = reg.encode(**{f"s2a_doorbell_port{port}_enable":1, f"s2a_doorbell_port{port}_awid":awid,  f"s2a_doorbell_port{port}_range_size":size,
       f"s2a_doorbell_port{port}_awaddr_31_28_value":awaddr_31_28_value, f"s2a_doorbell_port{port}_range_offset":offset})
 
-    if self.adev.ip_ver[am.NBIO_HWIP] == (7,9,0): self.adev.indirect_wreg_pcie(reg.addr[0], val)
+    if self.adev.ip_ver[am.NBIO_HWIP] in {(7,9,0), (7,9,1)}: self.adev.indirect_wreg_pcie(reg.addr[0], val)
     else: reg.write(val)
 
 class AM_GMC(AM_IP):
@@ -59,7 +59,9 @@ class AM_GMC(AM_IP):
 
     self.memscratch_xgmi_paddr = self.adev.paddr2xgmi(self.adev.mm.palloc(0x1000, zero=False, boot=True))
     self.dummy_page_xgmi_paddr = self.adev.paddr2xgmi(self.adev.mm.palloc(0x1000, zero=False, boot=True))
-    self.hub_initted = {"MM": False, "GC": False}
+
+    # MM hub is inited before any tlb flushes and is still valid during partial_boot, so set it to true
+    self.hub_initted = {"MM": True, "GC": False}
 
     self.pf_status_reg = lambda ip: f"reg{ip}VM_L2_PROTECTION_FAULT_STATUS{'_LO32' if self.adev.ip_ver[am.GC_HWIP] >= (12,0,0) else ''}"
 
@@ -176,17 +178,17 @@ class AM_SMU(AM_IP):
   def mode1_reset(self):
     if DEBUG >= 2: print(f"am {self.adev.devfmt}: mode1 reset")
     if self.adev.ip_ver[am.MP0_HWIP] >= (14,0,0): self._send_msg(__DEBUGSMC_MSG_Mode1Reset:=2, 0, debug=True)
-    elif self.adev.ip_ver[am.MP0_HWIP] == (13,0,6): self._send_msg(self.smu_mod.PPSMC_MSG_GfxDriverReset, 1)
+    elif self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6), (13,0,12)}: self._send_msg(self.smu_mod.PPSMC_MSG_GfxDriverReset, 1)
     else: self._send_msg(self.smu_mod.PPSMC_MSG_Mode1Reset, 0)
     time.sleep(0.5) # 500ms
 
-  def read_table(self, table_t, cmd):
-    self._send_msg(self.smu_mod.PPSMC_MSG_TransferTableSmu2Dram, cmd)
+  def read_table(self, table_t, arg):
+    if self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6),(13,0,12)}: self._send_msg(self.smu_mod.PPSMC_MSG_GetMetricsTable, arg)
+    else: self._send_msg(self.smu_mod.PPSMC_MSG_TransferTableSmu2Dram, arg)
     return table_t.from_buffer(bytearray(self.adev.vram.view(self.driver_table_paddr, ctypes.sizeof(table_t))[:]))
-  def read_metrics(self): return self.read_table(self.smu_mod.SmuMetricsExternal_t, self.smu_mod.TABLE_SMU_METRICS)
 
   def set_clocks(self, level):
-    if self.adev.ip_ver[am.MP0_HWIP] == (13,0,6): return # TODO
+    if self.adev.ip_ver[am.MP0_HWIP] in {(13,0,6), (13,0,12)}: return # TODO
 
     if not hasattr(self, 'clcks'):
       self.clcks = {}
@@ -228,13 +230,13 @@ class AM_GFX(AM_IP):
 
     for xcc in range(self.xccs): self.adev.regRLC_SPM_MC_CNTL.write(0xf, inst=xcc)
 
-    if self.adev.ip_ver[am.NBIO_HWIP] != (7,9,0):
+    if self.adev.ip_ver[am.NBIO_HWIP][:2] != (7,9):
       self.adev.soc.doorbell_enable(port=0, awid=0x3, awaddr_31_28_value=0x3)
       self.adev.soc.doorbell_enable(port=3, awid=0x6, awaddr_31_28_value=0x3)
 
     for xcc in range(self.xccs):
-      if self.adev.ip_ver[am.GC_HWIP] == (9,4,3):
-        self.adev.regGB_ADDR_CONFIG.write(0x2a114042, inst=xcc) # Golden value for mi300
+      if self.adev.ip_ver[am.GC_HWIP] in {(9,4,3), (9,5,0)}:
+        self.adev.regGB_ADDR_CONFIG.write(0x2a114042, inst=xcc) # Golden value for mi300/mi350
         self.adev.regTCP_UTCL1_CNTL2.update(spare=1, inst=xcc)
 
       self.adev.regGRBM_CNTL.update(read_timeout=0xff, inst=xcc)
@@ -267,13 +269,10 @@ class AM_GFX(AM_IP):
       self._grbm_select(me=1, pipe=0, queue=0, inst=xcc)
       if self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1: self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2, inst=xcc) # 1 - DRAIN_PIPE; 2 - RESET_WAVES
       self._grbm_select(inst=xcc)
-
-    # TODO: fix warm boot on mi300
-    if self.adev.ip_ver[am.GC_HWIP] != (9,4,3):
-      for xcc in range(self.xccs): self.adev.regGCVM_CONTEXT0_CNTL.write(0, inst=xcc)
+    for xcc in range(self.xccs): self.adev.regGCVM_CONTEXT0_CNTL.write(0, inst=xcc)
 
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, doorbell:int, pipe:int, queue:int,
-                 aql:bool):
+                 aql:bool) -> int:
     for xcc in range(self.xccs if aql else 1):
       mqd = self.adev.mm.valloc(0x1000, uncached=True, contiguous=True)
 
@@ -286,7 +285,7 @@ class AM_GFX(AM_IP):
         cp_hqd_pq_wptr_poll_addr_lo=lo32(wptr_addr), cp_hqd_pq_wptr_poll_addr_hi=hi32(wptr_addr),
         cp_hqd_pq_doorbell_control=self.adev.regCP_HQD_PQ_DOORBELL_CONTROL.encode(doorbell_offset=doorbell*2, doorbell_en=1),
         cp_hqd_pq_control=self.adev.regCP_HQD_PQ_CONTROL.encode(rptr_block_size=5, unord_dispatch=0, queue_size=(ring_size//4).bit_length()-2,
-          **({'queue_full_en':1, 'slot_based_wptr':2, 'no_update_rptr':xcc==0} if aql else {})),
+          **({'queue_full_en':1, 'slot_based_wptr':2, 'wpp_clamp_en':1, 'no_update_rptr':xcc!=0 or self.xccs==1} if aql else {})),
         cp_hqd_ib_control=self.adev.regCP_HQD_IB_CONTROL.encode(min_ib_avail_size=0x3), cp_hqd_hq_status0=0x20004000,
         cp_mqd_control=self.adev.regCP_MQD_CONTROL.encode(priv_state=1), cp_hqd_vmid=0, cp_hqd_aql_control=int(aql),
         cp_hqd_eop_base_addr_lo=lo32(eop_addr>>8), cp_hqd_eop_base_addr_hi=hi32(eop_addr>>8),
@@ -308,6 +307,7 @@ class AM_GFX(AM_IP):
       self._grbm_select(inst=xcc)
 
       self.adev.reg(f"regCP_ME1_PIPE{pipe}_INT_CNTL").update(time_stamp_int_enable=1, generic0_int_enable=1, inst=xcc)
+    return 0
 
   def set_clockgating_state(self):
     if hasattr(self.adev, 'regMM_ATC_L2_MISC_CG'): self.adev.regMM_ATC_L2_MISC_CG.write(enable=1, mem_ls_enable=1)
@@ -380,7 +380,7 @@ class AM_IH(AM_IP):
     for _, rwptr_vm, suf, ring_id in self.rings:
       self.adev.reg(f"regIH_RB_CNTL{suf}").update(rb_enable=1, **({'enable_intr': 1} if ring_id == 0 else {}))
 
-    if self.adev.ip_ver[am.NBIO_HWIP] != (7,9,0):
+    if self.adev.ip_ver[am.NBIO_HWIP][:2] != (7,9):
       self.adev.soc.doorbell_enable(port=1, awid=0x0, awaddr_31_28_value=0x0, offset=am.AMDGPU_NAVI10_DOORBELL_IH*2, size=2)
 
   def interrupt_handler(self):
@@ -410,14 +410,14 @@ class AM_SDMA(AM_IP):
       self.adev.reg(f"regSDMA{pipe}_CNTL").update(ctxempty_int_enable=1, trap_enable=1,
         **({'utc_l1_enable':1} if self.adev.ip_ver[am.SDMA0_HWIP] <= (5,2,0) else {}))
 
-    if self.adev.ip_ver[am.NBIO_HWIP] == (7,9,0):
+    if self.adev.ip_ver[am.NBIO_HWIP] in {(7,9,0), (7,9,1)}:
       self.adev.regDOORBELL0_CTRL_ENTRY_1.write(bif_doorbell1_range_offset_entry=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0*2,
         bif_doorbell1_range_size_entry=4)
       self.adev.soc.doorbell_enable(port=2, awid=0xe, awaddr_31_28_value=0x1, offset=0xe, size=4)
     else: self.adev.soc.doorbell_enable(port=2, awid=0xe, awaddr_31_28_value=0x3, offset=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0*2, size=4)
 
   def fini_hw(self):
-    reg, inst = ("regSDMA_GFX", 0) if self.adev.ip_ver[am.SDMA0_HWIP] == (4,4,2) else ("regSDMA0_QUEUE0", 0)
+    reg, inst = ("regSDMA_GFX", 0) if self.adev.ip_ver[am.SDMA0_HWIP][:2] == (4,4) else ("regSDMA0_QUEUE0", 0)
 
     self.adev.reg(f"{reg}_RB_CNTL").update(rb_enable=0, inst=inst)
     self.adev.reg(f"{reg}_IB_CNTL").update(ib_enable=0, inst=inst)
@@ -426,9 +426,9 @@ class AM_SDMA(AM_IP):
       time.sleep(0.01)
       self.adev.regGRBM_SOFT_RESET.write(0x0)
 
-  def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, doorbell:int, pipe:int, queue:int):
+  def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, doorbell:int, pipe:int, queue:int) -> int:
     # Setup the ring
-    reg, inst = ("regSDMA_GFX", pipe*4+queue) if self.adev.ip_ver[am.SDMA0_HWIP] == (4,4,2) else (f"regSDMA{pipe}_QUEUE{queue}", 0)
+    reg, inst = ("regSDMA_GFX", pipe*4+queue) if self.adev.ip_ver[am.SDMA0_HWIP][:2] == (4,4) else (f"regSDMA{pipe}_QUEUE{queue}", 0)
 
     self.adev.reg(f"{reg}_MINOR_PTR_UPDATE").write(0x1, inst=inst)
     self.adev.wreg_pair(f"{reg}_RB_RPTR", "", "_HI", 0, inst=inst)
@@ -439,9 +439,10 @@ class AM_SDMA(AM_IP):
     self.adev.reg(f"{reg}_DOORBELL_OFFSET").update(offset=doorbell * 2, inst=inst)
     self.adev.reg(f"{reg}_DOORBELL").update(enable=1, inst=inst)
     self.adev.reg(f"{reg}_MINOR_PTR_UPDATE").write(0x0, inst=inst)
-    self.adev.reg(f"{reg}_RB_CNTL").write(**({f'{self.sdma_name.lower()}_wptr_poll_enable':1} if self.adev.ip_ver[am.SDMA0_HWIP] != (4,4,2) else {}),
+    self.adev.reg(f"{reg}_RB_CNTL").write(**({f'{self.sdma_name.lower()}_wptr_poll_enable':1} if self.adev.ip_ver[am.SDMA0_HWIP][:2]!=(4,4) else {}),
       rb_vmid=0, rptr_writeback_enable=1, rptr_writeback_timer=4, rb_enable=1, rb_priv=1, rb_size=(ring_size//4).bit_length()-1, inst=inst)
     self.adev.reg(f"{reg}_IB_CNTL").update(ib_enable=1, inst=inst)
+    return self.adev.reg(f"{reg}_RB_WPTR").read() | (self.adev.reg(f"{reg}_RB_WPTR_HI").read() << 32)
 
 class AM_PSP(AM_IP):
   def init_sw(self):
@@ -475,7 +476,7 @@ class AM_PSP(AM_IP):
 
     if not self.is_sos_alive():
       for fw, compid in sos_components: self._bootloader_load_component(fw, compid)
-      while not self.is_sos_alive(): time.sleep(0.01)
+      wait_cond(self.is_sos_alive, value=True, msg="sOS failed to start")
 
     self._ring_create()
     if am.PSP_FW_TYPE_PSP_TOC in self.adev.fw.sos_fw: self._tmr_init()

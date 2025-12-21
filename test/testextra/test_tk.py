@@ -2,7 +2,8 @@ import unittest, math, time
 
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.engine.realize import ExecItem, get_runner
+from tinygrad.engine.realize import get_runner
+from tinygrad.engine.schedule import ExecItem
 from tinygrad.engine.jit import TinyJit
 from tinygrad.helpers import CI
 import numpy as np
@@ -64,7 +65,7 @@ class TestTK(unittest.TestCase):
       c = Tensor.empty(1, 1, N, N, dtype="float32")
       Tensor.realize(a, b, c)
 
-    ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (c, a, b)])
+    ei = ExecItem(sink, [t.uop.buffer for t in (c, a, b)], prg=get_runner(Device.DEFAULT, sink))
     for _ in range(5): ei.run(wait=True)
     c = c.float()
 
@@ -113,7 +114,7 @@ class TestTK(unittest.TestCase):
       c = Tensor.empty(1, 1, N, N, dtype="float32")
       Tensor.realize(a, b, c)
 
-    ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (c, a, b)])
+    ei = ExecItem(sink, [t.uop.buffer for t in (c, a, b)], prg=get_runner(Device.DEFAULT, sink))
     for _ in range(5): ei.run(wait=True)
     c = c.float()
 
@@ -149,7 +150,7 @@ class TestTK(unittest.TestCase):
       b = Tensor.empty(1, 1, N, N, dtype="float32")
       Tensor.realize(a, b)
 
-    ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (b, a)])
+    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
     for _ in range(5): ei.run(wait=True)
     b = b.float()
 
@@ -188,13 +189,57 @@ class TestTK(unittest.TestCase):
       b = Tensor.empty(1, 1, N, N, dtype="float32")
       Tensor.realize(a, b)
 
-    ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (b, a)])
+    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
     for _ in range(5): ei.run(wait=True)
     b = b.float()
 
     ref = a.float()
 
     np.testing.assert_allclose(b.numpy(), ref.numpy())
+
+  def test_load_store_multioutput(self):
+    N = 64
+    BLOCK_SIZE = 32
+    with Kernel("load_store_multioutput", (N // BLOCK_SIZE, N // BLOCK_SIZE, 1), WARP_THREADS) as ker:
+      warp = ker.warp
+
+      b = ker.gl((1, 1, N, N), dtypes.float32)
+      c = ker.gl((1, 1, N, N), dtypes.float32)
+      a = ker.gl((1, 1, N, N), dtypes.float32)
+
+      a_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      b_smem = ker.st((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+
+      a_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+      b_reg = ker.rt((BLOCK_SIZE, BLOCK_SIZE), dtypes.float32)
+
+      col, row = ker.blockIdx_x, ker.blockIdx_y
+
+      a_smem = warp.load(a_smem, a, (), (0, 0, row, col), axis=2)
+      a_reg = warp.load(a_reg, a_smem)
+      b_reg = warp.copy(b_reg, a_reg)
+      b_smem = warp.store(b_smem, b_reg)
+      b_reg = warp.load(b_reg, b_smem)
+      b = warp.store(b, b_reg, (0, 0, row, col), (), axis=2)
+      c = warp.store(c, b_reg, (0, 0, row, col), (), axis=2)
+
+      sink = ker.finish(2)
+
+    with Context(DEBUG=0):
+      a = Tensor.rand(1, 1, N, N, dtype="float32").contiguous()
+      b = Tensor.empty(1, 1, N, N, dtype="float32")
+      c = Tensor.empty(1, 1, N, N, dtype="float32")
+      Tensor.realize(a, b, c)
+
+    ei = ExecItem(sink, [t.uop.buffer for t in (b, c, a)], prg=get_runner(Device.DEFAULT, sink))
+    for _ in range(5): ei.run(wait=True)
+    b = b.float()
+    c = c.float()
+
+    ref = a.float()
+
+    np.testing.assert_allclose(b.numpy(), ref.numpy())
+    np.testing.assert_allclose(c.numpy(), ref.numpy())
 
   @unittest.skip("TODO")
   def test_load_store_group(self):
@@ -226,7 +271,7 @@ class TestTK(unittest.TestCase):
       b = Tensor.empty(1, 1, N, N, dtype="float32")
       Tensor.realize(a, b)
 
-    ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (b, a)])
+    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
     for _ in range(5): ei.run(wait=True)
     b = b.float()
 
@@ -263,7 +308,7 @@ class TestTK(unittest.TestCase):
         b = Tensor.empty(1, 1, N, N, dtype="float32")
         Tensor.realize(a, b)
 
-      ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (b, a)])
+      ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
       for _ in range(5): ei.run(wait=True)
       b = b.float()
 
@@ -308,7 +353,7 @@ class TestTK(unittest.TestCase):
       b = Tensor.empty(1, 1, N, N, dtype="float32")
       Tensor.realize(a, b)
 
-    ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (b, a)])
+    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
     for _ in range(5): ei.run(wait=True)
     b = b.float()
 
@@ -353,7 +398,7 @@ class TestTK(unittest.TestCase):
       b = Tensor.empty(1, 1, N, M, dtype="float32")
       Tensor.realize(a, b)
 
-    ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (b, a)])
+    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
     for _ in range(5): ei.run(wait=True)
     b = b.float()
 
@@ -398,7 +443,7 @@ class TestTK(unittest.TestCase):
       b = Tensor.empty(1, 1, N, N, dtype="float32")
       Tensor.realize(a, b)
 
-    ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (b, a)])
+    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
     for _ in range(5): ei.run(wait=True)
     b = b.float()
 
@@ -443,7 +488,7 @@ class TestTK(unittest.TestCase):
       b = Tensor.empty(1, 1, N, M, dtype="float32")
       Tensor.realize(a, b)
 
-    ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (b, a)])
+    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
     for _ in range(5): ei.run(wait=True)
     b = b.float()
 
@@ -503,7 +548,7 @@ class TestTK(unittest.TestCase):
       b = Tensor.empty(1, 1, BLOCK_SIZE, N, dtype="float32")
       Tensor.realize(a, b)
 
-    ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (b, a)])
+    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
     for _ in range(5): ei.run(wait=True)
     b = b.float()
 
@@ -563,7 +608,7 @@ class TestTK(unittest.TestCase):
       b = Tensor.empty(1, 1, N, BLOCK_SIZE, dtype="float32")
       Tensor.realize(a, b)
 
-    ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (b, a)])
+    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
     for _ in range(5): ei.run(wait=True)
     b = b.float()
 
@@ -673,7 +718,7 @@ class TestTK(unittest.TestCase):
       out = Tensor.empty(B, N, H, D, dtype=dtypes.bfloat16)
       Tensor.realize(q, k, v, out)
 
-    ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in (out, q, k, v)])
+    ei = ExecItem(sink, [t.uop.buffer for t in (out, q, k, v)], prg=get_runner(Device.DEFAULT, sink))
     for _ in range(5):
       et = ei.run(wait=True)
       attn_flops = 2 * B * H * N * N * D + \
@@ -718,6 +763,44 @@ class TestTK(unittest.TestCase):
     ref = q.scaled_dot_product_attention(k, v, is_causal=True, enable_gqa=True).float().transpose(1, 2)
 
     np.testing.assert_allclose(out.numpy(), ref.numpy(), atol=2e-2, rtol=2e-2)
+
+  def test_fast_fa_bwd(self):
+    from extra.thunder.tiny.fa import flash_attention
+
+    Tensor.manual_seed(42)
+
+    B, N, H, H_KV, D = 1, 32, 2, 1, 32
+
+    with Context(DEBUG=0):
+      q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
+      k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
+      v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
+      Tensor.realize(q, k, v)
+
+      do = Tensor.ones(B, N, H, D, dtype=dtypes.float32).contiguous()
+      Tensor.realize(do)
+
+    q_, k_, v_ = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
+    out = flash_attention(q_, k_, v_)
+    out = out.float().transpose(1, 2)
+    out.backward(do)
+    Tensor.realize(q.grad, k.grad, v.grad)
+
+    with Context(DEBUG=0):
+      q_ref = q.detach().clone().requires_grad_(True)
+      k_ref = k.detach().clone().requires_grad_(True)
+      v_ref = v.detach().clone().requires_grad_(True)
+      Tensor.realize(q_ref, k_ref, v_ref)
+
+    q_ref_, k_ref_, v_ref_ = q_ref.transpose(1, 2), k_ref.transpose(1, 2), v_ref.transpose(1, 2)
+    ref = q_ref_.scaled_dot_product_attention(k_ref_, v_ref_)
+    ref = ref.float().transpose(1, 2)
+    ref.backward(do)
+    Tensor.realize(q_ref.grad, k_ref.grad, v_ref.grad)
+
+    np.testing.assert_allclose(q.grad.numpy(), q_ref.grad.numpy(), atol=2e-2, rtol=2e-2)
+    np.testing.assert_allclose(v.grad.numpy(), v_ref.grad.numpy(), atol=2e-2, rtol=2e-2)
+    np.testing.assert_allclose(k.grad.numpy(), k_ref.grad.numpy(), atol=5e-2, rtol=2e-2)
 
 if __name__ == "__main__":
   unittest.main()

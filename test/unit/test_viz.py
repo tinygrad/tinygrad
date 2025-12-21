@@ -167,7 +167,8 @@ class TestViz(BaseTestViz):
       (UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4)),
       (UPat(Ops.CONST, arg=4, name="x"), lambda x: x.replace(arg=3)),
     ])
-    with self.assertRaises(RuntimeError): exec_rewrite(a, [pm])
+    # use smaller stack limit for faster test (default is 250000)
+    with Context(REWRITE_STACK_LIMIT=100): self.assertRaises(RuntimeError, exec_rewrite, a, [pm])
     graphs = flatten(x["graph"].values() for x in get_viz_details(0, 0))
     self.assertEqual(graphs[0], uop_to_json(a)[id(a)])
     self.assertEqual(graphs[1], uop_to_json(b)[id(b)])
@@ -232,7 +233,7 @@ import gc
 
 def bufs_allocated() -> int:
   gc.collect()
-  return sum([isinstance(x, Buffer) for x in gc.get_objects()])
+  return sum([type(x).__name__ == "Buffer" and type(x).__module__ == "tinygrad.device" for x in gc.get_objects()])
 
 class TestVizGC(BaseTestViz):
   def test_gc(self):

@@ -26,11 +26,13 @@ def color_temp(temp):
 def color_voltage(voltage): return colored(f"{voltage/1000:>5.3f}V", "cyan")
 
 def draw_bar(percentage, width=40, fill='|', empty=' ', opt_text='', color='cyan'):
+  percentage = 0.0 if percentage != percentage else percentage  # NaN guard
+  percentage = max(0.0, min(1.0, float(percentage)))
   filled_width = int(width * percentage)
   if not opt_text: opt_text = f'{percentage*100:.1f}%'
 
   bar = fill * filled_width + empty * (width - filled_width)
-  bar = (bar[:-len(opt_text)] + opt_text) if opt_text else bar
+  if opt_text and len(opt_text) <= len(bar): bar = (bar[:-len(opt_text)] + opt_text)
   bar = colored(bar[:filled_width], color) + bar[filled_width:]
   return f'[{bar}]'
 
@@ -88,12 +90,27 @@ class SMICtx:
     self.opened_pci_resources = {}
     self.prev_lines_cnt = 0
     self.prev_terminal_width = 0
+    self.prev_terminal_height = 0
 
     remove_parts = ["Advanced Micro Devices, Inc. [AMD/ATI]", "VGA compatible controller:"]
     lspci = subprocess.check_output(["lspci"]).decode("utf-8").splitlines()
     self.lspci = {l.split()[0]: l.split(" ", 1)[1] for l in lspci}
     for k,v in self.lspci.items():
       for part in remove_parts: self.lspci[k] = self.lspci[k].replace(part, "").strip().rstrip()
+
+  def _smuq10_round(self, v:int) -> int:
+    v = int(v)
+    return (v + 512) >> 10  # SMUQ10_ROUND
+
+  def _fmt_kb(self, kb:int) -> str:
+    kb = int(kb)
+    if kb < 1024: return f"{kb}KB"
+    mb = kb / 1024.0
+    if mb < 1024: return f"{mb:.1f}MB"
+    gb = mb / 1024.0
+    if gb < 1024: return f"{gb:.2f}GB"
+    tb = gb / 1024.0
+    return f"{tb:.2f}TB"
 
   def _open_am_device(self, pcibus):
     if pcibus not in self.opened_pci_resources:
@@ -116,6 +133,7 @@ class SMICtx:
   def rescan_devs(self):
     pattern = os.path.join('/tmp', 'am_*.lock')
     for d in [f[8:-5] for f in glob.glob(pattern)]:
+      if d.startswith("usb"): continue
       if d not in self.opened_pcidevs:
         self._open_am_device(d)
 
@@ -131,21 +149,53 @@ class SMICtx:
         os.system('clear')
         if DEBUG >= 2: print(f"Removed AM device {d.pcibus}")
 
-  def collect(self): return {d: d.smu.read_metrics() if d.pci_state == "D0" else None for d in self.devs}
+  def collect(self):
+    tables = {}
+    for dev in self.devs:
+      match dev.ip_ver[am.MP1_HWIP]:
+        case (13,0,6): table_t = dev.smu.smu_mod.MetricsTableX_t
+        case (13,0,12): table_t = dev.smu.smu_mod.MetricsTableV2_t
+        case _: table_t = dev.smu.smu_mod.SmuMetricsExternal_t
+      tables[dev] = dev.smu.read_table(table_t, dev.smu.smu_mod.SMU_TABLE_SMU_METRICS) if dev.pci_state == "D0" else None
+    return tables
 
-  def get_gfx_activity(self, dev, metrics): return metrics.SmuMetrics.AverageGfxActivity
-  def get_mem_activity(self, dev, metrics): return metrics.SmuMetrics.AverageUclkActivity
+  def _pick_nonzero_avg(self, vals) -> int:
+    xs = [x for x in vals if x > 0]
+    return int(sum(xs) / len(xs)) if xs else 0
+
+  def get_gfx_activity(self, dev, metrics):
+    match dev.ip_ver[am.MP1_HWIP]:
+      case (13,0,6): return max(0, min(100, self._smuq10_round(metrics.SocketGfxBusy)))
+      case _: return metrics.SmuMetrics.AverageGfxActivity
+
+  def get_mem_activity(self, dev, metrics):
+    match dev.ip_ver[am.MP1_HWIP]:
+      case (13,0,6): return max(0, min(100, self._smuq10_round(metrics.DramBandwidthUtilization)))
+      case _: return metrics.SmuMetrics.AverageUclkActivity
 
   def get_temps(self, dev, metrics, compact=False):
-    temps_keys = [(k, name) for k, name in dev.smu.smu_mod.c__EA_TEMP_e__enumvalues.items()
-                  if k < dev.smu.smu_mod.TEMP_COUNT and metrics.SmuMetrics.AvgTemperature[k] != 0]
-    if compact: temps_keys = [(k, name) for k, name in temps_keys if k in (dev.smu.smu_mod.TEMP_HOTSPOT, dev.smu.smu_mod.TEMP_MEM)]
-    return {name: metrics.SmuMetrics.AvgTemperature[k] for k, name in temps_keys}
+    match dev.ip_ver[am.MP1_HWIP]:
+      case (13,0,6):
+        temps = {
+          "Hotspot": self._smuq10_round(metrics.MaxSocketTemperature),
+          "HBM": self._smuq10_round(metrics.MaxHbmTemperature),
+          "VR": self._smuq10_round(metrics.MaxVrTemperature),
+        }
+        if compact: return {k: temps[k] for k in ("Hotspot", "HBM") if temps.get(k, 0) != 0}
+        return {k: v for k, v in temps.items() if v != 0}
+      case _:
+        temps_keys = [(k, name) for k, name in dev.smu.smu_mod.c__EA_TEMP_e__enumvalues.items()
+                      if k < dev.smu.smu_mod.TEMP_COUNT and metrics.SmuMetrics.AvgTemperature[k] != 0]
+        if compact: temps_keys = [(k, name) for k, name in temps_keys if k in (dev.smu.smu_mod.TEMP_HOTSPOT, dev.smu.smu_mod.TEMP_MEM)]
+        return {name: metrics.SmuMetrics.AvgTemperature[k] for k, name in temps_keys}
 
   def get_voltage(self, dev, metrics, compact=False):
-    voltage_keys = [(k, name) for k, name in dev.smu.smu_mod.c__EA_SVI_PLANE_e__enumvalues.items()
+    match dev.ip_ver[am.MP1_HWIP]:
+      case (13,0,6): return {}
+      case _:
+        voltage_keys = [(k, name) for k, name in dev.smu.smu_mod.c__EA_SVI_PLANE_e__enumvalues.items()
                         if k < dev.smu.smu_mod.SVI_PLANE_COUNT and metrics.SmuMetrics.AvgVoltage[k] != 0]
-    return {name: metrics.SmuMetrics.AvgVoltage[k] for k, name in voltage_keys}
+        return {name: metrics.SmuMetrics.AvgVoltage[k] for k, name in voltage_keys}
 
   def get_busy_threshold(self, dev):
     match dev.ip_ver[am.MP1_HWIP]:
@@ -153,22 +203,40 @@ class SMICtx:
       case _: return 15
 
   def get_gfx_freq(self, dev, metrics):
-    return metrics.SmuMetrics.AverageGfxclkFrequencyPostDs if self.get_gfx_activity(dev, metrics) <= self.get_busy_threshold(dev) else \
-          metrics.SmuMetrics.AverageGfxclkFrequencyPreDs
+    if metrics is None: return 0
+    match dev.ip_ver[am.MP1_HWIP]:
+      case (13,0,6): return self._smuq10_round(metrics.GfxclkFrequency[0])
+      case _:
+        return metrics.SmuMetrics.AverageGfxclkFrequencyPostDs if self.get_gfx_activity(dev, metrics) <= self.get_busy_threshold(dev) else \
+               metrics.SmuMetrics.AverageGfxclkFrequencyPreDs
 
   def get_mem_freq(self, dev, metrics):
-    return metrics.SmuMetrics.AverageMemclkFrequencyPostDs if self.get_mem_activity(dev, metrics) <= self.get_busy_threshold(dev) else \
-           metrics.SmuMetrics.AverageMemclkFrequencyPreDs
+    match dev.ip_ver[am.MP1_HWIP]:
+      case (13,0,6): return self._smuq10_round(metrics.UclkFrequency)
+      case _:
+        return metrics.SmuMetrics.AverageMemclkFrequencyPostDs if self.get_mem_activity(dev, metrics) <= self.get_busy_threshold(dev) else \
+               metrics.SmuMetrics.AverageMemclkFrequencyPreDs
 
   def get_fckl_freq(self, dev, metrics):
-    return metrics.SmuMetrics.AverageFclkFrequencyPostDs if self.get_mem_activity(dev, metrics) <= self.get_busy_threshold(dev) else \
-           metrics.SmuMetrics.AverageFclkFrequencyPreDs
+    match dev.ip_ver[am.MP1_HWIP]:
+      case (13,0,6): return self._smuq10_round(metrics.FclkFrequency)
+      case _:
+        return metrics.SmuMetrics.AverageFclkFrequencyPostDs if self.get_mem_activity(dev, metrics) <= self.get_busy_threshold(dev) else \
+               metrics.SmuMetrics.AverageFclkFrequencyPreDs
 
-  def get_fan_rpm_pwm(self, dev, metrics): return metrics.SmuMetrics.AvgFanRpm, metrics.SmuMetrics.AvgFanPwm
+  def get_fan_rpm_pwm(self, dev, metrics):
+    match dev.ip_ver[am.MP1_HWIP]:
+      case (13,0,6): return None, None
+      case _: return metrics.SmuMetrics.AvgFanRpm, metrics.SmuMetrics.AvgFanPwm
 
-  def get_power(self, dev, metrics): return metrics.SmuMetrics.AverageSocketPower, metrics.SmuMetrics.dGPU_W_MAX
+  def get_power(self, dev, metrics):
+    match dev.ip_ver[am.MP1_HWIP]:
+      case (13,0,6): return self._smuq10_round(metrics.SocketPower), self._smuq10_round(metrics.MaxSocketPowerLimit)
+      case _: return metrics.SmuMetrics.AverageSocketPower, metrics.SmuMetrics.dGPU_W_MAX
 
   def get_mem_usage(self, dev):
+    return 0
+
     usage = 0
     pt_stack = [dev.mm.root_page_table]
     while len(pt_stack) > 0:
@@ -177,7 +245,7 @@ class SMICtx:
         entry = pt.entries[i]
 
         if (entry & am.AMDGPU_PTE_VALID) == 0: continue
-        if pt.lv!=am.AMDGPU_VM_PTB and not dev.gmc.is_pte_huge_page(entry):
+        if pt.lv!=am.AMDGPU_VM_PTB and not dev.gmc.is_pte_huge_page(pt.lv, entry):
           pt_stack.append(AMPageTableEntry(dev, entry & 0x0000FFFFFFFFF000, lv=pt.lv+1))
           continue
         if (entry & am.AMDGPU_PTE_SYSTEM) != 0: continue
@@ -219,23 +287,28 @@ class SMICtx:
       temps_table_compact = ["Temps (°C):" + '/'.join([f"{color_temp(val)} {name}" for name, val in temps_data_compact.items()])]
 
       fan_rpm, fan_pwm = self.get_fan_rpm_pwm(dev, metrics)
-      power_table = ["=== Power ==="] + [f"Fan Speed: {fan_rpm} RPM"] + [f"Fan Power: {fan_pwm}%"]
+      power_table = ["=== Power ==="]
+      power_table += ["Fan: N/A"] if fan_rpm is None or fan_pwm is None else [f"Fan Speed: {fan_rpm} RPM", f"Fan Power: {fan_pwm}%"]
 
       total_power, max_power = self.get_power(dev, metrics)
-      power_line = [f"Power: " + draw_bar(total_power / max_power, 16, opt_text=f"{total_power}/{max_power}W")]
-      power_line_compact = [f"Power:       " + draw_bar(total_power / max_power, activity_line_width, opt_text=f"{total_power}/{max_power}W")]
+      if max_power > 0:
+        power_line = [f"Power: " + draw_bar(total_power / max_power, 16, opt_text=f"{total_power}/{max_power}W")]
+        power_line_compact = [f"Power:       " + draw_bar(total_power / max_power, activity_line_width, opt_text=f"{total_power}/{max_power}W")]
+      else:
+        power_line = ["Power: N/A"]
+        power_line_compact = ["Power: N/A"]
 
       voltage_data = self.get_voltage(dev, metrics)
-      voltage_table = ["=== Voltages ==="] + [f"{name:<20}: {color_voltage(voltage)}" for name, voltage in voltage_data.items()]
+      voltage_table = None if not voltage_data else (["=== Voltages ==="] + [f"{name:<20}: {color_voltage(voltage)}" for name, voltage in voltage_data.items()])
 
       gfx_freq = self.get_gfx_freq(dev, metrics)
       mclk_freq = self.get_mem_freq(dev, metrics)
       fclk_freq = self.get_fckl_freq(dev, metrics)
-
       frequency_table = ["=== Frequencies ===", f"GFXCLK: {gfx_freq:>4} MHz", f"FCLK  : {fclk_freq:>4} MHz", f"MCLK  : {mclk_freq:>4} MHz"]
 
       if self.prev_terminal_width >= 231:
-        power_table += power_line + [""] + voltage_table
+        power_table += power_line
+        if voltage_table is not None: power_table += [""] + voltage_table
         activity_line += [""]
       elif self.prev_terminal_width >= 171:
         power_table += power_line + [""] + frequency_table
@@ -307,4 +380,5 @@ if __name__ == "__main__":
       smi_ctx.draw(args.list)
       if args.list: break
       time.sleep(1)
-  except KeyboardInterrupt: print("Exiting...")
+  except KeyboardInterrupt:
+    print("Exiting...")

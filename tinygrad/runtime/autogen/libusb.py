@@ -1,14 +1,7 @@
 # mypy: ignore-errors
-import ctypes, os
-from tinygrad.helpers import unwrap
-from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-from ctypes.util import find_library
-def dll():
-  try: return ctypes.CDLL(unwrap(os.getenv('LIBUSB_PATH', find_library('usb-1.0'))))
-  except: pass
-  return None
-dll = dll()
-
+import ctypes
+from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+dll = DLL('libusb', 'usb-1.0')
 enum_libusb_class_code = CEnum(ctypes.c_uint32)
 LIBUSB_CLASS_PER_INTERFACE = enum_libusb_class_code.define('LIBUSB_CLASS_PER_INTERFACE', 0)
 LIBUSB_CLASS_AUDIO = enum_libusb_class_code.define('LIBUSB_CLASS_AUDIO', 1)

@@ -1,16 +1,8 @@
 # mypy: ignore-errors
-import ctypes, os
-from tinygrad.helpers import unwrap
-from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-from ctypes.util import find_library
-def dll():
-  try: return ctypes.CDLL(unwrap(os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libhsa-runtime64.so'))
-  except: pass
-  try: return ctypes.CDLL(unwrap(find_library('hsa-runtime64')))
-  except: pass
-  return None
-dll = dll()
-
+import ctypes
+from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+import os
+dll = DLL('hsa', [os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libhsa-runtime64.so', 'hsa-runtime64'])
 enum_SQ_RSRC_BUF_TYPE = CEnum(ctypes.c_uint32)
 SQ_RSRC_BUF = enum_SQ_RSRC_BUF_TYPE.define('SQ_RSRC_BUF', 0)
 SQ_RSRC_BUF_RSVD_1 = enum_SQ_RSRC_BUF_TYPE.define('SQ_RSRC_BUF_RSVD_1', 1)

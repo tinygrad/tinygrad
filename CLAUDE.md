@@ -88,13 +88,15 @@ VIZ=1 python -c "from tinygrad import Tensor; Tensor.ones(10).sum().realize()"
 ## Debugging Tips
 
 1. **Print UOp graphs**: `print(tensor.uop)` or `print(tensor.uop.sink())`
-2. **Check schedule**: `tensor.schedule()` returns list of ScheduleItems
+2. **Check schedule**: `tensor.schedule()` returns list of ExecItems
 3. **Trace graph rewrites**: Use `VIZ=1` or add print in PatternMatcher callbacks
 4. **Find UOps by type**: `[u for u in uop.toposort() if u.op is Ops.SOMETHING]`
 
 ## Workflow Rules
 
 - **NEVER commit without explicit user approval** - always show the diff and wait for approval
+- **NEVER amend commits** - always create a new commit instead
+- Run `pre-commit run --all-files` before committing to catch linting/type errors
 - Run tests before proposing commits
 - Test with `SPEC=2` when modifying UOp-related code
 
@@ -131,6 +133,18 @@ The schedule cache strips values from BIND nodes so different bound values (e.g.
 - Use ctx dict from graph_rewrite to collect info during traversal instead of separate toposort
 - Only extract var_vals when schedule is non-empty (no kernels = no vars needed)
 - PatternMatchers are slow to construct - define at module level, not in functions
+
+### Readability Over Speed
+Don't add complexity for marginal performance gains. Simpler code that's slightly slower is often better:
+```python
+# BAD: "optimized" with extra complexity
+if has_afters:  # skip toposort if no AFTERs
+  after_map = [(u, u.buf_uop) for u in big_sink.toposort() if u.op is Ops.AFTER]
+
+# GOOD: simple, always works
+after_map = [(u, u.buf_uop) for u in big_sink.toposort() if u.op is Ops.AFTER]
+```
+The conditional check adds complexity, potential bugs, and often negligible speedup. Only optimize when profiling shows a real bottleneck.
 
 ### Testing LLM Changes
 ```bash

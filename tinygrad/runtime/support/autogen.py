@@ -1,5 +1,5 @@
 import ctypes, itertools, re, functools, os
-from tinygrad.helpers import flatten, unwrap
+from tinygrad.helpers import unwrap
 from tinygrad.runtime.autogen import libclang as clang # use REGEN=1 to regenerate libclang bindings
 
 def unwrap_cursor(c: clang.CXCursor) -> clang.CXCursor:
@@ -91,7 +91,7 @@ fns, specs = (clang.CXType_FunctionProto, clang.CXType_FunctionNoProto), (clang.
 # https://clang.llvm.org/docs/AutomaticReferenceCounting.html#arc-method-families
 arc_families = ['alloc', 'copy', 'mutableCopy', 'new']
 
-def gen(dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, use_errno=False, anon_names={}, types={}, parse_macros=True):
+def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, errno=False, anon_names={}, types={}, parse_macros=True, paths=[]):
   macros, lines, anoncnt, types, objc = [], [], itertools.count().__next__, {k:(v,True) for k,v in types.items()}, False
   def tname(t, suggested_name=None, typedef=None) -> str:
     suggested_name = anon_names.get(f"{loc_file(loc(decl:=clang.clang_getTypeDeclaration(t)))}:{loc_line(loc(decl))}", suggested_name)
@@ -257,11 +257,9 @@ def gen(dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, use_e
         lines, types = rollback
     clang.clang_disposeTranslationUnit(tu)
     clang.clang_disposeIndex(idx)
-  main = (f"# mypy: ignore-errors\nimport ctypes{', os' if any('os' in s for s in dll) else ''}\n"
-    "from tinygrad.helpers import unwrap\nfrom tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR\n" + '\n'.join([*prolog,
-      *(["from ctypes.util import find_library"]*any('find_library' in s for s in dll)), *(["from tinygrad.runtime.support import objc"]*objc),
-      *(["def dll():",*flatten([[f"  try: return ctypes.CDLL(unwrap({d}){', use_errno=True' if use_errno else ''})",'  except: pass'] for d in dll]),
-         "  return None", "dll = dll()\n"]*bool(dll)), *lines]) + '\n')
+  main = '\n'.join(["# mypy: ignore-errors", "import ctypes", "from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR",
+                    *prolog, *(["from tinygrad.runtime.support import objc"]*objc),
+                    *([f"dll = DLL('{name}', {dll}{f', {paths}'*bool(paths)}{', use_errno=True'*errno})"] if dll else []), *lines]) + '\n'
   macros = [r for m in macros if (r:=functools.reduce(lambda s,r:re.sub(r[0], r[1], s), rules + base_rules, m))]
   while True:
     try:

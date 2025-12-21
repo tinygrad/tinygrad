@@ -147,7 +147,7 @@ def test_matmul(sink:UOp, N=N):
   hc = Tensor.empty(N, N)
   Tensor.realize(a, b, hc)
 
-  ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in [hc, a, b]])
+  ei = ExecItem(sink, [t.uop.buffer for t in [hc, a, b]], prg=get_runner(Device.DEFAULT, sink))
 
   ets = []
   with Context(DEBUG=2):

@@ -12,7 +12,6 @@ from tinygrad.uop.ops import UOp, Ops, python_alu
 from tinygrad.renderer import ProgramSpec
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.codegen import full_rewrite
-from tinygrad.engine.realize import lower_schedule_item
 
 def _test_uop_result(inputs:list[Tensor], stores:list[UOp], local_size=None):
   for x in inputs: x.realize()
@@ -76,8 +75,8 @@ class TestCStyleFailures(unittest.TestCase):
     for _ in range(5): ret = python_alu[op](ret, Tensor.empty(1, dtype=dtype))
     schedule = ret.schedule()
     assert len(schedule) == 1
-    ei = lower_schedule_item(schedule[0])
-    src = ei.prg.p.src
+    schedule[0].lower()
+    src = schedule[0].prg.p.src
     self.assertEqual("("*5 not in src, should_strip_paren)
 
   def test_repeat_add(self): self._test_src_strip_paren(Ops.ADD)

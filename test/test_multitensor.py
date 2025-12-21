@@ -2,12 +2,12 @@ import unittest, functools, random
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, Variable
 from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.helpers import CI, getenv, prod, Context
+from tinygrad.helpers import getenv, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
-from tinygrad.engine.realize import lower_schedule, BufferCopy, CompiledRunner, run_schedule
+from tinygrad.engine.realize import BufferCopy, CompiledRunner, run_schedule
 import numpy as np
 from hypothesis import given, strategies as strat, settings
-from test.helpers import REAL_DEV, not_support_multi_device, needs_second_gpu
+from test.helpers import not_support_multi_device, needs_second_gpu, slow
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -63,6 +63,28 @@ class TestMultiTensor(unittest.TestCase):
     assert GlobalCounters.kernel_count == 0
     (X + X).realize()
 
+  def test_shard_like(self):
+    X = Tensor.ones(256).shard(devices_2, 0)
+    Y = Tensor.zeros(256).shard_like(X)
+    self.assertEqual(Y.device, X.device)
+    self.assertEqual(Y.uop.axis, 0)
+    # also test with axis=None
+    X2 = Tensor.ones(256).shard(devices_2, axis=None)
+    Y2 = Tensor.zeros(256).shard_like(X2)
+    self.assertEqual(Y2.device, X2.device)
+    self.assertEqual(Y2.uop.axis, None)
+    # test with single device
+    X3 = Tensor.ones(256)
+    Y3 = Tensor.zeros(256).shard_like(X3)
+    self.assertEqual(Y3.device, X3.device)
+    # cannot shard_like multi unless it's a no-op
+    X4 = Tensor.ones(256).shard(devices_2, 0)
+    Y4 = Tensor.ones(256).shard(devices_2, 0).shard_like(X4)
+    self.assertEqual(Y4.device, X4.device)
+    self.assertEqual(Y4.uop.axis, 0)
+    with self.assertRaises(RuntimeError):
+      Tensor.ones(256).shard(devices_2, None).shard_like(X4)
+
   def _test_shard_op(self, op, out, n=4):
     t = Tensor.ones(n).contiguous().realize().shard(devices_2, 0)
     r = op(t).realize()
@@ -101,9 +123,10 @@ class TestMultiTensor(unittest.TestCase):
     out = (X + X)
     sched = out.schedule()
     names = []
-    for si, ei in lower_schedule(sched):
-      if isinstance(ei.prg, CompiledRunner): names.append(ei.prg.p.name)
-      ei.run()
+    for si in sched:
+      si.lower()
+      if isinstance(si.prg, CompiledRunner): names.append(si.prg.p.name)
+      si.run()
     self.assertEqual(len(set(names)), 1, "function was relinearized")
 
   @unittest.skip("this doesn't fold because shard_ calls contiguous on all lbs")
@@ -398,7 +421,7 @@ class TestMultiTensor(unittest.TestCase):
     np.testing.assert_allclose(y.numpy(), y_shard.numpy(), atol=1e-6, rtol=1e-6)
 
   # NOTE: this is failing on LLVM CI, no idea why. Works locally.
-  @unittest.skipIf(CI and REAL_DEV in ("CUDA", "NV", "CPU", "AMD"), "slow, and flaky on CPU")
+  @slow
   def test_data_parallel_resnet(self):
     from extra.models.resnet import ResNet18
 
@@ -434,7 +457,7 @@ class TestMultiTensor(unittest.TestCase):
     # sometimes there is zeros in these grads... why?
     np.testing.assert_allclose(grad, shard_grad, atol=1e-5, rtol=1e-5)
 
-  @unittest.skipIf(CI and REAL_DEV in ("CUDA", "NV", "CPU", "AMD"), "slow, and flaky on CPU")
+  @slow
   @unittest.skip("TODO: pm_rangeify hangs")
   def test_data_parallel_resnet_train_step(self):
     from extra.models.resnet import ResNet18

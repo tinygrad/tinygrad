@@ -2,7 +2,8 @@
 from __future__ import annotations
 import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref
 from contextlib import ContextDecorator
-from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Generic
+from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Generic, TYPE_CHECKING
+if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten
@@ -12,7 +13,7 @@ from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
 from tinygrad.mixin.movement import _align_left
 from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop, Variable
-from tinygrad.engine.schedule import ScheduleItem, complete_create_schedule_with_vars
+from tinygrad.engine.schedule import ExecItem, complete_create_schedule_with_vars
 from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import run_schedule
 
@@ -40,7 +41,7 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str) -> None:
 
 # **** Tensor helper functions ****
 
-def _fromnp(x: 'np.ndarray') -> UOp:  # type: ignore [name-defined] # noqa: F821
+def _fromnp(x: 'numpy.ndarray') -> UOp:
   ret = UOp.new_buffer("NPY", x.size, _from_np_dtype(x.dtype))
   # fake realize
   ret.buffer.allocate(x)
@@ -110,7 +111,7 @@ class Tensor(OpMixin):
   __slots__ = "uop", "requires_grad", "grad"
   training: ClassVar[bool] = False
 
-  def __init__(self, data:ConstType|bytes|list|tuple|UOp|'np.ndarray'|pathlib.Path|None,  # type: ignore [name-defined] # noqa: F821
+  def __init__(self, data:ConstType|bytes|list|tuple|UOp|'numpy.ndarray'|pathlib.Path|None,
                device:str|tuple|list|None=None, dtype:DTypeLike|None=None, requires_grad:bool|None=None, _force_unique:bool=False):
     if device is None and isinstance(data, pathlib.Path): device = f"DISK:{data.resolve()}"  # keep it on the disk if device is None
     _dtype:DType|None = to_dtype(dtype) if dtype is not None else None
@@ -190,8 +191,9 @@ class Tensor(OpMixin):
     lhs,rhs = self._broadcasted(x, reverse)
     return lhs._apply_uop(fxn, rhs)
 
-  # _binop is used by MathTrait
+  # _binop and alu are used by MathMixin
   def _binop(self, op, x, reverse): return self._apply_broadcasted_uop(lambda *u: UOp.alu(u[0], op, *u[1:]), x, reverse)
+  def alu(self, op: Ops, *src: Tensor) -> Tensor: return self._apply_uop(lambda *u: u[0].alu(op, *u[1:]), *src)
 
   def requires_grad_(self, requires_grad=True) -> Tensor:
     self.requires_grad = requires_grad
@@ -235,7 +237,7 @@ class Tensor(OpMixin):
     """
     return [Tensor(u) for u in UOp.custom_kernel(*[t.uop for t in (self,)+lst], fxn=fxn, grad_fxn=grad_fxn)]
 
-  def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ScheduleItem], dict[str, int]]:
+  def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ExecItem], dict[str, int]]:
     """
     Creates the schedule needed to realize these Tensor(s), with Variables.
 
@@ -248,7 +250,7 @@ class Tensor(OpMixin):
     _apply_map_to_tensors(becomes_map, name="Apply Schedule Map")
     return schedule, var_vals
 
-  def schedule(self, *lst:Tensor) -> list[ScheduleItem]:
+  def schedule(self, *lst:Tensor) -> list[ExecItem]:
     """Creates the schedule needed to realize these Tensor(s)."""
     schedule, var_vals = self.schedule_with_vars(*lst)
     assert len(var_vals) == 0
@@ -344,7 +346,7 @@ class Tensor(OpMixin):
     if self.dtype in (dtypes.half, dtypes.bfloat16, *dtypes.fp8s): return self.cast(dtypes.float32).tolist()
     return self.data().tolist()
 
-  def numpy(self) -> 'np.ndarray':  # type: ignore [name-defined] # noqa: F821
+  def numpy(self) -> 'numpy.ndarray':
     """
     Returns the value of this tensor as a `numpy.ndarray`.
 
@@ -395,7 +397,7 @@ class Tensor(OpMixin):
     print(t.shard((t.device, t.device), axis=1).uop)
     ```
     """
-    assert isinstance(self.device, str), "can't shard a MultiLazyBuffer"
+    if not isinstance(self.device, str): raise RuntimeError("can't shard a MultiLazyBuffer")
     if len(devices) == 1: return self.to(devices[0])
     devices = tuple(canonicalize_device(x) for x in devices)
     mlb = self.uop.shard(devices, self._resolve_dim(axis)) if axis is not None else self.uop.copy_to_device(devices)
@@ -406,6 +408,13 @@ class Tensor(OpMixin):
     Shards the tensor across the given devices in place.
     """
     return self.replace(self.shard(devices, axis))
+
+  def shard_like(self, y:Tensor) -> Tensor:
+    """
+    Shards the tensor the same way as `y` (same devices and axis).
+    """
+    if isinstance(y.device, str): return self.to(y.device)
+    return self if isinstance(self.device, tuple) and (y.device, y.uop.axis) == (self.device, self.uop.axis) else self.shard(y.device, y.uop.axis)
 
   CHUNK_SIZE = 2**20
   def fs_load(self, size:int) -> Tensor:
@@ -1334,10 +1343,11 @@ class Tensor(OpMixin):
     print("\\n".join([repr(x.numpy()) for x in split]))
     ```
     """
-    assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
     dim = self._resolve_dim(dim)
-    if isinstance(sizes, int): sizes = [min(sizes, self.shape[dim]-i) for i in range(0, max(1, self.shape[dim]), max(1, sizes))]
-    assert sum(sizes) == self.shape[dim], f"expect sizes to sum exactly to {self.shape[dim]}, but got {sum(sizes)}"
+    dim_sz = self.shape[dim]
+    assert isinstance(dim_sz, int), f"does not support symbolic shape in split dimension {dim}: {self.shape}"
+    if isinstance(sizes, int): sizes = [min(sizes, dim_sz-i) for i in range(0, max(1, dim_sz), max(1, sizes))]
+    assert sum(sizes) == dim_sz, f"expect sizes to sum exactly to {dim_sz}, but got {sum(sizes)}"
     return tuple(self[sl] for sl in [tuple([slice(None)]*dim + [slice(sum(sizes[:i]), sum(sizes[:i + 1]))]) for i in range(len(sizes))])
 
   def chunk(self, chunks:int, dim:int=0) -> list[Tensor]:
@@ -1359,10 +1369,11 @@ class Tensor(OpMixin):
     print("\\n".join([repr(x.numpy()) for x in chunked]))
     ```
     """
-    assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
-    assert chunks > 0, f"expect chunks to be greater than 0, got: {chunks}"
     dim = self._resolve_dim(dim)
-    return list(self.split(ceildiv(self.shape[dim], chunks) if self.shape[dim] else [0]*chunks, dim=dim))
+    dim_sz = self.shape[dim]
+    assert isinstance(dim_sz, int), f"does not support symbolic shape in split dimension {dim}: {self.shape}"
+    assert chunks > 0, f"expect chunks to be greater than 0, got: {chunks}"
+    return list(self.split(ceildiv(dim_sz, chunks) if dim_sz else [0]*chunks, dim=dim))
 
   def unfold(self, dim:int, size:sint, step:int) -> Tensor:
     """
@@ -2788,29 +2799,6 @@ class Tensor(OpMixin):
     """
     return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.exp2)
 
-  def relu(self) -> Tensor:
-    """
-    Applies the Rectified Linear Unit (ReLU) function element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).relu().numpy())
-    ```
-    """
-    # NOTE: if you write this as self.maximum(0) the gradient is wrong, passing through half when self is 0
-    return (self>0).where(self, 0)
-
-  def sigmoid(self) -> Tensor:
-    """
-    Applies the Sigmoid function element-wise.
-
-    - Described: https://en.wikipedia.org/wiki/Sigmoid_function
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).sigmoid().numpy())
-    ```
-    """
-    return (1 + (self * (-1/math.log(2))).exp2()).reciprocal()
-
   def logsigmoid(self) -> Tensor:
     """
     Applies the LogSigmoid function element-wise.
@@ -2823,19 +2811,6 @@ class Tensor(OpMixin):
     """
     return -(-self).softplus()
 
-  def hardsigmoid(self, alpha:float=1/6, beta:float=0.5) -> Tensor:
-    """
-    Applies the Hardsigmoid function element-wise.
-    NOTE: default `alpha` and `beta` values are taken from torch
-
-    - See: https://pytorch.org/docs/stable/generated/torch.nn.functional.hardsigmoid.html
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).hardsigmoid().numpy())
-    ```
-    """
-    return (alpha * self + beta).relu() - (alpha * self + beta - 1).relu()
-
   def sqrt(self) -> Tensor:
     """
     Computes the square root of the tensor element-wise.
@@ -2845,16 +2820,6 @@ class Tensor(OpMixin):
     ```
     """
     return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.sqrt)
-
-  def rsqrt(self) -> Tensor:
-    """
-    Computes the reciprocal of the square root of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 3., 4.]).rsqrt().numpy())
-    ```
-    """
-    return self.sqrt().reciprocal()
 
   def sin(self) -> Tensor:
     """
@@ -2922,36 +2887,6 @@ class Tensor(OpMixin):
 
   # ***** math functions *****
 
-  def trunc(self: Tensor) -> Tensor:
-    """
-    Truncates the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5]).trunc().numpy())
-    ```
-    """
-    return self._apply_uop(UOp.trunc)
-
-  def ceil(self: Tensor) -> Tensor:
-    """
-    Rounds the tensor element-wise towards positive infinity.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5]).ceil().numpy())
-    ```
-    """
-    return (self > (b := self.trunc())).where(b+1, b)
-
-  def floor(self: Tensor) -> Tensor:
-    """
-    Rounds the tensor element-wise towards negative infinity.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5]).floor().numpy())
-    ```
-    """
-    return (self < (b := self.trunc())).where(b-1, b)
-
   def round(self: Tensor) -> Tensor:
     """
     Rounds the tensor element-wise with rounding half to even.
@@ -2961,36 +2896,6 @@ class Tensor(OpMixin):
     ```
     """
     return ((self > 0) == ((b := self.trunc() / 2.0).trunc() == b)).where((self - 0.5).ceil(), (self + 0.5).floor())
-
-  def isinf(self:Tensor, detect_positive:bool=True, detect_negative:bool=True) -> Tensor:
-    """
-    Checks the tensor element-wise to return True where the element is infinity, otherwise returns False
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1, float('inf'), 2, float('-inf'), float('nan')]).isinf().numpy())
-    ```
-    """
-    return (self == float("inf")) * detect_positive + (self == float("-inf")) * detect_negative
-
-  def isnan(self:Tensor) -> Tensor:
-    """
-    Checks the tensor element-wise to return True where the element is NaN, otherwise returns False
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1, float('inf'), 2, float('-inf'), float('nan')]).isnan().numpy())
-    ```
-    """
-    return self != self
-
-  def isfinite(self:Tensor) -> Tensor:
-    """
-    Checks the tensor element-wise to return True where the element is finite, otherwise returns False
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1, float('inf'), 2, float('-inf'), float('nan')]).isfinite().numpy())
-    ```
-    """
-    return (self.isinf()|self.isnan()).logical_not()
 
   def lerp(self, end:Tensor, weight:Tensor|float) -> Tensor:
     """
@@ -3004,36 +2909,6 @@ class Tensor(OpMixin):
       w_i = (weight * (1<<(W_PREC:=7)) + 0.5).cast(dtypes.int16)
       return (self+(((end - self).cast(dtypes.int8) * w_i + (1<<W_PREC-1)).cast(dtypes.uint16) >> W_PREC)).cast(dtypes.uint8)
     return self + (end - self) * weight
-
-  def square(self) -> Tensor:
-    """
-    Squares the tensor element-wise.
-    Equivalent to `self*self`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).square().numpy())
-    ```
-    """
-    return self*self
-
-  def clamp(self, min_=None, max_=None) -> Tensor:
-    """
-    Clips (clamps) the values in the tensor between `min_` and `max_` element-wise.
-    If `min_` is `None`, there is no lower bound. If `max_` is None, there is no upper bound.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).clip(-1, 1).numpy())
-    ```
-    """
-    if min_ is None and max_ is None: raise RuntimeError("at least one of 'min_' or 'max_' must not be None")
-    ret = (self < min_).where(min_, self) if min_ is not None else self
-    return (ret > max_).where(max_, ret) if max_ is not None else ret
-
-  def clip(self, min_=None, max_=None) -> Tensor:
-    """
-    Alias for `Tensor.clamp`.
-    """
-    return self.clamp(min_, max_)
 
   def sign(self) -> Tensor:
     """
@@ -3103,66 +2978,6 @@ class Tensor(OpMixin):
     """
     return gamma * (self >= 0).detach().where(self, alpha * (self.exp() - 1))
 
-  def swish(self) -> Tensor:
-    """
-    See `.silu()`
-
-    - Paper: https://arxiv.org/abs/1710.05941v1
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).swish().numpy())
-    ```
-    """
-    return self * self.sigmoid()
-
-  def silu(self) -> Tensor:
-    """
-    Applies the Sigmoid Linear Unit (SiLU) function element-wise.
-
-    - Paper: https://arxiv.org/abs/1606.08415
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).silu().numpy())
-    ```
-    """
-    return self.swish()   # The SiLU function is also known as the swish function.
-
-  def relu6(self) -> Tensor:
-    """
-    Applies the ReLU6 function element-wise.
-
-    - Paper: https://arxiv.org/abs/1704.04861v1
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-9., -6., -3., 0., 3., 6., 9.]).relu6().numpy())
-    ```
-    """
-    return self.relu() - (self-6).relu()
-
-  def hardswish(self) -> Tensor:
-    """
-    Applies the Hardswish function element-wise.
-
-    - Paper: https://arxiv.org/abs/1905.02244v5
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).hardswish().numpy())
-    ```
-    """
-    return self * (self+3).relu6() * (1/6)
-
-  def tanh(self) -> Tensor:
-    """
-    Applies the Hyperbolic Tangent (tanh) function element-wise.
-
-    - Described: https://en.wikipedia.org/wiki/Hyperbolic_functions#Tanh
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).tanh().numpy())
-    ```
-    """
-    return 2.0 * ((2.0 * self).sigmoid()) - 1.0
-
   def sinh(self) -> Tensor:
     """
     Applies the Hyperbolic Sine (sinh) function element-wise.
@@ -3223,16 +3038,6 @@ class Tensor(OpMixin):
     """
     return (self + (self.square() - 1).sqrt()).log()
 
-  def hardtanh(self, min_val=-1, max_val=1) -> Tensor:
-    """
-    Applies the Hardtanh function element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1.5, -1.0, -0.5, 0., 0.5, 1.0, 1.5]).hardtanh().numpy())
-    ```
-    """
-    return self.clip(min_val, max_val)
-
   def erf(self) -> Tensor:
     """
     Applies error function element-wise.
@@ -3246,41 +3051,6 @@ class Tensor(OpMixin):
     # https://personal.math.ubc.ca/~cbm/aands/page_299.htm 7.1.26
     t = 1.0 / (1.0 + 0.3275911 * self.abs())
     return self.sign() * (1.0 - t * polyN(t, [1.061405429, -1.453152027, 1.421413741, -0.284496736, 0.254829592]) * (-self.square()).exp())
-
-  def gelu(self) -> Tensor:
-    """
-    Applies the Gaussian Error Linear Unit (GELU) function element-wise.
-
-    - Paper: https://arxiv.org/abs/1606.08415v5
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).gelu().numpy())
-    ```
-    """
-    return 0.5 * self * (1 + (math.sqrt(2 / math.pi) * (self + 0.044715 * self ** 3)).tanh())
-
-  def quick_gelu(self) -> Tensor:
-    """
-    Applies the Sigmoid GELU approximation element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).quick_gelu().numpy())
-    ```
-    """
-    return self * (self * 1.702).sigmoid()
-
-  def leaky_relu(self, neg_slope=0.01) -> Tensor:
-    """
-    Applies the Leaky ReLU function element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).leaky_relu().numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).leaky_relu(neg_slope=0.42).numpy())
-    ```
-    """
-    return (self<0).where(neg_slope*self, self)
 
   def mish(self) -> Tensor:
     """
