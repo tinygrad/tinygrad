@@ -344,7 +344,8 @@ def _mark_gemm_reduces(k:Scheduler) -> None:
 
 def _fp8_mul_promote_to_acc(k:Scheduler) -> None:
   # If TC didn't apply, fp8 matmul should still multiply in the accumulation dtype when one is requested.
-  if any(u.op is Ops.WMMA for u in k.ast.toposort()): return
+  if not any(u.op is Ops.REDUCE and u.arg is Ops.ADD and u.tag == "GEMM" for u in k.ast.backward_slice): return
+  if any(u.op is Ops.WMMA for u in k.ast.backward_slice): return
   replaces: dict[UOp, UOp] = {}
   for red in [x for x in k.ast.backward_slice if x.op is Ops.REDUCE and x.arg is Ops.ADD and x.tag == "GEMM"]:
     acc_dtype = red.dtype.scalar()
