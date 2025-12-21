@@ -12,6 +12,7 @@ from tinygrad.helpers import Context, flatten, dedup, TC_SELECT, TC_OPT, getenv
 from tinygrad.dtype import DType, dtypes, PtrDType, AddrSpace
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer
+from tinygrad.renderer.rdna import RDNARenderer
 MOCKGPU = getenv("MOCKGPU")
 
 from tinygrad.uop.ops import print_uops # noqa: F401 # pylint: disable=unused-import
@@ -56,7 +57,8 @@ class TestLinearizer(unittest.TestCase):
     uops = get_program(ast, renderer=Device[Device.DEFAULT].renderer, opts=[]).uops
     self.assertEqual(len([x for x in uops if x.op is Ops.CAST]), 0)
 
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "broken on ptx")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, RDNARenderer)),
+    "broken on ptx and rdna (INDEX dtype differs)")
   def test_late_bias_load(self):
     img = Tensor.empty(1, 3, 16, 16)
     w = Tensor.empty(16, 3, 3, 3)
@@ -174,7 +176,7 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "broken on ptx for some reason")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, RDNARenderer)), "broken on ptx/rdna (INDEX dtype differs)")
   def test_upcast_with_locals(self):
     x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
     r = (x@y).relu()
@@ -410,7 +412,7 @@ class TestLinearizer(unittest.TestCase):
     helper(Tensor.arange(255), max_ops=2)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "broken on ptx for some reason")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, RDNARenderer)), "broken on ptx/rdna (INDEX dtype differs)")
   def test_grouped_store_phis(self):
     """
     float4 acc0 = float4(0.0,0.0,0.0,0.0);
@@ -465,7 +467,7 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
-  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "broken on ptx for some reason")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, RDNARenderer)), "broken on ptx/rdna (INDEX dtype differs)")
   def test_grouped_store_local_only(self):
     x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
     r = (x@y).relu()

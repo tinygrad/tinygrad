@@ -622,10 +622,18 @@ def render_if(ctx, x):
   save_sgpr = ctx.if_sgpr_base + len(ctx.if_save_stack)
   ctx.if_save_stack.append(save_sgpr)
   ctx.max_if_depth = max(ctx.max_if_depth, len(ctx.if_save_stack))
-  return [
-    f"s_and_b32 vcc_lo, exec_lo, {ctx.r[x.src[0]]}",
+  cond_reg = ctx.r[x.src[0]]
+  instrs = []
+  # If condition is a VGPR (not an SGPR), convert to VCC mask first
+  if cond_reg.startswith('v'):
+    instrs.append(f"v_cmp_ne_u32 vcc_lo, {cond_reg}, 0")
+    instrs.append("s_and_b32 vcc_lo, exec_lo, vcc_lo")
+  else:
+    instrs.append(f"s_and_b32 vcc_lo, exec_lo, {cond_reg}")
+  instrs.extend([
     f"s_and_saveexec_b32 s{save_sgpr}, vcc_lo",
-    f"s_cbranch_execz IF_END_{ctx.uops.index(x)}"]
+    f"s_cbranch_execz IF_END_{ctx.uops.index(x)}"])
+  return instrs
 
 def render_endif(ctx, x):
   """Render ENDIF by popping the exec save stack."""
@@ -639,47 +647,81 @@ def render_64bit_mul(ctx, x):
   """Render 64-bit integer multiplication. For full 64-bit result:
   result_lo = (a_lo * b_lo) & 0xFFFFFFFF
   result_hi = (a_lo * b_lo) >> 32 + a_hi * b_lo + a_lo * b_hi
-  Simplified for values where only low 32 bits of operands are used."""
+  We need to handle both operands having 64 bits, not just the simplified case."""
   rx = ctx.r[x]
   a, b = x.src[0], x.src[1]
 
   # Check if this is a cast from signed 32-bit (magic number multiplication pattern)
   a_is_signed_cast = a.op is Ops.CAST and a.src[0].dtype == dtypes.int32
 
-  # Get low 32 bits of operands
+  # Get operand registers
   if a.op is Ops.CAST and a.src[0].dtype.itemsize == 4:
     ra = ctx.r[a.src[0]]  # Use 32-bit source directly
+    a_is_32bit = True
   else:
     ra = ctx.r[a]
-  ra_lo = f"v{get_reg_base(ra)}" if '[' in ra else ra
+    a_is_32bit = a.op is Ops.CAST and a.src[0].dtype.itemsize == 4
 
   if b.op is Ops.CONST:
-    rb_lo = render_val(b.arg & 0xFFFFFFFF, dtypes.uint32)
-    b_const_hi_bit_set = (b.arg & 0x80000000) != 0  # Would be negative as signed 32-bit
+    b_val = b.arg
+    b_lo_val = b_val & 0xFFFFFFFF
+    b_hi_val = (b_val >> 32) & 0xFFFFFFFF
+    rb_lo = render_val(b_lo_val, dtypes.uint32)
+    rb_hi = render_val(b_hi_val, dtypes.uint32) if b_hi_val != 0 else None
+    b_const_hi_bit_set = (b_val & 0x80000000) != 0
+    b_is_32bit = b_hi_val == 0
   else:
     rb = ctx.r[b]
     rb_lo = f"v{get_reg_base(rb)}" if '[' in rb else rb
+    rb_hi = f"v{get_reg_base(rb) + 1}" if '[' in rb else None
     b_const_hi_bit_set = False
+    b_is_32bit = '[' not in rb
+
+  # Get low/high parts of a
+  if '[' in ra:
+    ra_lo = f"v{get_reg_base(ra)}"
+    ra_hi = f"v{get_reg_base(ra) + 1}"
+  else:
+    ra_lo = ra
+    ra_hi = None
 
   # Check if result is a pair or single register
   if '[' in rx:
     rx_lo = f"v{get_reg_base(rx)}"
     rx_hi = f"v{get_reg_base(rx) + 1}"
-    # For signed 64-bit with sign-extended 32-bit operand and large constant (high bit set):
-    # - v_mul_hi_i32 would interpret the constant as negative, giving wrong results
-    # - Use v_mul_hi_u32 and correct for sign extension: if a < 0, subtract constant from high bits
-    # Formula: high_signed = high_unsigned - (a < 0 ? b : 0)
-    if x.dtype == dtypes.long and a_is_signed_cast and b.op is Ops.CONST and b_const_hi_bit_set:
-      s = ctx.get_scratch_vgpr()
-      return [
-        f"v_mul_lo_u32 {rx_lo}, {ra_lo}, {rb_lo}",
-        f"v_mul_hi_u32 {rx_hi}, {ra_lo}, {rb_lo}",
-        f"v_cmp_lt_i32 vcc_lo, {ra_lo}, 0",  # Check if input was negative
-        f"v_cndmask_b32 v{s}, 0, {rb_lo}, vcc_lo",  # Select constant if negative, else 0
-        f"v_sub_nc_u32 {rx_hi}, {rx_hi}, v{s}",  # Correct for sign extension
-      ]
-    mul_hi_instr = "v_mul_hi_i32" if x.dtype == dtypes.long else "v_mul_hi_u32"
-    return [f"v_mul_lo_u32 {rx_lo}, {ra_lo}, {rb_lo}", f"{mul_hi_instr} {rx_hi}, {ra_lo}, {rb_lo}"]
+
+    # Simple case: at least one operand is 32-bit
+    if a_is_32bit or b_is_32bit:
+      # For signed 64-bit with sign-extended 32-bit operand and large constant (high bit set):
+      if x.dtype == dtypes.long and a_is_signed_cast and b.op is Ops.CONST and b_const_hi_bit_set:
+        s = ctx.get_scratch_vgpr()
+        return [
+          f"v_mul_lo_u32 {rx_lo}, {ra_lo}, {rb_lo}",
+          f"v_mul_hi_u32 {rx_hi}, {ra_lo}, {rb_lo}",
+          f"v_cmp_lt_i32 vcc_lo, {ra_lo}, 0",
+          f"v_cndmask_b32 v{s}, 0, {rb_lo}, vcc_lo",
+          f"v_sub_nc_u32 {rx_hi}, {rx_hi}, v{s}",
+        ]
+      mul_hi_instr = "v_mul_hi_i32" if x.dtype == dtypes.long else "v_mul_hi_u32"
+      return [f"v_mul_lo_u32 {rx_lo}, {ra_lo}, {rb_lo}", f"{mul_hi_instr} {rx_hi}, {ra_lo}, {rb_lo}"]
+
+    # Full 64x64 -> 64 bit multiplication
+    # result_lo = low32(a_lo * b_lo)
+    # result_hi = high32(a_lo * b_lo) + low32(a_hi * b_lo) + low32(a_lo * b_hi)
+    s = ctx.get_scratch_vgpr()
+    instrs = [
+      f"v_mul_lo_u32 {rx_lo}, {ra_lo}, {rb_lo}",       # result_lo = low(a_lo * b_lo)
+      f"v_mul_hi_u32 {rx_hi}, {ra_lo}, {rb_lo}",       # result_hi = high(a_lo * b_lo)
+    ]
+    # Add a_hi * b_lo
+    if ra_hi is not None:
+      instrs.append(f"v_mul_lo_u32 v{s}, {ra_hi}, {rb_lo}")  # low(a_hi * b_lo)
+      instrs.append(f"v_add_nc_u32 {rx_hi}, {rx_hi}, v{s}")  # result_hi += low(a_hi * b_lo)
+    # Add a_lo * b_hi
+    if rb_hi is not None:
+      instrs.append(f"v_mul_lo_u32 v{s}, {ra_lo}, {rb_hi}")  # low(a_lo * b_hi)
+      instrs.append(f"v_add_nc_u32 {rx_hi}, {rx_hi}, v{s}")  # result_hi += low(a_lo * b_hi)
+    return instrs
   else:
     # Single register output - just compute low 32 bits
     return f"v_mul_lo_u32 {rx}, {ra_lo}, {rb_lo}"
@@ -781,6 +823,34 @@ def render_64bit_add(ctx, x, a, b):
     f"v_add_co_ci_u32 v{dst_hi}, vcc_lo, {a_hi}, {b_hi}, vcc_lo",  # high + high + carry
   ]
 
+def render_64bit_sub(ctx, x, a, b):
+  """Render 64-bit integer subtraction with borrow: dst = a - b.
+  Uses v_sub_co_u32 for low 32 bits (produces borrow), v_sub_co_ci_u32 for high (consumes borrow).
+  Handles constants: for small constants, high part is 0; for register pairs, extracts lo/hi."""
+  rx = ctx.r[x]
+  ra = ctx.r[a]
+  rb = ctx.r[b]
+  dst_lo, dst_hi = get_reg_base(rx), get_reg_base(rx) + 1
+
+  # Helper to extract lo/hi from a 64-bit operand (register pair or constant)
+  def get_lo_hi(r):
+    if '[' in r:  # register pair like v[10:11]
+      base = get_reg_base(r)
+      return f"v{base}", f"v{base+1}"
+    elif r.startswith('v') or r.startswith('s'):  # single register
+      num = int(r[1:])
+      return f"v{num}", f"v{num}"  # same reg for both (shouldn't happen for 64-bit)
+    else:  # constant - high part is 0 for small constants
+      return r, "0"
+
+  a_lo, a_hi = get_lo_hi(ra)
+  b_lo, b_hi = get_lo_hi(rb)
+
+  return [
+    f"v_sub_co_u32 v{dst_lo}, vcc_lo, {a_lo}, {b_lo}",  # low - low, borrow in vcc_lo
+    f"v_sub_co_ci_u32 v{dst_hi}, vcc_lo, {a_hi}, {b_hi}, vcc_lo",  # high - high - borrow
+  ]
+
 def render_64bit_or(ctx, x, a, b):
   """Render 64-bit bitwise OR: dst = a | b."""
   rx = ctx.r[x]
@@ -794,6 +864,355 @@ def render_64bit_or(ctx, x, a, b):
   return [
     f"v_or_b32 v{dst_lo}, v{a_lo}, v{b_lo}",
     f"v_or_b32 v{dst_hi}, v{a_hi}, v{b_hi}",
+  ]
+
+def render_64bit_xor(ctx, x, a, b):
+  """Render 64-bit bitwise XOR: dst = a ^ b."""
+  rx = ctx.r[x]
+  ra = ctx.r[a]
+  rb = ctx.r[b]
+  dst_lo, dst_hi = get_reg_base(rx), get_reg_base(rx) + 1
+  a_lo = get_reg_base(ra) if '[' in ra else int(ra[1:])
+  a_hi = a_lo + 1 if '[' in ra else a_lo
+  b_lo = get_reg_base(rb) if '[' in rb else int(rb[1:])
+  b_hi = b_lo + 1 if '[' in rb else b_lo
+  return [
+    f"v_xor_b32 v{dst_lo}, v{a_lo}, v{b_lo}",
+    f"v_xor_b32 v{dst_hi}, v{a_hi}, v{b_hi}",
+  ]
+
+def render_64bit_and(ctx, x, a, b):
+  """Render 64-bit bitwise AND: dst = a & b."""
+  rx = ctx.r[x]
+  ra = ctx.r[a]
+  rb = ctx.r[b]
+  dst_lo, dst_hi = get_reg_base(rx), get_reg_base(rx) + 1
+  a_lo = get_reg_base(ra) if '[' in ra else int(ra[1:])
+  a_hi = a_lo + 1 if '[' in ra else a_lo
+  b_lo = get_reg_base(rb) if '[' in rb else int(rb[1:])
+  b_hi = b_lo + 1 if '[' in rb else b_lo
+  return [
+    f"v_and_b32 v{dst_lo}, v{a_lo}, v{b_lo}",
+    f"v_and_b32 v{dst_hi}, v{a_hi}, v{b_hi}",
+  ]
+
+def render_64bit_udiv(ctx, x, a, b):
+  """Render 64-bit unsigned division using f64 arithmetic.
+  Algorithm: convert to f64, divide, floor, convert back, then refine.
+  f64 has 53 bits of mantissa, so we need iteration for full 64-bit precision.
+  Special case: if b == 1, return a directly (avoids f64 precision loss)."""
+  rx, ra, rb = ctx.r[x], ctx.r[a], ctx.r[b]
+  dst_lo, dst_hi = get_reg_base(rx), get_reg_base(rx) + 1
+  a_lo = get_reg_base(ra) if '[' in ra else int(ra[1:])
+  a_hi = a_lo + 1 if '[' in ra else a_lo
+  b_lo = get_reg_base(rb) if '[' in rb else int(rb[1:])
+  b_hi = b_lo + 1 if '[' in rb else b_lo
+  s = ctx.get_scratch_vgpr()
+  # Need 16+ scratch regs for f64 values, intermediates, multiply, compare, and refinement loop
+  return [
+    # Special case: if b == 1, result = a (avoids f64 precision loss for large values)
+    # Check: b_hi == 0 && b_lo == 1
+    f"v_or_b32 v{s}, v{b_hi}, 0",                      # copy b_hi
+    f"v_xor_b32 v{s+1}, v{b_lo}, 1",                   # b_lo XOR 1 (0 if b_lo == 1)
+    f"v_or_b32 v{s}, v{s}, v{s+1}",                    # combined: 0 if b == 1
+    f"v_cmp_eq_u32 vcc_lo, v{s}, 0",                   # vcc = (b == 1)
+    # Save b==1 flag for later
+    f"v_cndmask_b32 v{s+16}, 0, 1, vcc_lo",            # s+16 = b_is_one flag
+
+    # Convert a (u64) to f64: a_f64 = a_hi * 2^32 + a_lo
+    f"v_cvt_f64_u32 v[{s}:{s+1}], v{a_lo}",           # s = f64(a_lo)
+    f"v_cvt_f64_u32 v[{s+2}:{s+3}], v{a_hi}",         # s+2 = f64(a_hi)
+    # Multiply a_hi by 2^32 using FMA: a_hi_f64 * 4294967296.0
+    f"v_mov_b32 v{s+4}, 0x00000000",                   # low bits of 2^32 in f64
+    f"v_mov_b32 v{s+5}, 0x41F00000",                   # high bits of 2^32 in f64 (0x41F0000000000000)
+    f"v_fma_f64 v[{s+2}:{s+3}], v[{s+2}:{s+3}], v[{s+4}:{s+5}], v[{s}:{s+1}]",  # a_f64 = a_hi*2^32 + a_lo
+
+    # Convert b (u64) to f64
+    f"v_cvt_f64_u32 v[{s}:{s+1}], v{b_lo}",           # s = f64(b_lo)
+    f"v_cvt_f64_u32 v[{s+6}:{s+7}], v{b_hi}",         # s+6 = f64(b_hi)
+    f"v_fma_f64 v[{s+6}:{s+7}], v[{s+6}:{s+7}], v[{s+4}:{s+5}], v[{s}:{s+1}]",  # b_f64 = b_hi*2^32 + b_lo
+
+    # Compute reciprocal of b using Newton-Raphson on f64
+    # rcp = 1/b, refined with: rcp = rcp * (2 - b * rcp)
+    f"v_rcp_f64 v[{s}:{s+1}], v[{s+6}:{s+7}]",        # s = approx 1/b (24 bits)
+    # Newton-Raphson iteration 1: 2 - b*rcp (use v_add_f64 with negation)
+    f"v_mov_b32 v{s+4}, 0x00000000",                   # low bits of 2.0 in f64
+    f"v_mov_b32 v{s+5}, 0x40000000",                   # high bits of 2.0 in f64
+    f"v_mul_f64 v[{s+8}:{s+9}], v[{s+6}:{s+7}], v[{s}:{s+1}]",  # b * rcp
+    f"v_add_f64 v[{s+4}:{s+5}], v[{s+4}:{s+5}], -v[{s+8}:{s+9}]",  # 2 + (-(b*rcp)) = 2 - b*rcp
+    f"v_mul_f64 v[{s}:{s+1}], v[{s}:{s+1}], v[{s+4}:{s+5}]",  # rcp = rcp * (2 - b*rcp)
+    # Newton-Raphson iteration 2
+    f"v_mov_b32 v{s+4}, 0x00000000",
+    f"v_mov_b32 v{s+5}, 0x40000000",
+    f"v_mul_f64 v[{s+8}:{s+9}], v[{s+6}:{s+7}], v[{s}:{s+1}]",  # b * rcp
+    f"v_add_f64 v[{s+4}:{s+5}], v[{s+4}:{s+5}], -v[{s+8}:{s+9}]",  # 2 - b*rcp
+    f"v_mul_f64 v[{s}:{s+1}], v[{s}:{s+1}], v[{s+4}:{s+5}]",
+
+    # Compute q = floor(a / b) = floor(a * rcp)
+    f"v_mul_f64 v[{s}:{s+1}], v[{s+2}:{s+3}], v[{s}:{s+1}]",  # q_f64 = a * rcp
+    f"v_floor_f64 v[{s}:{s+1}], v[{s}:{s+1}]",        # q_f64 = floor(q_f64)
+
+    # Refinement using integer arithmetic: check if q*b > a, if so decrement q
+    # Also check if q_f64 >= 2^64 (which means f64 overflow, definitely need to decrement)
+    f"v_mov_b32 v{s+4}, 0x00000000",
+    f"v_mov_b32 v{s+5}, 0x43F00000",                   # 2^64 in f64 (0x43F0000000000000)
+    f"v_cmp_ge_f64 vcc_lo, v[{s}:{s+1}], v[{s+4}:{s+5}]",  # vcc = (q_f64 >= 2^64)
+    f"v_cndmask_b32 v{s+15}, 0, 1, vcc_lo",            # save overflow flag
+
+    # First, extract q as integer: q_hi and q_lo from q_f64
+    # Save to dst registers early since they're the final destination anyway
+    f"v_mov_b32 v{s+4}, 0x00000000",
+    f"v_mov_b32 v{s+5}, 0x3DF00000",                   # 1/2^32
+    f"v_mul_f64 v[{s+8}:{s+9}], v[{s}:{s+1}], v[{s+4}:{s+5}]",  # q / 2^32
+    f"v_floor_f64 v[{s+8}:{s+9}], v[{s+8}:{s+9}]",    # q_hi_f64
+    f"v_cvt_u32_f64 v{dst_hi}, v[{s+8}:{s+9}]",        # q_hi as u32 -> dst_hi
+    # q_lo = q - q_hi * 2^32
+    f"v_mov_b32 v{s+4}, 0x00000000",
+    f"v_mov_b32 v{s+5}, 0xC1F00000",                   # -2^32
+    f"v_fma_f64 v[{s+8}:{s+9}], v[{s+8}:{s+9}], v[{s+4}:{s+5}], v[{s}:{s+1}]",  # q_lo_f64
+    f"v_cvt_u32_f64 v{dst_lo}, v[{s+8}:{s+9}]",        # q_lo as u32 -> dst_lo
+
+    # Compute product = q * b (64-bit integer multiply, with overflow detection)
+    # The full 128-bit product is:
+    #   q_lo*b_lo + (q_lo*b_hi + q_hi*b_lo)*2^32 + q_hi*b_hi*2^64
+    # We want the lower 64 bits and detect if upper 64 bits are non-zero
+    # q_lo is in v{dst_lo}, q_hi is in v{dst_hi}
+    f"v_mul_lo_u32 v{s+4}, v{dst_lo}, v{b_lo}",        # low(q_lo * b_lo) = product_lo
+    f"v_mul_hi_u32 v{s+5}, v{dst_lo}, v{b_lo}",        # high(q_lo * b_lo)
+    # q_lo * b_hi: low 32 bits add to product_hi, high 32 bits are overflow
+    f"v_mul_lo_u32 v{s+8}, v{dst_lo}, v{b_hi}",        # low(q_lo * b_hi)
+    f"v_mul_hi_u32 v{s+12}, v{dst_lo}, v{b_hi}",       # high(q_lo * b_hi) -> overflow
+    # q_hi * b_lo: low 32 bits add to product_hi, high 32 bits are overflow
+    f"v_mul_lo_u32 v{s+9}, v{dst_hi}, v{b_lo}",        # low(q_hi * b_lo)
+    f"v_mul_hi_u32 v{s+13}, v{dst_hi}, v{b_lo}",       # high(q_hi * b_lo) -> overflow
+    # q_hi * b_hi: all bits are overflow
+    f"v_mul_lo_u32 v{s+14}, v{dst_hi}, v{b_hi}",       # q_hi * b_hi -> overflow
+    # Add to product_hi with carry detection
+    f"v_add_co_u32 v{s+5}, vcc_lo, v{s+5}, v{s+8}",    # add low(q_lo*b_hi) to high part
+    f"v_cndmask_b32 v{s+8}, 0, 1, vcc_lo",             # carry1
+    f"v_add_co_u32 v{s+5}, vcc_lo, v{s+5}, v{s+9}",    # add low(q_hi*b_lo) to high part
+    f"v_cndmask_b32 v{s+9}, 0, 1, vcc_lo",             # carry2
+    # Combine all overflow sources
+    f"v_or_b32 v{s+12}, v{s+12}, v{s+13}",             # overflow |= high(q_hi*b_lo)
+    f"v_or_b32 v{s+12}, v{s+12}, v{s+14}",             # overflow |= q_hi*b_hi
+    f"v_or_b32 v{s+12}, v{s+12}, v{s+8}",              # overflow |= carry1
+    f"v_or_b32 v{s+12}, v{s+12}, v{s+9}",              # overflow |= carry2
+    # product is in v{s+4} (low), v{s+5} (high), overflow in v{s+12}
+
+    # Compute how far off we are: diff = product - a (if product > a) or r = a - product (if product <= a)
+    # We'll use the sign to determine which direction to adjust
+
+    # First try r = a - product (handles case where q is too small or just right)
+    f"v_sub_co_u32 v{s+8}, vcc_lo, v{a_lo}, v{s+4}",    # r_lo = a_lo - product_lo
+    f"v_sub_co_ci_u32 v{s+9}, vcc_lo, v{a_hi}, v{s+5}, vcc_lo",  # r_hi = a_hi - product_hi - borrow
+    f"v_cndmask_b32 v{s+10}, 0, 1, vcc_lo",            # save borrow flag (1 = product > a)
+
+    # Also check for overflow (multiply produced > 64 bits) and q >= 2^64
+    f"v_or_b32 v{s+10}, v{s+10}, v{s+12}",             # borrowed = borrow || multiply_overflow
+    f"v_or_b32 v{s+10}, v{s+10}, v{s+15}",             # borrowed |= (q >= 2^64)
+
+    # If borrowed (product > a), compute diff = product - a and adjustment = ceil(diff/b)
+    # If not borrowed (product <= a), r is valid and adjustment = floor(r/b) to add to q
+    # Compute product - a (opposite subtraction) for the borrowed case
+    f"v_sub_co_u32 v{s+11}, vcc_lo, v{s+4}, v{a_lo}",  # diff_lo = product_lo - a_lo
+    f"v_sub_co_ci_u32 v{s+13}, vcc_lo, v{s+5}, v{a_hi}, vcc_lo",  # diff_hi = product_hi - a_hi - borrow
+
+    # Select between r (a-product) and diff (product-a) based on borrowed flag
+    f"v_cmp_ne_u32 vcc_lo, v{s+10}, 0",               # vcc = borrowed
+    f"v_cndmask_b32 v{s+8}, v{s+8}, v{s+11}, vcc_lo", # value_lo = diff if borrowed else r
+    f"v_cndmask_b32 v{s+9}, v{s+9}, v{s+13}, vcc_lo", # value_hi = diff if borrowed else r
+
+    # Convert value to f64
+    f"v_cvt_f64_u32 v[{s+11}:{s+12}], v{s+8}",        # f64(value_lo)
+    f"v_cvt_f64_u32 v[{s+13}:{s+14}], v{s+9}",        # f64(value_hi)
+    f"v_mov_b32 v{s+4}, 0x00000000",
+    f"v_mov_b32 v{s+5}, 0x41F00000",                   # 2^32 in f64
+    f"v_fma_f64 v[{s+11}:{s+12}], v[{s+13}:{s+14}], v[{s+4}:{s+5}], v[{s+11}:{s+12}]",  # value_f64
+
+    # Recompute b_f64
+    f"v_cvt_f64_u32 v[{s+13}:{s+14}], v{b_lo}",       # f64(b_lo)
+    f"v_cvt_f64_u32 v[{s+4}:{s+5}], v{b_hi}",         # f64(b_hi)  # use s+4:s+5 temp
+    f"v_mov_b32 v{s+6}, 0x00000000",
+    f"v_mov_b32 v{s+7}, 0x41F00000",                   # 2^32 in f64
+    f"v_fma_f64 v[{s+13}:{s+14}], v[{s+4}:{s+5}], v[{s+6}:{s+7}], v[{s+13}:{s+14}]",  # b_f64
+
+    # For borrowed case: adjustment = ceil(diff/b) = floor((diff + b - 1) / b)
+    # For non-borrowed: adjustment = floor(r/b)
+    # Add (b - 1) to value if borrowed to compute ceiling
+    f"v_sub_co_u32 v{s+4}, vcc_lo, v{b_lo}, 1",       # b_lo - 1
+    f"v_sub_co_ci_u32 v{s+5}, vcc_lo, v{b_hi}, 0, vcc_lo",  # b_hi - borrow
+    # Convert (b-1) to f64
+    f"v_cvt_f64_u32 v[{s+6}:{s+7}], v{s+4}",          # f64((b-1)_lo)
+    f"v_cvt_f64_u32 v[{s+8}:{s+9}], v{s+5}",          # f64((b-1)_hi) - FIXED: use s+8:s+9 instead of s+4:s+5
+    f"v_mov_b32 v{s+4}, 0x00000000",
+    f"v_mov_b32 v{s+5}, 0x41F00000",                   # 2^32 in f64
+    f"v_fma_f64 v[{s+6}:{s+7}], v[{s+8}:{s+9}], v[{s+4}:{s+5}], v[{s+6}:{s+7}]",  # (b-1)_f64
+    # Conditionally add (b-1) if borrowed
+    f"v_cmp_ne_u32 vcc_lo, v{s+10}, 0",               # vcc = borrowed
+    f"v_cndmask_b32 v{s+4}, 0, v{s+6}, vcc_lo",       # select: (b-1)_lo if borrowed else 0
+    f"v_cndmask_b32 v{s+5}, 0, v{s+7}, vcc_lo",       # select: (b-1)_hi if borrowed else 0
+    f"v_add_f64 v[{s+11}:{s+12}], v[{s+11}:{s+12}], v[{s+4}:{s+5}]",  # value + (b-1) if borrowed
+
+    # Compute adjustment = floor(adjusted_value / b)
+    f"v_rcp_f64 v[{s+4}:{s+5}], v[{s+13}:{s+14}]",    # 1/b_f64
+    f"v_mul_f64 v[{s+11}:{s+12}], v[{s+11}:{s+12}], v[{s+4}:{s+5}]",  # adjusted_value/b
+    f"v_floor_f64 v[{s+11}:{s+12}], v[{s+11}:{s+12}]",  # floor
+    f"v_cvt_u32_f64 v{s+4}, v[{s+11}:{s+12}]",        # adjustment as u32
+
+    # Apply adjustment: if borrowed, q -= adjustment; else q += adjustment
+    f"v_cmp_ne_u32 vcc_lo, v{s+10}, 0",               # vcc = borrowed
+    # For subtraction, negate adjustment: subtract = add negative (via two's complement)
+    f"v_xor_b32 v{s+5}, v{s+4}, -1",                  # ~adjustment
+    f"v_add_nc_u32 v{s+5}, v{s+5}, 1",                # -adjustment (two's complement)
+    f"v_cndmask_b32 v{s+4}, v{s+4}, v{s+5}, vcc_lo",  # select: -adjustment if borrowed, +adjustment otherwise
+
+    # Handle sign extension for 64-bit add: if adjustment was negated, sign extend to -1, else 0
+    f"v_ashrrev_i32 v{s+5}, 31, v{s+4}",              # sign extend adjustment to v{s+5}
+
+    # 64-bit add: q += signed_adjustment
+    f"v_add_co_u32 v{dst_lo}, vcc_lo, v{dst_lo}, v{s+4}",  # q_lo += adjustment
+    f"v_add_co_ci_u32 v{dst_hi}, vcc_lo, v{dst_hi}, v{s+5}, vcc_lo",  # q_hi += sign_ext + carry
+
+    # If b == 1, use a instead of computed quotient (b_is_one flag in v{s+16})
+    f"v_cmp_ne_u32 vcc_lo, v{s+16}, 0",               # vcc = (b == 1)
+    f"v_cndmask_b32 v{dst_lo}, v{dst_lo}, v{a_lo}, vcc_lo",  # dst_lo = a_lo if b==1 else q_lo
+    f"v_cndmask_b32 v{dst_hi}, v{dst_hi}, v{a_hi}, vcc_lo",  # dst_hi = a_hi if b==1 else q_hi
+  ]
+
+def render_64bit_idiv(ctx, x, a, b):
+  """Render 64-bit signed division using f64 arithmetic."""
+  rx, ra, rb = ctx.r[x], ctx.r[a], ctx.r[b]
+  dst_lo, dst_hi = get_reg_base(rx), get_reg_base(rx) + 1
+  a_lo = get_reg_base(ra) if '[' in ra else int(ra[1:])
+  a_hi = a_lo + 1 if '[' in ra else a_lo
+  b_lo = get_reg_base(rb) if '[' in rb else int(rb[1:])
+  b_hi = b_lo + 1 if '[' in rb else b_lo
+  s = ctx.get_scratch_vgpr()
+  # For signed division, convert to unsigned, divide, then fix sign
+  return [
+    # Get absolute values and track signs
+    # sign_a = a >> 63, sign_b = b >> 63
+    f"v_ashrrev_i32 v{s}, 31, v{a_hi}",               # s = sign extension of a
+    f"v_ashrrev_i32 v{s+1}, 31, v{b_hi}",             # s+1 = sign extension of b
+    f"v_xor_b32 v{s+2}, v{s}, v{s+1}",                # s+2 = result sign (a_sign ^ b_sign)
+    # abs_a = (a ^ sign) - sign
+    f"v_xor_b32 v{s+3}, v{a_lo}, v{s}",
+    f"v_xor_b32 v{s+4}, v{a_hi}, v{s}",
+    f"v_sub_co_u32 v{s+3}, vcc_lo, v{s+3}, v{s}",
+    f"v_sub_co_ci_u32 v{s+4}, vcc_lo, v{s+4}, v{s}, vcc_lo",  # abs_a in s+3:s+4
+    # abs_b = (b ^ sign) - sign
+    f"v_xor_b32 v{s+5}, v{b_lo}, v{s+1}",
+    f"v_xor_b32 v{s+6}, v{b_hi}, v{s+1}",
+    f"v_sub_co_u32 v{s+5}, vcc_lo, v{s+5}, v{s+1}",
+    f"v_sub_co_ci_u32 v{s+6}, vcc_lo, v{s+6}, v{s+1}, vcc_lo",  # abs_b in s+5:s+6
+
+    # Convert abs_a to f64
+    f"v_cvt_f64_u32 v[{s+7}:{s+8}], v{s+3}",
+    f"v_cvt_f64_u32 v[{s+9}:{s+10}], v{s+4}",
+    f"v_mov_b32 v{s+11}, 0x00000000",
+    f"v_mov_b32 v{s+12}, 0x41F00000",                  # 2^32 in f64
+    f"v_fma_f64 v[{s+7}:{s+8}], v[{s+9}:{s+10}], v[{s+11}:{s+12}], v[{s+7}:{s+8}]",
+
+    # Convert abs_b to f64
+    f"v_cvt_f64_u32 v[{s+9}:{s+10}], v{s+5}",
+    f"v_cvt_f64_u32 v[{s+13}:{s+14}], v{s+6}",
+    f"v_fma_f64 v[{s+9}:{s+10}], v[{s+13}:{s+14}], v[{s+11}:{s+12}], v[{s+9}:{s+10}]",
+
+    # Divide using f64 with Newton-Raphson for reciprocal
+    # rcp = 1/b (approximate), then refine: rcp = rcp * (2 - b * rcp)
+    f"v_rcp_f64 v[{s+11}:{s+12}], v[{s+9}:{s+10}]",
+    # Newton-Raphson iteration 1: 2 - b*rcp (use v_add_f64 with negation)
+    f"v_mov_b32 v{s+13}, 0x00000000",
+    f"v_mov_b32 v{s+14}, 0x40000000",                  # 2.0
+    f"v_mul_f64 v[{s+15}:{s+16}], v[{s+9}:{s+10}], v[{s+11}:{s+12}]",  # b * rcp
+    f"v_add_f64 v[{s+13}:{s+14}], v[{s+13}:{s+14}], -v[{s+15}:{s+16}]",  # 2 - b * rcp
+    f"v_mul_f64 v[{s+11}:{s+12}], v[{s+11}:{s+12}], v[{s+13}:{s+14}]",
+    # Newton-Raphson iteration 2
+    f"v_mov_b32 v{s+13}, 0x00000000",
+    f"v_mov_b32 v{s+14}, 0x40000000",                  # 2.0
+    f"v_mul_f64 v[{s+15}:{s+16}], v[{s+9}:{s+10}], v[{s+11}:{s+12}]",  # b * rcp
+    f"v_add_f64 v[{s+13}:{s+14}], v[{s+13}:{s+14}], -v[{s+15}:{s+16}]",  # 2 - b * rcp
+    f"v_mul_f64 v[{s+11}:{s+12}], v[{s+11}:{s+12}], v[{s+13}:{s+14}]",
+    f"v_mul_f64 v[{s+7}:{s+8}], v[{s+7}:{s+8}], v[{s+11}:{s+12}]",  # q = a * rcp
+    f"v_floor_f64 v[{s+7}:{s+8}], v[{s+7}:{s+8}]",  # q = floor(q)
+
+    # Convert back to u64: first compute q_hi, then q_lo = q - q_hi * 2^32
+    f"v_mov_b32 v{s+11}, 0x00000000",
+    f"v_mov_b32 v{s+12}, 0x3DF00000",                  # 1/2^32
+    f"v_mul_f64 v[{s+9}:{s+10}], v[{s+7}:{s+8}], v[{s+11}:{s+12}]",  # q / 2^32
+    f"v_floor_f64 v[{s+9}:{s+10}], v[{s+9}:{s+10}]",  # q_hi_f64 = floor(q / 2^32)
+    f"v_cvt_u32_f64 v{s+4}, v[{s+9}:{s+10}]",  # q_hi as u32
+    # q_lo = q - q_hi * 2^32 (use -2^32 to avoid negation modifier)
+    f"v_mov_b32 v{s+11}, 0x00000000",
+    f"v_mov_b32 v{s+12}, 0xC1F00000",                  # -2^32
+    f"v_fma_f64 v[{s+9}:{s+10}], v[{s+9}:{s+10}], v[{s+11}:{s+12}], v[{s+7}:{s+8}]",  # q_lo = q + q_hi*(-2^32)
+    f"v_cvt_u32_f64 v{s+3}, v[{s+9}:{s+10}]",  # q_lo as u32
+
+    # Apply sign: result = (abs_q ^ result_sign) - result_sign
+    f"v_xor_b32 v{dst_lo}, v{s+3}, v{s+2}",
+    f"v_xor_b32 v{dst_hi}, v{s+4}, v{s+2}",
+    f"v_sub_co_u32 v{dst_lo}, vcc_lo, v{dst_lo}, v{s+2}",
+    f"v_sub_co_ci_u32 v{dst_hi}, vcc_lo, v{dst_hi}, v{s+2}, vcc_lo",
+  ]
+
+def render_64bit_umod(ctx, x, a, b):
+  """Render 64-bit unsigned modulo: r = a - (a // b) * b.
+  We compute the quotient using f64, then multiply and subtract to get remainder."""
+  rx, ra, rb = ctx.r[x], ctx.r[a], ctx.r[b]
+  dst_lo, dst_hi = get_reg_base(rx), get_reg_base(rx) + 1
+  a_lo = get_reg_base(ra) if '[' in ra else int(ra[1:])
+  a_hi = a_lo + 1 if '[' in ra else a_lo
+  b_lo = get_reg_base(rb) if '[' in rb else int(rb[1:])
+  b_hi = b_lo + 1 if '[' in rb else b_lo
+  s = ctx.get_scratch_vgpr()
+  # First compute quotient q = a // b using f64 (same as render_64bit_udiv)
+  # Then compute r = a - q * b
+  return [
+    # Convert a to f64
+    f"v_cvt_f64_u32 v[{s}:{s+1}], v{a_lo}",
+    f"v_cvt_f64_u32 v[{s+2}:{s+3}], v{a_hi}",
+    f"v_mov_b32 v{s+4}, 0x00000000",
+    f"v_mov_b32 v{s+5}, 0x41F00000",  # 2^32
+    f"v_fma_f64 v[{s+2}:{s+3}], v[{s+2}:{s+3}], v[{s+4}:{s+5}], v[{s}:{s+1}]",  # a_f64
+    # Convert b to f64
+    f"v_cvt_f64_u32 v[{s}:{s+1}], v{b_lo}",
+    f"v_cvt_f64_u32 v[{s+6}:{s+7}], v{b_hi}",
+    f"v_fma_f64 v[{s+6}:{s+7}], v[{s+6}:{s+7}], v[{s+4}:{s+5}], v[{s}:{s+1}]",  # b_f64
+    # Compute reciprocal with Newton-Raphson
+    f"v_rcp_f64 v[{s}:{s+1}], v[{s+6}:{s+7}]",
+    f"v_mov_b32 v{s+4}, 0x00000000",
+    f"v_mov_b32 v{s+5}, 0x40000000",  # 2.0
+    f"v_mul_f64 v[{s+8}:{s+9}], v[{s+6}:{s+7}], v[{s}:{s+1}]",
+    f"v_add_f64 v[{s+4}:{s+5}], v[{s+4}:{s+5}], -v[{s+8}:{s+9}]",
+    f"v_mul_f64 v[{s}:{s+1}], v[{s}:{s+1}], v[{s+4}:{s+5}]",
+    f"v_mov_b32 v{s+4}, 0x00000000",
+    f"v_mov_b32 v{s+5}, 0x40000000",
+    f"v_mul_f64 v[{s+8}:{s+9}], v[{s+6}:{s+7}], v[{s}:{s+1}]",
+    f"v_add_f64 v[{s+4}:{s+5}], v[{s+4}:{s+5}], -v[{s+8}:{s+9}]",
+    f"v_mul_f64 v[{s}:{s+1}], v[{s}:{s+1}], v[{s+4}:{s+5}]",
+    # q_f64 = floor(a * rcp)
+    f"v_mul_f64 v[{s}:{s+1}], v[{s+2}:{s+3}], v[{s}:{s+1}]",
+    f"v_floor_f64 v[{s}:{s+1}], v[{s}:{s+1}]",
+    # Extract q_hi and q_lo from q_f64
+    f"v_mov_b32 v{s+4}, 0x00000000",
+    f"v_mov_b32 v{s+5}, 0x3DF00000",  # 1/2^32
+    f"v_mul_f64 v[{s+8}:{s+9}], v[{s}:{s+1}], v[{s+4}:{s+5}]",
+    f"v_floor_f64 v[{s+8}:{s+9}], v[{s+8}:{s+9}]",
+    f"v_cvt_u32_f64 v{s+10}, v[{s+8}:{s+9}]",  # q_hi
+    f"v_mov_b32 v{s+4}, 0x00000000",
+    f"v_mov_b32 v{s+5}, 0xC1F00000",  # -2^32
+    f"v_fma_f64 v[{s+8}:{s+9}], v[{s+8}:{s+9}], v[{s+4}:{s+5}], v[{s}:{s+1}]",
+    f"v_cvt_u32_f64 v{s+11}, v[{s+8}:{s+9}]",  # q_lo
+    # Compute product = q * b (64-bit multiply, lower 64 bits)
+    f"v_mul_lo_u32 v{s+4}, v{s+11}, v{b_lo}",  # product_lo
+    f"v_mul_hi_u32 v{s+5}, v{s+11}, v{b_lo}",  # high(q_lo * b_lo)
+    f"v_mul_lo_u32 v{s+8}, v{s+11}, v{b_hi}",  # low(q_lo * b_hi)
+    f"v_mul_lo_u32 v{s+9}, v{s+10}, v{b_lo}",  # low(q_hi * b_lo)
+    f"v_add_nc_u32 v{s+5}, v{s+5}, v{s+8}",  # product_hi
+    f"v_add_nc_u32 v{s+5}, v{s+5}, v{s+9}",
+    # Compute r = a - product (64-bit subtract)
+    f"v_sub_co_u32 v{dst_lo}, vcc_lo, v{a_lo}, v{s+4}",
+    f"v_sub_co_ci_u32 v{dst_hi}, vcc_lo, v{a_hi}, v{s+5}, vcc_lo",
   ]
 
 def render_where_64(ctx, x, cond, true_val, false_val):
@@ -942,10 +1361,15 @@ string_rewrite = PatternMatcher([
   # SIN: v_sin_f32 expects input in turns (1 turn = 2π radians), so we multiply by 1/(2π) first
   # NOTE: v_sin_f32 has limited range (~256 turns) but we accept this for native instruction benefits
   (UPat(Ops.SIN, name="x", src=(UPat.var("a"),)), render_sin),
+  # 64-bit IDIV: need full 64-bit precision using f64 arithmetic
+  (UPat(Ops.IDIV, name="x", dtype=dtypes.ulong, src=(UPat.var("a"), UPat.var("b"))), render_64bit_udiv),
+  (UPat(Ops.IDIV, name="x", dtype=dtypes.long, src=(UPat.var("a"), UPat.var("b"))), render_64bit_idiv),
   # IDIV: integer division via float conversion (a // b = trunc(float(a) / float(b)))
   # Use render_udiv for unsigned types, render_idiv for signed types
   (UPat(Ops.IDIV, name="x", src=(UPat.var("a"), UPat.var("b"))),
    lambda ctx, x, a, b: render_udiv(ctx, x, a, b) if dtypes.is_unsigned(x.dtype) else render_idiv(ctx, x, a, b)),
+  # 64-bit integer MOD: need proper 64-bit arithmetic
+  (UPat(Ops.MOD, name="x", dtype=dtypes.ulong, src=(UPat.var("a"), UPat.var("b"))), render_64bit_umod),
   # Integer MOD: a % b = a - (a // b) * b (floats use v_mod_f32 via code_for_op)
   # Use render_umod for unsigned types, render_mod for signed types
   (UPat(Ops.MOD, name="x", src=(UPat.var("a"), UPat.var("b"))),
@@ -967,9 +1391,18 @@ string_rewrite = PatternMatcher([
   # 64-bit integer ADD: need carry propagation for correct 64-bit arithmetic
   (UPat(Ops.ADD, name="x", dtype=dtypes.long, src=(UPat.var("a"), UPat.var("b"))), render_64bit_add),
   (UPat(Ops.ADD, name="x", dtype=dtypes.ulong, src=(UPat.var("a"), UPat.var("b"))), render_64bit_add),
+  # 64-bit integer SUB: need borrow propagation for correct 64-bit arithmetic
+  (UPat(Ops.SUB, name="x", dtype=dtypes.long, src=(UPat.var("a"), UPat.var("b"))), render_64bit_sub),
+  (UPat(Ops.SUB, name="x", dtype=dtypes.ulong, src=(UPat.var("a"), UPat.var("b"))), render_64bit_sub),
   # 64-bit bitwise OR: need to OR both halves
   (UPat(Ops.OR, name="x", dtype=dtypes.long, src=(UPat.var("a"), UPat.var("b"))), render_64bit_or),
   (UPat(Ops.OR, name="x", dtype=dtypes.ulong, src=(UPat.var("a"), UPat.var("b"))), render_64bit_or),
+  # 64-bit bitwise XOR: need to XOR both halves
+  (UPat(Ops.XOR, name="x", dtype=dtypes.long, src=(UPat.var("a"), UPat.var("b"))), render_64bit_xor),
+  (UPat(Ops.XOR, name="x", dtype=dtypes.ulong, src=(UPat.var("a"), UPat.var("b"))), render_64bit_xor),
+  # 64-bit bitwise AND: need to AND both halves
+  (UPat(Ops.AND, name="x", dtype=dtypes.long, src=(UPat.var("a"), UPat.var("b"))), render_64bit_and),
+  (UPat(Ops.AND, name="x", dtype=dtypes.ulong, src=(UPat.var("a"), UPat.var("b"))), render_64bit_and),
   # float64 ALU ops - RDNA3 doesn't have v_add_f64/v_sub_f64/v_mul_f64, use FMA instead
   (UPat(Ops.ADD, name="x", dtype=dtypes.float64, src=(UPat.var("a"), UPat.var("b"))), render_f64_add),
   (UPat(Ops.SUB, name="x", dtype=dtypes.float64, src=(UPat.var("a"), UPat.var("b"))), render_f64_sub),
@@ -1753,7 +2186,16 @@ amdhsa.version:
       # Note: VECTORIZE alias takes precedence over CAST->source alias to ensure correct lifetime
       if u.op is Ops.VECTORIZE:
         for src in u.src:
-          aliases[src] = u  # Overwrite any existing alias - VECTORIZE lifetime is what matters
+          # Don't overwrite aliases for things that alias to DEFINE_REG (accumulator registers)
+          # Those need to keep their original chain for proper lifetime tracking
+          if src in aliases:
+            orig_root = src
+            while orig_root in aliases:
+              orig_root = aliases[orig_root]
+            # If original root is DEFINE_REG, don't overwrite - it needs its own lifetime tracking
+            if orig_root.op is Ops.DEFINE_REG:
+              continue  # Skip this source, keep original alias chain
+          aliases[src] = u  # Alias source to VECTORIZE - VECTORIZE lifetime is what matters
           # Also alias the sources of aliased operations (e.g., CAST -> ADD -> VECTORIZE)
           # This ensures that when CAST repurposes a register, it gets VECTORIZE's lifetime
           for src_src in src.src:
@@ -2066,9 +2508,11 @@ amdhsa.version:
       nonlocal next_vgpr, max_vgpr
       if self.scratch_vgpr < 0:
         # Allocate scratch VGPRs (not tracked in owner map, stays allocated)
-        # IDIV uses s, s+1, s+2, s+3 (4 registers) for float temps and abs value computation
+        # 64-bit UDIV uses s through s+16 (17 registers) for f64 temps, multiply, and refinement
+        # 64-bit IDIV uses similar amount for signed handling
+        # When many operations are fused, we need extra headroom for intermediate values
         self.scratch_vgpr = next_vgpr
-        next_vgpr += 4  # Allocate 4 scratch registers for IDIV etc.
+        next_vgpr += 32  # Allocate 32 scratch registers for 64-bit division and fused kernels
         max_vgpr = max(max_vgpr, next_vgpr)
       return self.scratch_vgpr
 

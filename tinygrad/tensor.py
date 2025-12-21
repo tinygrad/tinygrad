@@ -1840,6 +1840,7 @@ class Tensor(OpMixin):
     state = Tensor.zeros(bs, 25, device=self.device, dtype=dtypes.uint64)
     for k in range(int(data.shape[1])):
       state = state ^ data.shrink((None, (k, k+1), None)).squeeze(1)
+      state = state.contiguous()  # Force realization to prevent kernel fusion issues with 64-bit ops
       for i in range(24): # f1600
         # θ step
         p = state.reshape(bs, 5, 5).transpose(2, 1)
