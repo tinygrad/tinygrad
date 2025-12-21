@@ -73,14 +73,15 @@ class ExecutionUnit:
 
       self._bound_items.append((runner, bufs, item.metadata, item.fixedvars))
 
-  def update(self, buffers: dict[UOp, Buffer]|None = None, var_vals: dict[str, int]|None = None):
-    """Update buffer mapping and/or var_vals for next run."""
+  def update(self, buffers: dict[UOp, Buffer]|None = None, var_vals: dict[str, int]|None = None) -> ExecutionUnit:
+    """Update buffer mapping and/or var_vals for next run. Returns self for chaining."""
     if buffers is not None:
       self.buffer_map.update(buffers)
       # Need to rebind if we update buffers
       self._bound_items = None
     if var_vals is not None:
       self.var_vals.update(var_vals)
+    return self
 
   def __call__(self, var_vals: dict[str, int]|None = None, wait=False, do_update_stats=True, jit=False) -> float|None:
     """Execute all items."""

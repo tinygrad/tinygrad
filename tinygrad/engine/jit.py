@@ -216,9 +216,7 @@ class CapturedJit(Generic[ReturnType]):
 
     if DEBUG >= 1 and len(self._jit_cache) >= 10: print(f"jit execs {len(self._jit_cache)} kernels")
     # Use ExecutionUnit for execution
-    unit = ExecutionUnit(self._jit_cache)
-    unit.update(var_vals=var_vals)
-    unit(jit=True)
+    ExecutionUnit(self._jit_cache).update(var_vals=var_vals)(jit=True)
     self._clear_inputs()
     return self.ret
 
@@ -313,14 +311,16 @@ class TinyJit(Generic[ReturnType]):
 
       # prune independent kernels (optional)
       if self.prune:
+        from tinygrad.engine.execution import ExecutionUnit
         depends = set(input_buffers)
         update_depends(depends, jit_cache)
         pruned, onetime = partition(jit_cache, lambda ei: any(b in depends for b in get_out_buffers_for_ei(ei)))
         if DEBUG >= 1: print(f"pruned from {len(jit_cache)} -> {len(pruned)} kernels")
         # run the onetime kernels here
-        for ei in onetime:
-          for b in ei.bufs: cast(Buffer, b).ensure_allocated()
-          ei.run(var_vals, jit=True)
+        if onetime:
+          for ei in onetime:
+            for b in ei.bufs: cast(Buffer, b).ensure_allocated()
+          ExecutionUnit(onetime).update(var_vals=var_vals)(jit=True)
         jit_cache = pruned
 
       # memory planning (optional)

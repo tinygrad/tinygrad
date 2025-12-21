@@ -263,18 +263,17 @@ def run_schedule(schedule:list[ExecItem], var_vals:dict[str, int]|None=None, do_
           if cpu_b is not None and gpu_b.is_allocated(): cpu_b.ensure_allocated().copyin(gpu_b.as_buffer())
 
         # run on GPU
-        ei.run(var_vals, do_update_stats=do_update_stats)
+        ExecutionUnit([ei]).update(var_vals=var_vals)(do_update_stats=do_update_stats)
 
         # validate the output buffers match (NOTE: this is assuming the output is buffer 0)
-        with Context(BEAM=0): ExecItem(ei.ast, nb, ei.metadata, ei.fixedvars).run(var_vals, do_update_stats=do_update_stats)
+        with Context(BEAM=0):
+          ExecutionUnit([ExecItem(ei.ast, nb, ei.metadata, ei.fixedvars)]).update(var_vals=var_vals)(do_update_stats=do_update_stats)
         import numpy as np
         assert nb[0] is not None
         np.testing.assert_allclose(bufs[0].numpy(), nb[0].numpy(), rtol=1e-3, atol=1e-3)
       else:
-        ei.run(var_vals, do_update_stats=do_update_stats)
+        ExecutionUnit([ei]).update(var_vals=var_vals)(do_update_stats=do_update_stats)
   else:
     # Use ExecutionUnit for batched execution
     if lowered:
-      unit = ExecutionUnit(lowered)
-      unit.update(var_vals=var_vals)
-      unit(do_update_stats=do_update_stats)
+      ExecutionUnit(lowered).update(var_vals=var_vals)(do_update_stats=do_update_stats)
