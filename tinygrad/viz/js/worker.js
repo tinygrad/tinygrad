@@ -30,7 +30,7 @@ const layoutCfg = (g, { blocks, paths, pc_table, colors }) => {
   }
   // paths become edges between basic blocks
   for (const [lead, value] of Object.entries(paths)) {
-    for (const [id, color] of Object.entries(value)) g.setEdge(lead, id, { label:{type:"port", text:""}, color:colors[color] });
+    for (const [id, color] of Object.entries(value)) g.setEdge(lead, id, {label:{type:"port", text:""}, color:colors[color]});
   }
   dagre.layout(g);
 }
@@ -46,7 +46,7 @@ const layoutUOp = (g, { graph, change }, opts) => {
       width = Math.max(width, ctx.measureText(line).width);
       height += LINE_HEIGHT;
     }
-    g.setNode(k, {...rectDims(width, height), label, ref, id:k, color, tag });
+    g.setNode(k, {...rectDims(width, height), label, ref, id:k, color, tag});
     // add edges
     const edgeCounts = {};
     for (const [_, s] of src) edgeCounts[s] = (edgeCounts[s] || 0)+1;

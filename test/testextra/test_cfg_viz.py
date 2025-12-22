@@ -9,15 +9,15 @@ from tinygrad.engine.realize import ExecItem, CompiledRunner
 
 # TODO: use the RDNA3 renderer when it's in master
 template = """.text
-.globl function_name
+.globl fn_name
 .p2align 8
-.type function_name,@function
-function_name:
+.type fn_name,@function
+fn_name:
   INSTRUCTION
 
 .rodata
 .p2align 6
-.amdhsa_kernel function_name
+.amdhsa_kernel fn_name
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
   .amdhsa_next_free_vgpr .amdgcn.next_free_vgpr
   .amdhsa_next_free_sgpr .amdgcn.next_free_sgpr
@@ -30,8 +30,8 @@ amdhsa.version:
   - 1
   - 0
 amdhsa.kernels:
-  - .name: function_name
-    .symbol: function_name.kd
+  - .name: fn_name
+    .symbol: fn_name.kd
     .group_segment_fixed_size: 0
     .private_segment_fixed_size: 0
     .wavefront_size: 32
@@ -53,7 +53,7 @@ amdhsa.kernels:
 
 @track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.name, ret=ret))
 def run_asm(name:str, src:str) -> ProgramSpec:
-  prg = ProgramSpec(name, template.replace("function_name", name).replace("INSTRUCTION", textwrap.dedent(src)), Device.DEFAULT, UOp(Ops.SINK))
+  prg = ProgramSpec(name, template.replace("fn_name", name).replace("INSTRUCTION", textwrap.dedent(src)), Device.DEFAULT, UOp(Ops.SINK))
   ei = ExecItem(UOp(Ops.SINK), [Tensor.empty(1).uop.buffer.ensure_allocated()], prg=CompiledRunner(prg))
   ei.run()
   return prg
@@ -89,7 +89,7 @@ class TestCfg(unittest.TestCase):
     """)
 
   def test_loop(self):
-    run_asm("loop", """
+    run_asm("simple_loop", """
       entry:
         s_mov_b32 s1, 4
       loop:
