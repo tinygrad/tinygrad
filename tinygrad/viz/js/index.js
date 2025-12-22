@@ -807,7 +807,8 @@ async function main() {
     }
     if (ret.cols != null) {
       renderTable(root, ret);
-    } else root.append(() => codeBlock(ret.src, ret.lang));
+    } else if (ret.src != null) root.append(() => codeBlock(ret.src, ret.lang));
+    else renderDag(ret, { recenter:true });
     ret.metadata?.forEach(m => {
       if (Array.isArray(m)) return metadata.appendChild(tabulate(m.map(({ label, value, idx }) => {
         const div = d3.create("div").style("background", cycleColors(colorScheme.CATEGORICAL, idx)).style("width", "100%").style("height", "100%");

@@ -43,7 +43,6 @@ def get_rewrites(t:RewriteTrace) -> list[dict]:
       steps.append(create_step("View UOp List", ("/uops", i, len(steps)), k.ret))
       steps.append(create_step("View Program", ("/code", i, len(steps)), k.ret))
       steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), k.ret))
-      steps.append(create_step("View CFG", ("/graph-cfg", i, len(steps)), k.ret))
     for key in k.keys: ref_map[key] = i
     ret.append({"name":k.display_name, "steps":steps})
   return ret
@@ -426,15 +425,12 @@ def get_render(i:int, j:int, fmt:str) -> dict:
     if isinstance(compiler, LLVMCompiler):
       return get_llvm_mca(disasm_str, ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode(),
                           ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode())
-    metadata:list = []
+    ret:dict = {"src":disasm_str}
     if data.device.startswith("AMD"):
       with soft_err(lambda err: metadata.append(err)):
-        metadata.append(amd_readelf(compiler.compile(data.src)))
-    return {"src":disasm_str, "lang":"amdgpu" if data.device.startswith("AMD") else None, "metadata":metadata}
-  if fmt == "graph-cfg":
-    # open the device to compile source code for static CFG builder
-    lib = Device[data.device].compiler.compile(data.src)
-    return {"value":[amdgpu_cfg(lib, Device[data.device].arch)], "content_type":"text/event-stream"}
+        metadata = amd_readelf(lib:=compiler.compile(data.src))
+        ret = {"data":amdgpu_cfg(lib, Device[data.device].arch), "metadata":[metadata]}
+    return ret
   if fmt == "all-pmc":
     durations, pmc = data
     ret:dict = {"cols":{}, "rows":[]}
