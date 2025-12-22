@@ -270,7 +270,7 @@ class AM_GFX(AM_IP):
     if self.xccs > 1 and not self.adev.partial_boot: self.adev.psp._spatial_partition_cmd(1)
 
   def fini_hw(self):
-    # NOTE: Reset only queue=0, for aqls with xccs (queue=1), will continue from the saved state.
+    # NOTE: For aqls with xccs (queue=1), will continue from the saved state.
     for q in range(2 if self.xccs == 1 else 1):
       for xcc in range(self.xccs):
         self._grbm_select(me=1, pipe=0, queue=q, inst=xcc)
@@ -282,8 +282,8 @@ class AM_GFX(AM_IP):
                  aql:bool) -> int:
     self._grbm_select(me=1, pipe=pipe, queue=queue, inst=0)
     restore_queue = aql and self.xccs > 1 and self.adev.partial_boot and (self.adev.regCP_HQD_ACTIVE.read(inst=0) & 1)
-    restore_ptr = self.adev.regCP_HQD_PQ_WPTR_LO.read() | (self.adev.regCP_HQD_PQ_WPTR_HI.read() << 32)
-    if DEBUG >= 2 and restore_queue: print(f"am {self.adev.devfmt}: GFX queue already active, continuing from saved state.")
+    restore_ptr = (self.adev.regCP_HQD_PQ_WPTR_LO.read(inst=0) | (self.adev.regCP_HQD_PQ_WPTR_HI.read(inst=0) << 32)) if restore_queue else 0
+    if DEBUG >= 2 and restore_queue: print(f"am {self.adev.devfmt}: GFX queue already active, continuing from saved state {restore_ptr=:#x}.")
 
     for xcc in range(self.xccs if aql else 1):
       struct_t = getattr(am, f"struct_v{self.adev.ip_ver[am.GC_HWIP][0]}{'_compute' if self.adev.ip_ver[am.GC_HWIP][0] >= 10 else ''}_mqd")
