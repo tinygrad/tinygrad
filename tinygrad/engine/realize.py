@@ -5,7 +5,7 @@ from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, 
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context
 from tinygrad.helpers import unwrap
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, track_rewrites, KernelInfo, pyrender
-from tinygrad.device import Device, Buffer, Compiler
+from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
 from tinygrad.codegen import full_rewrite_to_program
 from tinygrad.codegen.opt import Opt
@@ -13,19 +13,20 @@ from tinygrad.codegen.opt import Opt
 # **************** Program Creation ****************
 
 @track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.name, (ret.function_name, ret.ast), ret=ret), replay=True)
-def get_program(ast:UOp, renderer:Renderer, compiler:Compiler|None=None, opts:list[Opt]|None=None) -> ProgramSpec:
+def get_program(ast:UOp, renderer:Renderer, device:str|None=None, opts:list[Opt]|None=None) -> ProgramSpec:
   """
   Transform an AST into a ProgramSpec. May trigger BEAM search.
 
   Args:
     ast: The Ops.SINK rooted AST
     renderer: The renderer used to generate the code
-    compiler: The compiler used to compile the code (defaults to Device[renderer.device].compiler)
+    device: The device to compile for (defaults to renderer.device)
 
   Returns:
     The ProgramSpec of the program.
   """
-  if compiler is None: compiler = Device[renderer.device].compiler
+  if device is None: device = renderer.device
+  compiler = Device[device].compiler
 
   if getenv("VIZ"): graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(ast))
@@ -38,10 +39,10 @@ def get_program(ast:UOp, renderer:Renderer, compiler:Compiler|None=None, opts:li
 
   prg = full_rewrite_to_program(ast, renderer, compiler)
   # SINK/DEVICE/LINEAR/SOURCE/BINARY
-  sink, device, linear, source, binary = prg.src
+  sink, dev, linear, source, binary = prg.src
 
   # legacy
-  return ProgramSpec(sink.arg.name, source.arg, device.arg, sink, list(linear.src),
+  return ProgramSpec(sink.arg.name, source.arg, dev.arg, sink, list(linear.src),
                      global_size=[1,1,1] if renderer.has_local or renderer.has_threads else None,
                      local_size=[1,1,1] if renderer.has_local else None)
 
@@ -160,7 +161,7 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
   if bret:=method_cache.get(bkey):
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device), bret.lib)
   else:
-    prg: ProgramSpec = get_program(ast, Device[device].renderer, Device[device].compiler)
+    prg: ProgramSpec = get_program(ast, Device[device].renderer, device)
     method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, device=device))
   return ret
 
