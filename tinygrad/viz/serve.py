@@ -6,7 +6,7 @@ from decimal import Decimal
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, TypeVar, Generator, Callable
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
-from tinygrad.helpers import printable, system, TCPServerWithReuse, HTTPRequestHandler
+from tinygrad.helpers import printable, TCPServerWithReuse, HTTPRequestHandler
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, pyrender
 from tinygrad.uop.ops import print_uops, range_start, multirange_str
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device, ProfileProgramEvent
@@ -339,26 +339,6 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_
 
 # ** Assembly static analyzers
 
-def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
-  target_args = f"-mtriple={mtriple} -mcpu={mcpu}"
-  # disassembly output can include headers / metadata, skip if llvm-mca can't parse those lines
-  data = json.loads(system("llvm-mca -skip-unsupported-instructions=parse-failure --json -"+target_args, input=asm.encode()))
-  cr = data["CodeRegions"][0]
-  resource_labels = [repr(x)[1:-1] for x in data["TargetInfo"]["Resources"]]
-  rows:list = [[instr] for instr in cr["Instructions"]]
-  # add scheduler estimates
-  for info in cr["InstructionInfoView"]["InstructionList"]: rows[info["Instruction"]].append(info["Latency"])
-  # map per instruction resource usage
-  instr_usage:dict[int, dict[int, int]] = {}
-  for d in cr["ResourcePressureView"]["ResourcePressureInfo"]:
-    instr_usage.setdefault(i:=d["InstructionIndex"], {}).setdefault(r:=d["ResourceIndex"], 0)
-    instr_usage[i][r] += d["ResourceUsage"]
-  # last row is the usage summary
-  summary = [{"idx":k, "label":resource_labels[k], "value":v} for k,v in instr_usage.pop(len(rows), {}).items()]
-  max_usage = max([sum(v.values()) for i,v in instr_usage.items() if i<len(rows)], default=0)
-  for i,usage in instr_usage.items(): rows[i].append([[k, v, (v/max_usage)*100] for k,v in usage.items()])
-  return {"rows":rows, "cols":["Instruction", "Latency", {"title":"HW Resources", "labels":resource_labels}], "metadata":[summary]}
-
 def get_stdout(f: Callable) -> str:
   buf = io.StringIO()
   try:
@@ -449,10 +429,6 @@ def get_render(i:int, j:int, fmt:str) -> dict:
   if fmt == "asm":
     compiler = Device[data.device].compiler
     disasm_str = get_stdout(lambda: compiler.disassemble(compiler.compile(data.src)))
-    from tinygrad.runtime.support.compiler_cpu import llvm, LLVMCompiler
-    if isinstance(compiler, LLVMCompiler):
-      return get_llvm_mca(disasm_str, ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode(),
-                          ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode())
     ret:dict = {"src":disasm_str}
     if data.device.startswith("AMD"):
       with soft_err(lambda err: ret.update(err)):
