@@ -1300,9 +1300,10 @@ class Tensor(OpMixin):
     print(t0.cat(t1, t2, dim=1).numpy())
     ```
     """
+    if isinstance(self, (tuple, list)): self, args = self[0], tuple(self[1:]) + args  # type: ignore[arg-type]
     dim = self._resolve_dim(dim)
     for arg in args: assert arg.ndim==self.ndim and all(ti==ai for i,(ti,ai) in enumerate(zip(self.shape, arg.shape)) if i!=dim)
-    tensors = [self, *args]
+    tensors:list[Tensor] = [self, *args]
     dim_cumsum = list(itertools.accumulate([t.shape[dim] for t in tensors], initial=0))
     for i,t in enumerate(tensors): tensors[i] = t.pad([(dim_cumsum[i], dim_cumsum[-1]-dim_cumsum[i+1]) if j==dim else None for j in range(t.ndim)])
     return functools.reduce(Tensor.add, tensors)
@@ -2202,7 +2203,8 @@ class Tensor(OpMixin):
     idx = m * idx.pad(pads, value=dtypes.min(idx.dtype))._pool(k_, stride if stride is not None else k_, dilation)
     return pooled.max(axis), spatial_sz - idx.max(axis)
 
-  def max_unpool2d(self, indices:Tensor, kernel_size:int|tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]|list[int]=0, output_size=None):
+  def max_unpool2d(self, indices:Tensor, kernel_size:int|tuple[int, ...]=(2,2), stride=None, dilation=1,
+                   padding:int|tuple[int, ...]|list[int]=0, output_size=None):
     """
     Performs a partial inverse of `max_pool2d` using the indices from the argmax.
 

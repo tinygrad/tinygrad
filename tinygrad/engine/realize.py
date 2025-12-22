@@ -214,11 +214,11 @@ class ExecItem:
     et = self.prg(bufs, var_vals, wait=wait or DEBUG >= 2)
     if do_update_stats:
       GlobalCounters.kernel_count += 1
-      GlobalCounters.global_ops += (op_est:=sym_infer(self.prg.estimates.ops, var_vals))
-      GlobalCounters.global_mem += (mem_est:=sym_infer(self.prg.estimates.mem, var_vals))
+      GlobalCounters.global_ops += (op_est:=int(sym_infer(self.prg.estimates.ops, var_vals)))
+      GlobalCounters.global_mem += (mem_est:=int(sym_infer(self.prg.estimates.mem, var_vals)))
       if et is not None: GlobalCounters.time_sum_s += et
       if DEBUG >= 2:
-        lds_est = sym_infer(self.prg.estimates.lds, var_vals)
+        lds_est = int(sym_infer(self.prg.estimates.lds, var_vals))
         mem_est = min(mem_est, lds_est)   # there can't be more memory accessed than loads/stores. remove this when symbolic is fixed
         header_color = 'magenta' if jit else ('green' if self.prg.first_run else None)
         ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None) if et is not None else ""
