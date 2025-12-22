@@ -131,5 +131,8 @@ class Renderer:
   extra_matcher: PatternMatcher|None = None
   code_for_op: dict[Ops, Callable] = {}
 
+  @property
+  def compiler_device(self) -> str: return self.device
+
   def __reduce__(self): return self.__class__, ()
   def render(self, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")
