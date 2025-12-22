@@ -7,10 +7,53 @@ from tinygrad.renderer import ProgramSpec
 from tinygrad.helpers import TracingKey
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 
+# TODO: use the RDNA3 renderer when it's in master
+template = """.text
+.globl function_name
+.p2align 8
+.type function_name,@function
+function_name:
+  INSTRUCTION
+
+.rodata
+.p2align 6
+.amdhsa_kernel function_name
+  .amdhsa_user_sgpr_kernarg_segment_ptr 1
+  .amdhsa_next_free_vgpr .amdgcn.next_free_vgpr
+  .amdhsa_next_free_sgpr .amdgcn.next_free_sgpr
+  .amdhsa_wavefront_size32 1
+.end_amdhsa_kernel
+
+.amdgpu_metadata
+---
+amdhsa.version:
+  - 1
+  - 0
+amdhsa.kernels:
+  - .name: function_name
+    .symbol: function_name.kd
+    .group_segment_fixed_size: 0
+    .private_segment_fixed_size: 0
+    .wavefront_size: 32
+    .sgpr_count: 8
+    .vgpr_count: 8
+    .max_flat_workgroup_size: 1024
+    .kernarg_segment_align: 8
+    .kernarg_segment_size: 8
+    .args:
+      - .address_space:  global
+        .name:           a
+        .offset:         0
+        .size:           8
+        .type_name:      'float*'
+        .value_kind:     global_buffer
+...
+.end_amdgpu_metadata
+"""
+
 @track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.name, ret=ret))
 def run_asm(name:str, src:str) -> ProgramSpec:
-  from extra.sqtt.active_sqtt_parse import template # TODO: use RDNA3 renderer when it exists
-  prg = ProgramSpec(name, template.replace("INSTRUCTION", textwrap.dedent(src)), Device.DEFAULT, UOp(Ops.SINK))
+  prg = ProgramSpec(name, template.replace("function_name", name).replace("INSTRUCTION", textwrap.dedent(src)), Device.DEFAULT, UOp(Ops.SINK))
   ei = ExecItem(UOp(Ops.SINK), [Tensor.empty(1).uop.buffer.ensure_allocated()], prg=CompiledRunner(prg))
   ei.run()
   return prg
