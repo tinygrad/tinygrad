@@ -350,12 +350,11 @@
   tr.nested-row table tr.main-row:hover {
     background-color: unset;
   }
-  tr.main-row.has-children > td:first-child {
-    white-space: pre;
+  tr.main-row.has-children > td:first-child > p {
+    display: inline-block;
   }
   tr.main-row.has-children > td:first-child::before {
     content: "▸ ";
-    display: inline-block;
     width: 1em;
     margin-left: -0.25em;
   }

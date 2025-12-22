@@ -6,8 +6,8 @@ from tinygrad.engine.realize import ExecItem, CompiledRunner
 
 # ** assemble
 
+src:str = (pathlib.Path(__file__).parent/"gemm.s").read_text()
 with tempfile.NamedTemporaryFile(suffix=".s") as asmf, tempfile.NamedTemporaryFile(suffix=".o") as of:
-  src:str = (pathlib.Path(__file__).parent/"gemm.s").read_text()
   with tempfile.NamedTemporaryFile(suffix=".hsaco") as libf:
     asmf.write(src.encode())
     asmf.flush()

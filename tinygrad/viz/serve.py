@@ -53,7 +53,7 @@ class GraphRewriteDetails(TypedDict):
   graph: dict                            # JSON serialized UOp for this rewrite step
   uop: str                               # strigified UOp for this rewrite step
   diff: list[str]|None                   # diff of the single UOp that changed
-  changed_nodes: list[int]|None          # the changed UOp id + all its parents ids
+  change: list[int]|None                 # the new UOp id + all its parents ids
   upat: tuple[tuple[str, int], str]|None # [loc, source_code] of the matched UPat
 
 def shape_to_str(s:tuple[sint, ...]): return "(" + ','.join(srender(x) for x in s) + ")"
@@ -115,14 +115,14 @@ def _reconstruct(a:int):
 def get_full_rewrite(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
   next_sink = _reconstruct(ctx.sink)
   # in the schedule graph we don't show indexing ops (unless it's in a kernel AST or rewriting dtypes.index sink)
-  yield {"graph":uop_to_json(next_sink), "uop":pystr(next_sink), "changed_nodes":None, "diff":None, "upat":None}
+  yield {"graph":uop_to_json(next_sink), "uop":pystr(next_sink), "change":None, "diff":None, "upat":None}
   replaces: dict[UOp, UOp] = {}
   for u0_num,u1_num,upat_loc,dur in tqdm(ctx.matches):
     replaces[u0:=_reconstruct(u0_num)] = u1 = _reconstruct(u1_num)
     try: new_sink = next_sink.substitute(replaces)
     except RuntimeError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
     match_repr = f"# {dur*1e6:.2f} us\n"+printable(upat_loc)
-    yield {"graph":(sink_json:=uop_to_json(new_sink)), "uop":pystr(new_sink), "changed_nodes":[id(x) for x in u1.toposort() if id(x) in sink_json],
+    yield {"graph":(sink_json:=uop_to_json(new_sink)), "uop":pystr(new_sink), "change":[id(x) for x in u1.toposort() if id(x) in sink_json],
            "diff":list(difflib.unified_diff(pystr(u0).splitlines(), pystr(u1).splitlines())), "upat":(upat_loc, match_repr)}
     if not ctx.bottom_up: next_sink = new_sink
 
@@ -248,23 +248,25 @@ def load_counters(profile:list[ProfileEvent]) -> None:
       durations.setdefault(str(e.name), []).append(float(e.en-e.st))
     if isinstance(e, ProfileProgramEvent): prg_events[str(e.name)] = e
     if isinstance(e, ProfileDeviceEvent): dev_events[e.device] = e
-  ctxs.append({"name":"All Counters", "steps":[create_step("PMC", ("/all-pmc", len(ctxs), 0), \
-      (durations, {k:v[ProfilePMCEvent][0] for k,v in counter_events.items()}))]})
+  if len(counter_events) == 0: return None
+  ctxs.append({"name":"All Counters", "steps":[create_step("PMC", ("/all-pmc", len(ctxs), 0), (durations, all_counters:={}))]})
   run_number = {n:0 for n,_ in counter_events}
-  for k,v in counter_events.items():
-    prg = trace.keys[r].ret if (r:=ref_map.get(k[0])) else None
-    name = prg.name if prg is not None else k[0]
-    run_number[k[0]] += 1
+  for (k, tag),v in counter_events.items():
+    # use the colored name if it exists
+    name = trace.keys[r].ret.name if (r:=ref_map.get(k)) is not None else k
+    run_number[k] += 1
     steps:list[dict] = []
-    if (pmc:=v.get(ProfilePMCEvent)): steps.append(create_step("PMC", ("/prg-pmc", len(ctxs), len(steps)), pmc))
+    if (pmc:=v.get(ProfilePMCEvent)):
+      steps.append(create_step("PMC", ("/prg-pmc", len(ctxs), len(steps)), pmc))
+      all_counters[(name, run_number[k], k)] = pmc[0]
     if (sqtt:=v.get(ProfileSQTTEvent)):
       # to decode a SQTT trace, we need the raw stream, program binary and device properties
-      steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), (k, [*sqtt, prg_events[k[0]], dev_events[sqtt[0].device]])))
+      steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), ((k, tag), [*sqtt, prg_events[k], dev_events[sqtt[0].device]])))
       if getenv("SQTT_PARSE"):
         # run our decoder on startup, we don't use this since it only works on gfx11
         from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
         for e in sqtt: parse_sqtt_print_packets(e.blob)
-    ctxs.append({"name":f"Exec {name} n{run_number[k[0]]}", "steps":steps})
+    ctxs.append({"name":f"Exec {name} n{run_number[k]}", "steps":steps})
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
 
@@ -398,10 +400,10 @@ def get_render(i:int, j:int, fmt:str) -> dict:
   if fmt == "all-pmc":
     durations, pmc = data
     ret:dict = {"cols":{}, "rows":[]}
-    for (prg,_),events in pmc.items():
+    for (name, n, k),events in data[1].items():
       pmc_table = unpack_pmc(events)
       ret["cols"].update([(r[0], None) for r in pmc_table["rows"]])
-      ret["rows"].append((prg, durations[prg].pop(0), *[r[1] for r in pmc_table["rows"]]))
+      ret["rows"].append((name, durations[k][n-1], *[r[1] for r in pmc_table["rows"]]))
     ret["cols"] = ["Kernel", "Duration", *ret["cols"]]
     return ret
   if fmt == "prg-pmc": return unpack_pmc(data[0])

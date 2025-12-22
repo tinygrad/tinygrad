@@ -109,12 +109,12 @@ async function initWorker() {
   workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
 }
 
-function renderDag(graph, additions, recenter, layoutOpts) {
+function renderDag(layoutSpec, { recenter }) {
   // start calculating the new layout (non-blocking)
   updateProgress(Status.STARTED, "Rendering new graph...");
   if (worker != null) worker.terminate();
   worker = new Worker(workerUrl);
-  worker.postMessage({graph, additions, opts:layoutOpts });
+  worker.postMessage(layoutSpec);
   worker.onmessage = (e) => {
     displaySelection("#graph");
     updateProgress(Status.COMPLETE);
@@ -794,7 +794,7 @@ async function main() {
           }
           const td = tr.append("td").classed(ret.cols[i], true);
           // string format scalar values
-          if (!Array.isArray(value)) { td.text(typeof value === "string" ? value : ret.cols[i] === "Duration" ? formatMicroseconds(value) : formatUnit(value)); continue; }
+          if (!Array.isArray(value)) { td.append(() => typeof value === "string" ? colored(value) : d3.create("p").text(ret.cols[i] === "Duration" ? formatMicroseconds(value) : formatUnit(value)).node()); continue; }
           // display arrays in a bar graph
           td.classed("pct-row", true);
           const bar = td.append("div");
@@ -804,9 +804,8 @@ async function main() {
       }
       return table;
     }
-    if (ret.cols != null) {
-      renderTable(root, ret);
-    } else root.append(() => codeBlock(ret.src, ret.lang));
+    if (ret.cols != null) renderTable(root, ret);
+    else if (ret.src != null) root.append(() => codeBlock(ret.src, ret.lang));
     ret.metadata?.forEach(m => {
       if (Array.isArray(m)) return metadata.appendChild(tabulate(m.map(({ label, value, idx }) => {
         const div = d3.create("div").style("background", cycleColors(colorScheme.CATEGORICAL, idx)).style("width", "100%").style("height", "100%");
@@ -837,7 +836,7 @@ async function main() {
   if (ret.length === 0) return;
   // ** center graph
   const data = ret[currentRewrite];
-  const render = (opts) => renderDag(data.graph, data.changed_nodes ?? [], currentRewrite === 0, opts);
+  const render = (opts) => renderDag({ graph:data.graph, change:data.change, opts }, { recenter:currentRewrite === 0 });
   render({ showIndexing:toggle.checked });
   toggle.onchange = (e) => render({ showIndexing:e.target.checked });
   // ** right sidebar metadata
