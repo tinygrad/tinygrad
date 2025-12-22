@@ -386,6 +386,8 @@ def parse_branch(asm:str) -> int|None:
     return (x - 0x10000 if x & 0x8000 else x)*4
   return None
 
+COND_TAKEN, COND_NOT_TAKEN, UNCOND = range(3)
+cfg_colors = {COND_TAKEN: "#3f7564", COND_NOT_TAKEN: "#7a4540", UNCOND: "#3b5f7e"}
 def amdgpu_cfg(lib:bytes, arch:str) -> dict:
   # disassemble
   from extra.sqtt.roc import llvm_disasm
@@ -397,7 +399,7 @@ def amdgpu_cfg(lib:bytes, arch:str) -> dict:
   # build the cfg
   curr:int|None = None
   blocks:dict[int, list[int]] = {}
-  paths:dict[int, dict[int, None]] = {}
+  paths:dict[int, dict[int, int]] = {}
   for pc, (asm, sz) in pc_table.items():
     if pc in leaders:
       paths[curr:=pc] = {}
@@ -406,13 +408,13 @@ def amdgpu_cfg(lib:bytes, arch:str) -> dict:
     blocks[curr].append(pc)
     # control flow ends in endpgm
     if asm == "s_endpgm": break
-    # otherwise a basic block can have exactly one or two edges
+    # otherwise a basic block can have exactly one or two paths
     nx = pc+sz
     if (offset:=parse_branch(asm)) is not None:
-      paths[curr][nx+offset] = None
-      if not asm.startswith("s_branch"): paths[curr][nx] = None
-    elif nx in leaders: paths[curr][nx] = None
-  return {"blocks":blocks, "paths":paths, "pc_table":pc_table}
+      if asm.startswith("s_branch"): paths[curr][nx+offset] = UNCOND
+      else: paths[curr].update([(nx+offset, COND_TAKEN), (nx, COND_NOT_TAKEN)])
+    elif nx in leaders: paths[curr][nx] = UNCOND
+  return {"blocks":blocks, "paths":paths, "pc_table":pc_table, "colors":cfg_colors}
 
 # ** Main render function to get the complete details about a trace event
 

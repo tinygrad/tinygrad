@@ -13,7 +13,7 @@ onmessage = (e) => {
   self.close();
 }
 
-const layoutCfg = (g, { blocks, paths, pc_table }) => {
+const layoutCfg = (g, { blocks, paths, pc_table, colors }) => {
   g.setGraph({ rankdir:"TD", font:"monospace" });
   ctx.font = `350 ${LINE_HEIGHT}px ${g.graph().font}`;
   // basic blocks render the assembly in nodes
@@ -29,9 +29,8 @@ const layoutCfg = (g, { blocks, paths, pc_table }) => {
     g.setNode(lead, { ...rectDims(width, height), label, id:lead, color:"#1a1b26" });
   }
   // paths become edges between basic blocks
-  for (const [lead, pathSet] of Object.entries(paths)) {
-    const paths = [...Object.keys(pathSet)];
-    for (let i=0; i<paths.length; i++) g.setEdge(lead, paths[i].toString(), { i, label:{type:"port", text:i} });
+  for (const [lead, value] of Object.entries(paths)) {
+    for (const [id, color] of Object.entries(value)) g.setEdge(lead, id, { label:{type:"port", text:""}, color:colors[color] });
   }
   dagre.layout(g);
 }
