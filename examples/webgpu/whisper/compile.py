@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 import tempfile
-from typing import Optional, Union, Literal, List
+from typing import Optional, Union, Literal
 import collections
 
 import numpy as np
@@ -12,7 +12,7 @@ import json
 
 from tinygrad.dtype import dtypes
 from tinygrad.nn.state import safe_save, safe_load, torch_load, load_state_dict, get_state_dict
-from tinygrad.helpers import getenv, fetch
+from tinygrad.helpers import fetch
 
 from extra.export_model import export_model
 from examples.whisper import MODEL_URLS, get_encoding
