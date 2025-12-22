@@ -1,4 +1,4 @@
-import pathlib
+import pathlib, tempfile
 from dataclasses import replace
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.helpers import system, temp
@@ -6,10 +6,14 @@ from tinygrad.engine.realize import ExecItem, CompiledRunner
 
 # ** assemble
 
-asm_fp = pathlib.Path(__file__).parent/"gemm.s"
-system(f"clang -x assembler -target amdgcn-amd-amdhsa -mcpu=gfx950 -mcode-object-version=5 -c {str(asm_fp)} -o {temp('test.o')}")
-system(f"ld.lld -shared -o {temp('test.hsaco')} {temp('test.o')}")
-with open(temp('test.hsaco'), 'rb') as f: lib:bytes = f.read()
+with tempfile.NamedTemporaryFile(suffix=".s") as asmf, tempfile.NamedTemporaryFile(suffix=".o") as of:
+  src:str = (pathlib.Path(__file__).parent/"gemm.s").read_text()
+  with tempfile.NamedTemporaryFile(suffix=".hsaco") as libf:
+    asmf.write(src.encode())
+    asmf.flush()
+    system(f"clang -x assembler -target amdgcn-amd-amdhsa -mcpu=gfx950 -mcode-object-version=5 -c {asmf.name} -o {of.name}")
+    system(f"ld.lld -shared -o {libf.name} {of.name}")
+    lib:bytes = pathlib.Path(libf.name).read_bytes()
 
 # ** generate inputs on CPU
 
