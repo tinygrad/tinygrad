@@ -3,7 +3,7 @@ from collections import defaultdict
 from tinygrad.engine.realize import ExecItem
 from tinygrad.device import Device, Buffer
 from tinygrad.helpers import NO_MEMORY_PLANNER, dedup, DEBUG, round_up
-from tinygrad.uop.ops import Ops
+from tinygrad.uop.ops import Ops, UOp
 from tinygrad.dtype import dtypes, ImageDType
 from tinygrad.runtime.support.memory import TLSFAllocator
 
@@ -62,8 +62,6 @@ def _internal_memory_planner(buffers:list[list[Buffer]], noopt_buffers=None, ign
     if omem != nmem: print(f"{debug_prefix}memory reduced from {omem:.2f} MB -> {nmem:.2f} MB,", f"{len(ak)} -> {len(av)} bufs")
 
   return assigned
-
-from tinygrad.uop.ops import UOp
 
 def memory_planner(schedule:list[ExecItem]) -> tuple[list[ExecItem], dict[UOp, Buffer]]:
   # Exclude buffers involved in load ops (e.g transfers) to preserve parallelism in graphs.
