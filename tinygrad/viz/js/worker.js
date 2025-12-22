@@ -1,14 +1,14 @@
+const NODE_PADDING = 10;
+const rectDims = (lw, lh) => ({ width:lw+NODE_PADDING*2, height:lh+NODE_PADDING*2, labelWidth:lw, labelHeight:lh });
+
 const LINE_HEIGHT = 14;
 const canvas = new OffscreenCanvas(0, 0);
 const ctx = canvas.getContext("2d");
 
-const NODE_PADDING = 10;
-const rectDims = (lw, lh) => ({ width:lw+NODE_PADDING*2, height:lh+NODE_PADDING*2, labelHeight:lh, labelWidth:lw });
-
 onmessage = (e) => {
   const { data, opts } = e.data;
-  let g = new dagre.graphlib.Graph({ compound: true }).setDefaultEdgeLabel(function() { return {}; });
-  g = data.graph != null ? layoutUOp(g, data, opts) : layoutCfg(g, data, opts);
+  const g = new dagre.graphlib.Graph({ compound: true }).setDefaultEdgeLabel(function() { return {}; });
+  (data.blocks != null ? layoutCfg : layoutUOp)(g, data, opts);
   postMessage(dagre.graphlib.json.write(g));
   self.close();
 }
@@ -34,7 +34,6 @@ const layoutCfg = (g, { blocks, paths, pc_table }) => {
     for (let i=0; i<paths.length; i++) g.setEdge(lead, paths[i].toString(), { i, label:{type:"port", text:i} });
   }
   dagre.layout(g);
-  return g;
 }
 
 const layoutUOp = (g, { graph, change }, opts) => {
@@ -48,7 +47,7 @@ const layoutUOp = (g, { graph, change }, opts) => {
       width = Math.max(width, ctx.measureText(line).width);
       height += LINE_HEIGHT;
     }
-    g.setNode(k, {...rectDims(width, height), label, id:k, color, ref, tag });
+    g.setNode(k, {...rectDims(width, height), label, ref, id:k, color, tag });
     // add edges
     const edgeCounts = {};
     for (const [_, s] of src) edgeCounts[s] = (edgeCounts[s] || 0)+1;
@@ -65,5 +64,4 @@ const layoutUOp = (g, { graph, change }, opts) => {
   dagre.layout(g);
   // remove overlay node if it's empty
   if (!g.node("overlay")?.width) g.removeNode("overlay");
-  return g;
 }
