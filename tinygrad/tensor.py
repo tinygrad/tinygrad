@@ -3304,7 +3304,7 @@ class Tensor(OpMixin):
     Calculates (self.exp()+other.exp()).log(), elementwise.
     """
     m = self.maximum(other)
-    m = m.isnt().where(0,m)
+    m = m.isinf().where(0, m)
     return ((self-m).exp() + (self._broadcasted(other)[1]-m).exp()).log() + m
 
   # ***** op wrappers *****
