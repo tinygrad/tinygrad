@@ -434,7 +434,7 @@ def get_render(i:int, j:int, fmt:str) -> dict:
     if data.device.startswith("AMD"):
       with soft_err(lambda err: ret.update(err)):
         metadata = amd_readelf(lib:=compiler.compile(data.src))
-        ret = {"data":amdgpu_cfg(lib, Device[data.device].arch), "metadata":[metadata]}
+        ret = {"data":amdgpu_cfg(lib, getattr(compiler, "arch")), "metadata":[metadata]}
     return ret
   if fmt == "all-pmc":
     durations, pmc = data
