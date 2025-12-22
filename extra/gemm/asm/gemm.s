@@ -1,5 +1,3 @@
-.amdgcn_target "amdgcn-amd-amdhsa--gfx950"
-
 .text
 .section	.text.
 .global	gemm

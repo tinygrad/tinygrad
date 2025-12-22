@@ -1,19 +1,7 @@
-import pathlib, tempfile
-from dataclasses import replace
+import pathlib
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.helpers import system, temp
 from tinygrad.engine.realize import ExecItem, CompiledRunner
-
-# ** assemble
-
-src:str = (pathlib.Path(__file__).parent/"gemm.s").read_text()
-with tempfile.NamedTemporaryFile(suffix=".s") as asmf, tempfile.NamedTemporaryFile(suffix=".o") as of:
-  with tempfile.NamedTemporaryFile(suffix=".hsaco") as libf:
-    asmf.write(src.encode())
-    asmf.flush()
-    system(f"clang -x assembler -target amdgcn-amd-amdhsa -mcpu=gfx950 -mcode-object-version=5 -c {asmf.name} -o {of.name}")
-    system(f"ld.lld -shared -o {libf.name} {of.name}")
-    lib:bytes = pathlib.Path(libf.name).read_bytes()
+from tinygrad.renderer import ProgramSpec
 
 # ** generate inputs on CPU
 
@@ -43,9 +31,10 @@ C_asm.uop.buffer.allocate()
 sched = C_tiny.schedule()
 assert len(sched) == 1
 eis:list[ExecItem] = [sched[-1].lower()]
-prg = CompiledRunner(replace(eis[0].prg.p, name="gemm", global_size=(128, 86, 1), local_size=(256, 1, 1)), precompiled=lib)
-#Device[Device.DEFAULT].compiler.disassemble(lib)
-eis.append(ExecItem(eis[0].ast, [C_asm.uop.buffer, from_torch(A).uop.buffer, from_torch(B).uop.buffer], prg=prg))
+ast = eis[0].ast
+src:str = (pathlib.Path(__file__).parent/"gemm.s").read_text()
+prg = ProgramSpec("gemm", src, Device.DEFAULT, ast, global_size=[128, 86, 1], local_size=[256, 1, 1], globals=[0, 1, 2])
+eis.append(ExecItem(ast, [C_asm.uop.buffer, from_torch(A).uop.buffer, from_torch(B).uop.buffer], prg=CompiledRunner(prg)))
 
 for ei in eis: ei.run(wait=True)
 
