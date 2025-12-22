@@ -71,8 +71,7 @@ class ExpertWeights:
   def __init__(self, num_experts:int, in_features:int, out_features:int):
     self.weight = Tensor.zeros(num_experts, out_features, in_features)
   def __call__(self, sel:Tensor, x:Tensor) -> Tensor:
-    # sel: (T, k), w: (T, k, in, out) -> output: (T, k, out)
-    # x is (T, 1, in) for gate/up (broadcast across experts) or (T, k, in) for down (per-expert)
+    # sel: (B, T, k), x: (B, T, 1, in) or (B, T, k, in) -> output: (B, T, k, out)
     return (x.unsqueeze(-2) @ self.weight[sel].transpose(-1, -2)).squeeze(-2)
 
 def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
@@ -149,11 +148,10 @@ class TransformerBlock:
   def _feed_forward(self, h: Tensor) -> Tensor:
     h_norm = self.ffn_norm(h)
     if hasattr(self, 'ffn_gate_exps'):
-      assert h.shape[0] == 1, "only BS=1"
-      x = h_norm.squeeze(0).unsqueeze(1)  # (T, 1, D)
-      probs, sel = self.ffn_gate_inp(h_norm).softmax(-1).squeeze(0).topk(self.num_experts_per_tok)  # (T, k) each
-      x_down = self.ffn_down_exps(sel, self.ffn_gate_exps(sel, x).silu() * self.ffn_up_exps(sel, x))  # (T, k, D)
-      return h + (x_down * probs.unsqueeze(-1)).sum(axis=1).unsqueeze(0)  # (1, T, D)
+      x = h_norm.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
+      probs, sel = self.ffn_gate_inp(h_norm).softmax(-1).topk(self.num_experts_per_tok)  # (B, T, k) each
+      x_down = self.ffn_down_exps(sel, self.ffn_gate_exps(sel, x).silu() * self.ffn_up_exps(sel, x))  # (B, T, k, D)
+      return h + (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
     # TODO: remove the need for this contiguous
     gated  = self.ffn_gate(h_norm).silu().contiguous() * self.ffn_up(h_norm)
     return h + self.ffn_down(gated)
