@@ -25,8 +25,7 @@ def get_program(ast:UOp, renderer:Renderer, device:str|None=None, opts:list[Opt]
   Returns:
     The ProgramSpec of the program.
   """
-  if device is None: device = renderer.device
-  compiler = Device[device].compiler
+  compiler = Device[device or renderer.device].compiler
 
   if getenv("VIZ"): graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(ast))
@@ -42,7 +41,7 @@ def get_program(ast:UOp, renderer:Renderer, device:str|None=None, opts:list[Opt]
   sink, dev, linear, source, binary = prg.src
 
   # legacy
-  return ProgramSpec(sink.arg.name, source.arg, dev.arg, sink, list(linear.src),
+  return ProgramSpec(sink.arg.name, source.arg, dev.arg, sink, list(linear.src), binary.arg,
                      global_size=[1,1,1] if renderer.has_local or renderer.has_threads else None,
                      local_size=[1,1,1] if renderer.has_local else None)
 
@@ -73,19 +72,18 @@ def optimize_local_size(_prg:Callable, global_size:list[int], rawbufs:list[Buffe
   return ret[1]
 
 class CompiledRunner(Runner):
-  def __init__(self, p:ProgramSpec, precompiled:bytes|None=None, prg=None):
+  def __init__(self, p:ProgramSpec, prg=None):
     if DEBUG >= 3: print(p.applied_opts)
     if DEBUG >= 4: print(p.src)
-    self.p:ProgramSpec = p
-    if precompiled is not None: self.lib = precompiled
-    else:
+    if p.lib is None:
       with cpu_profile(TracingKey(f"compile {p.name}", (p.function_name,)), "TINY"):
-        self.lib = Device[p.device].compiler.compile_cached(p.src)
-    if DEBUG >= 7: Device[p.device].compiler.disassemble(self.lib)
-    self._prg = Device[p.device].runtime(p.function_name, self.lib) if prg is None else prg
+        p = replace(p, lib=Device[p.device].compiler.compile_cached(p.src))
+    self.p:ProgramSpec = p
+    if DEBUG >= 7: Device[p.device].compiler.disassemble(unwrap(p.lib))
+    self._prg = Device[p.device].runtime(p.function_name, p.lib) if prg is None else prg
     super().__init__(p.name, p.device, p.estimates)
 
-  def __reduce__(self): return self.__class__, (self.p, self.lib)
+  def __reduce__(self): return self.__class__, (self.p,)
 
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int]|None=None, wait=False) -> float|None:
     if var_vals is None: var_vals = {}
@@ -159,7 +157,7 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
   if cret:=method_cache.get(ckey): return cret
   bkey = (device.split(":")[0], type(Device[device].compiler), ast.key, context, True)
   if bret:=method_cache.get(bkey):
-    method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device), bret.lib)
+    method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device))
   else:
     prg: ProgramSpec = get_program(ast, Device[device].renderer, device)
     method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, device=device))
