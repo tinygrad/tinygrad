@@ -130,7 +130,7 @@ def do_linearize(prg:UOp, sink:UOp) -> UOp:
   return prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=tuple(lst)),))
 
 def do_render(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
-  src = ctx.render(lin.src)
+  src = ctx.render(list(lin.src))
   return prg.replace(src=prg.src + (UOp(Ops.SOURCE, arg=src),))
 
 # this is the compiler cache
@@ -144,7 +144,7 @@ pm_to_program = PatternMatcher([
   (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE, name="dev"), UPat(), UPat(Ops.SOURCE, name="src")), name="prg"), do_compile),
 ])
 
-def full_rewrite_to_program(sink:UOp, ren:Renderer|None=None) -> UOp:
+def full_rewrite_to_program(sink:UOp, ren:Renderer) -> UOp:
   full_sink = full_rewrite_to_sink(sink, ren, optimize=sink.tag is None)
   sink = UOp(Ops.PROGRAM, src=(full_sink, UOp(Ops.DEVICE, arg=ren.device)))
   return graph_rewrite(sink, pm_to_program, ctx=ren, name="transform program")
