@@ -946,6 +946,7 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, torch.logaddexp, Tensor.logaddexp, vals=[[-1.], [-1.0, 2, 3]])
     helper_test_op(None, torch.logaddexp, Tensor.logaddexp, vals=[[-100.0, -200, -300], [-1.0, 2, 3]])
     helper_test_op(None, torch.logaddexp, Tensor.logaddexp, vals=[[1.0, 2000, 30000], [-1.0, 2, 3]])
+    helper_test_op(None, torch.logaddexp, Tensor.logaddexp, vals=[[-float("inf")], [-float("inf")]], forward_only=True)
 
   def test_softsign(self):
     helper_test_op([(45,65)], torch.nn.functional.softsign, Tensor.softsign)
