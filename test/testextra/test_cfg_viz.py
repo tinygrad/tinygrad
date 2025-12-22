@@ -1,14 +1,16 @@
-import textwrap
 import unittest
+import textwrap
+
 from tinygrad import Device, Tensor
 from tinygrad.uop.ops import UOp, Ops, track_rewrites
 from tinygrad.renderer import ProgramSpec
 from tinygrad.helpers import TracingKey
 from tinygrad.engine.realize import ExecItem, CompiledRunner
+
 from extra.sqtt.active_sqtt_parse import template
 
-@track_rewrites(name=lambda *args, ret, **kwargs: TracingKey(ret.name, ret=ret))
-def run_asm(name:str, src:str):
+@track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.name, ret=ret))
+def run_asm(name:str, src:str) -> ProgramSpec:
   prg = ProgramSpec(name, template.replace("INSTRUCTION", textwrap.dedent(src)), Device.DEFAULT, UOp(Ops.SINK))
   ei = ExecItem(UOp(Ops.SINK), [Tensor.empty(1).uop.buffer.ensure_allocated()], prg=CompiledRunner(prg))
   ei.run()
@@ -19,7 +21,7 @@ class TestCfg(unittest.TestCase):
   def setUp(self):
     arch = Device["AMD"].arch
     if not any(arch.startswith(a) for a in {"gfx11", "gfx12"}):
-        self.skipTest(f"tests written for RDNA, got arch {arch}")
+      self.skipTest(f"tests written for RDNA, got arch {arch}")
 
   def test_simple(self):
     run_asm("simple", """
@@ -123,7 +125,6 @@ class TestCfg(unittest.TestCase):
       end:
         s_endpgm
     """)
-
 
 if __name__ == "__main__":
   unittest.main()
