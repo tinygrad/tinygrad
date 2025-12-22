@@ -248,6 +248,7 @@ def load_counters(profile:list[ProfileEvent]) -> None:
       durations.setdefault(str(e.name), []).append(float(e.en-e.st))
     if isinstance(e, ProfileProgramEvent): prg_events[str(e.name)] = e
     if isinstance(e, ProfileDeviceEvent): dev_events[e.device] = e
+  if len(counter_events) == 0: return None
   ctxs.append({"name":"All Counters", "steps":[create_step("PMC", ("/all-pmc", len(ctxs), 0), (durations, all_counters:={}))]})
   run_number = {n:0 for n,_ in counter_events}
   for (k,_),v in counter_events.items():
@@ -260,7 +261,7 @@ def load_counters(profile:list[ProfileEvent]) -> None:
       all_counters[(name, run_number[k])] = pmc[0]
     if (sqtt:=v.get(ProfileSQTTEvent)):
       # to decode a SQTT trace, we need the raw stream, program binary and device properties
-      steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), (k, [*sqtt, prg_events[k[0]], dev_events[sqtt[0].device]])))
+      steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), (k, [*sqtt, prg_events[k], dev_events[sqtt[0].device]])))
       if getenv("SQTT_PARSE"):
         # run our decoder on startup, we don't use this since it only works on gfx11
         from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
