@@ -87,8 +87,9 @@ class TransformerBlock:
     self.n_heads      = n_heads
     self.n_kv_heads   = n_kv_heads
     self.head_dim     = head_dim
-    self.max_context  = max_context
     self.rope_theta   = rope_theta
+    self.max_context  = max_context
+    self.qk_norm      = qk_norm
 
     # --- attention projections (all linear, bias-free) ------------------
     q_proj_out       = self.head_dim * n_heads
@@ -101,7 +102,6 @@ class TransformerBlock:
     # --- RMSNorms --------------------------------------------------------
     self.attn_norm   = nn.RMSNorm(dim, norm_eps)
     self.ffn_norm    = nn.RMSNorm(dim, norm_eps)
-    self.qk_norm = qk_norm
     if qk_norm: self.attn_q_norm, self.attn_k_norm = nn.RMSNorm(qk_norm, norm_eps), nn.RMSNorm(qk_norm, norm_eps)
 
     # --- feed-forward (MoE or dense) -------------------------------------
