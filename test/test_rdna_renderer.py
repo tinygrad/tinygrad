@@ -377,7 +377,7 @@ class TestLookAheadPacking(unittest.TestCase):
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(), arg=0)
 
     # Create index (workitem ID)
-    ridx = UOp(Ops.SPECIAL, dtypes.int, (), ("ridx0", 32))
+    ridx = UOp.special(32, "ridx0", dtype=dtypes.int)
 
     # Create 16 LOADs at different offsets
     loads = []
@@ -415,7 +415,7 @@ class TestLookAheadPacking(unittest.TestCase):
 
     # Create a minimal kernel with half LOADs feeding half16 VECTORIZE
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(), arg=0)
-    ridx = UOp(Ops.SPECIAL, dtypes.int, (), ("ridx0", 32))
+    ridx = UOp.special(32, "ridx0", dtype=dtypes.int)
 
     # Create 16 LOADs
     loads = []
@@ -452,7 +452,7 @@ class TestLookAheadPacking(unittest.TestCase):
 
     # Create a minimal kernel with half LOADs feeding half16 VECTORIZE
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(), arg=0)
-    ridx = UOp(Ops.SPECIAL, dtypes.int, (), ("ridx0", 32))
+    ridx = UOp.special(32, "ridx0", dtype=dtypes.int)
 
     # Create 16 LOADs
     loads = []
@@ -494,7 +494,7 @@ class TestLookAheadPacking(unittest.TestCase):
 
     # Create a minimal kernel with half LOADs feeding half16 VECTORIZE
     buf = UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(), arg=0)
-    ridx = UOp(Ops.SPECIAL, dtypes.int, (), ("ridx0", 32))
+    ridx = UOp.special(32, "ridx0", dtype=dtypes.int)
 
     # Create 16 LOADs
     loads = []
@@ -537,7 +537,7 @@ class TestLookAheadPacking(unittest.TestCase):
     # Create two buffers (like A and B matrices)
     buf_a = UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(), arg=0)
     buf_b = UOp(Ops.DEFINE_GLOBAL, dtypes.half.ptr(), arg=1)
-    ridx = UOp(Ops.SPECIAL, dtypes.int, (), ("ridx0", 32))
+    ridx = UOp.special(32, "ridx0", dtype=dtypes.int)
 
     # Create 16 LOADs from buf_a
     loads_a = []
