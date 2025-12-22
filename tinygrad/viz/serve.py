@@ -390,7 +390,7 @@ COND_TAKEN, COND_NOT_TAKEN, UNCOND = range(3)
 cfg_colors = {COND_TAKEN: "#3f7564", COND_NOT_TAKEN: "#7a4540", UNCOND: "#3b5f7e"}
 def amdgpu_cfg(lib:bytes, arch:str) -> dict:
   # disassemble
-  from extra.sqtt.roc import llvm_disasm
+  from extra.sqtt.roc import llvm_disasm # TODO: bring this to core tinygrad
   pc_table = llvm_disasm(arch, lib)
   # get leaders
   leaders:set[int] = {next(iter(pc_table))}

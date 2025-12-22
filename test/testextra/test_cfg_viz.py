@@ -7,10 +7,9 @@ from tinygrad.renderer import ProgramSpec
 from tinygrad.helpers import TracingKey
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 
-from extra.sqtt.active_sqtt_parse import template
-
 @track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.name, ret=ret))
 def run_asm(name:str, src:str) -> ProgramSpec:
+  from extra.sqtt.active_sqtt_parse import template # TODO: use RDNA3 renderer when it exists
   prg = ProgramSpec(name, template.replace("INSTRUCTION", textwrap.dedent(src)), Device.DEFAULT, UOp(Ops.SINK))
   ei = ExecItem(UOp(Ops.SINK), [Tensor.empty(1).uop.buffer.ensure_allocated()], prg=CompiledRunner(prg))
   ei.run()
