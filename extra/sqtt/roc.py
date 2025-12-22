@@ -5,28 +5,7 @@ from tinygrad.device import ProfileEvent, ProfileDeviceEvent, ProfileProgramEven
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
 from tinygrad.runtime.autogen import llvm, rocprof
 from tinygrad.runtime.support.elf import elf_loader
-
-def llvm_disasm(arch:str, lib:bytes) -> dict[int, tuple[str, int]]:
-  llvm.LLVMInitializeAMDGPUTargetInfo()
-  llvm.LLVMInitializeAMDGPUTargetMC()
-  llvm.LLVMInitializeAMDGPUAsmParser()
-  llvm.LLVMInitializeAMDGPUDisassembler()
-  # pass NULL to callbacks
-  cbs = [ctypes.cast(0, llvm.LLVMCreateDisasmCPUFeatures.argtypes[i]) for i in {5,6}]
-  ctx = llvm.LLVMCreateDisasmCPUFeatures("amdgcn-amd-amdhsa".encode(), arch.encode(), "".encode(), None, 0, *cbs)
-  image, sections, relocs = elf_loader(lib)
-  text = next((sh.header for sh in sections if sh.name == ".text"), None)
-  off, sz = unwrap(text).sh_addr, unwrap(text).sh_size
-
-  addr_table:dict[int, tuple[str, int]] = {}
-  out = ctypes.create_string_buffer(128)
-  cur_off = off
-  while cur_off < sz + off:
-    view = (ctypes.c_ubyte * ((sz + off) - cur_off)).from_buffer_copy(memoryview(image)[cur_off:])
-    instr_sz = llvm.LLVMDisasmInstruction(ctx, view, ctypes.c_uint64(len(view)), ctypes.c_uint64(0), out, ctypes.c_size_t(128))
-    addr_table[cur_off] = (out.value.decode("utf-8", "replace").strip(), instr_sz)
-    cur_off += instr_sz
-  return addr_table
+from tinygrad.viz.serve import llvm_disasm
 
 @dataclasses.dataclass(frozen=True)
 class InstExec:
