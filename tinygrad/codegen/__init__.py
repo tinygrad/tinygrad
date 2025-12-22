@@ -138,14 +138,14 @@ def do_compile(ctx:tuple[Renderer, Compiler], prg:UOp, src:UOp) -> UOp:
   return prg.replace(src=prg.src + (UOp(Ops.BINARY, arg=lib),))
 
 pm_to_program = PatternMatcher([
-  (UPat(Ops.PROGRAM, src=(UPat(Ops.SINK, name="sink"), UPat(Ops.DEVICE)), name="prg"), do_linearize),
-  (UPat(Ops.PROGRAM, src=(UPat(), UPat(), UPat(Ops.LINEAR, name="lin")), name="prg"), do_render),
-  (UPat(Ops.PROGRAM, src=(UPat(), UPat(), UPat(), UPat(Ops.SOURCE, name="src")), name="prg"), do_compile),
+  (UPat(Ops.PROGRAM, src=(UPat(Ops.SINK, name="sink"),), name="prg"), do_linearize),
+  (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.LINEAR, name="lin")), name="prg"), do_render),
+  (UPat(Ops.PROGRAM, src=(UPat(), UPat(), UPat(Ops.SOURCE, name="src")), name="prg"), do_compile),
 ])
 
 def full_rewrite_to_program(sink:UOp, ren:Renderer, compiler:Compiler) -> UOp:
   full_sink = full_rewrite_to_sink(sink, ren, optimize=sink.tag is None)
-  sink = UOp(Ops.PROGRAM, src=(full_sink, UOp(Ops.DEVICE, arg=ren.device)))
+  sink = UOp(Ops.PROGRAM, src=(full_sink,))
   return graph_rewrite(sink, pm_to_program, ctx=(ren, compiler), name="transform program")
 
 def full_rewrite(sink:UOp, ren:Renderer|None=None) -> list[UOp]:

@@ -37,11 +37,11 @@ def get_program(ast:UOp, renderer:Renderer, device:str|None=None, opts:list[Opt]
   if ast.arg is None: ast = ast.replace(arg=KernelInfo())
 
   prg = full_rewrite_to_program(ast, renderer, compiler)
-  # SINK/DEVICE/LINEAR/SOURCE/BINARY
-  sink, dev, linear, source, binary = prg.src
+  # SINK/LINEAR/SOURCE/BINARY
+  sink, linear, source, binary = prg.src
 
   # legacy
-  return ProgramSpec(sink.arg.name, source.arg, dev.arg, sink, list(linear.src), binary.arg,
+  return ProgramSpec(sink.arg.name, source.arg, device or renderer.device, sink, list(linear.src), binary.arg,
                      global_size=[1,1,1] if renderer.has_local or renderer.has_threads else None,
                      local_size=[1,1,1] if renderer.has_local else None)
 
