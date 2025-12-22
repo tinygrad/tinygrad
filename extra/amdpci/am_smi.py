@@ -184,7 +184,7 @@ class SMICtx:
         if compact: return {k: temps[k] for k in ("Hotspot", "HBM") if temps.get(k, 0) != 0}
         return {k: v for k, v in temps.items() if v != 0}
       case _:
-        temps_keys = [(k, name) for k, name in dev.smu.smu_mod.c__EA_TEMP_e__enumvalues.items()
+        temps_keys = [(k, name) for k, name in dev.smu.smu_mod.TEMP_e.items()
                       if k < dev.smu.smu_mod.TEMP_COUNT and metrics.SmuMetrics.AvgTemperature[k] != 0]
         if compact: temps_keys = [(k, name) for k, name in temps_keys if k in (dev.smu.smu_mod.TEMP_HOTSPOT, dev.smu.smu_mod.TEMP_MEM)]
         return {name: metrics.SmuMetrics.AvgTemperature[k] for k, name in temps_keys}
@@ -193,7 +193,7 @@ class SMICtx:
     match dev.ip_ver[am.MP1_HWIP]:
       case (13,0,6): return {}
       case _:
-        voltage_keys = [(k, name) for k, name in dev.smu.smu_mod.c__EA_SVI_PLANE_e__enumvalues.items()
+        voltage_keys = [(k, name) for k, name in dev.smu.smu_mod.SVI_PLANE_e.items()
                         if k < dev.smu.smu_mod.SVI_PLANE_COUNT and metrics.SmuMetrics.AvgVoltage[k] != 0]
         return {name: metrics.SmuMetrics.AvgVoltage[k] for k, name in voltage_keys}
 
