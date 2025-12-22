@@ -39,7 +39,7 @@ def linearize(sink:UOp) -> list[UOp]:
     priorities[u] = (run_count, priority, extra)
 
   # assign stable index based on original toposort order
-  stable_order = {u: i for i, u in enumerate(lst)}
+  stable_order = {u: hash(u.tuplize) for u in lst}
 
   # number the uops in "ideal" order
   nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: priorities[x]+(x.tuplize if TUPLE_ORDER else ())))}
