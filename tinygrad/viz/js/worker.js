@@ -1,7 +1,9 @@
-const NODE_PADDING = 10;
 const LINE_HEIGHT = 14;
 const canvas = new OffscreenCanvas(0, 0);
 const ctx = canvas.getContext("2d");
+
+const NODE_PADDING = 10;
+const rectDims = (lw, lh) => ({ width:lw+NODE_PADDING*2, height:lh+NODE_PADDING*2, labelHeight:lh, labelWidth:lw });
 
 onmessage = (e) => {
   const { data, opts } = e.data;
@@ -24,14 +26,12 @@ const layoutCfg = (g, { blocks, paths, pc_table }) => {
       const [inst, ...operands] = text.split(" ");
       label.push([{st:inst+" ", color:"#7aa2f7"}, {st:operands.join(" "), color:"#9aa5ce"}]);
     }
-    g.setNode(lead, {width:width+NODE_PADDING*2, height:height+NODE_PADDING*2, label,
-                     labelHeight:height, labelWidth:width, id:lead, color:"#1a1b26" });
+    g.setNode(lead, { ...rectDims(width, height), label, id:lead, color:"#1a1b26" });
   }
+  // paths become edges between basic blocks
   for (const [lead, pathSet] of Object.entries(paths)) {
     const paths = [...Object.keys(pathSet)];
-    for (let i=0; i < paths.length; i ++ ) {
-      g.setEdge(lead, paths[i].toString(), { i, label:{type:"port", text:i} });
-    }
+    for (let i=0; i<paths.length; i++) g.setEdge(lead, paths[i].toString(), { i, label:{type:"port", text:i} });
   }
   dagre.layout(g);
   return g;
@@ -41,14 +41,14 @@ const layoutUOp = (g, { graph, change }, opts) => {
   g.setGraph({ rankdir: "LR", font:"sans-serif" });
   ctx.font = `350 ${LINE_HEIGHT}px ${g.graph().font}`;
   if (change?.length) g.setNode("overlay", {label:"", labelWidth:0, labelHeight:0, className:"overlay"});
-  for (const [k, {label, src, ref, ...rest }] of Object.entries(graph)) {
+  for (const [k, {label, src, ref, color, tag }] of Object.entries(graph)) {
     // adjust node dims by label size (excluding escape codes) + add padding
     let [width, height] = [0, 0];
     for (line of label.replace(/\u001B\[(?:K|.*?m)/g, "").split("\n")) {
       width = Math.max(width, ctx.measureText(line).width);
       height += LINE_HEIGHT;
     }
-    g.setNode(k, {width:width+NODE_PADDING*2, height:height+NODE_PADDING*2, label, labelHeight:height, labelWidth:width, ref, id:k, ...rest});
+    g.setNode(k, {...rectDims(width, height), label, id:k, color, ref, tag });
     // add edges
     const edgeCounts = {};
     for (const [_, s] of src) edgeCounts[s] = (edgeCounts[s] || 0)+1;

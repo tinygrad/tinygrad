@@ -543,8 +543,6 @@ if __name__ == "__main__":
   ctxs:list[dict] = get_rewrites(trace:=load_pickle(args.kernels, default=RewriteTrace([], [], {})))
   profile_ret = get_profile(load_pickle(args.profile, default=[]))
 
-  #get_render(2, 23, "graph-cfg")
-
   server = TCPServerWithReuse(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)
   reloader_thread.start()
