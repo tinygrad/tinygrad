@@ -230,9 +230,6 @@ class PythonRenderer(Renderer):
       case "": pass
       case _: raise RuntimeError(f"can't EMULATE device: {EMULATE.value}")
 
-  @property
-  def compiler_device(self) -> str: return "PYTHON"
-
   def render(self, uops:list[UOp]) -> str:
     # the value of SPECIAL comes from local/global_size, not form its source
     lops = [(u.op, u.dtype, [uops.index(v) for v in u.src if u.op is not Ops.SPECIAL], u.arg) for u in uops]

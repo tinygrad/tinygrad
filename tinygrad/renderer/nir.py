@@ -224,9 +224,6 @@ class NIRRendererWithOpts(NIRRenderer):
   def __reduce__(self): return self.__class__, (None, self.nir_options)
 
   @property
-  def compiler_device(self) -> str: return self.dev.device if self.dev is not None else self.device
-
-  @property
   def nir_options(self):
     if self._nir_options is None: self._nir_options = self.dev.compiler.nir_options
     return self._nir_options

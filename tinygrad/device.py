@@ -321,7 +321,6 @@ class Compiled:
 
     ret = select_first_inited(list(forced_comps) if len(forced_comps)>0 else comps, f"No compiler for {self.device} is available", self.cached_pair)
     # NOTE: some devices (e.g. DISK) don't specify compilers and get a default Renderer with empty device.
-    # ensure renderer.device is set so renderer.compiler_device works correctly.
     if not ret[0].device: ret[0].device = self.device
     return ret
 

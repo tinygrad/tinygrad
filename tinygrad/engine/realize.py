@@ -13,17 +13,19 @@ from tinygrad.codegen.opt import Opt
 # **************** Program Creation ****************
 
 @track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.name, (ret.function_name, ret.ast), ret=ret), replay=True)
-def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> ProgramSpec:
+def get_program(ast:UOp, renderer:Renderer, device:str|None=None, opts:list[Opt]|None=None) -> ProgramSpec:
   """
   Transform an AST into a ProgramSpec. May trigger BEAM search.
 
   Args:
     ast: The Ops.SINK rooted AST
     renderer: The renderer used to generate the code
+    device: The device to compile for (defaults to renderer.device)
 
   Returns:
     The ProgramSpec of the program.
   """
+  device = device or renderer.device
 
   if getenv("VIZ"): graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(ast))
@@ -34,12 +36,12 @@ def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> Program
     ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts)))
   if ast.arg is None: ast = ast.replace(arg=KernelInfo())
 
-  prg = full_rewrite_to_program(ast, renderer, Device[renderer.compiler_device].compiler)
+  prg = full_rewrite_to_program(ast, renderer, Device[device].compiler)
   # SINK/LINEAR/SOURCE/BINARY
   sink, linear, source, binary = prg.src
 
   # legacy
-  return ProgramSpec(sink.arg.name, source.arg, renderer.compiler_device, sink, list(linear.src), binary.arg,
+  return ProgramSpec(sink.arg.name, source.arg, device, sink, list(linear.src), binary.arg,
                      global_size=[1,1,1] if renderer.has_local or renderer.has_threads else None,
                      local_size=[1,1,1] if renderer.has_local else None)
 
@@ -157,7 +159,7 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
   if bret:=method_cache.get(bkey):
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device))
   else:
-    prg: ProgramSpec = get_program(ast, Device[device].renderer)
+    prg: ProgramSpec = get_program(ast, Device[device].renderer, device)
     method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, device=device))
   return ret
 
