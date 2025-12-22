@@ -110,12 +110,12 @@ async function initWorker() {
   workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
 }
 
-function renderDag(spec, { recenter }) {
+function renderDag(layoutSpec, { recenter }) {
   // start calculating the new layout (non-blocking)
   updateProgress(Status.STARTED, "Rendering new graph...");
   if (worker != null) worker.terminate();
   worker = new Worker(workerUrl);
-  worker.postMessage(spec);
+  worker.postMessage(layoutSpec);
   worker.onmessage = (e) => {
     displaySelection("#graph");
     updateProgress(Status.COMPLETE);

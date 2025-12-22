@@ -38,10 +38,10 @@ const layoutCfg = (g, { blocks, paths, pc_table }) => {
   return g;
 }
 
-const layoutUOp = (g, { graph, changed }, opts) => {
-  g.setGraph({ rankdir:"LR" });
-  if (changed?.length) g.setNode("changed", {label:"", labelWidth:0, labelHeight:0, className:"overlay"});
-  for (let [k, {label, src, ref, ...rest }] of Object.entries(graph)) {
+const layoutUOp = (g, { graph, change }, opts) => {
+  g.setGraph({ rankdir: "LR" });
+  if (change?.length) g.setNode("overlay", {label:"", labelWidth:0, labelHeight:0, className:"overlay"});
+  for (const [k, {label, src, ref, ...rest }] of Object.entries(graph)) {
     // adjust node dims by label size (excluding escape codes) + add padding
     let [width, height] = [0, 0];
     for (line of label.replace(/\u001B\[(?:K|.*?m)/g, "").split("\n")) {
@@ -50,10 +50,10 @@ const layoutUOp = (g, { graph, changed }, opts) => {
     }
     g.setNode(k, {width:width+NODE_PADDING*2, height:height+NODE_PADDING*2, label, labelHeight:height, labelWidth:width, ref, id:k, ...rest});
     // add edges
-    const edgeCounts = {}
+    const edgeCounts = {};
     for (const [_, s] of src) edgeCounts[s] = (edgeCounts[s] || 0)+1;
     for (const [port, s] of src) g.setEdge(s, k, { label: edgeCounts[s] > 1 ? {type:"tag", text:edgeCounts[s]} : {type:"port", text:port}});
-    if (changed?.includes(parseInt(k))) g.setParent(k, "changed");
+    if (change?.includes(parseInt(k))) g.setParent(k, "overlay");
   }
   // optionally hide nodes from the layuot
   if (!opts.showIndexing) {
@@ -63,7 +63,7 @@ const layoutUOp = (g, { graph, changed }, opts) => {
     }
   }
   dagre.layout(g);
-  // remove changed overlay if it's empty
-  if (!g.node("changed")?.width) g.removeNode("changed");
+  // remove overlay node if it's empty
+  if (!g.node("overlay")?.width) g.removeNode("overlay");
   return g;
 }
