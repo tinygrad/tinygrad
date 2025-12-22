@@ -251,17 +251,17 @@ def load_counters(profile:list[ProfileEvent]) -> None:
   if len(counter_events) == 0: return None
   ctxs.append({"name":"All Counters", "steps":[create_step("PMC", ("/all-pmc", len(ctxs), 0), (durations, all_counters:={}))]})
   run_number = {n:0 for n,_ in counter_events}
-  for (k,_),v in counter_events.items():
+  for (k, tag),v in counter_events.items():
     # use the colored name if it exists
     name = trace.keys[r].ret.name if (r:=ref_map.get(k)) is not None else k
     run_number[k] += 1
     steps:list[dict] = []
     if (pmc:=v.get(ProfilePMCEvent)):
       steps.append(create_step("PMC", ("/prg-pmc", len(ctxs), len(steps)), pmc))
-      all_counters[(f"{name} n{run_number[k]}", k)] = pmc[0]
+      all_counters[(name, run_number[k], k)] = pmc[0]
     if (sqtt:=v.get(ProfileSQTTEvent)):
       # to decode a SQTT trace, we need the raw stream, program binary and device properties
-      steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), (k, [*sqtt, prg_events[k], dev_events[sqtt[0].device]])))
+      steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), ((k, tag), [*sqtt, prg_events[k], dev_events[sqtt[0].device]])))
       if getenv("SQTT_PARSE"):
         # run our decoder on startup, we don't use this since it only works on gfx11
         from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
@@ -400,10 +400,10 @@ def get_render(i:int, j:int, fmt:str) -> dict:
   if fmt == "all-pmc":
     durations, pmc = data
     ret:dict = {"cols":{}, "rows":[]}
-    for (name,k),events in pmc.items():
+    for (name, n, k),events in data[1].items():
       pmc_table = unpack_pmc(events)
       ret["cols"].update([(r[0], None) for r in pmc_table["rows"]])
-      ret["rows"].append((name, durations[k].pop(0), *[r[1] for r in pmc_table["rows"]]))
+      ret["rows"].append((name, durations[k][n-1], *[r[1] for r in pmc_table["rows"]]))
     ret["cols"] = ["Kernel", "Duration", *ret["cols"]]
     return ret
   if fmt == "prg-pmc": return unpack_pmc(data[0])

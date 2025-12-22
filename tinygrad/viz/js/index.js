@@ -794,7 +794,7 @@ async function main() {
           }
           const td = tr.append("td").classed(ret.cols[i], true);
           // string format scalar values
-          if (!Array.isArray(value)) { td.text(typeof value === "string" ? value : ret.cols[i] === "Duration" ? formatMicroseconds(value) : formatUnit(value)); continue; }
+          if (!Array.isArray(value)) { td.append(() => typeof value === "string" ? colored(value) : d3.create("p").text(ret.cols[i] === "Duration" ? formatMicroseconds(value) : formatUnit(value)).node()); continue; }
           // display arrays in a bar graph
           td.classed("pct-row", true);
           const bar = td.append("div");
@@ -804,9 +804,8 @@ async function main() {
       }
       return table;
     }
-    if (ret.cols != null) {
-      renderTable(root, ret);
-    } else root.append(() => codeBlock(ret.src, ret.lang));
+    if (ret.cols != null) renderTable(root, ret);
+    else if (ret.src != null) root.append(() => codeBlock(ret.src, ret.lang));
     ret.metadata?.forEach(m => {
       if (Array.isArray(m)) return metadata.appendChild(tabulate(m.map(({ label, value, idx }) => {
         const div = d3.create("div").style("background", cycleColors(colorScheme.CATEGORICAL, idx)).style("width", "100%").style("height", "100%");
