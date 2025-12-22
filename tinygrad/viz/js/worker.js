@@ -2,7 +2,6 @@ const NODE_PADDING = 10;
 const LINE_HEIGHT = 14;
 const canvas = new OffscreenCanvas(0, 0);
 const ctx = canvas.getContext("2d");
-ctx.font = `350 ${LINE_HEIGHT}px sans-serif`;
 
 onmessage = (e) => {
   const { data, opts } = e.data;
@@ -39,7 +38,8 @@ const layoutCfg = (g, { blocks, paths, pc_table }) => {
 }
 
 const layoutUOp = (g, { graph, change }, opts) => {
-  g.setGraph({ rankdir: "LR" });
+  g.setGraph({ rankdir: "LR", font:"sans-serif" });
+  ctx.font = `350 ${LINE_HEIGHT}px ${g.graph().font}`;
   if (change?.length) g.setNode("overlay", {label:"", labelWidth:0, labelHeight:0, className:"overlay"});
   for (const [k, {label, src, ref, ...rest }] of Object.entries(graph)) {
     // adjust node dims by label size (excluding escape codes) + add padding
