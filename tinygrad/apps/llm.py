@@ -56,8 +56,9 @@ class SimpleTokenizer:
     if self.preset == 'qwen2': return self.encode("<|im_start|>" + role + "\n")
     return self.encode("<|start_header_id|>" + role + "<|end_header_id|>\n\n")
   def end_turn(self, eos_id:int):
-    if self.preset == 'olmo': return self.encode("\n")  # just newline, no EOS mid-conversation
-    return [eos_id] + self.encode("\n") if self.preset == 'qwen2' else [eos_id]
+    if self.preset == 'olmo': return self.encode("\n")
+    if self.preset == 'qwen2': return [eos_id] + self.encode("\n")
+    return [eos_id]
 
 @functools.cache
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
@@ -100,9 +101,7 @@ class TransformerBlock:
     # --- RMSNorms --------------------------------------------------------
     self.attn_norm   = nn.RMSNorm(dim, norm_eps)
     self.ffn_norm    = nn.RMSNorm(dim, norm_eps)
-    if qk_norm:
-      self.attn_q_norm, self.attn_k_norm = nn.RMSNorm(qk_norm, norm_eps), nn.RMSNorm(qk_norm, norm_eps)
-      self.qk_norm_pre = qk_norm != head_dim  # True for olmoe (dim), False for qwen3 (head_dim)
+    if qk_norm: self.attn_q_norm, self.attn_k_norm = nn.RMSNorm(qk_norm, norm_eps), nn.RMSNorm(qk_norm, norm_eps)
 
     # --- feed-forward (MoE or dense) -------------------------------------
     if num_experts > 0:
@@ -119,13 +118,13 @@ class TransformerBlock:
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     x_norm = self.attn_norm(x)                       # (B,T,D)
     q, k, v = self.attn_q(x_norm), self.attn_k(x_norm), self.attn_v(x_norm)
-    if getattr(self, 'qk_norm_pre', False): q, k = self.attn_q_norm(q), self.attn_k_norm(k)
+    if hasattr(self, 'attn_q_norm') and self.attn_q_norm.weight.shape[0] != self.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
     B, T, _ = x.shape
     q = q.reshape(B, T, self.n_heads,    self.head_dim).transpose(1, 2)  # (B,H,T,Hd)
     k = k.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
     v = v.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
-    if hasattr(self, 'attn_q_norm') and not self.qk_norm_pre: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
+    if hasattr(self, 'attn_q_norm') and self.attn_q_norm.weight.shape[0] == self.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
     # TODO: make UOp have SupportsIndex
     freqs_cis = precompute_freqs_cis(self.head_dim, self.max_context, self.rope_theta)[start_pos:start_pos+T]  # type: ignore
@@ -194,7 +193,7 @@ class Transformer:
     if 'output.weight' not in state_dict: state_dict['output.weight'] = state_dict['token_embd.weight']
 
     arch = kv['general.architecture']
-    max_context = int(min(max_context, kv[f'{arch}.context_length']) if max_context is not None else kv[f'{arch}.context_length'])
+    max_context = min(max_context, kv[f'{arch}.context_length']) if max_context is not None else kv[f'{arch}.context_length']
     n_heads, n_kv_heads = kv[f'{arch}.attention.head_count'], kv[f'{arch}.attention.head_count_kv']
 
     # Permute Q/K weights from interleaved to half-split RoPE layout (llama-style models only)
@@ -209,7 +208,7 @@ class Transformer:
                         hidden_dim=kv.get(f'{arch}.expert_feed_forward_length', kv[f'{arch}.feed_forward_length']),
                         n_heads=n_heads, n_kv_heads=n_kv_heads, norm_eps=kv[f'{arch}.attention.layer_norm_rms_epsilon'],
                         vocab_size=len(kv['tokenizer.ggml.tokens']), head_dim=head_dim,
-                        rope_theta=kv.get(f'{arch}.rope.freq_base', 10000), max_context=max_context, qk_norm=qk_norm,
+                        rope_theta=kv[f'{arch}.rope.freq_base'], max_context=max_context, qk_norm=qk_norm,
                         num_experts=kv.get(f'{arch}.expert_count', 0), num_experts_per_tok=kv.get(f'{arch}.expert_used_count', 0))
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
