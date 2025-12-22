@@ -6,15 +6,14 @@ from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
 from tinygrad.runtime.autogen import llvm, rocprof
 from tinygrad.runtime.support.elf import elf_loader
 
-# to pass NULL to callbacks
-llvm.LLVMCreateDisasmCPUFeatures.argtypes = tuple(llvm.LLVMCreateDisasmCPUFeatures.argtypes[:5]) + (ctypes.c_void_p, ctypes.c_void_p)
 def llvm_disasm(arch:str, lib:bytes) -> dict[int, tuple[str, int]]:
   llvm.LLVMInitializeAMDGPUTargetInfo()
   llvm.LLVMInitializeAMDGPUTargetMC()
   llvm.LLVMInitializeAMDGPUAsmParser()
   llvm.LLVMInitializeAMDGPUDisassembler()
-  ctx = llvm.LLVMCreateDisasmCPUFeatures("amdgcn-amd-amdhsa".encode(), arch.encode(), "".encode(), None, 0, None, None)
-
+  # pass NULL to callbacks
+  cbs = [ctypes.cast(0, llvm.LLVMCreateDisasmCPUFeatures.argtypes[i]) for i in {5,6}]
+  ctx = llvm.LLVMCreateDisasmCPUFeatures("amdgcn-amd-amdhsa".encode(), arch.encode(), "".encode(), None, 0, *cbs)
   image, sections, relocs = elf_loader(lib)
   text = next((sh.header for sh in sections if sh.name == ".text"), None)
   off, sz = unwrap(text).sh_addr, unwrap(text).sh_size
