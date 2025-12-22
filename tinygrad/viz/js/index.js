@@ -799,7 +799,12 @@ async function main() {
     if (ret.cols != null) renderTable(root, ret);
     else if (ret.data != null) renderDag(ret, { recenter:true });
     else if (ret.src != null) root.append(() => codeBlock(ret.src, ret.lang));
-    ret.metadata?.forEach(m => metadata.appendChild(codeBlock(m.src)).classList.add("full-height"));
+    ret.metadata?.forEach(m => {
+      if (Array.isArray(m)) return metadata.appendChild(tabulate(m.map(({ label, value }) => {
+        return [label.trim(), typeof value === "string" ? value : formatUnit(value)];
+      })).node());
+      metadata.appendChild(codeBlock(m.src)).classList.add("full-height")
+    });
     return document.querySelector("#custom").replaceChildren(root.node());
   }
   // ** Graph view
