@@ -38,20 +38,17 @@ def linearize(sink:UOp) -> list[UOp]:
       case _: priority = 0            # everything else has priority 0
     priorities[u] = (run_count, priority, extra)
 
-  # assign stable index based on original toposort order
-  stable_order = {u: hash(u.tuplize) for u in lst}
-
   # number the uops in "ideal" order
   nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: priorities[x]+(x.tuplize if TUPLE_ORDER else ())))}
 
   # then force them to be toposorted in as close to the ideal order as possible
-  heap = [(-nkey[sink], stable_order[sink], sink)]
+  heap = [(-nkey[sink], sink)]
   newlst = []
   while heap:
-    newlst.append(u:=heapq.heappop(heap)[2])
+    newlst.append(u:=heapq.heappop(heap)[1])
     for v in u.src:
       out_degree[v] -= 1
-      if out_degree[v] == 0: heapq.heappush(heap, (-nkey[v], stable_order[v], v))
+      if out_degree[v] == 0: heapq.heappush(heap, (-nkey[v],v))
   newlst = newlst[::-1]
 
   if getenv("DEBUG_LINEARIZE"):
