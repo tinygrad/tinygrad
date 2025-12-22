@@ -100,9 +100,9 @@ class TransformerBlock:
     # --- RMSNorms --------------------------------------------------------
     self.attn_norm   = nn.RMSNorm(dim, norm_eps)
     self.ffn_norm    = nn.RMSNorm(dim, norm_eps)
-    # qk_norm: 0=disabled, head_dim=per-head norm (qwen3), dim=pre-reshape norm (olmoe)
-    if qk_norm: self.attn_q_norm, self.attn_k_norm = nn.RMSNorm(qk_norm, norm_eps), nn.RMSNorm(qk_norm, norm_eps)
-    self.qk_norm_dim = qk_norm  # store for deciding when to apply
+    if qk_norm:
+      self.attn_q_norm, self.attn_k_norm = nn.RMSNorm(qk_norm, norm_eps), nn.RMSNorm(qk_norm, norm_eps)
+      self.qk_norm_pre = qk_norm != head_dim  # True for olmoe (dim), False for qwen3 (head_dim)
 
     # --- feed-forward (MoE or dense) -------------------------------------
     if num_experts > 0:
@@ -119,18 +119,13 @@ class TransformerBlock:
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     x_norm = self.attn_norm(x)                       # (B,T,D)
     q, k, v = self.attn_q(x_norm), self.attn_k(x_norm), self.attn_v(x_norm)
-
-    # qk_norm before reshape if dim-shaped (olmoe), after reshape if head_dim-shaped (qwen3)
-    if hasattr(self, 'attn_q_norm') and self.qk_norm_dim != self.head_dim:
-      q, k = self.attn_q_norm(q), self.attn_k_norm(k)
+    if getattr(self, 'qk_norm_pre', False): q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
     B, T, _ = x.shape
     q = q.reshape(B, T, self.n_heads,    self.head_dim).transpose(1, 2)  # (B,H,T,Hd)
     k = k.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
     v = v.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
-
-    if hasattr(self, 'attn_q_norm') and self.qk_norm_dim == self.head_dim:
-      q, k = self.attn_q_norm(q), self.attn_k_norm(k)
+    if hasattr(self, 'attn_q_norm') and not self.qk_norm_pre: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
     # TODO: make UOp have SupportsIndex
     freqs_cis = precompute_freqs_cis(self.head_dim, self.max_context, self.rope_theta)[start_pos:start_pos+T]  # type: ignore
@@ -199,7 +194,7 @@ class Transformer:
     if 'output.weight' not in state_dict: state_dict['output.weight'] = state_dict['token_embd.weight']
 
     arch = kv['general.architecture']
-    max_context = min(max_context, kv[f'{arch}.context_length']) if max_context is not None else kv[f'{arch}.context_length']
+    max_context = int(min(max_context, kv[f'{arch}.context_length']) if max_context is not None else kv[f'{arch}.context_length'])
     n_heads, n_kv_heads = kv[f'{arch}.attention.head_count'], kv[f'{arch}.attention.head_count_kv']
 
     # Permute Q/K weights from interleaved to half-split RoPE layout (llama-style models only)
@@ -209,8 +204,7 @@ class Transformer:
         if 'attn_k.weight' in name: state_dict[name] = state_dict[name].rearrange("(n h two) d -> (n two h) d", n=n_kv_heads, two=2)
 
     dim, head_dim = kv[f'{arch}.embedding_length'], kv.get(f'{arch}.attention.key_length', kv[f'{arch}.embedding_length'] // n_heads)
-    # qk_norm: 0=disabled, or the dimension of the norm (head_dim for qwen3, dim for olmoe)
-    qk_norm = state_dict['blk.0.attn_q_norm.weight'].shape[0] if 'blk.0.attn_q_norm.weight' in state_dict else 0
+    qk_norm = int(state_dict['blk.0.attn_q_norm.weight'].shape[0]) if 'blk.0.attn_q_norm.weight' in state_dict else 0
     model = Transformer(num_blocks=kv[f'{arch}.block_count'], dim=dim,
                         hidden_dim=kv.get(f'{arch}.expert_feed_forward_length', kv[f'{arch}.feed_forward_length']),
                         n_heads=n_heads, n_kv_heads=n_kv_heads, norm_eps=kv[f'{arch}.attention.layer_norm_rms_epsilon'],
