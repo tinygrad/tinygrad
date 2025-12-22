@@ -795,7 +795,7 @@ async function main() {
           }
           const td = tr.append("td").classed(ret.cols[i], true);
           // string format scalar values
-          if (!Array.isArray(value)) { td.text(typeof value === "string" ? value : ret.cols[i] === "Duration" ? formatMicroseconds(value) : formatUnit(value)); continue; }
+          if (!Array.isArray(value)) { td.append(() => typeof value === "string" ? colored(value) : d3.create("p").text(ret.cols[i] === "Duration" ? formatMicroseconds(value) : formatUnit(value)).node()); continue; }
           // display arrays in a bar graph
           td.classed("pct-row", true);
           const bar = td.append("div");

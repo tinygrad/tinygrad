@@ -248,23 +248,25 @@ def load_counters(profile:list[ProfileEvent]) -> None:
       durations.setdefault(str(e.name), []).append(float(e.en-e.st))
     if isinstance(e, ProfileProgramEvent): prg_events[str(e.name)] = e
     if isinstance(e, ProfileDeviceEvent): dev_events[e.device] = e
-  ctxs.append({"name":"All Counters", "steps":[create_step("PMC", ("/all-pmc", len(ctxs), 0), \
-      (durations, {k:pmc[0] for k,v in counter_events.items() if (pmc:=v.get(ProfilePMCEvent))}))]})
+  if len(counter_events) == 0: return None
+  ctxs.append({"name":"All Counters", "steps":[create_step("PMC", ("/all-pmc", len(ctxs), 0), (durations, all_counters:={}))]})
   run_number = {n:0 for n,_ in counter_events}
-  for k,v in counter_events.items():
-    prg = trace.keys[r].ret if (r:=ref_map.get(k[0])) else None
-    name = prg.name if prg is not None else k[0]
-    run_number[k[0]] += 1
+  for (k, tag),v in counter_events.items():
+    # use the colored name if it exists
+    name = trace.keys[r].ret.name if (r:=ref_map.get(k)) is not None else k
+    run_number[k] += 1
     steps:list[dict] = []
-    if (pmc:=v.get(ProfilePMCEvent)): steps.append(create_step("PMC", ("/prg-pmc", len(ctxs), len(steps)), pmc))
+    if (pmc:=v.get(ProfilePMCEvent)):
+      steps.append(create_step("PMC", ("/prg-pmc", len(ctxs), len(steps)), pmc))
+      all_counters[(name, run_number[k], k)] = pmc[0]
     if (sqtt:=v.get(ProfileSQTTEvent)):
       # to decode a SQTT trace, we need the raw stream, program binary and device properties
-      steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), (k, [*sqtt, prg_events[k[0]], dev_events[sqtt[0].device]])))
+      steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), ((k, tag), [*sqtt, prg_events[k], dev_events[sqtt[0].device]])))
       if getenv("SQTT_PARSE"):
         # run our decoder on startup, we don't use this since it only works on gfx11
         from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
         for e in sqtt: parse_sqtt_print_packets(e.blob)
-    ctxs.append({"name":f"Exec {name} n{run_number[k[0]]}", "steps":steps})
+    ctxs.append({"name":f"Exec {name} n{run_number[k]}", "steps":steps})
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
 
@@ -434,10 +436,10 @@ def get_render(i:int, j:int, fmt:str) -> dict:
   if fmt == "all-pmc":
     durations, pmc = data
     ret:dict = {"cols":{}, "rows":[]}
-    for (prg,_),events in pmc.items():
+    for (name, n, k),events in data[1].items():
       pmc_table = unpack_pmc(events)
       ret["cols"].update([(r[0], None) for r in pmc_table["rows"]])
-      ret["rows"].append((prg, durations[prg].pop(0), *[r[1] for r in pmc_table["rows"]]))
+      ret["rows"].append((name, durations[k][n-1], *[r[1] for r in pmc_table["rows"]]))
     ret["cols"] = ["Kernel", "Duration", *ret["cols"]]
     return ret
   if fmt == "prg-pmc": return unpack_pmc(data[0])
