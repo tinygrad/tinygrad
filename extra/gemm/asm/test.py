@@ -2,6 +2,8 @@ import pathlib
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.renderer import ProgramSpec
+from tinygrad.uop.ops import track_rewrites, UOp
+from tinygrad.helpers import TracingKey
 
 # ** generate inputs on CPU
 
@@ -28,12 +30,15 @@ C_asm.uop.buffer.allocate()
 
 # ** run gemms
 
+@track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.name, (ret.function_name,), ret=ret))
+def get_asm_gemm(ast:UOp, fp:pathlib.Path) -> ProgramSpec:
+  return ProgramSpec("gemm", fp.read_text(), Device.DEFAULT, ast, global_size=[128, 86, 1], local_size=[256, 1, 1], globals=[0, 1, 2])
+
 sched = C_tiny.schedule()
 assert len(sched) == 1
 eis:list[ExecItem] = [sched[-1].lower()]
 ast = eis[0].ast
-src:str = (pathlib.Path(__file__).parent/"gemm.s").read_text()
-prg = ProgramSpec("gemm", src, Device.DEFAULT, ast, global_size=[128, 86, 1], local_size=[256, 1, 1], globals=[0, 1, 2])
+prg = get_asm_gemm(ast, pathlib.Path(__file__).parent/"gemm.s")
 eis.append(ExecItem(ast, [C_asm.uop.buffer, from_torch(A).uop.buffer, from_torch(B).uop.buffer], prg=CompiledRunner(prg)))
 
 for ei in eis: ei.run(wait=True)
