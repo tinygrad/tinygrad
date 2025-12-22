@@ -645,22 +645,51 @@ def render_signed_small_int_max(ctx, x, a, b):
   ]
 
 def render_signed_small_int_idiv(ctx, x, a, b):
-  """Render IDIV for signed int8/int16. Sign-extend operands first, then use regular idiv logic.
-  For small values, simple float-based division works correctly."""
+  """Render IDIV for signed int8/int16. Sign-extend operands first, then use full idiv correction logic.
+  v_rcp_f32 is an approximation, so we need the same correction as render_idiv."""
   dtype = x.dtype
   bits = 8 if dtype == dtypes.int8 else 16
   ra, rb, rx = ctx.r[a], ctx.r[b], ctx.r[x]
   s = ctx.get_scratch_vgpr()
-  # Sign-extend operands and use float division (exact for small integers)
+  # Sign-extend operands to scratch registers, then use render_idiv algorithm
+  # s: sign-extended a, s+1: sign-extended b, s+2: 1/float(b), s+3: temp, s+4: remainder
   return [
-    f"v_bfe_i32 v{s}, {ra}, 0, {bits}",      # sign-extend a
-    f"v_bfe_i32 v{s+1}, {rb}, 0, {bits}",    # sign-extend b
-    f"v_cvt_f32_i32 v{s+2}, v{s}",           # float(a)
-    f"v_cvt_f32_i32 v{s+3}, v{s+1}",         # float(b)
-    f"v_rcp_f32 v{s+3}, v{s+3}",             # 1/float(b)
-    f"v_mul_f32 v{s+2}, v{s+2}, v{s+3}",     # float(a)/float(b)
-    f"v_trunc_f32 v{s+2}, v{s+2}",           # truncate toward zero
-    f"v_cvt_i32_f32 {rx}, v{s+2}",           # convert to int
+    f"v_bfe_i32 v{s}, {ra}, 0, {bits}",      # s = sign-extend a
+    f"v_bfe_i32 v{s+1}, {rb}, 0, {bits}",    # s+1 = sign-extend b
+    # Initial float division
+    f"v_cvt_f32_i32 v{s+3}, v{s}",           # s+3 = float(a)
+    f"v_cvt_f32_i32 v{s+4}, v{s+1}",         # s+4 = float(b)
+    f"v_rcp_f32 v{s+2}, v{s+4}",             # s+2 = 1/float(b) (approx)
+    f"v_mul_f32 v{s+3}, v{s+3}, v{s+2}",     # s+3 = float(a)/float(b) (approx)
+    f"v_trunc_f32 v{s+3}, v{s+3}",           # s+3 = trunc(a/b)
+    f"v_cvt_i32_f32 {rx}, v{s+3}",           # rx = q (initial quotient)
+    # Compute exact remainder r = a - q*b
+    f"v_mul_lo_u32 v{s+3}, {rx}, v{s+1}",    # s+3 = q*b
+    f"v_sub_nc_u32 v{s+4}, v{s}, v{s+3}",    # s+4 = r = a - q*b (exact remainder)
+    # First correction pass using float - r is now smaller, fits in float24
+    f"v_cvt_f32_i32 v{s+3}, v{s+4}",         # s+3 = float(r)
+    f"v_mul_f32 v{s+3}, v{s+3}, v{s+2}",     # s+3 = float(r)/float(b)
+    f"v_trunc_f32 v{s+3}, v{s+3}",           # s+3 = trunc(r/b)
+    f"v_cvt_i32_f32 v{s+3}, v{s+3}",         # s+3 = large correction
+    f"v_add_nc_u32 {rx}, {rx}, v{s+3}",      # q += large correction
+    # Recompute remainder after large correction
+    f"v_mul_lo_u32 v{s+3}, {rx}, v{s+1}",    # s+3 = q*b
+    f"v_sub_nc_u32 v{s+4}, v{s}, v{s+3}",    # s+4 = r (after large correction)
+    # Correction: If r >= b and b > 0, q is too low - increment q
+    f"v_cmp_ge_i32 vcc_lo, v{s+4}, v{s+1}",  # vcc = (r >= b)
+    f"v_cndmask_b32 v{s+3}, 0, 1, vcc_lo",   # s+3 = 1 if r >= b
+    f"v_cmp_gt_i32 vcc_lo, v{s+1}, 0",       # vcc = (b > 0)
+    f"v_cndmask_b32 v{s+3}, 0, v{s+3}, vcc_lo", # s+3 = 1 if (r >= b AND b > 0)
+    f"v_add_nc_u32 {rx}, {rx}, v{s+3}",      # q += 1 if needed
+    # Correction: If r <= -b and b > 0 (r too negative), decrement q
+    f"v_cmp_lt_i32 vcc_lo, v{s+4}, 0",       # vcc = (r < 0)
+    f"v_cndmask_b32 v{s+3}, 0, 1, vcc_lo",   # s+3 = 1 if r < 0
+    f"v_add_nc_u32 v{s+5}, v{s+4}, v{s+1}",  # s+5 = r + b
+    f"v_cmp_le_i32 vcc_lo, v{s+5}, 0",       # vcc = (r + b <= 0)
+    f"v_cndmask_b32 v{s+3}, 0, v{s+3}, vcc_lo",
+    f"v_cmp_gt_i32 vcc_lo, v{s+1}, 0",       # vcc = (b > 0)
+    f"v_cndmask_b32 v{s+3}, 0, v{s+3}, vcc_lo",
+    f"v_sub_nc_u32 {rx}, {rx}, v{s+3}",      # q -= 1 if needed
   ]
 
 def render_signed_small_int_mod(ctx, x, a, b):

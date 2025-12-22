@@ -520,10 +520,10 @@ class TestLookAheadPacking(unittest.TestCase):
     # - 8 VGPRs for the half16 destination range
     # - A few temp VGPRs for loading (reused)
     # - A few VGPRs for address computation
-    # Without reuse, we'd need 8 + 16 = 24 VGPRs minimum
-    # With reuse, we should need significantly fewer
-    # The generated code shows temp VGPRs v6 and v16 are reused
-    self.assertLess(vgpr_count, 24, f"VGPR count should be < 24 with reuse, got {vgpr_count}")
+    # - 32 scratch VGPRs are allocated for potential 64-bit ops
+    # Without reuse, we'd need 8 + 16 + 32 = 56 VGPRs minimum
+    # With reuse, we should need fewer than that
+    self.assertLess(vgpr_count, 56, f"VGPR count should be < 56 with reuse, got {vgpr_count}")
 
   def test_multiple_half16_vectorizes(self):
     """Test look-ahead packing with multiple half16 VECTORIZEs (like WMMA A and B inputs)"""
@@ -581,8 +581,10 @@ class TestLookAheadPacking(unittest.TestCase):
     # With look-ahead packing and VGPR reuse:
     # - 16 VGPRs for the two half16 destination ranges (8 each)
     # - A few temp VGPRs for loading (reused)
-    # Without reuse, we'd need 16 + 32 = 48 VGPRs minimum
-    self.assertLess(vgpr_count, 48, f"VGPR count should be < 48 with reuse, got {vgpr_count}")
+    # - 32 scratch VGPRs are allocated for potential 64-bit ops
+    # Without reuse, we'd need 16 + 32 + 32 = 80 VGPRs minimum
+    # With reuse, we should need fewer than that
+    self.assertLess(vgpr_count, 80, f"VGPR count should be < 80 with reuse, got {vgpr_count}")
 
 @unittest.skipUnless(AMD_RDNA, "AMD_RDNA=1 required")
 class TestLookAheadPackingOnDevice(unittest.TestCase):
