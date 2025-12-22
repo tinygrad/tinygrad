@@ -222,18 +222,18 @@ class MemoryManager:
     assert cls.va_allocator is not None, "must be set it"
     return cls.va_allocator.alloc(size, max((1 << (size.bit_length() - 1)), align))
 
-  def valloc(self, size:int, align=0x1000, uncached=False, contiguous=False) -> VirtMapping:
+  def valloc(self, size:int, align=0x1000, uncached=False, contiguous=False, zero=False) -> VirtMapping:
     # Alloc physical memory and map it to the virtual address
     va = self.alloc_vaddr(size:=round_up(size, 0x1000), align)
 
-    if contiguous: paddrs = [(self.palloc(size, zero=True), size)]
+    if contiguous: paddrs = [(self.palloc(size, zero=zero), size)]
     else:
       # Traverse the PT to find the largest contiguous sizes we need to allocate. Try to allocate the longest segment to reduce TLB pressure.
       nxt_range, rem_size, paddrs = 0, size, []
       while rem_size > 0:
         while self.palloc_ranges[nxt_range][0] > rem_size: nxt_range += 1
 
-        try: paddrs += [(self.palloc(try_sz:=self.palloc_ranges[nxt_range][0], self.palloc_ranges[nxt_range][1], zero=False), try_sz)]
+        try: paddrs += [(self.palloc(try_sz:=self.palloc_ranges[nxt_range][0], self.palloc_ranges[nxt_range][1], zero=zero), try_sz)]
         except MemoryError:
           # Move to a smaller size and try again.
           nxt_range += 1

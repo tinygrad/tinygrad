@@ -212,14 +212,19 @@ class AM_SMU(AM_IP):
     return (self.adev.mmMP1_SMN_C2PMSG_82 if not debug else self.adev.mmMP1_SMN_C2PMSG_53).read() if read_back_arg else None
 
 class AM_GFX(AM_IP):
-  def init_sw(self): self.xccs = len(self.adev.regs_offset[am.GC_HWIP])
+  def init_sw(self):
+    self.xccs = len(self.adev.regs_offset[am.GC_HWIP])
+    self.mqd_paddr = self.adev.mm.palloc(0x1000 * self.xccs, zero=False, boot=True)
+    self.mqd_mc = self.adev.paddr2mc(self.mqd_paddr)
 
   def init_hw(self):
     # Wait for RLC autoload to complete
     while self.adev.regCP_STAT.read() != 0 and self.adev.regRLC_RLCS_BOOTLOAD_STATUS.read_bitfields()['bootload_complete'] != 0: pass
 
-    self._config_gfx_rs64()
     self.adev.gmc.init_hub("GC", inst_cnt=self.xccs)
+    if self.adev.partial_boot: return
+
+    self._config_gfx_rs64()
 
     # NOTE: Golden reg for gfx11. No values for this reg provided. The kernel just ors 0x20000000 to this reg.
     for xcc in range(self.xccs): self.adev.regTCP_CNTL.write(self.adev.regTCP_CNTL.read() | 0x20000000, inst=xcc)
@@ -265,6 +270,7 @@ class AM_GFX(AM_IP):
     if self.xccs > 1 and not self.adev.partial_boot: self.adev.psp._spatial_partition_cmd(1)
 
   def fini_hw(self):
+    # NOTE: Reset only queue=0, for aqls which are on queue=1, will use reset from the state.
     for xcc in range(self.xccs):
       self._grbm_select(me=1, pipe=0, queue=0, inst=xcc)
       if self.adev.regCP_HQD_ACTIVE.read(inst=xcc) & 1: self.adev.regCP_HQD_DEQUEUE_REQUEST.write(0x2, inst=xcc) # 1 - DRAIN_PIPE; 2 - RESET_WAVES
@@ -273,10 +279,14 @@ class AM_GFX(AM_IP):
 
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, doorbell:int, pipe:int, queue:int,
                  aql:bool) -> int:
-    mqd = self.adev.mm.valloc(0x1000 * self.xccs, uncached=True, contiguous=True)
+    self._grbm_select(me=1, pipe=pipe, queue=queue, inst=0)
+    restore_queue = aql and self.xccs > 1 and self.adev.partial_boot and (self.adev.regCP_HQD_ACTIVE.read(inst=0) & 1)
+    restore_ptr = self.adev.regCP_HQD_PQ_WPTR_LO.read() | (self.adev.regCP_HQD_PQ_WPTR_HI.read() << 32)
+    if DEBUG >= 2 and restore_queue: print(f"am {self.adev.devfmt}: GFX queue already active, continuing from saved state.")
+
     for xcc in range(self.xccs if aql else 1):
       struct_t = getattr(am, f"struct_v{self.adev.ip_ver[am.GC_HWIP][0]}{'_compute' if self.adev.ip_ver[am.GC_HWIP][0] >= 10 else ''}_mqd")
-      mqd_struct = struct_t(header=0xC0310800, cp_mqd_base_addr_lo=lo32(mqd.va_addr + 0x1000*xcc), cp_mqd_base_addr_hi=hi32(mqd.va_addr + 0x1000*xcc),
+      mqd_struct = struct_t(header=0xC0310800, cp_mqd_base_addr_lo=lo32(self.mqd_mc + 0x1000*xcc), cp_mqd_base_addr_hi=hi32(self.mqd_mc + 0x1000*xcc),
         cp_hqd_persistent_state=self.adev.regCP_HQD_PERSISTENT_STATE.encode(preload_size=0x55, preload_req=1),
         cp_hqd_pipe_priority=0x2, cp_hqd_queue_priority=0xf, cp_hqd_quantum=0x111,
         cp_hqd_pq_base_lo=lo32(ring_addr>>8), cp_hqd_pq_base_hi=hi32(ring_addr>>8),
@@ -293,20 +303,27 @@ class AM_GFX(AM_IP):
       for se in range(8 if self.adev.ip_ver[am.GC_HWIP][0] >= 10 else 4): setattr(mqd_struct, f'compute_static_thread_mgmt_se{se}', 0xffffffff)
 
       # Copy mqd into memory
-      self.adev.vram.view(mqd.paddrs[0][0] + 0x1000*xcc, ctypes.sizeof(mqd_struct))[:] = memoryview(mqd_struct).cast('B')
-      self.adev.gmc.flush_hdp()
-
       self._grbm_select(me=1, pipe=pipe, queue=queue, inst=xcc)
 
-      mqd_st_mv = to_mv(ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct)).cast('I')
-      for i, reg in enumerate(range(self.adev.regCP_MQD_BASE_ADDR.addr[xcc], self.adev.regCP_HQD_PQ_WPTR_HI.addr[xcc] + 1)):
-        self.adev.wreg(reg, mqd_st_mv[0x80 + i])
-      self.adev.regCP_HQD_ACTIVE.write(0x1, inst=xcc)
+      if restore_queue:
+        for r in [self.adev.regCP_HQD_PQ_RPTR_REPORT_ADDR, self.adev.regCP_HQD_EOP_BASE_ADDR, self.adev.regCP_HQD_EOP_BASE_ADDR_HI,
+                  self.adev.regCP_HQD_PQ_RPTR_REPORT_ADDR_HI, self.adev.regCP_HQD_PQ_WPTR_POLL_ADDR, self.adev.regCP_HQD_PQ_WPTR_POLL_ADDR_HI]:
+          val = memoryview(bytes(mqd_struct)).cast('I')[0x80 + (off:=r.addr[xcc] - self.adev.regCP_MQD_BASE_ADDR.addr[xcc])]
+          self.adev.vram.view(self.mqd_paddr + 0x1000*xcc, ctypes.sizeof(mqd_struct), fmt='I')[0x80 + off] = val
+          r.write(val, inst=xcc)
+      else:
+        self.adev.vram.view(self.mqd_paddr + 0x1000*xcc, ctypes.sizeof(mqd_struct))[:] = memoryview(mqd_struct).cast('B')
 
+        mqd_st_mv = to_mv(ctypes.addressof(mqd_struct), ctypes.sizeof(mqd_struct)).cast('I')
+        for i, reg in enumerate(range(self.adev.regCP_MQD_BASE_ADDR.addr[xcc], self.adev.regCP_HQD_PQ_WPTR_HI.addr[xcc] + 1)):
+          self.adev.wreg(reg, mqd_st_mv[0x80 + i])
+        self.adev.regCP_HQD_ACTIVE.write(0x1, inst=xcc)
+
+      self.adev.gmc.flush_hdp()
       self._grbm_select(inst=xcc)
 
       self.adev.reg(f"regCP_ME1_PIPE{pipe}_INT_CNTL").update(time_stamp_int_enable=1, generic0_int_enable=1, inst=xcc)
-    return 0
+    return restore_ptr // 16
 
   def set_clockgating_state(self):
     if hasattr(self.adev, 'regMM_ATC_L2_MISC_CG'): self.adev.regMM_ATC_L2_MISC_CG.write(enable=1, mem_ls_enable=1)
