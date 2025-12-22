@@ -805,10 +805,9 @@ async function main() {
       }
       return table;
     }
-    if (ret.cols != null) {
-      renderTable(root, ret);
-    } else if (ret.src != null) root.append(() => codeBlock(ret.src, ret.lang));
-    else renderDag(ret, { recenter:true });
+    if (ret.cols != null) renderTable(root, ret);
+    else if (ret.data != null) renderDag(ret, { recenter:true });
+    else if (ret.src != null) root.append(() => codeBlock(ret.src, ret.lang));
     ret.metadata?.forEach(m => {
       if (Array.isArray(m)) return metadata.appendChild(tabulate(m.map(({ label, value, idx }) => {
         const div = d3.create("div").style("background", cycleColors(colorScheme.CATEGORICAL, idx)).style("width", "100%").style("height", "100%");

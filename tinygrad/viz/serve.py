@@ -249,7 +249,7 @@ def load_counters(profile:list[ProfileEvent]) -> None:
     if isinstance(e, ProfileProgramEvent): prg_events[str(e.name)] = e
     if isinstance(e, ProfileDeviceEvent): dev_events[e.device] = e
   ctxs.append({"name":"All Counters", "steps":[create_step("PMC", ("/all-pmc", len(ctxs), 0), \
-      (durations, {k:v[ProfilePMCEvent][0] for k,v in counter_events.items()}))]})
+      (durations, {k:pmc[0] for k,v in counter_events.items() if (pmc:=v.get(ProfilePMCEvent))}))]})
   run_number = {n:0 for n,_ in counter_events}
   for k,v in counter_events.items():
     prg = trace.keys[r].ret if (r:=ref_map.get(k[0])) else None
