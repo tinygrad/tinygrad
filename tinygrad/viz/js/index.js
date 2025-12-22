@@ -78,6 +78,7 @@ const drawGraph = (data) => {
   const labels = nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label");
   labels.attr("transform", d => `translate(-${d.labelWidth/2}, -${d.labelHeight/2+STROKE_WIDTH*2})`);
   labels.selectAll("text").data(d => {
+    if (Array.isArray(d.label)) return [d.label];
     const ret = [[]];
     for (const s of parseColors(d.label, defaultColor="initial")) {
       const color = darkenHex(s.color, 25);
@@ -87,7 +88,7 @@ const drawGraph = (data) => {
     }
     return [ret];
   }).join("text").selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", 14).selectAll("tspan").data(d => d).join("tspan")
-    .attr("fill", d => d.color).text(d => d.st).attr("xml:space", "preserve");
+    .attr("fill", d => d.color).text(d => d.st).attr("xml:space", "preserve").style("font-family", g.graph().font);
   addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
   // draw edges
@@ -98,7 +99,7 @@ const drawGraph = (data) => {
     points.unshift(intersectRect(g.node(e.v), points[0]));
     points.push(intersectRect(g.node(e.w), points[points.length-1]));
     return line(points);
-  }).attr("marker-end", "url(#arrowhead)");
+  }).attr("marker-end", "url(#arrowhead)").attr("stroke", e => g.edge(e).color || "#4a4b57");
 }
 
 // ** UOp graph
@@ -630,9 +631,6 @@ hljs.registerLanguage("cpp", (hljs) => ({
   ...hljs.getLanguage('cpp'),
   contains: [{ begin: '\\b(?:float|half)[0-9]+\\b', className: 'type' }, ...hljs.getLanguage('cpp').contains]
 }));
-hljs.registerLanguage("amdgpu", (hljs) => ({
-  contains: [hljs.COMMENT("//", "$"), { begin:/\b(?:s_|v_|global_|buffer_|scratch_|flat_|ds_)[a-z0-9_]*\b/, className:"code" }]
-}));
 
 async function fetchValue(path) {
   const res = await fetch(path);
@@ -805,6 +803,7 @@ async function main() {
       return table;
     }
     if (ret.cols != null) renderTable(root, ret);
+    else if (ret.data != null) renderDag(ret, { recenter:true });
     else if (ret.src != null) root.append(() => codeBlock(ret.src, ret.lang));
     ret.metadata?.forEach(m => {
       if (Array.isArray(m)) return metadata.appendChild(tabulate(m.map(({ label, value, idx }) => {
@@ -836,7 +835,7 @@ async function main() {
   if (ret.length === 0) return;
   // ** center graph
   const data = ret[currentRewrite];
-  const render = (opts) => renderDag({ graph:data.graph, change:data.change, opts }, { recenter:currentRewrite === 0 });
+  const render = (opts) => renderDag({ data, opts }, { recenter:currentRewrite === 0 });
   render({ showIndexing:toggle.checked });
   toggle.onchange = (e) => render({ showIndexing:e.target.checked });
   // ** right sidebar metadata

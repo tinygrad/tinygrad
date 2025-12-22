@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, functools, codecs, io, struct
+import ctypes, multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, functools, codecs, io, struct
 import pathlib, traceback, itertools
 from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from decimal import Decimal
@@ -358,6 +358,67 @@ def amd_readelf(lib:bytes) -> list[dict]:
           ".group_segment_fixed_size":"LDS size", ".private_segment_fixed_size":"Scratch size"}
   return [{"label":label, "value":v} for k,label in keys.items() if (v:=notes["amdhsa.kernels"][0][k]) > 0]
 
+def llvm_disasm(arch:str, lib:bytes) -> dict[int, tuple[str, int]]:
+  from tinygrad.runtime.autogen import llvm
+  from tinygrad.runtime.support.elf import elf_loader
+  llvm.LLVMInitializeAMDGPUTargetInfo()
+  llvm.LLVMInitializeAMDGPUTargetMC()
+  llvm.LLVMInitializeAMDGPUAsmParser()
+  llvm.LLVMInitializeAMDGPUDisassembler()
+  # pass NULL to callbacks
+  cbs = [ctypes.cast(0, llvm.LLVMCreateDisasmCPUFeatures.argtypes[i]) for i in {5,6}]
+  ctx = llvm.LLVMCreateDisasmCPUFeatures("amdgcn-amd-amdhsa".encode(), arch.encode(), "".encode(), None, 0, *cbs)
+  image, sections, _ = elf_loader(lib)
+  text = next((sh.header for sh in sections if sh.name == ".text"), None)
+  assert text is not None, "no .text section found in ELF"
+  off, sz = text.sh_addr, text.sh_size
+  addr_table:dict[int, tuple[str, int]] = {}
+  out = ctypes.create_string_buffer(128)
+  cur_off = off
+  while cur_off < sz + off:
+    view = (ctypes.c_ubyte * ((sz + off) - cur_off)).from_buffer_copy(memoryview(image)[cur_off:])
+    instr_sz = llvm.LLVMDisasmInstruction(ctx, view, ctypes.c_uint64(len(view)), ctypes.c_uint64(0), out, ctypes.c_size_t(128))
+    addr_table[cur_off] = (out.value.decode("utf-8", "replace").strip(), instr_sz)
+    cur_off += instr_sz
+  return addr_table
+
+SOPP_INSTS = {"s_branch", "s_cbranch_scc0", "s_cbranch_scc1", "s_cbranch_vccz", "s_cbranch_vccnz", "s_cbranch_execz", "s_cbranch_execnz"}
+def parse_branch(asm:str) -> int|None:
+  inst, *operands = asm.split(" ")
+  if inst in SOPP_INSTS:
+    x = int(operands[0]) & 0xffff
+    return (x - 0x10000 if x & 0x8000 else x)*4
+  return None
+
+COND_TAKEN, COND_NOT_TAKEN, UNCOND = range(3)
+cfg_colors = {COND_TAKEN: "#3f7564", COND_NOT_TAKEN: "#7a4540", UNCOND: "#3b5f7e"}
+def amdgpu_cfg(lib:bytes, arch:str) -> dict:
+  # disassemble
+  pc_table = llvm_disasm(arch, lib)
+  # get leaders
+  leaders:set[int] = {next(iter(pc_table))}
+  for pc, (asm, sz) in pc_table.items():
+    if (offset:=parse_branch(asm)) is not None: leaders.update((pc+sz+offset, pc+sz))
+  # build the cfg
+  curr:int|None = None
+  blocks:dict[int, list[int]] = {}
+  paths:dict[int, dict[int, int]] = {}
+  for pc, (asm, sz) in pc_table.items():
+    if pc in leaders:
+      paths[curr:=pc] = {}
+      blocks[pc] = []
+    else: assert curr is not None, f"no basic block found for {pc}"
+    blocks[curr].append(pc)
+    # control flow ends in endpgm
+    if asm == "s_endpgm": break
+    # otherwise a basic block can have exactly one or two paths
+    nx = pc+sz
+    if (offset:=parse_branch(asm)) is not None:
+      if asm.startswith("s_branch"): paths[curr][nx+offset] = UNCOND
+      else: paths[curr].update([(nx+offset, COND_TAKEN), (nx, COND_NOT_TAKEN)])
+    elif nx in leaders: paths[curr][nx] = UNCOND
+  return {"blocks":blocks, "paths":paths, "pc_table":pc_table, "colors":cfg_colors}
+
 # ** Main render function to get the complete details about a trace event
 
 def get_render(i:int, j:int, fmt:str) -> dict:
@@ -368,14 +429,15 @@ def get_render(i:int, j:int, fmt:str) -> dict:
   if fmt == "asm":
     compiler = Device[data.device].compiler
     disasm_str = get_stdout(lambda: compiler.disassemble(compiler.compile(data.src)))
-    metadata:list = []
+    ret:dict = {"src":disasm_str}
     if data.device.startswith("AMD"):
-      with soft_err(lambda err: metadata.append(err)):
-        metadata.append(amd_readelf(compiler.compile(data.src)))
-    return {"src":disasm_str, "lang":"amdgpu" if data.device.startswith("AMD") else None, "metadata":metadata}
+      with soft_err(lambda err: ret.update(err)):
+        metadata = amd_readelf(lib:=compiler.compile(data.src))
+        ret = {"data":amdgpu_cfg(lib, getattr(compiler, "arch")), "metadata":[metadata]}
+    return ret
   if fmt == "all-pmc":
     durations, pmc = data
-    ret:dict = {"cols":{}, "rows":[]}
+    ret = {"cols":{}, "rows":[]}
     for (name, n, k),events in data[1].items():
       pmc_table = unpack_pmc(events)
       ret["cols"].update([(r[0], None) for r in pmc_table["rows"]])
