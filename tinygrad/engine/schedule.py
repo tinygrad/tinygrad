@@ -5,7 +5,7 @@ from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites
 from tinygrad.uop.ops import PatternMatcher, UPat, graph_rewrite, graph_rewrite_map
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, flatten, pluralize, Context
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, flatten, pluralize
 from tinygrad.engine.realize import ExecItem
 
 # **** schedule linearizer
@@ -14,8 +14,7 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
   from tinygrad.codegen.late.linearizer import linearize
 
   with cpu_profile(TracingKey("linearize schedule")):
-    with Context(TUPLE_ORDER=0):
-      ordered = linearize(sched_sink)
+    ordered = linearize(sched_sink)
     schedule: list[tuple|UOp] = []
     for u in ordered:
       if u.op is Ops.RANGE: schedule.append(u)
