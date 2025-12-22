@@ -42,13 +42,13 @@ def linearize(sink:UOp) -> list[UOp]:
   nkey = {u:i for i,u in enumerate(sorted(lst, key=lambda x: priorities[x]+(x.tuplize if TUPLE_ORDER else ())))}
 
   # then force them to be toposorted in as close to the ideal order as possible
-  heap = [(-nkey[sink], sink)]
+  heap = [(-nkey[sink], id(sink), sink)]
   newlst = []
   while heap:
-    newlst.append(u:=heapq.heappop(heap)[1])
+    newlst.append(u:=heapq.heappop(heap)[2])
     for v in u.src:
       out_degree[v] -= 1
-      if out_degree[v] == 0: heapq.heappush(heap, (-nkey[v],v))
+      if out_degree[v] == 0: heapq.heappush(heap, (-nkey[v], id(v), v))
   newlst = newlst[::-1]
 
   if getenv("DEBUG_LINEARIZE"):
