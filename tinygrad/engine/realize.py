@@ -5,7 +5,7 @@ from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, 
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context
 from tinygrad.helpers import unwrap
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, track_rewrites, KernelInfo, pyrender
-from tinygrad.device import Device, Buffer
+from tinygrad.device import Device, Buffer, Compiler
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
 from tinygrad.codegen import full_rewrite_to_program
 from tinygrad.codegen.opt import Opt
@@ -13,17 +13,19 @@ from tinygrad.codegen.opt import Opt
 # **************** Program Creation ****************
 
 @track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.name, (ret.function_name, ret.ast), ret=ret), replay=True)
-def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> ProgramSpec:
+def get_program(ast:UOp, renderer:Renderer, compiler:Compiler|None=None, opts:list[Opt]|None=None) -> ProgramSpec:
   """
   Transform an AST into a ProgramSpec. May trigger BEAM search.
 
   Args:
     ast: The Ops.SINK rooted AST
     renderer: The renderer used to generate the code
+    compiler: The compiler used to compile the code (defaults to Device[renderer.device].compiler)
 
   Returns:
     The ProgramSpec of the program.
   """
+  if compiler is None: compiler = Device[renderer.device].compiler
 
   if getenv("VIZ"): graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(ast))
@@ -34,7 +36,7 @@ def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> Program
     ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts)))
   if ast.arg is None: ast = ast.replace(arg=KernelInfo())
 
-  prg = full_rewrite_to_program(ast, renderer)
+  prg = full_rewrite_to_program(ast, renderer, compiler)
   # SINK/DEVICE/LINEAR/SOURCE/BINARY
   sink, device, linear, source, binary = prg.src
 
@@ -158,7 +160,7 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
   if bret:=method_cache.get(bkey):
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device), bret.lib)
   else:
-    prg: ProgramSpec = get_program(ast, Device[device].renderer)
+    prg: ProgramSpec = get_program(ast, Device[device].renderer, Device[device].compiler)
     method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, device=device))
   return ret
 
