@@ -101,6 +101,7 @@ class TransformerBlock:
     # --- RMSNorms --------------------------------------------------------
     self.attn_norm   = nn.RMSNorm(dim, norm_eps)
     self.ffn_norm    = nn.RMSNorm(dim, norm_eps)
+    self.qk_norm = qk_norm
     if qk_norm: self.attn_q_norm, self.attn_k_norm = nn.RMSNorm(qk_norm, norm_eps), nn.RMSNorm(qk_norm, norm_eps)
 
     # --- feed-forward (MoE or dense) -------------------------------------
@@ -118,13 +119,13 @@ class TransformerBlock:
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     x_norm = self.attn_norm(x)                       # (B,T,D)
     q, k, v = self.attn_q(x_norm), self.attn_k(x_norm), self.attn_v(x_norm)
-    if hasattr(self, 'attn_q_norm') and self.attn_q_norm.weight.shape[0] != self.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
+    if self.qk_norm and self.qk_norm != self.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
     B, T, _ = x.shape
     q = q.reshape(B, T, self.n_heads,    self.head_dim).transpose(1, 2)  # (B,H,T,Hd)
     k = k.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
     v = v.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
-    if hasattr(self, 'attn_q_norm') and self.attn_q_norm.weight.shape[0] == self.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
+    if self.qk_norm == self.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
     # TODO: make UOp have SupportsIndex
     freqs_cis = precompute_freqs_cis(self.head_dim, self.max_context, self.rope_theta)[start_pos:start_pos+T]  # type: ignore
