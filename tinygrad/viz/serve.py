@@ -378,6 +378,30 @@ def amd_readelf(lib:bytes) -> list[dict]:
           ".group_segment_fixed_size":"LDS size", ".private_segment_fixed_size":"Scratch size"}
   return [{"label":label, "value":v} for k,label in keys.items() if (v:=notes["amdhsa.kernels"][0][k]) > 0]
 
+def llvm_disasm(arch:str, lib:bytes) -> dict[int, tuple[str, int]]:
+  from tinygrad.runtime.autogen import llvm
+  from tinygrad.runtime.support.elf import elf_loader
+  llvm.LLVMInitializeAMDGPUTargetInfo()
+  llvm.LLVMInitializeAMDGPUTargetMC()
+  llvm.LLVMInitializeAMDGPUAsmParser()
+  llvm.LLVMInitializeAMDGPUDisassembler()
+  # pass NULL to callbacks
+  cbs = [ctypes.cast(0, llvm.LLVMCreateDisasmCPUFeatures.argtypes[i]) for i in {5,6}]
+  ctx = llvm.LLVMCreateDisasmCPUFeatures("amdgcn-amd-amdhsa".encode(), arch.encode(), "".encode(), None, 0, *cbs)
+  image, sections, _ = elf_loader(lib)
+  text = next((sh.header for sh in sections if sh.name == ".text"), None)
+  assert text is not None, "no .text section found in ELF"
+  off, sz = text.sh_addr, text.sh_size
+  addr_table:dict[int, tuple[str, int]] = {}
+  out = ctypes.create_string_buffer(128)
+  cur_off = off
+  while cur_off < sz + off:
+    view = (ctypes.c_ubyte * ((sz + off) - cur_off)).from_buffer_copy(memoryview(image)[cur_off:])
+    instr_sz = llvm.LLVMDisasmInstruction(ctx, view, ctypes.c_uint64(len(view)), ctypes.c_uint64(0), out, ctypes.c_size_t(128))
+    addr_table[cur_off] = (out.value.decode("utf-8", "replace").strip(), instr_sz)
+    cur_off += instr_sz
+  return addr_table
+
 SOPP_INSTS = {"s_branch", "s_cbranch_scc0", "s_cbranch_scc1", "s_cbranch_vccz", "s_cbranch_vccnz", "s_cbranch_execz", "s_cbranch_execnz"}
 def parse_branch(asm:str) -> int|None:
   inst, *operands = asm.split(" ")
@@ -390,7 +414,6 @@ COND_TAKEN, COND_NOT_TAKEN, UNCOND = range(3)
 cfg_colors = {COND_TAKEN: "#3f7564", COND_NOT_TAKEN: "#7a4540", UNCOND: "#3b5f7e"}
 def amdgpu_cfg(lib:bytes, arch:str) -> dict:
   # disassemble
-  from extra.sqtt.roc import llvm_disasm # TODO: bring this to core tinygrad
   pc_table = llvm_disasm(arch, lib)
   # get leaders
   leaders:set[int] = {next(iter(pc_table))}
