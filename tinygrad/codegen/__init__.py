@@ -146,7 +146,7 @@ pm_to_program = PatternMatcher([
 def full_rewrite_to_program(sink:UOp, ren:Renderer, compiler:Compiler) -> UOp:
   full_sink = full_rewrite_to_sink(sink, ren, optimize=sink.tag is None)
   sink = UOp(Ops.PROGRAM, src=(full_sink,))
-  return graph_rewrite(sink, pm_to_program, ctx=(ren, compiler), name="transform program")
+  return graph_rewrite(sink, pm_to_program, ctx=(ren, compiler), name="linearize/render/compile")
 
 def full_rewrite(sink:UOp, ren:Renderer|None=None) -> list[UOp]:
   """
