@@ -571,33 +571,37 @@ def render_comparison(ctx, x, src0):
     is_signed = dtype in (dtypes.int64, dtypes.long)
     hi_suffix = "i32" if is_signed else "u32"
 
+    # Use scratch SGPRs for 64-bit comparison intermediates
+    ctx.scratch_sgpr_used = True
+    ss0, ss1 = f"s{ctx.gated_sgpr}", f"s{ctx.gated_sgpr+1}"
+
     if x.op is Ops.CMPEQ:
       # a == b iff a_hi == b_hi AND a_lo == b_lo
       # RDNA3 wave32: v_cmp writes to vcc_lo (32 bits), use s_*_b32 operations
       instrs = [
         f"v_cmp_eq_u32 vcc_lo, {a_hi}, {b_hi}",   # vcc_lo = a_hi == b_hi
-        "s_mov_b32 s0, vcc_lo",                    # save hi result
+        f"s_mov_b32 {ss0}, vcc_lo",                # save hi result
         f"v_cmp_eq_u32 vcc_lo, {a_lo}, {b_lo}",   # vcc_lo = a_lo == b_lo
-        "s_and_b32 vcc_lo, s0, vcc_lo",            # vcc_lo = hi_eq AND lo_eq
+        f"s_and_b32 vcc_lo, {ss0}, vcc_lo",        # vcc_lo = hi_eq AND lo_eq
       ]
     elif x.op is Ops.CMPNE:
       # a != b iff a_hi != b_hi OR a_lo != b_lo
       instrs = [
         f"v_cmp_ne_u32 vcc_lo, {a_hi}, {b_hi}",   # vcc_lo = a_hi != b_hi
-        "s_mov_b32 s0, vcc_lo",                    # save hi result
+        f"s_mov_b32 {ss0}, vcc_lo",                # save hi result
         f"v_cmp_ne_u32 vcc_lo, {a_lo}, {b_lo}",   # vcc_lo = a_lo != b_lo
-        "s_or_b32 vcc_lo, s0, vcc_lo",             # vcc_lo = hi_ne OR lo_ne
+        f"s_or_b32 vcc_lo, {ss0}, vcc_lo",         # vcc_lo = hi_ne OR lo_ne
       ]
     else:  # CMPLT: a < b
       # if a_hi < b_hi -> true; if a_hi > b_hi -> false; if a_hi == b_hi -> compare low (unsigned)
       instrs = [
         f"v_cmp_lt_{hi_suffix} vcc_lo, {a_hi}, {b_hi}",  # vcc_lo = a_hi < b_hi
-        "s_mov_b32 s0, vcc_lo",                           # save hi_lt
+        f"s_mov_b32 {ss0}, vcc_lo",                       # save hi_lt
         f"v_cmp_eq_u32 vcc_lo, {a_hi}, {b_hi}",          # vcc_lo = a_hi == b_hi
-        "s_mov_b32 s1, vcc_lo",                           # save hi_eq
+        f"s_mov_b32 {ss1}, vcc_lo",                       # save hi_eq
         f"v_cmp_lt_u32 vcc_lo, {a_lo}, {b_lo}",          # vcc_lo = a_lo < b_lo
-        "s_and_b32 s1, s1, vcc_lo",                       # s1 = hi_eq AND lo_lt
-        "s_or_b32 vcc_lo, s0, s1",                        # vcc_lo = hi_lt OR (hi_eq AND lo_lt)
+        f"s_and_b32 {ss1}, {ss1}, vcc_lo",                # ss1 = hi_eq AND lo_lt
+        f"s_or_b32 vcc_lo, {ss0}, {ss1}",                 # vcc_lo = hi_lt OR (hi_eq AND lo_lt)
       ]
     if dest.startswith('v'):
       instrs.append(f"v_cndmask_b32 {dest}, 0, 1, vcc_lo")
@@ -3266,8 +3270,8 @@ amdhsa.version:
 
     # If scratch SGPRs were used, update max_sgpr to include them
     if self.scratch_sgpr_used:
-      # gated_sgpr (s100) + IF stack SGPRs (s101, s102, ...)
-      max_sgpr = max(max_sgpr, self.gated_sgpr + 1)
+      # gated_sgpr (s100) + s101 for 64-bit comparisons + IF stack SGPRs (s101, s102, ...)
+      max_sgpr = max(max_sgpr, self.gated_sgpr + 2)  # +2 for 64-bit comparison scratch
       if self.max_if_depth > 0:
         max_sgpr = max(max_sgpr, self.if_sgpr_base + self.max_if_depth)
 

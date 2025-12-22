@@ -97,6 +97,12 @@ class HIPCompiler(Compiler):
     except RuntimeError as e: raise CompileError(e) from e
   def disassemble(self, lib:bytes): amdgpu_disassemble(lib)
 
+# RDNACompiler is an alias with a different name to avoid dict key collision in CompilerSet
+class RDNACompiler(HIPCompiler):
+  def __init__(self, arch:str):
+    Compiler.__init__(self, f"compile_rdna_{arch}")
+    self.arch = arch
+
 class HIPCCCompiler(Compiler):
   def __init__(self, arch:str, extra_options:list[str]=[]):
     self.arch, self.extra_options = arch, extra_options
