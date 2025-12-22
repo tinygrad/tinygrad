@@ -559,14 +559,153 @@ def render_umod(ctx, x, a, b):
 def render_comparison(ctx, x, src0):
   """Render comparison op. If dest is SGPR, use directly. If VGPR (fallback), use vcc_lo + v_cndmask_b32."""
   dest = ctx.r[x]
-  # For 64-bit integer operands, extract low 32 bits (RDNA has limited 64-bit int ALU)
-  srcs = [extract_low_32(ctx.r[v]) for v in x.src]
-  dtype, typename = src0.dtype, ctx.types[src0.dtype]
+  dtype = src0.dtype
+  instrs = []
+
+  # Handle 64-bit integer comparison: compare high parts, then low parts if equal
+  if dtype in (dtypes.int64, dtypes.uint64, dtypes.long, dtypes.ulong):
+    s = ctx.get_scratch_vgpr()
+    regs = [ctx.r[v] for v in x.src]
+    a_lo, a_hi = f"v{get_reg_base(regs[0])}", f"v{get_reg_base(regs[0])+1}"
+    b_lo, b_hi = f"v{get_reg_base(regs[1])}", f"v{get_reg_base(regs[1])+1}"
+    is_signed = dtype in (dtypes.int64, dtypes.long)
+    hi_suffix = "i32" if is_signed else "u32"
+
+    if x.op is Ops.CMPEQ:
+      # a == b iff a_hi == b_hi AND a_lo == b_lo
+      # RDNA3 wave32: v_cmp writes to vcc_lo (32 bits), use s_*_b32 operations
+      instrs = [
+        f"v_cmp_eq_u32 vcc_lo, {a_hi}, {b_hi}",   # vcc_lo = a_hi == b_hi
+        "s_mov_b32 s0, vcc_lo",                    # save hi result
+        f"v_cmp_eq_u32 vcc_lo, {a_lo}, {b_lo}",   # vcc_lo = a_lo == b_lo
+        "s_and_b32 vcc_lo, s0, vcc_lo",            # vcc_lo = hi_eq AND lo_eq
+      ]
+    elif x.op is Ops.CMPNE:
+      # a != b iff a_hi != b_hi OR a_lo != b_lo
+      instrs = [
+        f"v_cmp_ne_u32 vcc_lo, {a_hi}, {b_hi}",   # vcc_lo = a_hi != b_hi
+        "s_mov_b32 s0, vcc_lo",                    # save hi result
+        f"v_cmp_ne_u32 vcc_lo, {a_lo}, {b_lo}",   # vcc_lo = a_lo != b_lo
+        "s_or_b32 vcc_lo, s0, vcc_lo",             # vcc_lo = hi_ne OR lo_ne
+      ]
+    else:  # CMPLT: a < b
+      # if a_hi < b_hi -> true; if a_hi > b_hi -> false; if a_hi == b_hi -> compare low (unsigned)
+      instrs = [
+        f"v_cmp_lt_{hi_suffix} vcc_lo, {a_hi}, {b_hi}",  # vcc_lo = a_hi < b_hi
+        "s_mov_b32 s0, vcc_lo",                           # save hi_lt
+        f"v_cmp_eq_u32 vcc_lo, {a_hi}, {b_hi}",          # vcc_lo = a_hi == b_hi
+        "s_mov_b32 s1, vcc_lo",                           # save hi_eq
+        f"v_cmp_lt_u32 vcc_lo, {a_lo}, {b_lo}",          # vcc_lo = a_lo < b_lo
+        "s_and_b32 s1, s1, vcc_lo",                       # s1 = hi_eq AND lo_lt
+        "s_or_b32 vcc_lo, s0, s1",                        # vcc_lo = hi_lt OR (hi_eq AND lo_lt)
+      ]
+    if dest.startswith('v'):
+      instrs.append(f"v_cndmask_b32 {dest}, 0, 1, vcc_lo")
+    else:
+      instrs.append(f"s_cselect_b32 {dest}, 1, 0")
+    return instrs
+
+  # Handle signed int8/int16: need sign extension before comparison
+  if dtype in (dtypes.int8, dtypes.int16):
+    s = ctx.get_scratch_vgpr()
+    bits = 8 if dtype == dtypes.int8 else 16
+    # Sign-extend both operands to 32-bit
+    srcs = []
+    for i, v in enumerate(x.src):
+      reg = ctx.r[v]
+      ext_reg = f"v{s+i}"
+      instrs.append(f"v_bfe_i32 {ext_reg}, {reg}, 0, {bits}")
+      srcs.append(ext_reg)
+  else:
+    srcs = [extract_low_32(ctx.r[v]) for v in x.src]
+
+  typename = ctx.types[dtype]
   cmp_instr = ctx.code_for_op[x.op]("vcc_lo" if dest.startswith('v') else dest, *srcs, dtype, typename)
+  instrs.append(cmp_instr)
   if dest.startswith('v'):
     # VGPR fallback: compare to vcc_lo, then convert to 0/1 in VGPR
-    return [cmp_instr, f"v_cndmask_b32 {dest}, 0, 1, vcc_lo"]
-  return cmp_instr
+    instrs.append(f"v_cndmask_b32 {dest}, 0, 1, vcc_lo")
+  return instrs
+
+def render_signed_small_int_max(ctx, x, a, b):
+  """Render MAX for signed int8/int16. Requires sign extension before comparison."""
+  dtype = x.dtype
+  bits = 8 if dtype == dtypes.int8 else 16
+  dest, ra, rb = ctx.r[x], ctx.r[a], ctx.r[b]
+  s = ctx.get_scratch_vgpr()
+  # Sign-extend both operands, then perform MAX
+  return [
+    f"v_bfe_i32 v{s}, {ra}, 0, {bits}",    # sign-extend a
+    f"v_bfe_i32 v{s+1}, {rb}, 0, {bits}",  # sign-extend b
+    f"v_max_i32 {dest}, v{s}, v{s+1}",     # max on sign-extended values
+  ]
+
+def render_signed_small_int_idiv(ctx, x, a, b):
+  """Render IDIV for signed int8/int16. Sign-extend operands first, then use regular idiv logic.
+  For small values, simple float-based division works correctly."""
+  dtype = x.dtype
+  bits = 8 if dtype == dtypes.int8 else 16
+  ra, rb, rx = ctx.r[a], ctx.r[b], ctx.r[x]
+  s = ctx.get_scratch_vgpr()
+  # Sign-extend operands and use float division (exact for small integers)
+  return [
+    f"v_bfe_i32 v{s}, {ra}, 0, {bits}",      # sign-extend a
+    f"v_bfe_i32 v{s+1}, {rb}, 0, {bits}",    # sign-extend b
+    f"v_cvt_f32_i32 v{s+2}, v{s}",           # float(a)
+    f"v_cvt_f32_i32 v{s+3}, v{s+1}",         # float(b)
+    f"v_rcp_f32 v{s+3}, v{s+3}",             # 1/float(b)
+    f"v_mul_f32 v{s+2}, v{s+2}, v{s+3}",     # float(a)/float(b)
+    f"v_trunc_f32 v{s+2}, v{s+2}",           # truncate toward zero
+    f"v_cvt_i32_f32 {rx}, v{s+2}",           # convert to int
+  ]
+
+def render_signed_small_int_mod(ctx, x, a, b):
+  """Render MOD for signed int8/int16. Sign-extend operands first, then compute a - (a/b)*b."""
+  dtype = x.dtype
+  bits = 8 if dtype == dtypes.int8 else 16
+  ra, rb, rx = ctx.r[a], ctx.r[b], ctx.r[x]
+  s = ctx.get_scratch_vgpr()
+  # Sign-extend and compute mod = a - (a/b)*b
+  return [
+    f"v_bfe_i32 v{s}, {ra}, 0, {bits}",      # sign-extend a
+    f"v_bfe_i32 v{s+1}, {rb}, 0, {bits}",    # sign-extend b
+    f"v_cvt_f32_i32 v{s+2}, v{s}",           # float(a)
+    f"v_cvt_f32_i32 v{s+3}, v{s+1}",         # float(b)
+    f"v_rcp_f32 v{s+3}, v{s+3}",             # 1/float(b)
+    f"v_mul_f32 v{s+2}, v{s+2}, v{s+3}",     # float(a)/float(b)
+    f"v_trunc_f32 v{s+2}, v{s+2}",           # truncate toward zero
+    f"v_cvt_i32_f32 v{s+2}, v{s+2}",         # q = trunc(a/b)
+    f"v_mul_lo_u32 v{s+2}, v{s+2}, v{s+1}",  # q*b
+    f"v_sub_nc_u32 {rx}, v{s}, v{s+2}",      # a - q*b
+  ]
+
+def render_signed_small_int_mul(ctx, x, a, b):
+  """Render MUL for signed int8/int16. Sign-extend operands before multiplication.
+  This is needed because loads are unsigned and don't preserve sign for small int types."""
+  dtype = x.dtype
+  bits = 8 if dtype == dtypes.int8 else 16
+  ra, rb, rx = ctx.r[a], ctx.r[b], ctx.r[x]
+  s = ctx.get_scratch_vgpr()
+  # Sign-extend both operands, then multiply
+  return [
+    f"v_bfe_i32 v{s}, {ra}, 0, {bits}",      # sign-extend a
+    f"v_bfe_i32 v{s+1}, {rb}, 0, {bits}",    # sign-extend b
+    f"v_mul_lo_u32 {rx}, v{s}, v{s+1}",      # signed multiply (low 32 bits)
+  ]
+
+def render_signed_small_int_sub(ctx, x, a, b):
+  """Render SUB for signed int8/int16. Sign-extend operands before subtraction.
+  This is needed because loads are unsigned and don't preserve sign for small int types."""
+  dtype = x.dtype
+  bits = 8 if dtype == dtypes.int8 else 16
+  ra, rb, rx = ctx.r[a], ctx.r[b], ctx.r[x]
+  s = ctx.get_scratch_vgpr()
+  # Sign-extend both operands, then subtract
+  return [
+    f"v_bfe_i32 v{s}, {ra}, 0, {bits}",      # sign-extend a
+    f"v_bfe_i32 v{s+1}, {rb}, 0, {bits}",    # sign-extend b
+    f"v_sub_nc_u32 {rx}, v{s}, v{s+1}",      # signed subtract
+  ]
 
 def render_sin(ctx, x, a):
   """Render SIN using v_sin_f32 with extended precision range reduction.
@@ -1361,6 +1500,9 @@ string_rewrite = PatternMatcher([
   # SIN: v_sin_f32 expects input in turns (1 turn = 2π radians), so we multiply by 1/(2π) first
   # NOTE: v_sin_f32 has limited range (~256 turns) but we accept this for native instruction benefits
   (UPat(Ops.SIN, name="x", src=(UPat.var("a"),)), render_sin),
+  # signed int8/int16 IDIV need sign extension
+  (UPat(Ops.IDIV, name="x", dtype=dtypes.int8, src=(UPat.var("a"), UPat.var("b"))), render_signed_small_int_idiv),
+  (UPat(Ops.IDIV, name="x", dtype=dtypes.int16, src=(UPat.var("a"), UPat.var("b"))), render_signed_small_int_idiv),
   # 64-bit IDIV: need full 64-bit precision using f64 arithmetic
   (UPat(Ops.IDIV, name="x", dtype=dtypes.ulong, src=(UPat.var("a"), UPat.var("b"))), render_64bit_udiv),
   (UPat(Ops.IDIV, name="x", dtype=dtypes.long, src=(UPat.var("a"), UPat.var("b"))), render_64bit_idiv),
@@ -1368,6 +1510,9 @@ string_rewrite = PatternMatcher([
   # Use render_udiv for unsigned types, render_idiv for signed types
   (UPat(Ops.IDIV, name="x", src=(UPat.var("a"), UPat.var("b"))),
    lambda ctx, x, a, b: render_udiv(ctx, x, a, b) if dtypes.is_unsigned(x.dtype) else render_idiv(ctx, x, a, b)),
+  # signed int8/int16 MOD need sign extension
+  (UPat(Ops.MOD, name="x", dtype=dtypes.int8, src=(UPat.var("a"), UPat.var("b"))), render_signed_small_int_mod),
+  (UPat(Ops.MOD, name="x", dtype=dtypes.int16, src=(UPat.var("a"), UPat.var("b"))), render_signed_small_int_mod),
   # 64-bit integer MOD: need proper 64-bit arithmetic
   (UPat(Ops.MOD, name="x", dtype=dtypes.ulong, src=(UPat.var("a"), UPat.var("b"))), render_64bit_umod),
   # Integer MOD: a % b = a - (a // b) * b (floats use v_mod_f32 via code_for_op)
@@ -1379,6 +1524,12 @@ string_rewrite = PatternMatcher([
    lambda ctx, x, a, b: ctx.render_bool_logic(x, a, b, "and")),
   (UPat(Ops.OR, name="x", dtype=dtypes.bool, src=(UPat.var("a", dtype=dtypes.bool), UPat.var("b", dtype=dtypes.bool))),
    lambda ctx, x, a, b: ctx.render_bool_logic(x, a, b, "or")),
+  # signed int8/int16 MUL need sign extension (loads are unsigned)
+  (UPat(Ops.MUL, name="x", dtype=dtypes.int8, src=(UPat.var("a"), UPat.var("b"))), render_signed_small_int_mul),
+  (UPat(Ops.MUL, name="x", dtype=dtypes.int16, src=(UPat.var("a"), UPat.var("b"))), render_signed_small_int_mul),
+  # signed int8/int16 SUB need sign extension (loads are unsigned)
+  (UPat(Ops.SUB, name="x", dtype=dtypes.int8, src=(UPat.var("a"), UPat.var("b"))), render_signed_small_int_sub),
+  (UPat(Ops.SUB, name="x", dtype=dtypes.int16, src=(UPat.var("a"), UPat.var("b"))), render_signed_small_int_sub),
   # 64-bit integer MUL: need full 64-bit product for division-by-multiplication pattern
   (UPat(Ops.MUL, name="x", dtype=dtypes.long), render_64bit_mul),
   (UPat(Ops.MUL, name="x", dtype=dtypes.ulong), render_64bit_mul),
@@ -1407,6 +1558,9 @@ string_rewrite = PatternMatcher([
   (UPat(Ops.ADD, name="x", dtype=dtypes.float64, src=(UPat.var("a"), UPat.var("b"))), render_f64_add),
   (UPat(Ops.SUB, name="x", dtype=dtypes.float64, src=(UPat.var("a"), UPat.var("b"))), render_f64_sub),
   (UPat(Ops.MUL, name="x", dtype=dtypes.float64, src=(UPat.var("a"), UPat.var("b"))), render_f64_mul),
+  # signed int8/int16 MAX need sign extension (MIN uses MAX + XOR pattern)
+  (UPat(Ops.MAX, name="x", dtype=dtypes.int8, src=(UPat.var("a"), UPat.var("b"))), render_signed_small_int_max),
+  (UPat(Ops.MAX, name="x", dtype=dtypes.int16, src=(UPat.var("a"), UPat.var("b"))), render_signed_small_int_max),
   # alu ops - extract low 32 bits for 64-bit integer operands since RDNA has limited 64-bit int ALU
   (UPat(GroupOp.ALU, name="x"), lambda ctx, x: ctx.code_for_op[x.op](
     extract_low_32(ctx.r[x]) if x.dtype in (dtypes.long, dtypes.ulong) else ctx.r[x],
