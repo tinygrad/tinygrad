@@ -1442,11 +1442,16 @@ def train_llama3():
     GlobalCounters.reset()
     loss, lr = train_step(model, tokens)
     loss = loss.float().item()
+    lr = lr.item()
 
     i += 1
     sequences_seen += tokens.shape[0]
 
-    tqdm.write(f"{loss:.4f} loss, {lr.item():.12f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {time.perf_counter()-t:.2f} s")
+    sec = time.perf_counter()-t
+    tqdm.write(
+      f"{i:5} {sec:.2f} s run, {loss:.4f} loss, {lr:.12f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, "
+      f"{GlobalCounters.global_ops * 1e-9 / sec:9.2f} GFLOPS")
+
     if (fname:=getenv("LOSS_FILE", "")):
       with open(fname, "a") as f:
         f.write(f"{i} {loss:.4f} {lr.item():.12f} {GlobalCounters.mem_used / 1e9:.2f}\n")
