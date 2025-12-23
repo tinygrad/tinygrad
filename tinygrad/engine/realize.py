@@ -7,7 +7,7 @@ from tinygrad.helpers import unwrap
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, print_uops, track_rewrites, KernelInfo, pyrender
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
-from tinygrad.codegen import full_rewrite
+from tinygrad.codegen import full_rewrite_to_program
 from tinygrad.codegen.opt import Opt
 
 # **************** Program Creation ****************
@@ -32,20 +32,16 @@ def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> Program
   if opts is not None:
     assert ast.arg is None, "can't apply opts if sink has an arg"
     ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts)))
-  try:
-    uops = full_rewrite(ast, renderer)
-  except RuntimeError as e:
-    print("***** LINEARIZE FAILURE *****")
-    print(e)
-    print(pyrender(ast))
-    raise
-  assert uops[-1].op is Ops.SINK, "last uop must be sink"
+  if ast.arg is None: ast = ast.replace(arg=KernelInfo())
 
-  # print and render
-  if DEBUG >= 6: print_uops(uops)
-  src = renderer.render(uops)
+  prg = full_rewrite_to_program(ast, renderer)
+  # SINK/LINEAR/SOURCE
+  sink, linear, source = prg.src
 
-  return ProgramSpec(uops[-1].arg.name if uops[-1].arg is not None else "test", src, renderer.device, ast, uops,
+  # print
+  if DEBUG >= 6: print_uops(list(linear.src))
+
+  return ProgramSpec(sink.arg.name, source.arg, renderer.device, sink, list(linear.src),
                      global_size=[1,1,1] if renderer.has_local or renderer.has_threads else None,
                      local_size=[1,1,1] if renderer.has_local else None)
 

@@ -123,6 +123,25 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher) -> list[UOp]:
     newlst.extend(ret[1])
   return newlst
 
+def do_linearize(prg:UOp, sink:UOp) -> UOp:
+  lst = line_rewrite(linearize(sink), pm_linearize_cleanups)
+  if SPEC: type_verify(lst, program_spec)
+  return prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=tuple(lst)),))
+
+def do_render(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
+  src = ctx.render(list(lin.src))
+  return prg.replace(src=prg.src + (UOp(Ops.SOURCE, arg=src),))
+
+pm_to_program = PatternMatcher([
+  (UPat(Ops.PROGRAM, src=(UPat(Ops.SINK, name="sink"),), name="prg"), do_linearize),
+  (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.LINEAR, name="lin")), name="prg"), do_render),
+])
+
+def full_rewrite_to_program(sink:UOp, ren:Renderer) -> UOp:
+  full_sink = full_rewrite_to_sink(sink, ren, optimize=sink.tag is None)
+  sink = UOp(Ops.PROGRAM, src=(full_sink,))
+  return graph_rewrite(sink, pm_to_program, ctx=ren, name="linearize/render")
+
 def full_rewrite(sink:UOp, ren:Renderer|None=None) -> list[UOp]:
   """
   Function to transform the Kernel UOp graph into a linearized program.
