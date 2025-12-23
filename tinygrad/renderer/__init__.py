@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Callable, cast
+from typing import Callable, cast, TYPE_CHECKING
 import functools
 from dataclasses import dataclass, field
 from tinygrad.helpers import to_function_name, dedup, prod, DEBUG
@@ -7,6 +7,7 @@ from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, Gro
 from tinygrad.dtype import AddrSpace, PtrDType
 from tinygrad.codegen.opt.tc import TensorCore
 from tinygrad.codegen.opt import Opt
+if TYPE_CHECKING: from tinygrad.device import Compiler
 
 @dataclass(frozen=True)
 class Estimates:
@@ -64,6 +65,7 @@ class ProgramSpec:
   device:str
   ast:UOp  # save the base ast (this is method cache key)
   uops:list[UOp]|None=None
+  lib:bytes|None=None
 
   # filled in from uops (via from_uop)
   global_size:list[int]=field(default_factory=lambda: [1,1,1])
@@ -95,8 +97,9 @@ class ProgramSpec:
   def from_uop(prg:UOp) -> ProgramSpec:
     """Construct ProgramSpec from a PROGRAM UOp."""
     assert prg.op is Ops.PROGRAM, f"expected PROGRAM, got {prg.op}"
-    # SINK/DEVICE/LINEAR/SOURCE
-    sink, device, linear, source = prg.src
+    # SINK/DEVICE/LINEAR/SOURCE/BINARY?
+    sink, device, linear, source = prg.src[:4]
+    lib = prg.src[4].arg if len(prg.src) > 4 else None
     uops = list(linear.src)
     if DEBUG >= 6: print_uops(uops)  # LINEAR is src[2]
 
@@ -120,7 +123,7 @@ class ProgramSpec:
         # TODO: this cast is wrong, u.src[0].ssimplify() can be sint
         if special_size is not None: special_size[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
 
-    return ProgramSpec(sink.arg.name, source.arg, device.arg, sink, uops, global_size, local_size,
+    return ProgramSpec(sink.arg.name, source.arg, device.arg, sink, uops, lib, global_size, local_size,
                        sorted(_vars, key=lambda v: v.arg), sorted(dedup(_globals)), sorted(dedup(outs)), sorted(dedup(ins)))
 
 class Renderer:
@@ -139,6 +142,7 @@ class Renderer:
   pre_matcher: PatternMatcher|None = None
   extra_matcher: PatternMatcher|None = None
   code_for_op: dict[Ops, Callable] = {}
+  compiler: Compiler|None = None
 
   def __reduce__(self): return self.__class__, ()
   def render(self, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")

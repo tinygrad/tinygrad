@@ -41,7 +41,7 @@ def _time_program(p:ProgramSpec, lib:bytes, var_vals:dict[str, int], rawbufs:lis
   if allow_test_size and max_global_size is not None:
     global_size, factor = get_test_global_size(p.global_size, max_global_size, var_vals)
     p = replace(p, global_size=global_size)
-  try: car = CompiledRunner(p, precompiled=lib)
+  try: car = CompiledRunner(replace(p, lib=lib))
   except AssertionError: return [math.inf] * cnt
   tms = []
   input_bufs = [rawbufs[i] for i in car.p.globals]
@@ -72,7 +72,7 @@ def _try_compile(x:tuple[int,Scheduler], compiler:Compiler) -> tuple[int, tuple[
       if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too many uops. {len(p.uops)=}, {uops_max=}")
       raise RuntimeError("too many uops")
     st = time.perf_counter()
-    prog = compiler.compile(p.src)
+    prog = p.lib if p.lib is not None else compiler.compile(p.src)
     et = time.perf_counter() - st
     ret = (p, prog, et)
   except RuntimeError:
