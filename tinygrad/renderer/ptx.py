@@ -240,3 +240,15 @@ class PTXRenderer(Renderer):
 
       if u.op is Ops.SPECIAL: kernel = [f".reg .u32 %{u.arg};"] + kernel
     return self.render_kernel(kernel, name, bufs, c.items(), uops)
+
+class CUDAPTXRenderer(PTXRenderer):
+  def __init__(self, arch:str):
+    super().__init__(arch, "CUDA")
+    from tinygrad.runtime.support.compiler_cuda import PTXCompiler
+    self.compiler = PTXCompiler(arch)
+
+class NVPTXRenderer(PTXRenderer):
+  def __init__(self, arch:str):
+    super().__init__(arch, "NV")
+    from tinygrad.runtime.support.compiler_cuda import NVPTXCompiler
+    self.compiler = NVPTXCompiler(arch)

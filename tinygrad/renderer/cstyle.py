@@ -386,6 +386,18 @@ class CUDARenderer(CStyleLanguage):
     self.tensor_cores = tc.cuda_sm89 if int(arch[3:]) >= 89 else tc.cuda_sm80 if int(arch[3:]) >= 80 else tc.cuda_sm75 if int(arch[3:]) >= 75 else []
   def __reduce__(self): return self.__class__, (self.arch,)
 
+class CUDACUDARenderer(CUDARenderer):
+  def __init__(self, arch:str):
+    super().__init__(arch)
+    from tinygrad.runtime.support.compiler_cuda import CUDACompiler
+    self.compiler = CUDACompiler(arch)
+
+class CUDANVCCRenderer(CUDARenderer):
+  def __init__(self, arch:str):
+    super().__init__(arch)
+    from tinygrad.runtime.support.compiler_cuda import NVCCCompiler
+    self.compiler = NVCCCompiler(arch)
+
   # language options
   # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
   kernel_typedef = "extern \"C\" __global__ void __launch_bounds__({launch_bounds})"
@@ -538,6 +550,32 @@ class AMDRenderer(CStyleLanguage):
   for (int n = 0; n < 8; n++) { d[n] = c_frag[n*2]; } return d;\n}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
+class AMDHIPRenderer(AMDRenderer):
+  def __init__(self, arch:str):
+    super().__init__(arch)
+    from tinygrad.runtime.support.compiler_amd import HIPCompiler
+    self.compiler = HIPCompiler(arch)
+
+class AMDHIPCCRenderer(AMDRenderer):
+  def __init__(self, arch:str):
+    super().__init__(arch)
+    from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
+    self.compiler = HIPCCCompiler(arch)
+
 class NVRenderer(CUDARenderer): device = "NV"
+
+class NVNVRenderer(NVRenderer):
+  def __init__(self, arch:str):
+    super().__init__(arch)
+    from tinygrad.runtime.support.compiler_cuda import NVCompiler
+    self.compiler = NVCompiler(arch)
+
 class HIPRenderer(AMDRenderer): device = "HIP"
+
+class HIPHIPRenderer(HIPRenderer):
+  def __init__(self, arch:str):
+    super().__init__(arch)
+    from tinygrad.runtime.support.compiler_amd import HIPCompiler
+    self.compiler = HIPCompiler(arch)
+
 class QCOMRenderer(OpenCLRenderer): device = "QCOM"

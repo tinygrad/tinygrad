@@ -8,9 +8,8 @@ from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, MOCKGPU
 from tinygrad.uop.ops import sint
 from tinygrad.device import BufferSpec, CompilerPair, CompilerSet
 from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, to_mv, hi32, lo32, NV_CC, NV_PTX, NV_NAK
-from tinygrad.renderer.ptx import PTXRenderer
-from tinygrad.renderer.cstyle import NVRenderer
-from tinygrad.runtime.support.compiler_cuda import CUDACompiler, PTXCompiler, NVPTXCompiler, NVCompiler
+from tinygrad.renderer.ptx import CUDAPTXRenderer, NVPTXRenderer
+from tinygrad.renderer.cstyle import NVNVRenderer, CUDACUDARenderer
 from tinygrad.runtime.support.compiler_mesa import NAKCompiler
 from tinygrad.runtime.autogen import nv_570, nv_580, pci, mesa
 from tinygrad.runtime.support.elf import elf_loader
@@ -583,9 +582,9 @@ class NVDevice(HCQCompiled[HCQSignal]):
     self.arch: str = "sm_120" if self.sm_version==0xa04 else f"sm_{(self.sm_version>>8)&0xff}{(val>>4) if (val:=self.sm_version&0xff) > 0xf else val}"
     self.sass_version = ((self.sm_version & 0xf00) >> 4) | (self.sm_version & 0xf)
 
-    cucc, ptxcc = (CUDACompiler, PTXCompiler) if MOCKGPU else (NVCompiler, NVPTXCompiler)
-    compilers = CompilerSet(ctrl_var=NV_CC, cset=[CompilerPair(functools.partial(NVRenderer, self.arch),functools.partial(cucc, self.arch)),
-       CompilerPair(functools.partial(PTXRenderer, self.arch, device="NV"), functools.partial(ptxcc, self.arch), NV_PTX),
+    nvr, ptxr = (CUDACUDARenderer, CUDAPTXRenderer) if MOCKGPU else (NVNVRenderer, NVPTXRenderer)
+    compilers = CompilerSet(ctrl_var=NV_CC, cset=[CompilerPair(functools.partial(nvr, self.arch), None),
+       CompilerPair(functools.partial(ptxr, self.arch), None, NV_PTX),
        CompilerPair(functools.partial(NAKRenderer, dev=self), functools.partial(NAKCompiler, self.arch, self.max_warps_per_sm), NV_NAK)])
     super().__init__(device, NVAllocator(self), compilers, functools.partial(NVProgram, self), HCQSignal, NVComputeQueue, NVCopyQueue)
 

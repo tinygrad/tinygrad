@@ -245,6 +245,11 @@ class LVPRenderer(NIRRenderer):
     srcs=lambda b, self: [nsrc(nimm(b, 0, dtypes.int)), nsrc(nimm(b, self.param_idx, dtypes.int))], also=lambda self, sz:
     setattr(self, "param_idx", self.param_idx+sz))(lambda self,b,x,sz: mesa.nir_intrinsic_instr_create(b.shader, mesa.nir_intrinsic_load_ubo))
 
+  def __init__(self):
+    from tinygrad.runtime.support.compiler_mesa import LVPCompiler
+    super().__init__()
+    self.compiler = LVPCompiler()
+
   def prerender(self, uops:list[UOp]):
     super().prerender(uops)
     self.param_sz = sum([8 if u.op == Ops.DEFINE_GLOBAL else u.dtype.itemsize for u in uops if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR)])

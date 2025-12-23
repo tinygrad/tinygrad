@@ -143,6 +143,9 @@ class LLVMRenderer(Renderer):
   if AMX: tensor_cores = tc.amx
 
   extra_matcher = create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast
+  def __init__(self):
+    from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler
+    self.compiler = CPULLVMCompiler()
   def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer(uops)))
   def _render_footer(self, uops: list[UOp]) -> str: return 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'
   def _render_fn(self, name:str, args:list[tuple[str,DType]], kernel:list[str], prefix:list[str]|None=None) -> str:
@@ -254,7 +257,9 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
                   f'"amdgpu-flat-work-group-size"="1,{requiredMaxThreadsPerBlock}"', '"no-trapping-math"="true"']
     return 'attributes #0 = { ' + ' '.join(attributes) + ' }'
   def __init__(self, arch:str):
+    from tinygrad.runtime.support.compiler_amd import AMDLLVMCompiler
     self.arch = arch
+    self.compiler = AMDLLVMCompiler(arch)
     self.tensor_cores = AMDRenderer.get_tensor_cores(arch)
     self.is_cdna = AMDRenderer.is_cdna(arch)
     self.string_rewrite += PatternMatcher([(UPat(Ops.WMMA, name="wmma"), lambda ctx, wmma, cdna=self.is_cdna: render_wmma_amd(ctx, wmma, cdna))])
