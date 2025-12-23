@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context
 from tinygrad.helpers import unwrap
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, print_uops, track_rewrites, KernelInfo, pyrender
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, track_rewrites, KernelInfo, pyrender
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
 from tinygrad.codegen import full_rewrite_to_program
@@ -25,25 +25,16 @@ def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> Program
     The ProgramSpec of the program.
   """
 
-  if getenv("VIZ"): graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
-  if DEBUG >= 5: print(pyrender(ast))
-
   # linearize
   if opts is not None:
     assert ast.arg is None, "can't apply opts if sink has an arg"
     ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts)))
-  if ast.arg is None: ast = ast.replace(arg=KernelInfo())
+
+  if getenv("VIZ"): graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
+  if DEBUG >= 5: print(pyrender(ast))
 
   prg = full_rewrite_to_program(ast, renderer)
-  # SINK/DEVICE/LINEAR/SOURCE
-  sink, device, linear, source = prg.src
-
-  # print
-  if DEBUG >= 6: print_uops(list(linear.src))
-
-  return ProgramSpec(sink.arg.name, source.arg, device.arg, sink, list(linear.src),
-                     global_size=[1,1,1] if renderer.has_local or renderer.has_threads else None,
-                     local_size=[1,1,1] if renderer.has_local else None)
+  return ProgramSpec.from_uop(prg, renderer)
 
 # **************** Runners ****************
 

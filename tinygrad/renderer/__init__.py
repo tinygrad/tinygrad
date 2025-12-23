@@ -113,6 +113,16 @@ class ProgramSpec:
     local_size = [sym_infer(sz, var_vals) for sz in self.local_size] if self.local_size is not None else None
     return global_size, local_size
 
+  @staticmethod
+  def from_uop(prg:UOp, renderer:Renderer) -> ProgramSpec:
+    """Construct ProgramSpec from a PROGRAM UOp."""
+    assert prg.op is Ops.PROGRAM, f"expected PROGRAM, got {prg.op}"
+    # SINK/DEVICE/LINEAR/SOURCE
+    sink, device, linear, source = prg.src
+    return ProgramSpec(sink.arg.name, source.arg, device.arg, sink, list(linear.src),
+                       global_size=[1,1,1] if renderer.has_local or renderer.has_threads else None,
+                       local_size=[1,1,1] if renderer.has_local else None)
+
 class Renderer:
   device: str = ""
   suffix: str = ""

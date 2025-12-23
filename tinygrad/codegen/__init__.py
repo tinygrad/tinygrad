@@ -1,7 +1,7 @@
 from typing import cast
 import itertools
-from tinygrad.helpers import DEVECTORIZE, TRANSCENDENTAL, SPEC
-from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat
+from tinygrad.helpers import DEVECTORIZE, TRANSCENDENTAL, SPEC, DEBUG
+from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, print_uops
 from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
 from tinygrad.renderer import Renderer
 from tinygrad.dtype import dtypes, PtrDType
@@ -138,6 +138,10 @@ pm_to_program = PatternMatcher([
 ])
 
 def full_rewrite_to_program(sink:UOp, ren:Renderer) -> UOp:
+  from tinygrad.uop.ops import KernelInfo
+  if sink.arg is None: sink = sink.replace(arg=KernelInfo())
   full_sink = full_rewrite_to_sink(sink, ren, optimize=sink.tag is None)
   sink = UOp(Ops.PROGRAM, src=(full_sink, UOp(Ops.DEVICE, arg=ren.device)))
-  return graph_rewrite(sink, pm_to_program, ctx=ren, name="linearize/render")
+  prg = graph_rewrite(sink, pm_to_program, ctx=ren, name="linearize/render")
+  if DEBUG >= 6: print_uops(list(prg.src[2].src))  # LINEAR is src[2]
+  return prg
