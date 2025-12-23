@@ -36,12 +36,11 @@ def optimize_local_size(_prg:Callable, global_size:list[int], rawbufs:list[Buffe
   return ret[1]
 
 class CompiledRunner(Runner):
-  def __init__(self, p:ProgramSpec, precompiled:bytes|None=None, prg=None):
+  def __init__(self, p:ProgramSpec, prg=None):
     if DEBUG >= 3: print(p.applied_opts)
     if DEBUG >= 4: print(p.src)
     self.p:ProgramSpec = p
     if p.lib is not None: self.lib = p.lib
-    elif precompiled is not None: self.lib = precompiled
     else:
       with cpu_profile(TracingKey(f"compile {p.name}", (p.function_name,)), "TINY"):
         self.lib = Device[p.device].compiler.compile_cached(p.src)
@@ -49,7 +48,7 @@ class CompiledRunner(Runner):
     self._prg = Device[p.device].runtime(p.function_name, self.lib) if prg is None else prg
     super().__init__(p.name, p.device, p.estimates)
 
-  def __reduce__(self): return self.__class__, (self.p, self.lib)
+  def __reduce__(self): return self.__class__, (replace(self.p, lib=self.lib),)
 
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int]|None=None, wait=False) -> float|None:
     if var_vals is None: var_vals = {}
@@ -116,7 +115,7 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
   if cret:=method_cache.get(ckey): return cret
   bkey = (device.split(":")[0], type(Device[device].compiler), ast.key, context, True)
   if bret:=method_cache.get(bkey):
-    method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device), bret.lib)
+    method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device, lib=bret.lib))
   else:
     prg: ProgramSpec = get_program(ast, Device[device].renderer)
     method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, device=device))
