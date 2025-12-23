@@ -230,7 +230,6 @@ class ClangRenderer(CStyleLanguage):
   code_for_workitem = {"g": lambda _: "core_id"}
   extra_args = ['int core_id']
   if AMX: tensor_cores = tc.amx
-  def __init__(self): self.compiler = ClangJITCompiler()
 
   # language options
   buffer_suffix = " restrict"
@@ -279,6 +278,9 @@ class ClangRenderer(CStyleLanguage):
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     defines = '\n'.join(self._render_defines(uops))
     return defines + "\n" + self._render_body(function_name, kernel, bufs, uops, prefix) + "\n" + self._render_entry(function_name, bufs)
+
+class ClangJITRenderer(ClangRenderer):
+  compiler = ClangJITCompiler()
 
 class OpenCLRenderer(CStyleLanguage):
   device = "CL"
