@@ -28,7 +28,7 @@ Transforms the ast into an optimized ast. This is where BEAM search and heuristi
 
 Transform the optimized ast into a linearized and rendered program.
 
-::: tinygrad.codegen.full_rewrite_to_program
+::: tinygrad.codegen.get_program
     options:
         members: false
         show_labels: false
