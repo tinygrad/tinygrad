@@ -6,7 +6,7 @@ from decimal import Decimal
 from urllib.parse import parse_qs, urlparse
 from typing import Any, TypedDict, TypeVar, Generator, Callable
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
-from tinygrad.helpers import printable, system, TCPServerWithReuse, HTTPRequestHandler
+from tinygrad.helpers import printable, TCPServerWithReuse, HTTPRequestHandler
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, pyrender
 from tinygrad.uop.ops import print_uops, range_start, multirange_str
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, Device, ProfileProgramEvent
@@ -53,7 +53,7 @@ class GraphRewriteDetails(TypedDict):
   graph: dict                            # JSON serialized UOp for this rewrite step
   uop: str                               # strigified UOp for this rewrite step
   diff: list[str]|None                   # diff of the single UOp that changed
-  changed_nodes: list[int]|None          # the changed UOp id + all its parents ids
+  change: list[int]|None                 # the new UOp id + all its parents ids
   upat: tuple[tuple[str, int], str]|None # [loc, source_code] of the matched UPat
 
 def shape_to_str(s:tuple[sint, ...]): return "(" + ','.join(srender(x) for x in s) + ")"
@@ -115,14 +115,14 @@ def _reconstruct(a:int):
 def get_full_rewrite(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
   next_sink = _reconstruct(ctx.sink)
   # in the schedule graph we don't show indexing ops (unless it's in a kernel AST or rewriting dtypes.index sink)
-  yield {"graph":uop_to_json(next_sink), "uop":pystr(next_sink), "changed_nodes":None, "diff":None, "upat":None}
+  yield {"graph":uop_to_json(next_sink), "uop":pystr(next_sink), "change":None, "diff":None, "upat":None}
   replaces: dict[UOp, UOp] = {}
   for u0_num,u1_num,upat_loc,dur in tqdm(ctx.matches):
     replaces[u0:=_reconstruct(u0_num)] = u1 = _reconstruct(u1_num)
     try: new_sink = next_sink.substitute(replaces)
     except RuntimeError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
     match_repr = f"# {dur*1e6:.2f} us\n"+printable(upat_loc)
-    yield {"graph":(sink_json:=uop_to_json(new_sink)), "uop":pystr(new_sink), "changed_nodes":[id(x) for x in u1.toposort() if id(x) in sink_json],
+    yield {"graph":(sink_json:=uop_to_json(new_sink)), "uop":pystr(new_sink), "change":[id(x) for x in u1.toposort() if id(x) in sink_json],
            "diff":list(difflib.unified_diff(pystr(u0).splitlines(), pystr(u1).splitlines())), "upat":(upat_loc, match_repr)}
     if not ctx.bottom_up: next_sink = new_sink
 
@@ -248,23 +248,25 @@ def load_counters(profile:list[ProfileEvent]) -> None:
       durations.setdefault(str(e.name), []).append(float(e.en-e.st))
     if isinstance(e, ProfileProgramEvent): prg_events[str(e.name)] = e
     if isinstance(e, ProfileDeviceEvent): dev_events[e.device] = e
-  ctxs.append({"name":"All Counters", "steps":[create_step("PMC", ("/all-pmc", len(ctxs), 0), \
-      (durations, {k:v[ProfilePMCEvent][0] for k,v in counter_events.items()}))]})
+  if len(counter_events) == 0: return None
+  ctxs.append({"name":"All Counters", "steps":[create_step("PMC", ("/all-pmc", len(ctxs), 0), (durations, all_counters:={}))]})
   run_number = {n:0 for n,_ in counter_events}
-  for k,v in counter_events.items():
-    prg = trace.keys[r].ret if (r:=ref_map.get(k[0])) else None
-    name = prg.name if prg is not None else k[0]
-    run_number[k[0]] += 1
+  for (k, tag),v in counter_events.items():
+    # use the colored name if it exists
+    name = trace.keys[r].ret.name if (r:=ref_map.get(k)) is not None else k
+    run_number[k] += 1
     steps:list[dict] = []
-    if (pmc:=v.get(ProfilePMCEvent)): steps.append(create_step("PMC", ("/prg-pmc", len(ctxs), len(steps)), pmc))
+    if (pmc:=v.get(ProfilePMCEvent)):
+      steps.append(create_step("PMC", ("/prg-pmc", len(ctxs), len(steps)), pmc))
+      all_counters[(name, run_number[k], k)] = pmc[0]
     if (sqtt:=v.get(ProfileSQTTEvent)):
       # to decode a SQTT trace, we need the raw stream, program binary and device properties
-      steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), (k, [*sqtt, prg_events[k[0]], dev_events[sqtt[0].device]])))
+      steps.append(create_step("SQTT", ("/prg-sqtt", len(ctxs), len(steps)), ((k, tag), [*sqtt, prg_events[k], dev_events[sqtt[0].device]])))
       if getenv("SQTT_PARSE"):
         # run our decoder on startup, we don't use this since it only works on gfx11
         from extra.sqtt.attempt_sqtt_parse import parse_sqtt_print_packets
         for e in sqtt: parse_sqtt_print_packets(e.blob)
-    ctxs.append({"name":f"Exec {name} n{run_number[k[0]]}", "steps":steps})
+    ctxs.append({"name":f"Exec {name} n{run_number[k]}", "steps":steps})
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
 
@@ -337,26 +339,6 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_
 
 # ** Assembly static analyzers
 
-def get_llvm_mca(asm:str, mtriple:str, mcpu:str) -> dict:
-  target_args = f"-mtriple={mtriple} -mcpu={mcpu}"
-  # disassembly output can include headers / metadata, skip if llvm-mca can't parse those lines
-  data = json.loads(system("llvm-mca -skip-unsupported-instructions=parse-failure --json -"+target_args, input=asm.encode()))
-  cr = data["CodeRegions"][0]
-  resource_labels = [repr(x)[1:-1] for x in data["TargetInfo"]["Resources"]]
-  rows:list = [[instr] for instr in cr["Instructions"]]
-  # add scheduler estimates
-  for info in cr["InstructionInfoView"]["InstructionList"]: rows[info["Instruction"]].append(info["Latency"])
-  # map per instruction resource usage
-  instr_usage:dict[int, dict[int, int]] = {}
-  for d in cr["ResourcePressureView"]["ResourcePressureInfo"]:
-    instr_usage.setdefault(i:=d["InstructionIndex"], {}).setdefault(r:=d["ResourceIndex"], 0)
-    instr_usage[i][r] += d["ResourceUsage"]
-  # last row is the usage summary
-  summary = [{"idx":k, "label":resource_labels[k], "value":v} for k,v in instr_usage.pop(len(rows), {}).items()]
-  max_usage = max([sum(v.values()) for i,v in instr_usage.items() if i<len(rows)], default=0)
-  for i,usage in instr_usage.items(): rows[i].append([[k, v, (v/max_usage)*100] for k,v in usage.items()])
-  return {"rows":rows, "cols":["Instruction", "Latency", {"title":"HW Resources", "labels":resource_labels}], "metadata":[summary]}
-
 def get_stdout(f: Callable) -> str:
   buf = io.StringIO()
   try:
@@ -376,6 +358,67 @@ def amd_readelf(lib:bytes) -> list[dict]:
           ".group_segment_fixed_size":"LDS size", ".private_segment_fixed_size":"Scratch size"}
   return [{"label":label, "value":v} for k,label in keys.items() if (v:=notes["amdhsa.kernels"][0][k]) > 0]
 
+def llvm_disasm(arch:str, lib:bytes) -> dict[int, tuple[str, int]]:
+  from tinygrad.runtime.autogen import llvm
+  from tinygrad.runtime.support.elf import elf_loader
+  llvm.LLVMInitializeAMDGPUTargetInfo()
+  llvm.LLVMInitializeAMDGPUTargetMC()
+  llvm.LLVMInitializeAMDGPUAsmParser()
+  llvm.LLVMInitializeAMDGPUDisassembler()
+  # pass NULL to callbacks
+  cbs = [ctypes.cast(0, llvm.LLVMCreateDisasmCPUFeatures.argtypes[i]) for i in {5,6}]
+  ctx = llvm.LLVMCreateDisasmCPUFeatures("amdgcn-amd-amdhsa".encode(), arch.encode(), "".encode(), None, 0, *cbs)
+  image, sections, _ = elf_loader(lib)
+  text = next((sh.header for sh in sections if sh.name == ".text"), None)
+  assert text is not None, "no .text section found in ELF"
+  off, sz = text.sh_addr, text.sh_size
+  addr_table:dict[int, tuple[str, int]] = {}
+  out = ctypes.create_string_buffer(128)
+  cur_off = off
+  while cur_off < sz + off:
+    view = (ctypes.c_ubyte * ((sz + off) - cur_off)).from_buffer_copy(memoryview(image)[cur_off:])
+    instr_sz = llvm.LLVMDisasmInstruction(ctx, view, ctypes.c_uint64(len(view)), ctypes.c_uint64(0), out, ctypes.c_size_t(128))
+    addr_table[cur_off] = (out.value.decode("utf-8", "replace").strip(), instr_sz)
+    cur_off += instr_sz
+  return addr_table
+
+SOPP_INSTS = {"s_branch", "s_cbranch_scc0", "s_cbranch_scc1", "s_cbranch_vccz", "s_cbranch_vccnz", "s_cbranch_execz", "s_cbranch_execnz"}
+def parse_branch(asm:str) -> int|None:
+  inst, *operands = asm.split(" ")
+  if inst in SOPP_INSTS:
+    x = int(operands[0]) & 0xffff
+    return (x - 0x10000 if x & 0x8000 else x)*4
+  return None
+
+COND_TAKEN, COND_NOT_TAKEN, UNCOND = range(3)
+cfg_colors = {COND_TAKEN: "#3f7564", COND_NOT_TAKEN: "#7a4540", UNCOND: "#3b5f7e"}
+def amdgpu_cfg(lib:bytes, arch:str) -> dict:
+  # disassemble
+  pc_table = llvm_disasm(arch, lib)
+  # get leaders
+  leaders:set[int] = {next(iter(pc_table))}
+  for pc, (asm, sz) in pc_table.items():
+    if (offset:=parse_branch(asm)) is not None: leaders.update((pc+sz+offset, pc+sz))
+  # build the cfg
+  curr:int|None = None
+  blocks:dict[int, list[int]] = {}
+  paths:dict[int, dict[int, int]] = {}
+  for pc, (asm, sz) in pc_table.items():
+    if pc in leaders:
+      paths[curr:=pc] = {}
+      blocks[pc] = []
+    else: assert curr is not None, f"no basic block found for {pc}"
+    blocks[curr].append(pc)
+    # control flow ends in endpgm
+    if asm == "s_endpgm": break
+    # otherwise a basic block can have exactly one or two paths
+    nx = pc+sz
+    if (offset:=parse_branch(asm)) is not None:
+      if asm.startswith("s_branch"): paths[curr][nx+offset] = UNCOND
+      else: paths[curr].update([(nx+offset, COND_TAKEN), (nx, COND_NOT_TAKEN)])
+    elif nx in leaders: paths[curr][nx] = UNCOND
+  return {"blocks":blocks, "paths":paths, "pc_table":pc_table, "colors":cfg_colors}
+
 # ** Main render function to get the complete details about a trace event
 
 def get_render(i:int, j:int, fmt:str) -> dict:
@@ -386,22 +429,19 @@ def get_render(i:int, j:int, fmt:str) -> dict:
   if fmt == "asm":
     compiler = Device[data.device].compiler
     disasm_str = get_stdout(lambda: compiler.disassemble(compiler.compile(data.src)))
-    from tinygrad.runtime.support.compiler_cpu import llvm, LLVMCompiler
-    if isinstance(compiler, LLVMCompiler):
-      return get_llvm_mca(disasm_str, ctypes.string_at(llvm.LLVMGetTargetMachineTriple(tm:=compiler.target_machine)).decode(),
-                          ctypes.string_at(llvm.LLVMGetTargetMachineCPU(tm)).decode())
-    metadata:list = []
+    ret:dict = {"src":disasm_str}
     if data.device.startswith("AMD"):
-      with soft_err(lambda err: metadata.append(err)):
-        metadata.append(amd_readelf(compiler.compile(data.src)))
-    return {"src":disasm_str, "lang":"amdgpu" if data.device.startswith("AMD") else None, "metadata":metadata}
+      with soft_err(lambda err: ret.update(err)):
+        metadata = amd_readelf(lib:=compiler.compile(data.src))
+        ret = {"data":amdgpu_cfg(lib, getattr(compiler, "arch")), "metadata":[metadata]}
+    return ret
   if fmt == "all-pmc":
     durations, pmc = data
-    ret:dict = {"cols":{}, "rows":[]}
-    for (prg,_),events in pmc.items():
+    ret = {"cols":{}, "rows":[]}
+    for (name, n, k),events in data[1].items():
       pmc_table = unpack_pmc(events)
       ret["cols"].update([(r[0], None) for r in pmc_table["rows"]])
-      ret["rows"].append((prg, durations[prg].pop(0), *[r[1] for r in pmc_table["rows"]]))
+      ret["rows"].append((name, durations[k][n-1], *[r[1] for r in pmc_table["rows"]]))
     ret["cols"] = ["Kernel", "Duration", *ret["cols"]]
     return ret
   if fmt == "prg-pmc": return unpack_pmc(data[0])

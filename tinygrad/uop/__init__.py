@@ -27,6 +27,10 @@ class Ops(FastEnum):
   # uops that aren't rendered
   NOOP = auto(); REWRITE_ERROR = auto()
 
+  # renderer
+  # LINEAR is a list of UOps, SOURCE has a str arg that's human readable
+  PROGRAM = auto(); LINEAR = auto(); SOURCE = auto()
+
   # AFTER passes src[0] through and promises in the toposort that any consumers of the AFTER run after src[1:]
   # GROUP is a NOOP that just merges things together
   SINK = auto(); AFTER = auto(); GROUP = auto()

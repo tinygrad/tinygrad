@@ -66,5 +66,21 @@ class TestDtypeTolist(unittest.TestCase):
     # 57344
     self.assertEqual(Tensor([-30000, 1.5, 3.1, 30000], device="PYTHON", dtype=dtypes.fp8e5m2).tolist(), [-28672.0, 1.5, 3.0, 28672.0])
 
+class TestCanLosslessCast(unittest.TestCase):
+  def test_can_lossless_cast(self):
+    from tinygrad.dtype import can_lossless_cast
+    # signed -> unsigned is NOT lossless (negative values wrap)
+    self.assertFalse(can_lossless_cast(dtypes.int8, dtypes.uint64))
+    self.assertFalse(can_lossless_cast(dtypes.int32, dtypes.uint32))
+    # unsigned -> larger signed is lossless
+    self.assertTrue(can_lossless_cast(dtypes.uint8, dtypes.int16))
+    self.assertTrue(can_lossless_cast(dtypes.uint32, dtypes.int64))
+    # large ints don't fit in floats
+    self.assertFalse(can_lossless_cast(dtypes.int32, dtypes.float))
+    self.assertFalse(can_lossless_cast(dtypes.int64, dtypes.double))
+    # half has more mantissa bits
+    self.assertTrue(can_lossless_cast(dtypes.int8, dtypes.half))
+    self.assertFalse(can_lossless_cast(dtypes.int8, dtypes.bfloat16))
+
 if __name__ == "__main__":
   unittest.main()
