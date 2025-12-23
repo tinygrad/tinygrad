@@ -386,18 +386,6 @@ class CUDARenderer(CStyleLanguage):
     self.tensor_cores = tc.cuda_sm89 if int(arch[3:]) >= 89 else tc.cuda_sm80 if int(arch[3:]) >= 80 else tc.cuda_sm75 if int(arch[3:]) >= 75 else []
   def __reduce__(self): return self.__class__, (self.arch,)
 
-class CUDACUDARenderer(CUDARenderer):
-  def __init__(self, arch:str):
-    super().__init__(arch)
-    from tinygrad.runtime.support.compiler_cuda import CUDACompiler
-    self.compiler = CUDACompiler(arch)
-
-class CUDANVCCRenderer(CUDARenderer):
-  def __init__(self, arch:str):
-    super().__init__(arch)
-    from tinygrad.runtime.support.compiler_cuda import NVCCCompiler
-    self.compiler = NVCCCompiler(arch)
-
   # language options
   # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
   kernel_typedef = "extern \"C\" __global__ void __launch_bounds__({launch_bounds})"
@@ -457,6 +445,18 @@ class CUDANVCCRenderer(CUDARenderer):
   return c;\n}}""")
 
     return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
+
+class CUDACUDARenderer(CUDARenderer):
+  def __init__(self, arch:str):
+    super().__init__(arch)
+    from tinygrad.runtime.support.compiler_cuda import CUDACompiler
+    self.compiler = CUDACompiler(arch)
+
+class CUDANVCCRenderer(CUDARenderer):
+  def __init__(self, arch:str):
+    super().__init__(arch)
+    from tinygrad.runtime.support.compiler_cuda import NVCCCompiler
+    self.compiler = NVCCCompiler(arch)
 
 class AMDRenderer(CStyleLanguage):
   device = "AMD"
