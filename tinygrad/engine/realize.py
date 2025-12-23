@@ -4,28 +4,26 @@ from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context
 from tinygrad.helpers import unwrap
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, track_rewrites, KernelInfo, pyrender
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, print_uops, track_rewrites, KernelInfo, pyrender
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
-from tinygrad.codegen import full_rewrite_to_program
+from tinygrad.codegen import full_rewrite
 from tinygrad.codegen.opt import Opt
 
 # **************** Program Creation ****************
 
 @track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.name, (ret.function_name, ret.ast), ret=ret), replay=True)
-def get_program(ast:UOp, renderer:Renderer, device:str|None=None, opts:list[Opt]|None=None) -> ProgramSpec:
+def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> ProgramSpec:
   """
   Transform an AST into a ProgramSpec. May trigger BEAM search.
 
   Args:
     ast: The Ops.SINK rooted AST
     renderer: The renderer used to generate the code
-    device: The device to compile for (defaults to renderer.device)
 
   Returns:
     The ProgramSpec of the program.
   """
-  device = device or renderer.device
 
   if getenv("VIZ"): graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(ast))
@@ -34,14 +32,20 @@ def get_program(ast:UOp, renderer:Renderer, device:str|None=None, opts:list[Opt]
   if opts is not None:
     assert ast.arg is None, "can't apply opts if sink has an arg"
     ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts)))
-  if ast.arg is None: ast = ast.replace(arg=KernelInfo())
+  try:
+    uops = full_rewrite(ast, renderer)
+  except RuntimeError as e:
+    print("***** LINEARIZE FAILURE *****")
+    print(e)
+    print(pyrender(ast))
+    raise
+  assert uops[-1].op is Ops.SINK, "last uop must be sink"
 
-  prg = full_rewrite_to_program(ast, renderer, Device[device].compiler)
-  # SINK/LINEAR/SOURCE/BINARY
-  sink, linear, source, binary = prg.src
+  # print and render
+  if DEBUG >= 6: print_uops(uops)
+  src = renderer.render(uops)
 
-  # legacy
-  return ProgramSpec(sink.arg.name, source.arg, device, sink, list(linear.src), binary.arg,
+  return ProgramSpec(uops[-1].arg.name if uops[-1].arg is not None else "test", src, renderer.device, ast, uops,
                      global_size=[1,1,1] if renderer.has_local or renderer.has_threads else None,
                      local_size=[1,1,1] if renderer.has_local else None)
 
@@ -72,18 +76,19 @@ def optimize_local_size(_prg:Callable, global_size:list[int], rawbufs:list[Buffe
   return ret[1]
 
 class CompiledRunner(Runner):
-  def __init__(self, p:ProgramSpec, prg=None):
+  def __init__(self, p:ProgramSpec, precompiled:bytes|None=None, prg=None):
     if DEBUG >= 3: print(p.applied_opts)
     if DEBUG >= 4: print(p.src)
-    if p.lib is None:
-      with cpu_profile(TracingKey(f"compile {p.name}", (p.function_name,)), "TINY"):
-        p = replace(p, lib=Device[p.device].compiler.compile_cached(p.src))
     self.p:ProgramSpec = p
-    if DEBUG >= 7: Device[p.device].compiler.disassemble(unwrap(p.lib))
-    self._prg = Device[p.device].runtime(p.function_name, p.lib) if prg is None else prg
+    if precompiled is not None: self.lib = precompiled
+    else:
+      with cpu_profile(TracingKey(f"compile {p.name}", (p.function_name,)), "TINY"):
+        self.lib = Device[p.device].compiler.compile_cached(p.src)
+    if DEBUG >= 7: Device[p.device].compiler.disassemble(self.lib)
+    self._prg = Device[p.device].runtime(p.function_name, self.lib) if prg is None else prg
     super().__init__(p.name, p.device, p.estimates)
 
-  def __reduce__(self): return self.__class__, (self.p,)
+  def __reduce__(self): return self.__class__, (self.p, self.lib)
 
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int]|None=None, wait=False) -> float|None:
     if var_vals is None: var_vals = {}
@@ -157,9 +162,9 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
   if cret:=method_cache.get(ckey): return cret
   bkey = (device.split(":")[0], type(Device[device].compiler), ast.key, context, True)
   if bret:=method_cache.get(bkey):
-    method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device))
+    method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device), bret.lib)
   else:
-    prg: ProgramSpec = get_program(ast, Device[device].renderer, device)
+    prg: ProgramSpec = get_program(ast, Device[device].renderer)
     method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, device=device))
   return ret
 
