@@ -2,8 +2,8 @@ from __future__ import annotations
 from typing import Callable, cast
 import functools
 from dataclasses import dataclass, field
-from tinygrad.helpers import to_function_name, dedup, prod
-from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher
+from tinygrad.helpers import to_function_name, dedup, prod, DEBUG
+from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher, print_uops
 from tinygrad.dtype import AddrSpace, PtrDType
 from tinygrad.codegen.opt.tc import TensorCore
 from tinygrad.codegen.opt import Opt
@@ -98,6 +98,7 @@ class ProgramSpec:
     # SINK/DEVICE/LINEAR/SOURCE
     sink, device, linear, source = prg.src
     uops = list(linear.src)
+    if DEBUG >= 6: print_uops(uops)  # LINEAR is src[2]
 
     # single pass through the uops to extract metadata
     _vars: list[Variable] = []

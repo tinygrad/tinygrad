@@ -1,7 +1,7 @@
 from typing import cast
 import itertools
 from tinygrad.helpers import DEVECTORIZE, TRANSCENDENTAL, SPEC, DEBUG, getenv, TracingKey
-from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, print_uops, track_rewrites, KernelInfo, pyrender
+from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, pyrender
 from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
 from tinygrad.renderer import Renderer, ProgramSpec
 from tinygrad.dtype import dtypes, PtrDType
@@ -29,6 +29,8 @@ pm_syntactic_sugar = PatternMatcher([
 def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -> UOp:
   if ren is None: ren = Renderer()
 
+  if getenv("VIZ"): graph_rewrite(sink, PatternMatcher([]), name="View Base AST")
+  if DEBUG >= 5: print(pyrender(sink))
   if SPEC: type_verify(sink, kernel_spec)
 
   # preprocess
@@ -150,16 +152,17 @@ def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> Program
   Returns:
     The ProgramSpec of the program.
   """
+
+  # fix up KernelInfo
   if opts is not None:
     assert ast.arg is None, "can't apply opts if sink has an arg"
     ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts)))
   if ast.arg is None: ast = ast.replace(arg=KernelInfo())
 
-  if getenv("VIZ"): graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
-  if DEBUG >= 5: print(pyrender(ast))
-
+  # rewrite to prg
   full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None)
   prg = UOp(Ops.PROGRAM, src=(full_sink, UOp(Ops.DEVICE, arg=renderer.device)))
   prg = graph_rewrite(prg, pm_to_program, ctx=renderer, name="linearize/render")
-  if DEBUG >= 6: print_uops(list(prg.src[2].src))  # LINEAR is src[2]
+
+  # create the ProgramSpec
   return ProgramSpec.from_uop(prg)
