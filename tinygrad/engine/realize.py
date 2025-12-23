@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context
 from tinygrad.helpers import unwrap
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, print_uops, track_rewrites, KernelInfo, pyrender
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, track_rewrites, KernelInfo, pyrender
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
 from tinygrad.codegen import full_rewrite_to_program
@@ -25,25 +25,15 @@ def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> Program
     The ProgramSpec of the program.
   """
 
-  if getenv("VIZ"): graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
-  if DEBUG >= 5: print(pyrender(ast))
-
   # linearize
   if opts is not None:
     assert ast.arg is None, "can't apply opts if sink has an arg"
     ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts)))
-  if ast.arg is None: ast = ast.replace(arg=KernelInfo())
 
-  prg = full_rewrite_to_program(ast, renderer)
-  # SINK/LINEAR/SOURCE
-  sink, linear, source = prg.src
+  if getenv("VIZ"): graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
+  if DEBUG >= 5: print(pyrender(ast))
 
-  # print
-  if DEBUG >= 6: print_uops(list(linear.src))
-
-  return ProgramSpec(sink.arg.name, source.arg, renderer.device, sink, list(linear.src),
-                     global_size=[1,1,1] if renderer.has_local or renderer.has_threads else None,
-                     local_size=[1,1,1] if renderer.has_local else None)
+  return ProgramSpec.from_uop(full_rewrite_to_program(ast, renderer))
 
 # **************** Runners ****************
 
@@ -88,20 +78,13 @@ class CompiledRunner(Runner):
 
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int]|None=None, wait=False) -> float|None:
     if var_vals is None: var_vals = {}
-    has_local = Device[self.p.device].renderer.has_local
     global_size, local_size = self.p.launch_dims(var_vals)
-    if has_local and global_size is not None and local_size is None and all_int(self.p.global_size): # type: ignore[arg-type]
+    if Device[self.p.device].renderer.has_local and local_size is None and all_int(self.p.global_size): # type: ignore[arg-type]
       local_size = optimize_local_size(self._prg, global_size, rawbufs)
       global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
       self.p = replace(self.p, global_size=global_size, local_size=local_size)
-    lra = {}
-    if global_size:
-      lra['global_size'] = tuple(global_size)
-      assert len(global_size) == 3, "global size must have len 3"
-    if local_size:
-      lra['local_size'] = tuple(local_size)
-      assert len(local_size) == 3, "local size must have len 3"
-    return self._prg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k.expr] for k in self.p.vars), wait=wait)
+    return self._prg(*[x._buf for x in rawbufs], global_size=tuple(global_size), local_size=tuple(local_size) if local_size else None,
+                     vals=tuple(var_vals[k.expr] for k in self.p.vars), wait=wait)
 
 class ViewOp(Runner):
   def __init__(self, buf:Buffer): super().__init__(colored(f"view {buf.nbytes:8d} @ {buf.offset:<10d}", "yellow"), buf.device)

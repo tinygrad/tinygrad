@@ -66,7 +66,7 @@ class ProgramSpec:
   uops:list[UOp]|None=None
 
   # filled in from uops (if we have uops)
-  global_size:list[int]|None=None
+  global_size:list[int]=field(default_factory=lambda: [1,1,1])
   local_size:list[int]|None=None
   vars:list[Variable]=field(default_factory=list)
   globals:list[int]=field(default_factory=list)
@@ -109,9 +109,17 @@ class ProgramSpec:
     return self.uops[-1].arg.applied_opts
 
   def launch_dims(self, var_vals:dict[str, int]):
-    global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else None
+    global_size = [sym_infer(sz, var_vals) for sz in self.global_size]
     local_size = [sym_infer(sz, var_vals) for sz in self.local_size] if self.local_size is not None else None
     return global_size, local_size
+
+  @staticmethod
+  def from_uop(prg:UOp) -> ProgramSpec:
+    """Construct ProgramSpec from a PROGRAM UOp."""
+    assert prg.op is Ops.PROGRAM, f"expected PROGRAM, got {prg.op}"
+    # SINK/DEVICE/LINEAR/SOURCE
+    sink, device, linear, source = prg.src
+    return ProgramSpec(sink.arg.name, source.arg, device.arg, sink, list(linear.src), global_size=[1,1,1], local_size=[1,1,1])
 
 class Renderer:
   device: str = ""
