@@ -33,7 +33,7 @@ class NVPageTableEntry:
 
   def _is_dual_pde(self) -> bool: return self.lv == self.nvdev.mm.level_cnt - 2
 
-  def set_entry(self, entry_id:int, paddr:int, table=False, uncached=False, aspace=AddrSpace.PADDR, snooped=False, frag=0, valid=True):
+  def set_entry(self, entry_id:int, paddr:int, table=False, uncached=False, aspace=AddrSpace.PHYS, snooped=False, frag=0, valid=True):
     if not table:
       x = self.nvdev.pte_t.encode(valid=valid, address_sys=paddr >> 12, aperture=2 if aspace is AddrSpace.SYS else 0, kind=6,
         **({'pcf': int(uncached)} if self.nvdev.mmu_ver == 3 else {'vol': uncached}))
