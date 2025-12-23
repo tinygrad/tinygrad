@@ -271,19 +271,23 @@ class LNXPCIIfaceBase:
 
   def free(self, b:HCQBuffer):
     for dev in b.mapped_devs[1:]: dev.iface.dev_impl.mm.unmap_range(b.va_addr, b.size)
-    if b.meta.mapping.aspace is AddrSpace.PADDR: self.dev_impl.mm.vfree(b.meta.mapping)
+    if b.meta.mapping.aspace is AddrSpace.PHYS: self.dev_impl.mm.vfree(b.meta.mapping)
     if b.owner == self.dev and b.meta.has_cpu_mapping and not OSX: FileIOInterface.munmap(b.va_addr, b.size)
 
   def map(self, b:HCQBuffer):
     if b.owner is not None and b.owner._is_cpu():
       System.lock_memory(cast(int, b.va_addr), b.size)
-      paddrs, snooped, uncached = [(x, 0x1000) for x in System.system_paddrs(cast(int, b.va_addr), round_up(b.size, 0x1000))], True, True
+      paddrs, aspace = [(x, 0x1000) for x in System.system_paddrs(cast(int, b.va_addr), round_up(b.size, 0x1000))], AddrSpace.SYS
+      snooped, uncached = True, True
     elif (ifa:=getattr(b.owner, "iface", None)) is not None and isinstance(ifa, LNXPCIIfaceBase):
-      paddrs = [(paddr if b.meta.mapping.aspace is AddrSpace.SYS else (paddr + ifa.p2p_base_addr), size) for paddr,size in b.meta.mapping.paddrs]
-      snooped, uncached = b.meta.mapping.snooped, b.meta.mapping.uncached
+      snooped, uncached = True, b.meta.mapping.uncached
+      if b.meta.mapping.aspace is AddrSpace.SYS: paddrs, aspace = b.meta.mapping.paddrs, AddrSpace.SYS
+      elif hasattr(ifa.dev_impl, 'paddr2xgmi') and ifa.dev_impl.gmc.xgmi_seg_sz > 0:
+        paddrs, aspace = [(ifa.dev_impl.paddr2xgmi(p), sz) for p, sz in b.meta.mapping.paddrs], AddrSpace.PEER
+      else: paddrs, aspace = [(p + ifa.p2p_base_addr, sz) for p, sz in b.meta.mapping.paddrs], AddrSpace.SYS
     else: raise RuntimeError(f"map failed: {b.owner} -> {self.dev}")
 
-    self.dev_impl.mm.map_range(cast(int, b.va_addr), round_up(b.size, 0x1000), paddrs, aspace=AddrSpace.SYS, snooped=snooped, uncached=uncached)
+    self.dev_impl.mm.map_range(cast(int, b.va_addr), round_up(b.size, 0x1000), paddrs, aspace=aspace, snooped=snooped, uncached=uncached)
 
 class APLPCIIfaceBase(LNXPCIIfaceBase):
   def __init__(self, dev, dev_id, vendor, devices, bars, vram_bar, va_start, va_size):

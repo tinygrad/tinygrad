@@ -2,10 +2,6 @@ import collections, functools, dataclasses, enum
 from typing import Any, ClassVar
 from tinygrad.helpers import round_up, getenv
 
-class AddrSpace(enum.Enum):
-  PADDR = enum.auto()
-  SYS = enum.auto()
-
 class BumpAllocator:
   def __init__(self, size:int, base:int=0, wrap:bool=True): self.size, self.ptr, self.base, self.wrap = size, 0, base, wrap
   def alloc(self, size:int, alignment:int=1) -> int:
@@ -110,6 +106,8 @@ class TLSFAllocator:
     self._insert_block(start - self.base, self.blocks[start - self.base][0])._merge_block(start - self.base)
 
 # Memory Managment
+
+class AddrSpace(enum.Enum): PHYS = enum.auto(); SYS = enum.auto(); PEER = enum.auto() # noqa: E702
 
 @dataclasses.dataclass(frozen=True)
 class VirtMapping: va_addr:int; size:int; paddrs:list[tuple[int, int]]; aspace:AddrSpace; uncached:bool=False; snooped:bool=False # noqa: E702
@@ -247,7 +245,7 @@ class MemoryManager:
           continue
         rem_size -= self.palloc_ranges[nxt_range][0]
 
-    return self.map_range(va, size, paddrs, aspace=AddrSpace.PADDR, uncached=uncached)
+    return self.map_range(va, size, paddrs, aspace=AddrSpace.PHYS, uncached=uncached)
 
   def vfree(self, vm:VirtMapping):
     assert self.va_allocator is not None, "must be set it"

@@ -120,9 +120,9 @@ class AMFirmware:
 class AMPageTableEntry:
   def __init__(self, adev, paddr, lv): self.adev, self.paddr, self.lv, self.entries = adev, paddr, lv, adev.vram.view(paddr, 0x1000, fmt='Q')
 
-  def set_entry(self, entry_id:int, paddr:int, table=False, uncached=False, aspace=AddrSpace.PADDR, snooped=False, frag=0, valid=True):
+  def set_entry(self, entry_id:int, paddr:int, table=False, uncached=False, aspace=AddrSpace.PHYS, snooped=False, frag=0, valid=True):
     is_sys = aspace is AddrSpace.SYS
-    if aspace is AddrSpace.PADDR: paddr = self.adev.paddr2xgmi(paddr)
+    if aspace is AddrSpace.PHYS: paddr = self.adev.paddr2xgmi(paddr)
     assert paddr & self.adev.gmc.address_space_mask == paddr, f"Invalid physical address {paddr:#x}"
     self.entries[entry_id] = self.adev.gmc.get_pte_flags(self.lv, table, frag, uncached, is_sys, snooped, valid) | (paddr & 0x0000FFFFFFFFF000)
 
