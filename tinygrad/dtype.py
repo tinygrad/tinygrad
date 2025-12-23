@@ -1,5 +1,6 @@
 from __future__ import annotations
-from typing import Final, ClassVar, Callable, Literal
+from typing import Final, ClassVar, Callable, Literal, TYPE_CHECKING, Any
+if TYPE_CHECKING: import numpy as np
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
 from tinygrad.helpers import getenv, prod
@@ -123,7 +124,7 @@ class dtypes:
     if x.__class__ is list or x.__class__ is tuple: return max(dtypes.from_py(xi) for xi in x) if x else dtypes.default_float
     raise RuntimeError(f"Could not infer dtype of {x} with type {type(x)}")
   @staticmethod
-  def as_const(val: tuple[ConstType|InvalidType, ...]|ConstType|InvalidType, dtype:DType):
+  def as_const(val:Any, dtype:DType):
     if isinstance(val, tuple):
       assert len(val) == dtype.count, f"mismatch {val} {dtype}"
       return tuple(dtypes.as_const(x, dtype) for x in val)

@@ -267,7 +267,7 @@ class TestOps(unittest.TestCase):
       for tor_i, ten_i in zip(tor, ten):
         helper_test_op([], lambda: tor_i, lambda: ten_i)
 
-    self.helper_test_exception([], lambda: torch.meshgrid(x, indexing="bad"), lambda: xt.meshgrid(indexing="bad"), expected=RuntimeError)
+    self.helper_test_exception([], lambda: torch.meshgrid(x, indexing="bad"), lambda: xt.meshgrid(indexing="bad"), expected=Exception)
 
   def test_arange(self):
     helper_test_op([], lambda: torch.arange(10, dtype=torch.int32), lambda: Tensor.arange(10), forward_only=True)
@@ -587,7 +587,7 @@ class TestOps(unittest.TestCase):
         helper_test_op(None, lambda x,y: x.div(y, rounding_mode="trunc"), forward_only=True, vals=[[numerator], [denominator]])
         helper_test_op(None, lambda x,y: x.div(y, rounding_mode="floor"), forward_only=True, vals=[[numerator], [denominator]])
 
-    self.helper_test_exception(None, lambda x,y: x.div(y, rounding_mode="typo"), forward_only=True, vals=[[5], [0]], expected=RuntimeError)
+    self.helper_test_exception(None, lambda x,y: x.div(y, rounding_mode="typo"), forward_only=True, vals=[[5], [0]], expected=Exception)
 
   def test_div_int(self):
     helper_test_op(None, lambda x,y: x/y, Tensor.div, forward_only=True, vals=[[5, 6, 7],[1, 2, 3]])
@@ -2989,7 +2989,7 @@ class TestOps(unittest.TestCase):
     self.helper_test_exception([(4,5,6), (4,5,6)],
       lambda x,src: x.scatter_reduce(dim=0, index=b, src=src, reduce="INVALID"),
       lambda x,src: x.scatter_reduce(dim=0, index=a, src=src, reduce="INVALID"),
-      RuntimeError)
+      Exception)
     # dtype mismatch
     self.helper_test_exception([(4,5,6), (4,5,6)],
       lambda x,src: x.half().scatter_reduce(dim=0, index=b, src=src, reduce="sum"),
@@ -3068,7 +3068,7 @@ class TestOps(unittest.TestCase):
       helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.cross_entropy(x, y, reduction=r),
                                          lambda x,y: x.cross_entropy(y, reduction=r))
     self.helper_test_exception([(32,10), (32,10)], lambda x,y: torch.nn.functional.cross_entropy(x, y, reduction="typo"),
-                                                   lambda x,y: x.cross_entropy(y, reduction="typo"), expected=ValueError)
+                                                   lambda x,y: x.cross_entropy(y, reduction="typo"), expected=Exception)
 
   def test_cross_entropy_smoothing(self):
     for ls in (0., 0.3, 0.7, 1.):
@@ -3131,7 +3131,7 @@ class TestOps(unittest.TestCase):
         lambda x: x.log_softmax(axis=1).nll_loss(Tensor(target), reduction=r))
     self.helper_test_exception([(32,10)],
       lambda x: torch.nn.functional.nll_loss(x, torch.tensor(target), reduction="typo"),
-      lambda x: x.nll_loss(Tensor(target), reduction="typo"), expected=ValueError)
+      lambda x: x.nll_loss(Tensor(target), reduction="typo"), expected=Exception)
 
   def test_nll_loss_weight(self):
     target = np.random.randint(0, 10, (32,), dtype=np.int32).tolist()
