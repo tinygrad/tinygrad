@@ -45,6 +45,7 @@ class DSPRenderer(ClangRenderer):
   string_rewrite = dsp_string+ClangRenderer.string_rewrite
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
   code_for_op = {k:v for k,v in ClangRenderer.code_for_op.items() if k != Ops.SQRT}
+  def __init__(self): pass  # DSP uses its own compiler setup
 
   def _render_defines(self, uops) -> list[str]:
     return ['''/* DSP boilerplate */ struct dcvs_v2_req { int type; int _pad; _Bool dcvs_enable; char dcvs_option; _Bool set_latency; int latency;

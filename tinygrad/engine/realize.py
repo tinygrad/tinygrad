@@ -40,7 +40,8 @@ class CompiledRunner(Runner):
     if DEBUG >= 3: print(p.applied_opts)
     if DEBUG >= 4: print(p.src)
     self.p:ProgramSpec = p
-    if precompiled is not None: self.lib = precompiled
+    if p.lib is not None: self.lib = p.lib
+    elif precompiled is not None: self.lib = precompiled
     else:
       with cpu_profile(TracingKey(f"compile {p.name}", (p.function_name,)), "TINY"):
         self.lib = Device[p.device].compiler.compile_cached(p.src)

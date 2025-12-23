@@ -135,9 +135,15 @@ def do_render(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
   src = ctx.render(list(lin.src))
   return prg.replace(src=prg.src + (UOp(Ops.SOURCE, arg=src),))
 
+def do_compile(ctx:Renderer, prg:UOp, source:UOp) -> UOp|None:
+  if ctx.compiler is None: return None
+  lib = ctx.compiler.compile_cached(source.arg)
+  return prg.replace(src=prg.src + (UOp(Ops.BINARY, arg=lib),))
+
 pm_to_program = PatternMatcher([
   (UPat(Ops.PROGRAM, src=(UPat(Ops.SINK, name="sink"), UPat(Ops.DEVICE)), name="prg"), do_linearize),
   (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE), UPat(Ops.LINEAR, name="lin")), name="prg"), do_render),
+  (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE), UPat(Ops.LINEAR), UPat(Ops.SOURCE, name="source")), name="prg"), do_compile),
 ])
 
 @track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.name, (ret.function_name, ret.ast), ret=ret), replay=True)

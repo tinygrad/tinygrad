@@ -7,6 +7,7 @@ from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX, CPU_COUNT
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, AddrSpace, truncate
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu
+from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
 
 base_rewrite = PatternMatcher([
   (UPat(Ops.DEFINE_REG, name="x"), lambda ctx,x: f"{ctx.render_dtype(x.dtype.base)} {ctx[x]}[{x.dtype.size}];"),
@@ -229,6 +230,7 @@ class ClangRenderer(CStyleLanguage):
   code_for_workitem = {"g": lambda _: "core_id"}
   extra_args = ['int core_id']
   if AMX: tensor_cores = tc.amx
+  def __init__(self): self.compiler = ClangJITCompiler()
 
   # language options
   buffer_suffix = " restrict"

@@ -72,7 +72,7 @@ def _try_compile(x:tuple[int,Scheduler], compiler:Compiler) -> tuple[int, tuple[
       if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too many uops. {len(p.uops)=}, {uops_max=}")
       raise RuntimeError("too many uops")
     st = time.perf_counter()
-    prog = compiler.compile(p.src)
+    prog = p.lib if p.lib is not None else compiler.compile(p.src)
     et = time.perf_counter() - st
     ret = (p, prog, et)
   except RuntimeError:
