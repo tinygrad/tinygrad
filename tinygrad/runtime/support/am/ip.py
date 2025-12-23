@@ -3,6 +3,7 @@ from typing import Literal
 from tinygrad.helpers import to_mv, data64, lo32, hi32, DEBUG, wait_cond, pad_bytes
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.amd import import_soc
+from tinygrad.runtime.support.memory import AddrSpace
 
 class AM_IP:
   def __init__(self, adev): self.adev = adev
@@ -468,7 +469,7 @@ class AM_PSP(AM_IP):
     msg1_region = next((reg for reg in self.adev.dma_regions or [] if reg[1].nbytes >= (512 << 10)), None)
     if msg1_region is not None:
       self.msg1_addr, self.msg1_view = self.adev.mm.alloc_vaddr(size=msg1_region[1].nbytes, align=am.PSP_1_MEG), msg1_region[1]
-      self.adev.mm.map_range(self.msg1_addr, msg1_region[1].nbytes, [(msg1_region[0], msg1_region[1].nbytes)], system=True, uncached=True, boot=True)
+      self.adev.mm.map_range(self.msg1_addr, msg1_region[1].nbytes, [(msg1_region[0],msg1_region[1].nbytes)], AddrSpace.SYS, uncached=True, boot=True)
     else:
       self.msg1_paddr = self.adev.mm.palloc(am.PSP_1_MEG, align=am.PSP_1_MEG, zero=False, boot=True)
       self.msg1_addr, self.msg1_view = self.adev.paddr2mc(self.msg1_paddr), self.adev.vram.view(self.msg1_paddr, am.PSP_1_MEG, 'B')
