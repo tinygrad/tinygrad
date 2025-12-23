@@ -2,7 +2,7 @@ from typing import cast, Callable
 import time, pprint, random, itertools, math
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
-from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context
+from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv, PROFILE, ProfilePointEvent, cpu_events, prod, Context
 from tinygrad.helpers import unwrap
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, track_rewrites, KernelInfo, pyrender
 from tinygrad.device import Device, Buffer
@@ -75,11 +75,9 @@ class CompiledRunner(Runner):
   def __init__(self, p:ProgramSpec, prg=None):
     if DEBUG >= 3: print(p.applied_opts)
     if DEBUG >= 4: print(p.src)
-    if p.lib is None:
-      with cpu_profile(TracingKey(f"compile {p.name}", (p.function_name,)), "TINY"):
-        p = replace(p, lib=Device[p.device].compiler.compile_cached(p.src))
+    assert p.lib is not None, "lib must be provided"
     self.p:ProgramSpec = p
-    if DEBUG >= 7: Device[p.device].compiler.disassemble(unwrap(p.lib))
+    if DEBUG >= 7: Device[p.device].compiler.disassemble(p.lib)
     self._prg = Device[p.device].runtime(p.function_name, p.lib) if prg is None else prg
     super().__init__(p.name, p.device, p.estimates)
 

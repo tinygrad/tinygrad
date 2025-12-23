@@ -23,8 +23,9 @@ def _test_uop_result(inputs:list[Tensor], stores:list[UOp], local_size=None):
       initial_value=np.zeros(sz, dtype=_to_np_dtype(dtype)).data) for u in uops if u.op is Ops.STORE]
   inbufs = [x.uop.base.buffer for x in inputs]
   src = Device[Device.DEFAULT].renderer.render(uops)
+  lib = Device[Device.DEFAULT].compiler.compile_cached(src)
   ei = CompiledRunner(ProgramSpec(uops[-1].arg.name if uops[-1].arg is not None else "test",
-                                  src, Device.DEFAULT, uops[-1], uops=uops, local_size=local_size))
+                                  src, Device.DEFAULT, uops[-1], uops=uops, lib=lib, local_size=local_size))
   ei.exec(outbufs+inbufs)
   return [np.frombuffer(x.as_buffer(), _to_np_dtype(x.dtype)) for x in outbufs]
 

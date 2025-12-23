@@ -7,7 +7,6 @@ from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.device import Buffer, Device
 from tinygrad.uop.ops import Ops, UOp, UPat, KernelInfo, exec_alu, AxisType
 from tinygrad.uop.spec import shared_spec
-from tinygrad.renderer import ProgramSpec
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.engine.realize import CompiledRunner, get_program, get_runner
 from tinygrad.engine.schedule import ExecItem
@@ -26,11 +25,7 @@ def to_uops_list(u:list[UOp], ren=None) -> list[UOp]:
   return ret[:-1]
 
 def _uops_to_prg(uops_list):
-  uops = full_rewrite(ast:=UOp.sink(*uops_list), ren=Device[Device.DEFAULT].renderer)
-  src = Device[Device.DEFAULT].renderer.render(uops)
-  has_local = Device[Device.DEFAULT].renderer.has_local
-  return CompiledRunner(ProgramSpec(uops[-1].arg.name if uops[-1].arg is not None else "test", src, Device.DEFAULT, ast, uops=uops,
-                                global_size=[1,1,1] if has_local else None, local_size=[1,1,1] if has_local else None))
+  return CompiledRunner(get_program(UOp.sink(*uops_list), Device[Device.DEFAULT].renderer, Device.DEFAULT))
 
 def uop(uops:list[UOp], uop:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
   uops.append(UOp(uop, dtype, tuple(src), arg))
