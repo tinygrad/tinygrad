@@ -90,15 +90,21 @@ from tinygrad.engine.memory import memory_planner
 from tinygrad.schedule.rangeify import get_rangeify_map
 from tinygrad.schedule.multi import get_multi_map
 
-def replace_input_buffer(ctx:dict[UOp, UOp], b:UOp):
-  if (ret:=ctx.get(b, None)) is None:
+def replace_input_buffer(ctx:tuple[dict[UOp, UOp], dict[str, int]], b:UOp):
+  if (ret:=ctx[0].get(b, None)) is None:
     if b.op is Ops.BUFFER:
-      ctx[b] = ret = b.replace(src=(UOp(Ops.LUNIQUE, arg=len(ctx)), b.src[1]))
+      ctx[0][b] = ret = b.replace(src=(UOp(Ops.LUNIQUE, arg=len(ctx[0])), b.src[1]))
     else:
       # TODO: flip args in CONST
       assert b.op is Ops.CONST
-      ctx[b] = ret = b.replace(src=(b.src[0], UOp(Ops.LUNIQUE, arg=len(ctx))))
+      ctx[0][b] = ret = b.replace(src=(b.src[0], UOp(Ops.LUNIQUE, arg=len(ctx[0]))))
   return ret
+
+def strip_bind(ctx:tuple[dict[UOp, UOp], dict[str, int]], b:UOp):
+  var, val = b.src[0], b.src[1].arg
+  assert var.expr not in ctx[1] or ctx[1][var.expr] == val, f"bind mismatch on {var}, {ctx[1][var.expr]} != {val}"
+  ctx[1][var.expr] = val
+  return ctx[0].setdefault(b, b.replace(src=(b.src[0],)))
 
 pm_pre_sched_cache = PatternMatcher([
   # replace input buffers
@@ -106,7 +112,7 @@ pm_pre_sched_cache = PatternMatcher([
   # remove unique consts
   (UPat(Ops.CONST, src=(UPat(Ops.DEVICE), UPat(Ops.UNIQUE)), name="b"), replace_input_buffer),
   # strip value from BIND for cache key normalization, so different values hit same cache
-  (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST)), name="b"), lambda ctx,b: ctx.setdefault(b, b.replace(src=(b.src[0],)))),
+  (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST)), name="b"), strip_bind),
 ])
 
 def replace_input_buffer_back(ctx:dict[UOp, UOp], b:UOp):
@@ -129,9 +135,10 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   # big_sink srcs are all the Tensors
   st = time.perf_counter()
 
-  # replace all UNIQUE buffers with LUNIQUE, strip BIND values for cache key
+  # replace all UNIQUE buffers with LUNIQUE, strip BIND values for cache key, extract var_vals
   input_buffers: dict[UOp, UOp] = {}
-  big_sink_cache = graph_rewrite(big_sink, pm_pre_sched_cache, ctx=input_buffers, name="rewrite for sched cache")
+  var_vals: dict[str, int] = {}
+  big_sink_cache = graph_rewrite(big_sink, pm_pre_sched_cache, ctx=(input_buffers, var_vals), name="rewrite for sched cache")
   sched_cache_key = big_sink_cache.key
 
   if (sc_ret:=schedule_cache.get(sched_cache_key, None)) is None:
@@ -139,7 +146,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
     if SPEC: type_verify(big_sink, tensor_spec)
 
     # hack to preserve metadata
-    graph_rewrite_map(big_sink, pm_pre_sched_cache, ctx={}, name="preserve metadata")
+    graph_rewrite_map(big_sink, pm_pre_sched_cache, ctx=({}, {}), name="preserve metadata")
 
     # tensor map is what we return
     tensor_map: dict[UOp, UOp] = {}
@@ -191,17 +198,8 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
       schedule.append(ExecItem(si.ast, list(ubufs), si.metadata, si.fixedvars))
   with cpu_profile(TracingKey("memory planner")): schedule = memory_planner(schedule)
 
-  # extract var_vals from BINDs that were stripped (only if there are kernels)
-  var_vals: dict[str, int] = {}
-  if schedule:
-    for u in input_buffers:
-      if u.op is Ops.BIND:
-        var, val = u.unbind()
-        assert var.expr not in var_vals or var_vals[var.expr] == val, f"bind mismatch on {var}, {var_vals[var.expr]} != {val}"
-        var_vals[var.expr] = val
-
   if (DEBUG >= 1 and len(schedule) > 1) or DEBUG >= 3:
     print(f"scheduled {len(schedule):4d} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
           f" | {' cache hit' if sc_ret is not None else 'CACHE MISS'} {sched_cache_key.hex()[:8]}"+\
           f" | {len(UOpMetaClass.ucache)} uops in cache")
-  return tensor_map, schedule, var_vals
+  return tensor_map, schedule, var_vals if schedule else {}
