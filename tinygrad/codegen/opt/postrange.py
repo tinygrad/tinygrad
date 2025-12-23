@@ -1,4 +1,3 @@
-from __future__ import annotations
 import math, itertools
 from collections import defaultdict
 from typing import cast, Final
