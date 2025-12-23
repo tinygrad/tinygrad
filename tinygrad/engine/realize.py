@@ -35,13 +35,13 @@ def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> Program
   if ast.arg is None: ast = ast.replace(arg=KernelInfo())
 
   prg = full_rewrite_to_program(ast, renderer)
-  # SINK/LINEAR/SOURCE
-  sink, linear, source = prg.src
+  # SINK/DEVICE/LINEAR/SOURCE
+  sink, device, linear, source = prg.src
 
   # print
   if DEBUG >= 6: print_uops(list(linear.src))
 
-  return ProgramSpec(sink.arg.name, source.arg, renderer.device, sink, list(linear.src),
+  return ProgramSpec(sink.arg.name, source.arg, device.arg, sink, list(linear.src),
                      global_size=[1,1,1] if renderer.has_local or renderer.has_threads else None,
                      local_size=[1,1,1] if renderer.has_local else None)
 
