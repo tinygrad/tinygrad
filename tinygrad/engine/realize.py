@@ -33,8 +33,7 @@ def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> Program
   if getenv("VIZ"): graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(ast))
 
-  prg = full_rewrite_to_program(ast, renderer)
-  return ProgramSpec.from_uop(prg, renderer)
+  return ProgramSpec.from_uop(full_rewrite_to_program(ast, renderer))
 
 # **************** Runners ****************
 

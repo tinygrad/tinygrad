@@ -114,14 +114,12 @@ class ProgramSpec:
     return global_size, local_size
 
   @staticmethod
-  def from_uop(prg:UOp, renderer:Renderer) -> ProgramSpec:
+  def from_uop(prg:UOp) -> ProgramSpec:
     """Construct ProgramSpec from a PROGRAM UOp."""
     assert prg.op is Ops.PROGRAM, f"expected PROGRAM, got {prg.op}"
     # SINK/DEVICE/LINEAR/SOURCE
     sink, device, linear, source = prg.src
-    return ProgramSpec(sink.arg.name, source.arg, device.arg, sink, list(linear.src),
-                       global_size=[1,1,1] if renderer.has_local or renderer.has_threads else None,
-                       local_size=[1,1,1] if renderer.has_local else None)
+    return ProgramSpec(sink.arg.name, source.arg, device.arg, sink, list(linear.src), global_size=[1,1,1], local_size=[1,1,1])
 
 class Renderer:
   device: str = ""
