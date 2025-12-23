@@ -125,7 +125,7 @@ pm_post_sched_cache = PatternMatcher([
 
 schedule_cache: dict[bytes, tuple[list[ExecItem], UOp]] = {}
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[1]))}")
-def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], list[ExecItem], dict[str, int]]:
+def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], list[ExecItem], dict[UOp, Buffer], dict[str, int]]:
   # big_sink srcs are all the Tensors
   st = time.perf_counter()
 
@@ -185,11 +185,11 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
       assert all(isinstance(x, MultiBuffer) for x in ubufs), "kernel must all be multibuffer"
       dnums = [x for x in si.ast.variables() if x.arg[0] == '_device_num']
       for j, bufs in enumerate(zip(*[x.bufs for x in cast(tuple[MultiBuffer, ...], ubufs)])):
-        schedule.append(ExecItem(si.ast, list(bufs), si.metadata, si.fixedvars | ({dnums[0].expr:j} if len(dnums) else {})))
+        schedule.append(ExecItem(si.ast, list(bufs), si.metadata, si.fixedvars | ({dnums[0].expr:j} if len(dnums) else {}), buf_uops=buf_uops))
     else:
       # ONE -> ONE
-      schedule.append(ExecItem(si.ast, list(ubufs), si.metadata, si.fixedvars))
-  with cpu_profile(TracingKey("memory planner")): schedule = memory_planner(schedule)
+      schedule.append(ExecItem(si.ast, list(ubufs), si.metadata, si.fixedvars, buf_uops=buf_uops))
+  with cpu_profile(TracingKey("memory planner")): schedule, buffer_map = memory_planner(schedule)
 
   # extract var_vals from BINDs that were stripped (only if there are kernels)
   var_vals: dict[str, int] = {}
@@ -204,4 +204,4 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
     print(f"scheduled {len(schedule):4d} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
           f" | {' cache hit' if sc_ret is not None else 'CACHE MISS'} {sched_cache_key.hex()[:8]}"+\
           f" | {len(UOpMetaClass.ucache)} uops in cache")
-  return tensor_map, schedule, var_vals
+  return tensor_map, schedule, buffer_map, var_vals

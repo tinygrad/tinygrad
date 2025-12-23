@@ -865,7 +865,7 @@ class TestIdxUpcast(unittest.TestCase):
     for src in ast.src:
       if (ret:=self._find_op(src, op)) is not None: return ret
   def _schedule_render(self, a: Tensor):
-    schedule, _ = a.schedule_with_vars()
+    schedule, _buffer_map, _var_vals = a.schedule_with_vars()
     for s in schedule:
       if s.ast.op is Ops.SINK:
         renderer = Device[s.bufs[0].device].renderer

@@ -237,7 +237,7 @@ class Tensor(OpMixin):
     """
     return [Tensor(u) for u in UOp.custom_kernel(*[t.uop for t in (self,)+lst], fxn=fxn, grad_fxn=grad_fxn)]
 
-  def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ExecItem], dict[str, int]]:
+  def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ExecItem], dict[UOp, Buffer], dict[str, int]]:
     """
     Creates the schedule needed to realize these Tensor(s), with Variables.
 
@@ -246,13 +246,13 @@ class Tensor(OpMixin):
     big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
 
     # this is where the schedule cache should go
-    becomes_map, schedule, var_vals = complete_create_schedule_with_vars(big_sink)
+    becomes_map, schedule, buffer_map, var_vals = complete_create_schedule_with_vars(big_sink)
     _apply_map_to_tensors(becomes_map, name="Apply Schedule Map")
-    return schedule, var_vals
+    return schedule, buffer_map, var_vals
 
   def schedule(self, *lst:Tensor) -> list[ExecItem]:
     """Creates the schedule needed to realize these Tensor(s)."""
-    schedule, var_vals = self.schedule_with_vars(*lst)
+    schedule, _buffer_map, var_vals = self.schedule_with_vars(*lst)
     assert len(var_vals) == 0
     return schedule
 
@@ -260,7 +260,8 @@ class Tensor(OpMixin):
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
     if len(to_realize:=[x for x in (self,)+lst if not x.uop.is_contiguous()]):
-      run_schedule(*Tensor.schedule_with_vars(*to_realize), do_update_stats=do_update_stats)
+      schedule, buffer_map, var_vals = Tensor.schedule_with_vars(*to_realize)
+      run_schedule(schedule, buffer_map, var_vals, do_update_stats=do_update_stats)
     return self
 
   def replace(self, x:Tensor, allow_shape_mismatch=False) -> Tensor:

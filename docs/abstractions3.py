@@ -45,9 +45,10 @@ print(f"The schedule contains {len(schedule)} items.")
 for si in schedule: print(str(si)[:80])
 
 # *****
-# 4. Lower and run the schedule.
+# 4. Run the schedule.
 
-for si in tqdm(schedule): si.run()
+from tinygrad.engine.realize import run_schedule
+run_schedule(schedule)
 
 # *****
 # 5. Print the weight change

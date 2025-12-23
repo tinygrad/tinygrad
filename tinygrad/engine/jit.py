@@ -195,6 +195,8 @@ class CapturedJit(Generic[ReturnType]):
 
   # jit exec
   def __call__(self, input_buffers:list[Buffer], var_vals:dict[str, int]) -> ReturnType:
+    from tinygrad.engine.execution import ExecutionUnit
+
     # assign inputs
     for idx, offset, device, size, dtype in self.extra_view_inputs:
       input_buffers.append(Buffer(device, size, dtype, base=input_buffers[idx], offset=offset).ensure_allocated())
@@ -213,7 +215,8 @@ class CapturedJit(Generic[ReturnType]):
       self._first_run = False
 
     if DEBUG >= 1 and len(self._jit_cache) >= 10: print(f"jit execs {len(self._jit_cache)} kernels")
-    for ei in self._jit_cache: ei.run(var_vals, jit=True)
+    # Use ExecutionUnit for execution
+    ExecutionUnit(self._jit_cache).update(var_vals=var_vals)(jit=True)
     self._clear_inputs()
     return self.ret
 
@@ -251,7 +254,7 @@ class TinyJit(Generic[ReturnType]):
     return ret
 
   def add(self, ei:ExecItem):
-    self._jit_cache.append(ExecItem(ei.ast, [self.add_buffer(buf) for buf in ei.bufs if buf is not None], ei.metadata, ei.fixedvars, ei.prg))
+    self._jit_cache.append(ExecItem(ei.ast, [self.add_buffer(buf) for buf in ei.bufs if buf is not None], ei.metadata, ei.fixedvars, ei.lib, ei.prg))
 
   def reset(self):
     assert self.fxn is not None, "can't reset without function"
@@ -308,14 +311,16 @@ class TinyJit(Generic[ReturnType]):
 
       # prune independent kernels (optional)
       if self.prune:
+        from tinygrad.engine.execution import ExecutionUnit
         depends = set(input_buffers)
         update_depends(depends, jit_cache)
         pruned, onetime = partition(jit_cache, lambda ei: any(b in depends for b in get_out_buffers_for_ei(ei)))
         if DEBUG >= 1: print(f"pruned from {len(jit_cache)} -> {len(pruned)} kernels")
         # run the onetime kernels here
-        for ei in onetime:
-          for b in ei.bufs: cast(Buffer, b).ensure_allocated()
-          ei.run(var_vals, jit=True)
+        if onetime:
+          for ei in onetime:
+            for b in ei.bufs: cast(Buffer, b).ensure_allocated()
+          ExecutionUnit(onetime).update(var_vals=var_vals)(jit=True)
         jit_cache = pruned
 
       # memory planning (optional)
