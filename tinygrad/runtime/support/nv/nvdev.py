@@ -1,7 +1,7 @@
 from __future__ import annotations
 import ctypes, time, functools, re, gzip, struct
 from tinygrad.helpers import getenv, DEBUG, fetch, getbits
-from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager
+from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager, AddrSpace
 from tinygrad.runtime.support.nv.ip import NV_FLCN, NV_FLCN_COT, NV_GSP
 from tinygrad.runtime.support.system import System, PCIDevice, PCIDevImplBase
 
@@ -33,9 +33,9 @@ class NVPageTableEntry:
 
   def _is_dual_pde(self) -> bool: return self.lv == self.nvdev.mm.level_cnt - 2
 
-  def set_entry(self, entry_id:int, paddr:int, table=False, uncached=False, system=False, snooped=False, frag=0, valid=True):
+  def set_entry(self, entry_id:int, paddr:int, table=False, uncached=False, aspace=AddrSpace.PADDR, snooped=False, frag=0, valid=True):
     if not table:
-      x = self.nvdev.pte_t.encode(valid=valid, address_sys=paddr >> 12, aperture=2 if system else 0, kind=6,
+      x = self.nvdev.pte_t.encode(valid=valid, address_sys=paddr >> 12, aperture=2 if aspace is AddrSpace.SYS else 0, kind=6,
         **({'pcf': int(uncached)} if self.nvdev.mmu_ver == 3 else {'vol': uncached}))
     else:
       pde = self.nvdev.dual_pde_t if self._is_dual_pde() else self.nvdev.pde_t
