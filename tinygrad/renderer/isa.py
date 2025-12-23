@@ -33,7 +33,7 @@ class IselContext:
     self.stack_size += amt
     return ret
   
-  def vreg(self, cons:tuple[Register, ...]): return Register(f"v{next(self.reg_n)}", 0, cons=cons)
+  def vreg(self, cons:tuple[Register, ...]|Register): return Register(f"v{next(self.reg_n)}", 0, cons=cons if isinstance(cons, tuple) else (cons,))
 
 isel_fixup = PatternMatcher([
   # NOOP / AFTER have the same register as first src

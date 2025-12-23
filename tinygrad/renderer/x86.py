@@ -195,10 +195,8 @@ RSI = Register("rsi", 6) # {4:"esi", 2:"si", 1:"sil"}
 RDI = Register("rdi", 7) # {4:"edi", 2:"di", 1:"dil"}
 GPR = (RAX, RCX, RDX, RBX, RSP, RBP, RSI, RDI) + tuple(Register(f"r{i}", i) for i in range(8, 16))
 XMM = tuple(Register(f"ymm{i}", i) for i in range(16))
-#XMM = XMM[0:5]
 # gprs you can write to
 WGPR = tuple(r for r in GPR if r != RSP)
-#WGPR = WGPR[0:5]
 
 # ***** X86 instruction selection *****
 
@@ -210,7 +208,7 @@ def to_imm(c:UOp) -> UOp|None:
   return None
 def disp(c:UOp) -> UOp: return imm(dtypes.int32 if c.overflows(dtypes.int8) else dtypes.int8, c.arg)
 def cmp(x:UOp): return UOp(X86Ops.CMP, src=x.src) if (i:=to_imm(x.src[1])) is None else UOp(X86Ops.CMPi, src=(x.src[0], i))
-def def_reg(dt:DType): return UOp(X86Ops.DEFINE_REG, dt)
+def def_reg(dt:DType, reg:Register|None=None): return UOp(X86Ops.DEFINE_REG, dt, arg=reg)
 
 # vshufps takes 2 registers, it gets its lower 64 bits from the first register and its upper 64 bits from the second
 # used for all shuffles with 1 or 2 src registers that are not broadcasts
@@ -236,10 +234,15 @@ def vinsertps(x:UOp) -> UOp:
 # vpins inserts from 2nd src gpr register into any element in the destination xmm register
 # the rest of the elements are taken from the 1st src xmm register
 def vpins(x:UOp) -> UOp:
-  op = {1: X86Ops.VPINSRB, 2: X86Ops.VPINSRW, 4: X86Ops.VPINSRD, 8: X86Ops.VPINSRQ}[x.dtype.scalar()]
+  op = {1: X86Ops.VPINSRB, 2: X86Ops.VPINSRW, 4: X86Ops.VPINSRD, 8: X86Ops.VPINSRQ}[x.dtype.scalar().itemsize]
   shuf = UOp(op, x.dtype, (def_reg(x.dtype), x.src[0], imm(dtypes.uint8, 0)))
   for i,s in enumerate(x.src[1:], 1): shuf = UOp(op, x.dtype, (shuf, s, imm(dtypes.uint8, i)))
   return shuf
+
+def idiv(ctx:IselContext, x:UOp):
+  cdq_op = {1: X86Ops.CBW, 2: X86Ops.CWD, 4: X86Ops.CDQ, 8: X86Ops.CQO}[x.dtype.itemsize]
+  cdq = UOp(cdq_op, x.dtype, (UOp(X86Ops.MOV, x.dtype, (x.src[0],), ctx.vreg(RAX)),), ctx.vreg(RDX))
+  return UOp(X86Ops.IDIV, x.dtype, (UOp(X86Ops.MOV, x.dtype, (x.src[1],), ctx.vreg(tuple(r for r in WGPR if r != RAX))), cdq), ctx.vreg(RAX))
 
 def fuse_index(ctx:IselContext, x:UOp) -> tuple[UOp, ...]:
   # fuse INDEX into the address if only used once, if there was a displacement it was already moved into the load/store to expose the base index
@@ -253,6 +256,10 @@ def fuse_load(ctx:IselContext, x:UOp, i:int) -> UOp|None:
 
 # TODO: args on the stack
 def x86_abi(ctx:IselContext, x:UOp):
+  # if arg is on the stack we move rsp to rbp, but this needs to be done before rsp is deincremented somehow
+  #def _stack_arg: return None
+  #if sys.platform == "win32": return x.replace(op=X86Ops.DEFINE_REG, arg=ctx.vreg(((RCX, RDX, GPR[8], GPR[9])[x.arg],))) if x.arg < 4 else None
+  #return x.replace(op=X86Ops.DEFINE_REG, arg=ctx.vreg(((RDI, RSI, RDX, RCX, GPR[8], GPR[9])[x.arg],))) if x.arg < 6 else x.replace(op=X86Ops.MOV, src=(def_reg(dtypes.uint64, RBP), UOp(Ops.NOOP), imm(dtypes.int8, (x.arg-5)*8)), arg=None)
   reg = (RCX, RDX, GPR[8], GPR[9])[x.arg] if sys.platform == "win32" else (RDI, RSI, RDX, RCX, GPR[8], GPR[9])[x.arg]
   return x.replace(op=X86Ops.DEFINE_REG, arg=ctx.vreg((reg,)))
 
@@ -279,7 +286,8 @@ isel_matcher = PatternMatcher([
   # constants that can't be immediates, move them to registers
   #(UPat(Ops.CONST, dtypes.float16, name="x"), lambda x: UOp(X86Ops.VMOVD, x.dtype, UOp(X86Ops.MOVi, dtypes.int32, (x.replace(op=X86Ops.IMM))))),
   (UPat(Ops.CONST, dtypes.float32, name="x"), lambda x: UOp(X86Ops.VMOVD, x.dtype, (UOp(X86Ops.MOVi, dtypes.int32, (x.replace(op=X86Ops.IMM),)),))),
-  (UPat(Ops.CONST, dtypes.float64, name="x"), lambda x: UOp(X86Ops.VMOVQ, x.dtype, (UOp(X86Ops.MOVi, dtypes.int64, (x.replace(op=X86Ops.IMM),)),))),
+  (UPat(Ops.CONST, dtypes.float64, name="x"), lambda x: UOp(X86Ops.VMOVQ, x.dtype, (UOp(X86Ops.MOVABS, dtypes.int64, (x.replace(op=X86Ops.IMM),)),))),
+  (UPat(Ops.CONST, dtypes.int64s, name="x"), lambda x: UOp(X86Ops.MOVABS, x.dtype, (x.replace(op=X86Ops.IMM),)) if x.tag is None else None),
   (UPat(Ops.CONST, dtypes.ints+(dtypes.bool,), name="x"), lambda x: UOp(X86Ops.MOVi, x.dtype, (x.replace(op=X86Ops.IMM),)) if x.tag is None else None),
   # LEA, first 2 cases only happen if INDEX is followed by a WHERE preventing the displacement being moved to the LOAD/STORE
   # if the idx can be less than 0 need to sign extend
@@ -371,10 +379,7 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.MUL, dtypes.int16s, name="x"), lambda x: x.replace(op=X86Ops.VPMULLW) if x.dtype.count > 1 else None),
   (UPat(Ops.MUL, dtypes.int32s, name="x"), lambda x: x.replace(op=X86Ops.VPMULLD) if x.dtype.count > 1 else None),
   # scalar int binary TODO: uint idiv
-  ((UPat.var("a", dtypes.int8) // UPat.var("b")).named("x"), lambda a,b,x: UOp(X86Ops.IDIV, x.dtype, (b, UOp(X86Ops.CBW, a.dtype, (UOp(X86Ops.MOV, a.dtype, (a,), RAX),), RDX)), RAX)), # noqa: E501
-  ((UPat.var("a", dtypes.int16) // UPat.var("b")).named("x"), lambda a,b,x: UOp(X86Ops.IDIV, x.dtype, (b, UOp(X86Ops.CWD, a.dtype, (UOp(X86Ops.MOV, a.dtype, (a,), RAX),), RDX)), RAX)), # noqa: E501
-  ((UPat.var("a", dtypes.int32) // UPat.var("b")).named("x"), lambda a,b,x: UOp(X86Ops.IDIV, x.dtype, (b, UOp(X86Ops.CDQ, a.dtype, (UOp(X86Ops.MOV, a.dtype, (a,), RAX),), RDX)), RAX)), # noqa: E501
-  ((UPat.var("a", dtypes.int64) // UPat.var("b")).named("x"), lambda a,b,x: UOp(X86Ops.IDIV, x.dtype, (b, UOp(X86Ops.CQO, a.dtype, (UOp(X86Ops.MOV, a.dtype, (a,), RAX),), RDX)), RAX)), # noqa: E501
+  ((UPat(dtype=dtypes.sints) // UPat()).named("x"), idiv),
   ((UPat.var("a", dtypes.ints) << UPat.var("b")).named("x"), lambda a,b,x: x.replace(op=X86Ops.SHLi, src=(a, imm(dtypes.uint8, b.arg))) if b.op is Ops.CONST else x.replace(op=X86Ops.SHL)), # noqa: E501
   ((UPat.var("a", dtypes.uints) >> UPat.var("b")).named("x"), lambda a,b,x: x.replace(op=X86Ops.SHRi, src=(a, imm(dtypes.uint8, b.arg))) if b.op is Ops.CONST else x.replace(op=X86Ops.SHR)), # noqa: E501
   ((UPat.var("a", dtypes.sints) >> UPat.var("b")).named("x"), lambda a,b,x: x.replace(op=X86Ops.SARi, src=(a, imm(dtypes.uint8, b.arg))) if b.op is Ops.CONST else x.replace(op=X86Ops.SHR)), # noqa: E501
@@ -470,6 +475,8 @@ post_regalloc_matcher = PatternMatcher([
   # rewrite END to ADD 1 -> CMPLT -> JUMP
   (UPat(Ops.END, name="x"), lambda x: (jl:=x.replace(op=X86Ops.JL, src=(x.src[1], cmp:=UOp(X86Ops.CMPi,
     src=(add:=UOp(X86Ops.ADDi, x.src[1].dtype, (imm(x.src[1].dtype, 1),), x.src[1].arg), imm(x.src[1].dtype, x.src[1].tag))))), [add, cmp, jl])),
+  # remove cdq from idiv
+  (UPat(X86Ops.IDIV, name="x"), lambda x: (nx:=x.replace(src=x.src[:-1]), [nx])),
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
   (UPat(X86GroupOp.TwoAddress1st, name="x"), lambda ctx,x: (nx:=x.replace(src=x.src[1:]), [assign(ctx, x.src[0], x.arg), nx] if x.arg != x.src[0].arg else [nx])),
   (UPat(X86GroupOp.TwoAddress2nd, name="x"), lambda ctx,x: (nx:=x.replace(src=x.src[:1]+x.src[2:]), [assign(ctx, x.src[1], x.arg), nx] if x.arg != x.src[1].arg else [nx])),
@@ -577,6 +584,7 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0):
 # map select: 0F == 1, 0F38 == 2, 0F3A == 3
 encodings = PatternMatcher([
   # moves
+  (UPat(X86Ops.MOVABS, name="x"), lambda x: bytes([0b0100 << 4 | 0b1 << 3 | 0b00 << 2 | x.arg.index >> 3, 0xB8 + (x.arg.index & 0b111)]) + cast(int, x.src[0].arg).to_bytes(8, 'little', signed=x.src[0].dtype in dtypes.sints)),
   (UPat(X86Ops.MOV, name="x"), lambda x: encode(x, 0x8B)), (UPat(X86Ops.MOVi, name="x"), lambda x: encode(x, 0xC7, reg=0)),
   (UPat(X86Ops.MOVm, name="x"), lambda x: encode(x, 0x89)), (UPat(X86Ops.LEA, name="x"), lambda x: encode(x, 0x8D)),
   (UPat(X86Ops.VMOVSS, name="x"), lambda x: encode(x, 0x10, pp=2, sel=1)), (UPat(X86Ops.VMOVSSm, name="x"), lambda x: encode(x, 0x11, pp=2, sel=1)),

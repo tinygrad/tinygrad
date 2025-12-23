@@ -141,7 +141,7 @@ class X86Ops(FastEnum):
   # index
   LEA = auto()
   # register / memory / immediate moves
-  MOV = auto(); MOVm = auto(); MOVi = auto() # noqa: E702
+  MOV = auto(); MOVm = auto(); MOVi = auto(); MOVABS = auto() # noqa: E702
   VMOVSS = auto(); VMOVSD = auto(); VMOVUPS = auto() # noqa: E702
   VMOVSSm = auto(); VMOVSDm = auto(); VMOVUPSm = auto() # noqa: E702
   # casts
