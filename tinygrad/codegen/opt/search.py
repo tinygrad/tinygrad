@@ -6,7 +6,8 @@ from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, di
 from tinygrad.helpers import IGNORE_BEAM_CACHE
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.tensor import Tensor
-from tinygrad.engine.realize import CompiledRunner, get_program
+from tinygrad.engine.realize import CompiledRunner
+from tinygrad.codegen import get_program
 from tinygrad.renderer import ProgramSpec
 from tinygrad.codegen.opt.postrange import Scheduler
 

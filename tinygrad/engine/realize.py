@@ -2,38 +2,12 @@ from typing import cast, Callable
 import time, pprint, random, itertools, math
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
-from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context
+from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context
 from tinygrad.helpers import unwrap
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, track_rewrites, KernelInfo, pyrender
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer
 from tinygrad.device import Device, Buffer
-from tinygrad.renderer import Renderer, ProgramSpec, Estimates
-from tinygrad.codegen import full_rewrite_to_program
-from tinygrad.codegen.opt import Opt
-
-# **************** Program Creation ****************
-
-@track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.name, (ret.function_name, ret.ast), ret=ret), replay=True)
-def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> ProgramSpec:
-  """
-  Transform an AST into a ProgramSpec. May trigger BEAM search.
-
-  Args:
-    ast: The Ops.SINK rooted AST
-    renderer: The renderer used to generate the code
-
-  Returns:
-    The ProgramSpec of the program.
-  """
-
-  # linearize
-  if opts is not None:
-    assert ast.arg is None, "can't apply opts if sink has an arg"
-    ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts)))
-
-  if getenv("VIZ"): graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
-  if DEBUG >= 5: print(pyrender(ast))
-
-  return ProgramSpec.from_uop(full_rewrite_to_program(ast, renderer))
+from tinygrad.renderer import ProgramSpec, Estimates
+from tinygrad.codegen import get_program
 
 # **************** Runners ****************
 
