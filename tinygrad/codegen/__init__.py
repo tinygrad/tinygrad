@@ -141,21 +141,3 @@ def full_rewrite_to_program(sink:UOp, ren:Renderer) -> UOp:
   full_sink = full_rewrite_to_sink(sink, ren, optimize=sink.tag is None)
   sink = UOp(Ops.PROGRAM, src=(full_sink,))
   return graph_rewrite(sink, pm_to_program, ctx=ren, name="linearize/render")
-
-def full_rewrite(sink:UOp, ren:Renderer|None=None) -> list[UOp]:
-  """
-  Function to transform the Kernel UOp graph into a linearized program.
-
-  Args:
-    sink: The Ops.SINK rooting the Kernel graph.
-    ren: The Renderer (can change how things are processed, fix this).
-
-  Returns:
-    Linear program in UOps.
-  """
-
-  full_sink = full_rewrite_to_sink(sink, ren, optimize=sink.tag is None)
-  assert len(full_sink.ranges) == 0, f"all ranges must end by the sink, {full_sink.ranges}"
-  lst = line_rewrite(linearize(full_sink), pm_linearize_cleanups)
-  if SPEC: type_verify(lst, program_spec)
-  return lst
