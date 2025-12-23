@@ -1,12 +1,10 @@
 from __future__ import annotations
 from typing import Callable, cast
-import functools
-from dataclasses import dataclass, field
-from tinygrad.helpers import to_function_name, dedup, prod
-from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher
+from dataclasses import dataclass
+from tinygrad.helpers import prod
+from tinygrad.uop.ops import Ops, UOp, sint, ssimplify, GroupOp, PatternMatcher
 from tinygrad.dtype import AddrSpace, PtrDType
 from tinygrad.codegen.opt.tc import TensorCore
-from tinygrad.codegen.opt import Opt
 
 @dataclass(frozen=True)
 class Estimates:
@@ -56,62 +54,6 @@ class Estimates:
       elif u.op in GroupOp.ALU and u not in dont_count: flops += (mults * (2 if u.op is Ops.MULACC else 1)) * u.dtype.count
       elif u.op is Ops.WMMA and u not in dont_count: flops += 2 * prod(u.arg[1]) // u.arg[5] * mults
     return Estimates(flops, lds, sum(mem.values()))
-
-@dataclass
-class ProgramSpec:
-  name:str
-  src:str
-  device:str
-  ast:UOp  # save the base ast (this is method cache key)
-  uops:list[UOp]|None=None
-
-  # filled in from uops (if we have uops)
-  global_size:list[int]|None=None
-  local_size:list[int]|None=None
-  vars:list[Variable]=field(default_factory=list)
-  globals:list[int]=field(default_factory=list)
-  outs:list[int]=field(default_factory=list)
-  ins:list[int]=field(default_factory=list)
-  _ran_post_init:bool=False  # NOTE: this is needed if you call replace on the Program
-
-  def __post_init__(self):
-    if not self._ran_post_init and self.uops is not None:
-      # single pass through the uops
-      for u in self.uops:
-        if u.op is Ops.DEFINE_VAR: self.vars.append(u)
-        if u.op is Ops.DEFINE_GLOBAL: self.globals.append(u.arg)
-        if u.op in (Ops.STORE, Ops.LOAD):
-          if (idx:=u.src[0]).op is Ops.INDEX or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
-            if (buf:=idx.src[0]).op is Ops.DEFINE_GLOBAL: (self.outs if u.op is Ops.STORE else self.ins).append(buf.arg)
-          # TODO: can else happen?
-        if u.op is Ops.SPECIAL:
-          # NOTE: you have to set local_size and global_size to the base [1,1,1] outside this
-          if u.arg[0] == 'i': self.local_size = None
-          special_size = self.local_size if u.arg[0] == 'l' else self.global_size
-          # TODO: this cast is wrong, u.src[0].ssimplify() can be sint
-          if special_size is not None: special_size[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
-      self.vars = sorted(self.vars, key=lambda v: v.arg)
-      self.outs = sorted(dedup(self.outs))
-      self.ins = sorted(dedup(self.ins))
-      self._ran_post_init = True
-
-  @functools.cached_property
-  def estimates(self) -> Estimates:
-    return Estimates() if self.uops is None else Estimates.from_uops(self.uops, ignore_indexing=True)
-
-  @functools.cached_property
-  def function_name(self) -> str: return to_function_name(self.name)
-
-  @property
-  def applied_opts(self) -> tuple[Opt, ...]|None:
-    if self.uops is None: return None
-    assert self.uops[-1].op is Ops.SINK, self.uops[-1].op
-    return self.uops[-1].arg.applied_opts
-
-  def launch_dims(self, var_vals:dict[str, int]):
-    global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else None
-    local_size = [sym_infer(sz, var_vals) for sz in self.local_size] if self.local_size is not None else None
-    return global_size, local_size
 
 class Renderer:
   device: str = ""

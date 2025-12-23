@@ -3,7 +3,6 @@ import textwrap
 
 from tinygrad import Device, Tensor
 from tinygrad.uop.ops import UOp, Ops, track_rewrites
-from tinygrad.renderer import ProgramSpec
 from tinygrad.helpers import TracingKey
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 
@@ -51,9 +50,9 @@ amdhsa.kernels:
 .end_amdgpu_metadata
 """
 
-@track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.name, ret=ret))
-def run_asm(name:str, src:str) -> ProgramSpec:
-  prg = ProgramSpec(name, template.replace("fn_name", name).replace("INSTRUCTION", textwrap.dedent(src)), Device.DEFAULT, UOp(Ops.SINK))
+@track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.src[0].arg.name, ret=ret))
+def run_asm(name:str, src:str) -> UOp:
+  prg = UOp.new_program(name, template.replace("fn_name", name).replace("INSTRUCTION", textwrap.dedent(src)), Device.DEFAULT, UOp(Ops.SINK), [])
   ei = ExecItem(UOp(Ops.SINK), [Tensor.empty(1).uop.buffer.ensure_allocated()], prg=CompiledRunner(prg))
   ei.run()
   return prg

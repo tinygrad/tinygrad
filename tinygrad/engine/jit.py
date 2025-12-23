@@ -4,7 +4,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, JIT_BATCH_SIZE, dedup, partition, unwrap
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType
-from tinygrad.uop.ops import UOp, Variable, sym_infer, Ops
+from tinygrad.uop.ops import UOp, Variable, sym_infer, Ops, sint
 from tinygrad.engine.realize import ExecItem, capturing, ViewOp, BufferCopy, BufferXfer, EncDec, CompiledRunner, Runner, Estimates
 from tinygrad.engine.memory import _internal_memory_planner
 from tinygrad.nn.state import get_parameters
@@ -78,13 +78,18 @@ class GraphRunner(Runner):
     self.input_replace:dict[tuple[int, int], int] = get_input_replace(jit_cache, input_rawbuffers)
     self.var_vals_replace:dict[int, list[tuple[int, int]]] = {}
     self.launch_dims_replace:dict[int, tuple[int|None, int|None]] = {}
-    self.launch_dims_base:dict[int, tuple[tuple[int, ...], tuple[int, ...]]] = {}
+    self.launch_dims_base:dict[int, tuple[tuple[sint, ...], tuple[sint, ...]]] = {}
 
-    def is_sym_dim(dim) -> bool: return not all(isinstance(d, (int, float)) for d in dim)
+    def is_sym_dim(dim) -> bool: return dim is not None and not all(isinstance(d, (int, float)) for d in dim)
 
     self.vars = sorted(var_vals.keys())
-    self.symbolic_dims = dedup([tuple(d) for ji in jit_cache if isinstance(ji.prg, CompiledRunner) and (d:=ji.prg.p.local_size) and is_sym_dim(d)] +
-                               [tuple(d) for ji in jit_cache if isinstance(ji.prg, CompiledRunner) and (d:=ji.prg.p.global_size) and is_sym_dim(d)])
+    sym_dims: list[tuple[sint, ...]] = []
+    for ji in jit_cache:
+      if isinstance(ji.prg, CompiledRunner):
+        global_size, local_size = ji.prg.p.sizes
+        if local_size is not None and is_sym_dim(local_size): sym_dims.append(tuple(local_size))
+        if global_size is not None and is_sym_dim(global_size): sym_dims.append(tuple(global_size))
+    self.symbolic_dims = dedup(sym_dims)
     def find_symbolic_dim(dim): return self.symbolic_dims.index(tuple(dim)) if dim is not None and tuple(dim) in self.symbolic_dims else None
 
     estimates = Estimates()
@@ -92,13 +97,15 @@ class GraphRunner(Runner):
       assert ji.prg is not None
       estimates += ji.prg.estimates
       if isinstance(ji.prg, CompiledRunner):
-        if ji.prg.p.vars: self.var_vals_replace[j] = [(i, self.vars.index(v.expr)) for i, v in enumerate(ji.prg.p.vars) if v.expr not in ji.fixedvars]
+        prg_vars = ji.prg.p.variables()
+        if prg_vars: self.var_vals_replace[j] = [(i, self.vars.index(v.expr)) for i, v in enumerate(prg_vars) if v.expr not in ji.fixedvars]
 
-        global_dim_idx, local_dim_idx = find_symbolic_dim(ji.prg.p.global_size), find_symbolic_dim(ji.prg.p.local_size)
+        global_size, local_size = ji.prg.p.sizes
+        global_dim_idx, local_dim_idx = find_symbolic_dim(global_size), find_symbolic_dim(local_size)
         if global_dim_idx is not None or local_dim_idx is not None:
           self.launch_dims_replace[j] = (global_dim_idx, local_dim_idx)
-          assert ji.prg.p.global_size is not None and ji.prg.p.local_size is not None
-          self.launch_dims_base[j] = (tuple(ji.prg.p.global_size), tuple(ji.prg.p.local_size))
+          assert global_size is not None and local_size is not None
+          self.launch_dims_base[j] = (tuple(global_size), tuple(local_size))
 
     # used in MultiGraphRunner. the ints are id() of _bufs
     self.w_dependency_map: dict[int, Any] = {}

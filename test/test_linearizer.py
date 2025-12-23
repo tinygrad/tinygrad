@@ -1,6 +1,5 @@
 import numpy as np
 import unittest
-from dataclasses import replace
 
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.codegen.gpudims import get_grouped_dims
@@ -168,8 +167,8 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device.DEFAULT == "CPU", "test only for CPU")
   def test_upcast_with_locals_cpu(self):
     out = Tensor.ones(64,64).contiguous() @ Tensor.ones(64,64).contiguous()
-    prg = get_program(out.schedule()[-1].ast, opts=[Opt(OptOps.LOCAL, axis=0, arg=4)]).uops
-    self.assertEqual(len(prg.src.split("for")), 5)
+    prg = get_program(out.schedule()[-1].ast, opts=[Opt(OptOps.LOCAL, axis=0, arg=4)])
+    self.assertEqual(len(prg.src[3].arg.split("for")), 5)  # source code is in src[3].arg
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
@@ -517,7 +516,11 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
   device = real_bufs[0].device
   wanna_output = [np.array(x).flatten() for x in wanna_output]
 
-  def get_prg(opts): return CompiledRunner(replace(get_program(realized_ast, renderer=Device[Device.DEFAULT].renderer, opts=opts), device=device))
+  def get_prg(opts):
+    prg = get_program(realized_ast, renderer=Device[Device.DEFAULT].renderer, opts=opts)
+    # update device in PROGRAM UOp: (SINK, DEVICE, LINEAR, SOURCE)
+    prg = prg.replace(src=(prg.src[0], UOp(Ops.DEVICE, arg=device), *prg.src[2:]))
+    return CompiledRunner(prg)
 
   def check_opt(opts):
     prg = get_prg(opts=opts)

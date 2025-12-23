@@ -1,10 +1,10 @@
 import numpy as np
 import unittest
 import subprocess, struct, math
-from tinygrad import Tensor, dtypes, Device, UOp
+from tinygrad import Tensor, dtypes, Device
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.helpers import getenv
 from tinygrad.runtime.support.compiler_amd import amdgpu_disassemble
-from tinygrad.renderer import ProgramSpec
 from tinygrad.engine.realize import CompiledRunner
 
 def get_output(asm:str, n_threads:int=1):
@@ -22,7 +22,9 @@ def get_output(asm:str, n_threads:int=1):
     *(data0_1+l) = res;
   }}"""
   t = Tensor.zeros(n_threads, dtype=dtypes.uint32).contiguous().realize()
-  prg = ProgramSpec("test", src, Device.DEFAULT, UOp.sink(t), global_size=[1, 1, 1], local_size=[n_threads, 1, 1])
+  # Create linearized uops with SPECIAL for local size
+  uops = [UOp(Ops.SPECIAL, arg=('l', 0), src=(UOp.const(dtypes.int, n_threads),))]
+  prg = UOp.new_program("test", src, Device.DEFAULT, UOp.sink(t.uop), uops)
   car = CompiledRunner(prg)
   if getenv("PRINT_ASM"): amdgpu_disassemble(car.lib)
   car([t.uop.buffer], {}, wait=True)

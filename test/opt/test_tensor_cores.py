@@ -1,10 +1,9 @@
 import numpy as np
 import unittest
-from dataclasses import replace
 
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.tensor import _to_np_dtype
-from tinygrad.uop.ops import Ops
+from tinygrad.uop.ops import Ops, UOp
 from tinygrad.dtype import DType
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import AMX, AMD_LLVM, CPU_LLVM, Context
@@ -44,7 +43,10 @@ def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axi
   if dtype_in == dtypes.bfloat16: r = r.float()
   realized_ast, bufs = helper_realized_ast(r)
   opts = [Opt(op=OptOps.TC, axis=axis, arg=(tc_select, tc_opt, use_tensor_cores))]
-  prg = CompiledRunner(replace(get_program(realized_ast, Device[Device.DEFAULT].renderer, opts=opts), device=Device.DEFAULT))
+  p = get_program(realized_ast, Device[Device.DEFAULT].renderer, opts=opts)
+  # update device in PROGRAM UOp: (SINK, DEVICE, LINEAR, SOURCE)
+  p = p.replace(src=(p.src[0], UOp(Ops.DEVICE, arg=Device.DEFAULT), *p.src[2:]))
+  prg = CompiledRunner(p)
   if use_tensor_cores == 1: assert len([uop for uop in prg.p.uops if uop.op is Ops.WMMA]) > 0, "wmma not triggered"
   assert len([x for x in prg.p.uops[-1].arg.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
   prg.exec(bufs)

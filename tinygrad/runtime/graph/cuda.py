@@ -22,12 +22,14 @@ class CUDAGraph(MultiGraphRunner):
     for j,ji in enumerate(jit_cache):
       if isinstance(ji.prg, CompiledRunner):
         global_size, local_size = ji.prg.p.launch_dims(var_vals)
+        assert global_size is not None and local_size is not None
 
         new_node = cuda.CUgraphNode()
         deps = self._access_resources([x.base for x in ji.bufs if x is not None], ji.prg.p.outs, new_dependency=new_node)
         c_deps = (cuda.CUgraphNode*len(deps))(*deps) if deps else None
 
-        c_args, vargs = encode_args([cast(Buffer, x)._buf for x in ji.bufs], [var_vals.get(x.expr, ji.fixedvars.get(x.expr)) for x in ji.prg.p.vars])
+        prg_vars = ji.prg.p.variables()
+        c_args, vargs = encode_args([cast(Buffer, x)._buf for x in ji.bufs], [var_vals.get(x.expr, ji.fixedvars.get(x.expr)) for x in prg_vars])
         kern_params = cuda.CUDA_KERNEL_NODE_PARAMS_v1(ji.prg._prg.prg, *global_size, *local_size, 0, None, vargs)
         check(cuda.cuGraphAddKernelNode(ctypes.byref(new_node), self.graph, c_deps, len(deps), ctypes.byref(kern_params)))
 

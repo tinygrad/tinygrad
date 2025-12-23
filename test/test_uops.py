@@ -15,7 +15,6 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
 from test.helpers import get_uops
-from dataclasses import replace
 
 def to_uops_list(u:list[UOp], ren=None) -> list[UOp]:
   sink = UOp.group(*u)
@@ -27,7 +26,9 @@ def to_uops_list(u:list[UOp], ren=None) -> list[UOp]:
 
 def _uops_to_prg(uops_list):
   prg = get_program(UOp.sink(*uops_list), Device[Device.DEFAULT].renderer)
-  return CompiledRunner(replace(prg, device=Device.DEFAULT))
+  # update device in PROGRAM UOp: (SINK, DEVICE, LINEAR, SOURCE)
+  prg = prg.replace(src=(prg.src[0], UOp(Ops.DEVICE, arg=Device.DEFAULT), *prg.src[2:]))
+  return CompiledRunner(prg)
 
 def uop(uops:list[UOp], uop:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
   uops.append(UOp(uop, dtype, tuple(src), arg))

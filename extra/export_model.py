@@ -1,12 +1,11 @@
 from typing import Tuple, Dict, List, Optional
 from tinygrad.dtype import DType
-from tinygrad.renderer import ProgramSpec
 from tinygrad.tensor import Device, Tensor
 from tinygrad.engine.jit import TinyJit
 from tinygrad.nn.state import get_state_dict
-from tinygrad.helpers import Context, to_mv
+from tinygrad.helpers import Context, to_mv, to_function_name
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import Ops
+from tinygrad.uop.ops import Ops, UOp
 import json
 from collections import OrderedDict
 
@@ -15,8 +14,13 @@ EXPORT_SUPPORTED_DEVICE = ["WEBGPU", "CPU", "CUDA", "CL"]
 def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str],List[Tuple[str,List[str],List[int]]],Dict[str,Tuple[int,DType,int]],Dict[str,Tensor]]:
   functions, bufs, bufs_to_save, statements, bufnum = {}, {}, {}, [], 0
   for ji in run.jit_cache:
-    fxn: ProgramSpec = ji.prg.p
-    functions[fxn.function_name] = fxn.src   # NOTE: this assumes all with the same name are the same
+    prg: UOp = ji.prg.p
+    name = prg.src[0].arg.name
+    function_name = to_function_name(name)
+    src = prg.src[3].arg
+    global_size, local_size = prg.sizes
+    prg_vars = prg.variables()
+    functions[function_name] = src   # NOTE: this assumes all with the same name are the same
     cargs = []
     for i,arg in enumerate(ji.bufs):
       key = id(arg)
@@ -28,8 +32,8 @@ def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str]
           bufnum += 1
           if i > 0: bufs_to_save[bufs[key][0]] = arg   # if first usage of a buffer is not an output, and it's not a special name
       cargs.append(bufs[key][0])
-    cargs += [var for var in fxn.vars if getattr(var, "op", None) is Ops.DEFINE_VAR] # symbolic vars; is it necessary or sufficient to check for DEFINE_VAR?
-    statements.append((fxn.function_name, cargs, fxn.global_size, fxn.local_size))
+    cargs += [var for var in prg_vars if getattr(var, "op", None) is Ops.DEFINE_VAR] # symbolic vars; is it necessary or sufficient to check for DEFINE_VAR?
+    statements.append((function_name, cargs, list(global_size) if global_size else None, list(local_size) if local_size else None))
 
   return functions, statements, {name:(size, dtype, key) for (name,size,dtype,key) in bufs.values()}, bufs_to_save
 

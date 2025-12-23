@@ -609,11 +609,17 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @staticmethod
   def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType, num=None):
     return UOp(Ops.BUFFER, dtype, (UOp.unique(num), UOp(Ops.DEVICE, arg=device)), size)
+  @staticmethod
+  def new_program(name:str, src:str, device:str, ast:UOp, uops:list[UOp]):
+    """Create a PROGRAM UOp from raw components."""
+    sink = ast.replace(arg=KernelInfo(name=name)) if ast.arg is None else ast.replace(arg=ast.arg.replace(name=name))
+    return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=device), UOp(Ops.LINEAR, src=tuple(uops)), UOp(Ops.SOURCE, arg=src)))
   @property
   def device(self) -> str|tuple[str, ...]: return unwrap(self._device)
   @recursive_property
   def _device(self) -> str|tuple[str, ...]|None:
     if self.op is Ops.DEVICE: return self.arg
+    if self.op is Ops.PROGRAM: return self.src[1].arg  # PROGRAM src[1] is DEVICE
     if self.op is Ops.BUFFERIZE: return self.arg.device
     if self.op is Ops.AFTER: return self.src[0]._device
     if self.op is Ops.MSELECT:
@@ -624,6 +630,104 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     for x in self.src:
       if x._device is not None: return x._device
     return None
+
+  # *** PROGRAM UOp properties ***
+
+  @property
+  def uops(self) -> list[UOp]:
+    """Linearized uops list. Only valid for PROGRAM."""
+    assert self.op is Ops.PROGRAM, f"uops only valid for PROGRAM, not {self.op}"
+    return list(self.src[2].src)
+
+  @property
+  def name(self) -> str:
+    """Kernel name. Only valid for PROGRAM."""
+    assert self.op is Ops.PROGRAM, f"name only valid for PROGRAM, not {self.op}"
+    return self.src[0].arg.name
+
+  @property
+  def applied_opts(self):
+    """Applied optimizations. Only valid for PROGRAM."""
+    assert self.op is Ops.PROGRAM, f"applied_opts only valid for PROGRAM, not {self.op}"
+    return self.src[0].arg.applied_opts
+
+  @functools.cached_property
+  def estimates(self):
+    """Estimates for this program. Only valid for PROGRAM."""
+    assert self.op is Ops.PROGRAM, f"estimates only valid for PROGRAM, not {self.op}"
+    from tinygrad.renderer import Estimates
+    return Estimates.from_uops(self.uops, ignore_indexing=True)
+
+  @property
+  def globals(self) -> list[int]:
+    """DEFINE_GLOBAL arg indices from linearized uops. Only valid for PROGRAM."""
+    assert self.op is Ops.PROGRAM, f"globals only valid for PROGRAM, not {self.op}"
+    return [u.arg for u in self.src[2].src if u.op is Ops.DEFINE_GLOBAL]
+
+  @property
+  def outs(self) -> list[int]:
+    """Buffer indices written to (STORE). Only valid for PROGRAM."""
+    assert self.op is Ops.PROGRAM, f"outs only valid for PROGRAM, not {self.op}"
+    ret = []
+    for u in self.src[2].src:
+      if u.op is Ops.STORE:
+        idx = u.src[0]
+        if idx.op is Ops.CAST: idx = idx.src[0]
+        if idx.op is Ops.INDEX and idx.src[0].op is Ops.DEFINE_GLOBAL: ret.append(idx.src[0].arg)
+    return sorted(set(ret))
+
+  @property
+  def ins(self) -> list[int]:
+    """Buffer indices read from (LOAD). Only valid for PROGRAM."""
+    assert self.op is Ops.PROGRAM, f"ins only valid for PROGRAM, not {self.op}"
+    ret = []
+    for u in self.src[2].src:
+      if u.op is Ops.LOAD:
+        idx = u.src[0]
+        if idx.op is Ops.CAST: idx = idx.src[0]
+        if idx.op is Ops.INDEX and idx.src[0].op is Ops.DEFINE_GLOBAL: ret.append(idx.src[0].arg)
+    return sorted(set(ret))
+
+  @functools.cached_property
+  def sizes(self) -> tuple[list[sint]|None, list[sint]|None]:
+    """Get (global_size, local_size) which may contain symbolic values. Only valid for PROGRAM."""
+    assert self.op is Ops.PROGRAM, f"sizes only valid for PROGRAM, not {self.op}"
+    from tinygrad.device import Device
+    dev = self.device
+    assert isinstance(dev, str), f"PROGRAM device must be a string, not {type(dev)}"
+    ren = Device[dev].renderer
+    global_size:list[sint]|None = [1,1,1] if ren.has_local or ren.has_threads else None
+    local_size:list[sint]|None = [1,1,1] if ren.has_local else None
+    for u in self.src[2].src:
+      if u.op is Ops.SPECIAL:
+        if u.arg[0] == 'i': local_size = None
+        special_size = local_size if u.arg[0] == 'l' else global_size
+        if special_size is not None: special_size[int(u.arg[-1])] = cast(sint, u.src[0].ssimplify())
+    return global_size, local_size
+
+  def launch_dims(self, var_vals:dict[str, int]) -> tuple[list[int]|None, list[int]|None]:
+    """Resolve global/local sizes to concrete ints. Only valid for PROGRAM."""
+    global_size, local_size = self.sizes
+    global_ret = [sym_infer(sz, var_vals) for sz in global_size] if global_size is not None else None
+    local_ret = [sym_infer(sz, var_vals) for sz in local_size] if local_size is not None else None
+    return global_ret, local_ret
+
+  @property
+  def global_size(self) -> list[sint]|None:
+    """Global size (may be symbolic). Only valid for PROGRAM."""
+    return self.sizes[0]
+
+  @property
+  def local_size(self) -> list[sint]|None:
+    """Local size (may be symbolic). Only valid for PROGRAM."""
+    return self.sizes[1]
+
+  def prog_vars(self) -> list:
+    """Variables list for this program. Only valid for PROGRAM."""
+    assert self.op is Ops.PROGRAM, f"prog_vars only valid for PROGRAM, not {self.op}"
+    # Get variables from the linearized uops
+    linear_uops = self.src[2]
+    return linear_uops.variables()
   @property
   def buf_uop(self) -> UOp:
     if self.op is Ops.BUFFER: return self

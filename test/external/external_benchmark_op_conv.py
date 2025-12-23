@@ -1,5 +1,4 @@
 # ruff: noqa: E501 E712 F401
-from dataclasses import replace
 from tinygrad import dtypes, Device
 from tinygrad.uop.ops import UOp, AxisType, Ops, KernelInfo
 from tinygrad.codegen.opt import Opt, OptOps # pylint: disable=unused-import
@@ -89,7 +88,9 @@ renderer = Device.default.renderer
 allocator = Device.default.allocator
 
 ps = get_program(ast, renderer)
-cr = CompiledRunner(replace(ps, device=Device.DEFAULT))
+# update device in PROGRAM UOp: (SINK, DEVICE, LINEAR, SOURCE)
+ps = ps.replace(src=(ps.src[0], UOp(Ops.DEVICE, arg=Device.DEFAULT), *ps.src[2:]))
+cr = CompiledRunner(ps)
 
 gs = sorted(dedup([u for u in ast.toposort() if u.op is Ops.DEFINE_GLOBAL]), key=lambda u: u.arg)
 # print(len(gs))

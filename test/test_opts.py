@@ -14,7 +14,7 @@ class TestOpts(unittest.TestCase):
     self.assertEqual(s[-1].ast.arg.opts_to_apply, opts)
     if Device.DEFAULT in {"CPU", "CL", "METAL"} and not CPU_LLVM and not CPU_LVP:
       prg = get_program(s[-1].ast, renderer=Device[Device.DEFAULT].renderer)
-      self.assertIn('float4', prg.src)
+      self.assertIn('float4', prg.src[3].arg)  # source code is in src[3].arg
 
 if __name__ == '__main__':
   unittest.main()

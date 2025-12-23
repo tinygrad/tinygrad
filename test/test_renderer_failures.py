@@ -1,6 +1,5 @@
 import unittest
 import numpy as np
-from dataclasses import replace
 from tinygrad.device import Buffer, Device, is_dtype_supported
 from tinygrad.dtype import dtypes, ConstType
 from tinygrad.engine.realize import CompiledRunner, get_program
@@ -18,8 +17,8 @@ def _test_uop_result(inputs:list[Tensor], prg, local_size=None):
   outbufs = [Buffer(Device.DEFAULT, sz:=(1 if local_size is None else prod(local_size)), (dtype:=u.src[1].dtype), \
       initial_value=np.zeros(sz, dtype=_to_np_dtype(dtype)).data) for u in uops if u.op is Ops.STORE]
   inbufs = [x.uop.base.buffer for x in inputs]
-  prg = replace(prg, device=Device.DEFAULT)
-  if local_size is not None: prg = replace(prg, local_size=local_size)
+  # update device in PROGRAM UOp: (SINK, DEVICE, LINEAR, SOURCE)
+  prg = prg.replace(src=(prg.src[0], UOp(Ops.DEVICE, arg=Device.DEFAULT), *prg.src[2:]))
   ei = CompiledRunner(prg)
   ei.exec(outbufs+inbufs)
   return [np.frombuffer(x.as_buffer(), _to_np_dtype(x.dtype)) for x in outbufs]
@@ -72,7 +71,7 @@ class TestCStyleFailures(unittest.TestCase):
     schedule = ret.schedule()
     assert len(schedule) == 1
     schedule[0].lower()
-    src = schedule[0].prg.p.src
+    src = schedule[0].prg.p.src[3].arg  # source code is in src[3].arg
     self.assertEqual("("*5 not in src, should_strip_paren)
 
   def test_repeat_add(self): self._test_src_strip_paren(Ops.ADD)

@@ -39,7 +39,7 @@ class HCQGraph(MultiGraphRunner):
       if not isinstance(ji.prg, CompiledRunner): continue
 
       argsbuf = self.kernargs_bufs[ji.prg.dev].offset(kargs_alloc[ji.prg.dev].alloc(ji.prg._prg.kernargs_alloc_size, 16))
-      self.ji_args[j] = ji.prg._prg.fill_kernargs(self.hcq_bufs[j], ji.prg.p.vars, argsbuf)
+      self.ji_args[j] = ji.prg._prg.fill_kernargs(self.hcq_bufs[j], ji.prg.p.prog_vars(), argsbuf)
 
     # Schedule Dependencies.
     # There are two types of queues on each device: copy and compute. Both must synchronize with all external operations before launching any
@@ -159,7 +159,8 @@ class HCQGraph(MultiGraphRunner):
 
       # Encode main commands based on ji type.
       if isinstance(ji.prg, CompiledRunner):
-        enqueue_queue.exec(ji.prg._prg, self.ji_args[j], tuple(ji.prg.p.global_size or (1,1,1)), tuple(ji.prg.p.local_size or (1,1,1)))
+        global_size, local_size = ji.prg.p.sizes
+        enqueue_queue.exec(ji.prg._prg, self.ji_args[j], tuple(global_size or (1,1,1)), tuple(local_size or (1,1,1)))
       elif isinstance(ji.prg, (BufferXfer, BufferCopy)):
         dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
         for bufid, src in enumerate(cast(list[Buffer], ji.bufs)):

@@ -9,7 +9,7 @@ if not int(os.getenv("ASSERT_PROCESS_REPLAY", "1")): ASSERT_DIFF = 0
 
 try:
   from tinygrad.schedule.rangeify import get_rangeify_map
-  from tinygrad.renderer import Renderer, ProgramSpec
+  from tinygrad.renderer import Renderer
   from tinygrad.engine.realize import get_program
   from tinygrad.uop.ops import UOp, Ops, KernelInfo
   from tinygrad.codegen.opt import Opt
@@ -51,15 +51,20 @@ def replay_get_rangeify_map(ret:dict[UOp, UOp], big_sink:UOp) -> tuple[str, str,
     return "\n".join([f"{len(asts)} kernels", *asts])
   return to_str(new_sink), to_str(big_sink.substitute(ret)), (big_sink,)
 
-def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> tuple[str, str, tuple[Any, ...]]:
+def replay_get_program(p:UOp, ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> tuple[str, str, tuple[Any, ...]]:
   # the ast.arg is non None if we are inside of search.py
-  sink_arg = ast.arg or KernelInfo(opts_to_apply=tuple(opts) if opts is not None else p.applied_opts if BEAM>=1 else None)
-  input_ast = ast.replace(arg=replace(sink_arg, name=p.name))
+  # p is a PROGRAM UOp: (SINK, DEVICE, LINEAR, SOURCE)
+  p_name = p.src[0].arg.name
+  p_applied_opts = p.src[0].arg.applied_opts
+  sink_arg = ast.arg or KernelInfo(opts_to_apply=tuple(opts) if opts is not None else p_applied_opts if BEAM>=1 else None)
+  input_ast = ast.replace(arg=replace(sink_arg, name=p_name))
   p2 = get_program(input_ast, renderer=renderer)
-  def to_str(ret:ProgramSpec) -> str:
+  def to_str(ret:UOp) -> str:
     # PYTHON renderer pickles UOps, first unpickle and decode here
-    if p.device.startswith("PYTHON"): return "\n".join([str(x) for x in pickle.loads(base64.b64decode(ret.src))])
-    return ret.src
+    ret_src = ret.src[3].arg
+    ret_device = ret.device
+    if ret_device.startswith("PYTHON"): return "\n".join([str(x) for x in pickle.loads(base64.b64decode(ret_src))])
+    return ret_src
   # properly color the name arg
   ast_repr = codecs.decode(str(input_ast), "unicode_escape")
   return to_str(p2), to_str(p), (ast_repr, renderer)

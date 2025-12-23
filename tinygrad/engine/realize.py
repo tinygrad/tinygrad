@@ -1,28 +1,29 @@
 from typing import cast, Callable
 import time, pprint, random, itertools, math
-from dataclasses import dataclass, replace, field
+from dataclasses import dataclass, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context
-from tinygrad.helpers import unwrap
+from tinygrad.helpers import unwrap, to_function_name
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, print_uops, track_rewrites, KernelInfo, pyrender
 from tinygrad.device import Device, Buffer
-from tinygrad.renderer import Renderer, ProgramSpec, Estimates
+from tinygrad.renderer import Renderer, Estimates
 from tinygrad.codegen import full_rewrite_to_program
 from tinygrad.codegen.opt import Opt
 
 # **************** Program Creation ****************
 
-@track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.name, (ret.function_name, ret.ast), ret=ret), replay=True)
-def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> ProgramSpec:
+@track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.src[0].arg.name, (to_function_name(ret.src[0].arg.name), ret.src[0]), ret=ret),
+                replay=True)
+def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> UOp:
   """
-  Transform an AST into a ProgramSpec. May trigger BEAM search.
+  Transform an AST into a PROGRAM UOp. May trigger BEAM search.
 
   Args:
     ast: The Ops.SINK rooted AST
     renderer: The renderer used to generate the code
 
   Returns:
-    The ProgramSpec of the program.
+    The PROGRAM UOp with structure (SINK, DEVICE, LINEAR, SOURCE).
   """
 
   if getenv("VIZ"): graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
@@ -35,15 +36,11 @@ def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> Program
   if ast.arg is None: ast = ast.replace(arg=KernelInfo())
 
   prg = full_rewrite_to_program(ast, renderer)
-  # SINK/LINEAR/SOURCE
-  sink, linear, source = prg.src
 
   # print
-  if DEBUG >= 6: print_uops(list(linear.src))
+  if DEBUG >= 6: print_uops(list(prg.src[2].src))  # LINEAR is src[2]
 
-  return ProgramSpec(sink.arg.name, source.arg, renderer.device, sink, list(linear.src),
-                     global_size=[1,1,1] if renderer.has_local or renderer.has_threads else None,
-                     local_size=[1,1,1] if renderer.has_local else None)
+  return prg
 
 # **************** Runners ****************
 
@@ -72,28 +69,36 @@ def optimize_local_size(_prg:Callable, global_size:list[int], rawbufs:list[Buffe
   return ret[1]
 
 class CompiledRunner(Runner):
-  def __init__(self, p:ProgramSpec, precompiled:bytes|None=None, prg=None):
-    if DEBUG >= 3: print(p.applied_opts)
-    if DEBUG >= 4: print(p.src)
-    self.p:ProgramSpec = p
+  def __init__(self, p:UOp, precompiled:bytes|None=None, prg=None):
+    assert p.op is Ops.PROGRAM, f"CompiledRunner requires PROGRAM UOp, not {p.op}"
+    self.p:UOp = p
+    dev = p.device
+    assert isinstance(dev, str), f"PROGRAM device must be a string, not {type(dev)}"
+    name = p.src[0].arg.name
+    src = p.src[3].arg
+    function_name = to_function_name(name)
+    if DEBUG >= 3: print(p.src[0].arg.applied_opts)
+    if DEBUG >= 4: print(src)
     if precompiled is not None: self.lib = precompiled
     else:
-      with cpu_profile(TracingKey(f"compile {p.name}", (p.function_name,)), "TINY"):
-        self.lib = Device[p.device].compiler.compile_cached(p.src)
-    if DEBUG >= 7: Device[p.device].compiler.disassemble(self.lib)
-    self._prg = Device[p.device].runtime(p.function_name, self.lib) if prg is None else prg
-    super().__init__(p.name, p.device, p.estimates)
+      with cpu_profile(TracingKey(f"compile {name}", (function_name,)), "TINY"):
+        self.lib = Device[dev].compiler.compile_cached(src)
+    if DEBUG >= 7: Device[dev].compiler.disassemble(self.lib)
+    self._prg = Device[dev].runtime(function_name, self.lib) if prg is None else prg
+    super().__init__(name, dev, Estimates.from_uops(list(p.src[2].src), ignore_indexing=True))
 
   def __reduce__(self): return self.__class__, (self.p, self.lib)
 
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int]|None=None, wait=False) -> float|None:
     if var_vals is None: var_vals = {}
-    has_local = Device[self.p.device].renderer.has_local
+    dev = self.p.device
+    assert isinstance(dev, str), f"PROGRAM device must be a string, not {type(dev)}"
+    has_local = Device[dev].renderer.has_local
     global_size, local_size = self.p.launch_dims(var_vals)
-    if has_local and global_size is not None and local_size is None and all_int(self.p.global_size): # type: ignore[arg-type]
+    sym_global_size, sym_local_size = self.p.sizes
+    if has_local and global_size is not None and local_size is None and sym_global_size is not None and all_int(sym_global_size):
       local_size = optimize_local_size(self._prg, global_size, rawbufs)
-      global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
-      self.p = replace(self.p, global_size=global_size, local_size=local_size)
+      global_size = [g//l if g%l == 0 else int(g/l) for g,l in zip(global_size, local_size)]
     lra = {}
     if global_size:
       lra['global_size'] = tuple(global_size)
@@ -101,7 +106,7 @@ class CompiledRunner(Runner):
     if local_size:
       lra['local_size'] = tuple(local_size)
       assert len(local_size) == 3, "local size must have len 3"
-    return self._prg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k.expr] for k in self.p.vars), wait=wait)
+    return self._prg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k.expr] for k in self.p.variables()), wait=wait)
 
 class ViewOp(Runner):
   def __init__(self, buf:Buffer): super().__init__(colored(f"view {buf.nbytes:8d} @ {buf.offset:<10d}", "yellow"), buf.device)
@@ -158,10 +163,14 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
   if cret:=method_cache.get(ckey): return cret
   bkey = (device.split(":")[0], type(Device[device].compiler), ast.key, context, True)
   if bret:=method_cache.get(bkey):
-    method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device), bret.lib)
+    # update device in PROGRAM UOp
+    new_p = bret.p.replace(src=(bret.p.src[0], UOp(Ops.DEVICE, arg=device), *bret.p.src[2:]))
+    method_cache[ckey] = ret = CompiledRunner(new_p, bret.lib)
   else:
-    prg: ProgramSpec = get_program(ast, Device[device].renderer)
-    method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, device=device))
+    prg = get_program(ast, Device[device].renderer)
+    # update device in PROGRAM UOp to match the actual device
+    prg = prg.replace(src=(prg.src[0], UOp(Ops.DEVICE, arg=device), *prg.src[2:]))
+    method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(prg)
   return ret
 
 # **************** lowering functions ****************
