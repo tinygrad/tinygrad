@@ -18,7 +18,9 @@ def _test_uop_result(inputs:list[Tensor], prg, local_size=None):
   outbufs = [Buffer(Device.DEFAULT, sz:=(1 if local_size is None else prod(local_size)), (dtype:=u.src[1].dtype), \
       initial_value=np.zeros(sz, dtype=_to_np_dtype(dtype)).data) for u in uops if u.op is Ops.STORE]
   inbufs = [x.uop.base.buffer for x in inputs]
-  ei = CompiledRunner(replace(prg, device=Device.DEFAULT, local_size=local_size))
+  prg = replace(prg, device=Device.DEFAULT)
+  if local_size is not None: prg = replace(prg, local_size=local_size)
+  ei = CompiledRunner(prg)
   ei.exec(outbufs+inbufs)
   return [np.frombuffer(x.as_buffer(), _to_np_dtype(x.dtype)) for x in outbufs]
 
