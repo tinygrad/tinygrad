@@ -27,6 +27,10 @@ class Ops(FastEnum):
   # uops that aren't rendered
   NOOP = auto(); REWRITE_ERROR = auto()
 
+  # renderer
+  # LINEAR is a list of UOps, SOURCE has a str arg that's human readable, BINARY has bytes arg that's compiled
+  PROGRAM = auto(); LINEAR = auto(); SOURCE = auto(); BINARY = auto()
+
   # AFTER passes src[0] through and promises in the toposort that any consumers of the AFTER run after src[1:]
   # GROUP is a NOOP that just merges things together
   SINK = auto(); AFTER = auto(); GROUP = auto()
@@ -75,12 +79,16 @@ class Ops(FastEnum):
 
   # tensor graph ops
   UNIQUE = auto(); DEVICE = auto(); KERNEL = auto(); ASSIGN = auto()
+  CUSTOM_KERNEL = auto()
+
+  # local unique
+  LUNIQUE = auto()
 
   # ops that adjust the behavior of the scheduler
   CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto()
 
   # buffer ops
-  BUFFERIZE = auto(); COPY = auto(); BUFFER = auto(); BUFFER_VIEW = auto(); MSELECT = auto(); MSTACK = auto()
+  BUFFERIZE = auto(); COPY = auto(); BUFFER = auto(); BUFFER_VIEW = auto(); MSELECT = auto(); MSTACK = auto(); ENCDEC = auto()
 
   # the core 6 movement ops! these only exist in the tensor graph
   RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); FLIP = auto()

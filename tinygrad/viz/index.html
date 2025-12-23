@@ -11,7 +11,6 @@
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/highlight.min.js"></script>
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/python.min.js"></script>
   <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/cpp.min.js"></script>
-  <script src="assets/cdnjs.cloudflare.com/ajax/libs/highlight.js/11.10.0/languages/x86asm.min.js"></script>
   <link rel="stylesheet" href="assets/unpkg.com/@highlightjs/cdn-assets@11.10.0/styles/tokyo-night-dark.min.css" />
   <style>
   * {
@@ -125,7 +124,6 @@
     fill: rgba(26, 27, 38, 0.5);
   }
   .edgePath {
-    stroke: #4a4b57;
     fill: none;
     stroke-width: 1.4px;
   }
@@ -323,14 +321,6 @@
   td.Instruction {
     font-family: monospace;
   }
-  td.pct-row > div {
-    height: 12px;
-    width: 100%;
-    display: flex;
-  }
-  td.pct-row > div > div {
-    height: 100%;
-  }
   thead {
     position: sticky;
     top: 0;
@@ -351,12 +341,11 @@
   tr.nested-row table tr.main-row:hover {
     background-color: unset;
   }
-  tr.main-row.has-children > td:first-child {
-    white-space: pre;
+  tr.main-row.has-children > td:first-child > p {
+    display: inline-block;
   }
   tr.main-row.has-children > td:first-child::before {
     content: "▸ ";
-    display: inline-block;
     width: 1em;
     margin-left: -0.25em;
   }

@@ -12,9 +12,8 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat
 from tinygrad.helpers import CI, DEBUG, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
-from tinygrad.schedule.rangeify import get_rangeify_map, Kernel
-from tinygrad.engine.schedule import create_schedule_with_vars
-from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
+from tinygrad.schedule.rangeify import Kernel
+from tinygrad.engine.realize import CompiledRunner, run_schedule
 
 class KernelCountException(Exception): pass
 def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Tensor]|None=None, filter_sink=True):
@@ -24,13 +23,12 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
   elif isinstance(t, list) and isinstance(t[0], Tensor): sched = Tensor.schedule(*t)
   else:
     assert isinstance(t, UOp), f"can't schedule {t}"
-    sink = UOp.sink(t) if t.op is not Ops.SINK else t
-    becomes_map = get_rangeify_map(sink)
-    sched, _ = create_schedule_with_vars(sink.substitute(becomes_map))
-  # test lowering all the ScheduleItems to ExecItems
-  kernel_cnt = len([si for si,ei in lower_schedule(sched.copy()) if isinstance(ei.prg, CompiledRunner) or not filter_sink])
+    sched = Tensor(t).schedule()
+  # test lowering all the ExecItems
+  for si in sched: si.lower()
+  kernel_cnt = len([si for si in sched if isinstance(si.prg, CompiledRunner) or not filter_sink])
   if kernel_cnt != allowed:
-    print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
+    print(f"SCHEDULE ISSUE, expecting {allowed} got {kernel_cnt}")
     if DEBUG >= 3:
       for i,s in enumerate(sched):
         print("kernel", i+1)
@@ -177,7 +175,7 @@ class TestSchedule(unittest.TestCase):
     child.realize()
     assert a.uop.is_realized
 
-  # NOTE: because empty does not have an ExecItem if realize is called on a childless empty, it never gets allocated.
+  # NOTE: because empty does not have a lowered ExecItem if realize is called on a childless empty, it never gets allocated.
   def test_childless_empty_never_allocates(self):
     a = Tensor.empty(10)
     a.realize()
@@ -1758,7 +1756,7 @@ class TestSchedule(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_precompute_freqs_cis(self):
     from extra.models.llama import precompute_freqs_cis
-    args = {"dim":32 if CI else 128, "end":2048 if CI else 8192, "theta":10000}
+    args = {"dim":32, "end":2048, "theta":10000}
     fused = precompute_freqs_cis(**args)
     run_schedule(check_schedule(fused, 1))
     if getenv("CHECK", 1):

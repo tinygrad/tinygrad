@@ -1,13 +1,12 @@
-import math, functools
+import math
 from typing import cast, Callable
-from tinygrad import Tensor, Device, Context, GlobalCounters, dtypes
-from tinygrad.uop.ops import AxisType, UOp, KernelInfo, Ops
-from tinygrad.engine.realize import ExecItem, get_runner
+from tinygrad import dtypes
+from tinygrad.uop.ops import AxisType, UOp, Ops
 from tinygrad.dtype import AddrSpace, PtrDType
-from tinygrad.helpers import getenv, prod
+from tinygrad.helpers import prod
 
 from extra.thunder.tiny.tk import WARP_THREADS
-from extra.thunder.tiny.tk.tiles import ALL_TILES, GL, RT_16X16, RT_16X32, ST, RT, RV, TileLayout
+from extra.thunder.tiny.tk.tiles import ALL_TILES, ST, RT, RV, TileLayout, VecLayout
 
 class Group:
   def __init__(self, warps:int, ker):
@@ -66,7 +65,10 @@ class Group:
     for height in self.ker.range(src.shape[-3], track=False):
       for width in self.ker.range(src.shape[-2], track=False):
         for inner in self.ker.range(src.shape[-1], track=False):
-          dst_store = dst[width, height, inner].store(src[height, width, inner]).end(height, width, inner)
+          src_load = src[height, width, inner]
+          if src.dtype.base != dst.dtype.base:
+            src_load = src_load.cast(dst.dtype.base)
+          dst_store = dst[width, height, inner].store(src_load).end(height, width, inner)
 
     self.ker.push_store(dst_store, dst)
     return dst.after(dst_store).reshape(dst.shape)
@@ -77,10 +79,10 @@ class Group:
 
     a_base_shape = cast(RT, a).base_shape
     if a_base_shape.cols == 16:
-      wmma_arg = ('WMMA_16_16_16___bf16_float', (16, 16, 16), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ())
+      wmma_arg = ('WMMA_16_16_16___bf16_float', (16, 16, 16), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ()) # type: ignore
     elif a_base_shape.cols == 32:
-      wmma_arg = ('WMMA_16_16_32___bf16_float', (16, 16, 32), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2))), ())
-    else:  raise NotImplementedError(f"mma_AB not implemented for {a_base_shape.cols=}")
+      wmma_arg = ('WMMA_16_16_32___bf16_float', (16, 16, 32), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2))), ()) # type: ignore
+    else: raise NotImplementedError(f"mma_AB not implemented for {a_base_shape.cols=}")
 
     for height in self.ker.range(c.shape[-3], track=False):
       for width in self.ker.range(c.shape[-2], track=False):
@@ -107,10 +109,10 @@ class Group:
 
     a_base_shape = cast(RT, a).base_shape
     if a_base_shape.cols == 16:
-      wmma_arg = ('WMMA_16_16_16___bf16_float', (16, 16, 16), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ())
+      wmma_arg = ('WMMA_16_16_16___bf16_float', (16, 16, 16), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ()) # type: ignore
     elif a_base_shape.cols == 32:
-      wmma_arg = ('WMMA_16_16_32___bf16_float', (16, 16, 32), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2))), ())
-    else:  raise NotImplementedError(f"mma_ABt not implemented for {a_base_shape.cols=}")
+      wmma_arg = ('WMMA_16_16_32___bf16_float', (16, 16, 32), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2))), ()) # type: ignore
+    else: raise NotImplementedError(f"mma_ABt not implemented for {a_base_shape.cols=}")
 
     for height in self.ker.range(c.shape[-3], track=False):
       for width in self.ker.range(c.shape[-2], track=False):
@@ -137,10 +139,10 @@ class Group:
 
     a_base_shape = cast(RT, a).base_shape
     if a_base_shape.cols == 16:
-      wmma_arg = ('WMMA_16_16_16___bf16_float', (16, 16, 16), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ())
+      wmma_arg = ('WMMA_16_16_16___bf16_float', (16, 16, 16), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ()) # type: ignore
     elif a_base_shape.cols == 32:
-      wmma_arg = ('WMMA_16_16_32___bf16_float', (16, 16, 32), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2))), ())
-    else:  raise NotImplementedError(f"mma_AtB not implemented for {a_base_shape.cols=}")
+      wmma_arg = ('WMMA_16_16_32___bf16_float', (16, 16, 32), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2))), ()) # type: ignore
+    else: raise NotImplementedError(f"mma_AtB not implemented for {a_base_shape.cols=}")
 
     for height in self.ker.range(c.shape[-3], track=False):
       for width in self.ker.range(c.shape[-2], track=False):
@@ -167,10 +169,10 @@ class Group:
 
     a_base_shape = cast(RT, a).base_shape
     if a_base_shape.cols == 16:
-      wmma_arg = ('WMMA_16_16_16___bf16_float', (16, 16, 16), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ())
+      wmma_arg = ('WMMA_16_16_16___bf16_float', (16, 16, 16), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2)), ((4, 2), (3, 2)), ((4, 2), (3, 2))), ()) # type: ignore
     elif a_base_shape.cols == 32:
-      wmma_arg = ('WMMA_16_16_32___bf16_float', (16, 16, 32), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2))), ())
-    else:  raise NotImplementedError(f"mma_AtBt not implemented for {a_base_shape.cols=}")
+      wmma_arg = ('WMMA_16_16_32___bf16_float', (16, 16, 32), dtypes.bfloat16, dtypes.float, 'AMD', 64, (((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2), (9, 2)), ((4, 2), (3, 2))), ()) # type: ignore
+    else: raise NotImplementedError(f"mma_AtBt not implemented for {a_base_shape.cols=}")
 
     for height in self.ker.range(c.shape[-3], track=False):
       for width in self.ker.range(c.shape[-2], track=False):
@@ -200,9 +202,9 @@ class Group:
     Group.map_rid += len(a.shape)
 
     if op.__code__.co_argcount == 1:
-      to_store = op(a[*rngs_for_shape])
+      to_store = op(a[*rngs_for_shape]) # type: ignore
     else:
-      to_store = op(a[*rngs_for_shape], rngs_for_shape)
+      to_store = op(a[*rngs_for_shape], rngs_for_shape) # type: ignore
 
     a_store = a[*rngs_for_shape].store(to_store).end(*rngs_for_shape)
 
@@ -284,7 +286,7 @@ class Group:
   def load(self, dst:ALL_TILES, src:ALL_TILES, dst_idxs:tuple[UOp|int,...]=(), idxs:tuple[UOp|int,...]=(), axis:int=0):
     dst, src = cast(UOp, dst), cast(UOp, src)
     assert isinstance(dst.dtype, PtrDType) and isinstance(src.dtype, PtrDType)
-    dst_dtype, src_dtype = cast(PtrDType, dst.dtype), cast(PtrDType, src.dtype)
+    dst_dtype, src_dtype = dst.dtype, src.dtype
     if dst_dtype.addrspace == AddrSpace.REG and src_dtype.addrspace == AddrSpace.LOCAL:
       laneid = self.ker.laneid
       rt, st = cast(RT, dst), cast(ST, src)
@@ -338,7 +340,7 @@ class Group:
                 src_load = src_load.cast(dst.dtype.base)
               dst_store = dst[*dst_idxs, height, width, srow, scol].store(src_load)
               dst_store = dst_store.end(height, width, outer, inner).barrier()
-    elif dst_dtype.addrspace == AddrSpace.REG and src_dtype.addrspace ==AddrSpace.GLOBAL:
+    elif dst_dtype.addrspace == AddrSpace.REG and src_dtype.addrspace == AddrSpace.GLOBAL and isinstance(dst, RT):
       srcf = src.flatten()
       row_stride = prod(src.shape[axis+1:])
 
@@ -371,8 +373,28 @@ class Group:
             if src.dtype.base != dst.dtype.base:
               src_load = src_load.cast(dst.dtype.base)
             dst_store = dst[*dst_idxs, height, width, inner].store(src_load).end(height, width, inner)
+    elif dst_dtype.addrspace == AddrSpace.REG and src_dtype.addrspace == AddrSpace.GLOBAL and isinstance(dst, RV):
+      srcf = src.flatten()
+      row_stride = prod(src.shape[axis+1:])
+
+      laneid = self.ker.laneid
+      rv = cast(RV, dst)
+      reductions = rv.base_shape.rows
+
+      assert rv.layout == VecLayout.ORTHO, "only ortho layout supported"
+
+      idxs = tuple(idx * rv.length if i == 3 else idx for i, idx in enumerate(idxs))
+      src_i = ((idxs[0] * src.shape[-3] + idxs[1]) * src.shape[-2] + idxs[2]) * src.shape[-1] + idxs[3]
+
+      for outer in self.ker.range(dst.shape[-2], track=False):
+        src_i += outer * reductions + (laneid % reductions)
+
+        src_load = srcf[src_i]
+        if src.dtype.base != dst.dtype.base:
+          src_load = src_load.cast(dst.dtype.base)
+        dst_store = dst[outer, 0].store(src_load).end(outer)
     else:
-      raise NotImplementedError(f"load from {src_dtype.addrspace} to {dst_dtype.addrspace} not implemented")
+      raise NotImplementedError(f"load from {src_dtype.addrspace} to {dst_dtype.addrspace} not implemented for {type(dst)=}")
 
     self.ker.push_store(dst_store, dst)
     return dst.after(dst_store).reshape(dst.shape)
@@ -380,8 +402,30 @@ class Group:
   def store(self, dst:ALL_TILES, src:ALL_TILES, idxs:tuple[UOp|int,...]=(), src_idxs:tuple[UOp|int,...]=(), axis:int=0):
     dst, src = cast(UOp, dst), cast(UOp, src)
     assert isinstance(dst.dtype, PtrDType) and isinstance(src.dtype, PtrDType)
-    dst_dtype, src_dtype = cast(PtrDType, dst.dtype), cast(PtrDType, src.dtype)
-    if src_dtype.addrspace == AddrSpace.REG and dst_dtype.addrspace == AddrSpace.GLOBAL:
+    dst_dtype, src_dtype = dst.dtype, src.dtype
+    if src_dtype.addrspace == AddrSpace.REG and dst_dtype.addrspace == AddrSpace.LOCAL:
+      laneid = self.ker.laneid
+      st, rt = cast(ST, dst), cast(RT, src)
+      elements_per_thread = rt.base_shape.elements_per_thread
+
+      for height in self.ker.range(src.shape[-3], track=False):
+        for width in self.ker.range(src.shape[-2], track=False):
+          for inner in self.ker.range(elements_per_thread, track=False):
+            if rt.layout != st.layout:
+              row = rt.base_shape.stride * (laneid // rt.base_shape.cols) + inner
+              col = laneid % rt.base_shape.cols
+            else:
+              row = laneid % rt.base_shape.rows
+              col = rt.base_shape.stride * (laneid // rt.base_shape.rows) + inner
+
+            srow, scol = cast(ST, dst).swizzle(row, col)
+
+            src_load = src[*src_idxs, height, width, inner]
+            if src.dtype.base != dst.dtype.base:
+              src_load = src_load.cast(dst.dtype.base)
+            dst_store = dst[*idxs[:-2], height, width, srow, scol].store(src_load)
+            dst_store = dst_store.end(height, width, inner)
+    elif src_dtype.addrspace == AddrSpace.REG and dst_dtype.addrspace == AddrSpace.GLOBAL and isinstance(src, RT):
       dstf = dst.flatten()
       row_stride = prod(dst.shape[axis+1:])
 
@@ -414,8 +458,28 @@ class Group:
             if src.dtype.base != dst.dtype.base:
               src_load = src_load.cast(dst.dtype.base)
             dst_store = dstf[dst_i].store(src_load).end(height, width, inner)
+    elif src_dtype.addrspace == AddrSpace.REG and dst_dtype.addrspace == AddrSpace.GLOBAL and isinstance(src, RV):
+      dstf = dst.flatten()
+      row_stride = prod(dst.shape[axis+1:])
+
+      laneid = self.ker.laneid
+      rv = cast(RV, src)
+      reductions = rv.base_shape.rows
+
+      assert rv.layout == VecLayout.ORTHO, "only ortho layout supported"
+
+      idxs = tuple(idx * rv.length if i == 3 else idx for i, idx in enumerate(idxs))
+      dst_i = ((idxs[0] * dst.shape[-3] + idxs[1]) * dst.shape[-2] + idxs[2]) * dst.shape[-1] + idxs[3]
+
+      for outer in self.ker.range(src.shape[-2]):
+        dst_i += outer * reductions + (laneid % reductions)
+
+        src_load = src[outer, 0]
+        if src.dtype.base != dst.dtype.base:
+          src_load = src_load.cast(dst.dtype.base)
+        dst_store = dstf[dst_i].store(src_load).end(outer)
     else:
-      raise NotImplementedError(f"store from {src_dtype.addrspace} to {dst_dtype.addrspace} not implemented")
+      raise NotImplementedError(f"store from {src_dtype.addrspace} to {dst_dtype.addrspace} not implemented for {type(src)=}")
 
     self.ker.push_store(dst_store, dst)
     return dst.after(dst_store).reshape(dst.shape)

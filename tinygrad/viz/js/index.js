@@ -26,18 +26,17 @@ const colored = n => d3.create("span").call(s => s.selectAll("span").data(typeof
 const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 
 let timeout = null;
-const updateProgress = ({ start, err }) => {
+const Status = {STARTED:0, COMPLETE:1, ERR:2}
+const updateProgress = (st, msg) => {
   clearTimeout(timeout);
-  const msg = document.getElementById("progress-message");
-  msg.style.display = "none";
-  if (start) {
-    msg.innerText = "Rendering new graph...";
-    timeout = setTimeout(() => { msg.style.display = "block"; }, 2000);
-  }
-  d3.select("#custom").html("");
-  if (err) {
+  const msgEl = d3.select("#progress-message").style("display", "none");
+  const customEl = d3.select("#custom").html("");
+  if (st === Status.STARTED) {
+    msgEl.text(msg);
+    timeout = setTimeout(() => msgEl.style("display", "block"), 2000);
+  } else if (st === Status.ERR) {
     displaySelection("#custom");
-    d3.select("#custom").append("div").classed("raw-text", true).call(s => s.append(() => codeBlock(err, "txt"))).node();
+    customEl.append("div").classed("raw-text", true).append(() => codeBlock(msg));
   }
 }
 
@@ -77,23 +76,19 @@ const drawGraph = (data) => {
     .attr("x", d => -d.width/2).attr("y", d => -d.height/2);
   const STROKE_WIDTH = 1.4;
   const labels = nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label");
-  const hasLabelDims = data.nodes[0]?.value.labelWidth != null;
-  if (hasLabelDims) labels.attr("transform", d => `translate(-${d.labelWidth/2}, -${d.labelHeight/2+STROKE_WIDTH*2})`);
+  labels.attr("transform", d => `translate(-${d.labelWidth/2}, -${d.labelHeight/2+STROKE_WIDTH*2})`);
   labels.selectAll("text").data(d => {
+    if (Array.isArray(d.label)) return [d.label];
     const ret = [[]];
-    for (const { st, color } of parseColors(d.label, defaultColor="initial")) {
-      const lines = st.split("\n");
+    for (const s of parseColors(d.label, defaultColor="initial")) {
+      const color = darkenHex(s.color, 25);
+      const lines = s.st.split("\n");
       ret.at(-1).push({ st:lines[0], color });
       for (let i=1; i<lines.length; i++) ret.push([{ st:lines[i], color }]);
     }
     return [ret];
   }).join("text").selectAll("tspan").data(d => d).join("tspan").attr("x", "0").attr("dy", 14).selectAll("tspan").data(d => d).join("tspan")
-    .attr("fill", d => darkenHex(d.color, 25)).text(d => d.st).attr("xml:space", "preserve");
-  // recenter after drawing texts if needed
-  if (!hasLabelDims) labels.attr("transform", (_,i,els) => {
-    const b = els[i].getBBox();
-    return `translate(${-b.x-b.width/2}, ${-b.y-b.height/2})`
-  });
+    .attr("fill", d => d.color).text(d => d.st).attr("xml:space", "preserve").style("font-family", g.graph().font);
   addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
   // draw edges
@@ -104,7 +99,7 @@ const drawGraph = (data) => {
     points.unshift(intersectRect(g.node(e.v), points[0]));
     points.push(intersectRect(g.node(e.w), points[points.length-1]));
     return line(points);
-  }).attr("marker-end", "url(#arrowhead)");
+  }).attr("marker-end", "url(#arrowhead)").attr("stroke", e => g.edge(e).color || "#4a4b57");
 }
 
 // ** UOp graph
@@ -115,15 +110,15 @@ async function initWorker() {
   workerUrl = URL.createObjectURL(new Blob([(await Promise.all(resp.map((r) => r.text()))).join("\n")], { type: "application/javascript" }));
 }
 
-function renderDag(graph, additions, recenter, layoutOpts) {
+function renderDag(layoutSpec, { recenter }) {
   // start calculating the new layout (non-blocking)
-  updateProgress({ start:true });
+  updateProgress(Status.STARTED, "Rendering new graph...");
   if (worker != null) worker.terminate();
   worker = new Worker(workerUrl);
-  worker.postMessage({graph, additions, opts:layoutOpts });
+  worker.postMessage(layoutSpec);
   worker.onmessage = (e) => {
     displaySelection("#graph");
-    updateProgress({ start:false });
+    updateProgress(Status.COMPLETE);
     drawGraph(e.data);
     addTags(d3.select("#edge-labels").selectAll("g").data(e.data.edges).join("g").attr("transform", (e) => {
       // get a point near the end
@@ -144,7 +139,7 @@ function renderDag(graph, additions, recenter, layoutOpts) {
   };
   worker.onerror = (e) => {
     e.preventDefault();
-    updateProgress({ err:"Error in graph layout:\n"+e.message });
+    updateProgress(Status.ERR, "Error in graph layout:\n"+e.message);
   }
 }
 
@@ -159,8 +154,7 @@ const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
 const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["get_program","#1d2e62"],["compile","#63b0cd"],["DEFAULT","#354f52"]]),
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
-  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SE:new Map([["OCC", "#101725"], ["INST", "#0A2042"]]),
-  CATEGORICAL:["#ff8080", "#F4A261", "#C8F9D4", "#8D99AE", "#F4A261", "#ffffa2", "#ffffc0", "#87CEEB"],}
+  BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SE:new Map([["OCC", "#101725"], ["INST", "#0A2042"]]),}
 const cycleColors = (lst, i) => lst[i%lst.length];
 
 const rescaleTrack = (source, tid, k) => {
@@ -257,7 +251,7 @@ async function renderProfiler(path, unit, opts) {
   if (data?.path !== path) { data = {tracks:new Map(), axes:{}, path, first:null}; focusedDevice = null; focusedShape = null; }
   metadata.replaceChildren(getMetadata(focusedShape));
   // layout once!
-  if (data.tracks.size !== 0) return updateProgress({ start:false });
+  if (data.tracks.size !== 0) return updateProgress(Status.COMPLETE);
   const profiler = d3.select("#profiler").html("");
   const buf = cache[path] ?? await fetchValue(path);
   const view = new DataView(buf);
@@ -376,7 +370,7 @@ async function renderProfiler(path, unit, opts) {
       for (const [num, {dtype, sz, nbytes, y, x:steps, users}] of buf_shapes) {
         const x = steps.map(s => timestamps[s]);
         const dur = x.at(-1)-x[0];
-        const arg = { tooltipText:`${dtype}\n${sz}\n${formatUnit(nbytes, 'B')}\n${formatTime(dur)}`, users, key:`${k}-${shapes.length}` };
+        const arg = { tooltipText:`${dtype}\n${formatUnit(sz)}\n${formatUnit(nbytes, 'B')}\n${formatTime(dur)}`, users, key:`${k}-${shapes.length}` };
         shapes.push({ x, y0:y.map(yscale), y1:y.map(y0 => yscale(y0+nbytes)), arg, fillColor:cycleColors(colorScheme.BUFFER, shapes.length) });
         users?.forEach((u) => selectShape(u.shape).e?.arg.bufs.push({ key:arg.key, nbytes, num:u.num, mode:u.mode, k }));
       }
@@ -419,7 +413,7 @@ async function renderProfiler(path, unit, opts) {
     }
   }
   for (const m of markers) m.label = m.name.split(/(\s+)/).map(st => ({ st, color:m.color, width:ctx.measureText(st).width }));
-  updateProgress({ start:false });
+  updateProgress(Status.COMPLETE);
   // draw events on a timeline
   const dpr = window.devicePixelRatio || 1;
   const ellipsisWidth = ctx.measureText("...").width;
@@ -604,7 +598,7 @@ const pathLink = (fp, lineno) => d3.create("a").attr("href", "vscode://file/"+fp
 function codeBlock(st, language, { loc, wrap }={}) {
   const code = document.createElement("code");
   // plaintext renders like a terminal print, otherwise render with syntax highlighting
-  if (language === "txt") code.appendChild(colored(st));
+  if (!language || language === "txt") code.appendChild(colored(st));
   else code.innerHTML = hljs.highlight(st, { language }).value;
   code.className = "hljs";
   const ret = document.createElement("pre");
@@ -695,6 +689,29 @@ const toggleLabel = d3.create("label").text("Show indexing (r)").node();
 const toggle = d3.create("input").attr("type", "checkbox").attr("id", "show-indexing").property("checked", true).node();
 toggleLabel.prepend(toggle);
 
+function appendSteps(root, idx, steps) {
+  const stack = [];
+  for (const [j,u] of steps.entries()) {
+    while (stack.length && stack.at(-1).depth >= u.depth) stack.pop();
+    const list = stack.length > 0 ? stack.at(-1).li : root;
+    u.li = list.appendChild(document.createElement("ul"));
+    u.li.id = `step-${idx}-${j}`
+    const p = u.li.appendChild(document.createElement("p"));
+    p.appendChild(colored(`${u.name}`+(u.match_count ? ` - ${u.match_count}` : '')));
+    p.onclick = (e) => {
+      e.stopPropagation();
+      const subrewrites = getSubrewrites(e.currentTarget.parentElement);
+      if (subrewrites.length) { e.currentTarget.parentElement.classList.toggle("expanded"); }
+      setState({ currentStep:j, currentCtx:idx, currentRewrite:0 });
+    }
+    stack.push(u);
+  }
+  for (const l of root.querySelectorAll("ul > ul > p")) {
+    const subrewrites = getSubrewrites(l.parentElement);
+    if (subrewrites.length > 0) { l.appendChild(d3.create("span").text(` (${subrewrites.length})`).node()); l.parentElement.classList.add("has-children"); }
+  }
+}
+
 async function main() {
   // ** left sidebar context list
   if (ctxs == null) {
@@ -709,26 +726,7 @@ async function main() {
       p.onclick = () => {
         setState(i === state.currentCtx ? { expandSteps:!state.expandSteps } : { expandSteps:true, currentCtx:i, currentStep:0, currentRewrite:0 });
       }
-      const stack = []; let list = ul;
-      for (const [j,u] of steps.entries()) {
-        while (stack.length && stack.at(-1).depth >= u.depth) stack.pop();
-        const list = stack.length > 0 ? stack.at(-1).li : ul;
-        u.li = list.appendChild(document.createElement("ul"));
-        u.li.id = `step-${i}-${j}`
-        const p = u.li.appendChild(document.createElement("p"));
-        p.appendChild(colored(`${u.name}`+(u.match_count ? ` - ${u.match_count}` : '')));
-        p.onclick = (e) => {
-          e.stopPropagation();
-          const subrewrites = getSubrewrites(e.currentTarget.parentElement);
-          if (subrewrites.length) { e.currentTarget.parentElement.classList.toggle("expanded"); }
-          setState({ currentStep:j, currentCtx:i, currentRewrite:0 });
-        }
-        stack.push(u);
-      }
-      for (const l of ul.querySelectorAll("ul > ul > p")) {
-        const subrewrites = getSubrewrites(l.parentElement);
-        if (subrewrites.length > 0) { l.appendChild(d3.create("span").text(` (${subrewrites.length})`).node()); l.parentElement.classList.add("has-children"); }
-      }
+      appendSteps(ul, i, steps);
     }
     return setState({ currentCtx:-1 });
   }
@@ -750,9 +748,18 @@ async function main() {
   if (ckey in cache) {
     ret = cache[ckey];
   }
-  // ** Disassembly view
-  if (!ckey.startsWith("/rewrites")) {
+  // ** Text view
+  if (!ckey.startsWith("/graph")) {
     if (!(ckey in cache)) cache[ckey] = ret = await fetchValue(ckey);
+    if (ret.steps?.length > 0) {
+      const el = select(state.currentCtx, state.currentStep);
+      if (el.step.querySelectorAll("ul").length === ret.steps.length) return;
+      // re render the list with new items
+      ctx.steps.push(...ret.steps);
+      while (el.ctx.children.length > 1) el.ctx.children[1].remove();
+      appendSteps(el.ctx, state.currentCtx, ctx.steps);
+      return setState({ currentStep:state.currentStep+1, expandSteps:true });
+    }
     // cycles on the x axis
     if (ret instanceof ArrayBuffer) {
       opts = {heightScale:0.5, hideLabels:true, levelKey:(e) => parseInt(e.name.split(" ")[1].split(":")[1])};
@@ -784,34 +791,31 @@ async function main() {
           }
           const td = tr.append("td").classed(ret.cols[i], true);
           // string format scalar values
-          if (!Array.isArray(value)) { td.text(value); continue; }
-          // display arrays in a bar graph
-          td.classed("pct-row", true);
-          const bar = td.append("div");
-          value.forEach(([k, v, width]) => bar.append("div").style("width", width+"%").attr("title", `${ret.cols[i].labels[k]} ${v}`)
-            .style("background", cycleColors(colorScheme.CATEGORICAL, parseInt(k))))
+          td.append(() => typeof value === "string" ? colored(value) : d3.create("p").text(ret.cols[i] === "Duration" ? formatMicroseconds(value) : formatUnit(value)).node());
         }
       }
       return table;
     }
-    if (ret.cols != null) {
-      renderTable(root, ret);
-      metadata.appendChild(tabulate(ret.summary.map(s => {
-        const div = d3.create("div").style("background", cycleColors(colorScheme.CATEGORICAL, s.idx)).style("width", "100%").style("height", "100%");
-        return [s.label.trim(), div.text(s.value.toLocaleString()).node()];
+    if (ret.cols != null) renderTable(root, ret);
+    else if (ret.data != null) renderDag(ret, { recenter:true });
+    else if (ret.src != null) root.append(() => codeBlock(ret.src, ret.lang));
+    ret.metadata?.forEach(m => {
+      if (Array.isArray(m)) return metadata.appendChild(tabulate(m.map(({ label, value }) => {
+        return [label.trim(), typeof value === "string" ? value : formatUnit(value)];
       })).node());
-    } else root.append(() => codeBlock(ret.src, ret.lang || "txt"));
+      metadata.appendChild(codeBlock(m.src)).classList.add("full-height")
+    });
     return document.querySelector("#custom").replaceChildren(root.node());
   }
-  // ** UOp view (default)
-  // if we don't have a complete cache yet we start streaming rewrites in this step
+  // ** Graph view
+  // if we don't have a complete cache yet we start streaming graphs in this step
   if (!(ckey in cache) || (cache[ckey].length !== step.match_count+1 && activeSrc == null)) {
     ret = [];
     cache[ckey] = ret;
     const eventSource = new EventSource(ckey);
     evtSources.push(eventSource);
     eventSource.onmessage = (e) => {
-      if (e.data === "END") return eventSource.close();
+      if (e.data === "[DONE]") return eventSource.close();
       const chunk = JSON.parse(e.data);
       ret.push(chunk);
       // if it's the first one render this new rgaph
@@ -822,45 +826,47 @@ async function main() {
     };
   }
   if (ret.length === 0) return;
-  // ** center UOp graph
-  const render = (opts) => renderDag(ret[currentRewrite].graph, ret[currentRewrite].changed_nodes ?? [], currentRewrite === 0, opts);
+  // ** center graph
+  const data = ret[currentRewrite];
+  const render = (opts) => renderDag({ data, opts }, { recenter:currentRewrite === 0 });
   render({ showIndexing:toggle.checked });
   toggle.onchange = (e) => render({ showIndexing:e.target.checked });
-  // ** right sidebar code blocks
-  const codeElement = codeBlock(ret[currentRewrite].uop, "python", { wrap:false });
-  metadata.replaceChildren(toggleLabel, codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }), codeElement);
+  // ** right sidebar metadata
+  metadata.innerHTML = "";
+  if (ckey.includes("rewrites")) metadata.appendChild(toggleLabel);
+  if (step.code_line != null) metadata.appendChild(codeBlock(step.code_line, "python", { loc:step.loc, wrap:true }));
   if (step.trace) {
     const trace = d3.create("pre").append("code").classed("hljs", true);
     for (let i=step.trace.length-1; i>=0; i--) {
       const [fp, lineno, fn, code] = step.trace[i];
       trace.append("div").style("margin-bottom", "2px").style("display","flex").text(fn+" ").append(() => pathLink(fp, lineno).node());
       trace.append("div").html(hljs.highlight(code, { language: "python" }).value).style("margin-bottom", "1ex");
+      metadata.appendChild(trace.node().parentNode);
     }
-    metadata.insertBefore(trace.node().parentNode, codeElement);
   }
-  // ** rewrite steps
-  if (step.match_count >= 1) {
-    const rewriteList = metadata.appendChild(document.createElement("div"));
-    rewriteList.className = "rewrite-list";
-    for (let s=0; s<=step.match_count; s++) {
-      const ul = rewriteList.appendChild(document.createElement("ul"));
-      ul.id = `rewrite-${s}`;
-      const p = ul.appendChild(document.createElement("p"));
-      p.innerText = s;
-      ul.onclick = () => setState({ currentRewrite:s });
-      ul.className = s > ret.length-1 ? "disabled" : s === currentRewrite ? "active" : "";
-      if (s > 0 && s === currentRewrite) {
-        const { upat, diff } = ret[s];
-        metadata.appendChild(codeBlock(upat[1], "python", { loc:upat[0], wrap:true }));
-        const diffCode = metadata.appendChild(document.createElement("pre")).appendChild(document.createElement("code"));
-        for (const line of diff) {
-          diffCode.appendChild(colored([{st:line, color:line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5"}]));
-          diffCode.appendChild(document.createElement("br"));
-        }
-        diffCode.className = "wrap";
+  if (data.uop != null) metadata.appendChild(codeBlock(data.uop, "python", { wrap:false })).classList.toggle("full-height", step.match_count === 0);
+  // ** multi graph in one page
+  if (!step.match_count) return;
+  const rewriteList = metadata.appendChild(document.createElement("div"));
+  rewriteList.className = "rewrite-list";
+  for (let s=0; s<=step.match_count; s++) {
+    const ul = rewriteList.appendChild(document.createElement("ul"));
+    ul.id = `rewrite-${s}`;
+    const p = ul.appendChild(document.createElement("p"));
+    p.innerText = s;
+    ul.onclick = () => setState({ currentRewrite:s });
+    ul.className = s > ret.length-1 ? "disabled" : s === currentRewrite ? "active" : "";
+    if (s > 0 && s === currentRewrite) {
+      const { upat, diff } = ret[s];
+      metadata.appendChild(codeBlock(upat[1], "python", { loc:upat[0], wrap:true }));
+      const diffCode = metadata.appendChild(document.createElement("pre")).appendChild(document.createElement("code"));
+      for (const line of diff) {
+        diffCode.appendChild(colored([{st:line, color:line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5"}]));
+        diffCode.appendChild(document.createElement("br"));
       }
+      diffCode.className = "wrap";
     }
-  } else codeElement.classList.add("full-height");
+  }
 }
 
 // **** collapse/expand

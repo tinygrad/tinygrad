@@ -6,8 +6,8 @@ from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType, least_upper_dtype, Invalid, InvalidType, AddrSpace
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
-from tinygrad.helpers import PICKLE_BUFFERS, PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, VIZ, SPEC, CI
-from tinygrad.helpers import strip_parens, colored, ansilen, printable
+from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, VIZ, SPEC, CI
+from tinygrad.helpers import strip_parens, colored, ansilen, printable, panic
 if TYPE_CHECKING:
   from tinygrad.device import Buffer, MultiBuffer
 
@@ -64,16 +64,15 @@ def consumer_map_from_toposort(lst:Iterable[UOp]):
     for s in u.src: ret[s][u] = None
   return ret
 
-# used for UOp and UPat
-def pretty_print(x:Any, rep:Callable, srcfn=lambda x: x.src, cache=None, d=0)->str:
-  def dfs(x:Any, cache:dict):
-    for s in srcfn(x) or []:
+def pretty_print(x:UOp, cache=None, d=0)->str:
+  def dfs(x:UOp, cache:dict):
+    for s in x.src:
       cache.setdefault(s, [len(cache), 0, False])[1] += 1
       if cache[s][1] == 1: dfs(s, cache)
   if cache is None: dfs(x, cache:={})
   if (cx:=cache.setdefault(x, [0,0,False]))[2]: return f"{' '*d} x{cx[0]}"
-  cx[2], srcs = True, ('None' if srcfn(x) is None else ''.join(f'\n{pretty_print(s, rep, srcfn, cache, d+2)},' for s in srcfn(x)))
-  return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{rep(x)}" % srcs
+  cx[2], srcs = True, (''.join(f'\n{pretty_print(s, cache, d+2)},' for s in x.src))
+  return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{type(x).__name__}({x.op}, {x.dtype}, arg={x.argstr()}{x.tagstr()}, src=({srcs}))"
 
 class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
@@ -133,7 +132,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     except AttributeError: pass
   def __reduce__(self):
     args = [self.op, self.dtype, self.src, self.arg, self.tag, self.metadata]
-    if self.op is Ops.BUFFER and self.realized is not None and PICKLE_BUFFERS: args.append(self.realized)
+    if self.op is Ops.BUFFER and self.realized is not None: args.append(self.realized)
     return UOp, tuple(args)
   def replace(self, **kwargs) -> UOp:
     new_args = (kwargs.pop("op", self.op), kwargs.pop("dtype", self.dtype), kwargs.pop("src", self.src),
@@ -145,7 +144,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @functools.cached_property
   def key(self) -> bytes:
     return hashlib.sha256(str((self.op, self.dtype, self.arg)).encode() + b"".join([s.key for s in self.src])).digest()
-  def __repr__(self): return pretty_print(self, lambda x: f"{type(self).__name__}({x.op}, {x.dtype}, arg={x.argstr()}{x.tagstr()}, src=(%s))")
+  def __repr__(self): return pretty_print(self)
   def argstr(self): return f'({", ".join(map(str, self.arg))})' if self.op is Ops.REDUCE_AXIS else repr(self.arg)
   def tagstr(self): return f", tag={self.tag}" if self.tag is not None else ""
 
@@ -159,7 +158,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   @property
   def backward_slice_with_self(self:UOp) -> dict[UOp, None]: return {self:None, **self.backward_slice}
-  def op_in_backward_slice_with_self(self, *ops:Ops): return any(x.op in ops for x in self.backward_slice_with_self)
+  def op_in_backward_slice_with_self(self, *ops:Ops) -> bool:
+    # Check self first, then iterate backward_slice (avoids creating intermediate dict)
+    return self.op in ops or any(x.op in ops for x in self.backward_slice)
 
   def toposort(self, gate:Callable|None=None) -> dict[UOp, None]:
     cache: dict[UOp, None] = {}
@@ -216,8 +217,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def _shape(self) -> tuple[sint, ...]|None:
     match self.op:
       # late ops don't have shape
-      case Ops.UNIQUE | Ops.DEVICE | Ops.RANGE | Ops.LOAD | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
-           Ops.VECTORIZE | Ops.VCONST | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.CONTRACT:
+      case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.RANGE | Ops.LOAD | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
+           Ops.VECTORIZE | Ops.VCONST | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.CONTRACT | Ops.CUSTOM_KERNEL | \
+           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY:
         return None
 
       case Ops.INDEX:
@@ -232,6 +234,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.CONST | Ops.DEFINE_VAR | Ops.BIND: return () if self._device is not None else None
       case Ops.BUFFER: return (self.arg,)
       case Ops.BUFFER_VIEW: return (self.arg[0],)
+      case Ops.ENCDEC: return self.arg[0]
       case Ops.BUFFERIZE: return tuple([int(r.vmax+1) for r in self.src[1:]])
       case Ops.DEFINE_GLOBAL | Ops.DEFINE_LOCAL | Ops.DEFINE_REG: return (self.ptrdtype.size,)
 
@@ -313,6 +316,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @functools.cached_property
   def ended_ranges(self):
     if self.op in range_start: return self.src[range_start[self.op]:]
+    if self.op is Ops.AFTER: return tuple(flatten([x.ended_ranges for x in self.src[1:]]))
     return ()
 
   # determine what ranges this is in
@@ -339,6 +343,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   # *** uop evaluation ***
 
   def simplify(self, tracked=False):
+    if self.op in {Ops.CONST, Ops.VCONST}: return self
     # late import!
     from tinygrad.uop.symbolic import symbolic
     with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
@@ -466,7 +471,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   def is_contiguous(self):
     # TODO: this is is_realized
-    if self.op is Ops.RESHAPE: return self.src[0].is_contiguous()
+    if self.op in {Ops.RESHAPE, Ops.MULTI}: return self.src[0].is_contiguous()
     return self.op is Ops.BUFFER
 
   def contiguous(self, *args, **kwargs):
@@ -538,6 +543,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def mselect(self, arg:int) -> UOp: return UOp(Ops.MSELECT, self.dtype, (self,), arg)
   @property
   def metadata(self) -> tuple[Metadata, ...]|None: return all_metadata.get(self, None)
+  def encdec(self, *src, arg=None): return UOp(Ops.ENCDEC, self.dtype, src=(self,)+src, arg=arg)
 
   # *** uop movement ops ***
 
@@ -611,7 +617,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op is Ops.BUFFERIZE: return self.arg.device
     if self.op is Ops.AFTER: return self.src[0]._device
     if self.op is Ops.MSELECT:
-      assert isinstance(self.src[0].device, tuple), "mselect must be on tuple device"
+      assert isinstance(self.src[0].device, tuple), f"mselect must be on tuple device, getting {self.src[0].device}"
       return self.src[0].device[self.arg]
     if self.op is Ops.MSTACK: return tuple(cast(str, x.device) for x in self.src)
     if self.op in {Ops.COPY, Ops.BUFFER, Ops.ALLREDUCE}: return self.src[1].device
@@ -660,6 +666,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       assert all_same([x.size for x in ret.bufs]) and all_same([x.dtype for x in ret.bufs]), "multibuffers mismatch buffers"
       return ret
     assert self.op is Ops.BUFFER, f"must be BUFFER {self.op}"
+    assert self.src[0].op is Ops.UNIQUE, f"buffer src[0] must be UNIQUE, not {self.src[0].op}"
     if (cret:=buffers.get(self)) is not None: return cret
     rdtype = self.dtype if isinstance(self.dtype, ImageDType) else self.dtype.base
     if isinstance(self.device, tuple): ret = MultiBuffer(self.device, self.size, rdtype).ref(1)
@@ -668,8 +675,12 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return ret
   @property
   def realized(self) -> Buffer|MultiBuffer|None:
+    # only these can be realized
+    if self.op not in (Ops.BUFFER, Ops.MSTACK): return None
+    # LUNIQUEs are never realized
+    if self.op_in_backward_slice_with_self(Ops.LUNIQUE): return None
     # NOTE: this is used by the JIT to determine which inputs we capture
-    return self.buffer if self.op in {Ops.BUFFER, Ops.MSTACK} and self.buffer.is_allocated() else None
+    return self.buffer if self.buffer.is_allocated() else None
   @property
   def is_realized(self) -> bool:
     return all(x.base.realized is not None for x in self.base.src) if self.base.op is Ops.MULTI else self.base.realized is not None
@@ -765,6 +776,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       if self.op is Ops.SHL and s1_vmin == s1_vmax and all_int(t:=(s0_vmin, s0_vmax, s1_vmin)): return t[0] << t[2], t[1] << t[2]
       if self.op is Ops.SHR and s1_vmin == s1_vmax and all_int(t:=(s0_vmin, s0_vmax, s1_vmin)): return t[0] >> t[2], t[1] >> t[2]
       if self.op is Ops.MOD:
+        if (c:=s1_vmin) == s1_vmax > 0:
+          return (0 if s0_vmin > 0 else s0_vmin if 0 >= s0_vmin > -c else -(s1_vmax-1), 0 if s0_vmax < 0 else s0_vmax if 0 <= s0_vmax < c else c-1)
         if s1_vmin > 0: return (0, s1_vmax-1) if s0_vmin >= 0 else (-(s1_vmax-1), 0) if s0_vmax <= 0 else (-(s1_vmax-1), s1_vmax-1)
         if s1_vmax < 0: return (0, -s1_vmin-1) if s0_vmin >= 0 else (-(-s1_vmin-1), 0) if s0_vmax <= 0 else (-(-s1_vmin-1), -s1_vmin-1)
       if self.op is Ops.IDIV:
@@ -828,9 +841,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return self.src[0].after(self.store(val).end(*argfix(end)))
 
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
-    placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(srcs)]
     contig_srcs = tuple(x.contiguous() for x in srcs)
-    kernel = UOp(Ops.KERNEL, src=tuple(x.base for x in contig_srcs), arg=Kernel(fxn(*placeholders), grad_fxn=grad_fxn))
+    kernel = UOp(Ops.CUSTOM_KERNEL, src=contig_srcs, arg=CustomKernel(fxn=fxn, grad_fxn=grad_fxn))
     return [s.after(kernel) for s in contig_srcs]
 
 @dataclass(frozen=True)
@@ -842,6 +854,14 @@ class KernelInfo:
   opts_to_apply: tuple|None = None
   @property
   def function_name(self): return to_function_name(self.name)
+
+@dataclass(frozen=True)
+class CustomKernel:
+  fxn: Callable
+  grad_fxn: Callable|None = None
+  # sadly CustomKernel can't be pickled or reconstructed as a str
+  def __reduce__(self): return (CustomKernel, (panic,))
+  def __repr__(self): return "CustomKernel(panic)"
 
 @dataclass(frozen=True)
 class Kernel:
@@ -894,15 +914,16 @@ def get_location() -> tuple[str, int]:
   return frm.f_code.co_filename, frm.f_lineno
 
 class UPat(OpMixin):
-  __slots__ = ("op", "dtype", "arg", "name", "src")
-  def __init__(self, op:Ops|tuple[Ops, ...]|set[Ops]|None=None, dtype:DType|tuple[DType, ...]|None=None,
+  __slots__ = ("op", "dtype", "arg", "name", "src", "is_any")
+  def __init__(self, op:Ops|tuple[Ops, ...]|set[Ops]|None=None, dtype:DType|tuple[DType, ...]|set[DType]|None=None,
                src:tuple[UPat, ...]|list[UPat]|UPat|None=None, arg:Any=None,
-               name:str|None=None, allow_any_len:bool=False, custom_early_reject:set[Ops]|None=None, location=None):
+               name:str|None=None, allow_any_len:bool=False, custom_early_reject:set[Ops]|None=None, location=None, is_any:bool=False):
     assert op is None or isinstance(op, (Ops, tuple, set)), "op must be Ops or tuple of Ops"
     self.op: tuple[Ops, ...]|None = (op,) if isinstance(op, Ops) else (tuple(op) if isinstance(op, set) else op)
-    self.dtype: tuple[DType, ...]|None = (dtype,) if isinstance(dtype, DType) else dtype
+    self.dtype: tuple[DType, ...]|None = (dtype,) if isinstance(dtype, DType) else (tuple(dtype) if isinstance(dtype, set) else dtype)
     self.arg, self.name, self._in_src, self.custom_early_reject = arg, name, src, custom_early_reject
     self.src: Any = None
+    self.is_any = is_any
     assert self.name != "ctx", "UPat can't be named ctx"
     assert dtype is None or isinstance(dtype, DType) or all(isinstance(x, DType) for x in dtype), f"invalid dtype {dtype}"
 
@@ -927,7 +948,7 @@ class UPat(OpMixin):
   def named(self, name:str): return UPat(self.op, self.dtype, self._in_src, self.arg, name, not self.strict_length, self.custom_early_reject)
 
   @staticmethod
-  def any(*src): return UPatAny(src=src)
+  def any(*src): return UPat(src=src, is_any=True)
   def or_casted(self, name:str|None=None): return UPat.any(self if name is None else self.named(name), UPat(Ops.CAST, name=name, src=(self,)))
   def or_after(self, name:str|None=None):
     return UPat.any(self if name is None else self.named(name), UPat(Ops.AFTER, name=name, src=(self,), allow_any_len=True))
@@ -967,6 +988,9 @@ class UPat(OpMixin):
     return UPat(op, dtypes.bool if op in {Ops.CMPLT, Ops.CMPNE} else asrc[-1].dtype, list(asrc) if op in GroupOp.Commutative else asrc)
 
   def match(self:UPat, uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:
+    if self.is_any:
+      matches = [x.match(uop, store.copy()) for x in self.src[0]]
+      return flatten([x for x in matches if x is not None])
     if (self.op is not None and uop.op not in self.op) or \
        (self.name is not None and store.setdefault(self.name, uop) is not uop) or \
        (self.dtype is not None and uop.dtype not in self.dtype and uop.dtype.scalar() not in self.dtype) or \
@@ -982,11 +1006,6 @@ class UPat(OpMixin):
         stores, new_stores = new_stores, []
       res.extend(stores)
     return res
-
-class UPatAny(UPat):
-  def match(self:UPat, uop:UOp, store:dict[str, UOp]) -> list[dict[str, UOp]]:
-    matches = [x.match(uop, store.copy()) for x in self.src[0]]
-    return flatten([x for x in matches if x is not None])
 
 def deconstruct_function(fxn:Callable) -> tuple:
   new_globals = {k:v for k,v in fxn.__globals__.items() if k in fxn.__code__.co_names}
@@ -1031,16 +1050,18 @@ class PatternMatcher:
   @functools.cache  # pylint: disable=method-cache-max-size-none
   def __add__(self, more:PatternMatcher) -> PatternMatcher: return PatternMatcher(self.patterns+more.patterns)
 
-  def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
-    ler = {u.op for u in uop.src}
-    for _,match,early_reject in self.pdict.get(uop.op, []):
-      if not early_reject.issubset(ler): continue
-      if (ret:=match(uop, ctx)) is not None and ret is not uop: return ret
+  def rewrite(self, uop:UOp, ctx=None):
+    if len(pats:=self.pdict.get(uop.op, [])):
+      ler = {u.op for u in uop.src}
+      for _,match,early_reject in pats:
+        if not early_reject.issubset(ler): continue
+        if (ret:=match(uop, ctx)) is not None and ret is not uop: return ret
     return None
 
 # *** tracking pattern matcher ***
 
 TRACK_MATCH_STATS = ContextVar("TRACK_MATCH_STATS", 2 if VIZ else 0)
+REWRITE_STACK_LIMIT = ContextVar("REWRITE_STACK_LIMIT", 250000)
 match_stats:dict[UPat, list[int|float]] = dict()
 
 # TRACK_MATCH_STATS>=2 or VIZ=1 saves all matches
@@ -1061,11 +1082,12 @@ tracked_ctxs:list[list[TrackedGraphRewrite]] = []
 _name_cnt:dict[str, itertools.count] = {}
 
 if getenv("CAPTURE_PROCESS_REPLAY"):
-  replay_capture: dict[str, bytes] = {}
-  import atexit
+  replay_capture: list[bytes] = []
+  import atexit, uuid
   @atexit.register
   def save_to_diskcache():
-    for k,v in replay_capture.items(): diskcache_put("process_replay", k, v, prepickled=True)
+    uid = uuid.uuid4() # one id per process
+    for i,v in enumerate(replay_capture): diskcache_put("process_replay", f"{uid}_{i}", v, prepickled=True)
 
 def add_trace_group(kt:TracingKey) -> None:
   tracked_keys.append(kt)
@@ -1089,9 +1111,8 @@ def track_rewrites(name:Callable[..., str|TracingKey]|bool=True, replay:bool=Fal
         while (f_back:=frm.f_back) is not None and "unittest" not in f_back.f_code.co_filename: frm = f_back
         loc = f"{frm.f_code.co_filename.split('/')[-1]}:{frm.f_lineno} {frm.f_code.co_name}"
         # capture global context vars and all the args passed in
-        with Context(PICKLE_BUFFERS=0):
-          inputs = (fn, args, kwargs, ContextVar._cache)
-          replay_capture[hashlib.sha256(pickle.dumps(inputs)).hexdigest()] = pickle.dumps(inputs+(loc, ret))
+        inputs = (fn, args, kwargs, ContextVar._cache)
+        replay_capture.append(pickle.dumps(inputs+(loc, ret)))
       return ret
     return __wrapper
   return _decorator
@@ -1116,29 +1137,30 @@ def profile_matches(fxn:Callable):
   return wrap_profile_matches
 
 class TrackedPatternMatcher(PatternMatcher):
-  def rewrite(self, uop:UOp, ctx=None) -> UOp|None:
-    ret = None
-    ler = {u.op for u in uop.src}
-    for p,match,early_reject in self.pdict.get(uop.op, []):
-      if p not in match_stats: match_stats[p] = [0,0,0.0,0.0]
-      st = time.perf_counter()
-      if not early_reject.issubset(ler):
+  def rewrite(self, uop:UOp, ctx=None):
+    if len(pats:=self.pdict.get(uop.op, [])):
+      ret = None
+      ler = {u.op for u in uop.src}
+      for p,match,early_reject in pats:
+        if p not in match_stats: match_stats[p] = [0,0,0.0,0.0]
+        st = time.perf_counter()
+        if not early_reject.issubset(ler):
+          match_stats[p][2] += time.perf_counter()-st
+          continue
+        match_stats[p][1] += 1
+        try: ret = match(uop, ctx)
+        except Exception:
+          if TRACK_MATCH_STATS >= 2 and active_rewrites:
+            active_rewrites[-1].matches.append((uop.trace_num, UOp(Ops.REWRITE_ERROR,src=uop.src,arg=str(sys.exc_info()[1])).trace_num,p.location,0))
+          raise
+        if ret is not None and ret is not uop:
+          match_stats[p][0] += 1
+          match_stats[p][3] += (et:=time.perf_counter()-st)
+          if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", printable(p.location))
+          if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites:
+            active_rewrites[-1].matches.append((uop.trace_num, ret.trace_num, p.location, et))
+          return ret
         match_stats[p][2] += time.perf_counter()-st
-        continue
-      match_stats[p][1] += 1
-      try: ret = match(uop, ctx)
-      except Exception:
-        if TRACK_MATCH_STATS >= 2 and active_rewrites:
-          active_rewrites[-1].matches.append((uop.trace_num, UOp(Ops.REWRITE_ERROR,src=uop.src,arg=str(sys.exc_info()[1])).trace_num,p.location,0))
-        raise
-      if ret is not None and ret is not uop:
-        match_stats[p][0] += 1
-        match_stats[p][3] += (et:=time.perf_counter()-st)
-        if TRACK_MATCH_STATS >= 3: print(f"{et*1e6:7.2f} us -- ", printable(p.location))
-        if TRACK_MATCH_STATS >= 2 and isinstance(ret, UOp) and active_rewrites:
-          active_rewrites[-1].matches.append((uop.trace_num, ret.trace_num, p.location, et))
-        return ret
-      match_stats[p][2] += time.perf_counter()-st
     return None
 
 @dataclass(frozen=True)
@@ -1153,7 +1175,7 @@ if TRACK_MATCH_STATS or PROFILE:
       with open(fn:=temp("rewrites.pkl", append_user=True), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
         pickle.dump(RewriteTrace(tracked_keys, tracked_ctxs, uop_fields), f)
-    if VIZ: return launch_viz("VIZ", temp("rewrites.pkl", append_user=True))
+    if VIZ > 0: return launch_viz("VIZ", temp("rewrites.pkl", append_user=True))
     if getenv("PRINT_MATCH_STATS", TRACK_MATCH_STATS.value):
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]+x[1][3]):
@@ -1180,16 +1202,13 @@ class BottomUpGate(Exception): pass
 class RewriteContext:
   def __init__(self, pm, bpm, ctx=None):
     self.pm: PatternMatcher|None = pm
-    self.pm_cache: dict[UOp, UOp|None] = {}
     self.bpm: PatternMatcher|None = bpm
     self.bpm_cache: dict[UOp, UOp|None] = {}
     self.ctx = ctx
     self.replace: dict[UOp, UOp] = {}
 
-  def cached_pm_rewrite(self, x:UOp) -> UOp|None:
-    if (ret:=self.pm_cache.get(x,SENTINEL)) is not SENTINEL: return ret
-    ret = self.pm_cache[x] = unwrap(self.pm).rewrite(x, self.ctx)
-    return ret
+  # no cache needed: pm_rewrite is called at most once per UOp due to the replace dict check in unified_rewrite
+  def pm_rewrite(self, x:UOp) -> UOp|None: return unwrap(self.pm).rewrite(x, self.ctx)
 
   def cached_bpm_rewrite(self, x:UOp) -> UOp|None:
     if (ret:=self.bpm_cache.get(x,SENTINEL)) is not SENTINEL: return ret
@@ -1199,7 +1218,6 @@ class RewriteContext:
   def unified_rewrite(self, root:UOp) -> UOp:
     stack: collections.deque[tuple[UOp, int, UOp]] = collections.deque([(root, 0, root)])
     on_stack = {root}  # all UOps either on the stack or in self.replace, i.e. dont have to be placed again
-    REWRITE_STACK_LIMIT = getenv("REWRITE_STACK_LIMIT", 250000)
     while stack:
       if len(stack) > REWRITE_STACK_LIMIT: raise RuntimeError("infinite loop in graph_rewrite (stack too big)")
       n, stage, new_n = stack.pop()
@@ -1236,7 +1254,7 @@ class RewriteContext:
           # in stage 1, once all srcs are rewritten, rebuild (if changed) or run top-down rewrite
           if (new_src:=tuple(tmp)) == new_n.src:
             # if top down, do the rewrite. if no rewrite or bottom up, we are done rewriting this node so we add it to the dict
-            if self.pm is None or (new_src_n:=self.cached_pm_rewrite(new_n)) is None:
+            if self.pm is None or (new_src_n:=self.pm_rewrite(new_n)) is None:
               self.replace[n] = new_n
               continue
           else:
@@ -1371,6 +1389,7 @@ pm_pyrender_extra = PatternMatcher([
   (UPat(Ops.BUFFER, src=(UPat(Ops.UNIQUE, name="u"), UPat(Ops.DEVICE, name="d")), name="x"), lambda x,u,d:
     f"UOp.new_buffer({repr(d.arg)}, {x.size}, {x.dtype}, {u.arg})"),
   (UPat(Ops.COPY, src=(UPat(name="x"), UPat(Ops.DEVICE, name="d"))), lambda ctx,x,d: f"{ctx[x]}.copy_to_device({repr(d.arg)})"),
+  (UPat(Ops.ENCDEC, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.encdec({''.join([str(ctx[s])+', ' for s in x.src[1:]])}arg={x.arg!r})"),
   (UPat(Ops.REDUCE_AXIS, name="r"), lambda ctx,r: f"{ctx[r.src[0]]}.r({r.arg[0]}, {r.arg[1]})"),
   # NOTE: range has srcs sometimes after control flow
   (UPat(Ops.RANGE, src=(UPat(Ops.CONST, name="c"),), allow_any_len=True, name="x"), lambda ctx,x,c:

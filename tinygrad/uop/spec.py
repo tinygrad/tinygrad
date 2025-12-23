@@ -1,8 +1,8 @@
 import math
 from typing import cast, Any
-from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, AxisType, KernelInfo, pyrender, Kernel
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, print_uops, AxisType, KernelInfo, pyrender, Kernel, CustomKernel
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Invalid
-from tinygrad.helpers import DEBUG, Context, prod, SPEC, Metadata
+from tinygrad.helpers import DEBUG, Context, prod, SPEC, Metadata, panic
 from tinygrad.uop.validate import validate_index
 
 # four specs:
@@ -54,15 +54,19 @@ movement_ops = PatternMatcher([
   (UPat({Ops.ADD, Ops.MUL, Ops.IDIV}, dtype=dtypes.index), lambda: True),
 
   # AFTER on Movement Op
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement),), allow_any_len=True), lambda: True),
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.MULTI, Ops.CONTIGUOUS})),), allow_any_len=True), lambda: True),
+
+  # custom kernels allowed here
+  (UPat(Ops.CUSTOM_KERNEL), lambda: True),
 ])
 
 _tensor_spec = PatternMatcher([
   # buffer spec
   (UPat(Ops.UNIQUE, dtypes.void, ()), lambda: True),
+  (UPat(Ops.LUNIQUE, dtypes.void, ()), lambda: True),
   (UPat(Ops.DEVICE, dtypes.void, (), name="d"), lambda d:
    isinstance(d.arg, str) or (isinstance(d.arg, tuple) and all(isinstance(s, str) for s in d.arg))),
-  (UPat(Ops.BUFFER, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE)), allow_any_len=True, name="buf"),
+  (UPat(Ops.BUFFER, src=(UPat((Ops.LUNIQUE, Ops.UNIQUE)), UPat(Ops.DEVICE)), allow_any_len=True, name="buf"),
    lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, (DType, ImageDType))),
   (UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.BUFFER),), name="buf_view"),
    lambda buf_view: isinstance(buf_view.arg, tuple) and len(buf_view.arg) == 2 and all(isinstance(arg, (int, UOp)) for arg in buf_view.arg)),
@@ -82,10 +86,12 @@ _tensor_spec = PatternMatcher([
 
   # Tensor variable bindings
   (UPat(Ops.BIND, (dtypes.int,dtypes.index,), (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=(dtypes.int,dtypes.index,))), arg=None), lambda: True),
+  # single-src BIND used for schedule cache key normalization
+  (UPat(Ops.BIND, (dtypes.int,dtypes.index,), (UPat(Ops.DEFINE_VAR),), arg=None), lambda: True),
 
   # device or unique
   (UPat(Ops.CONST, src=(UPat(Ops.DEVICE),)), lambda: True),
-  (UPat(Ops.CONST, src=(UPat(Ops.DEVICE), UPat(Ops.UNIQUE))), lambda: True),
+  (UPat(Ops.CONST, src=(UPat(Ops.DEVICE), UPat((Ops.LUNIQUE, Ops.UNIQUE)))), lambda: True),
 
   # DETACH and CONTIGUOUS change how we interpret the source UOp
   # CONTIGUOUS ensures the source UOp realizes
@@ -96,10 +102,11 @@ _tensor_spec = PatternMatcher([
   (UPat(Ops.CONTIGUOUS, name="root", src=(UPat.var("x"),), allow_any_len=True, arg=None),
    lambda root,x: root.dtype == x.dtype and all(u.op is Ops.RANGE for u in root.src[1:])),
 
-  # COPY/ALLREDUCE/MULTI
+  # COPY/ALLREDUCE/MULTI/ENCDEC
   (UPat(Ops.COPY, name="copy", src=(UPat.var("x"), UPat(Ops.DEVICE)), arg=None), lambda copy,x: copy.dtype == x.dtype),
   (UPat(Ops.ALLREDUCE, name="red", src=(UPat.var("x"), UPat(Ops.DEVICE))), lambda red,x: red.dtype == x.dtype and isinstance(red.arg, Ops)),
   (UPat(Ops.MULTI, name="multi"), lambda multi: all(x.dtype == multi.dtype for x in multi.src) and isinstance(multi.arg, int)),
+  (UPat(Ops.ENCDEC, name="x"), lambda x: len(x.src) >= 2), # state + inbuffer
 
   # REDUCE_AXIS is the reduce in the tensor graph
   (UPat(Ops.REDUCE_AXIS, name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) >= 2 and x.arg[0] in {Ops.ADD, Ops.MUL, Ops.MAX}),
@@ -242,6 +249,16 @@ full_spec = PatternMatcher([
   # in progress MSTACK may lose device
   (UPat((Ops.MSELECT, Ops.MSTACK), name="x"), lambda x: True),
 
+  # codegen: PROGRAM with progressive sources through the pipeline (SINK, DEVICE, LINEAR?, SOURCE?, BINARY?)
+  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE))), lambda: True),
+  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR))), lambda: True),
+  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR), UPat(Ops.SOURCE))), lambda: True),
+  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR), UPat(Ops.SOURCE), UPat(Ops.BINARY))), lambda: True),
+  # codegen: standalone LINEAR/SOURCE/BINARY
+  (UPat(Ops.LINEAR, dtypes.void), lambda: True),
+  (UPat(Ops.SOURCE, dtypes.void, src=()), lambda: True),
+  (UPat(Ops.BINARY, dtypes.void, src=()), lambda: True),
+
   # temp VECTORIZE/INDEX during rewrite have the wrong dtype
   (UPat(Ops.VECTORIZE), lambda: True),
   (UPat(Ops.INDEX), lambda: True),
@@ -270,8 +287,8 @@ def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.schedule.rangeify import BufferizeOpts
 glbls:dict[str, Any] = {"inf": math.inf, "nan": math.nan, "KernelInfo": KernelInfo, "Kernel": Kernel, "Metadata": Metadata,
-                        "UOp": UOp, "dtypes": dtypes, "Ops": Ops, "AxisType": AxisType, "Invalid": Invalid,
-                        "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace}
+                        "UOp": UOp, "dtypes": dtypes, "Ops": Ops, "AxisType": AxisType, "Invalid": Invalid, "CustomKernel": CustomKernel,
+                        "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace, "panic": panic}
 def eval_pyrender(code:str) -> UOp:
   lcls:dict[str, Any] = {}
   exec(code, glbls, lcls)

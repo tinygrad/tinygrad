@@ -4,10 +4,10 @@ from functools import partial
 from tinygrad import nn, dtypes, Tensor, Device, TinyJit, Variable
 from tinygrad.helpers import getenv, CI, OSX
 from tinygrad.device import is_dtype_supported
-from tinygrad.engine.realize import lower_schedule, CompiledRunner
+from tinygrad.engine.realize import CompiledRunner
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
-from test.helpers import not_support_multi_device
+from test.helpers import not_support_multi_device, needs_second_gpu
 
 import numpy as np
 import torch
@@ -103,10 +103,12 @@ class TestRandomness(unittest.TestCase):
 
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, PTXRenderer)), "PTX and NIR use pointer arithmetic")
   def test_threefry_doesnt_use_long(self):
-    for (_,ei) in lower_schedule(Tensor.rand(20).schedule()):
-      if isinstance(ei.prg, CompiledRunner):
-        for u in ei.prg.p.uops:
-          self.assertNotIn(u.dtype, {dtypes.long, dtypes.ulong}, msg=f"long found in {ei.prg.p.name}")
+    sched = Tensor.rand(20).schedule()
+    for si in sched:
+      si.lower()
+      if isinstance(si.prg, CompiledRunner):
+        for u in si.prg.p.uops:
+          self.assertNotIn(u.dtype, {dtypes.long, dtypes.ulong}, msg=f"long found in {si.prg.p.name}")
 
   def test_threefry_against_reference_full(self):
     Tensor.manual_seed(1337)
@@ -141,6 +143,7 @@ class TestRandomness(unittest.TestCase):
     r = Tensor.rand(10).numpy()
     np.testing.assert_allclose(r, jr, atol=1e-5, rtol=1e-5)
 
+  @needs_second_gpu
   @unittest.skipIf(not_support_multi_device(), "no multi")
   def test_threefry_tensors_cnt(self):
     Tensor.manual_seed(1337)
@@ -160,6 +163,7 @@ class TestRandomness(unittest.TestCase):
     assert len(Tensor._device_rng_counters) == 0
     assert len(Tensor._device_seeds) == 0
 
+  @needs_second_gpu
   @unittest.skipIf(not_support_multi_device(), "no multi")
   def test_threefry_same_kernels(self):
     Tensor.manual_seed(0)

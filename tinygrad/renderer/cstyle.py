@@ -8,6 +8,7 @@ from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, AddrSpace, trunc
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu
 
+
 base_rewrite = PatternMatcher([
   (UPat(Ops.DEFINE_REG, name="x"), lambda ctx,x: f"{ctx.render_dtype(x.dtype.base)} {ctx[x]}[{x.dtype.size}];"),
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"if ({ctx[x.src[0]]}) {{"),
@@ -82,6 +83,19 @@ def create_non_native_float_pats(dts:tuple[DType, ...], casting:bool=True):
       (UPat(Ops.CAST, dts, (UPat.var("x"),), name="y"), lambda x,y: x.cast(dtypes.float).cast(y.dtype) if x.dtype!=dtypes.float else None),
       (UPat(Ops.CAST, name="x", src=(UPat.var("y", dts),)), lambda x,y: y.cast(dtypes.float).cast(x.dtype) if x.dtype!=dtypes.float else None)])
   return patterns
+
+def cast_float_to_bf16(x: UOp) -> UOp:
+  assert x.dtype == dtypes.float, "cast float -> bf16 must start with float"
+  x = x.bitcast(dtypes.uint)
+  x = ((-x & 0x7f800000) != 0).where(x + ((x >> 16) & 1) + 0x7fff, ((x & 0xffff) != 0).where((x | 0x10000), x))
+  return (x >> 16).cast(dtypes.ushort).bitcast(dtypes.bfloat16)
+
+# manual bfloat16 casting patterns (shared between LLVM, Clang, and AMD renderers to avoid compiler intrinsics)
+pm_manual_bf16_cast = PatternMatcher([
+  (UPat(Ops.CAST, dtypes.float, (UPat.var("x", dtypes.bfloat16),)),
+   lambda x: (x.bitcast(dtypes.ushort).cast(dtypes.uint)<<16).bitcast(dtypes.float)),
+  (UPat(Ops.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float),)), cast_float_to_bf16),
+])
 
 def uops_to_dtypes(uops:list[UOp]) -> list[DType]: return dedup(u.dtype for u in uops if not isinstance(u.dtype, (ImageDType, PtrDType)))
 
@@ -224,9 +238,14 @@ class ClangRenderer(CStyleLanguage):
                  Ops.SQRT: lambda x,dtype: f"__builtin_sqrt({x})" if dtype == dtypes.float64 else f"__builtin_sqrtf({x})",
                  Ops.TRUNC: lambda x,dtype: f"__builtin_trunc({x})" if dtype == dtypes.float64 else f"__builtin_truncf({x})",
                  Ops.FDIV: lambda a,b,dtype: f"({a}/{b})"}
-  # LLVM legalizes double => half cast on systems that don't support it natively (like x86 cpus without AVX512-FP16) into a compiler-rt libcall.
+
+  # LLVM legalizes double => half/bf16 cast on systems that don't support it natively (like x86 cpus without AVX512-FP16) into a compiler-rt libcall.
+  # there is also no native bfl16 <-> fp16 conversion on those CPUs
   extra_matcher = PatternMatcher([(UPat.var("x", dtypes.float64).cast(dtypes.float16), lambda x: x.cast(dtypes.float32).cast(dtypes.float16)),
-    (UPat((Ops.SQRT, Ops.TRUNC), name="alu"), no_vectorized_alu)]) + CStyleLanguage.extra_matcher
+                                 (UPat.var("x", dtypes.float64).cast(dtypes.bfloat16), lambda x: x.cast(dtypes.float32).cast(dtypes.bfloat16)),
+                                 (UPat.var("x", dtypes.bfloat16).cast(dtypes.float16), lambda x: x.cast(dtypes.float32).cast(dtypes.float16)),
+    (UPat((Ops.SQRT, Ops.TRUNC), name="alu"), no_vectorized_alu)]) + create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast + \
+    CStyleLanguage.extra_matcher
 
   if sys.platform == 'win32':
     kernel_typedef = "__attribute__((ms_abi)) void"
@@ -259,6 +278,11 @@ class ClangRenderer(CStyleLanguage):
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     defines = '\n'.join(self._render_defines(uops))
     return defines + "\n" + self._render_body(function_name, kernel, bufs, uops, prefix) + "\n" + self._render_entry(function_name, bufs)
+
+class ClangJITRenderer(ClangRenderer):
+  def __init__(self):
+    from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
+    self.compiler = ClangJITCompiler()
 
 class OpenCLRenderer(CStyleLanguage):
   device = "CL"
@@ -373,6 +397,7 @@ class CUDARenderer(CStyleLanguage):
   code_for_workitem = {"g": lambda x: f"blockIdx.{chr(120+int(x))}", "l": lambda x: f"threadIdx.{chr(120+int(x))}",
                        "i": lambda x: f"(blockIdx.{chr(120+int(x))}*blockDim.{chr(120+int(x))}+threadIdx.{chr(120+int(x))})"}
   code_for_op = { **CStyleLanguage.code_for_op,
+    Ops.TRUNC: lambda x,dtype: f"htrunc({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"trunc({x})",
     Ops.SIN: lambda x,dtype: f"hsin({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"sin({x})",
     Ops.LOG2: lambda x,dtype: f"hlog2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"log2({x})",
     Ops.EXP2: lambda x,dtype: f"hexp2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"exp2({x})",
@@ -421,12 +446,6 @@ class CUDARenderer(CStyleLanguage):
 
     return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
 
-def cast_float_to_bf16(x: UOp) -> UOp:
-  assert x.dtype == dtypes.float, "cast float -> bf16 must start with float"
-  x = x.bitcast(dtypes.uint)
-  x = (-x & 0x7f800000).where(x + ((x >> 16) & 1) + 0x7fff, (x & 0xffff).where((x | 0x10000), x))
-  return (x >> 16).cast(dtypes.ushort).bitcast(dtypes.bfloat16)
-
 class AMDRenderer(CStyleLanguage):
   device = "AMD"
   shared_max = 65536
@@ -472,11 +491,9 @@ class AMDRenderer(CStyleLanguage):
     (UPat(Ops.WMMA, name="x", dtype=dtypes.float.vec(4)),
       lambda x: UOp(Ops.WMMA, x.dtype, (x.src[0].bitcast(dtypes.uint64), x.src[1].bitcast(dtypes.uint64),
         x.src[2]), (*x.arg,)) if x.src[0].dtype in (dtypes.fp8e4m3.vec(8), dtypes.fp8e5m2.vec(8)) else None),
-    # bfloat16 casting
+    # bfloat16 constant casting
     (UPat.cvar('x', dtypes.bfloat16), lambda x: cast_float_to_bf16(UOp.const(dtypes.float, x.arg))),
-    (UPat(Ops.CAST, dtypes.float, (UPat.var("x", dtypes.bfloat16),)),
-     lambda x: (x.bitcast(dtypes.ushort).cast(dtypes.uint)<<16).bitcast(dtypes.float)),
-    (UPat(Ops.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float),)), cast_float_to_bf16)]) + extra_pm
+  ]) + pm_manual_bf16_cast + extra_pm
 
   def render_vector_prefix(self, dtype:DType) -> str:
     vec, scal = self.render_dtype(dtype), self.render_dtype(dtype.scalar())

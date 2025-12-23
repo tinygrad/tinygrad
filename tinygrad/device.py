@@ -1,11 +1,11 @@
 from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
-from typing import Any, Generic, TypeVar, Iterator, Sequence, cast, Generator
+from typing import Any, Generic, TypeVar, Iterator, Generator
 import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal
-from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored, CPU_LLVM
-from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup
-from tinygrad.helpers import unwrap_class_type, suppress_finalizing, select_first_inited, VIZ
+from tinygrad.helpers import CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored
+from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, dedup, ContextVar
+from tinygrad.helpers import unwrap_class_type, suppress_finalizing, select_first_inited, VIZ, CPU_LLVM, CPU_LVP, NV_PTX, CUDA_PTX, NV_NAK
 from tinygrad.dtype import DType, ImageDType, PtrDType, dtypes, _to_np_dtype
 from tinygrad.renderer import Renderer
 
@@ -238,6 +238,7 @@ class Allocator(Generic[DeviceType]):
   # def _as_buffer(self, src) -> memoryview:
   # def _offset(self, buf, size:int, offset:int):
   # def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
+  def _encode_decode(self, bufout, bufin, desc, hist:list, shape:tuple[int,...], frame_pos:int): raise NotImplementedError("need encdec") # optional
 
 class LRUAllocator(Allocator, Generic[DeviceType]):
   """
@@ -276,29 +277,53 @@ class Compiler:
     return lib
   def disassemble(self, lib:bytes): pass
 
-CompilerPairT = tuple[functools.partial|type[Renderer], functools.partial|type[Compiler]]
+@dataclass(frozen=True)
+class CompilerPair: renderer:type[Renderer]|functools.partial; compiler:type[Compiler]|functools.partial|None; ctrl_var:ContextVar|None = None # noqa: E702
+
+@dataclass(frozen=True)
+class CompilerSet: cset:list[CompilerPair]; ctrl_var:ContextVar|None = None # noqa: E702
+
 class Compiled:
   profile_events:list[ProfileEvent] = [ProfileDeviceEvent("CPU")] # NOTE: CPU is the default device.
 
-  def __init__(self, device:str, allocator:Allocator, compilers:Sequence[CompilerPairT]|None, runtime, graph=None, group_id=None):
+  def __init__(self, device:str, allocator:Allocator, compilers:CompilerSet|None, runtime, graph=None, group_id=None):
     self.device, self.allocator, self.runtime, self.graph, self.group_id = device, allocator, runtime, graph, group_id
-    self.compilers = cast(list[CompilerPairT], compilers or [(Renderer, Compiler)])
 
-    envnames = [self._get_compiler_envvar(c) for r,c in self.compilers]
-    enable_comps = set((en, comp_pair) for en, comp_pair in zip(envnames, self.compilers) if en is not None and getenv(en, -1) == 1)
-    disable_comps = set((en, comp_pair) for en, comp_pair in zip(envnames, self.compilers) if en is not None and getenv(en, -1) == 0)
+    self.comps_ctrl_var = compilers.ctrl_var if compilers is not None else None
+    self.comp_sets:dict[Any, tuple[ContextVar|None, tuple[type[Renderer]|functools.partial, type[Compiler]|functools.partial|None]]] = {}
+    self.cached_pair:dict[Any, tuple[Renderer, Compiler|None]] = {}
+    for cpair in (compilers.cset if compilers is not None else [CompilerPair(Renderer, Compiler)]):
+      self.comp_sets[self._compiler_name(cpair.renderer, cpair.compiler)] = (cpair.ctrl_var, (cpair.renderer, cpair.compiler))
 
-    if len(enable_comps) > 1: raise RuntimeError(f"{self.device}: multiple compilers set in env {enable_comps}")
-    for _, comp_pair in disable_comps: self.compilers.remove(comp_pair)
+  @property
+  def renderer(self) -> Renderer: return self._select_compiler_pair()[0]
 
-    self.renderer, self.compiler = select_first_inited([list(enable_comps)[0][1]] if len(enable_comps) == 1 else self.compilers,
-                                                       f"No compiler for {self.device} is available")
+  @property
+  def compiler(self) -> Compiler:
+    if (ret:=self.renderer.compiler or self._select_compiler_pair()[1]) is None: raise RuntimeError(f"no compiler for {self.device}")
+    return ret
 
-    if DEBUG >= 1: print(f"{self.device}: using {self.compiler.__class__.__name__}")
+  def _compiler_name(self, r:type[Renderer]|functools.partial, c:type[Compiler]|functools.partial|None) -> str:
+    devname = self.device.split(':')[0].upper()
+    if c is None: return unwrap_class_type(r).__name__.upper().removesuffix("RENDERER").removeprefix(devname) or devname
+    return unwrap_class_type(c).__name__.upper().removesuffix("COMPILER").removeprefix(devname) or devname
 
-  def _get_compiler_envvar(self, c):
-    compiler_name = f"{unwrap_class_type(c).__name__.upper().removesuffix('COMPILER').removeprefix(devname:=self.device.split(':')[0].upper())}"
-    return f"{devname}_{compiler_name if len(compiler_name) > 0 else unwrap_class_type(c).__name__.upper()}"
+  def _select_compiler_pair(self) -> tuple[Renderer, Compiler|None]:
+    # select forced compiler from global env var.
+    forced_comps = set([self.comp_sets[val][1]] if self.comps_ctrl_var is not None and (val:=self.comps_ctrl_var.value) else [])
+
+    # add forced compilers from individual env vars (only if global env var is not set, as it takes precedence).
+    if not forced_comps: forced_comps |= set(rc for en, rc in self.comp_sets.values() if en is not None and en.value == 1)
+    if len(forced_comps) > 1: raise RuntimeError(f"{self.device}: multiple compilers set in env {forced_comps}")
+
+    # select remaining compilers (all or forced only)
+    comps = list(rc for en, rc in self.comp_sets.values())
+
+    # remove disabled compilers
+    for en, rc in self.comp_sets.values():
+      if en is not None and en.value == 0 and rc in comps: comps.remove(rc)
+
+    return select_first_inited(list(forced_comps) if len(forced_comps)>0 else comps, f"No compiler for {self.device} is available", self.cached_pair)
 
   def synchronize(self):
     """
@@ -324,11 +349,13 @@ def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
   if device is None: device = Device.DEFAULT
   if dtype == dtypes.bfloat16:
     if device == "METAL": return not CI
-    if device in {"CUDA", "NV"}: return not CI and not getenv(f"{device}_PTX") and not getenv("NV_NAK")
-    if device in {"CPU"}: return not CI and platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"} and not getenv("CPU_LVP")
+    if device == "CUDA": return not CI and not CUDA_PTX
+    if device == "NV": return not CI and not NV_PTX and not NV_NAK
+    if device in {"CPU"}: return not CI and platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"} and not CPU_LVP
     return device in {"AMD", "PYTHON", "NULL"}
   if dtype in dtypes.fp8s:
-    if device in {"CUDA", "NV"}: return not CI and not getenv(f"{device}_PTX") and not getenv("NV_NAK")
+    if device == "CUDA": return not CI and not CUDA_PTX
+    if device == "NV": return not CI and not NV_PTX and not NV_NAK
     if device == "AMD": return not CI and getattr(Device["AMD"], "target") in {(9,4,2), (9,5,0)}
     return device in {"PYTHON", "NULL"}
   if device == "WEBGPU": return dtype in [dtypes.bool, dtypes.char, dtypes.uchar, dtypes.short,
@@ -343,7 +370,7 @@ def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
     if device in ["CUDA", "NV"]: return not CI
     if device == "CPU" and CPU_LLVM: return OSX
     if device == "PYTHON": return sys.version_info >= (3, 12)
-  if dtype == dtypes.float64: return device != "METAL" and not (OSX and device == "CL")
+  if dtype == dtypes.float64: return device not in {"METAL", "QCOM"} and not (OSX and device == "CL") and not getenv("NULL_IR3")
   return True
 
 if PROFILE:
@@ -366,20 +393,23 @@ def enumerate_devices_str() -> Generator[str, None, None]:
     compilers_results, any_works = [], False
     try:
       d = Device[device]
-      default_renderer, default_compiler = d.renderer, d.compiler
+      default_comp_pairs, default_compiler, cc_ctrl_var = d.comp_sets, d.compiler, d.comps_ctrl_var
       try:
-        for r,c in d.compilers:
+        for k,(en,(r,c)) in default_comp_pairs.items():
+          d.comp_sets = {k:(None,(r,c))} # env var set to None, so it doesn't interfere
+          d.comps_ctrl_var = None
           try:
-            d.renderer, d.compiler = r(), c()
+            # d.renderer, d.compiler = r(), c()
             with Context(CACHELEVEL=0): test = (Tensor([1,2,3], device=device) * 2).tolist()
             if test != [2,4,6]: raise ValueError(f"got {test} instead of [2, 4, 6]")
-            default_text = '(default)' if type(default_compiler) is type(d.compiler) else f'({d._get_compiler_envvar(c)}=1 to make default)'
+            set_text = f'({cc_ctrl_var.key}={d._compiler_name(r, c)} to make default)' if cc_ctrl_var is not None else ''
+            default_text = '(default)' if type(default_compiler) is type(d.compiler) else set_text
             compilers_results.append(f"{colored('+', 'green')} {unwrap_class_type(c).__name__} {default_text}")
             any_works = True
           except Exception as e: compilers_results.append(f"{colored('-', 'yellow')} {unwrap_class_type(c).__name__}: {e}")
       finally:
         # put the defaults back!
-        d.renderer, d.compiler = default_renderer, default_compiler
+        d.comp_sets, d.comps_ctrl_var = default_comp_pairs, cc_ctrl_var
       result = (colored('PASS', 'green') if any_works else f"{colored('FAIL', 'yellow')}") + ''.join([f'\n{" "*16} {x}' for x in compilers_results])
     except Exception as e:
       result = f"{colored('FAIL', 'red')} {e}"

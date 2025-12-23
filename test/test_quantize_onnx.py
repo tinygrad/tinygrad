@@ -5,7 +5,8 @@ from dataclasses import replace
 from tinygrad import Tensor, Context, Device, dtypes
 from tinygrad.uop.ops import Ops
 from tinygrad.codegen.opt import Opt, OptOps
-from tinygrad.engine.realize import CompiledRunner, ExecItem, lower_schedule_item, get_program
+from tinygrad.engine.realize import CompiledRunner, get_program
+from tinygrad.engine.schedule import ExecItem
 
 N = 512
 
@@ -38,12 +39,12 @@ def create_gemm_model(model_path:str, batch_size=N, in_size=N, out_size=N, bias=
 
 def sexec(out:Tensor, opts:list[Opt], replace_src=None, run_count=3):
   si = out.schedule()[-1]
-  prg = get_program(si.ast, opts=opts)
+  prg = get_program(si.ast, renderer=Device[Device.DEFAULT].renderer, opts=opts)
   if replace_src is not None:
     old_name = prg.src.split("__attribute__((noinline)) void ")[1].split("(")[0]
     prg = replace(prg, src=replace_src + "/* DSP boilerplate */" + prg.src.split("/* DSP boilerplate */")[1].replace(old_name, "fxn"))
-  ei = ExecItem(CompiledRunner(prg), [x.ensure_allocated() for x in si.bufs], si.metadata)
-  for _ in range(run_count): ei.run(wait=True)
+  new_si = ExecItem(si.ast, [x.ensure_allocated() for x in si.bufs], si.metadata, prg=CompiledRunner(prg))
+  for _ in range(run_count): new_si.run(wait=True)
 
 def get_quantized_model(sz):
   from onnxruntime.quantization import quantize_static, QuantFormat, QuantType, CalibrationDataReader
@@ -74,8 +75,8 @@ class TestQuantizeOnnxCPU(unittest.TestCase):
     inp = Tensor(np.random.uniform(size=(sz, sz)).astype(np.float32))
     with Context(QUANTIZE=1):
       sched = run_onnx({"input":inp})["output"].schedule()
-      ei = lower_schedule_item(sched[-2])
-      daccs = [u for u in ei.prg.p.uops if u.op is Ops.DEFINE_REG]
+      sched[-2].lower()
+      daccs = [u for u in sched[-2].prg.p.uops if u.op is Ops.DEFINE_REG]
       assert all(u.dtype.scalar() is dtypes.int for u in daccs)
 
 @unittest.skipIf(Device.DEFAULT != "DSP", "only tests for DSP")

@@ -3,7 +3,6 @@ from tinygrad import dtypes, Tensor
 from tinygrad.helpers import getenv, get_single_element
 from tinygrad.dtype import _to_np_dtype
 from tinygrad.codegen.opt import OptOps
-from tinygrad.engine.realize import lower_schedule
 
 dtype_in = (dtypes.half if getenv("HALF") else dtypes.bfloat16 if getenv("BFLOAT16") else
             dtypes.fp8e4m3 if getenv("FP8E4M3") else dtypes.fp8e5m2 if getenv("FP8E5M2") else dtypes.float)
@@ -40,8 +39,8 @@ if __name__ == "__main__":
 
   if getenv("SHOULD_USE_TC"):
     sched = a.matmul(b, dtype=acc_dtype).schedule()
-    lowered = list(lower_schedule(sched))
-    ei = get_single_element(lowered)[1]
+    ei = get_single_element(sched)
+    ei.lower()
     assert any(opt.op is OptOps.TC for opt in ei.prg.p.applied_opts), f"TC not triggered, {ei.prg.p.applied_opts}"
 
   ref = a.numpy().astype(np.float32) @ b.numpy().astype(np.float32)
