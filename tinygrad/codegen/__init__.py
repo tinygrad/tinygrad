@@ -18,7 +18,6 @@ from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_split_store
 from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, pm_mops
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
-from tinygrad.device import Compiler
 
 pm_syntactic_sugar = PatternMatcher([
   # INDEX on ptr INDEX concats them
@@ -123,30 +122,6 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher) -> list[UOp]:
     replaced[u] = ret[0]
     newlst.extend(ret[1])
   return newlst
-
-def do_linearize(prg:UOp, sink:UOp) -> UOp:
-  lst = line_rewrite(linearize(sink), pm_linearize_cleanups)
-  if SPEC: type_verify(lst, program_spec)
-  return prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=tuple(lst)),))
-
-def do_render(ctx:tuple[Renderer, Compiler], prg:UOp, lin:UOp) -> UOp:
-  src = ctx[0].render(list(lin.src))
-  return prg.replace(src=prg.src + (UOp(Ops.SOURCE, arg=src),))
-
-def do_compile(ctx:tuple[Renderer, Compiler], prg:UOp, src:UOp) -> UOp:
-  lib = ctx[1].compile_cached(src.arg)
-  return prg.replace(src=prg.src + (UOp(Ops.BINARY, arg=lib),))
-
-pm_to_program = PatternMatcher([
-  (UPat(Ops.PROGRAM, src=(UPat(Ops.SINK, name="sink"),), name="prg"), do_linearize),
-  (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.LINEAR, name="lin")), name="prg"), do_render),
-  (UPat(Ops.PROGRAM, src=(UPat(), UPat(), UPat(Ops.SOURCE, name="src")), name="prg"), do_compile),
-])
-
-def full_rewrite_to_program(sink:UOp, ren:Renderer, compiler:Compiler) -> UOp:
-  full_sink = full_rewrite_to_sink(sink, ren, optimize=sink.tag is None)
-  sink = UOp(Ops.PROGRAM, src=(full_sink,))
-  return graph_rewrite(sink, pm_to_program, ctx=(ren, compiler), name="linearize/render/compile")
 
 def full_rewrite(sink:UOp, ren:Renderer|None=None) -> list[UOp]:
   """
