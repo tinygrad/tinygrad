@@ -28,9 +28,9 @@ def __getattr__(nm):
       [i for i in system("dpkg -L libc6-dev").split() if 'sys/mman.h' in i or 'sys/syscall.h' in i] +
       ["/usr/include/string.h", "/usr/include/elf.h", "/usr/include/unistd.h", "/usr/include/asm-generic/mman-common.h"]), use_errno=True)
     case "opencl": return load("opencl", ["find_library('OpenCL')"], ["/usr/include/CL/cl.h"])
-    case "cuda": return load("cuda", ["CUDA_PATH"], ["/usr/include/cuda.h"], args=["-D__CUDA_API_VERSION_INTERNAL"], parse_macros=False, prolog=["from tinygrad.runtime.support.cuda import CUDA_PATH"])
-    case "nvrtc": return load("nvrtc", ["NVRTC_PATH"], ["/usr/include/nvrtc.h"], prolog=["from tinygrad.runtime.support.cuda import NVRTC_PATH"])
-    case "nvjitlink": load("nvjitlink", ["NVJITLINK_PATH"], [root/"extra/nvJitLink.h"], prolog=["from tinygrad.runtime.support.cuda import NVJITLINK_PATH"])
+    case "cuda": return load("cuda", ["find_library('cuda')"], ["/usr/include/cuda.h"], args=["-D__CUDA_API_VERSION_INTERNAL"], parse_macros=False)
+    case "nvrtc": return load("nvrtc", ["find_library('nvrtc')"], ["/usr/include/nvrtc.h"])
+    case "nvjitlink": load("nvjitlink", ["find_library('nvJitLink')"], [root/"extra/nvJitLink.h"])
     case "kfd": return load("kfd", [], ["/usr/include/linux/kfd_ioctl.h"])
     case "nv_570" | "nv_580":
       return load(nm, [], [

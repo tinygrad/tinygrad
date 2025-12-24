@@ -2,9 +2,9 @@
 import ctypes
 from tinygrad.helpers import unwrap
 from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-from tinygrad.runtime.support.cuda import NVRTC_PATH
+from ctypes.util import find_library
 def dll():
-  try: return ctypes.CDLL(unwrap(NVRTC_PATH))
+  try: return ctypes.CDLL(unwrap(find_library('nvrtc')))
   except: pass
   return None
 dll = dll()
