@@ -16,8 +16,11 @@ def _try_dlopen_gpuocelot():
 
 class PythonRemu:
   """Python RDNA3 emulator wrapper that matches the libremu.so interface."""
+  valid_mem_ranges: set[tuple[int, int]] = set()
+
   def run_asm(self, lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int) -> int:
-    from extra.assembly.rdna3.emu import run_asm
+    from extra.assembly.rdna3.emu import run_asm, set_valid_mem_ranges
+    set_valid_mem_ranges(self.valid_mem_ranges)
     return run_asm(lib, lib_sz, gx, gy, gz, lx, ly, lz, args_ptr)
 
 def _try_dlopen_remu():
