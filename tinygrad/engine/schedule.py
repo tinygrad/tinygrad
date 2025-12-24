@@ -1,8 +1,6 @@
-from __future__ import annotations
 import time
 from typing import cast
-from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites
-from tinygrad.uop.ops import PatternMatcher, UPat, graph_rewrite, graph_rewrite_map
+from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, flatten, pluralize, Context
