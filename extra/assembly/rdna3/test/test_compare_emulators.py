@@ -47,6 +47,7 @@ class RustEmulator:
     self.lib.wave_get_snapshot.argtypes = [ctypes.c_void_p, ctypes.POINTER(CStateSnapshot)]
     self.lib.wave_set_sgpr.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32]
     self.lib.wave_set_vgpr.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32]
+    self.lib.wave_init_lds.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
     self.lib.wave_free.argtypes = [ctypes.c_void_p]
     self.ctx = None
 
@@ -58,6 +59,7 @@ class RustEmulator:
   def step(self) -> int: return self.lib.wave_step(self.ctx)
   def set_sgpr(self, idx: int, val: int): self.lib.wave_set_sgpr(self.ctx, idx, val)
   def set_vgpr(self, lane: int, idx: int, val: int): self.lib.wave_set_vgpr(self.ctx, lane, idx, val)
+  def init_lds(self, size: int): self.lib.wave_init_lds(self.ctx, size)
 
   def get_snapshot(self) -> StateSnapshot:
     snap = CStateSnapshot()
@@ -91,9 +93,9 @@ class PythonEmulator:
                          vgpr=[list(self.state.vgpr[i]) for i in range(WAVE_SIZE)])
 
 def compare_emulators_with_memory(kernel: bytes, n_lanes: int, buf_sizes: list, max_steps: int = 1000, debug: bool = False,
-                                   global_size: tuple[int, int, int] = (1, 1, 1)) -> tuple[bool, str]:
+                                   global_size: tuple[int, int, int] = (1, 1, 1), trace_len: int = 10) -> tuple[bool, str]:
   """Run both emulators with memory set up for tinygrad kernels, executing all workgroups."""
-  from extra.assembly.rdna3.emu import set_valid_mem_ranges
+  from extra.assembly.rdna3.emu import set_valid_mem_ranges, decode_program
 
   # Allocate buffers
   buffers = []
@@ -110,6 +112,9 @@ def compare_emulators_with_memory(kernel: bytes, n_lanes: int, buf_sizes: list, 
   ranges.add((args_ptr, ctypes.sizeof(args)))
   set_valid_mem_ranges(ranges)
 
+  # Decode program once for disassembly
+  program = decode_program(kernel)
+
   gx, gy, gz = global_size
   total_steps = 0
 
@@ -121,6 +126,9 @@ def compare_emulators_with_memory(kernel: bytes, n_lanes: int, buf_sizes: list, 
         rust.create(kernel, n_lanes)
         python.create(kernel, n_lanes)
 
+        # Initialize LDS (64KB, standard size for AMD GPUs)
+        rust.init_lds(65536)
+
         for emu in [rust, python]:
           emu.set_sgpr(0, args_ptr & 0xffffffff)
           emu.set_sgpr(1, (args_ptr >> 32) & 0xffffffff)
@@ -129,25 +137,40 @@ def compare_emulators_with_memory(kernel: bytes, n_lanes: int, buf_sizes: list, 
           emu.set_sgpr(15, gidz)
 
         step = 0
+        # Keep trace of last N instructions for debugging
+        trace: list[tuple[int, int, str, StateSnapshot, StateSnapshot]] = []  # (step, pc, disasm, rust_before, python_before)
         try:
           while step < max_steps:
             rust_before = rust.get_snapshot()
             python_before = python.get_snapshot()
 
-            if debug:
-              inst = python.program.get(python.state.pc)
-              print(f"WG({gidx},{gidy},{gidz}) Step {step}: PC={python.state.pc}, inst={inst.disasm() if inst else 'N/A'}")
+            inst = program.get(python_before.pc)
+            inst_str = inst.disasm() if inst else f"unknown at PC={python_before.pc}"
+            trace.append((step, python_before.pc, inst_str, rust_before, python_before))
+            if len(trace) > trace_len: trace.pop(0)
+
+            if debug: print(f"WG({gidx},{gidy},{gidz}) Step {step}: PC={python_before.pc}, inst={inst_str}")
 
             diffs = rust_before.diff(python_before, n_lanes)
-            if diffs: return False, f"WG({gidx},{gidy},{gidz}) Step {step} before: states differ:\n  " + "\n  ".join(diffs)
+            if diffs:
+              # Build trace showing what happened before the divergence
+              trace_lines = []
+              for s, pc, d, rb, pb in trace[:-1]:
+                trace_lines.append(f"    step {s}: PC={pc:3d} {d}")
+                # Show any state changes from this instruction
+                if trace.index((s, pc, d, rb, pb)) < len(trace) - 2:
+                  next_rb, next_pb = trace[trace.index((s, pc, d, rb, pb)) + 1][3:5]
+                  inst_diffs = rb.diff(next_rb, n_lanes)
+                  if inst_diffs: trace_lines.append(f"             rust changes: {', '.join(inst_diffs[:3])}")
+              trace_str = "\n".join(trace_lines)
+              return False, f"WG({gidx},{gidy},{gidz}) Step {step} before inst '{inst_str}': states differ:\n  " + "\n  ".join(diffs[:10]) + f"\n  Recent instructions:\n{trace_str}"
 
             rust_result = rust.step()
             python_result = python.step()
 
             if rust_result != python_result:
-              inst = python.program.get(rust_before.pc)
-              inst_str = inst.disasm() if inst else f"unknown at PC={rust_before.pc}"
-              return False, f"WG({gidx},{gidy},{gidz}) Step {step}: different return codes: rust={rust_result}, python={python_result}, inst={inst_str}"
+              trace_str = "\n".join(f"    step {s}: PC={pc:3d} {d}" for s, pc, d, _, _ in trace)
+              return False, f"WG({gidx},{gidy},{gidz}) Step {step}: different return codes: rust={rust_result}, python={python_result}, inst={inst_str}\n  Recent instructions:\n{trace_str}"
 
             if rust_result == -1:
               total_steps += step + 1

@@ -66,6 +66,12 @@ pub extern "C" fn wave_set_vgpr(ctx: *mut WaveContext, lane: u32, idx: u32, val:
 }
 
 #[no_mangle]
+pub extern "C" fn wave_init_lds(ctx: *mut WaveContext, size: u32) {
+    if ctx.is_null() { return; }
+    unsafe { (*ctx).lds.data.resize(size as usize, 0); }
+}
+
+#[no_mangle]
 pub extern "C" fn wave_free(ctx: *mut WaveContext) {
     if !ctx.is_null() { unsafe { drop(Box::from_raw(ctx)); } }
 }

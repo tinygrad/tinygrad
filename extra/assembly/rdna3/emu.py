@@ -7,15 +7,22 @@ from tinygrad.helpers import DEBUG, colored
 from extra.assembly.rdna3.lib import Inst32, Inst64, bits
 from extra.assembly.rdna3.autogen import (
   SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, DS, FLAT, VOPD,
-  SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, DSOp, FLATOp, GLOBALOp, VOPDOp
+  SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, DSOp, FLATOp, GLOBALOp, VOPDOp, VOP3POp
 )
 
 class VOPC(Inst32):
   encoding = bits[31:25] == 0b0111110
   op, src0, vsrc1 = bits[24:17], bits[8:0], bits[16:9]
 
+class VOP3P(Inst64):
+  encoding = bits[31:26] == 0b110011
+  op, vdst = bits[22:16], bits[7:0]
+  neg_hi, opsel, opsel_hi2, clamp = bits[10:8], bits[13:11], bits[14:14], bits[15:15]
+  src0, src1, src2 = bits[40:32], bits[49:41], bits[58:50]
+  opsel_hi, neg = bits[60:59], bits[63:61]
+
 # Type aliases
-Inst = Inst32 | Inst64
+Inst = Inst32 | Inst64 | VOP3P
 Program = dict[int, Inst]  # word offset -> instruction
 
 # constants and helpers
@@ -108,21 +115,22 @@ class WaveState:
     return self.rsrc(v, lane) | ((self.rsrc(v+1, lane) if v <= 105 or 256 <= v <= 511 else 0) << 32)
 
   # Pending scalar writes - accumulated during lane execution, applied after all lanes complete
+  # These start at 0 and only set bits for lanes that return true (matching Rust emulator behavior)
   _pend_vcc: int | None = None
   _pend_exec: int | None = None
   _pend_sgpr: dict[int, int] = field(default_factory=dict)
 
   def pend_vcc_lane(self, lane: int, val: bool) -> None:
-    if self._pend_vcc is None: self._pend_vcc = self.vcc
-    self._pend_vcc = (self._pend_vcc & ~(1 << lane)) | (int(val) << lane)
+    if self._pend_vcc is None: self._pend_vcc = 0  # start fresh at 0
+    if val: self._pend_vcc |= (1 << lane)
 
   def pend_exec_lane(self, lane: int, val: bool) -> None:
-    if self._pend_exec is None: self._pend_exec = self.exec_mask
-    self._pend_exec = (self._pend_exec & ~(1 << lane)) | (int(val) << lane)
+    if self._pend_exec is None: self._pend_exec = 0  # start fresh at 0
+    if val: self._pend_exec |= (1 << lane)
 
   def pend_sgpr_lane(self, reg: int, lane: int, val: bool) -> None:
-    if reg not in self._pend_sgpr: self._pend_sgpr[reg] = self.rsgpr(reg)
-    self._pend_sgpr[reg] = (self._pend_sgpr[reg] & ~(1 << lane)) | (int(val) << lane)
+    if reg not in self._pend_sgpr: self._pend_sgpr[reg] = 0  # start fresh at 0
+    if val: self._pend_sgpr[reg] |= (1 << lane)
 
   def commit_pends(self) -> None:
     """Apply all pending scalar writes after all lanes have executed."""
@@ -139,7 +147,7 @@ def decode_format(word: int) -> tuple[type[Inst] | None, bool]:
     if enc == 0b0101:
       op = (word >> 16) & 0x3ff
       return (VOP3SD, True) if op in (288, 289, 290, 764, 765, 766, 767, 768, 769, 770) else (VOP3, True)
-    return {0b0011: (None, True), 0b0110: (DS, True), 0b0111: (FLAT, True), 0b0010: (VOPD, True)}.get(enc, (None, True))
+    return {0b0011: (VOP3P, True), 0b0110: (DS, True), 0b0111: (FLAT, True), 0b0010: (VOPD, True)}.get(enc, (None, True))
   if hi2 == 0b10:
     enc = (word >> 23) & 0x7f
     return {0b1111101: (SOP1, False), 0b1111110: (SOPC, False), 0b1111111: (SOPP, False)}.get(enc, (SOPK, False) if ((word >> 28) & 0xf) == 0b1011 else (SOP2, False))
@@ -440,8 +448,8 @@ def exec_vopc_vop3(st: WaveState, op: int, s0: int, s1: int, sdst: int, lane: in
 def exec_vopc(st: WaveState, inst: VOPC, lane: int) -> None:
   op, s0, s1 = inst.op, st.rsrc(inst.src0, lane), st.vgpr[lane][inst.vsrc1]
   result, is_cmpx = vopc_compare(op, s0, s1), op >= 128
-  st.pend_vcc_lane(lane, result)
-  if is_cmpx: st.pend_exec_lane(lane, result)
+  if is_cmpx: st.pend_exec_lane(lane, result)  # CMPX only writes to EXEC
+  else: st.pend_vcc_lane(lane, result)  # CMP writes to VCC
 
 def exec_vop3sd(st: WaveState, inst: VOP3SD, lane: int) -> None:
   op, src0, src1, src2, vdst, sdst, neg = inst.op, inst.src0, inst.src1, inst.src2, inst.vdst, inst.sdst, inst.neg
@@ -506,13 +514,86 @@ def exec_vopd(st: WaveState, inst: VOPD, lane: int) -> None:
   exec_vopd_op(st, inst.opx, inst.srcx0, inst.vsrcx1, inst.vdstx, lane)
   exec_vopd_op(st, inst.opy, inst.srcy0, inst.vsrcy1, (inst.vdsty << 1) | ((inst.vdstx & 1) ^ 1), lane)
 
+def f16(i: int) -> float:
+  """Convert 16-bit int to float via half-precision."""
+  return struct.unpack('<e', struct.pack('<H', i & 0xffff))[0]
+
+def i16(f: float) -> int:
+  """Convert float to 16-bit int via half-precision."""
+  return struct.unpack('<H', struct.pack('<e', f))[0]
+
+def exec_vop3p(st: WaveState, inst: VOP3P, lane: int) -> None:
+  """Execute VOP3P (packed) instruction."""
+  op, vdst = inst.op, inst.vdst
+  V = st.vgpr[lane]
+  # Get source values
+  s0, s1, s2 = st.rsrc(inst.src0, lane), st.rsrc(inst.src1, lane), st.rsrc(inst.src2, lane)
+  # Extract opsel bits
+  opsel = [(inst.opsel >> i) & 1 for i in range(3)]
+  opsel_hi = [(inst.opsel_hi >> i) & 1 for i in range(2)] + [inst.opsel_hi2]
+  neg = inst.neg
+  neg_hi = inst.neg_hi
+
+  def get_src_f16(src: int, idx: int, use_hi: bool) -> float:
+    """Get f16 source with negation applied."""
+    val = ((src >> 16) & 0xffff) if use_hi else (src & 0xffff)
+    f = f16(val)
+    # Apply negation from neg_hi (for lo) or neg (for hi)
+    if use_hi:
+      if (neg >> idx) & 1: f = -f
+    else:
+      if (neg_hi >> idx) & 1: f = -f
+    return f
+
+  if op == VOP3POp.V_FMA_MIX_F32:
+    # D = S0 * S1 + S2, with mixed f16/f32 inputs
+    def get_src_f32(src: int, idx: int) -> float:
+      if not opsel_hi[idx]:  # full f32
+        f = f32(src)
+        if (neg_hi >> idx) & 1: f = -f
+        return abs(f) if (neg_hi >> idx) & 1 else f  # neg_hi acts as abs for f32
+      elif opsel[idx]:  # high f16
+        return float(f16((src >> 16) & 0xffff))
+      else:  # low f16
+        return float(f16(src & 0xffff))
+    src0_f = get_src_f32(s0, 0)
+    src1_f = get_src_f32(s1, 1)
+    src2_f = get_src_f32(s2, 2)
+    V[vdst] = i32(src0_f * src1_f + src2_f)
+  elif op == VOP3POp.V_FMA_MIXLO_F16:
+    # D.lo = f16(S0 * S1 + S2), D.hi unchanged
+    def get_src_f32(src: int, idx: int) -> float:
+      if not opsel_hi[idx]:  # full f32
+        return abs(f32(src)) if (neg_hi >> idx) & 1 else f32(src)
+      elif opsel[idx]:  # high f16
+        return float(f16((src >> 16) & 0xffff))
+      else:  # low f16
+        return float(f16(src & 0xffff))
+    result = get_src_f32(s0, 0) * get_src_f32(s1, 1) + get_src_f32(s2, 2)
+    result_i16 = i16(result)
+    V[vdst] = (V[vdst] & 0xffff0000) | result_i16
+  elif op == VOP3POp.V_FMA_MIXHI_F16:
+    # D.hi = f16(S0 * S1 + S2), D.lo unchanged
+    def get_src_f32(src: int, idx: int) -> float:
+      if not opsel_hi[idx]:
+        return abs(f32(src)) if (neg_hi >> idx) & 1 else f32(src)
+      elif opsel[idx]:
+        return float(f16((src >> 16) & 0xffff))
+      else:
+        return float(f16(src & 0xffff))
+    result = get_src_f32(s0, 0) * get_src_f32(s1, 1) + get_src_f32(s2, 2)
+    result_i16 = i16(result)
+    V[vdst] = (V[vdst] & 0x0000ffff) | (result_i16 << 16)
+  else:
+    raise NotImplementedError(f"VOP3P op {op}")
+
 def _trace(inst: Inst, wg_id: tuple[int,int,int], tid: tuple[int,int,int], lane: int, active: bool) -> None:
   gx, gy, gz = wg_id; lx, ly, lz = tid
   hexw = f"{inst.to_int():016X}" if isinstance(inst, Inst64) else f"{inst.to_int():08X}        "
   print(f"[{gx:<3} {gy:<3} {gz:<3}] [{lx:<3} {ly:<3} {lz:<3}] {colored(f'{lane:<2} {hexw}', 'green' if active else None)} {inst.disasm()}")
 
 SCALAR: dict[type, Any] = {SOP1: exec_sop1, SOP2: exec_sop2, SOPC: exec_sopc, SOPK: exec_sopk, SOPP: exec_sopp, SMEM: exec_smem}
-VECTOR: dict[type, Any] = {VOP1: exec_vop1, VOP2: exec_vop2, VOP3: exec_vop3, VOP3SD: exec_vop3sd, VOPC: exec_vopc, FLAT: exec_flat, DS: exec_ds, VOPD: exec_vopd}
+VECTOR: dict[type, Any] = {VOP1: exec_vop1, VOP2: exec_vop2, VOP3: exec_vop3, VOP3SD: exec_vop3sd, VOPC: exec_vopc, FLAT: exec_flat, DS: exec_ds, VOPD: exec_vopd, VOP3P: exec_vop3p}
 
 def step_wave(program: Program, st: WaveState, lds: bytearray, n_lanes: int) -> int:
   """Execute a single instruction. Returns: 0=continue, -1=endpgm, -2=barrier, 1=done (pc past program). PC is word offset."""
