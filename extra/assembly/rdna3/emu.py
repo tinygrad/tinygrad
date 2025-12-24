@@ -494,7 +494,7 @@ def exec_vopd(st: WaveState, inst: VOPD, lane: int) -> None:
 def _trace(inst: Inst, wg_id: tuple[int,int,int], tid: tuple[int,int,int], lane: int, active: bool) -> None:
   gx, gy, gz = wg_id; lx, ly, lz = tid
   hexw = f"{inst.to_int():016X}" if isinstance(inst, Inst64) else f"{inst.to_int():08X}        "
-  print(f"[{gx:<3} {gy:<3} {gz:<3}] [{lx:<3} {ly:<3} {lz:<3}] {colored(f'{lane:<2} {hexw}', 'green' if active else 'gray')} {inst.disasm()}")
+  print(f"[{gx:<3} {gy:<3} {gz:<3}] [{lx:<3} {ly:<3} {lz:<3}] {colored(f'{lane:<2} {hexw}', 'green' if active else None)} {inst.disasm()}")
 
 SCALAR: dict[type, Any] = {SOP1: exec_sop1, SOP2: exec_sop2, SOPC: exec_sopc, SOPK: exec_sopk, SOPP: exec_sopp, SMEM: exec_smem}
 VECTOR: dict[type, Any] = {VOP1: exec_vop1, VOP2: exec_vop2, VOP3: exec_vop3, VOP3SD: exec_vop3sd, VOPC: exec_vopc, FLAT: exec_flat, DS: exec_ds, VOPD: exec_vopd}
