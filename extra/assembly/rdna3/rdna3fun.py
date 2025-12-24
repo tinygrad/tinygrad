@@ -2,7 +2,7 @@
 # my goal is to write the most beautiful DSL for expressing this manual in Python
 # it should be a disassembler and assembler and only require writing code that looks like the manual
 import functools
-from tinygrad.assembly.autogen.rdna3_enum import SOP2Op, SOP1Op, SMEMOp, VOP2Op, SrcEnum
+from extra.assembly.rdna3.autogen_rdna3_enum import SOP2Op, SOP1Op, SMEMOp, VOP2Op, SrcEnum
 
 # *** supporting code ***
 
