@@ -6,7 +6,7 @@ import math
 from extra.assembly.rdna3.emu import (
   WaveState, decode_program, exec_wave, exec_workgroup, run_asm,
   write_sgpr, write_sgpr64, read_sgpr, read_sgpr64,
-  f32_to_bits, bits_to_f32, sign_ext, WAVE_SIZE
+  f32_to_bits, bits_to_f32, sign_ext, WAVE_SIZE, set_valid_mem_ranges
 )
 from extra.assembly.rdna3.autogen import *
 
@@ -18,6 +18,12 @@ def run_kernel(kernel: bytes, n_threads: int = 1, n_outputs: int = 1) -> list[in
   args_ptr = ctypes.addressof(args)
   kernel_buf = (ctypes.c_char * len(kernel))(*kernel)
   kernel_ptr = ctypes.addressof(kernel_buf)
+  # Register valid memory ranges for bounds checking
+  set_valid_mem_ranges({
+    (output_ptr, ctypes.sizeof(output)),
+    (args_ptr, ctypes.sizeof(args)),
+    (kernel_ptr, len(kernel)),
+  })
   result = run_asm(kernel_ptr, len(kernel), 1, 1, 1, n_threads, 1, 1, args_ptr)
   assert result == 0, f"run_asm failed with {result}"
   return [output[i] for i in range(n_threads * n_outputs)]
@@ -340,6 +346,12 @@ class TestMemory(unittest.TestCase):
 
     kernel_buf = (ctypes.c_char * len(kernel))(*kernel)
     kernel_ptr = ctypes.addressof(kernel_buf)
+    set_valid_mem_ranges({
+      (input_ptr, ctypes.sizeof(input_buf)),
+      (output_ptr, ctypes.sizeof(output_buf)),
+      (args_ptr, ctypes.sizeof(args)),
+      (kernel_ptr, len(kernel)),
+    })
     result = run_asm(kernel_ptr, len(kernel), 1, 1, 1, 4, 1, 1, args_ptr)
     self.assertEqual(result, 0)
     self.assertEqual([output_buf[i] for i in range(4)], [11, 21, 31, 41])
@@ -448,6 +460,35 @@ class TestVOP3(unittest.TestCase):
     out = run_kernel(kernel, n_threads=1)
     self.assertEqual(out[0], 17)
 
+  def test_v_lshl_or_b32(self):
+    """Regression test: V_LSHL_OR_B32 operand order is (s0 << s1) | s2, not (s0 << s2) | s1."""
+    kernel = make_store_kernel([
+      v_mov_b32_e32(v[1], 5),   # s0 = value to shift
+      v_mov_b32_e32(v[2], 2),   # s1 = shift amount
+      v_mov_b32_e32(v[4], 3),   # s2 = value to OR
+      v_lshl_or_b32(v[1], v[1], v[2], v[4]),  # (5 << 2) | 3 = 20 | 3 = 23
+    ])
+    out = run_kernel(kernel, n_threads=1)
+    self.assertEqual(out[0], 23)
+
+  def test_v_sqrt_f32_negative(self):
+    """Regression test: V_SQRT_F32 should return NaN for negative inputs, not 0."""
+    kernel = make_store_kernel([
+      v_mov_b32_e32(v[1], f32_to_bits(-1.0)),
+      v_sqrt_f32(v[1], v[1]),
+    ])
+    out = run_kernel(kernel, n_threads=1)
+    self.assertTrue(math.isnan(bits_to_f32(out[0])))
+
+  def test_v_rsq_f32_negative(self):
+    """Regression test: V_RSQ_F32 should return NaN for negative inputs, not inf."""
+    kernel = make_store_kernel([
+      v_mov_b32_e32(v[1], f32_to_bits(-1.0)),
+      v_rsq_f32(v[1], v[1]),
+    ])
+    out = run_kernel(kernel, n_threads=1)
+    self.assertTrue(math.isnan(bits_to_f32(out[0])))
+
 class TestVOPD(unittest.TestCase):
   def test_vopd_add_nc_u32(self):
     """Test VOPD V_DUAL_ADD_NC_U32."""
@@ -535,6 +576,11 @@ class TestMultiWave(unittest.TestCase):
 
     kernel_buf = (ctypes.c_char * len(kernel))(*kernel)
     kernel_ptr = ctypes.addressof(kernel_buf)
+    set_valid_mem_ranges({
+      (output_ptr, ctypes.sizeof(output)),
+      (args_ptr, ctypes.sizeof(args)),
+      (kernel_ptr, len(kernel)),
+    })
     result = run_asm(kernel_ptr, len(kernel), 1, 1, 1, n_threads, 1, 1, args_ptr)
     self.assertEqual(result, 0)
     # All threads should have written their tid

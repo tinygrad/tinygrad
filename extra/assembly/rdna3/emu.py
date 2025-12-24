@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes, struct, math
 from dataclasses import dataclass, field
 from typing import Any
+from tinygrad.helpers import DEBUG, colored
 from extra.assembly.rdna3.lib import Inst32, Inst64, bits
 from extra.assembly.rdna3.autogen import (
   SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, DS, FLAT, VOPD,
@@ -358,7 +359,7 @@ def exec_vop3(st: WaveState, inst: VOP3, lane: int) -> None:
     VOP3Op.V_FREXP_MANT_F32: lambda: i32(math.frexp(f32(s0))[0] if f32(s0)!=0 else 0.0),
     VOP3Op.V_FREXP_EXP_I32_F32: lambda: (math.frexp(f32(s0))[1] if f32(s0)!=0 else 0)&0xffffffff,
     VOP3Op.V_ALIGNBIT_B32: lambda: (((s0<<32)|s1)>>(s2&0x1f))&0xffffffff, VOP3Op.V_XAD_U32: lambda: ((s0*s1)+s2)&0xffffffff,
-    VOP3Op.V_LSHL_OR_B32: lambda: ((s0<<(s2&0x1f))|s1)&0xffffffff}
+    VOP3Op.V_LSHL_OR_B32: lambda: ((s0<<(s1&0x1f))|s2)&0xffffffff}
   if op == VOP3Op.V_BFE_U32: off, wd = s1 & 0x1f, s2 & 0x1f; V[vdst] = (s0 >> off) & ((1 << wd) - 1) if wd else 0
   elif op == VOP3Op.V_BFE_I32: off, wd = s1 & 0x1f, s2 & 0x1f; V[vdst] = sext((s0 >> off) & ((1 << wd) - 1), wd) & 0xffffffff if wd else 0
   elif op == VOP3Op.V_CNDMASK_B32: mask = rsrc(st, src2, lane) if src2 < 256 else st.vcc; V[vdst] = s1 if (mask >> lane) & 1 else s0
@@ -467,28 +468,40 @@ def exec_vopd(st: WaveState, inst: VOPD, lane: int) -> None:
   exec_vopd_op(st, inst.opx, inst.srcx0, inst.vsrcx1, inst.vdstx, lane)
   exec_vopd_op(st, inst.opy, inst.srcy0, inst.vsrcy1, (inst.vdsty << 1) | ((inst.vdstx & 1) ^ 1), lane)
 
-def exec_wave(program: Program, st: WaveState, lds: bytearray, n_lanes: int) -> int:
+def _trace(inst: Inst, wg_id: tuple[int,int,int], tid: tuple[int,int,int], lane: int, active: bool) -> None:
+  gx, gy, gz = wg_id; lx, ly, lz = tid
+  hexw = f"{inst.to_int():016X}" if isinstance(inst, Inst64) else f"{inst.to_int():08X}        "
+  print(f"[{gx:<3} {gy:<3} {gz:<3}] [{lx:<3} {ly:<3} {lz:<3}] {colored(f'{lane:<2} {hexw}', 'green' if active else 'gray')} {inst.disasm()}")
+
+def exec_wave(program: Program, st: WaveState, lds: bytearray, n_lanes: int, wg_id: tuple[int,int,int]=(0,0,0), local_size: tuple[int,int,int]=(1,1,1), wave_start: int=0) -> int:
   SCALAR: dict[type, Any] = {SOP1: exec_sop1, SOP2: exec_sop2, SOPC: exec_sopc, SOPK: exec_sopk, SOPP: exec_sopp, SMEM: exec_smem}
   VECTOR: dict[type, Any] = {VOP1: exec_vop1, VOP2: exec_vop2, VOP3: exec_vop3, VOP3SD: exec_vop3sd, VOPC: exec_vopc,
                               FLAT: exec_flat, DS: lambda s,i,l: exec_ds(s,i,l,lds), VOPD: exec_vopd}
+  lx, ly, lz = local_size
+  def get_tid(lane: int) -> tuple[int,int,int]:
+    t = wave_start + lane
+    return (t % lx, (t // lx) % ly, t // (lx * ly))
   while st.pc < len(program):
     inst, _ = program[st.pc]
     st.literal = inst._literal or 0
     if type(inst) in SCALAR:
+      if DEBUG >= 6: _trace(inst, wg_id, get_tid(0), 0, bool(st.exec_mask & 1))
       delta = SCALAR[type(inst)](st, inst)
       if delta == -1: return 0
       if delta == -2: st.pc += 1; return -2
       st.pc += 1 + delta
     else:
       for lane in range(n_lanes):
-        if st.exec_mask & (1 << lane): VECTOR[type(inst)](st, inst, lane)
+        active = bool(st.exec_mask & (1 << lane))
+        if DEBUG >= 6: _trace(inst, wg_id, get_tid(lane), lane, active)
+        if active: VECTOR[type(inst)](st, inst, lane)
       st.pc += 1
   return 0
 
 def exec_workgroup(program: Program, workgroup_id: tuple[int, int, int], local_size: tuple[int, int, int], args_ptr: int, dispatch_dim: int) -> None:
   lx, ly, lz = local_size
   total_threads, lds = lx * ly * lz, bytearray(65536)
-  waves: list[tuple[WaveState, int]] = []
+  waves: list[tuple[WaveState, int, int]] = []
   for wave_start in range(0, total_threads, WAVE_SIZE):
     n_lanes = min(WAVE_SIZE, total_threads - wave_start)
     st = WaveState()
@@ -501,10 +514,10 @@ def exec_workgroup(program: Program, workgroup_id: tuple[int, int, int], local_s
     for i in range(n_lanes):
       tid = wave_start + i
       st.vgpr[i][0] = tid if local_size == (lx, 1, 1) else ((tid // (lx * ly)) << 20) | (((tid // lx) % ly) << 10) | (tid % lx)
-    waves.append((st, n_lanes))
+    waves.append((st, n_lanes, wave_start))
   has_barrier = any(isinstance(inst, SOPP) and inst.op == SOPPOp.S_BARRIER for inst, _ in program)
   for _ in range(2 if has_barrier else 1):
-    for st, n_lanes in waves: exec_wave(program, st, lds, n_lanes)
+    for st, n_lanes, wave_start in waves: exec_wave(program, st, lds, n_lanes, workgroup_id, local_size, wave_start)
 
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int) -> int:
   data = (ctypes.c_char * lib_sz).from_address(lib).raw

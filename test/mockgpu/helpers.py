@@ -1,4 +1,5 @@
-import ctypes, ctypes.util, os
+import ctypes, ctypes.util
+from tinygrad.helpers import getenv
 
 def _try_dlopen_gpuocelot():
   GPUOCELOT_PATHS = [ctypes.util.find_library("gpuocelot")] if ctypes.util.find_library("gpuocelot") is not None else []
@@ -24,8 +25,8 @@ class PythonRemu:
     return run_asm(lib, lib_sz, gx, gy, gz, lx, ly, lz, args_ptr)
 
 def _try_dlopen_remu():
-  # Use Python emulator if PYTHON_REMU is set
-  if os.environ.get("PYTHON_REMU"):
+  # Use Python emulator only if PYTHON_REMU=1
+  if getenv("PYTHON_REMU"):
     return PythonRemu()
   REMU_PATHS = ["extra/remu/target/release/libremu.so", "libremu.so", "/usr/local/lib/libremu.so",
                "extra/remu/target/release/libremu.dylib", "libremu.dylib", "/usr/local/lib/libremu.dylib", "/opt/homebrew/lib/libremu.dylib"]
@@ -37,9 +38,5 @@ def _try_dlopen_remu():
         ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
     except OSError: pass
     else: return remu
-  # Fall back to Python emulator
-  try:
-    return PythonRemu()
-  except ImportError:
-    print("Could not find libremu.so or Python emulator")
-    return None
+  print("Could not find libremu.so")
+  return None
