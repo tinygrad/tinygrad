@@ -1,12 +1,23 @@
 # library for RDNA3 assembly DSL
 from __future__ import annotations
 import re
+from enum import IntEnum
 
 # *** bit field DSL: bits[31:30] == 0b10 ***
 class BitField:
-  def __init__(self, hi: int, lo: int): self.hi, self.lo = hi, lo
+  def __init__(self, hi: int, lo: int, name: str | None = None): self.hi, self.lo, self.name = hi, lo, name
+  def __set_name__(self, owner, name): self.name = name
   def __eq__(self, val: int) -> tuple[BitField, int]: return (self, val)  # type: ignore
   def mask(self) -> int: return (1 << (self.hi - self.lo + 1)) - 1
+  def __get__(self, obj, objtype=None):
+    if obj is None: return self
+    val = obj._values.get(self.name, 0)
+    val = val.val if isinstance(val, RawImm) else val.value if hasattr(val, 'value') else val.idx if hasattr(val, 'idx') else val
+    ann = getattr(type(obj), '__annotations__', {}).get(self.name)
+    if ann and isinstance(ann, type) and issubclass(ann, IntEnum):
+      try: return ann(val)
+      except ValueError: pass
+    return val
 class _Bits:
   def __getitem__(self, key) -> BitField: return BitField(key.start, key.stop) if isinstance(key, slice) else BitField(key, key)
 bits = _Bits()

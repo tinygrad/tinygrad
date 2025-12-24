@@ -3,7 +3,7 @@ from __future__ import annotations
 import ctypes, struct, math
 from dataclasses import dataclass, field
 from typing import Any
-from extra.assembly.rdna3.lib import Inst32, Inst64, RawImm, bits
+from extra.assembly.rdna3.lib import Inst32, Inst64, bits
 from extra.assembly.rdna3.autogen import (
   SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, DS, FLAT, VOPD,
   SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, DSOp, FLATOp, GLOBALOp, VOPDOp
@@ -42,10 +42,6 @@ class WaveState:
   pc: int = 0
   literal: int = 0
 
-def get_field(inst: Inst, name: str) -> int:
-  val = inst._values.get(name, 0)
-  return val.val if isinstance(val, RawImm) else (val.value if hasattr(val, 'value') else val)
-
 def decode_format(word: int) -> tuple[type[Inst] | None, bool]:
   hi2 = (word >> 30) & 0x3
   if hi2 == 0b11:
@@ -71,10 +67,10 @@ def decode_program(data: bytes) -> Program:
     size = 8 if is_64 else 4
     inst = inst_class.from_bytes(data[i:i+size])
     for fld in ['src0', 'src1', 'src2', 'ssrc0', 'ssrc1', 'srcx0', 'srcy0']:
-      if get_field(inst, fld) == 255: inst._literal = int.from_bytes(data[i+size:i+size+4], 'little'); size += 4; break
+      if getattr(inst, fld, None) == 255: inst._literal = int.from_bytes(data[i+size:i+size+4], 'little'); size += 4; break
     else: inst._literal = None
     result.append((inst, size // 4)); i += size
-    if inst_class == SOPP and get_field(inst, 'op') == SOPPOp.S_ENDPGM: break
+    if inst_class == SOPP and inst.op == SOPPOp.S_ENDPGM: break
   return result
 
 # register read/write helpers
@@ -113,10 +109,10 @@ def rsrc64(st: WaveState, v: int, lane: int) -> int:
   return rsrc(st, v, lane) | ((rsrc(st, v+1, lane) if v <= 105 or 256 <= v <= 511 else 0) << 32)
 
 # instruction execution
-def exec_sop1(st: WaveState, inst: Inst) -> int:
-  op, s0, sdst = get_field(inst, 'op'), rsrc(st, get_field(inst, 'ssrc0'), 0), get_field(inst, 'sdst')
+def exec_sop1(st: WaveState, inst: SOP1) -> int:
+  op, s0, sdst = inst.op, rsrc(st, inst.ssrc0, 0), inst.sdst
   OPS: dict[int, Any] = {
-    SOP1Op.S_MOV_B32: lambda: wsgpr(st, sdst, s0), SOP1Op.S_MOV_B64: lambda: wsgpr64(st, sdst, rsrc64(st, get_field(inst, 'ssrc0'), 0)),
+    SOP1Op.S_MOV_B32: lambda: wsgpr(st, sdst, s0), SOP1Op.S_MOV_B64: lambda: wsgpr64(st, sdst, rsrc64(st, inst.ssrc0, 0)),
     SOP1Op.S_BREV_B32: lambda: wsgpr(st, sdst, int(f'{s0:032b}'[::-1], 2)), SOP1Op.S_CLZ_I32_U32: lambda: wsgpr(st, sdst, clz(s0)),
     SOP1Op.S_CLS_I32: lambda: wsgpr(st, sdst, cls(s0)), SOP1Op.S_SEXT_I32_I8: lambda: wsgpr(st, sdst, sext(s0 & 0xff, 8) & 0xffffffff),
     SOP1Op.S_SEXT_I32_I16: lambda: wsgpr(st, sdst, sext(s0 & 0xffff, 16) & 0xffffffff),
@@ -124,7 +120,7 @@ def exec_sop1(st: WaveState, inst: Inst) -> int:
     SOP1Op.S_BITSET1_B32: lambda: wsgpr(st, sdst, rsgpr(st, sdst) | (1 << (s0 & 0x1f)))}
   if op in OPS: OPS[op]()
   elif op == SOP1Op.S_NOT_B32: r = (~s0) & 0xffffffff; st.scc = int(r != 0); wsgpr(st, sdst, r)
-  elif op == SOP1Op.S_NOT_B64: r = (~rsrc64(st, get_field(inst, 'ssrc0'), 0)) & 0xffffffffffffffff; st.scc = int(r != 0); wsgpr64(st, sdst, r)
+  elif op == SOP1Op.S_NOT_B64: r = (~rsrc64(st, inst.ssrc0, 0)) & 0xffffffffffffffff; st.scc = int(r != 0); wsgpr64(st, sdst, r)
   elif op == SOP1Op.S_ABS_I32: r = abs(sext(s0, 32)) & 0xffffffff; st.scc = int(r != 0); wsgpr(st, sdst, r)
   elif op == SOP1Op.S_AND_SAVEEXEC_B32: old = st.exec_mask & 0xffffffff; st.exec_mask = s0 & old; st.scc = int(st.exec_mask != 0); wsgpr(st, sdst, old)
   elif op == SOP1Op.S_OR_SAVEEXEC_B32: old = st.exec_mask & 0xffffffff; st.exec_mask = s0 | old; st.scc = int(st.exec_mask != 0); wsgpr(st, sdst, old)
@@ -132,8 +128,8 @@ def exec_sop1(st: WaveState, inst: Inst) -> int:
   else: raise NotImplementedError(f"SOP1 op {op}")
   return 0
 
-def exec_sop2(st: WaveState, inst: Inst) -> int:
-  op, ssrc0, ssrc1, sdst = get_field(inst, 'op'), get_field(inst, 'ssrc0'), get_field(inst, 'ssrc1'), get_field(inst, 'sdst')
+def exec_sop2(st: WaveState, inst: SOP2) -> int:
+  op, ssrc0, ssrc1, sdst = inst.op, inst.ssrc0, inst.ssrc1, inst.sdst
   s0, s1 = rsrc(st, ssrc0, 0), rsrc(st, ssrc1, 0)
   def w(r: int, scc: int | None = None) -> None: wsgpr(st, sdst, r & 0xffffffff); st.scc = scc if scc is not None else st.scc
   def w64(r: int, scc: int | None = None) -> None: wsgpr64(st, sdst, r & 0xffffffffffffffff); st.scc = scc if scc is not None else st.scc
@@ -175,8 +171,8 @@ def exec_sop2(st: WaveState, inst: Inst) -> int:
   else: raise NotImplementedError(f"SOP2 op {op}")
   return 0
 
-def exec_sopc(st: WaveState, inst: Inst) -> int:
-  op, s0, s1 = get_field(inst, 'op'), rsrc(st, get_field(inst, 'ssrc0'), 0), rsrc(st, get_field(inst, 'ssrc1'), 0)
+def exec_sopc(st: WaveState, inst: SOPC) -> int:
+  op, s0, s1 = inst.op, rsrc(st, inst.ssrc0, 0), rsrc(st, inst.ssrc1, 0)
   I32_CMP: dict[int, Any] = {SOPCOp.S_CMP_EQ_I32: lambda: sext(s0,32)==sext(s1,32), SOPCOp.S_CMP_LG_I32: lambda: sext(s0,32)!=sext(s1,32),
               SOPCOp.S_CMP_GT_I32: lambda: sext(s0,32)>sext(s1,32), SOPCOp.S_CMP_GE_I32: lambda: sext(s0,32)>=sext(s1,32),
               SOPCOp.S_CMP_LT_I32: lambda: sext(s0,32)<sext(s1,32), SOPCOp.S_CMP_LE_I32: lambda: sext(s0,32)<=sext(s1,32)}
@@ -186,13 +182,13 @@ def exec_sopc(st: WaveState, inst: Inst) -> int:
   elif op in U32_CMP: st.scc = int(U32_CMP[op])
   elif op == SOPCOp.S_BITCMP0_B32: st.scc = int((s0 & (1 << (s1 & 0x1f)))==0)
   elif op == SOPCOp.S_BITCMP1_B32: st.scc = int((s0 & (1 << (s1 & 0x1f)))!=0)
-  elif op == SOPCOp.S_CMP_EQ_U64: st.scc = int(rsrc64(st, get_field(inst, 'ssrc0'), 0) == rsrc64(st, get_field(inst, 'ssrc1'), 0))
-  elif op == SOPCOp.S_CMP_LG_U64: st.scc = int(rsrc64(st, get_field(inst, 'ssrc0'), 0) != rsrc64(st, get_field(inst, 'ssrc1'), 0))
+  elif op == SOPCOp.S_CMP_EQ_U64: st.scc = int(rsrc64(st, inst.ssrc0, 0) == rsrc64(st, inst.ssrc1, 0))
+  elif op == SOPCOp.S_CMP_LG_U64: st.scc = int(rsrc64(st, inst.ssrc0, 0) != rsrc64(st, inst.ssrc1, 0))
   else: raise NotImplementedError(f"SOPC op {op}")
   return 0
 
-def exec_sopk(st: WaveState, inst: Inst) -> int:
-  op, sdst, simm = get_field(inst, 'op'), get_field(inst, 'sdst'), sext(get_field(inst, 'simm16'), 16)
+def exec_sopk(st: WaveState, inst: SOPK) -> int:
+  op, sdst, simm = inst.op, inst.sdst, sext(inst.simm16, 16)
   s0 = rsgpr(st, sdst)
   CMPK: dict[int, bool] = {SOPKOp.S_CMPK_EQ_I32: sext(s0,32)==simm, SOPKOp.S_CMPK_LG_I32: sext(s0,32)!=simm, SOPKOp.S_CMPK_GT_I32: sext(s0,32)>simm,
           SOPKOp.S_CMPK_GE_I32: sext(s0,32)>=simm, SOPKOp.S_CMPK_LT_I32: sext(s0,32)<simm, SOPKOp.S_CMPK_LE_I32: sext(s0,32)<=simm,
@@ -205,8 +201,8 @@ def exec_sopk(st: WaveState, inst: Inst) -> int:
   else: raise NotImplementedError(f"SOPK op {op}")
   return 0
 
-def exec_sopp(st: WaveState, inst: Inst) -> int:
-  op, simm = get_field(inst, 'op'), sext(get_field(inst, 'simm16'), 16)
+def exec_sopp(st: WaveState, inst: SOPP) -> int:
+  op, simm = inst.op, sext(inst.simm16, 16)
   BRANCH: dict[int, bool] = {SOPPOp.S_BRANCH: True, SOPPOp.S_CBRANCH_SCC0: st.scc==0, SOPPOp.S_CBRANCH_SCC1: st.scc==1,
             SOPPOp.S_CBRANCH_VCCZ: st.vcc==0, SOPPOp.S_CBRANCH_VCCNZ: st.vcc!=0,
             SOPPOp.S_CBRANCH_EXECZ: st.exec_mask==0, SOPPOp.S_CBRANCH_EXECNZ: st.exec_mask!=0}
@@ -215,9 +211,8 @@ def exec_sopp(st: WaveState, inst: Inst) -> int:
   if op in BRANCH: return simm if BRANCH[op] else 0
   return 0
 
-def exec_smem(st: WaveState, inst: Inst) -> int:
-  op, sbase, sdata, offset = get_field(inst, 'op'), get_field(inst, 'sbase') * 2, get_field(inst, 'sdata'), sext(get_field(inst, 'offset'), 21)
-  soff_idx = get_field(inst, 'soffset')
+def exec_smem(st: WaveState, inst: SMEM) -> int:
+  op, sbase, sdata, offset, soff_idx = inst.op, inst.sbase * 2, inst.sdata, sext(inst.offset, 21), inst.soffset
   addr = (rsgpr64(st, sbase) + offset + (rsrc(st, soff_idx, 0) if soff_idx not in (NULL_REG, 0x7f) else 0)) & 0xffffffffffffffff
   LOADS: dict[int, int] = {SMEMOp.S_LOAD_B32: 1, SMEMOp.S_LOAD_B64: 2, SMEMOp.S_LOAD_B128: 4, SMEMOp.S_LOAD_B256: 8, SMEMOp.S_LOAD_B512: 16}
   if op in LOADS:
@@ -225,8 +220,8 @@ def exec_smem(st: WaveState, inst: Inst) -> int:
   else: raise NotImplementedError(f"SMEM op {op}")
   return 0
 
-def exec_vop1(st: WaveState, inst: Inst, lane: int) -> None:
-  op, s0, vdst = get_field(inst, 'op'), rsrc(st, get_field(inst, 'src0'), lane), get_field(inst, 'vdst')
+def exec_vop1(st: WaveState, inst: VOP1, lane: int) -> None:
+  op, s0, vdst = inst.op, rsrc(st, inst.src0, lane), inst.vdst
   V = st.vgpr[lane]
   SIMPLE: dict[int, Any] = {
     VOP1Op.V_NOP: lambda: None, VOP1Op.V_MOV_B32: lambda: s0,
@@ -249,14 +244,14 @@ def exec_vop1(st: WaveState, inst: Inst, lane: int) -> None:
     VOP1Op.V_CVT_F32_UBYTE2: lambda: i32(float((s0 >> 16) & 0xff)), VOP1Op.V_CVT_F32_UBYTE3: lambda: i32(float((s0 >> 24) & 0xff))}
   if op == VOP1Op.V_READFIRSTLANE_B32:
     first = (st.exec_mask & 0xffffffff).bit_length() - 1 if st.exec_mask else 0
-    wsgpr(st, vdst, rsrc(st, get_field(inst, 'src0'), first) if get_field(inst, 'src0') >= 256 else s0)
+    wsgpr(st, vdst, rsrc(st, inst.src0, first) if inst.src0 >= 256 else s0)
   elif op in SIMPLE:
     r = SIMPLE[op]()
     if r is not None: V[vdst] = r
   else: raise NotImplementedError(f"VOP1 op {op}")
 
-def exec_vop2(st: WaveState, inst: Inst, lane: int) -> None:
-  op, s0, s1, vdst = get_field(inst, 'op'), rsrc(st, get_field(inst, 'src0'), lane), st.vgpr[lane][get_field(inst, 'vsrc1')], get_field(inst, 'vdst')
+def exec_vop2(st: WaveState, inst: VOP2, lane: int) -> None:
+  op, s0, s1, vdst = inst.op, rsrc(st, inst.src0, lane), st.vgpr[lane][inst.vsrc1], inst.vdst
   V = st.vgpr[lane]
   ARITH: dict[int, Any] = {
     VOP2Op.V_ADD_F32: lambda: i32(f32(s0)+f32(s1)), VOP2Op.V_SUB_F32: lambda: i32(f32(s0)-f32(s1)),
@@ -286,9 +281,8 @@ def vop3_mod(val: int, neg: int, abs_: int, idx: int) -> int:
   if (neg >> idx) & 1: val = i32(-f32(val))
   return val
 
-def exec_vop3(st: WaveState, inst: Inst, lane: int) -> None:
-  op, src0, src1, src2, vdst = get_field(inst, 'op'), get_field(inst, 'src0'), get_field(inst, 'src1'), get_field(inst, 'src2'), get_field(inst, 'vdst')
-  neg, abs_ = get_field(inst, 'neg'), get_field(inst, 'abs')
+def exec_vop3(st: WaveState, inst: VOP3, lane: int) -> None:
+  op, src0, src1, src2, vdst, neg, abs_ = inst.op, inst.src0, inst.src1, inst.src2, inst.vdst, inst.neg, getattr(inst, 'abs', 0)
   s0, s1, s2 = vop3_mod(rsrc(st, src0, lane), neg, abs_, 0), vop3_mod(rsrc(st, src1, lane), neg, abs_, 1), vop3_mod(rsrc(st, src2, lane), neg, abs_, 2)
   V = st.vgpr[lane]
   SIMPLE: dict[int, Any] = {
@@ -347,8 +341,8 @@ def exec_vopc_vop3(st: WaveState, op: int, s0: int, s1: int, sdst: int, lane: in
   else: wsgpr(st, sdst, (rsgpr(st, sdst) & ~(1 << lane)) | (int(result) << lane))
   if is_cmpx: st.exec_mask = (st.exec_mask & ~(1 << lane)) | (int(result) << lane)
 
-def exec_vopc(st: WaveState, inst: Inst, lane: int) -> None:
-  op, s0, s1 = get_field(inst, 'op'), rsrc(st, get_field(inst, 'src0'), lane), st.vgpr[lane][get_field(inst, 'vsrc1')]
+def exec_vopc(st: WaveState, inst: VOPC, lane: int) -> None:
+  op, s0, s1 = inst.op, rsrc(st, inst.src0, lane), st.vgpr[lane][inst.vsrc1]
   is_cmpx, base = op >= 128, op - 128 if op >= 128 else op
   result = False
   if 16 <= base <= 31:
@@ -361,9 +355,8 @@ def exec_vopc(st: WaveState, inst: Inst, lane: int) -> None:
   st.vcc = (st.vcc & ~(1 << lane)) | (int(result) << lane)
   if is_cmpx: st.exec_mask = (st.exec_mask & ~(1 << lane)) | (int(result) << lane)
 
-def exec_vop3sd(st: WaveState, inst: Inst, lane: int) -> None:
-  op, src0, src1, src2, vdst, sdst = get_field(inst, 'op'), get_field(inst, 'src0'), get_field(inst, 'src1'), get_field(inst, 'src2'), get_field(inst, 'vdst'), get_field(inst, 'sdst')
-  neg = get_field(inst, 'neg')
+def exec_vop3sd(st: WaveState, inst: VOP3SD, lane: int) -> None:
+  op, src0, src1, src2, vdst, sdst, neg = inst.op, inst.src0, inst.src1, inst.src2, inst.vdst, inst.sdst, inst.neg
   s0, s1, s2 = rsrc(st, src0, lane), rsrc(st, src1, lane), rsrc(st, src2, lane)
   if (neg >> 0) & 1: s0 = i32(-f32(s0))
   if (neg >> 1) & 1: s1 = i32(-f32(s1))
@@ -379,13 +372,11 @@ def exec_vop3sd(st: WaveState, inst: Inst, lane: int) -> None:
   elif op == VOP3SDOp.V_DIV_SCALE_F64: V[vdst] = s0; V[vdst+1] = rsrc(st, src0 + 1, lane); st.vcc = (st.vcc & ~(1 << lane)) | ((1 if s0 == s2 else 0) << lane)
   else: raise NotImplementedError(f"VOP3SD op {op}")
 
-def exec_flat(st: WaveState, inst: Inst, lane: int) -> None:
-  op, addr_reg, data_reg, vdst, offset = get_field(inst, 'op'), get_field(inst, 'addr'), get_field(inst, 'data'), get_field(inst, 'vdst'), sext(get_field(inst, 'offset'), 13)
-  saddr = get_field(inst, 'saddr')
+def exec_flat(st: WaveState, inst: FLAT, lane: int) -> None:
+  op, addr_reg, data_reg, vdst, offset, saddr = inst.op, inst.addr, inst.data, inst.vdst, sext(inst.offset, 13), inst.saddr
   V = st.vgpr[lane]
   addr = V[addr_reg] | (V[addr_reg+1] << 32)
-  if saddr not in (NULL_REG, 0x7f): addr = (rsgpr64(st, saddr) + V[addr_reg] + offset) & 0xffffffffffffffff
-  else: addr = (addr + offset) & 0xffffffffffffffff
+  addr = (rsgpr64(st, saddr) + V[addr_reg] + offset) & 0xffffffffffffffff if saddr not in (NULL_REG, 0x7f) else (addr + offset) & 0xffffffffffffffff
   LOAD: dict[int, tuple[int, int] | tuple[int, int, str]] = {
     GLOBALOp.GLOBAL_LOAD_B32: (1,4), FLATOp.FLAT_LOAD_B32: (1,4), GLOBALOp.GLOBAL_LOAD_B64: (2,4), FLATOp.FLAT_LOAD_B64: (2,4),
     GLOBALOp.GLOBAL_LOAD_B96: (3,4), FLATOp.FLAT_LOAD_B96: (3,4), GLOBALOp.GLOBAL_LOAD_B128: (4,4), FLATOp.FLAT_LOAD_B128: (4,4),
@@ -406,10 +397,8 @@ def exec_flat(st: WaveState, inst: Inst, lane: int) -> None:
     for i in range(cnt): CTYPES[sz].from_address(addr + i * sz).value = V[data_reg + i] & ((1 << (sz * 8)) - 1)
   else: raise NotImplementedError(f"FLAT op {op}")
 
-def exec_ds(st: WaveState, inst: Inst, lane: int, lds: bytearray) -> None:
-  op, addr_reg, data0_reg, vdst, offset0 = get_field(inst, 'op'), get_field(inst, 'addr'), get_field(inst, 'data0'), get_field(inst, 'vdst'), get_field(inst, 'offset0')
-  addr = (st.vgpr[lane][addr_reg] + offset0) & 0xffff
-  V = st.vgpr[lane]
+def exec_ds(st: WaveState, inst: DS, lane: int, lds: bytearray) -> None:
+  op, addr, vdst, V = inst.op, (st.vgpr[lane][inst.addr] + inst.offset0) & 0xffff, inst.vdst, st.vgpr[lane]
   LOAD: dict[int, tuple[int, int] | tuple[int, int, str]] = {
     DSOp.DS_LOAD_B32: (1,4), DSOp.DS_LOAD_B64: (2,4), DSOp.DS_LOAD_B128: (4,4),
     DSOp.DS_LOAD_U8: (1,1,'u'), DSOp.DS_LOAD_I8: (1,1,'i'), DSOp.DS_LOAD_U16: (1,2,'u'), DSOp.DS_LOAD_I16: (1,2,'i')}
@@ -421,38 +410,30 @@ def exec_ds(st: WaveState, inst: Inst, lane: int, lds: bytearray) -> None:
       V[vdst + i] = sext(val, sz * 8) & 0xffffffff if sign == 'i' else val
   elif op in STORE:
     cnt, sz = STORE[op]
-    for i in range(cnt): lds[addr+i*sz:addr+i*sz+sz] = (V[data0_reg + i] & ((1 << (sz * 8)) - 1)).to_bytes(sz, 'little')
+    for i in range(cnt): lds[addr+i*sz:addr+i*sz+sz] = (V[inst.data0 + i] & ((1 << (sz * 8)) - 1)).to_bytes(sz, 'little')
   else: raise NotImplementedError(f"DS op {op}")
 
-def exec_vopd_op(st: WaveState, op: VOPDOp, src0: int, src1: int, dst: int, lane: int) -> None:
+def exec_vopd_op(st: WaveState, op: int, src0: int, src1: int, dst: int, lane: int) -> None:
   s0, s1, V = rsrc(st, src0, lane), st.vgpr[lane][src1], st.vgpr[lane]
-  if op == VOPDOp.V_DUAL_FMAC_F32: V[dst] = i32(f32(s0)*f32(s1)+f32(V[dst]))
-  elif op == VOPDOp.V_DUAL_MUL_F32: V[dst] = i32(f32(s0)*f32(s1))
-  elif op == VOPDOp.V_DUAL_ADD_F32: V[dst] = i32(f32(s0)+f32(s1))
-  elif op == VOPDOp.V_DUAL_SUB_F32: V[dst] = i32(f32(s0)-f32(s1))
-  elif op == VOPDOp.V_DUAL_SUBREV_F32: V[dst] = i32(f32(s1)-f32(s0))
-  elif op == VOPDOp.V_DUAL_MUL_DX9_ZERO_F32: V[dst] = i32(0.0 if f32(s0) == 0.0 or f32(s1) == 0.0 else f32(s0)*f32(s1))
-  elif op == VOPDOp.V_DUAL_MOV_B32: V[dst] = s0
-  elif op == VOPDOp.V_DUAL_CNDMASK_B32: V[dst] = s1 if (st.vcc >> lane) & 1 else s0
-  elif op == VOPDOp.V_DUAL_MAX_F32: V[dst] = i32(max(f32(s0), f32(s1)))
-  elif op == VOPDOp.V_DUAL_MIN_F32: V[dst] = i32(min(f32(s0), f32(s1)))
-  elif op == VOPDOp.V_DUAL_ADD_NC_U32: V[dst] = (s0 + s1) & 0xffffffff
-  elif op == VOPDOp.V_DUAL_LSHLREV_B32: V[dst] = (s1 << (s0 & 0x1f)) & 0xffffffff
-  elif op == VOPDOp.V_DUAL_AND_B32: V[dst] = s0 & s1
+  OPS: dict[int, Any] = {
+    VOPDOp.V_DUAL_FMAC_F32: lambda: i32(f32(s0)*f32(s1)+f32(V[dst])), VOPDOp.V_DUAL_MUL_F32: lambda: i32(f32(s0)*f32(s1)),
+    VOPDOp.V_DUAL_ADD_F32: lambda: i32(f32(s0)+f32(s1)), VOPDOp.V_DUAL_SUB_F32: lambda: i32(f32(s0)-f32(s1)),
+    VOPDOp.V_DUAL_SUBREV_F32: lambda: i32(f32(s1)-f32(s0)), VOPDOp.V_DUAL_MUL_DX9_ZERO_F32: lambda: i32(0.0 if f32(s0)==0.0 or f32(s1)==0.0 else f32(s0)*f32(s1)),
+    VOPDOp.V_DUAL_MOV_B32: lambda: s0, VOPDOp.V_DUAL_CNDMASK_B32: lambda: s1 if (st.vcc >> lane) & 1 else s0,
+    VOPDOp.V_DUAL_MAX_F32: lambda: i32(max(f32(s0), f32(s1))), VOPDOp.V_DUAL_MIN_F32: lambda: i32(min(f32(s0), f32(s1))),
+    VOPDOp.V_DUAL_ADD_NC_U32: lambda: (s0 + s1) & 0xffffffff, VOPDOp.V_DUAL_LSHLREV_B32: lambda: (s1 << (s0 & 0x1f)) & 0xffffffff,
+    VOPDOp.V_DUAL_AND_B32: lambda: s0 & s1}
+  if op in OPS: V[dst] = OPS[op]()
   else: raise NotImplementedError(f"VOPD op {op}")
 
-def exec_vopd(st: WaveState, inst: Inst, lane: int) -> None:
-  opx, opy = get_field(inst, 'opx'), get_field(inst, 'opy')
-  srcx0, vsrcx1, vdstx = get_field(inst, 'srcx0'), get_field(inst, 'vsrcx1'), get_field(inst, 'vdstx')
-  srcy0, vsrcy1, vdsty_enc = get_field(inst, 'srcy0'), get_field(inst, 'vsrcy1'), get_field(inst, 'vdsty')
-  vdsty = (vdsty_enc << 1) | ((vdstx & 1) ^ 1)
-  exec_vopd_op(st, opx, srcx0, vsrcx1, vdstx, lane)
-  exec_vopd_op(st, opy, srcy0, vsrcy1, vdsty, lane)
+def exec_vopd(st: WaveState, inst: VOPD, lane: int) -> None:
+  exec_vopd_op(st, inst.opx, inst.srcx0, inst.vsrcx1, inst.vdstx, lane)
+  exec_vopd_op(st, inst.opy, inst.srcy0, inst.vsrcy1, (inst.vdsty << 1) | ((inst.vdstx & 1) ^ 1), lane)
 
 def exec_wave(program: Program, st: WaveState, lds: bytearray, n_lanes: int) -> int:
-  SCALAR: dict[type[Inst], Any] = {SOP1: exec_sop1, SOP2: exec_sop2, SOPC: exec_sopc, SOPK: exec_sopk, SOPP: exec_sopp, SMEM: exec_smem}
-  VECTOR: dict[type[Inst], Any] = {VOP1: exec_vop1, VOP2: exec_vop2, VOP3: exec_vop3, VOP3SD: exec_vop3sd, VOPC: exec_vopc,
-                                    FLAT: exec_flat, DS: lambda s,i,l: exec_ds(s,i,l,lds), VOPD: exec_vopd}
+  SCALAR: dict[type, Any] = {SOP1: exec_sop1, SOP2: exec_sop2, SOPC: exec_sopc, SOPK: exec_sopk, SOPP: exec_sopp, SMEM: exec_smem}
+  VECTOR: dict[type, Any] = {VOP1: exec_vop1, VOP2: exec_vop2, VOP3: exec_vop3, VOP3SD: exec_vop3sd, VOPC: exec_vopc,
+                              FLAT: exec_flat, DS: lambda s,i,l: exec_ds(s,i,l,lds), VOPD: exec_vopd}
   while st.pc < len(program):
     inst, _ = program[st.pc]
     st.literal = inst._literal or 0
@@ -484,7 +465,7 @@ def exec_workgroup(program: Program, workgroup_id: tuple[int, int, int], local_s
       tid = wave_start + i
       st.vgpr[i][0] = tid if local_size == (lx, 1, 1) else ((tid // (lx * ly)) << 20) | (((tid // lx) % ly) << 10) | (tid % lx)
     waves.append((st, n_lanes))
-  has_barrier = any(isinstance(inst, SOPP) and get_field(inst, 'op') == SOPPOp.S_BARRIER for inst, _ in program)
+  has_barrier = any(isinstance(inst, SOPP) and inst.op == SOPPOp.S_BARRIER for inst, _ in program)
   for _ in range(2 if has_barrier else 1):
     for st, n_lanes in waves: exec_wave(program, st, lds, n_lanes)
 
