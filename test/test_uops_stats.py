@@ -1,9 +1,9 @@
 import unittest
 from tinygrad import Tensor
 from tinygrad.helpers import getenv, GlobalCounters, EMULATE
-from tinygrad.engine.realize import lower_schedule_item, ProgramSpec, get_program
+from tinygrad.engine.realize import get_program
+from tinygrad.renderer import ProgramSpec
 from tinygrad.renderer import Estimates
-from tinygrad.codegen import full_rewrite
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.dtype import dtypes
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
@@ -17,9 +17,8 @@ def flops_mem(uops, ignore_indexing=False):
 # **************** new FlopCounter ****************
 
 def get_stats(x:Tensor):
-  si = x.schedule()[-1]
-  ei = lower_schedule_item(si)
-  return ei.prg.estimates.ops, ei.prg.estimates.mem
+  si = x.schedule()[-1].lower()
+  return si.prg.estimates.ops, si.prg.estimates.mem
 
 @unittest.skipIf(Device.DEFAULT == "WEBGPU", "webgpu does extra load/store for packed types")
 class TestMemoryCount(unittest.TestCase):
@@ -146,7 +145,7 @@ class TestUOpsStats(unittest.TestCase):
     u3 = UOp(Ops.CONST, dtypes.int, tuple(), 3)
     u4 = UOp(Ops.MUL, dtypes.int, (u1,u2))
     u5 = UOp(Ops.ADD, dtypes.int, (u4,u3))
-    uops = full_rewrite(u5.sink())
+    uops = list(u5.toposort())
 
     globl = UOp(Ops.DEFINE_GLOBAL, dtypes.int.ptr(), tuple())
     o1 = UOp(Ops.CONST, dtypes.int, tuple(), 1)
@@ -155,7 +154,7 @@ class TestUOpsStats(unittest.TestCase):
     u2 = globl.index(o2)
     u3 = UOp(Ops.CONST, dtypes.int, tuple(), 3)
     u4 = UOp(Ops.MULACC, dtypes.int, (u1,u2,u3))
-    uops_fma = full_rewrite(u4.sink())
+    uops_fma = list(u4.toposort())
 
     self.assertEqual(flops_mem(uops), flops_mem(uops_fma))
 

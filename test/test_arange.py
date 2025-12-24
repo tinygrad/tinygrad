@@ -3,7 +3,8 @@ import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
 from tinygrad.helpers import Context, getenv
 from tinygrad.engine.realize import run_schedule
-from tinygrad.engine.realize import CompiledRunner, ExecItem, get_program
+from tinygrad.engine.realize import CompiledRunner, get_program
+from tinygrad.engine.schedule import ExecItem
 from tinygrad.uop.ops import Ops
 from tinygrad.renderer import Estimates
 from tinygrad.renderer.ptx import PTXRenderer
@@ -14,7 +15,7 @@ class TestArange(unittest.TestCase):
     sched = tensor.schedule()
     self.assertEqual(len(sched), 1)
     p = get_program(sched[-1].ast, renderer=Device[Device.DEFAULT].renderer)
-    ExecItem(CompiledRunner(p), [tensor.uop.buffer]).run()
+    ExecItem(sched[-1].ast, [tensor.uop.buffer], prg=CompiledRunner(p)).run()
     np.testing.assert_equal(tensor.numpy(), desired)
     return p.estimates.ops
 

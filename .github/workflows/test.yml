@@ -236,6 +236,7 @@ jobs:
         pip3 install --upgrade --force-reinstall ruff==0.11.0
         python3 -m ruff check .
         python3 -m ruff check examples/mlperf/ --ignore E501
+        python3 -m ruff check extra/thunder/tiny/ --ignore E501 --ignore F841 --ignore E722
     - name: Run mypy
       run: |
         python -m mypy --strict-equality --lineprecision-report .

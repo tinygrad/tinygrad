@@ -245,6 +245,11 @@ def convert_from_huggingface(weights:dict[str, Tensor], n_layers: int, n_heads: 
       continue
     sd[keymap[k]] = v
   for k,v in experts.items(): sd[k] = Tensor.stack(*[v[i] for i in range(len(v))])
+
+  # Handle tied embeddings (e.g., Llama 3.2 1B Instruct where lm_head shares weights with embed_tokens)
+  if "output.weight" not in sd and "tok_embeddings.weight" in sd:
+    sd["output.weight"] = sd["tok_embeddings.weight"]
+
   return sd
 
 def convert_from_gguf(weights:dict[str, Tensor], n_layers:int):
