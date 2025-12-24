@@ -179,6 +179,16 @@ def exec_sop1(st: WaveState, inst: SOP1) -> int:
   elif op == SOP1Op.S_AND_SAVEEXEC_B32: old = st.exec_mask & 0xffffffff; st.exec_mask = s0 & old; st.scc = int(st.exec_mask != 0); st.wsgpr(sdst, old)
   elif op == SOP1Op.S_OR_SAVEEXEC_B32: old = st.exec_mask & 0xffffffff; st.exec_mask = s0 | old; st.scc = int(st.exec_mask != 0); st.wsgpr(sdst, old)
   elif op == SOP1Op.S_AND_NOT1_SAVEEXEC_B32: old = st.exec_mask & 0xffffffff; st.exec_mask = s0 & (~old & 0xffffffff); st.scc = int(st.exec_mask != 0); st.wsgpr(sdst, old)
+  elif op == SOP1Op.S_CEIL_F32: st.wsgpr(sdst, i32(math.ceil(f32(s0))))
+  elif op == SOP1Op.S_FLOOR_F32: st.wsgpr(sdst, i32(math.floor(f32(s0))))
+  elif op == SOP1Op.S_TRUNC_F32: st.wsgpr(sdst, i32(math.trunc(f32(s0))))
+  elif op == SOP1Op.S_RNDNE_F32: st.wsgpr(sdst, i32(round(f32(s0))))
+  elif op == SOP1Op.S_CVT_F32_I32: st.wsgpr(sdst, i32(float(sext(s0, 32))))
+  elif op == SOP1Op.S_CVT_F32_U32: st.wsgpr(sdst, i32(float(s0)))
+  elif op == SOP1Op.S_CVT_I32_F32: v = f32(s0); st.wsgpr(sdst, (0x7fffffff if math.isinf(v) and v > 0 else (-0x80000000 if math.isinf(v) else max(-0x80000000, min(0x7fffffff, int(v))))) & 0xffffffff)
+  elif op == SOP1Op.S_CVT_U32_F32: v = f32(s0); st.wsgpr(sdst, 0xffffffff if math.isinf(v) and v > 0 else (0 if math.isinf(v) or math.isnan(v) or v < 0 else min(0xffffffff, int(v))))
+  elif op == SOP1Op.S_CVT_F16_F32: st.wsgpr(sdst, struct.unpack('<H', struct.pack('<e', f32(s0)))[0])
+  elif op == SOP1Op.S_CVT_F32_F16: st.wsgpr(sdst, i32(struct.unpack('<e', struct.pack('<H', s0 & 0xffff))[0]))
   else: raise NotImplementedError(f"SOP1 op {op}")
   return 0
 
@@ -236,8 +246,12 @@ def exec_sopc(st: WaveState, inst: SOPC) -> int:
   U32_CMP: dict[int, bool] = {SOPCOp.S_CMP_EQ_U32: s0==s1, SOPCOp.S_CMP_LG_U32: s0!=s1, SOPCOp.S_CMP_GT_U32: s0>s1,
              SOPCOp.S_CMP_GE_U32: s0>=s1, SOPCOp.S_CMP_LT_U32: s0<s1, SOPCOp.S_CMP_LE_U32: s0<=s1}
   f0, f1 = f32(s0), f32(s1)
+  o = not (math.isnan(f0) or math.isnan(f1))  # ordered (neither is NaN)
   F32_CMP: dict[int, bool] = {SOPCOp.S_CMP_LT_F32: f0<f1, SOPCOp.S_CMP_EQ_F32: f0==f1, SOPCOp.S_CMP_LE_F32: f0<=f1,
-             SOPCOp.S_CMP_GT_F32: f0>f1, SOPCOp.S_CMP_LG_F32: f0!=f1, SOPCOp.S_CMP_GE_F32: f0>=f1}
+             SOPCOp.S_CMP_GT_F32: f0>f1, SOPCOp.S_CMP_LG_F32: f0!=f1, SOPCOp.S_CMP_GE_F32: f0>=f1,
+             SOPCOp.S_CMP_O_F32: o, SOPCOp.S_CMP_U_F32: not o,
+             SOPCOp.S_CMP_NGE_F32: not (f0>=f1), SOPCOp.S_CMP_NLG_F32: not (f0!=f1), SOPCOp.S_CMP_NGT_F32: not (f0>f1),
+             SOPCOp.S_CMP_NLE_F32: not (f0<=f1), SOPCOp.S_CMP_NEQ_F32: not (f0==f1), SOPCOp.S_CMP_NLT_F32: not (f0<f1)}
   if op in I32_CMP: st.scc = int(I32_CMP[op]())
   elif op in U32_CMP: st.scc = int(U32_CMP[op])
   elif op in F32_CMP: st.scc = int(F32_CMP[op])
@@ -379,7 +393,10 @@ def exec_vop3(st: WaveState, inst: VOP3, lane: int) -> None:
     VOP3Op.V_FREXP_MANT_F32: lambda: i32(math.frexp(f32(s0))[0] if f32(s0)!=0 else 0.0),
     VOP3Op.V_FREXP_EXP_I32_F32: lambda: (math.frexp(f32(s0))[1] if f32(s0)!=0 else 0)&0xffffffff,
     VOP3Op.V_ALIGNBIT_B32: lambda: (((s0<<32)|s1)>>(s2&0x1f))&0xffffffff, VOP3Op.V_XAD_U32: lambda: ((s0*s1)+s2)&0xffffffff,
-    VOP3Op.V_LSHL_OR_B32: lambda: ((s0<<(s1&0x1f))|s2)&0xffffffff, VOP3Op.V_XOR3_B32: lambda: s0^s1^s2}
+    VOP3Op.V_LSHL_OR_B32: lambda: ((s0<<(s1&0x1f))|s2)&0xffffffff, VOP3Op.V_XOR3_B32: lambda: s0^s1^s2,
+    VOP3Op.V_MIN3_I32: lambda: max(min(sext(s0,32), sext(s1,32), sext(s2,32)), -0x80000000) & 0xffffffff,
+    VOP3Op.V_MAX3_I32: lambda: min(max(sext(s0,32), sext(s1,32), sext(s2,32)), 0x7fffffff) & 0xffffffff,
+    VOP3Op.V_MED3_I32: lambda: sorted([sext(s0,32), sext(s1,32), sext(s2,32)])[1] & 0xffffffff}
   if op == VOP3Op.V_BFE_U32: off, wd = s1 & 0x1f, s2 & 0x1f; V[vdst] = (s0 >> off) & ((1 << wd) - 1) if wd else 0
   elif op == VOP3Op.V_BFE_I32: off, wd = s1 & 0x1f, s2 & 0x1f; V[vdst] = sext((s0 >> off) & ((1 << wd) - 1), wd) & 0xffffffff if wd else 0
   elif op == VOP3Op.V_CNDMASK_B32: mask = st.rsrc(src2, lane) if src2 < 256 else st.vcc; V[vdst] = s1 if (mask >> lane) & 1 else s0
