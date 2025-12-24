@@ -107,9 +107,29 @@ class WaveState:
   def rsrc64(self, v: int, lane: int) -> int:
     return self.rsrc(v, lane) | ((self.rsrc(v+1, lane) if v <= 105 or 256 <= v <= 511 else 0) << 32)
 
-  def set_vcc_lane(self, lane: int, val: bool) -> None: self.vcc = (self.vcc & ~(1 << lane)) | (int(val) << lane)
-  def set_exec_lane(self, lane: int, val: bool) -> None: self.exec_mask = (self.exec_mask & ~(1 << lane)) | (int(val) << lane)
-  def set_sgpr_lane(self, reg: int, lane: int, val: bool) -> None: self.wsgpr(reg, (self.rsgpr(reg) & ~(1 << lane)) | (int(val) << lane))
+  # Pending scalar writes - accumulated during lane execution, applied after all lanes complete
+  _pend_vcc: int | None = None
+  _pend_exec: int | None = None
+  _pend_sgpr: dict[int, int] = field(default_factory=dict)
+
+  def pend_vcc_lane(self, lane: int, val: bool) -> None:
+    if self._pend_vcc is None: self._pend_vcc = self.vcc
+    self._pend_vcc = (self._pend_vcc & ~(1 << lane)) | (int(val) << lane)
+
+  def pend_exec_lane(self, lane: int, val: bool) -> None:
+    if self._pend_exec is None: self._pend_exec = self.exec_mask
+    self._pend_exec = (self._pend_exec & ~(1 << lane)) | (int(val) << lane)
+
+  def pend_sgpr_lane(self, reg: int, lane: int, val: bool) -> None:
+    if reg not in self._pend_sgpr: self._pend_sgpr[reg] = self.rsgpr(reg)
+    self._pend_sgpr[reg] = (self._pend_sgpr[reg] & ~(1 << lane)) | (int(val) << lane)
+
+  def commit_pends(self) -> None:
+    """Apply all pending scalar writes after all lanes have executed."""
+    if self._pend_vcc is not None: self.vcc = self._pend_vcc; self._pend_vcc = None
+    if self._pend_exec is not None: self.exec_mask = self._pend_exec; self._pend_exec = None
+    for reg, val in self._pend_sgpr.items(): self.wsgpr(reg, val)
+    self._pend_sgpr.clear()
 
 def decode_format(word: int) -> tuple[type[Inst] | None, bool]:
   hi2 = (word >> 30) & 0x3
@@ -288,7 +308,7 @@ def exec_vop1(st: WaveState, inst: VOP1, lane: int) -> None:
     VOP1Op.V_CVT_F32_UBYTE0: lambda: i32(float(s0 & 0xff)), VOP1Op.V_CVT_F32_UBYTE1: lambda: i32(float((s0 >> 8) & 0xff)),
     VOP1Op.V_CVT_F32_UBYTE2: lambda: i32(float((s0 >> 16) & 0xff)), VOP1Op.V_CVT_F32_UBYTE3: lambda: i32(float((s0 >> 24) & 0xff))}
   if op == VOP1Op.V_READFIRSTLANE_B32:
-    first = (st.exec_mask & 0xffffffff).bit_length() - 1 if st.exec_mask else 0
+    first = (st.exec_mask & -st.exec_mask).bit_length() - 1 if st.exec_mask else 0  # lowest set bit
     st.wsgpr(vdst, st.rsrc(inst.src0, first) if inst.src0 >= 256 else s0)
   elif op in SIMPLE:
     r = SIMPLE[op]()
@@ -317,9 +337,9 @@ def exec_vop2(st: WaveState, inst: VOP2, lane: int) -> None:
   if op == VOP2Op.V_CNDMASK_B32: V[vdst] = s1 if (st.vcc >> lane) & 1 else s0
   elif op == VOP2Op.V_FMAMK_F32: V[vdst] = i32(f32(s0) * f32(st.literal) + f32(s1))
   elif op == VOP2Op.V_FMAAK_F32: V[vdst] = i32(f32(s0) * f32(s1) + f32(st.literal))
-  elif op == VOP2Op.V_ADD_CO_CI_U32: cin = (st.vcc >> lane) & 1; r = s0 + s1 + cin; st.set_vcc_lane(lane, r >= 0x100000000); V[vdst] = r & 0xffffffff
-  elif op == VOP2Op.V_SUB_CO_CI_U32: bin_ = (st.vcc >> lane) & 1; r = s0 - s1 - bin_; st.set_vcc_lane(lane, s1 + bin_ > s0); V[vdst] = r & 0xffffffff
-  elif op == VOP2Op.V_SUBREV_CO_CI_U32: bin_ = (st.vcc >> lane) & 1; r = s1 - s0 - bin_; st.set_vcc_lane(lane, s0 + bin_ > s1); V[vdst] = r & 0xffffffff
+  elif op == VOP2Op.V_ADD_CO_CI_U32: cin = (st.vcc >> lane) & 1; r = s0 + s1 + cin; st.pend_vcc_lane(lane, r >= 0x100000000); V[vdst] = r & 0xffffffff
+  elif op == VOP2Op.V_SUB_CO_CI_U32: bin_ = (st.vcc >> lane) & 1; r = s0 - s1 - bin_; st.pend_vcc_lane(lane, s1 + bin_ > s0); V[vdst] = r & 0xffffffff
+  elif op == VOP2Op.V_SUBREV_CO_CI_U32: bin_ = (st.vcc >> lane) & 1; r = s1 - s0 - bin_; st.pend_vcc_lane(lane, s0 + bin_ > s1); V[vdst] = r & 0xffffffff
   elif op in ARITH: V[vdst] = ARITH[op]()
   else: raise NotImplementedError(f"VOP2 op {op}")
 
@@ -413,15 +433,15 @@ def vopc_compare(op: int, s0: int, s1: int) -> bool:
 
 def exec_vopc_vop3(st: WaveState, op: int, s0: int, s1: int, sdst: int, lane: int) -> None:
   result, is_cmpx = vopc_compare(op, s0, s1), op >= 128
-  if sdst == VCC_LO: st.set_vcc_lane(lane, result)
-  else: st.set_sgpr_lane(sdst, lane, result)
-  if is_cmpx: st.set_exec_lane(lane, result)
+  if sdst == VCC_LO: st.pend_vcc_lane(lane, result)
+  else: st.pend_sgpr_lane(sdst, lane, result)
+  if is_cmpx: st.pend_exec_lane(lane, result)
 
 def exec_vopc(st: WaveState, inst: VOPC, lane: int) -> None:
   op, s0, s1 = inst.op, st.rsrc(inst.src0, lane), st.vgpr[lane][inst.vsrc1]
   result, is_cmpx = vopc_compare(op, s0, s1), op >= 128
-  st.set_vcc_lane(lane, result)
-  if is_cmpx: st.set_exec_lane(lane, result)
+  st.pend_vcc_lane(lane, result)
+  if is_cmpx: st.pend_exec_lane(lane, result)
 
 def exec_vop3sd(st: WaveState, inst: VOP3SD, lane: int) -> None:
   op, src0, src1, src2, vdst, sdst, neg = inst.op, inst.src0, inst.src1, inst.src2, inst.vdst, inst.sdst, inst.neg
@@ -430,14 +450,14 @@ def exec_vop3sd(st: WaveState, inst: VOP3SD, lane: int) -> None:
   if (neg >> 1) & 1: s1 = i32(-f32(s1))
   if (neg >> 2) & 1: s2 = i32(-f32(s2))
   V = st.vgpr[lane]
-  if op == VOP3SDOp.V_ADD_CO_U32: r = s0 + s1; V[vdst] = r & 0xffffffff; st.set_sgpr_lane(sdst, lane, r >= 0x100000000)
-  elif op == VOP3SDOp.V_SUB_CO_U32: V[vdst] = (s0 - s1) & 0xffffffff; st.set_sgpr_lane(sdst, lane, s1 > s0)
-  elif op == VOP3SDOp.V_SUBREV_CO_U32: V[vdst] = (s1 - s0) & 0xffffffff; st.set_sgpr_lane(sdst, lane, s0 > s1)
-  elif op == VOP3SDOp.V_ADD_CO_CI_U32: cin = (st.rsgpr(src2) >> lane) & 1 if src2 < 256 else (st.vcc >> lane) & 1; r = s0 + s1 + cin; V[vdst] = r & 0xffffffff; st.set_sgpr_lane(sdst, lane, r >= 0x100000000)
+  if op == VOP3SDOp.V_ADD_CO_U32: r = s0 + s1; V[vdst] = r & 0xffffffff; st.pend_sgpr_lane(sdst, lane, r >= 0x100000000)
+  elif op == VOP3SDOp.V_SUB_CO_U32: V[vdst] = (s0 - s1) & 0xffffffff; st.pend_sgpr_lane(sdst, lane, s1 > s0)
+  elif op == VOP3SDOp.V_SUBREV_CO_U32: V[vdst] = (s1 - s0) & 0xffffffff; st.pend_sgpr_lane(sdst, lane, s0 > s1)
+  elif op == VOP3SDOp.V_ADD_CO_CI_U32: cin = (st.rsgpr(src2) >> lane) & 1 if src2 < 256 else (st.vcc >> lane) & 1; r = s0 + s1 + cin; V[vdst] = r & 0xffffffff; st.pend_sgpr_lane(sdst, lane, r >= 0x100000000)
   elif op == VOP3SDOp.V_MAD_U64_U32: s2_64 = s2 | (st.rsrc(src2 + 1, lane) << 32); r = s0 * s1 + s2_64; V[vdst] = r & 0xffffffff; V[vdst+1] = (r >> 32) & 0xffffffff
   elif op == VOP3SDOp.V_MAD_I64_I32: s2_64 = sext(s2 | (st.rsrc(src2 + 1, lane) << 32), 64); r = (sext(s0,32) * sext(s1,32) + s2_64) & 0xffffffffffffffff; V[vdst] = r & 0xffffffff; V[vdst+1] = (r >> 32) & 0xffffffff
-  elif op == VOP3SDOp.V_DIV_SCALE_F32: V[vdst] = 0; st.set_sgpr_lane(sdst, lane, False)  # div scaling not required in emulator
-  elif op == VOP3SDOp.V_DIV_SCALE_F64: V[vdst] = s0; V[vdst+1] = st.rsrc(src0 + 1, lane); st.set_vcc_lane(lane, s0 == s2)
+  elif op == VOP3SDOp.V_DIV_SCALE_F32: V[vdst] = 0; st.pend_sgpr_lane(sdst, lane, False)
+  elif op == VOP3SDOp.V_DIV_SCALE_F64: V[vdst] = s0; V[vdst+1] = st.rsrc(src0 + 1, lane); st.pend_vcc_lane(lane, s0 == s2)
   else: raise NotImplementedError(f"VOP3SD op {op}")
 
 def exec_flat(st: WaveState, inst: FLAT, lane: int) -> None:
@@ -510,6 +530,7 @@ def step_wave(program: Program, st: WaveState, lds: bytearray, n_lanes: int) -> 
       if st.exec_mask & (1 << lane):
         if type(inst) == DS: VECTOR[type(inst)](st, inst, lane, lds)
         else: VECTOR[type(inst)](st, inst, lane)
+    st.commit_pends()  # apply all scalar writes after all lanes complete
     st.pc += inst_words
   return 0
 

@@ -189,7 +189,6 @@ def get_kernel_from_tinygrad(op_fn) -> tuple[bytes, tuple[int, int, int], tuple[
   return kernels[-1]
 
 @unittest.skipUnless(REMU_PATH.exists(), "libremu.so not found")
-@unittest.skipUnless(os.environ.get("AMD"), "requires AMD=1")
 class TestTinygradKernels(unittest.TestCase):
   """Compare emulators on real tinygrad-compiled kernels."""
 
