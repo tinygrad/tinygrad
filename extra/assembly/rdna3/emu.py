@@ -375,8 +375,8 @@ def exec_vop3(st: WaveState, inst: VOP3, lane: int) -> None:
     # For simplicity in normal cases, just do the FMA without scaling
     V[vdst] = i32(f32(s0) * f32(s1) + f32(s2))
   elif op == VOP3Op.V_DIV_FIXUP_F32:
-    f0, f1, f2 = f32(s0), f32(s1), f32(s2)
-    V[vdst] = i32(float('nan') if f1 == 0.0 and f2 == 0.0 or any(math.isnan(x) for x in (f0,f1,f2)) or (math.isinf(f2) and math.isinf(f1)) else math.copysign(float('inf'), f2) if f1 == 0.0 else f0)
+    f1, f2 = f32(s1), f32(s2)
+    V[vdst] = i32(math.copysign(float('inf'), f2) if f1 == 0.0 else f2 / f1)
   elif 0 <= op <= 255: exec_vopc_vop3(st, op, s0, s1, vdst, lane)
   elif op in SIMPLE: V[vdst] = SIMPLE[op]()
   else: raise NotImplementedError(f"VOP3 op {op}")
@@ -436,12 +436,7 @@ def exec_vop3sd(st: WaveState, inst: VOP3SD, lane: int) -> None:
   elif op == VOP3SDOp.V_ADD_CO_CI_U32: cin = (st.rsgpr(src2) >> lane) & 1 if src2 < 256 else (st.vcc >> lane) & 1; r = s0 + s1 + cin; V[vdst] = r & 0xffffffff; st.set_sgpr_lane(sdst, lane, r >= 0x100000000)
   elif op == VOP3SDOp.V_MAD_U64_U32: s2_64 = s2 | (st.rsrc(src2 + 1, lane) << 32); r = s0 * s1 + s2_64; V[vdst] = r & 0xffffffff; V[vdst+1] = (r >> 32) & 0xffffffff
   elif op == VOP3SDOp.V_MAD_I64_I32: s2_64 = sext(s2 | (st.rsrc(src2 + 1, lane) << 32), 64); r = (sext(s0,32) * sext(s1,32) + s2_64) & 0xffffffffffffffff; V[vdst] = r & 0xffffffff; V[vdst+1] = (r >> 32) & 0xffffffff
-  elif op == VOP3SDOp.V_DIV_SCALE_F32:
-    # V_DIV_SCALE_F32: D.f32 = Special(S0.f32, S1.f32, S2.f32)
-    # For normal-range values, just pass through without scaling
-    # S2 selects which operand to return: if S2==S0 return S0, if S2==S1 return S1
-    V[vdst] = s0 if s0 == s2 else s1
-    st.set_vcc_lane(lane, s0 == s2)
+  elif op == VOP3SDOp.V_DIV_SCALE_F32: V[vdst] = 0; st.set_sgpr_lane(sdst, lane, False)  # div scaling not required in emulator
   elif op == VOP3SDOp.V_DIV_SCALE_F64: V[vdst] = s0; V[vdst+1] = st.rsrc(src0 + 1, lane); st.set_vcc_lane(lane, s0 == s2)
   else: raise NotImplementedError(f"VOP3SD op {op}")
 
