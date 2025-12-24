@@ -27,7 +27,7 @@ def parse_llvm_tests(text: str) -> list[tuple[str, bytes]]:
     asm = line.split('//')[0].strip()
     if not asm: continue
     for j in range(i, min(i + 3, len(lines))):
-      if m := re.search(r'GFX11[^:]*:\s*encoding:\s*\[(.*?)\]', lines[j]):
+      if m := re.search(r'GFX11[^:]*:.*?encoding:\s*\[(.*?)\]', lines[j]):
         hex_bytes = m.group(1).replace('0x', '').replace(',', '').replace(' ', '')
         if hex_bytes:
           try: tests.append((asm, bytes.fromhex(hex_bytes)))
@@ -81,6 +81,9 @@ SOPK_IMM_FIRST = {'s_setreg_b32'}
 SOPK_DST_FIRST = {'s_getreg_b32', 's_waitcnt_vscnt', 's_waitcnt_vmcnt', 's_waitcnt_expcnt', 's_waitcnt_lgkmcnt'}
 # SOPK instructions with special 64-bit encoding (not yet supported)
 SOPK_UNSUPPORTED = {'s_setreg_imm32_b32'}
+# VOP2 instructions with inline literal: FMAAK has literal last, FMAMK has literal in middle
+VOP2_FMAAK = {'v_fmaak_f32', 'v_fmaak_f16'}  # vdst, src0, vsrc1, imm32
+VOP2_FMAMK = {'v_fmamk_f32', 'v_fmamk_f16'}  # vdst, src0, imm32, vsrc1
 
 def try_assemble(asm: str):
   parts = asm.replace(',', ' ').split()
@@ -101,6 +104,8 @@ def try_assemble(asm: str):
     elif name in SOPK_IMM_ONLY: inst = helper(simm16=parsed[0])
     elif name in SOPK_IMM_FIRST: inst = helper(simm16=parsed[0], sdst=parsed[1])
     elif name in SOPK_DST_FIRST: inst = helper(sdst=parsed[0], simm16=parsed[1])
+    elif name in VOP2_FMAAK: inst = helper(vdst=parsed[0], src0=parsed[1], vsrc1=parsed[2], literal=parsed[3])
+    elif name in VOP2_FMAMK: inst = helper(vdst=parsed[0], src0=parsed[1], vsrc1=parsed[3], literal=parsed[2])
     else: inst = helper(*parsed)
     return inst.to_bytes()
   except: return None
