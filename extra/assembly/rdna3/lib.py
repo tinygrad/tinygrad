@@ -190,7 +190,7 @@ class Inst:
     # Try to find the opcode enum for this format
     cls_name = self.__class__.__name__
     try:
-      from extra.assembly.rdna3 import autogen_rdna3_enum as enums
+      from extra.assembly.rdna3 import autogen as enums
       op_enum_name = f"{cls_name}Op"
       if hasattr(enums, op_enum_name):
         op_enum = getattr(enums, op_enum_name)
@@ -281,3 +281,17 @@ def decode_src_to_operand(val: int):
   if 193 <= val <= 208: return -(val - 192)  # inline constant -1 to -16
   if 256 <= val <= 511: return VGPR[val - 256]
   return val  # return raw value for special constants
+
+# *** GFX11 s_waitcnt encoding ***
+# simm16 layout: [3:0]=vmcnt[3:0], [6:4]=expcnt, [9:7]=vmcnt[6:4], [15:10]=lgkmcnt
+
+def waitcnt(vmcnt: int = 0x7f, expcnt: int = 0x7, lgkmcnt: int = 0x3f) -> int:
+  """Encode s_waitcnt simm16 value. Default args = max (don't wait)."""
+  return (vmcnt & 0xf) | ((expcnt & 0x7) << 4) | (((vmcnt >> 4) & 0x7) << 7) | ((lgkmcnt & 0x3f) << 10)
+
+def decode_waitcnt(val: int) -> tuple[int, int, int]:
+  """Decode s_waitcnt simm16 to (vmcnt, expcnt, lgkmcnt)."""
+  vmcnt = (val & 0xf) | (((val >> 7) & 0x7) << 4)
+  expcnt = (val >> 4) & 0x7
+  lgkmcnt = (val >> 10) & 0x3f
+  return vmcnt, expcnt, lgkmcnt

@@ -94,7 +94,7 @@ def parse_src_encoding(text: str) -> dict[int, str]:
   return src
 
 if __name__ == "__main__":
-  pdf = pdfplumber.open("extra/assembly/rdna3/rdna35_instruction_set_architecture.pdf")
+  pdf = pdfplumber.open("extra/assembly/rdna3/autogen/rdna35_instruction_set_architecture.pdf")
   full_text = '\n'.join(page.extract_text() or '' for page in pdf.pages)
 
   # parse SSRC encoding from SOP2 Fields table
@@ -227,17 +227,6 @@ if __name__ == "__main__":
       else:
         lines.append(f"  encoding = bits[{enc[1]}:{enc[2]}] == {enc_val}")
     sorted_fields = sort_fields(fmt_name, [f for f in fields if f[0] != 'ENCODING'])
-    # VOP3SD has src0/src1/src2 in second DWORD (not parsed from PDF due to page break)
-    # Insert them after sdst, before clmp
-    if fmt_name == 'VOP3SD':
-      new_fields = []
-      for f in sorted_fields:
-        new_fields.append(f)
-        if f[0].lower() == 'sdst':
-          new_fields.append(('src0', 40, 32, None, 'Src'))
-          new_fields.append(('src1', 49, 41, None, 'Src'))
-          new_fields.append(('src2', 58, 50, None, 'Src'))
-      sorted_fields = new_fields
     for field in sorted_fields:
       name, hi, lo = field[0], field[1], field[2]
       field_type = field[4] if len(field) > 4 else None
@@ -275,6 +264,6 @@ if __name__ == "__main__":
   lines.append("OFF = NULL")
   lines.append("")
 
-  with open("extra/assembly/rdna3/autogen_rdna3_enum.py", "w") as f: f.write('\n'.join(lines))
+  with open("extra/assembly/rdna3/autogen/__init__.py", "w") as f: f.write('\n'.join(lines))
   print(f"generated SrcEnum ({len(src_enum)}) + {len(enums)} opcode enums + {len(formats)} format classes")
   for name, ops in sorted(enums.items()): print(f"  {name}: {len(ops)} opcodes")

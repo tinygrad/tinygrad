@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Test RDNA3 SOP1 instructions against LLVM test vectors."""
 import unittest, re
-from extra.assembly.rdna3.autogen_rdna3_enum import *
+from extra.assembly.rdna3.autogen import *
 
 # Parse LLVM test format: "instruction\n// GFX11: encoding: [bytes]"
 LLVM_TESTS = """

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import unittest, subprocess
-from extra.assembly.rdna3.autogen_rdna3_enum import *
+from extra.assembly.rdna3.autogen import *
 
 def llvm_assemble(asm: str) -> bytes:
   """Assemble using llvm-mc and return bytes."""
