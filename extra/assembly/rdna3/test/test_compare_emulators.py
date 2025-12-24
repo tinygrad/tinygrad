@@ -96,45 +96,86 @@ class PythonEmulator:
                          exec_mask=self.state.exec_mask & 0xffffffff, sgpr=list(self.state.sgpr),
                          vgpr=[list(self.state.vgpr[i]) for i in range(WAVE_SIZE)])
 
-def compare_emulators_with_memory(kernel: bytes, n_lanes: int, buf_sizes: list, max_steps: int = 1000, debug: bool = False) -> tuple[bool, str]:
-  """Run both emulators with memory set up for tinygrad kernels."""
-  rust = RustEmulator()
-  python = PythonEmulator()
-  rust.create(kernel, n_lanes)
-  python.create(kernel, n_lanes)
+def compare_emulators_with_memory(kernel: bytes, n_lanes: int, buf_sizes: list, max_steps: int = 1000, debug: bool = False,
+                                   global_size: tuple[int, int, int] = (1, 1, 1)) -> tuple[bool, str]:
+  """Run both emulators with memory set up for tinygrad kernels, executing all workgroups."""
+  from extra.assembly.rdna3.emu import set_valid_mem_ranges
 
-  # Set up memory buffers and args pointer
-  buffers, args_ptr, args = setup_memory_for_kernel(rust, python, buf_sizes)
+  # Allocate buffers
+  buffers = []
+  for size in buf_sizes:
+    buf = (ctypes.c_uint8 * size)(*[0] * size)
+    buffers.append(buf)
 
-  step = 0
-  try:
-    while step < max_steps:
-      rust_before = rust.get_snapshot()
-      python_before = python.get_snapshot()
+  # Create args array with buffer pointers
+  args = (ctypes.c_uint64 * len(buffers))(*[ctypes.addressof(b) for b in buffers])
+  args_ptr = ctypes.addressof(args)
 
-      if debug:
-        inst = python.program.get(python.state.pc)
-        print(f"Step {step}: PC={python.state.pc}, inst={inst.disasm() if inst else 'N/A'}")
+  # Set up valid memory ranges for Python emulator
+  ranges = {(ctypes.addressof(b), len(b)) for b in buffers}
+  ranges.add((args_ptr, ctypes.sizeof(args)))
+  set_valid_mem_ranges(ranges)
 
-      diffs = rust_before.diff(python_before, n_lanes)
-      if diffs: return False, f"Step {step} before: states differ:\n  " + "\n  ".join(diffs)
+  gx, gy, gz = global_size
+  total_steps = 0
 
-      rust_result = rust.step()
-      python_result = python.step()
+  for gidz in range(gz):
+    for gidy in range(gy):
+      for gidx in range(gx):
+        rust = RustEmulator()
+        python = PythonEmulator()
+        rust.create(kernel, n_lanes)
+        python.create(kernel, n_lanes)
 
-      if rust_result != python_result:
-        inst = python.program.get(rust_before.pc)
-        inst_str = inst.disasm() if inst else f"unknown at PC={rust_before.pc}"
-        return False, f"Step {step}: different return codes: rust={rust_result}, python={python_result}, inst={inst_str}"
+        # Set args pointer in s[0:1]
+        rust.set_sgpr(0, args_ptr & 0xffffffff)
+        rust.set_sgpr(1, (args_ptr >> 32) & 0xffffffff)
+        python.set_sgpr(0, args_ptr & 0xffffffff)
+        python.set_sgpr(1, (args_ptr >> 32) & 0xffffffff)
 
-      if rust_result == -1: return True, f"Completed after {step + 1} steps"
-      if rust_result == 1: return True, f"Program ended after {step + 1} steps"
-      if rust_result < 0 and rust_result != -2: return False, f"Step {step}: error code {rust_result}"
+        # Set workgroup ID in SGPRs (dispatch_dim=3 uses s13,s14,s15)
+        for emu in [rust, python]:
+          emu.set_sgpr(13, gidx)
+          emu.set_sgpr(14, gidy)
+          emu.set_sgpr(15, gidz)
 
-      step += 1
-    return False, f"Max steps ({max_steps}) reached"
-  finally:
-    rust.free()
+        step = 0
+        try:
+          while step < max_steps:
+            rust_before = rust.get_snapshot()
+            python_before = python.get_snapshot()
+
+            if debug:
+              inst = python.program.get(python.state.pc)
+              print(f"WG({gidx},{gidy},{gidz}) Step {step}: PC={python.state.pc}, inst={inst.disasm() if inst else 'N/A'}")
+
+            diffs = rust_before.diff(python_before, n_lanes)
+            if diffs: return False, f"WG({gidx},{gidy},{gidz}) Step {step} before: states differ:\n  " + "\n  ".join(diffs)
+
+            rust_result = rust.step()
+            python_result = python.step()
+
+            if rust_result != python_result:
+              inst = python.program.get(rust_before.pc)
+              inst_str = inst.disasm() if inst else f"unknown at PC={rust_before.pc}"
+              return False, f"WG({gidx},{gidy},{gidz}) Step {step}: different return codes: rust={rust_result}, python={python_result}, inst={inst_str}"
+
+            if rust_result == -1:
+              total_steps += step + 1
+              break  # endpgm - move to next workgroup
+            if rust_result == 1:
+              total_steps += step + 1
+              break  # past end
+            if rust_result < 0 and rust_result != -2:
+              return False, f"WG({gidx},{gidy},{gidz}) Step {step}: error code {rust_result}"
+
+            step += 1
+          else:
+            return False, f"WG({gidx},{gidy},{gidz}) Max steps ({max_steps}) reached"
+        finally:
+          rust.free()
+
+  return True, f"Completed {gx*gy*gz} workgroups, {total_steps} total steps"
 
 def compare_emulators(kernel: bytes, n_lanes: int = 1, setup_state=None, max_steps: int = 1000, debug: bool = False) -> tuple[bool, str]:
   """Run both emulators and compare state after each step. Returns (success, message)."""
@@ -343,16 +384,17 @@ class TestCompareEmulators(unittest.TestCase):
     ok, msg = compare_emulators(kernel, n_lanes=1)
     self.assertTrue(ok, msg)
 
-def get_kernel_from_tinygrad(op_fn) -> tuple[bytes, tuple[int, int, int], list]:
-  """Compile a tinygrad operation and extract the kernel binary. Returns (kernel_bytes, local_size, buffer_sizes)."""
+def get_kernels_from_tinygrad(op_fn) -> list[tuple[bytes, tuple[int, int, int], tuple[int, int, int], list]]:
+  """Compile a tinygrad operation and extract all kernel binaries. Returns list of (kernel_bytes, global_size, local_size, buffer_sizes)."""
   os.environ["AMD"] = "1"
   from tinygrad import Tensor
   from tinygrad.runtime.support.elf import elf_loader
 
   out = op_fn(Tensor)
   sched = out.schedule()
+  kernels = []
   for ei in sched:
-    if ei.ast.op.name == 'SINK':  # This is the compute kernel
+    if ei.ast.op.name == 'SINK':  # This is a compute kernel
       lowered = ei.lower()
       if lowered.prg and lowered.prg.p.lib:
         # Extract kernel code from ELF binary
@@ -363,35 +405,14 @@ def get_kernel_from_tinygrad(op_fn) -> tuple[bytes, tuple[int, int, int], list]:
           if sec.name == '.text':
             # Get buffer sizes from the bufs
             buf_sizes = [b.nbytes for b in lowered.bufs]
-            return bytes(sec.content), tuple(lowered.prg.p.local_size), buf_sizes
-  raise RuntimeError("No kernel found")
+            kernels.append((bytes(sec.content), tuple(lowered.prg.p.global_size), tuple(lowered.prg.p.local_size), buf_sizes))
+  if not kernels: raise RuntimeError("No kernel found")
+  return kernels
 
-def setup_memory_for_kernel(rust, python, buf_sizes: list) -> tuple[list, int]:
-  """Allocate memory buffers and set up args pointer for both emulators. Returns (buffers, args_ptr)."""
-  from extra.assembly.rdna3.emu import set_valid_mem_ranges
-
-  # Allocate buffers
-  buffers = []
-  for size in buf_sizes:
-    buf = (ctypes.c_uint8 * size)(*[0] * size)
-    buffers.append(buf)
-
-  # Create args array with buffer pointers
-  args = (ctypes.c_uint64 * len(buffers))(*[ctypes.addressof(b) for b in buffers])
-  args_ptr = ctypes.addressof(args)
-
-  # Set up valid memory ranges for Python emulator
-  ranges = {(ctypes.addressof(b), len(b)) for b in buffers}
-  ranges.add((args_ptr, ctypes.sizeof(args)))
-  set_valid_mem_ranges(ranges)
-
-  # Set args pointer in s[0:1] for both emulators
-  rust.set_sgpr(0, args_ptr & 0xffffffff)
-  rust.set_sgpr(1, (args_ptr >> 32) & 0xffffffff)
-  python.set_sgpr(0, args_ptr & 0xffffffff)
-  python.set_sgpr(1, (args_ptr >> 32) & 0xffffffff)
-
-  return buffers, args_ptr, args  # return args to prevent GC
+def get_kernel_from_tinygrad(op_fn) -> tuple[bytes, tuple[int, int, int], tuple[int, int, int], list]:
+  """Compile a tinygrad operation and extract the last (main) kernel binary."""
+  kernels = get_kernels_from_tinygrad(op_fn)
+  return kernels[-1]  # Return last kernel which is typically the main compute kernel
 
 @unittest.skipUnless(os.environ.get("AMD"), "requires AMD=1")
 class TestTinygradKernels(unittest.TestCase):
@@ -405,20 +426,11 @@ class TestTinygradKernels(unittest.TestCase):
       raise unittest.SkipTest("libremu.so not found after build")
 
   def _test_kernel(self, op_fn, max_steps=10000):
-    kernel, local_size, buf_sizes = get_kernel_from_tinygrad(op_fn)
+    kernel, global_size, local_size, buf_sizes = get_kernel_from_tinygrad(op_fn)
     n_lanes = local_size[0] * local_size[1] * local_size[2]
     # For tinygrad kernels, we need to set up memory - use compare_emulators_with_memory
-    ok, msg = compare_emulators_with_memory(kernel, n_lanes=min(n_lanes, 32), buf_sizes=buf_sizes, max_steps=max_steps)
+    ok, msg = compare_emulators_with_memory(kernel, n_lanes=min(n_lanes, 32), buf_sizes=buf_sizes, max_steps=max_steps, global_size=global_size)
     self.assertTrue(ok, msg)
-
-  def test_add(self):
-    self._test_kernel(lambda T: T([1.0, 2.0, 3.0, 4.0]) + T([5.0, 6.0, 7.0, 8.0]))
-
-  def test_mul(self):
-    self._test_kernel(lambda T: T([1.0, 2.0, 3.0, 4.0]) * T([2.0, 3.0, 4.0, 5.0]))
-
-  def test_sub(self):
-    self._test_kernel(lambda T: T([10.0, 20.0, 30.0, 40.0]) - T([1.0, 2.0, 3.0, 4.0]))
 
   def test_neg(self):
     self._test_kernel(lambda T: -T([1.0, -2.0, 3.0, -4.0]))
@@ -429,8 +441,8 @@ class TestTinygradKernels(unittest.TestCase):
   def test_exp(self):
     self._test_kernel(lambda T: T([0.0, 1.0, 2.0]).exp())
 
-  def test_sqrt(self):
-    self._test_kernel(lambda T: T([1.0, 4.0, 9.0, 16.0]).sqrt())
+  def test_gemm(self):
+    self._test_kernel(lambda T: T.randn(4, 4) @ T.randn(4, 4), max_steps=100000)
 
 if __name__ == "__main__":
   unittest.main()

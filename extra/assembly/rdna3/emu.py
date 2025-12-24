@@ -362,7 +362,7 @@ def exec_vop3(st: WaveState, inst: VOP3, lane: int) -> None:
     VOP3Op.V_FREXP_MANT_F32: lambda: i32(math.frexp(f32(s0))[0] if f32(s0)!=0 else 0.0),
     VOP3Op.V_FREXP_EXP_I32_F32: lambda: (math.frexp(f32(s0))[1] if f32(s0)!=0 else 0)&0xffffffff,
     VOP3Op.V_ALIGNBIT_B32: lambda: (((s0<<32)|s1)>>(s2&0x1f))&0xffffffff, VOP3Op.V_XAD_U32: lambda: ((s0*s1)+s2)&0xffffffff,
-    VOP3Op.V_LSHL_OR_B32: lambda: ((s0<<(s1&0x1f))|s2)&0xffffffff}
+    VOP3Op.V_LSHL_OR_B32: lambda: ((s0<<(s1&0x1f))|s2)&0xffffffff, VOP3Op.V_XOR3_B32: lambda: s0^s1^s2}
   if op == VOP3Op.V_BFE_U32: off, wd = s1 & 0x1f, s2 & 0x1f; V[vdst] = (s0 >> off) & ((1 << wd) - 1) if wd else 0
   elif op == VOP3Op.V_BFE_I32: off, wd = s1 & 0x1f, s2 & 0x1f; V[vdst] = sext((s0 >> off) & ((1 << wd) - 1), wd) & 0xffffffff if wd else 0
   elif op == VOP3Op.V_CNDMASK_B32: mask = st.rsrc(src2, lane) if src2 < 256 else st.vcc; V[vdst] = s1 if (mask >> lane) & 1 else s0
@@ -381,8 +381,27 @@ def exec_vop3(st: WaveState, inst: VOP3, lane: int) -> None:
   elif op in SIMPLE: V[vdst] = SIMPLE[op]()
   else: raise NotImplementedError(f"VOP3 op {op}")
 
+def cmp_class_f32(val: int, mask: int) -> bool:
+  """V_CMP_CLASS_F32: test if float matches class specified by mask bits."""
+  f = f32(val)
+  # Mask bits: 0=sNaN, 1=qNaN, 2=-inf, 3=-normal, 4=-denormal, 5=-0, 6=+0, 7=+denormal, 8=+normal, 9=+inf
+  if math.isnan(f): return bool(mask & 0x3)  # bits 0,1 for NaN
+  if math.isinf(f): return bool(mask & (0x4 if f < 0 else 0x200))  # bit 2 for -inf, bit 9 for +inf
+  if f == 0.0:
+    # Check sign of zero
+    sign = (val >> 31) & 1
+    return bool(mask & (0x20 if sign else 0x40))  # bit 5 for -0, bit 6 for +0
+  # Normal or denormal
+  exp = (val >> 23) & 0xff
+  sign = (val >> 31) & 1
+  if exp == 0:  # denormal
+    return bool(mask & (0x10 if sign else 0x80))  # bit 4 for -denorm, bit 7 for +denorm
+  else:  # normal
+    return bool(mask & (0x8 if sign else 0x100))  # bit 3 for -normal, bit 8 for +normal
+
 def vopc_compare(op: int, s0: int, s1: int) -> bool:
   base = op & 0x7f
+  if base == 126: return cmp_class_f32(s0, s1)  # V_CMP_CLASS_F32
   if 16 <= base <= 31:
     f0, f1, cmp = f32(s0), f32(s1), base - 16
     nan = math.isnan(f0) or math.isnan(f1)
@@ -390,7 +409,7 @@ def vopc_compare(op: int, s0: int, s1: int) -> bool:
   if 64 <= base <= 79:
     cmp = (base - 64) % 8; s0s, s1s = sext(s0,32), sext(s1,32)
     return [False, s0s<s1s, s0s==s1s, s0s<=s1s, s0s>s1s, s0s!=s1s, s0s>=s1s, True][cmp] if base < 72 else [False, s0<s1, s0==s1, s0<=s1, s0>s1, s0!=s1, s0>=s1, True][cmp]
-  return False
+  raise NotImplementedError(f"VOPC op {op}")
 
 def exec_vopc_vop3(st: WaveState, op: int, s0: int, s1: int, sdst: int, lane: int) -> None:
   result, is_cmpx = vopc_compare(op, s0, s1), op >= 128
