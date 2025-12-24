@@ -6,20 +6,9 @@ from typing import Any
 from tinygrad.helpers import DEBUG, colored
 from extra.assembly.rdna3.lib import Inst32, Inst64, bits
 from extra.assembly.rdna3.autogen import (
-  SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, DS, FLAT, VOPD,
-  SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, DSOp, FLATOp, GLOBALOp, VOPDOp, VOP3POp
+  SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, DS, FLAT, VOPD,
+  SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp, FLATOp, GLOBALOp, VOPDOp
 )
-
-class VOPC(Inst32):
-  encoding = bits[31:25] == 0b0111110
-  op, src0, vsrc1 = bits[24:17], bits[8:0], bits[16:9]
-
-class VOP3P(Inst64):
-  encoding = bits[31:26] == 0b110011
-  op, vdst = bits[22:16], bits[7:0]
-  neg_hi, opsel, opsel_hi2, clamp = bits[10:8], bits[13:11], bits[14:14], bits[15:15]
-  src0, src1, src2 = bits[40:32], bits[49:41], bits[58:50]
-  opsel_hi, neg = bits[60:59], bits[63:61]
 
 # Type aliases
 Inst = Inst32 | Inst64 | VOP3P

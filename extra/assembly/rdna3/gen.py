@@ -10,6 +10,7 @@ FIELD_ORDER = {'SOP2': ['op', 'sdst', 'ssrc0', 'ssrc1'], 'SOP1': ['op', 'sdst', 
   'SOPK': ['op', 'sdst', 'simm16'], 'SOPP': ['op', 'simm16'], 'SMEM': ['op', 'sdata', 'sbase', 'soffset', 'offset', 'glc', 'dlc'],
   'VOP1': ['op', 'vdst', 'src0'], 'VOP2': ['op', 'vdst', 'src0', 'vsrc1'], 'VOPC': ['op', 'src0', 'vsrc1'],
   'VOP3': ['op', 'vdst', 'src0', 'src1', 'src2', 'omod', 'neg', 'abs', 'clmp', 'opsel'], 'VOP3SD': ['op', 'vdst', 'sdst', 'src0', 'src1', 'src2', 'clmp'],
+  'VOP3P': ['op', 'vdst', 'src0', 'src1', 'src2', 'neg', 'neg_hi', 'opsel', 'opsel_hi', 'clmp'],
   'DS': ['op', 'vdst', 'addr', 'data0', 'data1', 'offset0', 'offset1', 'gds'], 'FLAT': ['op', 'vdst', 'addr', 'data', 'saddr', 'offset', 'seg', 'dlc', 'glc', 'slc'],
   'MUBUF': ['op', 'vdata', 'vaddr', 'srsrc', 'soffset', 'offset', 'offen', 'idxen', 'glc', 'dlc', 'slc', 'tfe'],
   'MTBUF': ['op', 'vdata', 'vaddr', 'srsrc', 'soffset', 'offset', 'format', 'offen', 'idxen', 'glc', 'dlc', 'slc', 'tfe'],
@@ -27,9 +28,16 @@ def parse_fields_table(table: list, fmt: str, enums: set[str]) -> list[tuple]:
     if not row or not row[0]: continue
     name, bits_str = row[0].split('\n')[0].strip(), (row[1] or '').split('\n')[0].strip()
     if not (bits := parse_bits(bits_str)): continue
-    enc_val = int(m.group(1).replace('_', ''), 2) if name == 'ENCODING' and row[2] and (m := re.search(r"'b([01_]+)", row[2])) else None
+    enc_val, hi, lo = None, bits[0], bits[1]
+    if name == 'ENCODING' and row[2] and (m := re.search(r"'b([01_]+)", row[2])):
+      enc_bits = m.group(1).replace('_', '')
+      enc_val = int(enc_bits, 2)
+      declared_width, actual_width = hi - lo + 1, len(enc_bits)
+      if actual_width > declared_width:
+        print(f"WARNING: {fmt} ENCODING has {actual_width} bits but field is [{hi}:{lo}] ({declared_width} bits), extending to [{hi}:{hi - actual_width + 1}]")
+        lo = hi - actual_width + 1
     ftype = f"{fmt}Op" if name == 'OP' and f"{fmt}Op" in enums else FIELD_TYPES.get(name.upper())
-    fields.append((name, bits[0], bits[1], enc_val, ftype))
+    fields.append((name, hi, lo, enc_val, ftype))
   return fields
 
 def is_fields_table(t) -> bool: return t and len(t) > 1 and t[0] and 'Field' in str(t[0][0] or '')
@@ -62,26 +70,40 @@ if __name__ == "__main__":
   # parse instruction formats
   formats: dict[str, list] = {}
   for i, page in enumerate(pdf.pages[150:200]):
-    for m in re.finditer(r'\d+\.\d+\.\d+\.\s+(\w+)\s*\n?Description', text := page.extract_text() or ''):
+    text = page.extract_text() or ''
+    # Match format headers followed by Description on same page
+    matches = list(re.finditer(r'\d+\.\d+\.\d+\.\s+(\w+)\s*\n?Description', text))
+    # Also match format headers near end of page where Description is on next page
+    for m in re.finditer(r'\d+\.\d+\.\d+\.\s+(\w+)\s*\n', text):
+      if m.start() > len(text) - 200 and 'Description' not in text[m.end():] and 150+i+1 < len(pdf.pages):
+        next_text = (pdf.pages[150+i+1].extract_text() or '').lstrip()
+        if next_text.startswith('Description') or next_text.startswith('"RDNA') and 'Description' in next_text[:200]: matches.append(m)
+    for m in matches:
       fmt_name, header_pos = m.group(1), m.start()
       if fmt_name in formats: continue
       fields, field_pos = None, text.find('Field Name', header_pos)
       for t in page.find_tables() if field_pos > header_pos else []:
         if is_fields_table(t_data := t.extract()) and (fields := parse_fields_table(t_data, fmt_name, set(enums.keys()))) and any(f[0] == 'ENCODING' for f in fields): break
         fields = None
-      if not fields and 150+i+1 < len(pdf.pages):
-        for t in pdf.pages[150+i+1].find_tables():
-          if is_fields_table(t_data := t.extract()) and (fields := parse_fields_table(t_data, fmt_name, set(enums.keys()))) and any(f[0] == 'ENCODING' for f in fields): break
-          fields = None
+      if not fields:
+        for offset in range(1, 3):  # check next 2 pages
+          if 150+i+offset >= len(pdf.pages): break
+          for t in pdf.pages[150+i+offset].find_tables():
+            if is_fields_table(t_data := t.extract()) and (fields := parse_fields_table(t_data, fmt_name, set(enums.keys()))) and any(f[0] == 'ENCODING' for f in fields): break
+            fields = None
+          if fields: break
       if fields:
-        if field_pos > header_pos and 150+i+1 < len(pdf.pages):
-          for nt in pdf.pages[150+i+1].extract_tables():
-            if is_fields_table(nt) and (extra := parse_fields_table(nt, fmt_name, set(enums.keys()))) and not any(f[0] == 'ENCODING' for f in extra): fields.extend(extra); break
+        # check next 2 pages for continuation fields (tables without ENCODING)
+        for offset in range(1, 3):
+          if 150+i+offset >= len(pdf.pages): break
+          for nt in pdf.pages[150+i+offset].extract_tables():
+            if is_fields_table(nt) and (extra := parse_fields_table(nt, fmt_name, set(enums.keys()))) and not any(f[0] == 'ENCODING' for f in extra):
+              fields.extend(extra); break
         formats[fmt_name] = fields
 
   # generate output
   def enum_lines(name, items): return [f"class {name}(IntEnum):"] + [f"  {n} = {v}" for v, n in sorted(items.items())] + [""]
-  lines = ["# autogenerated from AMD RDNA3.5 ISA PDF - do not edit", "from enum import IntEnum",
+  lines = ["# autogenerated from AMD RDNA3.5 ISA PDF by gen.py - do not edit", "from enum import IntEnum",
            "from extra.assembly.rdna3.lib import bits, Inst32, Inst64, SGPR, VGPR, TTMP, s, v, SSrc, Src, SImm, Imm", "import functools", ""]
   lines += enum_lines("SrcEnum", src_enum) + sum([enum_lines(n, ops) for n, ops in sorted(enums.items())], [])
   lines.append("# instruction formats")
