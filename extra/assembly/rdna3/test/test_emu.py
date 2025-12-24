@@ -556,6 +556,71 @@ class TestDecoder(unittest.TestCase):
     # Should only have 2 instructions (s_mov_b32 and s_endpgm)
     self.assertEqual(len(prog), 2)
 
+class TestFloatConversion(unittest.TestCase):
+  """Unit tests for i32/i16/f32/f16 float conversion functions."""
+
+  def test_i32_preserves_nan_sign(self):
+    """NaN sign bit should be preserved when converting float to int bits."""
+    from extra.assembly.rdna3.emu import i32, f32
+    # 0 * -inf produces a negative NaN
+    neg_nan = 0.0 * float('-inf')
+    bits = i32(neg_nan)
+    # Should have sign bit set (0xffc00000), not canonical positive NaN (0x7fc00000)
+    self.assertEqual(bits & 0x80000000, 0x80000000, f"Expected negative NaN, got 0x{bits:08x}")
+    self.assertTrue(math.isnan(f32(bits)))
+
+  def test_i32_preserves_positive_nan(self):
+    """Positive NaN should remain positive."""
+    from extra.assembly.rdna3.emu import i32, f32
+    pos_nan = float('nan')
+    bits = i32(pos_nan)
+    # Standard Python NaN is positive (0x7fc00000)
+    self.assertEqual(bits & 0x80000000, 0, f"Expected positive NaN, got 0x{bits:08x}")
+    self.assertTrue(math.isnan(f32(bits)))
+
+  def test_i32_overflow_to_inf(self):
+    """Values too large for f32 should become inf."""
+    from extra.assembly.rdna3.emu import i32, f32
+    big = 2.0 ** 200
+    self.assertEqual(i32(big), 0x7f800000)  # +inf
+    self.assertEqual(i32(-big), 0xff800000)  # -inf
+
+  def test_i32_inf(self):
+    """Infinity should be preserved."""
+    from extra.assembly.rdna3.emu import i32
+    self.assertEqual(i32(float('inf')), 0x7f800000)
+    self.assertEqual(i32(float('-inf')), 0xff800000)
+
+  def test_i32_normal_values(self):
+    """Normal float values should round-trip correctly (within f32 precision)."""
+    from extra.assembly.rdna3.emu import i32, f32
+    # Use values exactly representable in float32
+    for val in [0.0, 1.0, -1.0, 0.5, -0.5, 100.0, -100.0, 1e10]:
+      bits = i32(val)
+      self.assertAlmostEqual(f32(bits), val, places=5)
+
+  def test_i16_overflow_to_inf(self):
+    """Values too large for f16 should become inf."""
+    from extra.assembly.rdna3.emu import i16
+    big = 100000.0  # way larger than f16 max (65504)
+    self.assertEqual(i16(big), 0x7c00)  # +inf
+    self.assertEqual(i16(-big), 0xfc00)  # -inf
+
+  def test_i16_inf(self):
+    """Infinity should be preserved."""
+    from extra.assembly.rdna3.emu import i16
+    self.assertEqual(i16(float('inf')), 0x7c00)
+    self.assertEqual(i16(float('-inf')), 0xfc00)
+
+  def test_fma_nan_sign_preserved(self):
+    """FMA producing NaN should preserve the correct sign bit."""
+    from extra.assembly.rdna3.emu import i32, f32
+    # 0 * (-inf) + 1.0 = NaN (from 0 * -inf)
+    a, b, c = 0.0, float('-inf'), 1.0
+    result = i32(a * b + c)
+    # The NaN should be negative since 0 * -inf produces negative NaN
+    self.assertEqual(result & 0x80000000, 0x80000000, f"Expected negative NaN, got 0x{result:08x}")
+
 class TestMultiWave(unittest.TestCase):
   def test_all_waves_execute(self):
     """Regression test: all waves in a workgroup must execute, not just the first."""

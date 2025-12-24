@@ -41,12 +41,18 @@ DS_STORE = {DSOp.DS_STORE_B32: (1,4), DSOp.DS_STORE_B64: (2,4), DSOp.DS_STORE_B1
 # Optimized float conversion using cached struct
 _struct_I, _struct_f = struct.Struct('<I'), struct.Struct('<f')
 def f32(i: int) -> float: return _struct_f.unpack(_struct_I.pack(i & 0xffffffff))[0]
-def i32(f: float) -> int: return _struct_I.unpack(_struct_f.pack(f))[0]
+def i32(f: float) -> int:
+  if math.isinf(f): return 0x7f800000 if f > 0 else 0xff800000
+  try: return _struct_I.unpack(_struct_f.pack(f))[0]
+  except (OverflowError, struct.error): return 0x7f800000 if f > 0 else 0xff800000  # overflow to inf
 def sext(v: int, b: int) -> int: return v - (1 << b) if v & (1 << (b-1)) else v
 def clz(x: int) -> int: return 32 - x.bit_length() if x else 32
 def cls(x: int) -> int: x &= 0xffffffff; return 31 if x in (0, 0xffffffff) else clz(~x & 0xffffffff if x >> 31 else x) - 1
 def f16(i: int) -> float: return struct.unpack('<e', struct.pack('<H', i & 0xffff))[0]
-def i16(f: float) -> int: return struct.unpack('<H', struct.pack('<e', f))[0]
+def i16(f: float) -> int:
+  if math.isinf(f): return 0x7c00 if f > 0 else 0xfc00
+  try: return struct.unpack('<H', struct.pack('<e', f))[0]
+  except (OverflowError, struct.error): return 0x7c00 if f > 0 else 0xfc00  # overflow to inf
 
 # Shared transcendental/conversion functions
 def alu_rcp(a): v = f32(a); return i32(1.0 / v if v != 0 else math.copysign(float('inf'), v))
@@ -79,6 +85,7 @@ class WaveState:
     elif i == VCC_HI: self.vcc = (self.vcc & 0xffffffff) | (v << 32)
     elif i == EXEC_LO: self.exec_mask = (self.exec_mask & 0xffffffff00000000) | v
     elif i == EXEC_HI: self.exec_mask = (self.exec_mask & 0xffffffff) | (v << 32)
+    elif i == NULL_REG: pass  # writes to null are discarded
     elif i < SGPR_COUNT: self.sgpr[i] = v
 
   def rsgpr64(self, i: int) -> int: return self.rsgpr(i) | (self.rsgpr(i+1) << 32)
@@ -303,7 +310,7 @@ def exec_sopp(st: WaveState, inst: SOPP) -> int:
 
 SMEM_LOAD = {SMEMOp.S_LOAD_B32: 1, SMEMOp.S_LOAD_B64: 2, SMEMOp.S_LOAD_B128: 4, SMEMOp.S_LOAD_B256: 8, SMEMOp.S_LOAD_B512: 16}
 def exec_smem(st: WaveState, inst: SMEM) -> int:
-  addr = st.rsgpr64(inst.sbase * 2) + sext(inst.offset, 21)
+  addr = st.rsgpr64(inst.sbase * 2) + sext(inst.offset, 21)  # sbase field encodes register/2
   if inst.soffset not in (NULL_REG, 0x7f): addr += st.rsrc(inst.soffset, 0)
   if (cnt := SMEM_LOAD.get(inst.op)) is None: raise NotImplementedError(f"SMEM op {inst.op}")
   for i in range(cnt): st.wsgpr(inst.sdata + i, mem_read((addr + i * 4) & 0xffffffffffffffff, 4))
@@ -317,7 +324,7 @@ VOP1_OPS = {
   VOP1Op.V_CVT_F16_F32: lambda s: i16(f32(s)), VOP1Op.V_CVT_F32_F16: lambda s: i32(f16(s)),
   VOP1Op.V_TRUNC_F32: lambda s: i32(math.trunc(f32(s))), VOP1Op.V_CEIL_F32: lambda s: i32(math.ceil(f32(s))),
   VOP1Op.V_RNDNE_F32: lambda s: i32(round(f32(s))), VOP1Op.V_FLOOR_F32: lambda s: i32(math.floor(f32(s))),
-  VOP1Op.V_EXP_F32: lambda s: i32(math.pow(2.0, f32(s))), VOP1Op.V_LOG_F32: alu_log,
+  VOP1Op.V_EXP_F32: lambda s: i32(float('inf') if (v := f32(s)) > 128 else (0.0 if v < -150 else math.pow(2.0, v))), VOP1Op.V_LOG_F32: alu_log,
   VOP1Op.V_RCP_F32: alu_rcp, VOP1Op.V_RCP_IFLAG_F32: alu_rcp, VOP1Op.V_RSQ_F32: alu_rsq, VOP1Op.V_SQRT_F32: alu_sqrt,
   VOP1Op.V_SIN_F32: lambda s: i32(math.sin(f32(s) * 2 * math.pi)), VOP1Op.V_COS_F32: lambda s: i32(math.cos(f32(s) * 2 * math.pi)),
   VOP1Op.V_NOT_B32: lambda s: (~s) & 0xffffffff, VOP1Op.V_BFREV_B32: lambda s: int(f'{s:032b}'[::-1], 2),
@@ -389,6 +396,8 @@ VOP3_ONLY_OPS = {
   VOP3Op.V_MUL_LO_U32: lambda a, b, c: (a * b) & 0xffffffff, VOP3Op.V_MUL_HI_U32: lambda a, b, c: ((a * b) >> 32) & 0xffffffff,
   VOP3Op.V_MUL_HI_I32: lambda a, b, c: ((sext(a, 32) * sext(b, 32)) >> 32) & 0xffffffff,
   VOP3Op.V_LDEXP_F32: lambda a, b, c: i32(math.ldexp(f32(a), sext(b, 32))),
+  VOP3Op.V_LSHLREV_B16: lambda a, b, c: ((b & 0xffff) << (a & 0xf)) & 0xffff,
+  VOP3Op.V_OR3_B32: lambda a, b, c: a | b | c, VOP3Op.V_AND_OR_B32: lambda a, b, c: (a & b) | c,
 }
 
 # Build VOP3_OPS dynamically: VOP3Op = VOP1Op + 384 for VOP1, VOP3Op = VOP2Op + 256 for VOP2
@@ -404,7 +413,11 @@ def exec_vop3(st: WaveState, inst: VOP3, lane: int) -> None:
   if (fn := VOP3_OPS.get(op)): V[vdst] = fn(s0, s1, s2); return
   match op:
     case VOP3Op.V_FMAC_F32: V[vdst] = i32(f32(s0)*f32(s1)+f32(V[vdst]))
-    case VOP3Op.V_CNDMASK_B32: V[vdst] = s1 if ((st.rsrc(src2, lane) if src2 < 256 else st.vcc) >> lane) & 1 else s0
+    case VOP3Op.V_READLANE_B32: st.wsgpr(vdst, st.vgpr[s1 & 0x1f][src0 - 256] if src0 >= 256 else s0)
+    case VOP3Op.V_WRITELANE_B32: st.vgpr[s1 & 0x1f][vdst] = s0
+    case VOP3Op.V_CNDMASK_B32:
+      mask = st.rsgpr(src2) if src2 < 256 else st.vcc
+      V[vdst] = s1 if (mask >> lane) & 1 else s0
     case VOP3Op.V_LSHLREV_B64 | VOP3Op.V_LSHRREV_B64 | VOP3Op.V_ASHRREV_I64:
       v64 = st.rsrc64(src1, lane)
       r = ((v64 << (s0 & 0x3f)) & 0xffffffffffffffff if op == VOP3Op.V_LSHLREV_B64 else
@@ -423,10 +436,16 @@ def cmp_class_f32(val: int, mask: int) -> bool:
 def vopc_compare(op: int, s0: int, s1: int) -> bool:
   base = op & 0x7f
   if base == 126: return cmp_class_f32(s0, s1)
-  if 16 <= base <= 31:
+  if 16 <= base <= 31:  # F32 compare
     f0, f1, cmp, nan = f32(s0), f32(s1), base - 16, math.isnan(f32(s0)) or math.isnan(f32(s1))
     return [False, f0<f1, f0==f1, f0<=f1, f0>f1, f0!=f1, f0>=f1, not nan, nan, f0<f1 or nan, f0==f1 or nan, f0<=f1 or nan, f0>f1 or nan, f0!=f1 or nan, f0>=f1 or nan, True][cmp]
-  if 64 <= base <= 79:
+  if 49 <= base <= 54:  # I16 compare
+    cmp, s0s, s1s = base - 49, sext(s0 & 0xffff, 16), sext(s1 & 0xffff, 16)
+    return [s0s<s1s, s0s==s1s, s0s<=s1s, s0s>s1s, s0s!=s1s, s0s>=s1s][cmp]
+  if 57 <= base <= 62:  # U16 compare
+    cmp, s0u, s1u = base - 57, s0 & 0xffff, s1 & 0xffff
+    return [s0u<s1u, s0u==s1u, s0u<=s1u, s0u>s1u, s0u!=s1u, s0u>=s1u][cmp]
+  if 64 <= base <= 79:  # I32/U32 compare
     cmp, s0s, s1s = (base - 64) % 8, sext(s0,32), sext(s1,32)
     return [False, s0s<s1s, s0s==s1s, s0s<=s1s, s0s>s1s, s0s!=s1s, s0s>=s1s, True][cmp] if base < 72 else [False, s0<s1, s0==s1, s0<=s1, s0>s1, s0!=s1, s0>=s1, True][cmp]
   raise NotImplementedError(f"VOPC op {op}")
@@ -463,6 +482,10 @@ def exec_vop3sd(st: WaveState, inst: VOP3SD, lane: int) -> None:
       r = s0 + s1 + cin
       V[vdst] = r & 0xffffffff
       st.pend_sgpr_lane(sdst, lane, r >= 0x100000000)
+    case VOP3SDOp.V_SUB_CO_CI_U32:
+      cin = (st.rsgpr(src2) >> lane) & 1 if src2 < 256 else (st.vcc >> lane) & 1
+      V[vdst] = (s0 - s1 - cin) & 0xffffffff
+      st.pend_sgpr_lane(sdst, lane, s1 + cin > s0)
     case VOP3SDOp.V_MAD_U64_U32:
       s2_64 = s2 | (st.rsrc(src2 + 1, lane) << 32)
       r = s0 * s1 + s2_64
@@ -474,7 +497,7 @@ def exec_vop3sd(st: WaveState, inst: VOP3SD, lane: int) -> None:
       V[vdst] = r & 0xffffffff
       V[vdst+1] = (r >> 32) & 0xffffffff
     case VOP3SDOp.V_DIV_SCALE_F32:
-      V[vdst] = 0
+      V[vdst] = 0  # NOTE: div scaling isn't required (matches Rust emulator)
       st.pend_sgpr_lane(sdst, lane, False)
     case VOP3SDOp.V_DIV_SCALE_F64:
       V[vdst] = s0

@@ -21,8 +21,8 @@ class PythonRemu:
 
   def run_asm(self, lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int) -> int:
     from extra.assembly.rdna3.emu import run_asm, set_valid_mem_ranges
-    # Pad ranges by 16 bytes to handle GPU loads that read past small buffers (e.g. s_load_b128 on 12-byte buffer)
-    set_valid_mem_ranges({(start, size + 16) for start, size in self.valid_mem_ranges})
+    # Pad ranges to handle GPU loads that may read past small buffers (e.g. s_load_b128 on 12-byte buffer)
+    set_valid_mem_ranges({(start, size + 4096) for start, size in self.valid_mem_ranges})
     return run_asm(lib, lib_sz, gx, gy, gz, lx, ly, lz, args_ptr)
 
 def _try_dlopen_remu():

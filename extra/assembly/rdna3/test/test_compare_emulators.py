@@ -377,5 +377,9 @@ class TestTinygradKernels(unittest.TestCase):
   def test_half_add(self): self._test_kernel(lambda T: (T([1., 2.]*16).half() + T([3., 4.]*16).half()).float())
   def test_half_mul(self): self._test_kernel(lambda T: (T([2., 3.]*16).half() * T([4., 5.]*16).half()).float())
 
+  # Matrix ops - patterns from test_ops.py failures
+  def test_cat(self): self._test_kernel(lambda T: T.empty(32, 64).cat(T.empty(32, 64), dim=1))
+  def test_gather(self): self._test_kernel(lambda T: T.empty(64).gather(0, T.arange(32).int()))
+
 if __name__ == "__main__":
   unittest.main()
