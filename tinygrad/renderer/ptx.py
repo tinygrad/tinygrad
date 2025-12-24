@@ -246,9 +246,11 @@ class CUDAPTXRenderer(PTXRenderer):
     super().__init__(arch, "CUDA")
     from tinygrad.runtime.support.compiler_cuda import PTXCompiler
     self.compiler = PTXCompiler(arch)
+  def __reduce__(self): return self.__class__, (self.arch,)
 
 class NVPTXRenderer(PTXRenderer):
   def __init__(self, arch:str):
     super().__init__(arch, "NV")
     from tinygrad.runtime.support.compiler_cuda import NVPTXCompiler
     self.compiler = NVPTXCompiler(arch)
+  def __reduce__(self): return self.__class__, (self.arch,)
