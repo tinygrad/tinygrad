@@ -16,7 +16,7 @@ class VOPC(Inst32):
 
 # Type aliases
 Inst = Inst32 | Inst64
-Program = list[Inst]
+Program = dict[int, Inst]  # word offset -> instruction
 
 # constants and helpers
 WAVE_SIZE, SGPR_COUNT, VGPR_COUNT = 32, 128, 256
@@ -62,8 +62,6 @@ def i32(f: float) -> int: return struct.unpack('<I', struct.pack('<f', f))[0]
 def sext(v: int, b: int) -> int: return v - (1 << b) if v & (1 << (b-1)) else v
 def clz(x: int) -> int: return 32 - x.bit_length() if x else 32
 def cls(x: int) -> int: x &= 0xffffffff; return 31 if x in (0, 0xffffffff) else clz(~x & 0xffffffff if x >> 31 else x) - 1
-
-
 
 @dataclass
 class WaveState:
@@ -129,7 +127,7 @@ def decode_format(word: int) -> tuple[type[Inst] | None, bool]:
   return (VOPC, False) if enc == 0b0111110 else (VOP1, False) if enc == 0b0111111 else (VOP2, False)
 
 def decode_program(data: bytes) -> Program:
-  result: Program = []
+  result: Program = {}
   i = 0
   while i < len(data):
     word = int.from_bytes(data[i:i+4], 'little')
@@ -142,7 +140,7 @@ def decode_program(data: bytes) -> Program:
     if inst_class == VOP2 and inst.op in (44, 45, 55, 56): has_literal = True
     if inst_class == VOPD and (inst.opx in (1, 2) or inst.opy in (1, 2)): has_literal = True
     if has_literal: inst._literal = int.from_bytes(data[i+base_size:i+base_size+4], 'little')
-    result.append(inst)
+    result[i // 4] = inst  # key is word offset
     i += inst.size()
     if inst_class == SOPP and inst.op == SOPPOp.S_ENDPGM: break
   return result
@@ -207,6 +205,9 @@ def exec_sop2(st: WaveState, inst: SOP2) -> int:
   elif op == SOP2Op.S_PACK_LH_B32_B16: w((s0 & 0xffff) | (s1 & 0xffff0000))
   elif op == SOP2Op.S_PACK_HH_B32_B16: w(((s0 >> 16) & 0xffff) | (s1 & 0xffff0000))
   elif op == SOP2Op.S_PACK_HL_B32_B16: w(((s0 >> 16) & 0xffff) | ((s1 & 0xffff) << 16))
+  elif op == SOP2Op.S_ADD_F32: w(i32(f32(s0) + f32(s1)))
+  elif op == SOP2Op.S_SUB_F32: w(i32(f32(s0) - f32(s1)))
+  elif op == SOP2Op.S_MUL_F32: w(i32(f32(s0) * f32(s1)))
   else: raise NotImplementedError(f"SOP2 op {op}")
   return 0
 
@@ -217,8 +218,12 @@ def exec_sopc(st: WaveState, inst: SOPC) -> int:
               SOPCOp.S_CMP_LT_I32: lambda: sext(s0,32)<sext(s1,32), SOPCOp.S_CMP_LE_I32: lambda: sext(s0,32)<=sext(s1,32)}
   U32_CMP: dict[int, bool] = {SOPCOp.S_CMP_EQ_U32: s0==s1, SOPCOp.S_CMP_LG_U32: s0!=s1, SOPCOp.S_CMP_GT_U32: s0>s1,
              SOPCOp.S_CMP_GE_U32: s0>=s1, SOPCOp.S_CMP_LT_U32: s0<s1, SOPCOp.S_CMP_LE_U32: s0<=s1}
+  f0, f1 = f32(s0), f32(s1)
+  F32_CMP: dict[int, bool] = {SOPCOp.S_CMP_LT_F32: f0<f1, SOPCOp.S_CMP_EQ_F32: f0==f1, SOPCOp.S_CMP_LE_F32: f0<=f1,
+             SOPCOp.S_CMP_GT_F32: f0>f1, SOPCOp.S_CMP_LG_F32: f0!=f1, SOPCOp.S_CMP_GE_F32: f0>=f1}
   if op in I32_CMP: st.scc = int(I32_CMP[op]())
   elif op in U32_CMP: st.scc = int(U32_CMP[op])
+  elif op in F32_CMP: st.scc = int(F32_CMP[op])
   elif op == SOPCOp.S_BITCMP0_B32: st.scc = int((s0 & (1 << (s1 & 0x1f)))==0)
   elif op == SOPCOp.S_BITCMP1_B32: st.scc = int((s0 & (1 << (s1 & 0x1f)))!=0)
   elif op == SOPCOp.S_CMP_EQ_U64: st.scc = int(st.rsrc64(inst.ssrc0, 0) == st.rsrc64(inst.ssrc1, 0))
@@ -472,29 +477,42 @@ def _trace(inst: Inst, wg_id: tuple[int,int,int], tid: tuple[int,int,int], lane:
   hexw = f"{inst.to_int():016X}" if isinstance(inst, Inst64) else f"{inst.to_int():08X}        "
   print(f"[{gx:<3} {gy:<3} {gz:<3}] [{lx:<3} {ly:<3} {lz:<3}] {colored(f'{lane:<2} {hexw}', 'green' if active else 'gray')} {inst.disasm()}")
 
+SCALAR: dict[type, Any] = {SOP1: exec_sop1, SOP2: exec_sop2, SOPC: exec_sopc, SOPK: exec_sopk, SOPP: exec_sopp, SMEM: exec_smem}
+VECTOR: dict[type, Any] = {VOP1: exec_vop1, VOP2: exec_vop2, VOP3: exec_vop3, VOP3SD: exec_vop3sd, VOPC: exec_vopc, FLAT: exec_flat, DS: exec_ds, VOPD: exec_vopd}
+
+def step_wave(program: Program, st: WaveState, lds: bytearray, n_lanes: int) -> int:
+  """Execute a single instruction. Returns: 0=continue, -1=endpgm, -2=barrier, 1=done (pc past program). PC is word offset."""
+  if st.pc not in program: return 1
+  inst = program[st.pc]
+  inst_words = inst.size() // 4
+  st.literal = inst._literal or 0
+  if type(inst) in SCALAR:
+    delta = SCALAR[type(inst)](st, inst)
+    if delta == -1: return -1
+    if delta == -2: st.pc += inst_words; return -2
+    st.pc += inst_words + delta
+  else:
+    for lane in range(n_lanes):
+      if st.exec_mask & (1 << lane):
+        if type(inst) == DS: VECTOR[type(inst)](st, inst, lane, lds)
+        else: VECTOR[type(inst)](st, inst, lane)
+    st.pc += inst_words
+  return 0
+
 def exec_wave(program: Program, st: WaveState, lds: bytearray, n_lanes: int, wg_id: tuple[int,int,int]=(0,0,0), local_size: tuple[int,int,int]=(1,1,1), wave_start: int=0) -> int:
-  SCALAR: dict[type, Any] = {SOP1: exec_sop1, SOP2: exec_sop2, SOPC: exec_sopc, SOPK: exec_sopk, SOPP: exec_sopp, SMEM: exec_smem}
-  VECTOR: dict[type, Any] = {VOP1: exec_vop1, VOP2: exec_vop2, VOP3: exec_vop3, VOP3SD: exec_vop3sd, VOPC: exec_vopc,
-                              FLAT: exec_flat, DS: lambda s,i,l: exec_ds(s,i,l,lds), VOPD: exec_vopd}
   lx, ly, lz = local_size
   def get_tid(lane: int) -> tuple[int,int,int]:
     t = wave_start + lane
     return (t % lx, (t // lx) % ly, t // (lx * ly))
-  while st.pc < len(program):
+  while st.pc in program:
     inst = program[st.pc]
-    st.literal = inst._literal or 0
-    if type(inst) in SCALAR:
-      if DEBUG >= 6: _trace(inst, wg_id, get_tid(0), 0, bool(st.exec_mask & 1))
-      delta = SCALAR[type(inst)](st, inst)
-      if delta == -1: return 0
-      if delta == -2: st.pc += 1; return -2
-      st.pc += 1 + delta
-    else:
-      for lane in range(n_lanes):
-        active = bool(st.exec_mask & (1 << lane))
-        if DEBUG >= 6: _trace(inst, wg_id, get_tid(lane), lane, active)
-        if active: VECTOR[type(inst)](st, inst, lane)
-      st.pc += 1
+    if DEBUG >= 6:
+      if type(inst) in SCALAR: _trace(inst, wg_id, get_tid(0), 0, bool(st.exec_mask & 1))
+      else:
+        for lane in range(n_lanes): _trace(inst, wg_id, get_tid(lane), lane, bool(st.exec_mask & (1 << lane)))
+    result = step_wave(program, st, lds, n_lanes)
+    if result == -1: return 0
+    if result == -2: return -2
   return 0
 
 def exec_workgroup(program: Program, workgroup_id: tuple[int, int, int], local_size: tuple[int, int, int], args_ptr: int, dispatch_dim: int) -> None:
@@ -514,7 +532,7 @@ def exec_workgroup(program: Program, workgroup_id: tuple[int, int, int], local_s
       tid = wave_start + i
       st.vgpr[i][0] = tid if local_size == (lx, 1, 1) else ((tid // (lx * ly)) << 20) | (((tid // lx) % ly) << 10) | (tid % lx)
     waves.append((st, n_lanes, wave_start))
-  has_barrier = any(isinstance(inst, SOPP) and inst.op == SOPPOp.S_BARRIER for inst in program)
+  has_barrier = any(isinstance(inst, SOPP) and inst.op == SOPPOp.S_BARRIER for inst in program.values())
   for _ in range(2 if has_barrier else 1):
     for st, n_lanes, wave_start in waves: exec_wave(program, st, lds, n_lanes, workgroup_id, local_size, wave_start)
 

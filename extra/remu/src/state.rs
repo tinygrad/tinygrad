@@ -96,6 +96,24 @@ impl WaveValue {
     }
 }
 
+/// C-compatible state snapshot for FFI - used for comparing emulator states
+#[repr(C)]
+#[derive(Clone, Debug)]
+pub struct StateSnapshot {
+    pub pc: u32,
+    pub scc: u32,
+    pub vcc: u32,
+    pub exec_mask: u32,
+    pub sgpr: [u32; 128],
+    pub vgpr: [[u32; 256]; 32],
+}
+
+impl StateSnapshot {
+    pub fn new() -> Self {
+        Self { pc: 0, scc: 0, vcc: 0, exec_mask: 0, sgpr: [0; 128], vgpr: [[0; 256]; 32] }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct VecDataStore {
     pub data: Vec<u8>,
