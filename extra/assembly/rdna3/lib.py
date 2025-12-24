@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from enum import IntEnum
 
-# *** bit field DSL: bits[31:30] == 0b10 ***
+# Bit field DSL
 class BitField:
   def __init__(self, hi: int, lo: int, name: str | None = None): self.hi, self.lo, self.name = hi, lo, name
   def __set_name__(self, owner, name): self.name = name
@@ -17,11 +17,12 @@ class BitField:
       try: return ann(val)
       except ValueError: pass
     return val
+
 class _Bits:
   def __getitem__(self, key) -> BitField: return BitField(key.start, key.stop) if isinstance(key, slice) else BitField(key, key)
 bits = _Bits()
 
-# *** register types ***
+# Register types
 class Reg:
   def __init__(self, idx: int, count: int = 1): self.idx, self.count = idx, count
   def __repr__(self): return f"{self.__class__.__name__.lower()[0]}[{self.idx}]" if self.count == 1 else f"{self.__class__.__name__.lower()[0]}[{self.idx}:{self.idx + self.count}]"
@@ -32,7 +33,7 @@ class VGPR(Reg): pass
 class TTMP(Reg): pass
 s, v = SGPR, VGPR
 
-# *** field type markers ***
+# Field type markers
 class SSrc: pass
 class Src: pass
 class Imm: pass
@@ -43,7 +44,7 @@ class RawImm:
 def unwrap(val) -> int:
   return val.val if isinstance(val, RawImm) else val.value if hasattr(val, 'value') else val.idx if hasattr(val, 'idx') else val
 
-# *** encoding ***
+# Encoding helpers
 FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
 SRC_FIELDS = {'src0', 'src1', 'src2', 'ssrc0', 'ssrc1', 'soffset'}
 RAW_FIELDS = {'vdata', 'vdst', 'vaddr', 'addr', 'data', 'data0', 'data1', 'sdst', 'sdata'}
@@ -66,7 +67,7 @@ def decode_src(val: int) -> str:
   if 256 <= val <= 511: return f"v{val - 256}"
   return "lit" if val == 255 else f"?{val}"
 
-# *** instruction base class ***
+# Instruction base class
 class Inst:
   _fields: dict[str, BitField]
   _encoding: tuple[BitField, int] | None = None
@@ -95,7 +96,6 @@ class Inst:
     return word
 
   def _get_literal(self) -> int | None:
-    from enum import IntEnum
     for n in SRC_FIELDS:
       if n in self._values and not isinstance(v := self._values[n], RawImm) and isinstance(v, int) and not isinstance(v, IntEnum) and not (0 <= v <= 64 or -16 <= v <= -1): return v
     return None
@@ -106,10 +106,7 @@ class Inst:
 
   @classmethod
   def _size(cls) -> int: return 4 if issubclass(cls, Inst32) else 8
-
-  def size(self) -> int:
-    """Size in bytes including literal if present."""
-    return self._size() + (4 if self._literal is not None else 0)
+  def size(self) -> int: return self._size() + (4 if self._literal is not None else 0)
 
   @classmethod
   def from_int(cls, word: int):
@@ -122,7 +119,7 @@ class Inst:
   def from_bytes(cls, data: bytes):
     inst = cls.from_int(int.from_bytes(data[:cls._size()], 'little'))
     op_val = inst._values.get('op', 0)
-    has_literal = cls.__name__ == 'VOP2' and op_val in (44, 45, 55, 56)  # VOP2 FMAMK/FMAAK
+    has_literal = cls.__name__ == 'VOP2' and op_val in (44, 45, 55, 56)
     for n in SRC_FIELDS:
       if n in inst._values and isinstance(inst._values[n], RawImm) and inst._values[n].val == 255: has_literal = True
     if has_literal and len(data) >= cls._size() + 4: inst._literal = int.from_bytes(data[cls._size():cls._size()+4], 'little')
@@ -144,8 +141,7 @@ class Inst:
     ops = [fmt(n, self._values.get(n, 0)) for n in self._fields if n not in ('encoding', 'op')]
     if self.__class__.__name__ == 'VOP2' and getattr(self, '_literal', None) and op_val in (44, 45, 55, 56):
       lit_str = f"0x{self._literal:x}"
-      if op_val in (44, 55): ops.insert(2, lit_str)
-      else: ops.append(lit_str)
+      ops.insert(2, lit_str) if op_val in (44, 55) else ops.append(lit_str)
     return f"{op_name} {', '.join(ops)}" if ops else op_name
 
 class Inst32(Inst): pass
@@ -154,15 +150,16 @@ class Inst64(Inst):
   @classmethod
   def from_bytes(cls, data: bytes): return cls.from_int(int.from_bytes(data[:8], 'little'))
 
-# *** waitcnt ***
+# Waitcnt helpers
 def waitcnt(vmcnt: int = 0x7f, expcnt: int = 0x7, lgkmcnt: int = 0x3f) -> int:
   return (vmcnt & 0xf) | ((expcnt & 0x7) << 4) | (((vmcnt >> 4) & 0x7) << 7) | ((lgkmcnt & 0x3f) << 10)
 def decode_waitcnt(val: int) -> tuple[int, int, int]:
   return (val & 0xf) | (((val >> 7) & 0x7) << 4), (val >> 4) & 0x7, (val >> 10) & 0x3f
 
-# *** assembler ***
+# Assembler
 SPECIAL_REGS = {'vcc_lo': RawImm(106), 'vcc_hi': RawImm(107), 'null': RawImm(124), 'off': RawImm(124), 'm0': RawImm(125), 'exec_lo': RawImm(126), 'exec_hi': RawImm(127), 'scc': RawImm(253)}
 FLOAT_CONSTS = {'0.5': 0.5, '-0.5': -0.5, '1.0': 1.0, '-1.0': -1.0, '2.0': 2.0, '-2.0': -2.0, '4.0': 4.0, '-4.0': -4.0}
+REG_MAP = {'s': SGPR, 'v': VGPR, 't': TTMP, 'ttmp': TTMP}
 
 def parse_operand(op: str) -> tuple:
   op = op.strip().lower()
@@ -175,7 +172,6 @@ def parse_operand(op: str) -> tuple:
     v = -int(m.group(1), 16) if op.startswith('-') else int(m.group(1), 16)
     return (RawImm(v) if 0 <= v <= 255 else v, neg, abs_)
   if op in SPECIAL_REGS: return (SPECIAL_REGS[op], neg, abs_)
-  REG_MAP = {'s': SGPR, 'v': VGPR, 't': TTMP, 'ttmp': TTMP}
   if m := re.match(r'^([svt](?:tmp)?)\[(\d+):(\d+)\]$', op): return (REG_MAP[m.group(1)][int(m.group(2)):int(m.group(3))+1], neg, abs_)
   if m := re.match(r'^([svt](?:tmp)?)(\d+)$', op): return (REG_MAP[m.group(1)][int(m.group(2))], neg, abs_)
   raise ValueError(f"cannot parse operand: {op}")
