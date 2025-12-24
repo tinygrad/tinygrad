@@ -5,7 +5,7 @@ from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv,
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, Variable, sym_infer, Ops
-from tinygrad.engine.realize import ExecItem, capturing, ViewOp, BufferCopy, BufferXfer, CompiledRunner, Runner, Estimates
+from tinygrad.engine.realize import ExecItem, capturing, ViewOp, BufferCopy, BufferXfer, EncDec, CompiledRunner, Runner, Estimates
 from tinygrad.engine.memory import _internal_memory_planner
 from tinygrad.nn.state import get_parameters
 from tinygrad.schedule.rangeify import mop_cleanup
@@ -143,7 +143,7 @@ class MultiGraphRunner(GraphRunner):
 
 def get_out_buffers_for_ei(ei:ExecItem) -> list[Buffer]:
   if isinstance(ei.prg, CompiledRunner): return [cast(Buffer, ei.bufs[out]) for out in ei.prg.p.outs if out not in ei.prg.p.ins]
-  if isinstance(ei.prg, (BufferCopy, BufferXfer)): return [cast(Buffer, ei.bufs[0])]
+  if isinstance(ei.prg, (BufferCopy, BufferXfer, EncDec)): return [cast(Buffer, ei.bufs[0])]
   return []
 
 def update_depends(depends:set[Buffer|None], jit_cache:list[ExecItem]):
@@ -318,7 +318,7 @@ class TinyJit(Generic[ReturnType]):
 
       # memory planning (optional)
       # Exclude buffers involved in transfer ops to preserve parallelism.
-      noopt_buffers = {b for ji in jit_cache if isinstance(ji.prg, (BufferXfer, BufferCopy)) for b in ji.bufs}
+      noopt_buffers = {b for ji in jit_cache if isinstance(ji.prg, (BufferXfer, BufferCopy, EncDec)) for b in ji.bufs}
       assigned = _internal_memory_planner([cast(list[Buffer], item.bufs) for item in jit_cache], noopt_buffers, debug_prefix="JIT ")
       jit_cache = [ExecItem(item.prg, [assigned.get(b,b).ensure_allocated() for b in item.bufs if b is not None],
                             item.metadata, item.fixedvars) for item in jit_cache]

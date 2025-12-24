@@ -3,15 +3,17 @@ import functools, unittest, ctypes
 
 from tinygrad.device import Device, Buffer
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.helpers import Context, CI, dedup, from_mv
+from tinygrad.helpers import Context, dedup, from_mv
 from tinygrad.dtype import dtypes
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.engine.realize import ExecItem, BufferXfer, get_runner, CompiledRunner
 
+from test.helpers import needs_second_gpu
+
 np.random.seed(1337)
 Tensor.manual_seed(1337)
-BUF_SIZE = 4096 if CI else 4096 * 128
-RUN_CNT = 4 if CI else 32
+BUF_SIZE = 4096
+RUN_CNT = 4
 
 cached_prgs = {}
 def helper_exec_op(device, outbuf, inbufs):
@@ -154,6 +156,7 @@ class TestGraph(unittest.TestCase):
 
     helper_test_graphs(Device[d0].graph, graphs)
 
+  @needs_second_gpu
   def test_copies_2_devs(self):
     self.skip_if_not_multigraph()
 
@@ -167,6 +170,7 @@ class TestGraph(unittest.TestCase):
 
     helper_test_graphs(Device[d0].graph, graphs)
 
+  @needs_second_gpu
   def test_copies_after_graph_global(self):
     self.skip_if_not_multigraph()
 
@@ -215,6 +219,7 @@ class TestGraph(unittest.TestCase):
 
     helper_test_graphs(Device[d0].graph, graphs)
 
+  @needs_second_gpu
   def test_graph_after_copies_devs(self):
     self.skip_if_not_multigraph()
 

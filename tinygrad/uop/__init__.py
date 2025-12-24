@@ -75,12 +75,16 @@ class Ops(FastEnum):
 
   # tensor graph ops
   UNIQUE = auto(); DEVICE = auto(); KERNEL = auto(); ASSIGN = auto()
+  CUSTOM_KERNEL = auto()
+
+  # local unique
+  LUNIQUE = auto()
 
   # ops that adjust the behavior of the scheduler
   CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto()
 
   # buffer ops
-  BUFFERIZE = auto(); COPY = auto(); BUFFER = auto(); BUFFER_VIEW = auto(); MSELECT = auto(); MSTACK = auto()
+  BUFFERIZE = auto(); COPY = auto(); BUFFER = auto(); BUFFER_VIEW = auto(); MSELECT = auto(); MSTACK = auto(); ENCDEC = auto()
 
   # the core 6 movement ops! these only exist in the tensor graph
   RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); FLIP = auto()

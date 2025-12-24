@@ -38,11 +38,20 @@ class InstExec:
   time:int
 
 @dataclasses.dataclass(frozen=True)
-class WaveExec:
+class WaveSlot:
   wave_id:int
   cu:int
   simd:int
   se:int
+  @property
+  def cu_loc(self) -> str: return f"SE:{self.se} CU:{self.cu}"
+  @property
+  def simd_loc(self) -> str: return f"{self.cu_loc} SIMD:{self.simd}"
+  @property
+  def wave_loc(self) -> str: return f"{self.simd_loc} W:{self.wave_id}"
+
+@dataclasses.dataclass(frozen=True)
+class WaveExec(WaveSlot):
   begin_time:int
   end_time:int
   insts:bytearray
@@ -53,11 +62,19 @@ class WaveExec:
       inst_typ = rocprof.enum_rocprofiler_thread_trace_decoder_inst_category_t.get(inst.category)
       yield InstExec(inst_typ, inst.pc.address, inst.stall, inst.duration, inst.time)
 
+@dataclasses.dataclass(frozen=True)
+class OccEvent(WaveSlot):
+  time:int
+  start:int
+
+RunKey = tuple[str, int]
+
 class _ROCParseCtx:
   def __init__(self, dev_evs:dict[str, ProfileDeviceEvent], sqtt_evs:list[ProfileSQTTEvent], prog_evs:list[ProfileProgramEvent]):
     self.dev_evs, self.sqtt_evs, self.prog_evs = dev_evs, iter(sqtt_evs), prog_evs
     self.disasms:dict[str, dict[int, tuple[str, int]]] = {}
-    self.inst_execs:dict[str, list[WaveExec]] = {}
+    self.inst_execs:dict[RunKey, list[WaveExec]] = {}
+    self.occ_events:dict[RunKey, list[OccEvent]] = {}
 
     for prog in prog_evs:
       arch = "gfx%d%x%x" % ((trgt:=unwrap(dev_evs[prog.device].props)['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
@@ -66,21 +83,24 @@ class _ROCParseCtx:
 
   def next_sqtt(self):
     x = next(self.sqtt_evs, None)
-    self.active_kern = x.kern if x is not None else None
+    self.active_run = (x.kern, x.exec_tag) if x is not None else None
     self.active_se = x.se if x is not None else None
     self.active_blob = (ctypes.c_ubyte * len(x.blob)).from_buffer_copy(x.blob) if x is not None else None
     return self.active_blob
 
   def on_occupancy_ev(self, ev:rocprof.rocprofiler_thread_trace_decoder_occupancy_t):
     if DEBUG >= 5: print(f"OCC {ev.time=} {self.active_se=} {ev.cu=} {ev.simd=} {ev.wave_id=} {ev.start=}")
+    self.occ_events.setdefault(unwrap(self.active_run), []).append(OccEvent(ev.wave_id, ev.cu, ev.simd, unwrap(self.active_se), ev.time, ev.start))
 
   def on_wave_ev(self, ev:rocprof.rocprofiler_thread_trace_decoder_wave_t):
     if DEBUG >= 5: print(f"WAVE {ev.wave_id=} {self.active_se=} {ev.cu=} {ev.simd=} {ev.contexts=} {ev.begin_time=} {ev.end_time=}")
+    # Skip wave events without instruction timings, occupancy events give the start and duration.
+    if ev.instructions_size == 0: return
 
     insts_blob = bytearray(sz:=ev.instructions_size * ctypes.sizeof(rocprof.rocprofiler_thread_trace_decoder_inst_t))
     ctypes.memmove((ctypes.c_char * sz).from_buffer(insts_blob), ev.instructions_array, sz)
 
-    self.inst_execs.setdefault(unwrap(self.active_kern), []).append(WaveExec(ev.wave_id, ev.cu, ev.simd, unwrap(self.active_se), ev.begin_time,
+    self.inst_execs.setdefault(unwrap(self.active_run), []).append(WaveExec(ev.wave_id, ev.cu, ev.simd, unwrap(self.active_se), ev.begin_time,
                                                                              ev.end_time, insts_blob))
 
 def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
@@ -118,7 +138,7 @@ def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
 
   @rocprof.rocprof_trace_decoder_isa_callback_t
   def isa_cb(instr_ptr, mem_size_ptr, size_ptr, pc, _):
-    instr, mem_size_ptr[0] = ROCParseCtx.disasms[unwrap(ROCParseCtx.active_kern)][pc.address]
+    instr, mem_size_ptr[0] = ROCParseCtx.disasms[unwrap(ROCParseCtx.active_run)[0]][pc.address]
 
     # this is the number of bytes to next instruction, set to 0 for end_pgm
     if instr == "s_endpgm": mem_size_ptr[0] = 0
@@ -138,6 +158,14 @@ def decode(profile:list[ProfileEvent]) -> _ROCParseCtx:
   t.join()
   return ROCParseCtx
 
+def print_pmc(events:list[ProfilePMCEvent]) -> None:
+  from tinygrad.viz.serve import unpack_pmc
+  from tabulate import tabulate
+  for e in events:
+    print("**", e.kern)
+    data = unpack_pmc(e)
+    print(tabulate([r[:-1] for r in data["rows"]], headers=data["cols"], tablefmt="github"))
+
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
   parser.add_argument('--profile', type=pathlib.Path, help='Path to profile', default=pathlib.Path(temp("profile.pkl", append_user=True)))
@@ -147,13 +175,4 @@ if __name__ == "__main__":
   rctx = decode(profile)
   print('SQTT:', rctx.inst_execs.keys())
 
-  for ev in profile:
-    if not isinstance(ev, ProfilePMCEvent): continue
-    print(f"PMC Event: dev={ev.device} kern={ev.kern}")
-    ptr = 0
-    for s in ev.sched:
-      view = memoryview(ev.blob).cast('Q')
-      print(f"\t{s.name}")
-      for xcc, inst, se_idx, sa_idx, wgp_idx in itertools.product(range(s.xcc), range(s.inst), range(s.se), range(s.sa), range(s.wgp)):
-        print(f"\t\tXCC {xcc} Inst {inst} SE {se_idx} SA {sa_idx} WGP {wgp_idx}: {view[ptr]:#x}")
-        ptr += 1
+  print_pmc([ev for ev in profile if isinstance(ev, ProfilePMCEvent)])

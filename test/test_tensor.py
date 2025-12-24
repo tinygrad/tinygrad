@@ -70,15 +70,15 @@ class TestTinygrad(unittest.TestCase):
     out = out.log_softmax()
     out = out.mul(m).add(m).sum()
     out.backward()
-    xgrad,wgrad = x.grad, W.grad
+    xgrad, wgrad = x.grad.numpy(), W.grad.numpy()
     out.backward()
-    xgrad2,wgrad2 = x.grad, W.grad
+    xgrad2, wgrad2 = x.grad.numpy(), W.grad.numpy()
     out.backward() # no need to retain again since we will not re-run backward
-    xgrad3,wgrad3 = x.grad, W.grad
-    np.testing.assert_allclose(xgrad3.numpy(), xgrad.numpy() * 3., atol=1e-6)
-    np.testing.assert_allclose(wgrad3.numpy(), wgrad.numpy() * 3., atol=1e-6)
-    np.testing.assert_allclose(xgrad2.numpy(), xgrad.numpy() * 2., atol=1e-6)
-    np.testing.assert_allclose(wgrad2.numpy(), wgrad.numpy() * 2., atol=1e-6)
+    xgrad3, wgrad3 = x.grad.numpy(), W.grad.numpy()
+    np.testing.assert_allclose(xgrad3, xgrad * 3., atol=1e-6)
+    np.testing.assert_allclose(wgrad3, wgrad * 3., atol=1e-6)
+    np.testing.assert_allclose(xgrad2, xgrad * 2., atol=1e-6)
+    np.testing.assert_allclose(wgrad2, wgrad * 2., atol=1e-6)
 
   def test_second_order_backward_pass(self):
     def test_pytorch():
@@ -829,6 +829,7 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(len(si.metadata), 3)
     self.assertEqual(set(m.name for m in si.metadata), {"relu", "sigmoid", "__mul__"})
 
+  @unittest.skip("metadata is no longer promised to be exact with schedulecache")
   def test_complex_backward(self):
     x = Tensor.rand(3, requires_grad=True).realize()
     y = Tensor.rand(3, requires_grad=True).realize()
@@ -841,11 +842,13 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertTrue(y.grad.uop.metadata[0].backward)
     si = Tensor.schedule(out, x.grad, y.grad)[-1]
     #self.assertEqual(len(si.metadata), 3, f"failed with {si.metadata}")
-    self.assertSetEqual(set(m.name for m in si.metadata), {"sigmoid", "relu"})
+    # skip numpy, this is schedule cache
+    self.assertSetEqual(set(m.name for m in si.metadata if m.name != "numpy"), {"sigmoid", "relu"})
     #bw = [m for m in si.metadata if m.backward]
     #self.assertEqual(len(bw), 1)
     #self.assertEqual(bw[0].name, "sigmoid")
 
+  @unittest.skip("metadata is no longer promised to be exact with schedulecache")
   def test_tracemeta_0(self):
     with Context(TRACEMETA=0):
       x = Tensor.rand(3, requires_grad=True)

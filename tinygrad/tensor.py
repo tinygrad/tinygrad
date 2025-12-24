@@ -6,19 +6,15 @@ from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, Suppor
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten
-from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, polyN, DEBUG, is_numpy_ndarray, SPEC, TracingKey, cpu_profile
-from tinygrad.helpers import suppress_finalizing
+from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, polyN, is_numpy_ndarray, TracingKey, cpu_profile
+from tinygrad.helpers import suppress_finalizing, disable_gc
 from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
 from tinygrad.mixin.movement import _align_left
-from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop
-from tinygrad.uop.spec import type_verify, tensor_spec
+from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop, Variable
+from tinygrad.engine.schedule import ScheduleItem, complete_create_schedule_with_vars
 from tinygrad.device import Device, Buffer
 from tinygrad.engine.realize import run_schedule
-from tinygrad.engine.memory import memory_planner
-from tinygrad.engine.schedule import ScheduleItem, create_schedule_with_vars
-from tinygrad.schedule.rangeify import get_rangeify_map
-from tinygrad.schedule.multi import get_multi_map
 
 # TODO: this should be the only usage of Device
 def canonicalize_device(device:str|None) -> str: return Device.canonicalize(device)
@@ -28,8 +24,10 @@ def canonicalize_device(device:str|None) -> str: return Device.canonicalize(devi
 all_tensors: dict[weakref.ref[Tensor], None] = {}
 def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str) -> None:
   with cpu_profile(TracingKey(name), "TINY"):
-    scope_tensors = [t for tref in tuple(all_tensors) if (t:=tref()) is not None and
-                    (t.uop in applied_map or len(applied_map.keys() & t.uop.backward_slice.keys()))]
+    # get tensors in scope
+    in_scope: dict[UOp, bool] = {}
+    def visitor(node: UOp) -> bool: return True if node in applied_map else any(in_scope.get(s, False) for s in node.src)
+    scope_tensors: list[Tensor] = [t for tref in list(all_tensors) if (t:=tref()) is not None and t.uop.topovisit(visitor, in_scope)]
 
     # get all Tensors and apply the map
     sink = UOp.sink(*[t.uop for t in scope_tensors])
@@ -136,8 +134,10 @@ class Tensor(OpMixin):
         # give the bound constant a device
         const = UOp.const(var.dtype, val, _device, ())
         data = data.replace(src=(var.replace(src=const.src), const))  # type: ignore
-    elif data is None: data = UOp.const(_dtype or dtypes.default_float, 0, _device, (), unique=_force_unique)
-    elif isinstance(data, get_args(ConstType)): data = UOp.const(_dtype or dtypes.from_py(data), data, _device, (), unique=_force_unique)
+    elif data is None:
+      data = (UOp.unique_const if _force_unique else UOp.const)(_dtype or dtypes.default_float, 0, _device)
+    elif isinstance(data, get_args(ConstType)):
+      data = (UOp.unique_const if _force_unique else UOp.const)(_dtype or dtypes.from_py(data), data, _device)
     elif isinstance(data, bytes): data = _frompy(data, dtypes.uint8 if _dtype is None else _dtype)
     elif isinstance(data, (list, tuple)):
       if _dtype is None:
@@ -148,8 +148,10 @@ class Tensor(OpMixin):
     elif is_numpy_ndarray(data):
       import numpy as np
       assert isinstance(data, np.ndarray), f"expected np.ndarray, got {data}"
-      if data.shape == (): data = UOp.const(_dtype or _from_np_dtype(data.dtype), data.item(), _device, (), unique=_force_unique)
-      else: data = _fromnp(data.astype(npdtype) if _dtype is not None and (npdtype:=_to_np_dtype(_dtype)) is not None else data)  # type: ignore [name-defined]
+      if data.shape == ():
+        data = (UOp.unique_const if _force_unique else UOp.const)(_dtype or _from_np_dtype(data.dtype), data.item(), _device)
+      else:
+        data = _fromnp(data.astype(npdtype) if _dtype is not None and (npdtype:=_to_np_dtype(_dtype)) is not None else data)  # type: ignore [name-defined]
     elif isinstance(data, pathlib.Path):
       _dtype = _dtype or dtypes.uint8
       data = UOp.new_buffer(f"DISK:{data.resolve()}", data.stat().st_size // _dtype.itemsize, _dtype)
@@ -175,14 +177,22 @@ class Tensor(OpMixin):
     new_uop: UOp = fxn(*[t.uop for t in (self,)+x], *extra_args, **kwargs)
     if (metadata:=_METADATA.get()) is not None and TRACEMETA >= 1: all_metadata[new_uop] = (metadata,)
     needs_input_grad = [t.requires_grad for t in (self,)+x]
-    return Tensor(new_uop, device=new_uop.device, requires_grad=True if any(needs_input_grad) else None if None in needs_input_grad else False)
+    # directly create the Tensor
+    ret = Tensor.__new__(Tensor)
+    ret.uop = new_uop
+    ret.requires_grad = True if any(needs_input_grad) else None if None in needs_input_grad else False
+    ret.grad = None
+    # add to all_tensors after construction succeeds
+    all_tensors[weakref.ref(ret)] = None
+    return ret
 
   def _apply_broadcasted_uop(self, fxn:Callable, x:Tensor|ConstType, reverse=False) -> Tensor:
     lhs,rhs = self._broadcasted(x, reverse)
     return lhs._apply_uop(fxn, rhs)
 
-  # _binop is used by MathTrait
+  # _binop and alu are used by MathMixin
   def _binop(self, op, x, reverse): return self._apply_broadcasted_uop(lambda *u: UOp.alu(u[0], op, *u[1:]), x, reverse)
+  def alu(self, op: Ops, *src: Tensor) -> Tensor: return self._apply_uop(lambda *u: u[0].alu(op, *u[1:]), *src)
 
   def requires_grad_(self, requires_grad=True) -> Tensor:
     self.requires_grad = requires_grad
@@ -218,25 +228,6 @@ class Tensor(OpMixin):
 
   # ***** data handlers ****
 
-  def kernelize(self, *lst:Tensor) -> Tensor:
-    """
-    Creates the kernels and buffers needed to realize these Tensor(s).
-
-    NOTE: Kernelize can be called multiple times on a Tensor
-    """
-    big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
-
-    # verify Tensors match the spec
-    if SPEC: type_verify(big_sink, tensor_spec)
-
-    if any(isinstance(x._device, tuple) for x in big_sink.toposort()):
-      _apply_map_to_tensors(get_multi_map(big_sink), name="Apply Multi Map")
-      big_sink = UOp.sink(*flatten([x.uop.src if x.uop.op is Ops.MULTI else [x.uop] for x in (self,)+lst]))
-
-    becomes_map = get_rangeify_map(big_sink)
-    _apply_map_to_tensors(becomes_map, name="Apply Kernelize Map")
-    return self
-
   def custom_kernel(self, *lst:Tensor, fxn:Callable, grad_fxn:Callable|None=None) -> list[Tensor]:
     """
     Call into a custom kernel written in UOps. Returns the Tensors after the Kernel has been applied.
@@ -251,18 +242,11 @@ class Tensor(OpMixin):
 
     NOTE: A Tensor can only be scheduled once.
     """
-    st = time.perf_counter()
-    self.kernelize(*lst)
-    sink = UOp.sink(*[x.uop for x in (self,)+lst])
+    big_sink = UOp.sink(*[x.uop for x in (self,)+lst])
 
-    # remove all AFTERs, after scheduling, the tensors are just buffers
-    remove_assign_map = {u:u.buf_uop for u in sink.toposort() if u.op is Ops.AFTER}
-    _apply_map_to_tensors(remove_assign_map, name="Remove After")
-
-    # create the schedule
-    schedule, var_vals = create_schedule_with_vars(sink)
-    schedule = memory_planner(schedule)
-    if (DEBUG >= 1 and len(schedule) > 1) or DEBUG >= 3: print(f"scheduled {len(schedule)} kernels in {(time.perf_counter()-st)*1000:.2f} ms")
+    # this is where the schedule cache should go
+    becomes_map, schedule, var_vals = complete_create_schedule_with_vars(big_sink)
+    _apply_map_to_tensors(becomes_map, name="Apply Schedule Map")
     return schedule, var_vals
 
   def schedule(self, *lst:Tensor) -> list[ScheduleItem]:
@@ -271,6 +255,7 @@ class Tensor(OpMixin):
     assert len(var_vals) == 0
     return schedule
 
+  @disable_gc()
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
     if len(to_realize:=[x for x in (self,)+lst if not x.uop.is_contiguous()]):
@@ -411,7 +396,8 @@ class Tensor(OpMixin):
     print(t.shard((t.device, t.device), axis=1).uop)
     ```
     """
-    assert isinstance(self.device, str), "can't shard a MultiLazyBuffer"
+    if not isinstance(self.device, str): raise RuntimeError("can't shard a MultiLazyBuffer")
+    if len(devices) == 1: return self.to(devices[0])
     devices = tuple(canonicalize_device(x) for x in devices)
     mlb = self.uop.shard(devices, self._resolve_dim(axis)) if axis is not None else self.uop.copy_to_device(devices)
     return Tensor(mlb, device=devices, requires_grad=self.requires_grad)
@@ -422,8 +408,15 @@ class Tensor(OpMixin):
     """
     return self.replace(self.shard(devices, axis))
 
+  def shard_like(self, y:Tensor) -> Tensor:
+    """
+    Shards the tensor the same way as `y` (same devices and axis).
+    """
+    if isinstance(y.device, str): return self.to(y.device)
+    return self if isinstance(self.device, tuple) and (y.device, y.uop.axis) == (self.device, self.uop.axis) else self.shard(y.device, y.uop.axis)
+
   CHUNK_SIZE = 2**20
-  def load(self, size:int) -> Tensor:
+  def fs_load(self, size:int) -> Tensor:
     """
     Load a tensor from storage.
 
@@ -451,7 +444,7 @@ class Tensor(OpMixin):
 
     return data[:size]
 
-  def store(self) -> Tensor:
+  def fs_store(self) -> Tensor:
     """
     Store a tensor to storage.
     """
@@ -1033,7 +1026,8 @@ class Tensor(OpMixin):
     # clear contexts
     for t,g in zip(tensors_need_grad, self.gradient(*tensors_need_grad, gradient=gradient, materialize_grads=True)):
       assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
-      t.grad = g if t.grad is None else (t.grad + g)
+      if t.grad is None: t.grad = g
+      else: t.grad.assign(t.grad + g)
     return self
 
   # ***** movement low level ops *****
@@ -1272,6 +1266,9 @@ class Tensor(OpMixin):
       v = v.cast(res.dtype)._broadcast_to(_broadcast_shape(res.shape, v.shape)).contiguous()
       res.assign(v).realize()
 
+  def __delitem__(self, indices) -> None:
+    raise TypeError("Tensor does not support deleting items")
+
   def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
     """
     Gathers values along an axis specified by `dim`.
@@ -1345,10 +1342,11 @@ class Tensor(OpMixin):
     print("\\n".join([repr(x.numpy()) for x in split]))
     ```
     """
-    assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
     dim = self._resolve_dim(dim)
-    if isinstance(sizes, int): sizes = [min(sizes, self.shape[dim]-i) for i in range(0, max(1, self.shape[dim]), max(1, sizes))]
-    assert sum(sizes) == self.shape[dim], f"expect sizes to sum exactly to {self.shape[dim]}, but got {sum(sizes)}"
+    dim_sz = self.shape[dim]
+    assert isinstance(dim_sz, int), f"does not support symbolic shape in split dimension {dim}: {self.shape}"
+    if isinstance(sizes, int): sizes = [min(sizes, dim_sz-i) for i in range(0, max(1, dim_sz), max(1, sizes))]
+    assert sum(sizes) == dim_sz, f"expect sizes to sum exactly to {dim_sz}, but got {sum(sizes)}"
     return tuple(self[sl] for sl in [tuple([slice(None)]*dim + [slice(sum(sizes[:i]), sum(sizes[:i + 1]))]) for i in range(len(sizes))])
 
   def chunk(self, chunks:int, dim:int=0) -> list[Tensor]:
@@ -1370,10 +1368,11 @@ class Tensor(OpMixin):
     print("\\n".join([repr(x.numpy()) for x in chunked]))
     ```
     """
-    assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
-    assert chunks > 0, f"expect chunks to be greater than 0, got: {chunks}"
     dim = self._resolve_dim(dim)
-    return list(self.split(ceildiv(self.shape[dim], chunks) if self.shape[dim] else [0]*chunks, dim=dim))
+    dim_sz = self.shape[dim]
+    assert isinstance(dim_sz, int), f"does not support symbolic shape in split dimension {dim}: {self.shape}"
+    assert chunks > 0, f"expect chunks to be greater than 0, got: {chunks}"
+    return list(self.split(ceildiv(dim_sz, chunks) if dim_sz else [0]*chunks, dim=dim))
 
   def unfold(self, dim:int, size:sint, step:int) -> Tensor:
     """
@@ -1851,8 +1850,7 @@ class Tensor(OpMixin):
         # χ and ι step
         state = state.bitwise_xor(~state.roll(shifts=-1, dims=2) & state.roll(shifts=-2, dims=2))
         state = state.flatten(1) ^ rnd_const_masks[i]
-      # NOTE: kernelize here to prevent internal stack from growing propotional to data size
-      state = state.kernelize()
+      # NOTE: there was a kernelize here to prevent internal stack from growing propotional to data size, do we need something else?
     return state.bitcast(dtypes.uint8)[:,:(obytes:=(200 - rate) // 2)].reshape(*self.shape[:-1], obytes)
 
   def _hash_1mb(self) -> Tensor:
@@ -2800,29 +2798,6 @@ class Tensor(OpMixin):
     """
     return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.exp2)
 
-  def relu(self) -> Tensor:
-    """
-    Applies the Rectified Linear Unit (ReLU) function element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).relu().numpy())
-    ```
-    """
-    # NOTE: if you write this as self.maximum(0) the gradient is wrong, passing through half when self is 0
-    return (self>0).where(self, 0)
-
-  def sigmoid(self) -> Tensor:
-    """
-    Applies the Sigmoid function element-wise.
-
-    - Described: https://en.wikipedia.org/wiki/Sigmoid_function
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).sigmoid().numpy())
-    ```
-    """
-    return (1 + (self * (-1/math.log(2))).exp2()).reciprocal()
-
   def logsigmoid(self) -> Tensor:
     """
     Applies the LogSigmoid function element-wise.
@@ -2835,19 +2810,6 @@ class Tensor(OpMixin):
     """
     return -(-self).softplus()
 
-  def hardsigmoid(self, alpha:float=1/6, beta:float=0.5) -> Tensor:
-    """
-    Applies the Hardsigmoid function element-wise.
-    NOTE: default `alpha` and `beta` values are taken from torch
-
-    - See: https://pytorch.org/docs/stable/generated/torch.nn.functional.hardsigmoid.html
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).hardsigmoid().numpy())
-    ```
-    """
-    return (alpha * self + beta).relu() - (alpha * self + beta - 1).relu()
-
   def sqrt(self) -> Tensor:
     """
     Computes the square root of the tensor element-wise.
@@ -2857,16 +2819,6 @@ class Tensor(OpMixin):
     ```
     """
     return self.cast(least_upper_float(self.dtype))._apply_uop(UOp.sqrt)
-
-  def rsqrt(self) -> Tensor:
-    """
-    Computes the reciprocal of the square root of the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 3., 4.]).rsqrt().numpy())
-    ```
-    """
-    return self.sqrt().reciprocal()
 
   def sin(self) -> Tensor:
     """
@@ -2934,36 +2886,6 @@ class Tensor(OpMixin):
 
   # ***** math functions *****
 
-  def trunc(self: Tensor) -> Tensor:
-    """
-    Truncates the tensor element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5]).trunc().numpy())
-    ```
-    """
-    return self._apply_uop(UOp.trunc)
-
-  def ceil(self: Tensor) -> Tensor:
-    """
-    Rounds the tensor element-wise towards positive infinity.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5]).ceil().numpy())
-    ```
-    """
-    return (self > (b := self.trunc())).where(b+1, b)
-
-  def floor(self: Tensor) -> Tensor:
-    """
-    Rounds the tensor element-wise towards negative infinity.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3.5, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, 3.5]).floor().numpy())
-    ```
-    """
-    return (self < (b := self.trunc())).where(b-1, b)
-
   def round(self: Tensor) -> Tensor:
     """
     Rounds the tensor element-wise with rounding half to even.
@@ -2973,36 +2895,6 @@ class Tensor(OpMixin):
     ```
     """
     return ((self > 0) == ((b := self.trunc() / 2.0).trunc() == b)).where((self - 0.5).ceil(), (self + 0.5).floor())
-
-  def isinf(self:Tensor, detect_positive:bool=True, detect_negative:bool=True) -> Tensor:
-    """
-    Checks the tensor element-wise to return True where the element is infinity, otherwise returns False
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1, float('inf'), 2, float('-inf'), float('nan')]).isinf().numpy())
-    ```
-    """
-    return (self == float("inf")) * detect_positive + (self == float("-inf")) * detect_negative
-
-  def isnan(self:Tensor) -> Tensor:
-    """
-    Checks the tensor element-wise to return True where the element is NaN, otherwise returns False
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1, float('inf'), 2, float('-inf'), float('nan')]).isnan().numpy())
-    ```
-    """
-    return self != self
-
-  def isfinite(self:Tensor) -> Tensor:
-    """
-    Checks the tensor element-wise to return True where the element is finite, otherwise returns False
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1, float('inf'), 2, float('-inf'), float('nan')]).isfinite().numpy())
-    ```
-    """
-    return (self.isinf()|self.isnan()).logical_not()
 
   def lerp(self, end:Tensor, weight:Tensor|float) -> Tensor:
     """
@@ -3016,36 +2908,6 @@ class Tensor(OpMixin):
       w_i = (weight * (1<<(W_PREC:=7)) + 0.5).cast(dtypes.int16)
       return (self+(((end - self).cast(dtypes.int8) * w_i + (1<<W_PREC-1)).cast(dtypes.uint16) >> W_PREC)).cast(dtypes.uint8)
     return self + (end - self) * weight
-
-  def square(self) -> Tensor:
-    """
-    Squares the tensor element-wise.
-    Equivalent to `self*self`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).square().numpy())
-    ```
-    """
-    return self*self
-
-  def clamp(self, min_=None, max_=None) -> Tensor:
-    """
-    Clips (clamps) the values in the tensor between `min_` and `max_` element-wise.
-    If `min_` is `None`, there is no lower bound. If `max_` is None, there is no upper bound.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).clip(-1, 1).numpy())
-    ```
-    """
-    if min_ is None and max_ is None: raise RuntimeError("at least one of 'min_' or 'max_' must not be None")
-    ret = self.maximum(min_) if min_ is not None else self
-    return ret.minimum(max_) if max_ is not None else ret
-
-  def clip(self, min_=None, max_=None) -> Tensor:
-    """
-    Alias for `Tensor.clamp`.
-    """
-    return self.clamp(min_, max_)
 
   def sign(self) -> Tensor:
     """
@@ -3115,66 +2977,6 @@ class Tensor(OpMixin):
     """
     return gamma * (self >= 0).detach().where(self, alpha * (self.exp() - 1))
 
-  def swish(self) -> Tensor:
-    """
-    See `.silu()`
-
-    - Paper: https://arxiv.org/abs/1710.05941v1
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).swish().numpy())
-    ```
-    """
-    return self * self.sigmoid()
-
-  def silu(self) -> Tensor:
-    """
-    Applies the Sigmoid Linear Unit (SiLU) function element-wise.
-
-    - Paper: https://arxiv.org/abs/1606.08415
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).silu().numpy())
-    ```
-    """
-    return self.swish()   # The SiLU function is also known as the swish function.
-
-  def relu6(self) -> Tensor:
-    """
-    Applies the ReLU6 function element-wise.
-
-    - Paper: https://arxiv.org/abs/1704.04861v1
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-9., -6., -3., 0., 3., 6., 9.]).relu6().numpy())
-    ```
-    """
-    return self.relu() - (self-6).relu()
-
-  def hardswish(self) -> Tensor:
-    """
-    Applies the Hardswish function element-wise.
-
-    - Paper: https://arxiv.org/abs/1905.02244v5
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).hardswish().numpy())
-    ```
-    """
-    return self * (self+3).relu6() * (1/6)
-
-  def tanh(self) -> Tensor:
-    """
-    Applies the Hyperbolic Tangent (tanh) function element-wise.
-
-    - Described: https://en.wikipedia.org/wiki/Hyperbolic_functions#Tanh
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).tanh().numpy())
-    ```
-    """
-    return 2.0 * ((2.0 * self).sigmoid()) - 1.0
-
   def sinh(self) -> Tensor:
     """
     Applies the Hyperbolic Sine (sinh) function element-wise.
@@ -3235,16 +3037,6 @@ class Tensor(OpMixin):
     """
     return (self + (self.square() - 1).sqrt()).log()
 
-  def hardtanh(self, min_val=-1, max_val=1) -> Tensor:
-    """
-    Applies the Hardtanh function element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-1.5, -1.0, -0.5, 0., 0.5, 1.0, 1.5]).hardtanh().numpy())
-    ```
-    """
-    return self.clip(min_val, max_val)
-
   def erf(self) -> Tensor:
     """
     Applies error function element-wise.
@@ -3258,41 +3050,6 @@ class Tensor(OpMixin):
     # https://personal.math.ubc.ca/~cbm/aands/page_299.htm 7.1.26
     t = 1.0 / (1.0 + 0.3275911 * self.abs())
     return self.sign() * (1.0 - t * polyN(t, [1.061405429, -1.453152027, 1.421413741, -0.284496736, 0.254829592]) * (-self.square()).exp())
-
-  def gelu(self) -> Tensor:
-    """
-    Applies the Gaussian Error Linear Unit (GELU) function element-wise.
-
-    - Paper: https://arxiv.org/abs/1606.08415v5
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).gelu().numpy())
-    ```
-    """
-    return 0.5 * self * (1 + (math.sqrt(2 / math.pi) * (self + 0.044715 * self ** 3)).tanh())
-
-  def quick_gelu(self) -> Tensor:
-    """
-    Applies the Sigmoid GELU approximation element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).quick_gelu().numpy())
-    ```
-    """
-    return self * (self * 1.702).sigmoid()
-
-  def leaky_relu(self, neg_slope=0.01) -> Tensor:
-    """
-    Applies the Leaky ReLU function element-wise.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).leaky_relu().numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).leaky_relu(neg_slope=0.42).numpy())
-    ```
-    """
-    return (self<0).where(neg_slope*self, self)
 
   def mish(self) -> Tensor:
     """
@@ -3583,6 +3340,19 @@ class Tensor(OpMixin):
 
   def __eq__(self, x) -> Tensor: return self.eq(x)                      # type: ignore[override]
 
+  # ***** encoding/decoding ops *****
+
+  def decode_hevc_frame(self, frame_pos:Variable, shape:tuple[int,...], state:Tensor, ref_frames:list[Tensor]|None=None) -> Tensor:
+    """
+    Creates a Tensor by decoding an HEVC frame chunk.
+
+    You must provide the output shape of the decoded data (`shape`), the HEVC context (`vstate`), and, if required by the chunk,
+    the reference frames (`ref_frames`).
+    """
+    ref_frames = [x.contiguous() for x in ref_frames or []]
+    assert isinstance(frame_pos, Variable), "frame_pos must be a Variable"
+    return self.contiguous()._apply_uop(UOp.encdec, state.contiguous(), *ref_frames, extra_args=(frame_pos,), arg=(shape,))
+
   # ***** functional nn ops *****
 
   def linear(self, weight:Tensor, bias:Tensor|None=None, dtype:DTypeLike|None=None) -> Tensor:
@@ -3712,6 +3482,11 @@ class Tensor(OpMixin):
     """
     # NOTE: it also works when `key` and `value` have symbolic shape.
     assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
+
+    if getenv("FLASH_ATTENTION"):
+      from extra.thunder.tiny.fa import flash_attention
+      return flash_attention(self, key, value, attn_mask=attn_mask, is_causal=is_causal)
+
     # GQA: https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
     if enable_gqa:
       key = key.repeat_interleave(self.shape[-3] // key.shape[-3], dim=-3)
@@ -4201,7 +3976,8 @@ def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
     else: caller = ""
 
     token = _METADATA.set(Metadata(name=fn.__name__, caller=caller))
-    ret = fn(*args, **kwargs)
+    with cpu_profile(TracingKey(fn.__name__), "USER"):
+      ret = fn(*args, **kwargs)
     _METADATA.set(token)
     return ret
   return _wrapper

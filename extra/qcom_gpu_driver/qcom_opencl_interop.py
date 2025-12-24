@@ -29,8 +29,9 @@ rawbuf_ptr = to_mv(cl_buf_desc_ptr, 0x100).cast('Q')[20] # offset 0xA0 is a raw 
 
 # create QCOM tensor with the externally managed buffer
 x = Tensor.from_blob(rawbuf_ptr, (8, 8), dtype=dtypes.int, device='QCOM')
-y = (x + 1).numpy()
-print(y)
+y = (x + 1).reshape(-1).tolist()
+print(y[:10])
+assert y == [i + 1 for i in range(64)]
 
 # all calculations are done, save to free the object
 cl.clReleaseMemObject(cl_buf)
@@ -49,7 +50,7 @@ for i in range(4):
   cl_buf_desc_ptr = to_mv(ctypes.addressof(cl_buf), 8).cast('Q')[0]
   rawbuf_ptr = to_mv(cl_buf_desc_ptr, 0x100).cast('Q')[20]
 
-  y = calc(x = Tensor.from_blob(rawbuf_ptr, (2, 2), dtype=dtypes.int, device='QCOM')).numpy()
+  y = calc(x = Tensor.from_blob(rawbuf_ptr, (2, 2), dtype=dtypes.int, device='QCOM')).tolist()
   print(f'jit {i}\n', y)
 
   # all calculations are done, save to free the object
@@ -80,8 +81,19 @@ rawbuf_ptr = to_mv(cl_buf_desc_ptr, 0x100).cast('Q')[20] # offset 0xA0 is a raw 
 # dtypes.imageh = cl.cl_image_format(cl.CL_RGBA, cl.CL_HALF_FLOAT)
 # dtypes.imagef = cl.cl_image_format(cl.CL_RGBA, cl.CL_FLOAT)
 x = Tensor.from_blob(rawbuf_ptr, (h*w*4,), dtype=dtypes.imagef((h,w)), device='QCOM')
-y = (x + 1).numpy()
-print(y)
+y = (x + 1).tolist()
+print(y[:10])
 
 # all calculations are done, save to free the object
 cl.clReleaseMemObject(cl_img)
+
+# from numpy
+import numpy as np
+
+YUV_SIZE = 50
+a_np = (32*np.random.randn(YUV_SIZE).astype(np.float32) + 128).clip(0,255).astype(np.uint8)
+a = Tensor.from_blob(a_np.ctypes.data, (YUV_SIZE,), dtype=dtypes.uint8, device='QCOM').realize()
+
+print(a.numpy()[:10], a_np[:10])
+assert np.all(a.numpy() == a_np)
+assert np.all((a - 1).numpy() == a_np - 1)

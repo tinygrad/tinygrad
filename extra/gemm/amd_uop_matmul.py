@@ -1,3 +1,4 @@
+import numpy as np
 from tinygrad import Tensor, Device, Context, GlobalCounters, dtypes
 from tinygrad.uop.ops import UOp, KernelInfo, sint, AxisType
 from tinygrad.engine.realize import ExecItem, get_runner
@@ -140,15 +141,14 @@ def hand_spec_kernel3():
   return sink.sink(arg=KernelInfo(opts_to_apply=())).simplify()
 
 def test_matmul(sink:UOp, N=N):
-  with Context(DEBUG=0):
-    a = Tensor.randn(N, N)
-    b = Tensor.randn(N, N)
-    hc = Tensor.empty(N, N)
-    Tensor.realize(a, b, hc)
+  rng = np.random.default_rng()
+  a = Tensor(rng.random((N, N), dtype=np.float32)-0.5)
+  b = Tensor(rng.random((N, N), dtype=np.float32)-0.5)
+  hc = Tensor.empty(N, N)
+  Tensor.realize(a, b, hc)
 
   ei = ExecItem(get_runner(Device.DEFAULT, sink), [t.uop.buffer for t in [hc, a, b]])
 
-  GlobalCounters.reset()
   ets = []
   with Context(DEBUG=2):
     for _ in range(run_count):

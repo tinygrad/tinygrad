@@ -4,14 +4,14 @@ import numpy as np
 import torch
 from tinygrad import Tensor, Device, TinyJit, dtypes
 from tinygrad.uop.ops import Ops
-from tinygrad.helpers import GlobalCounters, CI, Context
+from tinygrad.helpers import GlobalCounters, Context
 from tinygrad.nn import Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, Embedding
 from tinygrad.nn import BatchNorm, LayerNorm, LayerNorm2d, GroupNorm, InstanceNorm, RMSNorm, LSTMCell
 from tinygrad.nn.state import load_state_dict
 from tinygrad.engine.realize import run_schedule
-from test.helpers import not_support_multi_device
+from test.helpers import not_support_multi_device, needs_second_gpu, slow
 
-@unittest.skipIf(CI and Device.DEFAULT in {"CUDA", "NV"}, "slow")
+@slow
 class TestNN(unittest.TestCase):
   def test_batchnorm2d(self, training=False, threed=False, track_running_stats=True):
     with Tensor.train(training):
@@ -481,6 +481,21 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
     np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
 
+  #https://github.com/pytorch/pytorch/blob/d38164a545b4a4e4e0cf73ce67173f70574890b6/torch/nn/modules/module.py#L2425
+  def test_load_conv_num_batches_tracked(self):
+    layer = BatchNorm(sz=1, track_running_stats=False)
+    state_dict = {
+      'weight': Tensor.ones(1),
+      'bias': Tensor.ones(1),
+      'num_batches_tracked': Tensor.ones(1),
+    }
+    load_state_dict(layer, state_dict)
+    state_dict['num_batches_tracked'] = Tensor.empty()
+    load_state_dict(layer, state_dict)
+    layer.num_batches_tracked = Tensor.ones(1)
+    load_state_dict(layer, state_dict)
+
+  @needs_second_gpu
   @unittest.skipIf(not_support_multi_device(), "no multi")
   def test_load_state_dict_sharded_model(self):
     devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3")
@@ -519,6 +534,7 @@ class TestNN(unittest.TestCase):
     np.testing.assert_allclose(layer.weight.numpy(), state_dict['weight'].numpy())
     np.testing.assert_allclose(layer.bias.numpy(), state_dict['bias'].numpy())
 
+  @needs_second_gpu
   @unittest.skipIf(not_support_multi_device(), "no multi")
   def test_load_state_dict_sharded_model_dict_same_axis(self):
     devices = (f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3")

@@ -5,7 +5,8 @@ import numpy as np
 
 from tinygrad import Tensor, dtypes, Device, TinyJit
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import CI, all_same, prod
+from tinygrad.helpers import all_same, prod
+from test.helpers import slow
 
 random.seed(42)
 
@@ -176,9 +177,8 @@ class TestIndexing(unittest.TestCase):
     self.assertRaises(IndexError, lambda: reference[0.0, ..., 0.0:2.0])
     self.assertRaises(IndexError, lambda: reference[0.0, :, 0.0])
 
-    # TODO: delitem
-    # def delitem(): del reference[0]
-    # self.assertRaises(TypeError, delitem)
+    def delitem(): del reference[0]
+    self.assertRaises(TypeError, delitem)
 
   # TODO setitem backward
   '''
@@ -1141,7 +1141,7 @@ def get_set_tensor(indexed: Tensor, indexer):
   set_tensor = Tensor.randint(set_count, high=set_count).reshape(set_size) #.cast(dtypes.float64)
   return set_tensor
 
-@unittest.skipIf(CI and Device.DEFAULT in ["CPU", "CL", "METAL", "NV", "AMD"], "slow")
+@slow
 class TestAdvancedIndexing(unittest.TestCase):
   def test_integer_array_indexing(self):
     # pick a random valid indexer type

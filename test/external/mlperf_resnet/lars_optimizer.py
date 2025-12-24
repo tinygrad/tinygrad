@@ -29,7 +29,6 @@ from tensorflow.python.keras.optimizer_v2 import optimizer_v2
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import linalg_ops
 from tensorflow.python.ops import math_ops
-from tensorflow.python.training import training_ops
 from tensorflow.python.ops import state_ops
 
 
@@ -147,20 +146,7 @@ class LARSOptimizer(optimizer_v2.OptimizerV2):
     return scaled_lr, grad
 
   def _apply_dense(self, grad, var, apply_state=None):
-    var_device, var_dtype = var.device, var.dtype.base_dtype
-    coefficients = ((apply_state or {}).get((var_device, var_dtype))
-                    or self._fallback_apply_state(var_device, var_dtype))
-
-    scaled_lr, grad = self.compute_lr(grad, var, coefficients)
-    mom = self.get_slot(var, "momentum")
-    return training_ops.apply_momentum(
-        var,
-        mom,
-        math_ops.cast(1.0, var.dtype.base_dtype),
-        grad * scaled_lr,
-        self.momentum,
-        use_locking=False,
-        use_nesterov=self.use_nesterov)
+    return self._resource_apply_dense(grad, var, apply_state)
 
   def _resource_apply_dense(self, grad, var, apply_state=None):
     var_device, var_dtype = var.device, var.dtype.base_dtype
@@ -194,13 +180,13 @@ class LARSOptimizer(optimizer_v2.OptimizerV2):
                     or self._fallback_apply_state(var_device, var_dtype))
 
     mom = self.get_slot(var, "momentum")
-    return training_ops.sparse_apply_momentum(
-        var,
-        mom,
-        coefficients["learning_rate"],
-        grad.values,
-        grad.indices,
-        self.momentum,
+    return tf.raw_ops.SparseApplyMomentum(
+        var=var,
+        accum=mom,
+        lr=coefficients["learning_rate"],
+        grad=grad.values,
+        indices=grad.indices,
+        momentum=self.momentum,
         use_locking=False,
         use_nesterov=self.use_nesterov)
 
@@ -210,13 +196,13 @@ class LARSOptimizer(optimizer_v2.OptimizerV2):
                     or self._fallback_apply_state(var_device, var_dtype))
 
     mom = self.get_slot(var, "momentum")
-    return training_ops.resource_sparse_apply_keras_momentum(
-        var.handle,
-        mom.handle,
-        coefficients["learning_rate"],
-        grad,
-        indices,
-        self.momentum,
+    return tf.raw_ops.ResourceSparseApplyKerasMomentum(
+        var=var.handle,
+        accum=mom.handle,
+        lr=coefficients["learning_rate"],
+        grad=grad,
+        indices=indices,
+        momentum=self.momentum,
         use_locking=False,
         use_nesterov=self.use_nesterov)
 

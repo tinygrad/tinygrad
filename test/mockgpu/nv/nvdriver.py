@@ -100,6 +100,9 @@ class NVDriver(VirtDriver):
       assert struct.hObjectParent in self.object_by_handle and isinstance(self.object_by_handle[struct.hObjectParent], NVGPU)
       struct.hObjectNew = self._alloc_handle()
       self.object_by_handle[struct.hObjectNew] = NVSubDevice(self.object_by_handle[struct.hObjectParent])
+    elif struct.hClass == nv_gpu.NV01_MEMORY_VIRTUAL:
+      assert struct.hObjectParent in self.object_by_handle and isinstance(self.object_by_handle[struct.hObjectParent], NVGPU)
+      struct.hObjectNew = self._alloc_handle()
     elif struct.hClass == nv_gpu.TURING_USERMODE_A:
       assert struct.hObjectParent in self.object_by_handle and isinstance(self.object_by_handle[struct.hObjectParent], NVSubDevice)
       struct.hObjectNew = self._alloc_handle()
@@ -215,6 +218,8 @@ class NVDriver(VirtDriver):
     elif nr == nv_gpu.NV_ESC_RM_FREE:
       st = nv_gpu.NVOS00_PARAMETERS.from_address(argp)
       self.object_by_handle.pop(st.hObjectOld)
+    elif nr == nv_gpu.NV_ESC_RM_MAP_MEMORY_DMA:
+      pass # mappings are same as uvm
     elif nr == nv_gpu.NV_ESC_CARD_INFO:
       for i,gpu in enumerate(self.gpus.values()):
         st = nv_gpu.nv_ioctl_card_info_t.from_address(argp + i * ctypes.sizeof(nv_gpu.nv_ioctl_card_info_t))

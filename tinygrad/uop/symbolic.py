@@ -3,7 +3,7 @@ import math, operator, struct, functools
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import ConstType, dtypes, PtrDType, can_safe_cast, Invalid
-from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, unwrap
+from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, unwrap, IMAGE, dedup
 from tinygrad.uop.decompositions import xpow
 from tinygrad.uop.divandmod import div_and_mod_symbolic
 
@@ -33,8 +33,8 @@ propagate_invalid = PatternMatcher([
     for op in GroupOp.Binary-GroupOp.Comparison),
   # TODO: when can this happen? and is it always safe to just drop invalid?
   *((invalid_gate.alu(op, UPat.var("y")).named("alu"), lambda cond,x,y,alu,i: x.alu(alu.op,y)) for op in GroupOp.Comparison),
-  # invalid + y -> invalid same for other ops
-  *((invalid_pat.alu(op, UPat(dtype=dtypes.index)).named("alu"), lambda alu,i: i) for op in GroupOp.Binary-GroupOp.Comparison),
+  # alu with invalid -> invalid
+  *((invalid_pat.alu(op, UPat(dtype=dtypes.index)), lambda i: i) for op in GroupOp.Binary-GroupOp.Comparison),
 ])
 
 symbolic_simple = propagate_invalid + PatternMatcher([
@@ -255,7 +255,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # after with 1 src is just src[0]
   (UPat(Ops.AFTER, src=(UPat.var("s"),)), lambda s: s),
   # VECTORIZE/CONST
-  (UPat(Ops.VECTORIZE, src=UPat(Ops.CONST), name="vec"), lambda vec: UOp.const(vec.dtype, tuple(x.arg for x in vec.src))),
+  (UPat(Ops.VECTORIZE, src=UPat(Ops.CONST), name="vec"),
+    lambda vec: UOp.const(vec.dtype, tuple(x.arg for x in vec.src)) if len(vec.src) > 0 else None),
 ])+div_and_mod_symbolic+gep_pushing
 
 # ******** we take a small aside to "simplify_valid" to rewrite valids ********
@@ -319,12 +320,12 @@ def _valid_priority(v: UOp, valids:list[UOp]):
 def simplify_valid(valid:UOp) -> UOp|None:
   if valid.op_in_backward_slice_with_self(Ops.INDEX): return None  # this should only be for indexing, skip if there's a INDEX
   ret:list[UOp] = []
-  something_changed = False
   valids = list(valid.split_uop(Ops.AND))
-  for stmt in sorted(valids, key=lambda v: _valid_priority(v, valids)):
-    ret.append(uop_given_valid(UOp.prod(*ret), stmt) if ret else stmt)
-    if ret[-1] is not stmt: something_changed = True
-  return UOp.prod(*ret) if something_changed else None
+  valids = sorted(valids, key=lambda v: _valid_priority(v, valids))
+  for stmt in dedup(valids):
+    if ret: stmt = uop_given_valid(UOp.prod(*ret), stmt)
+    ret.append(stmt)
+  return UOp.prod(*ret) if ret != valids else None
 
 # ******** phase 3 is the complete symbolic ********
 
@@ -340,8 +341,8 @@ def reduce_mul_chain(r:UOp):
   return r.replace(src=(prod(inside) if len(inside) else r.src[0].const_like(1),)+r.src[1:])*prod(outside)
 
 def drop_and_clauses(cond:UOp, x:UOp, i:UOp) -> UOp|None:
-  if not (dropped_clauses:=[c for c in cond.split_uop(Ops.AND) if not any(r in x.ranges for r in c.ranges)]): return None
-  return UOp.const(dtypes.bool, True).prod(*[c for c in cond.split_uop(Ops.AND) if c not in dropped_clauses]).where(x, i)
+  keep, drop = partition(cond.split_uop(Ops.AND), lambda c: any(r in x.ranges for r in c.ranges))
+  return UOp.const(dtypes.bool, True).prod(*keep).where(x, i) if drop else None
 pm_drop_and_clauses = PatternMatcher([(invalid_gate, drop_and_clauses)])
 
 def where_on_load(c1, buf, x):
@@ -362,11 +363,15 @@ pm_move_where_on_load = PatternMatcher([
   (UPat.var("c1").where(0, UPat.var("buf").index(UPat.var("x"))), lambda c1,buf,x: where_on_load(c1.logical_not(),buf,x)),
 ])
 
+def gated_given_valid(cond:UOp, x:UOp, i:UOp) -> UOp|None:
+  # Skip if x contains DIV/MOD AND IMAGE mode is enabled -> image index e.g. openpilot
+  if IMAGE.value > 0 and x.op_in_backward_slice_with_self(Ops.IDIV, Ops.MOD): return None
+  return cond.where(uop_given_valid(cond, x, try_simplex=False), i)
+
 pm_simplify_valid = PatternMatcher([
   # simplify valid
   (UPat(Ops.AND, name="valid"), simplify_valid),
-  # TODO: this regressed openpilot, not having this regressed cifar
-  # (invalid_gate, lambda cond,x,i: cond.where(uop_given_valid(cond, x, try_simplex=False), i)),
+  (invalid_gate, gated_given_valid),
 ])
 
 # this is symbolic 2.0
