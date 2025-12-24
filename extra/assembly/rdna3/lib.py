@@ -123,7 +123,7 @@ class Inst:
         val = val.val  # bypass inline constant encoding
       elif isinstance(val, Reg):
         val = encode_src(val)
-      elif name in src_fields and isinstance(val, int):
+      elif name in src_fields and isinstance(val, (int, float)):
         val = encode_src(val)  # inline constant encoding
       elif hasattr(val, 'value'): val = val.value
       word |= _encode_field(val, bf.hi, bf.lo)
@@ -237,6 +237,11 @@ def encode_src(val) -> int:
   if isinstance(val, VGPR): return 256 + val.idx
   if isinstance(val, TTMP): return 108 + val.idx
   if hasattr(val, 'value'): return val.value
+  if isinstance(val, float):
+    # Inline float constants
+    float_map = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
+    if val in float_map: return float_map[val]
+    return 255  # literal constant marker
   if isinstance(val, int):
     if 0 <= val <= 64: return 128 + val
     if -16 <= val <= -1: return 192 + (-val)
