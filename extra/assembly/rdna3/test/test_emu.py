@@ -437,5 +437,108 @@ class TestVOP3(unittest.TestCase):
     out = run_kernel(kernel, n_threads=1)
     self.assertEqual(bits_to_f32(out[0]), 12.0)
 
+  def test_v_xad_u32(self):
+    """Regression test: V_XAD_U32 (multiply-add) used by matmul address calculation."""
+    kernel = make_store_kernel([
+      v_mov_b32_e32(v[1], 3),
+      v_mov_b32_e32(v[2], 4),
+      v_mov_b32_e32(v[4], 5),
+      v_xad_u32(v[1], v[1], v[2], v[4]),  # 3*4+5 = 17
+    ])
+    out = run_kernel(kernel, n_threads=1)
+    self.assertEqual(out[0], 17)
+
+class TestVOPD(unittest.TestCase):
+  def test_vopd_lshrrev(self):
+    """Regression test: VOPD LSHRREV (op 16) was missing."""
+    state = WaveState()
+    state.vgpr[0][1] = 0x100  # src value
+    state.vgpr[0][2] = 0
+    # VOPD with opx=8 (MOV), opy=16 (LSHRREV)
+    # This shifts V1 right by 4 and stores in the Y destination
+    kernel = VOPD(opx=8, srcx0=256+1, vsrcx1=0, vdstx=2,  # MOV: V2 = V1
+                  opy=16, srcy0=132, vsrcy1=1, vdsty=4).to_bytes()  # LSHRREV: V4 = V1 >> 4
+    kernel += s_endpgm().to_bytes()
+    prog = decode_program(kernel)
+    exec_wave(prog, state, bytearray(65536), 1)
+    self.assertEqual(state.vgpr[0][2], 0x100)  # MOV result
+    self.assertEqual(state.vgpr[0][4], 0x10)   # 0x100 >> 4 = 0x10
+
+  def test_vopd_ashrrev(self):
+    """Regression test: VOPD ASHRREV (op 17) was missing."""
+    state = WaveState()
+    state.vgpr[0][1] = 0xffffff00  # negative number in 2's complement
+    state.vgpr[0][2] = 0
+    kernel = VOPD(opx=8, srcx0=256+1, vsrcx1=0, vdstx=2,  # MOV: V2 = V1
+                  opy=17, srcy0=132, vsrcy1=1, vdsty=4).to_bytes()  # ASHRREV: V4 = V1 >> 4 (arithmetic)
+    kernel += s_endpgm().to_bytes()
+    prog = decode_program(kernel)
+    exec_wave(prog, state, bytearray(65536), 1)
+    self.assertEqual(state.vgpr[0][2], 0xffffff00)
+    self.assertEqual(state.vgpr[0][4], 0xfffffff0)  # sign-extended shift
+
+  def test_vopd_or(self):
+    """Regression test: VOPD OR (op 18) was missing."""
+    state = WaveState()
+    state.vgpr[0][1] = 0xf0
+    state.vgpr[0][2] = 0x0f
+    kernel = VOPD(opx=8, srcx0=256+1, vsrcx1=0, vdstx=3,  # MOV: V3 = V1
+                  opy=18, srcy0=256+1, vsrcy1=2, vdsty=4).to_bytes()  # OR: V4 = V1 | V2
+    kernel += s_endpgm().to_bytes()
+    prog = decode_program(kernel)
+    exec_wave(prog, state, bytearray(65536), 1)
+    self.assertEqual(state.vgpr[0][3], 0xf0)
+    self.assertEqual(state.vgpr[0][4], 0xff)
+
+class TestDecoder(unittest.TestCase):
+  def test_vopd_literal_handling(self):
+    """Regression test: VOPD srcx0/srcy0 with literal (255) wasn't consuming the literal dword."""
+    state = WaveState()
+    # Create VOPD with srcx0=255 (literal), followed by literal value 0x12345678
+    vopd_bytes = VOPD(opx=8, srcx0=255, vsrcx1=0, vdstx=1,  # MOV: V1 = literal
+                      opy=8, srcy0=128, vsrcy1=0, vdsty=2).to_bytes()  # MOV: V2 = 0
+    literal_bytes = (0x12345678).to_bytes(4, 'little')
+    kernel = vopd_bytes + literal_bytes + s_endpgm().to_bytes()
+    prog = decode_program(kernel)
+    # Should decode as 3 instructions: VOPD (with literal), then S_ENDPGM
+    # The literal should NOT be decoded as a separate instruction
+    self.assertEqual(len(prog), 2)  # VOPD + S_ENDPGM
+    exec_wave(prog, state, bytearray(65536), 1)
+    self.assertEqual(state.vgpr[0][1], 0x12345678)
+
+  def test_s_endpgm_stops_decode(self):
+    """Regression test: decoder should stop at S_ENDPGM, not read past into metadata."""
+    # Create a kernel followed by garbage that looks like an invalid instruction
+    kernel = s_mov_b32(s[0], 42).to_bytes() + s_endpgm().to_bytes()
+    garbage = bytes([0xff] * 16)  # garbage after kernel
+    prog = decode_program(kernel + garbage)
+    # Should only have 2 instructions (s_mov_b32 and s_endpgm)
+    self.assertEqual(len(prog), 2)
+
+class TestMultiWave(unittest.TestCase):
+  def test_all_waves_execute(self):
+    """Regression test: all waves in a workgroup must execute, not just the first."""
+    n_threads = 64  # 2 waves of 32 threads each
+    output = (ctypes.c_uint32 * n_threads)(*[0xdead] * n_threads)
+    output_ptr = ctypes.addressof(output)
+    args = (ctypes.c_uint64 * 1)(output_ptr)
+    args_ptr = ctypes.addressof(args)
+
+    # Simple kernel: store tid to output[tid]
+    kernel = b''
+    kernel += s_load_b64(s[2:3], s[0:1], soffset=NULL, offset=0).to_bytes()
+    kernel += s_waitcnt(lgkmcnt=0).to_bytes()
+    kernel += v_lshlrev_b32_e32(v[1], 2, v[0]).to_bytes()  # offset = tid * 4
+    kernel += global_store_b32(addr=v[1], data=v[0], saddr=s[2]).to_bytes()
+    kernel += s_endpgm().to_bytes()
+
+    kernel_buf = (ctypes.c_char * len(kernel))(*kernel)
+    kernel_ptr = ctypes.addressof(kernel_buf)
+    result = run_asm(kernel_ptr, len(kernel), 1, 1, 1, n_threads, 1, 1, args_ptr)
+    self.assertEqual(result, 0)
+    # All threads should have written their tid
+    for i in range(n_threads):
+      self.assertEqual(output[i], i, f"Thread {i} didn't execute")
+
 if __name__ == "__main__":
   unittest.main()

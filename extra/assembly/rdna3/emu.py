@@ -1,6 +1,6 @@
 # RDNA3 emulator - pure Python implementation for testing
 from __future__ import annotations
-import ctypes, struct, math
+import ctypes, struct, math, os
 from dataclasses import dataclass, field
 from extra.assembly.rdna3.lib import Inst32, RawImm, bits
 from extra.assembly.rdna3.autogen import (
@@ -56,10 +56,12 @@ def decode_program(data):
     if inst_class is None: i += 4; continue
     size = 8 if is_64 else 4
     inst = inst_class.from_bytes(data[i:i+size])
-    for fld in ['src0', 'src1', 'src2', 'ssrc0', 'ssrc1']:
+    for fld in ['src0', 'src1', 'src2', 'ssrc0', 'ssrc1', 'srcx0', 'srcy0']:
       if get_field(inst, fld) == 255: inst._literal = int.from_bytes(data[i+size:i+size+4], 'little'); size += 4; break
     else: inst._literal = None
     result.append((inst, size // 4)); i += size
+    # stop at S_ENDPGM
+    if inst_class == SOPP and get_field(inst, 'op') == SOPPOp.S_ENDPGM: break
   return result
 
 # register read/write helpers
@@ -268,7 +270,7 @@ def exec_vop3(st, inst, lane):
             VOP3Op.V_CVT_I32_F32: lambda: max(-0x80000000,min(0x7fffffff,int(f32(s0))))&0xffffffff, VOP3Op.V_CVT_U32_F32: lambda: max(0,min(0xffffffff,int(f32(s0)))),
             VOP3Op.V_LDEXP_F32: lambda: i32(math.ldexp(f32(s0),sext(s1,32))), VOP3Op.V_FREXP_MANT_F32: lambda: i32(math.frexp(f32(s0))[0] if f32(s0)!=0 else 0.0),
             VOP3Op.V_FREXP_EXP_I32_F32: lambda: (math.frexp(f32(s0))[1] if f32(s0)!=0 else 0)&0xffffffff,
-            VOP3Op.V_ALIGNBIT_B32: lambda: (((s0<<32)|s1)>>(s2&0x1f))&0xffffffff}
+            VOP3Op.V_ALIGNBIT_B32: lambda: (((s0<<32)|s1)>>(s2&0x1f))&0xffffffff, VOP3Op.V_XAD_U32: lambda: ((s0*s1)+s2)&0xffffffff}
   if op == VOP3Op.V_BFE_U32: off, wd = s1 & 0x1f, s2 & 0x1f; V[vdst] = (s0 >> off) & ((1 << wd) - 1) if wd else 0
   elif op == VOP3Op.V_BFE_I32: off, wd = s1 & 0x1f, s2 & 0x1f; V[vdst] = sext((s0 >> off) & ((1 << wd) - 1), wd) & 0xffffffff if wd else 0
   elif op == VOP3Op.V_CNDMASK_B32: mask = rsrc(st, src2, lane) if src2 < 256 else st.vcc; V[vdst] = s1 if (mask >> lane) & 1 else s0
@@ -368,13 +370,15 @@ def exec_ds(st, inst, lane, lds):
     for i in range(cnt): lds[addr+i*sz:addr+i*sz+sz] = (V[data0_reg + i] & ((1 << (sz * 8)) - 1)).to_bytes(sz, 'little')
   else: raise NotImplementedError(f"DS op {op}")
 
-VOPD_OP = {0: 'FMAC', 3: 'MUL', 4: 'ADD', 5: 'SUB', 6: 'SUBREV', 8: 'MOV', 9: 'CNDMASK', 10: 'MAX', 11: 'MIN', 13: 'ADD_U32', 14: 'LSHLREV', 15: 'AND'}
+VOPD_OP = {0: 'FMAC', 3: 'MUL', 4: 'ADD', 5: 'SUB', 6: 'SUBREV', 8: 'MOV', 9: 'CNDMASK', 10: 'MAX', 11: 'MIN',
+           13: 'ADD_U32', 14: 'LSHLREV', 15: 'AND', 16: 'LSHRREV', 17: 'ASHRREV', 18: 'OR'}
 def exec_vopd_op(st, op, src0, src1, dst, lane):
   s0, s1, V = rsrc(st, src0, lane), st.vgpr[lane][src1], st.vgpr[lane]
   name = VOPD_OP.get(op, '')
   OPS = {'MOV': lambda: s0, 'ADD': lambda: i32(f32(s0)+f32(s1)), 'SUB': lambda: i32(f32(s0)-f32(s1)), 'SUBREV': lambda: i32(f32(s1)-f32(s0)), 'MUL': lambda: i32(f32(s0)*f32(s1)),
          'MAX': lambda: i32(max(f32(s0),f32(s1))), 'MIN': lambda: i32(min(f32(s0),f32(s1))), 'FMAC': lambda: i32(f32(s0)*f32(s1)+f32(V[dst])),
-         'ADD_U32': lambda: (s0+s1)&0xffffffff, 'LSHLREV': lambda: (s1<<(s0&0x1f))&0xffffffff, 'AND': lambda: s0&s1, 'CNDMASK': lambda: s1 if (st.vcc>>lane)&1 else s0}
+         'ADD_U32': lambda: (s0+s1)&0xffffffff, 'LSHLREV': lambda: (s1<<(s0&0x1f))&0xffffffff, 'LSHRREV': lambda: s1>>(s0&0x1f),
+         'ASHRREV': lambda: (sext(s1,32)>>(s0&0x1f))&0xffffffff, 'AND': lambda: s0&s1, 'OR': lambda: s0|s1, 'CNDMASK': lambda: s1 if (st.vcc>>lane)&1 else s0}
   if name in OPS: V[dst] = OPS[name]()
   else: raise NotImplementedError(f"VOPD op {op}")
 
@@ -422,11 +426,11 @@ def exec_workgroup(program, workgroup_id, local_size, args_ptr, dispatch_dim):
     waves.append((st, n_lanes))
   has_barrier = any(isinstance(inst, SOPP) and get_field(inst, 'op') == SOPPOp.S_BARRIER for inst, _ in program)
   for _ in range(2 if has_barrier else 1):
-    for st, n_lanes in waves:
-      if exec_wave(program, st, lds, n_lanes) == 0: break
+    for st, n_lanes in waves: exec_wave(program, st, lds, n_lanes)
 
 def run_asm(lib, lib_sz, gx, gy, gz, lx, ly, lz, args_ptr):
-  program = decode_program((ctypes.c_char * lib_sz).from_address(lib).raw)
+  data = (ctypes.c_char * lib_sz).from_address(lib).raw
+  program = decode_program(data)
   if not program: return -1
   dispatch_dim = 3 if gz > 1 else (2 if gy > 1 else 1)
   for gidz in range(gz):
