@@ -16,7 +16,7 @@ class VOPC(Inst32):
 
 # Type aliases
 Inst = Inst32 | Inst64
-Program = list[tuple[Inst, int]]
+Program = list[Inst]
 
 # constants and helpers
 WAVE_SIZE, SGPR_COUNT, VGPR_COUNT = 32, 128, 256
@@ -76,6 +76,40 @@ class WaveState:
   pc: int = 0
   literal: int = 0
 
+  def rsgpr(self, i: int) -> int:
+    """Read scalar register (handles VCC, EXEC, NULL, SCC)."""
+    return {VCC_LO: self.vcc & 0xffffffff, VCC_HI: (self.vcc >> 32) & 0xffffffff, EXEC_LO: self.exec_mask & 0xffffffff,
+            EXEC_HI: (self.exec_mask >> 32) & 0xffffffff, NULL_REG: 0, 253: self.scc}.get(i, self.sgpr[i] if i < SGPR_COUNT else 0)
+
+  def wsgpr(self, i: int, v: int) -> None:
+    """Write scalar register (handles VCC, EXEC)."""
+    v &= 0xffffffff
+    if i == VCC_LO: self.vcc = (self.vcc & 0xffffffff00000000) | v
+    elif i == VCC_HI: self.vcc = (self.vcc & 0xffffffff) | (v << 32)
+    elif i == EXEC_LO: self.exec_mask = (self.exec_mask & 0xffffffff00000000) | v
+    elif i == EXEC_HI: self.exec_mask = (self.exec_mask & 0xffffffff) | (v << 32)
+    elif i < SGPR_COUNT: self.sgpr[i] = v
+
+  def rsgpr64(self, i: int) -> int: return self.rsgpr(i) | (self.rsgpr(i+1) << 32)
+  def wsgpr64(self, i: int, v: int) -> None: self.wsgpr(i, v & 0xffffffff); self.wsgpr(i+1, (v >> 32) & 0xffffffff)
+
+  def rsrc(self, v: int, lane: int) -> int:
+    """Read source operand (SGPR, VGPR, inline constant, literal, etc.)."""
+    if v <= 105: return self.sgpr[v]
+    if v in (VCC_LO, VCC_HI): return (self.vcc >> (32 if v == VCC_HI else 0)) & 0xffffffff
+    if 108 <= v <= 123 or v == M0: return self.sgpr[v]
+    if v in (EXEC_LO, EXEC_HI): return (self.exec_mask >> (32 if v == EXEC_HI else 0)) & 0xffffffff
+    if v == NULL_REG: return 0
+    if 128 <= v <= 192: return v - 128
+    if 193 <= v <= 208: return (-(v - 192)) & 0xffffffff
+    if v in FLOAT_BITS: return FLOAT_BITS[v]
+    if v == 255: return self.literal
+    if 256 <= v <= 511: return self.vgpr[lane][v - 256]
+    return 0
+
+  def rsrc64(self, v: int, lane: int) -> int:
+    return self.rsrc(v, lane) | ((self.rsrc(v+1, lane) if v <= 105 or 256 <= v <= 511 else 0) << 32)
+
 def decode_format(word: int) -> tuple[type[Inst] | None, bool]:
   hi2 = (word >> 30) & 0x3
   if hi2 == 0b11:
@@ -98,82 +132,43 @@ def decode_program(data: bytes) -> Program:
     word = int.from_bytes(data[i:i+4], 'little')
     inst_class, is_64 = decode_format(word)
     if inst_class is None: i += 4; continue
-    size = 8 if is_64 else 4
-    inst = inst_class.from_bytes(data[i:i+size])
-    has_literal = False
-    # Check for src==255 literal marker
-    for fld in ['src0', 'src1', 'src2', 'ssrc0', 'ssrc1', 'srcx0', 'srcy0']:
-      if getattr(inst, fld, None) == 255: has_literal = True; break
-    # VOP2 FMAMK/FMAAK always have literal (ops 44, 45, 55, 56)
+    base_size = 8 if is_64 else 4
+    inst = inst_class.from_bytes(data[i:i+base_size])
+    # Check for literal: src==255 marker, or VOP2/VOPD FMAMK/FMAAK
+    has_literal = any(getattr(inst, fld, None) == 255 for fld in ('src0', 'src1', 'src2', 'ssrc0', 'ssrc1', 'srcx0', 'srcy0'))
     if inst_class == VOP2 and inst.op in (44, 45, 55, 56): has_literal = True
-    # VOPD FMAAK/FMAMK always have literal (ops 1, 2)
     if inst_class == VOPD and (inst.opx in (1, 2) or inst.opy in (1, 2)): has_literal = True
-    if has_literal: inst._literal = int.from_bytes(data[i+size:i+size+4], 'little'); size += 4
-    else: inst._literal = None
-    result.append((inst, size // 4)); i += size
+    if has_literal: inst._literal = int.from_bytes(data[i+base_size:i+base_size+4], 'little')
+    result.append(inst)
+    i += inst.size()
     if inst_class == SOPP and inst.op == SOPPOp.S_ENDPGM: break
   return result
 
-# register read/write helpers
-def rsgpr(st: WaveState, i: int) -> int:
-  return {VCC_LO: st.vcc & 0xffffffff, VCC_HI: (st.vcc >> 32) & 0xffffffff, EXEC_LO: st.exec_mask & 0xffffffff,
-          EXEC_HI: (st.exec_mask >> 32) & 0xffffffff, NULL_REG: 0, 253: st.scc}.get(i, st.sgpr[i] if i < SGPR_COUNT else 0)
-
-def wsgpr(st: WaveState, i: int, v: int) -> None:
-  v &= 0xffffffff
-  if i == VCC_LO: st.vcc = (st.vcc & 0xffffffff00000000) | v
-  elif i == VCC_HI: st.vcc = (st.vcc & 0xffffffff) | (v << 32)
-  elif i == EXEC_LO: st.exec_mask = (st.exec_mask & 0xffffffff00000000) | v
-  elif i == EXEC_HI: st.exec_mask = (st.exec_mask & 0xffffffff) | (v << 32)
-  elif i < SGPR_COUNT: st.sgpr[i] = v
-
-def rsgpr64(st: WaveState, i: int) -> int: return rsgpr(st, i) | (rsgpr(st, i+1) << 32)
-def wsgpr64(st: WaveState, i: int, v: int) -> None: wsgpr(st, i, v & 0xffffffff); wsgpr(st, i+1, (v >> 32) & 0xffffffff)
-
-# aliases for test compatibility
-write_sgpr, write_sgpr64, read_sgpr, read_sgpr64 = wsgpr, wsgpr64, rsgpr, rsgpr64
-
-def rsrc(st: WaveState, v: int, lane: int) -> int:
-  if v <= 105: return st.sgpr[v]
-  if v in (VCC_LO, VCC_HI): return (st.vcc >> (32 if v == VCC_HI else 0)) & 0xffffffff
-  if 108 <= v <= 123 or v == M0: return st.sgpr[v]
-  if v in (EXEC_LO, EXEC_HI): return (st.exec_mask >> (32 if v == EXEC_HI else 0)) & 0xffffffff
-  if v == NULL_REG: return 0
-  if 128 <= v <= 192: return v - 128
-  if 193 <= v <= 208: return (-(v - 192)) & 0xffffffff
-  if v in FLOAT_BITS: return FLOAT_BITS[v]
-  if v == 255: return st.literal
-  if 256 <= v <= 511: return st.vgpr[lane][v - 256]
-  return 0
-
-def rsrc64(st: WaveState, v: int, lane: int) -> int:
-  return rsrc(st, v, lane) | ((rsrc(st, v+1, lane) if v <= 105 or 256 <= v <= 511 else 0) << 32)
-
 # instruction execution
 def exec_sop1(st: WaveState, inst: SOP1) -> int:
-  op, s0, sdst = inst.op, rsrc(st, inst.ssrc0, 0), inst.sdst
+  op, s0, sdst = inst.op, st.rsrc(inst.ssrc0, 0), inst.sdst
   OPS: dict[int, Any] = {
-    SOP1Op.S_MOV_B32: lambda: wsgpr(st, sdst, s0), SOP1Op.S_MOV_B64: lambda: wsgpr64(st, sdst, rsrc64(st, inst.ssrc0, 0)),
-    SOP1Op.S_BREV_B32: lambda: wsgpr(st, sdst, int(f'{s0:032b}'[::-1], 2)), SOP1Op.S_CLZ_I32_U32: lambda: wsgpr(st, sdst, clz(s0)),
-    SOP1Op.S_CLS_I32: lambda: wsgpr(st, sdst, cls(s0)), SOP1Op.S_SEXT_I32_I8: lambda: wsgpr(st, sdst, sext(s0 & 0xff, 8) & 0xffffffff),
-    SOP1Op.S_SEXT_I32_I16: lambda: wsgpr(st, sdst, sext(s0 & 0xffff, 16) & 0xffffffff),
-    SOP1Op.S_BITSET0_B32: lambda: wsgpr(st, sdst, rsgpr(st, sdst) & ~(1 << (s0 & 0x1f))),
-    SOP1Op.S_BITSET1_B32: lambda: wsgpr(st, sdst, rsgpr(st, sdst) | (1 << (s0 & 0x1f)))}
+    SOP1Op.S_MOV_B32: lambda: st.wsgpr(sdst, s0), SOP1Op.S_MOV_B64: lambda: st.wsgpr64(sdst, st.rsrc64(inst.ssrc0, 0)),
+    SOP1Op.S_BREV_B32: lambda: st.wsgpr(sdst, int(f'{s0:032b}'[::-1], 2)), SOP1Op.S_CLZ_I32_U32: lambda: st.wsgpr(sdst, clz(s0)),
+    SOP1Op.S_CLS_I32: lambda: st.wsgpr(sdst, cls(s0)), SOP1Op.S_SEXT_I32_I8: lambda: st.wsgpr(sdst, sext(s0 & 0xff, 8) & 0xffffffff),
+    SOP1Op.S_SEXT_I32_I16: lambda: st.wsgpr(sdst, sext(s0 & 0xffff, 16) & 0xffffffff),
+    SOP1Op.S_BITSET0_B32: lambda: st.wsgpr(sdst, st.rsgpr(sdst) & ~(1 << (s0 & 0x1f))),
+    SOP1Op.S_BITSET1_B32: lambda: st.wsgpr(sdst, st.rsgpr(sdst) | (1 << (s0 & 0x1f)))}
   if op in OPS: OPS[op]()
-  elif op == SOP1Op.S_NOT_B32: r = (~s0) & 0xffffffff; st.scc = int(r != 0); wsgpr(st, sdst, r)
-  elif op == SOP1Op.S_NOT_B64: r = (~rsrc64(st, inst.ssrc0, 0)) & 0xffffffffffffffff; st.scc = int(r != 0); wsgpr64(st, sdst, r)
-  elif op == SOP1Op.S_ABS_I32: r = abs(sext(s0, 32)) & 0xffffffff; st.scc = int(r != 0); wsgpr(st, sdst, r)
-  elif op == SOP1Op.S_AND_SAVEEXEC_B32: old = st.exec_mask & 0xffffffff; st.exec_mask = s0 & old; st.scc = int(st.exec_mask != 0); wsgpr(st, sdst, old)
-  elif op == SOP1Op.S_OR_SAVEEXEC_B32: old = st.exec_mask & 0xffffffff; st.exec_mask = s0 | old; st.scc = int(st.exec_mask != 0); wsgpr(st, sdst, old)
-  elif op == SOP1Op.S_AND_NOT1_SAVEEXEC_B32: old = st.exec_mask & 0xffffffff; st.exec_mask = s0 & (~old & 0xffffffff); st.scc = int(st.exec_mask != 0); wsgpr(st, sdst, old)
+  elif op == SOP1Op.S_NOT_B32: r = (~s0) & 0xffffffff; st.scc = int(r != 0); st.wsgpr(sdst, r)
+  elif op == SOP1Op.S_NOT_B64: r = (~st.rsrc64(inst.ssrc0, 0)) & 0xffffffffffffffff; st.scc = int(r != 0); st.wsgpr64(sdst, r)
+  elif op == SOP1Op.S_ABS_I32: r = abs(sext(s0, 32)) & 0xffffffff; st.scc = int(r != 0); st.wsgpr(sdst, r)
+  elif op == SOP1Op.S_AND_SAVEEXEC_B32: old = st.exec_mask & 0xffffffff; st.exec_mask = s0 & old; st.scc = int(st.exec_mask != 0); st.wsgpr(sdst, old)
+  elif op == SOP1Op.S_OR_SAVEEXEC_B32: old = st.exec_mask & 0xffffffff; st.exec_mask = s0 | old; st.scc = int(st.exec_mask != 0); st.wsgpr(sdst, old)
+  elif op == SOP1Op.S_AND_NOT1_SAVEEXEC_B32: old = st.exec_mask & 0xffffffff; st.exec_mask = s0 & (~old & 0xffffffff); st.scc = int(st.exec_mask != 0); st.wsgpr(sdst, old)
   else: raise NotImplementedError(f"SOP1 op {op}")
   return 0
 
 def exec_sop2(st: WaveState, inst: SOP2) -> int:
   op, ssrc0, ssrc1, sdst = inst.op, inst.ssrc0, inst.ssrc1, inst.sdst
-  s0, s1 = rsrc(st, ssrc0, 0), rsrc(st, ssrc1, 0)
-  def w(r: int, scc: int | None = None) -> None: wsgpr(st, sdst, r & 0xffffffff); st.scc = scc if scc is not None else st.scc
-  def w64(r: int, scc: int | None = None) -> None: wsgpr64(st, sdst, r & 0xffffffffffffffff); st.scc = scc if scc is not None else st.scc
+  s0, s1 = st.rsrc(ssrc0, 0), st.rsrc(ssrc1, 0)
+  def w(r: int, scc: int | None = None) -> None: st.wsgpr(sdst, r & 0xffffffff); st.scc = scc if scc is not None else st.scc
+  def w64(r: int, scc: int | None = None) -> None: st.wsgpr64(sdst, r & 0xffffffffffffffff); st.scc = scc if scc is not None else st.scc
   if op == SOP2Op.S_ADD_U32: r = s0 + s1; w(r, int(r >= 0x100000000))
   elif op == SOP2Op.S_SUB_U32: w(s0 - s1, int(s1 > s0))
   elif op == SOP2Op.S_ADD_I32: r = sext(s0,32) + sext(s1,32); w(r, int(((s0>>31)==(s1>>31)) and ((s0>>31)!=((r>>31)&1))))
@@ -184,17 +179,17 @@ def exec_sop2(st: WaveState, inst: SOP2) -> int:
   elif op == SOP2Op.S_MUL_HI_U32: w((s0 * s1) >> 32)
   elif op == SOP2Op.S_MUL_HI_I32: w((sext(s0,32) * sext(s1,32)) >> 32)
   elif op == SOP2Op.S_LSHL_B32: r = (s0 << (s1 & 0x1f)) & 0xffffffff; w(r, int(r != 0))
-  elif op == SOP2Op.S_LSHL_B64: r = (rsrc64(st, ssrc0, 0) << (s1 & 0x3f)) & 0xffffffffffffffff; w64(r, int(r != 0))
+  elif op == SOP2Op.S_LSHL_B64: r = (st.rsrc64(ssrc0, 0) << (s1 & 0x3f)) & 0xffffffffffffffff; w64(r, int(r != 0))
   elif op == SOP2Op.S_LSHR_B32: r = s0 >> (s1 & 0x1f); w(r, int(r != 0))
-  elif op == SOP2Op.S_LSHR_B64: r = rsrc64(st, ssrc0, 0) >> (s1 & 0x3f); w64(r, int(r != 0))
+  elif op == SOP2Op.S_LSHR_B64: r = st.rsrc64(ssrc0, 0) >> (s1 & 0x3f); w64(r, int(r != 0))
   elif op == SOP2Op.S_ASHR_I32: r = sext(s0, 32) >> (s1 & 0x1f); w(r, int(r != 0))
-  elif op == SOP2Op.S_ASHR_I64: r = sext(rsrc64(st, ssrc0, 0), 64) >> (s1 & 0x3f); w64(r, int(r != 0))
+  elif op == SOP2Op.S_ASHR_I64: r = sext(st.rsrc64(ssrc0, 0), 64) >> (s1 & 0x3f); w64(r, int(r != 0))
   elif op == SOP2Op.S_AND_B32: r = s0 & s1; w(r, int(r != 0))
-  elif op == SOP2Op.S_AND_B64: r = rsrc64(st, ssrc0, 0) & rsrc64(st, ssrc1, 0); w64(r, int(r != 0))
+  elif op == SOP2Op.S_AND_B64: r = st.rsrc64(ssrc0, 0) & st.rsrc64(ssrc1, 0); w64(r, int(r != 0))
   elif op == SOP2Op.S_OR_B32: r = s0 | s1; w(r, int(r != 0))
-  elif op == SOP2Op.S_OR_B64: r = rsrc64(st, ssrc0, 0) | rsrc64(st, ssrc1, 0); w64(r, int(r != 0))
+  elif op == SOP2Op.S_OR_B64: r = st.rsrc64(ssrc0, 0) | st.rsrc64(ssrc1, 0); w64(r, int(r != 0))
   elif op == SOP2Op.S_XOR_B32: r = s0 ^ s1; w(r, int(r != 0))
-  elif op == SOP2Op.S_XOR_B64: r = rsrc64(st, ssrc0, 0) ^ rsrc64(st, ssrc1, 0); w64(r, int(r != 0))
+  elif op == SOP2Op.S_XOR_B64: r = st.rsrc64(ssrc0, 0) ^ st.rsrc64(ssrc1, 0); w64(r, int(r != 0))
   elif op == SOP2Op.S_AND_NOT1_B32: r = s0 & (~s1 & 0xffffffff); w(r, int(r != 0))
   elif op == SOP2Op.S_OR_NOT1_B32: r = s0 | (~s1 & 0xffffffff); w(r, int(r != 0))
   elif op == SOP2Op.S_MIN_I32: st.scc = int(sext(s0,32) < sext(s1,32)); w(s0 if st.scc else s1)
@@ -202,7 +197,7 @@ def exec_sop2(st: WaveState, inst: SOP2) -> int:
   elif op == SOP2Op.S_MAX_I32: st.scc = int(sext(s0,32) > sext(s1,32)); w(s0 if st.scc else s1)
   elif op == SOP2Op.S_MAX_U32: st.scc = int(s0 > s1); w(max(s0, s1))
   elif op == SOP2Op.S_CSELECT_B32: w(s0 if st.scc else s1)
-  elif op == SOP2Op.S_CSELECT_B64: w64(rsrc64(st, ssrc0, 0) if st.scc else rsrc64(st, ssrc1, 0))
+  elif op == SOP2Op.S_CSELECT_B64: w64(st.rsrc64(ssrc0, 0) if st.scc else st.rsrc64(ssrc1, 0))
   elif op == SOP2Op.S_BFE_U32: off, wd = s1 & 0x1f, (s1 >> 16) & 0x7f; r = (s0 >> off) & ((1 << wd) - 1) if wd else 0; w(r, int(r != 0))
   elif op == SOP2Op.S_BFE_I32: off, wd = s1 & 0x1f, (s1 >> 16) & 0x7f; r = sext((s0 >> off) & ((1 << wd) - 1), wd) & 0xffffffff if wd else 0; w(r, int(r != 0))
   elif op == SOP2Op.S_PACK_LL_B32_B16: w((s0 & 0xffff) | ((s1 & 0xffff) << 16))
@@ -213,7 +208,7 @@ def exec_sop2(st: WaveState, inst: SOP2) -> int:
   return 0
 
 def exec_sopc(st: WaveState, inst: SOPC) -> int:
-  op, s0, s1 = inst.op, rsrc(st, inst.ssrc0, 0), rsrc(st, inst.ssrc1, 0)
+  op, s0, s1 = inst.op, st.rsrc(inst.ssrc0, 0), st.rsrc(inst.ssrc1, 0)
   I32_CMP: dict[int, Any] = {SOPCOp.S_CMP_EQ_I32: lambda: sext(s0,32)==sext(s1,32), SOPCOp.S_CMP_LG_I32: lambda: sext(s0,32)!=sext(s1,32),
               SOPCOp.S_CMP_GT_I32: lambda: sext(s0,32)>sext(s1,32), SOPCOp.S_CMP_GE_I32: lambda: sext(s0,32)>=sext(s1,32),
               SOPCOp.S_CMP_LT_I32: lambda: sext(s0,32)<sext(s1,32), SOPCOp.S_CMP_LE_I32: lambda: sext(s0,32)<=sext(s1,32)}
@@ -223,22 +218,22 @@ def exec_sopc(st: WaveState, inst: SOPC) -> int:
   elif op in U32_CMP: st.scc = int(U32_CMP[op])
   elif op == SOPCOp.S_BITCMP0_B32: st.scc = int((s0 & (1 << (s1 & 0x1f)))==0)
   elif op == SOPCOp.S_BITCMP1_B32: st.scc = int((s0 & (1 << (s1 & 0x1f)))!=0)
-  elif op == SOPCOp.S_CMP_EQ_U64: st.scc = int(rsrc64(st, inst.ssrc0, 0) == rsrc64(st, inst.ssrc1, 0))
-  elif op == SOPCOp.S_CMP_LG_U64: st.scc = int(rsrc64(st, inst.ssrc0, 0) != rsrc64(st, inst.ssrc1, 0))
+  elif op == SOPCOp.S_CMP_EQ_U64: st.scc = int(st.rsrc64(inst.ssrc0, 0) == st.rsrc64(inst.ssrc1, 0))
+  elif op == SOPCOp.S_CMP_LG_U64: st.scc = int(st.rsrc64(inst.ssrc0, 0) != st.rsrc64(inst.ssrc1, 0))
   else: raise NotImplementedError(f"SOPC op {op}")
   return 0
 
 def exec_sopk(st: WaveState, inst: SOPK) -> int:
   op, sdst, simm = inst.op, inst.sdst, sext(inst.simm16, 16)
-  s0 = rsgpr(st, sdst)
+  s0 = st.rsgpr(sdst)
   CMPK: dict[int, bool] = {SOPKOp.S_CMPK_EQ_I32: sext(s0,32)==simm, SOPKOp.S_CMPK_LG_I32: sext(s0,32)!=simm, SOPKOp.S_CMPK_GT_I32: sext(s0,32)>simm,
           SOPKOp.S_CMPK_GE_I32: sext(s0,32)>=simm, SOPKOp.S_CMPK_LT_I32: sext(s0,32)<simm, SOPKOp.S_CMPK_LE_I32: sext(s0,32)<=simm,
           SOPKOp.S_CMPK_EQ_U32: s0==(simm&0xffff), SOPKOp.S_CMPK_LG_U32: s0!=(simm&0xffff), SOPKOp.S_CMPK_GT_U32: s0>(simm&0xffff),
           SOPKOp.S_CMPK_GE_U32: s0>=(simm&0xffff), SOPKOp.S_CMPK_LT_U32: s0<(simm&0xffff), SOPKOp.S_CMPK_LE_U32: s0<=(simm&0xffff)}
-  if op == SOPKOp.S_MOVK_I32: wsgpr(st, sdst, simm & 0xffffffff)
+  if op == SOPKOp.S_MOVK_I32: st.wsgpr(sdst, simm & 0xffffffff)
   elif op in CMPK: st.scc = int(CMPK[op])
-  elif op == SOPKOp.S_ADDK_I32: r = sext(s0,32) + simm; st.scc = int(((s0>>31)==((simm>>15)&1)) and ((s0>>31)!=((r>>31)&1))); wsgpr(st, sdst, r & 0xffffffff)
-  elif op == SOPKOp.S_MULK_I32: wsgpr(st, sdst, (sext(s0,32) * simm) & 0xffffffff)
+  elif op == SOPKOp.S_ADDK_I32: r = sext(s0,32) + simm; st.scc = int(((s0>>31)==((simm>>15)&1)) and ((s0>>31)!=((r>>31)&1))); st.wsgpr(sdst, r & 0xffffffff)
+  elif op == SOPKOp.S_MULK_I32: st.wsgpr(sdst, (sext(s0,32) * simm) & 0xffffffff)
   elif 24 <= op <= 31: pass  # Wait counter ops (S_WAITCNT_*) are NOPs in synchronous emulator
   else: raise NotImplementedError(f"SOPK op {op}")
   return 0
@@ -255,15 +250,15 @@ def exec_sopp(st: WaveState, inst: SOPP) -> int:
 
 def exec_smem(st: WaveState, inst: SMEM) -> int:
   op, sbase, sdata, offset, soff_idx = inst.op, inst.sbase * 2, inst.sdata, sext(inst.offset, 21), inst.soffset
-  addr = (rsgpr64(st, sbase) + offset + (rsrc(st, soff_idx, 0) if soff_idx not in (NULL_REG, 0x7f) else 0)) & 0xffffffffffffffff
+  addr = (st.rsgpr64(sbase) + offset + (st.rsrc(soff_idx, 0) if soff_idx not in (NULL_REG, 0x7f) else 0)) & 0xffffffffffffffff
   LOADS: dict[int, int] = {SMEMOp.S_LOAD_B32: 1, SMEMOp.S_LOAD_B64: 2, SMEMOp.S_LOAD_B128: 4, SMEMOp.S_LOAD_B256: 8, SMEMOp.S_LOAD_B512: 16}
   if op in LOADS:
-    for i in range(LOADS[op]): wsgpr(st, sdata + i, mem_read(addr + i * 4, 4))
+    for i in range(LOADS[op]): st.wsgpr(sdata + i, mem_read(addr + i * 4, 4))
   else: raise NotImplementedError(f"SMEM op {op}")
   return 0
 
 def exec_vop1(st: WaveState, inst: VOP1, lane: int) -> None:
-  op, s0, vdst = inst.op, rsrc(st, inst.src0, lane), inst.vdst
+  op, s0, vdst = inst.op, st.rsrc(inst.src0, lane), inst.vdst
   V = st.vgpr[lane]
   SIMPLE: dict[int, Any] = {
     VOP1Op.V_NOP: lambda: None, VOP1Op.V_MOV_B32: lambda: s0,
@@ -286,14 +281,14 @@ def exec_vop1(st: WaveState, inst: VOP1, lane: int) -> None:
     VOP1Op.V_CVT_F32_UBYTE2: lambda: i32(float((s0 >> 16) & 0xff)), VOP1Op.V_CVT_F32_UBYTE3: lambda: i32(float((s0 >> 24) & 0xff))}
   if op == VOP1Op.V_READFIRSTLANE_B32:
     first = (st.exec_mask & 0xffffffff).bit_length() - 1 if st.exec_mask else 0
-    wsgpr(st, vdst, rsrc(st, inst.src0, first) if inst.src0 >= 256 else s0)
+    st.wsgpr(vdst, st.rsrc(inst.src0, first) if inst.src0 >= 256 else s0)
   elif op in SIMPLE:
     r = SIMPLE[op]()
     if r is not None: V[vdst] = r
   else: raise NotImplementedError(f"VOP1 op {op}")
 
 def exec_vop2(st: WaveState, inst: VOP2, lane: int) -> None:
-  op, s0, s1, vdst = inst.op, rsrc(st, inst.src0, lane), st.vgpr[lane][inst.vsrc1], inst.vdst
+  op, s0, s1, vdst = inst.op, st.rsrc(inst.src0, lane), st.vgpr[lane][inst.vsrc1], inst.vdst
   V = st.vgpr[lane]
   ARITH: dict[int, Any] = {
     VOP2Op.V_ADD_F32: lambda: i32(f32(s0)+f32(s1)), VOP2Op.V_SUB_F32: lambda: i32(f32(s0)-f32(s1)),
@@ -327,7 +322,7 @@ def vop3_mod(val: int, neg: int, abs_: int, idx: int) -> int:
 
 def exec_vop3(st: WaveState, inst: VOP3, lane: int) -> None:
   op, src0, src1, src2, vdst, neg, abs_ = inst.op, inst.src0, inst.src1, inst.src2, inst.vdst, inst.neg, getattr(inst, 'abs', 0)
-  s0, s1, s2 = vop3_mod(rsrc(st, src0, lane), neg, abs_, 0), vop3_mod(rsrc(st, src1, lane), neg, abs_, 1), vop3_mod(rsrc(st, src2, lane), neg, abs_, 2)
+  s0, s1, s2 = vop3_mod(st.rsrc(src0, lane), neg, abs_, 0), vop3_mod(st.rsrc(src1, lane), neg, abs_, 1), vop3_mod(st.rsrc(src2, lane), neg, abs_, 2)
   V = st.vgpr[lane]
   SIMPLE: dict[int, Any] = {
     VOP3Op.V_MOV_B32: lambda: s0, VOP3Op.V_ADD_F32: lambda: i32(f32(s0)+f32(s1)), VOP3Op.V_SUB_F32: lambda: i32(f32(s0)-f32(s1)),
@@ -362,10 +357,10 @@ def exec_vop3(st: WaveState, inst: VOP3, lane: int) -> None:
     VOP3Op.V_LSHL_OR_B32: lambda: ((s0<<(s1&0x1f))|s2)&0xffffffff}
   if op == VOP3Op.V_BFE_U32: off, wd = s1 & 0x1f, s2 & 0x1f; V[vdst] = (s0 >> off) & ((1 << wd) - 1) if wd else 0
   elif op == VOP3Op.V_BFE_I32: off, wd = s1 & 0x1f, s2 & 0x1f; V[vdst] = sext((s0 >> off) & ((1 << wd) - 1), wd) & 0xffffffff if wd else 0
-  elif op == VOP3Op.V_CNDMASK_B32: mask = rsrc(st, src2, lane) if src2 < 256 else st.vcc; V[vdst] = s1 if (mask >> lane) & 1 else s0
-  elif op == VOP3Op.V_LSHLREV_B64: r = (rsrc64(st, src1, lane) << (s0 & 0x3f)) & 0xffffffffffffffff; V[vdst] = r & 0xffffffff; V[vdst+1] = (r >> 32) & 0xffffffff
-  elif op == VOP3Op.V_LSHRREV_B64: r = rsrc64(st, src1, lane) >> (s0 & 0x3f); V[vdst] = r & 0xffffffff; V[vdst+1] = (r >> 32) & 0xffffffff
-  elif op == VOP3Op.V_ASHRREV_I64: r = sext(rsrc64(st, src1, lane), 64) >> (s0 & 0x3f); V[vdst] = r & 0xffffffff; V[vdst+1] = (r >> 32) & 0xffffffff
+  elif op == VOP3Op.V_CNDMASK_B32: mask = st.rsrc(src2, lane) if src2 < 256 else st.vcc; V[vdst] = s1 if (mask >> lane) & 1 else s0
+  elif op == VOP3Op.V_LSHLREV_B64: r = (st.rsrc64(src1, lane) << (s0 & 0x3f)) & 0xffffffffffffffff; V[vdst] = r & 0xffffffff; V[vdst+1] = (r >> 32) & 0xffffffff
+  elif op == VOP3Op.V_LSHRREV_B64: r = st.rsrc64(src1, lane) >> (s0 & 0x3f); V[vdst] = r & 0xffffffff; V[vdst+1] = (r >> 32) & 0xffffffff
+  elif op == VOP3Op.V_ASHRREV_I64: r = sext(st.rsrc64(src1, lane), 64) >> (s0 & 0x3f); V[vdst] = r & 0xffffffff; V[vdst+1] = (r >> 32) & 0xffffffff
   elif op == VOP3Op.V_DIV_FMAS_F32:
     # V_DIV_FMAS_F32: D.f32 = S0.f32 * S1.f32 + S2.f32, with optional scaling based on VCC
     # When VCC=1, this indicates scaling was applied by DIV_SCALE and needs to be reversed
@@ -392,42 +387,42 @@ def vopc_compare(op: int, s0: int, s1: int) -> bool:
 def exec_vopc_vop3(st: WaveState, op: int, s0: int, s1: int, sdst: int, lane: int) -> None:
   result, is_cmpx = vopc_compare(op, s0, s1), op >= 128
   if sdst == VCC_LO: st.vcc = (st.vcc & ~(1 << lane)) | (int(result) << lane)
-  else: wsgpr(st, sdst, (rsgpr(st, sdst) & ~(1 << lane)) | (int(result) << lane))
+  else: st.wsgpr(sdst, (st.rsgpr(sdst) & ~(1 << lane)) | (int(result) << lane))
   if is_cmpx: st.exec_mask = (st.exec_mask & ~(1 << lane)) | (int(result) << lane)
 
 def exec_vopc(st: WaveState, inst: VOPC, lane: int) -> None:
-  op, s0, s1 = inst.op, rsrc(st, inst.src0, lane), st.vgpr[lane][inst.vsrc1]
+  op, s0, s1 = inst.op, st.rsrc(inst.src0, lane), st.vgpr[lane][inst.vsrc1]
   result, is_cmpx = vopc_compare(op, s0, s1), op >= 128
   st.vcc = (st.vcc & ~(1 << lane)) | (int(result) << lane)
   if is_cmpx: st.exec_mask = (st.exec_mask & ~(1 << lane)) | (int(result) << lane)
 
 def exec_vop3sd(st: WaveState, inst: VOP3SD, lane: int) -> None:
   op, src0, src1, src2, vdst, sdst, neg = inst.op, inst.src0, inst.src1, inst.src2, inst.vdst, inst.sdst, inst.neg
-  s0, s1, s2 = rsrc(st, src0, lane), rsrc(st, src1, lane), rsrc(st, src2, lane)
+  s0, s1, s2 = st.rsrc(src0, lane), st.rsrc(src1, lane), st.rsrc(src2, lane)
   if (neg >> 0) & 1: s0 = i32(-f32(s0))
   if (neg >> 1) & 1: s1 = i32(-f32(s1))
   if (neg >> 2) & 1: s2 = i32(-f32(s2))
   V = st.vgpr[lane]
-  if op == VOP3SDOp.V_ADD_CO_U32: r = s0 + s1; V[vdst] = r & 0xffffffff; wsgpr(st, sdst, (rsgpr(st, sdst) & ~(1 << lane)) | (int(r >= 0x100000000) << lane))
-  elif op == VOP3SDOp.V_SUB_CO_U32: V[vdst] = (s0 - s1) & 0xffffffff; wsgpr(st, sdst, (rsgpr(st, sdst) & ~(1 << lane)) | (int(s1 > s0) << lane))
-  elif op == VOP3SDOp.V_SUBREV_CO_U32: V[vdst] = (s1 - s0) & 0xffffffff; wsgpr(st, sdst, (rsgpr(st, sdst) & ~(1 << lane)) | (int(s0 > s1) << lane))
-  elif op == VOP3SDOp.V_ADD_CO_CI_U32: cin = (rsgpr(st, src2) >> lane) & 1 if src2 < 256 else (st.vcc >> lane) & 1; r = s0 + s1 + cin; V[vdst] = r & 0xffffffff; wsgpr(st, sdst, (rsgpr(st, sdst) & ~(1 << lane)) | (int(r >= 0x100000000) << lane))
-  elif op == VOP3SDOp.V_MAD_U64_U32: s2_64 = s2 | (rsrc(st, src2 + 1, lane) << 32); r = s0 * s1 + s2_64; V[vdst] = r & 0xffffffff; V[vdst+1] = (r >> 32) & 0xffffffff
-  elif op == VOP3SDOp.V_MAD_I64_I32: s2_64 = sext(s2 | (rsrc(st, src2 + 1, lane) << 32), 64); r = (sext(s0,32) * sext(s1,32) + s2_64) & 0xffffffffffffffff; V[vdst] = r & 0xffffffff; V[vdst+1] = (r >> 32) & 0xffffffff
+  if op == VOP3SDOp.V_ADD_CO_U32: r = s0 + s1; V[vdst] = r & 0xffffffff; st.wsgpr(sdst, (st.rsgpr(sdst) & ~(1 << lane)) | (int(r >= 0x100000000) << lane))
+  elif op == VOP3SDOp.V_SUB_CO_U32: V[vdst] = (s0 - s1) & 0xffffffff; st.wsgpr(sdst, (st.rsgpr(sdst) & ~(1 << lane)) | (int(s1 > s0) << lane))
+  elif op == VOP3SDOp.V_SUBREV_CO_U32: V[vdst] = (s1 - s0) & 0xffffffff; st.wsgpr(sdst, (st.rsgpr(sdst) & ~(1 << lane)) | (int(s0 > s1) << lane))
+  elif op == VOP3SDOp.V_ADD_CO_CI_U32: cin = (st.rsgpr(src2) >> lane) & 1 if src2 < 256 else (st.vcc >> lane) & 1; r = s0 + s1 + cin; V[vdst] = r & 0xffffffff; st.wsgpr(sdst, (st.rsgpr(sdst) & ~(1 << lane)) | (int(r >= 0x100000000) << lane))
+  elif op == VOP3SDOp.V_MAD_U64_U32: s2_64 = s2 | (st.rsrc(src2 + 1, lane) << 32); r = s0 * s1 + s2_64; V[vdst] = r & 0xffffffff; V[vdst+1] = (r >> 32) & 0xffffffff
+  elif op == VOP3SDOp.V_MAD_I64_I32: s2_64 = sext(s2 | (st.rsrc(src2 + 1, lane) << 32), 64); r = (sext(s0,32) * sext(s1,32) + s2_64) & 0xffffffffffffffff; V[vdst] = r & 0xffffffff; V[vdst+1] = (r >> 32) & 0xffffffff
   elif op == VOP3SDOp.V_DIV_SCALE_F32:
     # V_DIV_SCALE_F32: D.f32 = Special(S0.f32, S1.f32, S2.f32)
     # For normal-range values, just pass through without scaling
     # S2 selects which operand to return: if S2==S0 return S0, if S2==S1 return S1
     V[vdst] = s0 if s0 == s2 else s1
     st.vcc = (st.vcc & ~(1 << lane)) | ((1 if s0 == s2 else 0) << lane)
-  elif op == VOP3SDOp.V_DIV_SCALE_F64: V[vdst] = s0; V[vdst+1] = rsrc(st, src0 + 1, lane); st.vcc = (st.vcc & ~(1 << lane)) | ((1 if s0 == s2 else 0) << lane)
+  elif op == VOP3SDOp.V_DIV_SCALE_F64: V[vdst] = s0; V[vdst+1] = st.rsrc(src0 + 1, lane); st.vcc = (st.vcc & ~(1 << lane)) | ((1 if s0 == s2 else 0) << lane)
   else: raise NotImplementedError(f"VOP3SD op {op}")
 
 def exec_flat(st: WaveState, inst: FLAT, lane: int) -> None:
   op, addr_reg, data_reg, vdst, offset, saddr = inst.op, inst.addr, inst.data, inst.vdst, sext(inst.offset, 13), inst.saddr
   V = st.vgpr[lane]
   addr = V[addr_reg] | (V[addr_reg+1] << 32)
-  addr = (rsgpr64(st, saddr) + V[addr_reg] + offset) & 0xffffffffffffffff if saddr not in (NULL_REG, 0x7f) else (addr + offset) & 0xffffffffffffffff
+  addr = (st.rsgpr64(saddr) + V[addr_reg] + offset) & 0xffffffffffffffff if saddr not in (NULL_REG, 0x7f) else (addr + offset) & 0xffffffffffffffff
   if op in FLAT_LOAD:
     info = FLAT_LOAD[op]; cnt, sz = info[0], info[1]; sign = info[2] if len(info) > 2 else None
     for i in range(cnt):
@@ -451,7 +446,7 @@ def exec_ds(st: WaveState, inst: DS, lane: int, lds: bytearray) -> None:
   else: raise NotImplementedError(f"DS op {op}")
 
 def exec_vopd_op(st: WaveState, op: int, src0: int, src1: int, dst: int, lane: int) -> None:
-  s0, s1, V, lit = rsrc(st, src0, lane), st.vgpr[lane][src1], st.vgpr[lane], st.literal
+  s0, s1, V, lit = st.rsrc(src0, lane), st.vgpr[lane][src1], st.vgpr[lane], st.literal
   OPS: dict[int, Any] = {
     VOPDOp.V_DUAL_FMAC_F32: lambda: i32(f32(s0)*f32(s1)+f32(V[dst])), VOPDOp.V_DUAL_MUL_F32: lambda: i32(f32(s0)*f32(s1)),
     VOPDOp.V_DUAL_FMAAK_F32: lambda: i32(f32(s0)*f32(s1)+f32(lit)), VOPDOp.V_DUAL_FMAMK_F32: lambda: i32(f32(s0)*f32(lit)+f32(s1)),
@@ -482,7 +477,7 @@ def exec_wave(program: Program, st: WaveState, lds: bytearray, n_lanes: int, wg_
     t = wave_start + lane
     return (t % lx, (t // lx) % ly, t // (lx * ly))
   while st.pc < len(program):
-    inst, _ = program[st.pc]
+    inst = program[st.pc]
     st.literal = inst._literal or 0
     if type(inst) in SCALAR:
       if DEBUG >= 6: _trace(inst, wg_id, get_tid(0), 0, bool(st.exec_mask & 1))
@@ -506,7 +501,7 @@ def exec_workgroup(program: Program, workgroup_id: tuple[int, int, int], local_s
     n_lanes = min(WAVE_SIZE, total_threads - wave_start)
     st = WaveState()
     st.exec_mask = (1 << n_lanes) - 1
-    wsgpr64(st, 0, args_ptr)
+    st.wsgpr64(0, args_ptr)
     gx, gy, gz = workgroup_id
     if dispatch_dim >= 3: st.sgpr[13], st.sgpr[14], st.sgpr[15] = gx, gy, gz
     elif dispatch_dim == 2: st.sgpr[14], st.sgpr[15] = gx, gy
@@ -515,7 +510,7 @@ def exec_workgroup(program: Program, workgroup_id: tuple[int, int, int], local_s
       tid = wave_start + i
       st.vgpr[i][0] = tid if local_size == (lx, 1, 1) else ((tid // (lx * ly)) << 20) | (((tid // lx) % ly) << 10) | (tid % lx)
     waves.append((st, n_lanes, wave_start))
-  has_barrier = any(isinstance(inst, SOPP) and inst.op == SOPPOp.S_BARRIER for inst, _ in program)
+  has_barrier = any(isinstance(inst, SOPP) and inst.op == SOPPOp.S_BARRIER for inst in program)
   for _ in range(2 if has_barrier else 1):
     for st, n_lanes, wave_start in waves: exec_wave(program, st, lds, n_lanes, workgroup_id, local_size, wave_start)
 

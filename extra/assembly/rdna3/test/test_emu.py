@@ -5,7 +5,6 @@ import struct
 import math
 from extra.assembly.rdna3.emu import (
   WaveState, decode_program, exec_wave, exec_workgroup, run_asm,
-  write_sgpr, write_sgpr64, read_sgpr, read_sgpr64,
   f32_to_bits, bits_to_f32, sign_ext, WAVE_SIZE, set_valid_mem_ranges
 )
 from extra.assembly.rdna3.autogen import *

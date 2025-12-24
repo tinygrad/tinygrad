@@ -107,6 +107,10 @@ class Inst:
   @classmethod
   def _size(cls) -> int: return 4 if issubclass(cls, Inst32) else 8
 
+  def size(self) -> int:
+    """Size in bytes including literal if present."""
+    return self._size() + (4 if self._literal is not None else 0)
+
   @classmethod
   def from_int(cls, word: int):
     inst = object.__new__(cls)
