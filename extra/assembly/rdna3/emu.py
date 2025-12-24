@@ -288,20 +288,18 @@ def exec_sopk(st: WaveState, inst: SOPK) -> int:
     st.wsgpr(inst.sdst, r & 0xffffffff); return 0
   raise NotImplementedError(f"SOPK op {op}")
 
+# SOPP branch conditions: fn(scc, vcc, exec) -> bool
+SOPP_CBRANCH = {
+  SOPPOp.S_CBRANCH_SCC0: lambda s, v, e: s == 0, SOPPOp.S_CBRANCH_SCC1: lambda s, v, e: s == 1,
+  SOPPOp.S_CBRANCH_VCCZ: lambda s, v, e: v == 0, SOPPOp.S_CBRANCH_VCCNZ: lambda s, v, e: v != 0,
+  SOPPOp.S_CBRANCH_EXECZ: lambda s, v, e: e == 0, SOPPOp.S_CBRANCH_EXECNZ: lambda s, v, e: e != 0,
+}
 def exec_sopp(st: WaveState, inst: SOPP) -> int:
-  simm = sext(inst.simm16, 16)
-  match inst.op:
-    case SOPPOp.S_ENDPGM:          return -1
-    case SOPPOp.S_BARRIER:         return -2
-    case SOPPOp.S_NOP:             return 0
-    case SOPPOp.S_BRANCH:          return simm
-    case SOPPOp.S_CBRANCH_SCC0:    return simm if st.scc == 0 else 0
-    case SOPPOp.S_CBRANCH_SCC1:    return simm if st.scc == 1 else 0
-    case SOPPOp.S_CBRANCH_VCCZ:    return simm if st.vcc == 0 else 0
-    case SOPPOp.S_CBRANCH_VCCNZ:   return simm if st.vcc != 0 else 0
-    case SOPPOp.S_CBRANCH_EXECZ:   return simm if st.exec_mask == 0 else 0
-    case SOPPOp.S_CBRANCH_EXECNZ:  return simm if st.exec_mask != 0 else 0
-    case _: return 0
+  if inst.op == SOPPOp.S_ENDPGM: return -1
+  if inst.op == SOPPOp.S_BARRIER: return -2
+  if inst.op == SOPPOp.S_BRANCH: return sext(inst.simm16, 16)
+  if (fn := SOPP_CBRANCH.get(inst.op)): return sext(inst.simm16, 16) if fn(st.scc, st.vcc, st.exec_mask) else 0
+  return 0
 
 SMEM_LOAD = {SMEMOp.S_LOAD_B32: 1, SMEMOp.S_LOAD_B64: 2, SMEMOp.S_LOAD_B128: 4, SMEMOp.S_LOAD_B256: 8, SMEMOp.S_LOAD_B512: 16}
 def exec_smem(st: WaveState, inst: SMEM) -> int:
@@ -335,7 +333,7 @@ def exec_vop1(st: WaveState, inst: VOP1, lane: int) -> None:
     st.wsgpr(inst.vdst, st.rsrc(inst.src0, first) if inst.src0 >= 256 else st.rsrc(inst.src0, lane)); return
   st.vgpr[lane][inst.vdst] = VOP1_OPS[inst.op](st.rsrc(inst.src0, lane))
 
-# VOP2 table: op -> fn(s0, s1) -> result (2-arg ops)
+# VOP2 table: op -> fn(s0, s1) -> result
 VOP2_OPS = {
   VOP2Op.V_ADD_F32: lambda a, b: i32(f32(a)+f32(b)), VOP2Op.V_SUB_F32: lambda a, b: i32(f32(a)-f32(b)),
   VOP2Op.V_SUBREV_F32: lambda a, b: i32(f32(b)-f32(a)), VOP2Op.V_MUL_F32: lambda a, b: i32(f32(a)*f32(b)),
