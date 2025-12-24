@@ -43,14 +43,13 @@ def encode_src(val) -> int:
   if isinstance(val, float): return FLOAT_ENC.get(val, 255)
   return 128 + val if isinstance(val, int) and 0 <= val <= 64 else 192 + (-val) if isinstance(val, int) and -16 <= val <= -1 else 255
 
+SPECIAL_DEC = {106: "vcc_lo", 107: "vcc_hi", 124: "null", 125: "m0", 126: "exec_lo", 127: "exec_hi", **{v: str(k) for k, v in FLOAT_ENC.items()}}
 def decode_src(val: int) -> str:
   if val <= 105: return f"s{val}"
-  if 106 <= val <= 107: return ["vcc_lo", "vcc_hi"][val - 106]
+  if val in SPECIAL_DEC: return SPECIAL_DEC[val]
   if 108 <= val <= 123: return f"ttmp{val - 108}"
-  if 124 <= val <= 127: return ["null", "m0", "exec_lo", "exec_hi"][val - 124]
   if 128 <= val <= 192: return str(val - 128)
   if 193 <= val <= 208: return str(-(val - 192))
-  if val in (fd := {v: str(k) for k, v in FLOAT_ENC.items()}): return fd[val]
   if 256 <= val <= 511: return f"v{val - 256}"
   return "lit" if val == 255 else f"?{val}"
 
@@ -105,13 +104,11 @@ class Inst:
   @classmethod
   def from_bytes(cls, data: bytes):
     inst = cls.from_int(int.from_bytes(data[:cls._size()], 'little'))
-    # check for literal: either 255 in src field, or VOP2 FMAAK/FMAMK opcodes (always have literal)
     op_val = inst._values.get('op', 0)
     has_literal = cls.__name__ == 'VOP2' and op_val in (44, 45, 55, 56)  # VOP2 FMAMK/FMAAK
     for n in SRC_FIELDS:
       if n in inst._values and isinstance(inst._values[n], RawImm) and inst._values[n].val == 255: has_literal = True
-    if has_literal and len(data) >= cls._size() + 4:
-      inst._literal = int.from_bytes(data[cls._size():cls._size()+4], 'little')
+    if has_literal and len(data) >= cls._size() + 4: inst._literal = int.from_bytes(data[cls._size():cls._size()+4], 'little')
     return inst
 
   def __repr__(self): return f"{self.__class__.__name__}({', '.join(f'{k}={v}' for k, v in self._values.items())})"
@@ -125,17 +122,14 @@ class Inst:
     except (ValueError, KeyError): op_name = f"op_{op_val}"
     def fmt(n, v):
       v = v.val if isinstance(v, RawImm) else v
-      if n in SRC_FIELDS:
-        if v == 255: return f"0x{self._literal:x}" if getattr(self, '_literal', None) else "0xff"
-        return decode_src(v)
+      if n in SRC_FIELDS: return f"0x{self._literal:x}" if v == 255 and getattr(self, '_literal', None) else decode_src(v) if v != 255 else "0xff"
       if n in ('sdst', 'vdst'): return f"{'s' if n == 'sdst' else 'v'}{v}"
       return f"v{v}" if n == 'vsrc1' else f"0x{v:x}" if n == 'simm16' else str(v)
     ops = [fmt(n, self._values.get(n, 0)) for n in self._fields if n not in ('encoding', 'op')]
-    # FMAAK/FMAMK (VOP2 only): insert literal in correct position
     if self.__class__.__name__ == 'VOP2' and getattr(self, '_literal', None) and op_val in (44, 45, 55, 56):
       lit_str = f"0x{self._literal:x}"
-      if op_val in (44, 55): ops.insert(2, lit_str)  # FMAMK: vdst, src0, LIT, vsrc1
-      else: ops.append(lit_str)  # FMAAK: vdst, src0, vsrc1, LIT
+      if op_val in (44, 55): ops.insert(2, lit_str)
+      else: ops.append(lit_str)
     return f"{op_name} {', '.join(ops)}" if ops else op_name
 
 class Inst32(Inst): pass
@@ -153,24 +147,19 @@ def decode_waitcnt(val: int) -> tuple[int, int, int]:
 # *** assembler ***
 SPECIAL_REGS = {'vcc_lo': RawImm(106), 'vcc_hi': RawImm(107), 'null': RawImm(124), 'off': RawImm(124), 'm0': RawImm(125), 'exec_lo': RawImm(126), 'exec_hi': RawImm(127), 'scc': RawImm(253)}
 FLOAT_CONSTS = {'0.5': 0.5, '-0.5': -0.5, '1.0': 1.0, '-1.0': -1.0, '2.0': 2.0, '-2.0': -2.0, '4.0': 4.0, '-4.0': -4.0}
-REG_MAP = {'s': SGPR, 'v': VGPR, 't': TTMP, 'ttmp': TTMP}
 
 def parse_operand(op: str) -> tuple:
   op = op.strip().lower()
-  # handle neg prefix for combined -|v0| case
   neg = op.startswith('-') and not op[1:2].isdigit(); op = op[1:] if neg else op
-  # handle abs modifier
-  abs_ = (op.startswith('|') and op.endswith('|')) or (op.startswith('abs(') and op.endswith(')'))
+  abs_ = op.startswith('|') and op.endswith('|') or op.startswith('abs(') and op.endswith(')')
   op = op[1:-1] if op.startswith('|') else op[4:-1] if op.startswith('abs(') else op
-  # literals (neg is part of value, not modifier)
   if op in FLOAT_CONSTS: return (FLOAT_CONSTS[op], neg, abs_)
-  if m := re.match(r'^-?\d+$', op): return (int(op), neg, abs_)
-  # hex literals: small values (0-255) are raw immediates, larger need literal dword
+  if re.match(r'^-?\d+$', op): return (int(op), neg, abs_)
   if m := re.match(r'^-?0x([0-9a-f]+)$', op):
     v = -int(m.group(1), 16) if op.startswith('-') else int(m.group(1), 16)
     return (RawImm(v) if 0 <= v <= 255 else v, neg, abs_)
-  # registers
   if op in SPECIAL_REGS: return (SPECIAL_REGS[op], neg, abs_)
+  REG_MAP = {'s': SGPR, 'v': VGPR, 't': TTMP, 'ttmp': TTMP}
   if m := re.match(r'^([svt](?:tmp)?)\[(\d+):(\d+)\]$', op): return (REG_MAP[m.group(1)][int(m.group(2)):int(m.group(3))+1], neg, abs_)
   if m := re.match(r'^([svt](?:tmp)?)(\d+)$', op): return (REG_MAP[m.group(1)][int(m.group(2))], neg, abs_)
   raise ValueError(f"cannot parse operand: {op}")
@@ -192,16 +181,13 @@ def asm(text: str) -> Inst:
     else: current += ch
   if current.strip(): operands.append(current.strip())
   parsed = [parse_operand(op) for op in operands]
-  values, neg_bits, abs_bits = [p[0] for p in parsed], sum((1 << (i-1)) for i, p in enumerate(parsed) if i > 0 and p[1]), sum((1 << (i-1)) for i, p in enumerate(parsed) if i > 0 and p[2])
-  # FMAAK/FMAMK: 4th operand is literal
-  lit = None
-  if mnemonic in ('v_fmaak_f32', 'v_fmaak_f16') and len(values) == 4:
-    lit = values[3].val if isinstance(values[3], RawImm) else values[3]; values = values[:3]
-  elif mnemonic in ('v_fmamk_f32', 'v_fmamk_f16') and len(values) == 4:
-    lit = values[2].val if isinstance(values[2], RawImm) else values[2]; values = [values[0], values[1], values[3]]
-  # prefer _e32 (VOP1/2) when no modifiers, otherwise use VOP3
-  suffixes = ['_e32', ''] if not (neg_bits or abs_bits or clamp) else ['', '_e32']
-  for suffix in suffixes:
+  values = [p[0] for p in parsed]
+  neg_bits = sum((1 << (i-1)) for i, p in enumerate(parsed) if i > 0 and p[1])
+  abs_bits = sum((1 << (i-1)) for i, p in enumerate(parsed) if i > 0 and p[2])
+  lit, get_lit = None, lambda v: v.val if isinstance(v, RawImm) else v
+  if mnemonic in ('v_fmaak_f32', 'v_fmaak_f16') and len(values) == 4: lit, values = get_lit(values[3]), values[:3]
+  elif mnemonic in ('v_fmamk_f32', 'v_fmamk_f16') and len(values) == 4: lit, values = get_lit(values[2]), [values[0], values[1], values[3]]
+  for suffix in (['_e32', ''] if not (neg_bits or abs_bits or clamp) else ['', '_e32']):
     if hasattr(autogen, name := mnemonic.replace('.', '_') + suffix):
       inst = getattr(autogen, name)(*values, literal=lit)
       if neg_bits and 'neg' in inst._fields: inst._values['neg'] = neg_bits
