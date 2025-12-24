@@ -334,7 +334,10 @@ class IntelRenderer(OpenCLRenderer):
 class MetalRenderer(CStyleLanguage):
   device = "METAL"
   shared_max = 32768
-  def __init__(self): self.tensor_cores = tc.metal if hasattr(os, 'uname') and os.uname().machine == "arm64" else []
+  def __init__(self):
+    self.tensor_cores = tc.metal if hasattr(os, 'uname') and os.uname().machine == "arm64" else []
+    from tinygrad.runtime.ops_metal import MetalCompiler
+    self.compiler = MetalCompiler()
 
   # language options
   kernel_typedef = "kernel void"

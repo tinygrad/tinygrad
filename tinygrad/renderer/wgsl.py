@@ -1,6 +1,7 @@
 from tinygrad.dtype import DType, PtrDType, dtypes, AddrSpace
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.cstyle import CStyleLanguage, base_rewrite, extra_pm
+from tinygrad.device import Compiler
 from tinygrad.helpers import strip_parens
 
 def sign_extend(val:UOp, sext_am:int):
@@ -46,6 +47,7 @@ class WGSLRenderer(CStyleLanguage):
   global_max = (65535, 65535, 65535)
   local_max = (256, 256, 64)
   code_for_workitem = {"g": lambda x: f"i32(gindex.{'xyz'[int(x)]})", "l": lambda x: f"i32(lindex.{'xyz'[int(x)]})"}
+  def __init__(self): self.compiler = Compiler()
   extra_matcher = wgsl_matcher
   supports_float4 = False
   barrier = "workgroupBarrier();"

@@ -213,10 +213,14 @@ class PythonProgram:
         i += 1
     return time.perf_counter() - st
 
+class PythonCompiler(Compiler):
+  def compile(self, src:str) -> bytes: return base64.b64decode(src)
+
 class PythonRenderer(Renderer):
   device = "PYTHON"
   code_for_op = python_alu
   def __init__(self):
+    self.compiler = PythonCompiler()
     match cast(str, EMULATE.value):
       case "METAL": self.device, self.tensor_cores = "METAL", tc.metal
       case "AMD": self.device, self.tensor_cores = "AMD", tc.amd_rdna3
@@ -235,9 +239,6 @@ class PythonRenderer(Renderer):
     lops = [(u.op, u.dtype, [uops.index(v) for v in u.src if u.op is not Ops.SPECIAL], u.arg) for u in uops]
     return base64.b64encode(pickle.dumps(lops)).decode()
 
-class PythonCompiler(Compiler):
-  def compile(self, src:str) -> bytes: return base64.b64decode(src)
-
 class PythonAllocator(Allocator['PythonDevice']):
   def _alloc(self, size, options): return memoryview(bytearray(size))
   def _copyin(self, dest, src:memoryview): dest[:] = src
@@ -245,4 +246,4 @@ class PythonAllocator(Allocator['PythonDevice']):
 
 class PythonDevice(Compiled):
   def __init__(self, device:str):
-    super().__init__(device, PythonAllocator(self), CompilerSet([CompilerPair(PythonRenderer, PythonCompiler)]), PythonProgram)
+    super().__init__(device, PythonAllocator(self), CompilerSet([CompilerPair(PythonRenderer, None)]), PythonProgram)
