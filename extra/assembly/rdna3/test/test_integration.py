@@ -157,5 +157,111 @@ class TestIntegration(unittest.TestCase):
         return
     self.fail("Could not find s_mov_b32 in disassembly")
 
+@unittest.skipUnless(get_amd_toolchain(), "AMD toolchain not available")
+class TestTinygradIntegration(unittest.TestCase):
+  """Test that we can parse disassembled tinygrad kernels."""
+
+  def test_simple_add_kernel(self):
+    """Generate a simple add kernel from tinygrad and verify disassembly."""
+    from tinygrad import Tensor
+    from tinygrad.codegen import get_program
+    from tinygrad.renderer.cstyle import AMDRenderer
+    from tinygrad.runtime.support.compiler_amd import HIPCompiler
+    from tinygrad.uop.ops import Ops
+
+    # Create a computation that generates a real kernel
+    a = Tensor([1.0, 2.0, 3.0, 4.0]).realize()
+    b = Tensor([5.0, 6.0, 7.0, 8.0]).realize()
+    c = a + b
+
+    # Get schedule and find SINK
+    schedule = c.schedule()
+    sink_items = [si for si in schedule if si.ast.op == Ops.SINK]
+    self.assertTrue(len(sink_items) > 0, "No SINK in schedule")
+
+    # Generate program
+    renderer = AMDRenderer('gfx1100')
+    prg = get_program(sink_items[0].ast, renderer)
+    self.assertIsNotNone(prg.src)
+
+    # Compile and disassemble
+    compiler = HIPCompiler('gfx1100')
+    lib = compiler.compile(prg.src)
+    raw_disasm = disassemble(lib)
+    instrs = parse_disassembly(raw_disasm)
+
+    # Verify we got some instructions
+    self.assertTrue(len(instrs) > 0, "No instructions in disassembly")
+    # Should have an endpgm
+    self.assertTrue(any('s_endpgm' in i for i in instrs), "Missing s_endpgm")
+
+  def test_matmul_kernel(self):
+    """Generate a matmul kernel and verify disassembly has expected patterns."""
+    from tinygrad import Tensor
+    from tinygrad.codegen import get_program
+    from tinygrad.renderer.cstyle import AMDRenderer
+    from tinygrad.runtime.support.compiler_amd import HIPCompiler
+    from tinygrad.uop.ops import Ops
+
+    # Create a small matmul
+    a = Tensor.rand(4, 4).realize()
+    b = Tensor.rand(4, 4).realize()
+    c = a @ b
+
+    # Get schedule
+    schedule = c.schedule()
+    sink_items = [si for si in schedule if si.ast.op == Ops.SINK]
+    self.assertTrue(len(sink_items) > 0)
+
+    # Generate and compile
+    renderer = AMDRenderer('gfx1100')
+    prg = get_program(sink_items[0].ast, renderer)
+    compiler = HIPCompiler('gfx1100')
+    lib = compiler.compile(prg.src)
+    raw_disasm = disassemble(lib)
+    instrs = parse_disassembly(raw_disasm)
+
+    # Matmul should have multiply and add instructions
+    has_mul = any('mul' in i.lower() for i in instrs)
+    has_add = any('add' in i.lower() for i in instrs)
+    self.assertTrue(has_mul or has_add, "Matmul should have mul/add ops")
+
+  def test_disasm_to_bytes_roundtrip(self):
+    """Parse disassembled instructions and verify we can re-encode some of them."""
+    from tinygrad import Tensor
+    from tinygrad.codegen import get_program
+    from tinygrad.renderer.cstyle import AMDRenderer
+    from tinygrad.runtime.support.compiler_amd import HIPCompiler
+    from tinygrad.uop.ops import Ops
+
+    # Simple kernel
+    a = Tensor([1.0, 2.0, 3.0, 4.0]).realize()
+    b = (a * 2.0)
+
+    schedule = b.schedule()
+    sink_items = [si for si in schedule if si.ast.op == Ops.SINK]
+    if not sink_items: return  # skip if no kernel
+
+    renderer = AMDRenderer('gfx1100')
+    prg = get_program(sink_items[0].ast, renderer)
+    compiler = HIPCompiler('gfx1100')
+    lib = compiler.compile(prg.src)
+    raw_disasm = disassemble(lib)
+
+    # Find s_endpgm and verify we can encode it
+    for line in raw_disasm.splitlines():
+      if 's_endpgm' in line and '//' in line:
+        # Extract bytes from comment
+        comment = line.split('//')[1].strip()
+        hex_str = comment.split(':')[1].strip()
+        amd_bytes = bytes.fromhex(hex_str)[::-1]
+
+        # Our encoding
+        our_inst = s_endpgm()
+        our_bytes = our_inst.to_bytes()
+
+        self.assertEqual(our_bytes, amd_bytes, f"s_endpgm mismatch: ours={our_bytes.hex()} AMD={amd_bytes.hex()}")
+        return
+
 if __name__ == "__main__":
   unittest.main()
