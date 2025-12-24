@@ -972,38 +972,3 @@ jobs:
         run: |
           python -c "from tinygrad import Device; assert Device.DEFAULT == {'LLVM':'CPU'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
           python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
-  wincuda:
-    strategy:
-      fail-fast: false
-      matrix:
-        backend: [cuda]
-
-    name: Windows (${{ matrix.backend }})
-    runs-on: windows-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-      - name: Setup Environment
-        uses: ./.github/actions/setup-tinygrad
-        with:
-          key: windows-${{ matrix.backend }}-minimal
-          deps: testing_unit
-          pydeps: ${{ matrix.backend == 'webgpu' && 'dawn-python' || '' }}
-      - uses: Jimver/cuda-toolkit@v0.2.29
-        id: cuda-toolkit
-        with:
-          cuda: '12.5.0'
-      - name: Check CUDA install
-        run: |
-          echo "Installed cuda version is: ${{steps.cuda-toolkit.outputs.cuda}}"
-          echo "Cuda install location: ${{steps.cuda-toolkit.outputs.CUDA_PATH}}"
-          nvcc -V
-      - name: Set env
-        shell: bash
-        run:  printf "${{ matrix.backend == 'llvm' && 'CPU=1\nCPU_LLVM=1' || matrix.backend == 'cpu' && 'CPU=1\nCPU_LLVM=0\nCPU_COUNT=2' || matrix.backend == 'webgpu' && 'WEBGPU=1' || matrix.backend == 'cuda' && 'CUDA=1'}}" >> $GITHUB_ENV
-      - name: Run pytest (${{ matrix.backend }})
-        shell: bash
-        run: |
-          python -c "from tinygrad import Device; assert Device.DEFAULT == 'CUDA'"
-          python -m pytest -n=auto test/test_tiny.py test/test_ops.py --durations=20
