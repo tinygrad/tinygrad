@@ -63,8 +63,7 @@ def sext(v: int, b: int) -> int: return v - (1 << b) if v & (1 << (b-1)) else v
 def clz(x: int) -> int: return 32 - x.bit_length() if x else 32
 def cls(x: int) -> int: x &= 0xffffffff; return 31 if x in (0, 0xffffffff) else clz(~x & 0xffffffff if x >> 31 else x) - 1
 
-# aliases for test compatibility
-bits_to_f32, f32_to_bits, sign_ext = f32, i32, sext
+
 
 @dataclass
 class WaveState:
@@ -109,6 +108,10 @@ class WaveState:
 
   def rsrc64(self, v: int, lane: int) -> int:
     return self.rsrc(v, lane) | ((self.rsrc(v+1, lane) if v <= 105 or 256 <= v <= 511 else 0) << 32)
+
+  def set_vcc_lane(self, lane: int, val: bool) -> None: self.vcc = (self.vcc & ~(1 << lane)) | (int(val) << lane)
+  def set_exec_lane(self, lane: int, val: bool) -> None: self.exec_mask = (self.exec_mask & ~(1 << lane)) | (int(val) << lane)
+  def set_sgpr_lane(self, reg: int, lane: int, val: bool) -> None: self.wsgpr(reg, (self.rsgpr(reg) & ~(1 << lane)) | (int(val) << lane))
 
 def decode_format(word: int) -> tuple[type[Inst] | None, bool]:
   hi2 = (word >> 30) & 0x3
@@ -309,9 +312,9 @@ def exec_vop2(st: WaveState, inst: VOP2, lane: int) -> None:
   if op == VOP2Op.V_CNDMASK_B32: V[vdst] = s1 if (st.vcc >> lane) & 1 else s0
   elif op == VOP2Op.V_FMAMK_F32: V[vdst] = i32(f32(s0) * f32(st.literal) + f32(s1))
   elif op == VOP2Op.V_FMAAK_F32: V[vdst] = i32(f32(s0) * f32(s1) + f32(st.literal))
-  elif op == VOP2Op.V_ADD_CO_CI_U32: cin = (st.vcc >> lane) & 1; r = s0 + s1 + cin; st.vcc = (st.vcc & ~(1 << lane)) | (int(r >= 0x100000000) << lane); V[vdst] = r & 0xffffffff
-  elif op == VOP2Op.V_SUB_CO_CI_U32: bin_ = (st.vcc >> lane) & 1; r = s0 - s1 - bin_; st.vcc = (st.vcc & ~(1 << lane)) | (int(s1 + bin_ > s0) << lane); V[vdst] = r & 0xffffffff
-  elif op == VOP2Op.V_SUBREV_CO_CI_U32: bin_ = (st.vcc >> lane) & 1; r = s1 - s0 - bin_; st.vcc = (st.vcc & ~(1 << lane)) | (int(s0 + bin_ > s1) << lane); V[vdst] = r & 0xffffffff
+  elif op == VOP2Op.V_ADD_CO_CI_U32: cin = (st.vcc >> lane) & 1; r = s0 + s1 + cin; st.set_vcc_lane(lane, r >= 0x100000000); V[vdst] = r & 0xffffffff
+  elif op == VOP2Op.V_SUB_CO_CI_U32: bin_ = (st.vcc >> lane) & 1; r = s0 - s1 - bin_; st.set_vcc_lane(lane, s1 + bin_ > s0); V[vdst] = r & 0xffffffff
+  elif op == VOP2Op.V_SUBREV_CO_CI_U32: bin_ = (st.vcc >> lane) & 1; r = s1 - s0 - bin_; st.set_vcc_lane(lane, s0 + bin_ > s1); V[vdst] = r & 0xffffffff
   elif op in ARITH: V[vdst] = ARITH[op]()
   else: raise NotImplementedError(f"VOP2 op {op}")
 
@@ -386,15 +389,15 @@ def vopc_compare(op: int, s0: int, s1: int) -> bool:
 
 def exec_vopc_vop3(st: WaveState, op: int, s0: int, s1: int, sdst: int, lane: int) -> None:
   result, is_cmpx = vopc_compare(op, s0, s1), op >= 128
-  if sdst == VCC_LO: st.vcc = (st.vcc & ~(1 << lane)) | (int(result) << lane)
-  else: st.wsgpr(sdst, (st.rsgpr(sdst) & ~(1 << lane)) | (int(result) << lane))
-  if is_cmpx: st.exec_mask = (st.exec_mask & ~(1 << lane)) | (int(result) << lane)
+  if sdst == VCC_LO: st.set_vcc_lane(lane, result)
+  else: st.set_sgpr_lane(sdst, lane, result)
+  if is_cmpx: st.set_exec_lane(lane, result)
 
 def exec_vopc(st: WaveState, inst: VOPC, lane: int) -> None:
   op, s0, s1 = inst.op, st.rsrc(inst.src0, lane), st.vgpr[lane][inst.vsrc1]
   result, is_cmpx = vopc_compare(op, s0, s1), op >= 128
-  st.vcc = (st.vcc & ~(1 << lane)) | (int(result) << lane)
-  if is_cmpx: st.exec_mask = (st.exec_mask & ~(1 << lane)) | (int(result) << lane)
+  st.set_vcc_lane(lane, result)
+  if is_cmpx: st.set_exec_lane(lane, result)
 
 def exec_vop3sd(st: WaveState, inst: VOP3SD, lane: int) -> None:
   op, src0, src1, src2, vdst, sdst, neg = inst.op, inst.src0, inst.src1, inst.src2, inst.vdst, inst.sdst, inst.neg
@@ -403,10 +406,10 @@ def exec_vop3sd(st: WaveState, inst: VOP3SD, lane: int) -> None:
   if (neg >> 1) & 1: s1 = i32(-f32(s1))
   if (neg >> 2) & 1: s2 = i32(-f32(s2))
   V = st.vgpr[lane]
-  if op == VOP3SDOp.V_ADD_CO_U32: r = s0 + s1; V[vdst] = r & 0xffffffff; st.wsgpr(sdst, (st.rsgpr(sdst) & ~(1 << lane)) | (int(r >= 0x100000000) << lane))
-  elif op == VOP3SDOp.V_SUB_CO_U32: V[vdst] = (s0 - s1) & 0xffffffff; st.wsgpr(sdst, (st.rsgpr(sdst) & ~(1 << lane)) | (int(s1 > s0) << lane))
-  elif op == VOP3SDOp.V_SUBREV_CO_U32: V[vdst] = (s1 - s0) & 0xffffffff; st.wsgpr(sdst, (st.rsgpr(sdst) & ~(1 << lane)) | (int(s0 > s1) << lane))
-  elif op == VOP3SDOp.V_ADD_CO_CI_U32: cin = (st.rsgpr(src2) >> lane) & 1 if src2 < 256 else (st.vcc >> lane) & 1; r = s0 + s1 + cin; V[vdst] = r & 0xffffffff; st.wsgpr(sdst, (st.rsgpr(sdst) & ~(1 << lane)) | (int(r >= 0x100000000) << lane))
+  if op == VOP3SDOp.V_ADD_CO_U32: r = s0 + s1; V[vdst] = r & 0xffffffff; st.set_sgpr_lane(sdst, lane, r >= 0x100000000)
+  elif op == VOP3SDOp.V_SUB_CO_U32: V[vdst] = (s0 - s1) & 0xffffffff; st.set_sgpr_lane(sdst, lane, s1 > s0)
+  elif op == VOP3SDOp.V_SUBREV_CO_U32: V[vdst] = (s1 - s0) & 0xffffffff; st.set_sgpr_lane(sdst, lane, s0 > s1)
+  elif op == VOP3SDOp.V_ADD_CO_CI_U32: cin = (st.rsgpr(src2) >> lane) & 1 if src2 < 256 else (st.vcc >> lane) & 1; r = s0 + s1 + cin; V[vdst] = r & 0xffffffff; st.set_sgpr_lane(sdst, lane, r >= 0x100000000)
   elif op == VOP3SDOp.V_MAD_U64_U32: s2_64 = s2 | (st.rsrc(src2 + 1, lane) << 32); r = s0 * s1 + s2_64; V[vdst] = r & 0xffffffff; V[vdst+1] = (r >> 32) & 0xffffffff
   elif op == VOP3SDOp.V_MAD_I64_I32: s2_64 = sext(s2 | (st.rsrc(src2 + 1, lane) << 32), 64); r = (sext(s0,32) * sext(s1,32) + s2_64) & 0xffffffffffffffff; V[vdst] = r & 0xffffffff; V[vdst+1] = (r >> 32) & 0xffffffff
   elif op == VOP3SDOp.V_DIV_SCALE_F32:
@@ -414,8 +417,8 @@ def exec_vop3sd(st: WaveState, inst: VOP3SD, lane: int) -> None:
     # For normal-range values, just pass through without scaling
     # S2 selects which operand to return: if S2==S0 return S0, if S2==S1 return S1
     V[vdst] = s0 if s0 == s2 else s1
-    st.vcc = (st.vcc & ~(1 << lane)) | ((1 if s0 == s2 else 0) << lane)
-  elif op == VOP3SDOp.V_DIV_SCALE_F64: V[vdst] = s0; V[vdst+1] = st.rsrc(src0 + 1, lane); st.vcc = (st.vcc & ~(1 << lane)) | ((1 if s0 == s2 else 0) << lane)
+    st.set_vcc_lane(lane, s0 == s2)
+  elif op == VOP3SDOp.V_DIV_SCALE_F64: V[vdst] = s0; V[vdst+1] = st.rsrc(src0 + 1, lane); st.set_vcc_lane(lane, s0 == s2)
   else: raise NotImplementedError(f"VOP3SD op {op}")
 
 def exec_flat(st: WaveState, inst: FLAT, lane: int) -> None:
@@ -423,6 +426,7 @@ def exec_flat(st: WaveState, inst: FLAT, lane: int) -> None:
   V = st.vgpr[lane]
   addr = V[addr_reg] | (V[addr_reg+1] << 32)
   addr = (st.rsgpr64(saddr) + V[addr_reg] + offset) & 0xffffffffffffffff if saddr not in (NULL_REG, 0x7f) else (addr + offset) & 0xffffffffffffffff
+  if DEBUG >= 7: print(f"  FLAT lane={lane} addr=0x{addr:x} (v{addr_reg}=0x{V[addr_reg]:x}, v{addr_reg+1}=0x{V[addr_reg+1]:x})")
   if op in FLAT_LOAD:
     info = FLAT_LOAD[op]; cnt, sz = info[0], info[1]; sign = info[2] if len(info) > 2 else None
     for i in range(cnt):

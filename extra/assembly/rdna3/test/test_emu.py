@@ -5,7 +5,7 @@ import struct
 import math
 from extra.assembly.rdna3.emu import (
   WaveState, decode_program, exec_wave, exec_workgroup, run_asm,
-  f32_to_bits, bits_to_f32, sign_ext, WAVE_SIZE, set_valid_mem_ranges
+  i32, f32, sext, WAVE_SIZE, set_valid_mem_ranges
 )
 from extra.assembly.rdna3.autogen import *
 
@@ -203,39 +203,39 @@ class TestVectorOps(unittest.TestCase):
 
   def test_v_add_f32(self):
     kernel = make_store_kernel([
-      v_mov_b32_e32(v[1], f32_to_bits(1.5)),
-      v_mov_b32_e32(v[2], f32_to_bits(2.5)),
+      v_mov_b32_e32(v[1], i32(1.5)),
+      v_mov_b32_e32(v[2], i32(2.5)),
       v_add_f32_e32(v[1], v[1], v[2]),
     ])
     out = run_kernel(kernel, n_threads=1)
-    self.assertEqual(bits_to_f32(out[0]), 4.0)
+    self.assertEqual(f32(out[0]), 4.0)
 
   def test_v_mul_f32(self):
     kernel = make_store_kernel([
-      v_mov_b32_e32(v[1], f32_to_bits(3.0)),
-      v_mov_b32_e32(v[2], f32_to_bits(4.0)),
+      v_mov_b32_e32(v[1], i32(3.0)),
+      v_mov_b32_e32(v[2], i32(4.0)),
       v_mul_f32_e32(v[1], v[1], v[2]),
     ])
     out = run_kernel(kernel, n_threads=1)
-    self.assertEqual(bits_to_f32(out[0]), 12.0)
+    self.assertEqual(f32(out[0]), 12.0)
 
   def test_v_max_f32(self):
     kernel = make_store_kernel([
-      v_mov_b32_e32(v[1], f32_to_bits(3.0)),
-      v_mov_b32_e32(v[2], f32_to_bits(5.0)),
+      v_mov_b32_e32(v[1], i32(3.0)),
+      v_mov_b32_e32(v[2], i32(5.0)),
       v_max_f32_e32(v[1], v[1], v[2]),
     ])
     out = run_kernel(kernel, n_threads=1)
-    self.assertEqual(bits_to_f32(out[0]), 5.0)
+    self.assertEqual(f32(out[0]), 5.0)
 
   def test_v_min_f32(self):
     kernel = make_store_kernel([
-      v_mov_b32_e32(v[1], f32_to_bits(3.0)),
-      v_mov_b32_e32(v[2], f32_to_bits(5.0)),
+      v_mov_b32_e32(v[1], i32(3.0)),
+      v_mov_b32_e32(v[2], i32(5.0)),
       v_min_f32_e32(v[1], v[1], v[2]),
     ])
     out = run_kernel(kernel, n_threads=1)
-    self.assertEqual(bits_to_f32(out[0]), 3.0)
+    self.assertEqual(f32(out[0]), 3.0)
 
 class TestThreading(unittest.TestCase):
   def test_thread_id(self):
@@ -358,35 +358,35 @@ class TestMemory(unittest.TestCase):
 class TestFloatOps(unittest.TestCase):
   def test_v_rcp_f32(self):
     kernel = make_store_kernel([
-      v_mov_b32_e32(v[1], f32_to_bits(4.0)),
+      v_mov_b32_e32(v[1], i32(4.0)),
       v_rcp_f32_e32(v[1], v[1]),
     ])
     out = run_kernel(kernel, n_threads=1)
-    self.assertAlmostEqual(bits_to_f32(out[0]), 0.25, places=5)
+    self.assertAlmostEqual(f32(out[0]), 0.25, places=5)
 
   def test_v_sqrt_f32(self):
     kernel = make_store_kernel([
-      v_mov_b32_e32(v[1], f32_to_bits(16.0)),
+      v_mov_b32_e32(v[1], i32(16.0)),
       v_sqrt_f32_e32(v[1], v[1]),
     ])
     out = run_kernel(kernel, n_threads=1)
-    self.assertAlmostEqual(bits_to_f32(out[0]), 4.0, places=5)
+    self.assertAlmostEqual(f32(out[0]), 4.0, places=5)
 
   def test_v_floor_f32(self):
     kernel = make_store_kernel([
-      v_mov_b32_e32(v[1], f32_to_bits(3.7)),
+      v_mov_b32_e32(v[1], i32(3.7)),
       v_floor_f32_e32(v[1], v[1]),
     ])
     out = run_kernel(kernel, n_threads=1)
-    self.assertEqual(bits_to_f32(out[0]), 3.0)
+    self.assertEqual(f32(out[0]), 3.0)
 
   def test_v_ceil_f32(self):
     kernel = make_store_kernel([
-      v_mov_b32_e32(v[1], f32_to_bits(3.2)),
+      v_mov_b32_e32(v[1], i32(3.2)),
       v_ceil_f32_e32(v[1], v[1]),
     ])
     out = run_kernel(kernel, n_threads=1)
-    self.assertEqual(bits_to_f32(out[0]), 4.0)
+    self.assertEqual(f32(out[0]), 4.0)
 
   def test_v_cvt_f32_i32(self):
     kernel = make_store_kernel([
@@ -394,11 +394,11 @@ class TestFloatOps(unittest.TestCase):
       v_cvt_f32_i32_e32(v[1], v[1]),
     ])
     out = run_kernel(kernel, n_threads=1)
-    self.assertEqual(bits_to_f32(out[0]), 42.0)
+    self.assertEqual(f32(out[0]), 42.0)
 
   def test_v_cvt_i32_f32(self):
     kernel = make_store_kernel([
-      v_mov_b32_e32(v[1], f32_to_bits(42.9)),
+      v_mov_b32_e32(v[1], i32(42.9)),
       v_cvt_i32_f32_e32(v[1], v[1]),
     ])
     out = run_kernel(kernel, n_threads=1)
@@ -408,13 +408,13 @@ class TestVOP3(unittest.TestCase):
   def test_v_fma_f32(self):
     """Test fused multiply-add: a*b + c"""
     kernel = make_store_kernel([
-      v_mov_b32_e32(v[1], f32_to_bits(2.0)),
-      v_mov_b32_e32(v[2], f32_to_bits(3.0)),
-      v_mov_b32_e32(v[4], f32_to_bits(4.0)),
+      v_mov_b32_e32(v[1], i32(2.0)),
+      v_mov_b32_e32(v[2], i32(3.0)),
+      v_mov_b32_e32(v[4], i32(4.0)),
       v_fma_f32(v[1], v[1], v[2], v[4]),  # 2*3+4 = 10
     ])
     out = run_kernel(kernel, n_threads=1)
-    self.assertEqual(bits_to_f32(out[0]), 10.0)
+    self.assertEqual(f32(out[0]), 10.0)
 
   def test_v_add3_u32(self):
     """Test 3-operand add."""
@@ -430,23 +430,23 @@ class TestVOP3(unittest.TestCase):
   def test_v_neg_modifier(self):
     """Test VOP3 negation modifier."""
     kernel = make_store_kernel([
-      v_mov_b32_e32(v[1], f32_to_bits(5.0)),
-      v_mov_b32_e32(v[2], f32_to_bits(3.0)),
+      v_mov_b32_e32(v[1], i32(5.0)),
+      v_mov_b32_e32(v[2], i32(3.0)),
       # v_add_f32 with neg on src1: 5 + (-3) = 2
       v_add_f32(v[1], v[1], v[2], neg=0b010),
     ])
     out = run_kernel(kernel, n_threads=1)
-    self.assertEqual(bits_to_f32(out[0]), 2.0)
+    self.assertEqual(f32(out[0]), 2.0)
 
   def test_v_ldexp_f32(self):
     """Regression test: V_LDEXP_F32 used by exp()."""
     kernel = make_store_kernel([
-      v_mov_b32_e32(v[1], f32_to_bits(1.5)),
+      v_mov_b32_e32(v[1], i32(1.5)),
       v_mov_b32_e32(v[2], 3),  # exponent
       v_ldexp_f32(v[1], v[1], v[2]),  # 1.5 * 2^3 = 12.0
     ])
     out = run_kernel(kernel, n_threads=1)
-    self.assertEqual(bits_to_f32(out[0]), 12.0)
+    self.assertEqual(f32(out[0]), 12.0)
 
   def test_v_xad_u32(self):
     """Regression test: V_XAD_U32 (multiply-add) used by matmul address calculation."""
@@ -473,20 +473,20 @@ class TestVOP3(unittest.TestCase):
   def test_v_sqrt_f32_negative(self):
     """Regression test: V_SQRT_F32 should return NaN for negative inputs, not 0."""
     kernel = make_store_kernel([
-      v_mov_b32_e32(v[1], f32_to_bits(-1.0)),
+      v_mov_b32_e32(v[1], i32(-1.0)),
       v_sqrt_f32(v[1], v[1]),
     ])
     out = run_kernel(kernel, n_threads=1)
-    self.assertTrue(math.isnan(bits_to_f32(out[0])))
+    self.assertTrue(math.isnan(f32(out[0])))
 
   def test_v_rsq_f32_negative(self):
     """Regression test: V_RSQ_F32 should return NaN for negative inputs, not inf."""
     kernel = make_store_kernel([
-      v_mov_b32_e32(v[1], f32_to_bits(-1.0)),
+      v_mov_b32_e32(v[1], i32(-1.0)),
       v_rsq_f32(v[1], v[1]),
     ])
     out = run_kernel(kernel, n_threads=1)
-    self.assertTrue(math.isnan(bits_to_f32(out[0])))
+    self.assertTrue(math.isnan(f32(out[0])))
 
 class TestVOPD(unittest.TestCase):
   def test_vopd_add_nc_u32(self):
