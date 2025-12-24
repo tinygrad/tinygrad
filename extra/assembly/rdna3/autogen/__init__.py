@@ -1562,6 +1562,25 @@ class VOPCOp(IntEnum):
   V_CMPX_CLASS_F32 = 254
   V_CMPX_CLASS_F64 = 255
 
+class VOPDOp(IntEnum):
+  V_DUAL_FMAC_F32 = 0
+  V_DUAL_FMAAK_F32 = 1
+  V_DUAL_FMAMK_F32 = 2
+  V_DUAL_MUL_F32 = 3
+  V_DUAL_ADD_F32 = 4
+  V_DUAL_SUB_F32 = 5
+  V_DUAL_SUBREV_F32 = 6
+  V_DUAL_MUL_DX9_ZERO_F32 = 7
+  V_DUAL_MOV_B32 = 8
+  V_DUAL_CNDMASK_B32 = 9
+  V_DUAL_MAX_F32 = 10
+  V_DUAL_MIN_F32 = 11
+  V_DUAL_DOT2ACC_F32_F16 = 12
+  V_DUAL_DOT2ACC_F32_BF16 = 13
+  V_DUAL_ADD_NC_U32 = 16
+  V_DUAL_LSHLREV_B32 = 17
+  V_DUAL_AND_B32 = 18
+
 # instruction formats
 class DPP8(Inst64):
   encoding = bits[31:26] == 0b11001101
@@ -1754,14 +1773,14 @@ class VOP3SD(Inst64):
 
 class VOPD(Inst64):
   encoding = bits[31:26] == 0b110010
-  srcx0 = bits[8:0]
-  vsrcx1 = bits[16:9]
-  opy = bits[21:17]
-  opx = bits[25:22]
-  srcy0 = bits[40:32]
-  vsrcy1 = bits[48:41]
-  vdsty = bits[55:49]
-  vdstx = bits[63:56]
+  srcx0:Src = bits[8:0]
+  vsrcx1:VGPR = bits[16:9]
+  opy:VOPDOp = bits[21:17]
+  opx:VOPDOp = bits[25:22]
+  srcy0:Src = bits[40:32]
+  vsrcy1:VGPR = bits[48:41]
+  vdsty:VGPR = bits[55:49]
+  vdstx:VGPR = bits[63:56]
 
 # instruction helpers
 ds_add_u32 = functools.partial(DS, DSOp.DS_ADD_U32)
@@ -3030,6 +3049,23 @@ v_mad_i64_i32 = functools.partial(VOP3SD, VOP3SDOp.V_MAD_I64_I32)
 v_add_co_u32 = functools.partial(VOP3SD, VOP3SDOp.V_ADD_CO_U32)
 v_sub_co_u32 = functools.partial(VOP3SD, VOP3SDOp.V_SUB_CO_U32)
 v_subrev_co_u32 = functools.partial(VOP3SD, VOP3SDOp.V_SUBREV_CO_U32)
+v_dual_fmac_f32 = functools.partial(VOPD, VOPDOp.V_DUAL_FMAC_F32)
+v_dual_fmaak_f32 = functools.partial(VOPD, VOPDOp.V_DUAL_FMAAK_F32)
+v_dual_fmamk_f32 = functools.partial(VOPD, VOPDOp.V_DUAL_FMAMK_F32)
+v_dual_mul_f32 = functools.partial(VOPD, VOPDOp.V_DUAL_MUL_F32)
+v_dual_add_f32 = functools.partial(VOPD, VOPDOp.V_DUAL_ADD_F32)
+v_dual_sub_f32 = functools.partial(VOPD, VOPDOp.V_DUAL_SUB_F32)
+v_dual_subrev_f32 = functools.partial(VOPD, VOPDOp.V_DUAL_SUBREV_F32)
+v_dual_mul_dx9_zero_f32 = functools.partial(VOPD, VOPDOp.V_DUAL_MUL_DX9_ZERO_F32)
+v_dual_mov_b32 = functools.partial(VOPD, VOPDOp.V_DUAL_MOV_B32)
+v_dual_cndmask_b32 = functools.partial(VOPD, VOPDOp.V_DUAL_CNDMASK_B32)
+v_dual_max_f32 = functools.partial(VOPD, VOPDOp.V_DUAL_MAX_F32)
+v_dual_min_f32 = functools.partial(VOPD, VOPDOp.V_DUAL_MIN_F32)
+v_dual_dot2acc_f32_f16 = functools.partial(VOPD, VOPDOp.V_DUAL_DOT2ACC_F32_F16)
+v_dual_dot2acc_f32_bf16 = functools.partial(VOPD, VOPDOp.V_DUAL_DOT2ACC_F32_BF16)
+v_dual_add_nc_u32 = functools.partial(VOPD, VOPDOp.V_DUAL_ADD_NC_U32)
+v_dual_lshlrev_b32 = functools.partial(VOPD, VOPDOp.V_DUAL_LSHLREV_B32)
+v_dual_and_b32 = functools.partial(VOPD, VOPDOp.V_DUAL_AND_B32)
 
 VCC_LO = SrcEnum.VCC_LO
 VCC_HI = SrcEnum.VCC_HI

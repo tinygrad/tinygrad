@@ -4,7 +4,8 @@ import re, pdfplumber
 
 FIELD_TYPES = {'SSRC0': 'SSrc', 'SSRC1': 'SSrc', 'SOFFSET': 'SSrc', 'SADDR': 'SSrc', 'SRC0': 'Src', 'SRC1': 'Src', 'SRC2': 'Src',
   'SDST': 'SGPR', 'SBASE': 'SGPR', 'SDATA': 'SGPR', 'SRSRC': 'SGPR', 'VDST': 'VGPR', 'VSRC1': 'VGPR', 'VDATA': 'VGPR',
-  'VADDR': 'VGPR', 'ADDR': 'VGPR', 'DATA': 'VGPR', 'DATA0': 'VGPR', 'DATA1': 'VGPR', 'SIMM16': 'SImm', 'OFFSET': 'Imm'}
+  'VADDR': 'VGPR', 'ADDR': 'VGPR', 'DATA': 'VGPR', 'DATA0': 'VGPR', 'DATA1': 'VGPR', 'SIMM16': 'SImm', 'OFFSET': 'Imm',
+  'OPX': 'VOPDOp', 'OPY': 'VOPDOp', 'SRCX0': 'Src', 'SRCY0': 'Src', 'VSRCX1': 'VGPR', 'VSRCY1': 'VGPR', 'VDSTX': 'VGPR', 'VDSTY': 'VGPR'}
 FIELD_ORDER = {'SOP2': ['op', 'sdst', 'ssrc0', 'ssrc1'], 'SOP1': ['op', 'sdst', 'ssrc0'], 'SOPC': ['op', 'ssrc0', 'ssrc1'],
   'SOPK': ['op', 'sdst', 'simm16'], 'SOPP': ['op', 'simm16'], 'SMEM': ['op', 'sdata', 'sbase', 'soffset', 'offset', 'glc', 'dlc'],
   'VOP1': ['op', 'vdst', 'src0'], 'VOP2': ['op', 'vdst', 'src0', 'vsrc1'], 'VOPC': ['op', 'src0', 'vsrc1'],
@@ -52,6 +53,11 @@ if __name__ == "__main__":
   for m in re.finditer(r'Table \d+\. (\w+) Opcodes(.*?)(?=Table \d+\.|\n\d+\.\d+\.\d+\.\s+\w+\s*\nDescription|$)', full_text, re.S):
     if ops := {int(x.group(1)): x.group(2) for x in re.finditer(r'(\d+)\s+([A-Z][A-Z0-9_]+)', m.group(2))}:
       enums[m.group(1) + "Op"] = ops
+
+  # parse VOPD Y opcode table (Y is superset of X, X just has smaller bitfield)
+  if m := re.search(r'Table \d+\. VOPD Y-Opcodes\n(.*?)(?=Table \d+\.|15\.\d)', full_text, re.S):
+    if ops := {int(x.group(1)): x.group(2) for x in re.finditer(r'(\d+)\s+(V_DUAL_\w+)', m.group(1))}:
+      enums["VOPDOp"] = ops
 
   # parse instruction formats
   formats: dict[str, list] = {}

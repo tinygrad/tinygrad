@@ -6,7 +6,7 @@ from typing import Any
 from extra.assembly.rdna3.lib import Inst32, Inst64, RawImm, bits
 from extra.assembly.rdna3.autogen import (
   SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, DS, FLAT, VOPD,
-  SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, DSOp, FLATOp, GLOBALOp
+  SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, DSOp, FLATOp, GLOBALOp, VOPDOp
 )
 
 class VOPC(Inst32):
@@ -424,27 +424,28 @@ def exec_ds(st: WaveState, inst: Inst, lane: int, lds: bytearray) -> None:
     for i in range(cnt): lds[addr+i*sz:addr+i*sz+sz] = (V[data0_reg + i] & ((1 << (sz * 8)) - 1)).to_bytes(sz, 'little')
   else: raise NotImplementedError(f"DS op {op}")
 
-VOPD_OP: dict[int, str] = {0: 'FMAC', 3: 'MUL', 4: 'ADD', 5: 'SUB', 6: 'SUBREV', 8: 'MOV', 9: 'CNDMASK', 10: 'MAX', 11: 'MIN',
-           13: 'ADD_U32', 14: 'LSHLREV', 15: 'AND', 16: 'LSHRREV', 17: 'ASHRREV', 18: 'OR'}
-
-def exec_vopd_op(st: WaveState, op: int, src0: int, src1: int, dst: int, lane: int) -> None:
+def exec_vopd_op(st: WaveState, op: VOPDOp, src0: int, src1: int, dst: int, lane: int) -> None:
   s0, s1, V = rsrc(st, src0, lane), st.vgpr[lane][src1], st.vgpr[lane]
-  name = VOPD_OP.get(op, '')
-  OPS: dict[str, Any] = {
-    'MOV': lambda: s0, 'ADD': lambda: i32(f32(s0)+f32(s1)), 'SUB': lambda: i32(f32(s0)-f32(s1)), 'SUBREV': lambda: i32(f32(s1)-f32(s0)),
-    'MUL': lambda: i32(f32(s0)*f32(s1)), 'MAX': lambda: i32(max(f32(s0),f32(s1))), 'MIN': lambda: i32(min(f32(s0),f32(s1))),
-    'FMAC': lambda: i32(f32(s0)*f32(s1)+f32(V[dst])), 'ADD_U32': lambda: (s0+s1)&0xffffffff,
-    'LSHLREV': lambda: (s1<<(s0&0x1f))&0xffffffff, 'LSHRREV': lambda: s1>>(s0&0x1f),
-    'ASHRREV': lambda: (sext(s1,32)>>(s0&0x1f))&0xffffffff, 'AND': lambda: s0&s1, 'OR': lambda: s0|s1,
-    'CNDMASK': lambda: s1 if (st.vcc>>lane)&1 else s0}
-  if name in OPS: V[dst] = OPS[name]()
+  if op == VOPDOp.V_DUAL_FMAC_F32: V[dst] = i32(f32(s0)*f32(s1)+f32(V[dst]))
+  elif op == VOPDOp.V_DUAL_MUL_F32: V[dst] = i32(f32(s0)*f32(s1))
+  elif op == VOPDOp.V_DUAL_ADD_F32: V[dst] = i32(f32(s0)+f32(s1))
+  elif op == VOPDOp.V_DUAL_SUB_F32: V[dst] = i32(f32(s0)-f32(s1))
+  elif op == VOPDOp.V_DUAL_SUBREV_F32: V[dst] = i32(f32(s1)-f32(s0))
+  elif op == VOPDOp.V_DUAL_MUL_DX9_ZERO_F32: V[dst] = i32(0.0 if f32(s0) == 0.0 or f32(s1) == 0.0 else f32(s0)*f32(s1))
+  elif op == VOPDOp.V_DUAL_MOV_B32: V[dst] = s0
+  elif op == VOPDOp.V_DUAL_CNDMASK_B32: V[dst] = s1 if (st.vcc >> lane) & 1 else s0
+  elif op == VOPDOp.V_DUAL_MAX_F32: V[dst] = i32(max(f32(s0), f32(s1)))
+  elif op == VOPDOp.V_DUAL_MIN_F32: V[dst] = i32(min(f32(s0), f32(s1)))
+  elif op == VOPDOp.V_DUAL_ADD_NC_U32: V[dst] = (s0 + s1) & 0xffffffff
+  elif op == VOPDOp.V_DUAL_LSHLREV_B32: V[dst] = (s1 << (s0 & 0x1f)) & 0xffffffff
+  elif op == VOPDOp.V_DUAL_AND_B32: V[dst] = s0 & s1
   else: raise NotImplementedError(f"VOPD op {op}")
 
 def exec_vopd(st: WaveState, inst: Inst, lane: int) -> None:
   opx, opy = get_field(inst, 'opx'), get_field(inst, 'opy')
   srcx0, vsrcx1, vdstx = get_field(inst, 'srcx0'), get_field(inst, 'vsrcx1'), get_field(inst, 'vdstx')
   srcy0, vsrcy1, vdsty_enc = get_field(inst, 'srcy0'), get_field(inst, 'vsrcy1'), get_field(inst, 'vdsty')
-  vdsty = vdsty_enc if opy in {13, 14, 15, 16, 17, 18} else vdsty_enc * 2 + 1 if vdstx % 2 == 0 else vdsty_enc * 2
+  vdsty = (vdsty_enc << 1) | ((vdstx & 1) ^ 1)
   exec_vopd_op(st, opx, srcx0, vsrcx1, vdstx, lane)
   exec_vopd_op(st, opy, srcy0, vsrcy1, vdsty, lane)
 

@@ -449,46 +449,47 @@ class TestVOP3(unittest.TestCase):
     self.assertEqual(out[0], 17)
 
 class TestVOPD(unittest.TestCase):
-  def test_vopd_lshrrev(self):
-    """Regression test: VOPD LSHRREV (op 16) was missing."""
+  def test_vopd_add_nc_u32(self):
+    """Test VOPD V_DUAL_ADD_NC_U32."""
     state = WaveState()
-    state.vgpr[0][1] = 0x100  # src value
-    state.vgpr[0][2] = 0
-    # VOPD with opx=8 (MOV), opy=16 (LSHRREV)
-    # This shifts V1 right by 4 and stores in the Y destination
-    kernel = VOPD(opx=8, srcx0=256+1, vsrcx1=0, vdstx=2,  # MOV: V2 = V1
-                  opy=16, srcy0=132, vsrcy1=1, vdsty=4).to_bytes()  # LSHRREV: V4 = V1 >> 4
+    state.vgpr[0][1] = 100
+    state.vgpr[0][2] = 50
+    # vdsty = (vdsty_enc << 1) | ((vdstx & 1) ^ 1), so for vdstx=3 (odd), vdsty_enc=2 gives vdsty=4
+    kernel = VOPD(opx=VOPDOp.V_DUAL_MOV_B32, srcx0=256+1, vsrcx1=0, vdstx=3,
+                  opy=VOPDOp.V_DUAL_ADD_NC_U32, srcy0=256+1, vsrcy1=2, vdsty=2).to_bytes()
     kernel += s_endpgm().to_bytes()
     prog = decode_program(kernel)
     exec_wave(prog, state, bytearray(65536), 1)
-    self.assertEqual(state.vgpr[0][2], 0x100)  # MOV result
-    self.assertEqual(state.vgpr[0][4], 0x10)   # 0x100 >> 4 = 0x10
+    self.assertEqual(state.vgpr[0][3], 100)  # MOV result
+    self.assertEqual(state.vgpr[0][4], 150)  # 100 + 50
 
-  def test_vopd_ashrrev(self):
-    """Regression test: VOPD ASHRREV (op 17) was missing."""
+  def test_vopd_lshlrev(self):
+    """Test VOPD V_DUAL_LSHLREV_B32."""
     state = WaveState()
-    state.vgpr[0][1] = 0xffffff00  # negative number in 2's complement
+    state.vgpr[0][1] = 0x10
     state.vgpr[0][2] = 0
-    kernel = VOPD(opx=8, srcx0=256+1, vsrcx1=0, vdstx=2,  # MOV: V2 = V1
-                  opy=17, srcy0=132, vsrcy1=1, vdsty=4).to_bytes()  # ASHRREV: V4 = V1 >> 4 (arithmetic)
+    # vdsty = (vdsty_enc << 1) | ((vdstx & 1) ^ 1), so for vdstx=3 (odd), vdsty_enc=2 gives vdsty=4
+    kernel = VOPD(opx=VOPDOp.V_DUAL_MOV_B32, srcx0=256+1, vsrcx1=0, vdstx=3,
+                  opy=VOPDOp.V_DUAL_LSHLREV_B32, srcy0=132, vsrcy1=1, vdsty=2).to_bytes()  # V4 = V1 << 4
     kernel += s_endpgm().to_bytes()
     prog = decode_program(kernel)
     exec_wave(prog, state, bytearray(65536), 1)
-    self.assertEqual(state.vgpr[0][2], 0xffffff00)
-    self.assertEqual(state.vgpr[0][4], 0xfffffff0)  # sign-extended shift
+    self.assertEqual(state.vgpr[0][3], 0x10)  # MOV result
+    self.assertEqual(state.vgpr[0][4], 0x100)  # 0x10 << 4 = 0x100
 
-  def test_vopd_or(self):
-    """Regression test: VOPD OR (op 18) was missing."""
+  def test_vopd_and(self):
+    """Test VOPD V_DUAL_AND_B32."""
     state = WaveState()
-    state.vgpr[0][1] = 0xf0
+    state.vgpr[0][1] = 0xff
     state.vgpr[0][2] = 0x0f
-    kernel = VOPD(opx=8, srcx0=256+1, vsrcx1=0, vdstx=3,  # MOV: V3 = V1
-                  opy=18, srcy0=256+1, vsrcy1=2, vdsty=4).to_bytes()  # OR: V4 = V1 | V2
+    # vdsty = (vdsty_enc << 1) | ((vdstx & 1) ^ 1), so for vdstx=3 (odd), vdsty_enc=2 gives vdsty=4
+    kernel = VOPD(opx=VOPDOp.V_DUAL_MOV_B32, srcx0=256+1, vsrcx1=0, vdstx=3,
+                  opy=VOPDOp.V_DUAL_AND_B32, srcy0=256+1, vsrcy1=2, vdsty=2).to_bytes()
     kernel += s_endpgm().to_bytes()
     prog = decode_program(kernel)
     exec_wave(prog, state, bytearray(65536), 1)
-    self.assertEqual(state.vgpr[0][3], 0xf0)
-    self.assertEqual(state.vgpr[0][4], 0xff)
+    self.assertEqual(state.vgpr[0][3], 0xff)
+    self.assertEqual(state.vgpr[0][4], 0x0f)  # 0xff & 0x0f = 0x0f
 
 class TestDecoder(unittest.TestCase):
   def test_vopd_literal_handling(self):
