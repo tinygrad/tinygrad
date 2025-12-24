@@ -1588,12 +1588,12 @@ class EXP(Inst64):
   encoding = bits[31:26] == 0b111110
   en = bits[3:0]
   target = bits[9:4]
-  done = bits[11]
-  row = bits[13]
   vsrc0 = bits[39:32]
   vsrc1:VGPR = bits[47:40]
   vsrc2 = bits[55:48]
   vsrc3 = bits[63:56]
+  done = bits[11]
+  row = bits[13]
 
 class FLAT(Inst64):
   encoding = bits[31:26] == 0b110111
@@ -1611,23 +1611,23 @@ class FLAT(Inst64):
 
 class MIMG(Inst64):
   encoding = bits[31:26] == 0b111100
-  nsa = bits[0]
+  op:MIMGOp = bits[25:18]
+  vdata:VGPR = bits[47:40]
+  vaddr:VGPR = bits[39:32]
+  srsrc:SGPR = bits[52:48]
+  ssamp = bits[62:58]
+  dmask = bits[11:8]
   dim = bits[4:2]
   unrm = bits[7]
-  dmask = bits[11:8]
-  slc = bits[12]
   dlc = bits[13]
   glc = bits[14]
+  slc = bits[12]
   r128 = bits[15]
   a16 = bits[16]
   d16 = bits[17]
-  op:MIMGOp = bits[25:18]
-  vaddr:VGPR = bits[39:32]
-  vdata:VGPR = bits[47:40]
-  srsrc:SGPR = bits[52:48]
   tfe = bits[53]
   lwe = bits[54]
-  ssamp = bits[62:58]
+  nsa = bits[0]
   addr1 = bits[71:64]
   addr2 = bits[79:72]
 

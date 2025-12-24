@@ -210,6 +210,29 @@ class TestAsm(unittest.TestCase):
     for t in tests:
       self.assertEqual(asm(t).to_bytes(), get_llvm_bytes(t), f"mismatch for: {t}")
 
+  def test_asm_vop3_modifiers(self):
+    """Test asm() with VOP3 modifiers (neg, abs, clamp)."""
+    import subprocess, re
+
+    def get_llvm_encoding(instr: str) -> str:
+      result = subprocess.run(['llvm-mc', '-triple=amdgcn', '-mcpu=gfx1100', '-show-encoding'],
+                              input=instr, capture_output=True, text=True)
+      if m := re.search(r'encoding:\s*\[(.*?)\]', result.stdout):
+        return m.group(1).replace('0x','').replace(',','').replace(' ','')
+      return ''
+
+    tests = [
+      'v_fma_f32 v0, -v1, v2, v3',       # neg on src0
+      'v_fma_f32 v0, v1, |v2|, v3',      # abs on src1
+      'v_fma_f32 v0, v1, v2, v3 clamp',  # clamp
+      'v_fma_f32 v0, -v1, |v2|, v3 clamp',  # all modifiers
+      'v_fma_f32 v0, -|v1|, v2, v3',     # neg+abs on same operand
+    ]
+    for t in tests:
+      our_hex = asm(t).to_bytes().hex()
+      llvm_hex = get_llvm_encoding(t)
+      self.assertEqual(our_hex, llvm_hex, f"mismatch for: {t}")
+
 @unittest.skipUnless(get_amd_toolchain(), "AMD toolchain not available")
 class TestTinygradIntegration(unittest.TestCase):
   """Test that we can parse disassembled tinygrad kernels."""

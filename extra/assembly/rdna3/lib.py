@@ -34,7 +34,10 @@ class RawImm:     # bypass inline constant encoding
 # *** source operand encoding ***
 FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
 FLOAT_DEC = {v: str(k) for k, v in FLOAT_ENC.items()}
-SRC_FIELDS = {'src0', 'src1', 'src2', 'ssrc0', 'ssrc1'}
+SRC_FIELDS = {'src0', 'src1', 'src2', 'ssrc0', 'ssrc1', 'soffset'}  # fields using full src encoding
+ALIGNED_SGPR_FIELDS = {'srsrc': 4, 'ssamp': 4, 'sbase': 2}  # fields with aligned SGPR (divisor)
+RAW_VGPR_FIELDS = {'vdata', 'vdst', 'vaddr', 'addr', 'data', 'data0', 'data1'}  # VGPR fields using raw idx
+RAW_SGPR_FIELDS = {'sdst', 'sdata'}  # SGPR fields using encoded idx (SGPR idx or TTMP 108+idx)
 
 def encode_src(val) -> int:
   if isinstance(val, SGPR): return val.idx
@@ -94,6 +97,9 @@ class Inst:
       if name == 'encoding' or name not in self._values: continue
       val = self._values[name]
       if isinstance(val, RawImm): val = val.val
+      elif name in ALIGNED_SGPR_FIELDS: val = val.idx // ALIGNED_SGPR_FIELDS[name] if isinstance(val, Reg) else val
+      elif name in RAW_VGPR_FIELDS: val = val.idx if isinstance(val, Reg) else val
+      elif name in RAW_SGPR_FIELDS: val = (108 + val.idx if isinstance(val, TTMP) else val.idx) if isinstance(val, Reg) else val
       elif isinstance(val, Reg) or (name in SRC_FIELDS and isinstance(val, (int, float))): val = encode_src(val)
       elif hasattr(val, 'value'): val = val.value
       word |= (val & ((1 << (bf.hi - bf.lo + 1)) - 1)) << bf.lo
@@ -172,45 +178,68 @@ import re
 SPECIAL_REGS = {'vcc_lo': RawImm(106), 'vcc_hi': RawImm(107), 'null': RawImm(124), 'off': RawImm(124), 'm0': RawImm(125), 'exec_lo': RawImm(126), 'exec_hi': RawImm(127), 'scc': RawImm(253)}
 FLOAT_CONSTS = {'0.5': 0.5, '-0.5': -0.5, '1.0': 1.0, '-1.0': -1.0, '2.0': 2.0, '-2.0': -2.0, '4.0': 4.0, '-4.0': -4.0}
 
-def parse_operand(op: str):
-  """Parse an operand string to register/immediate value."""
+def parse_operand(op: str) -> tuple:
+  """Parse an operand string to (value, neg, abs). Handles -v0, |v0|, -|v0|."""
   op = op.strip().lower()
-  if op in SPECIAL_REGS: return SPECIAL_REGS[op]
-  if op in FLOAT_CONSTS: return FLOAT_CONSTS[op]
-  if m := re.match(r'^s\[(\d+):(\d+)\]$', op): return SGPR[int(m.group(1)):int(m.group(2))+1]
-  if m := re.match(r'^s(\d+)$', op): return SGPR[int(m.group(1))]
-  if m := re.match(r'^v\[(\d+):(\d+)\]$', op): return VGPR[int(m.group(1)):int(m.group(2))+1]
-  if m := re.match(r'^v(\d+)$', op): return VGPR[int(m.group(1))]
-  if m := re.match(r'^ttmp\[(\d+):(\d+)\]$', op): return TTMP[int(m.group(1)):int(m.group(2))+1]
-  if m := re.match(r'^ttmp(\d+)$', op): return TTMP[int(m.group(1))]
-  if m := re.match(r'^0x([0-9a-f]+)$', op): return int(m.group(1), 16)
-  if m := re.match(r'^-?\d+$', op): return int(op)
+  neg, abs_ = False, False
+  if op.startswith('-'): neg, op = True, op[1:]
+  if op.startswith('|') and op.endswith('|'): abs_, op = True, op[1:-1]
+  if op.startswith('abs(') and op.endswith(')'): abs_, op = True, op[4:-1]
+  if op in SPECIAL_REGS: return (SPECIAL_REGS[op], neg, abs_)
+  if op in FLOAT_CONSTS: return (FLOAT_CONSTS[op], neg, abs_)
+  if m := re.match(r'^s\[(\d+):(\d+)\]$', op): return (SGPR[int(m.group(1)):int(m.group(2))+1], neg, abs_)
+  if m := re.match(r'^s(\d+)$', op): return (SGPR[int(m.group(1))], neg, abs_)
+  if m := re.match(r'^v\[(\d+):(\d+)\]$', op): return (VGPR[int(m.group(1)):int(m.group(2))+1], neg, abs_)
+  if m := re.match(r'^v(\d+)$', op): return (VGPR[int(m.group(1))], neg, abs_)
+  if m := re.match(r'^ttmp\[(\d+):(\d+)\]$', op): return (TTMP[int(m.group(1)):int(m.group(2))+1], neg, abs_)
+  if m := re.match(r'^ttmp(\d+)$', op): return (TTMP[int(m.group(1))], neg, abs_)
+  if m := re.match(r'^0x([0-9a-f]+)$', op): return (int(m.group(1), 16), neg, abs_)
+  if m := re.match(r'^-?\d+$', op): return (int(op), neg, abs_)
   raise ValueError(f"cannot parse operand: {op}")
 
+def split_operands(text: str) -> list[str]:
+  """Split operands respecting brackets and pipes. Returns list of operand strings."""
+  operands, current, depth, in_pipe = [], "", 0, False
+  for ch in text:
+    if ch == '[': depth += 1
+    elif ch == ']': depth -= 1
+    elif ch == '|': in_pipe = not in_pipe
+    if ch == ',' and depth == 0 and not in_pipe:
+      if current.strip(): operands.append(current.strip())
+      current = ""
+    else: current += ch
+  if current.strip(): operands.append(current.strip())
+  return operands
+
 def asm(text: str) -> Inst:
-  """Assemble a single instruction from text. Returns instruction object."""
+  """Assemble a single instruction from text. Returns instruction object.
+  Supports modifiers: -v0 (neg), |v0| (abs), clamp.
+  Examples: v_add_f32_e64 v0, -v1, |v2| clamp"""
   from extra.assembly.rdna3 import autogen
   text = text.strip()
+  # check for trailing modifiers
+  clamp = 'clamp' in text.lower()
+  if clamp: text = re.sub(r'\s+clamp\s*$', '', text, flags=re.I)
   # split mnemonic and operands
   parts = text.replace(',', ' ').split()
   if not parts: raise ValueError("empty instruction")
-  mnemonic, operands = parts[0].lower(), []
-  if len(parts) > 1:
-    # re-parse to handle brackets in register ranges
-    op_str = text[len(parts[0]):].strip()
-    current, depth = "", 0
-    for ch in op_str:
-      if ch == '[': depth += 1
-      elif ch == ']': depth -= 1
-      if ch == ',' and depth == 0:
-        if current.strip(): operands.append(parse_operand(current))
-        current = ""
-      else: current += ch
-    if current.strip(): operands.append(parse_operand(current))
+  mnemonic = parts[0].lower()
+  # parse operands with modifiers
+  op_str = text[len(parts[0]):].strip()
+  parsed = [parse_operand(op) for op in split_operands(op_str)] if op_str else []
+  operands = [p[0] for p in parsed]
+  # neg/abs bits are for src0/src1/src2 which are operands 1/2/3 (operand 0 is vdst)
+  neg_bits = sum((1 << (i-1)) for i, p in enumerate(parsed) if i > 0 and p[1])
+  abs_bits = sum((1 << (i-1)) for i, p in enumerate(parsed) if i > 0 and p[2])
   # find the instruction helper (e.g., v_add_f32_e32, s_mov_b32)
   for suffix in ['', '_e32']:
     name = mnemonic.replace('.', '_') + suffix
     if hasattr(autogen, name):
       helper = getattr(autogen, name)
-      return helper(*operands)
+      inst = helper(*operands)
+      # apply modifiers for VOP3 instructions
+      if neg_bits and 'neg' in inst._fields: inst._values['neg'] = neg_bits
+      if abs_bits and 'abs' in inst._fields: inst._values['abs'] = abs_bits
+      if clamp and 'clmp' in inst._fields: inst._values['clmp'] = 1
+      return inst
   raise ValueError(f"unknown instruction: {mnemonic}")
