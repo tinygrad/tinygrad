@@ -22,6 +22,19 @@ WAVE_SIZE, SGPR_COUNT, VGPR_COUNT = 32, 128, 256
 VCC_LO, VCC_HI, EXEC_LO, EXEC_HI, NULL_REG, M0 = 106, 107, 126, 127, 124, 125
 FLOAT_BITS: dict[int, int] = {240: 0x3f000000, 241: 0xbf000000, 242: 0x3f800000, 243: 0xbf800000,
                                244: 0x40000000, 245: 0xc0000000, 246: 0x40800000, 247: 0xc0800000, 248: 0x3e22f983}
+CTYPES = {1: ctypes.c_uint8, 2: ctypes.c_uint16, 4: ctypes.c_uint32}
+
+# memory operation tables: (count, size, sign) where sign is 'i' for signed, None for unsigned
+FLAT_LOAD = {GLOBALOp.GLOBAL_LOAD_B32: (1,4), FLATOp.FLAT_LOAD_B32: (1,4), GLOBALOp.GLOBAL_LOAD_B64: (2,4), FLATOp.FLAT_LOAD_B64: (2,4),
+  GLOBALOp.GLOBAL_LOAD_B96: (3,4), FLATOp.FLAT_LOAD_B96: (3,4), GLOBALOp.GLOBAL_LOAD_B128: (4,4), FLATOp.FLAT_LOAD_B128: (4,4),
+  GLOBALOp.GLOBAL_LOAD_U8: (1,1), FLATOp.FLAT_LOAD_U8: (1,1), GLOBALOp.GLOBAL_LOAD_I8: (1,1,'i'), FLATOp.FLAT_LOAD_I8: (1,1,'i'),
+  GLOBALOp.GLOBAL_LOAD_U16: (1,2), FLATOp.FLAT_LOAD_U16: (1,2), GLOBALOp.GLOBAL_LOAD_I16: (1,2,'i'), FLATOp.FLAT_LOAD_I16: (1,2,'i')}
+FLAT_STORE = {GLOBALOp.GLOBAL_STORE_B32: (1,4), FLATOp.FLAT_STORE_B32: (1,4), GLOBALOp.GLOBAL_STORE_B64: (2,4), FLATOp.FLAT_STORE_B64: (2,4),
+  GLOBALOp.GLOBAL_STORE_B96: (3,4), FLATOp.FLAT_STORE_B96: (3,4), GLOBALOp.GLOBAL_STORE_B128: (4,4), FLATOp.FLAT_STORE_B128: (4,4),
+  GLOBALOp.GLOBAL_STORE_B8: (1,1), FLATOp.FLAT_STORE_B8: (1,1), GLOBALOp.GLOBAL_STORE_B16: (1,2), FLATOp.FLAT_STORE_B16: (1,2)}
+DS_LOAD = {DSOp.DS_LOAD_B32: (1,4), DSOp.DS_LOAD_B64: (2,4), DSOp.DS_LOAD_B128: (4,4),
+  DSOp.DS_LOAD_U8: (1,1), DSOp.DS_LOAD_I8: (1,1,'i'), DSOp.DS_LOAD_U16: (1,2), DSOp.DS_LOAD_I16: (1,2,'i')}
+DS_STORE = {DSOp.DS_STORE_B32: (1,4), DSOp.DS_STORE_B64: (2,4), DSOp.DS_STORE_B128: (4,4), DSOp.DS_STORE_B8: (1,1), DSOp.DS_STORE_B16: (1,2)}
 
 def f32(i: int) -> float: return struct.unpack('<f', struct.pack('<I', i & 0xffffffff))[0]
 def i32(f: float) -> int: return struct.unpack('<I', struct.pack('<f', f))[0]
@@ -327,31 +340,26 @@ def exec_vop3(st: WaveState, inst: VOP3, lane: int) -> None:
   elif op in SIMPLE: V[vdst] = SIMPLE[op]()
   else: raise NotImplementedError(f"VOP3 op {op}")
 
-def exec_vopc_vop3(st: WaveState, op: int, s0: int, s1: int, sdst: int, lane: int) -> None:
-  is_cmpx, base = op >= 128, op - 128 if op >= 128 else op
-  result = False
+def vopc_compare(op: int, s0: int, s1: int) -> bool:
+  base = op & 0x7f
   if 16 <= base <= 31:
     f0, f1, cmp = f32(s0), f32(s1), base - 16
     nan = math.isnan(f0) or math.isnan(f1)
-    result = [False, f0<f1, f0==f1, f0<=f1, f0>f1, f0!=f1, f0>=f1, not nan, nan, f0<f1 or nan, f0==f1 or nan, f0<=f1 or nan, f0>f1 or nan, f0!=f1 or nan, f0>=f1 or nan, True][cmp]
-  elif 64 <= base <= 79:
+    return [False, f0<f1, f0==f1, f0<=f1, f0>f1, f0!=f1, f0>=f1, not nan, nan, f0<f1 or nan, f0==f1 or nan, f0<=f1 or nan, f0>f1 or nan, f0!=f1 or nan, f0>=f1 or nan, True][cmp]
+  if 64 <= base <= 79:
     cmp = (base - 64) % 8; s0s, s1s = sext(s0,32), sext(s1,32)
-    result = [False, s0s<s1s, s0s==s1s, s0s<=s1s, s0s>s1s, s0s!=s1s, s0s>=s1s, True][cmp] if base < 72 else [False, s0<s1, s0==s1, s0<=s1, s0>s1, s0!=s1, s0>=s1, True][cmp]
+    return [False, s0s<s1s, s0s==s1s, s0s<=s1s, s0s>s1s, s0s!=s1s, s0s>=s1s, True][cmp] if base < 72 else [False, s0<s1, s0==s1, s0<=s1, s0>s1, s0!=s1, s0>=s1, True][cmp]
+  return False
+
+def exec_vopc_vop3(st: WaveState, op: int, s0: int, s1: int, sdst: int, lane: int) -> None:
+  result, is_cmpx = vopc_compare(op, s0, s1), op >= 128
   if sdst == VCC_LO: st.vcc = (st.vcc & ~(1 << lane)) | (int(result) << lane)
   else: wsgpr(st, sdst, (rsgpr(st, sdst) & ~(1 << lane)) | (int(result) << lane))
   if is_cmpx: st.exec_mask = (st.exec_mask & ~(1 << lane)) | (int(result) << lane)
 
 def exec_vopc(st: WaveState, inst: VOPC, lane: int) -> None:
   op, s0, s1 = inst.op, rsrc(st, inst.src0, lane), st.vgpr[lane][inst.vsrc1]
-  is_cmpx, base = op >= 128, op - 128 if op >= 128 else op
-  result = False
-  if 16 <= base <= 31:
-    f0, f1, cmp = f32(s0), f32(s1), base - 16
-    nan = math.isnan(f0) or math.isnan(f1)
-    result = [False, f0<f1, f0==f1, f0<=f1, f0>f1, f0!=f1, f0>=f1, not nan, nan, f0<f1 or nan, f0==f1 or nan, f0<=f1 or nan, f0>f1 or nan, f0!=f1 or nan, f0>=f1 or nan, True][cmp]
-  elif 64 <= base <= 79:
-    cmp = (base - 64) % 8; s0s, s1s = sext(s0,32), sext(s1,32)
-    result = [False, s0s<s1s, s0s==s1s, s0s<=s1s, s0s>s1s, s0s!=s1s, s0s>=s1s, True][cmp] if base < 72 else [False, s0<s1, s0==s1, s0<=s1, s0>s1, s0!=s1, s0>=s1, True][cmp]
+  result, is_cmpx = vopc_compare(op, s0, s1), op >= 128
   st.vcc = (st.vcc & ~(1 << lane)) | (int(result) << lane)
   if is_cmpx: st.exec_mask = (st.exec_mask & ~(1 << lane)) | (int(result) << lane)
 
@@ -377,39 +385,25 @@ def exec_flat(st: WaveState, inst: FLAT, lane: int) -> None:
   V = st.vgpr[lane]
   addr = V[addr_reg] | (V[addr_reg+1] << 32)
   addr = (rsgpr64(st, saddr) + V[addr_reg] + offset) & 0xffffffffffffffff if saddr not in (NULL_REG, 0x7f) else (addr + offset) & 0xffffffffffffffff
-  LOAD: dict[int, tuple[int, int] | tuple[int, int, str]] = {
-    GLOBALOp.GLOBAL_LOAD_B32: (1,4), FLATOp.FLAT_LOAD_B32: (1,4), GLOBALOp.GLOBAL_LOAD_B64: (2,4), FLATOp.FLAT_LOAD_B64: (2,4),
-    GLOBALOp.GLOBAL_LOAD_B96: (3,4), FLATOp.FLAT_LOAD_B96: (3,4), GLOBALOp.GLOBAL_LOAD_B128: (4,4), FLATOp.FLAT_LOAD_B128: (4,4),
-    GLOBALOp.GLOBAL_LOAD_U8: (1,1,'u'), FLATOp.FLAT_LOAD_U8: (1,1,'u'), GLOBALOp.GLOBAL_LOAD_I8: (1,1,'i'), FLATOp.FLAT_LOAD_I8: (1,1,'i'),
-    GLOBALOp.GLOBAL_LOAD_U16: (1,2,'u'), FLATOp.FLAT_LOAD_U16: (1,2,'u'), GLOBALOp.GLOBAL_LOAD_I16: (1,2,'i'), FLATOp.FLAT_LOAD_I16: (1,2,'i')}
-  STORE: dict[int, tuple[int, int]] = {
-    GLOBALOp.GLOBAL_STORE_B32: (1,4), FLATOp.FLAT_STORE_B32: (1,4), GLOBALOp.GLOBAL_STORE_B64: (2,4), FLATOp.FLAT_STORE_B64: (2,4),
-    GLOBALOp.GLOBAL_STORE_B96: (3,4), FLATOp.FLAT_STORE_B96: (3,4), GLOBALOp.GLOBAL_STORE_B128: (4,4), FLATOp.FLAT_STORE_B128: (4,4),
-    GLOBALOp.GLOBAL_STORE_B8: (1,1), FLATOp.FLAT_STORE_B8: (1,1), GLOBALOp.GLOBAL_STORE_B16: (1,2), FLATOp.FLAT_STORE_B16: (1,2)}
-  CTYPES: dict[int, type[ctypes.c_uint8] | type[ctypes.c_uint16] | type[ctypes.c_uint32]] = {1: ctypes.c_uint8, 2: ctypes.c_uint16, 4: ctypes.c_uint32}
-  if op in LOAD:
-    info = LOAD[op]; cnt, sz = info[0], info[1]; sign = info[2] if len(info) > 2 else None
+  if op in FLAT_LOAD:
+    info = FLAT_LOAD[op]; cnt, sz = info[0], info[1]; sign = info[2] if len(info) > 2 else None
     for i in range(cnt):
       val = CTYPES[sz].from_address(addr + i * sz).value
       V[vdst + i] = sext(val, sz * 8) & 0xffffffff if sign == 'i' else val
-  elif op in STORE:
-    cnt, sz = STORE[op]
+  elif op in FLAT_STORE:
+    cnt, sz = FLAT_STORE[op]
     for i in range(cnt): CTYPES[sz].from_address(addr + i * sz).value = V[data_reg + i] & ((1 << (sz * 8)) - 1)
   else: raise NotImplementedError(f"FLAT op {op}")
 
 def exec_ds(st: WaveState, inst: DS, lane: int, lds: bytearray) -> None:
   op, addr, vdst, V = inst.op, (st.vgpr[lane][inst.addr] + inst.offset0) & 0xffff, inst.vdst, st.vgpr[lane]
-  LOAD: dict[int, tuple[int, int] | tuple[int, int, str]] = {
-    DSOp.DS_LOAD_B32: (1,4), DSOp.DS_LOAD_B64: (2,4), DSOp.DS_LOAD_B128: (4,4),
-    DSOp.DS_LOAD_U8: (1,1,'u'), DSOp.DS_LOAD_I8: (1,1,'i'), DSOp.DS_LOAD_U16: (1,2,'u'), DSOp.DS_LOAD_I16: (1,2,'i')}
-  STORE: dict[int, tuple[int, int]] = {DSOp.DS_STORE_B32: (1,4), DSOp.DS_STORE_B64: (2,4), DSOp.DS_STORE_B128: (4,4), DSOp.DS_STORE_B8: (1,1), DSOp.DS_STORE_B16: (1,2)}
-  if op in LOAD:
-    info = LOAD[op]; cnt, sz = info[0], info[1]; sign = info[2] if len(info) > 2 else None
+  if op in DS_LOAD:
+    info = DS_LOAD[op]; cnt, sz = info[0], info[1]; sign = info[2] if len(info) > 2 else None
     for i in range(cnt):
       val = int.from_bytes(lds[addr+i*sz:addr+i*sz+sz], 'little')
       V[vdst + i] = sext(val, sz * 8) & 0xffffffff if sign == 'i' else val
-  elif op in STORE:
-    cnt, sz = STORE[op]
+  elif op in DS_STORE:
+    cnt, sz = DS_STORE[op]
     for i in range(cnt): lds[addr+i*sz:addr+i*sz+sz] = (V[inst.data0 + i] & ((1 << (sz * 8)) - 1)).to_bytes(sz, 'little')
   else: raise NotImplementedError(f"DS op {op}")
 

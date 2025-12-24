@@ -11,8 +11,7 @@ class BitField:
   def mask(self) -> int: return (1 << (self.hi - self.lo + 1)) - 1
   def __get__(self, obj, objtype=None):
     if obj is None: return self
-    val = obj._values.get(self.name, 0)
-    val = val.val if isinstance(val, RawImm) else val.value if hasattr(val, 'value') else val.idx if hasattr(val, 'idx') else val
+    val = unwrap(obj._values.get(self.name, 0))
     ann = getattr(type(obj), '__annotations__', {}).get(self.name)
     if ann and isinstance(ann, type) and issubclass(ann, IntEnum):
       try: return ann(val)
@@ -40,6 +39,9 @@ class Imm: pass
 class SImm: pass
 class RawImm:
   def __init__(self, val: int): self.val = val
+
+def unwrap(val) -> int:
+  return val.val if isinstance(val, RawImm) else val.value if hasattr(val, 'value') else val.idx if hasattr(val, 'idx') else val
 
 # *** encoding ***
 FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
@@ -125,14 +127,13 @@ class Inst:
   def __repr__(self): return f"{self.__class__.__name__}({', '.join(f'{k}={v}' for k, v in self._values.items())})"
 
   def disasm(self) -> str:
-    op_val = self._values.get('op', 0)
-    op_val = op_val.val if isinstance(op_val, RawImm) else op_val
+    op_val = unwrap(self._values.get('op', 0))
     try:
       from extra.assembly.rdna3 import autogen
       op_name = getattr(autogen, f"{self.__class__.__name__}Op")(op_val).name.lower() if hasattr(autogen, f"{self.__class__.__name__}Op") else f"op_{op_val}"
     except (ValueError, KeyError): op_name = f"op_{op_val}"
     def fmt(n, v):
-      v = v.val if isinstance(v, RawImm) else v
+      v = unwrap(v)
       if n in SRC_FIELDS: return f"0x{self._literal:x}" if v == 255 and getattr(self, '_literal', None) else decode_src(v) if v != 255 else "0xff"
       if n in ('sdst', 'vdst'): return f"{'s' if n == 'sdst' else 'v'}{v}"
       return f"v{v}" if n == 'vsrc1' else f"0x{v:x}" if n == 'simm16' else str(v)
@@ -195,9 +196,9 @@ def asm(text: str) -> Inst:
   values = [p[0] for p in parsed]
   neg_bits = sum((1 << (i-1)) for i, p in enumerate(parsed) if i > 0 and p[1])
   abs_bits = sum((1 << (i-1)) for i, p in enumerate(parsed) if i > 0 and p[2])
-  lit, get_lit = None, lambda v: v.val if isinstance(v, RawImm) else v
-  if mnemonic in ('v_fmaak_f32', 'v_fmaak_f16') and len(values) == 4: lit, values = get_lit(values[3]), values[:3]
-  elif mnemonic in ('v_fmamk_f32', 'v_fmamk_f16') and len(values) == 4: lit, values = get_lit(values[2]), [values[0], values[1], values[3]]
+  lit = None
+  if mnemonic in ('v_fmaak_f32', 'v_fmaak_f16') and len(values) == 4: lit, values = unwrap(values[3]), values[:3]
+  elif mnemonic in ('v_fmamk_f32', 'v_fmamk_f16') and len(values) == 4: lit, values = unwrap(values[2]), [values[0], values[1], values[3]]
   for suffix in (['_e32', ''] if not (neg_bits or abs_bits or clamp) else ['', '_e32']):
     if hasattr(autogen, name := mnemonic.replace('.', '_') + suffix):
       inst = getattr(autogen, name)(*values, literal=lit)
