@@ -36,7 +36,7 @@ class TestRDNA3Asm(unittest.TestCase):
       v_add_co_u32(v[2], VCC_LO, s[6], v[2]),
       v_add_co_ci_u32_e32(v[3], s[7], v[3]),
       v_add_co_u32(v[0], VCC_LO, s[4], v[0]),
-      global_load_b32(v[2], v[2:3], OFF),
+      global_load_b32(vdst=v[2], addr=v[2], saddr=OFF),
       v_add_co_ci_u32_e32(v[1], s[5], v[1]),
       s_waitcnt(0x03f7),  # vmcnt(0)
       global_store_b32(addr=v[0], data=v[2], saddr=OFF),

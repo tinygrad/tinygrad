@@ -48,10 +48,30 @@ class TTMP(Reg):
 s = SGPR
 v = VGPR
 
-# *** immediates ***
+# *** field type markers ***
+# These are used as type annotations to indicate how fields should be encoded/decoded
+# Register types (SGPR, VGPR) are used directly when the field holds a register
 
-class Imm: pass
-class SImm: pass
+class SSrc:
+  """Scalar source operand - uses full source encoding (SGPR, inline const, special regs, literals)."""
+  pass
+
+class Src:
+  """Vector/scalar source operand - uses full 9-bit source encoding including VGPRs."""
+  pass
+
+class Imm:
+  """Unsigned immediate value, stored directly."""
+  pass
+
+class SImm:
+  """Signed immediate value, stored directly."""
+  pass
+
+class RawImm:
+  """Raw immediate value that bypasses inline constant encoding."""
+  def __init__(self, val: int):
+    self.val = val
 
 # *** instruction base classes ***
 
@@ -92,26 +112,36 @@ class Inst:
     if self._encoding:
       bf, val = self._encoding
       word |= _encode_field(val, bf.hi, bf.lo)
-    # fields that use source operand encoding (only when explicitly provided)
-    src_fields = {'src0', 'src1', 'src2', 'ssrc0', 'ssrc1', 'sbase', 'soffset', 'saddr'}
+    # fields that use source operand encoding for integers (inline constants)
+    src_fields = {'src0', 'src1', 'src2', 'ssrc0', 'ssrc1'}
     for name, bf in self._fields.items():
       if name == 'encoding': continue
       if name not in self._values:
         continue  # use implicit 0 for missing fields
       val = self._values[name]
-      if isinstance(val, Reg) or (name in src_fields and isinstance(val, int)):
+      if isinstance(val, RawImm):
+        val = val.val  # bypass inline constant encoding
+      elif isinstance(val, Reg):
         val = encode_src(val)
+      elif name in src_fields and isinstance(val, int):
+        val = encode_src(val)  # inline constant encoding
       elif hasattr(val, 'value'): val = val.value
       word |= _encode_field(val, bf.hi, bf.lo)
     return word
 
   def _get_literal(self) -> int | None:
     """Get literal constant if any source needs it."""
+    from enum import IntEnum
+    # Source fields that use inline constant encoding and can have literals
     src_fields = {'src0', 'src1', 'src2', 'ssrc0', 'ssrc1'}
     for name in src_fields:
       if name in self._values:
         val = self._values[name]
-        if isinstance(val, int) and not (0 <= val <= 64 or -16 <= val <= -1):
+        # RawImm values don't need literals
+        if isinstance(val, RawImm):
+          continue
+        # Only raw ints (not enums) outside inline constant range need literals
+        if isinstance(val, int) and not isinstance(val, IntEnum) and not (0 <= val <= 64 or -16 <= val <= -1):
           return val
     return None
 
@@ -131,9 +161,15 @@ class Inst:
   def from_int(cls, word: int):
     inst = object.__new__(cls)
     inst._values = {}
+    # Fields that need RawImm wrapping to avoid double-encoding on roundtrip
+    src_fields = {'src0', 'src1', 'src2', 'ssrc0', 'ssrc1'}
     for name, bf in cls._fields.items():
       if name == 'encoding': continue
-      inst._values[name] = _decode_field(word, bf.hi, bf.lo)
+      val = _decode_field(word, bf.hi, bf.lo)
+      # Wrap source fields as RawImm to preserve raw encoding
+      if name in src_fields:
+        val = RawImm(val)
+      inst._values[name] = val
     return inst
 
   @classmethod
@@ -144,6 +180,43 @@ class Inst:
   def __repr__(self):
     parts = [f"{k}={v}" for k, v in self._values.items()]
     return f"{self.__class__.__name__}({', '.join(parts)})"
+
+  def disasm(self) -> str:
+    """Disassemble instruction to assembly string."""
+    # Get opcode name from the op field
+    op_val = self._values.get('op', 0)
+    if isinstance(op_val, RawImm): op_val = op_val.val
+    op_name = f"op_{op_val}"  # fallback
+    # Try to find the opcode enum for this format
+    cls_name = self.__class__.__name__
+    try:
+      from extra.assembly.rdna3 import autogen_rdna3_enum as enums
+      op_enum_name = f"{cls_name}Op"
+      if hasattr(enums, op_enum_name):
+        op_enum = getattr(enums, op_enum_name)
+        op_name = op_enum(op_val).name.lower()
+    except (ValueError, KeyError):
+      pass
+    # Build operand list based on format
+    operands = []
+    src_fields = {'src0', 'src1', 'src2', 'ssrc0', 'ssrc1'}
+    for name in self._fields:
+      if name in ('encoding', 'op'): continue
+      val = self._values.get(name, 0)
+      # Unwrap RawImm for display
+      if isinstance(val, RawImm): val = val.val
+      if name in src_fields:
+        operands.append(decode_src(val))
+      elif name in ('sdst', 'vdst'):
+        prefix = 's' if name == 'sdst' else 'v'
+        operands.append(f"{prefix}{val}")
+      elif name == 'vsrc1':
+        operands.append(f"v{val}")
+      elif name == 'simm16':
+        operands.append(f"0x{val:x}")
+      else:
+        operands.append(str(val))
+    return f"{op_name} {', '.join(operands)}" if operands else op_name
 
 class Inst32(Inst):
   pass
@@ -186,6 +259,25 @@ def decode_src(val: int) -> str:
   if val == 241: return "-0.5"
   if val == 242: return "1.0"
   if val == 243: return "-1.0"
+  if val == 244: return "2.0"
+  if val == 245: return "-2.0"
+  if val == 246: return "4.0"
+  if val == 247: return "-4.0"
   if val == 255: return "lit"
   if 256 <= val <= 511: return f"v{val - 256}"
   return f"?{val}"
+
+def decode_src_to_operand(val: int):
+  """Decode a source encoding back to an operand object."""
+  if val <= 105: return SGPR[val]
+  if val == 106: return 106  # vcc_lo - return as int for SrcEnum lookup
+  if val == 107: return 107  # vcc_hi
+  if 108 <= val <= 123: return TTMP[val - 108]
+  if val == 124: return 124  # null
+  if val == 125: return 125  # m0
+  if val == 126: return 126  # exec_lo
+  if val == 127: return 127  # exec_hi
+  if 128 <= val <= 192: return val - 128  # inline constant 0-64
+  if 193 <= val <= 208: return -(val - 192)  # inline constant -1 to -16
+  if 256 <= val <= 511: return VGPR[val - 256]
+  return val  # return raw value for special constants

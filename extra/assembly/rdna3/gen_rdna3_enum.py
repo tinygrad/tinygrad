@@ -9,8 +9,60 @@ def parse_opcode_table(text: str) -> dict[int, str]:
     ops[int(m.group(1))] = m.group(2)
   return ops
 
-def parse_fields_table(table: list) -> list[tuple[str, int, int, int | None]]:
-  """Parse fields table, return list of (name, hi, lo, encoding_value)"""
+def infer_field_type(name: str, desc: str, fmt_name: str, known_enums: set[str] | None = None) -> str | None:
+  """Infer field type from name and description."""
+  name = name.upper()
+  desc_lower = desc.lower() if desc else ''
+  # Opcode fields - type is FormatOp enum (only if enum exists)
+  if name == 'OP':
+    op_enum = f"{fmt_name}Op"
+    if known_enums is None or op_enum in known_enums:
+      return op_enum
+    return None
+  # Scalar source operands (SSRC0, SSRC1) - uses full source encoding
+  if name in ('SSRC0', 'SSRC1'):
+    return 'SSrc'
+  # Vector/scalar source operands (SRC0, SRC1, SRC2 in VOP formats)
+  if name in ('SRC0', 'SRC1', 'SRC2'):
+    return 'Src'
+  # Scalar destination - SGPR register
+  if name == 'SDST':
+    return 'SGPR'
+  # Vector destination - VGPR register (index stored directly, no 256 offset)
+  if name == 'VDST':
+    return 'VGPR'
+  # Vector source (VSRC1 is always a VGPR, index stored directly)
+  if name == 'VSRC1':
+    return 'VGPR'
+  # SGPR pair/quad fields (SBASE, SDATA, SRSRC)
+  if name in ('SBASE', 'SDATA', 'SRSRC'):
+    return 'SGPR'
+  # SOFFSET can be SGPR or special value
+  if name == 'SOFFSET':
+    return 'SSrc'
+  # VGPR fields for addresses and data
+  if name in ('VDATA', 'VADDR'):
+    return 'VGPR'
+  if name == 'ADDR' and ('vgpr' in desc_lower or fmt_name in ('FLAT', 'DS')):
+    return 'VGPR'
+  if name == 'DATA' and fmt_name in ('FLAT', 'DS'):
+    return 'VGPR'
+  if name in ('DATA0', 'DATA1'):
+    return 'VGPR'
+  # SADDR uses source encoding (can be SGPR or OFF/NULL)
+  if name == 'SADDR':
+    return 'SSrc'
+  # Immediate fields - signed or unsigned based on description
+  if name == 'SIMM16':
+    return 'SImm'
+  if name == 'OFFSET':
+    if 'signed' in desc_lower:
+      return 'SImm'
+    return 'Imm'
+  return None
+
+def parse_fields_table(table: list, fmt_name: str = '', known_enums: set[str] | None = None) -> list[tuple[str, int, int, int | None, str | None]]:
+  """Parse fields table, return list of (name, hi, lo, encoding_value, type)"""
   fields = []
   for row in table[1:]:  # skip header
     if not row or not row[0]: continue
@@ -20,9 +72,11 @@ def parse_fields_table(table: list) -> list[tuple[str, int, int, int | None]]:
     elif m := re.match(r'\[(\d+)\]', bits_str): hi = lo = int(m.group(1))
     else: continue
     enc_val = None
+    desc = row[2].split('\n')[0].strip() if row[2] else ''
     if name == 'ENCODING' and row[2]:
       if m := re.search(r"'b([01_]+)", row[2]): enc_val = int(m.group(1).replace('_', ''), 2)
-    fields.append((name, hi, lo, enc_val))
+    field_type = infer_field_type(name, desc, fmt_name, known_enums)
+    fields.append((name, hi, lo, enc_val, field_type))
   return fields
 
 def parse_src_encoding(text: str) -> dict[int, str]:
@@ -52,22 +106,7 @@ if __name__ == "__main__":
       break
   src_enum.update({233: 'DPP8', 234: 'DPP8FI', 250: 'DPP16', 251: 'VCCZ', 252: 'EXECZ', 254: 'LDS_DIRECT'})
 
-  # parse instruction formats
-  formats: dict[str, list[tuple[str, int, int, int | None]]] = {}
-  for i, page in enumerate(pdf.pages[150:200]):
-    text = page.extract_text() or ''
-    for m in re.finditer(r'\d+\.\d+\.\d+\.\s+(\w+)\s*\n?Description', text):
-      fmt_name = m.group(1)
-      for p in [page, pdf.pages[150+i+1] if 150+i+1 < len(pdf.pages) else None]:
-        if p is None: continue
-        for t in p.extract_tables():
-          if t and len(t) > 1 and t[0] and 'Field' in str(t[0][0] if t[0] else ''):
-            if fields := parse_fields_table(t):
-              formats[fmt_name] = fields
-              break
-        if fmt_name in formats: break
-
-  # parse all opcode tables
+  # parse all opcode tables FIRST (needed for field type inference)
   enums: dict[str, dict[int, str]] = {}
   table_positions = [(m.start(), m.group(1)) for m in re.finditer(r'Table \d+\. (\w+) Opcodes', full_text)]
   section_positions = [m.start() for m in re.finditer(r'\n\d+\.\d+\.\d+\.\s+\w+\s*\nDescription', full_text)]
@@ -76,11 +115,54 @@ if __name__ == "__main__":
     next_section = min((s for s in section_positions if s > pos), default=len(full_text))
     table_text = full_text[pos:min(next_table, next_section)]
     if ops := parse_opcode_table(table_text): enums[enc_name + "Op"] = ops
+  known_enums = set(enums.keys())
+
+  # parse instruction formats
+  formats: dict[str, list[tuple[str, int, int, int | None, str | None]]] = {}
+  for i, page in enumerate(pdf.pages[150:200]):
+    text = page.extract_text() or ''
+    for m in re.finditer(r'\d+\.\d+\.\d+\.\s+(\w+)\s*\n?Description', text):
+      fmt_name = m.group(1)
+      header_pos = m.start()
+      # Look for a Fields table that appears AFTER the section header
+      # First check tables on this page that are after the header
+      found = False
+      tables = page.find_tables()
+      for t in tables:
+        table_text_start = text.find('Field Name', header_pos)
+        if table_text_start > header_pos:  # Table is after header
+          t_data = t.extract()
+          if t_data and len(t_data) > 1 and t_data[0] and 'Field' in str(t_data[0][0] if t_data[0] else ''):
+            fields = parse_fields_table(t_data, fmt_name, known_enums)
+            if fields and any(f[0] == 'ENCODING' for f in fields):
+              # Check next page for continuation of fields table (only if no ENCODING in continuation)
+              if 150+i+1 < len(pdf.pages):
+                next_page = pdf.pages[150+i+1]
+                for nt in next_page.extract_tables():
+                  if nt and len(nt) > 0 and nt[0] and 'Field' in str(nt[0][0] if nt[0] else ''):
+                    extra_fields = parse_fields_table(nt, fmt_name, known_enums)
+                    # Only merge if this is a continuation (no ENCODING field)
+                    if extra_fields and not any(f[0] == 'ENCODING' for f in extra_fields):
+                      fields.extend(extra_fields)
+                    break
+              formats[fmt_name] = fields
+              found = True
+              break
+      # If not found on same page after header, check next page
+      if not found and 150+i+1 < len(pdf.pages):
+        next_page = pdf.pages[150+i+1]
+        for t in next_page.extract_tables():
+          if t and len(t) > 1 and t[0] and 'Field' in str(t[0][0] if t[0] else ''):
+            fields = parse_fields_table(t, fmt_name, known_enums)
+            if fields and any(f[0] == 'ENCODING' for f in fields):
+              formats[fmt_name] = fields
+              break
 
   # generate output
   lines = ["# autogenerated from AMD RDNA3.5 ISA PDF - do not edit"]
   lines.append("from enum import IntEnum")
-  lines.append("from extra.assembly.rdna3.lib import bits, Inst32, Inst64, SGPR, VGPR, TTMP, Imm, SImm, s, v")
+  lines.append("from extra.assembly.rdna3.lib import bits, Inst32, Inst64, SGPR, VGPR, TTMP, s, v")
+  lines.append("from extra.assembly.rdna3.lib import SSrc, Src, SImm, Imm")
   lines.append("import functools")
   lines.append("")
 
@@ -111,11 +193,11 @@ if __name__ == "__main__":
     'SOPC': ['op', 'ssrc0', 'ssrc1'],
     'SOPK': ['op', 'sdst', 'simm16'],
     'SOPP': ['op', 'simm16'],
-    'SMEM': ['op', 'sdata', 'sbase', 'offset', 'soffset', 'glc', 'dlc'],
+    'SMEM': ['op', 'sdata', 'sbase', 'soffset', 'offset', 'glc', 'dlc'],
     'VOP1': ['op', 'vdst', 'src0'],
     'VOP2': ['op', 'vdst', 'src0', 'vsrc1'],
     'VOP3': ['op', 'vdst', 'src0', 'src1', 'src2', 'omod', 'neg', 'abs', 'clmp', 'opsel'],
-    'VOP3SD': ['op', 'vdst', 'sdst', 'clmp'],
+    'VOP3SD': ['op', 'vdst', 'sdst', 'src0', 'src1', 'src2', 'clmp'],
     'VOPC': ['op', 'src0', 'vsrc1'],
     'DS': ['op', 'vdst', 'addr', 'data0', 'data1', 'offset0', 'offset1', 'gds'],
     'FLAT': ['op', 'vdst', 'addr', 'data', 'saddr', 'offset', 'seg', 'dlc', 'glc', 'slc'],
@@ -134,6 +216,9 @@ if __name__ == "__main__":
   for fmt_name, fields in sorted(formats.items()):
     base = get_base_class(fields)
     enc = next((f for f in fields if f[0] == 'ENCODING'), None)
+    # VOP3SD needs special handling - it has src fields in second DWORD but PDF splits across pages
+    if fmt_name == 'VOP3SD':
+      base = 'Inst64'  # VOP3SD is 64-bit
     lines.append(f"class {fmt_name}({base}):")
     if enc:
       enc_val = f"0b{enc[3]:b}" if enc[3] else "0"
@@ -142,11 +227,26 @@ if __name__ == "__main__":
       else:
         lines.append(f"  encoding = bits[{enc[1]}:{enc[2]}] == {enc_val}")
     sorted_fields = sort_fields(fmt_name, [f for f in fields if f[0] != 'ENCODING'])
-    for name, hi, lo, _ in sorted_fields:
+    # VOP3SD has src0/src1/src2 in second DWORD (not parsed from PDF due to page break)
+    # Insert them after sdst, before clmp
+    if fmt_name == 'VOP3SD':
+      new_fields = []
+      for f in sorted_fields:
+        new_fields.append(f)
+        if f[0].lower() == 'sdst':
+          new_fields.append(('src0', 40, 32, None, 'Src'))
+          new_fields.append(('src1', 49, 41, None, 'Src'))
+          new_fields.append(('src2', 58, 50, None, 'Src'))
+      sorted_fields = new_fields
+    for field in sorted_fields:
+      name, hi, lo = field[0], field[1], field[2]
+      field_type = field[4] if len(field) > 4 else None
+      # Build the field definition with optional type annotation
+      type_ann = f":{field_type}" if field_type else ""
       if hi == lo:
-        lines.append(f"  {name.lower()} = bits[{hi}]")
+        lines.append(f"  {name.lower()}{type_ann} = bits[{hi}]")
       else:
-        lines.append(f"  {name.lower()} = bits[{hi}:{lo}]")
+        lines.append(f"  {name.lower()}{type_ann} = bits[{hi}:{lo}]")
     lines.append("")
 
   # instruction helper functions using functools.partial
@@ -164,8 +264,8 @@ if __name__ == "__main__":
       continue
     if fmt_name not in formats: continue
     for opcode, name in sorted(ops.items()):
-      # VOP2 instructions use _e32 suffix (32-bit encoding)
-      suffix = "_e32" if fmt_name == "VOP2" else ""
+      # VOP1/VOP2 instructions use _e32 suffix (32-bit encoding) to avoid collisions with VOP3
+      suffix = "_e32" if fmt_name in ("VOP1", "VOP2") else ""
       lines.append(f"{name.lower()}{suffix} = functools.partial({fmt_name}, {cls_name}.{name})")
   lines.append("")
 
