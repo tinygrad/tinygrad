@@ -166,3 +166,51 @@ def waitcnt(vmcnt: int = 0x7f, expcnt: int = 0x7, lgkmcnt: int = 0x3f) -> int:
 
 def decode_waitcnt(val: int) -> tuple[int, int, int]:
   return (val & 0xf) | (((val >> 7) & 0x7) << 4), (val >> 4) & 0x7, (val >> 10) & 0x3f
+
+# *** assembler: parse "v_add_f32_e32 v0, v1, v2" to instruction object ***
+import re
+SPECIAL_REGS = {'vcc_lo': RawImm(106), 'vcc_hi': RawImm(107), 'null': RawImm(124), 'off': RawImm(124), 'm0': RawImm(125), 'exec_lo': RawImm(126), 'exec_hi': RawImm(127), 'scc': RawImm(253)}
+FLOAT_CONSTS = {'0.5': 0.5, '-0.5': -0.5, '1.0': 1.0, '-1.0': -1.0, '2.0': 2.0, '-2.0': -2.0, '4.0': 4.0, '-4.0': -4.0}
+
+def parse_operand(op: str):
+  """Parse an operand string to register/immediate value."""
+  op = op.strip().lower()
+  if op in SPECIAL_REGS: return SPECIAL_REGS[op]
+  if op in FLOAT_CONSTS: return FLOAT_CONSTS[op]
+  if m := re.match(r'^s\[(\d+):(\d+)\]$', op): return SGPR[int(m.group(1)):int(m.group(2))+1]
+  if m := re.match(r'^s(\d+)$', op): return SGPR[int(m.group(1))]
+  if m := re.match(r'^v\[(\d+):(\d+)\]$', op): return VGPR[int(m.group(1)):int(m.group(2))+1]
+  if m := re.match(r'^v(\d+)$', op): return VGPR[int(m.group(1))]
+  if m := re.match(r'^ttmp\[(\d+):(\d+)\]$', op): return TTMP[int(m.group(1)):int(m.group(2))+1]
+  if m := re.match(r'^ttmp(\d+)$', op): return TTMP[int(m.group(1))]
+  if m := re.match(r'^0x([0-9a-f]+)$', op): return int(m.group(1), 16)
+  if m := re.match(r'^-?\d+$', op): return int(op)
+  raise ValueError(f"cannot parse operand: {op}")
+
+def asm(text: str) -> Inst:
+  """Assemble a single instruction from text. Returns instruction object."""
+  from extra.assembly.rdna3 import autogen
+  text = text.strip()
+  # split mnemonic and operands
+  parts = text.replace(',', ' ').split()
+  if not parts: raise ValueError("empty instruction")
+  mnemonic, operands = parts[0].lower(), []
+  if len(parts) > 1:
+    # re-parse to handle brackets in register ranges
+    op_str = text[len(parts[0]):].strip()
+    current, depth = "", 0
+    for ch in op_str:
+      if ch == '[': depth += 1
+      elif ch == ']': depth -= 1
+      if ch == ',' and depth == 0:
+        if current.strip(): operands.append(parse_operand(current))
+        current = ""
+      else: current += ch
+    if current.strip(): operands.append(parse_operand(current))
+  # find the instruction helper (e.g., v_add_f32_e32, s_mov_b32)
+  for suffix in ['', '_e32']:
+    name = mnemonic.replace('.', '_') + suffix
+    if hasattr(autogen, name):
+      helper = getattr(autogen, name)
+      return helper(*operands)
+  raise ValueError(f"unknown instruction: {mnemonic}")
