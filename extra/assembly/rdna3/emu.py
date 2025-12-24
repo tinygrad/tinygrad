@@ -20,7 +20,7 @@ _valid_mem_ranges: set[tuple[int, int]] = set()
 def set_valid_mem_ranges(ranges: set[tuple[int, int]]) -> None: global _valid_mem_ranges; _valid_mem_ranges = ranges
 
 def _check_addr(addr: int, size: int) -> None:
-  if not any(s <= addr and addr + size <= s + z for s, z in _valid_mem_ranges):
+  if _valid_mem_ranges and not any(s <= addr and addr + size <= s + z for s, z in _valid_mem_ranges):
     raise RuntimeError(f"OOB memory access at 0x{addr:x} size={size}")
 
 def mem_read(addr: int, size: int) -> int: _check_addr(addr, size); return CTYPES[size].from_address(addr).value
@@ -312,7 +312,8 @@ def exec_smem(st: WaveState, inst: SMEM) -> int:
 # VOP1 table: op -> fn(s0) -> result (1-arg ops)
 VOP1_OPS = {
   VOP1Op.V_MOV_B32: lambda s: s, VOP1Op.V_CVT_F32_I32: lambda s: i32(float(sext(s, 32))), VOP1Op.V_CVT_F32_U32: lambda s: i32(float(s)),
-  VOP1Op.V_CVT_U32_F32: lambda s: max(0, min(0xffffffff, int(f32(s)))), VOP1Op.V_CVT_I32_F32: lambda s: max(-0x80000000, min(0x7fffffff, int(f32(s)))) & 0xffffffff,
+  VOP1Op.V_CVT_U32_F32: lambda s: 0 if (v := f32(s)) != v else max(0, min(0xffffffff, int(v) if math.isfinite(v) else (0xffffffff if v > 0 else 0))),
+  VOP1Op.V_CVT_I32_F32: lambda s: 0 if (v := f32(s)) != v else (max(-0x80000000, min(0x7fffffff, int(v) if math.isfinite(v) else (0x7fffffff if v > 0 else -0x80000000))) & 0xffffffff),
   VOP1Op.V_CVT_F16_F32: lambda s: i16(f32(s)), VOP1Op.V_CVT_F32_F16: lambda s: i32(f16(s)),
   VOP1Op.V_TRUNC_F32: lambda s: i32(math.trunc(f32(s))), VOP1Op.V_CEIL_F32: lambda s: i32(math.ceil(f32(s))),
   VOP1Op.V_RNDNE_F32: lambda s: i32(round(f32(s))), VOP1Op.V_FLOOR_F32: lambda s: i32(math.floor(f32(s))),
@@ -350,6 +351,8 @@ VOP2_OPS = {
   VOP2Op.V_MUL_U32_U24: lambda a, b: ((a & 0xffffff) * (b & 0xffffff)) & 0xffffffff,
   VOP2Op.V_MUL_HI_U32_U24: lambda a, b: (((a & 0xffffff) * (b & 0xffffff)) >> 32) & 0xffffffff,
   VOP2Op.V_LDEXP_F16: lambda a, b: i16(math.ldexp(f16(a), sext(b, 32))),
+  VOP2Op.V_ADD_F16: lambda a, b: i16(f16(a)+f16(b)), VOP2Op.V_SUB_F16: lambda a, b: i16(f16(a)-f16(b)),
+  VOP2Op.V_MUL_F16: lambda a, b: i16(f16(a)*f16(b)), VOP2Op.V_MIN_F16: lambda a, b: i16(min(f16(a), f16(b))), VOP2Op.V_MAX_F16: lambda a, b: i16(max(f16(a), f16(b))),
 }
 def exec_vop2(st: WaveState, inst: VOP2, lane: int) -> None:
   V, s0, s1 = st.vgpr[lane], st.rsrc(inst.src0, lane), st.vgpr[lane][inst.vsrc1]
@@ -505,21 +508,22 @@ def exec_ds(st: WaveState, inst: DS, lane: int, lds: bytearray) -> None:
     for i in range(cnt): lds[addr+i*sz:addr+i*sz+sz] = (V[inst.data0 + i] & ((1 << (sz * 8)) - 1)).to_bytes(sz, 'little')
   else: raise NotImplementedError(f"DS op {op}")
 
-# VOPD ops map to VOP2 ops where possible
+# VOPD ops: pure 2-arg ops (same signature as VOP2)
 VOPD_OPS = {
-  VOPDOp.V_DUAL_MUL_F32: lambda a, b, d, l: i32(f32(a)*f32(b)), VOPDOp.V_DUAL_ADD_F32: lambda a, b, d, l: i32(f32(a)+f32(b)),
-  VOPDOp.V_DUAL_SUB_F32: lambda a, b, d, l: i32(f32(a)-f32(b)), VOPDOp.V_DUAL_SUBREV_F32: lambda a, b, d, l: i32(f32(b)-f32(a)),
-  VOPDOp.V_DUAL_MAX_F32: lambda a, b, d, l: i32(max(f32(a), f32(b))), VOPDOp.V_DUAL_MIN_F32: lambda a, b, d, l: i32(min(f32(a), f32(b))),
-  VOPDOp.V_DUAL_MUL_DX9_ZERO_F32: lambda a, b, d, l: i32(0.0 if f32(a) == 0.0 or f32(b) == 0.0 else f32(a)*f32(b)),
-  VOPDOp.V_DUAL_MOV_B32: lambda a, b, d, l: a, VOPDOp.V_DUAL_ADD_NC_U32: lambda a, b, d, l: (a + b) & 0xffffffff,
-  VOPDOp.V_DUAL_LSHLREV_B32: lambda a, b, d, l: (b << (a & 0x1f)) & 0xffffffff, VOPDOp.V_DUAL_AND_B32: lambda a, b, d, l: a & b,
-  VOPDOp.V_DUAL_FMAC_F32: lambda a, b, d, l: i32(f32(a)*f32(b)+f32(d)),
-  VOPDOp.V_DUAL_FMAAK_F32: lambda a, b, d, l: i32(f32(a)*f32(b)+f32(l)),
-  VOPDOp.V_DUAL_FMAMK_F32: lambda a, b, d, l: i32(f32(a)*f32(l)+f32(b)),
+  VOPDOp.V_DUAL_MUL_F32: lambda a, b: i32(f32(a)*f32(b)), VOPDOp.V_DUAL_ADD_F32: lambda a, b: i32(f32(a)+f32(b)),
+  VOPDOp.V_DUAL_SUB_F32: lambda a, b: i32(f32(a)-f32(b)), VOPDOp.V_DUAL_SUBREV_F32: lambda a, b: i32(f32(b)-f32(a)),
+  VOPDOp.V_DUAL_MAX_F32: lambda a, b: i32(max(f32(a), f32(b))), VOPDOp.V_DUAL_MIN_F32: lambda a, b: i32(min(f32(a), f32(b))),
+  VOPDOp.V_DUAL_MUL_DX9_ZERO_F32: lambda a, b: i32(0.0 if f32(a) == 0.0 or f32(b) == 0.0 else f32(a)*f32(b)),
+  VOPDOp.V_DUAL_MOV_B32: lambda a, b: a, VOPDOp.V_DUAL_ADD_NC_U32: lambda a, b: (a + b) & 0xffffffff,
+  VOPDOp.V_DUAL_LSHLREV_B32: lambda a, b: (b << (a & 0x1f)) & 0xffffffff, VOPDOp.V_DUAL_AND_B32: lambda a, b: a & b,
 }
 def exec_vopd_op(st: WaveState, op: int, src0: int, src1: int, dst: int, lane: int) -> None:
   s0, s1, V = st.rsrc(src0, lane), st.vgpr[lane][src1], st.vgpr[lane]
-  if (fn := VOPD_OPS.get(op)): V[dst] = fn(s0, s1, V[dst], st.literal); return
+  if (fn := VOPD_OPS.get(op)): V[dst] = fn(s0, s1); return
+  # Special cases: ops that need dest register or literal
+  if op == VOPDOp.V_DUAL_FMAC_F32: V[dst] = i32(f32(s0)*f32(s1)+f32(V[dst])); return
+  if op == VOPDOp.V_DUAL_FMAAK_F32: V[dst] = i32(f32(s0)*f32(s1)+f32(st.literal)); return
+  if op == VOPDOp.V_DUAL_FMAMK_F32: V[dst] = i32(f32(s0)*f32(st.literal)+f32(s1)); return
   if op == VOPDOp.V_DUAL_CNDMASK_B32: V[dst] = s1 if (st.vcc >> lane) & 1 else s0; return
   raise NotImplementedError(f"VOPD op {op}")
 

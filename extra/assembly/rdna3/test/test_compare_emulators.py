@@ -362,5 +362,20 @@ class TestTinygradKernels(unittest.TestCase):
   def test_argmax(self): self._test_kernel(lambda T: T.empty(64).argmax())
   def test_argmin(self): self._test_kernel(lambda T: T.empty(64).argmin())
 
+  # Exact value tests - use 32+ elements to force vector instructions (small tensors use scalar ops which Rust emu doesn't fully support)
+  def test_abs_exact(self): self._test_kernel(lambda T: T([-1., 0., 1.]*11).abs())  # 33 elements
+  def test_neg_exact(self): self._test_kernel(lambda T: -T([-1., 0., 1.]*11))
+  def test_log_special(self): self._test_kernel(lambda T: T([1., 2., 0.5]*11).log())
+  def test_exp_exact(self): self._test_kernel(lambda T: T([0., 1., -1.]*11).exp())
+  def test_reciprocal_exact(self): self._test_kernel(lambda T: T([1., 2., 0.5]*11).reciprocal())
+
+  # Integer division and mod - use 32+ elements
+  def test_int_div(self): self._test_kernel(lambda T: (T([10, 20, 30]*11).int() // T([3, 4, 5]*11).int()).float())
+  def test_int_neg(self): self._test_kernel(lambda T: (-T([1, -2, 3]*11).int()).float())
+
+  # Mixed precision - use 32+ elements
+  def test_half_add(self): self._test_kernel(lambda T: (T([1., 2.]*16).half() + T([3., 4.]*16).half()).float())
+  def test_half_mul(self): self._test_kernel(lambda T: (T([2., 3.]*16).half() * T([4., 5.]*16).half()).float())
+
 if __name__ == "__main__":
   unittest.main()
