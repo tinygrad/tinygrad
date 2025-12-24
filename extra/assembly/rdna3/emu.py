@@ -4,7 +4,7 @@ import ctypes, struct, math
 from dataclasses import dataclass, field
 from typing import Any
 from tinygrad.helpers import DEBUG, colored
-from extra.assembly.rdna3.lib import Inst32, Inst64, bits
+from extra.assembly.rdna3.lib import Inst32, Inst64, bits, RawImm
 from extra.assembly.rdna3.autogen import (
   SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, DS, FLAT, VOPD,
   SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp, FLATOp, GLOBALOp, VOPDOp
@@ -38,13 +38,17 @@ DS_LOAD = {DSOp.DS_LOAD_B32: (1,4,0), DSOp.DS_LOAD_B64: (2,4,0), DSOp.DS_LOAD_B1
   DSOp.DS_LOAD_U8: (1,1,0), DSOp.DS_LOAD_I8: (1,1,1), DSOp.DS_LOAD_U16: (1,2,0), DSOp.DS_LOAD_I16: (1,2,1)}
 DS_STORE = {DSOp.DS_STORE_B32: (1,4), DSOp.DS_STORE_B64: (2,4), DSOp.DS_STORE_B128: (4,4), DSOp.DS_STORE_B8: (1,1), DSOp.DS_STORE_B16: (1,2)}
 
-def f32(i: int) -> float: return struct.unpack('<f', struct.pack('<I', i & 0xffffffff))[0]
-def i32(f: float) -> int: return struct.unpack('<I', struct.pack('<f', f))[0]
+# Optimized float conversion using cached struct
+_struct_I, _struct_f = struct.Struct('<I'), struct.Struct('<f')
+def f32(i: int) -> float: return _struct_f.unpack(_struct_I.pack(i & 0xffffffff))[0]
+def i32(f: float) -> int: return _struct_I.unpack(_struct_f.pack(f))[0]
 def sext(v: int, b: int) -> int: return v - (1 << b) if v & (1 << (b-1)) else v
 def clz(x: int) -> int: return 32 - x.bit_length() if x else 32
 def cls(x: int) -> int: x &= 0xffffffff; return 31 if x in (0, 0xffffffff) else clz(~x & 0xffffffff if x >> 31 else x) - 1
 def f16(i: int) -> float: return struct.unpack('<e', struct.pack('<H', i & 0xffff))[0]
 def i16(f: float) -> int: return struct.unpack('<H', struct.pack('<e', f))[0]
+
+
 
 @dataclass
 class WaveState:
@@ -123,6 +127,15 @@ def decode_format(word: int) -> tuple[type[Inst] | None, bool]:
   enc = (word >> 25) & 0x7f
   return (VOPC, False) if enc == 0b0111110 else (VOP1, False) if enc == 0b0111111 else (VOP2, False)
 
+def _unwrap(v) -> int:
+  """Unwrap RawImm/enum to plain int for fast field access."""
+  return v.val if isinstance(v, RawImm) else v.value if hasattr(v, 'value') else v
+
+def _cache_fields(inst) -> None:
+  """Cache unwrapped field values on instruction for fast access."""
+  for name, val in inst._values.items():
+    setattr(inst, name, _unwrap(val))
+
 def decode_program(data: bytes) -> Program:
   result: Program = {}
   i = 0
@@ -132,6 +145,7 @@ def decode_program(data: bytes) -> Program:
     if inst_class is None: i += 4; continue
     base_size = 8 if is_64 else 4
     inst = inst_class.from_bytes(data[i:i+base_size])
+    _cache_fields(inst)
     has_literal = any(getattr(inst, fld, None) == 255 for fld in ('src0', 'src1', 'src2', 'ssrc0', 'ssrc1', 'srcx0', 'srcy0'))
     if inst_class == VOP2 and inst.op in (44, 45, 55, 56): has_literal = True
     if inst_class == VOPD and (inst.opx in (1, 2) or inst.opy in (1, 2)): has_literal = True
@@ -299,26 +313,48 @@ def exec_vop1(st: WaveState, inst: VOP1, lane: int) -> None:
   else: raise NotImplementedError(f"VOP1 op {op}")
 
 def exec_vop2(st: WaveState, inst: VOP2, lane: int) -> None:
-  op, s0, s1, vdst, V = inst.op, st.rsrc(inst.src0, lane), st.vgpr[lane][inst.vsrc1], inst.vdst, st.vgpr[lane]
-  OPS = {VOP2Op.V_ADD_F32: lambda: i32(f32(s0)+f32(s1)), VOP2Op.V_SUB_F32: lambda: i32(f32(s0)-f32(s1)), VOP2Op.V_SUBREV_F32: lambda: i32(f32(s1)-f32(s0)),
-    VOP2Op.V_MUL_F32: lambda: i32(f32(s0)*f32(s1)), VOP2Op.V_MIN_F32: lambda: i32(min(f32(s0),f32(s1))), VOP2Op.V_MAX_F32: lambda: i32(max(f32(s0),f32(s1))),
-    VOP2Op.V_FMAC_F32: lambda: i32(f32(s0)*f32(s1)+f32(V[vdst])), VOP2Op.V_ADD_NC_U32: lambda: (s0+s1)&0xffffffff,
-    VOP2Op.V_SUB_NC_U32: lambda: (s0-s1)&0xffffffff, VOP2Op.V_SUBREV_NC_U32: lambda: (s1-s0)&0xffffffff,
-    VOP2Op.V_MUL_I32_I24: lambda: (sext(s0&0xffffff,24)*sext(s1&0xffffff,24))&0xffffffff,
-    VOP2Op.V_MUL_HI_I32_I24: lambda: ((sext(s0&0xffffff,24)*sext(s1&0xffffff,24))>>32)&0xffffffff,
-    VOP2Op.V_MUL_U32_U24: lambda: ((s0&0xffffff)*(s1&0xffffff))&0xffffffff, VOP2Op.V_MUL_HI_U32_U24: lambda: (((s0&0xffffff)*(s1&0xffffff))>>32)&0xffffffff,
-    VOP2Op.V_MIN_I32: lambda: s0 if sext(s0,32)<sext(s1,32) else s1, VOP2Op.V_MAX_I32: lambda: s0 if sext(s0,32)>sext(s1,32) else s1,
-    VOP2Op.V_MIN_U32: lambda: min(s0,s1), VOP2Op.V_MAX_U32: lambda: max(s0,s1),
-    VOP2Op.V_LSHLREV_B32: lambda: (s1<<(s0&0x1f))&0xffffffff, VOP2Op.V_LSHRREV_B32: lambda: s1>>(s0&0x1f), VOP2Op.V_ASHRREV_I32: lambda: (sext(s1,32)>>(s0&0x1f))&0xffffffff,
-    VOP2Op.V_AND_B32: lambda: s0&s1, VOP2Op.V_OR_B32: lambda: s0|s1, VOP2Op.V_XOR_B32: lambda: s0^s1, VOP2Op.V_XNOR_B32: lambda: ~(s0^s1)&0xffffffff}
-  if op == VOP2Op.V_CNDMASK_B32: V[vdst] = s1 if (st.vcc >> lane) & 1 else s0
-  elif op == VOP2Op.V_FMAMK_F32: V[vdst] = i32(f32(s0) * f32(st.literal) + f32(s1))
-  elif op == VOP2Op.V_FMAAK_F32: V[vdst] = i32(f32(s0) * f32(s1) + f32(st.literal))
-  elif op == VOP2Op.V_ADD_CO_CI_U32: cin = (st.vcc >> lane) & 1; r = s0 + s1 + cin; st.pend_vcc_lane(lane, r >= 0x100000000); V[vdst] = r & 0xffffffff
-  elif op == VOP2Op.V_SUB_CO_CI_U32: bin_ = (st.vcc >> lane) & 1; r = s0 - s1 - bin_; st.pend_vcc_lane(lane, s1 + bin_ > s0); V[vdst] = r & 0xffffffff
-  elif op == VOP2Op.V_SUBREV_CO_CI_U32: bin_ = (st.vcc >> lane) & 1; r = s1 - s0 - bin_; st.pend_vcc_lane(lane, s0 + bin_ > s1); V[vdst] = r & 0xffffffff
-  elif op in OPS: V[vdst] = OPS[op]()
-  else: raise NotImplementedError(f"VOP2 op {op}")
+  V = st.vgpr[lane]
+  s0, s1 = st.rsrc(inst.src0, lane), V[inst.vsrc1]
+  match inst.op:
+    case VOP2Op.V_ADD_F32:        V[inst.vdst] = i32(f32(s0)+f32(s1))
+    case VOP2Op.V_SUB_F32:        V[inst.vdst] = i32(f32(s0)-f32(s1))
+    case VOP2Op.V_SUBREV_F32:     V[inst.vdst] = i32(f32(s1)-f32(s0))
+    case VOP2Op.V_MUL_F32:        V[inst.vdst] = i32(f32(s0)*f32(s1))
+    case VOP2Op.V_MIN_F32:        V[inst.vdst] = i32(min(f32(s0), f32(s1)))
+    case VOP2Op.V_MAX_F32:        V[inst.vdst] = i32(max(f32(s0), f32(s1)))
+    case VOP2Op.V_FMAC_F32:       V[inst.vdst] = i32(f32(s0)*f32(s1)+f32(V[inst.vdst]))
+    case VOP2Op.V_FMAMK_F32:      V[inst.vdst] = i32(f32(s0)*f32(st.literal)+f32(s1))
+    case VOP2Op.V_FMAAK_F32:      V[inst.vdst] = i32(f32(s0)*f32(s1)+f32(st.literal))
+    case VOP2Op.V_ADD_NC_U32:     V[inst.vdst] = (s0+s1) & 0xffffffff
+    case VOP2Op.V_SUB_NC_U32:     V[inst.vdst] = (s0-s1) & 0xffffffff
+    case VOP2Op.V_SUBREV_NC_U32:  V[inst.vdst] = (s1-s0) & 0xffffffff
+    case VOP2Op.V_LSHLREV_B32:    V[inst.vdst] = (s1 << (s0 & 0x1f)) & 0xffffffff
+    case VOP2Op.V_LSHRREV_B32:    V[inst.vdst] = s1 >> (s0 & 0x1f)
+    case VOP2Op.V_ASHRREV_I32:    V[inst.vdst] = (sext(s1, 32) >> (s0 & 0x1f)) & 0xffffffff
+    case VOP2Op.V_AND_B32:        V[inst.vdst] = s0 & s1
+    case VOP2Op.V_OR_B32:         V[inst.vdst] = s0 | s1
+    case VOP2Op.V_XOR_B32:        V[inst.vdst] = s0 ^ s1
+    case VOP2Op.V_XNOR_B32:       V[inst.vdst] = ~(s0 ^ s1) & 0xffffffff
+    case VOP2Op.V_MIN_U32:        V[inst.vdst] = min(s0, s1)
+    case VOP2Op.V_MAX_U32:        V[inst.vdst] = max(s0, s1)
+    case VOP2Op.V_MIN_I32:        V[inst.vdst] = s0 if sext(s0, 32) < sext(s1, 32) else s1
+    case VOP2Op.V_MAX_I32:        V[inst.vdst] = s0 if sext(s0, 32) > sext(s1, 32) else s1
+    case VOP2Op.V_CNDMASK_B32:    V[inst.vdst] = s1 if (st.vcc >> lane) & 1 else s0
+    case VOP2Op.V_MUL_I32_I24:    V[inst.vdst] = (sext(s0 & 0xffffff, 24) * sext(s1 & 0xffffff, 24)) & 0xffffffff
+    case VOP2Op.V_MUL_HI_I32_I24: V[inst.vdst] = ((sext(s0 & 0xffffff, 24) * sext(s1 & 0xffffff, 24)) >> 32) & 0xffffffff
+    case VOP2Op.V_MUL_U32_U24:    V[inst.vdst] = ((s0 & 0xffffff) * (s1 & 0xffffff)) & 0xffffffff
+    case VOP2Op.V_MUL_HI_U32_U24: V[inst.vdst] = (((s0 & 0xffffff) * (s1 & 0xffffff)) >> 32) & 0xffffffff
+    case VOP2Op.V_ADD_CO_CI_U32:
+      cin = (st.vcc >> lane) & 1
+      r = s0 + s1 + cin
+      st.pend_vcc_lane(lane, r >= 0x100000000)
+      V[inst.vdst] = r & 0xffffffff
+    case VOP2Op.V_SUB_CO_CI_U32:
+      bin_ = (st.vcc >> lane) & 1
+      r = s0 - s1 - bin_
+      st.pend_vcc_lane(lane, s1 + bin_ > s0)
+      V[inst.vdst] = r & 0xffffffff
+    case _: raise NotImplementedError(f"VOP2 op {inst.op}")
 
 def vop3_mod(val: int, neg: int, abs_: int, idx: int) -> int:
   if (abs_ >> idx) & 1: val = i32(abs(f32(val)))
@@ -481,19 +517,26 @@ SCALAR = {SOP1: exec_sop1, SOP2: exec_sop2, SOPC: exec_sopc, SOPK: exec_sopk, SO
 VECTOR = {VOP1: exec_vop1, VOP2: exec_vop2, VOP3: exec_vop3, VOP3SD: exec_vop3sd, VOPC: exec_vopc, FLAT: exec_flat, DS: exec_ds, VOPD: exec_vopd, VOP3P: exec_vop3p}
 
 def step_wave(program: Program, st: WaveState, lds: bytearray, n_lanes: int) -> int:
-  if st.pc not in program: return 1
-  inst = program[st.pc]
+  inst = program.get(st.pc)
+  if inst is None: return 1
   inst_words = inst.size() // 4
   st.literal = inst._literal or 0
-  if type(inst) in SCALAR:
-    delta = SCALAR[type(inst)](st, inst)
+  inst_type = type(inst)
+  handler = SCALAR.get(inst_type)
+  if handler is not None:
+    delta = handler(st, inst)
     if delta == -1: return -1
     if delta == -2: st.pc += inst_words; return -2
     st.pc += inst_words + delta
   else:
-    for lane in range(n_lanes):
-      if st.exec_mask & (1 << lane):
-        VECTOR[type(inst)](st, inst, lane, lds) if type(inst) == DS else VECTOR[type(inst)](st, inst, lane)
+    handler = VECTOR[inst_type]
+    exec_mask = st.exec_mask
+    if inst_type is DS:
+      for lane in range(n_lanes):
+        if exec_mask & (1 << lane): handler(st, inst, lane, lds)
+    else:
+      for lane in range(n_lanes):
+        if exec_mask & (1 << lane): handler(st, inst, lane)
     st.commit_pends()
     st.pc += inst_words
   return 0
