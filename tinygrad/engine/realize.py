@@ -67,8 +67,8 @@ class ViewOp(Runner):
 
 class BufferCopy(Runner):
   def __init__(self, total_sz, dest_device, src_device):
-    if total_sz >= 1e6: name = f"{type(self).__name__[6:].lower()} {total_sz/1e6:7.2f}M, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
-    else: name = f"{type(self).__name__[6:].lower()} {total_sz:8d}, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
+    sz = f"{total_sz/1e6:7.2f}M" if total_sz >= 1e6 else f"{total_sz:8d}"
+    name = f"{type(self).__name__[6:].lower()} {sz}, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
     super().__init__(colored(name, "yellow"), dest_device, Estimates(lds=total_sz, mem=total_sz))
   def copy(self, dest, src):
     disk_supports_fast_copyout = src.device.startswith("DISK") and hasattr(src.allocator.dev, 'io_uring') and \
