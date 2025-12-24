@@ -19,10 +19,21 @@ class TestPDFParser(unittest.TestCase):
     self.assertEqual(SOP2._fields['sdst'].lo, 16)
 
   def test_sop1_fields(self):
-    """SOP1 should have op, sdst, ssrc0."""
+    """SOP1 should have op, sdst, ssrc0 with correct bit positions."""
     self.assertIn('op', SOP1._fields)
     self.assertIn('sdst', SOP1._fields)
     self.assertIn('ssrc0', SOP1._fields)
+    # SOP1 must NOT have simm16 (that's SOPK)
+    self.assertNotIn('simm16', SOP1._fields)
+    # Verify bit positions - ssrc0 is bits[7:0], op is bits[15:8]
+    self.assertEqual(SOP1._fields['ssrc0'].hi, 7)
+    self.assertEqual(SOP1._fields['ssrc0'].lo, 0)
+    self.assertEqual(SOP1._fields['op'].hi, 15)
+    self.assertEqual(SOP1._fields['op'].lo, 8)
+    # SOP1 encoding is 0b101111101 at bits[31:23]
+    self.assertEqual(SOP1._encoding[0].hi, 31)
+    self.assertEqual(SOP1._encoding[0].lo, 23)
+    self.assertEqual(SOP1._encoding[1], 0b101111101)
 
   def test_vop2_fields(self):
     """VOP2 should have op, vdst, src0, vsrc1."""
@@ -92,11 +103,27 @@ class TestPDFParser(unittest.TestCase):
     self.assertIn('simm16', SOPP._fields)
 
   def test_encoding_bits(self):
-    """Verify encoding bits are correct."""
+    """Verify encoding bits are correct for all major formats."""
     # SOP2 encoding is 10 at bits[31:30]
     self.assertEqual(SOP2._encoding[0].hi, 31)
     self.assertEqual(SOP2._encoding[0].lo, 30)
     self.assertEqual(SOP2._encoding[1], 0b10)
+    # SOPK encoding is 1011 at bits[31:28]
+    self.assertEqual(SOPK._encoding[0].hi, 31)
+    self.assertEqual(SOPK._encoding[0].lo, 28)
+    self.assertEqual(SOPK._encoding[1], 0b1011)
+    # SOPP encoding is 101111111 at bits[31:23]
+    self.assertEqual(SOPP._encoding[0].hi, 31)
+    self.assertEqual(SOPP._encoding[0].lo, 23)
+    self.assertEqual(SOPP._encoding[1], 0b101111111)
+    # VOP1 encoding is 0111111 at bits[31:25]
+    self.assertEqual(VOP1._encoding[0].hi, 31)
+    self.assertEqual(VOP1._encoding[0].lo, 25)
+    self.assertEqual(VOP1._encoding[1], 0b0111111)
+    # VOP2 encoding is 0 at bits[31]
+    self.assertEqual(VOP2._encoding[0].hi, 31)
+    self.assertEqual(VOP2._encoding[0].lo, 31)
+    self.assertEqual(VOP2._encoding[1], 0b0)
     # FLAT encoding is 110111 at bits[31:26]
     self.assertEqual(FLAT._encoding[0].hi, 31)
     self.assertEqual(FLAT._encoding[0].lo, 26)

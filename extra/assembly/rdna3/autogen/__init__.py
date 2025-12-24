@@ -1360,27 +1360,9 @@ class VOP3POp(IntEnum):
 
 class VOP3SDOp(IntEnum):
   DWORD = 1
-  SGPR0 = 105
-  VCC_LO = 106
-  VCC_HI = 107
-  TTMP0 = 123
-  NULL = 124
-  M0 = 125
-  EXEC_LO = 126
-  EXEC_HI = 127
-  DPP8 = 233
-  DPP8FI = 234
-  SHARED_BASE = 235
-  SHARED_LIMIT = 236
-  PRIVATE_BASE = 237
-  PRIVATE_LIMIT = 238
-  DPP16 = 250
-  SCC = 253
-  SRC1 = 255
   V_ADD_CO_CI_U32 = 288
   V_SUB_CO_CI_U32 = 289
   V_SUBREV_CO_CI_U32 = 290
-  VGPR = 511
   V_DIV_SCALE_F32 = 764
   V_DIV_SCALE_F64 = 765
   V_MAD_U64_U32 = 766
@@ -1388,7 +1370,6 @@ class VOP3SDOp(IntEnum):
   V_ADD_CO_U32 = 768
   V_SUB_CO_U32 = 769
   V_SUBREV_CO_U32 = 770
-  SRC0 = 11001100
 
 class VOPCOp(IntEnum):
   V_CMP_F_F16 = 0
@@ -1657,7 +1638,7 @@ class MTBUF(Inst64):
   vaddr:VGPR = bits[39:32]
   srsrc:SGPR = bits[52:48]
   soffset:SSrc = bits[63:56]
-  offset:SImm = bits[11:0]
+  offset:Imm = bits[11:0]
   format = bits[25:19]
   offen = bits[54]
   idxen = bits[55]
@@ -1673,7 +1654,7 @@ class MUBUF(Inst64):
   vaddr:VGPR = bits[39:32]
   srsrc:SGPR = bits[52:48]
   soffset:SSrc = bits[63:56]
-  offset:SImm = bits[11:0]
+  offset:Imm = bits[11:0]
   offen = bits[54]
   idxen = bits[55]
   glc = bits[14]
@@ -1687,7 +1668,7 @@ class SMEM(Inst64):
   sdata:SGPR = bits[12:6]
   sbase:SGPR = bits[5:0]
   soffset:SSrc = bits[63:57]
-  offset:SImm = bits[52:32]
+  offset:Imm = bits[52:32]
   glc = bits[16]
   dlc = bits[14]
 
@@ -1783,7 +1764,7 @@ class VOPD(Inst64):
   vdsty = bits[55:49]
   vdstx = bits[63:56]
 
-# instruction helpers: functools.partial(Format, Op.OPCODE)
+# instruction helpers
 ds_add_u32 = functools.partial(DS, DSOp.DS_ADD_U32)
 ds_sub_u32 = functools.partial(DS, DSOp.DS_SUB_U32)
 ds_rsub_u32 = functools.partial(DS, DSOp.DS_RSUB_U32)
@@ -3040,27 +3021,9 @@ v_and_b16 = functools.partial(VOP3, VOP3Op.V_AND_B16)
 v_or_b16 = functools.partial(VOP3, VOP3Op.V_OR_B16)
 v_xor_b16 = functools.partial(VOP3, VOP3Op.V_XOR_B16)
 dword = functools.partial(VOP3SD, VOP3SDOp.DWORD)
-sgpr0 = functools.partial(VOP3SD, VOP3SDOp.SGPR0)
-vcc_lo = functools.partial(VOP3SD, VOP3SDOp.VCC_LO)
-vcc_hi = functools.partial(VOP3SD, VOP3SDOp.VCC_HI)
-ttmp0 = functools.partial(VOP3SD, VOP3SDOp.TTMP0)
-null = functools.partial(VOP3SD, VOP3SDOp.NULL)
-m0 = functools.partial(VOP3SD, VOP3SDOp.M0)
-exec_lo = functools.partial(VOP3SD, VOP3SDOp.EXEC_LO)
-exec_hi = functools.partial(VOP3SD, VOP3SDOp.EXEC_HI)
-dpp8 = functools.partial(VOP3SD, VOP3SDOp.DPP8)
-dpp8fi = functools.partial(VOP3SD, VOP3SDOp.DPP8FI)
-shared_base = functools.partial(VOP3SD, VOP3SDOp.SHARED_BASE)
-shared_limit = functools.partial(VOP3SD, VOP3SDOp.SHARED_LIMIT)
-private_base = functools.partial(VOP3SD, VOP3SDOp.PRIVATE_BASE)
-private_limit = functools.partial(VOP3SD, VOP3SDOp.PRIVATE_LIMIT)
-dpp16 = functools.partial(VOP3SD, VOP3SDOp.DPP16)
-scc = functools.partial(VOP3SD, VOP3SDOp.SCC)
-src1 = functools.partial(VOP3SD, VOP3SDOp.SRC1)
 v_add_co_ci_u32 = functools.partial(VOP3SD, VOP3SDOp.V_ADD_CO_CI_U32)
 v_sub_co_ci_u32 = functools.partial(VOP3SD, VOP3SDOp.V_SUB_CO_CI_U32)
 v_subrev_co_ci_u32 = functools.partial(VOP3SD, VOP3SDOp.V_SUBREV_CO_CI_U32)
-vgpr = functools.partial(VOP3SD, VOP3SDOp.VGPR)
 v_div_scale_f32 = functools.partial(VOP3SD, VOP3SDOp.V_DIV_SCALE_F32)
 v_div_scale_f64 = functools.partial(VOP3SD, VOP3SDOp.V_DIV_SCALE_F64)
 v_mad_u64_u32 = functools.partial(VOP3SD, VOP3SDOp.V_MAD_U64_U32)
@@ -3068,7 +3031,6 @@ v_mad_i64_i32 = functools.partial(VOP3SD, VOP3SDOp.V_MAD_I64_I32)
 v_add_co_u32 = functools.partial(VOP3SD, VOP3SDOp.V_ADD_CO_U32)
 v_sub_co_u32 = functools.partial(VOP3SD, VOP3SDOp.V_SUB_CO_U32)
 v_subrev_co_u32 = functools.partial(VOP3SD, VOP3SDOp.V_SUBREV_CO_U32)
-src0 = functools.partial(VOP3SD, VOP3SDOp.SRC0)
 
 VCC_LO = SrcEnum.VCC_LO
 VCC_HI = SrcEnum.VCC_HI
