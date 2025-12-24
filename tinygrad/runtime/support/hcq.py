@@ -36,6 +36,12 @@ class FileIOInterface:
   def write(self, content, binary=False, offset=None):
     if offset is not None: self.seek(offset)
     with open(self.fd, "wb" if binary else "w", closefd=False) as file: file.write(content)
+  def pread(self, size=None, binary=False, offset=None):
+    if offset is None: offset = 0
+    return os.pread(self.fd, size, offset)
+  def pwrite(self, content, binary=False, offset=None):
+    if offset is None: offset = 0
+    return os.pwrite(self.fd, content, offset)
   def listdir(self): return os.listdir(self.path)
   def seek(self, offset): os.lseek(self.fd, offset, os.SEEK_SET)
   @staticmethod

@@ -16,6 +16,14 @@ def _IOW(base, nr, typ): return functools.partial(_do_ioctl, 1, ord(base) if isi
 def _IOR(base, nr, typ): return functools.partial(_do_ioctl, 2, ord(base) if isinstance(base, str) else base, nr, typ)
 def _IOWR(base, nr, typ): return functools.partial(_do_ioctl, 3, ord(base) if isinstance(base, str) else base, nr, typ)
 
+def _do_ioctl_nosz(__idir, __base, __nr, __fd, *args):
+  assert not WIN, "ioctl not supported"
+  import tinygrad.runtime.support.hcq as hcq, fcntl
+  ioctl = __fd.ioctl if isinstance(__fd, hcq.FileIOInterface) else functools.partial(fcntl.ioctl, __fd)
+  return ioctl((__idir<<30)|(__base << 8)|__nr, *args)
+
+def _IO_NOSZ(base, nr): return functools.partial(_do_ioctl_nosz, 0, ord(base) if isinstance(base, str) else base, nr)
+
 def CEnum(typ: type[ctypes._SimpleCData]):
   class _CEnum(typ): # type: ignore
     _val_to_name_: dict[int,str] = {}
