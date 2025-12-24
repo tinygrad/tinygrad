@@ -1,4 +1,4 @@
-import ctypes, ctypes.util
+import ctypes, ctypes.util, os
 
 def _try_dlopen_gpuocelot():
   GPUOCELOT_PATHS = [ctypes.util.find_library("gpuocelot")] if ctypes.util.find_library("gpuocelot") is not None else []
@@ -14,7 +14,16 @@ def _try_dlopen_gpuocelot():
   print("Could not find libgpuocelot.so")
   return None
 
+class PythonRemu:
+  """Python RDNA3 emulator wrapper that matches the libremu.so interface."""
+  def run_asm(self, lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int) -> int:
+    from extra.assembly.rdna3.emu import run_asm
+    return run_asm(lib, lib_sz, gx, gy, gz, lx, ly, lz, args_ptr)
+
 def _try_dlopen_remu():
+  # Use Python emulator if PYTHON_REMU is set
+  if os.environ.get("PYTHON_REMU"):
+    return PythonRemu()
   REMU_PATHS = ["extra/remu/target/release/libremu.so", "libremu.so", "/usr/local/lib/libremu.so",
                "extra/remu/target/release/libremu.dylib", "libremu.dylib", "/usr/local/lib/libremu.dylib", "/opt/homebrew/lib/libremu.dylib"]
   for path in REMU_PATHS:
@@ -25,5 +34,9 @@ def _try_dlopen_remu():
         ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
     except OSError: pass
     else: return remu
-  print("Could not find libremu.so")
-  return None
+  # Fall back to Python emulator
+  try:
+    return PythonRemu()
+  except ImportError:
+    print("Could not find libremu.so or Python emulator")
+    return None

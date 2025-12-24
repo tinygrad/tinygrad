@@ -6,6 +6,7 @@ import re
 class BitField:
   def __init__(self, hi: int, lo: int): self.hi, self.lo = hi, lo
   def __eq__(self, val: int) -> tuple[BitField, int]: return (self, val)  # type: ignore
+  def mask(self) -> int: return (1 << (self.hi - self.lo + 1)) - 1
 class _Bits:
   def __getitem__(self, key) -> BitField: return BitField(key.start, key.stop) if isinstance(key, slice) else BitField(key, key)
 bits = _Bits()
@@ -32,6 +33,7 @@ class RawImm:
 # *** encoding ***
 FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
 SRC_FIELDS = {'src0', 'src1', 'src2', 'ssrc0', 'ssrc1', 'soffset'}
+RAW_FIELDS = {'vdata', 'vdst', 'vaddr', 'addr', 'data', 'data0', 'data1', 'sdst', 'sdata'}
 
 def encode_src(val) -> int:
   if isinstance(val, SGPR): return val.idx
@@ -39,17 +41,16 @@ def encode_src(val) -> int:
   if isinstance(val, TTMP): return 108 + val.idx
   if hasattr(val, 'value'): return val.value
   if isinstance(val, float): return FLOAT_ENC.get(val, 255)
-  if isinstance(val, int): return 128 + val if 0 <= val <= 64 else 192 + (-val) if -16 <= val <= -1 else 255
-  raise ValueError(f"cannot encode source: {val}")
+  return 128 + val if isinstance(val, int) and 0 <= val <= 64 else 192 + (-val) if isinstance(val, int) and -16 <= val <= -1 else 255
 
 def decode_src(val: int) -> str:
   if val <= 105: return f"s{val}"
-  if val in (106, 107): return ["vcc_lo", "vcc_hi"][val - 106]
+  if 106 <= val <= 107: return ["vcc_lo", "vcc_hi"][val - 106]
   if 108 <= val <= 123: return f"ttmp{val - 108}"
   if 124 <= val <= 127: return ["null", "m0", "exec_lo", "exec_hi"][val - 124]
   if 128 <= val <= 192: return str(val - 128)
   if 193 <= val <= 208: return str(-(val - 192))
-  if val in (FLOAT_DEC := {v: str(k) for k, v in FLOAT_ENC.items()}): return FLOAT_DEC[val]
+  if val in (fd := {v: str(k) for k, v in FLOAT_ENC.items()}): return fd[val]
   if 256 <= val <= 511: return f"v{val - 256}"
   return "lit" if val == 255 else f"?{val}"
 
@@ -60,70 +61,59 @@ class Inst:
 
   def __init_subclass__(cls, **kwargs):
     super().__init_subclass__(**kwargs)
-    cls._fields = {}
-    for name, val in list(cls.__dict__.items()):
-      if isinstance(val, BitField): cls._fields[name] = val
-      elif isinstance(val, tuple) and len(val) == 2 and isinstance(val[0], BitField):
-        cls._fields[name] = val[0]
-        if name == 'encoding': cls._encoding = val
+    cls._fields = {n: v[0] if isinstance(v, tuple) else v for n, v in cls.__dict__.items() if isinstance(v, BitField) or (isinstance(v, tuple) and len(v) == 2 and isinstance(v[0], BitField))}
+    if 'encoding' in cls._fields and isinstance(cls.__dict__.get('encoding'), tuple): cls._encoding = cls.__dict__['encoding']
 
   def __init__(self, *args, literal: int | None = None, **kwargs):
-    self._values = dict(zip([n for n in self._fields if n != 'encoding'], args))
+    self._values, self._literal = dict(zip([n for n in self._fields if n != 'encoding'], args)), literal
     self._values.update(kwargs)
-    self._literal = literal
 
   def _encode_field(self, name: str, val) -> int:
     if isinstance(val, RawImm): return val.val
     if name in {'srsrc', 'ssamp'}: return val.idx // 4 if isinstance(val, Reg) else val
     if name == 'sbase': return val.idx // 2 if isinstance(val, Reg) else val
-    if name in {'vdata', 'vaddr', 'addr', 'data', 'data0', 'data1'}: return val.idx if isinstance(val, Reg) else val
-    # vdst can hold SGPR/TTMP for some instructions (e.g. v_readfirstlane_b32)
-    if name == 'vdst': return (108 + val.idx if isinstance(val, TTMP) else val.idx) if isinstance(val, Reg) else val
-    if name in {'sdst', 'sdata'}: return (108 + val.idx if isinstance(val, TTMP) else val.idx) if isinstance(val, Reg) else val
-    if isinstance(val, Reg) or (name in SRC_FIELDS and isinstance(val, (int, float))): return encode_src(val)
+    if name in RAW_FIELDS: return (108 + val.idx if isinstance(val, TTMP) else val.idx) if isinstance(val, Reg) else val
+    if isinstance(val, Reg) or name in SRC_FIELDS: return encode_src(val)
     return val.value if hasattr(val, 'value') else val
 
   def to_int(self) -> int:
-    word = 0
-    if self._encoding:
-      bf, val = self._encoding
-      word |= (val & ((1 << (bf.hi - bf.lo + 1)) - 1)) << bf.lo
-    for name, bf in self._fields.items():
-      if name != 'encoding' and name in self._values:
-        word |= (self._encode_field(name, self._values[name]) & ((1 << (bf.hi - bf.lo + 1)) - 1)) << bf.lo
+    word = (self._encoding[1] & self._encoding[0].mask()) << self._encoding[0].lo if self._encoding else 0
+    for n, bf in self._fields.items():
+      if n != 'encoding' and n in self._values: word |= (self._encode_field(n, self._values[n]) & bf.mask()) << bf.lo
     return word
 
   def _get_literal(self) -> int | None:
     from enum import IntEnum
-    for name in SRC_FIELDS:
-      if name in self._values and not isinstance(v := self._values[name], RawImm) and isinstance(v, int) and not isinstance(v, IntEnum) and not (0 <= v <= 64 or -16 <= v <= -1): return v
+    for n in SRC_FIELDS:
+      if n in self._values and not isinstance(v := self._values[n], RawImm) and isinstance(v, int) and not isinstance(v, IntEnum) and not (0 <= v <= 64 or -16 <= v <= -1): return v
     return None
 
   def to_bytes(self) -> bytes:
     result = self.to_int().to_bytes(self._size(), 'little')
-    lit = self._get_literal() or (self._literal if hasattr(self, '_literal') else None)
-    return result + (lit & 0xffffffff).to_bytes(4, 'little') if lit is not None else result
+    return result + (lit & 0xffffffff).to_bytes(4, 'little') if (lit := self._get_literal() or getattr(self, '_literal', None)) else result
 
   @classmethod
   def _size(cls) -> int: return 4 if issubclass(cls, Inst32) else 8
+
   @classmethod
-  def from_int(cls, word: int, literal: int | None = None):
+  def from_int(cls, word: int):
     inst = object.__new__(cls)
-    inst._values, inst._literal = {}, literal
-    for n, bf in cls._fields.items():
-      if n == 'encoding': continue
-      v = (word >> bf.lo) & ((1 << (bf.hi - bf.lo + 1)) - 1)
-      inst._values[n] = RawImm(v) if n in SRC_FIELDS else v
+    inst._values = {n: RawImm(v) if n in SRC_FIELDS else v for n, bf in cls._fields.items() if n != 'encoding' for v in [(word >> bf.lo) & bf.mask()]}
+    inst._literal = None
     return inst
+
   @classmethod
   def from_bytes(cls, data: bytes):
     inst = cls.from_int(int.from_bytes(data[:cls._size()], 'little'))
-    # check for literal (255 in any src field) and read the following dword
+    # check for literal: either 255 in src field, or VOP2 FMAAK/FMAMK opcodes (always have literal)
+    op_val = inst._values.get('op', 0)
+    has_literal = cls.__name__ == 'VOP2' and op_val in (44, 45, 55, 56)  # VOP2 FMAMK/FMAAK
     for n in SRC_FIELDS:
-      if n in inst._values and isinstance(inst._values[n], RawImm) and inst._values[n].val == 255 and len(data) >= cls._size() + 4:
-        inst._literal = int.from_bytes(data[cls._size():cls._size()+4], 'little')
-        break
+      if n in inst._values and isinstance(inst._values[n], RawImm) and inst._values[n].val == 255: has_literal = True
+    if has_literal and len(data) >= cls._size() + 4:
+      inst._literal = int.from_bytes(data[cls._size():cls._size()+4], 'little')
     return inst
+
   def __repr__(self): return f"{self.__class__.__name__}({', '.join(f'{k}={v}' for k, v in self._values.items())})"
 
   def disasm(self) -> str:
@@ -133,17 +123,20 @@ class Inst:
       from extra.assembly.rdna3 import autogen
       op_name = getattr(autogen, f"{self.__class__.__name__}Op")(op_val).name.lower() if hasattr(autogen, f"{self.__class__.__name__}Op") else f"op_{op_val}"
     except (ValueError, KeyError): op_name = f"op_{op_val}"
-    operands = []
-    for name in self._fields:
-      if name not in ('encoding', 'op'):
-        val = self._values.get(name, 0)
-        val = val.val if isinstance(val, RawImm) else val
-        # use literal value if this field has 255 (literal marker)
-        if name in SRC_FIELDS and val == 255 and hasattr(self, '_literal') and self._literal is not None:
-          operands.append(f"0x{self._literal:x}")
-        else:
-          operands.append(decode_src(val) if name in SRC_FIELDS else f"{'s' if name == 'sdst' else 'v'}{val}" if name in ('sdst', 'vdst') else f"v{val}" if name == 'vsrc1' else f"0x{val:x}" if name == 'simm16' else str(val))
-    return f"{op_name} {', '.join(operands)}" if operands else op_name
+    def fmt(n, v):
+      v = v.val if isinstance(v, RawImm) else v
+      if n in SRC_FIELDS:
+        if v == 255: return f"0x{self._literal:x}" if getattr(self, '_literal', None) else "0xff"
+        return decode_src(v)
+      if n in ('sdst', 'vdst'): return f"{'s' if n == 'sdst' else 'v'}{v}"
+      return f"v{v}" if n == 'vsrc1' else f"0x{v:x}" if n == 'simm16' else str(v)
+    ops = [fmt(n, self._values.get(n, 0)) for n in self._fields if n not in ('encoding', 'op')]
+    # FMAAK/FMAMK (VOP2 only): insert literal in correct position
+    if self.__class__.__name__ == 'VOP2' and getattr(self, '_literal', None) and op_val in (44, 45, 55, 56):
+      lit_str = f"0x{self._literal:x}"
+      if op_val in (44, 55): ops.insert(2, lit_str)  # FMAMK: vdst, src0, LIT, vsrc1
+      else: ops.append(lit_str)  # FMAAK: vdst, src0, vsrc1, LIT
+    return f"{op_name} {', '.join(ops)}" if ops else op_name
 
 class Inst32(Inst): pass
 class Inst64(Inst):
@@ -164,15 +157,22 @@ REG_MAP = {'s': SGPR, 'v': VGPR, 't': TTMP, 'ttmp': TTMP}
 
 def parse_operand(op: str) -> tuple:
   op = op.strip().lower()
-  neg = op.startswith('-'); op = op[1:] if neg else op
+  # handle neg prefix for combined -|v0| case
+  neg = op.startswith('-') and not op[1:2].isdigit(); op = op[1:] if neg else op
+  # handle abs modifier
   abs_ = (op.startswith('|') and op.endswith('|')) or (op.startswith('abs(') and op.endswith(')'))
   op = op[1:-1] if op.startswith('|') else op[4:-1] if op.startswith('abs(') else op
-  if op in SPECIAL_REGS: return (SPECIAL_REGS[op], neg, abs_)
+  # literals (neg is part of value, not modifier)
   if op in FLOAT_CONSTS: return (FLOAT_CONSTS[op], neg, abs_)
+  if m := re.match(r'^-?\d+$', op): return (int(op), neg, abs_)
+  # hex literals: small values (0-255) are raw immediates, larger need literal dword
+  if m := re.match(r'^-?0x([0-9a-f]+)$', op):
+    v = -int(m.group(1), 16) if op.startswith('-') else int(m.group(1), 16)
+    return (RawImm(v) if 0 <= v <= 255 else v, neg, abs_)
+  # registers
+  if op in SPECIAL_REGS: return (SPECIAL_REGS[op], neg, abs_)
   if m := re.match(r'^([svt](?:tmp)?)\[(\d+):(\d+)\]$', op): return (REG_MAP[m.group(1)][int(m.group(2)):int(m.group(3))+1], neg, abs_)
   if m := re.match(r'^([svt](?:tmp)?)(\d+)$', op): return (REG_MAP[m.group(1)][int(m.group(2))], neg, abs_)
-  if m := re.match(r'^0x([0-9a-f]+)$', op): return (int(m.group(1), 16), neg, abs_)
-  if m := re.match(r'^-?\d+$', op): return (int(op), neg, abs_)
   raise ValueError(f"cannot parse operand: {op}")
 
 def asm(text: str) -> Inst:
@@ -183,7 +183,6 @@ def asm(text: str) -> Inst:
   parts = text.replace(',', ' ').split()
   if not parts: raise ValueError("empty instruction")
   mnemonic, op_str = parts[0].lower(), text[len(parts[0]):].strip()
-  # split operands respecting brackets and pipes
   operands, current, depth, in_pipe = [], "", 0, False
   for ch in op_str:
     if ch == '[': depth += 1
@@ -193,12 +192,18 @@ def asm(text: str) -> Inst:
     else: current += ch
   if current.strip(): operands.append(current.strip())
   parsed = [parse_operand(op) for op in operands]
-  values = [p[0] for p in parsed]
-  neg_bits = sum((1 << (i-1)) for i, p in enumerate(parsed) if i > 0 and p[1])
-  abs_bits = sum((1 << (i-1)) for i, p in enumerate(parsed) if i > 0 and p[2])
-  for suffix in ['', '_e32']:
+  values, neg_bits, abs_bits = [p[0] for p in parsed], sum((1 << (i-1)) for i, p in enumerate(parsed) if i > 0 and p[1]), sum((1 << (i-1)) for i, p in enumerate(parsed) if i > 0 and p[2])
+  # FMAAK/FMAMK: 4th operand is literal
+  lit = None
+  if mnemonic in ('v_fmaak_f32', 'v_fmaak_f16') and len(values) == 4:
+    lit = values[3].val if isinstance(values[3], RawImm) else values[3]; values = values[:3]
+  elif mnemonic in ('v_fmamk_f32', 'v_fmamk_f16') and len(values) == 4:
+    lit = values[2].val if isinstance(values[2], RawImm) else values[2]; values = [values[0], values[1], values[3]]
+  # prefer _e32 (VOP1/2) when no modifiers, otherwise use VOP3
+  suffixes = ['_e32', ''] if not (neg_bits or abs_bits or clamp) else ['', '_e32']
+  for suffix in suffixes:
     if hasattr(autogen, name := mnemonic.replace('.', '_') + suffix):
-      inst = getattr(autogen, name)(*values)
+      inst = getattr(autogen, name)(*values, literal=lit)
       if neg_bits and 'neg' in inst._fields: inst._values['neg'] = neg_bits
       if abs_bits and 'abs' in inst._fields: inst._values['abs'] = abs_bits
       if clamp and 'clmp' in inst._fields: inst._values['clmp'] = 1
