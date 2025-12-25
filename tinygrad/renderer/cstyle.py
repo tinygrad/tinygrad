@@ -540,4 +540,23 @@ class AMDRenderer(CStyleLanguage):
 
 class NVRenderer(CUDARenderer): device = "NV"
 class HIPRenderer(AMDRenderer): device = "HIP"
+
+class AMDJITRenderer(AMDRenderer):
+  def __init__(self, arch:str):
+    from tinygrad.runtime.support.compiler_amd import HIPCompiler
+    super().__init__(arch)
+    self.compiler = HIPCompiler(arch)
+
+class AMDCCRenderer(AMDRenderer):
+  def __init__(self, arch:str, extra_options:list[str]=[]):
+    from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
+    super().__init__(arch)
+    self.compiler = HIPCCCompiler(arch, extra_options)
+
+class HIPJITRenderer(HIPRenderer):
+  def __init__(self, arch:str):
+    from tinygrad.runtime.support.compiler_amd import HIPCompiler
+    super().__init__(arch)
+    self.compiler = HIPCompiler(arch)
+
 class QCOMRenderer(OpenCLRenderer): device = "QCOM"
