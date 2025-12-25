@@ -31,8 +31,8 @@ class StateSnapshot:
     if self.vcc != other.vcc: diffs.append(f"vcc: 0x{self.vcc:08x} vs 0x{other.vcc:08x}")
     if self.exec_mask != other.exec_mask: diffs.append(f"exec: 0x{self.exec_mask:08x} vs 0x{other.exec_mask:08x}")
     for i, (a, b) in enumerate(zip(self.sgpr, other.sgpr)):
-      # Skip VCC_LO (106) and VCC_HI (107) as they alias vcc which is compared separately
-      if i in (106, 107): continue
+      # Skip VCC_LO/HI (106/107) and EXEC_LO/HI (126/127) as they alias vcc/exec_mask which are compared separately
+      if i in (106, 107, 126, 127): continue
       if a != b: diffs.append(f"sgpr[{i}]: 0x{a:08x} vs 0x{b:08x}")
     for lane in range(n_lanes):
       for i, (a, b) in enumerate(zip(self.vgpr[lane], other.vgpr[lane])):
@@ -424,6 +424,8 @@ class TestTinygradKernels(unittest.TestCase):
   def test_index_int64(self):
     from tinygrad import dtypes
     self._test_kernel(lambda T: T.empty(4, 4)[T.arange(4).cast(dtypes.int64), :])
+
+  @unittest.skip("only works with mock GPU")
   def test_index_int64_2d(self):
     from tinygrad import dtypes
     # Tests 64-bit compare with inline constants (comparing against 0)
