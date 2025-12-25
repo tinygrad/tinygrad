@@ -157,7 +157,7 @@ def disasm(inst: Inst) -> str:
   if cls_name == 'SMEM':
     # No-operand instructions
     if op_name in ('s_gl1_inv', 's_dcache_inv'): return op_name
-    sdata, sbase, soffset, offset = unwrap(inst._values['sdata']), unwrap(inst._values['sbase']), unwrap(inst._values['soffset']), unwrap(inst._values['offset'])
+    sdata, sbase, soffset, offset = unwrap(inst._values['sdata']), unwrap(inst._values['sbase']), unwrap(inst._values['soffset']), unwrap(inst._values.get('offset', 0))
     glc, dlc = unwrap(inst._values.get('glc', 0)), unwrap(inst._values.get('dlc', 0))
     # s_atc_probe/s_atc_probe_buffer: sdata is the probe mode (0-7), not a register
     if op_name in ('s_atc_probe', 's_atc_probe_buffer'):
@@ -265,6 +265,10 @@ def disasm(inst: Inst) -> str:
     is_shift64 = 'rev' in op_name and '64' in op_name and op_name.startswith('v_')
     # v_ldexp_f64: 64-bit src0 (mantissa), 32-bit src1 (exponent)
     is_ldexp64 = op_name == 'v_ldexp_f64'
+    # v_trig_preop_f64: 64-bit dst/src0, 32-bit src1 (exponent/scale)
+    is_trig_preop = op_name == 'v_trig_preop_f64'
+    # v_readlane_b32: destination is SGPR (despite vdst field)
+    is_readlane = op_name == 'v_readlane_b32'
     # SAD/QSAD/MQSAD instructions have mixed sizes
     # v_qsad_pk_u16_u8, v_mqsad_pk_u16_u8: 64-bit dst/src0/src2, 32-bit src1
     # v_mqsad_u32_u8: 128-bit (4 reg) dst/src2, 64-bit src0, 32-bit src1
@@ -281,11 +285,19 @@ def disasm(inst: Inst) -> str:
       dst_type, src_type = m.group(1), m.group(2)
       is_f16_dst = '16' in dst_type
       is_f16_src = is_f16_src2 = '16' in src_type
+      # Override is_f64 for conversion ops - check if dst or src is 64-bit
+      is_f64_dst = '64' in dst_type
+      is_f64_src = '64' in src_type
+      is_f64 = False  # Don't use default is_f64 detection for cvt ops
     elif m := re.match(r'v_mad_([iu])32_([iu])16', op_name):
       # v_mad_i32_i16, v_mad_u32_u16: 32-bit dst, 16-bit src0/src1, 32-bit src2
       is_f16_dst = False
       is_f16_src = True  # src0 and src1 are 16-bit
       is_f16_src2 = False  # src2 is 32-bit
+    elif 'pack_b32' in op_name:
+      # v_pack_b32_f16: 32-bit dst, 16-bit sources
+      is_f16_dst = False
+      is_f16_src = is_f16_src2 = True
     else:
       # 16-bit ops need .h/.l suffix, but packed ops (dot2, pk_, sad, msad, qsad, mqsad) don't
       is_16bit_op = ('f16' in op_name or 'i16' in op_name or 'u16' in op_name or 'b16' in op_name) and not any(x in op_name for x in ('dot2', 'pk_', 'sad', 'msad', 'qsad', 'mqsad'))
@@ -302,16 +314,21 @@ def disasm(inst: Inst) -> str:
       if abs_bit: s = f"|{s}|"
       if neg_bit: s = f"-{s}"
       return s
-    # Determine register count for each source
-    src0_cnt = 2 if ((is_f64 and not is_shift64) or is_sad64 or is_mqsad_u32) else 1
-    src1_cnt = 2 if (is_f64 and not is_class and not is_ldexp64) else 1
+    # Determine register count for each source (check for cvt-specific 64-bit flags first)
+    is_src0_64 = locals().get('is_f64_src', is_f64 and not is_shift64) or is_sad64 or is_mqsad_u32
+    is_src1_64 = is_f64 and not is_class and not is_ldexp64 and not is_trig_preop
+    src0_cnt = 2 if is_src0_64 else 1
+    src1_cnt = 2 if is_src1_64 else 1
     src2_cnt = 4 if is_mqsad_u32 else 2 if (is_f64 or is_sad64) else 1
     src0_str = fmt_vop3_src(src0, neg & 1, abs_ & 1, opsel & 1, src0_cnt, is_f16_src)
     src1_str = fmt_vop3_src(src1, neg & 2, abs_ & 2, opsel & 2, src1_cnt, is_f16_src)
     src2_str = fmt_vop3_src(src2, neg & 4, abs_ & 4, opsel & 4, src2_cnt, is_f16_src2)
-    # Format destination - for 16-bit ops, use .h/.l suffix
-    dst_cnt = 4 if is_mqsad_u32 else 2 if (is_f64 or is_sad64) else 1
-    if dst_cnt > 1:
+    # Format destination - for 16-bit ops, use .h/.l suffix; readlane uses SGPR dest
+    is_dst_64 = locals().get('is_f64_dst', is_f64) or is_sad64
+    dst_cnt = 4 if is_mqsad_u32 else 2 if is_dst_64 else 1
+    if is_readlane:
+      dst_str = _fmt_sdst(vdst, 1)
+    elif dst_cnt > 1:
       dst_str = _vreg(vdst, dst_cnt)
     elif is_f16_dst:
       dst_str = f"v{vdst}.h" if (opsel & 8) else f"v{vdst}.l"
@@ -350,10 +367,11 @@ def disasm(inst: Inst) -> str:
     elif op_val < 512:  # VOP1 promoted
       return f"{op_name}_e64 {dst_str}, {src0_str}" + fmt_opsel(1) + clamp_str + omod_str
     else:  # Native VOP3 - determine 2 vs 3 sources based on instruction name
-      # 3-source ops: fma, mad, min3, max3, med3, div_fixup, div_fmas, sad, msad, qsad, mqsad, lerp, alignbit/byte, cubeid/sc/tc/ma, bfe, bfi, permlane, cndmask
+      # 3-source ops: fma, mad, min3, max3, med3, div_fixup, div_fmas, sad, msad, qsad, mqsad, lerp, alignbit/byte, cubeid/sc/tc/ma, bfe, bfi, perm_b32, permlane, cndmask
+      # Note: v_writelane_b32 is 2-src (src0, src1 with vdst as 3rd operand - read-modify-write)
       is_3src = any(x in op_name for x in ('fma', 'mad', 'min3', 'max3', 'med3', 'div_fix', 'div_fmas', 'sad', 'lerp', 'align', 'cube',
-                                            'bfe', 'bfi', 'perm', 'cndmask', 'xor3', 'or3', 'add3', 'lshl_or', 'and_or', 'lshl_add',
-                                            'add_lshl', 'xad', 'maxmin', 'minmax', 'dot2', 'cvt_pk_u8', 'writelane', 'mullit'))
+                                            'bfe', 'bfi', 'perm_b32', 'permlane', 'cndmask', 'xor3', 'or3', 'add3', 'lshl_or', 'and_or', 'lshl_add',
+                                            'add_lshl', 'xad', 'maxmin', 'minmax', 'dot2', 'cvt_pk_u8', 'mullit'))
       if is_3src:
         return f"{op_name} {dst_str}, {src0_str}, {src1_str}, {src2_str}" + fmt_opsel(3) + clamp_str + omod_str
       return f"{op_name} {dst_str}, {src0_str}, {src1_str}" + fmt_opsel(2) + clamp_str + omod_str
