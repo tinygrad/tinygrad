@@ -116,15 +116,22 @@ def _make_disasm_test(name):
     for asm_text, data in self.tests.get(name, []):
       if len(data) > fmt_cls._size(): continue  # skip literals (need different handling)
       try:
-        decoded = fmt_cls.from_bytes(data)
-        op_val = decoded._values.get('op', 0)
-        op_val = op_val.val if hasattr(op_val, 'val') else op_val
-        # VOP3SD test uses VOP3 file - skip non-VOP3SD instructions
-        if name == 'vop3sd' and op_val not in vop3sd_opcodes: continue
-        # VOP3 and VOP3SD share encoding - validate with appropriate enum
-        if fmt_cls.__name__ == 'VOP3' and op_val in vop3sd_opcodes:
-          VOP3SDOp(op_val)  # validate as VOP3SD
+        # VOP3 and VOP3SD share encoding - peek at opcode to determine which class to use
+        if fmt_cls.__name__ in ('VOP3', 'VOP3SD'):
+          temp = VOP3.from_bytes(data)
+          op_val = temp._values.get('op', 0)
+          op_val = op_val.val if hasattr(op_val, 'val') else op_val
+          is_vop3sd = op_val in vop3sd_opcodes
+          decoded = VOP3SD.from_bytes(data) if is_vop3sd else VOP3.from_bytes(data)
+          # Validate opcode with appropriate enum
+          if is_vop3sd:
+            VOP3SDOp(op_val)
+          else:
+            VOP3Op(op_val)
         else:
+          decoded = fmt_cls.from_bytes(data)
+          op_val = decoded._values.get('op', 0)
+          op_val = op_val.val if hasattr(op_val, 'val') else op_val
           op_enum(op_val)  # validate opcode
         if decoded.to_bytes()[:len(data)] != data:
           failed += 1; failures.append(f"decode roundtrip failed for {data.hex()}"); continue

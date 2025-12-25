@@ -81,7 +81,11 @@ class Inst:
       annotations.update(getattr(cls, '__annotations__', {}))
     # Type check and encode values
     for name, val in list(self._values.items()):
-      if name == 'encoding' or isinstance(val, RawImm): continue
+      if name == 'encoding': continue
+      # For RawImm, only process RAW_FIELDS to unwrap to int
+      if isinstance(val, RawImm):
+        if name in RAW_FIELDS: self._values[name] = val.val
+        continue
       ann = annotations.get(name)
       # Type validation
       if ann is SGPR:
@@ -98,9 +102,11 @@ class Inst:
         if encoded == 255 and self._literal is None and isinstance(val, int) and not isinstance(val, IntEnum):
           self._literal = val
       # Encode raw register fields for consistent repr
-      elif name in RAW_FIELDS and isinstance(val, Reg):
-        encoded = (108 + val.idx) if isinstance(val, TTMP) else (val.idx | (0x80 if val.hi else 0))
-        self._values[name] = encoded
+      elif name in RAW_FIELDS:
+        if isinstance(val, Reg):
+          self._values[name] = (108 + val.idx) if isinstance(val, TTMP) else (val.idx | (0x80 if val.hi else 0))
+        elif hasattr(val, 'value'):  # IntEnum like SrcEnum.NULL
+          self._values[name] = val.value
       # Encode sbase (divided by 2) and srsrc/ssamp (divided by 4)
       elif name == 'sbase' and isinstance(val, Reg):
         self._values[name] = val.idx // 2

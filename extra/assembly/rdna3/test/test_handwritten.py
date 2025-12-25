@@ -55,5 +55,20 @@ class TestIntegration(unittest.TestCase):
   def test_simple_int_to_v(self):
     self.inst = v_mov_b32_e32(v[0], 1)
 
+  def test_three_add(self):
+    self.inst = v_add_co_ci_u32_e32(v[3], s[7], v[3])
+
+  def test_three_add_v(self):
+    self.inst = v_add_co_ci_u32_e32(v[3], v[7], v[3])
+
+  def test_three_add_const(self):
+    self.inst = v_add_co_ci_u32_e32(v[3], 2.0, v[3])
+
+  def test_swaitcnt_lgkm(self): self.inst = s_waitcnt(0xfc07)
+  def test_swaitcnt_vm(self): self.inst = s_waitcnt(0x03f7)
+
+  def test_vmad(self):
+    self.inst = v_mad_u64_u32(v[1:2], NULL, s[2], 3, v[1:2])
+
 if __name__ == "__main__":
   unittest.main()
