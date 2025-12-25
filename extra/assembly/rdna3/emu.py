@@ -8,7 +8,7 @@ from extra.assembly.rdna3.autogen import (
   SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp, FLATOp, GLOBALOp, VOPDOp
 )
 from extra.assembly.rdna3.alu import (
-  f32, i32, f16, i16, sext, clz, cls, salu, valu, vopc, FLOAT_BITS,
+  f32, i32, f16, i16, sext, vopc, FLOAT_BITS, SALU, VALU,
   SOP1_BASE, SOP2_BASE, SOPC_BASE, SOPK_BASE, VOP1_BASE, VOP2_BASE
 )
 
@@ -165,8 +165,8 @@ def exec_sop1(st: WaveState, inst: SOP1) -> int:
   if op == SOP1Op.S_GETPC_B64: return -3
   if op == SOP1Op.S_SETPC_B64: return -4
   if op == SOP1Op.S_SWAPPC_B64: return -5
-  r, scc = salu(SOP1_BASE + op, s0, 0, st.scc)
-  st.wsgpr(inst.sdst, r); st.scc = scc; return 0
+  if (fn := SALU.get(SOP1_BASE + op)) is None: raise NotImplementedError(f"SOP1 op {op}")
+  r, scc = fn(s0, 0, st.scc); st.wsgpr(inst.sdst, r); st.scc = scc; return 0
 
 def exec_sop2(st: WaveState, inst: SOP2) -> int:
   s0, s1, op = st.rsrc(inst.ssrc0, 0), st.rsrc(inst.ssrc1, 0), inst.op
@@ -181,20 +181,21 @@ def exec_sop2(st: WaveState, inst: SOP2) -> int:
   if op == SOP2Op.S_FMAC_F32: st.wsgpr(inst.sdst, i32(f32(st.rsgpr(inst.sdst)) + f32(s0) * f32(s1))); return 0
   if op == SOP2Op.S_FMAAK_F32: st.wsgpr(inst.sdst, i32(f32(s0) * f32(s1) + f32(inst._literal or 0))); return 0
   if op == SOP2Op.S_FMAMK_F32: st.wsgpr(inst.sdst, i32(f32(s0) * f32(inst._literal or 0) + f32(s1))); return 0
-  r, scc = salu(SOP2_BASE + op, s0, s1, st.scc)
-  st.wsgpr(inst.sdst, r); st.scc = scc; return 0
+  if (fn := SALU.get(SOP2_BASE + op)) is None: raise NotImplementedError(f"SOP2 op {op}")
+  r, scc = fn(s0, s1, st.scc); st.wsgpr(inst.sdst, r); st.scc = scc; return 0
 
 def exec_sopc(st: WaveState, inst: SOPC) -> int:
   s0, s1, op = st.rsrc(inst.ssrc0, 0), st.rsrc(inst.ssrc1, 0), inst.op
   if op == SOPCOp.S_CMP_EQ_U64: st.scc = int(st.rsrc64(inst.ssrc0, 0) == st.rsrc64(inst.ssrc1, 0)); return 0
   if op == SOPCOp.S_CMP_LG_U64: st.scc = int(st.rsrc64(inst.ssrc0, 0) != st.rsrc64(inst.ssrc1, 0)); return 0
-  _, scc = salu(SOPC_BASE + op, s0, s1, st.scc)
-  st.scc = scc; return 0
+  if (fn := SALU.get(SOPC_BASE + op)) is None: raise NotImplementedError(f"SOPC op {op}")
+  st.scc = fn(s0, s1, st.scc)[1]; return 0
 
 def exec_sopk(st: WaveState, inst: SOPK) -> int:
   simm, s0, op = inst.simm16, st.rsgpr(inst.sdst), inst.op
   if op in SOPK_WAIT: return 0
-  r, scc = salu(SOPK_BASE + op, s0, simm, st.scc)
+  if (fn := SALU.get(SOPK_BASE + op)) is None: raise NotImplementedError(f"SOPK op {op}")
+  r, scc = fn(s0, simm, st.scc)
   if op not in (SOPKOp.S_CMPK_EQ_I32, SOPKOp.S_CMPK_LG_I32, SOPKOp.S_CMPK_GT_I32, SOPKOp.S_CMPK_GE_I32,
                 SOPKOp.S_CMPK_LT_I32, SOPKOp.S_CMPK_LE_I32, SOPKOp.S_CMPK_EQ_U32, SOPKOp.S_CMPK_LG_U32,
                 SOPKOp.S_CMPK_GT_U32, SOPKOp.S_CMPK_GE_U32, SOPKOp.S_CMPK_LT_U32, SOPKOp.S_CMPK_LE_U32):
@@ -248,8 +249,7 @@ def exec_vop1(st: WaveState, inst: VOP1, lane: int) -> None:
     elif inst.op == VOP1Op.V_CVT_I32_F64: V[inst.vdst] = (max(-0x80000000, min(0x7fffffff, int(v))) & 0xffffffff) if math.isfinite(v) else 0
     else: V[inst.vdst] = max(0, min(0xffffffff, int(v))) if math.isfinite(v) and v == v else 0
     return
-  r = valu(VOP1_BASE + inst.op, s0, 0, 0)
-  if r is not None: V[inst.vdst] = r
+  if (fn := VALU.get(VOP1_BASE + inst.op)): V[inst.vdst] = fn(s0, 0, 0)
 
 def exec_vop2(st: WaveState, inst: VOP2, lane: int) -> None:
   V, s0, s1, op = st.vgpr[lane], st.rsrc(inst.src0, lane), st.vgpr[lane][inst.vsrc1], inst.op
@@ -266,8 +266,7 @@ def exec_vop2(st: WaveState, inst: VOP2, lane: int) -> None:
     V[inst.vdst] = lo | (hi << 16); return
   if op == VOP2Op.V_ADD_CO_CI_U32: r = s0+s1+((st.vcc>>lane)&1); st.pend_vcc_lane(lane, r >= 0x100000000); V[inst.vdst] = r & 0xffffffff; return
   if op == VOP2Op.V_SUB_CO_CI_U32: b = (st.vcc>>lane)&1; st.pend_vcc_lane(lane, s1+b > s0); V[inst.vdst] = (s0-s1-b) & 0xffffffff; return
-  r = valu(VOP2_BASE + op, s0, s1, 0)
-  if r is not None: V[inst.vdst] = r
+  if (fn := VALU.get(VOP2_BASE + op)): V[inst.vdst] = fn(s0, s1, 0)
 
 def vop3_mod(val: int, neg: int, abs_: int, idx: int) -> int:
   if (abs_ >> idx) & 1: val = i32(abs(f32(val)))
@@ -305,8 +304,7 @@ def exec_vop3(st: WaveState, inst: VOP3, lane: int) -> None:
     elif op == VOP3Op.V_MAX_F64: r = max(a, b)
     else: r = min(a, b)
     V[vdst], V[vdst+1] = i64_parts(r); return
-  r = valu(op, s0, s1, s2)
-  if r is not None: V[vdst] = r
+  if (fn := VALU.get(op)): V[vdst] = fn(s0, s1, s2)
 
 def exec_vopc(st: WaveState, inst: VOPC, lane: int) -> None:
   result, is_cmpx = vopc(inst.op, st.rsrc(inst.src0, lane), st.vgpr[lane][inst.vsrc1]), inst.op >= 128

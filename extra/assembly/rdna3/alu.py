@@ -228,14 +228,6 @@ VALU: dict[int, callable] = {
   VOP3Op.V_MED3_I16: lambda a, b, c: sorted([sext(a & 0xffff, 16), sext(b & 0xffff, 16), sext(c & 0xffff, 16)])[1] & 0xffff,
 }
 
-def salu(op: int, s0: int, s1: int, scc: int) -> tuple[int, int]:
-  if fn := SALU.get(op): return fn(s0, s1, scc)
-  raise NotImplementedError(f"SALU op {op}")
-
-def valu(op: int, s0: int, s1: int, s2: int) -> int | None:
-  if fn := VALU.get(op): return fn(s0, s1, s2)
-  return None
-
 def vopc(op: int, s0: int, s1: int) -> int:
   base = op & 0x7f
   if 16 <= base <= 31:  # F32
