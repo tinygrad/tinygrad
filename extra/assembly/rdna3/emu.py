@@ -165,7 +165,6 @@ def decode_program(data: bytes) -> Program:
     if has_literal: inst._literal = int.from_bytes(data[i+base_size:i+base_size+4], 'little')
     result[i // 4] = inst
     i += inst.size()
-    if inst_class == SOPP and inst.op == SOPPOp.S_ENDPGM: break
   return result
 
 # SOP1 pure ops: fn(s0) -> result (no SCC, no special state)
@@ -384,7 +383,7 @@ VOP3_ONLY_OPS = {
   VOP3Op.V_MAD_U32_U24: lambda a, b, c: ((a & 0xffffff) * (b & 0xffffff) + c) & 0xffffffff,
   VOP3Op.V_MAD_I32_I24: lambda a, b, c: (sext(a & 0xffffff, 24) * sext(b & 0xffffff, 24) + sext(c, 32)) & 0xffffffff,
   VOP3Op.V_ALIGNBIT_B32: lambda a, b, c: (((a << 32) | b) >> (c & 0x1f)) & 0xffffffff,
-  VOP3Op.V_XAD_U32: lambda a, b, c: ((a * b) + c) & 0xffffffff, VOP3Op.V_LSHL_OR_B32: lambda a, b, c: ((a << (b & 0x1f)) | c) & 0xffffffff,
+  VOP3Op.V_XAD_U32: lambda a, b, c: ((a ^ b) + c) & 0xffffffff, VOP3Op.V_LSHL_OR_B32: lambda a, b, c: ((a << (b & 0x1f)) | c) & 0xffffffff,
   VOP3Op.V_XOR3_B32: lambda a, b, c: a ^ b ^ c, VOP3Op.V_DIV_FMAS_F32: lambda a, b, c: i32(f32(a) * f32(b) + f32(c)),
   VOP3Op.V_MIN3_I32: lambda a, b, c: sorted([sext(a, 32), sext(b, 32), sext(c, 32)])[0] & 0xffffffff,
   VOP3Op.V_MAX3_I32: lambda a, b, c: sorted([sext(a, 32), sext(b, 32), sext(c, 32)])[2] & 0xffffffff,
@@ -423,6 +422,7 @@ def exec_vop3(st: WaveState, inst: VOP3, lane: int) -> None:
       r = ((v64 << (s0 & 0x3f)) & 0xffffffffffffffff if op == VOP3Op.V_LSHLREV_B64 else
            v64 >> (s0 & 0x3f) if op == VOP3Op.V_LSHRREV_B64 else sext(v64, 64) >> (s0 & 0x3f))
       V[vdst], V[vdst+1] = r & 0xffffffff, (r >> 32) & 0xffffffff
+    case VOP3Op.V_PACK_B32_F16: V[vdst] = (s0 & 0xffff) | ((s1 & 0xffff) << 16)  # pack two f16 into f32
     case _: raise NotImplementedError(f"VOP3 op {op}")
 
 def cmp_class_f32(val: int, mask: int) -> bool:
@@ -551,8 +551,28 @@ def exec_vopd_op(st: WaveState, op: int, src0: int, src1: int, dst: int, lane: i
   raise NotImplementedError(f"VOPD op {op}")
 
 def exec_vopd(st: WaveState, inst: VOPD, lane: int) -> None:
-  exec_vopd_op(st, inst.opx, inst.srcx0, inst.vsrcx1, inst.vdstx, lane)
-  exec_vopd_op(st, inst.opy, inst.srcy0, inst.vsrcy1, (inst.vdsty << 1) | ((inst.vdstx & 1) ^ 1), lane)
+  # VOPD executes both ops in parallel - read all inputs before writing any outputs
+  V = st.vgpr[lane]
+  vdsty = (inst.vdsty << 1) | ((inst.vdstx & 1) ^ 1)
+  # Read all source operands first
+  sx0, sx1 = st.rsrc(inst.srcx0, lane), V[inst.vsrcx1]
+  sy0, sy1 = st.rsrc(inst.srcy0, lane), V[inst.vsrcy1]
+  # Execute X op
+  opx, dstx = inst.opx, inst.vdstx
+  if (fn := VOPD_OPS.get(opx)): V[dstx] = fn(sx0, sx1)
+  elif opx == VOPDOp.V_DUAL_FMAC_F32: V[dstx] = i32(f32(sx0)*f32(sx1)+f32(V[dstx]))
+  elif opx == VOPDOp.V_DUAL_FMAAK_F32: V[dstx] = i32(f32(sx0)*f32(sx1)+f32(st.literal))
+  elif opx == VOPDOp.V_DUAL_FMAMK_F32: V[dstx] = i32(f32(sx0)*f32(st.literal)+f32(sx1))
+  elif opx == VOPDOp.V_DUAL_CNDMASK_B32: V[dstx] = sx1 if (st.vcc >> lane) & 1 else sx0
+  else: raise NotImplementedError(f"VOPD opx {opx}")
+  # Execute Y op
+  opy = inst.opy
+  if (fn := VOPD_OPS.get(opy)): V[vdsty] = fn(sy0, sy1)
+  elif opy == VOPDOp.V_DUAL_FMAC_F32: V[vdsty] = i32(f32(sy0)*f32(sy1)+f32(V[vdsty]))
+  elif opy == VOPDOp.V_DUAL_FMAAK_F32: V[vdsty] = i32(f32(sy0)*f32(sy1)+f32(st.literal))
+  elif opy == VOPDOp.V_DUAL_FMAMK_F32: V[vdsty] = i32(f32(sy0)*f32(st.literal)+f32(sy1))
+  elif opy == VOPDOp.V_DUAL_CNDMASK_B32: V[vdsty] = sy1 if (st.vcc >> lane) & 1 else sy0
+  else: raise NotImplementedError(f"VOPD opy {opy}")
 
 def exec_vop3p(st: WaveState, inst: VOP3P, lane: int) -> None:
   op, vdst, V = inst.op, inst.vdst, st.vgpr[lane]

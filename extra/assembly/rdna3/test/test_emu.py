@@ -449,15 +449,15 @@ class TestVOP3(unittest.TestCase):
     self.assertEqual(f32(out[0]), 12.0)
 
   def test_v_xad_u32(self):
-    """Regression test: V_XAD_U32 (multiply-add) used by matmul address calculation."""
+    """Regression test: V_XAD_U32 (xor-add) used by random number generation."""
     kernel = make_store_kernel([
       v_mov_b32_e32(v[1], 3),
       v_mov_b32_e32(v[2], 4),
       v_mov_b32_e32(v[4], 5),
-      v_xad_u32(v[1], v[1], v[2], v[4]),  # 3*4+5 = 17
+      v_xad_u32(v[1], v[1], v[2], v[4]),  # (3^4)+5 = 7+5 = 12
     ])
     out = run_kernel(kernel, n_threads=1)
-    self.assertEqual(out[0], 17)
+    self.assertEqual(out[0], 12)
 
   def test_v_lshl_or_b32(self):
     """Regression test: V_LSHL_OR_B32 operand order is (s0 << s1) | s2, not (s0 << s2) | s1."""
@@ -530,6 +530,22 @@ class TestVOPD(unittest.TestCase):
     exec_wave(prog, state, bytearray(65536), 1)
     self.assertEqual(state.vgpr[0][3], 0xff)
     self.assertEqual(state.vgpr[0][4], 0x0f)  # 0xff & 0x0f = 0x0f
+
+  def test_vopd_parallel_read(self):
+    """Regression: VOPD must read all inputs before writing - Y op reads register that X op writes."""
+    state = WaveState()
+    state.vgpr[0][4] = 0
+    state.vgpr[0][7] = 5  # Y op reads v7 as vsrcy1, X op writes to v7
+    # X: MOV v7, v0 (v0=0, so v7 becomes 0)
+    # Y: ADD v6, v4, v7 (should use original v7=5, not the overwritten 0)
+    # vdsty_enc=3 with vdstx=7 (odd) -> vdsty = (3 << 1) | (7&1)^1 = 6 | 0 = 6
+    kernel = VOPD(opx=VOPDOp.V_DUAL_MOV_B32, srcx0=256+0, vsrcx1=0, vdstx=7,
+                  opy=VOPDOp.V_DUAL_ADD_NC_U32, srcy0=256+4, vsrcy1=7, vdsty=3).to_bytes()
+    kernel += s_endpgm().to_bytes()
+    prog = decode_program(kernel)
+    exec_wave(prog, state, bytearray(65536), 1)
+    self.assertEqual(state.vgpr[0][7], 0)  # X op: v7 = v0 = 0
+    self.assertEqual(state.vgpr[0][6], 5)  # Y op: v6 = v4 + v7 = 0 + 5 (original v7)
 
 class TestDecoder(unittest.TestCase):
   def test_vopd_literal_handling(self):

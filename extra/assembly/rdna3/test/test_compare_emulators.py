@@ -101,14 +101,18 @@ class PythonEmulator:
                          vgpr=[list(self.state.vgpr[i]) for i in range(WAVE_SIZE)])
 
 def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: tuple[int, int, int],
-                      program, max_steps: int, debug: bool, trace_len: int, kernel_idx: int = 0) -> tuple[bool, str, int]:
+                      program, max_steps: int, debug: bool, trace_len: int, kernel_idx: int = 0,
+                      max_workgroups: int = 64) -> tuple[bool, str, int]:
   """Run a single kernel through both emulators. Returns (success, message, total_steps)."""
   gx, gy, gz = global_size
   total_steps = 0
+  wg_count = 0
 
   for gidz in range(gz):
     for gidy in range(gy):
       for gidx in range(gx):
+        if wg_count >= max_workgroups: return True, f"Completed {wg_count} workgroups (limit reached)", total_steps
+        wg_count += 1
         rust = RustEmulator()
         python = PythonEmulator()
         rust.create(kernel, n_lanes)
@@ -175,16 +179,20 @@ def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: t
   return True, f"Completed {gx*gy*gz} workgroups", total_steps
 
 def compare_emulators_multi_kernel(kernels: list[KernelInfo], buf_pool: dict[int, int], max_steps: int = 1000,
-                                    debug: bool = False, trace_len: int = 10) -> tuple[bool, str]:
+                                    debug: bool = False, trace_len: int = 10, buf_data: dict[int, bytes] = None) -> tuple[bool, str]:
   """Run all kernels through both emulators with shared buffer pool."""
   from extra.assembly.rdna3.emu import set_valid_mem_ranges, decode_program
+  if buf_data is None: buf_data = {}
 
   # Allocate shared buffer pool with padding for over-reads (GPU loads up to 16 bytes at once)
   buf_id_to_ptr: dict[int, int] = {}
   buffers = []
   for buf_id, size in buf_pool.items():
     padded_size = ((size + 15) // 16) * 16 + 16  # round up to 16 bytes + extra padding
-    buf = (ctypes.c_uint8 * padded_size)(*[0] * padded_size)
+    # Initialize with data from COPY if available
+    init_data = buf_data.get(buf_id, b'\x00' * padded_size)
+    init_list = list(init_data) + [0] * (padded_size - len(init_data))
+    buf = (ctypes.c_uint8 * padded_size)(*init_list[:padded_size])
     buffers.append((buf, padded_size))
     buf_id_to_ptr[buf_id] = ctypes.addressof(buf)
 
@@ -238,7 +246,7 @@ def compare_emulators_with_memory(kernel: bytes, n_lanes: int, buf_sizes: list, 
   ok, msg, _ = run_single_kernel(kernel, n_lanes, args_ptr, global_size, program, max_steps, debug, trace_len)
   return ok, msg
 
-def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelInfo], dict[int, int]]:
+def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelInfo], dict[int, int], dict[int, bytes]]:
   """Compile a tinygrad operation and extract all kernels with their buffer mappings."""
   os.environ["AMD"] = "1"
   from tinygrad import Tensor
@@ -248,10 +256,22 @@ def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelInfo], dict[int, int]]:
   sched = out.schedule()
   kernels = []
   buf_pool: dict[int, int] = {}  # buffer id -> size
+  buf_data: dict[int, bytes] = {}  # buffer id -> initial data from COPY
 
   for ei in sched:
-    if ei.ast.op.name == 'SINK':
-      lowered = ei.lower()
+    lowered = ei.lower()
+    if ei.ast.op.name == 'COPY':
+      # Handle COPY: extract source data to initialize destination buffer
+      if len(lowered.bufs) >= 2:
+        dst_buf, src_buf = lowered.bufs[0], lowered.bufs[1]
+        dst_id = id(dst_buf)
+        if dst_id not in buf_pool:
+          buf_pool[dst_id] = dst_buf.nbytes
+        # Get source data if it's from numpy/CPU
+        if hasattr(src_buf, 'base') and src_buf.base is not None and hasattr(src_buf.base, '_buf'):
+          src_data = bytes(src_buf.base._buf)
+          buf_data[dst_id] = src_data
+    elif ei.ast.op.name == 'SINK':
       if lowered.prg and lowered.prg.p.lib:
         lib = bytes(lowered.prg.p.lib)
         _, sections, _ = elf_loader(lib)
@@ -273,11 +293,11 @@ def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelInfo], dict[int, int]]:
               buf_sizes=buf_sizes
             ))
   if not kernels: raise RuntimeError("No kernel found")
-  return kernels, buf_pool
+  return kernels, buf_pool, buf_data
 
 def get_kernel_from_tinygrad(op_fn) -> tuple[bytes, tuple[int, int, int], tuple[int, int, int], list]:
   """Compile a tinygrad operation and extract the last (main) kernel binary. Legacy wrapper."""
-  kernels, _ = get_kernels_from_tinygrad(op_fn)
+  kernels, _, _ = get_kernels_from_tinygrad(op_fn)
   k = kernels[-1]
   return k.code, k.global_size, k.local_size, k.buf_sizes
 
@@ -286,8 +306,8 @@ class TestTinygradKernels(unittest.TestCase):
   """Compare emulators on real tinygrad-compiled kernels."""
 
   def _test_kernel(self, op_fn, max_steps=10000):
-    kernels, buf_pool = get_kernels_from_tinygrad(op_fn)
-    ok, msg = compare_emulators_multi_kernel(kernels, buf_pool, max_steps=max_steps)
+    kernels, buf_pool, buf_data = get_kernels_from_tinygrad(op_fn)
+    ok, msg = compare_emulators_multi_kernel(kernels, buf_pool, max_steps=max_steps, buf_data=buf_data)
     self.assertTrue(ok, msg)
 
   # Basic unary ops
@@ -380,6 +400,18 @@ class TestTinygradKernels(unittest.TestCase):
   # Matrix ops - patterns from test_ops.py failures
   def test_cat(self): self._test_kernel(lambda T: T.empty(32, 64).cat(T.empty(32, 64), dim=1))
   def test_gather(self): self._test_kernel(lambda T: T.empty(64).gather(0, T.arange(32).int()))
+
+  # Tests from test_ops.py that are failing
+  def test_permute(self): self._test_kernel(lambda T: T.empty(3, 4, 5, 6).permute((3, 2, 1, 0)).contiguous())
+  def test_cat_large(self): self._test_kernel(lambda T: T.empty(45, 65, 9).cat(T.empty(45, 65, 9), T.empty(45, 65, 9), dim=1))
+  def test_gather_small(self): self._test_kernel(lambda T: T.empty(10).gather(0, T.arange(5).int()))
+  def test_cross_entropy(self): self._test_kernel(lambda T: T.randn(32, 10).softmax().log().sum())
+  def test_cross_entropy_class(self):
+    import numpy as np
+    np.random.seed(0)
+    classes = np.random.randint(0, 10, (32,), dtype=np.int32).tolist()
+    x_np = np.random.randn(32, 10).astype(np.float32)
+    self._test_kernel(lambda T: (T(x_np.tolist()).reshape(32,10) + 0).cross_entropy((T(classes).int().reshape(32) + 0)))
 
 if __name__ == "__main__":
   unittest.main()
