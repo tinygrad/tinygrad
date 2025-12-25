@@ -208,8 +208,9 @@ def exec_sopp(st: WaveState, inst: SOPP) -> int:
   if inst.op == SOPPOp.S_BRANCH: return sext(inst.simm16, 16)
   if inst.op == SOPPOp.S_CBRANCH_SCC0: return sext(inst.simm16, 16) if st.scc == 0 else 0
   if inst.op == SOPPOp.S_CBRANCH_SCC1: return sext(inst.simm16, 16) if st.scc == 1 else 0
-  if inst.op == SOPPOp.S_CBRANCH_VCCZ: return sext(inst.simm16, 16) if st.vcc == 0 else 0
-  if inst.op == SOPPOp.S_CBRANCH_VCCNZ: return sext(inst.simm16, 16) if st.vcc != 0 else 0
+  # In wave32 mode, only VCC_LO is used for lane masks; VCC_HI is a free SGPR
+  if inst.op == SOPPOp.S_CBRANCH_VCCZ: return sext(inst.simm16, 16) if (st.vcc & 0xffffffff) == 0 else 0
+  if inst.op == SOPPOp.S_CBRANCH_VCCNZ: return sext(inst.simm16, 16) if (st.vcc & 0xffffffff) != 0 else 0
   if inst.op == SOPPOp.S_CBRANCH_EXECZ: return sext(inst.simm16, 16) if st.exec_mask == 0 else 0
   if inst.op == SOPPOp.S_CBRANCH_EXECNZ: return sext(inst.simm16, 16) if st.exec_mask != 0 else 0
   # Scheduling hints and wait instructions are no-ops in emulation

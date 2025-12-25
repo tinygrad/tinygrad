@@ -427,5 +427,22 @@ class TestTinygradKernels(unittest.TestCase):
     # Tests 64-bit compare with inline constants (comparing against 0)
     self._test_kernel(lambda T: T.empty(4, 4)[T.arange(4).cast(dtypes.int64), T.arange(4).cast(dtypes.int64)])
 
+  # Pooling operations - regression test for VCC wave32 mode (S_CBRANCH_VCCZ should only check VCC_LO)
+  def test_avg_pool2d(self): self._test_kernel(lambda T: T.empty(1, 1, 8, 8).avg_pool2d(kernel_size=(4,4), stride=2))
+  def test_avg_pool3d(self):
+    import numpy as np
+    np.random.seed(0)
+    self._test_kernel(lambda T: T(np.random.randn(1, 1, 16, 16, 16).astype(np.float32).tolist()).avg_pool2d(kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False))
+  def test_max_pool2d(self): self._test_kernel(lambda T: T.empty(1, 1, 8, 8).max_pool2d(kernel_size=(4,4), stride=2))
+
+  # Convolution operations - multi-kernel tests
+  def test_conv2d(self): self._test_kernel(lambda T: T.empty(1, 4, 8, 8).conv2d(T.empty(4, 4, 3, 3)), max_steps=100000)
+  def test_conv_transpose2d(self): self._test_kernel(lambda T: T.empty(1, 4, 8, 8).conv_transpose2d(T.empty(4, 4, 3, 3)), max_steps=200000)
+  def test_conv_transpose3d(self):
+    import numpy as np
+    np.random.seed(0)
+    self._test_kernel(lambda T: T(np.random.randn(2, 4, 9, 9, 9).astype(np.float32).tolist()).conv_transpose2d(
+      T(np.random.randn(4, 4, 3, 3, 3).astype(np.float32).tolist())), max_steps=500000)
+
 if __name__ == "__main__":
   unittest.main()

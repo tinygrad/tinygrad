@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Test that PDF parser correctly extracts format fields."""
 import unittest
-from extra.assembly.rdna3.autogen import *
+from extra.assembly.rdna3.autogen import (
+  SOP1, SOP2, SOPK, SOPP, VOP1, VOP2, VOP3SD, VOPC, FLAT, VOPD,
+  SOP1Op, SOP2Op, VOP1Op, VOP3Op
+)
 
 # expected formats with key fields and whether they have ENCODING
 EXPECTED_FORMATS = {
@@ -60,8 +63,10 @@ class TestPDFParserGenerate(unittest.TestCase):
       fields = {f[0] for f in self.result["formats"].get(fmt_name, [])}
       for field in expected_fields:
         self.assertIn(field, fields, f"{fmt_name} missing {field}")
-      if has_encoding: self.assertIn("ENCODING", fields, f"{fmt_name} should have ENCODING")
-      else: self.assertNotIn("ENCODING", fields, f"{fmt_name} should not have ENCODING")
+      if has_encoding:
+        self.assertIn("ENCODING", fields, f"{fmt_name} should have ENCODING")
+      else:
+        self.assertNotIn("ENCODING", fields, f"{fmt_name} should not have ENCODING")
 
   def test_vopd_no_dpp16_fields(self):
     """VOPD should not have DPP16-specific fields (parser boundary bug)."""
@@ -86,13 +91,15 @@ class TestPDFParser(unittest.TestCase):
 
   def test_sop2_fields(self):
     """SOP2 should have op, sdst, ssrc0, ssrc1."""
-    for field in ['op', 'sdst', 'ssrc0', 'ssrc1']: self.assertIn(field, SOP2._fields)
+    for field in ['op', 'sdst', 'ssrc0', 'ssrc1']:
+      self.assertIn(field, SOP2._fields)
     self.assertEqual(SOP2._fields['op'].hi, 29)
     self.assertEqual(SOP2._fields['op'].lo, 23)
 
   def test_sop1_fields(self):
     """SOP1 should have op, sdst, ssrc0 with correct bit positions."""
-    for field in ['op', 'sdst', 'ssrc0']: self.assertIn(field, SOP1._fields)
+    for field in ['op', 'sdst', 'ssrc0']:
+      self.assertIn(field, SOP1._fields)
     self.assertNotIn('simm16', SOP1._fields)
     self.assertEqual(SOP1._fields['ssrc0'].hi, 7)
     self.assertEqual(SOP1._fields['ssrc0'].lo, 0)
@@ -101,7 +108,8 @@ class TestPDFParser(unittest.TestCase):
 
   def test_vop3sd_fields(self):
     """VOP3SD should have all fields including src0/src1/src2 from page continuation."""
-    for field in ['op', 'vdst', 'sdst', 'src0', 'src1', 'src2']: self.assertIn(field, VOP3SD._fields)
+    for field in ['op', 'vdst', 'sdst', 'src0', 'src1', 'src2']:
+      self.assertIn(field, VOP3SD._fields)
     self.assertEqual(VOP3SD._fields['src0'].hi, 40)
     self.assertEqual(VOP3SD._fields['src0'].lo, 32)
     self.assertEqual(VOP3SD._size(), 8)
@@ -139,8 +147,10 @@ class TestPDFParser(unittest.TestCase):
     """VOPD should not have duplicate fields and should not include DPP16 fields."""
     field_names = list(VOPD._fields.keys())
     self.assertEqual(len(field_names), len(set(field_names)))
-    for field in ['srcx0', 'srcy0', 'opx', 'opy']: self.assertIn(field, VOPD._fields)
-    for field in ['dpp_ctrl', 'bank_mask', 'row_mask']: self.assertNotIn(field, VOPD._fields)
+    for field in ['srcx0', 'srcy0', 'opx', 'opy']:
+      self.assertIn(field, VOPD._fields)
+    for field in ['dpp_ctrl', 'bank_mask', 'row_mask']:
+      self.assertNotIn(field, VOPD._fields)
 
 if __name__ == "__main__":
   unittest.main()

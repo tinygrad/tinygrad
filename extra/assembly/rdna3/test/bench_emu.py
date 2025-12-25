@@ -62,37 +62,37 @@ def benchmark_emulator(name: str, run_fn, kernel: bytes, global_size, local_size
 
 def create_test_kernel(n_ops: int) -> bytes:
   """Create a synthetic kernel with n_ops vector operations.
-  
+
   This creates a kernel that does:
     v0 = v0 + v1 (repeated n_ops times with various ops)
     s_endpgm
   """
   instructions = []
-  
+
   # VOP2 V_ADD_F32: encoding = 0x03 (bits 25-30), vdst=v0, src0=v0 (256), vsrc1=v1 (1)
   # Format: [31:25]=0b0000011, [24:17]=vsrc1, [16:9]=vdst, [8:0]=src0
   # v_add_f32 v0, v0, v1
   v_add_f32 = (0b0000011 << 25) | (1 << 17) | (0 << 9) | 256
-  
+
   # VOP2 V_MUL_F32: encoding = 0x08
   v_mul_f32 = (0b0001000 << 25) | (1 << 17) | (0 << 9) | 256
-  
+
   # VOP2 V_MAX_F32: encoding = 0x10
   v_max_f32 = (0b0010000 << 25) | (1 << 17) | (0 << 9) | 256
-  
+
   # VOP2 V_MIN_F32: encoding = 0x0F
   v_min_f32 = (0b0001111 << 25) | (1 << 17) | (0 << 9) | 256
-  
+
   ops = [v_add_f32, v_mul_f32, v_max_f32, v_min_f32]
-  
+
   for i in range(n_ops):
     instructions.append(ops[i % len(ops)])
-  
+
   # S_ENDPGM: SOPP format, op=48 (0x30)
   # [31:23]=0b101111111, [22:16]=op(48), [15:0]=simm16(0)
   s_endpgm = (0b101111111 << 23) | (48 << 16) | 0
   instructions.append(s_endpgm)
-  
+
   return b''.join(struct.pack('<I', inst) for inst in instructions)
 
 # Synthetic test cases: (name, n_ops, n_workgroups, local_size)
@@ -126,10 +126,10 @@ def main():
     n_workgroups = global_size[0] * global_size[1] * global_size[2]
     n_threads = local_size[0] * local_size[1] * local_size[2]
     total_work = n_insts * n_workgroups * n_threads
-    
+
     print(f"  {n_insts} instructions, {n_workgroups} workgroup(s), {n_threads} threads/wg")
     print(f"  Total work: {total_work:,} instruction-thread executions")
-    
+
     # Setup minimal buffers for args
     buf_sizes = [4096]  # 4KB dummy buffer
     buffers, args, args_ptr, ranges = setup_buffers(buf_sizes)
