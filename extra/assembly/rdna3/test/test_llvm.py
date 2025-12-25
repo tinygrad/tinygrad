@@ -3,7 +3,8 @@
 import unittest, re
 from tinygrad.helpers import fetch
 from extra.assembly.rdna3.autogen import *
-from extra.assembly.rdna3.lib import asm
+from extra.assembly.rdna3.asm import asm
+from extra.assembly.rdna3.test.test_roundtrip import compile_asm, disassemble_lib
 
 LLVM_BASE = "https://raw.githubusercontent.com/llvm/llvm-project/main/llvm/test/MC/AMDGPU"
 
@@ -106,17 +107,36 @@ def _make_asm_test(name):
 
 def _make_disasm_test(name):
   def test(self):
+    from tinygrad.runtime.support.compiler_amd import HIPCompiler
+    compiler = HIPCompiler('gfx1100')
     _, fmt_cls, op_enum = LLVM_TEST_FILES[name]
-    passed, failed, skipped = 0, 0, 0
+    passed, failed, failures = 0, 0, []
+    # VOP3SD opcodes that share encoding with VOP3
+    vop3sd_opcodes = {1, 288, 289, 290, 764, 765, 766, 767, 768, 769, 770}
     for asm_text, data in self.tests.get(name, []):
-      if len(data) > fmt_cls._size(): skipped += 1; continue  # skip literals
+      if len(data) > fmt_cls._size(): continue  # skip literals (need different handling)
       try:
         decoded = fmt_cls.from_bytes(data)
-        op_enum(decoded._values.get('op', 0))  # validate opcode
-        if decoded.to_bytes()[:len(data)] == data: passed += 1
-        else: failed += 1
-      except: skipped += 1
-    print(f"{name.upper()} disasm: {passed} passed, {failed} failed, {skipped} skipped")
+        op_val = decoded._values.get('op', 0)
+        op_val = op_val.val if hasattr(op_val, 'val') else op_val
+        # VOP3 and VOP3SD share encoding - validate with appropriate enum
+        if fmt_cls.__name__ == 'VOP3' and op_val in vop3sd_opcodes:
+          VOP3SDOp(op_val)  # validate as VOP3SD
+        else:
+          op_enum(op_val)  # validate opcode
+        if decoded.to_bytes()[:len(data)] != data:
+          failed += 1; failures.append(f"decode roundtrip failed for {data.hex()}"); continue
+        disasm_str = decoded.disasm()
+        # Test: LLVM should assemble our disasm output to the same bytes
+        llvm_bytes = compile_asm(disasm_str, compiler)
+        if llvm_bytes is None:
+          failed += 1; failures.append(f"LLVM failed to assemble: '{disasm_str}' (from '{asm_text}')")
+        elif llvm_bytes == data: passed += 1
+        else: failed += 1; failures.append(f"'{disasm_str}': expected={data.hex()} got={llvm_bytes.hex()}")
+      except Exception as e:
+        failed += 1; failures.append(f"exception for {data.hex()}: {e}")
+    print(f"{name.upper()} disasm: {passed} passed, {failed} failed")
+    if failures[:10]: print("  " + "\n  ".join(failures[:10]))
     self.assertEqual(failed, 0)
   return test
 

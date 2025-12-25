@@ -2,7 +2,7 @@
 """Integration test: round-trip RDNA3 assembly through AMD toolchain."""
 import unittest, re, io, sys
 from extra.assembly.rdna3.autogen import *
-from extra.assembly.rdna3.lib import waitcnt, asm
+from extra.assembly.rdna3.asm import waitcnt, asm
 
 def get_amd_toolchain():
   """Check if AMD toolchain is available."""
