@@ -27,8 +27,8 @@ class TestLLMServer(unittest.TestCase):
     from tinygrad.apps.llm import Handler
     from tinygrad.helpers import TCPServerWithReuse
 
-    cls.port = 11435
-    cls.server = TCPServerWithReuse(('127.0.0.1', cls.port), Handler)
+    cls.server = TCPServerWithReuse(('127.0.0.1', 0), Handler)
+    cls.port = cls.server.server_address[1]
     cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
     cls.server_thread.start()
     time.sleep(0.1)

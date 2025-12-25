@@ -1,5 +1,5 @@
 import unittest, subprocess, platform
-from tinygrad.runtime.ops_cpu import ClangJITCompiler
+from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
 from tinygrad.runtime.support.elf import elf_loader
 
 class TestElfLoader(unittest.TestCase):
