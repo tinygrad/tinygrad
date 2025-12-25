@@ -164,4 +164,16 @@ print("DESC.ENABLE_SGPR_DISPATCH_ID:", enable_sgpr_dispatch_id)
 print("DESC.ENABLE_SGPR_FLAT_SCRATCH_INIT:", enable_sgpr_flat_scratch_init)
 print("DESC.ENABLE_SGPR_PRIVATE_SEGMENT_SIZE:", enable_sgpr_private_segment_size)
 
-assert_zero(desc, 458, 512)
+assert_zero(desc, 458, 459)
+
+uses_dynamic_stack = bits(desc, 459, 460)
+print("DESC.USES_DYNAMIC_STACK:", uses_dynamic_stack)
+
+assert_zero(desc, 460, 463)
+kernarg_preload_spec_length = bits(desc, 464, 470)
+print("DESC.KERNARG_PRELOAD_SPEC_LENGTH:", kernarg_preload_spec_length)
+
+kernarg_preload_spec_offset = bits(desc, 471, 479)
+print("DESC.KERNARG_PRELOAD_SPEC_OFFSET:", kernarg_preload_spec_offset)
+
+assert_zero(desc, 480, 511)
