@@ -139,15 +139,74 @@ class Inst:
       from extra.assembly.rdna3 import autogen
       op_name = getattr(autogen, f"{self.__class__.__name__}Op")(op_val).name.lower() if hasattr(autogen, f"{self.__class__.__name__}Op") else f"op_{op_val}"
     except (ValueError, KeyError): op_name = f"op_{op_val}"
+    cls_name = self.__class__.__name__
+    def fmt_src(v): return f"0x{self._literal:x}" if v == 255 and getattr(self, '_literal', None) else decode_src(v)
+    def sreg(base, cnt): return f"s{base}" if cnt == 1 else f"s[{base}:{base+cnt-1}]"
+    def vreg(base, cnt=1): return f"v{base}" if cnt == 1 else f"v[{base}:{base+cnt-1}]"
+    # VOP1/VOP2/VOPC
+    if cls_name == 'VOP1':
+      return f"{op_name}_e32 v{unwrap(self._values['vdst'])}, {fmt_src(unwrap(self._values['src0']))}"
+    if cls_name == 'VOP2':
+      vdst, src0, vsrc1 = unwrap(self._values['vdst']), fmt_src(unwrap(self._values['src0'])), unwrap(self._values['vsrc1'])
+      suffix = "" if op_name == "v_dot2acc_f32_f16" else "_e32"
+      return f"{op_name}{suffix} v{vdst}, {src0}, v{vsrc1}" + (", vcc_lo" if op_name == "v_cndmask_b32" else "")
+    if cls_name == 'VOPC':
+      return f"{op_name}_e32 vcc_lo, {fmt_src(unwrap(self._values['src0']))}, v{unwrap(self._values['vsrc1'])}"
+    # SOPP: handle s_waitcnt, s_delay_alu, s_endpgm specially
+    if cls_name == 'SOPP':
+      simm16 = unwrap(self._values.get('simm16', 0))
+      if op_name == 's_endpgm': return 's_endpgm'
+      if op_name == 's_barrier': return 's_barrier'
+      if op_name == 's_waitcnt':
+        vmcnt, expcnt, lgkmcnt = decode_waitcnt(simm16)
+        parts = []
+        if vmcnt != 0x3f: parts.append(f"vmcnt({vmcnt})")
+        if expcnt != 0x7: parts.append(f"expcnt({expcnt})")  # RDNA3: expcnt is 4 bits, max 7
+        if lgkmcnt != 0x3f: parts.append(f"lgkmcnt({lgkmcnt})")
+        return f"s_waitcnt {' '.join(parts)}" if parts else "s_waitcnt 0"
+      if op_name == 's_delay_alu':
+        dep_names = ['VALU_DEP_1','VALU_DEP_2','VALU_DEP_3','VALU_DEP_4','TRANS32_DEP_1','TRANS32_DEP_2','TRANS32_DEP_3','FMA_ACCUM_CYCLE_1',
+                     'SALU_CYCLE_1','SALU_CYCLE_2','SALU_CYCLE_3']
+        skip_names = ['SAME','NEXT','SKIP_1','SKIP_2','SKIP_3','SKIP_4']
+        id0, skip, id1 = simm16 & 0xf, (simm16 >> 4) & 0x7, (simm16 >> 7) & 0xf
+        def dep_name(v): return dep_names[v-1] if 0 < v <= len(dep_names) else str(v)
+        parts = [f"instid0({dep_name(id0)})"] if id0 else []
+        if skip: parts.append(f"instskip({skip_names[skip]})"); parts.append(f"instid1({dep_name(id1)})" if id1 else "")
+        return f"s_delay_alu {' | '.join(p for p in parts if p)}" if parts else "s_delay_alu 0"
+      # Branch instructions use decimal offsets
+      if op_name.startswith('s_cbranch') or op_name.startswith('s_branch'):
+        return f"{op_name} {simm16}"
+      return f"{op_name} 0x{simm16:x}" if simm16 else op_name
+    # SMEM: s_load_bXX sdst, sbase, offset
+    if cls_name == 'SMEM':
+      sdata, sbase, soffset, offset = unwrap(self._values['sdata']), unwrap(self._values['sbase']), unwrap(self._values['soffset']), unwrap(self._values['offset'])
+      width = {0:1, 1:2, 2:4, 3:8, 4:16, 8:1, 9:2, 10:4, 11:8, 12:16}.get(op_val, 1)
+      off_str = f"0x{offset:x}" if offset else "null" if soffset == 124 else decode_src(soffset)
+      return f"{op_name} {sreg(sdata, width)}, {sreg(sbase, 2)}, {off_str}"
+    # FLAT: flat_*/global_*/scratch_* load/store
+    if cls_name == 'FLAT':
+      vdst, addr, data, saddr, offset, seg = [unwrap(self._values.get(f, 0)) for f in ['vdst', 'addr', 'data', 'saddr', 'offset', 'seg']]
+      prefix = {0: 'flat', 1: 'scratch', 2: 'global'}.get(seg, 'flat')
+      op_suffix = op_name.split('_', 1)[1] if '_' in op_name else op_name  # load_b32, store_b32, etc
+      instr = f"{prefix}_{op_suffix}"
+      is_store = 'store' in op_name
+      width = {'b32':1, 'b64':2, 'b96':3, 'b128':4, 'u8':1, 'i8':1, 'u16':1, 'i16':1}.get(op_name.split('_')[-1], 1)
+      # Address mode depends on saddr: 0x7F = no saddr (use 64-bit vaddr), else saddr is SGPR pair
+      if saddr == 0x7F:
+        addr_str, saddr_str = vreg(addr, 2), ""
+      else:
+        addr_str = vreg(addr)
+        saddr_str = f", {sreg(saddr, 2)}" if saddr < 106 else f", off" if saddr == 124 else f", {decode_src(saddr)}"
+      off_str = f" offset:{offset}" if offset else ""
+      if is_store: return f"{instr} {addr_str}, {vreg(data, width)}{saddr_str}{off_str}"
+      return f"{instr} {vreg(vdst, width)}, {addr_str}{saddr_str}{off_str}"
+    # Generic disassembly for other formats
     def fmt(n, v):
       v = unwrap(v)
-      if n in SRC_FIELDS: return f"0x{self._literal:x}" if v == 255 and getattr(self, '_literal', None) else decode_src(v) if v != 255 else "0xff"
+      if n in SRC_FIELDS: return fmt_src(v) if v != 255 else "0xff"
       if n in ('sdst', 'vdst'): return f"{'s' if n == 'sdst' else 'v'}{v}"
       return f"v{v}" if n == 'vsrc1' else f"0x{v:x}" if n == 'simm16' else str(v)
     ops = [fmt(n, self._values.get(n, 0)) for n in self._fields if n not in ('encoding', 'op')]
-    if self.__class__.__name__ == 'VOP2' and getattr(self, '_literal', None) and op_val in (44, 45, 55, 56):
-      lit_str = f"0x{self._literal:x}"
-      ops.insert(2, lit_str) if op_val in (44, 55) else ops.append(lit_str)
     return f"{op_name} {', '.join(ops)}" if ops else op_name
 
 class Inst32(Inst): pass
@@ -158,11 +217,11 @@ class Inst64(Inst):
   @classmethod
   def from_bytes(cls, data: bytes): return cls.from_int(int.from_bytes(data[:8], 'little'))
 
-# Waitcnt helpers
-def waitcnt(vmcnt: int = 0x7f, expcnt: int = 0x7, lgkmcnt: int = 0x3f) -> int:
-  return (vmcnt & 0xf) | ((expcnt & 0x7) << 4) | (((vmcnt >> 4) & 0x7) << 7) | ((lgkmcnt & 0x3f) << 10)
+# Waitcnt helpers (RDNA3 format: bits 15:10=vmcnt, bits 9:4=lgkmcnt, bits 3:0=expcnt)
+def waitcnt(vmcnt: int = 0x3f, expcnt: int = 0x7, lgkmcnt: int = 0x3f) -> int:
+  return (expcnt & 0x7) | ((lgkmcnt & 0x3f) << 4) | ((vmcnt & 0x3f) << 10)
 def decode_waitcnt(val: int) -> tuple[int, int, int]:
-  return (val & 0xf) | (((val >> 7) & 0x7) << 4), (val >> 4) & 0x7, (val >> 10) & 0x3f
+  return (val >> 10) & 0x3f, val & 0xf, (val >> 4) & 0x3f  # vmcnt, expcnt, lgkmcnt
 
 # Assembler
 SPECIAL_REGS = {'vcc_lo': RawImm(106), 'vcc_hi': RawImm(107), 'null': RawImm(124), 'off': RawImm(124), 'm0': RawImm(125), 'exec_lo': RawImm(126), 'exec_hi': RawImm(127), 'scc': RawImm(253)}
