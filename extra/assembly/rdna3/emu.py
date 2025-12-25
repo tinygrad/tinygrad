@@ -1,35 +1,36 @@
 # RDNA3 emulator - pure Python implementation for testing
 from __future__ import annotations
 import ctypes, struct, math
-from dataclasses import dataclass, field
 from extra.assembly.rdna3.lib import Inst32, Inst64, RawImm
 from extra.assembly.rdna3.autogen import (
-  SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, DS, FLAT, VOPD,
+  SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, DS, FLAT, VOPD, SrcEnum,
   SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp, FLATOp, GLOBALOp, VOPDOp
 )
 from extra.assembly.rdna3.alu import (
-  f32, i32, f16, i16, sext, vopc, FLOAT_BITS, SALU, VALU,
+  f32, i32, f16, i16, sext, vopc, SALU, VALU,
   SOP1_BASE, SOP2_BASE, SOPC_BASE, SOPK_BASE, VOP1_BASE, VOP2_BASE
 )
 
-Inst, Program = Inst32 | Inst64 | VOP3P, dict[int, Inst32 | Inst64 | VOP3P]
 WAVE_SIZE, SGPR_COUNT, VGPR_COUNT = 32, 128, 256
-VCC_LO, VCC_HI, EXEC_LO, EXEC_HI, NULL_REG, M0 = 106, 107, 126, 127, 124, 125
-CTYPES = {1: ctypes.c_uint8, 2: ctypes.c_uint16, 4: ctypes.c_uint32}
+VCC_LO, VCC_HI, NULL, M0, EXEC_LO, EXEC_HI, SCC = SrcEnum.VCC_LO, SrcEnum.VCC_HI, SrcEnum.NULL, SrcEnum.M0, SrcEnum.EXEC_LO, SrcEnum.EXEC_HI, SrcEnum.SCC
+# Pre-computed inline constant table for src operands 128-254 (index = src - 128)
+_INLINE_CONSTS = [0] * 127
+for _i in range(65): _INLINE_CONSTS[_i] = _i  # 128-192 -> 0-64
+for _i in range(1, 17): _INLINE_CONSTS[64 + _i] = ((-_i) & 0xffffffff)  # 193-208 -> -1 to -16
+for _k, _v in {SrcEnum.POS_HALF: 0x3f000000, SrcEnum.NEG_HALF: 0xbf000000, SrcEnum.POS_ONE: 0x3f800000, SrcEnum.NEG_ONE: 0xbf800000,
+               SrcEnum.POS_TWO: 0x40000000, SrcEnum.NEG_TWO: 0xc0000000, SrcEnum.POS_FOUR: 0x40800000, SrcEnum.NEG_FOUR: 0xc0800000,
+               SrcEnum.INV_2PI: 0x3e22f983}.items(): _INLINE_CONSTS[_k - 128] = _v
 
-_valid_mem_ranges: set[tuple[int, int]] = set()
-def set_valid_mem_ranges(ranges: set[tuple[int, int]]) -> None: global _valid_mem_ranges; _valid_mem_ranges = ranges
-
-def _is_valid_addr(addr: int, size: int) -> bool:
-  return not _valid_mem_ranges or any(s <= addr and addr + size <= s + z for s, z in _valid_mem_ranges)
-
-def mem_read(addr: int, size: int) -> int:
-  if not _is_valid_addr(addr, size): return 0
-  return CTYPES[size].from_address(addr).value
-
+_valid_mem_ranges: list[tuple[int, int]] = []
+def set_valid_mem_ranges(ranges: set[tuple[int, int]]) -> None: global _valid_mem_ranges; _valid_mem_ranges = list(ranges)
+def _mem_valid(addr: int, size: int) -> bool:
+  for s, z in _valid_mem_ranges:
+    if s <= addr and addr + size <= s + z: return True
+  return not _valid_mem_ranges
+def _ctypes_at(addr: int, size: int): return (ctypes.c_uint8 if size == 1 else ctypes.c_uint16 if size == 2 else ctypes.c_uint32).from_address(addr)
+def mem_read(addr: int, size: int) -> int: return _ctypes_at(addr, size).value if _mem_valid(addr, size) else 0
 def mem_write(addr: int, size: int, val: int) -> None:
-  if not _is_valid_addr(addr, size): return
-  CTYPES[size].from_address(addr).value = val
+  if _mem_valid(addr, size): _ctypes_at(addr, size).value = val
 
 # Memory op tables
 FLAT_LOAD = {GLOBALOp.GLOBAL_LOAD_B32: (1,4,0), FLATOp.FLAT_LOAD_B32: (1,4,0), GLOBALOp.GLOBAL_LOAD_B64: (2,4,0), FLATOp.FLAT_LOAD_B64: (2,4,0),
@@ -50,22 +51,21 @@ FLAT_D16_STORE = {FLATOp.FLAT_STORE_D16_HI_B8: 1, FLATOp.FLAT_STORE_D16_HI_B16: 
 SMEM_LOAD = {SMEMOp.S_LOAD_B32: 1, SMEMOp.S_LOAD_B64: 2, SMEMOp.S_LOAD_B128: 4, SMEMOp.S_LOAD_B256: 8, SMEMOp.S_LOAD_B512: 16}
 SOPK_WAIT = {SOPKOp.S_WAITCNT_VSCNT, SOPKOp.S_WAITCNT_VMCNT, SOPKOp.S_WAITCNT_EXPCNT, SOPKOp.S_WAITCNT_LGKMCNT}
 
-@dataclass
 class WaveState:
-  sgpr: list[int] = field(default_factory=lambda: [0] * SGPR_COUNT)
-  vgpr: list[list[int]] = field(default_factory=lambda: [[0] * VGPR_COUNT for _ in range(WAVE_SIZE)])
-  scc: int = 0
-  vcc: int = 0
-  exec_mask: int = 0xffffffff
-  pc: int = 0
-  literal: int = 0
-  _pend_vcc: int | None = None
-  _pend_exec: int | None = None
-  _pend_sgpr: dict[int, int] = field(default_factory=dict)
+  __slots__ = ('sgpr', 'vgpr', 'scc', 'vcc', 'exec_mask', 'pc', 'literal', '_pend_vcc', '_pend_exec', '_pend_sgpr')
+  def __init__(self):
+    self.sgpr, self.vgpr = [0] * SGPR_COUNT, [[0] * VGPR_COUNT for _ in range(WAVE_SIZE)]
+    self.scc = self.vcc = self.pc = self.literal = 0
+    self.exec_mask, self._pend_vcc, self._pend_exec, self._pend_sgpr = 0xffffffff, None, None, {}
 
   def rsgpr(self, i: int) -> int:
-    return {VCC_LO: self.vcc & 0xffffffff, VCC_HI: (self.vcc >> 32) & 0xffffffff, EXEC_LO: self.exec_mask & 0xffffffff,
-            EXEC_HI: (self.exec_mask >> 32) & 0xffffffff, NULL_REG: 0, 253: self.scc}.get(i, self.sgpr[i] if i < SGPR_COUNT else 0)
+    if i == VCC_LO: return self.vcc & 0xffffffff
+    if i == VCC_HI: return (self.vcc >> 32) & 0xffffffff
+    if i == NULL: return 0
+    if i == EXEC_LO: return self.exec_mask & 0xffffffff
+    if i == EXEC_HI: return (self.exec_mask >> 32) & 0xffffffff
+    if i == SCC: return self.scc
+    return self.sgpr[i] if i < SGPR_COUNT else 0
 
   def wsgpr(self, i: int, v: int) -> None:
     v &= 0xffffffff
@@ -73,27 +73,20 @@ class WaveState:
     elif i == VCC_HI: self.vcc = (self.vcc & 0xffffffff) | (v << 32); self.sgpr[i] = v
     elif i == EXEC_LO: self.exec_mask = (self.exec_mask & 0xffffffff00000000) | v
     elif i == EXEC_HI: self.exec_mask = (self.exec_mask & 0xffffffff) | (v << 32)
-    elif i == NULL_REG: pass
-    elif i < SGPR_COUNT: self.sgpr[i] = v
+    elif i < SGPR_COUNT and i != NULL: self.sgpr[i] = v
 
   def rsgpr64(self, i: int) -> int: return self.rsgpr(i) | (self.rsgpr(i+1) << 32)
   def wsgpr64(self, i: int, v: int) -> None: self.wsgpr(i, v & 0xffffffff); self.wsgpr(i+1, (v >> 32) & 0xffffffff)
 
   def rsrc(self, v: int, lane: int) -> int:
-    if v <= 105: return self.sgpr[v]
-    if v in (VCC_LO, VCC_HI): return (self.vcc >> (32 if v == VCC_HI else 0)) & 0xffffffff
-    if 108 <= v <= 123 or v == M0: return self.sgpr[v]
-    if v in (EXEC_LO, EXEC_HI): return (self.exec_mask >> (32 if v == EXEC_HI else 0)) & 0xffffffff
-    if v == NULL_REG: return 0
-    if 128 <= v <= 192: return v - 128
-    if 193 <= v <= 208: return (-(v - 192)) & 0xffffffff
-    if v in FLOAT_BITS: return FLOAT_BITS[v]
+    if v < VCC_LO: return self.sgpr[v]
+    if v < SGPR_COUNT: return self.rsgpr(v)
+    if v < 255: return _INLINE_CONSTS[v - 128]
     if v == 255: return self.literal
-    if 256 <= v <= 511: return self.vgpr[lane][v - 256]
-    return 0
+    return self.vgpr[lane][v - 256] if v <= 511 else 0
 
   def rsrc64(self, v: int, lane: int) -> int:
-    return self.rsrc(v, lane) | ((self.rsrc(v+1, lane) if v <= 105 or 256 <= v <= 511 else 0) << 32)
+    return self.rsrc(v, lane) | ((self.rsrc(v+1, lane) if v < VCC_LO or 256 <= v <= 511 else 0) << 32)
 
   def pend_vcc_lane(self, lane: int, val: bool) -> None:
     if self._pend_vcc is None: self._pend_vcc = 0
@@ -145,8 +138,9 @@ def decode_program(data: bytes) -> Program:
     if inst_class == VOPD and (inst.opx in (1, 2) or inst.opy in (1, 2)): has_literal = True
     if inst_class == SOP2 and inst.op in (69, 70): has_literal = True
     if has_literal: inst._literal = int.from_bytes(data[i+base_size:i+base_size+4], 'little')
+    inst._words = inst.size() // 4  # cache size for step_wave
     result[i // 4] = inst
-    i += inst.size()
+    i += inst._words * 4
   return result
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -221,7 +215,7 @@ def exec_sopp(st: WaveState, inst: SOPP) -> int:
 
 def exec_smem(st: WaveState, inst: SMEM) -> int:
   addr = st.rsgpr64(inst.sbase * 2) + sext(inst.offset, 21)
-  if inst.soffset not in (NULL_REG, 0x7f): addr += st.rsrc(inst.soffset, 0)
+  if inst.soffset not in (NULL, 0x7f): addr += st.rsrc(inst.soffset, 0)
   if (cnt := SMEM_LOAD.get(inst.op)) is None: raise NotImplementedError(f"SMEM op {inst.op}")
   for i in range(cnt): st.wsgpr(inst.sdata + i, mem_read((addr + i * 4) & 0xffffffffffffffff, 4))
   return 0
@@ -356,7 +350,7 @@ def exec_vop3sd(st: WaveState, inst: VOP3SD, lane: int) -> None:
 def exec_flat(st: WaveState, inst: FLAT, lane: int) -> None:
   op, addr_reg, data_reg, vdst, offset, saddr, V = inst.op, inst.addr, inst.data, inst.vdst, sext(inst.offset, 13), inst.saddr, st.vgpr[lane]
   addr = V[addr_reg] | (V[addr_reg+1] << 32)
-  addr = (st.rsgpr64(saddr) + V[addr_reg] + offset) & 0xffffffffffffffff if saddr not in (NULL_REG, 0x7f) else (addr + offset) & 0xffffffffffffffff
+  addr = (st.rsgpr64(saddr) + V[addr_reg] + offset) & 0xffffffffffffffff if saddr not in (NULL, 0x7f) else (addr + offset) & 0xffffffffffffffff
   if op in FLAT_LOAD:
     cnt, sz, sign = FLAT_LOAD[op]
     for i in range(cnt): val = mem_read(addr + i * sz, sz); V[vdst + i] = sext(val, sz * 8) & 0xffffffff if sign else val
@@ -454,10 +448,13 @@ def exec_wmma_f32_16x16x16_f16(st: WaveState, inst: VOP3P, n_lanes: int) -> None
 SCALAR = {SOP1: exec_sop1, SOP2: exec_sop2, SOPC: exec_sopc, SOPK: exec_sopk, SOPP: exec_sopp, SMEM: exec_smem}
 VECTOR = {VOP1: exec_vop1, VOP2: exec_vop2, VOP3: exec_vop3, VOP3SD: exec_vop3sd, VOPC: exec_vopc, FLAT: exec_flat, DS: exec_ds, VOPD: exec_vopd, VOP3P: exec_vop3p}
 
+_WMMA_OPS = frozenset((VOP3POp.V_WMMA_F32_16X16X16_F16, VOP3POp.V_WMMA_F32_16X16X16_BF16, VOP3POp.V_WMMA_F16_16X16X16_F16,
+                       VOP3POp.V_WMMA_BF16_16X16X16_BF16, VOP3POp.V_WMMA_I32_16X16X16_IU8, VOP3POp.V_WMMA_I32_16X16X16_IU4))
+
 def step_wave(program: Program, st: WaveState, lds: bytearray, n_lanes: int) -> int:
   inst = program.get(st.pc)
   if inst is None: return 1
-  inst_words, st.literal, inst_type = inst.size() // 4, inst._literal or 0, type(inst)
+  inst_words, st.literal, inst_type = inst._words, inst._literal or 0, type(inst)
   if (handler := SCALAR.get(inst_type)) is not None:
     delta = handler(st, inst)
     if delta == -1: return -1
@@ -471,7 +468,7 @@ def step_wave(program: Program, st: WaveState, lds: bytearray, n_lanes: int) -> 
     if inst_type is DS:
       for lane in range(n_lanes):
         if exec_mask & (1 << lane): handler(st, inst, lane, lds)
-    elif inst_type is VOP3P and inst.op in (VOP3POp.V_WMMA_F32_16X16X16_F16, VOP3POp.V_WMMA_F32_16X16X16_BF16, VOP3POp.V_WMMA_F16_16X16X16_F16, VOP3POp.V_WMMA_BF16_16X16X16_BF16, VOP3POp.V_WMMA_I32_16X16X16_IU8, VOP3POp.V_WMMA_I32_16X16X16_IU4):
+    elif inst_type is VOP3P and inst.op in _WMMA_OPS:
       exec_wmma_f32_16x16x16_f16(st, inst, n_lanes)
     else:
       for lane in range(n_lanes):

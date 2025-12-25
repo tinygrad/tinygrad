@@ -288,22 +288,7 @@ def main():
       rust_ms, speedup = "N/A", "N/A"
     print(f"{test_type:<10} {name:<25} {n_insts:<8} {n_wgs:<6} {py_ms:<14} {rust_ms:<14} {speedup:<10}")
 
-  print("\n" + "=" * 90)
-  print("OPTIMIZATION TIPS")
-  print("=" * 90)
-  print("""
-Hot paths to optimize in the Python emulator:
-  1. step_wave() - main execution loop, called once per instruction
-  2. exec_vop2/exec_vop3 - most common vector instructions
-  3. rsrc()/wsgpr() - register access on every instruction
-  4. VALU/SALU dict lookups - consider direct dispatch
 
-Key bottlenecks:
-  - Python function call overhead (use __slots__, inline critical paths)
-  - Dictionary lookups for instruction dispatch (consider match/case or direct tables)
-  - Integer masking/shifting for register reads (consider numpy arrays)
-  - Loop overhead in lane iteration (consider vectorizing with numpy)
-""")
 
 if __name__ == "__main__":
   main()
