@@ -4,7 +4,7 @@ import textwrap
 from tinygrad import Device, Tensor
 from tinygrad.uop.ops import UOp, Ops, track_rewrites
 from tinygrad.renderer import ProgramSpec
-from tinygrad.helpers import TracingKey
+from tinygrad.helpers import TracingKey, getenv
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 
 # TODO: use the RDNA3 renderer when it's in master
@@ -60,7 +60,7 @@ def run_asm(name:str, src:str) -> ProgramSpec:
   ei.run()
   return prg
 
-@unittest.skipUnless(Device.DEFAULT == "AMD", "only on AMD")
+@unittest.skipUnless(Device.DEFAULT == "AMD" and not getenv("AMD_LLVM"), "only on AMD with comgr")
 class TestCfg(unittest.TestCase):
   def setUp(self):
     arch = Device["AMD"].arch
