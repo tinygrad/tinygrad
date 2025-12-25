@@ -304,6 +304,15 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
     ended_ranges = flatten([x.ended_ranges for x in topo if x.op is Ops.END])
     input_ranges = tuple([x for x in topo if x.op is Ops.RANGE and x not in reduce_range and x not in ended_ranges])
     identity = red.const(red.dtype, identity_element(red.arg, red.dtype.scalar()))
+    # vector accumulator: no dependency chain between unrolled adds
+    if (vec_count:=len(lst)) > 1 and red.dtype.count == 1:
+      vec_dtype, idx0 = red.dtype.vec(vec_count), UOp.const(dtypes.int, 0)
+      acc = UOp(Ops.DEFINE_REG, vec_dtype.ptr(size=1, addrspace=AddrSpace.REG), arg=ctx.acc_num)
+      acc_init = (acc.after(*input_ranges) if input_ranges else acc).index(idx0).store(identity.broadcast(vec_count))
+      new_val = acc.after(acc_init, *reduce_range).index(idx0).alu(red.arg, UOp(Ops.VECTORIZE, vec_dtype, tuple(lst)))
+      acc_out = acc.after(acc.index(idx0).store(new_val).end(*reduce_range)).index(idx0)
+      ctx.acc_num += 1
+      return functools.reduce(lambda x,y: x.alu(red.arg, y), [acc_out.gep((i,)) for i in range(vec_count)])
     acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=1, addrspace=AddrSpace.REG), arg=ctx.acc_num)
     acc_init = acc.after(*input_ranges).index(UOp.const(dtypes.int, 0)).store(identity) if len(input_ranges) else \
                acc.index(UOp.const(dtypes.int, 0)).store(identity)
