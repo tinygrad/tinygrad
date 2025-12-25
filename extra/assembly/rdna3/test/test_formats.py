@@ -268,5 +268,65 @@ class TestFLAT(unittest.TestCase):
     self.assertEqual(inst.to_bytes(), bytes([0x00,0x00,0x56,0xdc,0x02,0x00,0x7c,0x00]))
 
 
+class TestSMEM(unittest.TestCase):
+  """Test SMEM (scalar memory) instructions - regression tests for glc/dlc bit positions."""
+
+  def test_smem_dlc_bit_position(self):
+    # s_load_b32 s5, s[2:3], s0 dlc - tests that DLC is at bit 13 (not bit 14)
+    # GFX11: encoding: [0x41,0x21,0x00,0xf4,0x00,0x00,0x00,0x00]
+    inst = s_load_b32(sdata=s[5], sbase=s[2], soffset=s[0], dlc=1)
+    self.assertEqual(inst.to_bytes(), bytes([0x41,0x21,0x00,0xf4,0x00,0x00,0x00,0x00]))
+
+  def test_smem_glc_bit_position(self):
+    # s_load_b32 s5, s[2:3], s0 glc - tests that GLC is at bit 14 (not bit 16)
+    # GFX11: encoding: [0x41,0x41,0x00,0xf4,0x00,0x00,0x00,0x00]
+    inst = s_load_b32(sdata=s[5], sbase=s[2], soffset=s[0], glc=1)
+    self.assertEqual(inst.to_bytes(), bytes([0x41,0x41,0x00,0xf4,0x00,0x00,0x00,0x00]))
+
+  def test_smem_glc_dlc_combined(self):
+    # s_load_b32 s5, s[2:3], s0 glc dlc - tests both flags together
+    # GFX11: encoding: [0x41,0x61,0x00,0xf4,0x00,0x00,0x00,0x00]
+    inst = s_load_b32(sdata=s[5], sbase=s[2], soffset=s[0], glc=1, dlc=1)
+    self.assertEqual(inst.to_bytes(), bytes([0x41,0x61,0x00,0xf4,0x00,0x00,0x00,0x00]))
+
+  def test_smem_disasm_roundtrip_dlc(self):
+    # Test that disassembly/reassembly preserves DLC bit correctly
+    data = bytes([0x41,0x21,0x00,0xf4,0x00,0x00,0x00,0x00])
+    decoded = SMEM.from_bytes(data)
+    self.assertEqual(decoded.to_bytes(), data)
+
+  def test_smem_disasm_roundtrip_glc_dlc(self):
+    # Test that disassembly/reassembly preserves GLC+DLC bits correctly
+    data = bytes([0x41,0x61,0x00,0xf4,0x00,0x00,0x00,0x00])
+    decoded = SMEM.from_bytes(data)
+    self.assertEqual(decoded.to_bytes(), data)
+
+
+class TestVOP3Literal(unittest.TestCase):
+  """Test VOP3 literal handling - regression tests for Inst64 literal encoding."""
+
+  def test_vop3_with_literal(self):
+    # v_add3_u32 v5, vcc_hi, 0xaf123456, v255
+    # GFX11: encoding: [0x05,0x00,0x55,0xd6,0x6b,0xfe,0xfd,0x07,0x56,0x34,0x12,0xaf]
+    from extra.assembly.rdna3.lib import RawImm
+    inst = VOP3(VOP3Op.V_ADD3_U32, vdst=v[5], src0=RawImm(107), src1=0xaf123456, src2=v[255])
+    expected = bytes([0x05,0x00,0x55,0xd6,0x6b,0xfe,0xfd,0x07,0x56,0x34,0x12,0xaf])
+    self.assertEqual(inst.to_bytes(), expected)
+
+  def test_vop3_literal_null_operand(self):
+    # v_add3_u32 v5, null, exec_lo, 0xaf123456
+    # GFX11: encoding: [0x05,0x00,0x55,0xd6,0x7c,0xfc,0xfc,0x03,0x56,0x34,0x12,0xaf]
+    from extra.assembly.rdna3.lib import RawImm
+    inst = VOP3(VOP3Op.V_ADD3_U32, vdst=v[5], src0=NULL, src1=RawImm(126), src2=0xaf123456)
+    expected = bytes([0x05,0x00,0x55,0xd6,0x7c,0xfc,0xfc,0x03,0x56,0x34,0x12,0xaf])
+    self.assertEqual(inst.to_bytes(), expected)
+
+  def test_vop3p_with_literal(self):
+    # Test VOP3P literal encoding (also uses Inst64)
+    from extra.assembly.rdna3.lib import RawImm
+    inst = VOP3P(VOP3POp.V_PK_ADD_F16, vdst=v[5], src0=RawImm(240), src1=0x12345678, src2=v[0])
+    self.assertEqual(len(inst.to_bytes()), 12)  # 8 bytes + 4 byte literal
+
+
 if __name__ == "__main__":
   unittest.main()

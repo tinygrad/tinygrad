@@ -1709,8 +1709,8 @@ class SMEM(Inst64):
   sbase:SGPR = bits[5:0]
   soffset:SSrc = bits[63:57]
   offset:Imm = bits[52:32]
-  glc = bits[16]
-  dlc = bits[14]
+  glc = bits[14]
+  dlc = bits[13]
 
 class SOP1(Inst32):
   encoding = bits[31:23] == 0b101111101

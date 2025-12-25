@@ -126,6 +126,12 @@ def generate(output_path: pathlib.Path|str|None = None) -> dict:
           break
     formats[fmt_name] = fields
 
+  # fix known PDF errors (verified against LLVM test vectors)
+  # SMEM: PDF says DLC=bit14, GLC=bit16 but actual encoding is DLC=bit13, GLC=bit14
+  if 'SMEM' in formats:
+    formats['SMEM'] = [(n, 13 if n == 'DLC' else 14 if n == 'GLC' else h, 13 if n == 'DLC' else 14 if n == 'GLC' else l, e, t)
+                       for n, h, l, e, t in formats['SMEM']]
+
   # generate output
   def enum_lines(name, items):
     return [f"class {name}(IntEnum):"] + [f"  {n} = {v}" for v, n in sorted(items.items())] + [""]

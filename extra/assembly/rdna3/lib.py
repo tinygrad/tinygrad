@@ -147,7 +147,9 @@ class Inst:
 
 class Inst32(Inst): pass
 class Inst64(Inst):
-  def to_bytes(self) -> bytes: return self.to_int().to_bytes(8, 'little')
+  def to_bytes(self) -> bytes:
+    result = self.to_int().to_bytes(8, 'little')
+    return result + (lit & 0xffffffff).to_bytes(4, 'little') if (lit := self._get_literal() or getattr(self, '_literal', None)) else result
   @classmethod
   def from_bytes(cls, data: bytes): return cls.from_int(int.from_bytes(data[:8], 'little'))
 
@@ -171,11 +173,19 @@ def parse_operand(op: str) -> tuple:
   if re.match(r'^-?\d+$', op): return (int(op), neg, abs_)
   if m := re.match(r'^-?0x([0-9a-f]+)$', op):
     v = -int(m.group(1), 16) if op.startswith('-') else int(m.group(1), 16)
-    return (RawImm(v) if 0 <= v <= 255 else v, neg, abs_)
+    return (v, neg, abs_)  # let encode_src handle inline vs literal
   if op in SPECIAL_REGS: return (SPECIAL_REGS[op], neg, abs_)
   if m := re.match(r'^([svt](?:tmp)?)\[(\d+):(\d+)\]$', op): return (REG_MAP[m.group(1)][int(m.group(2)):int(m.group(3))+1], neg, abs_)
   if m := re.match(r'^([svt](?:tmp)?)(\d+)$', op): return (REG_MAP[m.group(1)][int(m.group(2))], neg, abs_)
   raise ValueError(f"cannot parse operand: {op}")
+
+SMEM_OPS = {'s_load_b32', 's_load_b64', 's_load_b128', 's_load_b256', 's_load_b512',
+            's_buffer_load_b32', 's_buffer_load_b64', 's_buffer_load_b128', 's_buffer_load_b256', 's_buffer_load_b512'}
+SOP1_SRC_ONLY = {'s_setpc_b64', 's_rfe_b64'}  # instructions with ssrc0 only, no sdst
+SOP1_MSG_IMM = {'s_sendmsg_rtn_b32', 's_sendmsg_rtn_b64'}  # instructions with raw immediate in ssrc0
+SOPK_IMM_ONLY = {'s_version'}  # instructions with simm16 only, no sdst
+SOPK_IMM_FIRST = {'s_setreg_b32'}  # instructions where simm16 comes before sdst
+SOPK_UNSUPPORTED = {'s_setreg_imm32_b32'}  # special 64-bit SOPK format
 
 def asm(text: str) -> Inst:
   from extra.assembly.rdna3 import autogen
@@ -200,6 +210,26 @@ def asm(text: str) -> Inst:
   lit = None
   if mnemonic in ('v_fmaak_f32', 'v_fmaak_f16') and len(values) == 4: lit, values = unwrap(values[3]), values[:3]
   elif mnemonic in ('v_fmamk_f32', 'v_fmamk_f16') and len(values) == 4: lit, values = unwrap(values[2]), [values[0], values[1], values[3]]
+  # Unsupported instructions
+  if mnemonic in SOPK_UNSUPPORTED: raise ValueError(f"unsupported instruction: {mnemonic}")
+  # SOP1 source-only instructions (no destination)
+  elif mnemonic in SOP1_SRC_ONLY:
+    return getattr(autogen, mnemonic)(ssrc0=values[0])
+  # SOP1 instructions with raw immediate message ID
+  elif mnemonic in SOP1_MSG_IMM:
+    return getattr(autogen, mnemonic)(sdst=values[0], ssrc0=RawImm(unwrap(values[1])))
+  # SOPK immediate-only instructions (no destination)
+  elif mnemonic in SOPK_IMM_ONLY:
+    return getattr(autogen, mnemonic)(simm16=values[0])
+  # SOPK instructions with simm16 before sdst
+  elif mnemonic in SOPK_IMM_FIRST:
+    return getattr(autogen, mnemonic)(simm16=values[0], sdst=values[1])
+  # SMEM: when third operand is immediate, use it as offset with soffset=NULL
+  elif mnemonic in SMEM_OPS and len(operands) >= 3 and re.match(r'^-?[0-9]|^-?0x', operands[2].strip().lower()):
+    return getattr(autogen, mnemonic)(sdata=values[0], sbase=values[1], offset=values[2], soffset=RawImm(124))
+  # MUBUF: when vaddr is 'off', use 0 instead of NULL
+  elif mnemonic.startswith('buffer_') and len(operands) >= 2 and operands[1].strip().lower() == 'off':
+    return getattr(autogen, mnemonic)(vdata=values[0], vaddr=0, srsrc=values[2], soffset=RawImm(unwrap(values[3])) if len(values) > 3 else RawImm(0))
   for suffix in (['_e32', ''] if not (neg_bits or abs_bits or clamp) else ['', '_e32']):
     if hasattr(autogen, name := mnemonic.replace('.', '_') + suffix):
       inst = getattr(autogen, name)(*values, literal=lit)
