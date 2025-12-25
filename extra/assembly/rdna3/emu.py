@@ -212,7 +212,9 @@ def exec_sopp(st: WaveState, inst: SOPP) -> int:
   if inst.op == SOPPOp.S_CBRANCH_VCCNZ: return sext(inst.simm16, 16) if st.vcc != 0 else 0
   if inst.op == SOPPOp.S_CBRANCH_EXECZ: return sext(inst.simm16, 16) if st.exec_mask == 0 else 0
   if inst.op == SOPPOp.S_CBRANCH_EXECNZ: return sext(inst.simm16, 16) if st.exec_mask != 0 else 0
-  return 0
+  # Scheduling hints and wait instructions are no-ops in emulation
+  if inst.op <= 31: return 0  # S_NOP, S_CLAUSE, S_DELAY_ALU, S_WAITCNT, etc.
+  raise NotImplementedError(f"SOPP op {inst.op}")
 
 def exec_smem(st: WaveState, inst: SMEM) -> int:
   addr = st.rsgpr64(inst.sbase * 2) + sext(inst.offset, 21)
@@ -249,7 +251,8 @@ def exec_vop1(st: WaveState, inst: VOP1, lane: int) -> None:
     elif inst.op == VOP1Op.V_CVT_I32_F64: V[inst.vdst] = (max(-0x80000000, min(0x7fffffff, int(v))) & 0xffffffff) if math.isfinite(v) else 0
     else: V[inst.vdst] = max(0, min(0xffffffff, int(v))) if math.isfinite(v) and v == v else 0
     return
-  if (fn := VALU.get(VOP1_BASE + inst.op)): V[inst.vdst] = fn(s0, 0, 0)
+  if (fn := VALU.get(VOP1_BASE + inst.op)): V[inst.vdst] = fn(s0, 0, 0); return
+  raise NotImplementedError(f"VOP1 op {inst.op}")
 
 def exec_vop2(st: WaveState, inst: VOP2, lane: int) -> None:
   V, s0, s1, op = st.vgpr[lane], st.rsrc(inst.src0, lane), st.vgpr[lane][inst.vsrc1], inst.op
@@ -266,7 +269,8 @@ def exec_vop2(st: WaveState, inst: VOP2, lane: int) -> None:
     V[inst.vdst] = lo | (hi << 16); return
   if op == VOP2Op.V_ADD_CO_CI_U32: r = s0+s1+((st.vcc>>lane)&1); st.pend_vcc_lane(lane, r >= 0x100000000); V[inst.vdst] = r & 0xffffffff; return
   if op == VOP2Op.V_SUB_CO_CI_U32: b = (st.vcc>>lane)&1; st.pend_vcc_lane(lane, s1+b > s0); V[inst.vdst] = (s0-s1-b) & 0xffffffff; return
-  if (fn := VALU.get(VOP2_BASE + op)): V[inst.vdst] = fn(s0, s1, 0)
+  if (fn := VALU.get(VOP2_BASE + op)): V[inst.vdst] = fn(s0, s1, 0); return
+  raise NotImplementedError(f"VOP2 op {op}")
 
 def vop3_mod(val: int, neg: int, abs_: int, idx: int) -> int:
   if (abs_ >> idx) & 1: val = i32(abs(f32(val)))
@@ -275,14 +279,22 @@ def vop3_mod(val: int, neg: int, abs_: int, idx: int) -> int:
 
 def exec_vop3(st: WaveState, inst: VOP3, lane: int) -> None:
   op, src0, src1, src2, vdst, neg, abs_ = inst.op, inst.src0, inst.src1, inst.src2, inst.vdst, inst.neg, getattr(inst, 'abs', 0)
-  s0, s1, s2 = vop3_mod(st.rsrc(src0, lane), neg, abs_, 0), vop3_mod(st.rsrc(src1, lane), neg, abs_, 1), vop3_mod(st.rsrc(src2, lane), neg, abs_, 2)
   V = st.vgpr[lane]
   # VOPC encoded in VOP3 (0-255)
   if 0 <= op <= 255:
-    result, is_cmpx = vopc(op, s0, s1), op >= 128
+    base = op & 0x7f
+    # For 64-bit comparisons (I64: 80-87, U64: 88-95), read raw 64-bit values (no float modifiers)
+    if 80 <= base <= 95:
+      s0_64, s1_64 = st.rsrc64(src0, lane), st.rsrc64(src1, lane)
+      result = vopc(op, s0_64 & 0xffffffff, s1_64 & 0xffffffff, (s0_64 >> 32) & 0xffffffff, (s1_64 >> 32) & 0xffffffff)
+    else:
+      s0, s1 = vop3_mod(st.rsrc(src0, lane), neg, abs_, 0), vop3_mod(st.rsrc(src1, lane), neg, abs_, 1)
+      result = vopc(op, s0, s1)
+    is_cmpx = op >= 128
     (st.pend_vcc_lane if vdst == VCC_LO else lambda l, v: st.pend_sgpr_lane(vdst, l, v))(lane, result)
     if is_cmpx: st.pend_exec_lane(lane, result)
     return
+  s0, s1, s2 = vop3_mod(st.rsrc(src0, lane), neg, abs_, 0), vop3_mod(st.rsrc(src1, lane), neg, abs_, 1), vop3_mod(st.rsrc(src2, lane), neg, abs_, 2)
   # Special ops
   if op == VOP3Op.V_FMAC_F32: V[vdst] = i32(f32(s0)*f32(s1)+f32(V[vdst])); return
   if op == VOP3Op.V_READLANE_B32: st.wsgpr(vdst, st.vgpr[s1 & 0x1f][src0 - 256] if src0 >= 256 else s0); return
@@ -304,7 +316,8 @@ def exec_vop3(st: WaveState, inst: VOP3, lane: int) -> None:
     elif op == VOP3Op.V_MAX_F64: r = max(a, b)
     else: r = min(a, b)
     V[vdst], V[vdst+1] = i64_parts(r); return
-  if (fn := VALU.get(op)): V[vdst] = fn(s0, s1, s2)
+  if (fn := VALU.get(op)): V[vdst] = fn(s0, s1, s2); return
+  raise NotImplementedError(f"VOP3 op {op}")
 
 def exec_vopc(st: WaveState, inst: VOPC, lane: int) -> None:
   result, is_cmpx = vopc(inst.op, st.rsrc(inst.src0, lane), st.vgpr[lane][inst.vsrc1]), inst.op >= 128

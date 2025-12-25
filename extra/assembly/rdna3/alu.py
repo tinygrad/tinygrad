@@ -228,7 +228,7 @@ VALU: dict[int, callable] = {
   VOP3Op.V_MED3_I16: lambda a, b, c: sorted([sext(a & 0xffff, 16), sext(b & 0xffff, 16), sext(c & 0xffff, 16)])[1] & 0xffff,
 }
 
-def vopc(op: int, s0: int, s1: int) -> int:
+def vopc(op: int, s0: int, s1: int, s0_hi: int = 0, s1_hi: int = 0) -> int:
   base = op & 0x7f
   if 16 <= base <= 31:  # F32
     f0, f1, cmp, nan = f32(s0), f32(s1), base - 16, math.isnan(f32(s0)) or math.isnan(f32(s1))
@@ -242,6 +242,14 @@ def vopc(op: int, s0: int, s1: int) -> int:
   if 64 <= base <= 79:  # I32/U32
     cmp, s0s, s1s = (base - 64) % 8, sext(s0, 32), sext(s1, 32)
     return int([False, s0s<s1s, s0s==s1s, s0s<=s1s, s0s>s1s, s0s!=s1s, s0s>=s1s, True][cmp]) if base < 72 else int([False, s0<s1, s0==s1, s0<=s1, s0>s1, s0!=s1, s0>=s1, True][cmp])
+  if 80 <= base <= 95:  # I64/U64
+    cmp = (base - 80) % 8
+    s0_64, s1_64 = s0 | (s0_hi << 32), s1 | (s1_hi << 32)
+    if base < 88:  # I64
+      s0s, s1s = sext(s0_64, 64), sext(s1_64, 64)
+      return int([False, s0s<s1s, s0s==s1s, s0s<=s1s, s0s>s1s, s0s!=s1s, s0s>=s1s, True][cmp])
+    else:  # U64
+      return int([False, s0_64<s1_64, s0_64==s1_64, s0_64<=s1_64, s0_64>s1_64, s0_64!=s1_64, s0_64>=s1_64, True][cmp])
   if base == 126:  # CLASS_F32
     f, mask = f32(s0), s1
     if math.isnan(f): return int(bool(mask & 0x3))
@@ -249,4 +257,4 @@ def vopc(op: int, s0: int, s1: int) -> int:
     if f == 0.0: return int(bool(mask & (0x20 if (s0 >> 31) & 1 else 0x40)))
     exp, sign = (s0 >> 23) & 0xff, (s0 >> 31) & 1
     return int(bool(mask & ((0x10 if sign else 0x80) if exp == 0 else (0x8 if sign else 0x100))))
-  return 0
+  raise NotImplementedError(f"VOPC op {op} (base {base})")

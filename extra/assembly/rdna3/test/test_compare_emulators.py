@@ -418,5 +418,14 @@ class TestTinygradKernels(unittest.TestCase):
   def test_topk(self): self._test_kernel(lambda T: T.empty(64).topk(3)[0])
   def test_interpolate_uint8(self): self._test_kernel(lambda T: T.empty(2,3,64,64).relu().cast('uint8').interpolate((10,10), mode="linear"))
 
+  # Regression test for 64-bit comparison (V_CMP_GT_I64, V_CMP_LT_U64, etc.) with rsrc64
+  def test_index_int64(self):
+    from tinygrad import dtypes
+    self._test_kernel(lambda T: T.empty(4, 4)[T.arange(4).cast(dtypes.int64), :])
+  def test_index_int64_2d(self):
+    from tinygrad import dtypes
+    # Tests 64-bit compare with inline constants (comparing against 0)
+    self._test_kernel(lambda T: T.empty(4, 4)[T.arange(4).cast(dtypes.int64), T.arange(4).cast(dtypes.int64)])
+
 if __name__ == "__main__":
   unittest.main()
