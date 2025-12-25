@@ -509,6 +509,28 @@ jobs:
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
+  testllama1bspeed:
+    name: Llama1B v Torch (cpu, clang)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: llama1b-speed
+          deps: testing_minimal
+          pydeps: transformers
+      - name: no JIT, TEMP=0
+        run: PYTHONPATH="." JIT=0 CPU=1 CNT=16 python3 test/speed/external_test_speed_llama1b_v_torch.py
+      - name: JIT, BEAM=0, TEMP=0
+        run: PYTHONPATH="." JIT=1 BEAM=0 CPU=1 CNT=16 python3 test/speed/external_test_speed_llama1b_v_torch.py
+      - name: JIT, BEAM=2, TEMP=0
+        run: PYTHONPATH="." JIT=1 BEAM=2 CPU=1 CNT=128 python3 test/speed/external_test_speed_llama1b_v_torch.py
+      - name: JIT, BEAM=2, TEMP=0.3
+        run: PYTHONPATH="." JIT=1 BEAM=2 TEMPERATURE=0.3 CPU=1 CNT=128 python3 test/speed/external_test_speed_llama1b_v_torch.py
+
   testmetalmodels:
     name: Models (metal)
     runs-on: macos-14
