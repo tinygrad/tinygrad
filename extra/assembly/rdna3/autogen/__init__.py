@@ -1643,11 +1643,11 @@ class FLAT(Inst64):
 
 class LDSDIR(Inst32):
   encoding = bits[31:24] == 0b11001110
-  vdst:VGPR = bits[7:0]
-  attr_chan = bits[9:8]
-  attr = bits[15:10]
-  wait_va = bits[19:16]
   op = bits[21:20]
+  vdst:VGPR = bits[7:0]
+  attr = bits[15:10]
+  attr_chan = bits[9:8]
+  wait_va = bits[19:16]
 
 class MIMG(Inst64):
   encoding = bits[31:26] == 0b111100
@@ -1744,14 +1744,14 @@ class SOPP(Inst32):
 
 class VINTERP(Inst64):
   encoding = bits[31:24] == 0b11001101
-  vdst:VGPR = bits[7:0]
-  waitexp = bits[10:8]
-  opsel = bits[14:11]
-  clmp = bits[15]
   op:VINTERPOp = bits[22:16]
+  vdst:VGPR = bits[7:0]
   src0:Src = bits[40:32]
   src1:Src = bits[49:41]
   src2:Src = bits[58:50]
+  waitexp = bits[10:8]
+  clmp = bits[15]
+  opsel = bits[14:11]
   neg = bits[63:61]
 
 class VOP1(Inst32):
@@ -1782,6 +1782,7 @@ class VOP3(Inst64):
 
 class VOP3P(Inst64):
   encoding = bits[31:24] == 0b11001100
+  _defaults = {'opsel_hi': 3, 'opsel_hi2': 1}
   op:VOP3POp = bits[22:16]
   vdst:VGPR = bits[7:0]
   src0:Src = bits[40:32]
@@ -1814,14 +1815,14 @@ class VOPC(Inst32):
 
 class VOPD(Inst64):
   encoding = bits[31:26] == 0b110010
+  opx:VOPDOp = bits[25:22]
+  opy:VOPDOp = bits[21:17]
+  vdstx:VGPR = bits[63:56]
+  vdsty:VGPR = bits[55:49]
   srcx0:Src = bits[8:0]
   vsrcx1:VGPR = bits[16:9]
-  opy:VOPDOp = bits[21:17]
-  opx:VOPDOp = bits[25:22]
   srcy0:Src = bits[40:32]
   vsrcy1:VGPR = bits[48:41]
-  vdsty:VGPR = bits[55:49]
-  vdstx:VGPR = bits[63:56]
 
 # instruction helpers
 ds_add_u32 = functools.partial(DS, DSOp.DS_ADD_U32)

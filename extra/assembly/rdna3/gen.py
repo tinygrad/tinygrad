@@ -19,7 +19,10 @@ FIELD_ORDER = {
   'MUBUF': ['op', 'vdata', 'vaddr', 'srsrc', 'soffset', 'offset', 'offen', 'idxen', 'glc', 'dlc', 'slc', 'tfe'],
   'MTBUF': ['op', 'vdata', 'vaddr', 'srsrc', 'soffset', 'offset', 'format', 'offen', 'idxen', 'glc', 'dlc', 'slc', 'tfe'],
   'MIMG': ['op', 'vdata', 'vaddr', 'srsrc', 'ssamp', 'dmask', 'dim', 'unrm', 'dlc', 'glc', 'slc'],
-  'EXP': ['en', 'target', 'vsrc0', 'vsrc1', 'vsrc2', 'vsrc3', 'done', 'row']}
+  'EXP': ['en', 'target', 'vsrc0', 'vsrc1', 'vsrc2', 'vsrc3', 'done', 'row'],
+  'VINTERP': ['op', 'vdst', 'src0', 'src1', 'src2', 'waitexp', 'clmp', 'opsel', 'neg'],
+  'VOPD': ['opx', 'opy', 'vdstx', 'vdsty', 'srcx0', 'vsrcx1', 'srcy0', 'vsrcy1'],
+  'LDSDIR': ['op', 'vdst', 'attr', 'attr_chan', 'wait_va']}
 SRC_EXTRAS = {233: 'DPP8', 234: 'DPP8FI', 250: 'DPP16', 251: 'VCCZ', 252: 'EXECZ', 254: 'LDS_DIRECT'}
 FLOAT_MAP = {'0.5': 'POS_HALF', '-0.5': 'NEG_HALF', '1.0': 'POS_ONE', '-1.0': 'NEG_ONE', '2.0': 'POS_TWO', '-2.0': 'NEG_TWO',
   '4.0': 'POS_FOUR', '-4.0': 'NEG_FOUR', '1/(2*PI)': 'INV_2PI', '0': 'ZERO'}
@@ -140,6 +143,8 @@ def generate(output_path: pathlib.Path|str|None = None) -> dict:
            "from extra.assembly.rdna3.lib import bits, Inst32, Inst64, SGPR, VGPR, TTMP as TTMP, s as s, v as v, SSrc, Src, SImm, Imm",
            "import functools", ""]
   lines += enum_lines("SrcEnum", src_enum) + sum([enum_lines(n, ops) for n, ops in sorted(enums.items())], [])
+  # Format-specific field defaults (verified against LLVM test vectors)
+  format_defaults = {'VOP3P': {'opsel_hi': 3, 'opsel_hi2': 1}}
   lines.append("# instruction formats")
   for fmt_name, fields in sorted(formats.items()):
     base = "Inst64" if max(f[1] for f in fields) > 31 or fmt_name == 'VOP3SD' else "Inst32"
@@ -148,6 +153,8 @@ def generate(output_path: pathlib.Path|str|None = None) -> dict:
     if enc := next((f for f in fields if f[0] == 'ENCODING'), None):
       enc_str = f"bits[{enc[1]}:{enc[2]}] == 0b{enc[3]:b}" if enc[1] != enc[2] else f"bits[{enc[1]}] == {enc[3]}"
       lines.append(f"  encoding = {enc_str}")
+    if defaults := format_defaults.get(fmt_name):
+      lines.append(f"  _defaults = {defaults}")
     for name, hi, lo, _, ftype in sorted([f for f in fields if f[0] != 'ENCODING'], key=field_key):
       typ = f":{ftype}" if ftype else ""
       lines.append(f"  {name.lower()}{typ} = bits[{hi}]" if hi == lo else f"  {name.lower()}{typ} = bits[{hi}:{lo}]")
