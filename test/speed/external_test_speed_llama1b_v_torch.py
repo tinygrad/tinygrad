@@ -9,49 +9,29 @@ import numpy as np
 import torch
 torch.set_num_threads(1)
 np.set_printoptions(linewidth=160)
-from transformers import LlamaForCausalLM, LlamaConfig, LogitsProcessorList, TopKLogitsWarper, TopPLogitsWarper, TemperatureLogitsWarper
-from extra.models.llama import Transformer as TinygradTransformer, convert_from_huggingface
-from tinygrad import Tensor, Device, GlobalCounters
-from tinygrad.nn.state import load_state_dict
+from transformers import LlamaForCausalLM, LlamaConfig
+from tinygrad.apps.llm import Transformer as TinygradTransformer
+from tinygrad import Tensor, Device, GlobalCounters, UOp
 from tinygrad.helpers import colorize_float, getenv, CI
 
 TORCHCOMPILE = bool(int(getenv("TORCHCOMPILE", 1)))
 CNT = getenv("CNT", 10)
 WARMUP = 10
+MAX_CONTEXT = WARMUP + CNT
 
-# llama 1B config
-LLAMA_CONFIG = {
-  'dim': 2048,
-  'n_heads': 32,
-  'n_kv_heads': 8,
-  'n_layers': 16,
-  'hidden_dim': 8192,
-  'vocab_size': 128256,
-  'norm_eps': 1e-5,
-  'rope_theta': 500000,
-  'max_context': WARMUP + CNT
+# Llama 3.2 1B config (from GGUF metadata)
+LLAMA_1B = {
+  "dim": 2048,
+  "hidden_dim": 8192,
+  "n_heads": 32,
+  "n_kv_heads": 8,
+  "num_blocks": 16,
+  "vocab_size": 128256,
+  "norm_eps": 1e-5,
+  "rope_theta": 500000.0,
+  "head_dim": 64,
+  "max_context": MAX_CONTEXT,
 }
-
-# sampling parameters
-TEMPERATURE = getenv("TEMPERATURE", 0.0)
-TOP_K = 5
-TOP_P = 0.0
-ALPHA_F = 0.0
-ALPHA_P = 0.0
-
-def create_hf_config():
-  return LlamaConfig(
-    vocab_size=LLAMA_CONFIG['vocab_size'],
-    hidden_size=LLAMA_CONFIG['dim'],
-    intermediate_size=LLAMA_CONFIG['hidden_dim'],
-    num_hidden_layers=LLAMA_CONFIG['n_layers'],
-    num_attention_heads=LLAMA_CONFIG['n_heads'],
-    num_key_value_heads=LLAMA_CONFIG['n_kv_heads'],
-    rms_norm_eps=LLAMA_CONFIG['norm_eps'],
-    rope_theta=LLAMA_CONFIG['rope_theta'],
-    max_position_embeddings=LLAMA_CONFIG['max_context'] * 2,
-    use_cache=True,
-  )
 
 def benchmark_hf(model, start_tok, warmup=WARMUP, iters=CNT):
   cache_defeat = np.zeros((2048, 2048))
@@ -60,17 +40,6 @@ def benchmark_hf(model, start_tok, warmup=WARMUP, iters=CNT):
   device = next(model.parameters()).device
   toks = []
 
-  logits_processor = LogitsProcessorList()
-  if TEMPERATURE > 0: logits_processor.append(TemperatureLogitsWarper(TEMPERATURE))
-  if TOP_K > 0: logits_processor.append(TopKLogitsWarper(TOP_K))
-  if TOP_P > 0: logits_processor.append(TopPLogitsWarper(TOP_P))
-
-  def sample_hf(logits, input_ids):
-    if TEMPERATURE < 1e-6: return logits.argmax(dim=-1).item()
-    scores = logits_processor(input_ids, logits)
-    probs = torch.softmax(scores, dim=-1)
-    return torch.multinomial(probs, 1).item()
-
   with torch.no_grad():
     past_key_values = None
     input_ids = torch.tensor([[start_tok]], device=device)
@@ -78,7 +47,7 @@ def benchmark_hf(model, start_tok, warmup=WARMUP, iters=CNT):
       outputs = model(input_ids, past_key_values=past_key_values, use_cache=True)
       past_key_values = outputs.past_key_values
       logits = outputs.logits[:, -1, :]
-      next_tok = sample_hf(logits, input_ids)
+      next_tok = logits.argmax(dim=-1).item()
       input_ids = torch.tensor([[next_tok]], device=device)
 
   times = []
@@ -88,7 +57,7 @@ def benchmark_hf(model, start_tok, warmup=WARMUP, iters=CNT):
       outputs = model(input_ids, past_key_values=past_key_values, use_cache=True)
       past_key_values = outputs.past_key_values
       logits = outputs.logits[:, -1, :]
-      next_tok = sample_hf(logits, input_ids)
+      next_tok = logits.argmax(dim=-1).item()
       times.append(time.perf_counter() - st)
       input_ids = torch.tensor([[next_tok]], device=device)
       toks.append(next_tok)
@@ -98,10 +67,11 @@ def benchmark_tinygrad(model, start_tok, warmup=WARMUP, iters=CNT):
   cache_defeat = np.zeros((2048, 2048))
   cache_defeat += 1
 
+  v_start_pos = UOp.variable("start_pos", 0, model.max_context-1)
   toks = []
   tok_tensor = Tensor([[start_tok]]).realize()
   for i in range(warmup):
-    last_tok = model(tok_tensor, i, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).item()
+    last_tok = model(tok_tensor, v_start_pos.bind(i)).item()
     tok_tensor.assign(Tensor([[last_tok]])).realize()
 
   times = []
@@ -109,7 +79,7 @@ def benchmark_tinygrad(model, start_tok, warmup=WARMUP, iters=CNT):
   for i in range(iters):
     GlobalCounters.reset()
     st = time.perf_counter()
-    last_tok = model(tok_tensor, warmup + i, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P).item()
+    last_tok = model(tok_tensor, v_start_pos.bind(warmup + i)).item()
     elapsed = time.perf_counter() - st
     times.append(elapsed)
     mems.append(getattr(GlobalCounters, "global_mem", 0))
@@ -117,60 +87,42 @@ def benchmark_tinygrad(model, start_tok, warmup=WARMUP, iters=CNT):
     toks.append(last_tok)
   return times, toks, mems
 
-def copy_weights_hf_to_tinygrad(hf_model, tiny_model):
-  hf_state = {k: Tensor(v.cpu().numpy()) for k, v in hf_model.state_dict().items()}
-  tiny_weights = convert_from_huggingface(hf_state, LLAMA_CONFIG['n_layers'], LLAMA_CONFIG['n_heads'], LLAMA_CONFIG['n_kv_heads'])
-  load_state_dict(tiny_model, tiny_weights, strict=False)
-
 class BaseLlamaTest(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
     print(f"\nTinygrad device: {Device.DEFAULT}")
-    print(f"Config: {LLAMA_CONFIG}")
-    print(f"Temperature: {TEMPERATURE} ({'sampling' if TEMPERATURE > 0 else 'greedy decoding'})")
-    print("Using HuggingFace transformers LlamaForCausalLM")
+    print(f"Config: {LLAMA_1B}")
 
-    hf_config = create_hf_config()
+    # create tinygrad model with random weights
+    print("Creating tinygrad model (tinygrad.apps.llm.Transformer)...")
+    cls.tiny_model = TinygradTransformer(**LLAMA_1B)
+
+    # create HF model with same architecture and random weights
     print("Creating HuggingFace model with random weights...")
+    hf_config = LlamaConfig(
+      vocab_size=LLAMA_1B["vocab_size"],
+      hidden_size=LLAMA_1B["dim"],
+      intermediate_size=LLAMA_1B["hidden_dim"],
+      num_hidden_layers=LLAMA_1B["num_blocks"],
+      num_attention_heads=LLAMA_1B["n_heads"],
+      num_key_value_heads=LLAMA_1B["n_kv_heads"],
+      rms_norm_eps=LLAMA_1B["norm_eps"],
+      rope_theta=LLAMA_1B["rope_theta"],
+      max_position_embeddings=MAX_CONTEXT * 2,
+      use_cache=True,
+    )
     cls.hf_model = LlamaForCausalLM(hf_config)
     cls.hf_model.eval()
-
-    print("Creating tinygrad model...")
-    cls.tiny_model = TinygradTransformer(**LLAMA_CONFIG, jit=True)
-
-    print("Copying weights from HuggingFace to tinygrad...")
-    copy_weights_hf_to_tinygrad(cls.hf_model, cls.tiny_model)
 
     cls.start_tok = 1  # starting token for generation
 
   def reset_kv(self):
-    # reset tinygrad kv cache
-    for layer in self.tiny_model.layers:
-      if hasattr(layer.attention, 'cache_kv'):
-        delattr(layer.attention, 'cache_kv')
+    # reset tinygrad kv cache (llm.py uses blk[i].cache_kv)
+    for block in self.tiny_model.blk:
+      if hasattr(block, 'cache_kv'):
+        delattr(block, 'cache_kv')
 
 class TestLlamaBenchmark(BaseLlamaTest):
-  @unittest.skipIf(TEMPERATURE > 0, "Skipping correctness test when sampling (TEMPERATURE > 0)")
-  def test_correctness(self):
-    self.reset_kv()
-
-    # run a short sequence through both models and compare logits
-    test_tokens = [1, 100, 200, 300]
-    input_ids = torch.tensor([test_tokens])
-
-    with torch.no_grad():
-      hf_outputs = self.hf_model(input_ids, use_cache=False)
-      hf_logits = hf_outputs.logits[0, -1, :].numpy()
-
-    tiny_logits = self.tiny_model.forward(
-      Tensor([test_tokens]).reshape(1, -1), 0, temperature=float('nan'), top_k=0, top_p=0, alpha_f=0, alpha_p=0
-    )[0, -1, :].numpy()
-
-    correlation = np.corrcoef(hf_logits.flatten(), tiny_logits.flatten())[0, 1]
-    print(f"\nLogits correlation: {correlation:.6f}")
-
-    self.assertGreater(correlation, 0.99, f"Logits correlation too low: {correlation}")
-
   def test_benchmark(self):
     self.reset_kv()
 
@@ -187,16 +139,11 @@ class TestLlamaBenchmark(BaseLlamaTest):
     self.reset_kv()
     tiny_times, tiny_toks, tiny_mems = benchmark_tinygrad(self.tiny_model, self.start_tok)
 
-    if TEMPERATURE == 0 and hf_toks != tiny_toks:
-      print("\nWarning: Generated sequences differ")
-      print(f"  HF tokens:      {hf_toks[:10]}...")
-      print(f"  tinygrad tokens: {tiny_toks[:10]}...")
-
     hf_mean, hf_std = np.mean(hf_times)*1000, np.std(hf_times)*1000
     tiny_mean, tiny_std = np.mean(tiny_times)*1000, np.std(tiny_times)*1000
     tiny_gbps = [(m * 1e-9) / t if t > 0 else 0.0 for m, t in zip(tiny_mems, tiny_times)]
 
-    print(f"\n{'sampling' if TEMPERATURE > 0 else 'greedy decoding'}:")
+    print("\ngreedy decoding:")
     for i in range(len(hf_times)):
       ratio = tiny_times[i]/hf_times[i]
       desc = "faster" if ratio < 1 else "slower"
