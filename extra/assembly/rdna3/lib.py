@@ -39,6 +39,8 @@ class Imm: pass
 class SImm: pass
 class RawImm:
   def __init__(self, val: int): self.val = val
+  def __repr__(self): return f"RawImm({self.val})"
+  def __eq__(self, other): return isinstance(other, RawImm) and self.val == other.val
 
 def unwrap(val) -> int:
   return val.val if isinstance(val, RawImm) else val.value if hasattr(val, 'value') else val.idx if hasattr(val, 'idx') else val
@@ -53,7 +55,9 @@ def encode_src(val) -> int:
   if isinstance(val, VGPR): return 256 + val.idx + (0x80 if val.hi else 0)
   if isinstance(val, TTMP): return 108 + val.idx
   if hasattr(val, 'value'): return val.value
-  if isinstance(val, float): return FLOAT_ENC.get(val, 255)
+  if isinstance(val, float):
+    if val == 0.0: return 128  # 0.0 encodes as integer constant 0
+    return FLOAT_ENC.get(val, 255)
   return 128 + val if isinstance(val, int) and 0 <= val <= 64 else 192 + (-val) if isinstance(val, int) and -16 <= val <= -1 else 255
 
 # Instruction base class
@@ -71,6 +75,37 @@ class Inst:
     self._values, self._literal = dict(self._defaults), literal
     self._values.update(zip([n for n in self._fields if n != 'encoding'], args))
     self._values.update(kwargs)
+    # Get annotations from class hierarchy
+    annotations = {}
+    for cls in type(self).__mro__:
+      annotations.update(getattr(cls, '__annotations__', {}))
+    # Type check and encode values
+    for name, val in list(self._values.items()):
+      if name == 'encoding' or isinstance(val, RawImm): continue
+      ann = annotations.get(name)
+      # Type validation
+      if ann is SGPR:
+        if isinstance(val, VGPR): raise TypeError(f"field '{name}' requires SGPR, got VGPR")
+        if not isinstance(val, (SGPR, TTMP, int, RawImm)): raise TypeError(f"field '{name}' requires SGPR, got {type(val).__name__}")
+      if ann is VGPR:
+        if not isinstance(val, VGPR): raise TypeError(f"field '{name}' requires VGPR, got {type(val).__name__}")
+      if ann is SSrc and isinstance(val, VGPR): raise TypeError(f"field '{name}' requires scalar source, got VGPR")
+      # Encode source fields as RawImm for consistent disassembly
+      if name in SRC_FIELDS:
+        encoded = encode_src(val)
+        self._values[name] = RawImm(encoded)
+        # Track literal value if needed (encoded as 255)
+        if encoded == 255 and self._literal is None and isinstance(val, int) and not isinstance(val, IntEnum):
+          self._literal = val
+      # Encode raw register fields for consistent repr
+      elif name in RAW_FIELDS and isinstance(val, Reg):
+        encoded = (108 + val.idx) if isinstance(val, TTMP) else (val.idx | (0x80 if val.hi else 0))
+        self._values[name] = encoded
+      # Encode sbase (divided by 2) and srsrc/ssamp (divided by 4)
+      elif name == 'sbase' and isinstance(val, Reg):
+        self._values[name] = val.idx // 2
+      elif name in {'srsrc', 'ssamp'} and isinstance(val, Reg):
+        self._values[name] = val.idx // 4
 
   def _encode_field(self, name: str, val) -> int:
     if isinstance(val, RawImm): return val.val
@@ -120,7 +155,11 @@ class Inst:
     if has_literal and len(data) >= cls._size() + 4: inst._literal = int.from_bytes(data[cls._size():cls._size()+4], 'little')
     return inst
 
-  def __repr__(self): return f"{self.__class__.__name__}({', '.join(f'{k}={v}' for k, v in self._values.items())})"
+  def __repr__(self):
+    # Use _fields order and exclude fields that are 0/default (for consistent repr after roundtrip)
+    items = [(k, self._values[k]) for k in self._fields if k in self._values and k != 'encoding'
+             and not (isinstance(self._values[k], int) and self._values[k] == 0 and k not in {'op'})]
+    return f"{self.__class__.__name__}({', '.join(f'{k}={v}' for k, v in items)})"
 
   def disasm(self) -> str:
     from extra.assembly.rdna3.asm import disasm
