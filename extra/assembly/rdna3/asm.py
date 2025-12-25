@@ -265,6 +265,11 @@ def disasm(inst: Inst) -> str:
     is_shift64 = 'rev' in op_name and '64' in op_name and op_name.startswith('v_')
     # v_ldexp_f64: 64-bit src0 (mantissa), 32-bit src1 (exponent)
     is_ldexp64 = op_name == 'v_ldexp_f64'
+    # SAD/QSAD/MQSAD instructions have mixed sizes
+    # v_qsad_pk_u16_u8, v_mqsad_pk_u16_u8: 64-bit dst/src0/src2, 32-bit src1
+    # v_mqsad_u32_u8: 128-bit (4 reg) dst/src2, 64-bit src0, 32-bit src1
+    is_sad64 = any(x in op_name for x in ('qsad_pk', 'mqsad_pk'))
+    is_mqsad_u32 = 'mqsad_u32' in op_name
     # Detect conversion ops: v_cvt_{dst_type}_{src_type} - each side may have different size
     # Also handle v_cvt_pk_* which packs two values into one
     if 'cvt_pk' in op_name:
@@ -282,31 +287,32 @@ def disasm(inst: Inst) -> str:
       is_f16_src = True  # src0 and src1 are 16-bit
       is_f16_src2 = False  # src2 is 32-bit
     else:
-      # 16-bit ops need .h/.l suffix, but packed ops (dot2, pk) don't
-      is_16bit_op = ('f16' in op_name or 'i16' in op_name or 'u16' in op_name or 'b16' in op_name) and 'dot2' not in op_name
+      # 16-bit ops need .h/.l suffix, but packed ops (dot2, pk_, sad, msad, qsad, mqsad) don't
+      is_16bit_op = ('f16' in op_name or 'i16' in op_name or 'u16' in op_name or 'b16' in op_name) and not any(x in op_name for x in ('dot2', 'pk_', 'sad', 'msad', 'qsad', 'mqsad'))
       is_f16_dst = is_f16_src = is_f16_src2 = is_16bit_op
-    def fmt_vop3_src(v, neg_bit, abs_bit, hi_bit=False, force_64=False, is_16=False):
+    def fmt_vop3_src(v, neg_bit, abs_bit, hi_bit=False, reg_cnt=1, is_16=False):
       s = fmt_src(v)
-      # Add register pair for f64, or .h suffix for f16 VGPRs with opsel
-      if force_64 and v >= 256: s = _vreg(v - 256, 2)
-      elif force_64 and v <= 105: s = _sreg(v, 2)
-      elif force_64 and v == 106: s = "vcc"
-      elif force_64 and v == 126: s = "exec"
-      elif force_64 and 108 <= v <= 123: s = f"ttmp[{v-108}:{v-108+1}]"
+      # Add register pair/quad for 64/128-bit, or .h suffix for f16 VGPRs with opsel
+      if reg_cnt > 1 and v >= 256: s = _vreg(v - 256, reg_cnt)
+      elif reg_cnt > 1 and v <= 105: s = _sreg(v, reg_cnt)
+      elif reg_cnt == 2 and v == 106: s = "vcc"
+      elif reg_cnt == 2 and v == 126: s = "exec"
+      elif reg_cnt > 1 and 108 <= v <= 123: s = f"ttmp[{v-108}:{v-108+reg_cnt-1}]"
       elif is_16 and v >= 256: s = f"v{v - 256}.h" if hi_bit else f"v{v - 256}.l"
       if abs_bit: s = f"|{s}|"
       if neg_bit: s = f"-{s}"
       return s
-    # Determine which sources are 64-bit
-    src0_64 = is_f64 and not is_shift64  # shift ops have 32-bit shift amount
-    src1_64 = is_f64 and not is_class and not is_ldexp64  # class/ldexp ops have 32-bit src1
-    src2_64 = is_f64
-    src0_str = fmt_vop3_src(src0, neg & 1, abs_ & 1, opsel & 1, src0_64, is_f16_src)
-    src1_str = fmt_vop3_src(src1, neg & 2, abs_ & 2, opsel & 2, src1_64, is_f16_src)
-    src2_str = fmt_vop3_src(src2, neg & 4, abs_ & 4, opsel & 4, src2_64, is_f16_src2)
+    # Determine register count for each source
+    src0_cnt = 2 if ((is_f64 and not is_shift64) or is_sad64 or is_mqsad_u32) else 1
+    src1_cnt = 2 if (is_f64 and not is_class and not is_ldexp64) else 1
+    src2_cnt = 4 if is_mqsad_u32 else 2 if (is_f64 or is_sad64) else 1
+    src0_str = fmt_vop3_src(src0, neg & 1, abs_ & 1, opsel & 1, src0_cnt, is_f16_src)
+    src1_str = fmt_vop3_src(src1, neg & 2, abs_ & 2, opsel & 2, src1_cnt, is_f16_src)
+    src2_str = fmt_vop3_src(src2, neg & 4, abs_ & 4, opsel & 4, src2_cnt, is_f16_src2)
     # Format destination - for 16-bit ops, use .h/.l suffix
-    if is_f64:
-      dst_str = _vreg(vdst, 2)
+    dst_cnt = 4 if is_mqsad_u32 else 2 if (is_f64 or is_sad64) else 1
+    if dst_cnt > 1:
+      dst_str = _vreg(vdst, dst_cnt)
     elif is_f16_dst:
       dst_str = f"v{vdst}.h" if (opsel & 8) else f"v{vdst}.l"
     else:
@@ -537,6 +543,15 @@ def asm(text: str) -> Inst:
   parts = text.replace(',', ' ').split()
   if not parts: raise ValueError("empty instruction")
   mnemonic, op_str = parts[0].lower(), text[len(parts[0]):].strip()
+  # Handle s_waitcnt specially before operand parsing
+  if mnemonic == 's_waitcnt':
+    vmcnt, expcnt, lgkmcnt = 0x3f, 0x7, 0x3f
+    for part in op_str.replace(',', ' ').split():
+      if m := re.match(r'vmcnt\((\d+)\)', part): vmcnt = int(m.group(1))
+      elif m := re.match(r'expcnt\((\d+)\)', part): expcnt = int(m.group(1))
+      elif m := re.match(r'lgkmcnt\((\d+)\)', part): lgkmcnt = int(m.group(1))
+      elif re.match(r'^0x[0-9a-f]+$|^\d+$', part): return autogen.s_waitcnt(simm16=int(part, 0))
+    return autogen.s_waitcnt(simm16=waitcnt(vmcnt, expcnt, lgkmcnt))
   operands, current, depth, in_pipe = [], "", 0, False
   for ch in op_str:
     if ch == '[': depth += 1
