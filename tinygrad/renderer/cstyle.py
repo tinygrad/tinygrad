@@ -446,7 +446,7 @@ class CUDARenderer(CStyleLanguage):
 
     return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
 
-class AMDRenderer(CStyleLanguage):
+class AMDHIPRenderer(CStyleLanguage):
   device = "AMD"
   shared_max = 65536
   # NOTE: this is only really needed on gfx12, even though gfx11 reports the same limitation
@@ -458,7 +458,8 @@ class AMDRenderer(CStyleLanguage):
   @staticmethod
   def is_cdna(arch): return arch.split(":")[0] in {"gfx942", "gfx950"}
   def __init__(self, arch:str): # gfx942 => MI300, gfx1100 => RX 7900, gfx1201 => RX 9700
-    self.arch = arch
+    from tinygrad.runtime.support.compiler_amd import HIPCompiler
+    self.arch, self.compiler = arch, HIPCompiler(arch)
     self.tensor_cores = self.get_tensor_cores(arch)
     if self.is_cdna(self.arch):
       self.string_rewrite = PatternMatcher([
@@ -539,24 +540,11 @@ class AMDRenderer(CStyleLanguage):
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
 class NVRenderer(CUDARenderer): device = "NV"
-class HIPRenderer(AMDRenderer): device = "HIP"
-
-class AMDHIPRenderer(AMDRenderer):
+class HIPRenderer(AMDHIPRenderer): device = "HIP"
+class AMDHIPCCRenderer(AMDHIPRenderer):
   def __init__(self, arch:str):
-    from tinygrad.runtime.support.compiler_amd import HIPCompiler
-    super().__init__(arch)
-    self.compiler = HIPCompiler(arch)
-
-class AMDHIPCCRenderer(AMDRenderer):
-  def __init__(self, arch:str, extra_options:list[str]=[]):
     from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
     super().__init__(arch)
-    self.compiler = HIPCCCompiler(arch, extra_options)
-
-class HIPJITRenderer(HIPRenderer):
-  def __init__(self, arch:str):
-    from tinygrad.runtime.support.compiler_amd import HIPCompiler
-    super().__init__(arch)
-    self.compiler = HIPCompiler(arch)
+    self.compiler = HIPCCCompiler(arch)
 
 class QCOMRenderer(OpenCLRenderer): device = "QCOM"
