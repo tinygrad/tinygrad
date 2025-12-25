@@ -414,5 +414,9 @@ class TestTinygradKernels(unittest.TestCase):
     x_np = np.random.randn(32, 10).astype(np.float32)
     self._test_kernel(lambda T: (T(x_np.tolist()).reshape(32,10) + 0).cross_entropy((T(classes).int().reshape(32) + 0)))
 
+  # Regression tests for BFE operations with width=0 (walrus operator bug)
+  def test_topk(self): self._test_kernel(lambda T: T.empty(64).topk(3)[0])
+  def test_interpolate_uint8(self): self._test_kernel(lambda T: T.empty(2,3,64,64).relu().cast('uint8').interpolate((10,10), mode="linear"))
+
 if __name__ == "__main__":
   unittest.main()
