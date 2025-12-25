@@ -1,6 +1,6 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR, _IO_NOSZ
 dll = DLL('libc', 'c', use_errno=True)
 off_t = ctypes.c_int64
 mode_t = ctypes.c_uint32

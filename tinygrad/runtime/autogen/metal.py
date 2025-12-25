@@ -1,6 +1,6 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR, _IO_NOSZ
 from tinygrad.runtime.support import objc
 dll = DLL('metal', 'Metal')
 class MTLDispatchThreadgroupsIndirectArguments(Struct): pass
