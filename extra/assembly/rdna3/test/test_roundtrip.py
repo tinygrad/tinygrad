@@ -2,7 +2,8 @@
 """Roundtrip tests: generate tinygrad kernels, decode instructions, re-encode, verify match."""
 import unittest, io, sys, re
 from extra.assembly.rdna3.autogen import *
-from extra.assembly.rdna3.lib import Inst, asm
+from extra.assembly.rdna3.lib import Inst
+from extra.assembly.rdna3.asm import asm
 
 # Instruction format detection based on encoding bits
 def detect_format(data: bytes) -> type[Inst] | None:
@@ -65,14 +66,21 @@ def disassemble_lib(lib: bytes, compiler) -> list[tuple[str, bytes]]:
       continue
   return results
 
-def compile_asm(instr: str, compiler) -> bytes | None:
-  """Compile a single instruction with LLVM and return the machine code bytes."""
-  src = f".text\n.globl test\n.p2align 8\n.type test,@function\ntest:\n  {instr}\n"
+def compile_asm(instr: str, compiler=None) -> bytes | None:
+  """Compile a single instruction with llvm-mc and return the machine code bytes."""
+  import subprocess
   try:
-    lib = compiler.compile(src)
-    instrs = disassemble_lib(lib, compiler)
-    if instrs:
-      return instrs[0][1]
+    result = subprocess.run(
+      ['llvm-mc', '-triple=amdgcn', '-mcpu=gfx1100', '-mattr=+real-true16,+wavefrontsize32', '-show-encoding'],
+      input=f".text\n{instr}\n", capture_output=True, text=True)
+    if result.returncode != 0: return None
+    # Parse encoding: [0x01,0x39,0x0a,0x7e]
+    for line in result.stdout.split('\n'):
+      if 'encoding:' in line:
+        enc = line.split('encoding:')[1].strip()
+        if enc.startswith('[') and enc.endswith(']'):
+          hex_vals = enc[1:-1].replace('0x', '').replace(',', '').replace(' ', '')
+          return bytes.fromhex(hex_vals)
   except Exception:
     pass
   return None
