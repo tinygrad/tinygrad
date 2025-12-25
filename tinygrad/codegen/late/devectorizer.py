@@ -304,7 +304,7 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
     ended_ranges = flatten([x.ended_ranges for x in topo if x.op is Ops.END])
     input_ranges = tuple([x for x in topo if x.op is Ops.RANGE and x not in reduce_range and x not in ended_ranges])
     identity = red.const(red.dtype, identity_element(red.arg, red.dtype.scalar()))
-    # vector accumulator: no dependency chain between unrolled adds
+    # vector accumulator, no dependency chain between unrolled adds
     if (vec_count:=len(lst)) > 1 and red.dtype.count == 1:
       vec_dtype, idx0 = red.dtype.vec(vec_count), UOp.const(dtypes.int, 0)
       acc = UOp(Ops.DEFINE_REG, vec_dtype.ptr(size=1, addrspace=AddrSpace.REG), arg=ctx.acc_num)
