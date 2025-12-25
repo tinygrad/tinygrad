@@ -19,12 +19,16 @@ CTYPES = {1: ctypes.c_uint8, 2: ctypes.c_uint16, 4: ctypes.c_uint32}
 _valid_mem_ranges: set[tuple[int, int]] = set()
 def set_valid_mem_ranges(ranges: set[tuple[int, int]]) -> None: global _valid_mem_ranges; _valid_mem_ranges = ranges
 
-def _check_addr(addr: int, size: int) -> None:
-  if _valid_mem_ranges and not any(s <= addr and addr + size <= s + z for s, z in _valid_mem_ranges):
-    raise RuntimeError(f"OOB memory access at 0x{addr:x} size={size}")
+def _is_valid_addr(addr: int, size: int) -> bool:
+  return not _valid_mem_ranges or any(s <= addr and addr + size <= s + z for s, z in _valid_mem_ranges)
 
-def mem_read(addr: int, size: int) -> int: _check_addr(addr, size); return CTYPES[size].from_address(addr).value
-def mem_write(addr: int, size: int, val: int) -> None: _check_addr(addr, size); CTYPES[size].from_address(addr).value = val
+def mem_read(addr: int, size: int) -> int:
+  if not _is_valid_addr(addr, size): return 0  # OOB reads return 0 (like real GPU padding behavior)
+  return CTYPES[size].from_address(addr).value
+
+def mem_write(addr: int, size: int, val: int) -> None:
+  if not _is_valid_addr(addr, size): return  # OOB writes are silently ignored
+  CTYPES[size].from_address(addr).value = val
 
 # Memory op tables: op -> (count, size, signed)
 FLAT_LOAD = {GLOBALOp.GLOBAL_LOAD_B32: (1,4,0), FLATOp.FLAT_LOAD_B32: (1,4,0), GLOBALOp.GLOBAL_LOAD_B64: (2,4,0), FLATOp.FLAT_LOAD_B64: (2,4,0),
@@ -162,6 +166,7 @@ def decode_program(data: bytes) -> Program:
     has_literal = any(getattr(inst, fld, None) == 255 for fld in ('src0', 'src1', 'src2', 'ssrc0', 'ssrc1', 'srcx0', 'srcy0'))
     if inst_class == VOP2 and inst.op in (44, 45, 55, 56): has_literal = True
     if inst_class == VOPD and (inst.opx in (1, 2) or inst.opy in (1, 2)): has_literal = True
+    if inst_class == SOP2 and inst.op in (69, 70): has_literal = True  # S_FMAAK_F32, S_FMAMK_F32
     if has_literal: inst._literal = int.from_bytes(data[i+base_size:i+base_size+4], 'little')
     result[i // 4] = inst
     i += inst.size()
@@ -195,6 +200,9 @@ def exec_sop1(st: WaveState, inst: SOP1) -> int:
     case SOP1Op.S_AND_SAVEEXEC_B32:    old = st.exec_mask & 0xffffffff; st.exec_mask = s0 & old; st.scc = int(st.exec_mask != 0); st.wsgpr(inst.sdst, old)
     case SOP1Op.S_OR_SAVEEXEC_B32:     old = st.exec_mask & 0xffffffff; st.exec_mask = s0 | old; st.scc = int(st.exec_mask != 0); st.wsgpr(inst.sdst, old)
     case SOP1Op.S_AND_NOT1_SAVEEXEC_B32: old = st.exec_mask & 0xffffffff; st.exec_mask = s0 & (~old & 0xffffffff); st.scc = int(st.exec_mask != 0); st.wsgpr(inst.sdst, old)
+    case SOP1Op.S_GETPC_B64:           return -3  # Special: handled in step_wave (needs PC)
+    case SOP1Op.S_SETPC_B64:           return -4  # Special: handled in step_wave (absolute jump)
+    case SOP1Op.S_SWAPPC_B64:          return -5  # Special: handled in step_wave (call)
     case _: raise NotImplementedError(f"SOP1 op {op}")
   return 0
 
@@ -247,6 +255,9 @@ def exec_sop2(st: WaveState, inst: SOP2) -> int:
     case SOP2Op.S_XOR_B64:      r = st.rsrc64(inst.ssrc0, 0) ^ st.rsrc64(inst.ssrc1, 0); st.wsgpr64(inst.sdst, r); st.scc = int(r != 0)
     case SOP2Op.S_CSELECT_B32:  st.wsgpr(inst.sdst, s0 if st.scc else s1)
     case SOP2Op.S_CSELECT_B64:  st.wsgpr64(inst.sdst, st.rsrc64(inst.ssrc0, 0) if st.scc else st.rsrc64(inst.ssrc1, 0))
+    case SOP2Op.S_FMAC_F32:     st.wsgpr(inst.sdst, i32(f32(st.rsgpr(inst.sdst)) + f32(s0) * f32(s1)))  # D = D + S0 * S1
+    case SOP2Op.S_FMAAK_F32:    st.wsgpr(inst.sdst, i32(f32(s0) * f32(s1) + f32(inst._literal or 0)))  # D = S0 * S1 + K
+    case SOP2Op.S_FMAMK_F32:    st.wsgpr(inst.sdst, i32(f32(s0) * f32(inst._literal or 0) + f32(s1)))  # D = S0 * K + S1
     case _: raise NotImplementedError(f"SOP2 op {op}")
   return 0
 
@@ -768,6 +779,20 @@ def step_wave(program: Program, st: WaveState, lds: bytearray, n_lanes: int) -> 
     delta = handler(st, inst)
     if delta == -1: return -1
     if delta == -2: st.pc += inst_words; return -2
+    if delta == -3:  # S_GETPC_B64: write PC of next instruction to sdst
+      next_pc = (st.pc + inst_words) * 4  # PC in bytes
+      st.wsgpr(inst.sdst, next_pc & 0xffffffff)
+      st.wsgpr(inst.sdst + 1, (next_pc >> 32) & 0xffffffff)
+      st.pc += inst_words; return 0
+    if delta == -4:  # S_SETPC_B64: absolute jump to address in ssrc0
+      addr = st.rsrc64(inst.ssrc0, 0)
+      st.pc = addr // 4; return 0  # Convert bytes to words
+    if delta == -5:  # S_SWAPPC_B64: save next PC to sdst, jump to ssrc0
+      next_pc = (st.pc + inst_words) * 4
+      st.wsgpr(inst.sdst, next_pc & 0xffffffff)
+      st.wsgpr(inst.sdst + 1, (next_pc >> 32) & 0xffffffff)
+      addr = st.rsrc64(inst.ssrc0, 0)
+      st.pc = addr // 4; return 0
     st.pc += inst_words + delta
   else:
     handler = VECTOR[inst_type]

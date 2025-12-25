@@ -120,6 +120,7 @@ class Inst:
     inst = cls.from_int(int.from_bytes(data[:cls._size()], 'little'))
     op_val = inst._values.get('op', 0)
     has_literal = cls.__name__ == 'VOP2' and op_val in (44, 45, 55, 56)
+    has_literal = has_literal or (cls.__name__ == 'SOP2' and op_val in (69, 70))  # S_FMAAK_F32, S_FMAMK_F32
     for n in SRC_FIELDS:
       if n in inst._values and isinstance(inst._values[n], RawImm) and inst._values[n].val == 255: has_literal = True
     if has_literal and len(data) >= cls._size() + 4: inst._literal = int.from_bytes(data[cls._size():cls._size()+4], 'little')
