@@ -649,7 +649,11 @@ class AMDQueueDesc:
 
     # Flush hdp if queue is in dev mem.
     if dev.is_am() and not dev.is_usb(): dev.iface.dev_impl.gmc.flush_hdp()
-    for doorbell in self.doorbells: doorbell[0] = self.put_value if doorbell_value is None else doorbell_value
+    try:
+      for doorbell in self.doorbells: doorbell[0] = self.put_value if doorbell_value is None else doorbell_value
+    except Exception as e:
+      dev.error_state = e
+      raise
 
 class KFDIface:
   kfd:FileIOInterface|None = None
