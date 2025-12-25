@@ -22,6 +22,9 @@ class TestIntegration(unittest.TestCase):
   def test_load_b128(self):
     self.inst = s_load_b128(s[4:7], s[0:1], NULL, 0)
 
+  def test_load_b128_no_0(self):
+    self.inst = s_load_b128(s[4:7], s[0:1], NULL)
+
   def test_load_b128_s(self):
     self.inst = s_load_b128(s[4:7], s[0:1], s[8], 0)
 
@@ -69,6 +72,9 @@ class TestIntegration(unittest.TestCase):
 
   def test_vmad(self):
     self.inst = v_mad_u64_u32(v[1:2], NULL, s[2], 3, v[1:2])
+
+  def test_large_imm(self):
+    self.inst = v_mov_b32_e32(v[0], 0x1234)
 
 if __name__ == "__main__":
   unittest.main()

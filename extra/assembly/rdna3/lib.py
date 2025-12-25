@@ -165,7 +165,8 @@ class Inst:
     # Use _fields order and exclude fields that are 0/default (for consistent repr after roundtrip)
     items = [(k, self._values[k]) for k in self._fields if k in self._values and k != 'encoding'
              and not (isinstance(self._values[k], int) and self._values[k] == 0 and k not in {'op'})]
-    return f"{self.__class__.__name__}({', '.join(f'{k}={v}' for k, v in items)})"
+    lit = f", literal={hex(self._literal)}" if self._literal is not None else ""
+    return f"{self.__class__.__name__}({', '.join(f'{k}={v}' for k, v in items)}{lit})"
 
   def disasm(self) -> str:
     from extra.assembly.rdna3.asm import disasm
