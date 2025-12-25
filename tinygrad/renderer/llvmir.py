@@ -254,7 +254,9 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
                   f'"amdgpu-flat-work-group-size"="1,{requiredMaxThreadsPerBlock}"', '"no-trapping-math"="true"']
     return 'attributes #0 = { ' + ' '.join(attributes) + ' }'
   def __init__(self, arch:str):
+    from tinygrad.runtime.support.compiler_amd import AMDLLVMCompiler
     self.arch = arch
+    self.compiler = AMDLLVMCompiler(arch)
     self.tensor_cores = AMDRenderer.get_tensor_cores(arch)
     self.is_cdna = AMDRenderer.is_cdna(arch)
     self.string_rewrite += PatternMatcher([(UPat(Ops.WMMA, name="wmma"), lambda ctx, wmma, cdna=self.is_cdna: render_wmma_amd(ctx, wmma, cdna))])
@@ -284,9 +286,3 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
             x.src[2]), (*x.arg,)) if x.src[0].dtype == dtypes.bfloat16.vec(8) else None)
       ])
   def __reduce__(self): return self.__class__, (self.arch,)
-
-class AMDLLVMJITRenderer(AMDLLVMRenderer):
-  def __init__(self, arch:str):
-    from tinygrad.runtime.support.compiler_amd import AMDLLVMCompiler
-    super().__init__(arch)
-    self.compiler = AMDLLVMCompiler(arch)
