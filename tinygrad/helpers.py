@@ -523,8 +523,7 @@ class tqdm(Generic[T]):
   @classmethod
   def write(cls, s:str): print(f"\r\033[K{s}", flush=True, file=sys.stderr)
 
-class trange(tqdm):
-  def __init__(self, n:int, **kwargs): super().__init__(iterable=range(n), total=n, **kwargs)
+def trange(n:int, **kwargs) -> tqdm[int]: return tqdm(range(n), total=n, **kwargs)
 
 class disable_gc(contextlib.ContextDecorator):
   def __enter__(self):

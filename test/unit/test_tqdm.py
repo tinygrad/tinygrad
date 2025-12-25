@@ -3,7 +3,7 @@ from unittest.mock import patch
 from io import StringIO
 from collections import namedtuple
 from tqdm import tqdm
-from tinygrad.helpers import tqdm as tinytqdm, trange as tinytrange
+from tinygrad.helpers import tqdm as tinytqdm, trange
 import numpy as np
 
 def _get_iter_per_second(raw:str) -> float:
@@ -165,7 +165,7 @@ class TestProgressBar(unittest.TestCase):
       mock_stderr.truncate(0)
 
       # compare bars at each iteration (only when tinytqdm bar has been updated)
-      for n in (bar := tinytrange(total, desc="Test")):
+      for n in (bar := trange(total, desc="Test")):
         if bar.i % bar.skip != 0: continue
         tiny_output = mock_stderr.getvalue().split("\r")[-1].rstrip()
         iters_per_sec = float(tiny_output.split("it/s")[-2].split(" ")[-1]) if n>0 else 0
