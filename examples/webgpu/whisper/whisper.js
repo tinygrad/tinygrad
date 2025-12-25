@@ -284,16 +284,13 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
 
         let sequences = initSequences(audio_features_batch.length);
         pendingTexts = Array(audio_features_batch.length).fill('');
-        let inferenceState = {
-            decoder_state: await initDecoder(nets, audio_features_batch),
-            is_done: false
-        };
+        let decoder_state = await initDecoder(nets, audio_features_batch);
+        let is_done = false;
         let currentTokenIndex = 0;
-        while (!inferenceState.is_done) {
-            let decoder_state = inferenceState.decoder_state;
+        while (!is_done) {
             if (currentTokenIndex < MAX_TOKENS_TO_DECODE && sequences.some(x => x.context.at(-1) !== TOK_EOS)) {
                 if (cancelToken.cancelled) {
-                    inferenceState.is_done = true;
+                    is_done = true;
                     break;
                 }
 
@@ -335,7 +332,7 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
 
                 ++currentTokenIndex;
             } else {
-                inferenceState.is_done = true;
+                is_done = true;
                 break;
             }
         }
