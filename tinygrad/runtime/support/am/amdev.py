@@ -161,7 +161,7 @@ class AMDev(PCIDevImplBase):
     # To enable this, AM uses a separate boot memory that is guaranteed not to be overwritten. This physical memory is utilized for
     # all blocks that are initialized only during the initial AM boot.
     # To determine if the GPU is in the third state, AM uses regSCRATCH_REG7 as a flag.
-    self.is_booting = True
+    self.is_booting = True # During boot only boot memory can be allocated. This flag is to validate this.
     self.init_sw(smi_dev=False)
 
     self.partial_boot = (self.reg("regSCRATCH_REG7").read() == AMDev.Version) and (getenv("AM_RESET", 0) != 1)
@@ -194,7 +194,7 @@ class AMDev(PCIDevImplBase):
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
 
   def init_sw(self, smi_dev=False):
-    self.smi_dev = smi_dev # During boot only boot memory can be allocated. This flag is to validate this.
+    self.smi_dev = smi_dev
 
     # Memory manager & firmware
     self.mm = AMMemoryManager(self, self.vram_size, boot_size=(32 << 20), pt_t=AMPageTableEntry, va_shifts=[12, 21, 30, 39], va_bits=48,
