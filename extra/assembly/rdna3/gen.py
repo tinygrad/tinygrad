@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 # generates autogen/__init__.py by parsing the AMD RDNA3.5 ISA PDF
-import re, pdfplumber
+import re, pdfplumber, pathlib
 
+PDF_PATH = pathlib.Path(__file__).parent / "autogen/rdna35_instruction_set_architecture.pdf"
 FIELD_TYPES = {'SSRC0': 'SSrc', 'SSRC1': 'SSrc', 'SOFFSET': 'SSrc', 'SADDR': 'SSrc', 'SRC0': 'Src', 'SRC1': 'Src', 'SRC2': 'Src',
   'SDST': 'SGPR', 'SBASE': 'SGPR', 'SDATA': 'SGPR', 'SRSRC': 'SGPR', 'VDST': 'VGPR', 'VSRC1': 'VGPR', 'VDATA': 'VGPR',
   'VADDR': 'VGPR', 'ADDR': 'VGPR', 'DATA': 'VGPR', 'DATA0': 'VGPR', 'DATA1': 'VGPR', 'SIMM16': 'SImm', 'OFFSET': 'Imm',
@@ -17,7 +18,8 @@ FIELD_ORDER = {'SOP2': ['op', 'sdst', 'ssrc0', 'ssrc1'], 'SOP1': ['op', 'sdst', 
   'MIMG': ['op', 'vdata', 'vaddr', 'srsrc', 'ssamp', 'dmask', 'dim', 'unrm', 'dlc', 'glc', 'slc', 'r128', 'a16', 'd16', 'tfe', 'lwe', 'nsa'],
   'EXP': ['en', 'target', 'vsrc0', 'vsrc1', 'vsrc2', 'vsrc3', 'done', 'row']}
 SRC_EXTRAS = {233: 'DPP8', 234: 'DPP8FI', 250: 'DPP16', 251: 'VCCZ', 252: 'EXECZ', 254: 'LDS_DIRECT'}
-FLOAT_MAP = {'0.5': 'POS_HALF', '-0.5': 'NEG_HALF', '1.0': 'POS_ONE', '-1.0': 'NEG_ONE', '2.0': 'POS_TWO', '-2.0': 'NEG_TWO', '4.0': 'POS_FOUR', '-4.0': 'NEG_FOUR', '1/(2*PI)': 'INV_2PI', '0': 'ZERO'}
+FLOAT_MAP = {'0.5': 'POS_HALF', '-0.5': 'NEG_HALF', '1.0': 'POS_ONE', '-1.0': 'NEG_ONE', '2.0': 'POS_TWO', '-2.0': 'NEG_TWO',
+  '4.0': 'POS_FOUR', '-4.0': 'NEG_FOUR', '1/(2*PI)': 'INV_2PI', '0': 'ZERO'}
 
 def parse_bits(s: str) -> tuple[int, int] | None:
   return (int(m.group(1)), int(m.group(2) or m.group(1))) if (m := re.match(r'\[(\d+)(?::(\d+))?\]', s)) else None
@@ -33,23 +35,23 @@ def parse_fields_table(table: list, fmt: str, enums: set[str]) -> list[tuple]:
       enc_bits = m.group(1).replace('_', '')
       enc_val = int(enc_bits, 2)
       declared_width, actual_width = hi - lo + 1, len(enc_bits)
-      if actual_width > declared_width:
-        print(f"WARNING: {fmt} ENCODING has {actual_width} bits but field is [{hi}:{lo}] ({declared_width} bits), extending to [{hi}:{hi - actual_width + 1}]")
-        lo = hi - actual_width + 1
+      if actual_width > declared_width: lo = hi - actual_width + 1
     ftype = f"{fmt}Op" if name == 'OP' and f"{fmt}Op" in enums else FIELD_TYPES.get(name.upper())
     fields.append((name, hi, lo, enc_val, ftype))
   return fields
 
-def is_fields_table(t) -> bool: return t and len(t) > 1 and t[0] and 'Field' in str(t[0][0] or '')
+def generate(output_path: pathlib.Path|str|None = None) -> dict:
+  """Generate RDNA3.5 instruction definitions from the AMD ISA PDF. Returns dict with formats for testing."""
+  pdf = pdfplumber.open(PDF_PATH)
+  pages = pdf.pages[150:200]
+  page_texts = [p.extract_text() or '' for p in pages]
+  page_tables = [[t.extract() for t in p.find_tables()] for p in pages]
+  full_text = '\n'.join(page_texts)
 
-if __name__ == "__main__":
-  pdf = pdfplumber.open("extra/assembly/rdna3/autogen/rdna35_instruction_set_architecture.pdf")
-  full_text = '\n'.join(page.extract_text() or '' for page in pdf.pages)
-
-  # parse SSRC encoding
+  # parse SSRC encoding from first page with VCC_LO
   src_enum = dict(SRC_EXTRAS)
-  for page in pdf.pages[150:160]:
-    if 'SSRC0' in (text := page.extract_text() or '') and 'VCC_LO' in text:
+  for text in page_texts[:10]:
+    if 'SSRC0' in text and 'VCC_LO' in text:
       for m in re.finditer(r'^(\d+)\s+(\S+)', text, re.M):
         val, name = int(m.group(1)), m.group(2).rstrip('.:')
         if name in FLOAT_MAP: src_enum[val] = FLOAT_MAP[name]
@@ -61,45 +63,63 @@ if __name__ == "__main__":
   for m in re.finditer(r'Table \d+\. (\w+) Opcodes(.*?)(?=Table \d+\.|\n\d+\.\d+\.\d+\.\s+\w+\s*\nDescription|$)', full_text, re.S):
     if ops := {int(x.group(1)): x.group(2) for x in re.finditer(r'(\d+)\s+([A-Z][A-Z0-9_]+)', m.group(2))}:
       enums[m.group(1) + "Op"] = ops
-
-  # parse VOPD Y opcode table (Y is superset of X, X just has smaller bitfield)
   if m := re.search(r'Table \d+\. VOPD Y-Opcodes\n(.*?)(?=Table \d+\.|15\.\d)', full_text, re.S):
     if ops := {int(x.group(1)): x.group(2) for x in re.finditer(r'(\d+)\s+(V_DUAL_\w+)', m.group(1))}:
       enums["VOPDOp"] = ops
+  enum_names = set(enums.keys())
+
+  def is_fields_table(t) -> bool: return t and len(t) > 1 and t[0] and 'Field' in str(t[0][0] or '')
+  def has_encoding(fields) -> bool: return any(f[0] == 'ENCODING' for f in fields)
+  def has_header_before_fields(text) -> bool:
+    return (pos := text.find('Field Name')) != -1 and bool(re.search(r'\d+\.\d+\.\d+\.\s+\w+\s*\n', text[:pos]))
+
+  # find format headers with their page indices
+  format_headers = []  # (fmt_name, page_idx)
+  for i, text in enumerate(page_texts):
+    for m in re.finditer(r'\d+\.\d+\.\d+\.\s+(\w+)\s*\n?Description', text): format_headers.append((m.group(1), i, m.start()))
+    for m in re.finditer(r'\d+\.\d+\.\d+\.\s+(\w+)\s*\n', text):
+      if m.start() > len(text) - 200 and 'Description' not in text[m.end():] and i + 1 < len(page_texts):
+        next_text = page_texts[i + 1].lstrip()
+        if next_text.startswith('Description') or (next_text.startswith('"RDNA') and 'Description' in next_text[:200]):
+          format_headers.append((m.group(1), i, m.start()))
 
   # parse instruction formats
   formats: dict[str, list] = {}
-  for i, page in enumerate(pdf.pages[150:200]):
-    text = page.extract_text() or ''
-    # Match format headers followed by Description on same page
-    matches = list(re.finditer(r'\d+\.\d+\.\d+\.\s+(\w+)\s*\n?Description', text))
-    # Also match format headers near end of page where Description is on next page
-    for m in re.finditer(r'\d+\.\d+\.\d+\.\s+(\w+)\s*\n', text):
-      if m.start() > len(text) - 200 and 'Description' not in text[m.end():] and 150+i+1 < len(pdf.pages):
-        next_text = (pdf.pages[150+i+1].extract_text() or '').lstrip()
-        if next_text.startswith('Description') or next_text.startswith('"RDNA') and 'Description' in next_text[:200]: matches.append(m)
-    for m in matches:
-      fmt_name, header_pos = m.group(1), m.start()
-      if fmt_name in formats: continue
-      fields, field_pos = None, text.find('Field Name', header_pos)
-      for t in page.find_tables() if field_pos > header_pos else []:
-        if is_fields_table(t_data := t.extract()) and (fields := parse_fields_table(t_data, fmt_name, set(enums.keys()))) and any(f[0] == 'ENCODING' for f in fields): break
-        fields = None
-      if not fields:
-        for offset in range(1, 3):  # check next 2 pages
-          if 150+i+offset >= len(pdf.pages): break
-          for t in pdf.pages[150+i+offset].find_tables():
-            if is_fields_table(t_data := t.extract()) and (fields := parse_fields_table(t_data, fmt_name, set(enums.keys()))) and any(f[0] == 'ENCODING' for f in fields): break
-            fields = None
-          if fields: break
-      if fields:
-        # check next 2 pages for continuation fields (tables without ENCODING)
-        for offset in range(1, 3):
-          if 150+i+offset >= len(pdf.pages): break
-          for nt in pdf.pages[150+i+offset].extract_tables():
-            if is_fields_table(nt) and (extra := parse_fields_table(nt, fmt_name, set(enums.keys()))) and not any(f[0] == 'ENCODING' for f in extra):
-              fields.extend(extra); break
-        formats[fmt_name] = fields
+  for fmt_name, page_idx, header_pos in format_headers:
+    if fmt_name in formats: continue
+    text, tables = page_texts[page_idx], page_tables[page_idx]
+    field_pos = text.find('Field Name', header_pos)
+
+    # find fields table with ENCODING (same page or up to 2 pages ahead)
+    fields = None
+    for offset in range(3):
+      if page_idx + offset >= len(pages): break
+      if offset > 0 and has_header_before_fields(page_texts[page_idx + offset]): break
+      for t in page_tables[page_idx + offset] if offset > 0 or field_pos > header_pos else []:
+        if is_fields_table(t) and (f := parse_fields_table(t, fmt_name, enum_names)) and has_encoding(f):
+          fields = f
+          break
+      if fields: break
+
+    # for modifier formats (no ENCODING), accept first fields table on same page
+    if not fields and field_pos > header_pos:
+      for t in tables:
+        if is_fields_table(t) and (f := parse_fields_table(t, fmt_name, enum_names)):
+          fields = f
+          break
+
+    if not fields: continue
+    field_names = {f[0] for f in fields}
+
+    # check next pages for continuation fields (tables without ENCODING)
+    for offset in range(1, 3):
+      if page_idx + offset >= len(pages) or has_header_before_fields(page_texts[page_idx + offset]): break
+      for t in page_tables[page_idx + offset]:
+        if is_fields_table(t) and (extra := parse_fields_table(t, fmt_name, enum_names)) and not has_encoding(extra):
+          for f in extra:
+            if f[0] not in field_names: fields.append(f); field_names.add(f[0])
+          break
+    formats[fmt_name] = fields
 
   # generate output
   def enum_lines(name, items): return [f"class {name}(IntEnum):"] + [f"  {n} = {v}" for v, n in sorted(items.items())] + [""]
@@ -123,5 +143,10 @@ if __name__ == "__main__":
       target = {"GLOBAL": "FLAT, GLOBALOp", "SCRATCH": "FLAT, SCRATCHOp"}.get(fmt, f"{fmt}, {cls_name}") if fmt in formats or fmt in ("GLOBAL", "SCRATCH") else None
       if target: lines.append(f"{name.lower()}{'_e32' if fmt in ('VOP1', 'VOP2') else ''} = functools.partial({target}.{name}{seg})")
   lines += [""] + [f"{name} = SrcEnum.{name}" for _, name in sorted(src_enum.items())] + ["OFF = NULL\n"]
-  with open("extra/assembly/rdna3/autogen/__init__.py", "w") as f: f.write('\n'.join(lines))
-  print(f"generated SrcEnum ({len(src_enum)}) + {len(enums)} opcode enums + {len(formats)} format classes")
+
+  if output_path is not None: pathlib.Path(output_path).write_text('\n'.join(lines))
+  return {"formats": formats, "enums": enums, "src_enum": src_enum}
+
+if __name__ == "__main__":
+  result = generate("extra/assembly/rdna3/autogen/__init__.py")
+  print(f"generated SrcEnum ({len(result['src_enum'])}) + {len(result['enums'])} opcode enums + {len(result['formats'])} format classes")

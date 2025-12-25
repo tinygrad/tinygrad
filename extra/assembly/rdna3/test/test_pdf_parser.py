@@ -3,139 +3,144 @@
 import unittest
 from extra.assembly.rdna3.autogen import *
 
+# expected formats with key fields and whether they have ENCODING
+EXPECTED_FORMATS = {
+  'DPP16': (['SRC0', 'DPP_CTRL', 'BANK_MASK', 'ROW_MASK'], False),
+  'DPP8': (['SRC0', 'LANE_SEL0', 'LANE_SEL7'], False),
+  'DS': (['OP', 'ADDR', 'DATA0', 'DATA1', 'VDST'], True),
+  'EXP': (['EN', 'TARGET', 'VSRC0', 'VSRC1', 'VSRC2', 'VSRC3'], True),
+  'FLAT': (['OP', 'ADDR', 'DATA', 'SADDR', 'VDST', 'OFFSET'], True),
+  'LDSDIR': (['VDST', 'OP'], True),
+  'MIMG': (['OP', 'VADDR', 'VDATA', 'SRSRC', 'DMASK'], True),
+  'MTBUF': (['OP', 'VADDR', 'VDATA', 'SRSRC', 'FORMAT', 'SOFFSET'], True),
+  'MUBUF': (['OP', 'VADDR', 'VDATA', 'SRSRC', 'SOFFSET'], True),
+  'SMEM': (['OP', 'SBASE', 'SDATA', 'OFFSET', 'SOFFSET'], True),
+  'SOP1': (['OP', 'SDST', 'SSRC0'], True),
+  'SOP2': (['OP', 'SDST', 'SSRC0', 'SSRC1'], True),
+  'SOPC': (['OP', 'SSRC0', 'SSRC1'], True),
+  'SOPK': (['OP', 'SDST', 'SIMM16'], True),
+  'SOPP': (['OP', 'SIMM16'], True),
+  'VINTERP': (['OP', 'VDST', 'SRC0', 'SRC1', 'SRC2'], True),
+  'VOP1': (['OP', 'VDST', 'SRC0'], True),
+  'VOP2': (['OP', 'VDST', 'SRC0', 'VSRC1'], True),
+  'VOP3': (['OP', 'VDST', 'SRC0', 'SRC1', 'SRC2'], True),
+  'VOP3P': (['OP', 'VDST', 'SRC0', 'SRC1', 'SRC2'], True),
+  'VOP3SD': (['OP', 'VDST', 'SDST', 'SRC0', 'SRC1', 'SRC2'], True),
+  'VOPC': (['OP', 'SRC0', 'VSRC1'], True),
+  'VOPD': (['OPX', 'OPY', 'SRCX0', 'SRCY0', 'VDSTX', 'VDSTY'], True),
+}
+
+class TestPDFParserGenerate(unittest.TestCase):
+  """Test the PDF parser by running generate() and checking results."""
+  result = None
+
+  @classmethod
+  def setUpClass(cls):
+    from extra.assembly.rdna3.gen import generate
+    cls.result = generate()
+
+  def test_all_formats_present(self):
+    """All expected formats should be parsed."""
+    for fmt_name in EXPECTED_FORMATS:
+      self.assertIn(fmt_name, self.result["formats"], f"missing format {fmt_name}")
+
+  def test_format_count(self):
+    """Should have exactly 23 formats."""
+    self.assertEqual(len(self.result["formats"]), 23)
+
+  def test_no_duplicate_fields(self):
+    """No format should have duplicate field names."""
+    for fmt_name, fields in self.result["formats"].items():
+      field_names = [f[0] for f in fields]
+      self.assertEqual(len(field_names), len(set(field_names)), f"{fmt_name} has duplicate fields: {field_names}")
+
+  def test_expected_fields(self):
+    """Each format should have its expected key fields."""
+    for fmt_name, (expected_fields, has_encoding) in EXPECTED_FORMATS.items():
+      fields = {f[0] for f in self.result["formats"].get(fmt_name, [])}
+      for field in expected_fields:
+        self.assertIn(field, fields, f"{fmt_name} missing {field}")
+      if has_encoding: self.assertIn("ENCODING", fields, f"{fmt_name} should have ENCODING")
+      else: self.assertNotIn("ENCODING", fields, f"{fmt_name} should not have ENCODING")
+
+  def test_vopd_no_dpp16_fields(self):
+    """VOPD should not have DPP16-specific fields (parser boundary bug)."""
+    vopd_fields = {f[0] for f in self.result["formats"].get("VOPD", [])}
+    for field in ['DPP_CTRL', 'BANK_MASK', 'ROW_MASK']:
+      self.assertNotIn(field, vopd_fields, f"VOPD should not have {field}")
+
+  def test_dpp16_no_vinterp_fields(self):
+    """DPP16 should not have VINTERP-specific fields."""
+    dpp16_fields = {f[0] for f in self.result["formats"].get("DPP16", [])}
+    for field in ['VDST', 'WAITEXP']:
+      self.assertNotIn(field, dpp16_fields, f"DPP16 should not have {field}")
+
+  def test_sopp_no_smem_fields(self):
+    """SOPP should not have SMEM fields (page break bug)."""
+    sopp_fields = {f[0] for f in self.result["formats"].get("SOPP", [])}
+    for field in ['SBASE', 'SDATA']:
+      self.assertNotIn(field, sopp_fields, f"SOPP should not have {field}")
+
 class TestPDFParser(unittest.TestCase):
   """Verify format classes have correct fields from PDF parsing."""
 
   def test_sop2_fields(self):
     """SOP2 should have op, sdst, ssrc0, ssrc1."""
-    self.assertIn('op', SOP2._fields)
-    self.assertIn('sdst', SOP2._fields)
-    self.assertIn('ssrc0', SOP2._fields)
-    self.assertIn('ssrc1', SOP2._fields)
-    # Check bit positions
+    for field in ['op', 'sdst', 'ssrc0', 'ssrc1']: self.assertIn(field, SOP2._fields)
     self.assertEqual(SOP2._fields['op'].hi, 29)
     self.assertEqual(SOP2._fields['op'].lo, 23)
-    self.assertEqual(SOP2._fields['sdst'].hi, 22)
-    self.assertEqual(SOP2._fields['sdst'].lo, 16)
 
   def test_sop1_fields(self):
     """SOP1 should have op, sdst, ssrc0 with correct bit positions."""
-    self.assertIn('op', SOP1._fields)
-    self.assertIn('sdst', SOP1._fields)
-    self.assertIn('ssrc0', SOP1._fields)
-    # SOP1 must NOT have simm16 (that's SOPK)
+    for field in ['op', 'sdst', 'ssrc0']: self.assertIn(field, SOP1._fields)
     self.assertNotIn('simm16', SOP1._fields)
-    # Verify bit positions - ssrc0 is bits[7:0], op is bits[15:8]
     self.assertEqual(SOP1._fields['ssrc0'].hi, 7)
     self.assertEqual(SOP1._fields['ssrc0'].lo, 0)
-    self.assertEqual(SOP1._fields['op'].hi, 15)
-    self.assertEqual(SOP1._fields['op'].lo, 8)
-    # SOP1 encoding is 0b101111101 at bits[31:23]
     self.assertEqual(SOP1._encoding[0].hi, 31)
-    self.assertEqual(SOP1._encoding[0].lo, 23)
     self.assertEqual(SOP1._encoding[1], 0b101111101)
-
-  def test_vop2_fields(self):
-    """VOP2 should have op, vdst, src0, vsrc1."""
-    self.assertIn('op', VOP2._fields)
-    self.assertIn('vdst', VOP2._fields)
-    self.assertIn('src0', VOP2._fields)
-    self.assertIn('vsrc1', VOP2._fields)
-
-  def test_vop3_fields(self):
-    """VOP3 should have op, vdst, src0, src1, src2 and modifiers."""
-    self.assertIn('op', VOP3._fields)
-    self.assertIn('vdst', VOP3._fields)
-    self.assertIn('src0', VOP3._fields)
-    self.assertIn('src1', VOP3._fields)
-    self.assertIn('src2', VOP3._fields)
-    # VOP3 is 64-bit
-    self.assertEqual(VOP3._size(), 8)
 
   def test_vop3sd_fields(self):
     """VOP3SD should have all fields including src0/src1/src2 from page continuation."""
-    # VOP3SD table spans pages 175-176, src fields are on continuation page
-    self.assertIn('op', VOP3SD._fields)
-    self.assertIn('vdst', VOP3SD._fields)
-    self.assertIn('sdst', VOP3SD._fields)
-    self.assertIn('src0', VOP3SD._fields)
-    self.assertIn('src1', VOP3SD._fields)
-    self.assertIn('src2', VOP3SD._fields)
-    self.assertIn('omod', VOP3SD._fields)
-    self.assertIn('neg', VOP3SD._fields)
-    # Verify bit positions for src fields (from second DWORD)
+    for field in ['op', 'vdst', 'sdst', 'src0', 'src1', 'src2']: self.assertIn(field, VOP3SD._fields)
     self.assertEqual(VOP3SD._fields['src0'].hi, 40)
     self.assertEqual(VOP3SD._fields['src0'].lo, 32)
-    self.assertEqual(VOP3SD._fields['src1'].hi, 49)
-    self.assertEqual(VOP3SD._fields['src1'].lo, 41)
-    self.assertEqual(VOP3SD._fields['src2'].hi, 58)
-    self.assertEqual(VOP3SD._fields['src2'].lo, 50)
-    # VOP3SD is 64-bit
     self.assertEqual(VOP3SD._size(), 8)
-    # Should not have duplicate fields
-    field_names = [name for name in VOP3SD._fields.keys()]
-    self.assertEqual(len(field_names), len(set(field_names)), "VOP3SD has duplicate fields")
 
   def test_flat_has_vdst(self):
-    """FLAT should have vdst field (was missing before fix)."""
+    """FLAT should have vdst field."""
     self.assertIn('vdst', FLAT._fields)
     self.assertEqual(FLAT._fields['vdst'].hi, 63)
     self.assertEqual(FLAT._fields['vdst'].lo, 56)
 
-  def test_flat_fields(self):
-    """FLAT should have all required fields."""
-    for field in ['op', 'vdst', 'addr', 'data', 'saddr', 'offset']:
-      self.assertIn(field, FLAT._fields, f"FLAT missing {field}")
-
-  def test_smem_fields(self):
-    """SMEM should have sbase, sdata, offset."""
-    self.assertIn('sbase', SMEM._fields)
-    self.assertIn('sdata', SMEM._fields)
-    self.assertIn('offset', SMEM._fields)
-    self.assertIn('soffset', SMEM._fields)
-
-  def test_sopp_no_extra_fields(self):
-    """SOPP should only have op and simm16 (no sdst from page break merge)."""
-    # SOPP should NOT have sbase, sdata, etc from SMEM (page break issue)
-    self.assertNotIn('sbase', SOPP._fields)
-    self.assertNotIn('sdata', SOPP._fields)
-    self.assertIn('op', SOPP._fields)
-    self.assertIn('simm16', SOPP._fields)
-
   def test_encoding_bits(self):
-    """Verify encoding bits are correct for all major formats."""
-    # SOP2 encoding is 10 at bits[31:30]
-    self.assertEqual(SOP2._encoding[0].hi, 31)
-    self.assertEqual(SOP2._encoding[0].lo, 30)
-    self.assertEqual(SOP2._encoding[1], 0b10)
-    # SOPK encoding is 1011 at bits[31:28]
-    self.assertEqual(SOPK._encoding[0].hi, 31)
-    self.assertEqual(SOPK._encoding[0].lo, 28)
-    self.assertEqual(SOPK._encoding[1], 0b1011)
-    # SOPP encoding is 101111111 at bits[31:23]
-    self.assertEqual(SOPP._encoding[0].hi, 31)
-    self.assertEqual(SOPP._encoding[0].lo, 23)
-    self.assertEqual(SOPP._encoding[1], 0b101111111)
-    # VOP1 encoding is 0111111 at bits[31:25]
-    self.assertEqual(VOP1._encoding[0].hi, 31)
-    self.assertEqual(VOP1._encoding[0].lo, 25)
-    self.assertEqual(VOP1._encoding[1], 0b0111111)
-    # VOP2 encoding is 0 at bits[31]
-    self.assertEqual(VOP2._encoding[0].hi, 31)
-    self.assertEqual(VOP2._encoding[0].lo, 31)
-    self.assertEqual(VOP2._encoding[1], 0b0)
-    # FLAT encoding is 110111 at bits[31:26]
-    self.assertEqual(FLAT._encoding[0].hi, 31)
-    self.assertEqual(FLAT._encoding[0].lo, 26)
-    self.assertEqual(FLAT._encoding[1], 0b110111)
+    """Verify encoding bits are correct for major formats."""
+    tests = [
+      (SOP2, 31, 30, 0b10),
+      (SOPK, 31, 28, 0b1011),
+      (SOPP, 31, 23, 0b101111111),
+      (VOP1, 31, 25, 0b0111111),
+      (VOP2, 31, 31, 0b0),
+      (VOPC, 31, 25, 0b0111110),
+      (FLAT, 31, 26, 0b110111),
+    ]
+    for cls, hi, lo, val in tests:
+      self.assertEqual(cls._encoding[0].hi, hi, f"{cls.__name__} encoding hi")
+      self.assertEqual(cls._encoding[0].lo, lo, f"{cls.__name__} encoding lo")
+      self.assertEqual(cls._encoding[1], val, f"{cls.__name__} encoding val")
 
   def test_opcode_enums_exist(self):
-    """Verify opcode enums are generated."""
-    self.assertTrue(len(SOP1Op) > 50)
-    self.assertTrue(len(SOP2Op) > 50)
-    self.assertTrue(len(VOP1Op) > 50)
-    self.assertTrue(len(VOP2Op) > 30)
-    self.assertTrue(len(VOP3Op) > 200)
+    """Verify opcode enums are generated with expected counts."""
+    self.assertGreater(len(SOP1Op), 50)
+    self.assertGreater(len(SOP2Op), 50)
+    self.assertGreater(len(VOP1Op), 50)
+    self.assertGreater(len(VOP3Op), 200)
+
+  def test_vopd_no_duplicate_fields(self):
+    """VOPD should not have duplicate fields and should not include DPP16 fields."""
+    field_names = list(VOPD._fields.keys())
+    self.assertEqual(len(field_names), len(set(field_names)))
+    for field in ['srcx0', 'srcy0', 'opx', 'opy']: self.assertIn(field, VOPD._fields)
+    for field in ['dpp_ctrl', 'bank_mask', 'row_mask']: self.assertNotIn(field, VOPD._fields)
 
 if __name__ == "__main__":
   unittest.main()

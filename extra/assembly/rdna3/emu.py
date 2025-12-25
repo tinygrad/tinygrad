@@ -69,8 +69,8 @@ class WaveState:
 
   def wsgpr(self, i: int, v: int) -> None:
     v &= 0xffffffff
-    if i == VCC_LO: self.vcc = (self.vcc & 0xffffffff00000000) | v
-    elif i == VCC_HI: self.vcc = (self.vcc & 0xffffffff) | (v << 32)
+    if i == VCC_LO: self.vcc = (self.vcc & 0xffffffff00000000) | v; self.sgpr[i] = v
+    elif i == VCC_HI: self.vcc = (self.vcc & 0xffffffff) | (v << 32); self.sgpr[i] = v
     elif i == EXEC_LO: self.exec_mask = (self.exec_mask & 0xffffffff00000000) | v
     elif i == EXEC_HI: self.exec_mask = (self.exec_mask & 0xffffffff) | (v << 32)
     elif i == NULL_REG: pass

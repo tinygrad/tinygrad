@@ -1583,13 +1583,18 @@ class VOPDOp(IntEnum):
 
 # instruction formats
 class DPP16(Inst64):
-  encoding = bits[31:24] == 0b11001101
-  vdst:VGPR = bits[7:0]
-  waitexp = bits[10:8]
-  opsel = bits[14:11]
-  clmp = bits[15]
-  op = bits[22:16]
-  src0:Src = bits[40:32]
+  src0:Src = bits[39:32]
+  dpp_ctrl = bits[48:40]
+  fi = bits[50]
+  bc = bits[51]
+  src0_neg = bits[52]
+  src0_abs = bits[53]
+  src1_neg = bits[54]
+  src1_abs = bits[55]
+  bank_mask = bits[59:56]
+  row_mask = bits[63:60]
+
+class DPP8(Inst64):
   src0:Src = bits[39:32]
   lane_sel0 = bits[42:40]
   lane_sel1 = bits[45:43]
@@ -1599,19 +1604,6 @@ class DPP16(Inst64):
   lane_sel5 = bits[57:55]
   lane_sel6 = bits[60:58]
   lane_sel7 = bits[63:61]
-
-class DPP8(Inst64):
-  encoding = bits[31:24] == 0b11001101
-  vdst:VGPR = bits[7:0]
-  waitexp = bits[10:8]
-  opsel = bits[14:11]
-  clmp = bits[15]
-  op = bits[22:16]
-  src0:Src = bits[40:32]
-  src0:Src = bits[40:32]
-  src1:Src = bits[49:41]
-  src2:Src = bits[58:50]
-  neg = bits[63:61]
 
 class DS(Inst64):
   encoding = bits[31:26] == 0b110110
@@ -1758,7 +1750,6 @@ class VINTERP(Inst64):
   clmp = bits[15]
   op:VINTERPOp = bits[22:16]
   src0:Src = bits[40:32]
-  src0:Src = bits[40:32]
   src1:Src = bits[49:41]
   src2:Src = bits[58:50]
   neg = bits[63:61]
@@ -1831,16 +1822,6 @@ class VOPD(Inst64):
   vsrcy1:VGPR = bits[48:41]
   vdsty:VGPR = bits[55:49]
   vdstx:VGPR = bits[63:56]
-  src0:Src = bits[39:32]
-  dpp_ctrl = bits[48:40]
-  fi = bits[50]
-  bc = bits[51]
-  src0_neg = bits[52]
-  src0_abs = bits[53]
-  src1_neg = bits[54]
-  src1_abs = bits[55]
-  bank_mask = bits[59:56]
-  row_mask = bits[63:60]
 
 # instruction helpers
 ds_add_u32 = functools.partial(DS, DSOp.DS_ADD_U32)
