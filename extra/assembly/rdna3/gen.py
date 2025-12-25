@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # generates autogen/__init__.py by parsing the AMD RDNA3.5 ISA PDF
 import re, pdfplumber, pathlib
+from tinygrad.helpers import fetch
 
-PDF_PATH = pathlib.Path(__file__).parent / "autogen/rdna35_instruction_set_architecture.pdf"
+PDF_URL = "https://docs.amd.com/api/khub/documents/UVVZM22UN7tMUeiW_4ShTQ/content"
 FIELD_TYPES = {'SSRC0': 'SSrc', 'SSRC1': 'SSrc', 'SOFFSET': 'SSrc', 'SADDR': 'SSrc', 'SRC0': 'Src', 'SRC1': 'Src', 'SRC2': 'Src',
   'SDST': 'SGPR', 'SBASE': 'SGPR', 'SDATA': 'SGPR', 'SRSRC': 'SGPR', 'VDST': 'VGPR', 'VSRC1': 'VGPR', 'VDATA': 'VGPR',
   'VADDR': 'VGPR', 'ADDR': 'VGPR', 'DATA': 'VGPR', 'DATA0': 'VGPR', 'DATA1': 'VGPR', 'SIMM16': 'SImm', 'OFFSET': 'Imm',
@@ -44,7 +45,7 @@ def parse_fields_table(table: list, fmt: str, enums: set[str]) -> list[tuple]:
 
 def generate(output_path: pathlib.Path|str|None = None) -> dict:
   """Generate RDNA3.5 instruction definitions from the AMD ISA PDF. Returns dict with formats for testing."""
-  pdf = pdfplumber.open(PDF_PATH)
+  pdf = pdfplumber.open(fetch(PDF_URL))
   pages = pdf.pages[150:200]
   page_texts = [p.extract_text() or '' for p in pages]
   page_tables = [[t.extract() for t in p.find_tables()] for p in pages]
