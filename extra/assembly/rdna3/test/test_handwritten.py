@@ -8,36 +8,51 @@ from extra.assembly.rdna3.test.test_roundtrip import compile_asm
 
 class TestIntegration(unittest.TestCase):
   def tearDown(self):
+    if not hasattr(self, 'inst'): return
     b = self.inst.to_bytes()
     st = self.inst.disasm()
     reasm = asm(st)
-    desc = f"{self.inst} {b} {st} {reasm}"
+    desc = f"{st:25s} {self.inst} {b} {reasm}"
     self.assertEqual(b, compile_asm(st), desc)
     # TODO: this compare should work for valid things
     #self.assertEqual(self.inst, reasm)
     self.assertEqual(repr(self.inst), repr(reasm))
+    print(desc)
+
+  def test_load_b128(self):
+    self.inst = s_load_b128(s[4:7], s[0:1], NULL, 0)
+
+  def test_load_b128_s(self):
+    self.inst = s_load_b128(s[4:7], s[0:1], s[8], 0)
+
+  def test_load_b128_v(self):
+    with self.assertRaises(TypeError):
+      self.inst = s_load_b128(s[4:7], s[0:1], v[8], 0)
+
+  def test_load_b128_off(self):
+    self.inst = s_load_b128(s[4:7], s[0:1], NULL, 3)
 
   def test_simple_stos(self):
     self.inst = s_mov_b32(s[0], s[1])
 
   def test_simple_wrong(self):
-    # TODO: this should raise an exception on construction, s[1] is not a valid type
     with self.assertRaises(TypeError):
       self.inst = s_mov_b32(v[0], s[1])
 
   def test_simple_vtov(self):
-    # TODO: this is broken, it's reconstructing with s[1] and not v[1]
     self.inst = v_mov_b32_e32(v[0], v[1])
 
   def test_simple_stov(self):
     self.inst = v_mov_b32_e32(v[0], s[2])
 
   def test_simple_float_to_v(self):
-    # TODO: this should be the magic float value 1.0
     self.inst = v_mov_b32_e32(v[0], 1.0)
 
+  def test_simple_v_to_float(self):
+    with self.assertRaises(TypeError):
+      self.inst = v_mov_b32_e32(1, v[0])
+
   def test_simple_int_to_v(self):
-    # TODO: this should be the constant 1, not s[0]
     self.inst = v_mov_b32_e32(v[0], 1)
 
 if __name__ == "__main__":

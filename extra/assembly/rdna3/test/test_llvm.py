@@ -119,6 +119,8 @@ def _make_disasm_test(name):
         decoded = fmt_cls.from_bytes(data)
         op_val = decoded._values.get('op', 0)
         op_val = op_val.val if hasattr(op_val, 'val') else op_val
+        # VOP3SD test uses VOP3 file - skip non-VOP3SD instructions
+        if name == 'vop3sd' and op_val not in vop3sd_opcodes: continue
         # VOP3 and VOP3SD share encoding - validate with appropriate enum
         if fmt_cls.__name__ == 'VOP3' and op_val in vop3sd_opcodes:
           VOP3SDOp(op_val)  # validate as VOP3SD
