@@ -333,11 +333,50 @@ VOP1_OPS = {
   VOP1Op.V_FREXP_MANT_F32: lambda s: i32(math.frexp(f32(s))[0] if f32(s) != 0 else 0.0),
   VOP1Op.V_FREXP_EXP_I32_F32: lambda s: (math.frexp(f32(s))[1] if f32(s) != 0 else 0) & 0xffffffff,
 }
+def f64(hi: int, lo: int) -> float:
+  """Convert two 32-bit ints (hi, lo) to float64."""
+  import struct
+  return struct.unpack('<d', struct.pack('<Q', (hi << 32) | lo))[0]
+
+def i64_parts(f: float) -> tuple[int, int]:
+  """Convert float64 to (lo, hi) 32-bit ints."""
+  import struct
+  if math.isnan(f): val = 0x7ff8000000000000  # canonical NaN
+  elif math.isinf(f): val = 0x7ff0000000000000 if f > 0 else 0xfff0000000000000
+  else: val = struct.unpack('<Q', struct.pack('<d', f))[0]
+  return val & 0xffffffff, (val >> 32) & 0xffffffff
+
 def exec_vop1(st: WaveState, inst: VOP1, lane: int) -> None:
   if inst.op == VOP1Op.V_NOP: return
   if inst.op == VOP1Op.V_READFIRSTLANE_B32:
     first = (st.exec_mask & -st.exec_mask).bit_length() - 1 if st.exec_mask else 0
     st.wsgpr(inst.vdst, st.rsrc(inst.src0, first) if inst.src0 >= 256 else st.rsrc(inst.src0, lane)); return
+  # F64 conversions that write to 2 registers
+  V = st.vgpr[lane]
+  if inst.op == VOP1Op.V_CVT_F64_F32:
+    lo, hi = i64_parts(float(f32(st.rsrc(inst.src0, lane))))
+    V[inst.vdst], V[inst.vdst + 1] = lo, hi; return
+  if inst.op == VOP1Op.V_CVT_F64_I32:
+    lo, hi = i64_parts(float(sext(st.rsrc(inst.src0, lane), 32)))
+    V[inst.vdst], V[inst.vdst + 1] = lo, hi; return
+  if inst.op == VOP1Op.V_CVT_F64_U32:
+    lo, hi = i64_parts(float(st.rsrc(inst.src0, lane)))
+    V[inst.vdst], V[inst.vdst + 1] = lo, hi; return
+  # F64 conversions that read from 2 registers
+  if inst.op == VOP1Op.V_CVT_F32_F64:
+    src = inst.src0 - 256 if inst.src0 >= 256 else inst.src0
+    lo, hi = (V[src], V[src + 1]) if inst.src0 >= 256 else (st.sgpr[src], st.sgpr[src + 1])
+    V[inst.vdst] = i32(f64(hi, lo)); return
+  if inst.op == VOP1Op.V_CVT_I32_F64:
+    src = inst.src0 - 256 if inst.src0 >= 256 else inst.src0
+    lo, hi = (V[src], V[src + 1]) if inst.src0 >= 256 else (st.sgpr[src], st.sgpr[src + 1])
+    v = f64(hi, lo)
+    V[inst.vdst] = (max(-0x80000000, min(0x7fffffff, int(v))) & 0xffffffff) if math.isfinite(v) else 0; return
+  if inst.op == VOP1Op.V_CVT_U32_F64:
+    src = inst.src0 - 256 if inst.src0 >= 256 else inst.src0
+    lo, hi = (V[src], V[src + 1]) if inst.src0 >= 256 else (st.sgpr[src], st.sgpr[src + 1])
+    v = f64(hi, lo)
+    V[inst.vdst] = max(0, min(0xffffffff, int(v))) if math.isfinite(v) and v == v else 0; return
   st.vgpr[lane][inst.vdst] = VOP1_OPS[inst.op](st.rsrc(inst.src0, lane))
 
 # VOP2 table: op -> fn(s0, s1) -> result
@@ -367,6 +406,15 @@ def exec_vop2(st: WaveState, inst: VOP2, lane: int) -> None:
   if inst.op == VOP2Op.V_FMAC_F32: V[inst.vdst] = i32(f32(s0)*f32(s1)+f32(V[inst.vdst])); return
   if inst.op == VOP2Op.V_FMAMK_F32: V[inst.vdst] = i32(f32(s0)*f32(st.literal)+f32(s1)); return
   if inst.op == VOP2Op.V_FMAAK_F32: V[inst.vdst] = i32(f32(s0)*f32(s1)+f32(st.literal)); return
+  if inst.op == VOP2Op.V_FMAC_F16: V[inst.vdst] = (V[inst.vdst] & 0xffff0000) | i16(f16(s0)*f16(s1)+f16(V[inst.vdst])); return
+  if inst.op == VOP2Op.V_FMAMK_F16: V[inst.vdst] = (V[inst.vdst] & 0xffff0000) | i16(f16(s0)*f16(st.literal)+f16(s1)); return
+  if inst.op == VOP2Op.V_FMAAK_F16: V[inst.vdst] = (V[inst.vdst] & 0xffff0000) | i16(f16(s0)*f16(s1)+f16(st.literal)); return
+  if inst.op == VOP2Op.V_SUBREV_F16: V[inst.vdst] = (V[inst.vdst] & 0xffff0000) | i16(f16(s1)-f16(s0)); return
+  if inst.op == VOP2Op.V_CVT_PK_RTZ_F16_F32: V[inst.vdst] = i16(f32(s0)) | (i16(f32(s1)) << 16); return
+  if inst.op == VOP2Op.V_PK_FMAC_F16:
+    lo = i16(f16(s0 & 0xffff) * f16(s1 & 0xffff) + f16(V[inst.vdst] & 0xffff))
+    hi = i16(f16((s0 >> 16) & 0xffff) * f16((s1 >> 16) & 0xffff) + f16((V[inst.vdst] >> 16) & 0xffff))
+    V[inst.vdst] = lo | (hi << 16); return
   if inst.op == VOP2Op.V_ADD_CO_CI_U32: r = s0+s1+((st.vcc>>lane)&1); st.pend_vcc_lane(lane, r >= 0x100000000); V[inst.vdst] = r & 0xffffffff; return
   if inst.op == VOP2Op.V_SUB_CO_CI_U32: b = (st.vcc>>lane)&1; st.pend_vcc_lane(lane, s1+b > s0); V[inst.vdst] = (s0-s1-b) & 0xffffffff; return
   raise NotImplementedError(f"VOP2 op {inst.op}")
@@ -396,7 +444,28 @@ VOP3_ONLY_OPS = {
   VOP3Op.V_MUL_HI_I32: lambda a, b, c: ((sext(a, 32) * sext(b, 32)) >> 32) & 0xffffffff,
   VOP3Op.V_LDEXP_F32: lambda a, b, c: i32(math.ldexp(f32(a), sext(b, 32))),
   VOP3Op.V_LSHLREV_B16: lambda a, b, c: ((b & 0xffff) << (a & 0xf)) & 0xffff,
+  VOP3Op.V_LSHRREV_B16: lambda a, b, c: (b & 0xffff) >> (a & 0xf),
+  VOP3Op.V_ASHRREV_I16: lambda a, b, c: (sext(b & 0xffff, 16) >> (a & 0xf)) & 0xffff,
+  VOP3Op.V_ADD_NC_U16: lambda a, b, c: ((a & 0xffff) + (b & 0xffff)) & 0xffff,
+  VOP3Op.V_SUB_NC_U16: lambda a, b, c: ((a & 0xffff) - (b & 0xffff)) & 0xffff,
+  VOP3Op.V_MUL_LO_U16: lambda a, b, c: ((a & 0xffff) * (b & 0xffff)) & 0xffff,
+  VOP3Op.V_MIN_U16: lambda a, b, c: min(a & 0xffff, b & 0xffff),
+  VOP3Op.V_MAX_U16: lambda a, b, c: max(a & 0xffff, b & 0xffff),
+  VOP3Op.V_MIN_I16: lambda a, b, c: (a & 0xffff) if sext(a & 0xffff, 16) < sext(b & 0xffff, 16) else (b & 0xffff),
+  VOP3Op.V_MAX_I16: lambda a, b, c: (a & 0xffff) if sext(a & 0xffff, 16) > sext(b & 0xffff, 16) else (b & 0xffff),
   VOP3Op.V_OR3_B32: lambda a, b, c: a | b | c, VOP3Op.V_AND_OR_B32: lambda a, b, c: (a & b) | c,
+  VOP3Op.V_MAD_U16: lambda a, b, c: ((a & 0xffff) * (b & 0xffff) + (c & 0xffff)) & 0xffff,
+  VOP3Op.V_MAD_I16: lambda a, b, c: (sext(a & 0xffff, 16) * sext(b & 0xffff, 16) + sext(c & 0xffff, 16)) & 0xffff,
+  VOP3Op.V_FMA_F16: lambda a, b, c: i16(f16(a) * f16(b) + f16(c)),
+  VOP3Op.V_MIN3_F16: lambda a, b, c: i16(min(f16(a), f16(b), f16(c))),
+  VOP3Op.V_MAX3_F16: lambda a, b, c: i16(max(f16(a), f16(b), f16(c))),
+  VOP3Op.V_MED3_F16: lambda a, b, c: i16(sorted([f16(a), f16(b), f16(c)])[1]),
+  VOP3Op.V_MIN3_U16: lambda a, b, c: min(a & 0xffff, b & 0xffff, c & 0xffff),
+  VOP3Op.V_MAX3_U16: lambda a, b, c: max(a & 0xffff, b & 0xffff, c & 0xffff),
+  VOP3Op.V_MED3_U16: lambda a, b, c: sorted([a & 0xffff, b & 0xffff, c & 0xffff])[1],
+  VOP3Op.V_MIN3_I16: lambda a, b, c: sorted([sext(a & 0xffff, 16), sext(b & 0xffff, 16), sext(c & 0xffff, 16)])[0] & 0xffff,
+  VOP3Op.V_MAX3_I16: lambda a, b, c: sorted([sext(a & 0xffff, 16), sext(b & 0xffff, 16), sext(c & 0xffff, 16)])[2] & 0xffff,
+  VOP3Op.V_MED3_I16: lambda a, b, c: sorted([sext(a & 0xffff, 16), sext(b & 0xffff, 16), sext(c & 0xffff, 16)])[1] & 0xffff,
 }
 
 # Build VOP3_OPS dynamically: VOP3Op = VOP1Op + 384 for VOP1, VOP3Op = VOP2Op + 256 for VOP2
@@ -423,6 +492,18 @@ def exec_vop3(st: WaveState, inst: VOP3, lane: int) -> None:
            v64 >> (s0 & 0x3f) if op == VOP3Op.V_LSHRREV_B64 else sext(v64, 64) >> (s0 & 0x3f))
       V[vdst], V[vdst+1] = r & 0xffffffff, (r >> 32) & 0xffffffff
     case VOP3Op.V_PACK_B32_F16: V[vdst] = (s0 & 0xffff) | ((s1 & 0xffff) << 16)  # pack two f16 into f32
+    case VOP3Op.V_ADD_F64 | VOP3Op.V_MUL_F64 | VOP3Op.V_FMA_F64 | VOP3Op.V_MAX_F64 | VOP3Op.V_MIN_F64:
+      # F64 ops: sources are 64-bit pairs, result is 64-bit
+      a = f64(st.rsrc(src0 + 1, lane), s0)
+      b = f64(st.rsrc(src1 + 1, lane), s1)
+      c = f64(st.rsrc(src2 + 1, lane), s2) if op == VOP3Op.V_FMA_F64 else 0.0
+      if op == VOP3Op.V_ADD_F64: r = a + b
+      elif op == VOP3Op.V_MUL_F64: r = a * b
+      elif op == VOP3Op.V_FMA_F64: r = a * b + c
+      elif op == VOP3Op.V_MAX_F64: r = max(a, b)
+      elif op == VOP3Op.V_MIN_F64: r = min(a, b)
+      lo, hi = i64_parts(r)
+      V[vdst], V[vdst + 1] = lo, hi
     case _: raise NotImplementedError(f"VOP3 op {op}")
 
 def cmp_class_f32(val: int, mask: int) -> bool:
@@ -505,6 +586,14 @@ def exec_vop3sd(st: WaveState, inst: VOP3SD, lane: int) -> None:
       st.pend_vcc_lane(lane, s0 == s2)
     case _: raise NotImplementedError(f"VOP3SD op {op}")
 
+# D16 load ops: load to low 16 bits (D16) or high 16 bits (D16_HI)
+FLAT_D16_LO = {FLATOp.FLAT_LOAD_D16_U8: (1, 0), FLATOp.FLAT_LOAD_D16_I8: (1, 1), FLATOp.FLAT_LOAD_D16_B16: (2, 0),
+               GLOBALOp.GLOBAL_LOAD_D16_U8: (1, 0), GLOBALOp.GLOBAL_LOAD_D16_I8: (1, 1), GLOBALOp.GLOBAL_LOAD_D16_B16: (2, 0)}
+FLAT_D16_HI = {FLATOp.FLAT_LOAD_D16_HI_U8: (1, 0), FLATOp.FLAT_LOAD_D16_HI_I8: (1, 1), FLATOp.FLAT_LOAD_D16_HI_B16: (2, 0),
+               GLOBALOp.GLOBAL_LOAD_D16_HI_U8: (1, 0), GLOBALOp.GLOBAL_LOAD_D16_HI_I8: (1, 1), GLOBALOp.GLOBAL_LOAD_D16_HI_B16: (2, 0)}
+FLAT_D16_STORE = {FLATOp.FLAT_STORE_D16_HI_B8: 1, FLATOp.FLAT_STORE_D16_HI_B16: 2,
+                  GLOBALOp.GLOBAL_STORE_D16_HI_B8: 1, GLOBALOp.GLOBAL_STORE_D16_HI_B16: 2}
+
 def exec_flat(st: WaveState, inst: FLAT, lane: int) -> None:
   op, addr_reg, data_reg, vdst, offset, saddr, V = inst.op, inst.addr, inst.data, inst.vdst, sext(inst.offset, 13), inst.saddr, st.vgpr[lane]
   addr = V[addr_reg] | (V[addr_reg+1] << 32)
@@ -517,6 +606,19 @@ def exec_flat(st: WaveState, inst: FLAT, lane: int) -> None:
   elif op in FLAT_STORE:
     cnt, sz = FLAT_STORE[op]
     for i in range(cnt): mem_write(addr + i * sz, sz, V[data_reg + i] & ((1 << (sz * 8)) - 1))
+  elif op in FLAT_D16_LO:  # Load to low 16 bits
+    sz, sign = FLAT_D16_LO[op]
+    val = mem_read(addr, sz)
+    val = sext(val, sz * 8) & 0xffff if sign else val & 0xffff
+    V[vdst] = (V[vdst] & 0xffff0000) | val
+  elif op in FLAT_D16_HI:  # Load to high 16 bits
+    sz, sign = FLAT_D16_HI[op]
+    val = mem_read(addr, sz)
+    val = sext(val, sz * 8) & 0xffff if sign else val & 0xffff
+    V[vdst] = (V[vdst] & 0x0000ffff) | (val << 16)
+  elif op in FLAT_D16_STORE:  # Store from high 16 bits
+    sz = FLAT_D16_STORE[op]
+    mem_write(addr, sz, (V[data_reg] >> 16) & ((1 << (sz * 8)) - 1))
   else: raise NotImplementedError(f"FLAT op {op}")
 
 def exec_ds(st: WaveState, inst: DS, lane: int, lds: bytearray) -> None:
@@ -597,6 +699,61 @@ def exec_vop3p(st: WaveState, inst: VOP3P, lane: int) -> None:
     case VOP3POp.V_FMA_MIXHI_F16:  V[vdst] = (V[vdst] & 0x0000ffff) | (i16(get_src(s0, 0, True) * get_src(s1, 1, True) + get_src(s2, 2, True)) << 16)
     case _: raise NotImplementedError(f"VOP3P op {op}")
 
+def exec_wmma_f32_16x16x16_f16(st: WaveState, inst: VOP3P, n_lanes: int) -> None:
+  """V_WMMA_F32_16X16X16_F16: C[16x16] += A[16x16] * B[16x16] where A,B are FP16 and C is FP32.
+  Layout matches Rust emulator: lanes 0-15 hold A rows and B columns, output distributed across all 32 lanes."""
+  # Decode source operands: >= 256 means VGPR (subtract 256)
+  src0_base = (inst.src0 - 256) if inst.src0 >= 256 else inst.src0
+  src1_base = (inst.src1 - 256) if inst.src1 >= 256 else inst.src1
+  src2_base = (inst.src2 - 256) if inst.src2 >= 256 else inst.src2
+  src0_is_vgpr, src1_is_vgpr, src2_is_vgpr = inst.src0 >= 256, inst.src1 >= 256, inst.src2 >= 256
+  vdst = inst.vdst
+
+  # Gather A matrix from lanes 0-15: lane i holds row i (16 fp16 values in 8 regs)
+  A = [[0.0] * 16 for _ in range(16)]
+  for lane in range(min(n_lanes, 16)):
+    V = st.vgpr[lane]
+    for reg in range(8):
+      val = V[src0_base + reg] if src0_is_vgpr else st.sgpr[src0_base + reg]
+      A[lane][reg * 2] = f16(val & 0xffff)
+      A[lane][reg * 2 + 1] = f16((val >> 16) & 0xffff)
+
+  # Gather B matrix from lanes 0-15: lane i holds column i (16 fp16 values in 8 regs)
+  # Note: B[row][col] where lane i holds B[*, i], so we read B transposed then use B[k][col]
+  B = [[0.0] * 16 for _ in range(16)]
+  for lane in range(min(n_lanes, 16)):
+    V = st.vgpr[lane]
+    for reg in range(8):
+      val = V[src1_base + reg] if src1_is_vgpr else st.sgpr[src1_base + reg]
+      # lane holds column 'lane' of B, values are B[0..15][lane]
+      B[reg * 2][lane] = f16(val & 0xffff)
+      B[reg * 2 + 1][lane] = f16((val >> 16) & 0xffff)
+
+  # Gather C accumulator: output i (row*16+col) is in lane (i%32), reg (i//32)
+  C = [[0.0] * 16 for _ in range(16)]
+  for row in range(16):
+    for col in range(16):
+      idx = row * 16 + col
+      lane, reg = idx % 32, idx // 32
+      if lane < n_lanes:
+        V = st.vgpr[lane]
+        val = V[src2_base + reg] if src2_is_vgpr else st.sgpr[src2_base + reg]
+        C[row][col] = f32(val)
+
+  # Compute matrix multiply: C += A @ B
+  for row in range(16):
+    for col in range(16):
+      for k in range(16):
+        C[row][col] += A[row][k] * B[k][col]
+
+  # Scatter C back to VGPRs: output i (row*16+col) goes to lane (i%32), reg (i//32)
+  for row in range(16):
+    for col in range(16):
+      idx = row * 16 + col
+      lane, reg = idx % 32, idx // 32
+      if lane < n_lanes and (st.exec_mask & (1 << lane)):
+        st.vgpr[lane][vdst + reg] = i32(C[row][col])
+
 SCALAR = {SOP1: exec_sop1, SOP2: exec_sop2, SOPC: exec_sopc, SOPK: exec_sopk, SOPP: exec_sopp, SMEM: exec_smem}
 VECTOR = {VOP1: exec_vop1, VOP2: exec_vop2, VOP3: exec_vop3, VOP3SD: exec_vop3sd, VOPC: exec_vopc, FLAT: exec_flat, DS: exec_ds, VOPD: exec_vopd, VOP3P: exec_vop3p}
 
@@ -618,6 +775,10 @@ def step_wave(program: Program, st: WaveState, lds: bytearray, n_lanes: int) -> 
     if inst_type is DS:
       for lane in range(n_lanes):
         if exec_mask & (1 << lane): handler(st, inst, lane, lds)
+    elif inst_type is VOP3P and inst.op in (VOP3POp.V_WMMA_F32_16X16X16_F16, VOP3POp.V_WMMA_F32_16X16X16_BF16,
+                                             VOP3POp.V_WMMA_F16_16X16X16_F16, VOP3POp.V_WMMA_BF16_16X16X16_BF16,
+                                             VOP3POp.V_WMMA_I32_16X16X16_IU8, VOP3POp.V_WMMA_I32_16X16X16_IU4):
+      exec_wmma_f32_16x16x16_f16(st, inst, n_lanes)  # WMMA is a wave-level op, handled specially
     else:
       for lane in range(n_lanes):
         if exec_mask & (1 << lane): handler(st, inst, lane)

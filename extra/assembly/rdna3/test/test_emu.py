@@ -667,5 +667,178 @@ class TestMultiWave(unittest.TestCase):
     for i in range(n_threads):
       self.assertEqual(output[i], i, f"Thread {i} didn't execute")
 
+class TestRegressions(unittest.TestCase):
+  """Regression tests for bugs fixed in the emulator."""
+
+  def test_v_fmac_f16(self):
+    """V_FMAC_F16: fused multiply-add for FP16. Regression for VOP2 op 54."""
+    from extra.assembly.rdna3.emu import i16, f16
+    kernel = make_store_kernel([
+      v_mov_b32_e32(v[1], i16(2.0)),  # v1.lo = 2.0 (fp16)
+      v_mov_b32_e32(v[2], i16(3.0)),  # v2.lo = 3.0 (fp16)
+      # v1 = v1 * v2 + v1 = 2.0 * 3.0 + 2.0 = 8.0
+      VOP2(VOP2Op.V_FMAC_F16, v[1], v[1], v[2]),
+    ])
+    out = run_kernel(kernel, n_threads=1)
+    self.assertAlmostEqual(f16(out[0] & 0xffff), 8.0, places=2)
+
+  def test_v_cvt_f64_f32(self):
+    """V_CVT_F64_F32: convert float32 to float64. Regression for VOP1 op 16."""
+    kernel = b''
+    kernel += s_load_b64(s[2:3], s[0:1], soffset=NULL, offset=0).to_bytes()
+    kernel += s_waitcnt(lgkmcnt=0).to_bytes()
+    kernel += v_mov_b32_e32(v[1], i32(3.14159)).to_bytes()
+    kernel += VOP1(VOP1Op.V_CVT_F64_F32, v[4], v[1]).to_bytes()  # v4:v5 = f64(v1)
+    kernel += v_lshlrev_b32_e32(v[3], 3, v[0]).to_bytes()  # offset = tid * 8
+    kernel += global_store_b64(addr=v[3], data=v[4], saddr=s[2]).to_bytes()
+    kernel += s_endpgm().to_bytes()
+    output = (ctypes.c_double * 1)(0.0)
+    output_ptr = ctypes.addressof(output)
+    args = (ctypes.c_uint64 * 1)(output_ptr)
+    args_ptr = ctypes.addressof(args)
+    kernel_buf = (ctypes.c_char * len(kernel))(*kernel)
+    kernel_ptr = ctypes.addressof(kernel_buf)
+    set_valid_mem_ranges({(output_ptr, 8), (args_ptr, 8), (kernel_ptr, len(kernel))})
+    run_asm(kernel_ptr, len(kernel), 1, 1, 1, 1, 1, 1, args_ptr)
+    self.assertAlmostEqual(output[0], 3.14159, places=4)
+
+  def test_v_add_f64(self):
+    """V_ADD_F64: add two float64 values. Regression for VOP3 op 807."""
+    from extra.assembly.rdna3.emu import i64_parts
+    kernel = b''
+    kernel += s_load_b64(s[2:3], s[0:1], soffset=NULL, offset=0).to_bytes()
+    kernel += s_waitcnt(lgkmcnt=0).to_bytes()
+    # Load 1.5 into v1:v2
+    lo, hi = i64_parts(1.5)
+    kernel += v_mov_b32_e32(v[1], lo).to_bytes()
+    kernel += v_mov_b32_e32(v[2], hi).to_bytes()
+    # Load 2.5 into v3:v4
+    lo, hi = i64_parts(2.5)
+    kernel += v_mov_b32_e32(v[3], lo).to_bytes()
+    kernel += v_mov_b32_e32(v[4], hi).to_bytes()
+    # v5:v6 = v1:v2 + v3:v4 = 1.5 + 2.5 = 4.0
+    kernel += VOP3(VOP3Op.V_ADD_F64, v[5], v[1], v[3]).to_bytes()
+    kernel += v_lshlrev_b32_e32(v[7], 3, v[0]).to_bytes()
+    kernel += global_store_b64(addr=v[7], data=v[5], saddr=s[2]).to_bytes()
+    kernel += s_endpgm().to_bytes()
+    output = (ctypes.c_double * 1)(0.0)
+    output_ptr = ctypes.addressof(output)
+    args = (ctypes.c_uint64 * 1)(output_ptr)
+    args_ptr = ctypes.addressof(args)
+    kernel_buf = (ctypes.c_char * len(kernel))(*kernel)
+    kernel_ptr = ctypes.addressof(kernel_buf)
+    set_valid_mem_ranges({(output_ptr, 8), (args_ptr, 8), (kernel_ptr, len(kernel))})
+    run_asm(kernel_ptr, len(kernel), 1, 1, 1, 1, 1, 1, args_ptr)
+    self.assertAlmostEqual(output[0], 4.0, places=10)
+
+  def test_flat_load_d16_hi_b16(self):
+    """FLAT_LOAD_D16_HI_B16: load 16-bit to high half. Regression for FLAT op 35."""
+    from extra.assembly.rdna3.emu import i16
+    # Create a buffer with test data
+    src_data = (ctypes.c_uint16 * 1)(0x1234)
+    src_ptr = ctypes.addressof(src_data)
+    output = (ctypes.c_uint32 * 1)(0xABCD0000)  # preset low bits
+    output_ptr = ctypes.addressof(output)
+    args = (ctypes.c_uint64 * 2)(output_ptr, src_ptr)
+    args_ptr = ctypes.addressof(args)
+
+    kernel = b''
+    kernel += s_load_b128(s[0:3], s[0:1], soffset=NULL, offset=0).to_bytes()
+    kernel += s_waitcnt(lgkmcnt=0).to_bytes()
+    kernel += v_mov_b32_e32(v[1], 0xDEAD).to_bytes()  # initial value with low bits set
+    kernel += v_mov_b32_e32(v[2], 0).to_bytes()  # offset = 0
+    kernel += FLAT(FLATOp.FLAT_LOAD_D16_HI_B16, v[1], v[2], saddr=s[2], offset=0).to_bytes()
+    kernel += s_waitcnt(vmcnt=0).to_bytes()
+    kernel += v_lshlrev_b32_e32(v[3], 2, v[0]).to_bytes()
+    kernel += global_store_b32(addr=v[3], data=v[1], saddr=s[0]).to_bytes()
+    kernel += s_endpgm().to_bytes()
+
+    kernel_buf = (ctypes.c_char * len(kernel))(*kernel)
+    kernel_ptr = ctypes.addressof(kernel_buf)
+    set_valid_mem_ranges({(output_ptr, 4), (src_ptr, 2), (args_ptr, 16), (kernel_ptr, len(kernel))})
+    run_asm(kernel_ptr, len(kernel), 1, 1, 1, 1, 1, 1, args_ptr)
+    # High 16 bits should be 0x1234, low 16 bits preserved as 0xDEAD
+    self.assertEqual(output[0], 0x1234DEAD)
+
+  def test_v_mad_u16(self):
+    """V_MAD_U16: multiply-add unsigned 16-bit. Regression for VOP3 op 577."""
+    kernel = make_store_kernel([
+      v_mov_b32_e32(v[1], 10),  # a = 10
+      v_mov_b32_e32(v[2], 20),  # b = 20
+      v_mov_b32_e32(v[4], 5),   # c = 5
+      VOP3(VOP3Op.V_MAD_U16, v[1], v[1], v[2], v[4]),  # v1 = 10*20+5 = 205
+    ])
+    out = run_kernel(kernel, n_threads=1)
+    self.assertEqual(out[0] & 0xffff, 205)
+
+  def test_v_lshrrev_b16(self):
+    """V_LSHRREV_B16: logical shift right 16-bit. Regression for VOP3 op 825."""
+    kernel = make_store_kernel([
+      v_mov_b32_e32(v[1], 0x8000),  # value to shift
+      v_mov_b32_e32(v[2], 4),       # shift amount
+      VOP3(VOP3Op.V_LSHRREV_B16, v[1], v[2], v[1]),  # v1 = 0x8000 >> 4 = 0x0800
+    ])
+    out = run_kernel(kernel, n_threads=1)
+    self.assertEqual(out[0] & 0xffff, 0x0800)
+
+  def test_v_min_u16(self):
+    """V_MIN_U16: minimum of two unsigned 16-bit values. Regression for VOP3 op 779."""
+    kernel = make_store_kernel([
+      v_mov_b32_e32(v[1], 100),
+      v_mov_b32_e32(v[2], 50),
+      VOP3(VOP3Op.V_MIN_U16, v[1], v[1], v[2]),
+    ])
+    out = run_kernel(kernel, n_threads=1)
+    self.assertEqual(out[0] & 0xffff, 50)
+
+class TestWMMA(unittest.TestCase):
+  """Tests for WMMA (Wave Matrix Multiply Accumulate) instructions."""
+
+  def test_wmma_f32_16x16x16_f16_identity(self):
+    """V_WMMA_F32_16X16X16_F16 with identity matrix. Regression for VOP3P op 64."""
+    from extra.assembly.rdna3.emu import i16, f16, exec_wmma_f32_16x16x16_f16, WaveState
+    # Test using direct emulator call rather than full kernel to simplify
+    st = WaveState()
+    st.exec_mask = 0xffffffff  # all 32 lanes active
+
+    # Set up A as identity matrix: A[i][i] = 1.0, rest = 0.0
+    # Lane i holds row i of A in 8 regs (2 fp16 per reg)
+    for lane in range(16):
+      for reg in range(8):
+        col0, col1 = reg * 2, reg * 2 + 1
+        val0 = i16(1.0) if col0 == lane else 0
+        val1 = i16(1.0) if col1 == lane else 0
+        st.vgpr[lane][0 + reg] = val0 | (val1 << 16)  # src0 = v0:v7
+
+    # Set up B as identity matrix: lane i holds column i of B
+    for lane in range(16):
+      for reg in range(8):
+        row0, row1 = reg * 2, reg * 2 + 1
+        val0 = i16(1.0) if row0 == lane else 0
+        val1 = i16(1.0) if row1 == lane else 0
+        st.vgpr[lane][8 + reg] = val0 | (val1 << 16)  # src1 = v8:v15
+
+    # Set up C as zeros
+    for lane in range(32):
+      for reg in range(8):
+        st.vgpr[lane][16 + reg] = 0  # src2 = v16:v23
+
+    # Create a fake VOP3P instruction
+    inst = VOP3P(VOP3POp.V_WMMA_F32_16X16X16_F16, v[24], src0=256+0, src1=256+8, src2=256+16)
+
+    # Execute WMMA
+    exec_wmma_f32_16x16x16_f16(st, inst, 32)
+
+    # Check result: C should be identity (since A @ B where both are identity)
+    # Output i = row*16+col goes to lane (i%32), reg (i//32)
+    for row in range(16):
+      for col in range(16):
+        idx = row * 16 + col
+        lane, reg = idx % 32, idx // 32
+        result = st.vgpr[lane][24 + reg]
+        expected = 1.0 if row == col else 0.0
+        self.assertAlmostEqual(f32(result), expected, places=3,
+          msg=f"C[{row},{col}] = {f32(result)}, expected {expected}")
+
 if __name__ == "__main__":
   unittest.main()

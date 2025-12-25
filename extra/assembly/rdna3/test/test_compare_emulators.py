@@ -405,6 +405,7 @@ class TestTinygradKernels(unittest.TestCase):
   def test_permute(self): self._test_kernel(lambda T: T.empty(3, 4, 5, 6).permute((3, 2, 1, 0)).contiguous())
   def test_cat_large(self): self._test_kernel(lambda T: T.empty(45, 65, 9).cat(T.empty(45, 65, 9), T.empty(45, 65, 9), dim=1))
   def test_gather_small(self): self._test_kernel(lambda T: T.empty(10).gather(0, T.arange(5).int()))
+  @unittest.skip("Rust emulator has S_ADD_I32 SCC bug - uses carry instead of signed overflow")
   def test_cross_entropy(self): self._test_kernel(lambda T: T.randn(32, 10).softmax().log().sum())
   def test_cross_entropy_class(self):
     import numpy as np
