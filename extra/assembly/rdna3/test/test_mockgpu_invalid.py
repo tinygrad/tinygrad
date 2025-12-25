@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Test that invalid instructions raise exceptions through the mock GPU stack."""
-import unittest, subprocess, os
+import unittest, subprocess, os, time
 
 class TestMockGPUInvalidInstruction(unittest.TestCase):
   def test_unsupported_instruction_raises(self):
-    """Test that unsupported instructions raise through the full MOCKGPU stack."""
+    """Test that unsupported instructions raise immediately through the full MOCKGPU stack."""
     test_code = '''
 import struct
 from tinygrad import Device, Tensor
@@ -39,11 +39,16 @@ dev.synchronize()
     env["AMD"] = "1"
     env["MOCKGPU"] = "1"
     env["PYTHON_REMU"] = "1"
-    env["HCQDEV_WAIT_TIMEOUT_MS"] = "1000"
+    env["HCQDEV_WAIT_TIMEOUT_MS"] = "10000"
 
+    st = time.perf_counter()
     result = subprocess.run(["python", "-c", test_code], env=env, capture_output=True, text=True, timeout=60)
+    elapsed = time.perf_counter() - st
+
     self.assertNotEqual(result.returncode, 0, "should have raised")
     self.assertIn("NotImplementedError", result.stderr)
+    # Should exit immediately, not wait for the full timeout
+    self.assertLess(elapsed, 5.0, f"should exit immediately on emulator exception, took {elapsed:.1f}s")
 
 if __name__ == "__main__":
   unittest.main()

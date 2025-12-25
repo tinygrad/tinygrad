@@ -214,6 +214,8 @@ def exec_sopp(st: WaveState, inst: SOPP) -> int:
   if inst.op == SOPPOp.S_CBRANCH_EXECNZ: return sext(inst.simm16, 16) if st.exec_mask != 0 else 0
   # Scheduling hints and wait instructions are no-ops in emulation
   if inst.op <= 31: return 0  # S_NOP, S_CLAUSE, S_DELAY_ALU, S_WAITCNT, etc.
+  # S_WAKEUP(52), S_SETPRIO(53), S_SENDMSG(54), S_SENDMSGHALT(55), perf counters, S_ICACHE_INV(60) are no-ops
+  if inst.op in (52, 53, 54, 55, 56, 57, 60): return 0
   raise NotImplementedError(f"SOPP op {inst.op}")
 
 def exec_smem(st: WaveState, inst: SMEM) -> int:
