@@ -1,6 +1,6 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR, _IO_NOSZ
 dll = DLL('opencl', 'OpenCL')
 class struct__cl_platform_id(Struct): pass
 cl_platform_id = ctypes.POINTER(struct__cl_platform_id)

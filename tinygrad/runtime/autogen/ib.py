@@ -1,6 +1,6 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR, _IO_NOSZ
 dll = DLL('ib', 'ibverbs', use_errno=True)
 class union_ibv_gid(ctypes.Union): pass
 uint8_t = ctypes.c_ubyte

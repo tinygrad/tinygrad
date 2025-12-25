@@ -1,6 +1,6 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR, _IO_NOSZ
 class struct_kfd_ioctl_get_version_args(Struct): pass
 __u32 = ctypes.c_uint32
 struct_kfd_ioctl_get_version_args._fields_ = [
