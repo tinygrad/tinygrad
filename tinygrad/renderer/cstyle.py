@@ -382,8 +382,8 @@ class CUDARenderer(CStyleLanguage):
   shared_max = 49152
 
   def __init__(self, arch:str):
-    self.arch = arch
-    self.tensor_cores = tc.cuda_sm89 if int(arch[3:]) >= 89 else tc.cuda_sm80 if int(arch[3:]) >= 80 else tc.cuda_sm75 if int(arch[3:]) >= 75 else []
+    self.arch, arch_ver = arch, int(arch[3:])
+    self.tensor_cores = tc.cuda_sm89 if arch_ver >= 89 else tc.cuda_sm80 if arch_ver >= 80 else tc.cuda_sm75 if arch_ver >= 75 else []
   def __reduce__(self): return self.__class__, (self.arch,)
 
   # language options
