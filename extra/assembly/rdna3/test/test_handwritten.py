@@ -3,16 +3,18 @@
 
 import unittest
 from extra.assembly.rdna3.autogen import *
+from extra.assembly.rdna3.lib import Inst
 from extra.assembly.rdna3.asm import asm
 from extra.assembly.rdna3.test.test_roundtrip import compile_asm
 
 class TestIntegration(unittest.TestCase):
+  inst: Inst
   def tearDown(self):
     if not hasattr(self, 'inst'): return
     b = self.inst.to_bytes()
     st = self.inst.disasm()
     reasm = asm(st)
-    desc = f"{st:25s} {self.inst} {b} {reasm}"
+    desc = f"{st:25s} {self.inst} {b!r} {reasm}"
     self.assertEqual(b, compile_asm(st), desc)
     # TODO: this compare should work for valid things
     #self.assertEqual(self.inst, reasm)

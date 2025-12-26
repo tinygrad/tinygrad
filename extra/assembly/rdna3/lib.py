@@ -42,12 +42,23 @@ bits = _Bits()
 class Reg:
   def __init__(self, idx: int, count: int = 1, hi: bool = False): self.idx, self.count, self.hi = idx, count, hi
   def __repr__(self): return f"{self.__class__.__name__.lower()[0]}[{self.idx}]" if self.count == 1 else f"{self.__class__.__name__.lower()[0]}[{self.idx}:{self.idx + self.count}]"
-  @classmethod
-  def __class_getitem__(cls, key): return cls(key.start, key.stop - key.start) if isinstance(key, slice) else cls(key)
+
+class _RegFactory[T: Reg]:
+  def __init__(self, cls: type[T], name: str): self._cls, self._name = cls, name
+  @overload
+  def __getitem__(self, key: int) -> Reg: ...
+  @overload
+  def __getitem__(self, key: slice) -> Reg: ...
+  def __getitem__(self, key: int | slice) -> Reg:
+    return self._cls(key.start, key.stop - key.start) if isinstance(key, slice) else self._cls(key)
+  def __repr__(self): return f"<{self._name} factory>"
+
 class SGPR(Reg): pass
 class VGPR(Reg): pass
 class TTMP(Reg): pass
-s, v = SGPR, VGPR
+s: _RegFactory[SGPR] = _RegFactory(SGPR, "SGPR")
+v: _RegFactory[VGPR] = _RegFactory(VGPR, "VGPR")
+ttmp: _RegFactory[TTMP] = _RegFactory(TTMP, "TTMP")
 
 # Field type markers (runtime classes for validation)
 class _SSrc: pass
@@ -96,6 +107,8 @@ class Inst:
   _encoding: tuple[BitField, int] | None = None
   _defaults: dict[str, int] = {}
   _values: dict[str, int | RawImm]
+  _words: int  # size in 32-bit words, set by decode_program
+  _literal: int | None
 
   def __init_subclass__(cls, **kwargs):
     super().__init_subclass__(**kwargs)
