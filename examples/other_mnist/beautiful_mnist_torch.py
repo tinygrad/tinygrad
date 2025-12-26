@@ -1,8 +1,12 @@
-from tinygrad import dtypes, getenv, Device
+from tinygrad import dtypes, getenv, Device, Tensor, TinyJit
 from tinygrad.helpers import trange, colored, DEBUG, temp
 from tinygrad.nn.datasets import mnist
 import torch
 from torch import nn, optim
+
+from extra.torch_backend.backend import unwrap, wrap
+from torch._dynamo.backends.registry import register_backend
+from torch._functorch.aot_autograd import aot_module_simplified
 
 class Model(nn.Module):
   def __init__(self):
@@ -25,6 +29,23 @@ class Model(nn.Module):
     x = self.m2(self.bn2(x))
     return self.lin(torch.flatten(x, 1))
 
+
+@register_backend
+def tiny(gm:torch.fx.GraphModule, sample_inputs):
+  def my_compiler(gm:torch.fx.GraphModule, sample_inputs):
+    # TODO: the jit should capture the graph directly, not need three runs. this is a planned tinygrad refactor after becomes_map
+    @TinyJit
+    def tiny_function(*args:Tensor):
+      outs = gm(*[wrap(x) for x in args])
+      for x in outs: unwrap(x).realize()
+      return outs
+    # TODO: this should be able to pass in .tiny() Tensors, not need to convert them. it tries to access Storage if you pass in.
+    def torch_function(*args:torch.Tensor): return tiny_function(*[unwrap(x.tiny()) for x in args])
+    return torch_function
+  return aot_module_simplified(gm, sample_inputs, decompositions={}, fw_compiler=my_compiler)
+
+
+
 if __name__ == "__main__":
   if getenv("TINY_BACKEND"):
     import tinygrad.nn.torch  # noqa: F401
@@ -43,7 +64,12 @@ if __name__ == "__main__":
   optimizer = optim.Adam(model.parameters(), 1e-3)
 
   loss_fn = nn.CrossEntropyLoss()
-  #@torch.compile
+
+  # Use "tiny" if we have "TINY_BACKEND" otherwise the default PyTorch's "inductor"
+  compile_backend = "tiny" if getenv("TINY_BACKEND") else "inductor"
+
+
+  @torch.compile(backend=compile_backend)
   def step(samples):
     X,Y = X_train[samples], Y_train[samples]
     out = model(X)
