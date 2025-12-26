@@ -66,6 +66,7 @@ global_store_b32 v[0:1], v2, off
 s_endpgm
 """
     expected = llvm_assemble(asm)
+    for inst,rt in zip(program, asm.strip().split("\n")): print(f"{inst.disasm():50s} {rt}")
     actual = b''.join(inst.to_bytes() for inst in program)
     self.assertEqual(actual, expected)
 

@@ -1,6 +1,5 @@
 # library for RDNA3 assembly DSL
 from __future__ import annotations
-import re
 from enum import IntEnum
 
 # Bit field DSL
@@ -24,7 +23,7 @@ bits = _Bits()
 
 # Register types
 class Reg:
-  def __init__(self, idx: int, count: int = 1): self.idx, self.count = idx, count
+  def __init__(self, idx: int, count: int = 1, hi: bool = False): self.idx, self.count, self.hi = idx, count, hi
   def __repr__(self): return f"{self.__class__.__name__.lower()[0]}[{self.idx}]" if self.count == 1 else f"{self.__class__.__name__.lower()[0]}[{self.idx}:{self.idx + self.count}]"
   @classmethod
   def __class_getitem__(cls, key): return cls(key.start, key.stop - key.start) if isinstance(key, slice) else cls(key)
@@ -38,39 +37,35 @@ class SSrc: pass
 class Src: pass
 class Imm: pass
 class SImm: pass
+class VDSTYEnc: pass  # VOPD vdsty: encoded = actual >> 1, actual = (encoded << 1) | ((vdstx & 1) ^ 1)
 class RawImm:
   def __init__(self, val: int): self.val = val
+  def __repr__(self): return f"RawImm({self.val})"
+  def __eq__(self, other): return isinstance(other, RawImm) and self.val == other.val
 
 def unwrap(val) -> int:
   return val.val if isinstance(val, RawImm) else val.value if hasattr(val, 'value') else val.idx if hasattr(val, 'idx') else val
 
 # Encoding helpers
 FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
-SRC_FIELDS = {'src0', 'src1', 'src2', 'ssrc0', 'ssrc1', 'soffset'}
+SRC_FIELDS = {'src0', 'src1', 'src2', 'ssrc0', 'ssrc1', 'soffset', 'srcx0', 'srcy0'}
 RAW_FIELDS = {'vdata', 'vdst', 'vaddr', 'addr', 'data', 'data0', 'data1', 'sdst', 'sdata'}
 
 def encode_src(val) -> int:
-  if isinstance(val, SGPR): return val.idx
-  if isinstance(val, VGPR): return 256 + val.idx
+  if isinstance(val, SGPR): return val.idx | (0x80 if val.hi else 0)
+  if isinstance(val, VGPR): return 256 + val.idx + (0x80 if val.hi else 0)
   if isinstance(val, TTMP): return 108 + val.idx
   if hasattr(val, 'value'): return val.value
-  if isinstance(val, float): return FLOAT_ENC.get(val, 255)
+  if isinstance(val, float):
+    if val == 0.0: return 128  # 0.0 encodes as integer constant 0
+    return FLOAT_ENC.get(val, 255)
   return 128 + val if isinstance(val, int) and 0 <= val <= 64 else 192 + (-val) if isinstance(val, int) and -16 <= val <= -1 else 255
-
-SPECIAL_DEC = {106: "vcc_lo", 107: "vcc_hi", 124: "null", 125: "m0", 126: "exec_lo", 127: "exec_hi", **{v: str(k) for k, v in FLOAT_ENC.items()}}
-def decode_src(val: int) -> str:
-  if val <= 105: return f"s{val}"
-  if val in SPECIAL_DEC: return SPECIAL_DEC[val]
-  if 108 <= val <= 123: return f"ttmp{val - 108}"
-  if 128 <= val <= 192: return str(val - 128)
-  if 193 <= val <= 208: return str(-(val - 192))
-  if 256 <= val <= 511: return f"v{val - 256}"
-  return "lit" if val == 255 else f"?{val}"
 
 # Instruction base class
 class Inst:
   _fields: dict[str, BitField]
   _encoding: tuple[BitField, int] | None = None
+  _defaults: dict[str, int] = {}
 
   def __init_subclass__(cls, **kwargs):
     super().__init_subclass__(**kwargs)
@@ -78,14 +73,58 @@ class Inst:
     if 'encoding' in cls._fields and isinstance(cls.__dict__.get('encoding'), tuple): cls._encoding = cls.__dict__['encoding']
 
   def __init__(self, *args, literal: int | None = None, **kwargs):
-    self._values, self._literal = dict(zip([n for n in self._fields if n != 'encoding'], args)), literal
+    self._values, self._literal = dict(self._defaults), literal
+    self._values.update(zip([n for n in self._fields if n != 'encoding'], args))
     self._values.update(kwargs)
+    # Get annotations from class hierarchy
+    annotations = {}
+    for cls in type(self).__mro__:
+      annotations.update(getattr(cls, '__annotations__', {}))
+    # Type check and encode values
+    for name, val in list(self._values.items()):
+      if name == 'encoding': continue
+      # For RawImm, only process RAW_FIELDS to unwrap to int
+      if isinstance(val, RawImm):
+        if name in RAW_FIELDS: self._values[name] = val.val
+        continue
+      ann = annotations.get(name)
+      # Type validation
+      if ann is SGPR:
+        if isinstance(val, VGPR): raise TypeError(f"field '{name}' requires SGPR, got VGPR")
+        if not isinstance(val, (SGPR, TTMP, int, RawImm)): raise TypeError(f"field '{name}' requires SGPR, got {type(val).__name__}")
+      if ann is VGPR:
+        if not isinstance(val, VGPR): raise TypeError(f"field '{name}' requires VGPR, got {type(val).__name__}")
+      if ann is SSrc and isinstance(val, VGPR): raise TypeError(f"field '{name}' requires scalar source, got VGPR")
+      # Encode source fields as RawImm for consistent disassembly
+      if name in SRC_FIELDS:
+        encoded = encode_src(val)
+        self._values[name] = RawImm(encoded)
+        # Track literal value if needed (encoded as 255)
+        if encoded == 255 and self._literal is None and isinstance(val, int) and not isinstance(val, IntEnum):
+          self._literal = val
+      # Encode raw register fields for consistent repr
+      elif name in RAW_FIELDS:
+        if isinstance(val, Reg):
+          self._values[name] = (108 + val.idx) if isinstance(val, TTMP) else (val.idx | (0x80 if val.hi else 0))
+        elif hasattr(val, 'value'):  # IntEnum like SrcEnum.NULL
+          self._values[name] = val.value
+      # Encode sbase (divided by 2) and srsrc/ssamp (divided by 4)
+      elif name == 'sbase' and isinstance(val, Reg):
+        self._values[name] = val.idx // 2
+      elif name in {'srsrc', 'ssamp'} and isinstance(val, Reg):
+        self._values[name] = val.idx // 4
+      # VOPD vdsty: encode as actual >> 1 (constraint: vdsty parity must be opposite of vdstx)
+      elif ann is VDSTYEnc and isinstance(val, VGPR):
+        self._values[name] = val.idx >> 1
 
   def _encode_field(self, name: str, val) -> int:
     if isinstance(val, RawImm): return val.val
     if name in {'srsrc', 'ssamp'}: return val.idx // 4 if isinstance(val, Reg) else val
     if name == 'sbase': return val.idx // 2 if isinstance(val, Reg) else val
-    if name in RAW_FIELDS: return (108 + val.idx if isinstance(val, TTMP) else val.idx) if isinstance(val, Reg) else val
+    if name in RAW_FIELDS:
+      if isinstance(val, TTMP): return 108 + val.idx
+      if isinstance(val, Reg): return val.idx | (0x80 if val.hi else 0)
+      return val
     if isinstance(val, Reg) or name in SRC_FIELDS: return encode_src(val)
     return val.value if hasattr(val, 'value') else val
 
@@ -120,30 +159,23 @@ class Inst:
     inst = cls.from_int(int.from_bytes(data[:cls._size()], 'little'))
     op_val = inst._values.get('op', 0)
     has_literal = cls.__name__ == 'VOP2' and op_val in (44, 45, 55, 56)
-    has_literal = has_literal or (cls.__name__ == 'SOP2' and op_val in (69, 70))  # S_FMAAK_F32, S_FMAMK_F32
+    has_literal = has_literal or (cls.__name__ == 'SOP2' and op_val in (69, 70))
     for n in SRC_FIELDS:
       if n in inst._values and isinstance(inst._values[n], RawImm) and inst._values[n].val == 255: has_literal = True
     if has_literal and len(data) >= cls._size() + 4: inst._literal = int.from_bytes(data[cls._size():cls._size()+4], 'little')
     return inst
 
-  def __repr__(self): return f"{self.__class__.__name__}({', '.join(f'{k}={v}' for k, v in self._values.items())})"
+  def __repr__(self):
+    # Use _fields order and exclude fields that are 0/default (for consistent repr after roundtrip)
+    def is_zero(v): return (isinstance(v, int) and v == 0) or (isinstance(v, VGPR) and v.idx == 0 and v.count == 1)
+    items = [(k, self._values[k]) for k in self._fields if k in self._values and k != 'encoding'
+             and not (is_zero(self._values[k]) and k not in {'op'})]
+    lit = f", literal={hex(self._literal)}" if self._literal is not None else ""
+    return f"{self.__class__.__name__}({', '.join(f'{k}={v}' for k, v in items)}{lit})"
 
   def disasm(self) -> str:
-    op_val = unwrap(self._values.get('op', 0))
-    try:
-      from extra.assembly.rdna3 import autogen
-      op_name = getattr(autogen, f"{self.__class__.__name__}Op")(op_val).name.lower() if hasattr(autogen, f"{self.__class__.__name__}Op") else f"op_{op_val}"
-    except (ValueError, KeyError): op_name = f"op_{op_val}"
-    def fmt(n, v):
-      v = unwrap(v)
-      if n in SRC_FIELDS: return f"0x{self._literal:x}" if v == 255 and getattr(self, '_literal', None) else decode_src(v) if v != 255 else "0xff"
-      if n in ('sdst', 'vdst'): return f"{'s' if n == 'sdst' else 'v'}{v}"
-      return f"v{v}" if n == 'vsrc1' else f"0x{v:x}" if n == 'simm16' else str(v)
-    ops = [fmt(n, self._values.get(n, 0)) for n in self._fields if n not in ('encoding', 'op')]
-    if self.__class__.__name__ == 'VOP2' and getattr(self, '_literal', None) and op_val in (44, 45, 55, 56):
-      lit_str = f"0x{self._literal:x}"
-      ops.insert(2, lit_str) if op_val in (44, 55) else ops.append(lit_str)
-    return f"{op_name} {', '.join(ops)}" if ops else op_name
+    from extra.assembly.rdna3.asm import disasm
+    return disasm(self)
 
 class Inst32(Inst): pass
 class Inst64(Inst):
@@ -152,89 +184,3 @@ class Inst64(Inst):
     return result + (lit & 0xffffffff).to_bytes(4, 'little') if (lit := self._get_literal() or getattr(self, '_literal', None)) else result
   @classmethod
   def from_bytes(cls, data: bytes): return cls.from_int(int.from_bytes(data[:8], 'little'))
-
-# Waitcnt helpers
-def waitcnt(vmcnt: int = 0x7f, expcnt: int = 0x7, lgkmcnt: int = 0x3f) -> int:
-  return (vmcnt & 0xf) | ((expcnt & 0x7) << 4) | (((vmcnt >> 4) & 0x7) << 7) | ((lgkmcnt & 0x3f) << 10)
-def decode_waitcnt(val: int) -> tuple[int, int, int]:
-  return (val & 0xf) | (((val >> 7) & 0x7) << 4), (val >> 4) & 0x7, (val >> 10) & 0x3f
-
-# Assembler
-SPECIAL_REGS = {'vcc_lo': RawImm(106), 'vcc_hi': RawImm(107), 'null': RawImm(124), 'off': RawImm(124), 'm0': RawImm(125), 'exec_lo': RawImm(126), 'exec_hi': RawImm(127), 'scc': RawImm(253)}
-FLOAT_CONSTS = {'0.5': 0.5, '-0.5': -0.5, '1.0': 1.0, '-1.0': -1.0, '2.0': 2.0, '-2.0': -2.0, '4.0': 4.0, '-4.0': -4.0}
-REG_MAP = {'s': SGPR, 'v': VGPR, 't': TTMP, 'ttmp': TTMP}
-
-def parse_operand(op: str) -> tuple:
-  op = op.strip().lower()
-  neg = op.startswith('-') and not op[1:2].isdigit(); op = op[1:] if neg else op
-  abs_ = op.startswith('|') and op.endswith('|') or op.startswith('abs(') and op.endswith(')')
-  op = op[1:-1] if op.startswith('|') else op[4:-1] if op.startswith('abs(') else op
-  if op in FLOAT_CONSTS: return (FLOAT_CONSTS[op], neg, abs_)
-  if re.match(r'^-?\d+$', op): return (int(op), neg, abs_)
-  if m := re.match(r'^-?0x([0-9a-f]+)$', op):
-    v = -int(m.group(1), 16) if op.startswith('-') else int(m.group(1), 16)
-    return (v, neg, abs_)  # let encode_src handle inline vs literal
-  if op in SPECIAL_REGS: return (SPECIAL_REGS[op], neg, abs_)
-  if m := re.match(r'^([svt](?:tmp)?)\[(\d+):(\d+)\]$', op): return (REG_MAP[m.group(1)][int(m.group(2)):int(m.group(3))+1], neg, abs_)
-  if m := re.match(r'^([svt](?:tmp)?)(\d+)$', op): return (REG_MAP[m.group(1)][int(m.group(2))], neg, abs_)
-  raise ValueError(f"cannot parse operand: {op}")
-
-SMEM_OPS = {'s_load_b32', 's_load_b64', 's_load_b128', 's_load_b256', 's_load_b512',
-            's_buffer_load_b32', 's_buffer_load_b64', 's_buffer_load_b128', 's_buffer_load_b256', 's_buffer_load_b512'}
-SOP1_SRC_ONLY = {'s_setpc_b64', 's_rfe_b64'}  # instructions with ssrc0 only, no sdst
-SOP1_MSG_IMM = {'s_sendmsg_rtn_b32', 's_sendmsg_rtn_b64'}  # instructions with raw immediate in ssrc0
-SOPK_IMM_ONLY = {'s_version'}  # instructions with simm16 only, no sdst
-SOPK_IMM_FIRST = {'s_setreg_b32'}  # instructions where simm16 comes before sdst
-SOPK_UNSUPPORTED = {'s_setreg_imm32_b32'}  # special 64-bit SOPK format
-
-def asm(text: str) -> Inst:
-  from extra.assembly.rdna3 import autogen
-  text = text.strip()
-  clamp = 'clamp' in text.lower()
-  if clamp: text = re.sub(r'\s+clamp\s*$', '', text, flags=re.I)
-  parts = text.replace(',', ' ').split()
-  if not parts: raise ValueError("empty instruction")
-  mnemonic, op_str = parts[0].lower(), text[len(parts[0]):].strip()
-  operands, current, depth, in_pipe = [], "", 0, False
-  for ch in op_str:
-    if ch == '[': depth += 1
-    elif ch == ']': depth -= 1
-    elif ch == '|': in_pipe = not in_pipe
-    if ch == ',' and depth == 0 and not in_pipe: operands.append(current.strip()); current = ""
-    else: current += ch
-  if current.strip(): operands.append(current.strip())
-  parsed = [parse_operand(op) for op in operands]
-  values = [p[0] for p in parsed]
-  neg_bits = sum((1 << (i-1)) for i, p in enumerate(parsed) if i > 0 and p[1])
-  abs_bits = sum((1 << (i-1)) for i, p in enumerate(parsed) if i > 0 and p[2])
-  lit = None
-  if mnemonic in ('v_fmaak_f32', 'v_fmaak_f16') and len(values) == 4: lit, values = unwrap(values[3]), values[:3]
-  elif mnemonic in ('v_fmamk_f32', 'v_fmamk_f16') and len(values) == 4: lit, values = unwrap(values[2]), [values[0], values[1], values[3]]
-  # Unsupported instructions
-  if mnemonic in SOPK_UNSUPPORTED: raise ValueError(f"unsupported instruction: {mnemonic}")
-  # SOP1 source-only instructions (no destination)
-  elif mnemonic in SOP1_SRC_ONLY:
-    return getattr(autogen, mnemonic)(ssrc0=values[0])
-  # SOP1 instructions with raw immediate message ID
-  elif mnemonic in SOP1_MSG_IMM:
-    return getattr(autogen, mnemonic)(sdst=values[0], ssrc0=RawImm(unwrap(values[1])))
-  # SOPK immediate-only instructions (no destination)
-  elif mnemonic in SOPK_IMM_ONLY:
-    return getattr(autogen, mnemonic)(simm16=values[0])
-  # SOPK instructions with simm16 before sdst
-  elif mnemonic in SOPK_IMM_FIRST:
-    return getattr(autogen, mnemonic)(simm16=values[0], sdst=values[1])
-  # SMEM: when third operand is immediate, use it as offset with soffset=NULL
-  elif mnemonic in SMEM_OPS and len(operands) >= 3 and re.match(r'^-?[0-9]|^-?0x', operands[2].strip().lower()):
-    return getattr(autogen, mnemonic)(sdata=values[0], sbase=values[1], offset=values[2], soffset=RawImm(124))
-  # MUBUF: when vaddr is 'off', use 0 instead of NULL
-  elif mnemonic.startswith('buffer_') and len(operands) >= 2 and operands[1].strip().lower() == 'off':
-    return getattr(autogen, mnemonic)(vdata=values[0], vaddr=0, srsrc=values[2], soffset=RawImm(unwrap(values[3])) if len(values) > 3 else RawImm(0))
-  for suffix in (['_e32', ''] if not (neg_bits or abs_bits or clamp) else ['', '_e32']):
-    if hasattr(autogen, name := mnemonic.replace('.', '_') + suffix):
-      inst = getattr(autogen, name)(*values, literal=lit)
-      if neg_bits and 'neg' in inst._fields: inst._values['neg'] = neg_bits
-      if abs_bits and 'abs' in inst._fields: inst._values['abs'] = abs_bits
-      if clamp and 'clmp' in inst._fields: inst._values['clmp'] = 1
-      return inst
-  raise ValueError(f"unknown instruction: {mnemonic}")

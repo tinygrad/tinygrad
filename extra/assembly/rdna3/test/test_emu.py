@@ -8,6 +8,7 @@ from extra.assembly.rdna3.emu import (
   i32, f32, sext, WAVE_SIZE, set_valid_mem_ranges
 )
 from extra.assembly.rdna3.autogen import *
+from extra.assembly.rdna3.lib import RawImm
 
 def run_kernel(kernel: bytes, n_threads: int = 1, n_outputs: int = 1) -> list[int]:
   """Helper to run a kernel and return output values."""
@@ -494,9 +495,9 @@ class TestVOPD(unittest.TestCase):
     state = WaveState()
     state.vgpr[0][1] = 100
     state.vgpr[0][2] = 50
-    # vdsty = (vdsty_enc << 1) | ((vdstx & 1) ^ 1), so for vdstx=3 (odd), vdsty_enc=2 gives vdsty=4
-    kernel = VOPD(opx=VOPDOp.V_DUAL_MOV_B32, srcx0=256+1, vsrcx1=0, vdstx=3,
-                  opy=VOPDOp.V_DUAL_ADD_NC_U32, srcy0=256+1, vsrcy1=2, vdsty=2).to_bytes()
+    # vdsty = (vdsty_enc << 1) | ((vdstx & 1) ^ 1), so for vdstx=3 (odd), vdsty=4 requires VGPR(4)
+    kernel = VOPD(opx=VOPDOp.V_DUAL_MOV_B32, srcx0=v[1], vsrcx1=VGPR(0), vdstx=VGPR(3),
+                  opy=VOPDOp.V_DUAL_ADD_NC_U32, srcy0=v[1], vsrcy1=VGPR(2), vdsty=VGPR(4)).to_bytes()
     kernel += s_endpgm().to_bytes()
     prog = decode_program(kernel)
     exec_wave(prog, state, bytearray(65536), 1)
@@ -508,9 +509,9 @@ class TestVOPD(unittest.TestCase):
     state = WaveState()
     state.vgpr[0][1] = 0x10
     state.vgpr[0][2] = 0
-    # vdsty = (vdsty_enc << 1) | ((vdstx & 1) ^ 1), so for vdstx=3 (odd), vdsty_enc=2 gives vdsty=4
-    kernel = VOPD(opx=VOPDOp.V_DUAL_MOV_B32, srcx0=256+1, vsrcx1=0, vdstx=3,
-                  opy=VOPDOp.V_DUAL_LSHLREV_B32, srcy0=132, vsrcy1=1, vdsty=2).to_bytes()  # V4 = V1 << 4
+    # vdsty = (vdsty_enc << 1) | ((vdstx & 1) ^ 1), so for vdstx=3 (odd), vdsty=4 requires VGPR(4)
+    kernel = VOPD(opx=VOPDOp.V_DUAL_MOV_B32, srcx0=v[1], vsrcx1=VGPR(0), vdstx=VGPR(3),
+                  opy=VOPDOp.V_DUAL_LSHLREV_B32, srcy0=4, vsrcy1=VGPR(1), vdsty=VGPR(4)).to_bytes()  # V4 = V1 << 4
     kernel += s_endpgm().to_bytes()
     prog = decode_program(kernel)
     exec_wave(prog, state, bytearray(65536), 1)
@@ -522,9 +523,9 @@ class TestVOPD(unittest.TestCase):
     state = WaveState()
     state.vgpr[0][1] = 0xff
     state.vgpr[0][2] = 0x0f
-    # vdsty = (vdsty_enc << 1) | ((vdstx & 1) ^ 1), so for vdstx=3 (odd), vdsty_enc=2 gives vdsty=4
-    kernel = VOPD(opx=VOPDOp.V_DUAL_MOV_B32, srcx0=256+1, vsrcx1=0, vdstx=3,
-                  opy=VOPDOp.V_DUAL_AND_B32, srcy0=256+1, vsrcy1=2, vdsty=2).to_bytes()
+    # vdsty = (vdsty_enc << 1) | ((vdstx & 1) ^ 1), so for vdstx=3 (odd), vdsty=4 requires VGPR(4)
+    kernel = VOPD(opx=VOPDOp.V_DUAL_MOV_B32, srcx0=v[1], vsrcx1=VGPR(0), vdstx=VGPR(3),
+                  opy=VOPDOp.V_DUAL_AND_B32, srcy0=v[1], vsrcy1=VGPR(2), vdsty=VGPR(4)).to_bytes()
     kernel += s_endpgm().to_bytes()
     prog = decode_program(kernel)
     exec_wave(prog, state, bytearray(65536), 1)
@@ -539,8 +540,8 @@ class TestVOPD(unittest.TestCase):
     # X: MOV v7, v0 (v0=0, so v7 becomes 0)
     # Y: ADD v6, v4, v7 (should use original v7=5, not the overwritten 0)
     # vdsty_enc=3 with vdstx=7 (odd) -> vdsty = (3 << 1) | (7&1)^1 = 6 | 0 = 6
-    kernel = VOPD(opx=VOPDOp.V_DUAL_MOV_B32, srcx0=256+0, vsrcx1=0, vdstx=7,
-                  opy=VOPDOp.V_DUAL_ADD_NC_U32, srcy0=256+4, vsrcy1=7, vdsty=3).to_bytes()
+    kernel = VOPD(opx=VOPDOp.V_DUAL_MOV_B32, srcx0=v[0], vsrcx1=VGPR(0), vdstx=VGPR(7),
+                  opy=VOPDOp.V_DUAL_ADD_NC_U32, srcy0=v[4], vsrcy1=VGPR(7), vdsty=VGPR(6)).to_bytes()
     kernel += s_endpgm().to_bytes()
     prog = decode_program(kernel)
     exec_wave(prog, state, bytearray(65536), 1)
@@ -552,8 +553,8 @@ class TestDecoder(unittest.TestCase):
     """Regression test: VOPD srcx0/srcy0 with literal (255) wasn't consuming the literal dword."""
     state = WaveState()
     # Create VOPD with srcx0=255 (literal), followed by literal value 0x12345678
-    vopd_bytes = VOPD(opx=8, srcx0=255, vsrcx1=0, vdstx=1,  # MOV: V1 = literal
-                      opy=8, srcy0=128, vsrcy1=0, vdsty=2).to_bytes()  # MOV: V2 = 0
+    vopd_bytes = VOPD(opx=8, srcx0=RawImm(255), vsrcx1=VGPR(0), vdstx=VGPR(1),  # MOV: V1 = literal
+                      opy=8, srcy0=RawImm(128), vsrcy1=VGPR(0), vdsty=VGPR(2)).to_bytes()  # MOV: V2 = 0
     literal_bytes = (0x12345678).to_bytes(4, 'little')
     kernel = vopd_bytes + literal_bytes + s_endpgm().to_bytes()
     prog = decode_program(kernel)
@@ -824,7 +825,7 @@ class TestWMMA(unittest.TestCase):
         st.vgpr[lane][16 + reg] = 0  # src2 = v16:v23
 
     # Create a fake VOP3P instruction
-    inst = VOP3P(VOP3POp.V_WMMA_F32_16X16X16_F16, v[24], src0=256+0, src1=256+8, src2=256+16)
+    inst = VOP3P(VOP3POp.V_WMMA_F32_16X16X16_F16, v[24], src0=VGPR(0), src1=VGPR(8), src2=VGPR(16))
 
     # Execute WMMA
     exec_wmma_f32_16x16x16_f16(st, inst, 32)
