@@ -7,8 +7,8 @@ except (ImportError, FileNotFoundError): llvm = None #type:ignore[assignment]
 
 @functools.lru_cache(None)
 def get_cc():
-  cc = getenv("CC")
-  if cc is not None: return cc, "clang" if "clang" in subprocess.check_output([cc, "--version"]).decode().lower() else "gcc"
+  cc = getenv("CC", "")
+  if cc != "": return cc, "clang" if "clang" in subprocess.check_output([cc, "--version"]).decode().lower() else "gcc"
   for cc in ["clang", "gcc"]:
     try:
       subprocess.check_output([cc, "--version"])
