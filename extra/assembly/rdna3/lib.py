@@ -1,7 +1,7 @@
 # library for RDNA3 assembly DSL
 from __future__ import annotations
 from enum import IntEnum
-from typing import overload, Annotated
+from typing import overload, Annotated, TypeVar, Generic
 
 # Bit field DSL
 class BitField:
@@ -43,7 +43,8 @@ class Reg:
   def __init__(self, idx: int, count: int = 1, hi: bool = False): self.idx, self.count, self.hi = idx, count, hi
   def __repr__(self): return f"{self.__class__.__name__.lower()[0]}[{self.idx}]" if self.count == 1 else f"{self.__class__.__name__.lower()[0]}[{self.idx}:{self.idx + self.count}]"
 
-class _RegFactory[T: Reg]:
+T = TypeVar('T', bound=Reg)
+class _RegFactory(Generic[T]):
   def __init__(self, cls: type[T], name: str): self._cls, self._name = cls, name
   @overload
   def __getitem__(self, key: int) -> Reg: ...
