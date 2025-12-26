@@ -37,6 +37,7 @@ class SSrc: pass
 class Src: pass
 class Imm: pass
 class SImm: pass
+class VDSTYEnc: pass  # VOPD vdsty: encoded = actual >> 1, actual = (encoded << 1) | ((vdstx & 1) ^ 1)
 class RawImm:
   def __init__(self, val: int): self.val = val
   def __repr__(self): return f"RawImm({self.val})"
@@ -47,7 +48,7 @@ def unwrap(val) -> int:
 
 # Encoding helpers
 FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
-SRC_FIELDS = {'src0', 'src1', 'src2', 'ssrc0', 'ssrc1', 'soffset'}
+SRC_FIELDS = {'src0', 'src1', 'src2', 'ssrc0', 'ssrc1', 'soffset', 'srcx0', 'srcy0'}
 RAW_FIELDS = {'vdata', 'vdst', 'vaddr', 'addr', 'data', 'data0', 'data1', 'sdst', 'sdata'}
 
 def encode_src(val) -> int:
@@ -112,6 +113,9 @@ class Inst:
         self._values[name] = val.idx // 2
       elif name in {'srsrc', 'ssamp'} and isinstance(val, Reg):
         self._values[name] = val.idx // 4
+      # VOPD vdsty: encode as actual >> 1 (constraint: vdsty parity must be opposite of vdstx)
+      elif ann is VDSTYEnc and isinstance(val, VGPR):
+        self._values[name] = val.idx >> 1
 
   def _encode_field(self, name: str, val) -> int:
     if isinstance(val, RawImm): return val.val
@@ -163,8 +167,9 @@ class Inst:
 
   def __repr__(self):
     # Use _fields order and exclude fields that are 0/default (for consistent repr after roundtrip)
+    def is_zero(v): return (isinstance(v, int) and v == 0) or (isinstance(v, VGPR) and v.idx == 0 and v.count == 1)
     items = [(k, self._values[k]) for k in self._fields if k in self._values and k != 'encoding'
-             and not (isinstance(self._values[k], int) and self._values[k] == 0 and k not in {'op'})]
+             and not (is_zero(self._values[k]) and k not in {'op'})]
     lit = f", literal={hex(self._literal)}" if self._literal is not None else ""
     return f"{self.__class__.__name__}({', '.join(f'{k}={v}' for k, v in items)}{lit})"
 

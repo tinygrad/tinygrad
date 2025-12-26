@@ -76,5 +76,8 @@ class TestIntegration(unittest.TestCase):
   def test_large_imm(self):
     self.inst = v_mov_b32_e32(v[0], 0x1234)
 
+  def test_dual_mov(self):
+    self.inst = VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_MOV_B32, vdstx=v[0], vdsty=v[1], srcx0=v[2], srcy0=v[4])
+
 if __name__ == "__main__":
   unittest.main()
