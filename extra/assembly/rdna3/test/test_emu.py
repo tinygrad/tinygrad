@@ -16,7 +16,7 @@ def run_kernel(kernel: bytes, n_threads: int = 1, n_outputs: int = 1) -> list[in
   output_ptr = ctypes.addressof(output)
   args = (ctypes.c_uint64 * 1)(output_ptr)
   args_ptr = ctypes.addressof(args)
-  kernel_buf = (ctypes.c_char * len(kernel))(*kernel)
+  kernel_buf = (ctypes.c_char * len(kernel)).from_buffer_copy(kernel)
   kernel_ptr = ctypes.addressof(kernel_buf)
   # Register valid memory ranges for bounds checking
   set_valid_mem_ranges({
@@ -344,7 +344,7 @@ class TestMemory(unittest.TestCase):
     kernel += global_store_b32(addr=v[2], data=v[1], saddr=s[2]).to_bytes()
     kernel += s_endpgm().to_bytes()
 
-    kernel_buf = (ctypes.c_char * len(kernel))(*kernel)
+    kernel_buf = (ctypes.c_char * len(kernel)).from_buffer_copy(kernel)
     kernel_ptr = ctypes.addressof(kernel_buf)
     set_valid_mem_ranges({
       (input_ptr, ctypes.sizeof(input_buf)),
@@ -434,7 +434,7 @@ class TestVOP3(unittest.TestCase):
       v_mov_b32_e32(v[1], i32(5.0)),
       v_mov_b32_e32(v[2], i32(3.0)),
       # v_add_f32 with neg on src1: 5 + (-3) = 2
-      v_add_f32(v[1], v[1], v[2], neg=0b010),
+      v_add_f32_e64(v[1], v[1], v[2], neg=0b010),
     ])
     out = run_kernel(kernel, n_threads=1)
     self.assertEqual(f32(out[0]), 2.0)
@@ -475,7 +475,7 @@ class TestVOP3(unittest.TestCase):
     """Regression test: V_SQRT_F32 should return NaN for negative inputs, not 0."""
     kernel = make_store_kernel([
       v_mov_b32_e32(v[1], i32(-1.0)),
-      v_sqrt_f32(v[1], v[1]),
+      v_sqrt_f32_e32(v[1], v[1]),
     ])
     out = run_kernel(kernel, n_threads=1)
     self.assertTrue(math.isnan(f32(out[0])))
@@ -484,7 +484,7 @@ class TestVOP3(unittest.TestCase):
     """Regression test: V_RSQ_F32 should return NaN for negative inputs, not inf."""
     kernel = make_store_kernel([
       v_mov_b32_e32(v[1], i32(-1.0)),
-      v_rsq_f32(v[1], v[1]),
+      v_rsq_f32_e32(v[1], v[1]),
     ])
     out = run_kernel(kernel, n_threads=1)
     self.assertTrue(math.isnan(f32(out[0])))
@@ -655,7 +655,7 @@ class TestMultiWave(unittest.TestCase):
     kernel += global_store_b32(addr=v[1], data=v[0], saddr=s[2]).to_bytes()
     kernel += s_endpgm().to_bytes()
 
-    kernel_buf = (ctypes.c_char * len(kernel))(*kernel)
+    kernel_buf = (ctypes.c_char * len(kernel)).from_buffer_copy(kernel)
     kernel_ptr = ctypes.addressof(kernel_buf)
     set_valid_mem_ranges({
       (output_ptr, ctypes.sizeof(output)),
@@ -697,7 +697,7 @@ class TestRegressions(unittest.TestCase):
     output_ptr = ctypes.addressof(output)
     args = (ctypes.c_uint64 * 1)(output_ptr)
     args_ptr = ctypes.addressof(args)
-    kernel_buf = (ctypes.c_char * len(kernel))(*kernel)
+    kernel_buf = (ctypes.c_char * len(kernel)).from_buffer_copy(kernel)
     kernel_ptr = ctypes.addressof(kernel_buf)
     set_valid_mem_ranges({(output_ptr, 8), (args_ptr, 8), (kernel_ptr, len(kernel))})
     run_asm(kernel_ptr, len(kernel), 1, 1, 1, 1, 1, 1, args_ptr)
@@ -726,7 +726,7 @@ class TestRegressions(unittest.TestCase):
     output_ptr = ctypes.addressof(output)
     args = (ctypes.c_uint64 * 1)(output_ptr)
     args_ptr = ctypes.addressof(args)
-    kernel_buf = (ctypes.c_char * len(kernel))(*kernel)
+    kernel_buf = (ctypes.c_char * len(kernel)).from_buffer_copy(kernel)
     kernel_ptr = ctypes.addressof(kernel_buf)
     set_valid_mem_ranges({(output_ptr, 8), (args_ptr, 8), (kernel_ptr, len(kernel))})
     run_asm(kernel_ptr, len(kernel), 1, 1, 1, 1, 1, 1, args_ptr)
@@ -754,7 +754,7 @@ class TestRegressions(unittest.TestCase):
     kernel += global_store_b32(addr=v[3], data=v[1], saddr=s[0]).to_bytes()
     kernel += s_endpgm().to_bytes()
 
-    kernel_buf = (ctypes.c_char * len(kernel))(*kernel)
+    kernel_buf = (ctypes.c_char * len(kernel)).from_buffer_copy(kernel)
     kernel_ptr = ctypes.addressof(kernel_buf)
     set_valid_mem_ranges({(output_ptr, 4), (src_ptr, 2), (args_ptr, 16), (kernel_ptr, len(kernel))})
     run_asm(kernel_ptr, len(kernel), 1, 1, 1, 1, 1, 1, args_ptr)

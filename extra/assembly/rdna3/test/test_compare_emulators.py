@@ -68,7 +68,7 @@ class RustEmulator:
     self.ctx = None
 
   def create(self, kernel: bytes, n_lanes: int):
-    kernel_buf = (ctypes.c_char * len(kernel))(*kernel)
+    kernel_buf = (ctypes.c_char * len(kernel)).from_buffer_copy(kernel)
     self.ctx = self.lib.wave_create(ctypes.addressof(kernel_buf), len(kernel), n_lanes)
     self._kernel_buf = kernel_buf
 
@@ -87,9 +87,9 @@ class RustEmulator:
 
 class PythonEmulator:
   def __init__(self):
-    self.state: WaveState = None
-    self.program = None
-    self.lds = None
+    self.state: WaveState | None = None
+    self.program: dict | None = None
+    self.lds: bytearray | None = None
     self.n_lanes = 0
 
   def create(self, kernel: bytes, n_lanes: int):
@@ -99,11 +99,18 @@ class PythonEmulator:
     self.lds = bytearray(65536)
     self.n_lanes = n_lanes
 
-  def step(self) -> int: return step_wave(self.program, self.state, self.lds, self.n_lanes)
-  def set_sgpr(self, idx: int, val: int): self.state.sgpr[idx] = val & 0xffffffff
-  def set_vgpr(self, lane: int, idx: int, val: int): self.state.vgpr[lane][idx] = val & 0xffffffff
+  def step(self) -> int:
+    assert self.program is not None and self.state is not None and self.lds is not None
+    return step_wave(self.program, self.state, self.lds, self.n_lanes)
+  def set_sgpr(self, idx: int, val: int):
+    assert self.state is not None
+    self.state.sgpr[idx] = val & 0xffffffff
+  def set_vgpr(self, lane: int, idx: int, val: int):
+    assert self.state is not None
+    self.state.vgpr[lane][idx] = val & 0xffffffff
 
   def get_snapshot(self) -> StateSnapshot:
+    assert self.state is not None
     return StateSnapshot(pc=self.state.pc, scc=self.state.scc, vcc=self.state.vcc & 0xffffffff,
                          exec_mask=self.state.exec_mask & 0xffffffff, sgpr=list(self.state.sgpr),
                          vgpr=[list(self.state.vgpr[i]) for i in range(WAVE_SIZE)])
@@ -129,7 +136,7 @@ def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: t
         # Initialize LDS (64KB, standard size for AMD GPUs)
         rust.init_lds(65536)
 
-        for emu in [rust, python]:
+        for emu in (rust, python):
           emu.set_sgpr(0, args_ptr & 0xffffffff)
           emu.set_sgpr(1, (args_ptr >> 32) & 0xffffffff)
           emu.set_sgpr(13, gidx)
@@ -187,7 +194,7 @@ def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: t
   return True, f"Completed {gx*gy*gz} workgroups", total_steps
 
 def compare_emulators_multi_kernel(kernels: list[KernelInfo], buf_pool: dict[int, int], max_steps: int = 1000,
-                                    debug: bool = False, trace_len: int = 10, buf_data: dict[int, bytes] = None) -> tuple[bool, str]:
+                                    debug: bool = False, trace_len: int = 10, buf_data: dict[int, bytes] | None = None) -> tuple[bool, str]:
   """Run all kernels through both emulators with shared buffer pool."""
   from extra.assembly.rdna3.emu import set_valid_mem_ranges, decode_program
   if buf_data is None: buf_data = {}

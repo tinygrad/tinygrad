@@ -1,7 +1,10 @@
 # RDNA3 emulator - pure Python implementation for testing
 from __future__ import annotations
 import ctypes, struct, math
-from extra.assembly.rdna3.lib import Inst32, Inst64, RawImm
+from typing import Callable
+from extra.assembly.rdna3.lib import Inst, Inst32, Inst64, RawImm
+
+Program = dict[int, Inst]  # pc (word offset) -> instruction
 from extra.assembly.rdna3.autogen import (
   SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, DS, FLAT, VOPD, SrcEnum,
   SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp, FLATOp, GLOBALOp, VOPDOp
@@ -32,23 +35,19 @@ def mem_read(addr: int, size: int) -> int: return _ctypes_at(addr, size).value i
 def mem_write(addr: int, size: int, val: int) -> None:
   if _mem_valid(addr, size): _ctypes_at(addr, size).value = val
 
-# Memory op tables
-FLAT_LOAD = {GLOBALOp.GLOBAL_LOAD_B32: (1,4,0), FLATOp.FLAT_LOAD_B32: (1,4,0), GLOBALOp.GLOBAL_LOAD_B64: (2,4,0), FLATOp.FLAT_LOAD_B64: (2,4,0),
-  GLOBALOp.GLOBAL_LOAD_B96: (3,4,0), FLATOp.FLAT_LOAD_B96: (3,4,0), GLOBALOp.GLOBAL_LOAD_B128: (4,4,0), FLATOp.FLAT_LOAD_B128: (4,4,0),
-  GLOBALOp.GLOBAL_LOAD_U8: (1,1,0), FLATOp.FLAT_LOAD_U8: (1,1,0), GLOBALOp.GLOBAL_LOAD_I8: (1,1,1), FLATOp.FLAT_LOAD_I8: (1,1,1),
-  GLOBALOp.GLOBAL_LOAD_U16: (1,2,0), FLATOp.FLAT_LOAD_U16: (1,2,0), GLOBALOp.GLOBAL_LOAD_I16: (1,2,1), FLATOp.FLAT_LOAD_I16: (1,2,1)}
-FLAT_STORE = {GLOBALOp.GLOBAL_STORE_B32: (1,4), FLATOp.FLAT_STORE_B32: (1,4), GLOBALOp.GLOBAL_STORE_B64: (2,4), FLATOp.FLAT_STORE_B64: (2,4),
-  GLOBALOp.GLOBAL_STORE_B96: (3,4), FLATOp.FLAT_STORE_B96: (3,4), GLOBALOp.GLOBAL_STORE_B128: (4,4), FLATOp.FLAT_STORE_B128: (4,4),
-  GLOBALOp.GLOBAL_STORE_B8: (1,1), FLATOp.FLAT_STORE_B8: (1,1), GLOBALOp.GLOBAL_STORE_B16: (1,2), FLATOp.FLAT_STORE_B16: (1,2)}
-DS_LOAD = {DSOp.DS_LOAD_B32: (1,4,0), DSOp.DS_LOAD_B64: (2,4,0), DSOp.DS_LOAD_B128: (4,4,0),
-  DSOp.DS_LOAD_U8: (1,1,0), DSOp.DS_LOAD_I8: (1,1,1), DSOp.DS_LOAD_U16: (1,2,0), DSOp.DS_LOAD_I16: (1,2,1)}
-DS_STORE = {DSOp.DS_STORE_B32: (1,4), DSOp.DS_STORE_B64: (2,4), DSOp.DS_STORE_B128: (4,4), DSOp.DS_STORE_B8: (1,1), DSOp.DS_STORE_B16: (1,2)}
-FLAT_D16_LO = {FLATOp.FLAT_LOAD_D16_U8: (1, 0), FLATOp.FLAT_LOAD_D16_I8: (1, 1), FLATOp.FLAT_LOAD_D16_B16: (2, 0),
-               GLOBALOp.GLOBAL_LOAD_D16_U8: (1, 0), GLOBALOp.GLOBAL_LOAD_D16_I8: (1, 1), GLOBALOp.GLOBAL_LOAD_D16_B16: (2, 0)}
-FLAT_D16_HI = {FLATOp.FLAT_LOAD_D16_HI_U8: (1, 0), FLATOp.FLAT_LOAD_D16_HI_I8: (1, 1), FLATOp.FLAT_LOAD_D16_HI_B16: (2, 0),
-               GLOBALOp.GLOBAL_LOAD_D16_HI_U8: (1, 0), GLOBALOp.GLOBAL_LOAD_D16_HI_I8: (1, 1), GLOBALOp.GLOBAL_LOAD_D16_HI_B16: (2, 0)}
-FLAT_D16_STORE = {FLATOp.FLAT_STORE_D16_HI_B8: 1, FLATOp.FLAT_STORE_D16_HI_B16: 2, GLOBALOp.GLOBAL_STORE_D16_HI_B8: 1, GLOBALOp.GLOBAL_STORE_D16_HI_B16: 2}
-SMEM_LOAD = {SMEMOp.S_LOAD_B32: 1, SMEMOp.S_LOAD_B64: 2, SMEMOp.S_LOAD_B128: 4, SMEMOp.S_LOAD_B256: 8, SMEMOp.S_LOAD_B512: 16}
+# Memory op tables - (cnt, sz, sign) for loads, (cnt, sz) for stores
+def _mem_ops(ops, suffix_map):
+  return {getattr(e, f"{p}_{s}"): v for e in ops for s, v in suffix_map.items() for p in [e.__name__.replace("Op", "")]}
+_LOAD_MAP = {'LOAD_B32': (1,4,0), 'LOAD_B64': (2,4,0), 'LOAD_B96': (3,4,0), 'LOAD_B128': (4,4,0), 'LOAD_U8': (1,1,0), 'LOAD_I8': (1,1,1), 'LOAD_U16': (1,2,0), 'LOAD_I16': (1,2,1)}
+_STORE_MAP = {'STORE_B32': (1,4), 'STORE_B64': (2,4), 'STORE_B96': (3,4), 'STORE_B128': (4,4), 'STORE_B8': (1,1), 'STORE_B16': (1,2)}
+FLAT_LOAD = _mem_ops([GLOBALOp, FLATOp], _LOAD_MAP)
+FLAT_STORE = _mem_ops([GLOBALOp, FLATOp], _STORE_MAP)
+DS_LOAD: dict[int, tuple[int,int,int]] = {DSOp.DS_LOAD_B32: (1,4,0), DSOp.DS_LOAD_B64: (2,4,0), DSOp.DS_LOAD_B128: (4,4,0), DSOp.DS_LOAD_U8: (1,1,0), DSOp.DS_LOAD_I8: (1,1,1), DSOp.DS_LOAD_U16: (1,2,0), DSOp.DS_LOAD_I16: (1,2,1)}
+DS_STORE: dict[int, tuple[int,int]] = {DSOp.DS_STORE_B32: (1,4), DSOp.DS_STORE_B64: (2,4), DSOp.DS_STORE_B128: (4,4), DSOp.DS_STORE_B8: (1,1), DSOp.DS_STORE_B16: (1,2)}
+FLAT_D16_LO = {getattr(e, f"{e.__name__.replace('Op', '')}_{s}"): v for e in [FLATOp, GLOBALOp] for s, v in [('LOAD_D16_U8', (1, 0)), ('LOAD_D16_I8', (1, 1)), ('LOAD_D16_B16', (2, 0))]}
+FLAT_D16_HI = {getattr(e, f"{e.__name__.replace('Op', '')}_{s}"): v for e in [FLATOp, GLOBALOp] for s, v in [('LOAD_D16_HI_U8', (1, 0)), ('LOAD_D16_HI_I8', (1, 1)), ('LOAD_D16_HI_B16', (2, 0))]}
+FLAT_D16_STORE = {getattr(e, f"{e.__name__.replace('Op', '')}_{s}"): v for e in [FLATOp, GLOBALOp] for s, v in [('STORE_D16_HI_B8', 1), ('STORE_D16_HI_B16', 2)]}
+SMEM_LOAD: dict[int, int] = {SMEMOp.S_LOAD_B32: 1, SMEMOp.S_LOAD_B64: 2, SMEMOp.S_LOAD_B128: 4, SMEMOp.S_LOAD_B256: 8, SMEMOp.S_LOAD_B512: 16}
 SOPK_WAIT = {SOPKOp.S_WAITCNT_VSCNT, SOPKOp.S_WAITCNT_VMCNT, SOPKOp.S_WAITCNT_EXPCNT, SOPKOp.S_WAITCNT_LGKMCNT}
 
 class WaveState:
@@ -78,7 +77,6 @@ class WaveState:
   def wsgpr64(self, i: int, v: int) -> None: self.wsgpr(i, v & 0xffffffff); self.wsgpr(i+1, (v >> 32) & 0xffffffff)
 
   def rsrc(self, v: int, lane: int) -> int:
-    if v < VCC_LO: return self.sgpr[v]
     if v < SGPR_COUNT: return self.sgpr[v]
     if v == SCC: return self.scc
     if v < 255: return _INLINE_CONSTS[v - 128]
@@ -88,7 +86,7 @@ class WaveState:
   def rsrc64(self, v: int, lane: int) -> int:
     return self.rsrc(v, lane) | ((self.rsrc(v+1, lane) if v < VCC_LO or 256 <= v <= 511 else 0) << 32)
 
-  def pend_sgpr_lane(self, reg: int, lane: int, val: bool) -> None:
+  def pend_sgpr_lane(self, reg: int, lane: int, val: int) -> None:
     if reg not in self._pend_sgpr: self._pend_sgpr[reg] = 0
     if val: self._pend_sgpr[reg] |= (1 << lane)
 
@@ -152,15 +150,14 @@ def exec_sop1(st: WaveState, inst: SOP1) -> int:
   if (fn := SALU.get(SOP1_BASE + op)) is None: raise NotImplementedError(f"SOP1 op {op}")
   r, scc = fn(s0, 0, st.scc); st.wsgpr(inst.sdst, r); st.scc = scc; return 0
 
+_SOP2_64: dict[int, Callable[[int, int], int]] = {SOP2Op.S_AND_B64: lambda a, b: a & b, SOP2Op.S_OR_B64: lambda a, b: a | b, SOP2Op.S_XOR_B64: lambda a, b: a ^ b}
 def exec_sop2(st: WaveState, inst: SOP2) -> int:
   s0, s1, op = st.rsrc(inst.ssrc0, 0), st.rsrc(inst.ssrc1, 0), inst.op
   # 64-bit ops handled inline
   if op == SOP2Op.S_LSHL_B64: r = (st.rsrc64(inst.ssrc0, 0) << (s1 & 0x3f)) & 0xffffffffffffffff; st.wsgpr64(inst.sdst, r); st.scc = int(r != 0); return 0
   if op == SOP2Op.S_LSHR_B64: r = st.rsrc64(inst.ssrc0, 0) >> (s1 & 0x3f); st.wsgpr64(inst.sdst, r); st.scc = int(r != 0); return 0
   if op == SOP2Op.S_ASHR_I64: r = sext(st.rsrc64(inst.ssrc0, 0), 64) >> (s1 & 0x3f); st.wsgpr64(inst.sdst, r & 0xffffffffffffffff); st.scc = int(r != 0); return 0
-  if op == SOP2Op.S_AND_B64: r = st.rsrc64(inst.ssrc0, 0) & st.rsrc64(inst.ssrc1, 0); st.wsgpr64(inst.sdst, r); st.scc = int(r != 0); return 0
-  if op == SOP2Op.S_OR_B64: r = st.rsrc64(inst.ssrc0, 0) | st.rsrc64(inst.ssrc1, 0); st.wsgpr64(inst.sdst, r); st.scc = int(r != 0); return 0
-  if op == SOP2Op.S_XOR_B64: r = st.rsrc64(inst.ssrc0, 0) ^ st.rsrc64(inst.ssrc1, 0); st.wsgpr64(inst.sdst, r); st.scc = int(r != 0); return 0
+  if (fn := _SOP2_64.get(op)): r = fn(st.rsrc64(inst.ssrc0, 0), st.rsrc64(inst.ssrc1, 0)); st.wsgpr64(inst.sdst, r); st.scc = int(r != 0); return 0
   if op == SOP2Op.S_CSELECT_B64: st.wsgpr64(inst.sdst, st.rsrc64(inst.ssrc0, 0) if st.scc else st.rsrc64(inst.ssrc1, 0)); return 0
   if op == SOP2Op.S_FMAC_F32: st.wsgpr(inst.sdst, i32(f32(st.rsgpr(inst.sdst)) + f32(s0) * f32(s1))); return 0
   if op == SOP2Op.S_FMAAK_F32: st.wsgpr(inst.sdst, i32(f32(s0) * f32(s1) + f32(inst._literal or 0))); return 0
@@ -175,15 +172,15 @@ def exec_sopc(st: WaveState, inst: SOPC) -> int:
   if (fn := SALU.get(SOPC_BASE + op)) is None: raise NotImplementedError(f"SOPC op {op}")
   st.scc = fn(s0, s1, st.scc)[1]; return 0
 
+_SOPK_CMP = frozenset((SOPKOp.S_CMPK_EQ_I32, SOPKOp.S_CMPK_LG_I32, SOPKOp.S_CMPK_GT_I32, SOPKOp.S_CMPK_GE_I32,
+  SOPKOp.S_CMPK_LT_I32, SOPKOp.S_CMPK_LE_I32, SOPKOp.S_CMPK_EQ_U32, SOPKOp.S_CMPK_LG_U32,
+  SOPKOp.S_CMPK_GT_U32, SOPKOp.S_CMPK_GE_U32, SOPKOp.S_CMPK_LT_U32, SOPKOp.S_CMPK_LE_U32))
 def exec_sopk(st: WaveState, inst: SOPK) -> int:
   simm, s0, op = inst.simm16, st.rsgpr(inst.sdst), inst.op
   if op in SOPK_WAIT: return 0
   if (fn := SALU.get(SOPK_BASE + op)) is None: raise NotImplementedError(f"SOPK op {op}")
   r, scc = fn(s0, simm, st.scc)
-  if op not in (SOPKOp.S_CMPK_EQ_I32, SOPKOp.S_CMPK_LG_I32, SOPKOp.S_CMPK_GT_I32, SOPKOp.S_CMPK_GE_I32,
-                SOPKOp.S_CMPK_LT_I32, SOPKOp.S_CMPK_LE_I32, SOPKOp.S_CMPK_EQ_U32, SOPKOp.S_CMPK_LG_U32,
-                SOPKOp.S_CMPK_GT_U32, SOPKOp.S_CMPK_GE_U32, SOPKOp.S_CMPK_LT_U32, SOPKOp.S_CMPK_LE_U32):
-    st.wsgpr(inst.sdst, r)
+  if op not in _SOPK_CMP: st.wsgpr(inst.sdst, r)
   st.scc = scc; return 0
 
 def exec_sopp(st: WaveState, inst: SOPP) -> int:
@@ -297,12 +294,8 @@ def exec_vop3(st: WaveState, inst: VOP3, lane: int) -> None:
   if op in (VOP3Op.V_ADD_F64, VOP3Op.V_MUL_F64, VOP3Op.V_FMA_F64, VOP3Op.V_MAX_F64, VOP3Op.V_MIN_F64):
     a, b = f64(st.rsrc(src0+1, lane), s0), f64(st.rsrc(src1+1, lane), s1)
     c = f64(st.rsrc(src2+1, lane), s2) if op == VOP3Op.V_FMA_F64 else 0.0
-    if op == VOP3Op.V_ADD_F64: r = a + b
-    elif op == VOP3Op.V_MUL_F64: r = a * b
-    elif op == VOP3Op.V_FMA_F64: r = a * b + c
-    elif op == VOP3Op.V_MAX_F64: r = max(a, b)
-    else: r = min(a, b)
-    V[vdst], V[vdst+1] = i64_parts(r); return
+    rf = a + b if op == VOP3Op.V_ADD_F64 else a * b if op == VOP3Op.V_MUL_F64 else a * b + c if op == VOP3Op.V_FMA_F64 else max(a, b) if op == VOP3Op.V_MAX_F64 else min(a, b)
+    V[vdst], V[vdst+1] = i64_parts(rf); return
   if (fn := VALU.get(op)): V[vdst] = fn(s0, s1, s2); return
   raise NotImplementedError(f"VOP3 op {op}")
 
@@ -362,30 +355,23 @@ def exec_ds(st: WaveState, inst: DS, lane: int, lds: bytearray) -> None:
     for i in range(cnt): lds[addr+i*sz:addr+i*sz+sz] = (V[inst.data0 + i] & ((1 << (sz * 8)) - 1)).to_bytes(sz, 'little')
   else: raise NotImplementedError(f"DS op {op}")
 
-VOPD_OPS = {
-  VOPDOp.V_DUAL_MUL_F32: lambda a, b: i32(f32(a)*f32(b)), VOPDOp.V_DUAL_ADD_F32: lambda a, b: i32(f32(a)+f32(b)),
-  VOPDOp.V_DUAL_SUB_F32: lambda a, b: i32(f32(a)-f32(b)), VOPDOp.V_DUAL_SUBREV_F32: lambda a, b: i32(f32(b)-f32(a)),
-  VOPDOp.V_DUAL_MAX_F32: lambda a, b: i32(max(f32(a), f32(b))), VOPDOp.V_DUAL_MIN_F32: lambda a, b: i32(min(f32(a), f32(b))),
-  VOPDOp.V_DUAL_MUL_DX9_ZERO_F32: lambda a, b: i32(0.0 if f32(a) == 0.0 or f32(b) == 0.0 else f32(a)*f32(b)),
-  VOPDOp.V_DUAL_MOV_B32: lambda a, b: a, VOPDOp.V_DUAL_ADD_NC_U32: lambda a, b: (a + b) & 0xffffffff,
-  VOPDOp.V_DUAL_LSHLREV_B32: lambda a, b: (b << (a & 0x1f)) & 0xffffffff, VOPDOp.V_DUAL_AND_B32: lambda a, b: a & b,
+VOPD_OPS: dict[int, Callable[[int, int, int, int, int], int]] = {
+  VOPDOp.V_DUAL_MUL_F32: lambda a, b, d, l, lit: i32(f32(a)*f32(b)), VOPDOp.V_DUAL_ADD_F32: lambda a, b, d, l, lit: i32(f32(a)+f32(b)),
+  VOPDOp.V_DUAL_SUB_F32: lambda a, b, d, l, lit: i32(f32(a)-f32(b)), VOPDOp.V_DUAL_SUBREV_F32: lambda a, b, d, l, lit: i32(f32(b)-f32(a)),
+  VOPDOp.V_DUAL_MAX_F32: lambda a, b, d, l, lit: i32(max(f32(a), f32(b))), VOPDOp.V_DUAL_MIN_F32: lambda a, b, d, l, lit: i32(min(f32(a), f32(b))),
+  VOPDOp.V_DUAL_MUL_DX9_ZERO_F32: lambda a, b, d, l, lit: i32(0.0 if f32(a) == 0.0 or f32(b) == 0.0 else f32(a)*f32(b)),
+  VOPDOp.V_DUAL_MOV_B32: lambda a, b, d, l, lit: a, VOPDOp.V_DUAL_ADD_NC_U32: lambda a, b, d, l, lit: (a + b) & 0xffffffff,
+  VOPDOp.V_DUAL_LSHLREV_B32: lambda a, b, d, l, lit: (b << (a & 0x1f)) & 0xffffffff, VOPDOp.V_DUAL_AND_B32: lambda a, b, d, l, lit: a & b,
+  VOPDOp.V_DUAL_FMAC_F32: lambda a, b, d, l, lit: i32(f32(a)*f32(b)+f32(d)), VOPDOp.V_DUAL_FMAAK_F32: lambda a, b, d, l, lit: i32(f32(a)*f32(b)+f32(lit)),
+  VOPDOp.V_DUAL_FMAMK_F32: lambda a, b, d, l, lit: i32(f32(a)*f32(lit)+f32(b)), VOPDOp.V_DUAL_CNDMASK_B32: lambda a, b, d, l, lit: b if l else a,
 }
 def exec_vopd(st: WaveState, inst: VOPD, lane: int) -> None:
-  V, vdsty = st.vgpr[lane], (inst.vdsty << 1) | ((inst.vdstx & 1) ^ 1)
-  sx0, sx1, sy0, sy1 = st.rsrc(inst.srcx0, lane), V[inst.vsrcx1], st.rsrc(inst.srcy0, lane), V[inst.vsrcy1]
-  opx, opy, dstx = inst.opx, inst.opy, inst.vdstx
-  if (fn := VOPD_OPS.get(opx)): V[dstx] = fn(sx0, sx1)
-  elif opx == VOPDOp.V_DUAL_FMAC_F32: V[dstx] = i32(f32(sx0)*f32(sx1)+f32(V[dstx]))
-  elif opx == VOPDOp.V_DUAL_FMAAK_F32: V[dstx] = i32(f32(sx0)*f32(sx1)+f32(st.literal))
-  elif opx == VOPDOp.V_DUAL_FMAMK_F32: V[dstx] = i32(f32(sx0)*f32(st.literal)+f32(sx1))
-  elif opx == VOPDOp.V_DUAL_CNDMASK_B32: V[dstx] = sx1 if (st.vcc >> lane) & 1 else sx0
-  else: raise NotImplementedError(f"VOPD opx {opx}")
-  if (fn := VOPD_OPS.get(opy)): V[vdsty] = fn(sy0, sy1)
-  elif opy == VOPDOp.V_DUAL_FMAC_F32: V[vdsty] = i32(f32(sy0)*f32(sy1)+f32(V[vdsty]))
-  elif opy == VOPDOp.V_DUAL_FMAAK_F32: V[vdsty] = i32(f32(sy0)*f32(sy1)+f32(st.literal))
-  elif opy == VOPDOp.V_DUAL_FMAMK_F32: V[vdsty] = i32(f32(sy0)*f32(st.literal)+f32(sy1))
-  elif opy == VOPDOp.V_DUAL_CNDMASK_B32: V[vdsty] = sy1 if (st.vcc >> lane) & 1 else sy0
-  else: raise NotImplementedError(f"VOPD opy {opy}")
+  V, vdsty, vcc_lane = st.vgpr[lane], (inst.vdsty << 1) | ((inst.vdstx & 1) ^ 1), (st.vcc >> lane) & 1
+  sx0, sx1, sy0, sy1, dstx = st.rsrc(inst.srcx0, lane), V[inst.vsrcx1], st.rsrc(inst.srcy0, lane), V[inst.vsrcy1], inst.vdstx
+  if (fn := VOPD_OPS.get(inst.opx)): V[dstx] = fn(sx0, sx1, V[dstx], vcc_lane, st.literal)
+  else: raise NotImplementedError(f"VOPD opx {inst.opx}")
+  if (fn := VOPD_OPS.get(inst.opy)): V[vdsty] = fn(sy0, sy1, V[vdsty], vcc_lane, st.literal)
+  else: raise NotImplementedError(f"VOPD opy {inst.opy}")
 
 def exec_vop3p(st: WaveState, inst: VOP3P, lane: int) -> None:
   op, vdst, V = inst.op, inst.vdst, st.vgpr[lane]
@@ -435,8 +421,8 @@ def exec_wmma_f32_16x16x16_f16(st: WaveState, inst: VOP3P, n_lanes: int) -> None
 # ═══════════════════════════════════════════════════════════════════════════════
 # MAIN EXECUTION LOOP
 # ═══════════════════════════════════════════════════════════════════════════════
-SCALAR = {SOP1: exec_sop1, SOP2: exec_sop2, SOPC: exec_sopc, SOPK: exec_sopk, SOPP: exec_sopp, SMEM: exec_smem}
-VECTOR = {VOP1: exec_vop1, VOP2: exec_vop2, VOP3: exec_vop3, VOP3SD: exec_vop3sd, VOPC: exec_vopc, FLAT: exec_flat, DS: exec_ds, VOPD: exec_vopd, VOP3P: exec_vop3p}
+SCALAR: dict[type, Callable[..., int]] = {SOP1: exec_sop1, SOP2: exec_sop2, SOPC: exec_sopc, SOPK: exec_sopk, SOPP: exec_sopp, SMEM: exec_smem}
+VECTOR: dict[type, Callable[..., None]] = {VOP1: exec_vop1, VOP2: exec_vop2, VOP3: exec_vop3, VOP3SD: exec_vop3sd, VOPC: exec_vopc, FLAT: exec_flat, DS: exec_ds, VOPD: exec_vopd, VOP3P: exec_vop3p}
 
 _WMMA_OPS = frozenset((VOP3POp.V_WMMA_F32_16X16X16_F16, VOP3POp.V_WMMA_F32_16X16X16_BF16, VOP3POp.V_WMMA_F16_16X16X16_F16,
                        VOP3POp.V_WMMA_BF16_16X16X16_BF16, VOP3POp.V_WMMA_I32_16X16X16_IU8, VOP3POp.V_WMMA_I32_16X16X16_IU4))
@@ -449,20 +435,35 @@ def step_wave(program: Program, st: WaveState, lds: bytearray, n_lanes: int) -> 
     delta = handler(st, inst)
     if delta == -1: return -1
     if delta == -2: st.pc += inst_words; return -2
-    if delta == -3: next_pc = (st.pc + inst_words) * 4; st.wsgpr(inst.sdst, next_pc & 0xffffffff); st.wsgpr(inst.sdst + 1, (next_pc >> 32) & 0xffffffff); st.pc += inst_words; return 0
-    if delta == -4: st.pc = st.rsrc64(inst.ssrc0, 0) // 4; return 0
-    if delta == -5: next_pc = (st.pc + inst_words) * 4; st.wsgpr(inst.sdst, next_pc & 0xffffffff); st.wsgpr(inst.sdst + 1, (next_pc >> 32) & 0xffffffff); st.pc = st.rsrc64(inst.ssrc0, 0) // 4; return 0
+    if delta == -3:  # S_GETPC_B64
+      sop1 = inst if isinstance(inst, SOP1) else None
+      assert sop1 is not None
+      next_pc = (st.pc + inst_words) * 4; st.wsgpr(sop1.sdst, next_pc & 0xffffffff); st.wsgpr(sop1.sdst + 1, (next_pc >> 32) & 0xffffffff); st.pc += inst_words; return 0
+    if delta == -4:  # S_SETPC_B64
+      sop1 = inst if isinstance(inst, SOP1) else None
+      assert sop1 is not None
+      st.pc = st.rsrc64(sop1.ssrc0, 0) // 4; return 0
+    if delta == -5:  # S_SWAPPC_B64
+      sop1 = inst if isinstance(inst, SOP1) else None
+      assert sop1 is not None
+      next_pc = (st.pc + inst_words) * 4; st.wsgpr(sop1.sdst, next_pc & 0xffffffff); st.wsgpr(sop1.sdst + 1, (next_pc >> 32) & 0xffffffff); st.pc = st.rsrc64(sop1.ssrc0, 0) // 4; return 0
     st.pc += inst_words + delta
   else:
-    handler, exec_mask = VECTOR[inst_type], st.exec_mask
+    vec_handler, exec_mask = VECTOR[inst_type], st.exec_mask
     if inst_type is DS:
       for lane in range(n_lanes):
-        if exec_mask & (1 << lane): handler(st, inst, lane, lds)
-    elif inst_type is VOP3P and inst.op in _WMMA_OPS:
-      exec_wmma_f32_16x16x16_f16(st, inst, n_lanes)
+        if exec_mask & (1 << lane): vec_handler(st, inst, lane, lds)
+    elif inst_type is VOP3P:
+      vop3p = inst if isinstance(inst, VOP3P) else None
+      assert vop3p is not None
+      if vop3p.op in _WMMA_OPS:
+        exec_wmma_f32_16x16x16_f16(st, vop3p, n_lanes)
+      else:
+        for lane in range(n_lanes):
+          if exec_mask & (1 << lane): vec_handler(st, vop3p, lane)
     else:
       for lane in range(n_lanes):
-        if exec_mask & (1 << lane): handler(st, inst, lane)
+        if exec_mask & (1 << lane): vec_handler(st, inst, lane)
     st.commit_pends(); st.pc += inst_words
   return 0
 

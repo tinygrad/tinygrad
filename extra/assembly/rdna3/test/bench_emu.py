@@ -26,7 +26,7 @@ def count_instructions(kernel: bytes) -> int:
   """Count instructions in a kernel."""
   return len(decode_program(kernel))
 
-def setup_buffers(buf_sizes: list[int], init_data: dict[int, bytes] = None):
+def setup_buffers(buf_sizes: list[int], init_data: dict[int, bytes] | None = None):
   """Allocate buffers and return args pointer + valid ranges."""
   if init_data is None: init_data = {}
   buffers = []
@@ -46,7 +46,7 @@ def benchmark_emulator(name: str, run_fn, kernel: bytes, global_size, local_size
   """Benchmark an emulator and return average time."""
   gx, gy, gz = global_size
   lx, ly, lz = local_size
-  kernel_buf = (ctypes.c_char * len(kernel))(*kernel)
+  kernel_buf = (ctypes.c_char * len(kernel)).from_buffer_copy(kernel)
   lib_ptr = ctypes.addressof(kernel_buf)
 
   # Warmup
@@ -132,7 +132,7 @@ def profile_python_emu(kernel: bytes, global_size, local_size, args_ptr, n_runs:
   """Profile the Python emulator to find bottlenecks."""
   gx, gy, gz = global_size
   lx, ly, lz = local_size
-  kernel_buf = (ctypes.c_char * len(kernel))(*kernel)
+  kernel_buf = (ctypes.c_char * len(kernel)).from_buffer_copy(kernel)
   lib_ptr = ctypes.addressof(kernel_buf)
 
   pr = cProfile.Profile()

@@ -1,6 +1,7 @@
 # Pure combinational ALU functions for RDNA3 emulation
 from __future__ import annotations
 import struct, math
+from typing import Callable
 from extra.assembly.rdna3.autogen import SOP1Op, SOP2Op, SOPCOp, SOPKOp, VOP1Op, VOP2Op, VOP3Op
 
 # Format base offsets for unified opcode space
@@ -8,26 +9,25 @@ SOP2_BASE, SOP1_BASE, SOPC_BASE, SOPK_BASE = 0x000, 0x100, 0x200, 0x300
 VOP2_BASE, VOP1_BASE = 0x100, 0x180
 
 # Float conversion helpers
-FLOAT_BITS = {240: 0x3f000000, 241: 0xbf000000, 242: 0x3f800000, 243: 0xbf800000, 244: 0x40000000, 245: 0xc0000000, 246: 0x40800000, 247: 0xc0800000, 248: 0x3e22f983}
-_struct_I, _struct_f = struct.Struct('<I'), struct.Struct('<f')
-def f32(i: int) -> float: return _struct_f.unpack(_struct_I.pack(i & 0xffffffff))[0]
+_I, _f, _H, _e = struct.Struct('<I'), struct.Struct('<f'), struct.Struct('<H'), struct.Struct('<e')
+def f32(i: int) -> float: return _f.unpack(_I.pack(i & 0xffffffff))[0]
 def i32(f: float) -> int:
   if math.isinf(f): return 0x7f800000 if f > 0 else 0xff800000
-  try: return _struct_I.unpack(_struct_f.pack(f))[0]
+  try: return _I.unpack(_f.pack(f))[0]
   except (OverflowError, struct.error): return 0x7f800000 if f > 0 else 0xff800000
-def f16(i: int) -> float: return struct.unpack('<e', struct.pack('<H', i & 0xffff))[0]
+def f16(i: int) -> float: return _e.unpack(_H.pack(i & 0xffff))[0]
 def i16(f: float) -> int:
   if math.isinf(f): return 0x7c00 if f > 0 else 0xfc00
-  try: return struct.unpack('<H', struct.pack('<e', f))[0]
+  try: return _H.unpack(_e.pack(f))[0]
   except (OverflowError, struct.error): return 0x7c00 if f > 0 else 0xfc00
 def sext(v: int, b: int) -> int: return v - (1 << b) if v & (1 << (b-1)) else v
 def clz(x: int) -> int: return 32 - x.bit_length() if x else 32
 def cls(x: int) -> int: x &= 0xffffffff; return 31 if x in (0, 0xffffffff) else clz(~x & 0xffffffff if x >> 31 else x) - 1
-def _cvt_i32_f32(v): return (0x7fffffff if v > 0 else (-0x80000000 & 0xffffffff)) if math.isinf(v) else (0 if math.isnan(v) else max(-0x80000000, min(0x7fffffff, int(v))) & 0xffffffff)
-def _cvt_u32_f32(v): return 0xffffffff if math.isinf(v) and v > 0 else (0 if math.isinf(v) or math.isnan(v) or v < 0 else min(0xffffffff, int(v)))
+def _cvt_i32_f32(v): return (0x7fffffff if v > 0 else 0x80000000) if math.isinf(v) else (0 if math.isnan(v) else max(-0x80000000, min(0x7fffffff, int(v))) & 0xffffffff)
+def _cvt_u32_f32(v): return (0xffffffff if v > 0 else 0) if math.isinf(v) else (0 if math.isnan(v) or v < 0 else min(0xffffffff, int(v)))
 
 # SALU: op -> fn(s0, s1, scc_in) -> (result, scc_out)
-SALU: dict[int, callable] = {
+SALU: dict[int, Callable] = {
   # SOP2
   SOP2_BASE + SOP2Op.S_ADD_U32: lambda a, b, scc: ((a + b) & 0xffffffff, int((a + b) >= 0x100000000)),
   SOP2_BASE + SOP2Op.S_SUB_U32: lambda a, b, scc: ((a - b) & 0xffffffff, int(b > a)),
@@ -114,7 +114,7 @@ SALU: dict[int, callable] = {
 }
 
 # VALU: op -> fn(s0, s1, s2) -> result
-VALU: dict[int, callable] = {
+VALU: dict[int, Callable] = {
   # VOP2
   VOP2_BASE + VOP2Op.V_ADD_F32: lambda a, b, c: i32(f32(a) + f32(b)),
   VOP2_BASE + VOP2Op.V_SUB_F32: lambda a, b, c: i32(f32(a) - f32(b)),
@@ -228,28 +228,22 @@ VALU: dict[int, callable] = {
   VOP3Op.V_MED3_I16: lambda a, b, c: sorted([sext(a & 0xffff, 16), sext(b & 0xffff, 16), sext(c & 0xffff, 16)])[1] & 0xffff,
 }
 
+def _cmp8(a, b): return [False, a < b, a == b, a <= b, a > b, a != b, a >= b, True]
+def _cmp6(a, b): return [a < b, a == b, a <= b, a > b, a != b, a >= b]
+
 def vopc(op: int, s0: int, s1: int, s0_hi: int = 0, s1_hi: int = 0) -> int:
   base = op & 0x7f
   if 16 <= base <= 31:  # F32
     f0, f1, cmp, nan = f32(s0), f32(s1), base - 16, math.isnan(f32(s0)) or math.isnan(f32(s1))
     return int([False, f0<f1, f0==f1, f0<=f1, f0>f1, f0!=f1, f0>=f1, not nan, nan, f0<f1 or nan, f0==f1 or nan, f0<=f1 or nan, f0>f1 or nan, f0!=f1 or nan, f0>=f1 or nan, True][cmp])
-  if 49 <= base <= 54:  # I16
-    cmp, s0s, s1s = base - 49, sext(s0 & 0xffff, 16), sext(s1 & 0xffff, 16)
-    return int([s0s<s1s, s0s==s1s, s0s<=s1s, s0s>s1s, s0s!=s1s, s0s>=s1s][cmp])
-  if 57 <= base <= 62:  # U16
-    cmp, s0u, s1u = base - 57, s0 & 0xffff, s1 & 0xffff
-    return int([s0u<s1u, s0u==s1u, s0u<=s1u, s0u>s1u, s0u!=s1u, s0u>=s1u][cmp])
+  if 49 <= base <= 54: return int(_cmp6(sext(s0 & 0xffff, 16), sext(s1 & 0xffff, 16))[base - 49])  # I16
+  if 57 <= base <= 62: return int(_cmp6(s0 & 0xffff, s1 & 0xffff)[base - 57])  # U16
   if 64 <= base <= 79:  # I32/U32
-    cmp, s0s, s1s = (base - 64) % 8, sext(s0, 32), sext(s1, 32)
-    return int([False, s0s<s1s, s0s==s1s, s0s<=s1s, s0s>s1s, s0s!=s1s, s0s>=s1s, True][cmp]) if base < 72 else int([False, s0<s1, s0==s1, s0<=s1, s0>s1, s0!=s1, s0>=s1, True][cmp])
+    cmp = (base - 64) % 8
+    return int(_cmp8(sext(s0, 32), sext(s1, 32))[cmp] if base < 72 else _cmp8(s0, s1)[cmp])
   if 80 <= base <= 95:  # I64/U64
-    cmp = (base - 80) % 8
     s0_64, s1_64 = s0 | (s0_hi << 32), s1 | (s1_hi << 32)
-    if base < 88:  # I64
-      s0s, s1s = sext(s0_64, 64), sext(s1_64, 64)
-      return int([False, s0s<s1s, s0s==s1s, s0s<=s1s, s0s>s1s, s0s!=s1s, s0s>=s1s, True][cmp])
-    else:  # U64
-      return int([False, s0_64<s1_64, s0_64==s1_64, s0_64<=s1_64, s0_64>s1_64, s0_64!=s1_64, s0_64>=s1_64, True][cmp])
+    return int(_cmp8(sext(s0_64, 64), sext(s1_64, 64))[(base - 80) % 8] if base < 88 else _cmp8(s0_64, s1_64)[(base - 80) % 8])
   if base == 126:  # CLASS_F32
     f, mask = f32(s0), s1
     if math.isnan(f): return int(bool(mask & 0x3))

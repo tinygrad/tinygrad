@@ -35,7 +35,7 @@ EXPECTED_FORMATS = {
 
 class TestPDFParserGenerate(unittest.TestCase):
   """Test the PDF parser by running generate() and checking results."""
-  result = None
+  result: dict
 
   @classmethod
   def setUpClass(cls):
@@ -103,6 +103,7 @@ class TestPDFParser(unittest.TestCase):
     self.assertNotIn('simm16', SOP1._fields)
     self.assertEqual(SOP1._fields['ssrc0'].hi, 7)
     self.assertEqual(SOP1._fields['ssrc0'].lo, 0)
+    assert SOP1._encoding is not None
     self.assertEqual(SOP1._encoding[0].hi, 31)
     self.assertEqual(SOP1._encoding[1], 0b101111101)
 
@@ -132,6 +133,7 @@ class TestPDFParser(unittest.TestCase):
       (FLAT, 31, 26, 0b110111),
     ]
     for cls, hi, lo, val in tests:
+      assert cls._encoding is not None
       self.assertEqual(cls._encoding[0].hi, hi, f"{cls.__name__} encoding hi")
       self.assertEqual(cls._encoding[0].lo, lo, f"{cls.__name__} encoding lo")
       self.assertEqual(cls._encoding[1], val, f"{cls.__name__} encoding val")
