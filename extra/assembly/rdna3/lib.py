@@ -100,8 +100,10 @@ class Inst:
         encoded = encode_src(val)
         self._values[name] = RawImm(encoded)
         # Track literal value if needed (encoded as 255)
-        if encoded == 255 and self._literal is None and isinstance(val, int) and not isinstance(val, IntEnum):
-          self._literal = val
+        if encoded == 255 and self._literal is None:
+          import struct
+          if isinstance(val, float): self._literal = struct.unpack("I", struct.pack("f", val))[0]
+          elif isinstance(val, int) and not isinstance(val, IntEnum): self._literal = val
       # Encode raw register fields for consistent repr
       elif name in RAW_FIELDS:
         if isinstance(val, Reg):

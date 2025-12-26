@@ -3,6 +3,7 @@ from collections import defaultdict
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.dtype import DType, PtrDType, AddrSpace, dtypes
 from tinygrad.helpers import getenv
+from extra.assembly.rdna3.autogen import VGPR, SGPR
 
 class RDNARegAlloc:
   """Register allocator for RDNA3 with liveness analysis and register reuse."""
@@ -164,7 +165,7 @@ class RDNARegAlloc:
       del self._sgpr_owner[reg]
       self._free_sgprs.append(reg)
 
-  def alloc_vgpr(self, owner: UOp) -> str:
+  def alloc_vgpr(self, owner: UOp) -> VGPR:
     """Allocate a single VGPR."""
     if self._free_vgprs:
       reg = self._free_vgprs.pop()
@@ -178,9 +179,9 @@ class RDNARegAlloc:
       self._max_vgpr = max(self._max_vgpr, self._next_vgpr)
     self._vgpr_owner[reg] = owner
     self._schedule_vgpr_death(reg, owner)
-    return f"v{reg}"
+    return VGPR(reg)
 
-  def alloc_vgpr_pair(self, owner: UOp) -> str:
+  def alloc_vgpr_pair(self, owner: UOp) -> VGPR:
     """Allocate aligned VGPR pair for 64-bit values."""
     if self._free_vgpr_pairs:
       reg = self._free_vgpr_pairs.pop()
@@ -194,9 +195,9 @@ class RDNARegAlloc:
     self._vgpr_pairs.add(reg + 1)
     self._schedule_vgpr_death(reg, owner)
     self._schedule_vgpr_death(reg + 1, owner)
-    return f"v[{reg}:{reg+1}]"
+    return VGPR(reg, 2)
 
-  def alloc_vgpr_range(self, owner: UOp, count: int = 8) -> str:
+  def alloc_vgpr_range(self, owner: UOp, count: int = 8) -> VGPR:
     """Allocate contiguous VGPR range (for WMMA/VECTORIZE)."""
     for i, (base, range_count) in enumerate(self._free_vgpr_ranges):
       if range_count >= count:
@@ -205,7 +206,7 @@ class RDNARegAlloc:
         self._range_owner[base] = owner
         self._vgpr_ranges[base] = count
         self._schedule_range_death(base, owner)
-        return f"v[{base}:{base+count-1}]"
+        return VGPR(base, count)
     base = self._next_vgpr
     if base % 2 != 0: base = self._next_vgpr = self._next_vgpr + 1
     self._next_vgpr = base + count
@@ -213,9 +214,9 @@ class RDNARegAlloc:
     self._range_owner[base] = owner
     self._vgpr_ranges[base] = count
     self._schedule_range_death(base, owner)
-    return f"v[{base}:{base+count-1}]"
+    return VGPR(base, count)
 
-  def alloc_sgpr(self, owner: UOp) -> str | None:
+  def alloc_sgpr(self, owner: UOp) -> SGPR | None:
     """Allocate single SGPR, returns None if exhausted."""
     if self._free_sgprs:
       reg = self._free_sgprs.pop()
@@ -227,9 +228,9 @@ class RDNARegAlloc:
       return None
     self._sgpr_owner[reg] = owner
     self._schedule_sgpr_death(reg, owner)
-    return f"s{reg}"
+    return SGPR(reg)
 
-  def alloc_sgpr_pair(self, owner: UOp) -> str:
+  def alloc_sgpr_pair(self, owner: UOp) -> SGPR:
     """Allocate aligned SGPR pair for 64-bit buffer addresses."""
     if self._next_sgpr % 2 != 0: self._next_sgpr += 1
     reg = self._next_sgpr
@@ -238,7 +239,7 @@ class RDNARegAlloc:
     self._sgpr_owner[reg] = self._sgpr_owner[reg + 1] = owner
     self._sgpr_pairs.add(reg)
     self._sgpr_pairs.add(reg + 1)
-    return f"s[{reg}:{reg+1}]"
+    return SGPR(reg, 2)
 
   def get_scratch_vgpr(self, count: int = 1) -> int:
     """Get scratch VGPR base for temporary operations."""
