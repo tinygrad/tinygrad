@@ -199,8 +199,7 @@ class Buffer:
     return mv
   def view(self, size:int, dtype:DType, offset:int) -> Buffer:
     assert offset < self.nbytes, "offset must be less than nbytes"
-    if self._base is not None: return Buffer(self.device, size, dtype, base=self._base, offset=self.offset+offset)
-    return Buffer(self.device, size, dtype, base=self, offset=offset)
+    return Buffer(self.device, size, dtype, base=self.base, offset=self.offset+offset)
 
 @dataclass(frozen=True)
 class DMACPURef:

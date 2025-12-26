@@ -428,12 +428,12 @@ def get_render(i:int, j:int, fmt:str) -> dict:
   if fmt == "code": return {"src":data.src, "lang":"cpp"}
   if fmt == "asm":
     compiler = Device[data.device].compiler
-    disasm_str = get_stdout(lambda: compiler.disassemble(compiler.compile(data.src)))
-    ret:dict = {"src":disasm_str}
+    ret:dict = {"metadata":[]}
     if data.device.startswith("AMD"):
       with soft_err(lambda err: ret.update(err)):
-        metadata = amd_readelf(lib:=compiler.compile(data.src))
-        ret = {"data":amdgpu_cfg(lib, getattr(compiler, "arch")), "metadata":[metadata]}
+        ret["data"] = amdgpu_cfg(lib:=compiler.compile(data.src), getattr(compiler, "arch"))
+        with soft_err(lambda err: ret["metadata"].append(err)): ret["metadata"].append(amd_readelf(lib))
+    else: ret["src"] = get_stdout(lambda: compiler.disassemble(compiler.compile(data.src)))
     return ret
   if fmt == "all-pmc":
     durations, pmc = data

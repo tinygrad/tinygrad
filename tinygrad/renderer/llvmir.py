@@ -2,7 +2,7 @@ from typing import cast
 import math, struct, sys
 from tinygrad.codegen.opt import tc
 from tinygrad.renderer import Renderer
-from tinygrad.renderer.cstyle import AMDRenderer, create_non_native_float_pats, pm_manual_bf16_cast
+from tinygrad.renderer.cstyle import AMDHIPRenderer, create_non_native_float_pats, pm_manual_bf16_cast
 from tinygrad.uop.decompositions import xexp2, xlog2
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
 from tinygrad.dtype import dtypes, float_to_fp8, DType, PtrDType, truncate
@@ -209,8 +209,8 @@ llvm_intrinsics = {Ops.SQRT: "sqrt", Ops.LOG2: "log2", Ops.EXP2: "exp2"}
 class AMDLLVMRenderer(LLVMRenderer):
   device = "AMD"
   has_local = True
-  shared_max = AMDRenderer.shared_max
-  global_max = AMDRenderer.global_max
+  shared_max = AMDHIPRenderer.shared_max
+  global_max = AMDHIPRenderer.global_max
   abi = "amdgpu_kernel"
   code_for_op = {**LLVMRenderer.code_for_op, **{op: lambda: None for op in llvm_intrinsics}}
   string_rewrite = PatternMatcher([
@@ -254,9 +254,10 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
                   f'"amdgpu-flat-work-group-size"="1,{requiredMaxThreadsPerBlock}"', '"no-trapping-math"="true"']
     return 'attributes #0 = { ' + ' '.join(attributes) + ' }'
   def __init__(self, arch:str):
-    self.arch = arch
-    self.tensor_cores = AMDRenderer.get_tensor_cores(arch)
-    self.is_cdna = AMDRenderer.is_cdna(arch)
+    from tinygrad.runtime.support.compiler_amd import AMDLLVMCompiler
+    self.arch, self.compiler = arch, AMDLLVMCompiler(arch)
+    self.tensor_cores = AMDHIPRenderer.get_tensor_cores(arch)
+    self.is_cdna = AMDHIPRenderer.is_cdna(arch)
     self.string_rewrite += PatternMatcher([(UPat(Ops.WMMA, name="wmma"), lambda ctx, wmma, cdna=self.is_cdna: render_wmma_amd(ctx, wmma, cdna))])
     if self.is_cdna:
       self.extra_matcher += PatternMatcher([
