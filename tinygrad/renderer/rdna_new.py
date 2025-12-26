@@ -24,12 +24,12 @@ from extra.assembly.rdna3.autogen import (
   v_add_nc_u32_e32, v_sub_nc_u32_e32, v_lshlrev_b32_e32, v_lshrrev_b32_e32, v_ashrrev_i32_e32,
   v_max_f32_e32, v_max_i32_e32, v_max_u32_e32,
   # VOP3
-  v_add_f32, v_mul_f32, v_fma_f32, v_fma_f64, v_mad_u64_u32, v_mad_i64_i32, v_lshlrev_b64, v_add3_u32,
-  v_mul_lo_u32, v_mul_hi_u32, v_bfe_u32, v_bfe_i32, v_add_co_u32, v_add_co_ci_u32_e32, v_cndmask_b32,
-  v_add_f64, v_mul_f64,
-  v_cmp_lt_f32, v_cmp_eq_f32, v_cmp_neq_f32, v_cmp_gt_f32,
-  v_cmp_lt_i32, v_cmp_eq_i32, v_cmp_ne_i32, v_cmp_gt_i32,
-  v_cmp_lt_u32, v_cmp_eq_u32, v_cmp_ne_u32, v_cmp_gt_u32,
+  v_fma_f32, v_fma_f64, v_mad_u64_u32, v_mad_i64_i32, v_lshlrev_b64, v_add3_u32,
+  v_mul_lo_u32, v_mul_hi_u32, v_bfe_u32, v_bfe_i32, v_add_co_u32, v_add_co_ci_u32_e32, v_cndmask_b32_e64,
+  v_add_f64, v_mul_f64, v_sub_co_u32, v_sub_co_ci_u32_e32,
+  v_cmp_lt_f32_e32, v_cmp_eq_f32_e32, v_cmp_neq_f32_e32, v_cmp_gt_f32_e32,
+  v_cmp_lt_i32_e32, v_cmp_eq_i32_e32, v_cmp_ne_i32_e32, v_cmp_gt_i32_e32,
+  v_cmp_lt_u32_e32, v_cmp_eq_u32_e32, v_cmp_ne_u32_e32, v_cmp_gt_u32_e32,
   # SOPP/SOP
   s_endpgm, s_waitcnt, s_barrier, s_branch, s_cbranch_vccnz, s_cbranch_execz, s_sendmsg,
   s_mov_b32, s_mov_b64, s_and_saveexec_b32, s_or_b32,
@@ -128,6 +128,15 @@ class RDNARenderer(Renderer):
             val = struct.unpack("I", struct.pack("f", val))[0]
         elif isinstance(val, int) and -16 <= val <= 64: return val
         # Load literal constant into register
+        # For 64-bit types, need to load both low and high 32 bits
+        if u.dtype in (dtypes.int64, dtypes.uint64, dtypes.long, dtypes.ulong):
+          reg = ra.alloc_vgpr_range(u, 2)
+          lo = val & 0xFFFFFFFF
+          hi = (val >> 32) & 0xFFFFFFFF
+          code.append(v_mov_b32_e32(v[reg.idx], lo))
+          code.append(v_mov_b32_e32(v[reg.idx + 1], hi))
+          r[u] = reg
+          return reg
         reg = ra.alloc_vgpr(u)
         code.append(v_mov_b32_e32(reg, val))
         r[u] = reg
@@ -139,13 +148,13 @@ class RDNARenderer(Renderer):
       # VOPC encoding: src0 can be constant, vsrc1 must be VGPR
       # For non-symmetric comparisons (LT), we swap and use the opposite (GT)
       cmp_map = {
-        (Ops.CMPLT, dtypes.float32): v_cmp_lt_f32, (Ops.CMPLT, dtypes.int32): v_cmp_lt_i32, (Ops.CMPLT, dtypes.uint32): v_cmp_lt_u32,
-        (Ops.CMPEQ, dtypes.float32): v_cmp_eq_f32, (Ops.CMPEQ, dtypes.int32): v_cmp_eq_i32, (Ops.CMPEQ, dtypes.uint32): v_cmp_eq_u32,
-        (Ops.CMPNE, dtypes.float32): v_cmp_neq_f32, (Ops.CMPNE, dtypes.int32): v_cmp_ne_i32, (Ops.CMPNE, dtypes.uint32): v_cmp_ne_u32,
+        (Ops.CMPLT, dtypes.float32): v_cmp_lt_f32_e32, (Ops.CMPLT, dtypes.int32): v_cmp_lt_i32_e32, (Ops.CMPLT, dtypes.uint32): v_cmp_lt_u32_e32,
+        (Ops.CMPEQ, dtypes.float32): v_cmp_eq_f32_e32, (Ops.CMPEQ, dtypes.int32): v_cmp_eq_i32_e32, (Ops.CMPEQ, dtypes.uint32): v_cmp_eq_u32_e32,
+        (Ops.CMPNE, dtypes.float32): v_cmp_neq_f32_e32, (Ops.CMPNE, dtypes.int32): v_cmp_ne_i32_e32, (Ops.CMPNE, dtypes.uint32): v_cmp_ne_u32_e32,
       }
       # GT versions for swapping CMPLT: a < b ⇔ b > a
       cmp_gt_map = {
-        (Ops.CMPLT, dtypes.float32): v_cmp_gt_f32, (Ops.CMPLT, dtypes.int32): v_cmp_gt_i32, (Ops.CMPLT, dtypes.uint32): v_cmp_gt_u32,
+        (Ops.CMPLT, dtypes.float32): v_cmp_gt_f32_e32, (Ops.CMPLT, dtypes.int32): v_cmp_gt_i32_e32, (Ops.CMPLT, dtypes.uint32): v_cmp_gt_u32_e32,
       }
       base_dtype = dtypes.float32 if dtypes.is_float(dtype) else dtypes.int32 if dtype in (dtypes.int8, dtypes.int16, dtypes.int32) else dtypes.uint32
       def is_const(x): return isinstance(x, (int, float))
@@ -154,7 +163,7 @@ class RDNARenderer(Renderer):
         cmp_fn = cmp_gt_map.get((op, base_dtype))
         if cmp_fn:
           code.append(cmp_fn(b, a))  # b > a ⇔ a < b
-          code.append(v_cndmask_b32(dst, 0, 1, VCC_LO))
+          code.append(v_cndmask_b32_e64(dst, 0, 1, VCC_LO))
           return
       # For symmetric comparisons, just swap
       cmp_fn = cmp_map.get((op, base_dtype))
@@ -162,7 +171,7 @@ class RDNARenderer(Renderer):
         if op in (Ops.CMPEQ, Ops.CMPNE) and is_const(b) and not is_const(a):
           a, b = b, a
         code.append(cmp_fn(a, b))  # VOPC implicitly writes to VCC
-        code.append(v_cndmask_b32(dst, 0, 1, VCC_LO))  # Use VOP3: src2 is the VCC condition
+        code.append(v_cndmask_b32_e64(dst, 0, 1, VCC_LO))  # Use VOP3: src2 is the VCC condition
 
     def emit_alu(u: UOp, dst: VGPR):
       """Emit ALU instruction."""
@@ -178,12 +187,29 @@ class RDNARenderer(Renderer):
 
       if op is Ops.ADD:
         if dtypes.is_float(dtype):
-          code.append(v_add_f32_e32(dst, a, b))
+          if dtype == dtypes.float64:
+            code.append(v_add_f64(dst, a, b))
+          else:
+            code.append(v_add_f32_e32(dst, a, b))
+        elif dtype in (dtypes.int64, dtypes.uint64, dtypes.long, dtypes.ulong):
+          # 64-bit integer add requires carry chain
+          # a and b are VGPRs pointing to register pairs (low, high)
+          code.append(v_add_co_u32(v[dst.idx], VCC_LO, v[a.idx], v[b.idx]))  # low + carry out
+          code.append(v_add_co_ci_u32_e32(v[dst.idx + 1], v[a.idx + 1], v[b.idx + 1]))  # high + carry in
         else:
           code.append(v_add_nc_u32_e32(dst, a, b))
       elif op is Ops.SUB:
         if dtypes.is_float(dtype):
-          code.append(v_sub_f32_e32(dst, a, b))
+          if dtype == dtypes.float64:
+            # v_sub_f64 doesn't exist - use v_add_f64 with negated b
+            code.append(v_mul_f64(dst, -1.0, b))  # negate b
+            code.append(v_add_f64(dst, a, dst))   # a + (-b)
+          else:
+            code.append(v_sub_f32_e32(dst, a, b))
+        elif dtype in (dtypes.int64, dtypes.uint64, dtypes.long, dtypes.ulong):
+          # 64-bit integer sub requires borrow chain
+          code.append(v_sub_co_u32(v[dst.idx], VCC_LO, v[a.idx], v[b.idx]))  # low - borrow out
+          code.append(v_sub_co_ci_u32_e32(v[dst.idx + 1], v[a.idx + 1], v[b.idx + 1]))  # high - borrow in
         else:
           code.append(v_sub_nc_u32_e32(dst, a, b))
       elif op is Ops.MUL:
@@ -207,8 +233,8 @@ class RDNARenderer(Renderer):
             a_src_reg = get_reg(a_uop.src[0])
             code.append(v_mul_lo_u32(v[dst.idx], a_reg, b_lo))      # dst_lo = a * b (low 32)
             code.append(v_mul_hi_u32(v[dst.idx + 1], a_reg, b_lo))  # dst_hi = a * b (high 32)
-            code.append(v_cmp_gt_i32(0, a_src_reg))  # vcc_lo = (0 > a), i.e., (a < 0)
-            code.append(v_cndmask_b32(scratch, 0, b_lo, VCC_LO))  # scratch = a < 0 ? b : 0
+            code.append(v_cmp_gt_i32_e32(0, a_src_reg))  # vcc_lo = (0 > a), i.e., (a < 0)
+            code.append(v_cndmask_b32_e64(scratch, 0, b_lo, VCC_LO))  # scratch = a < 0 ? b : 0
             code.append(v_sub_nc_u32_e32(v[dst.idx + 1], v[dst.idx + 1], scratch))  # dst_hi -= scratch
           elif dtype in (dtypes.int64, dtypes.long):
             code.append(v_mad_i64_i32(dst, NULL, a_reg, b_reg, 0))
@@ -219,7 +245,11 @@ class RDNARenderer(Renderer):
       elif op is Ops.AND: code.append(v_and_b32_e32(dst, a, b))
       elif op is Ops.OR: code.append(v_or_b32_e32(dst, a, b))
       elif op is Ops.XOR: code.append(v_xor_b32_e32(dst, a, b))
-      elif op is Ops.SHL: code.append(v_lshlrev_b32_e32(dst, b, a))
+      elif op is Ops.SHL:
+        if dtype in (dtypes.int64, dtypes.uint64, dtypes.long, dtypes.ulong):
+          code.append(v_lshlrev_b64(dst, b, a))  # 64-bit shift left
+        else:
+          code.append(v_lshlrev_b32_e32(dst, b, a))
       elif op is Ops.SHR:
         src_dtype = u.src[0].dtype
         # Handle 64-bit shift right: for shift >= 32, result = high_reg >> (shift - 32)
@@ -264,8 +294,8 @@ class RDNARenderer(Renderer):
         emit_cmp(op, u.src[0].dtype, dst, a, b)
       elif op is Ops.WHERE:
         cond, true_val, false_val = srcs[0], srcs[1], srcs[2]
-        code.append(v_cmp_ne_i32(0, cond))  # VOPC: src0=constant, vsrc1=VGPR; 0 != cond ⇔ cond != 0
-        code.append(v_cndmask_b32(dst, false_val, true_val, VCC_LO))
+        code.append(v_cmp_ne_i32_e32(0, cond))  # VOPC: src0=constant, vsrc1=VGPR; 0 != cond ⇔ cond != 0
+        code.append(v_cndmask_b32_e64(dst, false_val, true_val, VCC_LO))
       elif op is Ops.IDIV:
         # Integer division using floating-point approximation
         # quotient = trunc(float(a) * rcp(float(b)))
@@ -283,13 +313,13 @@ class RDNARenderer(Renderer):
           tmp_rem = ra.alloc_vgpr(u)   # temp for correction
           # |a|: abs(a) = a >= 0 ? a : -a
           code.append(v_sub_nc_u32_e32(tmp_neg, 0, a))  # -a
-          code.append(v_cmp_gt_i32(0, a))  # 0 > a means a < 0
-          code.append(v_cndmask_b32(tmp_abs_a, a, tmp_neg, VCC_LO))  # |a|
+          code.append(v_cmp_gt_i32_e32(0, a))  # 0 > a means a < 0
+          code.append(v_cndmask_b32_e64(tmp_abs_a, a, tmp_neg, VCC_LO))  # |a|
           code.append(v_mov_b32_e32(tmp_abs_a_orig, tmp_abs_a))  # save |a|
           # |b|: abs(b) = b >= 0 ? b : -b
           code.append(v_sub_nc_u32_e32(tmp_neg, 0, b))  # -b
-          code.append(v_cmp_gt_i32(0, b))  # 0 > b means b < 0
-          code.append(v_cndmask_b32(tmp_abs_b, b, tmp_neg, VCC_LO))  # |b|
+          code.append(v_cmp_gt_i32_e32(0, b))  # 0 > b means b < 0
+          code.append(v_cndmask_b32_e64(tmp_abs_b, b, tmp_neg, VCC_LO))  # |b|
           code.append(v_mov_b32_e32(tmp_abs_b_orig, tmp_abs_b))  # save |b|
           # sign = (a < 0) XOR (b < 0) -> top bit indicates result is negative
           code.append(v_xor_b32_e32(tmp_sign, a, b))
@@ -303,12 +333,12 @@ class RDNARenderer(Renderer):
           # Correct: if (q+1)*|b| <= |a|, then q should be q+1
           code.append(v_add_nc_u32_e32(tmp_abs_a, 1, tmp_q))  # q+1
           code.append(v_mul_lo_u32(tmp_rem, tmp_abs_a, tmp_abs_b_orig))  # (q+1)*|b|
-          code.append(v_cmp_gt_u32(tmp_rem, tmp_abs_a_orig))  # (q+1)*|b| > |a| means q is correct
-          code.append(v_cndmask_b32(dst, tmp_abs_a, tmp_q, VCC_LO))  # dst = vcc ? q : q+1
+          code.append(v_cmp_gt_u32_e32(tmp_rem, tmp_abs_a_orig))  # (q+1)*|b| > |a| means q is correct
+          code.append(v_cndmask_b32_e64(dst, tmp_abs_a, tmp_q, VCC_LO))  # dst = vcc ? q : q+1
           # Negate result if signs differ (top bit of tmp_sign is set)
           code.append(v_sub_nc_u32_e32(tmp_neg, 0, dst))  # -quotient
-          code.append(v_cmp_gt_i32(0, tmp_sign))  # 0 > tmp_sign means top bit is 1
-          code.append(v_cndmask_b32(dst, dst, tmp_neg, VCC_LO))
+          code.append(v_cmp_gt_i32_e32(0, tmp_sign))  # 0 > tmp_sign means top bit is 1
+          code.append(v_cndmask_b32_e64(dst, dst, tmp_neg, VCC_LO))
         else:
           # Unsigned division using floating-point with correction
           # The rcp instruction has limited precision, so we need to correct
@@ -325,8 +355,8 @@ class RDNARenderer(Renderer):
           # Correct: if (q+1)*b <= a, then q should be q+1
           code.append(v_add_nc_u32_e32(tmp_a, 1, tmp_q))  # q+1
           code.append(v_mul_lo_u32(tmp_rem, tmp_a, b))  # (q+1)*b
-          code.append(v_cmp_gt_u32(tmp_rem, a))  # (q+1)*b > a means q is correct
-          code.append(v_cndmask_b32(dst, tmp_a, tmp_q, VCC_LO))  # dst = vcc ? q : q+1
+          code.append(v_cmp_gt_u32_e32(tmp_rem, a))  # (q+1)*b > a means q is correct
+          code.append(v_cndmask_b32_e64(dst, tmp_a, tmp_q, VCC_LO))  # dst = vcc ? q : q+1
       elif op is Ops.MOD:
         # Modulo: a % b = a - (a // b) * b
         is_signed = dtype in (dtypes.int32, dtypes.int16, dtypes.int8)
@@ -339,12 +369,12 @@ class RDNARenderer(Renderer):
           tmp_abs_b = ra.alloc_vgpr(u)
           # |a|
           code.append(v_sub_nc_u32_e32(tmp_abs_a, 0, a))  # -a
-          code.append(v_cmp_gt_i32(0, a))
-          code.append(v_cndmask_b32(tmp_abs_a, a, tmp_abs_a, VCC_LO))  # |a|
+          code.append(v_cmp_gt_i32_e32(0, a))
+          code.append(v_cndmask_b32_e64(tmp_abs_a, a, tmp_abs_a, VCC_LO))  # |a|
           # |b|
           code.append(v_sub_nc_u32_e32(tmp_abs_b, 0, b))  # -b
-          code.append(v_cmp_gt_i32(0, b))
-          code.append(v_cndmask_b32(tmp_abs_b, b, tmp_abs_b, VCC_LO))  # |b|
+          code.append(v_cmp_gt_i32_e32(0, b))
+          code.append(v_cndmask_b32_e64(tmp_abs_b, b, tmp_abs_b, VCC_LO))  # |b|
           # Unsigned division of |a| / |b|
           code.append(v_cvt_f32_u32_e32(tmp1, tmp_abs_a))
           code.append(v_cvt_f32_u32_e32(tmp2, tmp_abs_b))
@@ -357,8 +387,8 @@ class RDNARenderer(Renderer):
           code.append(v_sub_nc_u32_e32(dst, tmp_abs_a, tmp2))  # |a| % |b|
           # Result sign follows a's sign
           code.append(v_sub_nc_u32_e32(tmp1, 0, dst))  # -result
-          code.append(v_cmp_gt_i32(0, a))
-          code.append(v_cndmask_b32(dst, dst, tmp1, VCC_LO))
+          code.append(v_cmp_gt_i32_e32(0, a))
+          code.append(v_cndmask_b32_e64(dst, dst, tmp1, VCC_LO))
         else:
           # Unsigned: a % b = a - (a // b) * b
           # Save original 'a' and 'b' since we'll overwrite temps
@@ -377,8 +407,8 @@ class RDNARenderer(Renderer):
           # Correct quotient: if (q+1)*b <= a, then q should be q+1
           code.append(v_add_nc_u32_e32(tmp1, 1, tmp_q))  # q+1
           code.append(v_mul_lo_u32(tmp_rem, tmp1, tmp_b_orig))  # (q+1)*b
-          code.append(v_cmp_gt_u32(tmp_rem, tmp_a_orig))  # (q+1)*b > a
-          code.append(v_cndmask_b32(tmp_q, tmp1, tmp_q, VCC_LO))  # corrected q
+          code.append(v_cmp_gt_u32_e32(tmp_rem, tmp_a_orig))  # (q+1)*b > a
+          code.append(v_cndmask_b32_e64(tmp_q, tmp1, tmp_q, VCC_LO))  # corrected q
           # mod = a - quotient * b
           code.append(v_mul_lo_u32(tmp2, tmp_q, tmp_b_orig))  # quotient * b
           code.append(v_sub_nc_u32_e32(dst, tmp_a_orig, tmp2))  # a - quotient * b
@@ -661,23 +691,23 @@ class RDNARenderer(Renderer):
             if src_dtype in INT64_TYPES:
               tmp = ra.alloc_vgpr(u)
               code.append(v_or_b32_e32(tmp, src_reg, v[src_reg.idx + 1]))
-              code.append(v_cmp_ne_u32(0, tmp))
+              code.append(v_cmp_ne_u32_e32(0, tmp))
             elif src_dtype == dtypes.float64:
-              code.append(v_cmp_neq_f32(0, src_reg))  # Just check low word for now
+              code.append(v_cmp_neq_f32_e32(0, src_reg))  # Just check low word for now
             else:
-              code.append(v_cmp_ne_i32(0, src_reg))
-            code.append(v_cndmask_b32(dst, 0, 1, VCC_LO))
+              code.append(v_cmp_ne_i32_e32(0, src_reg))
+            code.append(v_cndmask_b32_e64(dst, 0, 1, VCC_LO))
           elif src_dtype == dtypes.bool:
             if dst_dtype == dtypes.float32:
-              code.append(v_cmp_ne_i32(0, src_reg))
-              code.append(v_cndmask_b32(dst, 0, 0x3f800000, VCC_LO))  # 1.0f
+              code.append(v_cmp_ne_i32_e32(0, src_reg))
+              code.append(v_cndmask_b32_e64(dst, 0, 0x3f800000, VCC_LO))  # 1.0f
             elif dst_dtype == dtypes.float16:
-              code.append(v_cmp_ne_i32(0, src_reg))
-              code.append(v_cndmask_b32(dst, 0, 0x3c00, VCC_LO))  # 1.0 in f16
+              code.append(v_cmp_ne_i32_e32(0, src_reg))
+              code.append(v_cndmask_b32_e64(dst, 0, 0x3c00, VCC_LO))  # 1.0 in f16
             elif dst_dtype == dtypes.float64:
-              code.append(v_cmp_ne_i32(0, src_reg))
-              code.append(v_cndmask_b32(v[dst.idx], 0, 0, VCC_LO))
-              code.append(v_cndmask_b32(v[dst.idx + 1], 0, 0x3ff00000, VCC_LO))  # 1.0 in f64
+              code.append(v_cmp_ne_i32_e32(0, src_reg))
+              code.append(v_cndmask_b32_e64(v[dst.idx], 0, 0, VCC_LO))
+              code.append(v_cndmask_b32_e64(v[dst.idx + 1], 0, 0x3ff00000, VCC_LO))  # 1.0 in f64
             elif dst_dtype in INT64_TYPES:
               code.append(v_mov_b32_e32(v[dst.idx], src_reg))
               code.append(v_mov_b32_e32(v[dst.idx + 1], 0))
@@ -777,13 +807,13 @@ class RDNARenderer(Renderer):
 
             # Set up exec mask based on condition (use s[13] to avoid conflict with IF/ENDIF which uses s[12])
             cond_reg = get_reg(cond_uop)
-            code.append(v_cmp_ne_i32(0, cond_reg))  # VCC = (cond != 0)
+            code.append(v_cmp_ne_i32_e32(0, cond_reg))  # VCC = (cond != 0)
             # Clamp address to 0 for masked lanes to prevent invalid memory accesses
             # Even with exec masking, garbage addresses can cause protection faults
             # IMPORTANT: Use a temp register to avoid corrupting addr which may be used by STORE later
             if isinstance(addr, VGPR):
               clamped_addr = ra.alloc_vgpr(u)
-              code.append(v_cndmask_b32(clamped_addr, 0, addr, VCC_LO))  # clamped = cond ? addr : 0
+              code.append(v_cndmask_b32_e64(clamped_addr, 0, addr, VCC_LO))  # clamped = cond ? addr : 0
               addr = clamped_addr  # Use clamped address for this load only
             code.append(s_and_saveexec_b32(s[13], VCC_LO))  # Save exec, mask with condition
             # Now do the load (only executed by lanes where condition is true)
@@ -859,12 +889,12 @@ class RDNARenderer(Renderer):
           # Handle conditional store (mask exec for lanes where condition is false - use s[13])
           if cond_uop is not None:
             cond_reg = get_reg(cond_uop)
-            code.append(v_cmp_ne_i32(0, cond_reg))  # VCC = (cond != 0)
+            code.append(v_cmp_ne_i32_e32(0, cond_reg))  # VCC = (cond != 0)
             # Clamp address to 0 for masked lanes to prevent invalid memory accesses
             # IMPORTANT: Use a temp register to avoid corrupting addr which may be used elsewhere
             if isinstance(addr, VGPR):
               clamped_addr = ra.alloc_vgpr(val_uop)
-              code.append(v_cndmask_b32(clamped_addr, 0, addr, VCC_LO))  # clamped = cond ? addr : 0
+              code.append(v_cndmask_b32_e64(clamped_addr, 0, addr, VCC_LO))  # clamped = cond ? addr : 0
               addr = clamped_addr  # Use clamped address for this store only
             code.append(s_and_saveexec_b32(s[13], VCC_LO))  # Save exec, mask with condition
 
@@ -900,7 +930,7 @@ class RDNARenderer(Renderer):
           code.append(v_add_nc_u32_e32(loop_var, 1, loop_var))  # VOP2: src0=constant, vsrc1=VGPR
           # VOPC: src0 can be constant/SGPR, vsrc1 must be VGPR
           # We need loop_var < bound. Use bound > loop_var since loop_var is VGPR (vsrc1)
-          code.append(v_cmp_gt_i32(bound, loop_var))  # bound > loop_var ⇔ loop_var < bound
+          code.append(v_cmp_gt_i32_e32(bound, loop_var))  # bound > loop_var ⇔ loop_var < bound
           code.append(f"s_cbranch_vccnz .L_BODY_{range_idx}")  # Branch back to loop body
 
       elif u.op is Ops.BARRIER:
@@ -989,7 +1019,7 @@ class RDNARenderer(Renderer):
       elif u.op is Ops.IF:
         # Save exec and mask with condition
         cond = get_reg(u.src[0])
-        code.append(v_cmp_ne_i32(0, cond))  # condition != 0
+        code.append(v_cmp_ne_i32_e32(0, cond))  # condition != 0
         code.append(s_and_saveexec_b32(s[12], VCC_LO))  # Save exec, AND with condition
         code.append(f"s_cbranch_execz .L_ENDIF_{i}")  # Skip if all lanes masked
 
