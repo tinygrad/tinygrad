@@ -26,6 +26,16 @@ class PythonRemu:
     set_valid_mem_ranges({(start, size + 4096) for start, size in self.valid_mem_ranges})
     return run_asm(lib, lib_sz, gx, gy, gz, lx, ly, lz, args_ptr, self.rsrc2)
 
+  def run_asm_with_rsrc2(self, lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int,
+                         args_ptr: int, rsrc2: int) -> int:
+    """Run assembly with rsrc2 parameter for workgroup ID configuration.
+    rsrc2 bits: 7=ENABLE_SGPR_WORKGROUP_ID_X, 8=ENABLE_SGPR_WORKGROUP_ID_Y, 9=ENABLE_SGPR_WORKGROUP_ID_Z
+    """
+    from extra.assembly.rdna3.emu import run_asm_with_rsrc2 as emu_run_asm_with_rsrc2, set_valid_mem_ranges
+    # Pad ranges to handle GPU loads that may read past small buffers (e.g. s_load_b128 on 12-byte buffer)
+    set_valid_mem_ranges({(start, size + 4096) for start, size in self.valid_mem_ranges})
+    return emu_run_asm_with_rsrc2(lib, lib_sz, gx, gy, gz, lx, ly, lz, args_ptr, rsrc2)
+
 def _try_dlopen_remu():
   # Use Python emulator only if PYTHON_REMU=1
   if getenv("PYTHON_REMU"):

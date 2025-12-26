@@ -83,7 +83,7 @@ def disasm(inst: Inst) -> str:
     if op_name == 'v_nop': return 'v_nop'
     if op_name == 'v_pipeflush': return 'v_pipeflush'
     parts = op_name.split('_')
-    is_16bit_dst = any(p in ('f16', 'i16', 'u16', 'b16') for p in parts[-2:-1]) or (len(parts) >= 2 and parts[-1] in ('f16', 'i16', 'u16', 'b16') and 'cvt' not in op_name)
+    is_16bit_dst = ('cvt' not in op_name) and (any(p in ('f16', 'i16', 'u16', 'b16') for p in parts[-2:-1]) or (len(parts) >= 2 and parts[-1] in ('f16', 'i16', 'u16', 'b16')))
     is_16bit_src = parts[-1] in ('f16', 'i16', 'u16', 'b16') and 'sat_pk' not in op_name
     is_f64_dst = op_name in ('v_ceil_f64', 'v_floor_f64', 'v_fract_f64', 'v_frexp_mant_f64', 'v_rcp_f64', 'v_rndne_f64', 'v_rsq_f64', 'v_sqrt_f64', 'v_trunc_f64', 'v_cvt_f64_f32', 'v_cvt_f64_i32', 'v_cvt_f64_u32')
     is_f64_src = op_name in ('v_ceil_f64', 'v_floor_f64', 'v_fract_f64', 'v_frexp_mant_f64', 'v_rcp_f64', 'v_rndne_f64', 'v_rsq_f64', 'v_sqrt_f64', 'v_trunc_f64', 'v_cvt_f32_f64', 'v_cvt_i32_f64', 'v_cvt_u32_f64', 'v_frexp_exp_i32_f64')
@@ -92,7 +92,9 @@ def disasm(inst: Inst) -> str:
     dst_str = _vreg(vdst, 2) if is_f64_dst else f"v{vdst & 0x7f}.{'h' if vdst >= 128 else 'l'}" if is_16bit_dst else f"v{vdst}"
     if is_f64_src:
       src_str = _vreg(src0 - 256, 2) if src0 >= 256 else _sreg(src0, 2) if src0 <= 105 else "vcc" if src0 == 106 else "exec" if src0 == 126 else f"ttmp[{src0-108}:{src0-108+1}]" if 108 <= src0 <= 123 else fmt_src(src0)
-    elif is_16bit_src and src0 >= 256:
+    elif is_16bit_src and src0 >= 256 and 'cvt' not in op_name:
+      # Add .l/.h suffix for 16-bit ops, but NOT for conversion instructions
+      # v_cvt_f32_f16 takes a 32-bit register (reads low 16 bits implicitly)
       src_str = f"v{(src0 - 256) & 0x7f}.{'h' if src0 >= 384 else 'l'}"
     else:
       src_str = fmt_src(src0)
@@ -200,6 +202,25 @@ def disasm(inst: Inst) -> str:
     if dlc: mods.append("dlc")
     mod_str = " " + " ".join(mods) if mods else ""
     return f"{op_name} {_fmt_sdst(sdata, width)}, {sbase_str}, {off_str}{mod_str}"
+
+  # DS (LDS/GDS)
+  if cls_name == 'DS':
+    vdst, addr, data0, data1, offset0, offset1, gds = [unwrap(inst._values.get(f, 0)) for f in ['vdst', 'addr', 'data0', 'data1', 'offset0', 'offset1', 'gds']]
+    is_read = 'load' in op_name or 'read' in op_name
+    is_write = 'store' in op_name or 'write' in op_name or 'add' in op_name or 'sub' in op_name or 'min' in op_name or 'max' in op_name or 'and' in op_name or 'or' in op_name or 'xor' in op_name
+    is_dual = 'ds2' in op_name or '_2' in op_name  # DS_READ2_*, DS_WRITE2_*
+    is_b64 = 'b64' in op_name or '_x2' in op_name or '64' in op_name
+    is_b128 = 'b128' in op_name
+    width = 4 if is_b128 else (2 if is_b64 else 1)
+    gds_str = " gds" if gds else ""
+    off_str = f" offset:{offset0}" if offset0 else ""
+    if is_read:
+      return f"{op_name} {_vreg(vdst, width)}, v{addr}{off_str}{gds_str}"
+    elif is_write:
+      return f"{op_name} v{addr}, {_vreg(data0, width)}{off_str}{gds_str}"
+    else:
+      # Atomic ops with return: vdst, vaddr, data
+      return f"{op_name} {_vreg(vdst, width)}, v{addr}, {_vreg(data0, width)}{off_str}{gds_str}"
 
   # FLAT
   if cls_name == 'FLAT':

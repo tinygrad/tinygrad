@@ -5,6 +5,42 @@ from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp
 from tinygrad.dtype import dtypes, PtrDType, AddrSpace
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu
 
+# *** Fix fast_idiv output when shift >= 32 ***
+# fast_idiv generates (x * magic) >> shift expecting 64-bit multiply, but we only have 32-bit.
+# When shift >= 32, we need to use 64-bit arithmetic: cast to 64-bit, multiply, shift, cast back.
+
+def _fix_fast_idiv_unsigned(x: UOp, c: UOp, shift: UOp) -> UOp | None:
+  """Fix fast_idiv for unsigned: (x * magic) >> shift where shift >= 32."""
+  if not (c.op is Ops.CONST and shift.op is Ops.CONST): return None
+  s = shift.arg
+  if s < 32: return None  # Regular shift, no fix needed
+  # fast_idiv already promotes to int64/uint64 for safety - just return None to let it work
+  # The 64-bit ops will be properly lowered by other patterns
+  if x.dtype in (dtypes.int64, dtypes.uint64, dtypes.long, dtypes.ulong): return None
+  # For 32-bit types, use 64-bit arithmetic: cast to uint64, multiply, shift, cast back
+  x64 = x.cast(dtypes.uint64)
+  m64 = UOp.const(dtypes.uint64, c.arg)
+  result = (x64 * m64).alu(Ops.SHR, UOp.const(dtypes.uint64, s))
+  return result.cast(x.dtype)
+
+def _fix_fast_idiv_signed(x: UOp, c: UOp, shift: UOp, add: UOp) -> UOp | None:
+  """Fix fast_idiv for signed: ((x * magic) >> shift) + correction where shift >= 32.
+
+  Note: fast_idiv uses UNSIGNED multiply semantics even for signed division.
+  The magic constant is computed for unsigned division, and sign handling is separate.
+  We must use uint64 to avoid the magic being reinterpreted as negative.
+  """
+  if not (c.op is Ops.CONST and shift.op is Ops.CONST and x.dtype in dtypes.sints): return None
+  s = shift.arg
+  if s < 32: return None  # Regular shift, no fix needed
+  # Use 64-bit UNSIGNED arithmetic: the magic constant must stay positive
+  # Cast x to uint64 (zero-extend the bit pattern), multiply, shift, cast back
+  x64 = x.bitcast(dtypes.uint32).cast(dtypes.uint64)  # zero-extend the bits
+  m64 = UOp.const(dtypes.uint64, c.arg & 0xFFFFFFFF)  # ensure magic is treated as unsigned
+  result = (x64 * m64).alu(Ops.SHR, UOp.const(dtypes.uint64, s))
+  # Cast back to signed int32 and add the sign correction
+  return result.cast(dtypes.uint32).bitcast(x.dtype) + add
+
 # *** UOp-level lowering for operations without hardware support ***
 # RDNA3 lacks hardware integer division - lower to float approximation with correction
 
@@ -81,14 +117,97 @@ def lower_idiv64(a: UOp, b: UOp) -> UOp:
   sign_diff = a_neg ^ b_neg
   return UOp(Ops.WHERE, dtypes.int64, (sign_diff, zero - q_abs, q_abs))
 
+# *** Float16/BFloat16 ALU lowering ***
+# RDNA3 lacks scalar float16 ALU (only has packed f16), so we convert to f32, operate, convert back
+_small_floats = (dtypes.float16, dtypes.bfloat16, dtypes.half)
+
+def _lower_f16_add(a: UOp, b: UOp, x: UOp) -> UOp:
+  return (a.cast(dtypes.float32) + b.cast(dtypes.float32)).cast(x.dtype)
+
+def _lower_f16_sub(a: UOp, b: UOp, x: UOp) -> UOp:
+  return (a.cast(dtypes.float32) - b.cast(dtypes.float32)).cast(x.dtype)
+
+def _lower_f16_mul(a: UOp, b: UOp, x: UOp) -> UOp:
+  return (a.cast(dtypes.float32) * b.cast(dtypes.float32)).cast(x.dtype)
+
+def _lower_f16_max(a: UOp, b: UOp, x: UOp) -> UOp:
+  return a.cast(dtypes.float32).alu(Ops.MAX, b.cast(dtypes.float32)).cast(x.dtype)
+
+def _lower_f16_reciprocal(a: UOp, x: UOp) -> UOp:
+  return UOp(Ops.RECIPROCAL, dtypes.float32, (a.cast(dtypes.float32),)).cast(x.dtype)
+
+def _lower_f16_sqrt(a: UOp, x: UOp) -> UOp:
+  return UOp(Ops.SQRT, dtypes.float32, (a.cast(dtypes.float32),)).cast(x.dtype)
+
+def _lower_f16_exp2(a: UOp, x: UOp) -> UOp:
+  return UOp(Ops.EXP2, dtypes.float32, (a.cast(dtypes.float32),)).cast(x.dtype)
+
+def _lower_f16_log2(a: UOp, x: UOp) -> UOp:
+  return UOp(Ops.LOG2, dtypes.float32, (a.cast(dtypes.float32),)).cast(x.dtype)
+
+def _lower_f16_trunc(a: UOp, x: UOp) -> UOp:
+  return UOp(Ops.TRUNC, dtypes.float32, (a.cast(dtypes.float32),)).cast(x.dtype)
+
+def _lower_f16_sin(a: UOp, x: UOp) -> UOp:
+  return UOp(Ops.SIN, dtypes.float32, (a.cast(dtypes.float32),)).cast(x.dtype)
+
+def _lower_f16_neg(a: UOp, x: UOp) -> UOp:
+  return UOp(Ops.NEG, dtypes.float32, (a.cast(dtypes.float32),)).cast(x.dtype)
+
+def _lower_f16_where(cond: UOp, a: UOp, b: UOp, x: UOp) -> UOp:
+  return UOp(Ops.WHERE, dtypes.float32, (cond, a.cast(dtypes.float32), b.cast(dtypes.float32))).cast(x.dtype)
+
+def _lower_f16_cmplt(a: UOp, b: UOp) -> UOp:
+  return UOp(Ops.CMPLT, dtypes.bool, (a.cast(dtypes.float32), b.cast(dtypes.float32)))
+
+def _lower_f16_cmpeq(a: UOp, b: UOp) -> UOp:
+  return UOp(Ops.CMPEQ, dtypes.bool, (a.cast(dtypes.float32), b.cast(dtypes.float32)))
+
+def _lower_f16_cmpne(a: UOp, b: UOp) -> UOp:
+  return UOp(Ops.CMPNE, dtypes.bool, (a.cast(dtypes.float32), b.cast(dtypes.float32)))
+
+def _lower_same_size_int_cast(x: UOp) -> UOp | None:
+  """Convert same-size signed/unsigned integer casts to bitcasts (they're just bit reinterpretations)."""
+  src, dst = x.src[0].dtype, x.dtype
+  # Only match integer-to-integer casts of same size (e.g., int32 <-> uint32, int16 <-> uint16)
+  # NOT int <-> float (those need actual conversion instructions)
+  if src.itemsize == dst.itemsize and src != dst and dtypes.is_int(src) and dtypes.is_int(dst):
+    return x.src[0].bitcast(dst)
+  return None
+
+def _lower_f16_to_bf16(x: UOp) -> UOp:
+  """float16 -> bfloat16: go through float32."""
+  return x.src[0].cast(dtypes.float32).cast(dtypes.bfloat16)
+
+def _lower_bf16_to_f16(x: UOp) -> UOp:
+  """bfloat16 -> float16: go through float32."""
+  return x.src[0].cast(dtypes.float32).cast(dtypes.float16)
+
 # Pattern matcher for RDNA3-specific rewrites
 # NOTE: By the time rdna_matcher runs, gated loads have already been created by devectorize
 # (WHERE+LOAD -> LOAD(INDEX(buf, idx, gate), alt)). We don't need to do that transformation here.
 rdna_matcher = PatternMatcher([
   # cast void does nothing
   (UPat(Ops.CAST, name="x"), lambda x: x.src[0] if isinstance(x.dtype, PtrDType) or x.src[0].dtype == dtypes.void else None),
+  # same-size integer casts (signed <-> unsigned) are just bitcasts
+  (UPat(Ops.CAST, name="x"), _lower_same_size_int_cast),
+  # float16 <-> bfloat16 via float32
+  (UPat(Ops.CAST, dtype=dtypes.bfloat16, src=(UPat(dtype=dtypes.float16),), name="x"), _lower_f16_to_bf16),
+  (UPat(Ops.CAST, dtype=dtypes.bfloat16, src=(UPat(dtype=dtypes.half),), name="x"), _lower_f16_to_bf16),
+  (UPat(Ops.CAST, dtype=dtypes.float16, src=(UPat(dtype=dtypes.bfloat16),), name="x"), _lower_bf16_to_f16),
+  (UPat(Ops.CAST, dtype=dtypes.half, src=(UPat(dtype=dtypes.bfloat16),), name="x"), _lower_bf16_to_f16),
   # devectorize ALU operations - RDNA doesn't have vector float ALU
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST), name="alu"), no_vectorized_alu),
+  # Fix fast_idiv output when shift >= 32 (needs 64-bit multiply)
+  # Pattern: (x * const) >> shift for unsigned
+  (UPat(Ops.SHR, src=(UPat(Ops.MUL, src=(UPat.var("x"), UPat.cvar("c"))), UPat.cvar("shift"))), _fix_fast_idiv_unsigned),
+  (UPat(Ops.SHR, src=(UPat(Ops.MUL, src=(UPat.cvar("c"), UPat.var("x"))), UPat.cvar("shift"))),
+   lambda x, c, shift: _fix_fast_idiv_unsigned(x, c, shift)),
+  # Pattern: ((x * const) >> shift) + correction for signed (fast_idiv adds correction for negative x)
+  (UPat(Ops.ADD, src=(UPat(Ops.SHR, src=(UPat(Ops.MUL, src=(UPat.var("x"), UPat.cvar("c"))), UPat.cvar("shift"))), UPat.var("add"))),
+   _fix_fast_idiv_signed),
+  (UPat(Ops.ADD, src=(UPat(Ops.SHR, src=(UPat(Ops.MUL, src=(UPat.cvar("c"), UPat.var("x"))), UPat.cvar("shift"))), UPat.var("add"))),
+   lambda x, c, shift, add: _fix_fast_idiv_signed(x, c, shift, add)),
   # Lower integer division/modulo to float approximation (RDNA3 lacks hardware div)
   (UPat(Ops.IDIV, dtype=dtypes.uint32, src=(UPat.var("a"), UPat.var("b"))), lower_udiv),
   (UPat(Ops.IDIV, dtype=dtypes.int32, src=(UPat.var("a"), UPat.var("b"))), lower_idiv),
@@ -121,4 +240,24 @@ rdna_matcher = PatternMatcher([
   # MUL: a * b = FMA(a, b, 0.0) = a * b + 0.0
   (UPat(Ops.MUL, dtype=dtypes.float64, src=(UPat.var("a"), UPat.var("b"))),
    lambda a, b: UOp(Ops.MULACC, dtypes.float64, (a, b, UOp.const(dtypes.float64, 0.0)))),
+  # float16/bfloat16 ALU lowering - convert to f32, operate, convert back
+  # Binary ops: ADD, SUB, MUL, MAX
+  (UPat(Ops.ADD, dtype=_small_floats, src=(UPat.var("a"), UPat.var("b")), name="x"), _lower_f16_add),
+  (UPat(Ops.SUB, dtype=_small_floats, src=(UPat.var("a"), UPat.var("b")), name="x"), _lower_f16_sub),
+  (UPat(Ops.MUL, dtype=_small_floats, src=(UPat.var("a"), UPat.var("b")), name="x"), _lower_f16_mul),
+  (UPat(Ops.MAX, dtype=_small_floats, src=(UPat.var("a"), UPat.var("b")), name="x"), _lower_f16_max),
+  # Unary ops: RECIPROCAL, SQRT, EXP2, LOG2, TRUNC, SIN, NEG
+  (UPat(Ops.RECIPROCAL, dtype=_small_floats, src=(UPat.var("a"),), name="x"), _lower_f16_reciprocal),
+  (UPat(Ops.SQRT, dtype=_small_floats, src=(UPat.var("a"),), name="x"), _lower_f16_sqrt),
+  (UPat(Ops.EXP2, dtype=_small_floats, src=(UPat.var("a"),), name="x"), _lower_f16_exp2),
+  (UPat(Ops.LOG2, dtype=_small_floats, src=(UPat.var("a"),), name="x"), _lower_f16_log2),
+  (UPat(Ops.TRUNC, dtype=_small_floats, src=(UPat.var("a"),), name="x"), _lower_f16_trunc),
+  (UPat(Ops.SIN, dtype=_small_floats, src=(UPat.var("a"),), name="x"), _lower_f16_sin),
+  (UPat(Ops.NEG, dtype=_small_floats, src=(UPat.var("a"),), name="x"), _lower_f16_neg),
+  # WHERE for float16
+  (UPat(Ops.WHERE, dtype=_small_floats, src=(UPat.var("cond"), UPat.var("a"), UPat.var("b")), name="x"), _lower_f16_where),
+  # Comparisons on float16 inputs - note: result dtype is bool, but inputs are float16
+  (UPat(Ops.CMPLT, src=(UPat(dtype=_small_floats, name="a"), UPat(dtype=_small_floats, name="b"))), _lower_f16_cmplt),
+  (UPat(Ops.CMPEQ, src=(UPat(dtype=_small_floats, name="a"), UPat(dtype=_small_floats, name="b"))), _lower_f16_cmpeq),
+  (UPat(Ops.CMPNE, src=(UPat(dtype=_small_floats, name="a"), UPat(dtype=_small_floats, name="b"))), _lower_f16_cmpne),
 ])

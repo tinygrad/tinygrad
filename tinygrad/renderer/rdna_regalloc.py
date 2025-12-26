@@ -59,7 +59,10 @@ class RDNARegAlloc:
         last_use[u.src[1].src[0]] = i
       # Build alias relationships
       if u.op is Ops.AFTER: aliases[u] = u.src[0]
-      if u.op in {Ops.CAST, Ops.BITCAST} and (u.src[0].dtype == u.dtype or isinstance(u.src[0].dtype, PtrDType)):
+      # BITCAST is always an alias (just reinterprets bits) - critical for int32<->uint32 in division lowering
+      if u.op is Ops.BITCAST: aliases[u] = u.src[0]
+      # CAST is an alias only when dtypes match or source is pointer
+      if u.op is Ops.CAST and (u.src[0].dtype == u.dtype or isinstance(u.src[0].dtype, PtrDType)):
         aliases[u] = u.src[0]
       if u.op is Ops.GEP and isinstance(u.src[0].dtype, DType) and u.src[0].dtype.count > 1:
         aliases[u] = u.src[0]

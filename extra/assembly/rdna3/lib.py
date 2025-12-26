@@ -103,7 +103,7 @@ class Inst:
         if encoded == 255 and self._literal is None:
           import struct
           if isinstance(val, float): self._literal = struct.unpack("I", struct.pack("f", val))[0]
-          elif isinstance(val, int) and not isinstance(val, IntEnum): self._literal = val
+          elif isinstance(val, int) and not isinstance(val, IntEnum): self._literal = val & 0xffffffff  # Convert to unsigned 32-bit
       # Encode raw register fields for consistent repr
       elif name in RAW_FIELDS:
         if isinstance(val, Reg):
