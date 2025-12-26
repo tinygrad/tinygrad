@@ -5,9 +5,14 @@ from extra.torch_backend.backend import unwrap, wrap
 
 from torch._dynamo.backends.registry import register_backend
 from torch._functorch.aot_autograd import aot_module_simplified
+from torch._decomp import get_decompositions
 from functorch.compile import make_boxed_func
 
 from tinygrad import Tensor, TinyJit
+
+# native_batch_norm_backward dispatch to privateuseone doesn't work when inputs are CPU tensors (wrapped to tiny)
+# decompose it so the backward graph uses primitive ops that work through our wrap/unwrap path
+_decompositions = get_decompositions([torch.ops.aten.native_batch_norm_backward])
 
 @register_backend
 def tiny(gm:torch.fx.GraphModule, sample_inputs):
@@ -22,7 +27,7 @@ def tiny(gm:torch.fx.GraphModule, sample_inputs):
       tiny_args = [unwrap(x.tiny()) if isinstance(x, torch.Tensor) else x for x in args]
       return [x.cpu() if isinstance(x, torch.Tensor) else x for x in tiny_function(*tiny_args)]
     return make_boxed_func(torch_function)
-  return aot_module_simplified(gm, sample_inputs, decompositions={}, fw_compiler=my_compiler)
+  return aot_module_simplified(gm, sample_inputs, decompositions=_decompositions, fw_compiler=my_compiler)
 
 if __name__ == "__main__":
   def foo(x, y):
