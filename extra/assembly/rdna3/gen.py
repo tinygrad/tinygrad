@@ -162,11 +162,17 @@ def generate(output_path: pathlib.Path|str|None = None) -> dict:
   lines.append("# instruction helpers")
   for cls_name, ops in sorted(enums.items()):
     fmt = cls_name[:-2]
-    for _, name in sorted(ops.items()):
+    for op_val, name in sorted(ops.items()):
       seg = {"GLOBAL": ", seg=2", "SCRATCH": ", seg=2"}.get(fmt, "")
       tgt = {"GLOBAL": "FLAT, GLOBALOp", "SCRATCH": "FLAT, SCRATCHOp"}.get(fmt, f"{fmt}, {cls_name}")
       if fmt in formats or fmt in ("GLOBAL", "SCRATCH"):
-        suffix = "_e32" if fmt in ("VOP1", "VOP2") else ""
+        # VOP1/VOP2/VOPC get _e32 suffix, VOP3 promoted ops (< 512) get _e64 suffix
+        if fmt in ("VOP1", "VOP2", "VOPC"):
+          suffix = "_e32"
+        elif fmt == "VOP3" and op_val < 512:
+          suffix = "_e64"
+        else:
+          suffix = ""
         lines.append(f"{name.lower()}{suffix} = functools.partial({tgt}.{name}{seg})")
   # export SrcEnum values, but skip DPP8/DPP16 which conflict with class names
   skip_exports = {'DPP8', 'DPP16'}
