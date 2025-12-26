@@ -359,18 +359,44 @@ class MovementMixin:
     assert len(self.shape) >= len(k_), f"can't pool {self.shape} with {k_}"
     s_, d_ = make_tuple(stride, len(k_)), make_tuple(dilation, len(k_))
     assert len(k_) == len(s_) == len(d_), f"stride/dilation mismatch kernel:{k_} stride:{s_} dilation:{d_}"
-    noop, i_ = [None] * (self.ndim - len(k_)), self.shape[-len(k_) :]
-    assert all(resolve(d * (k - 1) + 1 <= i) for k, d, i in zip(k_, d_, i_)), "kernel size cannot be greater than actual input size"
-    o_ = [ceildiv(i - d * (k - 1), s) for i, d, k, s in zip(i_, d_, k_, s_)]
-    # input size scaling factor to make sure shrink for stride is possible
-    f_ = [smax(1, ceildiv(o * s - d, i)) for o, s, i, d in zip(o_, s_, i_, d_)]
-    # repeats such that we don't need padding
-    x = self.repeat([1] * len(noop) + [ceildiv(k * (i * f + d), i) for k, i, d, f in zip(k_, i_, d_, f_)])
-    # handle dilation
-    x = x.shrink_to(noop + [k * (i * f + d) for k, i, d, f in zip(k_, i_, d_, f_)])
-    x = x.reshape(noop + flatten((k, (i * f + d)) for k, i, d, f in zip(k_, i_, d_, f_)))
-    # handle stride
-    x = x.shrink_to(noop + flatten((k, o * s) for k, o, s in zip(k_, o_, s_))).reshape(noop + flatten((k, o, s) for k, o, s in zip(k_, o_, s_)))
-    x = x.shrink_to(noop + flatten((k, o, 1) for k, o in zip(k_, o_))).reshape(noop + flatten((k, o) for k, o in zip(k_, o_)))
-    # permute to move reduce to the end
-    return x.permute(*range(len(noop)), *[len(noop) + i * 2 + 1 for i in range(len(i_))], *[len(noop) + i * 2 for i in range(len(i_))])
+    x, noop_len = self, self.ndim - len(k_)
+    for i in reversed(range(len(k_))):
+      dim = noop_len + i
+      k, s, d = k_[i], s_[i], d_[i]
+      i_size = x.shape[dim]
+      assert resolve(d * (k - 1) + 1 <= i_size), "kernel size cannot be greater than actual input size"
+      o = ceildiv(i_size - d * (k - 1), s)
+      f = smax(1, ceildiv(o * s - d, i_size))
+      # repeats such that we don't need padding
+      repeats = [1] * x.ndim
+      repeats[dim] = ceildiv(k * (i_size * f + d), i_size)
+      x = x.repeat(repeats)
+      # handle dilation
+      shrinks = [None] * x.ndim
+      shrinks[dim] = (0, k * (i_size * f + d))
+      x = x.shrink(tuple(shrinks))
+      new_shape = list(x.shape)
+      new_shape[dim:dim+1] = [k, i_size * f + d]
+      x = x.reshape(tuple(new_shape))
+      # handle stride
+      shrinks = [None] * x.ndim
+      shrinks[dim+1] = (0, o*s)
+      x = x.shrink(tuple(shrinks))
+      new_shape = list(x.shape)
+      new_shape[dim+1:dim+2] = [o, s]
+      x = x.reshape(tuple(new_shape))
+      shrinks = [None] * x.ndim
+      shrinks[dim+2] = (0, 1)
+      x = x.shrink(tuple(shrinks))
+      new_shape = list(x.shape)
+      new_shape[dim+1:dim+3] = [o]
+      x = x.reshape(tuple(new_shape))
+      # permute to move reduce to the end
+      perm = list(range(x.ndim))
+      perm[dim], perm[dim+1] = perm[dim+1], perm[dim]
+      x = x.permute(tuple(perm))
+
+    final_perm = list(range(noop_len))
+    final_perm += [noop_len + j*2 for j in range(len(k_))]
+    final_perm += [noop_len + j*2 + 1 for j in range(len(k_))]
+    return x.permute(tuple(final_perm))
