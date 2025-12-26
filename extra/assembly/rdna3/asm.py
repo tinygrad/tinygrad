@@ -47,14 +47,6 @@ def _fmt_ssrc(v: int, cnt: int = 1) -> str:
     if 108 <= v <= 123: return _reg("ttmp", v - 108, 2)
   return decode_src(v)
 
-def _fmt_src64(v: int) -> str:
-  """Format 64-bit source (VGPR pair, SGPR pair, or special pair)."""
-  if v >= 256: return _vreg(v - 256, 2)
-  if v <= 105: return _sreg(v, 2)
-  if v in SPECIAL_PAIRS: return SPECIAL_PAIRS[v]
-  if 108 <= v <= 123: return _reg("ttmp", v - 108, 2)
-  return decode_src(v)
-
 def _fmt_src_n(v: int, cnt: int) -> str:
   """Format source with given register count (1, 2, or 4)."""
   if cnt == 1: return decode_src(v)
@@ -63,6 +55,10 @@ def _fmt_src_n(v: int, cnt: int) -> str:
   if cnt == 2 and v in SPECIAL_PAIRS: return SPECIAL_PAIRS[v]
   if 108 <= v <= 123: return _reg("ttmp", v - 108, cnt)
   return decode_src(v)
+
+def _fmt_src64(v: int) -> str:
+  """Format 64-bit source (VGPR pair, SGPR pair, or special pair)."""
+  return _fmt_src_n(v, 2)
 
 def _parse_sop_sizes(op_name: str) -> tuple[int, ...]:
   """Parse dst and src sizes from SOP instruction name. Returns (dst_cnt, src0_cnt) or (dst_cnt, src0_cnt, src1_cnt)."""
@@ -109,10 +105,11 @@ def disasm(inst: Inst) -> str:
     if op_name == 'v_nop': return 'v_nop'
     if op_name == 'v_pipeflush': return 'v_pipeflush'
     parts = op_name.split('_')
-    is_16bit_dst = any(p in ('f16', 'i16', 'u16', 'b16') for p in parts[-2:-1]) or (len(parts) >= 2 and parts[-1] in ('f16', 'i16', 'u16', 'b16') and 'cvt' not in op_name)
-    is_16bit_src = parts[-1] in ('f16', 'i16', 'u16', 'b16') and 'sat_pk' not in op_name
-    is_f64_dst = op_name in ('v_ceil_f64', 'v_floor_f64', 'v_fract_f64', 'v_frexp_mant_f64', 'v_rcp_f64', 'v_rndne_f64', 'v_rsq_f64', 'v_sqrt_f64', 'v_trunc_f64', 'v_cvt_f64_f32', 'v_cvt_f64_i32', 'v_cvt_f64_u32')
-    is_f64_src = op_name in ('v_ceil_f64', 'v_floor_f64', 'v_fract_f64', 'v_frexp_mant_f64', 'v_rcp_f64', 'v_rndne_f64', 'v_rsq_f64', 'v_sqrt_f64', 'v_trunc_f64', 'v_cvt_f32_f64', 'v_cvt_i32_f64', 'v_cvt_u32_f64', 'v_frexp_exp_i32_f64')
+    is_16bit_dst = any(p in _16BIT_TYPES for p in parts[-2:-1]) or (len(parts) >= 2 and parts[-1] in _16BIT_TYPES and 'cvt' not in op_name)
+    is_16bit_src = parts[-1] in _16BIT_TYPES and 'sat_pk' not in op_name
+    _F64_OPS = ('v_ceil_f64', 'v_floor_f64', 'v_fract_f64', 'v_frexp_mant_f64', 'v_rcp_f64', 'v_rndne_f64', 'v_rsq_f64', 'v_sqrt_f64', 'v_trunc_f64')
+    is_f64_dst = op_name in _F64_OPS or op_name in ('v_cvt_f64_f32', 'v_cvt_f64_i32', 'v_cvt_f64_u32')
+    is_f64_src = op_name in _F64_OPS or op_name in ('v_cvt_f32_f64', 'v_cvt_i32_f64', 'v_cvt_u32_f64', 'v_frexp_exp_i32_f64')
     if op_name == 'v_readfirstlane_b32':
       return f"v_readfirstlane_b32 {decode_src(vdst)}, v{src0 - 256 if src0 >= 256 else src0}"
     dst_str = _vreg(vdst, 2) if is_f64_dst else f"v{vdst & 0x7f}.{'h' if vdst >= 128 else 'l'}" if is_16bit_dst else f"v{vdst}"
@@ -394,6 +391,10 @@ def disasm(inst: Inst) -> str:
     mods = [m for m in [f"wait_exp:{waitexp}" if waitexp else "", "clamp" if clmp else ""] if m]
     return f"{op_name} v{vdst}, {', '.join(srcs)}" + (" " + " ".join(mods) if mods else "")
 
+  # MUBUF/MTBUF helpers
+  def _buf_vaddr(vaddr, offen, idxen): return _vreg(vaddr, 2) if offen and idxen else f"v{vaddr}" if offen or idxen else "off"
+  def _buf_srsrc(srsrc): srsrc_base = srsrc * 4; return _reg("ttmp", srsrc_base - 108, 4) if 108 <= srsrc_base <= 123 else _sreg(srsrc_base, 4)
+
   # MUBUF: buffer load/store
   if cls_name == 'MUBUF':
     vdata, vaddr, srsrc, soffset = [unwrap(inst._values.get(f, 0)) for f in ('vdata', 'vaddr', 'srsrc', 'soffset')]
@@ -407,24 +408,19 @@ def disasm(inst: Inst) -> str:
       width = base_width * 2 if 'cmpswap' in op_name else base_width
     else: width = {'b32':1, 'b64':2, 'b96':3, 'b128':4, 'b16':1, 'x':1, 'xy':2, 'xyz':3, 'xyzw':4}.get(op_name.split('_')[-1], 1)
     if tfe: width += 1
-    vaddr_str = _vreg(vaddr, 2) if offen and idxen else f"v{vaddr}" if offen or idxen else "off"
-    srsrc_str = _sreg(srsrc * 4, 4)
     mods = [m for m in ["offen" if offen else "", "idxen" if idxen else "", f"offset:{offset}" if offset else "",
                         "glc" if glc else "", "dlc" if dlc else "", "slc" if slc else "", "tfe" if tfe else ""] if m]
-    return f"{op_name} {_vreg(vdata, width)}, {vaddr_str}, {srsrc_str}, {decode_src(soffset)}" + (" " + " ".join(mods) if mods else "")
+    return f"{op_name} {_vreg(vdata, width)}, {_buf_vaddr(vaddr, offen, idxen)}, {_buf_srsrc(srsrc)}, {decode_src(soffset)}" + (" " + " ".join(mods) if mods else "")
 
   # MTBUF: typed buffer load/store
   if cls_name == 'MTBUF':
     vdata, vaddr, srsrc, soffset = [unwrap(inst._values.get(f, 0)) for f in ('vdata', 'vaddr', 'srsrc', 'soffset')]
     offset, fmt, offen, idxen = [unwrap(inst._values.get(f, 0)) for f in ('offset', 'format', 'offen', 'idxen')]
     glc, dlc, slc = [unwrap(inst._values.get(f, 0)) for f in ('glc', 'dlc', 'slc')]
-    vaddr_str = _vreg(vaddr, 2) if offen and idxen else f"v{vaddr}" if offen or idxen else "off"
-    srsrc_base = srsrc * 4
-    srsrc_str = _reg("ttmp", srsrc_base - 108, 4) if 108 <= srsrc_base <= 123 else _sreg(srsrc_base, 4)
     mods = [f"format:{fmt}"] + [m for m in ["idxen" if idxen else "", "offen" if offen else "", f"offset:{offset}" if offset else "",
                                              "glc" if glc else "", "dlc" if dlc else "", "slc" if slc else ""] if m]
     width = 2 if 'd16' in op_name and any(x in op_name for x in ('xyz', 'xyzw')) else 1 if 'd16' in op_name else {'x':1, 'xy':2, 'xyz':3, 'xyzw':4}.get(op_name.split('_')[-1], 1)
-    return f"{op_name} {_vreg(vdata, width)}, {vaddr_str}, {srsrc_str}, {decode_src(soffset)} {' '.join(mods)}"
+    return f"{op_name} {_vreg(vdata, width)}, {_buf_vaddr(vaddr, offen, idxen)}, {_buf_srsrc(srsrc)}, {decode_src(soffset)} {' '.join(mods)}"
 
   # SOP1/SOP2/SOPC/SOPK
   if cls_name in ('SOP1', 'SOP2', 'SOPC', 'SOPK'):

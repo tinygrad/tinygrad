@@ -51,14 +51,15 @@ FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0:
 SRC_FIELDS = {'src0', 'src1', 'src2', 'ssrc0', 'ssrc1', 'soffset', 'srcx0', 'srcy0'}
 RAW_FIELDS = {'vdata', 'vdst', 'vaddr', 'addr', 'data', 'data0', 'data1', 'sdst', 'sdata'}
 
-def encode_src(val) -> int:
-  if isinstance(val, SGPR): return val.idx | (0x80 if val.hi else 0)
-  if isinstance(val, VGPR): return 256 + val.idx + (0x80 if val.hi else 0)
+def _encode_reg(val) -> int:
   if isinstance(val, TTMP): return 108 + val.idx
+  return val.idx | (0x80 if val.hi else 0)
+
+def encode_src(val) -> int:
+  if isinstance(val, VGPR): return 256 + _encode_reg(val)
+  if isinstance(val, Reg): return _encode_reg(val)
   if hasattr(val, 'value'): return val.value
-  if isinstance(val, float):
-    if val == 0.0: return 128  # 0.0 encodes as integer constant 0
-    return FLOAT_ENC.get(val, 255)
+  if isinstance(val, float): return 128 if val == 0.0 else FLOAT_ENC.get(val, 255)
   return 128 + val if isinstance(val, int) and 0 <= val <= 64 else 192 + (-val) if isinstance(val, int) and -16 <= val <= -1 else 255
 
 # Instruction base class
@@ -104,10 +105,8 @@ class Inst:
           self._literal = val
       # Encode raw register fields for consistent repr
       elif name in RAW_FIELDS:
-        if isinstance(val, Reg):
-          self._values[name] = (108 + val.idx) if isinstance(val, TTMP) else (val.idx | (0x80 if val.hi else 0))
-        elif hasattr(val, 'value'):  # IntEnum like SrcEnum.NULL
-          self._values[name] = val.value
+        if isinstance(val, Reg): self._values[name] = _encode_reg(val)
+        elif hasattr(val, 'value'): self._values[name] = val.value  # IntEnum like SrcEnum.NULL
       # Encode sbase (divided by 2) and srsrc/ssamp (divided by 4)
       elif name == 'sbase' and isinstance(val, Reg):
         self._values[name] = val.idx // 2
@@ -121,10 +120,7 @@ class Inst:
     if isinstance(val, RawImm): return val.val
     if name in {'srsrc', 'ssamp'}: return val.idx // 4 if isinstance(val, Reg) else val
     if name == 'sbase': return val.idx // 2 if isinstance(val, Reg) else val
-    if name in RAW_FIELDS:
-      if isinstance(val, TTMP): return 108 + val.idx
-      if isinstance(val, Reg): return val.idx | (0x80 if val.hi else 0)
-      return val
+    if name in RAW_FIELDS: return _encode_reg(val) if isinstance(val, Reg) else val
     if isinstance(val, Reg) or name in SRC_FIELDS: return encode_src(val)
     return val.value if hasattr(val, 'value') else val
 
@@ -178,9 +174,4 @@ class Inst:
     return disasm(self)
 
 class Inst32(Inst): pass
-class Inst64(Inst):
-  def to_bytes(self) -> bytes:
-    result = self.to_int().to_bytes(8, 'little')
-    return result + (lit & 0xffffffff).to_bytes(4, 'little') if (lit := self._get_literal() or getattr(self, '_literal', None)) else result
-  @classmethod
-  def from_bytes(cls, data: bytes): return cls.from_int(int.from_bytes(data[:8], 'little'))
+class Inst64(Inst): pass
