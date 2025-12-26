@@ -542,3 +542,10 @@ copyreg.pickle(types.CodeType, _serialize_code)
 
 def _serialize_module(module:types.ModuleType): return importlib.import_module, (module.__name__,)
 copyreg.pickle(types.ModuleType, _serialize_module)
+
+class PickleableCount:
+  def __init__(self, start:int): self.n = start
+  def __next__(self) -> int:
+    cur = self.n
+    self.n += 1
+    return cur

@@ -6,7 +6,7 @@ from tinygrad.uop.ops import axis_letters, axis_colors, axis_to_pos
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes, ImageDType
 from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element, flatten
-from tinygrad.helpers import ALLOW_TF32
+from tinygrad.helpers import ALLOW_TF32, PickleableCount
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
 from tinygrad.codegen.simplify import pm_flatten_range
 from tinygrad.renderer import Renderer
@@ -18,9 +18,7 @@ class Scheduler:
     self.ast, self.ren = ast, ren
     self.dont_use_locals = self.ast.arg.dont_use_locals if self.ast.arg is not None else False
     self.applied_opts = list(self.ast.arg.applied_opts) if self.ast.arg is not None else []
-    self.opt_range = itertools.count(start=max([x.arg[0] for x in self.rngs], default=0)+1)
-
-  def __getstate__(self): return {**self.__dict__, "opt_range": None}
+    self.opt_range = PickleableCount(start=max([x.arg[0] for x in self.rngs], default=0)+1)
 
   @property
   def rngs(self):
