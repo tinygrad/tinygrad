@@ -12,7 +12,7 @@ from tinygrad.helpers import Context, flatten, dedup, TC_SELECT, TC_OPT, getenv
 from tinygrad.dtype import DType, dtypes, PtrDType, AddrSpace
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer
-from tinygrad.renderer.rdna import RDNARenderer
+from tinygrad.renderer.rdna_new import RDNARenderer
 MOCKGPU = getenv("MOCKGPU")
 
 from tinygrad.uop.ops import print_uops # noqa: F401 # pylint: disable=unused-import

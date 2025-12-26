@@ -7,6 +7,7 @@ from extra.assembly.rdna3.autogen import VGPR, SGPR
 
 class RDNARegAlloc:
   """Register allocator for RDNA3 with liveness analysis and register reuse."""
+  MAX_VGPR = 256  # RDNA3 has v0-v255
   MAX_SGPR = 100  # RDNA3 limit ~106, reserve some for scratch
 
   def __init__(self, uops: list[UOp]):
@@ -180,6 +181,7 @@ class RDNARegAlloc:
       reg = self._next_vgpr
       self._next_vgpr += 1
       self._max_vgpr = max(self._max_vgpr, self._next_vgpr)
+    assert reg < self.MAX_VGPR, f"VGPR overflow: v{reg} exceeds v{self.MAX_VGPR-1} limit"
     self._vgpr_owner[reg] = owner
     self._schedule_vgpr_death(reg, owner)
     return VGPR(reg)
@@ -193,6 +195,7 @@ class RDNARegAlloc:
       reg = self._next_vgpr
       self._next_vgpr += 2
       self._max_vgpr = max(self._max_vgpr, self._next_vgpr)
+    assert reg + 1 < self.MAX_VGPR, f"VGPR overflow: v{reg+1} exceeds v{self.MAX_VGPR-1} limit"
     self._vgpr_owner[reg] = self._vgpr_owner[reg + 1] = owner
     self._vgpr_pairs.add(reg)
     self._vgpr_pairs.add(reg + 1)
@@ -206,6 +209,7 @@ class RDNARegAlloc:
       if range_count >= count:
         self._free_vgpr_ranges.pop(i)
         if range_count > count: self._free_vgpr_ranges.append((base + count, range_count - count))
+        assert base + count <= self.MAX_VGPR, f"VGPR overflow: v{base+count-1} exceeds v{self.MAX_VGPR-1} limit"
         self._range_owner[base] = owner
         self._vgpr_ranges[base] = count
         self._schedule_range_death(base, owner)
@@ -214,6 +218,7 @@ class RDNARegAlloc:
     if base % 2 != 0: base = self._next_vgpr = self._next_vgpr + 1
     self._next_vgpr = base + count
     self._max_vgpr = max(self._max_vgpr, self._next_vgpr)
+    assert base + count <= self.MAX_VGPR, f"VGPR overflow: v{base+count-1} exceeds v{self.MAX_VGPR-1} limit"
     self._range_owner[base] = owner
     self._vgpr_ranges[base] = count
     self._schedule_range_death(base, owner)

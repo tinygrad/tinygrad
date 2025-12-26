@@ -7,7 +7,7 @@ from tinygrad.helpers import getenv, DEBUG, CI
 from tinygrad.dtype import DType, DTYPES_DICT, least_upper_dtype, fp8_to_float, float_to_fp8, _to_np_dtype, _to_torch_dtype, truncate
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
-from tinygrad.renderer.rdna import RDNARenderer
+from tinygrad.renderer.rdna_new import RDNARenderer
 from tinygrad import Device, Tensor, dtypes
 from hypothesis import given, settings, strategies as strat
 from test.helpers import rand_for_dtype

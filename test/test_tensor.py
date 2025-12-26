@@ -11,7 +11,7 @@ from tinygrad.uop.ops import Ops, UOp
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 from tinygrad.engine.realize import get_program
-from tinygrad.renderer.rdna import RDNARenderer
+from tinygrad.renderer.rdna_new import RDNARenderer
 from tinygrad.dtype import DType
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))

@@ -249,7 +249,7 @@ class TestWMMAVGPRUsage(unittest.TestCase):
     import re
     from tinygrad.codegen import full_rewrite
     from tinygrad.uop.ops import Ops
-    from tinygrad.renderer.rdna import RDNARenderer
+    from tinygrad.renderer.rdna_new import RDNARenderer
     from tinygrad.helpers import Context
 
     # Need TC=1 to enable tensor cores, TC_OPT=2 for padding support
@@ -300,7 +300,7 @@ class TestWMMAVGPRUsage(unittest.TestCase):
     import re
     from tinygrad.codegen import full_rewrite
     from tinygrad.uop.ops import Ops
-    from tinygrad.renderer.rdna import RDNARenderer
+    from tinygrad.renderer.rdna_new import RDNARenderer
     from tinygrad.helpers import Context
 
     with Context(TC=1, TC_OPT=2):
@@ -341,7 +341,7 @@ class TestLookAheadPacking(unittest.TestCase):
   def test_half16_const_packing(self):
     """Test that half16 VECTORIZE with constants generates pack instructions"""
     from tinygrad.uop.ops import Ops, UOp
-    from tinygrad.renderer.rdna import RDNARenderer
+    from tinygrad.renderer.rdna_new import RDNARenderer
     from tinygrad.dtype import dtypes
 
     renderer = RDNARenderer("gfx1100")
@@ -365,7 +365,7 @@ class TestLookAheadPacking(unittest.TestCase):
   def test_half16_load_packing_with_index(self):
     """Test that half16 VECTORIZE with LOADs generates pack instructions and uses look-ahead"""
     from tinygrad.uop.ops import Ops, UOp
-    from tinygrad.renderer.rdna import RDNARenderer
+    from tinygrad.renderer.rdna_new import RDNARenderer
     from tinygrad.dtype import dtypes
 
     renderer = RDNARenderer("gfx1100")
@@ -445,7 +445,7 @@ class TestLookAheadPacking(unittest.TestCase):
   def test_look_ahead_packing_is_interleaved(self):
     """Test that pack instructions are interleaved with loads (not all at the end)"""
     from tinygrad.uop.ops import Ops, UOp
-    from tinygrad.renderer.rdna import RDNARenderer
+    from tinygrad.renderer.rdna_new import RDNARenderer
     from tinygrad.dtype import dtypes
 
     renderer = RDNARenderer("gfx1100")
@@ -486,7 +486,7 @@ class TestLookAheadPacking(unittest.TestCase):
   def test_vgpr_reuse_in_look_ahead_packing(self):
     """Test that temp VGPRs are reused after packing (reducing register pressure)"""
     from tinygrad.uop.ops import Ops, UOp
-    from tinygrad.renderer.rdna import RDNARenderer
+    from tinygrad.renderer.rdna_new import RDNARenderer
     from tinygrad.dtype import dtypes
     import re
 
@@ -528,7 +528,7 @@ class TestLookAheadPacking(unittest.TestCase):
   def test_multiple_half16_vectorizes(self):
     """Test look-ahead packing with multiple half16 VECTORIZEs (like WMMA A and B inputs)"""
     from tinygrad.uop.ops import Ops, UOp
-    from tinygrad.renderer.rdna import RDNARenderer
+    from tinygrad.renderer.rdna_new import RDNARenderer
     from tinygrad.dtype import dtypes
     import re
 
@@ -593,7 +593,7 @@ class TestLookAheadPackingOnDevice(unittest.TestCase):
   @unittest.skip("WMMA generation depends on scheduler decisions for matrix size")
   def test_wmma_generates_pack_instructions(self):
     """Test that WMMA kernel generates v_pack_b32_f16 instructions"""
-    from tinygrad.renderer.rdna import RDNARenderer
+    from tinygrad.renderer.rdna_new import RDNARenderer
     from tinygrad.uop.ops import Ops
 
     # Create matmul that uses WMMA
@@ -620,7 +620,7 @@ class TestLookAheadPackingOnDevice(unittest.TestCase):
   @unittest.skip("Test needs adjustment for full_rewrite spec requirements")
   def test_look_ahead_packing_reduces_temp_regs(self):
     """Test that look-ahead packing packs halfs immediately after load"""
-    from tinygrad.renderer.rdna import RDNARenderer
+    from tinygrad.renderer.rdna_new import RDNARenderer
     from tinygrad.codegen import full_rewrite
     from tinygrad.uop.ops import Ops
     from tinygrad.helpers import Context
@@ -693,7 +693,7 @@ class TestVGPRRegressions(unittest.TestCase):
     import re
     from tinygrad.codegen import full_rewrite
     from tinygrad.uop.ops import Ops
-    from tinygrad.renderer.rdna import RDNARenderer
+    from tinygrad.renderer.rdna_new import RDNARenderer
     from tinygrad.helpers import Context
 
     with Context(TC=1, TC_OPT=2):
@@ -729,7 +729,7 @@ class TestVGPRRegressions(unittest.TestCase):
     import re
     from tinygrad.codegen import full_rewrite
     from tinygrad.uop.ops import Ops
-    from tinygrad.renderer.rdna import RDNARenderer
+    from tinygrad.renderer.rdna_new import RDNARenderer
     from tinygrad.helpers import Context
 
     with Context(TC=1, TC_OPT=2):
@@ -768,7 +768,7 @@ class TestVGPRRegressions(unittest.TestCase):
     import re
     from tinygrad.codegen import full_rewrite
     from tinygrad.uop.ops import Ops
-    from tinygrad.renderer.rdna import RDNARenderer
+    from tinygrad.renderer.rdna_new import RDNARenderer
     from tinygrad.helpers import Context
 
     with Context(TC=1, TC_OPT=2):

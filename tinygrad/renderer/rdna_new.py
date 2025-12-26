@@ -2,47 +2,138 @@
 from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat
 from tinygrad.dtype import dtypes, DType, PtrDType, AddrSpace, Invalid
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import get_single_element
 from tinygrad.renderer.rdna_regalloc import RDNARegAlloc
 from tinygrad.renderer.rdna_uops import rdna_matcher
 from tinygrad.renderer.cstyle import create_non_native_float_pats, cast_float_to_bf16
-from tinygrad.codegen.late.devectorizer import no_vectorized_alu
 from tinygrad.codegen.opt import tc
 from extra.assembly.rdna3.lib import Inst
 from extra.assembly.rdna3.asm import waitcnt
 from extra.assembly.rdna3.autogen import (
-  v, s, VGPR, SGPR, VCC_LO, EXEC_LO, NULL, OFF, SrcEnum,
+  v, s, VGPR, SGPR, VCC_LO, EXEC_LO, NULL,
   # VOP1
   v_mov_b32_e32, v_cvt_f32_i32_e32, v_cvt_i32_f32_e32, v_cvt_f32_u32_e32, v_cvt_u32_f32_e32,
-  v_cvt_f16_f32_e32, v_cvt_f32_f16_e32, v_rcp_f32_e32, v_rsq_f32_e32, v_sqrt_f32_e32,
-  v_exp_f32_e32, v_log_f32_e32, v_trunc_f32_e32, v_sin_f32_e32,
-  # Additional conversion instructions
+  v_cvt_f16_f32_e32, v_cvt_f32_f16_e32, v_rcp_f32_e32, v_sqrt_f32_e32,
+  v_exp_f32_e32, v_log_f32_e32, v_trunc_f32_e32,
   v_cvt_f64_f32_e32, v_cvt_f32_f64_e32, v_cvt_f64_i32_e32, v_cvt_f64_u32_e32,
-  v_cvt_i32_f64_e32, v_cvt_u32_f64_e32, v_ldexp_f64,
+  v_cvt_i32_f64_e32, v_cvt_u32_f64_e32,
   # VOP2
   v_add_f32_e32, v_sub_f32_e32, v_mul_f32_e32, v_and_b32_e32, v_or_b32_e32, v_xor_b32_e32,
   v_add_nc_u32_e32, v_sub_nc_u32_e32, v_lshlrev_b32_e32, v_lshrrev_b32_e32, v_ashrrev_i32_e32,
   v_max_f32_e32, v_max_i32_e32, v_max_u32_e32,
   # VOP3
-  v_fma_f32, v_fma_f64, v_mad_u64_u32, v_mad_i64_i32, v_lshlrev_b64, v_add3_u32,
-  v_mul_lo_u32, v_mul_hi_u32, v_bfe_u32, v_bfe_i32, v_add_co_u32, v_add_co_ci_u32_e32, v_cndmask_b32_e64,
-  v_add_f64, v_mul_f64, v_sub_co_u32, v_sub_co_ci_u32_e32,
+  v_fma_f32, v_fma_f64, v_mad_u64_u32, v_mad_i64_i32, v_lshlrev_b64, v_mul_lo_u32, v_mul_hi_u32, v_bfe_u32,
+  v_add_co_u32, v_add_co_ci_u32_e32, v_cndmask_b32_e64, v_add_f64, v_mul_f64, v_sub_co_u32, v_sub_co_ci_u32_e32,
   v_cmp_lt_f32_e32, v_cmp_eq_f32_e32, v_cmp_neq_f32_e32, v_cmp_gt_f32_e32,
   v_cmp_lt_i32_e32, v_cmp_eq_i32_e32, v_cmp_ne_i32_e32, v_cmp_gt_i32_e32,
   v_cmp_lt_u32_e32, v_cmp_eq_u32_e32, v_cmp_ne_u32_e32, v_cmp_gt_u32_e32,
   # SOPP/SOP
-  s_endpgm, s_waitcnt, s_barrier, s_branch, s_cbranch_vccnz, s_cbranch_execz, s_sendmsg,
-  s_mov_b32, s_mov_b64, s_and_saveexec_b32, s_or_b32,
+  s_endpgm, s_waitcnt, s_barrier, s_sendmsg, s_mov_b32, s_and_saveexec_b32,
   # SMEM
-  s_load_b32, s_load_b64, s_load_b128,
+  s_load_b32, s_load_b64,
   # FLAT/GLOBAL
-  global_load_b32, global_load_b64, global_load_b128, global_load_u16, global_load_u8, global_load_i8,
+  global_load_b32, global_load_b64, global_load_b128, global_load_u16, global_load_u8,
   global_store_b32, global_store_b64, global_store_b128, global_store_b16, global_store_b8,
   # DS (local memory)
   ds_load_b32, ds_load_b64, ds_load_b128, ds_store_b32, ds_store_b64, ds_store_b128,
-  # WMMA
-  v_wmma_f32_16x16x16_f16,
 )
+
+# Helper for VOP2: src0 can be constant/literal, vsrc1 must be VGPR - swap for commutative ops
+def _sw(c, a, b):
+  ar, br = c.get_reg(a), c.get_reg(b)
+  return (br, ar) if isinstance(br, (int, float)) and not isinstance(ar, (int, float)) else (ar, br)
+
+# Module-level PatternMatcher for simple ALU and CAST operations
+render_ops = PatternMatcher([
+  # CAST: float32 <-> int32/uint32
+  (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.int32),), name="x"), lambda c,x,a: [v_cvt_f32_i32_e32(c.dst, c.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.uint32),), name="x"), lambda c,x,a: [v_cvt_f32_u32_e32(c.dst, c.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.int32, (UPat.var("a", dtypes.float32),), name="x"), lambda c,x,a: [v_cvt_i32_f32_e32(c.dst, c.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.uint32, (UPat.var("a", dtypes.float32),), name="x"), lambda c,x,a: [v_cvt_u32_f32_e32(c.dst, c.get_reg(a))]),
+  # CAST: float32 <-> small unsigned
+  (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", (dtypes.uint8, dtypes.uint16)),), name="x"), lambda c,x,a: [v_cvt_f32_u32_e32(c.dst, c.get_reg(a))]),
+  (UPat(Ops.CAST, (dtypes.uint8, dtypes.uint16), (UPat.var("a", dtypes.float32),), name="x"), lambda c,x,a: [v_cvt_u32_f32_e32(c.dst, c.get_reg(a))]),
+  (UPat(Ops.CAST, (dtypes.int8, dtypes.int16), (UPat.var("a", dtypes.float32),), name="x"), lambda c,x,a: [v_cvt_i32_f32_e32(c.dst, c.get_reg(a))]),
+  # CAST: float16 <-> float32
+  (UPat(Ops.CAST, dtypes.float16, (UPat.var("a", dtypes.float32),), name="x"), lambda c,x,a: [v_cvt_f16_f32_e32(c.dst, c.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.float16),), name="x"), lambda c,x,a: [v_cvt_f32_f16_e32(c.dst, c.get_reg(a))]),
+  # CAST: bfloat16 <-> float32 (shift)
+  (UPat(Ops.CAST, dtypes.bfloat16, (UPat.var("a", dtypes.float32),), name="x"), lambda c,x,a: [v_lshrrev_b32_e32(c.dst, 16, c.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.bfloat16),), name="x"), lambda c,x,a: [v_lshlrev_b32_e32(c.dst, 16, c.get_reg(a))]),
+  # CAST: float64 <-> float32
+  (UPat(Ops.CAST, dtypes.float64, (UPat.var("a", dtypes.float32),), name="x"), lambda c,x,a: [v_cvt_f64_f32_e32(c.dst, c.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.float64),), name="x"), lambda c,x,a: [v_cvt_f32_f64_e32(c.dst, c.get_reg(a))]),
+  # CAST: float64 <-> int32/uint32
+  (UPat(Ops.CAST, dtypes.float64, (UPat.var("a", dtypes.int32),), name="x"), lambda c,x,a: [v_cvt_f64_i32_e32(c.dst, c.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.float64, (UPat.var("a", dtypes.uint32),), name="x"), lambda c,x,a: [v_cvt_f64_u32_e32(c.dst, c.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.int32, (UPat.var("a", dtypes.float64),), name="x"), lambda c,x,a: [v_cvt_i32_f64_e32(c.dst, c.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.uint32, (UPat.var("a", dtypes.float64),), name="x"), lambda c,x,a: [v_cvt_u32_f64_e32(c.dst, c.get_reg(a))]),
+  # CAST: float64 <-> small unsigned
+  (UPat(Ops.CAST, dtypes.float64, (UPat.var("a", (dtypes.uint8, dtypes.uint16)),), name="x"), lambda c,x,a: [v_cvt_f64_u32_e32(c.dst, c.get_reg(a))]),
+  (UPat(Ops.CAST, (dtypes.uint8, dtypes.uint16), (UPat.var("a", dtypes.float64),), name="x"), lambda c,x,a: [v_cvt_u32_f64_e32(c.dst, c.get_reg(a))]),
+  (UPat(Ops.CAST, (dtypes.int8, dtypes.int16), (UPat.var("a", dtypes.float64),), name="x"), lambda c,x,a: [v_cvt_i32_f64_e32(c.dst, c.get_reg(a))]),
+  # CAST: int64 -> smaller types (just take low 32 bits)
+  (UPat(Ops.CAST, dtypes.ints, (UPat.var("a", (dtypes.int64, dtypes.uint64)),), name="x"), lambda c,x,a: [v_mov_b32_e32(c.dst, c.get_reg(a))]),
+  # CAST: small int <-> int32/uint32, small int <-> small int (just mov)
+  (UPat(Ops.CAST, dtypes.ints, (UPat.var("a", dtypes.ints),), name="x"), lambda c,x,a: [v_mov_b32_e32(c.dst, c.get_reg(a))]),
+  # CAST: bool -> int (just move)
+  (UPat(Ops.CAST, dtypes.ints, (UPat.var("a", dtypes.bool),), name="x"), lambda c,x,a: [v_mov_b32_e32(c.dst, c.get_reg(a))]),
+  # ADD: float64, floats, int64, default to i32
+  (UPat(Ops.ADD, dtype=dtypes.float64, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda c,x,a,b: [v_add_f64(c.dst, c.get_reg(a), c.get_reg(b))]),
+  (UPat(Ops.ADD, dtype=dtypes.floats, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda c,x,a,b: [v_add_f32_e32(c.dst, *_sw(c,a,b))]),
+  (UPat(Ops.ADD, dtype=(dtypes.int64, dtypes.uint64), src=(UPat.var("a"), UPat.var("b")), name="x"),
+   lambda c,x,a,b: [v_add_co_u32(v[c.dst.idx], VCC_LO, v[c.get_reg(a).idx], v[c.get_reg(b).idx]),
+                    v_add_co_ci_u32_e32(v[c.dst.idx+1], v[c.get_reg(a).idx+1], v[c.get_reg(b).idx+1])]),
+  (UPat(Ops.ADD, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda c,x,a,b: [v_add_nc_u32_e32(c.dst, *_sw(c,a,b))]),
+  # SUB: float64, floats, int64, default to i32
+  (UPat(Ops.SUB, dtype=dtypes.float64, src=(UPat.var("a"), UPat.var("b")), name="x"),
+   lambda c,x,a,b: [v_mul_f64(c.dst, -1.0, c.get_reg(b)), v_add_f64(c.dst, c.get_reg(a), c.dst)]),
+  (UPat(Ops.SUB, dtype=dtypes.floats, src=(UPat.var("a"), UPat.var("b")), name="x"),
+   lambda c,x,a,b: [v_sub_f32_e32(c.dst, c.get_reg(a), c.get_reg(b))]),
+  (UPat(Ops.SUB, dtype=(dtypes.int64, dtypes.uint64), src=(UPat.var("a"), UPat.var("b")), name="x"),
+   lambda c,x,a,b: [v_sub_co_u32(v[c.dst.idx], VCC_LO, v[c.get_reg(a).idx], v[c.get_reg(b).idx]),
+                    v_sub_co_ci_u32_e32(v[c.dst.idx+1], v[c.get_reg(a).idx+1], v[c.get_reg(b).idx+1])]),
+  (UPat(Ops.SUB, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda c,x,a,b: [v_sub_nc_u32_e32(c.dst, c.get_reg(a), c.get_reg(b))]),
+  # MUL: floats, ints (int64 complex - handled in emit_alu)
+  (UPat(Ops.MUL, dtype=dtypes.floats, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda c,x,a,b: [v_mul_f32_e32(c.dst, *_sw(c,a,b))]),
+  (UPat(Ops.MUL, dtype=(dtypes.int32, dtypes.uint32, dtypes.int16, dtypes.uint16, dtypes.int8, dtypes.uint8),
+   src=(UPat.var("a"), UPat.var("b")), name="x"), lambda c,x,a,b: [v_mul_lo_u32(c.dst, *_sw(c,a,b))]),
+  # Bitwise: int only
+  (UPat(Ops.AND, dtype=dtypes.ints, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda c,x,a,b: [v_and_b32_e32(c.dst, *_sw(c,a,b))]),
+  (UPat(Ops.OR, dtype=dtypes.ints, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda c,x,a,b: [v_or_b32_e32(c.dst, *_sw(c,a,b))]),
+  (UPat(Ops.XOR, dtype=dtypes.ints, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda c,x,a,b: [v_xor_b32_e32(c.dst, *_sw(c,a,b))]),
+  # SHL: int64, default to i32
+  (UPat(Ops.SHL, dtype=(dtypes.int64, dtypes.uint64), src=(UPat.var("a"), UPat.var("b")), name="x"),
+   lambda c,x,a,b: [v_lshlrev_b64(c.dst, c.get_reg(b), c.get_reg(a))]),
+  (UPat(Ops.SHL, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda c,x,a,b: [v_lshlrev_b32_e32(c.dst, c.get_reg(b), c.get_reg(a))]),
+  # MAX: floats, signed ints, unsigned ints
+  (UPat(Ops.MAX, dtype=dtypes.floats, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda c,x,a,b: [v_max_f32_e32(c.dst, *_sw(c,a,b))]),
+  (UPat(Ops.MAX, dtype=dtypes.sints, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda c,x,a,b: [v_max_i32_e32(c.dst, *_sw(c,a,b))]),
+  (UPat(Ops.MAX, dtype=dtypes.uints, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda c,x,a,b: [v_max_u32_e32(c.dst, *_sw(c,a,b))]),
+  # MULACC (FMA): float64, floats
+  (UPat(Ops.MULACC, dtype=dtypes.float64, src=(UPat.var("a"), UPat.var("b"), UPat.var("d")), name="x"),
+   lambda c,x,a,b,d: [v_fma_f64(c.dst, c.get_reg(a), c.get_reg(b), c.get_reg(d))]),
+  (UPat(Ops.MULACC, dtype=dtypes.floats, src=(UPat.var("a"), UPat.var("b"), UPat.var("d")), name="x"),
+   lambda c,x,a,b,d: [v_fma_f32(c.dst, c.get_reg(a), c.get_reg(b), c.get_reg(d))]),
+  # Transcendental: float only
+  (UPat(Ops.RECIPROCAL, dtype=dtypes.floats, src=(UPat.var("a"),), name="x"), lambda c,x,a: [v_rcp_f32_e32(c.dst, c.get_reg(a))]),
+  (UPat(Ops.SQRT, dtype=dtypes.floats, src=(UPat.var("a"),), name="x"), lambda c,x,a: [v_sqrt_f32_e32(c.dst, c.get_reg(a))]),
+  (UPat(Ops.EXP2, dtype=dtypes.floats, src=(UPat.var("a"),), name="x"), lambda c,x,a: [v_exp_f32_e32(c.dst, c.get_reg(a))]),
+  (UPat(Ops.LOG2, dtype=dtypes.floats, src=(UPat.var("a"),), name="x"), lambda c,x,a: [v_log_f32_e32(c.dst, c.get_reg(a))]),
+  (UPat(Ops.TRUNC, dtype=dtypes.floats, src=(UPat.var("a"),), name="x"), lambda c,x,a: [v_trunc_f32_e32(c.dst, c.get_reg(a))]),
+  # NEG: floats vs ints
+  (UPat(Ops.NEG, dtype=dtypes.floats, src=(UPat.var("a"),), name="x"), lambda c,x,a: [v_mul_f32_e32(c.dst, -1.0, c.get_reg(a))]),
+  (UPat(Ops.NEG, dtype=dtypes.ints, src=(UPat.var("a"),), name="x"), lambda c,x,a: [v_sub_nc_u32_e32(c.dst, 0, c.get_reg(a))]),
+])
+
+
+# Context class for PatternMatcher - provides access to registers and code emission
+class RenderContext:
+  def __init__(self, ra: RDNARegAlloc, r: dict, code: list, get_reg_fn):
+    self.ra = ra
+    self.r = r
+    self.code = code
+    self.get_reg = get_reg_fn
+    self.dst: VGPR | None = None  # Set before each ALU op
 
 class RDNARenderer(Renderer):
   device = "AMD"
@@ -77,14 +168,13 @@ class RDNARenderer(Renderer):
 
   def render(self, uops: list[UOp]) -> str:
     ra = RDNARegAlloc(uops)  # Register allocator with liveness analysis
-    r: dict[UOp, VGPR | SGPR | int] = {}  # UOp -> register mapping
-    code: list[Inst] = []  # Generated instructions
+    r: dict[UOp, VGPR | SGPR | int | tuple] = {}  # UOp -> register mapping (RANGE stores (loop_var, bound) tuple)
+    code: list[Inst | str] = []  # Generated instructions (str for labels like .L_BODY_N)
     bufs: list[UOp] = []
     vars_: list[UOp] = []  # Symbolic variables
     kernarg_offset: dict[UOp, int] = {}
     current_offset = 0
     lds_size = 0
-    labels: dict[str, int] = {}  # Label -> instruction index
     pending_waits: set[UOp] = set()  # Track loads that need waits before use
     # Allocate dedicated SGPRs for exec mask saving to avoid conflicts with kernel arguments
     # These will be allocated on first use, which happens after all DEFINE_GLOBAL/VAR ops
@@ -105,8 +195,8 @@ class RDNARenderer(Renderer):
         visited.add(src)
         if src in pending_waits: return True
         # Check transitive sources (e.g., GEP -> LOAD)
-        for s in src.src:
-          if needs_wait(s, visited): return True
+        for src_ in src.src:
+          if needs_wait(src_, visited): return True
         return False
       for src in srcs:
         if needs_wait(src):
@@ -116,8 +206,6 @@ class RDNARenderer(Renderer):
 
     # Fixed registers
     kernarg_ptr = s[0:2]  # s[0:1] holds kernarg pointer
-    group_id = (s[2], s[3], s[4])  # s[2:4] holds group ID xyz
-    local_id = (v[0], v[1], v[2])  # v[0:2] holds local ID xyz
 
     def get_reg(u: UOp) -> VGPR | SGPR | int:
       """Get register for a UOp, handling constants and aliases."""
@@ -184,128 +272,42 @@ class RDNARenderer(Renderer):
         code.append(v_cndmask_b32_e64(dst, 0, 1, VCC_LO))  # Use VOP3: src2 is the VCC condition
 
     def emit_alu(u: UOp, dst: VGPR):
-      """Emit ALU instruction."""
+      """Emit ALU instruction for complex ops not handled by render_ops PatternMatcher."""
       op, dtype = u.op, u.dtype
       srcs = [get_reg(s) for s in u.src]
       a, b = (srcs[0], srcs[1]) if len(srcs) >= 2 else (srcs[0], 0)
 
-      # For VOP2: src0 can be constant/literal, but vsrc1 must be VGPR
-      # Swap operands for commutative ops when b is constant and a is not
-      def is_const(x): return isinstance(x, (int, float))
-      if op in (Ops.ADD, Ops.MUL, Ops.AND, Ops.OR, Ops.XOR, Ops.MAX) and is_const(b) and not is_const(a):
-        a, b = b, a
-
-      if op is Ops.ADD:
-        if dtypes.is_float(dtype):
-          if dtype == dtypes.float64:
-            code.append(v_add_f64(dst, a, b))
-          else:
-            code.append(v_add_f32_e32(dst, a, b))
-        elif dtype in (dtypes.int64, dtypes.uint64, dtypes.long, dtypes.ulong):
-          # 64-bit integer add requires carry chain
-          # a and b are VGPRs pointing to register pairs (low, high)
-          code.append(v_add_co_u32(v[dst.idx], VCC_LO, v[a.idx], v[b.idx]))  # low + carry out
-          code.append(v_add_co_ci_u32_e32(v[dst.idx + 1], v[a.idx + 1], v[b.idx + 1]))  # high + carry in
-        else:
-          code.append(v_add_nc_u32_e32(dst, a, b))
-      elif op is Ops.SUB:
-        if dtypes.is_float(dtype):
-          if dtype == dtypes.float64:
-            # v_sub_f64 doesn't exist - use v_add_f64 with negated b
-            code.append(v_mul_f64(dst, -1.0, b))  # negate b
-            code.append(v_add_f64(dst, a, dst))   # a + (-b)
-          else:
-            code.append(v_sub_f32_e32(dst, a, b))
-        elif dtype in (dtypes.int64, dtypes.uint64, dtypes.long, dtypes.ulong):
-          # 64-bit integer sub requires borrow chain
-          code.append(v_sub_co_u32(v[dst.idx], VCC_LO, v[a.idx], v[b.idx]))  # low - borrow out
-          code.append(v_sub_co_ci_u32_e32(v[dst.idx + 1], v[a.idx + 1], v[b.idx + 1]))  # high - borrow in
-        else:
-          code.append(v_sub_nc_u32_e32(dst, a, b))
-      elif op is Ops.MUL:
-        if dtypes.is_float(dtype):
-          code.append(v_mul_f32_e32(dst, a, b))
-        elif dtype in (dtypes.int64, dtypes.uint64, dtypes.long, dtypes.ulong):
-          # 64-bit multiply: need to handle signed cast with large constant specially
-          # Check for fast_idiv pattern: signed 32-bit cast * large constant (high bit set)
-          a_uop, b_uop = u.src[0], u.src[1]
-          a_is_signed_cast = a_uop.op is Ops.CAST and a_uop.src[0].dtype == dtypes.int32
-          b_is_const_hibit = b_uop.op is Ops.CONST and isinstance(b_uop.arg, int) and (b_uop.arg & 0x80000000) != 0
-          a_reg = a if isinstance(a, (int, float)) else v[a.idx]
-          b_reg = b if isinstance(b, (int, float)) else v[b.idx]
-          if dtype in (dtypes.int64, dtypes.long) and a_is_signed_cast and b_is_const_hibit:
-            # Special case for fast_idiv: do unsigned multiply then correct for sign
-            # When a < 0: unsigned(a) = a + 2^32, so unsigned_result = a*b + 2^32*b
-            # High 32 bits are off by b, so we subtract b when a < 0
-            b_lo = b_uop.arg & 0xFFFFFFFF
-            scratch = ra.alloc_vgpr(u)
-            # Get the source register of the CAST (the original signed int32)
-            a_src_reg = get_reg(a_uop.src[0])
-            code.append(v_mul_lo_u32(v[dst.idx], a_reg, b_lo))      # dst_lo = a * b (low 32)
-            code.append(v_mul_hi_u32(v[dst.idx + 1], a_reg, b_lo))  # dst_hi = a * b (high 32)
-            code.append(v_cmp_gt_i32_e32(0, a_src_reg))  # vcc_lo = (0 > a), i.e., (a < 0)
-            code.append(v_cndmask_b32_e64(scratch, 0, b_lo, VCC_LO))  # scratch = a < 0 ? b : 0
-            code.append(v_sub_nc_u32_e32(v[dst.idx + 1], v[dst.idx + 1], scratch))  # dst_hi -= scratch
-          elif dtype in (dtypes.int64, dtypes.long):
-            code.append(v_mad_i64_i32(dst, NULL, a_reg, b_reg, 0))
-          else:
-            code.append(v_mad_u64_u32(dst, NULL, a_reg, b_reg, 0))
-        else:
-          code.append(v_mul_lo_u32(dst, a, b))
-      elif op is Ops.AND: code.append(v_and_b32_e32(dst, a, b))
-      elif op is Ops.OR: code.append(v_or_b32_e32(dst, a, b))
-      elif op is Ops.XOR: code.append(v_xor_b32_e32(dst, a, b))
-      elif op is Ops.SHL:
-        if dtype in (dtypes.int64, dtypes.uint64, dtypes.long, dtypes.ulong):
-          code.append(v_lshlrev_b64(dst, b, a))  # 64-bit shift left
-        else:
-          code.append(v_lshlrev_b32_e32(dst, b, a))
+      if op is Ops.MUL and dtype in (dtypes.int64, dtypes.uint64):
+        # 64-bit multiply: handle fast_idiv pattern (signed 32-bit cast * large constant)
+        a_uop, b_uop = u.src[0], u.src[1]
+        a_is_signed_cast = a_uop.op is Ops.CAST and a_uop.src[0].dtype == dtypes.int32
+        b_is_const_hibit = b_uop.op is Ops.CONST and isinstance(b_uop.arg, int) and (b_uop.arg & 0x80000000) != 0
+        a_reg, b_reg = (a if isinstance(a, (int, float)) else v[a.idx]), (b if isinstance(b, (int, float)) else v[b.idx])
+        if dtype == dtypes.int64 and a_is_signed_cast and b_is_const_hibit:
+          # fast_idiv: unsigned multiply then correct for sign (when a < 0, high bits off by b)
+          b_lo, scratch, a_src_reg = b_uop.arg & 0xFFFFFFFF, ra.alloc_vgpr(u), get_reg(a_uop.src[0])
+          code.extend([v_mul_lo_u32(v[dst.idx], a_reg, b_lo), v_mul_hi_u32(v[dst.idx + 1], a_reg, b_lo),
+                       v_cmp_gt_i32_e32(0, a_src_reg), v_cndmask_b32_e64(scratch, 0, b_lo, VCC_LO),
+                       v_sub_nc_u32_e32(v[dst.idx + 1], v[dst.idx + 1], scratch)])
+        elif dtype == dtypes.int64: code.append(v_mad_i64_i32(dst, NULL, a_reg, b_reg, 0))
+        else: code.append(v_mad_u64_u32(dst, NULL, a_reg, b_reg, 0))
       elif op is Ops.SHR:
         src_dtype = u.src[0].dtype
-        # Handle 64-bit shift right: for shift >= 32, result = high_reg >> (shift - 32)
-        if src_dtype in (dtypes.int64, dtypes.uint64, dtypes.long, dtypes.ulong):
-          shift_amt = b if isinstance(b, int) else None
-          if shift_amt is not None and shift_amt >= 32:
-            # Source is in register pair v[idx:idx+1], need high register (idx+1)
-            src_uop = u.src[0]
-            src_reg = r[src_uop]  # Get register from the r mapping
-            src_idx = src_reg.idx if isinstance(src_reg, VGPR) else src_reg
-            high_reg = v[src_idx + 1]
-            adj_shift = shift_amt - 32
-            if src_dtype in (dtypes.uint64, dtypes.ulong):
-              code.append(v_lshrrev_b32_e32(dst, adj_shift, high_reg))
-            else:
-              code.append(v_ashrrev_i32_e32(dst, adj_shift, high_reg))
-          else:
-            # shift < 32 or dynamic shift - needs more complex handling
-            code.append(v_lshrrev_b32_e32(dst, b, a) if src_dtype in (dtypes.uint64, dtypes.ulong) else v_ashrrev_i32_e32(dst, b, a))
+        is_unsigned = src_dtype in (dtypes.uint64, dtypes.uint32, dtypes.uint16, dtypes.uint8)
+        if src_dtype in (dtypes.int64, dtypes.uint64) and isinstance(b, int) and b >= 32:
+          # 64-bit shift >= 32: result = high_reg >> (shift - 32)
+          src_reg = r[u.src[0]]
+          high_reg = v[(src_reg.idx if isinstance(src_reg, VGPR) else src_reg) + 1]
+          code.append(v_lshrrev_b32_e32(dst, b - 32, high_reg) if is_unsigned else v_ashrrev_i32_e32(dst, b - 32, high_reg))
         else:
-          code.append(v_lshrrev_b32_e32(dst, b, a) if dtype in (dtypes.uint32, dtypes.uint16, dtypes.uint8) else v_ashrrev_i32_e32(dst, b, a))
-      elif op is Ops.MAX:
-        if dtypes.is_float(dtype): code.append(v_max_f32_e32(dst, a, b))
-        elif dtype in (dtypes.int32, dtypes.int16, dtypes.int8): code.append(v_max_i32_e32(dst, a, b))
-        else: code.append(v_max_u32_e32(dst, a, b))
-      elif op is Ops.MULACC:
-        c = srcs[2] if len(srcs) > 2 else 0
-        if dtype == dtypes.float64:
-          code.append(v_fma_f64(dst, a, b, c))
-        else:
-          code.append(v_fma_f32(dst, a, b, c))
-      elif op is Ops.RECIPROCAL: code.append(v_rcp_f32_e32(dst, a))
-      elif op is Ops.SQRT: code.append(v_sqrt_f32_e32(dst, a))
-      elif op is Ops.EXP2: code.append(v_exp_f32_e32(dst, a))
-      elif op is Ops.LOG2: code.append(v_log_f32_e32(dst, a))
-      elif op is Ops.TRUNC: code.append(v_trunc_f32_e32(dst, a))
-      elif op is Ops.SIN: code.append(v_sin_f32_e32(dst, a))
-      elif op is Ops.NEG:
-        if dtypes.is_float(dtype): code.append(v_mul_f32_e32(dst, -1.0, a))
-        else: code.append(v_sub_nc_u32_e32(dst, 0, a))
+          code.append(v_lshrrev_b32_e32(dst, b, a) if is_unsigned else v_ashrrev_i32_e32(dst, b, a))
+      elif op is Ops.SIN:
+        raise NotImplementedError("SIN requires input normalization by 1/(2π) - needs to be lowered in rdna_uops.py")
       elif op in (Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE):
         emit_cmp(op, u.src[0].dtype, dst, a, b)
       elif op is Ops.WHERE:
         cond, true_val, false_val = srcs[0], srcs[1], srcs[2]
-        code.append(v_cmp_ne_i32_e32(0, cond))  # VOPC: src0=constant, vsrc1=VGPR; 0 != cond ⇔ cond != 0
-        code.append(v_cndmask_b32_e64(dst, false_val, true_val, VCC_LO))
+        code.extend([v_cmp_ne_i32_e32(0, cond), v_cndmask_b32_e64(dst, false_val, true_val, VCC_LO)])
       elif op is Ops.IDIV:
         # Integer division using floating-point approximation
         # quotient = trunc(float(a) * rcp(float(b)))
@@ -431,7 +433,7 @@ class RDNARenderer(Renderer):
 
       if u.op is Ops.SINK: continue
 
-      elif u.op is Ops.DEFINE_GLOBAL:
+      if u.op is Ops.DEFINE_GLOBAL:
         bufs.append(u)
         kernarg_offset[u] = current_offset
         current_offset += 8  # 64-bit pointer
@@ -490,241 +492,24 @@ class RDNARenderer(Renderer):
         maybe_wait(u.src)  # Wait for any pending loads used by this operation
         dst = ra.alloc_vgpr_pair(u) if RDNARegAlloc.needs_vgpr_pair(u.dtype) else ra.alloc_vgpr(u)
         r[u] = dst
-        emit_alu(u, dst)
+        ctx = RenderContext(ra, r, code, get_reg)
+        ctx.dst = dst
+        if (insts := render_ops.rewrite(u, ctx=ctx)) is not None: code.extend(insts)
+        else: emit_alu(u, dst)
 
       elif u.op is Ops.CAST:
-        maybe_wait(u.src)  # Wait for source value
-        src_reg = get_reg(u.src[0])
+        maybe_wait(u.src)
         src_dtype, dst_dtype = u.src[0].dtype, u.dtype
         if src_dtype == dst_dtype:
-          r[u] = src_reg
+          r[u] = get_reg(u.src[0])
         else:
-          SMALL_SIGNED = (dtypes.int8, dtypes.int16)
-          SMALL_UNSIGNED = (dtypes.uint8, dtypes.uint16)
-          SMALL_INTS = SMALL_SIGNED + SMALL_UNSIGNED
-          INT64_TYPES = (dtypes.int64, dtypes.uint64, dtypes.long, dtypes.ulong)
           dst = ra.alloc_vgpr_pair(u) if RDNARegAlloc.needs_vgpr_pair(dst_dtype) else ra.alloc_vgpr(u)
           r[u] = dst
-          # float32 <-> int32/uint32
-          if dst_dtype == dtypes.float32 and src_dtype == dtypes.int32:
-            code.append(v_cvt_f32_i32_e32(dst, src_reg))
-          elif dst_dtype == dtypes.float32 and src_dtype == dtypes.uint32:
-            code.append(v_cvt_f32_u32_e32(dst, src_reg))
-          elif dst_dtype == dtypes.int32 and src_dtype == dtypes.float32:
-            code.append(v_cvt_i32_f32_e32(dst, src_reg))
-          elif dst_dtype == dtypes.uint32 and src_dtype == dtypes.float32:
-            code.append(v_cvt_u32_f32_e32(dst, src_reg))
-          # float32 <-> small ints (via 32-bit convert)
-          elif dst_dtype == dtypes.float32 and src_dtype in SMALL_SIGNED:
-            # Sign-extend to 32-bit then convert
-            tmp = ra.alloc_vgpr(u)
-            bits = 8 if src_dtype.itemsize == 1 else 16
-            code.append(v_bfe_i32(tmp, src_reg, 0, bits))
-            code.append(v_cvt_f32_i32_e32(dst, tmp))
-          elif dst_dtype == dtypes.float32 and src_dtype in SMALL_UNSIGNED:
-            code.append(v_cvt_f32_u32_e32(dst, src_reg))  # Zero-extension is implicit
-          elif dst_dtype in SMALL_SIGNED and src_dtype == dtypes.float32:
-            code.append(v_cvt_i32_f32_e32(dst, src_reg))  # Truncation is implicit on store
-          elif dst_dtype in SMALL_UNSIGNED and src_dtype == dtypes.float32:
-            code.append(v_cvt_u32_f32_e32(dst, src_reg))
-          # float16 <-> float32
-          elif dst_dtype == dtypes.float16 and src_dtype == dtypes.float32:
-            code.append(v_cvt_f16_f32_e32(dst, src_reg))
-          elif dst_dtype == dtypes.float32 and src_dtype == dtypes.float16:
-            code.append(v_cvt_f32_f16_e32(dst, src_reg))
-          # float16 <-> int (via float32)
-          elif dst_dtype == dtypes.float16 and dtypes.is_int(src_dtype) and src_dtype not in INT64_TYPES:
-            tmp = ra.alloc_vgpr(u)
-            if src_dtype in SMALL_SIGNED:
-              bits = 8 if src_dtype.itemsize == 1 else 16
-              code.append(v_bfe_i32(tmp, src_reg, 0, bits))
-              code.append(v_cvt_f32_i32_e32(tmp, tmp))
-            elif src_dtype in SMALL_UNSIGNED:
-              code.append(v_cvt_f32_u32_e32(tmp, src_reg))
-            elif src_dtype == dtypes.int32:
-              code.append(v_cvt_f32_i32_e32(tmp, src_reg))
-            else:  # uint32
-              code.append(v_cvt_f32_u32_e32(tmp, src_reg))
-            code.append(v_cvt_f16_f32_e32(dst, tmp))
-          elif dtypes.is_int(dst_dtype) and dst_dtype not in INT64_TYPES and src_dtype == dtypes.float16:
-            tmp = ra.alloc_vgpr(u)
-            code.append(v_cvt_f32_f16_e32(tmp, src_reg))
-            if dst_dtype in (dtypes.int8, dtypes.int16, dtypes.int32):
-              code.append(v_cvt_i32_f32_e32(dst, tmp))
-            else:
-              code.append(v_cvt_u32_f32_e32(dst, tmp))
-          # bfloat16 <-> float32
-          elif dst_dtype == dtypes.bfloat16 and src_dtype == dtypes.float32:
-            code.append(v_lshrrev_b32_e32(dst, 16, src_reg))
-          elif dst_dtype == dtypes.float32 and src_dtype == dtypes.bfloat16:
-            code.append(v_lshlrev_b32_e32(dst, 16, src_reg))
-          # bfloat16 <-> int (via float32)
-          elif dst_dtype == dtypes.bfloat16 and dtypes.is_int(src_dtype) and src_dtype not in INT64_TYPES:
-            tmp = ra.alloc_vgpr(u)
-            if src_dtype in SMALL_SIGNED:
-              bits = 8 if src_dtype.itemsize == 1 else 16
-              code.append(v_bfe_i32(tmp, src_reg, 0, bits))
-              code.append(v_cvt_f32_i32_e32(tmp, tmp))
-            elif src_dtype in SMALL_UNSIGNED:
-              code.append(v_cvt_f32_u32_e32(tmp, src_reg))
-            elif src_dtype == dtypes.int32:
-              code.append(v_cvt_f32_i32_e32(tmp, src_reg))
-            else:
-              code.append(v_cvt_f32_u32_e32(tmp, src_reg))
-            code.append(v_lshrrev_b32_e32(dst, 16, tmp))
-          elif dtypes.is_int(dst_dtype) and dst_dtype not in INT64_TYPES and src_dtype == dtypes.bfloat16:
-            tmp = ra.alloc_vgpr(u)
-            code.append(v_lshlrev_b32_e32(tmp, 16, src_reg))  # bf16 -> f32
-            if dst_dtype in (dtypes.int8, dtypes.int16, dtypes.int32):
-              code.append(v_cvt_i32_f32_e32(dst, tmp))
-            else:
-              code.append(v_cvt_u32_f32_e32(dst, tmp))
-          # float64 <-> float32
-          elif dst_dtype == dtypes.float64 and src_dtype == dtypes.float32:
-            code.append(v_cvt_f64_f32_e32(dst, src_reg))
-          elif dst_dtype == dtypes.float32 and src_dtype == dtypes.float64:
-            code.append(v_cvt_f32_f64_e32(dst, src_reg))
-          # float64 <-> int32/uint32
-          elif dst_dtype == dtypes.float64 and src_dtype == dtypes.int32:
-            code.append(v_cvt_f64_i32_e32(dst, src_reg))
-          elif dst_dtype == dtypes.float64 and src_dtype == dtypes.uint32:
-            code.append(v_cvt_f64_u32_e32(dst, src_reg))
-          elif dst_dtype == dtypes.int32 and src_dtype == dtypes.float64:
-            code.append(v_cvt_i32_f64_e32(dst, src_reg))
-          elif dst_dtype == dtypes.uint32 and src_dtype == dtypes.float64:
-            code.append(v_cvt_u32_f64_e32(dst, src_reg))
-          # float64 <-> small ints (via float64 <-> int32)
-          elif dst_dtype == dtypes.float64 and src_dtype in SMALL_SIGNED:
-            tmp = ra.alloc_vgpr(u)
-            bits = 8 if src_dtype.itemsize == 1 else 16
-            code.append(v_bfe_i32(tmp, src_reg, 0, bits))
-            code.append(v_cvt_f64_i32_e32(dst, tmp))
-          elif dst_dtype == dtypes.float64 and src_dtype in SMALL_UNSIGNED:
-            code.append(v_cvt_f64_u32_e32(dst, src_reg))
-          elif dst_dtype in SMALL_SIGNED and src_dtype == dtypes.float64:
-            code.append(v_cvt_i32_f64_e32(dst, src_reg))
-          elif dst_dtype in SMALL_UNSIGNED and src_dtype == dtypes.float64:
-            code.append(v_cvt_u32_f64_e32(dst, src_reg))
-          # float64 <-> float16/bfloat16 (via float32)
-          elif dst_dtype == dtypes.float64 and src_dtype == dtypes.float16:
-            tmp = ra.alloc_vgpr(u)
-            code.append(v_cvt_f32_f16_e32(tmp, src_reg))
-            code.append(v_cvt_f64_f32_e32(dst, tmp))
-          elif dst_dtype == dtypes.float16 and src_dtype == dtypes.float64:
-            tmp = ra.alloc_vgpr(u)
-            code.append(v_cvt_f32_f64_e32(tmp, src_reg))
-            code.append(v_cvt_f16_f32_e32(dst, tmp))
-          elif dst_dtype == dtypes.float64 and src_dtype == dtypes.bfloat16:
-            tmp = ra.alloc_vgpr(u)
-            code.append(v_lshlrev_b32_e32(tmp, 16, src_reg))
-            code.append(v_cvt_f64_f32_e32(dst, tmp))
-          elif dst_dtype == dtypes.bfloat16 and src_dtype == dtypes.float64:
-            tmp = ra.alloc_vgpr(u)
-            code.append(v_cvt_f32_f64_e32(tmp, src_reg))
-            code.append(v_lshrrev_b32_e32(dst, 16, tmp))
-          # int64 -> smaller types (just take low 32 bits)
-          elif dst_dtype not in INT64_TYPES and src_dtype in INT64_TYPES:
-            code.append(v_mov_b32_e32(dst, src_reg))  # src_reg is already the low 32 bits
-          # smaller types -> int64 (extend to 64 bits)
-          elif dst_dtype in INT64_TYPES and src_dtype not in INT64_TYPES:
-            if src_dtype in SMALL_SIGNED:
-              bits = 8 if src_dtype.itemsize == 1 else 16
-              code.append(v_bfe_i32(v[dst.idx], src_reg, 0, bits))
-              code.append(v_ashrrev_i32_e32(v[dst.idx + 1], 31, v[dst.idx]))  # Sign-extend high word
-            elif src_dtype == dtypes.int32:
-              code.append(v_mov_b32_e32(v[dst.idx], src_reg))
-              code.append(v_ashrrev_i32_e32(v[dst.idx + 1], 31, src_reg))  # Sign-extend high word
-            else:  # unsigned types
-              code.append(v_mov_b32_e32(v[dst.idx], src_reg))
-              code.append(v_mov_b32_e32(v[dst.idx + 1], 0))  # Zero-extend high word
-          # int64 <-> float (complex - convert via f64)
-          elif dst_dtype in INT64_TYPES and src_dtype == dtypes.float64:
-            # Convert f64 to int32, then extend
-            code.append(v_cvt_i32_f64_e32(v[dst.idx], src_reg) if dst_dtype in (dtypes.int64, dtypes.long) else v_cvt_u32_f64_e32(v[dst.idx], src_reg))
-            if dst_dtype in (dtypes.int64, dtypes.long):
-              code.append(v_ashrrev_i32_e32(v[dst.idx + 1], 31, v[dst.idx]))
-            else:
-              code.append(v_mov_b32_e32(v[dst.idx + 1], 0))
-          elif src_dtype in INT64_TYPES and dst_dtype == dtypes.float64:
-            # Convert low 32 bits to f64, add high 32 bits * 2^32
-            tmp = ra.alloc_vgpr_pair(u)
-            is_signed = src_dtype in (dtypes.int64, dtypes.long)
-            code.append(v_cvt_f64_u32_e32(dst, src_reg))  # Low word (always unsigned)
-            if is_signed:
-              code.append(v_cvt_f64_i32_e32(tmp, v[src_reg.idx + 1]))  # High word (signed)
-            else:
-              code.append(v_cvt_f64_u32_e32(tmp, v[src_reg.idx + 1]))  # High word (unsigned)
-            code.append(v_ldexp_f64(tmp, tmp, 32))  # tmp *= 2^32
-            code.append(v_add_f64(dst, dst, tmp))  # result = low + high * 2^32
-          elif src_dtype in INT64_TYPES and dst_dtype == dtypes.float32:
-            # Convert via float64
-            tmp = ra.alloc_vgpr_pair(u)
-            tmp2 = ra.alloc_vgpr_pair(u)
-            is_signed = src_dtype in (dtypes.int64, dtypes.long)
-            code.append(v_cvt_f64_u32_e32(tmp, src_reg))
-            if is_signed:
-              code.append(v_cvt_f64_i32_e32(tmp2, v[src_reg.idx + 1]))
-            else:
-              code.append(v_cvt_f64_u32_e32(tmp2, v[src_reg.idx + 1]))
-            code.append(v_ldexp_f64(tmp2, tmp2, 32))
-            code.append(v_add_f64(tmp, tmp, tmp2))
-            code.append(v_cvt_f32_f64_e32(dst, tmp))
-          elif dst_dtype in INT64_TYPES and src_dtype == dtypes.float32:
-            # Convert via float64
-            tmp = ra.alloc_vgpr_pair(u)
-            code.append(v_cvt_f64_f32_e32(tmp, src_reg))
-            code.append(v_cvt_i32_f64_e32(v[dst.idx], tmp) if dst_dtype in (dtypes.int64, dtypes.long) else v_cvt_u32_f64_e32(v[dst.idx], tmp))
-            if dst_dtype in (dtypes.int64, dtypes.long):
-              code.append(v_ashrrev_i32_e32(v[dst.idx + 1], 31, v[dst.idx]))
-            else:
-              code.append(v_mov_b32_e32(v[dst.idx + 1], 0))
-          # small int <-> int32 (sign/zero extension)
-          elif dst_dtype == dtypes.int32 and src_dtype in SMALL_SIGNED:
-            bits = 8 if src_dtype.itemsize == 1 else 16
-            code.append(v_bfe_i32(dst, src_reg, 0, bits))
-          elif dst_dtype == dtypes.int32 and src_dtype in SMALL_UNSIGNED:
-            code.append(v_mov_b32_e32(dst, src_reg))  # Zero-extension implicit
-          elif dst_dtype == dtypes.uint32 and src_dtype in SMALL_INTS:
-            code.append(v_mov_b32_e32(dst, src_reg))  # Zero-extension implicit
-          elif dst_dtype in SMALL_INTS and src_dtype in (dtypes.int32, dtypes.uint32):
-            code.append(v_mov_b32_e32(dst, src_reg))  # Truncation is implicit
-          # small int <-> small int
-          elif dst_dtype in SMALL_INTS and src_dtype in SMALL_INTS:
-            if dst_dtype in SMALL_SIGNED and src_dtype in SMALL_SIGNED and dst_dtype.itemsize > src_dtype.itemsize:
-              # Sign extend
-              bits = 8 if src_dtype.itemsize == 1 else 16
-              code.append(v_bfe_i32(dst, src_reg, 0, bits))
-            else:
-              code.append(v_mov_b32_e32(dst, src_reg))
-          # bool conversions
-          elif dst_dtype == dtypes.bool:
-            if src_dtype in INT64_TYPES:
-              tmp = ra.alloc_vgpr(u)
-              code.append(v_or_b32_e32(tmp, src_reg, v[src_reg.idx + 1]))
-              code.append(v_cmp_ne_u32_e32(0, tmp))
-            elif src_dtype == dtypes.float64:
-              code.append(v_cmp_neq_f32_e32(0, src_reg))  # Just check low word for now
-            else:
-              code.append(v_cmp_ne_i32_e32(0, src_reg))
-            code.append(v_cndmask_b32_e64(dst, 0, 1, VCC_LO))
-          elif src_dtype == dtypes.bool:
-            if dst_dtype == dtypes.float32:
-              code.append(v_cmp_ne_i32_e32(0, src_reg))
-              code.append(v_cndmask_b32_e64(dst, 0, 0x3f800000, VCC_LO))  # 1.0f
-            elif dst_dtype == dtypes.float16:
-              code.append(v_cmp_ne_i32_e32(0, src_reg))
-              code.append(v_cndmask_b32_e64(dst, 0, 0x3c00, VCC_LO))  # 1.0 in f16
-            elif dst_dtype == dtypes.float64:
-              code.append(v_cmp_ne_i32_e32(0, src_reg))
-              code.append(v_cndmask_b32_e64(v[dst.idx], 0, 0, VCC_LO))
-              code.append(v_cndmask_b32_e64(v[dst.idx + 1], 0, 0x3ff00000, VCC_LO))  # 1.0 in f64
-            elif dst_dtype in INT64_TYPES:
-              code.append(v_mov_b32_e32(v[dst.idx], src_reg))
-              code.append(v_mov_b32_e32(v[dst.idx + 1], 0))
-            else:
-              code.append(v_mov_b32_e32(dst, src_reg))
-          else:
-            raise NotImplementedError(f"CAST from {src_dtype} to {dst_dtype} not implemented")
+          ctx = RenderContext(ra, r, code, get_reg)
+          ctx.dst = dst
+          insts = render_ops.rewrite(u, ctx=ctx)
+          assert insts is not None, f"unhandled cast: {src_dtype} -> {dst_dtype}"
+          code.extend(insts)
 
       elif u.op is Ops.BITCAST:
         r[u] = get_reg(u.src[0])  # Bitcast is just a reinterpretation
@@ -809,7 +594,9 @@ class RDNARenderer(Renderer):
               else:
                 # Copy from default vector
                 for j in range(itemsize // 4):
-                  code.append(v_mov_b32_e32(v[dst.idx + j] if hasattr(dst, 'idx') else dst, v[default_val.idx + j] if hasattr(default_val, 'idx') else default_val))
+                  dst_reg = v[dst.idx + j] if hasattr(dst, 'idx') else dst
+                  src_reg = v[default_val.idx + j] if hasattr(default_val, 'idx') else default_val
+                  code.append(v_mov_b32_e32(dst_reg, src_reg))
             else:
               # No default value - initialize to 0 for safety
               for j in range(itemsize // 4):
@@ -925,7 +712,11 @@ class RDNARenderer(Renderer):
 
       elif u.op is Ops.RANGE:
         loop_var = ra.alloc_vgpr(u)
-        r[u] = loop_var
+        # IMPORTANT: Materialize the bound BEFORE the loop starts, not lazily at END time
+        # Otherwise, if bound > 64, it gets allocated inside the loop body and the first
+        # comparison uses uninitialized register (v38=0 from earlier init)
+        bound = get_reg(u.src[0])
+        r[u] = (loop_var, bound)  # Store both loop var and bound
         code.append(v_mov_b32_e32(loop_var, -1))  # Start at -1
         code.append(f"s_branch .L_END_{i}")  # Jump to loop end check
         code.append(f".L_BODY_{i}:")  # Loop body label
@@ -934,8 +725,7 @@ class RDNARenderer(Renderer):
         if len(u.src) >= 2 and u.src[1].op is Ops.RANGE:
           range_uop = u.src[1]
           range_idx = uops.index(range_uop)
-          loop_var = r[range_uop]
-          bound = get_reg(range_uop.src[0])
+          loop_var, bound = r[range_uop]  # Get both loop var and pre-materialized bound
           code.append(f".L_END_{range_idx}:")  # Loop end label
           code.append(v_add_nc_u32_e32(loop_var, 1, loop_var))  # VOP2: src0=constant, vsrc1=VGPR
           # VOPC: src0 can be constant/SGPR, vsrc1 must be VGPR
@@ -953,6 +743,7 @@ class RDNARenderer(Renderer):
         r[u] = get_reg(buf_uop)
 
       elif u.op is Ops.VECTORIZE:
+        maybe_wait(u.src)  # Wait for any pending loads before vectorizing
         # Allocate contiguous registers for vector - pack small types
         count = len(u.src)
         scalar_dtype = u.dtype.scalar()
