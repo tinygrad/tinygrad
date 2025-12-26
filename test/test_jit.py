@@ -5,6 +5,7 @@ import numpy as np
 from hypothesis import given, settings, strategies as strat
 from test.helpers import assert_jit_cache_len, not_support_multi_device, REAL_DEV, needs_second_gpu
 from tinygrad.tensor import Tensor
+from tinygrad.uop.ops import RState
 from tinygrad.engine.jit import TinyJit, GraphRunner, MultiGraphRunner, graph_class
 from tinygrad.engine.realize import CompiledRunner, BufferCopy, BufferXfer
 from tinygrad.device import Device
@@ -501,17 +502,65 @@ class TestJit(unittest.TestCase):
     b = f(Tensor([2.0]))
     assert abs((a - b).item()) > 0.5
 
-  def test_jit_init_with_empty_different_size(self):
+  def test_jit_mapping_failures(self):
+    def new_f():
+      @TinyJit
+      # see jit.py, _prepare_jit_inputs for mapping info
+      def f(x:Tensor) -> Tensor: return (x + 1).realize()
+      return f
+    def _empty(): return Tensor.empty(1) + 0
+    # this maps unrealized -> unrealized -> realized, since empty is unrealized, realize(empty) is unrealized, and empty + 1 is realized
+    unrealized_f = new_f()
+    assert Tensor.empty(1).uop.base_state is RState.UNREALIZED
+    assert Tensor.empty(1).realize().uop.base_state is RState.UNREALIZED
+    assert (Tensor.empty(1) + 10).realize().uop.base_state is RState.REALIZED
+    unrealized_f(Tensor.empty(1)) # unrealized input
+    unrealized_f(Tensor.empty(1))
+    with self.assertRaises(AssertionError): unrealized_f(Tensor.empty(1) + 10) # realized input
+    # const -> const -> const
+    const_f = new_f()
+    assert Tensor(1.0).uop.base_state is RState.CONST
+    assert Tensor(1.0).realize().uop.base_state is RState.CONST
+    const_f(Tensor(1.0))
+    # maps here, and should throw error since consts alone do not map to buffers (throws no jit cache error)
+    with self.assertRaises(AssertionError): const_f(Tensor(1.0))
+    # passing in realize(x) -> unrealized followed by realize(y) -> realize throws an error
+    ru_f = new_f()
+    a = Tensor.empty(1).realize()
+    b = Tensor.ones(1).contiguous().realize()
+    assert a.uop.base_state is RState.UNREALIZED
+    assert b.uop.base_state is RState.REALIZED
+    ru_f(a)
+    ru_f(a) # maps unrealized inputs
+    with self.assertRaises(AssertionError): const_f(ru_f(b))
+    # unrealized -> realized. should always work
+    assert Tensor([1.0]).uop.base_state is RState.UNREALIZED
+    assert Tensor([1.0]).realize().uop.base_state is RState.REALIZED
+    realized_f = new_f()
+    assert realized_f(Tensor([1.0])).item() == 2.0
+    assert realized_f(Tensor([2.0])).item() == 3.0
+    assert realized_f(Tensor([3.0])).item() == 4.0
+    # adding .contiguous() ensures buffer allocation and so tensor.contiguous() should always work
+    contig_f = new_f()
+    assert Tensor([1.0]).uop.base_state is RState.UNREALIZED
+    assert Tensor([1.0]).contiguous().realize().uop.base_state is RState.REALIZED
+    contig_f(_empty().contiguous()).item()
+    assert contig_f(Tensor([2.0]).contiguous()).item() == 3.0
+    assert contig_f(Tensor([3.0]).contiguous()).item() == 4.0
+
+  @unittest.skipIf(Device.DEFAULT == "REMOTE", "somehow this test inherits values from the above test")
+  def test_jit_init_with_empty_different_types(self):
     @TinyJit
     def f(x:Tensor) -> Tensor: return (x + 1).realize()
-
-    f(Tensor.empty(1))
-    f(Tensor.empty(1))
-    # TODO: this should fail since input has a different size
-    f(Tensor(2.0)).item()
-    # TODO: this should not fail, and should return 3
-    with self.assertRaises(AssertionError):
-      f(Tensor([2.0])).item()
+    # Tensor.empty.realize() is unrealized
+    def _empty(): return Tensor.empty(1) + 0
+    f(_empty())
+    # maps realized -> realized
+    f(_empty())
+    # (type(realize(Tensor([10.0]))) = realized), realized -> realized
+    assert f(Tensor([17.0])).item() == 18.0
+    # this should fail since jit recorded a realized tensor and this is a const tensor
+    with self.assertRaises(AssertionError): f(Tensor(2.0)).item()
 
 @unittest.skip("Pending multioutput implementation #3607")
 class TestMultioutputJit(unittest.TestCase):
