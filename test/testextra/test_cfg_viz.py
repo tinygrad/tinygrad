@@ -1,3 +1,6 @@
+# ruff: noqa: F405, F403
+# allow define from star imports
+
 import unittest
 import textwrap
 
@@ -6,6 +9,7 @@ from tinygrad.uop.ops import UOp, Ops, track_rewrites
 from tinygrad.renderer import ProgramSpec
 from tinygrad.helpers import TracingKey, getenv
 from tinygrad.engine.realize import ExecItem, CompiledRunner
+
 from extra.assembly.rdna3.autogen import *
 
 # TODO: use the RDNA3 renderer when it's in master
