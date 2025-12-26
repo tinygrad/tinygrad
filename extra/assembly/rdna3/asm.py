@@ -126,7 +126,7 @@ def disasm(inst: Inst) -> str:
       src0_str = fmt_src(src0)
     vsrc1_str = _vreg(vsrc1, 2) if is_64bit_vsrc1 else f"v{vsrc1 & 0x7f}.{'h' if vsrc1 >= 128 else 'l'}" if is_16bit else f"v{vsrc1}"
     if is_cmpx:
-      return f"{op_name} {src0_str}, {vsrc1_str}"
+      return f"{op_name}_e32 {src0_str}, {vsrc1_str}"
     return f"{op_name}_e32 vcc_lo, {src0_str}, {vsrc1_str}"
 
   # SOPP
@@ -644,7 +644,19 @@ def disasm(inst: Inst) -> str:
     if cls_name == 'SOPK':
       sdst, simm16 = unwrap(inst._values.get('sdst', 0)), unwrap(inst._values.get('simm16', 0))
       if op_name == 's_version': return f"{op_name} 0x{simm16:x}"
-      if op_name == 's_setreg_b32': return f"{op_name} 0x{simm16:x}, {_fmt_sdst(sdst, 1)}"
+      if op_name in ('s_setreg_b32', 's_getreg_b32'):
+        # Decode hwreg: (size-1) << 11 | offset << 6 | id
+        hwreg_id, hwreg_offset, hwreg_size = simm16 & 0x3f, (simm16 >> 6) & 0x1f, ((simm16 >> 11) & 0x1f) + 1
+        hwreg_names = {1: 'HW_REG_MODE', 2: 'HW_REG_STATUS', 3: 'HW_REG_TRAPSTS', 4: 'HW_REG_HW_ID1', 5: 'HW_REG_HW_ID2',
+                       15: 'HW_REG_GPR_ALLOC', 16: 'HW_REG_LDS_ALLOC', 17: 'HW_REG_IB_STS', 18: 'HW_REG_IB_STS2',
+                       20: 'HW_REG_SH_MEM_BASES', 21: 'HW_REG_TBA_LO', 22: 'HW_REG_TBA_HI', 23: 'HW_REG_TMA_LO',
+                       24: 'HW_REG_TMA_HI', 25: 'HW_REG_FLAT_SCR_LO', 26: 'HW_REG_FLAT_SCR_HI', 27: 'HW_REG_XNACK_MASK',
+                       29: 'HW_REG_POPS_PACKER'}
+        hwreg_name = hwreg_names.get(hwreg_id, str(hwreg_id))
+        hwreg_str = f"hwreg({hwreg_name}, {hwreg_offset}, {hwreg_size})"
+        if op_name == 's_setreg_b32':
+          return f"{op_name} {hwreg_str}, {_fmt_sdst(sdst, 1)}"
+        return f"{op_name} {_fmt_sdst(sdst, 1)}, {hwreg_str}"
       return f"{op_name} {_fmt_sdst(sdst, dst_cnt)}, 0x{simm16:x}"
 
   # Generic fallback
@@ -706,6 +718,18 @@ def asm(text: str) -> Inst:
       elif m := re.match(r'lgkmcnt\((\d+)\)', part): lgkmcnt = int(m.group(1))
       elif re.match(r'^0x[0-9a-f]+$|^\d+$', part): return autogen.s_waitcnt(simm16=int(part, 0))
     return autogen.s_waitcnt(simm16=waitcnt(vmcnt, expcnt, lgkmcnt))
+  # Handle VOPD dual-issue instructions: opx dst, src :: opy dst, src
+  if '::' in text:
+    x_part, y_part = text.split('::')
+    x_parts, y_parts = x_part.strip().replace(',', ' ').split(), y_part.strip().replace(',', ' ').split()
+    opx_name, opy_name = x_parts[0].upper(), y_parts[0].upper()
+    opx, opy = autogen.VOPDOp[opx_name], autogen.VOPDOp[opy_name]
+    x_ops, y_ops = [parse_operand(p)[0] for p in x_parts[1:]], [parse_operand(p)[0] for p in y_parts[1:]]
+    vdstx, srcx0 = x_ops[0], x_ops[1] if len(x_ops) > 1 else 0
+    vsrcx1 = x_ops[2] if len(x_ops) > 2 else VGPR(0)
+    vdsty, srcy0 = y_ops[0], y_ops[1] if len(y_ops) > 1 else 0
+    vsrcy1 = y_ops[2] if len(y_ops) > 2 else VGPR(0)
+    return autogen.VOPD(opx, opy, vdstx=vdstx, vdsty=vdsty, srcx0=srcx0, vsrcx1=vsrcx1, srcy0=srcy0, vsrcy1=vsrcy1)
   operands, current, depth, in_pipe = [], "", 0, False
   for ch in op_str:
     if ch == '[': depth += 1
