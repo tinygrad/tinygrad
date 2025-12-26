@@ -512,7 +512,7 @@ jobs:
   testllama1bspeed:
     name: Llama1B v Torch (cpu, clang)
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -526,14 +526,16 @@ jobs:
         run: JIT=0 CPU=1 CNT=16 python3 test/speed/external_test_speed_llama1b_v_torch.py
       - name: JIT, BEAM=0, TEMP=0
         run: JIT=1 BEAM=0 CPU=1 CNT=16 python3 test/speed/external_test_speed_llama1b_v_torch.py
+      - name: JIT, BEAM=0, TEMP=0, FAKEWEIGHTS=0 (correctness test)
+        run: JIT=1 BEAM=0 CPU=1 CNT=16 FAKEWEIGHTS=0 python3 test/speed/external_test_speed_llama1b_v_torch.py
       - name: JIT, BEAM=2, TEMP=0
-        run: JIT=1 BEAM=2 CPU=1 CNT=128 python3 test/speed/external_test_speed_llama1b_v_torch.py
+        run: JIT=1 BEAM=2 IGNORE_BEAM_CACHE=1 CPU=1 CNT=128 python3 test/speed/external_test_speed_llama1b_v_torch.py
       - name: JIT, BEAM=2, TEMP=0, TORCHCOMPILE=0
-        run: JIT=1 BEAM=2 CPU=1 CNT=128 TORCHCOMPILE=0 python3 test/speed/external_test_speed_llama1b_v_torch.py
+        run: JIT=1 BEAM=2 IGNORE_BEAM_CACHE=1 CPU=1 CNT=128 TORCHCOMPILE=0 python3 test/speed/external_test_speed_llama1b_v_torch.py
       - name: tmp, individual layers speed test, BEAM=0
         run: PYTHONPATH="." JIT=1 CPU=1 CNT=10 python test/speed/external_test_speed_llama_layers_v_torch.py
       - name: tmp, individual layers speed test, BEAM=2
-        run: PYTHONPATH="." JIT=1 BEAM=2 CPU=1 CNT=10 python test/speed/external_test_speed_llama_layers_v_torch.py
+        run: PYTHONPATH="." JIT=1 BEAM=2 IGNORE_BEAM_CACHE=1 CPU=1 CNT=10 python test/speed/external_test_speed_llama_layers_v_torch.py
 
   testmetalmodels:
     name: Models (metal)

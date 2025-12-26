@@ -10,28 +10,15 @@ import torch
 torch.set_num_threads(1)
 np.set_printoptions(linewidth=160)
 from transformers import LlamaForCausalLM, LlamaConfig
-from tinygrad.apps.llm import Transformer as TinygradTransformer
-from tinygrad import Tensor, Device, GlobalCounters, UOp
+from tinygrad.apps.llm import Transformer as TinygradTransformer, models
+from tinygrad import Tensor, Device, GlobalCounters, UOp, fetch, Context
 from tinygrad.helpers import colorize_float, getenv, CI
 
-TORCHCOMPILE = bool(int(getenv("TORCHCOMPILE", 1)))
-CNT = getenv("CNT", 10)
-WARMUP = 10
+TORCHCOMPILE, FAKEWEIGHTS, CNT, WARMUP = getenv("TORCHCOMPILE", 1), getenv("FAKEWEIGHTS", 1), getenv("CNT", 10), 10
 MAX_CONTEXT = WARMUP + CNT
-
-# Llama 3.2 1B config (from GGUF metadata)
-LLAMA_1B = {
-  "dim": 2048,
-  "hidden_dim": 8192,
-  "n_heads": 32,
-  "n_kv_heads": 8,
-  "num_blocks": 16,
-  "vocab_size": 128256,
-  "norm_eps": 1e-5,
-  "rope_theta": 500000.0,
-  "head_dim": 64,
-  "max_context": MAX_CONTEXT,
-}
+# Llama 3.2 1B config
+LLAMA_1B = {"dim": 2048, "hidden_dim": 8192, "n_heads": 32, "n_kv_heads": 8, "num_blocks": 16,
+            "vocab_size": 128256, "norm_eps": 1e-5, "rope_theta": 500000.0, "head_dim": 64, "max_context": MAX_CONTEXT}
 
 def benchmark_hf(model, start_tok, warmup=WARMUP, iters=CNT):
   cache_defeat = np.zeros((2048, 2048))
@@ -87,33 +74,30 @@ def benchmark_tinygrad(model, start_tok, warmup=WARMUP, iters=CNT):
     toks.append(last_tok)
   return times, toks, mems
 
-class BaseLlamaTest(unittest.TestCase):
+class TestLlamaBenchmark(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
-    print(f"\nTinygrad device: {Device.DEFAULT}")
+    print(f"\nTinygrad device: {Device.DEFAULT}, FAKEWEIGHTS={FAKEWEIGHTS}")
     print(f"Config: {LLAMA_1B}")
 
-    # create tinygrad model with random weights
-    print("Creating tinygrad model (tinygrad.apps.llm.Transformer)...")
-    cls.tiny_model = TinygradTransformer(**LLAMA_1B)
+    # with Context(BEAM=0):  # don't search for faster copy kernels
+    if FAKEWEIGHTS:
+      print("Creating tinygrad model with random weights...")
+      cls.tiny_model = TinygradTransformer(**LLAMA_1B)
+      print("Creating HuggingFace model with random weights...")
+      hf_config = LlamaConfig(vocab_size=LLAMA_1B["vocab_size"], hidden_size=LLAMA_1B["dim"],
+        intermediate_size=LLAMA_1B["hidden_dim"], num_hidden_layers=LLAMA_1B["num_blocks"],
+        num_attention_heads=LLAMA_1B["n_heads"], num_key_value_heads=LLAMA_1B["n_kv_heads"],
+        rms_norm_eps=LLAMA_1B["norm_eps"], rope_theta=LLAMA_1B["rope_theta"],
+        max_position_embeddings=MAX_CONTEXT * 2, use_cache=True)
+      cls.hf_model = LlamaForCausalLM(hf_config)
+    else:
+      gguf_path = fetch(models["llama3.2:1b"])
+      print(f"Loading pretrained models from GGUF: {gguf_path}")
+      cls.tiny_model, _ = TinygradTransformer.from_gguf(Tensor(gguf_path), max_context=MAX_CONTEXT)
+      cls.hf_model = LlamaForCausalLM.from_pretrained(gguf_path.parent, gguf_file=gguf_path.name, dtype=torch.float16)
 
-    # create HF model with same architecture and random weights
-    print("Creating HuggingFace model with random weights...")
-    hf_config = LlamaConfig(
-      vocab_size=LLAMA_1B["vocab_size"],
-      hidden_size=LLAMA_1B["dim"],
-      intermediate_size=LLAMA_1B["hidden_dim"],
-      num_hidden_layers=LLAMA_1B["num_blocks"],
-      num_attention_heads=LLAMA_1B["n_heads"],
-      num_key_value_heads=LLAMA_1B["n_kv_heads"],
-      rms_norm_eps=LLAMA_1B["norm_eps"],
-      rope_theta=LLAMA_1B["rope_theta"],
-      max_position_embeddings=MAX_CONTEXT * 2,
-      use_cache=True,
-    )
-    cls.hf_model = LlamaForCausalLM(hf_config)
     cls.hf_model.eval()
-
     cls.start_tok = 1  # starting token for generation
 
   def reset_kv(self):
@@ -122,7 +106,6 @@ class BaseLlamaTest(unittest.TestCase):
       if hasattr(block, 'cache_kv'):
         delattr(block, 'cache_kv')
 
-class TestLlamaBenchmark(BaseLlamaTest):
   def test_benchmark(self):
     self.reset_kv()
 
@@ -152,6 +135,9 @@ class TestLlamaBenchmark(BaseLlamaTest):
     avg_desc = "faster" if tiny_mean < hf_mean else "slower"
     print(f"\naverage: {hf_mean:7.2f}±{hf_std:.2f} ms torch, {tiny_mean:7.2f}±{tiny_std:.2f} ms tinygrad, {avg_ratio} {avg_desc}")
     print(f"tinygrad mem bw: {np.mean(tiny_gbps):.2f}±{np.std(tiny_gbps):.2f} GB/s")
+
+    if not FAKEWEIGHTS:
+      self.assertEqual(hf_toks, tiny_toks, f"token mismatch: hf={hf_toks} vs tiny={tiny_toks}")
 
 if __name__ == "__main__":
   unittest.main(verbosity=2)
