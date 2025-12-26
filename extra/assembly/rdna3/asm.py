@@ -647,13 +647,21 @@ def disasm(inst: Inst) -> str:
       if op_name in ('s_setreg_b32', 's_getreg_b32'):
         # Decode hwreg: (size-1) << 11 | offset << 6 | id
         hwreg_id, hwreg_offset, hwreg_size = simm16 & 0x3f, (simm16 >> 6) & 0x1f, ((simm16 >> 11) & 0x1f) + 1
-        hwreg_names = {1: 'HW_REG_MODE', 2: 'HW_REG_STATUS', 3: 'HW_REG_TRAPSTS', 4: 'HW_REG_HW_ID1', 5: 'HW_REG_HW_ID2',
-                       15: 'HW_REG_GPR_ALLOC', 16: 'HW_REG_LDS_ALLOC', 17: 'HW_REG_IB_STS', 18: 'HW_REG_IB_STS2',
-                       20: 'HW_REG_SH_MEM_BASES', 21: 'HW_REG_TBA_LO', 22: 'HW_REG_TBA_HI', 23: 'HW_REG_TMA_LO',
-                       24: 'HW_REG_TMA_HI', 25: 'HW_REG_FLAT_SCR_LO', 26: 'HW_REG_FLAT_SCR_HI', 27: 'HW_REG_XNACK_MASK',
-                       29: 'HW_REG_POPS_PACKER'}
-        hwreg_name = hwreg_names.get(hwreg_id, str(hwreg_id))
-        hwreg_str = f"hwreg({hwreg_name}, {hwreg_offset}, {hwreg_size})"
+        # GFX11+ hwreg names (IDs 16-17 are TBA which are not supported on GFX11, IDs 18-19 are PERF_SNAPSHOT)
+        hwreg_names = {1: 'HW_REG_MODE', 2: 'HW_REG_STATUS', 3: 'HW_REG_TRAPSTS', 4: 'HW_REG_HW_ID',
+                       5: 'HW_REG_GPR_ALLOC', 6: 'HW_REG_LDS_ALLOC', 7: 'HW_REG_IB_STS',
+                       15: 'HW_REG_SH_MEM_BASES',
+                       18: 'HW_REG_PERF_SNAPSHOT_PC_LO', 19: 'HW_REG_PERF_SNAPSHOT_PC_HI',
+                       20: 'HW_REG_FLAT_SCR_LO', 21: 'HW_REG_FLAT_SCR_HI', 22: 'HW_REG_XNACK_MASK',
+                       23: 'HW_REG_HW_ID1', 24: 'HW_REG_HW_ID2', 25: 'HW_REG_POPS_PACKER',
+                       28: 'HW_REG_IB_STS2'}
+        # For unsupported registers (TBA_LO/HI, TMA_LO/HI on GFX11), output raw simm16 value
+        if hwreg_id in (16, 17, 18, 19) and hwreg_id not in hwreg_names:
+          # Unsupported on GFX11 - use raw encoding
+          hwreg_str = f"0x{simm16:x}"
+        else:
+          hwreg_name = hwreg_names.get(hwreg_id, str(hwreg_id))
+          hwreg_str = f"hwreg({hwreg_name}, {hwreg_offset}, {hwreg_size})"
         if op_name == 's_setreg_b32':
           return f"{op_name} {hwreg_str}, {_fmt_sdst(sdst, 1)}"
         return f"{op_name} {_fmt_sdst(sdst, 1)}, {hwreg_str}"
@@ -689,6 +697,19 @@ def parse_operand(op: str) -> tuple:
   if m := re.match(r'^([svt](?:tmp)?)\[(\d+):(\d+)\]$', op): return (REG_MAP[m.group(1)][int(m.group(2)):int(m.group(3))+1], neg, abs_, hi_half)
   if m := re.match(r'^([svt](?:tmp)?)(\d+)$', op):
     return (REG_MAP[m.group(1)](int(m.group(2)), 1, hi_half), neg, abs_, hi_half)
+  # hwreg(name, offset, size) -> simm16 encoding
+  if m := re.match(r'^hwreg\((\w+),\s*(\d+),\s*(\d+)\)$', op):
+    hwreg_names = {'hw_reg_mode': 1, 'hw_reg_status': 2, 'hw_reg_trapsts': 3, 'hw_reg_hw_id': 4,
+                   'hw_reg_gpr_alloc': 5, 'hw_reg_lds_alloc': 6, 'hw_reg_ib_sts': 7,
+                   'hw_reg_sh_mem_bases': 15, 'hw_reg_tba_lo': 16, 'hw_reg_tba_hi': 17, 'hw_reg_tma_lo': 18,
+                   'hw_reg_tma_hi': 19, 'hw_reg_flat_scr_lo': 20, 'hw_reg_flat_scr_hi': 21, 'hw_reg_xnack_mask': 22,
+                   'hw_reg_hw_id1': 23, 'hw_reg_hw_id2': 24, 'hw_reg_pops_packer': 25, 'hw_reg_ib_sts2': 28}
+    name_str = m.group(1).lower()
+    hwreg_id = hwreg_names.get(name_str, int(name_str) if name_str.isdigit() else None)
+    if hwreg_id is None: raise ValueError(f"unknown hwreg name: {name_str}")
+    offset, size = int(m.group(2)), int(m.group(3))
+    simm16 = ((size - 1) << 11) | (offset << 6) | hwreg_id
+    return (simm16, neg, abs_, hi_half)
   raise ValueError(f"cannot parse operand: {op}")
 
 SMEM_OPS = {'s_load_b32', 's_load_b64', 's_load_b128', 's_load_b256', 's_load_b512',
@@ -729,11 +750,17 @@ def asm(text: str) -> Inst:
     vsrcx1 = x_ops[2] if len(x_ops) > 2 else VGPR(0)
     vdsty, srcy0 = y_ops[0], y_ops[1] if len(y_ops) > 1 else 0
     vsrcy1 = y_ops[2] if len(y_ops) > 2 else VGPR(0)
-    return autogen.VOPD(opx, opy, vdstx=vdstx, vdsty=vdsty, srcx0=srcx0, vsrcx1=vsrcx1, srcy0=srcy0, vsrcy1=vsrcy1)
+    # Handle fmaak/fmamk literals (4th operand on x or y side)
+    lit = None
+    if 'fmaak' in opx_name.lower() and len(x_ops) > 3: lit = unwrap(x_ops[3])
+    elif 'fmamk' in opx_name.lower() and len(x_ops) > 3: lit, vsrcx1 = unwrap(x_ops[2]), x_ops[3]
+    elif 'fmaak' in opy_name.lower() and len(y_ops) > 3: lit = unwrap(y_ops[3])
+    elif 'fmamk' in opy_name.lower() and len(y_ops) > 3: lit, vsrcy1 = unwrap(y_ops[2]), y_ops[3]
+    return autogen.VOPD(opx, opy, vdstx=vdstx, vdsty=vdsty, srcx0=srcx0, vsrcx1=vsrcx1, srcy0=srcy0, vsrcy1=vsrcy1, literal=lit)
   operands, current, depth, in_pipe = [], "", 0, False
   for ch in op_str:
-    if ch == '[': depth += 1
-    elif ch == ']': depth -= 1
+    if ch in '[(': depth += 1
+    elif ch in '])': depth -= 1
     elif ch == '|': in_pipe = not in_pipe
     if ch == ',' and depth == 0 and not in_pipe: operands.append(current.strip()); current = ""
     else: current += ch
