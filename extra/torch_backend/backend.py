@@ -697,8 +697,7 @@ if TORCH_DEBUG:
 
 # this implementation is needed to allow the batchnorm kernels to fuse in e.g. mnist training
 # aten::native_batch_norm does more than Tensor.batchnorm
-@torch.library.impl("aten::native_batch_norm", "privateuseone")
-def native_batch_norm(input, weight, bias, running_mean, running_var, training, momentum, eps):
+def _native_batch_norm_impl(input, weight, bias, running_mean, running_var, training, momentum, eps):
   input_t, weight_t, bias_t = unwrap(input), unwrap(weight) if weight is not None else None, unwrap(bias) if bias is not None else None
   running_mean_t, running_var_t = unwrap(running_mean) if running_mean is not None else None, unwrap(running_var) if running_var is not None else None
   if training:
@@ -713,6 +712,13 @@ def native_batch_norm(input, weight, bias, running_mean, running_var, training, 
   else:
     out = input_t.batchnorm(weight_t, bias_t, running_mean_t, running_var_t.add(eps).rsqrt())
     return wrap(out), wrap(running_mean_t), wrap(running_var_t.add(eps).rsqrt())
+
+def _native_batch_norm_legit_no_stats(input, weight, bias, training, momentum, eps):
+  return _native_batch_norm_impl(input, weight, bias, None, None, True, momentum, eps)
+
+torch.library.impl("aten::native_batch_norm", "privateuseone")(_native_batch_norm_impl)
+torch.library.impl("aten::_native_batch_norm_legit", "privateuseone")(_native_batch_norm_impl)
+torch.library.impl("aten::_native_batch_norm_legit.no_stats", "privateuseone")(_native_batch_norm_legit_no_stats)
 
 @torch.library.impl("aten::native_batch_norm_backward", "privateuseone")
 def native_batch_norm_backward(grad_out, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps, output_mask):

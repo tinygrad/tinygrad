@@ -4,6 +4,8 @@ from tinygrad.nn.datasets import mnist
 import torch
 from torch import nn, optim
 
+from extra.torch_backend.test_compile import tiny  # noqa: F401
+
 class Model(nn.Module):
   def __init__(self):
     super().__init__()
@@ -27,11 +29,10 @@ class Model(nn.Module):
 
 if __name__ == "__main__":
   if getenv("TINY_BACKEND"):
-    import tinygrad.nn.torch  # noqa: F401
-    device = torch.device("tiny")
+    device = torch.device("cpu")  # torch.compile traces with fake tensors, use CPU
   else:
     device = torch.device({"METAL":"mps","NV":"cuda"}.get(Device.DEFAULT, "cpu"))
-  if DEBUG >= 1: print(f"using torch backend {device}")
+  if DEBUG >= 1: print(f"using torch device {device}")
   X_train, Y_train, X_test, Y_test = mnist()
   X_train = torch.tensor(X_train.float().numpy(), device=device)
   Y_train = torch.tensor(Y_train.cast(dtypes.int64).numpy(), device=device)
@@ -40,10 +41,10 @@ if __name__ == "__main__":
 
   if getenv("TORCHVIZ"): torch.cuda.memory._record_memory_history()
   model = Model().to(device)
+  if getenv("TINY_BACKEND"): model = torch.compile(model, backend="tiny", dynamic=False)
   optimizer = optim.Adam(model.parameters(), 1e-3)
 
   loss_fn = nn.CrossEntropyLoss()
-  #@torch.compile
   def step(samples):
     X,Y = X_train[samples], Y_train[samples]
     out = model(X)
