@@ -6,7 +6,7 @@ from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.uop.ops import Ops
 from tinygrad.helpers import cpu_profile, EMULATE, NULL_IR3, NULL_NAK, NULL_RDNA
 from tinygrad.renderer.nir import IR3Renderer, NAKRenderer
-from tinygrad.renderer.rdna import RDNARenderer
+from tinygrad.renderer.rdna_new import RDNARenderer
 from tinygrad.runtime.support.compiler_mesa import IR3Compiler, NAKCompiler
 from tinygrad.runtime.support.compiler_amd import HIPCompiler
 
