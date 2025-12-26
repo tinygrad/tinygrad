@@ -190,8 +190,8 @@ def disasm(inst: Inst) -> str:
     addr_str = _vreg(addr, 2) if saddr == 0x7F else _vreg(addr)
     saddr_str = "" if saddr == 0x7F else f", {_sreg(saddr, 2)}" if saddr < 106 else ", off" if saddr == 124 else f", {decode_src(saddr)}"
     off_str = f" offset:{offset}" if offset else ""
-    vdata = _vreg(data if 'store' in op_name else vdst, width)
-    return f"{instr} {addr_str}, {vdata}{saddr_str}{off_str}" if 'store' in op_name else f"{instr} {vdata}, {addr_str}{saddr_str}{off_str}"
+    vdata_str = _vreg(data if 'store' in op_name else vdst, width)
+    return f"{instr} {addr_str}, {vdata_str}{saddr_str}{off_str}" if 'store' in op_name else f"{instr} {vdata_str}, {addr_str}{saddr_str}{off_str}"
 
   # VOP3: vector ops with modifiers (can be 1, 2, or 3 sources depending on opcode range)
   if cls_name == 'VOP3':
@@ -386,8 +386,8 @@ def disasm(inst: Inst) -> str:
     vdst = unwrap(inst._values.get('vdst', 0))
     src0, src1, src2 = [unwrap(inst._values.get(f, 0)) for f in ('src0', 'src1', 'src2')]
     neg, waitexp, clmp = unwrap(inst._values.get('neg', 0)), unwrap(inst._values.get('waitexp', 0)), unwrap(inst._values.get('clmp', 0))
-    def fmt_neg(v, neg_bit): return f"-{v}" if neg_bit else v
-    srcs = [fmt_neg(f"v{s - 256}" if s >= 256 else fmt_src(s), neg & (1 << i)) for i, s in enumerate([src0, src1, src2])]
+    def fmt_neg_vi(v, neg_bit): return f"-{v}" if neg_bit else v
+    srcs = [fmt_neg_vi(f"v{s - 256}" if s >= 256 else fmt_src(s), neg & (1 << i)) for i, s in enumerate([src0, src1, src2])]
     mods = [m for m in [f"wait_exp:{waitexp}" if waitexp else "", "clamp" if clmp else ""] if m]
     return f"{op_name} v{vdst}, {', '.join(srcs)}" + (" " + " ".join(mods) if mods else "")
 
@@ -415,10 +415,10 @@ def disasm(inst: Inst) -> str:
   # MTBUF: typed buffer load/store
   if cls_name == 'MTBUF':
     vdata, vaddr, srsrc, soffset = [unwrap(inst._values.get(f, 0)) for f in ('vdata', 'vaddr', 'srsrc', 'soffset')]
-    offset, fmt, offen, idxen = [unwrap(inst._values.get(f, 0)) for f in ('offset', 'format', 'offen', 'idxen')]
+    offset, tbuf_fmt, offen, idxen = [unwrap(inst._values.get(f, 0)) for f in ('offset', 'format', 'offen', 'idxen')]
     glc, dlc, slc = [unwrap(inst._values.get(f, 0)) for f in ('glc', 'dlc', 'slc')]
-    mods = [f"format:{fmt}"] + [m for m in ["idxen" if idxen else "", "offen" if offen else "", f"offset:{offset}" if offset else "",
-                                             "glc" if glc else "", "dlc" if dlc else "", "slc" if slc else ""] if m]
+    mods = [f"format:{tbuf_fmt}"] + [m for m in ["idxen" if idxen else "", "offen" if offen else "", f"offset:{offset}" if offset else "",
+                                                  "glc" if glc else "", "dlc" if dlc else "", "slc" if slc else ""] if m]
     width = 2 if 'd16' in op_name and any(x in op_name for x in ('xyz', 'xyzw')) else 1 if 'd16' in op_name else {'x':1, 'xy':2, 'xyz':3, 'xyzw':4}.get(op_name.split('_')[-1], 1)
     return f"{op_name} {_vreg(vdata, width)}, {_buf_vaddr(vaddr, offen, idxen)}, {_buf_srsrc(srsrc)}, {decode_src(soffset)} {' '.join(mods)}"
 
@@ -450,12 +450,12 @@ def disasm(inst: Inst) -> str:
       return f"{op_name} {_fmt_sdst(sdst, dst_cnt)}, 0x{simm16:x}"
 
   # Generic fallback
-  def fmt(n, v):
+  def fmt_field(n, v):
     v = unwrap(v)
     if n in SRC_FIELDS: return fmt_src(v) if v != 255 else "0xff"
     if n in ('sdst', 'vdst'): return f"{'s' if n == 'sdst' else 'v'}{v}"
     return f"v{v}" if n == 'vsrc1' else f"0x{v:x}" if n == 'simm16' else str(v)
-  ops = [fmt(n, inst._values.get(n, 0)) for n in inst._fields if n not in ('encoding', 'op')]
+  ops = [fmt_field(n, inst._values.get(n, 0)) for n in inst._fields if n not in ('encoding', 'op')]
   return f"{op_name} {', '.join(ops)}" if ops else op_name
 
 # Assembler
@@ -476,7 +476,7 @@ def parse_operand(op: str) -> tuple:
     v = -int(m.group(1), 16) if op.startswith('-') else int(m.group(1), 16)
     return (v, neg, abs_, hi_half)
   if op in SPECIAL_REGS: return (SPECIAL_REGS[op], neg, abs_, hi_half)
-  if m := re.match(r'^([svt](?:tmp)?)\[(\d+):(\d+)\]$', op): return (REG_MAP[m.group(1)][int(m.group(2)):int(m.group(3))+1], neg, abs_, hi_half)
+  if m := re.match(r'^([svt](?:tmp)?)\[(\d+):(\d+)\]$', op): return (REG_MAP[m.group(1)][int(m.group(2)):int(m.group(3))+1], neg, abs_, hi_half)  # type: ignore[misc]
   if m := re.match(r'^([svt](?:tmp)?)(\d+)$', op):
     return (REG_MAP[m.group(1)](int(m.group(2)), 1, hi_half), neg, abs_, hi_half)
   # hwreg(name, offset, size) or hwreg(name) -> simm16 encoding
