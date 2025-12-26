@@ -20,6 +20,8 @@ class Scheduler:
     self.applied_opts = list(self.ast.arg.applied_opts) if self.ast.arg is not None else []
     self.opt_range = itertools.count(start=max([x.arg[0] for x in self.rngs], default=0)+1)
 
+  def __getstate__(self): return {**self.__dict__, "opt_range": None}
+
   @property
   def rngs(self):
     # always in order by axistype
