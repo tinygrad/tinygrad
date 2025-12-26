@@ -1,22 +1,44 @@
-import ctypes, platform, sys, subprocess
+import ctypes, platform, sys, subprocess, tempfile, os, functools
 from tinygrad.device import Compiler
 from tinygrad.helpers import OSX, getenv, capstone_flatdump, DEBUG, unwrap
 from tinygrad.runtime.support.elf import jit_loader
 try: from tinygrad.runtime.autogen import llvm
 except (ImportError, FileNotFoundError): llvm = None #type:ignore[assignment]
 
+@functools.lru_cache(None)
+def get_cc():
+  cc = getenv("CC")
+  if cc is not None: return cc, "clang" if "clang" in subprocess.check_output([cc, "--version"]).decode().lower() else "gcc"
+  for cc in ["clang", "gcc"]:
+    try:
+      subprocess.check_output([cc, "--version"])
+      return cc, cc
+    except (subprocess.CalledProcessError, FileNotFoundError): pass
+  raise RuntimeError("No C compiler found (clang or gcc)")
+
 class ClangJITCompiler(Compiler):
   def __init__(self, cachekey="compile_clang_jit"): super().__init__(cachekey)
 
   def compile(self, src:str) -> bytes:
+    cc, tool = get_cc()
     # -fno-math-errno is required for __builtin_sqrt to become an instruction instead of a function call
     # x18 is a reserved platform register. It is clobbered on context switch in macos and is used to store TEB pointer in windows on arm, don't use it
     target = 'x86_64' if sys.platform == 'win32' else platform.machine()
     # on arm march means "runs on this arch and superset" instead of "optimize for this arch". x86 march == arm mcpu
     arch = {'x86_64': '-march=native', 'AMD64': '-march=native', 'riscv64': '-march=rv64g'}.get(platform.machine(), "-mcpu=native")
-    args = [arch, f'--target={target}-none-unknown-elf', '-O2', '-fPIC', '-ffreestanding', '-fno-math-errno', '-nostdlib', '-fno-ident']
+    args = [arch, '-O2', '-fPIC', '-ffreestanding', '-fno-math-errno', '-nostdlib', '-fno-ident']
+    if tool == "clang": args.append(f'--target={target}-none-unknown-elf')
     arch_args = ['-ffixed-x18'] if target == 'arm64' else []
-    obj = subprocess.check_output([getenv("CC", 'clang'), '-c', '-x', 'c', *args, *arch_args, '-', '-o', '-'], input=src.encode('utf-8'))
+    if tool == "clang":
+      obj = subprocess.check_output([cc, '-c', '-x', 'c', *args, *arch_args, '-', '-o', '-'], input=src.encode('utf-8'))
+    else:
+      with tempfile.NamedTemporaryFile(delete=False) as f:
+        obj_path = f.name
+      try:
+        subprocess.run([cc, '-c', '-x', 'c', *args, *arch_args, '-', '-o', obj_path], check=True, input=src.encode('utf-8'))
+        with open(obj_path, "rb") as f: obj = f.read()
+      finally:
+        os.unlink(obj_path)
     return jit_loader(obj)
 
   def disassemble(self, lib:bytes): return capstone_flatdump(lib)
