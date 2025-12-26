@@ -86,6 +86,16 @@ class RDNARenderer(Renderer):
     lds_size = 0
     labels: dict[str, int] = {}  # Label -> instruction index
     pending_waits: set[UOp] = set()  # Track loads that need waits before use
+    # Allocate dedicated SGPRs for exec mask saving to avoid conflicts with kernel arguments
+    # These will be allocated on first use, which happens after all DEFINE_GLOBAL/VAR ops
+    exec_save_load: list[SGPR | None] = [None]  # Wrapped in list for nonlocal mutation
+    exec_save_if: list[SGPR | None] = [None]
+    def get_exec_save_load() -> SGPR:
+      if exec_save_load[0] is None: exec_save_load[0] = ra.alloc_sgpr(None)
+      return s[exec_save_load[0]] if isinstance(exec_save_load[0], int) else exec_save_load[0]
+    def get_exec_save_if() -> SGPR:
+      if exec_save_if[0] is None: exec_save_if[0] = ra.alloc_sgpr(None)
+      return s[exec_save_if[0]] if isinstance(exec_save_if[0], int) else exec_save_if[0]
 
     def maybe_wait(srcs):
       """Emit waitcnt if any source (or transitive source) is pending from an async load."""
@@ -805,7 +815,7 @@ class RDNARenderer(Renderer):
               for j in range(itemsize // 4):
                 code.append(v_mov_b32_e32(v[dst.idx + j] if hasattr(dst, 'idx') else dst, 0))
 
-            # Set up exec mask based on condition (use s[13] to avoid conflict with IF/ENDIF which uses s[12])
+            # Set up exec mask based on condition (use dynamically allocated SGPR)
             cond_reg = get_reg(cond_uop)
             code.append(v_cmp_ne_i32_e32(0, cond_reg))  # VCC = (cond != 0)
             # Clamp address to 0 for masked lanes to prevent invalid memory accesses
@@ -815,7 +825,7 @@ class RDNARenderer(Renderer):
               clamped_addr = ra.alloc_vgpr(u)
               code.append(v_cndmask_b32_e64(clamped_addr, 0, addr, VCC_LO))  # clamped = cond ? addr : 0
               addr = clamped_addr  # Use clamped address for this load only
-            code.append(s_and_saveexec_b32(s[13], VCC_LO))  # Save exec, mask with condition
+            code.append(s_and_saveexec_b32(get_exec_save_load(), VCC_LO))  # Save exec, mask with condition
             # Now do the load (only executed by lanes where condition is true)
 
           if itemsize == 1:
@@ -831,7 +841,7 @@ class RDNARenderer(Renderer):
 
           # Restore exec mask if we masked it
           if cond_uop is not None:
-            code.append(s_mov_b32(EXEC_LO, s[13]))
+            code.append(s_mov_b32(EXEC_LO, get_exec_save_load()))
 
         r[u] = dst
         pending_waits.add(u)  # Track that this load result needs wait before use
@@ -886,7 +896,7 @@ class RDNARenderer(Renderer):
           buf_result = r.get(buf_uop) if buf_uop in r else get_reg(buf_uop)
           buf_reg = buf_result[0] if isinstance(buf_result, tuple) else buf_result
 
-          # Handle conditional store (mask exec for lanes where condition is false - use s[13])
+          # Handle conditional store (mask exec for lanes where condition is false)
           if cond_uop is not None:
             cond_reg = get_reg(cond_uop)
             code.append(v_cmp_ne_i32_e32(0, cond_reg))  # VCC = (cond != 0)
@@ -896,7 +906,7 @@ class RDNARenderer(Renderer):
               clamped_addr = ra.alloc_vgpr(val_uop)
               code.append(v_cndmask_b32_e64(clamped_addr, 0, addr, VCC_LO))  # clamped = cond ? addr : 0
               addr = clamped_addr  # Use clamped address for this store only
-            code.append(s_and_saveexec_b32(s[13], VCC_LO))  # Save exec, mask with condition
+            code.append(s_and_saveexec_b32(get_exec_save_load(), VCC_LO))  # Save exec, mask with condition
 
           if itemsize == 1:
             code.append(global_store_b8(addr=addr, data=val, saddr=buf_reg))
@@ -911,7 +921,7 @@ class RDNARenderer(Renderer):
 
           # Restore exec mask if we masked it
           if cond_uop is not None:
-            code.append(s_mov_b32(EXEC_LO, s[13]))
+            code.append(s_mov_b32(EXEC_LO, get_exec_save_load()))
 
       elif u.op is Ops.RANGE:
         loop_var = ra.alloc_vgpr(u)
@@ -1020,7 +1030,7 @@ class RDNARenderer(Renderer):
         # Save exec and mask with condition
         cond = get_reg(u.src[0])
         code.append(v_cmp_ne_i32_e32(0, cond))  # condition != 0
-        code.append(s_and_saveexec_b32(s[12], VCC_LO))  # Save exec, AND with condition
+        code.append(s_and_saveexec_b32(get_exec_save_if(), VCC_LO))  # Save exec, AND with condition
         code.append(f"s_cbranch_execz .L_ENDIF_{i}")  # Skip if all lanes masked
 
       elif u.op is Ops.ENDIF:
@@ -1028,7 +1038,7 @@ class RDNARenderer(Renderer):
         if_uop = u.src[0]
         if_idx = uops.index(if_uop)
         code.append(f".L_ENDIF_{if_idx}:")
-        code.append(s_mov_b32(EXEC_LO, s[12]))  # exec_lo = saved
+        code.append(s_mov_b32(EXEC_LO, get_exec_save_if()))  # exec_lo = saved
 
     # Emit kernel prologue (load kernargs)
     prologue: list[Inst] = []

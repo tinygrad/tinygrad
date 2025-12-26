@@ -129,6 +129,23 @@ class TestTiny(unittest.TestCase):
     probs = Tensor.rand(1, 1, 28, 28).sequential(layers).tolist()
     self.assertEqual(len(probs[0]), 10)
 
+  def test_conv2d_backward_weight(self):
+    # Simple test for conv2d backward weight gradient - this exercises a kernel that was causing GPU hangs
+    conv = nn.Conv2d(1, 8, 5)
+    Tensor.realize(*[p.replace(Tensor.ones_like(p).contiguous()) for p in nn.state.get_parameters([conv])])
+    for x in nn.state.get_parameters([conv]): x.requires_grad_()
+    out = Tensor.empty(4, 1, 14, 14).sequential([conv, Tensor.relu])
+    out.sum().backward()
+    Tensor.realize(*[x.grad for x in nn.state.get_parameters([conv]) if x.grad is not None])
+
+  def test_conv2d_backward_weight_two_layers(self):
+    # Same as above but with 2 conv layers - this was causing GPU hangs
+    layers = [nn.Conv2d(1, 8, 5), Tensor.relu, nn.Conv2d(8, 8, 5), Tensor.relu]
+    Tensor.realize(*[p.replace(Tensor.ones_like(p).contiguous()) for p in nn.state.get_parameters(layers)])
+    for x in nn.state.get_parameters(layers): x.requires_grad_()
+    Tensor.empty(4, 1, 14, 14).sequential(layers).sum().backward()
+    Tensor.realize(*[x.grad for x in nn.state.get_parameters(layers) if x.grad is not None])
+
   # TODO: this is failing because of how swizzling rewrites the ShapeTracker of the final STORE
   @unittest.skipIf(CI and Device.DEFAULT == "DSP", "failing because of make things that can't be images not images")
   def test_mnist_backward(self):
