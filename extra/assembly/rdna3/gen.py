@@ -69,8 +69,8 @@ def generate(output_path: pathlib.Path|str|None = None) -> dict:
   for m in re.finditer(r'Table \d+\. (\w+) Opcodes(.*?)(?=Table \d+\.|\n\d+\.\d+\.\d+\.\s+\w+\s*\nDescription|$)', full_text, re.S):
     if ops := {int(x.group(1)): x.group(2) for x in re.finditer(r'(\d+)\s+([A-Z][A-Z0-9_]+)', m.group(2))}:
       enums[m.group(1) + "Op"] = ops
-  if m := re.search(r'Table \d+\. VOPD Y-Opcodes\n(.*?)(?=Table \d+\.|15\.\d)', full_text, re.S):
-    if ops := {int(x.group(1)): x.group(2) for x in re.finditer(r'(\d+)\s+(V_DUAL_\w+)', m.group(1))}:
+  if vopd_m := re.search(r'Table \d+\. VOPD Y-Opcodes\n(.*?)(?=Table \d+\.|15\.\d)', full_text, re.S):
+    if ops := {int(x.group(1)): x.group(2) for x in re.finditer(r'(\d+)\s+(V_DUAL_\w+)', vopd_m.group(1))}:
       enums["VOPDOp"] = ops
   enum_names = set(enums.keys())
 
@@ -118,14 +118,14 @@ def generate(output_path: pathlib.Path|str|None = None) -> dict:
     field_names = {f[0] for f in fields}
 
     # check next pages for continuation fields (tables without ENCODING)
-    for offset in range(1, 3):
-      if page_idx + offset >= len(pages) or has_header_before_fields(page_texts[page_idx + offset]): break
-      for t in page_tables[page_idx + offset]:
+    for pg_offset in range(1, 3):
+      if page_idx + pg_offset >= len(pages) or has_header_before_fields(page_texts[page_idx + pg_offset]): break
+      for t in page_tables[page_idx + pg_offset]:
         if is_fields_table(t) and (extra := parse_fields_table(t, fmt_name, enum_names)) and not has_encoding(extra):
-          for f in extra:
-            if f[0] not in field_names:
-              fields.append(f)
-              field_names.add(f[0])
+          for ef in extra:
+            if ef[0] not in field_names:
+              fields.append(ef)
+              field_names.add(ef[0])
           break
     formats[fmt_name] = fields
 

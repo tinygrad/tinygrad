@@ -1,6 +1,7 @@
 # Pure combinational ALU functions for RDNA3 emulation
 from __future__ import annotations
 import struct, math
+from typing import Callable
 from extra.assembly.rdna3.autogen import SOP1Op, SOP2Op, SOPCOp, SOPKOp, VOP1Op, VOP2Op, VOP3Op
 
 # Format base offsets for unified opcode space
@@ -26,7 +27,7 @@ def _cvt_i32_f32(v): return (0x7fffffff if v > 0 else 0x80000000) if math.isinf(
 def _cvt_u32_f32(v): return (0xffffffff if v > 0 else 0) if math.isinf(v) else (0 if math.isnan(v) or v < 0 else min(0xffffffff, int(v)))
 
 # SALU: op -> fn(s0, s1, scc_in) -> (result, scc_out)
-SALU: dict[int, callable] = {
+SALU: dict[int, Callable] = {
   # SOP2
   SOP2_BASE + SOP2Op.S_ADD_U32: lambda a, b, scc: ((a + b) & 0xffffffff, int((a + b) >= 0x100000000)),
   SOP2_BASE + SOP2Op.S_SUB_U32: lambda a, b, scc: ((a - b) & 0xffffffff, int(b > a)),
@@ -113,7 +114,7 @@ SALU: dict[int, callable] = {
 }
 
 # VALU: op -> fn(s0, s1, s2) -> result
-VALU: dict[int, callable] = {
+VALU: dict[int, Callable] = {
   # VOP2
   VOP2_BASE + VOP2Op.V_ADD_F32: lambda a, b, c: i32(f32(a) + f32(b)),
   VOP2_BASE + VOP2Op.V_SUB_F32: lambda a, b, c: i32(f32(a) - f32(b)),

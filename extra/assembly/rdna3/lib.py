@@ -67,6 +67,7 @@ class Inst:
   _fields: dict[str, BitField]
   _encoding: tuple[BitField, int] | None = None
   _defaults: dict[str, int] = {}
+  _values: dict[str, int | RawImm]
 
   def __init_subclass__(cls, **kwargs):
     super().__init_subclass__(**kwargs)
@@ -78,9 +79,9 @@ class Inst:
     self._values.update(zip([n for n in self._fields if n != 'encoding'], args))
     self._values.update(kwargs)
     # Get annotations from class hierarchy
-    annotations = {}
-    for cls in type(self).__mro__:
-      annotations.update(getattr(cls, '__annotations__', {}))
+    ann: dict[str, type] = {}
+    for kls in type(self).__mro__:
+      ann.update(getattr(kls, '__annotations__', {}))
     # Type check and encode values
     for name, val in list(self._values.items()):
       if name == 'encoding': continue
@@ -88,14 +89,14 @@ class Inst:
       if isinstance(val, RawImm):
         if name in RAW_FIELDS: self._values[name] = val.val
         continue
-      ann = annotations.get(name)
+      field_ann = ann.get(name)
       # Type validation
-      if ann is SGPR:
+      if field_ann is SGPR:
         if isinstance(val, VGPR): raise TypeError(f"field '{name}' requires SGPR, got VGPR")
         if not isinstance(val, (SGPR, TTMP, int, RawImm)): raise TypeError(f"field '{name}' requires SGPR, got {type(val).__name__}")
-      if ann is VGPR:
+      if field_ann is VGPR:
         if not isinstance(val, VGPR): raise TypeError(f"field '{name}' requires VGPR, got {type(val).__name__}")
-      if ann is SSrc and isinstance(val, VGPR): raise TypeError(f"field '{name}' requires scalar source, got VGPR")
+      if field_ann is SSrc and isinstance(val, VGPR): raise TypeError(f"field '{name}' requires scalar source, got VGPR")
       # Encode source fields as RawImm for consistent disassembly
       if name in SRC_FIELDS:
         encoded = encode_src(val)
@@ -113,7 +114,7 @@ class Inst:
       elif name in {'srsrc', 'ssamp'} and isinstance(val, Reg):
         self._values[name] = val.idx // 4
       # VOPD vdsty: encode as actual >> 1 (constraint: vdsty parity must be opposite of vdstx)
-      elif ann is VDSTYEnc and isinstance(val, VGPR):
+      elif field_ann is VDSTYEnc and isinstance(val, VGPR):
         self._values[name] = val.idx >> 1
 
   def _encode_field(self, name: str, val) -> int:
