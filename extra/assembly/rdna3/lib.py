@@ -1,19 +1,36 @@
 # library for RDNA3 assembly DSL
 from __future__ import annotations
 from enum import IntEnum
+from typing import overload, Annotated
 
 # Bit field DSL
 class BitField:
   def __init__(self, hi: int, lo: int, name: str | None = None): self.hi, self.lo, self.name = hi, lo, name
-  def __set_name__(self, owner, name): self.name = name
+  def __set_name__(self, owner, name): self.name, self._owner = name, owner
   def __eq__(self, val: int) -> tuple[BitField, int]: return (self, val)  # type: ignore
   def mask(self) -> int: return (1 << (self.hi - self.lo + 1)) - 1
+  @property
+  def marker(self) -> type | None:
+    # Get marker from Annotated type hint if present
+    import typing
+    if hasattr(self, '_owner') and self.name:
+      hints = typing.get_type_hints(self._owner, include_extras=True)
+      if self.name in hints:
+        hint = hints[self.name]
+        if typing.get_origin(hint) is Annotated:
+          args = typing.get_args(hint)
+          return args[1] if len(args) > 1 else None
+    return None
+  @overload
+  def __get__(self, obj: None, objtype: type) -> BitField: ...
+  @overload
+  def __get__(self, obj: object, objtype: type | None = None) -> int: ...
   def __get__(self, obj, objtype=None):
     if obj is None: return self
     val = unwrap(obj._values.get(self.name, 0))
-    ann = getattr(type(obj), '__annotations__', {}).get(self.name)
-    if ann and isinstance(ann, type) and issubclass(ann, IntEnum):
-      try: return ann(val)
+    # Convert to IntEnum if marker is an IntEnum subclass
+    if self.marker and isinstance(self.marker, type) and issubclass(self.marker, IntEnum):
+      try: return self.marker(val)
       except ValueError: pass
     return val
 
@@ -32,12 +49,23 @@ class VGPR(Reg): pass
 class TTMP(Reg): pass
 s, v = SGPR, VGPR
 
-# Field type markers
-class SSrc: pass
-class Src: pass
-class Imm: pass
-class SImm: pass
-class VDSTYEnc: pass  # VOPD vdsty: encoded = actual >> 1, actual = (encoded << 1) | ((vdstx & 1) ^ 1)
+# Field type markers (runtime classes for validation)
+class _SSrc: pass
+class _Src: pass
+class _Imm: pass
+class _SImm: pass
+class _VDSTYEnc: pass  # VOPD vdsty: encoded = actual >> 1, actual = (encoded << 1) | ((vdstx & 1) ^ 1)
+class _SGPRField: pass
+class _VGPRField: pass
+
+# Type aliases for annotations - tells mypy it's a BitField while preserving marker info
+SSrc = Annotated[BitField, _SSrc]
+Src = Annotated[BitField, _Src]
+Imm = Annotated[BitField, _Imm]
+SImm = Annotated[BitField, _SImm]
+VDSTYEnc = Annotated[BitField, _VDSTYEnc]
+SGPRField = Annotated[BitField, _SGPRField]
+VGPRField = Annotated[BitField, _VGPRField]
 class RawImm:
   def __init__(self, val: int): self.val = val
   def __repr__(self): return f"RawImm({self.val})"
@@ -78,10 +106,6 @@ class Inst:
     self._values, self._literal = dict(self._defaults), literal
     self._values.update(zip([n for n in self._fields if n != 'encoding'], args))
     self._values.update(kwargs)
-    # Get annotations from class hierarchy
-    ann: dict[str, type] = {}
-    for kls in type(self).__mro__:
-      ann.update(getattr(kls, '__annotations__', {}))
     # Type check and encode values
     for name, val in list(self._values.items()):
       if name == 'encoding': continue
@@ -89,14 +113,15 @@ class Inst:
       if isinstance(val, RawImm):
         if name in RAW_FIELDS: self._values[name] = val.val
         continue
-      field_ann = ann.get(name)
+      field = self._fields.get(name)
+      marker = field.marker if field else None
       # Type validation
-      if field_ann is SGPR:
+      if marker is _SGPRField:
         if isinstance(val, VGPR): raise TypeError(f"field '{name}' requires SGPR, got VGPR")
         if not isinstance(val, (SGPR, TTMP, int, RawImm)): raise TypeError(f"field '{name}' requires SGPR, got {type(val).__name__}")
-      if field_ann is VGPR:
+      if marker is _VGPRField:
         if not isinstance(val, VGPR): raise TypeError(f"field '{name}' requires VGPR, got {type(val).__name__}")
-      if field_ann is SSrc and isinstance(val, VGPR): raise TypeError(f"field '{name}' requires scalar source, got VGPR")
+      if marker is _SSrc and isinstance(val, VGPR): raise TypeError(f"field '{name}' requires scalar source, got VGPR")
       # Encode source fields as RawImm for consistent disassembly
       if name in SRC_FIELDS:
         encoded = encode_src(val)
@@ -114,7 +139,7 @@ class Inst:
       elif name in {'srsrc', 'ssamp'} and isinstance(val, Reg):
         self._values[name] = val.idx // 4
       # VOPD vdsty: encode as actual >> 1 (constraint: vdsty parity must be opposite of vdstx)
-      elif field_ann is VDSTYEnc and isinstance(val, VGPR):
+      elif marker is _VDSTYEnc and isinstance(val, VGPR):
         self._values[name] = val.idx >> 1
 
   def _encode_field(self, name: str, val) -> int:
