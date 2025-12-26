@@ -240,10 +240,6 @@ rdna_matcher = PatternMatcher([
    lambda x, a, b: UOp(Ops.CMPNE, dtypes.bool, (a.cast(dtypes.float32), b.cast(dtypes.float32)))),
   # devectorize ALU operations - RDNA doesn't have vector float ALU
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST), name="alu"), no_vectorized_alu),
-  # SIN: normalize input by 1/(2π) for v_sin_f32 (expects [0,1) -> [0,2π))
-  (UPat(Ops.SIN, dtype=dtypes.float32, src=(UPat.var("x"),), name="u"),
-   lambda u, x: None if u.tag == "normalized" else  # skip already normalized
-   UOp(Ops.SIN, dtypes.float32, (x * UOp.const(dtypes.float32, 0.15915494309189535),)).rtag("normalized")),
   # Fix fast_idiv output when shift >= 32 (needs 64-bit multiply)
   # Pattern: (x * const) >> shift for unsigned
   (UPat(Ops.SHR, src=(UPat(Ops.MUL, src=(UPat.var("x"), UPat.cvar("c"))), UPat.cvar("shift"))), _fix_fast_idiv_unsigned),
@@ -292,13 +288,12 @@ rdna_matcher = PatternMatcher([
   (UPat(Ops.SUB, dtype=_small_floats, src=(UPat.var("a"), UPat.var("b")), name="x"), _lower_f16_sub),
   (UPat(Ops.MUL, dtype=_small_floats, src=(UPat.var("a"), UPat.var("b")), name="x"), _lower_f16_mul),
   (UPat(Ops.MAX, dtype=_small_floats, src=(UPat.var("a"), UPat.var("b")), name="x"), _lower_f16_max),
-  # Unary ops: RECIPROCAL, SQRT, EXP2, LOG2, TRUNC, SIN, NEG
+  # Unary ops: RECIPROCAL, SQRT, EXP2, LOG2, TRUNC, NEG (SIN uses software impl for precision)
   (UPat(Ops.RECIPROCAL, dtype=_small_floats, src=(UPat.var("a"),), name="x"), _lower_f16_reciprocal),
   (UPat(Ops.SQRT, dtype=_small_floats, src=(UPat.var("a"),), name="x"), _lower_f16_sqrt),
   (UPat(Ops.EXP2, dtype=_small_floats, src=(UPat.var("a"),), name="x"), _lower_f16_exp2),
   (UPat(Ops.LOG2, dtype=_small_floats, src=(UPat.var("a"),), name="x"), _lower_f16_log2),
   (UPat(Ops.TRUNC, dtype=_small_floats, src=(UPat.var("a"),), name="x"), _lower_f16_trunc),
-  (UPat(Ops.SIN, dtype=_small_floats, src=(UPat.var("a"),), name="x"), _lower_f16_sin),
   (UPat(Ops.NEG, dtype=_small_floats, src=(UPat.var("a"),), name="x"), _lower_f16_neg),
   # WHERE for float16
   (UPat(Ops.WHERE, dtype=_small_floats, src=(UPat.var("cond"), UPat.var("a"), UPat.var("b")), name="x"), _lower_f16_where),
