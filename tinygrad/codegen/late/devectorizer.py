@@ -313,9 +313,8 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
       acc_out = acc.after(acc.index(idx0).store(new_val).end(*reduce_range)).index(idx0)
       ctx.acc_num += 1
       lanes = [acc_out.gep((i,)) for i in range(vec_count)]
-      while len(lanes) > 1:
-        lanes = [lanes[i].alu(red.arg, lanes[i+1]) if i+1 < len(lanes) else lanes[i] for i in range(0, len(lanes), 2)]
-      return lanes[0]
+      pairs = [lanes[i].alu(red.arg, lanes[i+1]) if i+1 < len(lanes) else lanes[i] for i in range(0, len(lanes), 2)]
+      return functools.reduce(lambda x,y: x.alu(red.arg, y), pairs) # pairwise sums then linear across: numerically closer ORT
     acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=1, addrspace=AddrSpace.REG), arg=ctx.acc_num)
     acc_init = acc.after(*input_ranges).index(UOp.const(dtypes.int, 0)).store(identity) if len(input_ranges) else \
                acc.index(UOp.const(dtypes.int, 0)).store(identity)
