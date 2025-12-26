@@ -32,7 +32,7 @@ if __name__ == "__main__":
     device = torch.device("cpu")  # torch.compile traces with fake tensors, use CPU
   else:
     device = torch.device({"METAL":"mps","NV":"cuda"}.get(Device.DEFAULT, "cpu"))
-  if DEBUG >= 1: print(f"using torch device {device}")
+  if DEBUG >= 1: print(f"using torch backend {device}")
   X_train, Y_train, X_test, Y_test = mnist()
   X_train = torch.tensor(X_train.float().numpy(), device=device)
   Y_train = torch.tensor(Y_train.cast(dtypes.int64).numpy(), device=device)
