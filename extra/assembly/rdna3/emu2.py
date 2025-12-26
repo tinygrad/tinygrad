@@ -42,10 +42,20 @@ DS_LOAD = {DSOp.DS_LOAD_B32: (1,4,0), DSOp.DS_LOAD_B64: (2,4,0), DSOp.DS_LOAD_B1
 DS_STORE = {DSOp.DS_STORE_B32: (1,4), DSOp.DS_STORE_B64: (2,4), DSOp.DS_STORE_B128: (4,4), DSOp.DS_STORE_B8: (1,1), DSOp.DS_STORE_B16: (1,2)}
 SMEM_LOAD = {SMEMOp.S_LOAD_B32: 1, SMEMOp.S_LOAD_B64: 2, SMEMOp.S_LOAD_B128: 4, SMEMOp.S_LOAD_B256: 8, SMEMOp.S_LOAD_B512: 16}
 
-# Pseudocode cache
-_PSEUDOCODE: dict[str, dict] | None = None
+# VOPD op -> VOP3 op mapping (VOPD is dual-issue of VOP1/VOP2 ops, use VOP3 enums for pseudocode lookup)
+_VOPD_TO_VOP = {
+  VOPDOp.V_DUAL_FMAC_F32: VOP3Op.V_FMAC_F32, VOPDOp.V_DUAL_FMAAK_F32: VOP2Op.V_FMAAK_F32, VOPDOp.V_DUAL_FMAMK_F32: VOP2Op.V_FMAMK_F32,
+  VOPDOp.V_DUAL_MUL_F32: VOP3Op.V_MUL_F32, VOPDOp.V_DUAL_ADD_F32: VOP3Op.V_ADD_F32, VOPDOp.V_DUAL_SUB_F32: VOP3Op.V_SUB_F32,
+  VOPDOp.V_DUAL_SUBREV_F32: VOP3Op.V_SUBREV_F32, VOPDOp.V_DUAL_MUL_DX9_ZERO_F32: VOP3Op.V_MUL_DX9_ZERO_F32,
+  VOPDOp.V_DUAL_MOV_B32: VOP3Op.V_MOV_B32, VOPDOp.V_DUAL_CNDMASK_B32: VOP3Op.V_CNDMASK_B32,
+  VOPDOp.V_DUAL_MAX_F32: VOP3Op.V_MAX_F32, VOPDOp.V_DUAL_MIN_F32: VOP3Op.V_MIN_F32,
+  VOPDOp.V_DUAL_ADD_NC_U32: VOP3Op.V_ADD_NC_U32, VOPDOp.V_DUAL_LSHLREV_B32: VOP3Op.V_LSHLREV_B32, VOPDOp.V_DUAL_AND_B32: VOP3Op.V_AND_B32,
+}
+
+# Pseudocode cache: {enum_cls: {op: [pseudocode_lines]}}
+_PSEUDOCODE: dict | None = None
 _INTERP: PseudocodeInterpreter | None = None
-def _get_pseudocode() -> tuple[dict[str, dict], PseudocodeInterpreter]:
+def _get_pseudocode() -> tuple[dict, PseudocodeInterpreter]:
   global _PSEUDOCODE, _INTERP
   if _PSEUDOCODE is None: _PSEUDOCODE, _INTERP = get_pseudocode(), PseudocodeInterpreter()
   return _PSEUDOCODE, _INTERP
@@ -157,16 +167,16 @@ def exec_scalar(st: WaveState, inst: Inst) -> int:
     for i in range(cnt): st.wsgpr(inst.sdata + i, mem_read((addr + i * 4) & 0xffffffffffffffff, 4))
     return 0
 
-  # Get op name and lookup pseudocode
-  if inst_type is SOP1: op_enum, op, ssrc0, sdst = SOP1Op, inst.op, inst.ssrc0, inst.sdst
-  elif inst_type is SOP2: op_enum, op, ssrc0, sdst = SOP2Op, inst.op, inst.ssrc0, inst.sdst
-  elif inst_type is SOPC: op_enum, op, ssrc0, sdst = SOPCOp, inst.op, inst.ssrc0, None
-  elif inst_type is SOPK: op_enum, op, ssrc0, sdst = SOPKOp, inst.op, inst.sdst, inst.sdst  # sdst is both src and dst
+  # Get op enum and lookup pseudocode
+  if inst_type is SOP1: op_cls, ssrc0, sdst = SOP1Op, inst.ssrc0, inst.sdst
+  elif inst_type is SOP2: op_cls, ssrc0, sdst = SOP2Op, inst.ssrc0, inst.sdst
+  elif inst_type is SOPC: op_cls, ssrc0, sdst = SOPCOp, inst.ssrc0, None
+  elif inst_type is SOPK: op_cls, ssrc0, sdst = SOPKOp, inst.sdst, inst.sdst  # sdst is both src and dst
   else: raise NotImplementedError(f"Unknown scalar type {inst_type}")
 
-  op_name = op_enum(op).name
-  pc = pc_dict.get(op_name, {}).get('pseudocode')
-  if pc is None: raise NotImplementedError(f"{op_name} not in pseudocode")
+  op = op_cls(inst.op)
+  pc = pc_dict.get(op_cls, {}).get(op)
+  if pc is None: raise NotImplementedError(f"{op.name} not in pseudocode")
 
   # Build interpreter context
   s0 = st.rsrc(ssrc0, 0) if inst_type != SOPK else st.rsgpr(inst.sdst)
@@ -218,20 +228,66 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     else: raise NotImplementedError(f"DS op {op}")
     return
 
-  # Get op name and sources
+  # VOPD: dual-issue, execute two ops using VOP2/VOP3 pseudocode
+  if inst_type is VOPD:
+    vdsty = (inst.vdsty << 1) | ((inst.vdstx & 1) ^ 1)
+    # Execute X op
+    if (op_x := _VOPD_TO_VOP.get(inst.opx)):
+      s0, s1 = st.rsrc(inst.srcx0, lane), V[inst.vsrcx1]
+      if op_x in (VOP3Op.V_MAX_F32, VOP2Op.V_MAX_F32): V[inst.vdstx] = _i32(max(_f32(s0), _f32(s1)))
+      elif op_x in (VOP3Op.V_MIN_F32, VOP2Op.V_MIN_F32): V[inst.vdstx] = _i32(min(_f32(s0), _f32(s1)))
+      elif (pc_x := pc_dict.get(type(op_x), {}).get(op_x)):
+        res = interp.execute(pc_x, s0, s1, scc=st.scc, d0=V[inst.vdstx], vcc=st.vcc, lane=lane, literal=st.literal)
+        V[inst.vdstx] = res['d0']
+    # Execute Y op
+    if (op_y := _VOPD_TO_VOP.get(inst.opy)):
+      s0, s1 = st.rsrc(inst.srcy0, lane), V[inst.vsrcy1]
+      if op_y in (VOP3Op.V_MAX_F32, VOP2Op.V_MAX_F32): V[vdsty] = _i32(max(_f32(s0), _f32(s1)))
+      elif op_y in (VOP3Op.V_MIN_F32, VOP2Op.V_MIN_F32): V[vdsty] = _i32(min(_f32(s0), _f32(s1)))
+      elif (pc_y := pc_dict.get(type(op_y), {}).get(op_y)):
+        res = interp.execute(pc_y, s0, s1, scc=st.scc, d0=V[vdsty], vcc=st.vcc, lane=lane, literal=st.literal)
+        V[vdsty] = res['d0']
+    return
+
+  # VOP3SD: has extra scalar dest for carry output
+  if inst_type is VOP3SD:
+    op = VOP3SDOp(inst.op)
+    pc = pc_dict.get(VOP3SDOp, {}).get(op)
+    if pc is None: raise NotImplementedError(f"{op.name} not in pseudocode")
+    s0, s1, s2 = st.rsrc(inst.src0, lane), st.rsrc(inst.src1, lane), st.rsrc(inst.src2, lane)
+    # For 64-bit src2, read from consecutive VGPRs
+    if inst.src2 >= 256:  # VGPR
+      s2 = V[inst.src2 - 256] | (V[inst.src2 - 256 + 1] << 32)
+    d0 = V[inst.vdst]
+    result = interp.execute(pc, s0, s1, s2, scc=st.scc, d0=d0, vcc=st.vcc, lane=lane, exec_mask=st.exec_mask)
+    # Write result - handle 64-bit destinations
+    if result.get('d0_64'):
+      V[inst.vdst] = result['d0'] & 0xffffffff
+      V[inst.vdst + 1] = (result['d0'] >> 32) & 0xffffffff
+    else:
+      V[inst.vdst] = result['d0'] & 0xffffffff
+    if result.get('vcc_lane') is not None:
+      st.pend_sgpr_lane(inst.sdst, lane, result['vcc_lane'])
+    return
+
+  # Get op enum and sources
   if inst_type is VOP1:
     if inst.op == VOP1Op.V_NOP: return
-    op_name, src0, src1, src2, vdst = VOP1Op(inst.op).name, inst.src0, 0, 0, inst.vdst
+    op_cls, op, src0, src1, src2, vdst = VOP1Op, VOP1Op(inst.op), inst.src0, 0, 0, inst.vdst
   elif inst_type is VOP2:
-    op_name, src0, src1, src2, vdst = VOP2Op(inst.op).name, inst.src0, inst.vsrc1 + 256, 0, inst.vdst
+    op_cls, op, src0, src1, src2, vdst = VOP2Op, VOP2Op(inst.op), inst.src0, inst.vsrc1 + 256, 0, inst.vdst
   elif inst_type is VOP3:
-    op_name, src0, src1, src2, vdst = VOP3Op(inst.op).name, inst.src0, inst.src1, inst.src2, inst.vdst
+    # VOP3 ops 0-255 are VOPC comparisons encoded as VOP3 (use VOPCOp pseudocode)
+    if inst.op < 256:
+      op_cls, op, src0, src1, src2, vdst = VOPCOp, VOPCOp(inst.op), inst.src0, inst.src1, 0, inst.sdst if hasattr(inst, 'sdst') else VCC_LO
+    else:
+      op_cls, op, src0, src1, src2, vdst = VOP3Op, VOP3Op(inst.op), inst.src0, inst.src1, inst.src2, inst.vdst
   elif inst_type is VOPC:
-    op_name, src0, src1, src2, vdst = VOPCOp(inst.op).name, inst.src0, inst.vsrc1 + 256, 0, VCC_LO
+    op_cls, op, src0, src1, src2, vdst = VOPCOp, VOPCOp(inst.op), inst.src0, inst.vsrc1 + 256, 0, VCC_LO
   else: raise NotImplementedError(f"Unknown vector type {inst_type}")
 
-  pc = pc_dict.get(op_name, {}).get('pseudocode')
-  if pc is None: raise NotImplementedError(f"{op_name} not in pseudocode")
+  pc = pc_dict.get(op_cls, {}).get(op)
+  if pc is None: raise NotImplementedError(f"{op.name} not in pseudocode")
 
   # Read sources (with VOP3 modifiers if applicable)
   neg, abs_ = (getattr(inst, 'neg', 0), getattr(inst, 'abs', 0)) if inst_type is VOP3 else (0, 0)
@@ -240,22 +296,50 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     if (neg >> idx) & 1: val = _i32(-_f32(val))
     return val
 
-  s0 = mod_src(st.rsrc(src0, lane), 0)
-  s1 = mod_src(st.rsrc(src1, lane), 1) if src1 else 0
-  s2 = mod_src(st.rsrc(src2, lane), 2) if src2 else 0
-  d0 = V[vdst]
+  # Determine if sources are 64-bit based on instruction type
+  # For 64-bit shift ops: src0 is 32-bit (shift amount), src1 is 64-bit (value to shift)
+  # For most other _B64/_I64/_U64/_F64 ops: all sources are 64-bit
+  is_64bit_op = op_cls in (VOP3Op, VOP1Op) and hasattr(op, 'name') and any(op.name.endswith(s) for s in ('_B64', '_I64', '_U64', '_F64'))
+  is_shift_64 = op_cls is VOP3Op and op in (VOP3Op.V_LSHLREV_B64, VOP3Op.V_LSHRREV_B64, VOP3Op.V_ASHRREV_I64)
+
+  if is_shift_64:
+    s0 = mod_src(st.rsrc(src0, lane), 0)  # shift amount is 32-bit
+    s1 = st.rsrc64(src1, lane) if src1 else 0  # value to shift is 64-bit
+    s2 = mod_src(st.rsrc(src2, lane), 2) if src2 else 0
+  elif is_64bit_op:
+    s0 = st.rsrc64(src0, lane)
+    s1 = st.rsrc64(src1, lane) if src1 else 0
+    s2 = st.rsrc64(src2, lane) if src2 else 0
+  else:
+    s0 = mod_src(st.rsrc(src0, lane), 0)
+    s1 = mod_src(st.rsrc(src1, lane), 1) if src1 else 0
+    s2 = mod_src(st.rsrc(src2, lane), 2) if src2 else 0
+  d0 = V[vdst] if not is_64bit_op else (V[vdst] | (V[vdst + 1] << 32))
+
+  # Special case: ops with control flow that the interpreter can't handle
+  if op in (VOP3Op.V_MAX_F32, VOP2Op.V_MAX_F32, VOP1Op.V_MAX_F32 if hasattr(VOP1Op, 'V_MAX_F32') else None):
+    V[vdst] = _i32(max(_f32(s0), _f32(s1))); return
+  if op in (VOP3Op.V_MIN_F32, VOP2Op.V_MIN_F32, VOP1Op.V_MIN_F32 if hasattr(VOP1Op, 'V_MIN_F32') else None):
+    V[vdst] = _i32(min(_f32(s0), _f32(s1))); return
 
   # Execute pseudocode
   result = interp.execute(pc, s0, s1, s2, scc=st.scc, d0=d0, vcc=st.vcc, lane=lane, exec_mask=st.exec_mask, literal=st.literal)
 
   # Apply results
-  if 'd0' in result:
-    if inst_type is VOPC or result.get('d0_is_mask'):
-      st.pend_sgpr_lane(vdst, lane, result['d0'])
-    else:
-      V[vdst] = result['d0']
   if 'vcc_lane' in result:
-    st.pend_sgpr_lane(VCC_LO, lane, result['vcc_lane'])
+    # VOP2 carry instructions (V_ADD_CO_CI_U32, V_SUB_CO_CI_U32, V_SUBREV_CO_CI_U32) write carry to VCC implicitly
+    # VOPC and VOP3-encoded VOPC write to vdst (which is VCC_LO for VOPC, inst.sdst for VOP3)
+    vcc_dst = VCC_LO if op_cls is VOP2Op and op in (VOP2Op.V_ADD_CO_CI_U32, VOP2Op.V_SUB_CO_CI_U32, VOP2Op.V_SUBREV_CO_CI_U32) else vdst
+    st.pend_sgpr_lane(vcc_dst, lane, result['vcc_lane'])
+  if 'exec_lane' in result:
+    # V_CMPX instructions write to EXEC per-lane
+    st.pend_sgpr_lane(EXEC_LO, lane, result['exec_lane'])
+  if 'd0' in result and op_cls not in (VOPCOp,):
+    if result.get('d0_64') or is_64bit_op:
+      V[vdst] = result['d0'] & 0xffffffff
+      V[vdst + 1] = (result['d0'] >> 32) & 0xffffffff
+    else:
+      V[vdst] = result['d0'] & 0xffffffff
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # MAIN EXECUTION LOOP

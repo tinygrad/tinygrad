@@ -11,12 +11,14 @@ from extra.assembly.rdna3.autogen import (
 
 def make_sop2(op: int, sdst: int, ssrc0: int, ssrc1: int) -> bytes:
   """Create a SOP2 instruction."""
-  inst = SOP2(op=op, sdst=sdst, ssrc0=ssrc0, ssrc1=ssrc1)
+  from extra.assembly.rdna3.lib import s
+  inst = SOP2(op=op, sdst=sdst, ssrc0=s[ssrc0], ssrc1=s[ssrc1])
   return inst.to_bytes()
 
 def make_sop1(op: int, sdst: int, ssrc0: int) -> bytes:
   """Create a SOP1 instruction."""
-  inst = SOP1(op=op, sdst=sdst, ssrc0=ssrc0)
+  from extra.assembly.rdna3.lib import s
+  inst = SOP1(op=op, sdst=sdst, ssrc0=s[ssrc0])
   return inst.to_bytes()
 
 def make_vop2(op: int, vdst: int, src0: int, vsrc1: int) -> bytes:
