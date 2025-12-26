@@ -67,7 +67,7 @@ def lower_umod(a: UOp, b: UOp) -> UOp:
 
 def lower_idiv(a: UOp, b: UOp) -> UOp:
   """Lower signed 32-bit division using unsigned division on absolute values."""
-  zero, one = UOp.const(dtypes.int32, 0), UOp.const(dtypes.int32, 1)
+  zero = UOp.const(dtypes.int32, 0)
   a_neg, b_neg = a.alu(Ops.CMPLT, zero), b.alu(Ops.CMPLT, zero)
   a_abs = UOp(Ops.WHERE, dtypes.int32, (a_neg, zero - a, a)).bitcast(dtypes.uint32)
   b_abs = UOp(Ops.WHERE, dtypes.int32, (b_neg, zero - b, b)).bitcast(dtypes.uint32)
@@ -183,6 +183,9 @@ def _lower_bf16_to_f16(x: UOp) -> UOp:
   """bfloat16 -> float16: go through float32."""
   return x.src[0].cast(dtypes.float32).cast(dtypes.float16)
 
+# *** Cast lowerings: multi-step casts go via intermediate types ***
+_small_ints = (dtypes.int8, dtypes.int16, dtypes.uint8, dtypes.uint16)
+
 # Pattern matcher for RDNA3-specific rewrites
 # NOTE: By the time rdna_matcher runs, gated loads have already been created by devectorize
 # (WHERE+LOAD -> LOAD(INDEX(buf, idx, gate), alt)). We don't need to do that transformation here.
@@ -196,8 +199,51 @@ rdna_matcher = PatternMatcher([
   (UPat(Ops.CAST, dtype=dtypes.bfloat16, src=(UPat(dtype=dtypes.half),), name="x"), _lower_f16_to_bf16),
   (UPat(Ops.CAST, dtype=dtypes.float16, src=(UPat(dtype=dtypes.bfloat16),), name="x"), _lower_bf16_to_f16),
   (UPat(Ops.CAST, dtype=dtypes.half, src=(UPat(dtype=dtypes.bfloat16),), name="x"), _lower_bf16_to_f16),
+  # small ints <-> float16/bfloat16 via float32
+  (UPat(Ops.CAST, dtype=_small_floats, src=(UPat(dtype=_small_ints),), name="x"), lambda x: x.src[0].cast(dtypes.float32).cast(x.dtype)),
+  (UPat(Ops.CAST, dtype=_small_ints, src=(UPat(dtype=_small_floats),), name="x"), lambda x: x.src[0].cast(dtypes.float32).cast(x.dtype)),
+  # int32/uint32 <-> float16/bfloat16 via float32
+  (UPat(Ops.CAST, dtype=_small_floats, src=(UPat(dtype=(dtypes.int32, dtypes.uint32)),), name="x"),
+   lambda x: x.src[0].cast(dtypes.float32).cast(x.dtype)),
+  (UPat(Ops.CAST, dtype=(dtypes.int32, dtypes.uint32), src=(UPat(dtype=_small_floats),), name="x"),
+   lambda x: x.src[0].cast(dtypes.float32).cast(x.dtype)),
+  # int64/uint64 <-> float32 via float64
+  (UPat(Ops.CAST, dtype=dtypes.float32, src=(UPat(dtype=(dtypes.int64, dtypes.uint64)),), name="x"),
+   lambda x: x.src[0].cast(dtypes.float64).cast(dtypes.float32)),
+  (UPat(Ops.CAST, dtype=(dtypes.int64, dtypes.uint64), src=(UPat(dtype=dtypes.float32),), name="x"),
+   lambda x: x.src[0].cast(dtypes.float64).cast(x.dtype)),
+  # int64/uint64 <-> float16/bfloat16 via float64 -> float32
+  (UPat(Ops.CAST, dtype=_small_floats, src=(UPat(dtype=(dtypes.int64, dtypes.uint64)),), name="x"),
+   lambda x: x.src[0].cast(dtypes.float64).cast(dtypes.float32).cast(x.dtype)),
+  (UPat(Ops.CAST, dtype=(dtypes.int64, dtypes.uint64), src=(UPat(dtype=_small_floats),), name="x"),
+   lambda x: x.src[0].cast(dtypes.float32).cast(dtypes.float64).cast(x.dtype)),
+  # small ints <-> float64 via float32
+  (UPat(Ops.CAST, dtype=dtypes.float64, src=(UPat(dtype=_small_ints),), name="x"), lambda x: x.src[0].cast(dtypes.float32).cast(dtypes.float64)),
+  (UPat(Ops.CAST, dtype=_small_ints, src=(UPat(dtype=dtypes.float64),), name="x"), lambda x: x.src[0].cast(dtypes.float32).cast(x.dtype)),
+  # float16/bfloat16 <-> float64 via float32
+  (UPat(Ops.CAST, dtype=dtypes.float64, src=(UPat(dtype=_small_floats),), name="x"), lambda x: x.src[0].cast(dtypes.float32).cast(dtypes.float64)),
+  (UPat(Ops.CAST, dtype=_small_floats, src=(UPat(dtype=dtypes.float64),), name="x"), lambda x: x.src[0].cast(dtypes.float32).cast(x.dtype)),
+  # bool <-> float16/bfloat16 via float32
+  (UPat(Ops.CAST, dtype=_small_floats, src=(UPat(dtype=dtypes.bool),), name="x"), lambda x: x.src[0].cast(dtypes.float32).cast(x.dtype)),
+  (UPat(Ops.CAST, dtype=dtypes.bool, src=(UPat(dtype=_small_floats),), name="x"), lambda x: x.src[0].cast(dtypes.float32).cast(dtypes.bool)),
+  # bool <-> int64/uint64 (need to handle 64-bit extension)
+  (UPat(Ops.CAST, dtype=(dtypes.int64, dtypes.uint64), src=(UPat(dtype=dtypes.bool),), name="x"),
+   lambda x: x.src[0].cast(dtypes.int32).cast(x.dtype)),
+  (UPat(Ops.CAST, dtype=dtypes.bool, src=(UPat(dtype=(dtypes.int64, dtypes.uint64)),), name="x"),
+   lambda x: x.src[0].cast(dtypes.int32).cast(dtypes.bool)),
+  # float64 comparisons: lower to float32 for now (VOP3 CMP needs special handling)
+  (UPat(Ops.CMPLT, src=(UPat.var("a", dtypes.float64), UPat.var("b")), name="x"),
+   lambda x, a, b: UOp(Ops.CMPLT, dtypes.bool, (a.cast(dtypes.float32), b.cast(dtypes.float32)))),
+  (UPat(Ops.CMPEQ, src=(UPat.var("a", dtypes.float64), UPat.var("b")), name="x"),
+   lambda x, a, b: UOp(Ops.CMPEQ, dtypes.bool, (a.cast(dtypes.float32), b.cast(dtypes.float32)))),
+  (UPat(Ops.CMPNE, src=(UPat.var("a", dtypes.float64), UPat.var("b")), name="x"),
+   lambda x, a, b: UOp(Ops.CMPNE, dtypes.bool, (a.cast(dtypes.float32), b.cast(dtypes.float32)))),
   # devectorize ALU operations - RDNA doesn't have vector float ALU
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST), name="alu"), no_vectorized_alu),
+  # SIN: normalize input by 1/(2π) for v_sin_f32 (expects [0,1) -> [0,2π))
+  (UPat(Ops.SIN, dtype=dtypes.float32, src=(UPat.var("x"),), name="u"),
+   lambda u, x: None if u.tag == "normalized" else  # skip already normalized
+   UOp(Ops.SIN, dtypes.float32, (x * UOp.const(dtypes.float32, 0.15915494309189535),)).rtag("normalized")),
   # Fix fast_idiv output when shift >= 32 (needs 64-bit multiply)
   # Pattern: (x * const) >> shift for unsigned
   (UPat(Ops.SHR, src=(UPat(Ops.MUL, src=(UPat.var("x"), UPat.cvar("c"))), UPat.cvar("shift"))), _fix_fast_idiv_unsigned),

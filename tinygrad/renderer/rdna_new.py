@@ -13,15 +13,16 @@ from extra.assembly.rdna3.autogen import (
   # VOP1
   v_mov_b32_e32, v_cvt_f32_i32_e32, v_cvt_i32_f32_e32, v_cvt_f32_u32_e32, v_cvt_u32_f32_e32,
   v_cvt_f16_f32_e32, v_cvt_f32_f16_e32, v_rcp_f32_e32, v_sqrt_f32_e32,
-  v_exp_f32_e32, v_log_f32_e32, v_trunc_f32_e32,
+  v_exp_f32_e32, v_log_f32_e32, v_trunc_f32_e32, v_sin_f32_e32,
   v_cvt_f64_f32_e32, v_cvt_f32_f64_e32, v_cvt_f64_i32_e32, v_cvt_f64_u32_e32,
-  v_cvt_i32_f64_e32, v_cvt_u32_f64_e32,
+  v_cvt_i32_f64_e32, v_cvt_u32_f64_e32, v_trunc_f64_e32, v_floor_f64_e32,
   # VOP2
   v_add_f32_e32, v_sub_f32_e32, v_mul_f32_e32, v_and_b32_e32, v_or_b32_e32, v_xor_b32_e32,
   v_add_nc_u32_e32, v_sub_nc_u32_e32, v_lshlrev_b32_e32, v_lshrrev_b32_e32, v_ashrrev_i32_e32,
   v_max_f32_e32, v_max_i32_e32, v_max_u32_e32,
   # VOP3
-  v_fma_f32, v_fma_f64, v_mad_u64_u32, v_mad_i64_i32, v_lshlrev_b64, v_mul_lo_u32, v_mul_hi_u32, v_bfe_u32,
+  v_fma_f32, v_fma_f64, v_mad_u64_u32, v_mad_i64_i32, v_lshlrev_b64, v_lshrrev_b64, v_ashrrev_i64,
+  v_mul_lo_u32, v_mul_hi_u32, v_bfe_u32, v_bfe_i32,
   v_add_co_u32, v_add_co_ci_u32_e32, v_cndmask_b32_e64, v_add_f64, v_mul_f64, v_sub_co_u32, v_sub_co_ci_u32_e32,
   v_cmp_lt_f32_e32, v_cmp_eq_f32_e32, v_cmp_neq_f32_e32, v_cmp_gt_f32_e32,
   v_cmp_lt_i32_e32, v_cmp_eq_i32_e32, v_cmp_ne_i32_e32, v_cmp_gt_i32_e32,
@@ -38,91 +39,229 @@ from extra.assembly.rdna3.autogen import (
 )
 
 # Helper for VOP2: src0 can be constant/literal, vsrc1 must be VGPR - swap for commutative ops
-def _sw(c, a, b):
-  ar, br = c.get_reg(a), c.get_reg(b)
+def _sw(ctx, a, b):
+  ar, br = ctx.get_reg(a), ctx.get_reg(b)
   return (br, ar) if isinstance(br, (int, float)) and not isinstance(ar, (int, float)) else (ar, br)
 
 # Module-level PatternMatcher for simple ALU and CAST operations
 render_ops = PatternMatcher([
   # CAST: float32 <-> int32/uint32
-  (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.int32),), name="x"), lambda c,x,a: [v_cvt_f32_i32_e32(c.dst, c.get_reg(a))]),
-  (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.uint32),), name="x"), lambda c,x,a: [v_cvt_f32_u32_e32(c.dst, c.get_reg(a))]),
-  (UPat(Ops.CAST, dtypes.int32, (UPat.var("a", dtypes.float32),), name="x"), lambda c,x,a: [v_cvt_i32_f32_e32(c.dst, c.get_reg(a))]),
-  (UPat(Ops.CAST, dtypes.uint32, (UPat.var("a", dtypes.float32),), name="x"), lambda c,x,a: [v_cvt_u32_f32_e32(c.dst, c.get_reg(a))]),
-  # CAST: float32 <-> small unsigned
-  (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", (dtypes.uint8, dtypes.uint16)),), name="x"), lambda c,x,a: [v_cvt_f32_u32_e32(c.dst, c.get_reg(a))]),
-  (UPat(Ops.CAST, (dtypes.uint8, dtypes.uint16), (UPat.var("a", dtypes.float32),), name="x"), lambda c,x,a: [v_cvt_u32_f32_e32(c.dst, c.get_reg(a))]),
-  (UPat(Ops.CAST, (dtypes.int8, dtypes.int16), (UPat.var("a", dtypes.float32),), name="x"), lambda c,x,a: [v_cvt_i32_f32_e32(c.dst, c.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.int32),), name="x"), lambda ctx,x,a: [v_cvt_f32_i32_e32(ctx.dst, ctx.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.uint32),), name="x"), lambda ctx,x,a: [v_cvt_f32_u32_e32(ctx.dst, ctx.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.int32, (UPat.var("a", dtypes.float32),), name="x"), lambda ctx,x,a: [v_cvt_i32_f32_e32(ctx.dst, ctx.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.uint32, (UPat.var("a", dtypes.float32),), name="x"), lambda ctx,x,a: [v_cvt_u32_f32_e32(ctx.dst, ctx.get_reg(a))]),
+  # CAST: float32 <-> small int
+  (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", (dtypes.uint8, dtypes.uint16)),), name="x"),
+   lambda ctx,x,a: [v_cvt_f32_u32_e32(ctx.dst, ctx.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.int8),), name="x"),
+   lambda ctx,x,a: [v_bfe_i32(ctx.dst, ctx.get_reg(a), 0, 8), v_cvt_f32_i32_e32(ctx.dst, ctx.dst)]),
+  (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.int16),), name="x"),
+   lambda ctx,x,a: [v_bfe_i32(ctx.dst, ctx.get_reg(a), 0, 16), v_cvt_f32_i32_e32(ctx.dst, ctx.dst)]),
+  (UPat(Ops.CAST, (dtypes.uint8, dtypes.uint16), (UPat.var("a", dtypes.float32),), name="x"),
+   lambda ctx,x,a: [v_cvt_u32_f32_e32(ctx.dst, ctx.get_reg(a))]),
+  (UPat(Ops.CAST, (dtypes.int8, dtypes.int16), (UPat.var("a", dtypes.float32),), name="x"),
+   lambda ctx,x,a: [v_cvt_i32_f32_e32(ctx.dst, ctx.get_reg(a))]),
   # CAST: float16 <-> float32
-  (UPat(Ops.CAST, dtypes.float16, (UPat.var("a", dtypes.float32),), name="x"), lambda c,x,a: [v_cvt_f16_f32_e32(c.dst, c.get_reg(a))]),
-  (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.float16),), name="x"), lambda c,x,a: [v_cvt_f32_f16_e32(c.dst, c.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.float16, (UPat.var("a", dtypes.float32),), name="x"), lambda ctx,x,a: [v_cvt_f16_f32_e32(ctx.dst, ctx.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.float16),), name="x"), lambda ctx,x,a: [v_cvt_f32_f16_e32(ctx.dst, ctx.get_reg(a))]),
+  # CAST: float16 -> ints (via f32)
+  (UPat(Ops.CAST, dtypes.int32, (UPat.var("a", dtypes.float16),), name="x"),
+   lambda ctx,x,a: [v_cvt_f32_f16_e32(ctx.dst, ctx.get_reg(a)), v_cvt_i32_f32_e32(ctx.dst, ctx.dst)]),
+  (UPat(Ops.CAST, dtypes.uint32, (UPat.var("a", dtypes.float16),), name="x"),
+   lambda ctx,x,a: [v_cvt_f32_f16_e32(ctx.dst, ctx.get_reg(a)), v_cvt_u32_f32_e32(ctx.dst, ctx.dst)]),
+  (UPat(Ops.CAST, (dtypes.int8, dtypes.int16), (UPat.var("a", dtypes.float16),), name="x"),
+   lambda ctx,x,a: [v_cvt_f32_f16_e32(ctx.dst, ctx.get_reg(a)), v_cvt_i32_f32_e32(ctx.dst, ctx.dst)]),
+  (UPat(Ops.CAST, (dtypes.uint8, dtypes.uint16), (UPat.var("a", dtypes.float16),), name="x"),
+   lambda ctx,x,a: [v_cvt_f32_f16_e32(ctx.dst, ctx.get_reg(a)), v_cvt_u32_f32_e32(ctx.dst, ctx.dst)]),
+  # CAST: ints -> float16 (via f32)
+  (UPat(Ops.CAST, dtypes.float16, (UPat.var("a", dtypes.ints),), name="x"),
+   lambda ctx,x,a: [v_cvt_f32_i32_e32(ctx.dst, ctx.get_reg(a)), v_cvt_f16_f32_e32(ctx.dst, ctx.dst)]),
   # CAST: bfloat16 <-> float32 (shift)
-  (UPat(Ops.CAST, dtypes.bfloat16, (UPat.var("a", dtypes.float32),), name="x"), lambda c,x,a: [v_lshrrev_b32_e32(c.dst, 16, c.get_reg(a))]),
-  (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.bfloat16),), name="x"), lambda c,x,a: [v_lshlrev_b32_e32(c.dst, 16, c.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.bfloat16, (UPat.var("a", dtypes.float32),), name="x"), lambda ctx,x,a: [v_lshrrev_b32_e32(ctx.dst, 16, ctx.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.bfloat16),), name="x"), lambda ctx,x,a: [v_lshlrev_b32_e32(ctx.dst, 16, ctx.get_reg(a))]),
+  # CAST: bfloat16 -> ints (via f32)
+  (UPat(Ops.CAST, dtypes.int32, (UPat.var("a", dtypes.bfloat16),), name="x"),
+   lambda ctx,x,a: [v_lshlrev_b32_e32(ctx.dst, 16, ctx.get_reg(a)), v_cvt_i32_f32_e32(ctx.dst, ctx.dst)]),
+  (UPat(Ops.CAST, dtypes.uint32, (UPat.var("a", dtypes.bfloat16),), name="x"),
+   lambda ctx,x,a: [v_lshlrev_b32_e32(ctx.dst, 16, ctx.get_reg(a)), v_cvt_u32_f32_e32(ctx.dst, ctx.dst)]),
+  (UPat(Ops.CAST, (dtypes.int8, dtypes.int16), (UPat.var("a", dtypes.bfloat16),), name="x"),
+   lambda ctx,x,a: [v_lshlrev_b32_e32(ctx.dst, 16, ctx.get_reg(a)), v_cvt_i32_f32_e32(ctx.dst, ctx.dst)]),
+  (UPat(Ops.CAST, (dtypes.uint8, dtypes.uint16), (UPat.var("a", dtypes.bfloat16),), name="x"),
+   lambda ctx,x,a: [v_lshlrev_b32_e32(ctx.dst, 16, ctx.get_reg(a)), v_cvt_u32_f32_e32(ctx.dst, ctx.dst)]),
+  # CAST: ints -> bfloat16 (via f32)
+  (UPat(Ops.CAST, dtypes.bfloat16, (UPat.var("a", dtypes.ints),), name="x"),
+   lambda ctx,x,a: [v_cvt_f32_i32_e32(ctx.dst, ctx.get_reg(a)), v_lshrrev_b32_e32(ctx.dst, 16, ctx.dst)]),
   # CAST: float64 <-> float32
-  (UPat(Ops.CAST, dtypes.float64, (UPat.var("a", dtypes.float32),), name="x"), lambda c,x,a: [v_cvt_f64_f32_e32(c.dst, c.get_reg(a))]),
-  (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.float64),), name="x"), lambda c,x,a: [v_cvt_f32_f64_e32(c.dst, c.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.float64, (UPat.var("a", dtypes.float32),), name="x"), lambda ctx,x,a: [v_cvt_f64_f32_e32(ctx.dst, ctx.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.float64),), name="x"), lambda ctx,x,a: [v_cvt_f32_f64_e32(ctx.dst, ctx.get_reg(a))]),
   # CAST: float64 <-> int32/uint32
-  (UPat(Ops.CAST, dtypes.float64, (UPat.var("a", dtypes.int32),), name="x"), lambda c,x,a: [v_cvt_f64_i32_e32(c.dst, c.get_reg(a))]),
-  (UPat(Ops.CAST, dtypes.float64, (UPat.var("a", dtypes.uint32),), name="x"), lambda c,x,a: [v_cvt_f64_u32_e32(c.dst, c.get_reg(a))]),
-  (UPat(Ops.CAST, dtypes.int32, (UPat.var("a", dtypes.float64),), name="x"), lambda c,x,a: [v_cvt_i32_f64_e32(c.dst, c.get_reg(a))]),
-  (UPat(Ops.CAST, dtypes.uint32, (UPat.var("a", dtypes.float64),), name="x"), lambda c,x,a: [v_cvt_u32_f64_e32(c.dst, c.get_reg(a))]),
-  # CAST: float64 <-> small unsigned
-  (UPat(Ops.CAST, dtypes.float64, (UPat.var("a", (dtypes.uint8, dtypes.uint16)),), name="x"), lambda c,x,a: [v_cvt_f64_u32_e32(c.dst, c.get_reg(a))]),
-  (UPat(Ops.CAST, (dtypes.uint8, dtypes.uint16), (UPat.var("a", dtypes.float64),), name="x"), lambda c,x,a: [v_cvt_u32_f64_e32(c.dst, c.get_reg(a))]),
-  (UPat(Ops.CAST, (dtypes.int8, dtypes.int16), (UPat.var("a", dtypes.float64),), name="x"), lambda c,x,a: [v_cvt_i32_f64_e32(c.dst, c.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.float64, (UPat.var("a", dtypes.int32),), name="x"), lambda ctx,x,a: [v_cvt_f64_i32_e32(ctx.dst, ctx.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.float64, (UPat.var("a", dtypes.uint32),), name="x"), lambda ctx,x,a: [v_cvt_f64_u32_e32(ctx.dst, ctx.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.int32, (UPat.var("a", dtypes.float64),), name="x"), lambda ctx,x,a: [v_cvt_i32_f64_e32(ctx.dst, ctx.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.uint32, (UPat.var("a", dtypes.float64),), name="x"), lambda ctx,x,a: [v_cvt_u32_f64_e32(ctx.dst, ctx.get_reg(a))]),
+  # CAST: float64 <-> small int
+  (UPat(Ops.CAST, dtypes.float64, (UPat.var("a", (dtypes.uint8, dtypes.uint16)),), name="x"),
+   lambda ctx,x,a: [v_cvt_f64_u32_e32(ctx.dst, ctx.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.float64, (UPat.var("a", dtypes.int8),), name="x"),
+   lambda ctx,x,a: [v_bfe_i32(v[ctx.dst.idx], ctx.get_reg(a), 0, 8), v_cvt_f64_i32_e32(ctx.dst, v[ctx.dst.idx])]),
+  (UPat(Ops.CAST, dtypes.float64, (UPat.var("a", dtypes.int16),), name="x"),
+   lambda ctx,x,a: [v_bfe_i32(v[ctx.dst.idx], ctx.get_reg(a), 0, 16), v_cvt_f64_i32_e32(ctx.dst, v[ctx.dst.idx])]),
+  (UPat(Ops.CAST, (dtypes.uint8, dtypes.uint16), (UPat.var("a", dtypes.float64),), name="x"),
+   lambda ctx,x,a: [v_cvt_u32_f64_e32(ctx.dst, ctx.get_reg(a))]),
+  (UPat(Ops.CAST, (dtypes.int8, dtypes.int16), (UPat.var("a", dtypes.float64),), name="x"),
+   lambda ctx,x,a: [v_cvt_i32_f64_e32(ctx.dst, ctx.get_reg(a))]),
   # CAST: int64 -> smaller types (just take low 32 bits)
-  (UPat(Ops.CAST, dtypes.ints, (UPat.var("a", (dtypes.int64, dtypes.uint64)),), name="x"), lambda c,x,a: [v_mov_b32_e32(c.dst, c.get_reg(a))]),
-  # CAST: small int <-> int32/uint32, small int <-> small int (just mov)
-  (UPat(Ops.CAST, dtypes.ints, (UPat.var("a", dtypes.ints),), name="x"), lambda c,x,a: [v_mov_b32_e32(c.dst, c.get_reg(a))]),
-  # CAST: bool -> int (just move)
-  (UPat(Ops.CAST, dtypes.ints, (UPat.var("a", dtypes.bool),), name="x"), lambda c,x,a: [v_mov_b32_e32(c.dst, c.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.ints, (UPat.var("a", (dtypes.int64, dtypes.uint64)),), name="x"), lambda ctx,x,a: [v_mov_b32_e32(ctx.dst, ctx.get_reg(a))]),
+  # CAST: int64/uint64 -> float32 (via float64: low + high*2^32, 2^32=0x41F0000000000000)
+  (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.int64),), name="x"),
+   lambda ctx,x,a: (s:=ctx.ra.get_scratch_vgpr(6), [v_cvt_f64_u32_e32(v[s:s+2], ctx.get_reg(a)),
+                    v_cvt_f64_i32_e32(v[s+2:s+4], v[ctx.get_reg(a).idx+1]),
+                    v_mov_b32_e32(v[s+4], 0), v_mov_b32_e32(v[s+5], 0x41F00000),
+                    v_mul_f64(v[s+2:s+4], v[s+4:s+6], v[s+2:s+4]),
+                    v_add_f64(v[s:s+2], v[s:s+2], v[s+2:s+4]), v_cvt_f32_f64_e32(ctx.dst, v[s:s+2])])[1]),
+  (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.uint64),), name="x"),
+   lambda ctx,x,a: (s:=ctx.ra.get_scratch_vgpr(6), [v_cvt_f64_u32_e32(v[s:s+2], ctx.get_reg(a)),
+                    v_cvt_f64_u32_e32(v[s+2:s+4], v[ctx.get_reg(a).idx+1]),
+                    v_mov_b32_e32(v[s+4], 0), v_mov_b32_e32(v[s+5], 0x41F00000),
+                    v_mul_f64(v[s+2:s+4], v[s+4:s+6], v[s+2:s+4]),
+                    v_add_f64(v[s:s+2], v[s:s+2], v[s+2:s+4]), v_cvt_f32_f64_e32(ctx.dst, v[s:s+2])])[1]),
+  # CAST: int64/uint64 -> float64 (low + high*2^32, 2^32=0x41F0000000000000)
+  (UPat(Ops.CAST, dtypes.float64, (UPat.var("a", dtypes.int64),), name="x"),
+   lambda ctx,x,a: (s:=ctx.ra.get_scratch_vgpr(4), [v_cvt_f64_u32_e32(ctx.dst, ctx.get_reg(a)),
+                    v_cvt_f64_i32_e32(v[s:s+2], v[ctx.get_reg(a).idx+1]),
+                    v_mov_b32_e32(v[s+2], 0), v_mov_b32_e32(v[s+3], 0x41F00000),
+                    v_mul_f64(v[s:s+2], v[s+2:s+4], v[s:s+2]), v_add_f64(ctx.dst, ctx.dst, v[s:s+2])])[1]),
+  (UPat(Ops.CAST, dtypes.float64, (UPat.var("a", dtypes.uint64),), name="x"),
+   lambda ctx,x,a: (s:=ctx.ra.get_scratch_vgpr(4), [v_cvt_f64_u32_e32(ctx.dst, ctx.get_reg(a)),
+                    v_cvt_f64_u32_e32(v[s:s+2], v[ctx.get_reg(a).idx+1]),
+                    v_mov_b32_e32(v[s+2], 0), v_mov_b32_e32(v[s+3], 0x41F00000),
+                    v_mul_f64(v[s:s+2], v[s+2:s+4], v[s:s+2]), v_add_f64(ctx.dst, ctx.dst, v[s:s+2])])[1]),
+  # CAST: float64 -> int64 (trunc, extract high*2^32 and low parts)
+  # s[0:2]=trunc, s[2:4]=high_float, s[4:6]=trunc_copy for final subtract
+  (UPat(Ops.CAST, dtypes.int64, (UPat.var("a", dtypes.float64),), name="x"),
+   lambda ctx,x,a: (s:=ctx.ra.get_scratch_vgpr(6), ar:=ctx.get_reg(a), [
+     v_trunc_f64_e32(v[s:s+2], ar),  # Truncate to integer
+     v_mov_b32_e32(v[s+4], v[s]), v_mov_b32_e32(v[s+5], v[s+1]),  # Save trunc copy
+     v_mov_b32_e32(v[s+2], 0), v_mov_b32_e32(v[s+3], 0x3DF00000),  # 2^-32
+     v_mul_f64(v[s+2:s+4], v[s:s+2], v[s+2:s+4]),  # high = trunc / 2^32
+     v_floor_f64_e32(v[s+2:s+4], v[s+2:s+4]),  # floor(high)
+     v_cvt_i32_f64_e32(v[ctx.dst.idx+1], v[s+2:s+4]),  # high 32 bits
+     v_mov_b32_e32(v[s], 0), v_mov_b32_e32(v[s+1], 0x41F00000),  # 2^32
+     v_mul_f64(v[s+2:s+4], v[s+2:s+4], v[s:s+2]),  # high * 2^32
+     v_mul_f64(v[s+2:s+4], -1.0, v[s+2:s+4]),  # negate high*2^32
+     v_add_f64(v[s:s+2], v[s+4:s+6], v[s+2:s+4]),  # trunc - high*2^32 = low
+     v_cvt_u32_f64_e32(ctx.dst, v[s:s+2])])[2]),  # low 32 bits
+  (UPat(Ops.CAST, dtypes.uint64, (UPat.var("a", dtypes.float64),), name="x"),
+   lambda ctx,x,a: (s:=ctx.ra.get_scratch_vgpr(6), ar:=ctx.get_reg(a), [
+     v_trunc_f64_e32(v[s:s+2], ar),  # Truncate to integer
+     v_mov_b32_e32(v[s+4], v[s]), v_mov_b32_e32(v[s+5], v[s+1]),  # Save trunc copy
+     v_mov_b32_e32(v[s+2], 0), v_mov_b32_e32(v[s+3], 0x3DF00000),  # 2^-32
+     v_mul_f64(v[s+2:s+4], v[s:s+2], v[s+2:s+4]),  # high = trunc / 2^32
+     v_floor_f64_e32(v[s+2:s+4], v[s+2:s+4]),  # floor(high)
+     v_cvt_u32_f64_e32(v[ctx.dst.idx+1], v[s+2:s+4]),  # high 32 bits
+     v_mov_b32_e32(v[s], 0), v_mov_b32_e32(v[s+1], 0x41F00000),  # 2^32
+     v_mul_f64(v[s+2:s+4], v[s+2:s+4], v[s:s+2]),  # high * 2^32
+     v_mul_f64(v[s+2:s+4], -1.0, v[s+2:s+4]),  # negate high*2^32
+     v_add_f64(v[s:s+2], v[s+4:s+6], v[s+2:s+4]),  # trunc - high*2^32 = low
+     v_cvt_u32_f64_e32(ctx.dst, v[s:s+2])])[2]),  # low 32 bits
+  # CAST: int8 -> larger types (sign extend)
+  (UPat(Ops.CAST, (dtypes.int16, dtypes.uint16, dtypes.int32, dtypes.uint32), (UPat.var("a", dtypes.int8),), name="x"),
+   lambda ctx,x,a: [v_bfe_i32(ctx.dst, ctx.get_reg(a), 0, 8)]),
+  # CAST: int16 -> 32-bit types (sign extend)
+  (UPat(Ops.CAST, (dtypes.int32, dtypes.uint32), (UPat.var("a", dtypes.int16),), name="x"),
+   lambda ctx,x,a: [v_bfe_i32(ctx.dst, ctx.get_reg(a), 0, 16)]),
+  # CAST: small signed int -> int64 (sign extend to 32-bit, then sign extend to 64-bit)
+  (UPat(Ops.CAST, dtypes.int64, (UPat.var("a", dtypes.int8),), name="x"),
+   lambda ctx,x,a: [v_bfe_i32(ctx.dst, ctx.get_reg(a), 0, 8), v_ashrrev_i32_e32(v[ctx.dst.idx+1], 31, ctx.dst)]),
+  (UPat(Ops.CAST, dtypes.int64, (UPat.var("a", dtypes.int16),), name="x"),
+   lambda ctx,x,a: [v_bfe_i32(ctx.dst, ctx.get_reg(a), 0, 16), v_ashrrev_i32_e32(v[ctx.dst.idx+1], 31, ctx.dst)]),
+  # CAST: small signed int -> uint64 (sign extend to 32-bit, then zero extend high bits for unsigned reinterpret)
+  (UPat(Ops.CAST, dtypes.uint64, (UPat.var("a", dtypes.int8),), name="x"),
+   lambda ctx,x,a: [v_bfe_i32(ctx.dst, ctx.get_reg(a), 0, 8), v_ashrrev_i32_e32(v[ctx.dst.idx+1], 31, ctx.dst)]),
+  (UPat(Ops.CAST, dtypes.uint64, (UPat.var("a", dtypes.int16),), name="x"),
+   lambda ctx,x,a: [v_bfe_i32(ctx.dst, ctx.get_reg(a), 0, 16), v_ashrrev_i32_e32(v[ctx.dst.idx+1], 31, ctx.dst)]),
+  # CAST: int32 -> int64 (sign extend: copy sign bit to high 32 bits)
+  (UPat(Ops.CAST, (dtypes.int64, dtypes.uint64), (UPat.var("a", dtypes.int32),), name="x"),
+   lambda ctx,x,a: [v_mov_b32_e32(ctx.dst, ctx.get_reg(a)), v_ashrrev_i32_e32(v[ctx.dst.idx+1], 31, ctx.get_reg(a))]),
+  # CAST: uint32 -> int64/uint64 (zero extend: set high 32 bits to 0)
+  (UPat(Ops.CAST, (dtypes.int64, dtypes.uint64), (UPat.var("a", dtypes.uint32),), name="x"),
+   lambda ctx,x,a: [v_mov_b32_e32(ctx.dst, ctx.get_reg(a)), v_mov_b32_e32(v[ctx.dst.idx+1], 0)]),
+  # CAST: small unsigned int -> int64/uint64 (zero extend)
+  (UPat(Ops.CAST, (dtypes.int64, dtypes.uint64), (UPat.var("a", (dtypes.uint8, dtypes.uint16)),), name="x"),
+   lambda ctx,x,a: [v_mov_b32_e32(ctx.dst, ctx.get_reg(a)), v_mov_b32_e32(v[ctx.dst.idx+1], 0)]),
+  # CAST: small int <-> int32/uint32, small int <-> small int (just mov for unsigned or same-size)
+  (UPat(Ops.CAST, dtypes.ints, (UPat.var("a", dtypes.ints),), name="x"), lambda ctx,x,a: [v_mov_b32_e32(ctx.dst, ctx.get_reg(a))]),
+  # CAST: bool <-> int/float
+  (UPat(Ops.CAST, (dtypes.int64, dtypes.uint64), (UPat.var("a", dtypes.bool),), name="x"),
+   lambda ctx,x,a: [v_mov_b32_e32(ctx.dst, ctx.get_reg(a)), v_mov_b32_e32(v[ctx.dst.idx+1], 0)]),
+  (UPat(Ops.CAST, dtypes.ints, (UPat.var("a", dtypes.bool),), name="x"), lambda ctx,x,a: [v_mov_b32_e32(ctx.dst, ctx.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.bool, (UPat.var("a", dtypes.ints),), name="x"),
+   lambda ctx,x,a: [v_cmp_ne_i32_e32(0, ctx.get_reg(a)), v_cndmask_b32_e64(ctx.dst, 0, 1, VCC_LO)]),
+  (UPat(Ops.CAST, dtypes.bool, (UPat.var("a", dtypes.float32),), name="x"),
+   lambda ctx,x,a: [v_cmp_neq_f32_e32(0.0, ctx.get_reg(a)), v_cndmask_b32_e64(ctx.dst, 0, 1, VCC_LO)]),
+  (UPat(Ops.CAST, dtypes.bool, (UPat.var("a", dtypes.float16),), name="x"),
+   lambda ctx,x,a: [v_cvt_f32_f16_e32(ctx.dst, ctx.get_reg(a)), v_cmp_neq_f32_e32(0.0, ctx.dst), v_cndmask_b32_e64(ctx.dst, 0, 1, VCC_LO)]),
+  (UPat(Ops.CAST, dtypes.bool, (UPat.var("a", dtypes.float64),), name="x"),
+   lambda ctx,x,a: [v_cvt_f32_f64_e32(ctx.dst, ctx.get_reg(a)), v_cmp_neq_f32_e32(0.0, ctx.dst), v_cndmask_b32_e64(ctx.dst, 0, 1, VCC_LO)]),
+  (UPat(Ops.CAST, dtypes.bool, (UPat.var("a", dtypes.bfloat16),), name="x"),
+   lambda ctx,x,a: [v_lshlrev_b32_e32(ctx.dst, 16, ctx.get_reg(a)), v_cmp_neq_f32_e32(0.0, ctx.dst), v_cndmask_b32_e64(ctx.dst, 0, 1, VCC_LO)]),
+  (UPat(Ops.CAST, dtypes.float64, (UPat.var("a", dtypes.bool),), name="x"),
+   lambda ctx,x,a: [v_cvt_f64_u32_e32(ctx.dst, ctx.get_reg(a))]),  # bool -> float64
+  (UPat(Ops.CAST, dtypes.floats, (UPat.var("a", dtypes.bool),), name="x"), lambda ctx,x,a: [v_cvt_f32_u32_e32(ctx.dst, ctx.get_reg(a))]),
   # ADD: float64, floats, int64, default to i32
-  (UPat(Ops.ADD, dtype=dtypes.float64, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda c,x,a,b: [v_add_f64(c.dst, c.get_reg(a), c.get_reg(b))]),
-  (UPat(Ops.ADD, dtype=dtypes.floats, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda c,x,a,b: [v_add_f32_e32(c.dst, *_sw(c,a,b))]),
+  (UPat(Ops.ADD, dtype=dtypes.float64, src=(UPat.var("a"), UPat.var("b")), name="x"),
+   lambda ctx,x,a,b: [v_add_f64(ctx.dst, ctx.get_reg(a), ctx.get_reg(b))]),
+  (UPat(Ops.ADD, dtype=dtypes.floats, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,x,a,b: [v_add_f32_e32(ctx.dst, *_sw(ctx,a,b))]),
   (UPat(Ops.ADD, dtype=(dtypes.int64, dtypes.uint64), src=(UPat.var("a"), UPat.var("b")), name="x"),
-   lambda c,x,a,b: [v_add_co_u32(v[c.dst.idx], VCC_LO, v[c.get_reg(a).idx], v[c.get_reg(b).idx]),
-                    v_add_co_ci_u32_e32(v[c.dst.idx+1], v[c.get_reg(a).idx+1], v[c.get_reg(b).idx+1])]),
-  (UPat(Ops.ADD, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda c,x,a,b: [v_add_nc_u32_e32(c.dst, *_sw(c,a,b))]),
+   lambda ctx,x,a,b: [v_add_co_u32(v[ctx.dst.idx], VCC_LO, v[ctx.get_reg(a).idx], v[ctx.get_reg(b).idx]),
+                    v_add_co_ci_u32_e32(v[ctx.dst.idx+1], v[ctx.get_reg(a).idx+1], v[ctx.get_reg(b).idx+1])]),
+  (UPat(Ops.ADD, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,x,a,b: [v_add_nc_u32_e32(ctx.dst, *_sw(ctx,a,b))]),
   # SUB: float64, floats, int64, default to i32
   (UPat(Ops.SUB, dtype=dtypes.float64, src=(UPat.var("a"), UPat.var("b")), name="x"),
-   lambda c,x,a,b: [v_mul_f64(c.dst, -1.0, c.get_reg(b)), v_add_f64(c.dst, c.get_reg(a), c.dst)]),
+   lambda ctx,x,a,b: [v_mul_f64(ctx.dst, -1.0, ctx.get_reg(b)), v_add_f64(ctx.dst, ctx.get_reg(a), ctx.dst)]),
   (UPat(Ops.SUB, dtype=dtypes.floats, src=(UPat.var("a"), UPat.var("b")), name="x"),
-   lambda c,x,a,b: [v_sub_f32_e32(c.dst, c.get_reg(a), c.get_reg(b))]),
+   lambda ctx,x,a,b: [v_sub_f32_e32(ctx.dst, ctx.get_reg(a), ctx.get_reg(b))]),
   (UPat(Ops.SUB, dtype=(dtypes.int64, dtypes.uint64), src=(UPat.var("a"), UPat.var("b")), name="x"),
-   lambda c,x,a,b: [v_sub_co_u32(v[c.dst.idx], VCC_LO, v[c.get_reg(a).idx], v[c.get_reg(b).idx]),
-                    v_sub_co_ci_u32_e32(v[c.dst.idx+1], v[c.get_reg(a).idx+1], v[c.get_reg(b).idx+1])]),
-  (UPat(Ops.SUB, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda c,x,a,b: [v_sub_nc_u32_e32(c.dst, c.get_reg(a), c.get_reg(b))]),
+   lambda ctx,x,a,b: [v_sub_co_u32(v[ctx.dst.idx], VCC_LO, v[ctx.get_reg(a).idx], v[ctx.get_reg(b).idx]),
+                    v_sub_co_ci_u32_e32(v[ctx.dst.idx+1], v[ctx.get_reg(a).idx+1], v[ctx.get_reg(b).idx+1])]),
+  (UPat(Ops.SUB, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,x,a,b: [v_sub_nc_u32_e32(ctx.dst, ctx.get_reg(a), ctx.get_reg(b))]),
   # MUL: floats, ints (int64 complex - handled in emit_alu)
-  (UPat(Ops.MUL, dtype=dtypes.floats, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda c,x,a,b: [v_mul_f32_e32(c.dst, *_sw(c,a,b))]),
+  (UPat(Ops.MUL, dtype=dtypes.floats, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,x,a,b: [v_mul_f32_e32(ctx.dst, *_sw(ctx,a,b))]),
   (UPat(Ops.MUL, dtype=(dtypes.int32, dtypes.uint32, dtypes.int16, dtypes.uint16, dtypes.int8, dtypes.uint8),
-   src=(UPat.var("a"), UPat.var("b")), name="x"), lambda c,x,a,b: [v_mul_lo_u32(c.dst, *_sw(c,a,b))]),
+   src=(UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,x,a,b: [v_mul_lo_u32(ctx.dst, *_sw(ctx,a,b))]),
   # Bitwise: int only
-  (UPat(Ops.AND, dtype=dtypes.ints, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda c,x,a,b: [v_and_b32_e32(c.dst, *_sw(c,a,b))]),
-  (UPat(Ops.OR, dtype=dtypes.ints, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda c,x,a,b: [v_or_b32_e32(c.dst, *_sw(c,a,b))]),
-  (UPat(Ops.XOR, dtype=dtypes.ints, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda c,x,a,b: [v_xor_b32_e32(c.dst, *_sw(c,a,b))]),
+  (UPat(Ops.AND, dtype=dtypes.ints, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,x,a,b: [v_and_b32_e32(ctx.dst, *_sw(ctx,a,b))]),
+  (UPat(Ops.OR, dtype=dtypes.ints, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,x,a,b: [v_or_b32_e32(ctx.dst, *_sw(ctx,a,b))]),
+  (UPat(Ops.XOR, dtype=dtypes.ints, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,x,a,b: [v_xor_b32_e32(ctx.dst, *_sw(ctx,a,b))]),
   # SHL: int64, default to i32
   (UPat(Ops.SHL, dtype=(dtypes.int64, dtypes.uint64), src=(UPat.var("a"), UPat.var("b")), name="x"),
-   lambda c,x,a,b: [v_lshlrev_b64(c.dst, c.get_reg(b), c.get_reg(a))]),
-  (UPat(Ops.SHL, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda c,x,a,b: [v_lshlrev_b32_e32(c.dst, c.get_reg(b), c.get_reg(a))]),
+   lambda ctx,x,a,b: [v_lshlrev_b64(ctx.dst, ctx.get_reg(b), ctx.get_reg(a))]),
+  (UPat(Ops.SHL, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,x,a,b: [v_lshlrev_b32_e32(ctx.dst, ctx.get_reg(b), ctx.get_reg(a))]),
+  # SHR: int64 signed, uint64 unsigned, default to 32-bit
+  (UPat(Ops.SHR, dtype=dtypes.int64, src=(UPat.var("a"), UPat.var("b")), name="x"),
+   lambda ctx,x,a,b: [v_ashrrev_i64(ctx.dst, ctx.get_reg(b), ctx.get_reg(a))]),
+  (UPat(Ops.SHR, dtype=dtypes.uint64, src=(UPat.var("a"), UPat.var("b")), name="x"),
+   lambda ctx,x,a,b: [v_lshrrev_b64(ctx.dst, ctx.get_reg(b), ctx.get_reg(a))]),
   # MAX: floats, signed ints, unsigned ints
-  (UPat(Ops.MAX, dtype=dtypes.floats, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda c,x,a,b: [v_max_f32_e32(c.dst, *_sw(c,a,b))]),
-  (UPat(Ops.MAX, dtype=dtypes.sints, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda c,x,a,b: [v_max_i32_e32(c.dst, *_sw(c,a,b))]),
-  (UPat(Ops.MAX, dtype=dtypes.uints, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda c,x,a,b: [v_max_u32_e32(c.dst, *_sw(c,a,b))]),
+  (UPat(Ops.MAX, dtype=dtypes.floats, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,x,a,b: [v_max_f32_e32(ctx.dst, *_sw(ctx,a,b))]),
+  (UPat(Ops.MAX, dtype=dtypes.sints, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,x,a,b: [v_max_i32_e32(ctx.dst, *_sw(ctx,a,b))]),
+  (UPat(Ops.MAX, dtype=dtypes.uints, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,x,a,b: [v_max_u32_e32(ctx.dst, *_sw(ctx,a,b))]),
   # MULACC (FMA): float64, floats
   (UPat(Ops.MULACC, dtype=dtypes.float64, src=(UPat.var("a"), UPat.var("b"), UPat.var("d")), name="x"),
-   lambda c,x,a,b,d: [v_fma_f64(c.dst, c.get_reg(a), c.get_reg(b), c.get_reg(d))]),
+   lambda ctx,x,a,b,d: [v_fma_f64(ctx.dst, ctx.get_reg(a), ctx.get_reg(b), ctx.get_reg(d))]),
   (UPat(Ops.MULACC, dtype=dtypes.floats, src=(UPat.var("a"), UPat.var("b"), UPat.var("d")), name="x"),
-   lambda c,x,a,b,d: [v_fma_f32(c.dst, c.get_reg(a), c.get_reg(b), c.get_reg(d))]),
+   lambda ctx,x,a,b,d: [v_fma_f32(ctx.dst, ctx.get_reg(a), ctx.get_reg(b), ctx.get_reg(d))]),
   # Transcendental: float only
-  (UPat(Ops.RECIPROCAL, dtype=dtypes.floats, src=(UPat.var("a"),), name="x"), lambda c,x,a: [v_rcp_f32_e32(c.dst, c.get_reg(a))]),
-  (UPat(Ops.SQRT, dtype=dtypes.floats, src=(UPat.var("a"),), name="x"), lambda c,x,a: [v_sqrt_f32_e32(c.dst, c.get_reg(a))]),
-  (UPat(Ops.EXP2, dtype=dtypes.floats, src=(UPat.var("a"),), name="x"), lambda c,x,a: [v_exp_f32_e32(c.dst, c.get_reg(a))]),
-  (UPat(Ops.LOG2, dtype=dtypes.floats, src=(UPat.var("a"),), name="x"), lambda c,x,a: [v_log_f32_e32(c.dst, c.get_reg(a))]),
-  (UPat(Ops.TRUNC, dtype=dtypes.floats, src=(UPat.var("a"),), name="x"), lambda c,x,a: [v_trunc_f32_e32(c.dst, c.get_reg(a))]),
+  (UPat(Ops.RECIPROCAL, dtype=dtypes.floats, src=(UPat.var("a"),), name="x"), lambda ctx,x,a: [v_rcp_f32_e32(ctx.dst, ctx.get_reg(a))]),
+  (UPat(Ops.SQRT, dtype=dtypes.floats, src=(UPat.var("a"),), name="x"), lambda ctx,x,a: [v_sqrt_f32_e32(ctx.dst, ctx.get_reg(a))]),
+  (UPat(Ops.EXP2, dtype=dtypes.floats, src=(UPat.var("a"),), name="x"), lambda ctx,x,a: [v_exp_f32_e32(ctx.dst, ctx.get_reg(a))]),
+  (UPat(Ops.LOG2, dtype=dtypes.floats, src=(UPat.var("a"),), name="x"), lambda ctx,x,a: [v_log_f32_e32(ctx.dst, ctx.get_reg(a))]),
+  (UPat(Ops.TRUNC, dtype=dtypes.floats, src=(UPat.var("a"),), name="x"), lambda ctx,x,a: [v_trunc_f32_e32(ctx.dst, ctx.get_reg(a))]),
+  # SIN: input should already be normalized by 1/(2π) via rdna_uops.py
+  (UPat(Ops.SIN, dtype=dtypes.float32, src=(UPat.var("a"),), name="x"), lambda ctx,x,a: [v_sin_f32_e32(ctx.dst, ctx.get_reg(a))]),
   # NEG: floats vs ints
-  (UPat(Ops.NEG, dtype=dtypes.floats, src=(UPat.var("a"),), name="x"), lambda c,x,a: [v_mul_f32_e32(c.dst, -1.0, c.get_reg(a))]),
-  (UPat(Ops.NEG, dtype=dtypes.ints, src=(UPat.var("a"),), name="x"), lambda c,x,a: [v_sub_nc_u32_e32(c.dst, 0, c.get_reg(a))]),
+  (UPat(Ops.NEG, dtype=dtypes.floats, src=(UPat.var("a"),), name="x"), lambda ctx,x,a: [v_mul_f32_e32(ctx.dst, -1.0, ctx.get_reg(a))]),
+  (UPat(Ops.NEG, dtype=dtypes.ints, src=(UPat.var("a"),), name="x"), lambda ctx,x,a: [v_sub_nc_u32_e32(ctx.dst, 0, ctx.get_reg(a))]),
 ])
 
 
@@ -219,6 +358,25 @@ class RDNARenderer(Renderer):
         val = u.arg
         if val is Invalid: return 0  # Invalid index - return safe address (will be masked anyway)
         if isinstance(val, bool): return 1 if val else 0  # Handle bool before int (bool is subclass of int)
+        # For 64-bit types, always load into register pair (can't use inline constants for 64-bit ADD)
+        if u.dtype in (dtypes.int64, dtypes.uint64, dtypes.long, dtypes.ulong):
+          reg = ra.alloc_vgpr_range(u, 2)
+          lo = int(val) & 0xFFFFFFFF
+          hi = (int(val) >> 32) & 0xFFFFFFFF
+          code.append(v_mov_b32_e32(v[reg.idx], lo))
+          code.append(v_mov_b32_e32(v[reg.idx + 1], hi))
+          r[u] = reg
+          return reg
+        # Float64 constants: load as two 32-bit parts (IEEE 754 double)
+        if u.dtype == dtypes.float64:
+          reg = ra.alloc_vgpr_range(u, 2)
+          bits64 = struct.unpack("Q", struct.pack("d", float(val)))[0]
+          lo = bits64 & 0xFFFFFFFF
+          hi = (bits64 >> 32) & 0xFFFFFFFF
+          code.append(v_mov_b32_e32(v[reg.idx], lo))
+          code.append(v_mov_b32_e32(v[reg.idx + 1], hi))
+          r[u] = reg
+          return reg
         if isinstance(val, float):
           if val in (0.0, 0.5, 1.0, 2.0, 4.0, -0.5, -1.0, -2.0, -4.0): return val
           # Convert inf/nan to hex representation
@@ -226,15 +384,6 @@ class RDNARenderer(Renderer):
             val = struct.unpack("I", struct.pack("f", val))[0]
         elif isinstance(val, int) and -16 <= val <= 64: return val
         # Load literal constant into register
-        # For 64-bit types, need to load both low and high 32 bits
-        if u.dtype in (dtypes.int64, dtypes.uint64, dtypes.long, dtypes.ulong):
-          reg = ra.alloc_vgpr_range(u, 2)
-          lo = val & 0xFFFFFFFF
-          hi = (val >> 32) & 0xFFFFFFFF
-          code.append(v_mov_b32_e32(v[reg.idx], lo))
-          code.append(v_mov_b32_e32(v[reg.idx + 1], hi))
-          r[u] = reg
-          return reg
         reg = ra.alloc_vgpr(u)
         code.append(v_mov_b32_e32(reg, val))
         r[u] = reg
@@ -301,13 +450,17 @@ class RDNARenderer(Renderer):
           code.append(v_lshrrev_b32_e32(dst, b - 32, high_reg) if is_unsigned else v_ashrrev_i32_e32(dst, b - 32, high_reg))
         else:
           code.append(v_lshrrev_b32_e32(dst, b, a) if is_unsigned else v_ashrrev_i32_e32(dst, b, a))
-      elif op is Ops.SIN:
-        raise NotImplementedError("SIN requires input normalization by 1/(2π) - needs to be lowered in rdna_uops.py")
       elif op in (Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE):
         emit_cmp(op, u.src[0].dtype, dst, a, b)
       elif op is Ops.WHERE:
         cond, true_val, false_val = srcs[0], srcs[1], srcs[2]
-        code.extend([v_cmp_ne_i32_e32(0, cond), v_cndmask_b32_e64(dst, false_val, true_val, VCC_LO)])
+        code.append(v_cmp_ne_i32_e32(0, cond))
+        if dtype == dtypes.float64:
+          # For float64: select both low and high 32-bit parts
+          code.append(v_cndmask_b32_e64(v[dst.idx], v[false_val.idx], v[true_val.idx], VCC_LO))
+          code.append(v_cndmask_b32_e64(v[dst.idx+1], v[false_val.idx+1], v[true_val.idx+1], VCC_LO))
+        else:
+          code.append(v_cndmask_b32_e64(dst, false_val, true_val, VCC_LO))
       elif op is Ops.IDIV:
         # Integer division using floating-point approximation
         # quotient = trunc(float(a) * rcp(float(b)))

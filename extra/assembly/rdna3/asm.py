@@ -105,7 +105,8 @@ def disasm(inst: Inst) -> str:
     if op_name == 'v_nop': return 'v_nop'
     if op_name == 'v_pipeflush': return 'v_pipeflush'
     parts = op_name.split('_')
-    is_16bit_dst = any(p in _16BIT_TYPES for p in parts[-2:-1]) or (len(parts) >= 2 and parts[-1] in _16BIT_TYPES and 'cvt' not in op_name)
+    # cvt instructions use full 32-bit registers (f16 result in bits[15:0]), not packed halves
+    is_16bit_dst = 'cvt' not in op_name and (any(p in _16BIT_TYPES for p in parts[-2:-1]) or (len(parts) >= 2 and parts[-1] in _16BIT_TYPES))
     is_16bit_src = parts[-1] in _16BIT_TYPES and 'sat_pk' not in op_name and 'cvt' not in op_name
     _F64_OPS = ('v_ceil_f64', 'v_floor_f64', 'v_fract_f64', 'v_frexp_mant_f64', 'v_rcp_f64', 'v_rndne_f64', 'v_rsq_f64', 'v_sqrt_f64', 'v_trunc_f64')
     is_f64_dst = op_name in _F64_OPS or op_name in ('v_cvt_f64_f32', 'v_cvt_f64_i32', 'v_cvt_f64_u32')
