@@ -719,6 +719,39 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x**29, vals=[[-2,0,2]], forward_only=True, atol=0)
     self.helper_test_exception(None, lambda x: x**-2, vals=[[-2,0,2]], forward_only=True, expected=RuntimeError)
 
+  def test_pow_forward_parity(self):
+    helper_test_op(None, lambda x: x**2.0, vals=[[-1.0, 2.0, 3.0]], forward_only=True, atol=0)
+    x = Tensor([1.0, 2.0, 3.0])
+    p = Tensor([2.0, 3.0, 1.0])
+    y = x.pow(p)
+    tx = torch.tensor([1.0, 2.0, 3.0])
+    tp = torch.tensor([2.0, 3.0, 1.0])
+    ty = tx ** tp
+    np.testing.assert_allclose(y.numpy(), ty.numpy())
+
+  def test_pow_backward_parity(self):
+    # scalar exponent
+    x = Tensor([2.0, 3.0], requires_grad=True)
+    y = x.pow(3).sum()
+    y.backward()
+
+    tx = torch.tensor([2.0, 3.0], requires_grad=True)
+    ty = (tx ** 3).sum()
+    ty.backward()
+    np.testing.assert_allclose(x.grad.numpy(), tx.grad.numpy())
+
+    # broadcast exponent
+    x = Tensor([[1.0, 2.0], [3.0, 4.0]], requires_grad=True)
+    p = Tensor([2.0, 3.0])
+    y = x.pow(p).sum()
+    y.backward()
+
+    tx = torch.tensor([[1.0, 2.0], [3.0, 4.0]], requires_grad=True)
+    tp = torch.tensor([2.0, 3.0])
+    ty = (tx ** tp).sum()
+    ty.backward()
+    np.testing.assert_allclose(x.grad.numpy(), tx.grad.numpy(), rtol=1e-5)
+
   @unittest.skip("not supported")
   def test_pow_int(self):
     def _test(base, exponent): helper_test_op(None, lambda x,y: x**y, vals=[base, exponent], forward_only=True)
