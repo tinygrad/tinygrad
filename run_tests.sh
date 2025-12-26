@@ -1,6 +1,13 @@
 #!/bin/bash
 set -e
 
+# Create and activate venv
+if [ ! -d "venv" ]; then
+  echo "Creating virtual environment..."
+  python3 -m venv venv
+fi
+source venv/bin/activate
+
 # Set PYTHONPATH to the current directory to ensure tinygrad is importable
 export PYTHONPATH=.
 
