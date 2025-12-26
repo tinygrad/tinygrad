@@ -697,17 +697,20 @@ def parse_operand(op: str) -> tuple:
   if m := re.match(r'^([svt](?:tmp)?)\[(\d+):(\d+)\]$', op): return (REG_MAP[m.group(1)][int(m.group(2)):int(m.group(3))+1], neg, abs_, hi_half)
   if m := re.match(r'^([svt](?:tmp)?)(\d+)$', op):
     return (REG_MAP[m.group(1)](int(m.group(2)), 1, hi_half), neg, abs_, hi_half)
-  # hwreg(name, offset, size) -> simm16 encoding
-  if m := re.match(r'^hwreg\((\w+),\s*(\d+),\s*(\d+)\)$', op):
+  # hwreg(name, offset, size) or hwreg(name) -> simm16 encoding
+  if m := re.match(r'^hwreg\((\w+)(?:,\s*(\d+),\s*(\d+))?\)$', op):
+    # GFX11 hwreg names - note IDs 18-19 are PERF_SNAPSHOT on GFX11, not TMA
     hwreg_names = {'hw_reg_mode': 1, 'hw_reg_status': 2, 'hw_reg_trapsts': 3, 'hw_reg_hw_id': 4,
                    'hw_reg_gpr_alloc': 5, 'hw_reg_lds_alloc': 6, 'hw_reg_ib_sts': 7,
-                   'hw_reg_sh_mem_bases': 15, 'hw_reg_tba_lo': 16, 'hw_reg_tba_hi': 17, 'hw_reg_tma_lo': 18,
-                   'hw_reg_tma_hi': 19, 'hw_reg_flat_scr_lo': 20, 'hw_reg_flat_scr_hi': 21, 'hw_reg_xnack_mask': 22,
+                   'hw_reg_sh_mem_bases': 15,
+                   'hw_reg_perf_snapshot_pc_lo': 18, 'hw_reg_perf_snapshot_pc_hi': 19,
+                   'hw_reg_flat_scr_lo': 20, 'hw_reg_flat_scr_hi': 21, 'hw_reg_xnack_mask': 22,
                    'hw_reg_hw_id1': 23, 'hw_reg_hw_id2': 24, 'hw_reg_pops_packer': 25, 'hw_reg_ib_sts2': 28}
     name_str = m.group(1).lower()
     hwreg_id = hwreg_names.get(name_str, int(name_str) if name_str.isdigit() else None)
     if hwreg_id is None: raise ValueError(f"unknown hwreg name: {name_str}")
-    offset, size = int(m.group(2)), int(m.group(3))
+    offset = int(m.group(2)) if m.group(2) else 0
+    size = int(m.group(3)) if m.group(3) else 32
     simm16 = ((size - 1) << 11) | (offset << 6) | hwreg_id
     return (simm16, neg, abs_, hi_half)
   raise ValueError(f"cannot parse operand: {op}")
