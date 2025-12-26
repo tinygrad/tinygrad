@@ -241,7 +241,7 @@ class TestTinygradIntegration(unittest.TestCase):
     """Generate a simple add kernel from tinygrad and verify disassembly."""
     from tinygrad import Tensor
     from tinygrad.codegen import get_program
-    from tinygrad.renderer.cstyle import AMDRenderer
+    from tinygrad.renderer.cstyle import AMDHIPRenderer
     from tinygrad.runtime.support.compiler_amd import HIPCompiler
     from tinygrad.uop.ops import Ops
 
@@ -256,7 +256,7 @@ class TestTinygradIntegration(unittest.TestCase):
     self.assertTrue(len(sink_items) > 0, "No SINK in schedule")
 
     # Generate program
-    renderer = AMDRenderer('gfx1100')
+    renderer = AMDHIPRenderer('gfx1100')
     prg = get_program(sink_items[0].ast, renderer)
     self.assertIsNotNone(prg.src)
 
@@ -275,7 +275,7 @@ class TestTinygradIntegration(unittest.TestCase):
     """Generate a matmul kernel and verify disassembly has expected patterns."""
     from tinygrad import Tensor
     from tinygrad.codegen import get_program
-    from tinygrad.renderer.cstyle import AMDRenderer
+    from tinygrad.renderer.cstyle import AMDHIPRenderer
     from tinygrad.runtime.support.compiler_amd import HIPCompiler
     from tinygrad.uop.ops import Ops
 
@@ -290,7 +290,7 @@ class TestTinygradIntegration(unittest.TestCase):
     self.assertTrue(len(sink_items) > 0)
 
     # Generate and compile
-    renderer = AMDRenderer('gfx1100')
+    renderer = AMDHIPRenderer('gfx1100')
     prg = get_program(sink_items[0].ast, renderer)
     compiler = HIPCompiler('gfx1100')
     lib = compiler.compile(prg.src)
@@ -306,7 +306,7 @@ class TestTinygradIntegration(unittest.TestCase):
     """Parse disassembled instructions and verify we can re-encode some of them."""
     from tinygrad import Tensor
     from tinygrad.codegen import get_program
-    from tinygrad.renderer.cstyle import AMDRenderer
+    from tinygrad.renderer.cstyle import AMDHIPRenderer
     from tinygrad.runtime.support.compiler_amd import HIPCompiler
     from tinygrad.uop.ops import Ops
 
@@ -318,7 +318,7 @@ class TestTinygradIntegration(unittest.TestCase):
     sink_items = [si for si in schedule if si.ast.op == Ops.SINK]
     if not sink_items: return  # skip if no kernel
 
-    renderer = AMDRenderer('gfx1100')
+    renderer = AMDHIPRenderer('gfx1100')
     prg = get_program(sink_items[0].ast, renderer)
     compiler = HIPCompiler('gfx1100')
     lib = compiler.compile(prg.src)
