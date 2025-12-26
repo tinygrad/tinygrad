@@ -434,7 +434,7 @@ class TestVOP3(unittest.TestCase):
       v_mov_b32_e32(v[1], i32(5.0)),
       v_mov_b32_e32(v[2], i32(3.0)),
       # v_add_f32 with neg on src1: 5 + (-3) = 2
-      v_add_f32(v[1], v[1], v[2], neg=0b010),
+      v_add_f32_e64(v[1], v[1], v[2], neg=0b010),
     ])
     out = run_kernel(kernel, n_threads=1)
     self.assertEqual(f32(out[0]), 2.0)
@@ -475,7 +475,7 @@ class TestVOP3(unittest.TestCase):
     """Regression test: V_SQRT_F32 should return NaN for negative inputs, not 0."""
     kernel = make_store_kernel([
       v_mov_b32_e32(v[1], i32(-1.0)),
-      v_sqrt_f32(v[1], v[1]),
+      v_sqrt_f32_e32(v[1], v[1]),
     ])
     out = run_kernel(kernel, n_threads=1)
     self.assertTrue(math.isnan(f32(out[0])))
@@ -484,7 +484,7 @@ class TestVOP3(unittest.TestCase):
     """Regression test: V_RSQ_F32 should return NaN for negative inputs, not inf."""
     kernel = make_store_kernel([
       v_mov_b32_e32(v[1], i32(-1.0)),
-      v_rsq_f32(v[1], v[1]),
+      v_rsq_f32_e32(v[1], v[1]),
     ])
     out = run_kernel(kernel, n_threads=1)
     self.assertTrue(math.isnan(f32(out[0])))

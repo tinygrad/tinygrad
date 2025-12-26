@@ -553,6 +553,13 @@ def asm(text: str) -> Inst:
   if mnemonic.replace('_e32', '') in vcc_ops and len(values) >= 5: values = [values[0], values[2], values[3]]
   if mnemonic.startswith('v_cmp') and len(values) >= 3 and operands[0].strip().lower() in ('vcc_lo', 'vcc_hi', 'vcc'):
     values = values[1:]
+  # CMPX instructions with _e64 suffix: prepend implicit EXEC_LO destination (vdst=126)
+  if 'cmpx' in mnemonic and mnemonic.endswith('_e64') and len(values) == 2:
+    values = [VGPR(126, 1)] + values
+    # Recalculate modifiers: parsed[0]=src0, parsed[1]=src1 (no vdst in user input)
+    neg_bits = sum((1 << i) for i, p in enumerate(parsed[:3]) if p[1])
+    abs_bits = sum((1 << i) for i, p in enumerate(parsed[:3]) if p[2])
+    opsel_bits = sum((1 << i) for i, p in enumerate(parsed[:2]) if p[3])
   vop3sd_ops = {'v_div_scale_f32', 'v_div_scale_f64'}
   if mnemonic in vop3sd_ops and len(parsed) >= 5:
     neg_bits = sum((1 << i) for i, p in enumerate(parsed[2:5]) if p[1])
