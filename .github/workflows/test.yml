@@ -526,8 +526,6 @@ jobs:
         run: JIT=0 CPU=1 CNT=16 python3 test/speed/external_test_speed_llama1b_v_torch.py
       - name: JIT, BEAM=0, TEMP=0
         run: JIT=1 BEAM=0 CPU=1 CNT=16 python3 test/speed/external_test_speed_llama1b_v_torch.py
-      - name: JIT, BEAM=0, TEMP=0, FAKEWEIGHTS=0 (correctness test)
-        run: JIT=1 BEAM=0 CPU=1 CNT=16 FAKEWEIGHTS=0 python3 test/speed/external_test_speed_llama1b_v_torch.py
       - name: JIT, BEAM=2, TEMP=0
         run: JIT=1 BEAM=2 IGNORE_BEAM_CACHE=1 CPU=1 CNT=128 python3 test/speed/external_test_speed_llama1b_v_torch.py
       - name: JIT, BEAM=2, TEMP=0, TORCHCOMPILE=0

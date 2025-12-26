@@ -11,7 +11,7 @@ torch.set_num_threads(1)
 np.set_printoptions(linewidth=160)
 from transformers import LlamaForCausalLM, LlamaConfig
 from tinygrad.apps.llm import Transformer as TinygradTransformer, models
-from tinygrad import Tensor, Device, GlobalCounters, UOp, fetch, Context
+from tinygrad import Tensor, Device, GlobalCounters, UOp, fetch
 from tinygrad.helpers import colorize_float, getenv, CI
 
 TORCHCOMPILE, FAKEWEIGHTS, CNT, WARMUP = getenv("TORCHCOMPILE", 1), getenv("FAKEWEIGHTS", 1), getenv("CNT", 10), 10
