@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
+import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
 import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools, socketserver, json
 from dataclasses import dataclass, field
 from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload
@@ -326,6 +326,11 @@ _db_connection = None
 def db_connection():
   global _db_connection
   if _db_connection is None:
+    try:
+      import sqlite3
+    except ImportError:
+      if DEBUG >= 1: stderr_log("sqlite3 not found, caching disabled\n")
+      return None
     os.makedirs(CACHEDB.rsplit(os.sep, 1)[0], exist_ok=True)
     _db_connection = sqlite3.connect(CACHEDB, timeout=60, isolation_level="IMMEDIATE")
     # another connection has set it already or is in the process of setting it
@@ -335,15 +340,17 @@ def db_connection():
   return _db_connection
 
 def diskcache_clear():
-  cur = db_connection().cursor()
+  if (conn := db_connection()) is None: return
+  cur = conn.cursor()
   drop_tables = cur.execute("SELECT 'DROP TABLE IF EXISTS ' || quote(name) || ';' FROM sqlite_master WHERE type = 'table';").fetchall()
   cur.executescript("\n".join([s[0] for s in drop_tables] + ["VACUUM;"]))
 
 def diskcache_get(table:str, key:dict|str|int) -> Any:
-  if CACHELEVEL < 1: return None
+  if CACHELEVEL < 1 or (conn := db_connection()) is None: return None
   if isinstance(key, (str,int)): key = {"key": key}
-  cur = db_connection().cursor()
+  cur = conn.cursor()
   try:
+    import sqlite3
     res = cur.execute(f"SELECT val FROM '{table}_{VERSION}' WHERE {' AND '.join([f'{x}=?' for x in key.keys()])}", tuple(key.values()))
   except sqlite3.OperationalError:
     return None  # table doesn't exist
@@ -352,9 +359,8 @@ def diskcache_get(table:str, key:dict|str|int) -> Any:
 
 _db_tables = set()
 def diskcache_put(table:str, key:dict|str|int, val:Any, prepickled=False):
-  if CACHELEVEL < 1: return val
+  if CACHELEVEL < 1 or (conn := db_connection()) is None: return val
   if isinstance(key, (str,int)): key = {"key": key}
-  conn = db_connection()
   cur = conn.cursor()
   if table not in _db_tables:
     TYPES = {str: "text", bool: "integer", int: "integer", float: "numeric", bytes: "blob"}
