@@ -270,20 +270,20 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
       st.pend_sgpr_lane(inst.sdst, lane, result['vcc_lane'])
     return
 
-  # Get op enum and sources
+  # Get op enum and sources (None means "no source" for that operand)
   if inst_type is VOP1:
     if inst.op == VOP1Op.V_NOP: return
-    op_cls, op, src0, src1, src2, vdst = VOP1Op, VOP1Op(inst.op), inst.src0, 0, 0, inst.vdst
+    op_cls, op, src0, src1, src2, vdst = VOP1Op, VOP1Op(inst.op), inst.src0, None, None, inst.vdst
   elif inst_type is VOP2:
-    op_cls, op, src0, src1, src2, vdst = VOP2Op, VOP2Op(inst.op), inst.src0, inst.vsrc1 + 256, 0, inst.vdst
+    op_cls, op, src0, src1, src2, vdst = VOP2Op, VOP2Op(inst.op), inst.src0, inst.vsrc1 + 256, None, inst.vdst
   elif inst_type is VOP3:
     # VOP3 ops 0-255 are VOPC comparisons encoded as VOP3 (use VOPCOp pseudocode)
     if inst.op < 256:
-      op_cls, op, src0, src1, src2, vdst = VOPCOp, VOPCOp(inst.op), inst.src0, inst.src1, 0, inst.sdst if hasattr(inst, 'sdst') else VCC_LO
+      op_cls, op, src0, src1, src2, vdst = VOPCOp, VOPCOp(inst.op), inst.src0, inst.src1, None, inst.vdst
     else:
       op_cls, op, src0, src1, src2, vdst = VOP3Op, VOP3Op(inst.op), inst.src0, inst.src1, inst.src2, inst.vdst
   elif inst_type is VOPC:
-    op_cls, op, src0, src1, src2, vdst = VOPCOp, VOPCOp(inst.op), inst.src0, inst.vsrc1 + 256, 0, VCC_LO
+    op_cls, op, src0, src1, src2, vdst = VOPCOp, VOPCOp(inst.op), inst.src0, inst.vsrc1 + 256, None, VCC_LO
   else: raise NotImplementedError(f"Unknown vector type {inst_type}")
 
   pc = pc_dict.get(op_cls, {}).get(op)
@@ -304,16 +304,16 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
 
   if is_shift_64:
     s0 = mod_src(st.rsrc(src0, lane), 0)  # shift amount is 32-bit
-    s1 = st.rsrc64(src1, lane) if src1 else 0  # value to shift is 64-bit
-    s2 = mod_src(st.rsrc(src2, lane), 2) if src2 else 0
+    s1 = st.rsrc64(src1, lane) if src1 is not None else 0  # value to shift is 64-bit
+    s2 = mod_src(st.rsrc(src2, lane), 2) if src2 is not None else 0
   elif is_64bit_op:
     s0 = st.rsrc64(src0, lane)
-    s1 = st.rsrc64(src1, lane) if src1 else 0
-    s2 = st.rsrc64(src2, lane) if src2 else 0
+    s1 = st.rsrc64(src1, lane) if src1 is not None else 0
+    s2 = st.rsrc64(src2, lane) if src2 is not None else 0
   else:
     s0 = mod_src(st.rsrc(src0, lane), 0)
-    s1 = mod_src(st.rsrc(src1, lane), 1) if src1 else 0
-    s2 = mod_src(st.rsrc(src2, lane), 2) if src2 else 0
+    s1 = mod_src(st.rsrc(src1, lane), 1) if src1 is not None else 0
+    s2 = mod_src(st.rsrc(src2, lane), 2) if src2 is not None else 0
   d0 = V[vdst] if not is_64bit_op else (V[vdst] | (V[vdst + 1] << 32))
 
   # Special case: ops with control flow that the interpreter can't handle
@@ -321,6 +321,10 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     V[vdst] = _i32(max(_f32(s0), _f32(s1))); return
   if op in (VOP3Op.V_MIN_F32, VOP2Op.V_MIN_F32, VOP1Op.V_MIN_F32 if hasattr(VOP1Op, 'V_MIN_F32') else None):
     V[vdst] = _i32(min(_f32(s0), _f32(s1))); return
+  # V_CNDMASK_B32: VOP3 encoding uses src2 as mask (not VCC); VOP2 uses VCC implicitly
+  if op in (VOP3Op.V_CNDMASK_B32, VOP2Op.V_CNDMASK_B32):
+    mask = s2 if (inst_type is VOP3 and src2 is not None and src2 < 256) else st.vcc
+    V[vdst] = s1 if (mask >> lane) & 1 else s0; return
 
   # Execute pseudocode
   result = interp.execute(pc, s0, s1, s2, scc=st.scc, d0=d0, vcc=st.vcc, lane=lane, exec_mask=st.exec_mask, literal=st.literal)

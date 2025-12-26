@@ -345,9 +345,11 @@ class PseudocodeInterpreter:
     def v_max3_i32(a, b, c): return v_max_i32(v_max_i32(a, b), c)
     def v_max3_u32(a, b, c): return v_max_u32(v_max_u32(a, b), c)
     def v_max3_f32(a, b, c): return v_max_f32(v_max_f32(a, b), c)
+    def _sqrt(x): return math.sqrt(x) if x >= 0 else float('nan')
+    def _log2(x): return math.log2(x) if x > 0 else (float('-inf') if x == 0 else float('nan'))
     try:
       return eval(expr, {'_f32': _f32, '_i32': _i32, '_sext': _sext, 'abs': abs, 'min': min, 'max': max, 'math': math,
-                         'log2': math.log2, 'sqrt': math.sqrt, 'trunc': math.trunc, 'floor': math.floor, 'ceil': math.ceil,
+                         'log2': _log2, 'sqrt': _sqrt, 'trunc': math.trunc, 'floor': math.floor, 'ceil': math.ceil,
                          'NAN': float('nan'), 'INF': float('inf'), '_isnan': lambda x: math.isnan(x) if isinstance(x, float) else False,
                          '_exponent': _exponent, '_mantissa': _mantissa, '_sign': _sign, '_ldexp': _ldexp,
                          '_sin': _sin, '_cos': _cos, '_pow': _pow, 'struct': struct,
