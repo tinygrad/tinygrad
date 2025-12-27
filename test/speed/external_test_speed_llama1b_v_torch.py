@@ -10,7 +10,7 @@ import torch
 torch.set_num_threads(1)
 np.set_printoptions(linewidth=160)
 from transformers import LlamaForCausalLM, LlamaConfig
-from tinygrad.apps.llm import Transformer as TinygradTransformer, models
+from tinygrad.apps.llm import Transformer, models
 from tinygrad import Tensor, Device, GlobalCounters, UOp, fetch
 from tinygrad.helpers import colorize_float, getenv, CI
 
@@ -56,6 +56,7 @@ def benchmark_tinygrad(model, start_tok, warmup=WARMUP, iters=CNT):
 
   v_start_pos = UOp.variable("start_pos", 0, model.max_context-1)
   toks = []
+
   tok_tensor = Tensor([[start_tok]]).realize()
   for i in range(warmup):
     last_tok = model(tok_tensor, v_start_pos.bind(i)).item()
@@ -80,10 +81,9 @@ class TestLlamaBenchmark(unittest.TestCase):
     print(f"\nTinygrad device: {Device.DEFAULT}, FAKEWEIGHTS={FAKEWEIGHTS}")
     print(f"Config: {LLAMA_1B}")
 
-    # with Context(BEAM=0):  # don't search for faster copy kernels
     if FAKEWEIGHTS:
       print("Creating tinygrad model with random weights...")
-      cls.tiny_model = TinygradTransformer(**LLAMA_1B)
+      cls.tiny_model = Transformer(**LLAMA_1B)
       print("Creating HuggingFace model with random weights...")
       hf_config = LlamaConfig(vocab_size=LLAMA_1B["vocab_size"], hidden_size=LLAMA_1B["dim"],
         intermediate_size=LLAMA_1B["hidden_dim"], num_hidden_layers=LLAMA_1B["num_blocks"],
@@ -94,21 +94,13 @@ class TestLlamaBenchmark(unittest.TestCase):
     else:
       gguf_path = fetch(models["llama3.2:1b"])
       print(f"Loading pretrained models from GGUF: {gguf_path}")
-      cls.tiny_model, _ = TinygradTransformer.from_gguf(Tensor(gguf_path), max_context=MAX_CONTEXT)
-      cls.hf_model = LlamaForCausalLM.from_pretrained(gguf_path.parent, gguf_file=gguf_path.name, dtype=torch.float16)
+      cls.tiny_model, _ = Transformer.from_gguf(Tensor(gguf_path), max_context=MAX_CONTEXT)
+      cls.hf_model = LlamaForCausalLM.from_pretrained(gguf_path.parent, gguf_file=gguf_path.name, dtype=torch.float32)
 
     cls.hf_model.eval()
     cls.start_tok = 1  # starting token for generation
 
-  def reset_kv(self):
-    # reset tinygrad kv cache (llm.py uses blk[i].cache_kv)
-    for block in self.tiny_model.blk:
-      if hasattr(block, 'cache_kv'):
-        delattr(block, 'cache_kv')
-
   def test_benchmark(self):
-    self.reset_kv()
-
     if TORCHCOMPILE:
       print("\nCompiling torch model...")
       hf_model = torch.compile(self.hf_model)
@@ -118,8 +110,6 @@ class TestLlamaBenchmark(unittest.TestCase):
     print("Running benchmarks...")
 
     hf_times, hf_toks = benchmark_hf(hf_model, self.start_tok)
-
-    self.reset_kv()
     tiny_times, tiny_toks, tiny_mems = benchmark_tinygrad(self.tiny_model, self.start_tok)
 
     hf_mean, hf_std = np.mean(hf_times)*1000, np.std(hf_times)*1000
