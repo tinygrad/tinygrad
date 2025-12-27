@@ -63,6 +63,9 @@ def fract(x): return x - math.floor(x)
 PI = math.pi
 def sin(x): return float("nan") if math.isinf(x) or math.isnan(x) else math.sin(x)
 def cos(x): return float("nan") if math.isinf(x) or math.isnan(x) else math.cos(x)
+def pow(a, b):
+  try: return a ** b
+  except OverflowError: return float("inf") if b > 0 else 0.0
 def _brev32(v): return int(bin(v & 0xffffffff)[2:].zfill(32)[::-1], 2)
 def _brev64(v): return int(bin(v & 0xffffffffffffffff)[2:].zfill(64)[::-1], 2)
 def _ctz32(v):

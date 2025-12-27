@@ -3,7 +3,7 @@
 from extra.assembly.rdna3.autogen import SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp
 from extra.assembly.rdna3.helpers import (
   _f32, _i32, _div, _sext, _f16, _i16, _to_f16_bits, _f64, _i64, _isnan, _gt_neg_zero, _lt_neg_zero, _fma, _signext,
-  trunc, floor, sqrt, log2, i32_to_f32, u32_to_f32, i32_to_f64, u32_to_f64, f32_to_f64, f64_to_f32, f32_to_i32, f32_to_u32,
+  trunc, floor, sqrt, log2, pow, i32_to_f32, u32_to_f32, i32_to_f64, u32_to_f64, f32_to_f64, f64_to_f32, f32_to_i32, f32_to_u32,
   f64_to_i32, f64_to_u32, f32_to_f16, f16_to_f32, i16_to_f16, u16_to_f16, f16_to_i16, f16_to_u16, _sign, _ldexp, isEven, fract,
   PI, sin, cos, _brev32, _brev64, _ctz32, _ctz64, _exponent, _is_denorm_f32, _is_denorm_f64, v_min_f32, v_max_f32, v_min_i32,
   v_max_i32, v_min_u32, v_max_u32, v_min_f16, v_max_f16, v_min_i16, v_max_i16, v_min_u16, v_max_u16, v_min3_f32, v_max3_f32,
