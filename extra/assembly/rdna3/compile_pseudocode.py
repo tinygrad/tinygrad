@@ -257,6 +257,9 @@ def expr_to_python(expr: str) -> str:
       e = f'(({true_val}) if ({cond}) else ({false_val}))'
     return e
   e = convert_ternary(e)
+  # Use safe division for floating point division to handle division by zero (returns inf/-inf)
+  # Pattern: number_or_expr / _f32(...) or _f64(...) or _f16(...)
+  e = re.sub(r'(\d+\.?\d*|_f(?:16|32|64)\([^)]+\))\s*/\s*(_f(?:16|32|64)\([^)]+\))', r'_div(\1, \2)', e)
   return e
 
 def compile_pseudocode(pseudocode: str) -> tuple[str, bool] | None:
@@ -379,6 +382,38 @@ def compile_pseudocode(pseudocode: str) -> tuple[str, bool] | None:
           py_lines.append('  ' * indent + f'_d0=int(_full)&0xffffffffffffffff')
           py_lines.append('  ' * indent + f'_d1=(int(_full)>>64)&1')
           has_d0_64, has_d1 = True, True
+        # Handle single-bit assignment to D0: D0.u32[bit_expr] = value or D0.u64[bit_expr] = value
+        # Need to match balanced brackets for nested expressions like D0.u32[S0.u32[4 : 0]]
+        elif (d0_bit_prefix := re.match(r'D0\.(u|b)(32|64)\[', lhs)):
+          typ, bits = d0_bit_prefix.groups()
+          # Extract content between outermost brackets (handle nested brackets)
+          bracket_start = d0_bit_prefix.end() - 1  # position of '['
+          depth, i = 1, bracket_start + 1
+          while i < len(lhs) and depth > 0:
+            if lhs[i] == '[': depth += 1
+            elif lhs[i] == ']': depth -= 1
+            i += 1
+          bit_expr = lhs[bracket_start + 1:i - 1]
+          # Check if it's a bit range (contains ':' at depth 0) vs single bit index
+          is_range = False
+          depth = 0
+          for c in bit_expr:
+            if c == '[': depth += 1
+            elif c == ']': depth -= 1
+            elif c == ':' and depth == 0: is_range = True; break
+          if not is_range:
+            bit_py = expr_to_python(bit_expr)
+            mask = '0xffffffffffffffff' if bits == '64' else '0xffffffff'
+            # Set or clear the bit at position bit_py based on rhs
+            py_lines.append('  ' * indent + f'_d0=((_d0&~(1<<({bit_py})))|(int(bool({rhs_py}))<<({bit_py})))&{mask}')
+            if bits == '64': has_d0_64 = True
+          else:
+            # Bit range - handled elsewhere, fall through
+            if 'f32' in lhs: py_lines.append('  ' * indent + f'_d0=_i32({rhs_py})')
+            elif 'f16' in lhs: py_lines.append('  ' * indent + f'_d0=_to_f16_bits({rhs_py})&0xffff')
+            elif 'f64' in lhs: py_lines.append('  ' * indent + f'_d0=_i64({rhs_py})'); has_d0_64 = True
+            elif '64' in lhs: py_lines.append('  ' * indent + f'_d0=int({rhs_py})&0xffffffffffffffff'); has_d0_64 = True
+            else: py_lines.append('  ' * indent + f'_d0=int({rhs_py})&0xffffffff')
         elif lhs.startswith('D0.'):
           if 'f32' in lhs: py_lines.append('  ' * indent + f'_d0=_i32({rhs_py})')
           elif 'f16' in lhs: py_lines.append('  ' * indent + f'_d0=_to_f16_bits({rhs_py})&0xffff')

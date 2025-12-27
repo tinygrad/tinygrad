@@ -29,20 +29,20 @@ class StateSnapshot:
   sgpr: list[int]
   vgpr: list[list[int]]
 
-  def diff(self, other: 'StateSnapshot', n_lanes: int) -> list[str]:
+  def diff(self, other: 'StateSnapshot', n_lanes: int, arrow: str = " vs ") -> list[str]:
     """Return list of differences between two states."""
     diffs = []
-    if self.pc != other.pc: diffs.append(f"pc: {self.pc} vs {other.pc}")
-    if self.scc != other.scc: diffs.append(f"scc: {self.scc} vs {other.scc}")
-    if self.vcc != other.vcc: diffs.append(f"vcc: 0x{self.vcc:08x} vs 0x{other.vcc:08x}")
-    if self.exec_mask != other.exec_mask: diffs.append(f"exec: 0x{self.exec_mask:08x} vs 0x{other.exec_mask:08x}")
+    if self.pc != other.pc: diffs.append(f"pc: {self.pc}{arrow}{other.pc}")
+    if self.scc != other.scc: diffs.append(f"scc: {self.scc}{arrow}{other.scc}")
+    if self.vcc != other.vcc: diffs.append(f"vcc: 0x{self.vcc:08x}{arrow}0x{other.vcc:08x}")
+    if self.exec_mask != other.exec_mask: diffs.append(f"exec: 0x{self.exec_mask:08x}{arrow}0x{other.exec_mask:08x}")
     for i, (a, b) in enumerate(zip(self.sgpr, other.sgpr)):
       # Skip VCC_LO/HI (106/107) and EXEC_LO/HI (126/127) as they alias vcc/exec_mask which are compared separately
       if i in (106, 107, 126, 127): continue
-      if a != b: diffs.append(f"sgpr[{i}]: 0x{a:08x} vs 0x{b:08x}")
+      if a != b: diffs.append(f"sgpr[{i}]: 0x{a:08x}{arrow}0x{b:08x}")
     for lane in range(n_lanes):
       for i, (a, b) in enumerate(zip(self.vgpr[lane], other.vgpr[lane])):
-        if a != b: diffs.append(f"vgpr[{lane}][{i}]: 0x{a:08x} vs 0x{b:08x}")
+        if a != b: diffs.append(f"vgpr[{lane}][{i}]: 0x{a:08x}{arrow}0x{b:08x}")
     return diffs
 
 class CStateSnapshot(ctypes.Structure):
@@ -160,14 +160,24 @@ def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: t
             diffs = rust_before.diff(python_before, n_lanes)
             if diffs:
               trace_lines = []
-              for s, pc, d, rb, pb in trace[:-1]:
+              for idx, (s, pc, d, rb, pb) in enumerate(trace):
                 trace_lines.append(f"    step {s}: PC={pc:3d} {d}")
-                if trace.index((s, pc, d, rb, pb)) < len(trace) - 2:
-                  next_rb, next_pb = trace[trace.index((s, pc, d, rb, pb)) + 1][3:5]
-                  inst_diffs = rb.diff(next_rb, n_lanes)
-                  if inst_diffs: trace_lines.append(f"             rust changes: {', '.join(inst_diffs[:3])}")
+                if idx < len(trace) - 1:
+                  next_rb, next_pb = trace[idx + 1][3:5]
+                  rust_diffs = rb.diff(next_rb, n_lanes, "->")
+                  python_diffs = pb.diff(next_pb, n_lanes, "->")
+                  if rust_diffs: trace_lines.append(f"             rust:   {', '.join(rust_diffs[:5])}")
+                  if python_diffs: trace_lines.append(f"             python: {', '.join(python_diffs[:5])}")
+                  elif rust_diffs: trace_lines.append(f"             python: (no changes)")
+                else:
+                  # Last traced instruction - compare with current state
+                  rust_diffs = rb.diff(rust_before, n_lanes, "->")
+                  python_diffs = pb.diff(python_before, n_lanes, "->")
+                  if rust_diffs: trace_lines.append(f"             rust:   {', '.join(rust_diffs[:5])}")
+                  if python_diffs: trace_lines.append(f"             python: {', '.join(python_diffs[:5])}")
+                  elif rust_diffs: trace_lines.append(f"             python: (no changes)")
               trace_str = "\n".join(trace_lines)
-              return False, f"K{kernel_idx} WG({gidx},{gidy},{gidz}) Step {step} before inst '{inst_str}': states differ:\n  " + "\n  ".join(diffs[:10]) + f"\n  Recent instructions:\n{trace_str}", total_steps
+              return False, f"K{kernel_idx} WG({gidx},{gidy},{gidz}) Step {step} before inst '{inst_str}': states differ (rust vs python):\n  " + "\n  ".join(diffs[:10]) + f"\n  Recent instructions:\n{trace_str}", total_steps
 
             rust_result = rust.step()
             python_result = python.step()
