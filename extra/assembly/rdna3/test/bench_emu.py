@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Benchmark for RDNA3 Python emulator (emu2.py) - measures instruction throughput and identifies bottlenecks."""
+"""Benchmark for RDNA3 Python emulator (emu.py) - measures instruction throughput and identifies bottlenecks."""
 import ctypes, time, struct, cProfile, pstats, io
 from pathlib import Path
 
