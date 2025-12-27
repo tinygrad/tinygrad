@@ -13,6 +13,7 @@ const TOK_NOSPEECH = 50361;
 const TOK_TS_FIRST = 50363;
 const TOK_TS_LAST = 51863;
 
+const MAX_CONTEXT_LENGTH = 448;
 const MAX_TOKENS_TO_DECODE = 224;
 // #endregion constants
 
@@ -132,7 +133,7 @@ function format_text(text, seek, seek_end) {
 }
 
 function tokensToText(tokens, mapping) {
-    return tokens.filter((t) => ![TOK_EOS, TOK_NO_TIMESTAMPS].includes(t)).map(j => mapping[j]).join('');
+    return Array.from(tokens).filter((t) => ![TOK_EOS, TOK_NO_TIMESTAMPS].includes(t)).map(j => mapping[j]).join('');
 }
 
 // #region whisper
@@ -175,10 +176,19 @@ async function decoder_upload_audio_features(nets, audio_features_batch, decoder
 /**
  * @typedef Decode_Sequence
  * @type {object}
- * @property {integer} index
  * @property {integer} context_prompt_length
  * @property {integer} max_context_length
- * @property {integer[]} context
+ * @property {Int32Array} tokens
+ * @property {integer} length
+ * @property {bool} done
+ */
+
+/**
+ * @typedef Decode_Cursor
+ * @type {object}
+ * @property {Int32Array} tokens
+ * @property {integer} length
+ * @property {bool} done
  */
 
 /**
@@ -188,7 +198,9 @@ async function decoder_upload_audio_features(nets, audio_features_batch, decoder
  */
 
 function initSequences(sequence_count) {
+    let tokens = new Int32Array(MAX_CONTEXT_LENGTH);
     let context = [TOK_BEGIN_TRANSCRIPTION, TOK_NO_TIMESTAMPS];
+    tokens.set(context, 0);
     const context_prompt_length = context.length;
     const max_context_length = context_prompt_length + MAX_TOKENS_TO_DECODE;
 
@@ -196,10 +208,11 @@ function initSequences(sequence_count) {
     let sequences = [];
     for (let i = 0; i < sequence_count; ++i) {
         let sequence = {};
-        sequence.index = context_prompt_length;
         sequence.context_prompt_length = context_prompt_length;
         sequence.max_context_length = max_context_length;
-        sequence.context = context.slice();
+        sequence.tokens = tokens.slice();
+        sequence.length = context.length;
+        sequence.done = false;
         sequences.push(sequence);
     }
 
@@ -288,7 +301,7 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
         let is_done = false;
         let currentTokenIndex = 0;
         while (!is_done) {
-            if (currentTokenIndex < MAX_TOKENS_TO_DECODE && sequences.some(x => x.context.at(-1) !== TOK_EOS)) {
+            if (currentTokenIndex < MAX_TOKENS_TO_DECODE && sequences.some(x => !x.done)) {
                 if (cancelToken.cancelled) {
                     is_done = true;
                     break;
@@ -297,10 +310,10 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
                 // NOTE: pack batch inputs
                 let context_inputs = [];
                 for (let idx = 0; idx < sequences.length; ++idx) {
-                    let ctx = sequences[idx].context;
-                    context_inputs.push(ctx.at(-1));
+                    let ctx = sequences[idx].tokens;
+                    context_inputs.push(ctx.at(sequences[idx].length-1));
                 }
-                const max_context_batch_length = Math.max.apply(null, sequences.map(x => x.context.length));
+                const max_context_batch_length = Math.max.apply(null, sequences.map(x => x.length));
                 let [sorted] = await decoder_helper(nets, context_inputs, audio_features_batch[0], max_context_batch_length - 1, decoder_state);
 
                 // NOTE: unpack batch results
@@ -312,23 +325,24 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
 
                 for (let idx = 0; idx < sequences.length; ++idx) {
                     let current_sequence = sequences[idx];
-                    let current_context = current_sequence.context;
 
-                    if (current_context.at(-1) === TOK_EOS) continue;
+                    if (current_sequence.done) continue;
                     let seek = seeks_batch[idx];
 
-                    current_context.push(decode_results_topk[idx][0]);
+                    let next_token = decode_results_topk[idx][0];
+                    current_sequence.tokens[current_sequence.length] = next_token;
+                    current_sequence.length += 1;
 
-                    if (current_context.length >= current_sequence.max_context_length) {
-                        current_context[current_context.length - 1] = TOK_EOS;
+                    if (next_token === TOK_EOS) {
+                        current_sequence.done = true;
                     }
 
-                    const detokenized = tokensToText(current_context.slice(current_sequence.context_prompt_length), nets.mapping);
+                    const detokenized = tokensToText(current_sequence.tokens.slice(current_sequence.context_prompt_length, current_sequence.length), nets.mapping);
                     const seek_end = Math.min(seek + MEL_SPEC_CHUNK_LENGTH, log_specs_full.length);
                     pendingTexts[idx] = format_text(detokenized, seek, seek_end);
                 }
 
-                onEvent("chunkUpdate", {pendingTexts: pendingTexts.slice(), currentTokenIndex, sequenceStatus: sequences.map(x => x.context.at(-1) === TOK_EOS ? "done" : "running")});
+                onEvent("chunkUpdate", {pendingTexts: pendingTexts.slice(), currentTokenIndex, sequenceStatus: sequences.map(x => x.done ? "done" : "running")});
 
                 ++currentTokenIndex;
             } else {
@@ -344,9 +358,9 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
                 return;
             } else {
                 let sequence = sequences[i];
-                let {context, context_prompt_length: offset} = sequence;
+                let {tokens, context_prompt_length: offset} = sequence;
 
-                onEvent("chunkDone", { context, offset, index: i, pendingText: pendingTexts[i] });
+                onEvent("chunkDone", { context: tokens.slice(0, sequence.length), offset, index: i, pendingText: pendingTexts[i] });
 
                 ++i;
             }
