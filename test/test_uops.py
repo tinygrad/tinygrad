@@ -544,6 +544,12 @@ class TestUopsObject(unittest.TestCase):
     self.assertEqual(a.device, Device.DEFAULT)
 
 class TestUOpRender(unittest.TestCase):
+  def test_render_vectorize_empty(self):
+    u = UOp(Ops.VECTORIZE, dtype=dtypes.int.vec(0), src=())
+    self.assertEqual(u.render(simplify=False), "{}")
+  def test_render_vectorize_empty_simplified(self):
+    u = UOp(Ops.VECTORIZE, dtype=dtypes.int.vec(0), src=())
+    self.assertEqual(u.render(), "{}")
   def test_render_vectorize_same(self):
     u = UOp(Ops.VECTORIZE, dtype=dtypes.int.vec(3), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0)))
     self.assertEqual(u.render(simplify=False), "{0, ...}")
