@@ -12,7 +12,7 @@ from tinygrad.device import Device
 from tinygrad.helpers import getenv
 from tinygrad.nn.state import get_state_dict
 
-from examples.mlperf.helpers import get_mlperf_bert_model, get_data_bert
+from examples.mlperf.helpers import get_mlperf_bert_model
 from examples.mlperf.dataloader import batch_load_val_bert
 from examples.mlperf.model_train import eval_step_bert
 
@@ -23,13 +23,16 @@ if __name__ == "__main__":
   EVAL_BS = getenv("EVAL_BS", 4 * len(GPUS))
   max_eval_steps = (10000 + EVAL_BS - 1) // EVAL_BS
 
+  # check for eval files
   for i in range(10):
-    assert os.path.exists(os.path.join(BASEDIR, "eval", f"{i}.pkl")), \
-      f"File {i}.pkl does not exist in {os.path.join(BASEDIR, 'eval')}"
+    if not os.path.exists(os.path.join(BASEDIR, "eval", f"{i}.pkl")):
+      print(f"File {i}.pkl does not exist in {os.path.join(BASEDIR, 'eval')}, skipping test")
+      exit(0)
 
   required_files = ["checkpoint", "model.ckpt-28252.data-00000-of-00001", "model.ckpt-28252.index", "model.ckpt-28252.meta"]
-  assert all(os.path.exists(os.path.join(INIT_CKPT_DIR, f)) for f in required_files), \
-    f"Missing checkpoint files in INIT_CKPT_DIR: {required_files}"
+  if not all(os.path.exists(os.path.join(INIT_CKPT_DIR, f)) for f in required_files):
+    print(f"Missing checkpoint files in INIT_CKPT_DIR: {required_files}, skipping test")
+    exit(0)
 
   Tensor.training = False
 
@@ -42,12 +45,12 @@ if __name__ == "__main__":
   eval_it = iter(batch_load_val_bert(EVAL_BS))
 
   for _ in tqdm(range(max_eval_steps), desc="Evaluating", total=max_eval_steps):
-    eval_data = get_data_bert(GPUS, eval_it)
-    eval_result: dict[str, Tensor] = eval_step_bert(model, eval_data["input_ids"], eval_data["segment_ids"], eval_data["input_mask"], \
+    eval_data = next(eval_it)
+    masked_lm_accuracy, seq_relationship_accuracy, masked_lm_loss, next_sentence_loss = eval_step_bert(model, eval_data["input_ids"], eval_data["segment_ids"], eval_data["input_mask"], \
                                                eval_data["masked_lm_positions"], eval_data["masked_lm_ids"], \
-                                               eval_data["masked_lm_weights"], eval_data["next_sentence_labels"])
+                                               eval_data["masked_lm_weights"], eval_data["next_sentence_labels"], GPUS)
 
-    mlm_accuracy = eval_result["masked_lm_accuracy"].numpy().item()
+    mlm_accuracy = masked_lm_accuracy.numpy().item()
     eval_accuracy.append(mlm_accuracy)
 
   total_lm_accuracy = sum(eval_accuracy) / len(eval_accuracy)

@@ -1,9 +1,9 @@
 import time, unittest
-from tinygrad.runtime.support.hip_comgr import compile_hip
+from tinygrad.runtime.support.compiler_amd import compile_hip
 from tinygrad import Tensor
 from tinygrad.device import Device
 from tinygrad.engine.schedule import create_schedule
-from tinygrad.codegen.opt.kernel import Kernel
+from tinygrad.uop.ops import Kernel
 
 class TestHIPCompileSpeed(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT != "HIP", "only run on HIP")
