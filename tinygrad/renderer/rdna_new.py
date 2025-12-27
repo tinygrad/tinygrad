@@ -290,10 +290,12 @@ render_ops = PatternMatcher([
    lambda ctx,x,a,b: [v_ashrrev_i64(ctx.dst, ctx.get_reg(b), ctx.get_reg(a))]),
   (UPat(Ops.SHR, dtype=dtypes.uint64, src=(UPat.var("a"), UPat.var("b")), name="x"),
    lambda ctx,x,a,b: [v_lshrrev_b64(ctx.dst, ctx.get_reg(b), ctx.get_reg(a))]),
-  # MAX: floats, signed ints, unsigned ints, bool (bool uses OR since max(True, False) = True)
+  # MAX: floats, 32-bit signed/unsigned ints, bool (64-bit MAX is lowered in rdna_uops.py)
   (UPat(Ops.MAX, dtype=dtypes.floats, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,x,a,b: [v_max_f32_e32(ctx.dst, *_sw(ctx,a,b))]),
-  (UPat(Ops.MAX, dtype=dtypes.sints, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,x,a,b: [v_max_i32_e32(ctx.dst, *_sw(ctx,a,b))]),
-  (UPat(Ops.MAX, dtype=dtypes.uints, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,x,a,b: [v_max_u32_e32(ctx.dst, *_sw(ctx,a,b))]),
+  (UPat(Ops.MAX, dtype=(dtypes.int8, dtypes.int16, dtypes.int32), src=(UPat.var("a"), UPat.var("b")), name="x"),
+   lambda ctx,x,a,b: [v_max_i32_e32(ctx.dst, *_sw(ctx,a,b))]),
+  (UPat(Ops.MAX, dtype=(dtypes.uint8, dtypes.uint16, dtypes.uint32), src=(UPat.var("a"), UPat.var("b")), name="x"),
+   lambda ctx,x,a,b: [v_max_u32_e32(ctx.dst, *_sw(ctx,a,b))]),
   (UPat(Ops.MAX, dtype=dtypes.bool, src=(UPat.var("a"), UPat.var("b")), name="x"), lambda ctx,x,a,b: [v_or_b32_e32(ctx.dst, *_sw(ctx,a,b))]),
   # MULACC (FMA): float64, floats
   (UPat(Ops.MULACC, dtype=dtypes.float64, src=(UPat.var("a"), UPat.var("b"), UPat.var("d")), name="x"),
@@ -310,6 +312,10 @@ render_ops = PatternMatcher([
   (UPat(Ops.TRUNC, dtype=dtypes.floats, src=(UPat.var("a"),), name="x"), lambda ctx,x,a: [v_trunc_f32_e32(ctx.dst, ctx.get_reg(a))]),
   # NEG: floats vs ints
   (UPat(Ops.NEG, dtype=dtypes.floats, src=(UPat.var("a"),), name="x"), lambda ctx,x,a: [v_mul_f32_e32(ctx.dst, -1.0, ctx.get_reg(a))]),
+  # 64-bit NEG: 0 - val with borrow propagation
+  (UPat(Ops.NEG, dtype=(dtypes.int64, dtypes.uint64), src=(UPat.var("a"),), name="x"),
+   lambda ctx,x,a: [v_sub_co_u32(v[ctx.dst.idx], VCC_LO, 0, v[ctx.get_reg(a).idx]),
+                    v_sub_co_ci_u32_e32(v[ctx.dst.idx+1], 0, v[ctx.get_reg(a).idx+1])]),
   (UPat(Ops.NEG, dtype=dtypes.ints, src=(UPat.var("a"),), name="x"), lambda ctx,x,a: [v_sub_nc_u32_e32(ctx.dst, 0, ctx.get_reg(a))]),
 ])
 
@@ -455,9 +461,41 @@ class RDNARenderer(Renderer):
         (Ops.CMPLT, dtypes.float32): v_cmp_gt_f32_e32, (Ops.CMPLT, dtypes.int32): v_cmp_gt_i32_e32, (Ops.CMPLT, dtypes.uint32): v_cmp_gt_u32_e32,
         (Ops.CMPLT, dtypes.float64): v_cmp_gt_f64_e32,
       }
+      def is_const(x): return isinstance(x, (int, float))
+
+      # Handle 64-bit integer comparisons specially
+      if dtype in (dtypes.int64, dtypes.uint64):
+        a_lo, a_hi = (v[a.idx], v[a.idx+1]) if isinstance(a, VGPR) else (a, 0)
+        b_lo, b_hi = (v[b.idx], v[b.idx+1]) if isinstance(b, VGPR) else (b, 0)
+        if op is Ops.CMPLT:
+          # a < b: (hi(a) < hi(b)) || (hi(a) == hi(b) && lo(a) < lo(b))
+          cmp_hi = v_cmp_lt_i32_e32 if dtype == dtypes.int64 else v_cmp_lt_u32_e32
+          code.append(cmp_hi(a_hi, b_hi))  # hi(a) < hi(b) -> VCC
+          code.append(v_cndmask_b32_e64(dst, 0, 1, VCC_LO))  # tmp1 = hi(a) < hi(b)
+          code.append(v_cmp_eq_u32_e32(a_hi, b_hi))  # hi(a) == hi(b) -> VCC
+          scratch = ra.alloc_vgpr(u)
+          code.append(v_cndmask_b32_e64(scratch, 0, 1, VCC_LO))  # tmp2 = hi(a) == hi(b)
+          code.append(v_cmp_lt_u32_e32(a_lo, b_lo))  # lo(a) < lo(b) -> VCC (always unsigned for low part)
+          code.append(v_cndmask_b32_e64(scratch, 0, scratch, VCC_LO))  # tmp2 = hi_eq && lo_lt
+          code.append(v_or_b32_e32(dst, dst, scratch))  # result = hi_lt || (hi_eq && lo_lt)
+        elif op is Ops.CMPEQ:
+          # a == b: hi(a) == hi(b) && lo(a) == lo(b)
+          code.append(v_cmp_eq_u32_e32(a_hi, b_hi))
+          code.append(v_cndmask_b32_e64(dst, 0, 1, VCC_LO))
+          code.append(v_cmp_eq_u32_e32(a_lo, b_lo))
+          code.append(v_cndmask_b32_e64(dst, 0, dst, VCC_LO))  # dst = hi_eq ? lo_eq : 0
+        elif op is Ops.CMPNE:
+          # a != b: hi(a) != hi(b) || lo(a) != lo(b)
+          code.append(v_cmp_ne_u32_e32(a_hi, b_hi))
+          code.append(v_cndmask_b32_e64(dst, 0, 1, VCC_LO))
+          code.append(v_cmp_ne_u32_e32(a_lo, b_lo))
+          scratch = ra.alloc_vgpr(u)
+          code.append(v_cndmask_b32_e64(scratch, 0, 1, VCC_LO))
+          code.append(v_or_b32_e32(dst, dst, scratch))
+        return
+
       base_dtype = dtypes.float64 if dtype == dtypes.float64 else dtypes.float32 if dtypes.is_float(dtype) else \
                    dtypes.int32 if dtype in (dtypes.int8, dtypes.int16, dtypes.int32) else dtypes.uint32
-      def is_const(x): return isinstance(x, (int, float))
       # For CMPLT with constant in vsrc1 position, swap and use GT
       if op is Ops.CMPLT and is_const(b) and not is_const(a):
         cmp_fn = cmp_gt_map.get((op, base_dtype))
@@ -508,8 +546,8 @@ class RDNARenderer(Renderer):
       elif op is Ops.WHERE:
         cond, true_val, false_val = srcs[0], srcs[1], srcs[2]
         code.append(v_cmp_ne_i32_e32(0, cond))
-        if dtype == dtypes.float64:
-          # For float64: select both low and high 32-bit parts
+        if dtype in (dtypes.float64, dtypes.int64, dtypes.uint64):
+          # For 64-bit types: select both low and high 32-bit parts
           code.append(v_cndmask_b32_e64(v[dst.idx], v[false_val.idx], v[true_val.idx], VCC_LO))
           code.append(v_cndmask_b32_e64(v[dst.idx+1], v[false_val.idx+1], v[true_val.idx+1], VCC_LO))
         else:

@@ -260,11 +260,25 @@ class RDNARegAlloc:
       if self._next_vgpr > self.MAX_VGPR:
         raise RuntimeError(f"VGPR overflow: scratch VGPRs exceed limit (need {self._next_vgpr}, max {self.MAX_VGPR})")
     elif count > self._scratch_count:
-      # Expand scratch region if more VGPRs needed
-      extra = count - self._scratch_count
-      self._scratch_count = count
-      self._next_vgpr += extra
-      self._max_vgpr = max(self._max_vgpr, self._next_vgpr)
+      # Need more scratch VGPRs. Check if we can expand in place or need to relocate.
+      expand_start = self._scratch_vgpr + self._scratch_count
+      expand_end = self._scratch_vgpr + count
+      # Check if expansion range overlaps with any owned registers
+      can_expand = all(r not in self._vgpr_owner for r in range(expand_start, expand_end))
+      if can_expand and expand_end <= self._next_vgpr:
+        # Expansion range is within already-allocated space and not owned - just expand
+        self._scratch_count = count
+      elif can_expand:
+        # Expansion range extends past _next_vgpr but is free - extend
+        self._scratch_count = count
+        self._next_vgpr = expand_end
+        self._max_vgpr = max(self._max_vgpr, self._next_vgpr)
+      else:
+        # Expansion would overlap with owned registers - relocate scratch to end
+        self._scratch_vgpr = self._next_vgpr
+        self._scratch_count = count
+        self._next_vgpr += count
+        self._max_vgpr = max(self._max_vgpr, self._next_vgpr)
       if self._next_vgpr > self.MAX_VGPR:
         raise RuntimeError(f"VGPR overflow: scratch VGPRs exceed limit (need {self._next_vgpr}, max {self.MAX_VGPR})")
     return self._scratch_vgpr

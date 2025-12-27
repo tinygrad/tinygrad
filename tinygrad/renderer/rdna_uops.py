@@ -268,6 +268,11 @@ rdna_matcher = PatternMatcher([
   (UPat(Ops.IDIV, dtype=dtypes.uint64, src=(UPat.var("a"), UPat.var("b"))), lower_udiv64),
   (UPat(Ops.IDIV, dtype=dtypes.int64, src=(UPat.var("a"), UPat.var("b"))), lower_idiv64),
   (UPat(Ops.MOD, dtype=dtypes.uint64, src=(UPat.var("a"), UPat.var("b"))), lower_umod64),
+  # 64-bit MAX: lower to WHERE(a > b, a, b) since RDNA3 lacks 64-bit max instruction
+  (UPat(Ops.MAX, dtype=dtypes.int64, src=(UPat.var("a"), UPat.var("b"))),
+   lambda a, b: UOp(Ops.WHERE, dtypes.int64, (a.alu(Ops.CMPLT, b).ne(True), a, b))),
+  (UPat(Ops.MAX, dtype=dtypes.uint64, src=(UPat.var("a"), UPat.var("b"))),
+   lambda a, b: UOp(Ops.WHERE, dtypes.uint64, (a.alu(Ops.CMPLT, b).ne(True), a, b))),
   # compute byte offset for INDEX operations at UOp level (like PTX)
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx")), name="op", allow_any_len=True), lambda buf, idx, op:
     UOp(Ops.INDEX, dtype=dtypes.int32, src=(buf, idx.cast(dtypes.int32)*buf.dtype.itemsize)+op.src[2:])
