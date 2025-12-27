@@ -151,9 +151,9 @@ function batch_repeat_helper(array, bs) {
     return result;
 }
 
-async function decoder_helper(nets, context_inputs, audio_features, context_last_token_index_absolute, decoder_state) {
+async function decoder_helper(nets, context_inputs, audio_features_stub, context_last_token_index_absolute, decoder_state) {
     context_inputs = batch_repeat_helper(context_inputs, nets.model_metadata.decoder_batch_size);
-    let [decoder_output] = await nets.decoder(context_inputs, audio_features, [context_last_token_index_absolute], [0], [1]);
+    let [decoder_output] = await nets.decoder(context_inputs, audio_features_stub, [context_last_token_index_absolute], [0], [1]);
     for (let i = 0; i < nets.model_metadata.decoder_batch_size; ++i) {
         decoder_state.contexts[i] = [...decoder_state.contexts[i].slice(0, context_last_token_index_absolute), context_inputs[i]];
     }
@@ -318,7 +318,8 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
                     context_inputs.push(ctx.at(sequences[idx].length-1));
                 }
                 const max_context_batch_length = Math.max.apply(null, sequences.map(x => x.length));
-                let [sorted] = await decoder_helper(nets, context_inputs, audio_features_batch[0], max_context_batch_length - 1, decoder_state);
+                let audio_features_stub = [0];
+                let [sorted] = await decoder_helper(nets, context_inputs, audio_features_stub, max_context_batch_length - 1, decoder_state);
 
                 // NOTE: unpack batch results
                 const indices_topk = nets.model_metadata.decoder_topk ? nets.model_metadata.decoder_topk : 10;
