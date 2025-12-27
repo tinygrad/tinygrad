@@ -19,6 +19,29 @@ def _sext(v: int, b: int) -> int:
   """Sign extend b-bit value to Python int."""
   return v - (1 << b) if v & (1 << (b - 1)) else v
 
+def _f16(i: int) -> float:
+  """Convert u16 bits to f16 (as Python float)."""
+  return struct.unpack('<e', struct.pack('<H', i & 0xffff))[0]
+
+def _i16(f: float) -> int:
+  """Convert f16 (as Python float) to u16 bits."""
+  if math.isnan(f): return 0x7e00  # f16 quiet NaN
+  if math.isinf(f): return 0x7c00 if f > 0 else 0xfc00
+  try: return struct.unpack('<H', struct.pack('<e', f))[0]
+  except (OverflowError, struct.error): return 0x7c00 if f > 0 else 0xfc00
+
+def _bf16(i: int) -> float:
+  """Convert u16 bits to bf16 (as Python float)."""
+  # BF16 is just the upper 16 bits of f32, so pad with zeros
+  return struct.unpack('<f', struct.pack('<I', (i & 0xffff) << 16))[0]
+
+def _ibf16(f: float) -> int:
+  """Convert f32 to bf16 u16 bits (truncate lower 16 bits of f32)."""
+  if math.isnan(f): return 0x7fc0  # bf16 quiet NaN
+  if math.isinf(f): return 0x7f80 if f > 0 else 0xff80
+  try: return (struct.unpack('<I', struct.pack('<f', f))[0] >> 16) & 0xffff
+  except (OverflowError, struct.error): return 0x7f80 if f > 0 else 0xff80
+
 class PseudocodeInterpreter:
   """Interpreter for RDNA3 pseudocode from AMD ISA PDF."""
 
@@ -66,17 +89,28 @@ class PseudocodeInterpreter:
       return ''.join(result)
     expr = convert_bit_index(expr)
 
-    # Handle bit range like S1[4:0].u32 or S1[4:0]
+    # Handle bit range like S1[4:0].u32 or S1[4:0] or S0[31:16].i16 (VOP3P style)
     def replace_bit_range(m):
-      var, n1, n2 = m.group(1), int(m.group(2)), int(m.group(3))
+      var, n1, n2, suffix = m.group(1), int(m.group(2)), int(m.group(3)), m.group(4)
       val = {'S0': s0, 'S1': s1, 'S2': s2, 'D0': d0}.get(var)
       if val is None: return m.group(0)
       lo, hi = min(n1, n2), max(n1, n2)
-      return str((val >> lo) & ((1 << (hi - lo + 1)) - 1))
+      bits = (val >> lo) & ((1 << (hi - lo + 1)) - 1)
+      # Apply sign extension for signed types
+      if suffix and suffix.startswith('.i'):
+        width = hi - lo + 1
+        bits = _sext(bits, width)
+      # For f16/bf16 suffix, convert bits to float for arithmetic operations
+      # e.g., S0[31:16].f16 + S1[31:16].f16 should add as floats
+      if suffix == '.f16':
+        return f'_f16({bits})'
+      if suffix == '.bf16':
+        return f'_bf16({bits})'
+      return str(bits)
     # Handle S0.u32[4:0] style (with type suffix before bit range)
-    expr = re.sub(r'(S[012]|D0)\.u32\[(\d+)\s*:\s*(\d+)\](?:\.u32)?', replace_bit_range, expr)
-    # Handle S0[4:0] style (without type suffix)
-    expr = re.sub(r'(S[012]|D0)\[(\d+)\s*:\s*(\d+)\](?:\.u32)?', replace_bit_range, expr)
+    expr = re.sub(r'(S[012]|D0)\.u32\[(\d+)\s*:\s*(\d+)\](\.u32)?', replace_bit_range, expr)
+    # Handle S0[4:0].i16 style (VOP3P - type suffix after bit range, including bf16)
+    expr = re.sub(r'(S[012]|D0)\[(\d+)\s*:\s*(\d+)\](\.\w+)?', replace_bit_range, expr)
 
     # Handle signext function
     expr = re.sub(r'signext\(S0\.i32\)', str(_sext(s0 & 0xffffffff, 32)), expr)
@@ -183,6 +217,7 @@ class PseudocodeInterpreter:
     for name, val in self.vars.items():
       expr = re.sub(rf'\b{name}\.u32\b', str(int(val) & 0xffffffff), expr)
       expr = re.sub(rf'\b{name}\.i32\b', str(_sext(int(val) & 0xffffffff, 32)), expr)
+      expr = re.sub(rf'\b{name}\.b32\b', str(int(val) & 0xffffffff), expr)  # VOP3P uses .b32
       expr = re.sub(rf'\b{name}\.u64\b', str(int(val) & 0xffffffffffffffff), expr)
       expr = re.sub(rf'\b{name}\b', str(int(val) if not isinstance(val, float) else val), expr)
 
@@ -246,14 +281,21 @@ class PseudocodeInterpreter:
       if 'f64_to_u32(' in expr: expr = re.sub(r'f64_to_u32\(([^)]+)\)', r'_f32_to_u32(\1)', expr)
       if 'f32_to_f64(' in expr: expr = re.sub(r'f32_to_f64\(([^)]+)\)', r'float(\1)', expr)
       if 'f64_to_f32(' in expr: expr = re.sub(r'f64_to_f32\(([^)]+)\)', r'float(\1)', expr)
-      if 'f16_to_f32(' in expr: expr = re.sub(r'f16_to_f32\(([^)]+)\)', r'_f16_to_f32(\1)', expr)
-      if 'f32_to_f16(' in expr: expr = re.sub(r'f32_to_f16\(([^)]+)\)', r'_f32_to_f16(\1)', expr)
+      # Process bf16 before f16 to avoid partial matches (bf16_to_f32 contains f16_to_f32)
+      if 'bf16_to_f32(' in expr: expr = re.sub(r'\bbf16_to_f32\(([^)]+)\)', r'_bf16_to_f32(\1)', expr)
+      if 'f32_to_bf16(' in expr: expr = re.sub(r'\bf32_to_bf16\(([^)]+)\)', r'_f32_to_bf16(\1)', expr)
+      if 'f16_to_f32(' in expr: expr = re.sub(r'\bf16_to_f32\(([^)]+)\)', r'_f16_to_f32(\1)', expr)
+      if 'f32_to_f16(' in expr: expr = re.sub(r'\bf32_to_f16\(([^)]+)\)', r'_f32_to_f16(\1)', expr)
+      if 'u8_to_u32(' in expr: expr = re.sub(r'u8_to_u32\(([^)]+)\)', r'_u8_to_u32(\1)', expr)
+      if 'u4_to_u32(' in expr: expr = re.sub(r'u4_to_u32\(([^)]+)\)', r'_u4_to_u32(\1)', expr)
       if 'f16_to_i16(' in expr: expr = re.sub(r'f16_to_i16\(([^)]+)\)', r'_f16_to_i16(\1)', expr)
       if 'f16_to_u16(' in expr: expr = re.sub(r'f16_to_u16\(([^)]+)\)', r'_f16_to_u16(\1)', expr)
       if 'i16_to_f16(' in expr: expr = re.sub(r'i16_to_f16\(([^)]+)\)', r'_i16_to_f16(\1)', expr)
       if 'u16_to_f16(' in expr: expr = re.sub(r'u16_to_f16\(([^)]+)\)', r'_u16_to_f16(\1)', expr)
       if 'i32_to_i16(' in expr: expr = re.sub(r'i32_to_i16\(([^)]+)\)', r'((\1) & 0xffff)', expr)
       if 'u32_to_u16(' in expr: expr = re.sub(r'u32_to_u16\(([^)]+)\)', r'((\1) & 0xffff)', expr)
+      if 'v_min_f16(' in expr: expr = re.sub(r'v_min_f16\(([^,]+),\s*([^)]+)\)', r'_v_min_f16(\1, \2)', expr)
+      if 'v_max_f16(' in expr: expr = re.sub(r'v_max_f16\(([^,]+),\s*([^)]+)\)', r'_v_max_f16(\1, \2)', expr)
     if 'fma(' in expr: expr = re.sub(r'\bfma\(([^,]+),\s*([^,]+),\s*([^)]+)\)', r'((\1) * (\2) + (\3))', expr)
     # NaN checking functions - for simplicity, treat signal/quiet NaN the same
     if 'isSignalNAN(' in expr: expr = re.sub(r'isSignalNAN\(([^)]+)\)', r'_isnan(\1)', expr)
@@ -421,11 +463,40 @@ class PseudocodeInterpreter:
     vgprs = self.ctx.get('vgprs')
     def _vgpr_access(lane_idx, reg_idx): return vgprs[int(lane_idx)][int(reg_idx)] if vgprs else 0
     def _log2(x): return math.log2(x) if x > 0 else (float('-inf') if x == 0 else float('nan'))
-    def _f16_to_f32(bits):
-      bits = int(bits) & 0xFFFF
+    def _f16_to_f32(val):
+      # If already a float (from _f16()), return as-is
+      if isinstance(val, float): return val
+      bits = int(val) & 0xFFFF
       return struct.unpack('e', struct.pack('H', bits))[0]
     def _f32_to_f16(f):
       return struct.unpack('H', struct.pack('e', float(f)))[0]
+    def _bf16_to_f32(val):
+      # If already a float (from _bf16()), return as-is
+      if isinstance(val, float): return val
+      # BF16 is upper 16 bits of f32 - pad with zeros in lower 16 bits
+      bits = int(val) & 0xFFFF
+      return struct.unpack('<f', struct.pack('<I', bits << 16))[0]
+    def _f32_to_bf16(f):
+      # Truncate f32 to upper 16 bits (bf16)
+      bits = struct.unpack('<I', struct.pack('<f', float(f)))[0]
+      return (bits >> 16) & 0xFFFF
+    def _u8_to_u32(bits): return int(bits) & 0xFF
+    def _u4_to_u32(bits): return int(bits) & 0xF
+    def _fma(a, b, c): return float(a) * float(b) + float(c)
+    def _v_min_f16(a, b):
+      # Accept either bits or floats (from _f16())
+      fa = a if isinstance(a, float) else _f16_to_f32(int(a))
+      fb = b if isinstance(b, float) else _f16_to_f32(int(b))
+      if math.isnan(fa): return _f32_to_f16(fb) if isinstance(b, float) else int(b)
+      if math.isnan(fb): return _f32_to_f16(fa) if isinstance(a, float) else int(a)
+      return _f32_to_f16(min(fa, fb))
+    def _v_max_f16(a, b):
+      # Accept either bits or floats (from _f16())
+      fa = a if isinstance(a, float) else _f16_to_f32(int(a))
+      fb = b if isinstance(b, float) else _f16_to_f32(int(b))
+      if math.isnan(fa): return int(b)
+      if math.isnan(fb): return int(a)
+      return _f32_to_f16(max(fa, fb))
     def _f32_to_i32(f):
       if math.isnan(f): return 0
       if f >= 2147483647: return 2147483647
@@ -468,9 +539,11 @@ class PseudocodeInterpreter:
                          '_getbit_s0': _getbit_s0, '_getbit_s1': _getbit_s1, '_getbit_s2': _getbit_s2, '_getbit_d0': _getbit_d0,
                          'v_max_i32': v_max_i32, 'v_min_i32': v_min_i32, 'v_max_u32': v_max_u32, 'v_min_u32': v_min_u32,
                          'v_max_f32': v_max_f32, 'v_min_f32': v_min_f32, 'v_max3_i32': v_max3_i32, 'v_max3_u32': v_max3_u32, 'v_max3_f32': v_max3_f32,
-                         '_f16_to_f32': _f16_to_f32, '_f32_to_f16': _f32_to_f16,
+                         '_f16_to_f32': _f16_to_f32, '_f32_to_f16': _f32_to_f16, '_bf16_to_f32': _bf16_to_f32, '_f32_to_bf16': _f32_to_bf16,
                          '_f16_to_i16': _f16_to_i16, '_f16_to_u16': _f16_to_u16, '_i16_to_f16': _i16_to_f16, '_u16_to_f16': _u16_to_f16,
-                         '_f32_to_i32': _f32_to_i32, '_f32_to_u32': _f32_to_u32,
+                         '_f32_to_i32': _f32_to_i32, '_f32_to_u32': _f32_to_u32, '_u8_to_u32': _u8_to_u32, '_u4_to_u32': _u4_to_u32,
+                         '_fma': _fma, '_v_min_f16': _v_min_f16, '_v_max_f16': _v_max_f16,
+                         '_f16': _f16, '_i16': _i16, '_bf16': _bf16, '_ibf16': _ibf16,
                          '_gt_neg_zero': _gt_neg_zero, '_lt_neg_zero': _lt_neg_zero,
                          '_s_ff1_b32': _s_ff1_b32, '_s_ff1_b64': _s_ff1_b64, '_vgpr_access': _vgpr_access})
     except ZeroDivisionError:
@@ -542,13 +615,39 @@ class PseudocodeInterpreter:
 
       if line.startswith(('endif', 'else', 'endfor')): continue  # Skip control flow markers
 
-      # Execute assignment
+      # Execute assignment (including compound assignment +=, -=, *=, etc.)
       if '=' in line and not line.startswith('=='):
-        parts = line.rstrip(';').split('=', 1)
-        if len(parts) == 2:
-          lhs, rhs = parts[0].strip(), parts[1].strip()
-          val = self.eval_expr(rhs)
-          self._assign(lhs, val)
+        line_stripped = line.rstrip(';')
+        # Check for compound assignment operators
+        compound_op = None
+        for op in ['+=', '-=', '*=', '/=', '|=', '&=', '^=']:
+          if op in line_stripped:
+            compound_op = op
+            break
+        if compound_op:
+          parts = line_stripped.split(compound_op, 1)
+          if len(parts) == 2:
+            lhs, rhs = parts[0].strip(), parts[1].strip()
+            # Get current value of lhs
+            current = self.vars.get(lhs, 0)
+            rhs_val = self.eval_expr(rhs)
+            # Apply the operation
+            op_char = compound_op[0]
+            if op_char == '+': val = current + rhs_val
+            elif op_char == '-': val = current - rhs_val
+            elif op_char == '*': val = current * rhs_val
+            elif op_char == '/': val = current / rhs_val if rhs_val != 0 else float('inf')
+            elif op_char == '|': val = int(current) | int(rhs_val)
+            elif op_char == '&': val = int(current) & int(rhs_val)
+            elif op_char == '^': val = int(current) ^ int(rhs_val)
+            else: val = rhs_val
+            self._assign(lhs, val)
+        else:
+          parts = line_stripped.split('=', 1)
+          if len(parts) == 2:
+            lhs, rhs = parts[0].strip(), parts[1].strip()
+            val = self.eval_expr(rhs)
+            self._assign(lhs, val)
           # Update context so subsequent lines can reference updated values
           if 'd0' in self._result: self.ctx['d0'] = self._result['d0']
           if 'scc' in self._result: self.ctx['scc'] = self._result['scc']
@@ -597,19 +696,42 @@ class PseudocodeInterpreter:
     elif lhs == 'PC':
       self._result['pc_delta'] = int(val)
     elif '[' in lhs:
-      # Bit assignment like tmp[i] = val or D0.u64[i * 2] = val
-      m = re.match(r'(\w+)(?:\.\w+)?\[(.+)\]', lhs)
-      if m:
-        var_name, idx_expr = m.group(1), m.group(2)
-        idx = int(self.eval_expr(idx_expr))
-        if var_name in ('D0',):
-          # Bit assignment to D0
-          if val: self._result['d0'] = self._result.get('d0', 0) | (1 << idx)
-          else: self._result['d0'] = self._result.get('d0', 0) & ~(1 << idx)
+      # Check for bit range assignment like tmp[31 : 16].i16 = val (VOP3P style)
+      range_m = re.match(r'(\w+)\[(\d+)\s*:\s*(\d+)\](?:\.(\w+))?', lhs)
+      if range_m:
+        var_name, n1, n2, suffix = range_m.group(1), int(range_m.group(2)), int(range_m.group(3)), range_m.group(4)
+        lo, hi = min(n1, n2), max(n1, n2)
+        width = hi - lo + 1
+        mask = (1 << width) - 1
+        # For f16 suffix, convert float to bits
+        if suffix == 'f16':
+          val = _i16(float(val))
+        elif suffix == 'bf16':
+          val = _ibf16(float(val))
+        val = int(val) & mask
+        if var_name == 'D0':
+          cur = self._result.get('d0', 0)
+          self._result['d0'] = (cur & ~(mask << lo)) | (val << lo)
         elif var_name in self.vars:
           cur = int(self.vars[var_name])
-          if val: self.vars[var_name] = cur | (1 << idx)
-          else: self.vars[var_name] = cur & ~(1 << idx)
+          self.vars[var_name] = (cur & ~(mask << lo)) | (val << lo)
+        else:
+          # Create new variable
+          self.vars[var_name] = val << lo
+      else:
+        # Single bit assignment like tmp[i] = val or D0.u64[i * 2] = val
+        m = re.match(r'(\w+)(?:\.\w+)?\[(.+)\]', lhs)
+        if m:
+          var_name, idx_expr = m.group(1), m.group(2)
+          idx = int(self.eval_expr(idx_expr))
+          if var_name in ('D0',):
+            # Bit assignment to D0
+            if val: self._result['d0'] = self._result.get('d0', 0) | (1 << idx)
+            else: self._result['d0'] = self._result.get('d0', 0) & ~(1 << idx)
+          elif var_name in self.vars:
+            cur = int(self.vars[var_name])
+            if val: self.vars[var_name] = cur | (1 << idx)
+            else: self.vars[var_name] = cur & ~(1 << idx)
     else:
       self.vars[lhs] = int(val) if not isinstance(val, float) else val
 
@@ -667,9 +789,10 @@ def extract_pseudocode(text: str) -> str | None:
     if re.match(r'^[a-z].*\.$', s) and '=' not in s: continue
     # Detect code lines
     is_code = (
-      any(p in s for p in ['D0.', 'D1.', 'S0.', 'S1.', 'S2.', 'SCC =', 'SCC ?', 'VCC', 'EXEC', 'tmp =', 'lane =']) or
+      any(p in s for p in ['D0.', 'D1.', 'S0.', 'S1.', 'S2.', 'SCC =', 'SCC ?', 'VCC', 'EXEC', 'tmp =', 'tmp[', 'lane =']) or
+      any(p in s for p in ['D0[', 'D1[', 'S0[', 'S1[', 'S2[']) or  # VOP3P packed bit range access
       s.startswith(('if ', 'else', 'elsif', 'endif', 'declare ', 'for ', '//')) or
-      re.match(r'^[a-z_]+\s*=', s) or (depth > 0 and '=' in s)
+      re.match(r'^[a-z_]+\s*=', s) or re.match(r'^[a-z_]+\[', s) or (depth > 0 and '=' in s)
     )
     if is_code: result.append(s)
   if not result: return None
@@ -737,7 +860,7 @@ def generate(output_path: pathlib.Path | str | None = None) -> dict[type, dict[A
     lines = [
       "# autogenerated from AMD RDNA3.5 ISA PDF by pseudocode.py - do not edit",
       "# to regenerate: python -m extra.assembly.rdna3.pseudocode generate",
-      "from extra.assembly.rdna3.autogen import SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOPCOp",
+      "from extra.assembly.rdna3.autogen import SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp",
       "",
     ]
     for enum_cls in _OP_ENUMS:

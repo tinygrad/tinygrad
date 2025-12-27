@@ -329,51 +329,45 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
   elif inst_type is VOPC:
     op_cls, op, src0, src1, src2, vdst = VOPCOp, VOPCOp(inst.op), inst.src0, inst.vsrc1 + 256, None, VCC_LO
   elif inst_type is VOP3P:
-    # VOP3P: Packed 16-bit operations - no pseudocode in AMD ISA PDF
-    # These execute two 16-bit operations in parallel (lo and hi halves of 32-bit registers)
+    # VOP3P: Packed 16-bit operations using pseudocode from AMD ISA PDF
     op = VOP3POp(inst.op)
-    s0 = st.rsrc(inst.src0, lane)
-    s1 = st.rsrc(inst.src1, lane)
-    s2 = st.rsrc(inst.src2, lane) if inst.src2 is not None else 0
-    # Handle opsel (which 16-bit halves to use)
+    s0_raw = st.rsrc(inst.src0, lane)
+    s1_raw = st.rsrc(inst.src1, lane)
+    s2_raw = st.rsrc(inst.src2, lane) if inst.src2 is not None else 0
+    # Handle opsel (which 16-bit halves to use for each source)
     opsel = getattr(inst, 'opsel', 0)
     opsel_hi = getattr(inst, 'opsel_hi', 3)  # Default: use hi for hi result
     opsel_hi2 = getattr(inst, 'opsel_hi2', 1)  # Default for src2
-    # Extract 16-bit halves based on opsel
-    s0_lo = (s0 >> 16) & 0xffff if (opsel & 1) else s0 & 0xffff
-    s1_lo = (s1 >> 16) & 0xffff if (opsel & 2) else s1 & 0xffff
-    s2_lo = (s2 >> 16) & 0xffff if (opsel & 4) else s2 & 0xffff
-    s0_hi = (s0 >> 16) & 0xffff if (opsel_hi & 1) else s0 & 0xffff
-    s1_hi = (s1 >> 16) & 0xffff if (opsel_hi & 2) else s1 & 0xffff
-    s2_hi = (s2 >> 16) & 0xffff if opsel_hi2 else s2 & 0xffff
-    # Execute packed operation for lo and hi halves
-    def pk_op(a, b, c):
-      if op == VOP3POp.V_PK_ADD_I16: return (a + b) & 0xffff
-      if op == VOP3POp.V_PK_SUB_I16: return (a - b) & 0xffff
-      if op == VOP3POp.V_PK_MUL_LO_U16: return (a * b) & 0xffff
-      if op == VOP3POp.V_PK_MAD_I16: return (_sext(a, 16) * _sext(b, 16) + _sext(c, 16)) & 0xffff
-      if op == VOP3POp.V_PK_MAD_U16: return (a * b + c) & 0xffff
-      if op == VOP3POp.V_PK_MAX_I16: return max(_sext(a, 16), _sext(b, 16)) & 0xffff
-      if op == VOP3POp.V_PK_MIN_I16: return min(_sext(a, 16), _sext(b, 16)) & 0xffff
-      if op == VOP3POp.V_PK_MAX_U16: return max(a, b)
-      if op == VOP3POp.V_PK_MIN_U16: return min(a, b)
-      if op == VOP3POp.V_PK_LSHLREV_B16: return (b << (a & 0xf)) & 0xffff
-      if op == VOP3POp.V_PK_LSHRREV_B16: return (b >> (a & 0xf)) & 0xffff
-      if op == VOP3POp.V_PK_ASHRREV_I16: return (_sext(b, 16) >> (a & 0xf)) & 0xffff
-      if op == VOP3POp.V_PK_ADD_U16: return (a + b) & 0xffff
-      if op == VOP3POp.V_PK_FMA_F16: return struct.unpack('H', struct.pack('e', struct.unpack('e', struct.pack('H', a))[0] * struct.unpack('e', struct.pack('H', b))[0] + struct.unpack('e', struct.pack('H', c))[0]))[0]
-      if op == VOP3POp.V_PK_ADD_F16:
-        fa = struct.unpack('e', struct.pack('H', a))[0]
-        fb = struct.unpack('e', struct.pack('H', b))[0]
-        return struct.unpack('H', struct.pack('e', fa + fb))[0]
-      if op == VOP3POp.V_PK_MUL_F16:
-        fa = struct.unpack('e', struct.pack('H', a))[0]
-        fb = struct.unpack('e', struct.pack('H', b))[0]
-        return struct.unpack('H', struct.pack('e', fa * fb))[0]
-      raise NotImplementedError(f"VOP3P op {op.name} not implemented")
-    result_lo = pk_op(s0_lo, s1_lo, s2_lo)
-    result_hi = pk_op(s0_hi, s1_hi, s2_hi)
-    st.vgpr[lane][inst.vdst] = (result_hi << 16) | result_lo
+    # Handle neg modifiers for VOP3P
+    # neg applies to lo result inputs, neg_hi applies to hi result inputs
+    neg = getattr(inst, 'neg', 0)
+    neg_hi = getattr(inst, 'neg_hi', 0)
+    # Build "virtual" sources with halves arranged for pseudocode: lo half goes to [15:0], hi half goes to [31:16]
+    # opsel bit 0/1/2 selects which half of src0/1/2 goes to the LO result
+    # opsel_hi bit 0/1 selects which half of src0/1 goes to the HI result
+    s0_lo = (s0_raw >> 16) & 0xffff if (opsel & 1) else s0_raw & 0xffff
+    s1_lo = (s1_raw >> 16) & 0xffff if (opsel & 2) else s1_raw & 0xffff
+    s2_lo = (s2_raw >> 16) & 0xffff if (opsel & 4) else s2_raw & 0xffff
+    s0_hi = (s0_raw >> 16) & 0xffff if (opsel_hi & 1) else s0_raw & 0xffff
+    s1_hi = (s1_raw >> 16) & 0xffff if (opsel_hi & 2) else s1_raw & 0xffff
+    s2_hi = (s2_raw >> 16) & 0xffff if opsel_hi2 else s2_raw & 0xffff
+    # Apply neg to lo result inputs (toggle f16 sign bit)
+    if neg & 1: s0_lo ^= 0x8000
+    if neg & 2: s1_lo ^= 0x8000
+    if neg & 4: s2_lo ^= 0x8000
+    # Apply neg_hi to hi result inputs
+    if neg_hi & 1: s0_hi ^= 0x8000
+    if neg_hi & 2: s1_hi ^= 0x8000
+    if neg_hi & 4: s2_hi ^= 0x8000
+    # Pack into format expected by pseudocode: [31:16] = hi input, [15:0] = lo input
+    s0 = (s0_hi << 16) | s0_lo
+    s1 = (s1_hi << 16) | s1_lo
+    s2 = (s2_hi << 16) | s2_lo
+    op_cls, vdst = VOP3POp, inst.vdst
+    pc = pc_dict.get(op_cls, {}).get(op)
+    if pc is None: raise NotImplementedError(f"{op.name} not in pseudocode")
+    result = interp.execute(pc, s0, s1, s2)
+    st.vgpr[lane][vdst] = result['d0'] & 0xffffffff
     return
   else: raise NotImplementedError(f"Unknown vector type {inst_type}")
 
