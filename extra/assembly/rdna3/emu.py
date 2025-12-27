@@ -389,6 +389,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
 
   # Read sources (with VOP3 modifiers if applicable)
   neg, abs_ = (getattr(inst, 'neg', 0), getattr(inst, 'abs', 0)) if inst_type is VOP3 else (0, 0)
+  opsel = getattr(inst, 'opsel', 0) if inst_type is VOP3 else 0
   def mod_src(val: int, idx: int) -> int:
     if (abs_ >> idx) & 1: val = _i32(abs(_f32(val)))
     if (neg >> idx) & 1: val = _i32(-_f32(val))
@@ -399,6 +400,8 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
   # For most other _B64/_I64/_U64/_F64 ops: all sources are 64-bit
   is_64bit_op = op_cls in (VOP3Op, VOP1Op) and hasattr(op, 'name') and any(op.name.endswith(s) for s in ('_B64', '_I64', '_U64', '_F64'))
   is_shift_64 = op_cls is VOP3Op and op in (VOP3Op.V_LSHLREV_B64, VOP3Op.V_LSHRREV_B64, VOP3Op.V_ASHRREV_I64)
+  # Check for 16-bit source ops (opsel bits 0/1/2 select hi/lo for src0/src1/src2)
+  is_16bit_src = op_cls is VOP3Op and hasattr(op, 'name') and any(s in op.name for s in ('_F16', '_B16', '_I16', '_U16'))
 
   if is_shift_64:
     s0 = mod_src(st.rsrc(src0, lane), 0)  # shift amount is 32-bit
@@ -408,6 +411,15 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     s0 = st.rsrc64(src0, lane)
     s1 = st.rsrc64(src1, lane) if src1 is not None else 0
     s2 = st.rsrc64(src2, lane) if src2 is not None else 0
+  elif is_16bit_src:
+    # For 16-bit source ops, opsel bits select which half to use
+    s0_raw = mod_src(st.rsrc(src0, lane), 0)
+    s1_raw = mod_src(st.rsrc(src1, lane), 1) if src1 is not None else 0
+    s2_raw = mod_src(st.rsrc(src2, lane), 2) if src2 is not None else 0
+    # opsel[0] selects hi(1) or lo(0) for src0, opsel[1] for src1, opsel[2] for src2
+    s0 = ((s0_raw >> 16) & 0xffff) if (opsel & 1) else (s0_raw & 0xffff)
+    s1 = ((s1_raw >> 16) & 0xffff) if (opsel & 2) else (s1_raw & 0xffff)
+    s2 = ((s2_raw >> 16) & 0xffff) if (opsel & 4) else (s2_raw & 0xffff)
   else:
     s0 = mod_src(st.rsrc(src0, lane), 0)
     s1 = mod_src(st.rsrc(src1, lane), 1) if src1 is not None else 0
@@ -441,11 +453,22 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     # V_WRITELANE_B32 uses vgpr_write for cross-lane writes, don't overwrite with d0
     writes_to_sgpr = op in (VOP1Op.V_READFIRSTLANE_B32,) or \
                      (op_cls is VOP3Op and op in (VOP3Op.V_READFIRSTLANE_B32, VOP3Op.V_READLANE_B32))
+    # Check for 16-bit destination ops (opsel[3] controls hi/lo write)
+    # Note: is_16bit_src is computed earlier for source handling
+    # Exclude PACK ops which have 32-bit destinations despite F16 in the name
+    is_16bit_dst = op_cls in (VOP1Op, VOP3Op) and hasattr(op, 'name') and \
+                   any(s in op.name for s in ('_F16', '_B16', '_I16', '_U16')) and 'PACK' not in op.name
     if writes_to_sgpr:
       st.wsgpr(vdst, result['d0'] & 0xffffffff)
     elif result.get('d0_64') or is_64bit_op:
       V[vdst] = result['d0'] & 0xffffffff
       V[vdst + 1] = (result['d0'] >> 32) & 0xffffffff
+    elif is_16bit_dst and inst_type is VOP3:
+      # VOP3 16-bit ops: opsel[3] (bit 3 of opsel field) controls hi/lo destination
+      if opsel & 8:  # opsel[3] = 1: write to high 16 bits
+        V[vdst] = (V[vdst] & 0x0000ffff) | ((result['d0'] & 0xffff) << 16)
+      else:  # opsel[3] = 0: write to low 16 bits
+        V[vdst] = (V[vdst] & 0xffff0000) | (result['d0'] & 0xffff)
     else:
       V[vdst] = result['d0'] & 0xffffffff
 
