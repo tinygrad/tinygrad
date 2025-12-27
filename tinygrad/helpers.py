@@ -545,8 +545,7 @@ copyreg.pickle(types.ModuleType, _serialize_module)
 
 class count:
   def __init__(self, start:int=0, step:int=1):
-    self.n = start
-    self.step = step
+    self.n, self.step = start, step
   def __next__(self) -> int:
     cur = self.n
     self.n += self.step
