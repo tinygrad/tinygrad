@@ -55,9 +55,9 @@ class _ROCParseCtx:
     self.occ_events:dict[RunKey, list[OccEvent]] = {}
 
     for prog in prog_evs:
-      arch = "gfx%d%x%x" % ((trgt:=unwrap(dev_evs[prog.device].props)['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
       base = unwrap(prog.base)
-      self.disasms[prog.name] = asm = {base+addr:info for addr,info in llvm_disasm(arch, unwrap(prog.lib)).items()}
+      target = unwrap(dev_evs[prog.device].props)['gfx_target_version']
+      self.disasms[prog.name] = asm = {base+addr:info for addr,info in llvm_disasm(target, unwrap(prog.lib)).items()}
 
   def next_sqtt(self):
     x = next(self.sqtt_evs, None)
