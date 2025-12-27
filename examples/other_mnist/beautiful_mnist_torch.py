@@ -4,8 +4,6 @@ from tinygrad.nn.datasets import mnist
 import torch
 from torch import nn, optim
 
-from extra.torch_backend.test_compile import tiny  # noqa: F401
-
 class Model(nn.Module):
   def __init__(self):
     super().__init__()
@@ -41,7 +39,9 @@ if __name__ == "__main__":
 
   if getenv("TORCHVIZ"): torch.cuda.memory._record_memory_history()
   model = Model().to(device)
-  if getenv("TINY_BACKEND"): model = torch.compile(model, backend="tiny", dynamic=False)
+  if getenv("TINY_BACKEND"):
+    from extra.torch_backend.test_compile import tiny  # noqa: F401
+    model = torch.compile(model, backend="tiny", dynamic=False)
   optimizer = optim.Adam(model.parameters(), 1e-3)
 
   loss_fn = nn.CrossEntropyLoss()
