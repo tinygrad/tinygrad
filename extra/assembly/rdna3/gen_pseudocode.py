@@ -265,7 +265,9 @@ def compile_pseudocode(pseudocode: str) -> tuple[str, bool] | None:
   if needs_vdst_idx: py_lines.append('  _vdst_idx=vdst_idx')
   indent = 1
   has_vcc_lane, has_exec_lane, has_d0_64, has_exec_mod, has_d1, has_vgpr_write = False, False, False, False, False, False
+  has_tmp_write, has_d0_write = False, False
   last_was_block_start = False
+  in_for_loop = 0  # Track for loop nesting depth
 
   for line in lines:
     line = line.strip()
@@ -292,7 +294,7 @@ def compile_pseudocode(pseudocode: str) -> tuple[str, bool] | None:
       indent += 1
       last_was_block_start = True
     elif line.startswith('endif'): indent -= 1
-    elif line.startswith('endfor'): indent -= 1
+    elif line.startswith('endfor'): indent -= 1; in_for_loop = max(0, in_for_loop - 1)
     elif line.startswith('declare '): pass
     elif line.startswith('for '):
       match = re.match(r'for (\w+) in (\d+)\s*:\s*(\d+) do', line)
@@ -300,7 +302,13 @@ def compile_pseudocode(pseudocode: str) -> tuple[str, bool] | None:
         var, start, end = match.groups()
         py_lines.append('  ' * indent + f'for {var} in range({start}, {int(end)+1}):')
         indent += 1
+        in_for_loop += 1
     elif '=' in line and not line.startswith('=='):
+      # Heuristic: if we're in a for loop and see D0.xxx = tmp, close the for loop first
+      # This handles pseudocode where endfor is implicit before the final D0 assignment
+      if in_for_loop > 0 and re.match(r'D0\.\w+\s*=\s*tmp\b', line):
+        indent -= in_for_loop
+        in_for_loop = 0
       line = line.rstrip(';')
       for op in ['+=', '-=', '*=', '/=', '|=', '&=', '^=']:
         if op in line:
@@ -308,11 +316,15 @@ def compile_pseudocode(pseudocode: str) -> tuple[str, bool] | None:
           lhs, rhs = lhs.strip(), rhs.strip()
           rhs_py = expr_to_python(rhs)
           if lhs.startswith('D0.'):
+            has_d0_write = True
             if 'f32' in lhs: py_lines.append('  ' * indent + f'_d0=_i32(_f32(_d0){op[0]}{rhs_py})')
             elif 'f16' in lhs: py_lines.append('  ' * indent + f'_d0=_i16(_f16(_d0){op[0]}{rhs_py})&0xffff')
             elif '64' in lhs: py_lines.append('  ' * indent + f'_d0=int(_d0{op[0]}{rhs_py})&0xffffffffffffffff')
             else: py_lines.append('  ' * indent + f'_d0=int(_d0{op[0]}{rhs_py})&0xffffffff')
           elif lhs == 'SCC': py_lines.append('  ' * indent + f'_scc=int(bool(_scc{op[0]}{rhs_py}))')
+          elif lhs == 'tmp' or lhs.startswith('tmp.'):
+            has_tmp_write = True
+            py_lines.append('  ' * indent + f'_tmp=_tmp{op[0]}{rhs_py}')
           else: py_lines.append('  ' * indent + f'_vars["{lhs}"]=_vars.get("{lhs}",0){op[0]}{rhs_py}')
           break
       else:
@@ -325,16 +337,17 @@ def compile_pseudocode(pseudocode: str) -> tuple[str, bool] | None:
           py_lines.append('  ' * indent + f'_exec_lane=int(bool({rhs_py}))'); has_exec_lane = True
         elif (m32 := re.match(r'D0\.(u|b)32\[31\s*:\s*0\]', lhs)) and re.match(r'S(\d)\.(u|b)32\[0\s*:\s*31\]', rhs):
           src_match = re.match(r'S(\d)', rhs)
-          if src_match: py_lines.append('  ' * indent + f'_d0=_brev32(s{src_match.group(1)})')
+          if src_match: py_lines.append('  ' * indent + f'_d0=_brev32(s{src_match.group(1)})'); has_d0_write = True
         elif (m64 := re.match(r'D0\.(u|b)64\[63\s*:\s*0\]', lhs)) and re.match(r'S(\d)\.(u|b)64\[0\s*:\s*63\]', rhs):
           src_match = re.match(r'S(\d)', rhs)
-          if src_match: py_lines.append('  ' * indent + f'_d0=_brev64(s{src_match.group(1)})'); has_d0_64 = True
+          if src_match: py_lines.append('  ' * indent + f'_d0=_brev64(s{src_match.group(1)})'); has_d0_64 = True; has_d0_write = True
         elif (d1d0_match := re.match(r'\{\s*D1\.(u|i)1\s*,\s*D0\.(u|i)64\s*\}', lhs)):
           py_lines.append('  ' * indent + f'_full={rhs_py}')
           py_lines.append('  ' * indent + f'_d0=int(_full)&0xffffffffffffffff')
           py_lines.append('  ' * indent + f'_d1=(int(_full)>>64)&1')
-          has_d0_64, has_d1 = True, True
+          has_d0_64, has_d1, has_d0_write = True, True, True
         elif (d0_bit_prefix := re.match(r'D0\.(u|b)(32|64)\[', lhs)):
+          has_d0_write = True
           typ, bits = d0_bit_prefix.groups()
           bracket_start = d0_bit_prefix.end() - 1
           depth, i = 1, bracket_start + 1
@@ -361,14 +374,18 @@ def compile_pseudocode(pseudocode: str) -> tuple[str, bool] | None:
             elif '64' in lhs: py_lines.append('  ' * indent + f'_d0=int({rhs_py})&0xffffffffffffffff'); has_d0_64 = True
             else: py_lines.append('  ' * indent + f'_d0=int({rhs_py})&0xffffffff')
         elif lhs.startswith('D0.'):
+          has_d0_write = True
           if 'f32' in lhs: py_lines.append('  ' * indent + f'_d0=_i32({rhs_py})')
           elif 'f16' in lhs: py_lines.append('  ' * indent + f'_d0=_to_f16_bits({rhs_py})&0xffff')
           elif 'f64' in lhs: py_lines.append('  ' * indent + f'_d0=_i64({rhs_py})'); has_d0_64 = True
           elif '64' in lhs: py_lines.append('  ' * indent + f'_d0=int({rhs_py})&0xffffffffffffffff'); has_d0_64 = True
           else: py_lines.append('  ' * indent + f'_d0=int({rhs_py})&0xffffffff')
         elif lhs == 'SCC' or lhs.startswith('SCC'): py_lines.append('  ' * indent + f'_scc=int(bool({rhs_py}))')
-        elif lhs == 'tmp' or lhs.startswith('tmp.'): py_lines.append('  ' * indent + f'_tmp={rhs_py}')
+        elif lhs == 'tmp' or lhs.startswith('tmp.'):
+          has_tmp_write = True
+          py_lines.append('  ' * indent + f'_tmp={rhs_py}')
         elif (d0_match := re.match(r'D0\[(\d+)\s*:\s*(\d+)\](?:\.(f16|i16|u16|f32|i32|u32|b16|b32))?', lhs)):
+          has_d0_write = True
           high, low, typ = int(d0_match.group(1)), int(d0_match.group(2)), d0_match.group(3)
           width, mask = high - low + 1, (1 << (high - low + 1)) - 1
           if typ == 'f16': rhs_bits = f'_i16({rhs_py})'
@@ -376,6 +393,7 @@ def compile_pseudocode(pseudocode: str) -> tuple[str, bool] | None:
           else: rhs_bits = f'(int({rhs_py})&{hex(mask)})'
           py_lines.append('  ' * indent + f'_d0=(_d0&~{hex(mask << low)})|({rhs_bits}<<{low})')
         elif (tmp_match := re.match(r'tmp\[(\d+)\s*:\s*(\d+)\](?:\.(f16|i16|u16|f32|i32|u32|b16|b32))?', lhs)):
+          has_tmp_write = True
           high, low, typ = int(tmp_match.group(1)), int(tmp_match.group(2)), tmp_match.group(3)
           width, mask = high - low + 1, (1 << (high - low + 1)) - 1
           if typ == 'f16': rhs_bits = f'_i16({rhs_py})'
@@ -394,7 +412,14 @@ def compile_pseudocode(pseudocode: str) -> tuple[str, bool] | None:
           has_vgpr_write = True
           lane_var = vgpr_match.group(1)
           py_lines.append('  ' * indent + f'_vgpr_write=(_vars.get("{lane_var}",0),_vdst_idx,int({rhs_py})&0xffffffff)')
+        elif lhs == 'D0':
+          has_d0_write = True
+          py_lines.append('  ' * indent + f'_d0=int({rhs_py})&0xffffffff')
         else: py_lines.append('  ' * indent + f'_vars["{lhs}"]={rhs_py}')
+
+  # If tmp was written but d0 was never assigned, copy tmp to d0
+  if has_tmp_write and not has_d0_write:
+    py_lines.append('  _d0=_tmp&0xffffffff')
 
   ret_parts = ['"d0":_d0', '"scc":_scc']
   if has_vcc_lane: ret_parts.append('"vcc_lane":_vcc_lane')

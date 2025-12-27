@@ -76,7 +76,7 @@ def _fn_SOP1Op_S_CTZ_I32_B32(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_v
   for i in range(0, 32):
     if ((s0 >> i) & 1) == 1:
       _tmp=i
-    _d0=int(_tmp)&0xffffffff
+  _d0=int(_tmp)&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
 # S_CTZ_I32_B64
@@ -94,7 +94,7 @@ def _fn_SOP1Op_S_CTZ_I32_B64(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_v
   for i in range(0, 64):
     if ((s0 >> i) & 1) == 1:
       _tmp=i
-    _d0=int(_tmp)&0xffffffff
+  _d0=int(_tmp)&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
 # S_CLZ_I32_U32
@@ -112,7 +112,7 @@ def _fn_SOP1Op_S_CLZ_I32_U32(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_v
   for i in range(0, 32):
     if ((s0 >> (31 - i)) & 1) == 1:
       _tmp=i
-    _d0=int(_tmp)&0xffffffff
+  _d0=int(_tmp)&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
 # S_CLZ_I32_U64
@@ -130,7 +130,7 @@ def _fn_SOP1Op_S_CLZ_I32_U64(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_v
   for i in range(0, 64):
     if ((s0 >> (63 - i)) & 1) == 1:
       _tmp=i
-    _d0=int(_tmp)&0xffffffff
+  _d0=int(_tmp)&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
 # S_CLS_I32
@@ -148,7 +148,7 @@ def _fn_SOP1Op_S_CLS_I32(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_vars,
   for i in range(1, 32):
     if ((s0 >> (31 - i)) & 1) != ((s0 >> 31) & 1):
       _tmp=i
-    _d0=int(_tmp)&0xffffffff
+  _d0=int(_tmp)&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
 # S_CLS_I32_I64
@@ -166,7 +166,7 @@ def _fn_SOP1Op_S_CLS_I32_I64(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_v
   for i in range(1, 64):
     if ((s0 >> (63 - i)) & 1) != ((s0 >> 63) & 1):
       _tmp=i
-    _d0=int(_tmp)&0xffffffff
+  _d0=int(_tmp)&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
 # S_SEXT_I32_I8
@@ -243,9 +243,9 @@ def _fn_SOP1Op_S_BCNT0_I32_B32(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,
   _d0,_scc,_vcc_lane,_exec_lane,_tmp,_exec,_saveexec,_d1=d0,scc,None,None,0,exec_mask,exec_mask,None
   _tmp=0
   for i in range(0, 32):
-    _vars["tmp"]=_vars.get("tmp",0)+((1) if (((s0 >> i) & 1) == 0) else (0))
-    _d0=int(_tmp)&0xffffffff
-    _scc=int(bool((_d0&0xffffffff) != 0))
+    _tmp=_tmp+((1) if (((s0 >> i) & 1) == 0) else (0))
+  _d0=int(_tmp)&0xffffffff
+  _scc=int(bool((_d0&0xffffffff) != 0))
   return {"d0":_d0,"scc":_scc}
 
 # S_BCNT0_I32_B64
@@ -258,9 +258,9 @@ def _fn_SOP1Op_S_BCNT0_I32_B64(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,
   _d0,_scc,_vcc_lane,_exec_lane,_tmp,_exec,_saveexec,_d1=d0,scc,None,None,0,exec_mask,exec_mask,None
   _tmp=0
   for i in range(0, 64):
-    _vars["tmp"]=_vars.get("tmp",0)+((1) if (((s0 >> i) & 1) == 0) else (0))
-    _d0=int(_tmp)&0xffffffff
-    _scc=int(bool(_d0 != 0))
+    _tmp=_tmp+((1) if (((s0 >> i) & 1) == 0) else (0))
+  _d0=int(_tmp)&0xffffffff
+  _scc=int(bool(_d0 != 0))
   return {"d0":_d0,"scc":_scc}
 
 # S_BCNT1_I32_B32
@@ -273,9 +273,9 @@ def _fn_SOP1Op_S_BCNT1_I32_B32(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,
   _d0,_scc,_vcc_lane,_exec_lane,_tmp,_exec,_saveexec,_d1=d0,scc,None,None,0,exec_mask,exec_mask,None
   _tmp=0
   for i in range(0, 32):
-    _vars["tmp"]=_vars.get("tmp",0)+((1) if (((s0 >> i) & 1) == 1) else (0))
-    _d0=int(_tmp)&0xffffffff
-    _scc=int(bool((_d0&0xffffffff) != 0))
+    _tmp=_tmp+((1) if (((s0 >> i) & 1) == 1) else (0))
+  _d0=int(_tmp)&0xffffffff
+  _scc=int(bool((_d0&0xffffffff) != 0))
   return {"d0":_d0,"scc":_scc}
 
 # S_BCNT1_I32_B64
@@ -288,9 +288,9 @@ def _fn_SOP1Op_S_BCNT1_I32_B64(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,
   _d0,_scc,_vcc_lane,_exec_lane,_tmp,_exec,_saveexec,_d1=d0,scc,None,None,0,exec_mask,exec_mask,None
   _tmp=0
   for i in range(0, 64):
-    _vars["tmp"]=_vars.get("tmp",0)+((1) if (((s0 >> i) & 1) == 1) else (0))
-    _d0=int(_tmp)&0xffffffff
-    _scc=int(bool(_d0 != 0))
+    _tmp=_tmp+((1) if (((s0 >> i) & 1) == 1) else (0))
+  _d0=int(_tmp)&0xffffffff
+  _scc=int(bool(_d0 != 0))
   return {"d0":_d0,"scc":_scc}
 
 # S_NOT_B32
@@ -1348,28 +1348,28 @@ def _fn_SOP2Op_S_CSELECT_B64(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_v
 #   D0 = { S1[15 : 0].u16, S0[15 : 0].u16 }
 def _fn_SOP2Op_S_PACK_LL_B32_B16(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_vars,src0_idx=0,vdst_idx=0):
   _d0,_scc,_vcc_lane,_exec_lane,_tmp,_exec,_saveexec,_d1=d0,scc,None,None,0,exec_mask,exec_mask,None
-  _vars["D0"]=(((((s1 >> 0) & ((1 << (15 - 0 + 1)) - 1)))&0xff)<<8)|((((s0 >> 0) & ((1 << (15 - 0 + 1)) - 1)))&0xff)
+  _d0=int((((((s1 >> 0) & ((1 << (15 - 0 + 1)) - 1)))&0xff)<<8)|((((s0 >> 0) & ((1 << (15 - 0 + 1)) - 1)))&0xff))&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
 # S_PACK_LH_B32_B16
 #   D0 = { S1[31 : 16].u16, S0[15 : 0].u16 }
 def _fn_SOP2Op_S_PACK_LH_B32_B16(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_vars,src0_idx=0,vdst_idx=0):
   _d0,_scc,_vcc_lane,_exec_lane,_tmp,_exec,_saveexec,_d1=d0,scc,None,None,0,exec_mask,exec_mask,None
-  _vars["D0"]=(((((s1 >> 16) & ((1 << (31 - 16 + 1)) - 1)))&0xff)<<8)|((((s0 >> 0) & ((1 << (15 - 0 + 1)) - 1)))&0xff)
+  _d0=int((((((s1 >> 16) & ((1 << (31 - 16 + 1)) - 1)))&0xff)<<8)|((((s0 >> 0) & ((1 << (15 - 0 + 1)) - 1)))&0xff))&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
 # S_PACK_HH_B32_B16
 #   D0 = { S1[31 : 16].u16, S0[31 : 16].u16 }
 def _fn_SOP2Op_S_PACK_HH_B32_B16(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_vars,src0_idx=0,vdst_idx=0):
   _d0,_scc,_vcc_lane,_exec_lane,_tmp,_exec,_saveexec,_d1=d0,scc,None,None,0,exec_mask,exec_mask,None
-  _vars["D0"]=(((((s1 >> 16) & ((1 << (31 - 16 + 1)) - 1)))&0xff)<<8)|((((s0 >> 16) & ((1 << (31 - 16 + 1)) - 1)))&0xff)
+  _d0=int((((((s1 >> 16) & ((1 << (31 - 16 + 1)) - 1)))&0xff)<<8)|((((s0 >> 16) & ((1 << (31 - 16 + 1)) - 1)))&0xff))&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
 # S_PACK_HL_B32_B16
 #   D0 = { S1[15 : 0].u16, S0[31 : 16].u16 }
 def _fn_SOP2Op_S_PACK_HL_B32_B16(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_vars,src0_idx=0,vdst_idx=0):
   _d0,_scc,_vcc_lane,_exec_lane,_tmp,_exec,_saveexec,_d1=d0,scc,None,None,0,exec_mask,exec_mask,None
-  _vars["D0"]=(((((s1 >> 0) & ((1 << (15 - 0 + 1)) - 1)))&0xff)<<8)|((((s0 >> 16) & ((1 << (31 - 16 + 1)) - 1)))&0xff)
+  _d0=int((((((s1 >> 0) & ((1 << (15 - 0 + 1)) - 1)))&0xff)<<8)|((((s0 >> 16) & ((1 << (31 - 16 + 1)) - 1)))&0xff))&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
 # S_ADD_F32
@@ -1535,6 +1535,7 @@ def _fn_SOP2Op_S_CVT_PK_RTZ_F16_F32(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,v
   _vars["prev_mode"]=0
   _tmp=(_tmp&~0xffff)|(_i16(f32_to_f16(_f32(s0)))<<0)
   _tmp=(_tmp&~0xffff0000)|(_i16(f32_to_f16(_f32(s1)))<<16)
+  _d0=_tmp&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
 # S_ADD_F16
@@ -3064,6 +3065,7 @@ def _fn_VOP1Op_V_SWAPREL_B32(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_v
   _vars["addrs"]=_src0_idx
   _vars["addrd"]=DST.u32
   _tmp=VGPR[laneId][addrd].b32
+  _d0=_tmp&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
 # V_NOT_B16
@@ -3084,7 +3086,7 @@ def _fn_VOP1Op_V_CVT_I32_I16(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_v
 #   D0 = { 16'0, S0.u16 }
 def _fn_VOP1Op_V_CVT_U32_U16(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_vars,src0_idx=0,vdst_idx=0):
   _d0,_scc,_vcc_lane,_exec_lane,_tmp,_exec,_saveexec,_d1=d0,scc,None,None,0,exec_mask,exec_mask,None
-  _vars["D0"]=(((0)&0xff)<<8)|(((s0&0xffff))&0xff)
+  _d0=int((((0)&0xff)<<8)|(((s0&0xffff))&0xff))&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
 VOP1Op_FUNCTIONS = {
@@ -3188,8 +3190,8 @@ def _fn_VOP2Op_V_CNDMASK_B32(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_v
 def _fn_VOP2Op_V_DOT2ACC_F32_F16(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_vars,src0_idx=0,vdst_idx=0):
   _d0,_scc,_vcc_lane,_exec_lane,_tmp,_exec,_saveexec,_d1=d0,scc,None,None,0,exec_mask,exec_mask,None
   _tmp=_f32(_d0)
-  _vars["tmp"]=_vars.get("tmp",0)+f16_to_f32(_f16((s0 >> 0) & ((1 << (15 - 0 + 1)) - 1))) * f16_to_f32(_f16((s1 >> 0) & ((1 << (15 - 0 + 1)) - 1)))
-  _vars["tmp"]=_vars.get("tmp",0)+f16_to_f32(_f16((s0 >> 16) & ((1 << (31 - 16 + 1)) - 1))) * f16_to_f32(_f16((s1 >> 16) & ((1 << (31 - 16 + 1)) - 1)))
+  _tmp=_tmp+f16_to_f32(_f16((s0 >> 0) & ((1 << (15 - 0 + 1)) - 1))) * f16_to_f32(_f16((s1 >> 0) & ((1 << (15 - 0 + 1)) - 1)))
+  _tmp=_tmp+f16_to_f32(_f16((s0 >> 16) & ((1 << (31 - 16 + 1)) - 1))) * f16_to_f32(_f16((s1 >> 16) & ((1 << (31 - 16 + 1)) - 1)))
   _d0=_i32(_tmp)
   return {"d0":_d0,"scc":_scc}
 
@@ -3555,6 +3557,7 @@ def _fn_VOP2Op_V_CVT_PK_RTZ_F16_F32(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,v
   _vars["prev_mode"]=0
   _tmp=(_tmp&~0xffff)|(_i16(f32_to_f16(_f32(s0)))<<0)
   _tmp=(_tmp&~0xffff0000)|(_i16(f32_to_f16(_f32(s1)))<<16)
+  _d0=_tmp&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
 # V_ADD_F16
@@ -4500,7 +4503,7 @@ def _fn_VOP3Op_V_CVT_I32_I16(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_v
 #   D0 = { 16'0, S0.u16 }
 def _fn_VOP3Op_V_CVT_U32_U16(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_vars,src0_idx=0,vdst_idx=0):
   _d0,_scc,_vcc_lane,_exec_lane,_tmp,_exec,_saveexec,_d1=d0,scc,None,None,0,exec_mask,exec_mask,None
-  _vars["D0"]=(((0)&0xff)<<8)|(((s0&0xffff))&0xff)
+  _d0=int((((0)&0xff)<<8)|(((s0&0xffff))&0xff))&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
 # V_CNDMASK_B32
@@ -4822,6 +4825,7 @@ def _fn_VOP3Op_V_CVT_PK_RTZ_F16_F32(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,v
   _vars["prev_mode"]=0
   _tmp=(_tmp&~0xffff)|(_i16(f32_to_f16(_f32(s0)))<<0)
   _tmp=(_tmp&~0xffff0000)|(_i16(f32_to_f16(_f32(s1)))<<16)
+  _d0=_tmp&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
 # V_ADD_F16
@@ -5187,9 +5191,9 @@ def _fn_VOP3Op_V_FMA_F64(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_vars,
 def _fn_VOP3Op_V_LERP_U8(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_vars,src0_idx=0,vdst_idx=0):
   _d0,_scc,_vcc_lane,_exec_lane,_tmp,_exec,_saveexec,_d1=d0,scc,None,None,0,exec_mask,exec_mask,None
   _tmp=((((s0 >> 24) & ((1 << (31 - 24 + 1)) - 1)) + ((s1 >> 24) & ((1 << (31 - 24 + 1)) - 1)) + ((s2 >> 24) & 1).u8) >> 1 << 24)
-  _vars["tmp"]=_vars.get("tmp",0)+((((s0 >> 16) & ((1 << (23 - 16 + 1)) - 1)) + ((s1 >> 16) & ((1 << (23 - 16 + 1)) - 1)) + ((s2 >> 16) & 1).u8) >> 1 << 16)
-  _vars["tmp"]=_vars.get("tmp",0)+((((s0 >> 8) & ((1 << (15 - 8 + 1)) - 1)) + ((s1 >> 8) & ((1 << (15 - 8 + 1)) - 1)) + ((s2 >> 8) & 1).u8) >> 1 << 8)
-  _vars["tmp"]=_vars.get("tmp",0)+((((s0 >> 0) & ((1 << (7 - 0 + 1)) - 1)) + ((s1 >> 0) & ((1 << (7 - 0 + 1)) - 1)) + ((s2 >> 0) & 1).u8) >> 1)
+  _tmp=_tmp+((((s0 >> 16) & ((1 << (23 - 16 + 1)) - 1)) + ((s1 >> 16) & ((1 << (23 - 16 + 1)) - 1)) + ((s2 >> 16) & 1).u8) >> 1 << 16)
+  _tmp=_tmp+((((s0 >> 8) & ((1 << (15 - 8 + 1)) - 1)) + ((s1 >> 8) & ((1 << (15 - 8 + 1)) - 1)) + ((s2 >> 8) & 1).u8) >> 1 << 8)
+  _tmp=_tmp+((((s0 >> 0) & ((1 << (7 - 0 + 1)) - 1)) + ((s1 >> 0) & ((1 << (7 - 0 + 1)) - 1)) + ((s2 >> 0) & 1).u8) >> 1)
   _d0=int((_tmp&0xffffffff))&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
@@ -5333,10 +5337,10 @@ def _fn_VOP3Op_V_MED3_U32(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_vars
 def _fn_VOP3Op_V_SAD_U8(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_vars,src0_idx=0,vdst_idx=0):
   _d0,_scc,_vcc_lane,_exec_lane,_tmp,_exec,_saveexec,_d1=d0,scc,None,None,0,exec_mask,exec_mask,None
   _tmp=(s2&0xffffffff)
-  _vars["tmp"]=_vars.get("tmp",0)+(ABSDIFF(((s0 >> 0) & ((1 << (7 - 0 + 1)) - 1)), ((s1 >> 0) & ((1 << (7 - 0 + 1)) - 1))))
-  _vars["tmp"]=_vars.get("tmp",0)+(ABSDIFF(((s0 >> 8) & ((1 << (15 - 8 + 1)) - 1)), ((s1 >> 8) & ((1 << (15 - 8 + 1)) - 1))))
-  _vars["tmp"]=_vars.get("tmp",0)+(ABSDIFF(((s0 >> 16) & ((1 << (23 - 16 + 1)) - 1)), ((s1 >> 16) & ((1 << (23 - 16 + 1)) - 1))))
-  _vars["tmp"]=_vars.get("tmp",0)+(ABSDIFF(((s0 >> 24) & ((1 << (31 - 24 + 1)) - 1)), ((s1 >> 24) & ((1 << (31 - 24 + 1)) - 1))))
+  _tmp=_tmp+(ABSDIFF(((s0 >> 0) & ((1 << (7 - 0 + 1)) - 1)), ((s1 >> 0) & ((1 << (7 - 0 + 1)) - 1))))
+  _tmp=_tmp+(ABSDIFF(((s0 >> 8) & ((1 << (15 - 8 + 1)) - 1)), ((s1 >> 8) & ((1 << (15 - 8 + 1)) - 1))))
+  _tmp=_tmp+(ABSDIFF(((s0 >> 16) & ((1 << (23 - 16 + 1)) - 1)), ((s1 >> 16) & ((1 << (23 - 16 + 1)) - 1))))
+  _tmp=_tmp+(ABSDIFF(((s0 >> 24) & ((1 << (31 - 24 + 1)) - 1)), ((s1 >> 24) & ((1 << (31 - 24 + 1)) - 1))))
   _d0=int(_tmp)&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
@@ -5349,8 +5353,8 @@ def _fn_VOP3Op_V_SAD_U8(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_vars,s
 def _fn_VOP3Op_V_SAD_U16(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_vars,src0_idx=0,vdst_idx=0):
   _d0,_scc,_vcc_lane,_exec_lane,_tmp,_exec,_saveexec,_d1=d0,scc,None,None,0,exec_mask,exec_mask,None
   _tmp=(s2&0xffffffff)
-  _vars["tmp"]=_vars.get("tmp",0)+ABSDIFF(((s0 >> 0) & ((1 << (15 - 0 + 1)) - 1)), ((s1 >> 0) & ((1 << (15 - 0 + 1)) - 1)))
-  _vars["tmp"]=_vars.get("tmp",0)+ABSDIFF(((s0 >> 16) & ((1 << (31 - 16 + 1)) - 1)), ((s1 >> 16) & ((1 << (31 - 16 + 1)) - 1)))
+  _tmp=_tmp+ABSDIFF(((s0 >> 0) & ((1 << (15 - 0 + 1)) - 1)), ((s1 >> 0) & ((1 << (15 - 0 + 1)) - 1)))
+  _tmp=_tmp+ABSDIFF(((s0 >> 16) & ((1 << (31 - 16 + 1)) - 1)), ((s1 >> 16) & ((1 << (31 - 16 + 1)) - 1)))
   _d0=int(_tmp)&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
@@ -5508,10 +5512,10 @@ def _fn_VOP3Op_V_DIV_FMAS_F64(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_
 def _fn_VOP3Op_V_MSAD_U8(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_vars,src0_idx=0,vdst_idx=0):
   _d0,_scc,_vcc_lane,_exec_lane,_tmp,_exec,_saveexec,_d1=d0,scc,None,None,0,exec_mask,exec_mask,None
   _tmp=(s2&0xffffffff)
-  _vars["tmp"]=_vars.get("tmp",0)+((0) if (((s1 >> 0) & ((1 << (7 - 0 + 1)) - 1)) == 0) else ((ABSDIFF(((s0 >> 0) & ((1 << (7 - 0 + 1)) - 1)), ((s1 >> 0) & ((1 << (7 - 0 + 1)) - 1))))))
-  _vars["tmp"]=_vars.get("tmp",0)+((0) if (((s1 >> 8) & ((1 << (15 - 8 + 1)) - 1)) == 0) else ((ABSDIFF(((s0 >> 8) & ((1 << (15 - 8 + 1)) - 1)), ((s1 >> 8) & ((1 << (15 - 8 + 1)) - 1))))))
-  _vars["tmp"]=_vars.get("tmp",0)+((0) if (((s1 >> 16) & ((1 << (23 - 16 + 1)) - 1)) == 0) else ((ABSDIFF(((s0 >> 16) & ((1 << (23 - 16 + 1)) - 1)), ((s1 >> 16) & ((1 << (23 - 16 + 1)) - 1))))))
-  _vars["tmp"]=_vars.get("tmp",0)+((0) if (((s1 >> 24) & ((1 << (31 - 24 + 1)) - 1)) == 0) else ((ABSDIFF(((s0 >> 24) & ((1 << (31 - 24 + 1)) - 1)), ((s1 >> 24) & ((1 << (31 - 24 + 1)) - 1))))))
+  _tmp=_tmp+((0) if (((s1 >> 0) & ((1 << (7 - 0 + 1)) - 1)) == 0) else ((ABSDIFF(((s0 >> 0) & ((1 << (7 - 0 + 1)) - 1)), ((s1 >> 0) & ((1 << (7 - 0 + 1)) - 1))))))
+  _tmp=_tmp+((0) if (((s1 >> 8) & ((1 << (15 - 8 + 1)) - 1)) == 0) else ((ABSDIFF(((s0 >> 8) & ((1 << (15 - 8 + 1)) - 1)), ((s1 >> 8) & ((1 << (15 - 8 + 1)) - 1))))))
+  _tmp=_tmp+((0) if (((s1 >> 16) & ((1 << (23 - 16 + 1)) - 1)) == 0) else ((ABSDIFF(((s0 >> 16) & ((1 << (23 - 16 + 1)) - 1)), ((s1 >> 16) & ((1 << (23 - 16 + 1)) - 1))))))
+  _tmp=_tmp+((0) if (((s1 >> 24) & ((1 << (31 - 24 + 1)) - 1)) == 0) else ((ABSDIFF(((s0 >> 24) & ((1 << (31 - 24 + 1)) - 1)), ((s1 >> 24) & ((1 << (31 - 24 + 1)) - 1))))))
   _d0=int(_tmp)&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
@@ -5868,8 +5872,8 @@ def _fn_VOP3Op_V_MINMAX_I32(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_va
 def _fn_VOP3Op_V_DOT2_F16_F16(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_vars,src0_idx=0,vdst_idx=0):
   _d0,_scc,_vcc_lane,_exec_lane,_tmp,_exec,_saveexec,_d1=d0,scc,None,None,0,exec_mask,exec_mask,None
   _tmp=_f16(s2&0xffff)
-  _vars["tmp"]=_vars.get("tmp",0)+_f16((s0 >> 0) & ((1 << (15 - 0 + 1)) - 1)) * _f16((s1 >> 0) & ((1 << (15 - 0 + 1)) - 1))
-  _vars["tmp"]=_vars.get("tmp",0)+_f16((s0 >> 16) & ((1 << (31 - 16 + 1)) - 1)) * _f16((s1 >> 16) & ((1 << (31 - 16 + 1)) - 1))
+  _tmp=_tmp+_f16((s0 >> 0) & ((1 << (15 - 0 + 1)) - 1)) * _f16((s1 >> 0) & ((1 << (15 - 0 + 1)) - 1))
+  _tmp=_tmp+_f16((s0 >> 16) & ((1 << (31 - 16 + 1)) - 1)) * _f16((s1 >> 16) & ((1 << (31 - 16 + 1)) - 1))
   _d0=_to_f16_bits(_tmp)&0xffff
   return {"d0":_d0,"scc":_scc}
 
@@ -5902,6 +5906,7 @@ def _fn_VOP3Op_V_CVT_PK_I16_F32(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs
   _d0,_scc,_vcc_lane,_exec_lane,_tmp,_exec,_saveexec,_d1=d0,scc,None,None,0,exec_mask,exec_mask,None
   _tmp=(_tmp&~0xffff0000)|((int((v_cvt_i16_f32(_f32(s1))))&0xffff)<<16)
   _tmp=(_tmp&~0xffff)|((int((v_cvt_i16_f32(_f32(s0))))&0xffff)<<0)
+  _d0=_tmp&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
 # V_CVT_PK_U16_F32
@@ -5912,6 +5917,7 @@ def _fn_VOP3Op_V_CVT_PK_U16_F32(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs
   _d0,_scc,_vcc_lane,_exec_lane,_tmp,_exec,_saveexec,_d1=d0,scc,None,None,0,exec_mask,exec_mask,None
   _tmp=(_tmp&~0xffff0000)|((int((v_cvt_u16_f32(_f32(s1))))&0xffff)<<16)
   _tmp=(_tmp&~0xffff)|((int((v_cvt_u16_f32(_f32(s0))))&0xffff)<<0)
+  _d0=_tmp&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
 # V_MAX_U16
@@ -5973,6 +5979,7 @@ def _fn_VOP3Op_V_CVT_PK_NORM_I16_F16(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,
   _d0,_scc,_vcc_lane,_exec_lane,_tmp,_exec,_saveexec,_d1=d0,scc,None,None,0,exec_mask,exec_mask,None
   _tmp=(_tmp&~0xffff)|((int(f16_to_snorm(_f16(s0&0xffff)))&0xffff)<<0)
   _tmp=(_tmp&~0xffff0000)|((int(f16_to_snorm(_f16(s1&0xffff)))&0xffff)<<16)
+  _d0=_tmp&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
 # V_CVT_PK_NORM_U16_F16
@@ -5983,6 +5990,7 @@ def _fn_VOP3Op_V_CVT_PK_NORM_U16_F16(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,
   _d0,_scc,_vcc_lane,_exec_lane,_tmp,_exec,_saveexec,_d1=d0,scc,None,None,0,exec_mask,exec_mask,None
   _tmp=(_tmp&~0xffff)|((int(f16_to_unorm(_f16(s0&0xffff)))&0xffff)<<0)
   _tmp=(_tmp&~0xffff0000)|((int(f16_to_unorm(_f16(s1&0xffff)))&0xffff)<<16)
+  _d0=_tmp&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
 # V_LDEXP_F32
@@ -6009,8 +6017,8 @@ def _fn_VOP3Op_V_BCNT_U32_B32(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_
   _d0,_scc,_vcc_lane,_exec_lane,_tmp,_exec,_saveexec,_d1=d0,scc,None,None,0,exec_mask,exec_mask,None
   _tmp=(s1&0xffffffff)
   for i in range(0, 32):
-    _vars["tmp"]=_vars.get("tmp",0)+((s0 >> i) & 1)
-    _d0=int(_tmp)&0xffffffff
+    _tmp=_tmp+((s0 >> i) & 1)
+  _d0=int(_tmp)&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
 # V_CVT_PK_NORM_I16_F32
@@ -6021,6 +6029,7 @@ def _fn_VOP3Op_V_CVT_PK_NORM_I16_F32(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,
   _d0,_scc,_vcc_lane,_exec_lane,_tmp,_exec,_saveexec,_d1=d0,scc,None,None,0,exec_mask,exec_mask,None
   _tmp=(_tmp&~0xffff)|((int(f32_to_snorm(_f32(s0)))&0xffff)<<0)
   _tmp=(_tmp&~0xffff0000)|((int(f32_to_snorm(_f32(s1)))&0xffff)<<16)
+  _d0=_tmp&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
 # V_CVT_PK_NORM_U16_F32
@@ -6031,6 +6040,7 @@ def _fn_VOP3Op_V_CVT_PK_NORM_U16_F32(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,
   _d0,_scc,_vcc_lane,_exec_lane,_tmp,_exec,_saveexec,_d1=d0,scc,None,None,0,exec_mask,exec_mask,None
   _tmp=(_tmp&~0xffff)|((int(f32_to_unorm(_f32(s0)))&0xffff)<<0)
   _tmp=(_tmp&~0xffff0000)|((int(f32_to_unorm(_f32(s1)))&0xffff)<<16)
+  _d0=_tmp&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
 # V_CVT_PK_U16_U32
@@ -6041,6 +6051,7 @@ def _fn_VOP3Op_V_CVT_PK_U16_U32(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs
   _d0,_scc,_vcc_lane,_exec_lane,_tmp,_exec,_saveexec,_d1=d0,scc,None,None,0,exec_mask,exec_mask,None
   _tmp=(_tmp&~0xffff)|((int(u32_to_u16((s0&0xffffffff)))&0xffff)<<0)
   _tmp=(_tmp&~0xffff0000)|((int(u32_to_u16((s1&0xffffffff)))&0xffff)<<16)
+  _d0=_tmp&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
 # V_CVT_PK_I16_I32
@@ -6051,6 +6062,7 @@ def _fn_VOP3Op_V_CVT_PK_I16_I32(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs
   _d0,_scc,_vcc_lane,_exec_lane,_tmp,_exec,_saveexec,_d1=d0,scc,None,None,0,exec_mask,exec_mask,None
   _tmp=(_tmp&~0xffff)|((int(i32_to_i16(_sext(s0&0xffffffff,32)))&0xffff)<<0)
   _tmp=(_tmp&~0xffff0000)|((int(i32_to_i16(_sext(s1&0xffffffff,32)))&0xffff)<<16)
+  _d0=_tmp&0xffffffff
   return {"d0":_d0,"scc":_scc}
 
 # V_SUB_NC_I32
@@ -6991,8 +7003,8 @@ def _fn_VOP3POp_V_PK_MAX_F16(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_v
 def _fn_VOP3POp_V_DOT2_F32_F16(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_vars,src0_idx=0,vdst_idx=0):
   _d0,_scc,_vcc_lane,_exec_lane,_tmp,_exec,_saveexec,_d1=d0,scc,None,None,0,exec_mask,exec_mask,None
   _tmp=_f32(s2)
-  _vars["tmp"]=_vars.get("tmp",0)+f16_to_f32(_f16((s0 >> 0) & ((1 << (15 - 0 + 1)) - 1))) * f16_to_f32(_f16((s1 >> 0) & ((1 << (15 - 0 + 1)) - 1)))
-  _vars["tmp"]=_vars.get("tmp",0)+f16_to_f32(_f16((s0 >> 16) & ((1 << (31 - 16 + 1)) - 1))) * f16_to_f32(_f16((s1 >> 16) & ((1 << (31 - 16 + 1)) - 1)))
+  _tmp=_tmp+f16_to_f32(_f16((s0 >> 0) & ((1 << (15 - 0 + 1)) - 1))) * f16_to_f32(_f16((s1 >> 0) & ((1 << (15 - 0 + 1)) - 1)))
+  _tmp=_tmp+f16_to_f32(_f16((s0 >> 16) & ((1 << (31 - 16 + 1)) - 1))) * f16_to_f32(_f16((s1 >> 16) & ((1 << (31 - 16 + 1)) - 1)))
   _d0=_i32(_tmp)
   return {"d0":_d0,"scc":_scc}
 

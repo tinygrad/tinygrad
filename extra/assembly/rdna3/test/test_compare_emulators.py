@@ -537,5 +537,8 @@ class TestTinygradKernels(unittest.TestCase):
   def test_isinf(self): self._test_kernel(lambda T: T([float('-inf'), 0., float('inf'), 1.1]*8).isinf())
   def test_isfinite(self): self._test_kernel(lambda T: T([float('-inf'), 0., float('inf'), 1.1]*8).isfinite())
 
+  # WMMA tests - uses wave matrix multiply for larger fp16 matmuls
+  def test_wmma_gemm_fp16(self): self._test_kernel(lambda T: T.empty(64, 64).half() @ T.empty(64, 64).half(), max_steps=1000000)
+
 if __name__ == "__main__":
   unittest.main()
