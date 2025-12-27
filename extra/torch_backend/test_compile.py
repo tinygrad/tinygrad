@@ -1,43 +1,22 @@
-# https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html
+# NOTE: we patch torch.compile instead of using register_backend because register_backend
+# runs after Dynamo traces the function into FX graphs. We need to wrap the raw Python
+# function before tracing to capture the full training step (fwd+bwd+optimizer) in TinyJit.
 import torch
-import torch._dynamo
 from extra.torch_backend.backend import unwrap, wrap
+from tinygrad import Tensor, TinyJit, dtypes
 
-from torch._dynamo.backends.registry import register_backend
-from torch._functorch.aot_autograd import aot_module_simplified
-from torch._decomp import get_decompositions
-from functorch.compile import make_boxed_func
+def _tiny_compile(fn):
+  model = next((v for v in fn.__globals__.values() if isinstance(v, torch.nn.Module) and list(v.parameters())), None)
+  assert model, "torch.compile(backend='tiny') requires step to reference a nn.Module"
+  params, loss_out = [unwrap(p) for p in model.parameters()], Tensor.zeros((), dtype=dtypes.float32)
+  @TinyJit
+  def _jit(samples: Tensor):
+    with Tensor.train(): loss_out.assign(unwrap(fn(wrap(samples))))
+    Tensor.realize(loss_out, *params)
+    return wrap(loss_out)
+  return lambda samples: _jit(unwrap(samples))
 
-from tinygrad import Tensor, TinyJit
+_orig = torch.compile
+torch.compile = lambda fn=None, /, **kw: (lambda f: _tiny_compile(f)) if kw.get("backend") == "tiny" and fn is None \
+  else _tiny_compile(fn) if kw.get("backend") == "tiny" else _orig(fn, **kw)
 
-# native_batch_norm_backward dispatch to privateuseone doesn't work when inputs are CPU tensors (wrapped to tiny)
-# decompose it so the backward graph uses primitive ops that work through our wrap/unwrap path
-_decompositions = get_decompositions([torch.ops.aten.native_batch_norm_backward])
-
-@register_backend
-def tiny(gm:torch.fx.GraphModule, sample_inputs):
-  def my_compiler(gm:torch.fx.GraphModule, sample_inputs):
-    # TODO: the jit should capture the graph directly, not need three runs. this is a planned tinygrad refactor after becomes_map
-    @TinyJit
-    def tiny_function(*args:Tensor):
-      outs = gm(*[wrap(x) if isinstance(x, Tensor) else x for x in args])
-      Tensor.realize(*[unwrap(x) for x in outs if isinstance(x, torch.Tensor)])
-      return outs
-    def torch_function(*args):
-      tiny_args = [unwrap(x.tiny()) if isinstance(x, torch.Tensor) else x for x in args]
-      return [x.cpu() if isinstance(x, torch.Tensor) else x for x in tiny_function(*tiny_args)]
-    return make_boxed_func(torch_function)
-  return aot_module_simplified(gm, sample_inputs, decompositions=_decompositions, fw_compiler=my_compiler)
-
-if __name__ == "__main__":
-  def foo(x, y):
-    a = torch.sin(x)
-    b = torch.cos(y)
-    return a + b
-
-  print("calling compile")
-  opt_foo1 = torch.compile(foo, backend="tiny")
-  print("compiled")
-  for i in range(5):
-    out = opt_foo1(torch.randn(10, 10), torch.randn(10, 10))
-    print(out.device)

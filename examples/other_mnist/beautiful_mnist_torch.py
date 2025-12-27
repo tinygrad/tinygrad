@@ -27,9 +27,13 @@ class Model(nn.Module):
 
 if __name__ == "__main__":
   if getenv("TINY_BACKEND"):
-    device = torch.device("cpu")  # torch.compile traces with fake tensors, use CPU
+    import extra.torch_backend.backend  # noqa: F401  # register tiny device
+    import extra.torch_backend.test_compile  # noqa: F401  # patch torch.compile for backend="tiny"
+    device = torch.device("tiny")
+    compile_backend = "tiny"
   else:
     device = torch.device({"METAL":"mps","NV":"cuda"}.get(Device.DEFAULT, "cpu"))
+    compile_backend = {"mps": "aot_eager"}.get(device.type, "inductor")  # inductor is default but broken on mps
   if DEBUG >= 1: print(f"using torch backend {device}")
   X_train, Y_train, X_test, Y_test = mnist()
   X_train = torch.tensor(X_train.float().numpy(), device=device)
@@ -39,12 +43,9 @@ if __name__ == "__main__":
 
   if getenv("TORCHVIZ"): torch.cuda.memory._record_memory_history()
   model = Model().to(device)
-  if getenv("TINY_BACKEND"):
-    from extra.torch_backend.test_compile import tiny  # noqa: F401
-    model = torch.compile(model, backend="tiny", dynamic=False)
   optimizer = optim.Adam(model.parameters(), 1e-3)
-
   loss_fn = nn.CrossEntropyLoss()
+  @torch.compile(backend=compile_backend)
   def step(samples):
     X,Y = X_train[samples], Y_train[samples]
     out = model(X)
@@ -56,7 +57,7 @@ if __name__ == "__main__":
 
   test_acc = float('nan')
   for i in (t:=trange(getenv("STEPS", 70))):
-    samples = torch.randint(0, X_train.shape[0], (512,))  # putting this in JIT didn't work well
+    samples = torch.randint(0, X_train.shape[0], (512,), device=device)  # putting this in JIT didn't work well
     loss = step(samples)
     if i%10 == 9: test_acc = ((model(X_test).argmax(axis=-1) == Y_test).sum() * 100 / X_test.shape[0]).item()
     t.set_description(f"loss: {loss.item():6.2f} test_accuracy: {test_acc:5.2f}%")
