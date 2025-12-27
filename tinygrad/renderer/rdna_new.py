@@ -887,16 +887,21 @@ class RDNARenderer(Renderer):
         dtype = val_uop.dtype
         itemsize = dtype.itemsize if hasattr(dtype, 'itemsize') else 4
         # STORE data operand must be a VGPR, not an inline constant
+        # Check if we already loaded this constant into a register (for reuse)
         if isinstance(val, (int, float)):
-          if itemsize == 8:
+          if val_uop in r and isinstance(r[val_uop], VGPR):
+            val = r[val_uop]  # Reuse previously allocated register
+          elif itemsize == 8:
             # 64-bit constant needs 2 VGPRs
             tmp = ra.alloc_vgpr_pair(val_uop)
             code.append(v_mov_b32_e32(v[tmp.idx], val & 0xffffffff if isinstance(val, int) else val))
             code.append(v_mov_b32_e32(v[tmp.idx + 1], (val >> 32) & 0xffffffff if isinstance(val, int) else 0))
+            r[val_uop] = tmp  # Store for reuse
             val = tmp
           else:
             tmp = ra.alloc_vgpr(val_uop)
             code.append(v_mov_b32_e32(tmp, val))
+            r[val_uop] = tmp  # Store for reuse
             val = tmp
         buf_uop = idx_uop.src[0] if idx_uop.op is Ops.INDEX else idx_uop
 
