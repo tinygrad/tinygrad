@@ -291,7 +291,7 @@ class LNXPCIIfaceBase:
     self.dev_impl.mm.map_range(cast(int, b.va_addr), round_up(b.size, 0x1000), paddrs, aspace=aspace, snooped=snooped, uncached=uncached)
 
 class APLPCIIfaceBase(LNXPCIIfaceBase):
-  def __init__(self, dev, dev_id, vendor, devices, bars, vram_bar, va_start, va_size):
+  def __init__(self, dev, dev_id, vendor, devices, bars, vram_bar, va_start, va_size, base_class:int|None=None):
     self.pci_dev, self.dev, self.vram_bar = APLPCIDevice(dev.__class__.__name__[:2], pcibus=f'usb4:{dev_id}', bars=bars), dev, vram_bar
     assert (read_vendor:=self.pci_dev.read_config(0x00, 2)) == vendor, f"Vendor ID mismatch: expected {vendor:#x}, got {read_vendor:#x}"
   def map(self, b:HCQBuffer): raise RuntimeError(f"map failed: {b.owner} -> {self.dev}")
