@@ -592,6 +592,14 @@ def generate(output_path: str = "extra/assembly/rdna3/autogen/pseudocode.py"):
       if result is not None:
         code, _ = result
         fn_name = f'_fn_{cls_name}_{op.name}'
+        # V_DIV_SCALE: when no scaling needed, D0 = S0 (passthrough)
+        if op.name == 'V_DIV_SCALE_F32':
+          code = code.replace('  return {"d0":_d0,"scc":_scc,"vcc_lane":_vcc_lane}',
+                              '  else:\n    _d0=_i32(_f32(s0))\n  return {"d0":_d0,"scc":_scc,"vcc_lane":_vcc_lane}')
+        elif op.name == 'V_DIV_SCALE_F64':
+          code = code.replace('  return {"d0":_d0,"scc":_scc,"vcc_lane":_vcc_lane,"d0_64":True}',
+                              '  else:\n    _d0=_i64(_f64(s0))\n  return {"d0":_d0,"scc":_scc,"vcc_lane":_vcc_lane,"d0_64":True}')
+
         # Add comment with original pseudocode
         lines.append(f'# {op.name}')
         for pc_line in pc.split('\n'):
