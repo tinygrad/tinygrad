@@ -33,6 +33,7 @@ class RDNARegAlloc:
     self._pending_range_deaths: dict[int, list[int]] = defaultdict(list)
     # Scratch registers
     self._scratch_vgpr = -1
+    self._scratch_count = 0
     self._deferred_store_vgpr = -1
     # Run liveness analysis
     self._last_use, self._aliases, self._effective_death = self._analyze_liveness()
@@ -181,7 +182,7 @@ class RDNARegAlloc:
       reg = self._next_vgpr
       self._next_vgpr += 1
       self._max_vgpr = max(self._max_vgpr, self._next_vgpr)
-    assert reg < self.MAX_VGPR, f"VGPR overflow: v{reg} exceeds v{self.MAX_VGPR-1} limit"
+    if reg >= self.MAX_VGPR: raise RuntimeError(f"VGPR overflow: v{reg} exceeds v{self.MAX_VGPR-1} limit")
     self._vgpr_owner[reg] = owner
     self._schedule_vgpr_death(reg, owner)
     return VGPR(reg)
@@ -195,7 +196,7 @@ class RDNARegAlloc:
       reg = self._next_vgpr
       self._next_vgpr += 2
       self._max_vgpr = max(self._max_vgpr, self._next_vgpr)
-    assert reg + 1 < self.MAX_VGPR, f"VGPR overflow: v{reg+1} exceeds v{self.MAX_VGPR-1} limit"
+    if reg + 1 >= self.MAX_VGPR: raise RuntimeError(f"VGPR overflow: v{reg+1} exceeds v{self.MAX_VGPR-1} limit")
     self._vgpr_owner[reg] = self._vgpr_owner[reg + 1] = owner
     self._vgpr_pairs.add(reg)
     self._vgpr_pairs.add(reg + 1)
@@ -209,7 +210,7 @@ class RDNARegAlloc:
       if range_count >= count:
         self._free_vgpr_ranges.pop(i)
         if range_count > count: self._free_vgpr_ranges.append((base + count, range_count - count))
-        assert base + count <= self.MAX_VGPR, f"VGPR overflow: v{base+count-1} exceeds v{self.MAX_VGPR-1} limit"
+        if base + count > self.MAX_VGPR: raise RuntimeError(f"VGPR overflow: v{base+count-1} exceeds v{self.MAX_VGPR-1} limit")
         self._range_owner[base] = owner
         self._vgpr_ranges[base] = count
         self._schedule_range_death(base, owner)
@@ -218,7 +219,7 @@ class RDNARegAlloc:
     if base % 2 != 0: base = self._next_vgpr = self._next_vgpr + 1
     self._next_vgpr = base + count
     self._max_vgpr = max(self._max_vgpr, self._next_vgpr)
-    assert base + count <= self.MAX_VGPR, f"VGPR overflow: v{base+count-1} exceeds v{self.MAX_VGPR-1} limit"
+    if base + count > self.MAX_VGPR: raise RuntimeError(f"VGPR overflow: v{base+count-1} exceeds v{self.MAX_VGPR-1} limit")
     self._range_owner[base] = owner
     self._vgpr_ranges[base] = count
     self._schedule_range_death(base, owner)
@@ -250,11 +251,22 @@ class RDNARegAlloc:
     return SGPR(reg, 2)
 
   def get_scratch_vgpr(self, count: int = 1) -> int:
-    """Get scratch VGPR base for temporary operations."""
+    """Get scratch VGPR base for temporary operations. Dynamically expands as needed."""
     if self._scratch_vgpr < 0:
       self._scratch_vgpr = self._next_vgpr
-      self._next_vgpr += 32  # Reserve for 64-bit division temps
+      self._scratch_count = count
+      self._next_vgpr += count
       self._max_vgpr = max(self._max_vgpr, self._next_vgpr)
+      if self._next_vgpr > self.MAX_VGPR:
+        raise RuntimeError(f"VGPR overflow: scratch VGPRs exceed limit (need {self._next_vgpr}, max {self.MAX_VGPR})")
+    elif count > self._scratch_count:
+      # Expand scratch region if more VGPRs needed
+      extra = count - self._scratch_count
+      self._scratch_count = count
+      self._next_vgpr += extra
+      self._max_vgpr = max(self._max_vgpr, self._next_vgpr)
+      if self._next_vgpr > self.MAX_VGPR:
+        raise RuntimeError(f"VGPR overflow: scratch VGPRs exceed limit (need {self._next_vgpr}, max {self.MAX_VGPR})")
     return self._scratch_vgpr
 
   def get_deferred_store_vgpr(self) -> str:
@@ -263,6 +275,8 @@ class RDNARegAlloc:
       self._deferred_store_vgpr = self._next_vgpr
       self._next_vgpr += 1
       self._max_vgpr = max(self._max_vgpr, self._next_vgpr)
+      if self._next_vgpr > self.MAX_VGPR:
+        raise RuntimeError(f"VGPR overflow: deferred store VGPR exceeds limit (need {self._next_vgpr}, max {self.MAX_VGPR})")
     return f"v{self._deferred_store_vgpr}"
 
   def extend_lifetime(self, uop: UOp, pos: int):
