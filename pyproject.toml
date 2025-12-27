@@ -61,7 +61,7 @@ linting = [
 # ]
 testing_minimal = [
   "numpy",
-  "torch==2.9.0",
+  "torch>=2.9.0",
   "pytest",
   "pytest-xdist",
   "pytest-timeout",
