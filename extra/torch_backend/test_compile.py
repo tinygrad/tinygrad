@@ -10,11 +10,11 @@ def _tiny_compile(fn):
   assert model, "torch.compile(backend='tiny') requires step to reference a nn.Module"
   params, loss_out = [unwrap(p) for p in model.parameters()], Tensor.zeros((), dtype=dtypes.float32)
   @TinyJit
-  def _jit(samples: Tensor):
-    with Tensor.train(): loss_out.assign(unwrap(fn(wrap(samples))))
+  def _jit(*args: Tensor):
+    with Tensor.train(): loss_out.assign(unwrap(fn(*[wrap(a) for a in args])))
     Tensor.realize(loss_out, *params)
     return wrap(loss_out)
-  return lambda samples: _jit(unwrap(samples))
+  return lambda *args: _jit(*[unwrap(a) for a in args])
 
 _orig = torch.compile
 torch.compile = lambda fn=None, /, **kw: (lambda f: _tiny_compile(f)) if kw.get("backend") == "tiny" and fn is None \
