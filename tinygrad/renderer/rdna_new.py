@@ -59,6 +59,20 @@ def _bitwise64(ctx, a, b, op):
   # Both are VGPRs
   return [op(ctx.dst, ar, br), op(v[ctx.dst.idx+1], v[ar.idx+1], v[br.idx+1])]
 
+# Helper for Newton-Raphson refined reciprocal: y' = y * (2 - x*y) for full precision
+# Hardware rcp has ~1 ulp error which causes off-by-one issues with truncated division
+def _refined_rcp_f32(ctx, x, a):
+  ar = ctx.get_reg(a)
+  dst = ctx.dst
+  scratch = v[ctx.ra.get_scratch_vgpr()]
+  # Newton-Raphson: y' = y * (2 - x*y) = y - y*(x*y - 1)
+  # scratch = rcp(x)                    # y ≈ 1/x
+  # dst = fma(x, y, -1) = x*y - 1       # error from 1
+  # dst = y * dst = y * (x*y - 1)       # correction term
+  # dst = y - dst = y * (2 - x*y)       # refined result
+  return [v_rcp_f32_e32(scratch, ar), v_fma_f32(dst, ar, scratch, -1.0),
+          v_mul_f32_e32(dst, scratch, dst), v_sub_f32_e32(dst, scratch, dst)]
+
 # Module-level PatternMatcher for simple ALU and CAST operations
 render_ops = PatternMatcher([
   # CAST: float32 <-> int32/uint32
@@ -278,9 +292,9 @@ render_ops = PatternMatcher([
    lambda ctx,x,a,b,d: [v_fma_f64(ctx.dst, ctx.get_reg(a), ctx.get_reg(b), ctx.get_reg(d))]),
   (UPat(Ops.MULACC, dtype=dtypes.floats, src=(UPat.var("a"), UPat.var("b"), UPat.var("d")), name="x"),
    lambda ctx,x,a,b,d: [v_fma_f32(ctx.dst, ctx.get_reg(a), ctx.get_reg(b), ctx.get_reg(d))]),
-  # Transcendental: float64 first (for precision), then float32
+  # Transcendental: float64 first (for precision), then float32 with Newton-Raphson refinement
   (UPat(Ops.RECIPROCAL, dtype=dtypes.float64, src=(UPat.var("a"),), name="x"), lambda ctx,x,a: [v_rcp_f64_e32(ctx.dst, ctx.get_reg(a))]),
-  (UPat(Ops.RECIPROCAL, dtype=dtypes.floats, src=(UPat.var("a"),), name="x"), lambda ctx,x,a: [v_rcp_f32_e32(ctx.dst, ctx.get_reg(a))]),
+  (UPat(Ops.RECIPROCAL, dtype=dtypes.floats, src=(UPat.var("a"),), name="x"), _refined_rcp_f32),
   (UPat(Ops.SQRT, dtype=dtypes.floats, src=(UPat.var("a"),), name="x"), lambda ctx,x,a: [v_sqrt_f32_e32(ctx.dst, ctx.get_reg(a))]),
   (UPat(Ops.EXP2, dtype=dtypes.floats, src=(UPat.var("a"),), name="x"), lambda ctx,x,a: [v_exp_f32_e32(ctx.dst, ctx.get_reg(a))]),
   (UPat(Ops.LOG2, dtype=dtypes.floats, src=(UPat.var("a"),), name="x"), lambda ctx,x,a: [v_log_f32_e32(ctx.dst, ctx.get_reg(a))]),
