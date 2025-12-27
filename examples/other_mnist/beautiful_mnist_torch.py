@@ -27,8 +27,8 @@ class Model(nn.Module):
 
 if __name__ == "__main__":
   if getenv("TINY_BACKEND"):
-    import extra.torch_backend.backend  # noqa: F401  # register tiny device
-    import extra.torch_backend.test_compile  # noqa: F401  # patch torch.compile for backend="tiny"
+    import tinygrad.nn.torch  # noqa: F401
+    import extra.torch_backend.test_compile  # noqa: F401
     device = torch.device("tiny")
     compile_backend = "tiny"
   else:
