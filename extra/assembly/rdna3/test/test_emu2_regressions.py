@@ -187,5 +187,23 @@ class TestEmu2Regressions(unittest.TestCase):
     expected = np.array([[1., 1., 1.], [2., 2., 2.], [3., 3., 3.]])
     np.testing.assert_allclose(W.grad.numpy(), expected, rtol=1e-5)
 
+  # === Bug: Broadcast comparison loading same value for all workgroups ===
+  # When comparing tensors with broadcast (e.g., (3,4,5) >= (5,)), the scalar load
+  # for the broadcast array was using the same address for all workgroups because:
+  # 1. Workgroup IDs were being placed in wrong SGPRs (needed to read COMPUTE_PGM_RSRC2)
+  # 2. S_ASHR_I64 was reading only 32-bit source instead of 64-bit
+  def test_broadcast_comparison_uses_workgroup_id(self):
+    """Broadcast comparison must load different values per workgroup."""
+    from tinygrad import Tensor
+    np.random.seed(0)
+    a = np.random.uniform(-2, 2, (3, 4, 5)).astype(np.float32)
+    b = np.random.uniform(-2, 2, (5,)).astype(np.float32)
+    ta, tb = Tensor(a), Tensor(b)
+    # All comparison operators should work correctly with broadcast
+    np.testing.assert_array_equal((ta >= tb).numpy(), a >= b)
+    np.testing.assert_array_equal((ta <= tb).numpy(), a <= b)
+    np.testing.assert_array_equal((ta > tb).numpy(), a > b)
+    np.testing.assert_array_equal((ta < tb).numpy(), a < b)
+
 if __name__ == '__main__':
   unittest.main()

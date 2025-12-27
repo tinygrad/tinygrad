@@ -739,6 +739,7 @@ class PseudocodeInterpreter:
               vcc: int = 0, lane: int = 0, exec_mask: int = 0xffffffff, literal: int = 0,
               vgprs: list[list[int]] | None = None) -> dict[str, Any]:
     """Execute pseudocode and return dict with results."""
+    # Full interpreter (compiled functions are used directly by emu2.py)
     self.vars = {}
     self.ctx = {'s0': s0, 's1': s1, 's2': s2, 'd0': d0, 'scc': scc, 'vcc': vcc, 'lane': lane, 'exec_mask': exec_mask, 'literal': literal,
                 'vgprs': vgprs}
@@ -885,7 +886,6 @@ def get_pseudocode() -> dict[type, dict[Any, str]]:
     return {cls: getattr(pd, f"{cls.__name__}_PSEUDOCODE", {}) for cls in _OP_ENUMS}
   except ImportError:
     return generate()
-
 
 if __name__ == "__main__":
   import sys
