@@ -3,7 +3,7 @@
 import ctypes, time, struct, cProfile, pstats, io
 from pathlib import Path
 
-from extra.assembly.rdna3.emu2 import run_asm, set_valid_mem_ranges, decode_program, step_wave, WaveState, WAVE_SIZE
+from extra.assembly.rdna3.emu import run_asm, set_valid_mem_ranges, decode_program, step_wave, WaveState, WAVE_SIZE
 
 def count_instructions(kernel: bytes) -> int:
   """Count instructions in a kernel."""

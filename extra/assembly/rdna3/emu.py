@@ -210,9 +210,10 @@ def exec_scalar(st: WaveState, inst: Inst) -> int:
   s1 = st.rsrc64(inst.ssrc1, 0) if is_64bit_s0s1 else (st.rsrc(inst.ssrc1, 0) if inst_type in (SOP2, SOPC) else inst.simm16 if inst_type is SOPK else 0)
   d0 = st.rsgpr64(sdst) if (is_64bit_s0 or is_64bit_s0s1) and sdst is not None else (st.rsgpr(sdst) if sdst is not None else 0)
   exec_mask = st.exec_mask
+  literal = inst.simm16 if inst_type is SOPK else st.literal
 
   # Execute compiled function
-  result = fn(s0, s1, 0, d0, st.scc, st.vcc, 0, exec_mask, st.literal, None, {})
+  result = fn(s0, s1, 0, d0, st.scc, st.vcc, 0, exec_mask, literal, None, {})
 
   # Apply results
   if sdst is not None:
