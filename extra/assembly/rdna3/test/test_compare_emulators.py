@@ -8,7 +8,7 @@ from pathlib import Path
 os.environ["AMD"] = "1"
 os.environ["MOCKGPU"] = "1"
 
-from extra.assembly.rdna3.emu2 import WaveState, decode_program, step_wave, WAVE_SIZE
+from extra.assembly.rdna3.emu import WaveState, decode_program, step_wave, WAVE_SIZE
 
 REMU_PATH = Path(__file__).parents[3] / "remu/target/release/libremu.so"
 
@@ -206,7 +206,7 @@ def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: t
 def compare_emulators_multi_kernel(kernels: list[KernelInfo], buf_pool: dict[int, int], max_steps: int = 1000,
                                     debug: bool = False, trace_len: int = 10, buf_data: dict[int, bytes] | None = None) -> tuple[bool, str]:
   """Run all kernels through both emulators with shared buffer pool."""
-  from extra.assembly.rdna3.emu2 import set_valid_mem_ranges, decode_program
+  from extra.assembly.rdna3.emu import set_valid_mem_ranges, decode_program
   if buf_data is None: buf_data = {}
 
   # Allocate shared buffer pool with padding for over-reads (GPU loads up to 16 bytes at once)
@@ -250,7 +250,7 @@ def compare_emulators_multi_kernel(kernels: list[KernelInfo], buf_pool: dict[int
 def compare_emulators_with_memory(kernel: bytes, n_lanes: int, buf_sizes: list, max_steps: int = 1000, debug: bool = False,
                                    global_size: tuple[int, int, int] = (1, 1, 1), trace_len: int = 10) -> tuple[bool, str]:
   """Run both emulators with memory set up for tinygrad kernels, executing all workgroups. Legacy wrapper."""
-  from extra.assembly.rdna3.emu2 import set_valid_mem_ranges, decode_program
+  from extra.assembly.rdna3.emu import set_valid_mem_ranges, decode_program
 
   # Allocate buffers
   buffers = []
