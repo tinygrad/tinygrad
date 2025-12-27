@@ -4415,8 +4415,6 @@ def _fn_VOP3SDOp_V_DIV_SCALE_F32(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgpr
       _d0=_i32(_ldexp(_f32(s0), 64))
   elif _exponent(_f32(s2)) <= 23:
     _d0=_i32(_ldexp(_f32(s0), 64))
-  else:
-    _d0=_i32(_f32(s0))
   return {"d0":_d0,"scc":_scc,"vcc_lane":_vcc_lane}
 
 def _fn_VOP3SDOp_V_DIV_SCALE_F64(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_vars,src0_idx=0,vdst_idx=0):
@@ -4442,8 +4440,6 @@ def _fn_VOP3SDOp_V_DIV_SCALE_F64(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgpr
       _d0=_i64(_ldexp(_f64(s0), 128))
   elif _exponent(_f64(s2)) <= 53:
     _d0=_i64(_ldexp(_f64(s0), 128))
-  else:
-    _d0=_i64(_f64(s0))
   return {"d0":_d0,"scc":_scc,"vcc_lane":_vcc_lane,"d0_64":True}
 
 def _fn_VOP3SDOp_V_MAD_U64_U32(s0,s1,s2,d0,scc,vcc,lane,exec_mask,literal,vgprs,_vars,src0_idx=0,vdst_idx=0):
