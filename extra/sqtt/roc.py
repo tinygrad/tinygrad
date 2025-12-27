@@ -136,7 +136,7 @@ if __name__ == "__main__":
   args = parser.parse_args()
 
   with args.profile.open("rb") as f: profile = pickle.load(f)
-  rctx = decode(profile)
-  print('SQTT:', rctx.inst_execs.keys())
+  #rctx = decode(profile, disasm)
+  #print('SQTT:', rctx.inst_execs.keys())
 
   print_pmc([ev for ev in profile if isinstance(ev, ProfilePMCEvent)])

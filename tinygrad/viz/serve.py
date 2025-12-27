@@ -270,13 +270,12 @@ def load_counters(profile:list[ProfileEvent]) -> None:
 
 # ** SQTT OCC only unpacks wave start, end time and SIMD location
 
-def unpack_sqtt(key:tuple[str, int], profile:list[ProfileEvent],
-                prg:ProfileProgramEvent) -> tuple[dict[str, list[ProfileEvent]], list[str], dict[str, dict[str, dict]]]:
+def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[dict[str, list[ProfileEvent]], list[str], dict[str, dict[str, dict]]]:
   # * init decoder
   from extra.sqtt.roc import decode
-  base = unwrap(prg.base)
-  disasm = {addr+base:inst_disasm for addr,inst_disasm in llvm_disasm(device_props[prg.device]["gfx_target_version"], unwrap(prg.lib)).items()}
-  rctx = decode(profile, {prg_event.name:disasm})
+  base = unwrap(p.base)
+  disasm = {addr+base:inst_disasm for addr,inst_disasm in llvm_disasm(device_props[p.device]["gfx_target_version"], unwrap(p.lib)).items()}
+  rctx = decode(data, {p.name:disasm})
   cu_events:dict[str, list[ProfileEvent]] = {}
   # * INST waves
   wave_insts:dict[str, dict[str, dict]] = {}
