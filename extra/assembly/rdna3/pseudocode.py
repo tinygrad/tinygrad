@@ -68,9 +68,10 @@ class PseudocodeInterpreter:
 
     # Handle bit range like S1[4:0].u32 or S1[4:0]
     def replace_bit_range(m):
-      var, hi, lo = m.group(1), int(m.group(2)), int(m.group(3))
+      var, n1, n2 = m.group(1), int(m.group(2)), int(m.group(3))
       val = {'S0': s0, 'S1': s1, 'S2': s2, 'D0': d0}.get(var)
       if val is None: return m.group(0)
+      lo, hi = min(n1, n2), max(n1, n2)
       return str((val >> lo) & ((1 << (hi - lo + 1)) - 1))
     # Handle S0.u32[4:0] style (with type suffix before bit range)
     expr = re.sub(r'(S[012]|D0)\.u32\[(\d+)\s*:\s*(\d+)\](?:\.u32)?', replace_bit_range, expr)
@@ -86,13 +87,21 @@ class PseudocodeInterpreter:
     expr = re.sub(r'S0\.u32', str(s0 & 0xffffffff), expr)
     expr = re.sub(r'S0\.i32', str(_sext(s0 & 0xffffffff, 32)), expr)
     expr = re.sub(r'S0\.f32', f'_f32({s0 & 0xffffffff})', expr)
+    expr = re.sub(r'S0\.f16', str(s0 & 0xffff), expr)  # 16-bit half-float bits
     expr = re.sub(r'S0\.b32', str(s0 & 0xffffffff), expr)
     expr = re.sub(r'S0\.u24', str(s0 & 0xffffff), expr)  # 24-bit unsigned
+    expr = re.sub(r'S0\.i24', str(_sext(s0 & 0xffffff, 24)), expr)  # 24-bit signed
+    expr = re.sub(r'S0\.u16', str(s0 & 0xffff), expr)  # 16-bit unsigned
+    expr = re.sub(r'S0\.i16', str(_sext(s0 & 0xffff, 16)), expr)  # 16-bit signed
     expr = re.sub(r'S1\.u32', str(s1 & 0xffffffff), expr)
     expr = re.sub(r'S1\.i32', str(_sext(s1 & 0xffffffff, 32)), expr)
     expr = re.sub(r'S1\.f32', f'_f32({s1 & 0xffffffff})', expr)
+    expr = re.sub(r'S1\.f16', str(s1 & 0xffff), expr)  # 16-bit half-float bits
     expr = re.sub(r'S1\.b32', str(s1 & 0xffffffff), expr)
     expr = re.sub(r'S1\.u24', str(s1 & 0xffffff), expr)  # 24-bit unsigned
+    expr = re.sub(r'S1\.i24', str(_sext(s1 & 0xffffff, 24)), expr)  # 24-bit signed
+    expr = re.sub(r'S1\.u16', str(s1 & 0xffff), expr)  # 16-bit unsigned
+    expr = re.sub(r'S1\.i16', str(_sext(s1 & 0xffff, 16)), expr)  # 16-bit signed
 
     # SIMM16 for SOPK instructions (s1 contains the 16-bit immediate)
     # Handle bit access first: SIMM16.i16[bit]
@@ -119,9 +128,15 @@ class PseudocodeInterpreter:
     expr = re.sub(r'S2\.u32', str(s2 & 0xffffffff), expr)
     expr = re.sub(r'S2\.i32', str(_sext(s2 & 0xffffffff, 32)), expr)
     expr = re.sub(r'S2\.f32', f'_f32({s2 & 0xffffffff})', expr)
+    expr = re.sub(r'S2\.f16', str(s2 & 0xffff), expr)  # 16-bit half-float bits
+    expr = re.sub(r'S2\.u16', str(s2 & 0xffff), expr)  # 16-bit unsigned
+    expr = re.sub(r'S2\.i16', str(_sext(s2 & 0xffff, 16)), expr)  # 16-bit signed
     expr = re.sub(r'D0\.u32', str(d0 & 0xffffffff), expr)
     expr = re.sub(r'D0\.i32', str(_sext(d0 & 0xffffffff, 32)), expr)
     expr = re.sub(r'D0\.f32', f'_f32({d0 & 0xffffffff})', expr)
+    expr = re.sub(r'D0\.f16', str(d0 & 0xffff), expr)  # 16-bit half-float bits
+    expr = re.sub(r'D0\.u16', str(d0 & 0xffff), expr)  # 16-bit unsigned
+    expr = re.sub(r'D0\.i16', str(_sext(d0 & 0xffff, 16)), expr)  # 16-bit signed
     expr = re.sub(r'D0\.b32', str(d0 & 0xffffffff), expr)
 
     # 64-bit access
@@ -141,8 +156,16 @@ class PseudocodeInterpreter:
     expr = re.sub(r'VCC\.u64\[laneId\]\.u32', str((vcc >> lane) & 1), expr)  # VCC bit as u32
     expr = re.sub(r'VCC\.u64\[laneId\]', str((vcc >> lane) & 1), expr)
     expr = re.sub(r'VCC\.u64', str(vcc & 0xffffffffffffffff), expr)
+    expr = re.sub(r'EXEC_LO\.u32', str(exec_mask & 0xffffffff), expr)
+    expr = re.sub(r'EXEC_LO\.i32', str(_sext(exec_mask & 0xffffffff, 32)), expr)
+    expr = re.sub(r'EXEC_LO\.u32', str(exec_mask & 0xffffffff), expr)
+    expr = re.sub(r'\bEXEC_LO\b', str(exec_mask & 0xffffffff), expr)  # Bare EXEC_LO
+    expr = re.sub(r'EXEC_HI\.u32', str((exec_mask >> 32) & 0xffffffff), expr)
+    expr = re.sub(r'EXEC_HI\.i32', str(_sext((exec_mask >> 32) & 0xffffffff, 32)), expr)
+    expr = re.sub(r'\bEXEC_HI\b', str((exec_mask >> 32) & 0xffffffff), expr)  # Bare EXEC_HI
     expr = re.sub(r'EXEC\.u32', str(exec_mask & 0xffffffff), expr)
     expr = re.sub(r'EXEC\.u64', str(exec_mask & 0xffffffffffffffff), expr)
+    expr = re.sub(r'\bEXEC\b', str(exec_mask & 0xffffffffffffffff), expr)  # Bare EXEC
 
     # SCC access
     expr = re.sub(r'SCC\.u32', str(scc & 1), expr)
@@ -151,9 +174,10 @@ class PseudocodeInterpreter:
 
     # laneId
     expr = re.sub(r'\blaneId\b', str(lane), expr)
-    # Wave mode - assume Wave32 for tinygrad
+    # Wave mode - assume Wave32 for tinygrad, non-IEEE mode (simpler NaN handling)
     expr = re.sub(r'\bWAVE64\b', 'False', expr)
     expr = re.sub(r'\bWAVE32\b', 'True', expr)
+    expr = re.sub(r'WAVE_MODE\.IEEE', 'False', expr)  # Use non-IEEE mode for simpler NaN handling
 
     # Handle variables from context
     for name, val in self.vars.items():
@@ -210,61 +234,90 @@ class PseudocodeInterpreter:
     # Handle special functions - cvtToQuietNAN just passes through (returns NaN if input is NaN)
     expr = re.sub(r'cvtToQuietNAN\(', '(', expr)  # Just strip the function name
 
-    # Handle conversion/math functions
-    expr = re.sub(r'i32_to_f32\(([^)]+)\)', r'float(\1)', expr)
-    expr = re.sub(r'u32_to_f32\(([^)]+)\)', r'float(\1)', expr)
-    expr = re.sub(r'f32_to_i32\(([^)]+)\)', r'int(\1)', expr)
-    expr = re.sub(r'f32_to_u32\(([^)]+)\)', r'max(0, int(\1))', expr)
-    expr = re.sub(r'\bfma\(([^,]+),\s*([^,]+),\s*([^)]+)\)', r'((\1) * (\2) + (\3))', expr)
-    expr = re.sub(r'\bmin\(', 'min(', expr)
-    expr = re.sub(r'\bmax\(', 'max(', expr)
+    # Handle conversion/math functions - only apply regex if function name exists
+    if '_to_' in expr:
+      if 'i32_to_f32(' in expr: expr = re.sub(r'i32_to_f32\(([^)]+)\)', r'float(\1)', expr)
+      if 'u32_to_f32(' in expr: expr = re.sub(r'u32_to_f32\(([^)]+)\)', r'float(\1)', expr)
+      if 'i32_to_f64(' in expr: expr = re.sub(r'i32_to_f64\(([^)]+)\)', r'float(\1)', expr)
+      if 'u32_to_f64(' in expr: expr = re.sub(r'u32_to_f64\(([^)]+)\)', r'float(\1)', expr)
+      if 'f32_to_i32(' in expr: expr = re.sub(r'f32_to_i32\(([^)]+)\)', r'_f32_to_i32(\1)', expr)
+      if 'f32_to_u32(' in expr: expr = re.sub(r'f32_to_u32\(([^)]+)\)', r'_f32_to_u32(\1)', expr)
+      if 'f64_to_i32(' in expr: expr = re.sub(r'f64_to_i32\(([^)]+)\)', r'_f32_to_i32(\1)', expr)
+      if 'f64_to_u32(' in expr: expr = re.sub(r'f64_to_u32\(([^)]+)\)', r'_f32_to_u32(\1)', expr)
+      if 'f32_to_f64(' in expr: expr = re.sub(r'f32_to_f64\(([^)]+)\)', r'float(\1)', expr)
+      if 'f64_to_f32(' in expr: expr = re.sub(r'f64_to_f32\(([^)]+)\)', r'float(\1)', expr)
+      if 'f16_to_f32(' in expr: expr = re.sub(r'f16_to_f32\(([^)]+)\)', r'_f16_to_f32(\1)', expr)
+      if 'f32_to_f16(' in expr: expr = re.sub(r'f32_to_f16\(([^)]+)\)', r'_f32_to_f16(\1)', expr)
+      if 'f16_to_i16(' in expr: expr = re.sub(r'f16_to_i16\(([^)]+)\)', r'_f16_to_i16(\1)', expr)
+      if 'f16_to_u16(' in expr: expr = re.sub(r'f16_to_u16\(([^)]+)\)', r'_f16_to_u16(\1)', expr)
+      if 'i16_to_f16(' in expr: expr = re.sub(r'i16_to_f16\(([^)]+)\)', r'_i16_to_f16(\1)', expr)
+      if 'u16_to_f16(' in expr: expr = re.sub(r'u16_to_f16\(([^)]+)\)', r'_u16_to_f16(\1)', expr)
+      if 'i32_to_i16(' in expr: expr = re.sub(r'i32_to_i16\(([^)]+)\)', r'((\1) & 0xffff)', expr)
+      if 'u32_to_u16(' in expr: expr = re.sub(r'u32_to_u16\(([^)]+)\)', r'((\1) & 0xffff)', expr)
+    if 'fma(' in expr: expr = re.sub(r'\bfma\(([^,]+),\s*([^,]+),\s*([^)]+)\)', r'((\1) * (\2) + (\3))', expr)
     # NaN checking functions - for simplicity, treat signal/quiet NaN the same
-    expr = re.sub(r'isSignalNAN\(([^)]+)\)', r'_isnan(\1)', expr)
-    expr = re.sub(r'isQuietNAN\(([^)]+)\)', r'_isnan(\1)', expr)
+    if 'isSignalNAN(' in expr: expr = re.sub(r'isSignalNAN\(([^)]+)\)', r'_isnan(\1)', expr)
+    if 'isQuietNAN(' in expr: expr = re.sub(r'isQuietNAN\(([^)]+)\)', r'_isnan(\1)', expr)
+    # GPU comparison functions with special -0.0 handling: GT_NEG_ZERO(a,b) means a > b with +0 > -0
+    if 'GT_NEG_ZERO(' in expr: expr = re.sub(r'GT_NEG_ZERO\(([^,]+),\s*([^)]+)\)', r'_gt_neg_zero(\1, \2)', expr)
+    if 'LT_NEG_ZERO(' in expr: expr = re.sub(r'LT_NEG_ZERO\(([^,]+),\s*([^)]+)\)', r'_lt_neg_zero(\1, \2)', expr)
     # Handle nested parentheses correctly for these functions
     def replace_func_with_balanced_parens(e, func_name, replacement_fn):
+      fn_pat = func_name + '('
+      if fn_pat not in e: return e
       result, i = [], 0
       while i < len(e):
-        if e[i:].startswith(func_name + '('):
-          start = i + len(func_name) + 1
-          depth, end = 1, start
-          while end < len(e) and depth > 0:
-            if e[end] == '(': depth += 1
-            elif e[end] == ')': depth -= 1
-            end += 1
-          inner = e[start:end-1]
-          result.append(replacement_fn(inner))
-          i = end
-        else:
-          result.append(e[i]); i += 1
+        idx = e.find(fn_pat, i)
+        if idx == -1:
+          result.append(e[i:])
+          break
+        result.append(e[i:idx])
+        start = idx + len(fn_pat)
+        depth, end = 1, start
+        while end < len(e) and depth > 0:
+          if e[end] == '(': depth += 1
+          elif e[end] == ')': depth -= 1
+          end += 1
+        inner = e[start:end-1]
+        result.append(replacement_fn(inner))
+        i = end
       return ''.join(result)
-    expr = replace_func_with_balanced_parens(expr, 'isNAN', lambda x: f'_isnan({x})')
-    expr = replace_func_with_balanced_parens(expr, 'isEven', lambda x: f'(int({x}) % 2 == 0)')
-    expr = replace_func_with_balanced_parens(expr, 'fract', lambda x: f'(({x}) - floor({x}))')
+    if 'isNAN(' in expr: expr = replace_func_with_balanced_parens(expr, 'isNAN', lambda x: f'_isnan({x})')
+    if 'isEven(' in expr: expr = replace_func_with_balanced_parens(expr, 'isEven', lambda x: f'(int({x}) % 2 == 0)')
+    if 'fract(' in expr: expr = replace_func_with_balanced_parens(expr, 'fract', lambda x: f'(({x}) - floor({x}))')
     # Float manipulation functions
-    expr = re.sub(r'exponent\(([^)]+)\)', r'_exponent(\1)', expr)
-    expr = re.sub(r'mantissa\(([^)]+)\)', r'_mantissa(\1)', expr)
-    expr = re.sub(r'sign\(([^)]+)\)', r'_sign(\1)', expr)
-    expr = re.sub(r'ldexp\(([^,]+),\s*([^)]+)\)', r'_ldexp(\1, \2)', expr)
-    expr = re.sub(r'signext_from_bit\(([^,]+),\s*([^)]+)\)', r'_sext(\1, \2)', expr)
-    expr = re.sub(r'\bsin\(', '_sin(', expr)
-    expr = re.sub(r'\bcos\(', '_cos(', expr)
-    expr = re.sub(r'\bpow\(', '_pow(', expr)
+    if 'exponent(' in expr: expr = re.sub(r'exponent\(([^)]+)\)', r'_exponent(\1)', expr)
+    if 'mantissa(' in expr: expr = re.sub(r'mantissa\(([^)]+)\)', r'_mantissa(\1)', expr)
+    if 'sign(' in expr: expr = re.sub(r'sign\(([^)]+)\)', r'_sign(\1)', expr)
+    if 'ldexp(' in expr: expr = re.sub(r'ldexp\(([^,]+),\s*([^)]+)\)', r'_ldexp(\1, \2)', expr)
+    if 'signext_from_bit(' in expr: expr = re.sub(r'signext_from_bit\(([^,]+),\s*([^)]+)\)', r'_sext(\1, \2)', expr)
+    if 'sin(' in expr: expr = re.sub(r'\bsin\(', '_sin(', expr)
+    if 'cos(' in expr: expr = re.sub(r'\bcos\(', '_cos(', expr)
+    if 'pow(' in expr: expr = re.sub(r'\bpow\(', '_pow(', expr)
+    # Scalar find-first-set-bit functions (used by V_READFIRSTLANE)
+    if 's_ff1_i32_b32(' in expr: expr = re.sub(r's_ff1_i32_b32\(([^)]+)\)', r'_s_ff1_b32(\1)', expr)
+    if 's_ff1_i32_b64(' in expr: expr = re.sub(r's_ff1_i32_b64\(([^)]+)\)', r'_s_ff1_b64(\1)', expr)
+    # VGPR array access: VGPR[lane][src] - used by V_READFIRSTLANE
+    if 'VGPR[' in expr: expr = re.sub(r'VGPR\[([^\]]+)\]\[([^\]]+)\]', r'_vgpr_access(\1, \2)', expr)
+    # SRC0.u32 for VGPR index
+    if 'SRC0.u32' in expr: expr = re.sub(r'SRC0\.u32', str(s0 & 0xffffffff), expr)
 
     # Handle { a, b } concatenation (pack two values into one: (a << 32) | b)
-    def replace_concat(m):
-      a, b = m.group(1).strip(), m.group(2).strip()
-      return f'((({a}) << 32) | ({b}))'
-    expr = re.sub(r'\{\s*([^,]+)\s*,\s*([^}]+)\s*\}', replace_concat, expr)
+    if '{' in expr:
+      def replace_concat(m):
+        a, b = m.group(1).strip(), m.group(2).strip()
+        return f'((({a}) << 32) | ({b}))'
+      expr = re.sub(r'\{\s*([^,]+)\s*,\s*([^}]+)\s*\}', replace_concat, expr)
 
     # Handle hex/int/float literals with suffixes
-    expr = re.sub(r'0x([0-9a-fA-F]+)ULL', r'0x\1', expr)
-    expr = re.sub(r'0x([0-9a-fA-F]+)U', r'0x\1', expr)
-    expr = re.sub(r'0x([0-9a-fA-F]+)LL', r'0x\1', expr)
-    expr = re.sub(r'(\d+)ULL\b', r'\1', expr)
-    expr = re.sub(r'(\d+)LL\b', r'\1', expr)
-    expr = re.sub(r'(\d+)U\b', r'\1', expr)
-    expr = re.sub(r'(\d+\.?\d*)F\b', r'\1', expr)  # Float suffix
+    if 'ULL' in expr or 'LL' in expr or 'U' in expr or 'F' in expr:
+      expr = re.sub(r'0x([0-9a-fA-F]+)ULL', r'0x\1', expr)
+      expr = re.sub(r'0x([0-9a-fA-F]+)U', r'0x\1', expr)
+      expr = re.sub(r'0x([0-9a-fA-F]+)LL', r'0x\1', expr)
+      expr = re.sub(r'(\d+)ULL\b', r'\1', expr)
+      expr = re.sub(r'(\d+)LL\b', r'\1', expr)
+      expr = re.sub(r'(\d+)U\b', r'\1', expr)
+      expr = re.sub(r'(\d+\.?\d*)F\b', r'\1', expr)  # Float suffix
 
     # Handle ternary operator - convert C-style `cond ? true : false` to Python `true if cond else false`
     def convert_ternary_recursive(e):
@@ -342,11 +395,70 @@ class PseudocodeInterpreter:
     def v_min_u32(a, b): return a if (a & 0xffffffff) < (b & 0xffffffff) else b
     def v_max_f32(a, b): return _i32(max(_f32(a), _f32(b)))
     def v_min_f32(a, b): return _i32(min(_f32(a), _f32(b)))
+    # GPU comparison with special -0.0 handling: +0 > -0 and -0 < +0
+    def _gt_neg_zero(a, b):
+      fa, fb = _f32(a) if isinstance(a, int) else float(a), _f32(b) if isinstance(b, int) else float(b)
+      if fa == 0 and fb == 0:  # Both zeros - check sign bits
+        sa = (a >> 31) & 1 if isinstance(a, int) else (struct.unpack('<I', struct.pack('<f', fa))[0] >> 31)
+        sb = (b >> 31) & 1 if isinstance(b, int) else (struct.unpack('<I', struct.pack('<f', fb))[0] >> 31)
+        return sa < sb  # +0 (sign=0) > -0 (sign=1)
+      return fa > fb
+    def _lt_neg_zero(a, b):
+      fa, fb = _f32(a) if isinstance(a, int) else float(a), _f32(b) if isinstance(b, int) else float(b)
+      if fa == 0 and fb == 0:  # Both zeros - check sign bits
+        sa = (a >> 31) & 1 if isinstance(a, int) else (struct.unpack('<I', struct.pack('<f', fa))[0] >> 31)
+        sb = (b >> 31) & 1 if isinstance(b, int) else (struct.unpack('<I', struct.pack('<f', fb))[0] >> 31)
+        return sa > sb  # -0 (sign=1) < +0 (sign=0)
+      return fa < fb
     def v_max3_i32(a, b, c): return v_max_i32(v_max_i32(a, b), c)
     def v_max3_u32(a, b, c): return v_max_u32(v_max_u32(a, b), c)
     def v_max3_f32(a, b, c): return v_max_f32(v_max_f32(a, b), c)
     def _sqrt(x): return math.sqrt(x) if x >= 0 else float('nan')
+    # Find first set bit (returns bit position, 0-indexed)
+    def _s_ff1_b32(x): return (int(x) & -int(x)).bit_length() - 1 if int(x) else 0
+    def _s_ff1_b64(x): return (int(x) & -int(x)).bit_length() - 1 if int(x) else 0
+    # VGPR access for V_READFIRSTLANE - access vgprs[lane][reg]
+    vgprs = self.ctx.get('vgprs')
+    def _vgpr_access(lane_idx, reg_idx): return vgprs[int(lane_idx)][int(reg_idx)] if vgprs else 0
     def _log2(x): return math.log2(x) if x > 0 else (float('-inf') if x == 0 else float('nan'))
+    def _f16_to_f32(bits):
+      bits = int(bits) & 0xFFFF
+      return struct.unpack('e', struct.pack('H', bits))[0]
+    def _f32_to_f16(f):
+      return struct.unpack('H', struct.pack('e', float(f)))[0]
+    def _f32_to_i32(f):
+      if math.isnan(f): return 0
+      if f >= 2147483647: return 2147483647
+      if f <= -2147483648: return -2147483648
+      return int(f)
+    def _f32_to_u32(f):
+      if math.isnan(f): return 0
+      if f >= 4294967295: return 4294967295
+      if f <= 0: return 0
+      return int(f)
+    def _f16_to_i16(bits):
+      f = _f16_to_f32(bits)
+      return max(-32768, min(32767, int(f))) if not math.isnan(f) else 0
+    def _f16_to_u16(bits):
+      f = _f16_to_f32(bits)
+      return max(0, min(65535, int(f))) if not math.isnan(f) else 0
+    def _i16_to_f16(v):
+      return _f32_to_f16(float(_sext(int(v) & 0xffff, 16)))
+    def _u16_to_f16(v):
+      return _f32_to_f16(float(int(v) & 0xffff))
+    # Handle numeric literal bit access like 1176256512[31] -> ((1176256512 >> 31) & 1)
+    # This must happen after all substitutions have replaced S0.u32 etc with numbers
+    # Only match when the number is preceded by non-word char or start, and index is simple number
+    # Also ensure the index is a small number (bit index, not array index)
+    if re.search(r'(?:^|[^.\w])-?\d+\[\d+\]', expr):
+      def replace_num_bit_access(m):
+        prefix, num, idx = m.group(1), m.group(2), m.group(3)
+        # Only treat as bit access if index is 0-63 (reasonable bit range)
+        if int(idx) <= 63:
+          return f'{prefix}(({num} >> ({idx})) & 1)'
+        return m.group(0)
+      # Match number (possibly negative) preceded by non-alphanumeric, followed by [digit]
+      expr = re.sub(r'(^|[^.\w])(-?\d+)\[(\d+)\]', replace_num_bit_access, expr)
     try:
       return eval(expr, {'_f32': _f32, '_i32': _i32, '_sext': _sext, 'abs': abs, 'min': min, 'max': max, 'math': math,
                          'log2': _log2, 'sqrt': _sqrt, 'trunc': math.trunc, 'floor': math.floor, 'ceil': math.ceil,
@@ -355,7 +467,12 @@ class PseudocodeInterpreter:
                          '_sin': _sin, '_cos': _cos, '_pow': _pow, 'struct': struct,
                          '_getbit_s0': _getbit_s0, '_getbit_s1': _getbit_s1, '_getbit_s2': _getbit_s2, '_getbit_d0': _getbit_d0,
                          'v_max_i32': v_max_i32, 'v_min_i32': v_min_i32, 'v_max_u32': v_max_u32, 'v_min_u32': v_min_u32,
-                         'v_max_f32': v_max_f32, 'v_min_f32': v_min_f32, 'v_max3_i32': v_max3_i32, 'v_max3_u32': v_max3_u32, 'v_max3_f32': v_max3_f32})
+                         'v_max_f32': v_max_f32, 'v_min_f32': v_min_f32, 'v_max3_i32': v_max3_i32, 'v_max3_u32': v_max3_u32, 'v_max3_f32': v_max3_f32,
+                         '_f16_to_f32': _f16_to_f32, '_f32_to_f16': _f32_to_f16,
+                         '_f16_to_i16': _f16_to_i16, '_f16_to_u16': _f16_to_u16, '_i16_to_f16': _i16_to_f16, '_u16_to_f16': _u16_to_f16,
+                         '_f32_to_i32': _f32_to_i32, '_f32_to_u32': _f32_to_u32,
+                         '_gt_neg_zero': _gt_neg_zero, '_lt_neg_zero': _lt_neg_zero,
+                         '_s_ff1_b32': _s_ff1_b32, '_s_ff1_b64': _s_ff1_b64, '_vgpr_access': _vgpr_access})
     except ZeroDivisionError:
       return float('inf')  # Division by zero returns infinity
     except Exception as e:
@@ -497,10 +614,12 @@ class PseudocodeInterpreter:
       self.vars[lhs] = int(val) if not isinstance(val, float) else val
 
   def execute(self, pseudocode: str | list[str], s0: int, s1: int, s2: int = 0, scc: int = 0, d0: int = 0,
-              vcc: int = 0, lane: int = 0, exec_mask: int = 0xffffffff, literal: int = 0) -> dict[str, Any]:
+              vcc: int = 0, lane: int = 0, exec_mask: int = 0xffffffff, literal: int = 0,
+              vgprs: list[list[int]] | None = None) -> dict[str, Any]:
     """Execute pseudocode and return dict with results."""
     self.vars = {}
-    self.ctx = {'s0': s0, 's1': s1, 's2': s2, 'd0': d0, 'scc': scc, 'vcc': vcc, 'lane': lane, 'exec_mask': exec_mask, 'literal': literal}
+    self.ctx = {'s0': s0, 's1': s1, 's2': s2, 'd0': d0, 'scc': scc, 'vcc': vcc, 'lane': lane, 'exec_mask': exec_mask, 'literal': literal,
+                'vgprs': vgprs}
     self._result: dict[str, Any] = {'d0': d0, 'scc': scc}
 
     lines = pseudocode.split('\n') if isinstance(pseudocode, str) else pseudocode
@@ -517,8 +636,8 @@ PDF_URL = "https://docs.amd.com/api/khub/documents/UVVZM22UN7tMUeiW_4ShTQ/conten
 INST_PATTERN = re.compile(r'^([SV]_[A-Z0-9_]+)\s+(\d+)\s*$', re.M)
 
 # Op enum classes that have pseudocode in the PDF
-from extra.assembly.rdna3.autogen import SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOPCOp
-_OP_ENUMS = [SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOPCOp]
+from extra.assembly.rdna3.autogen import SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp
+_OP_ENUMS = [SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp]
 
 def _get_defined_ops() -> dict[tuple[str, int], tuple[type, Any]]:
   """Get all ops defined in autogen/__init__.py as {(name, opcode): (enum_cls, enum_val)}."""

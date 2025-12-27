@@ -106,5 +106,86 @@ class TestEmu2Regressions(unittest.TestCase):
     result = (Tensor(a) * Tensor(b)).numpy()
     np.testing.assert_allclose(result, a * b, rtol=1e-5)
 
+  # === Bug: VOP3SD carry-in operations using VCC instead of src2 register ===
+  # VOP3SD V_ADD_CO_CI_U32 uses src2 as the carry input register, not VCC.
+  # The pseudocode says VCC but VOP3SD encoding uses src2 for the carry source.
+  def test_vop3sd_carry_in_uses_src2(self):
+    """VOP3SD V_ADD_CO_CI_U32 must use src2 for carry input, not VCC."""
+    from tinygrad import Tensor
+    # Multi-axis reduction triggers 64-bit address arithmetic with carry chains
+    x = np.ones((3, 4, 5, 6)).astype(np.float32)
+    result = Tensor(x).all(axis=(1, 2)).numpy()
+    expected = x.all(axis=(1, 2))
+    np.testing.assert_array_equal(result, expected)
+
+  # === Bug: sqrt/log2 of negative numbers causing exceptions ===
+  # GPU sqrt/log2 return NaN for invalid inputs, not exceptions.
+  def test_sqrt_negative_returns_nan(self):
+    """sqrt of negative should return NaN, not throw exception."""
+    from tinygrad import Tensor
+    x = Tensor([-1., 0., 1., 4.])
+    result = x.sqrt().numpy()
+    # -1 -> NaN, 0 -> 0, 1 -> 1, 4 -> 2
+    assert np.isnan(result[0]), f"sqrt(-1) should be NaN, got {result[0]}"
+    np.testing.assert_allclose(result[1:], [0., 1., 2.], rtol=1e-5)
+
+  # === Bug: S0.i24 and S1.i24 not parsed (24-bit signed integer) ===
+  def test_i24_signed_integer(self):
+    """24-bit signed integer fields must be parsed correctly."""
+    from tinygrad import Tensor
+    # Operations that use 24-bit multiplies
+    x = Tensor([1, 2, 3]).cast('int32')
+    y = Tensor([4, 5, 6]).cast('int32')
+    result = (x * y).numpy()
+    np.testing.assert_array_equal(result, [4, 10, 18])
+
+  # === Bug: SOPC ssrc1 not being read ===
+  # SOPC comparison instructions (S_CMP_*) have two source operands (ssrc0, ssrc1),
+  # but exec_scalar only read ssrc1 for SOP2 instructions, not SOPC.
+  # This caused comparisons to always compare against 0, breaking argmax/argmin.
+  def test_sopc_reads_ssrc1(self):
+    """SOPC S_CMP_* must read both ssrc0 and ssrc1."""
+    from tinygrad import Tensor
+    # argmax uses scalar comparisons to find the maximum index
+    x = Tensor([1., 2., 3.])
+    result = x.argmax().numpy()
+    assert result == 2, f"argmax([1,2,3]) should be 2, got {result}"
+    # Also test argmin
+    y = Tensor([3., 1., 2.])
+    result = y.argmin().numpy()
+    assert result == 1, f"argmin([3,1,2]) should be 1, got {result}"
+
+  # === Bug: V_READFIRSTLANE_B32 writing to VGPR instead of SGPR ===
+  # V_READFIRSTLANE_B32 is encoded as VOP1 but writes to SGPR (not VGPR).
+  # The vdst field is reinterpreted as SDST for this instruction.
+  # This broke bfloat16 conversion which uses V_READFIRSTLANE to broadcast
+  # the converted float value from VGPR to SGPR for scalar processing.
+  def test_readfirstlane_writes_to_sgpr(self):
+    """V_READFIRSTLANE_B32 must write to SGPR, not VGPR."""
+    from tinygrad import Tensor, dtypes
+    # Integer to bf16 conversion uses V_READFIRSTLANE to move float result to scalar
+    t = Tensor([10000, -1, -1000, -10000, 20]).cast(dtypes.bfloat16)
+    t.realize()
+    back = t.cast(dtypes.float32).numpy()
+    expected = [9984., -1., -1000., -9984., 20.]
+    np.testing.assert_allclose(back, expected, rtol=1e-5)
+
+  # === Bug: V_MAD_U64_U32 reading src2 as 32-bit instead of 64-bit ===
+  # V_MAD_U64_U32 expects S2.u64 (64-bit), but the emulator only read 32 bits.
+  # When src2 was an SGPR pair, only the low 32 bits were used, truncating addresses.
+  # This caused stores to write to wrong addresses (high 32 bits were 0).
+  def test_mad64_reads_64bit_src2(self):
+    """V_MAD_U64_U32 must read src2 as 64-bit from consecutive SGPRs."""
+    from tinygrad import Tensor
+    # Matmul backward uses V_MAD_U64_U32 to compute output buffer addresses
+    # The base address is a 64-bit value in consecutive SGPRs
+    x = Tensor([[1., 2., 3.]], requires_grad=True)
+    W = Tensor([[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]], requires_grad=True)
+    out = x.dot(W).sum()
+    out.backward()
+    # If addresses were truncated, W.grad would be all zeros
+    expected = np.array([[1., 1., 1.], [2., 2., 2.], [3., 3., 3.]])
+    np.testing.assert_allclose(W.grad.numpy(), expected, rtol=1e-5)
+
 if __name__ == '__main__':
   unittest.main()
