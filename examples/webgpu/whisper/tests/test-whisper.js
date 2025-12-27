@@ -20,7 +20,10 @@ import {
   fetchMonoFloat32Array,
   getProgressDlForPart,
 
-  transcribeAudio
+  transcribeAudio,
+  tokensToText,
+  format_text,
+  format_text_helper
 } from "../whisper.js";
 // #endregion imports
 
@@ -144,7 +147,14 @@ function onTranscriptionEvent(event, data) {
   if (event === "cancel") {
 
   } else if (event === "chunkUpdate") {
-    console.log(data.pendingTexts);
+    // console.log(data.pendingTexts);
+    // console.log(data.sequences);
+    for (let [idx, seq] of data.sequences.entries()) {
+      if (seq === undefined) continue;
+      let text = format_text_helper(seq.tokens, nets.mapping, seq.seek, seq.seek_end);
+      console.log(text);
+      // console.log(tokensToText(seq.tokens))
+    }
   } else if (event === "chunkDone") {
     // console.log(data.segment_cumlogprob.toFixed(2) + ' ' + data.pendingText);
   }

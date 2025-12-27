@@ -126,6 +126,8 @@
                 fetchMonoFloat32ArrayFile,
                 getProgressDlForPart,
 
+                format_text_helper,
+
                 transcribeAudio
             } from "./whisper.js";
 
@@ -218,8 +220,18 @@
                 updateProgress();
             } else if (event === "chunkUpdate") {
                 transcriptionStatus = STATUS_DECODING;
-                pendingTexts = data.pendingTexts;
-                pendingText = data.pendingTexts[0];
+                for (let [idx, seq] of data.sequences.entries()) {
+                    if (seq === undefined) {
+                        if (pendingTexts[idx] === undefined) {
+                            pendingTexts[idx] = '';
+                        }
+                    } else {
+                        pendingTexts[idx] = format_text_helper(seq.tokens, nets.mapping, seq.seek, seq.seek_end);
+                    }
+                }
+                // pendingTexts = data.pendingTexts;
+                // pendingText = data.pendingTexts[0];
+                pendingText = '';
 
                 let height = transcriptionContainer.scrollHeight;
                 let current = Array.from(document.querySelectorAll("div#current-transcription"));
@@ -241,7 +253,7 @@
                 current[data.index].style.display = 'none';
                 const newChunk = document.createElement('div');
                 newChunk.className = 'transcription-chunk';
-                newChunk.innerText = data.pendingText;
+                newChunk.innerText = pendingTexts[data.index];
                 transcriptionLog.appendChild(newChunk);
                 currentTranscription.innerText = '';
                 pendingText = '';

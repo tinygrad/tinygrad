@@ -136,6 +136,11 @@ function tokensToText(tokens, mapping) {
     return Array.from(tokens).filter((t) => ![TOK_EOS, TOK_NO_TIMESTAMPS].includes(t)).map(j => mapping[j]).join('');
 }
 
+function format_text_helper(tokens, mapping, seek, seek_end) {
+    const detokenized = tokensToText(tokens, mapping);
+    return format_text(detokenized, seek, seek_end);
+}
+
 // #region whisper
 
 function batch_repeat_helper(array, bs) {
@@ -257,8 +262,6 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
         ++chunkCount;
     }
 
-    let pendingTexts = [];
-
     onEvent("inferenceBegin", {chunkCount, sampleCount: samples.length});
     console.log("begin new transcription");
 
@@ -296,7 +299,6 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
         }
 
         let sequences = initSequences(audio_features_batch.length);
-        pendingTexts = Array(audio_features_batch.length).fill('');
         let decoder_state = await initDecoder(nets, audio_features_batch);
         let is_done = false;
         let currentTokenIndex = 0;
@@ -306,6 +308,8 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
                     is_done = true;
                     break;
                 }
+
+                let chunkUpdate = {};
 
                 // NOTE: pack batch inputs
                 let context_inputs = [];
@@ -323,6 +327,7 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
                     decode_results_topk.push(sorted.slice(i*indices_topk, (i+1)*indices_topk));
                 }
 
+                chunkUpdate.sequences = [];
                 for (let idx = 0; idx < sequences.length; ++idx) {
                     let current_sequence = sequences[idx];
 
@@ -337,12 +342,12 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
                         current_sequence.done = true;
                     }
 
-                    const detokenized = tokensToText(current_sequence.tokens.slice(current_sequence.context_prompt_length, current_sequence.length), nets.mapping);
+                    let decoded_tokens_so_far = current_sequence.tokens.slice(current_sequence.context_prompt_length, current_sequence.length);
                     const seek_end = Math.min(seek + MEL_SPEC_CHUNK_LENGTH, log_specs_full.length);
-                    pendingTexts[idx] = format_text(detokenized, seek, seek_end);
+                    chunkUpdate.sequences[idx] = {tokens: decoded_tokens_so_far, seek, seek_end};
                 }
 
-                onEvent("chunkUpdate", {pendingTexts: pendingTexts.slice(), currentTokenIndex, sequenceStatus: sequences.map(x => x.done ? "done" : "running")});
+                onEvent("chunkUpdate", {sequences: chunkUpdate.sequences, currentTokenIndex, sequenceStatus: sequences.map(x => x.done ? "done" : "running")});
 
                 ++currentTokenIndex;
             } else {
@@ -360,7 +365,7 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
                 let sequence = sequences[i];
                 let {tokens, context_prompt_length: offset} = sequence;
 
-                onEvent("chunkDone", { context: tokens.slice(0, sequence.length), offset, index: i, pendingText: pendingTexts[i] });
+                onEvent("chunkDone", { context: tokens.slice(0, sequence.length), offset, index: i });
 
                 ++i;
             }
@@ -395,6 +400,8 @@ export {
     getDevice,
 
     tokensToText,
+    format_text,
+    format_text_helper,
 
     fetchMonoFloat32Array,
     fetchMonoFloat32ArrayFile,
