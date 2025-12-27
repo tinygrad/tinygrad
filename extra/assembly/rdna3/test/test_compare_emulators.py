@@ -512,5 +512,28 @@ class TestTinygradKernels(unittest.TestCase):
     self._test_kernel(lambda T: T(np.random.randn(2, 4, 9, 9, 9).astype(np.float32).tolist()).conv_transpose2d(
       T(np.random.randn(4, 4, 3, 3, 3).astype(np.float32).tolist())), max_steps=500000)
 
+  # Tests from test_ops.py failures
+  def test_gelu_extreme(self): self._test_kernel(lambda T: T.empty(45, 65).gelu())
+  def test_gemm_64x64(self): self._test_kernel(lambda T: T.empty(64, 64) @ T.empty(64, 64), max_steps=500000)
+  def test_gemm_fp16(self): self._test_kernel(lambda T: T.empty(64, 64).half() @ T.empty(64, 64).half(), max_steps=500000)
+  def test_global_avg_pool2d(self): self._test_kernel(lambda T: T.empty(32, 2, 111, 28).avg_pool2d(kernel_size=(111, 28)))
+  def test_grouped_conv2d(self): self._test_kernel(lambda T: T.empty(4, 15, 5, 5).conv2d(T.empty(35, 3, 3, 3), groups=5), max_steps=200000)
+  def test_grouped_conv_transpose2d(self): self._test_kernel(lambda T: T.empty(2, 4, 9, 9).conv_transpose2d(T.empty(4, 4, 3, 3), groups=2), max_steps=200000)
+  def test_hardsigmoid(self): self._test_kernel(lambda T: T.empty(45, 65).hardsigmoid())
+  def test_hardsigmoid_extreme(self): self._test_kernel(lambda T: T.empty(45, 65).sigmoid())
+  def test_matvec(self): self._test_kernel(lambda T: (T.empty(1, 128) @ T.empty(128, 128)).relu(), max_steps=200000)
+  def test_matvecmat(self): self._test_kernel(lambda T: ((T.empty(1, 128) @ T.empty(128, 128)).relu() @ T.empty(128, 128)), max_steps=300000)
+  def test_max_reduce_45x3(self): self._test_kernel(lambda T: T.empty(45, 3).max())
+  def test_max_dont_collapse(self): self._test_kernel(lambda T: T.empty(4, 8).max(axis=1))
+  def test_max_pool2d_simple(self): self._test_kernel(lambda T: T.empty(1, 1, 2, 3).max_pool2d(kernel_size=(2, 2)))
+  def test_max_pool2d_32x2(self): self._test_kernel(lambda T: T.empty(32, 2, 11, 28).max_pool2d(kernel_size=(2, 2)))
+  def test_max_pool2d_asymmetric_padding(self): self._test_kernel(lambda T: T.empty(4, 2, 111, 28).max_pool2d(kernel_size=(5, 5), padding=(0, 1, 0, 1)))
+  def test_max_pool2d_bigger_stride(self): self._test_kernel(lambda T: T.empty(4, 2, 11, 28).max_pool2d(kernel_size=(2, 2), stride=(2, 3)))
+  def test_max_pool2d_unit_stride(self): self._test_kernel(lambda T: T.empty(3, 2, 17, 14).max_pool2d(kernel_size=(5, 5), stride=1))
+  def test_max_pool2d_smaller_stride(self): self._test_kernel(lambda T: T.empty(3, 2, 17, 14).max_pool2d(kernel_size=(5, 5), stride=(2, 3)))
+  def test_max_unpool2d(self): self._test_kernel(lambda T: T.max_unpool2d(*T.empty(8, 3, 50, 50).max_pool2d(kernel_size=(5, 5), stride=(6, 5), return_indices=True), kernel_size=(5, 5), stride=(6, 5)))
+  def test_isinf(self): self._test_kernel(lambda T: T([float('-inf'), 0., float('inf'), 1.1]*8).isinf())
+  def test_isfinite(self): self._test_kernel(lambda T: T([float('-inf'), 0., float('inf'), 1.1]*8).isfinite())
+
 if __name__ == "__main__":
   unittest.main()
