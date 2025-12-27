@@ -38,26 +38,16 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
           raise RuntimeError(f"input to kernel must be AFTER or BUFFER, not {s.op}")
 
   with cpu_profile(TracingKey("linearize schedule")):
-    queue: deque[UOp] = deque()
-    for k,v in in_degree.items():
-      if v == 0: queue.append(k)
-
+    from tinygrad.codegen.late.linearizer import linearize
     schedule: list[tuple|UOp] = []
-    while len(queue):
-      k = rk = queue.popleft()
-      if k.op is Ops.END: k = k.src[0]
+    for k in linearize(sched_sink):
       if k.op is Ops.RANGE: schedule.append(k)
       elif k.op is Ops.KERNEL:
         ast = k.arg.ast
         buf_uops = tuple(s.buf_uop for s in k.src if s.op is not Ops.BIND)
         bound_ranges = tuple(s for s in k.src if s.op is Ops.BIND and len(s.src) > 1 and s.src[1].op is Ops.RANGE)
         schedule.append((ast, buf_uops, k.arg.metadata, {}, bound_ranges))
-        if rk.op is Ops.END: schedule.append(rk)
-      else:
-        raise RuntimeError(f"can't schedule {k.op}")
-      for x in children.get(rk, []):
-        in_degree[x] -= 1
-        if in_degree[x] == 0: queue.append(x)
+      elif k.op is Ops.END: schedule.append(k)
 
   with cpu_profile(TracingKey("expand ranges")):
     pre_schedule: list[ExecItem] = []
