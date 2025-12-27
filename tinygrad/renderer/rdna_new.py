@@ -2,7 +2,11 @@
 from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat
 from tinygrad.dtype import dtypes, DType, PtrDType, AddrSpace, Invalid
 from tinygrad.renderer import Renderer
-from tinygrad.renderer.rdna_regalloc import RDNARegAlloc
+from tinygrad.helpers import getenv
+if getenv("RDNA_ILP_REGALLOC"):
+  from tinygrad.renderer.rdna_regalloc_ilp import RDNARegAllocILP as RDNARegAlloc
+else:
+  from tinygrad.renderer.rdna_regalloc import RDNARegAlloc
 from tinygrad.renderer.rdna_uops import rdna_matcher
 from tinygrad.renderer.cstyle import create_non_native_float_pats, cast_float_to_bf16
 from tinygrad.codegen.opt import tc
@@ -70,8 +74,12 @@ def _refined_rcp_f32(ctx, x, a):
   # dst = fma(x, y, -1) = x*y - 1       # error from 1
   # dst = y * dst = y * (x*y - 1)       # correction term
   # dst = y - dst = y * (2 - x*y)       # refined result
+  # For special values (inf*0=nan), dst will be nan; use scratch (hw rcp) in that case
+  # v_cmp_neq_f32 sets VCC if dst != dst (i.e., dst is nan)
+  # v_cndmask_b32 selects scratch if VCC is set, else dst
   return [v_rcp_f32_e32(scratch, ar), v_fma_f32(dst, ar, scratch, -1.0),
-          v_mul_f32_e32(dst, scratch, dst), v_sub_f32_e32(dst, scratch, dst)]
+          v_mul_f32_e32(dst, scratch, dst), v_sub_f32_e32(dst, scratch, dst),
+          v_cmp_neq_f32_e32(dst, dst), v_cndmask_b32_e64(dst, dst, scratch, VCC_LO)]
 
 # Module-level PatternMatcher for simple ALU and CAST operations
 render_ops = PatternMatcher([
