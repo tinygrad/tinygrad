@@ -93,6 +93,12 @@ testing = [
   "boto3",
   "pandas",
   "influxdb3-python",
+  "tensorflow",
+  "datasets",
+  "torchaudio",
+  "ultralytics",
+  "jiwer",
+  "openai-whisper",
 ]
 docs = [
   "mkdocs",
