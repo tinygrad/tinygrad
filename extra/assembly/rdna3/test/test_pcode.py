@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Tests for the RDNA3 pseudocode DSL."""
 import unittest
-from extra.assembly.rdna3.pcode import Reg, TypedView, SliceProxy, ExecContext, compile_pseudocode, _expr, MASK32, MASK64
-from extra.assembly.rdna3.pcode import _f32, _i32, _f16, _i16, f32_to_f16
+from extra.assembly.rdna3.pcode import Reg, TypedView, SliceProxy, ExecContext, compile_pseudocode, _expr, MASK32, MASK64, _f32, _i32, _f16, _i16, f32_to_f16, _isnan
+from extra.assembly.rdna3.autogen.gen_pcode import _VOP3SDOp_V_DIV_SCALE_F32, _VOPCOp_V_CMP_CLASS_F32
 
 class TestReg(unittest.TestCase):
   def test_u32_read(self):
@@ -226,7 +226,6 @@ class TestPseudocodeRegressions(unittest.TestCase):
     """V_DIV_SCALE_F32 must always return vcc_lane, even when VCC=0 (no scaling needed).
     Bug: when VCC._val == vcc (both 0), vcc_lane wasn't returned, so VCC bits weren't written.
     This caused division to produce wrong results for multiple lanes."""
-    from extra.assembly.rdna3.autogen.gen_pcode import _VOP3SDOp_V_DIV_SCALE_F32
     # Normal case: 1.0 / 3.0, no scaling needed, VCC should be 0
     s0 = 0x3f800000  # 1.0
     s1 = 0x40400000  # 3.0
@@ -239,7 +238,6 @@ class TestPseudocodeRegressions(unittest.TestCase):
   def test_v_cmp_class_f32_detects_quiet_nan(self):
     """V_CMP_CLASS_F32 must correctly identify quiet NaN vs signaling NaN.
     Bug: isQuietNAN and isSignalNAN both used math.isnan which can't distinguish them."""
-    from extra.assembly.rdna3.autogen.gen_pcode import _VOPCOp_V_CMP_CLASS_F32
     quiet_nan = 0x7fc00000   # quiet NaN: exponent=255, bit22=1
     signal_nan = 0x7f800001  # signaling NaN: exponent=255, bit22=0
     # Test quiet NaN detection (bit 1 in mask)
@@ -260,7 +258,6 @@ class TestPseudocodeRegressions(unittest.TestCase):
   def test_isnan_with_typed_view(self):
     """_isnan must work with TypedView objects, not just Python floats.
     Bug: _isnan checked isinstance(x, float) which returned False for TypedView."""
-    from extra.assembly.rdna3.pcode import Reg, _isnan
     nan_reg = Reg(0x7fc00000)  # quiet NaN
     normal_reg = Reg(0x3f800000)  # 1.0
     inf_reg = Reg(0x7f800000)  # +inf
