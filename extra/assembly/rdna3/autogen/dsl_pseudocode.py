@@ -11965,7 +11965,7 @@ def _VOP3SDOp_V_DIV_SCALE_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal
     D0.f32 = ldexp(S0.f32, 64)
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': SCC._val & 1}
-  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (VCC._val >> lane) & 1
   if EXEC._val != exec_mask: result['exec'] = EXEC._val
   return result
 
@@ -12031,7 +12031,7 @@ def _VOP3SDOp_V_DIV_SCALE_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal
     D0.f64 = ldexp(S0.f64, 128)
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': SCC._val & 1}
-  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (VCC._val >> lane) & 1
   if EXEC._val != exec_mask: result['exec'] = EXEC._val
   result['d0_64'] = True
   return result

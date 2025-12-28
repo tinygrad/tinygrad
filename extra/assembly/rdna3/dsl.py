@@ -745,9 +745,10 @@ from extra.assembly.rdna3.dsl import *
         if has_d1: is_64 = True
         is_cmp = cls_name == 'VOPCOp' and 'D0.u64[laneId]' in pc
         is_cmpx = cls_name == 'VOPCOp' and 'EXEC.u64[laneId]' in pc  # V_CMPX writes to EXEC per-lane
-        has_sdst = cls_name == 'VOP3SDOp' and 'VCC.u64[laneId]' in pc
         # V_DIV_SCALE passes through S0 if no branch taken
         is_div_scale = 'DIV_SCALE' in op.name
+        # VOP3SD instructions that write VCC per-lane (either via VCC.u64[laneId] or by setting VCC = 0/1)
+        has_sdst = cls_name == 'VOP3SDOp' and ('VCC.u64[laneId]' in pc or is_div_scale)
 
         # Generate function with indented body
         fn_name = f"_{cls_name}_{op.name}"
