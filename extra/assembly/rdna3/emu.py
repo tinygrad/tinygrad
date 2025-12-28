@@ -1,12 +1,9 @@
-# RDNA3 emulator v2 - executes compiled pseudocode from AMD ISA PDF
+# RDNA3 emulator - executes compiled pseudocode from AMD ISA PDF
 from __future__ import annotations
-import ctypes, struct, math, os
+import ctypes
 from extra.assembly.rdna3.lib import Inst, RawImm
 from extra.assembly.rdna3.dsl import _f32, _i32, _sext, _f16, _i16
-
-def _get_pseudocode_module():
-  from extra.assembly.rdna3.autogen.dsl_pseudocode import get_compiled_functions
-  return get_compiled_functions
+from extra.assembly.rdna3.autogen.dsl_pseudocode import get_compiled_functions
 from extra.assembly.rdna3.autogen import (
   SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, DS, FLAT, VOPD, SrcEnum,
   SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp, FLATOp, GLOBALOp, VOPDOp
@@ -66,9 +63,8 @@ _VOPD_TO_VOP = {
 _COMPILED: dict | None = None
 
 def _get_compiled() -> dict:
-  """Get compiled pseudocode functions."""
   global _COMPILED
-  if _COMPILED is None: _COMPILED = _get_pseudocode_module()()
+  if _COMPILED is None: _COMPILED = get_compiled_functions()
   return _COMPILED
 
 class WaveState:
@@ -186,29 +182,12 @@ def exec_scalar(st: WaveState, inst: Inst) -> int:
   else: raise NotImplementedError(f"Unknown scalar type {inst_type}")
 
   op = op_cls(inst.op)
-
-  # Handle PACK instructions directly (not in pseudocode)
-  # S_PACK_XX_B32_B16: pack two 16-bit values into 32-bit result
-  # First letter = which 16 bits of S0, Second letter = which 16 bits of S1
-  # Result = (S1_part << 16) | S0_part
-  if inst_type is SOP2 and op in (SOP2Op.S_PACK_LL_B32_B16, SOP2Op.S_PACK_LH_B32_B16, SOP2Op.S_PACK_HL_B32_B16, SOP2Op.S_PACK_HH_B32_B16):
-    s0, s1 = st.rsrc(inst.ssrc0, 0), st.rsrc(inst.ssrc1, 0)
-    s0_part = (s0 & 0xffff) if op in (SOP2Op.S_PACK_LL_B32_B16, SOP2Op.S_PACK_LH_B32_B16) else ((s0 >> 16) & 0xffff)
-    s1_part = (s1 & 0xffff) if op in (SOP2Op.S_PACK_LL_B32_B16, SOP2Op.S_PACK_HL_B32_B16) else ((s1 >> 16) & 0xffff)
-    st.wsgpr(inst.sdst, (s1_part << 16) | s0_part)
-    return 0
-
   fn = compiled.get(op_cls, {}).get(op)
   if fn is None: raise NotImplementedError(f"{op.name} not in pseudocode")
 
   # Build context - handle 64-bit ops that need 64-bit source reads
-  is_64bit_s0 = op_cls is SOP2Op and op in (SOP2Op.S_ASHR_I64, SOP2Op.S_LSHR_B64, SOP2Op.S_LSHL_B64, SOP2Op.S_BFE_U64, SOP2Op.S_BFE_I64)
-  is_64bit_s0 = is_64bit_s0 or (op_cls is SOP1Op and op in (SOP1Op.S_CLZ_I32_U64, SOP1Op.S_CLS_I32_I64,
-    SOP1Op.S_MOV_B64, SOP1Op.S_CMOV_B64, SOP1Op.S_BREV_B64, SOP1Op.S_NOT_B64, SOP1Op.S_CTZ_I32_B64,
-    SOP1Op.S_BCNT0_I32_B64, SOP1Op.S_BCNT1_I32_B64, SOP1Op.S_BITSET0_B64, SOP1Op.S_BITSET1_B64,
-    SOP1Op.S_WQM_B64, SOP1Op.S_QUADMASK_B64, SOP1Op.S_AND_SAVEEXEC_B64, SOP1Op.S_OR_SAVEEXEC_B64,
-    SOP1Op.S_XOR_SAVEEXEC_B64, SOP1Op.S_NAND_SAVEEXEC_B64, SOP1Op.S_NOR_SAVEEXEC_B64, SOP1Op.S_XNOR_SAVEEXEC_B64,
-    SOP1Op.S_AND_NOT0_SAVEEXEC_B64, SOP1Op.S_OR_NOT0_SAVEEXEC_B64, SOP1Op.S_AND_NOT1_SAVEEXEC_B64, SOP1Op.S_OR_NOT1_SAVEEXEC_B64))
+  # 64-bit source ops: name ends with _B64, _I64, _U64 or contains _U64, _I64 before last underscore
+  is_64bit_s0 = op.name.endswith(('_B64', '_I64', '_U64')) or '_U64_' in op.name or '_I64_' in op.name
   is_64bit_s0s1 = op_cls is SOPCOp and op in (SOPCOp.S_CMP_EQ_U64, SOPCOp.S_CMP_LG_U64)
   s0 = st.rsrc64(ssrc0, 0) if is_64bit_s0 or is_64bit_s0s1 else (st.rsrc(ssrc0, 0) if inst_type != SOPK else st.rsgpr(inst.sdst))
   s1 = st.rsrc64(inst.ssrc1, 0) if is_64bit_s0s1 else (st.rsrc(inst.ssrc1, 0) if inst_type in (SOP2, SOPC) else inst.simm16 if inst_type is SOPK else 0)
@@ -401,10 +380,9 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
   # Determine if sources are 64-bit based on instruction type
   # For 64-bit shift ops: src0 is 32-bit (shift amount), src1 is 64-bit (value to shift)
   # For most other _B64/_I64/_U64/_F64 ops: all sources are 64-bit
-  is_64bit_op = op_cls in (VOP3Op, VOP1Op) and hasattr(op, 'name') and any(op.name.endswith(s) for s in ('_B64', '_I64', '_U64', '_F64'))
-  is_shift_64 = op_cls is VOP3Op and op in (VOP3Op.V_LSHLREV_B64, VOP3Op.V_LSHRREV_B64, VOP3Op.V_ASHRREV_I64)
-  # Check for 16-bit source ops (opsel bits 0/1/2 select hi/lo for src0/src1/src2)
-  is_16bit_src = op_cls is VOP3Op and hasattr(op, 'name') and any(s in op.name for s in ('_F16', '_B16', '_I16', '_U16'))
+  is_64bit_op = op.name.endswith(('_B64', '_I64', '_U64', '_F64'))
+  is_shift_64 = op in (VOP3Op.V_LSHLREV_B64, VOP3Op.V_LSHRREV_B64, VOP3Op.V_ASHRREV_I64)
+  is_16bit_src = op_cls is VOP3Op and any(s in op.name for s in ('_F16', '_B16', '_I16', '_U16'))
 
   if is_shift_64:
     s0 = mod_src(st.rsrc(src0, lane), 0)  # shift amount is 32-bit
@@ -457,10 +435,8 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     writes_to_sgpr = op in (VOP1Op.V_READFIRSTLANE_B32,) or \
                      (op_cls is VOP3Op and op in (VOP3Op.V_READFIRSTLANE_B32, VOP3Op.V_READLANE_B32))
     # Check for 16-bit destination ops (opsel[3] controls hi/lo write)
-    # Note: is_16bit_src is computed earlier for source handling
-    # Exclude PACK ops which have 32-bit destinations despite F16 in the name
-    is_16bit_dst = op_cls in (VOP1Op, VOP3Op) and hasattr(op, 'name') and \
-                   any(s in op.name for s in ('_F16', '_B16', '_I16', '_U16')) and 'PACK' not in op.name
+    # 16-bit dst ops (exclude PACK which has 32-bit dst despite F16 in name)
+    is_16bit_dst = any(s in op.name for s in ('_F16', '_B16', '_I16', '_U16')) and 'PACK' not in op.name
     if writes_to_sgpr:
       st.wsgpr(vdst, result['d0'] & 0xffffffff)
     elif result.get('d0_64') or is_64bit_op:

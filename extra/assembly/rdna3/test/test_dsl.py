@@ -2,7 +2,7 @@
 """Tests for the RDNA3 pseudocode DSL."""
 import unittest
 from extra.assembly.rdna3.dsl import Reg, TypedView, SliceProxy, ExecContext, compile_pseudocode, _expr, MASK32, MASK64
-from extra.assembly.rdna3.helpers import _f32, _i32, _f16, _i16, f32_to_f16
+from extra.assembly.rdna3.dsl import _f32, _i32, _f16, _i16, f32_to_f16
 
 class TestReg(unittest.TestCase):
   def test_u32_read(self):

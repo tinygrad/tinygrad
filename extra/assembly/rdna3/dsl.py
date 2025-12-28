@@ -454,9 +454,8 @@ def compile_pseudocode(pseudocode: str) -> str:
     line = line.strip()
     if not line or line.startswith('//'): continue
 
-    # Control flow
+    # Control flow - only need pass before outdent (endif/endfor/else/elsif)
     if line.startswith('if '):
-      if need_pass: lines.append('  ' * indent + "pass")
       lines.append('  ' * indent + f"if {_expr(line[3:].rstrip(' then'))}:")
       indent += 1
       need_pass = True
@@ -483,7 +482,6 @@ def compile_pseudocode(pseudocode: str) -> str:
     elif line.startswith('declare '):
       pass
     elif m := re.match(r'for (\w+) in (.+?)\s*:\s*(.+?) do', line):
-      if need_pass: lines.append('  ' * indent + "pass")
       start, end = _expr(m[2].strip()), _expr(m[3].strip())
       lines.append('  ' * indent + f"for {m[1]} in range({start}, int({end})+1):")
       indent += 1
@@ -510,10 +508,6 @@ def compile_pseudocode(pseudocode: str) -> str:
   # If we ended with a control statement that needs a body, add pass
   if need_pass: lines.append('  ' * indent + "pass")
   return '\n'.join(lines)
-
-def _lhs(lhs: str) -> str:
-  """LHS: no transform needed - bare assignments handled specially."""
-  return lhs
 
 def _assign(lhs: str, rhs: str) -> str:
   """Generate assignment. Bare tmp/SCC/etc get wrapped in Reg()."""

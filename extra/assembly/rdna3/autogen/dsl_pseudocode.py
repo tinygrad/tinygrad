@@ -135,7 +135,6 @@ def _SOP1Op_S_CTZ_I32_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- compiled pseudocode ---
   tmp = Reg(-1)
   for i in range(0, int(31)+1):
-    pass
     if S0.u32[i] == 1:
       tmp = Reg(i)
   D0.i32 = tmp
@@ -165,7 +164,6 @@ def _SOP1Op_S_CTZ_I32_B64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- compiled pseudocode ---
   tmp = Reg(-1)
   for i in range(0, int(63)+1):
-    pass
     if S0.u64[i] == 1:
       tmp = Reg(i)
   D0.i32 = tmp
@@ -195,7 +193,6 @@ def _SOP1Op_S_CLZ_I32_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- compiled pseudocode ---
   tmp = Reg(-1)
   for i in range(0, int(31)+1):
-    pass
     if S0.u32[31 - i] == 1:
       tmp = Reg(i)
   D0.i32 = tmp
@@ -225,7 +222,6 @@ def _SOP1Op_S_CLZ_I32_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- compiled pseudocode ---
   tmp = Reg(-1)
   for i in range(0, int(63)+1):
-    pass
     if S0.u64[63 - i] == 1:
       tmp = Reg(i)
   D0.i32 = tmp
@@ -255,7 +251,6 @@ def _SOP1Op_S_CLS_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
   # --- compiled pseudocode ---
   tmp = Reg(-1)
   for i in range(1, int(31)+1):
-    pass
     if S0.u32[31 - i] != S0.u32[31]:
       tmp = Reg(i)
   D0.i32 = tmp
@@ -285,7 +280,6 @@ def _SOP1Op_S_CLS_I32_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- compiled pseudocode ---
   tmp = Reg(-1)
   for i in range(1, int(63)+1):
-    pass
     if S0.u64[63 - i] != S0.u64[63]:
       tmp = Reg(i)
   D0.i32 = tmp
@@ -2668,7 +2662,6 @@ def _SOP2Op_S_MIN_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
   if WAVE_MODE.IEEE:
-    pass
     if isSignalNAN(F(S0.f32)):
       D0.f32 = F(cvtToQuietNAN(F(S0.f32)))
     elif isSignalNAN(F(S1.f32)):
@@ -2682,7 +2675,6 @@ def _SOP2Op_S_MIN_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
     else:
       D0.f32 = S1.f32
   else:
-    pass
     if isNAN(F(S1.f32)):
       D0.f32 = S0.f32
     elif isNAN(F(S0.f32)):
@@ -2736,7 +2728,6 @@ def _SOP2Op_S_MAX_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
   if WAVE_MODE.IEEE:
-    pass
     if isSignalNAN(F(S0.f32)):
       D0.f32 = F(cvtToQuietNAN(F(S0.f32)))
     elif isSignalNAN(F(S1.f32)):
@@ -2750,7 +2741,6 @@ def _SOP2Op_S_MAX_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
     else:
       D0.f32 = S1.f32
   else:
-    pass
     if isNAN(F(S1.f32)):
       D0.f32 = S0.f32
     elif isNAN(F(S0.f32)):
@@ -2927,7 +2917,6 @@ def _SOP2Op_S_MIN_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
   if WAVE_MODE.IEEE:
-    pass
     if isSignalNAN(F(S0.f16)):
       D0.f16 = F(cvtToQuietNAN(F(S0.f16)))
     elif isSignalNAN(F(S1.f16)):
@@ -2941,7 +2930,6 @@ def _SOP2Op_S_MIN_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
     else:
       D0.f16 = S1.f16
   else:
-    pass
     if isNAN(F(S1.f16)):
       D0.f16 = S0.f16
     elif isNAN(F(S0.f16)):
@@ -2995,7 +2983,6 @@ def _SOP2Op_S_MAX_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
   if WAVE_MODE.IEEE:
-    pass
     if isSignalNAN(F(S0.f16)):
       D0.f16 = F(cvtToQuietNAN(F(S0.f16)))
     elif isSignalNAN(F(S1.f16)):
@@ -3009,7 +2996,6 @@ def _SOP2Op_S_MAX_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
     else:
       D0.f16 = S1.f16
   else:
-    pass
     if isNAN(F(S1.f16)):
       D0.f16 = S0.f16
     elif isNAN(F(S0.f16)):
@@ -4397,13 +4383,11 @@ def _VOP1Op_V_READFIRSTLANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, liter
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
   if WAVE64:
-    pass
     if EXEC == 0x0:
       lane = 0
     else:
       lane = (s_ff1_i32_b64(EXEC))
   else:
-    pass
     if EXEC_LO.i32 == 0:
       lane = 0
     else:
@@ -5172,7 +5156,6 @@ def _VOP1Op_V_CLZ_I32_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- compiled pseudocode ---
   D0.i32 = -1
   for i in range(0, int(31)+1):
-    pass
     if S0.u32[31 - i] == 1:
       D0.i32 = i
   # --- end pseudocode ---
@@ -5200,7 +5183,6 @@ def _VOP1Op_V_CTZ_I32_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- compiled pseudocode ---
   D0.i32 = -1
   for i in range(0, int(31)+1):
-    pass
     if S0.u32[i] == 1:
       D0.i32 = i
   # --- end pseudocode ---
@@ -5228,7 +5210,6 @@ def _VOP1Op_V_CLS_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
   # --- compiled pseudocode ---
   D0.i32 = -1
   for i in range(1, int(31)+1):
-    pass
     if S0.i32[31 - i] != S0.i32[31]:
       D0.i32 = i
   # --- end pseudocode ---
@@ -6179,7 +6160,6 @@ def _VOP2Op_V_MIN_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
   if WAVE_MODE.IEEE:
-    pass
     if isSignalNAN(F(S0.f32)):
       D0.f32 = F(cvtToQuietNAN(F(S0.f32)))
     elif isSignalNAN(F(S1.f32)):
@@ -6193,7 +6173,6 @@ def _VOP2Op_V_MIN_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
     else:
       D0.f32 = S1.f32
   else:
-    pass
     if isNAN(F(S1.f32)):
       D0.f32 = S0.f32
     elif isNAN(F(S0.f32)):
@@ -6247,7 +6226,6 @@ def _VOP2Op_V_MAX_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
   if WAVE_MODE.IEEE:
-    pass
     if isSignalNAN(F(S0.f32)):
       D0.f32 = F(cvtToQuietNAN(F(S0.f32)))
     elif isSignalNAN(F(S1.f32)):
@@ -6261,7 +6239,6 @@ def _VOP2Op_V_MAX_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
     else:
       D0.f32 = S1.f32
   else:
-    pass
     if isNAN(F(S1.f32)):
       D0.f32 = S0.f32
     elif isNAN(F(S0.f32)):
@@ -6810,7 +6787,6 @@ def _VOP2Op_V_MAX_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
   if WAVE_MODE.IEEE:
-    pass
     if isSignalNAN(F(S0.f16)):
       D0.f16 = F(cvtToQuietNAN(F(S0.f16)))
     elif isSignalNAN(F(S1.f16)):
@@ -6824,7 +6800,6 @@ def _VOP2Op_V_MAX_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
     else:
       D0.f16 = S1.f16
   else:
-    pass
     if isNAN(F(S1.f16)):
       D0.f16 = S0.f16
     elif isNAN(F(S0.f16)):
@@ -6878,7 +6853,6 @@ def _VOP2Op_V_MIN_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
   if WAVE_MODE.IEEE:
-    pass
     if isSignalNAN(F(S0.f16)):
       D0.f16 = F(cvtToQuietNAN(F(S0.f16)))
     elif isSignalNAN(F(S1.f16)):
@@ -6892,7 +6866,6 @@ def _VOP2Op_V_MIN_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
     else:
       D0.f16 = S1.f16
   else:
-    pass
     if isNAN(F(S1.f16)):
       D0.f16 = S0.f16
     elif isNAN(F(S0.f16)):
@@ -7040,13 +7013,11 @@ def _VOP3Op_V_READFIRSTLANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, liter
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
   if WAVE64:
-    pass
     if EXEC == 0x0:
       lane = 0
     else:
       lane = (s_ff1_i32_b64(EXEC))
   else:
-    pass
     if EXEC_LO.i32 == 0:
       lane = 0
     else:
@@ -7815,7 +7786,6 @@ def _VOP3Op_V_CLZ_I32_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- compiled pseudocode ---
   D0.i32 = -1
   for i in range(0, int(31)+1):
-    pass
     if S0.u32[31 - i] == 1:
       D0.i32 = i
   # --- end pseudocode ---
@@ -7843,7 +7813,6 @@ def _VOP3Op_V_CTZ_I32_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- compiled pseudocode ---
   D0.i32 = -1
   for i in range(0, int(31)+1):
-    pass
     if S0.u32[i] == 1:
       D0.i32 = i
   # --- end pseudocode ---
@@ -7871,7 +7840,6 @@ def _VOP3Op_V_CLS_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
   # --- compiled pseudocode ---
   D0.i32 = -1
   for i in range(1, int(31)+1):
-    pass
     if S0.i32[31 - i] != S0.i32[31]:
       D0.i32 = i
   # --- end pseudocode ---
@@ -8677,7 +8645,6 @@ def _VOP3Op_V_MIN_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
   if WAVE_MODE.IEEE:
-    pass
     if isSignalNAN(F(S0.f32)):
       D0.f32 = F(cvtToQuietNAN(F(S0.f32)))
     elif isSignalNAN(F(S1.f32)):
@@ -8691,7 +8658,6 @@ def _VOP3Op_V_MIN_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
     else:
       D0.f32 = S1.f32
   else:
-    pass
     if isNAN(F(S1.f32)):
       D0.f32 = S0.f32
     elif isNAN(F(S0.f32)):
@@ -8745,7 +8711,6 @@ def _VOP3Op_V_MAX_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
   if WAVE_MODE.IEEE:
-    pass
     if isSignalNAN(F(S0.f32)):
       D0.f32 = F(cvtToQuietNAN(F(S0.f32)))
     elif isSignalNAN(F(S1.f32)):
@@ -8759,7 +8724,6 @@ def _VOP3Op_V_MAX_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
     else:
       D0.f32 = S1.f32
   else:
-    pass
     if isNAN(F(S1.f32)):
       D0.f32 = S0.f32
     elif isNAN(F(S0.f32)):
@@ -9174,7 +9138,6 @@ def _VOP3Op_V_MAX_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
   if WAVE_MODE.IEEE:
-    pass
     if isSignalNAN(F(S0.f16)):
       D0.f16 = F(cvtToQuietNAN(F(S0.f16)))
     elif isSignalNAN(F(S1.f16)):
@@ -9188,7 +9151,6 @@ def _VOP3Op_V_MAX_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
     else:
       D0.f16 = S1.f16
   else:
-    pass
     if isNAN(F(S1.f16)):
       D0.f16 = S0.f16
     elif isNAN(F(S0.f16)):
@@ -9242,7 +9204,6 @@ def _VOP3Op_V_MIN_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
   if WAVE_MODE.IEEE:
-    pass
     if isSignalNAN(F(S0.f16)):
       D0.f16 = F(cvtToQuietNAN(F(S0.f16)))
     elif isSignalNAN(F(S1.f16)):
@@ -9256,7 +9217,6 @@ def _VOP3Op_V_MIN_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
     else:
       D0.f16 = S1.f16
   else:
-    pass
     if isNAN(F(S1.f16)):
       D0.f16 = S0.f16
     elif isNAN(F(S0.f16)):
@@ -9381,19 +9341,16 @@ def _VOP3Op_V_CUBEID_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
   if ((abs(S2.f32) >= abs(S0.f32))  and  (abs(S2.f32) >= abs(S1.f32))):
-    pass
     if S2.f32 < 0.0:
       D0.f32 = 5.0
     else:
       D0.f32 = 4.0
   elif abs(S1.f32) >= abs(S0.f32):
-    pass
     if S1.f32 < 0.0:
       D0.f32 = 3.0
     else:
       D0.f32 = 2.0
   else:
-    pass
     if S0.f32 < 0.0:
       D0.f32 = 1.0
     else:
@@ -9434,7 +9391,6 @@ def _VOP3Op_V_CUBESC_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
   if ((abs(S2.f32) >= abs(S0.f32))  and  (abs(S2.f32) >= abs(S1.f32))):
-    pass
     if S2.f32 < 0.0:
       D0.f32 = -S0.f32
     else:
@@ -9442,7 +9398,6 @@ def _VOP3Op_V_CUBESC_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   elif abs(S1.f32) >= abs(S0.f32):
     D0.f32 = S0.f32
   else:
-    pass
     if S0.f32 < 0.0:
       D0.f32 = S2.f32
     else:
@@ -9481,7 +9436,6 @@ def _VOP3Op_V_CUBETC_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   if ((abs(S2.f32) >= abs(S0.f32))  and  (abs(S2.f32) >= abs(S1.f32))):
     D0.f32 = -S1.f32
   elif abs(S1.f32) >= abs(S0.f32):
-    pass
     if S1.f32 < 0.0:
       D0.f32 = -S2.f32
     else:
@@ -11311,7 +11265,6 @@ def _VOP3Op_V_MIN_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
   if WAVE_MODE.IEEE:
-    pass
     if isSignalNAN(S0.f64):
       D0.f64 = cvtToQuietNAN(S0.f64)
     elif isSignalNAN(S1.f64):
@@ -11325,7 +11278,6 @@ def _VOP3Op_V_MIN_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
     else:
       D0.f64 = S1.f64
   else:
-    pass
     if isNAN(S1.f64):
       D0.f64 = S0.f64
     elif isNAN(S0.f64):
@@ -11380,7 +11332,6 @@ def _VOP3Op_V_MAX_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
   if WAVE_MODE.IEEE:
-    pass
     if isSignalNAN(S0.f64):
       D0.f64 = cvtToQuietNAN(S0.f64)
     elif isSignalNAN(S1.f64):
@@ -11394,7 +11345,6 @@ def _VOP3Op_V_MAX_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
     else:
       D0.f64 = S1.f64
   else:
-    pass
     if isNAN(S1.f64):
       D0.f64 = S0.f64
     elif isNAN(S0.f64):
