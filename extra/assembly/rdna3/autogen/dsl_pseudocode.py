@@ -3,7 +3,6 @@
 # ruff: noqa: E501,F405,F403
 from extra.assembly.rdna3.autogen import SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp
 from extra.assembly.rdna3.dsl import *
-from extra.assembly.rdna3.helpers import *
 
 def _SOP1Op_S_MOV_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
   # D0.b32 = S0.b32
@@ -1197,27 +1196,6 @@ def _SOP1Op_S_AND_NOT1_WREXEC_B64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, lit
   result['d0_64'] = True
   return result
 
-def _SOP1Op_S_MOVRELSD_2_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
-  # addrs = SRC0.u32;
-  # // Raw value from instruction
-  # addrd = DST.u32;
-  # // Raw value from instruction
-  S0, S1, S2, D0, D1 = Reg(s0), Reg(s1), Reg(s2), Reg(d0), Reg(0)
-  SCC, VCC, EXEC = Reg(scc), Reg(vcc), Reg(exec_mask)
-  EXEC_LO, EXEC_HI = SliceProxy(EXEC, 31, 0), SliceProxy(EXEC, 63, 32)
-  tmp, saveexec = Reg(0), Reg(exec_mask)
-  laneId = lane
-  SIMM16, SIMM32 = Reg(literal), Reg(literal)
-  SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
-  # --- compiled pseudocode ---
-  addrs = SRC0.u32
-  addrd = DST.u32
-  # --- end pseudocode ---
-  result = {'d0': D0._val, 'scc': SCC._val & 1}
-  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
-  return result
-
 def _SOP1Op_S_SENDMSG_RTN_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
   # If SDST is VCC then VCCZ is undefined.
   S0, S1, S2, D0, D1 = Reg(s0), Reg(s1), Reg(s2), Reg(d0), Reg(0)
@@ -1588,7 +1566,6 @@ SOP1Op_FUNCTIONS = {
   SOP1Op.S_AND_NOT0_WREXEC_B64: _SOP1Op_S_AND_NOT0_WREXEC_B64,
   SOP1Op.S_AND_NOT1_WREXEC_B32: _SOP1Op_S_AND_NOT1_WREXEC_B32,
   SOP1Op.S_AND_NOT1_WREXEC_B64: _SOP1Op_S_AND_NOT1_WREXEC_B64,
-  SOP1Op.S_MOVRELSD_2_B32: _SOP1Op_S_MOVRELSD_2_B32,
   SOP1Op.S_SENDMSG_RTN_B32: _SOP1Op_S_SENDMSG_RTN_B32,
   SOP1Op.S_SENDMSG_RTN_B64: _SOP1Op_S_SENDMSG_RTN_B64,
   SOP1Op.S_CEIL_F32: _SOP1Op_S_CEIL_F32,
@@ -5274,7 +5251,7 @@ def _VOP1Op_V_FREXP_EXP_I32_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, liter
   SIMM16, SIMM32 = Reg(literal), Reg(literal)
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
-  if ((S0.f64 == float("inf"))  or  (S0.f64 == float("-inf"))  or  isNAN(S0.f64)):
+  if ((S0.f64 == INF)  or  (S0.f64 == (-INF))  or  isNAN(S0.f64)):
     D0.i32 = 0
   else:
     D0.i32 = exponent(S0.f64) - 1023 + 1
@@ -5298,7 +5275,7 @@ def _VOP1Op_V_FREXP_MANT_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal,
   SIMM16, SIMM32 = Reg(literal), Reg(literal)
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
-  if ((S0.f64 == float("inf"))  or  (S0.f64 == float("-inf"))  or  isNAN(S0.f64)):
+  if ((S0.f64 == INF)  or  (S0.f64 == (-INF))  or  isNAN(S0.f64)):
     D0.f64 = S0.f64
   else:
     D0.f64 = mantissa(S0.f64)
@@ -5341,7 +5318,7 @@ def _VOP1Op_V_FREXP_EXP_I32_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, liter
   SIMM16, SIMM32 = Reg(literal), Reg(literal)
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
-  if ((F(S0.f32) == float("inf"))  or  (F(S0.f32) == float("-inf"))  or  isNAN(F(S0.f32))):
+  if ((F(S0.f32) == INF)  or  (F(S0.f32) == (-INF))  or  isNAN(F(S0.f32))):
     D0.i32 = 0
   else:
     D0.i32 = exponent(S0.f32) - 127 + 1
@@ -5365,30 +5342,10 @@ def _VOP1Op_V_FREXP_MANT_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal,
   SIMM16, SIMM32 = Reg(literal), Reg(literal)
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
-  if ((F(S0.f32) == float("inf"))  or  (F(S0.f32) == float("-inf"))  or  isNAN(F(S0.f32))):
+  if ((F(S0.f32) == INF)  or  (F(S0.f32) == (-INF))  or  isNAN(F(S0.f32))):
     D0.f32 = S0.f32
   else:
     D0.f32 = mantissa(S0.f32)
-  # --- end pseudocode ---
-  result = {'d0': D0._val, 'scc': SCC._val & 1}
-  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
-  return result
-
-def _VOP1Op_V_MOVRELD_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
-  # addr = DST.u32;
-  # // Raw value from instruction
-  # VGPR[laneId][addr].b32 = S0.b32
-  S0, S1, S2, D0, D1 = Reg(s0), Reg(s1), Reg(s2), Reg(d0), Reg(0)
-  SCC, VCC, EXEC = Reg(scc), Reg(vcc), Reg(exec_mask)
-  EXEC_LO, EXEC_HI = SliceProxy(EXEC, 31, 0), SliceProxy(EXEC, 63, 32)
-  tmp, saveexec = Reg(0), Reg(exec_mask)
-  laneId = lane
-  SIMM16, SIMM32 = Reg(literal), Reg(literal)
-  SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
-  # --- compiled pseudocode ---
-  addr = DST.u32
-  VGPR[laneId][addr].b32 = S0.b32
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': SCC._val & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
@@ -5409,48 +5366,6 @@ def _VOP1Op_V_MOVRELS_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- compiled pseudocode ---
   addr = SRC0.u32
   D0.b32 = VGPR[laneId][addr].b32
-  # --- end pseudocode ---
-  result = {'d0': D0._val, 'scc': SCC._val & 1}
-  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
-  return result
-
-def _VOP1Op_V_MOVRELSD_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
-  # addrs = SRC0.u32;
-  # // Raw value from instruction
-  # addrd = DST.u32;
-  # // Raw value from instruction
-  S0, S1, S2, D0, D1 = Reg(s0), Reg(s1), Reg(s2), Reg(d0), Reg(0)
-  SCC, VCC, EXEC = Reg(scc), Reg(vcc), Reg(exec_mask)
-  EXEC_LO, EXEC_HI = SliceProxy(EXEC, 31, 0), SliceProxy(EXEC, 63, 32)
-  tmp, saveexec = Reg(0), Reg(exec_mask)
-  laneId = lane
-  SIMM16, SIMM32 = Reg(literal), Reg(literal)
-  SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
-  # --- compiled pseudocode ---
-  addrs = SRC0.u32
-  addrd = DST.u32
-  # --- end pseudocode ---
-  result = {'d0': D0._val, 'scc': SCC._val & 1}
-  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
-  return result
-
-def _VOP1Op_V_MOVRELSD_2_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
-  # addrs = SRC0.u32;
-  # // Raw value from instruction
-  # addrd = DST.u32;
-  # // Raw value from instruction
-  S0, S1, S2, D0, D1 = Reg(s0), Reg(s1), Reg(s2), Reg(d0), Reg(0)
-  SCC, VCC, EXEC = Reg(scc), Reg(vcc), Reg(exec_mask)
-  EXEC_LO, EXEC_HI = SliceProxy(EXEC, 31, 0), SliceProxy(EXEC, 63, 32)
-  tmp, saveexec = Reg(0), Reg(exec_mask)
-  laneId = lane
-  SIMM16, SIMM32 = Reg(literal), Reg(literal)
-  SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
-  # --- compiled pseudocode ---
-  addrs = SRC0.u32
-  addrd = DST.u32
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': SCC._val & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
@@ -5624,7 +5539,7 @@ def _VOP1Op_V_FREXP_MANT_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal,
   SIMM16, SIMM32 = Reg(literal), Reg(literal)
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
-  if ((F(S0.f16) == float("inf"))  or  (F(S0.f16) == float("-inf"))  or  isNAN(F(S0.f16))):
+  if ((F(S0.f16) == INF)  or  (F(S0.f16) == (-INF))  or  isNAN(F(S0.f16))):
     D0.f16 = S0.f16
   else:
     D0.f16 = mantissa(S0.f16)
@@ -5648,7 +5563,7 @@ def _VOP1Op_V_FREXP_EXP_I16_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, liter
   SIMM16, SIMM32 = Reg(literal), Reg(literal)
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
-  if ((F(S0.f16) == float("inf"))  or  (F(S0.f16) == float("-inf"))  or  isNAN(F(S0.f16))):
+  if ((F(S0.f16) == INF)  or  (F(S0.f16) == (-INF))  or  isNAN(F(S0.f16))):
     D0.i16 = 0
   else:
     D0.i16 = (exponent(S0.f16) - 15 + 1)
@@ -5792,33 +5707,6 @@ def _VOP1Op_V_COS_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
   if EXEC._val != exec_mask: result['exec'] = EXEC._val
   return result
 
-def _VOP1Op_V_SAT_PK_U8_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
-  # if n.i32 <= 0 then
-  # elsif n >= 16'I(0xff) then
-  # else
-  # endif);
-  # D0.b16 = { SAT8(S0[31 : 16].i16), SAT8(S0[15 : 0].i16) }
-  S0, S1, S2, D0, D1 = Reg(s0), Reg(s1), Reg(s2), Reg(d0), Reg(0)
-  SCC, VCC, EXEC = Reg(scc), Reg(vcc), Reg(exec_mask)
-  EXEC_LO, EXEC_HI = SliceProxy(EXEC, 31, 0), SliceProxy(EXEC, 63, 32)
-  tmp, saveexec = Reg(0), Reg(exec_mask)
-  laneId = lane
-  SIMM16, SIMM32 = Reg(literal), Reg(literal)
-  SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
-  # --- compiled pseudocode ---
-  if n.i32 <= 0:
-    pass
-  elif n >= (0xff):
-    pass
-  else:
-    pass
-  D0.b16 = _pack(SAT8(S0[31 : 16].i16), SAT8(S0[15 : 0].i16))
-  # --- end pseudocode ---
-  result = {'d0': D0._val, 'scc': SCC._val & 1}
-  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
-  return result
-
 def _VOP1Op_V_CVT_NORM_I16_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
   # D0.i16 = f16_to_snorm(S0.f16)
   S0, S1, S2, D0, D1 = Reg(s0), Reg(s1), Reg(s2), Reg(d0), Reg(0)
@@ -5889,71 +5777,6 @@ def _VOP1Op_V_SWAP_B16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR,
   tmp = Reg(D0.b16)
   D0.b16 = S0.b16
   S0.b16 = tmp
-  # --- end pseudocode ---
-  result = {'d0': D0._val, 'scc': SCC._val & 1}
-  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
-  return result
-
-def _VOP1Op_V_PERMLANE64_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
-  # declare tmp : 32'B[64];
-  # declare lane : 32'U;
-  # if WAVE32 then
-  # // Supported in wave64 ONLY; treated as scalar NOP in wave32
-  # else
-  # for lane in 0U : 63U do
-  # // Copy original S0 in case D==S0
-  # tmp[lane] = VGPR[lane][SRC0.u32]
-  # endfor;
-  # for lane in 0U : 63U do
-  # altlane = { ~lane[5], lane[4 : 0] };
-  # // 0<->32, ..., 31<->63
-  # if EXEC[lane].u1 then
-  # VGPR[lane][VDST.u32] = tmp[altlane]
-  # endif
-  # endfor
-  # endif
-  S0, S1, S2, D0, D1 = Reg(s0), Reg(s1), Reg(s2), Reg(d0), Reg(0)
-  SCC, VCC, EXEC = Reg(scc), Reg(vcc), Reg(exec_mask)
-  EXEC_LO, EXEC_HI = SliceProxy(EXEC, 31, 0), SliceProxy(EXEC, 63, 32)
-  tmp, saveexec = Reg(0), Reg(exec_mask)
-  laneId = lane
-  SIMM16, SIMM32 = Reg(literal), Reg(literal)
-  SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
-  # --- compiled pseudocode ---
-  if WAVE32:
-    pass
-  else:
-    pass
-    for lane in range(0, int(63)+1):
-      tmp[lane] = VGPR[lane][SRC0.u32]
-    for lane in range(0, int(63)+1):
-      altlane = _pack(~lane[5], lane[4 : 0])
-      if EXEC[lane].u1:
-        VGPR[lane][VDST.u32] = tmp[altlane]
-  # --- end pseudocode ---
-  result = {'d0': D0._val, 'scc': SCC._val & 1}
-  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
-  return result
-
-def _VOP1Op_V_SWAPREL_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
-  # addrs = SRC0.u32;
-  # // Raw value from instruction
-  # addrd = DST.u32;
-  # // Raw value from instruction
-  # tmp = VGPR[laneId][addrd].b32;
-  S0, S1, S2, D0, D1 = Reg(s0), Reg(s1), Reg(s2), Reg(d0), Reg(0)
-  SCC, VCC, EXEC = Reg(scc), Reg(vcc), Reg(exec_mask)
-  EXEC_LO, EXEC_HI = SliceProxy(EXEC, 31, 0), SliceProxy(EXEC, 63, 32)
-  tmp, saveexec = Reg(0), Reg(exec_mask)
-  laneId = lane
-  SIMM16, SIMM32 = Reg(literal), Reg(literal)
-  SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
-  # --- compiled pseudocode ---
-  addrs = SRC0.u32
-  addrd = DST.u32
-  tmp = Reg(VGPR[laneId][addrd].b32)
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': SCC._val & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
@@ -6063,10 +5886,7 @@ VOP1Op_FUNCTIONS = {
   VOP1Op.V_FRACT_F64: _VOP1Op_V_FRACT_F64,
   VOP1Op.V_FREXP_EXP_I32_F32: _VOP1Op_V_FREXP_EXP_I32_F32,
   VOP1Op.V_FREXP_MANT_F32: _VOP1Op_V_FREXP_MANT_F32,
-  VOP1Op.V_MOVRELD_B32: _VOP1Op_V_MOVRELD_B32,
   VOP1Op.V_MOVRELS_B32: _VOP1Op_V_MOVRELS_B32,
-  VOP1Op.V_MOVRELSD_B32: _VOP1Op_V_MOVRELSD_B32,
-  VOP1Op.V_MOVRELSD_2_B32: _VOP1Op_V_MOVRELSD_2_B32,
   VOP1Op.V_CVT_F16_U16: _VOP1Op_V_CVT_F16_U16,
   VOP1Op.V_CVT_F16_I16: _VOP1Op_V_CVT_F16_I16,
   VOP1Op.V_CVT_U16_F16: _VOP1Op_V_CVT_U16_F16,
@@ -6085,13 +5905,10 @@ VOP1Op_FUNCTIONS = {
   VOP1Op.V_FRACT_F16: _VOP1Op_V_FRACT_F16,
   VOP1Op.V_SIN_F16: _VOP1Op_V_SIN_F16,
   VOP1Op.V_COS_F16: _VOP1Op_V_COS_F16,
-  VOP1Op.V_SAT_PK_U8_I16: _VOP1Op_V_SAT_PK_U8_I16,
   VOP1Op.V_CVT_NORM_I16_F16: _VOP1Op_V_CVT_NORM_I16_F16,
   VOP1Op.V_CVT_NORM_U16_F16: _VOP1Op_V_CVT_NORM_U16_F16,
   VOP1Op.V_SWAP_B32: _VOP1Op_V_SWAP_B32,
   VOP1Op.V_SWAP_B16: _VOP1Op_V_SWAP_B16,
-  VOP1Op.V_PERMLANE64_B32: _VOP1Op_V_PERMLANE64_B32,
-  VOP1Op.V_SWAPREL_B32: _VOP1Op_V_SWAPREL_B32,
   VOP1Op.V_NOT_B16: _VOP1Op_V_NOT_B16,
   VOP1Op.V_CVT_I32_I16: _VOP1Op_V_CVT_I32_I16,
   VOP1Op.V_CVT_U32_U16: _VOP1Op_V_CVT_U32_U16,
@@ -8077,7 +7894,7 @@ def _VOP3Op_V_FREXP_EXP_I32_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, liter
   SIMM16, SIMM32 = Reg(literal), Reg(literal)
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
-  if ((S0.f64 == float("inf"))  or  (S0.f64 == float("-inf"))  or  isNAN(S0.f64)):
+  if ((S0.f64 == INF)  or  (S0.f64 == (-INF))  or  isNAN(S0.f64)):
     D0.i32 = 0
   else:
     D0.i32 = exponent(S0.f64) - 1023 + 1
@@ -8101,7 +7918,7 @@ def _VOP3Op_V_FREXP_MANT_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal,
   SIMM16, SIMM32 = Reg(literal), Reg(literal)
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
-  if ((S0.f64 == float("inf"))  or  (S0.f64 == float("-inf"))  or  isNAN(S0.f64)):
+  if ((S0.f64 == INF)  or  (S0.f64 == (-INF))  or  isNAN(S0.f64)):
     D0.f64 = S0.f64
   else:
     D0.f64 = mantissa(S0.f64)
@@ -8144,7 +7961,7 @@ def _VOP3Op_V_FREXP_EXP_I32_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, liter
   SIMM16, SIMM32 = Reg(literal), Reg(literal)
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
-  if ((F(S0.f32) == float("inf"))  or  (F(S0.f32) == float("-inf"))  or  isNAN(F(S0.f32))):
+  if ((F(S0.f32) == INF)  or  (F(S0.f32) == (-INF))  or  isNAN(F(S0.f32))):
     D0.i32 = 0
   else:
     D0.i32 = exponent(S0.f32) - 127 + 1
@@ -8168,30 +7985,10 @@ def _VOP3Op_V_FREXP_MANT_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal,
   SIMM16, SIMM32 = Reg(literal), Reg(literal)
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
-  if ((F(S0.f32) == float("inf"))  or  (F(S0.f32) == float("-inf"))  or  isNAN(F(S0.f32))):
+  if ((F(S0.f32) == INF)  or  (F(S0.f32) == (-INF))  or  isNAN(F(S0.f32))):
     D0.f32 = S0.f32
   else:
     D0.f32 = mantissa(S0.f32)
-  # --- end pseudocode ---
-  result = {'d0': D0._val, 'scc': SCC._val & 1}
-  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
-  return result
-
-def _VOP3Op_V_MOVRELD_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
-  # addr = DST.u32;
-  # // Raw value from instruction
-  # VGPR[laneId][addr].b32 = S0.b32
-  S0, S1, S2, D0, D1 = Reg(s0), Reg(s1), Reg(s2), Reg(d0), Reg(0)
-  SCC, VCC, EXEC = Reg(scc), Reg(vcc), Reg(exec_mask)
-  EXEC_LO, EXEC_HI = SliceProxy(EXEC, 31, 0), SliceProxy(EXEC, 63, 32)
-  tmp, saveexec = Reg(0), Reg(exec_mask)
-  laneId = lane
-  SIMM16, SIMM32 = Reg(literal), Reg(literal)
-  SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
-  # --- compiled pseudocode ---
-  addr = DST.u32
-  VGPR[laneId][addr].b32 = S0.b32
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': SCC._val & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
@@ -8212,48 +8009,6 @@ def _VOP3Op_V_MOVRELS_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- compiled pseudocode ---
   addr = SRC0.u32
   D0.b32 = VGPR[laneId][addr].b32
-  # --- end pseudocode ---
-  result = {'d0': D0._val, 'scc': SCC._val & 1}
-  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
-  return result
-
-def _VOP3Op_V_MOVRELSD_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
-  # addrs = SRC0.u32;
-  # // Raw value from instruction
-  # addrd = DST.u32;
-  # // Raw value from instruction
-  S0, S1, S2, D0, D1 = Reg(s0), Reg(s1), Reg(s2), Reg(d0), Reg(0)
-  SCC, VCC, EXEC = Reg(scc), Reg(vcc), Reg(exec_mask)
-  EXEC_LO, EXEC_HI = SliceProxy(EXEC, 31, 0), SliceProxy(EXEC, 63, 32)
-  tmp, saveexec = Reg(0), Reg(exec_mask)
-  laneId = lane
-  SIMM16, SIMM32 = Reg(literal), Reg(literal)
-  SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
-  # --- compiled pseudocode ---
-  addrs = SRC0.u32
-  addrd = DST.u32
-  # --- end pseudocode ---
-  result = {'d0': D0._val, 'scc': SCC._val & 1}
-  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
-  return result
-
-def _VOP3Op_V_MOVRELSD_2_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
-  # addrs = SRC0.u32;
-  # // Raw value from instruction
-  # addrd = DST.u32;
-  # // Raw value from instruction
-  S0, S1, S2, D0, D1 = Reg(s0), Reg(s1), Reg(s2), Reg(d0), Reg(0)
-  SCC, VCC, EXEC = Reg(scc), Reg(vcc), Reg(exec_mask)
-  EXEC_LO, EXEC_HI = SliceProxy(EXEC, 31, 0), SliceProxy(EXEC, 63, 32)
-  tmp, saveexec = Reg(0), Reg(exec_mask)
-  laneId = lane
-  SIMM16, SIMM32 = Reg(literal), Reg(literal)
-  SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
-  # --- compiled pseudocode ---
-  addrs = SRC0.u32
-  addrd = DST.u32
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': SCC._val & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
@@ -8427,7 +8182,7 @@ def _VOP3Op_V_FREXP_MANT_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal,
   SIMM16, SIMM32 = Reg(literal), Reg(literal)
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
-  if ((F(S0.f16) == float("inf"))  or  (F(S0.f16) == float("-inf"))  or  isNAN(F(S0.f16))):
+  if ((F(S0.f16) == INF)  or  (F(S0.f16) == (-INF))  or  isNAN(F(S0.f16))):
     D0.f16 = S0.f16
   else:
     D0.f16 = mantissa(S0.f16)
@@ -8451,7 +8206,7 @@ def _VOP3Op_V_FREXP_EXP_I16_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, liter
   SIMM16, SIMM32 = Reg(literal), Reg(literal)
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
-  if ((F(S0.f16) == float("inf"))  or  (F(S0.f16) == float("-inf"))  or  isNAN(F(S0.f16))):
+  if ((F(S0.f16) == INF)  or  (F(S0.f16) == (-INF))  or  isNAN(F(S0.f16))):
     D0.i16 = 0
   else:
     D0.i16 = (exponent(S0.f16) - 15 + 1)
@@ -8589,33 +8344,6 @@ def _VOP3Op_V_COS_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
   D0.f16 = cos(S0.f16 * F(PI * 2.0))
-  # --- end pseudocode ---
-  result = {'d0': D0._val, 'scc': SCC._val & 1}
-  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
-  return result
-
-def _VOP3Op_V_SAT_PK_U8_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
-  # if n.i32 <= 0 then
-  # elsif n >= 16'I(0xff) then
-  # else
-  # endif);
-  # D0.b16 = { SAT8(S0[31 : 16].i16), SAT8(S0[15 : 0].i16) }
-  S0, S1, S2, D0, D1 = Reg(s0), Reg(s1), Reg(s2), Reg(d0), Reg(0)
-  SCC, VCC, EXEC = Reg(scc), Reg(vcc), Reg(exec_mask)
-  EXEC_LO, EXEC_HI = SliceProxy(EXEC, 31, 0), SliceProxy(EXEC, 63, 32)
-  tmp, saveexec = Reg(0), Reg(exec_mask)
-  laneId = lane
-  SIMM16, SIMM32 = Reg(literal), Reg(literal)
-  SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
-  # --- compiled pseudocode ---
-  if n.i32 <= 0:
-    pass
-  elif n >= (0xff):
-    pass
-  else:
-    pass
-  D0.b16 = _pack(SAT8(S0[31 : 16].i16), SAT8(S0[15 : 0].i16))
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': SCC._val & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
@@ -9961,7 +9689,7 @@ def _VOP3Op_V_MULLIT_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   SIMM16, SIMM32 = Reg(literal), Reg(literal)
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
-  if ((S1.f32 == -MAX_FLOAT_F32)  or  (F(S1.f32) == float("-inf"))  or  isNAN(F(S1.f32))  or  (S2.f32 <= 0.0)  or  isNAN(F(S2.f32))):
+  if ((S1.f32 == -MAX_FLOAT_F32)  or  (F(S1.f32) == (-INF))  or  isNAN(F(S1.f32))  or  (S2.f32 <= 0.0)  or  isNAN(F(S2.f32))):
     D0.f32 = -MAX_FLOAT_F32
   else:
     D0.f32 = S0.f32 * S1.f32
@@ -10292,11 +10020,11 @@ def _VOP3Op_V_DIV_FIXUP_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, 
     D0.f32 = F(cvtToQuietNAN(F(S1.f32)))
   elif ((F(S1.f32) == 0.0)  and  (F(S2.f32) == 0.0)):
     D0.f32 = F(0xffc00000)
-  elif ((F(abs(S1.f32)) == float("inf"))  and  (F(abs(S2.f32)) == float("inf"))):
+  elif ((F(abs(S1.f32)) == INF)  and  (F(abs(S2.f32)) == INF)):
     D0.f32 = F(0xffc00000)
-  elif ((F(S1.f32) == 0.0)  or  (F(abs(S2.f32)) == float("inf"))):
-    D0.f32 = ((float("-inf").f32) if (sign_out) else (float("inf").f32))
-  elif ((F(abs(S1.f32)) == float("inf"))  or  (F(S2.f32) == 0.0)):
+  elif ((F(S1.f32) == 0.0)  or  (F(abs(S2.f32)) == INF)):
+    D0.f32 = (((-INF).f32) if (sign_out) else (INF.f32))
+  elif ((F(abs(S1.f32)) == INF)  or  (F(S2.f32) == 0.0)):
     D0.f32 = ((-0.0) if (sign_out) else (0.0))
   elif exponent(S2.f32) - exponent(S1.f32) < -150:
     D0.f32 = ((-UNDERFLOW_F32) if (sign_out) else (UNDERFLOW_F32))
@@ -10350,11 +10078,11 @@ def _VOP3Op_V_DIV_FIXUP_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, 
     D0.f64 = cvtToQuietNAN(S1.f64)
   elif ((S1.f64 == 0.0)  and  (S2.f64 == 0.0)):
     D0.f64 = F(0xfff8000000000000)
-  elif ((abs(S1.f64) == float("inf"))  and  (abs(S2.f64) == float("inf"))):
+  elif ((abs(S1.f64) == INF)  and  (abs(S2.f64) == INF)):
     D0.f64 = F(0xfff8000000000000)
-  elif ((S1.f64 == 0.0)  or  (abs(S2.f64) == float("inf"))):
-    D0.f64 = ((float("-inf")) if (sign_out) else (float("inf")))
-  elif ((abs(S1.f64) == float("inf"))  or  (S2.f64 == 0.0)):
+  elif ((S1.f64 == 0.0)  or  (abs(S2.f64) == INF)):
+    D0.f64 = (((-INF)) if (sign_out) else (INF))
+  elif ((abs(S1.f64) == INF)  or  (S2.f64 == 0.0)):
     D0.f64 = ((-0.0) if (sign_out) else (0.0))
   elif exponent(S2.f64) - exponent(S1.f64) < -1075:
     D0.f64 = ((-UNDERFLOW_F64) if (sign_out) else (UNDERFLOW_F64))
@@ -10791,11 +10519,11 @@ def _VOP3Op_V_DIV_FIXUP_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, 
     D0.f16 = F(cvtToQuietNAN(F(S1.f16)))
   elif ((F(S1.f16) == 0.0)  and  (F(S2.f16) == 0.0)):
     D0.f16 = F(0xfe00)
-  elif ((F(abs(S1.f16)) == float("inf"))  and  (F(abs(S2.f16)) == float("inf"))):
+  elif ((F(abs(S1.f16)) == INF)  and  (F(abs(S2.f16)) == INF)):
     D0.f16 = F(0xfe00)
-  elif ((F(S1.f16) == 0.0)  or  (F(abs(S2.f16)) == float("inf"))):
-    D0.f16 = ((float("-inf").f16) if (sign_out) else (float("inf").f16))
-  elif ((F(abs(S1.f16)) == float("inf"))  or  (F(S2.f16) == 0.0)):
+  elif ((F(S1.f16) == 0.0)  or  (F(abs(S2.f16)) == INF)):
+    D0.f16 = (((-INF).f16) if (sign_out) else (INF.f16))
+  elif ((F(abs(S1.f16)) == INF)  or  (F(S2.f16) == 0.0)):
     D0.f16 = ((-0.0) if (sign_out) else (0.0))
   else:
     D0.f16 = ((-abs(S0.f16)) if (sign_out) else (abs(S0.f16)))
@@ -10901,86 +10629,6 @@ def _VOP3Op_V_MAD_I32_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
   # --- compiled pseudocode ---
   D0.i32 = (S0.i16) * (S1.i16) + S2.i32
-  # --- end pseudocode ---
-  result = {'d0': D0._val, 'scc': SCC._val & 1}
-  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
-  return result
-
-def _VOP3Op_V_PERMLANE16_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
-  # declare tmp : 32'B[64];
-  # lanesel = { S2.u32, S1.u32 };
-  # // Concatenate lane select bits
-  # for i in 0 : WAVE32 ? 31 : 63 do
-  # // Copy original S0 in case D==S0
-  # tmp[i] = VGPR[i][SRC0.u32]
-  # endfor;
-  # for row in 0 : WAVE32 ? 1 : 3 do
-  # // Implement arbitrary swizzle within each row
-  # for i in 0 : 15 do
-  # if EXEC[row * 16 + i].u1 then
-  # VGPR[row * 16 + i][VDST.u32] = tmp[64'B(row * 16) + lanesel[i * 4 + 3 : i * 4]]
-  # endif
-  # endfor
-  # endfor
-  S0, S1, S2, D0, D1 = Reg(s0), Reg(s1), Reg(s2), Reg(d0), Reg(0)
-  SCC, VCC, EXEC = Reg(scc), Reg(vcc), Reg(exec_mask)
-  EXEC_LO, EXEC_HI = SliceProxy(EXEC, 31, 0), SliceProxy(EXEC, 63, 32)
-  tmp, saveexec = Reg(0), Reg(exec_mask)
-  laneId = lane
-  SIMM16, SIMM32 = Reg(literal), Reg(literal)
-  SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
-  # --- compiled pseudocode ---
-  lanesel = _pack32(S2.u32, S1.u32)
-  for i in range(0, int(((31) if (WAVE32) else (63)))+1):
-    tmp[i] = VGPR[i][SRC0.u32]
-  for row in range(0, int(((1) if (WAVE32) else (3)))+1):
-    pass
-    for i in range(0, int(15)+1):
-      pass
-      if EXEC[row * 16 + i].u1:
-        VGPR[row * 16 + i][VDST.u32] = tmp[(row * 16) + lanesel[i * 4 + 3 : i * 4]]
-  # --- end pseudocode ---
-  result = {'d0': D0._val, 'scc': SCC._val & 1}
-  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
-  return result
-
-def _VOP3Op_V_PERMLANEX16_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
-  # declare tmp : 32'B[64];
-  # lanesel = { S2.u32, S1.u32 };
-  # // Concatenate lane select bits
-  # for i in 0 : WAVE32 ? 31 : 63 do
-  # // Copy original S0 in case D==S0
-  # tmp[i] = VGPR[i][SRC0.u32]
-  # endfor;
-  # for row in 0 : WAVE32 ? 1 : 3 do
-  # // Implement arbitrary swizzle across two rows
-  # altrow = { row[1], ~row[0] };
-  # // 1<->0, 3<->2
-  # for i in 0 : 15 do
-  # if EXEC[row * 16 + i].u1 then
-  # VGPR[row * 16 + i][VDST.u32] = tmp[64'B(altrow.i32 * 16) + lanesel[i * 4 + 3 : i * 4]]
-  # endif
-  # endfor
-  # endfor
-  S0, S1, S2, D0, D1 = Reg(s0), Reg(s1), Reg(s2), Reg(d0), Reg(0)
-  SCC, VCC, EXEC = Reg(scc), Reg(vcc), Reg(exec_mask)
-  EXEC_LO, EXEC_HI = SliceProxy(EXEC, 31, 0), SliceProxy(EXEC, 63, 32)
-  tmp, saveexec = Reg(0), Reg(exec_mask)
-  laneId = lane
-  SIMM16, SIMM32 = Reg(literal), Reg(literal)
-  SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
-  # --- compiled pseudocode ---
-  lanesel = _pack32(S2.u32, S1.u32)
-  for i in range(0, int(((31) if (WAVE32) else (63)))+1):
-    tmp[i] = VGPR[i][SRC0.u32]
-  for row in range(0, int(((1) if (WAVE32) else (3)))+1):
-    altrow = _pack(row[1], ~row[0])
-    for i in range(0, int(15)+1):
-      pass
-      if EXEC[row * 16 + i].u1:
-        VGPR[row * 16 + i][VDST.u32] = tmp[(altrow.i32 * 16) + lanesel[i * 4 + 3 : i * 4]]
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': SCC._val & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
@@ -11965,35 +11613,6 @@ def _VOP3Op_V_READLANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, V
   if EXEC._val != exec_mask: result['exec'] = EXEC._val
   return result
 
-def _VOP3Op_V_WRITELANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
-  # declare lane : 32'U;
-  # if WAVE32 then
-  # lane = S1.u32[4 : 0].u32;
-  # // Lane select for wave32
-  # else
-  # lane = S1.u32[5 : 0].u32;
-  # // Lane select for wave64
-  # endif;
-  # VGPR[lane][VDST.u32] = S0.b32
-  S0, S1, S2, D0, D1 = Reg(s0), Reg(s1), Reg(s2), Reg(d0), Reg(0)
-  SCC, VCC, EXEC = Reg(scc), Reg(vcc), Reg(exec_mask)
-  EXEC_LO, EXEC_HI = SliceProxy(EXEC, 31, 0), SliceProxy(EXEC, 63, 32)
-  tmp, saveexec = Reg(0), Reg(exec_mask)
-  laneId = lane
-  SIMM16, SIMM32 = Reg(literal), Reg(literal)
-  SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)
-  # --- compiled pseudocode ---
-  if WAVE32:
-    lane = S1.u32[4 : 0].u32
-  else:
-    lane = S1.u32[5 : 0].u32
-  VGPR[lane][VDST.u32] = S0.b32
-  # --- end pseudocode ---
-  result = {'d0': D0._val, 'scc': SCC._val & 1}
-  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
-  return result
-
 def _VOP3Op_V_AND_B16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
   # D0.u16 = (S0.u16 & S1.u16)
   S0, S1, S2, D0, D1 = Reg(s0), Reg(s1), Reg(s2), Reg(d0), Reg(0)
@@ -12097,10 +11716,7 @@ VOP3Op_FUNCTIONS = {
   VOP3Op.V_FRACT_F64: _VOP3Op_V_FRACT_F64,
   VOP3Op.V_FREXP_EXP_I32_F32: _VOP3Op_V_FREXP_EXP_I32_F32,
   VOP3Op.V_FREXP_MANT_F32: _VOP3Op_V_FREXP_MANT_F32,
-  VOP3Op.V_MOVRELD_B32: _VOP3Op_V_MOVRELD_B32,
   VOP3Op.V_MOVRELS_B32: _VOP3Op_V_MOVRELS_B32,
-  VOP3Op.V_MOVRELSD_B32: _VOP3Op_V_MOVRELSD_B32,
-  VOP3Op.V_MOVRELSD_2_B32: _VOP3Op_V_MOVRELSD_2_B32,
   VOP3Op.V_CVT_F16_U16: _VOP3Op_V_CVT_F16_U16,
   VOP3Op.V_CVT_F16_I16: _VOP3Op_V_CVT_F16_I16,
   VOP3Op.V_CVT_U16_F16: _VOP3Op_V_CVT_U16_F16,
@@ -12119,7 +11735,6 @@ VOP3Op_FUNCTIONS = {
   VOP3Op.V_FRACT_F16: _VOP3Op_V_FRACT_F16,
   VOP3Op.V_SIN_F16: _VOP3Op_V_SIN_F16,
   VOP3Op.V_COS_F16: _VOP3Op_V_COS_F16,
-  VOP3Op.V_SAT_PK_U8_I16: _VOP3Op_V_SAT_PK_U8_I16,
   VOP3Op.V_CVT_NORM_I16_F16: _VOP3Op_V_CVT_NORM_I16_F16,
   VOP3Op.V_CVT_NORM_U16_F16: _VOP3Op_V_CVT_NORM_U16_F16,
   VOP3Op.V_NOT_B16: _VOP3Op_V_NOT_B16,
@@ -12219,8 +11834,6 @@ VOP3Op_FUNCTIONS = {
   VOP3Op.V_OR3_B32: _VOP3Op_V_OR3_B32,
   VOP3Op.V_MAD_U32_U16: _VOP3Op_V_MAD_U32_U16,
   VOP3Op.V_MAD_I32_I16: _VOP3Op_V_MAD_I32_I16,
-  VOP3Op.V_PERMLANE16_B32: _VOP3Op_V_PERMLANE16_B32,
-  VOP3Op.V_PERMLANEX16_B32: _VOP3Op_V_PERMLANEX16_B32,
   VOP3Op.V_CNDMASK_B16: _VOP3Op_V_CNDMASK_B16,
   VOP3Op.V_MAXMIN_F32: _VOP3Op_V_MAXMIN_F32,
   VOP3Op.V_MINMAX_F32: _VOP3Op_V_MINMAX_F32,
@@ -12269,7 +11882,6 @@ VOP3Op_FUNCTIONS = {
   VOP3Op.V_LSHRREV_B64: _VOP3Op_V_LSHRREV_B64,
   VOP3Op.V_ASHRREV_I64: _VOP3Op_V_ASHRREV_I64,
   VOP3Op.V_READLANE_B32: _VOP3Op_V_READLANE_B32,
-  VOP3Op.V_WRITELANE_B32: _VOP3Op_V_WRITELANE_B32,
   VOP3Op.V_AND_B16: _VOP3Op_V_AND_B16,
   VOP3Op.V_OR_B16: _VOP3Op_V_OR_B16,
   VOP3Op.V_XOR_B16: _VOP3Op_V_XOR_B16,
@@ -12372,7 +11984,7 @@ def _VOP3SDOp_V_DIV_SCALE_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal
   # // Numerator is tiny
   # D0.f32 = ldexp(S0.f32, 64)
   # endif
-  S0, S1, S2, D0, D1 = Reg(s0), Reg(s1), Reg(s2), Reg(d0), Reg(0)
+  S0, S1, S2, D0, D1 = Reg(s0), Reg(s1), Reg(s2), Reg(s0), Reg(0)
   SCC, VCC, EXEC = Reg(scc), Reg(vcc), Reg(exec_mask)
   EXEC_LO, EXEC_HI = SliceProxy(EXEC, 31, 0), SliceProxy(EXEC, 63, 32)
   tmp, saveexec = Reg(0), Reg(exec_mask)
@@ -12438,7 +12050,7 @@ def _VOP3SDOp_V_DIV_SCALE_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal
   # // Numerator is tiny
   # D0.f64 = ldexp(S0.f64, 128)
   # endif
-  S0, S1, S2, D0, D1 = Reg(s0), Reg(s1), Reg(s2), Reg(d0), Reg(0)
+  S0, S1, S2, D0, D1 = Reg(s0), Reg(s1), Reg(s2), Reg(s0), Reg(0)
   SCC, VCC, EXEC = Reg(scc), Reg(vcc), Reg(exec_mask)
   EXEC_LO, EXEC_HI = SliceProxy(EXEC, 31, 0), SliceProxy(EXEC, 63, 32)
   tmp, saveexec = Reg(0), Reg(exec_mask)
@@ -17099,6 +16711,29 @@ VOPCOp_FUNCTIONS = {
   VOPCOp.V_CMPX_CLASS_F64: _VOPCOp_V_CMPX_CLASS_F64,
 }
 
+
+# Manually implemented lane instructions (require special vgpr_write handling)
+def _VOP3Op_V_WRITELANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # VGPR[lane][VDST] = S0.b32 - writes s0 to specified lane's VGPR
+  wr_lane = s1 & 0x1f  # lane select (5 bits for wave32)
+  return {'d0': d0, 'scc': scc, 'vgpr_write': (wr_lane, vdst_idx, s0 & 0xffffffff)}
+
+def _VOP3Op_V_READLANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0 = VGPR[lane][SRC0] - reads from specified lane's VGPR
+  rd_lane = s1 & 0x1f  # lane select (5 bits for wave32)
+  val = VGPR[rd_lane][src0_idx] if VGPR and rd_lane in VGPR and src0_idx in VGPR.get(rd_lane, {}) else s0
+  return {'d0': val & 0xffffffff, 'scc': scc}
+
+def _VOP1Op_V_READFIRSTLANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0 = VGPR[first_active_lane][SRC0] - reads from first active lane
+  first_lane = 0
+  for i in range(32):
+    if exec_mask & (1 << i):
+      first_lane = i
+      break
+  val = VGPR[first_lane][src0_idx] if VGPR and first_lane in VGPR and src0_idx in VGPR.get(first_lane, {}) else s0
+  return {'d0': val & 0xffffffff, 'scc': scc}
+
 COMPILED_FUNCTIONS = {
   SOP1Op: SOP1Op_FUNCTIONS,
   SOP2Op: SOP2Op_FUNCTIONS,
@@ -17112,5 +16747,10 @@ COMPILED_FUNCTIONS = {
   VOP3POp: VOP3POp_FUNCTIONS,
   VOPCOp: VOPCOp_FUNCTIONS,
 }
+
+# Add lane instructions to their respective dicts
+VOP3Op_FUNCTIONS[VOP3Op.V_WRITELANE_B32] = _VOP3Op_V_WRITELANE_B32
+VOP3Op_FUNCTIONS[VOP3Op.V_READLANE_B32] = _VOP3Op_V_READLANE_B32
+VOP1Op_FUNCTIONS[VOP1Op.V_READFIRSTLANE_B32] = _VOP1Op_V_READFIRSTLANE_B32
 
 def get_compiled_functions(): return COMPILED_FUNCTIONS

@@ -1,7 +1,202 @@
 # DSL for RDNA3 pseudocode - makes pseudocode expressions work directly as Python
 import struct, math, re
-from extra.assembly.rdna3.helpers import *
-from extra.assembly.rdna3.helpers import _f32, _i32, _f16, _i16, _f64, _i64, _sext, _ctz32, _ctz64, _isnan, _gt_neg_zero, _lt_neg_zero, _fma, _ldexp, _sign, _exponent, _div
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# HELPER FUNCTIONS (previously in helpers.py)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _f32(i): return struct.unpack("<f", struct.pack("<I", i & 0xffffffff))[0]
+def _i32(f):
+  if isinstance(f, int): f = float(f)
+  if math.isnan(f): return 0xffc00000 if math.copysign(1.0, f) < 0 else 0x7fc00000
+  if math.isinf(f): return 0x7f800000 if f > 0 else 0xff800000
+  try: return struct.unpack("<I", struct.pack("<f", f))[0]
+  except (OverflowError, struct.error): return 0x7f800000 if f > 0 else 0xff800000
+def _div(a, b):
+  try: return a / b
+  except ZeroDivisionError:
+    if a == 0.0 or math.isnan(a): return float("nan")
+    return math.copysign(float("inf"), a * b) if b == 0.0 else float("inf") if a > 0 else float("-inf")
+def _sext(v, b): return v - (1 << b) if v & (1 << (b - 1)) else v
+def _f16(i): return struct.unpack("<e", struct.pack("<H", i & 0xffff))[0]
+def _i16(f):
+  if math.isnan(f): return 0x7e00
+  if math.isinf(f): return 0x7c00 if f > 0 else 0xfc00
+  try: return struct.unpack("<H", struct.pack("<e", f))[0]
+  except (OverflowError, struct.error): return 0x7c00 if f > 0 else 0xfc00
+def _to_f16_bits(v): return v if isinstance(v, int) else _i16(v)
+def _f64(i): return struct.unpack("<d", struct.pack("<Q", i & 0xffffffffffffffff))[0]
+def _i64(f):
+  if math.isnan(f): return 0x7ff8000000000000
+  if math.isinf(f): return 0x7ff0000000000000 if f > 0 else 0xfff0000000000000
+  try: return struct.unpack("<Q", struct.pack("<d", f))[0]
+  except (OverflowError, struct.error): return 0x7ff0000000000000 if f > 0 else 0xfff0000000000000
+def _isnan(x): return math.isnan(x) if isinstance(x, float) else False
+def _gt_neg_zero(a, b): return (a > b) or (a == 0 and b == 0 and not math.copysign(1, a) < 0 and math.copysign(1, b) < 0)
+def _lt_neg_zero(a, b): return (a < b) or (a == 0 and b == 0 and math.copysign(1, a) < 0 and not math.copysign(1, b) < 0)
+def _fma(a, b, c): return a * b + c
+def _signext(v): return v
+def trunc(x):
+  x = float(x)
+  return x if math.isnan(x) or math.isinf(x) else math.trunc(x)
+def floor(x):
+  x = float(x)
+  return x if math.isnan(x) or math.isinf(x) else math.floor(x)
+def ceil(x):
+  x = float(x)
+  return x if math.isnan(x) or math.isinf(x) else math.ceil(x)
+def sqrt(x): return math.sqrt(x) if x >= 0 else float("nan")
+def log2(x): return math.log2(x) if x > 0 else (float("-inf") if x == 0 else float("nan"))
+i32_to_f32 = u32_to_f32 = i32_to_f64 = u32_to_f64 = f32_to_f64 = f64_to_f32 = float
+def f32_to_i32(f):
+  f = float(f)
+  if math.isnan(f): return 0
+  if f >= 2147483647: return 2147483647
+  if f <= -2147483648: return -2147483648
+  return int(f)
+def f32_to_u32(f):
+  f = float(f)
+  if math.isnan(f): return 0
+  if f >= 4294967295: return 4294967295
+  if f <= 0: return 0
+  return int(f)
+f64_to_i32 = f32_to_i32
+f64_to_u32 = f32_to_u32
+def f32_to_f16(f): return struct.unpack("<H", struct.pack("<e", float(f)))[0]
+def _f16_to_f32_bits(bits): return struct.unpack("<e", struct.pack("<H", int(bits) & 0xffff))[0]
+def f16_to_f32(v): return v if isinstance(v, float) else _f16_to_f32_bits(v)
+def i16_to_f16(v): return f32_to_f16(float(_sext(int(v) & 0xffff, 16)))
+def u16_to_f16(v): return f32_to_f16(float(int(v) & 0xffff))
+def f16_to_i16(bits): f = _f16_to_f32_bits(bits); return max(-32768, min(32767, int(f))) if not math.isnan(f) else 0
+def f16_to_u16(bits): f = _f16_to_f32_bits(bits); return max(0, min(65535, int(f))) if not math.isnan(f) else 0
+def _sign(f): return 1 if math.copysign(1.0, f) < 0 else 0
+def _mantissa_f32(f): return struct.unpack("<I", struct.pack("<f", f))[0] & 0x7fffff if not (math.isinf(f) or math.isnan(f)) else 0
+def _ldexp(m, e): return math.ldexp(m, e)
+def isEven(x): return int(x) % 2 == 0
+def fract(x): return x - math.floor(x)
+PI = math.pi
+def sin(x): return float("nan") if math.isinf(x) or math.isnan(x) else math.sin(x)
+def cos(x): return float("nan") if math.isinf(x) or math.isnan(x) else math.cos(x)
+def pow(a, b):
+  try: return a ** b
+  except OverflowError: return float("inf") if b > 0 else 0.0
+def _brev32(v): return int(bin(v & 0xffffffff)[2:].zfill(32)[::-1], 2)
+def _brev64(v): return int(bin(v & 0xffffffffffffffff)[2:].zfill(64)[::-1], 2)
+def _ctz32(v):
+  v = int(v) & 0xffffffff
+  if v == 0: return 32
+  n = 0
+  while (v & 1) == 0: v >>= 1; n += 1
+  return n
+def _ctz64(v):
+  v = int(v) & 0xffffffffffffffff
+  if v == 0: return 64
+  n = 0
+  while (v & 1) == 0: v >>= 1; n += 1
+  return n
+def _exponent(f):
+  if math.isinf(f) or math.isnan(f): return 255
+  if f == 0.0: return 0
+  try: bits = struct.unpack("<I", struct.pack("<f", float(f)))[0]; return (bits >> 23) & 0xff
+  except: return 0
+def _is_denorm_f32(f):
+  if not isinstance(f, float): f = _f32(int(f) & 0xffffffff)
+  if math.isinf(f) or math.isnan(f) or f == 0.0: return False
+  bits = struct.unpack("<I", struct.pack("<f", float(f)))[0]
+  return (bits >> 23) & 0xff == 0
+def _is_denorm_f64(f):
+  if not isinstance(f, float): f = _f64(int(f) & 0xffffffffffffffff)
+  if math.isinf(f) or math.isnan(f) or f == 0.0: return False
+  bits = struct.unpack("<Q", struct.pack("<d", float(f)))[0]
+  return (bits >> 52) & 0x7ff == 0
+def v_min_f32(a, b):
+  if math.isnan(b): return a
+  if math.isnan(a): return b
+  return a if _lt_neg_zero(a, b) else b
+def v_max_f32(a, b):
+  if math.isnan(b): return a
+  if math.isnan(a): return b
+  return a if _gt_neg_zero(a, b) else b
+def v_min_i32(a, b): return min(a, b)
+def v_max_i32(a, b): return max(a, b)
+def v_min_u32(a, b): return min(a & 0xffffffff, b & 0xffffffff)
+def v_max_u32(a, b): return max(a & 0xffffffff, b & 0xffffffff)
+v_min_f16 = v_min_f32
+v_max_f16 = v_max_f32
+v_min_i16 = v_min_i32
+v_max_i16 = v_max_i32
+def v_min_u16(a, b): return min(a & 0xffff, b & 0xffff)
+def v_max_u16(a, b): return max(a & 0xffff, b & 0xffff)
+def v_min3_f32(a, b, c): return v_min_f32(v_min_f32(a, b), c)
+def v_max3_f32(a, b, c): return v_max_f32(v_max_f32(a, b), c)
+def v_min3_i32(a, b, c): return min(a, b, c)
+def v_max3_i32(a, b, c): return max(a, b, c)
+def v_min3_u32(a, b, c): return min(a & 0xffffffff, b & 0xffffffff, c & 0xffffffff)
+def v_max3_u32(a, b, c): return max(a & 0xffffffff, b & 0xffffffff, c & 0xffffffff)
+v_min3_f16 = v_min3_f32
+v_max3_f16 = v_max3_f32
+v_min3_i16 = v_min3_i32
+v_max3_i16 = v_max3_i32
+def v_min3_u16(a, b, c): return min(a & 0xffff, b & 0xffff, c & 0xffff)
+def v_max3_u16(a, b, c): return max(a & 0xffff, b & 0xffff, c & 0xffff)
+def ABSDIFF(a, b): return abs(a - b)
+def f16_to_snorm(f): return max(-32768, min(32767, int(round(max(-1.0, min(1.0, f)) * 32767))))
+def f16_to_unorm(f): return max(0, min(65535, int(round(max(0.0, min(1.0, f)) * 65535))))
+def f32_to_snorm(f): return max(-32768, min(32767, int(round(max(-1.0, min(1.0, f)) * 32767))))
+def f32_to_unorm(f): return max(0, min(65535, int(round(max(0.0, min(1.0, f)) * 65535))))
+def v_cvt_i16_f32(f): return max(-32768, min(32767, int(f))) if not math.isnan(f) else 0
+def v_cvt_u16_f32(f): return max(0, min(65535, int(f))) if not math.isnan(f) else 0
+def u32_to_u16(u): return int(u) & 0xffff
+def i32_to_i16(i): return ((int(i) + 32768) & 0xffff) - 32768
+def SAT8(v): return max(0, min(255, int(v)))
+def f32_to_u8(f): return max(0, min(255, int(f))) if not math.isnan(f) else 0
+def mantissa(f):
+  if f == 0.0 or math.isinf(f) or math.isnan(f): return f
+  m, _ = math.frexp(f)
+  return math.copysign(m * 2.0, f)
+def signext_from_bit(val, bit):
+  bit = int(bit)
+  if bit == 0: return 0
+  mask = (1 << bit) - 1
+  val = int(val) & mask
+  if val & (1 << (bit - 1)): return val - (1 << bit)
+  return val
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DSL EXPORTS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+__all__ = [
+  # Classes
+  'Reg', 'SliceProxy', 'TypedView', 'ExecContext', 'compile_pseudocode',
+  # Pack functions
+  '_pack', '_pack32', 'pack', 'pack32',
+  # Constants
+  'WAVE32', 'WAVE64', 'MASK32', 'MASK64', 'WAVE_MODE', 'DENORM', 'OVERFLOW_F32', 'UNDERFLOW_F32',
+  'OVERFLOW_F64', 'UNDERFLOW_F64', 'MAX_FLOAT_F32', 'ROUND_MODE', 'cvtToQuietNAN', 'DST', 'INF', 'PI',
+  # Aliases for pseudocode
+  's_ff1_i32_b32', 's_ff1_i32_b64', 'GT_NEG_ZERO', 'LT_NEG_ZERO',
+  'isNAN', 'isQuietNAN', 'isSignalNAN', 'fma', 'ldexp', 'sign', 'exponent', 'F', 'signext',
+  # Conversion functions
+  '_f32', '_i32', '_f16', '_i16', '_f64', '_i64', '_sext', '_to_f16_bits', '_f16_to_f32_bits',
+  'i32_to_f32', 'u32_to_f32', 'i32_to_f64', 'u32_to_f64', 'f32_to_f64', 'f64_to_f32',
+  'f32_to_i32', 'f32_to_u32', 'f64_to_i32', 'f64_to_u32', 'f32_to_f16', 'f16_to_f32',
+  'i16_to_f16', 'u16_to_f16', 'f16_to_i16', 'f16_to_u16', 'u32_to_u16', 'i32_to_i16',
+  'f16_to_snorm', 'f16_to_unorm', 'f32_to_snorm', 'f32_to_unorm', 'v_cvt_i16_f32', 'v_cvt_u16_f32',
+  'SAT8', 'f32_to_u8',
+  # Math functions
+  'trunc', 'floor', 'ceil', 'sqrt', 'log2', 'sin', 'cos', 'pow', 'fract', 'isEven', 'mantissa',
+  # Min/max functions
+  'v_min_f32', 'v_max_f32', 'v_min_i32', 'v_max_i32', 'v_min_u32', 'v_max_u32',
+  'v_min_f16', 'v_max_f16', 'v_min_i16', 'v_max_i16', 'v_min_u16', 'v_max_u16',
+  'v_min3_f32', 'v_max3_f32', 'v_min3_i32', 'v_max3_i32', 'v_min3_u32', 'v_max3_u32',
+  'v_min3_f16', 'v_max3_f16', 'v_min3_i16', 'v_max3_i16', 'v_min3_u16', 'v_max3_u16',
+  'ABSDIFF',
+  # Bit manipulation
+  '_brev32', '_brev64', '_ctz32', '_ctz64', '_exponent', '_is_denorm_f32', '_is_denorm_f64',
+  '_sign', '_mantissa_f32', '_div', '_isnan', '_gt_neg_zero', '_lt_neg_zero', '_fma', '_ldexp', '_signext',
+  'signext_from_bit',
+]
 
 # Aliases used in pseudocode
 s_ff1_i32_b32, s_ff1_i32_b64 = _ctz32, _ctz64
@@ -9,9 +204,37 @@ GT_NEG_ZERO, LT_NEG_ZERO = _gt_neg_zero, _lt_neg_zero
 isNAN = isQuietNAN = isSignalNAN = _isnan
 fma, ldexp, sign, exponent = _fma, _ldexp, _sign, _exponent
 F = signext = lambda x: x
-_pack = lambda hi, lo: ((int(hi) & 0xffff) << 16) | (int(lo) & 0xffff)
-_pack32 = lambda hi, lo: ((int(hi) & 0xffffffff) << 32) | (int(lo) & 0xffffffff)
+pack = lambda hi, lo: ((int(hi) & 0xffff) << 16) | (int(lo) & 0xffff)
+pack32 = lambda hi, lo: ((int(hi) & 0xffffffff) << 32) | (int(lo) & 0xffffffff)
+_pack, _pack32 = pack, pack32  # Aliases for internal use
 WAVE32, WAVE64 = True, False
+
+# Float overflow/underflow constants
+OVERFLOW_F32 = float('inf')
+UNDERFLOW_F32 = 0.0
+OVERFLOW_F64 = float('inf')
+UNDERFLOW_F64 = 0.0
+MAX_FLOAT_F32 = 3.4028235e+38  # Largest finite float32
+
+# INF object that supports .f16/.f32/.f64 access
+class _Inf:
+  f16 = f32 = f64 = float('inf')
+  def __neg__(self): return _NegInf()
+  def __pos__(self): return self
+class _NegInf:
+  f16 = f32 = f64 = float('-inf')
+  def __neg__(self): return _Inf()
+  def __pos__(self): return self
+INF = _Inf()
+
+# Rounding mode placeholder
+class _RoundMode:
+  NEAREST_EVEN = 0
+ROUND_MODE = _RoundMode()
+
+# Helper functions for pseudocode
+def cvtToQuietNAN(x): return float('nan')
+DST = None  # Placeholder, will be set in context
 
 MASK32, MASK64 = 0xffffffff, 0xffffffffffffffff
 
@@ -19,21 +242,43 @@ class _WaveMode:
   IEEE = False
 WAVE_MODE = _WaveMode()
 
+class _DenormChecker:
+  """Comparator for denormalized floats. x == DENORM.f32 checks if x is denormalized."""
+  def __init__(self, bits): self._bits = bits
+  def _check(self, other):
+    return _is_denorm_f64(float(other)) if self._bits == 64 else _is_denorm_f32(float(other))
+  def __eq__(self, other): return self._check(other)
+  def __req__(self, other): return self._check(other)
+  def __ne__(self, other): return not self._check(other)
+
 class _Denorm:
-  """Placeholder for denormalized float comparisons. x == DENORM.f32 checks if x is denormalized."""
-  # Smallest positive denorm for float32: 2^-149 ≈ 1.4e-45
-  f32 = 1.401298464324817e-45
-  # Smallest positive denorm for float64: 2^-1074 ≈ 5e-324
-  f64 = 5e-324
+  f32 = _DenormChecker(32)
+  f64 = _DenormChecker(64)
 DENORM = _Denorm()
+
+def _brev(v, bits):
+  """Bit-reverse a value."""
+  result = 0
+  for i in range(bits): result |= ((v >> i) & 1) << (bits - 1 - i)
+  return result
 
 class SliceProxy:
   """Proxy for D0[31:16] that supports .f16/.u16 etc getters and setters."""
-  __slots__ = ('_reg', '_high', '_low')
-  def __init__(self, reg, high, low): self._reg, self._high, self._low = reg, high, low
-  def _mask(self): return (1 << (self._high - self._low + 1)) - 1
-  def _get(self): return (self._reg._val >> self._low) & self._mask()
-  def _set(self, v): self._reg._val = (self._reg._val & ~(self._mask() << self._low)) | ((int(v) & self._mask()) << self._low)
+  __slots__ = ('_reg', '_high', '_low', '_reversed')
+  def __init__(self, reg, high, low):
+    self._reg = reg
+    # Handle reversed slices like [0:31] which means bit-reverse
+    if high < low: self._high, self._low, self._reversed = low, high, True
+    else: self._high, self._low, self._reversed = high, low, False
+  def _nbits(self): return self._high - self._low + 1
+  def _mask(self): return (1 << self._nbits()) - 1
+  def _get(self):
+    v = (self._reg._val >> self._low) & self._mask()
+    return _brev(v, self._nbits()) if self._reversed else v
+  def _set(self, v):
+    v = int(v)
+    if self._reversed: v = _brev(v, self._nbits())
+    self._reg._val = (self._reg._val & ~(self._mask() << self._low)) | ((v & self._mask()) << self._low)
 
   u8 = property(lambda s: s._get() & 0xff)
   u16 = property(lambda s: s._get() & 0xffff, lambda s, v: s._set(v))
@@ -67,6 +312,7 @@ class TypedView:
   def __setitem__(self, key, value):
     if isinstance(key, slice):
       high, low = int(key.start), int(key.stop)
+      if high < low: high, low, value = low, high, _brev(int(value), low - high + 1)
       mask = (1 << (high - low + 1)) - 1
       self._reg._val = (self._reg._val & ~(mask << low)) | ((int(value) & mask) << low)
     elif value: self._reg._val |= (1 << int(key))
@@ -94,22 +340,26 @@ class TypedView:
   def __neg__(s): return -float(s) if s._float else -int(s)
   def __abs__(s): return abs(float(s)) if s._float else abs(int(s))
 
-  # Bitwise
+  # Bitwise - GPU shifts mask the shift amount to valid range
   def __and__(s, o): return int(s) & int(o)
   def __or__(s, o): return int(s) | int(o)
   def __xor__(s, o): return int(s) ^ int(o)
   def __invert__(s): return ~int(s)
-  def __lshift__(s, o): return int(s) << int(o)
-  def __rshift__(s, o): return int(s) >> int(o)
+  def __lshift__(s, o): n = int(o); return int(s) << n if 0 <= n < 64 else 0
+  def __rshift__(s, o): n = int(o); return int(s) >> n if 0 <= n < 64 else 0
   def __rand__(s, o): return int(o) & int(s)
   def __ror__(s, o): return int(o) | int(s)
   def __rxor__(s, o): return int(o) ^ int(s)
-  def __rlshift__(s, o): return int(o) << int(s)
-  def __rrshift__(s, o): return int(o) >> int(s)
+  def __rlshift__(s, o): n = int(s); return int(o) << n if 0 <= n < 64 else 0
+  def __rrshift__(s, o): n = int(s); return int(o) >> n if 0 <= n < 64 else 0
 
-  # Comparison
-  def __eq__(s, o): return float(s) == float(o) if s._float else int(s) == int(o)
-  def __ne__(s, o): return float(s) != float(o) if s._float else int(s) != int(o)
+  # Comparison - handle _DenormChecker specially
+  def __eq__(s, o):
+    if isinstance(o, _DenormChecker): return o._check(s)
+    return float(s) == float(o) if s._float else int(s) == int(o)
+  def __ne__(s, o):
+    if isinstance(o, _DenormChecker): return not o._check(s)
+    return float(s) != float(o) if s._float else int(s) != int(o)
   def __lt__(s, o): return float(s) < float(o) if s._float else int(s) < int(o)
   def __le__(s, o): return float(s) <= float(o) if s._float else int(s) <= int(o)
   def __gt__(s, o): return float(s) > float(o) if s._float else int(s) > int(o)
@@ -156,6 +406,23 @@ class Reg:
   def __index__(s): return s._val
   def __bool__(s): return bool(s._val)
 
+  # Arithmetic (for tmp = tmp + 1 patterns)
+  def __add__(s, o): return s._val + int(o)
+  def __radd__(s, o): return int(o) + s._val
+  def __sub__(s, o): return s._val - int(o)
+  def __rsub__(s, o): return int(o) - s._val
+  def __mul__(s, o): return s._val * int(o)
+  def __rmul__(s, o): return int(o) * s._val
+  def __and__(s, o): return s._val & int(o)
+  def __rand__(s, o): return int(o) & s._val
+  def __or__(s, o): return s._val | int(o)
+  def __ror__(s, o): return int(o) | s._val
+  def __xor__(s, o): return s._val ^ int(o)
+  def __rxor__(s, o): return int(o) ^ s._val
+  def __lshift__(s, o): n = int(o); return s._val << n if 0 <= n < 64 else 0
+  def __rshift__(s, o): n = int(o); return s._val >> n if 0 <= n < 64 else 0
+  def __invert__(s): return ~s._val
+
   # Comparison (for tmp >= 0x100000000 patterns)
   def __lt__(s, o): return s._val < int(o)
   def __le__(s, o): return s._val <= int(o)
@@ -172,7 +439,7 @@ def compile_pseudocode(pseudocode: str) -> str:
   """Compile pseudocode to Python. Transforms are minimal - most syntax just works."""
   # Join continuation lines (lines ending with || or && or open paren)
   raw_lines = pseudocode.strip().split('\n')
-  joined_lines = []
+  joined_lines: list[str] = []
   for line in raw_lines:
     line = line.strip()
     if joined_lines and (joined_lines[-1].rstrip().endswith(('||', '&&', '(', ',')) or
@@ -278,9 +545,8 @@ def _expr(e: str) -> str:
   # Remove redundant type suffix after lane access: VCC.u64[laneId].u64 -> VCC.u64[laneId]
   e = re.sub(r'(\[laneId\])\.[uib]\d+', r'\1', e)
 
-  # Constants
-  e = e.replace('+INF', 'float("inf")').replace('-INF', 'float("-inf")')
-  e = re.sub(r'[+-]?INF\.f\d+', 'float("inf")', e)
+  # Constants - INF is defined as an object supporting .f32/.f64 access
+  e = e.replace('+INF', 'INF').replace('-INF', '(-INF)')
   e = re.sub(r'NAN\.f\d+', 'float("nan")', e)
 
   # Recursively process bracket contents to handle nested ternaries like S1.u32[x ? a : b]
@@ -382,7 +648,8 @@ INST_PATTERN = re.compile(r'^([SV]_[A-Z0-9_]+)\s+(\d+)\s*$', re.M)
 UNSUPPORTED = ['SGPR[', 'V_SWAP', 'eval ', 'BYTE_PERMUTE', 'FATAL_HALT', 'HW_REGISTERS',
                'PC =', 'PC=', 'PC+', '= PC', 'v_sad', '+:', 'vscnt', 'vmcnt', 'expcnt', 'lgkmcnt',
                'CVT_OFF_TABLE', '.bf16', 'ThreadMask', 'u8_to_u32', 'u4_to_u32',
-               'S1[i', 'C.i32', 'v_msad_u8', 'S[i]', 'in[', '2.0 / PI']
+               'S1[i', 'C.i32', 'v_msad_u8', 'S[i]', 'in[', '2.0 / PI',
+               'if n.', 'DST.u32', 'addrd = DST', 'addr = DST']  # Malformed pseudocode from PDF
 
 def extract_pseudocode(text: str) -> str | None:
   """Extract pseudocode from an instruction description snippet."""
@@ -461,7 +728,6 @@ def generate_dsl_pseudocode(output_path: str = "extra/assembly/rdna3/autogen/dsl
 # ruff: noqa: E501,F405,F403
 from extra.assembly.rdna3.autogen import SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp
 from extra.assembly.rdna3.dsl import *
-from extra.assembly.rdna3.helpers import *
 ''']
 
   compiled_count, skipped_count = 0, 0
@@ -486,6 +752,8 @@ from extra.assembly.rdna3.helpers import *
         is_cmp = cls_name == 'VOPCOp' and 'D0.u64[laneId]' in pc
         is_cmpx = cls_name == 'VOPCOp' and 'EXEC.u64[laneId]' in pc  # V_CMPX writes to EXEC per-lane
         has_sdst = cls_name == 'VOP3SDOp' and 'VCC.u64[laneId]' in pc
+        # V_DIV_SCALE passes through S0 if no branch taken
+        is_div_scale = 'DIV_SCALE' in op.name
 
         # Generate function with indented body
         fn_name = f"_{cls_name}_{op.name}"
@@ -493,7 +761,11 @@ from extra.assembly.rdna3.helpers import *
         # Add original pseudocode as comment
         for pc_line in pc.split('\n'):
           lines.append(f"  # {pc_line}")
-        lines.append("  S0, S1, S2, D0, D1 = Reg(s0), Reg(s1), Reg(s2), Reg(d0), Reg(0)")
+        # V_DIV_SCALE: D0 defaults to S0 if no branch taken
+        if is_div_scale:
+          lines.append("  S0, S1, S2, D0, D1 = Reg(s0), Reg(s1), Reg(s2), Reg(s0), Reg(0)")
+        else:
+          lines.append("  S0, S1, S2, D0, D1 = Reg(s0), Reg(s1), Reg(s2), Reg(d0), Reg(0)")
         lines.append("  SCC, VCC, EXEC = Reg(scc), Reg(vcc), Reg(exec_mask)")
         lines.append("  EXEC_LO, EXEC_HI = SliceProxy(EXEC, 31, 0), SliceProxy(EXEC, 63, 32)")
         lines.append("  tmp, saveexec = Reg(0), Reg(exec_mask)")
@@ -537,11 +809,41 @@ from extra.assembly.rdna3.helpers import *
       lines.append('}')
       lines.append('')
 
+  # Add manually implemented lane instructions
+  lines.append('''
+# Manually implemented lane instructions (require special vgpr_write handling)
+def _VOP3Op_V_WRITELANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # VGPR[lane][VDST] = S0.b32 - writes s0 to specified lane's VGPR
+  wr_lane = s1 & 0x1f  # lane select (5 bits for wave32)
+  return {'d0': d0, 'scc': scc, 'vgpr_write': (wr_lane, vdst_idx, s0 & 0xffffffff)}
+
+def _VOP3Op_V_READLANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0 = VGPR[lane][SRC0] - reads from specified lane's VGPR
+  rd_lane = s1 & 0x1f  # lane select (5 bits for wave32)
+  val = VGPR[rd_lane][src0_idx] if VGPR and rd_lane in VGPR and src0_idx in VGPR.get(rd_lane, {}) else s0
+  return {'d0': val & 0xffffffff, 'scc': scc}
+
+def _VOP1Op_V_READFIRSTLANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0 = VGPR[first_active_lane][SRC0] - reads from first active lane
+  first_lane = 0
+  for i in range(32):
+    if exec_mask & (1 << i):
+      first_lane = i
+      break
+  val = VGPR[first_lane][src0_idx] if VGPR and first_lane in VGPR and src0_idx in VGPR.get(first_lane, {}) else s0
+  return {'d0': val & 0xffffffff, 'scc': scc}
+''')
+
   lines.append('COMPILED_FUNCTIONS = {')
   for enum_cls in OP_ENUMS:
     cls_name = enum_cls.__name__
     if by_cls.get(enum_cls): lines.append(f'  {cls_name}: {cls_name}_FUNCTIONS,')
   lines.append('}')
+  lines.append('')
+  lines.append("# Add lane instructions to their respective dicts")
+  lines.append("VOP3Op_FUNCTIONS[VOP3Op.V_WRITELANE_B32] = _VOP3Op_V_WRITELANE_B32")
+  lines.append("VOP3Op_FUNCTIONS[VOP3Op.V_READLANE_B32] = _VOP3Op_V_READLANE_B32")
+  lines.append("VOP1Op_FUNCTIONS[VOP1Op.V_READFIRSTLANE_B32] = _VOP1Op_V_READFIRSTLANE_B32")
   lines.append('')
   lines.append('def get_compiled_functions(): return COMPILED_FUNCTIONS')
 
