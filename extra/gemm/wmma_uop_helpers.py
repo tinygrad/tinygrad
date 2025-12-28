@@ -173,26 +173,19 @@ class WmmaUOpBuilder:
     variant = self.variant
     acc_scalar_dtype = dtypes.float if variant.acc_dtype == "float" else dtypes.half
 
-    # ldmatrix loads for A
+    # ldmatrix loads for A and B
     for i in range(variant.M_FRAGS):
-      smem_ptr_a = self.idx(smem_a, ld_a_offsets[k_idx][i])
-      self.u(Ops.CUSTOM, dtypes.void, (self.idx(a_frags[i]), smem_ptr_a),
-        arg="__ldmatrix_a_elems({0}, {1});")
-
-    # ldmatrix loads for B (pairs)
+      self.u(Ops.CUSTOM, dtypes.void, (self.idx(a_frags[i]), self.idx(smem_a, ld_a_offsets[k_idx][i])), arg="__ldmatrix_a_elems({0}, {1});")
     for pair in range(4):
-      smem_ptr_b = self.idx(smem_b, ld_b_offsets[k_idx][pair])
       self.u(Ops.CUSTOM, dtypes.void,
-        (self.idx(b_frags[2*pair]), self.idx(b_frags[2*pair+1]), smem_ptr_b),
-        arg="__ldmatrix_b_elems({0}, {1}, {2});")
+        (self.idx(b_frags[2*pair]), self.idx(b_frags[2*pair+1]), self.idx(smem_b, ld_b_offsets[k_idx][pair])), arg="__ldmatrix_b_elems({0}, {1}, {2});")
 
     # M_FRAGS x N_FRAGS WMMA ops
     for am in range(variant.M_FRAGS):
       a_val = self.u(Ops.LOAD, dtypes.half.vec(8), (self.idx(a_frags[am]),), tag=f"load_a_{k_idx}_{am}")
       for bn in range(variant.N_FRAGS):
-        acc_index = am*variant.N_FRAGS + bn
         b_val = self.u(Ops.LOAD, dtypes.half.vec(4), (self.idx(b_frags[bn]),), tag=f"load_b_{k_idx}_{bn}")
-        c_ptr = self.idx(acc_regs[acc_index])
+        c_ptr = self.idx(acc_regs[am*variant.N_FRAGS + bn])
         c_val = self.u(Ops.LOAD, acc_scalar_dtype.vec(4), (c_ptr,), tag=f"load_c_{k_idx}_{am}_{bn}")
         out_val = self.u(Ops.WMMA, acc_scalar_dtype.vec(4), (a_val, b_val, c_val), arg=wmma_arg)
         self.u(Ops.STORE, dtypes.void, (c_ptr, out_val))
@@ -259,11 +252,9 @@ class WmmaUOpBuilder:
       for bn in range(v.N_FRAGS):
         c_vec = self.u(Ops.LOAD, dtypes.float.vec(4), (self.idx(acc_regs[am*v.N_FRAGS + bn]),))
         for k in range(4):
-          val = self.u(Ops.GEP, dtypes.float, (c_vec,), (k,))
-          k_off = [0, 1, 8*self.N, 8*self.N + 1][k]
-          bn_mult = (bn % 2) + 4 * (bn // 2)
-          idx_val = wg_c_off + thread_c_off + am * 32*self.N + k_off + bn_mult*8
-          self.u(Ops.STORE, dtypes.void, (self.idx(c_uop, idx_val), val))
+          self.u(Ops.STORE, dtypes.void,
+            (self.idx(c_uop, wg_c_off + thread_c_off + am * 32*self.N + [0, 1, 8*self.N, 8*self.N + 1][k] + ((bn % 2) + 4 * (bn // 2))*8),
+             self.u(Ops.GEP, dtypes.float, (c_vec,), (k,))))
 
   def emit_smem_float4_epilogue(self, acc_regs, c_uop, grid_m, grid_n, wg_m, wg_n, wg_threads, threads, smem):
     """Emit smem-based float4 epilogue (max fp32 kernel)."""
@@ -278,25 +269,24 @@ class WmmaUOpBuilder:
       for bn in range(8):
         c_vec = self.u(Ops.LOAD, dtypes.float.vec(4), (self.idx(acc_regs[am*8 + bn]),))
         for k in range(4):
-          val = self.u(Ops.GEP, dtypes.float, (c_vec,), (k,))
-          k_off = [0, 1, 8*N_PAD, 8*N_PAD + 1][k]
-          self.u(Ops.STORE, dtypes.void, (self.idx(smem_d, smem_d_off + bn_col_map[bn]*8 + k_off), val))
+          self.u(Ops.STORE, dtypes.void,
+            (self.idx(smem_d, smem_d_off + bn_col_map[bn]*8 + [0, 1, 8*N_PAD, 8*N_PAD + 1][k]),
+             self.u(Ops.GEP, dtypes.float, (c_vec,), (k,))))
       self.barrier()
 
       d_regs = [self.u(Ops.DEFINE_REG, dtypes.float.vec(4).ptr(1, AddrSpace.REG), (), f"{d_regs_name}_{i}") for i in range(8)]
       for i, row_off in enumerate([0, 4, 8, 12, 16, 20, 24, 28]):
-        smem_scalar_ptr = self.idx(smem_d, load_smem_d_off + row_off * N_PAD)
-        smem_vec_ptr = self.u(smem_scalar_ptr.cast(dtypes.float.vec(4).ptr(AddrSpace.LOCAL)))
-        tmp_vec = self.u(Ops.LOAD, dtypes.float.vec(4), (smem_vec_ptr,), tag=f"load_{d_regs_name}_{i}")
-        self.u(Ops.STORE, dtypes.void, (self.idx(d_regs[i]), tmp_vec))
+        self.u(Ops.STORE, dtypes.void, (self.idx(d_regs[i]),
+          self.u(Ops.LOAD, dtypes.float.vec(4),
+            (self.u(self.idx(smem_d, load_smem_d_off + row_off * N_PAD).cast(dtypes.float.vec(4).ptr(AddrSpace.LOCAL))),),
+            tag=f"load_{d_regs_name}_{i}")))
       self.barrier()
 
       rows = [0, 4, 8, 12, 16, 20, 24, 28] if am == 0 else [32, 36, 40, 44, 48, 52, 56, 60]
       for i, row in enumerate(rows):
-        d_val = self.u(Ops.LOAD, dtypes.float.vec(4), (self.idx(d_regs[i]),), tag=f"store_{d_regs_name}_{i}")
-        c_scalar_ptr = self.idx(c_uop, global_d_base + row*self.N)
-        c_vec_ptr = self.u(c_scalar_ptr.cast(dtypes.float.vec(4).ptr()))
-        self.u(Ops.STORE, dtypes.void, (c_vec_ptr, d_val))
+        self.u(Ops.STORE, dtypes.void,
+          (self.u(self.idx(c_uop, global_d_base + row*self.N).cast(dtypes.float.vec(4).ptr())),
+           self.u(Ops.LOAD, dtypes.float.vec(4), (self.idx(d_regs[i]),), tag=f"store_{d_regs_name}_{i}")))
 
   def emit_smem_half2_epilogue(self, acc_regs, c_uop, grid_m, grid_n, wg_m, wg_n, wg_threads, threads, smem):
     """Emit smem-based half2/half8 epilogue (max fp16 kernel)."""
@@ -322,8 +312,8 @@ class WmmaUOpBuilder:
         out_off_base = out128_d_off + am * 64 * (self.N // 8)
         row_offsets = [(0, 0), (32, 16 * (W // 8))] if half_idx == 0 else [(8, 0), (40, 16 * (W // 8))]
         for out_row, smem_row in row_offsets:
-          val = self.u(Ops.LOAD, dtypes.half.vec(8), (self.idx(smem128_d, smem128_d_read_off + smem_row),), tag=f"epi_{am}_{out_row}_load")
-          self.u(Ops.STORE, dtypes.void, (self.idx(out128_d, out_off_base + out_row * (self.N // 8)), val))
+          self.u(Ops.STORE, dtypes.void, (self.idx(out128_d, out_off_base + out_row * (self.N // 8)),
+            self.u(Ops.LOAD, dtypes.half.vec(8), (self.idx(smem128_d, smem128_d_read_off + smem_row),), tag=f"epi_{am}_{out_row}_load")))
     self.barrier()
 
   def build(self) -> list[UOp]:
@@ -401,8 +391,8 @@ class WmmaUOpBuilder:
       smem_a, smem_b = smem_a_stages[0], smem_b_stages[0]
       self.emit_prefetch(smem_a, smem_b, store_smem_a_off, store_smem_b_off, global_a_off, global_b_off, a_uop, b_uop)
       self.cp_commit()
-      global_a_off_loop = global_a_off + variant.K_TILE
-      global_b_off_loop = global_b_off + variant.K_TILE * N
+      global_a_off += variant.K_TILE
+      global_b_off += variant.K_TILE * N
       self.barrier()
 
       block_k = self.u(Ops.RANGE, dtypes.int, (UOp.const(dtypes.int, num_k_blocks),), (0, AxisType.LOOP))
@@ -414,7 +404,7 @@ class WmmaUOpBuilder:
 
       cond = block_k < num_k_blocks - 1
       if_uop = self.u(Ops.IF, dtypes.void, (cond,))
-      self.emit_prefetch(smem_a, smem_b, store_smem_a_off, store_smem_b_off, global_a_off_loop + block_k * variant.K_TILE, global_b_off_loop + block_k * variant.K_TILE * N, a_uop, b_uop)
+      self.emit_prefetch(smem_a, smem_b, store_smem_a_off, store_smem_b_off, global_a_off + block_k * variant.K_TILE, global_b_off + block_k * variant.K_TILE * N, a_uop, b_uop)
       self.u(Ops.END, dtypes.void, (if_uop,))
       self.cp_commit()
       self.u(Ops.END, dtypes.void, (block_k,))
@@ -423,14 +413,14 @@ class WmmaUOpBuilder:
       # Double-buffer, 2-stage pipeline (max fp32)
       self.emit_prefetch(smem_a_stages[0], smem_b_stages[0], store_smem_a_off, store_smem_b_off, global_a_off, global_b_off, a_uop, b_uop)
       self.cp_commit()
-      global_a_off = global_a_off + variant.K_TILE
-      global_b_off = global_b_off + variant.K_TILE * N
+      global_a_off += variant.K_TILE
+      global_b_off += variant.K_TILE * N
       self.barrier()
 
       self.emit_prefetch(smem_a_stages[1], smem_b_stages[1], store_smem_a_off, store_smem_b_off, global_a_off, global_b_off, a_uop, b_uop)
       self.cp_commit()
-      global_a_off_loop = global_a_off + variant.K_TILE
-      global_b_off_loop = global_b_off + variant.K_TILE * N
+      global_a_off += variant.K_TILE
+      global_b_off += variant.K_TILE * N
       self.cp_wait_prior(0)
       self.barrier()
 
@@ -445,7 +435,7 @@ class WmmaUOpBuilder:
 
       cond_prefetch = block_k < num_k_blocks - 2
       if_prefetch = self.u(Ops.IF, dtypes.void, (cond_prefetch,))
-      self.emit_prefetch(smem_a_curr, smem_b_curr, store_smem_a_off, store_smem_b_off, global_a_off_loop + block_k * variant.K_TILE, global_b_off_loop + block_k * variant.K_TILE * N, a_uop, b_uop)
+      self.emit_prefetch(smem_a_curr, smem_b_curr, store_smem_a_off, store_smem_b_off, global_a_off + block_k * variant.K_TILE, global_b_off + block_k * variant.K_TILE * N, a_uop, b_uop)
       self.u(Ops.END, dtypes.void, (if_prefetch,))
       self.cp_commit()
 
@@ -465,13 +455,13 @@ class WmmaUOpBuilder:
 
       self.emit_prefetch(smem_a_stages[0], smem_b_stages[0], store_smem_a_off, store_smem_b_off, global_a_off, global_b_off, a_uop, b_uop)
       self.cp_commit()
-      global_a_off = global_a_off + variant.K_TILE
-      global_b_off = global_b_off + variant.K_TILE * N
+      global_a_off += variant.K_TILE
+      global_b_off += variant.K_TILE * N
 
       self.emit_prefetch(smem_a_stages[1], smem_b_stages[1], store_smem_a_off, store_smem_b_off, global_a_off, global_b_off, a_uop, b_uop)
       self.cp_commit()
-      global_a_off_loop = global_a_off + variant.K_TILE
-      global_b_off_loop = global_b_off + variant.K_TILE * N
+      global_a_off += variant.K_TILE
+      global_b_off += variant.K_TILE * N
 
       self.cp_wait_prior(1)
       self.barrier()
@@ -512,29 +502,25 @@ class WmmaUOpBuilder:
 
       # 1) Load K=1 fragments for the current tile into dedicated K=1 registers
       for i in range(variant.M_FRAGS):
-        smem_ptr_a = self.idx(smem_a_curr, ld_a_offsets[1][i])
-        self.u(Ops.CUSTOM, dtypes.void, (self.idx(a_frags_k1[i]), smem_ptr_a),
-          arg="__ldmatrix_a_elems({0}, {1});")
+        self.u(Ops.CUSTOM, dtypes.void, (self.idx(a_frags_k1[i]), self.idx(smem_a_curr, ld_a_offsets[1][i])), arg="__ldmatrix_a_elems({0}, {1});")
       for pair in range(4):
-        smem_ptr_b = self.idx(smem_b_curr, ld_b_offsets[1][pair])
         self.u(Ops.CUSTOM, dtypes.void,
-          (self.idx(b_frags_k1[2*pair]), self.idx(b_frags_k1[2*pair+1]), smem_ptr_b),
-          arg="__ldmatrix_b_elems({0}, {1}, {2});")
+          (self.idx(b_frags_k1[2*pair]), self.idx(b_frags_k1[2*pair+1]), self.idx(smem_b_curr, ld_b_offsets[1][pair])), arg="__ldmatrix_b_elems({0}, {1}, {2});")
 
       # 2) MMA for K=0 using previously loaded K=0 fragments
       for am in range(variant.M_FRAGS):
         a_val = self.u(Ops.LOAD, dtypes.half.vec(8), (self.idx(a_frags_k0[am]),), tag=f"mma_k0_a_{am}")
         for bn in range(variant.N_FRAGS):
-          acc_index = am * variant.N_FRAGS + bn
           b_val = self.u(Ops.LOAD, dtypes.half.vec(4), (self.idx(b_frags_k0[bn]),), tag=f"mma_k0_b_{bn}")
-          c_ptr = self.idx(acc_regs[acc_index])
+          c_ptr = self.idx(acc_regs[am * variant.N_FRAGS + bn])
           c_val = self.u(Ops.LOAD, acc_scalar_dtype.vec(4), (c_ptr,), tag=f"mma_k0_c_{am}_{bn}")
           out_val = self.u(Ops.WMMA, acc_scalar_dtype.vec(4), (a_val, b_val, c_val), arg=wmma_arg)
           self.u(Ops.STORE, dtypes.void, (c_ptr, out_val))
 
+      # 3) Prefetch next tile
       cond_prefetch = block_k < num_k_blocks - 2
       if_prefetch = self.u(Ops.IF, dtypes.void, (cond_prefetch,))
-      self.emit_prefetch(smem_a_store, smem_b_store, store_smem_a_off, store_smem_b_off, global_a_off_loop + block_k * variant.K_TILE, global_b_off_loop + block_k * variant.K_TILE * N, a_uop, b_uop)
+      self.emit_prefetch(smem_a_store, smem_b_store, store_smem_a_off, store_smem_b_off, global_a_off + block_k * variant.K_TILE, global_b_off + block_k * variant.K_TILE * N, a_uop, b_uop)
       self.u(Ops.END, dtypes.void, (if_prefetch,))
       self.cp_commit()
 
@@ -542,25 +528,19 @@ class WmmaUOpBuilder:
       self.cp_wait_prior(1)
       self.barrier()
 
-      # 5) Load K=0 fragments for the next tile into K=0 registers
-      #    (this will be used as "K=0" on the next loop iteration)
+      # 5) Load K=0 fragments for the next tile into K=0 registers (used as K=0 on next iteration)
       for i in range(variant.M_FRAGS):
-        smem_ptr_a = self.idx(smem_a_next, ld_a_offsets[0][i])
-        self.u(Ops.CUSTOM, dtypes.void, (self.idx(a_frags_k0[i]), smem_ptr_a),
-          arg="__ldmatrix_a_elems({0}, {1});")
+        self.u(Ops.CUSTOM, dtypes.void, (self.idx(a_frags_k0[i]), self.idx(smem_a_next, ld_a_offsets[0][i])), arg="__ldmatrix_a_elems({0}, {1});")
       for pair in range(4):
-        smem_ptr_b = self.idx(smem_b_next, ld_b_offsets[0][pair])
         self.u(Ops.CUSTOM, dtypes.void,
-          (self.idx(b_frags_k0[2*pair]), self.idx(b_frags_k0[2*pair+1]), smem_ptr_b),
-          arg="__ldmatrix_b_elems({0}, {1}, {2});")
+          (self.idx(b_frags_k0[2*pair]), self.idx(b_frags_k0[2*pair+1]), self.idx(smem_b_next, ld_b_offsets[0][pair])), arg="__ldmatrix_b_elems({0}, {1}, {2});")
 
       # 6) MMA for K=1 using the K=1 fragments loaded at the top of the loop
       for am in range(variant.M_FRAGS):
         a_val = self.u(Ops.LOAD, dtypes.half.vec(8), (self.idx(a_frags_k1[am]),), tag=f"mma_k1_a_{am}")
         for bn in range(variant.N_FRAGS):
-          acc_index = am * variant.N_FRAGS + bn
           b_val = self.u(Ops.LOAD, dtypes.half.vec(4), (self.idx(b_frags_k1[bn]),), tag=f"mma_k1_b_{bn}")
-          c_ptr = self.idx(acc_regs[acc_index])
+          c_ptr = self.idx(acc_regs[am * variant.N_FRAGS + bn])
           c_val = self.u(Ops.LOAD, acc_scalar_dtype.vec(4), (c_ptr,), tag=f"mma_k1_c_{am}_{bn}")
           out_val = self.u(Ops.WMMA, acc_scalar_dtype.vec(4), (a_val, b_val, c_val), arg=wmma_arg)
           self.u(Ops.STORE, dtypes.void, (c_ptr, out_val))

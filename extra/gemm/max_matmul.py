@@ -205,6 +205,36 @@ if __name__ == "__main__":
 
     tms = []
     na, nb, nc = randoms()
+
+    sleep_secs = getenv("TORCH_COMP_SLEEP", 20)
+
+    import time
+
+    if getenv("TORCH_COMP"):
+      print(f"Sleeping for {sleep_secs}s")
+      time.sleep(sleep_secs)
+      import torch
+      torch_dtype = torch.bfloat16 if DTYPE_IN == dtypes.bfloat16 else (torch.float16 if DTYPE_IN == dtypes.half else torch.float32)
+      ta = torch.from_numpy(na.astype(np.float32)).to(torch_dtype).cuda()
+      tb = torch.from_numpy(nb.astype(np.float32)).to(torch_dtype).cuda()
+      torch.cuda.synchronize()
+      for _ in range(3): ta @ tb  # warmup
+      torch.cuda.synchronize()
+      torch_tms = []
+      for _ in range(CNT):
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        start.record()
+        ta @ tb
+        end.record()
+        torch.cuda.synchronize()
+        torch_tms.append(start.elapsed_time(end) / 1000)
+      print(f"TORCH MIN: {min(torch_tms)*1e6:9.2f} us, {FLOPS*1e-9/min(torch_tms):9.2f} GFLOPS")
+      print(f"TORCH AVG: {np.mean(torch_tms)*1e6:9.2f} us, {FLOPS*1e-9/np.mean(torch_tms):9.2f} GFLOPS")
+      print(f"TORCH MED: {np.median(torch_tms)*1e6:9.2f} us, {FLOPS*1e-9/np.median(torch_tms):9.2f} GFLOPS")
+
+    print(f"Sleeping for {sleep_secs}s")
+    time.sleep(sleep_secs)
     cudaalloc._copyin(a, memoryview(bytearray(na)))
     cudaalloc._copyin(b, memoryview(bytearray(nb)))
     for i in range(CNT):
@@ -213,7 +243,11 @@ if __name__ == "__main__":
     comp = na.astype(np.float32) @ nb.astype(np.float32)
     result = nc.reshape(M, N).astype(np.float32)
 
-    print(f"{N*N:10d} {min(tms)*1e6:9.2f} us, would be {FLOPS*1e-9/min(tms):9.2f} GFLOPS matmul, {BW*1e-9/min(tms):.2f} GB/s")
+    print(f"MIN: {N*N:10d} {min(tms)*1e6:9.2f} us, would be {FLOPS*1e-9/min(tms):9.2f} GFLOPS matmul, {BW*1e-9/min(tms):.2f} GB/s")
+    avg_tms = np.mean(tms)
+    med_tms = np.median(tms)
+    print(f"AVG: {N*N:10d} {(avg_tms)*1e6:9.2f} us, would be {FLOPS*1e-9/(avg_tms):9.2f} GFLOPS matmul, {BW*1e-9/(avg_tms):.2f} GB/s")
+    print(f"MED: {N*N:10d} {(med_tms)*1e6:9.2f} us, would be {FLOPS*1e-9/(med_tms):9.2f} GFLOPS matmul, {BW*1e-9/(med_tms):.2f} GB/s")
     try:
       np.testing.assert_allclose(result, comp, atol=ATOL, rtol=RTOL)
     except AssertionError as e:
@@ -234,6 +268,29 @@ if __name__ == "__main__":
       print("ground sum  :", np.sum(comp))
       print(result)
       print("result sum  :", np.sum(result))
+
+    if getenv("TORCH_COMP"):
+      print(f"Sleeping for {sleep_secs}s")
+      time.sleep(sleep_secs)
+      import torch
+      torch_dtype = torch.bfloat16 if DTYPE_IN == dtypes.bfloat16 else (torch.float16 if DTYPE_IN == dtypes.half else torch.float32)
+      ta = torch.from_numpy(na.astype(np.float32)).to(torch_dtype).cuda()
+      tb = torch.from_numpy(nb.astype(np.float32)).to(torch_dtype).cuda()
+      torch.cuda.synchronize()
+      for _ in range(3): ta @ tb  # warmup
+      torch.cuda.synchronize()
+      torch_tms = []
+      for _ in range(CNT):
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        start.record()
+        ta @ tb
+        end.record()
+        torch.cuda.synchronize()
+        torch_tms.append(start.elapsed_time(end) / 1000)
+      print(f"TORCH MIN: {min(torch_tms)*1e6:9.2f} us, {FLOPS*1e-9/min(torch_tms):9.2f} GFLOPS")
+      print(f"TORCH AVG: {np.mean(torch_tms)*1e6:9.2f} us, {FLOPS*1e-9/np.mean(torch_tms):9.2f} GFLOPS")
+      print(f"TORCH MED: {np.median(torch_tms)*1e6:9.2f} us, {FLOPS*1e-9/np.median(torch_tms):9.2f} GFLOPS")
 
   elif getenv("AMD") == 1:
     # note: https://hipfft.readthedocs.io/en/rocm-6.1.2/how-to/fine-tuning-llms/optimizing-triton-kernel.html
