@@ -436,8 +436,8 @@ class RDNARegAlloc:
     self._last_use[uop] = pos
 
   def get_last_use(self, uop: UOp) -> int:
-    """Get last use position for a UOp."""
-    return self._last_use.get(uop, -1)
+    """Get effective death position for a UOp (considering alias groups)."""
+    return self._get_death_pos(uop)
 
   def is_vgpr_owner(self, reg: int) -> bool:
     """Check if register has an owner."""
