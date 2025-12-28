@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """Regression tests for the RDNA3 emulator instruction execution.
 Uses run_asm() with memory output, so tests can run on both emulator and real hardware.
+
+Set USE_HW=1 to run on real AMD hardware instead of the emulator.
 """
 
-import ctypes, unittest
+import ctypes, unittest, os, struct
 from extra.assembly.rdna3.autogen import *
 from extra.assembly.rdna3.emu import WaveState, run_asm, set_valid_mem_ranges
 from extra.assembly.rdna3.pcode import _i32, _f32
 
 VCC = SrcEnum.VCC_LO  # For VOP3SD sdst field
+USE_HW = os.environ.get("USE_HW", "0") == "1"
 
 # Output buffer layout: vgpr[16][32], sgpr[16], vcc, scc
 # Each VGPR store writes 32 lanes (128 bytes), so vgpr[i] is at offset i*128
@@ -23,11 +26,8 @@ def i2f(i: int) -> float: return _f32(i)
 def assemble(instructions: list) -> bytes:
   return b''.join(inst.to_bytes() for inst in instructions)
 
-def run_program(instructions: list, n_lanes: int = 1) -> WaveState:
-  """Run instructions via run_asm, dump state to memory, return WaveState."""
-  out_buf = (ctypes.c_uint8 * OUT_BYTES)(*([0] * OUT_BYTES))
-  out_addr = ctypes.addressof(out_buf)
-
+def get_prologue_epilogue(n_lanes: int) -> tuple[list, list]:
+  """Generate prologue and epilogue instructions for state capture."""
   # Prologue: save s[0:1] and v[0] before test clobbers them
   # Use s[80:81] for args pointer (safe range, avoiding VCC=106-107 and staying under 100)
   prologue = [
@@ -67,6 +67,27 @@ def run_program(instructions: list, n_lanes: int = 1) -> WaveState:
   epilogue.append(s_mov_b32(s[SrcEnum.EXEC_LO - 128], s[94]))  # restore exec
   epilogue.append(s_endpgm())
 
+  return prologue, epilogue
+
+def parse_output(out_buf: bytes, n_lanes: int) -> WaveState:
+  """Parse output buffer into WaveState."""
+  st = WaveState()
+  for i in range(N_VGPRS):
+    for lane in range(n_lanes):
+      off = i * WAVE_SIZE * 4 + lane * 4
+      st.vgpr[lane][i] = struct.unpack_from('<I', out_buf, off)[0]
+  for i in range(N_SGPRS):
+    st.sgpr[i] = struct.unpack_from('<I', out_buf, VGPR_BYTES + i * 4)[0]
+  st.vcc = struct.unpack_from('<I', out_buf, VGPR_BYTES + SGPR_BYTES)[0]
+  st.scc = struct.unpack_from('<I', out_buf, VGPR_BYTES + SGPR_BYTES + 4)[0]
+  return st
+
+def run_program_emu(instructions: list, n_lanes: int = 1) -> WaveState:
+  """Run instructions via emulator run_asm, dump state to memory, return WaveState."""
+  out_buf = (ctypes.c_uint8 * OUT_BYTES)(*([0] * OUT_BYTES))
+  out_addr = ctypes.addressof(out_buf)
+
+  prologue, epilogue = get_prologue_epilogue(n_lanes)
   code = assemble(prologue + instructions + epilogue)
 
   args = (ctypes.c_uint64 * 1)(out_addr)
@@ -78,18 +99,78 @@ def run_program(instructions: list, n_lanes: int = 1) -> WaveState:
   result = run_asm(lib_ptr, len(code), 1, 1, 1, n_lanes, 1, 1, args_ptr)
   assert result == 0, f"run_asm failed with {result}"
 
-  # Parse output into WaveState
-  import struct
-  st = WaveState()
-  for i in range(N_VGPRS):
-    for lane in range(n_lanes):
-      off = i * WAVE_SIZE * 4 + lane * 4
-      st.vgpr[lane][i] = struct.unpack_from('<I', bytes(out_buf), off)[0]
-  for i in range(N_SGPRS):
-    st.sgpr[i] = struct.unpack_from('<I', bytes(out_buf), VGPR_BYTES + i * 4)[0]
-  st.vcc = struct.unpack_from('<I', bytes(out_buf), VGPR_BYTES + SGPR_BYTES)[0]
-  st.scc = struct.unpack_from('<I', bytes(out_buf), VGPR_BYTES + SGPR_BYTES + 4)[0]
-  return st
+  return parse_output(bytes(out_buf), n_lanes)
+
+def run_program_hw(instructions: list, n_lanes: int = 1) -> WaveState:
+  """Run instructions on real AMD hardware via HIPCompiler and AMDProgram."""
+  from tinygrad.device import Device
+  from tinygrad.runtime.ops_amd import AMDProgram
+  from tinygrad.runtime.support.compiler_amd import HIPCompiler
+  from tinygrad.helpers import flat_mv
+
+  dev = Device["AMD"]
+  compiler = HIPCompiler(dev.arch)
+
+  prologue, epilogue = get_prologue_epilogue(n_lanes)
+  code = assemble(prologue + instructions + epilogue)
+
+  # Create inline assembly source with .byte directives
+  byte_str = ', '.join(f'0x{b:02x}' for b in code)
+  asm_src = f""".text
+.globl test
+.p2align 8
+.type test,@function
+test:
+.byte {byte_str}
+
+.rodata
+.p2align 6
+.amdhsa_kernel test
+  .amdhsa_next_free_vgpr 256
+  .amdhsa_next_free_sgpr 96
+  .amdhsa_wavefront_size32 1
+  .amdhsa_user_sgpr_kernarg_segment_ptr 1
+  .amdhsa_kernarg_size 8
+.end_amdhsa_kernel
+
+.amdgpu_metadata
+---
+amdhsa.version:
+  - 1
+  - 0
+amdhsa.kernels:
+  - .name: test
+    .symbol: test.kd
+    .kernarg_segment_size: 8
+    .group_segment_fixed_size: 0
+    .private_segment_fixed_size: 0
+    .kernarg_segment_align: 8
+    .wavefront_size: 32
+    .sgpr_count: 96
+    .vgpr_count: 256
+    .max_flat_workgroup_size: 1024
+...
+.end_amdgpu_metadata
+"""
+
+  lib = compiler.compile(asm_src)
+  prg = AMDProgram(dev, "test", lib)
+
+  # Allocate output buffer on GPU
+  out_gpu = dev.allocator.alloc(OUT_BYTES)
+
+  # Run the kernel
+  prg(out_gpu, global_size=(1, 1, 1), local_size=(n_lanes, 1, 1), wait=True)
+
+  # Copy result back
+  out_buf = bytearray(OUT_BYTES)
+  dev.allocator._copyout(flat_mv(memoryview(out_buf)), out_gpu)
+
+  return parse_output(bytes(out_buf), n_lanes)
+
+def run_program(instructions: list, n_lanes: int = 1) -> WaveState:
+  """Run instructions, dump state to memory, return WaveState. Uses USE_HW env var to select backend."""
+  return run_program_hw(instructions, n_lanes) if USE_HW else run_program_emu(instructions, n_lanes)
 
 
 class TestVDivScale(unittest.TestCase):
