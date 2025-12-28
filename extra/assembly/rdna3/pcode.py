@@ -876,4 +876,4 @@ def _VOP1Op_V_READFIRSTLANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, liter
   print(f"\nGenerated {output_path}: {compiled_count} compiled, {skipped_count} skipped")
 
 if __name__ == "__main__":
-  generate_dsl_pseudocode()
+  generate_gen_pcode()
