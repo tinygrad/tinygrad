@@ -219,5 +219,54 @@ D0.i32 = tmp""")
     self.assertEqual(result['d0'], 42)
     self.assertEqual(result['scc'], 1)
 
+class TestPseudocodeRegressions(unittest.TestCase):
+  """Regression tests for pseudocode instruction emulation bugs."""
+
+  def test_v_div_scale_f32_vcc_always_returned(self):
+    """V_DIV_SCALE_F32 must always return vcc_lane, even when VCC=0 (no scaling needed).
+    Bug: when VCC._val == vcc (both 0), vcc_lane wasn't returned, so VCC bits weren't written.
+    This caused division to produce wrong results for multiple lanes."""
+    from extra.assembly.rdna3.autogen.dsl_pseudocode import _VOP3SDOp_V_DIV_SCALE_F32
+    # Normal case: 1.0 / 3.0, no scaling needed, VCC should be 0
+    s0 = 0x3f800000  # 1.0
+    s1 = 0x40400000  # 3.0
+    s2 = 0x3f800000  # 1.0 (numerator)
+    result = _VOP3SDOp_V_DIV_SCALE_F32(s0, s1, s2, 0, 0, 0, 0, 0xffffffff, 0, None, {})
+    # Must always have vcc_lane in result
+    self.assertIn('vcc_lane', result, "V_DIV_SCALE_F32 must always return vcc_lane")
+    self.assertEqual(result['vcc_lane'], 0, "vcc_lane should be 0 when no scaling needed")
+
+  def test_v_cmp_class_f32_detects_quiet_nan(self):
+    """V_CMP_CLASS_F32 must correctly identify quiet NaN vs signaling NaN.
+    Bug: isQuietNAN and isSignalNAN both used math.isnan which can't distinguish them."""
+    from extra.assembly.rdna3.autogen.dsl_pseudocode import _VOPCOp_V_CMP_CLASS_F32
+    quiet_nan = 0x7fc00000   # quiet NaN: exponent=255, bit22=1
+    signal_nan = 0x7f800001  # signaling NaN: exponent=255, bit22=0
+    # Test quiet NaN detection (bit 1 in mask)
+    s1_quiet = 0b0000000010  # bit 1 = quiet NaN
+    result = _VOPCOp_V_CMP_CLASS_F32(quiet_nan, s1_quiet, 0, 0, 0, 0, 0, 0xffffffff, 0, None, {})
+    self.assertEqual(result['vcc_lane'], 1, "Should detect quiet NaN with quiet NaN mask")
+    # Test signaling NaN detection (bit 0 in mask)
+    s1_signal = 0b0000000001  # bit 0 = signaling NaN
+    result = _VOPCOp_V_CMP_CLASS_F32(signal_nan, s1_signal, 0, 0, 0, 0, 0, 0xffffffff, 0, None, {})
+    self.assertEqual(result['vcc_lane'], 1, "Should detect signaling NaN with signaling NaN mask")
+    # Test that quiet NaN doesn't match signaling NaN mask
+    result = _VOPCOp_V_CMP_CLASS_F32(quiet_nan, s1_signal, 0, 0, 0, 0, 0, 0xffffffff, 0, None, {})
+    self.assertEqual(result['vcc_lane'], 0, "Quiet NaN should not match signaling NaN mask")
+    # Test that signaling NaN doesn't match quiet NaN mask
+    result = _VOPCOp_V_CMP_CLASS_F32(signal_nan, s1_quiet, 0, 0, 0, 0, 0, 0xffffffff, 0, None, {})
+    self.assertEqual(result['vcc_lane'], 0, "Signaling NaN should not match quiet NaN mask")
+
+  def test_isnan_with_typed_view(self):
+    """_isnan must work with TypedView objects, not just Python floats.
+    Bug: _isnan checked isinstance(x, float) which returned False for TypedView."""
+    from extra.assembly.rdna3.dsl import Reg, _isnan
+    nan_reg = Reg(0x7fc00000)  # quiet NaN
+    normal_reg = Reg(0x3f800000)  # 1.0
+    inf_reg = Reg(0x7f800000)  # +inf
+    self.assertTrue(_isnan(nan_reg.f32), "_isnan should return True for NaN TypedView")
+    self.assertFalse(_isnan(normal_reg.f32), "_isnan should return False for normal TypedView")
+    self.assertFalse(_isnan(inf_reg.f32), "_isnan should return False for inf TypedView")
+
 if __name__ == '__main__':
   unittest.main()

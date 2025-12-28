@@ -31,7 +31,35 @@ def _i64(f):
   if math.isinf(f): return 0x7ff0000000000000 if f > 0 else 0xfff0000000000000
   try: return struct.unpack("<Q", struct.pack("<d", f))[0]
   except (OverflowError, struct.error): return 0x7ff0000000000000 if f > 0 else 0xfff0000000000000
-def _isnan(x): return math.isnan(x) if isinstance(x, float) else False
+def _isnan(x):
+  try: return math.isnan(float(x))
+  except (TypeError, ValueError): return False
+def _isquietnan(x):
+  """Check if x is a quiet NaN. For f32: exponent=255, bit22=1, mantissa!=0"""
+  try:
+    if not math.isnan(float(x)): return False
+    # Get raw bits from TypedView or similar object with _reg attribute
+    if hasattr(x, '_reg') and hasattr(x, '_bits'):
+      bits = x._reg._val & ((1 << x._bits) - 1)
+      if x._bits == 32:
+        return ((bits >> 23) & 0xff) == 255 and ((bits >> 22) & 1) == 1 and (bits & 0x7fffff) != 0
+      if x._bits == 64:
+        return ((bits >> 52) & 0x7ff) == 0x7ff and ((bits >> 51) & 1) == 1 and (bits & 0xfffffffffffff) != 0
+    return True  # Default to quiet NaN if we can't determine bit pattern
+  except (TypeError, ValueError): return False
+def _issignalnan(x):
+  """Check if x is a signaling NaN. For f32: exponent=255, bit22=0, mantissa!=0"""
+  try:
+    if not math.isnan(float(x)): return False
+    # Get raw bits from TypedView or similar object with _reg attribute
+    if hasattr(x, '_reg') and hasattr(x, '_bits'):
+      bits = x._reg._val & ((1 << x._bits) - 1)
+      if x._bits == 32:
+        return ((bits >> 23) & 0xff) == 255 and ((bits >> 22) & 1) == 0 and (bits & 0x7fffff) != 0
+      if x._bits == 64:
+        return ((bits >> 52) & 0x7ff) == 0x7ff and ((bits >> 51) & 1) == 0 and (bits & 0xfffffffffffff) != 0
+    return False  # Default to not signaling if we can't determine bit pattern
+  except (TypeError, ValueError): return False
 def _gt_neg_zero(a, b): return (a > b) or (a == 0 and b == 0 and not math.copysign(1, a) < 0 and math.copysign(1, b) < 0)
 def _lt_neg_zero(a, b): return (a < b) or (a == 0 and b == 0 and math.copysign(1, a) < 0 and not math.copysign(1, b) < 0)
 def _fma(a, b, c): return a * b + c
@@ -194,14 +222,16 @@ __all__ = [
   'ABSDIFF',
   # Bit manipulation
   '_brev32', '_brev64', '_ctz32', '_ctz64', '_exponent', '_is_denorm_f32', '_is_denorm_f64',
-  '_sign', '_mantissa_f32', '_div', '_isnan', '_gt_neg_zero', '_lt_neg_zero', '_fma', '_ldexp', '_signext',
+  '_sign', '_mantissa_f32', '_div', '_isnan', '_isquietnan', '_issignalnan', '_gt_neg_zero', '_lt_neg_zero', '_fma', '_ldexp', '_signext',
   'signext_from_bit',
 ]
 
 # Aliases used in pseudocode
 s_ff1_i32_b32, s_ff1_i32_b64 = _ctz32, _ctz64
 GT_NEG_ZERO, LT_NEG_ZERO = _gt_neg_zero, _lt_neg_zero
-isNAN = isQuietNAN = isSignalNAN = _isnan
+isNAN = _isnan
+isQuietNAN = _isquietnan
+isSignalNAN = _issignalnan
 fma, ldexp, sign, exponent = _fma, _ldexp, _sign, _exponent
 F = signext = lambda x: x
 pack = lambda hi, lo: ((int(hi) & 0xffff) << 16) | (int(lo) & 0xffff)
