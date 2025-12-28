@@ -1,9 +1,15 @@
 # RDNA3 emulator v2 - executes compiled pseudocode from AMD ISA PDF
 from __future__ import annotations
-import ctypes, struct, math
+import ctypes, struct, math, os
 from extra.assembly.rdna3.lib import Inst, RawImm
-from extra.assembly.rdna3.autogen.pseudocode import get_compiled_functions
 from extra.assembly.rdna3.helpers import _f32, _i32, _sext, _f16, _i16
+
+def _get_pseudocode_module():
+  if os.environ.get("USE_DSL_PSEUDOCODE", "0") == "1":
+    from extra.assembly.rdna3.autogen.dsl_pseudocode import get_compiled_functions
+  else:
+    from extra.assembly.rdna3.autogen.pseudocode import get_compiled_functions
+  return get_compiled_functions
 from extra.assembly.rdna3.autogen import (
   SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, DS, FLAT, VOPD, SrcEnum,
   SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp, FLATOp, GLOBALOp, VOPDOp
@@ -65,7 +71,7 @@ _COMPILED: dict | None = None
 def _get_compiled() -> dict:
   """Get compiled pseudocode functions."""
   global _COMPILED
-  if _COMPILED is None: _COMPILED = get_compiled_functions()
+  if _COMPILED is None: _COMPILED = _get_pseudocode_module()()
   return _COMPILED
 
 class WaveState:

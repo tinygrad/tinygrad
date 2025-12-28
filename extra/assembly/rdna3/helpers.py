@@ -37,11 +37,13 @@ def sqrt(x): return math.sqrt(x) if x >= 0 else float("nan")
 def log2(x): return math.log2(x) if x > 0 else (float("-inf") if x == 0 else float("nan"))
 i32_to_f32 = u32_to_f32 = i32_to_f64 = u32_to_f64 = f32_to_f64 = f64_to_f32 = float
 def f32_to_i32(f):
+  f = float(f)  # Handle TypedView objects
   if math.isnan(f): return 0
   if f >= 2147483647: return 2147483647
   if f <= -2147483648: return -2147483648
   return int(f)
 def f32_to_u32(f):
+  f = float(f)  # Handle TypedView objects
   if math.isnan(f): return 0
   if f >= 4294967295: return 4294967295
   if f <= 0: return 0
