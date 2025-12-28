@@ -12,33 +12,21 @@ from extra.assembly.rdna3.autogen import *
 from extra.assembly.rdna3.asm import waitcnt
 from test.testextra.test_cfg_viz import template
 
-def get_output(asm:str, n_threads:int=1):
-  input_asm = "\n".join([ln if ln.strip().startswith('asm volatile') else f'asm volatile("{ln.strip().lstrip()}" : "+v"(a), "+v"(b));'
-                         for ln in asm.strip().splitlines() if ln.strip()])
-  src = f"""
-  typedef long unsigned int size_t;
-  extern "C" __attribute__((device, const)) size_t __ockl_get_local_id(unsigned int);
-  extern "C" __attribute__((global)) void __attribute__((amdgpu_flat_work_group_size(1, {n_threads}))) test(unsigned int* data0_1) {{
-    int l = __ockl_get_local_id(0);
-    unsigned a = 0, b = 0, c = 0;
-    {input_asm}
-    unsigned res;
-    asm volatile("v_mov_b32 %0, %1" : "=v"(res) : "v"(a));
-    *(data0_1+l) = res;
-  }}"""
-  t = Tensor.zeros(n_threads, dtype=dtypes.uint32).contiguous().realize()
-  prg = ProgramSpec("test", src, Device.DEFAULT, UOp.sink(t), global_size=[1, 1, 1], local_size=[n_threads, 1, 1])
-  car = CompiledRunner(prg)
-  if getenv("PRINT_ASM"): amdgpu_disassemble(car.lib)
-  car([t.uop.buffer], {}, wait=True)
-  return t.numpy()
-
-def run_asm(insts:list, out:Tensor):
-  src = "\n".join([inst if isinstance(inst, str) else inst.disasm() for inst in insts])
+def get_output(asm:list, n_threads:int=1, vdst:VGPR=v[1]):
+  out = Tensor([0.0]).realize()
+  src = "\n".join(inst.disasm() for inst in [
+    s_load_b64(s[0:1], s[0:1], NULL),
+    *asm,
+    s_waitcnt(simm16=waitcnt(lgkmcnt=0)),
+    #global_store_b32(v[0], v[1], s[0:1]),
+    global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]),
+    s_endpgm()
+  ])
   prg = ProgramSpec("test", template.replace("fn_name", "test").replace("INSTRUCTION", textwrap.dedent(src)), Device.DEFAULT, UOp(Ops.SINK),
-                    global_size=[1, 1, 1], local_size=[1, 1, 1], globals=[0])
+                    global_size=[1, 1, 1], local_size=[n_threads, 1, 1], globals=[0])
   car = CompiledRunner(prg)
   car([out.uop.buffer], {}, wait=True)
+  return out.item()
 
 def f16_to_bits(x:float) -> int: return struct.unpack('<H', struct.pack('<e', x))[0]
 def f32_from_bits(x:int) -> float: return struct.unpack('<f', struct.pack('<I', x))[0]
@@ -50,16 +38,11 @@ class TestHW(unittest.TestCase):
     if getenv("MOCKGPU"): subprocess.run(["cargo", "build", "--release", "--manifest-path", "./extra/remu/Cargo.toml"], check=True)
 
   def test_simple(self):
-    out = Tensor([0.0]).realize()
-    run_asm([
-      s_load_b64(s[0:1], s[0:1], NULL),
+    out = get_output([
       v_mov_b32_e32(v[0], 0),
       v_mov_b32_e32(v[1], 2.0),
-      s_waitcnt(simm16=waitcnt(lgkmcnt=0)),
-      global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]),
-      s_endpgm(),
-    ], out)
-    self.assertEqual(out.tolist(), [2])
+    ])
+    self.assertEqual(out, 2.0)
 
   def test_exec_mov(self):
     out = get_output("""
