@@ -77,9 +77,11 @@ class RDNARegAllocILP:
         if u.src[1] in range_positions: loop_ranges[range_positions[u.src[1]]] = i
     for i, u in enumerate(self.uops):
       for src in u.src: last_use[src] = i
+      # Track INDEX through LOAD/STORE - only the offset (src[1]) needs to live until the memory op
+      # src[0] is the buffer (SGPR), src[1] is the offset (VGPR address)
       if u.op in {Ops.LOAD, Ops.STORE} and len(u.src) > 0 and u.src[0].op is Ops.INDEX:
         last_use[u.src[0]] = i
-        for src in u.src[0].src: last_use[src] = i
+        if len(u.src[0].src) > 1: last_use[u.src[0].src[1]] = i  # Only extend offset, not buffer
       # STORE: the value being stored needs to live until the STORE
       # Only extend the immediate value, not its transitive sources (which are consumed when computing the value)
       if u.op is Ops.STORE and len(u.src) > 1:
@@ -88,37 +90,50 @@ class RDNARegAllocILP:
         last_use[u.src[1].src[0]] = i
       if u.op is Ops.AFTER: aliases[u] = u.src[0]
       if u.op is Ops.BITCAST: aliases[u] = u.src[0]
-      if u.op is Ops.CAST and (u.src[0].dtype == u.dtype or isinstance(u.src[0].dtype, PtrDType)):
-        aliases[u] = u.src[0]
+      if u.op is Ops.CAST:
+        # CAST is alias when dtypes match OR source is pointer
+        if u.src[0].dtype == u.dtype or isinstance(u.src[0].dtype, PtrDType):
+          aliases[u] = u.src[0]
+        # CAST from register-space LOAD reuses the accumulator register
+        elif (u.src[0].op is Ops.LOAD and len(u.src[0].src) > 0 and u.src[0].src[0].op is Ops.INDEX and
+              len(u.src[0].src[0].src) > 0 and isinstance(u.src[0].src[0].src[0].dtype, PtrDType) and
+              u.src[0].src[0].src[0].dtype.addrspace == AddrSpace.REG):
+          aliases[u] = u.src[0]
       if u.op is Ops.GEP and isinstance(u.src[0].dtype, DType) and u.src[0].dtype.count > 1:
         aliases[u] = u.src[0]
-      if u.op in {Ops.INDEX, Ops.LOAD, Ops.STORE} and len(u.src) > 0:
-        if isinstance(u.src[0].dtype, PtrDType) and u.src[0].dtype.addrspace == AddrSpace.REG:
-          if u.op is Ops.INDEX: aliases[u] = u.src[0]
-        # LOAD from REG buffer: alias to the DEFINE_REG buffer
-        # This ensures the DEFINE_REG's lifetime extends to cover all uses of the LOAD result
-        if u.op is Ops.LOAD and u.src[0].op is Ops.INDEX:
-          idx_buf = u.src[0].src[0] if len(u.src[0].src) > 0 else None
-          if idx_buf is not None and isinstance(idx_buf.dtype, PtrDType) and idx_buf.dtype.addrspace == AddrSpace.REG:
-            # The LOAD is an alias to the DEFINE_REG buffer
-            aliases[u] = idx_buf
-            last_use[idx_buf] = max(last_use.get(idx_buf, 0), i)
+      # NOTE: We intentionally DON'T alias register-space INDEX/LOAD here.
+      # Register-space operations reference the accumulator range directly without allocating,
+      # so they don't need aliasing for register reuse. More importantly, aliasing them
+      # would incorrectly extend the accumulator's lifetime based on CAST uses.
+
+      # NOTE: We do NOT alias scalar ALU ops here. Although the greedy allocator reuses
+      # dying source registers, the ILP allocator pre-assigns all registers. The solver
+      # will find optimal placement for ALU ops given their short lifetimes.
+
       if u.op is Ops.VECTORIZE:
-        for src in u.src:
-          if src in aliases:
-            root = src
-            while root in aliases: root = aliases[root]
-            if root.op is Ops.DEFINE_REG: continue
-          aliases[src] = u
-          for src_src in src.src:
-            if src_src not in aliases: aliases[src_src] = u
+        # Only alias sources if VECTORIZE might reuse their registers (32-bit types with contiguous layout)
+        # For 16-bit types, VECTORIZE packs sources into new registers, so sources should die at VECTORIZE position
+        scalar_dtype = u.dtype.scalar()
+        if scalar_dtype.itemsize >= 4:  # 32-bit or larger - might reuse source registers
+          for src in u.src:
+            if src in aliases:
+              root = src
+              while root in aliases: root = aliases[root]
+              if root.op is Ops.DEFINE_REG: continue
+            aliases[src] = u
+            for src_src in src.src:
+              if src_src not in aliases: aliases[src_src] = u
     uop_positions = {u: i for i, u in enumerate(self.uops)}
+    if DEBUG_ILP:
+      print(f"[ILP] Loop ranges: {loop_ranges}")
     for uop, use_pos in list(last_use.items()):
       if uop not in uop_positions: continue
       def_pos = uop_positions[uop]
       for range_pos, end_pos in loop_ranges.items():
         # If defined before/at loop start and used inside loop, extend to loop end
         if def_pos <= range_pos and range_pos < use_pos <= end_pos:
+          if DEBUG_ILP >= 2 and uop.op is Ops.SHL:
+            print(f"[ILP] Extending SHL@{def_pos} from {use_pos} to {end_pos}")
           last_use[uop] = max(last_use[uop], end_pos)
         # If defined inside loop and used after loop, ensure it survives past loop end
         # This handles loop-carried values that accumulate and are stored after the loop
@@ -151,29 +166,29 @@ class RDNARegAllocILP:
     if u.op is Ops.DEFINE_VAR: return ('sgpr', 1, 1, [])
     if u.op is Ops.DEFINE_REG:
       num_regs = u.dtype.size if hasattr(u.dtype, 'size') and u.dtype.size > 0 else 16
-      return ('vgpr', num_regs, 2, [])
+      return ('vgpr', num_regs, 1, [])  # align=1 to reduce fragmentation
     if u.op is Ops.DEFINE_LOCAL: return ('none', 0, 1, [])
     if u.op is Ops.CONST:
+      # Most CONSTs are inlined in instructions. Only allocate a register for:
+      # 1. 64-bit types (can't be inlined)
+      # 2. CONSTs used as STORE data operand (must be in VGPR for global_store)
+      # The consts_needing_regs set is populated in _solve_ilp before calling this
       val = u.arg
       if u.dtype in (dtypes.int64, dtypes.uint64, dtypes.long, dtypes.ulong): return ('vgpr', 2, 2, [])
       if u.dtype == dtypes.float64: return ('vgpr', 2, 2, [])
-      # Check if constant can be used inline or needs a register
-      if isinstance(val, float):
-        if val not in (0.0, 0.5, 1.0, 2.0, 4.0, -0.5, -1.0, -2.0, -4.0):
-          return ('vgpr', 1, 1, [])  # Non-inline float literal
-      elif isinstance(val, int):
-        if not (-16 <= val <= 64):
-          return ('vgpr', 1, 1, [])  # Non-inline integer literal
-      return ('none', 0, 1, [])  # Inline constant
+      # All other CONSTs are assumed inline - only override if in consts_needing_regs set
+      return ('none', 0, 1, [])  # Inline constant (may be overridden in _solve_ilp)
     if u.op is Ops.RANGE: return ('vgpr', 1, 1, [])
     if u.op is Ops.SPECIAL: return ('vgpr', 1, 1, [])
-    if u.op is Ops.WMMA: return ('vgpr', 8, 2, [])
+    # WMMA writes to the C input (accumulator) in-place, so no new register allocation needed
+    if u.op is Ops.WMMA: return ('none', 0, 1, [])
     if u.op is Ops.VECTORIZE:
       count = len(u.src)
       scalar_dtype = u.dtype.scalar()
-      if scalar_dtype.itemsize == 2: return ('vgpr', (count + 1) // 2, 2, [(1, 1)] * (count // 2))
-      elif scalar_dtype.itemsize == 1: return ('vgpr', (count + 3) // 4, 2, [(1, 1)] * max(0, count - (count + 3) // 4))
-      return ('vgpr', count, 2, [])
+      # Use align=1 for VECTORIZE to reduce fragmentation (WMMA can handle any alignment)
+      if scalar_dtype.itemsize == 2: return ('vgpr', (count + 1) // 2, 1, [(1, 1)] * (count // 2))
+      elif scalar_dtype.itemsize == 1: return ('vgpr', (count + 3) // 4, 1, [(1, 1)] * max(0, count - (count + 3) // 4))
+      return ('vgpr', count, 1, [])
     if u.op is Ops.LOAD:
       # LOAD from REG buffer is an alias, not a new register allocation
       if len(u.src) > 0 and u.src[0].op is Ops.INDEX and len(u.src[0].src) > 0:
@@ -185,8 +200,9 @@ class RDNARegAllocILP:
       temps = []
       if len(u.src) > 0 and u.src[0].op is Ops.INDEX and len(u.src[0].src) > 2:
         temps = [(1, 1)]  # Extra temp for clamped_addr
-      if self._needs_vgpr_pair(u.dtype): return ('vgpr', 2, 2, temps)
-      if hasattr(u.dtype, 'itemsize') and u.dtype.itemsize == 16: return ('vgpr', 4, 2, temps)
+      # Use align=1 for pairs to reduce fragmentation (hardware doesn't require alignment for most ops)
+      if self._needs_vgpr_pair(u.dtype): return ('vgpr', 2, 1, temps)
+      if hasattr(u.dtype, 'itemsize') and u.dtype.itemsize == 16: return ('vgpr', 4, 1, temps)
       return ('vgpr', 1, 1, temps)
     if u.op is Ops.INDEX:
       # INDEX needs a register if the offset is a constant (will be loaded into VGPR)
@@ -216,6 +232,11 @@ class RDNARegAllocILP:
           return ('vgpr', 2, 2, [(1, 1)])
       return ('vgpr', 2, 2, [])
     if u.op is Ops.CAST:
+      # CAST from register-space LOAD reuses the accumulator register (aliased)
+      if (u.src[0].op is Ops.LOAD and len(u.src[0].src) > 0 and u.src[0].src[0].op is Ops.INDEX and
+          len(u.src[0].src[0].src) > 0 and isinstance(u.src[0].src[0].src[0].dtype, PtrDType) and
+          u.src[0].src[0].src[0].dtype.addrspace == AddrSpace.REG):
+        return ('none', 0, 1, [])  # Aliased to accumulator
       if self._needs_vgpr_pair(u.dtype): return ('vgpr', 2, 2, [])
       return ('vgpr', 1, 1, [])
     if u.op in {Ops.ADD, Ops.SUB, Ops.MUL, Ops.AND, Ops.OR, Ops.XOR, Ops.SHL, Ops.SHR,
@@ -265,6 +286,16 @@ class RDNARegAllocILP:
           reg_type, num_regs, align = 'vgpr', 1, 1
       if reg_type == 'none' and not temps: continue
       def_pos, death_pos = self._get_live_interval(u)
+      if DEBUG_ILP >= 2 and u.op is Ops.SHL and death_pos - def_pos > 500:
+        root = self._get_root(u)
+        # Find what uses this SHL at its last_use position
+        last_use_pos = self._last_use.get(u, -1)
+        user_at_last = None
+        for j, uu in enumerate(self.uops):
+          if j == last_use_pos:
+            for src in uu.src:
+              if src == u: user_at_last = uu.op.name
+        print(f"[ILP] Long SHL@{def_pos}: death={death_pos} (lifetime={death_pos-def_pos}), root={root.op.name}@{self.uops.index(root) if root in self.uops else '?'}, last_use={last_use_pos} by {user_at_last}")
       if reg_type == 'vgpr' and num_regs > 0:
         vgpr_requests.append((u, def_pos, death_pos, num_regs, align))
         self._vgpr_sizes[u] = num_regs
@@ -277,9 +308,10 @@ class RDNARegAllocILP:
         self._temp_alloc_order[u].append(temp_reg)
         vgpr_requests.append((temp_reg, i, i, temp_count, temp_align))
         self._vgpr_sizes[temp_reg] = temp_count
-    # Reserve v0-v2 for workitem IDs (packed in v0 with .amdhsa_system_vgpr_workitem_id 2)
+    # Reserve v0 for packed workitem IDs (.amdhsa_system_vgpr_workitem_id 2)
+    # v1-v2 are free (not used by RDNA3 ABI when using packed workitem IDs)
     # Reserve s0-s4: s[0:1] kernarg ptr, s[2:4] group IDs
-    self._vgpr_assignment = self._solve_register_class(vgpr_requests, self.MAX_VGPR, reserved={0, 1, 2})
+    self._vgpr_assignment = self._solve_register_class(vgpr_requests, self.MAX_VGPR, reserved={0})
     self._sgpr_assignment = self._solve_register_class(sgpr_requests, self.MAX_SGPR, reserved={0, 1, 2, 3, 4})
 
   def _solve_register_class(self, requests: list[tuple[UOp | TempReg, int, int, int, int]], max_regs: int,
@@ -326,15 +358,67 @@ class RDNARegAllocILP:
 
     # Solve with timeout (longer for large problems)
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 30.0 if n > 500 else 5.0
+    solver.parameters.max_time_in_seconds = 60.0  # Increase timeout for complex problems
     status = solver.Solve(model)
 
-    # If solver fails (timeout, infeasible, etc.), fall back to empty assignment
-    # The greedy allocator will handle all registers
+    if DEBUG_ILP:
+      # Count alignment requirements
+      align_counts = {}
+      size_counts = {}
+      for item, def_pos, death_pos, num_regs, align in requests:
+        align_counts[align] = align_counts.get(align, 0) + 1
+        size_counts[num_regs] = size_counts.get(num_regs, 0) + 1
+      print(f"[ILP] Solver status: {solver.StatusName(status)} for {n} requests, aligns: {align_counts}, sizes: {size_counts}")
+
+    # If solver fails (timeout, infeasible, etc.), print debug info and raise error
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-      if DEBUG_ILP:
-        print(f"[ILP] {n} requests -> FALLBACK TO GREEDY (status: {solver.StatusName(status)})")
-      return {}
+      # Calculate max live registers at any point using sweep-line
+      # Key insight: death_pos is when register is last used. At death_pos:
+      # 1. The consumer reads the value
+      # 2. The register can be freed immediately after reading
+      # 3. The consumer allocates its output registers
+      # So deaths should happen BEFORE births at the same position.
+      # We achieve this by having deaths at (pos, 0) and births at (pos, 1).
+      events = []
+      for item, def_pos, death_pos, num_regs, align in requests:
+        events.append((def_pos, 1, num_regs))        # birth at def_pos (type=1 for birth)
+        events.append((death_pos, 0, -num_regs))     # death AT death_pos (type=0 for death)
+      events.sort()  # sorts by (pos, type, delta) - deaths (type=0) before births (type=1)
+      live = 0
+      max_live = 0
+      for pos, typ, delta in events:
+        live += delta
+        if live > max_live: max_live = live
+      # Count by op type
+      from collections import Counter
+      op_counts = Counter()
+      op_lifetimes: dict[str, list[int]] = {}
+      for item, def_pos, death_pos, num_regs, _ in requests:
+        op_name = item.op.name if isinstance(item, UOp) else f"TempReg({item.parent.op.name})"
+        op_counts[op_name] += num_regs
+        if op_name not in op_lifetimes: op_lifetimes[op_name] = []
+        op_lifetimes[op_name].append(death_pos - def_pos)
+      # Show avg lifetimes for high-count ops
+      lifetime_info = {k: f"avg={sum(v)/len(v):.1f}, max={max(v)}" for k, v in op_lifetimes.items() if len(v) > 10}
+      # Find the position of max live and verify count
+      events_sorted = sorted(events)  # already sorted correctly
+      live = 0
+      peak_pos = 0
+      peak_live = 0
+      for pos, typ, delta in events_sorted:
+        live += delta
+        if live > peak_live:
+          peak_live = live
+          peak_pos = pos
+      # Show requests around the peak - count manually
+      peak_requests = [(item, def_pos, death_pos, num_regs) for item, def_pos, death_pos, num_regs, _ in requests
+                       if def_pos <= peak_pos <= death_pos]
+      peak_total = sum(num_regs for _, _, _, num_regs in peak_requests)
+      peak_by_op = Counter()
+      for item, _, _, num_regs in peak_requests:
+        peak_by_op[item.op.name if isinstance(item, UOp) else f"TempReg({item.parent.op.name})"] += num_regs
+      raise RuntimeError(f"[ILP] kernel requires {max_live} (sweep) / {peak_total} (manual) VGPRs at position {peak_pos}. "
+                         f"Usage: {dict(op_counts)}\nAt peak: {dict(peak_by_op)}\nLifetimes: {lifetime_info}")
 
     result = {requests[i][0]: solver.Value(reg_vars[i]) for i in range(n)}
 
@@ -472,7 +556,7 @@ class RDNARegAllocILP:
       self._schedule_vgpr_death(reg + 1, owner)
     return VGPR(reg, 2)
 
-  def alloc_vgpr_range(self, owner: UOp, count: int = 8) -> VGPR:
+  def alloc_vgpr_range(self, owner: UOp, count: int = 8, align: int = 2) -> VGPR:
     # First call for this owner: use ILP-assigned register if available
     if owner not in self._vgpr_allocated and owner in self._vgpr_assignment:
       self._vgpr_allocated.add(owner)
@@ -590,6 +674,13 @@ class RDNARegAllocILP:
   def max_vgpr(self) -> int: return self._max_vgpr
   @property
   def max_sgpr(self) -> int: return self._max_sgpr
+
+  def finalize(self):
+    """Check final register counts - ILP pre-validates during solve, so this is mostly a no-op."""
+    if self._max_vgpr > self.MAX_VGPR:
+      raise RuntimeError(f"VGPR overflow: allocated up to v{self._max_vgpr-1}, max v{self.MAX_VGPR-1}")
+    if self._max_sgpr > self.MAX_SGPR:
+      raise RuntimeError(f"SGPR overflow: allocated up to s{self._max_sgpr-1}, max s{self.MAX_SGPR-1}")
 
   @staticmethod
   def needs_vgpr_pair(dtype: DType) -> bool:

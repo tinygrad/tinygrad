@@ -92,7 +92,8 @@ class TestRDNAConditionalAccess(unittest.TestCase):
     mask = Tensor([1, 1, 0, 1], dtype=dtypes.int32)
     # The masked gather should not fault on index 100 since mask is 0
     # This requires proper conditional load handling
-    result = buf[indices.where(mask, 0)].numpy()
+    # mask.where(indices, 0) = if mask then indices else 0
+    result = buf[mask.where(indices, 0)].numpy()
     expected = [1.0, 2.0, 1.0, 3.0]  # masked lane uses index 0
     self.assertEqual(list(result), expected)
 

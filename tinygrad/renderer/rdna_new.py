@@ -15,11 +15,21 @@ from extra.assembly.rdna3.asm import waitcnt
 from extra.assembly.rdna3.autogen import (
   v, s, VGPR, SGPR, VCC_LO, EXEC_LO, NULL,
   # VOP1
-  v_mov_b32_e32, v_cvt_f32_i32_e32, v_cvt_i32_f32_e32, v_cvt_f32_u32_e32, v_cvt_u32_f32_e32,
-  v_cvt_f16_f32_e32, v_cvt_f32_f16_e32, v_rcp_f32_e32, v_rcp_f64_e32, v_sqrt_f32_e32,
+  v_mov_b32_e32,
+  v_cvt_f32_i32_e32 as _v_cvt_f32_i32, v_cvt_i32_f32_e32 as _v_cvt_i32_f32,
+  v_cvt_f32_u32_e32 as _v_cvt_f32_u32, v_cvt_u32_f32_e32 as _v_cvt_u32_f32,
+  v_cvt_f16_f32_e32 as _v_cvt_f16_f32, v_cvt_f32_f16_e32 as _v_cvt_f32_f16,
+  v_rcp_f32_e32, v_rcp_f64_e32, v_sqrt_f32_e32,
   v_exp_f32_e32, v_log_f32_e32, v_trunc_f32_e32, v_sin_f32_e32, v_fract_f32_e32,
   v_cvt_f64_f32_e32, v_cvt_f32_f64_e32, v_cvt_f64_i32_e32, v_cvt_f64_u32_e32,
   v_cvt_i32_f64_e32, v_cvt_u32_f64_e32, v_trunc_f64_e32, v_floor_f64_e32,
+  # VOP3 (e64) versions for high registers
+  v_cvt_f16_f32_e64 as _v_cvt_f16_f32_e64,
+  v_cvt_f32_f16_e64 as _v_cvt_f32_f16_e64,
+  v_cvt_f32_i32_e64 as _v_cvt_f32_i32_e64,
+  v_cvt_i32_f32_e64 as _v_cvt_i32_f32_e64,
+  v_cvt_f32_u32_e64 as _v_cvt_f32_u32_e64,
+  v_cvt_u32_f32_e64 as _v_cvt_u32_f32_e64,
   # VOP2
   v_add_f32_e32, v_sub_f32_e32, v_mul_f32_e32, v_and_b32_e32, v_or_b32_e32, v_xor_b32_e32,
   v_add_nc_u32_e32, v_sub_nc_u32_e32, v_lshlrev_b32_e32, v_lshrrev_b32_e32, v_ashrrev_i32_e32,
@@ -49,6 +59,21 @@ from extra.assembly.rdna3.autogen import (
 def _sw(ctx, a, b):
   ar, br = ctx.get_reg(a), ctx.get_reg(b)
   return (br, ar) if isinstance(br, (int, float)) and not isinstance(ar, (int, float)) else (ar, br)
+
+# VOP1 instructions in e32 encoding can only address VGPRs 0-127 for destination.
+# For VGPRs >= 128, we must use e64 encoding. These wrappers select the right encoding.
+def v_cvt_f16_f32(dst, src):
+  return _v_cvt_f16_f32_e64(dst, src) if isinstance(dst, VGPR) and dst.idx >= 128 else _v_cvt_f16_f32(dst, src)
+def v_cvt_f32_f16(dst, src):
+  return _v_cvt_f32_f16_e64(dst, src) if isinstance(dst, VGPR) and dst.idx >= 128 else _v_cvt_f32_f16(dst, src)
+def v_cvt_f32_i32(dst, src):
+  return _v_cvt_f32_i32_e64(dst, src) if isinstance(dst, VGPR) and dst.idx >= 128 else _v_cvt_f32_i32(dst, src)
+def v_cvt_i32_f32(dst, src):
+  return _v_cvt_i32_f32_e64(dst, src) if isinstance(dst, VGPR) and dst.idx >= 128 else _v_cvt_i32_f32(dst, src)
+def v_cvt_f32_u32(dst, src):
+  return _v_cvt_f32_u32_e64(dst, src) if isinstance(dst, VGPR) and dst.idx >= 128 else _v_cvt_f32_u32(dst, src)
+def v_cvt_u32_f32(dst, src):
+  return _v_cvt_u32_f32_e64(dst, src) if isinstance(dst, VGPR) and dst.idx >= 128 else _v_cvt_u32_f32(dst, src)
 
 # Helper for 64-bit bitwise operations: apply op to both low and high 32-bit parts
 def _bitwise64(ctx, a, b, op):
@@ -84,51 +109,51 @@ def _refined_rcp_f32(ctx, x, a):
 # Module-level PatternMatcher for simple ALU and CAST operations
 render_ops = PatternMatcher([
   # CAST: float32 <-> int32/uint32
-  (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.int32),), name="x"), lambda ctx,x,a: [v_cvt_f32_i32_e32(ctx.dst, ctx.get_reg(a))]),
-  (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.uint32),), name="x"), lambda ctx,x,a: [v_cvt_f32_u32_e32(ctx.dst, ctx.get_reg(a))]),
-  (UPat(Ops.CAST, dtypes.int32, (UPat.var("a", dtypes.float32),), name="x"), lambda ctx,x,a: [v_cvt_i32_f32_e32(ctx.dst, ctx.get_reg(a))]),
-  (UPat(Ops.CAST, dtypes.uint32, (UPat.var("a", dtypes.float32),), name="x"), lambda ctx,x,a: [v_cvt_u32_f32_e32(ctx.dst, ctx.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.int32),), name="x"), lambda ctx,x,a: [v_cvt_f32_i32(ctx.dst, ctx.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.uint32),), name="x"), lambda ctx,x,a: [v_cvt_f32_u32(ctx.dst, ctx.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.int32, (UPat.var("a", dtypes.float32),), name="x"), lambda ctx,x,a: [v_cvt_i32_f32(ctx.dst, ctx.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.uint32, (UPat.var("a", dtypes.float32),), name="x"), lambda ctx,x,a: [v_cvt_u32_f32(ctx.dst, ctx.get_reg(a))]),
   # CAST: float32 <-> small int
   (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", (dtypes.uint8, dtypes.uint16)),), name="x"),
-   lambda ctx,x,a: [v_cvt_f32_u32_e32(ctx.dst, ctx.get_reg(a))]),
+   lambda ctx,x,a: [v_cvt_f32_u32(ctx.dst, ctx.get_reg(a))]),
   (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.int8),), name="x"),
-   lambda ctx,x,a: [v_bfe_i32(ctx.dst, ctx.get_reg(a), 0, 8), v_cvt_f32_i32_e32(ctx.dst, ctx.dst)]),
+   lambda ctx,x,a: [v_bfe_i32(ctx.dst, ctx.get_reg(a), 0, 8), v_cvt_f32_i32(ctx.dst, ctx.dst)]),
   (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.int16),), name="x"),
-   lambda ctx,x,a: [v_bfe_i32(ctx.dst, ctx.get_reg(a), 0, 16), v_cvt_f32_i32_e32(ctx.dst, ctx.dst)]),
+   lambda ctx,x,a: [v_bfe_i32(ctx.dst, ctx.get_reg(a), 0, 16), v_cvt_f32_i32(ctx.dst, ctx.dst)]),
   (UPat(Ops.CAST, (dtypes.uint8, dtypes.uint16), (UPat.var("a", dtypes.float32),), name="x"),
-   lambda ctx,x,a: [v_cvt_u32_f32_e32(ctx.dst, ctx.get_reg(a))]),
+   lambda ctx,x,a: [v_cvt_u32_f32(ctx.dst, ctx.get_reg(a))]),
   (UPat(Ops.CAST, (dtypes.int8, dtypes.int16), (UPat.var("a", dtypes.float32),), name="x"),
-   lambda ctx,x,a: [v_cvt_i32_f32_e32(ctx.dst, ctx.get_reg(a))]),
+   lambda ctx,x,a: [v_cvt_i32_f32(ctx.dst, ctx.get_reg(a))]),
   # CAST: float16 <-> float32
-  (UPat(Ops.CAST, dtypes.float16, (UPat.var("a", dtypes.float32),), name="x"), lambda ctx,x,a: [v_cvt_f16_f32_e32(ctx.dst, ctx.get_reg(a))]),
-  (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.float16),), name="x"), lambda ctx,x,a: [v_cvt_f32_f16_e32(ctx.dst, ctx.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.float16, (UPat.var("a", dtypes.float32),), name="x"), lambda ctx,x,a: [v_cvt_f16_f32(ctx.dst, ctx.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.float16),), name="x"), lambda ctx,x,a: [v_cvt_f32_f16(ctx.dst, ctx.get_reg(a))]),
   # CAST: float16 -> ints (via f32)
   (UPat(Ops.CAST, dtypes.int32, (UPat.var("a", dtypes.float16),), name="x"),
-   lambda ctx,x,a: [v_cvt_f32_f16_e32(ctx.dst, ctx.get_reg(a)), v_cvt_i32_f32_e32(ctx.dst, ctx.dst)]),
+   lambda ctx,x,a: [v_cvt_f32_f16(ctx.dst, ctx.get_reg(a)), v_cvt_i32_f32(ctx.dst, ctx.dst)]),
   (UPat(Ops.CAST, dtypes.uint32, (UPat.var("a", dtypes.float16),), name="x"),
-   lambda ctx,x,a: [v_cvt_f32_f16_e32(ctx.dst, ctx.get_reg(a)), v_cvt_u32_f32_e32(ctx.dst, ctx.dst)]),
+   lambda ctx,x,a: [v_cvt_f32_f16(ctx.dst, ctx.get_reg(a)), v_cvt_u32_f32(ctx.dst, ctx.dst)]),
   (UPat(Ops.CAST, (dtypes.int8, dtypes.int16), (UPat.var("a", dtypes.float16),), name="x"),
-   lambda ctx,x,a: [v_cvt_f32_f16_e32(ctx.dst, ctx.get_reg(a)), v_cvt_i32_f32_e32(ctx.dst, ctx.dst)]),
+   lambda ctx,x,a: [v_cvt_f32_f16(ctx.dst, ctx.get_reg(a)), v_cvt_i32_f32(ctx.dst, ctx.dst)]),
   (UPat(Ops.CAST, (dtypes.uint8, dtypes.uint16), (UPat.var("a", dtypes.float16),), name="x"),
-   lambda ctx,x,a: [v_cvt_f32_f16_e32(ctx.dst, ctx.get_reg(a)), v_cvt_u32_f32_e32(ctx.dst, ctx.dst)]),
+   lambda ctx,x,a: [v_cvt_f32_f16(ctx.dst, ctx.get_reg(a)), v_cvt_u32_f32(ctx.dst, ctx.dst)]),
   # CAST: ints -> float16 (via f32)
   (UPat(Ops.CAST, dtypes.float16, (UPat.var("a", dtypes.ints),), name="x"),
-   lambda ctx,x,a: [v_cvt_f32_i32_e32(ctx.dst, ctx.get_reg(a)), v_cvt_f16_f32_e32(ctx.dst, ctx.dst)]),
+   lambda ctx,x,a: [v_cvt_f32_i32(ctx.dst, ctx.get_reg(a)), v_cvt_f16_f32(ctx.dst, ctx.dst)]),
   # CAST: bfloat16 <-> float32 (shift)
   (UPat(Ops.CAST, dtypes.bfloat16, (UPat.var("a", dtypes.float32),), name="x"), lambda ctx,x,a: [v_lshrrev_b32_e32(ctx.dst, 16, ctx.get_reg(a))]),
   (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.bfloat16),), name="x"), lambda ctx,x,a: [v_lshlrev_b32_e32(ctx.dst, 16, ctx.get_reg(a))]),
   # CAST: bfloat16 -> ints (via f32)
   (UPat(Ops.CAST, dtypes.int32, (UPat.var("a", dtypes.bfloat16),), name="x"),
-   lambda ctx,x,a: [v_lshlrev_b32_e32(ctx.dst, 16, ctx.get_reg(a)), v_cvt_i32_f32_e32(ctx.dst, ctx.dst)]),
+   lambda ctx,x,a: [v_lshlrev_b32_e32(ctx.dst, 16, ctx.get_reg(a)), v_cvt_i32_f32(ctx.dst, ctx.dst)]),
   (UPat(Ops.CAST, dtypes.uint32, (UPat.var("a", dtypes.bfloat16),), name="x"),
-   lambda ctx,x,a: [v_lshlrev_b32_e32(ctx.dst, 16, ctx.get_reg(a)), v_cvt_u32_f32_e32(ctx.dst, ctx.dst)]),
+   lambda ctx,x,a: [v_lshlrev_b32_e32(ctx.dst, 16, ctx.get_reg(a)), v_cvt_u32_f32(ctx.dst, ctx.dst)]),
   (UPat(Ops.CAST, (dtypes.int8, dtypes.int16), (UPat.var("a", dtypes.bfloat16),), name="x"),
-   lambda ctx,x,a: [v_lshlrev_b32_e32(ctx.dst, 16, ctx.get_reg(a)), v_cvt_i32_f32_e32(ctx.dst, ctx.dst)]),
+   lambda ctx,x,a: [v_lshlrev_b32_e32(ctx.dst, 16, ctx.get_reg(a)), v_cvt_i32_f32(ctx.dst, ctx.dst)]),
   (UPat(Ops.CAST, (dtypes.uint8, dtypes.uint16), (UPat.var("a", dtypes.bfloat16),), name="x"),
-   lambda ctx,x,a: [v_lshlrev_b32_e32(ctx.dst, 16, ctx.get_reg(a)), v_cvt_u32_f32_e32(ctx.dst, ctx.dst)]),
+   lambda ctx,x,a: [v_lshlrev_b32_e32(ctx.dst, 16, ctx.get_reg(a)), v_cvt_u32_f32(ctx.dst, ctx.dst)]),
   # CAST: ints -> bfloat16 (via f32)
   (UPat(Ops.CAST, dtypes.bfloat16, (UPat.var("a", dtypes.ints),), name="x"),
-   lambda ctx,x,a: [v_cvt_f32_i32_e32(ctx.dst, ctx.get_reg(a)), v_lshrrev_b32_e32(ctx.dst, 16, ctx.dst)]),
+   lambda ctx,x,a: [v_cvt_f32_i32(ctx.dst, ctx.get_reg(a)), v_lshrrev_b32_e32(ctx.dst, 16, ctx.dst)]),
   # CAST: float64 <-> float32
   (UPat(Ops.CAST, dtypes.float64, (UPat.var("a", dtypes.float32),), name="x"), lambda ctx,x,a: [v_cvt_f64_f32_e32(ctx.dst, ctx.get_reg(a))]),
   (UPat(Ops.CAST, dtypes.float32, (UPat.var("a", dtypes.float64),), name="x"), lambda ctx,x,a: [v_cvt_f32_f64_e32(ctx.dst, ctx.get_reg(a))]),
@@ -238,14 +263,14 @@ render_ops = PatternMatcher([
   (UPat(Ops.CAST, dtypes.bool, (UPat.var("a", dtypes.float32),), name="x"),
    lambda ctx,x,a: [v_cmp_neq_f32_e32(0.0, ctx.get_reg(a)), v_cndmask_b32_e64(ctx.dst, 0, 1, VCC_LO)]),
   (UPat(Ops.CAST, dtypes.bool, (UPat.var("a", dtypes.float16),), name="x"),
-   lambda ctx,x,a: [v_cvt_f32_f16_e32(ctx.dst, ctx.get_reg(a)), v_cmp_neq_f32_e32(0.0, ctx.dst), v_cndmask_b32_e64(ctx.dst, 0, 1, VCC_LO)]),
+   lambda ctx,x,a: [v_cvt_f32_f16(ctx.dst, ctx.get_reg(a)), v_cmp_neq_f32_e32(0.0, ctx.dst), v_cndmask_b32_e64(ctx.dst, 0, 1, VCC_LO)]),
   (UPat(Ops.CAST, dtypes.bool, (UPat.var("a", dtypes.float64),), name="x"),
    lambda ctx,x,a: [v_cvt_f32_f64_e32(ctx.dst, ctx.get_reg(a)), v_cmp_neq_f32_e32(0.0, ctx.dst), v_cndmask_b32_e64(ctx.dst, 0, 1, VCC_LO)]),
   (UPat(Ops.CAST, dtypes.bool, (UPat.var("a", dtypes.bfloat16),), name="x"),
    lambda ctx,x,a: [v_lshlrev_b32_e32(ctx.dst, 16, ctx.get_reg(a)), v_cmp_neq_f32_e32(0.0, ctx.dst), v_cndmask_b32_e64(ctx.dst, 0, 1, VCC_LO)]),
   (UPat(Ops.CAST, dtypes.float64, (UPat.var("a", dtypes.bool),), name="x"),
    lambda ctx,x,a: [v_cvt_f64_u32_e32(ctx.dst, ctx.get_reg(a))]),  # bool -> float64
-  (UPat(Ops.CAST, dtypes.floats, (UPat.var("a", dtypes.bool),), name="x"), lambda ctx,x,a: [v_cvt_f32_u32_e32(ctx.dst, ctx.get_reg(a))]),
+  (UPat(Ops.CAST, dtypes.floats, (UPat.var("a", dtypes.bool),), name="x"), lambda ctx,x,a: [v_cvt_f32_u32(ctx.dst, ctx.get_reg(a))]),
   # ADD: float64, floats, int64, default to i32
   (UPat(Ops.ADD, dtype=dtypes.float64, src=(UPat.var("a"), UPat.var("b")), name="x"),
    lambda ctx,x,a,b: [v_add_f64(ctx.dst, ctx.get_reg(a), ctx.get_reg(b))]),
@@ -439,11 +464,9 @@ class RDNARenderer(Renderer):
           if math.isinf(val) or math.isnan(val):
             val = struct.unpack("I", struct.pack("f", val))[0]
         elif isinstance(val, int) and -16 <= val <= 64: return val
-        # Load literal constant into register
-        reg = ra.alloc_vgpr(u)
-        code.append(v_mov_b32_e32(reg, val))
-        r[u] = reg
-        return reg
+        # Non-inline constant: just return the literal value
+        # Instructions that can't use literals will handle this in their own code
+        return val
       raise ValueError(f"No register for {u}")
 
     def emit_cmp(op: Ops, dtype: DType, dst: VGPR, a, b):
@@ -467,13 +490,13 @@ class RDNARenderer(Renderer):
       if dtype in (dtypes.int64, dtypes.uint64):
         a_lo, a_hi = (v[a.idx], v[a.idx+1]) if isinstance(a, VGPR) else (a, 0)
         b_lo, b_hi = (v[b.idx], v[b.idx+1]) if isinstance(b, VGPR) else (b, 0)
+        scratch = v[ra.get_scratch_vgpr(1)]  # Use scratch VGPR pool instead of allocating new
         if op is Ops.CMPLT:
           # a < b: (hi(a) < hi(b)) || (hi(a) == hi(b) && lo(a) < lo(b))
           cmp_hi = v_cmp_lt_i32_e32 if dtype == dtypes.int64 else v_cmp_lt_u32_e32
           code.append(cmp_hi(a_hi, b_hi))  # hi(a) < hi(b) -> VCC
           code.append(v_cndmask_b32_e64(dst, 0, 1, VCC_LO))  # tmp1 = hi(a) < hi(b)
           code.append(v_cmp_eq_u32_e32(a_hi, b_hi))  # hi(a) == hi(b) -> VCC
-          scratch = ra.alloc_vgpr(u)
           code.append(v_cndmask_b32_e64(scratch, 0, 1, VCC_LO))  # tmp2 = hi(a) == hi(b)
           code.append(v_cmp_lt_u32_e32(a_lo, b_lo))  # lo(a) < lo(b) -> VCC (always unsigned for low part)
           code.append(v_cndmask_b32_e64(scratch, 0, scratch, VCC_LO))  # tmp2 = hi_eq && lo_lt
@@ -489,7 +512,6 @@ class RDNARenderer(Renderer):
           code.append(v_cmp_ne_u32_e32(a_hi, b_hi))
           code.append(v_cndmask_b32_e64(dst, 0, 1, VCC_LO))
           code.append(v_cmp_ne_u32_e32(a_lo, b_lo))
-          scratch = ra.alloc_vgpr(u)
           code.append(v_cndmask_b32_e64(scratch, 0, 1, VCC_LO))
           code.append(v_or_b32_e32(dst, dst, scratch))
         return
@@ -615,12 +637,12 @@ class RDNARenderer(Renderer):
           # sign = (a < 0) XOR (b < 0) -> top bit indicates result is negative
           code.append(v_xor_b32_e32(tmp_sign, a, b))
           # Do unsigned division: |a| / |b|
-          code.append(v_cvt_f32_u32_e32(tmp_abs_a, tmp_abs_a))  # float(|a|)
-          code.append(v_cvt_f32_u32_e32(tmp_abs_b, tmp_abs_b))  # float(|b|)
+          code.append(v_cvt_f32_u32(tmp_abs_a, tmp_abs_a))  # float(|a|)
+          code.append(v_cvt_f32_u32(tmp_abs_b, tmp_abs_b))  # float(|b|)
           code.append(v_rcp_f32_e32(tmp_abs_b, tmp_abs_b))  # 1/|b|
           code.append(v_mul_f32_e32(tmp_abs_a, tmp_abs_a, tmp_abs_b))  # |a|/|b|
           code.append(v_trunc_f32_e32(tmp_abs_a, tmp_abs_a))  # trunc - may be 1 too low
-          code.append(v_cvt_u32_f32_e32(tmp_q, tmp_abs_a))  # quotient estimate
+          code.append(v_cvt_u32_f32(tmp_q, tmp_abs_a))  # quotient estimate
           # Correct: if (q+1)*|b| <= |a|, then q should be q+1
           code.append(v_add_nc_u32_e32(tmp_abs_a, 1, tmp_q))  # q+1
           code.append(v_mul_lo_u32(tmp_rem, tmp_abs_a, tmp_abs_b_orig))  # (q+1)*|b|
@@ -637,12 +659,12 @@ class RDNARenderer(Renderer):
           tmp_b = ra.alloc_vgpr(u)
           tmp_q = ra.alloc_vgpr(u)
           tmp_rem = ra.alloc_vgpr(u)
-          code.append(v_cvt_f32_u32_e32(tmp_a, a))  # float(a)
-          code.append(v_cvt_f32_u32_e32(tmp_b, b))  # float(b)
+          code.append(v_cvt_f32_u32(tmp_a, a))  # float(a)
+          code.append(v_cvt_f32_u32(tmp_b, b))  # float(b)
           code.append(v_rcp_f32_e32(tmp_b, tmp_b))  # 1/b (approximate)
           code.append(v_mul_f32_e32(tmp_a, tmp_a, tmp_b))  # a/b
           code.append(v_trunc_f32_e32(tmp_a, tmp_a))  # trunc(a/b) - may be 1 too low
-          code.append(v_cvt_u32_f32_e32(tmp_q, tmp_a))  # quotient estimate
+          code.append(v_cvt_u32_f32(tmp_q, tmp_a))  # quotient estimate
           # Correct: if (q+1)*b <= a, then q should be q+1
           code.append(v_add_nc_u32_e32(tmp_a, 1, tmp_q))  # q+1
           code.append(v_mul_lo_u32(tmp_rem, tmp_a, b))  # (q+1)*b
@@ -667,12 +689,12 @@ class RDNARenderer(Renderer):
           code.append(v_cmp_gt_i32_e32(0, b))
           code.append(v_cndmask_b32_e64(tmp_abs_b, b, tmp_abs_b, VCC_LO))  # |b|
           # Unsigned division of |a| / |b|
-          code.append(v_cvt_f32_u32_e32(tmp1, tmp_abs_a))
-          code.append(v_cvt_f32_u32_e32(tmp2, tmp_abs_b))
+          code.append(v_cvt_f32_u32(tmp1, tmp_abs_a))
+          code.append(v_cvt_f32_u32(tmp2, tmp_abs_b))
           code.append(v_rcp_f32_e32(tmp2, tmp2))
           code.append(v_mul_f32_e32(tmp1, tmp1, tmp2))
           code.append(v_trunc_f32_e32(tmp1, tmp1))
-          code.append(v_cvt_u32_f32_e32(tmp1, tmp1))  # quotient magnitude
+          code.append(v_cvt_u32_f32(tmp1, tmp1))  # quotient magnitude
           # mod = |a| - quotient * |b|
           code.append(v_mul_lo_u32(tmp2, tmp1, tmp_abs_b))
           code.append(v_sub_nc_u32_e32(dst, tmp_abs_a, tmp2))  # |a| % |b|
@@ -689,12 +711,12 @@ class RDNARenderer(Renderer):
           tmp_rem = ra.alloc_vgpr(u)     # temp for correction
           code.append(v_mov_b32_e32(tmp_a_orig, a))  # save a
           code.append(v_mov_b32_e32(tmp_b_orig, b))  # save b
-          code.append(v_cvt_f32_u32_e32(tmp1, a))    # float(a)
-          code.append(v_cvt_f32_u32_e32(tmp2, b))    # float(b)
+          code.append(v_cvt_f32_u32(tmp1, a))    # float(a)
+          code.append(v_cvt_f32_u32(tmp2, b))    # float(b)
           code.append(v_rcp_f32_e32(tmp2, tmp2))     # 1/b
           code.append(v_mul_f32_e32(tmp1, tmp1, tmp2))  # a/b
           code.append(v_trunc_f32_e32(tmp1, tmp1))   # trunc(a/b)
-          code.append(v_cvt_u32_f32_e32(tmp_q, tmp1))  # quotient estimate
+          code.append(v_cvt_u32_f32(tmp_q, tmp1))  # quotient estimate
           # Correct quotient: if (q+1)*b <= a, then q should be q+1
           code.append(v_add_nc_u32_e32(tmp1, 1, tmp_q))  # q+1
           code.append(v_mul_lo_u32(tmp_rem, tmp1, tmp_b_orig))  # (q+1)*b
@@ -739,8 +761,13 @@ class RDNARenderer(Renderer):
       elif u.op is Ops.DEFINE_REG:
         # Register-space buffer for WMMA/tensor core outputs
         # dtype is a pointer to register space with size = element count
-        num_regs = u.dtype.size if hasattr(u.dtype, 'size') and u.dtype.size > 0 else 16
-        r[u] = ra.alloc_vgpr_range(u, num_regs)
+        num_elems = u.dtype.size if hasattr(u.dtype, 'size') and u.dtype.size > 0 else 16
+        # For f64, each element needs 2 VGPRs; for f32/i32, 1 VGPR per element
+        scalar_size = u.dtype.base.itemsize if hasattr(u.dtype, 'base') else 4
+        regs_per_elem = (scalar_size + 3) // 4  # ceil(itemsize / 4)
+        num_regs = num_elems * regs_per_elem
+        # Use align=1 for accumulators - no hardware alignment requirement
+        r[u] = ra.alloc_vgpr_range(u, num_regs, align=1)
 
       elif u.op is Ops.SPECIAL:
         # SPECIAL arg is a string like 'lidx0', 'gidx1', etc.
@@ -769,7 +796,25 @@ class RDNARenderer(Renderer):
                     Ops.TRUNC, Ops.NEG, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.WHERE,
                     Ops.IDIV, Ops.MOD):
         maybe_wait(u.src)  # Wait for any pending loads used by this operation
-        dst = ra.alloc_vgpr_pair(u) if RDNARegAlloc.needs_vgpr_pair(u.dtype) else ra.alloc_vgpr(u)
+        needs_pair = RDNARegAlloc.needs_vgpr_pair(u.dtype)
+        dst = None
+        # Try to reuse a source register if it dies here and owns the register
+        if not needs_pair and u.op in (Ops.ADD, Ops.SUB, Ops.MUL, Ops.AND, Ops.OR, Ops.XOR, Ops.SHL, Ops.SHR, Ops.MAX):
+          for src in u.src:
+            if src.op == Ops.CONST: continue  # Skip constants
+            src_reg = get_reg(src)
+            if not isinstance(src_reg, VGPR): continue
+            # Check if source dies here and we own the register
+            src_last_use = ra.get_last_use(src)
+            owner = ra.get_vgpr_owner(src_reg.idx)
+            if src_last_use == i and owner == src:
+              # Can reuse this source register
+              dst = src_reg
+              # Transfer ownership to this UOp
+              ra.reschedule_vgpr_death(src_reg.idx, u)
+              break
+        if dst is None:
+          dst = ra.alloc_vgpr_pair(u) if needs_pair else ra.alloc_vgpr(u)
         r[u] = dst
         ctx = RenderContext(ra, r, code, get_reg)
         ctx.dst = dst
@@ -782,7 +827,23 @@ class RDNARenderer(Renderer):
         if src_dtype == dst_dtype:
           r[u] = get_reg(u.src[0])
         else:
-          dst = ra.alloc_vgpr_pair(u) if RDNARegAlloc.needs_vgpr_pair(dst_dtype) else ra.alloc_vgpr(u)
+          # Check if source is a register-space LOAD (accumulator) and can be overwritten
+          # This is safe because: 1) accumulator element is only used by this CAST
+          # 2) CAST result (smaller type) fits in source register
+          # 3) Source is from DEFINE_REG range which will be freed as a whole later
+          src_is_reg_load = (u.src[0].op == Ops.LOAD and len(u.src[0].src) > 0 and
+                             u.src[0].src[0].op == Ops.INDEX and len(u.src[0].src[0].src) > 0 and
+                             isinstance(u.src[0].src[0].src[0].dtype, PtrDType) and
+                             u.src[0].src[0].src[0].dtype.addrspace == AddrSpace.REG)
+          src_last_use = ra.get_last_use(u.src[0])
+          can_reuse_reg_load = (src_is_reg_load and src_last_use == i and
+                                dst_dtype.itemsize <= src_dtype.itemsize and
+                                not RDNARegAlloc.needs_vgpr_pair(dst_dtype))
+          if can_reuse_reg_load:
+            # Reuse the accumulator register for CAST result
+            dst = get_reg(u.src[0])
+          else:
+            dst = ra.alloc_vgpr_pair(u) if RDNARegAlloc.needs_vgpr_pair(dst_dtype) else ra.alloc_vgpr(u)
           r[u] = dst
           ctx = RenderContext(ra, r, code, get_reg)
           ctx.dst = dst
@@ -855,6 +916,9 @@ class RDNARenderer(Renderer):
           # Global memory load: use buffer SGPR pair as saddr
           buf_result = r.get(buf_uop) if buf_uop in r else get_reg(buf_uop)
           buf_reg = buf_result[0] if isinstance(buf_result, tuple) else buf_result
+          # IMPORTANT: Get condition register BEFORE allocating dst to prevent register collision
+          # The condition register must stay alive until after we use it for the exec mask
+          cond_reg = get_reg(cond_uop) if cond_uop is not None else None
           if itemsize == 16:
             dst = ra.alloc_vgpr_range(u, 4)  # b128 needs 4 VGPRs
           elif itemsize == 8:
@@ -881,8 +945,7 @@ class RDNARenderer(Renderer):
               for j in range(itemsize // 4):
                 code.append(v_mov_b32_e32(v[dst.idx + j] if hasattr(dst, 'idx') else dst, 0))
 
-            # Set up exec mask based on condition (use dynamically allocated SGPR)
-            cond_reg = get_reg(cond_uop)
+            # Set up exec mask based on condition (cond_reg already retrieved above)
             code.append(v_cmp_ne_i32_e32(0, cond_reg))  # VCC = (cond != 0)
             # Clamp address to 0 for masked lanes to prevent invalid memory accesses
             # Even with exec masking, garbage addresses can cause protection faults
@@ -925,21 +988,18 @@ class RDNARenderer(Renderer):
         dtype = val_uop.dtype
         itemsize = dtype.itemsize if hasattr(dtype, 'itemsize') else 4
         # STORE data operand must be a VGPR, not an inline constant
-        # Check if we already loaded this constant into a register (for reuse)
+        # Use scratch VGPRs for constants - they only need to live for the store instruction
         if isinstance(val, (int, float)):
-          if val_uop in r and isinstance(r[val_uop], VGPR):
-            val = r[val_uop]  # Reuse previously allocated register
-          elif itemsize == 8:
-            # 64-bit constant needs 2 VGPRs
-            tmp = ra.alloc_vgpr_pair(val_uop)
-            code.append(v_mov_b32_e32(v[tmp.idx], val & 0xffffffff if isinstance(val, int) else val))
-            code.append(v_mov_b32_e32(v[tmp.idx + 1], (val >> 32) & 0xffffffff if isinstance(val, int) else 0))
-            r[val_uop] = tmp  # Store for reuse
-            val = tmp
+          if itemsize == 8:
+            # 64-bit constant needs 2 scratch VGPRs
+            scratch_base = ra.get_scratch_vgpr(2)
+            code.append(v_mov_b32_e32(v[scratch_base], val & 0xffffffff if isinstance(val, int) else val))
+            code.append(v_mov_b32_e32(v[scratch_base + 1], (val >> 32) & 0xffffffff if isinstance(val, int) else 0))
+            val = VGPR(scratch_base, 2)
           else:
-            tmp = ra.alloc_vgpr(val_uop)
+            scratch_base = ra.get_scratch_vgpr(1)
+            tmp = v[scratch_base]
             code.append(v_mov_b32_e32(tmp, val))
-            r[val_uop] = tmp  # Store for reuse
             val = tmp
         buf_uop = idx_uop.src[0] if idx_uop.op is Ops.INDEX else idx_uop
 
@@ -1036,8 +1096,9 @@ class RDNARenderer(Renderer):
         # src: (A_vec, B_vec, C_acc)
         dtype_in, dtype_out = u.arg[2], u.dtype.scalar()
         a_reg, b_reg, c_reg = get_reg(u.src[0]), get_reg(u.src[1]), get_reg(u.src[2])
-        # Output is 8 floats (or 8 halves) = 8 VGPRs
-        dst = ra.alloc_vgpr_range(u, 8)
+        # WMMA operates in-place: dst can be same as src2 (accumulator)
+        # This saves 8 registers per WMMA by reusing the accumulator
+        dst = c_reg
         # Select the right WMMA instruction based on input/output types
         if dtype_in == dtypes.half and dtype_out == dtypes.float:
           code.append(v_wmma_f32_16x16x16_f16(dst, a_reg, b_reg, c_reg))
@@ -1063,21 +1124,34 @@ class RDNARenderer(Renderer):
         count = len(u.src)
         scalar_dtype = u.dtype.scalar()
         if scalar_dtype.itemsize == 2:  # float16, int16, etc. - 2 elements per VGPR
+          import struct
           num_regs = (count + 1) // 2
+          # First, read ALL source registers to ensure they're allocated before scratch
+          # This prevents scratch from conflicting with source registers
+          src_regs = [get_reg(src) for src in u.src]
           dst_range = ra.alloc_vgpr_range(u, num_regs)
-          for j, src in enumerate(u.src):
-            src_reg = get_reg(src)
+          scratch_idx = ra.get_scratch_vgpr(1)  # Reuse single scratch for all shifts
+          for j, src_reg in enumerate(src_regs):
             reg_idx = dst_range.idx + j // 2
+            # If src is a constant (not VGPR), handle it specially
+            if not isinstance(src_reg, VGPR):
+              # For f16 float constants, convert to f16 binary format and load as integer
+              if scalar_dtype == dtypes.float16 and isinstance(src_reg, float):
+                f16_bits = struct.unpack('<H', struct.pack('<e', src_reg))[0]
+                code.append(v_mov_b32_e32(v[scratch_idx], f16_bits))
+              else:
+                code.append(v_mov_b32_e32(v[scratch_idx], src_reg))
+              src_reg = v[scratch_idx]
             if j % 2 == 0:  # Low 16 bits - mask to clear upper bits (src may have garbage there)
               code.append(v_and_b32_e32(v[reg_idx], 0xFFFF, src_reg))
             else:  # High 16 bits - shift to upper 16 and OR
-              tmp = ra.alloc_vgpr(u)
-              code.append(v_lshlrev_b32_e32(tmp, 16, src_reg))
-              code.append(v_or_b32_e32(v[reg_idx], v[reg_idx], tmp))
+              code.append(v_lshlrev_b32_e32(v[scratch_idx], 16, src_reg))
+              code.append(v_or_b32_e32(v[reg_idx], v[reg_idx], v[scratch_idx]))
           r[u] = dst_range
         elif scalar_dtype.itemsize == 1:  # int8, uint8 - 4 elements per VGPR
           num_regs = (count + 3) // 4
           dst_range = ra.alloc_vgpr_range(u, num_regs)
+          scratch_idx = ra.get_scratch_vgpr(1)  # Reuse single scratch for all shifts
           for j, src in enumerate(u.src):
             src_reg = get_reg(src)
             reg_idx = dst_range.idx + j // 4
@@ -1085,15 +1159,25 @@ class RDNARenderer(Renderer):
             if byte_idx == 0:  # Low byte - mask to clear upper bits
               code.append(v_and_b32_e32(v[reg_idx], 0xFF, src_reg))
             else:  # Shift and OR into position
-              tmp = ra.alloc_vgpr(u)
-              code.append(v_and_b32_e32(tmp, 0xFF, src_reg))  # Mask first
-              code.append(v_lshlrev_b32_e32(tmp, byte_idx * 8, tmp))
-              code.append(v_or_b32_e32(v[reg_idx], v[reg_idx], tmp))
+              code.append(v_and_b32_e32(v[scratch_idx], 0xFF, src_reg))  # Mask first
+              code.append(v_lshlrev_b32_e32(v[scratch_idx], byte_idx * 8, v[scratch_idx]))
+              code.append(v_or_b32_e32(v[reg_idx], v[reg_idx], v[scratch_idx]))
           r[u] = dst_range
         else:  # 32-bit or larger - one or more VGPRs per element
+          # Check if sources are already in contiguous registers (e.g., from DEFINE_REG)
+          src_regs = [get_reg(src) for src in u.src]
+          # Check contiguity: all VGPRs and consecutive indices
+          all_vgpr = all(isinstance(sr, VGPR) for sr in src_regs)
+          if all_vgpr:
+            base_idx = src_regs[0].idx
+            is_contiguous = all(sr.idx == base_idx + j for j, sr in enumerate(src_regs))
+            if is_contiguous:
+              # Sources already contiguous - no need to allocate or copy
+              r[u] = VGPR(base_idx, count)
+              continue
+          # Not contiguous - need to allocate and copy
           dst_range = ra.alloc_vgpr_range(u, count)
-          for j, src in enumerate(u.src):
-            src_reg = get_reg(src)
+          for j, src_reg in enumerate(src_regs):
             code.append(v_mov_b32_e32(v[dst_range.idx + j], src_reg))
           r[u] = dst_range
 
@@ -1108,6 +1192,9 @@ class RDNARenderer(Renderer):
             # Two elements per 32-bit VGPR: element i is in VGPR[i//2], bits [15:0] if i%2==0, [31:16] if i%2==1
             reg_idx = vec_reg.idx + idx // 2
             if idx % 2 == 1:  # Need high 16 bits - shift and extract
+              # Always allocate a proper VGPR for extracted high bits
+              # Using scratch here would cause conflicts when multiple GEPs extract high bits
+              # that are then all used by a single VECTORIZE
               dst = ra.alloc_vgpr(u)
               code.append(v_lshrrev_b32_e32(dst, 16, v[reg_idx]))
               r[u] = dst
@@ -1120,6 +1207,9 @@ class RDNARenderer(Renderer):
             if byte_idx == 0:
               r[u] = v[reg_idx]  # Low byte, can use directly
             else:
+              # Always allocate a proper VGPR for extracted bytes
+              # Using scratch here would cause conflicts when multiple GEPs extract bytes
+              # that are then all used by a single VECTORIZE
               dst = ra.alloc_vgpr(u)
               code.append(v_lshrrev_b32_e32(dst, byte_idx * 8, v[reg_idx]))
               r[u] = dst
@@ -1169,7 +1259,8 @@ class RDNARenderer(Renderer):
     all_code = prologue + code + epilogue
     asm_lines = [item if isinstance(item, str) else item.disasm() for item in all_code]
 
-    # Generate kernel header
+    # Finalize and check register limits
+    ra.finalize()
     v_cnt, s_cnt = ra.max_vgpr, ra.max_sgpr
     header = f""".text
 .amdgcn_target "amdgcn-amd-amdhsa--{self.arch}"

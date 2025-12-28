@@ -270,7 +270,8 @@ def disasm(inst: Inst) -> str:
       is_f16_dst, is_f16_src, is_f16_src2 = False, op_name.endswith('16'), False
     elif m := re.match(r'v_(?:cvt|frexp_exp)_([a-z0-9_]+)_([a-z0-9]+)', op_name):
       dst_type, src_type = m.group(1), m.group(2)
-      is_f16_dst, is_f16_src, is_f16_src2 = _is_16bit(dst_type), _is_16bit(src_type), _is_16bit(src_type)
+      # cvt instructions don't use .l/.h suffix on dst/src even for 16-bit types
+      is_f16_dst, is_f16_src, is_f16_src2 = False, False, False
       is_f64_dst, is_f64_src, is_f64 = '64' in dst_type, '64' in src_type, False
     elif re.match(r'v_mad_[iu]32_[iu]16', op_name):
       is_f16_dst, is_f16_src, is_f16_src2 = False, True, False  # 32-bit dst, 16-bit src0/src1, 32-bit src2

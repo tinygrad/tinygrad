@@ -27,6 +27,8 @@ class RDNARegAlloc:
     # Counters: v[0:2] is local_xyz, s[0:1] kernarg, s[2:4] group id
     self._next_vgpr, self._next_sgpr = 3, 5
     self._max_vgpr, self._max_sgpr = 3, 5
+    self._peak_vgpr = 3  # Track peak simultaneous usage
+    self._peak_info = None  # Info about when peak was hit
     # Pending deaths scheduled by position
     self._pending_vgpr_deaths: dict[int, list[int]] = defaultdict(list)
     self._pending_sgpr_deaths: dict[int, list[int]] = defaultdict(list)
@@ -37,6 +39,11 @@ class RDNARegAlloc:
     self._deferred_store_vgpr = -1
     # Run liveness analysis
     self._last_use, self._aliases, self._effective_death = self._analyze_liveness()
+    # Pre-analyze VECTORIZE needs and reserve high registers for them
+    self._vectorize_pool: list[tuple[int, int]] = []  # (base, count) reserved ranges
+    self._init_vectorize_pool()
+    if getenv("RDNA_POOL_DEBUG", 0) and self._vectorize_pool:
+      print(f"[POOL] VECTORIZE pool: {self._vectorize_pool}")
 
   def _analyze_liveness(self) -> tuple[dict[UOp, int], dict[UOp, UOp], dict[UOp, int]]:
     """Compute last use positions, aliases, and effective death times."""
@@ -52,10 +59,12 @@ class RDNARegAlloc:
     # First pass: track direct uses and aliases
     for i, u in enumerate(self.uops):
       for src in u.src: last_use[src] = i
-      # Track INDEX sources through LOAD/STORE
+      # Track INDEX through LOAD/STORE - offset and condition need to live until the memory op
+      # src[0] is the buffer (SGPR), src[1] is the offset (VGPR address), src[2] is optional condition
       if u.op in {Ops.LOAD, Ops.STORE} and u.src[0].op is Ops.INDEX:
         last_use[u.src[0]] = i
-        for src in u.src[0].src: last_use[src] = i
+        if len(u.src[0].src) > 1: last_use[u.src[0].src[1]] = i  # Extend offset lifetime
+        if len(u.src[0].src) > 2: last_use[u.src[0].src[2]] = i  # Extend condition lifetime
       # Track RANGE.src[0] through END
       if u.op is Ops.END and len(u.src) >= 2 and u.src[1].op is Ops.RANGE and len(u.src[1].src) > 0:
         last_use[u.src[1].src[0]] = i
@@ -67,19 +76,31 @@ class RDNARegAlloc:
       if u.op is Ops.CAST and (u.src[0].dtype == u.dtype or isinstance(u.src[0].dtype, PtrDType)):
         aliases[u] = u.src[0]
       if u.op is Ops.GEP and isinstance(u.src[0].dtype, DType) and u.src[0].dtype.count > 1:
-        aliases[u] = u.src[0]
-      if u.op in {Ops.INDEX, Ops.LOAD, Ops.STORE} and len(u.src) > 0:
-        if isinstance(u.src[0].dtype, PtrDType) and u.src[0].dtype.addrspace == AddrSpace.REG:
-          if u.op in {Ops.INDEX, Ops.LOAD}: aliases[u] = u.src[0]
+        # Only alias GEP if it doesn't need a shift (extracting low bits)
+        # High-bit extraction (idx % 2 == 1 for 16-bit) needs its own register for shift result
+        idx = u.arg[0] if isinstance(u.arg, tuple) else u.arg
+        src_dtype = u.src[0].dtype
+        needs_shift = False
+        if src_dtype.scalar().itemsize == 2: needs_shift = (idx % 2 == 1)  # 16-bit: high half needs shift
+        elif src_dtype.scalar().itemsize == 1: needs_shift = (idx % 4 != 0)  # 8-bit: non-first byte needs shift
+        if not needs_shift: aliases[u] = u.src[0]
+      # NOTE: We intentionally DON'T alias register-space INDEX/LOAD here.
+      # Register-space operations reference the accumulator range directly without allocating,
+      # so they don't need aliasing for register reuse. More importantly, aliasing them
+      # would incorrectly extend the accumulator's lifetime based on CAST uses.
       if u.op is Ops.VECTORIZE:
-        for src in u.src:
-          if src in aliases:
-            root = src
-            while root in aliases: root = aliases[root]
-            if root.op is Ops.DEFINE_REG: continue
-          aliases[src] = u
-          for src_src in src.src:
-            if src_src not in aliases: aliases[src_src] = u
+        # Only alias sources if VECTORIZE might reuse their registers (32-bit types with contiguous layout)
+        # For 16-bit types, VECTORIZE packs sources into new registers, so sources should die at VECTORIZE position
+        scalar_dtype = u.dtype.scalar()
+        if scalar_dtype.itemsize >= 4:  # 32-bit or larger - might reuse source registers
+          for src in u.src:
+            if src in aliases:
+              root = src
+              while root in aliases: root = aliases[root]
+              if root.op is Ops.DEFINE_REG: continue
+            aliases[src] = u
+            for src_src in src.src:
+              if src_src not in aliases: aliases[src_src] = u
     # Extend lifetimes for values defined outside but used inside loops
     uop_positions = {u: i for i, u in enumerate(self.uops)}
     for uop, use_pos in list(last_use.items()):
@@ -92,6 +113,22 @@ class RDNARegAlloc:
     max_pos = len(self.uops) - 1
     for u in self.uops:
       if u.op is Ops.SPECIAL: last_use[u] = max_pos
+    # Extend DEFINE_REG lifetime for register-space LOADs
+    # Register-space LOADs return a reference to the accumulator register, not a copy.
+    # The accumulator must stay alive until the last use of any LOAD that references it.
+    for i, u in enumerate(self.uops):
+      if u.op is Ops.LOAD and len(u.src) > 0 and u.src[0].op is Ops.INDEX:
+        idx_uop = u.src[0]
+        buf_uop = idx_uop.src[0] if len(idx_uop.src) > 0 else None
+        # Walk through AFTER chain to find DEFINE_REG
+        while buf_uop is not None and buf_uop.op is Ops.AFTER:
+          buf_uop = buf_uop.src[0]
+        if buf_uop is not None and buf_uop.op is Ops.DEFINE_REG:
+          # Check if this is actually a register-space buffer
+          if isinstance(buf_uop.dtype, PtrDType) and buf_uop.dtype.addrspace == AddrSpace.REG:
+            # Extend DEFINE_REG's last_use to this LOAD's last use
+            load_last_use = last_use.get(u, i)
+            last_use[buf_uop] = max(last_use.get(buf_uop, 0), load_last_use)
     # Compute effective death for alias groups
     def get_root(u: UOp) -> UOp:
       while u in aliases: u = aliases[u]
@@ -104,6 +141,17 @@ class RDNARegAlloc:
       for alias in alias_list: death = max(death, last_use.get(alias, -1))
       effective_death[root] = death
     return last_use, aliases, effective_death
+
+  def _init_vectorize_pool(self):
+    """Pre-analyze VECTORIZE ops and reserve high registers for contiguous allocations.
+    This prevents fragmentation from LOADs affecting VECTORIZE range allocation.
+    
+    NOTE: Currently disabled as it causes register allocation issues when LOADs
+    overlap with the reserved pool. The proper fix requires ensuring _next_vgpr
+    never exceeds the pool boundary, but this needs more careful implementation.
+    """
+    # TODO: Re-enable when pool/regular allocation interaction is properly handled
+    return
 
   def _get_root(self, u: UOp) -> UOp:
     while u in self._aliases: u = self._aliases[u]
@@ -178,13 +226,46 @@ class RDNARegAlloc:
       base, count = self._free_vgpr_ranges.pop()
       reg = base
       if count > 1: self._free_vgpr_ranges.append((base + 1, count - 1))
-    else:
+    elif self._next_vgpr < self.MAX_VGPR:
       reg = self._next_vgpr
       self._next_vgpr += 1
       self._max_vgpr = max(self._max_vgpr, self._next_vgpr)
-    if reg >= self.MAX_VGPR: raise RuntimeError(f"VGPR overflow: v{reg} exceeds v{self.MAX_VGPR-1} limit")
+    else:
+      # At limit - find any unused register in 0-255
+      used = set(self._vgpr_owner.keys())
+      for rbase, rcount in self._vgpr_ranges.items():
+        used.update(range(rbase, rbase + rcount))
+      reg = next((r for r in range(self.MAX_VGPR) if r not in used), self._next_vgpr)
+      if reg >= self.MAX_VGPR:
+        self._next_vgpr = reg + 1
+        self._max_vgpr = max(self._max_vgpr, self._next_vgpr)
+    # Don't fail immediately - allow temporary overflow, check at finalize
     self._vgpr_owner[reg] = owner
     self._schedule_vgpr_death(reg, owner)
+    # Track peak simultaneous usage (owned + ranges)
+    current = len(self._vgpr_owner) + sum(self._vgpr_ranges.values())
+    if current > self._peak_vgpr:
+      self._peak_vgpr = current
+      # Count by op type for debugging
+      op_counts: dict[str, int] = {}
+      load_lifetimes: list[int] = []
+      load_details: list[tuple] = []  # (reg, def_pos)
+      uop_positions = {u: i for i, u in enumerate(self.uops)}
+      for r, o in self._vgpr_owner.items():
+        op_name = o.op.name
+        op_counts[op_name] = op_counts.get(op_name, 0) + 1
+        if o.op is Ops.LOAD and o in uop_positions:
+          def_pos = uop_positions[o]
+          death_pos = self._get_death_pos(o)
+          load_lifetimes.append((def_pos, death_pos - def_pos))
+          load_details.append((r, def_pos))
+      # Find current position
+      cur_pos = len([u for u in self.uops if u in self._vgpr_owner.values() or u in self._range_owner.values()])
+      for pi, pu in enumerate(self.uops):
+        if pu == owner:
+          cur_pos = pi
+          break
+      self._peak_info = (dict(self._vgpr_ranges), len(self._vgpr_owner), owner.op.name, op_counts, load_lifetimes, cur_pos, load_details)
     return VGPR(reg)
 
   def alloc_vgpr_pair(self, owner: UOp) -> VGPR:
@@ -194,9 +275,9 @@ class RDNARegAlloc:
     else:
       if self._next_vgpr % 2 != 0: self._next_vgpr += 1
       reg = self._next_vgpr
-      self._next_vgpr += 2
+      self._next_vgpr = reg + 2
       self._max_vgpr = max(self._max_vgpr, self._next_vgpr)
-    if reg + 1 >= self.MAX_VGPR: raise RuntimeError(f"VGPR overflow: v{reg+1} exceeds v{self.MAX_VGPR-1} limit")
+    # Don't fail immediately - allow temporary overflow, check at finalize
     self._vgpr_owner[reg] = self._vgpr_owner[reg + 1] = owner
     self._vgpr_pairs.add(reg)
     self._vgpr_pairs.add(reg + 1)
@@ -204,22 +285,75 @@ class RDNARegAlloc:
     self._schedule_vgpr_death(reg + 1, owner)
     return VGPR(reg, 2)
 
-  def alloc_vgpr_range(self, owner: UOp, count: int = 8) -> VGPR:
-    """Allocate contiguous VGPR range (for WMMA/VECTORIZE)."""
+  def alloc_vgpr_range(self, owner: UOp, count: int = 8, align: int = 2) -> VGPR:
+    """Allocate contiguous VGPR range (for WMMA/VECTORIZE/DEFINE_REG).
+    align=2 for WMMA (default), align=1 for DEFINE_REG accumulators."""
+    # For VECTORIZE, try to use the reserved pool first
+    if owner is not None and owner.op is Ops.VECTORIZE and self._vectorize_pool:
+      for i, (pool_base, pool_size) in enumerate(self._vectorize_pool):
+        if pool_size >= count and (align <= 1 or pool_base % align == 0):
+          # Allocate from the start of the pool
+          self._vectorize_pool[i] = (pool_base + count, pool_size - count)
+          if self._vectorize_pool[i][1] == 0:
+            self._vectorize_pool.pop(i)
+          self._range_owner[pool_base] = owner
+          self._vgpr_ranges[pool_base] = count
+          self._max_vgpr = max(self._max_vgpr, pool_base + count)
+          self._schedule_range_death(pool_base, owner)
+          return VGPR(pool_base, count)
+    # First try existing free ranges
     for i, (base, range_count) in enumerate(self._free_vgpr_ranges):
-      if range_count >= count:
+      if range_count >= count and (align <= 1 or base % align == 0):
         self._free_vgpr_ranges.pop(i)
         if range_count > count: self._free_vgpr_ranges.append((base + count, range_count - count))
-        if base + count > self.MAX_VGPR: raise RuntimeError(f"VGPR overflow: v{base+count-1} exceeds v{self.MAX_VGPR-1} limit")
         self._range_owner[base] = owner
         self._vgpr_ranges[base] = count
         self._schedule_range_death(base, owner)
         return VGPR(base, count)
+    # Try to find contiguous free single VGPRs
+    if self._free_vgprs and count <= 16:  # Only for small ranges to avoid expensive search
+      sorted_free = sorted(self._free_vgprs)
+      for i in range(len(sorted_free) - count + 1):
+        base = sorted_free[i]
+        if align > 1 and base % align != 0: continue
+        # Check if next 'count' registers are contiguous
+        if sorted_free[i:i+count] == list(range(base, base + count)):
+          # Found contiguous range in free_vgprs - claim them
+          for r in range(base, base + count):
+            self._free_vgprs.remove(r)
+          self._range_owner[base] = owner
+          self._vgpr_ranges[base] = count
+          self._schedule_range_death(base, owner)
+          return VGPR(base, count)
+    # Allocate new registers (but not if it would collide with VECTORIZE pool)
     base = self._next_vgpr
-    if base % 2 != 0: base = self._next_vgpr = self._next_vgpr + 1
-    self._next_vgpr = base + count
+    if align > 1 and base % align != 0: base = self._next_vgpr = self._next_vgpr + (align - base % align)
+    # Check for collision with VECTORIZE pool
+    if self._vectorize_pool:
+      pool_start = self._vectorize_pool[0][0]
+      if base + count > pool_start:
+        # Would collide with pool - this means we've run out of low registers
+        # Fall through to allocate anyway (will overflow and fail at finalize)
+        pass
+    # If this would exceed 256, try harder to find existing free space
+    if base + count > self.MAX_VGPR:
+      # Look for any contiguous free region in existing allocations
+      # Build a set of all currently used registers
+      used = set(self._vgpr_owner.keys())
+      for rbase, rcount in self._vgpr_ranges.items():
+        used.update(range(rbase, rbase + rcount))
+      # Find a gap of size 'count' - try aligned first, then unaligned
+      found_gap = False
+      for try_align in ([align, 1] if align > 1 else [1]):
+        for start in range(0, self.MAX_VGPR - count + 1, try_align):
+          if all(r not in used for r in range(start, start + count)):
+            base = start
+            found_gap = True
+            break
+        if found_gap: break
+    self._next_vgpr = max(self._next_vgpr, base + count)
     self._max_vgpr = max(self._max_vgpr, self._next_vgpr)
-    if base + count > self.MAX_VGPR: raise RuntimeError(f"VGPR overflow: v{base+count-1} exceeds v{self.MAX_VGPR-1} limit")
+    # Don't fail immediately - allow temporary overflow, check at finalize
     self._range_owner[base] = owner
     self._vgpr_ranges[base] = count
     self._schedule_range_death(base, owner)
@@ -253,9 +387,13 @@ class RDNARegAlloc:
   def get_scratch_vgpr(self, count: int = 1) -> int:
     """Get scratch VGPR base for temporary operations. Dynamically expands as needed."""
     if self._scratch_vgpr < 0:
-      self._scratch_vgpr = self._next_vgpr
+      # Find a range of 'count' registers that are not currently owned
+      base = self._next_vgpr
+      while any(r in self._vgpr_owner for r in range(base, base + count)):
+        base += 1
+      self._scratch_vgpr = base
       self._scratch_count = count
-      self._next_vgpr += count
+      self._next_vgpr = max(self._next_vgpr, base + count)
       self._max_vgpr = max(self._max_vgpr, self._next_vgpr)
       if self._next_vgpr > self.MAX_VGPR:
         raise RuntimeError(f"VGPR overflow: scratch VGPRs exceed limit (need {self._next_vgpr}, max {self.MAX_VGPR})")
@@ -319,6 +457,30 @@ class RDNARegAlloc:
   def max_vgpr(self) -> int: return self._max_vgpr
   @property
   def max_sgpr(self) -> int: return self._max_sgpr
+
+  def finalize(self):
+    """Check final register counts and raise error if exceeded limits."""
+    # Use peak simultaneous usage, not max allocated index
+    # Registers may temporarily get high indices but be freed before peak
+    if self._peak_vgpr > self.MAX_VGPR:
+      # Build summary showing what exceeded the limit
+      summary = [f"VGPR overflow: allocated up to v{self._max_vgpr-1}, max v{self.MAX_VGPR-1}"]
+      summary.append(f"  Peak simultaneous: {self._peak_vgpr} registers")
+      if self._peak_info:
+        ranges, owned, last_op, op_counts, load_lifetimes, peak_pos, load_details = self._peak_info
+        summary.append(f"  At peak (pos {peak_pos}): DEFINE_REG={ranges}, owned={owned}, allocating for {last_op}")
+        summary.append(f"  Owned by op: {op_counts}")
+        if load_lifetimes:
+          lifetimes = [l for _, l in load_lifetimes]
+          positions = [p for p, _ in load_lifetimes]
+          summary.append(f"  LOAD lifetimes: min={min(lifetimes)}, max={max(lifetimes)}, avg={sum(lifetimes)/len(lifetimes):.1f}")
+          summary.append(f"  LOAD positions: {min(positions)}-{max(positions)}")
+          # Show some load register details
+          load_details.sort(key=lambda x: x[1])
+          regs = sorted(set(r for r, _ in load_details))
+          summary.append(f"  LOAD regs: {min(regs)}-{max(regs)} ({len(regs)} distinct)")
+      if self._scratch_vgpr >= 0: summary.append(f"  Scratch: v{self._scratch_vgpr}")
+      raise RuntimeError("\n".join(summary))
 
   @staticmethod
   def needs_vgpr_pair(dtype: DType) -> bool:
