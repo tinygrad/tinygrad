@@ -32,20 +32,22 @@ C_asm.uop.buffer.allocate()
 
 @track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.name, (ret.function_name,), ret=ret))
 def get_asm_gemm(ast:UOp, fp:pathlib.Path) -> ProgramSpec:
-  return ProgramSpec("gemm", fp.read_text(), Device.DEFAULT, ast, global_size=[128, 86, 1], local_size=[256, 1, 1], globals=[0, 1, 2])
+  src = fp.read_text()
+  lib = Device[Device.DEFAULT].compiler.compile(src)
+  return ProgramSpec("gemm", src, Device.DEFAULT, ast, lib=lib, global_size=[1024, 1, 1], local_size=[256, 1, 1], globals=[0, 1, 2])
 
 sched = C_tiny.schedule()
 assert len(sched) == 1
 eis:list[ExecItem] = [sched[-1].lower()]
 ast = eis[0].ast
 prg = get_asm_gemm(ast, pathlib.Path(__file__).parent/"gemm.s")
-eis.append(ExecItem(ast, [C_asm.uop.buffer, from_torch(A).uop.buffer, from_torch(B).uop.buffer], prg=CompiledRunner(prg)))
+eis.append(ExecItem(ast, [C_asm.uop.buffer, from_torch(B).uop.buffer, from_torch(A).uop.buffer], prg=CompiledRunner(prg)))
 
 for ei in eis: ei.run(wait=True)
 
 # ** correctness
 
-import ctypes, torch
+import ctypes
 
 def torch_bf16(t:Tensor) -> torch.tensor:
   asm_out = t.to("cpu").realize().uop.buffer._buf
