@@ -1,9 +1,13 @@
+# Run assembly on the AMD runtime and check correctness
+# VIZ=2 to profile
 import pathlib
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.renderer import ProgramSpec
 from tinygrad.uop.ops import track_rewrites, UOp
 from tinygrad.helpers import TracingKey
+
+fp = pathlib.Path(__file__).parent/"gemm.s"
 
 # ** generate inputs on CPU
 
@@ -40,7 +44,7 @@ sched = C_tiny.schedule()
 assert len(sched) == 1
 eis:list[ExecItem] = [sched[-1].lower()]
 ast = eis[0].ast
-prg = get_asm_gemm(ast, pathlib.Path(__file__).parent/"gemm.s")
+prg = get_asm_gemm(ast, fp)
 eis.append(ExecItem(ast, [C_asm.uop.buffer, from_torch(B).uop.buffer, from_torch(A).uop.buffer], prg=CompiledRunner(prg)))
 
 for ei in eis: ei.run(wait=True)
