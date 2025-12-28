@@ -1,11 +1,16 @@
 import numpy as np
 import unittest
-import subprocess, struct, math
+import subprocess, struct, math, textwrap
 from tinygrad import Tensor, dtypes, Device, UOp
+from tinygrad.uop.ops import Ops
 from tinygrad.helpers import getenv
 from tinygrad.runtime.support.compiler_amd import amdgpu_disassemble
 from tinygrad.renderer import ProgramSpec
 from tinygrad.engine.realize import CompiledRunner
+
+from extra.assembly.rdna3.autogen import *
+from extra.assembly.rdna3.asm import waitcnt
+from test.testextra.test_cfg_viz import template
 
 def get_output(asm:str, n_threads:int=1):
   input_asm = "\n".join([ln if ln.strip().startswith('asm volatile') else f'asm volatile("{ln.strip().lstrip()}" : "+v"(a), "+v"(b));'
@@ -28,6 +33,13 @@ def get_output(asm:str, n_threads:int=1):
   car([t.uop.buffer], {}, wait=True)
   return t.numpy()
 
+def run_asm(insts:list, out:Tensor):
+  src = "\n".join([inst if isinstance(inst, str) else inst.disasm() for inst in insts])
+  prg = ProgramSpec("test", template.replace("fn_name", "test").replace("INSTRUCTION", textwrap.dedent(src)), Device.DEFAULT, UOp(Ops.SINK),
+                    global_size=[1, 1, 1], local_size=[1, 1, 1], globals=[0])
+  car = CompiledRunner(prg)
+  car([out.uop.buffer], {}, wait=True)
+
 def f16_to_bits(x:float) -> int: return struct.unpack('<H', struct.pack('<e', x))[0]
 def f32_from_bits(x:int) -> float: return struct.unpack('<f', struct.pack('<I', x))[0]
 def f32_to_bits(x:float) -> int: return struct.unpack('<I', struct.pack('<f', x))[0]
@@ -38,11 +50,16 @@ class TestHW(unittest.TestCase):
     if getenv("MOCKGPU"): subprocess.run(["cargo", "build", "--release", "--manifest-path", "./extra/remu/Cargo.toml"], check=True)
 
   def test_simple(self):
-    out = get_output("""
-    v_mov_b32_e32 %1 42
-    v_mov_b32_e32 %2 %1
-    """)[0]
-    np.testing.assert_equal(out, 42)
+    out = Tensor([0.0]).realize()
+    run_asm([
+      s_load_b64(s[0:1], s[0:1], NULL),
+      v_mov_b32_e32(v[0], 0),
+      v_mov_b32_e32(v[1], 2.0),
+      s_waitcnt(simm16=waitcnt(lgkmcnt=0)),
+      global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]),
+      s_endpgm(),
+    ], out)
+    self.assertEqual(out.tolist(), [2])
 
   def test_exec_mov(self):
     out = get_output("""
