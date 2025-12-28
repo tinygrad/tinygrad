@@ -5157,7 +5157,7 @@ def _VOP1Op_V_CLZ_I32_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   D0.i32 = -1
   for i in range(0, int(31)+1):
     if S0.u32[31 - i] == 1:
-      D0.i32 = i
+      D0.i32 = i; break  # Stop at first 1 bit found
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': SCC._val & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
@@ -5184,7 +5184,7 @@ def _VOP1Op_V_CTZ_I32_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   D0.i32 = -1
   for i in range(0, int(31)+1):
     if S0.u32[i] == 1:
-      D0.i32 = i
+      D0.i32 = i; break  # Stop at first 1 bit found
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': SCC._val & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
@@ -7787,7 +7787,7 @@ def _VOP3Op_V_CLZ_I32_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   D0.i32 = -1
   for i in range(0, int(31)+1):
     if S0.u32[31 - i] == 1:
-      D0.i32 = i
+      D0.i32 = i; break  # Stop at first 1 bit found
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': SCC._val & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
@@ -7814,7 +7814,7 @@ def _VOP3Op_V_CTZ_I32_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   D0.i32 = -1
   for i in range(0, int(31)+1):
     if S0.u32[i] == 1:
-      D0.i32 = i
+      D0.i32 = i; break  # Stop at first 1 bit found
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': SCC._val & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1

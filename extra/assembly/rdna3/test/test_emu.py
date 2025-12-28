@@ -2,7 +2,7 @@
 """Regression tests for the RDNA3 emulator instruction execution.
 Uses run_asm() with memory output, so tests can run on both emulator and real hardware.
 
-Set USE_HW=1 to run on real AMD hardware instead of the emulator.
+Set USE_HW=1 to run on both emulator and real hardware, comparing results.
 """
 
 import ctypes, unittest, os, struct
@@ -12,6 +12,8 @@ from extra.assembly.rdna3.pcode import _i32, _f32
 
 VCC = SrcEnum.VCC_LO  # For VOP3SD sdst field
 USE_HW = os.environ.get("USE_HW", "0") == "1"
+# Tolerance for float comparisons (in ULPs or absolute)
+FLOAT_TOLERANCE = 1e-5
 
 # Output buffer layout: vgpr[16][32], sgpr[16], vcc, scc
 # Each VGPR store writes 32 lanes (128 bytes), so vgpr[i] is at offset i*128
@@ -35,6 +37,12 @@ def get_prologue_epilogue(n_lanes: int) -> tuple[list, list]:
     s_mov_b32(s[81], s[1]),
     v_mov_b32_e32(v[255], v[0]),
   ]
+  # Zero out test registers (v0-v15, s0-s15, vcc) so emu and hw start from same state
+  for i in range(N_VGPRS):
+    prologue.append(v_mov_b32_e32(v[i], 0))
+  for i in range(N_SGPRS):
+    prologue.append(s_mov_b32(s[i], 0))
+  prologue.append(s_mov_b32(s[SrcEnum.VCC_LO - 128], 0))  # zero VCC
 
   # Epilogue: store wave state to memory
   # Use s[90-99] for epilogue temps to stay in safe SGPR range (<100, avoiding VCC=106-107)
@@ -168,9 +176,49 @@ amdhsa.kernels:
 
   return parse_output(bytes(out_buf), n_lanes)
 
+def compare_wave_states(emu_st: WaveState, hw_st: WaveState, n_lanes: int, n_vgprs: int = N_VGPRS) -> list[str]:
+  """Compare two WaveStates and return list of differences."""
+  import math
+  diffs = []
+  # Compare VGPRs - vgpr is list[lane][reg]
+  for i in range(n_vgprs):
+    for lane in range(n_lanes):
+      emu_val = emu_st.vgpr[lane][i]
+      hw_val = hw_st.vgpr[lane][i]
+      if emu_val != hw_val:
+        emu_f, hw_f = _f32(emu_val), _f32(hw_val)
+        # Handle NaN comparison
+        if math.isnan(emu_f) and math.isnan(hw_f):
+          continue
+        diffs.append(f"v[{i}] lane {lane}: emu=0x{emu_val:08x} ({emu_f:.6g}) hw=0x{hw_val:08x} ({hw_f:.6g})")
+  # Compare SGPRs - sgpr is list
+  for i in range(N_SGPRS):
+    emu_val = emu_st.sgpr[i]
+    hw_val = hw_st.sgpr[i]
+    if emu_val != hw_val:
+      diffs.append(f"s[{i}]: emu=0x{emu_val:08x} hw=0x{hw_val:08x}")
+  # Compare VCC
+  if emu_st.vcc != hw_st.vcc:
+    diffs.append(f"vcc: emu=0x{emu_st.vcc:08x} hw=0x{hw_st.vcc:08x}")
+  # Compare SCC
+  if emu_st.scc != hw_st.scc:
+    diffs.append(f"scc: emu={emu_st.scc} hw={hw_st.scc}")
+  return diffs
+
 def run_program(instructions: list, n_lanes: int = 1) -> WaveState:
-  """Run instructions, dump state to memory, return WaveState. Uses USE_HW env var to select backend."""
-  return run_program_hw(instructions, n_lanes) if USE_HW else run_program_emu(instructions, n_lanes)
+  """Run instructions and return WaveState.
+
+  If USE_HW=1, runs on both emulator and hardware, compares results, and raises if they differ.
+  Otherwise, runs only on emulator.
+  """
+  emu_st = run_program_emu(instructions, n_lanes)
+  if USE_HW:
+    hw_st = run_program_hw(instructions, n_lanes)
+    diffs = compare_wave_states(emu_st, hw_st, n_lanes)
+    if diffs:
+      raise AssertionError(f"Emulator vs Hardware mismatch:\n" + "\n".join(diffs))
+    return hw_st  # Return hardware result when both match
+  return emu_st
 
 
 class TestVDivScale(unittest.TestCase):
@@ -447,6 +495,534 @@ class TestTrigonometry(unittest.TestCase):
     expected = math.sin(132000.0 * 2 * math.pi)
     # Allow some tolerance due to precision differences
     self.assertAlmostEqual(result, expected, places=2, msg=f"sin(132000) got {result}, expected ~{expected}")
+
+
+class TestFMA(unittest.TestCase):
+  """Tests for FMA instructions - key for OCML sin argument reduction."""
+
+  def test_v_fma_f32_basic(self):
+    """V_FMA_F32: a*b+c basic case using inline constants only."""
+    # Inline float constants: 0.5, -0.5, 1.0, -1.0, 2.0, -2.0, 4.0, -4.0
+    instructions = [
+      v_mov_b32_e32(v[0], 2.0),  # inline constant
+      v_mov_b32_e32(v[1], 4.0),  # inline constant
+      v_mov_b32_e32(v[2], 1.0),  # inline constant
+      v_fma_f32(v[3], v[0], v[1], v[2]),  # 2*4+1 = 9
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][3]), 9.0, places=5)
+
+  def test_v_fma_f32_negative(self):
+    """V_FMA_F32 with negative multiplier (used in sin reduction)."""
+    instructions = [
+      v_mov_b32_e32(v[0], -2.0),  # inline constant
+      v_mov_b32_e32(v[1], 4.0),   # inline constant
+      v_mov_b32_e32(v[2], 1.0),   # inline constant
+      v_fma_f32(v[3], v[0], v[1], v[2]),  # -2*4+1 = -7
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][3]), -7.0, places=5)
+
+  def test_v_fmac_f32(self):
+    """V_FMAC_F32: d = d + a*b using inline constants."""
+    instructions = [
+      v_mov_b32_e32(v[0], 2.0),  # inline constant
+      v_mov_b32_e32(v[1], 4.0),  # inline constant
+      v_mov_b32_e32(v[2], 1.0),  # inline constant
+      v_fmac_f32_e32(v[2], v[0], v[1]),  # v2 = v2 + v0*v1 = 1 + 2*4 = 9
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][2]), 9.0, places=5)
+
+  def test_v_fmaak_f32(self):
+    """V_FMAAK_F32: d = a * b + K using inline constants."""
+    instructions = [
+      v_mov_b32_e32(v[0], 2.0),  # inline constant
+      v_mov_b32_e32(v[1], 4.0),  # inline constant
+      v_fmaak_f32_e32(v[2], v[0], v[1], 0x3f800000),  # v2 = v0 * v1 + 1.0 = 2*4+1 = 9
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][2]), 9.0, places=5)
+
+  def test_v_fma_f32_with_sgpr(self):
+    """V_FMA_F32: using SGPR for non-inline constant."""
+    # Use SGPR to load 3.0 which is not an inline constant
+    instructions = [
+      s_mov_b32(s[0], f2i(3.0)),  # 3.0 via literal in SGPR
+      v_mov_b32_e32(v[0], 2.0),   # inline constant
+      v_mov_b32_e32(v[1], s[0]),  # 3.0 from SGPR
+      v_mov_b32_e32(v[2], 4.0),   # inline constant
+      v_fma_f32(v[3], v[0], v[1], v[2]),  # 2*3+4 = 10
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][3]), 10.0, places=5)
+
+
+class TestRounding(unittest.TestCase):
+  """Tests for rounding instructions - used in sin argument reduction."""
+
+  def test_v_rndne_f32_half_even(self):
+    """V_RNDNE_F32 rounds to nearest even."""
+    instructions = [
+      s_mov_b32(s[0], f2i(2.5)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_rndne_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 2.0, places=5)  # rounds to even
+
+  def test_v_rndne_f32_half_odd(self):
+    """V_RNDNE_F32 rounds 3.5 to 4 (nearest even)."""
+    instructions = [
+      s_mov_b32(s[0], f2i(3.5)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_rndne_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 4.0, places=5)
+
+  def test_v_rndne_f32_large(self):
+    """V_RNDNE_F32 with large value (like sin reduction uses)."""
+    # sin(1e5) reduction: 1e5 * (1/2pi) ≈ 15915.49...
+    val = 100000.0 * 0.15915494309189535  # 1/(2*pi)
+    instructions = [
+      s_mov_b32(s[0], f2i(val)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_rndne_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    expected = round(val)  # Python's round does banker's rounding
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), expected, places=0)
+
+  def test_v_floor_f32(self):
+    """V_FLOOR_F32 floors to integer."""
+    instructions = [
+      s_mov_b32(s[0], f2i(3.7)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_floor_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 3.0, places=5)
+
+  def test_v_trunc_f32(self):
+    """V_TRUNC_F32 truncates toward zero."""
+    instructions = [
+      s_mov_b32(s[0], f2i(-3.7)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_trunc_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), -3.0, places=5)
+
+  def test_v_fract_f32(self):
+    """V_FRACT_F32 returns fractional part."""
+    instructions = [
+      s_mov_b32(s[0], f2i(3.75)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_fract_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 0.75, places=5)
+
+  def test_v_fract_f32_large(self):
+    """V_FRACT_F32 with large value - precision matters here."""
+    instructions = [
+      s_mov_b32(s[0], f2i(132000.25)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_fract_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][1])
+    # For large floats, fract precision degrades
+    self.assertGreaterEqual(result, 0.0)
+    self.assertLess(result, 1.0)
+
+
+class TestConversion(unittest.TestCase):
+  """Tests for conversion instructions."""
+
+  def test_v_cvt_i32_f32_positive(self):
+    """V_CVT_I32_F32 converts float to signed int."""
+    instructions = [
+      s_mov_b32(s[0], f2i(42.7)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_i32_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 42)
+
+  def test_v_cvt_i32_f32_negative(self):
+    """V_CVT_I32_F32 converts negative float to signed int."""
+    instructions = [
+      s_mov_b32(s[0], f2i(-42.7)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_i32_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # Result is signed, stored as unsigned
+    self.assertEqual(st.vgpr[0][1] & 0xffffffff, (-42) & 0xffffffff)
+
+  def test_v_cvt_i32_f32_large(self):
+    """V_CVT_I32_F32 with large float (used in sin for quadrant)."""
+    # sin reduction converts round(x * 1/2pi) to int for quadrant selection
+    instructions = [
+      s_mov_b32(s[0], f2i(15915.0)),  # ~1e5 / (2*pi)
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_i32_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 15915)
+
+  def test_v_cvt_f32_i32(self):
+    """V_CVT_F32_I32 converts signed int to float."""
+    instructions = [
+      s_mov_b32(s[0], 42),
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_f32_i32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 42.0, places=5)
+
+  def test_v_cvt_f32_u32(self):
+    """V_CVT_F32_U32 converts unsigned int to float."""
+    instructions = [
+      s_mov_b32(s[0], 0xffffffff),  # max u32
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_f32_u32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 4294967296.0, places=-5)
+
+
+class TestBitManipulation(unittest.TestCase):
+  """Tests for bit manipulation - used in sin for quadrant selection."""
+
+  def test_v_and_b32(self):
+    """V_AND_B32 bitwise and."""
+    instructions = [
+      s_mov_b32(s[0], 0xff),
+      s_mov_b32(s[1], 0x0f),
+      v_mov_b32_e32(v[0], s[0]),
+      v_and_b32_e32(v[1], s[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0x0f)
+
+  def test_v_and_b32_quadrant(self):
+    """V_AND_B32 for quadrant extraction (n & 3)."""
+    instructions = [
+      s_mov_b32(s[0], 15915),  # some large number
+      v_mov_b32_e32(v[0], s[0]),
+      v_and_b32_e32(v[1], 3, v[0]),  # n & 3 for quadrant
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 15915 & 3)
+
+  def test_v_lshrrev_b32(self):
+    """V_LSHRREV_B32 logical shift right."""
+    instructions = [
+      s_mov_b32(s[0], 0xff00),
+      v_mov_b32_e32(v[0], s[0]),
+      v_lshrrev_b32_e32(v[1], 8, v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0xff)
+
+  def test_v_lshlrev_b32(self):
+    """V_LSHLREV_B32 logical shift left."""
+    instructions = [
+      s_mov_b32(s[0], 0xff),
+      v_mov_b32_e32(v[0], s[0]),
+      v_lshlrev_b32_e32(v[1], 8, v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0xff00)
+
+  def test_v_xor_b32(self):
+    """V_XOR_B32 bitwise xor (used in sin for sign)."""
+    instructions = [
+      s_mov_b32(s[0], 0x80000000),  # sign bit
+      s_mov_b32(s[1], f2i(1.0)),
+      v_mov_b32_e32(v[0], s[1]),
+      v_xor_b32_e32(v[1], s[0], v[0]),  # flip sign
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), -1.0, places=5)
+
+
+class TestOCMLSinSequence(unittest.TestCase):
+  """Test the specific instruction sequence used in OCML sin."""
+
+  def test_sin_reduction_step1_mul(self):
+    """First step: v12 = |x| * (1/2pi)."""
+    import math
+    one_over_2pi = 1.0 / (2.0 * math.pi)  # 0x3e22f983 in hex
+    x = 100000.0
+    instructions = [
+      s_mov_b32(s[0], f2i(x)),
+      s_mov_b32(s[1], f2i(one_over_2pi)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mul_f32_e32(v[1], s[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][1])
+    expected = x * one_over_2pi
+    self.assertAlmostEqual(result, expected, places=0)
+
+  def test_sin_reduction_step2_round(self):
+    """Second step: round to nearest integer."""
+    import math
+    one_over_2pi = 1.0 / (2.0 * math.pi)
+    x = 100000.0
+    val = x * one_over_2pi  # ~15915.49
+    instructions = [
+      s_mov_b32(s[0], f2i(val)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_rndne_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][1])
+    expected = round(val)
+    self.assertAlmostEqual(result, expected, places=0)
+
+  def test_sin_reduction_step3_fma(self):
+    """Third step: x - n * (pi/2) via FMA."""
+    import math
+    # This is where precision matters - the FMA does: |x| + (-pi/2) * n
+    neg_half_pi = -math.pi / 2.0  # 0xbfc90fda
+    x = 100000.0
+    n = 15915.0
+    instructions = [
+      s_mov_b32(s[0], f2i(neg_half_pi)),
+      s_mov_b32(s[1], f2i(n)),
+      s_mov_b32(s[2], f2i(x)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_fma_f32(v[3], v[0], v[1], v[2]),  # x + (-pi/2) * n
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][3])
+    expected = x + neg_half_pi * n
+    # Allow some tolerance due to float precision
+    self.assertAlmostEqual(result, expected, places=2)
+
+  def test_sin_1e5_full_reduction(self):
+    """Full reduction sequence for sin(1e5)."""
+    import math
+    x = 100000.0
+    one_over_2pi = 1.0 / (2.0 * math.pi)
+    neg_half_pi = -math.pi / 2.0
+
+    instructions = [
+      # Load constants
+      s_mov_b32(s[0], f2i(x)),
+      s_mov_b32(s[1], f2i(one_over_2pi)),
+      s_mov_b32(s[2], f2i(neg_half_pi)),
+      # Step 1: v1 = x * (1/2pi)
+      v_mov_b32_e32(v[0], s[0]),
+      v_mul_f32_e32(v[1], s[1], v[0]),
+      # Step 2: v2 = round(v1)
+      v_rndne_f32_e32(v[2], v[1]),
+      # Step 3: v3 = x + (-pi/2) * round_val (FMA)
+      v_fma_f32(v[3], s[2], v[2], v[0]),
+      # Step 4: convert to int for quadrant
+      v_cvt_i32_f32_e32(v[4], v[2]),
+      # Step 5: quadrant = n & 3
+      v_and_b32_e32(v[5], 3, v[4]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+
+    # Check intermediate values
+    mul_result = i2f(st.vgpr[0][1])
+    round_result = i2f(st.vgpr[0][2])
+    reduced = i2f(st.vgpr[0][3])
+    quadrant = st.vgpr[0][5]
+
+    # Verify results match expected
+    expected_mul = x * one_over_2pi
+    expected_round = round(expected_mul)
+    expected_reduced = x + neg_half_pi * expected_round
+    expected_quadrant = int(expected_round) & 3
+
+    self.assertAlmostEqual(mul_result, expected_mul, places=0, msg=f"mul: got {mul_result}, expected {expected_mul}")
+    self.assertAlmostEqual(round_result, expected_round, places=0, msg=f"round: got {round_result}, expected {expected_round}")
+    self.assertEqual(quadrant, expected_quadrant, f"quadrant: got {quadrant}, expected {expected_quadrant}")
+
+
+class TestMad64(unittest.TestCase):
+  """Tests for V_MAD_U64_U32 - critical for OCML Payne-Hanek sin reduction."""
+
+  def test_v_mad_u64_u32_simple(self):
+    """V_MAD_U64_U32: D = S0 * S1 + S2 (64-bit result)."""
+    # 3 * 4 + 5 = 17
+    instructions = [
+      s_mov_b32(s[0], 3),
+      s_mov_b32(s[1], 4),
+      v_mov_b32_e32(v[2], 5),  # S2 lo
+      v_mov_b32_e32(v[3], 0),  # S2 hi
+      v_mad_u64_u32(v[4], SrcEnum.NULL, s[0], s[1], v[2]),  # result in v[4:5]
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result_lo = st.vgpr[0][4]
+    result_hi = st.vgpr[0][5]
+    result = result_lo | (result_hi << 32)
+    self.assertEqual(result, 17)
+
+  def test_v_mad_u64_u32_large_mult(self):
+    """V_MAD_U64_U32 with large values that overflow 32 bits."""
+    # 0x80000000 * 2 + 0 = 0x100000000
+    instructions = [
+      s_mov_b32(s[0], 0x80000000),
+      s_mov_b32(s[1], 2),
+      v_mov_b32_e32(v[2], 0),
+      v_mov_b32_e32(v[3], 0),
+      v_mad_u64_u32(v[4], SrcEnum.NULL, s[0], s[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result_lo = st.vgpr[0][4]
+    result_hi = st.vgpr[0][5]
+    result = result_lo | (result_hi << 32)
+    self.assertEqual(result, 0x100000000)
+
+  def test_v_mad_u64_u32_with_add(self):
+    """V_MAD_U64_U32 with 64-bit addend."""
+    # 1000 * 1000 + 0x100000000 = 1000000 + 0x100000000 = 0x1000F4240
+    instructions = [
+      s_mov_b32(s[0], 1000),
+      s_mov_b32(s[1], 1000),
+      v_mov_b32_e32(v[2], 0),  # S2 lo
+      v_mov_b32_e32(v[3], 1),  # S2 hi = 0x100000000
+      v_mad_u64_u32(v[4], SrcEnum.NULL, s[0], s[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result_lo = st.vgpr[0][4]
+    result_hi = st.vgpr[0][5]
+    result = result_lo | (result_hi << 32)
+    expected = 1000 * 1000 + 0x100000000
+    self.assertEqual(result, expected)
+
+  def test_v_mad_u64_u32_max_values(self):
+    """V_MAD_U64_U32 with max u32 values."""
+    # 0xFFFFFFFF * 0xFFFFFFFF + 0 = 0xFFFFFFFE00000001
+    instructions = [
+      s_mov_b32(s[0], 0xFFFFFFFF),
+      s_mov_b32(s[1], 0xFFFFFFFF),
+      v_mov_b32_e32(v[2], 0),
+      v_mov_b32_e32(v[3], 0),
+      v_mad_u64_u32(v[4], SrcEnum.NULL, s[0], s[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result_lo = st.vgpr[0][4]
+    result_hi = st.vgpr[0][5]
+    result = result_lo | (result_hi << 32)
+    expected = 0xFFFFFFFF * 0xFFFFFFFF
+    self.assertEqual(result, expected)
+
+
+class TestClz(unittest.TestCase):
+  """Tests for V_CLZ_I32_U32 - count leading zeros, used in Payne-Hanek."""
+
+  def test_v_clz_i32_u32_zero(self):
+    """V_CLZ_I32_U32 of 0 returns -1 (all bits are 0)."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),
+      v_clz_i32_u32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # -1 as unsigned 32-bit
+    self.assertEqual(st.vgpr[0][1], 0xFFFFFFFF)
+
+  def test_v_clz_i32_u32_one(self):
+    """V_CLZ_I32_U32 of 1 returns 31 (31 leading zeros)."""
+    instructions = [
+      v_mov_b32_e32(v[0], 1),
+      v_clz_i32_u32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 31)
+
+  def test_v_clz_i32_u32_msb_set(self):
+    """V_CLZ_I32_U32 of 0x80000000 returns 0 (no leading zeros)."""
+    instructions = [
+      s_mov_b32(s[0], 0x80000000),
+      v_mov_b32_e32(v[0], s[0]),
+      v_clz_i32_u32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0)
+
+  def test_v_clz_i32_u32_half(self):
+    """V_CLZ_I32_U32 of 0x8000 (bit 15) returns 16."""
+    instructions = [
+      s_mov_b32(s[0], 0x8000),
+      v_mov_b32_e32(v[0], s[0]),
+      v_clz_i32_u32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 16)
+
+  def test_v_clz_i32_u32_all_ones(self):
+    """V_CLZ_I32_U32 of 0xFFFFFFFF returns 0."""
+    instructions = [
+      s_mov_b32(s[0], 0xFFFFFFFF),
+      v_mov_b32_e32(v[0], s[0]),
+      v_clz_i32_u32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0)
+
+
+class TestCtz(unittest.TestCase):
+  """Tests for V_CTZ_I32_B32 - count trailing zeros."""
+
+  def test_v_ctz_i32_b32_zero(self):
+    """V_CTZ_I32_B32 of 0 returns -1 (all bits are 0)."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),
+      v_ctz_i32_b32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0xFFFFFFFF)
+
+  def test_v_ctz_i32_b32_one(self):
+    """V_CTZ_I32_B32 of 1 returns 0 (no trailing zeros)."""
+    instructions = [
+      v_mov_b32_e32(v[0], 1),
+      v_ctz_i32_b32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0)
+
+  def test_v_ctz_i32_b32_msb_set(self):
+    """V_CTZ_I32_B32 of 0x80000000 returns 31."""
+    instructions = [
+      s_mov_b32(s[0], 0x80000000),
+      v_mov_b32_e32(v[0], s[0]),
+      v_ctz_i32_b32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 31)
+
+  def test_v_ctz_i32_b32_half(self):
+    """V_CTZ_I32_B32 of 0x8000 (bit 15) returns 15."""
+    instructions = [
+      s_mov_b32(s[0], 0x8000),
+      v_mov_b32_e32(v[0], s[0]),
+      v_ctz_i32_b32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 15)
+
+  def test_v_ctz_i32_b32_all_ones(self):
+    """V_CTZ_I32_B32 of 0xFFFFFFFF returns 0."""
+    instructions = [
+      s_mov_b32(s[0], 0xFFFFFFFF),
+      v_mov_b32_e32(v[0], s[0]),
+      v_ctz_i32_b32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0)
 
 
 if __name__ == '__main__':

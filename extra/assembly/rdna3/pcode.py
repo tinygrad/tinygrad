@@ -103,8 +103,21 @@ def _ldexp(m, e): return math.ldexp(m, e)
 def isEven(x): return int(x) % 2 == 0
 def fract(x): return x - math.floor(x)
 PI = math.pi
-def sin(x): return float("nan") if math.isinf(x) or math.isnan(x) else math.sin(x)
-def cos(x): return float("nan") if math.isinf(x) or math.isnan(x) else math.cos(x)
+def sin(x):
+  # V_SIN_F32: pseudocode does sin(input * 2π), but hardware does frac on the input first
+  # So sin(1.0 * 2π) should be sin(frac(1.0) * 2π) = sin(0) = 0
+  if math.isinf(x) or math.isnan(x): return float("nan")
+  # The input x is already multiplied by 2π in the pseudocode, so we need to
+  # extract the fractional cycle: frac(x / 2π) * 2π
+  cycles = x / (2 * math.pi)
+  frac_cycles = cycles - math.floor(cycles)
+  return math.sin(frac_cycles * 2 * math.pi)
+def cos(x):
+  # V_COS_F32: same as sin, hardware does frac on input cycles
+  if math.isinf(x) or math.isnan(x): return float("nan")
+  cycles = x / (2 * math.pi)
+  frac_cycles = cycles - math.floor(cycles)
+  return math.cos(frac_cycles * 2 * math.pi)
 def pow(a, b):
   try: return a ** b
   except OverflowError: return float("inf") if b > 0 else 0.0
@@ -769,6 +782,10 @@ from extra.assembly.rdna3.pcode import *
 
       try:
         code = compile_pseudocode(pc)
+        # CLZ/CTZ: The PDF pseudocode searches for the first 1 bit but doesn't break.
+        # Hardware stops at first match, so we need to add break after D0.i32 = i
+        if 'CLZ' in op.name or 'CTZ' in op.name:
+          code = code.replace('D0.i32 = i', 'D0.i32 = i; break  # Stop at first 1 bit found')
         # Detect flags for result handling
         is_64 = any(p in pc for p in ['D0.u64', 'D0.b64', 'D0.f64', 'D0.i64', 'D1.u64', 'D1.b64', 'D1.f64', 'D1.i64'])
         has_d1 = '{ D1' in pc
