@@ -13,8 +13,8 @@ import os
 from extra.assembly.rdna3.autogen import *
 from extra.assembly.rdna3.emu import WaveState, decode_program, exec_wave, VCC_LO
 
-VCC = SrcEnum.VCC_LO
 USE_REAL_AMD = os.getenv("REAL_AMD", "0") == "1"
+VCC = SrcEnum.VCC_LO  # For VOP3SD sdst field
 
 def f2i(f: float) -> int:
   """Convert float32 to its bit representation."""
@@ -93,9 +93,9 @@ class TestVCmpClass(unittest.TestCase):
     quiet_nan = 0x7fc00000
     instructions = [
       s_mov_b32(s[0], quiet_nan),  # large int encodes as literal
-      s_mov_b32(s[1], 0b0000000010),  # bit 1 = quiet NaN
-      v_mov_b32_e32(v[0], s[0]),
-      v_cmp_class_f32_e32(VCC, v[0], s[1]),
+      v_mov_b32_e32(v[0], s[0]),  # value to classify
+      v_mov_b32_e32(v[1], 0b0000000010),  # bit 1 = quiet NaN (mask in VGPR for VOPC)
+      v_cmp_class_f32_e32(v[0], v[1]),  # VOPC: src0=value, vsrc1=mask, writes VCC
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vcc & 1, 1, "Should detect quiet NaN")
@@ -105,9 +105,9 @@ class TestVCmpClass(unittest.TestCase):
     signal_nan = 0x7f800001
     instructions = [
       s_mov_b32(s[0], signal_nan),  # large int encodes as literal
-      s_mov_b32(s[1], 0b0000000001),  # bit 0 = signaling NaN
-      v_mov_b32_e32(v[0], s[0]),
-      v_cmp_class_f32_e32(VCC, v[0], s[1]),
+      v_mov_b32_e32(v[0], s[0]),  # value to classify
+      v_mov_b32_e32(v[1], 0b0000000001),  # bit 0 = signaling NaN
+      v_cmp_class_f32_e32(v[0], v[1]),  # VOPC: src0=value, vsrc1=mask, writes VCC
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vcc & 1, 1, "Should detect signaling NaN")
@@ -117,9 +117,9 @@ class TestVCmpClass(unittest.TestCase):
     quiet_nan = 0x7fc00000
     instructions = [
       s_mov_b32(s[0], quiet_nan),  # large int encodes as literal
-      s_mov_b32(s[1], 0b0000000001),  # bit 0 = signaling NaN only
-      v_mov_b32_e32(v[0], s[0]),
-      v_cmp_class_f32_e32(VCC, v[0], s[1]),
+      v_mov_b32_e32(v[0], s[0]),  # value to classify
+      v_mov_b32_e32(v[1], 0b0000000001),  # bit 0 = signaling NaN only
+      v_cmp_class_f32_e32(v[0], v[1]),  # VOPC: src0=value, vsrc1=mask, writes VCC
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vcc & 1, 0, "Quiet NaN should not match signaling mask")
@@ -129,9 +129,9 @@ class TestVCmpClass(unittest.TestCase):
     signal_nan = 0x7f800001
     instructions = [
       s_mov_b32(s[0], signal_nan),  # large int encodes as literal
-      s_mov_b32(s[1], 0b0000000010),  # bit 1 = quiet NaN only
-      v_mov_b32_e32(v[0], s[0]),
-      v_cmp_class_f32_e32(VCC, v[0], s[1]),
+      v_mov_b32_e32(v[0], s[0]),  # value to classify
+      v_mov_b32_e32(v[1], 0b0000000010),  # bit 1 = quiet NaN only
+      v_cmp_class_f32_e32(v[0], v[1]),  # VOPC: src0=value, vsrc1=mask, writes VCC
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vcc & 1, 0, "Signaling NaN should not match quiet mask")
@@ -142,8 +142,9 @@ class TestVCmpClass(unittest.TestCase):
     instructions = [
       s_mov_b32(s[0], pos_inf),  # large int encodes as literal
       s_mov_b32(s[1], 0b1000000000),  # bit 9 = +inf (512 is outside inline range)
-      v_mov_b32_e32(v[0], s[0]),
-      v_cmp_class_f32_e32(VCC, v[0], s[1]),
+      v_mov_b32_e32(v[0], s[0]),  # value to classify
+      v_mov_b32_e32(v[1], s[1]),  # mask in VGPR
+      v_cmp_class_f32_e32(v[0], v[1]),  # VOPC: src0=value, vsrc1=mask, writes VCC
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vcc & 1, 1, "Should detect +inf")
@@ -153,9 +154,9 @@ class TestVCmpClass(unittest.TestCase):
     neg_inf = 0xff800000
     instructions = [
       s_mov_b32(s[0], neg_inf),  # large int encodes as literal
-      s_mov_b32(s[1], 0b0000000100),  # bit 2 = -inf
-      v_mov_b32_e32(v[0], s[0]),
-      v_cmp_class_f32_e32(VCC, v[0], s[1]),
+      v_mov_b32_e32(v[0], s[0]),  # value to classify
+      v_mov_b32_e32(v[1], 0b0000000100),  # bit 2 = -inf
+      v_cmp_class_f32_e32(v[0], v[1]),  # VOPC: src0=value, vsrc1=mask, writes VCC
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vcc & 1, 1, "Should detect -inf")
@@ -163,9 +164,10 @@ class TestVCmpClass(unittest.TestCase):
   def test_cmp_class_normal_positive(self):
     """V_CMP_CLASS_F32 detects positive normal."""
     instructions = [
-      v_mov_b32_e32(v[0], 1.0),  # inline constant
+      v_mov_b32_e32(v[0], 1.0),  # inline constant - value to classify
       s_mov_b32(s[1], 0b0100000000),  # bit 8 = positive normal (256 is outside inline range)
-      v_cmp_class_f32_e32(VCC, v[0], s[1]),
+      v_mov_b32_e32(v[1], s[1]),  # mask in VGPR
+      v_cmp_class_f32_e32(v[0], v[1]),  # VOPC: src0=value, vsrc1=mask, writes VCC
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vcc & 1, 1, "Should detect positive normal")
@@ -173,9 +175,9 @@ class TestVCmpClass(unittest.TestCase):
   def test_cmp_class_normal_negative(self):
     """V_CMP_CLASS_F32 detects negative normal."""
     instructions = [
-      v_mov_b32_e32(v[0], -1.0),  # inline constant
-      s_mov_b32(s[1], 0b0000001000),  # bit 3 = negative normal
-      v_cmp_class_f32_e32(VCC, v[0], s[1]),
+      v_mov_b32_e32(v[0], -1.0),  # inline constant - value to classify
+      v_mov_b32_e32(v[1], 0b0000001000),  # bit 3 = negative normal
+      v_cmp_class_f32_e32(v[0], v[1]),  # VOPC: src0=value, vsrc1=mask, writes VCC
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vcc & 1, 1, "Should detect negative normal")
@@ -271,7 +273,7 @@ class TestMultiLane(unittest.TestCase):
       s_mov_b32(s[0], 5),
       v_mov_b32_e32(v[0], s[0]),
       v_mov_b32_e32(v[1], s[0]),
-      v_cmp_eq_u32_e32(VCC, v[0], v[1]),
+      v_cmp_eq_u32_e32(v[0], v[1]),  # VOPC: src0, vsrc1 - writes VCC implicitly
     ]
     st = run_program(instructions, n_lanes=4)
     self.assertEqual(st.vcc & 0xf, 0xf, "All lanes should match")
