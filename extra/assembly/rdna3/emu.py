@@ -2,8 +2,8 @@
 from __future__ import annotations
 import ctypes
 from extra.assembly.rdna3.lib import Inst, RawImm
-from extra.assembly.rdna3.dsl import _f32, _i32, _sext, _f16, _i16
-from extra.assembly.rdna3.autogen.dsl_pseudocode import get_compiled_functions
+from extra.assembly.rdna3.pcode import _f32, _i32, _sext, _f16, _i16
+from extra.assembly.rdna3.autogen.gen_pcode import get_compiled_functions
 from extra.assembly.rdna3.autogen import (
   SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, DS, FLAT, VOPD, SrcEnum,
   SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp, FLATOp, GLOBALOp, VOPDOp

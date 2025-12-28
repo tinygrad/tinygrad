@@ -1,19 +1,11 @@
 #!/usr/bin/env python3
-"""Regression tests for the RDNA3 emulator instruction execution.
+"""Regression tests for the RDNA3 emulator instruction execution."""
 
-Run with emulator (default):
-  PYTHONPATH="." python3 extra/assembly/rdna3/test/test_emu.py
-
-Run on real AMD hardware:
-  PYTHONPATH="." REAL_AMD=1 python3 extra/assembly/rdna3/test/test_emu.py
-"""
 import unittest
 import struct
-import os
 from extra.assembly.rdna3.autogen import *
-from extra.assembly.rdna3.emu import WaveState, decode_program, exec_wave, VCC_LO
+from extra.assembly.rdna3.emu import WaveState, decode_program, exec_wave
 
-USE_REAL_AMD = os.getenv("REAL_AMD", "0") == "1"
 VCC = SrcEnum.VCC_LO  # For VOP3SD sdst field
 
 def f2i(f: float) -> int:
@@ -25,20 +17,8 @@ def i2f(i: int) -> float:
   return struct.unpack('f', struct.pack('I', i & 0xffffffff))[0]
 
 def assemble(instructions: list) -> bytes:
-  """Assemble instructions to bytes, handling literals properly."""
-  code = b''
-  for inst in instructions:
-    inst_bytes = inst.to_bytes()
-    code += inst_bytes
-    # Check if instruction uses literal (src=255) and has a float/int value that needs appending
-    if hasattr(inst, 'src0') and inst.src0 == 255:
-      # Literal value should be set via _literal or we need to extract from context
-      if hasattr(inst, '_literal') and inst._literal is not None:
-        code += struct.pack('<I', inst._literal)
-    elif hasattr(inst, 'src') and inst.src == 255:
-      if hasattr(inst, '_literal') and inst._literal is not None:
-        code += struct.pack('<I', inst._literal)
-  return code
+  """Assemble instructions to bytes."""
+  return b''.join(inst.to_bytes() for inst in instructions)
 
 def run_program(instructions: list, n_lanes: int = 1) -> WaveState:
   """Assemble instructions, set up state, and run until s_endpgm."""
