@@ -38,9 +38,18 @@ class TestHW(unittest.TestCase):
   def setUp(self):
     if getenv("MOCKGPU"): subprocess.run(["cargo", "build", "--release", "--manifest-path", "./extra/remu/Cargo.toml"], check=True)
 
-  def test_simple(self):
+  def test_simple_v_mov(self):
     out = get_output([
       v_mov_b32_e32(v[1], 2),
+    ])
+    self.assertEqual(out, [2])
+
+  # assembler err
+  @unittest.expectedFailure
+  def test_simple_s_mov(self):
+    out = get_output([
+      s_mov_b32(s[7], 0x7fffffff),
+      v_mov_b32_e32(v[1], s[7]),
     ])
     self.assertEqual(out, [2])
 
@@ -90,21 +99,24 @@ class TestHW(unittest.TestCase):
     self.assertEqual(get_output(init_state+"\n"+fmac("%1", "-%2", "%3")), f16_to_bits(-10.))
     self.assertEqual(get_output(init_state+"\n"+fmac("-%1", "-%2", "%3")), f16_to_bits(14.))
 
+  # assembler err
+  @unittest.expectedFailure
   def test_s_abs_i32(self):
-    def s_abs_i32(x, y, dst="s10", scc=0):
-      for reg,val in [(dst, y), ("scc", scc)]:
-        self.assertEqual(get_output(f"""
-        s_mov_b32_e32 {dst} {x}
-        s_abs_i32 {dst} {dst}
-        v_mov_b32_e32 %2 {reg}
-        """)[0], val)
-    s_abs_i32(0x00000001, 0x00000001, scc=1)
-    s_abs_i32(0x7fffffff, 0x7fffffff, scc=1)
-    s_abs_i32(0x80000000, 0x80000000, scc=1)
-    s_abs_i32(0x80000001, 0x7fffffff, scc=1)
-    s_abs_i32(0x80000002, 0x7ffffffe, scc=1)
-    s_abs_i32(0xffffffff, 0x00000001, scc=1)
-    s_abs_i32(0, 0, scc=0)
+    def check(x, y, dst=s[10], scc=0):
+      for reg,val in [(dst, y), (SCC, scc)]:
+        self.assertEqual(get_output([
+          s_mov_b32(dst, x),
+          s_abs_i32(dst, dst),
+          v_mov_b32_e32(v[1], reg)
+        ])[0], val)
+
+    check(0x00000001, 0x00000001, scc=1)
+    check(0x7fffffff, 0x7fffffff, scc=1)
+    check(0x80000000, 0x80000000, scc=1)
+    check(0x80000001, 0x7fffffff, scc=1)
+    check(0x80000002, 0x7ffffffe, scc=1)
+    check(0xffffffff, 0x00000001, scc=1)
+    check(0, 0, scc=0)
 
   def test_v_rcp_f32_neg_vop3(self):
     def v_neg_rcp_f32(x:float, y:float):
