@@ -241,9 +241,8 @@ jobs:
       run: |
         python -m mypy --strict-equality --lineprecision-report .
         cat lineprecision.txt
-    # broken because of UPatAny
-    #- name: Run TYPED=1
-    #  run: TYPED=1 python -c "import tinygrad"
+    - name: Run TYPED=1
+      run: TYPED=1 python -c "import tinygrad"
 
   unittest:
     name: Unit Tests
