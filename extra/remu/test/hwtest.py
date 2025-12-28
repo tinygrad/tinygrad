@@ -54,28 +54,28 @@ class TestHW(unittest.TestCase):
     np.testing.assert_equal(out, [42, 10])
 
   def test_exec_cmp_vopc(self):
-    out = get_output("""
-    s_mov_b32 vcc_lo 0 // reset vcc
-    v_mov_b32_e32 %1 42
-    v_mov_b32_e32 %2 10
-    s_mov_b32_e32 exec_lo 0b01
-    v_cmp_ne_u32 %1 %2
-    s_mov_b32_e32 exec_lo 0b11
-    v_mov_b32_e32 %2 vcc_lo
-    """, n_threads=2)
-    np.testing.assert_equal(out, 0b01)
+    out = get_output([
+      s_mov_b32(VCC_LO, 0), # reset vcc
+      v_mov_b32_e32(v[1], 42),
+      v_mov_b32_e32(v[2], 10),
+      s_mov_b32(EXEC_LO, 0b01),
+      v_cmp_ne_u32_e32(v[1], v[2]),
+      s_mov_b32(EXEC_LO, 0b11),
+      v_mov_b32_e32(v[1], VCC_LO),
+    ], n_threads=2)[0]
+    np.testing.assert_equal(out, 1)
 
   def test_exec_cmpx_vop3(self):
-    out = get_output("""
-    s_mov_b32_e32 exec_lo 0b11
-    v_mov_b32_e32 %1 42
-    v_mov_b32_e32 %2 10
-    s_mov_b32_e32 exec_lo 0b01
-    v_cmpx_ne_u32 %1 %2
-    s_mov_b32_e32 s10 exec_lo
-    s_mov_b32_e32 exec_lo 0b11
-    v_mov_b32_e32 %2 s10
-    """, n_threads=2)[0]
+    out = get_output([
+      s_mov_b32(EXEC_LO, 0b11),
+      v_mov_b32_e32(v[1], 42),
+      v_mov_b32_e32(v[2], 10),
+      s_mov_b32(EXEC_LO, 0b01),
+      v_cmpx_ne_u32_e32(v[1], v[2]),
+      s_mov_b32(s[10], EXEC_LO),
+      s_mov_b32(EXEC_LO, 0b11),
+      v_mov_b32_e32(v[1], s[10]),
+    ], n_threads=2)[0]
     np.testing.assert_equal(out & 0b11, 0b01)
 
   def test_fmac_vop3_modifier(self):
