@@ -13,20 +13,21 @@ from extra.assembly.rdna3.asm import waitcnt
 from test.testextra.test_cfg_viz import template
 
 def get_output(asm:list, n_threads:int=1, vdst:VGPR=v[1]):
-  out = Tensor([0.0]).realize()
+  out = Tensor([0]*n_threads, dtype=dtypes.uint32).realize()
   src = "\n".join(inst.disasm() for inst in [
     s_load_b64(s[0:1], s[0:1], NULL),
     *asm,
+    v_lshlrev_b32_e32(v[0], 2, v[0]),
     s_waitcnt(simm16=waitcnt(lgkmcnt=0)),
     #global_store_b32(v[0], v[1], s[0:1]),
-    global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]),
+    global_store_b32(addr=v[0], data=vdst, saddr=s[0:1]),
     s_endpgm()
   ])
   prg = ProgramSpec("test", template.replace("fn_name", "test").replace("INSTRUCTION", textwrap.dedent(src)), Device.DEFAULT, UOp(Ops.SINK),
                     global_size=[1, 1, 1], local_size=[n_threads, 1, 1], globals=[0])
   car = CompiledRunner(prg)
   car([out.uop.buffer], {}, wait=True)
-  return out.item()
+  return out.tolist()
 
 def f16_to_bits(x:float) -> int: return struct.unpack('<H', struct.pack('<e', x))[0]
 def f32_from_bits(x:int) -> float: return struct.unpack('<f', struct.pack('<I', x))[0]
@@ -39,19 +40,17 @@ class TestHW(unittest.TestCase):
 
   def test_simple(self):
     out = get_output([
-      v_mov_b32_e32(v[0], 0),
-      v_mov_b32_e32(v[1], 2.0),
+      v_mov_b32_e32(v[1], 2),
     ])
-    self.assertEqual(out, 2.0)
+    self.assertEqual(out, [2])
 
   def test_exec_mov(self):
-    out = get_output("""
-    v_mov_b32_e32 %1 42
-    s_mov_b32_e32 exec_lo 0b10
-    v_mov_b32_e32 %1 10
-    s_mov_b32_e32 exec_lo 0b11
-    v_mov_b32_e32 %2 %1
-    """, n_threads=2)
+    out = get_output([
+      v_mov_b32_e32(v[1], 42),
+      s_mov_b32(EXEC_LO, 0b10),
+      v_mov_b32_e32(v[1], 10),
+      s_mov_b32(EXEC_LO, 0b11),
+    ], n_threads=2)
     np.testing.assert_equal(out, [42, 10])
 
   def test_exec_cmp_vopc(self):
