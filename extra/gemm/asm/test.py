@@ -50,7 +50,7 @@ eis.append(ExecItem(ast, [C_asm.uop.buffer, from_torch(B).uop.buffer, from_torch
 
 for ei in eis:
   et = ei.run(wait=True)
-  print(f"REAL TFLOPS {(N*N*N*2 / et)*1e-12:.2f}")
+  print(f"{(N*N*N*2 / et)*1e-12:.2f} REAL TFLOPS")
 
 # ** correctness
 
