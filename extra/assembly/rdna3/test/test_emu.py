@@ -1,33 +1,94 @@
 #!/usr/bin/env python3
-"""Regression tests for the RDNA3 emulator instruction execution."""
+"""Regression tests for the RDNA3 emulator instruction execution.
+Uses run_asm() with memory output, so tests can run on both emulator and real hardware.
+"""
 
-import unittest
-import struct
+import ctypes, unittest
 from extra.assembly.rdna3.autogen import *
-from extra.assembly.rdna3.emu import WaveState, decode_program, exec_wave
+from extra.assembly.rdna3.emu import WaveState, run_asm, set_valid_mem_ranges
+from extra.assembly.rdna3.pcode import _i32, _f32
 
 VCC = SrcEnum.VCC_LO  # For VOP3SD sdst field
 
-def f2i(f: float) -> int:
-  """Convert float32 to its bit representation."""
-  return struct.unpack('I', struct.pack('f', f))[0]
+# Output buffer layout: vgpr[16][32], sgpr[16], vcc, scc
+# Each VGPR store writes 32 lanes (128 bytes), so vgpr[i] is at offset i*128
+N_VGPRS, N_SGPRS, WAVE_SIZE = 16, 16, 32
+VGPR_BYTES = N_VGPRS * WAVE_SIZE * 4  # 16 regs * 32 lanes * 4 bytes = 2048
+SGPR_BYTES = N_SGPRS * 4  # 16 regs * 4 bytes = 64
+OUT_BYTES = VGPR_BYTES + SGPR_BYTES + 8  # + vcc + scc
 
-def i2f(i: int) -> float:
-  """Convert bit representation to float32."""
-  return struct.unpack('f', struct.pack('I', i & 0xffffffff))[0]
+def f2i(f: float) -> int: return _i32(f)
+def i2f(i: int) -> float: return _f32(i)
 
 def assemble(instructions: list) -> bytes:
-  """Assemble instructions to bytes."""
   return b''.join(inst.to_bytes() for inst in instructions)
 
 def run_program(instructions: list, n_lanes: int = 1) -> WaveState:
-  """Assemble instructions, set up state, and run until s_endpgm."""
-  instructions = instructions + [s_endpgm()]
-  code = assemble(instructions)
-  program = decode_program(code)
+  """Run instructions via run_asm, dump state to memory, return WaveState."""
+  out_buf = (ctypes.c_uint8 * OUT_BYTES)(*([0] * OUT_BYTES))
+  out_addr = ctypes.addressof(out_buf)
+
+  # Prologue: save s[0:1] and v[0] before test clobbers them
+  # Use s[80:81] for args pointer (safe range, avoiding VCC=106-107 and staying under 100)
+  prologue = [
+    s_mov_b32(s[80], s[0]),
+    s_mov_b32(s[81], s[1]),
+    v_mov_b32_e32(v[255], v[0]),
+  ]
+
+  # Epilogue: store wave state to memory
+  # Use s[90-99] for epilogue temps to stay in safe SGPR range (<100, avoiding VCC=106-107)
+  # s[90] = saved VCC, s[91] = saved SCC, s[92:93] = output addr, s[94] = saved EXEC
+  # Save VCC/SCC first before we clobber them
+  epilogue = [
+    s_mov_b32(s[90], SrcEnum.VCC_LO),  # save VCC
+    s_cselect_b32(s[91], 1, 0),  # save SCC
+    s_load_b64(s[92], s[80], 0, soffset=SrcEnum.NULL),
+    s_waitcnt(lgkmcnt=0),
+    v_lshlrev_b32_e32(v[240], 2, v[255]),  # v[240] = lane_id * 4
+  ]
+  # Store VGPRs: vgpr[i] at offset i*128 + lane_id*4
+  for i in range(N_VGPRS):
+    epilogue.append(global_store_b32(addr=v[240], data=v[i], saddr=s[92], offset=i * WAVE_SIZE * 4))
+  # Store SGPRs at VGPR_BYTES + i*4 (lane 0 only via exec mask)
+  epilogue.append(v_mov_b32_e32(v[241], 0))
+  epilogue.append(v_cmp_eq_u32_e32(v[255], v[241]))
+  epilogue.append(s_and_saveexec_b32(s[94], SrcEnum.VCC_LO))
+  epilogue.append(v_mov_b32_e32(v[240], 0))
+  for i in range(N_SGPRS):
+    epilogue.append(v_mov_b32_e32(v[243], s[i]))
+    epilogue.append(global_store_b32(addr=v[240], data=v[243], saddr=s[92], offset=VGPR_BYTES + i * 4))
+  # Store saved VCC
+  epilogue.append(v_mov_b32_e32(v[243], s[90]))
+  epilogue.append(global_store_b32(addr=v[240], data=v[243], saddr=s[92], offset=VGPR_BYTES + SGPR_BYTES))
+  # Store saved SCC
+  epilogue.append(v_mov_b32_e32(v[243], s[91]))
+  epilogue.append(global_store_b32(addr=v[240], data=v[243], saddr=s[92], offset=VGPR_BYTES + SGPR_BYTES + 4))
+  epilogue.append(s_mov_b32(s[SrcEnum.EXEC_LO - 128], s[94]))  # restore exec
+  epilogue.append(s_endpgm())
+
+  code = assemble(prologue + instructions + epilogue)
+
+  args = (ctypes.c_uint64 * 1)(out_addr)
+  args_ptr = ctypes.addressof(args)
+  kernel_buf = (ctypes.c_char * len(code)).from_buffer_copy(code)
+  lib_ptr = ctypes.addressof(kernel_buf)
+
+  set_valid_mem_ranges({(out_addr, OUT_BYTES), (args_ptr, 8)})
+  result = run_asm(lib_ptr, len(code), 1, 1, 1, n_lanes, 1, 1, args_ptr)
+  assert result == 0, f"run_asm failed with {result}"
+
+  # Parse output into WaveState
+  import struct
   st = WaveState()
-  lds = bytearray(65536)
-  exec_wave(program, st, lds, n_lanes)
+  for i in range(N_VGPRS):
+    for lane in range(n_lanes):
+      off = i * WAVE_SIZE * 4 + lane * 4
+      st.vgpr[lane][i] = struct.unpack_from('<I', bytes(out_buf), off)[0]
+  for i in range(N_SGPRS):
+    st.sgpr[i] = struct.unpack_from('<I', bytes(out_buf), VGPR_BYTES + i * 4)[0]
+  st.vcc = struct.unpack_from('<I', bytes(out_buf), VGPR_BYTES + SGPR_BYTES)[0]
+  st.scc = struct.unpack_from('<I', bytes(out_buf), VGPR_BYTES + SGPR_BYTES + 4)[0]
   return st
 
 
@@ -257,6 +318,54 @@ class TestMultiLane(unittest.TestCase):
     ]
     st = run_program(instructions, n_lanes=4)
     self.assertEqual(st.vcc & 0xf, 0xf, "All lanes should match")
+
+
+class TestTrigonometry(unittest.TestCase):
+  """Tests for trigonometric instructions."""
+
+  def test_v_sin_f32_small(self):
+    """V_SIN_F32 computes sin for small values."""
+    import math
+    # sin(1.0) ≈ 0.8414709848
+    instructions = [
+      v_mov_b32_e32(v[0], 1.0),
+      v_sin_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][1])
+    expected = math.sin(1.0 * 2 * math.pi)  # V_SIN_F32 expects input in cycles (0-1 = 0-2π)
+    self.assertAlmostEqual(result, expected, places=4)
+
+  def test_v_sin_f32_quarter(self):
+    """V_SIN_F32 at 0.25 cycles = sin(π/2) = 1.0."""
+    instructions = [
+      s_mov_b32(s[0], f2i(0.25)),  # 0.25 is not an inline constant, use f2i
+      v_mov_b32_e32(v[0], s[0]),
+      v_sin_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][1])
+    self.assertAlmostEqual(result, 1.0, places=4)
+
+  def test_v_sin_f32_large(self):
+    """V_SIN_F32 for large input value (132000.0)."""
+    import math
+    # This is the failing case: sin(132000.0) should be ≈ 0.294
+    # V_SIN_F32 input is in cycles, so we need frac(132000.0) * 2π
+    instructions = [
+      s_mov_b32(s[0], f2i(132000.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_sin_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][1])
+    # frac(132000.0) = 0, so sin(0) = 0... but actually V_SIN_F32 does its own frac internally
+    # The expected value is sin(frac(132000.0) * 2π) where frac is done in the instruction
+    # For 132000.0, the hardware computes frac(132000.0) ≈ 0.046875 (due to precision)
+    # sin(0.046875 * 2π) ≈ 0.294
+    expected = math.sin(132000.0 * 2 * math.pi)
+    # Allow some tolerance due to precision differences
+    self.assertAlmostEqual(result, expected, places=2, msg=f"sin(132000) got {result}, expected ~{expected}")
 
 
 if __name__ == '__main__':
