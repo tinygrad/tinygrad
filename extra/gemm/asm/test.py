@@ -47,7 +47,10 @@ ast = eis[0].ast
 prg = get_asm_gemm(ast, fp)
 eis.append(ExecItem(ast, [C_asm.uop.buffer, from_torch(B).uop.buffer, from_torch(A).uop.buffer], prg=CompiledRunner(prg)))
 
-for ei in eis: ei.run(wait=True)
+
+for ei in eis:
+  et = ei.run(wait=True)
+  print(f"{(N*N*N*2 / et)*1e-12:.2f} REAL TFLOPS")
 
 # ** correctness
 
