@@ -937,10 +937,14 @@ jobs:
         id: cuda-toolkit
         with:
           cuda: '12.5.0'
+          method: 'network'
+          sub-packages: '["nvcc", "cudart", "nvrtc", "nvjitlink"]'
+          log-file-suffix: '${{matrix.os}}.txt'
       - name: Check CUDA install
         run: |
           echo "Installed cuda version is: ${{steps.cuda-toolkit.outputs.cuda}}"
           echo "Cuda install location: ${{steps.cuda-toolkit.outputs.CUDA_PATH}}"
+          where nvcuda.dll
           nvcc -V
       - name: Set env
         shell: bash
