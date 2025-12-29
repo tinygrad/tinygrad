@@ -8,26 +8,26 @@ gemm:
 	// ** global buffers
 	s_load_dwordx2 s[28:29], s[0:1], 0x0    // C
 	s_load_dwordx4 s[32:35], s[0:1], 0x8    // A, B
-	s_waitcnt lgkmcnt(0)
 	// ** others kernel args
-	// info
+  s_load_dword s24 s[0:1] 0x18
+  s_load_dword s54 s[0:1] 0x1C
+	s_waitcnt lgkmcnt(0)
+	// "kernel info"
 	s_mov_b32 s51, 0x00000001    // gemm_info = 1
 	s_mov_b32 s53, 0x00000001    // kernel_info0 = 1
 	s_mov_b32 s11, 0x40010020    // kernel_info1 = 0x40010020
-	s_mov_b32 s54, 0x00000400    // numWG = 1024
 	// sizes / strides
-	s_mov_b32 s24, 0x00002000    // sizesFree0 = M = 8192
-	s_mov_b32 s25, 0x00002000    // sizesFree1 = N = 8192
+	s_mov_b32 s25, s24    // sizesFree1 = N = 8192
 	s_mov_b32 s26, 0x00000001    // sizesFree2 = BATCH = 1
-	s_mov_b32 s27, 0x00002000    // sizesSum0  = K = 8192
+	s_mov_b32 s27, s24    // sizesSum0  = K = 8192
 	// Strides: major=8192, minor=0 (addr = base + idx0*8192 + idx1*0)
-	s_mov_b32 s36, 0x00002000    // strideD0
+	s_mov_b32 s36, s24    // strideD0
 	s_mov_b32 s37, 0x00000000    // strideD1
-	s_mov_b32 s38, 0x00002000    // strideC0
+	s_mov_b32 s38, s24    // strideC0
 	s_mov_b32 s39, 0x00000000    // strideC1
-	s_mov_b32 s40, 0x00002000    // strideA0
+	s_mov_b32 s40, s24    // strideA0
 	s_mov_b32 s41, 0x00000000    // strideA1
-	s_mov_b32 s42, 0x00002000    // strideB0
+	s_mov_b32 s42, s24    // strideB0
 	s_mov_b32 s43, 0x00000000    // strideB1
 	// ** workgroup mapping
 	s_lshr_b32 s52, s51, 30                                    // 000000002924: 8F349E33
@@ -4565,7 +4565,7 @@ end:
   # ---- basic memory requirements ----
   .amdhsa_group_segment_fixed_size 133120
   .amdhsa_private_segment_fixed_size 0
-  .amdhsa_kernarg_size 24
+  .amdhsa_kernarg_size 32
 
   # ---- register usage (RSRC1) ----
   .amdhsa_next_free_vgpr 504
@@ -4611,9 +4611,19 @@ amdhsa.kernels:
         .size:           8
         .value_kind:     global_buffer
         .value_type:     bf16
+      - .name:           sz
+        .offset:         24
+        .size:           4
+        .value_kind:     by_value
+        .value_type:     u32
+      - .name:           num_wg
+        .offset:         28
+        .size:           4
+        .value_kind:     by_value
+        .value_type:     u32
     .group_segment_fixed_size: 133120
     .kernarg_segment_align: 8
-    .kernarg_segment_size: 24
+    .kernarg_segment_size: 32
     .max_flat_workgroup_size: 256
     .name:           gemm
     .private_segment_fixed_size: 0

@@ -5,13 +5,15 @@ from tinygrad import Tensor, Device, dtypes
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.renderer import ProgramSpec
 from tinygrad.uop.ops import track_rewrites, UOp
-from tinygrad.helpers import TracingKey
+from tinygrad.helpers import TracingKey, getenv
 
 fp = pathlib.Path(__file__).parent/"gemm.s"
 
-N = 8192
+N = getenv("N", 8192)
 THREADS_PER_WG = 256
 NUM_WG = N//THREADS_PER_WG * N//THREADS_PER_WG
+
+assert N % THREADS_PER_WG == 0, "N must be divisible by THREADS_PER_WG"
 
 # ** generate inputs on CPU
 
@@ -48,8 +50,10 @@ ast = sched[-1].ast
 def get_asm_prg() -> ProgramSpec:
   src = fp.read_text()
   lib = Device[Device.DEFAULT].compiler.compile(src)
-  return ProgramSpec("gemm", src, Device.DEFAULT, ast, lib=lib, global_size=[NUM_WG, 1, 1], local_size=[THREADS_PER_WG, 1, 1], globals=[0, 1, 2])
-eis.append(ExecItem(ast, [C_asm.uop.buffer, from_torch(B).uop.buffer, from_torch(A).uop.buffer], prg=CompiledRunner(get_asm_prg())))
+  return ProgramSpec("gemm", src, Device.DEFAULT, ast, lib=lib, global_size=[NUM_WG, 1, 1], local_size=[THREADS_PER_WG, 1, 1],
+                     globals=[0, 1, 2], vars=[UOp.variable("SZ", 256, 8192), UOp.variable("NUM_WG", 1, 1024)])
+eis.append(ExecItem(ast, [C_asm.uop.buffer, from_torch(B).uop.buffer, from_torch(A).uop.buffer], fixedvars={"SZ":N, "NUM_WG":NUM_WG},
+                    prg=CompiledRunner(get_asm_prg())))
 
 for ei in eis:
   et = ei.run(wait=True)
