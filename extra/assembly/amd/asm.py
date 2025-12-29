@@ -97,7 +97,12 @@ def disasm(inst: Inst) -> str:
     else:
       op_name = getattr(autogen, f"{cls_name}Op")(op_val).name.lower() if hasattr(autogen, f"{cls_name}Op") else f"op_{op_val}"
   except (ValueError, KeyError): op_name = f"op_{op_val}"
-  def fmt_src(v): return f"0x{inst._literal:x}" if v == 255 and getattr(inst, '_literal', None) else decode_src(v)
+  def fmt_src(v):
+    lit = getattr(inst, '_literal', None)
+    if v == 255 and lit is not None:
+      # Format negative literals as unsigned 32-bit hex (AMD assembler doesn't accept 0x-xxx)
+      return f"0x{lit & 0xffffffff:x}" if lit < 0 else f"0x{lit:x}"
+    return decode_src(v)
 
   # VOP1
   if cls_name == 'VOP1':

@@ -10,9 +10,9 @@ else:
 from tinygrad.renderer.rdna_uops import rdna_matcher
 from tinygrad.renderer.cstyle import create_non_native_float_pats, cast_float_to_bf16
 from tinygrad.codegen.opt import tc
-from extra.assembly.rdna3.lib import Inst
-from extra.assembly.rdna3.asm import waitcnt
-from extra.assembly.rdna3.autogen import (
+from extra.assembly.amd.dsl import Inst
+from extra.assembly.amd.asm import waitcnt
+from extra.assembly.amd.autogen.rdna3 import (
   v, s, VGPR, SGPR, VCC_LO, EXEC_LO, NULL,
   # VOP1
   v_mov_b32_e32,
@@ -23,13 +23,13 @@ from extra.assembly.rdna3.autogen import (
   v_exp_f32_e32, v_log_f32_e32, v_trunc_f32_e32, v_sin_f32_e32, v_fract_f32_e32,
   v_cvt_f64_f32_e32, v_cvt_f32_f64_e32, v_cvt_f64_i32_e32, v_cvt_f64_u32_e32,
   v_cvt_i32_f64_e32, v_cvt_u32_f64_e32, v_trunc_f64_e32, v_floor_f64_e32,
-  # VOP3 (e64) versions for high registers
-  v_cvt_f16_f32_e64 as _v_cvt_f16_f32_e64,
-  v_cvt_f32_f16_e64 as _v_cvt_f32_f16_e64,
-  v_cvt_f32_i32_e64 as _v_cvt_f32_i32_e64,
-  v_cvt_i32_f32_e64 as _v_cvt_i32_f32_e64,
-  v_cvt_f32_u32_e64 as _v_cvt_f32_u32_e64,
-  v_cvt_u32_f32_e64 as _v_cvt_u32_f32_e64,
+  # VOP3 versions for high registers (named without suffix in new autogen)
+  v_cvt_f16_f32 as _v_cvt_f16_f32_e64,
+  v_cvt_f32_f16 as _v_cvt_f32_f16_e64,
+  v_cvt_f32_i32 as _v_cvt_f32_i32_e64,
+  v_cvt_i32_f32 as _v_cvt_i32_f32_e64,
+  v_cvt_f32_u32 as _v_cvt_f32_u32_e64,
+  v_cvt_u32_f32 as _v_cvt_u32_f32_e64,
   # VOP2
   v_add_f32_e32, v_sub_f32_e32, v_mul_f32_e32, v_and_b32_e32, v_or_b32_e32, v_xor_b32_e32,
   v_add_nc_u32_e32, v_sub_nc_u32_e32, v_lshlrev_b32_e32, v_lshrrev_b32_e32, v_ashrrev_i32_e32,
@@ -37,11 +37,11 @@ from extra.assembly.rdna3.autogen import (
   # VOP3
   v_fma_f32, v_fma_f64, v_mad_u64_u32, v_mad_i64_i32, v_lshlrev_b64, v_lshrrev_b64, v_ashrrev_i64,
   v_mul_lo_u32, v_mul_hi_u32, v_bfe_u32, v_bfe_i32,
-  v_add_co_u32, v_add_co_ci_u32_e32, v_cndmask_b32_e64, v_add_f64, v_mul_f64, v_sub_co_u32, v_sub_co_ci_u32_e32,
-  v_cmp_lt_f32_e32, v_cmp_eq_f32_e32, v_cmp_neq_f32_e32, v_cmp_gt_f32_e32,
-  v_cmp_lt_f64_e32, v_cmp_eq_f64_e32, v_cmp_neq_f64_e32, v_cmp_gt_f64_e32,
-  v_cmp_lt_i32_e32, v_cmp_eq_i32_e32, v_cmp_ne_i32_e32, v_cmp_gt_i32_e32,
-  v_cmp_lt_u32_e32, v_cmp_eq_u32_e32, v_cmp_ne_u32_e32, v_cmp_gt_u32_e32,
+  v_add_co_u32, v_add_co_ci_u32_e32, v_cndmask_b32 as v_cndmask_b32_e64, v_add_f64, v_mul_f64, v_sub_co_u32, v_sub_co_ci_u32_e32,
+  v_cmp_lt_f32 as v_cmp_lt_f32_e32, v_cmp_eq_f32 as v_cmp_eq_f32_e32, v_cmp_neq_f32 as v_cmp_neq_f32_e32, v_cmp_gt_f32 as v_cmp_gt_f32_e32,
+  v_cmp_lt_f64 as v_cmp_lt_f64_e32, v_cmp_eq_f64 as v_cmp_eq_f64_e32, v_cmp_neq_f64 as v_cmp_neq_f64_e32, v_cmp_gt_f64 as v_cmp_gt_f64_e32,
+  v_cmp_lt_i32 as v_cmp_lt_i32_e32, v_cmp_eq_i32 as v_cmp_eq_i32_e32, v_cmp_ne_i32 as v_cmp_ne_i32_e32, v_cmp_gt_i32 as v_cmp_gt_i32_e32,
+  v_cmp_lt_u32 as v_cmp_lt_u32_e32, v_cmp_eq_u32 as v_cmp_eq_u32_e32, v_cmp_ne_u32 as v_cmp_ne_u32_e32, v_cmp_gt_u32 as v_cmp_gt_u32_e32,
   # SOPP/SOP
   s_endpgm, s_waitcnt, s_barrier, s_sendmsg, s_mov_b32, s_and_saveexec_b32,
   # SMEM

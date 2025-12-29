@@ -3,7 +3,7 @@ from collections import defaultdict
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.dtype import DType, PtrDType, AddrSpace, dtypes
 from tinygrad.helpers import getenv
-from extra.assembly.rdna3.autogen import VGPR, SGPR
+from extra.assembly.amd.dsl import VGPR, SGPR
 
 class RDNARegAlloc:
   """Register allocator for RDNA3 with liveness analysis and register reuse."""
