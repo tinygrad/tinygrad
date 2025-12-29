@@ -448,7 +448,10 @@ def get_render(i:int, j:int, fmt:str) -> dict:
     return ret
   if fmt == "prg-pmc": return unpack_pmc(data[0])
   if fmt == "prg-sqtt":
+    key, data, p = data
     ret = {}
+    ret["data"] = amdgpu_cfg(p.lib, device_props[p.device]["gfx_target_version"])
+    return ret
     if len((steps:=ctxs[i]["steps"])[j+1:]) == 0:
       with soft_err(lambda err: ret.update(err)):
         cu_events, units, wave_insts = unpack_sqtt(*data)
@@ -458,6 +461,7 @@ def get_render(i:int, j:int, fmt:str) -> dict:
           for k in sorted(wave_insts.get(cu, []), key=row_tuple):
             steps.append(create_step(k.replace(cu, ""), ("/sqtt-insts", i, len(steps)), loc=(data:=wave_insts[cu][k])["loc"], depth=2, data=data))
     return {**ret, "steps":[{k:v for k,v in s.items() if k != "data"} for s in steps[j+1:]]}
+
   if fmt == "cu-sqtt": return {"value":get_profile(data, sort_fn=row_tuple), "content_type":"application/octet-stream"}
   if fmt == "sqtt-insts":
     columns = ["PC", "Instruction", "Hits", "Cycles", "Stall", "Type"]
