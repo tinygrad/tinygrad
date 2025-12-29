@@ -3,16 +3,7 @@
 import unittest, re, io, sys, subprocess
 from extra.assembly.rdna3.autogen import *
 from extra.assembly.rdna3.asm import waitcnt, asm
-from extra.assembly.rdna3.test.test_roundtrip import _get_llvm_mc
-
-def get_amd_toolchain():
-  """Check if AMD toolchain is available."""
-  try:
-    from tinygrad.runtime.support.compiler_amd import HIPCompiler
-    HIPCompiler("gfx1100").compile(".text\ns_endpgm")
-    return True
-  except Exception:
-    return False
+from extra.assembly.rdna3.test.helpers import get_llvm_mc
 
 def disassemble(lib: bytes, arch: str = "gfx1100") -> str:
   """Disassemble ELF binary using tinygrad's compiler, return raw output."""
@@ -48,7 +39,6 @@ def assemble_and_disassemble(instructions: list, arch: str = "gfx1100") -> list[
   lib = HIPCompiler(arch).compile(asm_src)
   return parse_disassembly(disassemble(lib, arch))
 
-@unittest.skipUnless(get_amd_toolchain(), "AMD toolchain not available")
 class TestIntegration(unittest.TestCase):
   """Test our assembler output matches LLVM disassembly."""
 
@@ -158,7 +148,6 @@ class TestIntegration(unittest.TestCase):
         return
     self.fail("Could not find s_mov_b32 in disassembly")
 
-@unittest.skipUnless(get_amd_toolchain(), "AMD toolchain not available")
 class TestAsm(unittest.TestCase):
   """Test asm() string parsing."""
 
@@ -214,7 +203,7 @@ class TestAsm(unittest.TestCase):
   def test_asm_vop3_modifiers(self):
     """Test asm() with VOP3 modifiers (neg, abs, clamp)."""
     def get_llvm_encoding(instr: str) -> str:
-      result = subprocess.run([_get_llvm_mc(), '-triple=amdgcn', '-mcpu=gfx1100', '-show-encoding'],
+      result = subprocess.run([get_llvm_mc(), '-triple=amdgcn', '-mcpu=gfx1100', '-show-encoding'],
                               input=instr, capture_output=True, text=True)
       if m := re.search(r'encoding:\s*\[(.*?)\]', result.stdout):
         return m.group(1).replace('0x','').replace(',','').replace(' ','')
@@ -232,7 +221,6 @@ class TestAsm(unittest.TestCase):
       llvm_hex = get_llvm_encoding(t)
       self.assertEqual(our_hex, llvm_hex, f"mismatch for: {t}")
 
-@unittest.skipUnless(get_amd_toolchain(), "AMD toolchain not available")
 class TestTinygradIntegration(unittest.TestCase):
   """Test that we can parse disassembled tinygrad kernels."""
 

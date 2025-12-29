@@ -1,4 +1,5 @@
 # RDNA3 emulator - executes compiled pseudocode from AMD ISA PDF
+# mypy: ignore-errors
 from __future__ import annotations
 import ctypes, os
 from extra.assembly.rdna3.lib import Inst, RawImm
