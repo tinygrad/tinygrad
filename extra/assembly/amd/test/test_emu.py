@@ -2357,5 +2357,162 @@ class TestF64Conversions(unittest.TestCase):
     self.assertEqual(result, -8, f"Expected -8, got {result} (lo=0x{lo:08x}, hi=0x{hi:08x})")
 
 
+class TestNewPcodeHelpers(unittest.TestCase):
+  """Tests for newly added pcode helper functions (SAD, BYTE_PERMUTE, BF16)."""
+
+  def test_v_sad_u8_basic(self):
+    """V_SAD_U8: Sum of absolute differences of 4 bytes."""
+    # s0 = 0x05040302, s1 = 0x04030201, s2 = 10 -> diff = 1+1+1+1 = 4, result = 14
+    instructions = [
+      s_mov_b32(s[0], 0x05040302),
+      s_mov_b32(s[1], 0x04030201),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], 10),
+      v_sad_u8(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][3]
+    self.assertEqual(result, 14, f"Expected 14, got {result}")
+
+  def test_v_sad_u8_identical_bytes(self):
+    """V_SAD_U8: When both operands are identical, SAD = 0 + accumulator."""
+    instructions = [
+      s_mov_b32(s[0], 0xDEADBEEF),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[0]),  # Same as v0
+      v_mov_b32_e32(v[2], 42),    # Accumulator
+      v_sad_u8(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][3]
+    self.assertEqual(result, 42, f"Expected 42, got {result}")
+
+  def test_v_sad_u16_basic(self):
+    """V_SAD_U16: Sum of absolute differences of 2 half-words."""
+    # s0 = 0x00020003, s1 = 0x00010001 -> diff = |2-1| + |3-1| = 1 + 2 = 3
+    instructions = [
+      s_mov_b32(s[0], 0x00020003),
+      s_mov_b32(s[1], 0x00010001),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], 0),
+      v_sad_u16(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][3]
+    self.assertEqual(result, 3, f"Expected 3, got {result}")
+
+  def test_v_sad_u32_basic(self):
+    """V_SAD_U32: Absolute difference of 32-bit values."""
+    # s0 = 100, s1 = 30 -> diff = 70, s2 = 5 -> result = 75
+    instructions = [
+      v_mov_b32_e32(v[0], 100),
+      v_mov_b32_e32(v[1], 30),
+      v_mov_b32_e32(v[2], 5),
+      v_sad_u32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][3]
+    self.assertEqual(result, 75, f"Expected 75, got {result}")
+
+  def test_v_msad_u8_masked(self):
+    """V_MSAD_U8: Skip bytes where reference (s1) is 0."""
+    # s0 = 0x10101010, s1 = 0x00010001, s2 = 0
+    # Only bytes 0 and 2 of s1 are non-zero, so only those contribute
+    # diff = |0x10-0x01| + |0x10-0x01| = 15 + 15 = 30
+    instructions = [
+      s_mov_b32(s[0], 0x10101010),
+      s_mov_b32(s[1], 0x00010001),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], 0),
+      v_msad_u8(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][3]
+    self.assertEqual(result, 30, f"Expected 30, got {result}")
+
+  def test_v_perm_b32_select_bytes(self):
+    """V_PERM_B32: Select bytes from combined {s0, s1}."""
+    # Combined = {S0, S1} where S1 is bytes 0-3, S0 is bytes 4-7
+    # s0 = 0x03020100 -> bytes 4-7 of combined
+    # s1 = 0x07060504 -> bytes 0-3 of combined
+    # Combined = 0x03020100_07060504
+    # selector = 0x00010203 -> select bytes 3,2,1,0 from combined = 0x04,0x05,0x06,0x07
+    instructions = [
+      s_mov_b32(s[0], 0x03020100),
+      s_mov_b32(s[1], 0x07060504),
+      s_mov_b32(s[2], 0x00010203),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_perm_b32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][3]
+    self.assertEqual(result, 0x04050607, f"Expected 0x04050607, got 0x{result:08x}")
+
+  def test_v_perm_b32_select_high_bytes(self):
+    """V_PERM_B32: Select bytes from high word (s0)."""
+    # Combined = {S0, S1} where S1 is bytes 0-3, S0 is bytes 4-7
+    # s0 = 0x03020100 -> bytes 4-7 of combined
+    # s1 = 0x07060504 -> bytes 0-3 of combined
+    # selector = 0x04050607 -> select bytes 7,6,5,4 from combined = 0x00,0x01,0x02,0x03
+    instructions = [
+      s_mov_b32(s[0], 0x03020100),
+      s_mov_b32(s[1], 0x07060504),
+      s_mov_b32(s[2], 0x04050607),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_perm_b32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][3]
+    self.assertEqual(result, 0x00010203, f"Expected 0x00010203, got 0x{result:08x}")
+
+  def test_v_perm_b32_constant_values(self):
+    """V_PERM_B32: Test constant 0x00 (sel=12) and 0xFF (sel>=13)."""
+    # selector = 0x0C0D0E0F -> bytes: 12=0x00, 13=0xFF, 14=0xFF, 15=0xFF
+    instructions = [
+      s_mov_b32(s[0], 0x12345678),
+      s_mov_b32(s[1], 0xABCDEF01),
+      s_mov_b32(s[2], 0x0C0D0E0F),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_perm_b32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][3]
+    # byte 0: sel=0x0F >= 13 -> 0xFF
+    # byte 1: sel=0x0E >= 13 -> 0xFF
+    # byte 2: sel=0x0D >= 13 -> 0xFF
+    # byte 3: sel=0x0C = 12 -> 0x00
+    self.assertEqual(result, 0x00FFFFFF, f"Expected 0x00FFFFFF, got 0x{result:08x}")
+
+  def test_v_dot2_f32_bf16_basic(self):
+    """V_DOT2_F32_BF16: Dot product of two bf16 pairs accumulated into f32."""
+    from extra.assembly.amd.pcode import _ibf16
+    # A = packed (2.0, 3.0) as bf16, B = packed (4.0, 5.0) as bf16
+    # Result = 2*4 + 3*5 + acc = 8 + 15 + 0 = 23.0
+    a_lo, a_hi = _ibf16(2.0), _ibf16(3.0)
+    b_lo, b_hi = _ibf16(4.0), _ibf16(5.0)
+    a_packed = (a_hi << 16) | a_lo
+    b_packed = (b_hi << 16) | b_lo
+    instructions = [
+      s_mov_b32(s[0], a_packed),
+      s_mov_b32(s[1], b_packed),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], 0),  # accumulator = 0
+      v_dot2_f32_bf16(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][3])
+    self.assertAlmostEqual(result, 23.0, places=1, msg=f"Expected 23.0, got {result}")
+
+
 if __name__ == '__main__':
   unittest.main()

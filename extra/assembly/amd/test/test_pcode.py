@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Tests for the RDNA3 pseudocode DSL."""
 import unittest
-from extra.assembly.amd.pcode import Reg, TypedView, SliceProxy, ExecContext, compile_pseudocode, _expr, MASK32, MASK64, _f32, _i32, _f16, _i16, f32_to_f16, _isnan
+from extra.assembly.amd.pcode import (Reg, TypedView, SliceProxy, ExecContext, compile_pseudocode, _expr, MASK32, MASK64,
+                                       _f32, _i32, _f16, _i16, f32_to_f16, _isnan, _bf16, _ibf16, bf16_to_f32, f32_to_bf16,
+                                       BYTE_PERMUTE, v_sad_u8, v_msad_u8)
 from extra.assembly.amd.autogen.rdna3.gen_pcode import _VOP3SDOp_V_DIV_SCALE_F32, _VOPCOp_V_CMP_CLASS_F32
 
 class TestReg(unittest.TestCase):
@@ -264,6 +266,130 @@ class TestPseudocodeRegressions(unittest.TestCase):
     self.assertTrue(_isnan(nan_reg.f32), "_isnan should return True for NaN TypedView")
     self.assertFalse(_isnan(normal_reg.f32), "_isnan should return False for normal TypedView")
     self.assertFalse(_isnan(inf_reg.f32), "_isnan should return False for inf TypedView")
+
+class TestBF16(unittest.TestCase):
+  """Tests for BF16 (bfloat16) support."""
+
+  def test_bf16_conversion(self):
+    """Test bf16 <-> f32 conversion."""
+    # bf16 is just the top 16 bits of f32
+    # 1.0f = 0x3f800000, bf16 = 0x3f80
+    self.assertAlmostEqual(_bf16(0x3f80), 1.0, places=2)
+    self.assertEqual(_ibf16(1.0), 0x3f80)
+    # 2.0f = 0x40000000, bf16 = 0x4000
+    self.assertAlmostEqual(_bf16(0x4000), 2.0, places=2)
+    self.assertEqual(_ibf16(2.0), 0x4000)
+    # -1.0f = 0xbf800000, bf16 = 0xbf80
+    self.assertAlmostEqual(_bf16(0xbf80), -1.0, places=2)
+    self.assertEqual(_ibf16(-1.0), 0xbf80)
+
+  def test_bf16_special_values(self):
+    """Test bf16 special values (inf, nan)."""
+    import math
+    # +inf: f32 = 0x7f800000, bf16 = 0x7f80
+    self.assertTrue(math.isinf(_bf16(0x7f80)))
+    self.assertEqual(_ibf16(float('inf')), 0x7f80)
+    # -inf: f32 = 0xff800000, bf16 = 0xff80
+    self.assertTrue(math.isinf(_bf16(0xff80)))
+    self.assertEqual(_ibf16(float('-inf')), 0xff80)
+    # NaN: quiet NaN bf16 = 0x7fc0
+    self.assertTrue(math.isnan(_bf16(0x7fc0)))
+    self.assertEqual(_ibf16(float('nan')), 0x7fc0)
+
+  def test_bf16_register_property(self):
+    """Test Reg.bf16 property."""
+    r = Reg(0)
+    r.bf16 = 3.0  # 3.0f = 0x40400000, bf16 = 0x4040
+    self.assertEqual(r._val & 0xffff, 0x4040)
+    self.assertAlmostEqual(float(r.bf16), 3.0, places=1)
+
+  def test_bf16_slice_property(self):
+    """Test SliceProxy.bf16 property."""
+    r = Reg(0x40404040)  # Two bf16 3.0 values
+    self.assertAlmostEqual(r[15:0].bf16, 3.0, places=1)
+    self.assertAlmostEqual(r[31:16].bf16, 3.0, places=1)
+
+class TestBytePermute(unittest.TestCase):
+  """Tests for BYTE_PERMUTE helper function (V_PERM_B32)."""
+
+  def test_byte_select_0_to_7(self):
+    """Test selecting bytes 0-7 from 64-bit data."""
+    # data = {s0, s1} where s0 is bytes 0-3, s1 is bytes 4-7
+    # Combined: 0x0706050403020100 (byte 0 = 0x00, byte 7 = 0x07)
+    data = 0x0706050403020100
+    for i in range(8):
+      self.assertEqual(BYTE_PERMUTE(data, i), i, f"byte {i} should be {i}")
+
+  def test_sign_extend_bytes(self):
+    """Test sign extension selectors 8-11."""
+    # sel 8: sign of byte 1 (bits 15:8)
+    # sel 9: sign of byte 3 (bits 31:24)
+    # sel 10: sign of byte 5 (bits 47:40)
+    # sel 11: sign of byte 7 (bits 63:56)
+    data = 0x8000800080008000  # All relevant bytes have sign bit set
+    self.assertEqual(BYTE_PERMUTE(data, 8), 0xff)
+    self.assertEqual(BYTE_PERMUTE(data, 9), 0xff)
+    self.assertEqual(BYTE_PERMUTE(data, 10), 0xff)
+    self.assertEqual(BYTE_PERMUTE(data, 11), 0xff)
+    data = 0x7f007f007f007f00  # No sign bits set
+    self.assertEqual(BYTE_PERMUTE(data, 8), 0x00)
+    self.assertEqual(BYTE_PERMUTE(data, 9), 0x00)
+    self.assertEqual(BYTE_PERMUTE(data, 10), 0x00)
+    self.assertEqual(BYTE_PERMUTE(data, 11), 0x00)
+
+  def test_constant_zero(self):
+    """Test selector 12 returns 0x00."""
+    self.assertEqual(BYTE_PERMUTE(0xffffffffffffffff, 12), 0x00)
+
+  def test_constant_ff(self):
+    """Test selectors >= 13 return 0xFF."""
+    for sel in [13, 14, 15, 255]:
+      self.assertEqual(BYTE_PERMUTE(0, sel), 0xff, f"sel {sel} should be 0xff")
+
+class TestSADHelpers(unittest.TestCase):
+  """Tests for V_SAD_U8 and V_MSAD_U8 helper functions."""
+
+  def test_v_sad_u8_basic(self):
+    """Test v_sad_u8 with simple values."""
+    # s0 = 0x04030201, s1 = 0x04030201 -> diff = 0 for all bytes
+    result = v_sad_u8(0x04030201, 0x04030201, 0)
+    self.assertEqual(result, 0)
+    # s0 = 0x05040302, s1 = 0x04030201 -> diff = 1+1+1+1 = 4
+    result = v_sad_u8(0x05040302, 0x04030201, 0)
+    self.assertEqual(result, 4)
+
+  def test_v_sad_u8_with_accumulator(self):
+    """Test v_sad_u8 with non-zero accumulator."""
+    # s0 = 0x05040302, s1 = 0x04030201, s2 = 100 -> 4 + 100 = 104
+    result = v_sad_u8(0x05040302, 0x04030201, 100)
+    self.assertEqual(result, 104)
+
+  def test_v_sad_u8_large_diff(self):
+    """Test v_sad_u8 with maximum byte differences."""
+    # s0 = 0xffffffff, s1 = 0x00000000 -> diff = 255*4 = 1020
+    result = v_sad_u8(0xffffffff, 0x00000000, 0)
+    self.assertEqual(result, 1020)
+
+  def test_v_msad_u8_basic(self):
+    """Test v_msad_u8 masks when reference byte is 0."""
+    # s0 = 0x10101010, s1 = 0x00000000 -> all masked, result = 0
+    result = v_msad_u8(0x10101010, 0x00000000, 0)
+    self.assertEqual(result, 0)
+    # s0 = 0x10101010, s1 = 0x01010101 -> diff = |0x10-0x01|*4 = 15*4 = 60
+    result = v_msad_u8(0x10101010, 0x01010101, 0)
+    self.assertEqual(result, 60)
+
+  def test_v_msad_u8_partial_mask(self):
+    """Test v_msad_u8 with partial masking."""
+    # s0 = 0x10101010, s1 = 0x00010001 -> bytes 1 and 3 masked
+    # diff = |0x10-0x01| + |0x10-0x01| = 15 + 15 = 30
+    result = v_msad_u8(0x10101010, 0x00010001, 0)
+    self.assertEqual(result, 30)
+
+  def test_v_msad_u8_with_accumulator(self):
+    """Test v_msad_u8 with non-zero accumulator."""
+    result = v_msad_u8(0x10101010, 0x01010101, 50)
+    self.assertEqual(result, 110)  # 60 + 50
 
 if __name__ == '__main__':
   unittest.main()

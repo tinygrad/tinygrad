@@ -195,7 +195,59 @@ v_min3_i16 = v_min3_i32
 v_max3_i16 = v_max3_i32
 def v_min3_u16(a, b, c): return min(a & 0xffff, b & 0xffff, c & 0xffff)
 def v_max3_u16(a, b, c): return max(a & 0xffff, b & 0xffff, c & 0xffff)
-def ABSDIFF(a, b): return abs(a - b)
+def ABSDIFF(a, b): return abs(int(a) - int(b))
+
+# BF16 (bfloat16) conversion functions
+def _bf16(i):
+  """Convert bf16 bits to float. BF16 is just the top 16 bits of f32."""
+  return struct.unpack("<f", struct.pack("<I", (i & 0xffff) << 16))[0]
+def _ibf16(f):
+  """Convert float to bf16 bits (truncate to top 16 bits of f32)."""
+  if math.isnan(f): return 0x7fc0  # bf16 quiet NaN
+  if math.isinf(f): return 0x7f80 if f > 0 else 0xff80  # bf16 ±infinity
+  try: return (struct.unpack("<I", struct.pack("<f", float(f)))[0] >> 16) & 0xffff
+  except (OverflowError, struct.error): return 0x7f80 if f > 0 else 0xff80
+def bf16_to_f32(v): return _bf16(v) if isinstance(v, int) else float(v)
+def f32_to_bf16(f): return _ibf16(f)
+
+# BYTE_PERMUTE for V_PERM_B32 - select bytes from 64-bit data based on selector
+def BYTE_PERMUTE(data, sel):
+  """Select a byte from 64-bit data based on selector value.
+  sel 0-7: select byte from data (S1 is bytes 0-3, S0 is bytes 4-7 in {S0,S1})
+  sel 8-11: sign-extend from specific bytes (8->byte1, 9->byte3, 10->byte5, 11->byte7)
+  sel 12: constant 0x00
+  sel >= 13: constant 0xFF"""
+  sel = int(sel) & 0xff
+  if sel <= 7: return (int(data) >> (sel * 8)) & 0xff
+  if sel == 8: return 0xff if ((int(data) >> 15) & 1) else 0x00  # sign of byte 1
+  if sel == 9: return 0xff if ((int(data) >> 31) & 1) else 0x00  # sign of byte 3
+  if sel == 10: return 0xff if ((int(data) >> 47) & 1) else 0x00  # sign of byte 5
+  if sel == 11: return 0xff if ((int(data) >> 63) & 1) else 0x00  # sign of byte 7
+  if sel == 12: return 0x00
+  return 0xff  # sel >= 13
+
+# v_sad_u8 helper for V_SAD instructions (sum of absolute differences of 4 bytes)
+def v_sad_u8(s0, s1, s2):
+  """V_SAD_U8: Sum of absolute differences of 4 byte pairs plus accumulator."""
+  s0, s1, s2 = int(s0), int(s1), int(s2)
+  result = s2
+  for i in range(4):
+    a = (s0 >> (i * 8)) & 0xff
+    b = (s1 >> (i * 8)) & 0xff
+    result += abs(a - b)
+  return result & 0xffffffff
+
+# v_msad_u8 helper (masked SAD - skip when reference byte is 0)
+def v_msad_u8(s0, s1, s2):
+  """V_MSAD_U8: Masked sum of absolute differences (skip if reference byte is 0)."""
+  s0, s1, s2 = int(s0), int(s1), int(s2)
+  result = s2
+  for i in range(4):
+    a = (s0 >> (i * 8)) & 0xff
+    b = (s1 >> (i * 8)) & 0xff
+    if b != 0:  # Only add diff if reference (s1) byte is non-zero
+      result += abs(a - b)
+  return result & 0xffffffff
 def f16_to_snorm(f): return max(-32768, min(32767, int(round(max(-1.0, min(1.0, f)) * 32767))))
 def f16_to_unorm(f): return max(0, min(65535, int(round(max(0.0, min(1.0, f)) * 65535))))
 def f32_to_snorm(f): return max(-32768, min(32767, int(round(max(-1.0, min(1.0, f)) * 32767))))
@@ -240,6 +292,8 @@ __all__ = [
   'i16_to_f16', 'u16_to_f16', 'f16_to_i16', 'f16_to_u16', 'u32_to_u16', 'i32_to_i16',
   'f16_to_snorm', 'f16_to_unorm', 'f32_to_snorm', 'f32_to_unorm', 'v_cvt_i16_f32', 'v_cvt_u16_f32',
   'SAT8', 'f32_to_u8', 'u8_to_u32', 'u4_to_u32',
+  # BF16 conversion functions
+  '_bf16', '_ibf16', 'bf16_to_f32', 'f32_to_bf16',
   # Math functions
   'trunc', 'floor', 'ceil', 'sqrt', 'log2', 'sin', 'cos', 'pow', 'fract', 'isEven', 'mantissa',
   # Min/max functions
@@ -248,6 +302,8 @@ __all__ = [
   'v_min3_f32', 'v_max3_f32', 'v_min3_i32', 'v_max3_i32', 'v_min3_u32', 'v_max3_u32',
   'v_min3_f16', 'v_max3_f16', 'v_min3_i16', 'v_max3_i16', 'v_min3_u16', 'v_max3_u16',
   'ABSDIFF',
+  # Byte/SAD helper functions
+  'BYTE_PERMUTE', 'v_sad_u8', 'v_msad_u8',
   # Bit manipulation
   '_brev32', '_brev64', '_ctz32', '_ctz64', '_exponent', '_is_denorm_f32', '_is_denorm_f64',
   '_sign', '_mantissa_f32', '_div', '_isnan', '_isquietnan', '_issignalnan', '_gt_neg_zero', '_lt_neg_zero', '_fma', '_ldexp', '_signext',
@@ -354,16 +410,25 @@ class SliceProxy:
   i32 = property(lambda s: _sext(s._get() & MASK32, 32), lambda s, v: s._set(v))
   f16 = property(lambda s: _f16(s._get()), lambda s, v: s._set(v if isinstance(v, int) else _i16(float(v))))
   f32 = property(lambda s: _f32(s._get()), lambda s, v: s._set(_i32(float(v))))
+  bf16 = property(lambda s: _bf16(s._get()), lambda s, v: s._set(v if isinstance(v, int) else _ibf16(float(v))))
   b16, b32 = u16, u32
 
   def __int__(self): return self._get()
   def __index__(self): return self._get()
 
+  # Comparison operators (compare as integers)
+  def __eq__(s, o): return s._get() == int(o)
+  def __ne__(s, o): return s._get() != int(o)
+  def __lt__(s, o): return s._get() < int(o)
+  def __le__(s, o): return s._get() <= int(o)
+  def __gt__(s, o): return s._get() > int(o)
+  def __ge__(s, o): return s._get() >= int(o)
+
 class TypedView:
   """View for S0.u32 that supports [4:0] slicing and [bit] access."""
-  __slots__ = ('_reg', '_bits', '_signed', '_float')
-  def __init__(self, reg, bits, signed=False, is_float=False):
-    self._reg, self._bits, self._signed, self._float = reg, bits, signed, is_float
+  __slots__ = ('_reg', '_bits', '_signed', '_float', '_bf16')
+  def __init__(self, reg, bits, signed=False, is_float=False, is_bf16=False):
+    self._reg, self._bits, self._signed, self._float, self._bf16 = reg, bits, signed, is_float, is_bf16
 
   @property
   def _val(self):
@@ -390,6 +455,7 @@ class TypedView:
   def __trunc__(self): return int(float(self)) if self._float else int(self)
   def __float__(self):
     if self._float:
+      if self._bf16: return _bf16(self._val)  # bf16 uses different conversion
       return _f16(self._val) if self._bits == 16 else _f32(self._val) if self._bits == 32 else _f64(self._val)
     return float(int(self))
 
@@ -454,6 +520,7 @@ class Reg:
   i16 = property(lambda s: TypedView(s, 16, signed=True), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | (int(v) & 0xffff)))
   b16 = property(lambda s: TypedView(s, 16), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | (int(v) & 0xffff)))
   f16 = property(lambda s: TypedView(s, 16, is_float=True), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | ((v if isinstance(v, int) else _i16(float(v))) & 0xffff)))
+  bf16 = property(lambda s: TypedView(s, 16, is_float=True, is_bf16=True), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | ((v if isinstance(v, int) else _ibf16(float(v))) & 0xffff)))
   u8 = property(lambda s: TypedView(s, 8))
   i8 = property(lambda s: TypedView(s, 8, signed=True))
 
@@ -706,10 +773,10 @@ from extra.assembly.amd.dsl import PDF_URLS
 INST_PATTERN = re.compile(r'^([SV]_[A-Z0-9_]+)\s+(\d+)\s*$', re.M)
 
 # Patterns that can't be handled by the DSL (require special handling in emu.py)
-UNSUPPORTED = ['SGPR[', 'V_SWAP', 'eval ', 'BYTE_PERMUTE', 'FATAL_HALT', 'HW_REGISTERS',
-               'PC =', 'PC=', 'PC+', '= PC', 'v_sad', '+:', 'vscnt', 'vmcnt', 'expcnt', 'lgkmcnt',
-               'CVT_OFF_TABLE', '.bf16', 'ThreadMask',
-               'S1[i', 'C.i32', 'v_msad_u8', 'S[i]', 'in[', '2.0 / PI',
+UNSUPPORTED = ['SGPR[', 'V_SWAP', 'eval ', 'FATAL_HALT', 'HW_REGISTERS',
+               'PC =', 'PC=', 'PC+', '= PC', '+:', 'vscnt', 'vmcnt', 'expcnt', 'lgkmcnt',
+               'CVT_OFF_TABLE', 'ThreadMask',
+               'S1[i', 'C.i32', 'S[i]', 'in[', '2.0 / PI',
                'if n.', 'DST.u32', 'addrd = DST', 'addr = DST']  # Malformed pseudocode from PDF
 
 def extract_pseudocode(text: str) -> str | None:

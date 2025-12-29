@@ -10159,6 +10159,18 @@ def _VOP3Op_V_SAD_U8(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _
   result = {'d0': D0._val, 'scc': scc & 1}
   return result
 
+def _VOP3Op_V_SAD_HI_U8(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u32 = (32'U(v_sad_u8(S0, S1, 0U)) << 16U) + S2.u32
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  S2 = Reg(s2)
+  D0 = Reg(d0)
+  # --- compiled pseudocode ---
+  D0.u32 = ((v_sad_u8(S0, S1, 0)) << 16) + S2.u32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  return result
+
 def _VOP3Op_V_SAD_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
   # // UNSIGNED comparison
   # tmp = S2.u32;
@@ -10381,6 +10393,71 @@ def _VOP3Op_V_MSAD_U8(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
   tmp += ((0) if (S1.u32[23 : 16] == 0) else ((ABSDIFF(S0.u32[23 : 16], S1.u32[23 : 16]))))
   tmp += ((0) if (S1.u32[31 : 24] == 0) else ((ABSDIFF(S0.u32[31 : 24], S1.u32[31 : 24]))))
   D0.u32 = tmp
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  return result
+
+def _VOP3Op_V_QSAD_PK_U16_U8(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # tmp[63 : 48] = 16'B(v_sad_u8(S0[55 : 24], S1[31 : 0], S2[63 : 48].u32));
+  # tmp[47 : 32] = 16'B(v_sad_u8(S0[47 : 16], S1[31 : 0], S2[47 : 32].u32));
+  # tmp[31 : 16] = 16'B(v_sad_u8(S0[39 : 8], S1[31 : 0], S2[31 : 16].u32));
+  # tmp[15 : 0] = 16'B(v_sad_u8(S0[31 : 0], S1[31 : 0], S2[15 : 0].u32));
+  # D0.b64 = tmp.b64
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  S2 = Reg(s2)
+  D0 = Reg(d0)
+  tmp = Reg(0)
+  # --- compiled pseudocode ---
+  tmp[63 : 48] = (v_sad_u8(S0[55 : 24], S1[31 : 0], S2[63 : 48].u32))
+  tmp[47 : 32] = (v_sad_u8(S0[47 : 16], S1[31 : 0], S2[47 : 32].u32))
+  tmp[31 : 16] = (v_sad_u8(S0[39 : 8], S1[31 : 0], S2[31 : 16].u32))
+  tmp[15 : 0] = (v_sad_u8(S0[31 : 0], S1[31 : 0], S2[15 : 0].u32))
+  D0.b64 = tmp.b64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  result['d0_64'] = True
+  return result
+
+def _VOP3Op_V_MQSAD_PK_U16_U8(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # tmp[63 : 48] = 16'B(v_msad_u8(S0[55 : 24], S1[31 : 0], S2[63 : 48].u32));
+  # tmp[47 : 32] = 16'B(v_msad_u8(S0[47 : 16], S1[31 : 0], S2[47 : 32].u32));
+  # tmp[31 : 16] = 16'B(v_msad_u8(S0[39 : 8], S1[31 : 0], S2[31 : 16].u32));
+  # tmp[15 : 0] = 16'B(v_msad_u8(S0[31 : 0], S1[31 : 0], S2[15 : 0].u32));
+  # D0.b64 = tmp.b64
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  S2 = Reg(s2)
+  D0 = Reg(d0)
+  tmp = Reg(0)
+  # --- compiled pseudocode ---
+  tmp[63 : 48] = (v_msad_u8(S0[55 : 24], S1[31 : 0], S2[63 : 48].u32))
+  tmp[47 : 32] = (v_msad_u8(S0[47 : 16], S1[31 : 0], S2[47 : 32].u32))
+  tmp[31 : 16] = (v_msad_u8(S0[39 : 8], S1[31 : 0], S2[31 : 16].u32))
+  tmp[15 : 0] = (v_msad_u8(S0[31 : 0], S1[31 : 0], S2[15 : 0].u32))
+  D0.b64 = tmp.b64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  result['d0_64'] = True
+  return result
+
+def _VOP3Op_V_MQSAD_U32_U8(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # tmp[127 : 96] = 32'B(v_msad_u8(S0[55 : 24], S1[31 : 0], S2[127 : 96].u32));
+  # tmp[95 : 64] = 32'B(v_msad_u8(S0[47 : 16], S1[31 : 0], S2[95 : 64].u32));
+  # tmp[63 : 32] = 32'B(v_msad_u8(S0[39 : 8], S1[31 : 0], S2[63 : 32].u32));
+  # tmp[31 : 0] = 32'B(v_msad_u8(S0[31 : 0], S1[31 : 0], S2[31 : 0].u32));
+  # D0.b128 = tmp.b128
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  S2 = Reg(s2)
+  D0 = Reg(d0)
+  tmp = Reg(0)
+  # --- compiled pseudocode ---
+  tmp[127 : 96] = (v_msad_u8(S0[55 : 24], S1[31 : 0], S2[127 : 96].u32))
+  tmp[95 : 64] = (v_msad_u8(S0[47 : 16], S1[31 : 0], S2[95 : 64].u32))
+  tmp[63 : 32] = (v_msad_u8(S0[39 : 8], S1[31 : 0], S2[63 : 32].u32))
+  tmp[31 : 0] = (v_msad_u8(S0[31 : 0], S1[31 : 0], S2[31 : 0].u32))
+  D0.b128 = tmp.b128
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   return result
@@ -10856,6 +10933,25 @@ def _VOP3Op_V_DOT2_F16_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, V
   tmp += S0[15 : 0].f16 * S1[15 : 0].f16
   tmp += S0[31 : 16].f16 * S1[31 : 16].f16
   D0.f16 = tmp
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  return result
+
+def _VOP3Op_V_DOT2_BF16_BF16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # tmp = S2.bf16;
+  # tmp += S0[15 : 0].bf16 * S1[15 : 0].bf16;
+  # tmp += S0[31 : 16].bf16 * S1[31 : 16].bf16;
+  # D0.bf16 = tmp
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  S2 = Reg(s2)
+  D0 = Reg(d0)
+  tmp = Reg(0)
+  # --- compiled pseudocode ---
+  tmp = Reg(S2.bf16)
+  tmp += S0[15 : 0].bf16 * S1[15 : 0].bf16
+  tmp += S0[31 : 16].bf16 * S1[31 : 16].bf16
+  D0.bf16 = tmp
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   return result
@@ -11793,6 +11889,7 @@ VOP3Op_FUNCTIONS = {
   VOP3Op.V_MED3_I32: _VOP3Op_V_MED3_I32,
   VOP3Op.V_MED3_U32: _VOP3Op_V_MED3_U32,
   VOP3Op.V_SAD_U8: _VOP3Op_V_SAD_U8,
+  VOP3Op.V_SAD_HI_U8: _VOP3Op_V_SAD_HI_U8,
   VOP3Op.V_SAD_U16: _VOP3Op_V_SAD_U16,
   VOP3Op.V_SAD_U32: _VOP3Op_V_SAD_U32,
   VOP3Op.V_CVT_PK_U8_F32: _VOP3Op_V_CVT_PK_U8_F32,
@@ -11801,6 +11898,9 @@ VOP3Op_FUNCTIONS = {
   VOP3Op.V_DIV_FMAS_F32: _VOP3Op_V_DIV_FMAS_F32,
   VOP3Op.V_DIV_FMAS_F64: _VOP3Op_V_DIV_FMAS_F64,
   VOP3Op.V_MSAD_U8: _VOP3Op_V_MSAD_U8,
+  VOP3Op.V_QSAD_PK_U16_U8: _VOP3Op_V_QSAD_PK_U16_U8,
+  VOP3Op.V_MQSAD_PK_U16_U8: _VOP3Op_V_MQSAD_PK_U16_U8,
+  VOP3Op.V_MQSAD_U32_U8: _VOP3Op_V_MQSAD_U32_U8,
   VOP3Op.V_XOR3_B32: _VOP3Op_V_XOR3_B32,
   VOP3Op.V_MAD_U16: _VOP3Op_V_MAD_U16,
   VOP3Op.V_XAD_U32: _VOP3Op_V_XAD_U32,
@@ -11834,6 +11934,7 @@ VOP3Op_FUNCTIONS = {
   VOP3Op.V_MAXMIN_I32: _VOP3Op_V_MAXMIN_I32,
   VOP3Op.V_MINMAX_I32: _VOP3Op_V_MINMAX_I32,
   VOP3Op.V_DOT2_F16_F16: _VOP3Op_V_DOT2_F16_F16,
+  VOP3Op.V_DOT2_BF16_BF16: _VOP3Op_V_DOT2_BF16_BF16,
   VOP3Op.V_ADD_NC_U16: _VOP3Op_V_ADD_NC_U16,
   VOP3Op.V_SUB_NC_U16: _VOP3Op_V_SUB_NC_U16,
   VOP3Op.V_MUL_LO_U16: _VOP3Op_V_MUL_LO_U16,
@@ -12552,6 +12653,25 @@ def _VOP3POp_V_DOT8_U32_U4(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, V
   result = {'d0': D0._val, 'scc': scc & 1}
   return result
 
+def _VOP3POp_V_DOT2_F32_BF16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # tmp = S2.f32;
+  # tmp += bf16_to_f32(S0[15 : 0].bf16) * bf16_to_f32(S1[15 : 0].bf16);
+  # tmp += bf16_to_f32(S0[31 : 16].bf16) * bf16_to_f32(S1[31 : 16].bf16);
+  # D0.f32 = tmp
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  S2 = Reg(s2)
+  D0 = Reg(d0)
+  tmp = Reg(0)
+  # --- compiled pseudocode ---
+  tmp = Reg(S2.f32)
+  tmp += bf16_to_f32(S0[15 : 0].bf16) * bf16_to_f32(S1[15 : 0].bf16)
+  tmp += bf16_to_f32(S0[31 : 16].bf16) * bf16_to_f32(S1[31 : 16].bf16)
+  D0.f32 = tmp
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  return result
+
 VOP3POp_FUNCTIONS = {
   VOP3POp.V_PK_MAD_I16: _VOP3POp_V_PK_MAD_I16,
   VOP3POp.V_PK_MUL_LO_U16: _VOP3POp_V_PK_MUL_LO_U16,
@@ -12575,6 +12695,7 @@ VOP3POp_FUNCTIONS = {
   VOP3POp.V_DOT2_F32_F16: _VOP3POp_V_DOT2_F32_F16,
   VOP3POp.V_DOT4_U32_U8: _VOP3POp_V_DOT4_U32_U8,
   VOP3POp.V_DOT8_U32_U4: _VOP3POp_V_DOT8_U32_U4,
+  VOP3POp.V_DOT2_F32_BF16: _VOP3POp_V_DOT2_F32_BF16,
 }
 
 def _VOPCOp_V_CMP_F_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
