@@ -48,14 +48,12 @@ class TestHW(unittest.TestCase):
     ])
     self.assertEqual(out, [2])
 
-  # assembler err
-  @unittest.expectedFailure
   def test_simple_s_mov(self):
     out = get_output([
       s_mov_b32(s[7], 0x7fffffff),
       v_mov_b32_e32(v[1], s[7]),
     ])
-    self.assertEqual(out, [2])
+    self.assertEqual(out, [0x7fffffff])
 
   def test_exec_mov(self):
     out = get_output([
@@ -102,8 +100,6 @@ class TestHW(unittest.TestCase):
     self.assertEqual(run_fmac(a, -b), f16_to_bits(-10.0))
     self.assertEqual(run_fmac(-a, -b), f16_to_bits(14.0))
 
-  # assembler err
-  @unittest.expectedFailure
   def test_s_abs_i32(self):
     def check(x, y, dst=s[10], scc=0):
       for reg,val in [(dst, y), (SCC, scc)]:
@@ -121,8 +117,6 @@ class TestHW(unittest.TestCase):
     check(0xffffffff, 0x00000001, scc=1)
     check(0, 0, scc=0)
 
-  # how do I negate a VGPR operand?
-  @unittest.expectedFailure
   def test_v_rcp_f32_neg_vop3(self):
     def v_neg_rcp_f32(x:float, y:float):
       out = get_output([
@@ -138,14 +132,12 @@ class TestHW(unittest.TestCase):
     v_neg_rcp_f32(-2.0, 0.5)
     v_neg_rcp_f32(2.0, -0.5)
 
-  # how do I negate a VGPR operand?
-  @unittest.expectedFailure
   def test_v_cndmask_b32_neg(self):
     def v_neg(x:float, y:float):
       out = get_output([
         v_mov_b32_e32(v[1], f32_to_bits(x)),
         s_mov_b32(s[10], 1),
-        v_cndmask_b32_e32(v[1], v[1], -v[1], s[10]),
+        v_cndmask_b32_e64(v[1], v[1], -v[1], s[10]),
       ])[0]
       assert out == f32_to_bits(y), f"{f32_from_bits(out)} != {y} / {out} != {f32_to_bits(y)}"
 

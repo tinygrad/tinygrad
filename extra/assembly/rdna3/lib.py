@@ -40,8 +40,9 @@ bits = _Bits()
 
 # Register types
 class Reg:
-  def __init__(self, idx: int, count: int = 1, hi: bool = False): self.idx, self.count, self.hi = idx, count, hi
+  def __init__(self, idx: int, count: int = 1, hi: bool = False, neg: bool = False): self.idx, self.count, self.hi, self.neg = idx, count, hi, neg
   def __repr__(self): return f"{self.__class__.__name__.lower()[0]}[{self.idx}]" if self.count == 1 else f"{self.__class__.__name__.lower()[0]}[{self.idx}:{self.idx + self.count}]"
+  def __neg__(self): return self.__class__(self.idx, self.count, self.hi, neg=not self.neg)
 
 T = TypeVar('T', bound=Reg)
 class _RegFactory(Generic[T]):
@@ -162,6 +163,11 @@ class Inst:
       if name in SRC_FIELDS:
         encoded = encode_src(val)
         self._values[name] = RawImm(encoded)
+        # Handle negation modifier for VOP3 instructions
+        if isinstance(val, Reg) and val.neg and 'neg' in self._fields:
+          neg_bit = {'src0': 1, 'src1': 2, 'src2': 4}.get(name, 0)
+          cur_neg = self._values.get('neg', 0)
+          self._values['neg'] = (cur_neg.val if isinstance(cur_neg, RawImm) else cur_neg) | neg_bit
         # Track literal value if needed (encoded as 255)
         if encoded == 255 and self._literal is None and isinstance(val, int) and not isinstance(val, IntEnum):
           self._literal = val
