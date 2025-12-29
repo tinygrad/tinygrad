@@ -954,7 +954,7 @@ jobs:
         run: |
           echo "Installed cuda version is: ${{steps.cuda-toolkit.outputs.cuda}}"
           echo "Cuda install location: ${{steps.cuda-toolkit.outputs.CUDA_PATH}}"
-          which nvcuda.dll
+          gcm nvcuda.dll
           nvcc -V
       - name: Set env
         shell: bash
