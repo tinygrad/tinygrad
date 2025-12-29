@@ -132,6 +132,16 @@ class Inst:
         sdata_val = orig_args.get('sdata')
         if expected_cnt is not None and isinstance(sdata_val, Reg) and sdata_val.count != expected_cnt:
           raise ValueError(f"SMEM op {op_val} expects {expected_cnt} registers, got {sdata_val.count}")
+    # Validate register counts for SOP1 instructions (b32 = 1 reg, b64 = 2 regs)
+    if self.__class__.__name__ == 'SOP1':
+      op_val = orig_args.get(field_names[0]) if args else orig_args.get('op')
+      if op_val is not None and hasattr(op_val, 'name'):
+        expected = 2 if op_val.name.endswith('_B64') else 1
+        sdst_val, ssrc0_val = orig_args.get('sdst'), orig_args.get('ssrc0')
+        if isinstance(sdst_val, Reg) and sdst_val.count != expected:
+          raise ValueError(f"SOP1 {op_val.name} expects {expected} destination register(s), got {sdst_val.count}")
+        if isinstance(ssrc0_val, Reg) and ssrc0_val.count != expected:
+          raise ValueError(f"SOP1 {op_val.name} expects {expected} source register(s), got {ssrc0_val.count}")
     # Type check and encode values
     for name, val in list(self._values.items()):
       if name == 'encoding': continue
@@ -170,12 +180,6 @@ class Inst:
       # VOPD vdsty: encode as actual >> 1 (constraint: vdsty parity must be opposite of vdstx)
       elif marker is _VDSTYEnc and isinstance(val, VGPR):
         self._values[name] = val.idx >> 1
-    # Validate register counts for SMEM instructions
-    if self.__class__.__name__ == 'SMEM':
-      op_val = unwrap(self._values.get('op', 0))
-      expected_cnt = {0:1, 1:2, 2:4, 3:8, 4:16, 8:1, 9:2, 10:4, 11:8, 12:16}.get(op_val)
-      if expected_cnt is not None and 'sdata' in kwargs and isinstance(kwargs['sdata'], Reg) and kwargs['sdata'].count != expected_cnt:
-        raise ValueError(f"SMEM op {op_val} expects {expected_cnt} registers, got {kwargs['sdata'].count}")
 
   def _encode_field(self, name: str, val) -> int:
     if isinstance(val, RawImm): return val.val

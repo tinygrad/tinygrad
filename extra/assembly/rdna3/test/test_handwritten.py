@@ -29,6 +29,28 @@ class TestIntegration(unittest.TestCase):
     with self.assertRaises(Exception):
       self.inst = s_load_b128(s[4:6], s[0:1], NULL, 0)
 
+  def test_mov_b32(self):
+    self.inst = s_mov_b32(s[80], s[0])
+
+  def test_mov_b64(self):
+    self.inst = s_mov_b64(s[80:81], s[0:1])
+
+  def test_mov_b32_wrong(self):
+    with self.assertRaises(Exception):
+      self.inst = s_mov_b32(s[80:81], s[0:1])
+    with self.assertRaises(Exception):
+      self.inst = s_mov_b32(s[80:81], s[0])
+    with self.assertRaises(Exception):
+      self.inst = s_mov_b32(s[80], s[0:1])
+
+  def test_mov_b64_wrong(self):
+    with self.assertRaises(Exception):
+      self.inst = s_mov_b64(s[80], s[0])
+    with self.assertRaises(Exception):
+      self.inst = s_mov_b64(s[80], s[0:1])
+    with self.assertRaises(Exception):
+      self.inst = s_mov_b64(s[80:81], s[0])
+
   def test_load_b128_no_0(self):
     self.inst = s_load_b128(s[4:7], s[0:1], NULL)
 
