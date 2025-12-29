@@ -1,10 +1,8 @@
 import base64, ctypes, pathlib, tempfile, hashlib, sys
 from tinygrad.device import Compiler
 from tinygrad.helpers import cpu_objdump, system, data64
-from tinygrad.runtime.autogen import mesa
+from tinygrad.runtime.autogen import mesa, llvm
 from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, expect, cerr
-try: from tinygrad.runtime.autogen import llvm
-except (ImportError, FileNotFoundError): llvm = None #type:ignore[assignment]
 
 def rzalloc(typ, ctx=None, **kwargs):
   s = ctypes.cast(mesa.rzalloc_size(ctypes.cast(ctx, ctypes.c_void_p), ctypes.sizeof(typ)), ctypes.POINTER(typ))
