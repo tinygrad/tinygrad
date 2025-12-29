@@ -564,71 +564,12 @@ def generate(output_path: str | None = None, arch: str = "rdna3") -> dict:
     pathlib.Path(output_path).write_text('\n'.join(lines))
   return {"formats": formats, "enums": enums, "src_enum": src_enum}
 
-def compare_archs(arch1: str, arch2: str):
-  """Compare two architectures and print differences."""
-  print(f"Comparing {arch1} vs {arch2}...")
-  r1 = generate(arch=arch1)
-  r2 = generate(arch=arch2)
-
-  differences = 0
-
-  # Compare formats
-  f1, f2 = set(r1['formats'].keys()), set(r2['formats'].keys())
-  if f1 - f2: print(f"  Formats only in {arch1}: {f1 - f2}"); differences += 1
-  if f2 - f1: print(f"  Formats only in {arch2}: {f2 - f1}"); differences += 1
-  common_formats = f1 & f2
-  for fmt in sorted(common_formats):
-    fields1 = {(f[0], f[1], f[2]) for f in r1['formats'][fmt]}  # name, hi, lo
-    fields2 = {(f[0], f[1], f[2]) for f in r2['formats'][fmt]}
-    if fields1 != fields2:
-      print(f"  Format {fmt} differs:")
-      if fields1 - fields2: print(f"    Only in {arch1}: {fields1 - fields2}")
-      if fields2 - fields1: print(f"    Only in {arch2}: {fields2 - fields1}")
-      differences += 1
-
-  # Compare enums
-  e1, e2 = set(r1['enums'].keys()), set(r2['enums'].keys())
-  if e1 - e2: print(f"  Enums only in {arch1}: {e1 - e2}"); differences += 1
-  if e2 - e1: print(f"  Enums only in {arch2}: {e2 - e1}"); differences += 1
-  common_enums = e1 & e2
-  for enum in sorted(common_enums):
-    ops1, ops2 = r1['enums'][enum], r2['enums'][enum]
-    vals1, vals2 = set(ops1.keys()), set(ops2.keys())
-    names1, names2 = set(ops1.values()), set(ops2.values())
-    if vals1 != vals2 or names1 != names2:
-      print(f"  Enum {enum}: {len(ops1)} vs {len(ops2)} ops")
-      differences += 1
-      # Check for same names with different values
-      name_to_val1 = {v: k for k, v in ops1.items()}
-      name_to_val2 = {v: k for k, v in ops2.items()}
-      for name in names1 & names2:
-        if name_to_val1[name] != name_to_val2[name]:
-          print(f"    {name}: {name_to_val1[name]} vs {name_to_val2[name]}")
-      if names1 - names2: print(f"    Only in {arch1}: {sorted(names1 - names2)[:10]}{'...' if len(names1-names2) > 10 else ''}")
-      if names2 - names1: print(f"    Only in {arch2}: {sorted(names2 - names1)[:10]}{'...' if len(names2-names1) > 10 else ''}")
-
-  # Compare src_enum
-  s1, s2 = r1['src_enum'], r2['src_enum']
-  if s1 != s2:
-    print(f"  SrcEnum differs: {len(s1)} vs {len(s2)} entries")
-    differences += 1
-    for k in set(s1.keys()) | set(s2.keys()):
-      if s1.get(k) != s2.get(k): print(f"    {k}: {s1.get(k)} vs {s2.get(k)}")
-
-  if differences == 0:
-    print(f"  No differences! {arch1} and {arch2} are identical.")
-  else:
-    print(f"  Total: {differences} differences")
-
 if __name__ == "__main__":
   import argparse
   parser = argparse.ArgumentParser(description="Generate instruction definitions from AMD ISA PDF")
   parser.add_argument("--arch", choices=list(PDF_URLS.keys()) + ["all"], default="rdna3", help="Target architecture (default: rdna3)")
-  parser.add_argument("--compare", nargs=2, metavar=("ARCH1", "ARCH2"), help="Compare two architectures")
   args = parser.parse_args()
-  if args.compare:
-    compare_archs(args.compare[0], args.compare[1])
-  elif args.arch == "all":
+  if args.arch == "all":
     for arch in PDF_URLS.keys():
       result = generate(f"extra/assembly/amd/autogen/{arch}/__init__.py", arch=arch)
       print(f"{arch}: generated SrcEnum ({len(result['src_enum'])}) + {len(result['enums'])} opcode enums + {len(result['formats'])} format classes")

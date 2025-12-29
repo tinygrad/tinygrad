@@ -818,8 +818,6 @@ def parse_pseudocode_from_pdf(arch: str = "rdna3") -> dict:
 
   return instructions
 
-  return instructions
-
 def generate_gen_pcode(output_path: str = "extra/assembly/amd/autogen/rdna3/gen_pcode.py", arch: str = "rdna3"):
   """Generate gen_pcode.py - compiled pseudocode functions for the emulator."""
   from pathlib import Path
