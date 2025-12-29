@@ -655,7 +655,7 @@ jobs:
         uses: ./.github/actions/process-replay
 
   testrdna3:
-    name: RDNA3 IDE
+    name: AMD ASM IDE
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -672,19 +672,29 @@ jobs:
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
           echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-21 main" | sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update
-          sudo apt-get install llvm-21 llvm-21-tools
+          sudo apt-get install llvm-21 llvm-21-tools cloc
+      - name: RDNA3 Line Count
+        run: cloc --by-file extra/assembly/amd/*.py
       - name: Run RDNA3 emulator tests
-        run: python -m pytest -n=auto extra/assembly/rdna3/ --durations 20
+        run: python -m pytest -n=auto extra/assembly/amd/ --durations 20
       - name: Install pdfplumber
         run: pip install pdfplumber
       - name: Verify RDNA3 autogen is up to date
         run: |
-          python -m extra.assembly.rdna3.lib
-          git diff --exit-code extra/assembly/rdna3/autogen/__init__.py
+          python -m extra.assembly.amd.lib --arch rdna3
+          git diff --exit-code extra/assembly/amd/autogen/rdna3/__init__.py
+      - name: Verify CDNA4 autogen is up to date
+        run: |
+          python -m extra.assembly.amd.lib --arch cdna4
+          git diff --exit-code extra/assembly/amd/autogen/cdna4/__init__.py
       - name: Verify RDNA3 pcode autogen is up to date
         run: |
-          python -m extra.assembly.rdna3.pcode
-          git diff --exit-code extra/assembly/rdna3/autogen/gen_pcode.py
+          python -m extra.assembly.amd.pcode --arch rdna3
+          git diff --exit-code extra/assembly/amd/autogen/rdna3/gen_pcode.py
+      - name: Verify CDNA4 pcode autogen is up to date
+        run: |
+          python -m extra.assembly.amd.pcode --arch cdna4
+          git diff --exit-code extra/assembly/amd/autogen/cdna4/gen_pcode.py
 
   testnvidia:
     strategy:

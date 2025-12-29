@@ -1,10 +1,11 @@
 # RDNA3 emulator - executes compiled pseudocode from AMD ISA PDF
+# mypy: ignore-errors
 from __future__ import annotations
 import ctypes, os
-from extra.assembly.rdna3.lib import Inst, RawImm
-from extra.assembly.rdna3.pcode import _f32, _i32, _sext, _f16, _i16, _f64, _i64
-from extra.assembly.rdna3.autogen.gen_pcode import get_compiled_functions
-from extra.assembly.rdna3.autogen import (
+from extra.assembly.amd.lib import Inst, RawImm
+from extra.assembly.amd.pcode import _f32, _i32, _sext, _f16, _i16, _f64, _i64
+from extra.assembly.amd.autogen.rdna3.gen_pcode import get_compiled_functions
+from extra.assembly.amd.autogen.rdna3 import (
   SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, DS, FLAT, VOPD, SrcEnum,
   SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp, FLATOp, GLOBALOp, VOPDOp
 )
@@ -21,6 +22,7 @@ _VOP3_64BIT_OPS_32BIT_SRC1 = {VOP3Op.V_LDEXP_F64.value}
 # Ops with 16-bit types in name (for source/dest handling)
 _VOP3_16BIT_OPS = {op for op in VOP3Op if any(s in op.name for s in ('_F16', '_B16', '_I16', '_U16'))}
 _VOP1_16BIT_OPS = {op for op in VOP1Op if any(s in op.name for s in ('_F16', '_B16', '_I16', '_U16'))}
+_VOP2_16BIT_OPS = {op for op in VOP2Op if any(s in op.name for s in ('_F16', '_B16', '_I16', '_U16'))}
 # CVT ops with 32/64-bit source (despite 16-bit in name)
 _CVT_32_64_SRC_OPS = {op for op in VOP3Op if op.name.startswith('V_CVT_') and op.name.endswith(('_F32', '_I32', '_U32', '_F64', '_I64', '_U64'))} | \
                      {op for op in VOP1Op if op.name.startswith('V_CVT_') and op.name.endswith(('_F32', '_I32', '_U32', '_F64', '_I64', '_U64'))}
@@ -28,34 +30,17 @@ _CVT_32_64_SRC_OPS = {op for op in VOP3Op if op.name.startswith('V_CVT_') and op
 _VOP3_16BIT_DST_OPS = {op for op in _VOP3_16BIT_OPS if 'PACK' not in op.name}
 _VOP1_16BIT_DST_OPS = {op for op in _VOP1_16BIT_OPS if 'PACK' not in op.name}
 
-# Inline constants for src operands 128-254 (f32 format for most instructions)
-_INLINE_CONSTS = [0] * 127
-for _i in range(65): _INLINE_CONSTS[_i] = _i
-for _i in range(1, 17): _INLINE_CONSTS[64 + _i] = ((-_i) & 0xffffffff)
-for _k, _v in {SrcEnum.POS_HALF: 0x3f000000, SrcEnum.NEG_HALF: 0xbf000000, SrcEnum.POS_ONE: 0x3f800000, SrcEnum.NEG_ONE: 0xbf800000,
-               SrcEnum.POS_TWO: 0x40000000, SrcEnum.NEG_TWO: 0xc0000000, SrcEnum.POS_FOUR: 0x40800000, SrcEnum.NEG_FOUR: 0xc0800000,
-               SrcEnum.INV_2PI: 0x3e22f983}.items(): _INLINE_CONSTS[_k - 128] = _v
-
-# Inline constants for VOP3P packed f16 operations (f16 value in low 16 bits only, high 16 bits are 0)
-# Hardware does NOT replicate the constant - opsel_hi controls which half is used for the hi result
-_INLINE_CONSTS_F16 = [0] * 127
-for _i in range(65): _INLINE_CONSTS_F16[_i] = _i  # Integer constants in low 16 bits only
-for _i in range(1, 17): _INLINE_CONSTS_F16[64 + _i] = (-_i) & 0xffff  # Negative integers in low 16 bits
-for _k, _v in {SrcEnum.POS_HALF: 0x3800, SrcEnum.NEG_HALF: 0xb800, SrcEnum.POS_ONE: 0x3c00, SrcEnum.NEG_ONE: 0xbc00,
-               SrcEnum.POS_TWO: 0x4000, SrcEnum.NEG_TWO: 0xc000, SrcEnum.POS_FOUR: 0x4400, SrcEnum.NEG_FOUR: 0xc400,
-               SrcEnum.INV_2PI: 0x3118}.items(): _INLINE_CONSTS_F16[_k - 128] = _v  # f16 values in low 16 bits
-
-# Inline constants for 64-bit operations (f64 format)
-# Integer constants 0-64 are zero-extended to 64 bits; -1 to -16 are sign-extended
-# Float constants are the f64 representation of the value
+# Inline constants for src operands 128-254. Build tables for f32, f16, and f64 formats.
 import struct as _struct
-_INLINE_CONSTS_F64 = [0] * 127
-for _i in range(65): _INLINE_CONSTS_F64[_i] = _i  # Integer constants 0-64 zero-extended
-for _i in range(1, 17): _INLINE_CONSTS_F64[64 + _i] = ((-_i) & 0xffffffffffffffff)  # -1 to -16 sign-extended
-for _k, _v in {SrcEnum.POS_HALF: 0.5, SrcEnum.NEG_HALF: -0.5, SrcEnum.POS_ONE: 1.0, SrcEnum.NEG_ONE: -1.0,
-               SrcEnum.POS_TWO: 2.0, SrcEnum.NEG_TWO: -2.0, SrcEnum.POS_FOUR: 4.0, SrcEnum.NEG_FOUR: -4.0,
-               SrcEnum.INV_2PI: 0.15915494309189535}.items():
-  _INLINE_CONSTS_F64[_k - 128] = _struct.unpack('<Q', _struct.pack('<d', _v))[0]
+_FLOAT_CONSTS = {SrcEnum.POS_HALF: 0.5, SrcEnum.NEG_HALF: -0.5, SrcEnum.POS_ONE: 1.0, SrcEnum.NEG_ONE: -1.0,
+                 SrcEnum.POS_TWO: 2.0, SrcEnum.NEG_TWO: -2.0, SrcEnum.POS_FOUR: 4.0, SrcEnum.NEG_FOUR: -4.0, SrcEnum.INV_2PI: 0.15915494309189535}
+def _build_inline_consts(neg_mask, float_to_bits):
+  tbl = list(range(65)) + [((-i) & neg_mask) for i in range(1, 17)] + [0] * (127 - 81)
+  for k, v in _FLOAT_CONSTS.items(): tbl[k - 128] = float_to_bits(v)
+  return tbl
+_INLINE_CONSTS = _build_inline_consts(0xffffffff, lambda f: _struct.unpack('<I', _struct.pack('<f', f))[0])
+_INLINE_CONSTS_F16 = _build_inline_consts(0xffff, lambda f: _struct.unpack('<H', _struct.pack('<e', f))[0])
+_INLINE_CONSTS_F64 = _build_inline_consts(0xffffffffffffffff, lambda f: _struct.unpack('<Q', _struct.pack('<d', f))[0])
 
 # Memory access
 _valid_mem_ranges: list[tuple[int, int]] = []
@@ -519,8 +504,10 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
   is_ldexp_64 = op in (VOP3Op.V_LDEXP_F64,)
   is_shift_64 = op in (VOP3Op.V_LSHLREV_B64, VOP3Op.V_LSHRREV_B64, VOP3Op.V_ASHRREV_I64)
   # 16-bit source ops: use precomputed sets instead of string checks
-  has_16bit_type = op in _VOP3_16BIT_OPS or op in _VOP1_16BIT_OPS
+  has_16bit_type = op in _VOP3_16BIT_OPS or op in _VOP1_16BIT_OPS or op in _VOP2_16BIT_OPS
   is_16bit_src = op_cls is VOP3Op and op in _VOP3_16BIT_OPS and op not in _CVT_32_64_SRC_OPS
+  # VOP2 16-bit ops use f16 inline constants for src0 (vsrc1 is always a VGPR, no inline constants)
+  is_vop2_16bit = op_cls is VOP2Op and op in _VOP2_16BIT_OPS
 
   if is_shift_64:
     s0 = mod_src(st.rsrc(src0, lane), 0)  # shift amount is 32-bit
@@ -544,6 +531,11 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     s0 = ((s0_raw >> 16) & 0xffff) if (opsel & 1) else (s0_raw & 0xffff)
     s1 = ((s1_raw >> 16) & 0xffff) if (opsel & 2) else (s1_raw & 0xffff)
     s2 = ((s2_raw >> 16) & 0xffff) if (opsel & 4) else (s2_raw & 0xffff)
+  elif is_vop2_16bit:
+    # VOP2 16-bit ops: src0 can use f16 inline constants, vsrc1 is always a VGPR (no inline constants)
+    s0 = mod_src(st.rsrc_f16(src0, lane), 0)
+    s1 = mod_src(st.rsrc(src1, lane), 1) if src1 is not None else 0
+    s2 = mod_src(st.rsrc(src2, lane), 2) if src2 is not None else 0
   else:
     s0 = mod_src(st.rsrc(src0, lane), 0)
     s1 = mod_src(st.rsrc(src1, lane), 1) if src1 is not None else 0
