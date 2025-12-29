@@ -1,6 +1,6 @@
 # RDNA3 emulator - executes compiled pseudocode from AMD ISA PDF
 from __future__ import annotations
-import ctypes
+import ctypes, os
 from extra.assembly.rdna3.lib import Inst, RawImm
 from extra.assembly.rdna3.pcode import _f32, _i32, _sext, _f16, _i16
 from extra.assembly.rdna3.autogen.gen_pcode import get_compiled_functions
@@ -473,6 +473,7 @@ def exec_wmma(st: WaveState, inst, op: VOP3POp) -> None:
       val = st.vgpr[lane][src1 - 256 + reg] if src1 >= 256 else st.rsgpr(src1 + reg)
       mat_b.append(_f16(val & 0xffff))
       mat_b.append(_f16((val >> 16) & 0xffff))
+
   # Read matrix C (16x16 f32) from lanes 0-31, VGPRs src2 to src2+7
   # Layout: element i is at lane (i % 32), VGPR (i // 32) + src2
   mat_c = []
@@ -480,6 +481,7 @@ def exec_wmma(st: WaveState, inst, op: VOP3POp) -> None:
     lane, reg = i % 32, i // 32
     val = st.vgpr[lane][src2 - 256 + reg] if src2 >= 256 else st.rsgpr(src2 + reg)
     mat_c.append(_f32(val))
+
   # Compute D = A × B + C (16x16 matrix multiply)
   mat_d = [0.0] * 256
   for row in range(16):
@@ -490,6 +492,7 @@ def exec_wmma(st: WaveState, inst, op: VOP3POp) -> None:
         b_val = mat_b[col * 16 + k]
         acc += a_val * b_val
       mat_d[row * 16 + col] = acc + mat_c[row * 16 + col]
+
   # Write result matrix D back - same layout as C
   if op == VOP3POp.V_WMMA_F16_16X16X16_F16:
     # Output is f16, pack 2 values per VGPR

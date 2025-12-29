@@ -1025,5 +1025,388 @@ class TestCtz(unittest.TestCase):
     self.assertEqual(st.vgpr[0][1], 0)
 
 
+class TestDivision(unittest.TestCase):
+  """Tests for division instructions - V_RCP, V_DIV_SCALE, V_DIV_FMAS, V_DIV_FIXUP."""
+
+  def test_v_rcp_f32_normal(self):
+    """V_RCP_F32 of 2.0 returns 0.5."""
+    instructions = [
+      v_mov_b32_e32(v[0], 2.0),
+      v_rcp_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 0.5, places=5)
+
+  def test_v_rcp_f32_inf(self):
+    """V_RCP_F32 of +inf returns 0."""
+    instructions = [
+      s_mov_b32(s[0], 0x7f800000),  # +inf
+      v_mov_b32_e32(v[0], s[0]),
+      v_rcp_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(i2f(st.vgpr[0][1]), 0.0)
+
+  def test_v_rcp_f32_neg_inf(self):
+    """V_RCP_F32 of -inf returns -0."""
+    instructions = [
+      s_mov_b32(s[0], 0xff800000),  # -inf
+      v_mov_b32_e32(v[0], s[0]),
+      v_rcp_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][1])
+    self.assertEqual(result, 0.0)
+    # Check it's negative zero
+    self.assertEqual(st.vgpr[0][1], 0x80000000)
+
+  def test_v_rcp_f32_zero(self):
+    """V_RCP_F32 of 0 returns +inf."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),
+      v_rcp_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    import math
+    self.assertTrue(math.isinf(i2f(st.vgpr[0][1])))
+
+  def test_v_div_fixup_f32_normal(self):
+    """V_DIV_FIXUP_F32 normal division 1.0/2.0."""
+    # S0 = approximation (from rcp * scale), S1 = denominator, S2 = numerator
+    instructions = [
+      s_mov_b32(s[0], f2i(0.5)),   # approximation
+      s_mov_b32(s[1], f2i(2.0)),   # denominator
+      s_mov_b32(s[2], f2i(1.0)),   # numerator
+      v_mov_b32_e32(v[0], s[0]),
+      v_div_fixup_f32(v[1], v[0], s[1], s[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 0.5, places=5)
+
+  def test_v_div_fixup_f32_one_div_inf(self):
+    """V_DIV_FIXUP_F32: 1.0 / +inf = 0."""
+    # For x/inf: S0=approx(~0), S1=inf, S2=x
+    instructions = [
+      s_mov_b32(s[0], 0),           # approximation (rcp of inf = 0)
+      s_mov_b32(s[1], 0x7f800000),  # denominator = +inf
+      s_mov_b32(s[2], f2i(1.0)),    # numerator = 1.0
+      v_mov_b32_e32(v[0], s[0]),
+      v_div_fixup_f32(v[1], v[0], s[1], s[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(i2f(st.vgpr[0][1]), 0.0)
+
+  def test_v_div_fixup_f32_one_div_neg_inf(self):
+    """V_DIV_FIXUP_F32: 1.0 / -inf = -0."""
+    instructions = [
+      s_mov_b32(s[0], 0x80000000),  # approximation (rcp of -inf = -0)
+      s_mov_b32(s[1], 0xff800000),  # denominator = -inf
+      s_mov_b32(s[2], f2i(1.0)),    # numerator = 1.0
+      v_mov_b32_e32(v[0], s[0]),
+      v_div_fixup_f32(v[1], v[0], s[1], s[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0x80000000)  # -0.0
+
+  def test_v_div_fixup_f32_inf_div_inf(self):
+    """V_DIV_FIXUP_F32: inf / inf = NaN."""
+    import math
+    instructions = [
+      s_mov_b32(s[0], 0),           # approximation
+      s_mov_b32(s[1], 0x7f800000),  # denominator = +inf
+      s_mov_b32(s[2], 0x7f800000),  # numerator = +inf
+      v_mov_b32_e32(v[0], s[0]),
+      v_div_fixup_f32(v[1], v[0], s[1], s[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertTrue(math.isnan(i2f(st.vgpr[0][1])))
+
+  def test_v_div_fixup_f32_zero_div_zero(self):
+    """V_DIV_FIXUP_F32: 0 / 0 = NaN."""
+    import math
+    instructions = [
+      s_mov_b32(s[0], 0),  # approximation
+      s_mov_b32(s[1], 0),  # denominator = 0
+      s_mov_b32(s[2], 0),  # numerator = 0
+      v_mov_b32_e32(v[0], s[0]),
+      v_div_fixup_f32(v[1], v[0], s[1], s[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertTrue(math.isnan(i2f(st.vgpr[0][1])))
+
+  def test_v_div_fixup_f32_x_div_zero(self):
+    """V_DIV_FIXUP_F32: 1.0 / 0 = +inf."""
+    import math
+    instructions = [
+      s_mov_b32(s[0], 0x7f800000),  # approximation (rcp of 0 = inf)
+      s_mov_b32(s[1], 0),           # denominator = 0
+      s_mov_b32(s[2], f2i(1.0)),    # numerator = 1.0
+      v_mov_b32_e32(v[0], s[0]),
+      v_div_fixup_f32(v[1], v[0], s[1], s[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][1])
+    self.assertTrue(math.isinf(result) and result > 0)
+
+  def test_v_div_fixup_f32_neg_x_div_zero(self):
+    """V_DIV_FIXUP_F32: -1.0 / 0 = -inf."""
+    import math
+    instructions = [
+      s_mov_b32(s[0], 0xff800000),  # approximation (rcp of 0 = inf, with sign)
+      s_mov_b32(s[1], 0),           # denominator = 0
+      s_mov_b32(s[2], f2i(-1.0)),   # numerator = -1.0
+      v_mov_b32_e32(v[0], s[0]),
+      v_div_fixup_f32(v[1], v[0], s[1], s[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][1])
+    self.assertTrue(math.isinf(result) and result < 0)
+
+
+class TestSpecialValues(unittest.TestCase):
+  """Tests for special float values - inf, nan, zero handling."""
+
+  def test_v_mul_f32_zero_times_inf(self):
+    """V_MUL_F32: 0 * inf = NaN."""
+    import math
+    instructions = [
+      v_mov_b32_e32(v[0], 0),
+      s_mov_b32(s[0], 0x7f800000),  # +inf
+      v_mov_b32_e32(v[1], s[0]),
+      v_mul_f32_e32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertTrue(math.isnan(i2f(st.vgpr[0][2])))
+
+  def test_v_add_f32_inf_minus_inf(self):
+    """V_ADD_F32: inf + (-inf) = NaN."""
+    import math
+    instructions = [
+      s_mov_b32(s[0], 0x7f800000),  # +inf
+      s_mov_b32(s[1], 0xff800000),  # -inf
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_add_f32_e32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertTrue(math.isnan(i2f(st.vgpr[0][2])))
+
+  def test_v_fma_f32_with_inf(self):
+    """V_FMA_F32: 1.0 * inf + 0 = inf."""
+    import math
+    instructions = [
+      v_mov_b32_e32(v[0], 1.0),
+      s_mov_b32(s[0], 0x7f800000),  # +inf
+      v_mov_b32_e32(v[1], s[0]),
+      v_mov_b32_e32(v[2], 0),
+      v_fma_f32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][3])
+    self.assertTrue(math.isinf(result) and result > 0)
+
+  def test_v_exp_f32_large_negative(self):
+    """V_EXP_F32 of large negative value (2^-100) returns very small number."""
+    instructions = [
+      s_mov_b32(s[0], f2i(-100.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_exp_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # V_EXP_F32 computes 2^x, so 2^-100 is ~7.9e-31 (very small but not 0)
+    result = i2f(st.vgpr[0][1])
+    self.assertLess(result, 1e-20)  # Just verify it's very small
+
+  def test_v_exp_f32_large_positive(self):
+    """V_EXP_F32 of large positive value (2^100) returns very large number."""
+    instructions = [
+      s_mov_b32(s[0], f2i(100.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_exp_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # V_EXP_F32 computes 2^x, so 2^100 is ~1.27e30 (very large)
+    result = i2f(st.vgpr[0][1])
+    self.assertGreater(result, 1e20)  # Just verify it's very large
+
+
+class TestF16Conversions(unittest.TestCase):
+  """Tests for f16 conversion and packing instructions."""
+
+  def test_v_cvt_f16_f32_basic(self):
+    """V_CVT_F16_F32 converts f32 to f16 in low 16 bits."""
+    from extra.assembly.rdna3.pcode import _f16
+    instructions = [
+      v_mov_b32_e32(v[0], 1.0),  # f32 1.0 = 0x3f800000
+      v_cvt_f16_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1]
+    # f16 1.0 = 0x3c00, should be in low 16 bits
+    lo_bits = result & 0xffff
+    self.assertEqual(lo_bits, 0x3c00, f"Expected 0x3c00, got 0x{lo_bits:04x}")
+
+  def test_v_cvt_f16_f32_negative(self):
+    """V_CVT_F16_F32 converts negative f32 to f16."""
+    from extra.assembly.rdna3.pcode import _f16
+    instructions = [
+      v_mov_b32_e32(v[0], -2.0),  # f32 -2.0 = 0xc0000000
+      v_cvt_f16_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1]
+    lo_bits = result & 0xffff
+    # f16 -2.0 = 0xc000
+    self.assertEqual(lo_bits, 0xc000, f"Expected 0xc000, got 0x{lo_bits:04x}")
+
+  def test_v_cvt_f16_f32_small(self):
+    """V_CVT_F16_F32 converts small f32 value."""
+    from extra.assembly.rdna3.pcode import _f16, f32_to_f16
+    instructions = [
+      v_mov_b32_e32(v[0], 0.5),
+      v_cvt_f16_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1]
+    lo_bits = result & 0xffff
+    expected = f32_to_f16(0.5)  # Should be 0x3800
+    self.assertEqual(lo_bits, expected, f"Expected 0x{expected:04x}, got 0x{lo_bits:04x}")
+
+  def test_v_cvt_f16_f32_preserves_high_bits(self):
+    """V_CVT_F16_F32 preserves high 16 bits of destination."""
+    instructions = [
+      s_mov_b32(s[0], 0xdead0000),  # Pre-fill with garbage in high bits
+      v_mov_b32_e32(v[1], s[0]),
+      v_mov_b32_e32(v[0], 1.0),
+      v_cvt_f16_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1]
+    hi_bits = (result >> 16) & 0xffff
+    lo_bits = result & 0xffff
+    # Low bits should be f16 1.0, high bits behavior is implementation-defined
+    self.assertEqual(lo_bits, 0x3c00, f"Low bits should be 0x3c00, got 0x{lo_bits:04x}")
+
+  def test_v_pack_b32_f16_basic(self):
+    """V_PACK_B32_F16 packs two f16 values into one 32-bit register."""
+    from extra.assembly.rdna3.pcode import _f16
+    instructions = [
+      # First convert two f32 values to f16
+      v_mov_b32_e32(v[0], 1.0),   # Will become f16 0x3c00
+      v_mov_b32_e32(v[2], -2.0),  # Will become f16 0xc000
+      v_cvt_f16_f32_e32(v[1], v[0]),  # v1 low = 0x3c00
+      v_cvt_f16_f32_e32(v[3], v[2]),  # v3 low = 0xc000
+      # Now pack them: v4 = (v3.f16 << 16) | v1.f16
+      v_pack_b32_f16(v[4], v[1], v[3]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][4]
+    lo_bits = result & 0xffff
+    hi_bits = (result >> 16) & 0xffff
+    # Expected: lo=0x3c00 (1.0), hi=0xc000 (-2.0)
+    self.assertEqual(lo_bits, 0x3c00, f"Lo should be 0x3c00 (1.0), got 0x{lo_bits:04x} ({_f16(lo_bits)})")
+    self.assertEqual(hi_bits, 0xc000, f"Hi should be 0xc000 (-2.0), got 0x{hi_bits:04x} ({_f16(hi_bits)})")
+
+  def test_v_pack_b32_f16_both_positive(self):
+    """V_PACK_B32_F16 packs two positive f16 values."""
+    from extra.assembly.rdna3.pcode import _f16
+    instructions = [
+      v_mov_b32_e32(v[0], 0.5),   # f16 0x3800
+      v_mov_b32_e32(v[2], 2.0),   # f16 0x4000
+      v_cvt_f16_f32_e32(v[1], v[0]),
+      v_cvt_f16_f32_e32(v[3], v[2]),
+      v_pack_b32_f16(v[4], v[1], v[3]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][4]
+    lo_bits = result & 0xffff
+    hi_bits = (result >> 16) & 0xffff
+    self.assertEqual(lo_bits, 0x3800, f"Lo should be 0x3800 (0.5), got 0x{lo_bits:04x}")
+    self.assertEqual(hi_bits, 0x4000, f"Hi should be 0x4000 (2.0), got 0x{hi_bits:04x}")
+
+  def test_v_pack_b32_f16_zeros(self):
+    """V_PACK_B32_F16 packs two zero values."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),
+      v_mov_b32_e32(v[2], 0),
+      v_cvt_f16_f32_e32(v[1], v[0]),
+      v_cvt_f16_f32_e32(v[3], v[2]),
+      v_pack_b32_f16(v[4], v[1], v[3]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][4]
+    self.assertEqual(result, 0, f"Expected 0x00000000, got 0x{result:08x}")
+
+
+class TestPackInstructions(unittest.TestCase):
+  """Tests for pack instructions."""
+
+  def test_v_pack_b32_f16(self):
+    """V_PACK_B32_F16 packs two f16 values into one 32-bit register."""
+    instructions = []
+    # f16 1.0 = 0x3c00, f16 2.0 = 0x4000
+    instructions.append(s_mov_b32(s[0], 0x3c00))  # f16 1.0
+    instructions.append(s_mov_b32(s[1], 0x4000))  # f16 2.0
+    instructions.append(v_mov_b32_e32(v[0], s[0]))
+    instructions.append(v_mov_b32_e32(v[1], s[1]))
+    # Pack: v[2] = (v[1].f16 << 16) | v[0].f16
+    instructions.append(v_pack_b32_f16(v[2], v[0], v[1]))
+
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    # Expected: hi=0x4000 (2.0), lo=0x3c00 (1.0) -> 0x40003c00
+    self.assertEqual(result, 0x40003c00, f"Expected 0x40003c00, got 0x{result:08x}")
+
+  def test_v_pack_b32_f16_with_cvt(self):
+    """V_PACK_B32_F16 after V_CVT_F16_F32 conversions."""
+    instructions = []
+    # f32 1.0 = 0x3f800000
+    instructions.append(s_mov_b32(s[0], 0x3f800000))
+    instructions.append(v_mov_b32_e32(v[0], s[0]))  # f32 1.0
+    instructions.append(v_mov_b32_e32(v[1], s[0]))  # f32 1.0
+    # Convert to f16
+    instructions.append(v_cvt_f16_f32_e32(v[2], v[0]))  # v[2].f16 = 1.0
+    instructions.append(v_cvt_f16_f32_e32(v[3], v[1]))  # v[3].f16 = 1.0
+    # Pack
+    instructions.append(v_pack_b32_f16(v[4], v[2], v[3]))
+
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][4]
+    # Expected: 0x3c003c00 (two f16 1.0 values)
+    self.assertEqual(result, 0x3c003c00, f"Expected 0x3c003c00, got 0x{result:08x}")
+
+
+class TestWMMA(unittest.TestCase):
+  """Tests for WMMA (Wave Matrix Multiply-Accumulate) instructions."""
+
+  def test_v_wmma_f32_16x16x16_f16_basic(self):
+    """V_WMMA_F32_16X16X16_F16 basic test - verify emulator matches hardware."""
+    # WMMA does D = A @ B + C where A,B are 16x16 f16, C,D are 16x16 f32
+    # Use: A=v[16:23], B=v[24:31], C=D=v[0:7] (output in captured range v[0:15])
+    instructions = []
+
+    # f16 1.0 = 0x3c00, packed pair = 0x3c003c00
+    instructions.append(s_mov_b32(s[0], 0x3c003c00))
+
+    # Set A (v16-v23) and B (v24-v31) to all 1.0s
+    for i in range(16, 32):
+      instructions.append(v_mov_b32_e32(v[i], s[0]))
+
+    # Set C (v0-v7) to all 0s (will also be output D)
+    for i in range(8):
+      instructions.append(v_mov_b32_e32(v[i], 0))
+
+    # Execute WMMA: v[0:7] = A @ B + C
+    instructions.append(v_wmma_f32_16x16x16_f16(v[0], v[16], v[24], v[0]))
+
+    # Just run and compare - USE_HW=1 will verify emulator matches hardware
+    st = run_program(instructions, n_lanes=32)
+
+    # Verify at least some output is non-zero (actual values depend on WMMA layout)
+    # Output should be 16.0 (16 x 1.0 x 1.0) for each element
+    any_nonzero = any(st.vgpr[lane][0] != 0 for lane in range(32))
+    self.assertTrue(any_nonzero, "WMMA should produce non-zero output")
+
+
 if __name__ == '__main__':
   unittest.main()

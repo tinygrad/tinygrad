@@ -66,13 +66,13 @@ def _fma(a, b, c): return a * b + c
 def _signext(v): return v
 def trunc(x):
   x = float(x)
-  return x if math.isnan(x) or math.isinf(x) else math.trunc(x)
+  return x if math.isnan(x) or math.isinf(x) else float(math.trunc(x))
 def floor(x):
   x = float(x)
-  return x if math.isnan(x) or math.isinf(x) else math.floor(x)
+  return x if math.isnan(x) or math.isinf(x) else float(math.floor(x))
 def ceil(x):
   x = float(x)
-  return x if math.isnan(x) or math.isinf(x) else math.ceil(x)
+  return x if math.isnan(x) or math.isinf(x) else float(math.ceil(x))
 def sqrt(x): return math.sqrt(x) if x >= 0 else float("nan")
 def log2(x): return math.log2(x) if x > 0 else (float("-inf") if x == 0 else float("nan"))
 i32_to_f32 = u32_to_f32 = i32_to_f64 = u32_to_f64 = f32_to_f64 = f64_to_f32 = float
@@ -90,7 +90,12 @@ def f32_to_u32(f):
   return int(f)
 f64_to_i32 = f32_to_i32
 f64_to_u32 = f32_to_u32
-def f32_to_f16(f): return struct.unpack("<H", struct.pack("<e", float(f)))[0]
+def f32_to_f16(f):
+  f = float(f)
+  if math.isnan(f): return 0x7e00  # f16 NaN
+  if math.isinf(f): return 0x7c00 if f > 0 else 0xfc00  # f16 ±infinity
+  try: return struct.unpack("<H", struct.pack("<e", f))[0]
+  except OverflowError: return 0x7c00 if f > 0 else 0xfc00  # overflow -> ±infinity
 def _f16_to_f32_bits(bits): return struct.unpack("<e", struct.pack("<H", int(bits) & 0xffff))[0]
 def f16_to_f32(v): return v if isinstance(v, float) else _f16_to_f32_bits(v)
 def i16_to_f16(v): return f32_to_f16(float(_sext(int(v) & 0xffff, 16)))
@@ -246,7 +251,12 @@ isNAN = _isnan
 isQuietNAN = _isquietnan
 isSignalNAN = _issignalnan
 fma, ldexp, sign, exponent = _fma, _ldexp, _sign, _exponent
-F = signext = lambda x: x
+def F(x):
+  """32'F(x) or 64'F(x) - interpret x as float. If x is int, treat as bit pattern."""
+  if isinstance(x, int): return _f32(x)  # int -> interpret as f32 bits
+  if isinstance(x, TypedView): return x  # preserve TypedView for bit-pattern checks
+  return float(x)  # already a float or float-like
+signext = lambda x: x
 pack = lambda hi, lo: ((int(hi) & 0xffff) << 16) | (int(lo) & 0xffff)
 pack32 = lambda hi, lo: ((int(hi) & 0xffffffff) << 32) | (int(lo) & 0xffffffff)
 _pack, _pack32 = pack, pack32  # Aliases for internal use
@@ -259,15 +269,19 @@ OVERFLOW_F64 = float('inf')
 UNDERFLOW_F64 = 0.0
 MAX_FLOAT_F32 = 3.4028235e+38  # Largest finite float32
 
-# INF object that supports .f16/.f32/.f64 access
+# INF object that supports .f16/.f32/.f64 access and comparison with floats
 class _Inf:
   f16 = f32 = f64 = float('inf')
   def __neg__(self): return _NegInf()
   def __pos__(self): return self
+  def __eq__(self, other): return float(other) == float('inf') if not isinstance(other, _NegInf) else False
+  def __req__(self, other): return self.__eq__(other)
 class _NegInf:
   f16 = f32 = f64 = float('-inf')
   def __neg__(self): return _Inf()
   def __pos__(self): return self
+  def __eq__(self, other): return float(other) == float('-inf') if not isinstance(other, _Inf) else False
+  def __req__(self, other): return self.__eq__(other)
 INF = _Inf()
 
 # Rounding mode placeholder
@@ -426,10 +440,10 @@ class Reg:
   f32 = property(lambda s: TypedView(s, 32, is_float=True), lambda s, v: setattr(s, '_val', _i32(float(v))))
   u24 = property(lambda s: TypedView(s, 24))
   i24 = property(lambda s: TypedView(s, 24, signed=True))
-  u16 = property(lambda s: TypedView(s, 16), lambda s, v: setattr(s, '_val', int(v) & 0xffff))
-  i16 = property(lambda s: TypedView(s, 16, signed=True), lambda s, v: setattr(s, '_val', int(v) & 0xffff))
-  b16 = property(lambda s: TypedView(s, 16), lambda s, v: setattr(s, '_val', int(v) & 0xffff))
-  f16 = property(lambda s: TypedView(s, 16, is_float=True), lambda s, v: setattr(s, '_val', v if isinstance(v, int) else _i16(float(v))))
+  u16 = property(lambda s: TypedView(s, 16), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | (int(v) & 0xffff)))
+  i16 = property(lambda s: TypedView(s, 16, signed=True), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | (int(v) & 0xffff)))
+  b16 = property(lambda s: TypedView(s, 16), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | (int(v) & 0xffff)))
+  f16 = property(lambda s: TypedView(s, 16, is_float=True), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | ((v if isinstance(v, int) else _i16(float(v))) & 0xffff)))
   u8 = property(lambda s: TypedView(s, 8))
   i8 = property(lambda s: TypedView(s, 8, signed=True))
 
@@ -449,13 +463,13 @@ class Reg:
   def __index__(s): return s._val
   def __bool__(s): return bool(s._val)
 
-  # Arithmetic (for tmp = tmp + 1 patterns)
-  def __add__(s, o): return s._val + int(o)
-  def __radd__(s, o): return int(o) + s._val
-  def __sub__(s, o): return s._val - int(o)
-  def __rsub__(s, o): return int(o) - s._val
-  def __mul__(s, o): return s._val * int(o)
-  def __rmul__(s, o): return int(o) * s._val
+  # Arithmetic (for tmp = tmp + 1 patterns). Float operands trigger f32 interpretation.
+  def __add__(s, o): return (_f32(s._val) + float(o)) if isinstance(o, float) else s._val + int(o)
+  def __radd__(s, o): return (float(o) + _f32(s._val)) if isinstance(o, float) else int(o) + s._val
+  def __sub__(s, o): return (_f32(s._val) - float(o)) if isinstance(o, float) else s._val - int(o)
+  def __rsub__(s, o): return (float(o) - _f32(s._val)) if isinstance(o, float) else int(o) - s._val
+  def __mul__(s, o): return (_f32(s._val) * float(o)) if isinstance(o, float) else s._val * int(o)
+  def __rmul__(s, o): return (float(o) * _f32(s._val)) if isinstance(o, float) else int(o) * s._val
   def __and__(s, o): return s._val & int(o)
   def __rand__(s, o): return int(o) & s._val
   def __or__(s, o): return s._val | int(o)
