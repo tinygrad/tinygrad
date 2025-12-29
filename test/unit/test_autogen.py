@@ -1,29 +1,18 @@
-import ctypes, subprocess, tempfile, unittest
+import ctypes, struct, subprocess, tempfile, unittest
 from tinygrad.helpers import WIN
-from tinygrad.runtime.support.c import Struct
+from tinygrad.runtime.support.c import Array, DLL, Pointer, Struct, field, pointer
 
 class TestAutogen(unittest.TestCase):
-  def test_packed_struct_sizeof(self):
-    layout = [('a', ctypes.c_char), ('b', ctypes.c_int, 5), ('c', ctypes.c_char)]
-    class Y(ctypes.Structure): _fields_, _pack_, _layout_ = layout, 1, 'ms'
-    class Z(Struct): pass
-    Z._packed_, Z._fields_ = True, layout
-    self.assertEqual(ctypes.sizeof(Y), 6)
-    self.assertEqual(ctypes.sizeof(Z), 3)
-    layout = [('a', ctypes.c_int, 31), ('b', ctypes.c_int, 31), ('c', ctypes.c_int, 1), ('d', ctypes.c_int, 1)]
-    class Foo(ctypes.Structure): _fields_, _layout_ = layout, 'gcc-sysv'
-    class Bar(ctypes.Structure): _fields_, _pack_, _layout_ = layout, 1, 'ms'
-    class Baz(Struct): pass
-    Baz._packed_, Baz._fields_ = True, layout
-    self.assertEqual(ctypes.sizeof(Foo), 12)
-    self.assertEqual(ctypes.sizeof(Bar), 12)
-    self.assertEqual(ctypes.sizeof(Baz), 8)
+  def compile(self, src):
+    with tempfile.NamedTemporaryFile(suffix=".so") as f:
+      subprocess.check_output(('clang', '-x', 'c', '-fPIC', '-shared', '-', '-o', f.name), input=src.encode())
+      return DLL("test", f.name)
 
   @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_packed_struct_interop(self):
-    class Baz(Struct): pass
-    Baz._packed_ = True
-    Baz._fields_ = [('a', ctypes.c_int, 30), ('b', ctypes.c_int, 30), ('c', ctypes.c_int, 2), ('d', ctypes.c_int, 2)]
+    class Baz(Struct): SIZE = 8
+    Baz._fields_ = ['a', 'b', 'c', 'd']
+    Baz.a, Baz.b, Baz.c, Baz.d = field(0, ctypes.c_int, 30), field(3, ctypes.c_int, 30, 6), field(7, ctypes.c_int, 2, 4), field(7, ctypes.c_int, 2, 6)
     src = '''
       struct __attribute__((packed)) baz {
         int a:30;
@@ -36,41 +25,164 @@ class TestAutogen(unittest.TestCase):
         return x.a + x.b + x.c + x.d;
       }
     '''
-    args = ('-x', 'c', '-fPIC', '-shared')
-    with tempfile.NamedTemporaryFile(suffix=".so") as f:
-      subprocess.check_output(('clang',) + args + ('-', '-o', f.name), input=src.encode('utf-8'))
-      b = Baz(0xAA000, 0x00BB0, 0, 1)
-      test = ctypes.CDLL(f.name).test
-      test.argtypes = [Baz]
-      self.assertEqual(test(b), b.a + b.b + b.c + b.d)
+    dll = self.compile(src)
+    b = Baz(0xAA000, 0x00BB0, 0, 1)
+    @dll.bind((Baz,), ctypes.c_int)
+    def test(_): ...
+    self.assertEqual(test(b), b.a + b.b + b.c + b.d)
 
   # https://github.com/python/cpython/issues/90914
   @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_bitfield_interop(self):
-    class Baz(Struct): pass
-    Baz._fields_ = [(chr(ord('a') + i), ctypes.c_bool, 1) for i in range(8)]
+    class Baz(Struct): SIZE = 1
+    Baz._fields_ = [chr(ord('a') + i) for i in range(8)]
+    for i in range(8): setattr(Baz, chr(ord('a') + i), field(0, ctypes.c_bool, 1, i))
     src = '''#include <stdbool.h>
       struct baz {
-        bool a:1;
-        bool b:1;
-        bool c:1;
-        bool d:1;
-        bool e:1;
-        bool f:1;
-        bool g:1;
-        bool h:1;
+        bool a:1, b:1, c:1, d:1, e:1, f:1, g:1, h:1;
       };
 
       int test(struct baz x) {
         return x.c;
       }
     '''
-    args = ('-x', 'c', '-fPIC', '-shared')
-    with tempfile.NamedTemporaryFile(suffix=".so") as f:
-      subprocess.check_output(('clang',) + args + ('-', '-o', f.name), input=src.encode('utf-8'))
-      test = ctypes.CDLL(f.name).test
-      test.argtypes = [Baz]
-      for i in range(8): self.assertEqual(test(Baz(*(j==i for j in range(8)))), i==2)
+    dll = self.compile(src)
+    @dll.bind((Baz,), ctypes.c_int)
+    def test(_): ...
+    for i in range(8): self.assertEqual(test(Baz(*(j==i for j in range(8)))), i==2)
+
+  @unittest.skipIf(WIN, "doesn't compile on windows")
+  def test_struct_interop(self):
+    class Baz(Struct): SIZE = 32
+    Baz._fields_ = [chr(ord('a') + i) for i in range(8)]
+    for i in range(8): setattr(Baz, chr(ord('a') + i), field(i*4, ctypes.c_int))
+    src = '''#include <stdio.h>
+      struct baz {
+        int a, b, c, d, e, f, g, h;
+      };
+
+      struct baz test(struct baz x) {
+        return (struct baz){x.h, x.g, x.f, x.e, x.d, x.c, x.b, x.a};
+      }
+    '''
+    dll = self.compile(src)
+    @dll.bind((Baz,), Baz)
+    def test(_): ...
+    self.assertEqual(bytes(test(Baz(*range(8)))), struct.pack("8i", *range(7, -1, -1)))
+
+  @unittest.skipIf(WIN, "doesn't compile on windows")
+  def test_array_interop(self):
+    Int4 = Array(ctypes.c_int, 4)
+    src = """
+      void test(int arr[4]) {
+        arr[0] += 10;
+        arr[3] *= 10;
+      }
+    """
+    dll = self.compile(src)
+    @dll.bind((Int4,), None)
+    def test(_): ...
+    test(arr:=Int4([1,2,3,4]))
+    self.assertEqual(arr[0], 11)
+    self.assertEqual(arr[1], 2)
+    self.assertEqual(arr[2], 3)
+    self.assertEqual(arr[3], 40)
+
+  @unittest.skipIf(WIN, "doesn't compile on windows")
+  def test_aos_interop(self):
+    class Item(Struct): SIZE = 4
+    Item._fields_ = ['val']
+    Item.val = field(0, ctypes.c_int)
+    src = """
+    struct item { int val; };
+      int test(struct item arr[3]) {
+        int ret = 0;
+        for (int i = 0; i < 3; i++) ret += arr[i].val;
+        return ret;
+      }
+    """
+    dll = self.compile(src)
+    @dll.bind((Array(Item, 3),), ctypes.c_int)
+    def test(_): ...
+    self.assertEqual(test(Array(Item, 3)([Item(10), Item(20), Item(30)])), 60)
+
+  @unittest.skipIf(WIN, "doesn't compile on windows")
+  def test_soa_interop(self):
+    class Row(Struct): SIZE = 16
+    Row._fields_ = ['data']
+    Row.data = field(0, Array(ctypes.c_int, 3))
+    src = """
+    struct row { int data[3]; };
+      struct row test(struct row x) {
+        return (struct row){{ x.data[2], x.data[1], x.data[0] }};
+      }
+    """
+    dll = self.compile(src)
+    @dll.bind((Row,), Row)
+    def test(_): ...
+    r = test(Row([10, 20, 30]))
+    self.assertIsInstance(r, Row)
+    self.assertEqual(r.data[0], 30)
+    self.assertEqual(r.data[1], 20)
+    self.assertEqual(r.data[2], 10)
+
+  @unittest.skipIf(WIN, "doesn't compile on windows")
+  def test_nested_struct_interop(self):
+    class Inner(Struct): SIZE = 4
+    Inner._fields_ = ['a']
+    Inner.a = field(0, ctypes.c_int)
+    class Outer(Struct): SIZE = 8
+    Outer._fields_ = ['inner', 'b']
+    Outer.inner = field(0, Inner)
+    Outer.b = field(4, ctypes.c_int)
+    src = """
+      struct i { int a; };
+      struct o { struct i i; int b; };
+      struct o test(struct o x) {
+        return (struct o){(struct i){ x.b }, x.i.a };
+      }
+    """
+    dll = self.compile(src)
+    @dll.bind((Outer,), Outer)
+    def test(_): ...
+    o = test(Outer(Inner(10), 20))
+    self.assertEqual(o.inner.a, 20)
+    self.assertEqual(o.b, 10)
+
+  def test_pointer_interop(self):
+    src = """
+      int test(int *p) {
+        return (*p)++;
+      }
+    """
+    dll = self.compile(src)
+    @dll.bind((Pointer(ctypes.c_int),), ctypes.c_int)
+    def test(_): ...
+    self.assertEqual(test(pointer(i:=ctypes.c_int(10))), 10)
+    self.assertEqual(i.value, 11)
+
+  def test_struct_pointer_interop(self):
+    class Foo(Struct): SIZE = 8
+    Foo._fields_ = ['a', 'b']
+    Foo.a = field(0, ctypes.c_int)
+    Foo.b = field(4, ctypes.c_int)
+    src = """
+      struct foo { int a, b; };
+      struct foo *test(struct foo *f) {
+        int x = f->a;
+        f->a = f->b;
+        f->b = x;
+        return f;
+      }
+    """
+    dll = self.compile(src)
+    @dll.bind((Pointer(Foo),), Pointer(Foo))
+    def test(_): ...
+    inp = pointer(Foo(10, 20))
+    out = test(inp)
+    self.assertEqual(inp.value, out.value)
+    self.assertEqual(out.contents.a, 20)
+    self.assertEqual(out.contents.b, 10)
 
   @unittest.skipIf(WIN, "doesn't compile on windows")
   def test_packed_structs(self):

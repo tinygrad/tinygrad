@@ -1,6 +1,6 @@
-import ctypes, itertools, re, functools, os
+import ctypes, itertools, re, functools, os, keyword
 from tinygrad.helpers import unwrap
-from tinygrad.runtime.autogen import libclang as clang # use REGEN=1 to regenerate libclang bindings
+import tinygrad.runtime.autogen.libclang as clang # use REGEN=1 to regenerate libclang bindings
 
 def unwrap_cursor(c: clang.CXCursor) -> clang.CXCursor:
   assert c != clang.clang_getNullCursor()
@@ -26,13 +26,12 @@ def fields(t: clang.CXType) -> list[clang.CXCursor]:
   clang.clang_Type_visitFields(t, visitor, None)
   return ret
 
-# flattens anonymous fields
-def all_fields(t, kind):
+# flattens anonymous structs/unions
+def all_fields(t, off=0):
   for f in fields(t):
-    if (clang.clang_Cursor_isAnonymousRecordDecl(clang.clang_getTypeDeclaration(clang.clang_getCursorType(f))) and
-        clang.clang_getTypeDeclaration(clang.clang_getCursorType(f)).kind == kind):
-      yield from all_fields(clang.clang_getCursorType(f), kind)
-    else: yield f
+    if clang.clang_Cursor_isAnonymousRecordDecl(clang.clang_getTypeDeclaration(clang.clang_getCursorType(f))):
+      yield from all_fields(clang.clang_getCursorType(f), clang.clang_Cursor_getOffsetOfField(f) // 8)
+    elif nm(f): yield f, off+clang.clang_Cursor_getOffsetOfField(f) // 8 # ignores unnamed fields
 
 def arguments(c: clang.CXCursor|clang.CXType):
   yield from ((clang.clang_Cursor_getArgument if isinstance(c, clang.CXCursor) else clang.clang_getArgType)(c, i)
@@ -109,7 +108,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
               ((', '+', '.join(map(tname, arguments(f)))) if f.kind==clang.CXType_FunctionProto else '') + ")")
     match t.kind:
       case clang.CXType_Pointer:
-        return "ctypes.c_void_p" if (p:=clang.clang_getPointeeType(t)).kind==clang.CXType_Void else f"ctypes.POINTER({tname(p)})"
+        return "ctypes.c_void_p" if (p:=clang.clang_getPointeeType(t)).kind==clang.CXType_Void else f"Pointer({tname(p)})"
       case clang.CXType_ObjCObjectPointer: return tname(clang.clang_getPointeeType(t)) # TODO: this seems wrong
       case clang.CXType_Elaborated: return tname(clang.clang_Type_getNamedType(t), suggested_name)
       case clang.CXType_Typedef if nm(t) == nm(canon:=clang.clang_getCanonicalType(t)): return tname(canon)
@@ -129,20 +128,12 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
           if clang.clang_Cursor_isAnonymous(decl):
             types[_nm] = (tnm:=(suggested_name or (f"_anon{'struct' if decl.kind==clang.CXCursor_StructDecl else 'union'}{anoncnt()}")), True)
           else: types[_nm] = (tnm:=_nm.replace(' ', '_').replace('::', '_')), len(fields(t)) != 0
-          lines.append(f"class {tnm}({'Struct' if decl.kind==clang.CXCursor_StructDecl else 'ctypes.Union'}): pass")
+          lines.append(f"class {tnm}({'Struct' if decl.kind==clang.CXCursor_StructDecl else 'Union'}): pass")
           if typedef: lines.append(f"{typedef} = {tnm}")
-        if ((is_packed:=(clang.CXCursor_PackedAttr in attrs(decl)) or
-            ((N:=clang.clang_Type_getAlignOf(t)) != max([clang.clang_Type_getAlignOf(clang.clang_getCursorType(f)) for f in fields(t)], default=N)))):
-          if clang.clang_Type_getAlignOf(t) != 1:
-            print(f"WARNING: ignoring alignment={clang.clang_Type_getAlignOf(t)} on {_nm}")
-            is_packed = False
-        acnt = itertools.count().__next__
-        def is_anon(f): return clang.clang_Cursor_isAnonymousRecordDecl(clang.clang_getTypeDeclaration(clang.clang_getCursorType(f)))
-        ll=["  ("+((fn:=f"'_{acnt()}'")+f", {tname(clang.clang_getCursorType(f), tnm+fn[1:-1])}" if is_anon(f) else f"'{nm(f)}', "+
-            tname(clang.clang_getCursorType(f), f'{tnm}_{nm(f)}'))+(f',{clang.clang_getFieldDeclBitWidth(f)}' * clang.clang_Cursor_isBitField(f))+"),"
-            for f in all_fields(t, decl.kind)]
-        lines.extend(([f"{tnm}._anonymous_ = ["+", ".join(f"'_{i}'" for i in range(n))+"]"] if (n:=acnt()) else [])+
-                     ([f"{tnm}._packed_ = True"] * is_packed)+([f"{tnm}._fields_ = [",*ll,"]"] if ll else []))
+        ff=[(nm(f), offset, tname(clang.clang_getCursorType(f))) + ((clang.clang_getFieldDeclBitWidth(f), clang.clang_Cursor_getOffsetOfField(f) % 8)
+                                                                    *clang.clang_Cursor_isBitField(f)) for f,offset in all_fields(t)]
+        if ff: lines.extend([f"{tnm}.SIZE = {clang.clang_Type_getSizeOf(t)}", f"{tnm}._fields_ = [{', '.join(repr(f) for f,*_ in ff)}]",
+                             *[f"setattr({tnm}, '{f}', field({', '.join(str(a) for a in args)}))" for f,*args in ff]])
         return tnm
       case clang.CXType_Enum:
         # TODO: C++ and GNU C have forward declared enums
@@ -154,10 +145,10 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
                      "\n".join(f"{nm(e)} = {types[nm(t)][0]}.define('{nm(e)}', {value(e)})" for e in children(decl)
                      if e.kind == clang.CXCursor_EnumConstantDecl) + "\n")
         return types[nm(t)][0]
-      case clang.CXType_ConstantArray:
-        return f"({tname(clang.clang_getArrayElementType(t),suggested_name.rstrip('s') if suggested_name else None)} * {clang.clang_getArraySize(t)})"
+      case clang.CXType_ConstantArray: return ("Array(" + tname(clang.clang_getArrayElementType(t), suggested_name.rstrip('s') if suggested_name
+                                                                 else None) + f", {clang.clang_getArraySize(t)})")
       case clang.CXType_IncompleteArray:
-        return f"({tname(clang.clang_getArrayElementType(t), suggested_name.rstrip('s') if suggested_name else None)} * 0)"
+        return f"Array({tname(clang.clang_getArrayElementType(t), suggested_name.rstrip('s') if suggested_name else None)}, 0)"
       case clang.CXType_ObjCInterface:
         is_defn = bool([f.kind for f in children(decl) if f.kind in (clang.CXCursor_ObjCInstanceMethodDecl, clang.CXCursor_ObjCClassMethodDecl)])
         if (tnm:=nm(t)) not in types: lines.append(f"class {tnm}(objc.Spec): pass")
@@ -227,8 +218,9 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
         match c.kind:
           case clang.CXCursor_FunctionDecl if clang.clang_getCursorLinkage(c) == clang.CXLinkage_External and dll:
             # TODO: we could support name-mangling
-            lines.append(f"try: ({nm(c)}:=dll.{nm(c)}).restype, {nm(c)}.argtypes = {tname(clang.clang_getCursorResultType(c))}, "
-                         f"[{', '.join(tname(clang.clang_getCursorType(arg)) for arg in arguments(c))}]\nexcept AttributeError: pass\n")
+            argus = [("_n" + n if keyword.iskeyword(n:=nm(arg)) else n, tname(clang.clang_getCursorType(arg))) for arg in arguments(c)]
+            lines.extend([f"@dll.bind(({', '.join(t for _,t in argus)}{',' * (len(argus) == 1)}), {tname(clang.clang_getCursorResultType(c))})",
+                          f"def {nm(c)}({', '.join(n or '_' + str(i) for i,(n,_) in enumerate(argus))}): ..."])
             if clang.CXCursor_NSReturnsRetained in attrs(c): lines.append(f"{nm(c)} = objc.returns_retained({nm(c)})")
           case (clang.CXCursor_StructDecl | clang.CXCursor_UnionDecl | clang.CXCursor_TypedefDecl | clang.CXCursor_EnumDecl
                 | clang.CXCursor_ObjCInterfaceDecl): tname(clang.clang_getCursorType(c))
@@ -257,7 +249,8 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
         lines, types = rollback
     clang.clang_disposeTranslationUnit(tu)
     clang.clang_disposeIndex(idx)
-  main = '\n'.join(["# mypy: ignore-errors", "import ctypes", "from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR",
+  main = '\n'.join(["# mypy: ignore-errors", "import ctypes",
+                    "from tinygrad.runtime.support.c import Array, DLL, Pointer, Struct, Union, field, CEnum, _IO, _IOW, _IOR, _IOWR",
                     *prolog, *(["from tinygrad.runtime.support import objc"]*objc),
                     *([f"dll = DLL('{name}', {dll}{f', {paths}'*bool(paths)}{', use_errno=True'*errno})"] if dll else []), *lines]) + '\n'
   macros = [r for m in macros if (r:=functools.reduce(lambda s,r:re.sub(r[0], r[1], s), rules + base_rules, m))]

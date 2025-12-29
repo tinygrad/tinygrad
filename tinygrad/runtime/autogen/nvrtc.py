@@ -1,6 +1,6 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support.c import Array, DLL, Pointer, Struct, Union, field, CEnum, _IO, _IOW, _IOR, _IOWR
 import sysconfig
 dll = DLL('nvrtc', 'nvrtc', f'/usr/local/cuda/targets/{sysconfig.get_config_vars().get("MULTIARCH", "").rsplit("-", 1)[0]}/lib')
 nvrtcResult = CEnum(ctypes.c_uint32)
@@ -17,70 +17,49 @@ NVRTC_ERROR_NO_LOWERED_NAMES_BEFORE_COMPILATION = nvrtcResult.define('NVRTC_ERRO
 NVRTC_ERROR_NAME_EXPRESSION_NOT_VALID = nvrtcResult.define('NVRTC_ERROR_NAME_EXPRESSION_NOT_VALID', 10)
 NVRTC_ERROR_INTERNAL_ERROR = nvrtcResult.define('NVRTC_ERROR_INTERNAL_ERROR', 11)
 
-try: (nvrtcGetErrorString:=dll.nvrtcGetErrorString).restype, nvrtcGetErrorString.argtypes = ctypes.POINTER(ctypes.c_char), [nvrtcResult]
-except AttributeError: pass
-
-try: (nvrtcVersion:=dll.nvrtcVersion).restype, nvrtcVersion.argtypes = nvrtcResult, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32)]
-except AttributeError: pass
-
-try: (nvrtcGetNumSupportedArchs:=dll.nvrtcGetNumSupportedArchs).restype, nvrtcGetNumSupportedArchs.argtypes = nvrtcResult, [ctypes.POINTER(ctypes.c_int32)]
-except AttributeError: pass
-
-try: (nvrtcGetSupportedArchs:=dll.nvrtcGetSupportedArchs).restype, nvrtcGetSupportedArchs.argtypes = nvrtcResult, [ctypes.POINTER(ctypes.c_int32)]
-except AttributeError: pass
-
+@dll.bind((nvrtcResult,), Pointer(ctypes.c_char))
+def nvrtcGetErrorString(result): ...
+@dll.bind((Pointer(ctypes.c_int32), Pointer(ctypes.c_int32),), nvrtcResult)
+def nvrtcVersion(major, minor): ...
+@dll.bind((Pointer(ctypes.c_int32),), nvrtcResult)
+def nvrtcGetNumSupportedArchs(numArchs): ...
+@dll.bind((Pointer(ctypes.c_int32),), nvrtcResult)
+def nvrtcGetSupportedArchs(supportedArchs): ...
 class struct__nvrtcProgram(Struct): pass
-nvrtcProgram = ctypes.POINTER(struct__nvrtcProgram)
-try: (nvrtcCreateProgram:=dll.nvrtcCreateProgram).restype, nvrtcCreateProgram.argtypes = nvrtcResult, [ctypes.POINTER(nvrtcProgram), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.c_int32, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (nvrtcDestroyProgram:=dll.nvrtcDestroyProgram).restype, nvrtcDestroyProgram.argtypes = nvrtcResult, [ctypes.POINTER(nvrtcProgram)]
-except AttributeError: pass
-
-try: (nvrtcCompileProgram:=dll.nvrtcCompileProgram).restype, nvrtcCompileProgram.argtypes = nvrtcResult, [nvrtcProgram, ctypes.c_int32, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
+nvrtcProgram = Pointer(struct__nvrtcProgram)
+@dll.bind((Pointer(nvrtcProgram), Pointer(ctypes.c_char), Pointer(ctypes.c_char), ctypes.c_int32, Pointer(Pointer(ctypes.c_char)), Pointer(Pointer(ctypes.c_char)),), nvrtcResult)
+def nvrtcCreateProgram(prog, src, name, numHeaders, headers, includeNames): ...
+@dll.bind((Pointer(nvrtcProgram),), nvrtcResult)
+def nvrtcDestroyProgram(prog): ...
+@dll.bind((nvrtcProgram, ctypes.c_int32, Pointer(Pointer(ctypes.c_char)),), nvrtcResult)
+def nvrtcCompileProgram(prog, numOptions, options): ...
 size_t = ctypes.c_uint64
-try: (nvrtcGetPTXSize:=dll.nvrtcGetPTXSize).restype, nvrtcGetPTXSize.argtypes = nvrtcResult, [nvrtcProgram, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (nvrtcGetPTX:=dll.nvrtcGetPTX).restype, nvrtcGetPTX.argtypes = nvrtcResult, [nvrtcProgram, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (nvrtcGetCUBINSize:=dll.nvrtcGetCUBINSize).restype, nvrtcGetCUBINSize.argtypes = nvrtcResult, [nvrtcProgram, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (nvrtcGetCUBIN:=dll.nvrtcGetCUBIN).restype, nvrtcGetCUBIN.argtypes = nvrtcResult, [nvrtcProgram, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (nvrtcGetNVVMSize:=dll.nvrtcGetNVVMSize).restype, nvrtcGetNVVMSize.argtypes = nvrtcResult, [nvrtcProgram, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (nvrtcGetNVVM:=dll.nvrtcGetNVVM).restype, nvrtcGetNVVM.argtypes = nvrtcResult, [nvrtcProgram, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (nvrtcGetLTOIRSize:=dll.nvrtcGetLTOIRSize).restype, nvrtcGetLTOIRSize.argtypes = nvrtcResult, [nvrtcProgram, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (nvrtcGetLTOIR:=dll.nvrtcGetLTOIR).restype, nvrtcGetLTOIR.argtypes = nvrtcResult, [nvrtcProgram, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (nvrtcGetOptiXIRSize:=dll.nvrtcGetOptiXIRSize).restype, nvrtcGetOptiXIRSize.argtypes = nvrtcResult, [nvrtcProgram, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (nvrtcGetOptiXIR:=dll.nvrtcGetOptiXIR).restype, nvrtcGetOptiXIR.argtypes = nvrtcResult, [nvrtcProgram, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (nvrtcGetProgramLogSize:=dll.nvrtcGetProgramLogSize).restype, nvrtcGetProgramLogSize.argtypes = nvrtcResult, [nvrtcProgram, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (nvrtcGetProgramLog:=dll.nvrtcGetProgramLog).restype, nvrtcGetProgramLog.argtypes = nvrtcResult, [nvrtcProgram, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (nvrtcAddNameExpression:=dll.nvrtcAddNameExpression).restype, nvrtcAddNameExpression.argtypes = nvrtcResult, [nvrtcProgram, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (nvrtcGetLoweredName:=dll.nvrtcGetLoweredName).restype, nvrtcGetLoweredName.argtypes = nvrtcResult, [nvrtcProgram, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
+@dll.bind((nvrtcProgram, Pointer(size_t),), nvrtcResult)
+def nvrtcGetPTXSize(prog, ptxSizeRet): ...
+@dll.bind((nvrtcProgram, Pointer(ctypes.c_char),), nvrtcResult)
+def nvrtcGetPTX(prog, ptx): ...
+@dll.bind((nvrtcProgram, Pointer(size_t),), nvrtcResult)
+def nvrtcGetCUBINSize(prog, cubinSizeRet): ...
+@dll.bind((nvrtcProgram, Pointer(ctypes.c_char),), nvrtcResult)
+def nvrtcGetCUBIN(prog, cubin): ...
+@dll.bind((nvrtcProgram, Pointer(size_t),), nvrtcResult)
+def nvrtcGetNVVMSize(prog, nvvmSizeRet): ...
+@dll.bind((nvrtcProgram, Pointer(ctypes.c_char),), nvrtcResult)
+def nvrtcGetNVVM(prog, nvvm): ...
+@dll.bind((nvrtcProgram, Pointer(size_t),), nvrtcResult)
+def nvrtcGetLTOIRSize(prog, LTOIRSizeRet): ...
+@dll.bind((nvrtcProgram, Pointer(ctypes.c_char),), nvrtcResult)
+def nvrtcGetLTOIR(prog, LTOIR): ...
+@dll.bind((nvrtcProgram, Pointer(size_t),), nvrtcResult)
+def nvrtcGetOptiXIRSize(prog, optixirSizeRet): ...
+@dll.bind((nvrtcProgram, Pointer(ctypes.c_char),), nvrtcResult)
+def nvrtcGetOptiXIR(prog, optixir): ...
+@dll.bind((nvrtcProgram, Pointer(size_t),), nvrtcResult)
+def nvrtcGetProgramLogSize(prog, logSizeRet): ...
+@dll.bind((nvrtcProgram, Pointer(ctypes.c_char),), nvrtcResult)
+def nvrtcGetProgramLog(prog, log): ...
+@dll.bind((nvrtcProgram, Pointer(ctypes.c_char),), nvrtcResult)
+def nvrtcAddNameExpression(prog, name_expression): ...
+@dll.bind((nvrtcProgram, Pointer(ctypes.c_char), Pointer(Pointer(ctypes.c_char)),), nvrtcResult)
+def nvrtcGetLoweredName(prog, name_expression, lowered_name): ...
 __DEPRECATED__ = lambda msg: __attribute__((deprecated(msg)))
