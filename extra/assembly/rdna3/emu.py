@@ -14,7 +14,10 @@ WAVE_SIZE, SGPR_COUNT, VGPR_COUNT = 32, 128, 256
 VCC_LO, VCC_HI, NULL, EXEC_LO, EXEC_HI, SCC = SrcEnum.VCC_LO, SrcEnum.VCC_HI, SrcEnum.NULL, SrcEnum.EXEC_LO, SrcEnum.EXEC_HI, SrcEnum.SCC
 
 # VOP3 ops that use 64-bit operands (and thus 64-bit literals when src is 255)
+# Exception: V_LDEXP_F64 has 32-bit integer src1, so literal should NOT be 64-bit when src1=255
 _VOP3_64BIT_OPS = {op.value for op in VOP3Op if op.name.endswith(('_F64', '_B64', '_I64', '_U64'))}
+# Ops where src1 is 32-bit (exponent/shift amount) even though the op name suggests 64-bit
+_VOP3_64BIT_OPS_32BIT_SRC1 = {VOP3Op.V_LDEXP_F64.value}
 
 # Inline constants for src operands 128-254 (f32 format for most instructions)
 _INLINE_CONSTS = [0] * 127
@@ -107,7 +110,7 @@ class WaveState:
   def exec_mask(self, v: int): self.sgpr[EXEC_LO], self.sgpr[EXEC_HI] = v & 0xffffffff, (v >> 32) & 0xffffffff
 
   def rsgpr(self, i: int) -> int: return 0 if i == NULL else self.scc if i == SCC else self.sgpr[i] if i < SGPR_COUNT else 0
-  def wsgpr(self, i: int, v: int): 
+  def wsgpr(self, i: int, v: int):
     if i < SGPR_COUNT and i != NULL: self.sgpr[i] = v & 0xffffffff
   def rsgpr64(self, i: int) -> int: return self.rsgpr(i) | (self.rsgpr(i+1) << 32)
   def wsgpr64(self, i: int, v: int): self.wsgpr(i, v & 0xffffffff); self.wsgpr(i+1, (v >> 32) & 0xffffffff)
@@ -178,9 +181,13 @@ def decode_program(data: bytes) -> Program:
       if inst_class == SOP2 and inst.op in (69, 70): has_literal = True
       if has_literal:
         # For 64-bit ops, the 32-bit literal is placed in HIGH 32 bits (low 32 bits = 0)
+        # Exception: some ops have mixed src sizes (e.g., V_LDEXP_F64 has 32-bit src1)
         op_val = inst._values.get('op')
         if hasattr(op_val, 'value'): op_val = op_val.value
         is_64bit = inst_class is VOP3 and op_val in _VOP3_64BIT_OPS
+        # Don't treat literal as 64-bit if the op has 32-bit src1 and src1 is the literal
+        if is_64bit and op_val in _VOP3_64BIT_OPS_32BIT_SRC1 and getattr(inst, 'src1', None) == 255:
+          is_64bit = False
         lit32 = int.from_bytes(data[i+base_size:i+base_size+4], 'little')
         inst._literal = (lit32 << 32) if is_64bit else lit32
     inst._words = inst.size() // 4
@@ -473,11 +480,17 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     if (abs_ >> idx) & 1: val = _i32(abs(_f32(val)))
     if (neg >> idx) & 1: val = _i32(-_f32(val))
     return val
+  def mod_src64(val: int, idx: int) -> int:
+    if (abs_ >> idx) & 1: val = _i64(abs(_f64(val)))
+    if (neg >> idx) & 1: val = _i64(-_f64(val))
+    return val
 
   # Determine if sources are 64-bit based on instruction type
   # For 64-bit shift ops: src0 is 32-bit (shift amount), src1 is 64-bit (value to shift)
   # For most other _B64/_I64/_U64/_F64 ops: all sources are 64-bit
   is_64bit_op = op.name.endswith(('_B64', '_I64', '_U64', '_F64'))
+  # V_LDEXP_F64: src0 is 64-bit float, src1 is 32-bit integer exponent
+  is_ldexp_64 = op in (VOP3Op.V_LDEXP_F64,)
   is_shift_64 = op in (VOP3Op.V_LSHLREV_B64, VOP3Op.V_LSHRREV_B64, VOP3Op.V_ASHRREV_I64)
   is_16bit_src = op_cls is VOP3Op and any(s in op.name for s in ('_F16', '_B16', '_I16', '_U16'))
 
@@ -485,10 +498,15 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     s0 = mod_src(st.rsrc(src0, lane), 0)  # shift amount is 32-bit
     s1 = st.rsrc64(src1, lane) if src1 is not None else 0  # value to shift is 64-bit
     s2 = mod_src(st.rsrc(src2, lane), 2) if src2 is not None else 0
+  elif is_ldexp_64:
+    s0 = mod_src64(st.rsrc64(src0, lane), 0)  # mantissa is 64-bit float
+    s1 = mod_src(st.rsrc(src1, lane), 1) if src1 is not None else 0  # exponent is 32-bit int
+    s2 = mod_src(st.rsrc(src2, lane), 2) if src2 is not None else 0
   elif is_64bit_op:
-    s0 = st.rsrc64(src0, lane)
-    s1 = st.rsrc64(src1, lane) if src1 is not None else 0
-    s2 = st.rsrc64(src2, lane) if src2 is not None else 0
+    # 64-bit ops: apply neg/abs modifiers using f64 interpretation for float ops
+    s0 = mod_src64(st.rsrc64(src0, lane), 0)
+    s1 = mod_src64(st.rsrc64(src1, lane), 1) if src1 is not None else 0
+    s2 = mod_src64(st.rsrc64(src2, lane), 2) if src2 is not None else 0
   elif is_16bit_src:
     # For 16-bit source ops, opsel bits select which half to use
     s0_raw = mod_src(st.rsrc(src0, lane), 0)

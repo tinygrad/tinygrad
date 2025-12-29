@@ -207,19 +207,20 @@ class Inst:
     return None
 
   def _is_64bit_op(self) -> bool:
-    """Check if this instruction uses 64-bit operands (and thus 64-bit literals)."""
+    """Check if this instruction uses 64-bit operands (and thus 64-bit literals).
+    Exception: V_LDEXP_F64 has 32-bit integer src1, so its literal is 32-bit."""
     op = self._values.get('op')
     if op is None: return False
     # op may be an enum (from __init__) or an int (from from_int)
-    if hasattr(op, 'name'): return op.name.endswith(('_F64', '_B64', '_I64', '_U64'))
-    # For VOP3, check against known 64-bit op values
-    if self.__class__.__name__ == 'VOP3':
+    op_name = op.name if hasattr(op, 'name') else None
+    if op_name is None and self.__class__.__name__ == 'VOP3':
       from extra.assembly.rdna3.autogen import VOP3Op
-      try:
-        return VOP3Op(op).name.endswith(('_F64', '_B64', '_I64', '_U64'))
-      except ValueError:
-        return False
-    return False
+      try: op_name = VOP3Op(op).name
+      except ValueError: pass
+    if op_name is None: return False
+    # V_LDEXP_F64 has 32-bit integer exponent in src1, so literal is 32-bit
+    if op_name == 'V_LDEXP_F64': return False
+    return op_name.endswith(('_F64', '_B64', '_I64', '_U64'))
 
   def to_bytes(self) -> bytes:
     result = self.to_int().to_bytes(self._size(), 'little')
