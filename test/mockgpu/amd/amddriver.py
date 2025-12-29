@@ -52,6 +52,7 @@ class AMDDriver(VirtDriver):
     self.doorbells = {}
     self.next_doorbell = collections.defaultdict(int)
     self.mmu_event_ids = []
+    self._executing = False  # re-entrancy guard for _emulate_execute
 
     for i in range(gpus): self._prepare_gpu(i+1)
 
@@ -125,6 +126,9 @@ class AMDDriver(VirtDriver):
       if struct.gpu_id not in self.gpus: return -1
       struct.handle = self._alloc_handle()
       self.object_by_handle[struct.handle] = copy.deepcopy(struct) # save memory struct to know what mem it is
+      # Track signal memory (uncached + coherent) - progress queues when written to
+      if struct.flags & kfd.KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED:
+        self.track_address(struct.va_addr, struct.va_addr + struct.size, lambda mv,off: None, lambda mv, off: self._emulate_execute())
     elif nr == kfd_ioctls.AMDKFD_IOC_FREE_MEMORY_OF_GPU:
       self.object_by_handle.pop(struct.handle)
     elif nr == kfd_ioctls.AMDKFD_IOC_MAP_MEMORY_TO_GPU:
@@ -173,9 +177,14 @@ class AMDDriver(VirtDriver):
     return 0
 
   def _emulate_execute(self):
-    any_progress = True
-    while any_progress:
-      any_progress = False
-      for gpu in self.gpus.values():
-        for q in gpu.queues:
-          if q.executing: any_progress |= q.execute() > 0
+    if self._executing: return  # prevent re-entrancy
+    self._executing = True
+    try:
+      any_progress = True
+      while any_progress:
+        any_progress = False
+        for gpu in self.gpus.values():
+          for q in gpu.queues:
+            if q.executing: any_progress |= q.execute() > 0
+    finally:
+      self._executing = False

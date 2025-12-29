@@ -49,6 +49,8 @@ class LLVMCompiler(Compiler):
     else:
       self.passes = b'default<O0>'
 
+    # Create a per-instance context instead of using the global context to avoid shared state between parallel test processes
+    self.context = llvm.LLVMContextCreate()
     self.diag_msgs: list[str] = []
     @llvm.LLVMDiagnosticHandler
     def handle_diag(diag_ref, _arg):
@@ -57,15 +59,17 @@ class LLVMCompiler(Compiler):
       if severity == llvm.LLVMDSError:
         self.diag_msgs.append(msg)
     self.handle_diag = handle_diag
-    llvm.LLVMContextSetDiagnosticHandler(llvm.LLVMGetGlobalContext(), handle_diag, None)
+    llvm.LLVMContextSetDiagnosticHandler(self.context, handle_diag, None)
     super().__init__(f"compile_llvm_{processor}_{feats}{'_jit' if self.jit else ''}{'_opt' if opt else ''}")
 
-  def __del__(self): llvm.LLVMDisposePassBuilderOptions(self.pbo)
+  def __del__(self):
+    llvm.LLVMDisposePassBuilderOptions(self.pbo)
+    llvm.LLVMContextDispose(self.context)
 
   def compile(self, src:str) -> bytes:
     self.diag_msgs.clear()
     src_buf = llvm.LLVMCreateMemoryBufferWithMemoryRangeCopy(ctypes.create_string_buffer(src_bytes:=src.encode()), len(src_bytes), b'src')
-    mod = expect(llvm.LLVMParseIRInContext(llvm.LLVMGetGlobalContext(), src_buf, ctypes.pointer(m:=llvm.LLVMModuleRef()), err:=cerr()), err, m)
+    mod = expect(llvm.LLVMParseIRInContext(self.context, src_buf, ctypes.pointer(m:=llvm.LLVMModuleRef()), err:=cerr()), err, m)
     expect(llvm.LLVMVerifyModule(mod, llvm.LLVMReturnStatusAction, err:=cerr()), err)
     expect(llvm.LLVMRunPasses(mod, self.passes, self.target_machine, self.pbo), 'failed to run passes')
     if DEBUG >= 7: print(ctypes.string_at(llvm.LLVMPrintModuleToString(mod)).decode())

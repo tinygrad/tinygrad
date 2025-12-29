@@ -1,10 +1,9 @@
 # ruff: noqa: E501 E712 F401
+from dataclasses import replace
 from tinygrad import dtypes, Device
 from tinygrad.uop.ops import UOp, AxisType, Ops, KernelInfo
-from tinygrad.codegen import full_rewrite
 from tinygrad.codegen.opt import Opt, OptOps # pylint: disable=unused-import
-from tinygrad.renderer import ProgramSpec
-from tinygrad.engine.realize import CompiledRunner
+from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.helpers import dedup, getenv
 from tinygrad.device import Buffer
 from tinygrad.dtype import ImageDType, Invalid
@@ -86,16 +85,11 @@ def dm_conv_172():
 
 ast = {143: vision_conv_143, 153: vision_conv_153, 172: dm_conv_172}[getenv("NUM", 143)]()
 
-compiler = Device.default.compiler
 renderer = Device.default.renderer
 allocator = Device.default.allocator
 
-uops = full_rewrite(ast, renderer)
-src = renderer.render(uops)
-
-lib = compiler.compile(src)
-ps = ProgramSpec("conv", src, Device.DEFAULT, ast, uops)
-cr = CompiledRunner(ps, precompiled=lib)
+ps = get_program(ast, renderer)
+cr = CompiledRunner(replace(ps, device=Device.DEFAULT))
 
 gs = sorted(dedup([u for u in ast.toposort() if u.op is Ops.DEFINE_GLOBAL]), key=lambda u: u.arg)
 # print(len(gs))

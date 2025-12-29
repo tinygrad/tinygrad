@@ -1,11 +1,12 @@
 from typing import cast
 import itertools
-from tinygrad.helpers import DEVECTORIZE, TRANSCENDENTAL, SPEC
-from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat
+from tinygrad.helpers import DEVECTORIZE, TRANSCENDENTAL, SPEC, DEBUG, getenv, TracingKey
+from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, pyrender
 from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
-from tinygrad.renderer import Renderer
+from tinygrad.renderer import Renderer, ProgramSpec
 from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.helpers import panic
+from tinygrad.codegen.opt import Opt
 
 # import all pattern matchers here
 from tinygrad.codegen.gpudims import pm_add_gpudims
@@ -28,6 +29,8 @@ pm_syntactic_sugar = PatternMatcher([
 def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -> UOp:
   if ren is None: ren = Renderer()
 
+  if getenv("VIZ"): graph_rewrite(sink, PatternMatcher([]), name="View Base AST")
+  if DEBUG >= 5: print(pyrender(sink))
   if SPEC: type_verify(sink, kernel_spec)
 
   # preprocess
@@ -123,20 +126,49 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher) -> list[UOp]:
     newlst.extend(ret[1])
   return newlst
 
-def full_rewrite(sink:UOp, ren:Renderer|None=None) -> list[UOp]:
+def do_linearize(prg:UOp, sink:UOp) -> UOp:
+  lst = line_rewrite(linearize(sink), pm_linearize_cleanups)
+  if SPEC: type_verify(lst, program_spec)
+  return prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=tuple(lst)),))
+
+def do_render(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
+  src = ctx.render(list(lin.src))
+  return prg.replace(src=prg.src + (UOp(Ops.SOURCE, arg=src),))
+
+def do_compile(ctx:Renderer, prg:UOp, source:UOp) -> UOp|None:
+  if ctx.compiler is None: return None
+  lib = ctx.compiler.compile_cached(source.arg)
+  return prg.replace(src=prg.src + (UOp(Ops.BINARY, arg=lib),))
+
+pm_to_program = PatternMatcher([
+  (UPat(Ops.PROGRAM, src=(UPat(Ops.SINK, name="sink"), UPat(Ops.DEVICE)), name="prg"), do_linearize),
+  (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE), UPat(Ops.LINEAR, name="lin")), name="prg"), do_render),
+  (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE), UPat(Ops.LINEAR), UPat(Ops.SOURCE, name="source")), name="prg"), do_compile),
+])
+
+@track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.name, (ret.function_name, ret.ast), ret=ret), replay=True)
+def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> ProgramSpec:
   """
-  Function to transform the Kernel UOp graph into a linearized program.
+  Transform an AST into a ProgramSpec. May trigger BEAM search.
 
   Args:
-    sink: The Ops.SINK rooting the Kernel graph.
-    ren: The Renderer (can change how things are processed, fix this).
+    ast: The Ops.SINK rooted AST
+    renderer: The renderer used to generate the code
 
   Returns:
-    Linear program in UOps.
+    The ProgramSpec of the program.
   """
 
-  full_sink = full_rewrite_to_sink(sink, ren, optimize=sink.tag is None)
-  assert len(full_sink.ranges) == 0, f"all ranges must end by the sink, {full_sink.ranges}"
-  lst = line_rewrite(linearize(full_sink), pm_linearize_cleanups)
-  if SPEC: type_verify(lst, program_spec)
-  return lst
+  # fix up KernelInfo
+  if opts is not None:
+    assert ast.arg is None, "can't apply opts if sink has an arg"
+    ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts)))
+  if ast.arg is None: ast = ast.replace(arg=KernelInfo())
+
+  # rewrite to prg
+  full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None)
+  prg = UOp(Ops.PROGRAM, src=(full_sink, UOp(Ops.DEVICE, arg=renderer.device)))
+  prg = graph_rewrite(prg, pm_to_program, ctx=renderer, name="linearize/render")
+
+  # create the ProgramSpec
+  return ProgramSpec.from_uop(prg)

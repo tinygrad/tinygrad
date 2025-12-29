@@ -242,7 +242,8 @@ class BertIntermediate:
   def __call__(self, hidden_states):
     x = self.dense(hidden_states)
     # tinygrad gelu is openai gelu but we need the original bert gelu
-    return gelu(x)
+    # NOTE: contiguous for speed
+    return gelu(x).contiguous()
 
 class BertAttention:
   def __init__(self, hidden_size, num_attention_heads, attention_probs_dropout_prob, hidden_dropout_prob):

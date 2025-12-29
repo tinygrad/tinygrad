@@ -1,4 +1,4 @@
-import collections, functools, dataclasses
+import collections, functools, dataclasses, enum
 from typing import Any, ClassVar
 from tinygrad.helpers import round_up, getenv
 
@@ -107,8 +107,10 @@ class TLSFAllocator:
 
 # Memory Managment
 
+class AddrSpace(enum.Enum): PHYS = enum.auto(); SYS = enum.auto(); PEER = enum.auto() # noqa: E702
+
 @dataclasses.dataclass(frozen=True)
-class VirtMapping: va_addr:int; size:int; paddrs:list[tuple[int, int]]; uncached:bool=False; system:bool=False; snooped:bool=False # noqa: E702
+class VirtMapping: va_addr:int; size:int; paddrs:list[tuple[int, int]]; aspace:AddrSpace; uncached:bool=False; snooped:bool=False # noqa: E702
 
 class PageTableTraverseContext:
   def __init__(self, dev, pt, vaddr, create_pts=False, free_pts=False, boot=False):
@@ -174,7 +176,7 @@ class MemoryManager:
 
     self.boot_allocator = TLSFAllocator(boot_size, base=0)
     self.ptable_allocator = TLSFAllocator(round_up(vram_size // 512, 1 << 20) if self.reserve_ptable else 0, base=self.boot_allocator.size)
-    self.pa_allocator = TLSFAllocator(vram_size - (64 << 20), base=self.boot_allocator.size + self.ptable_allocator.size)
+    self.pa_allocator = TLSFAllocator(vram_size - (off_sz:=self.boot_allocator.size + self.ptable_allocator.size) - (64 << 20), base=off_sz)
     self.root_page_table = pt_t(self.dev, self.palloc(0x1000, zero=not self.dev.smi_dev, boot=True), lv=first_lv)
 
   def _frag_size(self, va, sz, must_cover=True):
@@ -190,7 +192,7 @@ class MemoryManager:
     ctx = PageTableTraverseContext(self.dev, self.root_page_table, vaddr, create_pts=True)
     for _ in ctx.next(size, paddr=0): return [pt for pt, _, _ in ctx.pt_stack]
 
-  def map_range(self, vaddr:int, size:int, paddrs:list[tuple[int, int]], uncached=False, system=False, snooped=False, boot=False) -> VirtMapping:
+  def map_range(self, vaddr:int, size:int, paddrs:list[tuple[int, int]], aspace:AddrSpace, uncached=False, snooped=False, boot=False) -> VirtMapping:
     if getenv("MM_DEBUG", 0): print(f"mm {self.dev.devfmt}: mapping {vaddr=:#x} ({size=:#x})")
 
     assert size == sum(p[1] for p in paddrs), f"Size mismatch {size=} {sum(p[1] for p in paddrs)=}"
@@ -200,11 +202,11 @@ class MemoryManager:
       for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize, paddr=paddr):
         for pte_off in range(pte_cnt):
           assert not pt.valid(pte_idx + pte_off), f"PTE already mapped: {pt.entry(pte_idx + pte_off):#x}"
-          pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, system=system, snooped=snooped,
+          pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, aspace=aspace, snooped=snooped,
                        frag=self._frag_size(ctx.vaddr+off, pte_cnt * pte_covers), valid=True)
 
     self.on_range_mapped()
-    return VirtMapping(vaddr, size, paddrs, uncached=uncached, system=system, snooped=snooped)
+    return VirtMapping(vaddr, size, paddrs, aspace=aspace, uncached=uncached, snooped=snooped)
 
   def unmap_range(self, vaddr:int, size:int):
     if getenv("MM_DEBUG", 0): print(f"mm {self.dev.devfmt}: unmapping {vaddr=:#x} ({size=:#x})")
@@ -243,7 +245,7 @@ class MemoryManager:
           continue
         rem_size -= self.palloc_ranges[nxt_range][0]
 
-    return self.map_range(va, size, paddrs, uncached=uncached)
+    return self.map_range(va, size, paddrs, aspace=AddrSpace.PHYS, uncached=uncached)
 
   def vfree(self, vm:VirtMapping):
     assert self.va_allocator is not None, "must be set it"

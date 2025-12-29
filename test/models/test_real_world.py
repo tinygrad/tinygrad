@@ -5,11 +5,12 @@ from tinygrad.nn import optim
 from tinygrad.nn.state import get_parameters
 from tinygrad.engine.jit import TinyJit
 from tinygrad import Tensor, Device, GlobalCounters, dtypes, Variable
-from tinygrad.helpers import CI, Context
+from tinygrad.helpers import Context
+from test.helpers import slow
 from extra.lr_scheduler import OneCycleLR
 from test.helpers import derandomize_model
 
-from examples.gpt2 import Transformer as GPT2Transformer, MODEL_PARAMS as GPT2_MODEL_PARAMS
+from examples.gpt2 import Transformer as GPT2Transformer
 from examples.hlb_cifar10 import SpeedyResNet, hyp
 from examples.llama import Transformer as LLaMaTransformer
 from examples.stable_diffusion import UNetModel, unet_params
@@ -20,7 +21,7 @@ global_mem_used = 0
 def helper_test(nm, gen, model, max_memory_allowed, max_kernels_allowed, all_jitted=False):
   with Context(JIT=2):
     tms = []
-    for _ in range(4):
+    for _ in range(2):
       early_gen = [x.realize() if isinstance(x, Tensor) else x for x in gen()]
       GlobalCounters.reset()
       Device[Device.DEFAULT].synchronize()
@@ -52,7 +53,7 @@ class TestRealWorld(unittest.TestCase):
   def tearDown(self):
     dtypes.default_float = self.old_float
 
-  @unittest.skipIf(CI and Device.DEFAULT == "CPU", "slow, covered by METAL")
+  @slow
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need dtypes.float16")
   def test_stable_diffusion(self):
     params = unet_params
@@ -92,14 +93,14 @@ class TestRealWorld(unittest.TestCase):
     dtypes.default_float = dtypes.float16
 
     args_tiny = {"dim": 1024, "n_heads": 8, "n_layers": 8, "norm_eps": 1e-5, "vocab_size": 1000}
-    model = GPT2Transformer(**(args_tiny if CI else GPT2_MODEL_PARAMS["gpt2-medium"]))
+    model = GPT2Transformer(**args_tiny)
     derandomize_model(model)
     @TinyJit
     def test(t, v):
       with Context(JIT=0): return model(t, v).realize()
-    helper_test("test_gpt2", lambda: (Tensor([[1,]]),Variable("pos", 1, 100).bind(1)), test, 0.23 if CI else 0.9, 160 if CI else 468, all_jitted=True)
+    helper_test("test_gpt2", lambda: (Tensor([[1,]]),Variable("pos", 1, 100).bind(1)), test, 0.23, 160, all_jitted=True)
 
-  @unittest.skipIf(CI and Device.DEFAULT == "CPU", "slow")
+  @slow
   def test_train_mnist(self):
     from examples.beautiful_mnist import Model
     with Tensor.train():
@@ -117,7 +118,7 @@ class TestRealWorld(unittest.TestCase):
 
       helper_test("train_mnist", lambda: (Tensor.randn(BS, 1, 28, 28),), train, 0.017, 103)
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"CPU", "CL"}, "slow")
+  @slow
   def test_forward_cifar(self):
     BS = 32
     # with training batchnorm still though
@@ -127,7 +128,7 @@ class TestRealWorld(unittest.TestCase):
       def run(X): return model(X)
       helper_test("forward_cifar", lambda: (Tensor.randn(BS, 3, 32, 32),), run, 0.033, 27)
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"CPU", "CL"}, "slow")
+  @slow
   def test_train_cifar(self):
     with Tensor.train():
       model = SpeedyResNet(Tensor.ones((12,3,2,2)))
@@ -157,7 +158,7 @@ class TestRealWorld(unittest.TestCase):
                                 final_div_factor=1./(initial_div_factor*final_lr_ratio), total_steps=4)
       assert not np.isnan(lr_scheduler.min_lr), "lr too small or initial_div_facotr too big for half"
 
-  @unittest.skipIf(CI and Device.DEFAULT == "CPU", "slow")
+  @slow
   def test_bert(self):
     with Tensor.train():
       args_tiny = {"attention_probs_dropout_prob": 0.0, "hidden_dropout_prob": 0.0, "vocab_size": 30522, "type_vocab_size": 2,

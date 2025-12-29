@@ -1,8 +1,9 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
-import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools
+import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools, socketserver, json
 from dataclasses import dataclass, field
 from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload
+from http.server import BaseHTTPRequestHandler
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -114,12 +115,12 @@ def suppress_finalizing(func):
       if not getattr(sys, 'is_finalizing', lambda: True)(): raise # re-raise if not finalizing
   return wrapper
 
-def select_first_inited(candidates:Sequence[Callable[...,T]|Sequence[Callable[...,T]]], err_msg:str, cache:dict|None=None) -> tuple[T,...]|T:
+def select_first_inited(candidates:Sequence[Callable[...,T]|Sequence[Callable[...,T]|None]], err_msg:str, cache:dict|None=None):
   excs = []
   for typ in candidates:
     if cache is not None and typ in cache: return cache[typ]
     try:
-      x = tuple([cast(Callable, t)() for t in typ]) if isinstance(typ, Sequence) else cast(Callable, typ)()
+      x = tuple([cast(Callable, t)() if t is not None else None for t in typ]) if isinstance(typ, Sequence) else cast(Callable, typ)()
       if cache is not None: cache[typ] = x
       return x
     except Exception as e: excs.append(e)
@@ -147,6 +148,10 @@ def getenv(key:str, default:Any=0): return type(default)(os.getenv(key, default)
 
 def temp(x:str, append_user:bool=False) -> str:
   return (pathlib.Path(tempfile.gettempdir()) / (f"{x}.{getpass.getuser()}" if append_user else x)).as_posix()
+
+def stderr_log(msg):
+  sys.stderr.write(msg)
+  sys.stderr.flush()
 
 class Context(contextlib.ContextDecorator):
   def __init__(self, **kwargs): self.kwargs = kwargs
@@ -404,6 +409,33 @@ def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip
       if length and (file_size:=os.stat(fp).st_size) < length: raise RuntimeError(f"fetch size incomplete, {file_size} < {length}")
   return fp
 
+# NOTE: using HTTPServer forces a potentially slow socket.getfqdn
+class TCPServerWithReuse(socketserver.TCPServer):
+  allow_reuse_address = True
+  def __init__(self, server_address, RequestHandlerClass):
+    print(f"*** started server on http://127.0.0.1:{server_address[1]}")
+    super().__init__(server_address, RequestHandlerClass)
+
+class HTTPRequestHandler(BaseHTTPRequestHandler):
+  def send_data(self, data:bytes, content_type:str="application/json", status_code:int=200):
+    self.send_response(status_code)
+    self.send_header("Content-Type", content_type)
+    self.send_header("Content-Length", str(len(data)))
+    self.end_headers()
+    return self.wfile.write(data)
+  def stream_json(self, source:Generator):
+    try:
+      self.send_response(200)
+      self.send_header("Content-Type", "text/event-stream")
+      self.send_header("Cache-Control", "no-cache")
+      self.end_headers()
+      for r in source:
+        self.wfile.write(f"data: {json.dumps(r)}\n\n".encode("utf-8"))
+        self.wfile.flush()
+      self.wfile.write("data: [DONE]\n\n".encode("utf-8"))
+    # pass if client closed connection
+    except (BrokenPipeError, ConnectionResetError): return
+
 # *** Exec helpers
 
 def system(cmd:str, **kwargs) -> str:
@@ -491,8 +523,7 @@ class tqdm(Generic[T]):
   @classmethod
   def write(cls, s:str): print(f"\r\033[K{s}", flush=True, file=sys.stderr)
 
-class trange(tqdm):
-  def __init__(self, n:int, **kwargs): super().__init__(iterable=range(n), total=n, **kwargs)
+def trange(n:int, **kwargs) -> tqdm[int]: return tqdm(range(n), total=n, **kwargs)
 
 class disable_gc(contextlib.ContextDecorator):
   def __enter__(self):
@@ -511,3 +542,11 @@ copyreg.pickle(types.CodeType, _serialize_code)
 
 def _serialize_module(module:types.ModuleType): return importlib.import_module, (module.__name__,)
 copyreg.pickle(types.ModuleType, _serialize_module)
+
+class count:
+  def __init__(self, start:int=0, step:int=1):
+    self.n, self.step = start, step
+  def __next__(self) -> int:
+    cur = self.n
+    self.n += self.step
+    return cur

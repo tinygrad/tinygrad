@@ -1,6 +1,6 @@
-import ctypes, gzip, unittest, timeit
+import ctypes, gzip, unittest, timeit, pickle
 from tinygrad import Variable
-from tinygrad.helpers import Context, ContextVar, argfix, colored, word_wrap, is_numpy_ndarray, CI, mv_address, get_contraction
+from tinygrad.helpers import Context, ContextVar, argfix, colored, word_wrap, is_numpy_ndarray, mv_address, get_contraction, count
 from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str, cdiv, cmod, getbits
 from tinygrad.tensor import Tensor, get_shape
 import numpy as np
@@ -120,6 +120,18 @@ class TestRoundUp(unittest.TestCase):
     self.assertEqual(round_up(232, 24984), 24984)
     self.assertEqual(round_up(24984, 232), 25056)
 
+class TestCount(unittest.TestCase):
+  def test_count_basic(self):
+    c = count(3)
+    self.assertEqual(next(c), 3)
+    self.assertEqual(next(c), 4)
+
+  def test_count_step_pickle(self):
+    c = count(1, 2)
+    self.assertEqual(next(c), 1)
+    c2 = pickle.loads(pickle.dumps(c))
+    self.assertEqual(next(c2), 3)
+
 @unittest.skip("no fetch tests because they need internet")
 class TestFetch(unittest.TestCase):
   def test_fetch_bad_http(self):
@@ -198,7 +210,7 @@ class TestMemoryview(unittest.TestCase):
     mv[0] = 2
     assert base[0] == 2
 
-  @unittest.skipIf(CI, "dangerous for CI, it allocates tons of memory")
+  @unittest.skip("allocates tons of memory")
   def test_to_mv(self):
     sizes = [
       (16, "16 B"),
