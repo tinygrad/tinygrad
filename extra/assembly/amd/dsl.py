@@ -107,7 +107,11 @@ class RawImm:
   def __eq__(self, other): return isinstance(other, RawImm) and self.val == other.val
 
 def unwrap(val) -> int:
-  return val.val if isinstance(val, RawImm) else val.value if hasattr(val, 'value') else val.idx if hasattr(val, 'idx') else val
+  if isinstance(val, RawImm): return val.val
+  if isinstance(val, SrcMod) and not isinstance(val, Reg): return val.val  # Special registers like VCC_LO, NULL
+  if hasattr(val, 'value'): return val.value  # IntEnum
+  if hasattr(val, 'idx'): return val.idx  # Reg
+  return val
 
 # Encoding helpers
 FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
