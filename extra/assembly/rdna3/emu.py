@@ -507,7 +507,11 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
   # V_LDEXP_F64: src0 is 64-bit float, src1 is 32-bit integer exponent
   is_ldexp_64 = op in (VOP3Op.V_LDEXP_F64,)
   is_shift_64 = op in (VOP3Op.V_LSHLREV_B64, VOP3Op.V_LSHRREV_B64, VOP3Op.V_ASHRREV_I64)
-  is_16bit_src = op_cls is VOP3Op and any(s in op.name for s in ('_F16', '_B16', '_I16', '_U16'))
+  # 16-bit source ops: name contains 16-bit type, but for CVT ops check the SOURCE type (CVT naming is V_CVT_DST_SRC)
+  # For CVT: source type is at the end of the name, so V_CVT_F16_F32 has 32-bit src, V_CVT_F32_F16 has 16-bit src
+  has_16bit_type = any(s in op.name for s in ('_F16', '_B16', '_I16', '_U16'))
+  is_cvt_with_32_64_src = op.name.startswith('V_CVT_') and op.name.endswith(('_F32', '_I32', '_U32', '_F64', '_I64', '_U64'))
+  is_16bit_src = op_cls is VOP3Op and has_16bit_type and not is_cvt_with_32_64_src
 
   if is_shift_64:
     s0 = mod_src(st.rsrc(src0, lane), 0)  # shift amount is 32-bit
