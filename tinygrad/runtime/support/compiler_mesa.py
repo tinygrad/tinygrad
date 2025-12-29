@@ -59,9 +59,7 @@ class NAKCompiler(Compiler):
     self.nir_options = bytes(mesa.nak_nir_options(self.cc).contents)
     super().__init__(f"compile_{cache_key}_{arch}")
 
-  def __del__(self):
-    mesa.nak_compiler_destroy(self.cc)
-    super().__del__()
+  def __del__(self): mesa.nak_compiler_destroy(self.cc)
 
   def __reduce__(self): return NAKCompiler, (self.arch, self.warps_per_sm)
 
