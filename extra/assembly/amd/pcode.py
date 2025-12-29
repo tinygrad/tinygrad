@@ -702,7 +702,7 @@ class ExecContext:
 # PDF EXTRACTION AND CODE GENERATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-from extra.assembly.amd.lib import PDF_URLS
+from extra.assembly.amd.dsl import PDF_URLS
 INST_PATTERN = re.compile(r'^([SV]_[A-Z0-9_]+)\s+(\d+)\s*$', re.M)
 
 # Patterns that can't be handled by the DSL (require special handling in emu.py)

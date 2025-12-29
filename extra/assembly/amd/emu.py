@@ -2,7 +2,7 @@
 # mypy: ignore-errors
 from __future__ import annotations
 import ctypes, os
-from extra.assembly.amd.lib import Inst, RawImm
+from extra.assembly.amd.dsl import Inst, RawImm
 from extra.assembly.amd.pcode import _f32, _i32, _sext, _f16, _i16, _f64, _i64
 from extra.assembly.amd.autogen.rdna3.gen_pcode import get_compiled_functions
 from extra.assembly.amd.autogen.rdna3 import (

@@ -4,7 +4,7 @@
 
 import unittest
 from extra.assembly.amd.autogen.rdna3 import *
-from extra.assembly.amd.lib import Inst, RawImm, SGPR, VGPR
+from extra.assembly.amd.dsl import Inst, RawImm, SGPR, VGPR
 
 class TestRegisterSliceSyntax(unittest.TestCase):
   """
