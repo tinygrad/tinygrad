@@ -41,7 +41,7 @@ class TestPDFParserGenerate(unittest.TestCase):
 
   def test_pdf_parser(self):
     """Single test that validates all PDF parser outputs."""
-    from extra.assembly.rdna3.gen import generate
+    from extra.assembly.rdna3.lib import generate
     result = generate()
 
     # test_all_formats_present
