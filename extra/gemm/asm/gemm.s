@@ -6,29 +6,29 @@
 
 gemm:
 	// ** global buffers
-	s_load_dwordx2 s[28:29], s[0:1], 0x0    // C
-	s_load_dwordx4 s[32:35], s[0:1], 0x8    // A, B
+	s_load_dwordx2  s[28:29], s[0:1], 0x0    // C
+	s_load_dwordx4  s[32:35], s[0:1], 0x8    // A, B
 	// ** others kernel args
-  s_load_dword s24 s[0:1] 0x18
-  s_load_dword s54 s[0:1] 0x1C
+	s_load_dword    s24, s[0:1], 0x18        // N
+	s_load_dword    s54, s[0:1], 0x1C        // num work groups
 	s_waitcnt lgkmcnt(0)
-	// "kernel info"
-	s_mov_b32 s51, 0x00000001    // gemm_info = 1
-	s_mov_b32 s53, 0x00000001    // kernel_info0 = 1
+	// "info"
+	s_mov_b32 s51, 1             // gemm_info = 1
+	s_mov_b32 s53, 1             // kernel_info0 = 1
 	s_mov_b32 s11, 0x40010020    // kernel_info1 = 0x40010020
 	// sizes / strides
-	s_mov_b32 s25, s24    // sizesFree1 = N = 8192
-	s_mov_b32 s26, 0x00000001    // sizesFree2 = BATCH = 1
-	s_mov_b32 s27, s24    // sizesSum0  = K = 8192
-	// Strides: major=8192, minor=0 (addr = base + idx0*8192 + idx1*0)
-	s_mov_b32 s36, s24    // strideD0
-	s_mov_b32 s37, 0x00000000    // strideD1
-	s_mov_b32 s38, s24    // strideC0
-	s_mov_b32 s39, 0x00000000    // strideC1
-	s_mov_b32 s40, s24    // strideA0
-	s_mov_b32 s41, 0x00000000    // strideA1
-	s_mov_b32 s42, s24    // strideB0
-	s_mov_b32 s43, 0x00000000    // strideB1
+	s_mov_b32 s25, s24           // sizesFree1 = N
+	s_mov_b32 s26, 1             // sizesFree2 = BATCH
+	s_mov_b32 s27, s24           // sizesSum0  = K (== N)
+	// Strides: major=N, minor=0 (addr = base + idx0*N + idx1*0)
+	s_mov_b32 s36, s24           // strideD0
+	s_mov_b32 s37, 0             // strideD1
+	s_mov_b32 s38, s24           // strideC0
+	s_mov_b32 s39, 0             // strideC1
+	s_mov_b32 s40, s24           // strideA0
+	s_mov_b32 s41, 0             // strideA1
+	s_mov_b32 s42, s24           // strideB0
+	s_mov_b32 s43, 0             // strideB1
 	// ** workgroup mapping
 	s_lshr_b32 s52, s51, 30                                    // 000000002924: 8F349E33
 	s_and_b32 s51, 0x3fffffff, s51                             // 000000002928: 863333FF 3FFFFFFF
