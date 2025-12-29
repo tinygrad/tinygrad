@@ -108,7 +108,7 @@ class dtypes:
   def is_float(x: DType) -> bool: return x.scalar() in dtypes.floats or isinstance(x, ImageDType)
   @staticmethod # static methods on top, or bool in the type info will refer to dtypes.bool
   @functools.cache
-  def is_int(x: DType) -> bool: return x.scalar() in dtypes.ints + (dtypes.index,)
+  def is_int(x: DType) -> bool: return x.scalar() in dtypes.index_like
   @staticmethod
   @functools.cache
   def is_unsigned(x: DType) -> bool: return x.scalar() in dtypes.uints
@@ -128,6 +128,8 @@ class dtypes:
       assert len(val) == dtype.count, f"mismatch {val} {dtype}"
       return tuple(dtypes.as_const(x, dtype) for x in val)
     if isinstance(val, InvalidType): return val
+    # NOTE: float('nan') != float('nan'), so we canonicalize here
+    if isinstance(val, float) and math.isnan(val): val = math.nan
     return int(val) if dtypes.is_int(dtype) else float(val) if dtypes.is_float(dtype) else bool(val)
   @staticmethod
   @functools.cache
@@ -185,6 +187,7 @@ class dtypes:
   uints = (uint8, uint16, uint32, uint64)
   sints = (int8, int16, int32, int64)
   ints = uints + sints
+  index_like = ints + (index,)
   all = floats + ints + (bool, index) # noqa: A003
 
 if (env_default_float := getenv("DEFAULT_FLOAT", "")):
@@ -215,17 +218,19 @@ DTYPES_DICT = {k: v for k, v in dtypes.__dict__.items() if isinstance(v, DType) 
 INVERSE_DTYPES_DICT = {**{v.name:k for k,v in DTYPES_DICT.items()}, "void": "void", "index":"index"}
 
 @functools.cache
-def can_safe_cast(dt0:DType, dt1:DType) -> bool:
+def can_lossless_cast(dt0:DType, dt1:DType) -> bool:
   # return if dt1 preserves value of dt0
-  # https://numpy.org/doc/stable/reference/generated/numpy.can_cast.html
+  # similar to https://numpy.org/doc/stable/reference/generated/numpy.can_cast.html
   if dt0 == dt1 or dt0 == dtypes.bool: return True
   match dt1:
     case dtypes.index: return dt0 in dtypes.ints
     case dtypes.double: return dt0 in (dtypes.float, dtypes.half, dtypes.bfloat16, *dtypes.fp8s,
       dtypes.uint32, dtypes.uint16, dtypes.uint8, dtypes.int32, dtypes.int16, dtypes.int8)
     case dtypes.float: return dt0 in (dtypes.half, dtypes.bfloat16, *dtypes.fp8s, dtypes.uint16, dtypes.uint8, dtypes.int16, dtypes.int8)
+    case dtypes.half: return dt0 in (*dtypes.fp8s, dtypes.uint8, dtypes.int8)
     case dtypes.uint64: return dt0 in (dtypes.uint32, dtypes.uint16, dtypes.uint8)
     case dtypes.uint32: return dt0 in (dtypes.uint16, dtypes.uint8)
+    case dtypes.uint16: return dt0 in (dtypes.uint8,)
     case dtypes.int64: return dt0 in (dtypes.uint32, dtypes.uint16, dtypes.uint8, dtypes.int32, dtypes.int16, dtypes.int8)
     case dtypes.int32: return dt0 in (dtypes.uint16, dtypes.uint8, dtypes.int16, dtypes.int8)
     case dtypes.int16: return dt0 in (dtypes.uint8, dtypes.int8)
@@ -316,11 +321,8 @@ def fp8_to_float(x: int, dtype: DType) -> float:
 truncate: dict[DType, Callable] = {dtypes.bool: bool,
   dtypes.float16: float_to_fp16, dtypes.bfloat16: lambda x: float_to_bf16(float(x)),
   **{fp8: (lambda x, dtype=fp8: fp8_to_float(float_to_fp8(x, dtype), dtype)) for fp8 in dtypes.fp8s},
-  dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
-  dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
-  dtypes.uint32: lambda x: ctypes.c_uint32(x).value, dtypes.uint64: lambda x: ctypes.c_uint64(x).value,
-  dtypes.int8: lambda x: ctypes.c_int8(x).value, dtypes.int16: lambda x: ctypes.c_int16(x).value, dtypes.int32: lambda x: ctypes.c_int32(x).value,
-  dtypes.int64: lambda x: ctypes.c_int64(x).value}
+  **{getattr(dtypes, n): (lambda x, c=getattr(ctypes, f'c_{n}'): c(x).value)
+     for n in ('float', 'double', 'int8', 'int16', 'int32', 'int64', 'uint8', 'uint16', 'uint32', 'uint64')}}
 
 # numpy and torch dtype interop
 

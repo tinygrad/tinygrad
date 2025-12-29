@@ -25,4 +25,4 @@ if __name__ == "__main__":
   #k.apply_opt(Opt(OptOps.GROUP, 0, 32))
   from tinygrad.engine.realize import CompiledRunner, ExecItem
   run = CompiledRunner(prg:=get_program(k.ast, k.opts, k.applied_opts))
-  ExecItem(run, si.bufs).run()
+  ExecItem(k.ast, list(si.bufs), prg=run).run()

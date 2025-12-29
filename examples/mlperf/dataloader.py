@@ -763,48 +763,26 @@ class BlendedGPTDataset:
 
     return dataset_idx, dataset_sample_idx
 
-def batch_load_llama3(bs:int, samples:int, seqlen:int, base_dir:Path, seed:int=0, val:bool=True):
+def get_llama3_dataset(samples:int, seqlen:int, base_dir:Path, seed:int=0, val:bool=True, small:bool=False) -> BlendedGPTDataset:
+  if small:
+    if val:
+      return BlendedGPTDataset(
+        [base_dir / "c4-validation-91205-samples.en_text_document"], [1.0], samples, seqlen, seed, shuffle=False)
+    return BlendedGPTDataset(
+      [base_dir / "c4-train.en_6_text_document"], [1.0], samples, seqlen, seed, shuffle=True)
   if val:
-    dataset = BlendedGPTDataset([
-      base_dir / "validation" / "c4-validationn-91205-samples.en_text_document",
-    ], [
-      1.0
-    ], samples, seqlen, seed, False)
-  else:
-    dataset = BlendedGPTDataset([
-      base_dir / "c4-train.en_6_text_document",
-      base_dir / "c4-train.en_7_text_document",
-    ], [
-      1.0, 1.0
-    ], samples, seqlen, seed, True)
+    return BlendedGPTDataset(
+      [base_dir / "validation" / "c4-validationn-91205-samples.en_text_document"], [1.0], samples, seqlen, seed, shuffle=False)
+  return BlendedGPTDataset(
+    [base_dir / "c4-train.en_6_text_document", base_dir / "c4-train.en_7_text_document"], [1.0, 1.0], samples, seqlen, seed, shuffle=True)
 
-  for b in range(math.ceil(samples / bs)):
-    batch = []
-    for i in range(bs):
-      tokens = dataset.get(b * bs + i)
-      batch.append(tokens)
+def iterate_llama3_dataset(dataset:BlendedGPTDataset, bs:int):
+  for b in range(math.ceil(dataset.samples / bs)):
+    batch = [dataset.get(b * bs + i) for i in range(bs)]
     yield Tensor.stack(batch, dim=0)
 
-def batch_load_llama3_small(bs:int, samples:int, seqlen:int, base_dir:Path, seed:int=0, val:bool=True):
-  if val:
-    dataset = BlendedGPTDataset([
-      base_dir / "c4-validation-91205-samples.en_text_document",
-    ], [
-      1.0
-    ], samples, seqlen, seed, False)
-  else:
-    dataset = BlendedGPTDataset([
-      base_dir / "c4-train.en_6_text_document",
-    ], [
-      1.0
-    ], samples, seqlen, seed, True)
-
-  for b in range(math.ceil(samples / bs)):
-    batch = []
-    for i in range(bs):
-      tokens = dataset.get(b * bs + i)
-      batch.append(tokens)
-    yield Tensor.stack(batch, dim=0)
+def batch_load_llama3(bs:int, samples:int, seqlen:int, base_dir:Path, seed:int=0, val:bool=True, small:bool=False):
+  return iterate_llama3_dataset(get_llama3_dataset(samples, seqlen, base_dir, seed, val, small), bs)
 
 if __name__ == "__main__":
   def load_unet3d(val):

@@ -9,19 +9,21 @@ class Optimizer:
   Base class for all optimizers.
   """
   def __init__(self, params: list[Tensor], lr: float, fused=FUSE_OPTIM):
-    # if it's None, but being put into an optimizer, set it to True
+    # if requires_grad is None, but being put into an optimizer, set it to True
     for x in params:
       if x.requires_grad is None: x.requires_grad = True
 
     self.params: list[Tensor] = dedup([x for x in params if x.requires_grad])
     assert len(self.params) != 0, "optimizer must have at least one param"
-    self.device = self.params[0].device
     self.buffers: list[Tensor] = dedup([x for x in params if not x.requires_grad])   # buffers are still realized
     self.fused = fused
     # store lr in at least float32 precision
     self.lr = Tensor(lr if getenv("CONST_LR") else [lr], requires_grad=False, device=self.device,
                      dtype=least_upper_dtype(dtypes.default_float, dtypes.float32))
     if self.fused: self.pos_params = list(itertools.accumulate(self.params, lambda x,y: x+y.numel(), initial=0))
+
+  @property
+  def device(self): return self.params[0].device
 
   def _new_optim_param(self) -> list[Tensor]:
     param_dtype = to_dtype(getenv("OPTIM_DTYPE", "float32"))
@@ -49,6 +51,7 @@ class Optimizer:
                 - help: Consider setting Tensor.training=True before calling Optimizer.step().""")
     if self.fused:
       # optimizer fusion just concatenates all the buffers, runs the _step, then splits them back up
+      # NOTE: contiguous is for speed
       out, extra = self._step([Tensor.cat(*[t.flatten() for t in self.params], dim=0)],
                               [Tensor.cat(*[unwrap(t.grad).contiguous().flatten() for t in self.params], dim=0)])
       updated_params = [out[0][self.pos_params[i]:self.pos_params[i+1]].reshape(tt.shape) for i, tt in enumerate(self.params)]
@@ -160,11 +163,12 @@ class LAMB(Optimizer):
     self.b1_t *= self.b1
     self.b2_t *= self.b2
     for i, (t, g) in enumerate(zip(params, grads)):
+      if g.device != self.m[i].device: g = g.contiguous().to(self.m[i].device)
       self.m[i].assign((self.b1 * self.m[i] + (1.0 - self.b1) * g).cast(self.m[i].dtype))
       self.v[i].assign((self.b2 * self.v[i] + (1.0 - self.b2) * (g * g)).cast(self.v[i].dtype))
       m_hat = self.m[i] / (1.0 - self.b1_t)
       v_hat = self.v[i] / (1.0 - self.b2_t)
-      up = (m_hat / (v_hat.sqrt() + self.eps)) + self.wd * t.detach()
+      up = (m_hat / (v_hat.sqrt() + self.eps)).shard_like(t) + self.wd * t.detach()
       if not self.adam:
         r1 = t.detach().square().sum().sqrt()
         r2 = up.square().sum().sqrt()

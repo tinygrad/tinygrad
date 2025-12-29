@@ -1,4 +1,3 @@
-from __future__ import annotations
 import math, itertools
 from collections import defaultdict
 from typing import cast, Final
@@ -7,6 +6,7 @@ from tinygrad.uop.ops import axis_letters, axis_colors, axis_to_pos
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes, ImageDType
 from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element, flatten
+from tinygrad.helpers import ALLOW_TF32, count
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
 from tinygrad.codegen.simplify import pm_flatten_range
 from tinygrad.renderer import Renderer
@@ -18,7 +18,7 @@ class Scheduler:
     self.ast, self.ren = ast, ren
     self.dont_use_locals = self.ast.arg.dont_use_locals if self.ast.arg is not None else False
     self.applied_opts = list(self.ast.arg.applied_opts) if self.ast.arg is not None else []
-    self.opt_range = itertools.count(start=max([x.arg[0] for x in self.rngs], default=0)+1)
+    self.opt_range = count(start=max([x.arg[0] for x in self.rngs], default=0)+1)
 
   @property
   def rngs(self):
@@ -228,6 +228,7 @@ class Scheduler:
       except IndexError:
         raise KernelOptError(f"invalid tensor core choice {tc_select}")
       for tc in tensor_cores:
+        if self.ren.device in ("CUDA", "NV") and tc.dtype_in == dtypes.float and not ALLOW_TF32: continue
         if tc.dtype_in == in0.dtype.scalar() and tc.dtype_in == in1.dtype.scalar() and tc.dtype_out == reduceop.dtype.scalar():
           # tensor cores have three ranges. X, Y, and REDUCE
           in0_ranges = sorted([u for u in in0.ranges if u not in in1.ranges], key=lambda x: x.arg[0], reverse=True)

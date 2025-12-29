@@ -1,13 +1,8 @@
 # mypy: ignore-errors
-import ctypes, os
-from tinygrad.helpers import unwrap
-from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-def dll():
-  try: return ctypes.CDLL(unwrap(os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libamdhip64.so'))
-  except: pass
-  return None
-dll = dll()
-
+import ctypes
+from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+import os
+dll = DLL('hip', os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libamdhip64.so')
 hipError_t = CEnum(ctypes.c_uint32)
 hipSuccess = hipError_t.define('hipSuccess', 0)
 hipErrorInvalidValue = hipError_t.define('hipErrorInvalidValue', 1)
@@ -1809,8 +1804,7 @@ except AttributeError: pass
 try: (hipMemcpy2DToArrayAsync:=dll.hipMemcpy2DToArrayAsync).restype, hipMemcpy2DToArrayAsync.argtypes = hipError_t, [hipArray_t, size_t, size_t, ctypes.c_void_p, size_t, size_t, size_t, hipMemcpyKind, hipStream_t]
 except AttributeError: pass
 
-class const_hipArray(Struct): pass
-hipArray_const_t = ctypes.POINTER(const_hipArray)
+hipArray_const_t = ctypes.POINTER(hipArray)
 try: (hipMemcpy2DArrayToArray:=dll.hipMemcpy2DArrayToArray).restype, hipMemcpy2DArrayToArray.argtypes = hipError_t, [hipArray_t, size_t, size_t, hipArray_const_t, size_t, size_t, size_t, size_t, hipMemcpyKind]
 except AttributeError: pass
 
@@ -2358,21 +2352,7 @@ except AttributeError: pass
 try: (hipFreeMipmappedArray:=dll.hipFreeMipmappedArray).restype, hipFreeMipmappedArray.argtypes = hipError_t, [hipMipmappedArray_t]
 except AttributeError: pass
 
-class const_hipMipmappedArray(Struct): pass
-const_hipMipmappedArray._fields_ = [
-  ('data', ctypes.c_void_p),
-  ('desc', hipChannelFormatDesc),
-  ('type', ctypes.c_uint32),
-  ('width', ctypes.c_uint32),
-  ('height', ctypes.c_uint32),
-  ('depth', ctypes.c_uint32),
-  ('min_mipmap_level', ctypes.c_uint32),
-  ('max_mipmap_level', ctypes.c_uint32),
-  ('flags', ctypes.c_uint32),
-  ('format', hipArray_Format),
-  ('num_channels', ctypes.c_uint32),
-]
-hipMipmappedArray_const_t = ctypes.POINTER(const_hipMipmappedArray)
+hipMipmappedArray_const_t = ctypes.POINTER(hipMipmappedArray)
 try: (hipGetMipmappedArrayLevel:=dll.hipGetMipmappedArrayLevel).restype, hipGetMipmappedArrayLevel.argtypes = hipError_t, [ctypes.POINTER(hipArray_t), hipMipmappedArray_const_t, ctypes.c_uint32]
 except AttributeError: pass
 

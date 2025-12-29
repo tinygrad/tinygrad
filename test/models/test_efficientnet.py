@@ -4,7 +4,8 @@ import numpy as np
 from PIL import Image
 
 from tinygrad import Tensor
-from tinygrad.helpers import getenv, CI
+from tinygrad.helpers import getenv
+from test.helpers import slow
 from extra.models.efficientnet import EfficientNet
 from extra.models.vit import ViT
 from extra.models.resnet import ResNet50
@@ -56,18 +57,18 @@ class TestEfficientNet(unittest.TestCase):
   def tearDownClass(cls):
     del cls.model
 
-  @unittest.skipIf(CI, "covered by test_chicken_car")
+  @slow
   def test_chicken(self):
     labels = _infer(self.model, chicken_img)
     self.assertEqual(_LABELS[labels[0]], "hen")
 
-  @unittest.skipIf(CI, "covered by test_chicken_car")
+  @slow
   def test_car(self):
     labels = _infer(self.model, car_img)
     self.assertEqual(_LABELS[labels[0]], "sports car, sport car")
 
   def test_chicken_car(self):
-    labels = _infer(self.model, np.concat([chicken_img, car_img], axis=0))
+    labels = _infer(self.model, np.concatenate([chicken_img, car_img], axis=0))
     self.assertEqual(_LABELS[labels[0]], "hen")
     self.assertEqual(_LABELS[labels[1]], "sports car, sport car")
 

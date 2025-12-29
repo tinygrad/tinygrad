@@ -1,8 +1,9 @@
 from __future__ import annotations
 import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
-import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools
+import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools, socketserver, json
 from dataclasses import dataclass, field
 from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload
+from http.server import BaseHTTPRequestHandler
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -114,10 +115,14 @@ def suppress_finalizing(func):
       if not getattr(sys, 'is_finalizing', lambda: True)(): raise # re-raise if not finalizing
   return wrapper
 
-def select_first_inited(candidates:Sequence[Callable[...,T]|Sequence[Callable[...,T]]], err_msg: str) -> tuple[T,...]|T:
+def select_first_inited(candidates:Sequence[Callable[...,T]|Sequence[Callable[...,T]|None]], err_msg:str, cache:dict|None=None):
   excs = []
   for typ in candidates:
-    try: return tuple([cast(Callable, t)() for t in typ]) if isinstance(typ, Sequence) else cast(Callable, typ)()
+    if cache is not None and typ in cache: return cache[typ]
+    try:
+      x = tuple([cast(Callable, t)() if t is not None else None for t in typ]) if isinstance(typ, Sequence) else cast(Callable, typ)()
+      if cache is not None: cache[typ] = x
+      return x
     except Exception as e: excs.append(e)
   raise ExceptionGroup(err_msg, excs)
 
@@ -144,11 +149,17 @@ def getenv(key:str, default:Any=0): return type(default)(os.getenv(key, default)
 def temp(x:str, append_user:bool=False) -> str:
   return (pathlib.Path(tempfile.gettempdir()) / (f"{x}.{getpass.getuser()}" if append_user else x)).as_posix()
 
+def stderr_log(msg):
+  sys.stderr.write(msg)
+  sys.stderr.flush()
+
 class Context(contextlib.ContextDecorator):
   def __init__(self, **kwargs): self.kwargs = kwargs
   def __enter__(self):
-    self.old_context:dict[str, int] = {k:v.value for k,v in ContextVar._cache.items()}
-    for k,v in self.kwargs.items(): ContextVar._cache[k].value = v
+    self.old_context:dict[str, int] = {}
+    for k,v in self.kwargs.items():
+      self.old_context[k] = ContextVar._cache[k].value
+      ContextVar._cache[k].value = v
   def __exit__(self, *args):
     for k,v in self.old_context.items(): ContextVar._cache[k].value = v
 
@@ -171,14 +182,19 @@ WINO, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), 
 USE_TC, TC_SELECT, TC_OPT, AMX = ContextVar("TC", 1), ContextVar("TC_SELECT", -1), ContextVar("TC_OPT", 0), ContextVar("AMX", 0)
 TRANSCENDENTAL, NOLOCALS = ContextVar("TRANSCENDENTAL", 1), ContextVar("NOLOCALS", 0)
 SPLIT_REDUCEOP, NO_MEMORY_PLANNER, RING = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("NO_MEMORY_PLANNER", 0), ContextVar("RING", 1)
-PICKLE_BUFFERS, LRU = ContextVar("PICKLE_BUFFERS", 1), ContextVar("LRU", 1)
+LRU = ContextVar("LRU", 1)
 CACHELEVEL, IGNORE_BEAM_CACHE, DEVECTORIZE = ContextVar("CACHELEVEL", 2), ContextVar("IGNORE_BEAM_CACHE", 0), ContextVar("DEVECTORIZE", 1)
 VALIDATE_WITH_CPU, DISABLE_FAST_IDIV = ContextVar("VALIDATE_WITH_CPU", 0), ContextVar("DISABLE_FAST_IDIV", 0)
 CORRECT_DIVMOD_FOLDING, FUSE_OPTIM = ContextVar("CORRECT_DIVMOD_FOLDING", 0), ContextVar("FUSE_OPTIM", 0)
 ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE = ContextVar("ALLOW_DEVICE_USAGE", 1), ContextVar("MAX_BUFFER_SIZE", 0)
 EMULATE = ContextVar("EMULATE", "")
 CPU_COUNT = ContextVar("CPU_COUNT", max(1, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)))
+# Compilers
 CPU_LLVM, CPU_LVP, AMD_LLVM = ContextVar("CPU_LLVM", 0), ContextVar("CPU_LVP", 0), ContextVar("AMD_LLVM", 0)
+NV_PTX, CUDA_PTX, NV_NAK, QCOM_IR3 = ContextVar("NV_PTX", 0), ContextVar("CUDA_PTX", 0), ContextVar("NV_NAK", 0), ContextVar("QCOM_IR3", 0)
+NULL_IR3, NULL_NAK = ContextVar("NULL_IR3", 0), ContextVar("NULL_NAK", 0)
+AMD_CC, CPU_CC, NV_CC, CUDA_CC = ContextVar("AMD_CC", ""), ContextVar("CPU_CC", ""), ContextVar("NV_CC", ""), ContextVar("CUDA_CC", "")
+QCOM_CC = ContextVar("QCOM_CC", "")
 # VIZ implies PROFILE, but you can run PROFILE without VIZ
 VIZ = ContextVar("VIZ", 0)
 PROFILE = ContextVar("PROFILE", VIZ.value)
@@ -191,6 +207,8 @@ DEBUG_RANGEIFY = ContextVar("DEBUG_RANGEIFY", 0)
 TUPLE_ORDER = ContextVar("TUPLE_ORDER", 1)
 # set to 0 to disable the compiler cache
 CCACHE = ContextVar("CCACHE", 1)
+# allow tf32 to be used on NVIDIA GPUs
+ALLOW_TF32 = ContextVar("ALLOW_TF32", 0)
 
 @dataclass(frozen=True)
 class Metadata:
@@ -279,7 +297,7 @@ class ProfilePointEvent(ProfileEvent):
 
 cpu_events:list[ProfileEvent] = []
 @contextlib.contextmanager
-def cpu_profile(name:str|TracingKey, device="CPU", is_copy=False, display=True) -> Generator[ProfileRangeEvent, None, None]:
+def cpu_profile(name:str|TracingKey, device="TINY", is_copy=False, display=True) -> Generator[ProfileRangeEvent, None, None]:
   res = ProfileRangeEvent(device, name, perf_counter_us(), is_copy=is_copy)
   try: yield res
   finally:
@@ -288,6 +306,15 @@ def cpu_profile(name:str|TracingKey, device="CPU", is_copy=False, display=True) 
 
 def profile_marker(name:str, color="gray") -> None:
   cpu_events.append(ProfilePointEvent("TINY", "marker", None, {"name":name, "color":color}))
+
+if getenv("DEBUG_GC"):
+  gc_start: decimal.Decimal = perf_counter_us()
+  def my_gc_callback(phase, info):
+    global gc_start
+    if phase == 'start': gc_start = perf_counter_us()
+    elif phase == "stop":
+      cpu_events.append(ProfileRangeEvent("GC", f"collected: {info['collected']} (gen {info['generation']})", gc_start, perf_counter_us()))
+  if PROFILE: gc.callbacks.append(my_gc_callback)
 
 # *** universal database cache ***
 
@@ -361,14 +388,16 @@ def _ensure_downloads_dir() -> pathlib.Path:
   return pathlib.Path(cache_dir) / "downloads"
 
 def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip:bool=False,
-          allow_caching=not getenv("DISABLE_HTTP_CACHE")) -> pathlib.Path:
+          allow_caching=not getenv("DISABLE_HTTP_CACHE"), headers:dict[str, str]={}) -> pathlib.Path:
   if url.startswith(("/", ".")): return pathlib.Path(url)
   if name is not None and (isinstance(name, pathlib.Path) or '/' in name): fp = pathlib.Path(name)
-  else: fp = _ensure_downloads_dir() / (subdir or "") / ((name or hashlib.md5(url.encode('utf-8')).hexdigest()) + (".gunzip" if gunzip else ""))
+  else:
+    hh = "_"+hashlib.md5(("\n".join(f"{k.strip()}:{v.strip()}" for k,v in sorted(headers.items()))).encode("utf-8")).hexdigest() if headers else ""
+    fp = _ensure_downloads_dir() / (subdir or "") / ((name or hashlib.md5(url.encode('utf-8')).hexdigest()) + hh + (".gunzip" if gunzip else ""))
   if not fp.is_file() or not allow_caching:
     (_dir := fp.parent).mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "tinygrad 0.11.0"}), timeout=10) as r:
-      assert r.status == 200, r.status
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "tinygrad 0.11.0", **headers}), timeout=10) as r:
+      assert r.status in {200, 206}, r.status
       length = int(r.headers.get('content-length', 0)) if not gunzip else None
       readfile = gzip.GzipFile(fileobj=r) if gunzip else r
       progress_bar:tqdm = tqdm(total=length, unit='B', unit_scale=True, desc=f"{url}", disable=CI)
@@ -380,9 +409,40 @@ def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip
       if length and (file_size:=os.stat(fp).st_size) < length: raise RuntimeError(f"fetch size incomplete, {file_size} < {length}")
   return fp
 
+# NOTE: using HTTPServer forces a potentially slow socket.getfqdn
+class TCPServerWithReuse(socketserver.TCPServer):
+  allow_reuse_address = True
+  def __init__(self, server_address, RequestHandlerClass):
+    print(f"*** started server on http://127.0.0.1:{server_address[1]}")
+    super().__init__(server_address, RequestHandlerClass)
+
+class HTTPRequestHandler(BaseHTTPRequestHandler):
+  def send_data(self, data:bytes, content_type:str="application/json", status_code:int=200):
+    self.send_response(status_code)
+    self.send_header("Content-Type", content_type)
+    self.send_header("Content-Length", str(len(data)))
+    self.end_headers()
+    return self.wfile.write(data)
+  def stream_json(self, source:Generator):
+    try:
+      self.send_response(200)
+      self.send_header("Content-Type", "text/event-stream")
+      self.send_header("Cache-Control", "no-cache")
+      self.end_headers()
+      for r in source:
+        self.wfile.write(f"data: {json.dumps(r)}\n\n".encode("utf-8"))
+        self.wfile.flush()
+      self.wfile.write("data: [DONE]\n\n".encode("utf-8"))
+    # pass if client closed connection
+    except (BrokenPipeError, ConnectionResetError): return
+
 # *** Exec helpers
 
-def system(cmd, **kwargs): return subprocess.check_output(cmd.split(), **kwargs).decode().strip()
+def system(cmd:str, **kwargs) -> str:
+  st = time.perf_counter()
+  ret = subprocess.check_output(cmd.split(), **kwargs).decode().strip()
+  if DEBUG >= 1: print(f"system: '{cmd}' returned {len(ret)} bytes in {(time.perf_counter() - st)*1e3:.2f} ms")
+  return ret
 
 def cpu_objdump(lib, objdump_tool='objdump'):
   with tempfile.NamedTemporaryFile(delete=True) as f:
@@ -463,8 +523,7 @@ class tqdm(Generic[T]):
   @classmethod
   def write(cls, s:str): print(f"\r\033[K{s}", flush=True, file=sys.stderr)
 
-class trange(tqdm):
-  def __init__(self, n:int, **kwargs): super().__init__(iterable=range(n), total=n, **kwargs)
+def trange(n:int, **kwargs) -> tqdm[int]: return tqdm(range(n), total=n, **kwargs)
 
 class disable_gc(contextlib.ContextDecorator):
   def __enter__(self):
@@ -483,3 +542,11 @@ copyreg.pickle(types.CodeType, _serialize_code)
 
 def _serialize_module(module:types.ModuleType): return importlib.import_module, (module.__name__,)
 copyreg.pickle(types.ModuleType, _serialize_module)
+
+class count:
+  def __init__(self, start:int=0, step:int=1):
+    self.n, self.step = start, step
+  def __next__(self) -> int:
+    cur = self.n
+    self.n += self.step
+    return cur

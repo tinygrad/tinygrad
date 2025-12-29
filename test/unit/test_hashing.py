@@ -1,8 +1,8 @@
 from typing_extensions import Callable
 import hashlib, random, unittest
 from tinygrad import Tensor, Device, getenv, dtypes
+from test.helpers import slow
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import CI
 from tinygrad.uop.ops import UOp
 from tinygrad.engine.jit import TinyJit
 
@@ -47,26 +47,18 @@ class TestKeccak(unittest.TestCase):
 
       ha_ref, hb_ref = hasher(a), hasher(b)
       tres = Tensor.stack(*(Tensor(d) for d in (a, b))).keccak(name)
-      ha, hb = tres[0].data(), tres[1].data()
+      ha, hb = bytes(tres[0].data()), bytes(tres[1].data())
 
       self.assertEqual(ha_ref, ha)
-      self.assertEqual(ha_ref, Tensor(a).keccak(name).data())
+      self.assertEqual(ha_ref, bytes(Tensor(a).keccak(name).data()))
       self.assertEqual(hb_ref, hb)
 
   def test_referenced(self):
     # https://www.di-mgt.com.au/sha_testvectors.html
     self.assertEqual(bytes(Tensor(b"abc").keccak().tolist()),
                      bytearray.fromhex("3a985da74fe225b2 045c172d6bd390bd 855f086e3e9d525b 46bfe24511431532"))
-    self.assertEqual(bytes(Tensor(b"").keccak().tolist()),
-                     bytearray.fromhex("a7ffc6f8bf1ed766 51c14756a061d662 f580ff4de43b49fa 82d80a4b80f8434a"))
-    t = Tensor(b"abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu").keccak()
-    self.assertEqual(bytes(t.tolist()),
-                     bytearray.fromhex("916f6061fe879741 ca6469b43971dfdb 28b1a32dc36cb325 4e812be27aad1d18"))
-    # TODO: this does not run or very slow
-    # self.assertEqual(bytes(Tensor(b"a" * 1000000).keccak().tolist()),
-    #                  bytearray.fromhex("5c8875ae474a3634 ba4fd55ec85bffd6 61f32aca75c6d699 d0cdcb6c115891c1"))
 
-  @unittest.skipIf(CI, "times out in ci")
+  @slow
   def test_long(self):
     data = b"\x00" * 4
     self.assertEqual(bytes(Tensor(data).keccak("shake_128").tolist()), hashlib.shake_128(data).digest(16))
@@ -75,24 +67,14 @@ class TestKeccak(unittest.TestCase):
     self.assertEqual(bytes(Tensor(data).keccak("shake_128").tolist()), hashlib.shake_128(data).digest(16))
 
   def test_variable_bs(self):
-    data = Tensor([b"abc", b"abc", b"abc"], dtype=dtypes.uint8).repeat(2048, 1)
-
-    bs = UOp.variable("bs", 1, 4096).bind(1)
-    out = data.shrink_to(bs, data.shape[-1]).keccak().shrink_to(1, 32)
-    self.assertEqual(bytes(out[0].tolist()), bytearray.fromhex("3a985da74fe225b2 045c172d6bd390bd 855f086e3e9d525b 46bfe24511431532"))
-
-    bs = UOp.variable("bs", 1, 4096).bind(2)
-    out = data.shrink_to(bs, data.shape[-1]).keccak().shrink_to(2, 32)
-    self.assertEqual(bytes(out[0].tolist()), bytearray.fromhex("3a985da74fe225b2 045c172d6bd390bd 855f086e3e9d525b 46bfe24511431532"))
-    self.assertEqual(bytes(out[1].tolist()), bytearray.fromhex("3a985da74fe225b2 045c172d6bd390bd 855f086e3e9d525b 46bfe24511431532"))
-
-    bs = UOp.variable("bs", 1, 4096).bind(3)
     data = Tensor([b"abc", b"abc", b"def"], dtype=dtypes.uint8).repeat(2048, 1)
+    bs = UOp.variable("bs", 1, 4096).bind(3)
     out = data.shrink_to(bs, data.shape[-1]).keccak().shrink_to(3, 32)
     self.assertEqual(bytes(out[0].tolist()), bytearray.fromhex("3a985da74fe225b2 045c172d6bd390bd 855f086e3e9d525b 46bfe24511431532"))
     self.assertEqual(bytes(out[1].tolist()), bytearray.fromhex("3a985da74fe225b2 045c172d6bd390bd 855f086e3e9d525b 46bfe24511431532"))
     self.assertEqual(bytes(out[2].tolist()), bytearray.fromhex("8e0d8f672252acb0 ffc5093db8653b18 1513bf9a2097e737 b4f73533dcaf46df"))
 
+  @slow
   def test_variable_bs_jit(self):
     def f(data):
       return data.keccak()

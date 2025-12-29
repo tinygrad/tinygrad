@@ -1,21 +1,7 @@
 # mypy: ignore-errors
-import ctypes, os
-from tinygrad.helpers import unwrap
-from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-from ctypes.util import find_library
-def dll():
-  try: return ctypes.CDLL(unwrap(os.getenv('LIBUSB_PATH', find_library('usb-1.0'))))
-  except: pass
-  return None
-dll = dll()
-
-class _anonunion0(ctypes.Union): pass
-uint8_t = ctypes.c_ubyte
-uint16_t = ctypes.c_uint16
-_anonunion0._fields_ = [
-  ('b8', (uint8_t * 2)),
-  ('b16', uint16_t),
-]
+import ctypes
+from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+dll = DLL('libusb', 'usb-1.0')
 enum_libusb_class_code = CEnum(ctypes.c_uint32)
 LIBUSB_CLASS_PER_INTERFACE = enum_libusb_class_code.define('LIBUSB_CLASS_PER_INTERFACE', 0)
 LIBUSB_CLASS_AUDIO = enum_libusb_class_code.define('LIBUSB_CLASS_AUDIO', 1)
@@ -122,6 +108,8 @@ LIBUSB_BT_CONTAINER_ID = enum_libusb_bos_type.define('LIBUSB_BT_CONTAINER_ID', 4
 LIBUSB_BT_PLATFORM_DESCRIPTOR = enum_libusb_bos_type.define('LIBUSB_BT_PLATFORM_DESCRIPTOR', 5)
 
 class struct_libusb_device_descriptor(Struct): pass
+uint8_t = ctypes.c_ubyte
+uint16_t = ctypes.c_uint16
 struct_libusb_device_descriptor._fields_ = [
   ('bLength', uint8_t),
   ('bDescriptorType', uint8_t),
