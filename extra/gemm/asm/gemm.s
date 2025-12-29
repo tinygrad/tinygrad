@@ -36,7 +36,6 @@ gemm:
 	s_lshr_b32 s52, s51, 30                                    // 000000002924: 8F349E33
 	s_and_b32 s51, 0x3fffffff, s51                             // 000000002928: 863333FF 3FFFFFFF
 	s_cmp_eq_u32 s52, 0                                        // 000000002930: BF068034
-	s_waitcnt lgkmcnt(0)                                       // 000000002958: BF8CC07F
 	s_and_b32 s10, s53, 0xffff0000                             // 000000002A70: 860AFF35 FFFF0000
 	s_lshr_b32 s10, s10, 16                                    // 000000002A78: 8F0A900A
 	s_and_b32 s50, s53, 0xffff                                 // 000000002A7C: 8632FF35 0000FFFF
