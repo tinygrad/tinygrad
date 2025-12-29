@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Test that PDF parser correctly extracts format fields."""
-import unittest
+import unittest, os
 from extra.assembly.rdna3.autogen import (
   SOP1, SOP2, SOPK, SOPP, VOP1, VOP2, VOP3SD, VOPC, FLAT, VOPD,
   SOP1Op, SOP2Op, VOP1Op, VOP3Op
@@ -33,34 +33,32 @@ EXPECTED_FORMATS = {
   'VOPD': (['OPX', 'OPY', 'SRCX0', 'SRCY0', 'VDSTX', 'VDSTY'], True),
 }
 
+# Skip PDF parsing tests by default - only run with TEST_PDF_PARSER=1
+# These are slow (~5s) and only needed when regenerating autogen/
+@unittest.skipUnless(os.environ.get("TEST_PDF_PARSER"), "set TEST_PDF_PARSER=1 to run PDF parser tests")
 class TestPDFParserGenerate(unittest.TestCase):
   """Test the PDF parser by running generate() and checking results."""
-  result: dict
 
-  @classmethod
-  def setUpClass(cls):
+  def test_pdf_parser(self):
+    """Single test that validates all PDF parser outputs."""
     from extra.assembly.rdna3.gen import generate
-    cls.result = generate()
+    result = generate()
 
-  def test_all_formats_present(self):
-    """All expected formats should be parsed."""
+    # test_all_formats_present
     for fmt_name in EXPECTED_FORMATS:
-      self.assertIn(fmt_name, self.result["formats"], f"missing format {fmt_name}")
+      self.assertIn(fmt_name, result["formats"], f"missing format {fmt_name}")
 
-  def test_format_count(self):
-    """Should have exactly 23 formats."""
-    self.assertEqual(len(self.result["formats"]), 23)
+    # test_format_count
+    self.assertEqual(len(result["formats"]), 23)
 
-  def test_no_duplicate_fields(self):
-    """No format should have duplicate field names."""
-    for fmt_name, fields in self.result["formats"].items():
+    # test_no_duplicate_fields
+    for fmt_name, fields in result["formats"].items():
       field_names = [f[0] for f in fields]
       self.assertEqual(len(field_names), len(set(field_names)), f"{fmt_name} has duplicate fields: {field_names}")
 
-  def test_expected_fields(self):
-    """Each format should have its expected key fields."""
+    # test_expected_fields
     for fmt_name, (expected_fields, has_encoding) in EXPECTED_FORMATS.items():
-      fields = {f[0] for f in self.result["formats"].get(fmt_name, [])}
+      fields = {f[0] for f in result["formats"].get(fmt_name, [])}
       for field in expected_fields:
         self.assertIn(field, fields, f"{fmt_name} missing {field}")
       if has_encoding:
@@ -68,21 +66,18 @@ class TestPDFParserGenerate(unittest.TestCase):
       else:
         self.assertNotIn("ENCODING", fields, f"{fmt_name} should not have ENCODING")
 
-  def test_vopd_no_dpp16_fields(self):
-    """VOPD should not have DPP16-specific fields (parser boundary bug)."""
-    vopd_fields = {f[0] for f in self.result["formats"].get("VOPD", [])}
+    # test_vopd_no_dpp16_fields
+    vopd_fields = {f[0] for f in result["formats"].get("VOPD", [])}
     for field in ['DPP_CTRL', 'BANK_MASK', 'ROW_MASK']:
       self.assertNotIn(field, vopd_fields, f"VOPD should not have {field}")
 
-  def test_dpp16_no_vinterp_fields(self):
-    """DPP16 should not have VINTERP-specific fields."""
-    dpp16_fields = {f[0] for f in self.result["formats"].get("DPP16", [])}
+    # test_dpp16_no_vinterp_fields
+    dpp16_fields = {f[0] for f in result["formats"].get("DPP16", [])}
     for field in ['VDST', 'WAITEXP']:
       self.assertNotIn(field, dpp16_fields, f"DPP16 should not have {field}")
 
-  def test_sopp_no_smem_fields(self):
-    """SOPP should not have SMEM fields (page break bug)."""
-    sopp_fields = {f[0] for f in self.result["formats"].get("SOPP", [])}
+    # test_sopp_no_smem_fields
+    sopp_fields = {f[0] for f in result["formats"].get("SOPP", [])}
     for field in ['SBASE', 'SDATA']:
       self.assertNotIn(field, sopp_fields, f"SOPP should not have {field}")
 

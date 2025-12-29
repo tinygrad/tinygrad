@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Roundtrip tests: generate tinygrad kernels, decode instructions, re-encode, verify match."""
-import unittest, io, sys, re
+import unittest, io, sys, re, subprocess
 from extra.assembly.rdna3.autogen import *
 from extra.assembly.rdna3.lib import Inst
 from extra.assembly.rdna3.asm import asm
@@ -68,7 +68,6 @@ def disassemble_lib(lib: bytes, compiler) -> list[tuple[str, bytes]]:
 
 def compile_asm(instr: str, compiler=None) -> bytes | None:
   """Compile a single instruction with llvm-mc and return the machine code bytes."""
-  import subprocess
   try:
     result = subprocess.run(
       ['llvm-mc', '-triple=amdgcn', '-mcpu=gfx1100', '-mattr=+real-true16,+wavefrontsize32', '-show-encoding'],
@@ -85,6 +84,49 @@ def compile_asm(instr: str, compiler=None) -> bytes | None:
     pass
   return None
 
+def compile_asm_batch(instrs: list[str]) -> list[bytes | None]:
+  """Compile multiple instructions with a single llvm-mc call."""
+  if not instrs: return []
+  asm_text = ".text\n" + "\n".join(instrs) + "\n"
+  try:
+    result = subprocess.run(
+      ['llvm-mc', '-triple=amdgcn', '-mcpu=gfx1100', '-mattr=+real-true16,+wavefrontsize32', '-show-encoding'],
+      input=asm_text, capture_output=True, text=True, timeout=30)
+    if result.returncode != 0: return [None] * len(instrs)
+    results = []
+    for line in result.stdout.split('\n'):
+      if 'encoding:' not in line: continue
+      enc = line.split('encoding:')[1].strip()
+      if enc.startswith('[') and enc.endswith(']'):
+        hex_vals = enc[1:-1].replace('0x', '').replace(',', '').replace(' ', '')
+        try: results.append(bytes.fromhex(hex_vals))
+        except ValueError: results.append(None)
+      else: results.append(None)
+    while len(results) < len(instrs): results.append(None)
+    return results[:len(instrs)]
+  except Exception:
+    return [None] * len(instrs)
+
+def compile_and_disasm_batch(instrs: list[str], compiler) -> list[str | None]:
+  """Compile instructions and get LLVM's disassembly in a single call."""
+  if not instrs: return []
+  # Build assembly source with all instructions
+  src = ".text\n.globl test\n.p2align 8\n.type test,@function\ntest:\n"
+  src += "\n".join(f"  {instr}" for instr in instrs) + "\n"
+  try:
+    lib = compiler.compile(src)
+    llvm_instrs = disassemble_lib(lib, compiler)
+    # Map back to input instructions
+    results = []
+    for i in range(len(instrs)):
+      if i < len(llvm_instrs):
+        results.append(llvm_instrs[i][0])
+      else:
+        results.append(None)
+    return results
+  except Exception:
+    return [None] * len(instrs)
+
 class TestTinygradKernelRoundtrip(unittest.TestCase):
   """Test roundtrip on real tinygrad-generated kernels using get_kernels_from_tinygrad pattern."""
 
@@ -100,20 +142,15 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
     kernels, _, _ = get_kernels_from_tinygrad(op_fn)
     compiler = HIPCompiler('gfx1100')
 
-    decode_passed, decode_failed, decode_skipped = 0, 0, 0
-    asm_passed, asm_failed, asm_skipped = 0, 0, 0
-    disasm_passed, disasm_failed, disasm_skipped = 0, 0, 0
-    decode_failures, asm_failures, disasm_failures = [], [], []
-
+    # First pass: decode all instructions and collect info
+    decoded_instrs = []  # list of (ki, offset, orig_bytes, decoded, our_disasm, decode_ok, decode_err)
     for ki, kernel in enumerate(kernels):
       offset = 0
       while offset < len(kernel.code):
         remaining = kernel.code[offset:]
         fmt = detect_format(remaining)
         if fmt is None:
-          decode_skipped += 1
-          asm_skipped += 1
-          disasm_skipped += 1
+          decoded_instrs.append((ki, offset, None, None, None, False, "no format"))
           offset += 4
           continue
 
@@ -122,61 +159,87 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
           break
 
         orig_bytes = remaining[:size]
-
-        # Test 1: decode -> reencode roundtrip
         try:
           decoded = fmt.from_bytes(orig_bytes)
           reencoded = decoded.to_bytes()
-          if reencoded[:size] == orig_bytes:
-            decode_passed += 1
-          else:
-            decode_failed += 1
-            decode_failures.append(f"K{ki}@{offset}: {decoded.disasm()}: orig={orig_bytes.hex()} reenc={reencoded[:size].hex()}")
-
           our_disasm = decoded.disasm()
+          decode_ok = reencoded[:size] == orig_bytes
+          decode_err = None if decode_ok else f"orig={orig_bytes.hex()} reenc={reencoded[:size].hex()}"
+          decoded_instrs.append((ki, offset, orig_bytes, decoded, our_disasm, decode_ok, decode_err))
+        except Exception as e:
+          decoded_instrs.append((ki, offset, orig_bytes, None, None, False, str(e)))
 
-          # Test 2: asm(disasm()) matches LLVM output
+        offset += size
+
+    # Collect disasm strings for batched LLVM calls
+    asm_test_instrs = []  # (idx, our_disasm) for asm test
+    disasm_test_instrs = []  # (idx, our_disasm) for disasm comparison test
+
+    for idx, (ki, offset, orig_bytes, decoded, our_disasm, decode_ok, decode_err) in enumerate(decoded_instrs):
+      if our_disasm is None: continue
+      asm_test_instrs.append((idx, our_disasm))
+      # Skip disasm comparison for unknown opcodes or malformed instructions
+      if not our_disasm.startswith('op_') and not re.search(r', \d+, \d+, \d+,', our_disasm):
+        disasm_test_instrs.append((idx, our_disasm))
+
+    # Batch compile for asm test
+    asm_llvm_results = compile_asm_batch([d for _, d in asm_test_instrs])
+    asm_llvm_map = {idx: result for (idx, _), result in zip(asm_test_instrs, asm_llvm_results)}
+
+    # Batch compile+disasm for disasm comparison test
+    disasm_llvm_results = compile_and_disasm_batch([d for _, d in disasm_test_instrs], compiler)
+    disasm_llvm_map = {idx: result for (idx, _), result in zip(disasm_test_instrs, disasm_llvm_results)}
+
+    # Now evaluate results
+    decode_passed, decode_failed, decode_skipped = 0, 0, 0
+    asm_passed, asm_failed, asm_skipped = 0, 0, 0
+    disasm_passed, disasm_failed, disasm_skipped = 0, 0, 0
+    decode_failures, asm_failures, disasm_failures = [], [], []
+
+    for idx, (ki, offset, orig_bytes, decoded, our_disasm, decode_ok, decode_err) in enumerate(decoded_instrs):
+      # Decode test
+      if decode_ok:
+        decode_passed += 1
+      elif decode_err == "no format":
+        decode_skipped += 1
+      else:
+        decode_failed += 1
+        decode_failures.append(f"K{ki}@{offset}: {our_disasm}: {decode_err}")
+
+      # Asm test
+      if our_disasm is None:
+        asm_skipped += 1
+      elif idx in asm_llvm_map:
+        llvm_bytes = asm_llvm_map[idx]
+        if llvm_bytes is None:
+          asm_skipped += 1
+        else:
           try:
             our_bytes = asm(our_disasm).to_bytes()
-            llvm_bytes = compile_asm(our_disasm, compiler)
-            if llvm_bytes is None:
-              asm_skipped += 1
-            elif our_bytes[:len(llvm_bytes)] == llvm_bytes:
+            if our_bytes[:len(llvm_bytes)] == llvm_bytes:
               asm_passed += 1
             else:
               asm_failed += 1
               asm_failures.append(f"K{ki}@{offset}: '{our_disasm}': ours={our_bytes[:len(llvm_bytes)].hex()} llvm={llvm_bytes.hex()}")
           except Exception:
             asm_skipped += 1
+      else:
+        asm_skipped += 1
 
-          # Test 3: our disasm() matches LLVM's disassembly string exactly
-          # Skip if instruction uses op_XX (unknown opcode) or looks malformed (many raw field values)
-          if our_disasm.startswith('op_') or re.search(r', \d+, \d+, \d+,', our_disasm):
-            disasm_skipped += 1
-          else:
-            try:
-              # Get LLVM's disassembly of our instruction
-              src = f".text\n.globl test\n.p2align 8\n.type test,@function\ntest:\n  {our_disasm}\n"
-              lib = compiler.compile(src)
-              llvm_instrs = disassemble_lib(lib, compiler)
-              if llvm_instrs:
-                llvm_disasm = llvm_instrs[0][0]
-                if our_disasm == llvm_disasm:
-                  disasm_passed += 1
-                else:
-                  disasm_failed += 1
-                  disasm_failures.append(f"K{ki}@{offset}: ours='{our_disasm}' llvm='{llvm_disasm}'")
-              else:
-                disasm_skipped += 1
-            except Exception:
-              disasm_skipped += 1
-
-        except Exception:
-          decode_skipped += 1
-          asm_skipped += 1
+      # Disasm comparison test
+      if our_disasm is None:
+        disasm_skipped += 1
+      elif idx in disasm_llvm_map:
+        llvm_disasm = disasm_llvm_map[idx]
+        if llvm_disasm is None:
           disasm_skipped += 1
-
-        offset += size
+        elif our_disasm == llvm_disasm:
+          disasm_passed += 1
+        else:
+          disasm_failed += 1
+          disasm_failures.append(f"K{ki}@{offset}: ours='{our_disasm}' llvm='{llvm_disasm}'")
+      else:
+        disasm_skipped += 1
 
     print(f"decode roundtrip: {decode_passed} passed, {decode_failed} failed, {decode_skipped} skipped")
     print(f"asm vs llvm: {asm_passed} passed, {asm_failed} failed, {asm_skipped} skipped")
