@@ -4789,6 +4789,4117 @@ VOP3POp_FUNCTIONS = {
   VOP3POp.V_PK_MOV_B32: _VOP3POp_V_PK_MOV_B32,
 }
 
+def _VOPCOp_V_CMP_CLASS_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # single-precision float, and set the per-lane condition code to the result. Store the result into VCC or a scalar
+  # S1.u[0] value is a signaling NAN.
+  # S1.u[1] value is a quiet NAN.
+  # S1.u[2] value is negative infinity.
+  # S1.u[3] value is a negative normal value.
+  # S1.u[4] value is a negative denormal value.
+  # S1.u[5] value is negative zero.
+  # S1.u[6] value is positive zero.
+  # S1.u[7] value is a positive denormal value.
+  # S1.u[8] value is a positive normal value.
+  # S1.u[9] value is positive infinity.
+  # declare result : 1'U;
+  # if isSignalNAN(64'F(S0.f32)) then
+  # result = S1.u32[0]
+  # elsif isQuietNAN(64'F(S0.f32)) then
+  # result = S1.u32[1]
+  # elsif exponent(S0.f32) == 255 then
+  # // +-INF
+  # result = S1.u32[sign(S0.f32) ? 2 : 9]
+  # elsif exponent(S0.f32) > 0 then
+  # // +-normal value
+  # result = S1.u32[sign(S0.f32) ? 3 : 8]
+  # elsif 64'F(abs(S0.f32)) > 0.0 then
+  # // +-denormal value
+  # result = S1.u32[sign(S0.f32) ? 4 : 7]
+  # else
+  # // +-0.0
+  # result = S1.u32[sign(S0.f32) ? 5 : 6]
+  # endif;
+  # D0.u64[laneId] = result;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  if isSignalNAN(F(S0.f32)):
+    result = S1.u32[0]
+  elif isQuietNAN(F(S0.f32)):
+    result = S1.u32[1]
+  elif exponent(S0.f32) == 255:
+    result = S1.u32[((2) if (sign(S0.f32)) else (9))]
+  elif exponent(S0.f32) > 0:
+    result = S1.u32[((3) if (sign(S0.f32)) else (8))]
+  elif F(abs(S0.f32)) > 0.0:
+    result = S1.u32[((4) if (sign(S0.f32)) else (7))]
+  else:
+    result = S1.u32[((5) if (sign(S0.f32)) else (6))]
+  D0.u64[laneId] = result
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_CLASS_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # single-precision float, and set the per-lane condition code to the result. Store the result into the EXEC mask and
+  # S1.u[0] value is a signaling NAN.
+  # S1.u[1] value is a quiet NAN.
+  # S1.u[2] value is negative infinity.
+  # S1.u[3] value is a negative normal value.
+  # S1.u[4] value is a negative denormal value.
+  # S1.u[5] value is negative zero.
+  # S1.u[6] value is positive zero.
+  # S1.u[7] value is a positive denormal value.
+  # S1.u[8] value is a positive normal value.
+  # S1.u[9] value is positive infinity.
+  # declare result : 1'U;
+  # if isSignalNAN(64'F(S0.f32)) then
+  # result = S1.u32[0]
+  # elsif isQuietNAN(64'F(S0.f32)) then
+  # result = S1.u32[1]
+  # elsif exponent(S0.f32) == 255 then
+  # // +-INF
+  # result = S1.u32[sign(S0.f32) ? 2 : 9]
+  # elsif exponent(S0.f32) > 0 then
+  # // +-normal value
+  # result = S1.u32[sign(S0.f32) ? 3 : 8]
+  # elsif 64'F(abs(S0.f32)) > 0.0 then
+  # // +-denormal value
+  # result = S1.u32[sign(S0.f32) ? 4 : 7]
+  # else
+  # // +-0.0
+  # result = S1.u32[sign(S0.f32) ? 5 : 6]
+  # endif;
+  # EXEC.u64[laneId] = D0.u64[laneId] = result
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  if isSignalNAN(F(S0.f32)):
+    result = S1.u32[0]
+  elif isQuietNAN(F(S0.f32)):
+    result = S1.u32[1]
+  elif exponent(S0.f32) == 255:
+    result = S1.u32[((2) if (sign(S0.f32)) else (9))]
+  elif exponent(S0.f32) > 0:
+    result = S1.u32[((3) if (sign(S0.f32)) else (8))]
+  elif F(abs(S0.f32)) > 0.0:
+    result = S1.u32[((4) if (sign(S0.f32)) else (7))]
+  else:
+    result = S1.u32[((5) if (sign(S0.f32)) else (6))]
+  EXEC.u64[laneId] = D0.u64[laneId] = result
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_CLASS_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # double-precision float, and set the per-lane condition code to the result. Store the result into VCC or a scalar
+  # S1.u[0] value is a signaling NAN.
+  # S1.u[1] value is a quiet NAN.
+  # S1.u[2] value is negative infinity.
+  # S1.u[3] value is a negative normal value.
+  # S1.u[4] value is a negative denormal value.
+  # S1.u[5] value is negative zero.
+  # S1.u[6] value is positive zero.
+  # S1.u[7] value is a positive denormal value.
+  # S1.u[8] value is a positive normal value.
+  # S1.u[9] value is positive infinity.
+  # declare result : 1'U;
+  # if isSignalNAN(S0.f64) then
+  # result = S1.u32[0]
+  # elsif isQuietNAN(S0.f64) then
+  # result = S1.u32[1]
+  # elsif exponent(S0.f64) == 2047 then
+  # // +-INF
+  # result = S1.u32[sign(S0.f64) ? 2 : 9]
+  # elsif exponent(S0.f64) > 0 then
+  # // +-normal value
+  # result = S1.u32[sign(S0.f64) ? 3 : 8]
+  # elsif abs(S0.f64) > 0.0 then
+  # // +-denormal value
+  # result = S1.u32[sign(S0.f64) ? 4 : 7]
+  # else
+  # // +-0.0
+  # result = S1.u32[sign(S0.f64) ? 5 : 6]
+  # endif;
+  # D0.u64[laneId] = result;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  if isSignalNAN(S0.f64):
+    result = S1.u32[0]
+  elif isQuietNAN(S0.f64):
+    result = S1.u32[1]
+  elif exponent(S0.f64) == 2047:
+    result = S1.u32[((2) if (sign(S0.f64)) else (9))]
+  elif exponent(S0.f64) > 0:
+    result = S1.u32[((3) if (sign(S0.f64)) else (8))]
+  elif abs(S0.f64) > 0.0:
+    result = S1.u32[((4) if (sign(S0.f64)) else (7))]
+  else:
+    result = S1.u32[((5) if (sign(S0.f64)) else (6))]
+  D0.u64[laneId] = result
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_CLASS_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # double-precision float, and set the per-lane condition code to the result. Store the result into the EXEC mask
+  # S1.u[0] value is a signaling NAN.
+  # S1.u[1] value is a quiet NAN.
+  # S1.u[2] value is negative infinity.
+  # S1.u[3] value is a negative normal value.
+  # S1.u[4] value is a negative denormal value.
+  # S1.u[5] value is negative zero.
+  # S1.u[6] value is positive zero.
+  # S1.u[7] value is a positive denormal value.
+  # S1.u[8] value is a positive normal value.
+  # S1.u[9] value is positive infinity.
+  # declare result : 1'U;
+  # if isSignalNAN(S0.f64) then
+  # result = S1.u32[0]
+  # elsif isQuietNAN(S0.f64) then
+  # result = S1.u32[1]
+  # elsif exponent(S0.f64) == 2047 then
+  # // +-INF
+  # result = S1.u32[sign(S0.f64) ? 2 : 9]
+  # elsif exponent(S0.f64) > 0 then
+  # // +-normal value
+  # result = S1.u32[sign(S0.f64) ? 3 : 8]
+  # elsif abs(S0.f64) > 0.0 then
+  # // +-denormal value
+  # result = S1.u32[sign(S0.f64) ? 4 : 7]
+  # else
+  # // +-0.0
+  # result = S1.u32[sign(S0.f64) ? 5 : 6]
+  # endif;
+  # EXEC.u64[laneId] = D0.u64[laneId] = result
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  if isSignalNAN(S0.f64):
+    result = S1.u32[0]
+  elif isQuietNAN(S0.f64):
+    result = S1.u32[1]
+  elif exponent(S0.f64) == 2047:
+    result = S1.u32[((2) if (sign(S0.f64)) else (9))]
+  elif exponent(S0.f64) > 0:
+    result = S1.u32[((3) if (sign(S0.f64)) else (8))]
+  elif abs(S0.f64) > 0.0:
+    result = S1.u32[((4) if (sign(S0.f64)) else (7))]
+  else:
+    result = S1.u32[((5) if (sign(S0.f64)) else (6))]
+  EXEC.u64[laneId] = D0.u64[laneId] = result
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_CLASS_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # half-precision float, and set the per-lane condition code to the result. Store the result into VCC or a scalar
+  # S1.u[0] value is a signaling NAN.
+  # S1.u[1] value is a quiet NAN.
+  # S1.u[2] value is negative infinity.
+  # S1.u[3] value is a negative normal value.
+  # S1.u[4] value is a negative denormal value.
+  # S1.u[5] value is negative zero.
+  # S1.u[6] value is positive zero.
+  # S1.u[7] value is a positive denormal value.
+  # S1.u[8] value is a positive normal value.
+  # S1.u[9] value is positive infinity.
+  # declare result : 1'U;
+  # if isSignalNAN(64'F(S0.f16)) then
+  # result = S1.u32[0]
+  # elsif isQuietNAN(64'F(S0.f16)) then
+  # result = S1.u32[1]
+  # elsif exponent(S0.f16) == 31 then
+  # // +-INF
+  # result = S1.u32[sign(S0.f16) ? 2 : 9]
+  # elsif exponent(S0.f16) > 0 then
+  # // +-normal value
+  # result = S1.u32[sign(S0.f16) ? 3 : 8]
+  # elsif 64'F(abs(S0.f16)) > 0.0 then
+  # // +-denormal value
+  # result = S1.u32[sign(S0.f16) ? 4 : 7]
+  # else
+  # // +-0.0
+  # result = S1.u32[sign(S0.f16) ? 5 : 6]
+  # endif;
+  # D0.u64[laneId] = result;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  if isSignalNAN(F(S0.f16)):
+    result = S1.u32[0]
+  elif isQuietNAN(F(S0.f16)):
+    result = S1.u32[1]
+  elif exponent(S0.f16) == 31:
+    result = S1.u32[((2) if (sign(S0.f16)) else (9))]
+  elif exponent(S0.f16) > 0:
+    result = S1.u32[((3) if (sign(S0.f16)) else (8))]
+  elif F(abs(S0.f16)) > 0.0:
+    result = S1.u32[((4) if (sign(S0.f16)) else (7))]
+  else:
+    result = S1.u32[((5) if (sign(S0.f16)) else (6))]
+  D0.u64[laneId] = result
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_CLASS_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # half-precision float, and set the per-lane condition code to the result. Store the result into the EXEC mask and
+  # S1.u[0] value is a signaling NAN.
+  # S1.u[1] value is a quiet NAN.
+  # S1.u[2] value is negative infinity.
+  # S1.u[3] value is a negative normal value.
+  # S1.u[4] value is a negative denormal value.
+  # S1.u[5] value is negative zero.
+  # S1.u[6] value is positive zero.
+  # S1.u[7] value is a positive denormal value.
+  # S1.u[8] value is a positive normal value.
+  # S1.u[9] value is positive infinity.
+  # declare result : 1'U;
+  # if isSignalNAN(64'F(S0.f16)) then
+  # result = S1.u32[0]
+  # elsif isQuietNAN(64'F(S0.f16)) then
+  # result = S1.u32[1]
+  # elsif exponent(S0.f16) == 31 then
+  # // +-INF
+  # result = S1.u32[sign(S0.f16) ? 2 : 9]
+  # elsif exponent(S0.f16) > 0 then
+  # // +-normal value
+  # result = S1.u32[sign(S0.f16) ? 3 : 8]
+  # elsif 64'F(abs(S0.f16)) > 0.0 then
+  # // +-denormal value
+  # result = S1.u32[sign(S0.f16) ? 4 : 7]
+  # else
+  # // +-0.0
+  # result = S1.u32[sign(S0.f16) ? 5 : 6]
+  # endif;
+  # EXEC.u64[laneId] = D0.u64[laneId] = result
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  if isSignalNAN(F(S0.f16)):
+    result = S1.u32[0]
+  elif isQuietNAN(F(S0.f16)):
+    result = S1.u32[1]
+  elif exponent(S0.f16) == 31:
+    result = S1.u32[((2) if (sign(S0.f16)) else (9))]
+  elif exponent(S0.f16) > 0:
+    result = S1.u32[((3) if (sign(S0.f16)) else (8))]
+  elif F(abs(S0.f16)) > 0.0:
+    result = S1.u32[((4) if (sign(S0.f16)) else (7))]
+  else:
+    result = S1.u32[((5) if (sign(S0.f16)) else (6))]
+  EXEC.u64[laneId] = D0.u64[laneId] = result
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_F_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 0. Store the result into VCC or a scalar register.
+  # D0.u64[laneId] = 1'0U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = 0
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_LT_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is less than the second input. Store the result into VCC or a
+  # D0.u64[laneId] = S0.f16 < S1.f16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.f16 < S1.f16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_EQ_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into VCC or a
+  # D0.u64[laneId] = S0.f16 == S1.f16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.f16 == S1.f16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_LE_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = S0.f16 <= S1.f16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.f16 <= S1.f16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_GT_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is greater than the second input. Store the result into VCC
+  # D0.u64[laneId] = S0.f16 > S1.f16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.f16 > S1.f16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_LG_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = S0.f16 <> S1.f16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.f16  !=  S1.f16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_GE_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = S0.f16 >= S1.f16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.f16 >= S1.f16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_O_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is orderable to the second input. Store the result into VCC
+  # D0.u64[laneId] = (!isNAN(64'F(S0.f16)) && !isNAN(64'F(S1.f16)));
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = ( not isNAN(F(S0.f16))  and   not isNAN(F(S1.f16)))
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_U_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # VCC or a scalar register.
+  # D0.u64[laneId] = (isNAN(64'F(S0.f16)) || isNAN(64'F(S1.f16)));
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = (isNAN(F(S0.f16))  or  isNAN(F(S1.f16)))
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_NGE_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = !(S0.f16 >= S1.f16);
+  # // With NAN inputs this is not the same operation as <
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] =  not (S0.f16 >= S1.f16)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_NLG_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = !(S0.f16 <> S1.f16);
+  # // With NAN inputs this is not the same operation as ==
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] =  not (S0.f16  !=  S1.f16)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_NGT_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # VCC or a scalar register.
+  # D0.u64[laneId] = !(S0.f16 > S1.f16);
+  # // With NAN inputs this is not the same operation as <=
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] =  not (S0.f16 > S1.f16)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_NLE_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = !(S0.f16 <= S1.f16);
+  # // With NAN inputs this is not the same operation as >
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] =  not (S0.f16 <= S1.f16)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_NEQ_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is not equal to the second input. Store the result into VCC
+  # D0.u64[laneId] = !(S0.f16 == S1.f16);
+  # // With NAN inputs this is not the same operation as !=
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] =  not (S0.f16 == S1.f16)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_NLT_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is not less than the second input. Store the result into VCC
+  # D0.u64[laneId] = !(S0.f16 < S1.f16);
+  # // With NAN inputs this is not the same operation as >=
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] =  not (S0.f16 < S1.f16)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_TRU_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1. Store the result into VCC or a scalar register.
+  # D0.u64[laneId] = 1'1U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = 1
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_F_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 0. Store the result into the EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = 1'0U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = 0
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_LT_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.f16 < S1.f16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.f16 < S1.f16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_EQ_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into the EXEC
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.f16 == S1.f16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.f16 == S1.f16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_LE_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.f16 <= S1.f16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.f16 <= S1.f16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_GT_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.f16 > S1.f16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.f16 > S1.f16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_LG_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.f16 <> S1.f16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.f16  !=  S1.f16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_GE_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.f16 >= S1.f16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.f16 >= S1.f16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_O_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = (!isNAN(64'F(S0.f16)) && !isNAN(64'F(S1.f16)));
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = ( not isNAN(F(S0.f16))  and   not isNAN(F(S1.f16)))
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_U_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = (isNAN(64'F(S0.f16)) || isNAN(64'F(S1.f16)));
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = (isNAN(F(S0.f16))  or  isNAN(F(S1.f16)))
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_NGE_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = !(S0.f16 >= S1.f16);
+  # // With NAN inputs this is not the same operation as <
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] =  not (S0.f16 >= S1.f16)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_NLG_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = !(S0.f16 <> S1.f16);
+  # // With NAN inputs this is not the same operation as ==
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] =  not (S0.f16  !=  S1.f16)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_NGT_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = !(S0.f16 > S1.f16);
+  # // With NAN inputs this is not the same operation as <=
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] =  not (S0.f16 > S1.f16)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_NLE_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = !(S0.f16 <= S1.f16);
+  # // With NAN inputs this is not the same operation as >
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] =  not (S0.f16 <= S1.f16)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_NEQ_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = !(S0.f16 == S1.f16);
+  # // With NAN inputs this is not the same operation as !=
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] =  not (S0.f16 == S1.f16)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_NLT_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = !(S0.f16 < S1.f16);
+  # // With NAN inputs this is not the same operation as >=
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] =  not (S0.f16 < S1.f16)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_TRU_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1. Store the result into the EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = 1'1U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = 1
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_F_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 0. Store the result into VCC or a scalar register.
+  # D0.u64[laneId] = 1'0U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = 0
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_LT_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is less than the second input. Store the result into VCC or a
+  # D0.u64[laneId] = S0.f32 < S1.f32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.f32 < S1.f32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_EQ_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into VCC or a
+  # D0.u64[laneId] = S0.f32 == S1.f32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.f32 == S1.f32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_LE_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = S0.f32 <= S1.f32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.f32 <= S1.f32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_GT_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is greater than the second input. Store the result into VCC
+  # D0.u64[laneId] = S0.f32 > S1.f32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.f32 > S1.f32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_LG_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = S0.f32 <> S1.f32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.f32  !=  S1.f32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_GE_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = S0.f32 >= S1.f32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.f32 >= S1.f32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_O_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is orderable to the second input. Store the result into VCC
+  # D0.u64[laneId] = (!isNAN(64'F(S0.f32)) && !isNAN(64'F(S1.f32)));
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = ( not isNAN(F(S0.f32))  and   not isNAN(F(S1.f32)))
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_U_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # VCC or a scalar register.
+  # D0.u64[laneId] = (isNAN(64'F(S0.f32)) || isNAN(64'F(S1.f32)));
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = (isNAN(F(S0.f32))  or  isNAN(F(S1.f32)))
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_NGE_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = !(S0.f32 >= S1.f32);
+  # // With NAN inputs this is not the same operation as <
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] =  not (S0.f32 >= S1.f32)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_NLG_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = !(S0.f32 <> S1.f32);
+  # // With NAN inputs this is not the same operation as ==
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] =  not (S0.f32  !=  S1.f32)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_NGT_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # VCC or a scalar register.
+  # D0.u64[laneId] = !(S0.f32 > S1.f32);
+  # // With NAN inputs this is not the same operation as <=
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] =  not (S0.f32 > S1.f32)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_NLE_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = !(S0.f32 <= S1.f32);
+  # // With NAN inputs this is not the same operation as >
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] =  not (S0.f32 <= S1.f32)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_NEQ_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is not equal to the second input. Store the result into VCC
+  # D0.u64[laneId] = !(S0.f32 == S1.f32);
+  # // With NAN inputs this is not the same operation as !=
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] =  not (S0.f32 == S1.f32)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_NLT_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is not less than the second input. Store the result into VCC
+  # D0.u64[laneId] = !(S0.f32 < S1.f32);
+  # // With NAN inputs this is not the same operation as >=
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] =  not (S0.f32 < S1.f32)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_TRU_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1. Store the result into VCC or a scalar register.
+  # D0.u64[laneId] = 1'1U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = 1
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_F_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 0. Store the result into the EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = 1'0U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = 0
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_LT_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.f32 < S1.f32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.f32 < S1.f32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_EQ_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into the EXEC
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.f32 == S1.f32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.f32 == S1.f32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_LE_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.f32 <= S1.f32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.f32 <= S1.f32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_GT_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.f32 > S1.f32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.f32 > S1.f32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_LG_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.f32 <> S1.f32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.f32  !=  S1.f32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_GE_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.f32 >= S1.f32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.f32 >= S1.f32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_O_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = (!isNAN(64'F(S0.f32)) && !isNAN(64'F(S1.f32)));
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = ( not isNAN(F(S0.f32))  and   not isNAN(F(S1.f32)))
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_U_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = (isNAN(64'F(S0.f32)) || isNAN(64'F(S1.f32)));
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = (isNAN(F(S0.f32))  or  isNAN(F(S1.f32)))
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_NGE_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = !(S0.f32 >= S1.f32);
+  # // With NAN inputs this is not the same operation as <
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] =  not (S0.f32 >= S1.f32)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_NLG_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = !(S0.f32 <> S1.f32);
+  # // With NAN inputs this is not the same operation as ==
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] =  not (S0.f32  !=  S1.f32)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_NGT_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = !(S0.f32 > S1.f32);
+  # // With NAN inputs this is not the same operation as <=
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] =  not (S0.f32 > S1.f32)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_NLE_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = !(S0.f32 <= S1.f32);
+  # // With NAN inputs this is not the same operation as >
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] =  not (S0.f32 <= S1.f32)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_NEQ_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = !(S0.f32 == S1.f32);
+  # // With NAN inputs this is not the same operation as !=
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] =  not (S0.f32 == S1.f32)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_NLT_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = !(S0.f32 < S1.f32);
+  # // With NAN inputs this is not the same operation as >=
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] =  not (S0.f32 < S1.f32)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_TRU_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1. Store the result into the EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = 1'1U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = 1
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_F_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 0. Store the result into VCC or a scalar register.
+  # D0.u64[laneId] = 1'0U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = 0
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_LT_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is less than the second input. Store the result into VCC or a
+  # D0.u64[laneId] = S0.f64 < S1.f64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.f64 < S1.f64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_EQ_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into VCC or a
+  # D0.u64[laneId] = S0.f64 == S1.f64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.f64 == S1.f64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_LE_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = S0.f64 <= S1.f64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.f64 <= S1.f64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_GT_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is greater than the second input. Store the result into VCC
+  # D0.u64[laneId] = S0.f64 > S1.f64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.f64 > S1.f64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_LG_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = S0.f64 <> S1.f64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.f64  !=  S1.f64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_GE_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = S0.f64 >= S1.f64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.f64 >= S1.f64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_O_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is orderable to the second input. Store the result into VCC
+  # D0.u64[laneId] = (!isNAN(S0.f64) && !isNAN(S1.f64));
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = ( not isNAN(S0.f64)  and   not isNAN(S1.f64))
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_U_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # VCC or a scalar register.
+  # D0.u64[laneId] = (isNAN(S0.f64) || isNAN(S1.f64));
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = (isNAN(S0.f64)  or  isNAN(S1.f64))
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_NGE_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = !(S0.f64 >= S1.f64);
+  # // With NAN inputs this is not the same operation as <
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] =  not (S0.f64 >= S1.f64)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_NLG_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = !(S0.f64 <> S1.f64);
+  # // With NAN inputs this is not the same operation as ==
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] =  not (S0.f64  !=  S1.f64)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_NGT_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # VCC or a scalar register.
+  # D0.u64[laneId] = !(S0.f64 > S1.f64);
+  # // With NAN inputs this is not the same operation as <=
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] =  not (S0.f64 > S1.f64)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_NLE_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = !(S0.f64 <= S1.f64);
+  # // With NAN inputs this is not the same operation as >
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] =  not (S0.f64 <= S1.f64)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_NEQ_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is not equal to the second input. Store the result into VCC
+  # D0.u64[laneId] = !(S0.f64 == S1.f64);
+  # // With NAN inputs this is not the same operation as !=
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] =  not (S0.f64 == S1.f64)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_NLT_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is not less than the second input. Store the result into VCC
+  # D0.u64[laneId] = !(S0.f64 < S1.f64);
+  # // With NAN inputs this is not the same operation as >=
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] =  not (S0.f64 < S1.f64)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_TRU_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1. Store the result into VCC or a scalar register.
+  # D0.u64[laneId] = 1'1U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = 1
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_F_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 0. Store the result into the EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = 1'0U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = 0
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_LT_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.f64 < S1.f64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.f64 < S1.f64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_EQ_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into the EXEC
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.f64 == S1.f64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.f64 == S1.f64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_LE_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.f64 <= S1.f64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.f64 <= S1.f64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_GT_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.f64 > S1.f64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.f64 > S1.f64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_LG_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.f64 <> S1.f64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.f64  !=  S1.f64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_GE_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.f64 >= S1.f64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.f64 >= S1.f64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_O_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = (!isNAN(S0.f64) && !isNAN(S1.f64));
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = ( not isNAN(S0.f64)  and   not isNAN(S1.f64))
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_U_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = (isNAN(S0.f64) || isNAN(S1.f64));
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = (isNAN(S0.f64)  or  isNAN(S1.f64))
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_NGE_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = !(S0.f64 >= S1.f64);
+  # // With NAN inputs this is not the same operation as <
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] =  not (S0.f64 >= S1.f64)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_NLG_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = !(S0.f64 <> S1.f64);
+  # // With NAN inputs this is not the same operation as ==
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] =  not (S0.f64  !=  S1.f64)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_NGT_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = !(S0.f64 > S1.f64);
+  # // With NAN inputs this is not the same operation as <=
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] =  not (S0.f64 > S1.f64)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_NLE_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = !(S0.f64 <= S1.f64);
+  # // With NAN inputs this is not the same operation as >
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] =  not (S0.f64 <= S1.f64)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_NEQ_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = !(S0.f64 == S1.f64);
+  # // With NAN inputs this is not the same operation as !=
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] =  not (S0.f64 == S1.f64)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_NLT_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = !(S0.f64 < S1.f64);
+  # // With NAN inputs this is not the same operation as >=
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] =  not (S0.f64 < S1.f64)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_TRU_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1. Store the result into the EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = 1'1U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = 1
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_F_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 0. Store the result into VCC or a scalar register.
+  # D0.u64[laneId] = 1'0U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = 0
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_LT_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is less than the second input. Store the result into VCC or a
+  # D0.u64[laneId] = S0.i16 < S1.i16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.i16 < S1.i16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_EQ_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into VCC or a
+  # D0.u64[laneId] = S0.i16 == S1.i16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.i16 == S1.i16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_LE_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = S0.i16 <= S1.i16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.i16 <= S1.i16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_GT_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is greater than the second input. Store the result into VCC
+  # D0.u64[laneId] = S0.i16 > S1.i16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.i16 > S1.i16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_NE_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is not equal to the second input. Store the result into VCC
+  # D0.u64[laneId] = S0.i16 <> S1.i16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.i16  !=  S1.i16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_GE_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = S0.i16 >= S1.i16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.i16 >= S1.i16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_T_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1. Store the result into VCC or a scalar register.
+  # D0.u64[laneId] = 1'1U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = 1
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_F_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 0. Store the result into VCC or a scalar register.
+  # D0.u64[laneId] = 1'0U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = 0
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_LT_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is less than the second input. Store the result into VCC or a
+  # D0.u64[laneId] = S0.u16 < S1.u16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.u16 < S1.u16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_EQ_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into VCC or a
+  # D0.u64[laneId] = S0.u16 == S1.u16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.u16 == S1.u16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_LE_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = S0.u16 <= S1.u16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.u16 <= S1.u16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_GT_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is greater than the second input. Store the result into VCC
+  # D0.u64[laneId] = S0.u16 > S1.u16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.u16 > S1.u16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_NE_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is not equal to the second input. Store the result into VCC
+  # D0.u64[laneId] = S0.u16 <> S1.u16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.u16  !=  S1.u16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_GE_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = S0.u16 >= S1.u16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.u16 >= S1.u16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_T_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1. Store the result into VCC or a scalar register.
+  # D0.u64[laneId] = 1'1U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = 1
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_F_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 0. Store the result into the EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = 1'0U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = 0
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_LT_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.i16 < S1.i16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.i16 < S1.i16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_EQ_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into the EXEC
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.i16 == S1.i16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.i16 == S1.i16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_LE_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.i16 <= S1.i16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.i16 <= S1.i16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_GT_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.i16 > S1.i16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.i16 > S1.i16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_NE_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.i16 <> S1.i16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.i16  !=  S1.i16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_GE_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.i16 >= S1.i16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.i16 >= S1.i16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_T_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1. Store the result into the EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = 1'1U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = 1
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_F_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 0. Store the result into the EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = 1'0U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = 0
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_LT_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.u16 < S1.u16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.u16 < S1.u16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_EQ_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into the EXEC
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.u16 == S1.u16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.u16 == S1.u16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_LE_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.u16 <= S1.u16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.u16 <= S1.u16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_GT_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.u16 > S1.u16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.u16 > S1.u16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_NE_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.u16 <> S1.u16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.u16  !=  S1.u16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_GE_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.u16 >= S1.u16;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.u16 >= S1.u16
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_T_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1. Store the result into the EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = 1'1U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = 1
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_F_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 0. Store the result into VCC or a scalar register.
+  # D0.u64[laneId] = 1'0U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = 0
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_LT_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is less than the second input. Store the result into VCC or a
+  # D0.u64[laneId] = S0.i32 < S1.i32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.i32 < S1.i32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_EQ_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into VCC or a
+  # D0.u64[laneId] = S0.i32 == S1.i32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.i32 == S1.i32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_LE_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = S0.i32 <= S1.i32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.i32 <= S1.i32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_GT_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is greater than the second input. Store the result into VCC
+  # D0.u64[laneId] = S0.i32 > S1.i32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.i32 > S1.i32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_NE_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is not equal to the second input. Store the result into VCC
+  # D0.u64[laneId] = S0.i32 <> S1.i32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.i32  !=  S1.i32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_GE_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = S0.i32 >= S1.i32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.i32 >= S1.i32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_T_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1. Store the result into VCC or a scalar register.
+  # D0.u64[laneId] = 1'1U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = 1
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_F_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 0. Store the result into VCC or a scalar register.
+  # D0.u64[laneId] = 1'0U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = 0
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_LT_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is less than the second input. Store the result into VCC or a
+  # D0.u64[laneId] = S0.u32 < S1.u32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.u32 < S1.u32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_EQ_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into VCC or a
+  # D0.u64[laneId] = S0.u32 == S1.u32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.u32 == S1.u32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_LE_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = S0.u32 <= S1.u32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.u32 <= S1.u32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_GT_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is greater than the second input. Store the result into VCC
+  # D0.u64[laneId] = S0.u32 > S1.u32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.u32 > S1.u32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_NE_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is not equal to the second input. Store the result into VCC
+  # D0.u64[laneId] = S0.u32 <> S1.u32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.u32  !=  S1.u32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_GE_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = S0.u32 >= S1.u32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.u32 >= S1.u32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_T_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1. Store the result into VCC or a scalar register.
+  # D0.u64[laneId] = 1'1U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = 1
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_F_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 0. Store the result into the EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = 1'0U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = 0
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_LT_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.i32 < S1.i32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.i32 < S1.i32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_EQ_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into the EXEC
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.i32 == S1.i32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.i32 == S1.i32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_LE_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.i32 <= S1.i32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.i32 <= S1.i32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_GT_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.i32 > S1.i32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.i32 > S1.i32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_NE_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.i32 <> S1.i32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.i32  !=  S1.i32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_GE_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.i32 >= S1.i32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.i32 >= S1.i32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_T_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1. Store the result into the EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = 1'1U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = 1
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_F_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 0. Store the result into the EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = 1'0U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = 0
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_LT_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.u32 < S1.u32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.u32 < S1.u32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_EQ_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into the EXEC
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.u32 == S1.u32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.u32 == S1.u32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_LE_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.u32 <= S1.u32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.u32 <= S1.u32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_GT_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.u32 > S1.u32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.u32 > S1.u32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_NE_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.u32 <> S1.u32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.u32  !=  S1.u32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_GE_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.u32 >= S1.u32;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.u32 >= S1.u32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_T_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1. Store the result into the EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = 1'1U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = 1
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_F_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 0. Store the result into VCC or a scalar register.
+  # D0.u64[laneId] = 1'0U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = 0
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_LT_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is less than the second input. Store the result into VCC or a
+  # D0.u64[laneId] = S0.i64 < S1.i64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.i64 < S1.i64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_EQ_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into VCC or a
+  # D0.u64[laneId] = S0.i64 == S1.i64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.i64 == S1.i64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_LE_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = S0.i64 <= S1.i64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.i64 <= S1.i64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_GT_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is greater than the second input. Store the result into VCC
+  # D0.u64[laneId] = S0.i64 > S1.i64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.i64 > S1.i64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_NE_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is not equal to the second input. Store the result into VCC
+  # D0.u64[laneId] = S0.i64 <> S1.i64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.i64  !=  S1.i64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_GE_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = S0.i64 >= S1.i64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.i64 >= S1.i64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_T_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1. Store the result into VCC or a scalar register.
+  # D0.u64[laneId] = 1'1U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = 1
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_F_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 0. Store the result into VCC or a scalar register.
+  # D0.u64[laneId] = 1'0U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = 0
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_LT_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is less than the second input. Store the result into VCC or a
+  # D0.u64[laneId] = S0.u64 < S1.u64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.u64 < S1.u64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_EQ_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into VCC or a
+  # D0.u64[laneId] = S0.u64 == S1.u64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.u64 == S1.u64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_LE_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = S0.u64 <= S1.u64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.u64 <= S1.u64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_GT_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is greater than the second input. Store the result into VCC
+  # D0.u64[laneId] = S0.u64 > S1.u64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.u64 > S1.u64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_NE_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is not equal to the second input. Store the result into VCC
+  # D0.u64[laneId] = S0.u64 <> S1.u64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.u64  !=  S1.u64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_GE_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.u64[laneId] = S0.u64 >= S1.u64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = S0.u64 >= S1.u64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMP_T_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1. Store the result into VCC or a scalar register.
+  # D0.u64[laneId] = 1'1U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  laneId = lane
+  # --- compiled pseudocode ---
+  D0.u64[laneId] = 1
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_F_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 0. Store the result into the EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = 1'0U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = 0
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_LT_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.i64 < S1.i64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.i64 < S1.i64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_EQ_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into the EXEC
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.i64 == S1.i64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.i64 == S1.i64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_LE_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.i64 <= S1.i64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.i64 <= S1.i64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_GT_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.i64 > S1.i64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.i64 > S1.i64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_NE_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.i64 <> S1.i64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.i64  !=  S1.i64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_GE_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.i64 >= S1.i64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.i64 >= S1.i64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_T_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1. Store the result into the EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = 1'1U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = 1
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_F_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 0. Store the result into the EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = 1'0U;
+  # // D0 = VCC in VOPC encoding.
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = 0
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_LT_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.u64 < S1.u64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.u64 < S1.u64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_EQ_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into the EXEC
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.u64 == S1.u64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.u64 == S1.u64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_LE_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.u64 <= S1.u64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.u64 <= S1.u64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_GT_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.u64 > S1.u64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.u64 > S1.u64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_NE_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.u64 <> S1.u64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.u64  !=  S1.u64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_GE_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # EXEC.u64[laneId] = D0.u64[laneId] = S0.u64 >= S1.u64;
+  # // D0 = VCC in VOPC encoding.
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = S0.u64 >= S1.u64
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+def _VOPCOp_V_CMPX_T_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # Set the per-lane condition code to 1. Store the result into the EXEC mask and to VCC or a scalar register.
+  # EXEC.u64[laneId] = D0.u64[laneId] = 1'1U;
+  # // D0 = VCC in VOPC encoding.
+  # addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32);
+  # tmp = MEM[addr].u32;
+  # addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32);
+  # tmp = MEM[addr].u32;
+  # addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32);
+  # tmp = MEM[addr].u32;
+  # addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32);
+  # tmp = MEM[addr].u32;
+  # src = DATA.u32;
+  D0 = Reg(d0)
+  VCC = Reg(vcc)
+  EXEC = Reg(exec_mask)
+  tmp = Reg(0)
+  laneId = lane
+  # --- compiled pseudocode ---
+  EXEC.u64[laneId] = D0.u64[laneId] = 1
+  addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
+  tmp = Reg(MEM[addr].u32)
+  addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
+  tmp = Reg(MEM[addr].u32)
+  addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
+  tmp = Reg(MEM[addr].u32)
+  addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
+  tmp = Reg(MEM[addr].u32)
+  src = DATA.u32
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['exec_lane'] = (EXEC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
+  result['d0_64'] = True
+  return result
+
+VOPCOp_FUNCTIONS = {
+  VOPCOp.V_CMP_CLASS_F32: _VOPCOp_V_CMP_CLASS_F32,
+  VOPCOp.V_CMPX_CLASS_F32: _VOPCOp_V_CMPX_CLASS_F32,
+  VOPCOp.V_CMP_CLASS_F64: _VOPCOp_V_CMP_CLASS_F64,
+  VOPCOp.V_CMPX_CLASS_F64: _VOPCOp_V_CMPX_CLASS_F64,
+  VOPCOp.V_CMP_CLASS_F16: _VOPCOp_V_CMP_CLASS_F16,
+  VOPCOp.V_CMPX_CLASS_F16: _VOPCOp_V_CMPX_CLASS_F16,
+  VOPCOp.V_CMP_F_F16: _VOPCOp_V_CMP_F_F16,
+  VOPCOp.V_CMP_LT_F16: _VOPCOp_V_CMP_LT_F16,
+  VOPCOp.V_CMP_EQ_F16: _VOPCOp_V_CMP_EQ_F16,
+  VOPCOp.V_CMP_LE_F16: _VOPCOp_V_CMP_LE_F16,
+  VOPCOp.V_CMP_GT_F16: _VOPCOp_V_CMP_GT_F16,
+  VOPCOp.V_CMP_LG_F16: _VOPCOp_V_CMP_LG_F16,
+  VOPCOp.V_CMP_GE_F16: _VOPCOp_V_CMP_GE_F16,
+  VOPCOp.V_CMP_O_F16: _VOPCOp_V_CMP_O_F16,
+  VOPCOp.V_CMP_U_F16: _VOPCOp_V_CMP_U_F16,
+  VOPCOp.V_CMP_NGE_F16: _VOPCOp_V_CMP_NGE_F16,
+  VOPCOp.V_CMP_NLG_F16: _VOPCOp_V_CMP_NLG_F16,
+  VOPCOp.V_CMP_NGT_F16: _VOPCOp_V_CMP_NGT_F16,
+  VOPCOp.V_CMP_NLE_F16: _VOPCOp_V_CMP_NLE_F16,
+  VOPCOp.V_CMP_NEQ_F16: _VOPCOp_V_CMP_NEQ_F16,
+  VOPCOp.V_CMP_NLT_F16: _VOPCOp_V_CMP_NLT_F16,
+  VOPCOp.V_CMP_TRU_F16: _VOPCOp_V_CMP_TRU_F16,
+  VOPCOp.V_CMPX_F_F16: _VOPCOp_V_CMPX_F_F16,
+  VOPCOp.V_CMPX_LT_F16: _VOPCOp_V_CMPX_LT_F16,
+  VOPCOp.V_CMPX_EQ_F16: _VOPCOp_V_CMPX_EQ_F16,
+  VOPCOp.V_CMPX_LE_F16: _VOPCOp_V_CMPX_LE_F16,
+  VOPCOp.V_CMPX_GT_F16: _VOPCOp_V_CMPX_GT_F16,
+  VOPCOp.V_CMPX_LG_F16: _VOPCOp_V_CMPX_LG_F16,
+  VOPCOp.V_CMPX_GE_F16: _VOPCOp_V_CMPX_GE_F16,
+  VOPCOp.V_CMPX_O_F16: _VOPCOp_V_CMPX_O_F16,
+  VOPCOp.V_CMPX_U_F16: _VOPCOp_V_CMPX_U_F16,
+  VOPCOp.V_CMPX_NGE_F16: _VOPCOp_V_CMPX_NGE_F16,
+  VOPCOp.V_CMPX_NLG_F16: _VOPCOp_V_CMPX_NLG_F16,
+  VOPCOp.V_CMPX_NGT_F16: _VOPCOp_V_CMPX_NGT_F16,
+  VOPCOp.V_CMPX_NLE_F16: _VOPCOp_V_CMPX_NLE_F16,
+  VOPCOp.V_CMPX_NEQ_F16: _VOPCOp_V_CMPX_NEQ_F16,
+  VOPCOp.V_CMPX_NLT_F16: _VOPCOp_V_CMPX_NLT_F16,
+  VOPCOp.V_CMPX_TRU_F16: _VOPCOp_V_CMPX_TRU_F16,
+  VOPCOp.V_CMP_F_F32: _VOPCOp_V_CMP_F_F32,
+  VOPCOp.V_CMP_LT_F32: _VOPCOp_V_CMP_LT_F32,
+  VOPCOp.V_CMP_EQ_F32: _VOPCOp_V_CMP_EQ_F32,
+  VOPCOp.V_CMP_LE_F32: _VOPCOp_V_CMP_LE_F32,
+  VOPCOp.V_CMP_GT_F32: _VOPCOp_V_CMP_GT_F32,
+  VOPCOp.V_CMP_LG_F32: _VOPCOp_V_CMP_LG_F32,
+  VOPCOp.V_CMP_GE_F32: _VOPCOp_V_CMP_GE_F32,
+  VOPCOp.V_CMP_O_F32: _VOPCOp_V_CMP_O_F32,
+  VOPCOp.V_CMP_U_F32: _VOPCOp_V_CMP_U_F32,
+  VOPCOp.V_CMP_NGE_F32: _VOPCOp_V_CMP_NGE_F32,
+  VOPCOp.V_CMP_NLG_F32: _VOPCOp_V_CMP_NLG_F32,
+  VOPCOp.V_CMP_NGT_F32: _VOPCOp_V_CMP_NGT_F32,
+  VOPCOp.V_CMP_NLE_F32: _VOPCOp_V_CMP_NLE_F32,
+  VOPCOp.V_CMP_NEQ_F32: _VOPCOp_V_CMP_NEQ_F32,
+  VOPCOp.V_CMP_NLT_F32: _VOPCOp_V_CMP_NLT_F32,
+  VOPCOp.V_CMP_TRU_F32: _VOPCOp_V_CMP_TRU_F32,
+  VOPCOp.V_CMPX_F_F32: _VOPCOp_V_CMPX_F_F32,
+  VOPCOp.V_CMPX_LT_F32: _VOPCOp_V_CMPX_LT_F32,
+  VOPCOp.V_CMPX_EQ_F32: _VOPCOp_V_CMPX_EQ_F32,
+  VOPCOp.V_CMPX_LE_F32: _VOPCOp_V_CMPX_LE_F32,
+  VOPCOp.V_CMPX_GT_F32: _VOPCOp_V_CMPX_GT_F32,
+  VOPCOp.V_CMPX_LG_F32: _VOPCOp_V_CMPX_LG_F32,
+  VOPCOp.V_CMPX_GE_F32: _VOPCOp_V_CMPX_GE_F32,
+  VOPCOp.V_CMPX_O_F32: _VOPCOp_V_CMPX_O_F32,
+  VOPCOp.V_CMPX_U_F32: _VOPCOp_V_CMPX_U_F32,
+  VOPCOp.V_CMPX_NGE_F32: _VOPCOp_V_CMPX_NGE_F32,
+  VOPCOp.V_CMPX_NLG_F32: _VOPCOp_V_CMPX_NLG_F32,
+  VOPCOp.V_CMPX_NGT_F32: _VOPCOp_V_CMPX_NGT_F32,
+  VOPCOp.V_CMPX_NLE_F32: _VOPCOp_V_CMPX_NLE_F32,
+  VOPCOp.V_CMPX_NEQ_F32: _VOPCOp_V_CMPX_NEQ_F32,
+  VOPCOp.V_CMPX_NLT_F32: _VOPCOp_V_CMPX_NLT_F32,
+  VOPCOp.V_CMPX_TRU_F32: _VOPCOp_V_CMPX_TRU_F32,
+  VOPCOp.V_CMP_F_F64: _VOPCOp_V_CMP_F_F64,
+  VOPCOp.V_CMP_LT_F64: _VOPCOp_V_CMP_LT_F64,
+  VOPCOp.V_CMP_EQ_F64: _VOPCOp_V_CMP_EQ_F64,
+  VOPCOp.V_CMP_LE_F64: _VOPCOp_V_CMP_LE_F64,
+  VOPCOp.V_CMP_GT_F64: _VOPCOp_V_CMP_GT_F64,
+  VOPCOp.V_CMP_LG_F64: _VOPCOp_V_CMP_LG_F64,
+  VOPCOp.V_CMP_GE_F64: _VOPCOp_V_CMP_GE_F64,
+  VOPCOp.V_CMP_O_F64: _VOPCOp_V_CMP_O_F64,
+  VOPCOp.V_CMP_U_F64: _VOPCOp_V_CMP_U_F64,
+  VOPCOp.V_CMP_NGE_F64: _VOPCOp_V_CMP_NGE_F64,
+  VOPCOp.V_CMP_NLG_F64: _VOPCOp_V_CMP_NLG_F64,
+  VOPCOp.V_CMP_NGT_F64: _VOPCOp_V_CMP_NGT_F64,
+  VOPCOp.V_CMP_NLE_F64: _VOPCOp_V_CMP_NLE_F64,
+  VOPCOp.V_CMP_NEQ_F64: _VOPCOp_V_CMP_NEQ_F64,
+  VOPCOp.V_CMP_NLT_F64: _VOPCOp_V_CMP_NLT_F64,
+  VOPCOp.V_CMP_TRU_F64: _VOPCOp_V_CMP_TRU_F64,
+  VOPCOp.V_CMPX_F_F64: _VOPCOp_V_CMPX_F_F64,
+  VOPCOp.V_CMPX_LT_F64: _VOPCOp_V_CMPX_LT_F64,
+  VOPCOp.V_CMPX_EQ_F64: _VOPCOp_V_CMPX_EQ_F64,
+  VOPCOp.V_CMPX_LE_F64: _VOPCOp_V_CMPX_LE_F64,
+  VOPCOp.V_CMPX_GT_F64: _VOPCOp_V_CMPX_GT_F64,
+  VOPCOp.V_CMPX_LG_F64: _VOPCOp_V_CMPX_LG_F64,
+  VOPCOp.V_CMPX_GE_F64: _VOPCOp_V_CMPX_GE_F64,
+  VOPCOp.V_CMPX_O_F64: _VOPCOp_V_CMPX_O_F64,
+  VOPCOp.V_CMPX_U_F64: _VOPCOp_V_CMPX_U_F64,
+  VOPCOp.V_CMPX_NGE_F64: _VOPCOp_V_CMPX_NGE_F64,
+  VOPCOp.V_CMPX_NLG_F64: _VOPCOp_V_CMPX_NLG_F64,
+  VOPCOp.V_CMPX_NGT_F64: _VOPCOp_V_CMPX_NGT_F64,
+  VOPCOp.V_CMPX_NLE_F64: _VOPCOp_V_CMPX_NLE_F64,
+  VOPCOp.V_CMPX_NEQ_F64: _VOPCOp_V_CMPX_NEQ_F64,
+  VOPCOp.V_CMPX_NLT_F64: _VOPCOp_V_CMPX_NLT_F64,
+  VOPCOp.V_CMPX_TRU_F64: _VOPCOp_V_CMPX_TRU_F64,
+  VOPCOp.V_CMP_F_I16: _VOPCOp_V_CMP_F_I16,
+  VOPCOp.V_CMP_LT_I16: _VOPCOp_V_CMP_LT_I16,
+  VOPCOp.V_CMP_EQ_I16: _VOPCOp_V_CMP_EQ_I16,
+  VOPCOp.V_CMP_LE_I16: _VOPCOp_V_CMP_LE_I16,
+  VOPCOp.V_CMP_GT_I16: _VOPCOp_V_CMP_GT_I16,
+  VOPCOp.V_CMP_NE_I16: _VOPCOp_V_CMP_NE_I16,
+  VOPCOp.V_CMP_GE_I16: _VOPCOp_V_CMP_GE_I16,
+  VOPCOp.V_CMP_T_I16: _VOPCOp_V_CMP_T_I16,
+  VOPCOp.V_CMP_F_U16: _VOPCOp_V_CMP_F_U16,
+  VOPCOp.V_CMP_LT_U16: _VOPCOp_V_CMP_LT_U16,
+  VOPCOp.V_CMP_EQ_U16: _VOPCOp_V_CMP_EQ_U16,
+  VOPCOp.V_CMP_LE_U16: _VOPCOp_V_CMP_LE_U16,
+  VOPCOp.V_CMP_GT_U16: _VOPCOp_V_CMP_GT_U16,
+  VOPCOp.V_CMP_NE_U16: _VOPCOp_V_CMP_NE_U16,
+  VOPCOp.V_CMP_GE_U16: _VOPCOp_V_CMP_GE_U16,
+  VOPCOp.V_CMP_T_U16: _VOPCOp_V_CMP_T_U16,
+  VOPCOp.V_CMPX_F_I16: _VOPCOp_V_CMPX_F_I16,
+  VOPCOp.V_CMPX_LT_I16: _VOPCOp_V_CMPX_LT_I16,
+  VOPCOp.V_CMPX_EQ_I16: _VOPCOp_V_CMPX_EQ_I16,
+  VOPCOp.V_CMPX_LE_I16: _VOPCOp_V_CMPX_LE_I16,
+  VOPCOp.V_CMPX_GT_I16: _VOPCOp_V_CMPX_GT_I16,
+  VOPCOp.V_CMPX_NE_I16: _VOPCOp_V_CMPX_NE_I16,
+  VOPCOp.V_CMPX_GE_I16: _VOPCOp_V_CMPX_GE_I16,
+  VOPCOp.V_CMPX_T_I16: _VOPCOp_V_CMPX_T_I16,
+  VOPCOp.V_CMPX_F_U16: _VOPCOp_V_CMPX_F_U16,
+  VOPCOp.V_CMPX_LT_U16: _VOPCOp_V_CMPX_LT_U16,
+  VOPCOp.V_CMPX_EQ_U16: _VOPCOp_V_CMPX_EQ_U16,
+  VOPCOp.V_CMPX_LE_U16: _VOPCOp_V_CMPX_LE_U16,
+  VOPCOp.V_CMPX_GT_U16: _VOPCOp_V_CMPX_GT_U16,
+  VOPCOp.V_CMPX_NE_U16: _VOPCOp_V_CMPX_NE_U16,
+  VOPCOp.V_CMPX_GE_U16: _VOPCOp_V_CMPX_GE_U16,
+  VOPCOp.V_CMPX_T_U16: _VOPCOp_V_CMPX_T_U16,
+  VOPCOp.V_CMP_F_I32: _VOPCOp_V_CMP_F_I32,
+  VOPCOp.V_CMP_LT_I32: _VOPCOp_V_CMP_LT_I32,
+  VOPCOp.V_CMP_EQ_I32: _VOPCOp_V_CMP_EQ_I32,
+  VOPCOp.V_CMP_LE_I32: _VOPCOp_V_CMP_LE_I32,
+  VOPCOp.V_CMP_GT_I32: _VOPCOp_V_CMP_GT_I32,
+  VOPCOp.V_CMP_NE_I32: _VOPCOp_V_CMP_NE_I32,
+  VOPCOp.V_CMP_GE_I32: _VOPCOp_V_CMP_GE_I32,
+  VOPCOp.V_CMP_T_I32: _VOPCOp_V_CMP_T_I32,
+  VOPCOp.V_CMP_F_U32: _VOPCOp_V_CMP_F_U32,
+  VOPCOp.V_CMP_LT_U32: _VOPCOp_V_CMP_LT_U32,
+  VOPCOp.V_CMP_EQ_U32: _VOPCOp_V_CMP_EQ_U32,
+  VOPCOp.V_CMP_LE_U32: _VOPCOp_V_CMP_LE_U32,
+  VOPCOp.V_CMP_GT_U32: _VOPCOp_V_CMP_GT_U32,
+  VOPCOp.V_CMP_NE_U32: _VOPCOp_V_CMP_NE_U32,
+  VOPCOp.V_CMP_GE_U32: _VOPCOp_V_CMP_GE_U32,
+  VOPCOp.V_CMP_T_U32: _VOPCOp_V_CMP_T_U32,
+  VOPCOp.V_CMPX_F_I32: _VOPCOp_V_CMPX_F_I32,
+  VOPCOp.V_CMPX_LT_I32: _VOPCOp_V_CMPX_LT_I32,
+  VOPCOp.V_CMPX_EQ_I32: _VOPCOp_V_CMPX_EQ_I32,
+  VOPCOp.V_CMPX_LE_I32: _VOPCOp_V_CMPX_LE_I32,
+  VOPCOp.V_CMPX_GT_I32: _VOPCOp_V_CMPX_GT_I32,
+  VOPCOp.V_CMPX_NE_I32: _VOPCOp_V_CMPX_NE_I32,
+  VOPCOp.V_CMPX_GE_I32: _VOPCOp_V_CMPX_GE_I32,
+  VOPCOp.V_CMPX_T_I32: _VOPCOp_V_CMPX_T_I32,
+  VOPCOp.V_CMPX_F_U32: _VOPCOp_V_CMPX_F_U32,
+  VOPCOp.V_CMPX_LT_U32: _VOPCOp_V_CMPX_LT_U32,
+  VOPCOp.V_CMPX_EQ_U32: _VOPCOp_V_CMPX_EQ_U32,
+  VOPCOp.V_CMPX_LE_U32: _VOPCOp_V_CMPX_LE_U32,
+  VOPCOp.V_CMPX_GT_U32: _VOPCOp_V_CMPX_GT_U32,
+  VOPCOp.V_CMPX_NE_U32: _VOPCOp_V_CMPX_NE_U32,
+  VOPCOp.V_CMPX_GE_U32: _VOPCOp_V_CMPX_GE_U32,
+  VOPCOp.V_CMPX_T_U32: _VOPCOp_V_CMPX_T_U32,
+  VOPCOp.V_CMP_F_I64: _VOPCOp_V_CMP_F_I64,
+  VOPCOp.V_CMP_LT_I64: _VOPCOp_V_CMP_LT_I64,
+  VOPCOp.V_CMP_EQ_I64: _VOPCOp_V_CMP_EQ_I64,
+  VOPCOp.V_CMP_LE_I64: _VOPCOp_V_CMP_LE_I64,
+  VOPCOp.V_CMP_GT_I64: _VOPCOp_V_CMP_GT_I64,
+  VOPCOp.V_CMP_NE_I64: _VOPCOp_V_CMP_NE_I64,
+  VOPCOp.V_CMP_GE_I64: _VOPCOp_V_CMP_GE_I64,
+  VOPCOp.V_CMP_T_I64: _VOPCOp_V_CMP_T_I64,
+  VOPCOp.V_CMP_F_U64: _VOPCOp_V_CMP_F_U64,
+  VOPCOp.V_CMP_LT_U64: _VOPCOp_V_CMP_LT_U64,
+  VOPCOp.V_CMP_EQ_U64: _VOPCOp_V_CMP_EQ_U64,
+  VOPCOp.V_CMP_LE_U64: _VOPCOp_V_CMP_LE_U64,
+  VOPCOp.V_CMP_GT_U64: _VOPCOp_V_CMP_GT_U64,
+  VOPCOp.V_CMP_NE_U64: _VOPCOp_V_CMP_NE_U64,
+  VOPCOp.V_CMP_GE_U64: _VOPCOp_V_CMP_GE_U64,
+  VOPCOp.V_CMP_T_U64: _VOPCOp_V_CMP_T_U64,
+  VOPCOp.V_CMPX_F_I64: _VOPCOp_V_CMPX_F_I64,
+  VOPCOp.V_CMPX_LT_I64: _VOPCOp_V_CMPX_LT_I64,
+  VOPCOp.V_CMPX_EQ_I64: _VOPCOp_V_CMPX_EQ_I64,
+  VOPCOp.V_CMPX_LE_I64: _VOPCOp_V_CMPX_LE_I64,
+  VOPCOp.V_CMPX_GT_I64: _VOPCOp_V_CMPX_GT_I64,
+  VOPCOp.V_CMPX_NE_I64: _VOPCOp_V_CMPX_NE_I64,
+  VOPCOp.V_CMPX_GE_I64: _VOPCOp_V_CMPX_GE_I64,
+  VOPCOp.V_CMPX_T_I64: _VOPCOp_V_CMPX_T_I64,
+  VOPCOp.V_CMPX_F_U64: _VOPCOp_V_CMPX_F_U64,
+  VOPCOp.V_CMPX_LT_U64: _VOPCOp_V_CMPX_LT_U64,
+  VOPCOp.V_CMPX_EQ_U64: _VOPCOp_V_CMPX_EQ_U64,
+  VOPCOp.V_CMPX_LE_U64: _VOPCOp_V_CMPX_LE_U64,
+  VOPCOp.V_CMPX_GT_U64: _VOPCOp_V_CMPX_GT_U64,
+  VOPCOp.V_CMPX_NE_U64: _VOPCOp_V_CMPX_NE_U64,
+  VOPCOp.V_CMPX_GE_U64: _VOPCOp_V_CMPX_GE_U64,
+  VOPCOp.V_CMPX_T_U64: _VOPCOp_V_CMPX_T_U64,
+}
+
 def _VOP3AOp_V_CMP_CLASS_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
   # single-precision float, and set the per-lane condition code to the result. Store the result into VCC or a scalar
   # S1.u[0] value is a signaling NAN.
@@ -13124,6 +17235,7 @@ COMPILED_FUNCTIONS = {
   VOP1Op: VOP1Op_FUNCTIONS,
   VOP2Op: VOP2Op_FUNCTIONS,
   VOP3POp: VOP3POp_FUNCTIONS,
+  VOPCOp: VOPCOp_FUNCTIONS,
   VOP3AOp: VOP3AOp_FUNCTIONS,
   VOP3BOp: VOP3BOp_FUNCTIONS,
 }
