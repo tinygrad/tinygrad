@@ -170,20 +170,19 @@ def decode_program(data: bytes) -> Program:
     # Pass enough data for potential 64-bit literal (base + 8 bytes max)
     inst = inst_class.from_bytes(data[i:i+base_size+8])
     for name, val in inst._values.items(): setattr(inst, name, _unwrap(val))
-    # from_bytes already handles literal reading, including 64-bit literals for F64 ops
-    # Only read literal here if from_bytes didn't set it (for cases from_bytes doesn't handle)
+    # from_bytes already handles literal reading - only need fallback for cases it doesn't handle
     if inst._literal is None:
       has_literal = any(getattr(inst, fld, None) == 255 for fld in ('src0', 'src1', 'src2', 'ssrc0', 'ssrc1', 'srcx0', 'srcy0'))
       if inst_class == VOP2 and inst.op in (44, 45, 55, 56): has_literal = True
       if inst_class == VOPD and (inst.opx in (1, 2) or inst.opy in (1, 2)): has_literal = True
       if inst_class == SOP2 and inst.op in (69, 70): has_literal = True
       if has_literal:
-        # 64-bit ops (ending in _F64, _B64, _I64, _U64) use 64-bit literals
+        # For 64-bit ops, the 32-bit literal is placed in HIGH 32 bits (low 32 bits = 0)
         op_val = inst._values.get('op')
         if hasattr(op_val, 'value'): op_val = op_val.value
         is_64bit = inst_class is VOP3 and op_val in _VOP3_64BIT_OPS
-        lit_size = 8 if is_64bit else 4
-        inst._literal = int.from_bytes(data[i+base_size:i+base_size+lit_size], 'little')
+        lit32 = int.from_bytes(data[i+base_size:i+base_size+4], 'little')
+        inst._literal = (lit32 << 32) if is_64bit else lit32
     inst._words = inst.size() // 4
     result[i // 4] = inst
     i += inst._words * 4
@@ -219,6 +218,22 @@ def exec_scalar(st: WaveState, inst: Inst) -> int:
     if (cnt := SMEM_LOAD.get(inst.op)) is None: raise NotImplementedError(f"SMEM op {inst.op}")
     for i in range(cnt): st.wsgpr(inst.sdata + i, mem_read((addr + i * 4) & 0xffffffffffffffff, 4))
     return 0
+
+  # SOP1: special handling for ops not in pseudocode
+  if inst_type is SOP1:
+    op = SOP1Op(inst.op)
+    # S_GETPC_B64: Get program counter (PC is stored as byte offset, convert from words)
+    if op == SOP1Op.S_GETPC_B64:
+      pc_bytes = st.pc * 4  # PC is in words, convert to bytes
+      st.wsgpr64(inst.sdst, pc_bytes)
+      return 0
+    # S_SETPC_B64: Set program counter to source value (indirect jump)
+    # Returns delta such that st.pc + inst_words + delta = target_words
+    if op == SOP1Op.S_SETPC_B64:
+      target_bytes = st.rsrc64(inst.ssrc0, 0)
+      target_words = target_bytes // 4
+      inst_words = 1  # SOP1 is always 1 word
+      return target_words - st.pc - inst_words
 
   # Get op enum and lookup compiled function
   if inst_type is SOP1: op_cls, ssrc0, sdst = SOP1Op, inst.ssrc0, inst.sdst
@@ -371,6 +386,41 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     if op in (VOP3POp.V_WMMA_F32_16X16X16_F16, VOP3POp.V_WMMA_F32_16X16X16_BF16, VOP3POp.V_WMMA_F16_16X16X16_F16):
       if lane == 0:  # Only execute once per wave, write results for all lanes
         exec_wmma(st, inst, op)
+      return
+    # V_FMA_MIX: Mixed precision FMA - inputs can be f16 or f32 controlled by opsel
+    if op in (VOP3POp.V_FMA_MIX_F32, VOP3POp.V_FMA_MIXLO_F16, VOP3POp.V_FMA_MIXHI_F16):
+      opsel = getattr(inst, 'opsel', 0)
+      opsel_hi = getattr(inst, 'opsel_hi', 0)
+      neg = getattr(inst, 'neg', 0)
+      neg_hi = getattr(inst, 'neg_hi', 0)
+      vdst = inst.vdst
+      # Read raw 32-bit values - for V_FMA_MIX, sources can be either f32 or f16
+      s0_raw = st.rsrc(inst.src0, lane)
+      s1_raw = st.rsrc(inst.src1, lane)
+      s2_raw = st.rsrc(inst.src2, lane) if inst.src2 is not None else 0
+      # opsel[i]=0: use as f32, opsel[i]=1: use hi f16 as f32
+      # For src0: opsel[0], for src1: opsel[1], for src2: opsel[2]
+      if opsel & 1: s0 = _f16((s0_raw >> 16) & 0xffff)  # hi f16 -> f32
+      else: s0 = _f32(s0_raw)  # use as f32
+      if opsel & 2: s1 = _f16((s1_raw >> 16) & 0xffff)
+      else: s1 = _f32(s1_raw)
+      if opsel & 4: s2 = _f16((s2_raw >> 16) & 0xffff)
+      else: s2 = _f32(s2_raw)
+      # Apply neg modifiers (for f32 values)
+      if neg & 1: s0 = -s0
+      if neg & 2: s1 = -s1
+      if neg & 4: s2 = -s2
+      # Compute FMA: d = s0 * s1 + s2
+      result = s0 * s1 + s2
+      V = st.vgpr[lane]
+      if op == VOP3POp.V_FMA_MIX_F32:
+        V[vdst] = _i32(result)
+      elif op == VOP3POp.V_FMA_MIXLO_F16:
+        lo = _i16(result) & 0xffff
+        V[vdst] = (V[vdst] & 0xffff0000) | lo
+      else:  # V_FMA_MIXHI_F16
+        hi = _i16(result) & 0xffff
+        V[vdst] = (V[vdst] & 0x0000ffff) | (hi << 16)
       return
     # Use rsrc_f16 for VOP3P to get correct f16 inline constants
     s0_raw = st.rsrc_f16(inst.src0, lane)

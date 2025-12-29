@@ -225,14 +225,15 @@ class Inst:
     result = self.to_int().to_bytes(self._size(), 'little')
     lit = self._get_literal() or getattr(self, '_literal', None)
     if lit is None: return result
-    lit_size = 8 if self._is_64bit_op() else 4
-    return result + (lit & ((1 << (lit_size * 8)) - 1)).to_bytes(lit_size, 'little')
+    # For 64-bit ops, literal is stored in high 32 bits internally, but encoded as 4 bytes
+    lit32 = (lit >> 32) if self._is_64bit_op() else lit
+    return result + (lit32 & 0xffffffff).to_bytes(4, 'little')
 
   @classmethod
   def _size(cls) -> int: return 4 if issubclass(cls, Inst32) else 8
   def size(self) -> int:
-    if self._literal is None: return self._size()
-    return self._size() + (8 if self._is_64bit_op() else 4)
+    # Literal is always 4 bytes in the binary (for 64-bit ops, it's in high 32 bits)
+    return self._size() + (4 if self._literal is not None else 0)
 
   @classmethod
   def from_int(cls, word: int):
@@ -250,10 +251,11 @@ class Inst:
     for n in SRC_FIELDS:
       if n in inst._values and isinstance(inst._values[n], RawImm) and inst._values[n].val == 255: has_literal = True
     if has_literal:
-      # Use _is_64bit_op which handles both enum and int op values
-      lit_size = 8 if inst._is_64bit_op() else 4
-      if len(data) >= cls._size() + lit_size:
-        inst._literal = int.from_bytes(data[cls._size():cls._size()+lit_size], 'little')
+      # For 64-bit ops, the literal is 32 bits placed in the HIGH 32 bits of the 64-bit value
+      # (low 32 bits are zero). This is how AMD hardware interprets 32-bit literals for 64-bit ops.
+      if len(data) >= cls._size() + 4:
+        lit32 = int.from_bytes(data[cls._size():cls._size()+4], 'little')
+        inst._literal = (lit32 << 32) if inst._is_64bit_op() else lit32
     return inst
 
   def __repr__(self):
