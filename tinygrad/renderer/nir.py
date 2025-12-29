@@ -1,6 +1,6 @@
 from typing import Callable, cast, Any
 from tinygrad.dtype import AddrSpace, DType, PtrDType, ImageDType, dtypes
-from tinygrad.helpers import DEBUG, OSX, unwrap, charptr
+from tinygrad.helpers import DEBUG, OSX, unwrap, charptr, fromimport
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str
@@ -159,7 +159,9 @@ class NIRRenderer(Renderer):
     (UPat(Ops.ENDIF, name="x"), lambda ctx,x: (lambda _: mesa.nir_def())(mesa.nir_pop_if(ctx.b, ctx.r[x.src[0]])))
   ])
 
-  def __init__(self): mesa.glsl_type_singleton_init_or_ref()
+  def __init__(self, compiler):
+    self.compiler = compiler
+    mesa.glsl_type_singleton_init_or_ref()
 
   def __del__(self):
     with contextlib.suppress(AttributeError): mesa.glsl_type_singleton_decref()
@@ -219,10 +221,8 @@ class NAKRenderer(NIRRenderer):
   device = "NV"
 
   def __init__(self, arch, warps_per_sm):
-    from tinygrad.runtime.support.compiler_mesa import NAKCompiler
-    self.compiler = NAKCompiler(arch, warps_per_sm)
+    super().__init__(fromimport("tinygrad.runtime.support.compiler_mesa", "NAKCompiler")(arch, warps_per_sm))
     self.nir_options = self.compiler.nir_options
-    super().__init__()
 
   param = nir_instr(nc=1, num_components=1, bs=lambda sz:sz*8, also=lambda self,sz: setattr(self, "param_idx", self.param_idx + sz),
     intrins={"ALIGN_MUL":lambda sz:sz}, srcs=lambda self,b: [nsrc(nimm(b, 0, dtypes.int)), nsrc(nimm(b, self.param_idx, dtypes.int))])(
@@ -235,10 +235,7 @@ class LVPRenderer(NIRRenderer):
   global_max = (1, 0, 0)
   nir_options = mesa.lvp_nir_options
 
-  def __init__(self):
-    from tinygrad.runtime.support.compiler_mesa import LVPCompiler
-    self.compiler = LVPCompiler()
-    super().__init__()
+  def __init__(self): super().__init__(fromimport("tinygrad.runtime.support.compiler_mesa", "LVPCompiler")())
 
   param = nir_instr(nc=1, bs=lambda sz: sz * 8, num_components=1, intrins={"ALIGN_MUL":lambda sz: sz, "RANGE":lambda self: self.param_sz},
     srcs=lambda b, self: [nsrc(nimm(b, 0, dtypes.int)), nsrc(nimm(b, self.param_idx, dtypes.int))], also=lambda self, sz:
@@ -264,10 +261,8 @@ class IR3Renderer(NIRRenderer):
   device = "QCOM"
 
   def __init__(self, chip_id):
-    from tinygrad.runtime.support.compiler_mesa import IR3Compiler
-    self.compiler = IR3Compiler(chip_id)
+    super().__init__(fromimport("tinygrad.runtime.support.compiler_mesa", "IR3Compiler")(chip_id))
     self.nir_options = self.compiler.nir_options
-    super().__init__()
 
   def nload_img(ctx,img,coord):
     ctx.texs.add(img)
