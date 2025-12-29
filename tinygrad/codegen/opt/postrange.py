@@ -45,6 +45,7 @@ class Scheduler:
     ret = Scheduler(self.ast, self.ren)
     ret.dont_use_locals = self.dont_use_locals
     ret.applied_opts = self.applied_opts[:]
+    if hasattr(self, 'tensor_core'): ret.tensor_core = self.tensor_core
     return ret
 
   kernel_cnt: Final[defaultdict[str, int]] = defaultdict(int)
@@ -156,7 +157,6 @@ class Scheduler:
           "cannot have a GROUP_REDUCE inside another reduce")
 
       if opt.op is OptOps.UNROLL:
-        check(amt <= 32, "don't unroll more than 32")
         check(rng.arg[-1] in {AxisType.GROUP_REDUCE, AxisType.REDUCE}, "unroll is for GROUP_REDUCE/REDUCE")
       if opt.op is OptOps.UPCAST:
         check((self.ren is not None and self.ren.device == "DSP") or amt <= 16, "don't upcast more than 16")
@@ -307,6 +307,7 @@ class Scheduler:
             reduce_ranges = [x for x in UOp.sink(*reduceop.src[1:]).toposort() if x.op is Ops.RANGE and x.arg[0] not in tc_reduce_axes]
             if len(reduce_ranges): tc_uop = UOp(Ops.REDUCE, tc_uop.dtype, (tc_uop,)+tuple(reduce_ranges), Ops.ADD)
             self.ast = self.ast.substitute({reduceop: tc_uop})
+            self.tensor_core = tc
           return axes
     return None
 

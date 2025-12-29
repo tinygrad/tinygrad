@@ -219,7 +219,17 @@ def get_mlperf_bert_model():
   config = get_mlperf_bert_config()
   if getenv("DISABLE_DROPOUT", 0):
     config["hidden_dropout_prob"] = config["attention_probs_dropout_prob"] = 0.0
-  return BertForPretraining(**config)
+  model = BertForPretraining(**config)
+  if getenv("FP8_TRAIN"):
+    from extra.fp8 import convert_to_float8_training
+    def module_filter_fn(mod, fqn):
+      if isinstance(mod, LinearBert):
+        if mod.weight.shape[-1] >= 1024:
+          print(f"replacing linear to fp8: {fqn} {mod.weight.shape}")
+          return True
+      return False
+    convert_to_float8_training(model, module_filter_fn)
+  return model
 
 def get_fake_data_bert(BS:int):
   return {
