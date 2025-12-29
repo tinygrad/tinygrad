@@ -9,6 +9,7 @@ from tinygrad.renderer.cstyle import ClangJITRenderer
 from tinygrad.renderer.llvmir import LLVMRenderer
 from tinygrad.renderer.nir import LVPRenderer
 from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler
+from tinygrad.runtime.support.compiler_mesa import LVPCompiler
 from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.uop.ops import sint
 
@@ -71,7 +72,7 @@ class CPUProgram(HCQProgram):
   except OSError: pass
 
   def __init__(self, dev, name:str, lib:bytes):
-    LVP = isinstance(dev.renderer, LVPRenderer)
+    LVP = isinstance(dev.compiler, LVPCompiler)
     if sys.platform == "win32": # mypy doesn't understand when WIN is used here
       PAGE_EXECUTE_READWRITE, MEM_COMMIT, MEM_RESERVE = 0x40, 0x1000, 0x2000
       ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_void_p
@@ -136,5 +137,5 @@ class CPUDevice(HCQCompiled):
     self.tasks:queue.Queue = queue.Queue()
     CPUWorker(self, self.tasks, thread_id=0).start()
     compilers = CompilerSet([CompilerPair(ClangJITRenderer, None), CompilerPair(LLVMRenderer, CPULLVMCompiler, ctrl_var=CPU_LLVM),
-                             CompilerPair(LVPRenderer, None, ctrl_var=CPU_LVP)], ctrl_var=CPU_CC)
+                             CompilerPair(LVPRenderer, LVPCompiler, ctrl_var=CPU_LVP)], ctrl_var=CPU_CC)
     super().__init__(device, CPUAllocator(self), compilers, functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue)
