@@ -44,6 +44,10 @@ class Reg:
   def __init__(self, idx: int, count: int = 1, hi: bool = False, neg: bool = False): self.idx, self.count, self.hi, self.neg = idx, count, hi, neg
   def __repr__(self): return f"{self.__class__.__name__.lower()[0]}[{self.idx}]" if self.count == 1 else f"{self.__class__.__name__.lower()[0]}[{self.idx}:{self.idx + self.count}]"
   def __neg__(self): return self.__class__(self.idx, self.count, self.hi, neg=not self.neg)
+  @property
+  def h(self): return self.__class__(self.idx, self.count, hi=True, neg=self.neg)
+  @property
+  def l(self): return self.__class__(self.idx, self.count, hi=False, neg=self.neg)
 
 T = TypeVar('T', bound=Reg)
 class _RegFactory(Generic[T]):
@@ -159,16 +163,34 @@ class Inst:
         if not isinstance(val, (SGPR, TTMP, int, RawImm)): raise TypeError(f"field '{name}' requires SGPR, got {type(val).__name__}")
       if marker is _VGPRField:
         if not isinstance(val, VGPR): raise TypeError(f"field '{name}' requires VGPR, got {type(val).__name__}")
+        # For VOP3 with opsel, don't encode .h in vdst - use opsel[3] instead
+        if name == 'vdst' and val.hi and 'opsel' in self._fields:
+          self._values[name] = val.idx  # Just the index, no .h bit
+          cur_opsel = self._values.get('opsel', 0)
+          self._values['opsel'] = (cur_opsel.val if isinstance(cur_opsel, RawImm) else cur_opsel) | 8  # opsel[3] = 1
+        else:
+          # Encode VGPR fields to include .h bit (like RAW_FIELDS)
+          self._values[name] = _encode_reg(val)
       if marker is _SSrc and isinstance(val, VGPR): raise TypeError(f"field '{name}' requires scalar source, got VGPR")
       # Encode source fields as RawImm for consistent disassembly
       if name in SRC_FIELDS:
-        encoded = encode_src(val)
+        # For VOP3 with opsel, don't encode .h in register index - use opsel instead
+        # Create a temporary register without hi bit for encoding if opsel field exists
+        encode_val = val
+        if isinstance(val, Reg) and val.hi and 'opsel' in self._fields:
+          encode_val = val.__class__(val.idx, val.count, hi=False, neg=val.neg)
+        encoded = encode_src(encode_val)
         self._values[name] = RawImm(encoded)
         # Handle negation modifier for VOP3 instructions
         if isinstance(val, Reg) and val.neg and 'neg' in self._fields:
           neg_bit = {'src0': 1, 'src1': 2, 'src2': 4}.get(name, 0)
           cur_neg = self._values.get('neg', 0)
           self._values['neg'] = (cur_neg.val if isinstance(cur_neg, RawImm) else cur_neg) | neg_bit
+        # Handle .h modifier for VOP3 16-bit ops via opsel field
+        if isinstance(val, Reg) and val.hi and 'opsel' in self._fields:
+          opsel_bit = {'src0': 1, 'src1': 2, 'src2': 4}.get(name, 0)
+          cur_opsel = self._values.get('opsel', 0)
+          self._values['opsel'] = (cur_opsel.val if isinstance(cur_opsel, RawImm) else cur_opsel) | opsel_bit
         # Track literal value if needed (encoded as 255)
         # For 64-bit ops, store literal in high 32 bits (to match from_bytes decoding and to_bytes encoding)
         if encoded == 255 and self._literal is None and isinstance(val, int) and not isinstance(val, IntEnum):

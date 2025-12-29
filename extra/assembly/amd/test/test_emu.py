@@ -2773,5 +2773,247 @@ class TestAddCarry(unittest.TestCase):
       self.assertEqual(st.vgpr[lane][2], expected[lane], f"Lane {lane}: expected {expected[lane]}, got {st.vgpr[lane][2]}")
 
 
+class TestVOP1_16Bit(unittest.TestCase):
+  """Tests for VOP1 16-bit source and destination operands.
+
+  VOP1 e32 encoding uses bit 7 of register indices for .h (high 16-bit half).
+  Regression tests for handling .l and .h suffixes in VOP1 16-bit ops.
+  """
+
+  def test_v_cvt_f32_f16_lo(self):
+    """V_CVT_F32_F16 with .l suffix reads low 16 bits."""
+    instructions = [
+      s_mov_b32(s[0], 0x00003C00),  # 1.0 f16 in low half
+      v_mov_b32_e32(v[2], s[0]),
+      v_cvt_f32_f16_e32(v[0], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][0]), 1.0, places=5)
+
+  def test_v_cvt_f32_f16_hi(self):
+    """V_CVT_F32_F16 with .h suffix reads high 16 bits."""
+    instructions = [
+      s_mov_b32(s[0], 0x40000000),  # 2.0 f16 in high half
+      v_mov_b32_e32(v[2], s[0]),
+      v_cvt_f32_f16_e32(v[0], v[2].h),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][0]), 2.0, places=5)
+
+  def test_v_cvt_f32_f16_both_halves(self):
+    """V_CVT_F32_F16 with both .l and .h in sequence."""
+    instructions = [
+      s_mov_b32(s[0], 0x40003C00),  # low=1.0, high=2.0
+      v_mov_b32_e32(v[2], s[0]),
+      v_cvt_f32_f16_e32(v[0], v[2]),
+      v_cvt_f32_f16_e32(v[1], v[2].h),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][0]), 1.0, places=5)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 2.0, places=5)
+
+  def test_v_cvt_f16_i16_dst_lo(self):
+    """V_CVT_F16_I16 writes to low 16 bits by default."""
+    instructions = [
+      s_mov_b32(s[0], 0xffff0002),  # high=0xffff, low=2 (i16)
+      v_mov_b32_e32(v[2], s[0]),
+      v_cvt_f16_i16_e32(v[0], v[2]),  # convert low i16 (2) to f16
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # Result should be 2.0 in f16 format (0x4000) in low 16 bits
+    self.assertEqual(st.vgpr[0][0] & 0xffff, 0x4000)
+
+  def test_v_cvt_f16_i16_dst_hi(self):
+    """V_CVT_F16_I16 with .h destination writes to high 16 bits."""
+    instructions = [
+      s_mov_b32(s[0], 0x00030000),  # high=3, low=0 (i16)
+      v_mov_b32_e32(v[2], s[0]),
+      v_mov_b32_e32(v[0], 0),  # clear v0
+      v_cvt_f16_i16_e32(v[0].h, v[2].h),  # convert high i16 (3) to f16 in high half
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # Result should be 3.0 in f16 format (0x4200) in high 16 bits
+    self.assertEqual((st.vgpr[0][0] >> 16) & 0xffff, 0x4200)
+
+  def test_v_cvt_f16_i16_preserves_other_half(self):
+    """V_CVT_F16_I16 to .l preserves high half, .h preserves low half."""
+    instructions = [
+      s_mov_b32(s[0], 0xdead0001),  # high=0xdead, low=1 (i16)
+      s_mov_b32(s[1], 0xbeef0000),  # for v0 initial value
+      v_mov_b32_e32(v[2], s[0]),
+      v_mov_b32_e32(v[0], s[1]),  # v0 = 0xbeef0000
+      v_cvt_f16_i16_e32(v[0], v[2]),  # write to low, should preserve 0xbeef in high
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0] & 0xffff, 0x3c00)  # 1.0 f16 in low
+    self.assertEqual((st.vgpr[0][0] >> 16) & 0xffff, 0xbeef)  # preserved high
+
+  def test_v_cvt_f32_f16_multilane(self):
+    """V_CVT_F32_F16 with .h across multiple lanes."""
+    instructions = [
+      s_mov_b32(s[0], 0x40003C00),  # low=1.0, high=2.0 for lane 0
+      s_mov_b32(s[1], 0x44003800),  # low=0.5, high=4.0 for lane 1
+      v_mov_b32_e32(v[3], s[0]),
+      v_mov_b32_e32(v[4], s[1]),
+      v_mov_b32_e32(v[5], 0),
+      v_cmp_eq_u32_e32(v[255], v[5]),  # VCC = (lane_id == 0)
+      v_cndmask_b32_e32(v[2], v[4], v[3]),
+      v_cvt_f32_f16_e32(v[0], v[2]),
+      v_cvt_f32_f16_e32(v[1], v[2].h),
+    ]
+    st = run_program(instructions, n_lanes=2)
+    self.assertAlmostEqual(i2f(st.vgpr[0][0]), 1.0, places=4)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 2.0, places=4)
+    self.assertAlmostEqual(i2f(st.vgpr[1][0]), 0.5, places=4)
+    self.assertAlmostEqual(i2f(st.vgpr[1][1]), 4.0, places=4)
+
+
+class TestVOP2_16Bit(unittest.TestCase):
+  """Tests for VOP2 16-bit operations (v_add_f16, v_mul_f16, etc).
+
+  These ops use 16-bit source/destination with .l/.h encoding in VOP2 e32 format.
+  """
+
+  def test_v_add_f16_basic(self):
+    """v_add_f16 adds two f16 values from low halves."""
+    # f16: 1.0=0x3c00, 2.0=0x4000, 3.0=0x4200
+    instructions = [
+      s_mov_b32(s[0], 0x3c00),  # 1.0 f16 in low half
+      s_mov_b32(s[1], 0x4000),  # 2.0 f16 in low half
+      v_mov_b32_e32(v[2], s[0]),
+      v_add_f16_e32(v[0], s[1], v[2]),  # v0.l = 2.0 + 1.0 = 3.0
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0] & 0xffff, 0x4200)  # 3.0 f16
+
+  def test_v_add_f16_preserves_high(self):
+    """v_add_f16 to .l preserves high 16 bits of destination."""
+    instructions = [
+      s_mov_b32(s[0], 0xdead3c00),  # high=0xdead, low=1.0 f16
+      s_mov_b32(s[1], 0x4000),      # 2.0 f16
+      v_mov_b32_e32(v[0], s[0]),    # v0 = 0xdead3c00
+      v_add_f16_e32(v[0], s[1], v[0]),  # v0.l = 2.0 + 1.0 = 3.0, high preserved
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0] & 0xffff, 0x4200)  # low = 3.0 f16
+    self.assertEqual((st.vgpr[0][0] >> 16) & 0xffff, 0xdead)  # high preserved
+
+  def test_v_mul_f16_basic(self):
+    """v_mul_f16 multiplies two f16 values."""
+    # 2.0 * 3.0 = 6.0 (f16: 0x4600)
+    instructions = [
+      s_mov_b32(s[0], 0x4000),  # 2.0 f16
+      s_mov_b32(s[1], 0x4200),  # 3.0 f16
+      v_mov_b32_e32(v[2], s[0]),
+      v_mul_f16_e32(v[0], s[1], v[2]),  # v0.l = 3.0 * 2.0 = 6.0
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0] & 0xffff, 0x4600)  # 6.0 f16
+
+
+class TestIntToHalfConversion(unittest.TestCase):
+  """Tests for int32 to half conversion sequence (v_cvt_f32_i32 + v_cvt_f16_f32).
+
+  This is the sequence used when adding int + half in tinygrad.
+  """
+
+  def test_cvt_i32_to_f16_simple(self):
+    """Convert int32 to f16: v_cvt_f32_i32 followed by v_cvt_f16_f32."""
+    instructions = [
+      s_mov_b32(s[0], 1),  # int 1
+      v_cvt_f32_i32_e32(v[0], s[0]),  # v0 = 1.0 f32
+      v_cvt_f16_f32_e32(v[1], v[0]),  # v1.l = 1.0 f16
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # v0 should be 1.0 f32 = 0x3f800000
+    self.assertEqual(st.vgpr[0][0], 0x3f800000)
+    # v1 low 16 bits should be 1.0 f16 = 0x3c00
+    self.assertEqual(st.vgpr[0][1] & 0xffff, 0x3c00)
+
+  def test_cvt_i32_to_f16_multiple_values(self):
+    """Convert multiple int32 values to packed f16."""
+    instructions = [
+      s_mov_b32(s[0], 1),  # int 1
+      s_mov_b32(s[1], 2),  # int 2
+      s_mov_b32(s[2], 3),  # int 3
+      s_mov_b32(s[3], 4),  # int 4
+      # Convert ints to f32
+      v_cvt_f32_i32_e32(v[0], s[0]),  # 1 -> 1.0f
+      v_cvt_f32_i32_e32(v[1], s[1]),  # 2 -> 2.0f
+      v_cvt_f32_i32_e32(v[2], s[2]),  # 3 -> 3.0f
+      v_cvt_f32_i32_e32(v[3], s[3]),  # 4 -> 4.0f
+      # Convert f32 to f16, packing into v4 and v5
+      v_cvt_f16_f32_e32(v[4], v[0]),      # v4.l = 1.0 f16
+      v_cvt_f16_f32_e32(v[4].h, v[1]),    # v4.h = 2.0 f16
+      v_cvt_f16_f32_e32(v[5], v[2]),      # v5.l = 3.0 f16
+      v_cvt_f16_f32_e32(v[5].h, v[3]),    # v5.h = 4.0 f16
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # v4 should be packed: low=1.0(0x3c00), high=2.0(0x4000) = 0x40003c00
+    self.assertEqual(st.vgpr[0][4] & 0xffff, 0x3c00)  # 1.0 f16
+    self.assertEqual((st.vgpr[0][4] >> 16) & 0xffff, 0x4000)  # 2.0 f16
+    # v5 should be packed: low=3.0(0x4200), high=4.0(0x4400) = 0x44004200
+    self.assertEqual(st.vgpr[0][5] & 0xffff, 0x4200)  # 3.0 f16
+    self.assertEqual((st.vgpr[0][5] >> 16) & 0xffff, 0x4400)  # 4.0 f16
+
+  def test_int_plus_half_sequence(self):
+    """Full sequence: int + half where int is converted to half first.
+
+    This mimics the kernel generated by: Tensor([1,2,3,4], dtype=half) + Tensor([1,2,3,4], dtype=int)
+    """
+    # Input: ints [1,2,3,4], halfs [1.0,2.0,3.0,4.0]
+    # f16: 1.0=0x3c00, 2.0=0x4000, 3.0=0x4200, 4.0=0x4400
+    # Expected output: [2.0, 4.0, 6.0, 8.0] as f16
+    # f16: 2.0=0x4000, 4.0=0x4400, 6.0=0x4600, 8.0=0x4800
+    instructions = [
+      # Load ints to s[4:7]
+      s_mov_b32(s[4], 1),
+      s_mov_b32(s[5], 2),
+      s_mov_b32(s[6], 3),
+      s_mov_b32(s[7], 4),
+      # Load packed halfs: s[2] = (2.0 << 16) | 1.0, s[3] = (4.0 << 16) | 3.0
+      s_mov_b32(s[2], 0x40003c00),  # low=1.0, high=2.0
+      s_mov_b32(s[3], 0x44004200),  # low=3.0, high=4.0
+      # Convert ints to f32
+      v_cvt_f32_i32_e32(v[0], s[4]),  # 1 -> 1.0f
+      v_cvt_f32_i32_e32(v[1], s[6]),  # 3 -> 3.0f
+      v_cvt_f32_i32_e32(v[2], s[7]),  # 4 -> 4.0f
+      v_cvt_f32_i32_e32(v[3], s[5]),  # 2 -> 2.0f
+      # Extract high halfs from packed values
+      s_lshr_b32(s[8], s[2], 16),  # s8 = 2.0 f16
+      s_lshr_b32(s[9], s[3], 16),  # s9 = 4.0 f16
+      # Convert f32 to packed f16
+      v_cvt_f16_f32_e32(v[0], v[0]),      # v0.l = 1.0 f16
+      v_cvt_f16_f32_e32(v[0].h, v[1]),    # v0.h = 3.0 f16
+      v_cvt_f16_f32_e32(v[1], v[2]),      # v1.l = 4.0 f16
+      v_cvt_f16_f32_e32(v[1].h, v[3]),    # v1.h = 2.0 f16
+      # Add halfs: result = input_half + converted_int_half
+      # v0.l = s2.l(1.0) + v0.l(1.0) = 2.0
+      # v0.h = s3.l(3.0) + v0.h(3.0) = 6.0
+      # v1.l = s9(4.0) + v1.l(4.0) = 8.0
+      # v1.h = s8(2.0) + v1.h(2.0) = 4.0
+      v_add_f16_e32(v[4], s[2], v[0]),    # v4.l = 1.0 + 1.0 = 2.0
+      v_add_f16_e32(v[5], s[3], v[0].h),  # v5.l = 3.0 + 3.0 = 6.0
+      v_add_f16_e32(v[6], s[9], v[1]),    # v6.l = 4.0 + 4.0 = 8.0
+      v_add_f16_e32(v[7], s[8], v[1].h),  # v7.l = 2.0 + 2.0 = 4.0
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # Check results
+    self.assertEqual(st.vgpr[0][4] & 0xffff, 0x4000)  # 2.0 f16
+    self.assertEqual(st.vgpr[0][5] & 0xffff, 0x4600)  # 6.0 f16
+    self.assertEqual(st.vgpr[0][6] & 0xffff, 0x4800)  # 8.0 f16
+    self.assertEqual(st.vgpr[0][7] & 0xffff, 0x4400)  # 4.0 f16
+
+  def test_v_add_f16_with_hi_src(self):
+    """v_add_f16 reading from .h source."""
+    instructions = [
+      s_mov_b32(s[0], 0x40003c00),  # low=1.0, high=2.0
+      v_mov_b32_e32(v[2], s[0]),
+      v_add_f16_e32(v[0], s[0], v[2].h),  # v0.l = s0.l(1.0) + v2.h(2.0) = 3.0
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0] & 0xffff, 0x4200)  # 3.0 f16
+
+
 if __name__ == '__main__':
   unittest.main()

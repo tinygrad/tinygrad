@@ -26,9 +26,14 @@ _VOP2_16BIT_OPS = {op for op in VOP2Op if any(s in op.name for s in ('_F16', '_B
 # CVT ops with 32/64-bit source (despite 16-bit in name)
 _CVT_32_64_SRC_OPS = {op for op in VOP3Op if op.name.startswith('V_CVT_') and op.name.endswith(('_F32', '_I32', '_U32', '_F64', '_I64', '_U64'))} | \
                      {op for op in VOP1Op if op.name.startswith('V_CVT_') and op.name.endswith(('_F32', '_I32', '_U32', '_F64', '_I64', '_U64'))}
-# 16-bit dst ops (PACK has 32-bit dst despite F16 in name)
-_VOP3_16BIT_DST_OPS = {op for op in _VOP3_16BIT_OPS if 'PACK' not in op.name}
-_VOP1_16BIT_DST_OPS = {op for op in _VOP1_16BIT_OPS if 'PACK' not in op.name}
+# CVT ops with 32-bit destination (convert FROM 16-bit TO 32-bit): V_CVT_F32_F16, V_CVT_I32_I16, V_CVT_U32_U16
+_CVT_32_DST_OPS = {op for op in VOP3Op if op.name.startswith('V_CVT_') and any(s in op.name for s in ('F32_F16', 'I32_I16', 'U32_U16', 'I32_F16', 'U32_F16'))} | \
+                  {op for op in VOP1Op if op.name.startswith('V_CVT_') and any(s in op.name for s in ('F32_F16', 'I32_I16', 'U32_U16', 'I32_F16', 'U32_F16'))}
+# 16-bit dst ops (PACK has 32-bit dst despite F16 in name, CVT to 32-bit has 32-bit dst)
+_VOP3_16BIT_DST_OPS = {op for op in _VOP3_16BIT_OPS if 'PACK' not in op.name} - _CVT_32_DST_OPS
+_VOP1_16BIT_DST_OPS = {op for op in _VOP1_16BIT_OPS if 'PACK' not in op.name} - _CVT_32_DST_OPS
+# VOP1 16-bit source ops (excluding CVT ops with 32/64-bit source) - for VOP1 e32, .h encoded in register index
+_VOP1_16BIT_SRC_OPS = _VOP1_16BIT_OPS - _CVT_32_64_SRC_OPS
 
 # Inline constants for src operands 128-254. Build tables for f32, f16, and f64 formats.
 import struct as _struct
@@ -370,11 +375,25 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
 
 
   # Get op enum and sources (None means "no source" for that operand)
+  # vop1_dst_hi/vop2_dst_hi: for VOP1/VOP2 16-bit dst ops, bit 7 of vdst indicates .h (high 16-bit) destination
+  vop1_dst_hi, vop2_dst_hi = False, False
   if inst_type is VOP1:
     if inst.op == VOP1Op.V_NOP: return
-    op_cls, op, src0, src1, src2, vdst = VOP1Op, VOP1Op(inst.op), inst.src0, None, None, inst.vdst
+    op_cls, op, src0, src1, src2 = VOP1Op, VOP1Op(inst.op), inst.src0, None, None
+    # For 16-bit dst ops, vdst encodes .h in bit 7
+    if op in _VOP1_16BIT_DST_OPS:
+      vop1_dst_hi = (inst.vdst & 0x80) != 0
+      vdst = inst.vdst & 0x7f
+    else:
+      vdst = inst.vdst
   elif inst_type is VOP2:
-    op_cls, op, src0, src1, src2, vdst = VOP2Op, VOP2Op(inst.op), inst.src0, inst.vsrc1 + 256, None, inst.vdst
+    op_cls, op, src0, src1, src2 = VOP2Op, VOP2Op(inst.op), inst.src0, inst.vsrc1 + 256, None
+    # For 16-bit dst ops, vdst encodes .h in bit 7
+    if op in _VOP2_16BIT_OPS:
+      vop2_dst_hi = (inst.vdst & 0x80) != 0
+      vdst = inst.vdst & 0x7f
+    else:
+      vdst = inst.vdst
   elif inst_type is VOP3:
     # VOP3 ops 0-255 are VOPC comparisons encoded as VOP3 (use VOPCOp pseudocode)
     if inst.op < 256:
@@ -504,7 +523,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
   is_ldexp_64 = op in (VOP3Op.V_LDEXP_F64,)
   is_shift_64 = op in (VOP3Op.V_LSHLREV_B64, VOP3Op.V_LSHRREV_B64, VOP3Op.V_ASHRREV_I64)
   # 16-bit source ops: use precomputed sets instead of string checks
-  has_16bit_type = op in _VOP3_16BIT_OPS or op in _VOP1_16BIT_OPS or op in _VOP2_16BIT_OPS
+  # Note: must check op_cls to avoid cross-enum value collisions
   is_16bit_src = op_cls is VOP3Op and op in _VOP3_16BIT_OPS and op not in _CVT_32_64_SRC_OPS
   # VOP2 16-bit ops use f16 inline constants for src0 (vsrc1 is always a VGPR, no inline constants)
   is_vop2_16bit = op_cls is VOP2Op and op in _VOP2_16BIT_OPS
@@ -532,10 +551,33 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     s1 = ((s1_raw >> 16) & 0xffff) if (opsel & 2) else (s1_raw & 0xffff)
     s2 = ((s2_raw >> 16) & 0xffff) if (opsel & 4) else (s2_raw & 0xffff)
   elif is_vop2_16bit:
-    # VOP2 16-bit ops: src0 can use f16 inline constants, vsrc1 is always a VGPR (no inline constants)
-    s0 = mod_src(st.rsrc_f16(src0, lane), 0)
-    s1 = mod_src(st.rsrc(src1, lane), 1) if src1 is not None else 0
+    # VOP2 16-bit ops: src0 uses f16 inline constants, or VGPR where v128+ = hi half of v0-v127
+    # RDNA3 encoding: for VGPRs, bit 7 of VGPR index (src0-256) selects hi(1) or lo(0) half
+    if src0 >= 256:  # VGPR
+      src0_hi = (src0 - 256) & 0x80 != 0
+      src0_masked = ((src0 - 256) & 0x7f) + 256  # mask out hi bit to get actual VGPR
+      s0_raw = mod_src(st.rsrc(src0_masked, lane), 0)
+      s0 = ((s0_raw >> 16) & 0xffff) if src0_hi else (s0_raw & 0xffff)
+    else:  # SGPR or inline constant
+      s0_raw = mod_src(st.rsrc_f16(src0, lane), 0)
+      s0 = s0_raw & 0xffff
+    # vsrc1: .h suffix encoded in bit 7 of VGPR index (src1 = 256 + vgpr_idx + 0x80 if hi)
+    if src1 is not None:
+      src1_hi = (src1 - 256) & 0x80 != 0
+      src1_masked = ((src1 - 256) & 0x7f) + 256
+      s1_raw = mod_src(st.rsrc(src1_masked, lane), 1)
+      s1 = ((s1_raw >> 16) & 0xffff) if src1_hi else (s1_raw & 0xffff)
+    else:
+      s1 = 0
     s2 = mod_src(st.rsrc(src2, lane), 2) if src2 is not None else 0
+  elif op_cls is VOP1Op and op in _VOP1_16BIT_SRC_OPS:
+    # VOP1 16-bit source ops: .h encoded in bit 7 of VGPR index (src0 >= 384 means hi half)
+    # For VGPRs: src0 = 256 + vgpr_idx + (0x80 if hi else 0), so bit 7 of (src0-256) is the hi flag
+    src0_hi = src0 >= 256 and ((src0 - 256) & 0x80) != 0
+    src0_masked = ((src0 - 256) & 0x7f) + 256 if src0 >= 256 else src0  # mask out hi bit for VGPR
+    s0_raw = mod_src(st.rsrc(src0_masked, lane), 0)
+    s0 = ((s0_raw >> 16) & 0xffff) if src0_hi else (s0_raw & 0xffff)
+    s1, s2 = 0, 0
   else:
     s0 = mod_src(st.rsrc(src0, lane), 0)
     s1 = mod_src(st.rsrc(src1, lane), 1) if src1 is not None else 0
@@ -570,7 +612,8 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     writes_to_sgpr = op in (VOP1Op.V_READFIRSTLANE_B32,) or \
                      (op_cls is VOP3Op and op in (VOP3Op.V_READFIRSTLANE_B32, VOP3Op.V_READLANE_B32))
     # Check for 16-bit destination ops (opsel[3] controls hi/lo write)
-    is_16bit_dst = op in _VOP3_16BIT_DST_OPS or op in _VOP1_16BIT_DST_OPS
+    # Must check op_cls to avoid cross-enum value collisions (e.g., VOP1Op.V_MOV_B32=1 vs VOP3Op.V_CMP_LT_F16=1)
+    is_16bit_dst = (op_cls is VOP3Op and op in _VOP3_16BIT_DST_OPS) or (op_cls is VOP1Op and op in _VOP1_16BIT_DST_OPS)
     if writes_to_sgpr:
       st.wsgpr(vdst, result['d0'] & 0xffffffff)
     elif result.get('d0_64') or is_64bit_op:
@@ -581,6 +624,18 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
       if opsel & 8:  # opsel[3] = 1: write to high 16 bits
         V[vdst] = (V[vdst] & 0x0000ffff) | ((result['d0'] & 0xffff) << 16)
       else:  # opsel[3] = 0: write to low 16 bits
+        V[vdst] = (V[vdst] & 0xffff0000) | (result['d0'] & 0xffff)
+    elif is_16bit_dst and inst_type is VOP1:
+      # VOP1 16-bit ops: .h suffix encoded in bit 7 of vdst (extracted as vop1_dst_hi)
+      if vop1_dst_hi:  # .h: write to high 16 bits
+        V[vdst] = (V[vdst] & 0x0000ffff) | ((result['d0'] & 0xffff) << 16)
+      else:  # .l: write to low 16 bits
+        V[vdst] = (V[vdst] & 0xffff0000) | (result['d0'] & 0xffff)
+    elif is_vop2_16bit:
+      # VOP2 16-bit ops: .h suffix encoded in bit 7 of vdst (extracted as vop2_dst_hi)
+      if vop2_dst_hi:  # .h: write to high 16 bits
+        V[vdst] = (V[vdst] & 0x0000ffff) | ((result['d0'] & 0xffff) << 16)
+      else:  # .l: write to low 16 bits
         V[vdst] = (V[vdst] & 0xffff0000) | (result['d0'] & 0xffff)
     else:
       V[vdst] = result['d0'] & 0xffffffff
