@@ -143,9 +143,17 @@ def _ctz64(v):
   while (v & 1) == 0: v >>= 1; n += 1
   return n
 def _exponent(f):
+  # Handle TypedView (f16/f32/f64) to get correct exponent for that type
+  if hasattr(f, '_bits') and hasattr(f, '_float') and f._float:
+    raw = f._val
+    if f._bits == 16: return (raw >> 10) & 0x1f  # f16: 5-bit exponent
+    if f._bits == 32: return (raw >> 23) & 0xff  # f32: 8-bit exponent
+    if f._bits == 64: return (raw >> 52) & 0x7ff  # f64: 11-bit exponent
+  # Fallback: convert to f32 and get exponent
+  f = float(f)
   if math.isinf(f) or math.isnan(f): return 255
   if f == 0.0: return 0
-  try: bits = struct.unpack("<I", struct.pack("<f", float(f)))[0]; return (bits >> 23) & 0xff
+  try: bits = struct.unpack("<I", struct.pack("<f", f))[0]; return (bits >> 23) & 0xff
   except: return 0
 def _is_denorm_f32(f):
   if not isinstance(f, float): f = _f32(int(f) & 0xffffffff)
@@ -803,12 +811,18 @@ from extra.assembly.rdna3.pcode import *
         if 'CLZ' in op.name or 'CTZ' in op.name:
           code = code.replace('tmp = Reg(i)', 'tmp = Reg(i); break')
           code = code.replace('D0.i32 = i', 'D0.i32 = i; break')
-        # V_DIV_FMAS_F32/F64: PDF page 449 says 2^32/2^64 but hardware does 2^-64/2^-128
-        # This is because V_DIV_SCALE scales by 2^64/2^128, and V_DIV_FMAS undoes that scaling
+        # V_DIV_FMAS_F32/F64: PDF page 449 says 2^32/2^64 but hardware behavior is more complex.
+        # The scale direction depends on S2 (the addend): if exponent(S2) > 127 (i.e., S2 >= 2.0),
+        # scale by 2^+64 (to unscale a numerator that was scaled). Otherwise scale by 2^-64
+        # (to unscale a denominator that was scaled).
         if op.name == 'V_DIV_FMAS_F32':
-          code = code.replace('2.0 ** 32', '2.0 ** -64')
+          code = code.replace(
+            'D0.f32 = 2.0 ** 32 * fma(S0.f32, S1.f32, S2.f32)',
+            'D0.f32 = (2.0 ** 64 if exponent(S2.f32) > 127 else 2.0 ** -64) * fma(S0.f32, S1.f32, S2.f32)')
         if op.name == 'V_DIV_FMAS_F64':
-          code = code.replace('2.0 ** 64', '2.0 ** -128')
+          code = code.replace(
+            'D0.f64 = 2.0 ** 64 * fma(S0.f64, S1.f64, S2.f64)',
+            'D0.f64 = (2.0 ** 128 if exponent(S2.f64) > 1023 else 2.0 ** -128) * fma(S0.f64, S1.f64, S2.f64)')
         # V_DIV_SCALE_F32/F64: PDF page 463-464 has several bugs vs hardware behavior:
         # 1. Zero case: hardware sets VCC=1 (PDF doesn't)
         # 2. Denorm denom: hardware returns NaN (PDF says scale). VCC is set independently by exp diff check.
@@ -849,6 +863,16 @@ from extra.assembly.rdna3.pcode import *
           code = code.replace(
             'elif S2.f64 / S1.f64 == DENORM.f64:\n  VCC = Reg(0x1)\n  if S0.f64 == S2.f64:\n    D0.f64 = ldexp(S0.f64, 128)',
             'elif S2.f64 / S1.f64 == DENORM.f64:\n  VCC = Reg(0x1)')
+        # V_DIV_FIXUP_F32/F64: PDF doesn't check isNAN(S0), but hardware returns OVERFLOW if S0 is NaN.
+        # When division fails (e.g., due to denorm denom), S0 becomes NaN, and fixup should return ±inf.
+        if op.name == 'V_DIV_FIXUP_F32':
+          code = code.replace(
+            'D0.f32 = ((-abs(S0.f32)) if (sign_out) else (abs(S0.f32)))',
+            'D0.f32 = ((-OVERFLOW_F32) if (sign_out) else (OVERFLOW_F32)) if isNAN(S0.f32) else ((-abs(S0.f32)) if (sign_out) else (abs(S0.f32)))')
+        if op.name == 'V_DIV_FIXUP_F64':
+          code = code.replace(
+            'D0.f64 = ((-abs(S0.f64)) if (sign_out) else (abs(S0.f64)))',
+            'D0.f64 = ((-OVERFLOW_F64) if (sign_out) else (OVERFLOW_F64)) if isNAN(S0.f64) else ((-abs(S0.f64)) if (sign_out) else (abs(S0.f64)))')
         # Detect flags for result handling
         is_64 = any(p in pc for p in ['D0.u64', 'D0.b64', 'D0.f64', 'D0.i64', 'D1.u64', 'D1.b64', 'D1.f64', 'D1.i64'])
         has_d1 = '{ D1' in pc

@@ -21,6 +21,7 @@ _VOP3_64BIT_OPS_32BIT_SRC1 = {VOP3Op.V_LDEXP_F64.value}
 # Ops with 16-bit types in name (for source/dest handling)
 _VOP3_16BIT_OPS = {op for op in VOP3Op if any(s in op.name for s in ('_F16', '_B16', '_I16', '_U16'))}
 _VOP1_16BIT_OPS = {op for op in VOP1Op if any(s in op.name for s in ('_F16', '_B16', '_I16', '_U16'))}
+_VOP2_16BIT_OPS = {op for op in VOP2Op if any(s in op.name for s in ('_F16', '_B16', '_I16', '_U16'))}
 # CVT ops with 32/64-bit source (despite 16-bit in name)
 _CVT_32_64_SRC_OPS = {op for op in VOP3Op if op.name.startswith('V_CVT_') and op.name.endswith(('_F32', '_I32', '_U32', '_F64', '_I64', '_U64'))} | \
                      {op for op in VOP1Op if op.name.startswith('V_CVT_') and op.name.endswith(('_F32', '_I32', '_U32', '_F64', '_I64', '_U64'))}
@@ -502,8 +503,10 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
   is_ldexp_64 = op in (VOP3Op.V_LDEXP_F64,)
   is_shift_64 = op in (VOP3Op.V_LSHLREV_B64, VOP3Op.V_LSHRREV_B64, VOP3Op.V_ASHRREV_I64)
   # 16-bit source ops: use precomputed sets instead of string checks
-  has_16bit_type = op in _VOP3_16BIT_OPS or op in _VOP1_16BIT_OPS
+  has_16bit_type = op in _VOP3_16BIT_OPS or op in _VOP1_16BIT_OPS or op in _VOP2_16BIT_OPS
   is_16bit_src = op_cls is VOP3Op and op in _VOP3_16BIT_OPS and op not in _CVT_32_64_SRC_OPS
+  # VOP2 16-bit ops use f16 inline constants for src0 (vsrc1 is always a VGPR, no inline constants)
+  is_vop2_16bit = op_cls is VOP2Op and op in _VOP2_16BIT_OPS
 
   if is_shift_64:
     s0 = mod_src(st.rsrc(src0, lane), 0)  # shift amount is 32-bit
@@ -527,6 +530,11 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     s0 = ((s0_raw >> 16) & 0xffff) if (opsel & 1) else (s0_raw & 0xffff)
     s1 = ((s1_raw >> 16) & 0xffff) if (opsel & 2) else (s1_raw & 0xffff)
     s2 = ((s2_raw >> 16) & 0xffff) if (opsel & 4) else (s2_raw & 0xffff)
+  elif is_vop2_16bit:
+    # VOP2 16-bit ops: src0 can use f16 inline constants, vsrc1 is always a VGPR (no inline constants)
+    s0 = mod_src(st.rsrc_f16(src0, lane), 0)
+    s1 = mod_src(st.rsrc(src1, lane), 1) if src1 is not None else 0
+    s2 = mod_src(st.rsrc(src2, lane), 2) if src2 is not None else 0
   else:
     s0 = mod_src(st.rsrc(src0, lane), 0)
     s1 = mod_src(st.rsrc(src1, lane), 1) if src1 is not None else 0

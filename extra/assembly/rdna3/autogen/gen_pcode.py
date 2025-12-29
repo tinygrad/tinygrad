@@ -7207,7 +7207,7 @@ def _VOP3Op_V_DIV_FIXUP_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, 
   elif exponent(S1.f32) == 255:
     D0.f32 = ((-OVERFLOW_F32) if (sign_out) else (OVERFLOW_F32))
   else:
-    D0.f32 = ((-abs(S0.f32)) if (sign_out) else (abs(S0.f32)))
+    D0.f32 = ((-OVERFLOW_F32) if (sign_out) else (OVERFLOW_F32)) if isNAN(S0.f32) else ((-abs(S0.f32)) if (sign_out) else (abs(S0.f32)))
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   return result
@@ -7260,7 +7260,7 @@ def _VOP3Op_V_DIV_FIXUP_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, 
   elif exponent(S1.f64) == 2047:
     D0.f64 = ((-OVERFLOW_F64) if (sign_out) else (OVERFLOW_F64))
   else:
-    D0.f64 = ((-abs(S0.f64)) if (sign_out) else (abs(S0.f64)))
+    D0.f64 = ((-OVERFLOW_F64) if (sign_out) else (OVERFLOW_F64)) if isNAN(S0.f64) else ((-abs(S0.f64)) if (sign_out) else (abs(S0.f64)))
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   result['d0_64'] = True
@@ -7280,7 +7280,7 @@ def _VOP3Op_V_DIV_FMAS_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, V
   laneId = lane
   # --- compiled pseudocode ---
   if VCC.u64[laneId]:
-    D0.f32 = 2.0 ** -64 * fma(S0.f32, S1.f32, S2.f32)
+    D0.f32 = (2.0 ** 64 if exponent(S2.f32) > 127 else 2.0 ** -64) * fma(S0.f32, S1.f32, S2.f32)
   else:
     D0.f32 = fma(S0.f32, S1.f32, S2.f32)
   # --- end pseudocode ---
@@ -7302,7 +7302,7 @@ def _VOP3Op_V_DIV_FMAS_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, V
   laneId = lane
   # --- compiled pseudocode ---
   if VCC.u64[laneId]:
-    D0.f64 = 2.0 ** -128 * fma(S0.f64, S1.f64, S2.f64)
+    D0.f64 = (2.0 ** 128 if exponent(S2.f64) > 1023 else 2.0 ** -128) * fma(S0.f64, S1.f64, S2.f64)
   else:
     D0.f64 = fma(S0.f64, S1.f64, S2.f64)
   # --- end pseudocode ---

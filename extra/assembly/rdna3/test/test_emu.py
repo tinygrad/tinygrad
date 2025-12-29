@@ -381,10 +381,11 @@ class TestVDivFmas(unittest.TestCase):
   """Tests for V_DIV_FMAS_F32 edge cases.
 
   V_DIV_FMAS_F32 performs FMA with optional scaling based on VCC.
-  If VCC[lane] is set, result is scaled by 2^-64 (to undo V_DIV_SCALE's 2^64 scaling).
+  The scale direction depends on S2's exponent (the addend):
+  - If exponent(S2) > 127 (i.e., S2 >= 2.0): scale by 2^+64
+  - Otherwise: scale by 2^-64
 
-  NOTE: The PDF (page 449) incorrectly says 2^32, but hardware does 2^-64.
-  D0.f32 = VCC[lane] ? 2^-64 * fma(S0, S1, S2) : fma(S0, S1, S2)
+  NOTE: The PDF (page 449) incorrectly says just 2^32.
   """
 
   def test_div_fmas_f32_no_scale(self):
@@ -399,13 +400,26 @@ class TestVDivFmas(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     self.assertAlmostEqual(i2f(st.vgpr[0][3]), 7.0, places=5)
 
-  def test_div_fmas_f32_with_scale(self):
-    """V_DIV_FMAS_F32: VCC=1 -> scale by 2^-64 (PDF says 2^32 but hardware does 2^-64)."""
+  def test_div_fmas_f32_scale_up(self):
+    """V_DIV_FMAS_F32: VCC=1 with S2 >= 2.0 -> scale by 2^+64."""
     instructions = [
-      s_mov_b32(s[SrcEnum.VCC_LO - 128], 1),  # VCC = 1 (lane 0 set)
+      s_mov_b32(s[SrcEnum.VCC_LO - 128], 1),  # VCC = 1
+      v_mov_b32_e32(v[0], 1.0),   # S0
+      v_mov_b32_e32(v[1], 1.0),   # S1
+      v_mov_b32_e32(v[2], 2.0),   # S2 >= 2.0, so scale UP
+      v_div_fmas_f32(v[3], v[0], v[1], v[2]),  # 2^+64 * (1*1+2) = 2^+64 * 3
+    ]
+    st = run_program(instructions, n_lanes=1)
+    expected = 3.0 * (2.0 ** 64)
+    self.assertAlmostEqual(i2f(st.vgpr[0][3]), expected, delta=abs(expected) * 1e-6)
+
+  def test_div_fmas_f32_scale_down(self):
+    """V_DIV_FMAS_F32: VCC=1 with S2 < 2.0 -> scale by 2^-64."""
+    instructions = [
+      s_mov_b32(s[SrcEnum.VCC_LO - 128], 1),  # VCC = 1
       v_mov_b32_e32(v[0], 2.0),   # S0
       v_mov_b32_e32(v[1], 3.0),   # S1
-      v_mov_b32_e32(v[2], 1.0),   # S2
+      v_mov_b32_e32(v[2], 1.0),   # S2 < 2.0, so scale DOWN
       v_div_fmas_f32(v[3], v[0], v[1], v[2]),  # 2^-64 * (2*3+1) = 2^-64 * 7
     ]
     st = run_program(instructions, n_lanes=1)
@@ -413,12 +427,12 @@ class TestVDivFmas(unittest.TestCase):
     self.assertAlmostEqual(i2f(st.vgpr[0][3]), expected, delta=abs(expected) * 1e-6)
 
   def test_div_fmas_f32_per_lane_vcc(self):
-    """V_DIV_FMAS_F32: different VCC per lane."""
+    """V_DIV_FMAS_F32: different VCC per lane with S2 < 2.0."""
     instructions = [
       s_mov_b32(s[SrcEnum.VCC_LO - 128], 0b0101),  # VCC: lanes 0,2 set
       v_mov_b32_e32(v[0], 1.0),
       v_mov_b32_e32(v[1], 1.0),
-      v_mov_b32_e32(v[2], 1.0),
+      v_mov_b32_e32(v[2], 1.0),  # S2 < 2.0, so scale DOWN
       v_div_fmas_f32(v[3], v[0], v[1], v[2]),  # fma(1,1,1) = 2, scaled = 2^-64 * 2
     ]
     st = run_program(instructions, n_lanes=4)
@@ -592,6 +606,40 @@ class TestVDivFixup(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     # neg / neg = pos
     self.assertAlmostEqual(i2f(st.vgpr[0][3]), 3.0, places=5)
+
+  def test_div_fixup_f32_nan_estimate_overflow(self):
+    """V_DIV_FIXUP_F32: NaN estimate returns overflow (inf).
+
+    PDF doesn't check isNAN(S0), but hardware returns OVERFLOW if S0 is NaN.
+    This happens when division fails (e.g., denorm denominator in V_DIV_SCALE).
+    """
+    quiet_nan = 0x7fc00000
+    instructions = [
+      s_mov_b32(s[0], quiet_nan),
+      v_mov_b32_e32(v[0], s[0]),  # S0 = NaN (failed estimate)
+      v_mov_b32_e32(v[1], 1.0),   # S1 = denominator = 1.0
+      v_mov_b32_e32(v[2], 1.0),   # S2 = numerator = 1.0
+      v_div_fixup_f32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    import math
+    self.assertTrue(math.isinf(i2f(st.vgpr[0][3])), "NaN estimate should return inf")
+    self.assertEqual(st.vgpr[0][3], 0x7f800000, "Should be +inf (pos/pos)")
+
+  def test_div_fixup_f32_nan_estimate_sign(self):
+    """V_DIV_FIXUP_F32: NaN estimate with negative sign returns -inf."""
+    quiet_nan = 0x7fc00000
+    instructions = [
+      s_mov_b32(s[0], quiet_nan),
+      v_mov_b32_e32(v[0], s[0]),  # S0 = NaN (failed estimate)
+      v_mov_b32_e32(v[1], -1.0),  # S1 = denominator = -1.0
+      v_mov_b32_e32(v[2], 1.0),   # S2 = numerator = 1.0
+      v_div_fixup_f32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    import math
+    self.assertTrue(math.isinf(i2f(st.vgpr[0][3])), "NaN estimate should return inf")
+    self.assertEqual(st.vgpr[0][3], 0xff800000, "Should be -inf (pos/neg)")
 
 
 class TestVCmpClass(unittest.TestCase):
