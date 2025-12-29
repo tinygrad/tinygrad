@@ -3,8 +3,8 @@
 # Currently many of these tests fail - they document desired behavior
 
 import unittest
-from extra.assembly.rdna3.autogen import *
-from extra.assembly.rdna3.lib import Inst, RawImm, SGPR, VGPR
+from extra.assembly.amd.autogen.rdna3 import *
+from extra.assembly.amd.lib import Inst, RawImm, SGPR, VGPR
 
 class TestRegisterSliceSyntax(unittest.TestCase):
   """

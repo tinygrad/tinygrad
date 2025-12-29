@@ -7,7 +7,7 @@ from typing import Callable
 # Set AMD=1 before importing tinygrad
 os.environ["AMD"] = "1"
 
-from extra.assembly.rdna3.emu import run_asm as python_run_asm, set_valid_mem_ranges, decode_program, step_wave, WaveState, WAVE_SIZE
+from extra.assembly.amd.emu import run_asm as python_run_asm, set_valid_mem_ranges, decode_program, step_wave, WaveState, WAVE_SIZE
 
 REMU_PATH = Path(__file__).parents[3] / "remu/target/release/libremu.so"
 if not REMU_PATH.exists():
