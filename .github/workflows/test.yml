@@ -960,7 +960,7 @@ jobs:
           nvcc -V
       - name: Set env
         shell: bash
-        run:  printf "${{ matrix.backend == 'llvm' && 'CPU=1\nCPU_LLVM=1' || matrix.backend == 'cpu' && 'CPU=1\nCPU_LLVM=0\nCPU_COUNT=2' || matrix.backend == 'webgpu' && 'WEBGPU=1' || matrix.backend == 'cuda' && 'CUDA=1'}}" >> $GITHUB_ENV
+        run:  printf "${{ matrix.backend == 'llvm' && 'CPU=1\nCPU_LLVM=1' || matrix.backend == 'cpu' && 'CPU=1\nCPU_LLVM=0\nCPU_COUNT=2' || matrix.backend == 'webgpu' && 'WEBGPU=1' || matrix.backend == 'cuda' && 'CUDA=1\nCUDA_CC=1'}}" >> $GITHUB_ENV
       # - name: Run pytest (${{ matrix.backend }})
       #   shell: bash
       #   run: |
