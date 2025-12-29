@@ -4,11 +4,8 @@ from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.renderer.cstyle import Renderer, CStyleLanguage
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.uop.ops import Ops
-from tinygrad.helpers import cpu_profile, EMULATE, NULL_IR3, NULL_NAK, NULL_RDNA
+from tinygrad.helpers import cpu_profile, EMULATE, NULL_IR3, NULL_NAK
 from tinygrad.renderer.nir import IR3Renderer, NAKRenderer
-from tinygrad.renderer.rdna_new import RDNARenderer
-from tinygrad.runtime.support.compiler_mesa import IR3Compiler, NAKCompiler
-from tinygrad.runtime.support.compiler_amd import HIPCompiler
 
 class NullRenderer(CStyleLanguage):
   device = "NULL"
@@ -41,8 +38,6 @@ class NullDevice(Compiled):
       case "AMD_RDNA4": renderer = functools.partial(AMDLLVMRenderer, "gfx1201")
       case "": renderer = NullRenderer
       case _: raise RuntimeError(f"can't EMULATE device: {EMULATE.value}")
-    compilers = CompilerSet([CompilerPair(renderer, Compiler),
-                             CompilerPair(functools.partial(IR3Renderer, self), functools.partial(IR3Compiler, 0x6030001), NULL_IR3),  # adreno 630
-                             CompilerPair(functools.partial(NAKRenderer, self), functools.partial(NAKCompiler, "sm_120", 48), NULL_NAK),  # 5090
-                             CompilerPair(functools.partial(RDNARenderer, "gfx1100"), functools.partial(HIPCompiler, "gfx1100"), NULL_RDNA)])
+    compilers = CompilerSet([CompilerPair(renderer, Compiler), CompilerPair(functools.partial(IR3Renderer, 0x6030001), None, NULL_IR3), # adreno 630
+                             CompilerPair(functools.partial(NAKRenderer, "sm_120", 48), None, NULL_NAK)]) # 5090
     super().__init__(device, NullAllocator(self), compilers, functools.partial(NullProgram, device), NullGraph)
