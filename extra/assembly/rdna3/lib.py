@@ -169,11 +169,13 @@ class Inst:
           cur_neg = self._values.get('neg', 0)
           self._values['neg'] = (cur_neg.val if isinstance(cur_neg, RawImm) else cur_neg) | neg_bit
         # Track literal value if needed (encoded as 255)
+        # For 64-bit ops, store literal in high 32 bits (to match from_bytes decoding and to_bytes encoding)
         if encoded == 255 and self._literal is None and isinstance(val, int) and not isinstance(val, IntEnum):
-          self._literal = val
+          self._literal = (val << 32) if self._is_64bit_op() else val
         elif encoded == 255 and self._literal is None and isinstance(val, float):
           import struct
-          self._literal = struct.unpack('<I', struct.pack('<f', val))[0]
+          lit32 = struct.unpack('<I', struct.pack('<f', val))[0]
+          self._literal = (lit32 << 32) if self._is_64bit_op() else lit32
       # Encode raw register fields for consistent repr
       elif name in RAW_FIELDS:
         if isinstance(val, Reg): self._values[name] = _encode_reg(val)
