@@ -216,20 +216,15 @@ class NIRRenderer(Renderer):
 
     return ret
 
-class NIRRendererWithOpts(NIRRenderer):
-  def __init__(self, dev=None, nir_options=None):
-    self.dev, self._nir_options = dev, nir_options
+class NAKRenderer(NIRRenderer):
+  device = "NV"
+
+  def __init__(self, arch, warps_per_sm):
+    from tinygrad.runtime.support.compiler_mesa import NAKCompiler
+    self.compiler = NAKCompiler(arch, warps_per_sm)
+    self.nir_options = self.compiler.nir_options
     super().__init__()
 
-  def __reduce__(self): return self.__class__, (None, self.nir_options)
-
-  @property
-  def nir_options(self):
-    if self._nir_options is None: self._nir_options = self.dev.compiler.nir_options
-    return self._nir_options
-
-class NAKRenderer(NIRRendererWithOpts):
-  device = "NV"
   param = nir_instr(nc=1, num_components=1, bs=lambda sz:sz*8, also=lambda self,sz: setattr(self, "param_idx", self.param_idx + sz),
     intrins={"ALIGN_MUL":lambda sz:sz}, srcs=lambda self,b: [nsrc(nimm(b, 0, dtypes.int)), nsrc(nimm(b, self.param_idx, dtypes.int))])(
        lambda self, b, x, sz: mesa.nir_intrinsic_instr_create(b.shader, mesa.nir_intrinsic_ldc_nv))
@@ -261,8 +256,14 @@ _nload_img = nir_instr(intrins=lambda dtype:{'IMAGE_DIM':mesa.GLSL_SAMPLER_DIM_2
   nc=4, bs=32, num_components=4, srcs=lambda b,img,coord:[nsrc(x) for x in [img, tovec(b, coord), nundef(b, dtypes.int), nimm(b, 0, dtypes.int)]])(
     lambda b,img,coord,dtype: mesa.nir_intrinsic_instr_create(b.shader, g("nir_intrinsic_image_load")))
 
-class IR3Renderer(NIRRendererWithOpts):
+class IR3Renderer(NIRRenderer):
   device = "QCOM"
+
+  def __init__(self, chip_id):
+    from tinygrad.runtime.support.compiler_mesa import IR3Compiler
+    self.compiler = IR3Compiler(chip_id)
+    self.nir_options = self.compiler.nir_options
+    super().__init__()
 
   def nload_img(ctx,img,coord):
     ctx.texs.add(img)
