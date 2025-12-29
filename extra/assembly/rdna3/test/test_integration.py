@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Integration test: round-trip RDNA3 assembly through AMD toolchain."""
-import unittest, re, io, sys
+import unittest, re, io, sys, subprocess
 from extra.assembly.rdna3.autogen import *
 from extra.assembly.rdna3.asm import waitcnt, asm
+from extra.assembly.rdna3.test.test_roundtrip import _get_llvm_mc
 
 def get_amd_toolchain():
   """Check if AMD toolchain is available."""
@@ -212,10 +213,8 @@ class TestAsm(unittest.TestCase):
 
   def test_asm_vop3_modifiers(self):
     """Test asm() with VOP3 modifiers (neg, abs, clamp)."""
-    import subprocess, re
-
     def get_llvm_encoding(instr: str) -> str:
-      result = subprocess.run(['llvm-mc', '-triple=amdgcn', '-mcpu=gfx1100', '-show-encoding'],
+      result = subprocess.run([_get_llvm_mc(), '-triple=amdgcn', '-mcpu=gfx1100', '-show-encoding'],
                               input=instr, capture_output=True, text=True)
       if m := re.search(r'encoding:\s*\[(.*?)\]', result.stdout):
         return m.group(1).replace('0x','').replace(',','').replace(' ','')
