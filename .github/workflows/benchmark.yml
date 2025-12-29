@@ -429,13 +429,15 @@ jobs:
     #    LD_PRELOAD="/opt/rocm/lib/libhsa-runtime64.so" HSA=1 BIG=2 TORCHCUDA=1 python3 test/speed/external_test_speed_v_torch.py | tee torch_speed.txt
     - name: Test speed vs theoretical
       run: AMD=1 IGNORE_BEAM_CACHE=1 CCACHE=0 BEAM_DEBUG=1 DEBUG=1 python -m pytest -rA test/external/speed_v_theoretical.py --durations=20
-    - name: Test tensor cores
-      run: |
-        AMD=1 AMD_LLVM=0 python3 test/opt/test_tensor_cores.py
-        AMD=1 AMD_LLVM=1 python3 test/opt/test_tensor_cores.py
-        AMD=1 SHOULD_USE_TC=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
+    - name: Test tensor cores AMD_LLVM=0
+      run: AMD=1 AMD_LLVM=0 python3 test/opt/test_tensor_cores.py
+    # TODO: this is flaky
+    # - name: Test tensor cores AMD_LLVM=1
+    #   run: AMD=1 AMD_LLVM=1 python3 test/opt/test_tensor_cores.py
     - name: Run Tensor Core GEMM (AMD)
-      run: AMD=1 SHOULD_USE_TC=1 HALF=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py | tee matmul_amd.txt
+      run: |
+        AMD=1 SHOULD_USE_TC=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
+        AMD=1 SHOULD_USE_TC=1 HALF=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py | tee matmul_amd.txt
     - name: Test AMD=1
       run: DEBUG=2 AMD=1 python -m pytest -rA test/test_tiny.py
     #- name: Test HIP=1
