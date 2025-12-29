@@ -740,12 +740,9 @@ def _get_op_enums(arch: str) -> list:
   """Dynamically load op enums from the arch-specific autogen module."""
   import importlib
   autogen = importlib.import_module(f"extra.assembly.amd.autogen.{arch}")
-  # Common enums across all architectures
+  # Deterministic order: common enums first, then arch-specific
   enums = []
-  for name in ['SOP1Op', 'SOP2Op', 'SOPCOp', 'SOPKOp', 'SOPPOp', 'VOP1Op', 'VOP2Op', 'VOP3POp', 'VOPCOp']:
-    if hasattr(autogen, name): enums.append(getattr(autogen, name))
-  # Architecture-specific enums
-  for name in ['VOP3Op', 'VOP3SDOp', 'VOP3AOp', 'VOP3BOp']:
+  for name in ['SOP1Op', 'SOP2Op', 'SOPCOp', 'SOPKOp', 'SOPPOp', 'VOP1Op', 'VOP2Op', 'VOP3Op', 'VOP3SDOp', 'VOP3POp', 'VOPCOp', 'VOP3AOp', 'VOP3BOp']:
     if hasattr(autogen, name): enums.append(getattr(autogen, name))
   return enums
 
@@ -808,12 +805,18 @@ def parse_pseudocode_from_pdf(arch: str = "rdna3") -> dict:
   if isinstance(urls, str): urls = [urls]
 
   # Parse all PDFs and merge (union of pseudocode)
+  # Reverse order so newer PDFs (RDNA3.5, CDNA4) take priority
   instructions: dict = {cls: {} for cls in OP_ENUMS}
-  for url in urls:
+  for url in reversed(urls):
     result = _parse_pseudocode_from_single_pdf(url, defined_ops, OP_ENUMS)
     for cls, ops in result.items():
       for op, pseudocode in ops.items():
-        if op not in instructions[cls]:
+        if op in instructions[cls]:
+          if instructions[cls][op] != pseudocode:
+            print(f"  Ignoring {op.name} from older PDF:")
+            print(f"    new: {instructions[cls][op]!r}")
+            print(f"    old: {pseudocode!r}")
+        else:
           instructions[cls][op] = pseudocode
 
   return instructions
