@@ -4,7 +4,7 @@ import unittest, re, subprocess
 from tinygrad.helpers import fetch
 from extra.assembly.rdna3.autogen import *
 from extra.assembly.rdna3.asm import asm
-from extra.assembly.rdna3.test.test_roundtrip import _get_llvm_mc, _llvm_version
+from extra.assembly.rdna3.test.test_roundtrip import _get_llvm_mc
 
 LLVM_BASE = "https://raw.githubusercontent.com/llvm/llvm-project/main/llvm/test/MC/AMDGPU"
 
@@ -167,9 +167,7 @@ def _make_disasm_test(name):
         to_test.append((asm_text, data, None, f"exception: {e}"))
 
     # Batch compile all disasm strings with single llvm-mc call
-    # Skip patterns that LLVM 20 doesn't support (v_mad_[iu]32_[iu]16 with .l/.h suffixes)
-    def llvm20_skip(s): return _llvm_version() == 20 and re.match(r'v_mad_[iu]32_[iu]16', s) and ('.l' in s or '.h' in s)
-    disasm_strs = [(i, t[2]) for i, t in enumerate(to_test) if t[2] is not None and not llvm20_skip(t[2])]
+    disasm_strs = [(i, t[2]) for i, t in enumerate(to_test) if t[2] is not None]
     llvm_results = compile_asm_batch([s for _, s in disasm_strs]) if disasm_strs else []
     llvm_map = {i: llvm_results[j] for j, (i, _) in enumerate(disasm_strs)}
 

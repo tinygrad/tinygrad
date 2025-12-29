@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Roundtrip tests: generate tinygrad kernels, decode instructions, re-encode, verify match."""
-import unittest, io, sys, re, subprocess, shutil, functools
+import unittest, io, sys, re, subprocess, shutil
 from extra.assembly.rdna3.autogen import *
 from extra.assembly.rdna3.lib import Inst
 from extra.assembly.rdna3.asm import asm
@@ -9,12 +9,6 @@ def _get_llvm_mc():
   for p in ['llvm-mc', 'llvm-mc-20']:  # prefer newer llvm-mc
     if shutil.which(p): return p
   raise FileNotFoundError("llvm-mc not found")
-
-@functools.cache
-def _llvm_version():
-  result = subprocess.run([_get_llvm_mc(), '--version'], capture_output=True, text=True)
-  if m := re.search(r'version (\d+)\.', result.stdout): return int(m.group(1))
-  return 0
 
 # Instruction format detection based on encoding bits
 def detect_format(data: bytes) -> type[Inst] | None:
