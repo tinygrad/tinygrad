@@ -1,6 +1,6 @@
 from typing import Callable, cast, Any
 from tinygrad.dtype import AddrSpace, DType, PtrDType, ImageDType, dtypes
-from tinygrad.helpers import DEBUG, OSX, unwrap, charptr, fromimport
+from tinygrad.helpers import DEBUG, OSX, unwrap, charptr
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str
@@ -115,8 +115,7 @@ def nidx(b:mesa.nir_builder, buf, off, dtype, gate=None) -> mesa.nir_def:
   return if_phi(b, gate, f, lambda: buf) if gate is not None else f()
 
 class NIRRenderer(Renderer):
-  suffix = "NIR"
-  nir_options: bytes
+  suffix = "NAK"
   global_max, local_max, shared_max = CUDARenderer.global_max, CUDARenderer.local_max, CUDARenderer.shared_max
   code_for_op = {**{k:lambda:None for k in u_aop.keys()}, **{k:lambda:None for k in s_aop.keys()}, **{k:lambda:None for k in f_aop.keys()}}
 
@@ -170,6 +169,8 @@ class NIRRenderer(Renderer):
   def __del__(self):
     with contextlib.suppress(AttributeError): mesa.glsl_type_singleton_decref()
 
+  @property
+  def nir_options(self): raise NotImplementedError("needs nir_options")
   def param(self, b:mesa.nir_builder, x, sz:int) -> mesa.nir_def: raise NotImplementedError("needs param")
   def prerender(self, uops:list[UOp]):
     self.b = mesa.nir_builder_init_simple_shader(mesa.MESA_SHADER_COMPUTE, mesa.nir_shader_compiler_options.from_buffer_copy(self.nir_options), None)
@@ -221,9 +222,20 @@ class NIRRenderer(Renderer):
 
     return ret
 
-class NAKRenderer(NIRRenderer):
-  device = "NV"
+class NIRRendererWithOpts(NIRRenderer):
+  def __init__(self, dev=None, nir_options=None):
+    self.dev, self._nir_options = dev, nir_options
+    super().__init__()
 
+  def __reduce__(self): return self.__class__, (None, self.nir_options)
+
+  @property
+  def nir_options(self):
+    if self._nir_options is None: self._nir_options = self.dev.compiler.nir_options
+    return self._nir_options
+
+class NAKRenderer(NIRRendererWithOpts):
+  device = "NV"
   param = nir_instr(nc=1, num_components=1, bs=lambda sz:sz*8, also=lambda self,sz: setattr(self, "param_idx", self.param_idx + sz),
     intrins={"ALIGN_MUL":lambda sz:sz}, srcs=lambda self,b: [nsrc(nimm(b, 0, dtypes.int)), nsrc(nimm(b, self.param_idx, dtypes.int))])(
        lambda self, b, x, sz: mesa.nir_intrinsic_instr_create(b.shader, mesa.nir_intrinsic_ldc_nv))
@@ -255,7 +267,7 @@ _nload_img = nir_instr(intrins=lambda dtype:{'IMAGE_DIM':mesa.GLSL_SAMPLER_DIM_2
   nc=4, bs=32, num_components=4, srcs=lambda b,img,coord:[nsrc(x) for x in [img, tovec(b, coord), nundef(b, dtypes.int), nimm(b, 0, dtypes.int)]])(
     lambda b,img,coord,dtype: mesa.nir_intrinsic_instr_create(b.shader, g("nir_intrinsic_image_load")))
 
-class IR3Renderer(NIRRenderer):
+class IR3Renderer(NIRRendererWithOpts):
   device = "QCOM"
 
   def nload_img(ctx,img,coord):
