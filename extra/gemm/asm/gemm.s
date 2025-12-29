@@ -5,16 +5,16 @@
 .type	gemm,@function
 
 gemm:
-  // ** global buffers
+	// ** global buffers
 	s_load_dwordx2 s[28:29], s[0:1], 0x0    // C
 	s_load_dwordx4 s[32:35], s[0:1], 0x8    // A, B
-  // ** other inputs to the kernel
-  // info
+	// ** others kernel args
+	// info
 	s_mov_b32 s51, 0x00000001    // gemm_info = 1
 	s_mov_b32 s53, 0x00000001    // kernel_info0 = 1
 	s_mov_b32 s11, 0x40010020    // kernel_info1 = 0x40010020
 	s_mov_b32 s54, 0x00000400    // numWG = 1024
-  // sizes / strides
+	// sizes / strides
 	s_mov_b32 s24, 0x00002000    // sizesFree0 = M = 8192
 	s_mov_b32 s25, 0x00002000    // sizesFree1 = N = 8192
 	s_mov_b32 s26, 0x00000001    // sizesFree2 = BATCH = 1
@@ -194,10 +194,6 @@ label_skip_WGMXCC:
 	s_sub_u32 s34, s34, 16                                     // 000000002E44: 80A29022
 	s_subb_u32 s35, s35, 0                                     // 000000002E48: 82A38023
 	v_cmp_eq_f32_e64 vcc, s44, 0                               // 000000002E4C: D042006A 0001002C
-	s_cbranch_vccz label_AlphaNonZero                          // 000000002E54: BF860001
-	s_mov_b32 s27, 0                                           // 000000002E58: BE9B0080
-
-label_AlphaNonZero:
 	s_and_b32 s84, s50, 0x3fff                                 // 000000002E5C: 8654FF32 00003FFF
 	s_cmp_eq_u32 s84, 1                                        // 000000002E64: BF068154
 	s_cbranch_scc1 label_GSU                                   // 000000002E68: BF850037
@@ -15285,7 +15281,6 @@ end:
 
   # ---- user SGPR enables (descriptor bits >448) ----
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
-
   .amdhsa_user_sgpr_count 2
   .amdhsa_user_sgpr_kernarg_preload_length 0
   .amdhsa_user_sgpr_kernarg_preload_offset 0
