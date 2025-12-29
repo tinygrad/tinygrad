@@ -289,8 +289,7 @@ class Inst64(Inst): pass
 # ═══════════════════════════════════════════════════════════════════════════════
 
 PDF_URLS = {
-  "rdna3": ["https://docs.amd.com/api/khub/documents/UkT_UPQL21KfKAMUBFnZTw/content",  # RDNA3
-            "https://docs.amd.com/api/khub/documents/UVVZM22UN7tMUeiW_4ShTQ/content"],  # RDNA3.5
+  "rdna3": "https://docs.amd.com/api/khub/documents/UVVZM22UN7tMUeiW_4ShTQ/content",  # RDNA3.5
   "rdna4": "https://docs.amd.com/api/khub/documents/uQpkEvk3pv~kfAb2x~j4uw/content",
   "cdna": ["https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-mi300-cdna3-instruction-set-architecture.pdf",
            "https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf"],

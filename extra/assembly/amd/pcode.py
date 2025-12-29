@@ -754,13 +754,17 @@ def _parse_pseudocode_from_single_pdf(url: str, defined_ops: dict, OP_ENUMS: lis
   pdf = pdfplumber.open(fetch(url))
   total_pages = len(pdf.pages)
 
+  page_cache = {}
+  def get_page_text(i):
+    if i not in page_cache: page_cache[i] = pdf.pages[i].extract_text() or ''
+    return page_cache[i]
+
   # Find the "Instructions" chapter - typically 15-40% through the document
   instr_start = None
   search_starts = [int(total_pages * 0.2), int(total_pages * 0.1), 0]
   for start in search_starts:
     for i in range(start, min(start + 100, total_pages)):
-      text = pdf.pages[i].extract_text() or ''
-      if re.search(r'Chapter \d+\.\s+Instructions', text):
+      if re.search(r'Chapter \d+\.\s+Instructions', get_page_text(i)):
         instr_start = i
         break
     if instr_start: break
@@ -771,13 +775,13 @@ def _parse_pseudocode_from_single_pdf(url: str, defined_ops: dict, OP_ENUMS: lis
   search_starts = [int(total_pages * 0.6), int(total_pages * 0.5), instr_start]
   for start in search_starts:
     for i in range(start, min(start + 100, total_pages)):
-      text = pdf.pages[i].extract_text() or ''
-      if re.search(r'Chapter \d+\.\s+Microcode Formats', text):
+      if re.search(r'Chapter \d+\.\s+Microcode Formats', get_page_text(i)):
         instr_end = i
         break
     if instr_end < total_pages: break
 
-  all_text = '\n'.join(pdf.pages[i].extract_text() or '' for i in range(instr_start, instr_end))
+  # Extract remaining pages (some already cached from chapter search)
+  all_text = '\n'.join(get_page_text(i) for i in range(instr_start, instr_end))
   matches = list(INST_PATTERN.finditer(all_text))
   instructions: dict = {cls: {} for cls in OP_ENUMS}
 
