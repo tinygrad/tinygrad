@@ -235,6 +235,11 @@ class LVPRenderer(NIRRenderer):
   global_max = (1, 0, 0)
   nir_options = mesa.lvp_nir_options
 
+  def __init__(self):
+    from tinygrad.runtime.support.compiler_mesa import LVPCompiler
+    self.compiler = LVPCompiler()
+    super().__init__()
+
   param = nir_instr(nc=1, bs=lambda sz: sz * 8, num_components=1, intrins={"ALIGN_MUL":lambda sz: sz, "RANGE":lambda self: self.param_sz},
     srcs=lambda b, self: [nsrc(nimm(b, 0, dtypes.int)), nsrc(nimm(b, self.param_idx, dtypes.int))], also=lambda self, sz:
     setattr(self, "param_idx", self.param_idx+sz))(lambda self,b,x,sz: mesa.nir_intrinsic_instr_create(b.shader, mesa.nir_intrinsic_load_ubo))
