@@ -672,7 +672,7 @@ jobs:
           wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
           echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-21 main" | sudo tee /etc/apt/sources.list.d/llvm.list
           sudo apt-get update
-          sudo apt-get install llvm-21
+          sudo apt-get install llvm-21 llvm-21-tools
       - name: Run RDNA3 emulator tests
         run: python -m pytest -n=auto extra/assembly/rdna3/ --durations 20
 

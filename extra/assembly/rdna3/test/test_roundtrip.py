@@ -6,7 +6,7 @@ from extra.assembly.rdna3.lib import Inst
 from extra.assembly.rdna3.asm import asm
 
 def _get_llvm_mc():
-  for p in ['llvm-mc', 'llvm-mc-20']:  # prefer newer llvm-mc
+  for p in ['llvm-mc', 'llvm-mc-21', 'llvm-mc-20']:  # prefer newer llvm-mc
     if shutil.which(p): return p
   raise FileNotFoundError("llvm-mc not found")
 
@@ -113,19 +113,16 @@ def compile_and_disasm_batch(instrs: list[str], compiler) -> list[str | None]:
   # Build assembly source with all instructions
   src = ".text\n.globl test\n.p2align 8\n.type test,@function\ntest:\n"
   src += "\n".join(f"  {instr}" for instr in instrs) + "\n"
-  try:
-    lib = compiler.compile(src)
-    llvm_instrs = disassemble_lib(lib, compiler)
-    # Map back to input instructions
-    results = []
-    for i in range(len(instrs)):
-      if i < len(llvm_instrs):
-        results.append(llvm_instrs[i][0])
-      else:
-        results.append(None)
-    return results
-  except Exception:
-    return [None] * len(instrs)
+  lib = compiler.compile(src)
+  llvm_instrs = disassemble_lib(lib, compiler)
+  # Map back to input instructions
+  results = []
+  for i in range(len(instrs)):
+    if i < len(llvm_instrs):
+      results.append(llvm_instrs[i][0])
+    else:
+      results.append(None)
+  return results
 
 class TestTinygradKernelRoundtrip(unittest.TestCase):
   """Test roundtrip on real tinygrad-generated kernels using get_kernels_from_tinygrad pattern."""
