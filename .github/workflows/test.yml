@@ -948,7 +948,7 @@ jobs:
         with:
           cuda: '12.5.0'
           method: 'network'
-          sub-packages: '["nvcc", "cudart", "nvrtc", "nvjitlink"]'
+          sub-packages: '["nvcc", "cudart", "nvrtc", "nvjitlink", "Display.Driver"]'
           log-file-suffix: '${{matrix.os}}.txt'
       - name: Check CUDA install
         run: |
