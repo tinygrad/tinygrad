@@ -434,7 +434,8 @@ def disasm(inst: Inst) -> str:
       if op_name == 's_swappc_b64': return f"{op_name} {_fmt_sdst(sdst, 2)}, {_fmt_ssrc(ssrc0, 2)}"
       if op_name in ('s_sendmsg_rtn_b32', 's_sendmsg_rtn_b64'):
         return f"{op_name} {_fmt_sdst(sdst, 2 if 'b64' in op_name else 1)}, sendmsg({MSG_NAMES.get(ssrc0, str(ssrc0))})"
-      return f"{op_name} {_fmt_sdst(sdst, dst_cnt)}, {_fmt_ssrc(ssrc0, src0_cnt)}"
+      ssrc0_str = fmt_src(ssrc0) if src0_cnt == 1 else _fmt_ssrc(ssrc0, src0_cnt)
+      return f"{op_name} {_fmt_sdst(sdst, dst_cnt)}, {ssrc0_str}"
     if cls_name == 'SOP2':
       sdst, ssrc0, ssrc1 = [unwrap(inst._values.get(f, 0)) for f in ('sdst', 'ssrc0', 'ssrc1')]
       return f"{op_name} {_fmt_sdst(sdst, dst_cnt)}, {_fmt_ssrc(ssrc0, src0_cnt)}, {_fmt_ssrc(ssrc1, src1_cnt)}"
@@ -476,7 +477,8 @@ def parse_operand(op: str) -> tuple:
     v = -int(m.group(1), 16) if op.startswith('-') else int(m.group(1), 16)
     return (v, neg, abs_, hi_half)
   if op in SPECIAL_REGS: return (SPECIAL_REGS[op], neg, abs_, hi_half)
-  if m := re.match(r'^([svt](?:tmp)?)\[(\d+):(\d+)\]$', op): return (REG_MAP[m.group(1)][int(m.group(2)):int(m.group(3))+1], neg, abs_, hi_half)
+  if op == 'lit': return (RawImm(255), neg, abs_, hi_half)  # literal marker (actual value comes from literal word)
+  if m := re.match(r'^([svt](?:tmp)?)\[(\d+):(\d+)\]$', op): return (REG_MAP[m.group(1)][int(m.group(2)):int(m.group(3))], neg, abs_, hi_half)
   if m := re.match(r'^([svt](?:tmp)?)(\d+)$', op):
     reg = REG_MAP[m.group(1)][int(m.group(2))]
     reg.hi = hi_half
