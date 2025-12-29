@@ -18,6 +18,15 @@ VCC_LO, VCC_HI, NULL, EXEC_LO, EXEC_HI, SCC = SrcEnum.VCC_LO, SrcEnum.VCC_HI, Sr
 _VOP3_64BIT_OPS = {op.value for op in VOP3Op if op.name.endswith(('_F64', '_B64', '_I64', '_U64'))}
 # Ops where src1 is 32-bit (exponent/shift amount) even though the op name suggests 64-bit
 _VOP3_64BIT_OPS_32BIT_SRC1 = {VOP3Op.V_LDEXP_F64.value}
+# Ops with 16-bit types in name (for source/dest handling)
+_VOP3_16BIT_OPS = {op for op in VOP3Op if any(s in op.name for s in ('_F16', '_B16', '_I16', '_U16'))}
+_VOP1_16BIT_OPS = {op for op in VOP1Op if any(s in op.name for s in ('_F16', '_B16', '_I16', '_U16'))}
+# CVT ops with 32/64-bit source (despite 16-bit in name)
+_CVT_32_64_SRC_OPS = {op for op in VOP3Op if op.name.startswith('V_CVT_') and op.name.endswith(('_F32', '_I32', '_U32', '_F64', '_I64', '_U64'))} | \
+                     {op for op in VOP1Op if op.name.startswith('V_CVT_') and op.name.endswith(('_F32', '_I32', '_U32', '_F64', '_I64', '_U64'))}
+# 16-bit dst ops (PACK has 32-bit dst despite F16 in name)
+_VOP3_16BIT_DST_OPS = {op for op in _VOP3_16BIT_OPS if 'PACK' not in op.name}
+_VOP1_16BIT_DST_OPS = {op for op in _VOP1_16BIT_OPS if 'PACK' not in op.name}
 
 # Inline constants for src operands 128-254 (f32 format for most instructions)
 _INLINE_CONSTS = [0] * 127
@@ -509,11 +518,9 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
   # V_LDEXP_F64: src0 is 64-bit float, src1 is 32-bit integer exponent
   is_ldexp_64 = op in (VOP3Op.V_LDEXP_F64,)
   is_shift_64 = op in (VOP3Op.V_LSHLREV_B64, VOP3Op.V_LSHRREV_B64, VOP3Op.V_ASHRREV_I64)
-  # 16-bit source ops: name contains 16-bit type, but for CVT ops check the SOURCE type (CVT naming is V_CVT_DST_SRC)
-  # For CVT: source type is at the end of the name, so V_CVT_F16_F32 has 32-bit src, V_CVT_F32_F16 has 16-bit src
-  has_16bit_type = any(s in op.name for s in ('_F16', '_B16', '_I16', '_U16'))
-  is_cvt_with_32_64_src = op.name.startswith('V_CVT_') and op.name.endswith(('_F32', '_I32', '_U32', '_F64', '_I64', '_U64'))
-  is_16bit_src = op_cls is VOP3Op and has_16bit_type and not is_cvt_with_32_64_src
+  # 16-bit source ops: use precomputed sets instead of string checks
+  has_16bit_type = op in _VOP3_16BIT_OPS or op in _VOP1_16BIT_OPS
+  is_16bit_src = op_cls is VOP3Op and op in _VOP3_16BIT_OPS and op not in _CVT_32_64_SRC_OPS
 
   if is_shift_64:
     s0 = mod_src(st.rsrc(src0, lane), 0)  # shift amount is 32-bit
@@ -571,8 +578,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     writes_to_sgpr = op in (VOP1Op.V_READFIRSTLANE_B32,) or \
                      (op_cls is VOP3Op and op in (VOP3Op.V_READFIRSTLANE_B32, VOP3Op.V_READLANE_B32))
     # Check for 16-bit destination ops (opsel[3] controls hi/lo write)
-    # 16-bit dst ops (exclude PACK which has 32-bit dst despite F16 in name)
-    is_16bit_dst = any(s in op.name for s in ('_F16', '_B16', '_I16', '_U16')) and 'PACK' not in op.name
+    is_16bit_dst = op in _VOP3_16BIT_DST_OPS or op in _VOP1_16BIT_DST_OPS
     if writes_to_sgpr:
       st.wsgpr(vdst, result['d0'] & 0xffffffff)
     elif result.get('d0_64') or is_64bit_op:

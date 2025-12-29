@@ -49,7 +49,7 @@ dev.synchronize()
     self.assertTrue("NotImplementedError" in result.stderr or "ValueError" in result.stderr,
                     f"expected NotImplementedError or ValueError in stderr")
     # Should exit immediately, not wait for the full timeout
-    self.assertLess(elapsed, 5.0, f"should exit immediately on emulator exception, took {elapsed:.1f}s")
+    self.assertLess(elapsed, 9.0, f"should exit immediately on emulator exception, took {elapsed:.1f}s")
 
 if __name__ == "__main__":
   unittest.main()

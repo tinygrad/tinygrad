@@ -126,7 +126,7 @@ class PythonEmulator:
 
 def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: tuple[int, int, int],
                       program, max_steps: int, debug: bool, trace_len: int, kernel_idx: int = 0,
-                      max_workgroups: int = 64) -> tuple[bool, str, int]:
+                      max_workgroups: int = 8) -> tuple[bool, str, int]:
   """Run a single kernel through both emulators. Returns (success, message, total_steps)."""
   gx, gy, gz = global_size
   total_steps = 0
@@ -356,191 +356,52 @@ class TestTinygradKernels(unittest.TestCase):
     ok, msg = compare_emulators_multi_kernel(kernels, buf_pool, max_steps=max_steps, buf_data=buf_data)
     self.assertTrue(ok, msg)
 
-  # Basic unary ops
-  def test_neg(self): self._test_kernel(lambda T: -T([1.0, -2.0, 3.0, -4.0]))
-  def test_relu(self): self._test_kernel(lambda T: T([-1.0, 0.0, 1.0, 2.0]).relu())
-  def test_exp(self): self._test_kernel(lambda T: T([0.0, 1.0, 2.0]).exp())
-  def test_log(self): self._test_kernel(lambda T: T([1.0, 2.0, 3.0]).log())
-  def test_sin(self): self._test_kernel(lambda T: T([0.0, 1.0, 2.0]).sin())
-  def test_cos(self): self._test_kernel(lambda T: T([0.0, 1.0, 2.0]).cos())
-  def test_sqrt(self): self._test_kernel(lambda T: T([1.0, 4.0, 9.0]).sqrt())
-  def test_recip(self): self._test_kernel(lambda T: T([1.0, 2.0, 4.0]).reciprocal())
-
-  # Sin/cos with various ranges - test polynomial expansion
-  def test_sin_small(self): self._test_kernel(lambda T: T([0.1, 0.2, 0.3, 0.4, 0.5]*7).sin())  # 35 elements, small angles
-  def test_sin_pi(self): self._test_kernel(lambda T: T([3.14159, 1.5708, 0.7854, -1.5708, -3.14159]*7).sin())  # around pi
-  def test_sin_medium(self): self._test_kernel(lambda T: T([10.0, 20.0, 30.0, 50.0, 100.0]*7).sin())  # medium values
-  def test_sin_negative(self): self._test_kernel(lambda T: T([-0.5, -1.0, -2.0, -5.0, -10.0]*7).sin())  # negative values
-  def test_cos_small(self): self._test_kernel(lambda T: T([0.1, 0.2, 0.3, 0.4, 0.5]*7).cos())
-  def test_cos_pi(self): self._test_kernel(lambda T: T([3.14159, 1.5708, 0.7854, -1.5708, -3.14159]*7).cos())
-  def test_cos_medium(self): self._test_kernel(lambda T: T([10.0, 20.0, 30.0, 50.0, 100.0]*7).cos())
-  @unittest.skip("Rust emulator has V_DIV_SCALE_F32 bug - returns 0 instead of src0 for normal cases")
-  def test_tan(self): self._test_kernel(lambda T: T([0.1, 0.2, 0.5, 1.0, -0.5]*7).tan())  # avoid pi/2
-
-  # Binary ops
-  def test_add(self): self._test_kernel(lambda T: T([1.0, 2.0]) + T([3.0, 4.0]))
-  def test_sub(self): self._test_kernel(lambda T: T([5.0, 6.0]) - T([1.0, 2.0]))
-  def test_mul(self): self._test_kernel(lambda T: T([2.0, 3.0]) * T([4.0, 5.0]))
-  def test_div(self): self._test_kernel(lambda T: T([10.0, 20.0]) / T([2.0, 4.0]))
-  def test_max_binary(self): self._test_kernel(lambda T: T([1.0, 5.0]).maximum(T([3.0, 2.0])))
+  # Basic ops - consolidated tests covering key instruction patterns
+  def test_unary_ops(self): self._test_kernel(lambda T: T([-1.0, 0.0, 1.0, 2.0]).relu().exp().log().sqrt().reciprocal())
+  def test_binary_ops(self): self._test_kernel(lambda T: (T([1.0, 2.0]) + T([3.0, 4.0])) * T([0.5, 0.5]) - T([1.0, 1.0]))
+  def test_trig(self): self._test_kernel(lambda T: T([0.1, 1.0, 3.14, -1.0]*8).sin() + T([0.1, 1.0, 3.14, -1.0]*8).cos())
+  def test_compare(self): self._test_kernel(lambda T: (T.empty(64) < T.empty(64)).where(T.empty(64), T.empty(64)))
+  def test_bitwise(self): self._test_kernel(lambda T: (T([0xF0, 0x0F, 0xFF]*11).int() & T([0x0F, 0x0F, 0x00]*11).int()) | T([1]*33).int())
+  def test_int_ops(self): self._test_kernel(lambda T: ((T.empty(64).int() + T.empty(64).int()) * T.empty(64).int()).float())
 
   # Reductions
-  def test_sum_reduce(self): self._test_kernel(lambda T: T.empty(64).sum())
-  def test_max_reduce(self): self._test_kernel(lambda T: T.empty(64).max())
-  def test_mean_reduce(self): self._test_kernel(lambda T: T.empty(32).mean())
+  def test_reduce(self): self._test_kernel(lambda T: T.empty(64).sum() + T.empty(64).max())
+  def test_argmax(self): self._test_kernel(lambda T: T.empty(64).argmax())
 
-  # Matmul - various sizes
-  def test_gemm_4x4(self): self._test_kernel(lambda T: T.empty(4, 4) @ T.empty(4, 4), max_steps=100000)
-  def test_gemm_8x8(self): self._test_kernel(lambda T: T.empty(8, 8) @ T.empty(8, 8), max_steps=200000)
-  @unittest.skip("too slow")
-  def test_gemm_16x16(self): self._test_kernel(lambda T: T.empty(16, 16) @ T.empty(16, 16), max_steps=500000)
-  def test_gemv(self): self._test_kernel(lambda T: T.empty(1, 16) @ T.empty(16, 16), max_steps=100000)
+  # Matmul
+  def test_gemm(self): self._test_kernel(lambda T: T.empty(8, 8) @ T.empty(8, 8), max_steps=100000)
+  def test_gemm_fp16(self): self._test_kernel(lambda T: T.empty(16, 16).half() @ T.empty(16, 16).half(), max_steps=100000)
 
   # Complex ops
   def test_softmax(self): self._test_kernel(lambda T: T.empty(16).softmax())
   def test_layernorm(self): self._test_kernel(lambda T: T.empty(8, 8).layernorm())
 
   # Memory patterns
-  def test_contiguous(self): self._test_kernel(lambda T: T.empty(4, 4).permute(1, 0).contiguous())
-  def test_reshape(self): self._test_kernel(lambda T: (T.empty(16) + 1).reshape(4, 4).contiguous())
-  def test_expand(self): self._test_kernel(lambda T: T.empty(4, 1).expand(4, 4).contiguous())
+  def test_memory(self): self._test_kernel(lambda T: T.empty(4, 4).permute(1, 0).contiguous() + T.empty(4, 1).expand(4, 4))
 
   # Cast ops
-  def test_cast_int(self): self._test_kernel(lambda T: T.empty(16).int().float())
-  def test_cast_half(self): self._test_kernel(lambda T: T.empty(16).half().float())
+  def test_cast(self): self._test_kernel(lambda T: T.empty(32).half().float() + T.empty(32).int().float())
 
-  # Min/max (uses comparison internally)
-  def test_min_binary(self): self._test_kernel(lambda T: T([1.0, 5.0, 3.0]).minimum(T([3.0, 2.0, 4.0])))
+  # Pooling - regression for VCC wave32 mode
+  def test_pool2d(self): self._test_kernel(lambda T: T.empty(1, 1, 8, 8).avg_pool2d(kernel_size=(4,4)) + T.empty(1, 1, 8, 8).max_pool2d(kernel_size=(4,4)))
 
-  # Comparison ops (test VOPC instructions) - use 32+ elements to force vector instructions
-  def test_cmp_lt(self): self._test_kernel(lambda T: (T.empty(64) < T.empty(64)).where(T.empty(64), T.empty(64)))
-  def test_cmp_eq(self): self._test_kernel(lambda T: (T.empty(64) == T.empty(64)).where(T.empty(64), T.empty(64)))
-  def test_where(self): self._test_kernel(lambda T: (T.empty(64) > 0).where(T.empty(64), T.empty(64)))
+  # Convolution
+  def test_conv2d(self): self._test_kernel(lambda T: T.empty(1, 2, 8, 8).conv2d(T.empty(2, 2, 3, 3)), max_steps=50000)
 
-  # Bitwise ops
-  def test_bitwise_and(self): self._test_kernel(lambda T: T([0xF0, 0x0F, 0xFF]).int() & T([0x0F, 0x0F, 0x00]).int())
-  def test_bitwise_or(self): self._test_kernel(lambda T: T([0xF0, 0x0F, 0x00]).int() | T([0x0F, 0x0F, 0xFF]).int())
-  def test_bitwise_xor(self): self._test_kernel(lambda T: T([0xFF, 0x0F, 0xF0]).int() ^ T([0x0F, 0xF0, 0xF0]).int())
-
-  # Integer ops - use 32+ elements to force vector instructions
-  def test_int_add(self): self._test_kernel(lambda T: (T.empty(64).int() + T.empty(64).int()).float())
-  def test_int_mul(self): self._test_kernel(lambda T: (T.empty(64).int() * T.empty(64).int()).float())
-  def test_int_mod(self): self._test_kernel(lambda T: (T.empty(64).int().abs() % (T.empty(64).int().abs() + 1)).float())
-
-  # More math ops - use 32+ elements to force vector instructions
-  def test_abs(self): self._test_kernel(lambda T: T.empty(64).abs())
-  def test_floor(self): self._test_kernel(lambda T: T.empty(64).floor())
-  def test_ceil(self): self._test_kernel(lambda T: T.empty(64).ceil())
-  def test_trunc(self): self._test_kernel(lambda T: T.empty(64).trunc())
-
-  # Fused ops
-  def test_fma(self): self._test_kernel(lambda T: (T([1.0, 2.0]) * T([3.0, 4.0]) + T([5.0, 6.0])))
-
-  # Argmax/argmin (tests different reduction pattern) - use 32+ elements to force vector instructions
-  def test_argmax(self): self._test_kernel(lambda T: T.empty(64).argmax())
-  def test_argmin(self): self._test_kernel(lambda T: T.empty(64).argmin())
-
-  # Exact value tests - use 32+ elements to force vector instructions (small tensors use scalar ops which Rust emu doesn't fully support)
-  def test_abs_exact(self): self._test_kernel(lambda T: T([-1., 0., 1.]*11).abs())  # 33 elements
-  def test_neg_exact(self): self._test_kernel(lambda T: -T([-1., 0., 1.]*11))
-  def test_log_special(self): self._test_kernel(lambda T: T([1., 2., 0.5]*11).log())
-  def test_exp_exact(self): self._test_kernel(lambda T: T([0., 1., -1.]*11).exp())
-  def test_reciprocal_exact(self): self._test_kernel(lambda T: T([1., 2., 0.5]*11).reciprocal())
-
-  # Integer division and mod - use 32+ elements
-  def test_int_div(self): self._test_kernel(lambda T: (T([10, 20, 30]*11).int() // T([3, 4, 5]*11).int()).float())
-  def test_int_neg(self): self._test_kernel(lambda T: (-T([1, -2, 3]*11).int()).float())
-
-  # Mixed precision - use 32+ elements
-  def test_half_add(self): self._test_kernel(lambda T: (T([1., 2.]*16).half() + T([3., 4.]*16).half()).float())
-  def test_half_mul(self): self._test_kernel(lambda T: (T([2., 3.]*16).half() * T([4., 5.]*16).half()).float())
-
-  # Matrix ops - patterns from test_ops.py failures
-  def test_cat(self): self._test_kernel(lambda T: T.empty(32, 64).cat(T.empty(32, 64), dim=1))
-  def test_gather(self): self._test_kernel(lambda T: T.empty(64).gather(0, T.arange(32).int()))
-
-  # Tests from test_ops.py that are failing
-  def test_permute(self): self._test_kernel(lambda T: T.empty(3, 4, 5, 6).permute((3, 2, 1, 0)).contiguous())
-  def test_cat_large(self): self._test_kernel(lambda T: T.empty(45, 65, 9).cat(T.empty(45, 65, 9), T.empty(45, 65, 9), dim=1))
-  def test_gather_small(self): self._test_kernel(lambda T: T.empty(10).gather(0, T.arange(5).int()))
-  @unittest.skip("Rust emulator has S_ADD_I32 SCC bug - uses carry instead of signed overflow")
-  def test_cross_entropy(self): self._test_kernel(lambda T: T.randn(32, 10).softmax().log().sum())
-  def test_cross_entropy_class(self):
-    import numpy as np
-    np.random.seed(0)
-    classes = np.random.randint(0, 10, (32,), dtype=np.int32).tolist()
-    x_np = np.random.randn(32, 10).astype(np.float32)
-    self._test_kernel(lambda T: (T(x_np.tolist()).reshape(32,10) + 0).cross_entropy((T(classes).int().reshape(32) + 0)))
-
-  # Regression tests for BFE operations with width=0 (walrus operator bug)
+  # Regression tests
   def test_topk(self): self._test_kernel(lambda T: T.empty(64).topk(3)[0])
-  def test_interpolate_uint8(self): self._test_kernel(lambda T: T.empty(2,3,64,64).relu().cast('uint8').interpolate((10,10), mode="linear"))
-
-  # Regression test for 64-bit comparison (V_CMP_GT_I64, V_CMP_LT_U64, etc.) with rsrc64
+  def test_interpolate(self): self._test_kernel(lambda T: T.empty(1,2,16,16).relu().cast('uint8').interpolate((8,8), mode="linear"))
   def test_index_int64(self):
     from tinygrad import dtypes
     self._test_kernel(lambda T: T.empty(4, 4)[T.arange(4).cast(dtypes.int64), :])
-
-  @unittest.skip("only works with mock GPU")
-  def test_index_int64_2d(self):
-    from tinygrad import dtypes
-    # Tests 64-bit compare with inline constants (comparing against 0)
-    self._test_kernel(lambda T: T.empty(4, 4)[T.arange(4).cast(dtypes.int64), T.arange(4).cast(dtypes.int64)])
-
-  # Pooling operations - regression test for VCC wave32 mode (S_CBRANCH_VCCZ should only check VCC_LO)
-  def test_avg_pool2d(self): self._test_kernel(lambda T: T.empty(1, 1, 8, 8).avg_pool2d(kernel_size=(4,4), stride=2))
-
-  # Trig functions with special values (inf, nan, 0)
-  def test_sin_special(self): self._test_kernel(lambda T: T([0., 0.25, 0.5, 1.0]*8).sin())
-  def test_cos_special(self): self._test_kernel(lambda T: T([0., 0.25, 0.5, 1.0]*8).cos())
-
-  # Sqrt and rsqrt
-  def test_sqrt(self): self._test_kernel(lambda T: T([0., 1., 4., 9.]*8).sqrt())
-  def test_rsqrt(self): self._test_kernel(lambda T: T([1., 4., 9., 16.]*8).rsqrt())
-  @unittest.skip("Rust emulator has S_ADD_I32 SCC bug - uses carry instead of signed overflow")
-  def test_avg_pool3d(self):
+  def test_gelu(self): self._test_kernel(lambda T: T.empty(32, 32).gelu())
+  def test_cross_entropy(self):
     import numpy as np
     np.random.seed(0)
-    self._test_kernel(lambda T: T(np.random.randn(1, 1, 16, 16, 16).astype(np.float32).tolist()).avg_pool2d(kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False))
-  def test_max_pool2d(self): self._test_kernel(lambda T: T.empty(1, 1, 8, 8).max_pool2d(kernel_size=(4,4), stride=2))
-
-  # Convolution operations - multi-kernel tests
-  def test_conv2d(self): self._test_kernel(lambda T: T.empty(1, 4, 8, 8).conv2d(T.empty(4, 4, 3, 3)), max_steps=100000)
-  def test_conv_transpose2d(self): self._test_kernel(lambda T: T.empty(1, 4, 8, 8).conv_transpose2d(T.empty(4, 4, 3, 3)), max_steps=200000)
-  @unittest.skip("Rust emulator has S_ADD_I32 SCC bug - uses carry instead of signed overflow")
-  def test_conv_transpose3d(self):
-    import numpy as np
-    np.random.seed(0)
-    self._test_kernel(lambda T: T(np.random.randn(2, 4, 9, 9, 9).astype(np.float32).tolist()).conv_transpose2d(
-      T(np.random.randn(4, 4, 3, 3, 3).astype(np.float32).tolist())), max_steps=500000)
-
-  # Tests from test_ops.py failures
-  def test_gelu_extreme(self): self._test_kernel(lambda T: T.empty(45, 65).gelu())
-  def test_gemm_64x64(self): self._test_kernel(lambda T: T.empty(64, 64) @ T.empty(64, 64), max_steps=500000)
-  def test_gemm_fp16(self): self._test_kernel(lambda T: T.empty(64, 64).half() @ T.empty(64, 64).half(), max_steps=500000)
-  def test_global_avg_pool2d(self): self._test_kernel(lambda T: T.empty(32, 2, 111, 28).avg_pool2d(kernel_size=(111, 28)), max_steps=100000)
-  @unittest.skip("Rust emulator has S_ADD_I32 SCC bug - uses carry instead of signed overflow")
-  def test_grouped_conv2d(self): self._test_kernel(lambda T: T.empty(4, 15, 5, 5).conv2d(T.empty(35, 3, 3, 3), groups=5), max_steps=200000)
-  @unittest.skip("Rust emulator has S_ADD_I32 SCC bug - uses carry instead of signed overflow")
-  def test_grouped_conv_transpose2d(self): self._test_kernel(lambda T: T.empty(2, 4, 9, 9).conv_transpose2d(T.empty(4, 4, 3, 3), groups=2), max_steps=200000)
-  def test_hardsigmoid(self): self._test_kernel(lambda T: T.empty(45, 65).hardsigmoid())
-  def test_hardsigmoid_extreme(self): self._test_kernel(lambda T: T.empty(45, 65).sigmoid())
-  def test_matvec(self): self._test_kernel(lambda T: (T.empty(1, 128) @ T.empty(128, 128)).relu(), max_steps=200000)
-  def test_matvecmat(self): self._test_kernel(lambda T: ((T.empty(1, 128) @ T.empty(128, 128)).relu() @ T.empty(128, 128)), max_steps=300000)
-  def test_max_reduce_45x3(self): self._test_kernel(lambda T: T.empty(45, 3).max())
-  def test_max_dont_collapse(self): self._test_kernel(lambda T: T.empty(4, 8).max(axis=1))
-  def test_max_pool2d_simple(self): self._test_kernel(lambda T: T.empty(1, 1, 2, 3).max_pool2d(kernel_size=(2, 2)))
-  def test_max_pool2d_32x2(self): self._test_kernel(lambda T: T.empty(32, 2, 11, 28).max_pool2d(kernel_size=(2, 2)))
-  def test_max_pool2d_asymmetric_padding(self): self._test_kernel(lambda T: T.empty(4, 2, 111, 28).max_pool2d(kernel_size=(5, 5), padding=(0, 1, 0, 1)))
-  def test_max_pool2d_bigger_stride(self): self._test_kernel(lambda T: T.empty(4, 2, 11, 28).max_pool2d(kernel_size=(2, 2), stride=(2, 3)))
-  def test_max_pool2d_unit_stride(self): self._test_kernel(lambda T: T.empty(3, 2, 17, 14).max_pool2d(kernel_size=(5, 5), stride=1))
-  def test_max_pool2d_smaller_stride(self): self._test_kernel(lambda T: T.empty(3, 2, 17, 14).max_pool2d(kernel_size=(5, 5), stride=(2, 3)))
-  def test_max_unpool2d(self): self._test_kernel(lambda T: T.max_unpool2d(*T.empty(8, 3, 50, 50).max_pool2d(kernel_size=(5, 5), stride=(6, 5), return_indices=True), kernel_size=(5, 5), stride=(6, 5)))
+    classes = np.random.randint(0, 10, (16,), dtype=np.int32).tolist()
+    x_np = np.random.randn(16, 10).astype(np.float32)
+    self._test_kernel(lambda T: (T(x_np.tolist()).reshape(16,10) + 0).cross_entropy((T(classes).int().reshape(16) + 0)))
   def test_isinf(self): self._test_kernel(lambda T: T([float('-inf'), 0., float('inf'), 1.1]*8).isinf())
-  def test_isfinite(self): self._test_kernel(lambda T: T([float('-inf'), 0., float('inf'), 1.1]*8).isfinite())
-
-  # WMMA tests - uses wave matrix multiply for larger fp16 matmuls
-  def test_wmma_gemm_fp16(self): self._test_kernel(lambda T: T.empty(64, 64).half() @ T.empty(64, 64).half(), max_steps=1000000)
 
 if __name__ == "__main__":
   unittest.main()

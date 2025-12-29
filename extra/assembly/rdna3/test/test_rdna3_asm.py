@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 import unittest, subprocess
 from extra.assembly.rdna3.autogen import *
+from extra.assembly.rdna3.test.test_roundtrip import _get_llvm_mc
 
 def llvm_assemble(asm: str) -> bytes:
   """Assemble using llvm-mc and return bytes."""
   result = subprocess.run(
-    ["llvm-mc", "-triple=amdgcn", "-mcpu=gfx1100", "-show-encoding"],
+    [_get_llvm_mc(), "-triple=amdgcn", "-mcpu=gfx1100", "-show-encoding"],
     input=asm, capture_output=True, text=True
   )
   out = b''

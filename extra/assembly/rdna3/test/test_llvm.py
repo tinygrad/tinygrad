@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Test RDNA3 assembler/disassembler against LLVM test vectors."""
-import unittest, re
+import unittest, re, subprocess
 from tinygrad.helpers import fetch
 from extra.assembly.rdna3.autogen import *
 from extra.assembly.rdna3.asm import asm
-from extra.assembly.rdna3.test.test_roundtrip import compile_asm, disassemble_lib
+from extra.assembly.rdna3.test.test_roundtrip import _get_llvm_mc
 
 LLVM_BASE = "https://raw.githubusercontent.com/llvm/llvm-project/main/llvm/test/MC/AMDGPU"
 
@@ -78,6 +78,24 @@ def try_assemble(text: str):
   try: return asm(text).to_bytes()
   except: return None
 
+def compile_asm_batch(instrs: list[str]) -> list[bytes]:
+  """Compile multiple instructions with a single llvm-mc call."""
+  if not instrs: return []
+  asm_text = ".text\n" + "\n".join(instrs) + "\n"
+  result = subprocess.run(
+    [_get_llvm_mc(), '-triple=amdgcn', '-mcpu=gfx1100', '-mattr=+real-true16,+wavefrontsize32', '-show-encoding'],
+    input=asm_text, capture_output=True, text=True, timeout=30)
+  if result.returncode != 0: raise RuntimeError(f"llvm-mc batch failed: {result.stderr.strip()}")
+  # Parse all encodings from output
+  results = []
+  for line in result.stdout.split('\n'):
+    if 'encoding:' not in line: continue
+    enc = line.split('encoding:')[1].strip()
+    if enc.startswith('[') and enc.endswith(']'):
+      results.append(bytes.fromhex(enc[1:-1].replace('0x', '').replace(',', '').replace(' ', '')))
+  if len(results) != len(instrs): raise RuntimeError(f"expected {len(instrs)} encodings, got {len(results)}")
+  return results
+
 class TestLLVM(unittest.TestCase):
   """Test assembler and disassembler against all LLVM test vectors."""
   tests: dict[str, list[tuple[str, bytes]]] = {}
@@ -107,59 +125,62 @@ def _make_asm_test(name):
 
 def _make_disasm_test(name):
   def test(self):
-    from tinygrad.runtime.support.compiler_amd import HIPCompiler
-    compiler = HIPCompiler('gfx1100')
     _, fmt_cls, op_enum = LLVM_TEST_FILES[name]
-    passed, failed, skipped, failures = 0, 0, 0, []
     # VOP3SD opcodes that share encoding with VOP3 (only for vop3sd test, not vopc promotions)
-    # Note: opcodes 0-255 are VOPC promoted to VOP3, never VOP3SD
     vop3sd_opcodes = {288, 289, 290, 764, 765, 766, 767, 768, 769, 770}
-    # vop3_from_vopc/vopcx tests have VOPC opcodes 0-255, not VOP3SD - don't detect as VOP3SD
     is_vopc_promotion = name in ('vop3_from_vopc', 'vop3_from_vopcx')
-    # Undocumented opcodes not in AMD ISA PDF - skip these
-    undocumented = {'smem': {34, 35}, 'sopk': {22, 23}, 'sopp': {8, 58, 59}}  # s_atc_probe*, s_subvector_loop*, s_waitcnt_depctr, unknown
+    undocumented = {'smem': {34, 35}, 'sopk': {22, 23}, 'sopp': {8, 58, 59}}
+
+    # First pass: decode all instructions and collect disasm strings
+    to_test = []  # list of (asm_text, data, disasm_str)
+    skipped = 0
     for asm_text, data in self.tests.get(name, []):
-      if len(data) > fmt_cls._size(): continue  # skip literals (need different handling)
-      # Skip undocumented opcodes
+      if len(data) > fmt_cls._size(): continue
       temp_inst = fmt_cls.from_bytes(data)
       temp_op = temp_inst._values.get('op', 0)
       temp_op = temp_op.val if hasattr(temp_op, 'val') else temp_op
       if temp_op in undocumented.get(name, set()): skipped += 1; continue
-      # Skip SOPP no-imm instructions with non-zero simm16 (can't roundtrip through LLVM)
       if name == 'sopp':
         simm16 = temp_inst._values.get('simm16', 0)
         simm16 = simm16.val if hasattr(simm16, 'val') else simm16
-        sopp_no_imm = {48, 54, 53, 55, 60, 61, 62}  # s_endpgm, s_barrier, s_wakeup, s_icache_inv, s_wait_idle, s_endpgm_saved, s_code_end
+        sopp_no_imm = {48, 54, 53, 55, 60, 61, 62}
         if temp_op in sopp_no_imm and simm16 != 0: skipped += 1; continue
       try:
-        # VOP3 and VOP3SD share encoding - peek at opcode to determine which class to use
         if fmt_cls.__name__ in ('VOP3', 'VOP3SD'):
           temp = VOP3.from_bytes(data)
           op_val = temp._values.get('op', 0)
           op_val = op_val.val if hasattr(op_val, 'val') else op_val
           is_vop3sd = (op_val in vop3sd_opcodes) and not is_vopc_promotion
           decoded = VOP3SD.from_bytes(data) if is_vop3sd else VOP3.from_bytes(data)
-          # Validate opcode with appropriate enum
-          if is_vop3sd:
-            VOP3SDOp(op_val)
-          else:
-            VOP3Op(op_val)
+          if is_vop3sd: VOP3SDOp(op_val)
+          else: VOP3Op(op_val)
         else:
           decoded = fmt_cls.from_bytes(data)
           op_val = decoded._values.get('op', 0)
           op_val = op_val.val if hasattr(op_val, 'val') else op_val
-          op_enum(op_val)  # validate opcode
+          op_enum(op_val)
         if decoded.to_bytes()[:len(data)] != data:
-          failed += 1; failures.append(f"decode roundtrip failed for {data.hex()}"); continue
-        disasm_str = decoded.disasm()
-        # Test: LLVM should assemble our disasm output to the same bytes
-        llvm_bytes = compile_asm(disasm_str, compiler)
-        if llvm_bytes is None:
-          failed += 1; failures.append(f"LLVM failed to assemble: '{disasm_str}' (from '{asm_text}')")
-        elif llvm_bytes == data: passed += 1
-        else: failed += 1; failures.append(f"'{disasm_str}': expected={data.hex()} got={llvm_bytes.hex()}")
+          to_test.append((asm_text, data, None, "decode roundtrip failed"))
+          continue
+        to_test.append((asm_text, data, decoded.disasm(), None))
       except Exception as e:
-        failed += 1; failures.append(f"exception for {data.hex()}: {e}")
+        to_test.append((asm_text, data, None, f"exception: {e}"))
+
+    # Batch compile all disasm strings with single llvm-mc call
+    disasm_strs = [(i, t[2]) for i, t in enumerate(to_test) if t[2] is not None]
+    llvm_results = compile_asm_batch([s for _, s in disasm_strs]) if disasm_strs else []
+    llvm_map = {i: llvm_results[j] for j, (i, _) in enumerate(disasm_strs)}
+
+    # Match results back
+    passed, failed, failures = 0, 0, []
+    for idx, (asm_text, data, disasm_str, error) in enumerate(to_test):
+      if error:
+        failed += 1; failures.append(f"{error} for {data.hex()}")
+      elif disasm_str is not None and idx in llvm_map:
+        llvm_bytes = llvm_map[idx]
+        if llvm_bytes == data: passed += 1
+        else: failed += 1; failures.append(f"'{disasm_str}': expected={data.hex()} got={llvm_bytes.hex()}")
+
     print(f"{name.upper()} disasm: {passed} passed, {failed} failed" + (f", {skipped} skipped" if skipped else ""))
     if failures[:10]: print("  " + "\n  ".join(failures[:10]))
     self.assertEqual(failed, 0)

@@ -817,31 +817,37 @@ from extra.assembly.rdna3.pcode import *
         # Add original pseudocode as comment
         for pc_line in pc.split('\n'):
           lines.append(f"  # {pc_line}")
-        # V_DIV_SCALE: D0 defaults to S0 if no branch taken
-        if is_div_scale:
-          lines.append("  S0, S1, S2, D0, D1 = Reg(s0), Reg(s1), Reg(s2), Reg(s0), Reg(0)")
-        else:
-          lines.append("  S0, S1, S2, D0, D1 = Reg(s0), Reg(s1), Reg(s2), Reg(d0), Reg(0)")
-        lines.append("  SCC, VCC, EXEC = Reg(scc), Reg(vcc), Reg(exec_mask)")
-        lines.append("  EXEC_LO, EXEC_HI = SliceProxy(EXEC, 31, 0), SliceProxy(EXEC, 63, 32)")
-        lines.append("  tmp, saveexec = Reg(0), Reg(exec_mask)")
-        lines.append("  laneId = lane")
-        lines.append("  SIMM16, SIMM32 = Reg(literal), Reg(literal)")
-        lines.append("  SRC0, VDST = Reg(src0_idx), Reg(vdst_idx)")
+        # Only create Reg objects for registers actually used in the pseudocode
+        combined = code + pc
+        regs = [('S0', 'Reg(s0)'), ('S1', 'Reg(s1)'), ('S2', 'Reg(s2)'),
+                ('D0', 'Reg(s0)' if is_div_scale else 'Reg(d0)'), ('D1', 'Reg(0)'),
+                ('SCC', 'Reg(scc)'), ('VCC', 'Reg(vcc)'), ('EXEC', 'Reg(exec_mask)'),
+                ('tmp', 'Reg(0)'), ('saveexec', 'Reg(exec_mask)'), ('laneId', 'lane'),
+                ('SIMM16', 'Reg(literal)'), ('SIMM32', 'Reg(literal)'),
+                ('SRC0', 'Reg(src0_idx)'), ('VDST', 'Reg(vdst_idx)')]
+        used = {name for name, _ in regs if name in combined}
+        # EXEC_LO/EXEC_HI need EXEC
+        if 'EXEC_LO' in combined or 'EXEC_HI' in combined: used.add('EXEC')
+        for name, init in regs:
+          if name in used: lines.append(f"  {name} = {init}")
+        if 'EXEC_LO' in combined: lines.append("  EXEC_LO = SliceProxy(EXEC, 31, 0)")
+        if 'EXEC_HI' in combined: lines.append("  EXEC_HI = SliceProxy(EXEC, 63, 32)")
         # Add compiled pseudocode with markers
         lines.append("  # --- compiled pseudocode ---")
         for line in code.split('\n'):
           lines.append(f"  {line}")
         lines.append("  # --- end pseudocode ---")
-        # Generate result dict
-        lines.append("  result = {'d0': D0._val, 'scc': SCC._val & 1}")
+        # Generate result dict - use raw params if Reg wasn't created
+        d0_val = "D0._val" if 'D0' in used else "d0"
+        scc_val = "SCC._val & 1" if 'SCC' in used else "scc & 1"
+        lines.append(f"  result = {{'d0': {d0_val}, 'scc': {scc_val}}}")
         if has_sdst:
           lines.append("  result['vcc_lane'] = (VCC._val >> lane) & 1")
-        else:
+        elif 'VCC' in used:
           lines.append("  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1")
         if is_cmpx:
           lines.append("  result['exec_lane'] = (EXEC._val >> lane) & 1")
-        else:
+        elif 'EXEC' in used:
           lines.append("  if EXEC._val != exec_mask: result['exec'] = EXEC._val")
         if is_cmp:
           lines.append("  result['vcc_lane'] = (D0._val >> lane) & 1")
