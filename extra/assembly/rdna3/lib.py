@@ -287,7 +287,10 @@ class Inst64(Inst): pass
 # Supports both RDNA3.5 and CDNA4 instruction set PDFs - auto-detects format
 # ═══════════════════════════════════════════════════════════════════════════════
 
-PDF_URL = "https://docs.amd.com/api/khub/documents/UVVZM22UN7tMUeiW_4ShTQ/content"  # RDNA3.5 default
+PDF_URLS = {
+  "rdna3": "https://docs.amd.com/api/khub/documents/UVVZM22UN7tMUeiW_4ShTQ/content",
+  "cdna4": "https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf",
+}
 FIELD_TYPES = {'SSRC0': 'SSrc', 'SSRC1': 'SSrc', 'SOFFSET': 'SSrc', 'SADDR': 'SSrc', 'SRC0': 'Src', 'SRC1': 'Src', 'SRC2': 'Src',
   'SDST': 'SGPRField', 'SBASE': 'SGPRField', 'SDATA': 'SGPRField', 'SRSRC': 'SGPRField', 'VDST': 'VGPRField', 'VSRC1': 'VGPRField', 'VDATA': 'VGPRField',
   'VADDR': 'VGPRField', 'ADDR': 'VGPRField', 'DATA': 'VGPRField', 'DATA0': 'VGPRField', 'DATA1': 'VGPRField', 'SIMM16': 'SImm', 'OFFSET': 'Imm',
@@ -334,12 +337,12 @@ def _parse_fields_table(table: list, fmt: str, enums: set[str]) -> list[tuple]:
     fields.append((name, hi, lo, enc_val, ftype))
   return fields
 
-def generate(output_path: str | None = None, pdf_url: str | None = None) -> dict:
+def generate(output_path: str | None = None, arch: str = "rdna3") -> dict:
   """Generate instruction definitions from AMD ISA PDF. Returns dict with formats for testing."""
   import re, pdfplumber
   from tinygrad.helpers import fetch
 
-  pdf = pdfplumber.open(fetch(pdf_url or PDF_URL))
+  pdf = pdfplumber.open(fetch(PDF_URLS[arch]))
 
   # Auto-detect document type from first page
   first_page_text = pdf.pages[0].extract_text() or ''
@@ -513,7 +516,9 @@ def generate(output_path: str | None = None, pdf_url: str | None = None) -> dict
   return {"formats": formats, "enums": enums, "src_enum": src_enum}
 
 if __name__ == "__main__":
-  import sys
-  pdf_url = sys.argv[1] if len(sys.argv) > 1 else None
-  result = generate("extra/assembly/rdna3/autogen/__init__.py", pdf_url=pdf_url)
+  import argparse
+  parser = argparse.ArgumentParser(description="Generate instruction definitions from AMD ISA PDF")
+  parser.add_argument("--arch", choices=list(PDF_URLS.keys()), default="rdna3", help="Target architecture (default: rdna3)")
+  args = parser.parse_args()
+  result = generate("extra/assembly/rdna3/autogen/__init__.py", arch=args.arch)
   print(f"generated SrcEnum ({len(result['src_enum'])}) + {len(result['enums'])} opcode enums + {len(result['formats'])} format classes")
