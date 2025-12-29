@@ -946,10 +946,7 @@ jobs:
       - uses: Jimver/cuda-toolkit@v0.2.29
         id: cuda-toolkit
         with:
-          cuda: '12.5.0'
-          method: 'network'
-          sub-packages: '["nvcc", "cudart", "nvrtc", "nvjitlink", "Display.Driver"]'
-          log-file-suffix: '${{matrix.os}}.txt'
+          log-file-suffix: 'windows-latest-log.txt'
       - name: Check CUDA install
         run: |
           echo "Installed cuda version is: ${{steps.cuda-toolkit.outputs.cuda}}"
