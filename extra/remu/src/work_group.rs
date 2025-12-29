@@ -13,6 +13,7 @@ pub struct WorkGroup<'a> {
     kernel_args: *const u64,
     launch_bounds: [u32; 3],
     wave_state: HashMap<usize, WaveState>,
+    rsrc2: u32,  // compute_pgm_rsrc2 from kernel descriptor
 }
 
 #[derive(Debug, Clone)]
@@ -119,8 +120,8 @@ impl WaveContext {
 }
 
 impl<'a> WorkGroup<'a> {
-    pub fn new(dispatch_dim: u32, id: [u32; 3], launch_bounds: [u32; 3], kernel: &'a Vec<u32>, kernel_args: *const u64) -> Self {
-        Self { dispatch_dim, id, kernel, launch_bounds, kernel_args, lds: VecDataStore::new(), wave_state: HashMap::new() }
+    pub fn new(dispatch_dim: u32, id: [u32; 3], launch_bounds: [u32; 3], kernel: &'a Vec<u32>, kernel_args: *const u64, rsrc2: u32) -> Self {
+        Self { dispatch_dim, id, kernel, launch_bounds, kernel_args, lds: VecDataStore::new(), wave_state: HashMap::new(), rsrc2 }
     }
 
     pub fn exec_waves(&mut self) -> Result<(), i32> {
@@ -157,10 +158,40 @@ impl<'a> WorkGroup<'a> {
             scalar_reg.write64(0, self.kernel_args as u64);
 
             let [gx, gy, gz] = self.id;
-            match self.dispatch_dim {
-              3 => (scalar_reg[13], scalar_reg[14], scalar_reg[15]) = (gx, gy, gz),
-              2 => (scalar_reg[14], scalar_reg[15]) = (gx, gy),
-              _ => scalar_reg[15] = gx,
+
+            // If rsrc2 is provided, use it to determine workgroup ID placement
+            // Otherwise fall back to legacy behavior (s13/14/15)
+            if self.rsrc2 != 0 {
+              // Parse compute_pgm_rsrc2 to determine SGPR layout
+              // Bits 1-5: USER_SGPR count
+              // Bit 7: ENABLE_SGPR_WORKGROUP_ID_X
+              // Bit 8: ENABLE_SGPR_WORKGROUP_ID_Y
+              // Bit 9: ENABLE_SGPR_WORKGROUP_ID_Z
+              let user_sgpr_count = ((self.rsrc2 >> 1) & 0x1f) as usize;
+              let enable_wg_id_x = (self.rsrc2 >> 7) & 1 != 0;
+              let enable_wg_id_y = (self.rsrc2 >> 8) & 1 != 0;
+              let enable_wg_id_z = (self.rsrc2 >> 9) & 1 != 0;
+
+              // Workgroup IDs are placed after user SGPRs
+              let mut sgpr_idx = user_sgpr_count;
+              if enable_wg_id_x {
+                scalar_reg[sgpr_idx] = gx;
+                sgpr_idx += 1;
+              }
+              if enable_wg_id_y {
+                scalar_reg[sgpr_idx] = gy;
+                sgpr_idx += 1;
+              }
+              if enable_wg_id_z {
+                scalar_reg[sgpr_idx] = gz;
+              }
+            } else {
+              // Legacy behavior: place workgroup IDs at s13/14/15 based on dispatch_dim
+              match self.dispatch_dim {
+                3 => (scalar_reg[13], scalar_reg[14], scalar_reg[15]) = (gx, gy, gz),
+                2 => (scalar_reg[14], scalar_reg[15]) = (gx, gy),
+                _ => scalar_reg[15] = gx,
+              }
             }
 
             let mut vec_reg = VGPR::new();
@@ -289,7 +320,7 @@ mod test_workgroup {
         ];
         let addr = (&mut ret as *mut u32) as u64;
         let kernel = global_store_sgpr(addr, kernel, 106);
-        let mut wg = WorkGroup::new(1, [0, 0, 0], [3, 1, 1], &kernel, [addr].as_ptr());
+        let mut wg = WorkGroup::new(1, [0, 0, 0], [3, 1, 1], &kernel, [addr].as_ptr(), 0);
         wg.exec_waves().unwrap();
         assert_eq!(ret, 0b100);
     }
@@ -305,7 +336,7 @@ mod test_workgroup {
         ];
         let addr = (&mut ret as *mut u32) as u64;
         let kernel = global_store_sgpr(addr, kernel, 126);
-        let mut wg = WorkGroup::new(1, [0, 0, 0], [4, 1, 1], &kernel, [addr].as_ptr());
+        let mut wg = WorkGroup::new(1, [0, 0, 0], [4, 1, 1], &kernel, [addr].as_ptr(), 0);
         wg.exec_waves().unwrap();
         assert_eq!(ret, 0b0111);
     }
@@ -316,7 +347,7 @@ mod test_workgroup {
         let kernel = vec![0xBE8D00FF, 0x7FFFFFFF, 0x7E1402FF, u32::MAX, 0xD700000A, 0x0002010A];
         let addr = (&mut ret as *mut u32) as u64;
         let kernel = global_store_sgpr(addr, kernel, 0);
-        let mut wg = WorkGroup::new(1, [0, 0, 0], [5, 1, 1], &kernel, [addr].as_ptr());
+        let mut wg = WorkGroup::new(1, [0, 0, 0], [5, 1, 1], &kernel, [addr].as_ptr(), 0);
         wg.exec_waves().unwrap();
         assert_eq!(ret, 0b11110);
     }

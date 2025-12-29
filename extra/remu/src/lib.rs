@@ -10,6 +10,12 @@ mod work_group;
 
 #[no_mangle]
 pub extern "C" fn run_asm(lib: *const c_char, lib_sz: u32, gx: u32, gy: u32, gz: u32, lx: u32, ly: u32, lz: u32, args_ptr: *const u64) -> i32 {
+    // Legacy entry point - uses hardcoded SGPR layout (s13/14/15 for workgroup IDs)
+    run_asm_with_rsrc2(lib, lib_sz, gx, gy, gz, lx, ly, lz, args_ptr, 0)
+}
+
+#[no_mangle]
+pub extern "C" fn run_asm_with_rsrc2(lib: *const c_char, lib_sz: u32, gx: u32, gy: u32, gz: u32, lx: u32, ly: u32, lz: u32, args_ptr: *const u64, rsrc2: u32) -> i32 {
     if lib.is_null() || (lib_sz % 4) != 0 {
         panic!("Pointer is null or length is not properly aligned to 4 bytes");
     }
@@ -22,7 +28,7 @@ pub extern "C" fn run_asm(lib: *const c_char, lib_sz: u32, gx: u32, gy: u32, gz:
     for gx in 0..gx {
         for gy in 0..gy {
             for gz in 0..gz {
-                let mut wg = WorkGroup::new(dispatch_dim, [gx, gy, gz], [lx, ly, lz], &kernel, args_ptr);
+                let mut wg = WorkGroup::new(dispatch_dim, [gx, gy, gz], [lx, ly, lz], &kernel, args_ptr, rsrc2);
                 if let Err(err) = wg.exec_waves() {
                     return err;
                 }

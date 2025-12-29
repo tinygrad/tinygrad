@@ -97,7 +97,12 @@ def disasm(inst: Inst) -> str:
     else:
       op_name = getattr(autogen, f"{cls_name}Op")(op_val).name.lower() if hasattr(autogen, f"{cls_name}Op") else f"op_{op_val}"
   except (ValueError, KeyError): op_name = f"op_{op_val}"
-  def fmt_src(v): return f"0x{inst._literal:x}" if v == 255 and inst._literal is not None else decode_src(v)
+  def fmt_src(v):
+    lit = getattr(inst, '_literal', None)
+    if v == 255 and lit is not None:
+      # Format negative literals as unsigned 32-bit hex (AMD assembler doesn't accept 0x-xxx)
+      return f"0x{lit & 0xffffffff:x}" if lit < 0 else f"0x{lit:x}"
+    return decode_src(v)
 
   # VOP1
   if cls_name == 'VOP1':
@@ -105,8 +110,9 @@ def disasm(inst: Inst) -> str:
     if op_name == 'v_nop': return 'v_nop'
     if op_name == 'v_pipeflush': return 'v_pipeflush'
     parts = op_name.split('_')
-    is_16bit_dst = any(p in _16BIT_TYPES for p in parts[-2:-1]) or (len(parts) >= 2 and parts[-1] in _16BIT_TYPES and 'cvt' not in op_name)
-    is_16bit_src = parts[-1] in _16BIT_TYPES and 'sat_pk' not in op_name
+    # cvt instructions use full 32-bit registers (f16 result in bits[15:0]), not packed halves
+    is_16bit_dst = 'cvt' not in op_name and (any(p in _16BIT_TYPES for p in parts[-2:-1]) or (len(parts) >= 2 and parts[-1] in _16BIT_TYPES))
+    is_16bit_src = parts[-1] in _16BIT_TYPES and 'sat_pk' not in op_name and 'cvt' not in op_name
     _F64_OPS = ('v_ceil_f64', 'v_floor_f64', 'v_fract_f64', 'v_frexp_mant_f64', 'v_rcp_f64', 'v_rndne_f64', 'v_rsq_f64', 'v_sqrt_f64', 'v_trunc_f64')
     is_f64_dst = op_name in _F64_OPS or op_name in ('v_cvt_f64_f32', 'v_cvt_f64_i32', 'v_cvt_f64_u32')
     is_f64_src = op_name in _F64_OPS or op_name in ('v_cvt_f32_f64', 'v_cvt_i32_f64', 'v_cvt_u32_f64', 'v_frexp_exp_i32_f64')
@@ -182,6 +188,25 @@ def disasm(inst: Inst) -> str:
     mods = [m for m in ["glc" if glc else "", "dlc" if dlc else ""] if m]
     return f"{op_name} {_fmt_sdst(sdata, width)}, {sbase_str}, {off_str}" + (" " + " ".join(mods) if mods else "")
 
+  # DS (LDS/GDS)
+  if cls_name == 'DS':
+    vdst, addr, data0, data1, offset0, offset1, gds = [unwrap(inst._values.get(f, 0)) for f in ['vdst', 'addr', 'data0', 'data1', 'offset0', 'offset1', 'gds']]
+    is_read = 'load' in op_name or 'read' in op_name
+    is_write = 'store' in op_name or 'write' in op_name or 'add' in op_name or 'sub' in op_name or 'min' in op_name or 'max' in op_name or 'and' in op_name or 'or' in op_name or 'xor' in op_name
+    is_dual = 'ds2' in op_name or '_2' in op_name  # DS_READ2_*, DS_WRITE2_*
+    is_b64 = 'b64' in op_name or '_x2' in op_name or '64' in op_name
+    is_b128 = 'b128' in op_name
+    width = 4 if is_b128 else (2 if is_b64 else 1)
+    gds_str = " gds" if gds else ""
+    off_str = f" offset:{offset0}" if offset0 else ""
+    if is_read:
+      return f"{op_name} {_vreg(vdst, width)}, v{addr}{off_str}{gds_str}"
+    elif is_write:
+      return f"{op_name} v{addr}, {_vreg(data0, width)}{off_str}{gds_str}"
+    else:
+      # Atomic ops with return: vdst, vaddr, data
+      return f"{op_name} {_vreg(vdst, width)}, v{addr}, {_vreg(data0, width)}{off_str}{gds_str}"
+
   # FLAT
   if cls_name == 'FLAT':
     vdst, addr, data, saddr, offset, seg = [unwrap(inst._values.get(f, 0)) for f in ['vdst', 'addr', 'data', 'saddr', 'offset', 'seg']]
@@ -250,7 +275,8 @@ def disasm(inst: Inst) -> str:
       is_f16_dst, is_f16_src, is_f16_src2 = False, op_name.endswith('16'), False
     elif m := re.match(r'v_(?:cvt|frexp_exp)_([a-z0-9_]+)_([a-z0-9]+)', op_name):
       dst_type, src_type = m.group(1), m.group(2)
-      is_f16_dst, is_f16_src, is_f16_src2 = _is_16bit(dst_type), _is_16bit(src_type), _is_16bit(src_type)
+      # cvt instructions don't use .l/.h suffix on dst/src even for 16-bit types
+      is_f16_dst, is_f16_src, is_f16_src2 = False, False, False
       is_f64_dst, is_f64_src, is_f64 = '64' in dst_type, '64' in src_type, False
     elif re.match(r'v_mad_[iu]32_[iu]16', op_name):
       is_f16_dst, is_f16_src, is_f16_src2 = False, True, False  # 32-bit dst, 16-bit src0/src1, 32-bit src2
@@ -259,10 +285,8 @@ def disasm(inst: Inst) -> str:
     else:
       is_16bit_op = any(x in op_name for x in _16BIT_TYPES) and not any(x in op_name for x in ('dot2', 'pk_', 'sad', 'msad', 'qsad', 'mqsad'))
       is_f16_dst = is_f16_src = is_f16_src2 = is_16bit_op
-    # Check if any opsel bit is set (any operand uses .h) - if so, we need explicit .l for low-half
-    any_hi = opsel != 0
     def fmt_vop3_src(v, neg_bit, abs_bit, hi_bit=False, reg_cnt=1, is_16=False):
-      s = _fmt_src_n(v, reg_cnt) if reg_cnt > 1 else f"v{v - 256}.h" if is_16 and v >= 256 and hi_bit else f"v{v - 256}.l" if is_16 and v >= 256 and any_hi else fmt_src(v)
+      s = _fmt_src_n(v, reg_cnt) if reg_cnt > 1 else f"v{v - 256}.h" if is_16 and v >= 256 and hi_bit else f"v{v - 256}.l" if is_16 and v >= 256 else fmt_src(v)
       if abs_bit: s = f"|{s}|"
       return f"-{s}" if neg_bit else s
     # Determine register count for each source (check for cvt-specific 64-bit flags first)
@@ -282,7 +306,7 @@ def disasm(inst: Inst) -> str:
     elif dst_cnt > 1:
       dst_str = _vreg(vdst, dst_cnt)
     elif is_f16_dst:
-      dst_str = f"v{vdst}.h" if (opsel & 8) else f"v{vdst}.l" if any_hi else f"v{vdst}"
+      dst_str = f"v{vdst}.h" if (opsel & 8) else f"v{vdst}.l"
     else:
       dst_str = f"v{vdst}"
     clamp_str = " clamp" if clmp else ""
@@ -436,13 +460,10 @@ def disasm(inst: Inst) -> str:
       if op_name == 's_swappc_b64': return f"{op_name} {_fmt_sdst(sdst, 2)}, {_fmt_ssrc(ssrc0, 2)}"
       if op_name in ('s_sendmsg_rtn_b32', 's_sendmsg_rtn_b64'):
         return f"{op_name} {_fmt_sdst(sdst, 2 if 'b64' in op_name else 1)}, sendmsg({MSG_NAMES.get(ssrc0, str(ssrc0))})"
-      ssrc0_str = fmt_src(ssrc0) if src0_cnt == 1 else _fmt_ssrc(ssrc0, src0_cnt)
-      return f"{op_name} {_fmt_sdst(sdst, dst_cnt)}, {ssrc0_str}"
+      return f"{op_name} {_fmt_sdst(sdst, dst_cnt)}, {_fmt_ssrc(ssrc0, src0_cnt)}"
     if cls_name == 'SOP2':
       sdst, ssrc0, ssrc1 = [unwrap(inst._values.get(f, 0)) for f in ('sdst', 'ssrc0', 'ssrc1')]
-      ssrc0_str = fmt_src(ssrc0) if ssrc0 == 255 else _fmt_ssrc(ssrc0, src0_cnt)
-      ssrc1_str = fmt_src(ssrc1) if ssrc1 == 255 else _fmt_ssrc(ssrc1, src1_cnt)
-      return f"{op_name} {_fmt_sdst(sdst, dst_cnt)}, {ssrc0_str}, {ssrc1_str}"
+      return f"{op_name} {_fmt_sdst(sdst, dst_cnt)}, {_fmt_ssrc(ssrc0, src0_cnt)}, {_fmt_ssrc(ssrc1, src1_cnt)}"
     if cls_name == 'SOPC':
       return f"{op_name} {_fmt_ssrc(unwrap(inst._values.get('ssrc0', 0)), src0_cnt)}, {_fmt_ssrc(unwrap(inst._values.get('ssrc1', 0)), src1_cnt)}"
     if cls_name == 'SOPK':
@@ -481,8 +502,7 @@ def parse_operand(op: str) -> tuple:
     v = -int(m.group(1), 16) if op.startswith('-') else int(m.group(1), 16)
     return (v, neg, abs_, hi_half)
   if op in SPECIAL_REGS: return (SPECIAL_REGS[op], neg, abs_, hi_half)
-  if op == 'lit': return (RawImm(255), neg, abs_, hi_half)  # literal marker (actual value comes from literal word)
-  if m := re.match(r'^([svt](?:tmp)?)\[(\d+):(\d+)\]$', op): return (REG_MAP[m.group(1)][int(m.group(2)):int(m.group(3))], neg, abs_, hi_half)
+  if m := re.match(r'^([svt](?:tmp)?)\[(\d+):(\d+)\]$', op): return (REG_MAP[m.group(1)][int(m.group(2)):int(m.group(3))+1], neg, abs_, hi_half)
   if m := re.match(r'^([svt](?:tmp)?)(\d+)$', op):
     reg = REG_MAP[m.group(1)][int(m.group(2))]
     reg.hi = hi_half
@@ -559,8 +579,7 @@ def asm(text: str) -> Inst:
   elif mnemonic in ('v_fmamk_f32', 'v_fmamk_f16') and len(values) == 4: lit, values = unwrap(values[2]), [values[0], values[1], values[3]]
   vcc_ops = {'v_add_co_ci_u32', 'v_sub_co_ci_u32', 'v_subrev_co_ci_u32', 'v_add_co_u32', 'v_sub_co_u32', 'v_subrev_co_u32'}
   if mnemonic.replace('_e32', '') in vcc_ops and len(values) >= 5: values = [values[0], values[2], values[3]]
-  # v_cmp_*_e32: strip implicit vcc_lo dest. v_cmp_*_e64: keep vdst (vcc_lo encodes to 106)
-  if mnemonic.startswith('v_cmp') and not mnemonic.endswith('_e64') and len(values) >= 3 and operands[0].strip().lower() in ('vcc_lo', 'vcc_hi', 'vcc'):
+  if mnemonic.startswith('v_cmp') and len(values) >= 3 and operands[0].strip().lower() in ('vcc_lo', 'vcc_hi', 'vcc'):
     values = values[1:]
   # CMPX instructions with _e64 suffix: prepend implicit EXEC_LO destination (vdst=126)
   if 'cmpx' in mnemonic and mnemonic.endswith('_e64') and len(values) == 2:

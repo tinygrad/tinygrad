@@ -716,3 +716,46 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
     for gidy in range(gy):
       for gidx in range(gx): exec_workgroup(program, (gidx, gidy, gidz), (lx, ly, lz), args_ptr, user_sgpr_count, wg_id_enables)
   return 0
+
+def run_asm_with_rsrc2(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int) -> int:
+  """Run assembly with rsrc2 for proper SGPR configuration.
+  rsrc2 bits: 1-5=USER_SGPR_COUNT, 7=ENABLE_SGPR_WORKGROUP_ID_X, 8=Y, 9=Z
+  """
+  data = (ctypes.c_char * lib_sz).from_address(lib).raw
+  program = decode_program(data)
+  if not program: return -1
+  # Parse rsrc2 for workgroup ID configuration
+  user_sgpr_count = (rsrc2 >> 1) & 0x1f
+  enable_wg_id_x = (rsrc2 >> 7) & 1
+  enable_wg_id_y = (rsrc2 >> 8) & 1
+  enable_wg_id_z = (rsrc2 >> 9) & 1
+  for gidz in range(gz):
+    for gidy in range(gy):
+      for gidx in range(gx):
+        exec_workgroup_rsrc2(program, (gidx, gidy, gidz), (lx, ly, lz), args_ptr,
+                             user_sgpr_count, enable_wg_id_x, enable_wg_id_y, enable_wg_id_z)
+  return 0
+
+def exec_workgroup_rsrc2(program: Program, workgroup_id: tuple[int, int, int], local_size: tuple[int, int, int],
+                         args_ptr: int, user_sgpr_count: int, enable_x: int, enable_y: int, enable_z: int) -> None:
+  """Execute workgroup with rsrc2-based SGPR configuration."""
+  lx, ly, lz = local_size
+  total_threads, lds = lx * ly * lz, bytearray(65536)
+  waves: list[tuple[WaveState, int, int]] = []
+  for wave_start in range(0, total_threads, WAVE_SIZE):
+    n_lanes, st = min(WAVE_SIZE, total_threads - wave_start), WaveState()
+    st.exec_mask = (1 << n_lanes) - 1
+    st.wsgpr64(0, args_ptr)  # s[0:1] = kernarg_ptr
+    # Place workgroup IDs at proper positions based on rsrc2
+    gx, gy, gz = workgroup_id
+    sgpr_idx = user_sgpr_count
+    if enable_x: st.sgpr[sgpr_idx] = gx; sgpr_idx += 1
+    if enable_y: st.sgpr[sgpr_idx] = gy; sgpr_idx += 1
+    if enable_z: st.sgpr[sgpr_idx] = gz; sgpr_idx += 1
+    for i in range(n_lanes):
+      tid = wave_start + i
+      st.vgpr[i][0] = tid if local_size == (lx, 1, 1) else ((tid // (lx * ly)) << 20) | (((tid // lx) % ly) << 10) | (tid % lx)
+    waves.append((st, n_lanes, wave_start))
+  has_barrier = any(isinstance(inst, SOPP) and inst.op == SOPPOp.S_BARRIER for inst in program.values())
+  for _ in range(2 if has_barrier else 1):
+    for st, n_lanes, wave_start in waves: exec_wave(program, st, lds, n_lanes, workgroup_id, local_size, wave_start)

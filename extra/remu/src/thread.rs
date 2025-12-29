@@ -644,9 +644,10 @@ impl<'a> Thread<'a> {
                                 20 => (((s0 >> 24) & 0xff) as f32).to_bits(),
                                 56 => s0.reverse_bits(),
                                 57 => self.clz_i32_u32(s0),
-                                33..=51 => {
+                                32..=54 => {
                                     let s0 = f32::from_bits(s0);
                                     match op {
+                                        32 => s0.fract(),
                                         33 => s0.trunc(),
                                         34 => {
                                             let mut d0 = s0.trunc();
@@ -675,6 +676,8 @@ impl<'a> Thread<'a> {
                                         43 => 1.0 / s0,
                                         46 => 1.0 / f32::sqrt(s0),
                                         51 => f32::sqrt(s0),
+                                        53 => f32::sin(s0 * std::f32::consts::TAU),
+                                        54 => f32::cos(s0 * std::f32::consts::TAU),
                                         _ => todo_instr!(instruction)?,
                                     }
                                     .to_bits()
@@ -1268,7 +1271,7 @@ impl<'a> Thread<'a> {
                             }
 
                             let ret = match op {
-                                257 | 259 | 299 | 260 | 261 | 264 | 272 | 392 | 426 | 430 | 531 | 537 | 540 | 543 | 551 | 567 | 606 | 796 => {
+                                257 | 259 | 299 | 260 | 261 | 264 | 272 | 392 | 416 | 426 | 430 | 437 | 438 | 531 | 537 | 540 | 543 | 551 | 567 | 606 | 796 => {
                                     let s0 = f32::from_bits(s0).negate(0, neg).absolute(0, abs);
                                     let s1 = f32::from_bits(s1).negate(1, neg).absolute(1, abs);
                                     let s2 = f32::from_bits(s2).negate(2, neg).absolute(2, abs);
@@ -1279,8 +1282,11 @@ impl<'a> Thread<'a> {
                                         264 => s0 * s1,
                                         272 => f32::max(s0, s1).clmp(cm),
                                         299 => f32::mul_add(s0, s1, f32::from_bits(self.vec_reg[vdst])),
+                                        416 => s0.fract(),                                   // v_fract_f32
                                         426 => s0.recip(),
                                         430 => 1.0 / f32::sqrt(s0),
+                                        437 => f32::sin(s0 * std::f32::consts::TAU),         // v_sin_f32
+                                        438 => f32::cos(s0 * std::f32::consts::TAU),         // v_cos_f32
                                         531 => f32::mul_add(s0, s1, s2),
                                         537 => f32::min(f32::min(s0, s1), s2),
                                         543 => {
@@ -1358,14 +1364,20 @@ impl<'a> Thread<'a> {
                                                 _ => todo_instr!(instruction)?,
                                             }) as u32
                                         }
+                                        273 => i32::min(s0 as i32, s1 as i32) as u32,  // v_min_i32
+                                        274 => i32::max(s0 as i32, s1 as i32) as u32,  // v_max_i32
                                         275 => u32::min(s0, s1),
                                         276 => u32::max(s0, s1),
                                         280 => s1 << s0,
                                         281 => s1 >> s0,
+                                        282 => ((s1 as i32) >> s0) as u32,  // v_ashrrev_i32
                                         283 => s0 & s1,
                                         284 => s0 | s1,
                                         285 => s0 ^ s1,
                                         286 => !(s0 ^ s1),
+                                        293 => s0.wrapping_add(s1),  // v_add_nc_u32
+                                        294 => s0.wrapping_sub(s1),  // v_sub_nc_u32
+                                        295 => s1.wrapping_sub(s0),  // v_subrev_nc_u32
                                         523 => s0 * s1 + s2, // TODO 24 bit trunc
                                         528 => (s0 >> s1) & ((1 << s2) - 1),
                                         530 => (s0 & s1) | (!s0 & s2),
@@ -1811,7 +1823,7 @@ impl ALUSrc<u16> for Thread<'_> {
             VGPR_COUNT..=511 => self.vec_reg[code - VGPR_COUNT] as u16,
             129..=192 => (code - 128) as u16,
             193..=208 => ((code - 192) as i16 * -1) as u16,
-            240..=247 => f16::from_f32(
+            240..=248 => f16::from_f32(
                 [
                     (240, 0.5_f32),
                     (241, -0.5_f32),
@@ -1821,6 +1833,7 @@ impl ALUSrc<u16> for Thread<'_> {
                     (245, -2.0_f32),
                     (246, 4.0_f32),
                     (247, -4.0_f32),
+                    (248, std::f32::consts::FRAC_1_PI * 0.5),  // 1/(2*PI)
                 ]
                 .iter()
                 .find(|x| x.0 == code)
@@ -1839,7 +1852,7 @@ impl ALUSrc<u32> for Thread<'_> {
             VGPR_COUNT..=511 => self.vec_reg[code - VGPR_COUNT],
             129..=192 => (code - 128) as u32,
             193..=208 => ((code - 192) as i32 * -1) as u32,
-            240..=247 => [
+            240..=248 => [
                 (240, 0.5_f32),
                 (241, -0.5_f32),
                 (242, 1_f32),
@@ -1848,6 +1861,7 @@ impl ALUSrc<u32> for Thread<'_> {
                 (245, -2.0_f32),
                 (246, 4.0_f32),
                 (247, -4.0_f32),
+                (248, std::f32::consts::FRAC_1_PI * 0.5),  // 1/(2*PI)
             ]
             .iter()
             .find(|x| x.0 == code)
@@ -1865,7 +1879,7 @@ impl ALUSrc<u64> for Thread<'_> {
             VGPR_COUNT..=511 => self.vec_reg.read64(code - VGPR_COUNT),
             129..=192 => (code - 128) as u64,
             193..=208 => ((code - 192) as i64 * -1) as u64,
-            240..=247 => [
+            240..=248 => [
                 (240, 0.5_f64),
                 (241, -0.5_f64),
                 (242, 1_f64),
@@ -1874,6 +1888,7 @@ impl ALUSrc<u64> for Thread<'_> {
                 (245, -2.0_f64),
                 (246, 4.0_f64),
                 (247, -4.0_f64),
+                (248, std::f64::consts::FRAC_1_PI * 0.5),  // 1/(2*PI)
             ]
             .iter()
             .find(|x| x.0 == code)

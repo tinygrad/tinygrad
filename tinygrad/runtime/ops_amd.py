@@ -11,6 +11,8 @@ from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, Profil
 from tinygrad.helpers import VIZ, AMD_CC, AMD_LLVM, ceildiv
 from tinygrad.renderer.cstyle import AMDHIPRenderer, AMDHIPCCRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
+from tinygrad.renderer.rdna_new import RDNARenderer
+from tinygrad.runtime.support.compiler_amd import RDNACompiler
 from tinygrad.runtime.autogen import kfd, hsa, pci, sqtt
 from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.elf import elf_loader
@@ -23,6 +25,7 @@ if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint
 SQTT = ContextVar("SQTT", abs(VIZ.value)>=2)
 SQTT_ITRACE_SE_MASK, SQTT_LIMIT_SE = ContextVar("SQTT_ITRACE_SE_MASK", 0b11), ContextVar("SQTT_LIMIT_SE", 0)
 PMC = ContextVar("PMC", abs(VIZ.value)>=2)
+AMD_RDNA = ContextVar("AMD_RDNA", 0)
 EVENT_INDEX_PARTIAL_FLUSH = 4 # based on a comment in nvd.h
 WAIT_REG_MEM_FUNCTION_EQ  = 3 # ==
 WAIT_REG_MEM_FUNCTION_NEQ = 4 # !=
@@ -936,7 +939,8 @@ class AMDDevice(HCQCompiled):
 
     compilers = CompilerSet([CompilerPair(functools.partial(AMDHIPRenderer, self.arch), None),
                              CompilerPair(functools.partial(AMDLLVMRenderer, self.arch), None, AMD_LLVM),
-                             CompilerPair(functools.partial(AMDHIPCCRenderer, self.arch), None)], ctrl_var=AMD_CC)
+                             CompilerPair(functools.partial(AMDHIPCCRenderer, self.arch), None),
+                             CompilerPair(functools.partial(RDNARenderer, self.arch), functools.partial(RDNACompiler, self.arch), AMD_RDNA)], ctrl_var=AMD_CC)
 
     super().__init__(device, AMDAllocator(self), compilers, functools.partial(AMDProgram, self), AMDSignal,
                      functools.partial(AMDComputeAQLQueue if self.is_aql else AMDComputeQueue, self),

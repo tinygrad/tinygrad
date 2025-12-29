@@ -67,7 +67,7 @@ def disassemble_lib(lib: bytes, compiler) -> list[tuple[str, bytes]]:
       continue
   return results
 
-def compile_asm(instr: str, compiler=None) -> bytes:
+def compile_asm(instr: str, compiler=None) -> bytes | None:
   """Compile a single instruction with llvm-mc and return the machine code bytes."""
   llvm_mc = get_llvm_mc()
   result = subprocess.run(
@@ -154,18 +154,20 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
         remaining = kernel.code[offset:]
         fmt = detect_format(remaining)
         if fmt is None:
-          decoded_instrs.append((ki, offset, None, None, None, False, "no format"))
+          decoded_instrs.append((ki, offset, remaining[:4], None, None, False, "no format"))
           offset += 4
           continue
 
         base_size = fmt._size()
-        if len(remaining) < base_size:
+        size = base_size
+        if len(remaining) < size:
           break
 
+        orig_bytes = remaining[:size]
+
+        # Test 1: decode -> reencode roundtrip
         try:
-          decoded = fmt.from_bytes(remaining)  # pass all remaining bytes so from_bytes can read literal
-          size = decoded.size()  # actual size including literal
-          orig_bytes = remaining[:size]
+          decoded = fmt.from_bytes(orig_bytes)
           reencoded = decoded.to_bytes()
           our_disasm = decoded.disasm()
           decode_ok = reencoded == orig_bytes
@@ -249,7 +251,7 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
     print(f"disasm vs llvm: {disasm_passed} passed, {disasm_failed} failed, {disasm_skipped} skipped")
     self.assertEqual(decode_failed, 0, f"Decode failures:\n" + "\n".join(decode_failures[:20]))
     self.assertEqual(asm_failed, 0, f"Asm failures:\n" + "\n".join(asm_failures[:20]))
-    # Note: disasm string comparison is informational only - formatting differences between LLVM versions are expected
+    self.assertEqual(disasm_failed, 0, f"Disasm failures:\n" + "\n".join(disasm_failures[:20]))
 
   # Basic unary ops
   def test_neg(self): self._test_kernel_roundtrip(lambda T: -T([1.0, -2.0, 3.0, -4.0]))
