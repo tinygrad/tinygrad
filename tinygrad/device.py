@@ -199,8 +199,7 @@ class Buffer:
     return mv
   def view(self, size:int, dtype:DType, offset:int) -> Buffer:
     assert offset < self.nbytes, "offset must be less than nbytes"
-    if self._base is not None: return Buffer(self.device, size, dtype, base=self._base, offset=self.offset+offset)
-    return Buffer(self.device, size, dtype, base=self, offset=offset)
+    return Buffer(self.device, size, dtype, base=self.base, offset=self.offset+offset)
 
 @dataclass(frozen=True)
 class DMACPURef:
@@ -278,7 +277,7 @@ class Compiler:
   def disassemble(self, lib:bytes): pass
 
 @dataclass(frozen=True)
-class CompilerPair: renderer:type[Renderer]|functools.partial; compiler:type[Compiler]|functools.partial; ctrl_var:ContextVar|None = None # noqa: E702
+class CompilerPair: renderer:type[Renderer]|functools.partial; compiler:type[Compiler]|functools.partial|None; ctrl_var:ContextVar|None = None # noqa: E702
 
 @dataclass(frozen=True)
 class CompilerSet: cset:list[CompilerPair]; ctrl_var:ContextVar|None = None # noqa: E702
@@ -290,21 +289,25 @@ class Compiled:
     self.device, self.allocator, self.runtime, self.graph, self.group_id = device, allocator, runtime, graph, group_id
 
     self.comps_ctrl_var = compilers.ctrl_var if compilers is not None else None
-    self.comp_sets:dict[Any, tuple[ContextVar|None, tuple[type[Renderer]|functools.partial, type[Compiler]|functools.partial]]] = {}
-    self.cached_pair:dict[Any, tuple[Renderer, Compiler]] = {}
+    self.comp_sets:dict[Any, tuple[ContextVar|None, tuple[type[Renderer]|functools.partial, type[Compiler]|functools.partial|None]]] = {}
+    self.cached_pair:dict[Any, tuple[Renderer, Compiler|None]] = {}
     for cpair in (compilers.cset if compilers is not None else [CompilerPair(Renderer, Compiler)]):
-      self.comp_sets[self._compiler_name(cpair.compiler)] = (cpair.ctrl_var, (cpair.renderer, cpair.compiler))
+      self.comp_sets[self._compiler_name(cpair.renderer, cpair.compiler)] = (cpair.ctrl_var, (cpair.renderer, cpair.compiler))
 
   @property
   def renderer(self) -> Renderer: return self._select_compiler_pair()[0]
 
   @property
-  def compiler(self) -> Compiler: return self._select_compiler_pair()[1]
+  def compiler(self) -> Compiler:
+    if (ret:=self.renderer.compiler or self._select_compiler_pair()[1]) is None: raise RuntimeError(f"no compiler for {self.device}")
+    return ret
 
-  def _compiler_name(self, c:type[Compiler]|functools.partial) -> str:
-    return unwrap_class_type(c).__name__.upper().removesuffix("COMPILER").removeprefix(devname:=self.device.split(':')[0].upper()) or devname
+  def _compiler_name(self, r:type[Renderer]|functools.partial, c:type[Compiler]|functools.partial|None) -> str:
+    devname = self.device.split(':')[0].upper()
+    if c is None: return unwrap_class_type(r).__name__.upper().removesuffix("RENDERER").removeprefix(devname) or devname
+    return unwrap_class_type(c).__name__.upper().removesuffix("COMPILER").removeprefix(devname) or devname
 
-  def _select_compiler_pair(self) -> tuple[Renderer, Compiler]:
+  def _select_compiler_pair(self) -> tuple[Renderer, Compiler|None]:
     # select forced compiler from global env var.
     forced_comps = set([self.comp_sets[val][1]] if self.comps_ctrl_var is not None and (val:=self.comps_ctrl_var.value) else [])
 
@@ -398,7 +401,7 @@ def enumerate_devices_str() -> Generator[str, None, None]:
             # d.renderer, d.compiler = r(), c()
             with Context(CACHELEVEL=0): test = (Tensor([1,2,3], device=device) * 2).tolist()
             if test != [2,4,6]: raise ValueError(f"got {test} instead of [2, 4, 6]")
-            set_text = f'({cc_ctrl_var.key}={d._compiler_name(c)} to make default)' if cc_ctrl_var is not None else ''
+            set_text = f'({cc_ctrl_var.key}={d._compiler_name(r, c)} to make default)' if cc_ctrl_var is not None else ''
             default_text = '(default)' if type(default_compiler) is type(d.compiler) else set_text
             compilers_results.append(f"{colored('+', 'green')} {unwrap_class_type(c).__name__} {default_text}")
             any_works = True

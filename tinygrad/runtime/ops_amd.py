@@ -9,15 +9,15 @@ from tinygrad.uop.ops import sint
 from tinygrad.device import Compiled, DMAFdRef, BufferSpec, CompilerSet, CompilerPair
 from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, colored, prod, ContextVar
 from tinygrad.helpers import VIZ, AMD_CC, AMD_LLVM, ceildiv
-from tinygrad.renderer.cstyle import AMDRenderer
+from tinygrad.renderer.cstyle import AMDHIPRenderer, AMDHIPCCRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, pci, sqtt
 from tinygrad.runtime.autogen.am import am
-from tinygrad.runtime.support.compiler_amd import HIPCompiler, HIPCCCompiler, AMDLLVMCompiler
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_soc, import_ip_offsets, import_pmc
 from tinygrad.runtime.support.system import System, PCIIfaceBase, PCIAllocationMeta, PCIDevice, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
+from tinygrad.runtime.support.memory import AddrSpace
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
 SQTT = ContextVar("SQTT", abs(VIZ.value)>=2)
@@ -648,7 +648,11 @@ class AMDQueueDesc:
 
     # Flush hdp if queue is in dev mem.
     if dev.is_am() and not dev.is_usb(): dev.iface.dev_impl.gmc.flush_hdp()
-    for doorbell in self.doorbells: doorbell[0] = self.put_value if doorbell_value is None else doorbell_value
+    try:
+      for doorbell in self.doorbells: doorbell[0] = self.put_value if doorbell_value is None else doorbell_value
+    except Exception as e:
+      dev.error_state = e
+      raise
 
 class KFDIface:
   kfd:FileIOInterface|None = None
@@ -830,8 +834,8 @@ class PCIIface(PCIIfaceBase):
                                     doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0), pipe=0, queue=0)
     else:
       pv = self.dev_impl.gfx.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr+rptr, wptr_addr=gart.va_addr+wptr,
-        eop_addr=eop_buffer.va_addr, eop_size=eop_buffer.size, doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_MEC_RING0), pipe=0, queue=0,
-        aql=(queue_type==kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL))
+        eop_addr=eop_buffer.va_addr, eop_size=eop_buffer.size, doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_MEC_RING0), pipe=0,
+        queue=int(is_aql:=(queue_type==kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL)), aql=is_aql)
 
     return AMDQueueDesc(ring=ring.cpu_view().view(fmt='I'), doorbells=[self.dev_impl.doorbell64.view(doorbell_index * 8, 8, fmt='Q')],
       read_ptrs=[gart.cpu_view().view(offset=rptr, size=8, fmt='Q')], write_ptrs=[gart.cpu_view().view(offset=wptr, size=8, fmt='Q')], put_value=pv)
@@ -859,7 +863,7 @@ class USBIface(PCIIface):
     self.sys_buf, self.sys_next_off = self._dma_region(ctrl_addr=0xa000, sys_addr=0x820000, size=0x1000), 0x800
 
   def _dma_region(self, ctrl_addr, sys_addr, size):
-    region = self.dev_impl.mm.map_range(vaddr:=self.dev_impl.mm.alloc_vaddr(size=size), size, [(sys_addr, size)], system=True, uncached=True)
+    region = self.dev_impl.mm.map_range(vaddr:=self.dev_impl.mm.alloc_vaddr(size=size), size, [(sys_addr, size)], aspace=AddrSpace.SYS, uncached=True)
     return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(region, has_cpu_mapping=False), view=self.pci_dev.dma_view(ctrl_addr, size), owner=self.dev)
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, **kwargs) -> HCQBuffer:
@@ -930,9 +934,9 @@ class AMDDevice(HCQCompiled):
     max_copy_size = 0x40000000 if self.iface.ip_versions[am.SDMA0_HWIP][0] >= 5 else 0x400000
     self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else (16 << 20))
 
-    compilers = CompilerSet([CompilerPair(functools.partial(AMDRenderer, self.arch), functools.partial(HIPCompiler, self.arch)),
-                             CompilerPair(functools.partial(AMDLLVMRenderer, self.arch), functools.partial(AMDLLVMCompiler, self.arch), AMD_LLVM),
-                             CompilerPair(functools.partial(AMDRenderer, self.arch), functools.partial(HIPCCCompiler, self.arch))], ctrl_var=AMD_CC)
+    compilers = CompilerSet([CompilerPair(functools.partial(AMDHIPRenderer, self.arch), None),
+                             CompilerPair(functools.partial(AMDLLVMRenderer, self.arch), None, AMD_LLVM),
+                             CompilerPair(functools.partial(AMDHIPCCRenderer, self.arch), None)], ctrl_var=AMD_CC)
 
     super().__init__(device, AMDAllocator(self), compilers, functools.partial(AMDProgram, self), AMDSignal,
                      functools.partial(AMDComputeAQLQueue if self.is_aql else AMDComputeQueue, self),

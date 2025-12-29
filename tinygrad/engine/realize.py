@@ -2,52 +2,12 @@ from typing import cast, Callable
 import time, pprint, random, itertools, math
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
-from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, getenv, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context
+from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context
 from tinygrad.helpers import unwrap
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, graph_rewrite, print_uops, track_rewrites, KernelInfo, pyrender
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer
 from tinygrad.device import Device, Buffer
-from tinygrad.renderer import Renderer, ProgramSpec, Estimates
-from tinygrad.codegen import full_rewrite
-from tinygrad.codegen.opt import Opt
-
-# **************** Program Creation ****************
-
-@track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.name, (ret.function_name, ret.ast), ret=ret), replay=True)
-def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> ProgramSpec:
-  """
-  Transform an AST into a ProgramSpec. May trigger BEAM search.
-
-  Args:
-    ast: The Ops.SINK rooted AST
-    renderer: The renderer used to generate the code
-
-  Returns:
-    The ProgramSpec of the program.
-  """
-
-  if getenv("VIZ"): graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
-  if DEBUG >= 5: print(pyrender(ast))
-
-  # linearize
-  if opts is not None:
-    assert ast.arg is None, "can't apply opts if sink has an arg"
-    ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts)))
-  try:
-    uops = full_rewrite(ast, renderer)
-  except RuntimeError as e:
-    print("***** LINEARIZE FAILURE *****")
-    print(e)
-    print(pyrender(ast))
-    raise
-  assert uops[-1].op is Ops.SINK, "last uop must be sink"
-
-  # print and render
-  if DEBUG >= 6: print_uops(uops)
-  src = renderer.render(uops)
-
-  return ProgramSpec(uops[-1].arg.name if uops[-1].arg is not None else "test", src, renderer.device, ast, uops,
-                     global_size=[1,1,1] if renderer.has_local or renderer.has_threads else None,
-                     local_size=[1,1,1] if renderer.has_local else None)
+from tinygrad.renderer import ProgramSpec, Estimates
+from tinygrad.codegen import get_program
 
 # **************** Runners ****************
 
@@ -76,36 +36,29 @@ def optimize_local_size(_prg:Callable, global_size:list[int], rawbufs:list[Buffe
   return ret[1]
 
 class CompiledRunner(Runner):
-  def __init__(self, p:ProgramSpec, precompiled:bytes|None=None, prg=None):
+  def __init__(self, p:ProgramSpec, prg=None):
     if DEBUG >= 3: print(p.applied_opts)
     if DEBUG >= 4: print(p.src)
-    self.p:ProgramSpec = p
-    if precompiled is not None: self.lib = precompiled
-    else:
+    if p.lib is None:
       with cpu_profile(TracingKey(f"compile {p.name}", (p.function_name,)), "TINY"):
-        self.lib = Device[p.device].compiler.compile_cached(p.src)
-    if DEBUG >= 7: Device[p.device].compiler.disassemble(self.lib)
-    self._prg = Device[p.device].runtime(p.function_name, self.lib) if prg is None else prg
+        p = replace(p, lib=Device[p.device].compiler.compile_cached(p.src))
+    self.p:ProgramSpec = p
+    assert self.p.lib is not None
+    if DEBUG >= 7: Device[p.device].compiler.disassemble(self.p.lib)
+    self._prg = Device[p.device].runtime(p.function_name, self.p.lib) if prg is None else prg
     super().__init__(p.name, p.device, p.estimates)
 
-  def __reduce__(self): return self.__class__, (self.p, self.lib)
+  def __reduce__(self): return self.__class__, (self.p,)
 
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int]|None=None, wait=False) -> float|None:
     if var_vals is None: var_vals = {}
-    has_local = Device[self.p.device].renderer.has_local
     global_size, local_size = self.p.launch_dims(var_vals)
-    if has_local and global_size is not None and local_size is None and all_int(self.p.global_size): # type: ignore[arg-type]
+    if Device[self.p.device].renderer.has_local and local_size is None and all_int(self.p.global_size): # type: ignore[arg-type]
       local_size = optimize_local_size(self._prg, global_size, rawbufs)
       global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
       self.p = replace(self.p, global_size=global_size, local_size=local_size)
-    lra = {}
-    if global_size:
-      lra['global_size'] = tuple(global_size)
-      assert len(global_size) == 3, "global size must have len 3"
-    if local_size:
-      lra['local_size'] = tuple(local_size)
-      assert len(local_size) == 3, "local size must have len 3"
-    return self._prg(*[x._buf for x in rawbufs], **lra, vals=tuple(var_vals[k.expr] for k in self.p.vars), wait=wait)
+    return self._prg(*[x._buf for x in rawbufs], global_size=tuple(global_size), local_size=tuple(local_size) if local_size else None,
+                     vals=tuple(var_vals[k.expr] for k in self.p.vars), wait=wait)
 
 class ViewOp(Runner):
   def __init__(self, buf:Buffer): super().__init__(colored(f"view {buf.nbytes:8d} @ {buf.offset:<10d}", "yellow"), buf.device)
@@ -114,13 +67,13 @@ class ViewOp(Runner):
 
 class BufferCopy(Runner):
   def __init__(self, total_sz, dest_device, src_device):
-    if total_sz >= 1e6: name = f"{type(self).__name__[6:].lower()} {total_sz/1e6:7.2f}M, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
-    else: name = f"{type(self).__name__[6:].lower()} {total_sz:8d}, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
+    sz = f"{total_sz/1e6:7.2f}M" if total_sz >= 1e6 else f"{total_sz:8d}"
+    name = f"{type(self).__name__[6:].lower()} {sz}, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
     super().__init__(colored(name, "yellow"), dest_device, Estimates(lds=total_sz, mem=total_sz))
   def copy(self, dest, src):
     disk_supports_fast_copyout = src.device.startswith("DISK") and hasattr(src.allocator.dev, 'io_uring') and \
       getattr(src.allocator.dev, 'fd', None) is not None and dest.allocator.supports_copy_from_disk
-    if src.device.startswith("DISK") and hasattr(dest.allocator, 'copy_from_disk') and disk_supports_fast_copyout and src.nbytes >= 4096:
+    if disk_supports_fast_copyout and hasattr(dest.allocator, 'copy_from_disk') and src.nbytes >= 4096:
       dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes)
     elif (src.device.startswith("DISK") or src.device.startswith("TINYFS")) and hasattr(dest.allocator, '_as_buffer'):
       # fast(ish) path, uses readinto in diskbuffers
@@ -162,7 +115,7 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
   if cret:=method_cache.get(ckey): return cret
   bkey = (device.split(":")[0], type(Device[device].compiler), ast.key, context, True)
   if bret:=method_cache.get(bkey):
-    method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device), bret.lib)
+    method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device))
   else:
     prg: ProgramSpec = get_program(ast, Device[device].renderer)
     method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, device=device))
