@@ -7,6 +7,7 @@ Set USE_HW=1 to run on both emulator and real hardware, comparing results.
 
 import ctypes, unittest, os, struct
 from extra.assembly.rdna3.autogen import *
+from extra.assembly.rdna3.lib import RawImm
 from extra.assembly.rdna3.emu import WaveState, run_asm, set_valid_mem_ranges
 from extra.assembly.rdna3.pcode import _i32, _f32
 
@@ -449,6 +450,160 @@ class TestMultiLane(unittest.TestCase):
     ]
     st = run_program(instructions, n_lanes=4)
     self.assertEqual(st.vcc & 0xf, 0xf, "All lanes should match")
+
+
+class TestLaneInstructions(unittest.TestCase):
+  """Tests for cross-lane instructions (readlane, writelane, readfirstlane).
+
+  These are critical for wave-level reductions and WMMA matrix operations.
+
+  Note: V_READLANE_B32 and V_READFIRSTLANE_B32 write to SGPR, but the VOP1/VOP3
+  encoding has a 'vdst' field. We use RawImm to encode SGPR indices directly.
+  """
+
+  def _readlane(self, sdst_idx, vsrc, lane_idx):
+    """Helper to create V_READLANE_B32 with SGPR destination."""
+    return VOP3(VOP3Op.V_READLANE_B32, vdst=RawImm(sdst_idx), src0=vsrc, src1=lane_idx)
+
+  def _readfirstlane(self, sdst_idx, vsrc):
+    """Helper to create V_READFIRSTLANE_B32 with SGPR destination."""
+    return VOP1(VOP1Op.V_READFIRSTLANE_B32, vdst=RawImm(sdst_idx), src0=vsrc)
+
+  def test_v_readlane_b32_basic(self):
+    """V_READLANE_B32 reads a value from a specific lane's VGPR."""
+    # v[255] = lane_id from prologue; compute v[0] = lane_id * 10
+    instructions = [
+      v_lshlrev_b32_e32(v[0], 1, v[255]),  # v0 = lane_id * 2
+      v_lshlrev_b32_e32(v[1], 3, v[255]),  # v1 = lane_id * 8
+      v_add_nc_u32_e32(v[0], v[0], v[1]),  # v0 = lane_id * 10
+      # Now read lane 2's value (should be 20) into s0
+      self._readlane(0, v[0], 2),          # s0 = v0 from lane 2 = 20
+      v_mov_b32_e32(v[2], s[0]),           # broadcast to all lanes
+    ]
+    st = run_program(instructions, n_lanes=4)
+    # All lanes should have the value 20 (lane 2's value)
+    for lane in range(4):
+      self.assertEqual(st.vgpr[lane][2], 20, f"Lane {lane}: expected 20, got {st.vgpr[lane][2]}")
+
+  def test_v_readlane_b32_lane_0(self):
+    """V_READLANE_B32 reading from lane 0."""
+    instructions = [
+      v_lshlrev_b32_e32(v[0], 2, v[255]),  # v0 = lane_id * 4
+      v_add_nc_u32_e32(v[0], 100, v[0]),   # v0 = 100 + lane_id * 4
+      self._readlane(0, v[0], 0),          # s0 = lane 0's v0 = 100
+      v_mov_b32_e32(v[1], s[0]),
+    ]
+    st = run_program(instructions, n_lanes=4)
+    for lane in range(4):
+      self.assertEqual(st.vgpr[lane][1], 100)
+
+  def test_v_readlane_b32_last_lane(self):
+    """V_READLANE_B32 reading from the last active lane (lane 3 in 4-lane test)."""
+    instructions = [
+      v_lshlrev_b32_e32(v[0], 2, v[255]),  # v0 = lane_id * 4
+      v_add_nc_u32_e32(v[0], 100, v[0]),   # v0 = 100 + lane_id * 4
+      self._readlane(0, v[0], 3),          # s0 = lane 3's v0 = 112
+      v_mov_b32_e32(v[1], s[0]),
+    ]
+    st = run_program(instructions, n_lanes=4)
+    for lane in range(4):
+      self.assertEqual(st.vgpr[lane][1], 112)
+
+  def test_v_readlane_b32_different_vgpr(self):
+    """V_READLANE_B32 reading from different VGPR indices.
+
+    Regression test for bug where rd_lane was checked against VGPR values
+    instead of being used as an index (using 'in' operator on list instead
+    of checking if index is within bounds).
+    """
+    instructions = [
+      # Set up v[5] with per-lane values
+      v_lshlrev_b32_e32(v[5], 3, v[255]),  # v5 = lane_id * 8
+      v_add_nc_u32_e32(v[5], 50, v[5]),    # v5 = 50 + lane_id * 8
+      # Read lane 1's v[5] (should be 58)
+      self._readlane(0, v[5], 1),
+      v_mov_b32_e32(v[6], s[0]),
+    ]
+    st = run_program(instructions, n_lanes=4)
+    for lane in range(4):
+      self.assertEqual(st.vgpr[lane][6], 58, f"Lane {lane}: expected 58 from v[5] lane 1")
+
+  def test_v_readfirstlane_b32_basic(self):
+    """V_READFIRSTLANE_B32 reads from the first active lane."""
+    instructions = [
+      v_lshlrev_b32_e32(v[0], 2, v[255]),  # v0 = lane_id * 4
+      v_add_nc_u32_e32(v[0], 1000, v[0]),  # v0 = 1000 + lane_id * 4
+      self._readfirstlane(0, v[0]),        # s0 = first lane's v0 = 1000
+      v_mov_b32_e32(v[1], s[0]),
+    ]
+    st = run_program(instructions, n_lanes=4)
+    for lane in range(4):
+      self.assertEqual(st.vgpr[lane][1], 1000)
+
+  def test_v_readfirstlane_b32_different_vgpr(self):
+    """V_READFIRSTLANE_B32 reading from different VGPR index.
+
+    Regression test for bug where src0_idx bounds check was incorrect.
+    """
+    instructions = [
+      v_lshlrev_b32_e32(v[7], 5, v[255]),  # v7 = lane_id * 32
+      v_add_nc_u32_e32(v[7], 200, v[7]),   # v7 = 200 + lane_id * 32
+      self._readfirstlane(0, v[7]),        # s0 = first lane's v7 = 200
+      v_mov_b32_e32(v[8], s[0]),
+    ]
+    st = run_program(instructions, n_lanes=4)
+    for lane in range(4):
+      self.assertEqual(st.vgpr[lane][8], 200)
+
+  def test_v_writelane_b32_basic(self):
+    """V_WRITELANE_B32 writes a scalar to a specific lane's VGPR."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),              # Initialize v0 = 0 for all lanes
+      s_mov_b32(s[0], 999),                # Value to write
+      v_writelane_b32(v[0], s[0], 2),      # Write 999 to lane 2's v0
+    ]
+    st = run_program(instructions, n_lanes=4)
+    for lane in range(4):
+      if lane == 2:
+        self.assertEqual(st.vgpr[lane][0], 999, f"Lane 2 should have 999")
+      else:
+        self.assertEqual(st.vgpr[lane][0], 0, f"Lane {lane} should have 0")
+
+  def test_v_writelane_then_readlane(self):
+    """V_WRITELANE followed by V_READLANE to verify round-trip."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),
+      s_mov_b32(s[0], 0xdeadbeef),
+      v_writelane_b32(v[0], s[0], 1),      # Write to lane 1
+      self._readlane(1, v[0], 1),          # Read back from lane 1 into s1
+      v_mov_b32_e32(v[1], s[1]),
+    ]
+    st = run_program(instructions, n_lanes=4)
+    for lane in range(4):
+      self.assertEqual(st.vgpr[lane][1], 0xdeadbeef)
+
+  def test_v_readlane_for_reduction(self):
+    """Simulate a wave reduction using readlane - common pattern in WMMA/reductions.
+
+    This pattern is used when reducing across lanes, e.g., for computing
+    the sum of all elements in a wave.
+    """
+    # Each lane computes lane_id + 1, then we sum lanes 0-3 using readlane
+    instructions = [
+      v_add_nc_u32_e32(v[0], 1, v[255]),   # v0 = lane_id + 1 (1, 2, 3, 4)
+      # Read all 4 lanes and sum in scalar registers
+      self._readlane(0, v[0], 0),          # s0 = 1
+      self._readlane(1, v[0], 1),          # s1 = 2
+      s_add_u32(s[0], s[0], s[1]),         # s0 = 3
+      self._readlane(1, v[0], 2),          # s1 = 3
+      s_add_u32(s[0], s[0], s[1]),         # s0 = 6
+      self._readlane(1, v[0], 3),          # s1 = 4
+      s_add_u32(s[0], s[0], s[1]),         # s0 = 10
+      v_mov_b32_e32(v[1], s[0]),           # Broadcast sum to all lanes
+    ]
+    st = run_program(instructions, n_lanes=4)
+    for lane in range(4):
+      self.assertEqual(st.vgpr[lane][1], 10, f"Sum 1+2+3+4 should be 10")
 
 
 class TestTrigonometry(unittest.TestCase):
@@ -1289,6 +1444,67 @@ class TestF16Conversions(unittest.TestCase):
     # Low bits should be f16 1.0, high bits behavior is implementation-defined
     self.assertEqual(lo_bits, 0x3c00, f"Low bits should be 0x3c00, got 0x{lo_bits:04x}")
 
+  def test_v_cvt_f16_f32_reads_full_32bit_source(self):
+    """V_CVT_F16_F32 must read full 32-bit f32 source, not just low 16 bits.
+
+    Regression test for a bug where V_CVT_F16_F32 was incorrectly treated as having
+    a 16-bit source because '_F16' is in the instruction name. The CVT naming convention
+    is V_CVT_DST_SRC, so V_CVT_F16_F32 has a 32-bit f32 source and 16-bit f16 destination.
+
+    The bug caused the emulator to only read the low 16 bits of the source register,
+    which would produce wrong results when the significant bits of the f32 value are
+    in the upper bits (as they are for most f32 values > 1.0 or < -1.0).
+    """
+    from extra.assembly.rdna3.pcode import _f16
+    # Use f32 value 1.5 = 0x3fc00000. If only low 16 bits (0x0000) are read, result is wrong.
+    # Correct f16 result: 0x3e00 (1.5 in half precision)
+    instructions = [
+      s_mov_b32(s[0], 0x3fc00000),  # f32 1.5
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_f16_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1]
+    lo_bits = result & 0xffff
+    # f16(1.5) = 0x3e00
+    self.assertEqual(lo_bits, 0x3e00, f"Expected f16(1.5)=0x3e00, got 0x{lo_bits:04x} ({_f16(lo_bits)})")
+
+  def test_v_cvt_f16_f32_then_pack_for_wmma(self):
+    """Regression test: f32->f16 conversion followed by pack for WMMA input.
+
+    This sequence is used in fused fp16 GEMM kernels where f32 data is loaded,
+    converted to f16, packed into pairs, and fed to WMMA instructions.
+
+    The bug was: V_CVT_F16_F32 was treated as having 16-bit source (because '_F16'
+    is in the name), causing it to read only low 16 bits of the f32 input.
+    This resulted in WMMA receiving zero inputs and producing zero outputs.
+    """
+    from extra.assembly.rdna3.pcode import _f16
+    # Simulate loading two f32 values and converting/packing for WMMA
+    # f32 1.5 = 0x3fc00000, f32 2.5 = 0x40200000
+    # After CVT: f16 1.5 = 0x3e00, f16 2.5 = 0x4100
+    # After PACK: 0x41003e00 (hi=2.5, lo=1.5)
+    instructions = [
+      s_mov_b32(s[0], 0x3fc00000),  # f32 1.5
+      s_mov_b32(s[1], 0x40200000),  # f32 2.5
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_cvt_f16_f32_e32(v[2], v[0]),  # v2 = f16(1.5) = 0x3e00
+      v_cvt_f16_f32_e32(v[3], v[1]),  # v3 = f16(2.5) = 0x4100
+      v_pack_b32_f16(v[4], v[2], v[3]),  # v4 = pack(v2, v3) = 0x41003e00
+    ]
+    st = run_program(instructions, n_lanes=1)
+
+    # Check intermediate CVT results
+    v2_lo = st.vgpr[0][2] & 0xffff
+    v3_lo = st.vgpr[0][3] & 0xffff
+    self.assertEqual(v2_lo, 0x3e00, f"v2 should be f16(1.5)=0x3e00, got 0x{v2_lo:04x} ({_f16(v2_lo)})")
+    self.assertEqual(v3_lo, 0x4100, f"v3 should be f16(2.5)=0x4100, got 0x{v3_lo:04x} ({_f16(v3_lo)})")
+
+    # Check packed result
+    result = st.vgpr[0][4]
+    self.assertEqual(result, 0x41003e00, f"Expected packed 0x41003e00, got 0x{result:08x}")
+
   def test_v_pack_b32_f16_basic(self):
     """V_PACK_B32_F16 packs two f16 values into one 32-bit register."""
     from extra.assembly.rdna3.pcode import _f16
@@ -1702,12 +1918,15 @@ class TestF64Conversions(unittest.TestCase):
     """Test the f64->i64 conversion sequence used by the compiler.
 
     The compiler generates:
-      v_trunc_f64 -> v_ldexp_f64 (by -32) -> v_floor_f64 -> v_fma_f64 (by 2^32)
+      v_trunc_f64 -> v_ldexp_f64 (by -32) -> v_floor_f64 -> v_fma_f64 (by -2^32)
       -> v_cvt_u32_f64 (low bits) -> v_cvt_i32_f64 (high bits)
+
+    The FMA computes: trunc + (-2^32) * floor = trunc - floor * 2^32
+    which gives the low 32 bits as a positive float (for proper u32 conversion).
     """
     val = -8.0
     val_bits = f2i64(val)
-    lit = 4294967296.0  # 2^32
+    lit = -4294967296.0  # -2^32 (note: NEGATIVE, so FMA does trunc - floor * 2^32)
     lit_bits = f2i64(lit)
 
     instructions = [

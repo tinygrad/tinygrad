@@ -16671,7 +16671,7 @@ def _VOP3Op_V_WRITELANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, 
 def _VOP3Op_V_READLANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
   # D0 = VGPR[lane][SRC0] - reads from specified lane's VGPR
   rd_lane = s1 & 0x1f  # lane select (5 bits for wave32)
-  val = VGPR[rd_lane][src0_idx] if VGPR and rd_lane in VGPR and src0_idx in VGPR.get(rd_lane, {}) else s0
+  val = VGPR[rd_lane][src0_idx] if VGPR is not None and rd_lane < len(VGPR) and src0_idx < len(VGPR[rd_lane]) else s0
   return {'d0': val & 0xffffffff, 'scc': scc}
 
 def _VOP1Op_V_READFIRSTLANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
@@ -16681,7 +16681,7 @@ def _VOP1Op_V_READFIRSTLANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, liter
     if exec_mask & (1 << i):
       first_lane = i
       break
-  val = VGPR[first_lane][src0_idx] if VGPR and first_lane in VGPR and src0_idx in VGPR.get(first_lane, {}) else s0
+  val = VGPR[first_lane][src0_idx] if VGPR is not None and first_lane < len(VGPR) and src0_idx < len(VGPR[first_lane]) else s0
   return {'d0': val & 0xffffffff, 'scc': scc}
 
 COMPILED_FUNCTIONS = {
