@@ -169,11 +169,13 @@ class Inst:
           cur_neg = self._values.get('neg', 0)
           self._values['neg'] = (cur_neg.val if isinstance(cur_neg, RawImm) else cur_neg) | neg_bit
         # Track literal value if needed (encoded as 255)
+        # For 64-bit ops, store literal in high 32 bits (to match from_bytes decoding and to_bytes encoding)
         if encoded == 255 and self._literal is None and isinstance(val, int) and not isinstance(val, IntEnum):
-          self._literal = val
+          self._literal = (val << 32) if self._is_64bit_op() else val
         elif encoded == 255 and self._literal is None and isinstance(val, float):
           import struct
-          self._literal = struct.unpack('<I', struct.pack('<f', val))[0]
+          lit32 = struct.unpack('<I', struct.pack('<f', val))[0]
+          self._literal = (lit32 << 32) if self._is_64bit_op() else lit32
       # Encode raw register fields for consistent repr
       elif name in RAW_FIELDS:
         if isinstance(val, Reg): self._values[name] = _encode_reg(val)
@@ -206,13 +208,35 @@ class Inst:
       if n in self._values and not isinstance(v := self._values[n], RawImm) and isinstance(v, int) and not isinstance(v, IntEnum) and not (0 <= v <= 64 or -16 <= v <= -1): return v
     return None
 
+  def _is_64bit_op(self) -> bool:
+    """Check if this instruction uses 64-bit operands (and thus 64-bit literals).
+    Exception: V_LDEXP_F64 has 32-bit integer src1, so its literal is 32-bit."""
+    op = self._values.get('op')
+    if op is None: return False
+    # op may be an enum (from __init__) or an int (from from_int)
+    op_name = op.name if hasattr(op, 'name') else None
+    if op_name is None and self.__class__.__name__ == 'VOP3':
+      from extra.assembly.rdna3.autogen import VOP3Op
+      try: op_name = VOP3Op(op).name
+      except ValueError: pass
+    if op_name is None: return False
+    # V_LDEXP_F64 has 32-bit integer exponent in src1, so literal is 32-bit
+    if op_name == 'V_LDEXP_F64': return False
+    return op_name.endswith(('_F64', '_B64', '_I64', '_U64'))
+
   def to_bytes(self) -> bytes:
     result = self.to_int().to_bytes(self._size(), 'little')
-    return result + (lit & 0xffffffff).to_bytes(4, 'little') if (lit := self._get_literal() or getattr(self, '_literal', None)) else result
+    lit = self._get_literal() or getattr(self, '_literal', None)
+    if lit is None: return result
+    # For 64-bit ops, literal is stored in high 32 bits internally, but encoded as 4 bytes
+    lit32 = (lit >> 32) if self._is_64bit_op() else lit
+    return result + (lit32 & 0xffffffff).to_bytes(4, 'little')
 
   @classmethod
   def _size(cls) -> int: return 4 if issubclass(cls, Inst32) else 8
-  def size(self) -> int: return self._size() + (4 if self._literal is not None else 0)
+  def size(self) -> int:
+    # Literal is always 4 bytes in the binary (for 64-bit ops, it's in high 32 bits)
+    return self._size() + (4 if self._literal is not None else 0)
 
   @classmethod
   def from_int(cls, word: int):
@@ -229,7 +253,12 @@ class Inst:
     has_literal = has_literal or (cls.__name__ == 'SOP2' and op_val in (69, 70))
     for n in SRC_FIELDS:
       if n in inst._values and isinstance(inst._values[n], RawImm) and inst._values[n].val == 255: has_literal = True
-    if has_literal and len(data) >= cls._size() + 4: inst._literal = int.from_bytes(data[cls._size():cls._size()+4], 'little')
+    if has_literal:
+      # For 64-bit ops, the literal is 32 bits placed in the HIGH 32 bits of the 64-bit value
+      # (low 32 bits are zero). This is how AMD hardware interprets 32-bit literals for 64-bit ops.
+      if len(data) >= cls._size() + 4:
+        lit32 = int.from_bytes(data[cls._size():cls._size()+4], 'little')
+        inst._literal = (lit32 << 32) if inst._is_64bit_op() else lit32
     return inst
 
   def __repr__(self):
