@@ -283,10 +283,14 @@ class Inst32(Inst): pass
 class Inst64(Inst): pass
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# CODE GENERATION: generates autogen/__init__.py by parsing the AMD RDNA3.5 ISA PDF
+# CODE GENERATION: generates autogen/__init__.py by parsing AMD ISA PDFs
+# Supports both RDNA3.5 and CDNA4 instruction set PDFs - auto-detects format
 # ═══════════════════════════════════════════════════════════════════════════════
 
-PDF_URL = "https://docs.amd.com/api/khub/documents/UVVZM22UN7tMUeiW_4ShTQ/content"
+PDF_URLS = {
+  "rdna3": "https://docs.amd.com/api/khub/documents/UVVZM22UN7tMUeiW_4ShTQ/content",
+  "cdna4": "https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf",
+}
 FIELD_TYPES = {'SSRC0': 'SSrc', 'SSRC1': 'SSrc', 'SOFFSET': 'SSrc', 'SADDR': 'SSrc', 'SRC0': 'Src', 'SRC1': 'Src', 'SRC2': 'Src',
   'SDST': 'SGPRField', 'SBASE': 'SGPRField', 'SDATA': 'SGPRField', 'SRSRC': 'SGPRField', 'VDST': 'VGPRField', 'VSRC1': 'VGPRField', 'VDATA': 'VGPRField',
   'VADDR': 'VGPRField', 'ADDR': 'VGPRField', 'DATA': 'VGPRField', 'DATA0': 'VGPRField', 'DATA1': 'VGPRField', 'SIMM16': 'SImm', 'OFFSET': 'Imm',
@@ -322,22 +326,41 @@ def _parse_fields_table(table: list, fmt: str, enums: set[str]) -> list[tuple]:
     name, bits_str = row[0].split('\n')[0].strip(), (row[1] or '').split('\n')[0].strip()
     if not (bits := _parse_bits(bits_str)): continue
     enc_val, hi, lo = None, bits[0], bits[1]
-    if name == 'ENCODING' and row[2] and (m := re.search(r"'b([01_]+)", row[2])):
-      enc_bits = m.group(1).replace('_', '')
-      enc_val = int(enc_bits, 2)
-      declared_width, actual_width = hi - lo + 1, len(enc_bits)
-      if actual_width > declared_width: lo = hi - actual_width + 1
+    if name == 'ENCODING' and row[2]:
+      # Handle both RDNA3 ('bXX) and CDNA4 (Must be: XX) encoding formats
+      if m := re.search(r"(?:'b|Must be:\s*)([01_]+)", row[2]):
+        enc_bits = m.group(1).replace('_', '')
+        enc_val = int(enc_bits, 2)
+        declared_width, actual_width = hi - lo + 1, len(enc_bits)
+        if actual_width > declared_width: lo = hi - actual_width + 1
     ftype = f"{fmt}Op" if name == 'OP' and f"{fmt}Op" in enums else FIELD_TYPES.get(name.upper())
     fields.append((name, hi, lo, enc_val, ftype))
   return fields
 
-def generate(output_path: str | None = None) -> dict:
-  """Generate RDNA3.5 instruction definitions from the AMD ISA PDF. Returns dict with formats for testing."""
-  import re, pdfplumber, pathlib
+def generate(output_path: str | None = None, arch: str = "rdna3") -> dict:
+  """Generate instruction definitions from AMD ISA PDF. Returns dict with formats for testing."""
+  import re, pdfplumber
   from tinygrad.helpers import fetch
 
-  pdf = pdfplumber.open(fetch(PDF_URL))
-  pages = pdf.pages[150:200]
+  pdf = pdfplumber.open(fetch(PDF_URLS[arch]))
+
+  # Auto-detect document type from first page
+  first_page_text = pdf.pages[0].extract_text() or ''
+  is_cdna4 = 'CDNA4' in first_page_text or 'CDNA 4' in first_page_text
+  doc_name = "CDNA4" if is_cdna4 else "RDNA3.5"
+
+  # Find the "Microcode Formats" section by searching the PDF
+  # Look for "Chapter X. Microcode Formats" (RDNA3) or first format subsection header (CDNA4)
+  microcode_start = None
+  for i, page in enumerate(pdf.pages):
+    text = page.extract_text() or ''
+    if re.search(r'Chapter \d+\.\s+Microcode Formats', text) or \
+       (i > 100 and re.search(r'^\d+\.\d+\.\d+\.\s+SOP2\s*\n', text, re.M)):
+      microcode_start = i
+      break
+  if microcode_start is None: microcode_start = 150  # fallback for RDNA3.5
+
+  pages = pdf.pages[microcode_start:microcode_start + 50]
   page_texts = [p.extract_text() or '' for p in pages]
   page_tables = [[t.extract() for t in p.find_tables()] for p in pages]
   full_text = '\n'.join(page_texts)
@@ -368,14 +391,20 @@ def generate(output_path: str | None = None) -> dict:
     return (pos := text.find('Field Name')) != -1 and bool(re.search(r'\d+\.\d+\.\d+\.\s+\w+\s*\n', text[:pos]))
 
   # find format headers with their page indices
-  format_headers = []  # (fmt_name, page_idx)
+  format_headers = []  # (fmt_name, page_idx, header_pos)
   for i, text in enumerate(page_texts):
+    # Match "X.Y.Z. FORMAT_NAME" followed by Description (RDNA3) or newline (CDNA4)
     for m in re.finditer(r'\d+\.\d+\.\d+\.\s+(\w+)\s*\n?Description', text): format_headers.append((m.group(1), i, m.start()))
     for m in re.finditer(r'\d+\.\d+\.\d+\.\s+(\w+)\s*\n', text):
-      if m.start() > len(text) - 200 and 'Description' not in text[m.end():] and i + 1 < len(page_texts):
+      fmt_name = m.group(1)
+      # For CDNA4: accept uppercase format names (SOP2, VOP1, etc) directly
+      if is_cdna4 and fmt_name.isupper() and len(fmt_name) >= 2:
+        format_headers.append((fmt_name, i, m.start()))
+      # For RDNA3: check for Description on next page
+      elif m.start() > len(text) - 200 and 'Description' not in text[m.end():] and i + 1 < len(page_texts):
         next_text = page_texts[i + 1].lstrip()
         if next_text.startswith('Description') or (next_text.startswith('"RDNA') and 'Description' in next_text[:200]):
-          format_headers.append((m.group(1), i, m.start()))
+          format_headers.append((fmt_name, i, m.start()))
 
   # parse instruction formats
   formats: dict[str, list] = {}
@@ -427,7 +456,7 @@ def generate(output_path: str | None = None) -> dict:
   def enum_lines(name, items):
     return [f"class {name}(IntEnum):"] + [f"  {n} = {v}" for v, n in sorted(items.items())] + [""]
   def field_key(f): return order.index(f[0].lower()) if f[0].lower() in order else 1000
-  lines = ["# autogenerated from AMD RDNA3.5 ISA PDF by lib.py - do not edit", "from enum import IntEnum",
+  lines = [f"# autogenerated from AMD {doc_name} ISA PDF by lib.py - do not edit", "from enum import IntEnum",
            "from typing import Annotated",
            "from extra.assembly.rdna3.lib import bits, BitField, Inst32, Inst64, SGPR, VGPR, TTMP as TTMP, s as s, v as v, ttmp as ttmp, SSrc, Src, SImm, Imm, VDSTYEnc, SGPRField, VGPRField",
            "import functools", ""]
@@ -477,7 +506,9 @@ def generate(output_path: str | None = None) -> dict:
           lines.append(f"{name.lower()}{suffix} = functools.partial({tgt}.{name}{seg})")
   # export SrcEnum values, but skip DPP8/DPP16 which conflict with class names
   skip_exports = {'DPP8', 'DPP16'}
-  lines += [""] + [f"{name} = SrcEnum.{name}" for _, name in sorted(src_enum.items()) if name not in skip_exports] + ["OFF = NULL\n"]
+  src_names = {name for _, name in src_enum.items()}
+  lines += [""] + [f"{name} = SrcEnum.{name}" for _, name in sorted(src_enum.items()) if name not in skip_exports]
+  if "NULL" in src_names: lines.append("OFF = NULL\n")
 
   if output_path is not None:
     import pathlib
@@ -485,5 +516,9 @@ def generate(output_path: str | None = None) -> dict:
   return {"formats": formats, "enums": enums, "src_enum": src_enum}
 
 if __name__ == "__main__":
-  result = generate("extra/assembly/rdna3/autogen/__init__.py")
+  import argparse
+  parser = argparse.ArgumentParser(description="Generate instruction definitions from AMD ISA PDF")
+  parser.add_argument("--arch", choices=list(PDF_URLS.keys()), default="rdna3", help="Target architecture (default: rdna3)")
+  args = parser.parse_args()
+  result = generate("extra/assembly/rdna3/autogen/__init__.py", arch=args.arch)
   print(f"generated SrcEnum ({len(result['src_enum'])}) + {len(result['enums'])} opcode enums + {len(result['formats'])} format classes")

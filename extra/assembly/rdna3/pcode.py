@@ -702,7 +702,7 @@ class ExecContext:
 # PDF EXTRACTION AND CODE GENERATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-PDF_URL = "https://docs.amd.com/api/khub/documents/UVVZM22UN7tMUeiW_4ShTQ/content"
+from extra.assembly.rdna3.lib import PDF_URLS
 INST_PATTERN = re.compile(r'^([SV]_[A-Z0-9_]+)\s+(\d+)\s*$', re.M)
 
 # Patterns that can't be handled by the DSL (require special handling in emu.py)
@@ -720,7 +720,8 @@ def extract_pseudocode(text: str) -> str | None:
     if not s: continue
     if re.match(r'^\d+ of \d+$', s): continue
     if re.match(r'^\d+\.\d+\..*Instructions', s): continue
-    if s.startswith('"RDNA') or s.startswith('AMD '): continue
+    # Skip document headers (RDNA or CDNA)
+    if s.startswith('"RDNA') or s.startswith('AMD ') or s.startswith('CDNA'): continue
     if s.startswith('Notes') or s.startswith('Functional examples'): break
     if s.startswith('if '): depth += 1
     elif s.startswith('endif'): depth = max(0, depth - 1)
@@ -735,7 +736,7 @@ def extract_pseudocode(text: str) -> str | None:
     if is_code: result.append(s)
   return '\n'.join(result) if result else None
 
-def parse_pseudocode_from_pdf(pdf_path: str | None = None) -> dict:
+def parse_pseudocode_from_pdf(arch: str = "rdna3") -> dict:
   """Parse pseudocode from PDF for all ops. Returns {enum_cls: {op: pseudocode}}."""
   import pdfplumber
   from tinygrad.helpers import fetch
@@ -747,8 +748,26 @@ def parse_pseudocode_from_pdf(pdf_path: str | None = None) -> dict:
     for op in enum_cls:
       if op.name.startswith(('S_', 'V_')): defined_ops[(op.name, op.value)] = (enum_cls, op)
 
-  pdf = pdfplumber.open(fetch(PDF_URL) if pdf_path is None else pdf_path)
-  all_text = '\n'.join(pdf.pages[i].extract_text() or '' for i in range(195, 560))
+  pdf = pdfplumber.open(fetch(PDF_URLS[arch]))
+
+  # Find the "Instructions" chapter by looking for "Chapter X. Instructions"
+  instr_start = None
+  for i, page in enumerate(pdf.pages):
+    text = page.extract_text() or ''
+    if re.search(r'Chapter \d+\.\s+Instructions', text):
+      instr_start = i
+      break
+  if instr_start is None: instr_start = len(pdf.pages) // 3  # fallback
+
+  # Find end - stop at "Microcode Formats" chapter
+  instr_end = len(pdf.pages)
+  for i, page in enumerate(pdf.pages[instr_start:], instr_start):
+    text = page.extract_text() or ''
+    if re.search(r'Chapter \d+\.\s+Microcode Formats', text):
+      instr_end = i
+      break
+
+  all_text = '\n'.join(pdf.pages[i].extract_text() or '' for i in range(instr_start, instr_end))
   matches = list(INST_PATTERN.finditer(all_text))
   instructions: dict = {cls: {} for cls in OP_ENUMS}
 
@@ -764,7 +783,7 @@ def parse_pseudocode_from_pdf(pdf_path: str | None = None) -> dict:
 
   return instructions
 
-def generate_gen_pcode(output_path: str = "extra/assembly/rdna3/autogen/gen_pcode.py"):
+def generate_gen_pcode(output_path: str = "extra/assembly/rdna3/autogen/gen_pcode.py", arch: str = "rdna3"):
   """Generate gen_pcode.py - compiled pseudocode functions for the emulator."""
   from pathlib import Path
   from extra.assembly.rdna3.autogen import SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp
@@ -772,7 +791,7 @@ def generate_gen_pcode(output_path: str = "extra/assembly/rdna3/autogen/gen_pcod
   OP_ENUMS = [SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp]
 
   print("Parsing pseudocode from PDF...")
-  by_cls = parse_pseudocode_from_pdf()
+  by_cls = parse_pseudocode_from_pdf(arch)
 
   total_found, total_ops = 0, 0
   for enum_cls in OP_ENUMS:
@@ -986,4 +1005,8 @@ def _VOP1Op_V_READFIRSTLANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, liter
   print(f"\nGenerated {output_path}: {compiled_count} compiled, {skipped_count} skipped")
 
 if __name__ == "__main__":
-  generate_gen_pcode()
+  import argparse
+  parser = argparse.ArgumentParser(description="Generate pseudocode functions from AMD ISA PDF")
+  parser.add_argument("--arch", choices=list(PDF_URLS.keys()), default="rdna3", help="Target architecture (default: rdna3)")
+  args = parser.parse_args()
+  generate_gen_pcode(arch=args.arch)
