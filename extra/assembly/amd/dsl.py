@@ -39,15 +39,27 @@ class _Bits:
   def __getitem__(self, key) -> BitField: return BitField(key.start, key.stop) if isinstance(key, slice) else BitField(key, key)
 bits = _Bits()
 
+# Source operand with modifiers - base class for anything that can be a src with neg/abs
+class SrcMod:
+  __slots__ = ('val', 'neg', 'abs_')
+  def __init__(self, val: int, neg: bool = False, abs_: bool = False): self.val, self.neg, self.abs_ = val, neg, abs_
+  def __repr__(self): return f"{'-' if self.neg else ''}{'|' if self.abs_ else ''}{self.val}{'|' if self.abs_ else ''}"
+  def __neg__(self): return SrcMod(self.val, not self.neg, self.abs_)
+  def __abs__(self): return SrcMod(self.val, self.neg, True)
+
 # Register types
-class Reg:
-  def __init__(self, idx: int, count: int = 1, hi: bool = False, neg: bool = False): self.idx, self.count, self.hi, self.neg = idx, count, hi, neg
+class Reg(SrcMod):
+  __slots__ = ('idx', 'count', 'hi')
+  def __init__(self, idx: int, count: int = 1, hi: bool = False, neg: bool = False, abs_: bool = False):
+    self.idx, self.count, self.hi = idx, count, hi
+    super().__init__(idx, neg, abs_)
   def __repr__(self): return f"{self.__class__.__name__.lower()[0]}[{self.idx}]" if self.count == 1 else f"{self.__class__.__name__.lower()[0]}[{self.idx}:{self.idx + self.count}]"
-  def __neg__(self): return self.__class__(self.idx, self.count, self.hi, neg=not self.neg)
+  def __neg__(self): return self.__class__(self.idx, self.count, self.hi, not self.neg, self.abs_)
+  def __abs__(self): return self.__class__(self.idx, self.count, self.hi, self.neg, True)
   @property
-  def h(self): return self.__class__(self.idx, self.count, hi=True, neg=self.neg)
+  def l(self): return self.__class__(self.idx, self.count, False, self.neg, self.abs_)
   @property
-  def l(self): return self.__class__(self.idx, self.count, hi=False, neg=self.neg)
+  def h(self): return self.__class__(self.idx, self.count, True, self.neg, self.abs_)
 
 T = TypeVar('T', bound=Reg)
 class _RegFactory(Generic[T]):
@@ -66,6 +78,11 @@ class TTMP(Reg): pass
 s: _RegFactory[SGPR] = _RegFactory(SGPR, "SGPR")
 v: _RegFactory[VGPR] = _RegFactory(VGPR, "VGPR")
 ttmp: _RegFactory[TTMP] = _RegFactory(TTMP, "TTMP")
+
+# Special registers as SrcMod objects (support -VCC_LO, abs(EXEC_LO), etc.)
+VCC_LO, VCC_HI, VCC = SrcMod(106), SrcMod(107), SrcMod(106)
+EXEC_LO, EXEC_HI, EXEC = SrcMod(126), SrcMod(127), SrcMod(126)
+SCC, M0, NULL, OFF = SrcMod(253), SrcMod(125), SrcMod(124), SrcMod(124)
 
 # Field type markers (runtime classes for validation)
 class _SSrc: pass
@@ -90,21 +107,35 @@ class RawImm:
   def __eq__(self, other): return isinstance(other, RawImm) and self.val == other.val
 
 def unwrap(val) -> int:
-  return val.val if isinstance(val, RawImm) else val.value if hasattr(val, 'value') else val.idx if hasattr(val, 'idx') else val
+  if isinstance(val, RawImm): return val.val
+  if isinstance(val, SrcMod) and not isinstance(val, Reg): return val.val  # Special registers like VCC_LO, NULL
+  if hasattr(val, 'value'): return val.value  # IntEnum
+  if hasattr(val, 'idx'): return val.idx  # Reg
+  return val
 
 # Encoding helpers
 FLOAT_ENC = {0.5: 240, -0.5: 241, 1.0: 242, -1.0: 243, 2.0: 244, -2.0: 245, 4.0: 246, -4.0: 247}
 SRC_FIELDS = {'src0', 'src1', 'src2', 'ssrc0', 'ssrc1', 'soffset', 'srcx0', 'srcy0'}
-RAW_FIELDS = {'vdata', 'vdst', 'vaddr', 'addr', 'data', 'data0', 'data1', 'sdst', 'sdata'}
+RAW_FIELDS = {'vdata', 'vdst', 'vaddr', 'addr', 'data', 'data0', 'data1', 'sdst', 'sdata', 'vsrc1'}
 
-def _encode_reg(val) -> int:
+def _encode_reg(val: Reg) -> int:
   if isinstance(val, TTMP): return 108 + val.idx
-  return val.idx | (0x80 if val.hi else 0)
+  return val.idx  # hi bit is handled via opsel, not in register encoding
 
 def encode_src(val) -> int:
   if isinstance(val, VGPR): return 256 + _encode_reg(val)
   if isinstance(val, Reg): return _encode_reg(val)
-  if hasattr(val, 'value'): return val.value
+  if isinstance(val, SrcMod) and not isinstance(val, Reg):
+    # SrcMod wraps either special registers (VCC_LO=106, EXEC_LO=126, etc.) or literals
+    # Special register values are in valid encoding ranges - return as-is
+    # Literals (large integers) need 255 marker
+    v = val.val
+    # Valid source encoding ranges: 0-127 (SGPRs/special), 128-192 (inline const), 193-208 (neg inline), 240-247 (float), 251-253 (special)
+    if 0 <= v <= 127 or 240 <= v <= 255: return v  # SGPRs, special regs, float constants
+    if 128 <= v <= 192: return v  # Inline positive constants (0-64)
+    if 193 <= v <= 208: return v  # Inline negative constants (-1 to -16)
+    return 255  # Literal marker - value stored separately
+  if hasattr(val, 'value'): return val.value  # IntEnum
   if isinstance(val, float): return 128 if val == 0.0 else FLOAT_ENC.get(val, 255)
   return 128 + val if isinstance(val, int) and 0 <= val <= 64 else 192 + (-val) if isinstance(val, int) and -16 <= val <= -1 else 255
 
@@ -160,52 +191,61 @@ class Inst:
       # Type validation
       if marker is _SGPRField:
         if isinstance(val, VGPR): raise TypeError(f"field '{name}' requires SGPR, got VGPR")
-        if not isinstance(val, (SGPR, TTMP, int, RawImm)): raise TypeError(f"field '{name}' requires SGPR, got {type(val).__name__}")
+        if not isinstance(val, (SGPR, TTMP, SrcMod, int, RawImm)): raise TypeError(f"field '{name}' requires SGPR, got {type(val).__name__}")
       if marker is _VGPRField:
         if not isinstance(val, VGPR): raise TypeError(f"field '{name}' requires VGPR, got {type(val).__name__}")
-        # For VOP3 with opsel, don't encode .h in vdst - use opsel[3] instead
-        if name == 'vdst' and val.hi and 'opsel' in self._fields:
-          self._values[name] = val.idx  # Just the index, no .h bit
-          cur_opsel = self._values.get('opsel', 0)
-          self._values['opsel'] = (cur_opsel.val if isinstance(cur_opsel, RawImm) else cur_opsel) | 8  # opsel[3] = 1
-        else:
-          # Encode VGPR fields to include .h bit (like RAW_FIELDS)
-          self._values[name] = _encode_reg(val)
       if marker is _SSrc and isinstance(val, VGPR): raise TypeError(f"field '{name}' requires scalar source, got VGPR")
       # Encode source fields as RawImm for consistent disassembly
       if name in SRC_FIELDS:
-        # For VOP3 with opsel, don't encode .h in register index - use opsel instead
-        # Create a temporary register without hi bit for encoding if opsel field exists
-        encode_val = val
-        if isinstance(val, Reg) and val.hi and 'opsel' in self._fields:
-          encode_val = val.__class__(val.idx, val.count, hi=False, neg=val.neg)
-        encoded = encode_src(encode_val)
+        encoded = encode_src(val)
+        # For VOP1/VOP2/VOPC (no opsel field), encode hi bit in src value
+        if isinstance(val, Reg) and val.hi and 'opsel' not in self._fields:
+          encoded |= 0x80
         self._values[name] = RawImm(encoded)
-        # Handle negation modifier for VOP3 instructions
-        if isinstance(val, Reg) and val.neg and 'neg' in self._fields:
-          neg_bit = {'src0': 1, 'src1': 2, 'src2': 4}.get(name, 0)
-          cur_neg = self._values.get('neg', 0)
-          self._values['neg'] = (cur_neg.val if isinstance(cur_neg, RawImm) else cur_neg) | neg_bit
-        # Handle .h modifier for VOP3 16-bit ops via opsel field
+        # Handle neg/abs/opsel modifiers for VOP3 instructions
+        if isinstance(val, SrcMod):
+          if val.neg and 'neg' in self._fields:
+            neg_bit = {'src0': 1, 'src1': 2, 'src2': 4}.get(name, 0)
+            cur_neg = self._values.get('neg', 0)
+            self._values['neg'] = (cur_neg.val if isinstance(cur_neg, RawImm) else cur_neg) | neg_bit
+          if val.abs_ and 'abs' in self._fields:
+            abs_bit = {'src0': 1, 'src1': 2, 'src2': 4}.get(name, 0)
+            cur_abs = self._values.get('abs', 0)
+            self._values['abs'] = (cur_abs.val if isinstance(cur_abs, RawImm) else cur_abs) | abs_bit
+        # Handle hi (opsel) for 16-bit ops - only for formats with opsel field
         if isinstance(val, Reg) and val.hi and 'opsel' in self._fields:
           opsel_bit = {'src0': 1, 'src1': 2, 'src2': 4}.get(name, 0)
           cur_opsel = self._values.get('opsel', 0)
           self._values['opsel'] = (cur_opsel.val if isinstance(cur_opsel, RawImm) else cur_opsel) | opsel_bit
         # Track literal value if needed (encoded as 255)
         # For 64-bit ops, store literal in high 32 bits (to match from_bytes decoding and to_bytes encoding)
-        if encoded == 255 and self._literal is None and isinstance(val, int) and not isinstance(val, IntEnum):
-          self._literal = (val << 32) if self._is_64bit_op() else val
-        elif encoded == 255 and self._literal is None and isinstance(val, float):
-          import struct
-          lit32 = struct.unpack('<I', struct.pack('<f', val))[0]
-          self._literal = (lit32 << 32) if self._is_64bit_op() else lit32
+        if encoded == 255 and self._literal is None:
+          if isinstance(val, SrcMod) and not isinstance(val, Reg):
+            # SrcMod wrapping a literal value
+            self._literal = (val.val << 32) if self._is_64bit_op() else val.val
+          elif isinstance(val, int) and not isinstance(val, IntEnum):
+            self._literal = (val << 32) if self._is_64bit_op() else val
+          elif isinstance(val, float):
+            import struct
+            lit32 = struct.unpack('<I', struct.pack('<f', val))[0]
+            self._literal = (lit32 << 32) if self._is_64bit_op() else lit32
       # Encode raw register fields for consistent repr
       elif name in RAW_FIELDS:
-        if isinstance(val, Reg): self._values[name] = _encode_reg(val)
+        if isinstance(val, Reg):
+          encoded = _encode_reg(val)
+          # For VOP1/VOP2/VOPC (no opsel field), encode hi bit in register value
+          if val.hi and 'opsel' not in self._fields:
+            encoded |= 0x80
+          self._values[name] = encoded
+          # Handle vdst hi (opsel bit 3) for 16-bit ops - only for formats with opsel field
+          if name == 'vdst' and val.hi and 'opsel' in self._fields:
+            cur_opsel = self._values.get('opsel', 0)
+            self._values['opsel'] = (cur_opsel.val if isinstance(cur_opsel, RawImm) else cur_opsel) | 8
         elif hasattr(val, 'value'): self._values[name] = val.value  # IntEnum like SrcEnum.NULL
       # Encode sbase (divided by 2) and srsrc/ssamp (divided by 4)
-      elif name == 'sbase' and isinstance(val, Reg):
-        self._values[name] = val.idx // 2
+      elif name == 'sbase':
+        if isinstance(val, Reg): self._values[name] = val.idx // 2
+        elif isinstance(val, SrcMod): self._values[name] = val.val // 2  # Special regs like VCC_LO
       elif name in {'srsrc', 'ssamp'} and isinstance(val, Reg):
         self._values[name] = val.idx // 4
       # VOPD vdsty: encode as actual >> 1 (constraint: vdsty parity must be opposite of vdstx)
@@ -214,8 +254,9 @@ class Inst:
 
   def _encode_field(self, name: str, val) -> int:
     if isinstance(val, RawImm): return val.val
+    if isinstance(val, SrcMod) and not isinstance(val, Reg): return val.val  # Special regs like VCC_LO
     if name in {'srsrc', 'ssamp'}: return val.idx // 4 if isinstance(val, Reg) else val
-    if name == 'sbase': return val.idx // 2 if isinstance(val, Reg) else val
+    if name == 'sbase': return val.idx // 2 if isinstance(val, Reg) else val.val // 2 if isinstance(val, SrcMod) else val
     if name in RAW_FIELDS: return _encode_reg(val) if isinstance(val, Reg) else val
     if isinstance(val, Reg) or name in SRC_FIELDS: return encode_src(val)
     return val.value if hasattr(val, 'value') else val
@@ -274,12 +315,6 @@ class Inst:
     op_val = inst._values.get('op', 0)
     has_literal = cls.__name__ == 'VOP2' and op_val in (44, 45, 55, 56)
     has_literal = has_literal or (cls.__name__ == 'SOP2' and op_val in (69, 70))
-    # VOPD: fmaak (1) and fmamk (2) opcodes always have a literal
-    if cls.__name__ == 'VOPD':
-      opx, opy = inst._values.get('opx', 0), inst._values.get('opy', 0)
-      if isinstance(opx, RawImm): opx = opx.val
-      if isinstance(opy, RawImm): opy = opy.val
-      has_literal = has_literal or opx in (1, 2) or opy in (1, 2)
     for n in SRC_FIELDS:
       if n in inst._values and isinstance(inst._values[n], RawImm) and inst._values[n].val == 255: has_literal = True
     if has_literal:
