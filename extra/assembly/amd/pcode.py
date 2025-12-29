@@ -759,15 +759,12 @@ def _parse_pseudocode_from_single_pdf(url: str, defined_ops: dict, OP_ENUMS: lis
     if i not in page_cache: page_cache[i] = pdf.pages[i].extract_text() or ''
     return page_cache[i]
 
-  # Find the "Instructions" chapter - typically 15-40% through the document
+  # Find the "Instructions" chapter - typically 10-40% through the document
   instr_start = None
-  search_starts = [int(total_pages * 0.2), int(total_pages * 0.1), 0]
-  for start in search_starts:
-    for i in range(start, min(start + 100, total_pages)):
-      if re.search(r'Chapter \d+\.\s+Instructions', get_page_text(i)):
-        instr_start = i
-        break
-    if instr_start: break
+  for i in range(int(total_pages * 0.1), int(total_pages * 0.5)):
+    if re.search(r'Chapter \d+\.\s+Instructions\b', get_page_text(i)):
+      instr_start = i
+      break
   if instr_start is None: instr_start = total_pages // 3  # fallback
 
   # Find end - stop at "Microcode Formats" chapter (typically 60-70% through)
@@ -789,21 +786,25 @@ def _parse_pseudocode_from_single_pdf(url: str, defined_ops: dict, OP_ENUMS: lis
     name, opcode = match.group(1), int(match.group(2))
     key = (name, opcode)
     if key not in defined_ops: continue
-    enum_cls, enum_val = defined_ops[key]
     start = match.end()
     end = matches[i + 1].start() if i + 1 < len(matches) else start + 2000
     snippet = all_text[start:end].strip()
-    if (pseudocode := extract_pseudocode(snippet)): instructions[enum_cls][enum_val] = pseudocode
+    if (pseudocode := extract_pseudocode(snippet)):
+      # Assign to all enums that have this op (e.g., both VOPCOp and VOP3AOp)
+      for enum_cls, enum_val in defined_ops[key]:
+        instructions[enum_cls][enum_val] = pseudocode
 
   return instructions
 
 def parse_pseudocode_from_pdf(arch: str = "rdna3") -> dict:
   """Parse pseudocode from PDF(s) for all ops. Returns {enum_cls: {op: pseudocode}}."""
   OP_ENUMS = _get_op_enums(arch)
-  defined_ops = {}
+  # Build a dict from (name, opcode) -> list of (enum_cls, op) tuples
+  # Multiple enums can have the same op (e.g., VOPCOp and VOP3AOp both have V_CMP_* ops)
+  defined_ops: dict[tuple, list] = {}
   for enum_cls in OP_ENUMS:
     for op in enum_cls:
-      if op.name.startswith(('S_', 'V_')): defined_ops[(op.name, op.value)] = (enum_cls, op)
+      if op.name.startswith(('S_', 'V_')): defined_ops.setdefault((op.name, op.value), []).append((enum_cls, op))
 
   urls = PDF_URLS[arch]
   if isinstance(urls, str): urls = [urls]
