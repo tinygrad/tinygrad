@@ -28,34 +28,17 @@ _CVT_32_64_SRC_OPS = {op for op in VOP3Op if op.name.startswith('V_CVT_') and op
 _VOP3_16BIT_DST_OPS = {op for op in _VOP3_16BIT_OPS if 'PACK' not in op.name}
 _VOP1_16BIT_DST_OPS = {op for op in _VOP1_16BIT_OPS if 'PACK' not in op.name}
 
-# Inline constants for src operands 128-254 (f32 format for most instructions)
-_INLINE_CONSTS = [0] * 127
-for _i in range(65): _INLINE_CONSTS[_i] = _i
-for _i in range(1, 17): _INLINE_CONSTS[64 + _i] = ((-_i) & 0xffffffff)
-for _k, _v in {SrcEnum.POS_HALF: 0x3f000000, SrcEnum.NEG_HALF: 0xbf000000, SrcEnum.POS_ONE: 0x3f800000, SrcEnum.NEG_ONE: 0xbf800000,
-               SrcEnum.POS_TWO: 0x40000000, SrcEnum.NEG_TWO: 0xc0000000, SrcEnum.POS_FOUR: 0x40800000, SrcEnum.NEG_FOUR: 0xc0800000,
-               SrcEnum.INV_2PI: 0x3e22f983}.items(): _INLINE_CONSTS[_k - 128] = _v
-
-# Inline constants for VOP3P packed f16 operations (f16 value in low 16 bits only, high 16 bits are 0)
-# Hardware does NOT replicate the constant - opsel_hi controls which half is used for the hi result
-_INLINE_CONSTS_F16 = [0] * 127
-for _i in range(65): _INLINE_CONSTS_F16[_i] = _i  # Integer constants in low 16 bits only
-for _i in range(1, 17): _INLINE_CONSTS_F16[64 + _i] = (-_i) & 0xffff  # Negative integers in low 16 bits
-for _k, _v in {SrcEnum.POS_HALF: 0x3800, SrcEnum.NEG_HALF: 0xb800, SrcEnum.POS_ONE: 0x3c00, SrcEnum.NEG_ONE: 0xbc00,
-               SrcEnum.POS_TWO: 0x4000, SrcEnum.NEG_TWO: 0xc000, SrcEnum.POS_FOUR: 0x4400, SrcEnum.NEG_FOUR: 0xc400,
-               SrcEnum.INV_2PI: 0x3118}.items(): _INLINE_CONSTS_F16[_k - 128] = _v  # f16 values in low 16 bits
-
-# Inline constants for 64-bit operations (f64 format)
-# Integer constants 0-64 are zero-extended to 64 bits; -1 to -16 are sign-extended
-# Float constants are the f64 representation of the value
+# Inline constants for src operands 128-254. Build tables for f32, f16, and f64 formats.
 import struct as _struct
-_INLINE_CONSTS_F64 = [0] * 127
-for _i in range(65): _INLINE_CONSTS_F64[_i] = _i  # Integer constants 0-64 zero-extended
-for _i in range(1, 17): _INLINE_CONSTS_F64[64 + _i] = ((-_i) & 0xffffffffffffffff)  # -1 to -16 sign-extended
-for _k, _v in {SrcEnum.POS_HALF: 0.5, SrcEnum.NEG_HALF: -0.5, SrcEnum.POS_ONE: 1.0, SrcEnum.NEG_ONE: -1.0,
-               SrcEnum.POS_TWO: 2.0, SrcEnum.NEG_TWO: -2.0, SrcEnum.POS_FOUR: 4.0, SrcEnum.NEG_FOUR: -4.0,
-               SrcEnum.INV_2PI: 0.15915494309189535}.items():
-  _INLINE_CONSTS_F64[_k - 128] = _struct.unpack('<Q', _struct.pack('<d', _v))[0]
+_FLOAT_CONSTS = {SrcEnum.POS_HALF: 0.5, SrcEnum.NEG_HALF: -0.5, SrcEnum.POS_ONE: 1.0, SrcEnum.NEG_ONE: -1.0,
+                 SrcEnum.POS_TWO: 2.0, SrcEnum.NEG_TWO: -2.0, SrcEnum.POS_FOUR: 4.0, SrcEnum.NEG_FOUR: -4.0, SrcEnum.INV_2PI: 0.15915494309189535}
+def _build_inline_consts(neg_mask, float_to_bits):
+  tbl = list(range(65)) + [((-i) & neg_mask) for i in range(1, 17)] + [0] * (127 - 81)
+  for k, v in _FLOAT_CONSTS.items(): tbl[k - 128] = float_to_bits(v)
+  return tbl
+_INLINE_CONSTS = _build_inline_consts(0xffffffff, lambda f: _struct.unpack('<I', _struct.pack('<f', f))[0])
+_INLINE_CONSTS_F16 = _build_inline_consts(0xffff, lambda f: _struct.unpack('<H', _struct.pack('<e', f))[0])
+_INLINE_CONSTS_F64 = _build_inline_consts(0xffffffffffffffff, lambda f: _struct.unpack('<Q', _struct.pack('<d', f))[0])
 
 # Memory access
 _valid_mem_ranges: list[tuple[int, int]] = []

@@ -102,6 +102,8 @@ def i16_to_f16(v): return f32_to_f16(float(_sext(int(v) & 0xffff, 16)))
 def u16_to_f16(v): return f32_to_f16(float(int(v) & 0xffff))
 def f16_to_i16(bits): f = _f16_to_f32_bits(bits); return max(-32768, min(32767, int(f))) if not math.isnan(f) else 0
 def f16_to_u16(bits): f = _f16_to_f32_bits(bits); return max(0, min(65535, int(f))) if not math.isnan(f) else 0
+def u8_to_u32(v): return int(v) & 0xff
+def u4_to_u32(v): return int(v) & 0xf
 def _sign(f): return 1 if math.copysign(1.0, f) < 0 else 0
 def _mantissa_f32(f): return struct.unpack("<I", struct.pack("<f", f))[0] & 0x7fffff if not (math.isinf(f) or math.isnan(f)) else 0
 def _ldexp(m, e): return math.ldexp(m, e)
@@ -229,7 +231,7 @@ __all__ = [
   'f32_to_i32', 'f32_to_u32', 'f64_to_i32', 'f64_to_u32', 'f32_to_f16', 'f16_to_f32',
   'i16_to_f16', 'u16_to_f16', 'f16_to_i16', 'f16_to_u16', 'u32_to_u16', 'i32_to_i16',
   'f16_to_snorm', 'f16_to_unorm', 'f32_to_snorm', 'f32_to_unorm', 'v_cvt_i16_f32', 'v_cvt_u16_f32',
-  'SAT8', 'f32_to_u8',
+  'SAT8', 'f32_to_u8', 'u8_to_u32', 'u4_to_u32',
   # Math functions
   'trunc', 'floor', 'ceil', 'sqrt', 'log2', 'sin', 'cos', 'pow', 'fract', 'isEven', 'mantissa',
   # Min/max functions
@@ -698,7 +700,7 @@ INST_PATTERN = re.compile(r'^([SV]_[A-Z0-9_]+)\s+(\d+)\s*$', re.M)
 # Patterns that can't be handled by the DSL (require special handling in emu.py)
 UNSUPPORTED = ['SGPR[', 'V_SWAP', 'eval ', 'BYTE_PERMUTE', 'FATAL_HALT', 'HW_REGISTERS',
                'PC =', 'PC=', 'PC+', '= PC', 'v_sad', '+:', 'vscnt', 'vmcnt', 'expcnt', 'lgkmcnt',
-               'CVT_OFF_TABLE', '.bf16', 'ThreadMask', 'u8_to_u32', 'u4_to_u32',
+               'CVT_OFF_TABLE', '.bf16', 'ThreadMask',
                'S1[i', 'C.i32', 'v_msad_u8', 'S[i]', 'in[', '2.0 / PI',
                'if n.', 'DST.u32', 'addrd = DST', 'addr = DST']  # Malformed pseudocode from PDF
 
@@ -797,9 +799,10 @@ from extra.assembly.rdna3.pcode import *
       try:
         code = compile_pseudocode(pc)
         # CLZ/CTZ: The PDF pseudocode searches for the first 1 bit but doesn't break.
-        # Hardware stops at first match, so we need to add break after D0.i32 = i
+        # Hardware stops at first match. SOP1 uses tmp=i, VOP1/VOP3 use D0.i32=i
         if 'CLZ' in op.name or 'CTZ' in op.name:
-          code = code.replace('D0.i32 = i', 'D0.i32 = i; break  # Stop at first 1 bit found')
+          code = code.replace('tmp = Reg(i)', 'tmp = Reg(i); break')
+          code = code.replace('D0.i32 = i', 'D0.i32 = i; break')
         # Detect flags for result handling
         is_64 = any(p in pc for p in ['D0.u64', 'D0.b64', 'D0.f64', 'D0.i64', 'D1.u64', 'D1.b64', 'D1.f64', 'D1.i64'])
         has_d1 = '{ D1' in pc
