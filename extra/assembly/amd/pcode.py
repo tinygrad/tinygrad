@@ -718,7 +718,7 @@ class ExecContext:
 # PDF EXTRACTION AND CODE GENERATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-from extra.assembly.amd.lib import PDF_URLS
+from extra.assembly.amd.dsl import PDF_URLS
 INST_PATTERN = re.compile(r'^([SV]_[A-Z0-9_]+)\s+(\d+)\s*$', re.M)
 
 # Patterns that can't be handled by the DSL (require special handling in emu.py)
@@ -752,38 +752,49 @@ def extract_pseudocode(text: str) -> str | None:
     if is_code: result.append(s)
   return '\n'.join(result) if result else None
 
-def parse_pseudocode_from_pdf(arch: str = "rdna3") -> dict:
-  """Parse pseudocode from PDF for all ops. Returns {enum_cls: {op: pseudocode}}."""
+def _get_op_enums(arch: str) -> list:
+  """Dynamically load op enums from the arch-specific autogen module."""
+  import importlib
+  autogen = importlib.import_module(f"extra.assembly.amd.autogen.{arch}")
+  # Deterministic order: common enums first, then arch-specific
+  enums = []
+  for name in ['SOP1Op', 'SOP2Op', 'SOPCOp', 'SOPKOp', 'SOPPOp', 'VOP1Op', 'VOP2Op', 'VOP3Op', 'VOP3SDOp', 'VOP3POp', 'VOPCOp', 'VOP3AOp', 'VOP3BOp']:
+    if hasattr(autogen, name): enums.append(getattr(autogen, name))
+  return enums
+
+def _parse_pseudocode_from_single_pdf(url: str, defined_ops: dict, OP_ENUMS: list) -> dict:
+  """Parse pseudocode from a single PDF."""
   import pdfplumber
   from tinygrad.helpers import fetch
-  from extra.assembly.amd.autogen.rdna3 import SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp
 
-  OP_ENUMS = [SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp]
-  defined_ops = {}
-  for enum_cls in OP_ENUMS:
-    for op in enum_cls:
-      if op.name.startswith(('S_', 'V_')): defined_ops[(op.name, op.value)] = (enum_cls, op)
+  pdf = pdfplumber.open(fetch(url))
+  total_pages = len(pdf.pages)
 
-  pdf = pdfplumber.open(fetch(PDF_URLS[arch]))
+  page_cache = {}
+  def get_page_text(i):
+    if i not in page_cache: page_cache[i] = pdf.pages[i].extract_text() or ''
+    return page_cache[i]
 
-  # Find the "Instructions" chapter by looking for "Chapter X. Instructions"
+  # Find the "Instructions" chapter - typically 10-40% through the document
   instr_start = None
-  for i, page in enumerate(pdf.pages):
-    text = page.extract_text() or ''
-    if re.search(r'Chapter \d+\.\s+Instructions', text):
+  for i in range(int(total_pages * 0.1), int(total_pages * 0.5)):
+    if re.search(r'Chapter \d+\.\s+Instructions\b', get_page_text(i)):
       instr_start = i
       break
-  if instr_start is None: instr_start = len(pdf.pages) // 3  # fallback
+  if instr_start is None: instr_start = total_pages // 3  # fallback
 
-  # Find end - stop at "Microcode Formats" chapter
-  instr_end = len(pdf.pages)
-  for i, page in enumerate(pdf.pages[instr_start:], instr_start):
-    text = page.extract_text() or ''
-    if re.search(r'Chapter \d+\.\s+Microcode Formats', text):
-      instr_end = i
-      break
+  # Find end - stop at "Microcode Formats" chapter (typically 60-70% through)
+  instr_end = total_pages
+  search_starts = [int(total_pages * 0.6), int(total_pages * 0.5), instr_start]
+  for start in search_starts:
+    for i in range(start, min(start + 100, total_pages)):
+      if re.search(r'Chapter \d+\.\s+Microcode Formats', get_page_text(i)):
+        instr_end = i
+        break
+    if instr_end < total_pages: break
 
-  all_text = '\n'.join(pdf.pages[i].extract_text() or '' for i in range(instr_start, instr_end))
+  # Extract remaining pages (some already cached from chapter search)
+  all_text = '\n'.join(get_page_text(i) for i in range(instr_start, instr_end))
   matches = list(INST_PATTERN.finditer(all_text))
   instructions: dict = {cls: {} for cls in OP_ENUMS}
 
@@ -791,20 +802,51 @@ def parse_pseudocode_from_pdf(arch: str = "rdna3") -> dict:
     name, opcode = match.group(1), int(match.group(2))
     key = (name, opcode)
     if key not in defined_ops: continue
-    enum_cls, enum_val = defined_ops[key]
     start = match.end()
     end = matches[i + 1].start() if i + 1 < len(matches) else start + 2000
     snippet = all_text[start:end].strip()
-    if (pseudocode := extract_pseudocode(snippet)): instructions[enum_cls][enum_val] = pseudocode
+    if (pseudocode := extract_pseudocode(snippet)):
+      # Assign to all enums that have this op (e.g., both VOPCOp and VOP3AOp)
+      for enum_cls, enum_val in defined_ops[key]:
+        instructions[enum_cls][enum_val] = pseudocode
+
+  return instructions
+
+def parse_pseudocode_from_pdf(arch: str = "rdna3") -> dict:
+  """Parse pseudocode from PDF(s) for all ops. Returns {enum_cls: {op: pseudocode}}."""
+  OP_ENUMS = _get_op_enums(arch)
+  # Build a dict from (name, opcode) -> list of (enum_cls, op) tuples
+  # Multiple enums can have the same op (e.g., VOPCOp and VOP3AOp both have V_CMP_* ops)
+  defined_ops: dict[tuple, list] = {}
+  for enum_cls in OP_ENUMS:
+    for op in enum_cls:
+      if op.name.startswith(('S_', 'V_')): defined_ops.setdefault((op.name, op.value), []).append((enum_cls, op))
+
+  urls = PDF_URLS[arch]
+  if isinstance(urls, str): urls = [urls]
+
+  # Parse all PDFs and merge (union of pseudocode)
+  # Reverse order so newer PDFs (RDNA3.5, CDNA4) take priority
+  instructions: dict = {cls: {} for cls in OP_ENUMS}
+  for url in reversed(urls):
+    result = _parse_pseudocode_from_single_pdf(url, defined_ops, OP_ENUMS)
+    for cls, ops in result.items():
+      for op, pseudocode in ops.items():
+        if op in instructions[cls]:
+          if instructions[cls][op] != pseudocode:
+            print(f"  Ignoring {op.name} from older PDF:")
+            print(f"    new: {instructions[cls][op]!r}")
+            print(f"    old: {pseudocode!r}")
+        else:
+          instructions[cls][op] = pseudocode
 
   return instructions
 
 def generate_gen_pcode(output_path: str = "extra/assembly/amd/autogen/rdna3/gen_pcode.py", arch: str = "rdna3"):
   """Generate gen_pcode.py - compiled pseudocode functions for the emulator."""
   from pathlib import Path
-  from extra.assembly.amd.autogen.rdna3 import SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp
 
-  OP_ENUMS = [SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp]
+  OP_ENUMS = _get_op_enums(arch)
 
   print("Parsing pseudocode from PDF...")
   by_cls = parse_pseudocode_from_pdf(arch)
@@ -819,11 +861,13 @@ def generate_gen_pcode(output_path: str = "extra/assembly/amd/autogen/rdna3/gen_
   print(f"Total: {total_found}/{total_ops} ({100*total_found//total_ops}%)")
 
   print("\nCompiling to pseudocode functions...")
+  # Build dynamic import line based on available enums
+  enum_names = [e.__name__ for e in OP_ENUMS]
   lines = [f'''# autogenerated by pcode.py - do not edit
 # to regenerate: python -m extra.assembly.amd.pcode --arch {arch}
 # ruff: noqa: E501,F405,F403
 # mypy: ignore-errors
-from extra.assembly.amd.autogen.{arch} import SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp
+from extra.assembly.amd.autogen.{arch} import {", ".join(enum_names)}
 from extra.assembly.amd.pcode import *
 ''']
 
@@ -983,7 +1027,9 @@ from extra.assembly.amd.pcode import *
       lines.append('')
 
   # Add manually implemented V_WRITELANE_B32 (not in PDF pseudocode, requires special vgpr_write handling)
-  lines.append('''
+  # Only add for architectures that have VOP3Op (RDNA) not VOP3AOp/VOP3BOp (CDNA)
+  if 'VOP3Op' in enum_names:
+    lines.append('''
 # V_WRITELANE_B32: Write scalar to specific lane's VGPR (not in PDF pseudocode)
 def _VOP3Op_V_WRITELANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
   wr_lane = s1 & 0x1f  # lane select (5 bits for wave32)
@@ -1005,6 +1051,10 @@ VOP3Op_FUNCTIONS[VOP3Op.V_WRITELANE_B32] = _VOP3Op_V_WRITELANE_B32
 if __name__ == "__main__":
   import argparse
   parser = argparse.ArgumentParser(description="Generate pseudocode functions from AMD ISA PDF")
-  parser.add_argument("--arch", choices=list(PDF_URLS.keys()), default="rdna3", help="Target architecture (default: rdna3)")
+  parser.add_argument("--arch", choices=list(PDF_URLS.keys()) + ["all"], default="rdna3", help="Target architecture (default: rdna3)")
   args = parser.parse_args()
-  generate_gen_pcode(output_path=f"extra/assembly/amd/autogen/{args.arch}/gen_pcode.py", arch=args.arch)
+  if args.arch == "all":
+    for arch in PDF_URLS.keys():
+      generate_gen_pcode(output_path=f"extra/assembly/amd/autogen/{arch}/gen_pcode.py", arch=arch)
+  else:
+    generate_gen_pcode(output_path=f"extra/assembly/amd/autogen/{args.arch}/gen_pcode.py", arch=args.arch)
