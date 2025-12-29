@@ -189,7 +189,7 @@ class TestAsm(unittest.TestCase):
   def test_asm_register_range(self):
     """Test parsing register ranges."""
     inst = asm('s_load_b128 s[4:7], s[0:1], null')
-    self.assertEqual(inst.to_bytes(), s_load_b128(s[4:8], s[0:2], NULL).to_bytes())
+    self.assertEqual(inst.to_bytes(), s_load_b128(s[4:7], s[0:1], NULL).to_bytes())
 
   def test_asm_matches_llvm(self):
     """Test asm() output matches LLVM assembler."""
