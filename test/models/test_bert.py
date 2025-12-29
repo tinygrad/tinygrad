@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+import os
+os.environ['USE_TF'] = '0'  # prevent transformers from importing tensorflow
 import unittest
 from tinygrad import Tensor
 import numpy as np
