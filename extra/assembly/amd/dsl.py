@@ -289,8 +289,10 @@ class Inst64(Inst): pass
 # ═══════════════════════════════════════════════════════════════════════════════
 
 PDF_URLS = {
-  "rdna3": "https://docs.amd.com/api/khub/documents/UVVZM22UN7tMUeiW_4ShTQ/content",
-  "cdna4": "https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf",
+  "rdna3": "https://docs.amd.com/api/khub/documents/UVVZM22UN7tMUeiW_4ShTQ/content",  # RDNA3.5
+  "rdna4": "https://docs.amd.com/api/khub/documents/uQpkEvk3pv~kfAb2x~j4uw/content",
+  "cdna": ["https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-mi300-cdna3-instruction-set-architecture.pdf",
+           "https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf"],
 }
 FIELD_TYPES = {'SSRC0': 'SSrc', 'SSRC1': 'SSrc', 'SOFFSET': 'SSrc', 'SADDR': 'SSrc', 'SRC0': 'Src', 'SRC1': 'Src', 'SRC2': 'Src',
   'SDST': 'SGPRField', 'SBASE': 'SGPRField', 'SDATA': 'SGPRField', 'SRSRC': 'SGPRField', 'VDST': 'VGPRField', 'VSRC1': 'VGPRField', 'VDATA': 'VGPRField',
@@ -338,28 +340,34 @@ def _parse_fields_table(table: list, fmt: str, enums: set[str]) -> list[tuple]:
     fields.append((name, hi, lo, enc_val, ftype))
   return fields
 
-def generate(output_path: str | None = None, arch: str = "rdna3") -> dict:
-  """Generate instruction definitions from AMD ISA PDF. Returns dict with formats for testing."""
+def _parse_single_pdf(url: str) -> dict:
+  """Parse a single PDF and return raw data (formats, enums, src_enum, doc_name, is_cdna)."""
   import re, pdfplumber
   from tinygrad.helpers import fetch
 
-  pdf = pdfplumber.open(fetch(PDF_URLS[arch]))
+  pdf = pdfplumber.open(fetch(url))
 
   # Auto-detect document type from first page
   first_page_text = pdf.pages[0].extract_text() or ''
   is_cdna4 = 'CDNA4' in first_page_text or 'CDNA 4' in first_page_text
-  doc_name = "CDNA4" if is_cdna4 else "RDNA3.5"
+  is_cdna3 = 'CDNA3' in first_page_text or 'CDNA 3' in first_page_text or 'MI300' in first_page_text
+  is_cdna = is_cdna3 or is_cdna4
+  is_rdna4 = 'RDNA4' in first_page_text or 'RDNA 4' in first_page_text
+  is_rdna35 = 'RDNA3.5' in first_page_text or 'RDNA 3.5' in first_page_text  # Check 3.5 before 3
+  is_rdna3 = not is_rdna35 and ('RDNA3' in first_page_text or 'RDNA 3' in first_page_text)
+  doc_name = "CDNA4" if is_cdna4 else "CDNA3" if is_cdna3 else "RDNA4" if is_rdna4 else "RDNA3.5" if is_rdna35 else "RDNA3" if is_rdna3 else "Unknown"
 
-  # Find the "Microcode Formats" section by searching the PDF
-  # Look for "Chapter X. Microcode Formats" (RDNA3) or first format subsection header (CDNA4)
+  # Find the "Microcode Formats" section - search for SOP2 format definition
   microcode_start = None
-  for i, page in enumerate(pdf.pages):
-    text = page.extract_text() or ''
-    if re.search(r'Chapter \d+\.\s+Microcode Formats', text) or \
-       (i > 100 and re.search(r'^\d+\.\d+\.\d+\.\s+SOP2\s*\n', text, re.M)):
+  total_pages = len(pdf.pages)
+  # Search from likely locations (formats are typically 20-95% through the document - RDNA3 has them at ~25%)
+  for i in range(int(total_pages * 0.2), total_pages):
+    text = pdf.pages[i].extract_text() or ''
+    # Look for "X.Y.Z. SOP2" section header or "Chapter X. Microcode Formats"
+    if re.search(r'\d+\.\d+\.\d+\.\s+SOP2\b', text) or re.search(r'Chapter \d+\.\s+Microcode Formats', text):
       microcode_start = i
       break
-  if microcode_start is None: microcode_start = 150  # fallback for RDNA3.5
+  if microcode_start is None: microcode_start = int(total_pages * 0.9)
 
   pages = pdf.pages[microcode_start:microcode_start + 50]
   page_texts = [p.extract_text() or '' for p in pages]
@@ -392,16 +400,13 @@ def generate(output_path: str | None = None, arch: str = "rdna3") -> dict:
     return (pos := text.find('Field Name')) != -1 and bool(re.search(r'\d+\.\d+\.\d+\.\s+\w+\s*\n', text[:pos]))
 
   # find format headers with their page indices
-  format_headers = []  # (fmt_name, page_idx, header_pos)
+  format_headers = []
   for i, text in enumerate(page_texts):
-    # Match "X.Y.Z. FORMAT_NAME" followed by Description (RDNA3) or newline (CDNA4)
     for m in re.finditer(r'\d+\.\d+\.\d+\.\s+(\w+)\s*\n?Description', text): format_headers.append((m.group(1), i, m.start()))
     for m in re.finditer(r'\d+\.\d+\.\d+\.\s+(\w+)\s*\n', text):
       fmt_name = m.group(1)
-      # For CDNA4: accept uppercase format names (SOP2, VOP1, etc) directly
-      if is_cdna4 and fmt_name.isupper() and len(fmt_name) >= 2:
+      if is_cdna and fmt_name.isupper() and len(fmt_name) >= 2:
         format_headers.append((fmt_name, i, m.start()))
-      # For RDNA3: check for Description on next page
       elif m.start() > len(text) - 200 and 'Description' not in text[m.end():] and i + 1 < len(page_texts):
         next_text = page_texts[i + 1].lstrip()
         if next_text.startswith('Description') or (next_text.startswith('"RDNA') and 'Description' in next_text[:200]):
@@ -414,7 +419,6 @@ def generate(output_path: str | None = None, arch: str = "rdna3") -> dict:
     text, tables = page_texts[page_idx], page_tables[page_idx]
     field_pos = text.find('Field Name', header_pos)
 
-    # find fields table with ENCODING (same page or up to 2 pages ahead)
     fields = None
     for offset in range(3):
       if page_idx + offset >= len(pages): break
@@ -425,7 +429,6 @@ def generate(output_path: str | None = None, arch: str = "rdna3") -> dict:
           break
       if fields: break
 
-    # for modifier formats (no ENCODING), accept first fields table on same page
     if not fields and field_pos > header_pos:
       for t in tables:
         if is_fields_table(t) and (f := _parse_fields_table(t, fmt_name, enum_names)):
@@ -435,7 +438,6 @@ def generate(output_path: str | None = None, arch: str = "rdna3") -> dict:
     if not fields: continue
     field_names = {f[0] for f in fields}
 
-    # check next pages for continuation fields (tables without ENCODING)
     for pg_offset in range(1, 3):
       if page_idx + pg_offset >= len(pages) or has_header_before_fields(page_texts[page_idx + pg_offset]): break
       for t in page_tables[page_idx + pg_offset]:
@@ -447,19 +449,70 @@ def generate(output_path: str | None = None, arch: str = "rdna3") -> dict:
           break
     formats[fmt_name] = fields
 
-  # fix known PDF errors (verified against LLVM test vectors)
-  # SMEM: PDF says DLC=bit14, GLC=bit16 but actual encoding is DLC=bit13, GLC=bit14
+  # fix known PDF errors
   if 'SMEM' in formats:
     formats['SMEM'] = [(n, 13 if n == 'DLC' else 14 if n == 'GLC' else h, 13 if n == 'DLC' else 14 if n == 'GLC' else l, e, t)
                        for n, h, l, e, t in formats['SMEM']]
+
+  return {"formats": formats, "enums": enums, "src_enum": src_enum, "doc_name": doc_name, "is_cdna": is_cdna}
+
+def _merge_results(results: list[dict]) -> dict:
+  """Merge multiple PDF parse results into a superset. Asserts if any conflicts."""
+  merged = {"formats": {}, "enums": {}, "src_enum": dict(SRC_EXTRAS), "doc_names": [], "is_cdna": False}
+  for r in results:
+    merged["doc_names"].append(r["doc_name"])
+    merged["is_cdna"] = merged["is_cdna"] or r["is_cdna"]
+    # Merge src_enum (union, assert no conflicts)
+    for val, name in r["src_enum"].items():
+      if val in merged["src_enum"]:
+        assert merged["src_enum"][val] == name, f"SrcEnum conflict: {val} = {merged['src_enum'][val]} vs {name}"
+      else:
+        merged["src_enum"][val] = name
+    # Merge enums (union of ops per enum, assert no conflicts)
+    for enum_name, ops in r["enums"].items():
+      if enum_name not in merged["enums"]: merged["enums"][enum_name] = {}
+      for val, name in ops.items():
+        if val in merged["enums"][enum_name]:
+          assert merged["enums"][enum_name][val] == name, f"{enum_name} conflict: {val} = {merged['enums'][enum_name][val]} vs {name}"
+        else:
+          merged["enums"][enum_name][val] = name
+    # Merge formats (union of fields, assert no bit position conflicts for same field name)
+    for fmt_name, fields in r["formats"].items():
+      if fmt_name not in merged["formats"]:
+        merged["formats"][fmt_name] = list(fields)
+      else:
+        existing = {f[0]: (f[1], f[2]) for f in merged["formats"][fmt_name]}  # name -> (hi, lo)
+        for f in fields:
+          name, hi, lo = f[0], f[1], f[2]
+          if name in existing:
+            assert existing[name] == (hi, lo), f"Format {fmt_name} field {name} conflict: bits {existing[name]} vs ({hi}, {lo})"
+          else:
+            merged["formats"][fmt_name].append(f)
+  return merged
+
+def generate(output_path: str | None = None, arch: str = "rdna3") -> dict:
+  """Generate instruction definitions from AMD ISA PDF(s). Returns dict with formats for testing."""
+  urls = PDF_URLS[arch]
+  if isinstance(urls, str): urls = [urls]
+
+  # Parse all PDFs and merge
+  results = [_parse_single_pdf(url) for url in urls]
+  if len(results) == 1:
+    merged = results[0]
+    doc_name = merged["doc_name"]
+  else:
+    merged = _merge_results(results)
+    doc_name = "+".join(merged["doc_names"])
+
+  formats, enums, src_enum = merged["formats"], merged["enums"], merged["src_enum"]
 
   # generate output
   def enum_lines(name, items):
     return [f"class {name}(IntEnum):"] + [f"  {n} = {v}" for v, n in sorted(items.items())] + [""]
   def field_key(f): return order.index(f[0].lower()) if f[0].lower() in order else 1000
-  lines = [f"# autogenerated from AMD {doc_name} ISA PDF by lib.py - do not edit", "from enum import IntEnum",
+  lines = [f"# autogenerated from AMD {doc_name} ISA PDF by dsl.py - do not edit", "from enum import IntEnum",
            "from typing import Annotated",
-           "from extra.assembly.amd.lib import bits, BitField, Inst32, Inst64, SGPR, VGPR, TTMP as TTMP, s as s, v as v, ttmp as ttmp, SSrc, Src, SImm, Imm, VDSTYEnc, SGPRField, VGPRField",
+           "from extra.assembly.amd.dsl import bits, BitField, Inst32, Inst64, SGPR, VGPR, TTMP as TTMP, s as s, v as v, ttmp as ttmp, SSrc, Src, SImm, Imm, VDSTYEnc, SGPRField, VGPRField",
            "import functools", ""]
   lines += enum_lines("SrcEnum", src_enum) + sum([enum_lines(n, ops) for n, ops in sorted(enums.items())], [])
   # Format-specific field defaults (verified against LLVM test vectors)
@@ -475,7 +528,6 @@ def generate(output_path: str | None = None, arch: str = "rdna3") -> dict:
     if defaults := format_defaults.get(fmt_name):
       lines.append(f"  _defaults = {defaults}")
     for name, hi, lo, _, ftype in sorted([f for f in fields if f[0] != 'ENCODING'], key=field_key):
-      # Wrap IntEnum types (ending in Op) with Annotated[BitField, ...] for correct typing
       if ftype and ftype.endswith('Op'):
         ann = f":Annotated[BitField, {ftype}]"
       else:
@@ -489,23 +541,18 @@ def generate(output_path: str | None = None, arch: str = "rdna3") -> dict:
       seg = {"GLOBAL": ", seg=2", "SCRATCH": ", seg=2"}.get(fmt, "")
       tgt = {"GLOBAL": "FLAT, GLOBALOp", "SCRATCH": "FLAT, SCRATCHOp"}.get(fmt, f"{fmt}, {cls_name}")
       if fmt in formats or fmt in ("GLOBAL", "SCRATCH"):
-        # VOP1/VOP2/VOPC get _e32 suffix, VOP3 promoted ops (< 512) get _e64 suffix
         if fmt in ("VOP1", "VOP2", "VOPC"):
           suffix = "_e32"
         elif fmt == "VOP3" and op_val < 512:
           suffix = "_e64"
         else:
           suffix = ""
-        # FMAMK/FMAAK have a literal constant K that must be passed via literal= kwarg
-        # FMAMK: D = S0.f * K + S1.f (K is 3rd operand in assembly syntax)
-        # FMAAK: D = S0.f * S1.f + K (K is 4th operand in assembly syntax)
         if name in ('V_FMAMK_F32', 'V_FMAMK_F16'):
           lines.append(f"def {name.lower()}{suffix}(vdst, src0, K, vsrc1): return {fmt}({cls_name}.{name}, vdst, src0, vsrc1, literal=K)")
         elif name in ('V_FMAAK_F32', 'V_FMAAK_F16'):
           lines.append(f"def {name.lower()}{suffix}(vdst, src0, vsrc1, K): return {fmt}({cls_name}.{name}, vdst, src0, vsrc1, literal=K)")
         else:
           lines.append(f"{name.lower()}{suffix} = functools.partial({tgt}.{name}{seg})")
-  # export SrcEnum values, but skip DPP8/DPP16 which conflict with class names
   skip_exports = {'DPP8', 'DPP16'}
   src_names = {name for _, name in src_enum.items()}
   lines += [""] + [f"{name} = SrcEnum.{name}" for _, name in sorted(src_enum.items()) if name not in skip_exports]
@@ -519,7 +566,12 @@ def generate(output_path: str | None = None, arch: str = "rdna3") -> dict:
 if __name__ == "__main__":
   import argparse
   parser = argparse.ArgumentParser(description="Generate instruction definitions from AMD ISA PDF")
-  parser.add_argument("--arch", choices=list(PDF_URLS.keys()), default="rdna3", help="Target architecture (default: rdna3)")
+  parser.add_argument("--arch", choices=list(PDF_URLS.keys()) + ["all"], default="rdna3", help="Target architecture (default: rdna3)")
   args = parser.parse_args()
-  result = generate(f"extra/assembly/amd/autogen/{args.arch}/__init__.py", arch=args.arch)
-  print(f"generated SrcEnum ({len(result['src_enum'])}) + {len(result['enums'])} opcode enums + {len(result['formats'])} format classes")
+  if args.arch == "all":
+    for arch in PDF_URLS.keys():
+      result = generate(f"extra/assembly/amd/autogen/{arch}/__init__.py", arch=arch)
+      print(f"{arch}: generated SrcEnum ({len(result['src_enum'])}) + {len(result['enums'])} opcode enums + {len(result['formats'])} format classes")
+  else:
+    result = generate(f"extra/assembly/amd/autogen/{args.arch}/__init__.py", arch=args.arch)
+    print(f"generated SrcEnum ({len(result['src_enum'])}) + {len(result['enums'])} opcode enums + {len(result['formats'])} format classes")
