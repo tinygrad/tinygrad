@@ -15,7 +15,7 @@ webgpu_lib = "os.path.join(sysconfig.get_paths()['purelib'], 'pydawn', 'lib', 'l
 nv_lib_path = "f'/usr/local/cuda/targets/{sysconfig.get_config_vars().get(\"MULTIARCH\", \"\").rsplit(\"-\", 1)[0]}/lib'"
 
 cuda_path_glob_template = "(glob.glob(os.path.join(os.environ.get('CUDA_PATH', ''), 'bin', '{}'))+[''])[0]"
-nvrtc_dll = "'nvrtc' if not WIN else " + cuda_path_glob_template.format("nvrtc64_*.dll")
+nvrtc_dll = "'nvrtc' if not WIN else " + cuda_path_glob_template.format('nvrtc64_[0-9][0-9][0-9]_[0-9].dll')
 nvjitlink_dll = "'nvJitLink' if not WIN else " + cuda_path_glob_template.format("nvJitLink_*.dll")
 
 def load(name, dll, files, **kwargs):
