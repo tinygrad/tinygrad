@@ -3,7 +3,7 @@ from tinygrad import Tensor, dtypes, nn, UOp, Device
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 from tinygrad.helpers import getenv
 
-GPUS = tuple(f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))) if getenv("GPUS", 1) > 1 else Device.DEFAULT 
+GPUS = tuple(f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 1))) if getenv("GPUS", 1) > 1 else Device.DEFAULT
 
 def quantize_to_fp8(x: Tensor, axis=None, dtype=dtypes.fp8e4m3):
   x_abs_max = x.abs().max(axis=axis, keepdim=True).detach()
@@ -15,18 +15,18 @@ def quantize_to_fp8(x: Tensor, axis=None, dtype=dtypes.fp8e4m3):
   res = x_clamped_ste.cast(dtype).contiguous()
   return res, scale.float().reciprocal().contiguous()
 
-def custom_matmul(output: UOp, input: UOp, weight: UOp) -> UOp:
-  SEQ = input.shape[1]
+def custom_matmul(output: UOp, inp: UOp, weight: UOp) -> UOp:
+  SEQ = inp.shape[1]
   OUT = weight.shape[0]
   IN = weight.shape[-1]
-  seq_idx = UOp.range(SEQ, 2, AxisType.LOOP)        
-  out_idx = UOp.range(OUT, 3, AxisType.LOOP)        
-  batch_idx = UOp.range(output.size//SEQ//OUT, 1, AxisType.LOOP)  
-  reduce_idx = UOp.range(IN, 0, AxisType.REDUCE)     
-  product = (input.index((seq_idx*IN+reduce_idx+batch_idx*IN*SEQ)) * weight.index((out_idx*IN+reduce_idx))).cast(dtypes.float)
+  seq_idx = UOp.range(SEQ, 2, AxisType.LOOP)
+  out_idx = UOp.range(OUT, 3, AxisType.LOOP)
+  batch_idx = UOp.range(output.size//SEQ//OUT, 1, AxisType.LOOP)
+  reduce_idx = UOp.range(IN, 0, AxisType.REDUCE)
+  product = (inp.index((seq_idx*IN+reduce_idx+batch_idx*IN*SEQ)) * weight.index((out_idx*IN+reduce_idx))).cast(dtypes.float)
   reduced = product.reduce(reduce_idx, arg=Ops.ADD)
   store_op = output.index((seq_idx*OUT+out_idx+batch_idx*OUT*SEQ), ptr=True).store(reduced).end(batch_idx, seq_idx, out_idx)
-  return store_op.sink(arg=KernelInfo(name=f"custom_matmul_{input.shape}x{weight.shape}"))
+  return store_op.sink(arg=KernelInfo(name=f"custom_matmul_{inp.shape}x{weight.shape}"))
 
 def custom_matmul_backward(gradient: UOp, kernel: UOp) -> tuple[UOp, UOp]:
   _, input_uop, weight_uop = kernel.src
@@ -65,7 +65,7 @@ class FP8Linear:
 def _replace_linear(layer: nn.Linear):
   fp8_linear = FP8Linear(layer.weight.shape[1], layer.weight.shape[0], layer.bias is not None)
   fp8_linear.weight = layer.weight
-  if layer.bias is not None: fp8_linear.bias = layer.bias  
+  if layer.bias is not None: fp8_linear.bias = layer.bias
   return fp8_linear
 
 def _swap_linear_with_fp8(model, module_filter_fn:Callable[[Any, str],bool]|None=None, fqn:str="", parent:Any|None=None,
