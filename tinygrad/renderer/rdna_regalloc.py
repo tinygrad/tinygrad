@@ -37,8 +37,12 @@ class RDNARegAlloc:
     self._scratch_vgpr = -1
     self._scratch_count = 0
     self._deferred_store_vgpr = -1
+    # Loop-local buffer tracking: DEFINE_REG -> (loop_start, loop_end) if buffer is loop-local
+    self._loop_local_buffers: dict[UOp, tuple[int, int]] = {}
     # Run liveness analysis
     self._last_use, self._aliases, self._effective_death = self._analyze_liveness()
+    # Analyze loop-local buffers after liveness (needs loop_ranges)
+    self._analyze_loop_local_buffers()
     # Pre-analyze VECTORIZE needs and reserve high registers for them
     self._vectorize_pool: list[tuple[int, int]] = []  # (base, count) reserved ranges
     self._init_vectorize_pool()
@@ -142,6 +146,81 @@ class RDNARegAlloc:
       effective_death[root] = death
     return last_use, aliases, effective_death
 
+  def _analyze_loop_local_buffers(self):
+    """Detect DEFINE_REG buffers that are completely reinitialized inside a loop.
+    
+    If a buffer is zeroed/initialized at the start of each loop iteration, its registers
+    can be freed at the end of each iteration and reallocated, rather than staying live
+    for the entire kernel. This is what LLVM does automatically.
+    """
+    # Find loop ranges
+    loop_ranges: dict[int, int] = {}  # range_pos -> end_pos
+    range_uops: dict[int, UOp] = {}  # range_pos -> RANGE UOp
+    for i, u in enumerate(self.uops):
+      if u.op is Ops.RANGE: range_uops[i] = u
+      if u.op is Ops.END and len(u.src) >= 2 and u.src[1].op is Ops.RANGE:
+        for rpos, ruop in range_uops.items():
+          if ruop is u.src[1]:
+            loop_ranges[rpos] = i
+            break
+
+    # Find DEFINE_REG buffers
+    define_regs: list[tuple[int, UOp]] = []
+    for i, u in enumerate(self.uops):
+      if u.op is Ops.DEFINE_REG:
+        if isinstance(u.dtype, PtrDType) and u.dtype.addrspace == AddrSpace.REG:
+          define_regs.append((i, u))
+
+    # For each DEFINE_REG, check if it's loop-local
+    for def_pos, def_uop in define_regs:
+      buf_size = def_uop.dtype.size if hasattr(def_uop.dtype, 'size') and def_uop.dtype.size > 0 else 0
+      if buf_size == 0: continue
+
+      # Find all STOREs to this buffer
+      stores: list[tuple[int, bool, int]] = []  # (pos, is_const_zero, offset)
+      for i, u in enumerate(self.uops):
+        if u.op is Ops.STORE and len(u.src) >= 2:
+          idx_uop = u.src[0]
+          val_uop = u.src[1]
+          if idx_uop.op is Ops.INDEX and len(idx_uop.src) >= 2:
+            buf = idx_uop.src[0]
+            while buf.op is Ops.AFTER: buf = buf.src[0]
+            if buf is def_uop:
+              offset_uop = idx_uop.src[1]
+              offset = offset_uop.arg if offset_uop.op is Ops.CONST else -1
+              is_zero = val_uop.op is Ops.CONST and val_uop.arg == 0
+              stores.append((i, is_zero, offset))
+
+      if not stores: continue
+
+      # Check each loop to see if this buffer is completely zeroed at the start
+      for range_pos, end_pos in loop_ranges.items():
+        if range_pos <= def_pos: continue  # Buffer defined before this loop
+
+        # Find stores inside this loop, right after loop start (initialization region)
+        # Allow some slack - init stores should be within first ~50% of loop body before inner loops
+        init_region_end = range_pos + (end_pos - range_pos) // 2
+        
+        # Find the first inner loop (if any) - init must be before it
+        inner_loop_start = end_pos
+        for other_range_pos in loop_ranges:
+          if range_pos < other_range_pos < end_pos:
+            inner_loop_start = min(inner_loop_start, other_range_pos)
+        init_region_end = min(init_region_end, inner_loop_start)
+
+        # Count zero-init stores in the init region
+        init_stores = [(pos, is_zero, off) for pos, is_zero, off in stores 
+                       if range_pos < pos < init_region_end]
+        zero_init_offsets = set(off for pos, is_zero, off in init_stores if is_zero and off >= 0)
+
+        # Check if ALL buffer elements are zero-initialized
+        if len(zero_init_offsets) >= buf_size:
+          # This buffer is completely reinitialized at the start of this loop
+          self._loop_local_buffers[def_uop] = (range_pos, end_pos)
+          if getenv("RDNA_LOOP_LOCAL_DEBUG", 0):
+            print(f"[LOOP_LOCAL] DEFINE_REG@{def_pos} ({buf_size} elements) is loop-local to RANGE@{range_pos}-END@{end_pos}")
+          break  # Use the innermost containing loop
+
   def _init_vectorize_pool(self):
     """Pre-analyze VECTORIZE ops and reserve high registers for contiguous allocations.
     This prevents fragmentation from LOADs affecting VECTORIZE range allocation.
@@ -158,6 +237,10 @@ class RDNARegAlloc:
     return u
 
   def _get_death_pos(self, owner: UOp) -> int:
+    # For loop-local buffers, death is at the loop END, not kernel end
+    if owner in self._loop_local_buffers:
+      _, end_pos = self._loop_local_buffers[owner]
+      return end_pos
     root = self._get_root(owner)
     return self._effective_death.get(root, self._last_use.get(owner, -1))
 
@@ -250,6 +333,7 @@ class RDNARegAlloc:
       op_counts: dict[str, int] = {}
       load_lifetimes: list[int] = []
       load_details: list[tuple] = []  # (reg, def_pos)
+      add_details: list[tuple] = []  # (reg, def_pos, lifetime)
       uop_positions = {u: i for i, u in enumerate(self.uops)}
       for r, o in self._vgpr_owner.items():
         op_name = o.op.name
@@ -259,13 +343,17 @@ class RDNARegAlloc:
           death_pos = self._get_death_pos(o)
           load_lifetimes.append((def_pos, death_pos - def_pos))
           load_details.append((r, def_pos))
+        if o.op is Ops.ADD and o in uop_positions:
+          def_pos = uop_positions[o]
+          death_pos = self._get_death_pos(o)
+          add_details.append((r, def_pos, death_pos - def_pos))
       # Find current position
       cur_pos = len([u for u in self.uops if u in self._vgpr_owner.values() or u in self._range_owner.values()])
       for pi, pu in enumerate(self.uops):
         if pu == owner:
           cur_pos = pi
           break
-      self._peak_info = (dict(self._vgpr_ranges), len(self._vgpr_owner), owner.op.name, op_counts, load_lifetimes, cur_pos, load_details)
+      self._peak_info = (dict(self._vgpr_ranges), len(self._vgpr_owner), owner.op.name, op_counts, load_lifetimes, cur_pos, load_details, add_details)
     return VGPR(reg)
 
   def alloc_vgpr_pair(self, owner: UOp) -> VGPR:
@@ -467,7 +555,7 @@ class RDNARegAlloc:
       summary = [f"VGPR overflow: allocated up to v{self._max_vgpr-1}, max v{self.MAX_VGPR-1}"]
       summary.append(f"  Peak simultaneous: {self._peak_vgpr} registers")
       if self._peak_info:
-        ranges, owned, last_op, op_counts, load_lifetimes, peak_pos, load_details = self._peak_info
+        ranges, owned, last_op, op_counts, load_lifetimes, peak_pos, load_details, add_details = self._peak_info
         summary.append(f"  At peak (pos {peak_pos}): DEFINE_REG={ranges}, owned={owned}, allocating for {last_op}")
         summary.append(f"  Owned by op: {op_counts}")
         if load_lifetimes:
@@ -479,6 +567,17 @@ class RDNARegAlloc:
           load_details.sort(key=lambda x: x[1])
           regs = sorted(set(r for r, _ in load_details))
           summary.append(f"  LOAD regs: {min(regs)}-{max(regs)} ({len(regs)} distinct)")
+        if add_details:
+          lifetimes = [l for _, _, l in add_details]
+          positions = [p for _, p, _ in add_details]
+          summary.append(f"  ADD lifetimes: min={min(lifetimes)}, max={max(lifetimes)}, avg={sum(lifetimes)/len(lifetimes):.1f}")
+          summary.append(f"  ADD positions: {min(positions)}-{max(positions)}")
+          # Show long-lived ADDs
+          long_adds = [(r, p, l) for r, p, l in add_details if l > 100]
+          if long_adds:
+            summary.append(f"  Long-lived ADDs (lifetime>100): {len(long_adds)}")
+            for r, p, l in sorted(long_adds, key=lambda x: -x[2])[:10]:
+              summary.append(f"    v{r}: pos={p}, lifetime={l}")
       if self._scratch_vgpr >= 0: summary.append(f"  Scratch: v{self._scratch_vgpr}")
       raise RuntimeError("\n".join(summary))
 

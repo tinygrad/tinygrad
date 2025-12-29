@@ -396,6 +396,7 @@ class RDNARenderer(Renderer):
     current_offset = 0
     lds_size = 0
     pending_waits: set[UOp] = set()  # Track loads that need waits before use
+    pending_define_regs: dict[UOp, int] = {}  # Deferred DEFINE_REG allocations: UOp -> num_regs
     # Allocate dedicated SGPRs for exec mask saving to avoid conflicts with kernel arguments
     # These will be allocated on first use, which happens after all DEFINE_GLOBAL/VAR ops
     exec_save_load: list[SGPR | None] = [None]  # Wrapped in list for nonlocal mutation
@@ -615,15 +616,13 @@ class RDNARenderer(Renderer):
           code.append(v_cvt_u32_f64_e32(v[dst.idx+1], v[s:s+2]))  # high part
         # For signed: handle signs, do unsigned div, restore sign
         elif dtype in (dtypes.int32, dtypes.int16, dtypes.int8):
-          # Compute absolute values and track signs
-          tmp_abs_a = ra.alloc_vgpr(u)  # |a|
-          tmp_abs_b = ra.alloc_vgpr(u)  # |b|
-          tmp_abs_a_orig = ra.alloc_vgpr(u)  # copy of |a| for correction
-          tmp_abs_b_orig = ra.alloc_vgpr(u)  # copy of |b| for correction
-          tmp_sign = ra.alloc_vgpr(u)  # sign bit
-          tmp_neg = ra.alloc_vgpr(u)   # temp for negation
-          tmp_q = ra.alloc_vgpr(u)     # quotient
-          tmp_rem = ra.alloc_vgpr(u)   # temp for correction
+          # Use scratch registers for temporaries (only needed within this computation)
+          # Layout: s[0]=|a|, s[1]=|b|, s[2]=|a|_orig, s[3]=|b|_orig, s[4]=sign, s[5]=neg, s[6]=q, s[7]=rem
+          s = ra.get_scratch_vgpr(8)
+          tmp_abs_a, tmp_abs_b = v[s], v[s+1]
+          tmp_abs_a_orig, tmp_abs_b_orig = v[s+2], v[s+3]
+          tmp_sign, tmp_neg = v[s+4], v[s+5]
+          tmp_q, tmp_rem = v[s+6], v[s+7]
           # |a|: abs(a) = a >= 0 ? a : -a
           code.append(v_sub_nc_u32_e32(tmp_neg, 0, a))  # -a
           code.append(v_cmp_gt_i32_e32(0, a))  # 0 > a means a < 0
@@ -654,11 +653,9 @@ class RDNARenderer(Renderer):
           code.append(v_cndmask_b32_e64(dst, dst, tmp_neg, VCC_LO))
         else:
           # Unsigned division using floating-point with correction
-          # The rcp instruction has limited precision, so we need to correct
-          tmp_a = ra.alloc_vgpr(u)
-          tmp_b = ra.alloc_vgpr(u)
-          tmp_q = ra.alloc_vgpr(u)
-          tmp_rem = ra.alloc_vgpr(u)
+          # Use scratch registers for temporaries
+          s = ra.get_scratch_vgpr(4)
+          tmp_a, tmp_b, tmp_q, tmp_rem = v[s], v[s+1], v[s+2], v[s+3]
           code.append(v_cvt_f32_u32(tmp_a, a))  # float(a)
           code.append(v_cvt_f32_u32(tmp_b, b))  # float(b)
           code.append(v_rcp_f32_e32(tmp_b, tmp_b))  # 1/b (approximate)
@@ -673,13 +670,12 @@ class RDNARenderer(Renderer):
       elif op is Ops.MOD:
         # Modulo: a % b = a - (a // b) * b
         is_signed = dtype in (dtypes.int32, dtypes.int16, dtypes.int8)
-        tmp1 = ra.alloc_vgpr(u)
-        tmp2 = ra.alloc_vgpr(u)
         if is_signed:
           # Compute quotient first (same as IDIV signed)
-          tmp_sign = ra.alloc_vgpr(u)
-          tmp_abs_a = ra.alloc_vgpr(u)
-          tmp_abs_b = ra.alloc_vgpr(u)
+          # Use scratch registers: s[0]=tmp1, s[1]=tmp2, s[2]=sign, s[3]=|a|, s[4]=|b|
+          s = ra.get_scratch_vgpr(5)
+          tmp1, tmp2 = v[s], v[s+1]
+          tmp_sign, tmp_abs_a, tmp_abs_b = v[s+2], v[s+3], v[s+4]
           # |a|
           code.append(v_sub_nc_u32_e32(tmp_abs_a, 0, a))  # -a
           code.append(v_cmp_gt_i32_e32(0, a))
@@ -704,11 +700,11 @@ class RDNARenderer(Renderer):
           code.append(v_cndmask_b32_e64(dst, dst, tmp1, VCC_LO))
         else:
           # Unsigned: a % b = a - (a // b) * b
-          # Save original 'a' and 'b' since we'll overwrite temps
-          tmp_a_orig = ra.alloc_vgpr(u)  # save original a
-          tmp_b_orig = ra.alloc_vgpr(u)  # save original b
-          tmp_q = ra.alloc_vgpr(u)       # quotient
-          tmp_rem = ra.alloc_vgpr(u)     # temp for correction
+          # Use scratch registers: s[0]=tmp1, s[1]=tmp2, s[2]=a_orig, s[3]=b_orig, s[4]=q, s[5]=rem
+          s = ra.get_scratch_vgpr(6)
+          tmp1, tmp2 = v[s], v[s+1]
+          tmp_a_orig, tmp_b_orig = v[s+2], v[s+3]
+          tmp_q, tmp_rem = v[s+4], v[s+5]
           code.append(v_mov_b32_e32(tmp_a_orig, a))  # save a
           code.append(v_mov_b32_e32(tmp_b_orig, b))  # save b
           code.append(v_cvt_f32_u32(tmp1, a))    # float(a)
@@ -727,6 +723,195 @@ class RDNARenderer(Renderer):
           code.append(v_sub_nc_u32_e32(dst, tmp_a_orig, tmp2))  # a - quotient * b
       else:
         code.append(v_mov_b32_e32(dst, a))  # Fallback: just move
+
+    # Pre-analyze: detect identity stores (STORE(idx, LOAD(idx))) that can be skipped
+    # These are no-ops that waste registers - LLVM eliminates them automatically
+    def get_reg_buf_and_offset(idx_uop: UOp) -> tuple[UOp | None, int]:
+      """Extract (buffer, offset) from an INDEX into a register-space buffer."""
+      if idx_uop.op is not Ops.INDEX or len(idx_uop.src) < 2: return None, -1
+      buf = idx_uop.src[0]
+      while buf.op is Ops.AFTER: buf = buf.src[0]
+      if buf.op is not Ops.DEFINE_REG: return None, -1
+      if not (isinstance(buf.dtype, PtrDType) and buf.dtype.addrspace == AddrSpace.REG): return None, -1
+      offset_uop = idx_uop.src[1]
+      offset = offset_uop.arg if offset_uop.op is Ops.CONST else -1
+      return buf, offset
+
+    # Build a map of (buffer, offset) -> list of stores
+    # Track which offsets have ONLY identity stores (and zero-init), no real modifications
+    buffer_offset_stores: dict[tuple[UOp, int], list[tuple[UOp, bool, bool]]] = {}  # (buf, off) -> [(store, is_identity, is_zero_init)]
+    for u in uops:
+      if u.op is not Ops.STORE or len(u.src) < 2: continue
+      idx_uop, val_uop = u.src[0], u.src[1]
+      store_buf, store_off = get_reg_buf_and_offset(idx_uop)
+      if store_buf is None or store_off < 0: continue
+      # Check if this is an identity store (STORE(idx, LOAD(idx)))
+      is_identity = False
+      if val_uop.op is Ops.LOAD and len(val_uop.src) >= 1:
+        load_idx = val_uop.src[0]
+        load_buf, load_off = get_reg_buf_and_offset(load_idx)
+        is_identity = (load_buf is store_buf and load_off == store_off)
+      # Check if this is a zero-init store
+      is_zero_init = (val_uop.op is Ops.CONST and val_uop.arg == 0)
+      key = (store_buf, store_off)
+      if key not in buffer_offset_stores: buffer_offset_stores[key] = []
+      buffer_offset_stores[key].append((u, is_identity, is_zero_init))
+
+    # Find offsets that ONLY have identity stores and/or zero-init (no real modifications)
+    # These offsets don't need registers allocated
+    dead_offsets: set[tuple[UOp, int]] = set()
+    for key, stores in buffer_offset_stores.items():
+      # If ALL stores are either identity or zero-init, this offset is dead
+      if all(is_identity or is_zero_init for _, is_identity, is_zero_init in stores):
+        dead_offsets.add(key)
+
+    # Collect identity stores and their loads, plus dead offset stores
+    identity_stores: set[UOp] = set()
+    identity_loads: set[UOp] = set()  # LOADs that are only used by identity stores
+    dead_stores: set[UOp] = set()  # Zero-init stores to dead offsets
+    for key, stores in buffer_offset_stores.items():
+      for store, is_identity, is_zero_init in stores:
+        if is_identity:
+          identity_stores.add(store)
+          # Track the LOAD too
+          val_uop = store.src[1]
+          identity_loads.add(val_uop)
+        elif key in dead_offsets and is_zero_init:
+          # Zero-init to a dead offset - skip it too
+          dead_stores.add(store)
+
+    # Remove LOADs that have other uses (not just identity stores)
+    for u in uops:
+      for src in u.src:
+        if src in identity_loads and u not in identity_stores:
+          identity_loads.discard(src)  # This LOAD is used by something else
+
+    # Build map of buffer -> active offsets (those that need registers)
+    buffer_active_offsets: dict[UOp, set[int]] = {}
+    for (buf, off), stores in buffer_offset_stores.items():
+      if (buf, off) not in dead_offsets:
+        if buf not in buffer_active_offsets: buffer_active_offsets[buf] = set()
+        buffer_active_offsets[buf].add(off)
+
+    # Build offset remapping: logical offset -> physical offset (0 to active_count-1)
+    # Only for buffers that have dead offsets (optimization opportunity)
+    buffer_offset_remap: dict[UOp, dict[int, int]] = {}
+    buffer_reduced_size: dict[UOp, int] = {}  # Buffer -> reduced allocation size
+    for buf, active_offs in buffer_active_offsets.items():
+      buf_size = buf.dtype.size if hasattr(buf.dtype, 'size') else 0
+      if len(active_offs) < buf_size:  # Has dead offsets
+        # Create remapping: sorted active offsets map to 0, 1, 2, ...
+        sorted_active = sorted(active_offs)
+        remap = {old: new for new, old in enumerate(sorted_active)}
+        buffer_offset_remap[buf] = remap
+        buffer_reduced_size[buf] = len(active_offs)
+
+    if getenv("RDNA_IDENTITY_DEBUG", 0) and (identity_stores or dead_stores):
+      print(f"[IDENTITY] Skipping {len(identity_stores)} identity stores, {len(identity_loads)} identity loads, {len(dead_stores)} dead zero-inits ({len(dead_offsets)} dead offsets)")
+      # Debug: count by buffer
+      for buf, active_offs in buffer_active_offsets.items():
+        buf_size = buf.dtype.size if hasattr(buf.dtype, 'size') else 0
+        dead_cnt = buf_size - len(active_offs)
+        print(f"  Buffer {buf.dtype}: {len(active_offs)} active, {dead_cnt} dead out of {buf_size}")
+        if buf in buffer_reduced_size:
+          print(f"    Reduced allocation: {buf_size} -> {buffer_reduced_size[buf]}")
+
+    # Pre-analyze: find ADDs/WHEREs that are only used by register-space STOREs with constant offset
+    # These ops can be computed directly into the accumulator slot, saving a register
+    # Two passes: first identify all candidate ops, then check if all users of shared sources are fusable
+    # Compute last_use for sources
+    src_last_use: dict[UOp, int] = {}
+    for pos, u in enumerate(uops):
+      for src in u.src:
+        src_last_use[src] = pos
+
+    def is_reg_load(src: UOp) -> bool:
+      """Check if src is a register-space LOAD (doesn't allocate a register)."""
+      if src.op is Ops.LOAD and len(src.src) > 0 and src.src[0].op is Ops.INDEX:
+        src_idx = src.src[0]
+        if len(src_idx.src) > 0:
+          src_buf = src_idx.src[0]
+          while src_buf.op is Ops.AFTER: src_buf = src_buf.src[0]
+          return src_buf.op is Ops.DEFINE_REG
+      return False
+
+    # First pass: find all candidate fused ops (ignoring source sharing for now)
+    candidate_fused_ops: dict[UOp, int] = {}  # op -> STORE position
+    op_to_non_regload_srcs: dict[UOp, list[UOp]] = {}  # op -> list of non-regload sources
+    for i, u in enumerate(uops):
+      if u.op is not Ops.STORE: continue
+      if len(u.src) < 2: continue
+      idx_uop, val_uop = u.src[0], u.src[1]
+      if val_uop.op not in (Ops.ADD, Ops.WHERE): continue  # Value must be ADD or WHERE
+      if idx_uop.op is not Ops.INDEX: continue
+      if len(idx_uop.src) < 2: continue
+      # Check if this is a register-space store with constant offset
+      buf_uop = idx_uop.src[0]
+      while buf_uop.op is Ops.AFTER: buf_uop = buf_uop.src[0]
+      if buf_uop.op is not Ops.DEFINE_REG: continue
+      offset_uop = idx_uop.src[1]
+      if offset_uop.op is not Ops.CONST: continue  # Must have constant offset
+      # Check if the op is only used by this STORE
+      op_users = sum(1 for uu in uops if val_uop in uu.src)
+      if op_users != 1: continue
+      # Collect non-regload sources
+      non_regload_srcs = []
+      for src in val_uop.src:
+        if src.op is Ops.CONST: continue
+        if is_reg_load(src): continue  # REG_LOAD - skip
+        non_regload_srcs.append(src)
+      candidate_fused_ops[val_uop] = i
+      op_to_non_regload_srcs[val_uop] = non_regload_srcs
+
+    # Build mapping: source -> list of ops that use it
+    src_to_ops: dict[UOp, list[UOp]] = {}
+    for op_uop, srcs in op_to_non_regload_srcs.items():
+      for src in srcs:
+        if src not in src_to_ops: src_to_ops[src] = []
+        src_to_ops[src].append(op_uop)
+
+    # Second pass: check if all users of each source are fusable ops
+    fused_ops: set[UOp] = set()
+    fused_op_lifetime_extensions: dict[UOp, int] = {}  # Sources that need lifetime extension
+    for op_uop, store_pos in candidate_fused_ops.items():
+      can_fuse = True
+      needs_extension: list[tuple[UOp, int]] = []
+      for src in op_to_non_regload_srcs[op_uop]:
+        # Check if ALL users of this source are candidate fused ops
+        src_users = [uu for uu in uops if src in uu.src]
+        all_users_are_fusable = all(uu in candidate_fused_ops for uu in src_users)
+        if not all_users_are_fusable:
+          can_fuse = False
+          break
+        # Find the max store position among all ops that use this source
+        max_store_pos = max(candidate_fused_ops[uu] for uu in src_users if uu in candidate_fused_ops)
+        if src_last_use.get(src, 0) < max_store_pos:
+          needs_extension.append((src, max_store_pos))
+      if can_fuse:
+        fused_ops.add(op_uop)
+        for src, new_last_use in needs_extension:
+          fused_op_lifetime_extensions[src] = max(fused_op_lifetime_extensions.get(src, 0), new_last_use)
+      elif getenv("RDNA_FUSE_DEBUG", 0):
+        # Debug why this op couldn't be fused
+        src_info = []
+        for src in op_to_non_regload_srcs[op_uop]:
+          src_users = [uu for uu in uops if src in uu.src]
+          fusable_users = sum(1 for uu in src_users if uu in candidate_fused_ops)
+          src_info.append(f"{src.op.name}(users={len(src_users)},fusable={fusable_users})")
+        print(f"[FUSE] Can't fuse {op_uop.op.name} at store pos {store_pos}: srcs=[{', '.join(src_info)}]")
+
+    # Apply lifetime extensions to register allocator for fused op sources
+    for src, new_last_use in fused_op_lifetime_extensions.items():
+      ra.extend_lifetime(src, new_last_use)
+
+    if getenv("RDNA_FUSE_DEBUG", 0) and (fused_ops or candidate_fused_ops):
+      add_count = sum(1 for u in fused_ops if u.op is Ops.ADD)
+      where_count = sum(1 for u in fused_ops if u.op is Ops.WHERE)
+      print(f"[FUSE] {add_count} ADDs and {where_count} WHEREs fused, {len(fused_op_lifetime_extensions)} lifetime extensions")
+
+
+    # Keep backward compatibility name
+    fused_adds = fused_ops
 
     # Process UOps
     for i, u in enumerate(uops):
@@ -760,14 +945,16 @@ class RDNARenderer(Renderer):
 
       elif u.op is Ops.DEFINE_REG:
         # Register-space buffer for WMMA/tensor core outputs
-        # dtype is a pointer to register space with size = element count
+        # Defer allocation until first STORE to reduce register pressure
+        # Just record the allocation info for now
         num_elems = u.dtype.size if hasattr(u.dtype, 'size') and u.dtype.size > 0 else 16
-        # For f64, each element needs 2 VGPRs; for f32/i32, 1 VGPR per element
+        # Use reduced size if this buffer has dead offsets
+        if u in buffer_reduced_size:
+          num_elems = buffer_reduced_size[u]
         scalar_size = u.dtype.base.itemsize if hasattr(u.dtype, 'base') else 4
         regs_per_elem = (scalar_size + 3) // 4  # ceil(itemsize / 4)
         num_regs = num_elems * regs_per_elem
-        # Use align=1 for accumulators - no hardware alignment requirement
-        r[u] = ra.alloc_vgpr_range(u, num_regs, align=1)
+        pending_define_regs[u] = num_regs  # Store pending allocation info
 
       elif u.op is Ops.SPECIAL:
         # SPECIAL arg is a string like 'lidx0', 'gidx1', etc.
@@ -795,11 +982,17 @@ class RDNARenderer(Renderer):
                     Ops.MAX, Ops.MULACC, Ops.RECIPROCAL, Ops.SQRT, Ops.EXP2, Ops.LOG2,
                     Ops.TRUNC, Ops.NEG, Ops.CMPLT, Ops.CMPEQ, Ops.CMPNE, Ops.WHERE,
                     Ops.IDIV, Ops.MOD):
+        # Skip allocation for ADDs that will be fused with register-space STOREs
+        if u in fused_adds:
+          r[u] = None  # Mark as pending - will be computed at STORE time
+          continue
         maybe_wait(u.src)  # Wait for any pending loads used by this operation
         needs_pair = RDNARegAlloc.needs_vgpr_pair(u.dtype)
         dst = None
         # Try to reuse a source register if it dies here and owns the register
-        if not needs_pair and u.op in (Ops.ADD, Ops.SUB, Ops.MUL, Ops.AND, Ops.OR, Ops.XOR, Ops.SHL, Ops.SHR, Ops.MAX):
+        # Binary ops and unary ops can all potentially reuse source registers
+        if not needs_pair and u.op in (Ops.ADD, Ops.SUB, Ops.MUL, Ops.AND, Ops.OR, Ops.XOR, Ops.SHL, Ops.SHR, Ops.MAX,
+                                       Ops.NEG, Ops.RECIPROCAL, Ops.SQRT, Ops.EXP2, Ops.LOG2, Ops.TRUNC):
           for src in u.src:
             if src.op == Ops.CONST: continue  # Skip constants
             src_reg = get_reg(src)
@@ -876,6 +1069,8 @@ class RDNARenderer(Renderer):
             r[u] = (idx_reg, cond)
 
       elif u.op is Ops.LOAD:
+        # Skip identity loads (LOADs only used by identity stores) - they're no-ops
+        if u in identity_loads: continue
         idx_uop = u.src[0]
         default_uop = u.src[1] if len(u.src) > 1 else None  # Optional default value
         # For INDEX, r[idx_uop] is a tuple (addr, cond)
@@ -906,6 +1101,14 @@ class RDNARenderer(Renderer):
           if isinstance(addr, (int, float)):
             # addr is the element index, not byte offset
             reg_offset = int(addr)
+            # Apply offset remapping if this buffer has dead offsets
+            def_reg = buf_uop
+            while def_reg.op is Ops.AFTER: def_reg = def_reg.src[0]
+            if def_reg in buffer_offset_remap:
+              remap = buffer_offset_remap[def_reg]
+              if reg_offset in remap:
+                reg_offset = remap[reg_offset]
+              # else: offset not in remap means it's a dead offset - shouldn't happen for non-skipped LOADs
             dst = v[buf_reg.idx + reg_offset]
           else:
             # Variable offset - use first register as fallback (TODO: proper indirect)
@@ -949,9 +1152,11 @@ class RDNARenderer(Renderer):
             code.append(v_cmp_ne_i32_e32(0, cond_reg))  # VCC = (cond != 0)
             # Clamp address to 0 for masked lanes to prevent invalid memory accesses
             # Even with exec masking, garbage addresses can cause protection faults
-            # IMPORTANT: Use a temp register to avoid corrupting addr which may be used by STORE later
+            # IMPORTANT: Use scratch register instead of allocating a new one - clamped_addr only needs
+            # to live for the duration of the LOAD instruction, not until the LOAD result dies.
             if isinstance(addr, VGPR):
-              clamped_addr = ra.alloc_vgpr(u)
+              scratch_idx = ra.get_scratch_vgpr(1)
+              clamped_addr = v[scratch_idx]
               code.append(v_cndmask_b32_e64(clamped_addr, 0, addr, VCC_LO))  # clamped = cond ? addr : 0
               addr = clamped_addr  # Use clamped address for this load only
             code.append(s_and_saveexec_b32(get_exec_save_load(), VCC_LO))  # Save exec, mask with condition
@@ -976,6 +1181,8 @@ class RDNARenderer(Renderer):
         pending_waits.add(u)  # Track that this load result needs wait before use
 
       elif u.op is Ops.STORE:
+        # Skip identity stores (STORE(idx, LOAD(idx))) and dead zero-inits - they're no-ops
+        if u in identity_stores or u in dead_stores: continue
         maybe_wait(u.src)  # Wait for value to store
         idx_uop, val_uop = u.src[0], u.src[1]
         # For INDEX, r[idx_uop] is a tuple (addr, cond)
@@ -1013,17 +1220,69 @@ class RDNARenderer(Renderer):
             code.append(ds_store_b32(addr=addr, data0=val))
         elif isinstance(buf_uop.dtype, PtrDType) and buf_uop.dtype.addrspace == AddrSpace.REG:
           # Register-space store: copy to register range
+          # Handle deferred DEFINE_REG allocation - traverse AFTER chain to find actual DEFINE_REG
+          def_reg_uop = buf_uop
+          while def_reg_uop.op is Ops.AFTER:
+            def_reg_uop = def_reg_uop.src[0]
+          if def_reg_uop in pending_define_regs and def_reg_uop not in r:
+            # Allocate the deferred DEFINE_REG now
+            num_regs = pending_define_regs[def_reg_uop]
+            r[def_reg_uop] = ra.alloc_vgpr_range(def_reg_uop, num_regs, align=1)
+            del pending_define_regs[def_reg_uop]
           buf_result = r.get(buf_uop) if buf_uop in r else get_reg(buf_uop)
           buf_reg = buf_result[0] if isinstance(buf_result, tuple) else buf_result
           if isinstance(addr, (int, float)):
             # addr is the element index, not byte offset
             reg_offset = int(addr)
-            if itemsize == 8:
+            # Apply offset remapping if this buffer has dead offsets
+            if def_reg_uop in buffer_offset_remap:
+              remap = buffer_offset_remap[def_reg_uop]
+              if reg_offset in remap:
+                reg_offset = remap[reg_offset]
+              # else: dead offset - should have been skipped earlier
+            dst_reg = v[buf_reg.idx + reg_offset * (2 if itemsize == 8 else 1)]
+            # Check if this is a fused op - compute directly into accumulator slot
+            if val_uop in fused_adds and val_uop.op is Ops.ADD and itemsize <= 4:
+              maybe_wait(val_uop.src)  # Wait for ADD sources
+              add_a = get_reg(val_uop.src[0])
+              add_b = get_reg(val_uop.src[1])
+              is_float = dtypes.is_float(val_uop.dtype)
+              # VOP2 requires vsrc1 (second operand) to be VGPR
+              # src0 (first operand) can be constant, SGPR, or VGPR
+              # If add_b is constant, swap so constant goes to src0 position
+              if isinstance(add_b, (int, float)) and isinstance(add_a, VGPR):
+                add_a, add_b = add_b, add_a  # Swap: constant to src0, VGPR to vsrc1
+              elif isinstance(add_b, (int, float)):
+                # Both are constants (rare) - load add_b to scratch
+                scratch_idx = ra.get_scratch_vgpr(1)
+                code.append(v_mov_b32_e32(v[scratch_idx], add_b))
+                add_b = v[scratch_idx]
+              if is_float:
+                code.append(v_add_f32_e32(dst_reg, add_a, add_b))
+              else:
+                code.append(v_add_nc_u32_e32(dst_reg, add_a, add_b))
+            elif val_uop in fused_adds and val_uop.op is Ops.WHERE and itemsize <= 4:
+              maybe_wait(val_uop.src)  # Wait for WHERE sources
+              cond = get_reg(val_uop.src[0])
+              true_val = get_reg(val_uop.src[1])
+              false_val = get_reg(val_uop.src[2])
+              # Handle constants - v_cndmask_b32_e64 requires VGPRs
+              if isinstance(true_val, (int, float)):
+                scratch_idx = ra.get_scratch_vgpr(1)
+                code.append(v_mov_b32_e32(v[scratch_idx], true_val))
+                true_val = v[scratch_idx]
+              if isinstance(false_val, (int, float)):
+                scratch_idx = ra.get_scratch_vgpr(1)
+                code.append(v_mov_b32_e32(v[scratch_idx], false_val))
+                false_val = v[scratch_idx]
+              code.append(v_cmp_ne_i32_e32(0, cond))
+              code.append(v_cndmask_b32_e64(dst_reg, false_val, true_val, VCC_LO))
+            elif itemsize == 8:
               # 64-bit: move both low and high 32-bit parts
               code.append(v_mov_b32_e32(v[buf_reg.idx + reg_offset * 2], v[val.idx] if isinstance(val, VGPR) else val))
               code.append(v_mov_b32_e32(v[buf_reg.idx + reg_offset * 2 + 1], v[val.idx + 1] if isinstance(val, VGPR) else 0))
             else:
-              code.append(v_mov_b32_e32(v[buf_reg.idx + reg_offset], val))
+              code.append(v_mov_b32_e32(dst_reg, val))
           else:
             # Variable offset - use first register as fallback (TODO: proper indirect)
             if itemsize == 8:
@@ -1041,9 +1300,10 @@ class RDNARenderer(Renderer):
             cond_reg = get_reg(cond_uop)
             code.append(v_cmp_ne_i32_e32(0, cond_reg))  # VCC = (cond != 0)
             # Clamp address to 0 for masked lanes to prevent invalid memory accesses
-            # IMPORTANT: Use a temp register to avoid corrupting addr which may be used elsewhere
+            # IMPORTANT: Use scratch register - clamped_addr only needs to live for the STORE instruction
             if isinstance(addr, VGPR):
-              clamped_addr = ra.alloc_vgpr(val_uop)
+              scratch_idx = ra.get_scratch_vgpr(1)
+              clamped_addr = v[scratch_idx]
               code.append(v_cndmask_b32_e64(clamped_addr, 0, addr, VCC_LO))  # clamped = cond ? addr : 0
               addr = clamped_addr  # Use clamped address for this store only
             code.append(s_and_saveexec_b32(get_exec_save_load(), VCC_LO))  # Save exec, mask with condition
@@ -1116,6 +1376,11 @@ class RDNARenderer(Renderer):
         # AFTER ensures previous operations complete, then returns the buffer
         # src[0] is the buffer, src[1] is the operation that must complete
         buf_uop = u.src[0]
+        # Handle deferred DEFINE_REG allocation
+        if buf_uop in pending_define_regs and buf_uop not in r:
+          num_regs = pending_define_regs[buf_uop]
+          r[buf_uop] = ra.alloc_vgpr_range(buf_uop, num_regs, align=1)
+          del pending_define_regs[buf_uop]
         r[u] = get_reg(buf_uop)
 
       elif u.op is Ops.VECTORIZE:
