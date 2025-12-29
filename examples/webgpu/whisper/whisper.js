@@ -203,9 +203,11 @@ async function decoder_upload_audio_features(nets, audio_features_batch, decoder
  */
 
 function initSequences(sequence_count) {
-    let tokens = new Int32Array(MAX_CONTEXT_LENGTH);
+    // TODO: actual batch size
+    const batch_size = sequence_count;
+    let buffer = new ArrayBuffer(batch_size * MAX_CONTEXT_LENGTH * 4);
+
     let context = [TOK_BEGIN_TRANSCRIPTION, TOK_NO_TIMESTAMPS];
-    tokens.set(context, 0);
     const context_prompt_length = context.length;
     const max_context_length = context_prompt_length + MAX_TOKENS_TO_DECODE;
 
@@ -215,7 +217,9 @@ function initSequences(sequence_count) {
         let sequence = {};
         sequence.context_prompt_length = context_prompt_length;
         sequence.max_context_length = max_context_length;
-        sequence.tokens = tokens.slice();
+        let tokens = new Int32Array(buffer, i * MAX_CONTEXT_LENGTH * 4, MAX_CONTEXT_LENGTH);
+        tokens.set(context, 0);
+        sequence.tokens = tokens;
         sequence.length = context.length;
         sequence.done = false;
         sequences.push(sequence);
