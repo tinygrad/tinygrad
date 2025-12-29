@@ -93,7 +93,7 @@ def _SOP1Op_S_CTZ_I32_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   tmp = Reg(-1)
   for i in range(0, int(31)+1):
     if S0.u32[i] == 1:
-      tmp = Reg(i)
+      tmp = Reg(i); break
   D0.i32 = tmp
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
@@ -116,7 +116,7 @@ def _SOP1Op_S_CTZ_I32_B64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   tmp = Reg(-1)
   for i in range(0, int(63)+1):
     if S0.u64[i] == 1:
-      tmp = Reg(i)
+      tmp = Reg(i); break
   D0.i32 = tmp
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
@@ -139,7 +139,7 @@ def _SOP1Op_S_CLZ_I32_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   tmp = Reg(-1)
   for i in range(0, int(31)+1):
     if S0.u32[31 - i] == 1:
-      tmp = Reg(i)
+      tmp = Reg(i); break
   D0.i32 = tmp
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
@@ -162,7 +162,7 @@ def _SOP1Op_S_CLZ_I32_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   tmp = Reg(-1)
   for i in range(0, int(63)+1):
     if S0.u64[63 - i] == 1:
-      tmp = Reg(i)
+      tmp = Reg(i); break
   D0.i32 = tmp
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
@@ -3747,7 +3747,7 @@ def _VOP1Op_V_CLZ_I32_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   D0.i32 = -1
   for i in range(0, int(31)+1):
     if S0.u32[31 - i] == 1:
-      D0.i32 = i; break  # Stop at first 1 bit found
+      D0.i32 = i; break
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   return result
@@ -3767,7 +3767,7 @@ def _VOP1Op_V_CTZ_I32_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   D0.i32 = -1
   for i in range(0, int(31)+1):
     if S0.u32[i] == 1:
-      D0.i32 = i; break  # Stop at first 1 bit found
+      D0.i32 = i; break
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   return result
@@ -5589,7 +5589,7 @@ def _VOP3Op_V_CLZ_I32_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   D0.i32 = -1
   for i in range(0, int(31)+1):
     if S0.u32[31 - i] == 1:
-      D0.i32 = i; break  # Stop at first 1 bit found
+      D0.i32 = i; break
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   return result
@@ -5609,7 +5609,7 @@ def _VOP3Op_V_CTZ_I32_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   D0.i32 = -1
   for i in range(0, int(31)+1):
     if S0.u32[i] == 1:
-      D0.i32 = i; break  # Stop at first 1 bit found
+      D0.i32 = i; break
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   return result
@@ -7208,7 +7208,7 @@ def _VOP3Op_V_DIV_FIXUP_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, 
   elif exponent(S1.f32) == 255:
     D0.f32 = ((-OVERFLOW_F32) if (sign_out) else (OVERFLOW_F32))
   else:
-    D0.f32 = ((-abs(S0.f32)) if (sign_out) else (abs(S0.f32)))
+    D0.f32 = ((-OVERFLOW_F32) if (sign_out) else (OVERFLOW_F32)) if isNAN(S0.f32) else ((-abs(S0.f32)) if (sign_out) else (abs(S0.f32)))
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   return result
@@ -7261,7 +7261,7 @@ def _VOP3Op_V_DIV_FIXUP_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, 
   elif exponent(S1.f64) == 2047:
     D0.f64 = ((-OVERFLOW_F64) if (sign_out) else (OVERFLOW_F64))
   else:
-    D0.f64 = ((-abs(S0.f64)) if (sign_out) else (abs(S0.f64)))
+    D0.f64 = ((-OVERFLOW_F64) if (sign_out) else (OVERFLOW_F64)) if isNAN(S0.f64) else ((-abs(S0.f64)) if (sign_out) else (abs(S0.f64)))
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   result['d0_64'] = True
@@ -7281,7 +7281,7 @@ def _VOP3Op_V_DIV_FMAS_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, V
   laneId = lane
   # --- compiled pseudocode ---
   if VCC.u64[laneId]:
-    D0.f32 = 2.0 ** 32 * fma(S0.f32, S1.f32, S2.f32)
+    D0.f32 = (2.0 ** 64 if exponent(S2.f32) > 127 else 2.0 ** -64) * fma(S0.f32, S1.f32, S2.f32)
   else:
     D0.f32 = fma(S0.f32, S1.f32, S2.f32)
   # --- end pseudocode ---
@@ -7303,7 +7303,7 @@ def _VOP3Op_V_DIV_FMAS_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, V
   laneId = lane
   # --- compiled pseudocode ---
   if VCC.u64[laneId]:
-    D0.f64 = 2.0 ** 64 * fma(S0.f64, S1.f64, S2.f64)
+    D0.f64 = (2.0 ** 128 if exponent(S2.f64) > 1023 else 2.0 ** -128) * fma(S0.f64, S1.f64, S2.f64)
   else:
     D0.f64 = fma(S0.f64, S1.f64, S2.f64)
   # --- end pseudocode ---
@@ -8737,13 +8737,13 @@ def _VOP3SDOp_V_DIV_SCALE_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal
   # --- compiled pseudocode ---
   VCC = Reg(0x0)
   if ((F(S2.f32) == 0.0)  or  (F(S1.f32) == 0.0)):
-    D0.f32 = float("nan")
+    VCC = Reg(0x1); D0.f32 = float("nan")
   elif exponent(S2.f32) - exponent(S1.f32) >= 96:
     VCC = Reg(0x1)
     if S0.f32 == S1.f32:
       D0.f32 = ldexp(S0.f32, 64)
-  elif S1.f32 == DENORM.f32:
-    D0.f32 = ldexp(S0.f32, 64)
+  elif False:
+    pass  # denorm check moved to end
   elif ((1.0 / F(S1.f32) == DENORM.f64)  and  (S2.f32 / S1.f32 == DENORM.f32)):
     VCC = Reg(0x1)
     if S0.f32 == S1.f32:
@@ -8752,10 +8752,10 @@ def _VOP3SDOp_V_DIV_SCALE_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal
     D0.f32 = ldexp(S0.f32, -64)
   elif S2.f32 / S1.f32 == DENORM.f32:
     VCC = Reg(0x1)
-    if S0.f32 == S2.f32:
-      D0.f32 = ldexp(S0.f32, 64)
   elif exponent(S2.f32) <= 23:
-    D0.f32 = ldexp(S0.f32, 64)
+    VCC = Reg(0x1); D0.f32 = ldexp(S0.f32, 64)
+  if S1.f32 == DENORM.f32:
+    D0.f32 = float("nan")
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   result['vcc_lane'] = (VCC._val >> lane) & 1
@@ -8800,13 +8800,13 @@ def _VOP3SDOp_V_DIV_SCALE_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal
   # --- compiled pseudocode ---
   VCC = Reg(0x0)
   if ((S2.f64 == 0.0)  or  (S1.f64 == 0.0)):
-    D0.f64 = float("nan")
+    VCC = Reg(0x1); D0.f64 = float("nan")
   elif exponent(S2.f64) - exponent(S1.f64) >= 768:
     VCC = Reg(0x1)
     if S0.f64 == S1.f64:
       D0.f64 = ldexp(S0.f64, 128)
-  elif S1.f64 == DENORM.f64:
-    D0.f64 = ldexp(S0.f64, 128)
+  elif False:
+    pass  # denorm check moved to end
   elif ((1.0 / S1.f64 == DENORM.f64)  and  (S2.f64 / S1.f64 == DENORM.f64)):
     VCC = Reg(0x1)
     if S0.f64 == S1.f64:
@@ -8815,10 +8815,10 @@ def _VOP3SDOp_V_DIV_SCALE_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal
     D0.f64 = ldexp(S0.f64, -128)
   elif S2.f64 / S1.f64 == DENORM.f64:
     VCC = Reg(0x1)
-    if S0.f64 == S2.f64:
-      D0.f64 = ldexp(S0.f64, 128)
   elif exponent(S2.f64) <= 53:
     D0.f64 = ldexp(S0.f64, 128)
+  if S1.f64 == DENORM.f64:
+    D0.f64 = float("nan")
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   result['vcc_lane'] = (VCC._val >> lane) & 1
@@ -9259,6 +9259,60 @@ def _VOP3POp_V_DOT2_F32_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, 
   result = {'d0': D0._val, 'scc': scc & 1}
   return result
 
+def _VOP3POp_V_DOT4_U32_U8(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # tmp = S2.u32;
+  # tmp += u8_to_u32(S0[7 : 0].u8) * u8_to_u32(S1[7 : 0].u8);
+  # tmp += u8_to_u32(S0[15 : 8].u8) * u8_to_u32(S1[15 : 8].u8);
+  # tmp += u8_to_u32(S0[23 : 16].u8) * u8_to_u32(S1[23 : 16].u8);
+  # tmp += u8_to_u32(S0[31 : 24].u8) * u8_to_u32(S1[31 : 24].u8);
+  # D0.u32 = tmp
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  S2 = Reg(s2)
+  D0 = Reg(d0)
+  tmp = Reg(0)
+  # --- compiled pseudocode ---
+  tmp = Reg(S2.u32)
+  tmp += u8_to_u32(S0[7 : 0].u8) * u8_to_u32(S1[7 : 0].u8)
+  tmp += u8_to_u32(S0[15 : 8].u8) * u8_to_u32(S1[15 : 8].u8)
+  tmp += u8_to_u32(S0[23 : 16].u8) * u8_to_u32(S1[23 : 16].u8)
+  tmp += u8_to_u32(S0[31 : 24].u8) * u8_to_u32(S1[31 : 24].u8)
+  D0.u32 = tmp
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  return result
+
+def _VOP3POp_V_DOT8_U32_U4(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # tmp = S2.u32;
+  # tmp += u4_to_u32(S0[3 : 0].u4) * u4_to_u32(S1[3 : 0].u4);
+  # tmp += u4_to_u32(S0[7 : 4].u4) * u4_to_u32(S1[7 : 4].u4);
+  # tmp += u4_to_u32(S0[11 : 8].u4) * u4_to_u32(S1[11 : 8].u4);
+  # tmp += u4_to_u32(S0[15 : 12].u4) * u4_to_u32(S1[15 : 12].u4);
+  # tmp += u4_to_u32(S0[19 : 16].u4) * u4_to_u32(S1[19 : 16].u4);
+  # tmp += u4_to_u32(S0[23 : 20].u4) * u4_to_u32(S1[23 : 20].u4);
+  # tmp += u4_to_u32(S0[27 : 24].u4) * u4_to_u32(S1[27 : 24].u4);
+  # tmp += u4_to_u32(S0[31 : 28].u4) * u4_to_u32(S1[31 : 28].u4);
+  # D0.u32 = tmp
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  S2 = Reg(s2)
+  D0 = Reg(d0)
+  tmp = Reg(0)
+  # --- compiled pseudocode ---
+  tmp = Reg(S2.u32)
+  tmp += u4_to_u32(S0[3 : 0].u4) * u4_to_u32(S1[3 : 0].u4)
+  tmp += u4_to_u32(S0[7 : 4].u4) * u4_to_u32(S1[7 : 4].u4)
+  tmp += u4_to_u32(S0[11 : 8].u4) * u4_to_u32(S1[11 : 8].u4)
+  tmp += u4_to_u32(S0[15 : 12].u4) * u4_to_u32(S1[15 : 12].u4)
+  tmp += u4_to_u32(S0[19 : 16].u4) * u4_to_u32(S1[19 : 16].u4)
+  tmp += u4_to_u32(S0[23 : 20].u4) * u4_to_u32(S1[23 : 20].u4)
+  tmp += u4_to_u32(S0[27 : 24].u4) * u4_to_u32(S1[27 : 24].u4)
+  tmp += u4_to_u32(S0[31 : 28].u4) * u4_to_u32(S1[31 : 28].u4)
+  D0.u32 = tmp
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  return result
+
 VOP3POp_FUNCTIONS = {
   VOP3POp.V_PK_MAD_I16: _VOP3POp_V_PK_MAD_I16,
   VOP3POp.V_PK_MUL_LO_U16: _VOP3POp_V_PK_MUL_LO_U16,
@@ -9280,6 +9334,8 @@ VOP3POp_FUNCTIONS = {
   VOP3POp.V_PK_MIN_F16: _VOP3POp_V_PK_MIN_F16,
   VOP3POp.V_PK_MAX_F16: _VOP3POp_V_PK_MAX_F16,
   VOP3POp.V_DOT2_F32_F16: _VOP3POp_V_DOT2_F32_F16,
+  VOP3POp.V_DOT4_U32_U8: _VOP3POp_V_DOT4_U32_U8,
+  VOP3POp.V_DOT8_U32_U4: _VOP3POp_V_DOT8_U32_U4,
 }
 
 def _VOPCOp_V_CMP_F_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):

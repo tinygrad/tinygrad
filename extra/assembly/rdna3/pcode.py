@@ -102,6 +102,8 @@ def i16_to_f16(v): return f32_to_f16(float(_sext(int(v) & 0xffff, 16)))
 def u16_to_f16(v): return f32_to_f16(float(int(v) & 0xffff))
 def f16_to_i16(bits): f = _f16_to_f32_bits(bits); return max(-32768, min(32767, int(f))) if not math.isnan(f) else 0
 def f16_to_u16(bits): f = _f16_to_f32_bits(bits); return max(0, min(65535, int(f))) if not math.isnan(f) else 0
+def u8_to_u32(v): return int(v) & 0xff
+def u4_to_u32(v): return int(v) & 0xf
 def _sign(f): return 1 if math.copysign(1.0, f) < 0 else 0
 def _mantissa_f32(f): return struct.unpack("<I", struct.pack("<f", f))[0] & 0x7fffff if not (math.isinf(f) or math.isnan(f)) else 0
 def _ldexp(m, e): return math.ldexp(m, e)
@@ -141,9 +143,17 @@ def _ctz64(v):
   while (v & 1) == 0: v >>= 1; n += 1
   return n
 def _exponent(f):
+  # Handle TypedView (f16/f32/f64) to get correct exponent for that type
+  if hasattr(f, '_bits') and hasattr(f, '_float') and f._float:
+    raw = f._val
+    if f._bits == 16: return (raw >> 10) & 0x1f  # f16: 5-bit exponent
+    if f._bits == 32: return (raw >> 23) & 0xff  # f32: 8-bit exponent
+    if f._bits == 64: return (raw >> 52) & 0x7ff  # f64: 11-bit exponent
+  # Fallback: convert to f32 and get exponent
+  f = float(f)
   if math.isinf(f) or math.isnan(f): return 255
   if f == 0.0: return 0
-  try: bits = struct.unpack("<I", struct.pack("<f", float(f)))[0]; return (bits >> 23) & 0xff
+  try: bits = struct.unpack("<I", struct.pack("<f", f))[0]; return (bits >> 23) & 0xff
   except: return 0
 def _is_denorm_f32(f):
   if not isinstance(f, float): f = _f32(int(f) & 0xffffffff)
@@ -229,7 +239,7 @@ __all__ = [
   'f32_to_i32', 'f32_to_u32', 'f64_to_i32', 'f64_to_u32', 'f32_to_f16', 'f16_to_f32',
   'i16_to_f16', 'u16_to_f16', 'f16_to_i16', 'f16_to_u16', 'u32_to_u16', 'i32_to_i16',
   'f16_to_snorm', 'f16_to_unorm', 'f32_to_snorm', 'f32_to_unorm', 'v_cvt_i16_f32', 'v_cvt_u16_f32',
-  'SAT8', 'f32_to_u8',
+  'SAT8', 'f32_to_u8', 'u8_to_u32', 'u4_to_u32',
   # Math functions
   'trunc', 'floor', 'ceil', 'sqrt', 'log2', 'sin', 'cos', 'pow', 'fract', 'isEven', 'mantissa',
   # Min/max functions
@@ -692,13 +702,13 @@ class ExecContext:
 # PDF EXTRACTION AND CODE GENERATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-PDF_URL = "https://docs.amd.com/api/khub/documents/UVVZM22UN7tMUeiW_4ShTQ/content"
+from extra.assembly.rdna3.lib import PDF_URLS
 INST_PATTERN = re.compile(r'^([SV]_[A-Z0-9_]+)\s+(\d+)\s*$', re.M)
 
 # Patterns that can't be handled by the DSL (require special handling in emu.py)
 UNSUPPORTED = ['SGPR[', 'V_SWAP', 'eval ', 'BYTE_PERMUTE', 'FATAL_HALT', 'HW_REGISTERS',
                'PC =', 'PC=', 'PC+', '= PC', 'v_sad', '+:', 'vscnt', 'vmcnt', 'expcnt', 'lgkmcnt',
-               'CVT_OFF_TABLE', '.bf16', 'ThreadMask', 'u8_to_u32', 'u4_to_u32',
+               'CVT_OFF_TABLE', '.bf16', 'ThreadMask',
                'S1[i', 'C.i32', 'v_msad_u8', 'S[i]', 'in[', '2.0 / PI',
                'if n.', 'DST.u32', 'addrd = DST', 'addr = DST']  # Malformed pseudocode from PDF
 
@@ -710,7 +720,8 @@ def extract_pseudocode(text: str) -> str | None:
     if not s: continue
     if re.match(r'^\d+ of \d+$', s): continue
     if re.match(r'^\d+\.\d+\..*Instructions', s): continue
-    if s.startswith('"RDNA') or s.startswith('AMD '): continue
+    # Skip document headers (RDNA or CDNA)
+    if s.startswith('"RDNA') or s.startswith('AMD ') or s.startswith('CDNA'): continue
     if s.startswith('Notes') or s.startswith('Functional examples'): break
     if s.startswith('if '): depth += 1
     elif s.startswith('endif'): depth = max(0, depth - 1)
@@ -725,7 +736,7 @@ def extract_pseudocode(text: str) -> str | None:
     if is_code: result.append(s)
   return '\n'.join(result) if result else None
 
-def parse_pseudocode_from_pdf(pdf_path: str | None = None) -> dict:
+def parse_pseudocode_from_pdf(arch: str = "rdna3") -> dict:
   """Parse pseudocode from PDF for all ops. Returns {enum_cls: {op: pseudocode}}."""
   import pdfplumber
   from tinygrad.helpers import fetch
@@ -737,8 +748,26 @@ def parse_pseudocode_from_pdf(pdf_path: str | None = None) -> dict:
     for op in enum_cls:
       if op.name.startswith(('S_', 'V_')): defined_ops[(op.name, op.value)] = (enum_cls, op)
 
-  pdf = pdfplumber.open(fetch(PDF_URL) if pdf_path is None else pdf_path)
-  all_text = '\n'.join(pdf.pages[i].extract_text() or '' for i in range(195, 560))
+  pdf = pdfplumber.open(fetch(PDF_URLS[arch]))
+
+  # Find the "Instructions" chapter by looking for "Chapter X. Instructions"
+  instr_start = None
+  for i, page in enumerate(pdf.pages):
+    text = page.extract_text() or ''
+    if re.search(r'Chapter \d+\.\s+Instructions', text):
+      instr_start = i
+      break
+  if instr_start is None: instr_start = len(pdf.pages) // 3  # fallback
+
+  # Find end - stop at "Microcode Formats" chapter
+  instr_end = len(pdf.pages)
+  for i, page in enumerate(pdf.pages[instr_start:], instr_start):
+    text = page.extract_text() or ''
+    if re.search(r'Chapter \d+\.\s+Microcode Formats', text):
+      instr_end = i
+      break
+
+  all_text = '\n'.join(pdf.pages[i].extract_text() or '' for i in range(instr_start, instr_end))
   matches = list(INST_PATTERN.finditer(all_text))
   instructions: dict = {cls: {} for cls in OP_ENUMS}
 
@@ -754,7 +783,7 @@ def parse_pseudocode_from_pdf(pdf_path: str | None = None) -> dict:
 
   return instructions
 
-def generate_gen_pcode(output_path: str = "extra/assembly/rdna3/autogen/gen_pcode.py"):
+def generate_gen_pcode(output_path: str = "extra/assembly/rdna3/autogen/gen_pcode.py", arch: str = "rdna3"):
   """Generate gen_pcode.py - compiled pseudocode functions for the emulator."""
   from pathlib import Path
   from extra.assembly.rdna3.autogen import SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp
@@ -762,7 +791,7 @@ def generate_gen_pcode(output_path: str = "extra/assembly/rdna3/autogen/gen_pcod
   OP_ENUMS = [SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp]
 
   print("Parsing pseudocode from PDF...")
-  by_cls = parse_pseudocode_from_pdf()
+  by_cls = parse_pseudocode_from_pdf(arch)
 
   total_found, total_ops = 0, 0
   for enum_cls in OP_ENUMS:
@@ -797,9 +826,72 @@ from extra.assembly.rdna3.pcode import *
       try:
         code = compile_pseudocode(pc)
         # CLZ/CTZ: The PDF pseudocode searches for the first 1 bit but doesn't break.
-        # Hardware stops at first match, so we need to add break after D0.i32 = i
+        # Hardware stops at first match. SOP1 uses tmp=i, VOP1/VOP3 use D0.i32=i
         if 'CLZ' in op.name or 'CTZ' in op.name:
-          code = code.replace('D0.i32 = i', 'D0.i32 = i; break  # Stop at first 1 bit found')
+          code = code.replace('tmp = Reg(i)', 'tmp = Reg(i); break')
+          code = code.replace('D0.i32 = i', 'D0.i32 = i; break')
+        # V_DIV_FMAS_F32/F64: PDF page 449 says 2^32/2^64 but hardware behavior is more complex.
+        # The scale direction depends on S2 (the addend): if exponent(S2) > 127 (i.e., S2 >= 2.0),
+        # scale by 2^+64 (to unscale a numerator that was scaled). Otherwise scale by 2^-64
+        # (to unscale a denominator that was scaled).
+        if op.name == 'V_DIV_FMAS_F32':
+          code = code.replace(
+            'D0.f32 = 2.0 ** 32 * fma(S0.f32, S1.f32, S2.f32)',
+            'D0.f32 = (2.0 ** 64 if exponent(S2.f32) > 127 else 2.0 ** -64) * fma(S0.f32, S1.f32, S2.f32)')
+        if op.name == 'V_DIV_FMAS_F64':
+          code = code.replace(
+            'D0.f64 = 2.0 ** 64 * fma(S0.f64, S1.f64, S2.f64)',
+            'D0.f64 = (2.0 ** 128 if exponent(S2.f64) > 1023 else 2.0 ** -128) * fma(S0.f64, S1.f64, S2.f64)')
+        # V_DIV_SCALE_F32/F64: PDF page 463-464 has several bugs vs hardware behavior:
+        # 1. Zero case: hardware sets VCC=1 (PDF doesn't)
+        # 2. Denorm denom: hardware returns NaN (PDF says scale). VCC is set independently by exp diff check.
+        # 3. Tiny numer (exp<=23): hardware sets VCC=1 (PDF doesn't)
+        # 4. Result would be denorm: hardware doesn't scale, just sets VCC=1
+        if op.name == 'V_DIV_SCALE_F32':
+          # Fix 1: Set VCC=1 when zero operands produce NaN
+          code = code.replace(
+            'D0.f32 = float("nan")',
+            'VCC = Reg(0x1); D0.f32 = float("nan")')
+          # Fix 2: Denorm denom returns NaN. Must check this AFTER all VCC-setting logic runs.
+          # Insert at end of all branches, before the final result is used
+          code = code.replace(
+            'elif S1.f32 == DENORM.f32:\n  D0.f32 = ldexp(S0.f32, 64)',
+            'elif False:\n  pass  # denorm check moved to end')
+          # Add denorm check at the very end - this overrides D0 but preserves VCC
+          code += '\nif S1.f32 == DENORM.f32:\n  D0.f32 = float("nan")'
+          # Fix 3: Tiny numer should set VCC=1
+          code = code.replace(
+            'elif exponent(S2.f32) <= 23:\n  D0.f32 = ldexp(S0.f32, 64)',
+            'elif exponent(S2.f32) <= 23:\n  VCC = Reg(0x1); D0.f32 = ldexp(S0.f32, 64)')
+          # Fix 4: S2/S1 would be denorm - don't scale, just set VCC
+          code = code.replace(
+            'elif S2.f32 / S1.f32 == DENORM.f32:\n  VCC = Reg(0x1)\n  if S0.f32 == S2.f32:\n    D0.f32 = ldexp(S0.f32, 64)',
+            'elif S2.f32 / S1.f32 == DENORM.f32:\n  VCC = Reg(0x1)')
+        if op.name == 'V_DIV_SCALE_F64':
+          # Same fixes for f64 version
+          code = code.replace(
+            'D0.f64 = float("nan")',
+            'VCC = Reg(0x1); D0.f64 = float("nan")')
+          code = code.replace(
+            'elif S1.f64 == DENORM.f64:\n  D0.f64 = ldexp(S0.f64, 128)',
+            'elif False:\n  pass  # denorm check moved to end')
+          code += '\nif S1.f64 == DENORM.f64:\n  D0.f64 = float("nan")'
+          code = code.replace(
+            'elif exponent(S2.f64) <= 52:\n  D0.f64 = ldexp(S0.f64, 128)',
+            'elif exponent(S2.f64) <= 52:\n  VCC = Reg(0x1); D0.f64 = ldexp(S0.f64, 128)')
+          code = code.replace(
+            'elif S2.f64 / S1.f64 == DENORM.f64:\n  VCC = Reg(0x1)\n  if S0.f64 == S2.f64:\n    D0.f64 = ldexp(S0.f64, 128)',
+            'elif S2.f64 / S1.f64 == DENORM.f64:\n  VCC = Reg(0x1)')
+        # V_DIV_FIXUP_F32/F64: PDF doesn't check isNAN(S0), but hardware returns OVERFLOW if S0 is NaN.
+        # When division fails (e.g., due to denorm denom), S0 becomes NaN, and fixup should return ±inf.
+        if op.name == 'V_DIV_FIXUP_F32':
+          code = code.replace(
+            'D0.f32 = ((-abs(S0.f32)) if (sign_out) else (abs(S0.f32)))',
+            'D0.f32 = ((-OVERFLOW_F32) if (sign_out) else (OVERFLOW_F32)) if isNAN(S0.f32) else ((-abs(S0.f32)) if (sign_out) else (abs(S0.f32)))')
+        if op.name == 'V_DIV_FIXUP_F64':
+          code = code.replace(
+            'D0.f64 = ((-abs(S0.f64)) if (sign_out) else (abs(S0.f64)))',
+            'D0.f64 = ((-OVERFLOW_F64) if (sign_out) else (OVERFLOW_F64)) if isNAN(S0.f64) else ((-abs(S0.f64)) if (sign_out) else (abs(S0.f64)))')
         # Detect flags for result handling
         is_64 = any(p in pc for p in ['D0.u64', 'D0.b64', 'D0.f64', 'D0.i64', 'D1.u64', 'D1.b64', 'D1.f64', 'D1.i64'])
         has_d1 = '{ D1' in pc
@@ -913,4 +1005,8 @@ def _VOP1Op_V_READFIRSTLANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, liter
   print(f"\nGenerated {output_path}: {compiled_count} compiled, {skipped_count} skipped")
 
 if __name__ == "__main__":
-  generate_gen_pcode()
+  import argparse
+  parser = argparse.ArgumentParser(description="Generate pseudocode functions from AMD ISA PDF")
+  parser.add_argument("--arch", choices=list(PDF_URLS.keys()), default="rdna3", help="Target architecture (default: rdna3)")
+  args = parser.parse_args()
+  generate_gen_pcode(arch=args.arch)
