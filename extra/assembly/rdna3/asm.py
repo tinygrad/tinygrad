@@ -259,8 +259,10 @@ def disasm(inst: Inst) -> str:
     else:
       is_16bit_op = any(x in op_name for x in _16BIT_TYPES) and not any(x in op_name for x in ('dot2', 'pk_', 'sad', 'msad', 'qsad', 'mqsad'))
       is_f16_dst = is_f16_src = is_f16_src2 = is_16bit_op
+    # Check if any opsel bit is set (any operand uses .h) - if so, we need explicit .l for low-half
+    any_hi = opsel != 0
     def fmt_vop3_src(v, neg_bit, abs_bit, hi_bit=False, reg_cnt=1, is_16=False):
-      s = _fmt_src_n(v, reg_cnt) if reg_cnt > 1 else f"v{v - 256}.h" if is_16 and v >= 256 and hi_bit else f"v{v - 256}.l" if is_16 and v >= 256 else fmt_src(v)
+      s = _fmt_src_n(v, reg_cnt) if reg_cnt > 1 else f"v{v - 256}.h" if is_16 and v >= 256 and hi_bit else f"v{v - 256}.l" if is_16 and v >= 256 and any_hi else fmt_src(v)
       if abs_bit: s = f"|{s}|"
       return f"-{s}" if neg_bit else s
     # Determine register count for each source (check for cvt-specific 64-bit flags first)
@@ -280,7 +282,7 @@ def disasm(inst: Inst) -> str:
     elif dst_cnt > 1:
       dst_str = _vreg(vdst, dst_cnt)
     elif is_f16_dst:
-      dst_str = f"v{vdst}.h" if (opsel & 8) else f"v{vdst}.l"
+      dst_str = f"v{vdst}.h" if (opsel & 8) else f"v{vdst}.l" if any_hi else f"v{vdst}"
     else:
       dst_str = f"v{vdst}"
     clamp_str = " clamp" if clmp else ""
