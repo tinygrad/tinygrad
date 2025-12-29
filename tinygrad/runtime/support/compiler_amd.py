@@ -1,4 +1,4 @@
-import ctypes, hashlib, tempfile, subprocess, pathlib
+import ctypes, hashlib, tempfile, subprocess, pathlib, shutil
 from tinygrad.helpers import system
 from tinygrad.runtime.autogen import comgr
 try:
@@ -13,7 +13,6 @@ from tinygrad.runtime.support.compiler_cpu import LLVMCompiler
 from tinygrad.helpers import OSX, to_char_p_p
 
 def _find_llvm_objdump():
-  import shutil
   if OSX: return '/opt/homebrew/opt/llvm/bin/llvm-objdump'
   # Try ROCm path first, then fall back to system llvm-objdump
   if shutil.which('/opt/rocm/llvm/bin/llvm-objdump'): return '/opt/rocm/llvm/bin/llvm-objdump'

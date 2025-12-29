@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # generates autogen/__init__.py by parsing the AMD RDNA3.5 ISA PDF
-import re, pdfplumber, pathlib, functools
+import re, pdfplumber, pathlib
 from tinygrad.helpers import fetch
 
 PDF_URL = "https://docs.amd.com/api/khub/documents/UVVZM22UN7tMUeiW_4ShTQ/content"
@@ -46,7 +46,6 @@ def parse_fields_table(table: list, fmt: str, enums: set[str]) -> list[tuple]:
     fields.append((name, hi, lo, enc_val, ftype))
   return fields
 
-@functools.cache
 def generate(output_path: pathlib.Path|str|None = None) -> dict:
   """Generate RDNA3.5 instruction definitions from the AMD ISA PDF. Returns dict with formats for testing."""
   pdf = pdfplumber.open(fetch(PDF_URL))
