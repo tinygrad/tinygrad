@@ -31,7 +31,6 @@ gemm:
 	s_mov_b32 s43, 0x00000000    // strideB1
 	// scalars
 	s_mov_b32 s44, 0x3F800000    // alpha = 1.0f
-	s_mov_b32 s45, 0x00000000    // beta  = 0.0f
 	// ** workgroup mapping
 	s_lshr_b32 s52, s51, 30                                    // 000000002924: 8F349E33
 	s_and_b32 s51, 0x3fffffff, s51                             // 000000002928: 863333FF 3FFFFFFF
@@ -1280,8 +1279,6 @@ label_toPGR1:
 	s_and_b32 s8, s50, 0x3fff                                  // 000000004730: 8608FF32 00003FFF
 	s_cmp_eq_u32 s8, 1                                         // 000000004738: BF068108
 	s_cbranch_scc0 label_GSU_3                                 // 00000000473C: BF8404FB
-	s_cmpk_eq_u32 s45, 0x0                                     // 000000004740: B42D0000
-	s_cbranch_scc0 label_GSU_3                                 // 000000004744: BF8404F9
 	s_cmp_eq_u32 s44, 1.0                                      // 000000004748: BF06F22C
 	s_cbranch_scc0 label_GSU_3                                 // 00000000474C: BF8404F7
 	s_and_b32 s84, 0xff, s24                                   // 000000004750: 865418FF 000000FF
@@ -1983,7 +1980,6 @@ label_GW_B0_E0:
 	s_branch label_GW_End                                      // 000000005B24: BF820000
 
 label_GSU_3:
-label_OptNLL_End:
 	s_waitcnt lgkmcnt(7)                                       // 000000005B2C: BF8CC77F
 	v_mfma_f32_16x16x32_bf16 a[0:3], v[68:71], v[4:7], a[0:3]  // 000000005B30: D3B58000 04020944
 	ds_read_b128 v[36:39], v2 offset:64                        // 000000005B38: D9FE0040 24000002
@@ -4710,8 +4706,6 @@ label_GW_End_1:
 	s_setpc_b64 s[30:31]                                       // 00000000BB94: BE801D1E
 
 label_GSU_4:
-	s_cmpk_eq_u32 s45, 0x0                                     // 00000000BB98: B42D0000
-	s_cbranch_scc0 label_GW_Beta_2                             // 00000000BB9C: BF841D7F
 	s_and_b32 s30, 0xff, s24                                   // 00000000BBA0: 861E18FF 000000FF
 	s_add_u32 s31, -1, s14                                     // 00000000BBA8: 801F0EC1
 	s_cmp_ge_u32 s2, s31                                       // 00000000BBAC: BF091F02
@@ -4720,16 +4714,6 @@ label_GSU_4:
 	s_add_u32 s31, -1, s15                                     // 00000000BBC4: 801F0FC1
 	s_cmp_ge_u32 s3, s31                                       // 00000000BBC8: BF091F03
 	s_cselect_b32 s30, s30, 0                                  // 00000000BBCC: 851E801E
-
-label_GW_Beta_2:
-	s_and_b32 s30, 0xff, s24                                   // 00000001319C: 861E18FF 000000FF
-	s_add_u32 s31, -1, s14                                     // 0000000131A4: 801F0EC1
-	s_cmp_ge_u32 s2, s31                                       // 0000000131A8: BF091F02
-	s_cselect_b32 s30, s30, 0                                  // 0000000131AC: 851E801E
-	s_and_b32 s30, 0xff, s25                                   // 0000000131B8: 861E19FF 000000FF
-	s_add_u32 s31, -1, s15                                     // 0000000131C0: 801F0FC1
-	s_cmp_ge_u32 s3, s31                                       // 0000000131C4: BF091F03
-	s_cselect_b32 s30, s30, 0                                  // 0000000131C8: 851E801E
 
 label_GW_End:
 end:
