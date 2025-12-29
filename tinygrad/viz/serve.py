@@ -285,7 +285,7 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent) -> tuple[
     n = next(inst_units[u])
     if (events:=cu_events.get(w.cu_loc)) is None: cu_events[w.cu_loc] = events = []
     events.append(ProfileRangeEvent(w.simd_loc, loc:=f"INST WAVE:{w.wave_id} N:{n}", Decimal(w.begin_time), Decimal(w.end_time)))
-    wave_insts.setdefault(w.cu_loc, {})[f"{u} N:{n}"] = {"wave":w, "disasm":disasm, "run_number":n, "loc":loc}
+    wave_insts.setdefault(w.cu_loc, {})[f"{u} N:{n}"] = {"wave":w, "disasm":disasm, "prg":p, "run_number":n, "loc":loc}
   # * OCC waves
   units:dict[str, itertools.count] = {}
   wave_start:dict[str, int] = {}
@@ -448,10 +448,7 @@ def get_render(i:int, j:int, fmt:str) -> dict:
     return ret
   if fmt == "prg-pmc": return unpack_pmc(data[0])
   if fmt == "prg-sqtt":
-    key, data, p = data
     ret = {}
-    ret["data"] = amdgpu_cfg(p.lib, device_props[p.device]["gfx_target_version"])
-    return ret
     if len((steps:=ctxs[i]["steps"])[j+1:]) == 0:
       with soft_err(lambda err: ret.update(err)):
         cu_events, units, wave_insts = unpack_sqtt(*data)
@@ -461,7 +458,6 @@ def get_render(i:int, j:int, fmt:str) -> dict:
           for k in sorted(wave_insts.get(cu, []), key=row_tuple):
             steps.append(create_step(k.replace(cu, ""), ("/sqtt-insts", i, len(steps)), loc=(data:=wave_insts[cu][k])["loc"], depth=2, data=data))
     return {**ret, "steps":[{k:v for k,v in s.items() if k != "data"} for s in steps[j+1:]]}
-
   if fmt == "cu-sqtt": return {"value":get_profile(data, sort_fn=row_tuple), "content_type":"application/octet-stream"}
   if fmt == "sqtt-insts":
     columns = ["PC", "Instruction", "Hits", "Cycles", "Stall", "Type"]
@@ -473,6 +469,8 @@ def get_render(i:int, j:int, fmt:str) -> dict:
     #             * Instruction cache miss
     # Stall:    The total number of cycles the hardware pipe couldn't issue an instruction.
     # Duration: Total latency in cycles, defined as "Stall time + Issue time" for gfx9 or "Stall time + Execute time" for gfx10+.
+    prg = data["prg"]
+    cfg = amdgpu_cfg(prg.lib, device_props[prg.device]["gfx_target_version"])
     prev_instr = (w:=data["wave"]).begin_time
     pc_to_inst = data["disasm"]
     start_pc = None
@@ -489,7 +487,9 @@ def get_render(i:int, j:int, fmt:str) -> dict:
       prev_instr = max(prev_instr, e.time + e.dur)
     summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
                {"label":"SIMD", "value":w.simd}, {"label":"Wave ID", "value":w.wave_id}, {"label":"Run number", "value":data["run_number"]}]
-    return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":[summary]}
+    cfg["runtime_trace"] = {pc-prg.base:v for pc,v in rows.items()}
+    return {"data":cfg, "metadata":[summary]}
+    #return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":[summary], "data":cfg}
   return data
 
 # ** HTTP server
