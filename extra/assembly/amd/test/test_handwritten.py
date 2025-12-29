@@ -2,10 +2,10 @@
 # the Inst constructor should be looking at the types of the fields to correctly set the value
 
 import unittest, struct
-from extra.assembly.rdna3.autogen import *
-from extra.assembly.rdna3.lib import Inst
-from extra.assembly.rdna3.asm import asm
-from extra.assembly.rdna3.test.test_roundtrip import compile_asm
+from extra.assembly.amd.autogen.rdna3 import *
+from extra.assembly.amd.lib import Inst
+from extra.assembly.amd.asm import asm
+from extra.assembly.amd.test.test_roundtrip import compile_asm
 
 class TestIntegration(unittest.TestCase):
   inst: Inst

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Test that PDF parser correctly extracts format fields."""
 import unittest, os
-from extra.assembly.rdna3.autogen import (
+from extra.assembly.amd.autogen.rdna3 import (
   SOP1, SOP2, SOPK, SOPP, VOP1, VOP2, VOP3SD, VOPC, FLAT, VOPD,
   SOP1Op, SOP2Op, VOP1Op, VOP3Op
 )
@@ -41,7 +41,7 @@ class TestPDFParserGenerate(unittest.TestCase):
 
   def test_pdf_parser(self):
     """Single test that validates all PDF parser outputs."""
-    from extra.assembly.rdna3.lib import generate
+    from extra.assembly.amd.lib import generate
     result = generate()
 
     # test_all_formats_present

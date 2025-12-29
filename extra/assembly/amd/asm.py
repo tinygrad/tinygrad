@@ -1,7 +1,7 @@
 # RDNA3 assembler and disassembler
 from __future__ import annotations
 import re
-from extra.assembly.rdna3.lib import Inst, RawImm, Reg, SGPR, VGPR, TTMP, s, v, ttmp, _RegFactory, FLOAT_ENC, SRC_FIELDS, unwrap
+from extra.assembly.amd.lib import Inst, RawImm, Reg, SGPR, VGPR, TTMP, s, v, ttmp, _RegFactory, FLOAT_ENC, SRC_FIELDS, unwrap
 
 # Decoding helpers
 SPECIAL_GPRS = {106: "vcc_lo", 107: "vcc_hi", 124: "null", 125: "m0", 126: "exec_lo", 127: "exec_hi", 253: "scc"}
@@ -91,7 +91,7 @@ def disasm(inst: Inst) -> str:
   # VOP3 and VOP3SD share encoding - check opcode to determine which
   is_vop3sd = cls_name == 'VOP3' and op_val in VOP3SD_OPCODES
   try:
-    from extra.assembly.rdna3 import autogen
+    from extra.assembly.amd.autogen import rdna3 as autogen
     if is_vop3sd:
       op_name = autogen.VOP3SDOp(op_val).name.lower()
     else:
@@ -347,7 +347,7 @@ def disasm(inst: Inst) -> str:
 
   # VOPD: dual-issue instructions
   if cls_name == 'VOPD':
-    from extra.assembly.rdna3 import autogen
+    from extra.assembly.amd.autogen import rdna3 as autogen
     opx, opy, vdstx, vdsty_enc = [unwrap(inst._values.get(f, 0)) for f in ('opx', 'opy', 'vdstx', 'vdsty')]
     srcx0, vsrcx1, srcy0, vsrcy1 = [unwrap(inst._values.get(f, 0)) for f in ('srcx0', 'vsrcx1', 'srcy0', 'vsrcy1')]
     vdsty = (vdsty_enc << 1) | ((vdstx & 1) ^ 1)  # Decode vdsty
@@ -505,7 +505,7 @@ SOPK_IMM_FIRST = {'s_setreg_b32'}
 SOPK_UNSUPPORTED = {'s_setreg_imm32_b32'}
 
 def asm(text: str) -> Inst:
-  from extra.assembly.rdna3 import autogen
+  from extra.assembly.amd.autogen import rdna3 as autogen
   text = text.strip()
   clamp = 'clamp' in text.lower()
   if clamp: text = re.sub(r'\s+clamp\s*$', '', text, flags=re.I)

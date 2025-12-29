@@ -2,9 +2,9 @@
 """Test RDNA3 assembler/disassembler against LLVM test vectors."""
 import unittest, re, subprocess
 from tinygrad.helpers import fetch
-from extra.assembly.rdna3.autogen import *
-from extra.assembly.rdna3.asm import asm
-from extra.assembly.rdna3.test.helpers import get_llvm_mc
+from extra.assembly.amd.autogen.rdna3 import *
+from extra.assembly.amd.asm import asm
+from extra.assembly.amd.test.helpers import get_llvm_mc
 
 LLVM_BASE = "https://raw.githubusercontent.com/llvm/llvm-project/main/llvm/test/MC/AMDGPU"
 

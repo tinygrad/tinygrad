@@ -6,10 +6,10 @@ Set USE_HW=1 to run on both emulator and real hardware, comparing results.
 """
 
 import ctypes, unittest, os, struct
-from extra.assembly.rdna3.autogen import *
-from extra.assembly.rdna3.lib import RawImm
-from extra.assembly.rdna3.emu import WaveState, run_asm, set_valid_mem_ranges
-from extra.assembly.rdna3.pcode import _i32, _f32
+from extra.assembly.amd.autogen.rdna3 import *
+from extra.assembly.amd.lib import RawImm
+from extra.assembly.amd.emu import WaveState, run_asm, set_valid_mem_ranges
+from extra.assembly.amd.pcode import _i32, _f32
 
 VCC = SrcEnum.VCC_LO  # For VOP3SD sdst field
 USE_HW = os.environ.get("USE_HW", "0") == "1"
@@ -1776,7 +1776,7 @@ class TestF16Conversions(unittest.TestCase):
 
   def test_v_cvt_f16_f32_basic(self):
     """V_CVT_F16_F32 converts f32 to f16 in low 16 bits."""
-    from extra.assembly.rdna3.pcode import _f16
+    from extra.assembly.amd.pcode import _f16
     instructions = [
       v_mov_b32_e32(v[0], 1.0),  # f32 1.0 = 0x3f800000
       v_cvt_f16_f32_e32(v[1], v[0]),
@@ -1789,7 +1789,7 @@ class TestF16Conversions(unittest.TestCase):
 
   def test_v_cvt_f16_f32_negative(self):
     """V_CVT_F16_F32 converts negative f32 to f16."""
-    from extra.assembly.rdna3.pcode import _f16
+    from extra.assembly.amd.pcode import _f16
     instructions = [
       v_mov_b32_e32(v[0], -2.0),  # f32 -2.0 = 0xc0000000
       v_cvt_f16_f32_e32(v[1], v[0]),
@@ -1802,7 +1802,7 @@ class TestF16Conversions(unittest.TestCase):
 
   def test_v_cvt_f16_f32_small(self):
     """V_CVT_F16_F32 converts small f32 value."""
-    from extra.assembly.rdna3.pcode import _f16, f32_to_f16
+    from extra.assembly.amd.pcode import _f16, f32_to_f16
     instructions = [
       v_mov_b32_e32(v[0], 0.5),
       v_cvt_f16_f32_e32(v[1], v[0]),
@@ -1862,7 +1862,7 @@ class TestF16Conversions(unittest.TestCase):
     which would produce wrong results when the significant bits of the f32 value are
     in the upper bits (as they are for most f32 values > 1.0 or < -1.0).
     """
-    from extra.assembly.rdna3.pcode import _f16
+    from extra.assembly.amd.pcode import _f16
     # Use f32 value 1.5 = 0x3fc00000. If only low 16 bits (0x0000) are read, result is wrong.
     # Correct f16 result: 0x3e00 (1.5 in half precision)
     instructions = [
@@ -1886,7 +1886,7 @@ class TestF16Conversions(unittest.TestCase):
     is in the name), causing it to read only low 16 bits of the f32 input.
     This resulted in WMMA receiving zero inputs and producing zero outputs.
     """
-    from extra.assembly.rdna3.pcode import _f16
+    from extra.assembly.amd.pcode import _f16
     # Simulate loading two f32 values and converting/packing for WMMA
     # f32 1.5 = 0x3fc00000, f32 2.5 = 0x40200000
     # After CVT: f16 1.5 = 0x3e00, f16 2.5 = 0x4100
@@ -1914,7 +1914,7 @@ class TestF16Conversions(unittest.TestCase):
 
   def test_v_pack_b32_f16_basic(self):
     """V_PACK_B32_F16 packs two f16 values into one 32-bit register."""
-    from extra.assembly.rdna3.pcode import _f16
+    from extra.assembly.amd.pcode import _f16
     instructions = [
       # First convert two f32 values to f16
       v_mov_b32_e32(v[0], 1.0),   # Will become f16 0x3c00
@@ -1934,7 +1934,7 @@ class TestF16Conversions(unittest.TestCase):
 
   def test_v_pack_b32_f16_both_positive(self):
     """V_PACK_B32_F16 packs two positive f16 values."""
-    from extra.assembly.rdna3.pcode import _f16
+    from extra.assembly.amd.pcode import _f16
     instructions = [
       v_mov_b32_e32(v[0], 0.5),   # f16 0x3800
       v_mov_b32_e32(v[2], 2.0),   # f16 0x4000
@@ -2186,7 +2186,7 @@ class TestVOP3P(unittest.TestCase):
 
   def test_v_pk_add_f16_basic(self):
     """V_PK_ADD_F16 adds two packed f16 values."""
-    from extra.assembly.rdna3.pcode import _f16
+    from extra.assembly.amd.pcode import _f16
     # v0 = packed (1.0, 2.0), v1 = packed (3.0, 4.0)
     # Result should be packed (4.0, 6.0)
     instructions = [
@@ -2209,7 +2209,7 @@ class TestVOP3P(unittest.TestCase):
     Inline constants for VOP3P are f16 values in the low 16 bits only.
     The opsel_hi bits (default=0b11) select lo half for hi result, so both halves use the constant.
     """
-    from extra.assembly.rdna3.pcode import _f16
+    from extra.assembly.amd.pcode import _f16
     # v0 = packed (1.0, 1.0), add POS_ONE
     # With default opsel_hi=0b11: both lo and hi results use lo half of src1 (the constant)
     # But opsel_hi=1 means src1 hi comes from lo half - wait, let me check the actual encoding
@@ -2230,7 +2230,7 @@ class TestVOP3P(unittest.TestCase):
 
   def test_v_pk_mul_f16_basic(self):
     """V_PK_MUL_F16 multiplies two packed f16 values."""
-    from extra.assembly.rdna3.pcode import _f16
+    from extra.assembly.amd.pcode import _f16
     # v0 = packed (2.0, 3.0), v1 = packed (4.0, 5.0)
     # Result should be packed (8.0, 15.0)
     instructions = [
@@ -2251,7 +2251,7 @@ class TestVOP3P(unittest.TestCase):
     """V_PK_MUL_F16 with inline constant POS_TWO (2.0).
     Inline constant has value only in low 16 bits, hi is 0.
     """
-    from extra.assembly.rdna3.pcode import _f16
+    from extra.assembly.amd.pcode import _f16
     # v0 = packed (3.0, 4.0), multiply by POS_TWO
     # lo = 3.0 * 2.0 = 6.0, hi = 4.0 * 0.0 = 0.0 (inline const hi is 0)
     instructions = [
@@ -2268,7 +2268,7 @@ class TestVOP3P(unittest.TestCase):
 
   def test_v_pk_fma_f16_basic(self):
     """V_PK_FMA_F16: D = A * B + C for packed f16."""
-    from extra.assembly.rdna3.pcode import _f16
+    from extra.assembly.amd.pcode import _f16
     # A = packed (2.0, 3.0), B = packed (4.0, 5.0), C = packed (1.0, 1.0)
     # Result should be packed (2*4+1=9.0, 3*5+1=16.0)
     instructions = [

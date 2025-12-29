@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Integration test: round-trip RDNA3 assembly through AMD toolchain."""
 import unittest, re, io, sys, subprocess
-from extra.assembly.rdna3.autogen import *
-from extra.assembly.rdna3.asm import waitcnt, asm
-from extra.assembly.rdna3.test.helpers import get_llvm_mc
+from extra.assembly.amd.autogen.rdna3 import *
+from extra.assembly.amd.asm import waitcnt, asm
+from extra.assembly.amd.test.helpers import get_llvm_mc
 
 def disassemble(lib: bytes, arch: str = "gfx1100") -> str:
   """Disassemble ELF binary using tinygrad's compiler, return raw output."""

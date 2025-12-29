@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Roundtrip tests: generate tinygrad kernels, decode instructions, re-encode, verify match."""
 import unittest, io, sys, re, subprocess, os
-from extra.assembly.rdna3.autogen import *
-from extra.assembly.rdna3.lib import Inst
-from extra.assembly.rdna3.asm import asm
-from extra.assembly.rdna3.test.helpers import get_llvm_mc, get_llvm_objdump
+from extra.assembly.amd.autogen.rdna3 import *
+from extra.assembly.amd.lib import Inst
+from extra.assembly.amd.asm import asm
+from extra.assembly.amd.test.helpers import get_llvm_mc, get_llvm_objdump
 
 # Instruction format detection based on encoding bits
 def detect_format(data: bytes) -> type[Inst] | None:
@@ -140,7 +140,7 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
     2. asm(disasm()) matches LLVM output
     3. our disasm() matches LLVM's disassembly string exactly
     """
-    from extra.assembly.rdna3.test.test_compare_emulators import get_kernels_from_tinygrad
+    from extra.assembly.amd.test.test_compare_emulators import get_kernels_from_tinygrad
     from tinygrad.runtime.support.compiler_amd import HIPCompiler
 
     kernels, _, _ = get_kernels_from_tinygrad(op_fn)
