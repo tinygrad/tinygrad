@@ -949,6 +949,7 @@ jobs:
         shell: bash
         run: |
           python -c "from tinygrad import Device; assert Device.DEFAULT == 'CUDA'"
+          DEBUG=4 python -c "from tinygrad.runtime.autogen import cuda"
           python -m pytest -n=auto test/test_tiny.py --durations=20
 
 # ****** Compile-only Tests ******
