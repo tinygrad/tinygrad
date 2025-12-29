@@ -10,6 +10,11 @@ def _get_llvm_mc():
     if shutil.which(p): return p
   raise FileNotFoundError("llvm-mc not found")
 
+def _get_llvm_objdump():
+  for p in ['llvm-objdump', 'llvm-objdump-21', 'llvm-objdump-20']:
+    if shutil.which(p): return p
+  raise FileNotFoundError("llvm-objdump not found")
+
 # Instruction format detection based on encoding bits
 def detect_format(data: bytes) -> type[Inst] | None:
   """Detect instruction format from machine code bytes."""
@@ -108,21 +113,32 @@ def compile_asm_batch(instrs: list[str]) -> list[bytes]:
   return encodings
 
 def compile_and_disasm_batch(instrs: list[str], compiler) -> list[str | None]:
-  """Compile instructions and get LLVM's disassembly in a single call."""
+  """Compile instructions with LLVM and get LLVM's disassembly."""
+  import tempfile, os
   if not instrs: return []
   # Build assembly source with all instructions
   src = ".text\n.globl test\n.p2align 8\n.type test,@function\ntest:\n"
   src += "\n".join(f"  {instr}" for instr in instrs) + "\n"
-  lib = compiler.compile(src)
-  llvm_instrs = disassemble_lib(lib, compiler)
-  # Map back to input instructions
-  results = []
-  for i in range(len(instrs)):
-    if i < len(llvm_instrs):
-      results.append(llvm_instrs[i][0])
-    else:
-      results.append(None)
-  return results
+  # Use llvm-mc to assemble to object file
+  with tempfile.NamedTemporaryFile(suffix='.o', delete=False) as f:
+    obj_path = f.name
+  try:
+    result = subprocess.run(
+      [_get_llvm_mc(), '-triple=amdgcn', '-mcpu=gfx1100', '-mattr=+real-true16,+wavefrontsize32', '-filetype=obj', '-o', obj_path],
+      input=src, capture_output=True, text=True)
+    if result.returncode != 0: raise RuntimeError(f"llvm-mc failed: {result.stderr.strip()}")
+    # Disassemble with llvm-objdump
+    result = subprocess.run([_get_llvm_objdump(), '-d', '--mcpu=gfx1100', obj_path], capture_output=True, text=True)
+    if result.returncode != 0: raise RuntimeError(f"llvm-objdump failed: {result.stderr.strip()}")
+    # Parse disassembly output
+    results = []
+    for line in result.stdout.splitlines():
+      if '//' not in line: continue
+      instr = line.split('//')[0].strip()
+      if instr: results.append(instr)
+    return results[:len(instrs)]
+  finally:
+    os.unlink(obj_path)
 
 class TestTinygradKernelRoundtrip(unittest.TestCase):
   """Test roundtrip on real tinygrad-generated kernels using get_kernels_from_tinygrad pattern."""
