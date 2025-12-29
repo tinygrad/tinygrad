@@ -34,33 +34,6 @@ result = graph_rewrite(uop, pm)
 ### Schedule Cache
 Schedules are cached by graph structure. BIND nodes (variables with bound values) are unbound before cache key computation so different values hit the same cache.
 
-## Directory Structure
-
-```
-tinygrad/
-├── tensor.py          # Tensor class, user API
-├── device.py          # Buffer, device management
-├── dtype.py           # Data types
-├── helpers.py         # Utilities, environment vars
-├── uop/
-│   ├── ops.py         # UOp class, Ops enum, PatternMatcher
-│   ├── spec.py        # UOp type verification
-│   └── symbolic.py    # Symbolic math simplification
-├── engine/
-│   ├── schedule.py    # Schedule creation, caching
-│   ├── realize.py     # Tensor realization
-│   ├── jit.py         # JIT compilation
-│   └── memory.py      # Memory planning
-├── schedule/
-│   ├── rangeify.py    # Convert movements to ranges
-│   └── indexing.py    # Index calculations
-├── codegen/
-│   ├── kernel.py      # Kernel optimization
-│   └── uopgraph.py    # UOp graph transformations
-├── renderer/          # Code generation (CUDA, Metal, etc.)
-└── runtime/           # Device backends
-```
-
 ## Testing
 
 ```bash
