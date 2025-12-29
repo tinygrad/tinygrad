@@ -6,7 +6,7 @@ from typing import Callable, ClassVar, Sequence, cast, get_args, Literal, Suppor
 from tinygrad.dtype import DType, DTypeLike, dtypes, ImageDType, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten, dedup
-from tinygrad.helpers import IMAGE, WINO, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap, DEBUG, is_numpy_ndarray, RANGEIFY, FUSE_ATTENTION
+from tinygrad.helpers import IMAGE, WINO, WINO_OLD, Metadata, TRACEMETA, ceildiv, fetch, polyN, unwrap, DEBUG, is_numpy_ndarray, RANGEIFY, FUSE_ATTENTION
 from tinygrad.gradient import compute_gradient
 from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, MathTrait, identity_element, all_metadata, index_to_concrete_int
 from tinygrad.uop.spec import tensor_uop_spec, type_verify
@@ -239,7 +239,7 @@ class Tensor(MathTrait):
     # verify Tensors match the spec
     if __debug__: type_verify(list(big_sink.toposort()), tensor_uop_spec)
 
-    becomes_map = get_rangeify_map(big_sink) if RANGEIFY else get_kernelize_map(big_sink)
+    becomes_map = get_rangeify_map(big_sink) if RANGEIFY or WINO else get_kernelize_map(big_sink)
     _apply_map_to_tensors(becomes_map, name="Apply Kernelize Map")
     return self
 
@@ -2479,7 +2479,7 @@ class Tensor(MathTrait):
     # conv2d is a pooling op (with padding)
     x = self.pad(padding_)._pool(HW, stride, dilation)   # (bs, groups*cin, oy, ox, H, W)
     rcout, oyx = cout//groups, x.shape[2:-len(HW)]
-    if not all(x == 3 for x in HW) or stride != 1 or dilation != 1 or not WINO:
+    if not all(x == 3 for x in HW) or stride != 1 or dilation != 1 or not WINO_OLD:
       # normal conv
       x = x.reshape(bs, groups, cin, 1, *oyx, *HW).expand(bs, groups, cin, rcout, *oyx, *HW).permute(0,1,3,*[4+i for i in range(len(oyx))],2,*[4+len(oyx)+i for i in range(len(HW))])  # noqa: E501
 

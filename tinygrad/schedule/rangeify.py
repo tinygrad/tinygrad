@@ -353,7 +353,8 @@ def winoguard(lhs: UOp, rhs: UOp, redu: UOp):
 
 def winowrite(ctx: RangeifyContext, lhs: UOp, rhs: UOp, redu: UOp):
   # detect winograd pattern and pick activation/weight branches + spatial reduce axes (k_axes) and their adds (o_adds)
-  if not (g := winoguard(lhs, rhs, redu)): return None
+  if not (g := winoguard(lhs, rhs, redu)):
+    return None
   act_like, w_like, k_axes, o_axes, o_adds = g
   reduce_ranges = list(redu.src[1:])
   device = redu.device
@@ -563,7 +564,8 @@ def get_rangeify_map(sink:UOp) -> dict[UOp, UOp]:
   rctx = RangeifyContext()
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_rangeify, ctx=rctx, bottom_up=True, input_map=tensor_map, name="rangeify")
   # Winograd transform for 3x3 convolutions
-  if WINO: tensor_map = graph_rewrite_map(tensor_map[sink], winograd_rewrite, ctx=rctx, input_map=tensor_map, name="winograd")
+  if WINO:
+    tensor_map = graph_rewrite_map(tensor_map[sink], winograd_rewrite, ctx=rctx, input_map=tensor_map, name="winograd")
   # NOTE: running symbolic can break the graph, leaving RANGE/INDEX/BUFFERIZE in the final graph
   #tensor_map = graph_rewrite_map(tensor_map[sink], symbolic_simple, input_map=tensor_map, name="symbolic")
   tensor_map = graph_rewrite_map(tensor_map[sink], pm_cleanups, bottom_up=True, input_map=tensor_map, name="buffer cost")
