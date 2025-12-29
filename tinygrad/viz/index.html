@@ -2,7 +2,6 @@
 <html>
 <head>
   <title>tinygrad viz</title>
-  <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" href="data:;base64,iVBORw0KGgo=">
   <script src="assets/d3js.org/d3.v7.min.js" charset="utf-8"></script>
@@ -33,57 +32,35 @@
     font-size: 14px;
     overflow: hidden;
     background-color: #08090e;
-    scrollbar-color: #686977 #151720;
   }
-  ::-webkit-scrollbar-track { background: #151720; }
-  ::-webkit-scrollbar-thumb { background: #686977; }
   a {
     color: #4a90e2;
-    text-decoration: underline;
-    cursor: pointer;
-    display: block;
   }
   ul {
     padding: 0;
+    opacity: 0.6;
     white-space: nowrap;
     cursor: pointer;
   }
-  ul > p {
-    opacity: 0.6;
-  }
-  ul.active > p {
+  ul.active {
     opacity: 1;
   }
   ul > ul {
     display: none;
   }
-  ul.has-children > p::before {
-    content:"▸ ";
-  }
-  ul.has-children.expanded > p::before {
-    content:"▾ ";
-  }
   ul.expanded > ul {
     display: block;
   }
-  ul.disabled > p {
-    opacity: 0.4;
-  }
   ul.disabled {
+    opacity: 0.4;
     pointer-events: none;
   }
   label {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    line-height: 1;
-    user-select: none;
-    cursor: pointer;
   }
-  input {
-    outline: none;
-  }
-  #graph svg {
+  .graph svg {
     width: 100%;
     height: 100%;
   }
@@ -113,11 +90,11 @@
   .label :is(text, p) {
     font-weight: 350;
   }
-  g.node rect {
+  rect.node {
     stroke-width: 1.4;
     stroke: #4a4b57;
   }
-  g.overlay rect {
+  rect.overlay {
     fill: rgba(26, 27, 38, 0.5);
   }
   .edgePath {
@@ -125,10 +102,10 @@
     fill: none;
     stroke-width: 1.4px;
   }
-  g.node.highlight rect, .edgePath.highlight, g.port circle {
+  .highlight rect, .edgePath.highlight, g.port circle {
     stroke: #89C9A2;
   }
-  g.highlight.child rect, .edgePath.highlight.child {
+  .highlight.child rect, .edgePath.highlight.child {
     stroke: #C888B0;
   }
   #edge-labels g.port.highlight {
@@ -154,18 +131,29 @@
     position: relative;
     height: 100%;
   }
-  .metadata > * + *, .info > * + *, .rewrite-container > * + *, .ctx-list > * + * {
+  .metadata > * + *, .rewrite-container > * + *, .ctx-list > * + * {
     margin-top: 12px;
   }
-  ul > * + *, .args > * + * {
+  .stats-list > * + * {
+    margin-top: 8px;
+  }
+  .stats-list > p > * + * {
+    margin-top: 12px;
+  }
+  .stats-list {
+    width: 100%;
+    max-height: 240px;
+    overflow: auto;
+  }
+  .ctx-list > ul > * + * {
     margin-top: 4px;
   }
-  #graph {
+  .graph {
     position: absolute;
     inset: 0;
     z-index: 1;
   }
-  #profiler, #custom {
+  .profiler, .disasm {
     flex: 1 1 auto;
     min-width: 0;
     width: 100%;
@@ -246,9 +234,6 @@
     max-height: 30vh;
     padding: 8px;
   }
-  pre.full-height code.hljs {
-    max-height: none;
-  }
   #progress-message {
     position: absolute;
     z-index: 2;
@@ -269,6 +254,8 @@
     font-size: 10px;
   }
   #device-list > div {
+    min-height: 32px;
+    width: 132px;
     overflow-x: auto;
     overflow-y: hidden;
     white-space: nowrap;
@@ -281,15 +268,11 @@
     height: fit-content;
   }
   .raw-text {
-    padding-left: 15px;
+    padding: 0 8px;
     width: 100%;
     height: 100%;
     max-height: 100vh;
     overflow-x: auto;
-  }
-  .raw-text > pre {
-    display: inline-block;
-    min-width: 100%;
   }
   .raw-text code {
     max-height: none !important;
@@ -343,6 +326,15 @@
     font-size: 0.95em;
     letter-spacing: 0.03em;
   }
+  .legend {
+    display: flex;
+    align-items: center;
+  }
+  .legend > div {
+    width: 0.95em;
+    height: 0.95em;
+    margin-right: 4px;
+  }
   </style>
 </head>
 <body>
@@ -359,8 +351,9 @@
     </div>
     <div id="progress-message"></div>
     <div class="container ctx-list-parent"><div class="ctx-list"></div></div>
-    <div class="view" id="profiler"></div>
-    <div class="view" id="graph">
+    <div class="view profiler"></div>
+    <div class="view disasm"></div>
+    <div class="view graph">
       <svg id="graph-svg" preserveAspectRatio="xMidYMid meet">
         <g id="render">
           <g id="edges"></g>
@@ -374,7 +367,6 @@
         </defs>
       </svg>
     </div>
-    <div class="view" id="custom"></div>
     <div class="container metadata-parent"><div class="metadata"></div></div>
   </div>
   <div id="tooltip" class="wrap"></div>

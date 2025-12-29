@@ -1,142 +1,131 @@
-from typing import cast
-import itertools
-from tinygrad.helpers import DEVECTORIZE, TRANSCENDENTAL, SPEC
-from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat
-from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
+from typing import Any, Callable
+import functools
+from dataclasses import dataclass
+from tinygrad.helpers import QUANTIZE, DEVECTORIZE, TRANSCENDENTAL
+from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype
+from tinygrad.uop.spec import type_verify
 from tinygrad.renderer import Renderer
-from tinygrad.dtype import dtypes, PtrDType
-from tinygrad.helpers import panic
 
 # import all pattern matchers here
+from tinygrad.codegen.lowerer import pm_lowerer, get_index
+from tinygrad.codegen.quantize import pm_quant
 from tinygrad.codegen.gpudims import pm_add_gpudims
-from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing, symbolic, pm_move_where_on_load
+from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing
 from tinygrad.uop.decompositions import get_late_rewrite_patterns
-from tinygrad.codegen.late.expander import expander, pm_pre_expander, pm_group_for_reduce
+from tinygrad.codegen.late.expander import migrate_indexing, expander, pm_pre_expander
 from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
-  ReduceContext, correct_load_store, pm_render, pm_add_loads
-from tinygrad.codegen.opt.postrange import apply_opts
-from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_split_store
-from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, pm_mops
-from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
+  ReduceContext, correct_load_store, pm_render
+from tinygrad.codegen.late.linearize import block_create, pm_blockend_merge, block_merge, pm_finalize, BlockContext
+from tinygrad.codegen.opt.swizzler import view_left, view_right, fix_kernel_ops
+from tinygrad.codegen.opt.postrange import pm_postrange_opt
+from tinygrad.codegen.simplify import pm_simplify_ranges, pm_reduce_simplify
+from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen
 
-pm_syntactic_sugar = PatternMatcher([
-  # INDEX on ptr INDEX concats them
-  (UPat(Ops.INDEX, name="i1").f(Ops.INDEX, name="i2", allow_any_len=True),
-   lambda i1,i2: i2.replace(src=i1.src+i2.src[1:]) if isinstance(i1.dtype, PtrDType) and not isinstance(i2.dtype, PtrDType) else None),
-])
+@dataclass
+class RewriteStep:
+  pm: PatternMatcher
+  ctx: Callable[[UOp], Any]|None = None
+  name: str|None = None
+  bottom_up: bool = False
+  def __call__(self, sink:UOp):
+    return graph_rewrite(sink, self.pm, ctx=self.ctx(sink) if self.ctx is not None else None, name=self.name, bottom_up=self.bottom_up)
 
-def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -> UOp:
-  if ren is None: ren = Renderer()
+def apply_rewrites(sink:UOp, rewrites:list[RewriteStep]): return functools.reduce(lambda x,f: f(x), rewrites, sink)
 
-  if SPEC: type_verify(sink, kernel_spec)
+rewrites_for_views = [
+  RewriteStep(view_left, name="Main View Left"),
+  RewriteStep(view_right, name="Main View Right"),
+  RewriteStep(view_left+fix_kernel_ops, bottom_up=True, name="Finalize Kernel"),
+]
 
-  # preprocess
-  sink = graph_rewrite(sink, pm_mops+pm_syntactic_sugar, name="early movement ops", bottom_up=True)
+rewrites_for_linearizer = [
+  RewriteStep(block_create, ctx=BlockContext.from_sink, name="Linearizer: Create Blocks", bottom_up=True),
+  RewriteStep(pm_blockend_merge, name="Linearizer: Merge Blockends"),
+  RewriteStep(block_merge, name="Linearizer: Merge Blocks"),
+  RewriteStep(pm_finalize, name="Linearizer: Finalize")]
 
-  # first we optimize
+def get_rewrites_for_renderer(opts:Renderer, optimize:bool=True, linearizer:bool=True) -> list[RewriteStep]:
+  # cache with the values of the context vars
+  return _get_rewrites_for_renderer(opts, optimize, linearizer, QUANTIZE.value, DEVECTORIZE.value, TRANSCENDENTAL.value)
+
+@functools.cache
+def _get_rewrites_for_renderer(opts:Renderer, optimize:bool, linearizer:bool, _QUANTIZE, _DEVECTORIZE, _TRANSCENDENTAL) -> list[RewriteStep]:
+  # ** lowerer (rewrite_shapetracker_with_index) **
+  ret: list[RewriteStep] = []
+
   if optimize:
-    # collapse loads reduce (indexing by a tensor)
-    sink = graph_rewrite(sink, pm_load_collapse, name="load collapse")
+    # view pushing
+    ret.extend(rewrites_for_views)
 
-    # split ranges
-    sink = graph_rewrite(sink, pm_split_ranges+pm_flatten_range, ctx={}, name="split ranges")
+    # lowerer first
+    if _QUANTIZE and opts.device in {"CPU", "DSP"}: ret.append(RewriteStep(pm_quant, name="quantize"))
+    ret.append(RewriteStep(pm_lowerer, get_index, name="lowerer", bottom_up=True))
 
     # symbolic (NOTE: this is a requirement for pm_simplify_ranges to be correct)
-    sink = graph_rewrite(sink, sym+pm_flatten_range, name="initial symbolic")
+    ret.append(RewriteStep(sym, name="initial symbolic"))
 
     # optimize (schedule) the AST
-    sink = graph_rewrite(sink, pm_simplify_ranges, name="simplify ranges")
-
-    # split store range (only on CPU for now)
-    sink = graph_rewrite(sink, pm_split_store, ctx=ren.device, name="cut store ranges")
-
-    # do postrange optimization, BEAM or hand_coded_optimizations
-    sink = apply_opts(sink, ren)
+    ret.append(RewriteStep(pm_simplify_ranges, name="simplify ranges"))
+    ret.append(RewriteStep(pm_reduce_simplify, name="simplify reduces"))
+    ret.append(RewriteStep(pm_postrange_opt, ctx=lambda _: opts, name="post optimize ast"))
 
   # ** expander (expand_rewrite) **
-  sink = graph_rewrite(sink, sym+pm_move_where_on_load, name="postopt symbolic")
+  ret.append(RewriteStep(sym+migrate_indexing, name="postopt symbolic"))
 
   # expand
-  sink = graph_rewrite(sink, sym+pm_pre_expander+pm_group_for_reduce+expander, name="expander")
+  ret.append(RewriteStep(sym+pm_pre_expander+expander, name="expander"))
 
   # add locals
-  sink = graph_rewrite(sink, pm_add_buffers_local+rangeify_codegen, ctx=itertools.count(0), name="add local buffers")
+  ret.append(RewriteStep(pm_add_buffers_local+rangeify_codegen, name="add local buffers"))
 
   # ** devectorizer (full_graph_rewrite) **
   # remove reduce
-  sink = graph_rewrite(sink, pm_reduce+gep_pushing, ctx=ReduceContext(), name="remove_reduce")
+  ret.append(RewriteStep(pm_reduce+gep_pushing, lambda _: ReduceContext(), name="remove_reduce"))
 
   # add gpu dims (late). this works after devectorize, but it's faster here
-  sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")
-
-  # **** optimizations are done, now we lower to actual code ****
-
-  # add loads
-  sink = graph_rewrite(sink, pm_add_loads, name="** add loads (code)")
+  ret.append(RewriteStep(pm_add_gpudims, lambda _: opts, name="add gpudims"))
 
   # devectorize (TODO: does this need opts?)
-  if DEVECTORIZE >= 2: pm_devectorize = sym+load_store_folding+load_store_indexing
-  elif DEVECTORIZE: pm_devectorize = sym+devectorize+load_store_folding+correct_load_store+load_store_indexing
+  if _DEVECTORIZE >= 2: pm_devectorize = sym+load_store_folding+load_store_indexing
+  elif _DEVECTORIZE: pm_devectorize = sym+devectorize+load_store_folding+correct_load_store+load_store_indexing
   else: pm_devectorize = sym+load_store_folding+correct_load_store+load_store_indexing
-  sink = graph_rewrite(sink, pm_devectorize, ctx=ren, name="devectorize")
+  ret.append(RewriteStep(pm_devectorize, lambda _: opts, name="devectorize"))
+
+  supported_ops = tuple(opts.code_for_op.keys())
+  extra_matcher = opts.extra_matcher if opts.extra_matcher is not None else PatternMatcher([])
 
   # lower the index dtype to a concrete int
-  sink = graph_rewrite(sink, pm_lower_index_dtype+load_store_indexing, ctx=ren.device, name="lower all index dtypes")
-  sink = graph_rewrite(sink, symbolic, name="post index symbolic")
+  ret.append(RewriteStep(pm_lower_index_dtype+load_store_indexing, lambda _: opts.device, name="lower all index dtypes"))
 
   # optional pre matcher
-  if ren.pre_matcher is not None: sink = graph_rewrite(sink, ren.pre_matcher, name="pre_matcher")
+  if opts.pre_matcher is not None: ret.append(RewriteStep(opts.pre_matcher, name="pre_matcher"))
 
   # decompositions
-  supported_ops = tuple(ren.code_for_op.keys())
-  pm_decomp = symbolic_simple+get_late_rewrite_patterns(supported_ops, TRANSCENDENTAL>=2)
-  sink = graph_rewrite(sink, pm_decomp, ctx=ren.device, name="decompositions")
+  pm_decomp = symbolic_simple+get_late_rewrite_patterns(supported_ops, _TRANSCENDENTAL>=2)
+  ret.append(RewriteStep(pm_decomp, lambda _: opts.device, name="decompositions"))
 
   # final rules for the renderer (without sym)
-  extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
-  pm_final_rewrite = pm_decomp+pm_render+extra_matcher+pm_split_ends
-  sink = graph_rewrite(sink, pm_final_rewrite, ctx=ren.device, name="final rewrite")
+  pm_final_rewrite = pm_decomp+pm_render+extra_matcher
+  ret.append(RewriteStep(pm_final_rewrite, lambda _: opts.device, name="final rewrite"))
 
-  # this was the linearizer
-  sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
+  # return the list (with optional linearizer)
+  return ret + (rewrites_for_linearizer if linearizer else [])
 
-  # return the rewritten sink
-  return sink
+def full_rewrite_to_sink(sink:UOp, opts:Renderer|None=None, optimize:bool=True, linearizer:bool=False) -> UOp:
+  return apply_rewrites(sink, get_rewrites_for_renderer(opts if opts is not None else Renderer(), optimize, linearizer))
 
-# inject IF/ENDIF. only needed if device doesn't support gated stores
-pm_linearize_cleanups = PatternMatcher([
-  # if statements are not allowed in the graph
-  (UPat((Ops.IF, Ops.ENDIF)), lambda: panic(RuntimeError("if not allowed in graph"))),
-  # gated INDEX becomes IF-STORE-ENDIF. this is the only use of IF-ENDIF
-  (UPat(Ops.STORE, name="u", src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat(name="gate", dtype=dtypes.bool))).or_casted(), UPat()),
-        allow_any_len=True), lambda u, gate: (u, [mif:=UOp(Ops.IF, src=(gate, u.src[0])), u, UOp(Ops.ENDIF, src=(mif,))]))
-])
-
-# requires lst be toposorted. like graph rewrite, but for lines
-def line_rewrite(lst:list[UOp], pm:PatternMatcher) -> list[UOp]:
-  newlst = []
-  replaced: dict[UOp, UOp] = {}
-  for u in lst:
-    nu = u.replace(src=tuple([replaced[x] for x in u.src]))
-    ret: tuple[UOp, list[UOp]] = cast(tuple[UOp, list[UOp]]|None, pm.rewrite(nu)) or (nu, [nu])
-    replaced[u] = ret[0]
-    newlst.extend(ret[1])
-  return newlst
-
-def full_rewrite(sink:UOp, ren:Renderer|None=None) -> list[UOp]:
+def full_rewrite(sink:UOp, opts:Renderer|None=None) -> list[UOp]:
   """
   Function to transform the Kernel UOp graph into a linearized program.
 
   Args:
     sink: The Ops.SINK rooting the Kernel graph.
-    ren: The Renderer (can change how things are processed, fix this).
+    opts: The Renderer (can change how things are processed, fix this).
 
   Returns:
     Linear program in UOps.
   """
 
-  full_sink = full_rewrite_to_sink(sink, ren, optimize=sink.tag is None)
-  assert len(full_sink.ranges) == 0, f"all ranges must end by the sink, {full_sink.ranges}"
-  lst = line_rewrite(linearize(full_sink), pm_linearize_cleanups)
-  if SPEC: type_verify(lst, program_spec)
+  lst = list(full_rewrite_to_sink(sink, opts, optimize=sink.tag is None, linearizer=True).arg.lst)
+  if __debug__: type_verify(lst)
   return lst

@@ -5,23 +5,6 @@ from dataclasses import dataclass, fields
 from tinygrad.helpers import getenv, prod
 from enum import Enum, auto
 
-class InvalidTypeMetaClass(type):
-  instance:None|InvalidType = None
-  def __call__(cls):
-    if (ret:=InvalidTypeMetaClass.instance) is not None: return ret
-    InvalidTypeMetaClass.instance = ret = super().__call__()
-    return ret
-
-class InvalidType(metaclass=InvalidTypeMetaClass):
-  def __eq__(self, other): return self is other
-  def __lt__(self, other): return self is not other
-  def __gt__(self, other): return self is not other
-  def __hash__(self): return id(self)
-  def __repr__(self): return "Invalid"
-  def __reduce__(self): return (InvalidType, ())  # Return the global Invalid instance
-
-Invalid = InvalidType()
-
 ConstType = float|int|bool
 
 FmtStr = Literal['?', 'b', 'B', 'h', 'H', 'i', 'I', 'q', 'Q', 'e', 'f', 'd']
@@ -34,9 +17,7 @@ class DTypeMetaClass(type):
     DTypeMetaClass.dcache[args] = ret = super().__call__(*args)
     return ret
 
-class AddrSpace(Enum):
-  def __repr__(self): return str(self)
-  GLOBAL = auto(); LOCAL = auto(); REG = auto()  # noqa: E702
+class AddrSpace(Enum): GLOBAL = auto(); LOCAL = auto(); REG = auto()  # noqa: E702
 
 @dataclass(frozen=True, eq=False)
 class DType(metaclass=DTypeMetaClass):
@@ -49,7 +30,7 @@ class DType(metaclass=DTypeMetaClass):
   @staticmethod
   def new(priority:int, itemsize:int, name:str, fmt:FmtStr|None): return DType(priority, itemsize, name, fmt, 1, None)
   def __reduce__(self): return type(self), tuple(getattr(self, f.name) for f in fields(self))
-  def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self.scalar().name]}"+(f".vec({self.count})" if self.count != 1 else "")
+  def __repr__(self): return f"dtypes.{INVERSE_DTYPES_DICT[self.scalar().name]}"+(f".vec({self.count})" if self.count > 1 else "")
   def __lt__(self, o:DType): return (self.priority, self.itemsize, self.name, self.fmt, self.count) < (o.priority, o.itemsize, o.name, o.fmt, o.count)
   @property
   def base(self): return self
@@ -63,7 +44,7 @@ class DType(metaclass=DTypeMetaClass):
   def ptr(self, size=-1, addrspace=AddrSpace.GLOBAL) -> PtrDType:
     return PtrDType(self.priority, self.itemsize, self.name, self.fmt, self.count, None, self, addrspace, 1, size)
   def scalar(self) -> DType: return self._scalar if self._scalar is not None else self
-  def nbytes(self) -> int: raise RuntimeError("only ptr types have nbytes")
+  def nbytes(self): raise RuntimeError("only ptr types have nbytes")
   @property
   def min(self): return dtypes.min(self)
   @property
@@ -84,7 +65,7 @@ class PtrDType(DType):
     if isinstance(self, ImageDType):
       return ImageDType(self.priority, self.itemsize, self.name, self.fmt, self.count, self, self._base, self.addrspace, sz, self.size, self.shape)
     return type(self)(self.priority, self.itemsize, self.name, self.fmt, self.count, self, self._base, self.addrspace, sz, self.size)
-  def ptr(self, size=-1, addrspace=AddrSpace.GLOBAL) -> PtrDType: raise RuntimeError("can't make a pointer from a pointer")
+  def ptr(self, size=-1, addrspace=AddrSpace.GLOBAL): raise RuntimeError("can't make a pointer from a pointer")
   def nbytes(self) -> int:
     if self.size == -1: raise RuntimeError("can't get nbytes of a pointer with unlimited size")
     return self.size*self.itemsize
@@ -123,11 +104,10 @@ class dtypes:
     if x.__class__ is list or x.__class__ is tuple: return max(dtypes.from_py(xi) for xi in x) if x else dtypes.default_float
     raise RuntimeError(f"Could not infer dtype of {x} with type {type(x)}")
   @staticmethod
-  def as_const(val: tuple[ConstType|InvalidType, ...]|ConstType|InvalidType, dtype:DType):
+  def as_const(val: tuple[ConstType, ...]|ConstType, dtype:DType):
     if isinstance(val, tuple):
       assert len(val) == dtype.count, f"mismatch {val} {dtype}"
       return tuple(dtypes.as_const(x, dtype) for x in val)
-    if isinstance(val, InvalidType): return val
     return int(val) if dtypes.is_int(dtype) else float(val) if dtypes.is_float(dtype) else bool(val)
   @staticmethod
   @functools.cache
@@ -185,7 +165,7 @@ class dtypes:
   uints = (uint8, uint16, uint32, uint64)
   sints = (int8, int16, int32, int64)
   ints = uints + sints
-  all = floats + ints + (bool, index) # noqa: A003
+  all = floats + ints + (bool, index)
 
 if (env_default_float := getenv("DEFAULT_FLOAT", "")):
   dtypes.default_float = getattr(dtypes, env_default_float.lower())
@@ -221,9 +201,9 @@ def can_safe_cast(dt0:DType, dt1:DType) -> bool:
   if dt0 == dt1 or dt0 == dtypes.bool: return True
   match dt1:
     case dtypes.index: return dt0 in dtypes.ints
-    case dtypes.double: return dt0 in (dtypes.float, dtypes.half, dtypes.bfloat16, *dtypes.fp8s,
+    case dtypes.double: return dt0 in (dtypes.float, dtypes.half, dtypes.bfloat16,
       dtypes.uint32, dtypes.uint16, dtypes.uint8, dtypes.int32, dtypes.int16, dtypes.int8)
-    case dtypes.float: return dt0 in (dtypes.half, dtypes.bfloat16, *dtypes.fp8s, dtypes.uint16, dtypes.uint8, dtypes.int16, dtypes.int8)
+    case dtypes.float: return dt0 in (dtypes.half, dtypes.bfloat16, dtypes.uint16, dtypes.uint8, dtypes.int16, dtypes.int8)
     case dtypes.uint64: return dt0 in (dtypes.uint32, dtypes.uint16, dtypes.uint8)
     case dtypes.uint32: return dt0 in (dtypes.uint16, dtypes.uint8)
     case dtypes.int64: return dt0 in (dtypes.uint32, dtypes.uint16, dtypes.uint8, dtypes.int32, dtypes.int16, dtypes.int8)
@@ -237,7 +217,7 @@ def sum_acc_dtype(dt:DType):
   if dtypes.is_int(dt) or dt == dtypes.bool: return least_upper_dtype(dt, dtypes.int)
   return least_upper_dtype(dt, to_dtype(getenv("SUM_DTYPE", "float32")))
 
-def float_to_fp16(x):
+def truncate_fp16(x):
   try: return struct.unpack('e', struct.pack('e', float(x)))[0]
   except OverflowError: return math.copysign(math.inf, x)
 
@@ -314,7 +294,7 @@ def fp8_to_float(x: int, dtype: DType) -> float:
   return float(float32_val)
 
 truncate: dict[DType, Callable] = {dtypes.bool: bool,
-  dtypes.float16: float_to_fp16, dtypes.bfloat16: lambda x: float_to_bf16(float(x)),
+  dtypes.float16: truncate_fp16, dtypes.bfloat16: lambda x: float_to_bf16(float(x)),
   **{fp8: (lambda x, dtype=fp8: fp8_to_float(float_to_fp8(x, dtype), dtype)) for fp8 in dtypes.fp8s},
   dtypes.float32: lambda x: ctypes.c_float(x).value, dtypes.float64: lambda x: ctypes.c_double(x).value,
   dtypes.uint8: lambda x: ctypes.c_uint8(x).value, dtypes.uint16: lambda x: ctypes.c_uint16(x).value,
@@ -326,7 +306,7 @@ truncate: dict[DType, Callable] = {dtypes.bool: bool,
 
 def _to_np_dtype(dtype:DType) -> type|None:
   import numpy as np
-  if dtype in { dtypes.bfloat16, *dtypes.fp8s }: return np.float32
+  if dtype == dtypes.bfloat16: return np.float32
   return np.dtype(dtype.fmt).type if dtype.fmt is not None else None
 def _from_np_dtype(npdtype:'np.dtype') -> DType: # type: ignore [name-defined] # noqa: F821
   import numpy as np
@@ -337,7 +317,6 @@ def _to_torch_dtype(dtype:DType) -> 'torch.dtype'|None:  # type: ignore [name-de
   import numpy as np, torch
   if dtype == dtypes.uint64: return torch.uint64
   if dtype == dtypes.bfloat16: return torch.bfloat16
-  if dtype in dtypes.fp8s: return torch.uint8
   # NOTE: torch doesn't expose this mapping with a stable API
   try: return torch.from_numpy(np.array([], dtype=_to_np_dtype(dtype))).dtype
   except TypeError: return None

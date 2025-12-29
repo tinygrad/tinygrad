@@ -1,99 +1,90 @@
-# flake8: noqa: E702
-# allow semicolons to put multiple ops on one line
 from enum import auto, IntEnum, Enum
 
 # wrapper around IntEnum that preserves Enum.__str__ and makes auto() unique across all FastEnum subclasses
 class FastEnum(IntEnum):
   def __str__(self): return Enum.__str__(self)
-  def __repr__(x): return str(x)
   @staticmethod
   def _generate_next_value_(_, __, ___, last_values): return 1 + max([0, *last_values, *[max(c) for c in FastEnum.__subclasses__()]])
 
 # the order of these Ops controls the order of the toposort
 class Ops(FastEnum):
-  # ** 1 -- defines/special **
+  # uops that aren't rendered
+  NOOP = auto(); SINK = auto(); UNIQUE = auto(); DEVICE = auto(); KERNEL = auto(); PRECAST = auto(); REWRITE_ERROR = auto()  # noqa: E702
 
-  # define GLOBAL/VAR are ptrs to outside the Kernel
-  DEFINE_GLOBAL = auto(); DEFINE_VAR = auto(); BIND = auto()
+  # track children
+  CHILD = auto(); CHILDREN = auto() # noqa: E702
+
+  # buffer ops
+  COPY = auto(); BUFFER = auto(); BUFFER_VIEW = auto(); MSELECT = auto(); MSTACK = auto() # noqa: E702
+
+  # create buffer
+  BUFFERIZE = auto()
+
+  # ops that adjust the behavior of the scheduler
+  CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto(); FUSE = auto() # noqa: E702
+  REALIZE = auto()
+
+  # blocks in linearizer (only used there)
+  BLOCK = auto(); BLOCKSTART = auto(); BLOCKEND = auto(); BLOCKFINAL = auto() # noqa: E702
+
+  # movement ops! these only exist in the tensor graph
+  RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); FLIP = auto() # noqa: E702
+  MULTI = auto()  # MULTI is really a movement op
+
+  # view is what all movement ops become
+  VIEW = auto()
+
+  # TODO: remove VALID with the VIEW(CONST(DEVICE)) refactor
+  VALID = auto()
+
+  # TODO: unify these ops into the levels of the memory hierarchy. depends on ASSIGN is STORE
+  DEFINE_GLOBAL = auto(); DEFINE_LOCAL = auto(); DEFINE_REG = auto() # noqa: E702
+
+  # this is for symbolic shapes
+  DEFINE_VAR = auto(); BIND = auto() # noqa: E702
 
   # this is a RANGE for GPU dimensions, similar to symbolic shapes but not exactly
   SPECIAL = auto()
 
-  # define LOCAL/REG allocate things
-  DEFINE_LOCAL = auto(); DEFINE_REG = auto()
+  # reduce
+  REDUCE_AXIS = auto(); REDUCE = auto(); ALLREDUCE = auto() # noqa: E702
 
-  # ** 2 -- non op uops **
+  # optimization helper ops
+  UNROLL = auto(); CONTRACT = auto(); GEP = auto(); VECTORIZE = auto(); CAT = auto(); PTRCAT = auto() # noqa: E702
 
-  # uops that aren't rendered
-  NOOP = auto(); REWRITE_ERROR = auto()
-
-  # AFTER passes src[0] through and promises in the toposort that any consumers of the AFTER run after src[1:]
-  # GROUP is a NOOP that just merges things together
-  SINK = auto(); AFTER = auto(); GROUP = auto()
-
-  # vector creation / item selection
-  GEP = auto(); VECTORIZE = auto()
-
-  # ** 3 -- load/store **
-
-  # INDEX is a BinaryOp similar to ADD, but it operates on pointers
-  INDEX = auto()
+  # UnaryOps
+  CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto(); SQRT = auto(); RECIP = auto(); NEG = auto(); TRUNC = auto() # noqa: E702
 
   # load/store before math
-  LOAD = auto(); STORE = auto()
-
-  # ** 4 -- math **
+  LOAD = auto(); STORE = auto() # noqa: E702
+  ASSIGN = auto()  # TODO: ASSIGN is STORE, remove ASSIGN
 
   # tensor core math op, not elementwise
   WMMA = auto()
 
-  # UnaryOps
-  CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto()
-  SQRT = auto(); RECIPROCAL = auto(); NEG = auto(); TRUNC = auto()
+  # INDEX is a BinaryOp similar to ADD, but it operates on pointers
+  INDEX = auto()
 
   # BinaryOps
-  ADD = auto(); MUL = auto(); SHL = auto(); SHR = auto(); IDIV = auto(); MAX = auto(); MOD = auto()
-  CMPLT = auto(); CMPNE = auto(); CMPEQ = auto()
-  XOR = auto(); OR = auto(); AND = auto()
-  THREEFRY = auto(); SUB = auto(); FDIV = auto(); POW = auto()
+  ADD = auto(); MUL = auto(); SHL = auto(); SHR = auto(); IDIV = auto(); MAX = auto(); MOD = auto() # noqa: E702
+  CMPLT = auto(); CMPNE = auto(); CMPEQ = auto() # noqa: E702
+  XOR = auto(); OR = auto(); AND = auto() # noqa: E702
+  THREEFRY = auto(); SUB = auto(); FDIV = auto(); POW = auto() # noqa: E702
 
   # TernaryOps
-  WHERE = auto(); MULACC = auto()
-
-  # ** 5 -- control flow / consts / custom **
+  WHERE = auto(); MULACC = auto() # noqa: E702
 
   # control flow ops
-  BARRIER = auto(); RANGE = auto(); IF = auto(); END = auto(); ENDIF = auto()
+  BARRIER = auto(); RANGE = auto(); IF = auto(); ENDRANGE = auto(); ENDIF = auto() # noqa: E702
 
   # consts. VCONST is a vectorized const
-  VCONST = auto(); CONST = auto()
+  VCONST = auto(); CONST = auto() # noqa: E702
 
   # CUSTOM/CUSTOMI are used to output strings into codegen. the I makes the string inline
-  CUSTOM = auto(); CUSTOMI = auto()
-
-  # ** 6 -- ops that don't exist in programs **
-
-  # tensor graph ops
-  UNIQUE = auto(); DEVICE = auto(); KERNEL = auto(); ASSIGN = auto()
-
-  # ops that adjust the behavior of the scheduler
-  CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto()
-
-  # buffer ops
-  BUFFERIZE = auto(); COPY = auto(); BUFFER = auto(); BUFFER_VIEW = auto(); MSELECT = auto(); MSTACK = auto()
-
-  # the core 6 movement ops! these only exist in the tensor graph
-  RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); FLIP = auto()
-  MULTI = auto()  # MULTI is really a movement op
-
-  # reduce
-  REDUCE_AXIS = auto(); REDUCE = auto(); ALLREDUCE = auto()
-
-  # expander ops
-  UNROLL = auto(); CONTRACT = auto(); CAT = auto(); PTRCAT = auto()
+  CUSTOM = auto(); CUSTOMI = auto() # noqa: E702
 
 class GroupOp:
-  Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIPROCAL, Ops.NEG, Ops.TRUNC}
+  Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIP, Ops.NEG, Ops.TRUNC}
   Binary = {Ops.ADD, Ops.MUL, Ops.IDIV, Ops.MAX, Ops.MOD, Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ,
             Ops.XOR, Ops.SHL, Ops.SHR, Ops.OR, Ops.AND, Ops.THREEFRY, Ops.SUB, Ops.FDIV, Ops.POW}
   Ternary = {Ops.WHERE, Ops.MULACC}
@@ -107,7 +98,8 @@ class GroupOp:
   Irreducible = {Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}
   Movement = {Ops.RESHAPE, Ops.EXPAND, Ops.PERMUTE, Ops.PAD, Ops.SHRINK, Ops.FLIP}
 
-  Buffer = {Ops.LOAD, Ops.STORE, Ops.CONST, Ops.DEFINE_VAR}
+  Buffer = {Ops.LOAD, Ops.STORE, Ops.VALID, Ops.CONST, Ops.DEFINE_VAR}
+  Block = {Ops.BLOCK, Ops.BLOCKEND, Ops.BLOCKSTART}
 
   # BinaryOps that can be flipped
   Commutative = {Ops.ADD, Ops.MUL, Ops.MAX, Ops.CMPNE, Ops.CMPEQ, Ops.XOR, Ops.AND, Ops.OR}
@@ -122,6 +114,8 @@ class GroupOp:
   Comparison = {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ}
 
   # do not preserve f(0) = 0
-  UnsafePad = {Ops.RECIPROCAL, Ops.LOG2, Ops.EXP2, Ops.IDIV, Ops.POW}
+  UnsafePad = {Ops.RECIP, Ops.LOG2, Ops.EXP2, Ops.IDIV, Ops.POW}
+
+  Meta = {Ops.COPY, Ops.BUFFER_VIEW}
 
   All = set(Ops)

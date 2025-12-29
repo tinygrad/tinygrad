@@ -1,10 +1,10 @@
-import subprocess, hashlib, tempfile, ctypes, re, pathlib
+import subprocess, hashlib, tempfile, ctypes, ctypes.util, re, pathlib
 from typing import Callable
-from tinygrad.helpers import to_char_p_p, colored, init_c_var, getenv, system
-from tinygrad.runtime.autogen import nvrtc, nvjitlink as jitlink
+from tinygrad.helpers import to_char_p_p, colored, init_c_var, getenv
+import tinygrad.runtime.autogen.nvrtc as nvrtc
 from tinygrad.device import Compiler, CompileError
 
-CUDA_PATH = getenv("CUDA_PATH", "")
+CUDA_PATH = getenv("CUDA_PATH", "")  # PTX shouldn't be here, in fact, it shouldn't exist
 
 def _get_bytes(arg, get_str, get_sz, check) -> bytes:
   sz = init_c_var(ctypes.c_size_t(), lambda x: check(get_sz(arg, ctypes.byref(x))))
@@ -17,17 +17,15 @@ def nvrtc_check(status, ctx=None):
 
 def jitlink_check(status, ctx=None):
   if status != 0:
-    err_log = _get_bytes(ctx, jitlink.nvJitLinkGetErrorLog, jitlink.nvJitLinkGetErrorLogSize, lambda _: None).decode() if ctx else ""
-    raise CompileError(f"jitlink Error {status}, {jitlink.nvJitLinkResult.get(status)}\n{err_log}")
+    err_log = _get_bytes(ctx, nvrtc.nvJitLinkGetErrorLog, nvrtc.nvJitLinkGetErrorLogSize, lambda _: None).decode() if ctx else ""
+    raise CompileError(f"NvJitLink Error {status}, {nvrtc.nvJitLinkResult__enumvalues.get(status, 'Unknown')}\n{err_log}")
 
 def pretty_ptx(s):
   # all expressions match `<valid_before><expr><valid_after>` and replace it with `<valid_before>color(<expr>)<valid_after>`
-  s = re.sub(r'([!@<\[\s,\+\-;\n])((?:[_%$][\w%\$_]+(?:\.[xyz])?\:?)|(?:buf\d+))([<>\]\s,\+\-;\n\)])',
-             lambda m:m[1]+colored(m[2], "blue")+m[3], s, flags=re.M) # identifiers
+  s = re.sub(r'([!@<\[\s,\+\-;\n])((?:[_%$][\w%\$_]+(?:\.[xyz])?\:?)|(?:buf\d+))([<>\]\s,\+\-;\n\)])', lambda m:m[1]+colored(m[2], "blue")+m[3], s, flags=re.M) # identifiers  # noqa: E501
   s = re.sub(r'(.)((?:b|s|u|f)(?:8|16|32|64)|pred)([\.\s])', lambda m:m[1]+colored(m[2], "green")+m[3], s, flags=re.M) # types
   s = re.sub(r'^(\s*)([\w]+)(.*?;$)', lambda m:m[1]+colored(m[2], "yellow")+m[3], s, flags=re.M) # instructions
-  s = re.sub(r'([<>\[\]\s,\+\-;])((?:0[fF][0-9a-fA-F]{8})|(?:[0-9]+)|(?:0[xX][0-9a-fA-F]+))([<>\[\]\s,\+\-;])',
-             lambda m:m[1]+colored(m[2], "yellow")+m[3], s, flags=re.M) # numbers
+  s = re.sub(r'([<>\[\]\s,\+\-;])((?:0[fF][0-9a-fA-F]{8})|(?:[0-9]+)|(?:0[xX][0-9a-fA-F]+))([<>\[\]\s,\+\-;])', lambda m:m[1]+colored(m[2], "yellow")+m[3], s, flags=re.M) # numbers  # noqa: E501
   s = re.sub(r'(\.)(param|reg|global)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # space
   s = re.sub(r'(\.)(version|target|address_size|visible|entry)', lambda m:m[1]+colored(m[2], "magenta"), s, flags=re.M) # derivatives
   return s
@@ -37,7 +35,7 @@ def cuda_disassemble(lib:bytes, arch:str):
     fn = (pathlib.Path(tempfile.gettempdir()) / f"tinycuda_{hashlib.md5(lib).hexdigest()}").as_posix()
     with open(fn, "wb") as f: f.write(lib)
     subprocess.run(["ptxas", f"-arch={arch}", "-o", fn, fn], check=False, stderr=subprocess.DEVNULL) # optional ptx -> sass step for CUDA=1
-    print(system(f'nvdisasm {fn}'))
+    print(subprocess.check_output(['nvdisasm', fn]).decode('utf-8'))
   except Exception as e: print("Failed to generate SASS", str(e), "Make sure your PATH contains ptxas/nvdisasm binary of compatible version.")
 
 class CUDACompiler(Compiler):
@@ -60,35 +58,19 @@ class NVCompiler(CUDACompiler):
   def __init__(self, arch:str): super().__init__(arch, cache_key="nv")
   def compile(self, src:str) -> bytes: return self._compile_program(src, nvrtc.nvrtcGetCUBIN, nvrtc.nvrtcGetCUBINSize)
 
-class NVCCCompiler(Compiler):
-  def __init__(self, arch:str, extra_options:list[str]=[]):
-    self.arch, self.extra_options = arch, extra_options
-    super().__init__(f"compile_nvcc_{self.arch}_{hashlib.sha256(' '.join(extra_options).encode()).hexdigest()[:8]}")
-  def compile(self, src:str) -> bytes:
-    with tempfile.NamedTemporaryFile(suffix=".cu") as srcf, tempfile.NamedTemporaryFile(suffix=".ptx") as libf:
-      srcf.write(src.encode())
-      srcf.flush()
-      subprocess.run(["nvcc", f"-arch={self.arch}", "-ptx", "-o", libf.name, srcf.name] + self.extra_options,
-                 check=True)
-      return libf.read()
-  def disassemble(self, lib:bytes): cuda_disassemble(lib, self.arch)
-
 class PTXCompiler(Compiler):
   def __init__(self, arch:str, cache_key="ptx"):
     self.arch = arch
     super().__init__(f"compile_{cache_key}_{self.arch}")
-  def compile(self, src:str) -> bytes:
-    return src.replace("TARGET", self.arch).replace("VERSION", "8.7" if (ver:=int(self.arch[3:]))>=120 else ("7.8" if ver>=89 else "7.5")).encode()
+  def compile(self, src:str) -> bytes: return src.replace("TARGET", self.arch).replace("VERSION", "7.8" if self.arch >= "sm_89" else "7.5").encode()
   def disassemble(self, lib:bytes): cuda_disassemble(lib, self.arch)
 
 class NVPTXCompiler(PTXCompiler):
-  def __init__(self, arch:str):
-    nvrtc_check(jitlink.nvJitLinkVersion(ctypes.byref(ctypes.c_uint()), ctypes.byref(ctypes.c_uint())))
-    super().__init__(arch, cache_key="nv_ptx")
+  def __init__(self, arch:str): super().__init__(arch, cache_key="nv_ptx")
   def compile(self, src:str) -> bytes:
-    jitlink_check(jitlink.nvJitLinkCreate(handle := jitlink.nvJitLinkHandle(), 1, to_char_p_p([f'-arch={self.arch}'.encode()])), handle)
-    jitlink_check(jitlink.nvJitLinkAddData(handle, jitlink.NVJITLINK_INPUT_PTX, ptxsrc:=super().compile(src), len(ptxsrc), "<null>".encode()), handle)
-    jitlink_check(jitlink.nvJitLinkComplete(handle), handle)
-    data = _get_bytes(handle, jitlink.nvJitLinkGetLinkedCubin, jitlink.nvJitLinkGetLinkedCubinSize, jitlink_check)
-    jitlink_check(jitlink.nvJitLinkDestroy(handle))
+    jitlink_check(nvrtc.nvJitLinkCreate(handle := nvrtc.nvJitLinkHandle(), 1, to_char_p_p([f'-arch={self.arch}'.encode()])), handle)
+    jitlink_check(nvrtc.nvJitLinkAddData(handle, nvrtc.NVJITLINK_INPUT_PTX, ptxsrc:=super().compile(src), len(ptxsrc), "<null>".encode()), handle)
+    jitlink_check(nvrtc.nvJitLinkComplete(handle), handle)
+    data = _get_bytes(handle, nvrtc.nvJitLinkGetLinkedCubin, nvrtc.nvJitLinkGetLinkedCubinSize, jitlink_check)
+    jitlink_check(nvrtc.nvJitLinkDestroy(handle))
     return data

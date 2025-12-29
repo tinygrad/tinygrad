@@ -1,15 +1,11 @@
 from __future__ import annotations
 import platform, sys, ctypes, functools, time, mmap, threading, queue
-from tinygrad.helpers import from_mv, to_mv, OSX, WIN, mv_address, wait_cond, cpu_profile, suppress_finalizing, unwrap, data64_le
-from tinygrad.device import BufferSpec, DMACPURef, CompilerPairT
+from tinygrad.helpers import from_mv, to_mv, OSX, WIN, mv_address, wait_cond, cpu_profile, suppress_finalizing
+from tinygrad.device import BufferSpec, DMACPURef
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocatorBase, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
-from tinygrad.runtime.support.hcq import CLikeArgsState
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.renderer.llvmir import LLVMRenderer
-from tinygrad.renderer.nir import LVPRenderer
 from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler
-from tinygrad.runtime.support.compiler_mesa import LVPCompiler
-from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.uop.ops import sint
 
 class CPUSignal(HCQSignal):
@@ -50,28 +46,19 @@ class CPUComputeQueue(HWQueue):
 
   def memory_barrier(self): return self
   def exec(self, prg:CPUProgram, args_state:HCQArgsState, global_size, local_size):
-    if isinstance(args_state, LVPArgsState):
-      self.bind_args_state(args_state)
-      return self.cmd(self._exec, prg, 1, args_state.buf.va_addr)
     return self.cmd(self._exec, prg, len(args_state.bufs), *[x.va_addr for x in args_state.bufs], *args_state.vals, threads=(global_size or (1,))[0])
   def wait(self, signal, value=0): return self.cmd(self._wait, signal.value_addr, value)
   def timestamp(self, signal): return self.cmd(self._timestamp, signal.timestamp_addr)
   def signal(self, signal, value:sint=0): return self.cmd(self._signal, signal.value_addr, value)
   def _submit(self, dev): dev.tasks.put(self._q[:])
 
-class LVPArgsState(CLikeArgsState):
-  def __init__(self, buf, prg, bufs, vals=()): super().__init__(buf, prg, bufs, vals, [*data64_le(buf.va_addr + 12), (len(bufs) + len(vals)) * 2])
-
 # NOTE: MAP_JIT is added to mmap module in python 3.13
 MAP_JIT = 0x0800
 
 class CPUProgram(HCQProgram):
-  rt_lib = None
-  try: rt_lib = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32') if OSX or WIN else 'libgcc_s.so.1')
-  except OSError: pass
+  rt_lib = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32') if OSX or WIN else 'libgcc_s.so.1')
 
   def __init__(self, dev, name:str, lib:bytes):
-    LVP = isinstance(dev.compiler, LVPCompiler)
     if sys.platform == "win32": # mypy doesn't understand when WIN is used here
       PAGE_EXECUTE_READWRITE, MEM_COMMIT, MEM_RESERVE = 0x40, 0x1000, 0x2000
       ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_void_p
@@ -86,25 +73,19 @@ class CPUProgram(HCQProgram):
       # MAP_JIT allows us to easily flip pages from RW- to R-X and vice versa. It is a noop on intel cpus. (man pthread_jit_write_protect_np)
       self.mem = mmap.mmap(-1, len(lib), mmap.MAP_ANON|mmap.MAP_PRIVATE|(MAP_JIT if OSX else 0), mmap.PROT_READ|mmap.PROT_WRITE|mmap.PROT_EXEC)
 
-      if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(False)
-      if LVP: lib = jit_loader(lib, base=ctypes.addressof(ctypes.c_void_p.from_buffer(self.mem)), link_libs=['m'])
+      if OSX: CPUProgram.rt_lib.pthread_jit_write_protect_np(False)
       self.mem.write(lib)
-      if OSX: unwrap(CPUProgram.rt_lib).pthread_jit_write_protect_np(True)
+      if OSX: CPUProgram.rt_lib.pthread_jit_write_protect_np(True)
 
       # __clear_cache isn't a normal libc function, but a compiler support routine found in libgcc_s for gcc and compiler-rt for clang.
       # libgcc_s comes as shared library but compiler-rt is only a bunch of static library archives which we can't directly load, but fortunately
       # it somehow found its way into libSystem on macos (likely because it used __builtin_clear_cache) and libgcc_s is ~always present on linux
       # Using ["name"] instead of .name because otherwise name is getting mangled: https://docs.python.org/3.12/reference/expressions.html#index-5
-      if CPUProgram.rt_lib is not None:
-        CPUProgram.rt_lib["__clear_cache"](ctypes.c_void_p(mv_address(self.mem)), ctypes.c_void_p(mv_address(self.mem) + len(lib)))
-      else:
-        # msync should be a universal POSIX way to do this
-        from tinygrad.runtime.autogen import libc
-        libc.msync(ctypes.c_void_p(mv_address(self.mem)), len(lib), libc.MS_SYNC | libc.MS_INVALIDATE)
+      CPUProgram.rt_lib["__clear_cache"](ctypes.c_void_p(mv_address(self.mem)), ctypes.c_void_p(mv_address(self.mem) + len(lib)))
 
       self.fxn = ctypes.CFUNCTYPE(None)(mv_address(self.mem))
 
-    super().__init__(LVPArgsState if LVP else HCQArgsState, dev, name, kernargs_alloc_size=12+256 if LVP else 0)
+    super().__init__(HCQArgsState, dev, name, kernargs_alloc_size=0)
 
   @suppress_finalizing
   def __del__(self):
@@ -117,8 +98,8 @@ class CPUAllocator(HCQAllocatorBase):
     else: addr = mv_address(buf:=mmap.mmap(-1, size, mmap.MAP_ANON | mmap.MAP_PRIVATE, mmap.PROT_READ | mmap.PROT_WRITE))
     return HCQBuffer(va:=addr, sz:=size, meta=buf, view=MMIOInterface(va, sz, fmt='B'), owner=self.dev)
   def _as_buffer(self, src) -> memoryview:
-    self.dev.synchronize()
-    return to_mv(src.va_addr, src.size)
+   self.dev.synchronize()
+   return to_mv(src.va_addr, src.size)
   def _as_dmaref(self, buf):
     self.dev.synchronize()
     return DMACPURef(buf.va_addr, buf.size)
@@ -135,5 +116,5 @@ class CPUDevice(HCQCompiled):
   def __init__(self, device:str=""):
     self.tasks:queue.Queue = queue.Queue()
     CPUWorker(self, self.tasks, thread_id=0).start()
-    compilers:list[CompilerPairT] = [(ClangRenderer, ClangJITCompiler), (LLVMRenderer, CPULLVMCompiler), (LVPRenderer, LVPCompiler)]
+    compilers = [(ClangRenderer, ClangJITCompiler), (LLVMRenderer, CPULLVMCompiler)]
     super().__init__(device, CPUAllocator(self), compilers, functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue)

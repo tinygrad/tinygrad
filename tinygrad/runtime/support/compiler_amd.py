@@ -1,6 +1,6 @@
-import ctypes, hashlib, tempfile, subprocess, pathlib
-from tinygrad.helpers import system
-from tinygrad.runtime.autogen import comgr
+import ctypes, subprocess
+import tinygrad.runtime.autogen.comgr as comgr
+assert comgr.AMD_COMGR_LANGUAGE_HIP == 4
 try:
   comgr.amd_comgr_get_version(ctypes.byref(major:=ctypes.c_uint64()), ctypes.byref(minor:=ctypes.c_uint64()))
   if major.value >= 3:
@@ -13,9 +13,8 @@ from tinygrad.runtime.support.compiler_cpu import LLVMCompiler
 from tinygrad.helpers import OSX, to_char_p_p
 
 def amdgpu_disassemble(lib:bytes):
-  asm = system(f"{'/opt/homebrew/opt/llvm/bin/llvm-objdump' if OSX else '/opt/rocm/llvm/bin/llvm-objdump'} -d -", input=lib).splitlines()
-  while asm and ("s_nop 0" in asm[-1] or "s_code_end" in asm[-1]): asm.pop()
-  print("\n".join(asm))
+  asm = subprocess.check_output(["llvm-objdump" if OSX else "/opt/rocm/llvm/bin/llvm-objdump", '-d', '-'], input=lib)
+  print('\n'.join([x for x in asm.decode('utf-8').split("\n") if 's_code_end' not in x]))
 
 def check(status):
   if status != 0:
@@ -61,11 +60,7 @@ def compile_hip(prg:str, arch="gfx1100", asm=False) -> bytes:
     check(comgr.amd_comgr_set_data_name(data_src, b"<null>"))
     check(comgr.amd_comgr_data_set_add(data_set_src, data_src))
     # -include hiprtc_runtime.h was removed
-    options = [
-      "-O3", "-mcumode", "--hip-version=6.0.32830", "-DHIP_VERSION_MAJOR=6", "-DHIP_VERSION_MINOR=0", "-DHIP_VERSION_PATCH=32830",
-      "-D__HIPCC_RTC__", "-std=c++14", "-nogpuinc", "-Wno-gnu-line-marker", "-Wno-missing-prototypes", f"--offload-arch={arch}",
-      "-I/opt/rocm/include", "-Xclang -disable-llvm-passes", "-Xclang -aux-triple", "-Xclang x86_64-unknown-linux-gnu"]
-    check(set_options(action_info, ' '.join(options).encode()))
+    check(set_options(action_info, f"-O3 -mcumode --hip-version=6.0.32830 -DHIP_VERSION_MAJOR=6 -DHIP_VERSION_MINOR=0 -DHIP_VERSION_PATCH=32830 -D__HIPCC_RTC__ -std=c++14 -nogpuinc -Wno-gnu-line-marker -Wno-missing-prototypes --offload-arch={arch} -I/opt/rocm/include -Xclang -disable-llvm-passes -Xclang -aux-triple -Xclang x86_64-unknown-linux-gnu".encode())) # noqa: E501
     status = comgr.amd_comgr_do_action(comgr.AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC, action_info, data_set_src, data_set_bc)
     if status != 0:
       print(_get_comgr_data(data_set_bc, comgr.AMD_COMGR_DATA_KIND_LOG).decode())
@@ -88,24 +83,6 @@ class HIPCompiler(Compiler):
   def compile(self, src:str) -> bytes:
     try: return compile_hip(src, self.arch, src.split('\n', 1)[0].strip() == '.text')
     except RuntimeError as e: raise CompileError(e) from e
-  def disassemble(self, lib:bytes): amdgpu_disassemble(lib)
-
-class HIPCCCompiler(Compiler):
-  def __init__(self, arch:str, extra_options:list[str]=[]):
-    self.arch, self.extra_options = arch, extra_options
-    super().__init__(f"compile_hipcc_{self.arch}_{hashlib.sha256(' '.join(extra_options).encode()).hexdigest()[:8]}")
-  def compile(self, src:str) -> bytes:
-    with tempfile.NamedTemporaryFile(suffix=".cpp") as srcf, tempfile.NamedTemporaryFile(suffix=".bc") as bcf:
-      with tempfile.NamedTemporaryFile(suffix=".hsaco") as libf:
-        srcf.write(src.encode())
-        srcf.flush()
-
-        subprocess.run(["hipcc", "-c", "-emit-llvm", "--cuda-device-only", "-O3", "-mcumode",
-                        f"--offload-arch={self.arch}", "-I/opt/rocm/include/hip", "-o", bcf.name, srcf.name] + self.extra_options, check=True)
-        subprocess.run(["hipcc", "-target", "amdgcn-amd-amdhsa", f"-mcpu={self.arch}",
-                        "-O3", "-mllvm", "-amdgpu-internalize-symbols", "-c", "-o", libf.name, bcf.name] + self.extra_options, check=True)
-
-        return pathlib.Path(libf.name).read_bytes()
   def disassemble(self, lib:bytes): amdgpu_disassemble(lib)
 
 class AMDLLVMCompiler(LLVMCompiler):

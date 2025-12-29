@@ -1,8 +1,8 @@
 import ctypes, platform, sys, subprocess
 from tinygrad.device import Compiler
-from tinygrad.helpers import OSX, getenv, capstone_flatdump, DEBUG, unwrap
+from tinygrad.helpers import OSX, getenv, capstone_flatdump, DEBUG
 from tinygrad.runtime.support.elf import jit_loader
-try: from tinygrad.runtime.autogen import llvm
+try: import tinygrad.runtime.autogen.llvm as llvm
 except (ImportError, FileNotFoundError): llvm = None #type:ignore[assignment]
 
 class ClangJITCompiler(Compiler):
@@ -13,7 +13,7 @@ class ClangJITCompiler(Compiler):
     # x18 is a reserved platform register. It is clobbered on context switch in macos and is used to store TEB pointer in windows on arm, don't use it
     target = 'x86_64' if sys.platform == 'win32' else platform.machine()
     # on arm march means "runs on this arch and superset" instead of "optimize for this arch". x86 march == arm mcpu
-    arch = {'x86_64': '-march=native', 'AMD64': '-march=native', 'riscv64': '-march=rv64g'}.get(platform.machine(), "-mcpu=native")
+    arch = '-march=native' if platform.machine() in ('x86_64', 'AMD64') else '-mcpu=native'
     args = [arch, f'--target={target}-none-unknown-elf', '-O2', '-fPIC', '-ffreestanding', '-fno-math-errno', '-nostdlib', '-fno-ident']
     arch_args = ['-ffixed-x18'] if target == 'arm64' else []
     obj = subprocess.check_output([getenv("CC", 'clang'), '-c', '-x', 'c', *args, *arch_args, '-', '-o', '-'], input=src.encode('utf-8'))
@@ -24,12 +24,12 @@ class ClangJITCompiler(Compiler):
 def cerr(): return ctypes.pointer(ctypes.pointer(ctypes.c_char()))
 
 def expect(x, err, ret=None):
-  if x: raise RuntimeError(unwrap(ctypes.cast(err.contents, ctypes.c_char_p).value).decode() if not isinstance(err, str) else err)
+  if x: raise RuntimeError(llvm.string_cast(err.contents) if not isinstance(err, str) else err)
   return ret
 
 class LLVMCompiler(Compiler):
   jit = True
-  target_arch = {'arm64': 'AArch64', 'aarch64': 'AArch64', 'x86_64': 'X86', 'AMD64': 'X86', 'riscv64': 'riscv64'}[platform.machine()]
+  target_arch = {'arm64': 'AArch64', 'aarch64': 'AArch64', 'x86_64': 'X86', 'AMD64': 'X86'}[platform.machine()]
   def __init__(self, processor:str, feats:str):
     for component in ['Target', 'TargetInfo', 'TargetMC', 'AsmParser', 'AsmPrinter']: getattr(llvm, f'LLVMInitialize{self.target_arch}{component}')()
 
@@ -50,7 +50,7 @@ class LLVMCompiler(Compiler):
       self.passes = b'default<O0>'
 
     self.diag_msgs: list[str] = []
-    @llvm.LLVMDiagnosticHandler
+    @ctypes.CFUNCTYPE(None, llvm.LLVMDiagnosticInfoRef, ctypes.c_void_p)
     def handle_diag(diag_ref, _arg):
       severity = llvm.LLVMGetDiagInfoSeverity(diag_ref)
       msg = ctypes.string_at(llvm.LLVMGetDiagInfoDescription(diag_ref)).decode()
@@ -58,7 +58,7 @@ class LLVMCompiler(Compiler):
         self.diag_msgs.append(msg)
     self.handle_diag = handle_diag
     llvm.LLVMContextSetDiagnosticHandler(llvm.LLVMGetGlobalContext(), handle_diag, None)
-    super().__init__(f"compile_llvm_{processor}_{feats}{'_jit' if self.jit else ''}{'_opt' if opt else ''}")
+    super().__init__(f"compile_llvm_{self.target_arch}{'_jit' if self.jit else ''}{'_opt' if opt else ''}")
 
   def __del__(self): llvm.LLVMDisposePassBuilderOptions(self.pbo)
 
@@ -70,7 +70,7 @@ class LLVMCompiler(Compiler):
     expect(llvm.LLVMRunPasses(mod, self.passes, self.target_machine, self.pbo), 'failed to run passes')
     if DEBUG >= 7: print(ctypes.string_at(llvm.LLVMPrintModuleToString(mod)).decode())
     obj_buf = expect(llvm.LLVMTargetMachineEmitToMemoryBuffer(self.target_machine, mod, llvm.LLVMObjectFile, err:=cerr(),
-                                                              buf:=llvm.LLVMMemoryBufferRef()), err, buf)
+                                                              ctypes.pointer(buf:=llvm.LLVMMemoryBufferRef())), err, buf)
     llvm.LLVMDisposeModule(mod)
     obj = ctypes.string_at(llvm.LLVMGetBufferStart(obj_buf), llvm.LLVMGetBufferSize(obj_buf))
     llvm.LLVMDisposeMemoryBuffer(obj_buf)

@@ -1,7 +1,7 @@
 from typing import cast
 import functools, itertools, operator
-from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, getenv
-from tinygrad.uop.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp, track_rewrites, graph_rewrite_map, graph_rewrite
+from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, getenv, unwrap
+from tinygrad.uop.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp, resolve
 from tinygrad.device import Device
 
 # *** allreduce implementation ***
@@ -68,7 +68,7 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   # allgather
   copied_chunks = []
   for i,c in enumerate(reduced_chunks):
-    this_chunk: list[UOp|None] = [None] * len(buf.device)
+    this_chunk = [None] * len(buf.device)
     this_chunk[(i+len(buf.device)-1)%n_lbs] = c
     for step in range(n_lbs-1):
       dest = (i+step)%n_lbs
@@ -81,22 +81,32 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
 
 # ***** multi rewrite MSELECT/MSTACK *****
 
-def mstack_early_shrink(ms:UOp, shrink:UOp):
-  ret:list[UOp] = []
-  def apply_shrink(s:UOp, i:int) -> UOp:
-    new_arg = [tuple([x.substitute({dvar[0]:dvar[0].const_like(i)}) if isinstance(x, UOp) and
-                      (dvar:=[v for v in x.vars() if v.op is Ops.DEFINE_VAR and v.arg[0]=='_device_num']) else x for x in ss]) for ss in shrink.marg]
-    return s.shrink(tuple(new_arg))
+def _replace_dnum(st, val):
+  # replace dnum in ShapeTracker with literal const for this mselect
+  if (dnums:=[x for x in st.vars() if x.op is Ops.DEFINE_VAR and x.arg[0] == '_device_num']):
+    assert len(dnums) == 1, f"view must have exactly 0 or 1 dnum, got {dnums}"
+    st = st.substitute({dnums[0]:dnums[0].const_like(val)})
+  return st
+
+def mstack_reorder_view(ms:UOp):
+  args = [x.arg for x in ms.src]
+  if not all_same(args) or len([x for x in args[0].vars() if x.arg[0] == '_device_num']) != 0: return None
+  return UOp(Ops.MSTACK, ms.dtype, tuple(x.src[0] for x in ms.src)).view(args[0])
+
+def mstack_early_shrink(view:UOp, ms:UOp):
+  if resolve(prod(view.shape) >= prod(ms.shape)) or _replace_dnum(view.st, 0) == view.st: return None
+  ret = []
   for i, x in enumerate(ms.src):
+    new_view = _replace_dnum(view.st, i)
     if x.op is Ops.COPY:
       # if src device doesn't have a renderer, we have to view after the copy
       # TODO: a way to understand this
       if x.src[0].device in {"DISK", "NPY"}:
-        ret.append(apply_shrink(x, i))
+        ret.append(x.view(new_view))
       else:
-        ret.append(apply_shrink(x.src[0], i).copy_to_device(x.device))
+        ret.append(x.src[0].view(new_view).copy_to_device(x.device))
     else:
-      ret.append(apply_shrink(x, i).contiguous())
+      ret.append(x.view(new_view).contiguous())
   return ms.replace(src=tuple(ret))
 
 replace_allreduce = PatternMatcher([
@@ -110,11 +120,13 @@ replace_allreduce = PatternMatcher([
     x.mselect(0).copy_to_device(c.device) if isinstance(c.device, str) and isinstance(x.device, tuple) else None),
   # MSELECT on MSTACK is replaced with nothing
   (UPat(Ops.MSELECT, src=(UPat(Ops.MSTACK, name="mstack"),), name="ms"), lambda mstack, ms: mstack.src[ms.arg]),
+  # MSELECT must select a base, if there are views apply them after selecting the base
+  (UPat(Ops.MSELECT, src=(UPat(Ops.VIEW, src=(UPat.var("base"),), name="view"),), name="ms"), lambda ms, view, base:
+    base.mselect(ms.arg).view(_replace_dnum(unwrap(view.st), ms.arg))),
+  # move view through MSTACK
+  (UPat(Ops.MSTACK, src=UPat(Ops.VIEW), name="ms"), mstack_reorder_view),
   # move shrink before MSTACK
-  (UPat(Ops.SHRINK, src=(UPat(Ops.MSTACK, name="ms"),), allow_any_len=True, name="shrink"), mstack_early_shrink),
-  # move MSELECT before movement ops
-  (UPat(Ops.MSELECT, src=(UPat(GroupOp.Movement, src=(UPat.var("s"),), allow_any_len=True, name="v"),), name="ms"),
-   lambda s,v,ms: v.replace(src=(s.mselect(ms.arg),)+v.src[1:])),
+  (UPat(Ops.VIEW, src=(UPat(Ops.MSTACK, name="ms"),), name="view"), mstack_early_shrink),
 ])
 
 # ***** multi functions *****
@@ -153,40 +165,40 @@ def _shape_to_single_shard(axis, shape:tuple[sint, ...], lb:UOp) -> tuple[sint, 
   return tuple(lb.shape[axis] if a == axis else s for a,s in enumerate(shape))
 
 def reshape_multi(root:UOp, multi:UOp):
-  arg = root.marg
+  arg = root.arg
   if (new_axis:=root.axis) is None: return multi.src[0].reshape(arg).multi(new_axis)
   assert prod(multi.shape) == prod(arg), "reshape must maintain prod(shape)"
-  assert prod(multi.src[0].shape[multi.axis:])%prod(arg[new_axis+1:]) == 0, f"reshape cannot move items between shards {multi.shape} -> {arg=}"
+  assert prod(multi.src[0].shape[multi.axis:])%prod(arg[new_axis+1:]) == 0, f"reshape cannot move items between shards {multi.shape} -> {root.arg=}"
   new_shape_axis = prod(multi.src[0].shape[multi.axis:]) // prod(arg[new_axis+1:])
   return multi.src[0].reshape(tuple(s if a!=new_axis else new_shape_axis for a,s in enumerate(arg))).multi(new_axis)
 
 def expand_multi(root:UOp, multi:UOp):
   # NOTE: this assert isn't needed, sharded axis can have dim 1
-  assert multi.axis is None or root.marg[multi.axis] == multi.shape[multi.axis], f"expand not supported on sharded axis {root.marg=}"
-  return multi.src[0].expand(_shape_to_single_shard(multi.axis, root.marg, multi.src[0])).multi(multi.axis)
+  assert multi.axis is None or root.arg[multi.axis] == multi.shape[multi.axis], f"expand not supported on sharded axis {root.arg=}"
+  return multi.src[0].expand(_shape_to_single_shard(multi.axis, root.arg, multi.src[0])).multi(multi.axis)
 
 def pad_multi(root:UOp, multi:UOp):
-  assert multi.axis is None or root.marg[multi.axis] == (0,0), f"padding not supported for {root.marg=}"
-  return multi.src[0].pad(root.marg).multi(multi.axis)
+  assert multi.axis is None or root.arg[multi.axis] == (0,0), f"padding not supported for {root.arg=}"
+  return multi.src[0].pad(root.arg).multi(multi.axis)
 
 def permute_multi(root:UOp, multi:UOp):
   # all permutes supported!
-  return multi.src[0].permute(root.marg).multi(root.axis)
+  return multi.src[0].permute(root.arg).multi(root.axis)
 
 def shrink_multi(root:UOp, multi:UOp):
-  assert multi.axis is None or root.marg[multi.axis] == (0, multi.shape[multi.axis]) or root.marg[multi.axis] in multi.bounds, \
-    f"shrinking not supported for {root.marg=}"
-  if multi.axis is not None and root.marg[multi.axis] in multi.bounds and root.marg[multi.axis] != (0, multi.shape[multi.axis]):
-    assert all(root.marg[i] == (0, s) or i == multi.axis for i,s in enumerate(multi.shape)), \
+  assert multi.axis is None or root.arg[multi.axis] == (0, multi.shape[multi.axis]) or root.arg[multi.axis] in multi.bounds, \
+    f"shrinking not supported for {root.arg=}"
+  if multi.axis is not None and root.arg[multi.axis] in multi.bounds and root.arg[multi.axis] != (0, multi.shape[multi.axis]):
+    assert all(root.arg[i] == (0, s) or i == multi.axis for i,s in enumerate(multi.shape)), \
       "cannot shrink sharded and non-sharded axis at the same time"
     # NOTE: shrink on the shard axis is only allowed when result is a single partition, denoted by the new real
     # we just copy it to all the devices, no real. this will be optimized out later
-    return multi.src[0].copy_to_device(multi.device, arg=multi.bounds.index(root.marg[multi.axis]))
-  return multi.src[0].shrink(tuple((0, multi.src[0].shape[multi.axis]) if a == multi.axis else s for a,s in enumerate(root.marg))).multi(multi.axis)
+    return multi.src[0].copy_to_device(multi.device, arg=multi.bounds.index(root.arg[multi.axis]))
+  return multi.src[0].shrink(tuple((0, multi.src[0].shape[multi.axis]) if a == multi.axis else s for a,s in enumerate(root.arg))).multi(multi.axis)
 
 def flip_multi(root:UOp, multi:UOp):
-  assert multi.axis is None or not root.marg[multi.axis], "flipping not supported on sharded axis"
-  return multi.src[0].flip([i for i,x in enumerate(root.marg) if x]).multi(multi.axis)
+  assert multi.axis is None or not root.arg[multi.axis], "flipping not supported on sharded axis"
+  return multi.src[0].flip(root.arg).multi(multi.axis)
 
 # from multiple devices -> one
 def copy_multi(multi:UOp, device:UOp):
@@ -198,29 +210,22 @@ def assign_multi(dest:UOp, src:UOp):
   return dest.src[0].assign(src.src[0]).multi(src.axis)
 
 def passthrough_multi(root:UOp, multi:UOp):
-  return UOp(root.op, root.dtype, (multi.src[0],), root.arg).multi(multi.axis)
+  return root.replace(src=(multi.src[0],)).multi(multi.axis)
 
 # NOTE: this is the same pattern as Ops.UNROLL
 multi_pm = PatternMatcher([
   (UPat(GroupOp.ALU, name="root", custom_early_reject=set([Ops.MULTI])), alu_multi),
   (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), reduce_multi),
-  (UPat(Ops.RESHAPE, src=(UPat(Ops.MULTI, name="multi"), UPat()), name="root"), reshape_multi),
-  (UPat(Ops.EXPAND, src=(UPat(Ops.MULTI, name="multi"), UPat()), name="root"), expand_multi),
-  (UPat(Ops.PAD, src=(UPat(Ops.MULTI, name="multi"), UPat(), UPat()), name="root"), pad_multi),
-  (UPat(Ops.SHRINK, src=(UPat(Ops.MULTI, name="multi"), UPat(), UPat()), name="root"), shrink_multi),
+  (UPat(Ops.RESHAPE, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), reshape_multi),
+  (UPat(Ops.EXPAND, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), expand_multi),
+  (UPat(Ops.PAD, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), pad_multi),
   (UPat(Ops.PERMUTE, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), permute_multi),
+  (UPat(Ops.SHRINK, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), shrink_multi),
   (UPat(Ops.FLIP, src=(UPat(Ops.MULTI, name="multi"), ), name="root"), flip_multi),
   (UPat(Ops.ASSIGN, src=(UPat(Ops.MULTI, name="dest"), UPat(Ops.MULTI, name="src"))), assign_multi),
   (UPat(Ops.COPY, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE, name="device"))), copy_multi),
   (UPat(Ops.ALLREDUCE, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.DEVICE, name="device")), name="red"),
     lambda multi,device,red: multi.src[0].allreduce(red.arg, device).multi(axis=multi.axis)),
-  (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD),
+  (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD, Ops.FUSE),
         src=(UPat(Ops.MULTI, name="multi"), ), name="root"), passthrough_multi),
 ])+replace_allreduce
-
-@track_rewrites()
-def get_multi_map(big_sink:UOp) -> dict[UOp, UOp]:
-  if getenv("VIZ"): graph_rewrite(big_sink, PatternMatcher([]), name="View Multi AST")
-  ret = graph_rewrite_map(big_sink, multi_pm, name="multi_pm")
-  if getenv("VIZ"): graph_rewrite(ret[big_sink], PatternMatcher([]), name="View Post Multi AST")
-  return ret
