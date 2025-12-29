@@ -2357,5 +2357,421 @@ class TestF64Conversions(unittest.TestCase):
     self.assertEqual(result, -8, f"Expected -8, got {result} (lo=0x{lo:08x}, hi=0x{hi:08x})")
 
 
+class TestRSQ(unittest.TestCase):
+  """Tests for V_RSQ_F32 - reciprocal square root.
+
+  Regression tests for bug where sqrt() helper crashed on division by zero
+  when computing 1/sqrt(x) for x=0. The fix was to use _SafeFloat which
+  handles 1/0 correctly (returns inf instead of raising ZeroDivisionError).
+  """
+
+  def test_v_rsq_f32_one(self):
+    """V_RSQ_F32 of 1.0 returns 1.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 1.0),
+      v_rsq_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 1.0, places=5)
+
+  def test_v_rsq_f32_four(self):
+    """V_RSQ_F32 of 4.0 returns 0.5."""
+    instructions = [
+      v_mov_b32_e32(v[0], 4.0),
+      v_rsq_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 0.5, places=5)
+
+  def test_v_rsq_f32_zero(self):
+    """V_RSQ_F32 of 0.0 returns +inf.
+
+    Regression test: This used to crash with ZeroDivisionError because
+    sqrt(0) = 0, and 1/0 raised an exception instead of returning inf.
+    """
+    import math
+    instructions = [
+      v_mov_b32_e32(v[0], 0),
+      v_rsq_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][1])
+    self.assertTrue(math.isinf(result) and result > 0, f"Expected +inf, got {result}")
+
+  def test_v_rsq_f32_negative_zero(self):
+    """V_RSQ_F32 of -0.0 returns -inf."""
+    import math
+    instructions = [
+      s_mov_b32(s[0], 0x80000000),  # -0.0
+      v_mov_b32_e32(v[0], s[0]),
+      v_rsq_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][1])
+    self.assertTrue(math.isinf(result) and result < 0, f"Expected -inf, got {result}")
+
+  def test_v_rsq_f32_inf(self):
+    """V_RSQ_F32 of +inf returns 0."""
+    instructions = [
+      s_mov_b32(s[0], 0x7f800000),  # +inf
+      v_mov_b32_e32(v[0], s[0]),
+      v_rsq_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(i2f(st.vgpr[0][1]), 0.0)
+
+  def test_v_rsq_f32_negative(self):
+    """V_RSQ_F32 of negative number returns NaN."""
+    import math
+    instructions = [
+      v_mov_b32_e32(v[0], -1.0),
+      v_rsq_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertTrue(math.isnan(i2f(st.vgpr[0][1])))
+
+
+class TestCmpClassF16(unittest.TestCase):
+  """Tests for V_CMP_CLASS_F16 - f16 float classification.
+
+  Regression tests for bugs:
+  1. _exponent() always returned f32 exponent range (0-255) instead of f16 range (0-31)
+  2. _isquietnan()/_issignalnan() didn't handle f16 bit patterns (bit 9 for quiet vs signal)
+
+  Class bits (from AMD ISA):
+    bit 0 = signaling NaN
+    bit 1 = quiet NaN
+    bit 2 = negative infinity
+    bit 3 = negative normal
+    bit 4 = negative denormal
+    bit 5 = negative zero
+    bit 6 = positive zero
+    bit 7 = positive denormal
+    bit 8 = positive normal
+    bit 9 = positive infinity
+  """
+
+  def test_v_cmp_class_f16_positive_normal(self):
+    """V_CMP_CLASS_F16 detects positive normal f16."""
+    # f16 1.0 = 0x3c00
+    instructions = [
+      s_mov_b32(s[0], 0x3c00),  # f16 1.0
+      s_mov_b32(s[1], 0b0100000000),  # bit 8 = positive normal (256)
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_cmp_class_f16_e32(v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 1, "Should detect positive normal f16")
+
+  def test_v_cmp_class_f16_negative_normal(self):
+    """V_CMP_CLASS_F16 detects negative normal f16."""
+    # f16 -1.0 = 0xbc00
+    instructions = [
+      s_mov_b32(s[0], 0xbc00),  # f16 -1.0
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], 0b0000001000),  # bit 3 = negative normal
+      v_cmp_class_f16_e32(v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 1, "Should detect negative normal f16")
+
+  def test_v_cmp_class_f16_positive_inf(self):
+    """V_CMP_CLASS_F16 detects +inf f16.
+
+    Regression test: The _exponent() bug caused the exponent check to use f32 range (254),
+    but f16 +inf has exponent 31 (0x7c00), so it was misclassified.
+    """
+    # f16 +inf = 0x7c00 (exponent=31, mantissa=0)
+    instructions = [
+      s_mov_b32(s[0], 0x7c00),  # f16 +inf
+      s_mov_b32(s[1], 0b1000000000),  # bit 9 = +inf (512)
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_cmp_class_f16_e32(v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 1, "Should detect +inf f16")
+
+  def test_v_cmp_class_f16_negative_inf(self):
+    """V_CMP_CLASS_F16 detects -inf f16."""
+    # f16 -inf = 0xfc00
+    instructions = [
+      s_mov_b32(s[0], 0xfc00),  # f16 -inf
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], 0b0000000100),  # bit 2 = -inf
+      v_cmp_class_f16_e32(v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 1, "Should detect -inf f16")
+
+  def test_v_cmp_class_f16_quiet_nan(self):
+    """V_CMP_CLASS_F16 detects quiet NaN f16."""
+    # f16 quiet NaN = 0x7e00 (exponent=31, mantissa MSB set)
+    instructions = [
+      s_mov_b32(s[0], 0x7e00),  # f16 quiet NaN
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], 0b0000000010),  # bit 1 = quiet NaN
+      v_cmp_class_f16_e32(v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 1, "Should detect quiet NaN f16")
+
+  def test_v_cmp_class_f16_signaling_nan(self):
+    """V_CMP_CLASS_F16 detects signaling NaN f16.
+
+    Regression test: _issignalnan() didn't handle f16 bit patterns.
+    f16 signaling NaN = 0x7c01 (exponent=31, mantissa=1, MSB of mantissa=0)
+    """
+    instructions = [
+      s_mov_b32(s[0], 0x7c01),  # f16 signaling NaN
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], 0b0000000001),  # bit 0 = signaling NaN
+      v_cmp_class_f16_e32(v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 1, "Should detect signaling NaN f16")
+
+  def test_v_cmp_class_f16_positive_zero(self):
+    """V_CMP_CLASS_F16 detects positive zero f16."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),  # f16 +0
+      v_mov_b32_e32(v[1], 0b0001000000),  # bit 6 = positive zero (64)
+      v_cmp_class_f16_e32(v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 1, "Should detect positive zero f16")
+
+  def test_v_cmp_class_f16_negative_zero(self):
+    """V_CMP_CLASS_F16 detects negative zero f16."""
+    instructions = [
+      s_mov_b32(s[0], 0x8000),  # f16 -0
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], 0b0000100000),  # bit 5 = negative zero (32)
+      v_cmp_class_f16_e32(v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 1, "Should detect negative zero f16")
+
+  def test_v_cmp_class_f16_positive_denorm(self):
+    """V_CMP_CLASS_F16 detects positive denormalized f16."""
+    # f16 positive denorm: exponent=0, mantissa!=0
+    instructions = [
+      s_mov_b32(s[0], 0x0001),  # smallest positive denorm
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], 0b0010000000),  # bit 7 = positive denormal (128)
+      v_cmp_class_f16_e32(v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 1, "Should detect positive denorm f16")
+
+  def test_v_cmp_class_f16_negative_denorm(self):
+    """V_CMP_CLASS_F16 detects negative denormalized f16."""
+    # f16 negative denorm: sign=1, exponent=0, mantissa!=0
+    instructions = [
+      s_mov_b32(s[0], 0x8001),  # smallest negative denorm
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], 0b0000010000),  # bit 4 = negative denormal (16)
+      v_cmp_class_f16_e32(v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 1, "Should detect negative denorm f16")
+
+
+class TestCndmaskB16(unittest.TestCase):
+  """Tests for V_CNDMASK_B16 - conditional mask for 16-bit values.
+
+  Regression tests for bug where V_CNDMASK_B16 wasn't included in the list
+  of VOP3 ops that use src2 as mask instead of VCC. This caused it to read
+  the wrong mask source in VOP3 encoding.
+  """
+
+  def test_v_cndmask_b16_vop3_all_zeros(self):
+    """V_CNDMASK_B16 VOP3 with mask=0 selects src0 for all lanes."""
+    instructions = [
+      s_mov_b32(s[0], 0xAAAA),  # src0 = 0xAAAA
+      s_mov_b32(s[1], 0x5555),  # src1 = 0x5555
+      s_mov_b32(s[2], 0),       # mask = 0 (select src0)
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_cndmask_b16(v[2], v[0], v[1], s[2]),
+    ]
+    st = run_program(instructions, n_lanes=4)
+    for lane in range(4):
+      result = st.vgpr[lane][2] & 0xffff
+      self.assertEqual(result, 0xAAAA, f"Lane {lane}: expected 0xAAAA (src0), got 0x{result:04x}")
+
+  def test_v_cndmask_b16_vop3_all_ones(self):
+    """V_CNDMASK_B16 VOP3 with mask=all-1s selects src1 for all lanes."""
+    instructions = [
+      s_mov_b32(s[0], 0xAAAA),  # src0 = 0xAAAA
+      s_mov_b32(s[1], 0x5555),  # src1 = 0x5555
+      s_mov_b32(s[2], 0xFFFFFFFF),  # mask = all 1s (select src1)
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_cndmask_b16(v[2], v[0], v[1], s[2]),
+    ]
+    st = run_program(instructions, n_lanes=4)
+    for lane in range(4):
+      result = st.vgpr[lane][2] & 0xffff
+      self.assertEqual(result, 0x5555, f"Lane {lane}: expected 0x5555 (src1), got 0x{result:04x}")
+
+  def test_v_cndmask_b16_vop3_per_lane_mask(self):
+    """V_CNDMASK_B16 VOP3 with per-lane mask.
+
+    Regression test: The bug was that V_CNDMASK_B16 read VCC instead of src2
+    for the mask in VOP3 encoding, causing incorrect lane selection.
+    """
+    instructions = [
+      s_mov_b32(s[0], 0x1111),  # src0 = 0x1111
+      s_mov_b32(s[1], 0x2222),  # src1 = 0x2222
+      s_mov_b32(s[2], 0b0101),  # mask: lanes 0,2 = 1 (select src1), lanes 1,3 = 0 (select src0)
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_cndmask_b16(v[2], v[0], v[1], s[2]),
+    ]
+    st = run_program(instructions, n_lanes=4)
+    expected = [0x2222, 0x1111, 0x2222, 0x1111]  # lanes 0,2 get src1, lanes 1,3 get src0
+    for lane in range(4):
+      result = st.vgpr[lane][2] & 0xffff
+      self.assertEqual(result, expected[lane], f"Lane {lane}: expected 0x{expected[lane]:04x}, got 0x{result:04x}")
+
+  def test_v_cndmask_b16_vop3_different_sgpr(self):
+    """V_CNDMASK_B16 VOP3 with mask in different SGPR (not s2)."""
+    instructions = [
+      s_mov_b32(s[0], 0xDEAD),  # src0
+      s_mov_b32(s[1], 0xBEEF),  # src1
+      s_mov_b32(s[5], 0b1010),  # mask in s5: lanes 1,3 = 1, lanes 0,2 = 0
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_cndmask_b16(v[2], v[0], v[1], s[5]),
+    ]
+    st = run_program(instructions, n_lanes=4)
+    expected = [0xDEAD, 0xBEEF, 0xDEAD, 0xBEEF]  # lanes 0,2 get src0, lanes 1,3 get src1
+    for lane in range(4):
+      result = st.vgpr[lane][2] & 0xffff
+      self.assertEqual(result, expected[lane], f"Lane {lane}: expected 0x{expected[lane]:04x}, got 0x{result:04x}")
+
+
+class TestAddCarry(unittest.TestCase):
+  """Tests for V_ADD_CO_CI_U32 - add with carry in and carry out.
+
+  Regression tests for assembly/disassembly bugs:
+  1. Disassembly was missing src2 (carry-in) for VOP3SD encoding
+  2. Assembly was using VOP2 encoding when VOP3SD was needed (non-VCC sdst/src2)
+  """
+
+  def test_v_add_co_ci_u32_basic_vop2(self):
+    """V_ADD_CO_CI_U32 basic case - add with carry using VCC."""
+    instructions = [
+      s_mov_b32(s[SrcEnum.VCC_LO - 128], 0),  # VCC = 0 (no carry in)
+      v_mov_b32_e32(v[0], 5),
+      v_mov_b32_e32(v[1], 3),
+      v_add_co_ci_u32_e32(v[2], v[0], v[1]),  # v2 = 5 + 3 + 0 = 8
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 8)
+    self.assertEqual(st.vcc & 1, 0, "No carry out")
+
+  def test_v_add_co_ci_u32_with_carry_in(self):
+    """V_ADD_CO_CI_U32 with carry-in set."""
+    instructions = [
+      s_mov_b32(s[SrcEnum.VCC_LO - 128], 1),  # VCC = 1 (carry in for lane 0)
+      v_mov_b32_e32(v[0], 5),
+      v_mov_b32_e32(v[1], 3),
+      v_add_co_ci_u32_e32(v[2], v[0], v[1]),  # v2 = 5 + 3 + 1 = 9
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 9)
+
+  def test_v_add_co_ci_u32_generates_carry_out(self):
+    """V_ADD_CO_CI_U32 generates carry out on overflow."""
+    instructions = [
+      s_mov_b32(s[SrcEnum.VCC_LO - 128], 0),  # VCC = 0
+      s_mov_b32(s[0], 0xFFFFFFFF),
+      v_mov_b32_e32(v[0], s[0]),  # v0 = 0xFFFFFFFF
+      v_mov_b32_e32(v[1], 1),     # v1 = 1
+      v_add_co_ci_u32_e32(v[2], v[0], v[1]),  # v2 = 0xFFFFFFFF + 1 + 0 = 0 with carry
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0)
+    self.assertEqual(st.vcc & 1, 1, "Should have carry out")
+
+  def test_v_add_co_ci_u32_chain(self):
+    """V_ADD_CO_CI_U32 chained for 64-bit add.
+
+    This is a common pattern: add low 32 bits, then add high 32 bits with carry.
+    """
+    # Compute 0x1_00000001 + 0x0_FFFFFFFF = 0x2_00000000
+    # Low: 0x00000001 + 0xFFFFFFFF = 0x00000000, carry=1
+    # High: 0x00000001 + 0x00000000 + 1 = 0x00000002
+    instructions = [
+      s_mov_b32(s[SrcEnum.VCC_LO - 128], 0),  # Clear VCC
+      # First number: 0x1_00000001
+      v_mov_b32_e32(v[0], 1),           # low = 1
+      v_mov_b32_e32(v[1], 1),           # high = 1
+      # Second number: 0x0_FFFFFFFF
+      s_mov_b32(s[0], 0xFFFFFFFF),
+      v_mov_b32_e32(v[2], s[0]),        # low = 0xFFFFFFFF
+      v_mov_b32_e32(v[3], 0),           # high = 0
+      # Add low halves with carry out
+      v_add_co_u32(v[4], SrcEnum.VCC_LO, v[0], v[2]),  # v4 = 1 + 0xFFFFFFFF = 0, VCC=1
+      # Add high halves with carry in
+      v_add_co_ci_u32_e32(v[5], v[1], v[3]),  # v5 = 1 + 0 + carry(1) = 2
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][4], 0, "Low result should be 0")
+    self.assertEqual(st.vgpr[0][5], 2, "High result should be 2")
+
+  def test_v_add_co_ci_u32_vop3sd_encoding(self):
+    """V_ADD_CO_CI_U32 with VOP3SD encoding (non-VCC sdst/src2).
+
+    Regression test: The assembler was incorrectly using VOP2 encoding when
+    sdst or src2 was not VCC, causing incorrect carry handling.
+    """
+    # Use s4 for carry instead of VCC
+    instructions = [
+      s_mov_b32(s[4], 1),  # carry in = 1 for lane 0
+      v_mov_b32_e32(v[0], 10),
+      v_mov_b32_e32(v[1], 20),
+      # VOP3SD form: explicitly specify sdst and src2
+      VOP3SD(VOP3SDOp.V_ADD_CO_CI_U32, vdst=v[2], sdst=s[4], src0=v[0], src1=v[1], src2=s[4]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 31, "10 + 20 + 1 = 31")
+    # s4 should have carry out = 0 (no overflow)
+    self.assertEqual(st.sgpr[4], 0, "No carry out expected")
+
+  def test_v_add_co_ci_u32_vop3sd_carry_out(self):
+    """V_ADD_CO_CI_U32 VOP3SD generates carry to specified SGPR."""
+    # Use s6 for carry
+    instructions = [
+      s_mov_b32(s[6], 0),  # carry in = 0
+      s_mov_b32(s[0], 0xFFFFFFFF),
+      v_mov_b32_e32(v[0], s[0]),  # v0 = 0xFFFFFFFF
+      v_mov_b32_e32(v[1], 2),     # v1 = 2
+      VOP3SD(VOP3SDOp.V_ADD_CO_CI_U32, vdst=v[2], sdst=s[6], src0=v[0], src1=v[1], src2=s[6]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 1, "0xFFFFFFFF + 2 + 0 = 1 (with wrap)")
+    self.assertEqual(st.sgpr[6], 1, "Carry out should be 1")
+
+  def test_v_add_co_ci_u32_vop3sd_per_lane_carry(self):
+    """V_ADD_CO_CI_U32 VOP3SD with per-lane carry bits."""
+    # Carry in: lanes 0,2 have carry, lanes 1,3 don't
+    instructions = [
+      s_mov_b32(s[8], 0b0101),  # carry in for lanes 0,2
+      v_mov_b32_e32(v[0], 100),
+      v_mov_b32_e32(v[1], 50),
+      VOP3SD(VOP3SDOp.V_ADD_CO_CI_U32, vdst=v[2], sdst=s[8], src0=v[0], src1=v[1], src2=s[8]),
+    ]
+    st = run_program(instructions, n_lanes=4)
+    # Lanes 0,2: 100 + 50 + 1 = 151
+    # Lanes 1,3: 100 + 50 + 0 = 150
+    expected = [151, 150, 151, 150]
+    for lane in range(4):
+      self.assertEqual(st.vgpr[lane][2], expected[lane], f"Lane {lane}: expected {expected[lane]}, got {st.vgpr[lane][2]}")
+
+
 if __name__ == '__main__':
   unittest.main()

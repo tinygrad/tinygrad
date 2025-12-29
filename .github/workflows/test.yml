@@ -677,6 +677,8 @@ jobs:
         run: cloc --by-file extra/assembly/amd/*.py
       - name: Run RDNA3 emulator tests
         run: python -m pytest -n=auto extra/assembly/amd/ --durations 20
+      - name: Run RDNA3 emulator tests (AMD_LLVM=1)
+        run: AMD_LLVM=1 python -m pytest -n=auto extra/assembly/amd/ --durations 20
       - name: Install pdfplumber
         run: pip install pdfplumber
       - name: Verify RDNA3 autogen is up to date
