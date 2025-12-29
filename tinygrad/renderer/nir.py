@@ -161,6 +161,7 @@ class NIRRenderer(Renderer):
 
   def __init__(self, compiler):
     self.compiler = compiler
+    if hasattr(self.compiler, "nir_options"): self.nir_options = self.compiler.nir_options
     mesa.glsl_type_singleton_init_or_ref()
 
   def __del__(self):
@@ -220,9 +221,7 @@ class NIRRenderer(Renderer):
 class NAKRenderer(NIRRenderer):
   device = "NV"
 
-  def __init__(self, arch, warps_per_sm):
-    super().__init__(fromimport("tinygrad.runtime.support.compiler_mesa", "NAKCompiler")(arch, warps_per_sm))
-    self.nir_options = self.compiler.nir_options
+  def __init__(self, arch, warps_per_sm): super().__init__(fromimport("tinygrad.runtime.support.compiler_mesa", "NAKCompiler")(arch, warps_per_sm))
 
   param = nir_instr(nc=1, num_components=1, bs=lambda sz:sz*8, also=lambda self,sz: setattr(self, "param_idx", self.param_idx + sz),
     intrins={"ALIGN_MUL":lambda sz:sz}, srcs=lambda self,b: [nsrc(nimm(b, 0, dtypes.int)), nsrc(nimm(b, self.param_idx, dtypes.int))])(
@@ -260,9 +259,7 @@ _nload_img = nir_instr(intrins=lambda dtype:{'IMAGE_DIM':mesa.GLSL_SAMPLER_DIM_2
 class IR3Renderer(NIRRenderer):
   device = "QCOM"
 
-  def __init__(self, chip_id):
-    super().__init__(fromimport("tinygrad.runtime.support.compiler_mesa", "IR3Compiler")(chip_id))
-    self.nir_options = self.compiler.nir_options
+  def __init__(self, chip_id): super().__init__(fromimport("tinygrad.runtime.support.compiler_mesa", "IR3Compiler")(chip_id))
 
   def nload_img(ctx,img,coord):
     ctx.texs.add(img)
