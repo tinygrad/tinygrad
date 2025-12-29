@@ -167,7 +167,10 @@ def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: t
             if debug: print(f"K{kernel_idx} WG({gidx},{gidy},{gidz}) Step {step}: PC={python_before.pc}, inst={inst_str}")
 
             # Instructions with known Rust emulator bugs - sync Python to Rust after execution
-            sync_after = any(x in inst_str for x in ('v_div_scale_f32', 'v_div_scale_f64', 'v_div_fixup_f32', 'v_div_fixup_f64'))
+            # v_div_scale/v_div_fixup: Rust has different VCC handling
+            # v_cvt_f16_f32: Rust clears high 16 bits, but hardware (and Python) preserves them
+            sync_after = any(x in inst_str for x in ('v_div_scale_f32', 'v_div_scale_f64', 'v_div_fixup_f32', 'v_div_fixup_f64',
+                                                      'v_cvt_f16_f32'))
             diffs = rust_before.diff(python_before, n_lanes)
             if diffs:
               trace_lines = []

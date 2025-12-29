@@ -1430,7 +1430,12 @@ class TestF16Conversions(unittest.TestCase):
     self.assertEqual(lo_bits, expected, f"Expected 0x{expected:04x}, got 0x{lo_bits:04x}")
 
   def test_v_cvt_f16_f32_preserves_high_bits(self):
-    """V_CVT_F16_F32 preserves high 16 bits of destination."""
+    """V_CVT_F16_F32 preserves high 16 bits of destination.
+
+    Hardware verified: V_CVT_F16_F32 only writes to the low 16 bits of the
+    destination register, preserving the high 16 bits. This is important for
+    the common pattern of converting two f32 values and packing them.
+    """
     instructions = [
       s_mov_b32(s[0], 0xdead0000),  # Pre-fill with garbage in high bits
       v_mov_b32_e32(v[1], s[0]),
@@ -1441,8 +1446,26 @@ class TestF16Conversions(unittest.TestCase):
     result = st.vgpr[0][1]
     hi_bits = (result >> 16) & 0xffff
     lo_bits = result & 0xffff
-    # Low bits should be f16 1.0, high bits behavior is implementation-defined
     self.assertEqual(lo_bits, 0x3c00, f"Low bits should be 0x3c00, got 0x{lo_bits:04x}")
+    self.assertEqual(hi_bits, 0xdead, f"High bits should be preserved as 0xdead, got 0x{hi_bits:04x}")
+
+  def test_v_cvt_f16_f32_same_src_dst_preserves_high_bits(self):
+    """V_CVT_F16_F32 with same src/dst preserves high bits of source.
+
+    Regression test: When converting v0 in-place (v_cvt_f16_f32 v0, v0),
+    the high 16 bits of the original f32 value are preserved in the result.
+    For f32 1.0 (0x3f800000), the result should be 0x3f803c00:
+    - Low 16 bits: 0x3c00 (f16 1.0)
+    - High 16 bits: 0x3f80 (preserved from original f32)
+    """
+    instructions = [
+      v_mov_b32_e32(v[0], 1.0),      # v0 = 0x3f800000
+      v_cvt_f16_f32_e32(v[0], v[0]), # convert v0 in-place
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][0]
+    # Hardware preserves high bits: 0x3f800000 -> 0x3f803c00
+    self.assertEqual(result, 0x3f803c00, f"Expected 0x3f803c00, got 0x{result:08x}")
 
   def test_v_cvt_f16_f32_reads_full_32bit_source(self):
     """V_CVT_F16_F32 must read full 32-bit f32 source, not just low 16 bits.

@@ -216,6 +216,8 @@ def exec_scalar(st: WaveState, inst: Inst) -> int:
     if op == SOPPOp.S_CBRANCH_VCCNZ: return _sext(inst.simm16, 16) if (st.vcc & 0xffffffff) != 0 else 0
     if op == SOPPOp.S_CBRANCH_EXECZ: return _sext(inst.simm16, 16) if st.exec_mask == 0 else 0
     if op == SOPPOp.S_CBRANCH_EXECNZ: return _sext(inst.simm16, 16) if st.exec_mask != 0 else 0
+    # Valid SOPP range is 0-61 (max defined opcode); anything above is invalid
+    if op > 61: raise NotImplementedError(f"Invalid SOPP opcode {op}")
     return 0  # waits, hints, nops
 
   # SMEM: memory loads (not ALU)
