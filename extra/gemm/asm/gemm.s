@@ -32,7 +32,7 @@ gemm:
 	// scalars
 	s_mov_b32 s44, 0x3F800000    // alpha = 1.0f
 	s_mov_b32 s45, 0x00000000    // beta  = 0.0f
-  // ** workgroup mapping
+	// ** workgroup mapping
 	s_lshr_b32 s52, s51, 30                                    // 000000002924: 8F349E33
 	s_and_b32 s51, 0x3fffffff, s51                             // 000000002928: 863333FF 3FFFFFFF
 	s_cmp_eq_u32 s52, 0                                        // 000000002930: BF068034
