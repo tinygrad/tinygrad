@@ -9,7 +9,7 @@ from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 import numpy as np
 import pytest
-from hypothesis import assume, given, strategies as strat, settings, HealthCheck
+from hypothesis import assume, given, strategies as strat, settings
 
 pytestmark = pytest.mark.filterwarnings("ignore")
 
@@ -206,29 +206,31 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.int32, strat.sampled_from(dtypes_float+dtypes_int+dtypes_bool))
   def test_int32_cast(self, a, dtype): universal_test_cast(a, dtypes.int32, dtype)
 
-  @settings(suppress_health_check=[HealthCheck.filter_too_much])
-  @given(strat.data(), strat.sampled_from(dtypes_float), strat.sampled_from((dtypes.uint8, dtypes.uint16)))
-  def test_float_cast_to_unsigned(self, a, float_dtype, unsigned_dtype):
-    if not is_dtype_supported(float_dtype): float_dtype = dtypes.float32
-    float_strat = {dtypes.float16: ht.float16, dtypes.float32: ht.float32, dtypes.float64: ht.float64}[float_dtype]
-    float_strat = float_strat.filter(lambda x: 0 < x < dtypes.max(unsigned_dtype))
-    universal_test_cast(a.draw(float_strat), float_dtype, unsigned_dtype)
+  # max representable finite values for each float dtype
+  _float_max = {dtypes.float16: 65504.0, dtypes.float32: 2147483648.0, dtypes.float64: 2147483647.0}  # clamped to int32 range
+  _float_width = {dtypes.float16: 16, dtypes.float32: 32, dtypes.float64: 64}
 
-  @settings(suppress_health_check=[HealthCheck.filter_too_much])
-  @given(strat.data(), strat.sampled_from(dtypes_float), strat.sampled_from((dtypes.uint8, dtypes.uint16)))
-  def test_float_cast_to_unsigned_overflow(self, a, float_dtype, unsigned_dtype):
+  @given(strat.sampled_from(dtypes_float), strat.sampled_from((dtypes.uint8, dtypes.uint16)), strat.data())
+  def test_float_cast_to_unsigned(self, float_dtype, unsigned_dtype, data):
     if not is_dtype_supported(float_dtype): float_dtype = dtypes.float32
-    float_strat = {dtypes.float16: ht.float16, dtypes.float32: ht.float32, dtypes.float64: ht.float64}[float_dtype]
-    overflow_strat = float_strat.filter(lambda x: x > dtypes.max(unsigned_dtype) and x <= dtypes.max(dtypes.int32))
-    universal_test_cast(a.draw(overflow_strat), float_dtype, unsigned_dtype)
+    max_val = min(float(dtypes.max(unsigned_dtype) - 1), self._float_max[float_dtype])
+    a = data.draw(strat.floats(min_value=1, max_value=max_val, allow_subnormal=False, width=self._float_width[float_dtype]))
+    universal_test_cast(a, float_dtype, unsigned_dtype)
 
-  @settings(suppress_health_check=[HealthCheck.filter_too_much])
-  @given(strat.data(), strat.sampled_from(dtypes_float), strat.sampled_from((dtypes.uint8, dtypes.uint16)))
-  def test_float_cast_to_unsigned_underflow(self, a, float_dtype, unsigned_dtype):
+  @given(strat.sampled_from(dtypes_float), strat.sampled_from((dtypes.uint8, dtypes.uint16)), strat.data())
+  def test_float_cast_to_unsigned_overflow(self, float_dtype, unsigned_dtype, data):
     if not is_dtype_supported(float_dtype): float_dtype = dtypes.float32
-    float_strat = {dtypes.float16: ht.float16, dtypes.float32: ht.float32, dtypes.float64: ht.float64}[float_dtype]
-    underflow_strat = float_strat.filter(lambda x: x < 0 and x >= dtypes.min(dtypes.int32))
-    universal_test_cast(a.draw(underflow_strat), float_dtype, unsigned_dtype)
+    min_val, max_val = float(dtypes.max(unsigned_dtype) + 1), self._float_max[float_dtype]
+    assume(min_val <= max_val)  # skip if float dtype can't represent overflow range (e.g. float16 + uint16)
+    a = data.draw(strat.floats(min_value=min_val, max_value=max_val, allow_subnormal=False, width=self._float_width[float_dtype]))
+    universal_test_cast(a, float_dtype, unsigned_dtype)
+
+  @given(strat.sampled_from(dtypes_float), strat.sampled_from((dtypes.uint8, dtypes.uint16)), strat.data())
+  def test_float_cast_to_unsigned_underflow(self, float_dtype, unsigned_dtype, data):
+    if not is_dtype_supported(float_dtype): float_dtype = dtypes.float32
+    min_val = max(float(dtypes.min(dtypes.int32)), -self._float_max[float_dtype])
+    a = data.draw(strat.floats(min_value=min_val, max_value=-1.0, allow_subnormal=False, width=self._float_width[float_dtype]))
+    universal_test_cast(a, float_dtype, unsigned_dtype)
 
   @unittest.expectedFailure
   def test_unsafe_cast_float_to_int_failure(self):
