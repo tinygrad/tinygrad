@@ -2,7 +2,7 @@
 from __future__ import annotations
 import ctypes, os
 from extra.assembly.rdna3.lib import Inst, RawImm
-from extra.assembly.rdna3.pcode import _f32, _i32, _sext, _f16, _i16
+from extra.assembly.rdna3.pcode import _f32, _i32, _sext, _f16, _i16, _f64, _i64
 from extra.assembly.rdna3.autogen.gen_pcode import get_compiled_functions
 from extra.assembly.rdna3.autogen import (
   SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, DS, FLAT, VOPD, SrcEnum,
@@ -258,7 +258,8 @@ def exec_scalar(st: WaveState, inst: Inst) -> int:
   is_64bit_s0 = op.name.endswith(('_B64', '_I64', '_U64')) or '_U64_' in op.name or '_I64_' in op.name
   is_64bit_s0s1 = op_cls is SOPCOp and op in (SOPCOp.S_CMP_EQ_U64, SOPCOp.S_CMP_LG_U64)
   s0 = st.rsrc64(ssrc0, 0) if is_64bit_s0 or is_64bit_s0s1 else (st.rsrc(ssrc0, 0) if inst_type != SOPK else st.rsgpr(inst.sdst))
-  s1 = st.rsrc64(inst.ssrc1, 0) if is_64bit_s0s1 else (st.rsrc(inst.ssrc1, 0) if inst_type in (SOP2, SOPC) else inst.simm16 if inst_type is SOPK else 0)
+  is_64bit_sop2 = is_64bit_s0 and inst_type is SOP2
+  s1 = st.rsrc64(inst.ssrc1, 0) if (is_64bit_sop2 or is_64bit_s0s1) else (st.rsrc(inst.ssrc1, 0) if inst_type in (SOP2, SOPC) else inst.simm16 if inst_type is SOPK else 0)
   d0 = st.rsgpr64(sdst) if (is_64bit_s0 or is_64bit_s0s1) and sdst is not None else (st.rsgpr(sdst) if sdst is not None else 0)
   exec_mask = st.exec_mask
   literal = inst.simm16 if inst_type is SOPK else st.literal
@@ -384,6 +385,20 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
       op_cls, op, src0, src1, src2, vdst = VOPCOp, VOPCOp(inst.op), inst.src0, inst.src1, None, inst.vdst
     else:
       op_cls, op, src0, src1, src2, vdst = VOP3Op, VOP3Op(inst.op), inst.src0, inst.src1, inst.src2, inst.vdst
+      # V_PERM_B32: byte permutation - not in pseudocode PDF, implement directly
+      # D0[byte_i] = selector[byte_i] < 8 ? {src1, src0}[selector[byte_i]] : (selector[byte_i] >= 0xD ? 0xFF : 0x00)
+      if op == VOP3Op.V_PERM_B32:
+        s0, s1, s2 = st.rsrc(inst.src0, lane), st.rsrc(inst.src1, lane), st.rsrc(inst.src2, lane)
+        # Combine src0 and src1 into 8-byte value: src0 is bytes 0-3, src1 is bytes 4-7
+        combined = (s0 & 0xffffffff) | ((s1 & 0xffffffff) << 32)
+        result = 0
+        for i in range(4):  # 4 result bytes
+          sel = (s2 >> (i * 8)) & 0xff  # byte selector for this position
+          if sel <= 7: result |= (((combined >> (sel * 8)) & 0xff) << (i * 8))  # select byte from combined
+          elif sel >= 0xd: result |= (0xff << (i * 8))  # 0xD-0xF: constant 0xFF
+          # else 0x8-0xC: constant 0x00 (already 0)
+        V[vdst] = result & 0xffffffff
+        return
   elif inst_type is VOPC:
     op_cls, op, src0, src1, src2, vdst = VOPCOp, VOPCOp(inst.op), inst.src0, inst.vsrc1 + 256, None, VCC_LO
   elif inst_type is VOP3P:
