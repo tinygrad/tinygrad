@@ -655,7 +655,7 @@ jobs:
         uses: ./.github/actions/process-replay
 
   testrdna3:
-    name: RDNA3 Emulator
+    name: RDNA3 IDE
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

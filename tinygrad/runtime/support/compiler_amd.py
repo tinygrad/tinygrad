@@ -12,8 +12,16 @@ from tinygrad.device import Compiler, CompileError
 from tinygrad.runtime.support.compiler_cpu import LLVMCompiler
 from tinygrad.helpers import OSX, to_char_p_p
 
+def _find_llvm_objdump():
+  import shutil
+  if OSX: return '/opt/homebrew/opt/llvm/bin/llvm-objdump'
+  # Try ROCm path first, then fall back to system llvm-objdump
+  if shutil.which('/opt/rocm/llvm/bin/llvm-objdump'): return '/opt/rocm/llvm/bin/llvm-objdump'
+  if shutil.which('llvm-objdump'): return 'llvm-objdump'
+  raise FileNotFoundError("llvm-objdump not found")
+
 def amdgpu_disassemble(lib:bytes):
-  asm = system(f"{'/opt/homebrew/opt/llvm/bin/llvm-objdump' if OSX else '/opt/rocm/llvm/bin/llvm-objdump'} -d -", input=lib).splitlines()
+  asm = system(f"{_find_llvm_objdump()} -d -", input=lib).splitlines()
   while asm and ("s_nop 0" in asm[-1] or "s_code_end" in asm[-1]): asm.pop()
   print("\n".join(asm))
 
