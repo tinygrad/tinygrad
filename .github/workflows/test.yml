@@ -241,9 +241,8 @@ jobs:
       run: |
         python -m mypy --strict-equality --lineprecision-report .
         cat lineprecision.txt
-    # broken because of UPatAny
-    #- name: Run TYPED=1
-    #  run: TYPED=1 python -c "import tinygrad"
+    - name: Run TYPED=1
+      run: TYPED=1 python -c "import tinygrad"
 
   unittest:
     name: Unit Tests
@@ -654,6 +653,37 @@ jobs:
           extra/sqtt/rgptool.py create "/tmp/profile.pkl.$USER" -o /tmp/gpu0.rgp
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
+
+  testrdna3:
+    name: AMD ASM IDE
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: rdna3-emu
+          deps: testing_minimal
+          amd: 'true'
+      - name: Install LLVM 21
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+          echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-21 main" | sudo tee /etc/apt/sources.list.d/llvm.list
+          sudo apt-get update
+          sudo apt-get install llvm-21 llvm-21-tools cloc
+      - name: RDNA3 Line Count
+        run: cloc --by-file extra/assembly/amd/*.py
+      - name: Run RDNA3 emulator tests
+        run: python -m pytest -n=auto extra/assembly/amd/ --durations 20
+      - name: Install pdfplumber
+        run: pip install pdfplumber
+      - name: Verify AMD autogen is up to date
+        run: |
+          python -m extra.assembly.amd.dsl --arch all
+          python -m extra.assembly.amd.pcode --arch all
+          git diff --exit-code extra/assembly/amd/autogen/
 
   testnvidia:
     strategy:

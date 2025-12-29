@@ -176,7 +176,7 @@ class MemoryManager:
 
     self.boot_allocator = TLSFAllocator(boot_size, base=0)
     self.ptable_allocator = TLSFAllocator(round_up(vram_size // 512, 1 << 20) if self.reserve_ptable else 0, base=self.boot_allocator.size)
-    self.pa_allocator = TLSFAllocator(vram_size - (64 << 20), base=self.boot_allocator.size + self.ptable_allocator.size)
+    self.pa_allocator = TLSFAllocator(vram_size - (off_sz:=self.boot_allocator.size + self.ptable_allocator.size) - (64 << 20), base=off_sz)
     self.root_page_table = pt_t(self.dev, self.palloc(0x1000, zero=not self.dev.smi_dev, boot=True), lv=first_lv)
 
   def _frag_size(self, va, sz, must_cover=True):

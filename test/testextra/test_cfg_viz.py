@@ -10,7 +10,7 @@ from tinygrad.renderer import ProgramSpec
 from tinygrad.helpers import TracingKey, getenv
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 
-from extra.assembly.rdna3.autogen import *
+from extra.assembly.amd.autogen.rdna3 import *
 
 # TODO: use the RDNA3 renderer when it's in master
 template = """.text
@@ -60,8 +60,8 @@ amdhsa.kernels:
 @track_rewrites(name=lambda *args,ret,**kwargs: TracingKey(ret.name, ret=ret))
 def run_asm(name:str, insts:list) -> ProgramSpec:
   src = "\n".join([inst if isinstance(inst, str) else inst.disasm() for inst in insts])
-  prg = ProgramSpec(name, template.replace("fn_name", name).replace("INSTRUCTION", textwrap.dedent(src)), Device.DEFAULT, UOp(Ops.SINK),
-                    global_size=[1, 1, 1], local_size=[1, 1, 1], globals=[0])
+  prg = ProgramSpec(name, src:=template.replace("fn_name", name).replace("INSTRUCTION", textwrap.dedent(src)), Device.DEFAULT, UOp(Ops.SINK),
+                    lib=Device[Device.DEFAULT].compiler.compile(src), global_size=[1, 1, 1], local_size=[1, 1, 1], globals=[0])
   ei = ExecItem(UOp(Ops.SINK), [Tensor.empty(1).uop.buffer.ensure_allocated()], prg=CompiledRunner(prg))
   ei.run()
   return prg

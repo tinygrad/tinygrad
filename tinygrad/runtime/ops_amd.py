@@ -641,14 +641,14 @@ class AMDQueueDesc:
   def read_ptr(self): return min(p[0] for p in self.read_ptrs)
 
   def signal_doorbell(self, dev, doorbell_value:int|None=None):
-    for write_ptr in self.write_ptrs: write_ptr[0] = self.put_value
-
-    # Ensure all prior writes are visible to the GPU.
-    System.memory_barrier()
-
-    # Flush hdp if queue is in dev mem.
-    if dev.is_am() and not dev.is_usb(): dev.iface.dev_impl.gmc.flush_hdp()
     try:
+      for write_ptr in self.write_ptrs: write_ptr[0] = self.put_value
+
+      # Ensure all prior writes are visible to the GPU.
+      System.memory_barrier()
+
+      # Flush hdp if queue is in dev mem.
+      if dev.is_am() and not dev.is_usb(): dev.iface.dev_impl.gmc.flush_hdp()
       for doorbell in self.doorbells: doorbell[0] = self.put_value if doorbell_value is None else doorbell_value
     except Exception as e:
       dev.error_state = e
