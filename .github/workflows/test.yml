@@ -679,22 +679,11 @@ jobs:
         run: python -m pytest -n=auto extra/assembly/amd/ --durations 20
       - name: Install pdfplumber
         run: pip install pdfplumber
-      - name: Verify RDNA3 autogen is up to date
+      - name: Verify AMD autogen is up to date
         run: |
-          python -m extra.assembly.amd.lib --arch rdna3
-          git diff --exit-code extra/assembly/amd/autogen/rdna3/__init__.py
-      - name: Verify CDNA4 autogen is up to date
-        run: |
-          python -m extra.assembly.amd.lib --arch cdna4
-          git diff --exit-code extra/assembly/amd/autogen/cdna4/__init__.py
-      - name: Verify RDNA3 pcode autogen is up to date
-        run: |
-          python -m extra.assembly.amd.pcode --arch rdna3
-          git diff --exit-code extra/assembly/amd/autogen/rdna3/gen_pcode.py
-      - name: Verify CDNA4 pcode autogen is up to date
-        run: |
-          python -m extra.assembly.amd.pcode --arch cdna4
-          git diff --exit-code extra/assembly/amd/autogen/cdna4/gen_pcode.py
+          python -m extra.assembly.amd.lib --arch all
+          python -m extra.assembly.amd.pcode --arch all
+          git diff --exit-code extra/assembly/amd/autogen/
 
   testnvidia:
     strategy:
