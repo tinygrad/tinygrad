@@ -654,6 +654,23 @@ jobs:
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
+  testrdna3:
+    name: RDNA3 Emulator
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: rdna3-emu
+          deps: testing_minimal
+          amd: 'true'
+          llvm: 'true'
+      - name: Run RDNA3 emulator tests
+        run: python -m pytest -n12 extra/assembly/rdna3/ --durations 20
+
   testnvidia:
     strategy:
       fail-fast: false
