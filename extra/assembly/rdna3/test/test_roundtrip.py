@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """Roundtrip tests: generate tinygrad kernels, decode instructions, re-encode, verify match."""
-import unittest, io, sys, re, subprocess
+import unittest, io, sys, re, subprocess, shutil
 from extra.assembly.rdna3.autogen import *
 from extra.assembly.rdna3.lib import Inst
 from extra.assembly.rdna3.asm import asm
+
+def _get_llvm_mc():
+  for p in ['llvm-mc-20', 'llvm-mc']:
+    if shutil.which(p): return p
+  raise FileNotFoundError("llvm-mc not found")
 
 # Instruction format detection based on encoding bits
 def detect_format(data: bytes) -> type[Inst] | None:
@@ -66,46 +71,41 @@ def disassemble_lib(lib: bytes, compiler) -> list[tuple[str, bytes]]:
       continue
   return results
 
-def compile_asm(instr: str, compiler=None) -> bytes | None:
+def compile_asm(instr: str, compiler=None) -> bytes:
   """Compile a single instruction with llvm-mc and return the machine code bytes."""
-  try:
-    result = subprocess.run(
-      ['llvm-mc', '-triple=amdgcn', '-mcpu=gfx1100', '-mattr=+real-true16,+wavefrontsize32', '-show-encoding'],
-      input=f".text\n{instr}\n", capture_output=True, text=True)
-    if result.returncode != 0: return None
-    # Parse encoding: [0x01,0x39,0x0a,0x7e]
-    for line in result.stdout.split('\n'):
-      if 'encoding:' in line:
-        enc = line.split('encoding:')[1].strip()
-        if enc.startswith('[') and enc.endswith(']'):
-          hex_vals = enc[1:-1].replace('0x', '').replace(',', '').replace(' ', '')
-          return bytes.fromhex(hex_vals)
-  except Exception:
-    pass
-  return None
-
-def compile_asm_batch(instrs: list[str]) -> list[bytes | None]:
-  """Compile multiple instructions with a single llvm-mc call."""
-  if not instrs: return []
-  asm_text = ".text\n" + "\n".join(instrs) + "\n"
-  try:
-    result = subprocess.run(
-      ['llvm-mc', '-triple=amdgcn', '-mcpu=gfx1100', '-mattr=+real-true16,+wavefrontsize32', '-show-encoding'],
-      input=asm_text, capture_output=True, text=True, timeout=30)
-    if result.returncode != 0: return [None] * len(instrs)
-    results = []
-    for line in result.stdout.split('\n'):
-      if 'encoding:' not in line: continue
+  llvm_mc = _get_llvm_mc()
+  result = subprocess.run(
+    [llvm_mc, '-triple=amdgcn', '-mcpu=gfx1100', '-mattr=+real-true16,+wavefrontsize32', '-show-encoding'],
+    input=f".text\n{instr}\n", capture_output=True, text=True)
+  if result.returncode != 0: raise RuntimeError(f"llvm-mc failed for '{instr}': {result.stderr.strip()}")
+  # Parse encoding: [0x01,0x39,0x0a,0x7e]
+  for line in result.stdout.split('\n'):
+    if 'encoding:' in line:
       enc = line.split('encoding:')[1].strip()
       if enc.startswith('[') and enc.endswith(']'):
         hex_vals = enc[1:-1].replace('0x', '').replace(',', '').replace(' ', '')
-        try: results.append(bytes.fromhex(hex_vals))
-        except ValueError: results.append(None)
-      else: results.append(None)
-    while len(results) < len(instrs): results.append(None)
-    return results[:len(instrs)]
-  except Exception:
-    return [None] * len(instrs)
+        return bytes.fromhex(hex_vals)
+  raise RuntimeError(f"no encoding found in llvm-mc output for: {instr}")
+
+def compile_asm_batch(instrs: list[str]) -> list[bytes]:
+  """Compile multiple instructions with a single llvm-mc call."""
+  if not instrs: return []
+  llvm_mc = _get_llvm_mc()
+  src = ".text\n" + "\n".join(instrs) + "\n"
+  result = subprocess.run(
+    [llvm_mc, '-triple=amdgcn', '-mcpu=gfx1100', '-mattr=+real-true16,+wavefrontsize32', '-show-encoding'],
+    input=src, capture_output=True, text=True)
+  if result.returncode != 0: raise RuntimeError(f"llvm-mc batch failed: {result.stderr.strip()}")
+  # Parse all encodings in order
+  encodings = []
+  for line in result.stdout.split('\n'):
+    if 'encoding:' in line:
+      enc = line.split('encoding:')[1].strip()
+      if enc.startswith('[') and enc.endswith(']'):
+        hex_vals = enc[1:-1].replace('0x', '').replace(',', '').replace(' ', '')
+        encodings.append(bytes.fromhex(hex_vals))
+  if len(encodings) != len(instrs): raise RuntimeError(f"expected {len(instrs)} encodings, got {len(encodings)}")
+  return encodings
 
 def compile_and_disasm_batch(instrs: list[str], compiler) -> list[str | None]:
   """Compile instructions and get LLVM's disassembly in a single call."""
@@ -154,33 +154,35 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
           offset += 4
           continue
 
-        size = fmt._size()
-        if len(remaining) < size:
+        base_size = fmt._size()
+        if len(remaining) < base_size:
           break
 
-        orig_bytes = remaining[:size]
         try:
-          decoded = fmt.from_bytes(orig_bytes)
+          decoded = fmt.from_bytes(remaining)  # pass all remaining bytes so from_bytes can read literal
+          size = decoded.size()  # actual size including literal
+          orig_bytes = remaining[:size]
           reencoded = decoded.to_bytes()
           our_disasm = decoded.disasm()
-          decode_ok = reencoded[:size] == orig_bytes
-          decode_err = None if decode_ok else f"orig={orig_bytes.hex()} reenc={reencoded[:size].hex()}"
+          decode_ok = reencoded == orig_bytes
+          decode_err = None if decode_ok else f"orig={orig_bytes.hex()} reenc={reencoded.hex()}"
           decoded_instrs.append((ki, offset, orig_bytes, decoded, our_disasm, decode_ok, decode_err))
         except Exception as e:
-          decoded_instrs.append((ki, offset, orig_bytes, None, None, False, str(e)))
+          decoded_instrs.append((ki, offset, remaining[:base_size], None, None, False, str(e)))
+          size = base_size
 
         offset += size
 
-    # Collect disasm strings for batched LLVM calls
+    # Collect disasm strings for batched LLVM calls - skip unknown opcodes (op_X) that LLVM can't compile
     asm_test_instrs = []  # (idx, our_disasm) for asm test
     disasm_test_instrs = []  # (idx, our_disasm) for disasm comparison test
 
     for idx, (ki, offset, orig_bytes, decoded, our_disasm, decode_ok, decode_err) in enumerate(decoded_instrs):
       if our_disasm is None: continue
+      # Skip unknown opcodes and malformed instructions for both tests
+      if our_disasm.startswith('op_') or re.search(r', \d+, \d+, \d+,', our_disasm): continue
       asm_test_instrs.append((idx, our_disasm))
-      # Skip disasm comparison for unknown opcodes or malformed instructions
-      if not our_disasm.startswith('op_') and not re.search(r', \d+, \d+, \d+,', our_disasm):
-        disasm_test_instrs.append((idx, our_disasm))
+      disasm_test_instrs.append((idx, our_disasm))
 
     # Batch compile for asm test
     asm_llvm_results = compile_asm_batch([d for _, d in asm_test_instrs])

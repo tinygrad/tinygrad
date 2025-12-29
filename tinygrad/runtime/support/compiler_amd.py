@@ -14,9 +14,9 @@ from tinygrad.helpers import OSX, to_char_p_p
 
 def _find_llvm_objdump():
   if OSX: return '/opt/homebrew/opt/llvm/bin/llvm-objdump'
-  # Try ROCm path first, then fall back to system llvm-objdump
-  if shutil.which('/opt/rocm/llvm/bin/llvm-objdump'): return '/opt/rocm/llvm/bin/llvm-objdump'
-  if shutil.which('llvm-objdump'): return 'llvm-objdump'
+  # Try ROCm path first, then versioned, then unversioned
+  for p in ['/opt/rocm/llvm/bin/llvm-objdump', 'llvm-objdump-20', 'llvm-objdump']:
+    if shutil.which(p): return p
   raise FileNotFoundError("llvm-objdump not found")
 
 def amdgpu_disassemble(lib:bytes):
