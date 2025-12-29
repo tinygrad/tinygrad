@@ -934,6 +934,9 @@ jobs:
     name: Windows (${{ matrix.backend }})
     runs-on: windows-latest
     timeout-minutes: 15
+    env:
+      MOCKGPU: 1
+      FORWARD_ONLY: 1
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -946,22 +949,39 @@ jobs:
       - uses: Jimver/cuda-toolkit@v0.2.29
         id: cuda-toolkit
         with:
+          cuda: '12.5.0'
+          method: 'network'
+          sub-packages: '["nvcc", "cudart", "nvrtc", "nvjitlink"]'
           log-file-suffix: 'windows-latest-log.txt'
       - name: Check CUDA install
         run: |
           echo "Installed cuda version is: ${{steps.cuda-toolkit.outputs.cuda}}"
           echo "Cuda install location: ${{steps.cuda-toolkit.outputs.CUDA_PATH}}"
-          gcm nvcuda.dll
           nvcc -V
       - name: Set env
         shell: bash
         run:  printf "${{ matrix.backend == 'llvm' && 'CPU=1\nCPU_LLVM=1' || matrix.backend == 'cpu' && 'CPU=1\nCPU_LLVM=0\nCPU_COUNT=2' || matrix.backend == 'webgpu' && 'WEBGPU=1' || matrix.backend == 'cuda' && 'CUDA=1'}}" >> $GITHUB_ENV
-      - name: Run pytest (${{ matrix.backend }})
+      # - name: Run pytest (${{ matrix.backend }})
+      #   shell: bash
+      #   run: |
+      #     python -c "from tinygrad import Device; assert Device.DEFAULT == 'CUDA'"
+      #     python -m pytest -n=auto test/test_tiny.py --durations=20
+      - name: Check Device.DEFAULT and print some source
         shell: bash
         run: |
-          python -c "from tinygrad import Device; assert Device.DEFAULT == 'CUDA'"
-          DEBUG=4 python -c "from tinygrad.runtime.autogen import cuda"
-          python -m pytest -n=auto test/test_tiny.py --durations=20
+          python -c "from tinygrad import Device; assert Device.DEFAULT in ['CUDA','NV'], Device.DEFAULT"
+      - name: Print some source
+        shell: bash
+        env:
+          DEBUG: 5
+        run: |
+          python test/test_ops.py TestOps.test_add
+      - name: Run pytest (cuda)
+        shell: bash
+        # skip multitensor because it's slow
+        run: python -m pytest -n=auto test/ --ignore=test/models --ignore=test/unit --ignore test/test_gc.py --ignore test/test_multitensor.py --durations=20
+      - name: Run process replay tests
+        uses: ./.github/actions/process-replay
 
 # ****** Compile-only Tests ******
 
