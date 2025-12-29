@@ -102,8 +102,6 @@ def mstack_early_shrink(ms:UOp, shrink:UOp):
 replace_allreduce = PatternMatcher([
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce_multirank),
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce),
-  (UPat(Ops.COPY, src=(UPat(Ops.BUFFER, name="buf"), UPat(Ops.DEVICE, name="dev"))),lambda buf,dev: UOp.new_buffer(dev.arg, buf.arg, buf.dtype)
-   if buf.device not in {"DISK", "NPY"} and isinstance(dev.arg, tuple) and isinstance(buf.device, str) else None),
   # BROADCAST: explicitly expand broadcast copies and combine with MSTACK
   (UPat(Ops.COPY, name="c", src=(UPat(GroupOp.All-{Ops.CONST}, name="x"), UPat(Ops.DEVICE))), lambda c,x:
     UOp(Ops.MSTACK, c.dtype, tuple(x.copy_to_device(d) for d in c.device)) if isinstance(c.device, tuple) and isinstance(x.device, str) else None),

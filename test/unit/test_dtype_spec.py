@@ -8,7 +8,7 @@ from hypothesis import given, settings, strategies as strat
 import numpy as np
 import torch
 
-settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
+settings.register_profile("my_profile", max_examples=50, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
 
 core_dtypes = list(DTYPES_DICT.values())

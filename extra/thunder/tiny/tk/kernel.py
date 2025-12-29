@@ -2,7 +2,7 @@ from contextlib import AbstractContextManager
 from tinygrad.uop.ops import UOp, KernelInfo, AxisType, AddrSpace
 from extra.thunder.tiny.tk import WARP_THREADS
 from extra.thunder.tiny.tk.group import Group
-from extra.thunder.tiny.tk.tiles import GL, ST_16X16, ST_16X16_SWIZZLED, ST, RT_16X16, RT, RV, TileLayout, VecLayout
+from extra.thunder.tiny.tk.tiles import GL, ST_16X16, ST, RT_16X16, RT, RV, TileLayout, VecLayout
 
 class _tk_range:
   def __init__(self, start:int, end:int, step:int, axis_type:AxisType, rid:int):

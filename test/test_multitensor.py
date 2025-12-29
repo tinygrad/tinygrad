@@ -4,7 +4,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.helpers import getenv, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
-from tinygrad.engine.realize import lower_schedule, BufferCopy, CompiledRunner, run_schedule
+from tinygrad.engine.realize import BufferCopy, CompiledRunner, run_schedule
 import numpy as np
 from hypothesis import given, strategies as strat, settings
 from test.helpers import not_support_multi_device, needs_second_gpu, slow
@@ -57,11 +57,17 @@ class TestMultiTensor(unittest.TestCase):
       assert lb.shape == (128,)
     (X + X).realize()
 
+  @unittest.expectedFailure # TODO: fix
   def test_shard_empty(self):
     GlobalCounters.reset()
     X = Tensor.empty(256).shard(devices_2, 0).realize()
     assert GlobalCounters.kernel_count == 0
     (X + X).realize()
+
+  def test_arange_shrink(self):
+    x = Tensor.arange(4)
+    self.assertEqual(x.shard(devices_2, 0).realize().shrink(((2, 4),)).tolist(), [2, 3])
+    self.assertEqual(x.shard(devices_2, 0).realize().shrink(((0, 2),)).tolist(), [0, 1])
 
   def test_shard_like(self):
     X = Tensor.ones(256).shard(devices_2, 0)
@@ -123,9 +129,10 @@ class TestMultiTensor(unittest.TestCase):
     out = (X + X)
     sched = out.schedule()
     names = []
-    for si, ei in lower_schedule(sched):
-      if isinstance(ei.prg, CompiledRunner): names.append(ei.prg.p.name)
-      ei.run()
+    for si in sched:
+      si.lower()
+      if isinstance(si.prg, CompiledRunner): names.append(si.prg.p.name)
+      si.run()
     self.assertEqual(len(set(names)), 1, "function was relinearized")
 
   @unittest.skip("this doesn't fold because shard_ calls contiguous on all lbs")

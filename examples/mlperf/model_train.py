@@ -1314,6 +1314,13 @@ def train_llama3():
   opt_base_learning_rate = getenv("LR", 8e-5 * GBS / 1152)  # NOTE: cannot change for benchmark
   opt_end_learning_rate = getenv("END_LR", 8e-7)
 
+  # ** init wandb **
+  WANDB = getenv("WANDB")
+  if WANDB:
+    import wandb
+    wandb_args = {"id": wandb_id, "resume": "must"} if (wandb_id := getenv("WANDB_RESUME", "")) else {}
+    wandb.init(config=config, **wandb_args, project="MLPerf-LLaMA3")
+
   model_params = MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"]
   # vocab_size from the mixtral tokenizer
   if not SMALL: model_params |= {"vocab_size": 32000}
@@ -1417,49 +1424,56 @@ def train_llama3():
     if getenv("FAKEDATA", 0):
       return fake_data(BS, SAMPLES)
     else:
-      if SMALL:
-        from examples.mlperf.dataloader import batch_load_llama3_small
-        return batch_load_llama3_small(BS, SAMPLES, SEQLEN, BASEDIR, seed=SEED, val=bool(TRAIN_ON_VAL))
-      else:
-        from examples.mlperf.dataloader import batch_load_llama3
-        return batch_load_llama3(BS, SAMPLES, SEQLEN, BASEDIR, seed=SEED, val=bool(TRAIN_ON_VAL))
+      from examples.mlperf.dataloader import batch_load_llama3
+      return batch_load_llama3(BS, SAMPLES, SEQLEN, BASEDIR, seed=SEED, val=bool(TRAIN_ON_VAL), small=bool(SMALL))
+
+  if getenv("FAKEDATA", 0):
+    eval_dataset = None
+  else:
+    from examples.mlperf.dataloader import get_llama3_dataset
+    eval_dataset = get_llama3_dataset(5760, SEQLEN, BASEDIR, val=True, small=bool(SMALL))
 
   def get_eval_iter():
-    if getenv("FAKEDATA", 0):
+    if eval_dataset is None:
       return fake_data(EVAL_BS, 5760)
-    else:
-      if SMALL:
-        from examples.mlperf.dataloader import batch_load_llama3_small
-        return batch_load_llama3_small(EVAL_BS, 5760, SEQLEN, BASEDIR, val=True)
-      else:
-        from examples.mlperf.dataloader import batch_load_llama3
-        return batch_load_llama3(EVAL_BS, 5760, SEQLEN, BASEDIR, val=True)
+    from examples.mlperf.dataloader import iterate_llama3_dataset
+    return iterate_llama3_dataset(eval_dataset, EVAL_BS)
 
   iter = get_train_iter()
   i, sequences_seen = resume_ckpt, 0
   for tokens in tqdm(iter, total=SAMPLES//GBS):
-    t = time.perf_counter()
     GlobalCounters.reset()
-    loss, lr = train_step(model, tokens)
-    loss = loss.float().item()
+    if getenv("TRAIN", 1):
+      t = time.perf_counter()
+      loss, lr = train_step(model, tokens)
+      loss = loss.float().item()
+      lr = lr.item()
 
-    i += 1
-    sequences_seen += tokens.shape[0]
+      i += 1
+      sequences_seen += tokens.shape[0]
 
-    tqdm.write(f"{loss:.4f} loss, {lr.item():.12f} LR, {GlobalCounters.mem_used / 1e9:.2f} GB used, {time.perf_counter()-t:.2f} s")
-    if (fname:=getenv("LOSS_FILE", "")):
-      with open(fname, "a") as f:
-        f.write(f"{i} {loss:.4f} {lr.item():.12f} {GlobalCounters.mem_used / 1e9:.2f}\n")
+      sec = time.perf_counter()-t
+      mem_gb = GlobalCounters.mem_used / 1e9
+      gflops = GlobalCounters.global_ops / 1e9 / sec
+      tqdm.write(
+        f"{i:5} {sec:.2f} s run, {loss:.4f} loss, {lr:.12f} LR, {mem_gb:.2f} GB used, {gflops:9.2f} GFLOPS")
 
-    if (ckpt_freq := getenv("CKPT")) and (i % ckpt_freq == 0 and (i != 1 or ckpt_freq == 1)):
-      tqdm.write("saving checkpoint")
-      if not os.path.exists(ckpt_dir := "./ckpts"): os.mkdir(ckpt_dir)
-      fn = f"{ckpt_dir}/llama3_{i}.safe"
-      safe_save(get_state_dict(model), fn)
+      if (fname:=getenv("LOSS_FILE", "")):
+        with open(fname, "a") as f:
+          f.write(f"{i} {loss:.4f} {lr:.12f} {mem_gb:.2f}\n")
 
-      tqdm.write("saving optim checkpoint")
-      fn = f"{ckpt_dir}/llama3_{i}_optim.safe"
-      safe_save(get_state_dict(scheduler), fn)
+      if WANDB:
+        wandb.log({"lr": lr, "train/loss": loss, "train/step_time": sec, "train/GFLOPS": gflops, "train/sequences_seen": sequences_seen})
+
+      if (ckpt_freq := getenv("CKPT")) and (i % ckpt_freq == 0 and (i != 1 or ckpt_freq == 1)):
+        tqdm.write("saving checkpoint")
+        if not os.path.exists(ckpt_dir := "./ckpts"): os.mkdir(ckpt_dir)
+        fn = f"{ckpt_dir}/llama3_{i}.safe"
+        safe_save(get_state_dict(model), fn)
+
+        tqdm.write("saving optim checkpoint")
+        fn = f"{ckpt_dir}/llama3_{i}_optim.safe"
+        safe_save(get_state_dict(scheduler), fn)
 
     if sequences_seen % EVAL_FREQ == 0 and (i != 1 or EVAL_FREQ == 1):
       tqdm.write(f"evaluating after {sequences_seen} sequences")
@@ -1474,6 +1488,9 @@ def train_llama3():
       log_perplexity = Tensor(eval_losses).mean().float().item()
 
       tqdm.write(f"eval log perplexity: {log_perplexity:.4f}")
+
+      if WANDB:
+        wandb.log({"eval/log_perplexity": log_perplexity, "eval/sequences_seen": sequences_seen})
 
       if log_perplexity < EVAL_TARGET:
         tqdm.write(f"target achieved after {sequences_seen} sequences")

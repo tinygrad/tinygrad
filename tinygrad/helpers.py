@@ -115,12 +115,12 @@ def suppress_finalizing(func):
       if not getattr(sys, 'is_finalizing', lambda: True)(): raise # re-raise if not finalizing
   return wrapper
 
-def select_first_inited(candidates:Sequence[Callable[...,T]|Sequence[Callable[...,T]]], err_msg:str, cache:dict|None=None) -> tuple[T,...]|T:
+def select_first_inited(candidates:Sequence[Callable[...,T]|Sequence[Callable[...,T]|None]], err_msg:str, cache:dict|None=None):
   excs = []
   for typ in candidates:
     if cache is not None and typ in cache: return cache[typ]
     try:
-      x = tuple([cast(Callable, t)() for t in typ]) if isinstance(typ, Sequence) else cast(Callable, typ)()
+      x = tuple([cast(Callable, t)() if t is not None else None for t in typ]) if isinstance(typ, Sequence) else cast(Callable, typ)()
       if cache is not None: cache[typ] = x
       return x
     except Exception as e: excs.append(e)
@@ -523,8 +523,7 @@ class tqdm(Generic[T]):
   @classmethod
   def write(cls, s:str): print(f"\r\033[K{s}", flush=True, file=sys.stderr)
 
-class trange(tqdm):
-  def __init__(self, n:int, **kwargs): super().__init__(iterable=range(n), total=n, **kwargs)
+def trange(n:int, **kwargs) -> tqdm[int]: return tqdm(range(n), total=n, **kwargs)
 
 class disable_gc(contextlib.ContextDecorator):
   def __enter__(self):
@@ -543,3 +542,11 @@ copyreg.pickle(types.CodeType, _serialize_code)
 
 def _serialize_module(module:types.ModuleType): return importlib.import_module, (module.__name__,)
 copyreg.pickle(types.ModuleType, _serialize_module)
+
+class count:
+  def __init__(self, start:int=0, step:int=1):
+    self.n, self.step = start, step
+  def __next__(self) -> int:
+    cur = self.n
+    self.n += self.step
+    return cur

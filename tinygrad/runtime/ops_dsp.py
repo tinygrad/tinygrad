@@ -83,7 +83,7 @@ class DSPProgram:
   def __init__(self, dev:DSPDevice, name:str, lib:bytes):
     self.dev, self.lib = dev, lib
 
-  def __call__(self, *bufs, vals:tuple[int, ...]=(), wait=False):
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     if len(bufs) >= 16: raise RuntimeError(f"Too many buffers to execute: {len(bufs)}")
 
     pra, fds, attrs, _ = rpc_prep_args(ins=[var_vals_mv:=memoryview(bytearray((len(bufs)+len(vals))*4)), off_mv:=memoryview(bytearray(len(bufs)*4))],
@@ -289,7 +289,7 @@ class MockDSPRenderer(DSPRenderer):
 
 class MockDSPProgram:
   def __init__(self, name:str, lib:bytes): self.lib = lib
-  def __call__(self, *bufs, vals:tuple[int, ...]=(), wait=False):
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
     with tempfile.NamedTemporaryFile(suffix=".out") as dsp_lib:
       dsp_lib.write(self.lib)
       dsp_lib.flush()

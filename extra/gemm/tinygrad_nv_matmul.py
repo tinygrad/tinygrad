@@ -33,5 +33,5 @@ if __name__ == "__main__":
   new_src = prg.src
   # can mod source here
   prg = replace(prg, src=new_src)
-  ei = ExecItem(CompiledRunner(prg), [x.ensure_allocated() for x in si.bufs], si.metadata)
+  ei = ExecItem(si.ast, [x.ensure_allocated() for x in si.bufs], si.metadata, prg=CompiledRunner(prg))
   for i in range(5): ei.run(wait=True)

@@ -1,25 +1,15 @@
 import time
 from typing import cast
-from dataclasses import dataclass, field
 from collections import deque
-from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites
-from tinygrad.uop.ops import PatternMatcher, UPat, graph_rewrite, graph_rewrite_map
+from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, PatternMatcher, UPat, graph_rewrite, graph_rewrite_map
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.helpers import Metadata, DEBUG, cpu_profile, TracingKey, SPEC, flatten, pluralize
-
-# **** ScheduleItem return type
-
-@dataclass(frozen=True)
-class ScheduleItem:
-  ast: UOp
-  bufs: tuple[Buffer, ...] = ()
-  metadata: tuple[Metadata, ...] = ()
-  fixedvars: dict[str, int] = field(default_factory=dict)
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, flatten, pluralize
+from tinygrad.engine.realize import ExecItem
 
 # **** schedule linearizer
 
-def create_schedule(sched_sink:UOp) -> tuple[list[ScheduleItem], UOp]:
+def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
   with cpu_profile(TracingKey("toposort sched_sink")):
     # construct the KERNEL children graph based on assigns
     children: dict[UOp, list[UOp]] = {}
@@ -70,7 +60,7 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ScheduleItem], UOp]:
         if in_degree[x] == 0: queue.append(x)
 
   with cpu_profile(TracingKey("expand ranges")):
-    pre_schedule: list[ScheduleItem] = []
+    pre_schedule: list[ExecItem] = []
     buf_uops_list: list[UOp] = []
     sched_ptr = 0
     in_ranges: dict[UOp, int] = {}
@@ -89,7 +79,7 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ScheduleItem], UOp]:
       else:
         ast, buf_uops, metadata, fixedvars, bound_ranges = si
         fixedvars = fixedvars | {s.src[0].arg[0]:in_ranges[s.src[1]] for s in bound_ranges}
-        pre_schedule.append(ScheduleItem(ast, (), metadata, fixedvars))
+        pre_schedule.append(ExecItem(ast, [], metadata, fixedvars))
         buf_uops_list.append(UOp.sink(*buf_uops))
       sched_ptr += 1
   return pre_schedule, UOp.sink(*buf_uops_list)
@@ -98,15 +88,21 @@ from tinygrad.engine.memory import memory_planner
 from tinygrad.schedule.rangeify import get_rangeify_map
 from tinygrad.schedule.multi import get_multi_map
 
-def replace_input_buffer(ctx:dict[UOp, UOp], b:UOp):
-  if (ret:=ctx.get(b, None)) is None:
+def replace_input_buffer(ctx:tuple[dict[UOp, UOp], dict[str, int]], b:UOp):
+  if (ret:=ctx[0].get(b, None)) is None:
     if b.op is Ops.BUFFER:
-      ctx[b] = ret = b.replace(src=(UOp(Ops.LUNIQUE, arg=len(ctx)), b.src[1]))
+      ctx[0][b] = ret = b.replace(src=(UOp(Ops.LUNIQUE, arg=len(ctx[0])), b.src[1]))
     else:
       # TODO: flip args in CONST
       assert b.op is Ops.CONST
-      ctx[b] = ret = b.replace(src=(b.src[0], UOp(Ops.LUNIQUE, arg=len(ctx))))
+      ctx[0][b] = ret = b.replace(src=(b.src[0], UOp(Ops.LUNIQUE, arg=len(ctx[0]))))
   return ret
+
+def strip_bind(ctx:tuple[dict[UOp, UOp], dict[str, int]], b:UOp):
+  var, val = b.src[0], b.src[1].arg
+  assert var.expr not in ctx[1] or ctx[1][var.expr] == val, f"bind mismatch on {var}, {ctx[1][var.expr]} != {val}"
+  ctx[1][var.expr] = val
+  return ctx[0].setdefault(b, b.replace(src=(b.src[0],)))
 
 pm_pre_sched_cache = PatternMatcher([
   # replace input buffers
@@ -114,7 +110,7 @@ pm_pre_sched_cache = PatternMatcher([
   # remove unique consts
   (UPat(Ops.CONST, src=(UPat(Ops.DEVICE), UPat(Ops.UNIQUE)), name="b"), replace_input_buffer),
   # strip value from BIND for cache key normalization, so different values hit same cache
-  (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST)), name="b"), lambda ctx,b: ctx.setdefault(b, b.replace(src=(b.src[0],)))),
+  (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST)), name="b"), strip_bind),
 ])
 
 def replace_input_buffer_back(ctx:dict[UOp, UOp], b:UOp):
@@ -131,15 +127,16 @@ pm_post_sched_cache = PatternMatcher([
   (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR),), name="b"), lambda ctx,b: ctx.get(b)),
 ])
 
-schedule_cache: dict[bytes, tuple[list[ScheduleItem], UOp]] = {}
+schedule_cache: dict[bytes, tuple[list[ExecItem], UOp]] = {}
 @track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[1]))}")
-def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], list[ScheduleItem], dict[str, int]]:
+def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], list[ExecItem], dict[str, int]]:
   # big_sink srcs are all the Tensors
   st = time.perf_counter()
 
-  # replace all UNIQUE buffers with LUNIQUE, strip BIND values for cache key
+  # replace all UNIQUE buffers with LUNIQUE, strip BIND values for cache key, extract var_vals
   input_buffers: dict[UOp, UOp] = {}
-  big_sink_cache = graph_rewrite(big_sink, pm_pre_sched_cache, ctx=input_buffers, name="rewrite for sched cache")
+  var_vals: dict[str, int] = {}
+  big_sink_cache = graph_rewrite(big_sink, pm_pre_sched_cache, ctx=(input_buffers, var_vals), name="rewrite for sched cache")
   sched_cache_key = big_sink_cache.key
 
   if (sc_ret:=schedule_cache.get(sched_cache_key, None)) is None:
@@ -147,7 +144,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
     if SPEC: type_verify(big_sink, tensor_spec)
 
     # hack to preserve metadata
-    graph_rewrite_map(big_sink, pm_pre_sched_cache, ctx={}, name="preserve metadata")
+    graph_rewrite_map(big_sink, pm_pre_sched_cache, ctx=({}, {}), name="preserve metadata")
 
     # tensor map is what we return
     tensor_map: dict[UOp, UOp] = {}
@@ -180,7 +177,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
   tensor_map = {tm_src[i]:tm_src[i+1] for i in range(0, len(tm_src), 2)}
 
   # add bufs to pre_schedule
-  schedule: list[ScheduleItem] = []
+  schedule: list[ExecItem] = []
   for i, si in enumerate(pre_schedule):
     buf_uops = buf_uops_sink.src[i].src
     # create subbuffers if needed
@@ -193,23 +190,14 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[dict[UOp, UOp], li
       assert all(isinstance(x, MultiBuffer) for x in ubufs), "kernel must all be multibuffer"
       dnums = [x for x in si.ast.variables() if x.arg[0] == '_device_num']
       for j, bufs in enumerate(zip(*[x.bufs for x in cast(tuple[MultiBuffer, ...], ubufs)])):
-        schedule.append(ScheduleItem(si.ast, bufs, si.metadata, si.fixedvars | ({dnums[0].expr:j} if len(dnums) else {})))
+        schedule.append(ExecItem(si.ast, list(bufs), si.metadata, si.fixedvars | ({dnums[0].expr:j} if len(dnums) else {})))
     else:
       # ONE -> ONE
-      schedule.append(ScheduleItem(si.ast, cast(tuple[Buffer, ...], ubufs), si.metadata, si.fixedvars))
+      schedule.append(ExecItem(si.ast, list(ubufs), si.metadata, si.fixedvars))
   with cpu_profile(TracingKey("memory planner")): schedule = memory_planner(schedule)
-
-  # extract var_vals from BINDs that were stripped (only if there are kernels)
-  var_vals: dict[str, int] = {}
-  if schedule:
-    for u in input_buffers:
-      if u.op is Ops.BIND:
-        var, val = u.unbind()
-        assert var.expr not in var_vals or var_vals[var.expr] == val, f"bind mismatch on {var}, {var_vals[var.expr]} != {val}"
-        var_vals[var.expr] = val
 
   if (DEBUG >= 1 and len(schedule) > 1) or DEBUG >= 3:
     print(f"scheduled {len(schedule):4d} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
           f" | {' cache hit' if sc_ret is not None else 'CACHE MISS'} {sched_cache_key.hex()[:8]}"+\
           f" | {len(UOpMetaClass.ucache)} uops in cache")
-  return tensor_map, schedule, var_vals
+  return tensor_map, schedule, var_vals if schedule else {}
