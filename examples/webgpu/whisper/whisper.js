@@ -15,6 +15,10 @@ const TOK_TS_LAST = 51863;
 
 const MAX_CONTEXT_LENGTH = 448;
 const MAX_TOKENS_TO_DECODE = 224;
+
+const AUDIO_FEATURES_CACHE__REUSE = [1];
+const AUDIO_FEATURES_CACHE__OVERWRITE = [0];
+
 // #endregion constants
 
 // #region audio
@@ -151,26 +155,24 @@ function batch_repeat_helper(array, bs) {
     return result;
 }
 
-async function decoder_helper(nets, context_inputs, audio_features_stub, context_last_token_index_absolute, decoder_state) {
-    context_inputs = batch_repeat_helper(context_inputs, nets.model_metadata.decoder_batch_size);
-    let [decoder_output] = await nets.decoder(context_inputs, audio_features_stub, [context_last_token_index_absolute], [0], [1]);
-    for (let i = 0; i < nets.model_metadata.decoder_batch_size; ++i) {
-        decoder_state.contexts[i] = [...decoder_state.contexts[i].slice(0, context_last_token_index_absolute), context_inputs[i]];
-    }
-
-    return [decoder_output];
+async function decoder_decode_batch(nets, context_inputs, self_attention_kv_cache_cutoff) {
+    const AUDIO_FEATURES_UPDATE_INDEX_STUB = [0];
+    const AUDIO_FEATURES_STUB = [0];
+    let decoder_output = await nets.decoder(context_inputs, AUDIO_FEATURES_STUB, [self_attention_kv_cache_cutoff], AUDIO_FEATURES_UPDATE_INDEX_STUB, AUDIO_FEATURES_CACHE__REUSE);
+    return decoder_output;
 }
 
-async function decoder_upload_audio_features(nets, audio_features_batch, decoder_state) {
+async function decoder_upload_audio_features_item(nets, context_input, audio_features, batch_index_insert_point) {
+    const SELF_ATTENTION_KV_CACHE_CUTOFF_STUB = [0];
+    let decoder_output_discarded = await nets.decoder(context_input, audio_features, SELF_ATTENTION_KV_CACHE_CUTOFF_STUB, [batch_index_insert_point], AUDIO_FEATURES_CACHE__OVERWRITE);
+}
+
+async function decoder_upload_audio_features(nets, audio_features_batch) {
     let context_input = [TOK_BEGIN_TRANSCRIPTION];
     context_input = batch_repeat_helper(context_input, nets.model_metadata.decoder_batch_size);
 
     for (let i = 0; i < audio_features_batch.length; ++i) {
-        let decoder_output_discarded = await nets.decoder(context_input, audio_features_batch[i], [0], [i], [0]);
-    }
-
-    for (let i = 0; i < nets.model_metadata.decoder_batch_size; ++i) {
-        decoder_state.contexts[i] = [context_input[i]];
+        await decoder_upload_audio_features_item(nets, context_input, audio_features_batch[i], i);
     }
 }
 
@@ -179,41 +181,27 @@ async function decoder_upload_audio_features(nets, audio_features_batch, decoder
 /** @typedef {number} float */
 
 /**
- * @typedef Decode_Sequence
+ * @typedef Decode_Cursor
  * @type {object}
  * @property {integer} context_prompt_length
  * @property {integer} max_context_length
  * @property {Int32Array} tokens
  * @property {integer} length
+ * @property {integer} valid_cache
  * @property {bool} done
  */
 
-/**
- * @typedef Decode_Cursor
- * @type {object}
- * @property {Int32Array} tokens
- * @property {integer} length
- * @property {bool} done
- */
 
-/**
- * @typedef Decoder_State
- * @type {object}
- * @property {integer[][]} contexts
- */
-
-function initSequences(sequence_count) {
-    // TODO: actual batch size
-    const batch_size = sequence_count;
+function initSequences(batch_size) {
     let buffer = new ArrayBuffer(batch_size * MAX_CONTEXT_LENGTH * 4);
 
     let context = [TOK_BEGIN_TRANSCRIPTION, TOK_NO_TIMESTAMPS];
     const context_prompt_length = context.length;
     const max_context_length = context_prompt_length + MAX_TOKENS_TO_DECODE;
 
-    /** @type {Decode_Sequence[]} */
+    /** @type {Decode_Cursor[]} */
     let sequences = [];
-    for (let i = 0; i < sequence_count; ++i) {
+    for (let i = 0; i < batch_size; ++i) {
         let sequence = {};
         sequence.context_prompt_length = context_prompt_length;
         sequence.max_context_length = max_context_length;
@@ -221,6 +209,7 @@ function initSequences(sequence_count) {
         tokens.set(context, 0);
         sequence.tokens = tokens;
         sequence.length = context.length;
+        sequence.valid_cache = 0;
         sequence.done = false;
         sequences.push(sequence);
     }
@@ -228,20 +217,6 @@ function initSequences(sequence_count) {
     return sequences;
 }
 
-async function initDecoder(nets, audio_features_batch) {
-    /** @type {Decoder_State} */
-    let decoder_state = {
-        contexts: []
-    };
-
-    for (let i = 0; i < nets.model_metadata.decoder_batch_size; ++i) {
-        decoder_state.contexts.push([]);
-    }
-
-    await decoder_upload_audio_features(nets, audio_features_batch, decoder_state);
-
-    return decoder_state;
-}
 
 async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAndInitializeModels) {
     let before = performance.now();
@@ -307,8 +282,14 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
             return tokens[0];
         }
 
-        let sequences = initSequences(audio_features_batch.length);
-        let decoder_state = await initDecoder(nets, audio_features_batch);
+        // TODO: name misleading, actual sequence count equals to batch_size, sequence_count means actually how many batch slots we use
+        const sequence_count = audio_features_batch.length;
+
+        let sequences = initSequences(batch_size);
+        for (let i = sequence_count; i < batch_size; ++i) sequences[i].done = true;
+
+        await decoder_upload_audio_features(nets, audio_features_batch);
+
         let is_done = false;
         let currentTokenIndex = 0;
         while (!is_done) {
@@ -322,23 +303,31 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
 
                 // NOTE: pack batch inputs
                 let context_inputs = [];
-                for (let idx = 0; idx < sequences.length; ++idx) {
+                for (let idx = 0; idx < sequence_count; ++idx) {
                     let ctx = sequences[idx].tokens;
                     context_inputs.push(ctx.at(sequences[idx].length-1));
                 }
                 const max_context_batch_length = Math.max.apply(null, sequences.map(x => x.length));
-                let audio_features_stub = [0];
-                let [sorted] = await decoder_helper(nets, context_inputs, audio_features_stub, max_context_batch_length - 1, decoder_state);
+                let sorted;
+                {
+                    let context_inputs_padded = batch_repeat_helper(context_inputs, batch_size);
+                    let context_last_token_index_absolute = max_context_batch_length - 1;
+                    let self_attention_kv_cache_cutoff = context_last_token_index_absolute;
+                    [sorted] = await decoder_decode_batch(nets, context_inputs_padded, self_attention_kv_cache_cutoff);
 
+                    for (let i = 0; i < batch_size; ++i) {
+                        sequences[i].valid_cache = sequences[i].length;
+                    }
+                }
                 // NOTE: unpack batch results
                 const indices_topk = nets.model_metadata.decoder_topk ? nets.model_metadata.decoder_topk : 10;
                 let decode_results_topk = [];
-                for (let i = 0; i < sequences.length; ++i) {
+                for (let i = 0; i < sequence_count; ++i) {
                     decode_results_topk.push(sorted.slice(i*indices_topk, (i+1)*indices_topk));
                 }
 
                 chunkUpdate.sequences = [];
-                for (let idx = 0; idx < sequences.length; ++idx) {
+                for (let idx = 0; idx < sequence_count; ++idx) {
                     let current_sequence = sequences[idx];
 
                     if (current_sequence.done) continue;
@@ -357,7 +346,7 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
                     chunkUpdate.sequences[idx] = {tokens: decoded_tokens_so_far, seek, seek_end};
                 }
 
-                onEvent("chunkUpdate", {sequences: chunkUpdate.sequences, currentTokenIndex, sequenceStatus: sequences.map(x => x.done ? "done" : "running")});
+                onEvent("chunkUpdate", {sequences: chunkUpdate.sequences, currentTokenIndex, sequenceStatus: sequences.slice(0, sequence_count).map(x => x.done ? "done" : "running")});
 
                 ++currentTokenIndex;
             } else {
@@ -418,6 +407,5 @@ export {
     getProgressDlForPart,
 
     batch_repeat_helper,
-    decoder_helper,
     transcribeAudio
 };
