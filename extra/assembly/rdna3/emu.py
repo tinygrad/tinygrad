@@ -13,13 +13,37 @@ Program = dict[int, Inst]
 WAVE_SIZE, SGPR_COUNT, VGPR_COUNT = 32, 128, 256
 VCC_LO, VCC_HI, NULL, EXEC_LO, EXEC_HI, SCC = SrcEnum.VCC_LO, SrcEnum.VCC_HI, SrcEnum.NULL, SrcEnum.EXEC_LO, SrcEnum.EXEC_HI, SrcEnum.SCC
 
-# Inline constants for src operands 128-254
+# VOP3 ops that use 64-bit operands (and thus 64-bit literals when src is 255)
+_VOP3_64BIT_OPS = {op.value for op in VOP3Op if op.name.endswith(('_F64', '_B64', '_I64', '_U64'))}
+
+# Inline constants for src operands 128-254 (f32 format for most instructions)
 _INLINE_CONSTS = [0] * 127
 for _i in range(65): _INLINE_CONSTS[_i] = _i
 for _i in range(1, 17): _INLINE_CONSTS[64 + _i] = ((-_i) & 0xffffffff)
 for _k, _v in {SrcEnum.POS_HALF: 0x3f000000, SrcEnum.NEG_HALF: 0xbf000000, SrcEnum.POS_ONE: 0x3f800000, SrcEnum.NEG_ONE: 0xbf800000,
                SrcEnum.POS_TWO: 0x40000000, SrcEnum.NEG_TWO: 0xc0000000, SrcEnum.POS_FOUR: 0x40800000, SrcEnum.NEG_FOUR: 0xc0800000,
                SrcEnum.INV_2PI: 0x3e22f983}.items(): _INLINE_CONSTS[_k - 128] = _v
+
+# Inline constants for VOP3P packed f16 operations (f16 value in low 16 bits only, high 16 bits are 0)
+# Hardware does NOT replicate the constant - opsel_hi controls which half is used for the hi result
+_INLINE_CONSTS_F16 = [0] * 127
+for _i in range(65): _INLINE_CONSTS_F16[_i] = _i  # Integer constants in low 16 bits only
+for _i in range(1, 17): _INLINE_CONSTS_F16[64 + _i] = (-_i) & 0xffff  # Negative integers in low 16 bits
+for _k, _v in {SrcEnum.POS_HALF: 0x3800, SrcEnum.NEG_HALF: 0xb800, SrcEnum.POS_ONE: 0x3c00, SrcEnum.NEG_ONE: 0xbc00,
+               SrcEnum.POS_TWO: 0x4000, SrcEnum.NEG_TWO: 0xc000, SrcEnum.POS_FOUR: 0x4400, SrcEnum.NEG_FOUR: 0xc400,
+               SrcEnum.INV_2PI: 0x3118}.items(): _INLINE_CONSTS_F16[_k - 128] = _v  # f16 values in low 16 bits
+
+# Inline constants for 64-bit operations (f64 format)
+# Integer constants 0-64 are zero-extended to 64 bits; -1 to -16 are sign-extended
+# Float constants are the f64 representation of the value
+import struct as _struct
+_INLINE_CONSTS_F64 = [0] * 127
+for _i in range(65): _INLINE_CONSTS_F64[_i] = _i  # Integer constants 0-64 zero-extended
+for _i in range(1, 17): _INLINE_CONSTS_F64[64 + _i] = ((-_i) & 0xffffffffffffffff)  # -1 to -16 sign-extended
+for _k, _v in {SrcEnum.POS_HALF: 0.5, SrcEnum.NEG_HALF: -0.5, SrcEnum.POS_ONE: 1.0, SrcEnum.NEG_ONE: -1.0,
+               SrcEnum.POS_TWO: 2.0, SrcEnum.NEG_TWO: -2.0, SrcEnum.POS_FOUR: 4.0, SrcEnum.NEG_FOUR: -4.0,
+               SrcEnum.INV_2PI: 0.15915494309189535}.items():
+  _INLINE_CONSTS_F64[_k - 128] = _struct.unpack('<Q', _struct.pack('<d', _v))[0]
 
 # Memory access
 _valid_mem_ranges: list[tuple[int, int]] = []
@@ -95,7 +119,19 @@ class WaveState:
     if v == 255: return self.literal
     return self.vgpr[lane][v - 256] if v <= 511 else 0
 
+  def rsrc_f16(self, v: int, lane: int) -> int:
+    """Read source operand for VOP3P packed f16 operations. Uses f16 inline constants."""
+    if v < SGPR_COUNT: return self.sgpr[v]
+    if v == SCC: return self.scc
+    if v < 255: return _INLINE_CONSTS_F16[v - 128]
+    if v == 255: return self.literal
+    return self.vgpr[lane][v - 256] if v <= 511 else 0
+
   def rsrc64(self, v: int, lane: int) -> int:
+    """Read 64-bit source operand. For inline constants, returns 64-bit representation."""
+    # Inline constants 128-254 need special handling for 64-bit ops
+    if 128 <= v < 255: return _INLINE_CONSTS_F64[v - 128]
+    if v == 255: return self.literal  # 32-bit literal, caller handles extension
     return self.rsrc(v, lane) | ((self.rsrc(v+1, lane) if v < VCC_LO or 256 <= v <= 511 else 0) << 32)
 
   def pend_sgpr_lane(self, reg: int, lane: int, val: int):
@@ -131,13 +167,23 @@ def decode_program(data: bytes) -> Program:
     inst_class, is_64 = decode_format(word)
     if inst_class is None: i += 4; continue
     base_size = 8 if is_64 else 4
-    inst = inst_class.from_bytes(data[i:i+base_size])
+    # Pass enough data for potential 64-bit literal (base + 8 bytes max)
+    inst = inst_class.from_bytes(data[i:i+base_size+8])
     for name, val in inst._values.items(): setattr(inst, name, _unwrap(val))
-    has_literal = any(getattr(inst, fld, None) == 255 for fld in ('src0', 'src1', 'src2', 'ssrc0', 'ssrc1', 'srcx0', 'srcy0'))
-    if inst_class == VOP2 and inst.op in (44, 45, 55, 56): has_literal = True
-    if inst_class == VOPD and (inst.opx in (1, 2) or inst.opy in (1, 2)): has_literal = True
-    if inst_class == SOP2 and inst.op in (69, 70): has_literal = True
-    if has_literal: inst._literal = int.from_bytes(data[i+base_size:i+base_size+4], 'little')
+    # from_bytes already handles literal reading, including 64-bit literals for F64 ops
+    # Only read literal here if from_bytes didn't set it (for cases from_bytes doesn't handle)
+    if inst._literal is None:
+      has_literal = any(getattr(inst, fld, None) == 255 for fld in ('src0', 'src1', 'src2', 'ssrc0', 'ssrc1', 'srcx0', 'srcy0'))
+      if inst_class == VOP2 and inst.op in (44, 45, 55, 56): has_literal = True
+      if inst_class == VOPD and (inst.opx in (1, 2) or inst.opy in (1, 2)): has_literal = True
+      if inst_class == SOP2 and inst.op in (69, 70): has_literal = True
+      if has_literal:
+        # 64-bit ops (ending in _F64, _B64, _I64, _U64) use 64-bit literals
+        op_val = inst._values.get('op')
+        if hasattr(op_val, 'value'): op_val = op_val.value
+        is_64bit = inst_class is VOP3 and op_val in _VOP3_64BIT_OPS
+        lit_size = 8 if is_64bit else 4
+        inst._literal = int.from_bytes(data[i+base_size:i+base_size+lit_size], 'little')
     inst._words = inst.size() // 4
     result[i // 4] = inst
     i += inst._words * 4
@@ -326,9 +372,10 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
       if lane == 0:  # Only execute once per wave, write results for all lanes
         exec_wmma(st, inst, op)
       return
-    s0_raw = st.rsrc(inst.src0, lane)
-    s1_raw = st.rsrc(inst.src1, lane)
-    s2_raw = st.rsrc(inst.src2, lane) if inst.src2 is not None else 0
+    # Use rsrc_f16 for VOP3P to get correct f16 inline constants
+    s0_raw = st.rsrc_f16(inst.src0, lane)
+    s1_raw = st.rsrc_f16(inst.src1, lane)
+    s2_raw = st.rsrc_f16(inst.src2, lane) if inst.src2 is not None else 0
     # Handle opsel (which 16-bit halves to use for each source)
     opsel = getattr(inst, 'opsel', 0)
     opsel_hi = getattr(inst, 'opsel_hi', 3)  # Default: use hi for hi result

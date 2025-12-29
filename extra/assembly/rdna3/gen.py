@@ -178,7 +178,15 @@ def generate(output_path: pathlib.Path|str|None = None) -> dict:
           suffix = "_e64"
         else:
           suffix = ""
-        lines.append(f"{name.lower()}{suffix} = functools.partial({tgt}.{name}{seg})")
+        # FMAMK/FMAAK have a literal constant K that must be passed via literal= kwarg
+        # FMAMK: D = S0.f * K + S1.f (K is 3rd operand in assembly syntax)
+        # FMAAK: D = S0.f * S1.f + K (K is 4th operand in assembly syntax)
+        if name in ('V_FMAMK_F32', 'V_FMAMK_F16'):
+          lines.append(f"def {name.lower()}{suffix}(vdst, src0, K, vsrc1): return {fmt}({cls_name}.{name}, vdst, src0, vsrc1, literal=K)")
+        elif name in ('V_FMAAK_F32', 'V_FMAAK_F16'):
+          lines.append(f"def {name.lower()}{suffix}(vdst, src0, vsrc1, K): return {fmt}({cls_name}.{name}, vdst, src0, vsrc1, literal=K)")
+        else:
+          lines.append(f"{name.lower()}{suffix} = functools.partial({tgt}.{name}{seg})")
   # export SrcEnum values, but skip DPP8/DPP16 which conflict with class names
   skip_exports = {'DPP8', 'DPP16'}
   lines += [""] + [f"{name} = SrcEnum.{name}" for _, name in sorted(src_enum.items()) if name not in skip_exports] + ["OFF = NULL\n"]

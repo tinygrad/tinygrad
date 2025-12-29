@@ -24,6 +24,8 @@ OUT_BYTES = VGPR_BYTES + SGPR_BYTES + 8  # + vcc + scc
 
 def f2i(f: float) -> int: return _i32(f)
 def i2f(i: int) -> float: return _f32(i)
+def f2i64(f: float) -> int: return struct.unpack('<Q', struct.pack('<d', f))[0]
+def i642f(i: int) -> float: return struct.unpack('<d', struct.pack('<Q', i))[0]
 
 def assemble(instructions: list) -> bytes:
   return b''.join(inst.to_bytes() for inst in instructions)
@@ -1554,6 +1556,179 @@ class TestWMMA(unittest.TestCase):
       for reg in range(8):
         result = st.vgpr[lane][reg]
         self.assertEqual(result, expected, f"v[{reg}] lane {lane}: expected 0x{expected:08x} (21.0), got 0x{result:08x} ({i2f(result)})")
+
+
+class TestVOP3P(unittest.TestCase):
+  """Tests for VOP3P packed 16-bit operations."""
+
+  def test_v_pk_add_f16_basic(self):
+    """V_PK_ADD_F16 adds two packed f16 values."""
+    from extra.assembly.rdna3.pcode import _f16
+    # v0 = packed (1.0, 2.0), v1 = packed (3.0, 4.0)
+    # Result should be packed (4.0, 6.0)
+    instructions = [
+      s_mov_b32(s[0], 0x40003c00),  # packed f16: hi=2.0, lo=1.0
+      s_mov_b32(s[1], 0x44004200),  # packed f16: hi=4.0, lo=3.0
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_pk_add_f16(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    # Expected: lo=1.0+3.0=4.0 (0x4400), hi=2.0+4.0=6.0 (0x4600) -> 0x46004400
+    lo = _f16(result & 0xffff)
+    hi = _f16((result >> 16) & 0xffff)
+    self.assertAlmostEqual(lo, 4.0, places=2, msg=f"lo: expected 4.0, got {lo}")
+    self.assertAlmostEqual(hi, 6.0, places=2, msg=f"hi: expected 6.0, got {hi}")
+
+  def test_v_pk_add_f16_with_inline_constant(self):
+    """V_PK_ADD_F16 with inline constant POS_ONE (1.0).
+    Inline constants for VOP3P are f16 values in the low 16 bits only.
+    The opsel_hi bits (default=0b11) select lo half for hi result, so both halves use the constant.
+    """
+    from extra.assembly.rdna3.pcode import _f16
+    # v0 = packed (1.0, 1.0), add POS_ONE
+    # With default opsel_hi=0b11: both lo and hi results use lo half of src1 (the constant)
+    # But opsel_hi=1 means src1 hi comes from lo half - wait, let me check the actual encoding
+    # Default opsel_hi=3 means: bit0=1 (src0 hi from hi), bit1=1 (src1 hi from hi)
+    # Since inline constant has 0 in hi half, hi result = v0.hi + 0 = 1.0
+    instructions = [
+      s_mov_b32(s[0], 0x3c003c00),  # packed f16: hi=1.0, lo=1.0
+      v_mov_b32_e32(v[0], s[0]),
+      v_pk_add_f16(v[1], v[0], SrcEnum.POS_ONE),  # Add inline constant 1.0
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1]
+    lo = _f16(result & 0xffff)
+    hi = _f16((result >> 16) & 0xffff)
+    # lo = 1.0 + 1.0 = 2.0, hi = 1.0 + 0.0 = 1.0 (inline const hi half is 0)
+    self.assertAlmostEqual(lo, 2.0, places=2, msg=f"lo: expected 2.0, got {lo} (result=0x{result:08x})")
+    self.assertAlmostEqual(hi, 1.0, places=2, msg=f"hi: expected 1.0, got {hi} (result=0x{result:08x})")
+
+  def test_v_pk_mul_f16_basic(self):
+    """V_PK_MUL_F16 multiplies two packed f16 values."""
+    from extra.assembly.rdna3.pcode import _f16
+    # v0 = packed (2.0, 3.0), v1 = packed (4.0, 5.0)
+    # Result should be packed (8.0, 15.0)
+    instructions = [
+      s_mov_b32(s[0], 0x42004000),  # packed f16: hi=3.0, lo=2.0
+      s_mov_b32(s[1], 0x45004400),  # packed f16: hi=5.0, lo=4.0
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_pk_mul_f16(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    lo = _f16(result & 0xffff)
+    hi = _f16((result >> 16) & 0xffff)
+    self.assertAlmostEqual(lo, 8.0, places=1, msg=f"lo: expected 8.0, got {lo}")
+    self.assertAlmostEqual(hi, 15.0, places=1, msg=f"hi: expected 15.0, got {hi}")
+
+  def test_v_pk_mul_f16_with_inline_constant(self):
+    """V_PK_MUL_F16 with inline constant POS_TWO (2.0).
+    Inline constant has value only in low 16 bits, hi is 0.
+    """
+    from extra.assembly.rdna3.pcode import _f16
+    # v0 = packed (3.0, 4.0), multiply by POS_TWO
+    # lo = 3.0 * 2.0 = 6.0, hi = 4.0 * 0.0 = 0.0 (inline const hi is 0)
+    instructions = [
+      s_mov_b32(s[0], 0x44004200),  # packed f16: hi=4.0, lo=3.0
+      v_mov_b32_e32(v[0], s[0]),
+      v_pk_mul_f16(v[1], v[0], SrcEnum.POS_TWO),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1]
+    lo = _f16(result & 0xffff)
+    hi = _f16((result >> 16) & 0xffff)
+    self.assertAlmostEqual(lo, 6.0, places=1, msg=f"lo: expected 6.0, got {lo}")
+    self.assertAlmostEqual(hi, 0.0, places=1, msg=f"hi: expected 0.0, got {hi}")
+
+  def test_v_pk_fma_f16_basic(self):
+    """V_PK_FMA_F16: D = A * B + C for packed f16."""
+    from extra.assembly.rdna3.pcode import _f16
+    # A = packed (2.0, 3.0), B = packed (4.0, 5.0), C = packed (1.0, 1.0)
+    # Result should be packed (2*4+1=9.0, 3*5+1=16.0)
+    instructions = [
+      s_mov_b32(s[0], 0x42004000),  # A: hi=3.0, lo=2.0
+      s_mov_b32(s[1], 0x45004400),  # B: hi=5.0, lo=4.0
+      s_mov_b32(s[2], 0x3c003c00),  # C: hi=1.0, lo=1.0
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_pk_fma_f16(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][3]
+    lo = _f16(result & 0xffff)
+    hi = _f16((result >> 16) & 0xffff)
+    self.assertAlmostEqual(lo, 9.0, places=1, msg=f"lo: expected 9.0, got {lo}")
+    self.assertAlmostEqual(hi, 16.0, places=0, msg=f"hi: expected 16.0, got {hi}")
+
+
+class TestF64Conversions(unittest.TestCase):
+  """Tests for 64-bit float operations and conversions."""
+
+  def test_v_add_f64_inline_constant(self):
+    """V_ADD_F64 with inline constant POS_ONE (1.0) as f64."""
+    one_f64 = f2i64(1.0)
+    instructions = [
+      s_mov_b32(s[0], one_f64 & 0xffffffff),
+      s_mov_b32(s[1], one_f64 >> 32),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_add_f64(v[2:4], v[0:2], SrcEnum.POS_ONE),  # 1.0 + 1.0 = 2.0
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f(st.vgpr[0][2] | (st.vgpr[0][3] << 32))
+    self.assertAlmostEqual(result, 2.0, places=5)
+
+  def test_v_ldexp_f64_negative_exponent(self):
+    """V_LDEXP_F64 with negative exponent (-32)."""
+    val = -8.0
+    val_bits = f2i64(val)
+    expected = -8.0 * (2.0 ** -32)  # -1.862645149230957e-09
+    instructions = [
+      s_mov_b32(s[0], val_bits & 0xffffffff),
+      s_mov_b32(s[1], val_bits >> 32),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_ldexp_f64(v[2:4], v[0:2], 0xffffffe0),  # -32
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f(st.vgpr[0][2] | (st.vgpr[0][3] << 32))
+    self.assertAlmostEqual(result, expected, places=15)
+
+  def test_f64_to_i64_conversion_sequence(self):
+    """Test the f64->i64 conversion sequence used by the compiler.
+
+    The compiler generates:
+      v_trunc_f64 -> v_ldexp_f64 (by -32) -> v_floor_f64 -> v_fma_f64 (by 2^32)
+      -> v_cvt_u32_f64 (low bits) -> v_cvt_i32_f64 (high bits)
+    """
+    val = -8.0
+    val_bits = f2i64(val)
+    lit = 4294967296.0  # 2^32
+    lit_bits = f2i64(lit)
+
+    instructions = [
+      s_mov_b32(s[0], val_bits & 0xffffffff),
+      s_mov_b32(s[1], val_bits >> 32),
+      v_trunc_f64_e32(v[0:2], s[0:2]),
+      v_ldexp_f64(v[2:4], v[0:2], 0xffffffe0),  # -32
+      v_floor_f64_e32(v[2:4], v[2:4]),
+      s_mov_b32(s[2], lit_bits & 0xffffffff),
+      s_mov_b32(s[3], lit_bits >> 32),
+      v_fma_f64(v[0:2], s[2:4], v[2:4], v[0:2]),
+      v_cvt_u32_f64_e32(v[4], v[0:2]),
+      v_cvt_i32_f64_e32(v[5], v[2:4]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # v4 = low 32 bits, v5 = high 32 bits (sign extended)
+    lo = st.vgpr[0][4]
+    hi = st.vgpr[0][5]
+    # For -8: lo should be 0xfffffff8, hi should be 0xffffffff
+    result = struct.unpack('<q', struct.pack('<II', lo, hi))[0]
+    self.assertEqual(result, -8, f"Expected -8, got {result} (lo=0x{lo:08x}, hi=0x{hi:08x})")
 
 
 if __name__ == '__main__':

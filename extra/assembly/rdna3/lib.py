@@ -206,13 +206,33 @@ class Inst:
       if n in self._values and not isinstance(v := self._values[n], RawImm) and isinstance(v, int) and not isinstance(v, IntEnum) and not (0 <= v <= 64 or -16 <= v <= -1): return v
     return None
 
+  def _is_64bit_op(self) -> bool:
+    """Check if this instruction uses 64-bit operands (and thus 64-bit literals)."""
+    op = self._values.get('op')
+    if op is None: return False
+    # op may be an enum (from __init__) or an int (from from_int)
+    if hasattr(op, 'name'): return op.name.endswith(('_F64', '_B64', '_I64', '_U64'))
+    # For VOP3, check against known 64-bit op values
+    if self.__class__.__name__ == 'VOP3':
+      from extra.assembly.rdna3.autogen import VOP3Op
+      try:
+        return VOP3Op(op).name.endswith(('_F64', '_B64', '_I64', '_U64'))
+      except ValueError:
+        return False
+    return False
+
   def to_bytes(self) -> bytes:
     result = self.to_int().to_bytes(self._size(), 'little')
-    return result + (lit & 0xffffffff).to_bytes(4, 'little') if (lit := self._get_literal() or getattr(self, '_literal', None)) else result
+    lit = self._get_literal() or getattr(self, '_literal', None)
+    if lit is None: return result
+    lit_size = 8 if self._is_64bit_op() else 4
+    return result + (lit & ((1 << (lit_size * 8)) - 1)).to_bytes(lit_size, 'little')
 
   @classmethod
   def _size(cls) -> int: return 4 if issubclass(cls, Inst32) else 8
-  def size(self) -> int: return self._size() + (4 if self._literal is not None else 0)
+  def size(self) -> int:
+    if self._literal is None: return self._size()
+    return self._size() + (8 if self._is_64bit_op() else 4)
 
   @classmethod
   def from_int(cls, word: int):
@@ -229,7 +249,11 @@ class Inst:
     has_literal = has_literal or (cls.__name__ == 'SOP2' and op_val in (69, 70))
     for n in SRC_FIELDS:
       if n in inst._values and isinstance(inst._values[n], RawImm) and inst._values[n].val == 255: has_literal = True
-    if has_literal and len(data) >= cls._size() + 4: inst._literal = int.from_bytes(data[cls._size():cls._size()+4], 'little')
+    if has_literal:
+      # Use _is_64bit_op which handles both enum and int op values
+      lit_size = 8 if inst._is_64bit_op() else 4
+      if len(data) >= cls._size() + lit_size:
+        inst._literal = int.from_bytes(data[cls._size():cls._size()+lit_size], 'little')
     return inst
 
   def __repr__(self):
