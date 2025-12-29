@@ -20,7 +20,8 @@ _VOP3_64BIT_OPS = {op.value for op in VOP3Op if op.name.endswith(('_F64', '_B64'
 # Ops where src1 is 32-bit (exponent/shift amount) even though the op name suggests 64-bit
 _VOP3_64BIT_OPS_32BIT_SRC1 = {VOP3Op.V_LDEXP_F64.value}
 # Ops with 16-bit types in name (for source/dest handling)
-_VOP3_16BIT_OPS = {op for op in VOP3Op if any(s in op.name for s in ('_F16', '_B16', '_I16', '_U16'))}
+# Exception: SAD/MSAD ops take 32-bit packed sources and extract 16-bit/8-bit chunks internally
+_VOP3_16BIT_OPS = {op for op in VOP3Op if any(s in op.name for s in ('_F16', '_B16', '_I16', '_U16')) and 'SAD' not in op.name}
 _VOP1_16BIT_OPS = {op for op in VOP1Op if any(s in op.name for s in ('_F16', '_B16', '_I16', '_U16'))}
 _VOP2_16BIT_OPS = {op for op in VOP2Op if any(s in op.name for s in ('_F16', '_B16', '_I16', '_U16'))}
 # CVT ops with 32/64-bit source (despite 16-bit in name)
@@ -382,11 +383,11 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     else:
       op_cls, op, src0, src1, src2, vdst = VOP3Op, VOP3Op(inst.op), inst.src0, inst.src1, inst.src2, inst.vdst
       # V_PERM_B32: byte permutation - not in pseudocode PDF, implement directly
-      # D0[byte_i] = selector[byte_i] < 8 ? {src1, src0}[selector[byte_i]] : (selector[byte_i] >= 0xD ? 0xFF : 0x00)
+      # D0[byte_i] = selector[byte_i] < 8 ? {src0, src1}[selector[byte_i]] : (selector[byte_i] >= 0xD ? 0xFF : 0x00)
       if op == VOP3Op.V_PERM_B32:
         s0, s1, s2 = st.rsrc(inst.src0, lane), st.rsrc(inst.src1, lane), st.rsrc(inst.src2, lane)
-        # Combine src0 and src1 into 8-byte value: src0 is bytes 0-3, src1 is bytes 4-7
-        combined = (s0 & 0xffffffff) | ((s1 & 0xffffffff) << 32)
+        # Combine src1 and src0 into 8-byte value: src1 is bytes 0-3, src0 is bytes 4-7
+        combined = (s1 & 0xffffffff) | ((s0 & 0xffffffff) << 32)
         result = 0
         for i in range(4):  # 4 result bytes
           sel = (s2 >> (i * 8)) & 0xff  # byte selector for this position
