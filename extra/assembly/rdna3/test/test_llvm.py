@@ -4,6 +4,7 @@ import unittest, re, subprocess
 from tinygrad.helpers import fetch
 from extra.assembly.rdna3.autogen import *
 from extra.assembly.rdna3.asm import asm
+from extra.assembly.rdna3.test.test_roundtrip import _get_llvm_mc
 
 LLVM_BASE = "https://raw.githubusercontent.com/llvm/llvm-project/main/llvm/test/MC/AMDGPU"
 
@@ -83,7 +84,7 @@ def compile_asm_batch(instrs: list[str]) -> list[bytes | None]:
   asm_text = ".text\n" + "\n".join(instrs) + "\n"
   try:
     result = subprocess.run(
-      ['llvm-mc', '-triple=amdgcn', '-mcpu=gfx1100', '-mattr=+real-true16,+wavefrontsize32', '-show-encoding'],
+      [_get_llvm_mc(), '-triple=amdgcn', '-mcpu=gfx1100', '-mattr=+real-true16,+wavefrontsize32', '-show-encoding'],
       input=asm_text, capture_output=True, text=True, timeout=30)
     if result.returncode != 0: return [None] * len(instrs)
     # Parse all encodings from output - match instruction lines with encoding comments
