@@ -3,22 +3,10 @@ import unittest, ctypes, os
 from dataclasses import dataclass
 from pathlib import Path
 
-# Set environment before any tinygrad imports to use MOCKGPU
-# This allows generating AMD GPU kernels without requiring real hardware
-os.environ["AMD"] = "1"
-os.environ["MOCKGPU"] = "1"
-
 from extra.assembly.rdna3.emu import WaveState, decode_program, step_wave, WAVE_SIZE
+from extra.assembly.rdna3.test.helpers import KernelInfo, setup_mockgpu_env
 
 REMU_PATH = Path(__file__).parents[3] / "remu/target/release/libremu.so"
-
-@dataclass
-class KernelInfo:
-  code: bytes
-  global_size: tuple[int, int, int]
-  local_size: tuple[int, int, int]
-  buf_idxs: list[int]  # indices into shared buffer pool
-  buf_sizes: list[int]  # sizes for each buffer index
 
 def _is_f32_nan(bits: int) -> bool:
   """Check if 32-bit value is a NaN (exponent all 1s, mantissa non-zero)."""
@@ -206,6 +194,7 @@ def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: t
               for i in range(128): python.set_sgpr(i, rust_after.sgpr[i])
               for lane in range(n_lanes):
                 for i in range(256): python.set_vgpr(lane, i, rust_after.vgpr[lane][i])
+              assert python.state is not None
               python.state.pc, python.state.scc, python.state.vcc, python.state.exec_mask = rust_after.pc, rust_after.scc, rust_after.vcc, rust_after.exec_mask
 
             if rust_result == -1:
@@ -294,7 +283,14 @@ def compare_emulators_with_memory(kernel: bytes, n_lanes: int, buf_sizes: list, 
   return ok, msg
 
 def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelInfo], dict[int, int], dict[int, bytes]]:
-  """Compile a tinygrad operation and extract all kernels with their buffer mappings."""
+  """Compile a tinygrad operation and extract all kernels with their buffer mappings.
+
+  Sets up MOCKGPU environment before importing tinygrad if not already set.
+  """
+  # Ensure MOCKGPU is set before tinygrad Device is accessed
+  if os.environ.get("MOCKGPU") != "1":
+    setup_mockgpu_env()
+
   from tinygrad import Tensor
   from tinygrad.runtime.support.elf import elf_loader
 

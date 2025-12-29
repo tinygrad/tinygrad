@@ -1,19 +1,10 @@
 #!/usr/bin/env python3
 """Roundtrip tests: generate tinygrad kernels, decode instructions, re-encode, verify match."""
-import unittest, io, sys, re, subprocess, shutil
+import unittest, io, sys, re, subprocess, os
 from extra.assembly.rdna3.autogen import *
 from extra.assembly.rdna3.lib import Inst
 from extra.assembly.rdna3.asm import asm
-
-def _get_llvm_mc():
-  for p in ['llvm-mc', 'llvm-mc-21', 'llvm-mc-20']:  # prefer newer llvm-mc
-    if shutil.which(p): return p
-  raise FileNotFoundError("llvm-mc not found")
-
-def _get_llvm_objdump():
-  for p in ['llvm-objdump', 'llvm-objdump-21', 'llvm-objdump-20']:
-    if shutil.which(p): return p
-  raise FileNotFoundError("llvm-objdump not found")
+from extra.assembly.rdna3.test.helpers import get_llvm_mc, get_llvm_objdump
 
 # Instruction format detection based on encoding bits
 def detect_format(data: bytes) -> type[Inst] | None:
@@ -78,7 +69,7 @@ def disassemble_lib(lib: bytes, compiler) -> list[tuple[str, bytes]]:
 
 def compile_asm(instr: str, compiler=None) -> bytes:
   """Compile a single instruction with llvm-mc and return the machine code bytes."""
-  llvm_mc = _get_llvm_mc()
+  llvm_mc = get_llvm_mc()
   result = subprocess.run(
     [llvm_mc, '-triple=amdgcn', '-mcpu=gfx1100', '-mattr=+real-true16,+wavefrontsize32', '-show-encoding'],
     input=f".text\n{instr}\n", capture_output=True, text=True)
@@ -95,7 +86,7 @@ def compile_asm(instr: str, compiler=None) -> bytes:
 def compile_asm_batch(instrs: list[str]) -> list[bytes]:
   """Compile multiple instructions with a single llvm-mc call."""
   if not instrs: return []
-  llvm_mc = _get_llvm_mc()
+  llvm_mc = get_llvm_mc()
   src = ".text\n" + "\n".join(instrs) + "\n"
   result = subprocess.run(
     [llvm_mc, '-triple=amdgcn', '-mcpu=gfx1100', '-mattr=+real-true16,+wavefrontsize32', '-show-encoding'],
@@ -112,7 +103,7 @@ def compile_asm_batch(instrs: list[str]) -> list[bytes]:
   if len(encodings) != len(instrs): raise RuntimeError(f"expected {len(instrs)} encodings, got {len(encodings)}")
   return encodings
 
-def compile_and_disasm_batch(instrs: list[str], compiler) -> list[str | None]:
+def compile_and_disasm_batch(instrs: list[str], compiler) -> list[str]:
   """Compile instructions with LLVM and get LLVM's disassembly."""
   import tempfile, os
   if not instrs: return []
@@ -124,14 +115,14 @@ def compile_and_disasm_batch(instrs: list[str], compiler) -> list[str | None]:
     obj_path = f.name
   try:
     result = subprocess.run(
-      [_get_llvm_mc(), '-triple=amdgcn', '-mcpu=gfx1100', '-mattr=+real-true16,+wavefrontsize32', '-filetype=obj', '-o', obj_path],
+      [get_llvm_mc(), '-triple=amdgcn', '-mcpu=gfx1100', '-mattr=+real-true16,+wavefrontsize32', '-filetype=obj', '-o', obj_path],
       input=src, capture_output=True, text=True)
     if result.returncode != 0: raise RuntimeError(f"llvm-mc failed: {result.stderr.strip()}")
     # Disassemble with llvm-objdump
-    result = subprocess.run([_get_llvm_objdump(), '-d', '--mcpu=gfx1100', obj_path], capture_output=True, text=True)
+    result = subprocess.run([get_llvm_objdump(), '-d', '--mcpu=gfx1100', obj_path], capture_output=True, text=True)
     if result.returncode != 0: raise RuntimeError(f"llvm-objdump failed: {result.stderr.strip()}")
     # Parse disassembly output
-    results = []
+    results: list[str] = []
     for line in result.stdout.splitlines():
       if '//' not in line: continue
       instr = line.split('//')[0].strip()
@@ -156,7 +147,7 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
     compiler = HIPCompiler('gfx1100')
 
     # First pass: decode all instructions and collect info
-    decoded_instrs = []  # list of (ki, offset, orig_bytes, decoded, our_disasm, decode_ok, decode_err)
+    decoded_instrs: list[tuple] = []  # list of (ki, offset, orig_bytes, decoded, our_disasm, decode_ok, decode_err)
     for ki, kernel in enumerate(kernels):
       offset = 0
       while offset < len(kernel.code):
@@ -178,7 +169,7 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
           reencoded = decoded.to_bytes()
           our_disasm = decoded.disasm()
           decode_ok = reencoded == orig_bytes
-          decode_err = None if decode_ok else f"orig={orig_bytes.hex()} reenc={reencoded.hex()}"
+          decode_err: str | None = None if decode_ok else f"orig={orig_bytes.hex()} reenc={reencoded.hex()}"
           decoded_instrs.append((ki, offset, orig_bytes, decoded, our_disasm, decode_ok, decode_err))
         except Exception as e:
           decoded_instrs.append((ki, offset, remaining[:base_size], None, None, False, str(e)))
@@ -187,8 +178,8 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
         offset += size
 
     # Collect disasm strings for batched LLVM calls - skip unknown opcodes (op_X) that LLVM can't compile
-    asm_test_instrs = []  # (idx, our_disasm) for asm test
-    disasm_test_instrs = []  # (idx, our_disasm) for disasm comparison test
+    asm_test_instrs: list[tuple[int, str]] = []  # (idx, our_disasm) for asm test
+    disasm_test_instrs: list[tuple[int, str]] = []  # (idx, our_disasm) for disasm comparison test
 
     for idx, (ki, offset, orig_bytes, decoded, our_disasm, decode_ok, decode_err) in enumerate(decoded_instrs):
       if our_disasm is None: continue
@@ -209,7 +200,9 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
     decode_passed, decode_failed, decode_skipped = 0, 0, 0
     asm_passed, asm_failed, asm_skipped = 0, 0, 0
     disasm_passed, disasm_failed, disasm_skipped = 0, 0, 0
-    decode_failures, asm_failures, disasm_failures = [], [], []
+    decode_failures: list[str] = []
+    asm_failures: list[str] = []
+    disasm_failures: list[str] = []
 
     for idx, (ki, offset, orig_bytes, decoded, our_disasm, decode_ok, decode_err) in enumerate(decoded_instrs):
       # Decode test
@@ -226,18 +219,15 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
         asm_skipped += 1
       elif idx in asm_llvm_map:
         llvm_bytes = asm_llvm_map[idx]
-        if llvm_bytes is None:
+        try:
+          our_bytes = asm(our_disasm).to_bytes()
+          if our_bytes[:len(llvm_bytes)] == llvm_bytes:
+            asm_passed += 1
+          else:
+            asm_failed += 1
+            asm_failures.append(f"K{ki}@{offset}: '{our_disasm}': ours={our_bytes[:len(llvm_bytes)].hex()} llvm={llvm_bytes.hex()}")
+        except Exception:
           asm_skipped += 1
-        else:
-          try:
-            our_bytes = asm(our_disasm).to_bytes()
-            if our_bytes[:len(llvm_bytes)] == llvm_bytes:
-              asm_passed += 1
-            else:
-              asm_failed += 1
-              asm_failures.append(f"K{ki}@{offset}: '{our_disasm}': ours={our_bytes[:len(llvm_bytes)].hex()} llvm={llvm_bytes.hex()}")
-          except Exception:
-            asm_skipped += 1
       else:
         asm_skipped += 1
 
@@ -246,9 +236,7 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
         disasm_skipped += 1
       elif idx in disasm_llvm_map:
         llvm_disasm = disasm_llvm_map[idx]
-        if llvm_disasm is None:
-          disasm_skipped += 1
-        elif our_disasm == llvm_disasm:
+        if our_disasm == llvm_disasm:
           disasm_passed += 1
         else:
           disasm_failed += 1

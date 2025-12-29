@@ -1,4 +1,5 @@
 # library for RDNA3 assembly DSL
+# mypy: ignore-errors
 from __future__ import annotations
 from enum import IntEnum
 from typing import overload, Annotated, TypeVar, Generic

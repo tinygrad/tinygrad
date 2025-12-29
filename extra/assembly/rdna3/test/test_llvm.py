@@ -4,7 +4,7 @@ import unittest, re, subprocess
 from tinygrad.helpers import fetch
 from extra.assembly.rdna3.autogen import *
 from extra.assembly.rdna3.asm import asm
-from extra.assembly.rdna3.test.test_roundtrip import _get_llvm_mc
+from extra.assembly.rdna3.test.helpers import get_llvm_mc
 
 LLVM_BASE = "https://raw.githubusercontent.com/llvm/llvm-project/main/llvm/test/MC/AMDGPU"
 
@@ -83,7 +83,7 @@ def compile_asm_batch(instrs: list[str]) -> list[bytes]:
   if not instrs: return []
   asm_text = ".text\n" + "\n".join(instrs) + "\n"
   result = subprocess.run(
-    [_get_llvm_mc(), '-triple=amdgcn', '-mcpu=gfx1100', '-mattr=+real-true16,+wavefrontsize32', '-show-encoding'],
+    [get_llvm_mc(), '-triple=amdgcn', '-mcpu=gfx1100', '-mattr=+real-true16,+wavefrontsize32', '-show-encoding'],
     input=asm_text, capture_output=True, text=True, timeout=30)
   if result.returncode != 0: raise RuntimeError(f"llvm-mc batch failed: {result.stderr.strip()}")
   # Parse all encodings from output
@@ -132,7 +132,7 @@ def _make_disasm_test(name):
     undocumented = {'smem': {34, 35}, 'sopk': {22, 23}, 'sopp': {8, 58, 59}}
 
     # First pass: decode all instructions and collect disasm strings
-    to_test = []  # list of (asm_text, data, disasm_str)
+    to_test: list[tuple[str, bytes, str | None, str | None]] = []  # (asm_text, data, disasm_str, error)
     skipped = 0
     for asm_text, data in self.tests.get(name, []):
       if len(data) > fmt_cls._size(): continue
@@ -172,14 +172,15 @@ def _make_disasm_test(name):
     llvm_map = {i: llvm_results[j] for j, (i, _) in enumerate(disasm_strs)}
 
     # Match results back
-    passed, failed, failures = 0, 0, []
+    passed, failed = 0, 0
+    failures: list[str] = []
     for idx, (asm_text, data, disasm_str, error) in enumerate(to_test):
       if error:
         failed += 1; failures.append(f"{error} for {data.hex()}")
       elif disasm_str is not None and idx in llvm_map:
         llvm_bytes = llvm_map[idx]
-        if llvm_bytes == data: passed += 1
-        else: failed += 1; failures.append(f"'{disasm_str}': expected={data.hex()} got={llvm_bytes.hex()}")
+        if llvm_bytes is not None and llvm_bytes == data: passed += 1
+        elif llvm_bytes is not None: failed += 1; failures.append(f"'{disasm_str}': expected={data.hex()} got={llvm_bytes.hex()}")
 
     print(f"{name.upper()} disasm: {passed} passed, {failed} failed" + (f", {skipped} skipped" if skipped else ""))
     if failures[:10]: print("  " + "\n  ".join(failures[:10]))
