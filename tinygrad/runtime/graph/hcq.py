@@ -85,7 +85,7 @@ class HCQGraph(MultiGraphRunner):
         enqueue_queue = self.comp_queues[enqueue_dev]
       else:
         assert (enqueue_dev.hw_copy_queue_t is not None), "device must implement a copy queue"
-        enqueue_queue = self.copy_queues.setdefault(enqueue_dev, enqueue_dev.hw_copy_queue_t())
+        enqueue_queue = self.copy_queues.setdefault(enqueue_dev, enqueue_dev.hw_copy_queue_t().wait(self.signals['KICK'], self.kickoff_var))
 
       out_signal = self.signals.setdefault(enqueue_queue, self.devices[0].new_signal(value=0))
 
