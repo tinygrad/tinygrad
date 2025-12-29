@@ -2514,5 +2514,89 @@ class TestNewPcodeHelpers(unittest.TestCase):
     self.assertAlmostEqual(result, 23.0, places=1, msg=f"Expected 23.0, got {result}")
 
 
+class TestQuadmaskWqm(unittest.TestCase):
+  """Tests for S_QUADMASK and S_WQM instructions."""
+
+  def test_s_quadmask_b32_all_quads_active(self):
+    """S_QUADMASK_B32: All quads have at least one active lane."""
+    # Input: 0xFFFFFFFF (all bits set) -> all 8 quads active -> result = 0xFF
+    instructions = [
+      s_mov_b32(s[0], 0xFFFFFFFF),
+      s_quadmask_b32(s[1], s[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.sgpr[1]
+    self.assertEqual(result, 0xFF, f"Expected 0xFF, got 0x{result:x}")
+    self.assertEqual(st.scc, 1, "SCC should be 1 (result != 0)")
+
+  def test_s_quadmask_b32_alternating_quads(self):
+    """S_QUADMASK_B32: Every other quad has lanes active."""
+    # Input: 0x0F0F0F0F -> quads 0,2,4,6 active (bits 0-3, 8-11, 16-19, 24-27)
+    # Result: bits 0,2,4,6 set = 0x55
+    instructions = [
+      s_mov_b32(s[0], 0x0F0F0F0F),
+      s_quadmask_b32(s[1], s[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.sgpr[1]
+    self.assertEqual(result, 0x55, f"Expected 0x55, got 0x{result:x}")
+
+  def test_s_quadmask_b32_no_quads_active(self):
+    """S_QUADMASK_B32: No quads have active lanes."""
+    instructions = [
+      s_mov_b32(s[0], 0),
+      s_quadmask_b32(s[1], s[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.sgpr[1]
+    self.assertEqual(result, 0, f"Expected 0, got 0x{result:x}")
+    self.assertEqual(st.scc, 0, "SCC should be 0 (result == 0)")
+
+  def test_s_quadmask_b32_single_lane_per_quad(self):
+    """S_QUADMASK_B32: Single lane active in each quad."""
+    # Input: 0x11111111 -> bit 0 of each nibble set -> all 8 quads active
+    instructions = [
+      s_mov_b32(s[0], 0x11111111),
+      s_quadmask_b32(s[1], s[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.sgpr[1]
+    self.assertEqual(result, 0xFF, f"Expected 0xFF, got 0x{result:x}")
+
+  def test_s_wqm_b32_all_active(self):
+    """S_WQM_B32: Whole quad mode - if any lane in quad is active, activate all."""
+    # Input: 0x11111111 -> one lane per quad -> output all quads fully active = 0xFFFFFFFF
+    instructions = [
+      s_mov_b32(s[0], 0x11111111),
+      s_wqm_b32(s[1], s[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.sgpr[1]
+    self.assertEqual(result, 0xFFFFFFFF, f"Expected 0xFFFFFFFF, got 0x{result:x}")
+    self.assertEqual(st.scc, 1, "SCC should be 1 (result != 0)")
+
+  def test_s_wqm_b32_alternating_quads(self):
+    """S_WQM_B32: Only some quads have active lanes."""
+    # Input: 0x0000000F -> only quad 0 has lanes -> output = 0x0000000F (quad 0 all active)
+    instructions = [
+      s_mov_b32(s[0], 0x00000001),  # single lane in quad 0
+      s_wqm_b32(s[1], s[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.sgpr[1]
+    self.assertEqual(result, 0x0000000F, f"Expected 0x0000000F, got 0x{result:x}")
+
+  def test_s_wqm_b32_zero(self):
+    """S_WQM_B32: No lanes active."""
+    instructions = [
+      s_mov_b32(s[0], 0),
+      s_wqm_b32(s[1], s[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.sgpr[1]
+    self.assertEqual(result, 0, f"Expected 0, got 0x{result:x}")
+    self.assertEqual(st.scc, 0, "SCC should be 0 (result == 0)")
+
+
 if __name__ == '__main__':
   unittest.main()

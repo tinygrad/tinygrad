@@ -677,6 +677,14 @@ def _expr(e: str) -> str:
   e = e.replace('+INF', 'INF').replace('-INF', '(-INF)')
   e = re.sub(r'NAN\.f\d+', 'float("nan")', e)
 
+  # Verilog bit slice syntax: [start +: width] -> extract width bits starting at start
+  # Convert to Python slice: [start + width - 1 : start]
+  def convert_verilog_slice(m):
+    start, width = m.group(1).strip(), m.group(2).strip()
+    # Convert to high:low slice format
+    return f'[({start}) + ({width}) - 1 : ({start})]'
+  e = re.sub(r'\[([^:\[\]]+)\s*\+:\s*([^:\[\]]+)\]', convert_verilog_slice, e)
+
   # Recursively process bracket contents to handle nested ternaries like S1.u32[x ? a : b]
   def process_brackets(s):
     result, i = [], 0
@@ -774,7 +782,7 @@ INST_PATTERN = re.compile(r'^([SV]_[A-Z0-9_]+)\s+(\d+)\s*$', re.M)
 
 # Patterns that can't be handled by the DSL (require special handling in emu.py)
 UNSUPPORTED = ['SGPR[', 'V_SWAP', 'eval ', 'FATAL_HALT', 'HW_REGISTERS',
-               'PC =', 'PC=', 'PC+', '= PC', '+:', 'vscnt', 'vmcnt', 'expcnt', 'lgkmcnt',
+               'PC =', 'PC=', 'PC+', '= PC', 'vscnt', 'vmcnt', 'expcnt', 'lgkmcnt',
                'CVT_OFF_TABLE', 'ThreadMask',
                'S1[i', 'C.i32', 'S[i]', 'in[', '2.0 / PI',
                'if n.', 'DST.u32', 'addrd = DST', 'addr = DST']  # Malformed pseudocode from PDF

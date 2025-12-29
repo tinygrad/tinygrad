@@ -394,6 +394,94 @@ def _SOP1Op_S_BCNT1_I32_B64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, 
   result['d0_64'] = True
   return result
 
+def _SOP1Op_S_QUADMASK_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # tmp = 0U;
+  # for i in 0 : 7 do
+  # tmp[i] = S0.u32[i * 4 +: 4] != 0U
+  # endfor;
+  # D0.u32 = tmp;
+  # SCC = D0.u32 != 0U
+  S0 = Reg(s0)
+  D0 = Reg(d0)
+  SCC = Reg(scc)
+  tmp = Reg(0)
+  # --- compiled pseudocode ---
+  tmp = Reg(0)
+  for i in range(0, int(7)+1):
+    tmp[i] = S0.u32[(i * 4) + (4) - 1 : (i * 4)] != 0
+  D0.u32 = tmp
+  SCC = Reg(D0.u32 != 0)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': SCC._val & 1}
+  return result
+
+def _SOP1Op_S_QUADMASK_B64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # tmp = 0ULL;
+  # for i in 0 : 15 do
+  # tmp[i] = S0.u64[i * 4 +: 4] != 0ULL
+  # endfor;
+  # D0.u64 = tmp;
+  # SCC = D0.u64 != 0ULL
+  S0 = Reg(s0)
+  D0 = Reg(d0)
+  SCC = Reg(scc)
+  tmp = Reg(0)
+  # --- compiled pseudocode ---
+  tmp = Reg(0)
+  for i in range(0, int(15)+1):
+    tmp[i] = S0.u64[(i * 4) + (4) - 1 : (i * 4)] != 0
+  D0.u64 = tmp
+  SCC = Reg(D0.u64 != 0)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': SCC._val & 1}
+  result['d0_64'] = True
+  return result
+
+def _SOP1Op_S_WQM_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # tmp = 0U;
+  # declare i : 6'U;
+  # for i in 6'0U : 6'31U do
+  # tmp[i] = S0.u32[i & 6'60U +: 6'4U] != 0U
+  # endfor;
+  # D0.u32 = tmp;
+  # SCC = D0.u32 != 0U
+  S0 = Reg(s0)
+  D0 = Reg(d0)
+  SCC = Reg(scc)
+  tmp = Reg(0)
+  # --- compiled pseudocode ---
+  tmp = Reg(0)
+  for i in range(0, int(31)+1):
+    tmp[i] = S0.u32[(i & 60) + (4) - 1 : (i & 60)] != 0
+  D0.u32 = tmp
+  SCC = Reg(D0.u32 != 0)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': SCC._val & 1}
+  return result
+
+def _SOP1Op_S_WQM_B64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # tmp = 0ULL;
+  # declare i : 6'U;
+  # for i in 6'0U : 6'63U do
+  # tmp[i] = S0.u64[i & 6'60U +: 6'4U] != 0ULL
+  # endfor;
+  # D0.u64 = tmp;
+  # SCC = D0.u64 != 0ULL
+  S0 = Reg(s0)
+  D0 = Reg(d0)
+  SCC = Reg(scc)
+  tmp = Reg(0)
+  # --- compiled pseudocode ---
+  tmp = Reg(0)
+  for i in range(0, int(63)+1):
+    tmp[i] = S0.u64[(i & 60) + (4) - 1 : (i & 60)] != 0
+  D0.u64 = tmp
+  SCC = Reg(D0.u64 != 0)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': SCC._val & 1}
+  result['d0_64'] = True
+  return result
+
 def _SOP1Op_S_NOT_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
   # D0.u32 = ~S0.u32;
   # SCC = D0.u32 != 0U
@@ -1178,6 +1266,10 @@ SOP1Op_FUNCTIONS = {
   SOP1Op.S_BCNT0_I32_B64: _SOP1Op_S_BCNT0_I32_B64,
   SOP1Op.S_BCNT1_I32_B32: _SOP1Op_S_BCNT1_I32_B32,
   SOP1Op.S_BCNT1_I32_B64: _SOP1Op_S_BCNT1_I32_B64,
+  SOP1Op.S_QUADMASK_B32: _SOP1Op_S_QUADMASK_B32,
+  SOP1Op.S_QUADMASK_B64: _SOP1Op_S_QUADMASK_B64,
+  SOP1Op.S_WQM_B32: _SOP1Op_S_WQM_B32,
+  SOP1Op.S_WQM_B64: _SOP1Op_S_WQM_B64,
   SOP1Op.S_NOT_B32: _SOP1Op_S_NOT_B32,
   SOP1Op.S_NOT_B64: _SOP1Op_S_NOT_B64,
   SOP1Op.S_AND_SAVEEXEC_B32: _SOP1Op_S_AND_SAVEEXEC_B32,
