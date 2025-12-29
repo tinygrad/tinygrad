@@ -4,7 +4,7 @@ import unittest, re, subprocess
 from tinygrad.helpers import fetch
 from extra.assembly.rdna3.autogen import *
 from extra.assembly.rdna3.asm import asm
-from extra.assembly.rdna3.test.test_roundtrip import _get_llvm_mc
+from extra.assembly.rdna3.test.test_roundtrip import _get_llvm_mc, _llvm_version
 
 LLVM_BASE = "https://raw.githubusercontent.com/llvm/llvm-project/main/llvm/test/MC/AMDGPU"
 
@@ -78,30 +78,23 @@ def try_assemble(text: str):
   try: return asm(text).to_bytes()
   except: return None
 
-def compile_asm_batch(instrs: list[str]) -> list[bytes | None]:
+def compile_asm_batch(instrs: list[str]) -> list[bytes]:
   """Compile multiple instructions with a single llvm-mc call."""
   if not instrs: return []
   asm_text = ".text\n" + "\n".join(instrs) + "\n"
-  try:
-    result = subprocess.run(
-      [_get_llvm_mc(), '-triple=amdgcn', '-mcpu=gfx1100', '-mattr=+real-true16,+wavefrontsize32', '-show-encoding'],
-      input=asm_text, capture_output=True, text=True, timeout=30)
-    if result.returncode != 0: return [None] * len(instrs)
-    # Parse all encodings from output - match instruction lines with encoding comments
-    results = []
-    for line in result.stdout.split('\n'):
-      if 'encoding:' not in line: continue
-      enc = line.split('encoding:')[1].strip()
-      if enc.startswith('[') and enc.endswith(']'):
-        hex_vals = enc[1:-1].replace('0x', '').replace(',', '').replace(' ', '')
-        try: results.append(bytes.fromhex(hex_vals))
-        except ValueError: results.append(None)
-      else: results.append(None)
-    # Pad if we got fewer results than expected
-    while len(results) < len(instrs): results.append(None)
-    return results[:len(instrs)]
-  except Exception:
-    return [None] * len(instrs)
+  result = subprocess.run(
+    [_get_llvm_mc(), '-triple=amdgcn', '-mcpu=gfx1100', '-mattr=+real-true16,+wavefrontsize32', '-show-encoding'],
+    input=asm_text, capture_output=True, text=True, timeout=30)
+  if result.returncode != 0: raise RuntimeError(f"llvm-mc batch failed: {result.stderr.strip()}")
+  # Parse all encodings from output
+  results = []
+  for line in result.stdout.split('\n'):
+    if 'encoding:' not in line: continue
+    enc = line.split('encoding:')[1].strip()
+    if enc.startswith('[') and enc.endswith(']'):
+      results.append(bytes.fromhex(enc[1:-1].replace('0x', '').replace(',', '').replace(' ', '')))
+  if len(results) != len(instrs): raise RuntimeError(f"expected {len(instrs)} encodings, got {len(results)}")
+  return results
 
 class TestLLVM(unittest.TestCase):
   """Test assembler and disassembler against all LLVM test vectors."""
@@ -174,21 +167,20 @@ def _make_disasm_test(name):
         to_test.append((asm_text, data, None, f"exception: {e}"))
 
     # Batch compile all disasm strings with single llvm-mc call
-    disasm_strs = [t[2] for t in to_test if t[2] is not None]
-    llvm_results = compile_asm_batch(disasm_strs) if disasm_strs else []
+    # Skip patterns that LLVM 20 doesn't support (v_mad_[iu]32_[iu]16 with .l/.h suffixes)
+    def llvm20_skip(s): return _llvm_version() == 20 and re.match(r'v_mad_[iu]32_[iu]16', s) and ('.l' in s or '.h' in s)
+    disasm_strs = [(i, t[2]) for i, t in enumerate(to_test) if t[2] is not None and not llvm20_skip(t[2])]
+    llvm_results = compile_asm_batch([s for _, s in disasm_strs]) if disasm_strs else []
+    llvm_map = {i: llvm_results[j] for j, (i, _) in enumerate(disasm_strs)}
 
     # Match results back
     passed, failed, failures = 0, 0, []
-    llvm_idx = 0
-    for asm_text, data, disasm_str, error in to_test:
+    for idx, (asm_text, data, disasm_str, error) in enumerate(to_test):
       if error:
         failed += 1; failures.append(f"{error} for {data.hex()}")
-      elif disasm_str is not None:
-        llvm_bytes = llvm_results[llvm_idx] if llvm_idx < len(llvm_results) else None
-        llvm_idx += 1
-        if llvm_bytes is None:
-          failed += 1; failures.append(f"LLVM failed to assemble: '{disasm_str}'")
-        elif llvm_bytes == data: passed += 1
+      elif disasm_str is not None and idx in llvm_map:
+        llvm_bytes = llvm_map[idx]
+        if llvm_bytes == data: passed += 1
         else: failed += 1; failures.append(f"'{disasm_str}': expected={data.hex()} got={llvm_bytes.hex()}")
 
     print(f"{name.upper()} disasm: {passed} passed, {failed} failed" + (f", {skipped} skipped" if skipped else ""))
