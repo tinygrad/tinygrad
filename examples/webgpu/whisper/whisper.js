@@ -298,6 +298,11 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
             seeks_batch.push(seek);
         }
 
+        function selectToken(tokens, policy) {
+            console.assert(policy === "greedy", "only greedy policy implemented atm");
+            return tokens[0];
+        }
+
         let sequences = initSequences(audio_features_batch.length);
         let decoder_state = await initDecoder(nets, audio_features_batch);
         let is_done = false;
@@ -335,7 +340,7 @@ async function transcribeAudio(nets, audioFetcher, cancelToken, onEvent, loadAnd
                     if (current_sequence.done) continue;
                     let seek = seeks_batch[idx];
 
-                    let next_token = decode_results_topk[idx][0];
+                    let next_token = selectToken(decode_results_topk[idx], "greedy");
                     current_sequence.tokens[current_sequence.length] = next_token;
                     current_sequence.length += 1;
 
