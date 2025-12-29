@@ -176,7 +176,7 @@ runs:
         fi
         # **** LLVM ****
         if [[ "${{ inputs.llvm }}" == "true" ]]; then
-          pkgs+=" libllvm20 clang-20 lld-20 llvm-20"
+          pkgs+=" libllvm20 clang-20 lld-20"
         fi
 
         echo "pkgs=$pkgs" >> "$GITHUB_OUTPUT"
