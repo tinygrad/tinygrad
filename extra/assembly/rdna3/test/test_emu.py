@@ -225,7 +225,21 @@ def run_program(instructions: list, n_lanes: int = 1) -> WaveState:
 
 
 class TestVDivScale(unittest.TestCase):
-  """Tests for V_DIV_SCALE_F32 VCC handling."""
+  """Tests for V_DIV_SCALE_F32 edge cases.
+
+  V_DIV_SCALE_F32 is used in the Newton-Raphson division sequence to handle
+  denormals and near-overflow cases. It scales operands and sets VCC when
+  the final result needs to be unscaled.
+
+  Pseudocode cases:
+  1. Zero operands -> NaN
+  2. exp(S2) - exp(S1) >= 96 -> scale denom, VCC=1
+  3. S1 is denorm -> scale by 2^64
+  4. 1/S1 is f64 denorm AND S2/S1 is f32 denorm -> scale denom, VCC=1
+  5. 1/S1 is f64 denorm -> scale by 2^-64
+  6. S2/S1 is f32 denorm -> scale numer, VCC=1
+  7. exp(S2) <= 23 -> scale by 2^64 (tiny numerator)
+  """
 
   def test_div_scale_f32_vcc_zero_single_lane(self):
     """V_DIV_SCALE_F32 sets VCC=0 when no scaling needed."""
@@ -256,6 +270,328 @@ class TestVDivScale(unittest.TestCase):
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertAlmostEqual(i2f(st.vgpr[0][2]), 2.0, places=5)
+
+  def test_div_scale_f32_zero_denom_gives_nan(self):
+    """V_DIV_SCALE_F32: zero denominator -> NaN, VCC=1."""
+    instructions = [
+      v_mov_b32_e32(v[0], 1.0),  # numerator
+      v_mov_b32_e32(v[1], 0.0),  # denominator = 0
+      v_div_scale_f32(v[2], VCC, v[0], v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    import math
+    self.assertTrue(math.isnan(i2f(st.vgpr[0][2])), "Should be NaN for zero denom")
+    self.assertEqual(st.vcc & 1, 1, "VCC should be 1 for zero denom")
+
+  def test_div_scale_f32_zero_numer_gives_nan(self):
+    """V_DIV_SCALE_F32: zero numerator -> NaN, VCC=1."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0.0),  # numerator = 0
+      v_mov_b32_e32(v[1], 1.0),  # denominator
+      v_div_scale_f32(v[2], VCC, v[0], v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    import math
+    self.assertTrue(math.isnan(i2f(st.vgpr[0][2])), "Should be NaN for zero numer")
+    self.assertEqual(st.vcc & 1, 1, "VCC should be 1 for zero numer")
+
+  def test_div_scale_f32_large_exp_diff_scales_denom(self):
+    """V_DIV_SCALE_F32: exp(numer) - exp(denom) >= 96 -> scale denom, VCC=1."""
+    # Need exp difference >= 96. Use MAX_FLOAT / tiny_normal
+    # MAX_FLOAT exp=254, tiny_normal with exp <= 254-96=158
+    # Let's use exp=127 (1.0) for denom, exp=254 for numer -> diff = 127 (>96)
+    max_float = 0x7f7fffff  # 3.4028235e+38, exp=254
+    instructions = [
+      s_mov_b32(s[0], max_float),
+      v_mov_b32_e32(v[0], s[0]),  # numer = MAX_FLOAT (S2)
+      v_mov_b32_e32(v[1], 1.0),   # denom = 1.0 (S1), exp=127. diff = 254-127 = 127 >= 96
+      # S0=denom (what we're scaling), S1=denom, S2=numer
+      v_div_scale_f32(v[2], VCC, v[1], v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vcc & 1, 1, "VCC should be 1 when scaling denom for large exp diff")
+    # Result should be denom * 2^64
+    expected = 1.0 * (2.0 ** 64)
+    self.assertAlmostEqual(i2f(st.vgpr[0][2]), expected, delta=expected * 1e-6)
+
+  def test_div_scale_f32_denorm_denom(self):
+    """V_DIV_SCALE_F32: denormalized denominator -> NaN, VCC=1.
+
+    Hardware returns NaN when denominator is denormalized (different from PDF pseudocode).
+    """
+    # Smallest positive denorm: 0x00000001 = 1.4e-45
+    denorm = 0x00000001
+    instructions = [
+      s_mov_b32(s[0], denorm),
+      v_mov_b32_e32(v[0], 1.0),   # numer = 1.0 (S2)
+      v_mov_b32_e32(v[1], s[0]), # denom = denorm (S1)
+      # S0=denom, S1=denom, S2=numer -> scale denom
+      v_div_scale_f32(v[2], VCC, v[1], v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    import math
+    self.assertTrue(math.isnan(i2f(st.vgpr[0][2])), "Hardware returns NaN for denorm denom")
+    self.assertEqual(st.vcc & 1, 1, "VCC should be 1 for denorm denom")
+
+  def test_div_scale_f32_tiny_numer_exp_le_23(self):
+    """V_DIV_SCALE_F32: exponent(numer) <= 23 -> scale by 2^64, VCC=1."""
+    # exp <= 23 means exponent field is 0..23
+    # exp=23 corresponds to float value around 2^(23-127) = 2^-104 ≈ 4.9e-32
+    # Use exp=1 (smallest normal), which is 2^(1-127) = 2^-126 ≈ 1.18e-38
+    smallest_normal = 0x00800000  # exp=1, mantissa=0
+    instructions = [
+      s_mov_b32(s[0], smallest_normal),
+      v_mov_b32_e32(v[0], s[0]),  # numer = smallest_normal (S2), exp=1 <= 23
+      v_mov_b32_e32(v[1], 1.0),   # denom = 1.0 (S1)
+      # S0=numer, S1=denom, S2=numer -> scale numer
+      v_div_scale_f32(v[2], VCC, v[0], v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # Numer scaled by 2^64, VCC=1 to indicate scaling was done
+    numer_f = i2f(smallest_normal)
+    expected = numer_f * (2.0 ** 64)
+    self.assertAlmostEqual(i2f(st.vgpr[0][2]), expected, delta=abs(expected) * 1e-5)
+    self.assertEqual(st.vcc & 1, 1, "VCC should be 1 when scaling tiny numer")
+
+  def test_div_scale_f32_result_would_be_denorm(self):
+    """V_DIV_SCALE_F32: result would be denorm -> no scaling applied, VCC=1.
+
+    When the result of numer/denom would be denormalized, hardware sets VCC=1
+    but does NOT scale the input (returns it unchanged). The scaling happens
+    elsewhere in the division sequence.
+    """
+    # If S2/S1 would be denorm, set VCC but don't scale
+    # Denorm result: exp < 1, i.e., |result| < 2^-126
+    # Use 1.0 / 2^127 ≈ 5.9e-39 (result would be denorm)
+    large_denom = 0x7f000000  # 2^127
+    instructions = [
+      s_mov_b32(s[0], large_denom),
+      v_mov_b32_e32(v[0], 1.0),   # numer = 1.0 (S2)
+      v_mov_b32_e32(v[1], s[0]), # denom = 2^127 (S1)
+      # S0=numer, S1=denom, S2=numer -> check if we need to scale numer
+      v_div_scale_f32(v[2], VCC, v[0], v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # Hardware returns input unchanged but sets VCC=1
+    self.assertAlmostEqual(i2f(st.vgpr[0][2]), 1.0, places=5)
+    self.assertEqual(st.vcc & 1, 1, "VCC should be 1 when result would be denorm")
+
+
+class TestVDivFmas(unittest.TestCase):
+  """Tests for V_DIV_FMAS_F32 edge cases.
+
+  V_DIV_FMAS_F32 performs FMA with optional scaling based on VCC.
+  If VCC[lane] is set, result is scaled by 2^-64 (to undo V_DIV_SCALE's 2^64 scaling).
+
+  NOTE: The PDF (page 449) incorrectly says 2^32, but hardware does 2^-64.
+  D0.f32 = VCC[lane] ? 2^-64 * fma(S0, S1, S2) : fma(S0, S1, S2)
+  """
+
+  def test_div_fmas_f32_no_scale(self):
+    """V_DIV_FMAS_F32: VCC=0 -> normal FMA."""
+    instructions = [
+      s_mov_b32(s[SrcEnum.VCC_LO - 128], 0),  # VCC = 0
+      v_mov_b32_e32(v[0], 2.0),   # S0
+      v_mov_b32_e32(v[1], 3.0),   # S1
+      v_mov_b32_e32(v[2], 1.0),   # S2
+      v_div_fmas_f32(v[3], v[0], v[1], v[2]),  # 2*3+1 = 7
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][3]), 7.0, places=5)
+
+  def test_div_fmas_f32_with_scale(self):
+    """V_DIV_FMAS_F32: VCC=1 -> scale by 2^-64 (PDF says 2^32 but hardware does 2^-64)."""
+    instructions = [
+      s_mov_b32(s[SrcEnum.VCC_LO - 128], 1),  # VCC = 1 (lane 0 set)
+      v_mov_b32_e32(v[0], 2.0),   # S0
+      v_mov_b32_e32(v[1], 3.0),   # S1
+      v_mov_b32_e32(v[2], 1.0),   # S2
+      v_div_fmas_f32(v[3], v[0], v[1], v[2]),  # 2^-64 * (2*3+1) = 2^-64 * 7
+    ]
+    st = run_program(instructions, n_lanes=1)
+    expected = 7.0 * (2.0 ** -64)
+    self.assertAlmostEqual(i2f(st.vgpr[0][3]), expected, delta=abs(expected) * 1e-6)
+
+  def test_div_fmas_f32_per_lane_vcc(self):
+    """V_DIV_FMAS_F32: different VCC per lane."""
+    instructions = [
+      s_mov_b32(s[SrcEnum.VCC_LO - 128], 0b0101),  # VCC: lanes 0,2 set
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], 1.0),
+      v_mov_b32_e32(v[2], 1.0),
+      v_div_fmas_f32(v[3], v[0], v[1], v[2]),  # fma(1,1,1) = 2, scaled = 2^-64 * 2
+    ]
+    st = run_program(instructions, n_lanes=4)
+    scaled = 2.0 * (2.0 ** -64)
+    unscaled = 2.0
+    self.assertAlmostEqual(i2f(st.vgpr[0][3]), scaled, delta=abs(scaled) * 1e-6)  # lane 0: VCC=1
+    self.assertAlmostEqual(i2f(st.vgpr[1][3]), unscaled, places=5)                 # lane 1: VCC=0
+    self.assertAlmostEqual(i2f(st.vgpr[2][3]), scaled, delta=abs(scaled) * 1e-6)  # lane 2: VCC=1
+    self.assertAlmostEqual(i2f(st.vgpr[3][3]), unscaled, places=5)                 # lane 3: VCC=0
+
+
+class TestVDivFixup(unittest.TestCase):
+  """Tests for V_DIV_FIXUP_F32 edge cases.
+
+  V_DIV_FIXUP_F32 is the final step of Newton-Raphson division.
+  It handles special cases: NaN, Inf, zero, overflow, underflow.
+
+  Args: S0=quotient from NR iteration, S1=denominator, S2=numerator
+  """
+
+  def test_div_fixup_f32_normal(self):
+    """V_DIV_FIXUP_F32: normal division passes through quotient."""
+    # 6.0 / 2.0 = 3.0
+    instructions = [
+      v_mov_b32_e32(v[0], 3.0),   # S0 = quotient
+      v_mov_b32_e32(v[1], 2.0),   # S1 = denominator
+      v_mov_b32_e32(v[2], 6.0),   # S2 = numerator
+      v_div_fixup_f32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][3]), 3.0, places=5)
+
+  def test_div_fixup_f32_nan_numer(self):
+    """V_DIV_FIXUP_F32: NaN numerator -> quiet NaN."""
+    nan = 0x7fc00000  # quiet NaN
+    instructions = [
+      s_mov_b32(s[0], nan),
+      v_mov_b32_e32(v[0], 1.0),   # S0 = quotient
+      v_mov_b32_e32(v[1], 1.0),   # S1 = denominator
+      v_mov_b32_e32(v[2], s[0]), # S2 = numerator = NaN
+      v_div_fixup_f32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    import math
+    self.assertTrue(math.isnan(i2f(st.vgpr[0][3])), "Should be NaN")
+
+  def test_div_fixup_f32_nan_denom(self):
+    """V_DIV_FIXUP_F32: NaN denominator -> quiet NaN."""
+    nan = 0x7fc00000  # quiet NaN
+    instructions = [
+      s_mov_b32(s[0], nan),
+      v_mov_b32_e32(v[0], 1.0),   # S0 = quotient
+      v_mov_b32_e32(v[1], s[0]), # S1 = denominator = NaN
+      v_mov_b32_e32(v[2], 1.0),   # S2 = numerator
+      v_div_fixup_f32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    import math
+    self.assertTrue(math.isnan(i2f(st.vgpr[0][3])), "Should be NaN")
+
+  def test_div_fixup_f32_zero_div_zero(self):
+    """V_DIV_FIXUP_F32: 0/0 -> NaN (0xffc00000)."""
+    instructions = [
+      v_mov_b32_e32(v[0], 1.0),   # S0 = quotient (doesn't matter)
+      v_mov_b32_e32(v[1], 0.0),   # S1 = denominator = 0
+      v_mov_b32_e32(v[2], 0.0),   # S2 = numerator = 0
+      v_div_fixup_f32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    import math
+    self.assertTrue(math.isnan(i2f(st.vgpr[0][3])), "0/0 should be NaN")
+
+  def test_div_fixup_f32_inf_div_inf(self):
+    """V_DIV_FIXUP_F32: inf/inf -> NaN."""
+    pos_inf = 0x7f800000
+    instructions = [
+      s_mov_b32(s[0], pos_inf),
+      v_mov_b32_e32(v[0], 1.0),   # S0 = quotient
+      v_mov_b32_e32(v[1], s[0]), # S1 = denominator = +inf
+      v_mov_b32_e32(v[2], s[0]), # S2 = numerator = +inf
+      v_div_fixup_f32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    import math
+    self.assertTrue(math.isnan(i2f(st.vgpr[0][3])), "inf/inf should be NaN")
+
+  def test_div_fixup_f32_x_div_zero(self):
+    """V_DIV_FIXUP_F32: x/0 -> +/-inf based on sign."""
+    instructions = [
+      v_mov_b32_e32(v[0], 1.0),   # S0 = quotient
+      v_mov_b32_e32(v[1], 0.0),   # S1 = denominator = 0
+      v_mov_b32_e32(v[2], 1.0),   # S2 = numerator = 1.0
+      v_div_fixup_f32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    import math
+    self.assertTrue(math.isinf(i2f(st.vgpr[0][3])), "x/0 should be inf")
+    self.assertGreater(i2f(st.vgpr[0][3]), 0, "1/0 should be +inf")
+
+  def test_div_fixup_f32_neg_x_div_zero(self):
+    """V_DIV_FIXUP_F32: -x/0 -> -inf."""
+    instructions = [
+      v_mov_b32_e32(v[0], 1.0),   # S0 = quotient
+      v_mov_b32_e32(v[1], 0.0),   # S1 = denominator = 0
+      v_mov_b32_e32(v[2], -1.0),  # S2 = numerator = -1.0
+      v_div_fixup_f32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    import math
+    self.assertTrue(math.isinf(i2f(st.vgpr[0][3])), "-x/0 should be inf")
+    self.assertLess(i2f(st.vgpr[0][3]), 0, "-1/0 should be -inf")
+
+  def test_div_fixup_f32_zero_div_x(self):
+    """V_DIV_FIXUP_F32: 0/x -> 0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 1.0),   # S0 = quotient
+      v_mov_b32_e32(v[1], 2.0),   # S1 = denominator = 2.0
+      v_mov_b32_e32(v[2], 0.0),   # S2 = numerator = 0
+      v_div_fixup_f32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(i2f(st.vgpr[0][3]), 0.0, "0/x should be 0")
+
+  def test_div_fixup_f32_x_div_inf(self):
+    """V_DIV_FIXUP_F32: x/inf -> 0."""
+    pos_inf = 0x7f800000
+    instructions = [
+      s_mov_b32(s[0], pos_inf),
+      v_mov_b32_e32(v[0], 1.0),   # S0 = quotient
+      v_mov_b32_e32(v[1], s[0]), # S1 = denominator = +inf
+      v_mov_b32_e32(v[2], 1.0),   # S2 = numerator = 1.0
+      v_div_fixup_f32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(i2f(st.vgpr[0][3]), 0.0, "x/inf should be 0")
+
+  def test_div_fixup_f32_inf_div_x(self):
+    """V_DIV_FIXUP_F32: inf/x -> inf."""
+    pos_inf = 0x7f800000
+    instructions = [
+      s_mov_b32(s[0], pos_inf),
+      v_mov_b32_e32(v[0], 1.0),   # S0 = quotient
+      v_mov_b32_e32(v[1], 1.0),   # S1 = denominator = 1.0
+      v_mov_b32_e32(v[2], s[0]), # S2 = numerator = +inf
+      v_div_fixup_f32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    import math
+    self.assertTrue(math.isinf(i2f(st.vgpr[0][3])), "inf/x should be inf")
+
+  def test_div_fixup_f32_sign_propagation(self):
+    """V_DIV_FIXUP_F32: sign is XOR of numer and denom signs."""
+    instructions = [
+      v_mov_b32_e32(v[0], 3.0),   # S0 = |quotient|
+      v_mov_b32_e32(v[1], -2.0),  # S1 = denominator (negative)
+      v_mov_b32_e32(v[2], 6.0),   # S2 = numerator (positive)
+      v_div_fixup_f32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # pos / neg = neg
+    self.assertAlmostEqual(i2f(st.vgpr[0][3]), -3.0, places=5)
+
+  def test_div_fixup_f32_neg_neg(self):
+    """V_DIV_FIXUP_F32: neg/neg -> positive."""
+    instructions = [
+      v_mov_b32_e32(v[0], 3.0),   # S0 = |quotient|
+      v_mov_b32_e32(v[1], -2.0),  # S1 = denominator (negative)
+      v_mov_b32_e32(v[2], -6.0),  # S2 = numerator (negative)
+      v_div_fixup_f32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # neg / neg = pos
+    self.assertAlmostEqual(i2f(st.vgpr[0][3]), 3.0, places=5)
 
 
 class TestVCmpClass(unittest.TestCase):

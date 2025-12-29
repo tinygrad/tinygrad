@@ -7280,7 +7280,7 @@ def _VOP3Op_V_DIV_FMAS_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, V
   laneId = lane
   # --- compiled pseudocode ---
   if VCC.u64[laneId]:
-    D0.f32 = 2.0 ** 32 * fma(S0.f32, S1.f32, S2.f32)
+    D0.f32 = 2.0 ** -64 * fma(S0.f32, S1.f32, S2.f32)
   else:
     D0.f32 = fma(S0.f32, S1.f32, S2.f32)
   # --- end pseudocode ---
@@ -7302,7 +7302,7 @@ def _VOP3Op_V_DIV_FMAS_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, V
   laneId = lane
   # --- compiled pseudocode ---
   if VCC.u64[laneId]:
-    D0.f64 = 2.0 ** 64 * fma(S0.f64, S1.f64, S2.f64)
+    D0.f64 = 2.0 ** -128 * fma(S0.f64, S1.f64, S2.f64)
   else:
     D0.f64 = fma(S0.f64, S1.f64, S2.f64)
   # --- end pseudocode ---
@@ -8736,13 +8736,13 @@ def _VOP3SDOp_V_DIV_SCALE_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal
   # --- compiled pseudocode ---
   VCC = Reg(0x0)
   if ((F(S2.f32) == 0.0)  or  (F(S1.f32) == 0.0)):
-    D0.f32 = float("nan")
+    VCC = Reg(0x1); D0.f32 = float("nan")
   elif exponent(S2.f32) - exponent(S1.f32) >= 96:
     VCC = Reg(0x1)
     if S0.f32 == S1.f32:
       D0.f32 = ldexp(S0.f32, 64)
-  elif S1.f32 == DENORM.f32:
-    D0.f32 = ldexp(S0.f32, 64)
+  elif False:
+    pass  # denorm check moved to end
   elif ((1.0 / F(S1.f32) == DENORM.f64)  and  (S2.f32 / S1.f32 == DENORM.f32)):
     VCC = Reg(0x1)
     if S0.f32 == S1.f32:
@@ -8751,10 +8751,10 @@ def _VOP3SDOp_V_DIV_SCALE_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal
     D0.f32 = ldexp(S0.f32, -64)
   elif S2.f32 / S1.f32 == DENORM.f32:
     VCC = Reg(0x1)
-    if S0.f32 == S2.f32:
-      D0.f32 = ldexp(S0.f32, 64)
   elif exponent(S2.f32) <= 23:
-    D0.f32 = ldexp(S0.f32, 64)
+    VCC = Reg(0x1); D0.f32 = ldexp(S0.f32, 64)
+  if S1.f32 == DENORM.f32:
+    D0.f32 = float("nan")
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   result['vcc_lane'] = (VCC._val >> lane) & 1
@@ -8799,13 +8799,13 @@ def _VOP3SDOp_V_DIV_SCALE_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal
   # --- compiled pseudocode ---
   VCC = Reg(0x0)
   if ((S2.f64 == 0.0)  or  (S1.f64 == 0.0)):
-    D0.f64 = float("nan")
+    VCC = Reg(0x1); D0.f64 = float("nan")
   elif exponent(S2.f64) - exponent(S1.f64) >= 768:
     VCC = Reg(0x1)
     if S0.f64 == S1.f64:
       D0.f64 = ldexp(S0.f64, 128)
-  elif S1.f64 == DENORM.f64:
-    D0.f64 = ldexp(S0.f64, 128)
+  elif False:
+    pass  # denorm check moved to end
   elif ((1.0 / S1.f64 == DENORM.f64)  and  (S2.f64 / S1.f64 == DENORM.f64)):
     VCC = Reg(0x1)
     if S0.f64 == S1.f64:
@@ -8814,10 +8814,10 @@ def _VOP3SDOp_V_DIV_SCALE_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal
     D0.f64 = ldexp(S0.f64, -128)
   elif S2.f64 / S1.f64 == DENORM.f64:
     VCC = Reg(0x1)
-    if S0.f64 == S2.f64:
-      D0.f64 = ldexp(S0.f64, 128)
   elif exponent(S2.f64) <= 53:
     D0.f64 = ldexp(S0.f64, 128)
+  if S1.f64 == DENORM.f64:
+    D0.f64 = float("nan")
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   result['vcc_lane'] = (VCC._val >> lane) & 1

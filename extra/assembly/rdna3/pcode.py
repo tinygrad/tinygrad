@@ -803,6 +803,52 @@ from extra.assembly.rdna3.pcode import *
         if 'CLZ' in op.name or 'CTZ' in op.name:
           code = code.replace('tmp = Reg(i)', 'tmp = Reg(i); break')
           code = code.replace('D0.i32 = i', 'D0.i32 = i; break')
+        # V_DIV_FMAS_F32/F64: PDF page 449 says 2^32/2^64 but hardware does 2^-64/2^-128
+        # This is because V_DIV_SCALE scales by 2^64/2^128, and V_DIV_FMAS undoes that scaling
+        if op.name == 'V_DIV_FMAS_F32':
+          code = code.replace('2.0 ** 32', '2.0 ** -64')
+        if op.name == 'V_DIV_FMAS_F64':
+          code = code.replace('2.0 ** 64', '2.0 ** -128')
+        # V_DIV_SCALE_F32/F64: PDF page 463-464 has several bugs vs hardware behavior:
+        # 1. Zero case: hardware sets VCC=1 (PDF doesn't)
+        # 2. Denorm denom: hardware returns NaN (PDF says scale). VCC is set independently by exp diff check.
+        # 3. Tiny numer (exp<=23): hardware sets VCC=1 (PDF doesn't)
+        # 4. Result would be denorm: hardware doesn't scale, just sets VCC=1
+        if op.name == 'V_DIV_SCALE_F32':
+          # Fix 1: Set VCC=1 when zero operands produce NaN
+          code = code.replace(
+            'D0.f32 = float("nan")',
+            'VCC = Reg(0x1); D0.f32 = float("nan")')
+          # Fix 2: Denorm denom returns NaN. Must check this AFTER all VCC-setting logic runs.
+          # Insert at end of all branches, before the final result is used
+          code = code.replace(
+            'elif S1.f32 == DENORM.f32:\n  D0.f32 = ldexp(S0.f32, 64)',
+            'elif False:\n  pass  # denorm check moved to end')
+          # Add denorm check at the very end - this overrides D0 but preserves VCC
+          code += '\nif S1.f32 == DENORM.f32:\n  D0.f32 = float("nan")'
+          # Fix 3: Tiny numer should set VCC=1
+          code = code.replace(
+            'elif exponent(S2.f32) <= 23:\n  D0.f32 = ldexp(S0.f32, 64)',
+            'elif exponent(S2.f32) <= 23:\n  VCC = Reg(0x1); D0.f32 = ldexp(S0.f32, 64)')
+          # Fix 4: S2/S1 would be denorm - don't scale, just set VCC
+          code = code.replace(
+            'elif S2.f32 / S1.f32 == DENORM.f32:\n  VCC = Reg(0x1)\n  if S0.f32 == S2.f32:\n    D0.f32 = ldexp(S0.f32, 64)',
+            'elif S2.f32 / S1.f32 == DENORM.f32:\n  VCC = Reg(0x1)')
+        if op.name == 'V_DIV_SCALE_F64':
+          # Same fixes for f64 version
+          code = code.replace(
+            'D0.f64 = float("nan")',
+            'VCC = Reg(0x1); D0.f64 = float("nan")')
+          code = code.replace(
+            'elif S1.f64 == DENORM.f64:\n  D0.f64 = ldexp(S0.f64, 128)',
+            'elif False:\n  pass  # denorm check moved to end')
+          code += '\nif S1.f64 == DENORM.f64:\n  D0.f64 = float("nan")'
+          code = code.replace(
+            'elif exponent(S2.f64) <= 52:\n  D0.f64 = ldexp(S0.f64, 128)',
+            'elif exponent(S2.f64) <= 52:\n  VCC = Reg(0x1); D0.f64 = ldexp(S0.f64, 128)')
+          code = code.replace(
+            'elif S2.f64 / S1.f64 == DENORM.f64:\n  VCC = Reg(0x1)\n  if S0.f64 == S2.f64:\n    D0.f64 = ldexp(S0.f64, 128)',
+            'elif S2.f64 / S1.f64 == DENORM.f64:\n  VCC = Reg(0x1)')
         # Detect flags for result handling
         is_64 = any(p in pc for p in ['D0.u64', 'D0.b64', 'D0.f64', 'D0.i64', 'D1.u64', 'D1.b64', 'D1.f64', 'D1.i64'])
         has_d1 = '{ D1' in pc
