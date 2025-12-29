@@ -1,5 +1,5 @@
 """Shared test helpers for RDNA3 tests."""
-import os, shutil
+import shutil
 from dataclasses import dataclass
 
 @dataclass
@@ -22,9 +22,3 @@ def get_llvm_objdump():
   for p in ['llvm-objdump', 'llvm-objdump-21', 'llvm-objdump-20']:
     if shutil.which(p): return p
   raise FileNotFoundError("llvm-objdump not found")
-
-def setup_mockgpu_env():
-  """Set up environment for MOCKGPU. Must be called BEFORE importing tinygrad Device."""
-  os.environ["AMD"] = "1"
-  os.environ["MOCKGPU"] = "1"
-  os.environ["PYTHON_REMU"] = "1"

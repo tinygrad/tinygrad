@@ -3,8 +3,14 @@ import unittest, ctypes, os
 from dataclasses import dataclass
 from pathlib import Path
 
+# Set environment before any tinygrad imports to use MOCKGPU
+# This allows generating AMD GPU kernels without requiring real hardware
+os.environ["AMD"] = "1"
+os.environ["MOCKGPU"] = "1"
+os.environ["PYTHON_REMU"] = "1"
+
 from extra.assembly.rdna3.emu import WaveState, decode_program, step_wave, WAVE_SIZE
-from extra.assembly.rdna3.test.helpers import KernelInfo, setup_mockgpu_env
+from extra.assembly.rdna3.test.helpers import KernelInfo
 
 REMU_PATH = Path(__file__).parents[3] / "remu/target/release/libremu.so"
 
@@ -283,14 +289,7 @@ def compare_emulators_with_memory(kernel: bytes, n_lanes: int, buf_sizes: list, 
   return ok, msg
 
 def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelInfo], dict[int, int], dict[int, bytes]]:
-  """Compile a tinygrad operation and extract all kernels with their buffer mappings.
-
-  Sets up MOCKGPU environment before importing tinygrad if not already set.
-  """
-  # Ensure MOCKGPU is set before tinygrad Device is accessed
-  if os.environ.get("MOCKGPU") != "1":
-    setup_mockgpu_env()
-
+  """Compile a tinygrad operation and extract all kernels with their buffer mappings."""
   from tinygrad import Tensor
   from tinygrad.runtime.support.elf import elf_loader
 

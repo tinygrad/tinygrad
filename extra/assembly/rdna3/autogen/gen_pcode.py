@@ -12676,27 +12676,11 @@ VOPCOp_FUNCTIONS = {
 }
 
 
-# Manually implemented lane instructions (require special vgpr_write handling)
+# V_WRITELANE_B32: Write scalar to specific lane's VGPR (not in PDF pseudocode)
 def _VOP3Op_V_WRITELANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
-  # VGPR[lane][VDST] = S0.b32 - writes s0 to specified lane's VGPR
   wr_lane = s1 & 0x1f  # lane select (5 bits for wave32)
   return {'d0': d0, 'scc': scc, 'vgpr_write': (wr_lane, vdst_idx, s0 & 0xffffffff)}
-
-def _VOP3Op_V_READLANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
-  # D0 = VGPR[lane][SRC0] - reads from specified lane's VGPR
-  rd_lane = s1 & 0x1f  # lane select (5 bits for wave32)
-  val = VGPR[rd_lane][src0_idx] if VGPR is not None and rd_lane < len(VGPR) and src0_idx < len(VGPR[rd_lane]) else s0
-  return {'d0': val & 0xffffffff, 'scc': scc}
-
-def _VOP1Op_V_READFIRSTLANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
-  # D0 = VGPR[first_active_lane][SRC0] - reads from first active lane
-  first_lane = 0
-  for i in range(32):
-    if exec_mask & (1 << i):
-      first_lane = i
-      break
-  val = VGPR[first_lane][src0_idx] if VGPR is not None and first_lane < len(VGPR) and src0_idx < len(VGPR[first_lane]) else s0
-  return {'d0': val & 0xffffffff, 'scc': scc}
+VOP3Op_FUNCTIONS[VOP3Op.V_WRITELANE_B32] = _VOP3Op_V_WRITELANE_B32
 
 COMPILED_FUNCTIONS = {
   SOP1Op: SOP1Op_FUNCTIONS,
@@ -12711,10 +12695,5 @@ COMPILED_FUNCTIONS = {
   VOP3POp: VOP3POp_FUNCTIONS,
   VOPCOp: VOPCOp_FUNCTIONS,
 }
-
-# Add lane instructions to their respective dicts
-VOP3Op_FUNCTIONS[VOP3Op.V_WRITELANE_B32] = _VOP3Op_V_WRITELANE_B32
-VOP3Op_FUNCTIONS[VOP3Op.V_READLANE_B32] = _VOP3Op_V_READLANE_B32
-VOP1Op_FUNCTIONS[VOP1Op.V_READFIRSTLANE_B32] = _VOP1Op_V_READFIRSTLANE_B32
 
 def get_compiled_functions(): return COMPILED_FUNCTIONS
