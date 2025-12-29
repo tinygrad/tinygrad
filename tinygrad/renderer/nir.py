@@ -159,6 +159,13 @@ class NIRRenderer(Renderer):
     (UPat(Ops.ENDIF, name="x"), lambda ctx,x: (lambda _: mesa.nir_def())(mesa.nir_pop_if(ctx.b, ctx.r[x.src[0]])))
   ])
 
+  @staticmethod
+  def _reconstitute(cls, cc):
+    NIRRenderer.__init__(ret:=cls.__new__(cls), cc)
+    return ret
+
+  def __reduce__(self): return NIRRenderer._reconstitute, (self.__class__, self.compiler,)
+
   def __init__(self, compiler):
     self.compiler = compiler
     if hasattr(self.compiler, "nir_options"): self.nir_options = self.compiler.nir_options
