@@ -695,9 +695,7 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: rdna3-autogen
-          deps: testing_minimal
-      - name: Install pdfplumber
-        run: pip install pdfplumber
+          pydeps: "pdfplumber"
       - name: Verify AMD autogen is up to date
         run: |
           python -m extra.assembly.amd.dsl --arch all
