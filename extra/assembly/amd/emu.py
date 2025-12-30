@@ -525,8 +525,9 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
   # For 64-bit shift ops: src0 is 32-bit (shift amount), src1 is 64-bit (value to shift)
   # For most other _B64/_I64/_U64/_F64 ops: all sources are 64-bit
   is_64bit_op = op.name.endswith(('_B64', '_I64', '_U64', '_F64'))
-  # V_LDEXP_F64 and V_TRIG_PREOP_F64: src0 is 64-bit float, src1 is 32-bit integer
-  is_ldexp_64 = op in (VOP3Op.V_LDEXP_F64, VOP3Op.V_TRIG_PREOP_F64)
+  # V_LDEXP_F64, V_TRIG_PREOP_F64, V_CMP_CLASS_F64, V_CMPX_CLASS_F64: src0 is 64-bit, src1 is 32-bit
+  is_ldexp_64 = op in (VOP3Op.V_LDEXP_F64, VOP3Op.V_TRIG_PREOP_F64, VOP3Op.V_CMP_CLASS_F64, VOP3Op.V_CMPX_CLASS_F64,
+                       VOPCOp.V_CMP_CLASS_F64, VOPCOp.V_CMPX_CLASS_F64)
   is_shift_64 = op in (VOP3Op.V_LSHLREV_B64, VOP3Op.V_LSHRREV_B64, VOP3Op.V_ASHRREV_I64)
   # 16-bit source ops: use precomputed sets instead of string checks
   # Note: must check op_cls to avoid cross-enum value collisions
@@ -540,7 +541,12 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     s2 = mod_src(st.rsrc(src2, lane), 2) if src2 is not None else 0
   elif is_ldexp_64:
     s0 = mod_src64(st.rsrc64(src0, lane), 0)  # mantissa is 64-bit float
-    s1 = mod_src(st.rsrc(src1, lane), 1) if src1 is not None else 0  # exponent is 32-bit int
+    # src1 is 32-bit int. For 64-bit ops (like V_CMP_CLASS_F64), the literal is stored shifted left by 32.
+    # For V_LDEXP_F64/V_TRIG_PREOP_F64, _is_64bit_op() returns False so literal is stored as-is.
+    s1_raw = st.rsrc(src1, lane) if src1 is not None else 0
+    # Only shift if src1 is literal AND this is a true 64-bit op (V_CMP_CLASS ops, not LDEXP/TRIG_PREOP)
+    is_class_op = op in (VOP3Op.V_CMP_CLASS_F64, VOP3Op.V_CMPX_CLASS_F64, VOPCOp.V_CMP_CLASS_F64, VOPCOp.V_CMPX_CLASS_F64)
+    s1 = mod_src((s1_raw >> 32) if src1 == 255 and is_class_op else s1_raw, 1)
     s2 = mod_src(st.rsrc(src2, lane), 2) if src2 is not None else 0
   elif is_64bit_op:
     # 64-bit ops: apply neg/abs modifiers using f64 interpretation for float ops

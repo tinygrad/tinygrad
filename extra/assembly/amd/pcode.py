@@ -1095,8 +1095,8 @@ from extra.assembly.amd.pcode import *
         is_64 = any(p in pc for p in ['D0.u64', 'D0.b64', 'D0.f64', 'D0.i64', 'D1.u64', 'D1.b64', 'D1.f64', 'D1.i64'])
         has_d1 = '{ D1' in pc
         if has_d1: is_64 = True
-        is_cmp = cls_name == 'VOPCOp' and 'D0.u64[laneId]' in pc
-        is_cmpx = cls_name == 'VOPCOp' and 'EXEC.u64[laneId]' in pc  # V_CMPX writes to EXEC per-lane
+        is_cmp = (cls_name == 'VOPCOp' or cls_name == 'VOP3Op') and 'D0.u64[laneId]' in pc
+        is_cmpx = (cls_name == 'VOPCOp' or cls_name == 'VOP3Op') and 'EXEC.u64[laneId]' in pc  # V_CMPX writes to EXEC per-lane
         # V_DIV_SCALE passes through S0 if no branch taken
         is_div_scale = 'DIV_SCALE' in op.name
         # VOP3SD instructions that write VCC per-lane (either via VCC.u64[laneId] or by setting VCC = 0/1)
