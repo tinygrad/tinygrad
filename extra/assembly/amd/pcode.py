@@ -341,7 +341,7 @@ def F(x):
   if isinstance(x, int): return _f32(x)  # int -> interpret as f32 bits
   if isinstance(x, TypedView): return x  # preserve TypedView for bit-pattern checks
   return float(x)  # already a float or float-like
-signext = lambda x: x
+signext = lambda x: int(x)  # sign-extend to full width - already handled by Python's arbitrary precision ints
 pack = lambda hi, lo: ((int(hi) & 0xffff) << 16) | (int(lo) & 0xffff)
 pack32 = lambda hi, lo: ((int(hi) & 0xffffffff) << 32) | (int(lo) & 0xffffffff)
 _pack, _pack32 = pack, pack32  # Aliases for internal use
@@ -519,6 +519,17 @@ class TypedView:
 
   def __bool__(s): return bool(int(s))
 
+  # Allow chained type access like jump_addr.i64 when jump_addr is already a TypedView
+  # These just return self or convert appropriately
+  @property
+  def i64(s): return s if s._bits == 64 and s._signed else int(s)
+  @property
+  def u64(s): return s if s._bits == 64 and not s._signed else int(s) & MASK64
+  @property
+  def i32(s): return s if s._bits == 32 and s._signed else _sext(int(s) & MASK32, 32)
+  @property
+  def u32(s): return s if s._bits == 32 and not s._signed else int(s) & MASK32
+
 class Reg:
   """GPU register: D0.f32 = S0.f32 + S1.f32 just works."""
   __slots__ = ('_val',)
@@ -542,6 +553,7 @@ class Reg:
   bf16 = property(lambda s: TypedView(s, 16, is_float=True, is_bf16=True), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | ((v if isinstance(v, int) else _ibf16(float(v))) & 0xffff)))
   u8 = property(lambda s: TypedView(s, 8))
   i8 = property(lambda s: TypedView(s, 8, signed=True))
+  u1 = property(lambda s: TypedView(s, 1))  # single bit
 
   def __getitem__(s, key):
     if isinstance(key, slice): return SliceProxy(s, int(key.start), int(key.stop))
@@ -664,7 +676,7 @@ def compile_pseudocode(pseudocode: str) -> str:
 
 def _assign(lhs: str, rhs: str) -> str:
   """Generate assignment. Bare tmp/SCC/etc get wrapped in Reg()."""
-  if lhs in ('tmp', 'SCC', 'VCC', 'EXEC', 'D0', 'D1', 'saveexec'):
+  if lhs in ('tmp', 'SCC', 'VCC', 'EXEC', 'D0', 'D1', 'saveexec', 'PC'):
     return f"{lhs} = Reg({rhs})"
   return f"{lhs} = {rhs}"
 
@@ -801,7 +813,7 @@ INST_PATTERN = re.compile(r'^([SV]_[A-Z0-9_]+)\s+(\d+)\s*$', re.M)
 
 # Patterns that can't be handled by the DSL (require special handling in emu.py)
 UNSUPPORTED = ['SGPR[', 'V_SWAP', 'eval ', 'FATAL_HALT', 'HW_REGISTERS',
-               'PC =', 'PC=', 'PC+', '= PC', 'vscnt', 'vmcnt', 'expcnt', 'lgkmcnt',
+               'vscnt', 'vmcnt', 'expcnt', 'lgkmcnt',
                'CVT_OFF_TABLE', 'ThreadMask',
                'S1[i', 'C.i32', 'S[i]', 'in[', '2.0 / PI',
                'if n.', 'DST.u32', 'addrd = DST', 'addr = DST']  # Malformed pseudocode from PDF
@@ -827,7 +839,7 @@ def extract_pseudocode(text: str) -> str | None:
     if s.endswith('.') and not any(p in s for p in ['D0', 'D1', 'S0', 'S1', 'S2', 'SCC', 'VCC', 'tmp', '=']): continue
     if re.match(r'^[a-z].*\.$', s) and '=' not in s: continue
     is_code = (
-      any(p in s for p in ['D0.', 'D1.', 'S0.', 'S1.', 'S2.', 'SCC =', 'SCC ?', 'VCC', 'EXEC', 'tmp =', 'tmp[', 'lane =']) or
+      any(p in s for p in ['D0.', 'D1.', 'S0.', 'S1.', 'S2.', 'SCC =', 'SCC ?', 'VCC', 'EXEC', 'tmp =', 'tmp[', 'lane =', 'PC =']) or
       any(p in s for p in ['D0[', 'D1[', 'S0[', 'S1[', 'S2[']) or
       s.startswith(('if ', 'else', 'elsif', 'endif', 'declare ', 'for ', 'endfor', '//')) or
       re.match(r'^[a-z_]+\s*=', s) or re.match(r'^[a-z_]+\[', s) or (depth > 0 and '=' in s)
@@ -1048,10 +1060,12 @@ from extra.assembly.amd.pcode import *
         is_div_scale = 'DIV_SCALE' in op.name
         # VOP3SD instructions that write VCC per-lane (either via VCC.u64[laneId] or by setting VCC = 0/1)
         has_sdst = cls_name == 'VOP3SDOp' and ('VCC.u64[laneId]' in pc or is_div_scale)
+        # Instructions that use/modify PC
+        has_pc = 'PC' in pc
 
         # Generate function with indented body
         fn_name = f"_{cls_name}_{op.name}"
-        lines.append(f"def {fn_name}(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):")
+        lines.append(f"def {fn_name}(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):")
         # Add original pseudocode as comment
         for pc_line in pc.split('\n'):
           lines.append(f"  # {pc_line}")
@@ -1062,14 +1076,21 @@ from extra.assembly.amd.pcode import *
                 ('SCC', 'Reg(scc)'), ('VCC', 'Reg(vcc)'), ('EXEC', 'Reg(exec_mask)'),
                 ('tmp', 'Reg(0)'), ('saveexec', 'Reg(exec_mask)'), ('laneId', 'lane'),
                 ('SIMM16', 'Reg(literal)'), ('SIMM32', 'Reg(literal)'),
-                ('SRC0', 'Reg(src0_idx)'), ('VDST', 'Reg(vdst_idx)')]
+                ('SRC0', 'Reg(src0_idx)'), ('VDST', 'Reg(vdst_idx)'),
+                ('PC', 'Reg(pc)')]  # PC is passed in as byte address
         used = {name for name, _ in regs if name in combined}
         # EXEC_LO/EXEC_HI need EXEC
         if 'EXEC_LO' in combined or 'EXEC_HI' in combined: used.add('EXEC')
+        # VCCZ/EXECZ need VCC/EXEC
+        if 'VCCZ' in combined: used.add('VCC')
+        if 'EXECZ' in combined: used.add('EXEC')
         for name, init in regs:
           if name in used: lines.append(f"  {name} = {init}")
         if 'EXEC_LO' in combined: lines.append("  EXEC_LO = SliceProxy(EXEC, 31, 0)")
         if 'EXEC_HI' in combined: lines.append("  EXEC_HI = SliceProxy(EXEC, 63, 32)")
+        # VCCZ = 1 if VCC == 0, EXECZ = 1 if EXEC == 0
+        if 'VCCZ' in combined: lines.append("  VCCZ = Reg(1 if VCC._val == 0 else 0)")
+        if 'EXECZ' in combined: lines.append("  EXECZ = Reg(1 if EXEC._val == 0 else 0)")
         # Add compiled pseudocode with markers
         lines.append("  # --- compiled pseudocode ---")
         for line in code.split('\n'):
@@ -1093,6 +1114,11 @@ from extra.assembly.amd.pcode import *
           lines.append("  result['d0_64'] = True")
         if has_d1:
           lines.append("  result['d1'] = D1._val & 1")
+        if has_pc:
+          # Return new PC as absolute byte address, emulator will compute delta
+          # Handle negative values (backward jumps): PC._val is stored as unsigned, convert to signed
+          lines.append("  _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000")
+          lines.append("  result['new_pc'] = _pc  # absolute byte address")
         lines.append("  return result")
         lines.append("")
 
