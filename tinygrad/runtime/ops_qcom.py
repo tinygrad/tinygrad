@@ -11,7 +11,7 @@ from tinygrad.runtime.ops_cl import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
 from tinygrad.renderer.nir import IR3Renderer
 from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, prod, fromimport, cpu_profile, lo32, PROFILE, suppress_finalizing
-from tinygrad.helpers import flatten, QCOM_IR3, QCOM_CC
+from tinygrad.helpers import flatten, unwrap, QCOM_IR3, QCOM_CC
 from tinygrad.dtype import ImageDType
 from tinygrad.runtime.support.system import System
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
@@ -204,7 +204,7 @@ class QCOMArgsState(HCQArgsState):
     if prg.samp_cnt > 0: to_mv(self.buf.va_addr + prg.samp_off, len(prg.samplers) * 4).cast('I')[:] = array.array('I', prg.samplers)
     for i, b in enumerate(bufs):
       if prg.buf_info[i].type in {BUFTYPE_TEX, BUFTYPE_IBO}:
-        ti = b.texture_info or prg.tex_infos[i]
+        ti = unwrap(b.texture_info or prg.tex_infos[i])
         obj = ti.desc if prg.buf_info[i].type is BUFTYPE_TEX else ti.ibo
         to_mv(self.buf.va_addr + prg.buf_info[i].offset, len(obj) * 4).cast('I')[:] = array.array('I', obj)
       self.bind_sints_to_buf(b.va_addr, buf=self.buf, fmt='Q', offset=self.buf_info[i].offset+(0 if self.buf_info[i].type is BUFTYPE_BUF else 16))
