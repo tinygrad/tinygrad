@@ -657,9 +657,14 @@ def compile_pseudocode(pseudocode: str) -> str:
   return '\n'.join(lines)
 
 def _assign(lhs: str, rhs: str) -> str:
-  """Generate assignment. Bare tmp/SCC/etc modify existing Reg._val."""
-  if lhs in ('tmp', 'SCC', 'VCC', 'EXEC', 'D0', 'D1', 'saveexec'):
+  """Generate assignment. Outputs modify Reg in-place via ._val."""
+  # Output registers and tmp: modify in-place so caller sees changes
+  if lhs in ('SCC', 'VCC', 'EXEC', 'D0', 'D1', 'tmp'):
     return f"{lhs}._val = int({rhs})"
+  # saveexec needs to be a new Reg for typed accessor access
+  if lhs == 'saveexec':
+    return f"{lhs} = Reg(int({rhs}))"
+  # Other locals: natural style
   return f"{lhs} = {rhs}"
 
 def _expr(e: str) -> str:
@@ -982,30 +987,15 @@ from extra.assembly.amd.pcode import *
           code = code.replace(
             'D0.f64 = ((-abs(S0.f64)) if (sign_out) else (abs(S0.f64)))',
             'D0.f64 = ((-OVERFLOW_F64) if (sign_out) else (OVERFLOW_F64)) if isNAN(S0.f64) else ((-abs(S0.f64)) if (sign_out) else (abs(S0.f64)))')
-        # Detect flags for result handling (stored in metadata, not generated code)
-        is_64 = any(p in pc for p in ['D0.u64', 'D0.b64', 'D0.f64', 'D0.i64', 'D1.u64', 'D1.b64', 'D1.f64', 'D1.i64'])
-        has_d1 = '{ D1' in pc
-        if has_d1: is_64 = True
-        is_cmp = cls_name == 'VOPCOp' and 'D0.u64[laneId]' in pc
-        is_cmpx = cls_name == 'VOPCOp' and 'EXEC.u64[laneId]' in pc  # V_CMPX writes to EXEC per-lane
-        is_div_scale = 'DIV_SCALE' in op.name
-        has_sdst = cls_name == 'VOP3SDOp' and ('VCC.u64[laneId]' in pc or is_div_scale)
-        combined = code + pc
-        uses_vcc = 'VCC' in combined
-        uses_exec = 'EXEC' in combined or 'EXEC_LO' in combined or 'EXEC_HI' in combined
-
-        # Determine which registers are used
-        all_regs = ['S0', 'S1', 'S2', 'D0', 'D1', 'SCC', 'VCC', 'EXEC', 'tmp', 'saveexec', 'laneId', 'SIMM16', 'SIMM32', 'SRC0', 'VDST', 'VGPR']
-        used_regs = [r for r in all_regs if r in combined]
-        if 'EXEC_LO' in combined or 'EXEC_HI' in combined:
-          if 'EXEC' not in used_regs: used_regs.append('EXEC')
-
-        # Generate pure pseudocode function - Regs passed directly as arguments
+        # SIMM16/SIMM32 (inline literal constants) are passed as S2
+        code = code.replace('SIMM16', 'S2').replace('SIMM32', 'S2')
+        # Generate function with standard signature
         fn_name = f"_{cls_name}_{op.name}"
-        lines.append(f"def {fn_name}({', '.join(used_regs)}):")
+        lines.append(f"def {fn_name}(S0, S1, S2, D0, D1, SCC, VCC, EXEC, tmp, laneId):")
         for pc_line in pc.split('\n'):
           lines.append(f"  # {pc_line}")
         # Add EXEC_LO/EXEC_HI if needed
+        combined = code + pc
         if 'EXEC_LO' in combined: lines.append("  EXEC_LO = SliceProxy(EXEC, 31, 0)")
         if 'EXEC_HI' in combined: lines.append("  EXEC_HI = SliceProxy(EXEC, 63, 32)")
         code_lines = [line for line in code.split('\n') if line.strip()]
@@ -1016,9 +1006,7 @@ from extra.assembly.amd.pcode import *
           lines.append("  pass")
         lines.append("")
 
-        # Build flags tuple: (is_64, has_d1, is_cmp, is_cmpx, is_div_scale, has_sdst, uses_vcc, uses_exec, used_regs)
-        flags = (is_64, has_d1, is_cmp, is_cmpx, is_div_scale, has_sdst, uses_vcc, uses_exec, tuple(used_regs))
-        fn_entries.append((op, fn_name, flags))
+        fn_entries.append((op, fn_name))
         compiled_count += 1
       except Exception as e:
         print(f"  Warning: Failed to compile {op.name}: {e}")
@@ -1026,8 +1014,8 @@ from extra.assembly.amd.pcode import *
 
     if fn_entries:
       lines.append(f'{cls_name}_FUNCTIONS = {{')
-      for op, fn_name, flags in fn_entries:
-        lines.append(f"  {cls_name}.{op.name}: ({fn_name}, {flags}),")
+      for op, fn_name in fn_entries:
+        lines.append(f"  {cls_name}.{op.name}: {fn_name},")
       lines.append('}')
       lines.append('')
 
@@ -1036,10 +1024,9 @@ from extra.assembly.amd.pcode import *
   if 'VOP3Op' in enum_names:
     lines.append('''
 # V_WRITELANE_B32: Write scalar to specific lane's VGPR (not in PDF pseudocode)
-def _VOP3Op_V_WRITELANE_B32(S0, S1):
+def _VOP3Op_V_WRITELANE_B32(S0, S1, S2, D0, D1, SCC, VCC, EXEC, tmp, laneId):
   return (int(S1) & 0x1f, int(S0) & 0xffffffff)  # (wr_lane, value)
-# flags: (is_64, has_d1, is_cmp, is_cmpx, is_div_scale, has_sdst, uses_vcc, uses_exec, used_regs)
-VOP3Op_FUNCTIONS[VOP3Op.V_WRITELANE_B32] = (_VOP3Op_V_WRITELANE_B32, (False, False, False, False, False, False, False, False, ('S0', 'S1')))
+VOP3Op_FUNCTIONS[VOP3Op.V_WRITELANE_B32] = _VOP3Op_V_WRITELANE_B32
 ''')
 
   lines.append('COMPILED_FUNCTIONS = {')
