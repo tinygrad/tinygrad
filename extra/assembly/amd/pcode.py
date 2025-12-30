@@ -123,7 +123,10 @@ def u4_to_u32(v): return int(v) & 0xf
 def _sign(f): return 1 if math.copysign(1.0, f) < 0 else 0
 def _mantissa_f32(f): return struct.unpack("<I", struct.pack("<f", f))[0] & 0x7fffff if not (math.isinf(f) or math.isnan(f)) else 0
 def _ldexp(m, e): return math.ldexp(m, e)
-def isEven(x): return int(x) % 2 == 0
+def isEven(x):
+  x = float(x)
+  if math.isinf(x) or math.isnan(x): return False
+  return int(x) % 2 == 0
 def fract(x): return x - math.floor(x)
 PI = math.pi
 def sin(x):

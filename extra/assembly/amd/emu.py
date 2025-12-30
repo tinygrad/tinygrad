@@ -567,13 +567,22 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     s2 = mod_src64(st.rsrc64(src2, lane), 2) if src2 is not None else 0
   elif is_16bit_src:
     # For 16-bit source ops, opsel bits select which half to use
-    s0_raw = mod_src(st.rsrc(src0, lane), 0)
-    s1_raw = mod_src(st.rsrc(src1, lane), 1) if src1 is not None else 0
-    s2_raw = mod_src(st.rsrc(src2, lane), 2) if src2 is not None else 0
+    # Inline constants (128-254) must use f16 encoding, not f32
+    def rsrc_16bit(src, lane): return st.rsrc_f16(src, lane) if 128 <= src < 255 else st.rsrc(src, lane)
+    s0_raw = rsrc_16bit(src0, lane)
+    s1_raw = rsrc_16bit(src1, lane) if src1 is not None else 0
+    s2_raw = rsrc_16bit(src2, lane) if src2 is not None else 0
     # opsel[0] selects hi(1) or lo(0) for src0, opsel[1] for src1, opsel[2] for src2
     s0 = ((s0_raw >> 16) & 0xffff) if (opsel & 1) else (s0_raw & 0xffff)
     s1 = ((s1_raw >> 16) & 0xffff) if (opsel & 2) else (s1_raw & 0xffff)
     s2 = ((s2_raw >> 16) & 0xffff) if (opsel & 4) else (s2_raw & 0xffff)
+    # Apply abs/neg modifiers as f16 operations (toggle sign bit 15)
+    if abs_ & 1: s0 &= 0x7fff
+    if abs_ & 2: s1 &= 0x7fff
+    if abs_ & 4: s2 &= 0x7fff
+    if neg & 1: s0 ^= 0x8000
+    if neg & 2: s1 ^= 0x8000
+    if neg & 4: s2 ^= 0x8000
   elif is_vop2_16bit:
     # VOP2 16-bit ops: src0 uses f16 inline constants, or VGPR where v128+ = hi half of v0-v127
     # RDNA3 encoding: for VGPRs, bit 7 of VGPR index (src0-256) selects hi(1) or lo(0) half
@@ -615,10 +624,14 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
       s0 = s0_raw & 0xffff
     # vsrc1: bit 7 of VGPR index selects hi(1) or lo(0) half
     if src1 is not None:
-      src1_hi = (src1 - 256) & 0x80 != 0
-      src1_masked = ((src1 - 256) & 0x7f) + 256
-      s1_raw = mod_src(st.rsrc(src1_masked, lane), 1)
-      s1 = ((s1_raw >> 16) & 0xffff) if src1_hi else (s1_raw & 0xffff)
+      if src1 >= 256:  # VGPR - use hi/lo encoding
+        src1_hi = (src1 - 256) & 0x80 != 0
+        src1_masked = ((src1 - 256) & 0x7f) + 256
+        s1_raw = mod_src(st.rsrc(src1_masked, lane), 1)
+        s1 = ((s1_raw >> 16) & 0xffff) if src1_hi else (s1_raw & 0xffff)
+      else:  # SGPR or inline constant - read as 32-bit, use low 16 bits
+        s1_raw = mod_src(st.rsrc(src1, lane), 1)
+        s1 = s1_raw & 0xffffffff  # V_CMP_CLASS uses full 32-bit mask
     else:
       s1 = 0
     s2 = 0
