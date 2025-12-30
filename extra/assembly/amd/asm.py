@@ -1,8 +1,9 @@
 # RDNA3 assembler and disassembler
 from __future__ import annotations
 import re
-from extra.assembly.amd.dsl import Inst, RawImm, Reg, SrcMod, SGPR, VGPR, TTMP, s, v, ttmp, _RegFactory, FLOAT_ENC, SRC_FIELDS, unwrap
+from extra.assembly.amd.dsl import Inst, RawImm, Reg, SrcMod, SGPR, VGPR, TTMP, s, v, ttmp, _RegFactory, SRC_FIELDS, unwrap
 from extra.assembly.amd.dsl import VCC_LO, VCC_HI, VCC, EXEC_LO, EXEC_HI, EXEC, SCC, M0, NULL, OFF
+from extra.assembly.amd.dsl import SPECIAL_GPRS, SPECIAL_PAIRS, FLOAT_DEC, decode_src
 from extra.assembly.amd.autogen.rdna3 import VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, VOPD, VINTERP, SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, DS, FLAT, MUBUF, MTBUF, MIMG, EXP
 from extra.assembly.amd.autogen.rdna3 import VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, VOPDOp, VINTERPOp
 from extra.assembly.amd.autogen.rdna3 import SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, DSOp, FLATOp, MUBUFOp, MTBUFOp, MIMGOp
@@ -10,46 +11,35 @@ from extra.assembly.amd.autogen.rdna3 import SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOP
 # VOP3SD opcodes that share VOP3 encoding
 VOP3SD_OPS = {288, 289, 290, 764, 765, 766, 767, 768, 769, 770}
 
+def _matches_encoding(word: int, cls: type[Inst]) -> bool:
+  """Check if word matches the encoding pattern of an instruction class."""
+  if cls._encoding is None: return False
+  bf, val = cls._encoding
+  return ((word >> bf.lo) & bf.mask()) == val
+
+# Order matters: more specific encodings first, VOP2 last (it's a catch-all for bit31=0)
+_FORMATS_64 = [VOPD, VOP3P, VINTERP, VOP3, DS, FLAT, MUBUF, MTBUF, MIMG, SMEM, EXP]
+_FORMATS_32 = [SOP1, SOPC, SOPP, SOPK, VOPC, VOP1, SOP2, VOP2]  # SOP2/VOP2 are catch-alls
+
 def detect_format(data: bytes) -> type[Inst]:
   """Detect instruction format from machine code bytes."""
   assert len(data) >= 4, f"need at least 4 bytes, got {len(data)}"
   word = int.from_bytes(data[:4], 'little')
-  hi2 = (word >> 30) & 0x3
-  if hi2 == 0b11:
-    enc = (word >> 26) & 0xf
-    if enc == 0b0010: return VOPD
-    if enc == 0b0011: return VOP3P
-    if enc == 0b0100: return VINTERP
-    if enc == 0b0101: return VOP3SD if ((word >> 16) & 0x3ff) in VOP3SD_OPS else VOP3
-    if enc == 0b0110: return DS
-    if enc == 0b0111: return FLAT
-    if enc == 0b1000: return MUBUF
-    if enc == 0b1010: return MTBUF
-    if enc == 0b1100 or enc == 0b1111: return MIMG
-    if enc == 0b1101: return SMEM
-    if enc == 0b1110: return EXP
-    raise ValueError(f"unknown 64-bit format enc={enc:#06b} word={word:#010x}")
-  if hi2 == 0b10:
-    enc = (word >> 23) & 0x7f
-    if enc == 0b1111101: return SOP1
-    if enc == 0b1111110: return SOPC
-    if enc == 0b1111111: return SOPP
-    return SOPK if ((word >> 28) & 0xf) == 0b1011 else SOP2
-  # hi2 == 0b00 or 0b01: VOP1/VOP2/VOPC (bit 31 = 0)
-  assert (word >> 31) == 0, f"expected bit 31 = 0 for VOP, got word={word:#010x}"
-  enc = (word >> 25) & 0x7f
-  if enc == 0b0111110: return VOPC
-  if enc == 0b0111111: return VOP1
-  if enc <= 0b0111101: return VOP2
-  raise ValueError(f"unknown VOP format enc={enc:#09b} word={word:#010x}")
+  # Check 64-bit formats first (bits[31:30] == 0b11)
+  if (word >> 30) == 0b11:
+    for cls in _FORMATS_64:
+      if _matches_encoding(word, cls):
+        return VOP3SD if cls is VOP3 and ((word >> 16) & 0x3ff) in VOP3SD_OPS else cls
+    raise ValueError(f"unknown 64-bit format word={word:#010x}")
+  # 32-bit formats
+  for cls in _FORMATS_32:
+    if _matches_encoding(word, cls): return cls
+  raise ValueError(f"unknown 32-bit format word={word:#010x}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CONSTANTS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-SPECIAL_GPRS = {106: "vcc_lo", 107: "vcc_hi", 124: "null", 125: "m0", 126: "exec_lo", 127: "exec_hi", 253: "scc"}
-SPECIAL_DEC = {**SPECIAL_GPRS, **{v: str(k) for k, v in FLOAT_ENC.items()}}
-SPECIAL_PAIRS = {106: "vcc", 126: "exec"}
 HWREG = {1: 'HW_REG_MODE', 2: 'HW_REG_STATUS', 3: 'HW_REG_TRAPSTS', 4: 'HW_REG_HW_ID', 5: 'HW_REG_GPR_ALLOC',
          6: 'HW_REG_LDS_ALLOC', 7: 'HW_REG_IB_STS', 15: 'HW_REG_SH_MEM_BASES', 18: 'HW_REG_PERF_SNAPSHOT_PC_LO',
          19: 'HW_REG_PERF_SNAPSHOT_PC_HI', 20: 'HW_REG_FLAT_SCR_LO', 21: 'HW_REG_FLAT_SCR_HI', 22: 'HW_REG_XNACK_MASK',
@@ -57,25 +47,14 @@ HWREG = {1: 'HW_REG_MODE', 2: 'HW_REG_STATUS', 3: 'HW_REG_TRAPSTS', 4: 'HW_REG_H
 HWREG_IDS = {v.lower(): k for k, v in HWREG.items()}
 MSG = {128: 'MSG_RTN_GET_DOORBELL', 129: 'MSG_RTN_GET_DDID', 130: 'MSG_RTN_GET_TMA',
        131: 'MSG_RTN_GET_REALTIME', 132: 'MSG_RTN_SAVE_WAVE', 133: 'MSG_RTN_GET_TBA'}
-VOP3SD_OPS = {288, 289, 290, 764, 765, 766, 767, 768, 769, 770}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # HELPERS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def decode_src(val: int) -> str:
-  if val <= 105: return f"s{val}"
-  if val in SPECIAL_DEC: return SPECIAL_DEC[val]
-  if 108 <= val <= 123: return f"ttmp{val - 108}"
-  if 128 <= val <= 192: return str(val - 128)
-  if 193 <= val <= 208: return str(-(val - 192))
-  if 256 <= val <= 511: return f"v{val - 256}"
-  return "lit" if val == 255 else f"?{val}"
-
 def _reg(p: str, b: int, n: int = 1) -> str: return f"{p}{b}" if n == 1 else f"{p}[{b}:{b+n-1}]"
 def _sreg(b: int, n: int = 1) -> str: return _reg("s", b, n)
 def _vreg(b: int, n: int = 1) -> str: return _reg("v", b, n)
-def _hl(v: int, hi_thresh: int = 128) -> str: return 'h' if v >= hi_thresh else 'l'
 
 def _fmt_sdst(v: int, n: int = 1) -> str:
   if v == 124: return "null"
@@ -92,7 +71,7 @@ def _fmt_src(v: int, n: int = 1) -> str:
   return decode_src(v)
 
 def _fmt_v16(v: int, base: int = 256, hi_thresh: int = 384) -> str:
-  return f"v{(v - base) & 0x7f}.{_hl(v, hi_thresh)}"
+  return f"v{(v - base) & 0x7f}.{'h' if v >= hi_thresh else 'l'}"
 
 def waitcnt(vmcnt: int = 0x3f, expcnt: int = 0x7, lgkmcnt: int = 0x3f) -> int:
   return (expcnt & 0x7) | ((lgkmcnt & 0x3f) << 4) | ((vmcnt & 0x3f) << 10)
@@ -101,6 +80,7 @@ def _has(op: str, *subs) -> bool: return any(s in op for s in subs)
 def _is16(op: str) -> bool: return _has(op, 'f16', 'i16', 'u16', 'b16') and not _has(op, '_f32', '_i32')
 def _is64(op: str) -> bool: return _has(op, 'f64', 'i64', 'u64', 'b64')
 def _omod(v: int) -> str: return {1: " mul:2", 2: " mul:4", 3: " div:2"}.get(v, "")
+def _src16(inst, v: int) -> str: return _fmt_v16(v) if v >= 256 else inst.lit(v)  # format 16-bit src: vgpr.h/l or literal
 def _mods(*pairs) -> str: return " ".join(m for c, m in pairs if c)
 def _fmt_bits(label: str, val: int, count: int) -> str: return f"{label}:[{','.join(str((val >> i) & 1) for i in range(count))}]"
 
@@ -123,40 +103,36 @@ def _opsel_str(opsel: int, n: int, need: bool, is16_d: bool) -> str:
 # DISASSEMBLER
 # ═══════════════════════════════════════════════════════════════════════════════
 
+_VOP1_F64 = {VOP1Op.V_CEIL_F64, VOP1Op.V_FLOOR_F64, VOP1Op.V_FRACT_F64, VOP1Op.V_FREXP_MANT_F64, VOP1Op.V_RCP_F64, VOP1Op.V_RNDNE_F64, VOP1Op.V_RSQ_F64, VOP1Op.V_SQRT_F64, VOP1Op.V_TRUNC_F64}
+
 def _disasm_vop1(inst: VOP1) -> str:
-  op = VOP1Op(inst.op)
-  if op in (VOP1Op.V_NOP, VOP1Op.V_PIPEFLUSH): return op.name.lower()
-  F64_OPS = {VOP1Op.V_CEIL_F64, VOP1Op.V_FLOOR_F64, VOP1Op.V_FRACT_F64, VOP1Op.V_FREXP_MANT_F64, VOP1Op.V_RCP_F64, VOP1Op.V_RNDNE_F64, VOP1Op.V_RSQ_F64, VOP1Op.V_SQRT_F64, VOP1Op.V_TRUNC_F64}
-  is_f64_d = op in F64_OPS or op in (VOP1Op.V_CVT_F64_F32, VOP1Op.V_CVT_F64_I32, VOP1Op.V_CVT_F64_U32)
-  is_f64_s = op in F64_OPS or op in (VOP1Op.V_CVT_F32_F64, VOP1Op.V_CVT_I32_F64, VOP1Op.V_CVT_U32_F64, VOP1Op.V_FREXP_EXP_I32_F64)
-  name = op.name.lower()
-  parts = name.split('_')
+  op, name = VOP1Op(inst.op), VOP1Op(inst.op).name.lower()
+  if op in (VOP1Op.V_NOP, VOP1Op.V_PIPEFLUSH): return name
+  if op == VOP1Op.V_READFIRSTLANE_B32: return f"v_readfirstlane_b32 {decode_src(inst.vdst)}, v{inst.src0 - 256 if inst.src0 >= 256 else inst.src0}"
+  parts, is_f64_d = name.split('_'), op in _VOP1_F64 or op in (VOP1Op.V_CVT_F64_F32, VOP1Op.V_CVT_F64_I32, VOP1Op.V_CVT_F64_U32)
+  is_f64_s = op in _VOP1_F64 or op in (VOP1Op.V_CVT_F32_F64, VOP1Op.V_CVT_I32_F64, VOP1Op.V_CVT_U32_F64, VOP1Op.V_FREXP_EXP_I32_F64)
   is_16d = any(p in ('f16','i16','u16','b16') for p in parts[-2:-1]) or (len(parts) >= 2 and parts[-1] in ('f16','i16','u16','b16') and 'cvt' not in name)
   is_16s = parts[-1] in ('f16','i16','u16','b16') and 'sat_pk' not in name
-  if op == VOP1Op.V_READFIRSTLANE_B32: return f"v_readfirstlane_b32 {decode_src(inst.vdst)}, v{inst.src0 - 256 if inst.src0 >= 256 else inst.src0}"
   dst = _vreg(inst.vdst, 2) if is_f64_d else _fmt_v16(inst.vdst, 0, 128) if is_16d else f"v{inst.vdst}"
-  src = _fmt_src(inst.src0, 2) if is_f64_s else _fmt_v16(inst.src0) if is_16s and inst.src0 >= 256 else inst.lit(inst.src0)
+  src = _fmt_src(inst.src0, 2) if is_f64_s else _src16(inst, inst.src0) if is_16s else inst.lit(inst.src0)
   return f"{name}_e32 {dst}, {src}"
 
 def _disasm_vop2(inst: VOP2) -> str:
-  op = VOP2Op(inst.op)
-  name = op.name.lower()
-  suf = "" if op == VOP2Op.V_DOT2ACC_F32_F16 else "_e32"
-  is16 = _is16(name) and 'pk_' not in name
+  op, name = VOP2Op(inst.op), VOP2Op(inst.op).name.lower()
+  suf, is16 = "" if op == VOP2Op.V_DOT2ACC_F32_F16 else "_e32", _is16(name) and 'pk_' not in name
   # fmaak: dst = src0 * vsrc1 + K, fmamk: dst = src0 * K + vsrc1
   if op in (VOP2Op.V_FMAAK_F32, VOP2Op.V_FMAAK_F16): return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, v{inst.vsrc1}, 0x{inst._literal:x}"
   if op in (VOP2Op.V_FMAMK_F32, VOP2Op.V_FMAMK_F16): return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, 0x{inst._literal:x}, v{inst.vsrc1}"
-  if is16: return f"{name}{suf} {_fmt_v16(inst.vdst, 0, 128)}, {_fmt_v16(inst.src0) if inst.src0 >= 256 else inst.lit(inst.src0)}, {_fmt_v16(inst.vsrc1, 0, 128)}"
+  if is16: return f"{name}{suf} {_fmt_v16(inst.vdst, 0, 128)}, {_src16(inst, inst.src0)}, {_fmt_v16(inst.vsrc1, 0, 128)}"
   return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, v{inst.vsrc1}" + (", vcc_lo" if op == VOP2Op.V_CNDMASK_B32 else "")
 
 VOPC_CLASS = {VOPCOp.V_CMP_CLASS_F16, VOPCOp.V_CMP_CLASS_F32, VOPCOp.V_CMP_CLASS_F64,
               VOPCOp.V_CMPX_CLASS_F16, VOPCOp.V_CMPX_CLASS_F32, VOPCOp.V_CMPX_CLASS_F64}
 
 def _disasm_vopc(inst: VOPC) -> str:
-  op = VOPCOp(inst.op)
-  name = op.name.lower()
+  op, name = VOPCOp(inst.op), VOPCOp(inst.op).name.lower()
   is64, is16 = _is64(name), _is16(name)
-  s0 = _fmt_src(inst.src0, 2) if is64 else _fmt_v16(inst.src0) if is16 and inst.src0 >= 256 else inst.lit(inst.src0)
+  s0 = _fmt_src(inst.src0, 2) if is64 else _src16(inst, inst.src0) if is16 else inst.lit(inst.src0)
   s1 = _vreg(inst.vsrc1, 2) if is64 and op not in VOPC_CLASS else _fmt_v16(inst.vsrc1, 0, 128) if is16 else f"v{inst.vsrc1}"
   return f"{name}_e32 {s0}, {s1}" if op.value >= 128 else f"{name}_e32 vcc_lo, {s0}, {s1}"
 

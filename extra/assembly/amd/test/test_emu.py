@@ -3813,3 +3813,40 @@ class TestVTrigPreopF64(unittest.TestCase):
     # Result should still be a valid float (not NaN or inf)
     self.assertFalse(math.isnan(result), "Result should not be NaN")
     self.assertFalse(math.isinf(result), "Result should not be inf")
+
+
+class Test64BitLiterals(unittest.TestCase):
+  """Regression tests for 64-bit instruction literal encoding.
+  Tests verify that Inst.to_bytes() correctly encodes 64-bit literals."""
+
+  def test_64bit_literal_negative_encoding(self):
+    """Verify 64-bit instruction encodes negative literals correctly.
+    Regression test: -33 should encode as 0xffffffdf in the literal field,
+    NOT as 0xffffffff (which would happen with incorrect sign extension)."""
+    neg_val = -33
+    expected_lit = neg_val & 0xffffffff  # 0xffffffdf
+    inst = v_add_f64(v[2], v[0], neg_val)
+    # Check the literal is stored correctly (in high 32 bits for 64-bit ops)
+    self.assertIsNotNone(inst._literal, "Literal should be set")
+    # Literal is stored as (lit32 << 32) for 64-bit ops
+    actual_lit = (inst._literal >> 32) & 0xffffffff
+    self.assertEqual(actual_lit, expected_lit, f"Literal should be {expected_lit:#x}, got {actual_lit:#x}")
+    # Also verify the encoded bytes
+    code = inst.to_bytes()
+    # Literal is last 4 bytes
+    lit_bytes = code[-4:]
+    lit_val = int.from_bytes(lit_bytes, 'little')
+    self.assertEqual(lit_val, expected_lit, f"Encoded literal should be {expected_lit:#x}, got {lit_val:#x}")
+
+  def test_64bit_literal_positive_encoding(self):
+    """Verify 64-bit instruction encodes large positive literals correctly."""
+    large_val = 0x12345678
+    inst = v_add_f64(v[2], v[0], large_val)
+    self.assertIsNotNone(inst._literal, "Literal should be set")
+    actual_lit = (inst._literal >> 32) & 0xffffffff
+    self.assertEqual(actual_lit, large_val, f"Literal should be {large_val:#x}, got {actual_lit:#x}")
+    # Verify encoded bytes
+    code = inst.to_bytes()
+    lit_bytes = code[-4:]
+    lit_val = int.from_bytes(lit_bytes, 'little')
+    self.assertEqual(lit_val, large_val, f"Encoded literal should be {large_val:#x}, got {lit_val:#x}")

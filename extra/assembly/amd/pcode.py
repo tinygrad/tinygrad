@@ -1,11 +1,13 @@
 # DSL for RDNA3 pseudocode - makes pseudocode expressions work directly as Python
 import struct, math, re
 
+MASK32, MASK64 = 0xffffffff, 0xffffffffffffffff
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # HELPER FUNCTIONS (previously in helpers.py)
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _f32(i): return struct.unpack("<f", struct.pack("<I", i & 0xffffffff))[0]
+def _f32(i): return struct.unpack("<f", struct.pack("<I", i & MASK32))[0]
 def _i32(f):
   if isinstance(f, int): f = float(f)
   if math.isnan(f): return 0xffc00000 if math.copysign(1.0, f) < 0 else 0x7fc00000
@@ -76,15 +78,8 @@ def _gt_neg_zero(a, b): return (a > b) or (a == 0 and b == 0 and not math.copysi
 def _lt_neg_zero(a, b): return (a < b) or (a == 0 and b == 0 and math.copysign(1, a) < 0 and not math.copysign(1, b) < 0)
 def _fma(a, b, c): return a * b + c
 def _signext(v): return v
-def trunc(x):
-  x = float(x)
-  return x if math.isnan(x) or math.isinf(x) else float(math.trunc(x))
-def floor(x):
-  x = float(x)
-  return x if math.isnan(x) or math.isinf(x) else float(math.floor(x))
-def ceil(x):
-  x = float(x)
-  return x if math.isnan(x) or math.isinf(x) else float(math.ceil(x))
+def _fpop(fn): return lambda x: (x := float(x), x if math.isnan(x) or math.isinf(x) else float(fn(x)))[1]
+trunc, floor, ceil = _fpop(math.trunc), _fpop(math.floor), _fpop(math.ceil)
 class _SafeFloat(float):
   """Float subclass that uses _div for division to handle 0/inf correctly."""
   def __truediv__(self, o): return _div(float(self), float(o))
@@ -92,20 +87,10 @@ class _SafeFloat(float):
 def sqrt(x): return _SafeFloat(math.sqrt(x)) if x >= 0 else _SafeFloat(float("nan"))
 def log2(x): return math.log2(x) if x > 0 else (float("-inf") if x == 0 else float("nan"))
 i32_to_f32 = u32_to_f32 = i32_to_f64 = u32_to_f64 = f32_to_f64 = f64_to_f32 = float
-def f32_to_i32(f):
-  f = float(f)
-  if math.isnan(f): return 0
-  if f >= 2147483647: return 2147483647
-  if f <= -2147483648: return -2147483648
-  return int(f)
-def f32_to_u32(f):
-  f = float(f)
-  if math.isnan(f): return 0
-  if f >= 4294967295: return 4294967295
-  if f <= 0: return 0
-  return int(f)
-f64_to_i32 = f32_to_i32
-f64_to_u32 = f32_to_u32
+def _f_to_int(f, lo, hi): f = float(f); return 0 if math.isnan(f) else (hi if f >= hi else lo if f <= lo else int(f))
+def f32_to_i32(f): return _f_to_int(f, -2147483648, 2147483647)
+def f32_to_u32(f): return _f_to_int(f, 0, 4294967295)
+f64_to_i32, f64_to_u32 = f32_to_i32, f32_to_u32
 def f32_to_f16(f):
   f = float(f)
   if math.isnan(f): return 0x7e00  # f16 NaN
@@ -184,34 +169,21 @@ def _is_denorm_f64(f):
   if math.isinf(f) or math.isnan(f) or f == 0.0: return False
   bits = struct.unpack("<Q", struct.pack("<d", float(f)))[0]
   return (bits >> 52) & 0x7ff == 0
-def v_min_f32(a, b):
-  if math.isnan(b): return a
-  if math.isnan(a): return b
-  return a if _lt_neg_zero(a, b) else b
-def v_max_f32(a, b):
-  if math.isnan(b): return a
-  if math.isnan(a): return b
-  return a if _gt_neg_zero(a, b) else b
-def v_min_i32(a, b): return min(a, b)
-def v_max_i32(a, b): return max(a, b)
-def v_min_u32(a, b): return min(a & 0xffffffff, b & 0xffffffff)
-def v_max_u32(a, b): return max(a & 0xffffffff, b & 0xffffffff)
-v_min_f16 = v_min_f32
-v_max_f16 = v_max_f32
-v_min_i16 = v_min_i32
-v_max_i16 = v_max_i32
+def v_min_f32(a, b): return a if math.isnan(b) else b if math.isnan(a) else (a if _lt_neg_zero(a, b) else b)
+def v_max_f32(a, b): return a if math.isnan(b) else b if math.isnan(a) else (a if _gt_neg_zero(a, b) else b)
+v_min_f16, v_max_f16 = v_min_f32, v_max_f32
+v_min_i32, v_max_i32 = min, max
+v_min_i16, v_max_i16 = min, max
+def v_min_u32(a, b): return min(a & MASK32, b & MASK32)
+def v_max_u32(a, b): return max(a & MASK32, b & MASK32)
 def v_min_u16(a, b): return min(a & 0xffff, b & 0xffff)
 def v_max_u16(a, b): return max(a & 0xffff, b & 0xffff)
 def v_min3_f32(a, b, c): return v_min_f32(v_min_f32(a, b), c)
 def v_max3_f32(a, b, c): return v_max_f32(v_max_f32(a, b), c)
-def v_min3_i32(a, b, c): return min(a, b, c)
-def v_max3_i32(a, b, c): return max(a, b, c)
-def v_min3_u32(a, b, c): return min(a & 0xffffffff, b & 0xffffffff, c & 0xffffffff)
-def v_max3_u32(a, b, c): return max(a & 0xffffffff, b & 0xffffffff, c & 0xffffffff)
-v_min3_f16 = v_min3_f32
-v_max3_f16 = v_max3_f32
-v_min3_i16 = v_min3_i32
-v_max3_i16 = v_max3_i32
+v_min3_f16, v_max3_f16 = v_min3_f32, v_max3_f32
+v_min3_i32, v_max3_i32, v_min3_i16, v_max3_i16 = min, max, min, max
+def v_min3_u32(a, b, c): return min(a & MASK32, b & MASK32, c & MASK32)
+def v_max3_u32(a, b, c): return max(a & MASK32, b & MASK32, c & MASK32)
 def v_min3_u16(a, b, c): return min(a & 0xffff, b & 0xffff, c & 0xffff)
 def v_max3_u16(a, b, c): return max(a & 0xffff, b & 0xffff, c & 0xffff)
 def ABSDIFF(a, b): return abs(int(a) - int(b))
@@ -380,8 +352,6 @@ ROUND_MODE = _RoundMode()
 # Helper functions for pseudocode
 def cvtToQuietNAN(x): return float('nan')
 DST = None  # Placeholder, will be set in context
-
-MASK32, MASK64 = 0xffffffff, 0xffffffffffffffff
 
 # 2/PI with 1201 bits of precision for V_TRIG_PREOP_F64
 # Computed as: int((2/pi) * 2^1201) - this is the fractional part of 2/pi scaled to integer
