@@ -3,8 +3,7 @@ from __future__ import annotations
 import re
 from extra.assembly.amd.dsl import Inst, RawImm, Reg, SrcMod, SGPR, VGPR, TTMP, s, v, ttmp, _RegFactory, FLOAT_ENC, SRC_FIELDS, unwrap
 from extra.assembly.amd.dsl import VCC_LO, VCC_HI, VCC, EXEC_LO, EXEC_HI, EXEC, SCC, M0, NULL, OFF
-from extra.assembly.amd.autogen import rdna3
-from extra.assembly.amd.autogen.rdna3 import VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, VOPD, VINTERP, SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, DS, FLAT, MUBUF, MTBUF, MIMG
+from extra.assembly.amd.autogen.rdna3 import VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, VOPD, VINTERP, SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, DS, FLAT, MUBUF, MTBUF, MIMG, EXP
 from extra.assembly.amd.autogen.rdna3 import VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, VOPDOp, VINTERPOp
 from extra.assembly.amd.autogen.rdna3 import SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, DSOp, FLATOp, MUBUFOp, MTBUFOp, MIMGOp
 
@@ -18,13 +17,17 @@ def detect_format(data: bytes) -> type[Inst]:
   hi2 = (word >> 30) & 0x3
   if hi2 == 0b11:
     enc = (word >> 26) & 0xf
-    if enc == 0b1101: return SMEM
-    if enc == 0b0101: return VOP3SD if ((word >> 16) & 0x3ff) in VOP3SD_OPS else VOP3
+    if enc == 0b0010: return VOPD
     if enc == 0b0011: return VOP3P
+    if enc == 0b0100: return VINTERP
+    if enc == 0b0101: return VOP3SD if ((word >> 16) & 0x3ff) in VOP3SD_OPS else VOP3
     if enc == 0b0110: return DS
     if enc == 0b0111: return FLAT
-    if enc == 0b0010: return VOPD
-    if enc == 0b0100: return VINTERP
+    if enc == 0b1000: return MUBUF
+    if enc == 0b1010: return MTBUF
+    if enc == 0b1100 or enc == 0b1111: return MIMG
+    if enc == 0b1101: return SMEM
+    if enc == 0b1110: return EXP
     raise ValueError(f"unknown 64-bit format enc={enc:#06b} word={word:#010x}")
   if hi2 == 0b10:
     enc = (word >> 23) & 0x7f
@@ -37,7 +40,7 @@ def detect_format(data: bytes) -> type[Inst]:
   enc = (word >> 25) & 0x7f
   if enc == 0b0111110: return VOPC
   if enc == 0b0111111: return VOP1
-  if enc <= 0b0111101: return VOP2  # bits 31:25 = 0xxxxxx where xxxxxx <= 0b111101
+  if enc <= 0b0111101: return VOP2
   raise ValueError(f"unknown VOP format enc={enc:#09b} word={word:#010x}")
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -161,22 +164,19 @@ NO_ARG_SOPP = {SOPPOp.S_ENDPGM, SOPPOp.S_BARRIER, SOPPOp.S_WAKEUP, SOPPOp.S_ICAC
                SOPPOp.S_WAIT_IDLE, SOPPOp.S_ENDPGM_SAVED, SOPPOp.S_CODE_END, SOPPOp.S_ENDPGM_ORDERED_PS_DONE}
 
 def _disasm_sopp(inst: SOPP) -> str:
-  op = SOPPOp(inst.op)
-  name = op.name.lower()
+  op, name = SOPPOp(inst.op), SOPPOp(inst.op).name.lower()
   if op in NO_ARG_SOPP: return name
   if op == SOPPOp.S_WAITCNT:
     vm, exp, lgkm = (inst.simm16 >> 10) & 0x3f, inst.simm16 & 0xf, (inst.simm16 >> 4) & 0x3f
     p = [f"vmcnt({vm})" if vm != 0x3f else "", f"expcnt({exp})" if exp != 7 else "", f"lgkmcnt({lgkm})" if lgkm != 0x3f else ""]
-    return f"s_waitcnt {' '.join(x for x in p if x)}" if any(p) else "s_waitcnt 0"
+    return f"s_waitcnt {' '.join(x for x in p if x) or '0'}"
   if op == SOPPOp.S_DELAY_ALU:
-    deps = ['VALU_DEP_1','VALU_DEP_2','VALU_DEP_3','VALU_DEP_4','TRANS32_DEP_1','TRANS32_DEP_2','TRANS32_DEP_3','FMA_ACCUM_CYCLE_1','SALU_CYCLE_1','SALU_CYCLE_2','SALU_CYCLE_3']
-    skips = ['SAME','NEXT','SKIP_1','SKIP_2','SKIP_3','SKIP_4']
+    deps, skips = ['VALU_DEP_1','VALU_DEP_2','VALU_DEP_3','VALU_DEP_4','TRANS32_DEP_1','TRANS32_DEP_2','TRANS32_DEP_3','FMA_ACCUM_CYCLE_1','SALU_CYCLE_1','SALU_CYCLE_2','SALU_CYCLE_3'], ['SAME','NEXT','SKIP_1','SKIP_2','SKIP_3','SKIP_4']
     id0, skip, id1 = inst.simm16 & 0xf, (inst.simm16 >> 4) & 0x7, (inst.simm16 >> 7) & 0xf
     dep = lambda v: deps[v-1] if 0 < v <= len(deps) else str(v)
     p = [f"instid0({dep(id0)})" if id0 else "", f"instskip({skips[skip]})" if skip else "", f"instid1({dep(id1)})" if id1 else ""]
-    return f"s_delay_alu {' | '.join(x for x in p if x)}" if any(p) else "s_delay_alu 0"
-  if name.startswith('s_cbranch') or name.startswith('s_branch'): return f"{name} {inst.simm16}"
-  return f"{name} 0x{inst.simm16:x}"
+    return f"s_delay_alu {' | '.join(x for x in p if x) or '0'}"
+  return f"{name} {inst.simm16}" if name.startswith(('s_cbranch', 's_branch')) else f"{name} 0x{inst.simm16:x}"
 
 def _disasm_smem(inst: SMEM) -> str:
   op = SMEMOp(inst.op)
@@ -190,78 +190,31 @@ def _disasm_smem(inst: SMEM) -> str:
   return f"{name} {_fmt_sdst(inst.sdata, width)}, {sbase_str}, {off_s}" + _mods((inst.glc, " glc"), (inst.dlc, " dlc"))
 
 def _disasm_flat(inst: FLAT) -> str:
-  op = FLATOp(inst.op)
-  name = op.name.lower()
-  seg_prefix = ['flat', 'scratch', 'global'][inst.seg] if inst.seg < 3 else 'flat'
-  instr = f"{seg_prefix}_{name.split('_', 1)[1] if '_' in name else name}"
-  # offset: scratch/global are 13-bit signed, flat is 12-bit unsigned
-  raw_off = inst.offset
-  if seg_prefix == 'scratch' or seg_prefix == 'global':
-    off_val = raw_off if raw_off < 4096 else raw_off - 8192  # 13-bit signed
-  else:
-    off_val = raw_off  # flat: 12-bit unsigned
-  off_s = f" offset:{off_val}" if off_val else ""
-
-  # data width from suffix
+  name = FLATOp(inst.op).name.lower()
+  seg = ['flat', 'scratch', 'global'][inst.seg] if inst.seg < 3 else 'flat'
+  instr = f"{seg}_{name.split('_', 1)[1] if '_' in name else name}"
+  off_val = inst.offset if seg == 'flat' else (inst.offset if inst.offset < 4096 else inst.offset - 8192)
   suffix = name.split('_')[-1]
-  w = {'b32':1, 'b64':2, 'b96':3, 'b128':4, 'u8':1, 'i8':1, 'u16':1, 'i16':1, 'u32':1, 'i32':1, 'u64':2, 'i64':2, 'f32':1, 'f64':2}.get(suffix, 1)
-  # cmpswap uses 2x data width, x2 suffix means 64-bit
+  w = {'b32':1,'b64':2,'b96':3,'b128':4,'u8':1,'i8':1,'u16':1,'i16':1,'u32':1,'i32':1,'u64':2,'i64':2,'f32':1,'f64':2}.get(suffix, 1)
   if 'cmpswap' in name: w *= 2
   if name.endswith('_x2') or 'x2' in suffix: w = max(w, 2)
-
-  is_atomic = 'atomic' in name
-  is_store = 'store' in name
-  is_load = 'load' in name
-
-  # modifiers: glc/slc/dlc apply to loads, stores, and atomics
-  glc_s = " glc" if inst.glc else ""
-  slc_s = " slc" if inst.slc else ""
-  dlc_s = " dlc" if inst.dlc else ""
-  mods = f"{off_s}{glc_s}{slc_s}{dlc_s}"
-
-  # saddr handling: flat has no saddr, scratch uses single SGPR, global uses SGPR pair
-  if seg_prefix == 'flat' or inst.saddr == 0x7F: saddr_s = ""
+  mods = f"{f' offset:{off_val}' if off_val else ''}{' glc' if inst.glc else ''}{' slc' if inst.slc else ''}{' dlc' if inst.dlc else ''}"
+  # saddr
+  if seg == 'flat' or inst.saddr == 0x7F: saddr_s = ""
   elif inst.saddr == 124: saddr_s = ", off"
-  elif seg_prefix == 'scratch': saddr_s = f", {decode_src(inst.saddr)}"
-  elif inst.saddr in SPECIAL_PAIRS: saddr_s = f", {SPECIAL_PAIRS[inst.saddr]}"  # vcc, exec
-  elif 108 <= inst.saddr <= 123: saddr_s = f", {_reg('ttmp', inst.saddr - 108, 2)}"  # ttmp pair
-  elif inst.saddr < 106: saddr_s = f", {_sreg(inst.saddr, 2)}"
-  else: saddr_s = f", {decode_src(inst.saddr)}"
-
-  # addtid instructions: no addr operand, just vdst/data and saddr
-  if 'addtid' in name:
-    if is_store: return f"{instr} v{inst.data}{saddr_s}{mods}"
-    return f"{instr} v{inst.vdst}{saddr_s}{mods}"
-
-  # Address: for flat/global without saddr (or saddr=off), addr is 64-bit; with valid saddr, addr is 32-bit
-  # For scratch, addr is always 32-bit. sve=0 means addr is not used (output "off") - only for scratch
-  if not inst.sve and seg_prefix == 'scratch':
-    addr_s = "off"
-  else:
-    has_saddr = inst.saddr != 0x7F and inst.saddr != 124  # 0x7F=no saddr field, 124=off
-    addr_w = 1 if seg_prefix == 'scratch' or has_saddr else 2
-    addr_s = _vreg(inst.addr, addr_w)
-
-  if is_atomic:
-    data_s = _vreg(inst.data, w)
-    # vdst width: cmpswap returns single value (w/2), others return full width
-    vdst_w = w // 2 if 'cmpswap' in name else w
-    vdst_s = _vreg(inst.vdst, vdst_w)
-    # with glc: vdst, addr, data; without glc: addr, data
-    if inst.glc:
-      if seg_prefix == 'flat': return f"{instr} {vdst_s}, {addr_s}, {data_s}{mods}"
-      return f"{instr} {vdst_s}, {addr_s}, {data_s}{saddr_s}{mods}"
-    else:
-      if seg_prefix == 'flat': return f"{instr} {addr_s}, {data_s}{mods}"
-      return f"{instr} {addr_s}, {data_s}{saddr_s}{mods}"
-  if is_store:
-    data_s = _vreg(inst.data, w)
-    return f"{instr} {addr_s}, {data_s}{saddr_s}{mods}"
-  if is_load:
-    vdst_s = _vreg(inst.vdst, w)
-    return f"{instr} {vdst_s}, {addr_s}{saddr_s}{mods}"
-  # fallback
-  return f"{instr} {_vreg(inst.vdst, w)}, {addr_s}{saddr_s}{off_s}"
+  elif seg == 'scratch': saddr_s = f", {decode_src(inst.saddr)}"
+  elif inst.saddr in SPECIAL_PAIRS: saddr_s = f", {SPECIAL_PAIRS[inst.saddr]}"
+  elif 108 <= inst.saddr <= 123: saddr_s = f", {_reg('ttmp', inst.saddr - 108, 2)}"
+  else: saddr_s = f", {_sreg(inst.saddr, 2) if inst.saddr < 106 else decode_src(inst.saddr)}"
+  # addtid: no addr
+  if 'addtid' in name: return f"{instr} v{inst.data if 'store' in name else inst.vdst}{saddr_s}{mods}"
+  # addr width
+  addr_s = "off" if not inst.sve and seg == 'scratch' else _vreg(inst.addr, 1 if seg == 'scratch' or (inst.saddr not in (0x7F, 124)) else 2)
+  data_s, vdst_s = _vreg(inst.data, w), _vreg(inst.vdst, w // 2 if 'cmpswap' in name else w)
+  if 'atomic' in name:
+    return f"{instr} {vdst_s}, {addr_s}, {data_s}{saddr_s if seg != 'flat' else ''}{mods}" if inst.glc else f"{instr} {addr_s}, {data_s}{saddr_s if seg != 'flat' else ''}{mods}"
+  if 'store' in name: return f"{instr} {addr_s}, {data_s}{saddr_s}{mods}"
+  return f"{instr} {_vreg(inst.vdst, w)}, {addr_s}{saddr_s}{mods}"
 
 def _disasm_ds(inst: DS) -> str:
   op, name = DSOp(inst.op), DSOp(inst.op).name.lower()
@@ -358,74 +311,49 @@ def _disasm_vop3(inst: VOP3) -> str:
   return f"{name} {dst}, {s0}, {s1}, {s2}{os}{cl}{om}" if is3 else f"{name} {dst}, {s0}, {s1}{os}{cl}{om}"
 
 def _disasm_vop3sd(inst: VOP3SD) -> str:
-  op = VOP3SDOp(inst.op)
-  name = op.name.lower()
+  op, name = VOP3SDOp(inst.op), VOP3SDOp(inst.op).name.lower()
   is64, mad64 = 'f64' in name, _has(name, 'mad_i64_i32', 'mad_u64_u32')
   def src(v, neg, ext=False): s = _fmt_src(v, 2) if ext or is64 else inst.lit(v); return f"-{s}" if neg else s
   s0, s1, s2 = src(inst.src0, inst.neg & 1), src(inst.src1, inst.neg & 2), src(inst.src2, inst.neg & 4, mad64)
-  dst = _vreg(inst.vdst, 2) if is64 or mad64 else f"v{inst.vdst}"
-  is2src = op in (VOP3SDOp.V_ADD_CO_U32, VOP3SDOp.V_SUB_CO_U32, VOP3SDOp.V_SUBREV_CO_U32)
+  dst, is2src = _vreg(inst.vdst, 2) if is64 or mad64 else f"v{inst.vdst}", op in (VOP3SDOp.V_ADD_CO_U32, VOP3SDOp.V_SUB_CO_U32, VOP3SDOp.V_SUBREV_CO_U32)
   suffix = "_e64" if name.startswith('v_') and 'co_' in name else ""
-  srcs = f"{s0}, {s1}" if is2src else f"{s0}, {s1}, {s2}"
-  return f"{name}{suffix} {dst}, {_fmt_sdst(inst.sdst, 1)}, {srcs}" + (" clamp" if inst.clmp else "") + _omod(inst.omod)
+  return f"{name}{suffix} {dst}, {_fmt_sdst(inst.sdst, 1)}, {s0}, {s1}{'' if is2src else f', {s2}'}{' clamp' if inst.clmp else ''}{_omod(inst.omod)}"
 
 def _disasm_vopd(inst: VOPD) -> str:
-  literal = inst._literal or inst.literal
-  vdst_y = (inst.vdsty << 1) | ((inst.vdstx & 1) ^ 1)
-  op_x, op_y = VOPDOp(inst.opx), VOPDOp(inst.opy)
-  name_x, name_y = op_x.name.lower(), op_y.name.lower()
-  lit_x = f", 0x{literal:x}" if literal and _has(name_x, 'fmaak', 'fmamk') else ""
-  lit_y = f", 0x{literal:x}" if literal and _has(name_y, 'fmaak', 'fmamk') else ""
-  half_x = f"{name_x} v{inst.vdstx}, {inst.lit(inst.srcx0)}{lit_x}" if 'mov' in name_x else f"{name_x} v{inst.vdstx}, {inst.lit(inst.srcx0)}, v{inst.vsrcx1}{lit_x}"
-  half_y = f"{name_y} v{vdst_y}, {inst.lit(inst.srcy0)}{lit_y}" if 'mov' in name_y else f"{name_y} v{vdst_y}, {inst.lit(inst.srcy0)}, v{inst.vsrcy1}{lit_y}"
-  return f"{half_x} :: {half_y}"
+  lit = inst._literal or inst.literal
+  vdst_y, nx, ny = (inst.vdsty << 1) | ((inst.vdstx & 1) ^ 1), VOPDOp(inst.opx).name.lower(), VOPDOp(inst.opy).name.lower()
+  def half(n, vd, s0, vs1): return f"{n} v{vd}, {inst.lit(s0)}{f', 0x{lit:x}' if lit and _has(n, 'fmaak', 'fmamk') else ''}" if 'mov' in n else f"{n} v{vd}, {inst.lit(s0)}, v{vs1}{f', 0x{lit:x}' if lit and _has(n, 'fmaak', 'fmamk') else ''}"
+  return f"{half(nx, inst.vdstx, inst.srcx0, inst.vsrcx1)} :: {half(ny, vdst_y, inst.srcy0, inst.vsrcy1)}"
 
 def _disasm_vop3p(inst: VOP3P) -> str:
   name = VOP3POp(inst.op).name.lower()
-  is_wmma = 'wmma' in name
-  is_3src = _has(name, 'fma', 'mad', 'dot', 'wmma')
-  is_fma_mix = 'fma_mix' in name  # v_fma_mix_f32, v_fma_mixlo_f16, v_fma_mixhi_f16 use inline modifiers
+  is_wmma, is_3src, is_fma_mix = 'wmma' in name, _has(name, 'fma', 'mad', 'dot', 'wmma'), 'fma_mix' in name
   if is_wmma:
-    src_count = 2 if 'iu4' in name else 4 if 'iu8' in name else 8
-    src0, src1, src2, dst = _fmt_src(inst.src0, src_count), _fmt_src(inst.src1, src_count), _fmt_src(inst.src2, 8), _vreg(inst.vdst, 8)
+    sc = 2 if 'iu4' in name else 4 if 'iu8' in name else 8
+    src0, src1, src2, dst = _fmt_src(inst.src0, sc), _fmt_src(inst.src1, sc), _fmt_src(inst.src2, 8), _vreg(inst.vdst, 8)
   else: src0, src1, src2, dst = _fmt_src(inst.src0, 1), _fmt_src(inst.src1, 1), _fmt_src(inst.src2, 1), f"v{inst.vdst}"
-  num_srcs = 3 if is_3src else 2
-  opsel_hi_combined = inst.opsel_hi | (inst.opsel_hi2 << 2)
-  # For v_fma_mix*, use inline neg/abs modifiers (e.g. -|src|) instead of neg_lo:[...] arrays
+  n, opsel_hi = 3 if is_3src else 2, inst.opsel_hi | (inst.opsel_hi2 << 2)
   if is_fma_mix:
-    def apply_mods(s: str, neg: bool, abs_: bool) -> str:
-      if abs_: s = f"|{s}|"
-      if neg: s = f"-{s}"
-      return s
-    src0 = apply_mods(src0, bool(inst.neg & 1), bool(inst.neg_hi & 1))
-    src1 = apply_mods(src1, bool(inst.neg & 2), bool(inst.neg_hi & 2))
-    src2 = apply_mods(src2, bool(inst.neg & 4), bool(inst.neg_hi & 4))
-    # For v_fma_mix*, always output op_sel_hi since LLVM defaults to [0,0,0] not [1,1,1]
-    mods = ([_fmt_bits("op_sel", inst.opsel, num_srcs)] if inst.opsel else []) + \
-           ([_fmt_bits("op_sel_hi", opsel_hi_combined, num_srcs)] if opsel_hi_combined else []) + \
-           (["clamp"] if inst.clmp else [])
+    def m(s, neg, abs_): return f"-{f'|{s}|' if abs_ else s}" if neg else (f"|{s}|" if abs_ else s)
+    src0, src1, src2 = m(src0, inst.neg & 1, inst.neg_hi & 1), m(src1, inst.neg & 2, inst.neg_hi & 2), m(src2, inst.neg & 4, inst.neg_hi & 4)
+    mods = ([_fmt_bits("op_sel", inst.opsel, n)] if inst.opsel else []) + ([_fmt_bits("op_sel_hi", opsel_hi, n)] if opsel_hi else []) + (["clamp"] if inst.clmp else [])
   else:
-    mods = ([_fmt_bits("op_sel", inst.opsel, num_srcs)] if inst.opsel else []) + \
-           ([_fmt_bits("op_sel_hi", opsel_hi_combined, num_srcs)] if opsel_hi_combined != (7 if is_3src else 3) else []) + \
-           ([_fmt_bits("neg_lo", inst.neg, num_srcs)] if inst.neg else []) + \
-           ([_fmt_bits("neg_hi", inst.neg_hi, num_srcs)] if inst.neg_hi else []) + (["clamp"] if inst.clmp else [])
-  mods_str = ' ' + ' '.join(mods) if mods else ''
-  return f"{name} {dst}, {src0}, {src1}, {src2}{mods_str}" if is_3src else f"{name} {dst}, {src0}, {src1}{mods_str}"
+    mods = ([_fmt_bits("op_sel", inst.opsel, n)] if inst.opsel else []) + ([_fmt_bits("op_sel_hi", opsel_hi, n)] if opsel_hi != (7 if is_3src else 3) else []) + \
+           ([_fmt_bits("neg_lo", inst.neg, n)] if inst.neg else []) + ([_fmt_bits("neg_hi", inst.neg_hi, n)] if inst.neg_hi else []) + (["clamp"] if inst.clmp else [])
+  return f"{name} {dst}, {src0}, {src1}, {src2}{' ' + ' '.join(mods) if mods else ''}" if is_3src else f"{name} {dst}, {src0}, {src1}{' ' + ' '.join(mods) if mods else ''}"
 
 def _disasm_buf(inst: MUBUF | MTBUF) -> str:
   op = MTBUFOp(inst.op) if isinstance(inst, MTBUF) else MUBUFOp(inst.op)
   name = op.name.lower()
   if op in (MUBUFOp.BUFFER_GL0_INV, MUBUFOp.BUFFER_GL1_INV): return name
-  if 'd16' in name: width = 2 if _has(name, 'xyz', 'xyzw') else 1
-  elif 'atomic' in name: base = 2 if _has(name, 'b64', 'u64', 'i64') else 1; width = base * 2 if 'cmpswap' in name else base
-  else: width = {'b32':1, 'b64':2, 'b96':3, 'b128':4, 'b16':1, 'x':1, 'xy':2, 'xyz':3, 'xyzw':4}.get(name.split('_')[-1], 1)
-  if inst.tfe: width += 1
-  vaddr_str = _vreg(inst.vaddr, 2) if inst.offen and inst.idxen else f"v{inst.vaddr}" if inst.offen or inst.idxen else "off"
-  srsrc_base = inst.srsrc * 4
-  srsrc_str = _reg("ttmp", srsrc_base - 108, 4) if 108 <= srsrc_base <= 123 else _sreg(srsrc_base, 4)
-  fmt = inst.format if isinstance(inst, MTBUF) else None
-  mods = ([f"format:{fmt}"] if fmt else []) + [m for cond, m in [(inst.idxen, "idxen"), (inst.offen, "offen"), (inst.offset, f"offset:{inst.offset}"), (inst.glc, "glc"), (inst.dlc, "dlc"), (inst.slc, "slc"), (inst.tfe, "tfe")] if cond]
-  return f"{name} {_vreg(inst.vdata, width)}, {vaddr_str}, {srsrc_str}, {decode_src(inst.soffset)}" + (" " + " ".join(mods) if mods else "")
+  w = (2 if _has(name, 'xyz', 'xyzw') else 1) if 'd16' in name else \
+      ((2 if _has(name, 'b64', 'u64', 'i64') else 1) * (2 if 'cmpswap' in name else 1)) if 'atomic' in name else \
+      {'b32':1,'b64':2,'b96':3,'b128':4,'b16':1,'x':1,'xy':2,'xyz':3,'xyzw':4}.get(name.split('_')[-1], 1)
+  if inst.tfe: w += 1
+  vaddr = _vreg(inst.vaddr, 2) if inst.offen and inst.idxen else f"v{inst.vaddr}" if inst.offen or inst.idxen else "off"
+  srsrc = _reg("ttmp", inst.srsrc*4 - 108, 4) if 108 <= inst.srsrc*4 <= 123 else _sreg(inst.srsrc*4, 4)
+  mods = ([f"format:{inst.format}"] if isinstance(inst, MTBUF) else []) + [m for c, m in [(inst.idxen,"idxen"),(inst.offen,"offen"),(inst.offset,f"offset:{inst.offset}"),(inst.glc,"glc"),(inst.dlc,"dlc"),(inst.slc,"slc"),(inst.tfe,"tfe")] if c]
+  return f"{name} {_vreg(inst.vdata, w)}, {vaddr}, {srsrc}, {decode_src(inst.soffset)}{' ' + ' '.join(mods) if mods else ''}"
 
 def _mimg_vaddr_width(name: str, dim: int, a16: bool) -> int:
   """Calculate vaddr register count for MIMG sample/gather operations."""

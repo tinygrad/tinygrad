@@ -154,7 +154,8 @@ def decode_program(data: bytes) -> Program:
   result: Program = {}
   i = 0
   while i < len(data):
-    inst_class = detect_format(data[i:])
+    try: inst_class = detect_format(data[i:])
+    except ValueError: break  # stop at invalid instruction (padding/metadata after code)
     if inst_class is None: i += 4; continue
     base_size = inst_class._size()
     # Pass enough data for potential 64-bit literal (base + 8 bytes max)
