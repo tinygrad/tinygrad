@@ -1,12 +1,13 @@
 from __future__ import annotations
-from typing import Callable, cast
+from typing import Callable, cast, TYPE_CHECKING
 import functools
 from dataclasses import dataclass, field
-from tinygrad.helpers import to_function_name, dedup, prod
-from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher
+from tinygrad.helpers import to_function_name, dedup, prod, DEBUG
+from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, GroupOp, PatternMatcher, print_uops
 from tinygrad.dtype import AddrSpace, PtrDType
 from tinygrad.codegen.opt.tc import TensorCore
 from tinygrad.codegen.opt import Opt
+if TYPE_CHECKING: from tinygrad.device import Compiler
 
 @dataclass(frozen=True)
 class Estimates:
@@ -64,37 +65,16 @@ class ProgramSpec:
   device:str
   ast:UOp  # save the base ast (this is method cache key)
   uops:list[UOp]|None=None
+  lib:bytes|None=None
   aux:dict=field(default_factory=dict)
 
-  # filled in from uops (if we have uops)
-  global_size:list[int]|None=None
+  # filled in from uops (via from_uop)
+  global_size:list[int]=field(default_factory=lambda: [1,1,1])
   local_size:list[int]|None=None
   vars:list[Variable]=field(default_factory=list)
   globals:list[int]=field(default_factory=list)
   outs:list[int]=field(default_factory=list)
   ins:list[int]=field(default_factory=list)
-  _ran_post_init:bool=False  # NOTE: this is needed if you call replace on the Program
-
-  def __post_init__(self):
-    if not self._ran_post_init and self.uops is not None:
-      # single pass through the uops
-      for u in self.uops:
-        if u.op is Ops.DEFINE_VAR: self.vars.append(u)
-        if u.op is Ops.DEFINE_GLOBAL: self.globals.append(u.arg)
-        if u.op in (Ops.STORE, Ops.LOAD):
-          if (idx:=u.src[0]).op is Ops.INDEX or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
-            if (buf:=idx.src[0]).op is Ops.DEFINE_GLOBAL: (self.outs if u.op is Ops.STORE else self.ins).append(buf.arg)
-          # TODO: can else happen?
-        if u.op is Ops.SPECIAL:
-          # NOTE: you have to set local_size and global_size to the base [1,1,1] outside this
-          if u.arg[0] == 'i': self.local_size = None
-          special_size = self.local_size if u.arg[0] == 'l' else self.global_size
-          # TODO: this cast is wrong, u.src[0].ssimplify() can be sint
-          if special_size is not None: special_size[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
-      self.vars = sorted(self.vars, key=lambda v: v.arg)
-      self.outs = sorted(dedup(self.outs))
-      self.ins = sorted(dedup(self.ins))
-      self._ran_post_init = True
 
   @functools.cached_property
   def estimates(self) -> Estimates:
@@ -110,9 +90,42 @@ class ProgramSpec:
     return self.uops[-1].arg.applied_opts
 
   def launch_dims(self, var_vals:dict[str, int]):
-    global_size = [sym_infer(sz, var_vals) for sz in self.global_size] if self.global_size is not None else None
+    global_size = [sym_infer(sz, var_vals) for sz in self.global_size]
     local_size = [sym_infer(sz, var_vals) for sz in self.local_size] if self.local_size is not None else None
     return global_size, local_size
+
+  @staticmethod
+  def from_uop(prg:UOp) -> ProgramSpec:
+    """Construct ProgramSpec from a PROGRAM UOp."""
+    assert prg.op is Ops.PROGRAM, f"expected PROGRAM, got {prg.op}"
+    # SINK/DEVICE/LINEAR/SOURCE/BINARY?
+    sink, device, linear, source = prg.src[:4]
+    lib = prg.src[4].arg if len(prg.src) > 4 else None
+    uops = list(linear.src)
+    if DEBUG >= 6: print_uops(uops)  # LINEAR is src[2]
+
+    # single pass through the uops to extract metadata
+    _vars: list[Variable] = []
+    _globals: list[int] = []
+    outs: list[int] = []
+    ins: list[int] = []
+    global_size: list[int] = [1, 1, 1]
+    local_size: list[int]|None = [1, 1, 1]
+    for u in uops:
+      if u.op is Ops.DEFINE_VAR: _vars.append(u)
+      if u.op is Ops.DEFINE_GLOBAL: _globals.append(u.arg)
+      if u.op in (Ops.STORE, Ops.LOAD):
+        if (idx:=u.src[0]).op is Ops.INDEX or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
+          if (buf:=idx.src[0]).op is Ops.DEFINE_GLOBAL: (outs if u.op is Ops.STORE else ins).append(buf.arg)
+        # TODO: can else happen?
+      if u.op is Ops.SPECIAL:
+        if u.arg[0] == 'i': local_size = None
+        special_size = local_size if u.arg[0] == 'l' else global_size
+        # TODO: this cast is wrong, u.src[0].ssimplify() can be sint
+        if special_size is not None: special_size[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
+
+    return ProgramSpec(sink.arg.name, source.arg, device.arg, sink, uops, lib, prg.arg._asdict() if prg.arg else {}, global_size, local_size,
+                       sorted(_vars, key=lambda v: v.arg), sorted(dedup(_globals)), sorted(dedup(outs)), sorted(dedup(ins)))
 
 class Renderer:
   device: str = ""
@@ -131,6 +144,7 @@ class Renderer:
   pre_matcher: PatternMatcher|None = None
   extra_matcher: PatternMatcher|None = None
   code_for_op: dict[Ops, Callable] = {}
+  compiler: Compiler|None = None
 
   def __reduce__(self): return self.__class__, ()
   def render(self, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")

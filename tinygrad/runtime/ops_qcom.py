@@ -10,7 +10,6 @@ from tinygrad.runtime.autogen import kgsl, mesa
 from tinygrad.runtime.ops_cl import CLCompiler, CLDevice
 from tinygrad.renderer.cstyle import QCOMRenderer
 from tinygrad.renderer.nir import IR3Renderer
-from tinygrad.runtime.support.compiler_mesa import IR3Compiler
 from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, prod, fromimport, cpu_profile, lo32, PROFILE, suppress_finalizing
 from tinygrad.helpers import flatten, QCOM_IR3, QCOM_CC
 from tinygrad.dtype import ImageDType
@@ -244,9 +243,10 @@ class QCOMProgram(HCQProgram):
       else: self.tex_infos.append(None)
 
     self.dev: QCOMDevice = dev
-    self.name, self.lib, self.NIR = name, lib, isinstance(dev.compiler, IR3Compiler)
+    self.name, self.lib, self.NIR = name, lib, isinstance(dev.renderer, IR3Renderer)
 
     if self.NIR:
+      from tinygrad.runtime.support.compiler_mesa import IR3Compiler
       v, cs, self.imm_vals, self.image = IR3Compiler.unpack_lib(lib)
       self.prg_offset, self.brnchstck, self.image_size, self.pvtmem, self.shmem = 0, v.branchstack, v.info.size, v.pvtmem_size, v.shared_size
       self.wgsz = alloc.offset_vec4 * 4 + 8 if (alloc:=cs.allocs.consts[mesa.IR3_CONST_ALLOC_DRIVER_PARAMS]).size_vec4 else 0xfc
@@ -348,7 +348,8 @@ class QCOMAllocator(HCQAllocatorBase):
 
       granularity = 128 if options.image.itemsize == 4 else 256
       pitch_add = (1 << pitchalign) if min(next_power2(imgw), round_up(imgw, granularity)) - align_up + 1 <= imgw and imgw > granularity//2 else 0
-      pitch = (real_stride:=imgw * 4 * options.image.itemsize) + pitch_add
+      pitch = round_up((real_stride:=imgw * 4 * options.image.itemsize), 1 << pitchalign) + pitch_add
+      # pitch = (real_stride:=imgw * 4 * options.image.itemsize) + pitch_add
       size = pitch * imgh
 
     buf = self.dev._gpu_map(options.external_ptr, size) if options.external_ptr else self.dev._gpu_alloc(size)
@@ -418,7 +419,7 @@ class QCOMDevice(HCQCompiled):
       System.write_sysfs("/sys/class/kgsl/kgsl-3d0/idle_timer", value="4000000000", msg="Failed to disable suspend mode", expected="4294967276")
 
     compilers = CompilerSet(ctrl_var=QCOM_CC, cset=[CompilerPair(QCOMRenderer, functools.partial(QCOMCompiler, device)),
-                             CompilerPair(functools.partial(IR3Renderer, self), functools.partial(IR3Compiler, info.chip_id), QCOM_IR3)])
+                                                    CompilerPair(functools.partial(IR3Renderer, info.chip_id), None, QCOM_IR3)])
     super().__init__(device, QCOMAllocator(self), compilers, functools.partial(QCOMProgram, self), QCOMSignal,
                      functools.partial(QCOMComputeQueue, self), None)
 

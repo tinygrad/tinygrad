@@ -47,10 +47,10 @@ class TestKeccak(unittest.TestCase):
 
       ha_ref, hb_ref = hasher(a), hasher(b)
       tres = Tensor.stack(*(Tensor(d) for d in (a, b))).keccak(name)
-      ha, hb = tres[0].data(), tres[1].data()
+      ha, hb = bytes(tres[0].data()), bytes(tres[1].data())
 
       self.assertEqual(ha_ref, ha)
-      self.assertEqual(ha_ref, Tensor(a).keccak(name).data())
+      self.assertEqual(ha_ref, bytes(Tensor(a).keccak(name).data()))
       self.assertEqual(hb_ref, hb)
 
   def test_referenced(self):

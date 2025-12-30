@@ -1,12 +1,13 @@
 from typing import Literal, Callable, cast
 import os, math, sys
-from collections import defaultdict, Counter
+from collections import namedtuple, defaultdict, Counter
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX, CPU_COUNT
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, AddrSpace, truncate
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu
+
 
 base_rewrite = PatternMatcher([
   (UPat(Ops.DEFINE_REG, name="x"), lambda ctx,x: f"{ctx.render_dtype(x.dtype.base)} {ctx[x]}[{x.dtype.size}];"),
@@ -278,6 +279,11 @@ class ClangRenderer(CStyleLanguage):
     defines = '\n'.join(self._render_defines(uops))
     return defines + "\n" + self._render_body(function_name, kernel, bufs, uops, prefix) + "\n" + self._render_entry(function_name, bufs)
 
+class ClangJITRenderer(ClangRenderer):
+  def __init__(self):
+    from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
+    self.compiler = ClangJITCompiler()
+
 class OpenCLRenderer(CStyleLanguage):
   device = "CL"
   has_aux = True
@@ -309,7 +315,7 @@ class OpenCLRenderer(CStyleLanguage):
     if any(uop.dtype.base == dtypes.half for uop in uops): prefix = (["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"] + (prefix or []))
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
-  def aux(self, uops:list[UOp]): return {"buf_dtypes": [u.dtype for u in uops if u.op == Ops.DEFINE_GLOBAL]}
+  def aux(self, uops:list[UOp]): return namedtuple('aux', ['buf_dtypes'])(tuple(u.dtype for u in uops if u.op == Ops.DEFINE_GLOBAL))
 
 class IntelRenderer(OpenCLRenderer):
   device, suffix, kernel_typedef = "CL", "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel void"
@@ -379,8 +385,8 @@ class CUDARenderer(CStyleLanguage):
   shared_max = 49152
 
   def __init__(self, arch:str):
-    self.arch = arch
-    self.tensor_cores = tc.cuda_sm89 if int(arch[3:]) >= 89 else tc.cuda_sm80 if int(arch[3:]) >= 80 else tc.cuda_sm75 if int(arch[3:]) >= 75 else []
+    self.arch, arch_ver = arch, int(arch[3:])
+    self.tensor_cores = tc.cuda_sm89 if arch_ver >= 89 else tc.cuda_sm80 if arch_ver >= 80 else tc.cuda_sm75 if arch_ver >= 75 else []
   def __reduce__(self): return self.__class__, (self.arch,)
 
   # language options
@@ -443,7 +449,7 @@ class CUDARenderer(CStyleLanguage):
 
     return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
 
-class AMDRenderer(CStyleLanguage):
+class AMDHIPRenderer(CStyleLanguage):
   device = "AMD"
   shared_max = 65536
   # NOTE: this is only really needed on gfx12, even though gfx11 reports the same limitation
@@ -455,7 +461,8 @@ class AMDRenderer(CStyleLanguage):
   @staticmethod
   def is_cdna(arch): return arch.split(":")[0] in {"gfx942", "gfx950"}
   def __init__(self, arch:str): # gfx942 => MI300, gfx1100 => RX 7900, gfx1201 => RX 9700
-    self.arch = arch
+    from tinygrad.runtime.support.compiler_amd import HIPCompiler
+    self.arch, self.compiler = arch, HIPCompiler(arch)
     self.tensor_cores = self.get_tensor_cores(arch)
     if self.is_cdna(self.arch):
       self.string_rewrite = PatternMatcher([
@@ -536,5 +543,11 @@ class AMDRenderer(CStyleLanguage):
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
 class NVRenderer(CUDARenderer): device = "NV"
-class HIPRenderer(AMDRenderer): device = "HIP"
+class HIPRenderer(AMDHIPRenderer): device = "HIP"
+class AMDHIPCCRenderer(AMDHIPRenderer):
+  def __init__(self, arch:str):
+    from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
+    super().__init__(arch)
+    self.compiler = HIPCCCompiler(arch)
+
 class QCOMRenderer(OpenCLRenderer): device = "QCOM"

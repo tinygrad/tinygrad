@@ -1,31 +1,26 @@
 import unittest
 import numpy as np
+from dataclasses import replace
 from tinygrad.device import Buffer, Device, is_dtype_supported
 from tinygrad.dtype import dtypes, ConstType
-from tinygrad.engine.realize import CompiledRunner
-from tinygrad.helpers import dedup, flatten, prod
+from tinygrad.engine.realize import CompiledRunner, get_program
+from tinygrad.helpers import prod
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.runtime.ops_python import PythonRenderer
 from tinygrad.uop.ops import UOp, Ops, python_alu
-from tinygrad.renderer import ProgramSpec
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.codegen import full_rewrite
 
-def _test_uop_result(inputs:list[Tensor], stores:list[UOp], local_size=None):
+def _test_uop_result(inputs:list[Tensor], prg, local_size=None):
   for x in inputs: x.realize()
-  # NOTE: we only toposort the stores
-  uops: list[UOp] = []
-  def _recursive_add(uop:UOp) -> list[UOp]: return flatten([_recursive_add(x) for x in uop.src])+[uop]
-  uops = dedup(flatten(_recursive_add(st) for st in stores))
+  uops = prg.uops
   outbufs = [Buffer(Device.DEFAULT, sz:=(1 if local_size is None else prod(local_size)), (dtype:=u.src[1].dtype), \
       initial_value=np.zeros(sz, dtype=_to_np_dtype(dtype)).data) for u in uops if u.op is Ops.STORE]
   inbufs = [x.uop.base.buffer for x in inputs]
-  src = Device[Device.DEFAULT].renderer.render(uops)
-  aux = Device[Device.DEFAULT].renderer.aux(uops) if Device[Device.DEFAULT].renderer.has_aux else {}
-  ei = CompiledRunner(ProgramSpec(uops[-1].arg.name if uops[-1].arg is not None else "test",
-                                  src, Device.DEFAULT, uops[-1], uops=uops, local_size=local_size, aux=aux))
+  prg = replace(prg, device=Device.DEFAULT)
+  if local_size is not None: prg = replace(prg, local_size=local_size)
+  ei = CompiledRunner(prg)
   ei.exec(outbufs+inbufs)
   return [np.frombuffer(x.as_buffer(), _to_np_dtype(x.dtype)) for x in outbufs]
 
@@ -38,8 +33,8 @@ def _setup_and_test_alu(alu_op:Ops, input_val:ConstType, *alu_src_uops:UOp):
   alu = ld.alu(alu_op, *alu_src_uops)
   store = UOp.store(a.index(idx), alu)
   sink = UOp(Ops.SINK, dtypes.void, (store,))
-  uops = full_rewrite(sink, Device[Device.DEFAULT].renderer)
-  return _test_uop_result([Tensor([input_val])], uops)[0]
+  prg = get_program(sink, Device[Device.DEFAULT].renderer)
+  return _test_uop_result([Tensor([input_val])], prg)[0]
 
 class TestRendererFailures(unittest.TestCase):
   @unittest.skipIf(not isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, PythonRenderer)), "test is for ptx or python renderer")
@@ -48,8 +43,8 @@ class TestRendererFailures(unittest.TestCase):
     gate_alu = (lidx0:=UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'lidx0')).ne(0)
     gated_alu_store = UOp(Ops.STORE, dtypes.void, (a.index(lidx0.valid(gate_alu)), UOp.const(dtypes.int, 1)))
     sink = UOp(Ops.SINK, dtypes.void, (gated_alu_store,))
-    uops = full_rewrite(sink, Device[Device.DEFAULT].renderer)
-    ret = _test_uop_result([], uops, local_size=[4, 1, 1])[0]
+    prg = get_program(sink, Device[Device.DEFAULT].renderer)
+    ret = _test_uop_result([], prg, local_size=[4, 1, 1])[0]
     np.testing.assert_equal(ret, [0, 1, 1, 1])
 
   @unittest.skipIf(not isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, PythonRenderer)), "test is for ptx or python renderer")
@@ -59,8 +54,8 @@ class TestRendererFailures(unittest.TestCase):
     gate_alu_1 = (lidx1:=UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 2),), 'lidx1')).ne(0)
     gated_alu_store = UOp(Ops.STORE, dtypes.void, (a.index((lidx0+lidx1*4).valid(gate_alu_0&gate_alu_1)), UOp.const(dtypes.int, 1)))
     sink = UOp(Ops.SINK, dtypes.void, (gated_alu_store,))
-    uops = full_rewrite(sink, Device[Device.DEFAULT].renderer)
-    ret = _test_uop_result([], uops, local_size=[4, 2, 1])[0]
+    prg = get_program(sink, Device[Device.DEFAULT].renderer)
+    ret = _test_uop_result([], prg, local_size=[4, 2, 1])[0]
     np.testing.assert_equal(ret, [0, 0, 0, 0, 0, 1, 1, 1])
 
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage), "uops are for cstyle")
@@ -105,8 +100,8 @@ class TestPTXFailures(unittest.TestCase):
     if_uop = UOp(Ops.IF, dtypes.void, (gate_alu,))
     gated_alu_store = UOp(Ops.STORE, dtypes.void, (a.index(lidx0, if_uop), val))
     sink = UOp(Ops.SINK, dtypes.void, (gated_alu_store,))
-    uops = full_rewrite(sink, Device[Device.DEFAULT].renderer)
-    ret = _test_uop_result([], uops, local_size=[4, 1, 1])[0]
+    prg = get_program(sink, Device[Device.DEFAULT].renderer)
+    ret = _test_uop_result([], prg, local_size=[4, 1, 1])[0]
     np.testing.assert_equal(ret, [0, 1, 1, 1])
 
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")

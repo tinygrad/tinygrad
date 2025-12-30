@@ -97,7 +97,7 @@ class GraphRunner(Runner):
         global_dim_idx, local_dim_idx = find_symbolic_dim(ji.prg.p.global_size), find_symbolic_dim(ji.prg.p.local_size)
         if global_dim_idx is not None or local_dim_idx is not None:
           self.launch_dims_replace[j] = (global_dim_idx, local_dim_idx)
-          assert ji.prg.p.global_size is not None and ji.prg.p.local_size is not None
+          assert ji.prg.p.local_size is not None
           self.launch_dims_base[j] = (tuple(ji.prg.p.global_size), tuple(ji.prg.p.local_size))
 
     # used in MultiGraphRunner. the ints are id() of _bufs

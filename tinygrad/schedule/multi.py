@@ -102,8 +102,6 @@ def mstack_early_shrink(ms:UOp, shrink:UOp):
 replace_allreduce = PatternMatcher([
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce_multirank),
   (UPat(Ops.ALLREDUCE, src=(UPat.var("buf"), UPat()), name="red"), handle_allreduce),
-  (UPat(Ops.COPY, src=(UPat(Ops.BUFFER, name="buf"), UPat(Ops.DEVICE, name="dev"))),lambda buf,dev: UOp.new_buffer(dev.arg, buf.arg, buf.dtype)
-   if buf.device not in {"DISK", "NPY"} and isinstance(dev.arg, tuple) and isinstance(buf.device, str) else None),
   # BROADCAST: explicitly expand broadcast copies and combine with MSTACK
   (UPat(Ops.COPY, name="c", src=(UPat(GroupOp.All-{Ops.CONST}, name="x"), UPat(Ops.DEVICE))), lambda c,x:
     UOp(Ops.MSTACK, c.dtype, tuple(x.copy_to_device(d) for d in c.device)) if isinstance(c.device, tuple) and isinstance(x.device, str) else None),
@@ -219,8 +217,8 @@ multi_pm = PatternMatcher([
   (UPat((Ops.CAST, Ops.BITCAST, Ops.CONTIGUOUS, Ops.DETACH, Ops.CONTIGUOUS_BACKWARD),
         src=(UPat(Ops.MULTI, name="multi"), ), name="root"), passthrough_multi),
   # multi supports custom kernels with CUSTOM_KERNEL + AFTER
-  (UPat(Ops.CUSTOM_KERNEL, src=UPat(Ops.MULTI), name="ck"),
-    lambda ck: ck.replace(src=tuple(m.src[0] for m in ck.src))),
+  (UPat(Ops.CUSTOM_KERNEL, src=UPat((Ops.MULTI, Ops.CONTIGUOUS)), name="ck"),
+    lambda ck: ck.replace(src=tuple(m.src[0] if m.op is Ops.MULTI else m for m in ck.src))),
   (UPat(Ops.AFTER, src=(UPat(Ops.MULTI, name="multi"), UPat(Ops.CUSTOM_KERNEL)), name="a"),
     lambda multi,a: a.replace(src=(multi.src[0],)+a.src[1:]).multi(multi.axis))
 ])+replace_allreduce
