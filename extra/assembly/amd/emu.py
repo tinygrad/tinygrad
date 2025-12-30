@@ -1,8 +1,8 @@
 # RDNA3 emulator - executes compiled pseudocode from AMD ISA PDF
 # mypy: ignore-errors
 from __future__ import annotations
-import ctypes
-from extra.assembly.amd.dsl import Inst, RawImm, unwrap
+import ctypes, struct
+from extra.assembly.amd.dsl import Inst, RawImm, unwrap, FLOAT_ENC
 from extra.assembly.amd.asm import detect_format
 from extra.assembly.amd.pcode import _f32, _i32, _sext, _f16, _i16, _f64, _i64
 from extra.assembly.amd.autogen.rdna3.gen_pcode import get_compiled_functions
@@ -43,17 +43,14 @@ _VOP1_16BIT_DST_OPS = {op for op in _VOP1_16BIT_OPS if 'PACK' not in op.name} - 
 _VOP1_16BIT_SRC_OPS = _VOP1_16BIT_OPS - _CVT_32_64_SRC_OPS
 
 # Inline constants for src operands 128-254. Build tables for f32, f16, and f64 formats.
-import struct as _struct
-from extra.assembly.amd.dsl import FLOAT_ENC
-_FLOAT_CONSTS = {v: k for k, v in FLOAT_ENC.items()}  # Reuse from dsl.py: {240: 0.5, 241: -0.5, ...}
-_FLOAT_CONSTS[248] = 0.15915494309189535  # INV_2PI not in FLOAT_ENC
+_FLOAT_CONSTS = {v: k for k, v in FLOAT_ENC.items()} | {248: 0.15915494309189535}  # INV_2PI
 def _build_inline_consts(mask, to_bits):
   tbl = list(range(65)) + [((-i) & mask) for i in range(1, 17)] + [0] * (127 - 81)
   for k, v in _FLOAT_CONSTS.items(): tbl[k - 128] = to_bits(v)
   return tbl
-_INLINE_CONSTS = _build_inline_consts(0xffffffff, lambda f: _struct.unpack('<I', _struct.pack('<f', f))[0])
-_INLINE_CONSTS_F16 = _build_inline_consts(0xffff, lambda f: _struct.unpack('<H', _struct.pack('<e', f))[0])
-_INLINE_CONSTS_F64 = _build_inline_consts(0xffffffffffffffff, lambda f: _struct.unpack('<Q', _struct.pack('<d', f))[0])
+_INLINE_CONSTS = _build_inline_consts(0xffffffff, lambda f: struct.unpack('<I', struct.pack('<f', f))[0])
+_INLINE_CONSTS_F16 = _build_inline_consts(0xffff, lambda f: struct.unpack('<H', struct.pack('<e', f))[0])
+_INLINE_CONSTS_F64 = _build_inline_consts(0xffffffffffffffff, lambda f: struct.unpack('<Q', struct.pack('<d', f))[0])
 
 # Helper: extract/write 16-bit half from/to 32-bit value
 def _src16(raw: int, is_hi: bool) -> int: return ((raw >> 16) & 0xffff) if is_hi else (raw & 0xffff)
