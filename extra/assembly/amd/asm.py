@@ -558,15 +558,13 @@ def _op2dsl(op: str) -> str:
   hi = ".h" if op.endswith('.h') else ".l" if op.endswith('.l') else ""
   if hi: op = op[:-2]
   lo = op.lower()
-
   def wrap(b): return f"{'-' if neg else ''}abs({b}){hi}" if abs_ else f"-{b}{hi}" if neg else f"{b}{hi}"
   if lo in SPEC_DSL: return wrap(SPEC_DSL[lo])
   if op in FLOATS: return wrap(op)
-  reg_prefix = {'s': 's', 'v': 'v', 't': 'ttmp', 'ttmp': 'ttmp'}
-  if m := re.match(r'^([svt](?:tmp)?)\[(\d+):(\d+)\]$', lo): return wrap(f"{reg_prefix[m.group(1)]}[{m.group(2)}:{m.group(3)}]")
-  if m := re.match(r'^([svt](?:tmp)?)(\d+)$', lo): return wrap(f"{reg_prefix[m.group(1)]}[{m.group(2)}]")
-  if re.match(r'^-?\d+$', op) or re.match(r'^-?0x[0-9a-fA-F]+$', op): return f"SrcMod({op}, neg={neg}, abs_={abs_})" if neg or abs_ else op
-  if lo.startswith('hwreg(') or lo.startswith('sendmsg('): return wrap(op)
+  rp = {'s': 's', 'v': 'v', 't': 'ttmp', 'ttmp': 'ttmp'}
+  if m := re.match(r'^([svt](?:tmp)?)\[(\d+):(\d+)\]$', lo): return wrap(f"{rp[m.group(1)]}[{m.group(2)}:{m.group(3)}]")
+  if m := re.match(r'^([svt](?:tmp)?)(\d+)$', lo): return wrap(f"{rp[m.group(1)]}[{m.group(2)}]")
+  if re.match(r'^-?\d+$|^-?0x[0-9a-fA-F]+$', op): return f"SrcMod({op}, neg={neg}, abs_={abs_})" if neg or abs_ else op
   return wrap(op)
 
 def _parse_ops(s: str) -> list[str]:
@@ -586,40 +584,29 @@ def _extract(text: str, pat: str, flags=re.I):
 
 def get_dsl(text: str) -> str:
   text, kw = text.strip(), []
-
   # Extract modifiers
   for pat, val in [(r'\s+mul:2(?:\s|$)', 1), (r'\s+mul:4(?:\s|$)', 2), (r'\s+div:2(?:\s|$)', 3)]:
-    m, text = _extract(text, pat)
-    if m: kw.append(f'omod={val}'); break
-  m, text = _extract(text, r'\s+clamp(?:\s|$)')
-  if m: kw.append('clmp=1')
-
-  opsel = None
-  m, text = _extract(text, r'\s+op_sel:\[([^\]]+)\]')
+    if (m := _extract(text, pat))[0]: kw.append(f'omod={val}'); text = m[1]; break
+  if (m := _extract(text, r'\s+clamp(?:\s|$)'))[0]: kw.append('clmp=1'); text = m[1]
+  opsel, m, text = None, *_extract(text, r'\s+op_sel:\[([^\]]+)\]')
   if m:
-    bits = [int(x.strip()) for x in m.group(1).split(',')]
-    mn = text.split()[0].lower()
+    bits, mn = [int(x.strip()) for x in m.group(1).split(',')], text.split()[0].lower()
     is3p = mn.startswith(('v_pk_', 'v_wmma_', 'v_dot'))
-    opsel = (bits[0] | (bits[1] << 1) | (bits[2] << 2)) if len(bits) == 3 and is3p else (bits[0] | (bits[1] << 1) | (bits[2] << 3)) if len(bits) == 3 else sum(b << i for i, b in enumerate(bits))
-
-  m, text = _extract(text, r'\s+wait_exp:(\d+)')
-  if m: kw.append(f'waitexp={m.group(1)}')
-  m, text = _extract(text, r'\s+offset:(0x[0-9a-fA-F]+|-?\d+)')
-  off_val = m.group(1) if m else None
-  m, text = _extract(text, r'\s+dlc(?:\s|$)')
-  dlc = 1 if m else None
-  m, text = _extract(text, r'\s+glc(?:\s|$)')
-  glc = 1 if m else None
-  m, text = _extract(text, r'\s+slc(?:\s|$)')
-  slc = 1 if m else None
-  m, text = _extract(text, r'\s+neg_lo:\[([^\]]+)\]')
-  neg_lo = sum(int(x.strip()) << i for i, x in enumerate(m.group(1).split(','))) if m else None
-  m, text = _extract(text, r'\s+neg_hi:\[([^\]]+)\]')
-  neg_hi = sum(int(x.strip()) << i for i, x in enumerate(m.group(1).split(','))) if m else None
+    opsel = (bits[0] | (bits[1] << 1) | (bits[2] << 2)) if len(bits) == 3 and is3p else \
+            (bits[0] | (bits[1] << 1) | (bits[2] << 3)) if len(bits) == 3 else sum(b << i for i, b in enumerate(bits))
+  m, text = _extract(text, r'\s+wait_exp:(\d+)'); waitexp = m.group(1) if m else None
+  m, text = _extract(text, r'\s+offset:(0x[0-9a-fA-F]+|-?\d+)'); off_val = m.group(1) if m else None
+  m, text = _extract(text, r'\s+dlc(?:\s|$)'); dlc = 1 if m else None
+  m, text = _extract(text, r'\s+glc(?:\s|$)'); glc = 1 if m else None
+  m, text = _extract(text, r'\s+slc(?:\s|$)'); slc = 1 if m else None
+  m, text = _extract(text, r'\s+neg_lo:\[([^\]]+)\]'); neg_lo = sum(int(x.strip()) << i for i, x in enumerate(m.group(1).split(','))) if m else None
+  m, text = _extract(text, r'\s+neg_hi:\[([^\]]+)\]'); neg_hi = sum(int(x.strip()) << i for i, x in enumerate(m.group(1).split(','))) if m else None
+  if waitexp: kw.append(f'waitexp={waitexp}')
 
   parts = text.replace(',', ' ').split()
   if not parts: raise ValueError("empty instruction")
   mn, op_str = parts[0].lower(), text[len(parts[0]):].strip()
+  ops, args = _parse_ops(op_str), [_op2dsl(o) for o in _parse_ops(op_str)]
 
   # s_waitcnt
   if mn == 's_waitcnt':
@@ -638,16 +625,10 @@ def get_dsl(text: str) -> str:
     xo, yo = [_op2dsl(p) for p in xps[1:]], [_op2dsl(p) for p in yps[1:]]
     vdx, sx0, vsx1 = xo[0], xo[1] if len(xo) > 1 else '0', xo[2] if len(xo) > 2 else 'v[0]'
     vdy, sy0, vsy1 = yo[0], yo[1] if len(yo) > 1 else '0', yo[2] if len(yo) > 2 else 'v[0]'
-    lit = None
-    if 'fmaak' in xps[0].lower() and len(xo) > 3: lit = xo[3]
-    elif 'fmamk' in xps[0].lower() and len(xo) > 3: lit, vsx1 = xo[2], xo[3]
-    elif 'fmaak' in yps[0].lower() and len(yo) > 3: lit = yo[3]
+    lit = xo[3] if 'fmaak' in xps[0].lower() and len(xo) > 3 else yo[3] if 'fmaak' in yps[0].lower() and len(yo) > 3 else None
+    if 'fmamk' in xps[0].lower() and len(xo) > 3: lit, vsx1 = xo[2], xo[3]
     elif 'fmamk' in yps[0].lower() and len(yo) > 3: lit, vsy1 = yo[2], yo[3]
-    ls = f", literal={lit}" if lit else ""
-    return f"VOPD(VOPDOp.{xps[0].upper()}, VOPDOp.{yps[0].upper()}, vdstx={vdx}, vdsty={vdy}, srcx0={sx0}, vsrcx1={vsx1}, srcy0={sy0}, vsrcy1={vsy1}{ls})"
-
-  ops = _parse_ops(op_str)
-  args = [_op2dsl(o) for o in ops]
+    return f"VOPD(VOPDOp.{xps[0].upper()}, VOPDOp.{yps[0].upper()}, vdstx={vdx}, vdsty={vdy}, srcx0={sx0}, vsrcx1={vsx1}, srcy0={sy0}, vsrcy1={vsy1}{f', literal={lit}' if lit else ''})"
 
   # Special instructions
   if mn == 's_setreg_imm32_b32': raise ValueError(f"unsupported: {mn}")
@@ -666,100 +647,64 @@ def get_dsl(text: str) -> str:
 
   # Buffer
   if mn.startswith('buffer_') and len(ops) >= 2 and ops[1].strip().lower() == 'off':
-    soff = f"RawImm({args[3].strip()})" if len(args) > 3 else "RawImm(0)"
-    return f"{mn}(vdata={args[0]}, vaddr=0, srsrc={args[2]}, soffset={soff})"
+    return f"{mn}(vdata={args[0]}, vaddr=0, srsrc={args[2]}, soffset={f'RawImm({args[3].strip()})' if len(args) > 3 else 'RawImm(0)'})"
 
-  # FLAT/GLOBAL/SCRATCH
-  flat_mods = "".join([f", offset={off_val}" if off_val else "", ", glc=1" if glc else "", ", slc=1" if slc else "", ", dlc=1" if dlc else ""])
-  for pre, flds in [('flat_load', 'vdst,addr,saddr'), ('global_load', 'vdst,addr,saddr'), ('scratch_load', 'vdst,addr,saddr'),
-                    ('flat_store', 'addr,data,saddr'), ('global_store', 'addr,data,saddr'), ('scratch_store', 'addr,data,saddr')]:
+  # FLAT/GLOBAL/SCRATCH load/store/atomic - saddr needs RawImm(124) for off/null
+  def _saddr(a): return 'RawImm(124)' if a in ('OFF', 'NULL') else a
+  flat_mods = f"{f', offset={off_val}' if off_val else ''}{', glc=1' if glc else ''}{', slc=1' if slc else ''}{', dlc=1' if dlc else ''}"
+  for pre, flds in [('flat_load','vdst,addr,saddr'), ('global_load','vdst,addr,saddr'), ('scratch_load','vdst,addr,saddr'),
+                    ('flat_store','addr,data,saddr'), ('global_store','addr,data,saddr'), ('scratch_store','addr,data,saddr')]:
     if mn.startswith(pre) and len(args) >= 2:
-      fs = flds.split(',')
-      saddr_arg = f", {fs[2]}={args[2]}" if len(args) >= 3 else ", saddr=RawImm(124)"
-      return f"{mn}({fs[0]}={args[0]}, {fs[1]}={args[1]}{saddr_arg}{flat_mods})"
-  # FLAT/GLOBAL/SCRATCH atomics
+      f0, f1, f2 = flds.split(',')
+      return f"{mn}({f0}={args[0]}, {f1}={args[1]}{f', {f2}={_saddr(args[2])}' if len(args) >= 3 else ', saddr=RawImm(124)'}{flat_mods})"
   for pre in ('flat_atomic', 'global_atomic', 'scratch_atomic'):
     if mn.startswith(pre):
-      # with glc: vdst, addr, data [, saddr]; without glc: addr, data [, saddr]
-      if glc and len(args) >= 3:
-        saddr_arg = f", saddr={args[3]}" if len(args) >= 4 else ", saddr=RawImm(124)"
-        return f"{mn}(vdst={args[0]}, addr={args[1]}, data={args[2]}{saddr_arg}{flat_mods})"
-      elif len(args) >= 2:
-        saddr_arg = f", saddr={args[2]}" if len(args) >= 3 else ", saddr=RawImm(124)"
-        return f"{mn}(addr={args[0]}, data={args[1]}{saddr_arg}{flat_mods})"
+      if glc and len(args) >= 3: return f"{mn}(vdst={args[0]}, addr={args[1]}, data={args[2]}{f', saddr={_saddr(args[3])}' if len(args) >= 4 else ', saddr=RawImm(124)'}{flat_mods})"
+      if len(args) >= 2: return f"{mn}(addr={args[0]}, data={args[1]}{f', saddr={_saddr(args[2])}' if len(args) >= 3 else ', saddr=RawImm(124)'}{flat_mods})"
 
   # DS instructions
   if mn.startswith('ds_'):
-    off0, off1, gds_s = "0", "0", ", gds=1" if 'gds' in text.lower().split()[-1:] else ""
-    if off_val:
-      off_int = int(off_val, 0)
-      off0, off1 = str(off_int & 0xff), str((off_int >> 8) & 0xff)
+    off0, off1 = (str(int(off_val, 0) & 0xff), str((int(off_val, 0) >> 8) & 0xff)) if off_val else ("0", "0")
+    gds_s = ", gds=1" if 'gds' in text.lower().split()[-1:] else ""
     off_kw = f", offset0={off0}, offset1={off1}{gds_s}"
-
-    # no operands (nop, gws_sema_v, gws_sema_p, gws_sema_release_all)
     if mn == 'ds_nop' or mn in ('ds_gws_sema_v', 'ds_gws_sema_p', 'ds_gws_sema_release_all'): return f"{mn}({off_kw.lstrip(', ')})"
-    # addr only (gws_init, gws_barrier, gws_sema_br)
     if 'gws_' in mn: return f"{mn}(addr={args[0]}{off_kw})"
-    # vdst only (consume/append)
     if 'consume' in mn or 'append' in mn: return f"{mn}(vdst={args[0]}{off_kw})"
-    # gs_reg: vdst, data0
     if 'gs_reg' in mn: return f"{mn}(vdst={args[0]}, data0={args[1]}{off_kw})"
-    # 2addr ops
     if '2addr' in mn:
       if 'load' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}{off_kw})"
       if 'store' in mn and 'xchg' not in mn: return f"{mn}(addr={args[0]}, data0={args[1]}, data1={args[2]}{off_kw})"
       return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}, data1={args[3]}{off_kw})"
-    # load
-    if 'load' in mn:
-      if 'addtid' in mn: return f"{mn}(vdst={args[0]}{off_kw})"
-      return f"{mn}(vdst={args[0]}, addr={args[1]}{off_kw})"
-    # store (not cmpstore/xchg)
-    if 'store' in mn and 'cmp' not in mn and 'xchg' not in mn:
-      if 'addtid' in mn: return f"{mn}(data0={args[0]}{off_kw})"
-      return f"{mn}(addr={args[0]}, data0={args[1]}{off_kw})"
-    # permute/swizzle
-    if 'swizzle' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}{off_kw})"
+    if 'load' in mn: return f"{mn}(vdst={args[0]}{off_kw})" if 'addtid' in mn else f"{mn}(vdst={args[0]}, addr={args[1]}{off_kw})"
+    if 'store' in mn and not _has(mn, 'cmp', 'xchg'):
+      return f"{mn}(data0={args[0]}{off_kw})" if 'addtid' in mn else f"{mn}(addr={args[0]}, data0={args[1]}{off_kw})"
+    if 'swizzle' in mn or 'ordered_count' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}{off_kw})"
     if 'permute' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}{off_kw})"
-    # ordered_count
-    if 'ordered_count' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}{off_kw})"
-    # bvh: vdst, addr, data0, data1
     if 'bvh' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}, data1={args[3]}{off_kw})"
-    # condxchg: vdst, addr, data0
     if 'condxchg' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}{off_kw})"
-    # 2-data atomics (cmpstore, mskor, wrap)
-    if 'cmpstore' in mn or 'mskor' in mn or 'wrap' in mn:
-      if '_rtn' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}, data1={args[3]}{off_kw})"
-      return f"{mn}(addr={args[0]}, data0={args[1]}, data1={args[2]}{off_kw})"
-    # default atomics
-    if '_rtn' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}{off_kw})"
-    return f"{mn}(addr={args[0]}, data0={args[1]}{off_kw})"
+    if _has(mn, 'cmpstore', 'mskor', 'wrap'):
+      return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}, data1={args[3]}{off_kw})" if '_rtn' in mn else f"{mn}(addr={args[0]}, data0={args[1]}, data1={args[2]}{off_kw})"
+    return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}{off_kw})" if '_rtn' in mn else f"{mn}(addr={args[0]}, data0={args[1]}{off_kw})"
 
-  # v_fmaak/v_fmamk
+  # v_fmaak/v_fmamk literal extraction
   lit_s = ""
   if mn in ('v_fmaak_f32', 'v_fmaak_f16') and len(args) == 4: lit_s, args = f", literal={args[3].strip()}", args[:3]
   elif mn in ('v_fmamk_f32', 'v_fmamk_f16') and len(args) == 4: lit_s, args = f", literal={args[2].strip()}", [args[0], args[1], args[3]]
 
-  # VCC ops
+  # VCC ops cleanup
   vcc_ops = {'v_add_co_ci_u32', 'v_sub_co_ci_u32', 'v_subrev_co_ci_u32'}
   if mn.replace('_e32', '') in vcc_ops and len(args) >= 5: mn, args = mn.replace('_e32', '') + '_e32', [args[0], args[2], args[3]]
   if mn.replace('_e64', '') in vcc_ops and mn.endswith('_e64'): mn = mn.replace('_e64', '')
-
-  # v_cmp strip implicit vcc_lo
-  if mn.startswith('v_cmp') and not mn.endswith('_e64') and len(args) >= 3 and ops[0].strip().lower() in ('vcc_lo', 'vcc_hi', 'vcc'):
-    args = args[1:]
-
-  # CMPX e64
+  if mn.startswith('v_cmp') and not mn.endswith('_e64') and len(args) >= 3 and ops[0].strip().lower() in ('vcc_lo', 'vcc_hi', 'vcc'): args = args[1:]
   if 'cmpx' in mn and mn.endswith('_e64') and len(args) == 2: args = ['RawImm(126)'] + args
 
   fn = mn.replace('.', '_')
   if opsel is not None: args = [re.sub(r'\.[hl]$', '', a) for a in args]
 
-  # v_fma_mix* instructions: extract inline -/|...| modifiers and convert to neg/neg_hi fields
-  # ops[0] is vdst, ops[1:4] are src0, src1, src2
+  # v_fma_mix*: extract inline neg/abs modifiers
   if 'fma_mix' in mn and neg_lo is None and neg_hi is None:
-    inline_neg, inline_abs = 0, 0
-    clean_args = [args[0]]  # keep vdst as-is
-    for i, op in enumerate(ops[1:4]):  # src0, src1, src2 (indices 1-3 in ops)
+    inline_neg, inline_abs, clean_args = 0, 0, [args[0]]
+    for i, op in enumerate(ops[1:4]):
       op = op.strip()
       neg = op.startswith('-') and not (op[1:2].isdigit() or (len(op) > 2 and op[1] == '0' and op[2] in 'xX'))
       if neg: op = op[1:]
@@ -777,9 +722,7 @@ def get_dsl(text: str) -> str:
   if opsel is not None: all_kw.append(f'opsel={opsel}')
   if neg_lo is not None: all_kw.append(f'neg={neg_lo}')
   if neg_hi is not None: all_kw.append(f'neg_hi={neg_hi}')
-  # image_bvh*_intersect_ray: fixed fields dmask=15, unrm=1, r128=1
-  if 'bvh' in mn and 'intersect_ray' in mn:
-    all_kw.extend(['dmask=15', 'unrm=1', 'r128=1'])
+  if 'bvh' in mn and 'intersect_ray' in mn: all_kw.extend(['dmask=15', 'unrm=1', 'r128=1'])
 
   a_str, kw_str = ', '.join(args), ', '.join(all_kw)
   return f"{fn}({a_str}, {kw_str})" if kw_str and a_str else f"{fn}({kw_str})" if kw_str else f"{fn}({a_str})"

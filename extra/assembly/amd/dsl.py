@@ -640,7 +640,7 @@ def generate(output_path: str | None = None, arch: str = "rdna3") -> dict:
   for cls_name, ops in sorted(enums.items()):
     fmt = cls_name[:-2]
     for op_val, name in sorted(ops.items()):
-      seg = {"GLOBAL": ", seg=2", "SCRATCH": ", seg=2"}.get(fmt, "")
+      seg = {"GLOBAL": ", seg=2", "SCRATCH": ", seg=1"}.get(fmt, "")
       tgt = {"GLOBAL": "FLAT, GLOBALOp", "SCRATCH": "FLAT, SCRATCHOp"}.get(fmt, f"{fmt}, {cls_name}")
       if fmt in formats or fmt in ("GLOBAL", "SCRATCH"):
         if fmt in ("VOP1", "VOP2", "VOPC"):
