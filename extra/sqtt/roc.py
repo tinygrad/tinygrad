@@ -134,10 +134,10 @@ def main() -> None:
   viz.ctxs = []
 
   parser = argparse.ArgumentParser()
-  parser.add_argument('--profile', type=pathlib.Path, metavar="PATH", help='Path to profile (optional path, defaults to latest profile)',
+  parser.add_argument('--profile', type=pathlib.Path, metavar="PATH", help='Path to profile (optional file, default: latest profile)',
                       default=pathlib.Path(temp("profile.pkl", append_user=True)))
-  parser.add_argument('--kernel', type=str, default=None, metavar="NAME", help='Kernel to focus on (optional name, default lists all kernels)')
-  parser.add_argument('-n', type=int, default=3, metavar="COUNT", help='Max traces to print (optional, default: 3)')
+  parser.add_argument('--kernel', type=str, default=None, metavar="NAME", help='Kernel to focus on (optional name, default: all kernels)')
+  parser.add_argument('-n', type=int, default=3, metavar="NUM", help='Max traces to print (optional number, default: 3 traces)')
   args = parser.parse_args()
 
   with args.profile.open("rb") as f: profile = pickle.load(f)
@@ -149,7 +149,6 @@ def main() -> None:
     for c in viz.ctxs:
       print(c["name"])
       for s in c["steps"]: print("  "+s["name"])
-    parser.print_usage()
     return None
 
   # Find kernel trace
