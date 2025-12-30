@@ -4,9 +4,9 @@ import re
 from extra.assembly.amd.dsl import Inst, RawImm, Reg, SrcMod, SGPR, VGPR, TTMP, s, v, ttmp, _RegFactory, FLOAT_ENC, SRC_FIELDS, unwrap
 from extra.assembly.amd.dsl import VCC_LO, VCC_HI, VCC, EXEC_LO, EXEC_HI, EXEC, SCC, M0, NULL, OFF
 from extra.assembly.amd.autogen import rdna3
-from extra.assembly.amd.autogen.rdna3 import VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, VOPD, VINTERP, SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, DS, FLAT, MUBUF, MTBUF
+from extra.assembly.amd.autogen.rdna3 import VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, VOPD, VINTERP, SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, DS, FLAT, MUBUF, MTBUF, MIMG
 from extra.assembly.amd.autogen.rdna3 import VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, VOPDOp, VINTERPOp
-from extra.assembly.amd.autogen.rdna3 import SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, FLATOp, MUBUFOp, MTBUFOp
+from extra.assembly.amd.autogen.rdna3 import SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, DSOp, FLATOp, MUBUFOp, MTBUFOp, MIMGOp
 
 # VOP3SD opcodes that share VOP3 encoding
 VOP3SD_OPS = {288, 289, 290, 764, 765, 766, 767, 768, 769, 770}
@@ -146,19 +146,24 @@ def _disasm_vop2(inst: VOP2) -> str:
   if is16: return f"{name}{suf} {_fmt_v16(inst.vdst, 0, 128)}, {_fmt_v16(inst.src0) if inst.src0 >= 256 else inst.lit(inst.src0)}, {_fmt_v16(inst.vsrc1, 0, 128)}"
   return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, v{inst.vsrc1}" + (", vcc_lo" if op == VOP2Op.V_CNDMASK_B32 else "")
 
+VOPC_CLASS = {VOPCOp.V_CMP_CLASS_F16, VOPCOp.V_CMP_CLASS_F32, VOPCOp.V_CMP_CLASS_F64,
+              VOPCOp.V_CMPX_CLASS_F16, VOPCOp.V_CMPX_CLASS_F32, VOPCOp.V_CMPX_CLASS_F64}
+
 def _disasm_vopc(inst: VOPC) -> str:
-  name = VOPCOp(inst.op).name.lower()
+  op = VOPCOp(inst.op)
+  name = op.name.lower()
   is64, is16 = _is64(name), _is16(name)
   s0 = _fmt_src(inst.src0, 2) if is64 else _fmt_v16(inst.src0) if is16 and inst.src0 >= 256 else inst.lit(inst.src0)
-  s1 = _vreg(inst.vsrc1, 2) if is64 and 'class' not in name else _fmt_v16(inst.vsrc1, 0, 128) if is16 else f"v{inst.vsrc1}"
-  return f"{name}_e32 {s0}, {s1}" if name.startswith('v_cmpx') else f"{name}_e32 vcc_lo, {s0}, {s1}"
+  s1 = _vreg(inst.vsrc1, 2) if is64 and op not in VOPC_CLASS else _fmt_v16(inst.vsrc1, 0, 128) if is16 else f"v{inst.vsrc1}"
+  return f"{name}_e32 {s0}, {s1}" if op.value >= 128 else f"{name}_e32 vcc_lo, {s0}, {s1}"
+
+NO_ARG_SOPP = {SOPPOp.S_ENDPGM, SOPPOp.S_BARRIER, SOPPOp.S_WAKEUP, SOPPOp.S_ICACHE_INV,
+               SOPPOp.S_WAIT_IDLE, SOPPOp.S_ENDPGM_SAVED, SOPPOp.S_CODE_END, SOPPOp.S_ENDPGM_ORDERED_PS_DONE}
 
 def _disasm_sopp(inst: SOPP) -> str:
   op = SOPPOp(inst.op)
   name = op.name.lower()
-  NO_ARG_NAMES = {'s_endpgm', 's_barrier', 's_wakeup', 's_icache_inv', 's_ttracedata', 's_ttracedata_imm',
-                  's_wait_idle', 's_endpgm_saved', 's_code_end', 's_endpgm_ordered_ps_done'}
-  if name in NO_ARG_NAMES: return name
+  if op in NO_ARG_SOPP: return name
   if op == SOPPOp.S_WAITCNT:
     vm, exp, lgkm = (inst.simm16 >> 10) & 0x3f, inst.simm16 & 0xf, (inst.simm16 >> 4) & 0x3f
     p = [f"vmcnt({vm})" if vm != 0x3f else "", f"expcnt({exp})" if exp != 7 else "", f"lgkmcnt({lgkm})" if lgkm != 0x3f else ""]
@@ -176,7 +181,7 @@ def _disasm_sopp(inst: SOPP) -> str:
 def _disasm_smem(inst: SMEM) -> str:
   op = SMEMOp(inst.op)
   name = op.name.lower()
-  if name in ('s_gl1_inv', 's_dcache_inv'): return name
+  if op in (SMEMOp.S_GL1_INV, SMEMOp.S_DCACHE_INV): return name
   off_s = f"{decode_src(inst.soffset)} offset:0x{inst.offset:x}" if inst.offset and inst.soffset != 124 else f"0x{inst.offset:x}" if inst.offset else decode_src(inst.soffset)
   sbase_idx, sbase_count = inst.sbase * 2, 4 if (8 <= inst.op <= 12 or name == 's_atc_probe_buffer') else 2
   sbase_str = _fmt_src(sbase_idx, sbase_count) if sbase_count == 2 else _sreg(sbase_idx, sbase_count) if sbase_idx <= 105 else _reg("ttmp", sbase_idx - 108, sbase_count)
@@ -187,13 +192,104 @@ def _disasm_smem(inst: SMEM) -> str:
 def _disasm_flat(inst: FLAT) -> str:
   op = FLATOp(inst.op)
   name = op.name.lower()
-  instr = f"{['flat', 'scratch', 'global'][inst.seg] if inst.seg < 3 else 'flat'}_{name.split('_', 1)[1] if '_' in name else name}"
-  w = {'b32':1, 'b64':2, 'b96':3, 'b128':4, 'u8':1, 'i8':1, 'u16':1, 'i16':1}.get(name.split('_')[-1], 1)
-  addr_s = _vreg(inst.addr, 2 if inst.saddr == 0x7F else 1)
-  saddr_s = "" if inst.saddr == 0x7F else f", {_sreg(inst.saddr, 2)}" if inst.saddr < 106 else ", off" if inst.saddr == 124 else f", {decode_src(inst.saddr)}"
-  off_s = f" offset:{inst.offset}" if inst.offset else ""
-  vdata = _vreg(inst.data if 'store' in name else inst.vdst, w)
-  return f"{instr} {addr_s}, {vdata}{saddr_s}{off_s}" if 'store' in name else f"{instr} {vdata}, {addr_s}{saddr_s}{off_s}"
+  seg_prefix = ['flat', 'scratch', 'global'][inst.seg] if inst.seg < 3 else 'flat'
+  instr = f"{seg_prefix}_{name.split('_', 1)[1] if '_' in name else name}"
+  # offset: scratch/global are 13-bit signed, flat is 12-bit unsigned
+  raw_off = inst.offset
+  if seg_prefix == 'scratch' or seg_prefix == 'global':
+    off_val = raw_off if raw_off < 4096 else raw_off - 8192  # 13-bit signed
+  else:
+    off_val = raw_off  # flat: 12-bit unsigned
+  off_s = f" offset:{off_val}" if off_val else ""
+
+  # data width from suffix
+  suffix = name.split('_')[-1]
+  w = {'b32':1, 'b64':2, 'b96':3, 'b128':4, 'u8':1, 'i8':1, 'u16':1, 'i16':1, 'u32':1, 'i32':1, 'u64':2, 'i64':2, 'f32':1, 'f64':2}.get(suffix, 1)
+  # cmpswap uses 2x data width, x2 suffix means 64-bit
+  if 'cmpswap' in name: w *= 2
+  if name.endswith('_x2') or 'x2' in suffix: w = max(w, 2)
+
+  is_atomic = 'atomic' in name
+  is_store = 'store' in name
+  is_load = 'load' in name
+
+  # modifiers: glc/slc/dlc apply to loads, stores, and atomics
+  glc_s = " glc" if inst.glc else ""
+  slc_s = " slc" if inst.slc else ""
+  dlc_s = " dlc" if inst.dlc else ""
+  mods = f"{off_s}{glc_s}{slc_s}{dlc_s}"
+
+  # saddr handling: flat has no saddr, scratch uses single SGPR, global uses SGPR pair
+  if seg_prefix == 'flat' or inst.saddr == 0x7F: saddr_s = ""
+  elif inst.saddr == 124: saddr_s = ", off"
+  elif seg_prefix == 'scratch': saddr_s = f", {decode_src(inst.saddr)}"
+  elif inst.saddr in SPECIAL_PAIRS: saddr_s = f", {SPECIAL_PAIRS[inst.saddr]}"  # vcc, exec
+  elif 108 <= inst.saddr <= 123: saddr_s = f", {_reg('ttmp', inst.saddr - 108, 2)}"  # ttmp pair
+  elif inst.saddr < 106: saddr_s = f", {_sreg(inst.saddr, 2)}"
+  else: saddr_s = f", {decode_src(inst.saddr)}"
+
+  # addtid instructions: no addr operand, just vdst/data and saddr
+  if 'addtid' in name:
+    if is_store: return f"{instr} v{inst.data}{saddr_s}{mods}"
+    return f"{instr} v{inst.vdst}{saddr_s}{mods}"
+
+  # Address: for flat/global without saddr (or saddr=off), addr is 64-bit; with valid saddr, addr is 32-bit
+  # For scratch, addr is always 32-bit. sve=0 means addr is not used (output "off") - only for scratch
+  if not inst.sve and seg_prefix == 'scratch':
+    addr_s = "off"
+  else:
+    has_saddr = inst.saddr != 0x7F and inst.saddr != 124  # 0x7F=no saddr field, 124=off
+    addr_w = 1 if seg_prefix == 'scratch' or has_saddr else 2
+    addr_s = _vreg(inst.addr, addr_w)
+
+  if is_atomic:
+    data_s = _vreg(inst.data, w)
+    # vdst width: cmpswap returns single value (w/2), others return full width
+    vdst_w = w // 2 if 'cmpswap' in name else w
+    vdst_s = _vreg(inst.vdst, vdst_w)
+    # with glc: vdst, addr, data; without glc: addr, data
+    if inst.glc:
+      if seg_prefix == 'flat': return f"{instr} {vdst_s}, {addr_s}, {data_s}{mods}"
+      return f"{instr} {vdst_s}, {addr_s}, {data_s}{saddr_s}{mods}"
+    else:
+      if seg_prefix == 'flat': return f"{instr} {addr_s}, {data_s}{mods}"
+      return f"{instr} {addr_s}, {data_s}{saddr_s}{mods}"
+  if is_store:
+    data_s = _vreg(inst.data, w)
+    return f"{instr} {addr_s}, {data_s}{saddr_s}{mods}"
+  if is_load:
+    vdst_s = _vreg(inst.vdst, w)
+    return f"{instr} {vdst_s}, {addr_s}{saddr_s}{mods}"
+  # fallback
+  return f"{instr} {_vreg(inst.vdst, w)}, {addr_s}{saddr_s}{off_s}"
+
+def _disasm_ds(inst: DS) -> str:
+  op, name = DSOp(inst.op), DSOp(inst.op).name.lower()
+  gds = " gds" if inst.gds else ""
+  off = f" offset:{inst.offset0 | (inst.offset1 << 8)}" if inst.offset0 or inst.offset1 else ""
+  off2 = f" offset0:{inst.offset0} offset1:{inst.offset1}" if inst.offset0 or inst.offset1 else ""
+  w = 4 if '128' in name else 3 if '96' in name else 2 if (name.endswith('64') or 'gs_reg' in name) else 1
+  d0, d1, dst, addr = _vreg(inst.data0, w), _vreg(inst.data1, w), _vreg(inst.vdst, w), f"v{inst.addr}"
+
+  if op == DSOp.DS_NOP: return name
+  if op == DSOp.DS_BVH_STACK_RTN_B32: return f"{name} v{inst.vdst}, {addr}, v{inst.data0}, {_vreg(inst.data1, 4)}{off}{gds}"
+  if 'gws_sema' in name and op != DSOp.DS_GWS_SEMA_BR: return f"{name}{off}{gds}"
+  if 'gws_' in name: return f"{name} {addr}{off}{gds}"
+  if op in (DSOp.DS_CONSUME, DSOp.DS_APPEND): return f"{name} v{inst.vdst}{off}{gds}"
+  if 'gs_reg' in name: return f"{name} {_vreg(inst.vdst, 2)}, v{inst.data0}{off}{gds}"
+  if '2addr' in name:
+    if 'load' in name: return f"{name} {_vreg(inst.vdst, w*2)}, {addr}{off2}{gds}"
+    if 'store' in name and 'xchg' not in name: return f"{name} {addr}, {d0}, {d1}{off2}{gds}"
+    return f"{name} {_vreg(inst.vdst, w*2)}, {addr}, {d0}, {d1}{off2}{gds}"
+  if 'load' in name: return f"{name} v{inst.vdst}{off}{gds}" if 'addtid' in name else f"{name} {dst}, {addr}{off}{gds}"
+  if 'store' in name and not _has(name, 'cmp', 'xchg'):
+    return f"{name} v{inst.data0}{off}{gds}" if 'addtid' in name else f"{name} {addr}, {d0}{off}{gds}"
+  if 'swizzle' in name or op == DSOp.DS_ORDERED_COUNT: return f"{name} v{inst.vdst}, {addr}{off}{gds}"
+  if 'permute' in name: return f"{name} v{inst.vdst}, {addr}, v{inst.data0}{off}{gds}"
+  if 'condxchg' in name: return f"{name} {_vreg(inst.vdst, 2)}, {addr}, {_vreg(inst.data0, 2)}{off}{gds}"
+  if _has(name, 'cmpstore', 'mskor', 'wrap'):
+    return f"{name} {dst}, {addr}, {d0}, {d1}{off}{gds}" if '_rtn' in name else f"{name} {addr}, {d0}, {d1}{off}{gds}"
+  return f"{name} {dst}, {addr}, {d0}{off}{gds}" if '_rtn' in name else f"{name} {addr}, {d0}{off}{gds}"
 
 def _disasm_vop3(inst: VOP3) -> str:
   op = VOP3SDOp(inst.op) if inst.op in VOP3SD_OPS else VOP3Op(inst.op)
@@ -288,16 +384,31 @@ def _disasm_vop3p(inst: VOP3P) -> str:
   name = VOP3POp(inst.op).name.lower()
   is_wmma = 'wmma' in name
   is_3src = _has(name, 'fma', 'mad', 'dot', 'wmma')
+  is_fma_mix = 'fma_mix' in name  # v_fma_mix_f32, v_fma_mixlo_f16, v_fma_mixhi_f16 use inline modifiers
   if is_wmma:
     src_count = 2 if 'iu4' in name else 4 if 'iu8' in name else 8
     src0, src1, src2, dst = _fmt_src(inst.src0, src_count), _fmt_src(inst.src1, src_count), _fmt_src(inst.src2, 8), _vreg(inst.vdst, 8)
   else: src0, src1, src2, dst = _fmt_src(inst.src0, 1), _fmt_src(inst.src1, 1), _fmt_src(inst.src2, 1), f"v{inst.vdst}"
   num_srcs = 3 if is_3src else 2
   opsel_hi_combined = inst.opsel_hi | (inst.opsel_hi2 << 2)
-  mods = ([_fmt_bits("op_sel", inst.opsel, num_srcs)] if inst.opsel else []) + \
-         ([_fmt_bits("op_sel_hi", opsel_hi_combined, num_srcs)] if opsel_hi_combined != (7 if is_3src else 3) else []) + \
-         ([_fmt_bits("neg_lo", inst.neg, num_srcs)] if inst.neg else []) + \
-         ([_fmt_bits("neg_hi", inst.neg_hi, num_srcs)] if inst.neg_hi else []) + (["clamp"] if inst.clmp else [])
+  # For v_fma_mix*, use inline neg/abs modifiers (e.g. -|src|) instead of neg_lo:[...] arrays
+  if is_fma_mix:
+    def apply_mods(s: str, neg: bool, abs_: bool) -> str:
+      if abs_: s = f"|{s}|"
+      if neg: s = f"-{s}"
+      return s
+    src0 = apply_mods(src0, bool(inst.neg & 1), bool(inst.neg_hi & 1))
+    src1 = apply_mods(src1, bool(inst.neg & 2), bool(inst.neg_hi & 2))
+    src2 = apply_mods(src2, bool(inst.neg & 4), bool(inst.neg_hi & 4))
+    # For v_fma_mix*, always output op_sel_hi since LLVM defaults to [0,0,0] not [1,1,1]
+    mods = ([_fmt_bits("op_sel", inst.opsel, num_srcs)] if inst.opsel else []) + \
+           ([_fmt_bits("op_sel_hi", opsel_hi_combined, num_srcs)] if opsel_hi_combined else []) + \
+           (["clamp"] if inst.clmp else [])
+  else:
+    mods = ([_fmt_bits("op_sel", inst.opsel, num_srcs)] if inst.opsel else []) + \
+           ([_fmt_bits("op_sel_hi", opsel_hi_combined, num_srcs)] if opsel_hi_combined != (7 if is_3src else 3) else []) + \
+           ([_fmt_bits("neg_lo", inst.neg, num_srcs)] if inst.neg else []) + \
+           ([_fmt_bits("neg_hi", inst.neg_hi, num_srcs)] if inst.neg_hi else []) + (["clamp"] if inst.clmp else [])
   mods_str = ' ' + ' '.join(mods) if mods else ''
   return f"{name} {dst}, {src0}, {src1}, {src2}{mods_str}" if is_3src else f"{name} {dst}, {src0}, {src1}{mods_str}"
 
@@ -315,6 +426,54 @@ def _disasm_buf(inst: MUBUF | MTBUF) -> str:
   fmt = inst.format if isinstance(inst, MTBUF) else None
   mods = ([f"format:{fmt}"] if fmt else []) + [m for cond, m in [(inst.idxen, "idxen"), (inst.offen, "offen"), (inst.offset, f"offset:{inst.offset}"), (inst.glc, "glc"), (inst.dlc, "dlc"), (inst.slc, "slc"), (inst.tfe, "tfe")] if cond]
   return f"{name} {_vreg(inst.vdata, width)}, {vaddr_str}, {srsrc_str}, {decode_src(inst.soffset)}" + (" " + " ".join(mods) if mods else "")
+
+def _mimg_vaddr_width(name: str, dim: int, a16: bool) -> int:
+  """Calculate vaddr register count for MIMG sample/gather operations."""
+  #                    1d,2d,3d,cube,1d_arr,2d_arr,2d_msaa,2d_msaa_arr
+  base =              [1, 2, 3, 3,   2,     3,     3,      4][dim]  # address coords
+  grad =              [1, 2, 3, 2,   1,     2,     2,      2][dim]  # gradient coords (for derivatives)
+  if 'get_resinfo' in name: return 1  # only mip level
+  packed, unpacked = 0, 0
+  if '_mip' in name: packed += 1
+  elif 'sample' in name or 'gather' in name:
+    if '_o' in name: unpacked += 1                                              # offset
+    if re.search(r'_c(_|$)', name): unpacked += 1                               # compare (not _cl)
+    if '_d' in name: unpacked += (grad + 1) & ~1 if '_g16' in name else grad*2  # derivatives
+    if '_b' in name: unpacked += 1                                              # bias
+    if '_l' in name and '_cl' not in name and '_lz' not in name: packed += 1    # LOD
+    if '_cl' in name: packed += 1                                               # clamp
+  return (base + packed + 1) // 2 + unpacked if a16 else base + packed + unpacked
+
+def _disasm_mimg(inst: MIMG) -> str:
+  name = MIMGOp(inst.op).name.lower()
+  srsrc_base = inst.srsrc * 4
+  srsrc_str = _reg("ttmp", srsrc_base - 108, 8) if 108 <= srsrc_base <= 123 else _sreg(srsrc_base, 8)
+  # BVH intersect ray: special case with 4 SGPR srsrc
+  if 'bvh' in name:
+    vaddr = (9 if '64' in name else 8) if inst.a16 else (12 if '64' in name else 11)
+    srsrc = _reg("ttmp", srsrc_base - 108, 4) if 108 <= srsrc_base <= 123 else _sreg(srsrc_base, 4)
+    return f"{name} {_vreg(inst.vdata, 4)}, {_vreg(inst.vaddr, vaddr)}, {srsrc}{' a16' if inst.a16 else ''}"
+  # vdata width from dmask (gather4/msaa_load always 4), d16 packs, tfe adds 1
+  vdata = 4 if 'gather4' in name or 'msaa_load' in name else (bin(inst.dmask).count('1') or 1)
+  if inst.d16: vdata = (vdata + 1) // 2
+  if inst.tfe: vdata += 1
+  # vaddr width
+  dim_names = ['1d', '2d', '3d', 'cube', '1d_array', '2d_array', '2d_msaa', '2d_msaa_array']
+  dim = dim_names[inst.dim] if inst.dim < len(dim_names) else f"dim_{inst.dim}"
+  vaddr = _mimg_vaddr_width(name, inst.dim, inst.a16)
+  vaddr_str = f"v{inst.vaddr}" if vaddr == 1 else _vreg(inst.vaddr, vaddr)
+  # modifiers
+  mods = [f"dmask:0x{inst.dmask:x}"] if inst.dmask and (inst.dmask != 15 or 'atomic' in name) else []
+  mods.append(f"dim:SQ_RSRC_IMG_{dim.upper()}")
+  for flag, mod in [(inst.unrm,"unorm"),(inst.glc,"glc"),(inst.slc,"slc"),(inst.dlc,"dlc"),(inst.r128,"r128"),
+                    (inst.a16,"a16"),(inst.tfe,"tfe"),(inst.lwe,"lwe"),(inst.d16,"d16")]:
+    if flag: mods.append(mod)
+  # ssamp for sample/gather/get_lod
+  ssamp_str = ""
+  if 'sample' in name or 'gather' in name or 'get_lod' in name:
+    ssamp_base = inst.ssamp * 4
+    ssamp_str = ", " + (_reg("ttmp", ssamp_base - 108, 4) if 108 <= ssamp_base <= 123 else _sreg(ssamp_base, 4))
+  return f"{name} {_vreg(inst.vdata, vdata)}, {vaddr_str}, {srsrc_str}{ssamp_str} {' '.join(mods)}"
 
 def _sop_widths(name: str) -> tuple[int, int, int]:
   """Return (dst_width, src0_width, src1_width) in register count for SOP instructions."""
@@ -372,8 +531,8 @@ def _disasm_generic(inst: Inst) -> str:
   return f"{name} {', '.join(operands)}" if operands else name
 
 DISASM_HANDLERS = {VOP1: _disasm_vop1, VOP2: _disasm_vop2, VOPC: _disasm_vopc, VOP3: _disasm_vop3, VOP3SD: _disasm_vop3sd, VOPD: _disasm_vopd, VOP3P: _disasm_vop3p,
-                   VINTERP: _disasm_vinterp, SOPP: _disasm_sopp, SMEM: _disasm_smem, FLAT: _disasm_flat, MUBUF: _disasm_buf, MTBUF: _disasm_buf,
-                   SOP1: _disasm_sop1, SOP2: _disasm_sop2, SOPC: _disasm_sopc, SOPK: _disasm_sopk}
+                   VINTERP: _disasm_vinterp, SOPP: _disasm_sopp, SMEM: _disasm_smem, DS: _disasm_ds, FLAT: _disasm_flat, MUBUF: _disasm_buf, MTBUF: _disasm_buf,
+                   MIMG: _disasm_mimg, SOP1: _disasm_sop1, SOP2: _disasm_sop2, SOPC: _disasm_sopc, SOPK: _disasm_sopk}
 
 def disasm(inst: Inst) -> str: return DISASM_HANDLERS.get(type(inst), _disasm_generic)(inst)
 
@@ -451,6 +610,8 @@ def get_dsl(text: str) -> str:
   dlc = 1 if m else None
   m, text = _extract(text, r'\s+glc(?:\s|$)')
   glc = 1 if m else None
+  m, text = _extract(text, r'\s+slc(?:\s|$)')
+  slc = 1 if m else None
   m, text = _extract(text, r'\s+neg_lo:\[([^\]]+)\]')
   neg_lo = sum(int(x.strip()) << i for i, x in enumerate(m.group(1).split(','))) if m else None
   m, text = _extract(text, r'\s+neg_hi:\[([^\]]+)\]')
@@ -509,11 +670,69 @@ def get_dsl(text: str) -> str:
     return f"{mn}(vdata={args[0]}, vaddr=0, srsrc={args[2]}, soffset={soff})"
 
   # FLAT/GLOBAL/SCRATCH
+  flat_mods = "".join([f", offset={off_val}" if off_val else "", ", glc=1" if glc else "", ", slc=1" if slc else "", ", dlc=1" if dlc else ""])
   for pre, flds in [('flat_load', 'vdst,addr,saddr'), ('global_load', 'vdst,addr,saddr'), ('scratch_load', 'vdst,addr,saddr'),
                     ('flat_store', 'addr,data,saddr'), ('global_store', 'addr,data,saddr'), ('scratch_store', 'addr,data,saddr')]:
-    if mn.startswith(pre) and len(args) >= 3:
+    if mn.startswith(pre) and len(args) >= 2:
       fs = flds.split(',')
-      return f"{mn}({fs[0]}={args[0]}, {fs[1]}={args[1]}, {fs[2]}={args[2]}{', offset=' + off_val if off_val else ''})"
+      saddr_arg = f", {fs[2]}={args[2]}" if len(args) >= 3 else ", saddr=RawImm(124)"
+      return f"{mn}({fs[0]}={args[0]}, {fs[1]}={args[1]}{saddr_arg}{flat_mods})"
+  # FLAT/GLOBAL/SCRATCH atomics
+  for pre in ('flat_atomic', 'global_atomic', 'scratch_atomic'):
+    if mn.startswith(pre):
+      # with glc: vdst, addr, data [, saddr]; without glc: addr, data [, saddr]
+      if glc and len(args) >= 3:
+        saddr_arg = f", saddr={args[3]}" if len(args) >= 4 else ", saddr=RawImm(124)"
+        return f"{mn}(vdst={args[0]}, addr={args[1]}, data={args[2]}{saddr_arg}{flat_mods})"
+      elif len(args) >= 2:
+        saddr_arg = f", saddr={args[2]}" if len(args) >= 3 else ", saddr=RawImm(124)"
+        return f"{mn}(addr={args[0]}, data={args[1]}{saddr_arg}{flat_mods})"
+
+  # DS instructions
+  if mn.startswith('ds_'):
+    off0, off1, gds_s = "0", "0", ", gds=1" if 'gds' in text.lower().split()[-1:] else ""
+    if off_val:
+      off_int = int(off_val, 0)
+      off0, off1 = str(off_int & 0xff), str((off_int >> 8) & 0xff)
+    off_kw = f", offset0={off0}, offset1={off1}{gds_s}"
+
+    # no operands (nop, gws_sema_v, gws_sema_p, gws_sema_release_all)
+    if mn == 'ds_nop' or mn in ('ds_gws_sema_v', 'ds_gws_sema_p', 'ds_gws_sema_release_all'): return f"{mn}({off_kw.lstrip(', ')})"
+    # addr only (gws_init, gws_barrier, gws_sema_br)
+    if 'gws_' in mn: return f"{mn}(addr={args[0]}{off_kw})"
+    # vdst only (consume/append)
+    if 'consume' in mn or 'append' in mn: return f"{mn}(vdst={args[0]}{off_kw})"
+    # gs_reg: vdst, data0
+    if 'gs_reg' in mn: return f"{mn}(vdst={args[0]}, data0={args[1]}{off_kw})"
+    # 2addr ops
+    if '2addr' in mn:
+      if 'load' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}{off_kw})"
+      if 'store' in mn and 'xchg' not in mn: return f"{mn}(addr={args[0]}, data0={args[1]}, data1={args[2]}{off_kw})"
+      return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}, data1={args[3]}{off_kw})"
+    # load
+    if 'load' in mn:
+      if 'addtid' in mn: return f"{mn}(vdst={args[0]}{off_kw})"
+      return f"{mn}(vdst={args[0]}, addr={args[1]}{off_kw})"
+    # store (not cmpstore/xchg)
+    if 'store' in mn and 'cmp' not in mn and 'xchg' not in mn:
+      if 'addtid' in mn: return f"{mn}(data0={args[0]}{off_kw})"
+      return f"{mn}(addr={args[0]}, data0={args[1]}{off_kw})"
+    # permute/swizzle
+    if 'swizzle' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}{off_kw})"
+    if 'permute' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}{off_kw})"
+    # ordered_count
+    if 'ordered_count' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}{off_kw})"
+    # bvh: vdst, addr, data0, data1
+    if 'bvh' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}, data1={args[3]}{off_kw})"
+    # condxchg: vdst, addr, data0
+    if 'condxchg' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}{off_kw})"
+    # 2-data atomics (cmpstore, mskor, wrap)
+    if 'cmpstore' in mn or 'mskor' in mn or 'wrap' in mn:
+      if '_rtn' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}, data1={args[3]}{off_kw})"
+      return f"{mn}(addr={args[0]}, data0={args[1]}, data1={args[2]}{off_kw})"
+    # default atomics
+    if '_rtn' in mn: return f"{mn}(vdst={args[0]}, addr={args[1]}, data0={args[2]}{off_kw})"
+    return f"{mn}(addr={args[0]}, data0={args[1]}{off_kw})"
 
   # v_fmaak/v_fmamk
   lit_s = ""
@@ -535,11 +754,32 @@ def get_dsl(text: str) -> str:
   fn = mn.replace('.', '_')
   if opsel is not None: args = [re.sub(r'\.[hl]$', '', a) for a in args]
 
+  # v_fma_mix* instructions: extract inline -/|...| modifiers and convert to neg/neg_hi fields
+  # ops[0] is vdst, ops[1:4] are src0, src1, src2
+  if 'fma_mix' in mn and neg_lo is None and neg_hi is None:
+    inline_neg, inline_abs = 0, 0
+    clean_args = [args[0]]  # keep vdst as-is
+    for i, op in enumerate(ops[1:4]):  # src0, src1, src2 (indices 1-3 in ops)
+      op = op.strip()
+      neg = op.startswith('-') and not (op[1:2].isdigit() or (len(op) > 2 and op[1] == '0' and op[2] in 'xX'))
+      if neg: op = op[1:]
+      abs_ = op.startswith('|') and op.endswith('|')
+      if abs_: op = op[1:-1]
+      if neg: inline_neg |= (1 << i)
+      if abs_: inline_abs |= (1 << i)
+      clean_args.append(_op2dsl(op))
+    args = clean_args + args[4:]
+    if inline_neg: neg_lo = inline_neg
+    if inline_abs: neg_hi = inline_abs
+
   all_kw = list(kw)
   if lit_s: all_kw.append(lit_s.lstrip(', '))
   if opsel is not None: all_kw.append(f'opsel={opsel}')
   if neg_lo is not None: all_kw.append(f'neg={neg_lo}')
   if neg_hi is not None: all_kw.append(f'neg_hi={neg_hi}')
+  # image_bvh*_intersect_ray: fixed fields dmask=15, unrm=1, r128=1
+  if 'bvh' in mn and 'intersect_ray' in mn:
+    all_kw.extend(['dmask=15', 'unrm=1', 'r128=1'])
 
   a_str, kw_str = ', '.join(args), ', '.join(all_kw)
   return f"{fn}({a_str}, {kw_str})" if kw_str and a_str else f"{fn}({kw_str})" if kw_str else f"{fn}({a_str})"

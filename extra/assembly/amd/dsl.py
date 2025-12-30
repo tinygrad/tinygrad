@@ -178,6 +178,21 @@ class Inst:
           raise ValueError(f"SOP1 {op_val.name} expects {expected} destination register(s), got {sdst_val.count}")
         if isinstance(ssrc0_val, Reg) and ssrc0_val.count != expected:
           raise ValueError(f"SOP1 {op_val.name} expects {expected} source register(s), got {ssrc0_val.count}")
+    # FLAT: set sve=1 when addr is a VGPR for scratch only
+    # For scratch (seg=1), sve=1 means addr VGPR is used; sve=0 means addr is "off"
+    # For global (seg=2) and flat (seg=0), sve is always 0
+    if self.__class__.__name__ == 'FLAT' and 'sve' in self._fields:
+      seg_val = self._values.get('seg', 0)
+      if isinstance(seg_val, RawImm): seg_val = seg_val.val
+      addr_val = orig_args.get('addr')
+      if seg_val == 1 and isinstance(addr_val, VGPR): self._values['sve'] = 1
+    # VOP3P: v_fma_mix* instructions (opcodes 32-34) have opsel_hi default of 0, not 7
+    if self.__class__.__name__ == 'VOP3P':
+      op_val = orig_args.get(field_names[0]) if args else orig_args.get('op')
+      if hasattr(op_val, 'value'): op_val = op_val.value
+      if op_val in (32, 33, 34) and 'opsel_hi' not in orig_args and 'opsel_hi2' not in orig_args:
+        self._values['opsel_hi'] = 0
+        self._values['opsel_hi2'] = 0
     # Type check and encode values
     for name, val in list(self._values.items()):
       if name == 'encoding': continue
@@ -522,12 +537,24 @@ def _parse_single_pdf(url: str) -> dict:
           break
     formats[fmt_name] = fields
 
-  # fix known PDF errors
+  # fix known PDF errors - assert if already present (so we know when the bug is fixed)
   if 'SMEM' in formats:
     formats['SMEM'] = [(n, 13 if n == 'DLC' else 14 if n == 'GLC' else h, 13 if n == 'DLC' else 14 if n == 'GLC' else l, e, t)
                        for n, h, l, e, t in formats['SMEM']]
-  # add missing opcodes not in PDF tables
-  if 'SOPPOp' in enums: enums['SOPPOp'][8] = 'S_WAITCNT_DEPCTR'
+  # add missing opcodes not in PDF tables (RDNA3/RDNA3.5 specific)
+  if doc_name in ('RDNA3', 'RDNA3.5'):
+    if 'SOPPOp' in enums:
+      assert 8 not in enums['SOPPOp'], "S_WAITCNT_DEPCTR now in PDF, remove workaround"
+      enums['SOPPOp'][8] = 'S_WAITCNT_DEPCTR'
+    if 'DSOp' in enums:
+      gws_ops = {24: 'DS_GWS_SEMA_RELEASE_ALL', 25: 'DS_GWS_INIT', 26: 'DS_GWS_SEMA_V',
+                 27: 'DS_GWS_SEMA_BR', 28: 'DS_GWS_SEMA_P', 29: 'DS_GWS_BARRIER'}
+      for k in gws_ops: assert k not in enums['DSOp'], f"{gws_ops[k]} now in PDF, remove workaround"
+      enums['DSOp'].update(gws_ops)
+    if 'FLATOp' in enums:
+      flat_ops = {40: 'GLOBAL_LOAD_ADDTID_B32', 41: 'GLOBAL_STORE_ADDTID_B32', 55: 'FLAT_ATOMIC_CSUB_U32'}
+      for k in flat_ops: assert k not in enums['FLATOp'], f"{flat_ops[k]} now in PDF, remove workaround"
+      enums['FLATOp'].update(flat_ops)
 
   return {"formats": formats, "enums": enums, "src_enum": src_enum, "doc_name": doc_name, "is_cdna": is_cdna}
 
