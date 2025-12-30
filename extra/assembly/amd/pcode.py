@@ -565,6 +565,19 @@ class Reg:
   def __eq__(s, o): return s._val == int(o)
   def __ne__(s, o): return s._val != int(o)
 
+class ExecContext:
+  """Execution context for running compiled pseudocode strings (for testing)."""
+  def __init__(self, s0=0, s1=0, s2=0, d0=0, scc=0, vcc=0, lane=0, exec_mask=0xffffffff):
+    self.S0, self.S1, self.S2, self.D0, self.D1 = Reg(s0), Reg(s1), Reg(s2), Reg(d0), Reg(0)
+    self.SCC, self.VCC, self.EXEC = Reg(scc), Reg(vcc), Reg(exec_mask)
+    self.tmp, self.saveexec, self.laneId = Reg(0), Reg(exec_mask), lane
+  def run(self, code: str):
+    if not code.strip(): return
+    code = code if '\n' in code else compile_pseudocode(code)
+    exec(code, {**globals(), 'Reg': Reg, 'SliceProxy': SliceProxy}, self.__dict__)
+  def result(self) -> dict:
+    return {'d0': self.D0._val, 'd1': self.D1._val, 'scc': self.SCC._val & 1, 'vcc': self.VCC._val, 'exec': self.EXEC._val}
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # COMPILER: pseudocode -> Python (minimal transforms)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -644,9 +657,9 @@ def compile_pseudocode(pseudocode: str) -> str:
   return '\n'.join(lines)
 
 def _assign(lhs: str, rhs: str) -> str:
-  """Generate assignment. Bare tmp/SCC/etc get wrapped in Reg()."""
+  """Generate assignment. Bare tmp/SCC/etc modify existing Reg._val."""
   if lhs in ('tmp', 'SCC', 'VCC', 'EXEC', 'D0', 'D1', 'saveexec'):
-    return f"{lhs} = Reg({rhs})"
+    return f"{lhs}._val = int({rhs})"
   return f"{lhs} = {rhs}"
 
 def _expr(e: str) -> str:
@@ -728,50 +741,7 @@ def _expr(e: str) -> str:
     e = f'(({t}) if ({cond}) else ({f}))'
   return e
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# EXECUTION CONTEXT
-# ═══════════════════════════════════════════════════════════════════════════════
 
-class ExecContext:
-  """Context for running compiled pseudocode."""
-  def __init__(self, s0=0, s1=0, s2=0, d0=0, scc=0, vcc=0, lane=0, exec_mask=MASK32, literal=0, vgprs=None, src0_idx=0, vdst_idx=0):
-    self.S0, self.S1, self.S2 = Reg(s0), Reg(s1), Reg(s2)
-    self.D0, self.D1 = Reg(d0), Reg(0)
-    self.SCC, self.VCC, self.EXEC = Reg(scc), Reg(vcc), Reg(exec_mask)
-    self.tmp, self.saveexec = Reg(0), Reg(exec_mask)
-    self.lane, self.laneId, self.literal = lane, lane, literal
-    self.SIMM16, self.SIMM32 = Reg(literal), Reg(literal)
-    self.VGPR = vgprs if vgprs is not None else {}
-    self.SRC0, self.VDST = Reg(src0_idx), Reg(vdst_idx)
-
-  def run(self, code: str):
-    """Execute compiled code."""
-    # Start with module globals (helpers, aliases), then add instance-specific bindings
-    ns = dict(globals())
-    ns.update({
-      'S0': self.S0, 'S1': self.S1, 'S2': self.S2, 'D0': self.D0, 'D1': self.D1,
-      'SCC': self.SCC, 'VCC': self.VCC, 'EXEC': self.EXEC,
-      'EXEC_LO': SliceProxy(self.EXEC, 31, 0), 'EXEC_HI': SliceProxy(self.EXEC, 63, 32),
-      'tmp': self.tmp, 'saveexec': self.saveexec,
-      'lane': self.lane, 'laneId': self.laneId, 'literal': self.literal,
-      'SIMM16': self.SIMM16, 'SIMM32': self.SIMM32,
-      'VGPR': self.VGPR, 'SRC0': self.SRC0, 'VDST': self.VDST,
-    })
-    exec(code, ns)
-    # Sync rebinds: if register was reassigned to new Reg or value, copy it back
-    def _sync(ctx_reg, ns_val):
-      if isinstance(ns_val, Reg): ctx_reg._val = ns_val._val
-      else: ctx_reg._val = int(ns_val) & MASK64
-    if ns.get('SCC') is not self.SCC: _sync(self.SCC, ns['SCC'])
-    if ns.get('VCC') is not self.VCC: _sync(self.VCC, ns['VCC'])
-    if ns.get('EXEC') is not self.EXEC: _sync(self.EXEC, ns['EXEC'])
-    if ns.get('D0') is not self.D0: _sync(self.D0, ns['D0'])
-    if ns.get('D1') is not self.D1: _sync(self.D1, ns['D1'])
-    if ns.get('tmp') is not self.tmp: _sync(self.tmp, ns['tmp'])
-    if ns.get('saveexec') is not self.saveexec: _sync(self.saveexec, ns['saveexec'])
-
-  def result(self) -> dict:
-    return {"d0": self.D0._val, "scc": self.SCC._val & 1}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PDF EXTRACTION AND CODE GENERATION
@@ -971,7 +941,7 @@ from extra.assembly.amd.pcode import *
           # Fix 1: Set VCC=1 when zero operands produce NaN
           code = code.replace(
             'D0.f32 = float("nan")',
-            'VCC = Reg(0x1); D0.f32 = float("nan")')
+            'VCC._val = 0x1; D0.f32 = float("nan")')
           # Fix 2: Denorm denom returns NaN. Must check this AFTER all VCC-setting logic runs.
           # Insert at end of all branches, before the final result is used
           code = code.replace(
@@ -982,26 +952,26 @@ from extra.assembly.amd.pcode import *
           # Fix 3: Tiny numer should set VCC=1
           code = code.replace(
             'elif exponent(S2.f32) <= 23:\n  D0.f32 = ldexp(S0.f32, 64)',
-            'elif exponent(S2.f32) <= 23:\n  VCC = Reg(0x1); D0.f32 = ldexp(S0.f32, 64)')
+            'elif exponent(S2.f32) <= 23:\n  VCC._val = 0x1; D0.f32 = ldexp(S0.f32, 64)')
           # Fix 4: S2/S1 would be denorm - don't scale, just set VCC
           code = code.replace(
-            'elif S2.f32 / S1.f32 == DENORM.f32:\n  VCC = Reg(0x1)\n  if S0.f32 == S2.f32:\n    D0.f32 = ldexp(S0.f32, 64)',
-            'elif S2.f32 / S1.f32 == DENORM.f32:\n  VCC = Reg(0x1)')
+            'elif S2.f32 / S1.f32 == DENORM.f32:\n  VCC._val = int(0x1)\n  if S0.f32 == S2.f32:\n    D0.f32 = ldexp(S0.f32, 64)',
+            'elif S2.f32 / S1.f32 == DENORM.f32:\n  VCC._val = 0x1')
         if op.name == 'V_DIV_SCALE_F64':
           # Same fixes for f64 version
           code = code.replace(
             'D0.f64 = float("nan")',
-            'VCC = Reg(0x1); D0.f64 = float("nan")')
+            'VCC._val = 0x1; D0.f64 = float("nan")')
           code = code.replace(
             'elif S1.f64 == DENORM.f64:\n  D0.f64 = ldexp(S0.f64, 128)',
             'elif False:\n  pass  # denorm check moved to end')
           code += '\nif S1.f64 == DENORM.f64:\n  D0.f64 = float("nan")'
           code = code.replace(
             'elif exponent(S2.f64) <= 52:\n  D0.f64 = ldexp(S0.f64, 128)',
-            'elif exponent(S2.f64) <= 52:\n  VCC = Reg(0x1); D0.f64 = ldexp(S0.f64, 128)')
+            'elif exponent(S2.f64) <= 52:\n  VCC._val = 0x1; D0.f64 = ldexp(S0.f64, 128)')
           code = code.replace(
-            'elif S2.f64 / S1.f64 == DENORM.f64:\n  VCC = Reg(0x1)\n  if S0.f64 == S2.f64:\n    D0.f64 = ldexp(S0.f64, 128)',
-            'elif S2.f64 / S1.f64 == DENORM.f64:\n  VCC = Reg(0x1)')
+            'elif S2.f64 / S1.f64 == DENORM.f64:\n  VCC._val = int(0x1)\n  if S0.f64 == S2.f64:\n    D0.f64 = ldexp(S0.f64, 128)',
+            'elif S2.f64 / S1.f64 == DENORM.f64:\n  VCC._val = 0x1')
         # V_DIV_FIXUP_F32/F64: PDF doesn't check isNAN(S0), but hardware returns OVERFLOW if S0 is NaN.
         # When division fails (e.g., due to denorm denom), S0 becomes NaN, and fixup should return ±inf.
         if op.name == 'V_DIV_FIXUP_F32':
@@ -1012,65 +982,43 @@ from extra.assembly.amd.pcode import *
           code = code.replace(
             'D0.f64 = ((-abs(S0.f64)) if (sign_out) else (abs(S0.f64)))',
             'D0.f64 = ((-OVERFLOW_F64) if (sign_out) else (OVERFLOW_F64)) if isNAN(S0.f64) else ((-abs(S0.f64)) if (sign_out) else (abs(S0.f64)))')
-        # Detect flags for result handling
+        # Detect flags for result handling (stored in metadata, not generated code)
         is_64 = any(p in pc for p in ['D0.u64', 'D0.b64', 'D0.f64', 'D0.i64', 'D1.u64', 'D1.b64', 'D1.f64', 'D1.i64'])
         has_d1 = '{ D1' in pc
         if has_d1: is_64 = True
         is_cmp = cls_name == 'VOPCOp' and 'D0.u64[laneId]' in pc
         is_cmpx = cls_name == 'VOPCOp' and 'EXEC.u64[laneId]' in pc  # V_CMPX writes to EXEC per-lane
-        # V_DIV_SCALE passes through S0 if no branch taken
         is_div_scale = 'DIV_SCALE' in op.name
-        # VOP3SD instructions that write VCC per-lane (either via VCC.u64[laneId] or by setting VCC = 0/1)
         has_sdst = cls_name == 'VOP3SDOp' and ('VCC.u64[laneId]' in pc or is_div_scale)
+        combined = code + pc
+        uses_vcc = 'VCC' in combined
+        uses_exec = 'EXEC' in combined or 'EXEC_LO' in combined or 'EXEC_HI' in combined
 
-        # Generate function with indented body
+        # Determine which registers are used
+        all_regs = ['S0', 'S1', 'S2', 'D0', 'D1', 'SCC', 'VCC', 'EXEC', 'tmp', 'saveexec', 'laneId', 'SIMM16', 'SIMM32', 'SRC0', 'VDST', 'VGPR']
+        used_regs = [r for r in all_regs if r in combined]
+        if 'EXEC_LO' in combined or 'EXEC_HI' in combined:
+          if 'EXEC' not in used_regs: used_regs.append('EXEC')
+
+        # Generate pure pseudocode function - Regs passed directly as arguments
         fn_name = f"_{cls_name}_{op.name}"
-        lines.append(f"def {fn_name}(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):")
-        # Add original pseudocode as comment
+        lines.append(f"def {fn_name}({', '.join(used_regs)}):")
         for pc_line in pc.split('\n'):
           lines.append(f"  # {pc_line}")
-        # Only create Reg objects for registers actually used in the pseudocode
-        combined = code + pc
-        regs = [('S0', 'Reg(s0)'), ('S1', 'Reg(s1)'), ('S2', 'Reg(s2)'),
-                ('D0', 'Reg(s0)' if is_div_scale else 'Reg(d0)'), ('D1', 'Reg(0)'),
-                ('SCC', 'Reg(scc)'), ('VCC', 'Reg(vcc)'), ('EXEC', 'Reg(exec_mask)'),
-                ('tmp', 'Reg(0)'), ('saveexec', 'Reg(exec_mask)'), ('laneId', 'lane'),
-                ('SIMM16', 'Reg(literal)'), ('SIMM32', 'Reg(literal)'),
-                ('SRC0', 'Reg(src0_idx)'), ('VDST', 'Reg(vdst_idx)')]
-        used = {name for name, _ in regs if name in combined}
-        # EXEC_LO/EXEC_HI need EXEC
-        if 'EXEC_LO' in combined or 'EXEC_HI' in combined: used.add('EXEC')
-        for name, init in regs:
-          if name in used: lines.append(f"  {name} = {init}")
+        # Add EXEC_LO/EXEC_HI if needed
         if 'EXEC_LO' in combined: lines.append("  EXEC_LO = SliceProxy(EXEC, 31, 0)")
         if 'EXEC_HI' in combined: lines.append("  EXEC_HI = SliceProxy(EXEC, 63, 32)")
-        # Add compiled pseudocode with markers
-        lines.append("  # --- compiled pseudocode ---")
-        for line in code.split('\n'):
-          lines.append(f"  {line}")
-        lines.append("  # --- end pseudocode ---")
-        # Generate result dict - use raw params if Reg wasn't created
-        d0_val = "D0._val" if 'D0' in used else "d0"
-        scc_val = "SCC._val & 1" if 'SCC' in used else "scc & 1"
-        lines.append(f"  result = {{'d0': {d0_val}, 'scc': {scc_val}}}")
-        if has_sdst:
-          lines.append("  result['vcc_lane'] = (VCC._val >> lane) & 1")
-        elif 'VCC' in used:
-          lines.append("  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1")
-        if is_cmpx:
-          lines.append("  result['exec_lane'] = (EXEC._val >> lane) & 1")
-        elif 'EXEC' in used:
-          lines.append("  if EXEC._val != exec_mask: result['exec'] = EXEC._val")
-        if is_cmp:
-          lines.append("  result['vcc_lane'] = (D0._val >> lane) & 1")
-        if is_64:
-          lines.append("  result['d0_64'] = True")
-        if has_d1:
-          lines.append("  result['d1'] = D1._val & 1")
-        lines.append("  return result")
+        code_lines = [line for line in code.split('\n') if line.strip()]
+        if code_lines:
+          for line in code_lines:
+            lines.append(f"  {line}")
+        else:
+          lines.append("  pass")
         lines.append("")
 
-        fn_entries.append((op, fn_name))
+        # Build flags tuple: (is_64, has_d1, is_cmp, is_cmpx, is_div_scale, has_sdst, uses_vcc, uses_exec, used_regs)
+        flags = (is_64, has_d1, is_cmp, is_cmpx, is_div_scale, has_sdst, uses_vcc, uses_exec, tuple(used_regs))
+        fn_entries.append((op, fn_name, flags))
         compiled_count += 1
       except Exception as e:
         print(f"  Warning: Failed to compile {op.name}: {e}")
@@ -1078,8 +1026,8 @@ from extra.assembly.amd.pcode import *
 
     if fn_entries:
       lines.append(f'{cls_name}_FUNCTIONS = {{')
-      for op, fn_name in fn_entries:
-        lines.append(f"  {cls_name}.{op.name}: {fn_name},")
+      for op, fn_name, flags in fn_entries:
+        lines.append(f"  {cls_name}.{op.name}: ({fn_name}, {flags}),")
       lines.append('}')
       lines.append('')
 
@@ -1088,10 +1036,10 @@ from extra.assembly.amd.pcode import *
   if 'VOP3Op' in enum_names:
     lines.append('''
 # V_WRITELANE_B32: Write scalar to specific lane's VGPR (not in PDF pseudocode)
-def _VOP3Op_V_WRITELANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
-  wr_lane = s1 & 0x1f  # lane select (5 bits for wave32)
-  return {'d0': d0, 'scc': scc, 'vgpr_write': (wr_lane, vdst_idx, s0 & 0xffffffff)}
-VOP3Op_FUNCTIONS[VOP3Op.V_WRITELANE_B32] = _VOP3Op_V_WRITELANE_B32
+def _VOP3Op_V_WRITELANE_B32(S0, S1):
+  return (int(S1) & 0x1f, int(S0) & 0xffffffff)  # (wr_lane, value)
+# flags: (is_64, has_d1, is_cmp, is_cmpx, is_div_scale, has_sdst, uses_vcc, uses_exec, used_regs)
+VOP3Op_FUNCTIONS[VOP3Op.V_WRITELANE_B32] = (_VOP3Op_V_WRITELANE_B32, (False, False, False, False, False, False, False, False, ('S0', 'S1')))
 ''')
 
   lines.append('COMPILED_FUNCTIONS = {')

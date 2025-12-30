@@ -4,7 +4,9 @@ import unittest
 from extra.assembly.amd.pcode import (Reg, TypedView, SliceProxy, ExecContext, compile_pseudocode, _expr, MASK32, MASK64,
                                        _f32, _i32, _f16, _i16, f32_to_f16, _isnan, _bf16, _ibf16, bf16_to_f32, f32_to_bf16,
                                        BYTE_PERMUTE, v_sad_u8, v_msad_u8)
-from extra.assembly.amd.autogen.rdna3.gen_pcode import _VOP3SDOp_V_DIV_SCALE_F32, _VOPCOp_V_CMP_CLASS_F32
+from extra.assembly.amd.autogen.rdna3.gen_pcode import VOP3SDOp_FUNCTIONS, VOPCOp_FUNCTIONS
+from extra.assembly.amd.autogen.rdna3 import VOP3SDOp, VOPCOp
+from extra.assembly.amd.emu import _run_pcode
 
 class TestReg(unittest.TestCase):
   def test_u32_read(self):
@@ -232,7 +234,8 @@ class TestPseudocodeRegressions(unittest.TestCase):
     s0 = 0x3f800000  # 1.0
     s1 = 0x40400000  # 3.0
     s2 = 0x3f800000  # 1.0 (numerator)
-    result = _VOP3SDOp_V_DIV_SCALE_F32(s0, s1, s2, 0, 0, 0, 0, 0xffffffff, 0, None, {})
+    fn, flags = VOP3SDOp_FUNCTIONS[VOP3SDOp.V_DIV_SCALE_F32]
+    result = _run_pcode(fn, flags, s0, s1, s2, 0, 0, 0, 0, 0xffffffff, 0, None, 0, 0)
     # Must always have vcc_lane in result
     self.assertIn('vcc_lane', result, "V_DIV_SCALE_F32 must always return vcc_lane")
     self.assertEqual(result['vcc_lane'], 0, "vcc_lane should be 0 when no scaling needed")
@@ -242,19 +245,20 @@ class TestPseudocodeRegressions(unittest.TestCase):
     Bug: isQuietNAN and isSignalNAN both used math.isnan which can't distinguish them."""
     quiet_nan = 0x7fc00000   # quiet NaN: exponent=255, bit22=1
     signal_nan = 0x7f800001  # signaling NaN: exponent=255, bit22=0
+    fn, flags = VOPCOp_FUNCTIONS[VOPCOp.V_CMP_CLASS_F32]
     # Test quiet NaN detection (bit 1 in mask)
     s1_quiet = 0b0000000010  # bit 1 = quiet NaN
-    result = _VOPCOp_V_CMP_CLASS_F32(quiet_nan, s1_quiet, 0, 0, 0, 0, 0, 0xffffffff, 0, None, {})
+    result = _run_pcode(fn, flags, quiet_nan, s1_quiet, 0, 0, 0, 0, 0, 0xffffffff, 0, None, 0, 0)
     self.assertEqual(result['vcc_lane'], 1, "Should detect quiet NaN with quiet NaN mask")
     # Test signaling NaN detection (bit 0 in mask)
     s1_signal = 0b0000000001  # bit 0 = signaling NaN
-    result = _VOPCOp_V_CMP_CLASS_F32(signal_nan, s1_signal, 0, 0, 0, 0, 0, 0xffffffff, 0, None, {})
+    result = _run_pcode(fn, flags, signal_nan, s1_signal, 0, 0, 0, 0, 0, 0xffffffff, 0, None, 0, 0)
     self.assertEqual(result['vcc_lane'], 1, "Should detect signaling NaN with signaling NaN mask")
     # Test that quiet NaN doesn't match signaling NaN mask
-    result = _VOPCOp_V_CMP_CLASS_F32(quiet_nan, s1_signal, 0, 0, 0, 0, 0, 0xffffffff, 0, None, {})
+    result = _run_pcode(fn, flags, quiet_nan, s1_signal, 0, 0, 0, 0, 0, 0xffffffff, 0, None, 0, 0)
     self.assertEqual(result['vcc_lane'], 0, "Quiet NaN should not match signaling NaN mask")
     # Test that signaling NaN doesn't match quiet NaN mask
-    result = _VOPCOp_V_CMP_CLASS_F32(signal_nan, s1_quiet, 0, 0, 0, 0, 0, 0xffffffff, 0, None, {})
+    result = _run_pcode(fn, flags, signal_nan, s1_quiet, 0, 0, 0, 0, 0, 0xffffffff, 0, None, 0, 0)
     self.assertEqual(result['vcc_lane'], 0, "Signaling NaN should not match quiet NaN mask")
 
   def test_isnan_with_typed_view(self):
