@@ -3,7 +3,7 @@
 
 import numpy as np
 import unittest
-import subprocess, struct, math, textwrap
+import subprocess, struct, math, textwrap, functools
 from tinygrad import Tensor, dtypes, Device, UOp
 from tinygrad.uop.ops import Ops, KernelInfo
 from tinygrad.helpers import getenv
