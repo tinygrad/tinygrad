@@ -280,37 +280,43 @@ def _disasm_buf(inst: MUBUF | MTBUF) -> str:
   mods = ([f"format:{fmt}"] if fmt else []) + [m for cond, m in [(inst.idxen, "idxen"), (inst.offen, "offen"), (inst.offset, f"offset:{inst.offset}"), (inst.glc, "glc"), (inst.dlc, "dlc"), (inst.slc, "slc"), (inst.tfe, "tfe")] if cond]
   return f"{name} {_vreg(inst.vdata, width)}, {vaddr_str}, {srsrc_str}, {decode_src(inst.soffset)}" + (" " + " ".join(mods) if mods else "")
 
-def _disasm_sop(inst: SOP1 | SOP2 | SOPC | SOPK) -> str:
-  if isinstance(inst, SOP1): op, name = SOP1Op(inst.op), SOP1Op(inst.op).name.lower()
-  elif isinstance(inst, SOP2): op, name = SOP2Op(inst.op), SOP2Op(inst.op).name.lower()
-  elif isinstance(inst, SOPC): op, name = SOPCOp(inst.op), SOPCOp(inst.op).name.lower()
-  else: op, name = SOPKOp(inst.op), SOPKOp(inst.op).name.lower()
+def _sop_widths(name: str) -> tuple[int, int, int]:
+  """Return (dst_width, src0_width, src1_width) in register count for SOP instructions."""
+  if name in ('s_bitset0_b64', 's_bitset1_b64', 's_bfm_b64'): return 2, 1, 1
+  if name in ('s_lshl_b64', 's_lshr_b64', 's_ashr_i64', 's_bfe_u64', 's_bfe_i64'): return 2, 2, 1
+  if name in ('s_bitcmp0_b64', 's_bitcmp1_b64'): return 1, 2, 1
+  if m := re.search(r'_(b|i|u)(32|64)_(b|i|u)(32|64)$', name): return 2 if m.group(2) == '64' else 1, 2 if m.group(4) == '64' else 1, 1
+  if m := re.search(r'_(b|i|u)(32|64)$', name): sz = 2 if m.group(2) == '64' else 1; return sz, sz, sz
+  return 1, 1, 1
 
-  if name in ('s_bitset0_b64', 's_bitset1_b64'): dn, s0n, s1n = 2, 1, 1
-  elif name in ('s_lshl_b64', 's_lshr_b64', 's_ashr_i64', 's_bfe_u64', 's_bfe_i64'): dn, s0n, s1n = 2, 2, 1
-  elif name == 's_bfm_b64': dn, s0n, s1n = 2, 1, 1
-  elif name in ('s_bitcmp0_b64', 's_bitcmp1_b64'): dn, s0n, s1n = 1, 2, 1
-  elif m := re.search(r'_(b|i|u)(32|64)_(b|i|u)(32|64)$', name): dn, s0n, s1n = 2 if m.group(2) == '64' else 1, 2 if m.group(4) == '64' else 1, 1
-  elif m := re.search(r'_(b|i|u)(32|64)$', name): sz = 2 if m.group(2) == '64' else 1; dn, s0n, s1n = sz, sz, sz
-  else: dn, s0n, s1n = 1, 1, 1
+def _disasm_sop1(inst: SOP1) -> str:
+  op, name = SOP1Op(inst.op), SOP1Op(inst.op).name.lower()
+  if op == SOP1Op.S_GETPC_B64: return f"{name} {_fmt_sdst(inst.sdst, 2)}"
+  if op in (SOP1Op.S_SETPC_B64, SOP1Op.S_RFE_B64): return f"{name} {_fmt_src(inst.ssrc0, 2)}"
+  if op == SOP1Op.S_SWAPPC_B64: return f"{name} {_fmt_sdst(inst.sdst, 2)}, {_fmt_src(inst.ssrc0, 2)}"
+  if op in (SOP1Op.S_SENDMSG_RTN_B32, SOP1Op.S_SENDMSG_RTN_B64): return f"{name} {_fmt_sdst(inst.sdst, 2 if 'b64' in name else 1)}, sendmsg({MSG.get(inst.ssrc0, str(inst.ssrc0))})"
+  dn, s0n, _ = _sop_widths(name)
+  return f"{name} {_fmt_sdst(inst.sdst, dn)}, {inst.lit(inst.ssrc0) if s0n == 1 else _fmt_src(inst.ssrc0, s0n)}"
 
-  if isinstance(inst, SOP1):
-    if op == SOP1Op.S_GETPC_B64: return f"{name} {_fmt_sdst(inst.sdst, 2)}"
-    if op in (SOP1Op.S_SETPC_B64, SOP1Op.S_RFE_B64): return f"{name} {_fmt_src(inst.ssrc0, 2)}"
-    if op == SOP1Op.S_SWAPPC_B64: return f"{name} {_fmt_sdst(inst.sdst, 2)}, {_fmt_src(inst.ssrc0, 2)}"
-    if op in (SOP1Op.S_SENDMSG_RTN_B32, SOP1Op.S_SENDMSG_RTN_B64): return f"{name} {_fmt_sdst(inst.sdst, 2 if 'b64' in name else 1)}, sendmsg({MSG.get(inst.ssrc0, str(inst.ssrc0))})"
-    return f"{name} {_fmt_sdst(inst.sdst, dn)}, {inst.lit(inst.ssrc0) if s0n == 1 else _fmt_src(inst.ssrc0, s0n)}"
-  if isinstance(inst, SOP2):
-    return f"{name} {_fmt_sdst(inst.sdst, dn)}, {inst.lit(inst.ssrc0) if inst.ssrc0 == 255 else _fmt_src(inst.ssrc0, s0n)}, {inst.lit(inst.ssrc1) if inst.ssrc1 == 255 else _fmt_src(inst.ssrc1, s1n)}"
-  if isinstance(inst, SOPC): return f"{name} {_fmt_src(inst.ssrc0, s0n)}, {_fmt_src(inst.ssrc1, s1n)}"
-  if isinstance(inst, SOPK):
-    if op == SOPKOp.S_VERSION: return f"{name} 0x{inst.simm16:x}"
-    if op in (SOPKOp.S_SETREG_B32, SOPKOp.S_GETREG_B32):
-      hid, hoff, hsz = inst.simm16 & 0x3f, (inst.simm16 >> 6) & 0x1f, ((inst.simm16 >> 11) & 0x1f) + 1
-      hs = f"0x{inst.simm16:x}" if hid in (16, 17) else f"hwreg({HWREG.get(hid, str(hid))}, {hoff}, {hsz})"
-      return f"{name} {hs}, {_fmt_sdst(inst.sdst, 1)}" if op == SOPKOp.S_SETREG_B32 else f"{name} {_fmt_sdst(inst.sdst, 1)}, {hs}"
-    return f"{name} {_fmt_sdst(inst.sdst, dn)}, 0x{inst.simm16:x}"
-  return name
+def _disasm_sop2(inst: SOP2) -> str:
+  name = SOP2Op(inst.op).name.lower()
+  dn, s0n, s1n = _sop_widths(name)
+  return f"{name} {_fmt_sdst(inst.sdst, dn)}, {inst.lit(inst.ssrc0) if inst.ssrc0 == 255 else _fmt_src(inst.ssrc0, s0n)}, {inst.lit(inst.ssrc1) if inst.ssrc1 == 255 else _fmt_src(inst.ssrc1, s1n)}"
+
+def _disasm_sopc(inst: SOPC) -> str:
+  name = SOPCOp(inst.op).name.lower()
+  _, s0n, s1n = _sop_widths(name)
+  return f"{name} {_fmt_src(inst.ssrc0, s0n)}, {_fmt_src(inst.ssrc1, s1n)}"
+
+def _disasm_sopk(inst: SOPK) -> str:
+  op, name = SOPKOp(inst.op), SOPKOp(inst.op).name.lower()
+  if op == SOPKOp.S_VERSION: return f"{name} 0x{inst.simm16:x}"
+  if op in (SOPKOp.S_SETREG_B32, SOPKOp.S_GETREG_B32):
+    hid, hoff, hsz = inst.simm16 & 0x3f, (inst.simm16 >> 6) & 0x1f, ((inst.simm16 >> 11) & 0x1f) + 1
+    hs = f"0x{inst.simm16:x}" if hid in (16, 17) else f"hwreg({HWREG.get(hid, str(hid))}, {hoff}, {hsz})"
+    return f"{name} {hs}, {_fmt_sdst(inst.sdst, 1)}" if op == SOPKOp.S_SETREG_B32 else f"{name} {_fmt_sdst(inst.sdst, 1)}, {hs}"
+  dn, _, _ = _sop_widths(name)
+  return f"{name} {_fmt_sdst(inst.sdst, dn)}, 0x{inst.simm16:x}"
 
 def _disasm_vinterp(inst: VINTERP) -> str:
   name = VINTERPOp(inst.op).name.lower()
@@ -330,7 +336,7 @@ def _disasm_generic(inst: Inst) -> str:
 
 DISASM_HANDLERS = {VOP1: _disasm_vop1, VOP2: _disasm_vop2, VOPC: _disasm_vopc, VOP3: _disasm_vop3, VOP3SD: _disasm_vop3sd, VOPD: _disasm_vopd, VOP3P: _disasm_vop3p,
                    VINTERP: _disasm_vinterp, SOPP: _disasm_sopp, SMEM: _disasm_smem, FLAT: _disasm_flat, MUBUF: _disasm_buf, MTBUF: _disasm_buf,
-                   SOP1: _disasm_sop, SOP2: _disasm_sop, SOPC: _disasm_sop, SOPK: _disasm_sop}
+                   SOP1: _disasm_sop1, SOP2: _disasm_sop2, SOPC: _disasm_sopc, SOPK: _disasm_sopk}
 
 def disasm(inst: Inst) -> str: return DISASM_HANDLERS.get(type(inst), _disasm_generic)(inst)
 
