@@ -251,7 +251,7 @@ def _SOP1Op_S_FF0_I32_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   tmp = Reg(-1)
   for i in range(0, int(31)+1):
     if S0.u32[i] == 0:
-      tmp = Reg(i)
+      tmp = Reg(i); break
   D0.i32 = tmp
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
@@ -274,7 +274,7 @@ def _SOP1Op_S_FF0_I32_B64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   tmp = Reg(-1)
   for i in range(0, int(63)+1):
     if S0.u64[i] == 0:
-      tmp = Reg(i)
+      tmp = Reg(i); break
   D0.i32 = tmp
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
@@ -297,7 +297,7 @@ def _SOP1Op_S_FF1_I32_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   tmp = Reg(-1)
   for i in range(0, int(31)+1):
     if S0.u32[i] == 1:
-      tmp = Reg(i)
+      tmp = Reg(i); break
   D0.i32 = tmp
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
@@ -320,7 +320,7 @@ def _SOP1Op_S_FF1_I32_B64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   tmp = Reg(-1)
   for i in range(0, int(63)+1):
     if S0.u64[i] == 1:
-      tmp = Reg(i)
+      tmp = Reg(i); break
   D0.i32 = tmp
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
@@ -343,7 +343,7 @@ def _SOP1Op_S_FLBIT_I32_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, 
   tmp = Reg(-1)
   for i in range(0, int(31)+1):
     if S0.u32[31 - i] == 1:
-      tmp = Reg(i)
+      tmp = Reg(i); break
   D0.i32 = tmp
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
@@ -366,7 +366,7 @@ def _SOP1Op_S_FLBIT_I32_B64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, 
   tmp = Reg(-1)
   for i in range(0, int(63)+1):
     if S0.u64[63 - i] == 1:
-      tmp = Reg(i)
+      tmp = Reg(i); break
   D0.i32 = tmp
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
@@ -389,7 +389,7 @@ def _SOP1Op_S_FLBIT_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR
   tmp = Reg(-1)
   for i in range(1, int(31)+1):
     if S0.u32[31 - i] != S0.u32[31]:
-      tmp = Reg(i)
+      tmp = Reg(i); break
   D0.i32 = tmp
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
@@ -412,7 +412,7 @@ def _SOP1Op_S_FLBIT_I32_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, 
   tmp = Reg(-1)
   for i in range(1, int(63)+1):
     if S0.u64[63 - i] != S0.u64[63]:
-      tmp = Reg(i)
+      tmp = Reg(i); break
   D0.i32 = tmp
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
@@ -2964,7 +2964,7 @@ def _VOP1Op_V_FFBH_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR,
   D0.i32 = -1
   for i in range(0, int(31)+1):
     if S0.u32[31 - i] == 1:
-      D0.i32 = i
+      D0.i32 = i; break
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   return result
@@ -2984,7 +2984,7 @@ def _VOP1Op_V_FFBL_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR,
   D0.i32 = -1
   for i in range(0, int(31)+1):
     if S0.u32[i] == 1:
-      D0.i32 = i
+      D0.i32 = i; break
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   return result
@@ -3004,7 +3004,7 @@ def _VOP1Op_V_FFBH_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR,
   D0.i32 = -1
   for i in range(1, int(31)+1):
     if S0.i32[31 - i] != S0.i32[31]:
-      D0.i32 = i
+      D0.i32 = i; break
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   return result
@@ -14702,7 +14702,7 @@ def _VOP3AOp_V_FFBH_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR
   D0.i32 = -1
   for i in range(0, int(31)+1):
     if S0.u32[31 - i] == 1:
-      D0.i32 = i
+      D0.i32 = i; break
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   return result
@@ -14722,7 +14722,7 @@ def _VOP3AOp_V_FFBL_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR
   D0.i32 = -1
   for i in range(0, int(31)+1):
     if S0.u32[i] == 1:
-      D0.i32 = i
+      D0.i32 = i; break
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   return result
@@ -14742,7 +14742,7 @@ def _VOP3AOp_V_FFBH_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR
   D0.i32 = -1
   for i in range(1, int(31)+1):
     if S0.i32[31 - i] != S0.i32[31]:
-      D0.i32 = i
+      D0.i32 = i; break
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   return result
