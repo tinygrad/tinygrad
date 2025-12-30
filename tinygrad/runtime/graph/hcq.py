@@ -49,7 +49,8 @@ class HCQGraph(MultiGraphRunner):
     self.ji_schedule: dict[int, tuple[HCQCompiled, HWQueue, list, list, HCQSignal, int|None]] = {}
 
     self.comp_queues: dict[HCQCompiled, HWQueue] = {dev: dev.hw_compute_queue_t() for dev in self.devices}
-    self.copy_queues: dict[HCQCompiled, HWQueue] = {} # lazy allocation
+    self.copy_queues: dict[tuple[HCQCompiled, int], HWQueue] = {} # lazy allocation, keyed by (device, queue_idx)
+    self.copy_queue_idx: dict[HCQCompiled, int] = collections.defaultdict(int) # round-robin counter per device
 
     self.signals: dict[Any, HCQSignal] = {**{dev: dev.new_signal(value=0) for dev in self.devices if not dev._is_cpu()},
       **{"KICK": self.devices[0].new_signal(value=0)}, **{dev: self.devices[0].new_signal(value=0) for dev in self.devices if dev._is_cpu()}}
@@ -85,7 +86,14 @@ class HCQGraph(MultiGraphRunner):
         enqueue_queue = self.comp_queues[enqueue_dev]
       else:
         assert (enqueue_dev.hw_copy_queue_t is not None), "device must implement a copy queue"
-        enqueue_queue = self.copy_queues.setdefault(enqueue_dev, enqueue_dev.hw_copy_queue_t())
+        # Round-robin across SDMA queues for parallel copy operations
+        num_copy_queues = getenv("HCQ_NUM_SDMA", 2)
+        queue_idx = self.copy_queue_idx[enqueue_dev] % num_copy_queues
+        self.copy_queue_idx[enqueue_dev] += 1
+        key = (enqueue_dev, queue_idx)
+        if key not in self.copy_queues:
+          self.copy_queues[key] = enqueue_dev.hw_copy_queue_t(queue_idx=queue_idx)
+        enqueue_queue = self.copy_queues[key]
 
       out_signal = self.signals.setdefault(enqueue_queue, self.devices[0].new_signal(value=0))
 
@@ -173,12 +181,16 @@ class HCQGraph(MultiGraphRunner):
 
       if signal_val is not None: enqueue_queue.signal(signal, signal_val)
 
+    # Helper to get all copy queues for a device
+    def get_dev_copy_queues(d): return [q for (dev, _), q in self.copy_queues.items() if dev == d]
+
     for dev in self.devices:
       for dep_dev in list(self.copy_to_devs[dev]) + [dev]:
-        if dep_dev in self.copy_queues: self.comp_queues[dev].wait(self.signals[(copy_q:=self.copy_queues[dep_dev])], cast(int, last_j[copy_q]) + 1)
+        for copy_q in get_dev_copy_queues(dep_dev):
+          if copy_q in self.signals: self.comp_queues[dev].wait(self.signals[copy_q], cast(int, last_j[copy_q]) + 1)
 
       self.comp_queues[dev].signal(self.virt_timeline_signals[dev], self.virt_timeline_vals[dev] + 1).bind(dev)
-      if dev in self.copy_queues: self.copy_queues[dev].bind(dev)
+      for copy_q in get_dev_copy_queues(dev): copy_q.bind(dev)
 
     self.last_timeline: dict[HCQCompiled, tuple[HCQSignal, int]] = {dev: (dev.timeline_signal, 0) for dev in self.devices}
     self.queue_signals_to_reset = [self.signals[q] for q in list(self.comp_queues.values()) + list(self.copy_queues.values()) if q in self.signals]
@@ -205,7 +217,8 @@ class HCQGraph(MultiGraphRunner):
 
     for dev in self.devices:
       self.comp_queues[dev].submit(dev, hcq_var_vals_local:=hcq_var_vals|self.fixedvars.get(dev, {}))
-      if (copy_queue:=self.copy_queues.get(dev, None)) is not None: copy_queue.submit(dev, hcq_var_vals_local)
+      for (d, _), copy_queue in self.copy_queues.items():
+        if d == dev: copy_queue.submit(dev, hcq_var_vals_local)
 
       self.last_timeline[dev] = (dev.timeline_signal, dev.next_timeline())
 

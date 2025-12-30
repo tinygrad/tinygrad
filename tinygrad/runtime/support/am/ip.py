@@ -414,23 +414,25 @@ class AM_IH(AM_IP):
 class AM_SDMA(AM_IP):
   def init_sw(self): self.sdma_name = "F32" if self.adev.ip_ver[am.SDMA0_HWIP] < (7,0,0) else "MCU"
   def init_hw(self):
-    for pipe_id in range(1):
-      pipe = "" if self.adev.ip_ver[am.SDMA0_HWIP] < (5,0,0) else str(pipe_id)
+    for pipe_id in range(16):
+      pipe, inst = ("", pipe_id) if self.adev.ip_ver[am.SDMA0_HWIP] < (5,0,0) else (str(pipe_id), 0)
 
       if self.adev.ip_ver[am.SDMA0_HWIP] >= (6,0,0):
-        self.adev.reg(f"regSDMA{pipe}_WATCHDOG_CNTL").update(queue_hang_count=100) # 10s, 100ms per unit
-        self.adev.reg(f"regSDMA{pipe}_UTCL1_CNTL").update(resp_mode=3, redo_delay=9)
+        self.adev.reg(f"regSDMA{pipe}_WATCHDOG_CNTL").update(queue_hang_count=100, inst=inst) # 10s, 100ms per unit
+        self.adev.reg(f"regSDMA{pipe}_UTCL1_CNTL").update(resp_mode=3, redo_delay=9, inst=inst)
 
         # rd=noa, wr=bypass
-        self.adev.reg(f"regSDMA{pipe}_UTCL1_PAGE").update(rd_l2_policy=2, wr_l2_policy=3, **({'llc_noalloc':1} if self.sdma_name == "F32" else {}))
-        self.adev.reg(f"regSDMA{pipe}_{self.sdma_name}_CNTL").update(halt=0, **{f"{'th1_' if self.sdma_name == 'F32' else ''}reset":0})
+        self.adev.reg(f"regSDMA{pipe}_UTCL1_PAGE").update(rd_l2_policy=2, wr_l2_policy=3, **({'llc_noalloc':1} if self.sdma_name == "F32" else {}), inst=inst)
+        self.adev.reg(f"regSDMA{pipe}_{self.sdma_name}_CNTL").update(halt=0, **{f"{'th1_' if self.sdma_name == 'F32' else ''}reset":0}, inst=inst)
 
+      print(self.adev.reg(f"regSDMA{pipe}_{self.sdma_name}_CNTL").read_bitfields(inst=inst))
       self.adev.reg(f"regSDMA{pipe}_CNTL").update(ctxempty_int_enable=1, trap_enable=1,
-        **({'utc_l1_enable':1} if self.adev.ip_ver[am.SDMA0_HWIP] <= (5,2,0) else {}))
+        **({'utc_l1_enable':1} if self.adev.ip_ver[am.SDMA0_HWIP] <= (5,2,0) else {}), inst=inst)
 
     if self.adev.ip_ver[am.NBIO_HWIP] in {(7,9,0), (7,9,1)}:
-      self.adev.regDOORBELL0_CTRL_ENTRY_1.write(bif_doorbell1_range_offset_entry=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0*2,
-        bif_doorbell1_range_size_entry=4)
+      for i in range(16):
+        self.adev.reg(f"regDOORBELL0_CTRL_ENTRY_{i+1}").write(**{f'bif_doorbell{i+1}_range_offset_entry':(am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0 + i*0xA)*2,
+          f'bif_doorbell{i+1}_range_size_entry':4})
       self.adev.soc.doorbell_enable(port=2, awid=0xe, awaddr_31_28_value=0x1, offset=0xe, size=4)
     else: self.adev.soc.doorbell_enable(port=2, awid=0xe, awaddr_31_28_value=0x3, offset=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0*2, size=4)
 
