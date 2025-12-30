@@ -144,7 +144,7 @@ def main() -> None:
 
   viz.get_profile(profile)
 
-  # List all traces
+  # List all kernels
   if args.kernel is None:
     for c in viz.ctxs:
       print(c["name"])
@@ -152,13 +152,12 @@ def main() -> None:
     parser.print_usage()
     return None
 
-  # Find matching trace
+  # Find kernel trace
   trace = next((c for c in viz.ctxs if c["name"] == f"Exec {args.kernel}"), None)
   if not trace: raise RuntimeError(f"no matching trace for {args.kernel}")
-
-  # List all counter data
   n = 0
   for s in trace["steps"]:
+    print(s["name"])
     data = viz.get_render(s["query"])
     print_data(data)
     n += 1
