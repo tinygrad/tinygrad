@@ -56,6 +56,12 @@ class DSOp(IntEnum):
   DS_MAX_F32 = 19
   DS_NOP = 20
   DS_ADD_F32 = 21
+  DS_GWS_SEMA_RELEASE_ALL = 24
+  DS_GWS_INIT = 25
+  DS_GWS_SEMA_V = 26
+  DS_GWS_SEMA_BR = 27
+  DS_GWS_SEMA_P = 28
+  DS_GWS_BARRIER = 29
   DS_STORE_B8 = 30
   DS_STORE_B16 = 31
   DS_ADD_RTN_U32 = 32
@@ -178,10 +184,13 @@ class FLATOp(IntEnum):
   FLAT_LOAD_D16_HI_B16 = 35
   FLAT_STORE_D16_HI_B8 = 36
   FLAT_STORE_D16_HI_B16 = 37
+  GLOBAL_LOAD_ADDTID_B32 = 40
+  GLOBAL_STORE_ADDTID_B32 = 41
   FLAT_ATOMIC_SWAP_B32 = 51
   FLAT_ATOMIC_CMPSWAP_B32 = 52
   FLAT_ATOMIC_ADD_U32 = 53
   FLAT_ATOMIC_SUB_U32 = 54
+  FLAT_ATOMIC_CSUB_U32 = 55
   FLAT_ATOMIC_MIN_I32 = 56
   FLAT_ATOMIC_MIN_U32 = 57
   FLAT_ATOMIC_MAX_I32 = 58
@@ -717,6 +726,7 @@ class SOPPOp(IntEnum):
   S_SET_INST_PREFETCH_DISTANCE = 4
   S_CLAUSE = 5
   S_DELAY_ALU = 7
+  S_WAITCNT_DEPCTR = 8
   S_WAITCNT = 9
   S_WAIT_IDLE = 10
   S_WAIT_EVENT = 11
@@ -1848,6 +1858,12 @@ ds_min_f32 = functools.partial(DS, DSOp.DS_MIN_F32)
 ds_max_f32 = functools.partial(DS, DSOp.DS_MAX_F32)
 ds_nop = functools.partial(DS, DSOp.DS_NOP)
 ds_add_f32 = functools.partial(DS, DSOp.DS_ADD_F32)
+ds_gws_sema_release_all = functools.partial(DS, DSOp.DS_GWS_SEMA_RELEASE_ALL)
+ds_gws_init = functools.partial(DS, DSOp.DS_GWS_INIT)
+ds_gws_sema_v = functools.partial(DS, DSOp.DS_GWS_SEMA_V)
+ds_gws_sema_br = functools.partial(DS, DSOp.DS_GWS_SEMA_BR)
+ds_gws_sema_p = functools.partial(DS, DSOp.DS_GWS_SEMA_P)
+ds_gws_barrier = functools.partial(DS, DSOp.DS_GWS_BARRIER)
 ds_store_b8 = functools.partial(DS, DSOp.DS_STORE_B8)
 ds_store_b16 = functools.partial(DS, DSOp.DS_STORE_B16)
 ds_add_rtn_u32 = functools.partial(DS, DSOp.DS_ADD_RTN_U32)
@@ -1968,10 +1984,13 @@ flat_load_d16_hi_i8 = functools.partial(FLAT, FLATOp.FLAT_LOAD_D16_HI_I8)
 flat_load_d16_hi_b16 = functools.partial(FLAT, FLATOp.FLAT_LOAD_D16_HI_B16)
 flat_store_d16_hi_b8 = functools.partial(FLAT, FLATOp.FLAT_STORE_D16_HI_B8)
 flat_store_d16_hi_b16 = functools.partial(FLAT, FLATOp.FLAT_STORE_D16_HI_B16)
+global_load_addtid_b32 = functools.partial(FLAT, FLATOp.GLOBAL_LOAD_ADDTID_B32)
+global_store_addtid_b32 = functools.partial(FLAT, FLATOp.GLOBAL_STORE_ADDTID_B32)
 flat_atomic_swap_b32 = functools.partial(FLAT, FLATOp.FLAT_ATOMIC_SWAP_B32)
 flat_atomic_cmpswap_b32 = functools.partial(FLAT, FLATOp.FLAT_ATOMIC_CMPSWAP_B32)
 flat_atomic_add_u32 = functools.partial(FLAT, FLATOp.FLAT_ATOMIC_ADD_U32)
 flat_atomic_sub_u32 = functools.partial(FLAT, FLATOp.FLAT_ATOMIC_SUB_U32)
+flat_atomic_csub_u32 = functools.partial(FLAT, FLATOp.FLAT_ATOMIC_CSUB_U32)
 flat_atomic_min_i32 = functools.partial(FLAT, FLATOp.FLAT_ATOMIC_MIN_I32)
 flat_atomic_min_u32 = functools.partial(FLAT, FLATOp.FLAT_ATOMIC_MIN_U32)
 flat_atomic_max_i32 = functools.partial(FLAT, FLATOp.FLAT_ATOMIC_MAX_I32)
@@ -2226,28 +2245,28 @@ buffer_atomic_cmpswap_f32 = functools.partial(MUBUF, MUBUFOp.BUFFER_ATOMIC_CMPSW
 buffer_atomic_min_f32 = functools.partial(MUBUF, MUBUFOp.BUFFER_ATOMIC_MIN_F32)
 buffer_atomic_max_f32 = functools.partial(MUBUF, MUBUFOp.BUFFER_ATOMIC_MAX_F32)
 buffer_atomic_add_f32 = functools.partial(MUBUF, MUBUFOp.BUFFER_ATOMIC_ADD_F32)
-scratch_load_u8 = functools.partial(FLAT, SCRATCHOp.SCRATCH_LOAD_U8, seg=2)
-scratch_load_i8 = functools.partial(FLAT, SCRATCHOp.SCRATCH_LOAD_I8, seg=2)
-scratch_load_u16 = functools.partial(FLAT, SCRATCHOp.SCRATCH_LOAD_U16, seg=2)
-scratch_load_i16 = functools.partial(FLAT, SCRATCHOp.SCRATCH_LOAD_I16, seg=2)
-scratch_load_b32 = functools.partial(FLAT, SCRATCHOp.SCRATCH_LOAD_B32, seg=2)
-scratch_load_b64 = functools.partial(FLAT, SCRATCHOp.SCRATCH_LOAD_B64, seg=2)
-scratch_load_b96 = functools.partial(FLAT, SCRATCHOp.SCRATCH_LOAD_B96, seg=2)
-scratch_load_b128 = functools.partial(FLAT, SCRATCHOp.SCRATCH_LOAD_B128, seg=2)
-scratch_store_b8 = functools.partial(FLAT, SCRATCHOp.SCRATCH_STORE_B8, seg=2)
-scratch_store_b16 = functools.partial(FLAT, SCRATCHOp.SCRATCH_STORE_B16, seg=2)
-scratch_store_b32 = functools.partial(FLAT, SCRATCHOp.SCRATCH_STORE_B32, seg=2)
-scratch_store_b64 = functools.partial(FLAT, SCRATCHOp.SCRATCH_STORE_B64, seg=2)
-scratch_store_b96 = functools.partial(FLAT, SCRATCHOp.SCRATCH_STORE_B96, seg=2)
-scratch_store_b128 = functools.partial(FLAT, SCRATCHOp.SCRATCH_STORE_B128, seg=2)
-scratch_load_d16_u8 = functools.partial(FLAT, SCRATCHOp.SCRATCH_LOAD_D16_U8, seg=2)
-scratch_load_d16_i8 = functools.partial(FLAT, SCRATCHOp.SCRATCH_LOAD_D16_I8, seg=2)
-scratch_load_d16_b16 = functools.partial(FLAT, SCRATCHOp.SCRATCH_LOAD_D16_B16, seg=2)
-scratch_load_d16_hi_u8 = functools.partial(FLAT, SCRATCHOp.SCRATCH_LOAD_D16_HI_U8, seg=2)
-scratch_load_d16_hi_i8 = functools.partial(FLAT, SCRATCHOp.SCRATCH_LOAD_D16_HI_I8, seg=2)
-scratch_load_d16_hi_b16 = functools.partial(FLAT, SCRATCHOp.SCRATCH_LOAD_D16_HI_B16, seg=2)
-scratch_store_d16_hi_b8 = functools.partial(FLAT, SCRATCHOp.SCRATCH_STORE_D16_HI_B8, seg=2)
-scratch_store_d16_hi_b16 = functools.partial(FLAT, SCRATCHOp.SCRATCH_STORE_D16_HI_B16, seg=2)
+scratch_load_u8 = functools.partial(FLAT, SCRATCHOp.SCRATCH_LOAD_U8, seg=1)
+scratch_load_i8 = functools.partial(FLAT, SCRATCHOp.SCRATCH_LOAD_I8, seg=1)
+scratch_load_u16 = functools.partial(FLAT, SCRATCHOp.SCRATCH_LOAD_U16, seg=1)
+scratch_load_i16 = functools.partial(FLAT, SCRATCHOp.SCRATCH_LOAD_I16, seg=1)
+scratch_load_b32 = functools.partial(FLAT, SCRATCHOp.SCRATCH_LOAD_B32, seg=1)
+scratch_load_b64 = functools.partial(FLAT, SCRATCHOp.SCRATCH_LOAD_B64, seg=1)
+scratch_load_b96 = functools.partial(FLAT, SCRATCHOp.SCRATCH_LOAD_B96, seg=1)
+scratch_load_b128 = functools.partial(FLAT, SCRATCHOp.SCRATCH_LOAD_B128, seg=1)
+scratch_store_b8 = functools.partial(FLAT, SCRATCHOp.SCRATCH_STORE_B8, seg=1)
+scratch_store_b16 = functools.partial(FLAT, SCRATCHOp.SCRATCH_STORE_B16, seg=1)
+scratch_store_b32 = functools.partial(FLAT, SCRATCHOp.SCRATCH_STORE_B32, seg=1)
+scratch_store_b64 = functools.partial(FLAT, SCRATCHOp.SCRATCH_STORE_B64, seg=1)
+scratch_store_b96 = functools.partial(FLAT, SCRATCHOp.SCRATCH_STORE_B96, seg=1)
+scratch_store_b128 = functools.partial(FLAT, SCRATCHOp.SCRATCH_STORE_B128, seg=1)
+scratch_load_d16_u8 = functools.partial(FLAT, SCRATCHOp.SCRATCH_LOAD_D16_U8, seg=1)
+scratch_load_d16_i8 = functools.partial(FLAT, SCRATCHOp.SCRATCH_LOAD_D16_I8, seg=1)
+scratch_load_d16_b16 = functools.partial(FLAT, SCRATCHOp.SCRATCH_LOAD_D16_B16, seg=1)
+scratch_load_d16_hi_u8 = functools.partial(FLAT, SCRATCHOp.SCRATCH_LOAD_D16_HI_U8, seg=1)
+scratch_load_d16_hi_i8 = functools.partial(FLAT, SCRATCHOp.SCRATCH_LOAD_D16_HI_I8, seg=1)
+scratch_load_d16_hi_b16 = functools.partial(FLAT, SCRATCHOp.SCRATCH_LOAD_D16_HI_B16, seg=1)
+scratch_store_d16_hi_b8 = functools.partial(FLAT, SCRATCHOp.SCRATCH_STORE_D16_HI_B8, seg=1)
+scratch_store_d16_hi_b16 = functools.partial(FLAT, SCRATCHOp.SCRATCH_STORE_D16_HI_B16, seg=1)
 s_load_b32 = functools.partial(SMEM, SMEMOp.S_LOAD_B32)
 s_load_b64 = functools.partial(SMEM, SMEMOp.S_LOAD_B64)
 s_load_b128 = functools.partial(SMEM, SMEMOp.S_LOAD_B128)
@@ -2485,6 +2504,7 @@ s_sleep = functools.partial(SOPP, SOPPOp.S_SLEEP)
 s_set_inst_prefetch_distance = functools.partial(SOPP, SOPPOp.S_SET_INST_PREFETCH_DISTANCE)
 s_clause = functools.partial(SOPP, SOPPOp.S_CLAUSE)
 s_delay_alu = functools.partial(SOPP, SOPPOp.S_DELAY_ALU)
+s_waitcnt_depctr = functools.partial(SOPP, SOPPOp.S_WAITCNT_DEPCTR)
 s_waitcnt = functools.partial(SOPP, SOPPOp.S_WAITCNT)
 s_wait_idle = functools.partial(SOPP, SOPPOp.S_WAIT_IDLE)
 s_wait_event = functools.partial(SOPP, SOPPOp.S_WAIT_EVENT)
