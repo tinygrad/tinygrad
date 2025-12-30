@@ -642,7 +642,7 @@ def compile_pseudocode(pseudocode: str) -> str:
       joined_lines.append(line)
 
   lines = []
-  indent, need_pass = 0, False
+  indent, need_pass, in_first_match_loop = 0, False, False
   for line in joined_lines:
     line = line.strip()
     if not line or line.startswith('//'): continue
@@ -671,14 +671,14 @@ def compile_pseudocode(pseudocode: str) -> str:
     elif line.startswith('endfor'):
       if need_pass: lines.append('  ' * indent + "pass")
       indent -= 1
-      need_pass = False
+      need_pass, in_first_match_loop = False, False
     elif line.startswith('declare '):
       pass
     elif m := re.match(r'for (\w+) in (.+?)\s*:\s*(.+?) do', line):
       start, end = _expr(m[2].strip()), _expr(m[3].strip())
       lines.append('  ' * indent + f"for {m[1]} in range({start}, int({end})+1):")
       indent += 1
-      need_pass = True
+      need_pass, in_first_match_loop = True, True
     elif '=' in line and not line.startswith('=='):
       need_pass = False
       line = line.rstrip(';')
@@ -697,7 +697,12 @@ def compile_pseudocode(pseudocode: str) -> str:
             break
       else:
         lhs, rhs = line.split('=', 1)
-        lines.append('  ' * indent + _assign(lhs.strip(), _expr(rhs.strip())))
+        lhs_s, rhs_s = lhs.strip(), rhs.strip()
+        stmt = _assign(lhs_s, _expr(rhs_s))
+        # CLZ/CTZ pattern: assignment of loop var to tmp/D0.i32 in first-match loop needs break
+        if in_first_match_loop and rhs_s == 'i' and (lhs_s == 'tmp' or lhs_s == 'D0.i32'):
+          stmt += "; break"
+        lines.append('  ' * indent + stmt)
   # If we ended with a control statement that needs a body, add pass
   if need_pass: lines.append('  ' * indent + "pass")
   return '\n'.join(lines)
@@ -1014,11 +1019,6 @@ from extra.assembly.amd.pcode import *
         code = compile_pseudocode(pc)
         # NOTE: Do NOT add more code.replace() hacks here. Fix issues properly in the DSL
         # (compile_pseudocode, helper functions, or Reg/TypedView classes) instead.
-        # CLZ/CTZ: The PDF pseudocode searches for the first 1 bit but doesn't break.
-        # Hardware stops at first match. SOP1 uses tmp=i, VOP1/VOP3 use D0.i32=i
-        if 'CLZ' in op.name or 'CTZ' in op.name:
-          code = code.replace('tmp = Reg(i)', 'tmp = Reg(i); break')
-          code = code.replace('D0.i32 = i', 'D0.i32 = i; break')
         # V_DIV_FMAS_F32/F64: PDF page 449 says 2^32/2^64 but hardware behavior is more complex.
         # The scale direction depends on S2 (the addend): if exponent(S2) > 127 (i.e., S2 >= 2.0),
         # scale by 2^+64 (to unscale a numerator that was scaled). Otherwise scale by 2^-64
