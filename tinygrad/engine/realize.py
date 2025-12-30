@@ -3,8 +3,9 @@ import time, pprint, random, itertools, math
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, CAPTURING, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context
-from tinygrad.helpers import unwrap
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer
+from tinygrad.helpers import unwrap, getenv
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, KernelInfo
+from tinygrad.dtype import dtypes
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import ProgramSpec, Estimates
 from tinygrad.codegen import get_program
@@ -123,13 +124,21 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
 
 # **************** lowering functions ****************
 
+def copy_ast(sz:int) -> UOp:
+  dest, src = UOp.placeholder((sz,), dtypes.uint8, 0), UOp.placeholder((sz,), dtypes.uint8, 1)
+  i = UOp.range(sz, 0)
+  return dest[i].store(src[i]).end(i).sink(arg=KernelInfo(name=f"copy_{sz}"))
+
+def lower_copy(ctx, copy):
+  if getenv("USE_COPY_KERNEL"): return get_runner(ctx[0].device, copy_ast(ctx[0].nbytes))
+  can_xfer = hasattr(Device[ctx[0].device].allocator, '_transfer') and all_same([x.device.split(":")[0] for x in ctx])
+  return BufferXfer(ctx[0].nbytes, ctx[0].device, ctx[1].device) if can_xfer else BufferCopy(ctx[0].nbytes, ctx[0].device, ctx[1].device)
+
 # NOTE: ctx is the buffers
 si_lowerer = PatternMatcher([
   (UPat((Ops.SINK, Ops.PROGRAM), name="sink"), lambda ctx,sink: get_runner(ctx[0].device, sink)),
   (UPat(Ops.BUFFER_VIEW), lambda ctx: ViewOp(ctx[0])),
-  (UPat(Ops.COPY, name="copy"), lambda ctx,copy: (BufferXfer(ctx[0].nbytes, ctx[0].device, ctx[1].device) \
-      if hasattr(Device[ctx[0].device].allocator, '_transfer') and all_same([x.device.split(":")[0] for x in ctx]) \
-      else BufferCopy(ctx[0].nbytes, ctx[0].device, ctx[1].device))),
+  (UPat(Ops.COPY, name="copy"), lower_copy),
   (UPat(Ops.ENCDEC, name="encdec"), lambda ctx,encdec: EncDec(encdec, ctx[0].nbytes, ctx[1].device)),
 ])
 
