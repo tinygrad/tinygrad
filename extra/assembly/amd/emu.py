@@ -301,27 +301,14 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     else: raise NotImplementedError(f"DS op {op}")
     return
 
-  # VOPD: dual-issue, execute two ops using VOP2/VOP3 compiled functions
-  # Both ops execute simultaneously using pre-instruction values, so read all inputs first
+  # VOPD: dual-issue, execute two ops simultaneously (read all inputs before writes)
   if inst_type is VOPD:
     vdsty = (inst.vdsty << 1) | ((inst.vdstx & 1) ^ 1)
-    # Read all source operands BEFORE any writes (dual-issue semantics)
-    sx0, sx1 = st.rsrc(inst.srcx0, lane), V[inst.vsrcx1]
-    sy0, sy1 = st.rsrc(inst.srcy0, lane), V[inst.vsrcy1]
-    dx0, dy0 = V[inst.vdstx], V[vdsty]
-    # Execute X op
-    res_x = None
-    if (op_x := _VOPD_TO_VOP.get(inst.opx)):
-      if (fn_x := compiled.get(type(op_x), {}).get(op_x)):
-        res_x = fn_x(sx0, sx1, 0, dx0, st.scc, st.vcc, lane, st.exec_mask, st.literal, None, {})
-    # Execute Y op
-    res_y = None
-    if (op_y := _VOPD_TO_VOP.get(inst.opy)):
-      if (fn_y := compiled.get(type(op_y), {}).get(op_y)):
-        res_y = fn_y(sy0, sy1, 0, dy0, st.scc, st.vcc, lane, st.exec_mask, st.literal, None, {})
-    # Write results after both ops complete
-    if res_x is not None: V[inst.vdstx] = res_x['d0']
-    if res_y is not None: V[vdsty] = res_y['d0']
+    inputs = [(inst.opx, st.rsrc(inst.srcx0, lane), V[inst.vsrcx1], V[inst.vdstx], inst.vdstx),
+              (inst.opy, st.rsrc(inst.srcy0, lane), V[inst.vsrcy1], V[vdsty], vdsty)]
+    results = [(dst, fn(s0, s1, 0, d0, st.scc, st.vcc, lane, st.exec_mask, st.literal, None, {})['d0'])
+               for vopd_op, s0, s1, d0, dst in inputs if (op := _VOPD_TO_VOP.get(vopd_op)) and (fn := compiled.get(type(op), {}).get(op))]
+    for dst, val in results: V[dst] = val
     return
 
   # VOP3SD: has extra scalar dest for carry output
@@ -329,37 +316,20 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     op = VOP3SDOp(inst.op)
     fn = compiled.get(VOP3SDOp, {}).get(op)
     if fn is None: raise NotImplementedError(f"{op.name} not in pseudocode")
-    # VOP3SD has both 32-bit ops (V_ADD_CO_CI_U32, etc.) and 64-bit ops (V_DIV_SCALE_F64, V_MAD_U64_U32, etc.)
-    div_scale_64_ops = (VOP3SDOp.V_DIV_SCALE_F64,)
-    mad64_ops = (VOP3SDOp.V_MAD_U64_U32, VOP3SDOp.V_MAD_I64_I32)
-    if op in div_scale_64_ops:
-      # V_DIV_SCALE_F64: all sources are 64-bit
+    # Source sizes vary: DIV_SCALE=all 64-bit, MAD64=32/32/64, others=32-bit
+    if op == VOP3SDOp.V_DIV_SCALE_F64:
       s0, s1, s2 = st.rsrc64(inst.src0, lane), st.rsrc64(inst.src1, lane), st.rsrc64(inst.src2, lane)
-    elif op in mad64_ops:
-      # V_MAD_U64_U32, V_MAD_I64_I32: src0/src1 are 32-bit, src2 is 64-bit
+    elif op in (VOP3SDOp.V_MAD_U64_U32, VOP3SDOp.V_MAD_I64_I32):
       s0, s1 = st.rsrc(inst.src0, lane), st.rsrc(inst.src1, lane)
-      if inst.src2 >= 256:  # VGPR
-        s2 = V[inst.src2 - 256] | (V[inst.src2 - 256 + 1] << 32)
-      else:  # SGPR - read 64-bit from consecutive SGPRs
-        s2 = st.rsgpr64(inst.src2)
+      s2 = (V[inst.src2 - 256] | (V[inst.src2 - 256 + 1] << 32)) if inst.src2 >= 256 else st.rsgpr64(inst.src2)
     else:
-      # Default: 32-bit sources
       s0, s1, s2 = st.rsrc(inst.src0, lane), st.rsrc(inst.src1, lane), st.rsrc(inst.src2, lane)
-    d0 = V[inst.vdst]
-    # For carry-in operations (V_*_CO_CI_*), src2 register contains the carry bitmask (not VCC).
-    # The pseudocode uses VCC but in VOP3SD encoding, the actual carry source is inst.src2.
-    # We pass the src2 register value as 'vcc' to the interpreter so it reads the correct carry.
+    # Carry-in ops use src2 as carry bitmask instead of VCC
     carry_ops = (VOP3SDOp.V_ADD_CO_CI_U32, VOP3SDOp.V_SUB_CO_CI_U32, VOP3SDOp.V_SUBREV_CO_CI_U32)
-    vcc_for_exec = st.rsgpr64(inst.src2) if op in carry_ops else st.vcc
-    result = fn(s0, s1, s2, d0, st.scc, vcc_for_exec, lane, st.exec_mask, st.literal, None, {})
-    # Write result - handle 64-bit destinations
-    if result.get('d0_64'):
-      V[inst.vdst] = result['d0'] & 0xffffffff
-      V[inst.vdst + 1] = (result['d0'] >> 32) & 0xffffffff
-    else:
-      V[inst.vdst] = result['d0'] & 0xffffffff
-    if result.get('vcc_lane') is not None:
-      st.pend_sgpr_lane(inst.sdst, lane, result['vcc_lane'])
+    result = fn(s0, s1, s2, V[inst.vdst], st.scc, st.rsgpr64(inst.src2) if op in carry_ops else st.vcc, lane, st.exec_mask, st.literal, None, {})
+    V[inst.vdst] = result['d0'] & 0xffffffff
+    if result.get('d0_64'): V[inst.vdst + 1] = (result['d0'] >> 32) & 0xffffffff
+    if result.get('vcc_lane') is not None: st.pend_sgpr_lane(inst.sdst, lane, result['vcc_lane'])
     return
 
   # Get op enum and sources (None means "no source" for that operand)
@@ -406,20 +376,16 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
       V = st.vgpr[lane]
       V[inst.vdst] = _i32(result) if op == VOP3POp.V_FMA_MIX_F32 else _dst16(V[inst.vdst], _i16(result), op == VOP3POp.V_FMA_MIXHI_F16)
       return
-    # VOP3P packed ops: opsel selects halves for lo result, opsel_hi for hi result
+    # VOP3P packed ops: opsel selects halves for lo, opsel_hi for hi; neg toggles f16 sign
     raws = [st.rsrc_f16(inst.src0, lane), st.rsrc_f16(inst.src1, lane), st.rsrc_f16(inst.src2, lane) if inst.src2 is not None else 0]
     opsel, opsel_hi, opsel_hi2 = getattr(inst, 'opsel', 0), getattr(inst, 'opsel_hi', 3), getattr(inst, 'opsel_hi2', 1)
     neg, neg_hi = getattr(inst, 'neg', 0), getattr(inst, 'neg_hi', 0)
-    # Build packed sources: [31:16]=hi input, [15:0]=lo input; apply neg as f16 sign toggle
-    def pack_src(raw, lo_sel, hi_sel, neg_lo, neg_hi):
-      lo, hi = _src16(raw, lo_sel), _src16(raw, hi_sel)
-      return ((hi ^ (0x8000 if neg_hi else 0)) << 16) | (lo ^ (0x8000 if neg_lo else 0))
-    s0 = pack_src(raws[0], bool(opsel & 1), bool(opsel_hi & 1), bool(neg & 1), bool(neg_hi & 1))
-    s1 = pack_src(raws[1], bool(opsel & 2), bool(opsel_hi & 2), bool(neg & 2), bool(neg_hi & 2))
-    s2 = pack_src(raws[2], bool(opsel & 4), bool(opsel_hi2), bool(neg & 4), bool(neg_hi & 4))
+    hi_sels = [opsel_hi & 1, opsel_hi & 2, opsel_hi2]
+    srcs = [((_src16(raws[i], hi_sels[i]) ^ (0x8000 if neg_hi & (1<<i) else 0)) << 16) |
+            (_src16(raws[i], opsel & (1<<i)) ^ (0x8000 if neg & (1<<i) else 0)) for i in range(3)]
     fn = compiled.get(VOP3POp, {}).get(op)
     if fn is None: raise NotImplementedError(f"{op.name} not in pseudocode")
-    st.vgpr[lane][inst.vdst] = fn(s0, s1, s2, 0, st.scc, st.vcc, lane, st.exec_mask, st.literal, None, {})['d0'] & 0xffffffff
+    st.vgpr[lane][inst.vdst] = fn(srcs[0], srcs[1], srcs[2], 0, st.scc, st.vcc, lane, st.exec_mask, st.literal, None, {})['d0'] & 0xffffffff
     return
   else: raise NotImplementedError(f"Unknown vector type {inst_type}")
 
@@ -497,11 +463,8 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     s0 = mod_src(st.rsrc(src0, lane), 0)
     s1 = mod_src(st.rsrc(src1, lane), 1) if src1 is not None else 0
     s2 = mod_src(st.rsrc(src2, lane), 2) if src2 is not None else 0
-  # For VOP2 16-bit ops (like V_FMAC_F16), the destination is used as an accumulator.
-  if is_vop2_16bit:
-    d0 = _src16(V[vdst], dst_hi)
-  else:
-    d0 = V[vdst] if not is_64bit_op else (V[vdst] | (V[vdst + 1] << 32))
+  # Read destination (accumulator for VOP2 f16, 64-bit for 64-bit ops)
+  d0 = _src16(V[vdst], dst_hi) if is_vop2_16bit else (V[vdst] | (V[vdst + 1] << 32)) if is_64bit_op else V[vdst]
 
   # V_CNDMASK_B32/B16: VOP3 encoding uses src2 as mask (not VCC); VOP2 uses VCC implicitly
   # Pass the correct mask as vcc to the function so pseudocode VCC.u64[laneId] works correctly
@@ -526,24 +489,14 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     # V_CMPX instructions write to EXEC per-lane
     st.pend_sgpr_lane(EXEC_LO, lane, result['exec_lane'])
   if 'd0' in result and op_cls not in (VOPCOp,) and 'vgpr_write' not in result:
-    # V_READFIRSTLANE_B32 and V_READLANE_B32 write to SGPR, not VGPR
-    # V_WRITELANE_B32 uses vgpr_write for cross-lane writes, don't overwrite with d0
-    writes_to_sgpr = op in (VOP1Op.V_READFIRSTLANE_B32,) or \
-                     (op_cls is VOP3Op and op in (VOP3Op.V_READFIRSTLANE_B32, VOP3Op.V_READLANE_B32))
-    # Check for 16-bit destination ops (opsel[3] controls hi/lo write)
-    # Must check op_cls to avoid cross-enum value collisions (e.g., VOP1Op.V_MOV_B32=1 vs VOP3Op.V_CMP_LT_F16=1)
+    writes_to_sgpr = op in (VOP1Op.V_READFIRSTLANE_B32,) or (op_cls is VOP3Op and op in (VOP3Op.V_READFIRSTLANE_B32, VOP3Op.V_READLANE_B32))
     is_16bit_dst = (op_cls is VOP3Op and op in _VOP3_16BIT_DST_OPS) or (op_cls is VOP1Op and op in _VOP1_16BIT_DST_OPS)
-    if writes_to_sgpr:
-      st.wsgpr(vdst, result['d0'] & 0xffffffff)
-    elif result.get('d0_64'):
-      V[vdst] = result['d0'] & 0xffffffff
-      V[vdst + 1] = (result['d0'] >> 32) & 0xffffffff
-    elif is_16bit_dst and inst_type is VOP3:
-      V[vdst] = _dst16(V[vdst], result['d0'], bool(opsel & 8))  # opsel[3] controls hi/lo
-    elif is_16bit_dst or is_vop2_16bit:
-      V[vdst] = _dst16(V[vdst], result['d0'], dst_hi)
-    else:
-      V[vdst] = result['d0'] & 0xffffffff
+    d0_val = result['d0']
+    if writes_to_sgpr: st.wsgpr(vdst, d0_val & 0xffffffff)
+    elif result.get('d0_64'): V[vdst], V[vdst + 1] = d0_val & 0xffffffff, (d0_val >> 32) & 0xffffffff
+    elif is_16bit_dst: V[vdst] = _dst16(V[vdst], d0_val, bool(opsel & 8) if inst_type is VOP3 else dst_hi)
+    elif is_vop2_16bit: V[vdst] = _dst16(V[vdst], d0_val, dst_hi)
+    else: V[vdst] = d0_val & 0xffffffff
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # WMMA (Wave Matrix Multiply-Accumulate)
@@ -634,16 +587,10 @@ def exec_workgroup(program: Program, workgroup_id: tuple[int, int, int], local_s
     for st, n_lanes, _ in waves: exec_wave(program, st, lds, n_lanes)
 
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c) -> int:
-  data = (ctypes.c_char * lib_sz).from_address(lib).raw
-  program = decode_program(data)
+  program = decode_program((ctypes.c_char * lib_sz).from_address(lib).raw)
   if not program: return -1
-  # Parse COMPUTE_PGM_RSRC2 for SGPR layout
-  user_sgpr_count = (rsrc2 >> 1) & 0x1f
-  enable_wg_id_x = bool((rsrc2 >> 7) & 1)
-  enable_wg_id_y = bool((rsrc2 >> 8) & 1)
-  enable_wg_id_z = bool((rsrc2 >> 9) & 1)
-  wg_id_enables = (enable_wg_id_x, enable_wg_id_y, enable_wg_id_z)
+  wg_id_enables = tuple(bool((rsrc2 >> (7+i)) & 1) for i in range(3))
   for gidz in range(gz):
     for gidy in range(gy):
-      for gidx in range(gx): exec_workgroup(program, (gidx, gidy, gidz), (lx, ly, lz), args_ptr, user_sgpr_count, wg_id_enables)
+      for gidx in range(gx): exec_workgroup(program, (gidx, gidy, gidz), (lx, ly, lz), args_ptr, (rsrc2 >> 1) & 0x1f, wg_id_enables)
   return 0
