@@ -860,17 +860,20 @@ jobs:
     name: MacOS (${{ matrix.backend }})
     runs-on: macos-15
     timeout-minutes: 20
+    env:
+      CACHE_VERSION: '1917'
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
-          key: macos-${{ matrix.backend }}-minimal
+          key: macos-${{ matrix.backend }}-minimal-uv
           deps: testing_minimal
           pydeps: "capstone"
           llvm: ${{ matrix.backend == 'llvm' || matrix.backend == 'lvp' }}
           mesa: ${{ matrix.backend == 'lvp' && 'true' }}
+          uv: 'true'
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'CPU=1\nCPU_LLVM=1' || matrix.backend == 'cpu' && 'CPU=1\nCPU_LLVM=0\nCPU_COUNT=2' || matrix.backend == 'metal' && 'METAL=1' || matrix.backend == 'lvp' && 'CPU=1\nCPU_LVP=1' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
@@ -904,9 +907,10 @@ jobs:
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
-          key: windows-${{ matrix.backend }}-minimal
+          key: windows-${{ matrix.backend }}-minimal-uv
           deps: testing_unit
           pydeps: ${{ matrix.backend == 'webgpu' && 'dawn-python' || '' }}
+          uv: 'true'
       - name: Set env
         shell: bash
         run:  printf "${{ matrix.backend == 'llvm' && 'CPU=1\nCPU_LLVM=1' || matrix.backend == 'cpu' && 'CPU=1\nCPU_LLVM=0\nCPU_COUNT=2' || matrix.backend == 'webgpu' && 'WEBGPU=1'}}" >> $GITHUB_ENV
