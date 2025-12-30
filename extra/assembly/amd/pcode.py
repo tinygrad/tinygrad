@@ -35,12 +35,18 @@ def _isnan(x):
   try: return math.isnan(float(x))
   except (TypeError, ValueError): return False
 def _isquietnan(x):
-  """Check if x is a quiet NaN. For f32: exponent=255, bit22=1, mantissa!=0"""
+  """Check if x is a quiet NaN.
+  f16: exponent=31, bit9=1, mantissa!=0
+  f32: exponent=255, bit22=1, mantissa!=0
+  f64: exponent=2047, bit51=1, mantissa!=0
+  """
   try:
     if not math.isnan(float(x)): return False
     # Get raw bits from TypedView or similar object with _reg attribute
     if hasattr(x, '_reg') and hasattr(x, '_bits'):
       bits = x._reg._val & ((1 << x._bits) - 1)
+      if x._bits == 16:
+        return ((bits >> 10) & 0x1f) == 31 and ((bits >> 9) & 1) == 1 and (bits & 0x3ff) != 0
       if x._bits == 32:
         return ((bits >> 23) & 0xff) == 255 and ((bits >> 22) & 1) == 1 and (bits & 0x7fffff) != 0
       if x._bits == 64:
@@ -48,12 +54,18 @@ def _isquietnan(x):
     return True  # Default to quiet NaN if we can't determine bit pattern
   except (TypeError, ValueError): return False
 def _issignalnan(x):
-  """Check if x is a signaling NaN. For f32: exponent=255, bit22=0, mantissa!=0"""
+  """Check if x is a signaling NaN.
+  f16: exponent=31, bit9=0, mantissa!=0
+  f32: exponent=255, bit22=0, mantissa!=0
+  f64: exponent=2047, bit51=0, mantissa!=0
+  """
   try:
     if not math.isnan(float(x)): return False
     # Get raw bits from TypedView or similar object with _reg attribute
     if hasattr(x, '_reg') and hasattr(x, '_bits'):
       bits = x._reg._val & ((1 << x._bits) - 1)
+      if x._bits == 16:
+        return ((bits >> 10) & 0x1f) == 31 and ((bits >> 9) & 1) == 0 and (bits & 0x3ff) != 0
       if x._bits == 32:
         return ((bits >> 23) & 0xff) == 255 and ((bits >> 22) & 1) == 0 and (bits & 0x7fffff) != 0
       if x._bits == 64:
@@ -73,7 +85,11 @@ def floor(x):
 def ceil(x):
   x = float(x)
   return x if math.isnan(x) or math.isinf(x) else float(math.ceil(x))
-def sqrt(x): return math.sqrt(x) if x >= 0 else float("nan")
+class _SafeFloat(float):
+  """Float subclass that uses _div for division to handle 0/inf correctly."""
+  def __truediv__(self, o): return _div(float(self), float(o))
+  def __rtruediv__(self, o): return _div(float(o), float(self))
+def sqrt(x): return _SafeFloat(math.sqrt(x)) if x >= 0 else _SafeFloat(float("nan"))
 def log2(x): return math.log2(x) if x > 0 else (float("-inf") if x == 0 else float("nan"))
 i32_to_f32 = u32_to_f32 = i32_to_f64 = u32_to_f64 = f32_to_f64 = f64_to_f32 = float
 def f32_to_i32(f):
@@ -107,7 +123,10 @@ def u4_to_u32(v): return int(v) & 0xf
 def _sign(f): return 1 if math.copysign(1.0, f) < 0 else 0
 def _mantissa_f32(f): return struct.unpack("<I", struct.pack("<f", f))[0] & 0x7fffff if not (math.isinf(f) or math.isnan(f)) else 0
 def _ldexp(m, e): return math.ldexp(m, e)
-def isEven(x): return int(x) % 2 == 0
+def isEven(x):
+  x = float(x)
+  if math.isinf(x) or math.isnan(x): return False
+  return int(x) % 2 == 0
 def fract(x): return x - math.floor(x)
 PI = math.pi
 def sin(x):
@@ -945,6 +964,8 @@ from extra.assembly.amd.pcode import *
 
       try:
         code = compile_pseudocode(pc)
+        # NOTE: Do NOT add more code.replace() hacks here. Fix issues properly in the DSL
+        # (compile_pseudocode, helper functions, or Reg/TypedView classes) instead.
         # CLZ/CTZ: The PDF pseudocode searches for the first 1 bit but doesn't break.
         # Hardware stops at first match. SOP1 uses tmp=i, VOP1/VOP3 use D0.i32=i
         if 'CLZ' in op.name or 'CTZ' in op.name:

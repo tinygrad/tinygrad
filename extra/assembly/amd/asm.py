@@ -219,9 +219,12 @@ def disasm(inst: Inst) -> str:
       src2_str = fmt_sd_src(src2, neg & 4, is_mad64)
       dst_str = _vreg(vdst, 2) if (is_f64 or is_mad64) else f"v{vdst}"
       sdst_str = _fmt_sdst(sdst, 1)
-      # v_add_co_u32, v_sub_co_u32, v_subrev_co_u32, v_add_co_ci_u32, etc. only use 2 sources
-      if op_name in ('v_add_co_u32', 'v_sub_co_u32', 'v_subrev_co_u32', 'v_add_co_ci_u32', 'v_sub_co_ci_u32', 'v_subrev_co_ci_u32'):
+      # v_add_co_u32, v_sub_co_u32, v_subrev_co_u32 only use 2 sources
+      if op_name in ('v_add_co_u32', 'v_sub_co_u32', 'v_subrev_co_u32'):
         return f"{op_name} {dst_str}, {sdst_str}, {src0_str}, {src1_str}"
+      # v_add_co_ci_u32, v_sub_co_ci_u32, v_subrev_co_ci_u32 use 3 sources (src2 is carry-in)
+      if op_name in ('v_add_co_ci_u32', 'v_sub_co_ci_u32', 'v_subrev_co_ci_u32'):
+        return f"{op_name} {dst_str}, {sdst_str}, {src0_str}, {src1_str}, {src2_str}"
       # v_div_scale uses 3 sources
       return f"{op_name} {dst_str}, {sdst_str}, {src0_str}, {src1_str}, {src2_str}" + omod_str
 
@@ -351,12 +354,17 @@ def disasm(inst: Inst) -> str:
     from extra.assembly.amd.autogen import rdna3 as autogen
     opx, opy, vdstx, vdsty_enc = [unwrap(inst._values.get(f, 0)) for f in ('opx', 'opy', 'vdstx', 'vdsty')]
     srcx0, vsrcx1, srcy0, vsrcy1 = [unwrap(inst._values.get(f, 0)) for f in ('srcx0', 'vsrcx1', 'srcy0', 'vsrcy1')]
+    literal = inst._literal if hasattr(inst, '_literal') and inst._literal else unwrap(inst._values.get('literal', None))
     vdsty = (vdsty_enc << 1) | ((vdstx & 1) ^ 1)  # Decode vdsty
-    def fmt_vopd(op, vdst, src0, vsrc1):
+    def fmt_vopd(op, vdst, src0, vsrc1, include_lit):
       try: name = autogen.VOPDOp(op).name.lower()
       except (ValueError, KeyError): name = f"op_{op}"
-      return f"{name} v{vdst}, {fmt_src(src0)}" if 'mov' in name else f"{name} v{vdst}, {fmt_src(src0)}, v{vsrc1}"
-    return f"{fmt_vopd(opx, vdstx, srcx0, vsrcx1)} :: {fmt_vopd(opy, vdsty, srcy0, vsrcy1)}"
+      lit_str = f", 0x{literal:x}" if include_lit and literal is not None and ('fmaak' in name or 'fmamk' in name) else ""
+      return f"{name} v{vdst}, {fmt_src(src0)}{lit_str}" if 'mov' in name else f"{name} v{vdst}, {fmt_src(src0)}, v{vsrc1}{lit_str}"
+    # fmaak/fmamk: both X and Y can use the shared literal
+    x_needs_lit = 'fmaak' in autogen.VOPDOp(opx).name.lower() or 'fmamk' in autogen.VOPDOp(opx).name.lower()
+    y_needs_lit = 'fmaak' in autogen.VOPDOp(opy).name.lower() or 'fmamk' in autogen.VOPDOp(opy).name.lower()
+    return f"{fmt_vopd(opx, vdstx, srcx0, vsrcx1, x_needs_lit)} :: {fmt_vopd(opy, vdsty, srcy0, vsrcy1, y_needs_lit)}"
 
   # VOP3P: packed vector ops
   if cls_name == 'VOP3P':
@@ -721,6 +729,9 @@ def get_dsl(text: str) -> str:
   if mnemonic.replace('_e32', '') in vcc_ops and len(dsl_args) >= 5:
     mnemonic = mnemonic.replace('_e32', '') + '_e32'  # Ensure _e32 suffix for VOP2 encoding
     dsl_args = [dsl_args[0], dsl_args[2], dsl_args[3]]
+  # Handle v_add_co_ci_u32_e64 etc - strip _e64 suffix (function name doesn't have it, returns VOP3SD)
+  if mnemonic.replace('_e64', '') in vcc_ops and mnemonic.endswith('_e64'):
+    mnemonic = mnemonic.replace('_e64', '')
   # v_cmp_*_e32: strip implicit vcc_lo dest
   if mnemonic.startswith('v_cmp') and not mnemonic.endswith('_e64') and len(dsl_args) >= 3 and operands[0].strip().lower() in ('vcc_lo', 'vcc_hi', 'vcc'):
     dsl_args = dsl_args[1:]
