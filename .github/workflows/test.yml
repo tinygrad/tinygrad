@@ -893,6 +893,8 @@ jobs:
     name: Windows (${{ matrix.backend }})
     runs-on: windows-latest
     timeout-minutes: 15
+    env:
+      CACHE_VERSION: '1917'
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
