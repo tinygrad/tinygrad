@@ -2480,6 +2480,56 @@ class TestF64Conversions(unittest.TestCase):
     # v3 should still contain the canary (not clobbered by 64-bit write)
     self.assertEqual(canary, 0xDEADBEEF, f"v3 canary should be 0xDEADBEEF, got 0x{canary:08x} (clobbered!)")
 
+  def test_v_frexp_mant_f64_range(self):
+    """V_FREXP_MANT_F64 should return mantissa in [0.5, 1.0) range.
+
+    Regression test: The mantissa() helper was incorrectly multiplying by 2.0,
+    returning values in [1.0, 2.0) instead of the correct [0.5, 1.0) range.
+    """
+    # Test with 2.0: frexp(2.0) should give mantissa=0.5, exponent=2
+    two_f64 = f2i64(2.0)
+    instructions = [
+      s_mov_b32(s[0], two_f64 & 0xffffffff),
+      s_mov_b32(s[1], two_f64 >> 32),
+      v_frexp_mant_f64_e32(v[0:2], s[0:2]),
+      v_frexp_exp_i32_f64_e32(v[2], s[0:2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    mant = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
+    exp = st.vgpr[0][2]
+    if exp >= 0x80000000: exp -= 0x100000000  # sign extend
+    # frexp(2.0) = 0.5 * 2^2
+    self.assertAlmostEqual(mant, 0.5, places=10, msg=f"Expected mantissa 0.5, got {mant}")
+    self.assertEqual(exp, 2, f"Expected exponent 2, got {exp}")
+
+  def test_v_div_scale_f64_reads_64bit_sources(self):
+    """V_DIV_SCALE_F64 must read all sources as 64-bit values.
+
+    Regression test: VOP3SD was reading sources as 32-bit for V_DIV_SCALE_F64,
+    causing incorrect results when the low 32 bits happened to look like 0 or denorm.
+    """
+    # Set up v0:v1 = sqrt(2) ≈ 1.414, v2:v3 = 1.0
+    sqrt2_f64 = f2i64(1.4142135623730951)
+    one_f64 = f2i64(1.0)
+    instructions = [
+      s_mov_b32(s[0], sqrt2_f64 & 0xffffffff),
+      s_mov_b32(s[1], sqrt2_f64 >> 32),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      s_mov_b32(s[2], one_f64 & 0xffffffff),
+      s_mov_b32(s[3], one_f64 >> 32),
+      v_mov_b32_e32(v[2], s[2]),
+      v_mov_b32_e32(v[3], s[3]),
+      # V_DIV_SCALE_F64: src0=v0:v1, src1=v0:v1, src2=v2:v3
+      # For normal inputs, should pass through src0 unchanged
+      VOP3SD(VOP3SDOp.V_DIV_SCALE_F64, vdst=v[4], sdst=s[10], src0=v[0], src1=v[0], src2=v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f(st.vgpr[0][4] | (st.vgpr[0][5] << 32))
+    # For normal (non-denorm, non-edge-case) inputs, V_DIV_SCALE_F64 passes through src0
+    self.assertAlmostEqual(result, 1.4142135623730951, places=10,
+                           msg=f"Expected ~1.414, got {result} (may be nan if 64-bit sources not read correctly)")
+
 
 class TestNewPcodeHelpers(unittest.TestCase):
   """Tests for newly added pcode helper functions (SAD, BYTE_PERMUTE, BF16)."""
