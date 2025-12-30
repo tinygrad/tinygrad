@@ -249,7 +249,7 @@ class QCOMProgram(HCQProgram):
     else: self._parse_lib()
 
     self.lib_gpu: HCQBuffer = self.dev.allocator.alloc(self.image_size, buf_spec:=BufferSpec(cpu_access=True, nolru=True))
-    to_mv(cast(int, self.lib_gpu.va_addr), self.image_size)[:] = self.image
+    to_mv(self.lib_gpu.va_addr, self.image_size)[:] = self.image
 
     self.pvtmem_size_per_item: int = round_up(self.pvtmem, 512) >> 9
     self.pvtmem_size_total: int = self.pvtmem_size_per_item * 128 * 2
