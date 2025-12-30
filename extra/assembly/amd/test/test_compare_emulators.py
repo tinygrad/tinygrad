@@ -107,16 +107,16 @@ class PythonEmulator:
     return step_wave(self.program, self.state, self.lds, self.n_lanes)
   def set_sgpr(self, idx: int, val: int):
     assert self.state is not None
-    self.state.sgpr[idx] = val & 0xffffffff
+    self.state.sgpr[idx]._val = val & 0xffffffff
   def set_vgpr(self, lane: int, idx: int, val: int):
     assert self.state is not None
-    self.state.vgpr[lane][idx] = val & 0xffffffff
+    self.state.vgpr[lane][idx]._val = val & 0xffffffff
 
   def get_snapshot(self) -> StateSnapshot:
     assert self.state is not None
     return StateSnapshot(pc=self.state.pc, scc=self.state.scc, vcc=self.state.vcc & 0xffffffff,
-                         exec_mask=self.state.exec_mask & 0xffffffff, sgpr=list(self.state.sgpr),
-                         vgpr=[list(self.state.vgpr[i]) for i in range(WAVE_SIZE)])
+                         exec_mask=self.state.exec_mask & 0xffffffff, sgpr=[r._val for r in self.state.sgpr],
+                         vgpr=[[r._val for r in self.state.vgpr[i]] for i in range(WAVE_SIZE)])
 
 def run_single_kernel(kernel: bytes, n_lanes: int, args_ptr: int, global_size: tuple[int, int, int],
                       program, max_steps: int, debug: bool, trace_len: int, kernel_idx: int = 0,

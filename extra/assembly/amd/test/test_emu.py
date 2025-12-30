@@ -86,9 +86,9 @@ def parse_output(out_buf: bytes, n_lanes: int) -> WaveState:
   for i in range(N_VGPRS):
     for lane in range(n_lanes):
       off = i * WAVE_SIZE * 4 + lane * 4
-      st.vgpr[lane][i] = struct.unpack_from('<I', out_buf, off)[0]
+      st.vgpr[lane][i]._val = struct.unpack_from('<I', out_buf, off)[0]
   for i in range(N_SGPRS):
-    st.sgpr[i] = struct.unpack_from('<I', out_buf, VGPR_BYTES + i * 4)[0]
+    st.sgpr[i]._val = struct.unpack_from('<I', out_buf, VGPR_BYTES + i * 4)[0]
   st.vcc = struct.unpack_from('<I', out_buf, VGPR_BYTES + SGPR_BYTES)[0]
   st.scc = struct.unpack_from('<I', out_buf, VGPR_BYTES + SGPR_BYTES + 4)[0]
   return st
