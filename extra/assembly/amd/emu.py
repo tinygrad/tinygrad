@@ -205,21 +205,11 @@ def exec_scalar(st: WaveState, inst: Inst) -> int:
   compiled = _get_compiled()
   inst_type = type(inst)
 
-  # SOPP: control flow (not ALU)
+  # SOPP: special cases for control flow that has no pseudocode
   if inst_type is SOPP:
     op = inst.op
     if op == SOPPOp.S_ENDPGM: return -1
     if op == SOPPOp.S_BARRIER: return -2
-    if op == SOPPOp.S_BRANCH: return _sext(inst.simm16, 16)
-    if op == SOPPOp.S_CBRANCH_SCC0: return _sext(inst.simm16, 16) if st.scc == 0 else 0
-    if op == SOPPOp.S_CBRANCH_SCC1: return _sext(inst.simm16, 16) if st.scc == 1 else 0
-    if op == SOPPOp.S_CBRANCH_VCCZ: return _sext(inst.simm16, 16) if (st.vcc & 0xffffffff) == 0 else 0
-    if op == SOPPOp.S_CBRANCH_VCCNZ: return _sext(inst.simm16, 16) if (st.vcc & 0xffffffff) != 0 else 0
-    if op == SOPPOp.S_CBRANCH_EXECZ: return _sext(inst.simm16, 16) if st.exec_mask == 0 else 0
-    if op == SOPPOp.S_CBRANCH_EXECNZ: return _sext(inst.simm16, 16) if st.exec_mask != 0 else 0
-    # Valid SOPP range is 0-61 (max defined opcode); anything above is invalid
-    if op > 61: raise NotImplementedError(f"Invalid SOPP opcode {op}")
-    return 0  # waits, hints, nops
 
   # SMEM: memory loads (not ALU)
   if inst_type is SMEM:
@@ -229,46 +219,39 @@ def exec_scalar(st: WaveState, inst: Inst) -> int:
     for i in range(cnt): st.wsgpr(inst.sdata + i, mem_read((addr + i * 4) & 0xffffffffffffffff, 4))
     return 0
 
-  # SOP1: special handling for ops not in pseudocode
-  if inst_type is SOP1:
-    op = SOP1Op(inst.op)
-    # S_GETPC_B64: Get program counter (PC is stored as byte offset, convert from words)
-    if op == SOP1Op.S_GETPC_B64:
-      pc_bytes = st.pc * 4  # PC is in words, convert to bytes
-      st.wsgpr64(inst.sdst, pc_bytes)
-      return 0
-    # S_SETPC_B64: Set program counter to source value (indirect jump)
-    # Returns delta such that st.pc + inst_words + delta = target_words
-    if op == SOP1Op.S_SETPC_B64:
-      target_bytes = st.rsrc64(inst.ssrc0, 0)
-      target_words = target_bytes // 4
-      inst_words = 1  # SOP1 is always 1 word
-      return target_words - st.pc - inst_words
-
   # Get op enum and lookup compiled function
   if inst_type is SOP1: op_cls, ssrc0, sdst = SOP1Op, inst.ssrc0, inst.sdst
   elif inst_type is SOP2: op_cls, ssrc0, sdst = SOP2Op, inst.ssrc0, inst.sdst
   elif inst_type is SOPC: op_cls, ssrc0, sdst = SOPCOp, inst.ssrc0, None
   elif inst_type is SOPK: op_cls, ssrc0, sdst = SOPKOp, inst.sdst, inst.sdst  # sdst is both src and dst
+  elif inst_type is SOPP: op_cls, ssrc0, sdst = SOPPOp, None, None
   else: raise NotImplementedError(f"Unknown scalar type {inst_type}")
 
-  op = op_cls(inst.op)
+  # SOPP has gaps in the opcode enum - treat unknown opcodes as no-ops
+  try: op = op_cls(inst.op)
+  except ValueError:
+    if inst_type is SOPP: return 0
+    raise
   fn = compiled.get(op_cls, {}).get(op)
-  if fn is None: raise NotImplementedError(f"{op.name} not in pseudocode")
+  if fn is None:
+    # SOPP instructions without pseudocode (waits, hints, nops) are no-ops
+    if inst_type is SOPP: return 0
+    raise NotImplementedError(f"{op.name} not in pseudocode")
 
   # Build context - handle 64-bit ops that need 64-bit source reads
   # 64-bit source ops: name ends with _B64, _I64, _U64 or contains _U64, _I64 before last underscore
   is_64bit_s0 = op.name.endswith(('_B64', '_I64', '_U64')) or '_U64_' in op.name or '_I64_' in op.name
   is_64bit_s0s1 = op_cls is SOPCOp and op in (SOPCOp.S_CMP_EQ_U64, SOPCOp.S_CMP_LG_U64)
-  s0 = st.rsrc64(ssrc0, 0) if is_64bit_s0 or is_64bit_s0s1 else (st.rsrc(ssrc0, 0) if inst_type != SOPK else st.rsgpr(inst.sdst))
+  s0 = st.rsrc64(ssrc0, 0) if is_64bit_s0 or is_64bit_s0s1 else (st.rsrc(ssrc0, 0) if inst_type not in (SOPK, SOPP) else (st.rsgpr(inst.sdst) if inst_type is SOPK else 0))
   is_64bit_sop2 = is_64bit_s0 and inst_type is SOP2
   s1 = st.rsrc64(inst.ssrc1, 0) if (is_64bit_sop2 or is_64bit_s0s1) else (st.rsrc(inst.ssrc1, 0) if inst_type in (SOP2, SOPC) else inst.simm16 if inst_type is SOPK else 0)
   d0 = st.rsgpr64(sdst) if (is_64bit_s0 or is_64bit_s0s1) and sdst is not None else (st.rsgpr(sdst) if sdst is not None else 0)
   exec_mask = st.exec_mask
-  literal = inst.simm16 if inst_type is SOPK else st.literal
+  literal = inst.simm16 if inst_type in (SOPK, SOPP) else st.literal
 
-  # Execute compiled function
-  result = fn(s0, s1, 0, d0, st.scc, st.vcc, 0, exec_mask, literal, None, {})
+  # Execute compiled function - pass PC in bytes for instructions that need it
+  pc_bytes = st.pc * 4
+  result = fn(s0, s1, 0, d0, st.scc, st.vcc, 0, exec_mask, literal, None, {}, pc=pc_bytes)
 
   # Apply results
   if sdst is not None:
@@ -278,7 +261,11 @@ def exec_scalar(st: WaveState, inst: Inst) -> int:
       st.wsgpr(sdst, result['d0'])
   if 'scc' in result: st.scc = result['scc']
   if 'exec' in result: st.exec_mask = result['exec']
-  if 'pc_delta' in result: return result['pc_delta']
+  if 'new_pc' in result:
+    # Convert absolute byte address to word delta
+    # new_pc is where we want to go, st.pc is current position, inst._words will be added after
+    new_pc_words = result['new_pc'] // 4
+    return new_pc_words - st.pc - 1  # -1 because emulator adds inst_words (1 for scalar)
   return 0
 
 def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = None) -> None:
@@ -402,20 +389,6 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
       op_cls, op, src0, src1, src2, vdst = VOPCOp, VOPCOp(inst.op), inst.src0, inst.src1, None, inst.vdst
     else:
       op_cls, op, src0, src1, src2, vdst = VOP3Op, VOP3Op(inst.op), inst.src0, inst.src1, inst.src2, inst.vdst
-      # V_PERM_B32: byte permutation - not in pseudocode PDF, implement directly
-      # D0[byte_i] = selector[byte_i] < 8 ? {src0, src1}[selector[byte_i]] : (selector[byte_i] >= 0xD ? 0xFF : 0x00)
-      if op == VOP3Op.V_PERM_B32:
-        s0, s1, s2 = st.rsrc(inst.src0, lane), st.rsrc(inst.src1, lane), st.rsrc(inst.src2, lane)
-        # Combine src1 and src0 into 8-byte value: src1 is bytes 0-3, src0 is bytes 4-7
-        combined = (s1 & 0xffffffff) | ((s0 & 0xffffffff) << 32)
-        result = 0
-        for i in range(4):  # 4 result bytes
-          sel = (s2 >> (i * 8)) & 0xff  # byte selector for this position
-          if sel <= 7: result |= (((combined >> (sel * 8)) & 0xff) << (i * 8))  # select byte from combined
-          elif sel >= 0xd: result |= (0xff << (i * 8))  # 0xD-0xF: constant 0xFF
-          # else 0x8-0xC: constant 0x00 (already 0)
-        V[vdst] = result & 0xffffffff
-        return
   elif inst_type is VOPC:
     op = VOPCOp(inst.op)
     # For 16-bit VOPC, vsrc1 uses same encoding as VOP2 16-bit: bit 7 selects hi(1) or lo(0) half
