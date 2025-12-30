@@ -728,17 +728,20 @@ jobs:
     name: Linux (${{ matrix.backend }})
     runs-on: ubuntu-22.04
     timeout-minutes: 20
+    env:
+      CACHE_VERSION: '1917'
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
-          key: ${{ matrix.backend }}-minimal
+          key: ${{ matrix.backend }}-minimal-uv
           deps: testing_minimal
           opencl: ${{ matrix.backend == 'opencl' && 'true' }}
           llvm: ${{ matrix.backend == 'llvm' || matrix.backend == 'lvp' }}
           mesa: ${{ matrix.backend == 'lvp' && 'true' }}
+          uv: 'true'
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'CPU=1\nCPU_LLVM=1' || matrix.backend == 'cpu' && 'CPU=1\nCPU_LLVM=0\nCPU_COUNT=2' || matrix.backend == 'opencl' && 'CL=1' || matrix.backend == 'lvp' && 'CPU=1\nCPU_LVP=1' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source

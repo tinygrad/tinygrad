@@ -9,6 +9,10 @@ inputs:
     description: 'Key for the python cache'
     required: false
     default: ''  # if you don't set a key, it doesn't cache
+  uv:
+    description: 'Use uv pip instead of pip'
+    required: false
+    default: 'false'
   deps:
     description: 'Extra dependency groups (comma separated)'
     required: false
@@ -81,7 +85,7 @@ runs:
     # **** Python deps ****
 
     - name: Install dependencies in venv (with extra)
-      if: inputs.deps != '' && steps.restore-venv.outputs.cache-hit != 'true'
+      if: inputs.uv == 'false' && inputs.deps != '' && steps.restore-venv.outputs.cache-hit != 'true'
       shell: bash
       run: |
         if [[ "$RUNNER_OS" == "Windows" ]]; then
@@ -93,6 +97,21 @@ runs:
           python -m venv .venv
           . .venv/bin/activate
           python -m pip install -e ".[${{ inputs.deps }}]" ${{ inputs.pydeps }} --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
+        fi
+    - name: Install dependencies in venv (uv, with extra)
+      if: inputs.uv == 'true' && inputs.deps != '' && steps.restore-venv.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        if [[ "$RUNNER_OS" == "Windows" ]]; then
+          choco install uv
+          uv venv
+          source .venv/Scripts/activate
+          uv pip install -e ".[${{ inputs.deps }}]" ${{ inputs.pydeps }} --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
+        else
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          uv venv
+          . .venv/bin/activate
+          uv pip install -e ".[${{ inputs.deps }}]" ${{ inputs.pydeps }} --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
         fi
     - name: Install dependencies in venv (without extra)
       if: inputs.deps == '' && steps.restore-venv.outputs.cache-hit != 'true'
