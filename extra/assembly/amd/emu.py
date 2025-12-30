@@ -525,8 +525,8 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
   # For 64-bit shift ops: src0 is 32-bit (shift amount), src1 is 64-bit (value to shift)
   # For most other _B64/_I64/_U64/_F64 ops: all sources are 64-bit
   is_64bit_op = op.name.endswith(('_B64', '_I64', '_U64', '_F64'))
-  # V_LDEXP_F64: src0 is 64-bit float, src1 is 32-bit integer exponent
-  is_ldexp_64 = op in (VOP3Op.V_LDEXP_F64,)
+  # V_LDEXP_F64 and V_TRIG_PREOP_F64: src0 is 64-bit float, src1 is 32-bit integer
+  is_ldexp_64 = op in (VOP3Op.V_LDEXP_F64, VOP3Op.V_TRIG_PREOP_F64)
   is_shift_64 = op in (VOP3Op.V_LSHLREV_B64, VOP3Op.V_LSHRREV_B64, VOP3Op.V_ASHRREV_I64)
   # 16-bit source ops: use precomputed sets instead of string checks
   # Note: must check op_cls to avoid cross-enum value collisions

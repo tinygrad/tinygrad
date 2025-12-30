@@ -3726,3 +3726,90 @@ class TestVFmaMixSinCase(unittest.TestCase):
     # Result should be approximately -π = -3.14...
     # f16 -π ≈ 0xc248 = -3.140625
     self.assertAlmostEqual(lo, -3.14159, delta=0.01, msg=f"Expected ~-π, got {lo}")
+
+
+class TestVTrigPreopF64(unittest.TestCase):
+  """Tests for V_TRIG_PREOP_F64 instruction.
+
+  V_TRIG_PREOP_F64 extracts chunks of 2/PI for Payne-Hanek trig range reduction.
+  For input S0 (f64) and index S1 (0, 1, or 2), it returns a portion of 2/PI
+  scaled appropriately for computing |S0| * (2/PI) in extended precision.
+
+  The three chunks (index 0, 1, 2) when summed should equal 2/PI.
+  """
+
+  def test_trig_preop_f64_index0(self):
+    """V_TRIG_PREOP_F64 index=0: primary chunk of 2/PI."""
+    import math
+    two_over_pi = 2.0 / math.pi
+    instructions = [
+      # S0 = 1.0 (f64), S1 = 0 (index)
+      s_mov_b32(s[0], 0x00000000),  # low bits of 1.0
+      s_mov_b32(s[1], 0x3ff00000),  # high bits of 1.0
+      v_trig_preop_f64(v[0], abs(s[0]), 0),  # index 0
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
+    # For x=1.0, index=0 should give the main part of 2/PI
+    self.assertAlmostEqual(result, two_over_pi, places=10, msg=f"Expected ~{two_over_pi}, got {result}")
+
+  def test_trig_preop_f64_index1(self):
+    """V_TRIG_PREOP_F64 index=1: secondary chunk (extended precision bits)."""
+    instructions = [
+      s_mov_b32(s[0], 0x00000000),  # low bits of 1.0
+      s_mov_b32(s[1], 0x3ff00000),  # high bits of 1.0
+      v_trig_preop_f64(v[0], abs(s[0]), 1),  # index 1
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
+    # Index 1 gives the next 53 bits, should be very small (~1e-16)
+    self.assertLess(abs(result), 1e-15, msg=f"Expected tiny value, got {result}")
+    self.assertGreater(abs(result), 0, msg="Expected non-zero value")
+
+  def test_trig_preop_f64_index2(self):
+    """V_TRIG_PREOP_F64 index=2: tertiary chunk (more extended precision bits)."""
+    instructions = [
+      s_mov_b32(s[0], 0x00000000),  # low bits of 1.0
+      s_mov_b32(s[1], 0x3ff00000),  # high bits of 1.0
+      v_trig_preop_f64(v[0], abs(s[0]), 2),  # index 2
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
+    # Index 2 gives the next 53 bits after index 1, should be tiny (~1e-32)
+    self.assertLess(abs(result), 1e-30, msg=f"Expected very tiny value, got {result}")
+
+  def test_trig_preop_f64_sum_equals_two_over_pi(self):
+    """V_TRIG_PREOP_F64: sum of chunks 0,1,2 should equal 2/PI."""
+    import math
+    two_over_pi = 2.0 / math.pi
+    instructions = [
+      s_mov_b32(s[0], 0x00000000),  # low bits of 1.0
+      s_mov_b32(s[1], 0x3ff00000),  # high bits of 1.0
+      v_trig_preop_f64(v[0], abs(s[0]), 0),  # index 0 -> v[0:1]
+      v_trig_preop_f64(v[2], abs(s[0]), 1),  # index 1 -> v[2:3]
+      v_trig_preop_f64(v[4], abs(s[0]), 2),  # index 2 -> v[4:5]
+    ]
+    st = run_program(instructions, n_lanes=1)
+    p0 = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
+    p1 = i642f(st.vgpr[0][2] | (st.vgpr[0][3] << 32))
+    p2 = i642f(st.vgpr[0][4] | (st.vgpr[0][5] << 32))
+    total = p0 + p1 + p2
+    self.assertAlmostEqual(total, two_over_pi, places=14, msg=f"Expected {two_over_pi}, got {total} (p0={p0}, p1={p1}, p2={p2})")
+
+  def test_trig_preop_f64_large_input(self):
+    """V_TRIG_PREOP_F64 with larger input should adjust shift based on exponent."""
+    import math
+    # For x=2.0, exponent(2.0)=1024 which is <= 1077, so no adjustment
+    # But let's test with x=2^60 where exponent > 1077
+    large_val = 2.0 ** 60  # exponent = 1083 > 1077
+    large_bits = f2i64(large_val)
+    instructions = [
+      s_mov_b32(s[0], large_bits & 0xffffffff),
+      s_mov_b32(s[1], (large_bits >> 32) & 0xffffffff),
+      v_trig_preop_f64(v[0], abs(s[0]), 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
+    # Result should still be a valid float (not NaN or inf)
+    self.assertFalse(math.isnan(result), "Result should not be NaN")
+    self.assertFalse(math.isinf(result), "Result should not be inf")
