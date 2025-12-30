@@ -654,7 +654,7 @@ jobs:
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
-  testrdna3:
+  testamdasm:
     name: AMD ASM IDE
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -683,6 +683,19 @@ jobs:
         run: PYTHONPATH="." AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=0 pytest -n=auto test/test_dtype_alu.py test/test_dtype.py
       - name: Run RDNA3 dtype tests (AMD_LLVM=1)
         run: PYTHONPATH="." AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=1 pytest -n=auto test/test_dtype_alu.py test/test_dtype.py
+
+  testamdautogen:
+    name: AMD autogen
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Setup Environment
+        uses: ./.github/actions/setup-tinygrad
+        with:
+          key: rdna3-autogen
+          deps: testing_minimal
       - name: Install pdfplumber
         run: pip install pdfplumber
       - name: Verify AMD autogen is up to date
