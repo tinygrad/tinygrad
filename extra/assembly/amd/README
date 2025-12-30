@@ -21,22 +21,10 @@ tinygrad's dtype tests should pass with and without LLVM. they run in about 12 s
 `PYTHONPATH="." AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=0 pytest -n=12 test/test_dtype_alu.py test/test_dtype.py`
 `PYTHONPATH="." AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=1 pytest -n=12 test/test_dtype_alu.py test/test_dtype.py`
 
-The ops tests also mostly pass, but they are very slow, so you should run them one at a time.
+The ops tests also pass, but they are very slow, so you should run them one at a time.
 
 `SKIP_SLOW_TEST=1 PYTHONPATH="." AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=0 pytest -n=12 test/test_ops.py`
-with failure
-`FAILED test/test_ops.py::TestOps::test_avg_pool3d - Exception: forward pass failed shape (1, 1, 3, 3, 3):`
-
 `SKIP_SLOW_TEST=1 PYTHONPATH="." AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=1 pytest -n=12 test/test_ops.py`
-with failures
-```
-FAILED test/test_ops.py::TestOps::test_avg_pool3d - Exception: forward pass failed shape (1, 1, 3, 3, 3):
-FAILED test/test_ops.py::TestOps::test_negative_padding_conv2d - Exception: backward pass tensor 0 failed shape (1, 1, 10, 10):
-FAILED test/test_ops.py::TestOps::test_unfold - Exception: backward pass tensor 0 failed shape (8,):
-FAILED test/test_ops.py::TestOps::test_avg_pool2d_ceil_mode - Exception: backward pass tensor 0 failed shape (1, 1, 6, 6):
-```
-
-TODO: make all ops tests pass and add local regression tests.
 
 When something is caught by main tinygrad tests, a local regression test should be added to `extra/assembly/amd/test`. While working with tinygrad, you can dump the assembly with `DEBUG=7`. These tests all pass on real hardware, so if a test is failing with `AMD=1 PYTHON_REMU=1 MOCKGPU=1` it's likely because an instruction is emulated incorrectly. You can test without `MOCKGPU=1` to test on real hardware, if it works on real hardware there's a bug in the emulator.
 
