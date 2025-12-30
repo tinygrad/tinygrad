@@ -54,6 +54,9 @@ FLAT_D16_LOAD = _mem_ops([GLOBALOp, FLATOp], _D16_LOAD_MAP)
 FLAT_D16_STORE = _mem_ops([GLOBALOp, FLATOp], _D16_STORE_MAP)
 DS_LOAD = {DSOp.DS_LOAD_B32: (1,4,0), DSOp.DS_LOAD_B64: (2,4,0), DSOp.DS_LOAD_B128: (4,4,0), DSOp.DS_LOAD_U8: (1,1,0), DSOp.DS_LOAD_I8: (1,1,1), DSOp.DS_LOAD_U16: (1,2,0), DSOp.DS_LOAD_I16: (1,2,1)}
 DS_STORE = {DSOp.DS_STORE_B32: (1,4), DSOp.DS_STORE_B64: (2,4), DSOp.DS_STORE_B128: (4,4), DSOp.DS_STORE_B8: (1,1), DSOp.DS_STORE_B16: (1,2)}
+# 2ADDR ops: load/store two values using offset0 and offset1
+DS_LOAD_2ADDR = {DSOp.DS_LOAD_2ADDR_B32: 4, DSOp.DS_LOAD_2ADDR_B64: 8}
+DS_STORE_2ADDR = {DSOp.DS_STORE_2ADDR_B32: 4, DSOp.DS_STORE_2ADDR_B64: 8}
 SMEM_LOAD = {SMEMOp.S_LOAD_B32: 1, SMEMOp.S_LOAD_B64: 2, SMEMOp.S_LOAD_B128: 4, SMEMOp.S_LOAD_B256: 8, SMEMOp.S_LOAD_B512: 16}
 
 # VOPD op -> VOP3 op mapping (VOPD is dual-issue of VOP1/VOP2 ops, use VOP3 enums for pseudocode lookup)
@@ -183,8 +186,10 @@ def exec_scalar(st: WaveState, inst: Inst) -> int:
   literal = inst.simm16 if inst_type in (SOPK, SOPP) else st.literal
 
   # Execute compiled function - pass PC in bytes for instructions that need it
+  # For wave32, mask VCC and EXEC to 32 bits since only the lower 32 bits are relevant
   pc_bytes = st.pc * 4
-  result = fn(s0, s1, 0, d0, st.scc, st.vcc, 0, exec_mask, literal, None, {}, pc=pc_bytes)
+  vcc32, exec32 = st.vcc & MASK32, exec_mask & MASK32
+  result = fn(s0, s1, 0, d0, st.scc, vcc32, 0, exec32, literal, None, {}, pc=pc_bytes)
 
   # Apply results
   if sdst is not None:
@@ -226,13 +231,31 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     return
 
   if inst_type is DS:
-    op, addr, vdst = inst.op, (V[inst.addr] + inst.offset0) & 0xffff, inst.vdst
+    op, addr0, vdst = inst.op, (V[inst.addr] + inst.offset0) & 0xffff, inst.vdst
     if op in DS_LOAD:
       cnt, sz, sign = DS_LOAD[op]
-      for i in range(cnt): val = int.from_bytes(lds[addr+i*sz:addr+i*sz+sz], 'little'); V[vdst + i] = _sext(val, sz * 8) & MASK32 if sign else val
+      for i in range(cnt): val = int.from_bytes(lds[addr0+i*sz:addr0+i*sz+sz], 'little'); V[vdst + i] = _sext(val, sz * 8) & MASK32 if sign else val
     elif op in DS_STORE:
       cnt, sz = DS_STORE[op]
-      for i in range(cnt): lds[addr+i*sz:addr+i*sz+sz] = (V[inst.data0 + i] & ((1 << (sz * 8)) - 1)).to_bytes(sz, 'little')
+      for i in range(cnt): lds[addr0+i*sz:addr0+i*sz+sz] = (V[inst.data0 + i] & ((1 << (sz * 8)) - 1)).to_bytes(sz, 'little')
+    elif op in DS_LOAD_2ADDR:
+      # Load two values from addr+offset0*sz and addr+offset1*sz into vdst (B32: 1 dword each, B64: 2 dwords each)
+      # Note: offsets are scaled by data size (4 for B32, 8 for B64) per AMD ISA
+      sz = DS_LOAD_2ADDR[op]
+      addr0 = (V[inst.addr] + inst.offset0 * sz) & 0xffff
+      addr1 = (V[inst.addr] + inst.offset1 * sz) & 0xffff
+      cnt = sz // 4  # 1 for B32, 2 for B64
+      for i in range(cnt): V[vdst + i] = int.from_bytes(lds[addr0+i*4:addr0+i*4+4], 'little')
+      for i in range(cnt): V[vdst + cnt + i] = int.from_bytes(lds[addr1+i*4:addr1+i*4+4], 'little')
+    elif op in DS_STORE_2ADDR:
+      # Store two values from data0 and data1 to addr+offset0*sz and addr+offset1*sz
+      # Note: offsets are scaled by data size (4 for B32, 8 for B64) per AMD ISA
+      sz = DS_STORE_2ADDR[op]
+      addr0 = (V[inst.addr] + inst.offset0 * sz) & 0xffff
+      addr1 = (V[inst.addr] + inst.offset1 * sz) & 0xffff
+      cnt = sz // 4
+      for i in range(cnt): lds[addr0+i*4:addr0+i*4+4] = (V[inst.data0 + i] & MASK32).to_bytes(4, 'little')
+      for i in range(cnt): lds[addr1+i*4:addr1+i*4+4] = (V[inst.data1 + i] & MASK32).to_bytes(4, 'little')
     else: raise NotImplementedError(f"DS op {op}")
     return
 
@@ -333,7 +356,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     if (neg >> idx) & 1: val = to_i(-to_f(val))
     return val
 
-  # Use inst properties to determine operand sizes
+  # Use inst methods to determine operand sizes (inst.is_src_16, inst.is_src_64, etc.)
   is_vop2_16bit = op_cls is VOP2Op and inst.is_16bit
 
   # Read sources based on register counts and dtypes from inst properties

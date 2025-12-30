@@ -3850,3 +3850,236 @@ class Test64BitLiterals(unittest.TestCase):
     lit_bytes = code[-4:]
     lit_val = int.from_bytes(lit_bytes, 'little')
     self.assertEqual(lit_val, large_val, f"Encoded literal should be {large_val:#x}, got {lit_val:#x}")
+
+
+class TestWave32VCCBranch(unittest.TestCase):
+  """Regression tests for wave32 VCC branch behavior.
+  In wave32 mode, S_CBRANCH_VCCNZ/VCCZ should only check VCC_LO (lower 32 bits),
+  ignoring VCC_HI. Bug: emulator was checking full 64-bit VCC, causing incorrect
+  branches when VCC_LO=0 but VCC_HI!=0."""
+
+  def test_cbranch_vccnz_ignores_vcc_hi(self):
+    """S_CBRANCH_VCCNZ should NOT branch when VCC_LO=0, even if VCC_HI!=0.
+    This is the fix for test_avg_pool3d failure where the emulator incorrectly
+    branched due to stale VCC_HI bits."""
+    instructions = [
+      # Set VCC_HI to non-zero (simulating stale bits from previous ops)
+      s_mov_b32(s[SrcEnum.VCC_HI - 128], 0x80000000),  # VCC_HI = 0x80000000
+      # Set VCC_LO to zero (the condition we're testing)
+      s_mov_b32(s[SrcEnum.VCC_LO - 128], 0),  # VCC_LO = 0
+      # Now S_CBRANCH_VCCNZ should NOT branch since VCC_LO is 0
+      # If it doesn't branch, we'll set v0 = 1; if it branches, v0 stays 0
+      v_mov_b32_e32(v[0], 0),
+      s_cbranch_vccnz(2),  # Skip next instruction if VCC != 0
+      v_mov_b32_e32(v[0], 1),  # This should execute
+      s_nop(0),  # Jump target
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # v0 should be 1 because VCC_LO=0 means no branch
+    self.assertEqual(st.vgpr[0][0], 1, "Should NOT branch when VCC_LO=0 (VCC_HI ignored in wave32)")
+
+  def test_cbranch_vccz_ignores_vcc_hi(self):
+    """S_CBRANCH_VCCZ should branch when VCC_LO=0, regardless of VCC_HI."""
+    instructions = [
+      # Set VCC_HI to non-zero (simulating stale bits)
+      s_mov_b32(s[SrcEnum.VCC_HI - 128], 0x80000000),  # VCC_HI = 0x80000000
+      # Set VCC_LO to zero
+      s_mov_b32(s[SrcEnum.VCC_LO - 128], 0),  # VCC_LO = 0
+      # S_CBRANCH_VCCZ should branch since VCC_LO is 0
+      v_mov_b32_e32(v[0], 0),
+      s_cbranch_vccz(2),  # Skip next instruction if VCC == 0
+      v_mov_b32_e32(v[0], 1),  # This should NOT execute
+      s_nop(0),  # Jump target
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # v0 should be 0 because VCC_LO=0 means branch is taken
+    self.assertEqual(st.vgpr[0][0], 0, "Should branch when VCC_LO=0 (VCC_HI ignored in wave32)")
+
+  def test_cbranch_vccnz_branches_on_vcc_lo(self):
+    """S_CBRANCH_VCCNZ should branch when VCC_LO!=0."""
+    instructions = [
+      # Set VCC_LO to non-zero
+      s_mov_b32(s[SrcEnum.VCC_LO - 128], 1),  # VCC_LO = 1
+      s_mov_b32(s[SrcEnum.VCC_HI - 128], 0),  # VCC_HI = 0
+      v_mov_b32_e32(v[0], 0),
+      s_cbranch_vccnz(2),  # Skip next instruction if VCC != 0
+      v_mov_b32_e32(v[0], 1),  # This should NOT execute
+      s_nop(0),  # Jump target
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # v0 should be 0 because VCC_LO=1 means branch is taken
+    self.assertEqual(st.vgpr[0][0], 0, "Should branch when VCC_LO!=0")
+
+
+class TestVOP3VOPC16Bit(unittest.TestCase):
+  """Regression tests for VOP3-encoded VOPC 16-bit comparison instructions.
+  When VOPC comparisons are encoded in VOP3 format, they use opsel bits to select
+  which 16-bit half of each source to compare.
+  Bug: Emulator was ignoring opsel and using VGPR bit 7 encoding instead."""
+
+  def test_cmp_eq_u16_opsel_lo_lo(self):
+    """V_CMP_EQ_U16 VOP3 with opsel=0 compares lo halves."""
+    # v0 = 0x12340005 (lo=5, hi=0x1234)
+    # v1 = 0x56780005 (lo=5, hi=0x5678)
+    # opsel=0: compare lo halves -> 5 == 5 -> true
+    instructions = [
+      s_mov_b32(s[2], 0x12340005),
+      v_mov_b32_e32(v[0], s[2]),
+      s_mov_b32(s[2], 0x56780005),
+      v_mov_b32_e32(v[1], s[2]),
+      VOP3(VOP3Op.V_CMP_EQ_U16, vdst=v[0], src0=v[0], src1=v[1], opsel=0),  # dst=s0
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # s0 should have bit 0 set (comparison true for lane 0)
+    self.assertEqual(st.sgpr[0] & 1, 1, "lo==lo should be true: 5==5")
+
+  def test_cmp_eq_u16_opsel_hi_hi(self):
+    """V_CMP_EQ_U16 VOP3 with opsel=3 compares hi halves."""
+    # v0 = 0x12340005 (lo=5, hi=0x1234)
+    # v1 = 0x56780005 (lo=5, hi=0x5678)
+    # opsel=3 (bits 0 and 1 set): compare hi halves -> 0x1234 != 0x5678 -> false
+    instructions = [
+      s_mov_b32(s[2], 0x12340005),
+      v_mov_b32_e32(v[0], s[2]),
+      s_mov_b32(s[2], 0x56780005),
+      v_mov_b32_e32(v[1], s[2]),
+      VOP3(VOP3Op.V_CMP_EQ_U16, vdst=v[0], src0=v[0], src1=v[1], opsel=3),  # dst=s0, hi vs hi
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # s0 should have bit 0 clear (comparison false for lane 0)
+    self.assertEqual(st.sgpr[0] & 1, 0, "hi==hi should be false: 0x1234!=0x5678")
+
+  def test_cmp_eq_u16_opsel_hi_hi_equal(self):
+    """V_CMP_EQ_U16 VOP3 with opsel=3 compares hi halves (equal case)."""
+    # v0 = 0x12340005 (lo=5, hi=0x1234)
+    # v1 = 0x12340009 (lo=9, hi=0x1234)
+    # opsel=3: compare hi halves -> 0x1234 == 0x1234 -> true
+    instructions = [
+      s_mov_b32(s[2], 0x12340005),
+      v_mov_b32_e32(v[0], s[2]),
+      s_mov_b32(s[2], 0x12340009),
+      v_mov_b32_e32(v[1], s[2]),
+      VOP3(VOP3Op.V_CMP_EQ_U16, vdst=v[0], src0=v[0], src1=v[1], opsel=3),  # dst=s0, hi vs hi
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # s0 should have bit 0 set (comparison true for lane 0)
+    self.assertEqual(st.sgpr[0] & 1, 1, "hi==hi should be true: 0x1234==0x1234")
+
+  def test_cmp_gt_u16_opsel_hi(self):
+    """V_CMP_GT_U16 VOP3 with opsel=3 compares hi halves."""
+    # v0 = 0x99990005 (lo=5, hi=0x9999)
+    # v1 = 0x12340005 (lo=5, hi=0x1234)
+    # opsel=3: compare hi halves -> 0x9999 > 0x1234 -> true
+    instructions = [
+      s_mov_b32(s[2], 0x99990005),
+      v_mov_b32_e32(v[0], s[2]),
+      s_mov_b32(s[2], 0x12340005),
+      v_mov_b32_e32(v[1], s[2]),
+      VOP3(VOP3Op.V_CMP_GT_U16, vdst=v[0], src0=v[0], src1=v[1], opsel=3),  # dst=s0, hi vs hi
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # s0 should have bit 0 set (comparison true for lane 0)
+    self.assertEqual(st.sgpr[0] & 1, 1, "hi>hi should be true: 0x9999>0x1234")
+
+
+class TestDS2Addr(unittest.TestCase):
+  """Regression tests for DS_LOAD_2ADDR and DS_STORE_2ADDR instructions.
+  These ops use offset scaling: offset * sizeof(data) for address calculation.
+  Bug: Emulator was using offset*4 for both B32 and B64, but B64 needs offset*8."""
+
+  def test_ds_store_load_2addr_b32(self):
+    """DS_STORE_2ADDR_B32 and DS_LOAD_2ADDR_B32 with offset scaling by 4."""
+    # Store 0x12345678 at offset0=0 (*4=0) and 0xDEADBEEF at offset1=1 (*4=4)
+    # Then load them back
+    instructions = [
+      v_mov_b32_e32(v[10], 0),  # addr base = 0
+      s_mov_b32(s[2], 0x12345678),
+      v_mov_b32_e32(v[0], s[2]),  # data0
+      s_mov_b32(s[2], 0xDEADBEEF),
+      v_mov_b32_e32(v[1], s[2]),  # data1
+      DS(DSOp.DS_STORE_2ADDR_B32, addr=v[10], data0=v[0], data1=v[1], vdst=v[0], offset0=0, offset1=1),
+      s_waitcnt(lgkmcnt=0),
+      DS(DSOp.DS_LOAD_2ADDR_B32, addr=v[10], vdst=v[2], offset0=0, offset1=1),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0x12345678, "v2 should have value from offset 0")
+    self.assertEqual(st.vgpr[0][3], 0xDEADBEEF, "v3 should have value from offset 4")
+
+  def test_ds_store_load_2addr_b32_nonzero_offsets(self):
+    """DS_STORE_2ADDR_B32 with non-zero offsets (offset*4 scaling)."""
+    # Store at offset0=2 (*4=8) and offset1=5 (*4=20)
+    instructions = [
+      v_mov_b32_e32(v[10], 0),  # addr base = 0
+      s_mov_b32(s[2], 0x11111111),
+      v_mov_b32_e32(v[0], s[2]),
+      s_mov_b32(s[2], 0x22222222),
+      v_mov_b32_e32(v[1], s[2]),
+      DS(DSOp.DS_STORE_2ADDR_B32, addr=v[10], data0=v[0], data1=v[1], vdst=v[0], offset0=2, offset1=5),
+      s_waitcnt(lgkmcnt=0),
+      DS(DSOp.DS_LOAD_2ADDR_B32, addr=v[10], vdst=v[2], offset0=2, offset1=5),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0x11111111, "v2 should have value from offset 8 (2*4)")
+    self.assertEqual(st.vgpr[0][3], 0x22222222, "v3 should have value from offset 20 (5*4)")
+
+  def test_ds_store_load_2addr_b64(self):
+    """DS_STORE_2ADDR_B64 and DS_LOAD_2ADDR_B64 with offset scaling by 8."""
+    # For B64: each value is 8 bytes (2 dwords), offsets scaled by 8
+    # Store 64-bit value at offset0=0 (*8=0) and another at offset1=1 (*8=8)
+    instructions = [
+      v_mov_b32_e32(v[10], 0),  # addr base = 0
+      # First 64-bit value: 0x123456789ABCDEF0
+      s_mov_b32(s[2], 0x9ABCDEF0),
+      v_mov_b32_e32(v[0], s[2]),  # low dword
+      s_mov_b32(s[2], 0x12345678),
+      v_mov_b32_e32(v[1], s[2]),  # high dword
+      # Second 64-bit value: 0xDEADBEEFCAFEBABE
+      s_mov_b32(s[2], 0xCAFEBABE),
+      v_mov_b32_e32(v[2], s[2]),  # low dword
+      s_mov_b32(s[2], 0xDEADBEEF),
+      v_mov_b32_e32(v[3], s[2]),  # high dword
+      DS(DSOp.DS_STORE_2ADDR_B64, addr=v[10], data0=v[0], data1=v[2], vdst=v[0], offset0=0, offset1=1),
+      s_waitcnt(lgkmcnt=0),
+      DS(DSOp.DS_LOAD_2ADDR_B64, addr=v[10], vdst=v[4], offset0=0, offset1=1),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # v4,v5 = first 64-bit value from offset 0
+    self.assertEqual(st.vgpr[0][4], 0x9ABCDEF0, "v4 should have low dword of first value")
+    self.assertEqual(st.vgpr[0][5], 0x12345678, "v5 should have high dword of first value")
+    # v6,v7 = second 64-bit value from offset 8 (1*8)
+    self.assertEqual(st.vgpr[0][6], 0xCAFEBABE, "v6 should have low dword of second value")
+    self.assertEqual(st.vgpr[0][7], 0xDEADBEEF, "v7 should have high dword of second value")
+
+  def test_ds_2addr_b64_no_overlap(self):
+    """DS_LOAD_2ADDR_B64 with adjacent offsets should not overlap.
+    Regression test: offset1=1 should access bytes 8-15, not overlap with offset0=0 (bytes 0-7)."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      # Store 4 distinct dwords at addresses 0,4,8,12 using regular DS_STORE
+      s_mov_b32(s[2], 0x11111111),
+      v_mov_b32_e32(v[0], s[2]),
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_mov_b32(s[2], 0x22222222),
+      v_mov_b32_e32(v[0], s[2]),
+      ds_store_b32(addr=v[10], data0=v[0], offset0=4),
+      s_mov_b32(s[2], 0x33333333),
+      v_mov_b32_e32(v[0], s[2]),
+      ds_store_b32(addr=v[10], data0=v[0], offset0=8),
+      s_mov_b32(s[2], 0x44444444),
+      v_mov_b32_e32(v[0], s[2]),
+      ds_store_b32(addr=v[10], data0=v[0], offset0=12),
+      s_waitcnt(lgkmcnt=0),
+      # Load with DS_LOAD_2ADDR_B64: offset0=0 should get 0-7, offset1=1 should get 8-15
+      DS(DSOp.DS_LOAD_2ADDR_B64, addr=v[10], vdst=v[4], offset0=0, offset1=1),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # v4,v5 from addr 0-7: 0x11111111, 0x22222222
+    self.assertEqual(st.vgpr[0][4], 0x11111111, "v4 should be 0x11111111")
+    self.assertEqual(st.vgpr[0][5], 0x22222222, "v5 should be 0x22222222")
+    # v6,v7 from addr 8-15: 0x33333333, 0x44444444
+    self.assertEqual(st.vgpr[0][6], 0x33333333, "v6 should be 0x33333333")
+    self.assertEqual(st.vgpr[0][7], 0x44444444, "v7 should be 0x44444444")
