@@ -1,10 +1,53 @@
 #!/usr/bin/env python3
 """Tests for the RDNA3 pseudocode DSL."""
 import unittest
-from extra.assembly.amd.pcode import (Reg, TypedView, SliceProxy, ExecContext, compile_pseudocode, _expr, MASK32, MASK64,
+from extra.assembly.amd.pcode import (Reg, TypedView, SliceProxy, MASK32, MASK64,
                                        _f32, _i32, _f16, _i16, f32_to_f16, _isnan, _bf16, _ibf16, bf16_to_f32, f32_to_bf16,
                                        BYTE_PERMUTE, v_sad_u8, v_msad_u8)
+from extra.assembly.amd.generate import compile_pseudocode, _expr
 from extra.assembly.amd.autogen.rdna3.gen_pcode import _VOP3SDOp_V_DIV_SCALE_F32, _VOPCOp_V_CMP_CLASS_F32
+
+class ExecContext:
+  """Context for running compiled pseudocode (test-only)."""
+  def __init__(self, s0=0, s1=0, s2=0, d0=0, scc=0, vcc=0, lane=0, exec_mask=MASK32, literal=0, vgprs=None, src0_idx=0, vdst_idx=0):
+    self.S0, self.S1, self.S2 = Reg(s0), Reg(s1), Reg(s2)
+    self.D0, self.D1 = Reg(d0), Reg(0)
+    self.SCC, self.VCC, self.EXEC = Reg(scc), Reg(vcc), Reg(exec_mask)
+    self.tmp, self.saveexec = Reg(0), Reg(exec_mask)
+    self.lane, self.laneId, self.literal = lane, lane, literal
+    self.SIMM16, self.SIMM32 = Reg(literal), Reg(literal)
+    self.VGPR = vgprs if vgprs is not None else {}
+    self.SRC0, self.VDST = Reg(src0_idx), Reg(vdst_idx)
+
+  def run(self, code: str):
+    """Execute compiled code."""
+    import extra.assembly.amd.pcode as pcode_mod
+    ns = {k: v for k, v in vars(pcode_mod).items() if not k.startswith('_') or k in ('_f32', '_i32', '_f16', '_i16', '_f64', '_i64', '_bf16', '_ibf16',
+                                                                                       '_div', '_sext', '_isnan', '_isquietnan', '_issignalnan', '_fma',
+                                                                                       '_gt_neg_zero', '_lt_neg_zero', '_signext', '_to_f16_bits', '_pack')}
+    ns.update({
+      'S0': self.S0, 'S1': self.S1, 'S2': self.S2, 'D0': self.D0, 'D1': self.D1,
+      'SCC': self.SCC, 'VCC': self.VCC, 'EXEC': self.EXEC,
+      'EXEC_LO': SliceProxy(self.EXEC, 31, 0), 'EXEC_HI': SliceProxy(self.EXEC, 63, 32),
+      'tmp': self.tmp, 'saveexec': self.saveexec,
+      'lane': self.lane, 'laneId': self.laneId, 'literal': self.literal,
+      'SIMM16': self.SIMM16, 'SIMM32': self.SIMM32,
+      'VGPR': self.VGPR, 'SRC0': self.SRC0, 'VDST': self.VDST,
+    })
+    exec(code, ns)
+    def _sync(ctx_reg, ns_val):
+      if isinstance(ns_val, Reg): ctx_reg._val = ns_val._val
+      else: ctx_reg._val = int(ns_val) & MASK64
+    if ns.get('SCC') is not self.SCC: _sync(self.SCC, ns['SCC'])
+    if ns.get('VCC') is not self.VCC: _sync(self.VCC, ns['VCC'])
+    if ns.get('EXEC') is not self.EXEC: _sync(self.EXEC, ns['EXEC'])
+    if ns.get('D0') is not self.D0: _sync(self.D0, ns['D0'])
+    if ns.get('D1') is not self.D1: _sync(self.D1, ns['D1'])
+    if ns.get('tmp') is not self.tmp: _sync(self.tmp, ns['tmp'])
+    if ns.get('saveexec') is not self.saveexec: _sync(self.saveexec, ns['saveexec'])
+
+  def result(self) -> dict:
+    return {"d0": self.D0._val, "scc": self.SCC._val & 1}
 
 class TestReg(unittest.TestCase):
   def test_u32_read(self):
