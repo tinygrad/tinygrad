@@ -4,7 +4,7 @@ import unittest, io, sys, re, subprocess, os
 from extra.assembly.amd.autogen.rdna3 import *
 from extra.assembly.amd.dsl import Inst
 from extra.assembly.amd.asm import asm
-from extra.assembly.amd.dsl import detect_format
+from extra.assembly.amd.asm import detect_format
 from extra.assembly.amd.test.helpers import get_llvm_mc, get_llvm_objdump
 
 def disassemble_lib(lib: bytes, compiler) -> list[tuple[str, bytes]]:
