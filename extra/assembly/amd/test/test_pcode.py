@@ -4,7 +4,7 @@ import unittest
 from extra.assembly.amd.pcode import (Reg, TypedView, SliceProxy, MASK32, MASK64,
                                        _f32, _i32, _f16, _i16, f32_to_f16, _isnan, _bf16, _ibf16, bf16_to_f32, f32_to_bf16,
                                        BYTE_PERMUTE, v_sad_u8, v_msad_u8)
-from extra.assembly.amd.generate import compile_pseudocode, _expr
+from extra.assembly.amd.pdf import compile_pseudocode, _expr
 from extra.assembly.amd.test.helpers import ExecContext
 from extra.assembly.amd.autogen.rdna3.gen_pcode import _VOP3SDOp_V_DIV_SCALE_F32, _VOPCOp_V_CMP_CLASS_F32
 
