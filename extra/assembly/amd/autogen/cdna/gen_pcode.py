@@ -18284,6 +18284,37 @@ def _VOP3AOp_V_ASHRREV_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, V
   result['d0_64'] = True
   return result
 
+def _VOP3AOp_V_TRIG_PREOP_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
+  # shift = 32'I(S1[4 : 0].u32) * 53;
+  # if exponent(S0.f64) > 1077 then
+  # shift += exponent(S0.f64) - 1077
+  # endif;
+  # // (2.0/PI) == 0.{b_1200, b_1199, b_1198, ..., b_1, b_0}
+  # // b_1200 is the MSB of the fractional part of 2.0/PI
+  # // Left shift operation indicates which bits are brought
+  # result = 64'F((1201'B(2.0 / PI)[1200 : 0] << shift.u32) & 1201'0x1fffffffffffff);
+  # scale = -53 - shift;
+  # if exponent(S0.f64) >= 1968 then
+  # scale += 128
+  # endif;
+  # D0.f64 = ldexp(result, scale)
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  # --- compiled pseudocode ---
+  shift = (S1[4 : 0].u32) * 53
+  if exponent(S0.f64) > 1077:
+    shift += exponent(S0.f64) - 1077
+  result = float(((TWO_OVER_PI_1201[1200 : 0] << int(shift)) >> (1201 - 53)) & 0x1fffffffffffff)
+  scale = -53 - shift
+  if exponent(S0.f64) >= 1968:
+    scale += 128
+  D0.f64 = ldexp(result, scale)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  result['d0_64'] = True
+  return result
+
 def _VOP3AOp_V_BFM_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
   # D0.u32 = (((1U << S0[4 : 0].u32) - 1U) << S1[4 : 0].u32)
   S0 = Reg(s0)
@@ -18940,6 +18971,7 @@ VOP3AOp_FUNCTIONS = {
   VOP3AOp.V_LSHLREV_B64: _VOP3AOp_V_LSHLREV_B64,
   VOP3AOp.V_LSHRREV_B64: _VOP3AOp_V_LSHRREV_B64,
   VOP3AOp.V_ASHRREV_I64: _VOP3AOp_V_ASHRREV_I64,
+  VOP3AOp.V_TRIG_PREOP_F64: _VOP3AOp_V_TRIG_PREOP_F64,
   VOP3AOp.V_BFM_B32: _VOP3AOp_V_BFM_B32,
   VOP3AOp.V_CVT_PKNORM_I16_F32: _VOP3AOp_V_CVT_PKNORM_I16_F32,
   VOP3AOp.V_CVT_PKNORM_U16_F32: _VOP3AOp_V_CVT_PKNORM_U16_F32,

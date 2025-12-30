@@ -280,7 +280,7 @@ def f32_to_u8(f): return max(0, min(255, int(f))) if not math.isnan(f) else 0
 def mantissa(f):
   if f == 0.0 or math.isinf(f) or math.isnan(f): return f
   m, _ = math.frexp(f)
-  return math.copysign(m * 2.0, f)
+  return m  # AMD V_FREXP_MANT returns mantissa in [0.5, 1.0) range
 def signext_from_bit(val, bit):
   bit = int(bit)
   if bit == 0: return 0
@@ -301,6 +301,7 @@ __all__ = [
   # Constants
   'WAVE32', 'WAVE64', 'MASK32', 'MASK64', 'WAVE_MODE', 'DENORM', 'OVERFLOW_F32', 'UNDERFLOW_F32',
   'OVERFLOW_F64', 'UNDERFLOW_F64', 'MAX_FLOAT_F32', 'ROUND_MODE', 'cvtToQuietNAN', 'DST', 'INF', 'PI',
+  'TWO_OVER_PI_1201',
   # Aliases for pseudocode
   's_ff1_i32_b32', 's_ff1_i32_b64', 'GT_NEG_ZERO', 'LT_NEG_ZERO',
   'isNAN', 'isQuietNAN', 'isSignalNAN', 'fma', 'ldexp', 'sign', 'exponent', 'F', 'signext',
@@ -359,12 +360,14 @@ class _Inf:
   f16 = f32 = f64 = float('inf')
   def __neg__(self): return _NegInf()
   def __pos__(self): return self
+  def __float__(self): return float('inf')
   def __eq__(self, other): return float(other) == float('inf') if not isinstance(other, _NegInf) else False
   def __req__(self, other): return self.__eq__(other)
 class _NegInf:
   f16 = f32 = f64 = float('-inf')
   def __neg__(self): return _Inf()
   def __pos__(self): return self
+  def __float__(self): return float('-inf')
   def __eq__(self, other): return float(other) == float('-inf') if not isinstance(other, _Inf) else False
   def __req__(self, other): return self.__eq__(other)
 INF = _Inf()
@@ -379,6 +382,31 @@ def cvtToQuietNAN(x): return float('nan')
 DST = None  # Placeholder, will be set in context
 
 MASK32, MASK64 = 0xffffffff, 0xffffffffffffffff
+
+# 2/PI with 1201 bits of precision for V_TRIG_PREOP_F64
+# Computed as: int((2/pi) * 2^1201) - this is the fractional part of 2/pi scaled to integer
+# The MSB (bit 1200) corresponds to 2^0 position in the fraction 0.b1200 b1199 ... b1 b0
+_TWO_OVER_PI_1201_RAW = 0x0145f306dc9c882a53f84eafa3ea69bb81b6c52b3278872083fca2c757bd778ac36e48dc74849ba5c00c925dd413a32439fc3bd63962534e7dd1046bea5d768909d338e04d68befc827323ac7306a673e93908bf177bf250763ff12fffbc0b301fde5e2316b414da3eda6cfd9e4f96136e9e8c7ecd3cbfd45aea4f758fd7cbe2f67a0e73ef14a525d4d7f6bf623f1aba10ac06608df8f6
+
+class _BigInt:
+  """Wrapper for large integers that supports bit slicing [high:low]."""
+  __slots__ = ('_val',)
+  def __init__(self, val): self._val = val
+  def __getitem__(self, key):
+    if isinstance(key, slice):
+      high, low = key.start, key.stop
+      if high < low: high, low = low, high  # Handle reversed slice
+      mask = (1 << (high - low + 1)) - 1
+      return (self._val >> low) & mask
+    return (self._val >> key) & 1
+  def __int__(self): return self._val
+  def __index__(self): return self._val
+  def __lshift__(self, n): return self._val << int(n)
+  def __rshift__(self, n): return self._val >> int(n)
+  def __and__(self, n): return self._val & int(n)
+  def __or__(self, n): return self._val | int(n)
+
+TWO_OVER_PI_1201 = _BigInt(_TWO_OVER_PI_1201_RAW)
 
 class _WaveMode:
   IEEE = False
@@ -693,6 +721,9 @@ def _expr(e: str) -> str:
     return f'_pack({hi}, {lo})'
   e = re.sub(r'\{\s*([^,{}]+)\s*,\s*([^,{}]+)\s*\}', pack, e)
 
+  # Special constant: 1201'B(2.0 / PI) -> TWO_OVER_PI_1201 (precomputed 1201-bit 2/pi)
+  e = re.sub(r"1201'B\(2\.0\s*/\s*PI\)", "TWO_OVER_PI_1201", e)
+
   # Literals: 1'0U -> 0, 32'I(x) -> (x), B(x) -> (x)
   e = re.sub(r"\d+'([0-9a-fA-Fx]+)[UuFf]*", r'\1', e)
   e = re.sub(r"\d+'[FIBU]\(", "(", e)
@@ -815,7 +846,7 @@ INST_PATTERN = re.compile(r'^([SV]_[A-Z0-9_]+)\s+(\d+)\s*$', re.M)
 UNSUPPORTED = ['SGPR[', 'V_SWAP', 'eval ', 'FATAL_HALT', 'HW_REGISTERS',
                'vscnt', 'vmcnt', 'expcnt', 'lgkmcnt',
                'CVT_OFF_TABLE', 'ThreadMask',
-               'S1[i', 'C.i32', 'S[i]', 'in[', '2.0 / PI',
+               'S1[i', 'C.i32', 'S[i]', 'in[',
                'if n.', 'DST.u32', 'addrd = DST', 'addr = DST']  # Malformed pseudocode from PDF
 
 def extract_pseudocode(text: str) -> str | None:
@@ -1050,12 +1081,22 @@ from extra.assembly.amd.pcode import *
           code = code.replace(
             'D0.f64 = ((-abs(S0.f64)) if (sign_out) else (abs(S0.f64)))',
             'D0.f64 = ((-OVERFLOW_F64) if (sign_out) else (OVERFLOW_F64)) if isNAN(S0.f64) else ((-abs(S0.f64)) if (sign_out) else (abs(S0.f64)))')
+        # V_TRIG_PREOP_F64: AMD pseudocode uses (x << shift) & mask but mask needs to extract TOP bits.
+        # The PDF shows: result = 64'F((1201'B(2.0/PI)[1200:0] << shift) & 1201'0x1fffffffffffff)
+        # Issues to fix:
+        # 1. After left shift, the interesting bits are at the top, not bottom - need >> (1201-53)
+        # 2. shift.u32 fails because shift is a plain int after * 53 - use int(shift)
+        # 3. 64'F(...) means convert int to float (not interpret as bit pattern) - use float()
+        if op.name == 'V_TRIG_PREOP_F64':
+          code = code.replace(
+            'result = F((TWO_OVER_PI_1201[1200 : 0] << shift.u32) & 0x1fffffffffffff)',
+            'result = float(((TWO_OVER_PI_1201[1200 : 0] << int(shift)) >> (1201 - 53)) & 0x1fffffffffffff)')
         # Detect flags for result handling
         is_64 = any(p in pc for p in ['D0.u64', 'D0.b64', 'D0.f64', 'D0.i64', 'D1.u64', 'D1.b64', 'D1.f64', 'D1.i64'])
         has_d1 = '{ D1' in pc
         if has_d1: is_64 = True
-        is_cmp = cls_name == 'VOPCOp' and 'D0.u64[laneId]' in pc
-        is_cmpx = cls_name == 'VOPCOp' and 'EXEC.u64[laneId]' in pc  # V_CMPX writes to EXEC per-lane
+        is_cmp = (cls_name == 'VOPCOp' or cls_name == 'VOP3Op') and 'D0.u64[laneId]' in pc
+        is_cmpx = (cls_name == 'VOPCOp' or cls_name == 'VOP3Op') and 'EXEC.u64[laneId]' in pc  # V_CMPX writes to EXEC per-lane
         # V_DIV_SCALE passes through S0 if no branch taken
         is_div_scale = 'DIV_SCALE' in op.name
         # VOP3SD instructions that write VCC per-lane (either via VCC.u64[laneId] or by setting VCC = 0/1)
