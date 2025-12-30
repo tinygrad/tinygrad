@@ -336,6 +336,14 @@ class Inst:
     lit = f", literal={hex(self._literal)}" if self._literal is not None else ""
     return f"{self.__class__.__name__}({', '.join(f'{k}={v}' for k, v in items)}{lit})"
 
+  def __getattr__(self, name: str):
+    if name.startswith('_'): raise AttributeError(name)
+    return unwrap(self._values.get(name, 0))
+
+  def lit(self, v: int) -> str:
+    from extra.assembly.amd.asm import decode_src
+    return f"0x{self._literal:x}" if v == 255 and self._literal else decode_src(v)
+
   def __eq__(self, other):
     if not isinstance(other, Inst): return NotImplemented
     return self.__class__ == other.__class__ and self._values == other._values and self._literal == other._literal
@@ -348,6 +356,33 @@ class Inst:
 
 class Inst32(Inst): pass
 class Inst64(Inst): pass
+
+# VOP3SD opcodes that share VOP3 encoding but use VOP3SD format
+VOP3SD_OPS = {288, 289, 290, 764, 765, 766, 767, 768, 769, 770}
+
+def detect_format(data: bytes) -> type[Inst] | None:
+  """Detect instruction format from machine code bytes."""
+  if len(data) < 4: return None
+  from extra.assembly.amd.autogen.rdna3 import VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, VOPD, VINTERP, SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, DS, FLAT, MUBUF, MTBUF
+  word = int.from_bytes(data[:4], 'little')
+  hi2 = (word >> 30) & 0x3
+  if hi2 == 0b11:
+    enc = (word >> 26) & 0xf
+    if enc == 0b1101: return SMEM
+    if enc == 0b0101:
+      op = (word >> 16) & 0x3ff
+      return VOP3SD if op in VOP3SD_OPS else VOP3
+    return {0b0011: VOP3P, 0b0110: DS, 0b0111: FLAT, 0b0010: VOPD, 0b0100: VINTERP}.get(enc)
+  if hi2 == 0b10:
+    enc = (word >> 23) & 0x7f
+    if enc == 0b1111101: return SOP1
+    if enc == 0b1111110: return SOPC
+    if enc == 0b1111111: return SOPP
+    return SOPK if ((word >> 28) & 0xf) == 0b1011 else SOP2
+  enc = (word >> 25) & 0x7f
+  if enc == 0b0111110: return VOPC
+  if enc == 0b0111111: return VOP1
+  return VOP2
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # CODE GENERATION: generates autogen/__init__.py by parsing AMD ISA PDFs
@@ -519,6 +554,8 @@ def _parse_single_pdf(url: str) -> dict:
   if 'SMEM' in formats:
     formats['SMEM'] = [(n, 13 if n == 'DLC' else 14 if n == 'GLC' else h, 13 if n == 'DLC' else 14 if n == 'GLC' else l, e, t)
                        for n, h, l, e, t in formats['SMEM']]
+  # add missing opcodes not in PDF tables
+  if 'SOPPOp' in enums: enums['SOPPOp'][8] = 'S_WAITCNT_DEPCTR'
 
   return {"formats": formats, "enums": enums, "src_enum": src_enum, "doc_name": doc_name, "is_cdna": is_cdna}
 

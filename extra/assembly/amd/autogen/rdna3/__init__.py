@@ -717,6 +717,7 @@ class SOPPOp(IntEnum):
   S_SET_INST_PREFETCH_DISTANCE = 4
   S_CLAUSE = 5
   S_DELAY_ALU = 7
+  S_WAITCNT_DEPCTR = 8
   S_WAITCNT = 9
   S_WAIT_IDLE = 10
   S_WAIT_EVENT = 11
@@ -2485,6 +2486,7 @@ s_sleep = functools.partial(SOPP, SOPPOp.S_SLEEP)
 s_set_inst_prefetch_distance = functools.partial(SOPP, SOPPOp.S_SET_INST_PREFETCH_DISTANCE)
 s_clause = functools.partial(SOPP, SOPPOp.S_CLAUSE)
 s_delay_alu = functools.partial(SOPP, SOPPOp.S_DELAY_ALU)
+s_waitcnt_depctr = functools.partial(SOPP, SOPPOp.S_WAITCNT_DEPCTR)
 s_waitcnt = functools.partial(SOPP, SOPPOp.S_WAITCNT)
 s_wait_idle = functools.partial(SOPP, SOPPOp.S_WAIT_IDLE)
 s_wait_event = functools.partial(SOPP, SOPPOp.S_WAIT_EVENT)

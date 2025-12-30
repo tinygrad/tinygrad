@@ -2,7 +2,7 @@
 # mypy: ignore-errors
 from __future__ import annotations
 import ctypes, os
-from extra.assembly.amd.dsl import Inst, RawImm
+from extra.assembly.amd.dsl import Inst, RawImm, detect_format
 from extra.assembly.amd.pcode import _f32, _i32, _sext, _f16, _i16, _f64, _i64
 from extra.assembly.amd.autogen.rdna3.gen_pcode import get_compiled_functions
 from extra.assembly.amd.autogen.rdna3 import (
@@ -145,21 +145,7 @@ class WaveState:
     for reg, val in self._pend_sgpr.items(): self.sgpr[reg] = val
     self._pend_sgpr.clear()
 
-# Instruction decode
-def decode_format(word: int) -> tuple[type[Inst] | None, bool]:
-  hi2 = (word >> 30) & 0x3
-  if hi2 == 0b11:
-    enc = (word >> 26) & 0xf
-    if enc == 0b1101: return SMEM, True
-    if enc == 0b0101:
-      op = (word >> 16) & 0x3ff
-      return (VOP3SD, True) if op in (288, 289, 290, 764, 765, 766, 767, 768, 769, 770) else (VOP3, True)
-    return {0b0011: (VOP3P, True), 0b0110: (DS, True), 0b0111: (FLAT, True), 0b0010: (VOPD, True)}.get(enc, (None, True))
-  if hi2 == 0b10:
-    enc = (word >> 23) & 0x7f
-    return {0b1111101: (SOP1, False), 0b1111110: (SOPC, False), 0b1111111: (SOPP, False)}.get(enc, (SOPK, False) if ((word >> 28) & 0xf) == 0b1011 else (SOP2, False))
-  enc = (word >> 25) & 0x7f
-  return (VOPC, False) if enc == 0b0111110 else (VOP1, False) if enc == 0b0111111 else (VOP2, False)
+
 
 def _unwrap(v) -> int: return v.val if isinstance(v, RawImm) else v.value if hasattr(v, 'value') else v
 
@@ -167,10 +153,9 @@ def decode_program(data: bytes) -> Program:
   result: Program = {}
   i = 0
   while i < len(data):
-    word = int.from_bytes(data[i:i+4], 'little')
-    inst_class, is_64 = decode_format(word)
+    inst_class = detect_format(data[i:])
     if inst_class is None: i += 4; continue
-    base_size = 8 if is_64 else 4
+    base_size = inst_class._size()
     # Pass enough data for potential 64-bit literal (base + 8 bytes max)
     inst = inst_class.from_bytes(data[i:i+base_size+8])
     for name, val in inst._values.items(): setattr(inst, name, _unwrap(val))
