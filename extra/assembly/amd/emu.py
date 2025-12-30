@@ -526,9 +526,10 @@ def exec_workgroup(program: Program, workgroup_id: tuple[int, int, int], local_s
     sgpr_idx = wg_id_sgpr_base
     for wg_id, enabled in zip(workgroup_id, wg_id_enables):
       if enabled: st.sgpr[sgpr_idx] = wg_id; sgpr_idx += 1
+    # Set workitem IDs in VGPR0 using packed method: v0 = (Z << 20) | (Y << 10) | X
     for i in range(n_lanes):
       tid = wave_start + i
-      st.vgpr[i][0] = tid if local_size == (lx, 1, 1) else ((tid // (lx * ly)) << 20) | (((tid // lx) % ly) << 10) | (tid % lx)
+      st.vgpr[i][0] = ((tid // (lx * ly)) << 20) | (((tid // lx) % ly) << 10) | (tid % lx)
     waves.append((st, n_lanes, wave_start))
   has_barrier = any(isinstance(inst, SOPP) and inst.op == SOPPOp.S_BARRIER for inst in program.values())
   for _ in range(2 if has_barrier else 1):
