@@ -84,24 +84,30 @@ runs:
       if: inputs.deps != '' && steps.restore-venv.outputs.cache-hit != 'true'
       shell: bash
       run: |
-        python -m venv .venv
         if [[ "$RUNNER_OS" == "Windows" ]]; then
+          choco install uv
+          uv venv
           source .venv/Scripts/activate
+          uv pip install -e ".[${{ inputs.deps }}]" ${{ inputs.pydeps }} --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
         else
+          python -m venv .venv
           . .venv/bin/activate
+          python -m pip install -e ".[${{ inputs.deps }}]" ${{ inputs.pydeps }} --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
         fi
-        python -m pip install -e ".[${{ inputs.deps }}]" ${{ inputs.pydeps }} --extra-index-url https://download.pytorch.org/whl/cpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/Triton-Nightly/pypi/simple/
     - name: Install dependencies in venv (without extra)
       if: inputs.deps == '' && steps.restore-venv.outputs.cache-hit != 'true'
       shell: bash
       run: |
-        python -m venv .venv
         if [[ "$RUNNER_OS" == "Windows" ]]; then
+          choco install uv
+          uv venv
           source .venv/Scripts/activate
+          uv pip install -e . ${{ inputs.pydeps }}
         else
+          python -m venv .venv
           . .venv/bin/activate
+          python -m pip install -e . ${{ inputs.pydeps }}
         fi
-        python -m pip install -e . ${{ inputs.pydeps }}
     - name: Set up venv environment
       shell: bash
       run: |
