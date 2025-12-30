@@ -3850,3 +3850,133 @@ class Test64BitLiterals(unittest.TestCase):
     lit_bytes = code[-4:]
     lit_val = int.from_bytes(lit_bytes, 'little')
     self.assertEqual(lit_val, large_val, f"Encoded literal should be {large_val:#x}, got {lit_val:#x}")
+
+
+class TestWave32VCCBranch(unittest.TestCase):
+  """Regression tests for wave32 VCC branch behavior.
+  In wave32 mode, S_CBRANCH_VCCNZ/VCCZ should only check VCC_LO (lower 32 bits),
+  ignoring VCC_HI. Bug: emulator was checking full 64-bit VCC, causing incorrect
+  branches when VCC_LO=0 but VCC_HI!=0."""
+
+  def test_cbranch_vccnz_ignores_vcc_hi(self):
+    """S_CBRANCH_VCCNZ should NOT branch when VCC_LO=0, even if VCC_HI!=0.
+    This is the fix for test_avg_pool3d failure where the emulator incorrectly
+    branched due to stale VCC_HI bits."""
+    instructions = [
+      # Set VCC_HI to non-zero (simulating stale bits from previous ops)
+      s_mov_b32(s[SrcEnum.VCC_HI - 128], 0x80000000),  # VCC_HI = 0x80000000
+      # Set VCC_LO to zero (the condition we're testing)
+      s_mov_b32(s[SrcEnum.VCC_LO - 128], 0),  # VCC_LO = 0
+      # Now S_CBRANCH_VCCNZ should NOT branch since VCC_LO is 0
+      # If it doesn't branch, we'll set v0 = 1; if it branches, v0 stays 0
+      v_mov_b32_e32(v[0], 0),
+      s_cbranch_vccnz(2),  # Skip next instruction if VCC != 0
+      v_mov_b32_e32(v[0], 1),  # This should execute
+      s_nop(0),  # Jump target
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # v0 should be 1 because VCC_LO=0 means no branch
+    self.assertEqual(st.vgpr[0][0], 1, "Should NOT branch when VCC_LO=0 (VCC_HI ignored in wave32)")
+
+  def test_cbranch_vccz_ignores_vcc_hi(self):
+    """S_CBRANCH_VCCZ should branch when VCC_LO=0, regardless of VCC_HI."""
+    instructions = [
+      # Set VCC_HI to non-zero (simulating stale bits)
+      s_mov_b32(s[SrcEnum.VCC_HI - 128], 0x80000000),  # VCC_HI = 0x80000000
+      # Set VCC_LO to zero
+      s_mov_b32(s[SrcEnum.VCC_LO - 128], 0),  # VCC_LO = 0
+      # S_CBRANCH_VCCZ should branch since VCC_LO is 0
+      v_mov_b32_e32(v[0], 0),
+      s_cbranch_vccz(2),  # Skip next instruction if VCC == 0
+      v_mov_b32_e32(v[0], 1),  # This should NOT execute
+      s_nop(0),  # Jump target
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # v0 should be 0 because VCC_LO=0 means branch is taken
+    self.assertEqual(st.vgpr[0][0], 0, "Should branch when VCC_LO=0 (VCC_HI ignored in wave32)")
+
+  def test_cbranch_vccnz_branches_on_vcc_lo(self):
+    """S_CBRANCH_VCCNZ should branch when VCC_LO!=0."""
+    instructions = [
+      # Set VCC_LO to non-zero
+      s_mov_b32(s[SrcEnum.VCC_LO - 128], 1),  # VCC_LO = 1
+      s_mov_b32(s[SrcEnum.VCC_HI - 128], 0),  # VCC_HI = 0
+      v_mov_b32_e32(v[0], 0),
+      s_cbranch_vccnz(2),  # Skip next instruction if VCC != 0
+      v_mov_b32_e32(v[0], 1),  # This should NOT execute
+      s_nop(0),  # Jump target
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # v0 should be 0 because VCC_LO=1 means branch is taken
+    self.assertEqual(st.vgpr[0][0], 0, "Should branch when VCC_LO!=0")
+
+
+class TestVOP3VOPC16Bit(unittest.TestCase):
+  """Regression tests for VOP3-encoded VOPC 16-bit comparison instructions.
+  When VOPC comparisons are encoded in VOP3 format, they use opsel bits to select
+  which 16-bit half of each source to compare.
+  Bug: Emulator was ignoring opsel and using VGPR bit 7 encoding instead."""
+
+  def test_cmp_eq_u16_opsel_lo_lo(self):
+    """V_CMP_EQ_U16 VOP3 with opsel=0 compares lo halves."""
+    # v0 = 0x12340005 (lo=5, hi=0x1234)
+    # v1 = 0x56780005 (lo=5, hi=0x5678)
+    # opsel=0: compare lo halves -> 5 == 5 -> true
+    instructions = [
+      s_mov_b32(s[2], 0x12340005),
+      v_mov_b32_e32(v[0], s[2]),
+      s_mov_b32(s[2], 0x56780005),
+      v_mov_b32_e32(v[1], s[2]),
+      VOP3(VOP3Op.V_CMP_EQ_U16, vdst=v[0], src0=v[0], src1=v[1], opsel=0),  # dst=s0
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # s0 should have bit 0 set (comparison true for lane 0)
+    self.assertEqual(st.sgpr[0] & 1, 1, "lo==lo should be true: 5==5")
+
+  def test_cmp_eq_u16_opsel_hi_hi(self):
+    """V_CMP_EQ_U16 VOP3 with opsel=3 compares hi halves."""
+    # v0 = 0x12340005 (lo=5, hi=0x1234)
+    # v1 = 0x56780005 (lo=5, hi=0x5678)
+    # opsel=3 (bits 0 and 1 set): compare hi halves -> 0x1234 != 0x5678 -> false
+    instructions = [
+      s_mov_b32(s[2], 0x12340005),
+      v_mov_b32_e32(v[0], s[2]),
+      s_mov_b32(s[2], 0x56780005),
+      v_mov_b32_e32(v[1], s[2]),
+      VOP3(VOP3Op.V_CMP_EQ_U16, vdst=v[0], src0=v[0], src1=v[1], opsel=3),  # dst=s0, hi vs hi
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # s0 should have bit 0 clear (comparison false for lane 0)
+    self.assertEqual(st.sgpr[0] & 1, 0, "hi==hi should be false: 0x1234!=0x5678")
+
+  def test_cmp_eq_u16_opsel_hi_hi_equal(self):
+    """V_CMP_EQ_U16 VOP3 with opsel=3 compares hi halves (equal case)."""
+    # v0 = 0x12340005 (lo=5, hi=0x1234)
+    # v1 = 0x12340009 (lo=9, hi=0x1234)
+    # opsel=3: compare hi halves -> 0x1234 == 0x1234 -> true
+    instructions = [
+      s_mov_b32(s[2], 0x12340005),
+      v_mov_b32_e32(v[0], s[2]),
+      s_mov_b32(s[2], 0x12340009),
+      v_mov_b32_e32(v[1], s[2]),
+      VOP3(VOP3Op.V_CMP_EQ_U16, vdst=v[0], src0=v[0], src1=v[1], opsel=3),  # dst=s0, hi vs hi
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # s0 should have bit 0 set (comparison true for lane 0)
+    self.assertEqual(st.sgpr[0] & 1, 1, "hi==hi should be true: 0x1234==0x1234")
+
+  def test_cmp_gt_u16_opsel_hi(self):
+    """V_CMP_GT_U16 VOP3 with opsel=3 compares hi halves."""
+    # v0 = 0x99990005 (lo=5, hi=0x9999)
+    # v1 = 0x12340005 (lo=5, hi=0x1234)
+    # opsel=3: compare hi halves -> 0x9999 > 0x1234 -> true
+    instructions = [
+      s_mov_b32(s[2], 0x99990005),
+      v_mov_b32_e32(v[0], s[2]),
+      s_mov_b32(s[2], 0x12340005),
+      v_mov_b32_e32(v[1], s[2]),
+      VOP3(VOP3Op.V_CMP_GT_U16, vdst=v[0], src0=v[0], src1=v[1], opsel=3),  # dst=s0, hi vs hi
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # s0 should have bit 0 set (comparison true for lane 0)
+    self.assertEqual(st.sgpr[0] & 1, 1, "hi>hi should be true: 0x9999>0x1234")

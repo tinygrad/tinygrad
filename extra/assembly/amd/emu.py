@@ -227,8 +227,10 @@ def exec_scalar(st: WaveState, inst: Inst) -> int:
   literal = inst.simm16 if inst_type in (SOPK, SOPP) else st.literal
 
   # Execute compiled function - pass PC in bytes for instructions that need it
+  # For wave32, mask VCC and EXEC to 32 bits since only the lower 32 bits are relevant
   pc_bytes = st.pc * 4
-  result = fn(s0, s1, 0, d0, st.scc, st.vcc, 0, exec_mask, literal, None, {}, pc=pc_bytes)
+  vcc32, exec32 = st.vcc & MASK32, exec_mask & MASK32
+  result = fn(s0, s1, 0, d0, st.scc, vcc32, 0, exec32, literal, None, {}, pc=pc_bytes)
 
   # Apply results
   if sdst is not None:
@@ -387,7 +389,9 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
   is_shift_64 = op in (VOP3Op.V_LSHLREV_B64, VOP3Op.V_LSHRREV_B64, VOP3Op.V_ASHRREV_I64)
   # 16-bit source ops: use precomputed sets instead of string checks
   # Note: must check op_cls to avoid cross-enum value collisions
-  is_16bit_src = op_cls is VOP3Op and op in _VOP3_16BIT_OPS and op not in _CVT_32_64_SRC_OPS
+  # VOP3-encoded VOPC 16-bit ops also use opsel (not VGPR bit 7 like non-VOP3 VOPC)
+  is_16bit_src = (op_cls is VOP3Op and op in _VOP3_16BIT_OPS and op not in _CVT_32_64_SRC_OPS) or \
+                 (inst_type is VOP3 and op_cls is VOPCOp and op in _VOPC_16BIT_OPS)
   # VOP2 16-bit ops use f16 inline constants for src0 (vsrc1 is always a VGPR, no inline constants)
   is_vop2_16bit = op_cls is VOP2Op and op in _VOP2_16BIT_OPS
 
