@@ -1,7 +1,7 @@
 # Run assembly on the AMD runtime and check correctness
 # VIZ=2 to profile
 import pathlib
-from tinygrad import Tensor, Device, dtypes
+from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 from tinygrad.renderer import ProgramSpec
 from tinygrad.uop.ops import track_rewrites, UOp
@@ -55,9 +55,10 @@ def get_asm_prg() -> ProgramSpec:
 eis.append(ExecItem(ast, [C_asm.uop.buffer, from_torch(B).uop.buffer, from_torch(A).uop.buffer], fixedvars={"SZ":N, "NUM_WG":NUM_WG},
                     prg=CompiledRunner(get_asm_prg())))
 
-for ei in eis:
-  et = ei.run(wait=True)
-  print(f"{(N*N*N*2 / et)*1e-12:.2f} REAL TFLOPS")
+with Context(DEBUG=2):
+  for ei in eis:
+    et = ei.run(wait=True)
+    print(f"{(N*N*N*2 / et)*1e-12:.2f} REAL TFLOPS")
 
 # ** correctness
 

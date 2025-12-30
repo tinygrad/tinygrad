@@ -208,3 +208,9 @@ Key patterns to watch (from ResNet50 benchmark):
 - `vmin==vmax folding`: ~55ms, 0.33% match rate - checks 52K ops but rarely matches
 
 Patterns with 0% match rate are workload-specific overhead. They may be useful in other workloads, so don't remove them without understanding their purpose.
+
+## AMD Performance Counter Profiling
+
+Set VIZ to `-2` to save performance counters traces for the AMD backend.
+
+Use the CLI in `./extra/sqtt/roc.py` to explore the trace.
