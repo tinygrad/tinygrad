@@ -2590,6 +2590,30 @@ class TestNewPcodeHelpers(unittest.TestCase):
     # byte 3: sel=0x0C = 12 -> 0x00
     self.assertEqual(result, 0x00FFFFFF, f"Expected 0x00FFFFFF, got 0x{result:08x}")
 
+  def test_v_perm_b32_sign_extend(self):
+    """V_PERM_B32: Test sign extension selectors 8-11."""
+    # Combined = {S0, S1} where S1 is bytes 0-3, S0 is bytes 4-7
+    # s0 = 0x00008000 -> byte 5 (0x80) has sign bit set
+    # s1 = 0x80000080 -> bytes 1 (0x00) and 3 (0x80) have sign bits, byte 0 (0x80) has sign bit
+    # Combined = 0x00008000_80000080
+    # selector = 0x08090A0B -> sign of bytes 1,3,5,7
+    # byte 0: sel=0x0B -> sign of byte 7 (0x00) -> 0x00
+    # byte 1: sel=0x0A -> sign of byte 5 (0x80) -> 0xFF
+    # byte 2: sel=0x09 -> sign of byte 3 (0x80) -> 0xFF
+    # byte 3: sel=0x08 -> sign of byte 1 (0x00) -> 0x00
+    instructions = [
+      s_mov_b32(s[0], 0x00008000),
+      s_mov_b32(s[1], 0x80000080),
+      s_mov_b32(s[2], 0x08090A0B),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_perm_b32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][3]
+    self.assertEqual(result, 0x00FFFF00, f"Expected 0x00FFFF00, got 0x{result:08x}")
+
   def test_v_dot2_f32_bf16_basic(self):
     """V_DOT2_F32_BF16: Dot product of two bf16 pairs accumulated into f32."""
     from extra.assembly.amd.pcode import _ibf16

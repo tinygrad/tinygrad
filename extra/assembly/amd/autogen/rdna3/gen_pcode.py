@@ -4187,6 +4187,16 @@ def _VOP1Op_V_COS_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
   result = {'d0': D0._val, 'scc': scc & 1}
   return result
 
+def _VOP1Op_V_SAT_PK_U8_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.b16 = { SAT8(S0[31 : 16].i16), SAT8(S0[15 : 0].i16) }
+  S0 = Reg(s0)
+  D0 = Reg(d0)
+  # --- compiled pseudocode ---
+  D0.b16 = _pack(SAT8(S0[31 : 16].i16), SAT8(S0[15 : 0].i16))
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  return result
+
 def _VOP1Op_V_CVT_NORM_I16_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
   # D0.i16 = f16_to_snorm(S0.f16)
   S0 = Reg(s0)
@@ -4338,6 +4348,7 @@ VOP1Op_FUNCTIONS = {
   VOP1Op.V_FRACT_F16: _VOP1Op_V_FRACT_F16,
   VOP1Op.V_SIN_F16: _VOP1Op_V_SIN_F16,
   VOP1Op.V_COS_F16: _VOP1Op_V_COS_F16,
+  VOP1Op.V_SAT_PK_U8_I16: _VOP1Op_V_SAT_PK_U8_I16,
   VOP1Op.V_CVT_NORM_I16_F16: _VOP1Op_V_CVT_NORM_I16_F16,
   VOP1Op.V_CVT_NORM_U16_F16: _VOP1Op_V_CVT_NORM_U16_F16,
   VOP1Op.V_SWAP_B32: _VOP1Op_V_SWAP_B32,
@@ -9078,6 +9089,16 @@ def _VOP3Op_V_COS_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
   result = {'d0': D0._val, 'scc': scc & 1}
   return result
 
+def _VOP3Op_V_SAT_PK_U8_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0.b16 = { SAT8(S0[31 : 16].i16), SAT8(S0[15 : 0].i16) }
+  S0 = Reg(s0)
+  D0 = Reg(d0)
+  # --- compiled pseudocode ---
+  D0.b16 = _pack(SAT8(S0[31 : 16].i16), SAT8(S0[15 : 0].i16))
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  return result
+
 def _VOP3Op_V_CVT_NORM_I16_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
   # D0.i16 = f16_to_snorm(S0.f16)
   S0 = Reg(s0)
@@ -10578,6 +10599,24 @@ def _VOP3Op_V_MAD_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
   result = {'d0': D0._val, 'scc': scc & 1}
   return result
 
+def _VOP3Op_V_PERM_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+  # D0[31 : 24] = BYTE_PERMUTE({ S0.u32, S1.u32 }, S2.u32[31 : 24]);
+  # D0[23 : 16] = BYTE_PERMUTE({ S0.u32, S1.u32 }, S2.u32[23 : 16]);
+  # D0[15 : 8] = BYTE_PERMUTE({ S0.u32, S1.u32 }, S2.u32[15 : 8]);
+  # D0[7 : 0] = BYTE_PERMUTE({ S0.u32, S1.u32 }, S2.u32[7 : 0])
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  S2 = Reg(s2)
+  D0 = Reg(d0)
+  # --- compiled pseudocode ---
+  D0[31 : 24] = BYTE_PERMUTE(_pack32(S0.u32, S1.u32), S2.u32[31 : 24])
+  D0[23 : 16] = BYTE_PERMUTE(_pack32(S0.u32, S1.u32), S2.u32[23 : 16])
+  D0[15 : 8] = BYTE_PERMUTE(_pack32(S0.u32, S1.u32), S2.u32[15 : 8])
+  D0[7 : 0] = BYTE_PERMUTE(_pack32(S0.u32, S1.u32), S2.u32[7 : 0])
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  return result
+
 def _VOP3Op_V_XAD_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
   # D0.u32 = (S0.u32 ^ S1.u32) + S2.u32
   S0 = Reg(s0)
@@ -11913,6 +11952,7 @@ VOP3Op_FUNCTIONS = {
   VOP3Op.V_FRACT_F16: _VOP3Op_V_FRACT_F16,
   VOP3Op.V_SIN_F16: _VOP3Op_V_SIN_F16,
   VOP3Op.V_COS_F16: _VOP3Op_V_COS_F16,
+  VOP3Op.V_SAT_PK_U8_I16: _VOP3Op_V_SAT_PK_U8_I16,
   VOP3Op.V_CVT_NORM_I16_F16: _VOP3Op_V_CVT_NORM_I16_F16,
   VOP3Op.V_CVT_NORM_U16_F16: _VOP3Op_V_CVT_NORM_U16_F16,
   VOP3Op.V_NOT_B16: _VOP3Op_V_NOT_B16,
@@ -11995,6 +12035,7 @@ VOP3Op_FUNCTIONS = {
   VOP3Op.V_MQSAD_U32_U8: _VOP3Op_V_MQSAD_U32_U8,
   VOP3Op.V_XOR3_B32: _VOP3Op_V_XOR3_B32,
   VOP3Op.V_MAD_U16: _VOP3Op_V_MAD_U16,
+  VOP3Op.V_PERM_B32: _VOP3Op_V_PERM_B32,
   VOP3Op.V_XAD_U32: _VOP3Op_V_XAD_U32,
   VOP3Op.V_LSHL_ADD_U32: _VOP3Op_V_LSHL_ADD_U32,
   VOP3Op.V_ADD_LSHL_U32: _VOP3Op_V_ADD_LSHL_U32,

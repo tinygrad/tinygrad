@@ -808,7 +808,7 @@ UNSUPPORTED = ['SGPR[', 'V_SWAP', 'eval ', 'FATAL_HALT', 'HW_REGISTERS',
 
 def extract_pseudocode(text: str) -> str | None:
   """Extract pseudocode from an instruction description snippet."""
-  lines, result, depth = text.split('\n'), [], 0
+  lines, result, depth, in_lambda = text.split('\n'), [], 0, 0
   for line in lines:
     s = line.strip()
     if not s: continue
@@ -817,6 +817,11 @@ def extract_pseudocode(text: str) -> str | None:
     # Skip document headers (RDNA or CDNA)
     if s.startswith('"RDNA') or s.startswith('AMD ') or s.startswith('CDNA'): continue
     if s.startswith('Notes') or s.startswith('Functional examples'): break
+    # Track lambda definitions (e.g., BYTE_PERMUTE = lambda(data, sel) (...))
+    if '= lambda(' in s: in_lambda += 1; continue
+    if in_lambda > 0:
+      if s.endswith(');'): in_lambda -= 1
+      continue
     if s.startswith('if '): depth += 1
     elif s.startswith('endif'): depth = max(0, depth - 1)
     if s.endswith('.') and not any(p in s for p in ['D0', 'D1', 'S0', 'S1', 'S2', 'SCC', 'VCC', 'tmp', '=']): continue

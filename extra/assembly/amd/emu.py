@@ -402,20 +402,6 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
       op_cls, op, src0, src1, src2, vdst = VOPCOp, VOPCOp(inst.op), inst.src0, inst.src1, None, inst.vdst
     else:
       op_cls, op, src0, src1, src2, vdst = VOP3Op, VOP3Op(inst.op), inst.src0, inst.src1, inst.src2, inst.vdst
-      # V_PERM_B32: byte permutation - not in pseudocode PDF, implement directly
-      # D0[byte_i] = selector[byte_i] < 8 ? {src0, src1}[selector[byte_i]] : (selector[byte_i] >= 0xD ? 0xFF : 0x00)
-      if op == VOP3Op.V_PERM_B32:
-        s0, s1, s2 = st.rsrc(inst.src0, lane), st.rsrc(inst.src1, lane), st.rsrc(inst.src2, lane)
-        # Combine src1 and src0 into 8-byte value: src1 is bytes 0-3, src0 is bytes 4-7
-        combined = (s1 & 0xffffffff) | ((s0 & 0xffffffff) << 32)
-        result = 0
-        for i in range(4):  # 4 result bytes
-          sel = (s2 >> (i * 8)) & 0xff  # byte selector for this position
-          if sel <= 7: result |= (((combined >> (sel * 8)) & 0xff) << (i * 8))  # select byte from combined
-          elif sel >= 0xd: result |= (0xff << (i * 8))  # 0xD-0xF: constant 0xFF
-          # else 0x8-0xC: constant 0x00 (already 0)
-        V[vdst] = result & 0xffffffff
-        return
   elif inst_type is VOPC:
     op = VOPCOp(inst.op)
     # For 16-bit VOPC, vsrc1 uses same encoding as VOP2 16-bit: bit 7 selects hi(1) or lo(0) half
