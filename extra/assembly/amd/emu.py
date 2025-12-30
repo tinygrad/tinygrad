@@ -430,26 +430,44 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
       if lane == 0:  # Only execute once per wave, write results for all lanes
         exec_wmma(st, inst, op)
       return
-    # V_FMA_MIX: Mixed precision FMA - inputs can be f16 or f32 controlled by opsel
+    # V_FMA_MIX: Mixed precision FMA - inputs can be f16 or f32 controlled by opsel_hi/opsel_hi2
+    # opsel_hi[0]: src0 is f32 (0) or f16 from hi bits (1)
+    # opsel_hi[1]: src1 is f32 (0) or f16 from hi bits (1)
+    # opsel_hi2: src2 is f32 (0) or f16 from hi bits (1)
+    # opsel[i]: when source is f16, use lo (0) or hi (1) 16 bits - BUT for V_FMA_MIX, opsel selects lo/hi when opsel_hi=1
+    # neg_hi[i]: abs modifier for source i (reuses neg_hi field for abs in V_FMA_MIX)
     if op in (VOP3POp.V_FMA_MIX_F32, VOP3POp.V_FMA_MIXLO_F16, VOP3POp.V_FMA_MIXHI_F16):
       opsel = getattr(inst, 'opsel', 0)
       opsel_hi = getattr(inst, 'opsel_hi', 0)
+      opsel_hi2 = getattr(inst, 'opsel_hi2', 0)
       neg = getattr(inst, 'neg', 0)
-      neg_hi = getattr(inst, 'neg_hi', 0)
+      abs_ = getattr(inst, 'neg_hi', 0)  # neg_hi field is reused as abs for V_FMA_MIX
       vdst = inst.vdst
-      # Read raw 32-bit values - for V_FMA_MIX, sources can be either f32 or f16
+      # Read raw 32-bit values
       s0_raw = st.rsrc(inst.src0, lane)
       s1_raw = st.rsrc(inst.src1, lane)
       s2_raw = st.rsrc(inst.src2, lane) if inst.src2 is not None else 0
-      # opsel[i]=0: use as f32, opsel[i]=1: use hi f16 as f32
-      # For src0: opsel[0], for src1: opsel[1], for src2: opsel[2]
-      if opsel & 1: s0 = _f16((s0_raw >> 16) & 0xffff)  # hi f16 -> f32
-      else: s0 = _f32(s0_raw)  # use as f32
-      if opsel & 2: s1 = _f16((s1_raw >> 16) & 0xffff)
-      else: s1 = _f32(s1_raw)
-      if opsel & 4: s2 = _f16((s2_raw >> 16) & 0xffff)
-      else: s2 = _f32(s2_raw)
-      # Apply neg modifiers (for f32 values)
+      # Decode sources based on opsel_hi (controls f32 vs f16) and opsel (controls which half for f16)
+      # src0: opsel_hi[0]=1 means f16, opsel[0] selects hi(1) or lo(0) half
+      if opsel_hi & 1:
+        s0 = _f16((s0_raw >> 16) & 0xffff) if (opsel & 1) else _f16(s0_raw & 0xffff)
+      else:
+        s0 = _f32(s0_raw)
+      # src1: opsel_hi[1]=1 means f16, opsel[1] selects hi(1) or lo(0) half
+      if opsel_hi & 2:
+        s1 = _f16((s1_raw >> 16) & 0xffff) if (opsel & 2) else _f16(s1_raw & 0xffff)
+      else:
+        s1 = _f32(s1_raw)
+      # src2: opsel_hi2=1 means f16, opsel[2] selects hi(1) or lo(0) half
+      if opsel_hi2:
+        s2 = _f16((s2_raw >> 16) & 0xffff) if (opsel & 4) else _f16(s2_raw & 0xffff)
+      else:
+        s2 = _f32(s2_raw)
+      # Apply abs modifiers (abs_ field reuses neg_hi position)
+      if abs_ & 1: s0 = abs(s0)
+      if abs_ & 2: s1 = abs(s1)
+      if abs_ & 4: s2 = abs(s2)
+      # Apply neg modifiers
       if neg & 1: s0 = -s0
       if neg & 2: s1 = -s1
       if neg & 4: s2 = -s2

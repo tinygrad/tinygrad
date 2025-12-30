@@ -2288,6 +2288,104 @@ class TestVOP3P(unittest.TestCase):
     self.assertAlmostEqual(hi, 16.0, places=0, msg=f"hi: expected 16.0, got {hi}")
 
 
+class TestVFmaMix(unittest.TestCase):
+  """Tests for V_FMA_MIX_F32/F16 mixed-precision FMA instructions.
+
+  These instructions are critical for OCML sin/cos implementations.
+  opsel_hi[i] controls whether source i is f32 (0) or f16 from hi bits (1)
+  opsel[i] selects which half (lo=0, hi=1) when source is f16
+  """
+
+  def test_v_fma_mix_f32_all_f32(self):
+    """V_FMA_MIX_F32 with all f32 sources."""
+    instructions = [
+      s_mov_b32(s[0], f2i(2.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[1], f2i(3.0)),
+      v_mov_b32_e32(v[1], s[1]),
+      s_mov_b32(s[2], f2i(1.0)),
+      v_mov_b32_e32(v[2], s[2]),
+      # opsel_hi=0, opsel_hi2=0 means all sources are f32
+      VOP3P(VOP3POp.V_FMA_MIX_F32, vdst=v[3], src0=v[0], src1=v[1], src2=v[2], opsel=0, opsel_hi=0, opsel_hi2=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][3])
+    self.assertAlmostEqual(result, 7.0, places=5, msg=f"2*3+1=7, got {result}")
+
+  def test_v_fma_mix_f32_src2_f16_lo(self):
+    """V_FMA_MIX_F32 with src2 as f16 from lo bits."""
+    from extra.assembly.amd.pcode import f32_to_f16
+    f16_2 = f32_to_f16(2.0)  # 0x4000
+    instructions = [
+      s_mov_b32(s[0], f2i(1.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[1], f2i(3.0)),
+      v_mov_b32_e32(v[1], s[1]),
+      s_mov_b32(s[2], f16_2),  # f16 2.0 in lo bits, 0 in hi bits
+      v_mov_b32_e32(v[2], s[2]),
+      # opsel_hi2=1 means src2 is f16, opsel[2]=0 means use lo half
+      VOP3P(VOP3POp.V_FMA_MIX_F32, vdst=v[3], src0=v[0], src1=v[1], src2=v[2], opsel=0, opsel_hi=0, opsel_hi2=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][3])
+    self.assertAlmostEqual(result, 5.0, places=5, msg=f"1*3+2=5, got {result}")
+
+  def test_v_fma_mix_f32_src2_f16_hi(self):
+    """V_FMA_MIX_F32 with src2 as f16 from hi bits."""
+    from extra.assembly.amd.pcode import f32_to_f16
+    f16_2 = f32_to_f16(2.0)  # 0x4000
+    val = (f16_2 << 16) | 0  # hi = f16 2.0, lo = 0
+    instructions = [
+      s_mov_b32(s[0], f2i(1.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[1], f2i(3.0)),
+      v_mov_b32_e32(v[1], s[1]),
+      s_mov_b32(s[2], val),
+      v_mov_b32_e32(v[2], s[2]),
+      # opsel_hi2=1 means src2 is f16, opsel[2]=1 (bit 2 set, opsel=4) means use hi half
+      VOP3P(VOP3POp.V_FMA_MIX_F32, vdst=v[3], src0=v[0], src1=v[1], src2=v[2], opsel=4, opsel_hi=0, opsel_hi2=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][3])
+    self.assertAlmostEqual(result, 5.0, places=5, msg=f"1*3+2=5, got {result}")
+
+  def test_v_fma_mix_f32_with_abs(self):
+    """V_FMA_MIX_F32 with abs modifier on src2."""
+    instructions = [
+      s_mov_b32(s[0], f2i(2.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[1], f2i(3.0)),
+      v_mov_b32_e32(v[1], s[1]),
+      s_mov_b32(s[2], f2i(-1.0)),  # -1.0
+      v_mov_b32_e32(v[2], s[2]),
+      # neg_hi field is used for abs in V_FMA_MIX, abs bit 2 (0b100) for |src2|
+      VOP3P(VOP3POp.V_FMA_MIX_F32, vdst=v[3], src0=v[0], src1=v[1], src2=v[2], opsel=0, opsel_hi=0, opsel_hi2=0, neg_hi=4),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][3])
+    self.assertAlmostEqual(result, 7.0, places=5, msg=f"2*3+|-1|=7, got {result}")
+
+  def test_v_fma_mixlo_f16(self):
+    """V_FMA_MIXLO_F16 writes to low 16 bits of destination."""
+    from extra.assembly.amd.pcode import _f16
+    instructions = [
+      s_mov_b32(s[0], f2i(2.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[1], f2i(3.0)),
+      v_mov_b32_e32(v[1], s[1]),
+      s_mov_b32(s[2], f2i(1.0)),
+      v_mov_b32_e32(v[2], s[2]),
+      s_mov_b32(s[3], 0xdead0000),  # garbage in hi bits
+      v_mov_b32_e32(v[3], s[3]),
+      VOP3P(VOP3POp.V_FMA_MIXLO_F16, vdst=v[3], src0=v[0], src1=v[1], src2=v[2], opsel=0, opsel_hi=0, opsel_hi2=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    lo = _f16(st.vgpr[0][3] & 0xffff)
+    hi = (st.vgpr[0][3] >> 16) & 0xffff
+    self.assertAlmostEqual(lo, 7.0, places=1, msg=f"lo: 2*3+1=7, got {lo}")
+    self.assertEqual(hi, 0xdead, f"hi should be preserved, got 0x{hi:04x}")
+
+
 class TestF64Conversions(unittest.TestCase):
   """Tests for 64-bit float operations and conversions."""
 
@@ -2762,6 +2860,338 @@ class TestVOPC_16bit_HiHalf(unittest.TestCase):
     st = run_program(instructions, n_lanes=2)
     self.assertEqual(st.vcc & 1, 1, "Lane 0: expected vcc=1 (1.0 < 2.0)")
     self.assertEqual((st.vcc >> 1) & 1, 0, "Lane 1: expected vcc=0 (2.0 < 1.0)")
+
+
+class TestF16SinKernelOps(unittest.TestCase):
+  """Tests for F16 instructions used in the sin kernel. Run with USE_HW=1 to compare emulator vs hardware."""
+
+  def test_v_cvt_i16_f16_zero(self):
+    """v_cvt_i16_f16: Convert f16 0.0 to i16 0."""
+    instructions = [
+      s_mov_b32(s[0], 0x00000000),  # f16 0.0 in low bits
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_i16_f16_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1] & 0xFFFF
+    self.assertEqual(result, 0, f"Expected 0, got {result}")
+
+  def test_v_cvt_i16_f16_one(self):
+    """v_cvt_i16_f16: Convert f16 1.0 (0x3c00) to i16 1."""
+    instructions = [
+      s_mov_b32(s[0], 0x00003c00),  # f16 1.0 in low bits
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_i16_f16_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1] & 0xFFFF
+    self.assertEqual(result, 1, f"Expected 1, got {result}")
+
+  def test_v_cvt_i16_f16_negative(self):
+    """v_cvt_i16_f16: Convert f16 -2.0 (0xc000) to i16 -2."""
+    instructions = [
+      s_mov_b32(s[0], 0x0000c000),  # f16 -2.0 in low bits
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_i16_f16_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1] & 0xFFFF
+    # -2 as signed 16-bit = 0xFFFE
+    self.assertEqual(result, 0xFFFE, f"Expected 0xFFFE (-2), got 0x{result:04x}")
+
+  def test_v_cvt_i16_f16_from_hi(self):
+    """v_cvt_i16_f16: Convert f16 from high half of register."""
+    instructions = [
+      s_mov_b32(s[0], 0x3c000000),  # f16 1.0 in HIGH bits, 0.0 in low
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_i16_f16_e32(v[1], v[0].h),  # Read from high half
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1] & 0xFFFF
+    self.assertEqual(result, 1, f"Expected 1, got {result}")
+
+  def test_v_bfe_i32_sign_extend(self):
+    """v_bfe_i32: Extract 16 bits with sign extension."""
+    instructions = [
+      s_mov_b32(s[0], 0x80000001),  # low 16 bits = 0x0001
+      v_mov_b32_e32(v[0], s[0]),
+      v_bfe_i32(v[1], v[0], 0, 16),  # Extract bits 0-15 with sign extend
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1]
+    self.assertEqual(result, 1, f"Expected 1, got {result}")
+
+  def test_v_bfe_i32_sign_extend_negative(self):
+    """v_bfe_i32: Extract 16 bits with sign extension (negative value)."""
+    instructions = [
+      s_mov_b32(s[0], 0x0000FFFE),  # low 16 bits = 0xFFFE = -2 as i16
+      v_mov_b32_e32(v[0], s[0]),
+      v_bfe_i32(v[1], v[0], 0, 16),  # Extract bits 0-15 with sign extend
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1]
+    # -2 sign-extended to 32 bits = 0xFFFFFFFE
+    self.assertEqual(result, 0xFFFFFFFE, f"Expected 0xFFFFFFFE (-2), got 0x{result:08x}")
+
+  def test_v_cndmask_b16_select_src0(self):
+    """v_cndmask_b16: Select src0 when vcc=0."""
+    instructions = [
+      s_mov_b32(s[0], 0x3c003800),  # src0.h=1.0, src0.l=0.5
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[1], 0x4000c000),  # src1.h=2.0, src1.l=-2.0
+      v_mov_b32_e32(v[1], s[1]),
+      s_mov_b32(s[SrcEnum.VCC_LO - 128], 0),  # vcc = 0
+      v_cndmask_b16(v[2], v[0], v[1], SrcEnum.VCC_LO),  # Should select v0.l = 0.5
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2] & 0xFFFF
+    self.assertEqual(result, 0x3800, f"Expected 0x3800 (0.5), got 0x{result:04x}")
+
+  def test_v_cndmask_b16_select_src1(self):
+    """v_cndmask_b16: Select src1 when vcc=1."""
+    instructions = [
+      s_mov_b32(s[0], 0x3c003800),  # src0.h=1.0, src0.l=0.5
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[1], 0x4000c000),  # src1.h=2.0, src1.l=-2.0
+      v_mov_b32_e32(v[1], s[1]),
+      s_mov_b32(s[SrcEnum.VCC_LO - 128], 1),  # vcc = 1 for lane 0
+      v_cndmask_b16(v[2], v[0], v[1], SrcEnum.VCC_LO),  # Should select v1.l = -2.0
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2] & 0xFFFF
+    self.assertEqual(result, 0xc000, f"Expected 0xc000 (-2.0), got 0x{result:04x}")
+
+  def test_v_cndmask_b16_write_hi(self):
+    """v_cndmask_b16: Write to high half with opsel."""
+    instructions = [
+      s_mov_b32(s[0], 0x3c003800),  # src0: hi=1.0, lo=0.5
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[1], 0x4000c000),  # src1: hi=2.0, lo=-2.0
+      v_mov_b32_e32(v[1], s[1]),
+      s_mov_b32(s[2], 0xDEAD0000),  # v2 initial: hi=0xDEAD, lo=0
+      v_mov_b32_e32(v[2], s[2]),
+      s_mov_b32(s[SrcEnum.VCC_LO - 128], 0),  # vcc = 0
+      # opsel=8 means write to high half (bit 3 = dst hi)
+      # opsel=1 means read src0 from hi, opsel=2 means read src1 from hi
+      # v_cndmask_b16 v2.h, v0.h, v1.h, vcc -> select v0.h = 1.0
+      VOP3(VOP3Op.V_CNDMASK_B16, vdst=v[2], src0=v[0], src1=v[1], src2=SrcEnum.VCC_LO, opsel=0b1011),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result_hi = (st.vgpr[0][2] >> 16) & 0xFFFF
+    result_lo = st.vgpr[0][2] & 0xFFFF
+    self.assertEqual(result_hi, 0x3c00, f"Expected hi=0x3c00 (1.0), got 0x{result_hi:04x}")
+    self.assertEqual(result_lo, 0x0000, f"Expected lo preserved as 0, got 0x{result_lo:04x}")
+
+  def test_v_mul_f16_basic(self):
+    """v_mul_f16: 2.0 * 3.0 = 6.0."""
+    instructions = [
+      s_mov_b32(s[0], 0x00004000),  # f16 2.0 in low bits
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[1], 0x00004200),  # f16 3.0 in low bits
+      v_mov_b32_e32(v[1], s[1]),
+      v_mul_f16_e32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2] & 0xFFFF
+    self.assertEqual(result, 0x4600, f"Expected 0x4600 (6.0), got 0x{result:04x}")
+
+  def test_v_mul_f16_by_zero(self):
+    """v_mul_f16: x * 0.0 = 0.0."""
+    instructions = [
+      s_mov_b32(s[0], 0x00003c00),  # f16 1.0
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[1], 0x00000000),  # f16 0.0
+      v_mov_b32_e32(v[1], s[1]),
+      v_mul_f16_e32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2] & 0xFFFF
+    self.assertEqual(result, 0x0000, f"Expected 0x0000 (0.0), got 0x{result:04x}")
+
+  def test_v_mul_f16_hi_half(self):
+    """v_mul_f16: Multiply using high halves."""
+    instructions = [
+      s_mov_b32(s[0], 0x40000000),  # hi=2.0, lo=0.0
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[1], 0x42000000),  # hi=3.0, lo=0.0
+      v_mov_b32_e32(v[1], s[1]),
+      v_mul_f16_e32(v[2].h, v[0].h, v[1].h),  # 2.0 * 3.0 = 6.0 in hi
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result_hi = (st.vgpr[0][2] >> 16) & 0xFFFF
+    self.assertEqual(result_hi, 0x4600, f"Expected hi=0x4600 (6.0), got 0x{result_hi:04x}")
+
+  def test_v_fmac_f16_basic(self):
+    """v_fmac_f16: dst = src0 * src1 + dst = 2.0 * 3.0 + 1.0 = 7.0."""
+    instructions = [
+      s_mov_b32(s[0], 0x00004000),  # f16 2.0
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[1], 0x00004200),  # f16 3.0
+      v_mov_b32_e32(v[1], s[1]),
+      s_mov_b32(s[2], 0x00003c00),  # f16 1.0 (accumulator)
+      v_mov_b32_e32(v[2], s[2]),
+      v_fmac_f16_e32(v[2], v[0], v[1]),  # v2 = v0 * v1 + v2
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2] & 0xFFFF
+    self.assertEqual(result, 0x4700, f"Expected 0x4700 (7.0), got 0x{result:04x}")
+
+  def test_v_add_f16_basic(self):
+    """v_add_f16: 1.0 + 2.0 = 3.0."""
+    instructions = [
+      s_mov_b32(s[0], 0x00003c00),  # f16 1.0
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[1], 0x00004000),  # f16 2.0
+      v_mov_b32_e32(v[1], s[1]),
+      v_add_f16_e32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2] & 0xFFFF
+    self.assertEqual(result, 0x4200, f"Expected 0x4200 (3.0), got 0x{result:04x}")
+
+  def test_v_add_f16_negative(self):
+    """v_add_f16: 1.0 + (-1.5703125) = -0.5703125."""
+    # 0xbe48 is approximately -1.5703125 in f16
+    instructions = [
+      s_mov_b32(s[0], 0x00003c00),  # f16 1.0
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[1], 0x0000be48),  # f16 -1.5703125
+      v_mov_b32_e32(v[1], s[1]),
+      v_add_f16_e32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2] & 0xFFFF
+    # 1.0 + (-1.5703125) = -0.5703125 which is approximately 0xb890
+    # Allow some tolerance - just check it's negative and close
+    from extra.assembly.amd.pcode import _f16
+    result_f = _f16(result)
+    expected = 1.0 - 1.5703125
+    self.assertAlmostEqual(result_f, expected, places=2, msg=f"Expected ~{expected}, got {result_f}")
+
+  def test_v_fmaak_f16_basic(self):
+    """v_fmaak_f16: dst = src0 * vsrc1 + K."""
+    # v_fmaak_f16 computes: D = S0 * S1 + K
+    # 2.0 * 3.0 + 1.0 = 7.0
+    instructions = [
+      s_mov_b32(s[0], 0x00004000),  # f16 2.0
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[1], 0x00004200),  # f16 3.0
+      v_mov_b32_e32(v[1], s[1]),
+      v_fmaak_f16_e32(v[2], v[0], v[1], 0x3c00),  # v2 = v0 * v1 + 1.0
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2] & 0xFFFF
+    self.assertEqual(result, 0x4700, f"Expected 0x4700 (7.0), got 0x{result:04x}")
+
+  def test_v_fmamk_f32_basic(self):
+    """v_fmamk_f32: dst = src0 * K + vsrc1."""
+    # v_fmamk_f32 computes: D = S0 * K + S1
+    # 2.0 * 3.0 + 1.0 = 7.0
+    instructions = [
+      s_mov_b32(s[0], f2i(2.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[1], f2i(1.0)),  # accumulator
+      v_mov_b32_e32(v[1], s[1]),
+      v_fmamk_f32_e32(v[2], v[0], f2i(3.0), v[1]),  # v2 = v0 * 3.0 + v1
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][2])
+    self.assertAlmostEqual(result, 7.0, places=5, msg=f"Expected 7.0, got {result}")
+
+  def test_v_fmamk_f32_small_constant(self):
+    """v_fmamk_f32: Test with small constant like in sin kernel."""
+    # This mimics part of the sin kernel: 1.0 * (-1.13e-4) + (-3.1414795) ≈ -3.1415926
+    k_val = 0xb8ed5000  # approximately -0.0001131594 as f32
+    s1_val = f2i(-3.1414794921875)
+    instructions = [
+      s_mov_b32(s[0], f2i(1.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[1], s1_val),
+      v_mov_b32_e32(v[1], s[1]),
+      v_fmamk_f32_e32(v[2], v[0], k_val, v[1]),  # v2 = 1.0 * K + v1
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][2])
+    k_f32 = i2f(k_val)
+    expected = 1.0 * k_f32 + (-3.1414794921875)
+    self.assertAlmostEqual(result, expected, places=5, msg=f"Expected {expected}, got {result}")
+
+  def test_v_mov_b16_to_hi(self):
+    """v_mov_b16: Move immediate to high half, preserving low."""
+    instructions = [
+      s_mov_b32(s[0], 0x0000DEAD),  # initial: lo=0xDEAD, hi=0
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b16_e32(v[0].h, 0x3800),  # Move 0.5 to high half
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result_hi = (st.vgpr[0][0] >> 16) & 0xFFFF
+    result_lo = st.vgpr[0][0] & 0xFFFF
+    self.assertEqual(result_hi, 0x3800, f"Expected hi=0x3800, got 0x{result_hi:04x}")
+    self.assertEqual(result_lo, 0xDEAD, f"Expected lo=0xDEAD (preserved), got 0x{result_lo:04x}")
+
+  def test_v_mov_b16_to_lo(self):
+    """v_mov_b16: Move immediate to low half, preserving high."""
+    instructions = [
+      s_mov_b32(s[0], 0xBEEF0000),  # initial: hi=0xBEEF, lo=0
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b16_e32(v[0], 0x3c00),  # Move 1.0 to low half
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result_hi = (st.vgpr[0][0] >> 16) & 0xFFFF
+    result_lo = st.vgpr[0][0] & 0xFFFF
+    self.assertEqual(result_lo, 0x3c00, f"Expected lo=0x3c00, got 0x{result_lo:04x}")
+    self.assertEqual(result_hi, 0xBEEF, f"Expected hi=0xBEEF (preserved), got 0x{result_hi:04x}")
+
+  def test_v_xor_b32_sign_flip(self):
+    """v_xor_b32: XOR with 0x8000 flips sign of f16 in low bits."""
+    # 0x4246 is approximately 3.13671875 in f16
+    # XOR with 0x8000 gives 0xC246 which is -3.13671875
+    instructions = [
+      s_mov_b32(s[0], 0x00004246),  # f16 3.13671875
+      v_mov_b32_e32(v[0], s[0]),
+      v_xor_b32_e32(v[1], 0x8000, v[0]),  # Flip sign bit of low half
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][1] & 0xFFFF
+    self.assertEqual(result, 0xC246, f"Expected 0xC246 (-3.137), got 0x{result:04x}")
+
+  def test_v_fma_mix_f32_all_f32_sources(self):
+    """v_fma_mix_f32: All sources as f32 (opsel_hi=0)."""
+    instructions = [
+      s_mov_b32(s[0], f2i(2.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[1], f2i(3.0)),
+      v_mov_b32_e32(v[1], s[1]),
+      s_mov_b32(s[2], f2i(1.0)),
+      v_mov_b32_e32(v[2], s[2]),
+      # opsel_hi=0,0,0 means all sources are f32
+      VOP3P(VOP3POp.V_FMA_MIX_F32, vdst=v[3], src0=v[0], src1=v[1], src2=v[2], opsel=0, opsel_hi=0, opsel_hi2=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][3])
+    self.assertAlmostEqual(result, 7.0, places=5, msg=f"2*3+1=7, got {result}")
+
+  def test_v_fma_mixlo_f16_all_f32_sources(self):
+    """v_fma_mixlo_f16: All sources as f32, result to low f16."""
+    instructions = [
+      s_mov_b32(s[0], f2i(1.0)),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[1], f2i(-1.22e-10)),  # Very small
+      v_mov_b32_e32(v[1], s[1]),
+      s_mov_b32(s[2], f2i(-3.1415927)),  # -pi
+      v_mov_b32_e32(v[2], s[2]),
+      s_mov_b32(s[3], 0xDEAD0000),  # Garbage in hi
+      v_mov_b32_e32(v[3], s[3]),
+      # 1.0 * (-1.22e-10) + (-3.1415927) ≈ -3.1415927
+      VOP3P(VOP3POp.V_FMA_MIXLO_F16, vdst=v[3], src0=v[0], src1=v[1], src2=v[2], opsel=0, opsel_hi=0, opsel_hi2=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    from extra.assembly.amd.pcode import _f16
+    result_lo = _f16(st.vgpr[0][3] & 0xFFFF)
+    result_hi = (st.vgpr[0][3] >> 16) & 0xFFFF
+    # Result should be approximately -pi
+    self.assertAlmostEqual(result_lo, -3.14, delta=0.01, msg=f"Expected ~-3.14, got {result_lo}")
+    self.assertEqual(result_hi, 0xDEAD, f"Expected hi preserved as 0xDEAD, got 0x{result_hi:04x}")
 
 
 if __name__ == '__main__':

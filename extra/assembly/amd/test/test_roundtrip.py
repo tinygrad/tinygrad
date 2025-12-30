@@ -31,7 +31,12 @@ def detect_format(data: bytes) -> type[Inst] | None:
 
   # Check 64-bit formats
   if len(data) >= 8:
-    if enc_8bit in (0xD4, 0xD5, 0xD7): return VOP3
+    if enc_8bit in (0xD4, 0xD5, 0xD7):
+      # VOP3 and VOP3SD share encoding - check opcode to determine which
+      # VOP3SD opcodes: 288-290 (v_*_co_ci_*), 764-770 (v_div_scale_*, v_mad_*, v_*_co_u32)
+      op = (int.from_bytes(data[:8], 'little') >> 16) & 0x3FF
+      if op in {288, 289, 290, 764, 765, 766, 767, 768, 769, 770}: return VOP3SD
+      return VOP3
     if enc_8bit == 0xD6: return VOP3SD
     if enc_8bit == 0xCC: return VOP3P
     if enc_8bit == 0xCD: return VINTERP

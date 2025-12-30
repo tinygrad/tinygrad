@@ -315,6 +315,9 @@ class Inst:
     op_val = inst._values.get('op', 0)
     has_literal = cls.__name__ == 'VOP2' and op_val in (44, 45, 55, 56)
     has_literal = has_literal or (cls.__name__ == 'SOP2' and op_val in (69, 70))
+    # VOPD fmaak/fmamk always have a literal (opx/opy value 1 or 2)
+    opx, opy = inst._values.get('opx', 0), inst._values.get('opy', 0)
+    has_literal = has_literal or (cls.__name__ == 'VOPD' and (opx in (1, 2) or opy in (1, 2)))
     for n in SRC_FIELDS:
       if n in inst._values and isinstance(inst._values[n], RawImm) and inst._values[n].val == 255: has_literal = True
     if has_literal:
