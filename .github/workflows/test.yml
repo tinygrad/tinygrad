@@ -882,7 +882,7 @@ jobs:
         if: matrix.backend == 'cpu'
         run: python3 -m pytest test/unit/test_disk_tensor.py::TestDiskTensor::test_copy_to_cpu_not_truncated
 
-# ****** Windows Tests ******
+# ****** Windows Testss ******
 
   wintests:
     strategy:
