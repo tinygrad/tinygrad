@@ -280,7 +280,7 @@ def f32_to_u8(f): return max(0, min(255, int(f))) if not math.isnan(f) else 0
 def mantissa(f):
   if f == 0.0 or math.isinf(f) or math.isnan(f): return f
   m, _ = math.frexp(f)
-  return math.copysign(m * 2.0, f)
+  return m  # AMD V_FREXP_MANT returns mantissa in [0.5, 1.0) range
 def signext_from_bit(val, bit):
   bit = int(bit)
   if bit == 0: return 0
@@ -359,12 +359,14 @@ class _Inf:
   f16 = f32 = f64 = float('inf')
   def __neg__(self): return _NegInf()
   def __pos__(self): return self
+  def __float__(self): return float('inf')
   def __eq__(self, other): return float(other) == float('inf') if not isinstance(other, _NegInf) else False
   def __req__(self, other): return self.__eq__(other)
 class _NegInf:
   f16 = f32 = f64 = float('-inf')
   def __neg__(self): return _Inf()
   def __pos__(self): return self
+  def __float__(self): return float('-inf')
   def __eq__(self, other): return float(other) == float('-inf') if not isinstance(other, _Inf) else False
   def __req__(self, other): return self.__eq__(other)
 INF = _Inf()

@@ -2454,6 +2454,32 @@ class TestF64Conversions(unittest.TestCase):
     result = struct.unpack('<q', struct.pack('<II', lo, hi))[0]
     self.assertEqual(result, -8, f"Expected -8, got {result} (lo=0x{lo:08x}, hi=0x{hi:08x})")
 
+  def test_v_cvt_i32_f64_writes_32bit_only(self):
+    """V_CVT_I32_F64 should only write 32 bits, not 64.
+
+    Regression test: V_CVT_I32_F64 has a 64-bit source (f64) but 32-bit destination (i32).
+    The emulator was incorrectly writing 64 bits (clobbering vdst+1) because
+    is_64bit_op was True for any op ending in '_F64'.
+    """
+    # Pre-fill v3 with a canary value that should NOT be clobbered
+    val_bits = f2i64(-1.0)
+    instructions = [
+      s_mov_b32(s[0], val_bits & 0xffffffff),
+      s_mov_b32(s[1], val_bits >> 32),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      s_mov_b32(s[2], 0xDEADBEEF),  # Canary value
+      v_mov_b32_e32(v[3], s[2]),    # Put canary in v3
+      v_cvt_i32_f64_e32(v[2], v[0:2]),  # Convert -1.0 -> -1 (0xffffffff)
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    canary = st.vgpr[0][3]
+    # V_CVT_I32_F64 of -1.0 should produce 0xffffffff (-1)
+    self.assertEqual(result, 0xffffffff, f"Expected 0xffffffff (-1), got 0x{result:08x}")
+    # v3 should still contain the canary (not clobbered by 64-bit write)
+    self.assertEqual(canary, 0xDEADBEEF, f"v3 canary should be 0xDEADBEEF, got 0x{canary:08x} (clobbered!)")
+
 
 class TestNewPcodeHelpers(unittest.TestCase):
   """Tests for newly added pcode helper functions (SAD, BYTE_PERMUTE, BF16)."""

@@ -679,6 +679,10 @@ jobs:
         run: python -m pytest -n=auto extra/assembly/amd/ --durations 20
       - name: Run RDNA3 emulator tests (AMD_LLVM=1)
         run: AMD_LLVM=1 python -m pytest -n=auto extra/assembly/amd/ --durations 20
+      - name: Run RDNA3 dtype tests
+        run: PYTHONPATH="." AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=0 pytest -n=auto test/test_dtype_alu.py test/test_dtype.py
+      - name: Run RDNA3 dtype tests (AMD_LLVM=1)
+        run: PYTHONPATH="." AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=1 pytest -n=auto test/test_dtype_alu.py test/test_dtype.py
       - name: Install pdfplumber
         run: pip install pdfplumber
       - name: Verify AMD autogen is up to date

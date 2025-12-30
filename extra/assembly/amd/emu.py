@@ -17,6 +17,7 @@ VCC_LO, VCC_HI, NULL, EXEC_LO, EXEC_HI, SCC = SrcEnum.VCC_LO, SrcEnum.VCC_HI, Sr
 # VOP3 ops that use 64-bit operands (and thus 64-bit literals when src is 255)
 # Exception: V_LDEXP_F64 has 32-bit integer src1, so literal should NOT be 64-bit when src1=255
 _VOP3_64BIT_OPS = {op.value for op in VOP3Op if op.name.endswith(('_F64', '_B64', '_I64', '_U64'))}
+_VOPC_64BIT_OPS = {op.value for op in VOPCOp if op.name.endswith(('_F64', '_B64', '_I64', '_U64'))}
 # Ops where src1 is 32-bit (exponent/shift amount) even though the op name suggests 64-bit
 _VOP3_64BIT_OPS_32BIT_SRC1 = {VOP3Op.V_LDEXP_F64.value}
 # Ops with 16-bit types in name (for source/dest handling)
@@ -185,7 +186,7 @@ def decode_program(data: bytes) -> Program:
         # Exception: some ops have mixed src sizes (e.g., V_LDEXP_F64 has 32-bit src1)
         op_val = inst._values.get('op')
         if hasattr(op_val, 'value'): op_val = op_val.value
-        is_64bit = inst_class is VOP3 and op_val in _VOP3_64BIT_OPS
+        is_64bit = (inst_class is VOP3 and op_val in _VOP3_64BIT_OPS) or (inst_class is VOPC and op_val in _VOPC_64BIT_OPS)
         # Don't treat literal as 64-bit if the op has 32-bit src1 and src1 is the literal
         if is_64bit and op_val in _VOP3_64BIT_OPS_32BIT_SRC1 and getattr(inst, 'src1', None) == 255:
           is_64bit = False
@@ -336,14 +337,22 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     op = VOP3SDOp(inst.op)
     fn = compiled.get(VOP3SDOp, {}).get(op)
     if fn is None: raise NotImplementedError(f"{op.name} not in pseudocode")
-    s0, s1, s2 = st.rsrc(inst.src0, lane), st.rsrc(inst.src1, lane), st.rsrc(inst.src2, lane)
-    # For 64-bit src2 ops (V_MAD_U64_U32, V_MAD_I64_I32), read from consecutive registers
+    # VOP3SD has both 32-bit ops (V_ADD_CO_CI_U32, etc.) and 64-bit ops (V_DIV_SCALE_F64, V_MAD_U64_U32, etc.)
+    div_scale_64_ops = (VOP3SDOp.V_DIV_SCALE_F64,)
     mad64_ops = (VOP3SDOp.V_MAD_U64_U32, VOP3SDOp.V_MAD_I64_I32)
-    if op in mad64_ops:
+    if op in div_scale_64_ops:
+      # V_DIV_SCALE_F64: all sources are 64-bit
+      s0, s1, s2 = st.rsrc64(inst.src0, lane), st.rsrc64(inst.src1, lane), st.rsrc64(inst.src2, lane)
+    elif op in mad64_ops:
+      # V_MAD_U64_U32, V_MAD_I64_I32: src0/src1 are 32-bit, src2 is 64-bit
+      s0, s1 = st.rsrc(inst.src0, lane), st.rsrc(inst.src1, lane)
       if inst.src2 >= 256:  # VGPR
         s2 = V[inst.src2 - 256] | (V[inst.src2 - 256 + 1] << 32)
       else:  # SGPR - read 64-bit from consecutive SGPRs
         s2 = st.rsgpr64(inst.src2)
+    else:
+      # Default: 32-bit sources
+      s0, s1, s2 = st.rsrc(inst.src0, lane), st.rsrc(inst.src1, lane), st.rsrc(inst.src2, lane)
     d0 = V[inst.vdst]
     # For carry-in operations (V_*_CO_CI_*), src2 register contains the carry bitmask (not VCC).
     # The pseudocode uses VCC but in VOP3SD encoding, the actual carry source is inst.src2.
@@ -651,7 +660,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     is_16bit_dst = (op_cls is VOP3Op and op in _VOP3_16BIT_DST_OPS) or (op_cls is VOP1Op and op in _VOP1_16BIT_DST_OPS)
     if writes_to_sgpr:
       st.wsgpr(vdst, result['d0'] & 0xffffffff)
-    elif result.get('d0_64') or is_64bit_op:
+    elif result.get('d0_64'):
       V[vdst] = result['d0'] & 0xffffffff
       V[vdst + 1] = (result['d0'] >> 32) & 0xffffffff
     elif is_16bit_dst and inst_type is VOP3:
