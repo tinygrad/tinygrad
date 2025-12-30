@@ -16,9 +16,6 @@ def _SOP1Op_S_MOV_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0
   # --- compiled pseudocode ---
   D0.b64 = S0.b64
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP1Op_S_CMOV_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # if SCC then
@@ -37,9 +34,6 @@ def _SOP1Op_S_CMOV_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC
   if SCC:
     D0.b64 = S0.b64
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP1Op_S_BREV_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u32[31 : 0] = S0.u32[0 : 31]
@@ -52,9 +46,6 @@ def _SOP1Op_S_BREV_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC
   # --- compiled pseudocode ---
   D0.u64[63 : 0] = S0.u64[0 : 63]
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP1Op_S_CTZ_I32_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # tmp = -1;
@@ -193,9 +184,6 @@ def _SOP1Op_S_BITSET0_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[S0.u32[5 : 0]] = 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP1Op_S_BITSET1_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u32[S0.u32[4 : 0]] = 1'1U
@@ -208,9 +196,6 @@ def _SOP1Op_S_BITSET1_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[S0.u32[5 : 0]] = 1
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP1Op_S_BITREPLICATE_B64_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # tmp = S0.u32;
@@ -225,9 +210,6 @@ def _SOP1Op_S_BITREPLICATE_B64_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM1
     D0.u64[i * 2] = tmp[i]
     D0.u64[i * 2 + 1] = tmp[i]
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP1Op_S_ABS_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.i32 = S0.i32 < 0 ? -S0.i32 : S0.i32;
@@ -268,9 +250,6 @@ def _SOP1Op_S_BCNT0_I32_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR
   D0.i32 = tmp
   SCC.b32 = D0.u64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP1Op_S_BCNT1_I32_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # tmp = 0;
@@ -303,9 +282,6 @@ def _SOP1Op_S_BCNT1_I32_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR
   D0.i32 = tmp
   SCC.b32 = D0.u64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP1Op_S_QUADMASK_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # tmp = 0U;
@@ -338,9 +314,6 @@ def _SOP1Op_S_QUADMASK_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR,
   D0.u64 = tmp
   SCC.b32 = D0.u64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP1Op_S_WQM_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # tmp = 0U;
@@ -375,9 +348,6 @@ def _SOP1Op_S_WQM_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0
   D0.u64 = tmp
   SCC.b32 = D0.u64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP1Op_S_NOT_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u32 = ~S0.u32;
@@ -394,9 +364,6 @@ def _SOP1Op_S_NOT_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0
   D0.u64 = ~S0.u64
   SCC.b32 = D0.u64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP1Op_S_AND_SAVEEXEC_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Calculate bitwise AND on the scalar input and the EXEC mask, store the calculated result into the EXEC mask,
@@ -427,9 +394,6 @@ def _SOP1Op_S_AND_SAVEEXEC_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, V
   D0.u64 = saveexec.u64
   SCC.b32 = EXEC.u64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP1Op_S_OR_SAVEEXEC_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Calculate bitwise OR on the scalar input and the EXEC mask, store the calculated result into the EXEC mask, set
@@ -460,9 +424,6 @@ def _SOP1Op_S_OR_SAVEEXEC_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VG
   D0.u64 = saveexec.u64
   SCC.b32 = EXEC.u64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP1Op_S_XOR_SAVEEXEC_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Calculate bitwise XOR on the scalar input and the EXEC mask, store the calculated result into the EXEC mask,
@@ -493,9 +454,6 @@ def _SOP1Op_S_XOR_SAVEEXEC_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, V
   D0.u64 = saveexec.u64
   SCC.b32 = EXEC.u64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP1Op_S_NAND_SAVEEXEC_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Calculate bitwise NAND on the scalar input and the EXEC mask, store the calculated result into the EXEC mask,
@@ -526,9 +484,6 @@ def _SOP1Op_S_NAND_SAVEEXEC_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, 
   D0.u64 = saveexec.u64
   SCC.b32 = EXEC.u64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP1Op_S_NOR_SAVEEXEC_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Calculate bitwise NOR on the scalar input and the EXEC mask, store the calculated result into the EXEC mask,
@@ -559,9 +514,6 @@ def _SOP1Op_S_NOR_SAVEEXEC_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, V
   D0.u64 = saveexec.u64
   SCC.b32 = EXEC.u64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP1Op_S_XNOR_SAVEEXEC_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Calculate bitwise XNOR on the scalar input and the EXEC mask, store the calculated result into the EXEC mask,
@@ -592,9 +544,6 @@ def _SOP1Op_S_XNOR_SAVEEXEC_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, 
   D0.u64 = saveexec.u64
   SCC.b32 = EXEC.u64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP1Op_S_AND_NOT0_SAVEEXEC_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Calculate bitwise AND on the EXEC mask and the negation of the scalar input, store the calculated result into
@@ -625,9 +574,6 @@ def _SOP1Op_S_AND_NOT0_SAVEEXEC_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM
   D0.u64 = saveexec.u64
   SCC.b32 = EXEC.u64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP1Op_S_OR_NOT0_SAVEEXEC_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Calculate bitwise OR on the EXEC mask and the negation of the scalar input, store the calculated result into the
@@ -658,9 +604,6 @@ def _SOP1Op_S_OR_NOT0_SAVEEXEC_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM1
   D0.u64 = saveexec.u64
   SCC.b32 = EXEC.u64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP1Op_S_AND_NOT1_SAVEEXEC_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Calculate bitwise AND on the scalar input and the negation of the EXEC mask, store the calculated result into
@@ -691,9 +634,6 @@ def _SOP1Op_S_AND_NOT1_SAVEEXEC_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM
   D0.u64 = saveexec.u64
   SCC.b32 = EXEC.u64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP1Op_S_OR_NOT1_SAVEEXEC_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Calculate bitwise OR on the scalar input and the negation of the EXEC mask, store the calculated result into the
@@ -724,9 +664,6 @@ def _SOP1Op_S_OR_NOT1_SAVEEXEC_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM1
   D0.u64 = saveexec.u64
   SCC.b32 = EXEC.u64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP1Op_S_AND_NOT0_WREXEC_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Calculate bitwise AND on the EXEC mask and the negation of the scalar input, store the calculated result into
@@ -753,9 +690,6 @@ def _SOP1Op_S_AND_NOT0_WREXEC_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16
   D0.u64 = EXEC.u64
   SCC.b32 = EXEC.u64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP1Op_S_AND_NOT1_WREXEC_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Calculate bitwise AND on the scalar input and the negation of the EXEC mask, store the calculated result into
@@ -782,9 +716,6 @@ def _SOP1Op_S_AND_NOT1_WREXEC_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16
   D0.u64 = EXEC.u64
   SCC.b32 = EXEC.u64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP1Op_S_SENDMSG_RTN_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # If SDST is VCC then VCCZ is undefined.
@@ -1086,9 +1017,6 @@ def _SOP2Op_S_LSHL_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC
   D0.u64 = (S0.u64 << S1[5 : 0].u32)
   SCC.b32 = D0.u64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP2Op_S_LSHR_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u32 = (S0.u32 >> S1[4 : 0].u32);
@@ -1105,9 +1033,6 @@ def _SOP2Op_S_LSHR_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC
   D0.u64 = (S0.u64 >> S1[5 : 0].u32)
   SCC.b32 = D0.u64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP2Op_S_ASHR_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.i32 = 32'I(signext(S0.i32) >> S1[4 : 0].u32);
@@ -1124,9 +1049,6 @@ def _SOP2Op_S_ASHR_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC
   D0.i64 = (signext(S0.i64) >> S1[5 : 0].u32)
   SCC.b32 = D0.i64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP2Op_S_LSHL1_ADD_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # tmp = (64'U(S0.u32) << 1U) + 64'U(S1.u32);
@@ -1219,9 +1141,6 @@ def _SOP2Op_S_AND_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0
   D0.u64 = (S0.u64 & S1.u64)
   SCC.b32 = D0.u64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP2Op_S_OR_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u32 = (S0.u32 | S1.u32);
@@ -1238,9 +1157,6 @@ def _SOP2Op_S_OR_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0,
   D0.u64 = (S0.u64 | S1.u64)
   SCC.b32 = D0.u64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP2Op_S_XOR_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u32 = (S0.u32 ^ S1.u32);
@@ -1257,9 +1173,6 @@ def _SOP2Op_S_XOR_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0
   D0.u64 = (S0.u64 ^ S1.u64)
   SCC.b32 = D0.u64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP2Op_S_NAND_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u32 = ~(S0.u32 & S1.u32);
@@ -1276,9 +1189,6 @@ def _SOP2Op_S_NAND_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC
   D0.u64 = ~(S0.u64 & S1.u64)
   SCC.b32 = D0.u64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP2Op_S_NOR_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u32 = ~(S0.u32 | S1.u32);
@@ -1295,9 +1205,6 @@ def _SOP2Op_S_NOR_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0
   D0.u64 = ~(S0.u64 | S1.u64)
   SCC.b32 = D0.u64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP2Op_S_XNOR_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u32 = ~(S0.u32 ^ S1.u32);
@@ -1314,9 +1221,6 @@ def _SOP2Op_S_XNOR_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC
   D0.u64 = ~(S0.u64 ^ S1.u64)
   SCC.b32 = D0.u64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP2Op_S_AND_NOT1_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u32 = (S0.u32 & ~S1.u32);
@@ -1333,9 +1237,6 @@ def _SOP2Op_S_AND_NOT1_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR,
   D0.u64 = (S0.u64 & ~S1.u64)
   SCC.b32 = D0.u64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP2Op_S_OR_NOT1_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u32 = (S0.u32 | ~S1.u32);
@@ -1352,9 +1253,6 @@ def _SOP2Op_S_OR_NOT1_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   D0.u64 = (S0.u64 | ~S1.u64)
   SCC.b32 = D0.u64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP2Op_S_BFE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u32 = ((S0.u32 >> S1[4 : 0].u32) & ((1U << S1[22 : 16].u32) - 1U));
@@ -1382,9 +1280,6 @@ def _SOP2Op_S_BFE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0
   D0.u64 = ((S0.u64 >> S1[5 : 0].u32) & ((1 << S1[22 : 16].u32) - 1))
   SCC.b32 = D0.u64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP2Op_S_BFE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # tmp.i64 = ((S0.i64 >> S1[5 : 0].u32) & ((1LL << S1[22 : 16].u32) - 1LL));
@@ -1396,9 +1291,6 @@ def _SOP2Op_S_BFE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0
   D0.i64 = signext_from_bit(tmp.i64, S1[22 : 16].u32)
   SCC.b32 = D0.i64 != 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP2Op_S_BFM_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u32 = (((1U << S0[4 : 0].u32) - 1U) << S1[4 : 0].u32)
@@ -1411,9 +1303,6 @@ def _SOP2Op_S_BFM_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0
   # --- compiled pseudocode ---
   D0.u64 = (((1 << S0[5 : 0].u32) - 1) << S1[5 : 0].u32)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP2Op_S_MUL_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.i32 = S0.i32 * S1.i32
@@ -1444,9 +1333,6 @@ def _SOP2Op_S_CSELECT_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64 = ((S0.u64) if (SCC) else (S1.u64))
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _SOP2Op_S_PACK_LL_B32_B16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0 = { S1[15 : 0].u16, S0[15 : 0].u16 }
@@ -2385,9 +2271,6 @@ def _VOP1Op_V_CVT_F64_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.f64 = i32_to_f64(S0.i32)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP1Op_V_CVT_F32_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.f32 = i32_to_f32(S0.i32)
@@ -2448,9 +2331,6 @@ def _VOP1Op_V_CVT_F64_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.f64 = f32_to_f64(S0.f32)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP1Op_V_CVT_F32_UBYTE0(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.f32 = u32_to_f32(S0[7 : 0].u32)
@@ -2487,18 +2367,12 @@ def _VOP1Op_V_CVT_F64_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.f64 = u32_to_f64(S0.u32)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP1Op_V_TRUNC_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.f64 = trunc(S0.f64)
   # --- compiled pseudocode ---
   D0.f64 = trunc(S0.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP1Op_V_CEIL_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.f64 = trunc(S0.f64);
@@ -2510,9 +2384,6 @@ def _VOP1Op_V_CEIL_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC
   if ((S0.f64 > 0.0)  and  (S0.f64 != D0.f64)):
     D0.f64 += 1.0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP1Op_V_RNDNE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.f64 = floor(S0.f64 + 0.5);
@@ -2524,9 +2395,6 @@ def _VOP1Op_V_RNDNE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   if (isEven(floor(S0.f64))  and  (fract(S0.f64) == 0.5)):
     D0.f64 -= 1.0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP1Op_V_FLOOR_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.f64 = trunc(S0.f64);
@@ -2538,9 +2406,6 @@ def _VOP1Op_V_FLOOR_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   if ((S0.f64 < 0.0)  and  (S0.f64 != D0.f64)):
     D0.f64 += -1.0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP1Op_V_MOV_B16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.b16 = S0.b16
@@ -2629,18 +2494,12 @@ def _VOP1Op_V_RCP_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0
   # --- compiled pseudocode ---
   D0.f64 = 1.0 / S0.f64
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP1Op_V_RSQ_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.f64 = 1.0 / sqrt(S0.f64)
   # --- compiled pseudocode ---
   D0.f64 = 1.0 / sqrt(S0.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP1Op_V_SQRT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.f32 = sqrt(S0.f32)
@@ -2653,9 +2512,6 @@ def _VOP1Op_V_SQRT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC
   # --- compiled pseudocode ---
   D0.f64 = sqrt(S0.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP1Op_V_SIN_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.f32 = sin(S0.f32 * 32'F(PI * 2.0))
@@ -2754,18 +2610,12 @@ def _VOP1Op_V_FREXP_MANT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGP
   else:
     D0.f64 = mantissa(S0.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP1Op_V_FRACT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.f64 = S0.f64 + -floor(S0.f64)
   # --- compiled pseudocode ---
   D0.f64 = S0.f64 + -floor(S0.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP1Op_V_FREXP_EXP_I32_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # if ((64'F(S0.f32) == +INF) || (64'F(S0.f32) == -INF) || isNAN(64'F(S0.f32))) then
@@ -3651,9 +3501,6 @@ def _VOP3Op_V_CMP_F_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_LT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is less than the second input. Store the result into VCC or a
@@ -3662,9 +3509,6 @@ def _VOP3Op_V_CMP_LT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f16 < S1.f16
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_EQ_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into VCC or a
@@ -3673,9 +3517,6 @@ def _VOP3Op_V_CMP_EQ_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f16 == S1.f16
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_LE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.f16 <= S1.f16;
@@ -3683,9 +3524,6 @@ def _VOP3Op_V_CMP_LE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f16 <= S1.f16
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_GT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is greater than the second input. Store the result into VCC
@@ -3694,9 +3532,6 @@ def _VOP3Op_V_CMP_GT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f16 > S1.f16
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_LG_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.f16 <> S1.f16;
@@ -3704,9 +3539,6 @@ def _VOP3Op_V_CMP_LG_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f16  !=  S1.f16
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_GE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.f16 >= S1.f16;
@@ -3714,9 +3546,6 @@ def _VOP3Op_V_CMP_GE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f16 >= S1.f16
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_O_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is orderable to the second input. Store the result into VCC
@@ -3725,9 +3554,6 @@ def _VOP3Op_V_CMP_O_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = ( not isNAN(F(S0.f16))  and   not isNAN(F(S1.f16)))
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_U_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # VCC or a scalar register.
@@ -3736,9 +3562,6 @@ def _VOP3Op_V_CMP_U_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = (isNAN(F(S0.f16))  or  isNAN(F(S1.f16)))
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_NGE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = !(S0.f16 >= S1.f16);
@@ -3747,9 +3570,6 @@ def _VOP3Op_V_CMP_NGE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f16 >= S1.f16)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_NLG_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = !(S0.f16 <> S1.f16);
@@ -3758,9 +3578,6 @@ def _VOP3Op_V_CMP_NLG_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f16  !=  S1.f16)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_NGT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # VCC or a scalar register.
@@ -3770,9 +3587,6 @@ def _VOP3Op_V_CMP_NGT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f16 > S1.f16)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_NLE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = !(S0.f16 <= S1.f16);
@@ -3781,9 +3595,6 @@ def _VOP3Op_V_CMP_NLE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f16 <= S1.f16)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_NEQ_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is not equal to the second input. Store the result into VCC
@@ -3793,9 +3604,6 @@ def _VOP3Op_V_CMP_NEQ_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f16 == S1.f16)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_NLT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is not less than the second input. Store the result into VCC
@@ -3805,9 +3613,6 @@ def _VOP3Op_V_CMP_NLT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f16 < S1.f16)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_T_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1. Store the result into VCC or a scalar register.
@@ -3816,9 +3621,6 @@ def _VOP3Op_V_CMP_T_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = 1
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_F_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 0. Store the result into VCC or a scalar register.
@@ -3827,9 +3629,6 @@ def _VOP3Op_V_CMP_F_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_LT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is less than the second input. Store the result into VCC or a
@@ -3838,9 +3637,6 @@ def _VOP3Op_V_CMP_LT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f32 < S1.f32
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_EQ_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into VCC or a
@@ -3849,9 +3645,6 @@ def _VOP3Op_V_CMP_EQ_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f32 == S1.f32
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_LE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.f32 <= S1.f32;
@@ -3859,9 +3652,6 @@ def _VOP3Op_V_CMP_LE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f32 <= S1.f32
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_GT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is greater than the second input. Store the result into VCC
@@ -3870,9 +3660,6 @@ def _VOP3Op_V_CMP_GT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f32 > S1.f32
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_LG_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.f32 <> S1.f32;
@@ -3880,9 +3667,6 @@ def _VOP3Op_V_CMP_LG_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f32  !=  S1.f32
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_GE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.f32 >= S1.f32;
@@ -3890,9 +3674,6 @@ def _VOP3Op_V_CMP_GE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f32 >= S1.f32
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_O_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is orderable to the second input. Store the result into VCC
@@ -3901,9 +3682,6 @@ def _VOP3Op_V_CMP_O_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = ( not isNAN(F(S0.f32))  and   not isNAN(F(S1.f32)))
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_U_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # VCC or a scalar register.
@@ -3912,9 +3690,6 @@ def _VOP3Op_V_CMP_U_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = (isNAN(F(S0.f32))  or  isNAN(F(S1.f32)))
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_NGE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = !(S0.f32 >= S1.f32);
@@ -3923,9 +3698,6 @@ def _VOP3Op_V_CMP_NGE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f32 >= S1.f32)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_NLG_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = !(S0.f32 <> S1.f32);
@@ -3934,9 +3706,6 @@ def _VOP3Op_V_CMP_NLG_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f32  !=  S1.f32)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_NGT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # VCC or a scalar register.
@@ -3946,9 +3715,6 @@ def _VOP3Op_V_CMP_NGT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f32 > S1.f32)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_NLE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = !(S0.f32 <= S1.f32);
@@ -3957,9 +3723,6 @@ def _VOP3Op_V_CMP_NLE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f32 <= S1.f32)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_NEQ_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is not equal to the second input. Store the result into VCC
@@ -3969,9 +3732,6 @@ def _VOP3Op_V_CMP_NEQ_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f32 == S1.f32)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_NLT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is not less than the second input. Store the result into VCC
@@ -3981,9 +3741,6 @@ def _VOP3Op_V_CMP_NLT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f32 < S1.f32)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_T_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1. Store the result into VCC or a scalar register.
@@ -3992,9 +3749,6 @@ def _VOP3Op_V_CMP_T_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = 1
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_F_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 0. Store the result into VCC or a scalar register.
@@ -4003,9 +3757,6 @@ def _VOP3Op_V_CMP_F_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_LT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is less than the second input. Store the result into VCC or a
@@ -4014,9 +3765,6 @@ def _VOP3Op_V_CMP_LT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f64 < S1.f64
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_EQ_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into VCC or a
@@ -4025,9 +3773,6 @@ def _VOP3Op_V_CMP_EQ_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f64 == S1.f64
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_LE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.f64 <= S1.f64;
@@ -4035,9 +3780,6 @@ def _VOP3Op_V_CMP_LE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f64 <= S1.f64
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_GT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is greater than the second input. Store the result into VCC
@@ -4046,9 +3788,6 @@ def _VOP3Op_V_CMP_GT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f64 > S1.f64
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_LG_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.f64 <> S1.f64;
@@ -4056,9 +3795,6 @@ def _VOP3Op_V_CMP_LG_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f64  !=  S1.f64
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_GE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.f64 >= S1.f64;
@@ -4066,9 +3802,6 @@ def _VOP3Op_V_CMP_GE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f64 >= S1.f64
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_O_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is orderable to the second input. Store the result into VCC
@@ -4077,9 +3810,6 @@ def _VOP3Op_V_CMP_O_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = ( not isNAN(S0.f64)  and   not isNAN(S1.f64))
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_U_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # VCC or a scalar register.
@@ -4088,9 +3818,6 @@ def _VOP3Op_V_CMP_U_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = (isNAN(S0.f64)  or  isNAN(S1.f64))
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_NGE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = !(S0.f64 >= S1.f64);
@@ -4099,9 +3826,6 @@ def _VOP3Op_V_CMP_NGE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f64 >= S1.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_NLG_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = !(S0.f64 <> S1.f64);
@@ -4110,9 +3834,6 @@ def _VOP3Op_V_CMP_NLG_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f64  !=  S1.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_NGT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # VCC or a scalar register.
@@ -4122,9 +3843,6 @@ def _VOP3Op_V_CMP_NGT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f64 > S1.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_NLE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = !(S0.f64 <= S1.f64);
@@ -4133,9 +3851,6 @@ def _VOP3Op_V_CMP_NLE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f64 <= S1.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_NEQ_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is not equal to the second input. Store the result into VCC
@@ -4145,9 +3860,6 @@ def _VOP3Op_V_CMP_NEQ_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f64 == S1.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_NLT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is not less than the second input. Store the result into VCC
@@ -4157,9 +3869,6 @@ def _VOP3Op_V_CMP_NLT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f64 < S1.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_T_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1. Store the result into VCC or a scalar register.
@@ -4168,9 +3877,6 @@ def _VOP3Op_V_CMP_T_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = 1
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_LT_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is less than the second input. Store the result into VCC or a
@@ -4179,9 +3885,6 @@ def _VOP3Op_V_CMP_LT_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i16 < S1.i16
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_EQ_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into VCC or a
@@ -4190,9 +3893,6 @@ def _VOP3Op_V_CMP_EQ_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i16 == S1.i16
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_LE_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.i16 <= S1.i16;
@@ -4200,9 +3900,6 @@ def _VOP3Op_V_CMP_LE_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i16 <= S1.i16
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_GT_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is greater than the second input. Store the result into VCC
@@ -4211,9 +3908,6 @@ def _VOP3Op_V_CMP_GT_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i16 > S1.i16
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_NE_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is not equal to the second input. Store the result into VCC
@@ -4222,9 +3916,6 @@ def _VOP3Op_V_CMP_NE_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i16  !=  S1.i16
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_GE_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.i16 >= S1.i16;
@@ -4232,9 +3923,6 @@ def _VOP3Op_V_CMP_GE_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i16 >= S1.i16
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_LT_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is less than the second input. Store the result into VCC or a
@@ -4243,9 +3931,6 @@ def _VOP3Op_V_CMP_LT_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u16 < S1.u16
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_EQ_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into VCC or a
@@ -4254,9 +3939,6 @@ def _VOP3Op_V_CMP_EQ_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u16 == S1.u16
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_LE_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.u16 <= S1.u16;
@@ -4264,9 +3946,6 @@ def _VOP3Op_V_CMP_LE_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u16 <= S1.u16
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_GT_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is greater than the second input. Store the result into VCC
@@ -4275,9 +3954,6 @@ def _VOP3Op_V_CMP_GT_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u16 > S1.u16
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_NE_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is not equal to the second input. Store the result into VCC
@@ -4286,9 +3962,6 @@ def _VOP3Op_V_CMP_NE_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u16  !=  S1.u16
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_GE_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.u16 >= S1.u16;
@@ -4296,9 +3969,6 @@ def _VOP3Op_V_CMP_GE_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u16 >= S1.u16
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_F_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 0. Store the result into VCC or a scalar register.
@@ -4307,9 +3977,6 @@ def _VOP3Op_V_CMP_F_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_LT_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is less than the second input. Store the result into VCC or a
@@ -4318,9 +3985,6 @@ def _VOP3Op_V_CMP_LT_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i32 < S1.i32
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_EQ_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into VCC or a
@@ -4329,9 +3993,6 @@ def _VOP3Op_V_CMP_EQ_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i32 == S1.i32
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_LE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.i32 <= S1.i32;
@@ -4339,9 +4000,6 @@ def _VOP3Op_V_CMP_LE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i32 <= S1.i32
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_GT_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is greater than the second input. Store the result into VCC
@@ -4350,9 +4008,6 @@ def _VOP3Op_V_CMP_GT_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i32 > S1.i32
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_NE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is not equal to the second input. Store the result into VCC
@@ -4361,9 +4016,6 @@ def _VOP3Op_V_CMP_NE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i32  !=  S1.i32
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_GE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.i32 >= S1.i32;
@@ -4371,9 +4023,6 @@ def _VOP3Op_V_CMP_GE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i32 >= S1.i32
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_T_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1. Store the result into VCC or a scalar register.
@@ -4382,9 +4031,6 @@ def _VOP3Op_V_CMP_T_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = 1
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_F_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 0. Store the result into VCC or a scalar register.
@@ -4393,9 +4039,6 @@ def _VOP3Op_V_CMP_F_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_LT_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is less than the second input. Store the result into VCC or a
@@ -4404,9 +4047,6 @@ def _VOP3Op_V_CMP_LT_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u32 < S1.u32
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_EQ_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into VCC or a
@@ -4415,9 +4055,6 @@ def _VOP3Op_V_CMP_EQ_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u32 == S1.u32
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_LE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.u32 <= S1.u32;
@@ -4425,9 +4062,6 @@ def _VOP3Op_V_CMP_LE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u32 <= S1.u32
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_GT_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is greater than the second input. Store the result into VCC
@@ -4436,9 +4070,6 @@ def _VOP3Op_V_CMP_GT_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u32 > S1.u32
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_NE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is not equal to the second input. Store the result into VCC
@@ -4447,9 +4078,6 @@ def _VOP3Op_V_CMP_NE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u32  !=  S1.u32
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_GE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.u32 >= S1.u32;
@@ -4457,9 +4085,6 @@ def _VOP3Op_V_CMP_GE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u32 >= S1.u32
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_T_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1. Store the result into VCC or a scalar register.
@@ -4468,9 +4093,6 @@ def _VOP3Op_V_CMP_T_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = 1
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_F_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 0. Store the result into VCC or a scalar register.
@@ -4479,9 +4101,6 @@ def _VOP3Op_V_CMP_F_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_LT_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is less than the second input. Store the result into VCC or a
@@ -4490,9 +4109,6 @@ def _VOP3Op_V_CMP_LT_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i64 < S1.i64
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_EQ_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into VCC or a
@@ -4501,9 +4117,6 @@ def _VOP3Op_V_CMP_EQ_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i64 == S1.i64
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_LE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.i64 <= S1.i64;
@@ -4511,9 +4124,6 @@ def _VOP3Op_V_CMP_LE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i64 <= S1.i64
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_GT_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is greater than the second input. Store the result into VCC
@@ -4522,9 +4132,6 @@ def _VOP3Op_V_CMP_GT_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i64 > S1.i64
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_NE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is not equal to the second input. Store the result into VCC
@@ -4533,9 +4140,6 @@ def _VOP3Op_V_CMP_NE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i64  !=  S1.i64
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_GE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.i64 >= S1.i64;
@@ -4543,9 +4147,6 @@ def _VOP3Op_V_CMP_GE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i64 >= S1.i64
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_T_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1. Store the result into VCC or a scalar register.
@@ -4554,9 +4155,6 @@ def _VOP3Op_V_CMP_T_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = 1
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_F_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 0. Store the result into VCC or a scalar register.
@@ -4565,9 +4163,6 @@ def _VOP3Op_V_CMP_F_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = 0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_LT_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is less than the second input. Store the result into VCC or a
@@ -4576,9 +4171,6 @@ def _VOP3Op_V_CMP_LT_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u64 < S1.u64
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_EQ_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into VCC or a
@@ -4587,9 +4179,6 @@ def _VOP3Op_V_CMP_EQ_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u64 == S1.u64
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_LE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.u64 <= S1.u64;
@@ -4597,9 +4186,6 @@ def _VOP3Op_V_CMP_LE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u64 <= S1.u64
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_GT_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is greater than the second input. Store the result into VCC
@@ -4608,9 +4194,6 @@ def _VOP3Op_V_CMP_GT_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u64 > S1.u64
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_NE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is not equal to the second input. Store the result into VCC
@@ -4619,9 +4202,6 @@ def _VOP3Op_V_CMP_NE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u64  !=  S1.u64
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_GE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.u64 >= S1.u64;
@@ -4629,9 +4209,6 @@ def _VOP3Op_V_CMP_GE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u64 >= S1.u64
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_T_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1. Store the result into VCC or a scalar register.
@@ -4640,9 +4217,6 @@ def _VOP3Op_V_CMP_T_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = 1
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_CLASS_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # half-precision float, and set the per-lane condition code to the result. Store the result into VCC or a scalar
@@ -4691,9 +4265,6 @@ def _VOP3Op_V_CMP_CLASS_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR
     result = S1.u32[((5) if (sign(S0.f16)) else (6))]
   D0.u64[laneId] = result
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_CLASS_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # single-precision float, and set the per-lane condition code to the result. Store the result into VCC or a scalar
@@ -4742,9 +4313,6 @@ def _VOP3Op_V_CMP_CLASS_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR
     result = S1.u32[((5) if (sign(S0.f32)) else (6))]
   D0.u64[laneId] = result
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMP_CLASS_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # double-precision float, and set the per-lane condition code to the result. Store the result into VCC or a scalar
@@ -4793,9 +4361,6 @@ def _VOP3Op_V_CMP_CLASS_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR
     result = S1.u32[((5) if (sign(S0.f64)) else (6))]
   D0.u64[laneId] = result
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CMPX_F_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = 1'0U
@@ -5568,9 +5133,6 @@ def _VOP3Op_V_CVT_F64_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.f64 = i32_to_f64(S0.i32)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CVT_F32_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.f32 = i32_to_f32(S0.i32)
@@ -5631,9 +5193,6 @@ def _VOP3Op_V_CVT_F64_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.f64 = f32_to_f64(S0.f32)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CVT_F32_UBYTE0(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.f32 = u32_to_f32(S0[7 : 0].u32)
@@ -5670,18 +5229,12 @@ def _VOP3Op_V_CVT_F64_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.f64 = u32_to_f64(S0.u32)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_TRUNC_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.f64 = trunc(S0.f64)
   # --- compiled pseudocode ---
   D0.f64 = trunc(S0.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_CEIL_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.f64 = trunc(S0.f64);
@@ -5693,9 +5246,6 @@ def _VOP3Op_V_CEIL_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC
   if ((S0.f64 > 0.0)  and  (S0.f64 != D0.f64)):
     D0.f64 += 1.0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_RNDNE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.f64 = floor(S0.f64 + 0.5);
@@ -5707,9 +5257,6 @@ def _VOP3Op_V_RNDNE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   if (isEven(floor(S0.f64))  and  (fract(S0.f64) == 0.5)):
     D0.f64 -= 1.0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_FLOOR_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.f64 = trunc(S0.f64);
@@ -5721,9 +5268,6 @@ def _VOP3Op_V_FLOOR_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   if ((S0.f64 < 0.0)  and  (S0.f64 != D0.f64)):
     D0.f64 += -1.0
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_MOV_B16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.b16 = S0.b16
@@ -5812,18 +5356,12 @@ def _VOP3Op_V_RCP_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0
   # --- compiled pseudocode ---
   D0.f64 = 1.0 / S0.f64
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_RSQ_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.f64 = 1.0 / sqrt(S0.f64)
   # --- compiled pseudocode ---
   D0.f64 = 1.0 / sqrt(S0.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_SQRT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.f32 = sqrt(S0.f32)
@@ -5836,9 +5374,6 @@ def _VOP3Op_V_SQRT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC
   # --- compiled pseudocode ---
   D0.f64 = sqrt(S0.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_SIN_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.f32 = sin(S0.f32 * 32'F(PI * 2.0))
@@ -5937,18 +5472,12 @@ def _VOP3Op_V_FREXP_MANT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGP
   else:
     D0.f64 = mantissa(S0.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_FRACT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.f64 = S0.f64 + -floor(S0.f64)
   # --- compiled pseudocode ---
   D0.f64 = S0.f64 + -floor(S0.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_FREXP_EXP_I32_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # if ((64'F(S0.f32) == +INF) || (64'F(S0.f32) == -INF) || isNAN(64'F(S0.f32))) then
@@ -6779,9 +6308,6 @@ def _VOP3Op_V_FMA_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0
   # --- compiled pseudocode ---
   D0.f64 = fma(S0.f64, S1.f64, S2.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_LERP_U8(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # tmp = ((S0.u32[31 : 24] + S1.u32[31 : 24] + S2.u32[24].u8) >> 1U << 24U);
@@ -7064,9 +6590,6 @@ def _VOP3Op_V_DIV_FIXUP_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR
   else:
     D0.f64 = ((-abs(S0.f64)) if (sign_out) else (abs(S0.f64)))
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_DIV_FMAS_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # if VCC.u64[laneId] then
@@ -7093,9 +6616,6 @@ def _VOP3Op_V_DIV_FMAS_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR,
   else:
     D0.f64 = fma(S0.f64, S1.f64, S2.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_MSAD_U8(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # // UNSIGNED comparison
@@ -7129,9 +6649,6 @@ def _VOP3Op_V_QSAD_PK_U16_U8(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGP
   tmp[15 : 0] = (v_sad_u8(S0[31 : 0], S1[31 : 0], S2[15 : 0].u32))
   D0.b64 = tmp.b64
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_MQSAD_PK_U16_U8(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # tmp[63 : 48] = 16'B(v_msad_u8(S0[55 : 24], S1[31 : 0], S2[63 : 48].u32));
@@ -7147,9 +6664,6 @@ def _VOP3Op_V_MQSAD_PK_U16_U8(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VG
   tmp[15 : 0] = (v_msad_u8(S0[31 : 0], S1[31 : 0], S2[15 : 0].u32))
   D0.b64 = tmp.b64
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_MQSAD_U32_U8(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # tmp[127 : 96] = 32'B(v_msad_u8(S0[55 : 24], S1[31 : 0], S2[127 : 96].u32));
@@ -7640,18 +7154,12 @@ def _VOP3Op_V_ADD_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0
   # --- compiled pseudocode ---
   D0.f64 = S0.f64 + S1.f64
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_MUL_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.f64 = S0.f64 * S1.f64
   # --- compiled pseudocode ---
   D0.f64 = S0.f64 * S1.f64
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_MIN_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # // Version of comparison where -0.0 < +0.0, differs from IEEE
@@ -7707,9 +7215,6 @@ def _VOP3Op_V_MIN_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0
     else:
       D0.f64 = S1.f64
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_MAX_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # // Version of comparison where +0.0 > -0.0, differs from IEEE
@@ -7765,18 +7270,12 @@ def _VOP3Op_V_MAX_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0
     else:
       D0.f64 = S1.f64
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_LDEXP_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.f64 = S0.f64 * 2.0 ** S1.i32
   # --- compiled pseudocode ---
   D0.f64 = S0.f64 * 2.0 ** S1.i32
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_MUL_LO_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u32 = S0.u32 * S1.u32
@@ -7819,27 +7318,18 @@ def _VOP3Op_V_LSHLREV_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64 = (S1.u64 << S0[5 : 0].u32)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_LSHRREV_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64 = (S1.u64 >> S0[5 : 0].u32)
   # --- compiled pseudocode ---
   D0.u64 = (S1.u64 >> S0[5 : 0].u32)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_ASHRREV_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.i64 = (S1.i64 >> S0[5 : 0].u32)
   # --- compiled pseudocode ---
   D0.i64 = (S1.i64 >> S0[5 : 0].u32)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3Op_V_READLANE_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # declare lane : 32'U;
@@ -8306,9 +7796,6 @@ def _VOP3SDOp_V_ADD_CO_CI_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VG
   VCC.u64[laneId] = ((1) if (tmp >= 0x100000000) else (0))
   D0.u32 = tmp.u32
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (VCC._val >> laneId) & 1
-  return flags
 
 def _VOP3SDOp_V_SUB_CO_CI_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # tmp = S0.u32 - S1.u32 - VCC.u64[laneId].u32;
@@ -8321,9 +7808,6 @@ def _VOP3SDOp_V_SUB_CO_CI_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VG
   VCC.u64[laneId] = ((1) if ((S1.u32) + VCC.u64[laneId] > (S0.u32)) else (0))
   D0.u32 = tmp.u32
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (VCC._val >> laneId) & 1
-  return flags
 
 def _VOP3SDOp_V_SUBREV_CO_CI_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # tmp = S1.u32 - S0.u32 - VCC.u64[laneId].u32;
@@ -8336,9 +7820,6 @@ def _VOP3SDOp_V_SUBREV_CO_CI_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16,
   VCC.u64[laneId] = ((1) if ((S0.u32) + VCC.u64[laneId] > (S1.u32)) else (0))
   D0.u32 = tmp.u32
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (VCC._val >> laneId) & 1
-  return flags
 
 def _VOP3SDOp_V_DIV_SCALE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # VCC = 0x0LL;
@@ -8373,31 +7854,29 @@ def _VOP3SDOp_V_DIV_SCALE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VG
   # endif
   D0._val = S0._val
   # --- compiled pseudocode ---
-  VCC.b32 = 0x0
+  # V_DIV_SCALE sets VCC bit for the lane if scaling is needed
+  VCC.u64[laneId] = 0
   if ((F(S2.f32) == 0.0)  or  (F(S1.f32) == 0.0)):
-    D0.f32 = float("nan")
+    VCC.u64[laneId] = 1; D0.f32 = float("nan")
   elif exponent(S2.f32) - exponent(S1.f32) >= 96:
-    VCC.b32 = 0x1
+    VCC.u64[laneId] = 1
     if S0.f32 == S1.f32:
       D0.f32 = ldexp(S0.f32, 64)
   elif S1.f32 == DENORM.f32:
-    D0.f32 = ldexp(S0.f32, 64)
+    D0.f32 = float("nan")
   elif ((1.0 / F(S1.f32) == DENORM.f64)  and  (S2.f32 / S1.f32 == DENORM.f32)):
-    VCC.b32 = 0x1
+    VCC.u64[laneId] = 1
     if S0.f32 == S1.f32:
       D0.f32 = ldexp(S0.f32, 64)
   elif 1.0 / F(S1.f32) == DENORM.f64:
     D0.f32 = ldexp(S0.f32, -64)
   elif S2.f32 / S1.f32 == DENORM.f32:
-    VCC.b32 = 0x1
+    VCC.u64[laneId] = 1
     if S0.f32 == S2.f32:
       D0.f32 = ldexp(S0.f32, 64)
   elif exponent(S2.f32) <= 23:
-    D0.f32 = ldexp(S0.f32, 64)
+    VCC.u64[laneId] = 1; D0.f32 = ldexp(S0.f32, 64)
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (VCC._val >> laneId) & 1
-  return flags
 
 def _VOP3SDOp_V_DIV_SCALE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # VCC = 0x0LL;
@@ -8432,32 +7911,29 @@ def _VOP3SDOp_V_DIV_SCALE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VG
   # endif
   D0._val = S0._val
   # --- compiled pseudocode ---
-  VCC.b32 = 0x0
+  # V_DIV_SCALE sets VCC bit for the lane if scaling is needed
+  VCC.u64[laneId] = 0
   if ((S2.f64 == 0.0)  or  (S1.f64 == 0.0)):
-    D0.f64 = float("nan")
+    VCC.u64[laneId] = 1; D0.f64 = float("nan")
   elif exponent(S2.f64) - exponent(S1.f64) >= 768:
-    VCC.b32 = 0x1
+    VCC.u64[laneId] = 1
     if S0.f64 == S1.f64:
       D0.f64 = ldexp(S0.f64, 128)
   elif S1.f64 == DENORM.f64:
-    D0.f64 = ldexp(S0.f64, 128)
+    D0.f64 = float("nan")
   elif ((1.0 / S1.f64 == DENORM.f64)  and  (S2.f64 / S1.f64 == DENORM.f64)):
-    VCC.b32 = 0x1
+    VCC.u64[laneId] = 1
     if S0.f64 == S1.f64:
       D0.f64 = ldexp(S0.f64, 128)
   elif 1.0 / S1.f64 == DENORM.f64:
     D0.f64 = ldexp(S0.f64, -128)
   elif S2.f64 / S1.f64 == DENORM.f64:
-    VCC.b32 = 0x1
+    VCC.u64[laneId] = 1
     if S0.f64 == S2.f64:
       D0.f64 = ldexp(S0.f64, 128)
   elif exponent(S2.f64) <= 53:
-    D0.f64 = ldexp(S0.f64, 128)
+    VCC.u64[laneId] = 1; D0.f64 = ldexp(S0.f64, 128)
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (VCC._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOP3SDOp_V_MAD_U64_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # { D1.u1, D0.u64 } = 65'B(65'U(S0.u32) * 65'U(S1.u32) + 65'U(S2.u64))
@@ -8467,10 +7943,6 @@ def _VOP3SDOp_V_MAD_U64_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR
   D0.u64 = int(_full) & 0xffffffffffffffff
   D1 = Reg((int(_full) >> 64) & 1)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  flags['d1'] = D1._val & 1
-  return flags
 
 def _VOP3SDOp_V_MAD_I64_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # { D1.i1, D0.i64 } = 65'B(65'I(S0.i32) * 65'I(S1.i32) + 65'I(S2.i64))
@@ -8480,10 +7952,6 @@ def _VOP3SDOp_V_MAD_I64_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR
   D0.u64 = int(_full) & 0xffffffffffffffff
   D1 = Reg((int(_full) >> 64) & 1)
   # --- end pseudocode ---
-  flags = {}
-  flags['d0_64'] = True
-  flags['d1'] = D1._val & 1
-  return flags
 
 def _VOP3SDOp_V_ADD_CO_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # tmp = 64'U(S0.u32) + 64'U(S1.u32);
@@ -8496,9 +7964,6 @@ def _VOP3SDOp_V_ADD_CO_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR,
   VCC.u64[laneId] = ((1) if (tmp >= 0x100000000) else (0))
   D0.u32 = tmp.u32
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (VCC._val >> laneId) & 1
-  return flags
 
 def _VOP3SDOp_V_SUB_CO_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # tmp = S0.u32 - S1.u32;
@@ -8511,9 +7976,6 @@ def _VOP3SDOp_V_SUB_CO_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR,
   VCC.u64[laneId] = ((1) if (S1.u32 > S0.u32) else (0))
   D0.u32 = tmp.u32
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (VCC._val >> laneId) & 1
-  return flags
 
 def _VOP3SDOp_V_SUBREV_CO_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # tmp = S1.u32 - S0.u32;
@@ -8526,9 +7988,6 @@ def _VOP3SDOp_V_SUBREV_CO_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VG
   VCC.u64[laneId] = ((1) if (S0.u32 > S1.u32) else (0))
   D0.u32 = tmp.u32
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (VCC._val >> laneId) & 1
-  return flags
 
 VOP3SDOp_FUNCTIONS = {
   VOP3SDOp.V_ADD_CO_CI_U32: _VOP3SDOp_V_ADD_CO_CI_U32,
@@ -8854,10 +8313,6 @@ def _VOPCOp_V_CMP_F_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = 0
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_LT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is less than the second input. Store the result into VCC or a
@@ -8866,10 +8321,6 @@ def _VOPCOp_V_CMP_LT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f16 < S1.f16
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_EQ_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into VCC or a
@@ -8878,10 +8329,6 @@ def _VOPCOp_V_CMP_EQ_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f16 == S1.f16
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_LE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.f16 <= S1.f16;
@@ -8889,10 +8336,6 @@ def _VOPCOp_V_CMP_LE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f16 <= S1.f16
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_GT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is greater than the second input. Store the result into VCC
@@ -8901,10 +8344,6 @@ def _VOPCOp_V_CMP_GT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f16 > S1.f16
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_LG_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.f16 <> S1.f16;
@@ -8912,10 +8351,6 @@ def _VOPCOp_V_CMP_LG_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f16  !=  S1.f16
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_GE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.f16 >= S1.f16;
@@ -8923,10 +8358,6 @@ def _VOPCOp_V_CMP_GE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f16 >= S1.f16
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_O_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is orderable to the second input. Store the result into VCC
@@ -8935,10 +8366,6 @@ def _VOPCOp_V_CMP_O_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = ( not isNAN(F(S0.f16))  and   not isNAN(F(S1.f16)))
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_U_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # VCC or a scalar register.
@@ -8947,10 +8374,6 @@ def _VOPCOp_V_CMP_U_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = (isNAN(F(S0.f16))  or  isNAN(F(S1.f16)))
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_NGE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = !(S0.f16 >= S1.f16);
@@ -8959,10 +8382,6 @@ def _VOPCOp_V_CMP_NGE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f16 >= S1.f16)
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_NLG_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = !(S0.f16 <> S1.f16);
@@ -8971,10 +8390,6 @@ def _VOPCOp_V_CMP_NLG_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f16  !=  S1.f16)
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_NGT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # VCC or a scalar register.
@@ -8984,10 +8399,6 @@ def _VOPCOp_V_CMP_NGT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f16 > S1.f16)
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_NLE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = !(S0.f16 <= S1.f16);
@@ -8996,10 +8407,6 @@ def _VOPCOp_V_CMP_NLE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f16 <= S1.f16)
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_NEQ_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is not equal to the second input. Store the result into VCC
@@ -9009,10 +8416,6 @@ def _VOPCOp_V_CMP_NEQ_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f16 == S1.f16)
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_NLT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is not less than the second input. Store the result into VCC
@@ -9022,10 +8425,6 @@ def _VOPCOp_V_CMP_NLT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f16 < S1.f16)
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_T_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1. Store the result into VCC or a scalar register.
@@ -9034,10 +8433,6 @@ def _VOPCOp_V_CMP_T_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = 1
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_F_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 0. Store the result into VCC or a scalar register.
@@ -9046,10 +8441,6 @@ def _VOPCOp_V_CMP_F_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = 0
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_LT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is less than the second input. Store the result into VCC or a
@@ -9058,10 +8449,6 @@ def _VOPCOp_V_CMP_LT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f32 < S1.f32
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_EQ_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into VCC or a
@@ -9070,10 +8457,6 @@ def _VOPCOp_V_CMP_EQ_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f32 == S1.f32
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_LE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.f32 <= S1.f32;
@@ -9081,10 +8464,6 @@ def _VOPCOp_V_CMP_LE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f32 <= S1.f32
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_GT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is greater than the second input. Store the result into VCC
@@ -9093,10 +8472,6 @@ def _VOPCOp_V_CMP_GT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f32 > S1.f32
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_LG_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.f32 <> S1.f32;
@@ -9104,10 +8479,6 @@ def _VOPCOp_V_CMP_LG_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f32  !=  S1.f32
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_GE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.f32 >= S1.f32;
@@ -9115,10 +8486,6 @@ def _VOPCOp_V_CMP_GE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f32 >= S1.f32
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_O_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is orderable to the second input. Store the result into VCC
@@ -9127,10 +8494,6 @@ def _VOPCOp_V_CMP_O_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = ( not isNAN(F(S0.f32))  and   not isNAN(F(S1.f32)))
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_U_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # VCC or a scalar register.
@@ -9139,10 +8502,6 @@ def _VOPCOp_V_CMP_U_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = (isNAN(F(S0.f32))  or  isNAN(F(S1.f32)))
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_NGE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = !(S0.f32 >= S1.f32);
@@ -9151,10 +8510,6 @@ def _VOPCOp_V_CMP_NGE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f32 >= S1.f32)
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_NLG_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = !(S0.f32 <> S1.f32);
@@ -9163,10 +8518,6 @@ def _VOPCOp_V_CMP_NLG_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f32  !=  S1.f32)
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_NGT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # VCC or a scalar register.
@@ -9176,10 +8527,6 @@ def _VOPCOp_V_CMP_NGT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f32 > S1.f32)
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_NLE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = !(S0.f32 <= S1.f32);
@@ -9188,10 +8535,6 @@ def _VOPCOp_V_CMP_NLE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f32 <= S1.f32)
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_NEQ_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is not equal to the second input. Store the result into VCC
@@ -9201,10 +8544,6 @@ def _VOPCOp_V_CMP_NEQ_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f32 == S1.f32)
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_NLT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is not less than the second input. Store the result into VCC
@@ -9214,10 +8553,6 @@ def _VOPCOp_V_CMP_NLT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f32 < S1.f32)
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_T_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1. Store the result into VCC or a scalar register.
@@ -9226,10 +8561,6 @@ def _VOPCOp_V_CMP_T_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = 1
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_F_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 0. Store the result into VCC or a scalar register.
@@ -9238,10 +8569,6 @@ def _VOPCOp_V_CMP_F_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = 0
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_LT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is less than the second input. Store the result into VCC or a
@@ -9250,10 +8577,6 @@ def _VOPCOp_V_CMP_LT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f64 < S1.f64
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_EQ_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into VCC or a
@@ -9262,10 +8585,6 @@ def _VOPCOp_V_CMP_EQ_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f64 == S1.f64
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_LE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.f64 <= S1.f64;
@@ -9273,10 +8592,6 @@ def _VOPCOp_V_CMP_LE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f64 <= S1.f64
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_GT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is greater than the second input. Store the result into VCC
@@ -9285,10 +8600,6 @@ def _VOPCOp_V_CMP_GT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f64 > S1.f64
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_LG_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.f64 <> S1.f64;
@@ -9296,10 +8607,6 @@ def _VOPCOp_V_CMP_LG_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f64  !=  S1.f64
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_GE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.f64 >= S1.f64;
@@ -9307,10 +8614,6 @@ def _VOPCOp_V_CMP_GE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.f64 >= S1.f64
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_O_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is orderable to the second input. Store the result into VCC
@@ -9319,10 +8622,6 @@ def _VOPCOp_V_CMP_O_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = ( not isNAN(S0.f64)  and   not isNAN(S1.f64))
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_U_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # VCC or a scalar register.
@@ -9331,10 +8630,6 @@ def _VOPCOp_V_CMP_U_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = (isNAN(S0.f64)  or  isNAN(S1.f64))
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_NGE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = !(S0.f64 >= S1.f64);
@@ -9343,10 +8638,6 @@ def _VOPCOp_V_CMP_NGE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f64 >= S1.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_NLG_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = !(S0.f64 <> S1.f64);
@@ -9355,10 +8646,6 @@ def _VOPCOp_V_CMP_NLG_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f64  !=  S1.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_NGT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # VCC or a scalar register.
@@ -9368,10 +8655,6 @@ def _VOPCOp_V_CMP_NGT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f64 > S1.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_NLE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = !(S0.f64 <= S1.f64);
@@ -9380,10 +8663,6 @@ def _VOPCOp_V_CMP_NLE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f64 <= S1.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_NEQ_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is not equal to the second input. Store the result into VCC
@@ -9393,10 +8672,6 @@ def _VOPCOp_V_CMP_NEQ_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f64 == S1.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_NLT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is not less than the second input. Store the result into VCC
@@ -9406,10 +8681,6 @@ def _VOPCOp_V_CMP_NLT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   D0.u64[laneId] =  not (S0.f64 < S1.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_T_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1. Store the result into VCC or a scalar register.
@@ -9418,10 +8689,6 @@ def _VOPCOp_V_CMP_T_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = 1
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_LT_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is less than the second input. Store the result into VCC or a
@@ -9430,10 +8697,6 @@ def _VOPCOp_V_CMP_LT_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i16 < S1.i16
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_EQ_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into VCC or a
@@ -9442,10 +8705,6 @@ def _VOPCOp_V_CMP_EQ_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i16 == S1.i16
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_LE_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.i16 <= S1.i16;
@@ -9453,10 +8712,6 @@ def _VOPCOp_V_CMP_LE_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i16 <= S1.i16
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_GT_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is greater than the second input. Store the result into VCC
@@ -9465,10 +8720,6 @@ def _VOPCOp_V_CMP_GT_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i16 > S1.i16
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_NE_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is not equal to the second input. Store the result into VCC
@@ -9477,10 +8728,6 @@ def _VOPCOp_V_CMP_NE_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i16  !=  S1.i16
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_GE_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.i16 >= S1.i16;
@@ -9488,10 +8735,6 @@ def _VOPCOp_V_CMP_GE_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i16 >= S1.i16
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_LT_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is less than the second input. Store the result into VCC or a
@@ -9500,10 +8743,6 @@ def _VOPCOp_V_CMP_LT_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u16 < S1.u16
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_EQ_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into VCC or a
@@ -9512,10 +8751,6 @@ def _VOPCOp_V_CMP_EQ_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u16 == S1.u16
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_LE_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.u16 <= S1.u16;
@@ -9523,10 +8758,6 @@ def _VOPCOp_V_CMP_LE_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u16 <= S1.u16
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_GT_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is greater than the second input. Store the result into VCC
@@ -9535,10 +8766,6 @@ def _VOPCOp_V_CMP_GT_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u16 > S1.u16
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_NE_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is not equal to the second input. Store the result into VCC
@@ -9547,10 +8774,6 @@ def _VOPCOp_V_CMP_NE_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u16  !=  S1.u16
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_GE_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.u16 >= S1.u16;
@@ -9558,10 +8781,6 @@ def _VOPCOp_V_CMP_GE_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u16 >= S1.u16
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_F_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 0. Store the result into VCC or a scalar register.
@@ -9570,10 +8789,6 @@ def _VOPCOp_V_CMP_F_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = 0
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_LT_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is less than the second input. Store the result into VCC or a
@@ -9582,10 +8797,6 @@ def _VOPCOp_V_CMP_LT_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i32 < S1.i32
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_EQ_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into VCC or a
@@ -9594,10 +8805,6 @@ def _VOPCOp_V_CMP_EQ_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i32 == S1.i32
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_LE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.i32 <= S1.i32;
@@ -9605,10 +8812,6 @@ def _VOPCOp_V_CMP_LE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i32 <= S1.i32
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_GT_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is greater than the second input. Store the result into VCC
@@ -9617,10 +8820,6 @@ def _VOPCOp_V_CMP_GT_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i32 > S1.i32
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_NE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is not equal to the second input. Store the result into VCC
@@ -9629,10 +8828,6 @@ def _VOPCOp_V_CMP_NE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i32  !=  S1.i32
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_GE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.i32 >= S1.i32;
@@ -9640,10 +8835,6 @@ def _VOPCOp_V_CMP_GE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i32 >= S1.i32
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_T_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1. Store the result into VCC or a scalar register.
@@ -9652,10 +8843,6 @@ def _VOPCOp_V_CMP_T_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = 1
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_F_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 0. Store the result into VCC or a scalar register.
@@ -9664,10 +8851,6 @@ def _VOPCOp_V_CMP_F_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = 0
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_LT_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is less than the second input. Store the result into VCC or a
@@ -9676,10 +8859,6 @@ def _VOPCOp_V_CMP_LT_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u32 < S1.u32
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_EQ_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into VCC or a
@@ -9688,10 +8867,6 @@ def _VOPCOp_V_CMP_EQ_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u32 == S1.u32
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_LE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.u32 <= S1.u32;
@@ -9699,10 +8874,6 @@ def _VOPCOp_V_CMP_LE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u32 <= S1.u32
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_GT_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is greater than the second input. Store the result into VCC
@@ -9711,10 +8882,6 @@ def _VOPCOp_V_CMP_GT_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u32 > S1.u32
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_NE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is not equal to the second input. Store the result into VCC
@@ -9723,10 +8890,6 @@ def _VOPCOp_V_CMP_NE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u32  !=  S1.u32
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_GE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.u32 >= S1.u32;
@@ -9734,10 +8897,6 @@ def _VOPCOp_V_CMP_GE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u32 >= S1.u32
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_T_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1. Store the result into VCC or a scalar register.
@@ -9746,10 +8905,6 @@ def _VOPCOp_V_CMP_T_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = 1
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_F_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 0. Store the result into VCC or a scalar register.
@@ -9758,10 +8913,6 @@ def _VOPCOp_V_CMP_F_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = 0
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_LT_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is less than the second input. Store the result into VCC or a
@@ -9770,10 +8921,6 @@ def _VOPCOp_V_CMP_LT_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i64 < S1.i64
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_EQ_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into VCC or a
@@ -9782,10 +8929,6 @@ def _VOPCOp_V_CMP_EQ_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i64 == S1.i64
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_LE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.i64 <= S1.i64;
@@ -9793,10 +8936,6 @@ def _VOPCOp_V_CMP_LE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i64 <= S1.i64
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_GT_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is greater than the second input. Store the result into VCC
@@ -9805,10 +8944,6 @@ def _VOPCOp_V_CMP_GT_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i64 > S1.i64
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_NE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is not equal to the second input. Store the result into VCC
@@ -9817,10 +8952,6 @@ def _VOPCOp_V_CMP_NE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i64  !=  S1.i64
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_GE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.i64 >= S1.i64;
@@ -9828,10 +8959,6 @@ def _VOPCOp_V_CMP_GE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.i64 >= S1.i64
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_T_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1. Store the result into VCC or a scalar register.
@@ -9840,10 +8967,6 @@ def _VOPCOp_V_CMP_T_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = 1
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_F_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 0. Store the result into VCC or a scalar register.
@@ -9852,10 +8975,6 @@ def _VOPCOp_V_CMP_F_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = 0
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_LT_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is less than the second input. Store the result into VCC or a
@@ -9864,10 +8983,6 @@ def _VOPCOp_V_CMP_LT_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u64 < S1.u64
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_EQ_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into VCC or a
@@ -9876,10 +8991,6 @@ def _VOPCOp_V_CMP_EQ_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u64 == S1.u64
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_LE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.u64 <= S1.u64;
@@ -9887,10 +8998,6 @@ def _VOPCOp_V_CMP_LE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u64 <= S1.u64
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_GT_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is greater than the second input. Store the result into VCC
@@ -9899,10 +9006,6 @@ def _VOPCOp_V_CMP_GT_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u64 > S1.u64
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_NE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is not equal to the second input. Store the result into VCC
@@ -9911,10 +9014,6 @@ def _VOPCOp_V_CMP_NE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u64  !=  S1.u64
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_GE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # D0.u64[laneId] = S0.u64 >= S1.u64;
@@ -9922,10 +9021,6 @@ def _VOPCOp_V_CMP_GE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, S
   # --- compiled pseudocode ---
   D0.u64[laneId] = S0.u64 >= S1.u64
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_T_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1. Store the result into VCC or a scalar register.
@@ -9934,10 +9029,6 @@ def _VOPCOp_V_CMP_T_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SR
   # --- compiled pseudocode ---
   D0.u64[laneId] = 1
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_CLASS_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # half-precision float, and set the per-lane condition code to the result. Store the result into VCC or a scalar
@@ -9986,10 +9077,6 @@ def _VOPCOp_V_CMP_CLASS_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR
     result = S1.u32[((5) if (sign(S0.f16)) else (6))]
   D0.u64[laneId] = result
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_CLASS_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # single-precision float, and set the per-lane condition code to the result. Store the result into VCC or a scalar
@@ -10038,10 +9125,6 @@ def _VOPCOp_V_CMP_CLASS_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR
     result = S1.u32[((5) if (sign(S0.f32)) else (6))]
   D0.u64[laneId] = result
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMP_CLASS_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # double-precision float, and set the per-lane condition code to the result. Store the result into VCC or a scalar
@@ -10090,28 +9173,18 @@ def _VOPCOp_V_CMP_CLASS_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR
     result = S1.u32[((5) if (sign(S0.f64)) else (6))]
   D0.u64[laneId] = result
   # --- end pseudocode ---
-  flags = {}
-  flags['vcc_lane'] = (D0._val >> laneId) & 1
-  flags['d0_64'] = True
-  return flags
 
 def _VOPCOp_V_CMPX_F_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = 1'0U
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = 0
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_LT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.f16 < S1.f16
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f16 < S1.f16
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_EQ_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into the EXEC
@@ -10119,63 +9192,42 @@ def _VOPCOp_V_CMPX_EQ_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f16 == S1.f16
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_LE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.f16 <= S1.f16
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f16 <= S1.f16
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_GT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.f16 > S1.f16
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f16 > S1.f16
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_LG_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.f16 <> S1.f16
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f16  !=  S1.f16
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_GE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.f16 >= S1.f16
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f16 >= S1.f16
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_O_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = (!isNAN(64'F(S0.f16)) && !isNAN(64'F(S1.f16)))
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = ( not isNAN(F(S0.f16))  and   not isNAN(F(S1.f16)))
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_U_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = (isNAN(64'F(S0.f16)) || isNAN(64'F(S1.f16)))
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = (isNAN(F(S0.f16))  or  isNAN(F(S1.f16)))
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_NGE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = !(S0.f16 >= S1.f16);
@@ -10183,9 +9235,6 @@ def _VOPCOp_V_CMPX_NGE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR,
   # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f16 >= S1.f16)
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_NLG_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = !(S0.f16 <> S1.f16);
@@ -10193,9 +9242,6 @@ def _VOPCOp_V_CMPX_NLG_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR,
   # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f16  !=  S1.f16)
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_NGT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = !(S0.f16 > S1.f16);
@@ -10203,9 +9249,6 @@ def _VOPCOp_V_CMPX_NGT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR,
   # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f16 > S1.f16)
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_NLE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = !(S0.f16 <= S1.f16);
@@ -10213,9 +9256,6 @@ def _VOPCOp_V_CMPX_NLE_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR,
   # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f16 <= S1.f16)
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_NEQ_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = !(S0.f16 == S1.f16);
@@ -10223,9 +9263,6 @@ def _VOPCOp_V_CMPX_NEQ_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR,
   # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f16 == S1.f16)
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_NLT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = !(S0.f16 < S1.f16);
@@ -10233,36 +9270,24 @@ def _VOPCOp_V_CMPX_NLT_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR,
   # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f16 < S1.f16)
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_T_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = 1'1U
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = 1
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_F_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = 1'0U
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = 0
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_LT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.f32 < S1.f32
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f32 < S1.f32
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_EQ_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into the EXEC
@@ -10270,63 +9295,42 @@ def _VOPCOp_V_CMPX_EQ_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f32 == S1.f32
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_LE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.f32 <= S1.f32
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f32 <= S1.f32
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_GT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.f32 > S1.f32
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f32 > S1.f32
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_LG_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.f32 <> S1.f32
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f32  !=  S1.f32
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_GE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.f32 >= S1.f32
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f32 >= S1.f32
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_O_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = (!isNAN(64'F(S0.f32)) && !isNAN(64'F(S1.f32)))
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = ( not isNAN(F(S0.f32))  and   not isNAN(F(S1.f32)))
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_U_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = (isNAN(64'F(S0.f32)) || isNAN(64'F(S1.f32)))
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = (isNAN(F(S0.f32))  or  isNAN(F(S1.f32)))
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_NGE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = !(S0.f32 >= S1.f32);
@@ -10334,9 +9338,6 @@ def _VOPCOp_V_CMPX_NGE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR,
   # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f32 >= S1.f32)
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_NLG_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = !(S0.f32 <> S1.f32);
@@ -10344,9 +9345,6 @@ def _VOPCOp_V_CMPX_NLG_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR,
   # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f32  !=  S1.f32)
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_NGT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = !(S0.f32 > S1.f32);
@@ -10354,9 +9352,6 @@ def _VOPCOp_V_CMPX_NGT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR,
   # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f32 > S1.f32)
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_NLE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = !(S0.f32 <= S1.f32);
@@ -10364,9 +9359,6 @@ def _VOPCOp_V_CMPX_NLE_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR,
   # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f32 <= S1.f32)
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_NEQ_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = !(S0.f32 == S1.f32);
@@ -10374,9 +9366,6 @@ def _VOPCOp_V_CMPX_NEQ_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR,
   # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f32 == S1.f32)
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_NLT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = !(S0.f32 < S1.f32);
@@ -10384,36 +9373,24 @@ def _VOPCOp_V_CMPX_NLT_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR,
   # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f32 < S1.f32)
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_T_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = 1'1U
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = 1
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_F_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = 1'0U
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = 0
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_LT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.f64 < S1.f64
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f64 < S1.f64
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_EQ_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into the EXEC
@@ -10421,63 +9398,42 @@ def _VOPCOp_V_CMPX_EQ_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f64 == S1.f64
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_LE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.f64 <= S1.f64
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f64 <= S1.f64
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_GT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.f64 > S1.f64
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f64 > S1.f64
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_LG_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.f64 <> S1.f64
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f64  !=  S1.f64
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_GE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.f64 >= S1.f64
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.f64 >= S1.f64
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_O_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = (!isNAN(S0.f64) && !isNAN(S1.f64))
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = ( not isNAN(S0.f64)  and   not isNAN(S1.f64))
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_U_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = (isNAN(S0.f64) || isNAN(S1.f64))
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = (isNAN(S0.f64)  or  isNAN(S1.f64))
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_NGE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = !(S0.f64 >= S1.f64);
@@ -10485,9 +9441,6 @@ def _VOPCOp_V_CMPX_NGE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR,
   # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f64 >= S1.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_NLG_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = !(S0.f64 <> S1.f64);
@@ -10495,9 +9448,6 @@ def _VOPCOp_V_CMPX_NLG_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR,
   # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f64  !=  S1.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_NGT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = !(S0.f64 > S1.f64);
@@ -10505,9 +9455,6 @@ def _VOPCOp_V_CMPX_NGT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR,
   # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f64 > S1.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_NLE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = !(S0.f64 <= S1.f64);
@@ -10515,9 +9462,6 @@ def _VOPCOp_V_CMPX_NLE_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR,
   # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f64 <= S1.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_NEQ_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = !(S0.f64 == S1.f64);
@@ -10525,9 +9469,6 @@ def _VOPCOp_V_CMPX_NEQ_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR,
   # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f64 == S1.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_NLT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = !(S0.f64 < S1.f64);
@@ -10535,27 +9476,18 @@ def _VOPCOp_V_CMPX_NLT_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR,
   # --- compiled pseudocode ---
   EXEC.u64[laneId] =  not (S0.f64 < S1.f64)
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_T_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = 1'1U
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = 1
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_LT_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.i16 < S1.i16
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i16 < S1.i16
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_EQ_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into the EXEC
@@ -10563,54 +9495,36 @@ def _VOPCOp_V_CMPX_EQ_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i16 == S1.i16
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_LE_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.i16 <= S1.i16
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i16 <= S1.i16
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_GT_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.i16 > S1.i16
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i16 > S1.i16
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_NE_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.i16 <> S1.i16
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i16  !=  S1.i16
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_GE_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.i16 >= S1.i16
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i16 >= S1.i16
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_LT_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.u16 < S1.u16
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u16 < S1.u16
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_EQ_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into the EXEC
@@ -10618,63 +9532,42 @@ def _VOPCOp_V_CMPX_EQ_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u16 == S1.u16
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_LE_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.u16 <= S1.u16
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u16 <= S1.u16
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_GT_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.u16 > S1.u16
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u16 > S1.u16
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_NE_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.u16 <> S1.u16
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u16  !=  S1.u16
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_GE_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.u16 >= S1.u16
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u16 >= S1.u16
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_F_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = 1'0U
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = 0
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_LT_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.i32 < S1.i32
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i32 < S1.i32
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_EQ_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into the EXEC
@@ -10682,72 +9575,48 @@ def _VOPCOp_V_CMPX_EQ_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i32 == S1.i32
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_LE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.i32 <= S1.i32
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i32 <= S1.i32
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_GT_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.i32 > S1.i32
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i32 > S1.i32
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_NE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.i32 <> S1.i32
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i32  !=  S1.i32
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_GE_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.i32 >= S1.i32
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i32 >= S1.i32
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_T_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = 1'1U
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = 1
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_F_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = 1'0U
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = 0
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_LT_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.u32 < S1.u32
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u32 < S1.u32
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_EQ_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into the EXEC
@@ -10755,72 +9624,48 @@ def _VOPCOp_V_CMPX_EQ_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u32 == S1.u32
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_LE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.u32 <= S1.u32
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u32 <= S1.u32
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_GT_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.u32 > S1.u32
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u32 > S1.u32
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_NE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.u32 <> S1.u32
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u32  !=  S1.u32
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_GE_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.u32 >= S1.u32
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u32 >= S1.u32
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_T_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = 1'1U
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = 1
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_F_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = 1'0U
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = 0
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_LT_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.i64 < S1.i64
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i64 < S1.i64
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_EQ_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into the EXEC
@@ -10828,72 +9673,48 @@ def _VOPCOp_V_CMPX_EQ_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i64 == S1.i64
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_LE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.i64 <= S1.i64
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i64 <= S1.i64
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_GT_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.i64 > S1.i64
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i64 > S1.i64
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_NE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.i64 <> S1.i64
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i64  !=  S1.i64
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_GE_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.i64 >= S1.i64
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.i64 >= S1.i64
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_T_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = 1'1U
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = 1
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_F_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = 1'0U
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = 0
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_LT_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.u64 < S1.u64
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u64 < S1.u64
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_EQ_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # Set the per-lane condition code to 1 iff the first input is equal to the second input. Store the result into the EXEC
@@ -10901,54 +9722,36 @@ def _VOPCOp_V_CMPX_EQ_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, 
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u64 == S1.u64
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_LE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.u64 <= S1.u64
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u64 <= S1.u64
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_GT_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.u64 > S1.u64
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u64 > S1.u64
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_NE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.u64 <> S1.u64
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u64  !=  S1.u64
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_GE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = S0.u64 >= S1.u64
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = S0.u64 >= S1.u64
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_T_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # EXEC.u64[laneId] = 1'1U
   # --- compiled pseudocode ---
   EXEC.u64[laneId] = 1
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_CLASS_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # S1.u[0] value is a signaling NAN.
@@ -10995,9 +9798,6 @@ def _VOPCOp_V_CMPX_CLASS_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGP
     result = S1.u32[((5) if (sign(S0.f16)) else (6))]
   EXEC.u64[laneId] = result
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_CLASS_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # S1.u[0] value is a signaling NAN.
@@ -11044,9 +9844,6 @@ def _VOPCOp_V_CMPX_CLASS_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGP
     result = S1.u32[((5) if (sign(S0.f32)) else (6))]
   EXEC.u64[laneId] = result
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 def _VOPCOp_V_CMPX_CLASS_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
   # S1.u[0] value is a signaling NAN.
@@ -11093,9 +9890,6 @@ def _VOPCOp_V_CMPX_CLASS_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGP
     result = S1.u32[((5) if (sign(S0.f64)) else (6))]
   EXEC.u64[laneId] = result
   # --- end pseudocode ---
-  flags = {}
-  flags['exec_lane'] = (EXEC._val >> laneId) & 1
-  return flags
 
 VOPCOp_FUNCTIONS = {
   VOPCOp.V_CMP_F_F16: _VOPCOp_V_CMP_F_F16,
@@ -11296,6 +10090,20 @@ def _VOP3Op_V_WRITELANE_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR
   wr_lane = S1._val & 0x1f  # lane select (5 bits for wave32)
   return {'vgpr_write': (wr_lane, VDST._val, S0._val & 0xffffffff)}
 VOP3Op_FUNCTIONS[VOP3Op.V_WRITELANE_B32] = _VOP3Op_V_WRITELANE_B32
+
+# V_PERM_B32: Byte permutation (not in PDF pseudocode)
+# Combined 64-bit data = {S0, S1} where S1 is bytes 0-3, S0 is bytes 4-7
+# S2 is selector: each byte selects which byte of combined data goes to output
+def _VOP3Op_V_PERM_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, SIMM16, VGPR, SRC0, VDST):
+  from extra.assembly.amd.pcode import BYTE_PERMUTE
+  combined = (S0._val << 32) | S1._val  # {S0, S1}
+  sel = S2._val
+  result = 0
+  for i in range(4):
+    byte_sel = (sel >> (i * 8)) & 0xff
+    result |= BYTE_PERMUTE(combined, byte_sel) << (i * 8)
+  D0.b32 = result
+VOP3Op_FUNCTIONS[VOP3Op.V_PERM_B32] = _VOP3Op_V_PERM_B32
 
 COMPILED_FUNCTIONS = {
   SOP1Op: SOP1Op_FUNCTIONS,

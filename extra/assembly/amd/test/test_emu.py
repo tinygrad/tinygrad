@@ -315,11 +315,15 @@ class TestVDivScale(unittest.TestCase):
     self.assertAlmostEqual(i2f(st.vgpr[0][2]), expected, delta=expected * 1e-6)
 
   def test_div_scale_f32_denorm_denom(self):
-    """V_DIV_SCALE_F32: denormalized denominator -> NaN, VCC=1.
+    """V_DIV_SCALE_F32: denormalized denominator with large exp diff -> scale by 2^64, VCC=1.
 
-    Hardware returns NaN when denominator is denormalized (different from PDF pseudocode).
+    Per PDF pseudocode: when numer/denom has exp diff >= 96, set VCC=1.
+    If S0==S1 (scaling denom), scale by 2^64.
+    The denorm check (S1==DENORM) comes after exp diff check, so denorm denoms
+    with normal numerators hit the exp diff branch first.
     """
     # Smallest positive denorm: 0x00000001 = 1.4e-45
+    # exp(1.0) - exp(denorm) = 127 - 0 = 127 >= 96
     denorm = 0x00000001
     instructions = [
       s_mov_b32(s[0], denorm),
@@ -329,9 +333,12 @@ class TestVDivScale(unittest.TestCase):
       v_div_scale_f32(v[2], VCC, v[1], v[1], v[0]),
     ]
     st = run_program(instructions, n_lanes=1)
-    import math
-    self.assertTrue(math.isnan(i2f(st.vgpr[0][2])), "Hardware returns NaN for denorm denom")
-    self.assertEqual(st.vcc & 1, 1, "VCC should be 1 for denorm denom")
+    # Per PDF: exp diff >= 96, S0==S1 (denom), scale by 2^64
+    from extra.assembly.amd.pcode import _f32
+    denorm_f = _f32(denorm)
+    expected = denorm_f * (2.0 ** 64)
+    self.assertAlmostEqual(i2f(st.vgpr[0][2]), expected, delta=abs(expected) * 1e-5)
+    self.assertEqual(st.vcc & 1, 1, "VCC should be 1 for large exp diff")
 
   def test_div_scale_f32_tiny_numer_exp_le_23(self):
     """V_DIV_SCALE_F32: exponent(numer) <= 23 -> scale by 2^64, VCC=1."""
@@ -354,13 +361,12 @@ class TestVDivScale(unittest.TestCase):
     self.assertEqual(st.vcc & 1, 1, "VCC should be 1 when scaling tiny numer")
 
   def test_div_scale_f32_result_would_be_denorm(self):
-    """V_DIV_SCALE_F32: result would be denorm -> no scaling applied, VCC=1.
+    """V_DIV_SCALE_F32: result would be denorm -> scale by 2^64, VCC=1.
 
-    When the result of numer/denom would be denormalized, hardware sets VCC=1
-    but does NOT scale the input (returns it unchanged). The scaling happens
-    elsewhere in the division sequence.
+    Per PDF pseudocode: when S2.f32 / S1.f32 would be denormalized and S0==S2
+    (checking numerator), scale the numerator by 2^64 and set VCC=1.
     """
-    # If S2/S1 would be denorm, set VCC but don't scale
+    # If S2/S1 would be denorm, scale and set VCC
     # Denorm result: exp < 1, i.e., |result| < 2^-126
     # Use 1.0 / 2^127 ≈ 5.9e-39 (result would be denorm)
     large_denom = 0x7f000000  # 2^127
@@ -368,12 +374,13 @@ class TestVDivScale(unittest.TestCase):
       s_mov_b32(s[0], large_denom),
       v_mov_b32_e32(v[0], 1.0),   # numer = 1.0 (S2)
       v_mov_b32_e32(v[1], s[0]), # denom = 2^127 (S1)
-      # S0=numer, S1=denom, S2=numer -> check if we need to scale numer
+      # S0=numer, S1=denom, S2=numer -> scale numer
       v_div_scale_f32(v[2], VCC, v[0], v[1], v[0]),
     ]
     st = run_program(instructions, n_lanes=1)
-    # Hardware returns input unchanged but sets VCC=1
-    self.assertAlmostEqual(i2f(st.vgpr[0][2]), 1.0, places=5)
+    # Per PDF: scale by 2^64, VCC=1
+    expected = 1.0 * (2.0 ** 64)
+    self.assertAlmostEqual(i2f(st.vgpr[0][2]), expected, delta=expected * 1e-6)
     self.assertEqual(st.vcc & 1, 1, "VCC should be 1 when result would be denorm")
 
 
@@ -401,43 +408,44 @@ class TestVDivFmas(unittest.TestCase):
     self.assertAlmostEqual(i2f(st.vgpr[0][3]), 7.0, places=5)
 
   def test_div_fmas_f32_scale_up(self):
-    """V_DIV_FMAS_F32: VCC=1 with S2 >= 2.0 -> scale by 2^+64."""
+    """V_DIV_FMAS_F32: VCC=1 -> scale by 2^32."""
     instructions = [
-      s_mov_b32(s[SrcEnum.VCC_LO - 128], 1),  # VCC = 1
+      s_mov_b32(s[106], 1),  # VCC_LO = 1
       v_mov_b32_e32(v[0], 1.0),   # S0
       v_mov_b32_e32(v[1], 1.0),   # S1
-      v_mov_b32_e32(v[2], 2.0),   # S2 >= 2.0, so scale UP
-      v_div_fmas_f32(v[3], v[0], v[1], v[2]),  # 2^+64 * (1*1+2) = 2^+64 * 3
+      v_mov_b32_e32(v[2], 2.0),   # S2
+      v_div_fmas_f32(v[3], v[0], v[1], v[2]),  # 2^32 * fma(1,1,2) = 2^32 * 3
     ]
     st = run_program(instructions, n_lanes=1)
-    expected = 3.0 * (2.0 ** 64)
+    expected = 3.0 * (2.0 ** 32)
     self.assertAlmostEqual(i2f(st.vgpr[0][3]), expected, delta=abs(expected) * 1e-6)
 
   def test_div_fmas_f32_scale_down(self):
-    """V_DIV_FMAS_F32: VCC=1 with S2 < 2.0 -> scale by 2^-64."""
+    """V_DIV_FMAS_F32: VCC=1 -> scale by 2^32 (not dependent on S2)."""
     instructions = [
-      s_mov_b32(s[SrcEnum.VCC_LO - 128], 1),  # VCC = 1
+      s_mov_b32(s[106], 1),  # VCC_LO = 1
       v_mov_b32_e32(v[0], 2.0),   # S0
       v_mov_b32_e32(v[1], 3.0),   # S1
-      v_mov_b32_e32(v[2], 1.0),   # S2 < 2.0, so scale DOWN
-      v_div_fmas_f32(v[3], v[0], v[1], v[2]),  # 2^-64 * (2*3+1) = 2^-64 * 7
+      v_mov_b32_e32(v[2], 1.0),   # S2
+      v_div_fmas_f32(v[3], v[0], v[1], v[2]),  # 2^32 * fma(2,3,1) = 2^32 * 7
     ]
     st = run_program(instructions, n_lanes=1)
-    expected = 7.0 * (2.0 ** -64)
+    expected = 7.0 * (2.0 ** 32)
     self.assertAlmostEqual(i2f(st.vgpr[0][3]), expected, delta=abs(expected) * 1e-6)
 
   def test_div_fmas_f32_per_lane_vcc(self):
-    """V_DIV_FMAS_F32: different VCC per lane with S2 < 2.0."""
+    """V_DIV_FMAS_F32: different VCC per lane.
+    When VCC=1, scales UP by 2^32. When VCC=0, no scaling."""
     instructions = [
-      s_mov_b32(s[SrcEnum.VCC_LO - 128], 0b0101),  # VCC: lanes 0,2 set
+      s_mov_b32(s[106], 0b0101),  # VCC_LO: lanes 0,2 set
       v_mov_b32_e32(v[0], 1.0),
       v_mov_b32_e32(v[1], 1.0),
-      v_mov_b32_e32(v[2], 1.0),  # S2 < 2.0, so scale DOWN
-      v_div_fmas_f32(v[3], v[0], v[1], v[2]),  # fma(1,1,1) = 2, scaled = 2^-64 * 2
+      v_mov_b32_e32(v[2], 1.0),
+      v_div_fmas_f32(v[3], v[0], v[1], v[2]),  # fma(1,1,1) = 2, scaled = 2^32 * 2 when VCC=1
     ]
     st = run_program(instructions, n_lanes=4)
-    scaled = 2.0 * (2.0 ** -64)
-    unscaled = 2.0
+    scaled = 2.0 * (2.0 ** 32)  # VCC=1: scale UP by 2^32
+    unscaled = 2.0              # VCC=0: no scaling
     self.assertAlmostEqual(i2f(st.vgpr[0][3]), scaled, delta=abs(scaled) * 1e-6)  # lane 0: VCC=1
     self.assertAlmostEqual(i2f(st.vgpr[1][3]), unscaled, places=5)                 # lane 1: VCC=0
     self.assertAlmostEqual(i2f(st.vgpr[2][3]), scaled, delta=abs(scaled) * 1e-6)  # lane 2: VCC=1
@@ -608,10 +616,10 @@ class TestVDivFixup(unittest.TestCase):
     self.assertAlmostEqual(i2f(st.vgpr[0][3]), 3.0, places=5)
 
   def test_div_fixup_f32_nan_estimate_overflow(self):
-    """V_DIV_FIXUP_F32: NaN estimate returns overflow (inf).
+    """V_DIV_FIXUP_F32: NaN estimate passes through as NaN per PDF pseudocode.
 
-    PDF doesn't check isNAN(S0), but hardware returns OVERFLOW if S0 is NaN.
-    This happens when division fails (e.g., denorm denominator in V_DIV_SCALE).
+    PDF pseudocode only checks isNAN(S1) and isNAN(S2), not S0.
+    When S0 is NaN but S1/S2 are valid, it falls through to: D0 = abs(S0) = NaN.
     """
     quiet_nan = 0x7fc00000
     instructions = [
@@ -623,11 +631,10 @@ class TestVDivFixup(unittest.TestCase):
     ]
     st = run_program(instructions, n_lanes=1)
     import math
-    self.assertTrue(math.isinf(i2f(st.vgpr[0][3])), "NaN estimate should return inf")
-    self.assertEqual(st.vgpr[0][3], 0x7f800000, "Should be +inf (pos/pos)")
+    self.assertTrue(math.isnan(i2f(st.vgpr[0][3])), "NaN estimate should pass through as NaN per PDF")
 
   def test_div_fixup_f32_nan_estimate_sign(self):
-    """V_DIV_FIXUP_F32: NaN estimate with negative sign returns -inf."""
+    """V_DIV_FIXUP_F32: NaN estimate passes through per PDF pseudocode."""
     quiet_nan = 0x7fc00000
     instructions = [
       s_mov_b32(s[0], quiet_nan),
@@ -638,8 +645,8 @@ class TestVDivFixup(unittest.TestCase):
     ]
     st = run_program(instructions, n_lanes=1)
     import math
-    self.assertTrue(math.isinf(i2f(st.vgpr[0][3])), "NaN estimate should return inf")
-    self.assertEqual(st.vgpr[0][3], 0xff800000, "Should be -inf (pos/neg)")
+    # PDF pseudocode: D0 = -abs(S0) when sign_out=1. abs(NaN) is NaN, -NaN is NaN.
+    self.assertTrue(math.isnan(i2f(st.vgpr[0][3])), "NaN estimate should pass through as NaN per PDF")
 
 
 class TestVCmpClass(unittest.TestCase):

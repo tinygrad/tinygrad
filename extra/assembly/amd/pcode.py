@@ -992,21 +992,9 @@ from extra.assembly.amd.pcode import *
             lines.append(f"  {line}")
             has_code = True
         lines.append("  # --- end pseudocode ---")
-        # Return flags dict (Reg objects are modified in place)
-        if has_sdst or is_cmpx or is_cmp or is_64 or has_d1:
-          lines.append("  flags = {}")
-          if has_sdst:
-            lines.append("  flags['vcc_lane'] = (VCC._val >> laneId) & 1")
-          if is_cmpx:
-            lines.append("  flags['exec_lane'] = (EXEC._val >> laneId) & 1")
-          if is_cmp:
-            lines.append("  flags['vcc_lane'] = (D0._val >> laneId) & 1")
-          if is_64:
-            lines.append("  flags['d0_64'] = True")
-          if has_d1:
-            lines.append("  flags['d1'] = D1._val & 1")
-          lines.append("  return flags")
-        elif not has_code:
+        # All Reg objects (D0, SCC, VCC, EXEC) are modified in place
+        # The emulator determines 64-bit ops from the opcode name
+        if not has_code:
           lines.append("  pass")
         lines.append("")
 
