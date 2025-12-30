@@ -1,38 +1,17 @@
 # DSL for RDNA3 pseudocode - makes pseudocode expressions work directly as Python
 import struct, math
-
-MASK32, MASK64 = 0xffffffff, 0xffffffffffffffff
+from extra.assembly.amd.dsl import MASK32, MASK64, _f32, _i32, _sext, _f16, _i16, _f64, _i64
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# HELPER FUNCTIONS (previously in helpers.py)
+# HELPER FUNCTIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _f32(i): return struct.unpack("<f", struct.pack("<I", i & MASK32))[0]
-def _i32(f):
-  if isinstance(f, int): f = float(f)
-  if math.isnan(f): return 0xffc00000 if math.copysign(1.0, f) < 0 else 0x7fc00000
-  if math.isinf(f): return 0x7f800000 if f > 0 else 0xff800000
-  try: return struct.unpack("<I", struct.pack("<f", f))[0]
-  except (OverflowError, struct.error): return 0x7f800000 if f > 0 else 0xff800000
 def _div(a, b):
   try: return a / b
   except ZeroDivisionError:
     if a == 0.0 or math.isnan(a): return float("nan")
     return math.copysign(float("inf"), a * b) if b == 0.0 else float("inf") if a > 0 else float("-inf")
-def _sext(v, b): return v - (1 << b) if v & (1 << (b - 1)) else v
-def _f16(i): return struct.unpack("<e", struct.pack("<H", i & 0xffff))[0]
-def _i16(f):
-  if math.isnan(f): return 0x7e00
-  if math.isinf(f): return 0x7c00 if f > 0 else 0xfc00
-  try: return struct.unpack("<H", struct.pack("<e", f))[0]
-  except (OverflowError, struct.error): return 0x7c00 if f > 0 else 0xfc00
 def _to_f16_bits(v): return v if isinstance(v, int) else _i16(v)
-def _f64(i): return struct.unpack("<d", struct.pack("<Q", i & 0xffffffffffffffff))[0]
-def _i64(f):
-  if math.isnan(f): return 0x7ff8000000000000
-  if math.isinf(f): return 0x7ff0000000000000 if f > 0 else 0xfff0000000000000
-  try: return struct.unpack("<Q", struct.pack("<d", f))[0]
-  except (OverflowError, struct.error): return 0x7ff0000000000000 if f > 0 else 0xfff0000000000000
 def _isnan(x):
   try: return math.isnan(float(x))
   except (TypeError, ValueError): return False

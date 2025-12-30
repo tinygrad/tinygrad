@@ -2,9 +2,8 @@
 # mypy: ignore-errors
 from __future__ import annotations
 import ctypes, struct
-from extra.assembly.amd.dsl import Inst, RawImm, unwrap, FLOAT_ENC
+from extra.assembly.amd.dsl import Inst, RawImm, unwrap, FLOAT_ENC, MASK32, MASK64, _f32, _i32, _sext, _f16, _i16, _f64, _i64
 from extra.assembly.amd.asm import detect_format
-from extra.assembly.amd.pcode import _f32, _i32, _sext, _f16, _i16, _f64, _i64
 from extra.assembly.amd.autogen.rdna3.gen_pcode import get_compiled_functions
 from extra.assembly.amd.autogen.rdna3 import (
   SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, DS, FLAT, VOPD, SrcEnum,
@@ -43,14 +42,15 @@ _VOP1_16BIT_DST_OPS = {op for op in _VOP1_16BIT_OPS if 'PACK' not in op.name} - 
 _VOP1_16BIT_SRC_OPS = _VOP1_16BIT_OPS - _CVT_32_64_SRC_OPS
 
 # Inline constants for src operands 128-254. Build tables for f32, f16, and f64 formats.
+# Inline constants for src operands 128-254. Build tables for f32, f16, and f64 formats.
 _FLOAT_CONSTS = {v: k for k, v in FLOAT_ENC.items()} | {248: 0.15915494309189535}  # INV_2PI
 def _build_inline_consts(mask, to_bits):
   tbl = list(range(65)) + [((-i) & mask) for i in range(1, 17)] + [0] * (127 - 81)
   for k, v in _FLOAT_CONSTS.items(): tbl[k - 128] = to_bits(v)
   return tbl
-_INLINE_CONSTS = _build_inline_consts(0xffffffff, lambda f: struct.unpack('<I', struct.pack('<f', f))[0])
-_INLINE_CONSTS_F16 = _build_inline_consts(0xffff, lambda f: struct.unpack('<H', struct.pack('<e', f))[0])
-_INLINE_CONSTS_F64 = _build_inline_consts(0xffffffffffffffff, lambda f: struct.unpack('<Q', struct.pack('<d', f))[0])
+_INLINE_CONSTS = _build_inline_consts(MASK32, _i32)
+_INLINE_CONSTS_F16 = _build_inline_consts(0xffff, _i16)
+_INLINE_CONSTS_F64 = _build_inline_consts(MASK64, _i64)
 
 # Helper: extract/write 16-bit half from/to 32-bit value
 def _src16(raw: int, is_hi: bool) -> int: return ((raw >> 16) & 0xffff) if is_hi else (raw & 0xffff)
@@ -111,17 +111,17 @@ class WaveState:
   @property
   def vcc(self) -> int: return self.sgpr[VCC_LO] | (self.sgpr[VCC_HI] << 32)
   @vcc.setter
-  def vcc(self, v: int): self.sgpr[VCC_LO], self.sgpr[VCC_HI] = v & 0xffffffff, (v >> 32) & 0xffffffff
+  def vcc(self, v: int): self.sgpr[VCC_LO], self.sgpr[VCC_HI] = v & MASK32, (v >> 32) & MASK32
   @property
   def exec_mask(self) -> int: return self.sgpr[EXEC_LO] | (self.sgpr[EXEC_HI] << 32)
   @exec_mask.setter
-  def exec_mask(self, v: int): self.sgpr[EXEC_LO], self.sgpr[EXEC_HI] = v & 0xffffffff, (v >> 32) & 0xffffffff
+  def exec_mask(self, v: int): self.sgpr[EXEC_LO], self.sgpr[EXEC_HI] = v & MASK32, (v >> 32) & MASK32
 
   def rsgpr(self, i: int) -> int: return 0 if i == NULL else self.scc if i == SCC else self.sgpr[i] if i < SGPR_COUNT else 0
   def wsgpr(self, i: int, v: int):
-    if i < SGPR_COUNT and i != NULL: self.sgpr[i] = v & 0xffffffff
+    if i < SGPR_COUNT and i != NULL: self.sgpr[i] = v & MASK32
   def rsgpr64(self, i: int) -> int: return self.rsgpr(i) | (self.rsgpr(i+1) << 32)
-  def wsgpr64(self, i: int, v: int): self.wsgpr(i, v & 0xffffffff); self.wsgpr(i+1, (v >> 32) & 0xffffffff)
+  def wsgpr64(self, i: int, v: int): self.wsgpr(i, v & MASK32); self.wsgpr(i+1, (v >> 32) & MASK32)
 
   def _rsrc_base(self, v: int, lane: int, consts):
     if v < SGPR_COUNT: return self.sgpr[v]
@@ -193,7 +193,7 @@ def exec_scalar(st: WaveState, inst: Inst) -> int:
     addr = st.rsgpr64(inst.sbase * 2) + _sext(inst.offset, 21)
     if inst.soffset not in (NULL, 0x7f): addr += st.rsrc(inst.soffset, 0)
     if (cnt := SMEM_LOAD.get(inst.op)) is None: raise NotImplementedError(f"SMEM op {inst.op}")
-    for i in range(cnt): st.wsgpr(inst.sdata + i, mem_read((addr + i * 4) & 0xffffffffffffffff, 4))
+    for i in range(cnt): st.wsgpr(inst.sdata + i, mem_read((addr + i * 4) & MASK64, 4))
     return 0
 
   # Get op enum and lookup compiled function
@@ -251,10 +251,10 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
   if inst_type is FLAT:
     op, addr_reg, data_reg, vdst, offset, saddr = inst.op, inst.addr, inst.data, inst.vdst, _sext(inst.offset, 13), inst.saddr
     addr = V[addr_reg] | (V[addr_reg+1] << 32)
-    addr = (st.rsgpr64(saddr) + V[addr_reg] + offset) & 0xffffffffffffffff if saddr not in (NULL, 0x7f) else (addr + offset) & 0xffffffffffffffff
+    addr = (st.rsgpr64(saddr) + V[addr_reg] + offset) & MASK64 if saddr not in (NULL, 0x7f) else (addr + offset) & MASK64
     if op in FLAT_LOAD:
       cnt, sz, sign = FLAT_LOAD[op]
-      for i in range(cnt): val = mem_read(addr + i * sz, sz); V[vdst + i] = _sext(val, sz * 8) & 0xffffffff if sign else val
+      for i in range(cnt): val = mem_read(addr + i * sz, sz); V[vdst + i] = _sext(val, sz * 8) & MASK32 if sign else val
     elif op in FLAT_STORE:
       cnt, sz = FLAT_STORE[op]
       for i in range(cnt): mem_write(addr + i * sz, sz, V[data_reg + i] & ((1 << (sz * 8)) - 1))
@@ -273,7 +273,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     op, addr, vdst = inst.op, (V[inst.addr] + inst.offset0) & 0xffff, inst.vdst
     if op in DS_LOAD:
       cnt, sz, sign = DS_LOAD[op]
-      for i in range(cnt): val = int.from_bytes(lds[addr+i*sz:addr+i*sz+sz], 'little'); V[vdst + i] = _sext(val, sz * 8) & 0xffffffff if sign else val
+      for i in range(cnt): val = int.from_bytes(lds[addr+i*sz:addr+i*sz+sz], 'little'); V[vdst + i] = _sext(val, sz * 8) & MASK32 if sign else val
     elif op in DS_STORE:
       cnt, sz = DS_STORE[op]
       for i in range(cnt): lds[addr+i*sz:addr+i*sz+sz] = (V[inst.data0 + i] & ((1 << (sz * 8)) - 1)).to_bytes(sz, 'little')
@@ -303,8 +303,8 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     # Carry-in ops use src2 as carry bitmask instead of VCC
     carry_ops = (VOP3SDOp.V_ADD_CO_CI_U32, VOP3SDOp.V_SUB_CO_CI_U32, VOP3SDOp.V_SUBREV_CO_CI_U32)
     result = fn(s0, s1, s2, V[inst.vdst], st.scc, st.rsgpr64(inst.src2) if op in carry_ops else st.vcc, lane, st.exec_mask, st.literal, None, {})
-    V[inst.vdst] = result['d0'] & 0xffffffff
-    if result.get('d0_64'): V[inst.vdst + 1] = (result['d0'] >> 32) & 0xffffffff
+    V[inst.vdst] = result['d0'] & MASK32
+    if result.get('d0_64'): V[inst.vdst + 1] = (result['d0'] >> 32) & MASK32
     if result.get('vcc_lane') is not None: st.pend_sgpr_lane(inst.sdst, lane, result['vcc_lane'])
     return
 
@@ -361,7 +361,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
             (_src16(raws[i], opsel & (1<<i)) ^ (0x8000 if neg & (1<<i) else 0)) for i in range(3)]
     fn = compiled.get(VOP3POp, {}).get(op)
     if fn is None: raise NotImplementedError(f"{op.name} not in pseudocode")
-    st.vgpr[lane][inst.vdst] = fn(srcs[0], srcs[1], srcs[2], 0, st.scc, st.vcc, lane, st.exec_mask, st.literal, None, {})['d0'] & 0xffffffff
+    st.vgpr[lane][inst.vdst] = fn(srcs[0], srcs[1], srcs[2], 0, st.scc, st.vcc, lane, st.exec_mask, st.literal, None, {})['d0'] & MASK32
     return
   else: raise NotImplementedError(f"Unknown vector type {inst_type}")
 
@@ -452,10 +452,10 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     writes_to_sgpr = op in (VOP1Op.V_READFIRSTLANE_B32,) or (op_cls is VOP3Op and op in (VOP3Op.V_READFIRSTLANE_B32, VOP3Op.V_READLANE_B32))
     is_16bit_dst = (op_cls is VOP3Op and op in _VOP3_16BIT_DST_OPS) or (op_cls is VOP1Op and op in _VOP1_16BIT_DST_OPS) or is_vop2_16bit
     d0_val = result['d0']
-    if writes_to_sgpr: st.wsgpr(vdst, d0_val & 0xffffffff)
-    elif result.get('d0_64'): V[vdst], V[vdst + 1] = d0_val & 0xffffffff, (d0_val >> 32) & 0xffffffff
+    if writes_to_sgpr: st.wsgpr(vdst, d0_val & MASK32)
+    elif result.get('d0_64'): V[vdst], V[vdst + 1] = d0_val & MASK32, (d0_val >> 32) & MASK32
     elif is_16bit_dst: V[vdst] = _dst16(V[vdst], d0_val, bool(opsel & 8) if inst_type is VOP3 else dst_hi)
-    else: V[vdst] = d0_val & 0xffffffff
+    else: V[vdst] = d0_val & MASK32
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # WMMA (Wave Matrix Multiply-Accumulate)

@@ -1,8 +1,32 @@
 # library for RDNA3 assembly DSL
 # mypy: ignore-errors
 from __future__ import annotations
+import struct, math
 from enum import IntEnum
 from typing import overload, Annotated, TypeVar, Generic
+
+# Common masks and bit conversion functions
+MASK32, MASK64 = 0xffffffff, 0xffffffffffffffff
+def _f32(i): return struct.unpack("<f", struct.pack("<I", i & MASK32))[0]
+def _i32(f):
+  if isinstance(f, int): f = float(f)
+  if math.isnan(f): return 0xffc00000 if math.copysign(1.0, f) < 0 else 0x7fc00000
+  if math.isinf(f): return 0x7f800000 if f > 0 else 0xff800000
+  try: return struct.unpack("<I", struct.pack("<f", f))[0]
+  except (OverflowError, struct.error): return 0x7f800000 if f > 0 else 0xff800000
+def _sext(v, b): return v - (1 << b) if v & (1 << (b - 1)) else v
+def _f16(i): return struct.unpack("<e", struct.pack("<H", i & 0xffff))[0]
+def _i16(f):
+  if math.isnan(f): return 0x7e00
+  if math.isinf(f): return 0x7c00 if f > 0 else 0xfc00
+  try: return struct.unpack("<H", struct.pack("<e", f))[0]
+  except (OverflowError, struct.error): return 0x7c00 if f > 0 else 0xfc00
+def _f64(i): return struct.unpack("<d", struct.pack("<Q", i & MASK64))[0]
+def _i64(f):
+  if math.isnan(f): return 0x7ff8000000000000
+  if math.isinf(f): return 0x7ff0000000000000 if f > 0 else 0xfff0000000000000
+  try: return struct.unpack("<Q", struct.pack("<d", f))[0]
+  except (OverflowError, struct.error): return 0x7ff0000000000000 if f > 0 else 0xfff0000000000000
 
 # Bit field DSL
 class BitField:
@@ -178,9 +202,9 @@ class Inst:
     if encoded == 255 and self._literal is None:
       import struct
       is_64 = self._is_64bit_op()
-      if isinstance(val, SrcMod) and not isinstance(val, Reg): lit32 = val.val & 0xffffffff
-      elif isinstance(val, int) and not isinstance(val, IntEnum): lit32 = val & 0xffffffff
-      elif isinstance(val, float): lit32 = struct.unpack('<I', struct.pack('<f', val))[0]
+      if isinstance(val, SrcMod) and not isinstance(val, Reg): lit32 = val.val & MASK32
+      elif isinstance(val, int) and not isinstance(val, IntEnum): lit32 = val & MASK32
+      elif isinstance(val, float): lit32 = _i32(val)
       else: return
       self._literal = (lit32 << 32) if is_64 else lit32
 
@@ -290,7 +314,7 @@ class Inst:
     if lit is None: return result
     # For 64-bit ops, literal is stored in high 32 bits internally, but encoded as 4 bytes
     lit32 = (lit >> 32) if self._is_64bit_op() else lit
-    return result + (lit32 & 0xffffffff).to_bytes(4, 'little')
+    return result + (lit32 & MASK32).to_bytes(4, 'little')
 
   @classmethod
   def _size(cls) -> int: return 4 if issubclass(cls, Inst32) else 8

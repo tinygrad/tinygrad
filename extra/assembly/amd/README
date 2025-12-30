@@ -21,6 +21,23 @@ tinygrad's dtype tests should pass with and without LLVM. they run in about 12 s
 `PYTHONPATH="." AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=0 pytest -n=12 test/test_dtype_alu.py test/test_dtype.py`
 `PYTHONPATH="." AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=1 pytest -n=12 test/test_dtype_alu.py test/test_dtype.py`
 
+The ops tests also mostly pass, but they are very slow, so you should run them one at a time.
+
+`SKIP_SLOW_TEST=1 PYTHONPATH="." AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=0 pytest -n=12 test/test_ops.py`
+with failure
+`FAILED test/test_ops.py::TestOps::test_avg_pool3d - Exception: forward pass failed shape (1, 1, 3, 3, 3):`
+
+`SKIP_SLOW_TEST=1 PYTHONPATH="." AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=1 pytest -n=12 test/test_ops.py`
+with failures
+```
+FAILED test/test_ops.py::TestOps::test_avg_pool3d - Exception: forward pass failed shape (1, 1, 3, 3, 3):
+FAILED test/test_ops.py::TestOps::test_negative_padding_conv2d - Exception: backward pass tensor 0 failed shape (1, 1, 10, 10):
+FAILED test/test_ops.py::TestOps::test_unfold - Exception: backward pass tensor 0 failed shape (8,):
+FAILED test/test_ops.py::TestOps::test_avg_pool2d_ceil_mode - Exception: backward pass tensor 0 failed shape (1, 1, 6, 6):
+```
+
+TODO: make all ops tests pass and add local regression tests.
+
 When something is caught by main tinygrad tests, a local regression test should be added to `extra/assembly/amd/test`
 
 Currently, only RDNA3 is well supported, but when finished, this will support RDNA3+RDNA4+CDNA in ~2000 lines.
