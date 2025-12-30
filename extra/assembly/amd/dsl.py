@@ -297,6 +297,10 @@ class Inst:
       from extra.assembly.amd.autogen.rdna3 import VOP3Op
       try: op_name = VOP3Op(op).name
       except ValueError: pass
+    if op_name is None and self.__class__.__name__ == 'VOPC':
+      from extra.assembly.amd.autogen.rdna3 import VOPCOp
+      try: op_name = VOPCOp(op).name
+      except ValueError: pass
     if op_name is None: return False
     # V_LDEXP_F64 has 32-bit integer exponent in src1, so literal is 32-bit
     if op_name == 'V_LDEXP_F64': return False

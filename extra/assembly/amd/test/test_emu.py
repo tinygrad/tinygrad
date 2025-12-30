@@ -2454,6 +2454,82 @@ class TestF64Conversions(unittest.TestCase):
     result = struct.unpack('<q', struct.pack('<II', lo, hi))[0]
     self.assertEqual(result, -8, f"Expected -8, got {result} (lo=0x{lo:08x}, hi=0x{hi:08x})")
 
+  def test_v_cvt_i32_f64_writes_32bit_only(self):
+    """V_CVT_I32_F64 should only write 32 bits, not 64.
+
+    Regression test: V_CVT_I32_F64 has a 64-bit source (f64) but 32-bit destination (i32).
+    The emulator was incorrectly writing 64 bits (clobbering vdst+1) because
+    is_64bit_op was True for any op ending in '_F64'.
+    """
+    # Pre-fill v3 with a canary value that should NOT be clobbered
+    val_bits = f2i64(-1.0)
+    instructions = [
+      s_mov_b32(s[0], val_bits & 0xffffffff),
+      s_mov_b32(s[1], val_bits >> 32),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      s_mov_b32(s[2], 0xDEADBEEF),  # Canary value
+      v_mov_b32_e32(v[3], s[2]),    # Put canary in v3
+      v_cvt_i32_f64_e32(v[2], v[0:2]),  # Convert -1.0 -> -1 (0xffffffff)
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    canary = st.vgpr[0][3]
+    # V_CVT_I32_F64 of -1.0 should produce 0xffffffff (-1)
+    self.assertEqual(result, 0xffffffff, f"Expected 0xffffffff (-1), got 0x{result:08x}")
+    # v3 should still contain the canary (not clobbered by 64-bit write)
+    self.assertEqual(canary, 0xDEADBEEF, f"v3 canary should be 0xDEADBEEF, got 0x{canary:08x} (clobbered!)")
+
+  def test_v_frexp_mant_f64_range(self):
+    """V_FREXP_MANT_F64 should return mantissa in [0.5, 1.0) range.
+
+    Regression test: The mantissa() helper was incorrectly multiplying by 2.0,
+    returning values in [1.0, 2.0) instead of the correct [0.5, 1.0) range.
+    """
+    # Test with 2.0: frexp(2.0) should give mantissa=0.5, exponent=2
+    two_f64 = f2i64(2.0)
+    instructions = [
+      s_mov_b32(s[0], two_f64 & 0xffffffff),
+      s_mov_b32(s[1], two_f64 >> 32),
+      v_frexp_mant_f64_e32(v[0:2], s[0:2]),
+      v_frexp_exp_i32_f64_e32(v[2], s[0:2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    mant = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
+    exp = st.vgpr[0][2]
+    if exp >= 0x80000000: exp -= 0x100000000  # sign extend
+    # frexp(2.0) = 0.5 * 2^2
+    self.assertAlmostEqual(mant, 0.5, places=10, msg=f"Expected mantissa 0.5, got {mant}")
+    self.assertEqual(exp, 2, f"Expected exponent 2, got {exp}")
+
+  def test_v_div_scale_f64_reads_64bit_sources(self):
+    """V_DIV_SCALE_F64 must read all sources as 64-bit values.
+
+    Regression test: VOP3SD was reading sources as 32-bit for V_DIV_SCALE_F64,
+    causing incorrect results when the low 32 bits happened to look like 0 or denorm.
+    """
+    # Set up v0:v1 = sqrt(2) ≈ 1.414, v2:v3 = 1.0
+    sqrt2_f64 = f2i64(1.4142135623730951)
+    one_f64 = f2i64(1.0)
+    instructions = [
+      s_mov_b32(s[0], sqrt2_f64 & 0xffffffff),
+      s_mov_b32(s[1], sqrt2_f64 >> 32),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      s_mov_b32(s[2], one_f64 & 0xffffffff),
+      s_mov_b32(s[3], one_f64 >> 32),
+      v_mov_b32_e32(v[2], s[2]),
+      v_mov_b32_e32(v[3], s[3]),
+      # V_DIV_SCALE_F64: src0=v0:v1, src1=v0:v1, src2=v2:v3
+      # For normal inputs, should pass through src0 unchanged
+      VOP3SD(VOP3SDOp.V_DIV_SCALE_F64, vdst=v[4], sdst=s[10], src0=v[0], src1=v[0], src2=v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f(st.vgpr[0][4] | (st.vgpr[0][5] << 32))
+    # For normal (non-denorm, non-edge-case) inputs, V_DIV_SCALE_F64 passes through src0
+    self.assertAlmostEqual(result, 1.4142135623730951, places=10,
+                           msg=f"Expected ~1.414, got {result} (may be nan if 64-bit sources not read correctly)")
+
 
 class TestNewPcodeHelpers(unittest.TestCase):
   """Tests for newly added pcode helper functions (SAD, BYTE_PERMUTE, BF16)."""
@@ -3650,3 +3726,90 @@ class TestVFmaMixSinCase(unittest.TestCase):
     # Result should be approximately -π = -3.14...
     # f16 -π ≈ 0xc248 = -3.140625
     self.assertAlmostEqual(lo, -3.14159, delta=0.01, msg=f"Expected ~-π, got {lo}")
+
+
+class TestVTrigPreopF64(unittest.TestCase):
+  """Tests for V_TRIG_PREOP_F64 instruction.
+
+  V_TRIG_PREOP_F64 extracts chunks of 2/PI for Payne-Hanek trig range reduction.
+  For input S0 (f64) and index S1 (0, 1, or 2), it returns a portion of 2/PI
+  scaled appropriately for computing |S0| * (2/PI) in extended precision.
+
+  The three chunks (index 0, 1, 2) when summed should equal 2/PI.
+  """
+
+  def test_trig_preop_f64_index0(self):
+    """V_TRIG_PREOP_F64 index=0: primary chunk of 2/PI."""
+    import math
+    two_over_pi = 2.0 / math.pi
+    instructions = [
+      # S0 = 1.0 (f64), S1 = 0 (index)
+      s_mov_b32(s[0], 0x00000000),  # low bits of 1.0
+      s_mov_b32(s[1], 0x3ff00000),  # high bits of 1.0
+      v_trig_preop_f64(v[0], abs(s[0]), 0),  # index 0
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
+    # For x=1.0, index=0 should give the main part of 2/PI
+    self.assertAlmostEqual(result, two_over_pi, places=10, msg=f"Expected ~{two_over_pi}, got {result}")
+
+  def test_trig_preop_f64_index1(self):
+    """V_TRIG_PREOP_F64 index=1: secondary chunk (extended precision bits)."""
+    instructions = [
+      s_mov_b32(s[0], 0x00000000),  # low bits of 1.0
+      s_mov_b32(s[1], 0x3ff00000),  # high bits of 1.0
+      v_trig_preop_f64(v[0], abs(s[0]), 1),  # index 1
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
+    # Index 1 gives the next 53 bits, should be very small (~1e-16)
+    self.assertLess(abs(result), 1e-15, msg=f"Expected tiny value, got {result}")
+    self.assertGreater(abs(result), 0, msg="Expected non-zero value")
+
+  def test_trig_preop_f64_index2(self):
+    """V_TRIG_PREOP_F64 index=2: tertiary chunk (more extended precision bits)."""
+    instructions = [
+      s_mov_b32(s[0], 0x00000000),  # low bits of 1.0
+      s_mov_b32(s[1], 0x3ff00000),  # high bits of 1.0
+      v_trig_preop_f64(v[0], abs(s[0]), 2),  # index 2
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
+    # Index 2 gives the next 53 bits after index 1, should be tiny (~1e-32)
+    self.assertLess(abs(result), 1e-30, msg=f"Expected very tiny value, got {result}")
+
+  def test_trig_preop_f64_sum_equals_two_over_pi(self):
+    """V_TRIG_PREOP_F64: sum of chunks 0,1,2 should equal 2/PI."""
+    import math
+    two_over_pi = 2.0 / math.pi
+    instructions = [
+      s_mov_b32(s[0], 0x00000000),  # low bits of 1.0
+      s_mov_b32(s[1], 0x3ff00000),  # high bits of 1.0
+      v_trig_preop_f64(v[0], abs(s[0]), 0),  # index 0 -> v[0:1]
+      v_trig_preop_f64(v[2], abs(s[0]), 1),  # index 1 -> v[2:3]
+      v_trig_preop_f64(v[4], abs(s[0]), 2),  # index 2 -> v[4:5]
+    ]
+    st = run_program(instructions, n_lanes=1)
+    p0 = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
+    p1 = i642f(st.vgpr[0][2] | (st.vgpr[0][3] << 32))
+    p2 = i642f(st.vgpr[0][4] | (st.vgpr[0][5] << 32))
+    total = p0 + p1 + p2
+    self.assertAlmostEqual(total, two_over_pi, places=14, msg=f"Expected {two_over_pi}, got {total} (p0={p0}, p1={p1}, p2={p2})")
+
+  def test_trig_preop_f64_large_input(self):
+    """V_TRIG_PREOP_F64 with larger input should adjust shift based on exponent."""
+    import math
+    # For x=2.0, exponent(2.0)=1024 which is <= 1077, so no adjustment
+    # But let's test with x=2^60 where exponent > 1077
+    large_val = 2.0 ** 60  # exponent = 1083 > 1077
+    large_bits = f2i64(large_val)
+    instructions = [
+      s_mov_b32(s[0], large_bits & 0xffffffff),
+      s_mov_b32(s[1], (large_bits >> 32) & 0xffffffff),
+      v_trig_preop_f64(v[0], abs(s[0]), 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
+    # Result should still be a valid float (not NaN or inf)
+    self.assertFalse(math.isnan(result), "Result should not be NaN")
+    self.assertFalse(math.isinf(result), "Result should not be inf")

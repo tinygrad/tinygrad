@@ -185,7 +185,7 @@ def _SOP1Op_S_CLS_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
   tmp = Reg(-1)
   for i in range(1, int(31)+1):
     if S0.u32[31 - i] != S0.u32[31]:
-      tmp = Reg(i)
+      tmp = Reg(i); break
   D0.i32 = tmp
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
@@ -208,7 +208,7 @@ def _SOP1Op_S_CLS_I32_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   tmp = Reg(-1)
   for i in range(1, int(63)+1):
     if S0.u64[63 - i] != S0.u64[63]:
-      tmp = Reg(i)
+      tmp = Reg(i); break
   D0.i32 = tmp
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
@@ -4190,7 +4190,7 @@ def _VOP1Op_V_CLS_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
   D0.i32 = -1
   for i in range(1, int(31)+1):
     if S0.i32[31 - i] != S0.i32[31]:
-      D0.i32 = i
+      D0.i32 = i; break
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   return result
@@ -5497,6 +5497,7 @@ def _VOP3Op_V_CMP_F_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -5517,6 +5518,7 @@ def _VOP3Op_V_CMP_LT_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -5537,6 +5539,7 @@ def _VOP3Op_V_CMP_EQ_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -5556,6 +5559,7 @@ def _VOP3Op_V_CMP_LE_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -5576,6 +5580,7 @@ def _VOP3Op_V_CMP_GT_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -5595,6 +5600,7 @@ def _VOP3Op_V_CMP_LG_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -5614,6 +5620,7 @@ def _VOP3Op_V_CMP_GE_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -5634,6 +5641,7 @@ def _VOP3Op_V_CMP_O_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -5654,6 +5662,7 @@ def _VOP3Op_V_CMP_U_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -5674,6 +5683,7 @@ def _VOP3Op_V_CMP_NGE_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -5694,6 +5704,7 @@ def _VOP3Op_V_CMP_NLG_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -5715,6 +5726,7 @@ def _VOP3Op_V_CMP_NGT_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -5735,6 +5747,7 @@ def _VOP3Op_V_CMP_NLE_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -5756,6 +5769,7 @@ def _VOP3Op_V_CMP_NEQ_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -5777,6 +5791,7 @@ def _VOP3Op_V_CMP_NLT_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -5795,6 +5810,7 @@ def _VOP3Op_V_CMP_T_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -5813,6 +5829,7 @@ def _VOP3Op_V_CMP_F_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -5833,6 +5850,7 @@ def _VOP3Op_V_CMP_LT_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -5853,6 +5871,7 @@ def _VOP3Op_V_CMP_EQ_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -5872,6 +5891,7 @@ def _VOP3Op_V_CMP_LE_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -5892,6 +5912,7 @@ def _VOP3Op_V_CMP_GT_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -5911,6 +5932,7 @@ def _VOP3Op_V_CMP_LG_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -5930,6 +5952,7 @@ def _VOP3Op_V_CMP_GE_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -5950,6 +5973,7 @@ def _VOP3Op_V_CMP_O_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -5970,6 +5994,7 @@ def _VOP3Op_V_CMP_U_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -5990,6 +6015,7 @@ def _VOP3Op_V_CMP_NGE_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6010,6 +6036,7 @@ def _VOP3Op_V_CMP_NLG_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6031,6 +6058,7 @@ def _VOP3Op_V_CMP_NGT_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6051,6 +6079,7 @@ def _VOP3Op_V_CMP_NLE_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6072,6 +6101,7 @@ def _VOP3Op_V_CMP_NEQ_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6093,6 +6123,7 @@ def _VOP3Op_V_CMP_NLT_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6111,6 +6142,7 @@ def _VOP3Op_V_CMP_T_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6129,6 +6161,7 @@ def _VOP3Op_V_CMP_F_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6149,6 +6182,7 @@ def _VOP3Op_V_CMP_LT_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6169,6 +6203,7 @@ def _VOP3Op_V_CMP_EQ_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6188,6 +6223,7 @@ def _VOP3Op_V_CMP_LE_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6208,6 +6244,7 @@ def _VOP3Op_V_CMP_GT_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6227,6 +6264,7 @@ def _VOP3Op_V_CMP_LG_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6246,6 +6284,7 @@ def _VOP3Op_V_CMP_GE_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6266,6 +6305,7 @@ def _VOP3Op_V_CMP_O_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6286,6 +6326,7 @@ def _VOP3Op_V_CMP_U_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6306,6 +6347,7 @@ def _VOP3Op_V_CMP_NGE_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6326,6 +6368,7 @@ def _VOP3Op_V_CMP_NLG_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6347,6 +6390,7 @@ def _VOP3Op_V_CMP_NGT_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6367,6 +6411,7 @@ def _VOP3Op_V_CMP_NLE_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6388,6 +6433,7 @@ def _VOP3Op_V_CMP_NEQ_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6409,6 +6455,7 @@ def _VOP3Op_V_CMP_NLT_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6427,6 +6474,7 @@ def _VOP3Op_V_CMP_T_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6447,6 +6495,7 @@ def _VOP3Op_V_CMP_LT_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6467,6 +6516,7 @@ def _VOP3Op_V_CMP_EQ_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6486,6 +6536,7 @@ def _VOP3Op_V_CMP_LE_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6506,6 +6557,7 @@ def _VOP3Op_V_CMP_GT_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6526,6 +6578,7 @@ def _VOP3Op_V_CMP_NE_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6545,6 +6598,7 @@ def _VOP3Op_V_CMP_GE_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6565,6 +6619,7 @@ def _VOP3Op_V_CMP_LT_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6585,6 +6640,7 @@ def _VOP3Op_V_CMP_EQ_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6604,6 +6660,7 @@ def _VOP3Op_V_CMP_LE_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6624,6 +6681,7 @@ def _VOP3Op_V_CMP_GT_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6644,6 +6702,7 @@ def _VOP3Op_V_CMP_NE_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6663,6 +6722,7 @@ def _VOP3Op_V_CMP_GE_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6681,6 +6741,7 @@ def _VOP3Op_V_CMP_F_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6701,6 +6762,7 @@ def _VOP3Op_V_CMP_LT_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6721,6 +6783,7 @@ def _VOP3Op_V_CMP_EQ_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6740,6 +6803,7 @@ def _VOP3Op_V_CMP_LE_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6760,6 +6824,7 @@ def _VOP3Op_V_CMP_GT_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6780,6 +6845,7 @@ def _VOP3Op_V_CMP_NE_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6799,6 +6865,7 @@ def _VOP3Op_V_CMP_GE_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6817,6 +6884,7 @@ def _VOP3Op_V_CMP_T_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6835,6 +6903,7 @@ def _VOP3Op_V_CMP_F_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6855,6 +6924,7 @@ def _VOP3Op_V_CMP_LT_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6875,6 +6945,7 @@ def _VOP3Op_V_CMP_EQ_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6894,6 +6965,7 @@ def _VOP3Op_V_CMP_LE_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6914,6 +6986,7 @@ def _VOP3Op_V_CMP_GT_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6934,6 +7007,7 @@ def _VOP3Op_V_CMP_NE_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6953,6 +7027,7 @@ def _VOP3Op_V_CMP_GE_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6971,6 +7046,7 @@ def _VOP3Op_V_CMP_T_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -6989,6 +7065,7 @@ def _VOP3Op_V_CMP_F_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -7009,6 +7086,7 @@ def _VOP3Op_V_CMP_LT_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -7029,6 +7107,7 @@ def _VOP3Op_V_CMP_EQ_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -7048,6 +7127,7 @@ def _VOP3Op_V_CMP_LE_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -7068,6 +7148,7 @@ def _VOP3Op_V_CMP_GT_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -7088,6 +7169,7 @@ def _VOP3Op_V_CMP_NE_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -7107,6 +7189,7 @@ def _VOP3Op_V_CMP_GE_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -7125,6 +7208,7 @@ def _VOP3Op_V_CMP_T_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -7143,6 +7227,7 @@ def _VOP3Op_V_CMP_F_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -7163,6 +7248,7 @@ def _VOP3Op_V_CMP_LT_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -7183,6 +7269,7 @@ def _VOP3Op_V_CMP_EQ_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -7202,6 +7289,7 @@ def _VOP3Op_V_CMP_LE_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -7222,6 +7310,7 @@ def _VOP3Op_V_CMP_GT_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -7242,6 +7331,7 @@ def _VOP3Op_V_CMP_NE_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -7261,6 +7351,7 @@ def _VOP3Op_V_CMP_GE_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -7279,6 +7370,7 @@ def _VOP3Op_V_CMP_T_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -7339,6 +7431,7 @@ def _VOP3Op_V_CMP_CLASS_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, 
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -7399,6 +7492,7 @@ def _VOP3Op_V_CMP_CLASS_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, 
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -7459,6 +7553,7 @@ def _VOP3Op_V_CMP_CLASS_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, 
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1
+  result['vcc_lane'] = (D0._val >> lane) & 1
   result['d0_64'] = True
   _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000
   result['new_pc'] = _pc  # absolute byte address
@@ -7472,7 +7567,7 @@ def _VOP3Op_V_CMPX_F_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   EXEC.u64[laneId] = 0
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_LT_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7485,7 +7580,7 @@ def _VOP3Op_V_CMPX_LT_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.f16 < S1.f16
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_EQ_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7499,7 +7594,7 @@ def _VOP3Op_V_CMPX_EQ_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.f16 == S1.f16
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_LE_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7512,7 +7607,7 @@ def _VOP3Op_V_CMPX_LE_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.f16 <= S1.f16
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_GT_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7525,7 +7620,7 @@ def _VOP3Op_V_CMPX_GT_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.f16 > S1.f16
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_LG_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7538,7 +7633,7 @@ def _VOP3Op_V_CMPX_LG_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.f16  !=  S1.f16
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_GE_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7551,7 +7646,7 @@ def _VOP3Op_V_CMPX_GE_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.f16 >= S1.f16
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_O_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7564,7 +7659,7 @@ def _VOP3Op_V_CMPX_O_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   EXEC.u64[laneId] = ( not isNAN(F(S0.f16))  and   not isNAN(F(S1.f16)))
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_U_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7577,7 +7672,7 @@ def _VOP3Op_V_CMPX_U_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   EXEC.u64[laneId] = (isNAN(F(S0.f16))  or  isNAN(F(S1.f16)))
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_NGE_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7591,7 +7686,7 @@ def _VOP3Op_V_CMPX_NGE_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, V
   EXEC.u64[laneId] =  not (S0.f16 >= S1.f16)
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_NLG_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7605,7 +7700,7 @@ def _VOP3Op_V_CMPX_NLG_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, V
   EXEC.u64[laneId] =  not (S0.f16  !=  S1.f16)
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_NGT_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7619,7 +7714,7 @@ def _VOP3Op_V_CMPX_NGT_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, V
   EXEC.u64[laneId] =  not (S0.f16 > S1.f16)
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_NLE_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7633,7 +7728,7 @@ def _VOP3Op_V_CMPX_NLE_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, V
   EXEC.u64[laneId] =  not (S0.f16 <= S1.f16)
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_NEQ_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7647,7 +7742,7 @@ def _VOP3Op_V_CMPX_NEQ_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, V
   EXEC.u64[laneId] =  not (S0.f16 == S1.f16)
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_NLT_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7661,7 +7756,7 @@ def _VOP3Op_V_CMPX_NLT_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, V
   EXEC.u64[laneId] =  not (S0.f16 < S1.f16)
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_T_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7672,7 +7767,7 @@ def _VOP3Op_V_CMPX_T_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   EXEC.u64[laneId] = 1
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_F_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7683,7 +7778,7 @@ def _VOP3Op_V_CMPX_F_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   EXEC.u64[laneId] = 0
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_LT_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7696,7 +7791,7 @@ def _VOP3Op_V_CMPX_LT_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.f32 < S1.f32
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_EQ_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7710,7 +7805,7 @@ def _VOP3Op_V_CMPX_EQ_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.f32 == S1.f32
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_LE_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7723,7 +7818,7 @@ def _VOP3Op_V_CMPX_LE_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.f32 <= S1.f32
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_GT_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7736,7 +7831,7 @@ def _VOP3Op_V_CMPX_GT_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.f32 > S1.f32
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_LG_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7749,7 +7844,7 @@ def _VOP3Op_V_CMPX_LG_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.f32  !=  S1.f32
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_GE_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7762,7 +7857,7 @@ def _VOP3Op_V_CMPX_GE_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.f32 >= S1.f32
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_O_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7775,7 +7870,7 @@ def _VOP3Op_V_CMPX_O_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   EXEC.u64[laneId] = ( not isNAN(F(S0.f32))  and   not isNAN(F(S1.f32)))
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_U_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7788,7 +7883,7 @@ def _VOP3Op_V_CMPX_U_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   EXEC.u64[laneId] = (isNAN(F(S0.f32))  or  isNAN(F(S1.f32)))
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_NGE_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7802,7 +7897,7 @@ def _VOP3Op_V_CMPX_NGE_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, V
   EXEC.u64[laneId] =  not (S0.f32 >= S1.f32)
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_NLG_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7816,7 +7911,7 @@ def _VOP3Op_V_CMPX_NLG_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, V
   EXEC.u64[laneId] =  not (S0.f32  !=  S1.f32)
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_NGT_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7830,7 +7925,7 @@ def _VOP3Op_V_CMPX_NGT_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, V
   EXEC.u64[laneId] =  not (S0.f32 > S1.f32)
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_NLE_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7844,7 +7939,7 @@ def _VOP3Op_V_CMPX_NLE_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, V
   EXEC.u64[laneId] =  not (S0.f32 <= S1.f32)
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_NEQ_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7858,7 +7953,7 @@ def _VOP3Op_V_CMPX_NEQ_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, V
   EXEC.u64[laneId] =  not (S0.f32 == S1.f32)
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_NLT_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7872,7 +7967,7 @@ def _VOP3Op_V_CMPX_NLT_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, V
   EXEC.u64[laneId] =  not (S0.f32 < S1.f32)
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_T_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7883,7 +7978,7 @@ def _VOP3Op_V_CMPX_T_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   EXEC.u64[laneId] = 1
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_F_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7894,7 +7989,7 @@ def _VOP3Op_V_CMPX_F_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   EXEC.u64[laneId] = 0
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_LT_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7907,7 +8002,7 @@ def _VOP3Op_V_CMPX_LT_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.f64 < S1.f64
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_EQ_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7921,7 +8016,7 @@ def _VOP3Op_V_CMPX_EQ_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.f64 == S1.f64
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_LE_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7934,7 +8029,7 @@ def _VOP3Op_V_CMPX_LE_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.f64 <= S1.f64
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_GT_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7947,7 +8042,7 @@ def _VOP3Op_V_CMPX_GT_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.f64 > S1.f64
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_LG_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7960,7 +8055,7 @@ def _VOP3Op_V_CMPX_LG_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.f64  !=  S1.f64
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_GE_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7973,7 +8068,7 @@ def _VOP3Op_V_CMPX_GE_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.f64 >= S1.f64
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_O_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7986,7 +8081,7 @@ def _VOP3Op_V_CMPX_O_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   EXEC.u64[laneId] = ( not isNAN(S0.f64)  and   not isNAN(S1.f64))
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_U_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -7999,7 +8094,7 @@ def _VOP3Op_V_CMPX_U_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   EXEC.u64[laneId] = (isNAN(S0.f64)  or  isNAN(S1.f64))
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_NGE_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8013,7 +8108,7 @@ def _VOP3Op_V_CMPX_NGE_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, V
   EXEC.u64[laneId] =  not (S0.f64 >= S1.f64)
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_NLG_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8027,7 +8122,7 @@ def _VOP3Op_V_CMPX_NLG_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, V
   EXEC.u64[laneId] =  not (S0.f64  !=  S1.f64)
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_NGT_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8041,7 +8136,7 @@ def _VOP3Op_V_CMPX_NGT_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, V
   EXEC.u64[laneId] =  not (S0.f64 > S1.f64)
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_NLE_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8055,7 +8150,7 @@ def _VOP3Op_V_CMPX_NLE_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, V
   EXEC.u64[laneId] =  not (S0.f64 <= S1.f64)
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_NEQ_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8069,7 +8164,7 @@ def _VOP3Op_V_CMPX_NEQ_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, V
   EXEC.u64[laneId] =  not (S0.f64 == S1.f64)
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_NLT_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8083,7 +8178,7 @@ def _VOP3Op_V_CMPX_NLT_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, V
   EXEC.u64[laneId] =  not (S0.f64 < S1.f64)
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_T_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8094,7 +8189,7 @@ def _VOP3Op_V_CMPX_T_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   EXEC.u64[laneId] = 1
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_LT_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8107,7 +8202,7 @@ def _VOP3Op_V_CMPX_LT_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.i16 < S1.i16
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_EQ_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8121,7 +8216,7 @@ def _VOP3Op_V_CMPX_EQ_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.i16 == S1.i16
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_LE_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8134,7 +8229,7 @@ def _VOP3Op_V_CMPX_LE_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.i16 <= S1.i16
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_GT_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8147,7 +8242,7 @@ def _VOP3Op_V_CMPX_GT_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.i16 > S1.i16
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_NE_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8160,7 +8255,7 @@ def _VOP3Op_V_CMPX_NE_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.i16  !=  S1.i16
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_GE_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8173,7 +8268,7 @@ def _VOP3Op_V_CMPX_GE_I16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.i16 >= S1.i16
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_LT_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8186,7 +8281,7 @@ def _VOP3Op_V_CMPX_LT_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.u16 < S1.u16
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_EQ_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8200,7 +8295,7 @@ def _VOP3Op_V_CMPX_EQ_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.u16 == S1.u16
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_LE_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8213,7 +8308,7 @@ def _VOP3Op_V_CMPX_LE_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.u16 <= S1.u16
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_GT_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8226,7 +8321,7 @@ def _VOP3Op_V_CMPX_GT_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.u16 > S1.u16
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_NE_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8239,7 +8334,7 @@ def _VOP3Op_V_CMPX_NE_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.u16  !=  S1.u16
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_GE_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8252,7 +8347,7 @@ def _VOP3Op_V_CMPX_GE_U16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.u16 >= S1.u16
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_F_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8263,7 +8358,7 @@ def _VOP3Op_V_CMPX_F_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   EXEC.u64[laneId] = 0
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_LT_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8276,7 +8371,7 @@ def _VOP3Op_V_CMPX_LT_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.i32 < S1.i32
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_EQ_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8290,7 +8385,7 @@ def _VOP3Op_V_CMPX_EQ_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.i32 == S1.i32
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_LE_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8303,7 +8398,7 @@ def _VOP3Op_V_CMPX_LE_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.i32 <= S1.i32
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_GT_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8316,7 +8411,7 @@ def _VOP3Op_V_CMPX_GT_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.i32 > S1.i32
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_NE_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8329,7 +8424,7 @@ def _VOP3Op_V_CMPX_NE_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.i32  !=  S1.i32
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_GE_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8342,7 +8437,7 @@ def _VOP3Op_V_CMPX_GE_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.i32 >= S1.i32
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_T_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8353,7 +8448,7 @@ def _VOP3Op_V_CMPX_T_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   EXEC.u64[laneId] = 1
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_F_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8364,7 +8459,7 @@ def _VOP3Op_V_CMPX_F_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   EXEC.u64[laneId] = 0
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_LT_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8377,7 +8472,7 @@ def _VOP3Op_V_CMPX_LT_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.u32 < S1.u32
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_EQ_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8391,7 +8486,7 @@ def _VOP3Op_V_CMPX_EQ_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.u32 == S1.u32
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_LE_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8404,7 +8499,7 @@ def _VOP3Op_V_CMPX_LE_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.u32 <= S1.u32
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_GT_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8417,7 +8512,7 @@ def _VOP3Op_V_CMPX_GT_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.u32 > S1.u32
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_NE_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8430,7 +8525,7 @@ def _VOP3Op_V_CMPX_NE_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.u32  !=  S1.u32
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_GE_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8443,7 +8538,7 @@ def _VOP3Op_V_CMPX_GE_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.u32 >= S1.u32
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_T_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8454,7 +8549,7 @@ def _VOP3Op_V_CMPX_T_U32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   EXEC.u64[laneId] = 1
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_F_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8465,7 +8560,7 @@ def _VOP3Op_V_CMPX_F_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   EXEC.u64[laneId] = 0
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_LT_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8478,7 +8573,7 @@ def _VOP3Op_V_CMPX_LT_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.i64 < S1.i64
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_EQ_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8492,7 +8587,7 @@ def _VOP3Op_V_CMPX_EQ_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.i64 == S1.i64
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_LE_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8505,7 +8600,7 @@ def _VOP3Op_V_CMPX_LE_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.i64 <= S1.i64
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_GT_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8518,7 +8613,7 @@ def _VOP3Op_V_CMPX_GT_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.i64 > S1.i64
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_NE_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8531,7 +8626,7 @@ def _VOP3Op_V_CMPX_NE_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.i64  !=  S1.i64
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_GE_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8544,7 +8639,7 @@ def _VOP3Op_V_CMPX_GE_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.i64 >= S1.i64
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_T_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8555,7 +8650,7 @@ def _VOP3Op_V_CMPX_T_I64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   EXEC.u64[laneId] = 1
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_F_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8566,7 +8661,7 @@ def _VOP3Op_V_CMPX_F_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   EXEC.u64[laneId] = 0
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_LT_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8579,7 +8674,7 @@ def _VOP3Op_V_CMPX_LT_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.u64 < S1.u64
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_EQ_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8593,7 +8688,7 @@ def _VOP3Op_V_CMPX_EQ_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.u64 == S1.u64
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_LE_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8606,7 +8701,7 @@ def _VOP3Op_V_CMPX_LE_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.u64 <= S1.u64
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_GT_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8619,7 +8714,7 @@ def _VOP3Op_V_CMPX_GT_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.u64 > S1.u64
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_NE_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8632,7 +8727,7 @@ def _VOP3Op_V_CMPX_NE_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.u64  !=  S1.u64
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_GE_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8645,7 +8740,7 @@ def _VOP3Op_V_CMPX_GE_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VG
   EXEC.u64[laneId] = S0.u64 >= S1.u64
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_T_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8656,7 +8751,7 @@ def _VOP3Op_V_CMPX_T_U64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   EXEC.u64[laneId] = 1
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_CLASS_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8709,7 +8804,7 @@ def _VOP3Op_V_CMPX_CLASS_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal,
   EXEC.u64[laneId] = result
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_CLASS_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8762,7 +8857,7 @@ def _VOP3Op_V_CMPX_CLASS_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal,
   EXEC.u64[laneId] = result
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_CMPX_CLASS_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -8815,7 +8910,7 @@ def _VOP3Op_V_CMPX_CLASS_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal,
   EXEC.u64[laneId] = result
   # --- end pseudocode ---
   result = {'d0': d0, 'scc': scc & 1}
-  if EXEC._val != exec_mask: result['exec'] = EXEC._val
+  result['exec_lane'] = (EXEC._val >> lane) & 1
   return result
 
 def _VOP3Op_V_MOV_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
@@ -9377,7 +9472,7 @@ def _VOP3Op_V_CLS_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, 
   D0.i32 = -1
   for i in range(1, int(31)+1):
     if S0.i32[31 - i] != S0.i32[31]:
-      D0.i32 = i
+      D0.i32 = i; break
   # --- end pseudocode ---
   result = {'d0': D0._val, 'scc': scc & 1}
   return result
@@ -12162,6 +12257,37 @@ def _VOP3Op_V_MUL_HI_I32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGP
   result = {'d0': D0._val, 'scc': scc & 1}
   return result
 
+def _VOP3Op_V_TRIG_PREOP_F64(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
+  # shift = 32'I(S1[4 : 0].u32) * 53;
+  # if exponent(S0.f64) > 1077 then
+  # shift += exponent(S0.f64) - 1077
+  # endif;
+  # // (2.0/PI) == 0.{b_1200, b_1199, b_1198, ..., b_1, b_0}
+  # // b_1200 is the MSB of the fractional part of 2.0/PI
+  # // Left shift operation indicates which bits are brought
+  # result = 64'F((1201'B(2.0 / PI)[1200 : 0] << shift.u32) & 1201'0x1fffffffffffff);
+  # scale = -53 - shift;
+  # if exponent(S0.f64) >= 1968 then
+  # scale += 128
+  # endif;
+  # D0.f64 = ldexp(result, scale)
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  D0 = Reg(d0)
+  # --- compiled pseudocode ---
+  shift = (S1[4 : 0].u32) * 53
+  if exponent(S0.f64) > 1077:
+    shift += exponent(S0.f64) - 1077
+  result = float(((TWO_OVER_PI_1201[1200 : 0] << int(shift)) >> (1201 - 53)) & 0x1fffffffffffff)
+  scale = -53 - shift
+  if exponent(S0.f64) >= 1968:
+    scale += 128
+  D0.f64 = ldexp(result, scale)
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  result['d0_64'] = True
+  return result
+
 def _VOP3Op_V_LSHLREV_B16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):
   # D0.u16 = (S1.u16 << S0[3 : 0].u32)
   S0 = Reg(s0)
@@ -12695,6 +12821,7 @@ VOP3Op_FUNCTIONS = {
   VOP3Op.V_MUL_LO_U32: _VOP3Op_V_MUL_LO_U32,
   VOP3Op.V_MUL_HI_U32: _VOP3Op_V_MUL_HI_U32,
   VOP3Op.V_MUL_HI_I32: _VOP3Op_V_MUL_HI_I32,
+  VOP3Op.V_TRIG_PREOP_F64: _VOP3Op_V_TRIG_PREOP_F64,
   VOP3Op.V_LSHLREV_B16: _VOP3Op_V_LSHLREV_B16,
   VOP3Op.V_LSHRREV_B16: _VOP3Op_V_LSHRREV_B16,
   VOP3Op.V_ASHRREV_I16: _VOP3Op_V_ASHRREV_I16,
