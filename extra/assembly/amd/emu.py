@@ -639,7 +639,12 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     s0 = mod_src(st.rsrc(src0, lane), 0)
     s1 = mod_src(st.rsrc(src1, lane), 1) if src1 is not None else 0
     s2 = mod_src(st.rsrc(src2, lane), 2) if src2 is not None else 0
-  d0 = V[vdst] if not is_64bit_op else (V[vdst] | (V[vdst + 1] << 32))
+  # For VOP2 16-bit ops (like V_FMAC_F16), the destination is used as an accumulator.
+  # The pseudocode reads D0.f16 from low 16 bits, so we need to shift hi->lo when vop2_dst_hi is True.
+  if is_vop2_16bit:
+    d0 = ((V[vdst] >> 16) & 0xffff) if vop2_dst_hi else (V[vdst] & 0xffff)
+  else:
+    d0 = V[vdst] if not is_64bit_op else (V[vdst] | (V[vdst + 1] << 32))
 
   # V_CNDMASK_B32/B16: VOP3 encoding uses src2 as mask (not VCC); VOP2 uses VCC implicitly
   # Pass the correct mask as vcc to the function so pseudocode VCC.u64[laneId] works correctly

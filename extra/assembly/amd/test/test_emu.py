@@ -3036,6 +3036,31 @@ class TestF16SinKernelOps(unittest.TestCase):
     result = st.vgpr[0][2] & 0xFFFF
     self.assertEqual(result, 0x4700, f"Expected 0x4700 (7.0), got 0x{result:04x}")
 
+  def test_v_fmac_f16_hi_dest(self):
+    """v_fmac_f16 with .h destination: dst.h = src0 * src1 + dst.h.
+
+    This tests the case from AMD_LLVM sin(0) where V_FMAC_F16 writes to v0.h.
+    The accumulator D should be read from v0.h, not v0.l.
+    """
+    from extra.assembly.amd.pcode import f32_to_f16, _f16
+    # Set up: v0 = {hi=0.5, lo=1.0}, src0 = 0.0 (literal), src1 = v1.l (any value)
+    # Expected: v0.h = 0.0 * v1.l + 0.5 = 0.5 (unchanged)
+    instructions = [
+      s_mov_b32(s[0], 0x38003c00),  # v0 = {hi=0.5, lo=1.0}
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[1], 0x38000000),  # v1 = {hi=0.5, lo=0.0}
+      v_mov_b32_e32(v[1], s[1]),
+      # v_fmac_f16 v0.h, literal(0.318...), v1.l  (vdst=128 for .h)
+      # D = D + S0 * S1 = v0.h + 0.318 * 0.0 = 0.5 + 0 = 0.5
+      VOP2(VOP2Op.V_FMAC_F16, vdst=RawImm(128), src0=RawImm(255), vsrc1=RawImm(1), literal=0x3518),  # 0.318... * 0.0 + 0.5
+    ]
+    st = run_program(instructions, n_lanes=1)
+    v0 = st.vgpr[0][0]
+    result_hi = _f16((v0 >> 16) & 0xffff)
+    result_lo = _f16(v0 & 0xffff)
+    self.assertAlmostEqual(result_hi, 0.5, delta=0.01, msg=f"Expected v0.h=0.5, got {result_hi}")
+    self.assertAlmostEqual(result_lo, 1.0, delta=0.01, msg=f"Expected v0.l=1.0, got {result_lo}")
+
   def test_v_add_f16_basic(self):
     """v_add_f16: 1.0 + 2.0 = 3.0."""
     instructions = [
@@ -3567,3 +3592,37 @@ class TestVOP3F16Modifiers(unittest.TestCase):
 
 if __name__ == '__main__':
   unittest.main()
+
+
+class TestVFmaMixSinCase(unittest.TestCase):
+  """Tests for the specific V_FMA_MIXLO_F16 case that fails in AMD_LLVM sin(0) kernel."""
+
+  def test_v_fma_mixlo_f16_sin_case(self):
+    """V_FMA_MIXLO_F16 case from sin kernel at pc=0x14e.
+
+    This tests the specific operands that produce the wrong result:
+    - src0 = v3 = 0x3f800000 (f32 1.0)
+    - src1 = s6 = 0xaf05a309 (f32 tiny negative)
+    - src2 = v5 = 0xc0490fdb (f32 -π)
+    - Result should be approximately -π (tiny * 1.0 + -π ≈ -π)
+    """
+    from extra.assembly.amd.pcode import _f16
+    instructions = [
+      # Set up operands as in the sin kernel
+      s_mov_b32(s[0], 0x3f800000),  # f32 1.0
+      v_mov_b32_e32(v[3], s[0]),
+      s_mov_b32(s[1], 0xaf05a309),  # f32 tiny negative
+      s_mov_b32(s[6], s[1]),
+      s_mov_b32(s[2], 0xc0490fdb),  # f32 -π
+      v_mov_b32_e32(v[5], s[2]),
+      # Pre-fill v3 with expected hi bits
+      s_mov_b32(s[3], 0x3f800000),  # hi = f32 1.0 encoding (will be overwritten by opsel behavior)
+      v_mov_b32_e32(v[3], s[3]),
+      # V_FMA_MIXLO_F16: src0=v3 (259), src1=s6, src2=v5 (261), opsel=0, opsel_hi=0, opsel_hi2=0
+      VOP3P(VOP3POp.V_FMA_MIXLO_F16, vdst=v[3], src0=v[3], src1=s[6], src2=v[5], opsel=0, opsel_hi=0, opsel_hi2=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    lo = _f16(st.vgpr[0][3] & 0xffff)
+    # Result should be approximately -π = -3.14...
+    # f16 -π ≈ 0xc248 = -3.140625
+    self.assertAlmostEqual(lo, -3.14159, delta=0.01, msg=f"Expected ~-π, got {lo}")
