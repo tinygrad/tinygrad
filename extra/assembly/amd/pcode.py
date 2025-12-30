@@ -1,5 +1,5 @@
 # DSL for RDNA3 pseudocode - makes pseudocode expressions work directly as Python
-import struct, math, re
+import struct, math
 
 MASK32, MASK64 = 0xffffffff, 0xffffffffffffffff
 
@@ -36,44 +36,22 @@ def _i64(f):
 def _isnan(x):
   try: return math.isnan(float(x))
   except (TypeError, ValueError): return False
-def _isquietnan(x):
-  """Check if x is a quiet NaN.
-  f16: exponent=31, bit9=1, mantissa!=0
-  f32: exponent=255, bit22=1, mantissa!=0
-  f64: exponent=2047, bit51=1, mantissa!=0
-  """
+def _check_nan_type(x, quiet_bit_expected, default):
+  """Check NaN type by examining quiet bit. Returns default if can't determine."""
   try:
     if not math.isnan(float(x)): return False
-    # Get raw bits from TypedView or similar object with _reg attribute
     if hasattr(x, '_reg') and hasattr(x, '_bits'):
       bits = x._reg._val & ((1 << x._bits) - 1)
-      if x._bits == 16:
-        return ((bits >> 10) & 0x1f) == 31 and ((bits >> 9) & 1) == 1 and (bits & 0x3ff) != 0
-      if x._bits == 32:
-        return ((bits >> 23) & 0xff) == 255 and ((bits >> 22) & 1) == 1 and (bits & 0x7fffff) != 0
-      if x._bits == 64:
-        return ((bits >> 52) & 0x7ff) == 0x7ff and ((bits >> 51) & 1) == 1 and (bits & 0xfffffffffffff) != 0
-    return True  # Default to quiet NaN if we can't determine bit pattern
+      # NaN format: exponent all 1s, quiet bit, mantissa != 0
+      # f16: exp[14:10]=31, quiet=bit9, mant[8:0]  |  f32: exp[30:23]=255, quiet=bit22, mant[22:0]  |  f64: exp[62:52]=2047, quiet=bit51, mant[51:0]
+      exp_bits, quiet_pos, mant_mask = {16: (0x1f, 9, 0x3ff), 32: (0xff, 22, 0x7fffff), 64: (0x7ff, 51, 0xfffffffffffff)}.get(x._bits, (0,0,0))
+      exp_shift = {16: 10, 32: 23, 64: 52}.get(x._bits, 0)
+      if exp_bits and ((bits >> exp_shift) & exp_bits) == exp_bits and (bits & mant_mask) != 0:
+        return ((bits >> quiet_pos) & 1) == quiet_bit_expected
+    return default
   except (TypeError, ValueError): return False
-def _issignalnan(x):
-  """Check if x is a signaling NaN.
-  f16: exponent=31, bit9=0, mantissa!=0
-  f32: exponent=255, bit22=0, mantissa!=0
-  f64: exponent=2047, bit51=0, mantissa!=0
-  """
-  try:
-    if not math.isnan(float(x)): return False
-    # Get raw bits from TypedView or similar object with _reg attribute
-    if hasattr(x, '_reg') and hasattr(x, '_bits'):
-      bits = x._reg._val & ((1 << x._bits) - 1)
-      if x._bits == 16:
-        return ((bits >> 10) & 0x1f) == 31 and ((bits >> 9) & 1) == 0 and (bits & 0x3ff) != 0
-      if x._bits == 32:
-        return ((bits >> 23) & 0xff) == 255 and ((bits >> 22) & 1) == 0 and (bits & 0x7fffff) != 0
-      if x._bits == 64:
-        return ((bits >> 52) & 0x7ff) == 0x7ff and ((bits >> 51) & 1) == 0 and (bits & 0xfffffffffffff) != 0
-    return False  # Default to not signaling if we can't determine bit pattern
-  except (TypeError, ValueError): return False
+def _isquietnan(x): return _check_nan_type(x, 1, True)  # quiet NaN has quiet bit = 1
+def _issignalnan(x): return _check_nan_type(x, 0, False)  # signaling NaN has quiet bit = 0
 def _gt_neg_zero(a, b): return (a > b) or (a == 0 and b == 0 and not math.copysign(1, a) < 0 and math.copysign(1, b) < 0)
 def _lt_neg_zero(a, b): return (a < b) or (a == 0 and b == 0 and math.copysign(1, a) < 0 and not math.copysign(1, b) < 0)
 def _fma(a, b, c): return a * b + c
@@ -114,38 +92,26 @@ def isEven(x):
   return int(x) % 2 == 0
 def fract(x): return x - math.floor(x)
 PI = math.pi
-def sin(x):
-  # V_SIN_F32: pseudocode does sin(input * 2π), but hardware does frac on the input first
-  # So sin(1.0 * 2π) should be sin(frac(1.0) * 2π) = sin(0) = 0
+def _trig(fn, x):
+  # V_SIN/COS_F32: hardware does frac on input cycles before computing
   if math.isinf(x) or math.isnan(x): return float("nan")
-  # The input x is already multiplied by 2π in the pseudocode, so we need to
-  # extract the fractional cycle: frac(x / 2π) * 2π
-  cycles = x / (2 * math.pi)
-  frac_cycles = cycles - math.floor(cycles)
-  return math.sin(frac_cycles * 2 * math.pi)
-def cos(x):
-  # V_COS_F32: same as sin, hardware does frac on input cycles
-  if math.isinf(x) or math.isnan(x): return float("nan")
-  cycles = x / (2 * math.pi)
-  frac_cycles = cycles - math.floor(cycles)
-  return math.cos(frac_cycles * 2 * math.pi)
+  frac_cycles = fract(x / (2 * math.pi))
+  return fn(frac_cycles * 2 * math.pi)
+def sin(x): return _trig(math.sin, x)
+def cos(x): return _trig(math.cos, x)
 def pow(a, b):
   try: return a ** b
   except OverflowError: return float("inf") if b > 0 else 0.0
-def _brev32(v): return int(bin(v & 0xffffffff)[2:].zfill(32)[::-1], 2)
-def _brev64(v): return int(bin(v & 0xffffffffffffffff)[2:].zfill(64)[::-1], 2)
-def _ctz32(v):
-  v = int(v) & 0xffffffff
-  if v == 0: return 32
-  n = 0
+def _brev(v, bits): return int(bin(v & ((1 << bits) - 1))[2:].zfill(bits)[::-1], 2)
+def _brev32(v): return _brev(v, 32)
+def _brev64(v): return _brev(v, 64)
+def _ctz(v, bits):
+  v, n = int(v) & ((1 << bits) - 1), 0
+  if v == 0: return bits
   while (v & 1) == 0: v >>= 1; n += 1
   return n
-def _ctz64(v):
-  v = int(v) & 0xffffffffffffffff
-  if v == 0: return 64
-  n = 0
-  while (v & 1) == 0: v >>= 1; n += 1
-  return n
+def _ctz32(v): return _ctz(v, 32)
+def _ctz64(v): return _ctz(v, 64)
 def _exponent(f):
   # Handle TypedView (f16/f32/f64) to get correct exponent for that type
   if hasattr(f, '_bits') and hasattr(f, '_float') and f._float:
