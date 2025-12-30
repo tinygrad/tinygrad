@@ -210,6 +210,8 @@ D0.u32 = tmp.u32""")
 for i in 0 : 31 do
   if S0.u32[i] == 1 then
     tmp = i
+  endif
+endfor
 D0.i32 = tmp""")
     ctx = ExecContext(s0=0b1000)  # Bit 3 is set
     ctx.run(code)
