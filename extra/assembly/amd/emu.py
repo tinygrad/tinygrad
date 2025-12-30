@@ -1,8 +1,8 @@
 # RDNA3 emulator - executes compiled pseudocode from AMD ISA PDF
 # mypy: ignore-errors
 from __future__ import annotations
-import ctypes, os
-from extra.assembly.amd.dsl import Inst, RawImm
+import ctypes
+from extra.assembly.amd.dsl import Inst, RawImm, unwrap
 from extra.assembly.amd.asm import detect_format
 from extra.assembly.amd.pcode import _f32, _i32, _sext, _f16, _i16, _f64, _i64
 from extra.assembly.amd.autogen.rdna3.gen_pcode import get_compiled_functions
@@ -15,41 +15,51 @@ Program = dict[int, Inst]
 WAVE_SIZE, SGPR_COUNT, VGPR_COUNT = 32, 128, 256
 VCC_LO, VCC_HI, NULL, EXEC_LO, EXEC_HI, SCC = SrcEnum.VCC_LO, SrcEnum.VCC_HI, SrcEnum.NULL, SrcEnum.EXEC_LO, SrcEnum.EXEC_HI, SrcEnum.SCC
 
-# VOP3 ops that use 64-bit operands (and thus 64-bit literals when src is 255)
-# Exception: V_LDEXP_F64 has 32-bit integer src1, so literal should NOT be 64-bit when src1=255
-_VOP3_64BIT_OPS = {op.value for op in VOP3Op if op.name.endswith(('_F64', '_B64', '_I64', '_U64'))}
-_VOPC_64BIT_OPS = {op.value for op in VOPCOp if op.name.endswith(('_F64', '_B64', '_I64', '_U64'))}
-# Ops where src1 is 32-bit (exponent/shift amount) even though the op name suggests 64-bit
-_VOP3_64BIT_OPS_32BIT_SRC1 = {VOP3Op.V_LDEXP_F64.value}
-# Ops with 16-bit types in name (for source/dest handling)
-# Exception: SAD/MSAD ops take 32-bit packed sources and extract 16-bit/8-bit chunks internally
-_VOP3_16BIT_OPS = {op for op in VOP3Op if any(s in op.name for s in ('_F16', '_B16', '_I16', '_U16')) and 'SAD' not in op.name}
-_VOP1_16BIT_OPS = {op for op in VOP1Op if any(s in op.name for s in ('_F16', '_B16', '_I16', '_U16'))}
-_VOP2_16BIT_OPS = {op for op in VOP2Op if any(s in op.name for s in ('_F16', '_B16', '_I16', '_U16'))}
-_VOPC_16BIT_OPS = {op for op in VOPCOp if any(s in op.name for s in ('_F16', '_B16', '_I16', '_U16'))}
-# CVT ops with 32/64-bit source (despite 16-bit in name)
-_CVT_32_64_SRC_OPS = {op for op in VOP3Op if op.name.startswith('V_CVT_') and op.name.endswith(('_F32', '_I32', '_U32', '_F64', '_I64', '_U64'))} | \
-                     {op for op in VOP1Op if op.name.startswith('V_CVT_') and op.name.endswith(('_F32', '_I32', '_U32', '_F64', '_I64', '_U64'))}
-# CVT ops with 32-bit destination (convert FROM 16-bit TO 32-bit): V_CVT_F32_F16, V_CVT_I32_I16, V_CVT_U32_U16
-_CVT_32_DST_OPS = {op for op in VOP3Op if op.name.startswith('V_CVT_') and any(s in op.name for s in ('F32_F16', 'I32_I16', 'U32_U16', 'I32_F16', 'U32_F16'))} | \
-                  {op for op in VOP1Op if op.name.startswith('V_CVT_') and any(s in op.name for s in ('F32_F16', 'I32_I16', 'U32_U16', 'I32_F16', 'U32_F16'))}
-# 16-bit dst ops (PACK has 32-bit dst despite F16 in name, CVT to 32-bit has 32-bit dst)
+# Op classification helpers - build sets from op name patterns
+def _ops_matching(enum, *patterns, exclude=()): return {op for op in enum if any(p in op.name for p in patterns) and not any(e in op.name for e in exclude)}
+def _ops_ending(enum, *suffixes): return {op for op in enum if op.name.endswith(suffixes)}
+
+# 64-bit ops (for literal handling)
+_VOP3_64BIT_OPS = {op.value for op in _ops_ending(VOP3Op, '_F64', '_B64', '_I64', '_U64')}
+_VOPC_64BIT_OPS = {op.value for op in _ops_ending(VOPCOp, '_F64', '_B64', '_I64', '_U64')}
+_VOP3_64BIT_OPS_32BIT_SRC1 = {VOP3Op.V_LDEXP_F64.value}  # src1 is 32-bit exponent
+
+# 16-bit ops (SAD/MSAD excluded - they use 32-bit packed sources)
+_VOP3_16BIT_OPS = _ops_matching(VOP3Op, '_F16', '_B16', '_I16', '_U16', exclude=('SAD',))
+_VOP1_16BIT_OPS = _ops_matching(VOP1Op, '_F16', '_B16', '_I16', '_U16')
+_VOP2_16BIT_OPS = _ops_matching(VOP2Op, '_F16', '_B16', '_I16', '_U16')
+_VOPC_16BIT_OPS = _ops_matching(VOPCOp, '_F16', '_B16', '_I16', '_U16')
+
+# CVT ops with 32/64-bit source (despite 16-bit in name) - must end with the type suffix
+_CVT_32_64_SRC_OPS = {op for op in _ops_ending(VOP3Op, '_F32', '_I32', '_U32', '_F64', '_I64', '_U64') if op.name.startswith('V_CVT_')} | \
+                     {op for op in _ops_ending(VOP1Op, '_F32', '_I32', '_U32', '_F64', '_I64', '_U64') if op.name.startswith('V_CVT_')}
+# CVT ops with 32-bit destination (FROM 16-bit TO 32-bit) - match patterns like F32_F16 in name
+_CVT_32_DST_OPS = _ops_matching(VOP3Op, 'F32_F16', 'I32_I16', 'U32_U16', 'I32_F16', 'U32_F16') | \
+                  _ops_matching(VOP1Op, 'F32_F16', 'I32_I16', 'U32_U16', 'I32_F16', 'U32_F16')
+
+# 16-bit dst ops (PACK has 32-bit dst, CVT to 32-bit has 32-bit dst)
 _VOP3_16BIT_DST_OPS = {op for op in _VOP3_16BIT_OPS if 'PACK' not in op.name} - _CVT_32_DST_OPS
 _VOP1_16BIT_DST_OPS = {op for op in _VOP1_16BIT_OPS if 'PACK' not in op.name} - _CVT_32_DST_OPS
-# VOP1 16-bit source ops (excluding CVT ops with 32/64-bit source) - for VOP1 e32, .h encoded in register index
 _VOP1_16BIT_SRC_OPS = _VOP1_16BIT_OPS - _CVT_32_64_SRC_OPS
 
 # Inline constants for src operands 128-254. Build tables for f32, f16, and f64 formats.
 import struct as _struct
-_FLOAT_CONSTS = {SrcEnum.POS_HALF: 0.5, SrcEnum.NEG_HALF: -0.5, SrcEnum.POS_ONE: 1.0, SrcEnum.NEG_ONE: -1.0,
-                 SrcEnum.POS_TWO: 2.0, SrcEnum.NEG_TWO: -2.0, SrcEnum.POS_FOUR: 4.0, SrcEnum.NEG_FOUR: -4.0, SrcEnum.INV_2PI: 0.15915494309189535}
-def _build_inline_consts(neg_mask, float_to_bits):
-  tbl = list(range(65)) + [((-i) & neg_mask) for i in range(1, 17)] + [0] * (127 - 81)
-  for k, v in _FLOAT_CONSTS.items(): tbl[k - 128] = float_to_bits(v)
+from extra.assembly.amd.dsl import FLOAT_ENC
+_FLOAT_CONSTS = {v: k for k, v in FLOAT_ENC.items()}  # Reuse from dsl.py: {240: 0.5, 241: -0.5, ...}
+_FLOAT_CONSTS[248] = 0.15915494309189535  # INV_2PI not in FLOAT_ENC
+def _build_inline_consts(mask, to_bits):
+  tbl = list(range(65)) + [((-i) & mask) for i in range(1, 17)] + [0] * (127 - 81)
+  for k, v in _FLOAT_CONSTS.items(): tbl[k - 128] = to_bits(v)
   return tbl
 _INLINE_CONSTS = _build_inline_consts(0xffffffff, lambda f: _struct.unpack('<I', _struct.pack('<f', f))[0])
 _INLINE_CONSTS_F16 = _build_inline_consts(0xffff, lambda f: _struct.unpack('<H', _struct.pack('<e', f))[0])
 _INLINE_CONSTS_F64 = _build_inline_consts(0xffffffffffffffff, lambda f: _struct.unpack('<Q', _struct.pack('<d', f))[0])
+
+# Helper: extract/write 16-bit half from/to 32-bit value
+def _src16(raw: int, is_hi: bool) -> int: return ((raw >> 16) & 0xffff) if is_hi else (raw & 0xffff)
+def _dst16(cur: int, val: int, is_hi: bool) -> int: return (cur & 0x0000ffff) | ((val & 0xffff) << 16) if is_hi else (cur & 0xffff0000) | (val & 0xffff)
+def _vgpr_hi(src: int) -> bool: return src >= 256 and ((src - 256) & 0x80) != 0
+def _vgpr_masked(src: int) -> int: return ((src - 256) & 0x7f) + 256 if src >= 256 else src
 
 # Memory access
 _valid_mem_ranges: list[tuple[int, int]] = []
@@ -148,9 +158,6 @@ class WaveState:
     self._pend_sgpr.clear()
 
 
-
-def _unwrap(v) -> int: return v.val if isinstance(v, RawImm) else v.value if hasattr(v, 'value') else v
-
 def decode_program(data: bytes) -> Program:
   result: Program = {}
   i = 0
@@ -161,7 +168,7 @@ def decode_program(data: bytes) -> Program:
     base_size = inst_class._size()
     # Pass enough data for potential 64-bit literal (base + 8 bytes max)
     inst = inst_class.from_bytes(data[i:i+base_size+8])
-    for name, val in inst._values.items(): setattr(inst, name, _unwrap(val))
+    for name, val in inst._values.items(): setattr(inst, name, unwrap(val))
     # from_bytes already handles literal reading - only need fallback for cases it doesn't handle
     if inst._literal is None:
       has_literal = any(getattr(inst, fld, None) == 255 for fld in ('src0', 'src1', 'src2', 'ssrc0', 'ssrc1', 'srcx0', 'srcy0'))
@@ -276,12 +283,10 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
       sz, sign, hi = FLAT_D16_LOAD[op]
       val = mem_read(addr, sz)
       if sign: val = _sext(val, sz * 8) & 0xffff
-      if hi: V[vdst] = (V[vdst] & 0xffff) | (val << 16)  # upper 16 bits
-      else: V[vdst] = (V[vdst] & 0xffff0000) | (val & 0xffff)  # lower 16 bits
+      V[vdst] = _dst16(V[vdst], val, hi)
     elif op in FLAT_D16_STORE:
       sz, hi = FLAT_D16_STORE[op]
-      val = (V[data_reg] >> 16) & 0xffff if hi else V[data_reg] & 0xffff
-      mem_write(addr, sz, val & ((1 << (sz * 8)) - 1))
+      mem_write(addr, sz, _src16(V[data_reg], hi) & ((1 << (sz * 8)) - 1))
     else: raise NotImplementedError(f"FLAT op {op}")
     return
 
@@ -357,28 +362,16 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
       st.pend_sgpr_lane(inst.sdst, lane, result['vcc_lane'])
     return
 
-
-
   # Get op enum and sources (None means "no source" for that operand)
-  # vop1_dst_hi/vop2_dst_hi: for VOP1/VOP2 16-bit dst ops, bit 7 of vdst indicates .h (high 16-bit) destination
-  vop1_dst_hi, vop2_dst_hi = False, False
+  # dst_hi: for VOP1/VOP2 16-bit dst ops, bit 7 of vdst indicates .h (high 16-bit) destination
+  dst_hi = False
   if inst_type is VOP1:
     if inst.op == VOP1Op.V_NOP: return
     op_cls, op, src0, src1, src2 = VOP1Op, VOP1Op(inst.op), inst.src0, None, None
-    # For 16-bit dst ops, vdst encodes .h in bit 7
-    if op in _VOP1_16BIT_DST_OPS:
-      vop1_dst_hi = (inst.vdst & 0x80) != 0
-      vdst = inst.vdst & 0x7f
-    else:
-      vdst = inst.vdst
+    dst_hi, vdst = (inst.vdst & 0x80) != 0 and op in _VOP1_16BIT_DST_OPS, inst.vdst & 0x7f if op in _VOP1_16BIT_DST_OPS else inst.vdst
   elif inst_type is VOP2:
     op_cls, op, src0, src1, src2 = VOP2Op, VOP2Op(inst.op), inst.src0, inst.vsrc1 + 256, None
-    # For 16-bit dst ops, vdst encodes .h in bit 7
-    if op in _VOP2_16BIT_OPS:
-      vop2_dst_hi = (inst.vdst & 0x80) != 0
-      vdst = inst.vdst & 0x7f
-    else:
-      vdst = inst.vdst
+    dst_hi, vdst = (inst.vdst & 0x80) != 0 and op in _VOP2_16BIT_OPS, inst.vdst & 0x7f if op in _VOP2_16BIT_OPS else inst.vdst
   elif inst_type is VOP3:
     # VOP3 ops 0-255 are VOPC comparisons encoded as VOP3 (use VOPCOp pseudocode)
     if inst.op < 256:
@@ -399,97 +392,34 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
       if lane == 0:  # Only execute once per wave, write results for all lanes
         exec_wmma(st, inst, op)
       return
-    # V_FMA_MIX: Mixed precision FMA - inputs can be f16 or f32 controlled by opsel_hi/opsel_hi2
-    # opsel_hi[0]: src0 is f32 (0) or f16 from hi bits (1)
-    # opsel_hi[1]: src1 is f32 (0) or f16 from hi bits (1)
-    # opsel_hi2: src2 is f32 (0) or f16 from hi bits (1)
-    # opsel[i]: when source is f16, use lo (0) or hi (1) 16 bits - BUT for V_FMA_MIX, opsel selects lo/hi when opsel_hi=1
-    # neg_hi[i]: abs modifier for source i (reuses neg_hi field for abs in V_FMA_MIX)
+    # V_FMA_MIX: Mixed precision FMA - opsel_hi controls f32(0) vs f16(1), opsel selects which f16 half
     if op in (VOP3POp.V_FMA_MIX_F32, VOP3POp.V_FMA_MIXLO_F16, VOP3POp.V_FMA_MIXHI_F16):
-      opsel = getattr(inst, 'opsel', 0)
-      opsel_hi = getattr(inst, 'opsel_hi', 0)
-      opsel_hi2 = getattr(inst, 'opsel_hi2', 0)
-      neg = getattr(inst, 'neg', 0)
-      abs_ = getattr(inst, 'neg_hi', 0)  # neg_hi field is reused as abs for V_FMA_MIX
-      vdst = inst.vdst
-      # Read raw 32-bit values
-      s0_raw = st.rsrc(inst.src0, lane)
-      s1_raw = st.rsrc(inst.src1, lane)
-      s2_raw = st.rsrc(inst.src2, lane) if inst.src2 is not None else 0
-      # Decode sources based on opsel_hi (controls f32 vs f16) and opsel (controls which half for f16)
-      # src0: opsel_hi[0]=1 means f16, opsel[0] selects hi(1) or lo(0) half
-      if opsel_hi & 1:
-        s0 = _f16((s0_raw >> 16) & 0xffff) if (opsel & 1) else _f16(s0_raw & 0xffff)
-      else:
-        s0 = _f32(s0_raw)
-      # src1: opsel_hi[1]=1 means f16, opsel[1] selects hi(1) or lo(0) half
-      if opsel_hi & 2:
-        s1 = _f16((s1_raw >> 16) & 0xffff) if (opsel & 2) else _f16(s1_raw & 0xffff)
-      else:
-        s1 = _f32(s1_raw)
-      # src2: opsel_hi2=1 means f16, opsel[2] selects hi(1) or lo(0) half
-      if opsel_hi2:
-        s2 = _f16((s2_raw >> 16) & 0xffff) if (opsel & 4) else _f16(s2_raw & 0xffff)
-      else:
-        s2 = _f32(s2_raw)
-      # Apply abs modifiers (abs_ field reuses neg_hi position)
-      if abs_ & 1: s0 = abs(s0)
-      if abs_ & 2: s1 = abs(s1)
-      if abs_ & 4: s2 = abs(s2)
-      # Apply neg modifiers
-      if neg & 1: s0 = -s0
-      if neg & 2: s1 = -s1
-      if neg & 4: s2 = -s2
-      # Compute FMA: d = s0 * s1 + s2
-      result = s0 * s1 + s2
+      opsel, opsel_hi, opsel_hi2 = getattr(inst, 'opsel', 0), getattr(inst, 'opsel_hi', 0), getattr(inst, 'opsel_hi2', 0)
+      neg, abs_ = getattr(inst, 'neg', 0), getattr(inst, 'neg_hi', 0)  # neg_hi reused as abs
+      raws = [st.rsrc(inst.src0, lane), st.rsrc(inst.src1, lane), st.rsrc(inst.src2, lane) if inst.src2 is not None else 0]
+      is_f16 = [opsel_hi & 1, opsel_hi & 2, opsel_hi2]
+      srcs = [_f16(_src16(raws[i], bool(opsel & (1<<i)))) if is_f16[i] else _f32(raws[i]) for i in range(3)]
+      for i in range(3):
+        if abs_ & (1<<i): srcs[i] = abs(srcs[i])
+        if neg & (1<<i): srcs[i] = -srcs[i]
+      result = srcs[0] * srcs[1] + srcs[2]
       V = st.vgpr[lane]
-      if op == VOP3POp.V_FMA_MIX_F32:
-        V[vdst] = _i32(result)
-      elif op == VOP3POp.V_FMA_MIXLO_F16:
-        lo = _i16(result) & 0xffff
-        V[vdst] = (V[vdst] & 0xffff0000) | lo
-      else:  # V_FMA_MIXHI_F16
-        hi = _i16(result) & 0xffff
-        V[vdst] = (V[vdst] & 0x0000ffff) | (hi << 16)
+      V[inst.vdst] = _i32(result) if op == VOP3POp.V_FMA_MIX_F32 else _dst16(V[inst.vdst], _i16(result), op == VOP3POp.V_FMA_MIXHI_F16)
       return
-    # Use rsrc_f16 for VOP3P to get correct f16 inline constants
-    s0_raw = st.rsrc_f16(inst.src0, lane)
-    s1_raw = st.rsrc_f16(inst.src1, lane)
-    s2_raw = st.rsrc_f16(inst.src2, lane) if inst.src2 is not None else 0
-    # Handle opsel (which 16-bit halves to use for each source)
-    opsel = getattr(inst, 'opsel', 0)
-    opsel_hi = getattr(inst, 'opsel_hi', 3)  # Default: use hi for hi result
-    opsel_hi2 = getattr(inst, 'opsel_hi2', 1)  # Default for src2
-    # Handle neg modifiers for VOP3P
-    # neg applies to lo result inputs, neg_hi applies to hi result inputs
-    neg = getattr(inst, 'neg', 0)
-    neg_hi = getattr(inst, 'neg_hi', 0)
-    # Build "virtual" sources with halves arranged for pseudocode: lo half goes to [15:0], hi half goes to [31:16]
-    # opsel bit 0/1/2 selects which half of src0/1/2 goes to the LO result
-    # opsel_hi bit 0/1 selects which half of src0/1 goes to the HI result
-    s0_lo = (s0_raw >> 16) & 0xffff if (opsel & 1) else s0_raw & 0xffff
-    s1_lo = (s1_raw >> 16) & 0xffff if (opsel & 2) else s1_raw & 0xffff
-    s2_lo = (s2_raw >> 16) & 0xffff if (opsel & 4) else s2_raw & 0xffff
-    s0_hi = (s0_raw >> 16) & 0xffff if (opsel_hi & 1) else s0_raw & 0xffff
-    s1_hi = (s1_raw >> 16) & 0xffff if (opsel_hi & 2) else s1_raw & 0xffff
-    s2_hi = (s2_raw >> 16) & 0xffff if opsel_hi2 else s2_raw & 0xffff
-    # Apply neg to lo result inputs (toggle f16 sign bit)
-    if neg & 1: s0_lo ^= 0x8000
-    if neg & 2: s1_lo ^= 0x8000
-    if neg & 4: s2_lo ^= 0x8000
-    # Apply neg_hi to hi result inputs
-    if neg_hi & 1: s0_hi ^= 0x8000
-    if neg_hi & 2: s1_hi ^= 0x8000
-    if neg_hi & 4: s2_hi ^= 0x8000
-    # Pack into format expected by pseudocode: [31:16] = hi input, [15:0] = lo input
-    s0 = (s0_hi << 16) | s0_lo
-    s1 = (s1_hi << 16) | s1_lo
-    s2 = (s2_hi << 16) | s2_lo
-    op_cls, vdst = VOP3POp, inst.vdst
-    fn = compiled.get(op_cls, {}).get(op)
+    # VOP3P packed ops: opsel selects halves for lo result, opsel_hi for hi result
+    raws = [st.rsrc_f16(inst.src0, lane), st.rsrc_f16(inst.src1, lane), st.rsrc_f16(inst.src2, lane) if inst.src2 is not None else 0]
+    opsel, opsel_hi, opsel_hi2 = getattr(inst, 'opsel', 0), getattr(inst, 'opsel_hi', 3), getattr(inst, 'opsel_hi2', 1)
+    neg, neg_hi = getattr(inst, 'neg', 0), getattr(inst, 'neg_hi', 0)
+    # Build packed sources: [31:16]=hi input, [15:0]=lo input; apply neg as f16 sign toggle
+    def pack_src(raw, lo_sel, hi_sel, neg_lo, neg_hi):
+      lo, hi = _src16(raw, lo_sel), _src16(raw, hi_sel)
+      return ((hi ^ (0x8000 if neg_hi else 0)) << 16) | (lo ^ (0x8000 if neg_lo else 0))
+    s0 = pack_src(raws[0], bool(opsel & 1), bool(opsel_hi & 1), bool(neg & 1), bool(neg_hi & 1))
+    s1 = pack_src(raws[1], bool(opsel & 2), bool(opsel_hi & 2), bool(neg & 2), bool(neg_hi & 2))
+    s2 = pack_src(raws[2], bool(opsel & 4), bool(opsel_hi2), bool(neg & 4), bool(neg_hi & 4))
+    fn = compiled.get(VOP3POp, {}).get(op)
     if fn is None: raise NotImplementedError(f"{op.name} not in pseudocode")
-    result = fn(s0, s1, s2, 0, st.scc, st.vcc, lane, st.exec_mask, st.literal, None, {})
-    st.vgpr[lane][vdst] = result['d0'] & 0xffffffff
+    st.vgpr[lane][inst.vdst] = fn(s0, s1, s2, 0, st.scc, st.vcc, lane, st.exec_mask, st.literal, None, {})['d0'] & 0xffffffff
     return
   else: raise NotImplementedError(f"Unknown vector type {inst_type}")
 
@@ -541,83 +471,35 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     s1 = mod_src64(st.rsrc64(src1, lane), 1) if src1 is not None else 0
     s2 = mod_src64(st.rsrc64(src2, lane), 2) if src2 is not None else 0
   elif is_16bit_src:
-    # For 16-bit source ops, opsel bits select which half to use
-    # Inline constants (128-254) must use f16 encoding, not f32
-    def rsrc_16bit(src, lane): return st.rsrc_f16(src, lane) if 128 <= src < 255 else st.rsrc(src, lane)
-    s0_raw = rsrc_16bit(src0, lane)
-    s1_raw = rsrc_16bit(src1, lane) if src1 is not None else 0
-    s2_raw = rsrc_16bit(src2, lane) if src2 is not None else 0
-    # opsel[0] selects hi(1) or lo(0) for src0, opsel[1] for src1, opsel[2] for src2
-    s0 = ((s0_raw >> 16) & 0xffff) if (opsel & 1) else (s0_raw & 0xffff)
-    s1 = ((s1_raw >> 16) & 0xffff) if (opsel & 2) else (s1_raw & 0xffff)
-    s2 = ((s2_raw >> 16) & 0xffff) if (opsel & 4) else (s2_raw & 0xffff)
-    # Apply abs/neg modifiers as f16 operations (toggle sign bit 15)
-    if abs_ & 1: s0 &= 0x7fff
-    if abs_ & 2: s1 &= 0x7fff
-    if abs_ & 4: s2 &= 0x7fff
-    if neg & 1: s0 ^= 0x8000
-    if neg & 2: s1 ^= 0x8000
-    if neg & 4: s2 ^= 0x8000
-  elif is_vop2_16bit:
-    # VOP2 16-bit ops: src0 uses f16 inline constants, or VGPR where v128+ = hi half of v0-v127
-    # RDNA3 encoding: for VGPRs, bit 7 of VGPR index (src0-256) selects hi(1) or lo(0) half
-    if src0 >= 256:  # VGPR
-      src0_hi = (src0 - 256) & 0x80 != 0
-      src0_masked = ((src0 - 256) & 0x7f) + 256  # mask out hi bit to get actual VGPR
-      s0_raw = mod_src(st.rsrc(src0_masked, lane), 0)
-      s0 = ((s0_raw >> 16) & 0xffff) if src0_hi else (s0_raw & 0xffff)
-    else:  # SGPR or inline constant
-      s0_raw = mod_src(st.rsrc_f16(src0, lane), 0)
-      s0 = s0_raw & 0xffff
-    # vsrc1: .h suffix encoded in bit 7 of VGPR index (src1 = 256 + vgpr_idx + 0x80 if hi)
-    if src1 is not None:
-      src1_hi = (src1 - 256) & 0x80 != 0
-      src1_masked = ((src1 - 256) & 0x7f) + 256
-      s1_raw = mod_src(st.rsrc(src1_masked, lane), 1)
-      s1 = ((s1_raw >> 16) & 0xffff) if src1_hi else (s1_raw & 0xffff)
+    # VOP3 16-bit ops: opsel bits select which half, abs/neg as f16 bit ops
+    def rsrc_16bit(src, idx):
+      if src is None: return 0
+      raw = st.rsrc_f16(src, lane) if 128 <= src < 255 else st.rsrc(src, lane)
+      val = _src16(raw, bool(opsel & (1 << idx)))
+      if abs_ & (1 << idx): val &= 0x7fff
+      if neg & (1 << idx): val ^= 0x8000
+      return val
+    s0, s1, s2 = rsrc_16bit(src0, 0), rsrc_16bit(src1, 1), rsrc_16bit(src2, 2)
+  elif is_vop2_16bit or (op_cls is VOP1Op and op in _VOP1_16BIT_SRC_OPS) or (op_cls is VOPCOp and op in _VOPC_16BIT_OPS):
+    # VOP1/VOP2/VOPC 16-bit ops: VGPRs use bit 7 for hi/lo, non-VGPRs use f16 inline consts
+    def rsrc16_vgpr(src, idx):
+      if src is None: return 0
+      if src >= 256: return _src16(mod_src(st.rsrc(_vgpr_masked(src), lane), idx), _vgpr_hi(src))
+      return mod_src(st.rsrc_f16(src, lane), idx) & 0xffff
+    s0 = rsrc16_vgpr(src0, 0)
+    # VOPC V_CMP_CLASS uses full 32-bit mask for src1 when non-VGPR
+    if op_cls is VOPCOp and src1 is not None and src1 < 256:
+      s1 = mod_src(st.rsrc(src1, lane), 1) & 0xffffffff
     else:
-      s1 = 0
+      s1 = rsrc16_vgpr(src1, 1)
     s2 = mod_src(st.rsrc(src2, lane), 2) if src2 is not None else 0
-  elif op_cls is VOP1Op and op in _VOP1_16BIT_SRC_OPS:
-    # VOP1 16-bit source ops: .h encoded in bit 7 of VGPR index (src0 >= 384 means hi half)
-    # For VGPRs: src0 = 256 + vgpr_idx + (0x80 if hi else 0), so bit 7 of (src0-256) is the hi flag
-    src0_hi = src0 >= 256 and ((src0 - 256) & 0x80) != 0
-    src0_masked = ((src0 - 256) & 0x7f) + 256 if src0 >= 256 else src0  # mask out hi bit for VGPR
-    s0_raw = mod_src(st.rsrc(src0_masked, lane), 0)
-    s0 = ((s0_raw >> 16) & 0xffff) if src0_hi else (s0_raw & 0xffff)
-    s1, s2 = 0, 0
-  elif op_cls is VOPCOp and op in _VOPC_16BIT_OPS:
-    # VOPC 16-bit ops: src0 and vsrc1 use same encoding as VOP2 16-bit
-    # For VGPRs, bit 7 of VGPR index selects hi(1) or lo(0) half
-    if src0 >= 256:  # VGPR
-      src0_hi = (src0 - 256) & 0x80 != 0
-      src0_masked = ((src0 - 256) & 0x7f) + 256
-      s0_raw = mod_src(st.rsrc(src0_masked, lane), 0)
-      s0 = ((s0_raw >> 16) & 0xffff) if src0_hi else (s0_raw & 0xffff)
-    else:  # SGPR or inline constant
-      s0_raw = mod_src(st.rsrc_f16(src0, lane), 0)
-      s0 = s0_raw & 0xffff
-    # vsrc1: bit 7 of VGPR index selects hi(1) or lo(0) half
-    if src1 is not None:
-      if src1 >= 256:  # VGPR - use hi/lo encoding
-        src1_hi = (src1 - 256) & 0x80 != 0
-        src1_masked = ((src1 - 256) & 0x7f) + 256
-        s1_raw = mod_src(st.rsrc(src1_masked, lane), 1)
-        s1 = ((s1_raw >> 16) & 0xffff) if src1_hi else (s1_raw & 0xffff)
-      else:  # SGPR or inline constant - read as 32-bit, use low 16 bits
-        s1_raw = mod_src(st.rsrc(src1, lane), 1)
-        s1 = s1_raw & 0xffffffff  # V_CMP_CLASS uses full 32-bit mask
-    else:
-      s1 = 0
-    s2 = 0
   else:
     s0 = mod_src(st.rsrc(src0, lane), 0)
     s1 = mod_src(st.rsrc(src1, lane), 1) if src1 is not None else 0
     s2 = mod_src(st.rsrc(src2, lane), 2) if src2 is not None else 0
   # For VOP2 16-bit ops (like V_FMAC_F16), the destination is used as an accumulator.
-  # The pseudocode reads D0.f16 from low 16 bits, so we need to shift hi->lo when vop2_dst_hi is True.
   if is_vop2_16bit:
-    d0 = ((V[vdst] >> 16) & 0xffff) if vop2_dst_hi else (V[vdst] & 0xffff)
+    d0 = _src16(V[vdst], dst_hi)
   else:
     d0 = V[vdst] if not is_64bit_op else (V[vdst] | (V[vdst + 1] << 32))
 
@@ -657,23 +539,9 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
       V[vdst] = result['d0'] & 0xffffffff
       V[vdst + 1] = (result['d0'] >> 32) & 0xffffffff
     elif is_16bit_dst and inst_type is VOP3:
-      # VOP3 16-bit ops: opsel[3] (bit 3 of opsel field) controls hi/lo destination
-      if opsel & 8:  # opsel[3] = 1: write to high 16 bits
-        V[vdst] = (V[vdst] & 0x0000ffff) | ((result['d0'] & 0xffff) << 16)
-      else:  # opsel[3] = 0: write to low 16 bits
-        V[vdst] = (V[vdst] & 0xffff0000) | (result['d0'] & 0xffff)
-    elif is_16bit_dst and inst_type is VOP1:
-      # VOP1 16-bit ops: .h suffix encoded in bit 7 of vdst (extracted as vop1_dst_hi)
-      if vop1_dst_hi:  # .h: write to high 16 bits
-        V[vdst] = (V[vdst] & 0x0000ffff) | ((result['d0'] & 0xffff) << 16)
-      else:  # .l: write to low 16 bits
-        V[vdst] = (V[vdst] & 0xffff0000) | (result['d0'] & 0xffff)
-    elif is_vop2_16bit:
-      # VOP2 16-bit ops: .h suffix encoded in bit 7 of vdst (extracted as vop2_dst_hi)
-      if vop2_dst_hi:  # .h: write to high 16 bits
-        V[vdst] = (V[vdst] & 0x0000ffff) | ((result['d0'] & 0xffff) << 16)
-      else:  # .l: write to low 16 bits
-        V[vdst] = (V[vdst] & 0xffff0000) | (result['d0'] & 0xffff)
+      V[vdst] = _dst16(V[vdst], result['d0'], bool(opsel & 8))  # opsel[3] controls hi/lo
+    elif is_16bit_dst or is_vop2_16bit:
+      V[vdst] = _dst16(V[vdst], result['d0'], dst_hi)
     else:
       V[vdst] = result['d0'] & 0xffffffff
 
@@ -684,54 +552,25 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
 def exec_wmma(st: WaveState, inst, op: VOP3POp) -> None:
   """Execute WMMA instruction - 16x16x16 matrix multiply across the wave."""
   src0, src1, src2, vdst = inst.src0, inst.src1, inst.src2, inst.vdst
-  # Read matrix A (16x16 f16/bf16) from lanes 0-15, VGPRs src0 to src0+7 (2 f16 per VGPR = 16 values per lane)
-  # Layout: A[row][k] where row = lane (0-15), k comes from 8 VGPRs × 2 halves
-  mat_a = []
-  for lane in range(16):
-    for reg in range(8):
-      val = st.vgpr[lane][src0 - 256 + reg] if src0 >= 256 else st.rsgpr(src0 + reg)
-      mat_a.append(_f16(val & 0xffff))
-      mat_a.append(_f16((val >> 16) & 0xffff))
-  # Read matrix B (16x16 f16/bf16) - same layout, B[col][k] where col comes from lane
-  mat_b = []
-  for lane in range(16):
-    for reg in range(8):
-      val = st.vgpr[lane][src1 - 256 + reg] if src1 >= 256 else st.rsgpr(src1 + reg)
-      mat_b.append(_f16(val & 0xffff))
-      mat_b.append(_f16((val >> 16) & 0xffff))
-
+  # Read 16x16 f16 matrix from 16 lanes × 8 VGPRs (2 f16 per VGPR)
+  def read_f16_mat(src):
+    mat = []
+    for lane in range(16):
+      for reg in range(8):
+        val = st.vgpr[lane][src - 256 + reg] if src >= 256 else st.rsgpr(src + reg)
+        mat.extend([_f16(val & 0xffff), _f16((val >> 16) & 0xffff)])
+    return mat
+  mat_a, mat_b = read_f16_mat(src0), read_f16_mat(src1)
   # Read matrix C (16x16 f32) from lanes 0-31, VGPRs src2 to src2+7
-  # Layout: element i is at lane (i % 32), VGPR (i // 32) + src2
-  mat_c = []
-  for i in range(256):
-    lane, reg = i % 32, i // 32
-    val = st.vgpr[lane][src2 - 256 + reg] if src2 >= 256 else st.rsgpr(src2 + reg)
-    mat_c.append(_f32(val))
-
+  mat_c = [_f32(st.vgpr[i % 32][src2 - 256 + i // 32] if src2 >= 256 else st.rsgpr(src2 + i // 32)) for i in range(256)]
   # Compute D = A × B + C (16x16 matrix multiply)
-  mat_d = [0.0] * 256
-  for row in range(16):
-    for col in range(16):
-      acc = 0.0
-      for k in range(16):
-        a_val = mat_a[row * 16 + k]
-        b_val = mat_b[col * 16 + k]
-        acc += a_val * b_val
-      mat_d[row * 16 + col] = acc + mat_c[row * 16 + col]
-
-  # Write result matrix D back - same layout as C
+  mat_d = [sum(mat_a[row*16+k] * mat_b[col*16+k] for k in range(16)) + mat_c[row*16+col] for row in range(16) for col in range(16)]
+  # Write result - f16 packed or f32
   if op == VOP3POp.V_WMMA_F16_16X16X16_F16:
-    # Output is f16, pack 2 values per VGPR
     for i in range(0, 256, 2):
-      lane, reg = (i // 2) % 32, (i // 2) // 32
-      lo = _i16(mat_d[i]) & 0xffff
-      hi = _i16(mat_d[i + 1]) & 0xffff
-      st.vgpr[lane][vdst + reg] = (hi << 16) | lo
+      st.vgpr[(i//2) % 32][vdst + (i//2)//32] = ((_i16(mat_d[i+1]) & 0xffff) << 16) | (_i16(mat_d[i]) & 0xffff)
   else:
-    # Output is f32
-    for i in range(256):
-      lane, reg = i % 32, i // 32
-      st.vgpr[lane][vdst + reg] = _i32(mat_d[i])
+    for i in range(256): st.vgpr[i % 32][vdst + i//32] = _i32(mat_d[i])
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # MAIN EXECUTION LOOP
