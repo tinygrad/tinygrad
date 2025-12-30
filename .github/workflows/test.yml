@@ -310,7 +310,7 @@ jobs:
         deps: testing_unit
         python-version: '3.14'
     - name: Test SPEC=2
-      run: IGNORE_OOB=0 SPEC=2 PYTHONPATH="." pytest --maxfail=10 -n auto --durations=30 --ignore=test/models --ignore test/test_custom_kernel.py --ignore test/unit/test_hashing.py --timeout 60 -k "not test_setitem_big" --splits 2 --group ${{ matrix.group }}
+      run: IGNORE_OOB=0 SPEC=2 pytest --maxfail=10 -n auto --durations=30 --ignore=test/models --ignore test/test_custom_kernel.py --ignore test/unit/test_hashing.py --timeout 60 -k "not test_setitem_big" --splits 2 --group ${{ matrix.group }}
 
   fuzzing:
     name: Fuzzing
@@ -680,9 +680,9 @@ jobs:
       - name: Run RDNA3 emulator tests (AMD_LLVM=1)
         run: AMD_LLVM=1 python -m pytest -n=auto extra/assembly/amd/ --durations 20
       - name: Run RDNA3 dtype tests
-        run: PYTHONPATH="." AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=0 pytest -n=auto test/test_dtype_alu.py test/test_dtype.py
+        run: AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=0 pytest -n=auto test/test_dtype_alu.py test/test_dtype.py
       - name: Run RDNA3 dtype tests (AMD_LLVM=1)
-        run: PYTHONPATH="." AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=1 pytest -n=auto test/test_dtype_alu.py test/test_dtype.py
+        run: AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=1 pytest -n=auto test/test_dtype_alu.py test/test_dtype.py
 
   testamdautogen:
     name: AMD autogen
