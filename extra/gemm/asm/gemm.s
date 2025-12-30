@@ -308,8 +308,6 @@ label_GSUC_B:
 	s_and_b32 s87, s10, 0xe000                                 // 0000000035A4: 8657FF0A 0000E000
 	s_and_b32 s10, s10, 0xff                                   // 0000000035AC: 860AFF0A 000000FF
 	s_mov_b32 s84, s10                                         // 0000000035B4: BED4000A
-
-label_beginStaggerUIter:
 	s_lshl_b32 s85, s84, s86                                   // 0000000035B8: 8E555654
 	s_cmp_ge_u32 s13, s85                                      // 0000000035BC: BF09550D
 	s_sub_u32 s85, s84, 1                                      // 0000000035CC: 80D58154
@@ -476,8 +474,6 @@ label_ShadowInitStart:
 	s_lshl_b64 s[84:85], s[84:85], 2                           // 0000000039C4: 8ED48254
 	s_add_u32 s16, s16, s84                                    // 0000000039C8: 80105410
 	s_addc_u32 s17, s17, s85                                   // 0000000039CC: 82115511
-
-label_NoBranch_T8JHFHKM7BO5OHXW:
 	s_xor_b32 s46, s48, s46                                    // 0000000039F0: 882E2E30
 	s_xor_b32 s47, s49, s47                                    // 0000000039F4: 882F2F31
 	s_cmp_eq_u32 s12, 1                                        // 0000000039F8: BF06810C
@@ -539,8 +535,6 @@ label_skipPGR2:
 	ds_read_b128 v[92:95], v3 offset:768                       // 000000003B80: D9FE0300 5C000003
 	ds_read_b128 v[96:99], v3 offset:896                       // 000000003B88: D9FE0380 60000003
 	s_waitcnt lgkmcnt(0)                                       // 000000003B90: BF8CC07F
-
-label_openLoopL:
 	s_cmp_eq_u32 s12, 1                                        // 000000003B94: BF06810C
 	s_cbranch_scc1 label_toPGR1                                // 000000003B98: BF8502E5
 	s_cmp_le_u32 s12, 2                                        // 000000003B9C: BF0B820C
@@ -1095,7 +1089,6 @@ label_toPGR1:
 	v_mfma_f32_16x16x32_bf16 a[248:251], v[128:131], v[60:63], a[248:251]// 000000004BFC: D3B580F8 07E27980
 	v_mfma_f32_16x16x32_bf16 a[252:255], v[128:131], v[64:67], a[252:255]// 000000004C04: D3B580FC 07F28180
 
-label_toPGR1end_OptNLL:
 	v_lshrrev_b32_e32 v4, 6, v134                              // 000000004C0C: 20090C86
 	v_lshrrev_b32_e32 v5, 1, v4                                // 000000004C10: 200A0881
 	v_mul_lo_u32 v5, 16, v5                                    // 000000004C14: D2850005 00020A90
@@ -1114,7 +1107,6 @@ label_toPGR1end_OptNLL:
 	s_mul_i32 s8, 0x100, s3                                    // 000000004C64: 920803FF 00000100
 	v_add_u32_e32 v1, s8, v1                                   // 000000004C6C: 68020208
 
-label_GW_B0_E0:
 	v_add_lshl_u32 v11, v3, v0, 1                              // 000000004C70: D1FE000B 02060103
 	v_accvgpr_read_b32 v16, a0                                 // 000000004C78: D3D84010 18000100
 	v_accvgpr_read_b32 v17, a4                                 // 000000004C80: D3D84011 18000104
@@ -1634,7 +1626,6 @@ label_GW_B0_E0:
 	buffer_store_dwordx4 v[40:43], v11, s[16:19], 0 offen nt   // 000000005B18: E07E1000 8004280B
 	s_nop 0                                                    // 000000005B20: BF800000
 
-end:
 	s_endpgm                                                   // 00000001F5D0: BF810000
 
 .section	.rodata,"a",@progbits
