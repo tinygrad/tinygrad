@@ -66,7 +66,7 @@ class ProgramSpec:
   ast:UOp  # save the base ast (this is method cache key)
   uops:list[UOp]|None=None
   lib:bytes|None=None
-  aux:dict=field(default_factory=dict)
+  aux:list=field(default_factory=list)
 
   # filled in from uops (via from_uop)
   global_size:list[int]=field(default_factory=lambda: [1,1,1])
@@ -124,7 +124,7 @@ class ProgramSpec:
         # TODO: this cast is wrong, u.src[0].ssimplify() can be sint
         if special_size is not None: special_size[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
 
-    return ProgramSpec(sink.arg.name, source.arg, device.arg, sink, uops, lib, prg.arg._asdict() if prg.arg else {}, global_size, local_size,
+    return ProgramSpec(sink.arg.name, source.arg, device.arg, sink, uops, lib, list(prg.arg) if prg.arg else [], global_size, local_size,
                        sorted(_vars, key=lambda v: v.arg), sorted(dedup(_globals)), sorted(dedup(outs)), sorted(dedup(ins)))
 
 class Renderer:

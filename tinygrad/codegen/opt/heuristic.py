@@ -48,10 +48,10 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # make a copy so it does not mutate the input
   k = k.copy()
 
-  if IMAGE and k.ren is not None and k.ren.device == "QCOM":
-    for buf in k.bufs:
-      if (dt:=buf.src[0].dtype).base in {dtypes.float, dtypes.half} and not isinstance(dt, ImageDType) and dt.nbytes() % 64 == 0:
-        buf.src[0].replace(dtype=(dtypes.imagef if dt.base == dtypes.float else dtypes.imageh)((1, buf.src[0].dtype.itemsize // 4, 4)))
+  # if IMAGE and k.ren is not None and k.ren.device == "QCOM":
+  #   for buf in k.bufs:
+  #     if (dt:=buf.src[0].dtype).base in {dtypes.float, dtypes.half} and not isinstance(dt, ImageDType) and dt.nbytes() % 64 == 0:
+  #       buf.src[0].replace(dtype=(dtypes.imagef if dt.base == dtypes.float else dtypes.imageh)((1, buf.src[0].dtype.itemsize // 4, 4)))
 
   # upcast float4 images, this must be early so we don't accidentally add locals before the upcast
   for buf_index,buf in enumerate(k.bufs):

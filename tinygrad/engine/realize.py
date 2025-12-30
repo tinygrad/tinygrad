@@ -45,7 +45,7 @@ class CompiledRunner(Runner):
     self.p:ProgramSpec = p
     assert self.p.lib is not None
     if DEBUG >= 7: Device[p.device].compiler.disassemble(self.p.lib)
-    self._prg = Device[p.device].runtime(p.function_name, self.p.lib, **p.aux) if prg is None else prg
+    self._prg = Device[p.device].runtime(p.function_name, self.p.lib, *p.aux) if prg is None else prg
     super().__init__(p.name, p.device, p.estimates)
 
   def __reduce__(self): return self.__class__, (self.p,)
