@@ -2,7 +2,8 @@
 """Test MUBUF, MTBUF, MIMG, EXP, DS formats against LLVM."""
 import unittest
 from extra.assembly.amd.autogen.rdna3 import *
-from extra.assembly.amd.dsl import encode_src
+from extra.assembly.amd.dsl import encode_src, RawImm
+from extra.assembly.amd.asm import detect_format
 
 class TestMUBUF(unittest.TestCase):
   """Test MUBUF (buffer) instructions."""
@@ -326,6 +327,80 @@ class TestVOP3Literal(unittest.TestCase):
     from extra.assembly.amd.dsl import RawImm
     inst = VOP3P(VOP3POp.V_PK_ADD_F16, vdst=v[5], src0=RawImm(240), src1=0x12345678, src2=v[0])
     self.assertEqual(len(inst.to_bytes()), 12)  # 8 bytes + 4 byte literal
+
+
+class TestDetectFormat(unittest.TestCase):
+  """Test detect_format uses encoding from autogen classes."""
+
+  def test_detect_sopp(self):
+    self.assertEqual(detect_format(s_endpgm().to_bytes()), SOPP)
+    self.assertEqual(detect_format(s_nop(0).to_bytes()), SOPP)
+    self.assertEqual(detect_format(s_barrier().to_bytes()), SOPP)
+
+  def test_detect_sop1(self):
+    self.assertEqual(detect_format(s_mov_b32(s[0], 0).to_bytes()), SOP1)
+    self.assertEqual(detect_format(s_mov_b64(s[0:1], 0).to_bytes()), SOP1)
+
+  def test_detect_sop2(self):
+    self.assertEqual(detect_format(s_add_u32(s[0], s[1], s[2]).to_bytes()), SOP2)
+    self.assertEqual(detect_format(s_mul_i32(s[0], s[1], s[2]).to_bytes()), SOP2)
+
+  def test_detect_sopc(self):
+    self.assertEqual(detect_format(s_cmp_eq_i32(s[0], s[1]).to_bytes()), SOPC)
+
+  def test_detect_sopk(self):
+    self.assertEqual(detect_format(s_movk_i32(s[0], 0x1234).to_bytes()), SOPK)
+
+  def test_detect_vop1(self):
+    self.assertEqual(detect_format(v_mov_b32_e32(v[0], 0).to_bytes()), VOP1)
+    self.assertEqual(detect_format(v_rcp_f32_e32(v[0], v[1]).to_bytes()), VOP1)
+
+  def test_detect_vop2(self):
+    self.assertEqual(detect_format(v_add_f32_e32(v[0], v[1], v[2]).to_bytes()), VOP2)
+    self.assertEqual(detect_format(v_mul_f32_e32(v[0], v[1], v[2]).to_bytes()), VOP2)
+
+  def test_detect_vopc(self):
+    self.assertEqual(detect_format(v_cmp_eq_f32_e32(v[0], v[1]).to_bytes()), VOPC)
+    self.assertEqual(detect_format(v_cmp_lt_i32_e32(v[0], v[1]).to_bytes()), VOPC)
+
+  def test_detect_vop3(self):
+    self.assertEqual(detect_format(v_add_f32_e64(v[0], v[1], v[2]).to_bytes()), VOP3)
+    self.assertEqual(detect_format(v_fma_f32(v[0], v[1], v[2], v[3]).to_bytes()), VOP3)
+
+  def test_detect_vop3p(self):
+    self.assertEqual(detect_format(VOP3P(VOP3POp.V_PK_ADD_F16, v[0], v[1], v[2], v[3]).to_bytes()), VOP3P)
+
+  def test_detect_smem(self):
+    self.assertEqual(detect_format(s_load_b32(s[0], s[2:3], 0).to_bytes()), SMEM)
+    self.assertEqual(detect_format(s_load_b64(s[0:1], s[2:3], s[5]).to_bytes()), SMEM)
+
+  def test_detect_ds(self):
+    self.assertEqual(detect_format(ds_load_b32(v[0], v[1]).to_bytes()), DS)
+    self.assertEqual(detect_format(ds_store_b32(v[0], v[1]).to_bytes()), DS)
+
+  def test_detect_flat(self):
+    self.assertEqual(detect_format(global_load_b32(v[0], v[1:3], RawImm(124)).to_bytes()), FLAT)
+    self.assertEqual(detect_format(global_store_b32(v[0:2], v[2], RawImm(124)).to_bytes()), FLAT)
+
+  def test_detect_mubuf(self):
+    self.assertEqual(detect_format(buffer_load_b32(v[0], v[1], s[0:4], s[5]).to_bytes()), MUBUF)
+
+  def test_detect_mtbuf(self):
+    self.assertEqual(detect_format(tbuffer_load_format_x(v[0], v[1], s[0:4], s[5], format=22).to_bytes()), MTBUF)
+
+  def test_detect_mimg(self):
+    self.assertEqual(detect_format(image_load(v[0:4], v[4:6], s[0:8], dmask=0xf, dim=1).to_bytes()), MIMG)
+
+  def test_detect_exp(self):
+    self.assertEqual(detect_format(EXP(en=0xf, target=0, vsrc0=v[0], vsrc1=v[1], vsrc2=v[2], vsrc3=v[3]).to_bytes()), EXP)
+
+  def test_detect_vopd(self):
+    inst = VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_MOV_B32, vdstx=v[0], vdsty=v[1], srcx0=0, srcy0=0)
+    self.assertEqual(detect_format(inst.to_bytes()), VOPD)
+
+  def test_detect_vinterp(self):
+    inst = VINTERP(VINTERPOp.V_INTERP_P10_F32, vdst=v[0], src0=v[1], src1=v[2], src2=v[3])
+    self.assertEqual(detect_format(inst.to_bytes()), VINTERP)
 
 
 if __name__ == "__main__":

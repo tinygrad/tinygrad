@@ -698,8 +698,7 @@ jobs:
           pydeps: "pdfplumber"
       - name: Verify AMD autogen is up to date
         run: |
-          python -m extra.assembly.amd.dsl --arch all
-          python -m extra.assembly.amd.pcode --arch all
+          python -m extra.assembly.amd.pdf --arch all
           git diff --exit-code extra/assembly/amd/autogen/
 
   testnvidia:
