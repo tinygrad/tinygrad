@@ -1094,6 +1094,7 @@ gemm = [
   s_mul_i32(s[8], 0x100, s[3]),
   v_add_u32_e32(v[1], s[8], v[1]),
   v_add_lshl_u32(v[11], v[3], v[0], 1),
+  # TODO: should be AGPR
   v_accvgpr_read_b32(v[16], a0),
   v_accvgpr_read_b32(v[17], a4),
   v_accvgpr_read_b32(v[18], a8),
@@ -1616,14 +1617,6 @@ gemm = [
 
 
 # verify a single instruction against llvm
-
-def verify_inst(inst:Inst) -> None:
-  b = inst.to_bytes()
-  st = inst.disasm()
-  reasm = asm(st)
-  desc = f"{st:25s} {inst} {b!r} {reasm}"
-  ref = compile_asm(st, mcpu='gfx950', mattr='+wavefrontsize64')
-  assert b == ref, f"Bytes mismatch {b} != {ref} for {st}"
 
 def prepare_verification():
   import pathlib
