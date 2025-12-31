@@ -251,20 +251,20 @@ class TestPseudocodeRegressions(unittest.TestCase):
     s1_quiet = 0b0000000010  # bit 1 = quiet NaN
     S0, S1, S2, D0, SCC, VCC, EXEC = Reg(quiet_nan), Reg(s1_quiet), Reg(0), Reg(0), Reg(0), Reg(0), Reg(0xffffffff)
     result = _VOPCOp_V_CMP_CLASS_F32(S0, S1, S2, D0, SCC, VCC, 0, EXEC, 0, None)
-    self.assertEqual(result['D0_cmp']._val & 1, 1, "Should detect quiet NaN with quiet NaN mask")
+    self.assertEqual(result['D0']._val & 1, 1, "Should detect quiet NaN with quiet NaN mask")
     # Test signaling NaN detection (bit 0 in mask)
     s1_signal = 0b0000000001  # bit 0 = signaling NaN
     S0, S1 = Reg(signal_nan), Reg(s1_signal)
     result = _VOPCOp_V_CMP_CLASS_F32(S0, S1, S2, D0, SCC, VCC, 0, EXEC, 0, None)
-    self.assertEqual(result['D0_cmp']._val & 1, 1, "Should detect signaling NaN with signaling NaN mask")
+    self.assertEqual(result['D0']._val & 1, 1, "Should detect signaling NaN with signaling NaN mask")
     # Test that quiet NaN doesn't match signaling NaN mask
     S0, S1 = Reg(quiet_nan), Reg(s1_signal)
     result = _VOPCOp_V_CMP_CLASS_F32(S0, S1, S2, D0, SCC, VCC, 0, EXEC, 0, None)
-    self.assertEqual(result['D0_cmp']._val & 1, 0, "Quiet NaN should not match signaling NaN mask")
+    self.assertEqual(result['D0']._val & 1, 0, "Quiet NaN should not match signaling NaN mask")
     # Test that signaling NaN doesn't match quiet NaN mask
     S0, S1 = Reg(signal_nan), Reg(s1_quiet)
     result = _VOPCOp_V_CMP_CLASS_F32(S0, S1, S2, D0, SCC, VCC, 0, EXEC, 0, None)
-    self.assertEqual(result['D0_cmp']._val & 1, 0, "Signaling NaN should not match quiet NaN mask")
+    self.assertEqual(result['D0']._val & 1, 0, "Signaling NaN should not match quiet NaN mask")
 
   def test_isnan_with_typed_view(self):
     """_isnan must work with TypedView objects, not just Python floats.

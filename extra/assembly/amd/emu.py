@@ -190,9 +190,9 @@ def exec_scalar(st: WaveState, inst: Inst) -> int:
   result = fn(S0, S1, S2, D0, SCC, VCC, 0, EXEC, literal, None, PC=PC)
 
   # Apply results - extract values from returned Reg objects
-  if sdst is not None:
-    (st.wsgpr64 if result.get('d0_64') else st.wsgpr)(sdst, result['D0']._val)
-  st.scc = result['SCC']._val & 1
+  if sdst is not None and 'D0' in result:
+    (st.wsgpr64 if inst.dst_regs() == 2 else st.wsgpr)(sdst, result['D0']._val)
+  if 'SCC' in result: st.scc = result['SCC']._val & 1
   if 'EXEC' in result: st.exec_mask = result['EXEC']._val
   if 'PC' in result:
     # Convert absolute byte address to word delta
@@ -289,7 +289,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     result = fn(S0, S1, S2, D0, SCC, VCC_R, lane, EXEC, st.literal, None)
     d0_val = result['D0']._val
     V[inst.vdst] = d0_val & MASK32
-    if result.get('d0_64'): V[inst.vdst + 1] = (d0_val >> 32) & MASK32
+    if inst.dst_regs() == 2: V[inst.vdst + 1] = (d0_val >> 32) & MASK32
     if 'VCC' in result: st.pend_sgpr_lane(inst.sdst, lane, (result['VCC']._val >> lane) & 1)
     return
 
@@ -405,17 +405,17 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
   if 'VCC' in result:
     # VOP2 carry ops write to VCC implicitly; VOPC/VOP3 write to vdst
     st.pend_sgpr_lane(VCC_LO if isinstance(inst, VOP2) and 'CO_CI' in inst.op_name else vdst, lane, (result['VCC']._val >> lane) & 1)
-  if 'D0_cmp' in result:
-    # Comparison result stored in D0, extract lane bit for vcc_lane
-    st.pend_sgpr_lane(VCC_LO if isinstance(inst, VOP2) and 'CO_CI' in inst.op_name else vdst, lane, (result['D0_cmp']._val >> lane) & 1)
   if 'EXEC' in result:
-    # V_CMPX instructions write to EXEC per-lane
+    # V_CMPX instructions write to EXEC per-lane (not to vdst)
     st.pend_sgpr_lane(EXEC_LO, lane, (result['EXEC']._val >> lane) & 1)
+  elif op_cls is VOPCOp:
+    # VOPC comparison result stored in D0 bitmask, extract lane bit (non-CMPX only)
+    st.pend_sgpr_lane(vdst, lane, (result['D0']._val >> lane) & 1)
   if op_cls is not VOPCOp and 'vgpr_write' not in result:
     writes_to_sgpr = 'READFIRSTLANE' in inst.op_name or 'READLANE' in inst.op_name
     d0_val = result['D0']._val
     if writes_to_sgpr: st.wsgpr(vdst, d0_val & MASK32)
-    elif result.get('d0_64'): V[vdst], V[vdst + 1] = d0_val & MASK32, (d0_val >> 32) & MASK32
+    elif inst.dst_regs() == 2: V[vdst], V[vdst + 1] = d0_val & MASK32, (d0_val >> 32) & MASK32
     elif inst.is_dst_16(): V[vdst] = _dst16(V[vdst], d0_val, bool(opsel & 8) if isinstance(inst, VOP3) else dst_hi)
     else: V[vdst] = d0_val & MASK32
 

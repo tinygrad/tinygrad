@@ -533,52 +533,57 @@ def _apply_pseudocode_fixes(op, code: str) -> str:
 
 def _generate_function(cls_name: str, op, pc: str, code: str) -> tuple[str, str]:
   """Generate a single compiled pseudocode function."""
-  is_64 = any(p in pc for p in ['D0.u64', 'D0.b64', 'D0.f64', 'D0.i64', 'D1.u64', 'D1.b64', 'D1.f64', 'D1.i64'])
+  import re
   has_d1 = '{ D1' in pc
-  if has_d1: is_64 = True
-  is_cmp = (cls_name in ('VOPCOp', 'VOP3Op')) and 'D0.u64[laneId]' in pc
   is_cmpx = (cls_name in ('VOPCOp', 'VOP3Op')) and 'EXEC.u64[laneId]' in pc
   is_div_scale = 'DIV_SCALE' in op.name
   has_sdst = cls_name == 'VOP3SDOp' and ('VCC.u64[laneId]' in pc or is_div_scale)
-  has_pc = 'PC' in pc
   combined = code + pc
 
   fn_name = f"_{cls_name}_{op.name}"
   # Function accepts Reg objects directly (uppercase names), laneId is passed directly as int
   lines = [f"def {fn_name}(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):"]
-  for pc_line in pc.split('\n'): lines.append(f"  # {pc_line}")
 
   # Registers that need special handling (not passed directly)
-  special_regs = [('D1', 'Reg(0)'), ('tmp', 'Reg(0)'), ('saveexec', 'Reg(EXEC._val)'),
-                  ('SIMM16', 'Reg(literal)'), ('SIMM32', 'Reg(literal)'),
+  # Only init if used but not first assigned as `name = Reg(...)` in the compiled code
+  def needs_init(name): return name in combined and not re.search(rf'^\s*{name}\s*=\s*Reg\(', code, re.MULTILINE)
+  special_regs = [('D1', 'Reg(0)'), ('SIMM16', 'Reg(literal)'), ('SIMM32', 'Reg(literal)'),
                   ('SRC0', 'Reg(src0_idx)'), ('VDST', 'Reg(vdst_idx)')]
+  if needs_init('tmp'): special_regs.insert(0, ('tmp', 'Reg(0)'))
+  if needs_init('saveexec'): special_regs.insert(0, ('saveexec', 'Reg(EXEC._val)'))
   used = {name for name, _ in special_regs if name in combined}
 
   # Detect which registers are modified (not just read) - look for assignments
-  import re
+  modifies_d0 = is_div_scale or bool(re.search(r'\bD0\b[.\[]', combined))
   modifies_exec = is_cmpx or bool(re.search(r'EXEC\.(u32|u64|b32|b64)\s*=', combined))
   modifies_vcc = has_sdst or bool(re.search(r'VCC\.(u32|u64|b32|b64)\s*=|VCC\.u64\[laneId\]\s*=', combined))
+  modifies_scc = bool(re.search(r'\bSCC\s*=', combined))
+  modifies_pc = bool(re.search(r'\bPC\s*=', combined))
 
-  # DIV_SCALE uses S0 as D0
-  if is_div_scale: lines.append("  D0 = Reg(S0._val)")
+  # Build init code for special registers
+  init_lines = []
+  if is_div_scale: init_lines.append("  D0 = Reg(S0._val)")
   for name, init in special_regs:
-    if name in used: lines.append(f"  {name} = {init}")
-  if 'EXEC_LO' in combined: lines.append("  EXEC_LO = SliceProxy(EXEC, 31, 0)")
-  if 'EXEC_HI' in combined: lines.append("  EXEC_HI = SliceProxy(EXEC, 63, 32)")
-  if 'VCCZ' in combined: lines.append("  VCCZ = Reg(1 if VCC._val == 0 else 0)")
-  if 'EXECZ' in combined: lines.append("  EXECZ = Reg(1 if EXEC._val == 0 else 0)")
-  lines.append("  # --- compiled pseudocode ---")
-  for line in code.split('\n'): lines.append(f"  {line}")
-  lines.append("  # --- end pseudocode ---")
+    if name in used: init_lines.append(f"  {name} = {init}")
+  if 'EXEC_LO' in code: init_lines.append("  EXEC_LO = SliceProxy(EXEC, 31, 0)")
+  if 'EXEC_HI' in code: init_lines.append("  EXEC_HI = SliceProxy(EXEC, 63, 32)")
+  if 'VCCZ' in code and not re.search(r'^\s*VCCZ\s*=', code, re.MULTILINE): init_lines.append("  VCCZ = Reg(1 if VCC._val == 0 else 0)")
+  if 'EXECZ' in code and not re.search(r'^\s*EXECZ\s*=', code, re.MULTILINE): init_lines.append("  EXECZ = Reg(1 if EXEC._val == 0 else 0)")
+  code_lines = [line for line in code.split('\n') if line.strip()]
+  if init_lines:
+    lines.extend(init_lines)
+    if code_lines: lines.append("  # --- compiled pseudocode ---")
+  for line in code_lines:
+    lines.append(f"  {line}")
 
-  # Build result dict - only include registers that may be modified
-  result_items = ["'D0': D0", "'SCC': SCC"]
+  # Build result dict - only include registers that are modified
+  result_items = []
+  if modifies_d0: result_items.append("'D0': D0")
+  if modifies_scc: result_items.append("'SCC': SCC")
   if modifies_vcc: result_items.append("'VCC': VCC")
   if modifies_exec: result_items.append("'EXEC': EXEC")
-  if is_cmp: result_items.append("'D0_cmp': D0")
-  if is_64: result_items.append("'d0_64': True")
   if has_d1: result_items.append("'D1': D1")
-  if has_pc: result_items.append("'PC': PC")
+  if modifies_pc: result_items.append("'PC': PC")
   lines.append(f"  return {{{', '.join(result_items)}}}\n")
   return fn_name, '\n'.join(lines)
 
