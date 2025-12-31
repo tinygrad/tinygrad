@@ -447,7 +447,10 @@ def _disasm_sop2(inst: SOP2) -> str:
 def _disasm_sopc(inst: SOPC) -> str:
   name = SOPCOp(inst.op).name.lower()
   _, s0n, s1n = _sop_widths(name)
-  return f"{name} {_fmt_src(inst.ssrc0, s0n)}, {_fmt_src(inst.ssrc1, s1n)}"
+  # Use inst.lit() to properly format literals
+  s0 = _fmt_src(inst.ssrc0, s0n) if inst.ssrc0 != 255 and s0n > 1 else inst.lit(inst.ssrc0)
+  s1 = _fmt_src(inst.ssrc1, s1n) if inst.ssrc1 != 255 and s1n > 1 else inst.lit(inst.ssrc1)
+  return f"{name} {s0}, {s1}"
 
 def _disasm_sopk(inst: SOPK) -> str:
   op, name = SOPKOp(inst.op), SOPKOp(inst.op).name.lower()
