@@ -544,20 +544,24 @@ def _generate_function(cls_name: str, op, pc: str, code: str) -> tuple[str, str]
   combined = code + pc
 
   fn_name = f"_{cls_name}_{op.name}"
-  lines = [f"def {fn_name}(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):"]
+  # Function accepts Reg objects directly (uppercase names), laneId is passed directly as int
+  lines = [f"def {fn_name}(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, PC=None):"]
   for pc_line in pc.split('\n'): lines.append(f"  # {pc_line}")
 
-  regs = [('S0', 'Reg(s0)'), ('S1', 'Reg(s1)'), ('S2', 'Reg(s2)'),
-          ('D0', 'Reg(s0)' if is_div_scale else 'Reg(d0)'), ('D1', 'Reg(0)'),
-          ('SCC', 'Reg(scc)'), ('VCC', 'Reg(vcc)'), ('EXEC', 'Reg(exec_mask)'),
-          ('tmp', 'Reg(0)'), ('saveexec', 'Reg(exec_mask)'), ('laneId', 'lane'),
-          ('SIMM16', 'Reg(literal)'), ('SIMM32', 'Reg(literal)'),
-          ('SRC0', 'Reg(src0_idx)'), ('VDST', 'Reg(vdst_idx)'), ('PC', 'Reg(pc)')]
-  used = {name for name, _ in regs if name in combined}
-  if 'EXEC_LO' in combined or 'EXEC_HI' in combined: used.add('EXEC')
-  if 'VCCZ' in combined: used.add('VCC')
-  if 'EXECZ' in combined: used.add('EXEC')
-  for name, init in regs:
+  # Registers that need special handling (not passed directly)
+  special_regs = [('D1', 'Reg(0)'), ('tmp', 'Reg(0)'), ('saveexec', 'Reg(EXEC._val)'),
+                  ('SIMM16', 'Reg(literal)'), ('SIMM32', 'Reg(literal)'),
+                  ('SRC0', 'Reg(src0_idx)'), ('VDST', 'Reg(vdst_idx)')]
+  used = {name for name, _ in special_regs if name in combined}
+
+  # Detect which registers are modified (not just read) - look for assignments
+  import re
+  modifies_exec = is_cmpx or bool(re.search(r'EXEC\.(u32|u64|b32|b64)\s*=', combined))
+  modifies_vcc = has_sdst or bool(re.search(r'VCC\.(u32|u64|b32|b64)\s*=|VCC\.u64\[laneId\]\s*=', combined))
+
+  # DIV_SCALE uses S0 as D0
+  if is_div_scale: lines.append("  D0 = Reg(S0._val)")
+  for name, init in special_regs:
     if name in used: lines.append(f"  {name} = {init}")
   if 'EXEC_LO' in combined: lines.append("  EXEC_LO = SliceProxy(EXEC, 31, 0)")
   if 'EXEC_HI' in combined: lines.append("  EXEC_HI = SliceProxy(EXEC, 63, 32)")
@@ -566,19 +570,16 @@ def _generate_function(cls_name: str, op, pc: str, code: str) -> tuple[str, str]
   lines.append("  # --- compiled pseudocode ---")
   for line in code.split('\n'): lines.append(f"  {line}")
   lines.append("  # --- end pseudocode ---")
-  d0_val, scc_val = ("D0._val" if 'D0' in used else "d0"), ("SCC._val & 1" if 'SCC' in used else "scc & 1")
-  lines.append(f"  result = {{'d0': {d0_val}, 'scc': {scc_val}}}")
-  if has_sdst: lines.append("  result['vcc_lane'] = (VCC._val >> lane) & 1")
-  elif 'VCC' in used: lines.append("  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1")
-  if is_cmpx: lines.append("  result['exec_lane'] = (EXEC._val >> lane) & 1")
-  elif 'EXEC' in used: lines.append("  if EXEC._val != exec_mask: result['exec'] = EXEC._val")
-  if is_cmp: lines.append("  result['vcc_lane'] = (D0._val >> lane) & 1")
-  if is_64: lines.append("  result['d0_64'] = True")
-  if has_d1: lines.append("  result['d1'] = D1._val & 1")
-  if has_pc:
-    lines.append("  _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000")
-    lines.append("  result['new_pc'] = _pc")
-  lines.append("  return result\n")
+
+  # Build result dict - only include registers that may be modified
+  result_items = ["'D0': D0", "'SCC': SCC"]
+  if modifies_vcc: result_items.append("'VCC': VCC")
+  if modifies_exec: result_items.append("'EXEC': EXEC")
+  if is_cmp: result_items.append("'D0_cmp': D0")
+  if is_64: result_items.append("'d0_64': True")
+  if has_d1: result_items.append("'D1': D1")
+  if has_pc: result_items.append("'PC': PC")
+  lines.append(f"  return {{{', '.join(result_items)}}}\n")
   return fn_name, '\n'.join(lines)
 
 # ═══════════════════════════════════════════════════════════════════════════════
