@@ -4256,3 +4256,217 @@ class TestDS2Addr(unittest.TestCase):
     # v6,v7 from addr 8-15: 0x33333333, 0x44444444
     self.assertEqual(st.vgpr[0][6], 0x33333333, "v6 should be 0x33333333")
     self.assertEqual(st.vgpr[0][7], 0x44444444, "v7 should be 0x44444444")
+
+
+class TestDSAtomic(unittest.TestCase):
+  """Tests for DS atomic instructions (add, max, min, and, or, xor, cmpstore, etc.)."""
+
+  def test_ds_max_rtn_u32(self):
+    """DS_MAX_RTN_U32: atomically store max(mem, data) and return old value."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),  # addr = 0
+      s_mov_b32(s[2], 100),
+      v_mov_b32_e32(v[0], s[2]),  # initial value = 100
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[2], 200),
+      v_mov_b32_e32(v[1], s[2]),  # data = 200 (greater than 100)
+      ds_max_rtn_u32(addr=v[10], data0=v[1], vdst=v[2], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[10], vdst=v[3], offset0=0),  # read result
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 100, "v2 should have old value (100)")
+    self.assertEqual(st.vgpr[0][3], 200, "v3 should have max(100, 200) = 200")
+
+  def test_ds_max_u32_no_rtn(self):
+    """DS_MAX_U32 (no RTN): atomically store max, no return value."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[2], 100),
+      v_mov_b32_e32(v[0], s[2]),  # initial = 100
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[2], 200),
+      v_mov_b32_e32(v[1], s[2]),  # data = 200
+      ds_max_u32(addr=v[10], data0=v[1], vdst=v[2], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[10], vdst=v[3], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][3], 200, "v3 should have max(100, 200) = 200")
+
+  def test_ds_min_rtn_u32(self):
+    """DS_MIN_RTN_U32: atomically store min(mem, data) and return old value."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[2], 200),
+      v_mov_b32_e32(v[0], s[2]),  # initial = 200
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[2], 100),
+      v_mov_b32_e32(v[1], s[2]),  # data = 100
+      ds_min_rtn_u32(addr=v[10], data0=v[1], vdst=v[2], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[10], vdst=v[3], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 200, "v2 should have old value (200)")
+    self.assertEqual(st.vgpr[0][3], 100, "v3 should have min(200, 100) = 100")
+
+  def test_ds_and_rtn_b32(self):
+    """DS_AND_RTN_B32: atomically AND mem with data and return old value."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[2], 0xFF00FF00),
+      v_mov_b32_e32(v[0], s[2]),  # initial = 0xFF00FF00
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[2], 0xFFFF0000),
+      v_mov_b32_e32(v[1], s[2]),  # data = 0xFFFF0000
+      ds_and_rtn_b32(addr=v[10], data0=v[1], vdst=v[2], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[10], vdst=v[3], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0xFF00FF00, "v2 should have old value")
+    self.assertEqual(st.vgpr[0][3], 0xFF000000, "v3 should have 0xFF00FF00 & 0xFFFF0000 = 0xFF000000")
+
+  def test_ds_or_rtn_b32(self):
+    """DS_OR_RTN_B32: atomically OR mem with data and return old value."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[2], 0x00FF0000),
+      v_mov_b32_e32(v[0], s[2]),  # initial = 0x00FF0000
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[2], 0x000000FF),
+      v_mov_b32_e32(v[1], s[2]),  # data = 0x000000FF
+      ds_or_rtn_b32(addr=v[10], data0=v[1], vdst=v[2], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[10], vdst=v[3], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0x00FF0000, "v2 should have old value")
+    self.assertEqual(st.vgpr[0][3], 0x00FF00FF, "v3 should have 0x00FF0000 | 0x000000FF = 0x00FF00FF")
+
+  def test_ds_xor_rtn_b32(self):
+    """DS_XOR_RTN_B32: atomically XOR mem with data and return old value."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[2], 0xAAAAAAAA),
+      v_mov_b32_e32(v[0], s[2]),  # initial = 0xAAAAAAAA
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[2], 0xFFFFFFFF),
+      v_mov_b32_e32(v[1], s[2]),  # data = 0xFFFFFFFF
+      ds_xor_rtn_b32(addr=v[10], data0=v[1], vdst=v[2], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[10], vdst=v[3], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0xAAAAAAAA, "v2 should have old value")
+    self.assertEqual(st.vgpr[0][3], 0x55555555, "v3 should have 0xAAAAAAAA ^ 0xFFFFFFFF = 0x55555555")
+
+  def test_ds_cmpstore_b32_match(self):
+    """DS_CMPSTORE_B32: conditional store when compare matches."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[2], 100),
+      v_mov_b32_e32(v[0], s[2]),  # initial = 100
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[2], 200),
+      v_mov_b32_e32(v[1], s[2]),  # new value = 200
+      s_mov_b32(s[2], 100),
+      v_mov_b32_e32(v[2], s[2]),  # compare = 100 (matches current)
+      ds_cmpstore_b32(addr=v[10], data0=v[1], data1=v[2], vdst=v[3], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[10], vdst=v[4], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][4], 200, "mem should be updated to 200 (compare matched)")
+
+  def test_ds_cmpstore_b32_no_match(self):
+    """DS_CMPSTORE_B32: no store when compare doesn't match."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[2], 100),
+      v_mov_b32_e32(v[0], s[2]),  # initial = 100
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[2], 200),
+      v_mov_b32_e32(v[1], s[2]),  # new value = 200
+      s_mov_b32(s[2], 50),
+      v_mov_b32_e32(v[2], s[2]),  # compare = 50 (doesn't match 100)
+      ds_cmpstore_b32(addr=v[10], data0=v[1], data1=v[2], vdst=v[3], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[10], vdst=v[4], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][4], 100, "mem should still be 100 (compare didn't match)")
+
+  def test_ds_inc_u32(self):
+    """DS_INC_U32: increment with wrap."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[2], 5),
+      v_mov_b32_e32(v[0], s[2]),  # initial = 5
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[2], 10),
+      v_mov_b32_e32(v[1], s[2]),  # limit = 10
+      ds_inc_u32(addr=v[10], data0=v[1], vdst=v[2], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[10], vdst=v[3], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 5, "v2 should have old value (5)")
+    self.assertEqual(st.vgpr[0][3], 6, "v3 should have incremented value (6)")
+
+  def test_ds_dec_u32(self):
+    """DS_DEC_U32: decrement with wrap."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[2], 5),
+      v_mov_b32_e32(v[0], s[2]),  # initial = 5
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[2], 10),
+      v_mov_b32_e32(v[1], s[2]),  # limit = 10
+      ds_dec_u32(addr=v[10], data0=v[1], vdst=v[2], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[10], vdst=v[3], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 5, "v2 should have old value (5)")
+    self.assertEqual(st.vgpr[0][3], 4, "v3 should have decremented value (4)")
+
+  def test_ds_dec_u32_wrap(self):
+    """DS_DEC_U32: wraps to limit when value is 0 or > limit."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[2], 0),
+      v_mov_b32_e32(v[0], s[2]),  # initial = 0
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[2], 10),
+      v_mov_b32_e32(v[1], s[2]),  # limit = 10
+      ds_dec_u32(addr=v[10], data0=v[1], vdst=v[2], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[10], vdst=v[3], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0, "v2 should have old value (0)")
+    self.assertEqual(st.vgpr[0][3], 10, "v3 should wrap to limit (10)")

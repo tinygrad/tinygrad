@@ -3,7 +3,7 @@
 from __future__ import annotations
 import ctypes
 from extra.assembly.amd.dsl import Inst, unwrap, FLOAT_ENC, MASK32, MASK64, _f32, _i32, _sext, _f16, _i16, _f64, _i64
-from extra.assembly.amd.pcode import Reg
+from extra.assembly.amd.pcode import Reg, LDSMem
 from extra.assembly.amd.asm import detect_format
 from extra.assembly.amd.autogen.rdna3.gen_pcode import get_compiled_functions
 from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, DS, FLAT, VOPD,
@@ -51,11 +51,6 @@ _D16_LOAD_MAP = {'LOAD_D16_U8': (1,0,0), 'LOAD_D16_I8': (1,1,0), 'LOAD_D16_B16':
 _D16_STORE_MAP = {'STORE_D16_HI_B8': (1,1), 'STORE_D16_HI_B16': (2,1)}  # (size, hi)
 FLAT_D16_LOAD = _mem_ops([GLOBALOp, FLATOp], _D16_LOAD_MAP)
 FLAT_D16_STORE = _mem_ops([GLOBALOp, FLATOp], _D16_STORE_MAP)
-DS_LOAD = {DSOp.DS_LOAD_B32: (1,4,0), DSOp.DS_LOAD_B64: (2,4,0), DSOp.DS_LOAD_B128: (4,4,0), DSOp.DS_LOAD_U8: (1,1,0), DSOp.DS_LOAD_I8: (1,1,1), DSOp.DS_LOAD_U16: (1,2,0), DSOp.DS_LOAD_I16: (1,2,1)}
-DS_STORE = {DSOp.DS_STORE_B32: (1,4), DSOp.DS_STORE_B64: (2,4), DSOp.DS_STORE_B128: (4,4), DSOp.DS_STORE_B8: (1,1), DSOp.DS_STORE_B16: (1,2)}
-# 2ADDR ops: load/store two values using offset0 and offset1
-DS_LOAD_2ADDR = {DSOp.DS_LOAD_2ADDR_B32: 4, DSOp.DS_LOAD_2ADDR_B64: 8}
-DS_STORE_2ADDR = {DSOp.DS_STORE_2ADDR_B32: 4, DSOp.DS_STORE_2ADDR_B64: 8}
 SMEM_LOAD = {SMEMOp.S_LOAD_B32: 1, SMEMOp.S_LOAD_B64: 2, SMEMOp.S_LOAD_B128: 4, SMEMOp.S_LOAD_B256: 8, SMEMOp.S_LOAD_B512: 16}
 
 # VOPD op -> VOP3 op mapping (VOPD is dual-issue of VOP1/VOP2 ops, use VOP3 enums for pseudocode lookup)
@@ -225,31 +220,32 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     return
 
   if isinstance(inst, DS):
-    op, addr0, vdst = inst.op, (V[inst.addr] + inst.offset0) & 0xffff, inst.vdst
-    if op in DS_LOAD:
-      cnt, sz, sign = DS_LOAD[op]
-      for i in range(cnt): val = int.from_bytes(lds[addr0+i*sz:addr0+i*sz+sz], 'little'); V[vdst + i] = _sext(val, sz * 8) & MASK32 if sign else val
-    elif op in DS_STORE:
-      cnt, sz = DS_STORE[op]
-      for i in range(cnt): lds[addr0+i*sz:addr0+i*sz+sz] = (V[inst.data0 + i] & ((1 << (sz * 8)) - 1)).to_bytes(sz, 'little')
-    elif op in DS_LOAD_2ADDR:
-      # Load two values from addr+offset0*sz and addr+offset1*sz into vdst (B32: 1 dword each, B64: 2 dwords each)
-      # Note: offsets are scaled by data size (4 for B32, 8 for B64) per AMD ISA
-      sz = DS_LOAD_2ADDR[op]
-      addr0 = (V[inst.addr] + inst.offset0 * sz) & 0xffff
-      addr1 = (V[inst.addr] + inst.offset1 * sz) & 0xffff
-      cnt = sz // 4  # 1 for B32, 2 for B64
-      for i in range(cnt): V[vdst + i] = int.from_bytes(lds[addr0+i*4:addr0+i*4+4], 'little')
-      for i in range(cnt): V[vdst + cnt + i] = int.from_bytes(lds[addr1+i*4:addr1+i*4+4], 'little')
-    elif op in DS_STORE_2ADDR:
-      # Store two values from data0 and data1 to addr+offset0*sz and addr+offset1*sz
-      # Note: offsets are scaled by data size (4 for B32, 8 for B64) per AMD ISA
-      sz = DS_STORE_2ADDR[op]
-      addr0 = (V[inst.addr] + inst.offset0 * sz) & 0xffff
-      addr1 = (V[inst.addr] + inst.offset1 * sz) & 0xffff
-      cnt = sz // 4
-      for i in range(cnt): lds[addr0+i*4:addr0+i*4+4] = (V[inst.data0 + i] & MASK32).to_bytes(4, 'little')
-      for i in range(cnt): lds[addr1+i*4:addr1+i*4+4] = (V[inst.data1 + i] & MASK32).to_bytes(4, 'little')
+    op, vdst = inst.op, inst.vdst
+    if DSOp in compiled and op in compiled[DSOp]:
+      fn = compiled[DSOp][op]
+      # For B64 operations, DATA/DATA2 access bits [63:32] so we need to pass 64-bit values
+      op_name = op.name
+      is_b64 = '_B64' in op_name or '_U64' in op_name or '_I64' in op_name or '_F64' in op_name
+      is_b128 = '_B128' in op_name
+      if is_b128:
+        s1 = Reg((V[inst.data0 + 3] << 96) | (V[inst.data0 + 2] << 64) | (V[inst.data0 + 1] << 32) | V[inst.data0])
+        s2 = Reg((V[inst.data1 + 3] << 96) | (V[inst.data1 + 2] << 64) | (V[inst.data1 + 1] << 32) | V[inst.data1]) if inst.data1 else Reg(0)
+      elif is_b64:
+        s1 = Reg((V[inst.data0 + 1] << 32) | V[inst.data0])
+        s2 = Reg((V[inst.data1 + 1] << 32) | V[inst.data1]) if inst.data1 else Reg(0)
+      else:
+        s1, s2 = Reg(V[inst.data0]), Reg(V[inst.data1] if inst.data1 else 0)
+      s0, mem = Reg(V[inst.addr]), LDSMem(lds)
+      result = fn(s0, s1, s2, Reg(V[vdst]), Reg(st.scc), Reg(st.vcc), lane, Reg(st.exec_mask), st.literal, None,
+                  offset0=inst.offset0, offset1=inst.offset1, MEM=mem)
+      if 'D0' in result: V[vdst] = result['D0']._val & MASK32
+      if 'RETURN_DATA' in result:
+        # RETURN_DATA can be multi-dword (up to 128 bits for B128 ops)
+        val = result['RETURN_DATA']._val
+        V[vdst] = val & MASK32
+        V[vdst + 1] = (val >> 32) & MASK32
+        V[vdst + 2] = (val >> 64) & MASK32
+        V[vdst + 3] = (val >> 96) & MASK32
     else: raise NotImplementedError(f"DS op {op}")
     return
 
