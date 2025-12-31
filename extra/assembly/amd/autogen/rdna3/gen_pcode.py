@@ -2,7 +2,7 @@
 # to regenerate: python -m extra.assembly.amd.pdf --arch rdna3
 # ruff: noqa: E501,F405,F403
 # mypy: ignore-errors
-from extra.assembly.amd.autogen.rdna3.enum import SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp
+from extra.assembly.amd.autogen.rdna3.enum import SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp
 from extra.assembly.amd.pcode import *
 
 def _SOP1Op_S_MOV_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
@@ -6360,6 +6360,119 @@ def _VOP3Op_V_WRITELANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, 
   return {'d0': d0, 'scc': scc, 'vgpr_write': (wr_lane, vdst_idx, s0 & 0xffffffff)}
 VOP3Op_FUNCTIONS[VOP3Op.V_WRITELANE_B32] = _VOP3Op_V_WRITELANE_B32
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# DS (Data Share) INSTRUCTIONS
+# DS instructions operate on LDS (Local Data Share) memory
+# They receive: addr (address), data0/data1 (data VGPRs), offset0/offset1 (byte offsets)
+# They return: {'vdst': [...]} for loads, {'lds_writes': [...]} for stores
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _ds_load(lds, addr, offset, size, sign_extend=False):
+  """Load from LDS memory. Returns list of 32-bit values."""
+  a = (addr + offset) & 0xffff
+  if size <= 4:
+    val = int.from_bytes(lds[a:a+size], 'little')
+    if sign_extend and size < 4:
+      # Sign extend from size*8 bits to 32 bits
+      sign_bit = 1 << (size * 8 - 1)
+      if val & sign_bit: val |= ~((1 << (size * 8)) - 1)
+    return [val & 0xffffffff]
+  # Multi-dword load
+  return [int.from_bytes(lds[a+i*4:a+i*4+4], 'little') for i in range(size // 4)]
+
+def _ds_store(lds, addr, offset, values, size):
+  """Store to LDS memory. values is list of 32-bit dwords, size is bytes per element."""
+  a = (addr + offset) & 0xffff
+  if size <= 4:
+    lds[a:a+size] = (values[0] & ((1 << (size * 8)) - 1)).to_bytes(size, 'little')
+  else:
+    for i, v in enumerate(values):
+      lds[a+i*4:a+i*4+4] = (v & 0xffffffff).to_bytes(4, 'little')
+
+# Load operations: DS_LOAD_B32, DS_LOAD_B64, DS_LOAD_B128, DS_LOAD_U8, DS_LOAD_I8, DS_LOAD_U16, DS_LOAD_I16
+def _DSOp_DS_LOAD_B32(lds, addr, data0, data1, vdst, offset0, offset1):
+  return {'vdst': _ds_load(lds, addr, offset0, 4)}
+
+def _DSOp_DS_LOAD_B64(lds, addr, data0, data1, vdst, offset0, offset1):
+  return {'vdst': _ds_load(lds, addr, offset0, 8)}
+
+def _DSOp_DS_LOAD_B128(lds, addr, data0, data1, vdst, offset0, offset1):
+  return {'vdst': _ds_load(lds, addr, offset0, 16)}
+
+def _DSOp_DS_LOAD_U8(lds, addr, data0, data1, vdst, offset0, offset1):
+  return {'vdst': _ds_load(lds, addr, offset0, 1, sign_extend=False)}
+
+def _DSOp_DS_LOAD_I8(lds, addr, data0, data1, vdst, offset0, offset1):
+  return {'vdst': _ds_load(lds, addr, offset0, 1, sign_extend=True)}
+
+def _DSOp_DS_LOAD_U16(lds, addr, data0, data1, vdst, offset0, offset1):
+  return {'vdst': _ds_load(lds, addr, offset0, 2, sign_extend=False)}
+
+def _DSOp_DS_LOAD_I16(lds, addr, data0, data1, vdst, offset0, offset1):
+  return {'vdst': _ds_load(lds, addr, offset0, 2, sign_extend=True)}
+
+# Store operations: DS_STORE_B32, DS_STORE_B64, DS_STORE_B128, DS_STORE_B8, DS_STORE_B16
+def _DSOp_DS_STORE_B32(lds, addr, data0, data1, vdst, offset0, offset1):
+  _ds_store(lds, addr, offset0, data0, 4)
+  return {}
+
+def _DSOp_DS_STORE_B64(lds, addr, data0, data1, vdst, offset0, offset1):
+  _ds_store(lds, addr, offset0, data0, 8)
+  return {}
+
+def _DSOp_DS_STORE_B128(lds, addr, data0, data1, vdst, offset0, offset1):
+  _ds_store(lds, addr, offset0, data0, 16)
+  return {}
+
+def _DSOp_DS_STORE_B8(lds, addr, data0, data1, vdst, offset0, offset1):
+  _ds_store(lds, addr, offset0, data0, 1)
+  return {}
+
+def _DSOp_DS_STORE_B16(lds, addr, data0, data1, vdst, offset0, offset1):
+  _ds_store(lds, addr, offset0, data0, 2)
+  return {}
+
+# 2-address operations: DS_LOAD_2ADDR_B32, DS_LOAD_2ADDR_B64, DS_STORE_2ADDR_B32, DS_STORE_2ADDR_B64
+# Note: offsets are scaled by data size (4 for B32, 8 for B64)
+def _DSOp_DS_LOAD_2ADDR_B32(lds, addr, data0, data1, vdst, offset0, offset1):
+  v0 = _ds_load(lds, addr, offset0 * 4, 4)
+  v1 = _ds_load(lds, addr, offset1 * 4, 4)
+  return {'vdst': v0 + v1}
+
+def _DSOp_DS_LOAD_2ADDR_B64(lds, addr, data0, data1, vdst, offset0, offset1):
+  v0 = _ds_load(lds, addr, offset0 * 8, 8)
+  v1 = _ds_load(lds, addr, offset1 * 8, 8)
+  return {'vdst': v0 + v1}
+
+def _DSOp_DS_STORE_2ADDR_B32(lds, addr, data0, data1, vdst, offset0, offset1):
+  _ds_store(lds, addr, offset0 * 4, data0, 4)
+  _ds_store(lds, addr, offset1 * 4, data1, 4)
+  return {}
+
+def _DSOp_DS_STORE_2ADDR_B64(lds, addr, data0, data1, vdst, offset0, offset1):
+  _ds_store(lds, addr, offset0 * 8, data0, 8)
+  _ds_store(lds, addr, offset1 * 8, data1, 8)
+  return {}
+
+DSOp_FUNCTIONS = {
+  DSOp.DS_LOAD_B32: _DSOp_DS_LOAD_B32,
+  DSOp.DS_LOAD_B64: _DSOp_DS_LOAD_B64,
+  DSOp.DS_LOAD_B128: _DSOp_DS_LOAD_B128,
+  DSOp.DS_LOAD_U8: _DSOp_DS_LOAD_U8,
+  DSOp.DS_LOAD_I8: _DSOp_DS_LOAD_I8,
+  DSOp.DS_LOAD_U16: _DSOp_DS_LOAD_U16,
+  DSOp.DS_LOAD_I16: _DSOp_DS_LOAD_I16,
+  DSOp.DS_STORE_B32: _DSOp_DS_STORE_B32,
+  DSOp.DS_STORE_B64: _DSOp_DS_STORE_B64,
+  DSOp.DS_STORE_B128: _DSOp_DS_STORE_B128,
+  DSOp.DS_STORE_B8: _DSOp_DS_STORE_B8,
+  DSOp.DS_STORE_B16: _DSOp_DS_STORE_B16,
+  DSOp.DS_LOAD_2ADDR_B32: _DSOp_DS_LOAD_2ADDR_B32,
+  DSOp.DS_LOAD_2ADDR_B64: _DSOp_DS_LOAD_2ADDR_B64,
+  DSOp.DS_STORE_2ADDR_B32: _DSOp_DS_STORE_2ADDR_B32,
+  DSOp.DS_STORE_2ADDR_B64: _DSOp_DS_STORE_2ADDR_B64,
+}
+
 COMPILED_FUNCTIONS = {
   SOP1Op: SOP1Op_FUNCTIONS,
   SOP2Op: SOP2Op_FUNCTIONS,
@@ -6372,6 +6485,7 @@ COMPILED_FUNCTIONS = {
   VOP3SDOp: VOP3SDOp_FUNCTIONS,
   VOP3POp: VOP3POp_FUNCTIONS,
   VOPCOp: VOPCOp_FUNCTIONS,
+  DSOp: DSOp_FUNCTIONS,
 }
 
 def get_compiled_functions(): return COMPILED_FUNCTIONS
