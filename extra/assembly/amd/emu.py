@@ -145,9 +145,8 @@ def exec_scalar(st: WaveState, inst: Inst) -> int:
 
   # SOPP: special cases for control flow that has no pseudocode
   if inst_type is SOPP:
-    op = inst.op
-    if op == SOPPOp.S_ENDPGM: return -1
-    if op == SOPPOp.S_BARRIER: return -2
+    if inst.op == SOPPOp.S_ENDPGM: return -1
+    if inst.op == SOPPOp.S_BARRIER: return -2
 
   # SMEM: memory loads (not ALU)
   if inst_type is SMEM:
@@ -158,19 +157,19 @@ def exec_scalar(st: WaveState, inst: Inst) -> int:
     return 0
 
   # Get op enum and lookup compiled function
-  if inst_type is SOP1: op_cls, ssrc0, sdst = SOP1Op, inst.ssrc0, inst.sdst
-  elif inst_type is SOP2: op_cls, ssrc0, sdst = SOP2Op, inst.ssrc0, inst.sdst
-  elif inst_type is SOPC: op_cls, ssrc0, sdst = SOPCOp, inst.ssrc0, None
-  elif inst_type is SOPK: op_cls, ssrc0, sdst = SOPKOp, inst.sdst, inst.sdst  # sdst is both src and dst
-  elif inst_type is SOPP: op_cls, ssrc0, sdst = SOPPOp, None, None
+  if inst_type is SOP1: ssrc0, sdst = inst.ssrc0, inst.sdst
+  elif inst_type is SOP2: ssrc0, sdst = inst.ssrc0, inst.sdst
+  elif inst_type is SOPC: ssrc0, sdst = inst.ssrc0, None
+  elif inst_type is SOPK: ssrc0, sdst = inst.sdst, inst.sdst  # sdst is both src and dst
+  elif inst_type is SOPP: ssrc0, sdst = None, None
   else: raise NotImplementedError(f"Unknown scalar type {inst_type}")
 
   # SOPP has gaps in the opcode enum - treat unknown opcodes as no-ops
-  try: op = op_cls(inst.op)
+  try: op = inst.op
   except ValueError:
     if inst_type is SOPP: return 0
     raise
-  fn = compiled.get(op_cls, {}).get(op)
+  fn = compiled.get(type(op), {}).get(op)
   if fn is None:
     # SOPP instructions without pseudocode (waits, hints, nops) are no-ops
     if inst_type is SOPP: return 0
@@ -288,25 +287,20 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
   dst_hi = False
   if inst_type is VOP1:
     if inst.op == VOP1Op.V_NOP: return
-    op_cls, op, src0, src1, src2 = VOP1Op, inst.op, inst.src0, None, None
-    is_16dst = inst.is_dst_16()
-    dst_hi, vdst = (inst.vdst & 0x80) != 0 and is_16dst, inst.vdst & 0x7f if is_16dst else inst.vdst
+    op, src0, src1, src2 = inst.op, inst.src0, None, None
+    dst_hi = (inst.vdst & 0x80) != 0 and inst.is_dst_16()
+    vdst = inst.vdst & 0x7f if inst.is_dst_16() else inst.vdst
   elif inst_type is VOP2:
-    op_cls, op, src0, src1, src2 = VOP2Op, inst.op, inst.src0, inst.vsrc1 + 256, None
-    is_16dst = inst.is_dst_16()
-    dst_hi, vdst = (inst.vdst & 0x80) != 0 and is_16dst, inst.vdst & 0x7f if is_16dst else inst.vdst
+    op, src0, src1, src2 = inst.op, inst.src0, inst.vsrc1 + 256, None
+    dst_hi = (inst.vdst & 0x80) != 0 and inst.is_dst_16()
+    vdst = inst.vdst & 0x7f if inst.is_dst_16() else inst.vdst
   elif inst_type is VOP3:
-    # VOP3 ops 0-255 are VOPC comparisons encoded as VOP3 (use VOPCOp pseudocode)
-    if inst.op.value < 256:
-      op_cls, op, src0, src1, src2, vdst = VOPCOp, VOPCOp(inst.op.value), inst.src0, inst.src1, None, inst.vdst
-    else:
-      op_cls, op, src0, src1, src2, vdst = VOP3Op, inst.op, inst.src0, inst.src1, inst.src2, inst.vdst
+    # VOP3 ops 0-255 are VOPC comparisons encoded as VOP3 - inst.op returns VOPCOp for these
+    op, src0, src1, src2, vdst = inst.op, inst.src0, inst.src1, (None if inst.op.value < 256 else inst.src2), inst.vdst
   elif inst_type is VOPC:
-    op = inst.op
     # For 16-bit VOPC, vsrc1 uses same encoding as VOP2 16-bit: bit 7 selects hi(1) or lo(0) half
     # vsrc1 field is 8 bits: [6:0] = VGPR index, [7] = hi flag
-    src1 = inst.vsrc1 + 256  # convert to standard VGPR encoding (256 + vgpr_idx)
-    op_cls, src0, src2, vdst = VOPCOp, inst.src0, None, VCC_LO
+    op, src0, src1, src2, vdst = inst.op, inst.src0, inst.vsrc1 + 256, None, VCC_LO
   elif inst_type is VOP3P:
     # VOP3P: Packed 16-bit operations using compiled functions
     op = inst.op
@@ -342,6 +336,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     return
   else: raise NotImplementedError(f"Unknown vector type {inst_type}")
 
+  op_cls = type(op)
   fn = compiled.get(op_cls, {}).get(op)
   if fn is None: raise NotImplementedError(f"{op.name} not in pseudocode")
 
@@ -355,7 +350,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     return val
 
   # Use inst methods to determine operand sizes (inst.is_src_16, inst.is_src_64, etc.)
-  is_vop2_16bit = op_cls is VOP2Op and inst.is_16bit()
+  is_vop2_16bit = inst_type is VOP2 and inst.is_16bit()
 
   # Read sources based on register counts and dtypes from inst properties
   def read_src(src, idx, regs, is_src_16):
@@ -394,11 +389,11 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     st.vgpr[wr_lane][wr_idx] = wr_val
   if 'vcc_lane' in result:
     # VOP2 carry ops write to VCC implicitly; VOPC/VOP3 write to vdst
-    st.pend_sgpr_lane(VCC_LO if op_cls is VOP2Op and 'CO_CI' in inst.op_name else vdst, lane, result['vcc_lane'])
+    st.pend_sgpr_lane(VCC_LO if inst_type is VOP2 and 'CO_CI' in inst.op_name else vdst, lane, result['vcc_lane'])
   if 'exec_lane' in result:
     # V_CMPX instructions write to EXEC per-lane
     st.pend_sgpr_lane(EXEC_LO, lane, result['exec_lane'])
-  if 'd0' in result and op_cls not in (VOPCOp,) and 'vgpr_write' not in result:
+  if 'd0' in result and op_cls is not VOPCOp and 'vgpr_write' not in result:
     writes_to_sgpr = 'READFIRSTLANE' in inst.op_name or 'READLANE' in inst.op_name
     d0_val = result['d0']
     if writes_to_sgpr: st.wsgpr(vdst, d0_val & MASK32)

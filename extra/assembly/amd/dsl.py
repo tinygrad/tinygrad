@@ -129,6 +129,10 @@ class BitField:
     val = unwrap(obj._values.get(self.name, 0))
     # Convert to IntEnum if marker is an IntEnum subclass
     if self.marker and isinstance(self.marker, type) and issubclass(self.marker, IntEnum):
+      # VOP3 with VOPC opcodes (0-255) -> VOPCOp, VOP3SD opcodes -> VOP3SDOp
+      if self.marker is VOP3Op:
+        if val < 256: return VOPCOp(val)
+        if val in Inst._VOP3SD_OPS: return VOP3SDOp(val)
       try: return self.marker(val)
       except ValueError: pass
     return val
@@ -483,13 +487,11 @@ class Inst:
 
   @property
   def op(self):
-    """Return the op as an enum (e.g., VOP1Op.V_MOV_B32)."""
+    """Return the op as an enum (e.g., VOP1Op.V_MOV_B32). VOP3 returns VOPCOp/VOP3SDOp for those op ranges."""
     val = self._values.get('op')
     if val is None: return None
     if hasattr(val, 'name'): return val  # already an enum
     cls_name = self.__class__.__name__
-    # VOP3 with VOP3SD opcodes -> use VOP3SDOp
-    if cls_name == 'VOP3' and val in self._VOP3SD_OPS: cls_name = 'VOP3SD'
     assert cls_name in self._enum_map, f"no enum map for {cls_name}"
     return self._enum_map[cls_name](val)
 
