@@ -5203,6 +5203,102 @@ def _VOP3POp_V_DOT2_F32_BF16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VG
   D0.f32 = tmp
   return {'D0': D0}
 
+def _VOP3POp_V_FMA_MIX_F32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0, OPSEL=0, OPSEL_HI=0):
+  # declare in : 32'F[3];
+  # declare S : 32'B[3];
+  # for i in 0 : 2 do
+  # if !OPSEL_HI.u3[i] then
+  # in[i] = S[i].f32
+  # elsif OPSEL.u3[i] then
+  # in[i] = f16_to_f32(S[i][31 : 16].f16)
+  # else
+  # in[i] = f16_to_f32(S[i][15 : 0].f16)
+  # endif
+  # endfor;
+  # D0[31 : 0].f32 = fma(in[0], in[1], in[2])
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  S2 = Reg(s2)
+  D0 = Reg(d0)
+  # --- compiled pseudocode ---
+  in_ = [Reg(0) for _ in range(3)]
+  S = [S0, S1, S2]
+  for i in range(0, int(2)+1):
+    if  not ((OPSEL_HI >> i) & 1):
+      in_[i] = S[i].f32
+    elif ((OPSEL >> i) & 1):
+      in_[i] = f16_to_f32(S[i][31 : 16].f16)
+    else:
+      in_[i] = f16_to_f32(S[i][15 : 0].f16)
+  D0[31 : 0].f32 = fma(in_[0], in_[1], in_[2])
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  return result
+
+def _VOP3POp_V_FMA_MIXLO_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0, OPSEL=0, OPSEL_HI=0):
+  # declare in : 32'F[3];
+  # declare S : 32'B[3];
+  # for i in 0 : 2 do
+  # if !OPSEL_HI.u3[i] then
+  # in[i] = S[i].f32
+  # elsif OPSEL.u3[i] then
+  # in[i] = f16_to_f32(S[i][31 : 16].f16)
+  # else
+  # in[i] = f16_to_f32(S[i][15 : 0].f16)
+  # endif
+  # endfor;
+  # D0[15 : 0].f16 = f32_to_f16(fma(in[0], in[1], in[2]))
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  S2 = Reg(s2)
+  D0 = Reg(d0)
+  # --- compiled pseudocode ---
+  in_ = [Reg(0) for _ in range(3)]
+  S = [S0, S1, S2]
+  for i in range(0, int(2)+1):
+    if  not ((OPSEL_HI >> i) & 1):
+      in_[i] = S[i].f32
+    elif ((OPSEL >> i) & 1):
+      in_[i] = f16_to_f32(S[i][31 : 16].f16)
+    else:
+      in_[i] = f16_to_f32(S[i][15 : 0].f16)
+  D0[15 : 0].f16 = f32_to_f16(fma(in_[0], in_[1], in_[2]))
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  return result
+
+def _VOP3POp_V_FMA_MIXHI_F16(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0, OPSEL=0, OPSEL_HI=0):
+  # declare in : 32'F[3];
+  # declare S : 32'B[3];
+  # for i in 0 : 2 do
+  # if !OPSEL_HI.u3[i] then
+  # in[i] = S[i].f32
+  # elsif OPSEL.u3[i] then
+  # in[i] = f16_to_f32(S[i][31 : 16].f16)
+  # else
+  # in[i] = f16_to_f32(S[i][15 : 0].f16)
+  # endif
+  # endfor;
+  # D0[31 : 16].f16 = f32_to_f16(fma(in[0], in[1], in[2]))
+  S0 = Reg(s0)
+  S1 = Reg(s1)
+  S2 = Reg(s2)
+  D0 = Reg(d0)
+  # --- compiled pseudocode ---
+  in_ = [Reg(0) for _ in range(3)]
+  S = [S0, S1, S2]
+  for i in range(0, int(2)+1):
+    if  not ((OPSEL_HI >> i) & 1):
+      in_[i] = S[i].f32
+    elif ((OPSEL >> i) & 1):
+      in_[i] = f16_to_f32(S[i][31 : 16].f16)
+    else:
+      in_[i] = f16_to_f32(S[i][15 : 0].f16)
+  D0[31 : 16].f16 = f32_to_f16(fma(in_[0], in_[1], in_[2]))
+  # --- end pseudocode ---
+  result = {'d0': D0._val, 'scc': scc & 1}
+  return result
+
 VOP3POp_FUNCTIONS = {
   VOP3POp.V_PK_MAD_I16: _VOP3POp_V_PK_MAD_I16,
   VOP3POp.V_PK_MUL_LO_U16: _VOP3POp_V_PK_MUL_LO_U16,
@@ -5227,6 +5323,9 @@ VOP3POp_FUNCTIONS = {
   VOP3POp.V_DOT4_U32_U8: _VOP3POp_V_DOT4_U32_U8,
   VOP3POp.V_DOT8_U32_U4: _VOP3POp_V_DOT8_U32_U4,
   VOP3POp.V_DOT2_F32_BF16: _VOP3POp_V_DOT2_F32_BF16,
+  VOP3POp.V_FMA_MIX_F32: _VOP3POp_V_FMA_MIX_F32,
+  VOP3POp.V_FMA_MIXLO_F16: _VOP3POp_V_FMA_MIXLO_F16,
+  VOP3POp.V_FMA_MIXHI_F16: _VOP3POp_V_FMA_MIXHI_F16,
 }
 
 def _VOPCOp_V_CMP_F_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):

@@ -7,7 +7,7 @@ from extra.assembly.amd.pcode import Reg
 from extra.assembly.amd.asm import detect_format
 from extra.assembly.amd.autogen.rdna3.gen_pcode import get_compiled_functions
 from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, DS, FLAT, VOPD,
-  SrcEnum, SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp, FLATOp, GLOBALOp, VOPDOp)
+  SrcEnum, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, GLOBALOp, FLATOp, DSOp, VOPDOp)
 
 Program = dict[int, Inst]
 WAVE_SIZE, SGPR_COUNT, VGPR_COUNT = 32, 128, 256
@@ -306,17 +306,19 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
         exec_wmma(st, inst, inst.op)
       return
     # V_FMA_MIX: Mixed precision FMA - opsel_hi controls f32(0) vs f16(1), opsel selects which f16 half
-    if 'FMA_MIX' in inst.op_name:
+    # Handle inline because abs/neg must be applied AFTER type conversion
+    if inst.op in (VOP3POp.V_FMA_MIX_F32, VOP3POp.V_FMA_MIXLO_F16, VOP3POp.V_FMA_MIXHI_F16):
       opsel, opsel_hi, opsel_hi2 = getattr(inst, 'opsel', 0), getattr(inst, 'opsel_hi', 0), getattr(inst, 'opsel_hi2', 0)
-      neg, abs_ = getattr(inst, 'neg', 0), getattr(inst, 'neg_hi', 0)  # neg_hi reused as abs
+      neg, abs_ = getattr(inst, 'neg', 0), getattr(inst, 'neg_hi', 0)  # neg_hi reused as abs for FMA_MIX
       raws = [st.rsrc(inst.src0, lane), st.rsrc(inst.src1, lane), st.rsrc(inst.src2, lane) if inst.src2 is not None else 0]
       is_f16 = [opsel_hi & 1, opsel_hi & 2, opsel_hi2]
       srcs = [_f16(_src16(raws[i], bool(opsel & (1<<i)))) if is_f16[i] else _f32(raws[i]) for i in range(3)]
       for i in range(3):
         if abs_ & (1<<i): srcs[i] = abs(srcs[i])
         if neg & (1<<i): srcs[i] = -srcs[i]
-      result = srcs[0] * srcs[1] + srcs[2]
-      st.vgpr[lane][inst.vdst] = _i32(result) if inst.op == VOP3POp.V_FMA_MIX_F32 else _dst16(V[inst.vdst], _i16(result), inst.op == VOP3POp.V_FMA_MIXHI_F16)
+      result_f = srcs[0] * srcs[1] + srcs[2]
+      V = st.vgpr[lane]
+      V[inst.vdst] = _i32(result_f) if inst.op == VOP3POp.V_FMA_MIX_F32 else _dst16(V[inst.vdst], _i16(result_f), inst.op == VOP3POp.V_FMA_MIXHI_F16)
       return
     # VOP3P packed ops: opsel selects halves for lo, opsel_hi for hi; neg toggles f16 sign
     raws = [st.rsrc_f16(inst.src0, lane), st.rsrc_f16(inst.src1, lane), st.rsrc_f16(inst.src2, lane) if inst.src2 is not None else 0]

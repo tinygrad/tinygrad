@@ -42,7 +42,7 @@ INST_PATTERN = re.compile(r'^([SV]_[A-Z0-9_]+)\s+(\d+)\s*$', re.M)
 UNSUPPORTED = ['SGPR[', 'V_SWAP', 'eval ', 'FATAL_HALT', 'HW_REGISTERS',
                'vscnt', 'vmcnt', 'expcnt', 'lgkmcnt',
                'CVT_OFF_TABLE', 'ThreadMask',
-               'S1[i', 'C.i32', 'S[i]', 'in[',
+               'S1[i', 'C.i32',
                'if n.', 'DST.u32', 'addrd = DST', 'addr = DST',
                'BARRIER_STATE', 'ReallocVgprs',
                'GPR_IDX', 'VSKIP', 'specified in', 'TTBL',
@@ -67,17 +67,18 @@ def compile_pseudocode(pseudocode: str) -> str:
 
   lines = []
   indent, need_pass, in_first_match_loop = 0, False, False
+  declared_arrays: dict[str, int] = {}  # Track declared arrays: name -> size
   for line in joined_lines:
     line = line.strip()
     if not line or line.startswith('//'): continue
     if line.startswith('if '):
-      lines.append('  ' * indent + f"if {_expr(line[3:].rstrip(' then'))}:")
+      lines.append('  ' * indent + f"if {_expr(line[3:].rstrip(' then'), declared_arrays)}:")
       indent += 1
       need_pass = True
     elif line.startswith('elsif '):
       if need_pass: lines.append('  ' * indent + "pass")
       indent -= 1
-      lines.append('  ' * indent + f"elif {_expr(line[6:].rstrip(' then'))}:")
+      lines.append('  ' * indent + f"elif {_expr(line[6:].rstrip(' then'), declared_arrays)}:")
       indent += 1
       need_pass = True
     elif line == 'else':
@@ -94,10 +95,19 @@ def compile_pseudocode(pseudocode: str) -> str:
       if need_pass: lines.append('  ' * indent + "pass")
       indent -= 1
       need_pass, in_first_match_loop = False, False
+    elif m := re.match(r'declare\s+(\w+)\s*:\s*\d+\'[FBU]\[(\d+)\]', line):
+      # Handle array declarations: declare in : 32'F[3] or declare S : 32'B[3]
+      arr_name, arr_size = m[1], int(m[2])
+      declared_arrays[arr_name] = arr_size
+      py_name = f"{arr_name}_" if arr_name == 'in' else arr_name  # 'in' is Python keyword
+      if arr_name == 'S':
+        lines.append('  ' * indent + f"{py_name} = [S0, S1, S2]")  # Map to source registers
+      else:
+        lines.append('  ' * indent + f"{py_name} = [Reg(0) for _ in range({arr_size})]")
     elif line.startswith('declare '):
-      pass
+      pass  # Ignore other declare statements
     elif m := re.match(r'for (\w+) in (.+?)\s*:\s*(.+?) do', line):
-      start, end = _expr(m[2].strip()), _expr(m[3].strip())
+      start, end = _expr(m[2].strip(), declared_arrays), _expr(m[3].strip(), declared_arrays)
       lines.append('  ' * indent + f"for {m[1]} in range({start}, int({end})+1):")
       indent += 1
       need_pass, in_first_match_loop = True, True
@@ -105,7 +115,7 @@ def compile_pseudocode(pseudocode: str) -> str:
       need_pass = False
       line = line.rstrip(';')
       if m := re.match(r'\{\s*D1\.[ui]1\s*,\s*D0\.[ui]64\s*\}\s*=\s*(.+)', line):
-        rhs = _expr(m[1])
+        rhs = _expr(m[1], declared_arrays)
         lines.append('  ' * indent + f"_full = {rhs}")
         lines.append('  ' * indent + f"D0.u64 = int(_full) & 0xffffffffffffffff")
         lines.append('  ' * indent + f"D1 = Reg((int(_full) >> 64) & 1)")
@@ -113,30 +123,39 @@ def compile_pseudocode(pseudocode: str) -> str:
         for op in ('+=', '-=', '*=', '/=', '|=', '&=', '^='):
           if op in line:
             lhs, rhs = line.split(op, 1)
-            lines.append('  ' * indent + f"{lhs.strip()} {op} {_expr(rhs.strip())}")
+            lhs_s = _expr(lhs.strip(), declared_arrays)  # Transform LHS too for array access
+            lines.append('  ' * indent + f"{lhs_s} {op} {_expr(rhs.strip(), declared_arrays)}")
             break
       else:
         lhs, rhs = line.split('=', 1)
-        lhs_s, rhs_s = _expr(lhs.strip()), rhs.strip()
-        stmt = _assign(lhs_s, _expr(rhs_s))
+        lhs_s, rhs_s = lhs.strip(), rhs.strip()
+        lhs_t = _expr(lhs_s, declared_arrays)  # Transform LHS for array access
+        stmt = _assign(lhs_t, _expr(rhs_s, declared_arrays), declared_arrays)
         if in_first_match_loop and rhs_s == 'i' and (lhs_s == 'tmp' or lhs_s == 'D0.i32'):
           stmt += "; break"
         lines.append('  ' * indent + stmt)
   if need_pass: lines.append('  ' * indent + "pass")
   return '\n'.join(lines)
 
-def _assign(lhs: str, rhs: str) -> str:
+def _assign(lhs: str, rhs: str, declared_arrays: dict[str, int] | None = None) -> str:
+  # Check for array element assignment: in_[i] should not wrap in Reg()
+  if declared_arrays and re.match(r'\w+_?\[\w+\]', lhs):
+    return f"{lhs} = {rhs}"
   if lhs in ('tmp', 'SCC', 'VCC', 'EXEC', 'D0', 'D1', 'saveexec', 'PC'):
     return f"{lhs} = Reg({rhs})"
   return f"{lhs} = {rhs}"
 
-def _expr(e: str) -> str:
+def _expr(e: str, declared_arrays: dict[str, int] | None = None) -> str:
   e = e.strip()
+  # Handle OPSEL_HI.u3[i] and OPSEL.u3[i] - bit extraction from opsel fields
+  e = re.sub(r'(OPSEL(?:_HI)?)\.u\d+\[(\w+)\]', r'((\1 >> \2) & 1)', e)
+  # Rename 'in' to 'in_' to avoid Python keyword conflict
+  e = re.sub(r'\bin\[', 'in_[', e)
   e = e.replace('&&', ' and ').replace('||', ' or ').replace('<>', ' != ')
   e = re.sub(r'!([^=])', r' not \1', e)
   e = re.sub(r'\{\s*(\w+\.u32)\s*,\s*(\w+\.u32)\s*\}', r'_pack32(\1, \2)', e)
   def pack(m):
-    hi, lo = _expr(m[1].strip()), _expr(m[2].strip())
+    hi, lo = _expr(m[1].strip(), declared_arrays), _expr(m[2].strip(), declared_arrays)
     return f'_pack({hi}, {lo})'
   e = re.sub(r'\{\s*([^,{}]+)\s*,\s*([^,{}]+)\s*\}', pack, e)
   e = re.sub(r"1201'B\(2\.0\s*/\s*PI\)", "TWO_OVER_PI_1201", e)
@@ -164,7 +183,7 @@ def _expr(e: str) -> str:
           if s[j] == '[': depth += 1
           elif s[j] == ']': depth -= 1
           j += 1
-        inner = _expr(s[start:j-1])
+        inner = _expr(s[start:j-1], declared_arrays)
         result.append('[' + inner + ']')
         i = j
       else:
@@ -541,11 +560,14 @@ def _generate_function(cls_name: str, op, pc: str, code: str) -> tuple[str, str]
   is_cmpx = (cls_name in ('VOPCOp', 'VOP3Op')) and 'EXEC.u64[laneId]' in pc
   is_div_scale = 'DIV_SCALE' in op.name
   has_sdst = cls_name == 'VOP3SDOp' and ('VCC.u64[laneId]' in pc or is_div_scale)
+  has_opsel = 'OPSEL' in pc  # FMA_MIX and similar instructions need OPSEL/OPSEL_HI
   combined = code + pc
 
   fn_name = f"_{cls_name}_{op.name}"
   # Function accepts Reg objects directly (uppercase names), laneId is passed directly as int
-  lines = [f"def {fn_name}(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):"]
+  params = "S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None"
+  if has_opsel: params += ", OPSEL=0, OPSEL_HI=0"
+  lines = [f"def {fn_name}({params}):"]
 
   # Registers that need special handling (not passed directly)
   # Only init if used but not first assigned as `name = Reg(...)` in the compiled code
