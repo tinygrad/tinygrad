@@ -96,11 +96,8 @@ gemm = [
   v_lshrrev_b32_e32(v[12], 10, v[10]),
   v_lshl_add_u32(vdst=v[10], src0=v[12], src1=4, src2=v[10]),
   v_add_co_u32_e32(v[10], 0x8200, v[10]),
-]
-"""
-[
   s_nop(0),
-  v_readfirstlane_b32(s[47], v[10]),
+  v_readfirstlane_b32_e32(vdst=RawImm(47), src0=v[10]),
   s_nop(0),
   s_add_u32(s[49], s[47], 0x10400),
   s_xor_b32(s[49], s[49], s[47]),
@@ -113,6 +110,9 @@ gemm = [
   v_cvt_u32_f32_e32(v[10], v[10]),
   v_mul_u32_u24_e32(v[13], v[10], v[12]),
   v_sub_u32_e32(v[13], v[11], v[13]),
+]
+"""
+[
   v_cmp_ne_u32_e64(VCC_LO, v[13], 0),
   v_addc_co_u32_e64(v[10], VCC_LO, v[10], 0, VCC_LO),
   v_mov_b32_e32(v[12], 0x100),
