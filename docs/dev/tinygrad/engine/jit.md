@@ -1,72 +1,79 @@
-# JIT (Just-In-Time) Implementation Details
+# JIT Implementation Details
 
-`tinygrad/engine/jit.py` implements the JIT compiler/executor `TinyJit`.
+`tinygrad/engine/jit.py` implements `TinyJit`, a record-and-replay optimization decorator.
 
-## 1. The `TinyJit` Class
+## 1. `TinyJit.__call__` Flow
 
-A decorator class that records and replays computation graphs.
+The logic is controlled by `self.cnt`:
 
-### 1.1 Motivation
-In deep learning, the same operations (layers) are executed repeatedly with the same shapes but different data.
-Dispatching kernels from Python is slow (overhead). JIT allows us to:
-1.  **Capture**: Record the sequence of kernels once.
-2.  **Optimize**: Fuse or graph the sequence.
-3.  **Replay**: Execute the sequence with low overhead.
+### 1.1 `cnt == 0` (Warmup)
+1.  **Preparation**: Calls `_prepare_jit_inputs`.
+    *   Identifies tensor inputs.
+    *   Realizes unrealized inputs (JIT cannot handle purely symbolic inputs that change every time).
+    *   Extracts `var_vals` (symbolic variables).
+2.  **Execution**: Calls `self.fxn`.
+3.  **Realize**: Calls `Tensor.realize` on the return values to ensure computation happens.
+4.  **No Capture**: Just returns the result. Increment `cnt`.
 
-### 1.2 Usage
-```python
-@TinyJit
-def run(x):
-  return x.relu()
-```
+### 1.2 `cnt == 1` (Capture)
+1.  **Setup**:
+    *   Initializes `self._jit_cache` (list).
+    *   Initializes `self._buffer_replace` (map for deduplicating buffers).
+2.  **Context**: Sets `BEAM` (optional) and `NO_MEMORY_PLANNER=1` (we want raw graph first).
+3.  **Capture**:
+    *   `capturing.append(self)`.
+    *   Run `self.fxn`.
+    *   Any call to `run_schedule` (in `realize.py`) sees `capturing` and appends `ExecItem`s to `self._jit_cache` instead of running them.
+    *   `capturing.clear()`.
+4.  **Pruning**:
+    *   If `self.prune=True`:
+        *   Calculates dependencies (buffers used by outputs).
+        *   Filters `jit_cache` to remove kernels that don't contribute to outputs (dead code).
+        *   Runs the pruned ("onetime") kernels immediately.
+5.  **Optimization**:
+    *   **Memory Planning**: Calls `_internal_memory_planner` on the captured schedule to assign buffers efficiently. Replaces temporary buffers in `ExecItem`s.
+    *   **Input Replacement**: Builds `input_replace` map: `(jit_index, buffer_index) -> input_arg_index`.
+6.  **Finalize**: Creates `CapturedJit`.
 
-### 1.3 Execution Flow (`__call__`)
+### 1.3 `cnt >= 2` (Execution)
+1.  **Verify**: Checks if input arguments (names, shapes, dtypes) match the capture.
+2.  **Run**: Calls `self.captured(input_buffers, var_vals)`.
 
-It has a state machine based on `self.cnt`:
+## 2. `CapturedJit`
 
-1.  **Cnt 0 (Warmup)**:
-    *   Executes the function normally.
-    *   Does NOT capture yet.
-    *   Ensures lazy buffers are realized so we start with a clean slate.
+Holds the frozen execution plan.
 
-2.  **Cnt 1 (Capture)**:
-    *   Initializes `self._jit_cache`.
-    *   Sets global `capturing` flag (consumed by `run_schedule`).
-    *   Executes the function.
-    *   `run_schedule` appends `ExecItem`s to `_jit_cache` instead of running them.
-    *   **Pruning**: Removes independent kernels (kernels whose outputs are not used).
-    *   **Optimization**:
-        *   `_internal_memory_planner`: Reassigns buffers to reuse memory (since the graph is static).
-        *   `apply_graph_to_jit`: Converts a list of kernels into a `GraphRunner` (e.g., CUDA Graphs).
-    *   Creates a `CapturedJit` object.
-
-3.  **Cnt > 1 (Replay)**:
-    *   Calls `self.captured(input_buffers, var_vals)`.
-
-## 2. `CapturedJit` Class
-
-Stores the captured execution plan.
-
-### 2.1 Inputs
-*   **`input_replace`**: Map `(jit_cache_index, buffer_index) -> input_argument_index`.
-    *   This allows replacing the "dummy" buffers recorded during capture with the actual input buffers passed during replay.
-*   **`extra_view_inputs`**: Handles inputs that are views (offsets) of other inputs.
-
-### 2.2 Execution
-*   Updates the `bufs` in `jit_cache` with the new inputs.
-*   Runs the `ExecItem`s.
-    *   If using `GraphRunner`, it updates the graph node parameters instead of launching new kernels.
+### 2.1 `__call__`
+1.  **Input Binding**:
+    *   Updates `self._jit_cache[j].bufs[i]` with the new `input_buffers`.
+    *   Uses `extra_view_inputs` to reconstruct view buffers (offset pointers) from base inputs.
+2.  **Graphing (First Run Only)**:
+    *   If `JIT < 2` (Graph enabled):
+    *   Calls `apply_graph_to_jit`.
+    *   Groups sequences of kernels that run on the same device into `GraphRunner` items.
+    *   Replaces the list of kernels with a single `ExecItem` calling the graph.
+3.  **Execution Loop**:
+    *   Iterates `self._jit_cache`.
+    *   Calls `ei.run(var_vals, jit=True)`.
+    *   If it's a `GraphRunner`, it updates the graph node params.
+    *   If it's a `CompiledRunner` (fallback), it launches the kernel.
 
 ## 3. `GraphRunner`
 
-Wraps hardware graph APIs (CUDA Graphs, HGS).
+Abstract base for hardware graphs (CUDA Graphs, etc.).
 
-*   **Batched Execution**: Groups multiple `CompiledRunner` items into a single graph submission.
-*   **Dependency Management**: `_access_resources` tracks read/write dependencies to insert barriers/edges in the graph.
-*   **Update**: Updates pointers (buffer addresses) and scalars (launch dims, var vals) in the instantiated graph.
+### 3.1 `__init__`
+*   **Analysis**:
+    *   Identifies variables (`var_vals`) used in the graph.
+    *   Identifies symbolic launch dimensions.
+    *   Builds dependency maps (`w_dependency_map`, `r_dependency_map`) to handle synchronization within the graph.
 
-## 4. Why this design?
+### 3.2 `apply_graph_to_jit`
+1.  **Batching**: Iterates through the cache.
+2.  **Grouping**: Collects consecutive `CompiledRunner` items for the same device.
+3.  **Flushing**: Creates a `GraphRunner` for the batch via `device.graph(batch, ...)`.
 
-*   **Python Overhead**: Removing Python loop overhead for small kernels.
-*   **Device Overhead**: Reducing kernel launch overhead (driver latency).
-*   **Memory Footprint**: Static memory planning can significantly reduce peak memory usage compared to dynamic allocation.
+## 4. Why?
+*   **Latency**: Python overhead is ~10-20us per kernel. GPU kernels can be ~1us. JIT removes Python loop.
+*   **Memory**: Static planner reuses intermediate memory, reducing footprint.
+*   **Graphs**: Hardware graphs reduce driver overhead (launch 100 kernels in 1 syscall).

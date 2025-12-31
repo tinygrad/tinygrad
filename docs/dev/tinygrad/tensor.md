@@ -1,147 +1,124 @@
 # Tensor Implementation Details
 
-`tinygrad/tensor.py` defines the `Tensor` class, which is the user-facing API for deep learning. It wraps the `UOp` graph and provides autograd, lazy execution, and device management.
+`tinygrad/tensor.py` defines the `Tensor` class, the core API for tinygrad. This document details its implementation mechanics.
 
 ## 1. The `Tensor` Class
 
-### 1.1 Attributes
+### 1.1 `__init__`
+The constructor standardizes inputs into a `UOp`.
+*   **`data` Handling**:
+    *   **`UOp`**: Validates dtype. If `Ops.BIND` (from `Variable.bind`), it replaces the bound constant with a new `Ops.CONST` on the correct device.
+    *   **`None`**: Creates a `Const` UOp (0.0). `_force_unique` uses `UOp.unique_const` (cache-breaking).
+    *   **`ConstType`**: Creates a `Const` UOp.
+    *   **`bytes`**: Calls `_frompy`. Creates a `PYTHON` buffer (CPU) containing the raw bytes.
+    *   **`list`/`tuple`**: Calls `_frompy`. Infers dtype (bool/int/float) if `None`. Handles flattening.
+    *   **`numpy.ndarray`**: Calls `_fromnp`. Allocates a `NPY` buffer reusing the array's memory (zero-copy if possible).
+    *   **`pathlib.Path`**: Disk loading. Creates a `DISK` buffer (`UOp.new_buffer`).
+*   **Device Normalization**: Uses `canonicalize_device`.
+*   **UOp Assignment**: Ensures the final `self.uop` matches the requested device (via `copy_to_device` or `shard`).
+*   **Reference Tracking**: Adds `weakref` of `self` to `all_tensors`.
 
-*   **`uop` (`UOp`)**: The underlying micro-operation graph node representing this tensor's data. This is the source of truth for the tensor's value and history.
-*   **`requires_grad` (`bool | None`)**:
-    *   `True`: Gradients will be computed for this tensor during backward pass.
-    *   `False`: Gradients are not computed.
-    *   `None`: Default state. Will be set to `True` if the tensor is used in an optimizer or if `requires_grad=True` is explicitly passed.
-*   **`grad` (`Tensor | None`)**: Stores the gradient of the loss with respect to this tensor. Populated after `.backward()` is called.
+### 1.2 Graph Construction (`_apply_uop`)
+Generic handler for creating new Tensors from operations.
+1.  **Call**: Takes a function (e.g., lambda building a `UOp` tree) and input tensors.
+2.  **Execute**: Calls the function with input `uop`s.
+3.  **Metadata**: If `TRACEMETA`, attaches source location to the new `UOp`.
+4.  **Grad Requirement**: `ret.requires_grad` is True if *any* input requires grad.
+5.  **Return**: Returns a new `Tensor` wrapping the result `UOp`.
 
-### 1.2 Initialization (`__init__`)
+### 1.3 `realize`
+Triggers execution.
+1.  **Filter**: Selects tensors that are *not* contiguous or realized.
+2.  **Schedule**: Calls `Tensor.schedule_with_vars` -> `complete_create_schedule_with_vars`.
+3.  **Run**: Calls `run_schedule` to execute the kernels.
+4.  **Return**: Returns `self`.
 
-The constructor handles various input types and normalizes them into a `UOp`.
+### 1.4 `schedule_with_vars`
+1.  **Sink**: Creates a `UOp.sink` of the tensor(s) uops.
+2.  **Scheduler**: Calls `engine.schedule.complete_create_schedule_with_vars`.
+    *   This linearizes the graph into `ExecItem`s.
+    *   It returns `becomes_map`, `schedule`, `var_vals`.
+3.  **Update (`_apply_map_to_tensors`)**:
+    *   The scheduler might rewrite the graph (e.g., fusing, changing buffer pointers).
+    *   `_apply_map_to_tensors` iterates over `all_tensors` (weakrefs).
+    *   It updates the `uop` of any Tensor involved in the schedule to point to the *realized* (or scheduled) `UOp`.
+    *   This "in-place" update is how lazy evaluation propagates results back to user objects.
 
-*   **Data Sources**:
-    *   **`UOp`**: Wraps an existing UOp directly. Checks for dtype mismatches.
-    *   **`ConstType`** (int, float, bool): Creates a constant scalar tensor.
-    *   **`bytes`**: Creates a tensor from raw bytes (useful for loading weights).
-    *   **`list` / `tuple`**: Recursively flattens and loads data.
-    *   **`numpy.ndarray`**: Copies data from NumPy.
-    *   **`pathlib.Path`**: Loads data from a file (lazy disk loading).
-*   **Device & DType**: Normalizes `device` string (e.g., "GPU:0" -> "GPU") and `dtype`.
-*   **Unique Consts**: `_force_unique` flag forces creation of a new UOp even for cached constants, useful for unique ids.
+## 2. Gradient Computation
 
-### 1.3 Properties
-
-*   **`shape`**: Delegated to `self.uop.shape`.
-*   **`dtype`**: Delegated to `self.uop.dtype`.
-*   **`device`**: Delegated to `self.uop.device`.
-
-## 2. Autograd Engine
-
-The autograd system is implicit in the `UOp` graph construction and explicit in the `backward` pass.
-
-### 2.1 Forward Pass (Graph Construction)
-
-Operations on `Tensor` (e.g., `__add__`, `relu`, `matmul`) call `_apply_uop`.
-
-```python
-def _apply_uop(self, fxn:Callable, *x:Tensor, extra_args=(), **kwargs) -> Tensor:
-    # ...
-    new_uop: UOp = fxn(*[t.uop for t in (self,)+x], *extra_args, **kwargs)
-    # ...
-    ret = Tensor.__new__(Tensor)
-    ret.uop = new_uop
-    # ...
-    return ret
-```
-
-*   It extracts `uop`s from input tensors.
-*   Calls the `UOp` generation function (e.g., `UOp.alu`, `UOp.load`).
-*   Creates a new `Tensor` wrapping the result `UOp`.
-*   Propagates `requires_grad`.
-
-### 2.2 Backward Pass (`backward`)
-
-1.  **Topological Sort**: `self.uop.toposort()` finds all nodes in the graph leading to the loss.
-2.  **Filter**: Identifies tensors that `require_grad`.
-3.  **Compute Gradients**: Calls `tinygrad.gradient.compute_gradient`.
-    *   This generates the backward graph (UOps) for gradients.
+### 2.1 `backward`
+1.  **Toposort**: `self.uop.toposort()`. Finds the upstream graph.
+2.  **Filter**: Identifies `tensors_need_grad`.
+3.  **Compute**: Calls `compute_gradient`.
+    *   Inputs: Loss UOp, Loss Grad (1.0), Target UOps.
+    *   Output: Map of `target_uop -> grad_uop`.
 4.  **Accumulate**:
-    *   Iterates through computed gradients.
-    *   Assigns them to `.grad` attributes of corresponding Tensors.
-    *   If a Tensor already has a gradient (from a previous backward pass), it accumulates (`+=`).
+    *   Iterates targets.
+    *   `t.grad = t.grad + g` (if exists) else `g`.
+    *   This handles branching paths summing up gradients.
 
-## 3. Data Management
+## 3. Operations Breakdown
 
-### 3.1 Realization (`realize`)
+### 3.1 Movement Ops (`_mop`)
+*   **`reshape`**: Calls `self._apply_uop(UOp._mop, Ops.RESHAPE, arg)`.
+*   **`pad`**: Complex logic.
+    *   Supports "flat" (PyTorch style) and "grouped" (NumPy style) padding.
+    *   Modes: `constant` (pad with val), `reflect`, `replicate`, `circular`.
+    *   `constant`: Uses `UOp.pad` and `where` (for non-zero value).
+    *   `reflect/replicate`: Implemented via slicing and concatenation (`cat`).
+*   **`permute`**: Calls `UOp.permute`.
+*   **`expand`**: Calls `UOp.expand`.
+*   **`shrink`**: Calls `UOp.shrink`.
+*   **`stride`**: Handled in `_getitem` via reshape/shrink logic.
 
-Tinygrad is lazy. Computation only happens when `realize()` is called (explicitly or implicitly via `.numpy()`, `.item()`).
+### 3.2 Slicing (`_getitem`)
+Handles complex indexing: `int`, `slice`, `Tensor`, `None`, `Ellipsis`.
+1.  **Normalization**: Resolves `Ellipsis` and `None` (newaxis).
+2.  **Iteration**: Goes dim by dim.
+    *   `slice`: Converts to `shrink` (start/end) and `stride`.
+    *   `int`: Converts to `shrink` (range 1) + `reshape` (drop dim).
+    *   `Tensor` (Advanced Indexing):
+        *   Creates `one_hot` masks.
+        *   Uses `mul` (masking) and `sum` (reduction) to extract values.
+        *   This is expensive compared to basic slicing.
+3.  **Optimization**: Merges consecutive slices/strides.
 
-```python
-def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
-    if len(to_realize:=[x for x in (self,)+lst if not x.uop.is_contiguous()]):
-      run_schedule(*Tensor.schedule_with_vars(*to_realize), do_update_stats=do_update_stats)
-    return self
-```
+### 3.3 Processing (`conv2d`)
+1.  **Im2Col / Winograd**:
+    *   If `WINO` and conditions met, uses `_apply_winograd_matrix` (F(4x4, 3x3)).
+    *   Otherwise, standard Im2Col:
+        *   `pool` (with stride/dilation) creates the windows.
+        *   `reshape`/`permute` aligns them.
+        *   `mul` (elementwise multiplication with weights).
+        *   `sum` (reduce over window).
+2.  **Groups**: Handles grouped convolution by reshaping.
 
-*   It gathers tensors to realize.
-*   Calls `schedule_with_vars` to generate an execution schedule (`list[ExecItem]`).
-*   Calls `run_schedule` (in `engine/realize.py`) to execute the kernels.
+### 3.4 Reduction (`sum`, `max`)
+*   Calls `_reduce`.
+*   Resolves axis (supports tuple).
+*   Calls `UOp.r` (`Ops.REDUCE_AXIS`).
+*   If `keepdim=False`, adds a `reshape` to squeeze dimensions.
 
-### 3.2 Scheduling (`schedule_with_vars`)
+### 3.5 Matmul (`dot`)
+*   Checks dimensions (broadcasting).
+*   Reshapes inputs to align last dimensions.
+*   Calls `mul` (elementwise) and `sum` (reduction).
+*   Standard approach: `(M, K) * (K, N) -> (M, K, N) -> sum(1) -> (M, N)`.
 
-This bridges the `Tensor` world and the `Engine` world.
+## 4. Helpers
 
-1.  **Sink Creation**: Creates a `UOp.sink` of all target tensors.
-2.  **Scheduling**: Calls `complete_create_schedule_with_vars` (in `engine/schedule.py`).
-    *   This transforms the UOp graph into a linear list of `ExecItem`s.
-    *   It handles "rangeifying" (loops), memory planning, and graph linearization.
-3.  **Map Application**: Updates the `Tensor.uop`s to point to the realized buffers (or the new graph state).
+*   **`_broadcasted`**:
+    *   Given two tensors/consts.
+    *   Casts to common dtype.
+    *   Calculates `_broadcast_shape`.
+    *   Calls `expand` on both to match shape.
+*   **`_to_np_dtype`**: Maps tinygrad `DType` to `numpy.dtype`.
+*   **`_from_np_dtype`**: Inverse.
 
-### 3.3 Storage
-
-*   **`_buffer()`**: Returns the underlying `Buffer` object (from `device.py`).
-*   **`_data()`**: Returns a `memoryview` of the data (synchronously copies to CPU if needed).
-
-## 4. Tensor Operations
-
-### 4.1 Movement Ops
-Implemented directly or via `_mop`.
-*   `reshape`, `permute`, `expand`, `pad`, `shrink`, `flip`.
-*   These manipulate the `UOp` metadata (shape, strides) without necessarily launching kernels (zero-copy views), unless a contiguous buffer is required later.
-
-### 4.2 Elementwise Ops
-Implemented via `_binop` or `alu`.
-*   `add`, `sub`, `mul`, `div`, `pow`.
-*   Uses `_broadcasted` to handle shape broadcasting before applying the ALU op.
-
-### 4.3 Reduction Ops
-Implemented via `_reduce`.
-*   `sum`, `max`.
-*   Maps to `UOp(Ops.REDUCE_AXIS, ...)`.
-
-### 4.4 Processing Ops
-High-level ops like `conv2d`, `avg_pool2d`.
-*   These are implemented by decomposing them into simpler ops (`reshape`, `permute`, `pad`, `mul`, `sum` - effectively "im2col" style or Winograd).
-*   Example: `conv2d` might reshape input, expand weights, and do a reduction.
-
-## 5. Randomness (`rand`, `randn`)
-
-Uses a counter-based PRNG (Threefry).
-*   **`manual_seed`**: Sets the global seed.
-*   **`_device_seeds`**: Stores seeds per device.
-*   **`_threefry_random_bits`**: Generates random bits deterministically based on seed and position.
-*   Random tensors are lazy; the random generation happens in the kernel execution.
-
-## 6. Multi-Device Support (`shard`)
-
-*   **`shard`**: splits a tensor across multiple devices.
-*   Creates a `MultiLazyBuffer` (handled via `UOp` with tuple device).
-*   Operations on sharded tensors dispatch to sharded UOps (`Ops.MULTI`), which the scheduler expands into per-device kernels.
-
-## 7. Context Managers
-
-*   **`train`**: Sets `Tensor.training`. Used by layers like Dropout and BatchNorm to change behavior.
-*   **`no_grad`** (implicit): By setting `requires_grad=False` on inputs.
-
-## 8. Helpers
-
-*   **`argfix`**: Normalizes arguments (tuples/lists).
-*   **`_metadata_wrapper`**: Captures stack traces for debugging/visualization (`TRACEMETA`).
+## 5. Randomness
+*   **`Threefry`**: A counter-based PRNG used in `rand` and `randn`.
+*   **State**: `_device_rng_counters` stores the offset per device.
+*   **Generation**:
+    *   Generates 2x 32-bit randoms.
+    *   Bitcasts/masks to float mantissa.
+    *   Subtracts 1.0 to get U[0, 1).

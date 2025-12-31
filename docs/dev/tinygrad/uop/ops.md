@@ -1,60 +1,79 @@
 # Ops Implementation Details
 
-`tinygrad/uop/ops.py` defines the Micro-Operations (UOps) that form the Intermediate Representation (IR).
+`tinygrad/uop/ops.py` is the foundation of the IR.
 
-## 1. `Ops` Enum
+## 1. The `UOp` Class
 
-Defines the instruction set.
+### 1.1 `__init__`
+*   **Memoization**: Uses `UOpMetaClass.ucache` to ensure UOps are unique and reused.
+    *   Key: `(op, dtype, src, arg, tag)`.
+    *   Uses `weakref` to avoid leaks.
+*   **Validation**: If `SPEC > 1`, runs `type_verify`.
 
-*   **ALU**: `ADD`, `MUL`, `MAX`, `CMPLT`, `WHERE`, `SIN`, `EXP2`, `LOG2`, `RECIPROCAL`.
-*   **Load/Store**: `LOAD`, `STORE`, `INDEX`.
-*   **Movement**: `RESHAPE`, `PERMUTE`, `EXPAND`, `PAD`, `SHRINK`, `FLIP`.
-*   **Buffer**: `BUFFER`, `BUFFER_VIEW`, `CONST`, `DEFINE_VAR`.
-*   **Meta**: `SINK` (output), `DETACH`, `BARRIER`.
-*   **Loops**: `RANGE`, `END`.
+### 1.2 `replace`
+*   Creates a new UOp with modified fields.
+*   Optimization: If args match existing, returns `self`.
 
-## 2. `UOp` Class
+### 1.3 `toposort`
+*   Iterative DFS using a stack.
+*   Returns `dict` (ordered keys = sort order).
+*   Handling `visited`: `cache` dict stores results.
 
-The node class.
+### 1.4 `substitute`
+*   Inputs: `dvars` (replacement map).
+*   Process:
+    *   Calls `graph_rewrite` with a special pattern `_substitute`.
+    *   Pattern matches `Ops` (all) and replaces if in `dvars`.
 
-### 2.1 Attributes
-*   **`op` (`Ops`)**: The operation type.
-*   **`dtype` (`DType`)**: The data type of the result.
-*   **`src` (`tuple[UOp]`)**: Inputs.
-*   **`arg` (`Any`)**: Constant arguments (values, shapes, axes).
+## 2. Shape Tracking (`_shape`)
 
-### 2.2 Symbolic Math
-`UOp`s are used for both tensor data and symbolic shapes.
-*   `sint` = `int | UOp`.
-*   Methods like `__add__`, `__mul__` on `UOp` create new UOps, building the symbolic expression tree.
-*   **`simplify()`**: Applies rewrite rules (from `symbolic.py` logic merged here) to canonicalize expressions (e.g., `x+0 -> x`, constant folding).
+This replaced `shapetracker.py`. The UOp *is* the shape tracker.
 
-### 2.3 Graph Traversal
-*   **`toposort`**: Iterative DFS to get topologically sorted list.
-*   **`replace`**: Creates a copy with modified fields (immutable style).
-*   **`substitute`**: Deep replacement of nodes.
+### 2.1 Recursive Property
+*   `_shape` is a `recursive_property`.
+*   It avoids recursion limit by using an iterative stack approach to compute the property.
 
-## 3. Pattern Matching (`PatternMatcher`, `UPat`)
+### 2.2 Logic
+*   **`RESHAPE`**: Returns `marg` (argument). Validates size.
+*   **`PERMUTE`**: Permutes `src[0].shape` based on `arg`.
+*   **`EXPAND`**: Checks broadcast compatibility.
+*   **`PAD`**: Adds padding to shape.
+*   **`ALU`**: Returns `src[0].shape` (asserts all srcs match).
+*   **`REDUCE_AXIS`**: Sets dimensions in `axis` to 1.
 
-A DSL for writing graph rewrite rules.
+## 3. Simplification (`simplify`)
 
-### 3.1 `UPat`
-Describes a pattern.
-*   `UPat(Ops.ADD, src=(UPat.var("x"), UPat.var("y")))` matches any ADD.
-*   `match(uop, store)`: Recursive check. Populates `store` with captured variables.
+The symbolic algebra engine.
 
-### 3.2 `PatternMatcher`
-A collection of `(UPat, transformer_function)` pairs.
-*   **`rewrite(uop)`**: Checks `uop` against patterns. If match, calls transformer.
-*   **`graph_rewrite`**: Systematically applies rewrites to a whole graph until convergence (or single pass).
+### 3.1 `graph_rewrite`
+The driver for simplification.
+1.  **Context**: `RewriteContext`.
+2.  **Stack**: Iterative traversal.
+3.  **Stages**:
+    *   **0**: Push srcs.
+    *   **1**: All srcs processed. Check pattern match (`pm.rewrite`).
+        *   If match: create `new_uop`.
+        *   If `new_uop` has new sources, push them.
+    *   **2**: Link result.
 
-### 3.3 Example Rule
-```python
-(UPat(Ops.ADD, src=(UPat.var("x"), UPat.const(None, 0))), lambda x: x)
-```
-Matches `x + 0` and replaces it with `x`.
+### 3.2 `PatternMatcher` (`upat.py`)
+*   **`rewrite(uop)`**:
+    *   Lookups up patterns in `pdict[uop.op]`.
+    *   Calls `match(uop)`.
+    *   If valid, calls the transform function.
+*   **`UPat.match`**:
+    *   Checks `op`, `dtype`, `arg`.
+    *   Recursively checks `src`.
+    *   Populates `store` (wildcard captures).
 
-## 4. Visualization (`render`, `pyrender`)
+## 4. Visualization
 
-*   **`render`**: Generic method to convert UOp to string using a provided matcher.
-*   **`pyrender`**: Generates Python code that would reconstruct the UOp graph. Useful for debugging and serialization.
+### 4.1 `render`
+*   Used for C-style code generation.
+*   Uses a `renderer` PatternMatcher.
+*   e.g., `(UPat(Ops.ADD, name="x"), lambda ctx,x: f"({ctx[x.src[0]]}+{ctx[x.src[1]]})")`.
+
+### 4.2 `pyrender`
+*   Generates Python code to recreate the graph.
+*   Used for the `viz` UI.
+*   Handles deduping (assigning variables `c0`, `c1`...).

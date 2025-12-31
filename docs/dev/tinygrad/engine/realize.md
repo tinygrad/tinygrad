@@ -1,54 +1,71 @@
 # Realize Implementation Details
 
-`tinygrad/engine/realize.py` handles the lowering and execution of scheduled items.
+`tinygrad/engine/realize.py` manages the execution of the schedule.
 
-## 1. `ExecItem`
+## 1. `run_schedule`
 
-Represents a unit of work.
-*   **`ast` (`UOp`)**: The operation to perform (if it's a kernel).
-*   **`bufs` (`list[Buffer]`)**: The input and output buffers.
-*   **`prg` (`Runner`)**: The lowered program (compiled kernel, copy op, etc.).
+The main execution loop.
 
-### 1.1 `lower()`
-Converts the `ast` into a `Runner`.
-*   Uses `si_lowerer` (PatternMatcher).
-*   `Ops.SINK`: Calls `get_runner` (compilation).
-*   `Ops.COPY`: Creates `BufferCopy` or `BufferXfer`.
-*   `Ops.BUFFER_VIEW`: Creates `ViewOp`.
+```python
+def run_schedule(schedule:list[ExecItem], var_vals:dict[str, int]|None=None, do_update_stats=True):
+  while len(schedule):
+    ei = schedule.pop(0).lower()
+    # ... handle JIT capturing ...
+    ei.run(var_vals, do_update_stats=do_update_stats)
+```
 
-## 2. Runners
+1.  **Lowering**: Calls `ei.lower()`. This ensures the abstract `UOp` is converted to a concrete `Runner` (compiled binary).
+2.  **Capturing**: If `capturing` list is non-empty (from `TinyJit`), adds `ei` to it and **stops**.
+3.  **Validation**: If `VALIDATE_WITH_CPU`, runs the kernel on GPU, then copies inputs to CPU, runs on CPU, and compares.
+4.  **Run**: Calls `ei.run()`.
 
-### 2.1 `CompiledRunner`
-Manages compiled kernels (GPU/CPU).
-*   **`p` (`ProgramSpec`)**: Metadata (globals, locals, name).
-*   **`lib`**: The binary code.
-*   **`clprg`**: The runtime handle (created by `Device[d].runtime(..., lib)`).
-*   **`__call__`**:
-    *   Calculates global/local launch dimensions.
-    *   Optimizes local size if needed (`optimize_local_size`).
-    *   Calls the runtime program.
+## 2. `ExecItem`
 
-### 2.2 `BufferCopy` / `BufferXfer`
-Handles memory movement.
-*   `BufferCopy`: Standard copy (CPU <-> Device).
-*   `BufferXfer`: Peer-to-Peer copy (Device <-> Device) if supported.
+A unit of execution.
 
-### 2.3 `ViewOp`
-A virtual operation. It asserts that the destination buffer is a view of the source buffer.
+*   **`lower()`**:
+    *   Uses `si_lowerer` (`PatternMatcher`).
+    *   `Ops.SINK` -> `get_runner` (compilation).
+    *   `Ops.COPY` -> `BufferCopy` / `BufferXfer`.
+*   **`run()`**:
+    *   Updates `GlobalCounters` (ops, mem).
+    *   Calls `self.prg(bufs, var_vals)`.
 
-## 3. Execution (`run_schedule`)
+## 3. Runners
 
-Loops through the list of `ExecItem`s.
-1.  **Lower**: Ensures the item has a `prg`.
-2.  **JIT Capture**: If `capturing`, adds the item to the JIT cache and skips execution.
-3.  **Run**: Calls `ei.run()`.
-4.  **Stats**: Updates `GlobalCounters` (ops, memory, time).
+### 3.1 `CompiledRunner` (`__call__`)
+1.  **Launch Dims**:
+    *   Calculates `global_size` and `local_size` using `self.p.launch_dims(var_vals)`.
+    *   If `local_size` is missing (and device supports it), calls `optimize_local_size`.
+2.  **Optimize Local Size**:
+    *   Tries various power-of-2 local sizes (e.g., [32, 1, 1], [4, 8, 1]).
+    *   Runs the kernel (measure execution time).
+    *   Picks the fastest.
+    *   *Note*: This happens once per kernel (unless cached).
+3.  **Execution**:
+    *   Calls `self._prg` (the runtime handle).
+    *   Passes raw buffer handles (`x._buf`).
+    *   Passes symbolic variable values (`vals`).
 
-## 4. Compilation Cache (`method_cache`)
+### 3.2 `BufferCopy`
+1.  **Selection**: Checks if devices support P2P (`BufferXfer`) or need host copy (`BufferCopy`).
+2.  **Execution**:
+    *   `dest.copyin(src.as_buffer())`.
+    *   Typically involves `map` -> `memcpy` -> `unmap`.
 
-Memoizes `CompiledRunner` creation based on:
-*   Device
-*   AST structure
-*   Optimization flags (BEAM, NOOPT).
+## 4. `get_runner` (Compilation)
 
-This prevents recompiling the same kernel repeatedly.
+1.  **Cache Key**: `(device, compiler_type, ast_key, optimization_flags)`.
+2.  **Check Cache**: `method_cache`.
+3.  **Compile**:
+    *   Calls `get_program(ast, renderer)`.
+    *   Returns `CompiledRunner`.
+
+## 5. `Estimates`
+
+Static analysis logic (`from_uops`).
+*   Iterates UOps.
+*   `Ops.LOAD`: Adds `dtype.itemsize` to `lds`.
+*   `Ops.MUL/ADD`: Adds FLOPs to `ops`.
+*   `Ops.RANGE`: Multiplies subsequent costs by loop range.
+*   Used for deciding `BEAM` search winners.
