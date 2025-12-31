@@ -94,7 +94,7 @@ def spec_is_16bit(name: str) -> bool:
 def spec_is_64bit(name: str) -> bool: return bool(re.search(r'_[FIUB]64(?:_|$)', name.upper()))
 _3SRC = {'FMA', 'MAD', 'MIN3', 'MAX3', 'MED3', 'DIV_FIX', 'DIV_FMAS', 'DIV_SCALE', 'SAD', 'LERP', 'ALIGN', 'CUBE', 'BFE', 'BFI',
          'PERM_B32', 'PERMLANE', 'CNDMASK', 'XOR3', 'OR3', 'ADD3', 'LSHL_OR', 'AND_OR', 'LSHL_ADD', 'ADD_LSHL', 'XAD', 'MAXMIN',
-         'MINMAX', 'DOT2', 'CVT_PK_U8', 'MULLIT', 'CO_CI'}
+         'MINMAX', 'DOT2', 'DOT4', 'DOT8', 'WMMA', 'CVT_PK_U8', 'MULLIT', 'CO_CI'}
 _2SRC = {'FMAC'}  # FMAC uses dst as implicit accumulator, so only 2 explicit sources
 def spec_num_srcs(name: str) -> int:
   name = name.upper()

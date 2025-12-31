@@ -268,9 +268,8 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
 
   # VOP3SD: has extra scalar dest for carry output
   if inst_type is VOP3SD:
-    op = inst.op
-    fn = compiled.get(VOP3SDOp, {}).get(op)
-    if fn is None: raise NotImplementedError(f"{op.name} not in pseudocode")
+    fn = compiled.get(VOP3SDOp, {}).get(inst.op)
+    if fn is None: raise NotImplementedError(f"{inst.op.name} not in pseudocode")
     # Read sources based on register counts from inst properties
     def rsrc_n(src, regs): return st.rsrc64(src, lane) if regs == 2 else st.rsrc(src, lane)
     s0, s1, s2 = rsrc_n(inst.src0, inst.src_regs(0)), rsrc_n(inst.src1, inst.src_regs(1)), rsrc_n(inst.src2, inst.src_regs(2))
@@ -287,27 +286,26 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
   dst_hi = False
   if inst_type is VOP1:
     if inst.op == VOP1Op.V_NOP: return
-    op, src0, src1, src2 = inst.op, inst.src0, None, None
+    src0, src1, src2 = inst.src0, None, None
     dst_hi = (inst.vdst & 0x80) != 0 and inst.is_dst_16()
     vdst = inst.vdst & 0x7f if inst.is_dst_16() else inst.vdst
   elif inst_type is VOP2:
-    op, src0, src1, src2 = inst.op, inst.src0, inst.vsrc1 + 256, None
+    src0, src1, src2 = inst.src0, inst.vsrc1 + 256, None
     dst_hi = (inst.vdst & 0x80) != 0 and inst.is_dst_16()
     vdst = inst.vdst & 0x7f if inst.is_dst_16() else inst.vdst
   elif inst_type is VOP3:
     # VOP3 ops 0-255 are VOPC comparisons encoded as VOP3 - inst.op returns VOPCOp for these
-    op, src0, src1, src2, vdst = inst.op, inst.src0, inst.src1, (None if inst.op.value < 256 else inst.src2), inst.vdst
+    src0, src1, src2, vdst = inst.src0, inst.src1, (None if inst.op.value < 256 else inst.src2), inst.vdst
   elif inst_type is VOPC:
     # For 16-bit VOPC, vsrc1 uses same encoding as VOP2 16-bit: bit 7 selects hi(1) or lo(0) half
     # vsrc1 field is 8 bits: [6:0] = VGPR index, [7] = hi flag
-    op, src0, src1, src2, vdst = inst.op, inst.src0, inst.vsrc1 + 256, None, VCC_LO
+    src0, src1, src2, vdst = inst.src0, inst.vsrc1 + 256, None, VCC_LO
   elif inst_type is VOP3P:
     # VOP3P: Packed 16-bit operations using compiled functions
-    op = inst.op
     # WMMA: wave-level matrix multiply-accumulate (special handling - needs cross-lane access)
     if 'WMMA' in inst.op_name:
       if lane == 0:  # Only execute once per wave, write results for all lanes
-        exec_wmma(st, inst, op)
+        exec_wmma(st, inst, inst.op)
       return
     # V_FMA_MIX: Mixed precision FMA - opsel_hi controls f32(0) vs f16(1), opsel selects which f16 half
     if 'FMA_MIX' in inst.op_name:
@@ -321,7 +319,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
         if neg & (1<<i): srcs[i] = -srcs[i]
       result = srcs[0] * srcs[1] + srcs[2]
       V = st.vgpr[lane]
-      V[inst.vdst] = _i32(result) if op == VOP3POp.V_FMA_MIX_F32 else _dst16(V[inst.vdst], _i16(result), op == VOP3POp.V_FMA_MIXHI_F16)
+      V[inst.vdst] = _i32(result) if inst.op == VOP3POp.V_FMA_MIX_F32 else _dst16(V[inst.vdst], _i16(result), inst.op == VOP3POp.V_FMA_MIXHI_F16)
       return
     # VOP3P packed ops: opsel selects halves for lo, opsel_hi for hi; neg toggles f16 sign
     raws = [st.rsrc_f16(inst.src0, lane), st.rsrc_f16(inst.src1, lane), st.rsrc_f16(inst.src2, lane) if inst.src2 is not None else 0]
@@ -330,15 +328,15 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     hi_sels = [opsel_hi & 1, opsel_hi & 2, opsel_hi2]
     srcs = [((_src16(raws[i], hi_sels[i]) ^ (0x8000 if neg_hi & (1<<i) else 0)) << 16) |
             (_src16(raws[i], opsel & (1<<i)) ^ (0x8000 if neg & (1<<i) else 0)) for i in range(3)]
-    fn = compiled.get(VOP3POp, {}).get(op)
-    if fn is None: raise NotImplementedError(f"{op.name} not in pseudocode")
+    fn = compiled.get(VOP3POp, {}).get(inst.op)
+    if fn is None: raise NotImplementedError(f"{inst.op.name} not in pseudocode")
     st.vgpr[lane][inst.vdst] = fn(srcs[0], srcs[1], srcs[2], 0, st.scc, st.vcc, lane, st.exec_mask, st.literal, None, {})['d0'] & MASK32
     return
   else: raise NotImplementedError(f"Unknown vector type {inst_type}")
 
-  op_cls = type(op)
-  fn = compiled.get(op_cls, {}).get(op)
-  if fn is None: raise NotImplementedError(f"{op.name} not in pseudocode")
+  op_cls = type(inst.op)
+  fn = compiled.get(op_cls, {}).get(inst.op)
+  if fn is None: raise NotImplementedError(f"{inst.op_name} not in pseudocode")
 
   # Read sources (with VOP3 modifiers if applicable)
   neg, abs_ = (getattr(inst, 'neg', 0), getattr(inst, 'abs', 0)) if inst_type is VOP3 else (0, 0)
@@ -375,7 +373,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
 
   # V_CNDMASK_B32/B16: VOP3 encoding uses src2 as mask (not VCC); VOP2 uses VCC implicitly
   # Pass the correct mask as vcc to the function so pseudocode VCC.u64[laneId] works correctly
-  vcc_for_fn = st.rsgpr64(src2) if op in (VOP3Op.V_CNDMASK_B32, VOP3Op.V_CNDMASK_B16) and inst_type is VOP3 and src2 is not None and src2 < 256 else st.vcc
+  vcc_for_fn = st.rsgpr64(src2) if inst.op in (VOP3Op.V_CNDMASK_B32, VOP3Op.V_CNDMASK_B16) and inst_type is VOP3 and src2 is not None and src2 < 256 else st.vcc
 
   # Execute compiled function - pass src0_idx and vdst_idx for lane instructions
   # For VGPR access: src0 index is the VGPR number (src0 - 256 if VGPR, else src0 for SGPR)
