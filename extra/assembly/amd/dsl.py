@@ -88,7 +88,7 @@ def spec_dtype(name: str) -> tuple[str | None, str | None, str | None, str | Non
   return dst_suf, src_suf, src_suf, src_suf
 def spec_is_16bit(name: str) -> bool:
   name = name.upper()
-  if 'SAD' in name or 'PACK' in name or '_PK_' in name or 'SAT_PK' in name: return False
+  if 'SAD' in name or 'PACK' in name or '_PK_' in name or 'SAT_PK' in name or 'DOT2' in name: return False
   if '_F32' in name or '_I32' in name or '_U32' in name or '_B32' in name: return False  # mixed ops like V_DOT2ACC_F32_F16
   return bool(re.search(r'_[FIUB]16(?:_|$)', name))
 def spec_is_64bit(name: str) -> bool: return bool(re.search(r'_[FIUB]64(?:_|$)', name.upper()))
