@@ -38,6 +38,9 @@ RDNA3_TEST_FILES = {
   'mubuf': 'gfx11_asm_mubuf.s',
   'mtbuf': 'gfx11_asm_mtbuf.s',
   'mimg': 'gfx11_asm_mimg.s',
+  'ldsdir': 'gfx11_asm_ldsdir.s',
+  # Export
+  'exp': 'gfx11_asm_exp.s',
   # WMMA
   'wmma': 'gfx11_asm_wmma.s',
   # Features
@@ -162,12 +165,12 @@ class TestLLVMRDNA3(unittest.TestCase):
 
   @classmethod
   def setUpClass(cls):
-    from extra.assembly.amd.autogen.rdna3.ins import SOP1, SOP2, SOPC, SOPK, SOPP, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, VOPD, VINTERP, DS, SMEM, FLAT, MUBUF, MTBUF, MIMG
+    from extra.assembly.amd.autogen.rdna3.ins import SOP1, SOP2, SOPC, SOPK, SOPP, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, VOPD, VINTERP, DS, SMEM, FLAT, MUBUF, MTBUF, MIMG, LDSDIR, EXP
     cls.formats = {
       'sop1': SOP1, 'sop2': SOP2, 'sopc': SOPC, 'sopk': SOPK, 'sopp': SOPP,
       'vop1': VOP1, 'vop2': VOP2, 'vopc': VOPC, 'vopcx': VOPC, 'vop3': VOP3, 'vop3p': VOP3P,
       'vinterp': VINTERP, 'vopd': VOPD, 'ds': DS, 'smem': SMEM, 'flat': FLAT,
-      'mubuf': MUBUF, 'mtbuf': MTBUF, 'mimg': MIMG, 'wmma': VOP3P,
+      'mubuf': MUBUF, 'mtbuf': MTBUF, 'mimg': MIMG, 'wmma': VOP3P, 'ldsdir': LDSDIR, 'exp': EXP,
       'vop3_from_vop1': VOP3, 'vop3_from_vop2': VOP3, 'vop3_from_vopc': VOP3, 'vop3_from_vopcx': VOP3,
       'vop3_features': VOP3, 'vop3p_features': VOP3P, 'vopd_features': VOPD,
       'vop3_alias': VOP3, 'vop3p_alias': VOP3P, 'vopc_alias': VOPC, 'vopcx_alias': VOPC,
@@ -260,7 +263,7 @@ class TestLLVMRDNA4(unittest.TestCase):
       'ds': VDS, 'ds_alias': VDS, 'smem': SMEM,
       'vinterp': VINTERP, 'exp': VEXPORT,
       'vbuffer_mubuf': VBUFFER, 'vbuffer_mubuf_alias': VBUFFER, 'vbuffer_mtbuf': VBUFFER, 'vbuffer_mtbuf_alias': VBUFFER,
-      'vdsdir': VDSDIR, 'vdsdir_alias': VDSDIR,
+      'vdsdir': None, 'vdsdir_alias': None,  # VDSDIR is 64-bit but ds_direct_load is 32-bit
       'vflat': VFLAT, 'vflat_alias': VFLAT,
       'vimage': VIMAGE, 'vimage_alias': VIMAGE,
       'vsample': VSAMPLE,

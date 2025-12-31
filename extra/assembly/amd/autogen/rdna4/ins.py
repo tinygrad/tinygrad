@@ -154,7 +154,7 @@ class VIMAGE(Inst96):
   scope = bits[51:50]
   th = bits[54:52]
   tfe = bits[55]
-  vaddr4 = bits[56:63]
+  vaddr4 = bits[63:56]
   vaddr0 = bits[71:64]
   vaddr1 = bits[79:72]
   vaddr2 = bits[87:80]

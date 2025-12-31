@@ -54,7 +54,7 @@ _SPECIAL_REGS = {
   'V_CMP_CLASS_F64': (1, 2, 1, 1), 'V_CMPX_CLASS_F64': (1, 2, 1, 1),
   'V_CMP_CLASS_F32': (1, 1, 1, 1), 'V_CMPX_CLASS_F32': (1, 1, 1, 1),
   'V_CMP_CLASS_F16': (1, 1, 1, 1), 'V_CMPX_CLASS_F16': (1, 1, 1, 1),
-  'V_MAD_U64_U32': (2, 1, 1, 2), 'V_MAD_I64_I32': (2, 1, 1, 2),
+  'V_MAD_U64_U32': (2, 1, 1, 2), 'V_MAD_I64_I32': (2, 1, 1, 2), 'V_MAD_CO_U64_U32': (2, 1, 1, 2), 'V_MAD_CO_I64_I32': (2, 1, 1, 2),
   'V_QSAD_PK_U16_U8': (2, 2, 1, 2), 'V_MQSAD_PK_U16_U8': (2, 2, 1, 2), 'V_MQSAD_U32_U8': (4, 2, 1, 4),
   # RDNA4 CVT_PK_F32 instructions output 2 F32 values (64-bit)
   'V_CVT_PK_F32_BF8': (2, 1, 1, 1), 'V_CVT_PK_F32_FP8': (2, 1, 1, 1),
@@ -98,7 +98,7 @@ def spec_is_16bit(name: str) -> bool:
 def spec_is_64bit(name: str) -> bool: return bool(re.search(r'_[FIUB]64(?:_|$)', name.upper()))
 _3SRC = {'FMA', 'MAD', 'MIN3', 'MAX3', 'MED3', 'DIV_FIX', 'DIV_FMAS', 'DIV_SCALE', 'SAD', 'LERP', 'ALIGN', 'CUBE', 'BFE', 'BFI',
          'PERM_B32', 'PERMLANE', 'CNDMASK', 'XOR3', 'OR3', 'ADD3', 'LSHL_OR', 'AND_OR', 'LSHL_ADD', 'ADD_LSHL', 'XAD', 'MAXMIN',
-         'MINMAX', 'DOT2', 'DOT4', 'DOT8', 'WMMA', 'CVT_PK_U8', 'MULLIT', 'CO_CI'}
+         'MINMAX', 'MAXIMUMMINIMUM', 'MINIMUMMAXIMUM', 'MAXIMUM3', 'MINIMUM3', 'DOT2', 'DOT4', 'DOT8', 'WMMA', 'CVT_PK_U8', 'MULLIT', 'CO_CI'}
 _2SRC = {'FMAC'}  # FMAC uses dst as implicit accumulator, so only 2 explicit sources
 def spec_num_srcs(name: str) -> int:
   name = name.upper()
@@ -138,9 +138,14 @@ class BitField:
     # Convert to IntEnum if marker is an IntEnum subclass
     if self.marker and isinstance(self.marker, type) and issubclass(self.marker, IntEnum):
       # VOP3 with VOPC opcodes (0-255) -> VOPCOp, VOP3SD opcodes -> VOP3SDOp
-      if self.marker is VOP3Op:
-        if val < 256: return VOPCOp(val)
-        if val in Inst._VOP3SD_OPS: return VOP3SDOp(val)
+      # Check by name to handle both RDNA3 and RDNA4 enums
+      if self.marker.__name__ == 'VOP3Op':
+        # Get the appropriate enums from the same module as the marker
+        marker_mod = self.marker.__module__
+        import importlib
+        enum_mod = importlib.import_module(marker_mod)
+        if val < 256: return enum_mod.VOPCOp(val)
+        if val in Inst._VOP3SD_OPS: return enum_mod.VOP3SDOp(val)
       try: return self.marker(val)
       except ValueError: pass
     # For RDNA4 op fields without type annotations, dynamically look up enum
