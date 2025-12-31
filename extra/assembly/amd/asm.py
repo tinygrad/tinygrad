@@ -319,6 +319,15 @@ def _disasm_vop3sd(inst: VOP3SD) -> str:
   suffix = "_e64" if name.startswith('v_') and 'co_' in name else ""
   return f"{name}{suffix} {dst}, {_fmt_sdst(inst.sdst, 1)}, {s0}, {s1}{'' if is2src else f', {s2}'}{' clamp' if inst.clmp else ''}{_omod(inst.omod)}"
 
+def _disasm_vop3b(inst) -> str:
+  """Disassemble CDNA VOP3B instructions (with sdst field for carry)."""
+  stored_op = inst._values.get('op')
+  name = stored_op.name.lower() if stored_op is not None and hasattr(stored_op, 'name') else f"op_{inst.op}"
+  s0, s1, s2 = inst.lit(inst.src0), inst.lit(inst.src1), inst.lit(inst.src2)
+  is3src = 'addc' in name or 'subb' in name  # carry instructions have 3 sources
+  suffix = "_e64" if 'co_' in name else ""
+  return f"{name}{suffix} v{inst.vdst}, {_fmt_sdst(inst.sdst, 1)}, {s0}, {s1}, {s2}" if is3src else f"{name}{suffix} v{inst.vdst}, {_fmt_sdst(inst.sdst, 1)}, {s0}, {s1}"
+
 def _disasm_vopd(inst: VOPD) -> str:
   lit = inst._literal or inst.literal
   vdst_y, nx, ny = (inst.vdsty << 1) | ((inst.vdstx & 1) ^ 1), VOPDOp(inst.opx).name.lower(), VOPDOp(inst.opy).name.lower()
@@ -464,6 +473,7 @@ DISASM_HANDLERS = {VOP1: _disasm_vop1, VOP2: _disasm_vop2, VOPC: _disasm_vopc, V
                    MIMG: _disasm_mimg, SOP1: _disasm_sop1, SOP2: _disasm_sop2, SOPC: _disasm_sopc, SOPK: _disasm_sopk}
 DISASM_BY_NAME = {cls.__name__: handler for cls, handler in DISASM_HANDLERS.items()}
 DISASM_BY_NAME['VOP3A'] = _disasm_vop3  # CDNA VOP3A uses same handler as VOP3
+DISASM_BY_NAME['VOP3B'] = _disasm_vop3b  # CDNA VOP3B for carry instructions
 
 def disasm(inst: Inst) -> str: return DISASM_HANDLERS.get(type(inst), DISASM_BY_NAME.get(type(inst).__name__, _disasm_generic))(inst)
 
@@ -642,10 +652,34 @@ def get_dsl(text: str) -> str:
   # VOP3A (CDNA native VOP3) needs keyword args since op is passed via partial
   is_vop3a_3src = _has(mn, 'lshl_add', 'add_lshl', 'lshl_or', 'and_or', 'xor3', 'or3', 'add3') and not mn.endswith(('_e32', '_e64'))
   is_vop3a_2src = _has(mn, 'mul_lo_u32', 'mul_hi_u32', 'mul_lo_i32', 'mul_hi_i32') and not mn.endswith(('_e32', '_e64'))
+  # VOP3A compare instructions: v_cmp_* and v_cmpx_* - either without suffix or with _e64 suffix (CDNA uses VOP3A)
+  is_vop3a_cmp = (mn.startswith('v_cmp') or mn.startswith('v_cmpx')) and not mn.endswith('_e32')
+  is_vop3a_cmp_e64 = is_vop3a_cmp and mn.endswith('_e64')
+  # VOP3B carry instructions: addc, subb - need vdst, sdst, src0, src1, src2 (5 args)
+  is_vop3b_carry = _has(mn, 'v_addc_co_u32', 'v_subb_co_u32', 'v_subbrev_co_u32') and mn.endswith('_e64')
+  # VOP3B add/sub (2 sources): v_add_co_u32, v_sub_co_u32 - need vdst, sdst, src0, src1 (4 args)
+  is_vop3b_2src = _has(mn, 'v_add_co_u32', 'v_sub_co_u32', 'v_subrev_co_u32') and mn.endswith('_e64') and not is_vop3b_carry
   if is_vop3a_3src and len(args) == 4:
     args = [f'vdst={args[0]}', f'src0={args[1]}', f'src1={args[2]}', f'src2={args[3]}']
   elif is_vop3a_2src and len(args) == 3:
     args = [f'vdst={args[0]}', f'src0={args[1]}', f'src1={args[2]}']
+  elif is_vop3a_cmp and len(args) == 3:
+    # For VOP3A compares, vdst holds SGPR destination - convert to RawImm
+    dst = args[0]
+    if m := re.match(r'v\[(\d+)\]', dst):
+      dst = f'RawImm({m.group(1)})'
+    # Keep VCC_LO, EXEC_LO etc as-is (they're passed to vdst which accepts them)
+    if is_vop3a_cmp_e64:
+      fn = mn.replace('_e64', '')  # Strip _e64 suffix for CDNA VOP3A compare
+    args = [f'vdst={dst}', f'src0={args[1]}', f'src1={args[2]}']
+  elif is_vop3b_carry and len(args) == 5:
+    # VOP3B carry instructions: vdst, sdst, src0, src1, src2 (carry in)
+    fn = mn.replace('_e64', '')  # remove suffix for VOP3B partial
+    args = [f'vdst={args[0]}', f'sdst={args[1]}', f'src0={args[2]}', f'src1={args[3]}', f'src2={args[4]}']
+  elif is_vop3b_2src and len(args) == 4:
+    # VOP3B 2-source instructions: vdst, sdst, src0, src1
+    fn = mn.replace('_e64', '')
+    args = [f'vdst={args[0]}', f'sdst={args[1]}', f'src0={args[2]}', f'src1={args[3]}']
 
   # v_readfirstlane_b32 has SGPR dest, use RawImm for vdst
   if mn == 'v_readfirstlane_b32' and len(args) == 2:
