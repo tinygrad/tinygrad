@@ -30,11 +30,11 @@ def disassemble_lib(lib: bytes, compiler) -> list[tuple[str, bytes]]:
       continue
   return results
 
-def compile_asm(instr: str, compiler=None) -> bytes:
+def compile_asm(instr: str, compiler=None, mcpu: str = 'gfx1100', mattr: str = '+real-true16,+wavefrontsize32') -> bytes:
   """Compile a single instruction with llvm-mc and return the machine code bytes."""
   llvm_mc = get_llvm_mc()
   result = subprocess.run(
-    [llvm_mc, '-triple=amdgcn', '-mcpu=gfx1100', '-mattr=+real-true16,+wavefrontsize32', '-show-encoding'],
+    [llvm_mc, '-triple=amdgcn', f'-mcpu={mcpu}', f'-mattr={mattr}', '-show-encoding'],
     input=f".text\n{instr}\n", capture_output=True, text=True)
   if result.returncode != 0: raise RuntimeError(f"llvm-mc failed for '{instr}': {result.stderr.strip()}")
   # Parse encoding: [0x01,0x39,0x0a,0x7e]
