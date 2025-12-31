@@ -313,7 +313,7 @@ class QCOMTextureInfo:
 class QCOMAllocator(HCQAllocatorBase):
   def _alloc(self, size:int, opts:BufferSpec) -> HCQBuffer:
     # Recalculate real size for texture
-    if opts.image is not None: size = opts.image.pitch* opts.image.shape[0]
+    if opts.image is not None: size = opts.image.pitch * opts.image.shape[0]
     return self.dev._gpu_map(opts.external_ptr, size, image=opts.image) if opts.external_ptr else self.dev._gpu_alloc(size, image=opts.image)
 
   def _do_copy(self, src_addr, dest_addr, src_size, real_size, src_stride, dest_stride, prof_text, dest_off=0, src_off=0):
