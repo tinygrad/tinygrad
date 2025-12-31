@@ -304,9 +304,31 @@ gemm = [
   s_cselect_b32(s[51], s[85], 0),
   s_cmp_eq_u32(s[87], 0x2000),
   s_and_b32(s[51], s[51], s[84]),
-]
-"""
-[
+  s_lshl_b32(s[51], s[51], s[86]),
+  s_mul_hi_i32(s[85], s[51], s[68]),
+  s_mul_i32(s[84], s[51], s[68]),
+  s_mul_hi_i32(s[65], s[12], s[68]),
+  s_mul_i32(s[64], s[12], s[68]),
+  s_sub_u32(s[64], s[68], s[64]),
+  s_subb_u32(s[65], 0, s[65]),
+  s_add_u32(s[52], s[52], s[84]),
+  s_addc_u32(s[53], s[53], s[85]),
+  s_sub_u32(s[60], s[60], s[84]),
+  s_subb_u32(s[61], s[61], s[85]),
+  s_cmp_eq_u32(s[61], 0),
+  s_cselect_b32(s[54], s[60], -1),
+  s_mul_hi_i32(s[85], s[51], s[69]),
+  s_mul_i32(s[84], s[51], s[69]),
+  s_mul_hi_i32(s[67], s[12], s[69]),
+  s_mul_i32(s[66], s[12], s[69]),
+  s_sub_u32(s[66], s[69], s[66]),
+  s_subb_u32(s[67], 0, s[67]),
+  s_add_u32(s[56], s[56], s[84]),
+  s_addc_u32(s[57], s[57], s[85]),
+  s_sub_u32(s[62], s[62], s[84]),
+  s_subb_u32(s[63], s[63], s[85]),
+  s_cmp_eq_u32(s[63], 0),
+  s_cselect_b32(s[58], s[62], -1),
   v_cmp_ne_u32_e64(VCC_LO, v[13], 0),
   v_addc_co_u32_e64(v[10], VCC_LO, v[10], 0, VCC_LO),
   v_mov_b32_e32(v[12], 0x100),
@@ -1811,7 +1833,6 @@ gemm = [
   s_nop(0),
   s_endpgm(),
 ]
-"""
 
 
 # verify a single instruction against llvm
@@ -1849,4 +1870,4 @@ if __name__ == "__main__":
     except Exception as e:
       raise Exception(f"failure at Python source lineno {pysrc[0]+1} {pysrc[1]}\n{e}")
 
-    print(f"PASS {st}")
+    #print(f"PASS {st}")
