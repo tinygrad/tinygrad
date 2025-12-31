@@ -1,33 +1,44 @@
-# Renderer
+# Renderer Implementation Details
 
-The `tinygrad/renderer/` directory contains code for converting UOps into target-specific code (e.g., C, CUDA, Metal, LLVM IR).
+`tinygrad/renderer/__init__.py` and subfiles handle code generation.
 
-## `__init__.py`
+## 1. `Renderer` Base Class
 
-Defines the `Renderer` base class and `ProgramSpec`.
+Defines the interface for a backend code generator.
 
-### `ProgramSpec`
-Holds the specification of a compiled program:
-- `name`: Name of the kernel.
-- `src`: Source code.
-- `device`: Device name.
-- `uops`: List of UOps.
-- `global_size`, `local_size`: Launch dimensions.
-- `vars`, `globals`: Variables and global buffers.
+*   **`render(uops) -> str`**: The core method.
+*   **Flags**: `has_local`, `has_shared`, `supports_float4`, `tensor_cores`.
+*   **`code_for_op`**: Map `Ops` to string templates (e.g., `Ops.ADD: lambda a,b: f"({a}+{b})"`).
 
-### `Estimates`
-Helper class to estimate FLOPS and memory usage from UOps.
+## 2. `ProgramSpec`
 
-### `Renderer` Class
-Abstract base class for all renderers.
-- `render(uops: list[UOp]) -> str`: Main method to implement. Converts UOps to source code.
-- `code_for_op`: Dictionary mapping `Ops` to functions that generate code for them.
-- Configuration flags: `has_local`, `has_shared`, `supports_float4`, etc.
+Contains everything needed to compile a kernel.
+*   **`name`**: Kernel name.
+*   **`src`**: Generated source code.
+*   **`uops`**: The linear list of UOps that generated this code.
+*   **`global_size` / `local_size`**: Launch bounds.
+*   **`vars`**: Symbolic variables (e.g., batch size).
 
-## Specific Renderers
+## 3. C-Style Renderers (`cstyle.py`)
 
-- **`cstyle.py`**: Base class for C-style languages (C, CUDA, Metal, OpenCL, WGSL). Implements common logic for control flow, types, and function definitions.
-- **`llvmir.py`**: Renders UOps to LLVM IR.
-- **`ptx.py`**: Renders UOps to NVIDIA PTX assembly.
-- **`nir.py`**: Renders UOps to NIR (for Mesa/AMD).
-- **`wgsl.py`**: Renders UOps to WebGPU Shading Language.
+Used for C, CUDA, Metal, OpenCL, WGSL.
+*   Inherits from `Renderer`.
+*   Implements `render` by iterating UOps and building a C-like AST string.
+*   Handles:
+    *   Type declarations (`float4`).
+    *   Loops (`for (int i = ...)`).
+    *   Barriers.
+    *   Load/Store syntax.
+
+## 4. LLVM / PTX Renderers
+
+*   **`llvmir.py`**: Generates LLVM IR directly (text format). Used for CPU (via Clang/LLVM) or AMD GPU (via COMGR).
+*   **`ptx.py`**: Generates NVIDIA PTX assembly. Used if `nvcc` is not available or for direct control.
+
+## 5. `Estimates`
+
+Static analysis of UOps to estimate:
+*   **`ops`**: FLOPS.
+*   **`lds`**: Bytes loaded from global memory.
+*   **`mem`**: Total memory footprint.
+Used for deciding optimization strategies (Beam Search).

@@ -1,26 +1,34 @@
-# Codegen
+# Codegen Implementation Details
 
-The `tinygrad/codegen/` directory deals with generating kernel code from UOps.
+`tinygrad/codegen/` handles the transformation of `UOp` graphs into kernel-ready structures.
 
-## `__init__.py`
+## 1. `get_program`
 
-Exports kernel generation functions.
-- **`get_program`**: Takes a `UOp` (sink) and a `Renderer`, and generates a `ProgramSpec` containing the source code.
+The main pipeline in `__init__.py`.
+1.  **Linearize**: Calls `linearizer` (if not already linear).
+2.  **Optimize**: Simplifies UOps.
+3.  **Render**: Calls the device renderer.
 
-## `simplify.py`
+## 2. Kernel Optimization
 
-Implements simplification passes on the UOp graph before code generation.
+### 2.1 `gpudims.py`
+Calculates optimal global/local workgroup sizes.
+*   Heuristics based on hardware limits (max threads per block, register usage estimates).
+*   Handles image constraints.
 
-## `gpudims.py`
+### 2.2 `simplify.py`
+A collection of `PatternMatcher` rules specifically for optimization *after* scheduling but *before* rendering.
+*   e.g., `simplify_alu`: Constant folding for integer arithmetic used in indexing.
 
-Logic for calculating optimal GPU launch dimensions (global/local sizes).
+### 2.3 `opt/` (Optimization Passes)
+*   **`search.py`**: **Beam Search**.
+    *   Tries different "applied opts" (loop unrolling, tiling, upcasting, vectorization) on the `Kernel` UOp.
+    *   Estimates performance (using `Estimates`) or measures it (if running tuning).
+    *   Selects the best configuration.
+*   **`tc.py`**: **Tensor Cores**.
+    *   Detects matrix multiplication patterns (`WMMA`).
+    *   Replaces generic `MUL`/`SUM` with hardware-specific `WMMA` ops if shapes align.
 
-## `opt/`
+## 3. Late Transformations
 
-Contains optimization passes.
-- **`search.py`**: Beam search or other search algorithms to find optimal kernel configurations (hand-tuning or auto-tuning).
-- **`tc.py`**: Tensor Core usage logic.
-
-## `late/`
-
-Late-stage transformations (e.g., linearizing the graph for printing).
+*   **`late/linearizer.py`**: This is where the old "Linearizer" logic lives (mostly migrated to `UOp` schedulers now, but some parts remain for specific graph transforms).

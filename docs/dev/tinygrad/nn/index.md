@@ -1,42 +1,35 @@
-# NN (Neural Networks)
+# NN Implementation Details
 
-The `tinygrad/nn/` directory contains neural network primitives and utilities.
+`tinygrad/nn/` provides the neural network building blocks.
 
-## `__init__.py`
+## 1. Layers
 
-Defines high-level layers:
-- **`Linear`**: Fully connected layer.
-- **`Conv2d`**, **`ConvTranspose2d`**: Convolutional layers.
-- **`BatchNorm2d`**, **`GroupNorm`**, **`LayerNorm`**, **`InstanceNorm`**: Normalization layers.
-- **`Embedding`**: Embedding layer.
-- **`LSTM`**, **`GRU`**, **`RNN`**: Recurrent layers.
+Implemented as classes inheriting from nothing (just Python classes) or using `tinygrad.tensor.Tensor`.
 
-These layers store their parameters as `Tensor`s and implement the forward pass.
+*   **`Linear`**: `x @ w + b`.
+*   **`Conv2d`**: `x.conv2d(w, b, ...)`.
+*   **`BatchNorm`**: `x.batchnorm(...)`. Track running stats if `Tensor.training`.
 
-## `optim.py`
+## 2. Optimizers (`optim.py`)
 
-Implements optimization algorithms:
-- **`SGD`**: Stochastic Gradient Descent.
-- **`Adam`**, **`AdamW`**: Adaptive Moment Estimation.
-- **`RMSprop`**.
-- **`LAMB`**.
-- **`LARS`**.
+*   **`Optimizer`**: Base class.
+    *   `params`: List of tensors to update.
+    *   `zero_grad()`: Sets `.grad = None` for all params.
+    *   `step()`: Updates params using `.grad`.
+    *   `realize()`: Forces realization of new param values (needed because update is lazy).
 
-Optimizers take a list of parameters and update them based on their gradients.
+*   **Implementations**: `SGD`, `Adam`, `AdamW`, `RMSprop`.
+    *   They implement the update math using `Tensor` ops.
 
-## `state.py`
+## 3. State Management (`state.py`)
 
-Utilities for saving and loading model state.
-- **`get_parameters(obj)`**: Recursively finds all `Tensor`s in an object (that require grad).
-- **`get_state_dict(obj)`**: Returns a dictionary of parameters.
-- **`load_state_dict(obj, state_dict)`**: Loads parameters into a model.
-- **`safe_save`**, **`safe_load`**: Save/load weights using the safetensors format.
-- **`torch_load`**: Load PyTorch checkpoints.
+*   **`get_parameters(model)`**: Reflection. Walks the object tree to find `Tensor` attributes.
+*   **`get_state_dict(model)`**: Returns `dict[name, Tensor]`.
+*   **`safe_save` / `safe_load`**:
+    *   Uses the **SafeTensors** format.
+    *   Zero-copy loading using `mmap` (Tensor from `pathlib.Path`).
+    *   Handling of device mapping (load to CPU vs disk vs GPU).
 
-## `datasets.py`
+## 4. `torch` Compatibility
 
-Helper functions to load common datasets (MNIST, CIFAR).
-
-## `onnx.py`
-
-ONNX model loader. Converts ONNX graphs to tinygrad code/models.
+`tinygrad/nn/torch.py` provides helpers to load PyTorch weights (pickled or safetensors) and convert logic.
