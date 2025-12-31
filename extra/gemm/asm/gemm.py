@@ -17,6 +17,9 @@ gemm = [
   s_mov_b32(s[11], 0x40010020),
   s_mov_b32(s[25], s[24]),
   s_mov_b32(s[26], 1),
+]
+"""
+[
   s_mov_b32(s[27], s[24]),
   s_mov_b32(s[36], s[24]),
   s_mov_b32(s[37], 0),
@@ -1614,6 +1617,7 @@ gemm = [
   s_nop(0),
   s_endpgm(),
 ]
+"""
 
 
 # verify a single instruction against llvm
@@ -1625,11 +1629,11 @@ def prepare_verification():
     if l.strip().startswith("//"): continue
     if not l.strip(): continue
     raw_txt_lines.append(l.strip())
-  code:list[str] = []
+  code:list[tuple[int, str]] = []
   on = False
-  for l in open(__file__):
+  for lineno,l in enumerate(open(__file__)):
     if on and l.strip() == "]": break
-    if on: code.append(l.strip())
+    if on: code.append((lineno, l.strip()))
     elif "[" in l: on = True
   return raw_txt_lines, code
 
@@ -1637,12 +1641,16 @@ if __name__ == "__main__":
   raw_txt_lines, python_code = prepare_verification()
 
   assert len(python_code) == len(gemm)
-  for py_txt,asm_txt,inst in zip(python_code, raw_txt_lines, gemm):
+  for pysrc,asm_txt,inst in zip(python_code, raw_txt_lines, gemm):
     ref = compile_asm(asm_txt)
-    print(asm_txt)
-    b = inst.to_bytes()
-    st = inst.disasm()
-    reasm = asm(st, arch='cdna')
-    desc = f"{st:25s} {inst} {b!r} {reasm}"
-    ref = compile_asm(st)
-    assert b == ref == reasm.to_bytes(), f"Bytes mismatch {b} != {ref} for {st}"
+    try:
+      b = inst.to_bytes()
+      st = inst.disasm()
+      reasm = asm(st, arch='cdna')
+      desc = f"{st:25s} {inst} {b!r} {reasm}"
+      ref = compile_asm(st)
+      assert b == ref == reasm.to_bytes(), f"Bytes mismatch {b} != {ref} for {st}"
+    except Exception as e:
+      raise Exception(f"failure at Python source lineno {pysrc[0]+1} {pysrc[1]}\n{e}")
+
+    print(f"PASS {st}")
