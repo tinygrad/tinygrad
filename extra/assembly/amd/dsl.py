@@ -55,7 +55,7 @@ _SPECIAL_REGS = {
   'V_CMP_CLASS_F32': (1, 1, 1, 1), 'V_CMPX_CLASS_F32': (1, 1, 1, 1),
   'V_CMP_CLASS_F16': (1, 1, 1, 1), 'V_CMPX_CLASS_F16': (1, 1, 1, 1),
   'V_MAD_U64_U32': (2, 1, 1, 2), 'V_MAD_I64_I32': (2, 1, 1, 2),
-  'V_QSAD_PK_U16_U8': (2, 2, 2, 2), 'V_MQSAD_PK_U16_U8': (2, 2, 2, 2), 'V_MQSAD_U32_U8': (4, 2, 2, 4),
+  'V_QSAD_PK_U16_U8': (2, 2, 1, 2), 'V_MQSAD_PK_U16_U8': (2, 2, 1, 2), 'V_MQSAD_U32_U8': (4, 2, 1, 4),
 }
 _SPECIAL_DTYPE = {
   'V_LSHLREV_B64': ('B64', 'U32', 'B64', None), 'V_LSHRREV_B64': ('B64', 'U32', 'B64', None), 'V_ASHRREV_I64': ('I64', 'U32', 'I64', None),
@@ -496,11 +496,8 @@ class Inst:
   def src_dtype(self, n: int) -> str | None: return spec_dtype(self.op_name)[n + 1]
   def is_src_16(self, n: int) -> bool: return self.src_regs(n) == 1 and is_dtype_16(self.src_dtype(n))
   def is_src_64(self, n: int) -> bool: return self.src_regs(n) == 2
-  @property
   def is_16bit(self) -> bool: return spec_is_16bit(self.op_name)
-  @property
   def is_64bit(self) -> bool: return spec_is_64bit(self.op_name)
-  @property
   def is_dst_16(self) -> bool: return self.dst_regs() == 1 and is_dtype_16(self.dst_dtype())
 
 class Inst32(Inst): pass

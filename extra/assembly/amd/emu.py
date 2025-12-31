@@ -289,11 +289,11 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
   if inst_type is VOP1:
     if inst.op == VOP1Op.V_NOP: return
     op_cls, op, src0, src1, src2 = VOP1Op, VOP1Op(inst.op), inst.src0, None, None
-    is_16dst = inst.is_dst_16
+    is_16dst = inst.is_dst_16()
     dst_hi, vdst = (inst.vdst & 0x80) != 0 and is_16dst, inst.vdst & 0x7f if is_16dst else inst.vdst
   elif inst_type is VOP2:
     op_cls, op, src0, src1, src2 = VOP2Op, VOP2Op(inst.op), inst.src0, inst.vsrc1 + 256, None
-    is_16dst = inst.is_dst_16
+    is_16dst = inst.is_dst_16()
     dst_hi, vdst = (inst.vdst & 0x80) != 0 and is_16dst, inst.vdst & 0x7f if is_16dst else inst.vdst
   elif inst_type is VOP3:
     # VOP3 ops 0-255 are VOPC comparisons encoded as VOP3 (use VOPCOp pseudocode)
@@ -355,7 +355,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     return val
 
   # Use inst methods to determine operand sizes (inst.is_src_16, inst.is_src_64, etc.)
-  is_vop2_16bit = op_cls is VOP2Op and inst.is_16bit
+  is_vop2_16bit = op_cls is VOP2Op and inst.is_16bit()
 
   # Read sources based on register counts and dtypes from inst properties
   def read_src(src, idx, regs, is_src_16):
@@ -403,7 +403,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     d0_val = result['d0']
     if writes_to_sgpr: st.wsgpr(vdst, d0_val & MASK32)
     elif result.get('d0_64'): V[vdst], V[vdst + 1] = d0_val & MASK32, (d0_val >> 32) & MASK32
-    elif inst.is_dst_16: V[vdst] = _dst16(V[vdst], d0_val, bool(opsel & 8) if inst_type is VOP3 else dst_hi)
+    elif inst.is_dst_16(): V[vdst] = _dst16(V[vdst], d0_val, bool(opsel & 8) if inst_type is VOP3 else dst_hi)
     else: V[vdst] = d0_val & MASK32
 
 # ═══════════════════════════════════════════════════════════════════════════════

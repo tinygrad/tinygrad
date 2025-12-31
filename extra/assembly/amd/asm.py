@@ -121,7 +121,7 @@ def _disasm_vop1(inst: VOP1) -> str:
 
 def _disasm_vop2(inst: VOP2) -> str:
   op, name = VOP2Op(inst.op), VOP2Op(inst.op).name.lower()
-  suf, is16 = "" if op == VOP2Op.V_DOT2ACC_F32_F16 else "_e32", _is16(name) and 'pk_' not in name
+  suf, is16 = "" if op == VOP2Op.V_DOT2ACC_F32_F16 else "_e32", inst.is_16bit()
   # fmaak: dst = src0 * vsrc1 + K, fmamk: dst = src0 * K + vsrc1
   if op in (VOP2Op.V_FMAAK_F32, VOP2Op.V_FMAAK_F16): return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, v{inst.vsrc1}, 0x{inst._literal:x}"
   if op in (VOP2Op.V_FMAMK_F32, VOP2Op.V_FMAMK_F16): return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, 0x{inst._literal:x}, v{inst.vsrc1}"
@@ -133,7 +133,7 @@ VOPC_CLASS = {VOPCOp.V_CMP_CLASS_F16, VOPCOp.V_CMP_CLASS_F32, VOPCOp.V_CMP_CLASS
 
 def _disasm_vopc(inst: VOPC) -> str:
   op, name = VOPCOp(inst.op), VOPCOp(inst.op).name.lower()
-  is64, is16 = _is64(name), _is16(name)
+  is64, is16 = inst.is_64bit(), inst.is_16bit()
   s0 = _fmt_src(inst.src0, 2) if is64 else _src16(inst, inst.src0) if is16 else inst.lit(inst.src0)
   s1 = _vreg(inst.vsrc1, 2) if is64 and op not in VOPC_CLASS else _fmt_v16(inst.vsrc1, 0, 128) if is16 else f"v{inst.vsrc1}"
   return f"{name}_e32 {s0}, {s1}" if op.value >= 128 else f"{name}_e32 vcc_lo, {s0}, {s1}"
@@ -229,10 +229,9 @@ def _disasm_vop3(inst: VOP3) -> str:
   # VOP3SD (shared encoding)
   if inst.op in VOP3SD_OPS:
     sdst = (inst.clmp << 7) | (inst.opsel << 3) | inst.abs
-    is64, mad64 = 'f64' in name, _has(name, 'mad_i64_i32', 'mad_u64_u32')
-    def src(v, neg, ext=False): s = _fmt_src(v, 2) if ext or is64 else inst.lit(v); return f"-{s}" if neg else s
-    s0, s1, s2 = src(inst.src0, inst.neg & 1), src(inst.src1, inst.neg & 2), src(inst.src2, inst.neg & 4, mad64)
-    dst = _vreg(inst.vdst, 2) if is64 or mad64 else f"v{inst.vdst}"
+    def src(v, neg, n): s = _fmt_src(v, n) if n > 1 else inst.lit(v); return f"-{s}" if neg else s
+    s0, s1, s2 = src(inst.src0, inst.neg & 1, inst.src_regs(0)), src(inst.src1, inst.neg & 2, inst.src_regs(1)), src(inst.src2, inst.neg & 4, inst.src_regs(2))
+    dst = _vreg(inst.vdst, inst.dst_regs()) if inst.dst_regs() > 1 else f"v{inst.vdst}"
     if op in (VOP3SDOp.V_ADD_CO_U32, VOP3SDOp.V_SUB_CO_U32, VOP3SDOp.V_SUBREV_CO_U32): return f"{name} {dst}, {_fmt_sdst(sdst, 1)}, {s0}, {s1}"
     if op in (VOP3SDOp.V_ADD_CO_CI_U32, VOP3SDOp.V_SUB_CO_CI_U32, VOP3SDOp.V_SUBREV_CO_CI_U32): return f"{name} {dst}, {_fmt_sdst(sdst, 1)}, {s0}, {s1}, {s2}"
     return f"{name} {dst}, {_fmt_sdst(sdst, 1)}, {s0}, {s1}, {s2}" + _omod(inst.omod)
@@ -290,10 +289,9 @@ def _disasm_vop3(inst: VOP3) -> str:
 
 def _disasm_vop3sd(inst: VOP3SD) -> str:
   op, name = VOP3SDOp(inst.op), VOP3SDOp(inst.op).name.lower()
-  is64, mad64 = 'f64' in name, _has(name, 'mad_i64_i32', 'mad_u64_u32')
-  def src(v, neg, ext=False): s = _fmt_src(v, 2) if ext or is64 else inst.lit(v); return f"-{s}" if neg else s
-  s0, s1, s2 = src(inst.src0, inst.neg & 1), src(inst.src1, inst.neg & 2), src(inst.src2, inst.neg & 4, mad64)
-  dst, is2src = _vreg(inst.vdst, 2) if is64 or mad64 else f"v{inst.vdst}", op in (VOP3SDOp.V_ADD_CO_U32, VOP3SDOp.V_SUB_CO_U32, VOP3SDOp.V_SUBREV_CO_U32)
+  def src(v, neg, n): s = _fmt_src(v, n) if n > 1 else inst.lit(v); return f"-{s}" if neg else s
+  s0, s1, s2 = src(inst.src0, inst.neg & 1, inst.src_regs(0)), src(inst.src1, inst.neg & 2, inst.src_regs(1)), src(inst.src2, inst.neg & 4, inst.src_regs(2))
+  dst, is2src = _vreg(inst.vdst, inst.dst_regs()) if inst.dst_regs() > 1 else f"v{inst.vdst}", op in (VOP3SDOp.V_ADD_CO_U32, VOP3SDOp.V_SUB_CO_U32, VOP3SDOp.V_SUBREV_CO_U32)
   suffix = "_e64" if name.startswith('v_') and 'co_' in name else ""
   return f"{name}{suffix} {dst}, {_fmt_sdst(inst.sdst, 1)}, {s0}, {s1}{'' if is2src else f', {s2}'}{' clamp' if inst.clmp else ''}{_omod(inst.omod)}"
 
