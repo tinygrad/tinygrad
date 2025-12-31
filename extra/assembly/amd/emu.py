@@ -1,8 +1,8 @@
 # RDNA3 emulator - executes compiled pseudocode from AMD ISA PDF
 # mypy: ignore-errors
 from __future__ import annotations
-import ctypes, struct
-from extra.assembly.amd.dsl import Inst, RawImm, unwrap, FLOAT_ENC, MASK32, MASK64, _f32, _i32, _sext, _f16, _i16, _f64, _i64
+import ctypes
+from extra.assembly.amd.dsl import Inst, unwrap, FLOAT_ENC, MASK32, MASK64, _f32, _i32, _sext, _f16, _i16, _f64, _i64
 from extra.assembly.amd.pcode import Reg
 from extra.assembly.amd.asm import detect_format
 from extra.assembly.amd.autogen.rdna3.gen_pcode import get_compiled_functions
@@ -179,13 +179,10 @@ def exec_scalar(st: WaveState, inst: Inst) -> int:
   s0 = st.rsrc64(ssrc0, 0) if inst.is_src_64(0) else (st.rsrc(ssrc0, 0) if not isinstance(inst, (SOPK, SOPP)) else (st.rsgpr(inst.sdst) if isinstance(inst, SOPK) else 0))
   s1 = st.rsrc64(inst.ssrc1, 0) if inst.is_src_64(1) else (st.rsrc(inst.ssrc1, 0) if isinstance(inst, (SOP2, SOPC)) else inst.simm16 if isinstance(inst, SOPK) else 0)
   d0 = st.rsgpr64(sdst) if inst.dst_regs() == 2 and sdst is not None else (st.rsgpr(sdst) if sdst is not None else 0)
-  exec_mask = st.exec_mask
   literal = inst.simm16 if isinstance(inst, (SOPK, SOPP)) else st.literal
 
   # Create Reg objects for compiled function - mask VCC/EXEC to 32 bits for wave32
-  pc_bytes = st.pc * 4
-  vcc32, exec32 = st.vcc & MASK32, exec_mask & MASK32
-  result = fn(Reg(s0), Reg(s1), None, Reg(d0), Reg(st.scc), Reg(vcc32), 0, Reg(exec32), literal, None, PC=Reg(pc_bytes))
+  result = fn(Reg(s0), Reg(s1), None, Reg(d0), Reg(st.scc), Reg(st.vcc & MASK32), 0, Reg(st.exec_mask & MASK32), literal, None, PC=Reg(st.pc * 4))
 
   # Apply results - extract values from returned Reg objects
   if sdst is not None and 'D0' in result:
@@ -319,8 +316,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
         if abs_ & (1<<i): srcs[i] = abs(srcs[i])
         if neg & (1<<i): srcs[i] = -srcs[i]
       result = srcs[0] * srcs[1] + srcs[2]
-      V = st.vgpr[lane]
-      V[inst.vdst] = _i32(result) if inst.op == VOP3POp.V_FMA_MIX_F32 else _dst16(V[inst.vdst], _i16(result), inst.op == VOP3POp.V_FMA_MIXHI_F16)
+      st.vgpr[lane][inst.vdst] = _i32(result) if inst.op == VOP3POp.V_FMA_MIX_F32 else _dst16(V[inst.vdst], _i16(result), inst.op == VOP3POp.V_FMA_MIXHI_F16)
       return
     # VOP3P packed ops: opsel selects halves for lo, opsel_hi for hi; neg toggles f16 sign
     raws = [st.rsrc_f16(inst.src0, lane), st.rsrc_f16(inst.src1, lane), st.rsrc_f16(inst.src2, lane) if inst.src2 is not None else 0]

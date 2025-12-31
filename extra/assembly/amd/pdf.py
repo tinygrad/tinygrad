@@ -533,7 +533,6 @@ def _apply_pseudocode_fixes(op, code: str) -> str:
 
 def _generate_function(cls_name: str, op, pc: str, code: str) -> tuple[str, str]:
   """Generate a single compiled pseudocode function."""
-  import re
   has_d1 = '{ D1' in pc
   is_cmpx = (cls_name in ('VOPCOp', 'VOP3Op')) and 'EXEC.u64[laneId]' in pc
   is_div_scale = 'DIV_SCALE' in op.name
