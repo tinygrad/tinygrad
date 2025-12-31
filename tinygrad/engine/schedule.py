@@ -38,13 +38,22 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
           raise RuntimeError(f"input to kernel must be AFTER or BUFFER, not {s.op}")
 
   with cpu_profile(TracingKey("linearize schedule")):
-    queue: deque[UOp] = deque()
+    # priority toposort: RANGE > KERNEL > END
+    qr: deque[UOp] = deque()
+    qk: deque[UOp] = deque()
+    qe: deque[UOp] = deque()
     for k,v in in_degree.items():
-      if v == 0: queue.append(k)
+      if v == 0:
+        if k.op is Ops.RANGE: qr.append(k)
+        elif k.op is Ops.END: qe.append(k)
+        else: qk.append(k)
 
     schedule: list[tuple|UOp] = []
-    while len(queue):
-      k = rk = queue.popleft()
+    while qr or qk or qe:
+      if qr: k = qr.popleft()
+      elif qk: k = qk.popleft()
+      else: k = qe.popleft()
+      rk = k
       if k.op is Ops.END: k = k.src[0]
       if k.op is Ops.RANGE: schedule.append(k)
       elif k.op is Ops.KERNEL:
@@ -57,7 +66,10 @@ def create_schedule(sched_sink:UOp) -> tuple[list[ExecItem], UOp]:
         raise RuntimeError(f"can't schedule {k.op}")
       for x in children.get(rk, []):
         in_degree[x] -= 1
-        if in_degree[x] == 0: queue.append(x)
+        if in_degree[x] == 0:
+          if x.op is Ops.RANGE: qr.append(x)
+          elif x.op is Ops.END: qe.append(x)
+          else: qk.append(x)
 
   with cpu_profile(TracingKey("expand ranges")):
     pre_schedule: list[ExecItem] = []
