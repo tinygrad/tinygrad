@@ -2,7 +2,7 @@
 # to regenerate: python -m extra.assembly.amd.pdf --arch cdna
 # ruff: noqa: E501,F405,F403
 # mypy: ignore-errors
-from extra.assembly.amd.autogen.cdna.enum import SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, VOP1Op, VOP2Op, VOP3POp, VOPCOp, VOP3AOp, VOP3BOp, DSOp
+from extra.assembly.amd.autogen.cdna.enum import SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, VOP1Op, VOP2Op, VOP3POp, VOPCOp, VOP3AOp, VOP3BOp, DSOp, FLATOp, GLOBALOp, SCRATCHOp
 from extra.assembly.amd.pcode import *
 
 def _SOP1Op_S_MOV_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
@@ -976,6 +976,10 @@ def _SOPPOp_S_CBRANCH_CDBGSYS_AND_USER(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, l
   return {'PC': PC}
 
 def _SOPPOp_S_SET_GPR_IDX_MODE(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+  SIMM16 = Reg(literal)
+  VDST = Reg(vdst_idx)
+  # --- compiled pseudocode ---
+  SIMM16[1] = VSRC1_REL, SIMM16[2] = VSRC2_REL and SIMM16[3] = VDST_REL.
   return {}
 
 SOPPOp_FUNCTIONS = {
@@ -1387,21 +1391,6 @@ def _VOP1Op_V_CVT_PK_F32_BF8(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VG
   D0[63 : 32].f32 = bf8_to_f32(tmp[15 : 8].bf8)
   return {'D0': D0}
 
-def _VOP1Op_V_PERMLANE16_SWAP_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SRC0 = Reg(src0_idx)
-  # --- compiled pseudocode ---
-  for pass_ in range(0, int(1)+1):
-    for lane in range(0, int(15)+1):
-      tmp = Reg(VGPR[pass_ * 32 + lane][SRC0.u32])
-  return {}
-
-def _VOP1Op_V_PERMLANE32_SWAP_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  SRC0 = Reg(src0_idx)
-  # --- compiled pseudocode ---
-  for lane in range(0, int(31)+1):
-    tmp = Reg(VGPR[lane][SRC0.u32])
-  return {}
-
 def _VOP1Op_V_CVT_F32_BF16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
   D0.f32 = F(_pack(S0.b16, 0))
   return {'D0': D0}
@@ -1484,8 +1473,6 @@ VOP1Op_FUNCTIONS = {
   VOP1Op.V_CVT_F32_BF8: _VOP1Op_V_CVT_F32_BF8,
   VOP1Op.V_CVT_PK_F32_FP8: _VOP1Op_V_CVT_PK_F32_FP8,
   VOP1Op.V_CVT_PK_F32_BF8: _VOP1Op_V_CVT_PK_F32_BF8,
-  VOP1Op.V_PERMLANE16_SWAP_B32: _VOP1Op_V_PERMLANE16_SWAP_B32,
-  VOP1Op.V_PERMLANE32_SWAP_B32: _VOP1Op_V_PERMLANE32_SWAP_B32,
   VOP1Op.V_CVT_F32_BF16: _VOP1Op_V_CVT_F32_BF16,
 }
 
@@ -3076,7 +3063,12 @@ def _VOPCOp_V_CMPX_GE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR,
   return {'D0': D0, 'EXEC': EXEC}
 
 def _VOPCOp_V_CMPX_T_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+  VDST = Reg(vdst_idx)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = D0.u64[laneId] = 1
+  OFFSET0 = Unsigned byte offset added to the address from the ADDR VGPR.
+  OFFSET1 = Unsigned byte offset added to the address from the ADDR VGPR.
+  VDST = Destination VGPR 0- 255.
   return {'D0': D0, 'EXEC': EXEC}
 
 VOPCOp_FUNCTIONS = {
@@ -4141,7 +4133,12 @@ def _VOP3AOp_V_CMPX_GE_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR
   return {'D0': D0}
 
 def _VOP3AOp_V_CMPX_T_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+  VDST = Reg(vdst_idx)
+  # --- compiled pseudocode ---
   EXEC.u64[laneId] = D0.u64[laneId] = 1
+  OFFSET0 = Unsigned byte offset added to the address from the ADDR VGPR.
+  OFFSET1 = Unsigned byte offset added to the address from the ADDR VGPR.
+  VDST = Destination VGPR 0- 255.
   return {'D0': D0}
 
 def _VOP3AOp_V_MOV_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
@@ -5373,36 +5370,6 @@ def _VOP3AOp_V_DOT2C_F32_BF16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, V
   D0.f32 = tmp
   return {'D0': D0}
 
-def _VOP3AOp_V_CVT_SCALEF32_PK_FP8_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
-  # --- compiled pseudocode ---
-  scale = (exponent(S2.f32))
-  tmp0 = f32_to_fp8_scale(S0.f32, scale.u8)
-  tmp1 = f32_to_fp8_scale(S1.f32, scale.u8)
-  dstword = OPSEL[3].i32 * 16
-  return {}
-
-def _VOP3AOp_V_CVT_SCALEF32_PK_BF8_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
-  # --- compiled pseudocode ---
-  scale = (exponent(S2.f32))
-  tmp0 = f32_to_bf8_scale(S0.f32, scale.u8)
-  tmp1 = f32_to_bf8_scale(S1.f32, scale.u8)
-  dstword = OPSEL[3].i32 * 16
-  return {}
-
-def _VOP3AOp_V_CVT_SCALEF32_SR_FP8_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  scale = (exponent(S2.f32))
-  tmp = Reg(f32_to_fp8_sr_scale(S0.f32, S1.u32, scale.u8))
-  dstbyte = OPSEL[3 : 2].i32 * 8
-  return {}
-
-def _VOP3AOp_V_CVT_SCALEF32_SR_BF8_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  scale = (exponent(S2.f32))
-  tmp = Reg(f32_to_bf8_sr_scale(S0.f32, S1.u32, scale.u8))
-  dstbyte = OPSEL[3 : 2].i32 * 8
-  return {}
-
 def _VOP3AOp_V_CVT_SCALEF32_PK_F32_FP8(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
   tmp = Reg(0)
   SRC0 = Reg(src0_idx)
@@ -5443,25 +5410,6 @@ def _VOP3AOp_V_CVT_SCALEF32_F32_BF8(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, lite
   tmp = Reg(bf8_to_f32_scale(src, scale.u8))
   return {}
 
-def _VOP3AOp_V_CVT_SCALEF32_PK_FP4_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
-  # --- compiled pseudocode ---
-  scale = (exponent(S2.f32))
-  tmp0 = f32_to_fp4_scale(S0.f32, scale.u8)
-  tmp1 = f32_to_fp4_scale(S1.f32, scale.u8)
-  dstbyte = OPSEL[3 : 2].i32 * 8
-  return {}
-
-def _VOP3AOp_V_CVT_SCALEF32_SR_PK_FP4_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
-  # --- compiled pseudocode ---
-  scale = (exponent(S2.f32))
-  randomVal = S1.u32
-  tmp0 = f32_to_fp4_sr_scale(S0[31 : 0].f32, randomVal, scale.u8)
-  tmp1 = f32_to_fp4_sr_scale(S0[63 : 32].f32, randomVal, scale.u8)
-  dstbyte = OPSEL[3 : 2].i32 * 8
-  return {}
-
 def _VOP3AOp_V_CVT_SCALEF32_PK_F32_FP4(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
   tmp = Reg(0)
   SRC0 = Reg(src0_idx)
@@ -5472,66 +5420,6 @@ def _VOP3AOp_V_CVT_SCALEF32_PK_F32_FP4(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, l
   D0[31 : 0].f32 = tmp0
   D0[63 : 32].f32 = tmp1
   return {'D0': D0}
-
-def _VOP3AOp_V_CVT_SCALEF32_PK_FP8_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
-  # --- compiled pseudocode ---
-  scale = (exponent(S1.f32))
-  tmp0 = f16_to_fp8_scale(S0[15 : 0].f16, scale.u8)
-  tmp1 = f16_to_fp8_scale(S0[31 : 16].f16, scale.u8)
-  dstword = OPSEL[3].i32 * 16
-  return {}
-
-def _VOP3AOp_V_CVT_SCALEF32_PK_BF8_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
-  # --- compiled pseudocode ---
-  scale = (exponent(S1.f32))
-  tmp0 = f16_to_bf8_scale(S0[15 : 0].f16, scale.u8)
-  tmp1 = f16_to_bf8_scale(S0[31 : 16].f16, scale.u8)
-  dstword = OPSEL[3].i32 * 16
-  return {}
-
-def _VOP3AOp_V_CVT_SCALEF32_SR_FP8_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  scale = (exponent(S2.f32))
-  tmp = Reg(f16_to_fp8_sr_scale(S0.f16, S1.u32, scale.u8))
-  dstbyte = OPSEL[3 : 2].i32 * 8
-  return {}
-
-def _VOP3AOp_V_CVT_SCALEF32_SR_BF8_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  scale = (exponent(S2.f32))
-  tmp = Reg(f16_to_bf8_sr_scale(S0.f16, S1.u32, scale.u8))
-  dstbyte = OPSEL[3 : 2].i32 * 8
-  return {}
-
-def _VOP3AOp_V_CVT_SCALEF32_PK_FP8_BF16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
-  # --- compiled pseudocode ---
-  scale = (exponent(S1.f32))
-  tmp0 = bf16_to_fp8_scale(S0[15 : 0].bf16, scale.u8)
-  tmp1 = bf16_to_fp8_scale(S0[31 : 16].bf16, scale.u8)
-  dstword = OPSEL[3].i32 * 16
-  return {}
-
-def _VOP3AOp_V_CVT_SCALEF32_PK_BF8_BF16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
-  # --- compiled pseudocode ---
-  scale = (exponent(S1.f32))
-  tmp0 = bf16_to_bf8_scale(S0[15 : 0].bf16, scale.u8)
-  tmp1 = bf16_to_bf8_scale(S0[31 : 16].bf16, scale.u8)
-  dstword = OPSEL[3].i32 * 16
-  return {}
-
-def _VOP3AOp_V_CVT_SCALEF32_SR_FP8_BF16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  scale = (exponent(S2.f32))
-  tmp = Reg(bf16_to_fp8_sr_scale(S0.bf16, S1.u32, scale.u8))
-  dstbyte = OPSEL[3 : 2].i32 * 8
-  return {}
-
-def _VOP3AOp_V_CVT_SCALEF32_SR_BF8_BF16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  scale = (exponent(S2.f32))
-  tmp = Reg(bf16_to_bf8_sr_scale(S0.bf16, S1.u32, scale.u8))
-  dstbyte = OPSEL[3 : 2].i32 * 8
-  return {}
 
 def _VOP3AOp_V_CVT_SCALEF32_PK_F16_FP8(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
   tmp = Reg(0)
@@ -5571,44 +5459,6 @@ def _VOP3AOp_V_CVT_SCALEF32_F16_BF8(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, lite
   srcbyte = OPSEL[1 : 0].i32 * 8
   src = VGPR[laneId][SRC0.u32][srcbyte + 7 : srcbyte].bf8
   tmp = Reg(bf8_to_f16_scale(src, scale.u8))
-  return {}
-
-def _VOP3AOp_V_CVT_SCALEF32_PK_FP4_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
-  # --- compiled pseudocode ---
-  scale = (exponent(S1.f32))
-  tmp0 = f16_to_fp4_scale(S0[15 : 0].f16, scale.u8)
-  tmp1 = f16_to_fp4_scale(S0[31 : 16].f16, scale.u8)
-  dstbyte = OPSEL[3 : 2].i32 * 8
-  return {}
-
-def _VOP3AOp_V_CVT_SCALEF32_PK_FP4_BF16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
-  # --- compiled pseudocode ---
-  scale = (exponent(S1.f32))
-  tmp0 = bf16_to_fp4_scale(S0[15 : 0].bf16, scale.u8)
-  tmp1 = bf16_to_fp4_scale(S0[31 : 16].bf16, scale.u8)
-  dstbyte = OPSEL[3 : 2].i32 * 8
-  return {}
-
-def _VOP3AOp_V_CVT_SCALEF32_SR_PK_FP4_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
-  # --- compiled pseudocode ---
-  scale = (exponent(S2.f32))
-  randomVal = S1.u32
-  tmp0 = f16_to_fp4_sr_scale(S0[15 : 0].f16, randomVal, scale.u8)
-  tmp1 = f16_to_fp4_sr_scale(S0[31 : 16].f16, randomVal, scale.u8)
-  dstbyte = OPSEL[3 : 2].i32 * 8
-  return {}
-
-def _VOP3AOp_V_CVT_SCALEF32_SR_PK_FP4_BF16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  tmp = Reg(0)
-  # --- compiled pseudocode ---
-  scale = (exponent(S2.f32))
-  randomVal = S1.u32
-  tmp0 = bf16_to_fp4_sr_scale(S0[15 : 0].bf16, randomVal, scale.u8)
-  tmp1 = bf16_to_fp4_sr_scale(S0[31 : 16].bf16, randomVal, scale.u8)
-  dstbyte = OPSEL[3 : 2].i32 * 8
   return {}
 
 def _VOP3AOp_V_CVT_SCALEF32_PK_F16_FP4(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
@@ -6102,33 +5952,15 @@ VOP3AOp_FUNCTIONS = {
   VOP3AOp.V_PACK_B32_F16: _VOP3AOp_V_PACK_B32_F16,
   VOP3AOp.V_MUL_LEGACY_F32: _VOP3AOp_V_MUL_LEGACY_F32,
   VOP3AOp.V_DOT2C_F32_BF16: _VOP3AOp_V_DOT2C_F32_BF16,
-  VOP3AOp.V_CVT_SCALEF32_PK_FP8_F32: _VOP3AOp_V_CVT_SCALEF32_PK_FP8_F32,
-  VOP3AOp.V_CVT_SCALEF32_PK_BF8_F32: _VOP3AOp_V_CVT_SCALEF32_PK_BF8_F32,
-  VOP3AOp.V_CVT_SCALEF32_SR_FP8_F32: _VOP3AOp_V_CVT_SCALEF32_SR_FP8_F32,
-  VOP3AOp.V_CVT_SCALEF32_SR_BF8_F32: _VOP3AOp_V_CVT_SCALEF32_SR_BF8_F32,
   VOP3AOp.V_CVT_SCALEF32_PK_F32_FP8: _VOP3AOp_V_CVT_SCALEF32_PK_F32_FP8,
   VOP3AOp.V_CVT_SCALEF32_PK_F32_BF8: _VOP3AOp_V_CVT_SCALEF32_PK_F32_BF8,
   VOP3AOp.V_CVT_SCALEF32_F32_FP8: _VOP3AOp_V_CVT_SCALEF32_F32_FP8,
   VOP3AOp.V_CVT_SCALEF32_F32_BF8: _VOP3AOp_V_CVT_SCALEF32_F32_BF8,
-  VOP3AOp.V_CVT_SCALEF32_PK_FP4_F32: _VOP3AOp_V_CVT_SCALEF32_PK_FP4_F32,
-  VOP3AOp.V_CVT_SCALEF32_SR_PK_FP4_F32: _VOP3AOp_V_CVT_SCALEF32_SR_PK_FP4_F32,
   VOP3AOp.V_CVT_SCALEF32_PK_F32_FP4: _VOP3AOp_V_CVT_SCALEF32_PK_F32_FP4,
-  VOP3AOp.V_CVT_SCALEF32_PK_FP8_F16: _VOP3AOp_V_CVT_SCALEF32_PK_FP8_F16,
-  VOP3AOp.V_CVT_SCALEF32_PK_BF8_F16: _VOP3AOp_V_CVT_SCALEF32_PK_BF8_F16,
-  VOP3AOp.V_CVT_SCALEF32_SR_FP8_F16: _VOP3AOp_V_CVT_SCALEF32_SR_FP8_F16,
-  VOP3AOp.V_CVT_SCALEF32_SR_BF8_F16: _VOP3AOp_V_CVT_SCALEF32_SR_BF8_F16,
-  VOP3AOp.V_CVT_SCALEF32_PK_FP8_BF16: _VOP3AOp_V_CVT_SCALEF32_PK_FP8_BF16,
-  VOP3AOp.V_CVT_SCALEF32_PK_BF8_BF16: _VOP3AOp_V_CVT_SCALEF32_PK_BF8_BF16,
-  VOP3AOp.V_CVT_SCALEF32_SR_FP8_BF16: _VOP3AOp_V_CVT_SCALEF32_SR_FP8_BF16,
-  VOP3AOp.V_CVT_SCALEF32_SR_BF8_BF16: _VOP3AOp_V_CVT_SCALEF32_SR_BF8_BF16,
   VOP3AOp.V_CVT_SCALEF32_PK_F16_FP8: _VOP3AOp_V_CVT_SCALEF32_PK_F16_FP8,
   VOP3AOp.V_CVT_SCALEF32_PK_F16_BF8: _VOP3AOp_V_CVT_SCALEF32_PK_F16_BF8,
   VOP3AOp.V_CVT_SCALEF32_F16_FP8: _VOP3AOp_V_CVT_SCALEF32_F16_FP8,
   VOP3AOp.V_CVT_SCALEF32_F16_BF8: _VOP3AOp_V_CVT_SCALEF32_F16_BF8,
-  VOP3AOp.V_CVT_SCALEF32_PK_FP4_F16: _VOP3AOp_V_CVT_SCALEF32_PK_FP4_F16,
-  VOP3AOp.V_CVT_SCALEF32_PK_FP4_BF16: _VOP3AOp_V_CVT_SCALEF32_PK_FP4_BF16,
-  VOP3AOp.V_CVT_SCALEF32_SR_PK_FP4_F16: _VOP3AOp_V_CVT_SCALEF32_SR_PK_FP4_F16,
-  VOP3AOp.V_CVT_SCALEF32_SR_PK_FP4_BF16: _VOP3AOp_V_CVT_SCALEF32_SR_PK_FP4_BF16,
   VOP3AOp.V_CVT_SCALEF32_PK_F16_FP4: _VOP3AOp_V_CVT_SCALEF32_PK_F16_FP4,
   VOP3AOp.V_CVT_SCALEF32_PK_BF16_FP4: _VOP3AOp_V_CVT_SCALEF32_PK_BF16_FP4,
   VOP3AOp.V_ASHR_PK_I8_I32: _VOP3AOp_V_ASHR_PK_I8_I32,
@@ -6258,13 +6090,9 @@ VOP3BOp_FUNCTIONS = {
   VOP3BOp.V_MAD_I64_I32: _VOP3BOp_V_MAD_I64_I32,
 }
 
-def _DSOp_DS_ADD_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_ADD_U32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].u32)
@@ -6272,13 +6100,9 @@ def _DSOp_DS_ADD_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0
   RETURN_DATA.u32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_SUB_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_SUB_U32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].u32)
@@ -6286,13 +6110,9 @@ def _DSOp_DS_SUB_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0
   RETURN_DATA.u32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_RSUB_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_RSUB_U32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].u32)
@@ -6300,13 +6120,9 @@ def _DSOp_DS_RSUB_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src
   RETURN_DATA.u32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_INC_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_INC_U32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].u32)
@@ -6315,13 +6131,9 @@ def _DSOp_DS_INC_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0
   RETURN_DATA.u32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_DEC_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_DEC_U32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].u32)
@@ -6330,13 +6142,9 @@ def _DSOp_DS_DEC_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0
   RETURN_DATA.u32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_MIN_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_MIN_I32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].i32)
@@ -6345,13 +6153,9 @@ def _DSOp_DS_MIN_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0
   RETURN_DATA.i32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_MAX_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_MAX_I32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].i32)
@@ -6360,13 +6164,9 @@ def _DSOp_DS_MAX_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0
   RETURN_DATA.i32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_MIN_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_MIN_U32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].u32)
@@ -6375,13 +6175,9 @@ def _DSOp_DS_MIN_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0
   RETURN_DATA.u32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_MAX_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_MAX_U32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].u32)
@@ -6390,13 +6186,9 @@ def _DSOp_DS_MAX_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0
   RETURN_DATA.u32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_AND_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_AND_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].b32)
@@ -6404,13 +6196,9 @@ def _DSOp_DS_AND_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0
   RETURN_DATA.b32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_OR_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_OR_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].b32)
@@ -6418,13 +6206,9 @@ def _DSOp_DS_OR_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_
   RETURN_DATA.b32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_XOR_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_XOR_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].b32)
@@ -6432,14 +6216,10 @@ def _DSOp_DS_XOR_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0
   RETURN_DATA.b32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_MSKOR_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  DATA2 = S2
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_MSKOR_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  DATA2 = DATA1
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].b32)
@@ -6447,22 +6227,18 @@ def _DSOp_DS_MSKOR_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, sr
   RETURN_DATA.b32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_WRITE_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
+def _DSOp_DS_WRITE_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, 0x0, 0x0)
   MEM[addr + OFFSET.u32].b32 = DATA[31 : 0]
   return {}
 
-def _DSOp_DS_WRITE2_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  DATA2 = S2
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
+def _DSOp_DS_WRITE2_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  DATA2 = DATA1
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, 0x0, 0x0)
   MEM[addr + OFFSET0.u32 * 4].b32 = DATA[31 : 0]
@@ -6470,13 +6246,10 @@ def _DSOp_DS_WRITE2_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, s
   MEM[addr + OFFSET1.u32 * 4].b32 = DATA2[31 : 0]
   return {}
 
-def _DSOp_DS_WRITE2ST64_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  DATA2 = S2
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
+def _DSOp_DS_WRITE2ST64_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  DATA2 = DATA1
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, 0x0, 0x0)
   MEM[addr + OFFSET0.u32 * 256].b32 = DATA[31 : 0]
@@ -6484,14 +6257,10 @@ def _DSOp_DS_WRITE2ST64_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGP
   MEM[addr + OFFSET1.u32 * 256].b32 = DATA2[31 : 0]
   return {}
 
-def _DSOp_DS_CMPST_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  DATA2 = S2
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_CMPST_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  DATA2 = DATA1
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].b32)
@@ -6501,14 +6270,10 @@ def _DSOp_DS_CMPST_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, sr
   RETURN_DATA.b32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_CMPST_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  DATA2 = S2
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_CMPST_F32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  DATA2 = DATA1
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].f32)
@@ -6518,13 +6283,9 @@ def _DSOp_DS_CMPST_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, sr
   RETURN_DATA.f32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_MIN_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_MIN_F32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].f32)
@@ -6533,13 +6294,9 @@ def _DSOp_DS_MIN_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0
   RETURN_DATA.f32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_MAX_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_MAX_F32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].f32)
@@ -6548,13 +6305,9 @@ def _DSOp_DS_MAX_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0
   RETURN_DATA.f32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_ADD_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_ADD_F32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].f32)
@@ -6562,10 +6315,8 @@ def _DSOp_DS_ADD_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0
   RETURN_DATA.f32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_PK_ADD_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_PK_ADD_F16(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR])
   src = DATA
@@ -6575,10 +6326,8 @@ def _DSOp_DS_PK_ADD_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, s
   RETURN_DATA = tmp
   return {}
 
-def _DSOp_DS_PK_ADD_BF16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_PK_ADD_BF16(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR])
   src = DATA
@@ -6588,37 +6337,21 @@ def _DSOp_DS_PK_ADD_BF16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
   RETURN_DATA = tmp
   return {}
 
-def _DSOp_DS_WRITE_ADDTID_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  DATA = S1
-  DATA0 = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  # --- compiled pseudocode ---
-  MEM[(_pack(OFFSET1, OFFSET0) + M0[15 : 0]) + laneID.i32 * 4].u32 = DATA0.u32
-  return {}
-
-def _DSOp_DS_WRITE_B8(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
+def _DSOp_DS_WRITE_B8(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
   # --- compiled pseudocode ---
   MEM[ADDR].b8 = DATA[7 : 0]
   return {}
 
-def _DSOp_DS_WRITE_B16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
+def _DSOp_DS_WRITE_B16(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
   # --- compiled pseudocode ---
   MEM[ADDR].b16 = DATA[15 : 0]
   return {}
 
-def _DSOp_DS_ADD_RTN_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_ADD_RTN_U32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].u32)
@@ -6626,13 +6359,9 @@ def _DSOp_DS_ADD_RTN_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
   RETURN_DATA.u32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_SUB_RTN_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_SUB_RTN_U32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].u32)
@@ -6640,13 +6369,9 @@ def _DSOp_DS_SUB_RTN_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
   RETURN_DATA.u32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_RSUB_RTN_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_RSUB_RTN_U32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].u32)
@@ -6654,13 +6379,9 @@ def _DSOp_DS_RSUB_RTN_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR,
   RETURN_DATA.u32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_INC_RTN_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_INC_RTN_U32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].u32)
@@ -6669,13 +6390,9 @@ def _DSOp_DS_INC_RTN_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
   RETURN_DATA.u32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_DEC_RTN_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_DEC_RTN_U32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].u32)
@@ -6684,13 +6401,9 @@ def _DSOp_DS_DEC_RTN_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
   RETURN_DATA.u32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_MIN_RTN_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_MIN_RTN_I32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].i32)
@@ -6699,13 +6412,9 @@ def _DSOp_DS_MIN_RTN_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
   RETURN_DATA.i32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_MAX_RTN_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_MAX_RTN_I32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].i32)
@@ -6714,13 +6423,9 @@ def _DSOp_DS_MAX_RTN_I32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
   RETURN_DATA.i32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_MIN_RTN_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_MIN_RTN_U32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].u32)
@@ -6729,13 +6434,9 @@ def _DSOp_DS_MIN_RTN_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
   RETURN_DATA.u32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_MAX_RTN_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_MAX_RTN_U32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].u32)
@@ -6744,13 +6445,9 @@ def _DSOp_DS_MAX_RTN_U32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
   RETURN_DATA.u32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_AND_RTN_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_AND_RTN_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].b32)
@@ -6758,13 +6455,9 @@ def _DSOp_DS_AND_RTN_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
   RETURN_DATA.b32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_OR_RTN_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_OR_RTN_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].b32)
@@ -6772,13 +6465,9 @@ def _DSOp_DS_OR_RTN_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, s
   RETURN_DATA.b32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_XOR_RTN_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_XOR_RTN_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].b32)
@@ -6786,14 +6475,10 @@ def _DSOp_DS_XOR_RTN_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
   RETURN_DATA.b32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_MSKOR_RTN_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  DATA2 = S2
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_MSKOR_RTN_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  DATA2 = DATA1
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].b32)
@@ -6801,13 +6486,9 @@ def _DSOp_DS_MSKOR_RTN_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR
   RETURN_DATA.b32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_WRXCHG_RTN_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_WRXCHG_RTN_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].b32)
@@ -6815,12 +6496,14 @@ def _DSOp_DS_WRXCHG_RTN_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGP
   RETURN_DATA.b32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_WRXCHG2_RTN_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  tmp = Reg(0)
-  DATA = S1
-  DATA2 = S2
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_WRXCHG2_RTN_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  DATA2 = DATA1
+  OFFSET = OFFSET0
+  ADDR_BASE = ADDR
   # --- compiled pseudocode ---
+  addr1 = ADDR_BASE.u32 + OFFSET0.u32 * 4
+  addr2 = ADDR_BASE.u32 + OFFSET1.u32 * 4
   tmp1 = MEM[addr1].b32
   tmp2 = MEM[addr2].b32
   MEM[addr1].b32 = DATA.b32
@@ -6829,12 +6512,14 @@ def _DSOp_DS_WRXCHG2_RTN_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VG
   RETURN_DATA[63 : 32] = tmp2
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_WRXCHG2ST64_RTN_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  tmp = Reg(0)
-  DATA = S1
-  DATA2 = S2
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_WRXCHG2ST64_RTN_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  DATA2 = DATA1
+  OFFSET = OFFSET0
+  ADDR_BASE = ADDR
   # --- compiled pseudocode ---
+  addr1 = ADDR_BASE.u32 + OFFSET0.u32 * 256
+  addr2 = ADDR_BASE.u32 + OFFSET1.u32 * 256
   tmp1 = MEM[addr1].b32
   tmp2 = MEM[addr2].b32
   MEM[addr1].b32 = DATA.b32
@@ -6843,14 +6528,10 @@ def _DSOp_DS_WRXCHG2ST64_RTN_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal
   RETURN_DATA[63 : 32] = tmp2
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_CMPST_RTN_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  DATA2 = S2
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_CMPST_RTN_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  DATA2 = DATA1
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].b32)
@@ -6860,14 +6541,10 @@ def _DSOp_DS_CMPST_RTN_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR
   RETURN_DATA.b32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_CMPST_RTN_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  DATA2 = S2
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_CMPST_RTN_F32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  DATA2 = DATA1
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].f32)
@@ -6877,13 +6554,9 @@ def _DSOp_DS_CMPST_RTN_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR
   RETURN_DATA.f32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_MIN_RTN_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_MIN_RTN_F32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].f32)
@@ -6892,13 +6565,9 @@ def _DSOp_DS_MIN_RTN_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
   RETURN_DATA.f32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_MAX_RTN_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_MAX_RTN_F32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].f32)
@@ -6907,24 +6576,18 @@ def _DSOp_DS_MAX_RTN_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
   RETURN_DATA.f32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_WRAP_RTN_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  DATA2 = S2
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_WRAP_RTN_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  DATA2 = DATA1
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].u32)
   MEM[ADDR].u32 = ((tmp - DATA.u32) if (tmp >= DATA.u32) else (tmp + DATA2.u32))
   RETURN_DATA = tmp
   return {}
 
-def _DSOp_DS_ADD_RTN_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_ADD_RTN_F32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].f32)
@@ -6932,23 +6595,17 @@ def _DSOp_DS_ADD_RTN_F32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
   RETURN_DATA.f32 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_READ_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_READ_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, 0x0, 0x0)
   RETURN_DATA[31 : 0] = MEM[addr + OFFSET.u32].b32
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_READ2_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_READ2_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, 0x0, 0x0)
   RETURN_DATA[31 : 0] = MEM[addr + OFFSET0.u32 * 4].b32
@@ -6956,13 +6613,9 @@ def _DSOp_DS_READ2_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, sr
   RETURN_DATA[63 : 32] = MEM[addr + OFFSET1.u32 * 4].b32
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_READ2ST64_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_READ2ST64_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, 0x0, 0x0)
   RETURN_DATA[31 : 0] = MEM[addr + OFFSET0.u32 * 256].b32
@@ -6970,45 +6623,33 @@ def _DSOp_DS_READ2ST64_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR
   RETURN_DATA[63 : 32] = MEM[addr + OFFSET1.u32 * 256].b32
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_READ_I8(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_READ_I8(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
   # --- compiled pseudocode ---
   RETURN_DATA.i32 = (signext(MEM[ADDR].i8))
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_READ_U8(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_READ_U8(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
   # --- compiled pseudocode ---
   RETURN_DATA.u32 = (_pack(0, MEM[ADDR].u8))
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_READ_I16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_READ_I16(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
   # --- compiled pseudocode ---
   RETURN_DATA.i32 = (signext(MEM[ADDR].i16))
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_READ_U16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_READ_U16(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
   # --- compiled pseudocode ---
   RETURN_DATA.u32 = (_pack(0, MEM[ADDR].u16))
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_PERMUTE_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  tmp = Reg(0)
-  VDST = Reg(vdst_idx)
-  ADDR = S0._val
-  DATA = S1
-  DATA0 = S1
-  OFFSET = Reg(offset0)
+def _DSOp_DS_PERMUTE_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   for i in range(0, int(63)+1):
     tmp[i] = 0x0
@@ -7021,13 +6662,9 @@ def _DSOp_DS_PERMUTE_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
       VGPR[i][VDST] = tmp[i]
   return {}
 
-def _DSOp_DS_BPERMUTE_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  tmp = Reg(0)
-  VDST = Reg(vdst_idx)
-  ADDR = S0._val
-  DATA = S1
-  DATA0 = S1
-  OFFSET = Reg(offset0)
+def _DSOp_DS_BPERMUTE_B32(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   for i in range(0, int(63)+1):
     tmp[i] = 0x0
@@ -7040,13 +6677,9 @@ def _DSOp_DS_BPERMUTE_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR,
       VGPR[i][VDST] = tmp[i]
   return {}
 
-def _DSOp_DS_ADD_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_ADD_U64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].u64)
@@ -7054,13 +6687,9 @@ def _DSOp_DS_ADD_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0
   RETURN_DATA.u64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_SUB_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_SUB_U64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].u64)
@@ -7068,13 +6697,9 @@ def _DSOp_DS_SUB_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0
   RETURN_DATA.u64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_RSUB_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_RSUB_U64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].u64)
@@ -7082,13 +6707,9 @@ def _DSOp_DS_RSUB_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src
   RETURN_DATA.u64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_INC_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_INC_U64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].u64)
@@ -7097,13 +6718,9 @@ def _DSOp_DS_INC_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0
   RETURN_DATA.u64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_DEC_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_DEC_U64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].u64)
@@ -7112,13 +6729,9 @@ def _DSOp_DS_DEC_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0
   RETURN_DATA.u64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_MIN_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_MIN_I64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].i64)
@@ -7127,13 +6740,9 @@ def _DSOp_DS_MIN_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0
   RETURN_DATA.i64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_MAX_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_MAX_I64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].i64)
@@ -7142,13 +6751,9 @@ def _DSOp_DS_MAX_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0
   RETURN_DATA.i64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_MIN_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_MIN_U64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].u64)
@@ -7157,13 +6762,9 @@ def _DSOp_DS_MIN_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0
   RETURN_DATA.u64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_MAX_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_MAX_U64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].u64)
@@ -7172,13 +6773,9 @@ def _DSOp_DS_MAX_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0
   RETURN_DATA.u64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_AND_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_AND_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].b64)
@@ -7186,13 +6783,9 @@ def _DSOp_DS_AND_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0
   RETURN_DATA.b64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_OR_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_OR_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].b64)
@@ -7200,13 +6793,9 @@ def _DSOp_DS_OR_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_
   RETURN_DATA.b64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_XOR_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_XOR_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].b64)
@@ -7214,14 +6803,10 @@ def _DSOp_DS_XOR_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0
   RETURN_DATA.b64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_MSKOR_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  DATA2 = S2
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_MSKOR_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  DATA2 = DATA1
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].b64)
@@ -7229,23 +6814,19 @@ def _DSOp_DS_MSKOR_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, sr
   RETURN_DATA.b64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_WRITE_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
+def _DSOp_DS_WRITE_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, 0x0, 0x0)
   MEM[addr + OFFSET.u32].b32 = DATA[31 : 0]
   MEM[addr + OFFSET.u32 + 4].b32 = DATA[63 : 32]
   return {}
 
-def _DSOp_DS_WRITE2_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  DATA2 = S2
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
+def _DSOp_DS_WRITE2_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  DATA2 = DATA1
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, 0x0, 0x0)
   MEM[addr + OFFSET0.u32 * 8].b32 = DATA[31 : 0]
@@ -7255,13 +6836,10 @@ def _DSOp_DS_WRITE2_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, s
   MEM[addr + OFFSET1.u32 * 8 + 4].b32 = DATA2[63 : 32]
   return {}
 
-def _DSOp_DS_WRITE2ST64_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  DATA2 = S2
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
+def _DSOp_DS_WRITE2ST64_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  DATA2 = DATA1
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, 0x0, 0x0)
   MEM[addr + OFFSET0.u32 * 512].b32 = DATA[31 : 0]
@@ -7271,14 +6849,10 @@ def _DSOp_DS_WRITE2ST64_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGP
   MEM[addr + OFFSET1.u32 * 512 + 4].b32 = DATA2[63 : 32]
   return {}
 
-def _DSOp_DS_CMPST_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  DATA2 = S2
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_CMPST_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  DATA2 = DATA1
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].b64)
@@ -7288,14 +6862,10 @@ def _DSOp_DS_CMPST_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, sr
   RETURN_DATA.b64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_CMPST_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  DATA2 = S2
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_CMPST_F64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  DATA2 = DATA1
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].f64)
@@ -7305,13 +6875,9 @@ def _DSOp_DS_CMPST_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, sr
   RETURN_DATA.f64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_MIN_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_MIN_F64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].f64)
@@ -7320,13 +6886,9 @@ def _DSOp_DS_MIN_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0
   RETURN_DATA.f64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_MAX_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_MAX_F64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].f64)
@@ -7335,85 +6897,65 @@ def _DSOp_DS_MAX_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0
   RETURN_DATA.f64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_WRITE_B8_D16_HI(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
+def _DSOp_DS_WRITE_B8_D16_HI(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
   # --- compiled pseudocode ---
   MEM[ADDR].b8 = DATA[23 : 16]
   return {}
 
-def _DSOp_DS_WRITE_B16_D16_HI(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
+def _DSOp_DS_WRITE_B16_D16_HI(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
   # --- compiled pseudocode ---
   MEM[ADDR].b16 = DATA[31 : 16]
   return {}
 
-def _DSOp_DS_READ_U8_D16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_READ_U8_D16(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
   # --- compiled pseudocode ---
   RETURN_DATA[15 : 0].u16 = (_pack(0, MEM[ADDR].u8))
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_READ_U8_D16_HI(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_READ_U8_D16_HI(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
   # --- compiled pseudocode ---
   RETURN_DATA[31 : 16].u16 = (_pack(0, MEM[ADDR].u8))
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_READ_I8_D16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_READ_I8_D16(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
   # --- compiled pseudocode ---
   RETURN_DATA[15 : 0].i16 = (signext(MEM[ADDR].i8))
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_READ_I8_D16_HI(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_READ_I8_D16_HI(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
   # --- compiled pseudocode ---
   RETURN_DATA[31 : 16].i16 = (signext(MEM[ADDR].i8))
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_READ_U16_D16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_READ_U16_D16(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
   # --- compiled pseudocode ---
   RETURN_DATA[15 : 0].u16 = MEM[ADDR].u16
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_READ_U16_D16_HI(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_READ_U16_D16_HI(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
   # --- compiled pseudocode ---
   RETURN_DATA[31 : 16].u16 = MEM[ADDR].u16
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_ADD_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_ADD_F64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].f64)
   MEM[ADDR].f64 += DATA.f64
   RETURN_DATA = tmp
   return {}
 
-def _DSOp_DS_ADD_RTN_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_ADD_RTN_U64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].u64)
@@ -7421,13 +6963,9 @@ def _DSOp_DS_ADD_RTN_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
   RETURN_DATA.u64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_SUB_RTN_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_SUB_RTN_U64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].u64)
@@ -7435,13 +6973,9 @@ def _DSOp_DS_SUB_RTN_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
   RETURN_DATA.u64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_RSUB_RTN_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_RSUB_RTN_U64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].u64)
@@ -7449,13 +6983,9 @@ def _DSOp_DS_RSUB_RTN_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR,
   RETURN_DATA.u64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_INC_RTN_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_INC_RTN_U64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].u64)
@@ -7464,13 +6994,9 @@ def _DSOp_DS_INC_RTN_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
   RETURN_DATA.u64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_DEC_RTN_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_DEC_RTN_U64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].u64)
@@ -7479,13 +7005,9 @@ def _DSOp_DS_DEC_RTN_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
   RETURN_DATA.u64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_MIN_RTN_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_MIN_RTN_I64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].i64)
@@ -7494,13 +7016,9 @@ def _DSOp_DS_MIN_RTN_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
   RETURN_DATA.i64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_MAX_RTN_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_MAX_RTN_I64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].i64)
@@ -7509,13 +7027,9 @@ def _DSOp_DS_MAX_RTN_I64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
   RETURN_DATA.i64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_MIN_RTN_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_MIN_RTN_U64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].u64)
@@ -7524,13 +7038,9 @@ def _DSOp_DS_MIN_RTN_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
   RETURN_DATA.u64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_MAX_RTN_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_MAX_RTN_U64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].u64)
@@ -7539,13 +7049,9 @@ def _DSOp_DS_MAX_RTN_U64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
   RETURN_DATA.u64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_AND_RTN_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_AND_RTN_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].b64)
@@ -7553,13 +7059,9 @@ def _DSOp_DS_AND_RTN_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
   RETURN_DATA.b64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_OR_RTN_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_OR_RTN_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].b64)
@@ -7567,13 +7069,9 @@ def _DSOp_DS_OR_RTN_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, s
   RETURN_DATA.b64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_XOR_RTN_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_XOR_RTN_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].b64)
@@ -7581,14 +7079,10 @@ def _DSOp_DS_XOR_RTN_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
   RETURN_DATA.b64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_MSKOR_RTN_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  DATA2 = S2
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_MSKOR_RTN_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  DATA2 = DATA1
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].b64)
@@ -7596,13 +7090,9 @@ def _DSOp_DS_MSKOR_RTN_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR
   RETURN_DATA.b64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_WRXCHG_RTN_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_WRXCHG_RTN_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].b64)
@@ -7610,12 +7100,14 @@ def _DSOp_DS_WRXCHG_RTN_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGP
   RETURN_DATA.b64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_WRXCHG2_RTN_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  tmp = Reg(0)
-  DATA = S1
-  DATA2 = S2
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_WRXCHG2_RTN_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  DATA2 = DATA1
+  OFFSET = OFFSET0
+  ADDR_BASE = ADDR
   # --- compiled pseudocode ---
+  addr1 = ADDR_BASE.u32 + OFFSET0.u32 * 8
+  addr2 = ADDR_BASE.u32 + OFFSET1.u32 * 8
   tmp1 = MEM[addr1].b64
   tmp2 = MEM[addr2].b64
   MEM[addr1].b64 = DATA.b64
@@ -7624,12 +7116,14 @@ def _DSOp_DS_WRXCHG2_RTN_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VG
   RETURN_DATA[127 : 64] = tmp2
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_WRXCHG2ST64_RTN_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  tmp = Reg(0)
-  DATA = S1
-  DATA2 = S2
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_WRXCHG2ST64_RTN_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  DATA2 = DATA1
+  OFFSET = OFFSET0
+  ADDR_BASE = ADDR
   # --- compiled pseudocode ---
+  addr1 = ADDR_BASE.u32 + OFFSET0.u32 * 512
+  addr2 = ADDR_BASE.u32 + OFFSET1.u32 * 512
   tmp1 = MEM[addr1].b64
   tmp2 = MEM[addr2].b64
   MEM[addr1].b64 = DATA.b64
@@ -7638,14 +7132,10 @@ def _DSOp_DS_WRXCHG2ST64_RTN_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal
   RETURN_DATA[127 : 64] = tmp2
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_CMPST_RTN_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  DATA2 = S2
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_CMPST_RTN_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  DATA2 = DATA1
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].b64)
@@ -7655,14 +7145,10 @@ def _DSOp_DS_CMPST_RTN_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR
   RETURN_DATA.b64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_CMPST_RTN_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  DATA2 = S2
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_CMPST_RTN_F64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  DATA2 = DATA1
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].f64)
@@ -7672,13 +7158,9 @@ def _DSOp_DS_CMPST_RTN_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR
   RETURN_DATA.f64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_MIN_RTN_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_MIN_RTN_F64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].f64)
@@ -7687,13 +7169,9 @@ def _DSOp_DS_MIN_RTN_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
   RETURN_DATA.f64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_MAX_RTN_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_MAX_RTN_F64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, OFFSET0.b32, OFFSET1.b32)
   tmp = Reg(MEM[addr].f64)
@@ -7702,24 +7180,18 @@ def _DSOp_DS_MAX_RTN_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, 
   RETURN_DATA.f64 = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_READ_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_READ_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, 0x0, 0x0)
   RETURN_DATA[31 : 0] = MEM[addr + OFFSET.u32].b32
   RETURN_DATA[63 : 32] = MEM[addr + OFFSET.u32 + 4].b32
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_READ2_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_READ2_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, 0x0, 0x0)
   RETURN_DATA[31 : 0] = MEM[addr + OFFSET0.u32 * 8].b32
@@ -7729,13 +7201,9 @@ def _DSOp_DS_READ2_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, sr
   RETURN_DATA[127 : 96] = MEM[addr + OFFSET1.u32 * 8 + 4].b32
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_READ2ST64_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_READ2ST64_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, 0x0, 0x0)
   RETURN_DATA[31 : 0] = MEM[addr + OFFSET0.u32 * 512].b32
@@ -7745,23 +7213,17 @@ def _DSOp_DS_READ2ST64_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR
   RETURN_DATA[127 : 96] = MEM[addr + OFFSET1.u32 * 512 + 4].b32
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_ADD_RTN_F64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_ADD_RTN_F64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR].f64)
   MEM[ADDR].f64 += DATA.f64
   RETURN_DATA = tmp
   return {}
 
-def _DSOp_DS_CONDXCHG32_RTN_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_CONDXCHG32_RTN_B64(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   ADDR = S0.u32
   DATA = S1.u64
@@ -7774,20 +7236,8 @@ def _DSOp_DS_CONDXCHG32_RTN_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal,
     LDS[ADDR1] = _pack(0, DATA[62 : 32])
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_READ_ADDTID_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  DATA = S1
-  OFFSET = Reg(offset0)
-  OFFSET0 = Reg(offset0)
-  OFFSET1 = Reg(offset1)
-  RETURN_DATA = Reg(0)
-  # --- compiled pseudocode ---
-  RETURN_DATA.u32 = MEM[(_pack(OFFSET1, OFFSET0) + M0[15 : 0]) + laneID.i32 * 4].u32
-  return {'RETURN_DATA': RETURN_DATA}
-
-def _DSOp_DS_PK_ADD_RTN_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_PK_ADD_RTN_F16(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR])
   src = DATA
@@ -7797,10 +7247,8 @@ def _DSOp_DS_PK_ADD_RTN_F16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGP
   RETURN_DATA = tmp
   return {}
 
-def _DSOp_DS_PK_ADD_RTN_BF16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_PK_ADD_RTN_BF16(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
   # --- compiled pseudocode ---
   tmp = Reg(MEM[ADDR])
   src = DATA
@@ -7810,10 +7258,9 @@ def _DSOp_DS_PK_ADD_RTN_BF16(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VG
   RETURN_DATA = tmp
   return {}
 
-def _DSOp_DS_WRITE_B96(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
+def _DSOp_DS_WRITE_B96(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, 0x0, 0x0)
   MEM[addr + OFFSET.u32].b32 = DATA[31 : 0]
@@ -7821,10 +7268,9 @@ def _DSOp_DS_WRITE_B96(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, sr
   MEM[addr + OFFSET.u32 + 8].b32 = DATA[95 : 64]
   return {}
 
-def _DSOp_DS_WRITE_B128(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
+def _DSOp_DS_WRITE_B128(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, 0x0, 0x0)
   MEM[addr + OFFSET.u32].b32 = DATA[31 : 0]
@@ -7833,11 +7279,9 @@ def _DSOp_DS_WRITE_B128(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, s
   MEM[addr + OFFSET.u32 + 12].b32 = DATA[127 : 96]
   return {}
 
-def _DSOp_DS_READ_B96(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_READ_B96(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, 0x0, 0x0)
   RETURN_DATA[31 : 0] = MEM[addr + OFFSET.u32].b32
@@ -7845,22 +7289,200 @@ def _DSOp_DS_READ_B96(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src
   RETURN_DATA[95 : 64] = MEM[addr + OFFSET.u32 + 8].b32
   return {'RETURN_DATA': RETURN_DATA}
 
-def _DSOp_DS_READ_B128(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None, MEM=None, offset0=0, offset1=0):
-  ADDR = S0._val
-  DATA = S1
-  OFFSET = Reg(offset0)
-  RETURN_DATA = Reg(0)
+def _DSOp_DS_READ_B128(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):
+  DATA = DATA0
+  OFFSET = OFFSET0
   # --- compiled pseudocode ---
   addr = CalcDsAddr(ADDR.b32, 0x0, 0x0)
   RETURN_DATA[31 : 0] = MEM[addr + OFFSET.u32].b32
   RETURN_DATA[63 : 32] = MEM[addr + OFFSET.u32 + 4].b32
   RETURN_DATA[95 : 64] = MEM[addr + OFFSET.u32 + 8].b32
   RETURN_DATA[127 : 96] = MEM[addr + OFFSET.u32 + 12].b32
+  OFFSET = Unsigned immediate byte offset.
+  OFFEN = Send offset either as VADDR or as zero..
+  IDXEN = Send index either as VADDR or as zero.
+  VADDR = VGPR address source.
+  VDATA = Destination vector GPR.
+  SOFFSET = Byte offset added to the memory address of an SGPR.
   addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
   VDATA[31 : 0].b32 = ConvertFromFormat(MEM[addr + ChannelOffsetX()])
   addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
   VDATA[31 : 0].b32 = ConvertFromFormat(MEM[addr + ChannelOffsetX()])
   VDATA[63 : 32].b32 = ConvertFromFormat(MEM[addr + ChannelOffsetY()])
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  VDATA[31 : 0].b32 = ConvertFromFormat(MEM[addr + ChannelOffsetX()])
+  VDATA[63 : 32].b32 = ConvertFromFormat(MEM[addr + ChannelOffsetY()])
+  VDATA[95 : 64].b32 = ConvertFromFormat(MEM[addr + ChannelOffsetZ()])
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  VDATA[31 : 0].b32 = ConvertFromFormat(MEM[addr + ChannelOffsetX()])
+  VDATA[63 : 32].b32 = ConvertFromFormat(MEM[addr + ChannelOffsetY()])
+  VDATA[95 : 64].b32 = ConvertFromFormat(MEM[addr + ChannelOffsetZ()])
+  VDATA[127 : 96].b32 = ConvertFromFormat(MEM[addr + ChannelOffsetW()])
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  MEM[addr + ChannelOffsetX()] = ConvertToFormat(VDATA[31 : 0].b32)
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  MEM[addr + ChannelOffsetX()] = ConvertToFormat(VDATA[31 : 0].b32)
+  MEM[addr + ChannelOffsetY()] = ConvertToFormat(VDATA[63 : 32].b32)
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  MEM[addr + ChannelOffsetX()] = ConvertToFormat(VDATA[31 : 0].b32)
+  MEM[addr + ChannelOffsetY()] = ConvertToFormat(VDATA[63 : 32].b32)
+  MEM[addr + ChannelOffsetZ()] = ConvertToFormat(VDATA[95 : 64].b32)
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  MEM[addr + ChannelOffsetX()] = ConvertToFormat(VDATA[31 : 0].b32)
+  MEM[addr + ChannelOffsetY()] = ConvertToFormat(VDATA[63 : 32].b32)
+  MEM[addr + ChannelOffsetZ()] = ConvertToFormat(VDATA[95 : 64].b32)
+  MEM[addr + ChannelOffsetW()] = ConvertToFormat(VDATA[127 : 96].b32)
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  VDATA[15 : 0].b16 = (ConvertFromFormat(MEM[addr + ChannelOffsetX()]))
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  VDATA[15 : 0].b16 = (ConvertFromFormat(MEM[addr + ChannelOffsetX()]))
+  VDATA[31 : 16].b16 = (ConvertFromFormat(MEM[addr + ChannelOffsetY()]))
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  VDATA[15 : 0].b16 = (ConvertFromFormat(MEM[addr + ChannelOffsetX()]))
+  VDATA[31 : 16].b16 = (ConvertFromFormat(MEM[addr + ChannelOffsetY()]))
+  VDATA[47 : 32].b16 = (ConvertFromFormat(MEM[addr + ChannelOffsetZ()]))
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  VDATA[15 : 0].b16 = (ConvertFromFormat(MEM[addr + ChannelOffsetX()]))
+  VDATA[31 : 16].b16 = (ConvertFromFormat(MEM[addr + ChannelOffsetY()]))
+  VDATA[47 : 32].b16 = (ConvertFromFormat(MEM[addr + ChannelOffsetZ()]))
+  VDATA[63 : 48].b16 = (ConvertFromFormat(MEM[addr + ChannelOffsetW()]))
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  MEM[addr + ChannelOffsetX()] = ConvertToFormat((VDATA[15 : 0].b16))
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  MEM[addr + ChannelOffsetX()] = ConvertToFormat((VDATA[15 : 0].b16))
+  MEM[addr + ChannelOffsetY()] = ConvertToFormat((VDATA[31 : 16].b16))
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  MEM[addr + ChannelOffsetX()] = ConvertToFormat((VDATA[15 : 0].b16))
+  MEM[addr + ChannelOffsetY()] = ConvertToFormat((VDATA[31 : 16].b16))
+  MEM[addr + ChannelOffsetZ()] = ConvertToFormat((VDATA[47 : 32].b16))
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  MEM[addr + ChannelOffsetX()] = ConvertToFormat((VDATA[15 : 0].b16))
+  MEM[addr + ChannelOffsetY()] = ConvertToFormat((VDATA[31 : 16].b16))
+  MEM[addr + ChannelOffsetZ()] = ConvertToFormat((VDATA[47 : 32].b16))
+  MEM[addr + ChannelOffsetW()] = ConvertToFormat((VDATA[63 : 48].b16))
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  VDATA.u32 = (_pack(0, MEM[addr].u8))
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  VDATA.i32 = (signext(MEM[addr].i8))
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  VDATA.u32 = (_pack(0, MEM[addr].u16))
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  VDATA.i32 = (signext(MEM[addr].i16))
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  VDATA[31 : 0] = MEM[addr].b32
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  VDATA[31 : 0] = MEM[addr].b32
+  VDATA[63 : 32] = MEM[addr + 4].b32
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  VDATA[31 : 0] = MEM[addr].b32
+  VDATA[63 : 32] = MEM[addr + 4].b32
+  VDATA[95 : 64] = MEM[addr + 8].b32
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  VDATA[31 : 0] = MEM[addr].b32
+  VDATA[63 : 32] = MEM[addr + 4].b32
+  VDATA[95 : 64] = MEM[addr + 8].b32
+  VDATA[127 : 96] = MEM[addr + 12].b32
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  MEM[addr].b8 = VDATA[7 : 0]
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  MEM[addr].b8 = VDATA[23 : 16]
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  MEM[addr].b16 = VDATA[15 : 0]
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  MEM[addr].b16 = VDATA[31 : 16]
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  MEM[addr].b32 = VDATA[31 : 0]
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  MEM[addr].b32 = VDATA[31 : 0]
+  MEM[addr + 4].b32 = VDATA[63 : 32]
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  MEM[addr].b32 = VDATA[31 : 0]
+  MEM[addr + 4].b32 = VDATA[63 : 32]
+  MEM[addr + 8].b32 = VDATA[95 : 64]
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  MEM[addr].b32 = VDATA[31 : 0]
+  MEM[addr + 4].b32 = VDATA[63 : 32]
+  MEM[addr + 8].b32 = VDATA[95 : 64]
+  MEM[addr + 12].b32 = VDATA[127 : 96]
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  VDATA[15 : 0].u16 = (_pack(0, MEM[addr].u8))
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  VDATA[31 : 16].u16 = (_pack(0, MEM[addr].u8))
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  VDATA[15 : 0].i16 = (signext(MEM[addr].i8))
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  VDATA[31 : 16].i16 = (signext(MEM[addr].i8))
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  VDATA[15 : 0].b16 = MEM[addr].b16
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  VDATA[31 : 16].b16 = MEM[addr].b16
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  VDATA[31 : 16].b16 = (ConvertFromFormat(MEM[addr + ChannelOffsetX()]))
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  MEM[addr + ChannelOffsetX()] = ConvertToFormat((VDATA[31 : 16].b16))
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].b32)
+  MEM[addr].b32 = DATA.b32
+  RETURN_DATA.b32 = tmp
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u32)
+  src = DATA[31 : 0].u32
+  cmp = DATA[63 : 32].u32
+  MEM[addr].u32 = ((src) if (tmp == cmp) else (tmp))
+  RETURN_DATA.u32 = tmp
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u32)
+  MEM[addr].u32 += DATA.u32
+  RETURN_DATA.u32 = tmp
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u32)
+  MEM[addr].u32 -= DATA.u32
+  RETURN_DATA.u32 = tmp
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].i32)
+  src = DATA.i32
+  MEM[addr].i32 = ((src) if (src < tmp) else (tmp))
+  RETURN_DATA.i32 = tmp
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u32)
+  src = DATA.u32
+  MEM[addr].u32 = ((src) if (src < tmp) else (tmp))
+  RETURN_DATA.u32 = tmp
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].i32)
+  src = DATA.i32
+  MEM[addr].i32 = ((src) if (src >= tmp) else (tmp))
+  RETURN_DATA.i32 = tmp
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u32)
+  src = DATA.u32
+  MEM[addr].u32 = ((src) if (src >= tmp) else (tmp))
+  RETURN_DATA.u32 = tmp
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].b32)
+  MEM[addr].b32 = (tmp & DATA.b32)
+  RETURN_DATA.b32 = tmp
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].b32)
+  MEM[addr].b32 = (tmp | DATA.b32)
+  RETURN_DATA.b32 = tmp
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].b32)
+  MEM[addr].b32 = (tmp ^ DATA.b32)
+  RETURN_DATA.b32 = tmp
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u32)
+  src = DATA.u32
+  MEM[addr].u32 = ((0) if (tmp >= src) else (tmp + 1))
+  RETURN_DATA.u32 = tmp
+  addr = CalcBufferAddr(VADDR.b32, SRSRC.b32, SOFFSET.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u32)
+  src = DATA.u32
+  MEM[addr].u32 = ((src) if (((tmp == 0)  or  (tmp > src))) else (tmp - 1))
+  RETURN_DATA.u32 = tmp
+  tmp = Reg(MEM[ADDR].f32)
+  MEM[ADDR].f32 += DATA.f32
+  RETURN_DATA = tmp
   return {'RETURN_DATA': RETURN_DATA}
 
 DSOp_FUNCTIONS = {
@@ -7887,7 +7509,6 @@ DSOp_FUNCTIONS = {
   DSOp.DS_ADD_F32: _DSOp_DS_ADD_F32,
   DSOp.DS_PK_ADD_F16: _DSOp_DS_PK_ADD_F16,
   DSOp.DS_PK_ADD_BF16: _DSOp_DS_PK_ADD_BF16,
-  DSOp.DS_WRITE_ADDTID_B32: _DSOp_DS_WRITE_ADDTID_B32,
   DSOp.DS_WRITE_B8: _DSOp_DS_WRITE_B8,
   DSOp.DS_WRITE_B16: _DSOp_DS_WRITE_B16,
   DSOp.DS_ADD_RTN_U32: _DSOp_DS_ADD_RTN_U32,
@@ -7975,13 +7596,1265 @@ DSOp_FUNCTIONS = {
   DSOp.DS_READ2ST64_B64: _DSOp_DS_READ2ST64_B64,
   DSOp.DS_ADD_RTN_F64: _DSOp_DS_ADD_RTN_F64,
   DSOp.DS_CONDXCHG32_RTN_B64: _DSOp_DS_CONDXCHG32_RTN_B64,
-  DSOp.DS_READ_ADDTID_B32: _DSOp_DS_READ_ADDTID_B32,
   DSOp.DS_PK_ADD_RTN_F16: _DSOp_DS_PK_ADD_RTN_F16,
   DSOp.DS_PK_ADD_RTN_BF16: _DSOp_DS_PK_ADD_RTN_BF16,
   DSOp.DS_WRITE_B96: _DSOp_DS_WRITE_B96,
   DSOp.DS_WRITE_B128: _DSOp_DS_WRITE_B128,
   DSOp.DS_READ_B96: _DSOp_DS_READ_B96,
   DSOp.DS_READ_B128: _DSOp_DS_READ_B128,
+}
+
+def _FLATOp_FLAT_LOAD_UBYTE(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  VDATA.u32 = (_pack(0, MEM[addr].u8))
+  return {'VDATA': VDATA}
+
+def _FLATOp_FLAT_LOAD_SBYTE(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  VDATA.i32 = (signext(MEM[addr].i8))
+  return {'VDATA': VDATA}
+
+def _FLATOp_FLAT_LOAD_USHORT(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  VDATA.u32 = (_pack(0, MEM[addr].u16))
+  return {'VDATA': VDATA}
+
+def _FLATOp_FLAT_LOAD_SSHORT(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  VDATA.i32 = (signext(MEM[addr].i16))
+  return {'VDATA': VDATA}
+
+def _FLATOp_FLAT_LOAD_DWORD(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  VDATA[31 : 0] = MEM[addr].b32
+  return {'VDATA': VDATA}
+
+def _FLATOp_FLAT_LOAD_DWORDX2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  VDATA[31 : 0] = MEM[addr].b32
+  VDATA[63 : 32] = MEM[addr + 4].b32
+  return {'VDATA': VDATA}
+
+def _FLATOp_FLAT_LOAD_DWORDX3(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  VDATA[31 : 0] = MEM[addr].b32
+  VDATA[63 : 32] = MEM[addr + 4].b32
+  VDATA[95 : 64] = MEM[addr + 8].b32
+  return {'VDATA': VDATA}
+
+def _FLATOp_FLAT_LOAD_DWORDX4(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  VDATA[31 : 0] = MEM[addr].b32
+  VDATA[63 : 32] = MEM[addr + 4].b32
+  VDATA[95 : 64] = MEM[addr + 8].b32
+  VDATA[127 : 96] = MEM[addr + 12].b32
+  return {'VDATA': VDATA}
+
+def _FLATOp_FLAT_STORE_BYTE(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  MEM[addr].b8 = VDATA[7 : 0]
+  return {}
+
+def _FLATOp_FLAT_STORE_BYTE_D16_HI(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  MEM[addr].b8 = VDATA[23 : 16]
+  return {}
+
+def _FLATOp_FLAT_STORE_SHORT(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  MEM[addr].b16 = VDATA[15 : 0]
+  return {}
+
+def _FLATOp_FLAT_STORE_SHORT_D16_HI(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  MEM[addr].b16 = VDATA[31 : 16]
+  return {}
+
+def _FLATOp_FLAT_STORE_DWORD(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  MEM[addr].b32 = VDATA[31 : 0]
+  return {}
+
+def _FLATOp_FLAT_STORE_DWORDX2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  MEM[addr].b32 = VDATA[31 : 0]
+  MEM[addr + 4].b32 = VDATA[63 : 32]
+  return {}
+
+def _FLATOp_FLAT_STORE_DWORDX3(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  MEM[addr].b32 = VDATA[31 : 0]
+  MEM[addr + 4].b32 = VDATA[63 : 32]
+  MEM[addr + 8].b32 = VDATA[95 : 64]
+  return {}
+
+def _FLATOp_FLAT_STORE_DWORDX4(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  MEM[addr].b32 = VDATA[31 : 0]
+  MEM[addr + 4].b32 = VDATA[63 : 32]
+  MEM[addr + 8].b32 = VDATA[95 : 64]
+  MEM[addr + 12].b32 = VDATA[127 : 96]
+  return {}
+
+def _FLATOp_FLAT_LOAD_UBYTE_D16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  VDATA[15 : 0].u16 = (_pack(0, MEM[addr].u8))
+  return {'VDATA': VDATA}
+
+def _FLATOp_FLAT_LOAD_UBYTE_D16_HI(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  VDATA[31 : 16].u16 = (_pack(0, MEM[addr].u8))
+  return {'VDATA': VDATA}
+
+def _FLATOp_FLAT_LOAD_SBYTE_D16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  VDATA[15 : 0].i16 = (signext(MEM[addr].i8))
+  return {'VDATA': VDATA}
+
+def _FLATOp_FLAT_LOAD_SBYTE_D16_HI(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  VDATA[31 : 16].i16 = (signext(MEM[addr].i8))
+  return {'VDATA': VDATA}
+
+def _FLATOp_FLAT_LOAD_SHORT_D16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  VDATA[15 : 0].b16 = MEM[addr].b16
+  return {'VDATA': VDATA}
+
+def _FLATOp_FLAT_LOAD_SHORT_D16_HI(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  VDATA[31 : 16].b16 = MEM[addr].b16
+  return {'VDATA': VDATA}
+
+def _FLATOp_FLAT_ATOMIC_SWAP(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].b32)
+  MEM[addr].b32 = DATA.b32
+  RETURN_DATA.b32 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _FLATOp_FLAT_ATOMIC_CMPSWAP(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u32)
+  src = DATA[31 : 0].u32
+  cmp = DATA[63 : 32].u32
+  MEM[addr].u32 = ((src) if (tmp == cmp) else (tmp))
+  RETURN_DATA.u32 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _FLATOp_FLAT_ATOMIC_ADD(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u32)
+  MEM[addr].u32 += DATA.u32
+  RETURN_DATA.u32 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _FLATOp_FLAT_ATOMIC_SUB(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u32)
+  MEM[addr].u32 -= DATA.u32
+  RETURN_DATA.u32 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _FLATOp_FLAT_ATOMIC_SMIN(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].i32)
+  src = DATA.i32
+  MEM[addr].i32 = ((src) if (src < tmp) else (tmp))
+  RETURN_DATA.i32 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _FLATOp_FLAT_ATOMIC_UMIN(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u32)
+  src = DATA.u32
+  MEM[addr].u32 = ((src) if (src < tmp) else (tmp))
+  RETURN_DATA.u32 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _FLATOp_FLAT_ATOMIC_SMAX(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].i32)
+  src = DATA.i32
+  MEM[addr].i32 = ((src) if (src >= tmp) else (tmp))
+  RETURN_DATA.i32 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _FLATOp_FLAT_ATOMIC_UMAX(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u32)
+  src = DATA.u32
+  MEM[addr].u32 = ((src) if (src >= tmp) else (tmp))
+  RETURN_DATA.u32 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _FLATOp_FLAT_ATOMIC_AND(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].b32)
+  MEM[addr].b32 = (tmp & DATA.b32)
+  RETURN_DATA.b32 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _FLATOp_FLAT_ATOMIC_OR(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].b32)
+  MEM[addr].b32 = (tmp | DATA.b32)
+  RETURN_DATA.b32 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _FLATOp_FLAT_ATOMIC_XOR(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].b32)
+  MEM[addr].b32 = (tmp ^ DATA.b32)
+  RETURN_DATA.b32 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _FLATOp_FLAT_ATOMIC_INC(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u32)
+  src = DATA.u32
+  MEM[addr].u32 = ((0) if (tmp >= src) else (tmp + 1))
+  RETURN_DATA.u32 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _FLATOp_FLAT_ATOMIC_DEC(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u32)
+  src = DATA.u32
+  MEM[addr].u32 = ((src) if (((tmp == 0)  or  (tmp > src))) else (tmp - 1))
+  RETURN_DATA.u32 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _FLATOp_FLAT_ATOMIC_ADD_F32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  tmp = Reg(MEM[ADDR].f32)
+  MEM[ADDR].f32 += DATA.f32
+  RETURN_DATA = tmp
+  return {}
+
+def _FLATOp_FLAT_ATOMIC_PK_ADD_F16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  tmp = Reg(MEM[ADDR])
+  src = DATA
+  dst[31 : 16].f16 = tmp[31 : 16].f16 + src[31 : 16].f16
+  dst[15 : 0].f16 = tmp[15 : 0].f16 + src[15 : 0].f16
+  MEM[ADDR] = dst.b32
+  RETURN_DATA = tmp
+  return {}
+
+def _FLATOp_FLAT_ATOMIC_ADD_F64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  tmp = Reg(MEM[ADDR].f64)
+  MEM[ADDR].f64 += DATA.f64
+  RETURN_DATA = tmp
+  return {}
+
+def _FLATOp_FLAT_ATOMIC_MIN_F64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].f64)
+  src = DATA.f64
+  MEM[addr].f64 = ((src) if (src < tmp) else (tmp))
+  RETURN_DATA.f64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _FLATOp_FLAT_ATOMIC_MAX_F64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].f64)
+  src = DATA.f64
+  MEM[addr].f64 = ((src) if (src > tmp) else (tmp))
+  RETURN_DATA.f64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _FLATOp_FLAT_ATOMIC_PK_ADD_BF16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  tmp = Reg(MEM[ADDR])
+  src = DATA
+  dst[31 : 16].bf16 = tmp[31 : 16].bf16 + src[31 : 16].bf16
+  dst[15 : 0].bf16 = tmp[15 : 0].bf16 + src[15 : 0].bf16
+  MEM[ADDR] = dst.b32
+  RETURN_DATA = tmp
+  return {}
+
+def _FLATOp_FLAT_ATOMIC_SWAP_X2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].b64)
+  MEM[addr].b64 = DATA.b64
+  RETURN_DATA.b64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _FLATOp_FLAT_ATOMIC_CMPSWAP_X2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u64)
+  src = DATA[63 : 0].u64
+  cmp = DATA[127 : 64].u64
+  MEM[addr].u64 = ((src) if (tmp == cmp) else (tmp))
+  RETURN_DATA.u64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _FLATOp_FLAT_ATOMIC_ADD_X2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u64)
+  MEM[addr].u64 += DATA.u64
+  RETURN_DATA.u64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _FLATOp_FLAT_ATOMIC_SUB_X2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u64)
+  MEM[addr].u64 -= DATA.u64
+  RETURN_DATA.u64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _FLATOp_FLAT_ATOMIC_SMIN_X2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].i64)
+  src = DATA.i64
+  MEM[addr].i64 = ((src) if (src < tmp) else (tmp))
+  RETURN_DATA.i64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _FLATOp_FLAT_ATOMIC_UMIN_X2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u64)
+  src = DATA.u64
+  MEM[addr].u64 = ((src) if (src < tmp) else (tmp))
+  RETURN_DATA.u64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _FLATOp_FLAT_ATOMIC_SMAX_X2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].i64)
+  src = DATA.i64
+  MEM[addr].i64 = ((src) if (src >= tmp) else (tmp))
+  RETURN_DATA.i64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _FLATOp_FLAT_ATOMIC_UMAX_X2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u64)
+  src = DATA.u64
+  MEM[addr].u64 = ((src) if (src >= tmp) else (tmp))
+  RETURN_DATA.u64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _FLATOp_FLAT_ATOMIC_AND_X2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].b64)
+  MEM[addr].b64 = (tmp & DATA.b64)
+  RETURN_DATA.b64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _FLATOp_FLAT_ATOMIC_OR_X2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].b64)
+  MEM[addr].b64 = (tmp | DATA.b64)
+  RETURN_DATA.b64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _FLATOp_FLAT_ATOMIC_XOR_X2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].b64)
+  MEM[addr].b64 = (tmp ^ DATA.b64)
+  RETURN_DATA.b64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _FLATOp_FLAT_ATOMIC_INC_X2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u64)
+  src = DATA.u64
+  MEM[addr].u64 = ((0) if (tmp >= src) else (tmp + 1))
+  RETURN_DATA.u64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _FLATOp_FLAT_ATOMIC_DEC_X2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcFlatAddr(ADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u64)
+  src = DATA.u64
+  MEM[addr].u64 = ((src) if (((tmp == 0)  or  (tmp > src))) else (tmp - 1))
+  RETURN_DATA.u64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+FLATOp_FUNCTIONS = {
+  FLATOp.FLAT_LOAD_UBYTE: _FLATOp_FLAT_LOAD_UBYTE,
+  FLATOp.FLAT_LOAD_SBYTE: _FLATOp_FLAT_LOAD_SBYTE,
+  FLATOp.FLAT_LOAD_USHORT: _FLATOp_FLAT_LOAD_USHORT,
+  FLATOp.FLAT_LOAD_SSHORT: _FLATOp_FLAT_LOAD_SSHORT,
+  FLATOp.FLAT_LOAD_DWORD: _FLATOp_FLAT_LOAD_DWORD,
+  FLATOp.FLAT_LOAD_DWORDX2: _FLATOp_FLAT_LOAD_DWORDX2,
+  FLATOp.FLAT_LOAD_DWORDX3: _FLATOp_FLAT_LOAD_DWORDX3,
+  FLATOp.FLAT_LOAD_DWORDX4: _FLATOp_FLAT_LOAD_DWORDX4,
+  FLATOp.FLAT_STORE_BYTE: _FLATOp_FLAT_STORE_BYTE,
+  FLATOp.FLAT_STORE_BYTE_D16_HI: _FLATOp_FLAT_STORE_BYTE_D16_HI,
+  FLATOp.FLAT_STORE_SHORT: _FLATOp_FLAT_STORE_SHORT,
+  FLATOp.FLAT_STORE_SHORT_D16_HI: _FLATOp_FLAT_STORE_SHORT_D16_HI,
+  FLATOp.FLAT_STORE_DWORD: _FLATOp_FLAT_STORE_DWORD,
+  FLATOp.FLAT_STORE_DWORDX2: _FLATOp_FLAT_STORE_DWORDX2,
+  FLATOp.FLAT_STORE_DWORDX3: _FLATOp_FLAT_STORE_DWORDX3,
+  FLATOp.FLAT_STORE_DWORDX4: _FLATOp_FLAT_STORE_DWORDX4,
+  FLATOp.FLAT_LOAD_UBYTE_D16: _FLATOp_FLAT_LOAD_UBYTE_D16,
+  FLATOp.FLAT_LOAD_UBYTE_D16_HI: _FLATOp_FLAT_LOAD_UBYTE_D16_HI,
+  FLATOp.FLAT_LOAD_SBYTE_D16: _FLATOp_FLAT_LOAD_SBYTE_D16,
+  FLATOp.FLAT_LOAD_SBYTE_D16_HI: _FLATOp_FLAT_LOAD_SBYTE_D16_HI,
+  FLATOp.FLAT_LOAD_SHORT_D16: _FLATOp_FLAT_LOAD_SHORT_D16,
+  FLATOp.FLAT_LOAD_SHORT_D16_HI: _FLATOp_FLAT_LOAD_SHORT_D16_HI,
+  FLATOp.FLAT_ATOMIC_SWAP: _FLATOp_FLAT_ATOMIC_SWAP,
+  FLATOp.FLAT_ATOMIC_CMPSWAP: _FLATOp_FLAT_ATOMIC_CMPSWAP,
+  FLATOp.FLAT_ATOMIC_ADD: _FLATOp_FLAT_ATOMIC_ADD,
+  FLATOp.FLAT_ATOMIC_SUB: _FLATOp_FLAT_ATOMIC_SUB,
+  FLATOp.FLAT_ATOMIC_SMIN: _FLATOp_FLAT_ATOMIC_SMIN,
+  FLATOp.FLAT_ATOMIC_UMIN: _FLATOp_FLAT_ATOMIC_UMIN,
+  FLATOp.FLAT_ATOMIC_SMAX: _FLATOp_FLAT_ATOMIC_SMAX,
+  FLATOp.FLAT_ATOMIC_UMAX: _FLATOp_FLAT_ATOMIC_UMAX,
+  FLATOp.FLAT_ATOMIC_AND: _FLATOp_FLAT_ATOMIC_AND,
+  FLATOp.FLAT_ATOMIC_OR: _FLATOp_FLAT_ATOMIC_OR,
+  FLATOp.FLAT_ATOMIC_XOR: _FLATOp_FLAT_ATOMIC_XOR,
+  FLATOp.FLAT_ATOMIC_INC: _FLATOp_FLAT_ATOMIC_INC,
+  FLATOp.FLAT_ATOMIC_DEC: _FLATOp_FLAT_ATOMIC_DEC,
+  FLATOp.FLAT_ATOMIC_ADD_F32: _FLATOp_FLAT_ATOMIC_ADD_F32,
+  FLATOp.FLAT_ATOMIC_PK_ADD_F16: _FLATOp_FLAT_ATOMIC_PK_ADD_F16,
+  FLATOp.FLAT_ATOMIC_ADD_F64: _FLATOp_FLAT_ATOMIC_ADD_F64,
+  FLATOp.FLAT_ATOMIC_MIN_F64: _FLATOp_FLAT_ATOMIC_MIN_F64,
+  FLATOp.FLAT_ATOMIC_MAX_F64: _FLATOp_FLAT_ATOMIC_MAX_F64,
+  FLATOp.FLAT_ATOMIC_PK_ADD_BF16: _FLATOp_FLAT_ATOMIC_PK_ADD_BF16,
+  FLATOp.FLAT_ATOMIC_SWAP_X2: _FLATOp_FLAT_ATOMIC_SWAP_X2,
+  FLATOp.FLAT_ATOMIC_CMPSWAP_X2: _FLATOp_FLAT_ATOMIC_CMPSWAP_X2,
+  FLATOp.FLAT_ATOMIC_ADD_X2: _FLATOp_FLAT_ATOMIC_ADD_X2,
+  FLATOp.FLAT_ATOMIC_SUB_X2: _FLATOp_FLAT_ATOMIC_SUB_X2,
+  FLATOp.FLAT_ATOMIC_SMIN_X2: _FLATOp_FLAT_ATOMIC_SMIN_X2,
+  FLATOp.FLAT_ATOMIC_UMIN_X2: _FLATOp_FLAT_ATOMIC_UMIN_X2,
+  FLATOp.FLAT_ATOMIC_SMAX_X2: _FLATOp_FLAT_ATOMIC_SMAX_X2,
+  FLATOp.FLAT_ATOMIC_UMAX_X2: _FLATOp_FLAT_ATOMIC_UMAX_X2,
+  FLATOp.FLAT_ATOMIC_AND_X2: _FLATOp_FLAT_ATOMIC_AND_X2,
+  FLATOp.FLAT_ATOMIC_OR_X2: _FLATOp_FLAT_ATOMIC_OR_X2,
+  FLATOp.FLAT_ATOMIC_XOR_X2: _FLATOp_FLAT_ATOMIC_XOR_X2,
+  FLATOp.FLAT_ATOMIC_INC_X2: _FLATOp_FLAT_ATOMIC_INC_X2,
+  FLATOp.FLAT_ATOMIC_DEC_X2: _FLATOp_FLAT_ATOMIC_DEC_X2,
+}
+
+def _GLOBALOp_GLOBAL_LOAD_UBYTE(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  VDATA.u32 = (_pack(0, MEM[addr].u8))
+  return {'VDATA': VDATA}
+
+def _GLOBALOp_GLOBAL_LOAD_SBYTE(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  VDATA.i32 = (signext(MEM[addr].i8))
+  return {'VDATA': VDATA}
+
+def _GLOBALOp_GLOBAL_LOAD_USHORT(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  VDATA.u32 = (_pack(0, MEM[addr].u16))
+  return {'VDATA': VDATA}
+
+def _GLOBALOp_GLOBAL_LOAD_SSHORT(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  VDATA.i32 = (signext(MEM[addr].i16))
+  return {'VDATA': VDATA}
+
+def _GLOBALOp_GLOBAL_LOAD_DWORD(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  VDATA[31 : 0] = MEM[addr].b32
+  return {'VDATA': VDATA}
+
+def _GLOBALOp_GLOBAL_LOAD_DWORDX2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  VDATA[31 : 0] = MEM[addr].b32
+  VDATA[63 : 32] = MEM[addr + 4].b32
+  return {'VDATA': VDATA}
+
+def _GLOBALOp_GLOBAL_LOAD_DWORDX3(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  VDATA[31 : 0] = MEM[addr].b32
+  VDATA[63 : 32] = MEM[addr + 4].b32
+  VDATA[95 : 64] = MEM[addr + 8].b32
+  return {'VDATA': VDATA}
+
+def _GLOBALOp_GLOBAL_LOAD_DWORDX4(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  VDATA[31 : 0] = MEM[addr].b32
+  VDATA[63 : 32] = MEM[addr + 4].b32
+  VDATA[95 : 64] = MEM[addr + 8].b32
+  VDATA[127 : 96] = MEM[addr + 12].b32
+  return {'VDATA': VDATA}
+
+def _GLOBALOp_GLOBAL_STORE_BYTE(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  MEM[addr].b8 = VDATA[7 : 0]
+  return {}
+
+def _GLOBALOp_GLOBAL_STORE_BYTE_D16_HI(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  MEM[addr].b8 = VDATA[23 : 16]
+  return {}
+
+def _GLOBALOp_GLOBAL_STORE_SHORT(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  MEM[addr].b16 = VDATA[15 : 0]
+  return {}
+
+def _GLOBALOp_GLOBAL_STORE_SHORT_D16_HI(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  MEM[addr].b16 = VDATA[31 : 16]
+  return {}
+
+def _GLOBALOp_GLOBAL_STORE_DWORD(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  MEM[addr].b32 = VDATA[31 : 0]
+  return {}
+
+def _GLOBALOp_GLOBAL_STORE_DWORDX2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  MEM[addr].b32 = VDATA[31 : 0]
+  MEM[addr + 4].b32 = VDATA[63 : 32]
+  return {}
+
+def _GLOBALOp_GLOBAL_STORE_DWORDX3(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  MEM[addr].b32 = VDATA[31 : 0]
+  MEM[addr + 4].b32 = VDATA[63 : 32]
+  MEM[addr + 8].b32 = VDATA[95 : 64]
+  return {}
+
+def _GLOBALOp_GLOBAL_STORE_DWORDX4(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  MEM[addr].b32 = VDATA[31 : 0]
+  MEM[addr + 4].b32 = VDATA[63 : 32]
+  MEM[addr + 8].b32 = VDATA[95 : 64]
+  MEM[addr + 12].b32 = VDATA[127 : 96]
+  return {}
+
+def _GLOBALOp_GLOBAL_LOAD_UBYTE_D16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  VDATA[15 : 0].u16 = (_pack(0, MEM[addr].u8))
+  return {'VDATA': VDATA}
+
+def _GLOBALOp_GLOBAL_LOAD_UBYTE_D16_HI(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  VDATA[31 : 16].u16 = (_pack(0, MEM[addr].u8))
+  return {'VDATA': VDATA}
+
+def _GLOBALOp_GLOBAL_LOAD_SBYTE_D16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  VDATA[15 : 0].i16 = (signext(MEM[addr].i8))
+  return {'VDATA': VDATA}
+
+def _GLOBALOp_GLOBAL_LOAD_SBYTE_D16_HI(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  VDATA[31 : 16].i16 = (signext(MEM[addr].i8))
+  return {'VDATA': VDATA}
+
+def _GLOBALOp_GLOBAL_LOAD_SHORT_D16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  VDATA[15 : 0].b16 = MEM[addr].b16
+  return {'VDATA': VDATA}
+
+def _GLOBALOp_GLOBAL_LOAD_SHORT_D16_HI(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  VDATA[31 : 16].b16 = MEM[addr].b16
+  return {'VDATA': VDATA}
+
+def _GLOBALOp_GLOBAL_ATOMIC_SWAP(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].b32)
+  MEM[addr].b32 = DATA.b32
+  RETURN_DATA.b32 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _GLOBALOp_GLOBAL_ATOMIC_CMPSWAP(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u32)
+  src = DATA[31 : 0].u32
+  cmp = DATA[63 : 32].u32
+  MEM[addr].u32 = ((src) if (tmp == cmp) else (tmp))
+  RETURN_DATA.u32 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _GLOBALOp_GLOBAL_ATOMIC_ADD(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u32)
+  MEM[addr].u32 += DATA.u32
+  RETURN_DATA.u32 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _GLOBALOp_GLOBAL_ATOMIC_SUB(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u32)
+  MEM[addr].u32 -= DATA.u32
+  RETURN_DATA.u32 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _GLOBALOp_GLOBAL_ATOMIC_SMIN(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].i32)
+  src = DATA.i32
+  MEM[addr].i32 = ((src) if (src < tmp) else (tmp))
+  RETURN_DATA.i32 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _GLOBALOp_GLOBAL_ATOMIC_UMIN(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u32)
+  src = DATA.u32
+  MEM[addr].u32 = ((src) if (src < tmp) else (tmp))
+  RETURN_DATA.u32 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _GLOBALOp_GLOBAL_ATOMIC_SMAX(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].i32)
+  src = DATA.i32
+  MEM[addr].i32 = ((src) if (src >= tmp) else (tmp))
+  RETURN_DATA.i32 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _GLOBALOp_GLOBAL_ATOMIC_UMAX(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u32)
+  src = DATA.u32
+  MEM[addr].u32 = ((src) if (src >= tmp) else (tmp))
+  RETURN_DATA.u32 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _GLOBALOp_GLOBAL_ATOMIC_AND(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].b32)
+  MEM[addr].b32 = (tmp & DATA.b32)
+  RETURN_DATA.b32 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _GLOBALOp_GLOBAL_ATOMIC_OR(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].b32)
+  MEM[addr].b32 = (tmp | DATA.b32)
+  RETURN_DATA.b32 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _GLOBALOp_GLOBAL_ATOMIC_XOR(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].b32)
+  MEM[addr].b32 = (tmp ^ DATA.b32)
+  RETURN_DATA.b32 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _GLOBALOp_GLOBAL_ATOMIC_INC(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u32)
+  src = DATA.u32
+  MEM[addr].u32 = ((0) if (tmp >= src) else (tmp + 1))
+  RETURN_DATA.u32 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _GLOBALOp_GLOBAL_ATOMIC_DEC(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u32)
+  src = DATA.u32
+  MEM[addr].u32 = ((src) if (((tmp == 0)  or  (tmp > src))) else (tmp - 1))
+  RETURN_DATA.u32 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _GLOBALOp_GLOBAL_ATOMIC_ADD_F32(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  tmp = Reg(MEM[ADDR].f32)
+  MEM[ADDR].f32 += DATA.f32
+  RETURN_DATA = tmp
+  return {}
+
+def _GLOBALOp_GLOBAL_ATOMIC_PK_ADD_F16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  tmp = Reg(MEM[ADDR])
+  src = DATA
+  dst[31 : 16].f16 = tmp[31 : 16].f16 + src[31 : 16].f16
+  dst[15 : 0].f16 = tmp[15 : 0].f16 + src[15 : 0].f16
+  MEM[ADDR] = dst.b32
+  RETURN_DATA = tmp
+  return {}
+
+def _GLOBALOp_GLOBAL_ATOMIC_ADD_F64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  tmp = Reg(MEM[ADDR].f64)
+  MEM[ADDR].f64 += DATA.f64
+  RETURN_DATA = tmp
+  return {}
+
+def _GLOBALOp_GLOBAL_ATOMIC_MIN_F64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].f64)
+  src = DATA.f64
+  MEM[addr].f64 = ((src) if (src < tmp) else (tmp))
+  RETURN_DATA.f64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _GLOBALOp_GLOBAL_ATOMIC_MAX_F64(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].f64)
+  src = DATA.f64
+  MEM[addr].f64 = ((src) if (src > tmp) else (tmp))
+  RETURN_DATA.f64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _GLOBALOp_GLOBAL_ATOMIC_PK_ADD_BF16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  tmp = Reg(MEM[ADDR])
+  src = DATA
+  dst[31 : 16].bf16 = tmp[31 : 16].bf16 + src[31 : 16].bf16
+  dst[15 : 0].bf16 = tmp[15 : 0].bf16 + src[15 : 0].bf16
+  MEM[ADDR] = dst.b32
+  RETURN_DATA = tmp
+  return {}
+
+def _GLOBALOp_GLOBAL_ATOMIC_SWAP_X2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].b64)
+  MEM[addr].b64 = DATA.b64
+  RETURN_DATA.b64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _GLOBALOp_GLOBAL_ATOMIC_CMPSWAP_X2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u64)
+  src = DATA[63 : 0].u64
+  cmp = DATA[127 : 64].u64
+  MEM[addr].u64 = ((src) if (tmp == cmp) else (tmp))
+  RETURN_DATA.u64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _GLOBALOp_GLOBAL_ATOMIC_ADD_X2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u64)
+  MEM[addr].u64 += DATA.u64
+  RETURN_DATA.u64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _GLOBALOp_GLOBAL_ATOMIC_SUB_X2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u64)
+  MEM[addr].u64 -= DATA.u64
+  RETURN_DATA.u64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _GLOBALOp_GLOBAL_ATOMIC_SMIN_X2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].i64)
+  src = DATA.i64
+  MEM[addr].i64 = ((src) if (src < tmp) else (tmp))
+  RETURN_DATA.i64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _GLOBALOp_GLOBAL_ATOMIC_UMIN_X2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u64)
+  src = DATA.u64
+  MEM[addr].u64 = ((src) if (src < tmp) else (tmp))
+  RETURN_DATA.u64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _GLOBALOp_GLOBAL_ATOMIC_SMAX_X2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].i64)
+  src = DATA.i64
+  MEM[addr].i64 = ((src) if (src >= tmp) else (tmp))
+  RETURN_DATA.i64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _GLOBALOp_GLOBAL_ATOMIC_UMAX_X2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u64)
+  src = DATA.u64
+  MEM[addr].u64 = ((src) if (src >= tmp) else (tmp))
+  RETURN_DATA.u64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _GLOBALOp_GLOBAL_ATOMIC_AND_X2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].b64)
+  MEM[addr].b64 = (tmp & DATA.b64)
+  RETURN_DATA.b64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _GLOBALOp_GLOBAL_ATOMIC_OR_X2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].b64)
+  MEM[addr].b64 = (tmp | DATA.b64)
+  RETURN_DATA.b64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _GLOBALOp_GLOBAL_ATOMIC_XOR_X2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].b64)
+  MEM[addr].b64 = (tmp ^ DATA.b64)
+  RETURN_DATA.b64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _GLOBALOp_GLOBAL_ATOMIC_INC_X2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u64)
+  src = DATA.u64
+  MEM[addr].u64 = ((0) if (tmp >= src) else (tmp + 1))
+  RETURN_DATA.u64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+def _GLOBALOp_GLOBAL_ATOMIC_DEC_X2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  tmp = Reg(MEM[addr].u64)
+  src = DATA.u64
+  MEM[addr].u64 = ((src) if (((tmp == 0)  or  (tmp > src))) else (tmp - 1))
+  RETURN_DATA.u64 = tmp
+  return {'RETURN_DATA': RETURN_DATA}
+
+GLOBALOp_FUNCTIONS = {
+  GLOBALOp.GLOBAL_LOAD_UBYTE: _GLOBALOp_GLOBAL_LOAD_UBYTE,
+  GLOBALOp.GLOBAL_LOAD_SBYTE: _GLOBALOp_GLOBAL_LOAD_SBYTE,
+  GLOBALOp.GLOBAL_LOAD_USHORT: _GLOBALOp_GLOBAL_LOAD_USHORT,
+  GLOBALOp.GLOBAL_LOAD_SSHORT: _GLOBALOp_GLOBAL_LOAD_SSHORT,
+  GLOBALOp.GLOBAL_LOAD_DWORD: _GLOBALOp_GLOBAL_LOAD_DWORD,
+  GLOBALOp.GLOBAL_LOAD_DWORDX2: _GLOBALOp_GLOBAL_LOAD_DWORDX2,
+  GLOBALOp.GLOBAL_LOAD_DWORDX3: _GLOBALOp_GLOBAL_LOAD_DWORDX3,
+  GLOBALOp.GLOBAL_LOAD_DWORDX4: _GLOBALOp_GLOBAL_LOAD_DWORDX4,
+  GLOBALOp.GLOBAL_STORE_BYTE: _GLOBALOp_GLOBAL_STORE_BYTE,
+  GLOBALOp.GLOBAL_STORE_BYTE_D16_HI: _GLOBALOp_GLOBAL_STORE_BYTE_D16_HI,
+  GLOBALOp.GLOBAL_STORE_SHORT: _GLOBALOp_GLOBAL_STORE_SHORT,
+  GLOBALOp.GLOBAL_STORE_SHORT_D16_HI: _GLOBALOp_GLOBAL_STORE_SHORT_D16_HI,
+  GLOBALOp.GLOBAL_STORE_DWORD: _GLOBALOp_GLOBAL_STORE_DWORD,
+  GLOBALOp.GLOBAL_STORE_DWORDX2: _GLOBALOp_GLOBAL_STORE_DWORDX2,
+  GLOBALOp.GLOBAL_STORE_DWORDX3: _GLOBALOp_GLOBAL_STORE_DWORDX3,
+  GLOBALOp.GLOBAL_STORE_DWORDX4: _GLOBALOp_GLOBAL_STORE_DWORDX4,
+  GLOBALOp.GLOBAL_LOAD_UBYTE_D16: _GLOBALOp_GLOBAL_LOAD_UBYTE_D16,
+  GLOBALOp.GLOBAL_LOAD_UBYTE_D16_HI: _GLOBALOp_GLOBAL_LOAD_UBYTE_D16_HI,
+  GLOBALOp.GLOBAL_LOAD_SBYTE_D16: _GLOBALOp_GLOBAL_LOAD_SBYTE_D16,
+  GLOBALOp.GLOBAL_LOAD_SBYTE_D16_HI: _GLOBALOp_GLOBAL_LOAD_SBYTE_D16_HI,
+  GLOBALOp.GLOBAL_LOAD_SHORT_D16: _GLOBALOp_GLOBAL_LOAD_SHORT_D16,
+  GLOBALOp.GLOBAL_LOAD_SHORT_D16_HI: _GLOBALOp_GLOBAL_LOAD_SHORT_D16_HI,
+  GLOBALOp.GLOBAL_ATOMIC_SWAP: _GLOBALOp_GLOBAL_ATOMIC_SWAP,
+  GLOBALOp.GLOBAL_ATOMIC_CMPSWAP: _GLOBALOp_GLOBAL_ATOMIC_CMPSWAP,
+  GLOBALOp.GLOBAL_ATOMIC_ADD: _GLOBALOp_GLOBAL_ATOMIC_ADD,
+  GLOBALOp.GLOBAL_ATOMIC_SUB: _GLOBALOp_GLOBAL_ATOMIC_SUB,
+  GLOBALOp.GLOBAL_ATOMIC_SMIN: _GLOBALOp_GLOBAL_ATOMIC_SMIN,
+  GLOBALOp.GLOBAL_ATOMIC_UMIN: _GLOBALOp_GLOBAL_ATOMIC_UMIN,
+  GLOBALOp.GLOBAL_ATOMIC_SMAX: _GLOBALOp_GLOBAL_ATOMIC_SMAX,
+  GLOBALOp.GLOBAL_ATOMIC_UMAX: _GLOBALOp_GLOBAL_ATOMIC_UMAX,
+  GLOBALOp.GLOBAL_ATOMIC_AND: _GLOBALOp_GLOBAL_ATOMIC_AND,
+  GLOBALOp.GLOBAL_ATOMIC_OR: _GLOBALOp_GLOBAL_ATOMIC_OR,
+  GLOBALOp.GLOBAL_ATOMIC_XOR: _GLOBALOp_GLOBAL_ATOMIC_XOR,
+  GLOBALOp.GLOBAL_ATOMIC_INC: _GLOBALOp_GLOBAL_ATOMIC_INC,
+  GLOBALOp.GLOBAL_ATOMIC_DEC: _GLOBALOp_GLOBAL_ATOMIC_DEC,
+  GLOBALOp.GLOBAL_ATOMIC_ADD_F32: _GLOBALOp_GLOBAL_ATOMIC_ADD_F32,
+  GLOBALOp.GLOBAL_ATOMIC_PK_ADD_F16: _GLOBALOp_GLOBAL_ATOMIC_PK_ADD_F16,
+  GLOBALOp.GLOBAL_ATOMIC_ADD_F64: _GLOBALOp_GLOBAL_ATOMIC_ADD_F64,
+  GLOBALOp.GLOBAL_ATOMIC_MIN_F64: _GLOBALOp_GLOBAL_ATOMIC_MIN_F64,
+  GLOBALOp.GLOBAL_ATOMIC_MAX_F64: _GLOBALOp_GLOBAL_ATOMIC_MAX_F64,
+  GLOBALOp.GLOBAL_ATOMIC_PK_ADD_BF16: _GLOBALOp_GLOBAL_ATOMIC_PK_ADD_BF16,
+  GLOBALOp.GLOBAL_ATOMIC_SWAP_X2: _GLOBALOp_GLOBAL_ATOMIC_SWAP_X2,
+  GLOBALOp.GLOBAL_ATOMIC_CMPSWAP_X2: _GLOBALOp_GLOBAL_ATOMIC_CMPSWAP_X2,
+  GLOBALOp.GLOBAL_ATOMIC_ADD_X2: _GLOBALOp_GLOBAL_ATOMIC_ADD_X2,
+  GLOBALOp.GLOBAL_ATOMIC_SUB_X2: _GLOBALOp_GLOBAL_ATOMIC_SUB_X2,
+  GLOBALOp.GLOBAL_ATOMIC_SMIN_X2: _GLOBALOp_GLOBAL_ATOMIC_SMIN_X2,
+  GLOBALOp.GLOBAL_ATOMIC_UMIN_X2: _GLOBALOp_GLOBAL_ATOMIC_UMIN_X2,
+  GLOBALOp.GLOBAL_ATOMIC_SMAX_X2: _GLOBALOp_GLOBAL_ATOMIC_SMAX_X2,
+  GLOBALOp.GLOBAL_ATOMIC_UMAX_X2: _GLOBALOp_GLOBAL_ATOMIC_UMAX_X2,
+  GLOBALOp.GLOBAL_ATOMIC_AND_X2: _GLOBALOp_GLOBAL_ATOMIC_AND_X2,
+  GLOBALOp.GLOBAL_ATOMIC_OR_X2: _GLOBALOp_GLOBAL_ATOMIC_OR_X2,
+  GLOBALOp.GLOBAL_ATOMIC_XOR_X2: _GLOBALOp_GLOBAL_ATOMIC_XOR_X2,
+  GLOBALOp.GLOBAL_ATOMIC_INC_X2: _GLOBALOp_GLOBAL_ATOMIC_INC_X2,
+  GLOBALOp.GLOBAL_ATOMIC_DEC_X2: _GLOBALOp_GLOBAL_ATOMIC_DEC_X2,
+}
+
+def _SCRATCHOp_SCRATCH_LOAD_UBYTE(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcScratchAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  VDATA.u32 = (_pack(0, MEM[addr].u8))
+  return {'VDATA': VDATA}
+
+def _SCRATCHOp_SCRATCH_LOAD_SBYTE(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcScratchAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  VDATA.i32 = (signext(MEM[addr].i8))
+  return {'VDATA': VDATA}
+
+def _SCRATCHOp_SCRATCH_LOAD_USHORT(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcScratchAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  VDATA.u32 = (_pack(0, MEM[addr].u16))
+  return {'VDATA': VDATA}
+
+def _SCRATCHOp_SCRATCH_LOAD_SSHORT(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcScratchAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  VDATA.i32 = (signext(MEM[addr].i16))
+  return {'VDATA': VDATA}
+
+def _SCRATCHOp_SCRATCH_LOAD_DWORD(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcScratchAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  VDATA[31 : 0] = MEM[addr].b32
+  return {'VDATA': VDATA}
+
+def _SCRATCHOp_SCRATCH_LOAD_DWORDX2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcScratchAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  VDATA[31 : 0] = MEM[addr].b32
+  VDATA[63 : 32] = MEM[addr + 4].b32
+  return {'VDATA': VDATA}
+
+def _SCRATCHOp_SCRATCH_LOAD_DWORDX3(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcScratchAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  VDATA[31 : 0] = MEM[addr].b32
+  VDATA[63 : 32] = MEM[addr + 4].b32
+  VDATA[95 : 64] = MEM[addr + 8].b32
+  return {'VDATA': VDATA}
+
+def _SCRATCHOp_SCRATCH_LOAD_DWORDX4(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcScratchAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  VDATA[31 : 0] = MEM[addr].b32
+  VDATA[63 : 32] = MEM[addr + 4].b32
+  VDATA[95 : 64] = MEM[addr + 8].b32
+  VDATA[127 : 96] = MEM[addr + 12].b32
+  return {'VDATA': VDATA}
+
+def _SCRATCHOp_SCRATCH_STORE_BYTE(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcScratchAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  MEM[addr].b8 = VDATA[7 : 0]
+  return {}
+
+def _SCRATCHOp_SCRATCH_STORE_BYTE_D16_HI(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcScratchAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  MEM[addr].b8 = VDATA[23 : 16]
+  return {}
+
+def _SCRATCHOp_SCRATCH_STORE_SHORT(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcScratchAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  MEM[addr].b16 = VDATA[15 : 0]
+  return {}
+
+def _SCRATCHOp_SCRATCH_STORE_SHORT_D16_HI(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcScratchAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  MEM[addr].b16 = VDATA[31 : 16]
+  return {}
+
+def _SCRATCHOp_SCRATCH_STORE_DWORD(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcScratchAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  MEM[addr].b32 = VDATA[31 : 0]
+  return {}
+
+def _SCRATCHOp_SCRATCH_STORE_DWORDX2(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcScratchAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  MEM[addr].b32 = VDATA[31 : 0]
+  MEM[addr + 4].b32 = VDATA[63 : 32]
+  return {}
+
+def _SCRATCHOp_SCRATCH_STORE_DWORDX3(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcScratchAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  MEM[addr].b32 = VDATA[31 : 0]
+  MEM[addr + 4].b32 = VDATA[63 : 32]
+  MEM[addr + 8].b32 = VDATA[95 : 64]
+  return {}
+
+def _SCRATCHOp_SCRATCH_STORE_DWORDX4(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcScratchAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  MEM[addr].b32 = VDATA[31 : 0]
+  MEM[addr + 4].b32 = VDATA[63 : 32]
+  MEM[addr + 8].b32 = VDATA[95 : 64]
+  MEM[addr + 12].b32 = VDATA[127 : 96]
+  return {}
+
+def _SCRATCHOp_SCRATCH_LOAD_UBYTE_D16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcScratchAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  VDATA[15 : 0].u16 = (_pack(0, MEM[addr].u8))
+  return {'VDATA': VDATA}
+
+def _SCRATCHOp_SCRATCH_LOAD_UBYTE_D16_HI(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcScratchAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  VDATA[31 : 16].u16 = (_pack(0, MEM[addr].u8))
+  return {'VDATA': VDATA}
+
+def _SCRATCHOp_SCRATCH_LOAD_SBYTE_D16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcScratchAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  VDATA[15 : 0].i16 = (signext(MEM[addr].i8))
+  return {'VDATA': VDATA}
+
+def _SCRATCHOp_SCRATCH_LOAD_SBYTE_D16_HI(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcScratchAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  VDATA[31 : 16].i16 = (signext(MEM[addr].i8))
+  return {'VDATA': VDATA}
+
+def _SCRATCHOp_SCRATCH_LOAD_SHORT_D16(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcScratchAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  VDATA[15 : 0].b16 = MEM[addr].b16
+  return {'VDATA': VDATA}
+
+def _SCRATCHOp_SCRATCH_LOAD_SHORT_D16_HI(MEM, ADDR, VDATA, VDST, RETURN_DATA):
+  DATA = VDATA
+  # --- compiled pseudocode ---
+  addr = CalcScratchAddr(ADDR.b32, SADDR.b32, OFFSET.b32)
+  VDATA[31 : 16].b16 = MEM[addr].b16
+  return {'VDATA': VDATA}
+
+SCRATCHOp_FUNCTIONS = {
+  SCRATCHOp.SCRATCH_LOAD_UBYTE: _SCRATCHOp_SCRATCH_LOAD_UBYTE,
+  SCRATCHOp.SCRATCH_LOAD_SBYTE: _SCRATCHOp_SCRATCH_LOAD_SBYTE,
+  SCRATCHOp.SCRATCH_LOAD_USHORT: _SCRATCHOp_SCRATCH_LOAD_USHORT,
+  SCRATCHOp.SCRATCH_LOAD_SSHORT: _SCRATCHOp_SCRATCH_LOAD_SSHORT,
+  SCRATCHOp.SCRATCH_LOAD_DWORD: _SCRATCHOp_SCRATCH_LOAD_DWORD,
+  SCRATCHOp.SCRATCH_LOAD_DWORDX2: _SCRATCHOp_SCRATCH_LOAD_DWORDX2,
+  SCRATCHOp.SCRATCH_LOAD_DWORDX3: _SCRATCHOp_SCRATCH_LOAD_DWORDX3,
+  SCRATCHOp.SCRATCH_LOAD_DWORDX4: _SCRATCHOp_SCRATCH_LOAD_DWORDX4,
+  SCRATCHOp.SCRATCH_STORE_BYTE: _SCRATCHOp_SCRATCH_STORE_BYTE,
+  SCRATCHOp.SCRATCH_STORE_BYTE_D16_HI: _SCRATCHOp_SCRATCH_STORE_BYTE_D16_HI,
+  SCRATCHOp.SCRATCH_STORE_SHORT: _SCRATCHOp_SCRATCH_STORE_SHORT,
+  SCRATCHOp.SCRATCH_STORE_SHORT_D16_HI: _SCRATCHOp_SCRATCH_STORE_SHORT_D16_HI,
+  SCRATCHOp.SCRATCH_STORE_DWORD: _SCRATCHOp_SCRATCH_STORE_DWORD,
+  SCRATCHOp.SCRATCH_STORE_DWORDX2: _SCRATCHOp_SCRATCH_STORE_DWORDX2,
+  SCRATCHOp.SCRATCH_STORE_DWORDX3: _SCRATCHOp_SCRATCH_STORE_DWORDX3,
+  SCRATCHOp.SCRATCH_STORE_DWORDX4: _SCRATCHOp_SCRATCH_STORE_DWORDX4,
+  SCRATCHOp.SCRATCH_LOAD_UBYTE_D16: _SCRATCHOp_SCRATCH_LOAD_UBYTE_D16,
+  SCRATCHOp.SCRATCH_LOAD_UBYTE_D16_HI: _SCRATCHOp_SCRATCH_LOAD_UBYTE_D16_HI,
+  SCRATCHOp.SCRATCH_LOAD_SBYTE_D16: _SCRATCHOp_SCRATCH_LOAD_SBYTE_D16,
+  SCRATCHOp.SCRATCH_LOAD_SBYTE_D16_HI: _SCRATCHOp_SCRATCH_LOAD_SBYTE_D16_HI,
+  SCRATCHOp.SCRATCH_LOAD_SHORT_D16: _SCRATCHOp_SCRATCH_LOAD_SHORT_D16,
+  SCRATCHOp.SCRATCH_LOAD_SHORT_D16_HI: _SCRATCHOp_SCRATCH_LOAD_SHORT_D16_HI,
 }
 
 COMPILED_FUNCTIONS = {
@@ -7997,6 +8870,9 @@ COMPILED_FUNCTIONS = {
   VOP3AOp: VOP3AOp_FUNCTIONS,
   VOP3BOp: VOP3BOp_FUNCTIONS,
   DSOp: DSOp_FUNCTIONS,
+  FLATOp: FLATOp_FUNCTIONS,
+  GLOBALOp: GLOBALOp_FUNCTIONS,
+  SCRATCHOp: SCRATCHOp_FUNCTIONS,
 }
 
 def get_compiled_functions(): return COMPILED_FUNCTIONS

@@ -3,11 +3,11 @@
 from __future__ import annotations
 import ctypes
 from extra.assembly.amd.dsl import Inst, unwrap, FLOAT_ENC, MASK32, MASK64, _f32, _i32, _sext, _f16, _i16, _f64, _i64
-from extra.assembly.amd.pcode import Reg, LDSMem
+from extra.assembly.amd.pcode import Reg
 from extra.assembly.amd.asm import detect_format
 from extra.assembly.amd.autogen.rdna3.gen_pcode import get_compiled_functions
 from extra.assembly.amd.autogen.rdna3.ins import (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM, VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, DS, FLAT, VOPD,
-  SrcEnum, SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp, FLATOp, GLOBALOp, VOPDOp)
+  SrcEnum, SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp, FLATOp, GLOBALOp, SCRATCHOp, VOPDOp)
 
 Program = dict[int, Inst]
 WAVE_SIZE, SGPR_COUNT, VGPR_COUNT = 32, 128, 256
@@ -29,6 +29,20 @@ def _dst16(cur: int, val: int, is_hi: bool) -> int: return (cur & 0x0000ffff) | 
 def _vgpr_hi(src: int) -> bool: return src >= 256 and ((src - 256) & 0x80) != 0
 def _vgpr_masked(src: int) -> int: return ((src - 256) & 0x7f) + 256 if src >= 256 else src
 
+# Helper: get number of dwords from memory op name
+def _op_ndwords(name: str) -> int:
+  if '_B128' in name: return 4
+  if '_B96' in name: return 3
+  if any(s in name for s in ('_B64', '_U64', '_I64', '_F64')): return 2
+  return 1
+
+# Helper: build multi-dword Reg from consecutive VGPRs
+def _vgpr_read(V: list, base: int, ndwords: int) -> Reg: return Reg(sum(V[base + i] << (32 * i) for i in range(ndwords)))
+
+# Helper: write multi-dword value to consecutive VGPRs
+def _vgpr_write(V: list, base: int, val: int, ndwords: int):
+  for i in range(ndwords): V[base + i] = (val >> (32 * i)) & MASK32
+
 # Memory access
 _valid_mem_ranges: list[tuple[int, int]] = []
 def set_valid_mem_ranges(ranges: set[tuple[int, int]]) -> None: _valid_mem_ranges.clear(); _valid_mem_ranges.extend(ranges)
@@ -39,18 +53,41 @@ def mem_read(addr: int, size: int) -> int: return _ctypes_at(addr, size).value i
 def mem_write(addr: int, size: int, val: int) -> None:
   if _mem_valid(addr, size): _ctypes_at(addr, size).value = val
 
-# Memory op tables (not pseudocode - these are format descriptions)
-def _mem_ops(ops, suffix_map):
-  return {getattr(e, f"{p}_{s}"): v for e in ops for s, v in suffix_map.items() for p in [e.__name__.replace("Op", "")]}
-_LOAD_MAP = {'LOAD_B32': (1,4,0), 'LOAD_B64': (2,4,0), 'LOAD_B96': (3,4,0), 'LOAD_B128': (4,4,0), 'LOAD_U8': (1,1,0), 'LOAD_I8': (1,1,1), 'LOAD_U16': (1,2,0), 'LOAD_I16': (1,2,1)}
-_STORE_MAP = {'STORE_B32': (1,4), 'STORE_B64': (2,4), 'STORE_B96': (3,4), 'STORE_B128': (4,4), 'STORE_B8': (1,1), 'STORE_B16': (1,2)}
-FLAT_LOAD, FLAT_STORE = _mem_ops([GLOBALOp, FLATOp], _LOAD_MAP), _mem_ops([GLOBALOp, FLATOp], _STORE_MAP)
-# D16 ops: load/store 16-bit to lower or upper half of VGPR. Format: (size, sign, hi) where hi=1 means upper 16 bits
-_D16_LOAD_MAP = {'LOAD_D16_U8': (1,0,0), 'LOAD_D16_I8': (1,1,0), 'LOAD_D16_B16': (2,0,0),
-                 'LOAD_D16_HI_U8': (1,0,1), 'LOAD_D16_HI_I8': (1,1,1), 'LOAD_D16_HI_B16': (2,0,1)}
-_D16_STORE_MAP = {'STORE_D16_HI_B8': (1,1), 'STORE_D16_HI_B16': (2,1)}  # (size, hi)
-FLAT_D16_LOAD = _mem_ops([GLOBALOp, FLATOp], _D16_LOAD_MAP)
-FLAT_D16_STORE = _mem_ops([GLOBALOp, FLATOp], _D16_STORE_MAP)
+def _make_mem_accessor(read_fn, write_fn):
+  """Create a memory accessor class with the given read/write functions."""
+  class _MemAccessor:
+    __slots__ = ('_addr',)
+    def __init__(self, addr: int): self._addr = int(addr)
+    u8 = property(lambda s: read_fn(s._addr, 1), lambda s, v: write_fn(s._addr, 1, int(v)))
+    u16 = property(lambda s: read_fn(s._addr, 2), lambda s, v: write_fn(s._addr, 2, int(v)))
+    u32 = property(lambda s: read_fn(s._addr, 4), lambda s, v: write_fn(s._addr, 4, int(v)))
+    u64 = property(lambda s: read_fn(s._addr, 8), lambda s, v: write_fn(s._addr, 8, int(v)))
+    i8 = property(lambda s: _sext(read_fn(s._addr, 1), 8), lambda s, v: write_fn(s._addr, 1, int(v)))
+    i16 = property(lambda s: _sext(read_fn(s._addr, 2), 16), lambda s, v: write_fn(s._addr, 2, int(v)))
+    i32 = property(lambda s: _sext(read_fn(s._addr, 4), 32), lambda s, v: write_fn(s._addr, 4, int(v)))
+    i64 = property(lambda s: _sext(read_fn(s._addr, 8), 64), lambda s, v: write_fn(s._addr, 8, int(v)))
+    b8, b16, b32, b64 = u8, u16, u32, u64
+  return _MemAccessor
+
+_GlobalMemAccessor = _make_mem_accessor(mem_read, mem_write)
+
+class _GlobalMem:
+  """Global memory wrapper that supports MEM[addr].u32 style access."""
+  def __getitem__(self, addr) -> _GlobalMemAccessor: return _GlobalMemAccessor(addr)
+GlobalMem = _GlobalMem()
+
+class LDSMem:
+  """LDS memory wrapper that supports MEM[addr].u32 style access."""
+  __slots__ = ('_lds',)
+  def __init__(self, lds: bytearray): self._lds = lds
+  def _read(self, addr: int, size: int) -> int:
+    addr = addr & 0xffff
+    return int.from_bytes(self._lds[addr:addr+size], 'little') if addr + size <= len(self._lds) else 0
+  def _write(self, addr: int, size: int, val: int):
+    addr = addr & 0xffff
+    if addr + size <= len(self._lds): self._lds[addr:addr+size] = (int(val) & ((1 << (size*8)) - 1)).to_bytes(size, 'little')
+  def __getitem__(self, addr): return _make_mem_accessor(self._read, self._write)(addr)
+
 SMEM_LOAD = {SMEMOp.S_LOAD_B32: 1, SMEMOp.S_LOAD_B64: 2, SMEMOp.S_LOAD_B128: 4, SMEMOp.S_LOAD_B256: 8, SMEMOp.S_LOAD_B512: 16}
 
 # VOPD op -> VOP3 op mapping (VOPD is dual-issue of VOP1/VOP2 ops, use VOP3 enums for pseudocode lookup)
@@ -192,61 +229,26 @@ def exec_scalar(st: WaveState, inst: Inst) -> int:
     return new_pc_words - st.pc - 1  # -1 because emulator adds inst_words (1 for scalar)
   return 0
 
-def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = None) -> None:
+def exec_vector(st: WaveState, inst: Inst, lane: int, lds: LDSMem | None = None) -> None:
   """Execute vector instruction for one lane."""
   compiled = _get_compiled()
   V = st.vgpr[lane]
 
-  # Memory ops (not ALU pseudocode)
-  if isinstance(inst, FLAT):
-    op, addr_reg, data_reg, vdst, offset, saddr = inst.op, inst.addr, inst.data, inst.vdst, _sext(inst.offset, 13), inst.saddr
-    addr = V[addr_reg] | (V[addr_reg+1] << 32)
-    addr = (st.rsgpr64(saddr) + V[addr_reg] + offset) & MASK64 if saddr not in (NULL, 0x7f) else (addr + offset) & MASK64
-    if op in FLAT_LOAD:
-      cnt, sz, sign = FLAT_LOAD[op]
-      for i in range(cnt): val = mem_read(addr + i * sz, sz); V[vdst + i] = _sext(val, sz * 8) & MASK32 if sign else val
-    elif op in FLAT_STORE:
-      cnt, sz = FLAT_STORE[op]
-      for i in range(cnt): mem_write(addr + i * sz, sz, V[data_reg + i] & ((1 << (sz * 8)) - 1))
-    elif op in FLAT_D16_LOAD:
-      sz, sign, hi = FLAT_D16_LOAD[op]
-      val = mem_read(addr, sz)
-      if sign: val = _sext(val, sz * 8) & 0xffff
-      V[vdst] = _dst16(V[vdst], val, hi)
-    elif op in FLAT_D16_STORE:
-      sz, hi = FLAT_D16_STORE[op]
-      mem_write(addr, sz, _src16(V[data_reg], hi) & ((1 << (sz * 8)) - 1))
-    else: raise NotImplementedError(f"FLAT op {op}")
-    return
-
-  if isinstance(inst, DS):
-    op, vdst = inst.op, inst.vdst
-    if DSOp in compiled and op in compiled[DSOp]:
-      fn = compiled[DSOp][op]
-      # For B64 operations, DATA/DATA2 access bits [63:32] so we need to pass 64-bit values
-      op_name = op.name
-      is_b64 = '_B64' in op_name or '_U64' in op_name or '_I64' in op_name or '_F64' in op_name
-      is_b128 = '_B128' in op_name
-      if is_b128:
-        s1 = Reg((V[inst.data0 + 3] << 96) | (V[inst.data0 + 2] << 64) | (V[inst.data0 + 1] << 32) | V[inst.data0])
-        s2 = Reg((V[inst.data1 + 3] << 96) | (V[inst.data1 + 2] << 64) | (V[inst.data1 + 1] << 32) | V[inst.data1]) if inst.data1 else Reg(0)
-      elif is_b64:
-        s1 = Reg((V[inst.data0 + 1] << 32) | V[inst.data0])
-        s2 = Reg((V[inst.data1 + 1] << 32) | V[inst.data1]) if inst.data1 else Reg(0)
-      else:
-        s1, s2 = Reg(V[inst.data0]), Reg(V[inst.data1] if inst.data1 else 0)
-      s0, mem = Reg(V[inst.addr]), LDSMem(lds)
-      result = fn(s0, s1, s2, Reg(V[vdst]), Reg(st.scc), Reg(st.vcc), lane, Reg(st.exec_mask), st.literal, None,
-                  offset0=inst.offset0, offset1=inst.offset1, MEM=mem)
-      if 'D0' in result: V[vdst] = result['D0']._val & MASK32
-      if 'RETURN_DATA' in result:
-        # RETURN_DATA can be multi-dword (up to 128 bits for B128 ops)
-        val = result['RETURN_DATA']._val
-        V[vdst] = val & MASK32
-        V[vdst + 1] = (val >> 32) & MASK32
-        V[vdst + 2] = (val >> 64) & MASK32
-        V[vdst + 3] = (val >> 96) & MASK32
-    else: raise NotImplementedError(f"DS op {op}")
+  # Memory ops (FLAT/GLOBAL/SCRATCH and DS) - use generated pcode
+  if isinstance(inst, (FLAT, DS)):
+    op, vdst, op_name = inst.op, inst.vdst, inst.op.name
+    fn, ndwords = compiled[type(op)][op], _op_ndwords(op_name)
+    if isinstance(inst, FLAT):
+      addr = V[inst.addr] | (V[inst.addr + 1] << 32)
+      ADDR = (st.rsgpr64(inst.saddr) + V[inst.addr] + _sext(inst.offset, 13)) & MASK64 if inst.saddr not in (NULL, 0x7f) else (addr + _sext(inst.offset, 13)) & MASK64
+      result = fn(GlobalMem, ADDR, _vgpr_read(V, inst.data, ndwords), Reg(V[vdst]), Reg(0))
+      if 'VDATA' in result: _vgpr_write(V, vdst, result['VDATA']._val, ndwords)
+      if 'RETURN_DATA' in result: V[vdst] = result['RETURN_DATA']._val & MASK32
+    else:  # DS
+      DATA0, DATA1 = _vgpr_read(V, inst.data0, ndwords), _vgpr_read(V, inst.data1, ndwords) if inst.data1 else Reg(0)
+      result = fn(lds, Reg(V[inst.addr]), DATA0, DATA1, Reg(inst.offset0), Reg(inst.offset1), Reg(0))
+      if 'RETURN_DATA' in result and ('_RTN' in op_name or '_LOAD' in op_name):
+        _vgpr_write(V, vdst, result['RETURN_DATA']._val, ndwords * 2 if '_2ADDR_' in op_name else ndwords)
     return
 
   # VOPD: dual-issue, execute two ops simultaneously (read all inputs before writes)
@@ -419,7 +421,7 @@ def exec_wmma(st: WaveState, inst, op: VOP3POp) -> None:
 # MAIN EXECUTION LOOP
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def step_wave(program: Program, st: WaveState, lds: bytearray, n_lanes: int) -> int:
+def step_wave(program: Program, st: WaveState, lds: LDSMem, n_lanes: int) -> int:
   inst = program.get(st.pc)
   if inst is None: return 1
   inst_words, st.literal = inst._words, getattr(inst, '_literal', None) or 0
@@ -439,7 +441,7 @@ def step_wave(program: Program, st: WaveState, lds: bytearray, n_lanes: int) -> 
     st.pc += inst_words
   return 0
 
-def exec_wave(program: Program, st: WaveState, lds: bytearray, n_lanes: int) -> int:
+def exec_wave(program: Program, st: WaveState, lds: LDSMem, n_lanes: int) -> int:
   while st.pc in program:
     result = step_wave(program, st, lds, n_lanes)
     if result == -1: return 0
@@ -449,7 +451,7 @@ def exec_wave(program: Program, st: WaveState, lds: bytearray, n_lanes: int) -> 
 def exec_workgroup(program: Program, workgroup_id: tuple[int, int, int], local_size: tuple[int, int, int], args_ptr: int,
                    wg_id_sgpr_base: int, wg_id_enables: tuple[bool, bool, bool]) -> None:
   lx, ly, lz = local_size
-  total_threads, lds = lx * ly * lz, bytearray(65536)
+  total_threads, lds = lx * ly * lz, LDSMem(bytearray(65536))
   waves: list[tuple[WaveState, int, int]] = []
   for wave_start in range(0, total_threads, WAVE_SIZE):
     n_lanes, st = min(WAVE_SIZE, total_threads - wave_start), WaveState()

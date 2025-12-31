@@ -142,6 +142,7 @@ test:
   .amdhsa_wavefront_size32 1
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
   .amdhsa_kernarg_size 8
+  .amdhsa_group_segment_fixed_size 65536
 .end_amdhsa_kernel
 
 .amdgpu_metadata
@@ -153,7 +154,7 @@ amdhsa.kernels:
   - .name: test
     .symbol: test.kd
     .kernarg_segment_size: 8
-    .group_segment_fixed_size: 0
+    .group_segment_fixed_size: 65536
     .private_segment_fixed_size: 0
     .kernarg_segment_align: 8
     .wavefront_size: 32
@@ -3690,10 +3691,6 @@ class TestVOP3F16Modifiers(unittest.TestCase):
     self.assertAlmostEqual(result, -6.0, delta=0.01, msg=f"Expected -6.0, got {result}")
 
 
-if __name__ == '__main__':
-  unittest.main()
-
-
 class TestVFmaMixSinCase(unittest.TestCase):
   """Tests for the specific V_FMA_MIXLO_F16 case that fails in AMD_LLVM sin(0) kernel."""
 
@@ -4414,8 +4411,8 @@ class TestDSAtomic(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vgpr[0][4], 100, "mem should still be 100 (compare didn't match)")
 
-  def test_ds_inc_u32(self):
-    """DS_INC_U32: increment with wrap."""
+  def test_ds_inc_rtn_u32(self):
+    """DS_INC_RTN_U32: increment with wrap, return old value."""
     instructions = [
       v_mov_b32_e32(v[10], 0),
       s_mov_b32(s[2], 5),
@@ -4424,7 +4421,7 @@ class TestDSAtomic(unittest.TestCase):
       s_waitcnt(lgkmcnt=0),
       s_mov_b32(s[2], 10),
       v_mov_b32_e32(v[1], s[2]),  # limit = 10
-      ds_inc_u32(addr=v[10], data0=v[1], vdst=v[2], offset0=0),
+      ds_inc_rtn_u32(addr=v[10], data0=v[1], vdst=v[2], offset0=0),
       s_waitcnt(lgkmcnt=0),
       ds_load_b32(addr=v[10], vdst=v[3], offset0=0),
       s_waitcnt(lgkmcnt=0),
@@ -4433,8 +4430,8 @@ class TestDSAtomic(unittest.TestCase):
     self.assertEqual(st.vgpr[0][2], 5, "v2 should have old value (5)")
     self.assertEqual(st.vgpr[0][3], 6, "v3 should have incremented value (6)")
 
-  def test_ds_dec_u32(self):
-    """DS_DEC_U32: decrement with wrap."""
+  def test_ds_dec_rtn_u32(self):
+    """DS_DEC_RTN_U32: decrement with wrap, return old value."""
     instructions = [
       v_mov_b32_e32(v[10], 0),
       s_mov_b32(s[2], 5),
@@ -4443,7 +4440,7 @@ class TestDSAtomic(unittest.TestCase):
       s_waitcnt(lgkmcnt=0),
       s_mov_b32(s[2], 10),
       v_mov_b32_e32(v[1], s[2]),  # limit = 10
-      ds_dec_u32(addr=v[10], data0=v[1], vdst=v[2], offset0=0),
+      ds_dec_rtn_u32(addr=v[10], data0=v[1], vdst=v[2], offset0=0),
       s_waitcnt(lgkmcnt=0),
       ds_load_b32(addr=v[10], vdst=v[3], offset0=0),
       s_waitcnt(lgkmcnt=0),
@@ -4452,8 +4449,8 @@ class TestDSAtomic(unittest.TestCase):
     self.assertEqual(st.vgpr[0][2], 5, "v2 should have old value (5)")
     self.assertEqual(st.vgpr[0][3], 4, "v3 should have decremented value (4)")
 
-  def test_ds_dec_u32_wrap(self):
-    """DS_DEC_U32: wraps to limit when value is 0 or > limit."""
+  def test_ds_dec_rtn_u32_wrap(self):
+    """DS_DEC_RTN_U32: wraps to limit when value is 0 or > limit."""
     instructions = [
       v_mov_b32_e32(v[10], 0),
       s_mov_b32(s[2], 0),
@@ -4462,7 +4459,7 @@ class TestDSAtomic(unittest.TestCase):
       s_waitcnt(lgkmcnt=0),
       s_mov_b32(s[2], 10),
       v_mov_b32_e32(v[1], s[2]),  # limit = 10
-      ds_dec_u32(addr=v[10], data0=v[1], vdst=v[2], offset0=0),
+      ds_dec_rtn_u32(addr=v[10], data0=v[1], vdst=v[2], offset0=0),
       s_waitcnt(lgkmcnt=0),
       ds_load_b32(addr=v[10], vdst=v[3], offset0=0),
       s_waitcnt(lgkmcnt=0),
@@ -4470,3 +4467,276 @@ class TestDSAtomic(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.vgpr[0][2], 0, "v2 should have old value (0)")
     self.assertEqual(st.vgpr[0][3], 10, "v3 should wrap to limit (10)")
+
+
+class TestDSRegisterWidth(unittest.TestCase):
+  """Regression tests: DS loads should only write the correct number of VGPRs."""
+
+  def test_ds_load_b32_no_overwrite(self):
+    """DS_LOAD_B32 should only write 1 VGPR, not overwrite subsequent registers."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),      # addr = 0
+      s_mov_b32(s[0], 0xDEADBEEF),
+      v_mov_b32_e32(v[1], s[0]),   # store value
+      s_mov_b32(s[0], 0x11111111),
+      v_mov_b32_e32(v[2], s[0]),   # sentinel
+      s_mov_b32(s[0], 0x22222222),
+      v_mov_b32_e32(v[3], s[0]),   # sentinel
+      s_mov_b32(s[0], 0x33333333),
+      v_mov_b32_e32(v[4], s[0]),   # sentinel
+      ds_store_b32(addr=v[0], data0=v[1], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[0], vdst=v[1], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0xDEADBEEF, "v1 should have loaded value")
+    self.assertEqual(st.vgpr[0][2], 0x11111111, "v2 should be untouched")
+    self.assertEqual(st.vgpr[0][3], 0x22222222, "v3 should be untouched")
+    self.assertEqual(st.vgpr[0][4], 0x33333333, "v4 should be untouched")
+
+  def test_ds_load_b64_no_overwrite(self):
+    """DS_LOAD_B64 should only write 2 VGPRs, not overwrite subsequent registers."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),      # addr = 0
+      s_mov_b32(s[0], 0xDEADBEEF),
+      v_mov_b32_e32(v[1], s[0]),   # low dword
+      s_mov_b32(s[0], 0xCAFEBABE),
+      v_mov_b32_e32(v[2], s[0]),   # high dword
+      s_mov_b32(s[0], 0x11111111),
+      v_mov_b32_e32(v[5], s[0]),   # sentinel
+      s_mov_b32(s[0], 0x22222222),
+      v_mov_b32_e32(v[6], s[0]),   # sentinel
+      DS(DSOp.DS_STORE_B64, addr=v[0], data0=v[1], vdst=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      DS(DSOp.DS_LOAD_B64, addr=v[0], vdst=v[3], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][3], 0xDEADBEEF, "v3 should have low dword")
+    self.assertEqual(st.vgpr[0][4], 0xCAFEBABE, "v4 should have high dword")
+    self.assertEqual(st.vgpr[0][5], 0x11111111, "v5 should be untouched")
+    self.assertEqual(st.vgpr[0][6], 0x22222222, "v6 should be untouched")
+
+  def test_ds_load_2addr_b32_no_overwrite(self):
+    """DS_LOAD_2ADDR_B32 should only write 2 VGPRs, not overwrite subsequent registers."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),      # addr = 0
+      s_mov_b32(s[0], 0xAAAAAAAA),
+      v_mov_b32_e32(v[1], s[0]),   # first value
+      s_mov_b32(s[0], 0xBBBBBBBB),
+      v_mov_b32_e32(v[2], s[0]),   # second value
+      s_mov_b32(s[0], 0x11111111),
+      v_mov_b32_e32(v[5], s[0]),   # sentinel
+      s_mov_b32(s[0], 0x22222222),
+      v_mov_b32_e32(v[6], s[0]),   # sentinel
+      DS(DSOp.DS_STORE_2ADDR_B32, addr=v[0], data0=v[1], data1=v[2], vdst=v[0], offset0=0, offset1=1),
+      s_waitcnt(lgkmcnt=0),
+      DS(DSOp.DS_LOAD_2ADDR_B32, addr=v[0], vdst=v[3], offset0=0, offset1=1),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][3], 0xAAAAAAAA, "v3 should have first value")
+    self.assertEqual(st.vgpr[0][4], 0xBBBBBBBB, "v4 should have second value")
+    self.assertEqual(st.vgpr[0][5], 0x11111111, "v5 should be untouched")
+    self.assertEqual(st.vgpr[0][6], 0x22222222, "v6 should be untouched")
+
+
+class TestDS2AddrStride64(unittest.TestCase):
+  """Tests for DS_*_2ADDR_STRIDE64 instructions (offset * 256 for B32, offset * 512 for B64)."""
+
+  def test_ds_store_load_2addr_stride64_b32(self):
+    """DS_STORE_2ADDR_STRIDE64_B32: stores at ADDR + offset*256."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),     # base addr = 0
+      s_mov_b32(s[0], 0xAAAAAAAA),
+      v_mov_b32_e32(v[0], s[0]),   # first value
+      s_mov_b32(s[0], 0xBBBBBBBB),
+      v_mov_b32_e32(v[1], s[0]),   # second value
+      # Store with STRIDE64: offset0=1 -> addr 256, offset1=2 -> addr 512
+      DS(DSOp.DS_STORE_2ADDR_STRIDE64_B32, addr=v[10], data0=v[0], data1=v[1], vdst=v[0], offset0=1, offset1=2),
+      s_waitcnt(lgkmcnt=0),
+      # Load back using STRIDE64
+      DS(DSOp.DS_LOAD_2ADDR_STRIDE64_B32, addr=v[10], vdst=v[2], offset0=1, offset1=2),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0xAAAAAAAA, "v2 should have value from addr 256")
+    self.assertEqual(st.vgpr[0][3], 0xBBBBBBBB, "v3 should have value from addr 512")
+
+  def test_ds_store_load_2addr_stride64_b64(self):
+    """DS_STORE_2ADDR_STRIDE64_B64: stores at ADDR + offset*512."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),     # base addr = 0
+      s_mov_b32(s[0], 0xDEADBEEF),
+      v_mov_b32_e32(v[0], s[0]),   # first value low
+      s_mov_b32(s[0], 0xCAFEBABE),
+      v_mov_b32_e32(v[1], s[0]),   # first value high
+      s_mov_b32(s[0], 0x12345678),
+      v_mov_b32_e32(v[2], s[0]),   # second value low
+      s_mov_b32(s[0], 0x9ABCDEF0),
+      v_mov_b32_e32(v[3], s[0]),   # second value high
+      # Store with STRIDE64: offset0=1 -> addr 512, offset1=2 -> addr 1024
+      DS(DSOp.DS_STORE_2ADDR_STRIDE64_B64, addr=v[10], data0=v[0], data1=v[2], vdst=v[0], offset0=1, offset1=2),
+      s_waitcnt(lgkmcnt=0),
+      # Load back using STRIDE64
+      DS(DSOp.DS_LOAD_2ADDR_STRIDE64_B64, addr=v[10], vdst=v[4], offset0=1, offset1=2),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][4], 0xDEADBEEF, "v4 should have first low dword")
+    self.assertEqual(st.vgpr[0][5], 0xCAFEBABE, "v5 should have first high dword")
+    self.assertEqual(st.vgpr[0][6], 0x12345678, "v6 should have second low dword")
+    self.assertEqual(st.vgpr[0][7], 0x9ABCDEF0, "v7 should have second high dword")
+
+
+class TestDSStorexchg(unittest.TestCase):
+  """Tests for DS_STOREXCHG (exchange) instructions."""
+
+  def test_ds_storexchg_rtn_b32(self):
+    """DS_STOREXCHG_RTN_B32: exchange value and return old."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[0], 0xAAAAAAAA),
+      v_mov_b32_e32(v[0], s[0]),   # initial value
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[0], 0xBBBBBBBB),
+      v_mov_b32_e32(v[1], s[0]),   # new value
+      DS(DSOp.DS_STOREXCHG_RTN_B32, addr=v[10], data0=v[1], vdst=v[2], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[10], vdst=v[3], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0xAAAAAAAA, "v2 should have old value")
+    self.assertEqual(st.vgpr[0][3], 0xBBBBBBBB, "memory should have new value")
+
+  def test_ds_storexchg_2addr_rtn_b32(self):
+    """DS_STOREXCHG_2ADDR_RTN_B32: exchange at two addresses (offset*4)."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[0], 0x11111111),
+      v_mov_b32_e32(v[0], s[0]),   # initial at offset0
+      s_mov_b32(s[0], 0x22222222),
+      v_mov_b32_e32(v[1], s[0]),   # initial at offset1
+      # Store initial values at offset 0 and 4 (offset0=0, offset1=1, each *4)
+      DS(DSOp.DS_STORE_2ADDR_B32, addr=v[10], data0=v[0], data1=v[1], vdst=v[0], offset0=0, offset1=1),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[0], 0xAAAAAAAA),
+      v_mov_b32_e32(v[2], s[0]),   # new value for offset0
+      s_mov_b32(s[0], 0xBBBBBBBB),
+      v_mov_b32_e32(v[3], s[0]),   # new value for offset1
+      # Exchange: write new values, return old
+      DS(DSOp.DS_STOREXCHG_2ADDR_RTN_B32, addr=v[10], data0=v[2], data1=v[3], vdst=v[4], offset0=0, offset1=1),
+      s_waitcnt(lgkmcnt=0),
+      # Load back to verify new values
+      DS(DSOp.DS_LOAD_2ADDR_B32, addr=v[10], vdst=v[6], offset0=0, offset1=1),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # Return value: v4=old[0], v5=old[1]
+    self.assertEqual(st.vgpr[0][4], 0x11111111, "v4 should have old value from offset0")
+    self.assertEqual(st.vgpr[0][5], 0x22222222, "v5 should have old value from offset1")
+    # Memory should have new values
+    self.assertEqual(st.vgpr[0][6], 0xAAAAAAAA, "v6 should have new value at offset0")
+    self.assertEqual(st.vgpr[0][7], 0xBBBBBBBB, "v7 should have new value at offset1")
+
+  def test_ds_storexchg_2addr_stride64_rtn_b32(self):
+    """DS_STOREXCHG_2ADDR_STRIDE64_RTN_B32: exchange at two addresses (offset*256)."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[0], 0x11111111),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[0], 0x22222222),
+      v_mov_b32_e32(v[1], s[0]),
+      # Store initial values at offset*256
+      DS(DSOp.DS_STORE_2ADDR_STRIDE64_B32, addr=v[10], data0=v[0], data1=v[1], vdst=v[0], offset0=1, offset1=2),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[0], 0xAAAAAAAA),
+      v_mov_b32_e32(v[2], s[0]),
+      s_mov_b32(s[0], 0xBBBBBBBB),
+      v_mov_b32_e32(v[3], s[0]),
+      # Exchange
+      DS(DSOp.DS_STOREXCHG_2ADDR_STRIDE64_RTN_B32, addr=v[10], data0=v[2], data1=v[3], vdst=v[4], offset0=1, offset1=2),
+      s_waitcnt(lgkmcnt=0),
+      # Load back
+      DS(DSOp.DS_LOAD_2ADDR_STRIDE64_B32, addr=v[10], vdst=v[6], offset0=1, offset1=2),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][4], 0x11111111, "v4 should have old value")
+    self.assertEqual(st.vgpr[0][5], 0x22222222, "v5 should have old value")
+    self.assertEqual(st.vgpr[0][6], 0xAAAAAAAA, "v6 should have new value")
+    self.assertEqual(st.vgpr[0][7], 0xBBBBBBBB, "v7 should have new value")
+
+  def test_ds_storexchg_rtn_b64(self):
+    """DS_STOREXCHG_RTN_B64: exchange 64-bit value and return old."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[0], 0xDEADBEEF),
+      v_mov_b32_e32(v[0], s[0]),   # initial low
+      s_mov_b32(s[0], 0xCAFEBABE),
+      v_mov_b32_e32(v[1], s[0]),   # initial high
+      DS(DSOp.DS_STORE_B64, addr=v[10], data0=v[0], vdst=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[0], 0x12345678),
+      v_mov_b32_e32(v[2], s[0]),   # new low
+      s_mov_b32(s[0], 0x9ABCDEF0),
+      v_mov_b32_e32(v[3], s[0]),   # new high
+      DS(DSOp.DS_STOREXCHG_RTN_B64, addr=v[10], data0=v[2], vdst=v[4], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      DS(DSOp.DS_LOAD_B64, addr=v[10], vdst=v[6], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][4], 0xDEADBEEF, "v4 should have old low dword")
+    self.assertEqual(st.vgpr[0][5], 0xCAFEBABE, "v5 should have old high dword")
+    self.assertEqual(st.vgpr[0][6], 0x12345678, "v6 should have new low dword")
+    self.assertEqual(st.vgpr[0][7], 0x9ABCDEF0, "v7 should have new high dword")
+
+  def test_ds_storexchg_2addr_stride64_rtn_b64(self):
+    """DS_STOREXCHG_2ADDR_STRIDE64_RTN_B64: exchange at two addresses (offset*512) with 64-bit values."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      # Initial values at offset*512
+      s_mov_b32(s[0], 0x11111111),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[0], 0x22222222),
+      v_mov_b32_e32(v[1], s[0]),
+      s_mov_b32(s[0], 0x33333333),
+      v_mov_b32_e32(v[2], s[0]),
+      s_mov_b32(s[0], 0x44444444),
+      v_mov_b32_e32(v[3], s[0]),
+      DS(DSOp.DS_STORE_2ADDR_STRIDE64_B64, addr=v[10], data0=v[0], data1=v[2], vdst=v[0], offset0=1, offset1=2),
+      s_waitcnt(lgkmcnt=0),
+      # New values
+      s_mov_b32(s[0], 0xAAAAAAAA),
+      v_mov_b32_e32(v[4], s[0]),
+      s_mov_b32(s[0], 0xBBBBBBBB),
+      v_mov_b32_e32(v[5], s[0]),
+      s_mov_b32(s[0], 0xCCCCCCCC),
+      v_mov_b32_e32(v[6], s[0]),
+      s_mov_b32(s[0], 0xDDDDDDDD),
+      v_mov_b32_e32(v[7], s[0]),
+      # Exchange
+      DS(DSOp.DS_STOREXCHG_2ADDR_STRIDE64_RTN_B64, addr=v[10], data0=v[4], data1=v[6], vdst=v[8], offset0=1, offset1=2),
+      s_waitcnt(lgkmcnt=0),
+      # Load back
+      DS(DSOp.DS_LOAD_2ADDR_STRIDE64_B64, addr=v[10], vdst=v[12], offset0=1, offset1=2),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # Return: v8-v11 = old values (4 dwords for 2x64-bit)
+    self.assertEqual(st.vgpr[0][8], 0x11111111, "v8 should have old val1 low")
+    self.assertEqual(st.vgpr[0][9], 0x22222222, "v9 should have old val1 high")
+    self.assertEqual(st.vgpr[0][10], 0x33333333, "v10 should have old val2 low")
+    self.assertEqual(st.vgpr[0][11], 0x44444444, "v11 should have old val2 high")
+    # Memory: v12-v15 = new values
+    self.assertEqual(st.vgpr[0][12], 0xAAAAAAAA, "v12 should have new val1 low")
+    self.assertEqual(st.vgpr[0][13], 0xBBBBBBBB, "v13 should have new val1 high")
+    self.assertEqual(st.vgpr[0][14], 0xCCCCCCCC, "v14 should have new val2 low")
+    self.assertEqual(st.vgpr[0][15], 0xDDDDDDDD, "v15 should have new val2 high")
+
+if __name__ == '__main__':
+  unittest.main()

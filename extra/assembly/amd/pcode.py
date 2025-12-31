@@ -212,7 +212,7 @@ def signext_from_bit(val, bit):
 
 __all__ = [
   # Classes
-  'Reg', 'SliceProxy', 'TypedView', 'LDSMem',
+  'Reg', 'SliceProxy', 'TypedView',
   # Pack functions
   '_pack', '_pack32', 'pack', 'pack32',
   # Constants
@@ -340,43 +340,6 @@ class _Denorm:
   f32 = _DenormChecker(32)
   f64 = _DenormChecker(64)
 DENORM = _Denorm()
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# LDS MEMORY ACCESS (for DS instructions)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-class _LDSAccessor:
-  """Accessor for LDS memory at a specific address. Supports .u32/.f32 etc."""
-  __slots__ = ('_lds', '_addr')
-  def __init__(self, lds: bytearray, addr: int): self._lds, self._addr = lds, addr & 0xffff
-
-  def _read(self, size: int) -> int:
-    return int.from_bytes(self._lds[self._addr:self._addr+size], 'little') if self._addr + size <= len(self._lds) else 0
-  def _write(self, size: int, val: int):
-    if self._addr + size <= len(self._lds): self._lds[self._addr:self._addr+size] = (int(val) & ((1 << (size*8)) - 1)).to_bytes(size, 'little')
-
-  # Unsigned integer access
-  u8 = property(lambda s: s._read(1), lambda s, v: s._write(1, v))
-  u16 = property(lambda s: s._read(2), lambda s, v: s._write(2, v))
-  u32 = property(lambda s: s._read(4), lambda s, v: s._write(4, v))
-  u64 = property(lambda s: s._read(8), lambda s, v: s._write(8, v))
-  # Signed integer access
-  i8 = property(lambda s: _sext(s._read(1), 8), lambda s, v: s._write(1, v))
-  i16 = property(lambda s: _sext(s._read(2), 16), lambda s, v: s._write(2, v))
-  i32 = property(lambda s: _sext(s._read(4), 32), lambda s, v: s._write(4, v))
-  i64 = property(lambda s: _sext(s._read(8), 64), lambda s, v: s._write(8, v))
-  # Float access
-  f16 = property(lambda s: _f16(s._read(2)), lambda s, v: s._write(2, v if isinstance(v, int) else _i16(float(v))))
-  f32 = property(lambda s: _f32(s._read(4)), lambda s, v: s._write(4, _i32(float(v))))
-  f64 = property(lambda s: _f64(s._read(8)), lambda s, v: s._write(8, _i64(float(v))))
-  # Bit/byte aliases
-  b8, b16, b32, b64 = u8, u16, u32, u64
-
-class LDSMem:
-  """LDS memory wrapper that supports MEM[addr].u32 style access."""
-  __slots__ = ('_lds',)
-  def __init__(self, lds: bytearray): self._lds = lds
-  def __getitem__(self, addr) -> _LDSAccessor: return _LDSAccessor(self._lds, int(addr))
 
 class SliceProxy:
   """Proxy for D0[31:16] that supports .f16/.u16 etc getters and setters."""
