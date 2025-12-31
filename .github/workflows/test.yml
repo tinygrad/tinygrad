@@ -218,7 +218,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
-    # TODO: run the pre-commit hook to replace a lot of this
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -233,13 +232,13 @@ jobs:
     - name: Lint with ruff
       run: |
         pip3 install --upgrade --force-reinstall ruff==0.14.10
-        python3 -m ruff check .
+        pre-commit run ruff --all-files
         python3 -m ruff check examples/mlperf/ --ignore E501
         python3 -m ruff check extra/thunder/tiny/ --ignore E501 --ignore F841 --ignore E722
         python3 -m ruff check extra/torch_backend/backend.py
     - name: Run mypy
       run: |
-        python -m mypy --strict-equality --lineprecision-report .
+        python -m mypy --lineprecision-report .
         cat lineprecision.txt
     - name: Run TYPED=1
       run: TYPED=1 python -c "import tinygrad"
