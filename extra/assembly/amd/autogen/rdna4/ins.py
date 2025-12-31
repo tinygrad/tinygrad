@@ -94,17 +94,14 @@ class VDS(Inst64):
   data1:VGPRField = bits[55:48]
   vdst:VGPRField = bits[63:56]
 
-class VDSDIR(Inst64):
-  encoding = bits[31:24] == 0b11001101
+class VDSDIR(Inst32):
+  encoding = bits[31:24] == 0b11001110
   vdst:VGPRField = bits[7:0]
-  waitexp = bits[10:8]
-  opsel = bits[14:11]
-  cm = bits[15]
-  op:Annotated[BitField, VDSDIROp] = bits[20:16]
-  src0:Src = bits[40:32]
-  src1:Src = bits[49:41]
-  src2:Src = bits[58:50]
-  neg = bits[63:61]
+  attr_chan = bits[9:8]
+  attr = bits[15:10]
+  wait_va = bits[19:16]
+  op:Annotated[BitField, VDSDIROp] = bits[21:20]
+  wait_vm = bits[23]  # single bit, bit 22 is reserved
 
 class VEXPORT(Inst64):
   encoding = bits[31:26] == 0b111110

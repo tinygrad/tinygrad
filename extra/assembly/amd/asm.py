@@ -509,6 +509,13 @@ def _disasm_ldsdir(inst) -> str:
   if inst.op == 0: return f"lds_param_load v{inst.vdst}, attr{inst.attr}.{['x','y','z','w'][inst.attr_chan]}{wait}"
   raise ValueError(f"unknown LDSDIR op: {inst.op}")
 
+def _disasm_vdsdir(inst) -> str:
+  wait_va = f" wait_va_vdst:{inst.wait_va}" if inst.wait_va != 0 else ""
+  wait_vm = f" wait_vm_vsrc:{inst.wait_vm}" if inst.wait_vm != 0 else ""
+  if inst.op == 1: return f"ds_direct_load v{inst.vdst}{wait_va}{wait_vm}"
+  if inst.op == 0: return f"ds_param_load v{inst.vdst}, attr{inst.attr}.{['x','y','z','w'][inst.attr_chan]}{wait_va}{wait_vm}"
+  raise ValueError(f"unknown VDSDIR op: {inst.op}")
+
 def _disasm_vexport(inst) -> str:
   target = _EXP_TARGETS.get(inst.target, f"invalid_target_{inst.target}")
   en = inst.en
@@ -584,7 +591,7 @@ _DISASM_BY_NAME = {
   'VOPD': _disasm_vopd, 'VOP3P': _disasm_vop3p, 'VINTERP': _disasm_vinterp, 'SOPP': _disasm_sopp, 'SMEM': _disasm_smem,
   'DS': _disasm_ds, 'VDS': _disasm_ds, 'FLAT': _disasm_flat, 'MUBUF': _disasm_buf, 'MTBUF': _disasm_buf, 'MIMG': _disasm_mimg,
   'SOP1': _disasm_sop1, 'SOP2': _disasm_sop2, 'SOPC': _disasm_sopc, 'SOPK': _disasm_sopk,
-  'VEXPORT': _disasm_vexport, 'EXP': _disasm_vexport, 'LDSDIR': _disasm_ldsdir,
+  'VEXPORT': _disasm_vexport, 'EXP': _disasm_vexport, 'LDSDIR': _disasm_ldsdir, 'VDSDIR': _disasm_vdsdir,
   'VBUFFER': _disasm_vbuffer, 'VFLAT': _disasm_vflat, 'VGLOBAL': _disasm_vflat, 'VSCRATCH': _disasm_vflat,
   'VSAMPLE': _disasm_vsample, 'VIMAGE': _disasm_vimage,
 }
