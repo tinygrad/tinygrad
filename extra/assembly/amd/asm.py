@@ -425,6 +425,38 @@ def _disasm_vinterp(inst: VINTERP) -> str:
   mods = _mods((inst.waitexp, f"wait_exp:{inst.waitexp}"), (inst.clmp, "clamp"))
   return f"{name} v{inst.vdst}, {src0}, {src1}, {src2}" + (" " + mods if mods else "")
 
+def _disasm_vflat(inst) -> str:
+  """Disassemble RDNA4 VFLAT/VGLOBAL/VSCRATCH instructions."""
+  # Get op enum based on class name
+  cls_name = type(inst).__name__
+  from extra.assembly.amd.autogen.rdna4.enum import VFLATOp, VGLOBALOp, VSCRATCHOp
+  op_enum = {'VFLAT': VFLATOp, 'VGLOBAL': VGLOBALOp, 'VSCRATCH': VSCRATCHOp}[cls_name]
+  name = op_enum(inst.op).name.lower()
+  # Determine data width from instruction name suffix
+  suffix = name.split('_')[-1]
+  w = {'b32':1,'b64':2,'b96':3,'b128':4,'u8':1,'i8':1,'u16':1,'i16':1,'u32':1,'i32':1,'u64':2,'i64':2,'f32':1,'f64':2,'f16':1,'bf16':1}.get(suffix, 1)
+  if 'cmpswap' in name: w *= 2
+  # Handle signed 24-bit offset
+  ioffset = inst.ioffset if inst.ioffset < 0x800000 else inst.ioffset - 0x1000000
+  # Build modifiers
+  th_map = {0: '', 1: ' th:TH_ATOMIC_RETURN', 2: ' th:TH_ATOMIC_NT', 3: ' th:TH_ATOMIC_CASCADE_NT'}
+  mods = f"{f' offset:{ioffset}' if ioffset else ''}{th_map.get(inst.th, '')}"
+  # Format operands - 64-bit addr when saddr is NULL (124 or 0x7f)
+  vdst_s = _vreg(inst.vdst, w // 2 if 'cmpswap' in name else w)
+  vaddr_s = _vreg(inst.vaddr, 2 if inst.saddr in (124, 0x7f) else 1)
+  vsrc_s = _vreg(inst.vsrc, w)
+  # Atomic with return value
+  if 'atomic' in name and inst.th == 1:
+    return f"{name} {vdst_s}, {vaddr_s}, {vsrc_s}{mods}"
+  # Atomic without return
+  if 'atomic' in name:
+    return f"{name} {vaddr_s}, {vsrc_s}{mods}"
+  # Store
+  if 'store' in name:
+    return f"{name} {vaddr_s}, {vsrc_s}{mods}"
+  # Load
+  return f"{name} {vdst_s}, {vaddr_s}{mods}"
+
 def _disasm_generic(inst: Inst) -> str:
   name = f"op_{inst.op}"
   def format_field(field_name, val):
@@ -434,11 +466,18 @@ def _disasm_generic(inst: Inst) -> str:
   operands = [format_field(field_name, inst._values.get(field_name, 0)) for field_name in inst._fields if field_name not in ('encoding', 'op')]
   return f"{name} {', '.join(operands)}" if operands else name
 
-DISASM_HANDLERS = {VOP1: _disasm_vop1, VOP2: _disasm_vop2, VOPC: _disasm_vopc, VOP3: _disasm_vop3, VOP3SD: _disasm_vop3sd, VOPD: _disasm_vopd, VOP3P: _disasm_vop3p,
-                   VINTERP: _disasm_vinterp, SOPP: _disasm_sopp, SMEM: _disasm_smem, DS: _disasm_ds, FLAT: _disasm_flat, MUBUF: _disasm_buf, MTBUF: _disasm_buf,
-                   MIMG: _disasm_mimg, SOP1: _disasm_sop1, SOP2: _disasm_sop2, SOPC: _disasm_sopc, SOPK: _disasm_sopk}
+# Map class names to handlers (allows same handler for RDNA3/RDNA4 variants)
+DISASM_HANDLERS_BY_NAME = {
+  'VOP1': _disasm_vop1, 'VOP2': _disasm_vop2, 'VOPC': _disasm_vopc, 'VOP3': _disasm_vop3, 'VOP3SD': _disasm_vop3sd,
+  'VOPD': _disasm_vopd, 'VOP3P': _disasm_vop3p, 'VINTERP': _disasm_vinterp, 'SOPP': _disasm_sopp, 'SMEM': _disasm_smem,
+  'DS': _disasm_ds, 'VDS': _disasm_ds,  # RDNA4 VDS uses same format as DS
+  'FLAT': _disasm_flat, 'VFLAT': _disasm_vflat, 'VGLOBAL': _disasm_vflat, 'VSCRATCH': _disasm_vflat,  # RDNA4 uses new format
+  'MUBUF': _disasm_buf, 'MTBUF': _disasm_buf, 'VBUFFER': _disasm_buf,  # RDNA4 VBUFFER uses MUBUF format
+  'MIMG': _disasm_mimg, 'VIMAGE': _disasm_mimg, 'VSAMPLE': _disasm_mimg,  # RDNA4 VIMAGE/VSAMPLE use MIMG format
+  'SOP1': _disasm_sop1, 'SOP2': _disasm_sop2, 'SOPC': _disasm_sopc, 'SOPK': _disasm_sopk,
+}
 
-def disasm(inst: Inst) -> str: return DISASM_HANDLERS.get(type(inst), _disasm_generic)(inst)
+def disasm(inst: Inst) -> str: return DISASM_HANDLERS_BY_NAME.get(type(inst).__name__, _disasm_generic)(inst)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ASSEMBLER

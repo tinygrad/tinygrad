@@ -317,7 +317,7 @@ class Inst:
     return result + (lit32 & MASK32).to_bytes(4, 'little')
 
   @classmethod
-  def _size(cls) -> int: return 4 if issubclass(cls, Inst32) else 8
+  def _size(cls) -> int: return 4 if issubclass(cls, Inst32) else 12 if issubclass(cls, Inst96) else 8
   def size(self) -> int:
     # Literal is always 4 bytes in the binary (for 64-bit ops, it's in high 32 bits)
     return self._size() + (4 if self._literal is not None else 0)
@@ -374,3 +374,4 @@ class Inst:
 
 class Inst32(Inst): pass
 class Inst64(Inst): pass
+class Inst96(Inst): pass
