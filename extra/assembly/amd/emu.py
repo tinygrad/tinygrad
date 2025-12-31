@@ -261,28 +261,21 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     vdsty = (inst.vdsty << 1) | ((inst.vdstx & 1) ^ 1)
     inputs = [(inst.opx, st.rsrc(inst.srcx0, lane), V[inst.vsrcx1], V[inst.vdstx], inst.vdstx),
               (inst.opy, st.rsrc(inst.srcy0, lane), V[inst.vsrcy1], V[vdsty], vdsty)]
-    def exec_vopd(vopd_op, s0, s1, d0, dst):
-      op = _VOPD_TO_VOP.get(vopd_op)
-      if op is None: return None
-      fn = compiled.get(type(op), {}).get(op)
-      if fn is None: return None
-      SCC, VCC, EXEC = Reg(st.scc), Reg(st.vcc), Reg(st.exec_mask)
-      return (dst, fn(Reg(s0), Reg(s1), None, Reg(d0), SCC, VCC, lane, EXEC, st.literal, None)['D0']._val)
-    results = [r for vopd_op, s0, s1, d0, dst in inputs if (r := exec_vopd(vopd_op, s0, s1, d0, dst))]
-    for dst, val in results: V[dst] = val
+    def exec_vopd(vopd_op, s0, s1, d0):
+      op = _VOPD_TO_VOP[vopd_op]
+      return compiled[type(op)][op](Reg(s0), Reg(s1), None, Reg(d0), Reg(st.scc), Reg(st.vcc), lane, Reg(st.exec_mask), st.literal, None)['D0']._val
+    for vopd_op, s0, s1, d0, dst in inputs: V[dst] = exec_vopd(vopd_op, s0, s1, d0)
     return
 
   # VOP3SD: has extra scalar dest for carry output
   if isinstance(inst, VOP3SD):
-    fn = compiled.get(VOP3SDOp, {}).get(inst.op)
-    if fn is None: raise NotImplementedError(f"{inst.op.name} not in pseudocode")
+    fn = compiled[VOP3SDOp][inst.op]
     # Read sources based on register counts from inst properties
     def rsrc_n(src, regs): return st.rsrc64(src, lane) if regs == 2 else st.rsrc(src, lane)
     s0, s1, s2 = rsrc_n(inst.src0, inst.src_regs(0)), rsrc_n(inst.src1, inst.src_regs(1)), rsrc_n(inst.src2, inst.src_regs(2))
     # Carry-in ops use src2 as carry bitmask instead of VCC
     vcc = st.rsgpr64(inst.src2) if 'CO_CI' in inst.op_name else st.vcc
-    SCC, VCC_R, EXEC = Reg(st.scc), Reg(vcc), Reg(st.exec_mask)
-    result = fn(Reg(s0), Reg(s1), Reg(s2), Reg(V[inst.vdst]), SCC, VCC_R, lane, EXEC, st.literal, None)
+    result = fn(Reg(s0), Reg(s1), Reg(s2), Reg(V[inst.vdst]), Reg(st.scc), Reg(vcc), lane, Reg(st.exec_mask), st.literal, None)
     d0_val = result['D0']._val
     V[inst.vdst] = d0_val & MASK32
     if inst.dst_regs() == 2: V[inst.vdst + 1] = (d0_val >> 32) & MASK32
@@ -336,17 +329,13 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     hi_sels = [opsel_hi & 1, opsel_hi & 2, opsel_hi2]
     srcs = [((_src16(raws[i], hi_sels[i]) ^ (0x8000 if neg_hi & (1<<i) else 0)) << 16) |
             (_src16(raws[i], opsel & (1<<i)) ^ (0x8000 if neg & (1<<i) else 0)) for i in range(3)]
-    fn = compiled.get(VOP3POp, {}).get(inst.op)
-    if fn is None: raise NotImplementedError(f"{inst.op.name} not in pseudocode")
-    SCC, VCC, EXEC = Reg(st.scc), Reg(st.vcc), Reg(st.exec_mask)
-    result = fn(Reg(srcs[0]), Reg(srcs[1]), Reg(srcs[2]), Reg(0), SCC, VCC, lane, EXEC, st.literal, None)
+    result = compiled[VOP3POp][inst.op](Reg(srcs[0]), Reg(srcs[1]), Reg(srcs[2]), Reg(0), Reg(st.scc), Reg(st.vcc), lane, Reg(st.exec_mask), st.literal, None)
     st.vgpr[lane][inst.vdst] = result['D0']._val & MASK32
     return
   else: raise NotImplementedError(f"Unknown vector type {type(inst)}")
 
   op_cls = type(inst.op)
-  fn = compiled.get(op_cls, {}).get(inst.op)
-  if fn is None: raise NotImplementedError(f"{inst.op_name} not in pseudocode")
+  if (fn := compiled.get(op_cls, {}).get(inst.op)) is None: raise NotImplementedError(f"{inst.op_name} not in pseudocode")
 
   # Read sources (with VOP3 modifiers if applicable)
   neg, abs_ = (getattr(inst, 'neg', 0), getattr(inst, 'abs', 0)) if isinstance(inst, VOP3) else (0, 0)
