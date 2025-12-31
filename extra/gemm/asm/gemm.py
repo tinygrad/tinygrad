@@ -71,9 +71,6 @@ gemm = [
   v_lshl_add_u32(vdst=v[3], src0=v[6], src1=4, src2=v[3]),
   v_add_co_u32_e32(v[3], 0x8200, v[3]),
   v_add_u32_e32(v[132], 0x10400, v[2]),
-]
-"""
-[
   v_xor_b32_e32(v[132], v[132], v[2]),
   v_add_u32_e32(v[133], 0x10400, v[3]),
   v_xor_b32_e32(v[133], v[133], v[3]),
@@ -86,19 +83,22 @@ gemm = [
   v_lshlrev_b32_e32(v[7], 3, v[7]),
   v_mov_b32_e32(v[9], v[7]),
   v_mul_u32_u24_e32(v[10], 64, v[4]),
-  v_add_lshl_u32(v[10], v[8], v[10], 1),
+  v_add_lshl_u32(vdst=v[10], src0=v[8], src1=v[10], src2=1),
   v_lshrrev_b32_e32(v[12], 10, v[10]),
-  v_lshl_add_u32(v[10], v[12], 4, v[10]),
+  v_lshl_add_u32(vdst=v[10], src0=v[12], src1=4, src2=v[10]),
   s_nop(0),
-  v_readfirstlane_b32(s[46], v[10]),
+  v_readfirstlane_b32_e32(vdst=RawImm(46), src0=v[10]),
   s_nop(0),
   s_add_u32(s[48], s[46], 0x10400),
   s_xor_b32(s[48], s[48], s[46]),
   v_mul_u32_u24_e32(v[10], 64, v[6]),
-  v_add_lshl_u32(v[10], v[9], v[10], 1),
+  v_add_lshl_u32(vdst=v[10], src0=v[9], src1=v[10], src2=1),
   v_lshrrev_b32_e32(v[12], 10, v[10]),
-  v_lshl_add_u32(v[10], v[12], 4, v[10]),
-  v_add_co_u32_e32(v[10], VCC_LO, 0x8200, v[10]),
+  v_lshl_add_u32(vdst=v[10], src0=v[12], src1=4, src2=v[10]),
+  v_add_co_u32_e32(v[10], 0x8200, v[10]),
+]
+"""
+[
   s_nop(0),
   v_readfirstlane_b32(s[47], v[10]),
   s_nop(0),

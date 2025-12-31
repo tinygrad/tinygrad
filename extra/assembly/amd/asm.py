@@ -647,6 +647,14 @@ def get_dsl(text: str) -> str:
   elif is_vop3a_2src and len(args) == 3:
     args = [f'vdst={args[0]}', f'src0={args[1]}', f'src1={args[2]}']
 
+  # v_readfirstlane_b32 has SGPR dest, use RawImm for vdst
+  if mn == 'v_readfirstlane_b32' and len(args) == 2:
+    # Extract SGPR index from s[N] format
+    m = re.match(r's\[(\d+)\]', args[0])
+    sdst_idx = int(m.group(1)) if m else int(args[0].lstrip('s'))
+    args = [f'vdst=RawImm({sdst_idx})', f'src0={args[1]}']
+    fn = 'v_readfirstlane_b32_e32'
+
   # v_fma_mix*: extract inline neg/abs modifiers
   if 'fma_mix' in mn and neg_lo is None and neg_hi is None:
     inline_neg, inline_abs, clean_args = 0, 0, [args[0]]
