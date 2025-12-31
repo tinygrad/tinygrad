@@ -39,7 +39,7 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   n_lbs, shape, numel = len(buf.device), buf.shape, prod(buf.shape)
 
   # select algorithm: all2all (XGMI) > ring (large) > naive (small/2-device)
-  use_all2all = ALL2ALL >= 1
+  use_all2all = (ALL2ALL >= 2 or (n_lbs > 2 and numel > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and ALL2ALL >= 1))
   use_ring = not use_all2all and (RING >= 2 or (n_lbs > 2 and numel > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and RING >= 1))
   if DEBUG >= 2: print(f"{'ALL2ALL' if use_all2all else 'RING' if use_ring else 'NAIVE'} ALLREDUCE {n_lbs}x{numel} | {buf.dtype}")
 
