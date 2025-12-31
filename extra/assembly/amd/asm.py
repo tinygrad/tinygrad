@@ -80,7 +80,6 @@ def waitcnt(vmcnt: int = 0x3f, expcnt: int = 0x7, lgkmcnt: int = 0x3f) -> int:
 
 def _has(op: str, *subs) -> bool: return any(s in op for s in subs)
 def _is16(op: str) -> bool: return _has(op, 'f16', 'i16', 'u16', 'b16') and not _has(op, '_f32', '_i32')
-def _is64(op: str) -> bool: return _has(op, 'f64', 'i64', 'u64', 'b64')
 def _omod(v: int) -> str: return {1: " mul:2", 2: " mul:4", 3: " div:2"}.get(v, "")
 def _src16(inst, v: int) -> str: return _fmt_v16(v) if v >= 256 else inst.lit(v)  # format 16-bit src: vgpr.h/l or literal
 def _mods(*pairs) -> str: return " ".join(m for c, m in pairs if c)
@@ -121,11 +120,11 @@ def _disasm_vop1(inst: VOP1) -> str:
 
 def _disasm_vop2(inst: VOP2) -> str:
   op, name = VOP2Op(inst.op), VOP2Op(inst.op).name.lower()
-  suf, is16 = "" if op == VOP2Op.V_DOT2ACC_F32_F16 else "_e32", inst.is_16bit()
+  suf = "" if op == VOP2Op.V_DOT2ACC_F32_F16 else "_e32"
   # fmaak: dst = src0 * vsrc1 + K, fmamk: dst = src0 * K + vsrc1
   if op in (VOP2Op.V_FMAAK_F32, VOP2Op.V_FMAAK_F16): return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, v{inst.vsrc1}, 0x{inst._literal:x}"
   if op in (VOP2Op.V_FMAMK_F32, VOP2Op.V_FMAMK_F16): return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, 0x{inst._literal:x}, v{inst.vsrc1}"
-  if is16: return f"{name}{suf} {_fmt_v16(inst.vdst, 0, 128)}, {_src16(inst, inst.src0)}, {_fmt_v16(inst.vsrc1, 0, 128)}"
+  if inst.is_16bit(): return f"{name}{suf} {_fmt_v16(inst.vdst, 0, 128)}, {_src16(inst, inst.src0)}, {_fmt_v16(inst.vsrc1, 0, 128)}"
   return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, v{inst.vsrc1}" + (", vcc_lo" if op == VOP2Op.V_CNDMASK_B32 else "")
 
 VOPC_CLASS = {VOPCOp.V_CMP_CLASS_F16, VOPCOp.V_CMP_CLASS_F32, VOPCOp.V_CMP_CLASS_F64,
@@ -133,9 +132,8 @@ VOPC_CLASS = {VOPCOp.V_CMP_CLASS_F16, VOPCOp.V_CMP_CLASS_F32, VOPCOp.V_CMP_CLASS
 
 def _disasm_vopc(inst: VOPC) -> str:
   op, name = VOPCOp(inst.op), VOPCOp(inst.op).name.lower()
-  is64, is16 = inst.is_64bit(), inst.is_16bit()
-  s0 = _fmt_src(inst.src0, 2) if is64 else _src16(inst, inst.src0) if is16 else inst.lit(inst.src0)
-  s1 = _vreg(inst.vsrc1, 2) if is64 and op not in VOPC_CLASS else _fmt_v16(inst.vsrc1, 0, 128) if is16 else f"v{inst.vsrc1}"
+  s0 = _fmt_src(inst.src0, 2) if inst.is_64bit() else _src16(inst, inst.src0) if inst.is_16bit() else inst.lit(inst.src0)
+  s1 = _vreg(inst.vsrc1, 2) if inst.is_64bit() and op not in VOPC_CLASS else _fmt_v16(inst.vsrc1, 0, 128) if inst.is_16bit() else f"v{inst.vsrc1}"
   return f"{name}_e32 {s0}, {s1}" if op.value >= 128 else f"{name}_e32 vcc_lo, {s0}, {s1}"
 
 NO_ARG_SOPP = {SOPPOp.S_ENDPGM, SOPPOp.S_BARRIER, SOPPOp.S_WAKEUP, SOPPOp.S_ICACHE_INV,
@@ -236,35 +234,23 @@ def _disasm_vop3(inst: VOP3) -> str:
     if op in (VOP3SDOp.V_ADD_CO_CI_U32, VOP3SDOp.V_SUB_CO_CI_U32, VOP3SDOp.V_SUBREV_CO_CI_U32): return f"{name} {dst}, {_fmt_sdst(sdst, 1)}, {s0}, {s1}, {s2}"
     return f"{name} {dst}, {_fmt_sdst(sdst, 1)}, {s0}, {s1}, {s2}" + _omod(inst.omod)
 
-  # Detect operand sizes
-  is64 = _is64(name)
-  is64_src, is64_dst = False, False
+  # Detect 16-bit operand sizes (for .h/.l suffix handling)
   is16_d = is16_s = is16_s2 = False
   if 'cvt_pk' in name: is16_s = name.endswith('16')
   elif m := re.match(r'v_(?:cvt|frexp_exp)_([a-z0-9_]+)_([a-z0-9]+)', name):
     is16_d, is16_s = _has(m.group(1), 'f16','i16','u16','b16'), _has(m.group(2), 'f16','i16','u16','b16')
-    is64_src, is64_dst = '64' in m.group(2), '64' in m.group(1)
-    is16_s2, is64 = is16_s, False
+    is16_s2 = is16_s
   elif re.match(r'v_mad_[iu]32_[iu]16', name): is16_s = True
   elif 'pack_b32' in name: is16_s = is16_s2 = True
   else: is16_d = is16_s = is16_s2 = _is16(name) and not _has(name, 'dot2', 'pk_', 'sad', 'msad', 'qsad', 'mqsad')
 
-  # Source counts
-  shift64 = 'rev' in name and '64' in name and name.startswith('v_')
-  ldexp64 = op == VOP3Op.V_LDEXP_F64
-  trig = op == VOP3Op.V_TRIG_PREOP_F64
-  sad64, mqsad = _has(name, 'qsad_pk', 'mqsad_pk'), 'mqsad_u32' in name
-  s0n = 2 if ((is64 and not shift64) or sad64 or mqsad or is64_src) else 1
-  s1n = 2 if (is64 and not _has(name, 'class') and not ldexp64 and not trig) else 1
-  s2n = 4 if mqsad else 2 if (is64 or sad64) else 1
-
   any_hi = inst.opsel != 0
-  s0 = _vop3_src(inst, inst.src0, inst.neg&1, inst.abs&1, inst.opsel&1, s0n, is16_s, any_hi)
-  s1 = _vop3_src(inst, inst.src1, inst.neg&2, inst.abs&2, inst.opsel&2, s1n, is16_s, any_hi)
-  s2 = _vop3_src(inst, inst.src2, inst.neg&4, inst.abs&4, inst.opsel&4, s2n, is16_s2, any_hi)
+  s0 = _vop3_src(inst, inst.src0, inst.neg&1, inst.abs&1, inst.opsel&1, inst.src_regs(0), is16_s, any_hi)
+  s1 = _vop3_src(inst, inst.src1, inst.neg&2, inst.abs&2, inst.opsel&2, inst.src_regs(1), is16_s, any_hi)
+  s2 = _vop3_src(inst, inst.src2, inst.neg&4, inst.abs&4, inst.opsel&4, inst.src_regs(2), is16_s2, any_hi)
 
   # Destination
-  dn = 4 if mqsad else 2 if (is64 or sad64 or is64_dst) else 1
+  dn = inst.dst_regs()
   if op == VOP3Op.V_READLANE_B32: dst = _fmt_sdst(inst.vdst, 1)
   elif dn > 1: dst = _vreg(inst.vdst, dn)
   elif is16_d: dst = f"v{inst.vdst}.h" if (inst.opsel & 8) else f"v{inst.vdst}.l" if any_hi else f"v{inst.vdst}"
