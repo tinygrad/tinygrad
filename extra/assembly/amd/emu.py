@@ -269,7 +269,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
 
   # VOP3SD: has extra scalar dest for carry output
   if inst_type is VOP3SD:
-    op = VOP3SDOp(inst.op)
+    op = inst.op
     fn = compiled.get(VOP3SDOp, {}).get(op)
     if fn is None: raise NotImplementedError(f"{op.name} not in pseudocode")
     # Read sources based on register counts from inst properties
@@ -288,28 +288,28 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
   dst_hi = False
   if inst_type is VOP1:
     if inst.op == VOP1Op.V_NOP: return
-    op_cls, op, src0, src1, src2 = VOP1Op, VOP1Op(inst.op), inst.src0, None, None
+    op_cls, op, src0, src1, src2 = VOP1Op, inst.op, inst.src0, None, None
     is_16dst = inst.is_dst_16()
     dst_hi, vdst = (inst.vdst & 0x80) != 0 and is_16dst, inst.vdst & 0x7f if is_16dst else inst.vdst
   elif inst_type is VOP2:
-    op_cls, op, src0, src1, src2 = VOP2Op, VOP2Op(inst.op), inst.src0, inst.vsrc1 + 256, None
+    op_cls, op, src0, src1, src2 = VOP2Op, inst.op, inst.src0, inst.vsrc1 + 256, None
     is_16dst = inst.is_dst_16()
     dst_hi, vdst = (inst.vdst & 0x80) != 0 and is_16dst, inst.vdst & 0x7f if is_16dst else inst.vdst
   elif inst_type is VOP3:
     # VOP3 ops 0-255 are VOPC comparisons encoded as VOP3 (use VOPCOp pseudocode)
-    if inst.op < 256:
-      op_cls, op, src0, src1, src2, vdst = VOPCOp, VOPCOp(inst.op), inst.src0, inst.src1, None, inst.vdst
+    if inst.op.value < 256:
+      op_cls, op, src0, src1, src2, vdst = VOPCOp, VOPCOp(inst.op.value), inst.src0, inst.src1, None, inst.vdst
     else:
-      op_cls, op, src0, src1, src2, vdst = VOP3Op, VOP3Op(inst.op), inst.src0, inst.src1, inst.src2, inst.vdst
+      op_cls, op, src0, src1, src2, vdst = VOP3Op, inst.op, inst.src0, inst.src1, inst.src2, inst.vdst
   elif inst_type is VOPC:
-    op = VOPCOp(inst.op)
+    op = inst.op
     # For 16-bit VOPC, vsrc1 uses same encoding as VOP2 16-bit: bit 7 selects hi(1) or lo(0) half
     # vsrc1 field is 8 bits: [6:0] = VGPR index, [7] = hi flag
     src1 = inst.vsrc1 + 256  # convert to standard VGPR encoding (256 + vgpr_idx)
     op_cls, src0, src2, vdst = VOPCOp, inst.src0, None, VCC_LO
   elif inst_type is VOP3P:
     # VOP3P: Packed 16-bit operations using compiled functions
-    op = VOP3POp(inst.op)
+    op = inst.op
     # WMMA: wave-level matrix multiply-accumulate (special handling - needs cross-lane access)
     if 'WMMA' in inst.op_name:
       if lane == 0:  # Only execute once per wave, write results for all lanes

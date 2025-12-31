@@ -482,10 +482,8 @@ class Inst:
     cls_name = self.__class__.__name__
     # VOP3 with VOP3SD opcodes -> use VOP3SDOp
     if cls_name == 'VOP3' and val in self._VOP3SD_OPS: cls_name = 'VOP3SD'
-    if cls_name in self._enum_map:
-      try: return self._enum_map[cls_name](val)
-      except ValueError: pass
-    return val
+    assert cls_name in self._enum_map, f"no enum map for {cls_name}"
+    return self._enum_map[cls_name](val)
 
   @property
   def op_name(self) -> str:
