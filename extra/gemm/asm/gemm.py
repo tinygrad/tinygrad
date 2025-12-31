@@ -38,10 +38,41 @@ if __name__ == "__main__":
     print(c)
     print(a)
 
+  passed, failed, skipped = 0, 0, 0
   for a in asm_lines:
     if a.endswith(":"): continue
-    print(a)
-    print(compile_asm(a, mcpu='gfx950', mattr='+wavefrontsize64'))
+    # parse instruction and optional hex bytes from comment
+    if "//" in a:
+      instr, comment = a.split("//", 1)
+      instr = instr.strip()
+      # format: "address: hex_bytes [hex_bytes2]" e.g. "000000002928: 863333FF 3FFFFFFF"
+      if ":" in comment:
+        hex_parts = comment.split(":", 1)[1].strip().split()
+        try:
+          # combine dwords: first dword (little-endian) + second dword (little-endian)
+          expected = b''.join(bytes.fromhex(h)[::-1] for h in hex_parts)
+        except ValueError:
+          expected = None
+      else:
+        expected = None
+    else:
+      instr = a.strip()
+      expected = None
+
+    if not instr: continue
+    llvm_bytes = compile_asm(instr, mcpu='gfx950', mattr='+wavefrontsize64')
+
+    if expected is None:
+      print(f"SKIP {instr}")
+      skipped += 1
+    elif llvm_bytes == expected:
+      print(f"PASS {instr}")
+      passed += 1
+    else:
+      print(f"FAIL {instr}: expected {expected.hex()} got {llvm_bytes.hex()}")
+      failed += 1
+
+  print(f"\n{passed} passed, {failed} failed, {skipped} skipped")
   """
   for inst in gemm:
     print(inst._lineno)
