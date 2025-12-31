@@ -54,10 +54,10 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   # reduce-scatter
   reduced_chunks = []
   for i,(s,e) in enumerate(chunks):
-    if use_all2all: # parallel: all GPUs send chunk[i] to GPU i
+    if use_all2all:
       chunks_on_i = [buf.mselect(j).reshape((numel,)).shrink(((s,e),)).copy_to_device(buf.device[i]) for j in range(n_lbs)]
       reduced_chunks.append(functools.reduce(lambda x,y: x.alu(red.arg, y), chunks_on_i))
-    else: # ring: sequential hops around ring
+    else:
       chunk, reduced = buf.reshape((numel,)).shrink(((s,e),)), buf.reshape((numel,)).shrink(((s,e),))
       for step in range(n_lbs-1):
         src, dest = (i+step)%n_lbs, (i+step+1)%n_lbs
