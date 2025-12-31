@@ -1,13 +1,13 @@
 import functools
 from extra.assembly.amd.autogen.cdna import *
 from extra.assembly.amd.asm import asm
-from extra.assembly.amd.dsl import Inst
+from extra.assembly.amd.dsl import Inst, RawImm
 from extra.assembly.amd.test.test_roundtrip import compile_asm
 
 compile_asm = functools.partial(compile_asm, mcpu='gfx950', mattr='+wavefrontsize64')
 
 gemm = [
-  s_load_dwordx2(s[28:29], s[0:1], 0x0),
+  s_load_dwordx2(sdata=s[28:29], sbase=s[0:1], offset=0x0, soffset=RawImm(0), imm=1),
 ]
 
 
@@ -45,7 +45,7 @@ if __name__ == "__main__":
     print(asm_txt)
     b = inst.to_bytes()
     st = inst.disasm()
-    reasm = asm(st)
+    reasm = asm(st, arch='cdna')
     desc = f"{st:25s} {inst} {b!r} {reasm}"
     ref = compile_asm(st)
-    assert b == ref == recompiled, f"Bytes mismatch {b} != {ref} for {st}"
+    assert b == ref == reasm.to_bytes(), f"Bytes mismatch {b} != {ref} for {st}"

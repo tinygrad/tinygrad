@@ -157,15 +157,19 @@ def _disasm_sopp(inst: SOPP) -> str:
   return f"{name} {inst.simm16}" if name.startswith(('s_cbranch', 's_branch')) else f"{name} 0x{inst.simm16:x}"
 
 def _disasm_smem(inst: SMEM) -> str:
-  op = SMEMOp(inst.op)
-  name = op.name.lower()
-  if op in (SMEMOp.S_GL1_INV, SMEMOp.S_DCACHE_INV): return name
-  off_s = f"{decode_src(inst.soffset)} offset:0x{inst.offset:x}" if inst.offset and inst.soffset != 124 else f"0x{inst.offset:x}" if inst.offset else decode_src(inst.soffset)
+  # Use stored enum if available (preserves CDNA names), otherwise fall back to RDNA3 SMEMOp
+  stored_op = inst._values.get('op')
+  name = stored_op.name.lower() if hasattr(stored_op, 'name') else SMEMOp(inst.op).name.lower()
+  if name in ('s_gl1_inv', 's_dcache_inv'): return name
+  # CDNA uses imm bit to indicate immediate offset mode; RDNA3 uses soffset==124 (null)
+  is_imm = inst._values.get('imm', 0) or inst.soffset == 124
+  off_s = f"{decode_src(inst.soffset)} offset:0x{inst.offset:x}" if inst.offset and not is_imm else f"0x{inst.offset:x}" if is_imm else decode_src(inst.soffset)
   sbase_idx, sbase_count = inst.sbase * 2, 4 if (8 <= inst.op <= 12 or name == 's_atc_probe_buffer') else 2
   sbase_str = _fmt_src(sbase_idx, sbase_count) if sbase_count == 2 else _sreg(sbase_idx, sbase_count) if sbase_idx <= 105 else _reg("ttmp", sbase_idx - 108, sbase_count)
   if name in ('s_atc_probe', 's_atc_probe_buffer'): return f"{name} {inst.sdata}, {sbase_str}, {off_s}"
   width = {0:1, 1:2, 2:4, 3:8, 4:16, 8:1, 9:2, 10:4, 11:8, 12:16}.get(inst.op, 1)
-  return f"{name} {_fmt_sdst(inst.sdata, width)}, {sbase_str}, {off_s}" + _mods((inst.glc, " glc"), (inst.dlc, " dlc"))
+  dlc = inst._values.get('dlc', 0)  # CDNA may not have dlc field
+  return f"{name} {_fmt_sdst(inst.sdata, width)}, {sbase_str}, {off_s}" + _mods((inst.glc, " glc"), (dlc, " dlc"))
 
 def _disasm_flat(inst: FLAT) -> str:
   name = FLATOp(inst.op).name.lower()
@@ -437,8 +441,9 @@ def _disasm_generic(inst: Inst) -> str:
 DISASM_HANDLERS = {VOP1: _disasm_vop1, VOP2: _disasm_vop2, VOPC: _disasm_vopc, VOP3: _disasm_vop3, VOP3SD: _disasm_vop3sd, VOPD: _disasm_vopd, VOP3P: _disasm_vop3p,
                    VINTERP: _disasm_vinterp, SOPP: _disasm_sopp, SMEM: _disasm_smem, DS: _disasm_ds, FLAT: _disasm_flat, MUBUF: _disasm_buf, MTBUF: _disasm_buf,
                    MIMG: _disasm_mimg, SOP1: _disasm_sop1, SOP2: _disasm_sop2, SOPC: _disasm_sopc, SOPK: _disasm_sopk}
+DISASM_BY_NAME = {cls.__name__: handler for cls, handler in DISASM_HANDLERS.items()}
 
-def disasm(inst: Inst) -> str: return DISASM_HANDLERS.get(type(inst), _disasm_generic)(inst)
+def disasm(inst: Inst) -> str: return DISASM_HANDLERS.get(type(inst), DISASM_BY_NAME.get(type(inst).__name__, _disasm_generic))(inst)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ASSEMBLER
@@ -448,8 +453,13 @@ SPEC_REGS = {'vcc_lo': RawImm(106), 'vcc_hi': RawImm(107), 'vcc': RawImm(106), '
              'exec_lo': RawImm(126), 'exec_hi': RawImm(127), 'exec': RawImm(126), 'scc': RawImm(253), 'src_scc': RawImm(253)}
 FLOATS = {str(k): k for k in FLOAT_ENC}  # Valid float literal strings: '0.5', '-0.5', '1.0', etc.
 REG_MAP: dict[str, _RegFactory] = {'s': s, 'v': v, 't': ttmp, 'ttmp': ttmp}
+# RDNA3/4 uses _b32/_b64 naming, CDNA uses _dword/_dwordx2 naming
 SMEM_OPS = {'s_load_b32', 's_load_b64', 's_load_b128', 's_load_b256', 's_load_b512',
-            's_buffer_load_b32', 's_buffer_load_b64', 's_buffer_load_b128', 's_buffer_load_b256', 's_buffer_load_b512'}
+            's_buffer_load_b32', 's_buffer_load_b64', 's_buffer_load_b128', 's_buffer_load_b256', 's_buffer_load_b512',
+            's_load_dword', 's_load_dwordx2', 's_load_dwordx4', 's_load_dwordx8', 's_load_dwordx16',
+            's_buffer_load_dword', 's_buffer_load_dwordx2', 's_buffer_load_dwordx4', 's_buffer_load_dwordx8', 's_buffer_load_dwordx16'}
+CDNA_SMEM_OPS = {'s_load_dword', 's_load_dwordx2', 's_load_dwordx4', 's_load_dwordx8', 's_load_dwordx16',
+                 's_buffer_load_dword', 's_buffer_load_dwordx2', 's_buffer_load_dwordx4', 's_buffer_load_dwordx8', 's_buffer_load_dwordx16'}
 SPEC_DSL = {'vcc_lo': 'VCC_LO', 'vcc_hi': 'VCC_HI', 'vcc': 'VCC_LO', 'null': 'NULL', 'off': 'OFF', 'm0': 'M0',
             'exec_lo': 'EXEC_LO', 'exec_hi': 'EXEC_HI', 'exec': 'EXEC_LO', 'scc': 'SCC', 'src_scc': 'SCC'}
 
@@ -541,11 +551,13 @@ def get_dsl(text: str) -> str:
   if mn == 's_version': return f"{mn}(simm16={args[0]})"
   if mn == 's_setreg_b32': return f"{mn}(simm16={args[0]}, sdst={args[1]})"
 
-  # SMEM
+  # SMEM - RDNA3/4 uses soffset=RawImm(124) for immediate offset, CDNA uses imm=1, soffset=RawImm(0)
   if mn in SMEM_OPS:
+    is_cdna = mn in CDNA_SMEM_OPS
     gs, ds = ", glc=1" if glc else "", ", dlc=1" if dlc else ""
+    imm_kw = ", imm=1, soffset=RawImm(0)" if is_cdna else ", soffset=RawImm(124)"
     if len(ops) >= 3 and re.match(r'^-?[0-9]|^-?0x', ops[2].strip().lower()):
-      return f"{mn}(sdata={args[0]}, sbase={args[1]}, offset={args[2]}, soffset=RawImm(124){gs}{ds})"
+      return f"{mn}(sdata={args[0]}, sbase={args[1]}, offset={args[2]}{imm_kw}{gs}{ds})"
     if off_val and len(ops) >= 3: return f"{mn}(sdata={args[0]}, sbase={args[1]}, offset={off_val}, soffset={args[2]}{gs}{ds})"
     if len(ops) >= 3: return f"{mn}(sdata={args[0]}, sbase={args[1]}, soffset={args[2]}{gs}{ds})"
 
@@ -631,8 +643,10 @@ def get_dsl(text: str) -> str:
   a_str, kw_str = ', '.join(args), ', '.join(all_kw)
   return f"{fn}({a_str}, {kw_str})" if kw_str and a_str else f"{fn}({kw_str})" if kw_str else f"{fn}({a_str})"
 
-def asm(text: str) -> Inst:
-  from extra.assembly.amd.autogen import rdna3 as ag
+def asm(text: str, arch: str = 'rdna3') -> Inst:
+  if arch == 'cdna': from extra.assembly.amd.autogen import cdna as ag
+  elif arch == 'rdna4': from extra.assembly.amd.autogen import rdna4 as ag
+  else: from extra.assembly.amd.autogen import rdna3 as ag
   dsl = get_dsl(text)
   ns = {n: getattr(ag, n) for n in dir(ag) if not n.startswith('_')}
   ns.update({'s': s, 'v': v, 'ttmp': ttmp, 'abs': abs, 'RawImm': RawImm, 'SrcMod': SrcMod, 'VGPR': VGPR, 'SGPR': SGPR, 'TTMP': TTMP,
