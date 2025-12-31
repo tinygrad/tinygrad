@@ -453,7 +453,9 @@ class Inst:
     if name.startswith('_'): raise AttributeError(name)
     return unwrap(self._values.get(name, 0))
 
-  def lit(self, v: int) -> str: return f"0x{self._literal:x}" if v == 255 and self._literal else decode_src(v)
+  def lit(self, v: int, neg: bool = False) -> str:
+    s = f"0x{self._literal:x}" if v == 255 and self._literal else decode_src(v)
+    return f"-{s}" if neg else s
 
   def __eq__(self, other):
     if not isinstance(other, Inst): return NotImplemented
