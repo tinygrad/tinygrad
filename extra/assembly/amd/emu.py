@@ -187,7 +187,7 @@ def exec_scalar(st: WaveState, inst: Inst) -> int:
   vcc32, exec32 = st.vcc & MASK32, exec_mask & MASK32
   S0, S1, S2, D0 = Reg(s0), Reg(s1), Reg(0), Reg(d0)
   SCC, VCC, EXEC, PC = Reg(st.scc), Reg(vcc32), Reg(exec32), Reg(pc_bytes)
-  result = fn(S0, S1, S2, D0, SCC, VCC, 0, EXEC, literal, None, {}, PC=PC)
+  result = fn(S0, S1, S2, D0, SCC, VCC, 0, EXEC, literal, None, PC=PC)
 
   # Apply results - extract values from returned Reg objects
   if sdst is not None:
@@ -270,7 +270,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
       if fn is None: return None
       S0, S1, S2, D0 = Reg(s0), Reg(s1), Reg(0), Reg(d0)
       SCC, VCC, EXEC = Reg(st.scc), Reg(st.vcc), Reg(st.exec_mask)
-      return (dst, fn(S0, S1, S2, D0, SCC, VCC, lane, EXEC, st.literal, None, {})['D0']._val)
+      return (dst, fn(S0, S1, S2, D0, SCC, VCC, lane, EXEC, st.literal, None)['D0']._val)
     results = [r for vopd_op, s0, s1, d0, dst in inputs if (r := exec_vopd(vopd_op, s0, s1, d0, dst))]
     for dst, val in results: V[dst] = val
     return
@@ -286,7 +286,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     vcc = st.rsgpr64(inst.src2) if 'CO_CI' in inst.op_name else st.vcc
     S0, S1, S2, D0 = Reg(s0), Reg(s1), Reg(s2), Reg(V[inst.vdst])
     SCC, VCC_R, EXEC = Reg(st.scc), Reg(vcc), Reg(st.exec_mask)
-    result = fn(S0, S1, S2, D0, SCC, VCC_R, lane, EXEC, st.literal, None, {})
+    result = fn(S0, S1, S2, D0, SCC, VCC_R, lane, EXEC, st.literal, None)
     d0_val = result['D0']._val
     V[inst.vdst] = d0_val & MASK32
     if result.get('d0_64'): V[inst.vdst + 1] = (d0_val >> 32) & MASK32
@@ -344,7 +344,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     if fn is None: raise NotImplementedError(f"{inst.op.name} not in pseudocode")
     S0, S1, S2, D0 = Reg(srcs[0]), Reg(srcs[1]), Reg(srcs[2]), Reg(0)
     SCC, VCC, EXEC = Reg(st.scc), Reg(st.vcc), Reg(st.exec_mask)
-    result = fn(S0, S1, S2, D0, SCC, VCC, lane, EXEC, st.literal, None, {})
+    result = fn(S0, S1, S2, D0, SCC, VCC, lane, EXEC, st.literal, None)
     st.vgpr[lane][inst.vdst] = result['D0']._val & MASK32
     return
   else: raise NotImplementedError(f"Unknown vector type {type(inst)}")
@@ -395,7 +395,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
   src0_idx = (src0 - 256) if src0 is not None and src0 >= 256 else (src0 if src0 is not None else 0)
   S0, S1, S2, D0 = Reg(s0), Reg(s1), Reg(s2), Reg(d0)
   SCC, VCC, EXEC = Reg(st.scc), Reg(vcc_for_fn), Reg(st.exec_mask)
-  result = fn(S0, S1, S2, D0, SCC, VCC, lane, EXEC, st.literal, st.vgpr, {}, src0_idx, vdst)
+  result = fn(S0, S1, S2, D0, SCC, VCC, lane, EXEC, st.literal, st.vgpr, src0_idx, vdst)
 
   # Apply results - extract values from returned Reg objects
   if 'vgpr_write' in result:

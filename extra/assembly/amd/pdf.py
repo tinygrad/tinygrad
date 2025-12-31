@@ -545,7 +545,7 @@ def _generate_function(cls_name: str, op, pc: str, code: str) -> tuple[str, str]
 
   fn_name = f"_{cls_name}_{op.name}"
   # Function accepts Reg objects directly (uppercase names), laneId is passed directly as int
-  lines = [f"def {fn_name}(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, PC=None):"]
+  lines = [f"def {fn_name}(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):"]
   for pc_line in pc.split('\n'): lines.append(f"  # {pc_line}")
 
   # Registers that need special handling (not passed directly)
