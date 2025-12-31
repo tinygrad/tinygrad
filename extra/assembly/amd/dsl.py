@@ -92,6 +92,14 @@ def spec_is_16bit(name: str) -> bool:
   if '_F32' in name or '_I32' in name or '_U32' in name or '_B32' in name: return False  # mixed ops like V_DOT2ACC_F32_F16
   return bool(re.search(r'_[FIUB]16(?:_|$)', name))
 def spec_is_64bit(name: str) -> bool: return bool(re.search(r'_[FIUB]64(?:_|$)', name.upper()))
+_3SRC = {'FMA', 'MAD', 'MIN3', 'MAX3', 'MED3', 'DIV_FIX', 'DIV_FMAS', 'DIV_SCALE', 'SAD', 'LERP', 'ALIGN', 'CUBE', 'BFE', 'BFI',
+         'PERM_B32', 'PERMLANE', 'CNDMASK', 'XOR3', 'OR3', 'ADD3', 'LSHL_OR', 'AND_OR', 'LSHL_ADD', 'ADD_LSHL', 'XAD', 'MAXMIN',
+         'MINMAX', 'DOT2', 'CVT_PK_U8', 'MULLIT', 'CO_CI'}
+_2SRC = {'FMAC'}  # FMAC uses dst as implicit accumulator, so only 2 explicit sources
+def spec_num_srcs(name: str) -> int:
+  name = name.upper()
+  if any(k in name for k in _2SRC): return 2
+  return 3 if any(k in name for k in _3SRC) else 2
 def is_dtype_16(dt: str | None) -> bool: return dt is not None and '16' in dt
 def is_dtype_64(dt: str | None) -> bool: return dt is not None and '64' in dt
 
@@ -492,6 +500,7 @@ class Inst:
 
   def dst_regs(self) -> int: return spec_regs(self.op_name)[0]
   def src_regs(self, n: int) -> int: return spec_regs(self.op_name)[n + 1]
+  def num_srcs(self) -> int: return spec_num_srcs(self.op_name)
   def dst_dtype(self) -> str | None: return spec_dtype(self.op_name)[0]
   def src_dtype(self, n: int) -> str | None: return spec_dtype(self.op_name)[n + 1]
   def is_src_16(self, n: int) -> bool: return self.src_regs(n) == 1 and is_dtype_16(self.src_dtype(n))
