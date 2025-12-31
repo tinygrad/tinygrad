@@ -1,10 +1,11 @@
 # mypy: ignore-errors
 import ctypes
 from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from typing import TypeAlias
 from tinygrad.runtime.support import objc
 dll = DLL('metal', 'Metal')
 class MTLDispatchThreadgroupsIndirectArguments(Struct): pass
-uint32_t = ctypes.c_uint32
+uint32_t: TypeAlias = ctypes.c_uint32
 MTLDispatchThreadgroupsIndirectArguments._fields_ = [
   ('threadgroupsPerGrid', (uint32_t * 3)),
 ]
@@ -16,11 +17,11 @@ MTLStageInRegionIndirectArguments._fields_ = [
 class MTLComputeCommandEncoder(objc.Spec): pass
 class MTLCommandEncoder(objc.Spec): pass
 class MTLComputePipelineState(objc.Spec): pass
-NSUInteger = ctypes.c_uint64
+NSUInteger: TypeAlias = ctypes.c_uint64
 class MTLBuffer(objc.Spec): pass
 class MTLResource(objc.Spec): pass
 class struct__NSRange(Struct): pass
-NSRange = struct__NSRange
+NSRange: TypeAlias = struct__NSRange
 struct__NSRange._fields_ = [
   ('location', NSUInteger),
   ('length', NSUInteger),
@@ -39,7 +40,7 @@ MTLTextureType3D = enum_MTLTextureType.define('MTLTextureType3D', 7)
 MTLTextureType2DMultisampleArray = enum_MTLTextureType.define('MTLTextureType2DMultisampleArray', 8)
 MTLTextureTypeTextureBuffer = enum_MTLTextureType.define('MTLTextureTypeTextureBuffer', 9)
 
-MTLTextureType = enum_MTLTextureType
+MTLTextureType: TypeAlias = enum_MTLTextureType
 enum_MTLPixelFormat = CEnum(NSUInteger)
 MTLPixelFormatInvalid = enum_MTLPixelFormat.define('MTLPixelFormatInvalid', 0)
 MTLPixelFormatA8Unorm = enum_MTLPixelFormat.define('MTLPixelFormatA8Unorm', 1)
@@ -181,7 +182,7 @@ MTLPixelFormatDepth32Float_Stencil8 = enum_MTLPixelFormat.define('MTLPixelFormat
 MTLPixelFormatX32_Stencil8 = enum_MTLPixelFormat.define('MTLPixelFormatX32_Stencil8', 261)
 MTLPixelFormatX24_Stencil8 = enum_MTLPixelFormat.define('MTLPixelFormatX24_Stencil8', 262)
 
-MTLPixelFormat = enum_MTLPixelFormat
+MTLPixelFormat: TypeAlias = enum_MTLPixelFormat
 enum_MTLResourceOptions = CEnum(NSUInteger)
 MTLResourceCPUCacheModeDefaultCache = enum_MTLResourceOptions.define('MTLResourceCPUCacheModeDefaultCache', 0)
 MTLResourceCPUCacheModeWriteCombined = enum_MTLResourceOptions.define('MTLResourceCPUCacheModeWriteCombined', 1)
@@ -195,25 +196,25 @@ MTLResourceHazardTrackingModeTracked = enum_MTLResourceOptions.define('MTLResour
 MTLResourceOptionCPUCacheModeDefault = enum_MTLResourceOptions.define('MTLResourceOptionCPUCacheModeDefault', 0)
 MTLResourceOptionCPUCacheModeWriteCombined = enum_MTLResourceOptions.define('MTLResourceOptionCPUCacheModeWriteCombined', 1)
 
-MTLResourceOptions = enum_MTLResourceOptions
+MTLResourceOptions: TypeAlias = enum_MTLResourceOptions
 enum_MTLCPUCacheMode = CEnum(NSUInteger)
 MTLCPUCacheModeDefaultCache = enum_MTLCPUCacheMode.define('MTLCPUCacheModeDefaultCache', 0)
 MTLCPUCacheModeWriteCombined = enum_MTLCPUCacheMode.define('MTLCPUCacheModeWriteCombined', 1)
 
-MTLCPUCacheMode = enum_MTLCPUCacheMode
+MTLCPUCacheMode: TypeAlias = enum_MTLCPUCacheMode
 enum_MTLStorageMode = CEnum(NSUInteger)
 MTLStorageModeShared = enum_MTLStorageMode.define('MTLStorageModeShared', 0)
 MTLStorageModeManaged = enum_MTLStorageMode.define('MTLStorageModeManaged', 1)
 MTLStorageModePrivate = enum_MTLStorageMode.define('MTLStorageModePrivate', 2)
 MTLStorageModeMemoryless = enum_MTLStorageMode.define('MTLStorageModeMemoryless', 3)
 
-MTLStorageMode = enum_MTLStorageMode
+MTLStorageMode: TypeAlias = enum_MTLStorageMode
 enum_MTLHazardTrackingMode = CEnum(NSUInteger)
 MTLHazardTrackingModeDefault = enum_MTLHazardTrackingMode.define('MTLHazardTrackingModeDefault', 0)
 MTLHazardTrackingModeUntracked = enum_MTLHazardTrackingMode.define('MTLHazardTrackingModeUntracked', 1)
 MTLHazardTrackingModeTracked = enum_MTLHazardTrackingMode.define('MTLHazardTrackingModeTracked', 2)
 
-MTLHazardTrackingMode = enum_MTLHazardTrackingMode
+MTLHazardTrackingMode: TypeAlias = enum_MTLHazardTrackingMode
 enum_MTLTextureUsage = CEnum(NSUInteger)
 MTLTextureUsageUnknown = enum_MTLTextureUsage.define('MTLTextureUsageUnknown', 0)
 MTLTextureUsageShaderRead = enum_MTLTextureUsage.define('MTLTextureUsageShaderRead', 1)
@@ -222,16 +223,16 @@ MTLTextureUsageRenderTarget = enum_MTLTextureUsage.define('MTLTextureUsageRender
 MTLTextureUsagePixelFormatView = enum_MTLTextureUsage.define('MTLTextureUsagePixelFormatView', 16)
 MTLTextureUsageShaderAtomic = enum_MTLTextureUsage.define('MTLTextureUsageShaderAtomic', 32)
 
-MTLTextureUsage = enum_MTLTextureUsage
-BOOL = ctypes.c_int32
-NSInteger = ctypes.c_int64
+MTLTextureUsage: TypeAlias = enum_MTLTextureUsage
+BOOL: TypeAlias = ctypes.c_int32
+NSInteger: TypeAlias = ctypes.c_int64
 enum_MTLTextureCompressionType = CEnum(NSInteger)
 MTLTextureCompressionTypeLossless = enum_MTLTextureCompressionType.define('MTLTextureCompressionTypeLossless', 0)
 MTLTextureCompressionTypeLossy = enum_MTLTextureCompressionType.define('MTLTextureCompressionTypeLossy', 1)
 
-MTLTextureCompressionType = enum_MTLTextureCompressionType
+MTLTextureCompressionType: TypeAlias = enum_MTLTextureCompressionType
 class MTLTextureSwizzleChannels(Struct): pass
-uint8_t = ctypes.c_ubyte
+uint8_t: TypeAlias = ctypes.c_ubyte
 enum_MTLTextureSwizzle = CEnum(uint8_t)
 MTLTextureSwizzleZero = enum_MTLTextureSwizzle.define('MTLTextureSwizzleZero', 0)
 MTLTextureSwizzleOne = enum_MTLTextureSwizzle.define('MTLTextureSwizzleOne', 1)
@@ -240,7 +241,7 @@ MTLTextureSwizzleGreen = enum_MTLTextureSwizzle.define('MTLTextureSwizzleGreen',
 MTLTextureSwizzleBlue = enum_MTLTextureSwizzle.define('MTLTextureSwizzleBlue', 4)
 MTLTextureSwizzleAlpha = enum_MTLTextureSwizzle.define('MTLTextureSwizzleAlpha', 5)
 
-MTLTextureSwizzle = enum_MTLTextureSwizzle
+MTLTextureSwizzle: TypeAlias = enum_MTLTextureSwizzle
 MTLTextureSwizzleChannels._fields_ = [
   ('red', MTLTextureSwizzle),
   ('green', MTLTextureSwizzle),
@@ -248,7 +249,7 @@ MTLTextureSwizzleChannels._fields_ = [
   ('alpha', MTLTextureSwizzle),
 ]
 class NSObject(objc.Spec): pass
-IMP = ctypes.CFUNCTYPE(None, )
+IMP: TypeAlias = ctypes.CFUNCTYPE(None, )
 class NSInvocation(objc.Spec): pass
 class NSMethodSignature(objc.Spec): pass
 NSMethodSignature._bases_ = [NSObject]
@@ -286,7 +287,7 @@ NSInvocation._classmethods_ = [
 class struct__NSZone(Struct): pass
 class Protocol(objc.Spec): pass
 class NSString(objc.Spec): pass
-unichar = ctypes.c_uint16
+unichar: TypeAlias = ctypes.c_uint16
 class NSCoder(objc.Spec): pass
 class NSData(objc.Spec): pass
 NSData._bases_ = [NSObject]
@@ -382,7 +383,7 @@ MTLTextureDescriptor._classmethods_ = [
   ('textureBufferDescriptorWithPixelFormat:width:resourceOptions:usage:', MTLTextureDescriptor, [MTLPixelFormat, NSUInteger, MTLResourceOptions, MTLTextureUsage]),
 ]
 class MTLDevice(objc.Spec): pass
-uint64_t = ctypes.c_uint64
+uint64_t: TypeAlias = ctypes.c_uint64
 MTLBuffer._bases_ = [MTLResource]
 MTLBuffer._methods_ = [
   ('contents', ctypes.c_void_p, []),
@@ -429,9 +430,9 @@ MTLPurgeableStateNonVolatile = enum_MTLPurgeableState.define('MTLPurgeableStateN
 MTLPurgeableStateVolatile = enum_MTLPurgeableState.define('MTLPurgeableStateVolatile', 3)
 MTLPurgeableStateEmpty = enum_MTLPurgeableState.define('MTLPurgeableStateEmpty', 4)
 
-MTLPurgeableState = enum_MTLPurgeableState
-kern_return_t = ctypes.c_int32
-task_id_token_t = ctypes.c_uint32
+MTLPurgeableState: TypeAlias = enum_MTLPurgeableState
+kern_return_t: TypeAlias = ctypes.c_int32
+task_id_token_t: TypeAlias = ctypes.c_uint32
 class MTLHeap(objc.Spec): pass
 MTLResource._bases_ = [NSObject]
 MTLResource._methods_ = [
@@ -455,14 +456,14 @@ MTLResourceUsageRead = enum_MTLResourceUsage.define('MTLResourceUsageRead', 1)
 MTLResourceUsageWrite = enum_MTLResourceUsage.define('MTLResourceUsageWrite', 2)
 MTLResourceUsageSample = enum_MTLResourceUsage.define('MTLResourceUsageSample', 4)
 
-MTLResourceUsage = enum_MTLResourceUsage
+MTLResourceUsage: TypeAlias = enum_MTLResourceUsage
 class MTLIndirectCommandBuffer(objc.Spec): pass
 enum_MTLBarrierScope = CEnum(NSUInteger)
 MTLBarrierScopeBuffers = enum_MTLBarrierScope.define('MTLBarrierScopeBuffers', 1)
 MTLBarrierScopeTextures = enum_MTLBarrierScope.define('MTLBarrierScopeTextures', 2)
 MTLBarrierScopeRenderTargets = enum_MTLBarrierScope.define('MTLBarrierScopeRenderTargets', 4)
 
-MTLBarrierScope = enum_MTLBarrierScope
+MTLBarrierScope: TypeAlias = enum_MTLBarrierScope
 class MTLCounterSampleBuffer(objc.Spec): pass
 MTLCounterSampleBuffer._bases_ = [NSObject]
 MTLCounterSampleBuffer._methods_ = [
@@ -475,7 +476,7 @@ enum_MTLDispatchType = CEnum(NSUInteger)
 MTLDispatchTypeSerial = enum_MTLDispatchType.define('MTLDispatchTypeSerial', 0)
 MTLDispatchTypeConcurrent = enum_MTLDispatchType.define('MTLDispatchTypeConcurrent', 1)
 
-MTLDispatchType = enum_MTLDispatchType
+MTLDispatchType: TypeAlias = enum_MTLDispatchType
 MTLComputeCommandEncoder._bases_ = [MTLCommandEncoder]
 MTLComputeCommandEncoder._methods_ = [
   ('setComputePipelineState:', None, [MTLComputePipelineState]),
@@ -536,7 +537,7 @@ MTLArgumentTypePrimitiveAccelerationStructure = enum_MTLArgumentType.define('MTL
 MTLArgumentTypeInstanceAccelerationStructure = enum_MTLArgumentType.define('MTLArgumentTypeInstanceAccelerationStructure', 26)
 MTLArgumentTypeIntersectionFunctionTable = enum_MTLArgumentType.define('MTLArgumentTypeIntersectionFunctionTable', 27)
 
-MTLArgumentType = enum_MTLArgumentType
+MTLArgumentType: TypeAlias = enum_MTLArgumentType
 enum_MTLBindingAccess = CEnum(NSUInteger)
 MTLBindingAccessReadOnly = enum_MTLBindingAccess.define('MTLBindingAccessReadOnly', 0)
 MTLBindingAccessReadWrite = enum_MTLBindingAccess.define('MTLBindingAccessReadWrite', 1)
@@ -545,7 +546,7 @@ MTLArgumentAccessReadOnly = enum_MTLBindingAccess.define('MTLArgumentAccessReadO
 MTLArgumentAccessReadWrite = enum_MTLBindingAccess.define('MTLArgumentAccessReadWrite', 1)
 MTLArgumentAccessWriteOnly = enum_MTLBindingAccess.define('MTLArgumentAccessWriteOnly', 2)
 
-MTLBindingAccess = enum_MTLBindingAccess
+MTLBindingAccess: TypeAlias = enum_MTLBindingAccess
 enum_MTLDataType = CEnum(NSUInteger)
 MTLDataTypeNone = enum_MTLDataType.define('MTLDataTypeNone', 0)
 MTLDataTypeStruct = enum_MTLDataType.define('MTLDataTypeStruct', 1)
@@ -643,7 +644,7 @@ MTLDataTypeBFloat2 = enum_MTLDataType.define('MTLDataTypeBFloat2', 122)
 MTLDataTypeBFloat3 = enum_MTLDataType.define('MTLDataTypeBFloat3', 123)
 MTLDataTypeBFloat4 = enum_MTLDataType.define('MTLDataTypeBFloat4', 124)
 
-MTLDataType = enum_MTLDataType
+MTLDataType: TypeAlias = enum_MTLDataType
 class MTLStructType(objc.Spec): pass
 class MTLStructMember(objc.Spec): pass
 class MTLArrayType(objc.Spec): pass
@@ -725,19 +726,19 @@ MTLFunctionTypeIntersection = enum_MTLFunctionType.define('MTLFunctionTypeInters
 MTLFunctionTypeMesh = enum_MTLFunctionType.define('MTLFunctionTypeMesh', 7)
 MTLFunctionTypeObject = enum_MTLFunctionType.define('MTLFunctionTypeObject', 8)
 
-MTLFunctionType = enum_MTLFunctionType
+MTLFunctionType: TypeAlias = enum_MTLFunctionType
 enum_MTLPatchType = CEnum(NSUInteger)
 MTLPatchTypeNone = enum_MTLPatchType.define('MTLPatchTypeNone', 0)
 MTLPatchTypeTriangle = enum_MTLPatchType.define('MTLPatchTypeTriangle', 1)
 MTLPatchTypeQuad = enum_MTLPatchType.define('MTLPatchTypeQuad', 2)
 
-MTLPatchType = enum_MTLPatchType
+MTLPatchType: TypeAlias = enum_MTLPatchType
 enum_MTLFunctionOptions = CEnum(NSUInteger)
 MTLFunctionOptionNone = enum_MTLFunctionOptions.define('MTLFunctionOptionNone', 0)
 MTLFunctionOptionCompileToBinary = enum_MTLFunctionOptions.define('MTLFunctionOptionCompileToBinary', 1)
 MTLFunctionOptionStoreFunctionInMetalScript = enum_MTLFunctionOptions.define('MTLFunctionOptionStoreFunctionInMetalScript', 2)
 
-MTLFunctionOptions = enum_MTLFunctionOptions
+MTLFunctionOptions: TypeAlias = enum_MTLFunctionOptions
 MTLFunction._bases_ = [NSObject]
 MTLFunction._methods_ = [
   ('newArgumentEncoderWithBufferIndex:', MTLArgumentEncoder, [NSUInteger], True),
@@ -765,7 +766,7 @@ MTLStepFunctionThreadPositionInGridY = enum_MTLStepFunction.define('MTLStepFunct
 MTLStepFunctionThreadPositionInGridXIndexed = enum_MTLStepFunction.define('MTLStepFunctionThreadPositionInGridXIndexed', 7)
 MTLStepFunctionThreadPositionInGridYIndexed = enum_MTLStepFunction.define('MTLStepFunctionThreadPositionInGridYIndexed', 8)
 
-MTLStepFunction = enum_MTLStepFunction
+MTLStepFunction: TypeAlias = enum_MTLStepFunction
 MTLBufferLayoutDescriptor._bases_ = [NSObject]
 MTLBufferLayoutDescriptor._methods_ = [
   ('stride', NSUInteger, []),
@@ -838,7 +839,7 @@ MTLAttributeFormatHalf = enum_MTLAttributeFormat.define('MTLAttributeFormatHalf'
 MTLAttributeFormatFloatRG11B10 = enum_MTLAttributeFormat.define('MTLAttributeFormatFloatRG11B10', 54)
 MTLAttributeFormatFloatRGB9E5 = enum_MTLAttributeFormat.define('MTLAttributeFormatFloatRGB9E5', 55)
 
-MTLAttributeFormat = enum_MTLAttributeFormat
+MTLAttributeFormat: TypeAlias = enum_MTLAttributeFormat
 MTLAttributeDescriptor._bases_ = [NSObject]
 MTLAttributeDescriptor._methods_ = [
   ('format', MTLAttributeFormat, []),
@@ -857,7 +858,7 @@ enum_MTLIndexType = CEnum(NSUInteger)
 MTLIndexTypeUInt16 = enum_MTLIndexType.define('MTLIndexTypeUInt16', 0)
 MTLIndexTypeUInt32 = enum_MTLIndexType.define('MTLIndexTypeUInt32', 1)
 
-MTLIndexType = enum_MTLIndexType
+MTLIndexType: TypeAlias = enum_MTLIndexType
 MTLStageInputOutputDescriptor._bases_ = [NSObject]
 MTLStageInputOutputDescriptor._methods_ = [
   ('reset', None, []),
@@ -878,7 +879,7 @@ MTLMutabilityDefault = enum_MTLMutability.define('MTLMutabilityDefault', 0)
 MTLMutabilityMutable = enum_MTLMutability.define('MTLMutabilityMutable', 1)
 MTLMutabilityImmutable = enum_MTLMutability.define('MTLMutabilityImmutable', 2)
 
-MTLMutability = enum_MTLMutability
+MTLMutability: TypeAlias = enum_MTLMutability
 MTLPipelineBufferDescriptor._bases_ = [NSObject]
 MTLPipelineBufferDescriptor._methods_ = [
   ('mutability', MTLMutability, []),
@@ -921,7 +922,7 @@ class MTLFunctionHandle(objc.Spec): pass
 class MTLVisibleFunctionTableDescriptor(objc.Spec): pass
 class MTLIntersectionFunctionTableDescriptor(objc.Spec): pass
 class struct_MTLResourceID(Struct): pass
-MTLResourceID = struct_MTLResourceID
+MTLResourceID: TypeAlias = struct_MTLResourceID
 struct_MTLResourceID._fields_ = [
   ('_impl', uint64_t),
 ]
@@ -942,7 +943,7 @@ MTLComputePipelineState._methods_ = [
 class MTLCommandQueue(objc.Spec): pass
 class MTLCommandBuffer(objc.Spec): pass
 class MTLDrawable(objc.Spec): pass
-CFTimeInterval = ctypes.c_double
+CFTimeInterval: TypeAlias = ctypes.c_double
 class MTLBlitCommandEncoder(objc.Spec): pass
 enum_MTLBlitOption = CEnum(NSUInteger)
 MTLBlitOptionNone = enum_MTLBlitOption.define('MTLBlitOptionNone', 0)
@@ -950,7 +951,7 @@ MTLBlitOptionDepthFromDepthStencil = enum_MTLBlitOption.define('MTLBlitOptionDep
 MTLBlitOptionStencilFromDepthStencil = enum_MTLBlitOption.define('MTLBlitOptionStencilFromDepthStencil', 2)
 MTLBlitOptionRowLinearPVRTC = enum_MTLBlitOption.define('MTLBlitOptionRowLinearPVRTC', 4)
 
-MTLBlitOption = enum_MTLBlitOption
+MTLBlitOption: TypeAlias = enum_MTLBlitOption
 MTLBlitCommandEncoder._bases_ = [MTLCommandEncoder]
 MTLBlitCommandEncoder._methods_ = [
   ('synchronizeResource:', None, [MTLResource]),
@@ -1001,7 +1002,7 @@ MTLLoadActionDontCare = enum_MTLLoadAction.define('MTLLoadActionDontCare', 0)
 MTLLoadActionLoad = enum_MTLLoadAction.define('MTLLoadActionLoad', 1)
 MTLLoadActionClear = enum_MTLLoadAction.define('MTLLoadActionClear', 2)
 
-MTLLoadAction = enum_MTLLoadAction
+MTLLoadAction: TypeAlias = enum_MTLLoadAction
 enum_MTLStoreAction = CEnum(NSUInteger)
 MTLStoreActionDontCare = enum_MTLStoreAction.define('MTLStoreActionDontCare', 0)
 MTLStoreActionStore = enum_MTLStoreAction.define('MTLStoreActionStore', 1)
@@ -1010,12 +1011,12 @@ MTLStoreActionStoreAndMultisampleResolve = enum_MTLStoreAction.define('MTLStoreA
 MTLStoreActionUnknown = enum_MTLStoreAction.define('MTLStoreActionUnknown', 4)
 MTLStoreActionCustomSampleDepthStore = enum_MTLStoreAction.define('MTLStoreActionCustomSampleDepthStore', 5)
 
-MTLStoreAction = enum_MTLStoreAction
+MTLStoreAction: TypeAlias = enum_MTLStoreAction
 enum_MTLStoreActionOptions = CEnum(NSUInteger)
 MTLStoreActionOptionNone = enum_MTLStoreActionOptions.define('MTLStoreActionOptionNone', 0)
 MTLStoreActionOptionCustomSamplePositions = enum_MTLStoreActionOptions.define('MTLStoreActionOptionCustomSamplePositions', 1)
 
-MTLStoreActionOptions = enum_MTLStoreActionOptions
+MTLStoreActionOptions: TypeAlias = enum_MTLStoreActionOptions
 MTLRenderPassAttachmentDescriptor._bases_ = [NSObject]
 MTLRenderPassAttachmentDescriptor._methods_ = [
   ('texture', MTLTexture, []),
@@ -1057,7 +1058,7 @@ MTLMultisampleDepthResolveFilterSample0 = enum_MTLMultisampleDepthResolveFilter.
 MTLMultisampleDepthResolveFilterMin = enum_MTLMultisampleDepthResolveFilter.define('MTLMultisampleDepthResolveFilterMin', 1)
 MTLMultisampleDepthResolveFilterMax = enum_MTLMultisampleDepthResolveFilter.define('MTLMultisampleDepthResolveFilterMax', 2)
 
-MTLMultisampleDepthResolveFilter = enum_MTLMultisampleDepthResolveFilter
+MTLMultisampleDepthResolveFilter: TypeAlias = enum_MTLMultisampleDepthResolveFilter
 MTLRenderPassDepthAttachmentDescriptor._bases_ = [MTLRenderPassAttachmentDescriptor]
 MTLRenderPassDepthAttachmentDescriptor._methods_ = [
   ('clearDepth', ctypes.c_double, []),
@@ -1070,7 +1071,7 @@ enum_MTLMultisampleStencilResolveFilter = CEnum(NSUInteger)
 MTLMultisampleStencilResolveFilterSample0 = enum_MTLMultisampleStencilResolveFilter.define('MTLMultisampleStencilResolveFilterSample0', 0)
 MTLMultisampleStencilResolveFilterDepthResolvedSample = enum_MTLMultisampleStencilResolveFilter.define('MTLMultisampleStencilResolveFilterDepthResolvedSample', 1)
 
-MTLMultisampleStencilResolveFilter = enum_MTLMultisampleStencilResolveFilter
+MTLMultisampleStencilResolveFilter: TypeAlias = enum_MTLMultisampleStencilResolveFilter
 MTLRenderPassStencilAttachmentDescriptor._bases_ = [MTLRenderPassAttachmentDescriptor]
 MTLRenderPassStencilAttachmentDescriptor._methods_ = [
   ('clearStencil', uint32_t, []),
@@ -1190,7 +1191,7 @@ enum_MTLSparseTextureMappingMode = CEnum(NSUInteger)
 MTLSparseTextureMappingModeMap = enum_MTLSparseTextureMappingMode.define('MTLSparseTextureMappingModeMap', 0)
 MTLSparseTextureMappingModeUnmap = enum_MTLSparseTextureMappingMode.define('MTLSparseTextureMappingModeUnmap', 1)
 
-MTLSparseTextureMappingMode = enum_MTLSparseTextureMappingMode
+MTLSparseTextureMappingMode: TypeAlias = enum_MTLSparseTextureMappingMode
 MTLResourceStateCommandEncoder._bases_ = [MTLCommandEncoder]
 MTLResourceStateCommandEncoder._methods_ = [
   ('updateTextureMappings:mode:regions:mipLevels:slices:numRegions:', None, [MTLTexture, MTLSparseTextureMappingMode, ctypes.POINTER(MTLRegion), ctypes.POINTER(NSUInteger), ctypes.POINTER(NSUInteger), NSUInteger]),
@@ -1253,7 +1254,7 @@ enum_MTLCommandBufferErrorOption = CEnum(NSUInteger)
 MTLCommandBufferErrorOptionNone = enum_MTLCommandBufferErrorOption.define('MTLCommandBufferErrorOptionNone', 0)
 MTLCommandBufferErrorOptionEncoderExecutionStatus = enum_MTLCommandBufferErrorOption.define('MTLCommandBufferErrorOptionEncoderExecutionStatus', 1)
 
-MTLCommandBufferErrorOption = enum_MTLCommandBufferErrorOption
+MTLCommandBufferErrorOption: TypeAlias = enum_MTLCommandBufferErrorOption
 class MTLLogContainer(objc.Spec): pass
 enum_MTLCommandBufferStatus = CEnum(NSUInteger)
 MTLCommandBufferStatusNotEnqueued = enum_MTLCommandBufferStatus.define('MTLCommandBufferStatusNotEnqueued', 0)
@@ -1263,9 +1264,9 @@ MTLCommandBufferStatusScheduled = enum_MTLCommandBufferStatus.define('MTLCommand
 MTLCommandBufferStatusCompleted = enum_MTLCommandBufferStatus.define('MTLCommandBufferStatusCompleted', 4)
 MTLCommandBufferStatusError = enum_MTLCommandBufferStatus.define('MTLCommandBufferStatusError', 5)
 
-MTLCommandBufferStatus = enum_MTLCommandBufferStatus
+MTLCommandBufferStatus: TypeAlias = enum_MTLCommandBufferStatus
 class NSError(objc.Spec): pass
-NSErrorDomain = NSString
+NSErrorDomain: TypeAlias = NSString
 NSError._bases_ = [NSObject]
 NSError._methods_ = [
   ('domain', NSErrorDomain, []),
@@ -1339,12 +1340,12 @@ MTLIOCompressionMethodLZ4 = enum_MTLIOCompressionMethod.define('MTLIOCompression
 MTLIOCompressionMethodLZMA = enum_MTLIOCompressionMethod.define('MTLIOCompressionMethodLZMA', 3)
 MTLIOCompressionMethodLZBitmap = enum_MTLIOCompressionMethod.define('MTLIOCompressionMethodLZBitmap', 4)
 
-MTLIOCompressionMethod = enum_MTLIOCompressionMethod
+MTLIOCompressionMethod: TypeAlias = enum_MTLIOCompressionMethod
 try: (MTLCreateSystemDefaultDevice:=dll.MTLCreateSystemDefaultDevice).restype, MTLCreateSystemDefaultDevice.argtypes = MTLDevice, []
 except AttributeError: pass
 
 MTLCreateSystemDefaultDevice = objc.returns_retained(MTLCreateSystemDefaultDevice)
-MTLDeviceNotificationName = NSString
+MTLDeviceNotificationName: TypeAlias = NSString
 try: MTLDeviceWasAddedNotification = MTLDeviceNotificationName.in_dll(dll, 'MTLDeviceWasAddedNotification')
 except (ValueError,AttributeError): pass
 try: MTLDeviceRemovalRequestedNotification = MTLDeviceNotificationName.in_dll(dll, 'MTLDeviceRemovalRequestedNotification')
@@ -1389,7 +1390,7 @@ MTLFeatureSet_tvOS_GPUFamily2_v1 = enum_MTLFeatureSet.define('MTLFeatureSet_tvOS
 MTLFeatureSet_tvOS_GPUFamily1_v4 = enum_MTLFeatureSet.define('MTLFeatureSet_tvOS_GPUFamily1_v4', 30004)
 MTLFeatureSet_tvOS_GPUFamily2_v2 = enum_MTLFeatureSet.define('MTLFeatureSet_tvOS_GPUFamily2_v2', 30005)
 
-MTLFeatureSet = enum_MTLFeatureSet
+MTLFeatureSet: TypeAlias = enum_MTLFeatureSet
 enum_MTLGPUFamily = CEnum(NSInteger)
 MTLGPUFamilyApple1 = enum_MTLGPUFamily.define('MTLGPUFamilyApple1', 1001)
 MTLGPUFamilyApple2 = enum_MTLGPUFamily.define('MTLGPUFamilyApple2', 1002)
@@ -1409,43 +1410,43 @@ MTLGPUFamilyMacCatalyst1 = enum_MTLGPUFamily.define('MTLGPUFamilyMacCatalyst1', 
 MTLGPUFamilyMacCatalyst2 = enum_MTLGPUFamily.define('MTLGPUFamilyMacCatalyst2', 4002)
 MTLGPUFamilyMetal3 = enum_MTLGPUFamily.define('MTLGPUFamilyMetal3', 5001)
 
-MTLGPUFamily = enum_MTLGPUFamily
+MTLGPUFamily: TypeAlias = enum_MTLGPUFamily
 enum_MTLDeviceLocation = CEnum(NSUInteger)
 MTLDeviceLocationBuiltIn = enum_MTLDeviceLocation.define('MTLDeviceLocationBuiltIn', 0)
 MTLDeviceLocationSlot = enum_MTLDeviceLocation.define('MTLDeviceLocationSlot', 1)
 MTLDeviceLocationExternal = enum_MTLDeviceLocation.define('MTLDeviceLocationExternal', 2)
 MTLDeviceLocationUnspecified = enum_MTLDeviceLocation.define('MTLDeviceLocationUnspecified', -1)
 
-MTLDeviceLocation = enum_MTLDeviceLocation
+MTLDeviceLocation: TypeAlias = enum_MTLDeviceLocation
 enum_MTLPipelineOption = CEnum(NSUInteger)
 MTLPipelineOptionNone = enum_MTLPipelineOption.define('MTLPipelineOptionNone', 0)
 MTLPipelineOptionArgumentInfo = enum_MTLPipelineOption.define('MTLPipelineOptionArgumentInfo', 1)
 MTLPipelineOptionBufferTypeInfo = enum_MTLPipelineOption.define('MTLPipelineOptionBufferTypeInfo', 2)
 MTLPipelineOptionFailOnBinaryArchiveMiss = enum_MTLPipelineOption.define('MTLPipelineOptionFailOnBinaryArchiveMiss', 4)
 
-MTLPipelineOption = enum_MTLPipelineOption
+MTLPipelineOption: TypeAlias = enum_MTLPipelineOption
 enum_MTLReadWriteTextureTier = CEnum(NSUInteger)
 MTLReadWriteTextureTierNone = enum_MTLReadWriteTextureTier.define('MTLReadWriteTextureTierNone', 0)
 MTLReadWriteTextureTier1 = enum_MTLReadWriteTextureTier.define('MTLReadWriteTextureTier1', 1)
 MTLReadWriteTextureTier2 = enum_MTLReadWriteTextureTier.define('MTLReadWriteTextureTier2', 2)
 
-MTLReadWriteTextureTier = enum_MTLReadWriteTextureTier
+MTLReadWriteTextureTier: TypeAlias = enum_MTLReadWriteTextureTier
 enum_MTLArgumentBuffersTier = CEnum(NSUInteger)
 MTLArgumentBuffersTier1 = enum_MTLArgumentBuffersTier.define('MTLArgumentBuffersTier1', 0)
 MTLArgumentBuffersTier2 = enum_MTLArgumentBuffersTier.define('MTLArgumentBuffersTier2', 1)
 
-MTLArgumentBuffersTier = enum_MTLArgumentBuffersTier
+MTLArgumentBuffersTier: TypeAlias = enum_MTLArgumentBuffersTier
 enum_MTLSparseTextureRegionAlignmentMode = CEnum(NSUInteger)
 MTLSparseTextureRegionAlignmentModeOutward = enum_MTLSparseTextureRegionAlignmentMode.define('MTLSparseTextureRegionAlignmentModeOutward', 0)
 MTLSparseTextureRegionAlignmentModeInward = enum_MTLSparseTextureRegionAlignmentMode.define('MTLSparseTextureRegionAlignmentModeInward', 1)
 
-MTLSparseTextureRegionAlignmentMode = enum_MTLSparseTextureRegionAlignmentMode
+MTLSparseTextureRegionAlignmentMode: TypeAlias = enum_MTLSparseTextureRegionAlignmentMode
 enum_MTLSparsePageSize = CEnum(NSInteger)
 MTLSparsePageSize16 = enum_MTLSparsePageSize.define('MTLSparsePageSize16', 101)
 MTLSparsePageSize64 = enum_MTLSparsePageSize.define('MTLSparsePageSize64', 102)
 MTLSparsePageSize256 = enum_MTLSparsePageSize.define('MTLSparsePageSize256', 103)
 
-MTLSparsePageSize = enum_MTLSparsePageSize
+MTLSparsePageSize: TypeAlias = enum_MTLSparsePageSize
 class MTLAccelerationStructureSizes(Struct): pass
 MTLAccelerationStructureSizes._fields_ = [
   ('accelerationStructureSize', NSUInteger),
@@ -1459,7 +1460,7 @@ MTLCounterSamplingPointAtDispatchBoundary = enum_MTLCounterSamplingPoint.define(
 MTLCounterSamplingPointAtTileDispatchBoundary = enum_MTLCounterSamplingPoint.define('MTLCounterSamplingPointAtTileDispatchBoundary', 3)
 MTLCounterSamplingPointAtBlitBoundary = enum_MTLCounterSamplingPoint.define('MTLCounterSamplingPointAtBlitBoundary', 4)
 
-MTLCounterSamplingPoint = enum_MTLCounterSamplingPoint
+MTLCounterSamplingPoint: TypeAlias = enum_MTLCounterSamplingPoint
 class MTLSizeAndAlign(Struct): pass
 MTLSizeAndAlign._fields_ = [
   ('size', NSUInteger),
@@ -1494,7 +1495,7 @@ class MTLHeapDescriptor(objc.Spec): pass
 class MTLDepthStencilState(objc.Spec): pass
 class MTLDepthStencilDescriptor(objc.Spec): pass
 class struct___IOSurface(Struct): pass
-IOSurfaceRef = ctypes.POINTER(struct___IOSurface)
+IOSurfaceRef: TypeAlias = ctypes.POINTER(struct___IOSurface)
 class MTLSharedTextureHandle(objc.Spec): pass
 MTLSharedTextureHandle._bases_ = [NSObject]
 MTLSharedTextureHandle._methods_ = [
@@ -1531,7 +1532,7 @@ enum_MTLLibraryType = CEnum(NSInteger)
 MTLLibraryTypeExecutable = enum_MTLLibraryType.define('MTLLibraryTypeExecutable', 0)
 MTLLibraryTypeDynamic = enum_MTLLibraryType.define('MTLLibraryTypeDynamic', 1)
 
-MTLLibraryType = enum_MTLLibraryType
+MTLLibraryType: TypeAlias = enum_MTLLibraryType
 MTLLibrary._bases_ = [NSObject]
 MTLLibrary._methods_ = [
   ('newFunctionWithName:', MTLFunction, [NSString], True),
@@ -1546,7 +1547,7 @@ MTLLibrary._methods_ = [
 ]
 class NSBundle(objc.Spec): pass
 class NSURL(objc.Spec): pass
-NSURLResourceKey = NSString
+NSURLResourceKey: TypeAlias = NSString
 enum_NSURLBookmarkCreationOptions = CEnum(NSUInteger)
 NSURLBookmarkCreationPreferFileIDResolution = enum_NSURLBookmarkCreationOptions.define('NSURLBookmarkCreationPreferFileIDResolution', 256)
 NSURLBookmarkCreationMinimalBookmark = enum_NSURLBookmarkCreationOptions.define('NSURLBookmarkCreationMinimalBookmark', 512)
@@ -1555,21 +1556,21 @@ NSURLBookmarkCreationWithSecurityScope = enum_NSURLBookmarkCreationOptions.defin
 NSURLBookmarkCreationSecurityScopeAllowOnlyReadAccess = enum_NSURLBookmarkCreationOptions.define('NSURLBookmarkCreationSecurityScopeAllowOnlyReadAccess', 4096)
 NSURLBookmarkCreationWithoutImplicitSecurityScope = enum_NSURLBookmarkCreationOptions.define('NSURLBookmarkCreationWithoutImplicitSecurityScope', 536870912)
 
-NSURLBookmarkCreationOptions = enum_NSURLBookmarkCreationOptions
+NSURLBookmarkCreationOptions: TypeAlias = enum_NSURLBookmarkCreationOptions
 enum_NSURLBookmarkResolutionOptions = CEnum(NSUInteger)
 NSURLBookmarkResolutionWithoutUI = enum_NSURLBookmarkResolutionOptions.define('NSURLBookmarkResolutionWithoutUI', 256)
 NSURLBookmarkResolutionWithoutMounting = enum_NSURLBookmarkResolutionOptions.define('NSURLBookmarkResolutionWithoutMounting', 512)
 NSURLBookmarkResolutionWithSecurityScope = enum_NSURLBookmarkResolutionOptions.define('NSURLBookmarkResolutionWithSecurityScope', 1024)
 NSURLBookmarkResolutionWithoutImplicitStartAccessing = enum_NSURLBookmarkResolutionOptions.define('NSURLBookmarkResolutionWithoutImplicitStartAccessing', 32768)
 
-NSURLBookmarkResolutionOptions = enum_NSURLBookmarkResolutionOptions
+NSURLBookmarkResolutionOptions: TypeAlias = enum_NSURLBookmarkResolutionOptions
 class NSNumber(objc.Spec): pass
 enum_NSComparisonResult = CEnum(NSInteger)
 NSOrderedAscending = enum_NSComparisonResult.define('NSOrderedAscending', -1)
 NSOrderedSame = enum_NSComparisonResult.define('NSOrderedSame', 0)
 NSOrderedDescending = enum_NSComparisonResult.define('NSOrderedDescending', 1)
 
-NSComparisonResult = enum_NSComparisonResult
+NSComparisonResult: TypeAlias = enum_NSComparisonResult
 class NSValue(objc.Spec): pass
 NSValue._bases_ = [NSObject]
 NSValue._methods_ = [
@@ -1616,7 +1617,7 @@ NSNumber._methods_ = [
   ('unsignedIntegerValue', NSUInteger, []),
   ('stringValue', NSString, []),
 ]
-NSURLBookmarkFileCreationOptions = ctypes.c_uint64
+NSURLBookmarkFileCreationOptions: TypeAlias = ctypes.c_uint64
 NSURL._bases_ = [NSObject]
 NSURL._methods_ = [
   ('initWithScheme:host:path:', 'instancetype', [NSString, NSString, NSString]),
@@ -1743,17 +1744,17 @@ MTLLanguageVersion2_4 = enum_MTLLanguageVersion.define('MTLLanguageVersion2_4', 
 MTLLanguageVersion3_0 = enum_MTLLanguageVersion.define('MTLLanguageVersion3_0', 196608)
 MTLLanguageVersion3_1 = enum_MTLLanguageVersion.define('MTLLanguageVersion3_1', 196609)
 
-MTLLanguageVersion = enum_MTLLanguageVersion
+MTLLanguageVersion: TypeAlias = enum_MTLLanguageVersion
 enum_MTLLibraryOptimizationLevel = CEnum(NSInteger)
 MTLLibraryOptimizationLevelDefault = enum_MTLLibraryOptimizationLevel.define('MTLLibraryOptimizationLevelDefault', 0)
 MTLLibraryOptimizationLevelSize = enum_MTLLibraryOptimizationLevel.define('MTLLibraryOptimizationLevelSize', 1)
 
-MTLLibraryOptimizationLevel = enum_MTLLibraryOptimizationLevel
+MTLLibraryOptimizationLevel: TypeAlias = enum_MTLLibraryOptimizationLevel
 enum_MTLCompileSymbolVisibility = CEnum(NSInteger)
 MTLCompileSymbolVisibilityDefault = enum_MTLCompileSymbolVisibility.define('MTLCompileSymbolVisibilityDefault', 0)
 MTLCompileSymbolVisibilityHidden = enum_MTLCompileSymbolVisibility.define('MTLCompileSymbolVisibilityHidden', 1)
 
-MTLCompileSymbolVisibility = enum_MTLCompileSymbolVisibility
+MTLCompileSymbolVisibility: TypeAlias = enum_MTLCompileSymbolVisibility
 MTLCompileOptions._bases_ = [NSObject]
 MTLCompileOptions._methods_ = [
   ('fastMathEnabled', BOOL, []),
@@ -1804,7 +1805,7 @@ MTLCounterSampleBufferDescriptor._methods_ = [
   ('sampleCount', NSUInteger, []),
   ('setSampleCount:', None, [NSUInteger]),
 ]
-MTLTimestamp = ctypes.c_uint64
+MTLTimestamp: TypeAlias = ctypes.c_uint64
 class MTLBufferBinding(objc.Spec): pass
 class MTLBinding(objc.Spec): pass
 MTLBufferBinding._bases_ = [MTLBinding]
@@ -1937,7 +1938,7 @@ MTLIndirectCommandTypeConcurrentDispatchThreads = enum_MTLIndirectCommandType.de
 MTLIndirectCommandTypeDrawMeshThreadgroups = enum_MTLIndirectCommandType.define('MTLIndirectCommandTypeDrawMeshThreadgroups', 128)
 MTLIndirectCommandTypeDrawMeshThreads = enum_MTLIndirectCommandType.define('MTLIndirectCommandTypeDrawMeshThreads', 256)
 
-MTLIndirectCommandType = enum_MTLIndirectCommandType
+MTLIndirectCommandType: TypeAlias = enum_MTLIndirectCommandType
 class MTLIndirectCommandBufferExecutionRange(Struct): pass
 MTLIndirectCommandBufferExecutionRange._fields_ = [
   ('location', uint32_t),
@@ -1978,7 +1979,7 @@ MTLPrimitiveTypeLineStrip = enum_MTLPrimitiveType.define('MTLPrimitiveTypeLineSt
 MTLPrimitiveTypeTriangle = enum_MTLPrimitiveType.define('MTLPrimitiveTypeTriangle', 3)
 MTLPrimitiveTypeTriangleStrip = enum_MTLPrimitiveType.define('MTLPrimitiveTypeTriangleStrip', 4)
 
-MTLPrimitiveType = enum_MTLPrimitiveType
+MTLPrimitiveType: TypeAlias = enum_MTLPrimitiveType
 MTLIndirectRenderCommand._bases_ = [NSObject]
 MTLIndirectRenderCommand._methods_ = [
   ('setRenderPipelineState:', None, [MTLRenderPipelineState]),
