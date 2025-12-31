@@ -49,7 +49,7 @@ arm = ["unicorn"]
 triton = ["triton-nightly>=2.1.0.dev20231014192330"]
 linting = [
   "pylint",
-  "mypy==1.18.1",
+  "mypy==1.19.1",
   "typing-extensions",
   "pre-commit",
   "ruff",
@@ -61,7 +61,7 @@ linting = [
 # ]
 testing_minimal = [
   "numpy",
-  "torch==2.9.0",
+  "torch==2.9.1",
   "pytest",
   "pytest-xdist",
   "pytest-timeout",
@@ -188,7 +188,6 @@ select = [
   "E72",
   "E112",   # no-indented-block
   "E113",   # unexpected-indentation
-  # "E124",
   "E203",   # whitespace-before-punctuation
   "E272",   # multiple-spaces-before-keyword
   "E275",   # missing-whitespace-after-keyword
