@@ -215,7 +215,7 @@ class QCOMArgsState(HCQArgsState):
     self.bind_sints_to_buf(*flatten(map(functools.partial(_tex, ibo=True), ibos)), buf=self.buf, fmt='I', offset=prg.ibo_off)
 
 class QCOMProgram(HCQProgram):
-  def __init__(self, dev: QCOMDevice, name: str, lib: bytes):
+  def __init__(self, dev: QCOMDevice, name: str, lib: bytes, buf_dtypes=[]):
     self.dev: QCOMDevice = dev
     self.name, self.lib, self.NIR = name, lib, isinstance(dev.renderer, IR3Renderer)
 

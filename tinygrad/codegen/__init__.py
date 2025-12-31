@@ -133,7 +133,7 @@ def do_linearize(prg:UOp, sink:UOp) -> UOp:
 
 def do_render(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
   src = ctx.render(list(lin.src))
-  return prg.replace(src=prg.src + (UOp(Ops.SOURCE, arg=src),))
+  return prg.replace(src=prg.src + (UOp(Ops.SOURCE, arg=src),), arg=ctx.aux(list(lin.src)) if ctx.has_aux else prg.arg)
 
 def do_compile(ctx:Renderer, prg:UOp, source:UOp) -> UOp|None:
   if ctx.compiler is None: return None

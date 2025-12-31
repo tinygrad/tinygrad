@@ -286,6 +286,7 @@ class ClangJITRenderer(ClangRenderer):
 
 class OpenCLRenderer(CStyleLanguage):
   device = "CL"
+  has_aux = True
 
   # language options
   kernel_typedef = "__kernel void"
@@ -313,6 +314,8 @@ class OpenCLRenderer(CStyleLanguage):
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     if any(uop.dtype.base == dtypes.half for uop in uops): prefix = (["#pragma OPENCL EXTENSION cl_khr_fp16 : enable"] + (prefix or []))
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
+
+  def aux(self, uops:list[UOp]): return (tuple(u.dtype for u in uops if u.op == Ops.DEFINE_GLOBAL),)
 
 class IntelRenderer(OpenCLRenderer):
   device, suffix, kernel_typedef = "CL", "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel void"
