@@ -43,7 +43,10 @@ UNSUPPORTED = ['SGPR[', 'V_SWAP', 'eval ', 'FATAL_HALT', 'HW_REGISTERS',
                'vscnt', 'vmcnt', 'expcnt', 'lgkmcnt',
                'CVT_OFF_TABLE', 'ThreadMask',
                'S1[i', 'C.i32', 'S[i]', 'in[',
-               'if n.', 'DST.u32', 'addrd = DST', 'addr = DST']  # Malformed pseudocode from PDF
+               'if n.', 'DST.u32', 'addrd = DST', 'addr = DST',
+               'BARRIER_STATE', 'ReallocVgprs',
+               'GPR_IDX', 'VSKIP', 'specified in', 'TTBL',
+               'fp6', 'bf6']  # Malformed pseudocode from PDF
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # COMPILER: pseudocode -> Python (minimal transforms)
@@ -51,6 +54,7 @@ UNSUPPORTED = ['SGPR[', 'V_SWAP', 'eval ', 'FATAL_HALT', 'HW_REGISTERS',
 
 def compile_pseudocode(pseudocode: str) -> str:
   """Compile pseudocode to Python. Transforms are minimal - most syntax just works."""
+  pseudocode = re.sub(r'\bpass\b', 'pass_', pseudocode)  # 'pass' is Python keyword
   raw_lines = pseudocode.strip().split('\n')
   joined_lines: list[str] = []
   for line in raw_lines:
@@ -113,7 +117,7 @@ def compile_pseudocode(pseudocode: str) -> str:
             break
       else:
         lhs, rhs = line.split('=', 1)
-        lhs_s, rhs_s = lhs.strip(), rhs.strip()
+        lhs_s, rhs_s = _expr(lhs.strip()), rhs.strip()
         stmt = _assign(lhs_s, _expr(rhs_s))
         if in_first_match_loop and rhs_s == 'i' and (lhs_s == 'tmp' or lhs_s == 'D0.i32'):
           stmt += "; break"

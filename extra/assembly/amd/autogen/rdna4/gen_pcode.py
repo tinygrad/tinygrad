@@ -377,42 +377,6 @@ def _SOP1Op_S_SENDMSG_RTN_B32(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, V
 def _SOP1Op_S_SENDMSG_RTN_B64(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
   return {}
 
-def _SOP1Op_S_BARRIER_SIGNAL(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  if  not InWorkgroup():
-    pass
-  elif ((barrierNumber == -2)  and   not WAVE_STATUS.PRIV):
-    pass
-  elif barrierNumber == 0:
-    pass
-  else:
-    BARRIER_STATE[barrierNumber & 63].signalCnt += 1
-  return {}
-
-def _SOP1Op_S_BARRIER_SIGNAL_ISFIRST(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  if  not InWorkgroup():
-    SCC = Reg(0)
-  elif ((barrierNumber == -2)  and   not WAVE_STATUS.PRIV):
-    SCC = Reg(0)
-  elif barrierNumber == 0:
-    SCC = Reg(0)
-  else:
-    SCC = Reg(BARRIER_STATE[barrierNumber & 63].signalCnt.u32 == 0)
-    BARRIER_STATE[barrierNumber & 63].signalCnt += 1
-  return {'SCC': SCC}
-
-def _SOP1Op_S_GET_BARRIER_STATE(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  D0.u32 = ({ 0, BARRIER_STATE[barrierNumber & 63].signalCnt.u7, 0, BARRIER_STATE[barrierNumber]
-  return {'D0': D0}
-
-def _SOP1Op_S_ALLOC_VGPR(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
-  n = ReallocVgprs((S0[8 : 0].u32))
-  if n < 0:
-    SCC = Reg(0)
-  else:
-    NUM_VGPRS = n
-    SCC = Reg(1)
-  return {'SCC': SCC}
-
 def _SOP1Op_S_SLEEP_VAR(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
   return {}
 
@@ -549,10 +513,6 @@ SOP1Op_FUNCTIONS = {
   SOP1Op.S_RFE_B64: _SOP1Op_S_RFE_B64,
   SOP1Op.S_SENDMSG_RTN_B32: _SOP1Op_S_SENDMSG_RTN_B32,
   SOP1Op.S_SENDMSG_RTN_B64: _SOP1Op_S_SENDMSG_RTN_B64,
-  SOP1Op.S_BARRIER_SIGNAL: _SOP1Op_S_BARRIER_SIGNAL,
-  SOP1Op.S_BARRIER_SIGNAL_ISFIRST: _SOP1Op_S_BARRIER_SIGNAL_ISFIRST,
-  SOP1Op.S_GET_BARRIER_STATE: _SOP1Op_S_GET_BARRIER_STATE,
-  SOP1Op.S_ALLOC_VGPR: _SOP1Op_S_ALLOC_VGPR,
   SOP1Op.S_SLEEP_VAR: _SOP1Op_S_SLEEP_VAR,
   SOP1Op.S_CEIL_F32: _SOP1Op_S_CEIL_F32,
   SOP1Op.S_FLOOR_F32: _SOP1Op_S_FLOOR_F32,
