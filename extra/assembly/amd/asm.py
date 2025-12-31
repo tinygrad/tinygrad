@@ -58,8 +58,8 @@ def _vreg(b: int, n: int = 1) -> str: return _reg("v", b, n)
 def _ttmp(b: int, n: int = 1) -> str: return _reg("ttmp", b - 108, n) if 108 <= b <= 123 else None
 def _sreg_or_ttmp(b: int, n: int = 1) -> str: return _ttmp(b, n) or _sreg(b, n)
 
-def _fmt_sdst(v: int, n: int = 1) -> str:
-  if v == 124: return "null"
+def _fmt_sdst(v: int, n: int = 1, *, is_cdna: bool = False) -> str:
+  if v == 124: return "m0" if is_cdna else "null"  # CDNA: M0=124, RDNA: null=124
   if t := _ttmp(v, n): return t
   if n > 1: return SPECIAL_PAIRS.get(v) or _sreg(v, n)
   return SPECIAL_GPRS.get(v, f"s{v}")
@@ -108,11 +108,14 @@ def _opsel_str(opsel: int, n: int, need: bool, is16_d: bool) -> str:
 _VOP1_F64 = {VOP1Op.V_CEIL_F64, VOP1Op.V_FLOOR_F64, VOP1Op.V_FRACT_F64, VOP1Op.V_FREXP_MANT_F64, VOP1Op.V_RCP_F64, VOP1Op.V_RNDNE_F64, VOP1Op.V_RSQ_F64, VOP1Op.V_SQRT_F64, VOP1Op.V_TRUNC_F64}
 
 def _disasm_vop1(inst: VOP1) -> str:
-  op, name = VOP1Op(inst.op), VOP1Op(inst.op).name.lower()
-  if op in (VOP1Op.V_NOP, VOP1Op.V_PIPEFLUSH): return name
-  if op == VOP1Op.V_READFIRSTLANE_B32: return f"v_readfirstlane_b32 {decode_src(inst.vdst)}, v{inst.src0 - 256 if inst.src0 >= 256 else inst.src0}"
-  parts, is_f64_d = name.split('_'), op in _VOP1_F64 or op in (VOP1Op.V_CVT_F64_F32, VOP1Op.V_CVT_F64_I32, VOP1Op.V_CVT_F64_U32)
-  is_f64_s = op in _VOP1_F64 or op in (VOP1Op.V_CVT_F32_F64, VOP1Op.V_CVT_I32_F64, VOP1Op.V_CVT_U32_F64, VOP1Op.V_FREXP_EXP_I32_F64)
+  stored_op = inst._values.get('op')
+  op = stored_op if stored_op is not None and hasattr(stored_op, 'name') else VOP1Op(inst.op)
+  name = op.name.lower()
+  if name in ('v_nop', 'v_pipeflush'): return name
+  if name == 'v_readfirstlane_b32': return f"v_readfirstlane_b32 {decode_src(inst.vdst)}, v{inst.src0 - 256 if inst.src0 >= 256 else inst.src0}"
+  _f64_names = {'v_ceil_f64', 'v_floor_f64', 'v_fract_f64', 'v_frexp_mant_f64', 'v_rcp_f64', 'v_rndne_f64', 'v_rsq_f64', 'v_sqrt_f64', 'v_trunc_f64'}
+  parts, is_f64_d = name.split('_'), name in _f64_names or name in ('v_cvt_f64_f32', 'v_cvt_f64_i32', 'v_cvt_f64_u32')
+  is_f64_s = name in _f64_names or name in ('v_cvt_f32_f64', 'v_cvt_i32_f64', 'v_cvt_u32_f64', 'v_frexp_exp_i32_f64')
   is_16d = any(p in ('f16','i16','u16','b16') for p in parts[-2:-1]) or (len(parts) >= 2 and parts[-1] in ('f16','i16','u16','b16') and 'cvt' not in name)
   is_16s = parts[-1] in ('f16','i16','u16','b16') and 'sat_pk' not in name
   dst = _vreg(inst.vdst, 2) if is_f64_d else _fmt_v16(inst.vdst, 0, 128) if is_16d else f"v{inst.vdst}"
@@ -120,35 +123,43 @@ def _disasm_vop1(inst: VOP1) -> str:
   return f"{name}_e32 {dst}, {src}"
 
 def _disasm_vop2(inst: VOP2) -> str:
-  op, name = VOP2Op(inst.op), VOP2Op(inst.op).name.lower()
-  suf, is16 = "" if op == VOP2Op.V_DOT2ACC_F32_F16 else "_e32", _is16(name) and 'pk_' not in name
+  stored_op = inst._values.get('op')
+  op = stored_op if stored_op is not None and hasattr(stored_op, 'name') else VOP2Op(inst.op)
+  name = op.name.lower()
+  suf, is16 = "" if name == 'v_dot2acc_f32_f16' else "_e32", _is16(name) and 'pk_' not in name
   # fmaak: dst = src0 * vsrc1 + K, fmamk: dst = src0 * K + vsrc1
-  if op in (VOP2Op.V_FMAAK_F32, VOP2Op.V_FMAAK_F16): return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, v{inst.vsrc1}, 0x{inst._literal:x}"
-  if op in (VOP2Op.V_FMAMK_F32, VOP2Op.V_FMAMK_F16): return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, 0x{inst._literal:x}, v{inst.vsrc1}"
+  if name in ('v_fmaak_f32', 'v_fmaak_f16'): return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, v{inst.vsrc1}, 0x{inst._literal:x}"
+  if name in ('v_fmamk_f32', 'v_fmamk_f16'): return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, 0x{inst._literal:x}, v{inst.vsrc1}"
   if is16: return f"{name}{suf} {_fmt_v16(inst.vdst, 0, 128)}, {_src16(inst, inst.src0)}, {_fmt_v16(inst.vsrc1, 0, 128)}"
-  return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, v{inst.vsrc1}" + (", vcc_lo" if op == VOP2Op.V_CNDMASK_B32 else "")
+  return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, v{inst.vsrc1}" + (", vcc_lo" if name == 'v_cndmask_b32' else "")
 
-VOPC_CLASS = {VOPCOp.V_CMP_CLASS_F16, VOPCOp.V_CMP_CLASS_F32, VOPCOp.V_CMP_CLASS_F64,
-              VOPCOp.V_CMPX_CLASS_F16, VOPCOp.V_CMPX_CLASS_F32, VOPCOp.V_CMPX_CLASS_F64}
+VOPC_CLASS_NAMES = {'v_cmp_class_f16', 'v_cmp_class_f32', 'v_cmp_class_f64',
+                    'v_cmpx_class_f16', 'v_cmpx_class_f32', 'v_cmpx_class_f64'}
 
 def _disasm_vopc(inst: VOPC) -> str:
-  op, name = VOPCOp(inst.op), VOPCOp(inst.op).name.lower()
+  stored_op = inst._values.get('op')
+  op = stored_op if stored_op is not None and hasattr(stored_op, 'name') else VOPCOp(inst.op)
+  name = op.name.lower()
   is64, is16 = _is64(name), _is16(name)
   s0 = _fmt_src(inst.src0, 2) if is64 else _src16(inst, inst.src0) if is16 else inst.lit(inst.src0)
-  s1 = _vreg(inst.vsrc1, 2) if is64 and op not in VOPC_CLASS else _fmt_v16(inst.vsrc1, 0, 128) if is16 else f"v{inst.vsrc1}"
+  s1 = _vreg(inst.vsrc1, 2) if is64 and name not in VOPC_CLASS_NAMES else _fmt_v16(inst.vsrc1, 0, 128) if is16 else f"v{inst.vsrc1}"
   return f"{name}_e32 {s0}, {s1}" if op.value >= 128 else f"{name}_e32 vcc_lo, {s0}, {s1}"
 
 NO_ARG_SOPP = {SOPPOp.S_ENDPGM, SOPPOp.S_BARRIER, SOPPOp.S_WAKEUP, SOPPOp.S_ICACHE_INV,
                SOPPOp.S_WAIT_IDLE, SOPPOp.S_ENDPGM_SAVED, SOPPOp.S_CODE_END, SOPPOp.S_ENDPGM_ORDERED_PS_DONE}
 
 def _disasm_sopp(inst: SOPP) -> str:
-  op, name = SOPPOp(inst.op), SOPPOp(inst.op).name.lower()
-  if op in NO_ARG_SOPP: return name
-  if op == SOPPOp.S_WAITCNT:
+  stored_op = inst._values.get('op')
+  name = stored_op.name.lower() if hasattr(stored_op, 'name') else SOPPOp(inst.op).name.lower()
+  if name in {x.name.lower() for x in NO_ARG_SOPP}: return name
+  if name == 's_waitcnt':
+    # CDNA uses different bit layout, just output raw hex value for safety
+    is_cdna = hasattr(stored_op, 'name') and 'cdna' in type(stored_op).__module__
+    if is_cdna: return f"s_waitcnt 0x{inst.simm16:x}"
     vm, exp, lgkm = (inst.simm16 >> 10) & 0x3f, inst.simm16 & 0xf, (inst.simm16 >> 4) & 0x3f
     p = [f"vmcnt({vm})" if vm != 0x3f else "", f"expcnt({exp})" if exp != 7 else "", f"lgkmcnt({lgkm})" if lgkm != 0x3f else ""]
     return f"s_waitcnt {' '.join(x for x in p if x) or '0'}"
-  if op == SOPPOp.S_DELAY_ALU:
+  if name == 's_delay_alu':
     deps, skips = ['VALU_DEP_1','VALU_DEP_2','VALU_DEP_3','VALU_DEP_4','TRANS32_DEP_1','TRANS32_DEP_2','TRANS32_DEP_3','FMA_ACCUM_CYCLE_1','SALU_CYCLE_1','SALU_CYCLE_2','SALU_CYCLE_3'], ['SAME','NEXT','SKIP_1','SKIP_2','SKIP_3','SKIP_4']
     id0, skip, id1 = inst.simm16 & 0xf, (inst.simm16 >> 4) & 0x7, (inst.simm16 >> 7) & 0xf
     dep = lambda v: deps[v-1] if 0 < v <= len(deps) else str(v)
@@ -393,16 +404,19 @@ def _sop_widths(name: str) -> tuple[int, int, int]:
   return 1, 1, 1
 
 def _disasm_sop1(inst: SOP1) -> str:
-  op, name = SOP1Op(inst.op), SOP1Op(inst.op).name.lower()
-  if op == SOP1Op.S_GETPC_B64: return f"{name} {_fmt_sdst(inst.sdst, 2)}"
-  if op in (SOP1Op.S_SETPC_B64, SOP1Op.S_RFE_B64): return f"{name} {_fmt_src(inst.ssrc0, 2)}"
-  if op == SOP1Op.S_SWAPPC_B64: return f"{name} {_fmt_sdst(inst.sdst, 2)}, {_fmt_src(inst.ssrc0, 2)}"
-  if op in (SOP1Op.S_SENDMSG_RTN_B32, SOP1Op.S_SENDMSG_RTN_B64): return f"{name} {_fmt_sdst(inst.sdst, 2 if 'b64' in name else 1)}, sendmsg({MSG.get(inst.ssrc0, str(inst.ssrc0))})"
+  stored_op = inst._values.get('op')
+  name = stored_op.name.lower() if hasattr(stored_op, 'name') else SOP1Op(inst.op).name.lower()
+  is_cdna = hasattr(stored_op, 'name') and 'cdna' in type(stored_op).__module__
+  if name == 's_getpc_b64': return f"{name} {_fmt_sdst(inst.sdst, 2, is_cdna=is_cdna)}"
+  if name in ('s_setpc_b64', 's_rfe_b64'): return f"{name} {_fmt_src(inst.ssrc0, 2)}"
+  if name == 's_swappc_b64': return f"{name} {_fmt_sdst(inst.sdst, 2, is_cdna=is_cdna)}, {_fmt_src(inst.ssrc0, 2)}"
+  if name in ('s_sendmsg_rtn_b32', 's_sendmsg_rtn_b64'): return f"{name} {_fmt_sdst(inst.sdst, 2 if 'b64' in name else 1, is_cdna=is_cdna)}, sendmsg({MSG.get(inst.ssrc0, str(inst.ssrc0))})"
   dn, s0n, _ = _sop_widths(name)
-  return f"{name} {_fmt_sdst(inst.sdst, dn)}, {inst.lit(inst.ssrc0) if s0n == 1 else _fmt_src(inst.ssrc0, s0n)}"
+  return f"{name} {_fmt_sdst(inst.sdst, dn, is_cdna=is_cdna)}, {inst.lit(inst.ssrc0) if s0n == 1 else _fmt_src(inst.ssrc0, s0n)}"
 
 def _disasm_sop2(inst: SOP2) -> str:
-  name = SOP2Op(inst.op).name.lower()
+  stored_op = inst._values.get('op')
+  name = stored_op.name.lower() if hasattr(stored_op, 'name') else SOP2Op(inst.op).name.lower()
   dn, s0n, s1n = _sop_widths(name)
   return f"{name} {_fmt_sdst(inst.sdst, dn)}, {inst.lit(inst.ssrc0) if inst.ssrc0 == 255 else _fmt_src(inst.ssrc0, s0n)}, {inst.lit(inst.ssrc1) if inst.ssrc1 == 255 else _fmt_src(inst.ssrc1, s1n)}"
 
@@ -650,7 +664,7 @@ def asm(text: str, arch: str = 'rdna3') -> Inst:
   dsl = get_dsl(text)
   ns = {n: getattr(ag, n) for n in dir(ag) if not n.startswith('_')}
   ns.update({'s': s, 'v': v, 'ttmp': ttmp, 'abs': abs, 'RawImm': RawImm, 'SrcMod': SrcMod, 'VGPR': VGPR, 'SGPR': SGPR, 'TTMP': TTMP,
-             'VCC_LO': VCC_LO, 'VCC_HI': VCC_HI, 'VCC': VCC, 'EXEC_LO': EXEC_LO, 'EXEC_HI': EXEC_HI, 'EXEC': EXEC, 'SCC': SCC, 'M0': M0, 'NULL': NULL, 'OFF': OFF})
+             'VCC_LO': VCC_LO, 'VCC_HI': VCC_HI, 'VCC': VCC, 'EXEC_LO': EXEC_LO, 'EXEC_HI': EXEC_HI, 'EXEC': EXEC, 'SCC': SCC, 'NULL': NULL, 'OFF': OFF})
   try: return eval(dsl, ns)
   except NameError:
     if m := re.match(r'^(v_\w+)(\(.*\))$', dsl): return eval(f"{m.group(1)}_e32{m.group(2)}", ns)
