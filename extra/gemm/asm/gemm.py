@@ -7,7 +7,8 @@ from extra.assembly.amd.test.test_roundtrip import compile_asm
 compile_asm = functools.partial(compile_asm, mcpu='gfx950', mattr='+wavefrontsize64')
 
 gemm = [
-  s_load_dwordx2(s[28:29], s[0:1], offset=0x0),
+  s_load_dwordx2(s[28:29], s[0:1], offset=0x0, imm=1),
+  s_load_dwordx4(s[32:35], s[0:1], offset=0x8, imm=1),
 ]
 
 
