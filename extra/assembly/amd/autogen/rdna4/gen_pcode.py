@@ -2,7 +2,7 @@
 # to regenerate: python -m extra.assembly.amd.pdf --arch rdna4
 # ruff: noqa: E501,F405,F403
 # mypy: ignore-errors
-from extra.assembly.amd.autogen.rdna4 import SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp
+from extra.assembly.amd.autogen.rdna4.enum import SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp
 from extra.assembly.amd.pcode import *
 
 def _SOP1Op_S_MOV_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):

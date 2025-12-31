@@ -11,7 +11,7 @@ from tinygrad.runtime.support.compiler_amd import amdgpu_disassemble
 from tinygrad.renderer import ProgramSpec
 from tinygrad.engine.realize import CompiledRunner
 
-from extra.assembly.amd.autogen.rdna3 import *
+from extra.assembly.amd.autogen.rdna3.ins import *
 from extra.assembly.amd.asm import waitcnt
 from test.testextra.test_cfg_viz import template
 

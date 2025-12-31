@@ -2,7 +2,7 @@
 """Test RDNA3 assembler/disassembler against LLVM test vectors."""
 import unittest, re, subprocess
 from tinygrad.helpers import fetch
-from extra.assembly.amd.autogen.rdna3 import *
+from extra.assembly.amd.autogen.rdna3.ins import *
 from extra.assembly.amd.asm import asm
 from extra.assembly.amd.test.helpers import get_llvm_mc
 

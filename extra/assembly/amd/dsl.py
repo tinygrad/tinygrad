@@ -297,11 +297,11 @@ class Inst:
     op_name = op.name if hasattr(op, 'name') else None
     # Look up op name from int if needed (happens in from_bytes path)
     if op_name is None and self.__class__.__name__ == 'VOP3':
-      from extra.assembly.amd.autogen.rdna3 import VOP3Op
+      from extra.assembly.amd.autogen.rdna3.ins import VOP3Op
       try: op_name = VOP3Op(op).name
       except ValueError: pass
     if op_name is None and self.__class__.__name__ == 'VOPC':
-      from extra.assembly.amd.autogen.rdna3 import VOPCOp
+      from extra.assembly.amd.autogen.rdna3.ins import VOPCOp
       try: op_name = VOPCOp(op).name
       except ValueError: pass
     if op_name is None: return False
