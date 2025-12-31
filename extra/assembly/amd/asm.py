@@ -238,8 +238,12 @@ def _disasm_ds(inst: DS) -> str:
   return f"{name} {dst}, {addr}, {d0}{off}{gds}" if '_rtn' in name else f"{name} {addr}, {d0}{off}{gds}"
 
 def _disasm_vop3(inst: VOP3) -> str:
-  op = VOP3SDOp(inst.op) if inst.op in VOP3SD_OPS else VOP3Op(inst.op)
-  name = op.name.lower()
+  stored_op = inst._values.get('op')
+  if stored_op is not None and hasattr(stored_op, 'name'):
+    op, name = stored_op, stored_op.name.lower()
+  else:
+    op = VOP3SDOp(inst.op) if inst.op in VOP3SD_OPS else VOP3Op(inst.op)
+    name = op.name.lower()
 
   # VOP3SD (shared encoding)
   if inst.op in VOP3SD_OPS:
@@ -290,13 +294,16 @@ def _disasm_vop3(inst: VOP3) -> str:
   nonvgpr_opsel = (inst.src0 < 256 and (inst.opsel & 1)) or (inst.src1 < 256 and (inst.opsel & 2)) or (inst.src2 < 256 and (inst.opsel & 4))
   need_opsel = nonvgpr_opsel or (inst.opsel and not is16_s)
 
-  if inst.op < 256:  # VOPC
-    return f"{name}_e64 {s0}, {s1}" if name.startswith('v_cmpx') else f"{name}_e64 {_fmt_sdst(inst.vdst, 1)}, {s0}, {s1}"
-  if inst.op < 384:  # VOP2
-    os = _opsel_str(inst.opsel, 3, need_opsel, is16_d) if 'cndmask' in name else _opsel_str(inst.opsel, 2, need_opsel, is16_d)
-    return f"{name}_e64 {dst}, {s0}, {s1}, {s2}{os}{cl}{om}" if 'cndmask' in name else f"{name}_e64 {dst}, {s0}, {s1}{os}{cl}{om}"
-  if inst.op < 512:  # VOP1
-    return f"{name}_e64" if op in (VOP3Op.V_NOP, VOP3Op.V_PIPEFLUSH) else f"{name}_e64 {dst}, {s0}{_opsel_str(inst.opsel, 1, need_opsel, is16_d)}{cl}{om}"
+  # RDNA3 VOP3 encodes VOPC/VOP2/VOP1 in lower opcode ranges - skip these for CDNA VOP3A
+  is_cdna_vop3a = stored_op is not None and type(stored_op).__name__ == 'VOP3AOp'
+  if not is_cdna_vop3a:
+    if inst.op < 256:  # VOPC
+      return f"{name}_e64 {s0}, {s1}" if name.startswith('v_cmpx') else f"{name}_e64 {_fmt_sdst(inst.vdst, 1)}, {s0}, {s1}"
+    if inst.op < 384:  # VOP2
+      os = _opsel_str(inst.opsel, 3, need_opsel, is16_d) if 'cndmask' in name else _opsel_str(inst.opsel, 2, need_opsel, is16_d)
+      return f"{name}_e64 {dst}, {s0}, {s1}, {s2}{os}{cl}{om}" if 'cndmask' in name else f"{name}_e64 {dst}, {s0}, {s1}{os}{cl}{om}"
+    if inst.op < 512:  # VOP1
+      return f"{name}_e64" if name in ('v_nop', 'v_pipeflush') else f"{name}_e64 {dst}, {s0}{_opsel_str(inst.opsel, 1, need_opsel, is16_d)}{cl}{om}"
   # Native VOP3
   is3 = _has(name, 'fma', 'mad', 'min3', 'max3', 'med3', 'div_fix', 'div_fmas', 'sad', 'lerp', 'align', 'cube', 'bfe', 'bfi',
              'perm_b32', 'permlane', 'cndmask', 'xor3', 'or3', 'add3', 'lshl_or', 'and_or', 'lshl_add', 'add_lshl', 'xad', 'maxmin', 'minmax', 'dot2', 'cvt_pk_u8', 'mullit')
@@ -456,6 +463,7 @@ DISASM_HANDLERS = {VOP1: _disasm_vop1, VOP2: _disasm_vop2, VOPC: _disasm_vopc, V
                    VINTERP: _disasm_vinterp, SOPP: _disasm_sopp, SMEM: _disasm_smem, DS: _disasm_ds, FLAT: _disasm_flat, MUBUF: _disasm_buf, MTBUF: _disasm_buf,
                    MIMG: _disasm_mimg, SOP1: _disasm_sop1, SOP2: _disasm_sop2, SOPC: _disasm_sopc, SOPK: _disasm_sopk}
 DISASM_BY_NAME = {cls.__name__: handler for cls, handler in DISASM_HANDLERS.items()}
+DISASM_BY_NAME['VOP3A'] = _disasm_vop3  # CDNA VOP3A uses same handler as VOP3
 
 def disasm(inst: Inst) -> str: return DISASM_HANDLERS.get(type(inst), DISASM_BY_NAME.get(type(inst).__name__, _disasm_generic))(inst)
 

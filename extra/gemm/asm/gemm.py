@@ -39,20 +39,20 @@ gemm = [
   s_ff1_i32_b32(s[60], s[60]),
   s_lshr_b32(s[61], s[11], 22),
   v_and_b32_e32(v[5], 63, v[134]),
-]
-"""
-[
   v_and_b32_e32(v[4], 15, v[5]),
   v_lshlrev_b32_e32(v[4], 6, v[4]),
   v_lshlrev_b32_e32(v[4], 3, v[4]),
   v_lshrrev_b32_e32(v[5], 4, v[5]),
-  v_lshl_add_u32(v[4], v[5], 3, v[4]),
+  v_lshl_add_u32(vdst=v[4], src0=v[5], src1=3, src2=v[4]),
   v_lshrrev_b32_e32(v[8], 6, v[134]),
   v_and_b32_e32(v[8], 1, v[8]),
-  v_lshl_add_u32(v[4], v[8], 13, v[4]),
+  v_lshl_add_u32(vdst=v[4], src0=v[8], src1=13, src2=v[4]),
   v_and_b32_e32(v[6], 63, v[134]),
   v_and_b32_e32(v[5], 15, v[6]),
   v_lshlrev_b32_e32(v[5], 6, v[5]),
+]
+"""
+[
   v_lshlrev_b32_e32(v[5], 3, v[5]),
   v_lshrrev_b32_e32(v[6], 4, v[6]),
   v_lshl_add_u32(v[5], v[6], 3, v[5]),

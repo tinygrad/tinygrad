@@ -426,7 +426,7 @@ def _generate_init_py(formats, enums, src_enum, doc_name) -> str:
           lines.append(f"def {name.lower()}{suffix}(vdst, src0, K, vsrc1): return {fmt}({cls_name}.{name}, vdst, src0, vsrc1, literal=K)")
         elif name in ('V_FMAAK_F32', 'V_FMAAK_F16'):
           lines.append(f"def {name.lower()}{suffix}(vdst, src0, vsrc1, K): return {fmt}({cls_name}.{name}, vdst, src0, vsrc1, literal=K)")
-        else: lines.append(f"{name.lower()}{suffix} = functools.partial({tgt}.{name}{seg})")
+        else: lines.append(f"{name.lower()}{suffix} = functools.partial({fmt}, op={cls_name}.{name}{seg})")
   src_names = {name for _, name in src_enum.items()}
   lines += [""] + [f"{name} = SrcEnum.{name}" for _, name in sorted(src_enum.items()) if name not in {'DPP8', 'DPP16'}]
   if "NULL" in src_names: lines.append("OFF = NULL\n")
