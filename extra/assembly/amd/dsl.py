@@ -369,8 +369,22 @@ class Inst:
     return None
 
   def _is_64bit_op(self) -> bool:
-    """Check if this instruction uses 64-bit source operands (for literal encoding)."""
-    return self.src_regs(0) == 2
+    """Check if this instruction uses 64-bit operands (and thus 64-bit literals)."""
+    op = self._values.get('op')
+    if op is None: return False
+    op_name = op.name if hasattr(op, 'name') else None
+    # Look up op name from int if needed (happens in from_bytes path)
+    if op_name is None and self.__class__.__name__ == 'VOP3':
+      from extra.assembly.amd.autogen.rdna3.ins import VOP3Op
+      try: op_name = VOP3Op(op).name
+      except ValueError: pass
+    if op_name is None and self.__class__.__name__ == 'VOPC':
+      from extra.assembly.amd.autogen.rdna3.ins import VOPCOp
+      try: op_name = VOPCOp(op).name
+      except ValueError: pass
+    if op_name is None: return False
+    # V_LDEXP_F64 has 32-bit integer src1, so literal is 32-bit
+    return op_name != 'V_LDEXP_F64' and op_name.endswith(('_F64', '_B64', '_I64', '_U64'))
 
   def to_bytes(self) -> bytes:
     result = self.to_int().to_bytes(self._size(), 'little')
