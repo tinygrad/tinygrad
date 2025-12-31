@@ -36,13 +36,16 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   assert all_int(buf.shape), f"does not support symbolic shape {buf.shape}"
   n_lbs, shape, numel = len(buf.device), buf.shape, prod(buf.shape)
 
+  # ring allreduce doesn't provide a benefit with only 2 nodes or where number of elements is less than 256k (empirically)
+  # fallback to naive allreduce to save on kernel dispatch, chunking and reassembling chunks.
   use_all2all = (ALL2ALL >= 2 or (n_lbs > 2 and numel > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and ALL2ALL >= 1))
   use_ring = not use_all2all and (RING >= 2 or (n_lbs > 2 and numel > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and RING >= 1))
   if DEBUG >= 2: print(f"{'ALL2ALL' if use_all2all else 'RING' if use_ring else 'NAIVE'} ALLREDUCE {n_lbs}x{numel} | {buf.dtype}")
 
+  # contiguous before we copy it
   buf = buf.contiguous()
 
-  # naive: copy all to target device and reduce
+  # naive: copy to all devices. if you shrink later, that'll be handled
   if not use_ring and not use_all2all:
     return functools.reduce(lambda x,y: x.alu(red.arg, y), [UOp(Ops.COPY, buf.dtype, (buf.mselect(i), red.src[1])) for i in range(n_lbs)])
 
