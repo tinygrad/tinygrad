@@ -5,6 +5,9 @@ from extra.assembly.amd.dsl import Inst, RawImm, a
 from extra.assembly.amd.test.test_roundtrip import compile_asm
 
 compile_asm = functools.partial(compile_asm, mcpu='gfx950', mattr='+wavefrontsize64')
+# HACKS: cdna is 64 lanes
+VCC = VCC_LO
+EXEC = EXEC_LO
 
 gemm = [
   s_load_dwordx2(sdata=s[28:29], sbase=s[0:1], offset=0x0, imm=1, soffset=RawImm(0)),
@@ -110,8 +113,8 @@ gemm = [
   v_cvt_u32_f32_e32(v[10], v[10]),
   v_mul_u32_u24_e32(v[13], v[10], v[12]),
   v_sub_u32_e32(v[13], v[11], v[13]),
-  v_cmp_ne_u32(vdst=RawImm(106), src0=v[13], src1=0),  # vdst=VCC_LO=106
-  v_addc_co_u32(vdst=v[10], sdst=RawImm(106), src0=v[10], src1=0, src2=VCC_LO),
+  v_cmp_ne_u32(vdst=VCC, src0=v[13], src1=0),  # vdst=VCC_LO=106
+  v_addc_co_u32(vdst=v[10], sdst=VCC, src0=v[10], src1=0, src2=VCC_LO),
   v_mov_b32_e32(v[12], 0x100),
   v_mov_b32_e32(v[11], s[25]),
   v_readfirstlane_b32_e32(vdst=s[14], src0=v[10]),
@@ -122,8 +125,8 @@ gemm = [
   v_cvt_u32_f32_e32(v[10], v[10]),
   v_mul_u32_u24_e32(v[13], v[10], v[12]),
   v_sub_u32_e32(v[13], v[11], v[13]),
-  v_cmp_ne_u32(vdst=RawImm(106), src0=v[13], src1=0),
-  v_addc_co_u32(vdst=v[10], sdst=RawImm(106), src0=v[10], src1=0, src2=VCC_LO),
+  v_cmp_ne_u32(vdst=VCC, src0=v[13], src1=0),
+  v_addc_co_u32(vdst=v[10], sdst=VCC, src0=v[10], src1=0, src2=VCC_LO),
   s_nop(0),
   v_readfirstlane_b32_e32(vdst=s[15], src0=v[10]),
   s_waitcnt(simm16=0xc07f),
@@ -137,10 +140,10 @@ gemm = [
   v_cvt_u32_f32_e32(v[10], v[10]),
   v_mul_u32_u24(vdst=v[11], src0=v[10], src1=s[52]),
   v_sub_u32_e32(v[11], s[2], v[11]),
-  v_cmpx_eq_u32(vdst=RawImm(126), src0=v[11], src1=s[52]),  # vdst=EXEC_LO=126
+  v_cmpx_eq_u32(vdst=EXEC, src0=v[11], src1=s[52]),  # vdst=EXEC_LO=126
   v_add_u32_e32(v[10], 1, v[10]),
   s_mov_b64(s[126:127], -1),  # EXEC = -1 (all ones)
-  v_cmpx_gt_u32(vdst=RawImm(126), src0=v[11], src1=s[52]),
+  v_cmpx_gt_u32(vdst=EXEC, src0=v[11], src1=s[52]),
   v_sub_u32(vdst=v[10], src0=v[10], src1=1),
   s_mov_b64(s[126:127], -1),
   v_readfirstlane_b32_e32(vdst=s[52], src0=v[10]),
@@ -156,10 +159,10 @@ gemm = [
   v_cvt_u32_f32_e32(v[10], v[10]),
   v_mul_u32_u24(vdst=v[11], src0=v[10], src1=s[14]),
   v_sub_u32_e32(v[11], s[2], v[11]),
-  v_cmpx_eq_u32(vdst=RawImm(126), src0=v[11], src1=s[14]),
+  v_cmpx_eq_u32(vdst=EXEC, src0=v[11], src1=s[14]),
   v_add_u32_e32(v[10], 1, v[10]),
   s_mov_b64(s[126:127], -1),
-  v_cmpx_gt_u32(vdst=RawImm(126), src0=v[11], src1=s[14]),
+  v_cmpx_gt_u32(vdst=EXEC, src0=v[11], src1=s[14]),
   v_sub_u32(vdst=v[10], src0=v[10], src1=1),
   s_mov_b64(s[126:127], -1),
   v_readfirstlane_b32_e32(vdst=s[52], src0=v[10]),
@@ -329,8 +332,8 @@ gemm = [
   s_subb_u32(s[63], s[63], s[85]),
   s_cmp_eq_u32(s[63], 0),
   s_cselect_b32(s[58], s[62], -1),
-  v_cmp_ne_u32(vdst=RawImm(106), src0=v[13], src1=0),
-  v_addc_co_u32(vdst=v[10], sdst=RawImm(106), src0=v[10], src1=0, src2=RawImm(106)),
+  v_cmp_ne_u32(vdst=VCC, src0=v[13], src1=0),
+  v_addc_co_u32(vdst=v[10], sdst=VCC, src0=v[10], src1=0, src2=VCC),
   v_mov_b32_e32(v[12], 0x100),
   v_mov_b32_e32(v[11], s[25]),
   v_readfirstlane_b32_e32(vdst=s[14], src0=v[10]),
@@ -341,8 +344,8 @@ gemm = [
   v_cvt_u32_f32_e32(v[10], v[10]),
   v_mul_u32_u24_e32(v[13], v[10], v[12]),
   v_sub_u32_e32(v[13], v[11], v[13]),
-  v_cmp_ne_u32(vdst=RawImm(106), src0=v[13], src1=0),
-  v_addc_co_u32(vdst=v[10], sdst=RawImm(106), src0=v[10], src1=0, src2=RawImm(106)),
+  v_cmp_ne_u32(vdst=VCC, src0=v[13], src1=0),
+  v_addc_co_u32(vdst=v[10], sdst=VCC, src0=v[10], src1=0, src2=VCC),
   s_nop(0),
   v_readfirstlane_b32_e32(vdst=s[15], src0=v[10]),
   s_waitcnt(simm16=0xc07f),
@@ -356,10 +359,10 @@ gemm = [
   v_cvt_u32_f32_e32(v[10], v[10]),
   v_mul_u32_u24(vdst=v[11], src0=v[10], src1=s[52]),
   v_sub_u32_e32(v[11], s[2], v[11]),
-  v_cmpx_eq_u32(vdst=RawImm(126), src0=v[11], src1=s[52]),
+  v_cmpx_eq_u32(vdst=EXEC, src0=v[11], src1=s[52]),
   v_add_u32_e32(v[10], 1, v[10]),
   s_mov_b64(EXEC_LO, -1),
-  v_cmpx_gt_u32(vdst=RawImm(126), src0=v[11], src1=s[52]),
+  v_cmpx_gt_u32(vdst=EXEC, src0=v[11], src1=s[52]),
   v_sub_u32(vdst=v[10], src0=v[10], src1=1),
   s_mov_b64(EXEC_LO, -1),
   v_readfirstlane_b32_e32(vdst=s[52], src0=v[10]),
@@ -375,10 +378,10 @@ gemm = [
   v_cvt_u32_f32_e32(v[10], v[10]),
   v_mul_u32_u24(vdst=v[11], src0=v[10], src1=s[14]),
   v_sub_u32_e32(v[11], s[2], v[11]),
-  v_cmpx_eq_u32(vdst=RawImm(126), src0=v[11], src1=s[14]),
+  v_cmpx_eq_u32(vdst=EXEC, src0=v[11], src1=s[14]),
   v_add_u32_e32(v[10], 1, v[10]),
   s_mov_b64(EXEC_LO, -1),
-  v_cmpx_gt_u32(vdst=RawImm(126), src0=v[11], src1=s[14]),
+  v_cmpx_gt_u32(vdst=EXEC, src0=v[11], src1=s[14]),
   v_sub_u32(vdst=v[10], src0=v[10], src1=1),
   s_mov_b64(EXEC_LO, -1),
   v_readfirstlane_b32_e32(vdst=s[52], src0=v[10]),
