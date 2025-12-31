@@ -642,14 +642,14 @@ class AMDQueueDesc:
   def read_ptr(self): return min(p[0] for p in self.read_ptrs)
 
   def signal_doorbell(self, dev, doorbell_value:int|None=None):
-    for write_ptr in self.write_ptrs: write_ptr[0] = self.put_value
-
-    # Ensure all prior writes are visible to the GPU.
-    System.memory_barrier()
-
-    # Flush hdp if queue is in dev mem.
-    if dev.is_am() and not dev.is_usb(): dev.iface.dev_impl.gmc.flush_hdp()
     try:
+      for write_ptr in self.write_ptrs: write_ptr[0] = self.put_value
+
+      # Ensure all prior writes are visible to the GPU.
+      System.memory_barrier()
+
+      # Flush hdp if queue is in dev mem.
+      if dev.is_am() and not dev.is_usb(): dev.iface.dev_impl.gmc.flush_hdp()
       for doorbell in self.doorbells: doorbell[0] = self.put_value if doorbell_value is None else doorbell_value
     except Exception as e:
       dev.error_state = e
@@ -835,7 +835,7 @@ class PCIIface(PCIIfaceBase):
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA:
       assert idx <= 3, "only 4 SDMA queues supported in am"
       pv = self.dev_impl.sdma.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr+rptr, wptr_addr=gart.va_addr+wptr,
-            doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0 + idx * 0xA * 4), pipe=idx, queue=0)
+            doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0 + idx * 0xA * 4), pipe=0, queue=idx)
     else:
       pv = self.dev_impl.gfx.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr+rptr, wptr_addr=gart.va_addr+wptr,
         eop_addr=eop_buffer.va_addr, eop_size=eop_buffer.size, doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_MEC_RING0), pipe=0,
@@ -879,9 +879,10 @@ class USBIface(PCIIface):
     barview = self.pci_dev.map_bar(bar=0, off=mapping.paddrs[0][0], size=mapping.size) if cpu_access else None
     return HCQBuffer(mapping.va_addr, size, meta=PCIAllocationMeta(mapping, has_cpu_mapping=False), view=barview, owner=self.dev)
 
-  def create_queue(self, queue_type, ring, gart, rptr, wptr, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, xcc_id=0):
+  def create_queue(self, queue_type, ring, gart, rptr, wptr, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0,
+                   xcc_id=0, idx=0):
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE: self.pci_dev.usb._pci_cacheable += [(ring.cpu_view().addr, ring.size)]
-    return super().create_queue(queue_type, ring, gart, rptr, wptr, eop_buffer, cwsr_buffer, ctl_stack_size, ctx_save_restore_size, xcc_id)
+    return super().create_queue(queue_type, ring, gart, rptr, wptr, eop_buffer, cwsr_buffer, ctl_stack_size, ctx_save_restore_size, xcc_id, idx)
 
   def sleep(self, timeout): pass
 
