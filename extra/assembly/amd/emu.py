@@ -141,15 +141,14 @@ def decode_program(data: bytes) -> Program:
 def exec_scalar(st: WaveState, inst: Inst) -> int:
   """Execute scalar instruction. Returns PC delta or negative for special cases."""
   compiled = _get_compiled()
-  inst_type = type(inst)
 
   # SOPP: special cases for control flow that has no pseudocode
-  if inst_type is SOPP:
+  if isinstance(inst, SOPP):
     if inst.op == SOPPOp.S_ENDPGM: return -1
     if inst.op == SOPPOp.S_BARRIER: return -2
 
   # SMEM: memory loads (not ALU)
-  if inst_type is SMEM:
+  if isinstance(inst, SMEM):
     addr = st.rsgpr64(inst.sbase * 2) + _sext(inst.offset, 21)
     if inst.soffset not in (NULL, 0x7f): addr += st.rsrc(inst.soffset, 0)
     if (cnt := SMEM_LOAD.get(inst.op)) is None: raise NotImplementedError(f"SMEM op {inst.op}")
@@ -157,30 +156,30 @@ def exec_scalar(st: WaveState, inst: Inst) -> int:
     return 0
 
   # Get op enum and lookup compiled function
-  if inst_type is SOP1: ssrc0, sdst = inst.ssrc0, inst.sdst
-  elif inst_type is SOP2: ssrc0, sdst = inst.ssrc0, inst.sdst
-  elif inst_type is SOPC: ssrc0, sdst = inst.ssrc0, None
-  elif inst_type is SOPK: ssrc0, sdst = inst.sdst, inst.sdst  # sdst is both src and dst
-  elif inst_type is SOPP: ssrc0, sdst = None, None
-  else: raise NotImplementedError(f"Unknown scalar type {inst_type}")
+  if isinstance(inst, SOP1): ssrc0, sdst = inst.ssrc0, inst.sdst
+  elif isinstance(inst, SOP2): ssrc0, sdst = inst.ssrc0, inst.sdst
+  elif isinstance(inst, SOPC): ssrc0, sdst = inst.ssrc0, None
+  elif isinstance(inst, SOPK): ssrc0, sdst = inst.sdst, inst.sdst  # sdst is both src and dst
+  elif isinstance(inst, SOPP): ssrc0, sdst = None, None
+  else: raise NotImplementedError(f"Unknown scalar type {type(inst)}")
 
   # SOPP has gaps in the opcode enum - treat unknown opcodes as no-ops
   try: op = inst.op
   except ValueError:
-    if inst_type is SOPP: return 0
+    if isinstance(inst, SOPP): return 0
     raise
   fn = compiled.get(type(op), {}).get(op)
   if fn is None:
     # SOPP instructions without pseudocode (waits, hints, nops) are no-ops
-    if inst_type is SOPP: return 0
+    if isinstance(inst, SOPP): return 0
     raise NotImplementedError(f"{op.name} not in pseudocode")
 
   # Build context - use inst methods to determine operand sizes
-  s0 = st.rsrc64(ssrc0, 0) if inst.is_src_64(0) else (st.rsrc(ssrc0, 0) if inst_type not in (SOPK, SOPP) else (st.rsgpr(inst.sdst) if inst_type is SOPK else 0))
-  s1 = st.rsrc64(inst.ssrc1, 0) if inst.is_src_64(1) else (st.rsrc(inst.ssrc1, 0) if inst_type in (SOP2, SOPC) else inst.simm16 if inst_type is SOPK else 0)
+  s0 = st.rsrc64(ssrc0, 0) if inst.is_src_64(0) else (st.rsrc(ssrc0, 0) if not isinstance(inst, (SOPK, SOPP)) else (st.rsgpr(inst.sdst) if isinstance(inst, SOPK) else 0))
+  s1 = st.rsrc64(inst.ssrc1, 0) if inst.is_src_64(1) else (st.rsrc(inst.ssrc1, 0) if isinstance(inst, (SOP2, SOPC)) else inst.simm16 if isinstance(inst, SOPK) else 0)
   d0 = st.rsgpr64(sdst) if inst.dst_regs() == 2 and sdst is not None else (st.rsgpr(sdst) if sdst is not None else 0)
   exec_mask = st.exec_mask
-  literal = inst.simm16 if inst_type in (SOPK, SOPP) else st.literal
+  literal = inst.simm16 if isinstance(inst, (SOPK, SOPP)) else st.literal
 
   # Execute compiled function - pass PC in bytes for instructions that need it
   # For wave32, mask VCC and EXEC to 32 bits since only the lower 32 bits are relevant
@@ -203,10 +202,10 @@ def exec_scalar(st: WaveState, inst: Inst) -> int:
 def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = None) -> None:
   """Execute vector instruction for one lane."""
   compiled = _get_compiled()
-  inst_type, V = type(inst), st.vgpr[lane]
+  V = st.vgpr[lane]
 
   # Memory ops (not ALU pseudocode)
-  if inst_type is FLAT:
+  if isinstance(inst, FLAT):
     op, addr_reg, data_reg, vdst, offset, saddr = inst.op, inst.addr, inst.data, inst.vdst, _sext(inst.offset, 13), inst.saddr
     addr = V[addr_reg] | (V[addr_reg+1] << 32)
     addr = (st.rsgpr64(saddr) + V[addr_reg] + offset) & MASK64 if saddr not in (NULL, 0x7f) else (addr + offset) & MASK64
@@ -227,7 +226,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     else: raise NotImplementedError(f"FLAT op {op}")
     return
 
-  if inst_type is DS:
+  if isinstance(inst, DS):
     op, addr0, vdst = inst.op, (V[inst.addr] + inst.offset0) & 0xffff, inst.vdst
     if op in DS_LOAD:
       cnt, sz, sign = DS_LOAD[op]
@@ -257,7 +256,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     return
 
   # VOPD: dual-issue, execute two ops simultaneously (read all inputs before writes)
-  if inst_type is VOPD:
+  if isinstance(inst, VOPD):
     vdsty = (inst.vdsty << 1) | ((inst.vdstx & 1) ^ 1)
     inputs = [(inst.opx, st.rsrc(inst.srcx0, lane), V[inst.vsrcx1], V[inst.vdstx], inst.vdstx),
               (inst.opy, st.rsrc(inst.srcy0, lane), V[inst.vsrcy1], V[vdsty], vdsty)]
@@ -267,7 +266,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     return
 
   # VOP3SD: has extra scalar dest for carry output
-  if inst_type is VOP3SD:
+  if isinstance(inst, VOP3SD):
     fn = compiled.get(VOP3SDOp, {}).get(inst.op)
     if fn is None: raise NotImplementedError(f"{inst.op.name} not in pseudocode")
     # Read sources based on register counts from inst properties
@@ -284,23 +283,23 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
   # Get op enum and sources (None means "no source" for that operand)
   # dst_hi: for VOP1/VOP2 16-bit dst ops, bit 7 of vdst indicates .h (high 16-bit) destination
   dst_hi = False
-  if inst_type is VOP1:
+  if isinstance(inst, VOP1):
     if inst.op == VOP1Op.V_NOP: return
     src0, src1, src2 = inst.src0, None, None
     dst_hi = (inst.vdst & 0x80) != 0 and inst.is_dst_16()
     vdst = inst.vdst & 0x7f if inst.is_dst_16() else inst.vdst
-  elif inst_type is VOP2:
+  elif isinstance(inst, VOP2):
     src0, src1, src2 = inst.src0, inst.vsrc1 + 256, None
     dst_hi = (inst.vdst & 0x80) != 0 and inst.is_dst_16()
     vdst = inst.vdst & 0x7f if inst.is_dst_16() else inst.vdst
-  elif inst_type is VOP3:
+  elif isinstance(inst, VOP3):
     # VOP3 ops 0-255 are VOPC comparisons encoded as VOP3 - inst.op returns VOPCOp for these
     src0, src1, src2, vdst = inst.src0, inst.src1, (None if inst.op.value < 256 else inst.src2), inst.vdst
-  elif inst_type is VOPC:
+  elif isinstance(inst, VOPC):
     # For 16-bit VOPC, vsrc1 uses same encoding as VOP2 16-bit: bit 7 selects hi(1) or lo(0) half
     # vsrc1 field is 8 bits: [6:0] = VGPR index, [7] = hi flag
     src0, src1, src2, vdst = inst.src0, inst.vsrc1 + 256, None, VCC_LO
-  elif inst_type is VOP3P:
+  elif isinstance(inst, VOP3P):
     # VOP3P: Packed 16-bit operations using compiled functions
     # WMMA: wave-level matrix multiply-accumulate (special handling - needs cross-lane access)
     if 'WMMA' in inst.op_name:
@@ -332,15 +331,15 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     if fn is None: raise NotImplementedError(f"{inst.op.name} not in pseudocode")
     st.vgpr[lane][inst.vdst] = fn(srcs[0], srcs[1], srcs[2], 0, st.scc, st.vcc, lane, st.exec_mask, st.literal, None, {})['d0'] & MASK32
     return
-  else: raise NotImplementedError(f"Unknown vector type {inst_type}")
+  else: raise NotImplementedError(f"Unknown vector type {type(inst)}")
 
   op_cls = type(inst.op)
   fn = compiled.get(op_cls, {}).get(inst.op)
   if fn is None: raise NotImplementedError(f"{inst.op_name} not in pseudocode")
 
   # Read sources (with VOP3 modifiers if applicable)
-  neg, abs_ = (getattr(inst, 'neg', 0), getattr(inst, 'abs', 0)) if inst_type is VOP3 else (0, 0)
-  opsel = getattr(inst, 'opsel', 0) if inst_type is VOP3 else 0
+  neg, abs_ = (getattr(inst, 'neg', 0), getattr(inst, 'abs', 0)) if isinstance(inst, VOP3) else (0, 0)
+  opsel = getattr(inst, 'opsel', 0) if isinstance(inst, VOP3) else 0
   def mod_src(val: int, idx: int, is64=False) -> int:
     to_f, to_i = (_f64, _i64) if is64 else (_f32, _i32)
     if (abs_ >> idx) & 1: val = to_i(abs(to_f(val)))
@@ -348,19 +347,19 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     return val
 
   # Use inst methods to determine operand sizes (inst.is_src_16, inst.is_src_64, etc.)
-  is_vop2_16bit = inst_type is VOP2 and inst.is_16bit()
+  is_vop2_16bit = isinstance(inst, VOP2) and inst.is_16bit()
 
   # Read sources based on register counts and dtypes from inst properties
   def read_src(src, idx, regs, is_src_16):
     if src is None: return 0
     if regs == 2: return mod_src(st.rsrc64(src, lane), idx, is64=True)
-    if is_src_16 and inst_type is VOP3:
+    if is_src_16 and isinstance(inst, VOP3):
       raw = st.rsrc_f16(src, lane) if 128 <= src < 255 else st.rsrc(src, lane)
       val = _src16(raw, bool(opsel & (1 << idx)))
       if abs_ & (1 << idx): val &= 0x7fff
       if neg & (1 << idx): val ^= 0x8000
       return val
-    if is_src_16 and inst_type in (VOP1, VOP2, VOPC):
+    if is_src_16 and isinstance(inst, (VOP1, VOP2, VOPC)):
       if src >= 256: return _src16(mod_src(st.rsrc(_vgpr_masked(src), lane), idx), _vgpr_hi(src))
       return mod_src(st.rsrc_f16(src, lane), idx) & 0xffff
     return mod_src(st.rsrc(src, lane), idx)
@@ -373,7 +372,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
 
   # V_CNDMASK_B32/B16: VOP3 encoding uses src2 as mask (not VCC); VOP2 uses VCC implicitly
   # Pass the correct mask as vcc to the function so pseudocode VCC.u64[laneId] works correctly
-  vcc_for_fn = st.rsgpr64(src2) if inst.op in (VOP3Op.V_CNDMASK_B32, VOP3Op.V_CNDMASK_B16) and inst_type is VOP3 and src2 is not None and src2 < 256 else st.vcc
+  vcc_for_fn = st.rsgpr64(src2) if inst.op in (VOP3Op.V_CNDMASK_B32, VOP3Op.V_CNDMASK_B16) and isinstance(inst, VOP3) and src2 is not None and src2 < 256 else st.vcc
 
   # Execute compiled function - pass src0_idx and vdst_idx for lane instructions
   # For VGPR access: src0 index is the VGPR number (src0 - 256 if VGPR, else src0 for SGPR)
@@ -387,7 +386,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     st.vgpr[wr_lane][wr_idx] = wr_val
   if 'vcc_lane' in result:
     # VOP2 carry ops write to VCC implicitly; VOPC/VOP3 write to vdst
-    st.pend_sgpr_lane(VCC_LO if inst_type is VOP2 and 'CO_CI' in inst.op_name else vdst, lane, result['vcc_lane'])
+    st.pend_sgpr_lane(VCC_LO if isinstance(inst, VOP2) and 'CO_CI' in inst.op_name else vdst, lane, result['vcc_lane'])
   if 'exec_lane' in result:
     # V_CMPX instructions write to EXEC per-lane
     st.pend_sgpr_lane(EXEC_LO, lane, result['exec_lane'])
@@ -396,7 +395,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: bytearray | None = No
     d0_val = result['d0']
     if writes_to_sgpr: st.wsgpr(vdst, d0_val & MASK32)
     elif result.get('d0_64'): V[vdst], V[vdst + 1] = d0_val & MASK32, (d0_val >> 32) & MASK32
-    elif inst.is_dst_16(): V[vdst] = _dst16(V[vdst], d0_val, bool(opsel & 8) if inst_type is VOP3 else dst_hi)
+    elif inst.is_dst_16(): V[vdst] = _dst16(V[vdst], d0_val, bool(opsel & 8) if isinstance(inst, VOP3) else dst_hi)
     else: V[vdst] = d0_val & MASK32
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -425,22 +424,19 @@ def exec_wmma(st: WaveState, inst, op: VOP3POp) -> None:
 # MAIN EXECUTION LOOP
 # ═══════════════════════════════════════════════════════════════════════════════
 
-SCALAR_TYPES = {SOP1, SOP2, SOPC, SOPK, SOPP, SMEM}
-VECTOR_TYPES = {VOP1, VOP2, VOP3, VOP3SD, VOPC, FLAT, DS, VOPD, VOP3P}
-
 def step_wave(program: Program, st: WaveState, lds: bytearray, n_lanes: int) -> int:
   inst = program.get(st.pc)
   if inst is None: return 1
-  inst_words, st.literal, inst_type = inst._words, getattr(inst, '_literal', None) or 0, type(inst)
+  inst_words, st.literal = inst._words, getattr(inst, '_literal', None) or 0
 
-  if inst_type in SCALAR_TYPES:
+  if isinstance(inst, (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM)):
     delta = exec_scalar(st, inst)
     if delta == -1: return -1  # endpgm
     if delta == -2: st.pc += inst_words; return -2  # barrier
     st.pc += inst_words + delta
   else:
     # V_READFIRSTLANE/V_READLANE write to SGPR, execute once; others execute per-lane with exec_mask
-    is_readlane = inst_type in (VOP1, VOP3) and ('READFIRSTLANE' in inst.op_name or 'READLANE' in inst.op_name)
+    is_readlane = isinstance(inst, (VOP1, VOP3)) and ('READFIRSTLANE' in inst.op_name or 'READLANE' in inst.op_name)
     exec_mask = 1 if is_readlane else st.exec_mask
     for lane in range(1 if is_readlane else n_lanes):
       if exec_mask & (1 << lane): exec_vector(st, inst, lane, lds)
