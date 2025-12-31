@@ -68,7 +68,7 @@ def validate_index(buf:UOp, idx:UOp, gate:UOp|None=None):
   if 0<=idx.vmin and idx.vmax<sz: return True
 
   # WEBGPU has a BITCAST in the index. TODO: fix
-  if any(x.op is Ops.BITCAST for x in idx.toposort()): return True
+  if any(x.op is Ops.BITCAST for x in idx.toposort() | gate.toposort()): return True
 
   if not z3_imported: raise ImportError("bounds checking requires z3 >= 4.12.4, use IGNORE_OOB=1 to disable, or \"pip install 'z3-solver>=4.12.4\"")
   solver = z3.Solver(ctx=z3.Context())

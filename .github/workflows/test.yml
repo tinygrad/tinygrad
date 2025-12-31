@@ -584,6 +584,8 @@ jobs:
     name: Linux (WebGPU)
     runs-on: ubuntu-22.04
     timeout-minutes: 20
+    env:
+      IGNORE_OOB: 0
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -829,6 +831,8 @@ jobs:
     name: MacOS (WebGPU)
     runs-on: macos-14
     timeout-minutes: 10
+    env:
+      IGNORE_OOB: 0
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -906,6 +910,8 @@ jobs:
     name: Windows (${{ matrix.backend }})
     runs-on: windows-latest
     timeout-minutes: 15
+    env:
+      IGNORE_OOB: 0
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
