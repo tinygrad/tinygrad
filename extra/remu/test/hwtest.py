@@ -11,8 +11,8 @@ from tinygrad.runtime.support.compiler_amd import amdgpu_disassemble
 from tinygrad.renderer import ProgramSpec
 from tinygrad.engine.realize import CompiledRunner
 
-from extra.assembly.rdna3.autogen import *
-from extra.assembly.rdna3.asm import waitcnt
+from extra.assembly.amd.autogen.rdna3 import *
+from extra.assembly.amd.asm import waitcnt
 from test.testextra.test_cfg_viz import template
 
 def get_output(asm:list, n_threads:int=1, vdst:VGPR=v[1]):
