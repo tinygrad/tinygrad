@@ -4,6 +4,8 @@ from __future__ import annotations
 import struct, math
 from enum import IntEnum
 from typing import overload, Annotated, TypeVar, Generic
+from extra.assembly.amd.autogen.rdna3.enum import (VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, VOPDOp, SOP1Op, SOP2Op,
+  SOPCOp, SOPKOp, SOPPOp, SMEMOp, DSOp, FLATOp, MUBUFOp, MTBUFOp, MIMGOp, VINTERPOp)
 
 # Common masks and bit conversion functions
 MASK32, MASK64 = 0xffffffff, 0xffffffffffffffff
@@ -375,11 +377,9 @@ class Inst:
     op_name = op.name if hasattr(op, 'name') else None
     # Look up op name from int if needed (happens in from_bytes path)
     if op_name is None and self.__class__.__name__ == 'VOP3':
-      from extra.assembly.amd.autogen.rdna3.ins import VOP3Op
       try: op_name = VOP3Op(op).name
       except ValueError: pass
     if op_name is None and self.__class__.__name__ == 'VOPC':
-      from extra.assembly.amd.autogen.rdna3.ins import VOPCOp
       try: op_name = VOPCOp(op).name
       except ValueError: pass
     if op_name is None: return False
@@ -465,10 +465,10 @@ class Inst:
     from extra.assembly.amd.asm import disasm
     return disasm(self)
 
-  _enum_map = {'VOP1': 'VOP1Op', 'VOP2': 'VOP2Op', 'VOP3': 'VOP3Op', 'VOP3SD': 'VOP3SDOp', 'VOP3P': 'VOP3POp', 'VOPC': 'VOPCOp',
-               'SOP1': 'SOP1Op', 'SOP2': 'SOP2Op', 'SOPC': 'SOPCOp', 'SOPK': 'SOPKOp', 'SOPP': 'SOPPOp',
-               'SMEM': 'SMEMOp', 'DS': 'DSOp', 'FLAT': 'FLATOp', 'MUBUF': 'MUBUFOp', 'MTBUF': 'MTBUFOp', 'MIMG': 'MIMGOp',
-               'VOPD': 'VOPDOp', 'VINTERP': 'VINTERPOp'}
+  _enum_map = {'VOP1': VOP1Op, 'VOP2': VOP2Op, 'VOP3': VOP3Op, 'VOP3SD': VOP3SDOp, 'VOP3P': VOP3POp, 'VOPC': VOPCOp,
+               'SOP1': SOP1Op, 'SOP2': SOP2Op, 'SOPC': SOPCOp, 'SOPK': SOPKOp, 'SOPP': SOPPOp,
+               'SMEM': SMEMOp, 'DS': DSOp, 'FLAT': FLATOp, 'MUBUF': MUBUFOp, 'MTBUF': MTBUFOp, 'MIMG': MIMGOp,
+               'VOPD': VOPDOp, 'VINTERP': VINTERPOp}
   _VOP3SD_OPS = {288, 289, 290, 764, 765, 766, 767, 768, 769, 770}
 
   @property
@@ -481,8 +481,7 @@ class Inst:
     # VOP3 with VOP3SD opcodes -> use VOP3SDOp
     if cls_name == 'VOP3' and val in self._VOP3SD_OPS: cls_name = 'VOP3SD'
     if cls_name in self._enum_map:
-      import extra.assembly.amd.autogen.rdna3 as rdna3
-      try: return getattr(rdna3, self._enum_map[cls_name])(val)
+      try: return self._enum_map[cls_name](val)
       except ValueError: pass
     return val
 
