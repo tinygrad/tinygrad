@@ -303,11 +303,21 @@ class Inst:
           raise ValueError(f"SOP1 {orig_args['op'].name} expects {expected} register(s) for {fld}, got {orig_args[fld].count}")
 
   def __init__(self, *args, literal: int | None = None, **kwargs):
-    self._values, self._literal = dict(self._defaults), literal
+    self._values, self._literal = dict(self._defaults), None
     field_names = [n for n in self._fields if n != 'encoding']
     orig_args = dict(zip(field_names, args)) | kwargs
     self._values.update(orig_args)
     self._validate(orig_args)
+    # Pre-shift literal for 64-bit sources (literal param is always raw 32-bit value from user)
+    if literal is not None:
+      # Find which source uses the literal (255) and check its register count
+      for n, idx in [('src0', 0), ('src1', 1), ('src2', 2), ('ssrc0', 0), ('ssrc1', 1)]:
+        v = orig_args.get(n)
+        if (isinstance(v, RawImm) and v.val == 255) or (isinstance(v, int) and v == 255):
+          self._literal = (literal << 32) if self.src_regs(idx) == 2 else literal
+          break
+      else:
+        self._literal = literal  # fallback if no literal source found
     cls_name = self.__class__.__name__
 
     # Format-specific setup
@@ -410,9 +420,9 @@ class Inst:
         lit32 = int.from_bytes(data[cls._size():cls._size()+4], 'little')
         # Find which source has literal (255) and check its register count
         lit_src_is_64 = False
-        for n, regs_prop in [('src0', 'src0_regs'), ('src1', 'src1_regs'), ('src2', 'src2_regs')]:
+        for n, idx in [('src0', 0), ('src1', 1), ('src2', 2)]:
           if n in inst._values and isinstance(inst._values[n], RawImm) and inst._values[n].val == 255:
-            lit_src_is_64 = getattr(inst, regs_prop, 1) == 2
+            lit_src_is_64 = inst.src_regs(idx) == 2
             break
         inst._literal = (lit32 << 32) if lit_src_is_64 else lit32
     return inst

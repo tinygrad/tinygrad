@@ -108,7 +108,7 @@ class WaveState:
   def rsrc_f16(self, v: int, lane: int) -> int: return self._rsrc_base(v, lane, _INLINE_CONSTS_F16)
   def rsrc64(self, v: int, lane: int) -> int:
     if 128 <= v < 255: return _INLINE_CONSTS_F64[v - 128]
-    if v == 255: return self.literal
+    if v == 255: return self.literal  # literal is already shifted in from_bytes for 64-bit ops
     return self.rsrc(v, lane) | ((self.rsrc(v+1, lane) if v < VCC_LO or 256 <= v <= 511 else 0) << 32)
 
   def pend_sgpr_lane(self, reg: int, lane: int, val: int):
