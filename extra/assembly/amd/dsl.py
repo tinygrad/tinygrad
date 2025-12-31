@@ -97,9 +97,11 @@ class _RegFactory(Generic[T]):
 
 class SGPR(Reg): pass
 class VGPR(Reg): pass
+class AGPR(VGPR): pass
 class TTMP(Reg): pass
 s: _RegFactory[SGPR] = _RegFactory(SGPR, "SGPR")
 v: _RegFactory[VGPR] = _RegFactory(VGPR, "VGPR")
+a: _RegFactory[AGPR] = _RegFactory(AGPR, "AGPR")
 ttmp: _RegFactory[TTMP] = _RegFactory(TTMP, "TTMP")
 
 # Special registers as SrcMod objects (support -VCC_LO, abs(EXEC_LO), etc.)
