@@ -1,16 +1,17 @@
 # mypy: ignore-errors
 import ctypes
 from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from typing import TypeAlias
 import gzip, base64
 dll = DLL('mesa', ['tinymesa_cpu', 'tinymesa'])
 class struct_u_printf_info(Struct): pass
-u_printf_info = struct_u_printf_info
-uint32_t = ctypes.c_uint32
+u_printf_info: TypeAlias = struct_u_printf_info
+uint32_t: TypeAlias = ctypes.c_uint32
 try: nir_debug = uint32_t.in_dll(dll, 'nir_debug')
 except (ValueError,AttributeError): pass
 try: nir_debug_print_shader = (ctypes.c_bool * 15).in_dll(dll, 'nir_debug_print_shader')
 except (ValueError,AttributeError): pass
-nir_component_mask_t = ctypes.c_uint16
+nir_component_mask_t: TypeAlias = ctypes.c_uint16
 try: (nir_process_debug_variable:=dll.nir_process_debug_variable).restype, nir_process_debug_variable.argtypes = None, []
 except AttributeError: pass
 
@@ -21,11 +22,11 @@ try: (nir_component_mask_reinterpret:=dll.nir_component_mask_reinterpret).restyp
 except AttributeError: pass
 
 class struct_nir_state_slot(Struct): pass
-gl_state_index16 = ctypes.c_int16
+gl_state_index16: TypeAlias = ctypes.c_int16
 struct_nir_state_slot._fields_ = [
   ('tokens', (gl_state_index16 * 4)),
 ]
-nir_state_slot = struct_nir_state_slot
+nir_state_slot: TypeAlias = struct_nir_state_slot
 nir_rounding_mode = CEnum(ctypes.c_uint32)
 nir_rounding_mode_undef = nir_rounding_mode.define('nir_rounding_mode_undef', 0)
 nir_rounding_mode_rtne = nir_rounding_mode.define('nir_rounding_mode_rtne', 1)
@@ -73,13 +74,13 @@ NIR_CMAT_C_SIGNED = nir_cmat_signed.define('NIR_CMAT_C_SIGNED', 4)
 NIR_CMAT_RESULT_SIGNED = nir_cmat_signed.define('NIR_CMAT_RESULT_SIGNED', 8)
 
 class nir_const_value(ctypes.Union): pass
-int8_t = ctypes.c_byte
-uint8_t = ctypes.c_ubyte
-int16_t = ctypes.c_int16
-uint16_t = ctypes.c_uint16
-int32_t = ctypes.c_int32
-int64_t = ctypes.c_int64
-uint64_t = ctypes.c_uint64
+int8_t: TypeAlias = ctypes.c_byte
+uint8_t: TypeAlias = ctypes.c_ubyte
+int16_t: TypeAlias = ctypes.c_int16
+uint16_t: TypeAlias = ctypes.c_uint16
+int32_t: TypeAlias = ctypes.c_int32
+int64_t: TypeAlias = ctypes.c_int64
+uint64_t: TypeAlias = ctypes.c_uint64
 nir_const_value._fields_ = [
   ('b', ctypes.c_bool),
   ('f32', ctypes.c_float),
@@ -100,7 +101,7 @@ try: (nir_const_value_as_float:=dll.nir_const_value_as_float).restype, nir_const
 except AttributeError: pass
 
 class struct_nir_constant(Struct): pass
-nir_constant = struct_nir_constant
+nir_constant: TypeAlias = struct_nir_constant
 struct_nir_constant._fields_ = [
   ('values', (nir_const_value * 16)),
   ('is_null_constant', ctypes.c_bool),
@@ -666,7 +667,7 @@ struct_nir_variable_data._fields_ = [
   ('_0', struct_nir_variable_data_0),
   ('node_name', ctypes.POINTER(ctypes.c_char)),
 ]
-nir_variable_data = struct_nir_variable_data
+nir_variable_data: TypeAlias = struct_nir_variable_data
 class struct_nir_variable(Struct): pass
 class struct_exec_node(Struct): pass
 struct_exec_node._fields_ = [
@@ -710,11 +711,11 @@ struct_glsl_cmat_description._fields_ = [
   ('cols', uint8_t),
   ('use', uint8_t),
 ]
-uintptr_t = ctypes.c_uint64
+uintptr_t: TypeAlias = ctypes.c_uint64
 class struct_glsl_type_fields(ctypes.Union): pass
-glsl_type = struct_glsl_type
+glsl_type: TypeAlias = struct_glsl_type
 class struct_glsl_struct_field(Struct): pass
-glsl_struct_field = struct_glsl_struct_field
+glsl_struct_field: TypeAlias = struct_glsl_struct_field
 class struct_glsl_struct_field_0(ctypes.Union): pass
 class struct_glsl_struct_field_0_0(Struct): pass
 struct_glsl_struct_field_0_0._fields_ = [
@@ -773,7 +774,7 @@ struct_glsl_type._fields_ = [
   ('explicit_alignment', ctypes.c_uint32),
   ('fields', struct_glsl_type_fields),
 ]
-nir_variable = struct_nir_variable
+nir_variable: TypeAlias = struct_nir_variable
 struct_nir_variable._fields_ = [
   ('node', struct_exec_node),
   ('type', ctypes.POINTER(struct_glsl_type)),
@@ -803,16 +804,16 @@ nir_instr_type_parallel_copy = nir_instr_type.define('nir_instr_type_parallel_co
 
 class struct_nir_instr(Struct): pass
 class struct_nir_block(Struct): pass
-nir_block = struct_nir_block
+nir_block: TypeAlias = struct_nir_block
 class struct_nir_cf_node(Struct): pass
-nir_cf_node = struct_nir_cf_node
+nir_cf_node: TypeAlias = struct_nir_cf_node
 nir_cf_node_type = CEnum(ctypes.c_uint32)
 nir_cf_node_block = nir_cf_node_type.define('nir_cf_node_block', 0)
 nir_cf_node_if = nir_cf_node_type.define('nir_cf_node_if', 1)
 nir_cf_node_loop = nir_cf_node_type.define('nir_cf_node_loop', 2)
 nir_cf_node_function = nir_cf_node_type.define('nir_cf_node_function', 3)
 
-nir_cf_node = struct_nir_cf_node
+nir_cf_node: TypeAlias = struct_nir_cf_node
 struct_nir_cf_node._fields_ = [
   ('node', struct_exec_node),
   ('type', nir_cf_node_type),
@@ -823,7 +824,7 @@ struct_exec_list._fields_ = [
   ('head_sentinel', struct_exec_node),
   ('tail_sentinel', struct_exec_node),
 ]
-nir_block = struct_nir_block
+nir_block: TypeAlias = struct_nir_block
 class struct_set(Struct): pass
 class struct_set_entry(Struct): pass
 struct_set_entry._fields_ = [
@@ -870,7 +871,7 @@ struct_nir_instr._fields_ = [
   ('has_debug_info', ctypes.c_bool),
   ('index', uint32_t),
 ]
-nir_instr = struct_nir_instr
+nir_instr: TypeAlias = struct_nir_instr
 class struct_nir_def(Struct): pass
 class struct_list_head(Struct): pass
 struct_list_head._fields_ = [
@@ -886,14 +887,14 @@ struct_nir_def._fields_ = [
   ('divergent', ctypes.c_bool),
   ('loop_invariant', ctypes.c_bool),
 ]
-nir_def = struct_nir_def
+nir_def: TypeAlias = struct_nir_def
 class struct_nir_src(Struct): pass
 struct_nir_src._fields_ = [
   ('_parent', uintptr_t),
   ('use_link', struct_list_head),
   ('ssa', ctypes.POINTER(nir_def)),
 ]
-nir_src = struct_nir_src
+nir_src: TypeAlias = struct_nir_src
 try: (nir_src_is_divergent:=dll.nir_src_is_divergent).restype, nir_src_is_divergent.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_src)]
 except AttributeError: pass
 
@@ -902,7 +903,7 @@ struct_nir_alu_src._fields_ = [
   ('src', nir_src),
   ('swizzle', (uint8_t * 16)),
 ]
-nir_alu_src = struct_nir_alu_src
+nir_alu_src: TypeAlias = struct_nir_alu_src
 nir_alu_type = CEnum(ctypes.c_ubyte)
 nir_type_invalid = nir_alu_type.define('nir_type_invalid', 0)
 nir_type_int = nir_alu_type.define('nir_type_int', 2)
@@ -1473,7 +1474,7 @@ struct_nir_op_info._fields_ = [
   ('algebraic_properties', nir_op_algebraic_property),
   ('is_conversion', ctypes.c_bool),
 ]
-nir_op_info = struct_nir_op_info
+nir_op_info: TypeAlias = struct_nir_op_info
 try: nir_op_infos = (nir_op_info * 489).in_dll(dll, 'nir_op_infos')
 except (ValueError,AttributeError): pass
 class struct_nir_alu_instr(Struct): pass
@@ -1487,7 +1488,7 @@ struct_nir_alu_instr._fields_ = [
   ('def', nir_def),
   ('src', (nir_alu_src * 0)),
 ]
-nir_alu_instr = struct_nir_alu_instr
+nir_alu_instr: TypeAlias = struct_nir_alu_instr
 try: (nir_alu_src_copy:=dll.nir_alu_src_copy).restype, nir_alu_src_copy.argtypes = None, [ctypes.POINTER(nir_alu_src), ctypes.POINTER(nir_alu_src)]
 except AttributeError: pass
 
@@ -1588,7 +1589,7 @@ struct_nir_deref_instr._fields_ = [
   ('_1', struct_nir_deref_instr_1),
   ('def', nir_def),
 ]
-nir_deref_instr = struct_nir_deref_instr
+nir_deref_instr: TypeAlias = struct_nir_deref_instr
 try: (nir_deref_cast_is_trivial:=dll.nir_deref_cast_is_trivial).restype, nir_deref_cast_is_trivial.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_deref_instr)]
 except AttributeError: pass
 
@@ -1614,14 +1615,14 @@ except AttributeError: pass
 
 class struct_nir_call_instr(Struct): pass
 class struct_nir_function(Struct): pass
-nir_function = struct_nir_function
+nir_function: TypeAlias = struct_nir_function
 class struct_nir_shader(Struct): pass
-nir_shader = struct_nir_shader
+nir_shader: TypeAlias = struct_nir_shader
 class struct_gc_ctx(Struct): pass
-gc_ctx = struct_gc_ctx
+gc_ctx: TypeAlias = struct_gc_ctx
 class struct_nir_shader_compiler_options(Struct): pass
-nir_shader_compiler_options = struct_nir_shader_compiler_options
-nir_instr_filter_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_instr), ctypes.c_void_p)
+nir_shader_compiler_options: TypeAlias = struct_nir_shader_compiler_options
+nir_instr_filter_cb: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_instr), ctypes.c_void_p)
 nir_lower_int64_options = CEnum(ctypes.c_uint32)
 nir_lower_imul64 = nir_lower_int64_options.define('nir_lower_imul64', 1)
 nir_lower_isign64 = nir_lower_int64_options.define('nir_lower_isign64', 2)
@@ -1872,7 +1873,7 @@ struct_nir_shader_compiler_options._fields_ = [
   ('max_varying_expression_cost', ctypes.c_uint32),
 ]
 class struct_shader_info(Struct): pass
-blake3_hash = (ctypes.c_ubyte * 32)
+blake3_hash: TypeAlias = (ctypes.c_ubyte * 32)
 enum_pipe_shader_type = CEnum(ctypes.c_int32)
 MESA_SHADER_NONE = enum_pipe_shader_type.define('MESA_SHADER_NONE', -1)
 MESA_SHADER_VERTEX = enum_pipe_shader_type.define('MESA_SHADER_VERTEX', 0)
@@ -1901,7 +1902,7 @@ MESA_SHADER_INTERSECTION = enum_pipe_shader_type.define('MESA_SHADER_INTERSECTIO
 MESA_SHADER_CALLABLE = enum_pipe_shader_type.define('MESA_SHADER_CALLABLE', 13)
 MESA_SHADER_KERNEL = enum_pipe_shader_type.define('MESA_SHADER_KERNEL', 14)
 
-gl_shader_stage = enum_pipe_shader_type
+gl_shader_stage: TypeAlias = enum_pipe_shader_type
 enum_gl_subgroup_size = CEnum(ctypes.c_ubyte)
 SUBGROUP_SIZE_VARYING = enum_gl_subgroup_size.define('SUBGROUP_SIZE_VARYING', 0)
 SUBGROUP_SIZE_UNIFORM = enum_gl_subgroup_size.define('SUBGROUP_SIZE_UNIFORM', 1)
@@ -2141,7 +2142,7 @@ struct_shader_info._fields_ = [
   ('_0', struct_shader_info_0),
 ]
 class struct_nir_xfb_info(Struct): pass
-nir_xfb_info = struct_nir_xfb_info
+nir_xfb_info: TypeAlias = struct_nir_xfb_info
 struct_nir_shader._fields_ = [
   ('gctx', ctypes.POINTER(gc_ctx)),
   ('variables', struct_exec_list),
@@ -2161,7 +2162,7 @@ struct_nir_shader._fields_ = [
   ('has_debug_info', ctypes.c_bool),
 ]
 class struct_nir_parameter(Struct): pass
-nir_parameter = struct_nir_parameter
+nir_parameter: TypeAlias = struct_nir_parameter
 struct_nir_parameter._fields_ = [
   ('num_components', uint8_t),
   ('bit_size', uint8_t),
@@ -2174,8 +2175,8 @@ struct_nir_parameter._fields_ = [
   ('name', ctypes.POINTER(ctypes.c_char)),
 ]
 class struct_nir_function_impl(Struct): pass
-nir_function_impl = struct_nir_function_impl
-nir_function = struct_nir_function
+nir_function_impl: TypeAlias = struct_nir_function_impl
+nir_function: TypeAlias = struct_nir_function
 nir_metadata = CEnum(ctypes.c_int32)
 nir_metadata_none = nir_metadata.define('nir_metadata_none', 0)
 nir_metadata_block_index = nir_metadata.define('nir_metadata_block_index', 1)
@@ -2230,7 +2231,7 @@ struct_nir_call_instr._fields_ = [
   ('num_params', ctypes.c_uint32),
   ('params', (nir_src * 0)),
 ]
-nir_call_instr = struct_nir_call_instr
+nir_call_instr: TypeAlias = struct_nir_call_instr
 class struct_nir_intrinsic_instr(Struct): pass
 nir_intrinsic_op = CEnum(ctypes.c_uint32)
 nir_intrinsic_accept_ray_intersection = nir_intrinsic_op.define('nir_intrinsic_accept_ray_intersection', 0)
@@ -2977,7 +2978,7 @@ struct_nir_intrinsic_instr._fields_ = [
   ('name', ctypes.POINTER(ctypes.c_char)),
   ('src', (nir_src * 0)),
 ]
-nir_intrinsic_instr = struct_nir_intrinsic_instr
+nir_intrinsic_instr: TypeAlias = struct_nir_intrinsic_instr
 nir_memory_semantics = CEnum(ctypes.c_uint32)
 NIR_MEMORY_ACQUIRE = nir_memory_semantics.define('NIR_MEMORY_ACQUIRE', 1)
 NIR_MEMORY_RELEASE = nir_memory_semantics.define('NIR_MEMORY_RELEASE', 2)
@@ -3008,7 +3009,7 @@ struct_nir_io_semantics._fields_ = [
   ('interp_explicit_strict', ctypes.c_uint32,1),
   ('_pad', ctypes.c_uint32,1),
 ]
-nir_io_semantics = struct_nir_io_semantics
+nir_io_semantics: TypeAlias = struct_nir_io_semantics
 class struct_nir_io_xfb(Struct): pass
 class struct_nir_io_xfb_out(Struct): pass
 struct_nir_io_xfb_out._fields_ = [
@@ -3019,7 +3020,7 @@ struct_nir_io_xfb_out._fields_ = [
 struct_nir_io_xfb._fields_ = [
   ('out', (struct_nir_io_xfb_out * 2)),
 ]
-nir_io_xfb = struct_nir_io_xfb
+nir_io_xfb: TypeAlias = struct_nir_io_xfb
 try: (nir_instr_xfb_write_mask:=dll.nir_instr_xfb_write_mask).restype, nir_instr_xfb_write_mask.argtypes = ctypes.c_uint32, [ctypes.POINTER(nir_intrinsic_instr)]
 except AttributeError: pass
 
@@ -3037,7 +3038,7 @@ struct_nir_intrinsic_info._fields_ = [
   ('index_map', (uint8_t * 75)),
   ('flags', nir_intrinsic_semantic_flag),
 ]
-nir_intrinsic_info = struct_nir_intrinsic_info
+nir_intrinsic_info: TypeAlias = struct_nir_intrinsic_info
 try: nir_intrinsic_infos = (nir_intrinsic_info * 732).in_dll(dll, 'nir_intrinsic_infos')
 except (ValueError,AttributeError): pass
 try: (nir_intrinsic_src_components:=dll.nir_intrinsic_src_components).restype, nir_intrinsic_src_components.argtypes = ctypes.c_uint32, [ctypes.POINTER(nir_intrinsic_instr), ctypes.c_uint32]
@@ -3093,13 +3094,13 @@ nir_tex_src_backend1 = enum_nir_tex_src_type.define('nir_tex_src_backend1', 21)
 nir_tex_src_backend2 = enum_nir_tex_src_type.define('nir_tex_src_backend2', 22)
 nir_num_tex_src_types = enum_nir_tex_src_type.define('nir_num_tex_src_types', 23)
 
-nir_tex_src_type = enum_nir_tex_src_type
+nir_tex_src_type: TypeAlias = enum_nir_tex_src_type
 class struct_nir_tex_src(Struct): pass
 struct_nir_tex_src._fields_ = [
   ('src', nir_src),
   ('src_type', nir_tex_src_type),
 ]
-nir_tex_src = struct_nir_tex_src
+nir_tex_src: TypeAlias = struct_nir_tex_src
 enum_nir_texop = CEnum(ctypes.c_uint32)
 nir_texop_tex = enum_nir_texop.define('nir_texop_tex', 0)
 nir_texop_txb = enum_nir_texop.define('nir_texop_txb', 1)
@@ -3127,7 +3128,7 @@ nir_texop_custom_border_color_agx = enum_nir_texop.define('nir_texop_custom_bord
 nir_texop_hdr_dim_nv = enum_nir_texop.define('nir_texop_hdr_dim_nv', 23)
 nir_texop_tex_type_nv = enum_nir_texop.define('nir_texop_tex_type_nv', 24)
 
-nir_texop = enum_nir_texop
+nir_texop: TypeAlias = enum_nir_texop
 class struct_nir_tex_instr(Struct): pass
 enum_glsl_sampler_dim = CEnum(ctypes.c_uint32)
 GLSL_SAMPLER_DIM_1D = enum_glsl_sampler_dim.define('GLSL_SAMPLER_DIM_1D', 0)
@@ -3166,7 +3167,7 @@ struct_nir_tex_instr._fields_ = [
   ('sampler_index', ctypes.c_uint32),
   ('backend_flags', uint32_t),
 ]
-nir_tex_instr = struct_nir_tex_instr
+nir_tex_instr: TypeAlias = struct_nir_tex_instr
 try: (nir_tex_instr_need_sampler:=dll.nir_tex_instr_need_sampler).restype, nir_tex_instr_need_sampler.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_tex_instr)]
 except AttributeError: pass
 
@@ -3200,7 +3201,7 @@ struct_nir_load_const_instr._fields_ = [
   ('def', nir_def),
   ('value', (nir_const_value * 0)),
 ]
-nir_load_const_instr = struct_nir_load_const_instr
+nir_load_const_instr: TypeAlias = struct_nir_load_const_instr
 nir_jump_type = CEnum(ctypes.c_uint32)
 nir_jump_return = nir_jump_type.define('nir_jump_return', 0)
 nir_jump_halt = nir_jump_type.define('nir_jump_halt', 1)
@@ -3217,27 +3218,27 @@ struct_nir_jump_instr._fields_ = [
   ('target', ctypes.POINTER(nir_block)),
   ('else_target', ctypes.POINTER(nir_block)),
 ]
-nir_jump_instr = struct_nir_jump_instr
+nir_jump_instr: TypeAlias = struct_nir_jump_instr
 class struct_nir_undef_instr(Struct): pass
 struct_nir_undef_instr._fields_ = [
   ('instr', nir_instr),
   ('def', nir_def),
 ]
-nir_undef_instr = struct_nir_undef_instr
+nir_undef_instr: TypeAlias = struct_nir_undef_instr
 class struct_nir_phi_src(Struct): pass
 struct_nir_phi_src._fields_ = [
   ('node', struct_exec_node),
   ('pred', ctypes.POINTER(nir_block)),
   ('src', nir_src),
 ]
-nir_phi_src = struct_nir_phi_src
+nir_phi_src: TypeAlias = struct_nir_phi_src
 class struct_nir_phi_instr(Struct): pass
 struct_nir_phi_instr._fields_ = [
   ('instr', nir_instr),
   ('srcs', struct_exec_list),
   ('def', nir_def),
 ]
-nir_phi_instr = struct_nir_phi_instr
+nir_phi_instr: TypeAlias = struct_nir_phi_instr
 class struct_nir_parallel_copy_entry(Struct): pass
 class struct_nir_parallel_copy_entry_dest(ctypes.Union): pass
 struct_nir_parallel_copy_entry_dest._fields_ = [
@@ -3251,13 +3252,13 @@ struct_nir_parallel_copy_entry._fields_ = [
   ('src', nir_src),
   ('dest', struct_nir_parallel_copy_entry_dest),
 ]
-nir_parallel_copy_entry = struct_nir_parallel_copy_entry
+nir_parallel_copy_entry: TypeAlias = struct_nir_parallel_copy_entry
 class struct_nir_parallel_copy_instr(Struct): pass
 struct_nir_parallel_copy_instr._fields_ = [
   ('instr', nir_instr),
   ('entries', struct_exec_list),
 ]
-nir_parallel_copy_instr = struct_nir_parallel_copy_instr
+nir_parallel_copy_instr: TypeAlias = struct_nir_parallel_copy_instr
 class struct_nir_instr_debug_info(Struct): pass
 struct_nir_instr_debug_info._fields_ = [
   ('filename', ctypes.POINTER(ctypes.c_char)),
@@ -3268,13 +3269,13 @@ struct_nir_instr_debug_info._fields_ = [
   ('variable_name', ctypes.POINTER(ctypes.c_char)),
   ('instr', nir_instr),
 ]
-nir_instr_debug_info = struct_nir_instr_debug_info
+nir_instr_debug_info: TypeAlias = struct_nir_instr_debug_info
 class struct_nir_scalar(Struct): pass
 struct_nir_scalar._fields_ = [
   ('def', ctypes.POINTER(nir_def)),
   ('comp', ctypes.c_uint32),
 ]
-nir_scalar = struct_nir_scalar
+nir_scalar: TypeAlias = struct_nir_scalar
 try: (nir_scalar_chase_movs:=dll.nir_scalar_chase_movs).restype, nir_scalar_chase_movs.argtypes = nir_scalar, [nir_scalar]
 except AttributeError: pass
 
@@ -3288,7 +3289,7 @@ struct_nir_binding._fields_ = [
   ('indices', (nir_src * 4)),
   ('read_first_invocation', ctypes.c_bool),
 ]
-nir_binding = struct_nir_binding
+nir_binding: TypeAlias = struct_nir_binding
 try: (nir_chase_binding:=dll.nir_chase_binding).restype, nir_chase_binding.argtypes = nir_binding, [nir_src]
 except AttributeError: pass
 
@@ -3312,7 +3313,7 @@ struct_nir_if._fields_ = [
   ('then_list', struct_exec_list),
   ('else_list', struct_exec_list),
 ]
-nir_if = struct_nir_if
+nir_if: TypeAlias = struct_nir_if
 class struct_nir_loop_terminator(Struct): pass
 struct_nir_loop_terminator._fields_ = [
   ('nif', ctypes.POINTER(nir_if)),
@@ -3324,7 +3325,7 @@ struct_nir_loop_terminator._fields_ = [
   ('exact_trip_count_unknown', ctypes.c_bool),
   ('loop_terminator_link', struct_list_head),
 ]
-nir_loop_terminator = struct_nir_loop_terminator
+nir_loop_terminator: TypeAlias = struct_nir_loop_terminator
 class struct_nir_loop_induction_variable(Struct): pass
 struct_nir_loop_induction_variable._fields_ = [
   ('basis', ctypes.POINTER(nir_def)),
@@ -3332,7 +3333,7 @@ struct_nir_loop_induction_variable._fields_ = [
   ('init_src', ctypes.POINTER(nir_src)),
   ('update_src', ctypes.POINTER(nir_alu_src)),
 ]
-nir_loop_induction_variable = struct_nir_loop_induction_variable
+nir_loop_induction_variable: TypeAlias = struct_nir_loop_induction_variable
 class struct_nir_loop_info(Struct): pass
 class struct_hash_table(Struct): pass
 class struct_hash_entry(Struct): pass
@@ -3367,7 +3368,7 @@ struct_nir_loop_info._fields_ = [
   ('loop_terminator_list', struct_list_head),
   ('induction_vars', ctypes.POINTER(struct_hash_table)),
 ]
-nir_loop_info = struct_nir_loop_info
+nir_loop_info: TypeAlias = struct_nir_loop_info
 nir_loop_control = CEnum(ctypes.c_uint32)
 nir_loop_control_none = nir_loop_control.define('nir_loop_control_none', 0)
 nir_loop_control_unroll = nir_loop_control.define('nir_loop_control_unroll', 1)
@@ -3384,9 +3385,9 @@ struct_nir_loop._fields_ = [
   ('divergent_continue', ctypes.c_bool),
   ('divergent_break', ctypes.c_bool),
 ]
-nir_loop = struct_nir_loop
-nir_intrin_filter_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.c_void_p)
-nir_vectorize_cb = ctypes.CFUNCTYPE(ctypes.c_ubyte, ctypes.POINTER(struct_nir_instr), ctypes.c_void_p)
+nir_loop: TypeAlias = struct_nir_loop
+nir_intrin_filter_cb: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.c_void_p)
+nir_vectorize_cb: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_ubyte, ctypes.POINTER(struct_nir_instr), ctypes.c_void_p)
 try: (nir_remove_non_entrypoints:=dll.nir_remove_non_entrypoints).restype, nir_remove_non_entrypoints.argtypes = None, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
@@ -3399,7 +3400,7 @@ except AttributeError: pass
 try: (nir_fixup_is_exported:=dll.nir_fixup_is_exported).restype, nir_fixup_is_exported.argtypes = None, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-shader_info = struct_shader_info
+shader_info: TypeAlias = struct_shader_info
 try: (nir_shader_create:=dll.nir_shader_create).restype, nir_shader_create.argtypes = ctypes.POINTER(nir_shader), [ctypes.c_void_p, gl_shader_stage, ctypes.POINTER(nir_shader_compiler_options), ctypes.POINTER(shader_info)]
 except AttributeError: pass
 
@@ -3522,7 +3523,7 @@ struct_nir_cursor._fields_ = [
   ('option', nir_cursor_option),
   ('_0', struct_nir_cursor_0),
 ]
-nir_cursor = struct_nir_cursor
+nir_cursor: TypeAlias = struct_nir_cursor
 try: (nir_cursors_equal:=dll.nir_cursors_equal).restype, nir_cursors_equal.argtypes = ctypes.c_bool, [nir_cursor, nir_cursor]
 except AttributeError: pass
 
@@ -3547,8 +3548,8 @@ except AttributeError: pass
 try: (nir_instr_def:=dll.nir_instr_def).restype, nir_instr_def.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_instr)]
 except AttributeError: pass
 
-nir_foreach_def_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_def), ctypes.c_void_p)
-nir_foreach_src_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_src), ctypes.c_void_p)
+nir_foreach_def_cb: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_def), ctypes.c_void_p)
+nir_foreach_src_cb: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_src), ctypes.c_void_p)
 try: (nir_foreach_phi_src_leaving_block:=dll.nir_foreach_phi_src_leaving_block).restype, nir_foreach_phi_src_leaving_block.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_block), nir_foreach_src_cb, ctypes.c_void_p]
 except AttributeError: pass
 
@@ -3661,14 +3662,14 @@ try: (nir_function_impl_index_vars:=dll.nir_function_impl_index_vars).restype, n
 except AttributeError: pass
 
 class struct__IO_FILE(Struct): pass
-FILE = struct__IO_FILE
+FILE: TypeAlias = struct__IO_FILE
 class struct__IO_marker(Struct): pass
-__off_t = ctypes.c_int64
-_IO_lock_t = None
-__off64_t = ctypes.c_int64
+__off_t: TypeAlias = ctypes.c_int64
+_IO_lock_t: TypeAlias = None
+__off64_t: TypeAlias = ctypes.c_int64
 class struct__IO_codecvt(Struct): pass
 class struct__IO_wide_data(Struct): pass
-size_t = ctypes.c_uint64
+size_t: TypeAlias = ctypes.c_uint64
 struct__IO_FILE._fields_ = [
   ('_flags', ctypes.c_int32),
   ('_IO_read_ptr', ctypes.POINTER(ctypes.c_char)),
@@ -3784,9 +3785,9 @@ except AttributeError: pass
 try: (nir_metadata_require_all:=dll.nir_metadata_require_all).restype, nir_metadata_require_all.argtypes = None, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-nir_instr_writemask_filter_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_instr), ctypes.c_uint32, ctypes.c_void_p)
+nir_instr_writemask_filter_cb: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_instr), ctypes.c_uint32, ctypes.c_void_p)
 class struct_nir_builder(Struct): pass
-nir_lower_instr_cb = ctypes.CFUNCTYPE(ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_instr), ctypes.c_void_p)
+nir_lower_instr_cb: TypeAlias = ctypes.CFUNCTYPE(ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_instr), ctypes.c_void_p)
 try: (nir_function_impl_lower_instructions:=dll.nir_function_impl_lower_instructions).restype, nir_function_impl_lower_instructions.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_function_impl), nir_instr_filter_cb, nir_lower_instr_cb, ctypes.c_void_p]
 except AttributeError: pass
 
@@ -3857,7 +3858,7 @@ except AttributeError: pass
 try: (nir_lower_returns:=dll.nir_lower_returns).restype, nir_lower_returns.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-nir_builder = struct_nir_builder
+nir_builder: TypeAlias = struct_nir_builder
 try: (nir_inline_function_impl:=dll.nir_inline_function_impl).restype, nir_inline_function_impl.argtypes = ctypes.POINTER(nir_def), [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_function_impl), ctypes.POINTER(ctypes.POINTER(nir_def)), ctypes.POINTER(struct_hash_table)]
 except AttributeError: pass
 
@@ -3936,7 +3937,7 @@ except AttributeError: pass
 try: (nir_lower_io_vars_to_temporaries:=dll.nir_lower_io_vars_to_temporaries).restype, nir_lower_io_vars_to_temporaries.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_function_impl), ctypes.c_bool, ctypes.c_bool]
 except AttributeError: pass
 
-glsl_type_size_align_func = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32))
+glsl_type_size_align_func: TypeAlias = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32))
 try: (nir_lower_vars_to_scratch:=dll.nir_lower_vars_to_scratch).restype, nir_lower_vars_to_scratch.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.c_int32, glsl_type_size_align_func, glsl_type_size_align_func]
 except AttributeError: pass
 
@@ -4222,7 +4223,7 @@ struct_nir_mem_access_size_align._fields_ = [
   ('align', uint16_t),
   ('shift', nir_mem_access_shift_method),
 ]
-nir_mem_access_size_align = struct_nir_mem_access_size_align
+nir_mem_access_size_align: TypeAlias = struct_nir_mem_access_size_align
 enum_gl_access_qualifier = CEnum(ctypes.c_uint32)
 ACCESS_COHERENT = enum_gl_access_qualifier.define('ACCESS_COHERENT', 1)
 ACCESS_RESTRICT = enum_gl_access_qualifier.define('ACCESS_RESTRICT', 2)
@@ -4242,7 +4243,7 @@ ACCESS_IN_BOUNDS = enum_gl_access_qualifier.define('ACCESS_IN_BOUNDS', 16384)
 ACCESS_KEEP_SCALAR = enum_gl_access_qualifier.define('ACCESS_KEEP_SCALAR', 32768)
 ACCESS_SMEM_AMD = enum_gl_access_qualifier.define('ACCESS_SMEM_AMD', 65536)
 
-nir_lower_mem_access_bit_sizes_cb = ctypes.CFUNCTYPE(struct_nir_mem_access_size_align, nir_intrinsic_op, ctypes.c_ubyte, ctypes.c_ubyte, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool, enum_gl_access_qualifier, ctypes.c_void_p)
+nir_lower_mem_access_bit_sizes_cb: TypeAlias = ctypes.CFUNCTYPE(struct_nir_mem_access_size_align, nir_intrinsic_op, ctypes.c_ubyte, ctypes.c_ubyte, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool, enum_gl_access_qualifier, ctypes.c_void_p)
 class struct_nir_lower_mem_access_bit_sizes_options(Struct): pass
 struct_nir_lower_mem_access_bit_sizes_options._fields_ = [
   ('callback', nir_lower_mem_access_bit_sizes_cb),
@@ -4250,14 +4251,14 @@ struct_nir_lower_mem_access_bit_sizes_options._fields_ = [
   ('may_lower_unaligned_stores_to_atomics', ctypes.c_bool),
   ('cb_data', ctypes.c_void_p),
 ]
-nir_lower_mem_access_bit_sizes_options = struct_nir_lower_mem_access_bit_sizes_options
+nir_lower_mem_access_bit_sizes_options: TypeAlias = struct_nir_lower_mem_access_bit_sizes_options
 try: (nir_lower_mem_access_bit_sizes:=dll.nir_lower_mem_access_bit_sizes).restype, nir_lower_mem_access_bit_sizes.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_mem_access_bit_sizes_options)]
 except AttributeError: pass
 
 try: (nir_lower_robust_access:=dll.nir_lower_robust_access).restype, nir_lower_robust_access.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_intrin_filter_cb, ctypes.c_void_p]
 except AttributeError: pass
 
-nir_should_vectorize_mem_func = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int64, ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.c_void_p)
+nir_should_vectorize_mem_func: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int64, ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.c_void_p)
 class struct_nir_load_store_vectorize_options(Struct): pass
 struct_nir_load_store_vectorize_options._fields_ = [
   ('callback', nir_should_vectorize_mem_func),
@@ -4266,14 +4267,14 @@ struct_nir_load_store_vectorize_options._fields_ = [
   ('cb_data', ctypes.c_void_p),
   ('has_shared2_amd', ctypes.c_bool),
 ]
-nir_load_store_vectorize_options = struct_nir_load_store_vectorize_options
+nir_load_store_vectorize_options: TypeAlias = struct_nir_load_store_vectorize_options
 try: (nir_opt_load_store_vectorize:=dll.nir_opt_load_store_vectorize).restype, nir_opt_load_store_vectorize.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_load_store_vectorize_options)]
 except AttributeError: pass
 
 try: (nir_opt_load_store_update_alignments:=dll.nir_opt_load_store_update_alignments).restype, nir_opt_load_store_update_alignments.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-nir_lower_shader_calls_should_remat_func = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_instr), ctypes.c_void_p)
+nir_lower_shader_calls_should_remat_func: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_instr), ctypes.c_void_p)
 class struct_nir_lower_shader_calls_options(Struct): pass
 struct_nir_lower_shader_calls_options._fields_ = [
   ('address_format', nir_address_format),
@@ -4284,7 +4285,7 @@ struct_nir_lower_shader_calls_options._fields_ = [
   ('should_remat_callback', nir_lower_shader_calls_should_remat_func),
   ('should_remat_data', ctypes.c_void_p),
 ]
-nir_lower_shader_calls_options = struct_nir_lower_shader_calls_options
+nir_lower_shader_calls_options: TypeAlias = struct_nir_lower_shader_calls_options
 try: (nir_lower_shader_calls:=dll.nir_lower_shader_calls).restype, nir_lower_shader_calls.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_shader_calls_options), ctypes.POINTER(ctypes.POINTER(ctypes.POINTER(nir_shader))), ctypes.POINTER(uint32_t), ctypes.c_void_p]
 except AttributeError: pass
 
@@ -4335,7 +4336,7 @@ struct_nir_remove_dead_variables_options._fields_ = [
   ('can_remove_var', ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(nir_variable), ctypes.c_void_p)),
   ('can_remove_var_data', ctypes.c_void_p),
 ]
-nir_remove_dead_variables_options = struct_nir_remove_dead_variables_options
+nir_remove_dead_variables_options: TypeAlias = struct_nir_remove_dead_variables_options
 try: (nir_remove_dead_variables:=dll.nir_remove_dead_variables).restype, nir_remove_dead_variables.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_variable_mode, ctypes.POINTER(nir_remove_dead_variables_options)]
 except AttributeError: pass
 
@@ -4528,7 +4529,7 @@ struct_nir_lower_subgroups_options._fields_ = [
   ('lower_boolean_reduce', ctypes.c_bool,1),
   ('lower_boolean_shuffle', ctypes.c_bool,1),
 ]
-nir_lower_subgroups_options = struct_nir_lower_subgroups_options
+nir_lower_subgroups_options: TypeAlias = struct_nir_lower_subgroups_options
 try: (nir_lower_subgroups:=dll.nir_lower_subgroups).restype, nir_lower_subgroups.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_subgroups_options)]
 except AttributeError: pass
 
@@ -4551,7 +4552,7 @@ struct_nir_lower_compute_system_values_options._fields_ = [
   ('shortcut_1d_workgroup_id', ctypes.c_bool,1),
   ('num_workgroups', (uint32_t * 3)),
 ]
-nir_lower_compute_system_values_options = struct_nir_lower_compute_system_values_options
+nir_lower_compute_system_values_options: TypeAlias = struct_nir_lower_compute_system_values_options
 try: (nir_lower_compute_system_values:=dll.nir_lower_compute_system_values).restype, nir_lower_compute_system_values.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_compute_system_values_options)]
 except AttributeError: pass
 
@@ -4561,7 +4562,7 @@ struct_nir_lower_sysvals_to_varyings_options._fields_ = [
   ('front_face', ctypes.c_bool,1),
   ('point_coord', ctypes.c_bool,1),
 ]
-nir_lower_sysvals_to_varyings_options = struct_nir_lower_sysvals_to_varyings_options
+nir_lower_sysvals_to_varyings_options: TypeAlias = struct_nir_lower_sysvals_to_varyings_options
 try: (nir_lower_sysvals_to_varyings:=dll.nir_lower_sysvals_to_varyings).restype, nir_lower_sysvals_to_varyings.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_sysvals_to_varyings_options)]
 except AttributeError: pass
 
@@ -4629,7 +4630,7 @@ struct_nir_lower_tex_options._fields_ = [
   ('lower_index_to_offset', ctypes.c_bool),
   ('callback_data', ctypes.c_void_p),
 ]
-nir_lower_tex_options = struct_nir_lower_tex_options
+nir_lower_tex_options: TypeAlias = struct_nir_lower_tex_options
 try: (nir_lower_tex:=dll.nir_lower_tex).restype, nir_lower_tex.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_tex_options)]
 except AttributeError: pass
 
@@ -4640,7 +4641,7 @@ struct_nir_lower_tex_shadow_swizzle._fields_ = [
   ('swizzle_b', ctypes.c_uint32,3),
   ('swizzle_a', ctypes.c_uint32,3),
 ]
-nir_lower_tex_shadow_swizzle = struct_nir_lower_tex_shadow_swizzle
+nir_lower_tex_shadow_swizzle: TypeAlias = struct_nir_lower_tex_shadow_swizzle
 try: (nir_lower_tex_shadow:=dll.nir_lower_tex_shadow).restype, nir_lower_tex_shadow.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.POINTER(enum_compare_func), ctypes.POINTER(nir_lower_tex_shadow_swizzle), ctypes.c_bool]
 except AttributeError: pass
 
@@ -4650,7 +4651,7 @@ struct_nir_lower_image_options._fields_ = [
   ('lower_to_fragment_mask_load_amd', ctypes.c_bool),
   ('lower_image_samples_to_one', ctypes.c_bool),
 ]
-nir_lower_image_options = struct_nir_lower_image_options
+nir_lower_image_options: TypeAlias = struct_nir_lower_image_options
 try: (nir_lower_image:=dll.nir_lower_image).restype, nir_lower_image.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_image_options)]
 except AttributeError: pass
 
@@ -4669,8 +4670,8 @@ nir_lower_non_uniform_get_ssbo_size = enum_nir_lower_non_uniform_access_type.def
 nir_lower_non_uniform_texture_offset_access = enum_nir_lower_non_uniform_access_type.define('nir_lower_non_uniform_texture_offset_access', 32)
 nir_lower_non_uniform_access_type_count = enum_nir_lower_non_uniform_access_type.define('nir_lower_non_uniform_access_type_count', 6)
 
-nir_lower_non_uniform_src_access_callback = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_tex_instr), ctypes.c_uint32, ctypes.c_void_p)
-nir_lower_non_uniform_access_callback = ctypes.CFUNCTYPE(ctypes.c_uint16, ctypes.POINTER(struct_nir_src), ctypes.c_void_p)
+nir_lower_non_uniform_src_access_callback: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_tex_instr), ctypes.c_uint32, ctypes.c_void_p)
+nir_lower_non_uniform_access_callback: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_uint16, ctypes.POINTER(struct_nir_src), ctypes.c_void_p)
 class struct_nir_lower_non_uniform_access_options(Struct): pass
 struct_nir_lower_non_uniform_access_options._fields_ = [
   ('types', enum_nir_lower_non_uniform_access_type),
@@ -4678,7 +4679,7 @@ struct_nir_lower_non_uniform_access_options._fields_ = [
   ('callback', nir_lower_non_uniform_access_callback),
   ('callback_data', ctypes.c_void_p),
 ]
-nir_lower_non_uniform_access_options = struct_nir_lower_non_uniform_access_options
+nir_lower_non_uniform_access_options: TypeAlias = struct_nir_lower_non_uniform_access_options
 try: (nir_has_non_uniform_access:=dll.nir_has_non_uniform_access).restype, nir_has_non_uniform_access.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), enum_nir_lower_non_uniform_access_type]
 except AttributeError: pass
 
@@ -4692,7 +4693,7 @@ class struct_nir_lower_idiv_options(Struct): pass
 struct_nir_lower_idiv_options._fields_ = [
   ('allow_fp16', ctypes.c_bool),
 ]
-nir_lower_idiv_options = struct_nir_lower_idiv_options
+nir_lower_idiv_options: TypeAlias = struct_nir_lower_idiv_options
 try: (nir_lower_idiv:=dll.nir_lower_idiv).restype, nir_lower_idiv.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_idiv_options)]
 except AttributeError: pass
 
@@ -4705,7 +4706,7 @@ struct_nir_input_attachment_options._fields_ = [
   ('unscaled_depth_stencil_ir3', ctypes.c_bool),
   ('unscaled_input_attachment_ir3', uint32_t),
 ]
-nir_input_attachment_options = struct_nir_input_attachment_options
+nir_input_attachment_options: TypeAlias = struct_nir_input_attachment_options
 try: (nir_lower_input_attachments:=dll.nir_lower_input_attachments).restype, nir_lower_input_attachments.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_input_attachment_options)]
 except AttributeError: pass
 
@@ -4756,7 +4757,7 @@ struct_nir_lower_wpos_ytransform_options._fields_ = [
   ('fs_coord_pixel_center_integer', ctypes.c_bool,1),
   ('fs_coord_pixel_center_half_integer', ctypes.c_bool,1),
 ]
-nir_lower_wpos_ytransform_options = struct_nir_lower_wpos_ytransform_options
+nir_lower_wpos_ytransform_options: TypeAlias = struct_nir_lower_wpos_ytransform_options
 try: (nir_lower_wpos_ytransform:=dll.nir_lower_wpos_ytransform).restype, nir_lower_wpos_ytransform.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_wpos_ytransform_options)]
 except AttributeError: pass
 
@@ -4782,7 +4783,7 @@ struct_nir_lower_drawpixels_options._fields_ = [
   ('pixel_maps', ctypes.c_bool,1),
   ('scale_and_bias', ctypes.c_bool,1),
 ]
-nir_lower_drawpixels_options = struct_nir_lower_drawpixels_options
+nir_lower_drawpixels_options: TypeAlias = struct_nir_lower_drawpixels_options
 try: (nir_lower_drawpixels:=dll.nir_lower_drawpixels).restype, nir_lower_drawpixels.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_drawpixels_options)]
 except AttributeError: pass
 
@@ -4791,7 +4792,7 @@ struct_nir_lower_bitmap_options._fields_ = [
   ('sampler', ctypes.c_uint32),
   ('swizzle_xxxx', ctypes.c_bool),
 ]
-nir_lower_bitmap_options = struct_nir_lower_bitmap_options
+nir_lower_bitmap_options: TypeAlias = struct_nir_lower_bitmap_options
 try: (nir_lower_bitmap:=dll.nir_lower_bitmap).restype, nir_lower_bitmap.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_bitmap_options)]
 except AttributeError: pass
 
@@ -4819,11 +4820,11 @@ struct_nir_lower_task_shader_options._fields_ = [
   ('payload_to_shared_for_small_types', ctypes.c_bool,1),
   ('payload_offset_in_bytes', uint32_t),
 ]
-nir_lower_task_shader_options = struct_nir_lower_task_shader_options
+nir_lower_task_shader_options: TypeAlias = struct_nir_lower_task_shader_options
 try: (nir_lower_task_shader:=dll.nir_lower_task_shader).restype, nir_lower_task_shader.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_lower_task_shader_options]
 except AttributeError: pass
 
-nir_lower_bit_size_callback = ctypes.CFUNCTYPE(ctypes.c_uint32, ctypes.POINTER(struct_nir_instr), ctypes.c_void_p)
+nir_lower_bit_size_callback: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_uint32, ctypes.POINTER(struct_nir_instr), ctypes.c_void_p)
 try: (nir_lower_bit_size:=dll.nir_lower_bit_size).restype, nir_lower_bit_size.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_lower_bit_size_callback, ctypes.c_void_p]
 except AttributeError: pass
 
@@ -4836,7 +4837,7 @@ struct_nir_split_conversions_options._fields_ = [
   ('callback_data', ctypes.c_void_p),
   ('has_convert_alu_types', ctypes.c_bool),
 ]
-nir_split_conversions_options = struct_nir_split_conversions_options
+nir_split_conversions_options: TypeAlias = struct_nir_split_conversions_options
 try: (nir_split_conversions:=dll.nir_split_conversions).restype, nir_split_conversions.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_split_conversions_options)]
 except AttributeError: pass
 
@@ -4881,7 +4882,7 @@ struct_nir_opt_tex_srcs_options._fields_ = [
   ('sampler_dims', ctypes.c_uint32),
   ('src_types', ctypes.c_uint32),
 ]
-nir_opt_tex_srcs_options = struct_nir_opt_tex_srcs_options
+nir_opt_tex_srcs_options: TypeAlias = struct_nir_opt_tex_srcs_options
 class struct_nir_opt_16bit_tex_image_options(Struct): pass
 struct_nir_opt_16bit_tex_image_options._fields_ = [
   ('rounding_mode', nir_rounding_mode),
@@ -4893,7 +4894,7 @@ struct_nir_opt_16bit_tex_image_options._fields_ = [
   ('opt_srcs_options_count', ctypes.c_uint32),
   ('opt_srcs_options', ctypes.POINTER(nir_opt_tex_srcs_options)),
 ]
-nir_opt_16bit_tex_image_options = struct_nir_opt_16bit_tex_image_options
+nir_opt_16bit_tex_image_options: TypeAlias = struct_nir_opt_16bit_tex_image_options
 try: (nir_opt_16bit_tex_image:=dll.nir_opt_16bit_tex_image).restype, nir_opt_16bit_tex_image.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_opt_16bit_tex_image_options)]
 except AttributeError: pass
 
@@ -4903,8 +4904,8 @@ struct_nir_tex_src_type_constraint._fields_ = [
   ('bit_size', uint8_t),
   ('match_src', nir_tex_src_type),
 ]
-nir_tex_src_type_constraint = struct_nir_tex_src_type_constraint
-nir_tex_src_type_constraints = (struct_nir_tex_src_type_constraint * 23)
+nir_tex_src_type_constraint: TypeAlias = struct_nir_tex_src_type_constraint
+nir_tex_src_type_constraints: TypeAlias = (struct_nir_tex_src_type_constraint * 23)
 try: (nir_legalize_16bit_sampler_srcs:=dll.nir_legalize_16bit_sampler_srcs).restype, nir_legalize_16bit_sampler_srcs.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_tex_src_type_constraints]
 except AttributeError: pass
 
@@ -4955,7 +4956,7 @@ struct_nir_lower_multiview_options._fields_ = [
   ('view_mask', uint32_t),
   ('allowed_per_view_outputs', uint64_t),
 ]
-nir_lower_multiview_options = struct_nir_lower_multiview_options
+nir_lower_multiview_options: TypeAlias = struct_nir_lower_multiview_options
 try: (nir_shader_uses_view_index:=dll.nir_shader_uses_view_index).restype, nir_shader_uses_view_index.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
@@ -5053,7 +5054,7 @@ struct_nir_lower_ssbo_options._fields_ = [
   ('native_loads', ctypes.c_bool),
   ('native_offset', ctypes.c_bool),
 ]
-nir_lower_ssbo_options = struct_nir_lower_ssbo_options
+nir_lower_ssbo_options: TypeAlias = struct_nir_lower_ssbo_options
 try: (nir_lower_ssbo:=dll.nir_lower_ssbo).restype, nir_lower_ssbo.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_ssbo_options)]
 except AttributeError: pass
 
@@ -5066,7 +5067,7 @@ struct_nir_lower_printf_options._fields_ = [
   ('ptr_bit_size', ctypes.c_uint32),
   ('hash_format_strings', ctypes.c_bool),
 ]
-nir_lower_printf_options = struct_nir_lower_printf_options
+nir_lower_printf_options: TypeAlias = struct_nir_lower_printf_options
 try: (nir_lower_printf:=dll.nir_lower_printf).restype, nir_lower_printf.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_printf_options)]
 except AttributeError: pass
 
@@ -5083,7 +5084,7 @@ class struct_nir_opt_access_options(Struct): pass
 struct_nir_opt_access_options._fields_ = [
   ('is_vulkan', ctypes.c_bool),
 ]
-nir_opt_access_options = struct_nir_opt_access_options
+nir_opt_access_options: TypeAlias = struct_nir_opt_access_options
 try: (nir_opt_access:=dll.nir_opt_access).restype, nir_opt_access.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_opt_access_options)]
 except AttributeError: pass
 
@@ -5111,7 +5112,7 @@ except AttributeError: pass
 try: (nir_opt_constant_folding:=dll.nir_opt_constant_folding).restype, nir_opt_constant_folding.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader)]
 except AttributeError: pass
 
-nir_combine_barrier_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.c_void_p)
+nir_combine_barrier_cb: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.c_void_p)
 try: (nir_opt_combine_barriers:=dll.nir_opt_combine_barriers).restype, nir_opt_combine_barriers.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), nir_combine_barrier_cb, ctypes.c_void_p]
 except AttributeError: pass
 
@@ -5237,7 +5238,7 @@ struct_nir_opt_offsets_options._fields_ = [
   ('max_offset_data', ctypes.c_void_p),
   ('allow_offset_wrap', ctypes.c_bool),
 ]
-nir_opt_offsets_options = struct_nir_opt_offsets_options
+nir_opt_offsets_options: TypeAlias = struct_nir_opt_offsets_options
 try: (nir_opt_offsets:=dll.nir_opt_offsets).restype, nir_opt_offsets.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_opt_offsets_options)]
 except AttributeError: pass
 
@@ -5248,7 +5249,7 @@ struct_nir_opt_peephole_select_options._fields_ = [
   ('expensive_alu_ok', ctypes.c_bool),
   ('discard_ok', ctypes.c_bool),
 ]
-nir_opt_peephole_select_options = struct_nir_opt_peephole_select_options
+nir_opt_peephole_select_options: TypeAlias = struct_nir_opt_peephole_select_options
 try: (nir_opt_peephole_select:=dll.nir_opt_peephole_select).restype, nir_opt_peephole_select.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_opt_peephole_select_options)]
 except AttributeError: pass
 
@@ -5426,7 +5427,7 @@ struct_nir_unsigned_upper_bound_config._fields_ = [
   ('max_workgroup_size', (ctypes.c_uint32 * 3)),
   ('vertex_attrib_max', (uint32_t * 32)),
 ]
-nir_unsigned_upper_bound_config = struct_nir_unsigned_upper_bound_config
+nir_unsigned_upper_bound_config: TypeAlias = struct_nir_unsigned_upper_bound_config
 try: (nir_unsigned_upper_bound:=dll.nir_unsigned_upper_bound).restype, nir_unsigned_upper_bound.argtypes = uint32_t, [ctypes.POINTER(nir_shader), ctypes.POINTER(struct_hash_table), nir_scalar, ctypes.POINTER(nir_unsigned_upper_bound_config)]
 except AttributeError: pass
 
@@ -5445,7 +5446,7 @@ struct_nir_opt_preamble_options._fields_ = [
   ('avoid_instr_cb', nir_instr_filter_cb),
   ('cb_data', ctypes.c_void_p),
 ]
-nir_opt_preamble_options = struct_nir_opt_preamble_options
+nir_opt_preamble_options: TypeAlias = struct_nir_opt_preamble_options
 try: (nir_opt_preamble:=dll.nir_opt_preamble).restype, nir_opt_preamble.argtypes = ctypes.c_bool, [ctypes.POINTER(nir_shader), ctypes.POINTER(nir_opt_preamble_options), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
@@ -5471,7 +5472,7 @@ try: (nir_static_workgroup_size:=dll.nir_static_workgroup_size).restype, nir_sta
 except AttributeError: pass
 
 class struct_nir_use_dominance_state(Struct): pass
-nir_use_dominance_state = struct_nir_use_dominance_state
+nir_use_dominance_state: TypeAlias = struct_nir_use_dominance_state
 try: (nir_calc_use_dominance_impl:=dll.nir_calc_use_dominance_impl).restype, nir_calc_use_dominance_impl.argtypes = ctypes.POINTER(nir_use_dominance_state), [ctypes.POINTER(nir_function_impl), ctypes.c_bool]
 except AttributeError: pass
 
@@ -5538,11 +5539,11 @@ struct_nir_builder._fields_ = [
 try: (nir_builder_init_simple_shader:=dll.nir_builder_init_simple_shader).restype, nir_builder_init_simple_shader.argtypes = nir_builder, [gl_shader_stage, ctypes.POINTER(nir_shader_compiler_options), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
-nir_instr_pass_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_instr), ctypes.c_void_p)
-nir_intrinsic_pass_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.c_void_p)
-nir_alu_pass_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_alu_instr), ctypes.c_void_p)
-nir_tex_pass_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_tex_instr), ctypes.c_void_p)
-nir_phi_pass_cb = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_phi_instr), ctypes.c_void_p)
+nir_instr_pass_cb: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_instr), ctypes.c_void_p)
+nir_intrinsic_pass_cb: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.c_void_p)
+nir_alu_pass_cb: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_alu_instr), ctypes.c_void_p)
+nir_tex_pass_cb: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_tex_instr), ctypes.c_void_p)
+nir_phi_pass_cb: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_phi_instr), ctypes.c_void_p)
 try: (nir_builder_instr_insert:=dll.nir_builder_instr_insert).restype, nir_builder_instr_insert.argtypes = None, [ctypes.POINTER(nir_builder), ctypes.POINTER(nir_instr)]
 except AttributeError: pass
 
@@ -5967,20 +5968,20 @@ except AttributeError: pass
 
 class struct_lp_context_ref(Struct): pass
 class struct_LLVMOpaqueContext(Struct): pass
-LLVMContextRef = ctypes.POINTER(struct_LLVMOpaqueContext)
+LLVMContextRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueContext)
 struct_lp_context_ref._fields_ = [
   ('ref', LLVMContextRef),
   ('owned', ctypes.c_bool),
 ]
-lp_context_ref = struct_lp_context_ref
+lp_context_ref: TypeAlias = struct_lp_context_ref
 class struct_lp_passmgr(Struct): pass
 class struct_LLVMOpaqueModule(Struct): pass
-LLVMModuleRef = ctypes.POINTER(struct_LLVMOpaqueModule)
+LLVMModuleRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueModule)
 try: (lp_passmgr_create:=dll.lp_passmgr_create).restype, lp_passmgr_create.argtypes = ctypes.c_bool, [LLVMModuleRef, ctypes.POINTER(ctypes.POINTER(struct_lp_passmgr))]
 except AttributeError: pass
 
 class struct_LLVMOpaqueTargetMachine(Struct): pass
-LLVMTargetMachineRef = ctypes.POINTER(struct_LLVMOpaqueTargetMachine)
+LLVMTargetMachineRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueTargetMachine)
 try: (lp_passmgr_run:=dll.lp_passmgr_run).restype, lp_passmgr_run.argtypes = None, [ctypes.POINTER(struct_lp_passmgr), LLVMModuleRef, LLVMTargetMachineRef, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
@@ -5996,7 +5997,7 @@ struct_lp_cached_code._fields_ = [
 ]
 class struct_lp_generated_code(Struct): pass
 class struct_LLVMOpaqueTargetLibraryInfotData(Struct): pass
-LLVMTargetLibraryInfoRef = ctypes.POINTER(struct_LLVMOpaqueTargetLibraryInfotData)
+LLVMTargetLibraryInfoRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueTargetLibraryInfotData)
 try: (gallivm_create_target_library_info:=dll.gallivm_create_target_library_info).restype, gallivm_create_target_library_info.argtypes = LLVMTargetLibraryInfoRef, [ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
@@ -6010,9 +6011,9 @@ try: (lp_bld_init_native_targets:=dll.lp_bld_init_native_targets).restype, lp_bl
 except AttributeError: pass
 
 class struct_LLVMOpaqueExecutionEngine(Struct): pass
-LLVMExecutionEngineRef = ctypes.POINTER(struct_LLVMOpaqueExecutionEngine)
+LLVMExecutionEngineRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueExecutionEngine)
 class struct_LLVMOpaqueMCJITMemoryManager(Struct): pass
-LLVMMCJITMemoryManagerRef = ctypes.POINTER(struct_LLVMOpaqueMCJITMemoryManager)
+LLVMMCJITMemoryManagerRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueMCJITMemoryManager)
 try: (lp_build_create_jit_compiler_for_module:=dll.lp_build_create_jit_compiler_for_module).restype, lp_build_create_jit_compiler_for_module.argtypes = ctypes.c_int32, [ctypes.POINTER(LLVMExecutionEngineRef), ctypes.POINTER(ctypes.POINTER(struct_lp_generated_code)), ctypes.POINTER(struct_lp_cached_code), LLVMModuleRef, LLVMMCJITMemoryManagerRef, ctypes.c_uint32, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
 
@@ -6026,7 +6027,7 @@ try: (lp_free_memory_manager:=dll.lp_free_memory_manager).restype, lp_free_memor
 except AttributeError: pass
 
 class struct_LLVMOpaqueValue(Struct): pass
-LLVMValueRef = ctypes.POINTER(struct_LLVMOpaqueValue)
+LLVMValueRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueValue)
 try: (lp_get_called_value:=dll.lp_get_called_value).restype, lp_get_called_value.argtypes = LLVMValueRef, [LLVMValueRef]
 except AttributeError: pass
 
@@ -6055,7 +6056,7 @@ struct_lp_type._fields_ = [
 class struct_lp_build_context(Struct): pass
 class struct_gallivm_state(Struct): pass
 class struct_LLVMOpaqueType(Struct): pass
-LLVMTypeRef = ctypes.POINTER(struct_LLVMOpaqueType)
+LLVMTypeRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueType)
 struct_lp_build_context._fields_ = [
   ('gallivm', ctypes.POINTER(struct_gallivm_state)),
   ('type', struct_lp_type),
@@ -6139,13 +6140,13 @@ except AttributeError: pass
 
 class struct_lp_jit_texture(Struct): pass
 class struct_LLVMOpaqueTargetData(Struct): pass
-LLVMTargetDataRef = ctypes.POINTER(struct_LLVMOpaqueTargetData)
+LLVMTargetDataRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueTargetData)
 class struct_LLVMOpaqueBuilder(Struct): pass
-LLVMBuilderRef = ctypes.POINTER(struct_LLVMOpaqueBuilder)
+LLVMBuilderRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueBuilder)
 class struct_LLVMOpaqueDIBuilder(Struct): pass
-LLVMDIBuilderRef = ctypes.POINTER(struct_LLVMOpaqueDIBuilder)
+LLVMDIBuilderRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueDIBuilder)
 class struct_LLVMOpaqueMetadata(Struct): pass
-LLVMMetadataRef = ctypes.POINTER(struct_LLVMOpaqueMetadata)
+LLVMMetadataRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueMetadata)
 struct_gallivm_state._fields_ = [
   ('module_name', ctypes.POINTER(ctypes.c_char)),
   ('file_name', ctypes.POINTER(ctypes.c_char)),
@@ -6196,7 +6197,7 @@ except AttributeError: pass
 try: (gallivm_compile_module:=dll.gallivm_compile_module).restype, gallivm_compile_module.argtypes = None, [ctypes.POINTER(struct_gallivm_state)]
 except AttributeError: pass
 
-func_pointer = ctypes.CFUNCTYPE(None, )
+func_pointer: TypeAlias = ctypes.CFUNCTYPE(None, )
 try: (gallivm_jit_function:=dll.gallivm_jit_function).restype, gallivm_jit_function.argtypes = func_pointer, [ctypes.POINTER(struct_gallivm_state), LLVMValueRef, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
@@ -6216,7 +6217,7 @@ class struct_lp_build_tgsi_params(Struct): pass
 class struct_lp_build_mask_context(Struct): pass
 class struct_lp_build_skip_context(Struct): pass
 class struct_LLVMOpaqueBasicBlock(Struct): pass
-LLVMBasicBlockRef = ctypes.POINTER(struct_LLVMOpaqueBasicBlock)
+LLVMBasicBlockRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueBasicBlock)
 struct_lp_build_skip_context._fields_ = [
   ('gallivm', ctypes.POINTER(struct_gallivm_state)),
   ('block', LLVMBasicBlockRef),
@@ -8447,10 +8448,10 @@ struct_ir3_shader_0._fields_ = [
   ('vs', struct_ir3_shader_0_vs),
 ]
 class pthread_mutex_t(ctypes.Union): pass
-mtx_t = pthread_mutex_t
+mtx_t: TypeAlias = pthread_mutex_t
 class struct___pthread_mutex_s(Struct): pass
 class struct___pthread_internal_list(Struct): pass
-__pthread_list_t = struct___pthread_internal_list
+__pthread_list_t: TypeAlias = struct___pthread_internal_list
 struct___pthread_internal_list._fields_ = [
   ('__prev', ctypes.POINTER(struct___pthread_internal_list)),
   ('__next', ctypes.POINTER(struct___pthread_internal_list)),
@@ -8470,7 +8471,7 @@ pthread_mutex_t._fields_ = [
   ('__size', (ctypes.c_char * 40)),
   ('__align', ctypes.c_int64),
 ]
-cache_key = (ctypes.c_ubyte * 20)
+cache_key: TypeAlias = (ctypes.c_ubyte * 20)
 struct_ir3_shader._anonymous_ = ['_0']
 struct_ir3_shader._fields_ = [
   ('type', gl_shader_stage),
@@ -9113,7 +9114,7 @@ except AttributeError: pass
 try: (blob_write_bytes:=dll.blob_write_bytes).restype, blob_write_bytes.argtypes = ctypes.c_bool, [ctypes.POINTER(struct_blob), ctypes.c_void_p, size_t]
 except AttributeError: pass
 
-intptr_t = ctypes.c_int64
+intptr_t: TypeAlias = ctypes.c_int64
 try: (blob_reserve_bytes:=dll.blob_reserve_bytes).restype, blob_reserve_bytes.argtypes = intptr_t, [ctypes.POINTER(struct_blob), size_t]
 except AttributeError: pass
 
@@ -9256,7 +9257,7 @@ struct___va_list_tag._fields_ = [
   ('overflow_arg_area', ctypes.c_void_p),
   ('reg_save_area', ctypes.c_void_p),
 ]
-va_list = (struct___va_list_tag * 1)
+va_list: TypeAlias = (struct___va_list_tag * 1)
 try: (ralloc_vasprintf:=dll.ralloc_vasprintf).restype, ralloc_vasprintf.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.c_void_p, ctypes.POINTER(ctypes.c_char), va_list]
 except AttributeError: pass
 
@@ -9300,7 +9301,7 @@ try: (gc_sweep_end:=dll.gc_sweep_end).restype, gc_sweep_end.argtypes = None, [ct
 except AttributeError: pass
 
 class struct_linear_ctx(Struct): pass
-linear_ctx = struct_linear_ctx
+linear_ctx: TypeAlias = struct_linear_ctx
 try: (linear_alloc_child:=dll.linear_alloc_child).restype, linear_alloc_child.argtypes = ctypes.c_void_p, [ctypes.POINTER(linear_ctx), ctypes.c_uint32]
 except AttributeError: pass
 

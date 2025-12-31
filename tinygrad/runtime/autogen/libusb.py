@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 import ctypes
 from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from typing import TypeAlias
 dll = DLL('libusb', 'usb-1.0')
 enum_libusb_class_code = CEnum(ctypes.c_uint32)
 LIBUSB_CLASS_PER_INTERFACE = enum_libusb_class_code.define('LIBUSB_CLASS_PER_INTERFACE', 0)
@@ -108,8 +109,8 @@ LIBUSB_BT_CONTAINER_ID = enum_libusb_bos_type.define('LIBUSB_BT_CONTAINER_ID', 4
 LIBUSB_BT_PLATFORM_DESCRIPTOR = enum_libusb_bos_type.define('LIBUSB_BT_PLATFORM_DESCRIPTOR', 5)
 
 class struct_libusb_device_descriptor(Struct): pass
-uint8_t = ctypes.c_ubyte
-uint16_t = ctypes.c_uint16
+uint8_t: TypeAlias = ctypes.c_ubyte
+uint16_t: TypeAlias = ctypes.c_uint16
 struct_libusb_device_descriptor._fields_ = [
   ('bLength', uint8_t),
   ('bDescriptorType', uint8_t),
@@ -213,7 +214,7 @@ struct_libusb_bos_descriptor._fields_ = [
   ('dev_capability', (ctypes.POINTER(struct_libusb_bos_dev_capability_descriptor) * 0)),
 ]
 class struct_libusb_usb_2_0_extension_descriptor(Struct): pass
-uint32_t = ctypes.c_uint32
+uint32_t: TypeAlias = ctypes.c_uint32
 struct_libusb_usb_2_0_extension_descriptor._fields_ = [
   ('bLength', uint8_t),
   ('bDescriptorType', uint8_t),
@@ -269,9 +270,9 @@ struct_libusb_version._fields_ = [
   ('rc', ctypes.POINTER(ctypes.c_char)),
   ('describe', ctypes.POINTER(ctypes.c_char)),
 ]
-libusb_context = struct_libusb_context
-libusb_device = struct_libusb_device
-libusb_device_handle = struct_libusb_device_handle
+libusb_context: TypeAlias = struct_libusb_context
+libusb_device: TypeAlias = struct_libusb_device
+libusb_device_handle: TypeAlias = struct_libusb_device_handle
 enum_libusb_speed = CEnum(ctypes.c_uint32)
 LIBUSB_SPEED_UNKNOWN = enum_libusb_speed.define('LIBUSB_SPEED_UNKNOWN', 0)
 LIBUSB_SPEED_LOW = enum_libusb_speed.define('LIBUSB_SPEED_LOW', 1)
@@ -325,7 +326,7 @@ struct_libusb_iso_packet_descriptor._fields_ = [
   ('status', enum_libusb_transfer_status),
 ]
 class struct_libusb_transfer(Struct): pass
-libusb_transfer_cb_fn = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_libusb_transfer))
+libusb_transfer_cb_fn: TypeAlias = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_libusb_transfer))
 struct_libusb_transfer._fields_ = [
   ('dev_handle', ctypes.POINTER(libusb_device_handle)),
   ('flags', uint8_t),
@@ -365,7 +366,7 @@ LIBUSB_OPTION_NO_DEVICE_DISCOVERY = enum_libusb_option.define('LIBUSB_OPTION_NO_
 LIBUSB_OPTION_LOG_CB = enum_libusb_option.define('LIBUSB_OPTION_LOG_CB', 3)
 LIBUSB_OPTION_MAX = enum_libusb_option.define('LIBUSB_OPTION_MAX', 4)
 
-libusb_log_cb = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_libusb_context), enum_libusb_log_level, ctypes.POINTER(ctypes.c_char))
+libusb_log_cb: TypeAlias = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_libusb_context), enum_libusb_log_level, ctypes.POINTER(ctypes.c_char))
 class struct_libusb_init_option(Struct): pass
 class struct_libusb_init_option_value(ctypes.Union): pass
 struct_libusb_init_option_value._fields_ = [
@@ -406,7 +407,7 @@ except AttributeError: pass
 try: (libusb_strerror:=dll.libusb_strerror).restype, libusb_strerror.argtypes = ctypes.POINTER(ctypes.c_char), [ctypes.c_int32]
 except AttributeError: pass
 
-ssize_t = ctypes.c_int64
+ssize_t: TypeAlias = ctypes.c_int64
 try: (libusb_get_device_list:=dll.libusb_get_device_list).restype, libusb_get_device_list.argtypes = ssize_t, [ctypes.POINTER(libusb_context), ctypes.POINTER(ctypes.POINTER(ctypes.POINTER(libusb_device)))]
 except AttributeError: pass
 
@@ -512,7 +513,7 @@ except AttributeError: pass
 try: (libusb_free_interface_association_descriptors:=dll.libusb_free_interface_association_descriptors).restype, libusb_free_interface_association_descriptors.argtypes = None, [ctypes.POINTER(struct_libusb_interface_association_descriptor_array)]
 except AttributeError: pass
 
-intptr_t = ctypes.c_int64
+intptr_t: TypeAlias = ctypes.c_int64
 try: (libusb_wrap_sys_device:=dll.libusb_wrap_sys_device).restype, libusb_wrap_sys_device.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_context), intptr_t, ctypes.POINTER(ctypes.POINTER(libusb_device_handle))]
 except AttributeError: pass
 
@@ -552,7 +553,7 @@ except AttributeError: pass
 try: (libusb_free_streams:=dll.libusb_free_streams).restype, libusb_free_streams.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_device_handle), ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32]
 except AttributeError: pass
 
-size_t = ctypes.c_uint64
+size_t: TypeAlias = ctypes.c_uint64
 try: (libusb_dev_mem_alloc:=dll.libusb_dev_mem_alloc).restype, libusb_dev_mem_alloc.argtypes = ctypes.POINTER(ctypes.c_ubyte), [ctypes.POINTER(libusb_device_handle), size_t]
 except AttributeError: pass
 
@@ -626,8 +627,8 @@ try: (libusb_unlock_event_waiters:=dll.libusb_unlock_event_waiters).restype, lib
 except AttributeError: pass
 
 class struct_timeval(Struct): pass
-__time_t = ctypes.c_int64
-__suseconds_t = ctypes.c_int64
+__time_t: TypeAlias = ctypes.c_int64
+__suseconds_t: TypeAlias = ctypes.c_int64
 struct_timeval._fields_ = [
   ('tv_sec', ctypes.c_int64),
   ('tv_usec', ctypes.c_int64),
@@ -661,8 +662,8 @@ struct_libusb_pollfd._fields_ = [
   ('fd', ctypes.c_int32),
   ('events', ctypes.c_int16),
 ]
-libusb_pollfd_added_cb = ctypes.CFUNCTYPE(None, ctypes.c_int32, ctypes.c_int16, ctypes.c_void_p)
-libusb_pollfd_removed_cb = ctypes.CFUNCTYPE(None, ctypes.c_int32, ctypes.c_void_p)
+libusb_pollfd_added_cb: TypeAlias = ctypes.CFUNCTYPE(None, ctypes.c_int32, ctypes.c_int16, ctypes.c_void_p)
+libusb_pollfd_removed_cb: TypeAlias = ctypes.CFUNCTYPE(None, ctypes.c_int32, ctypes.c_void_p)
 try: (libusb_get_pollfds:=dll.libusb_get_pollfds).restype, libusb_get_pollfds.argtypes = ctypes.POINTER(ctypes.POINTER(struct_libusb_pollfd)), [ctypes.POINTER(libusb_context)]
 except AttributeError: pass
 
@@ -672,7 +673,7 @@ except AttributeError: pass
 try: (libusb_set_pollfd_notifiers:=dll.libusb_set_pollfd_notifiers).restype, libusb_set_pollfd_notifiers.argtypes = None, [ctypes.POINTER(libusb_context), libusb_pollfd_added_cb, libusb_pollfd_removed_cb, ctypes.c_void_p]
 except AttributeError: pass
 
-libusb_hotplug_callback_handle = ctypes.c_int32
+libusb_hotplug_callback_handle: TypeAlias = ctypes.c_int32
 libusb_hotplug_event = CEnum(ctypes.c_uint32)
 LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED = libusb_hotplug_event.define('LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED', 1)
 LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT = libusb_hotplug_event.define('LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT', 2)
@@ -680,7 +681,7 @@ LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT = libusb_hotplug_event.define('LIBUSB_HOTPLUG_E
 libusb_hotplug_flag = CEnum(ctypes.c_uint32)
 LIBUSB_HOTPLUG_ENUMERATE = libusb_hotplug_flag.define('LIBUSB_HOTPLUG_ENUMERATE', 1)
 
-libusb_hotplug_callback_fn = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_libusb_context), ctypes.POINTER(struct_libusb_device), libusb_hotplug_event, ctypes.c_void_p)
+libusb_hotplug_callback_fn: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_libusb_context), ctypes.POINTER(struct_libusb_device), libusb_hotplug_event, ctypes.c_void_p)
 try: (libusb_hotplug_register_callback:=dll.libusb_hotplug_register_callback).restype, libusb_hotplug_register_callback.argtypes = ctypes.c_int32, [ctypes.POINTER(libusb_context), ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, libusb_hotplug_callback_fn, ctypes.c_void_p, ctypes.POINTER(libusb_hotplug_callback_handle)]
 except AttributeError: pass
 

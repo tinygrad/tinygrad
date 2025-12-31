@@ -1,9 +1,10 @@
 # mypy: ignore-errors
 import ctypes
 from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from typing import TypeAlias
 from tinygrad.helpers import WIN, OSX
 dll = DLL('llvm', 'C:\\Program Files\\LLVM\\bin\\LLVM-C.dll' if WIN else '/opt/homebrew/opt/llvm@20/lib/libLLVM.dylib' if OSX else ['LLVM', 'LLVM-21', 'LLVM-20', 'LLVM-19', 'LLVM-18', 'LLVM-17', 'LLVM-16', 'LLVM-15', 'LLVM-14'])
-intmax_t = ctypes.c_int64
+intmax_t: TypeAlias = ctypes.c_int64
 try: (imaxabs:=dll.imaxabs).restype, imaxabs.argtypes = intmax_t, [intmax_t]
 except AttributeError: pass
 
@@ -18,11 +19,11 @@ except AttributeError: pass
 try: (strtoimax:=dll.strtoimax).restype, strtoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
-uintmax_t = ctypes.c_uint64
+uintmax_t: TypeAlias = ctypes.c_uint64
 try: (strtoumax:=dll.strtoumax).restype, strtoumax.argtypes = uintmax_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.c_int32]
 except AttributeError: pass
 
-__gwchar_t = ctypes.c_int32
+__gwchar_t: TypeAlias = ctypes.c_int32
 try: (wcstoimax:=dll.wcstoimax).restype, wcstoimax.argtypes = intmax_t, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.POINTER(ctypes.c_int32)), ctypes.c_int32]
 except AttributeError: pass
 
@@ -42,13 +43,13 @@ try: (wcstoumax:=dll.wcstoumax).restype, wcstoumax.argtypes = uintmax_t, [ctypes
 except AttributeError: pass
 
 class fd_set(Struct): pass
-__fd_mask = ctypes.c_int64
+__fd_mask: TypeAlias = ctypes.c_int64
 fd_set._fields_ = [
   ('fds_bits', (ctypes.c_int64 * 16)),
 ]
 class struct_timeval(Struct): pass
-__time_t = ctypes.c_int64
-__suseconds_t = ctypes.c_int64
+__time_t: TypeAlias = ctypes.c_int64
+__suseconds_t: TypeAlias = ctypes.c_int64
 struct_timeval._fields_ = [
   ('tv_sec', ctypes.c_int64),
   ('tv_usec', ctypes.c_int64),
@@ -57,7 +58,7 @@ try: (select:=dll.select).restype, select.argtypes = ctypes.c_int32, [ctypes.c_i
 except AttributeError: pass
 
 class struct_timespec(Struct): pass
-__syscall_slong_t = ctypes.c_int64
+__syscall_slong_t: TypeAlias = ctypes.c_int64
 struct_timespec._fields_ = [
   ('tv_sec', ctypes.c_int64),
   ('tv_nsec', ctypes.c_int64),
@@ -74,14 +75,14 @@ LLVMAbortProcessAction = LLVMVerifierFailureAction.define('LLVMAbortProcessActio
 LLVMPrintMessageAction = LLVMVerifierFailureAction.define('LLVMPrintMessageAction', 1)
 LLVMReturnStatusAction = LLVMVerifierFailureAction.define('LLVMReturnStatusAction', 2)
 
-LLVMBool = ctypes.c_int32
+LLVMBool: TypeAlias = ctypes.c_int32
 class struct_LLVMOpaqueModule(Struct): pass
-LLVMModuleRef = ctypes.POINTER(struct_LLVMOpaqueModule)
+LLVMModuleRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueModule)
 try: (LLVMVerifyModule:=dll.LLVMVerifyModule).restype, LLVMVerifyModule.argtypes = LLVMBool, [LLVMModuleRef, LLVMVerifierFailureAction, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
 
 class struct_LLVMOpaqueValue(Struct): pass
-LLVMValueRef = ctypes.POINTER(struct_LLVMOpaqueValue)
+LLVMValueRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueValue)
 try: (LLVMVerifyFunction:=dll.LLVMVerifyFunction).restype, LLVMVerifyFunction.argtypes = LLVMBool, [LLVMValueRef, LLVMVerifierFailureAction]
 except AttributeError: pass
 
@@ -128,7 +129,7 @@ try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.
 except AttributeError: pass
 
 class struct_LLVMOpaqueMemoryBuffer(Struct): pass
-LLVMMemoryBufferRef = ctypes.POINTER(struct_LLVMOpaqueMemoryBuffer)
+LLVMMemoryBufferRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueMemoryBuffer)
 try: (LLVMParseBitcode:=dll.LLVMParseBitcode).restype, LLVMParseBitcode.argtypes = LLVMBool, [LLVMMemoryBufferRef, ctypes.POINTER(LLVMModuleRef), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
 
@@ -136,7 +137,7 @@ try: (LLVMParseBitcode2:=dll.LLVMParseBitcode2).restype, LLVMParseBitcode2.argty
 except AttributeError: pass
 
 class struct_LLVMOpaqueContext(Struct): pass
-LLVMContextRef = ctypes.POINTER(struct_LLVMOpaqueContext)
+LLVMContextRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueContext)
 try: (LLVMParseBitcodeInContext:=dll.LLVMParseBitcodeInContext).restype, LLVMParseBitcodeInContext.argtypes = LLVMBool, [LLVMContextRef, LLVMMemoryBufferRef, ctypes.POINTER(LLVMModuleRef), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
 
@@ -247,7 +248,7 @@ LLVMNoDeduplicateComdatSelectionKind = LLVMComdatSelectionKind.define('LLVMNoDed
 LLVMSameSizeComdatSelectionKind = LLVMComdatSelectionKind.define('LLVMSameSizeComdatSelectionKind', 4)
 
 class struct_LLVMComdat(Struct): pass
-LLVMComdatRef = ctypes.POINTER(struct_LLVMComdat)
+LLVMComdatRef: TypeAlias = ctypes.POINTER(struct_LLVMComdat)
 try: (LLVMGetOrInsertComdat:=dll.LLVMGetOrInsertComdat).restype, LLVMGetOrInsertComdat.argtypes = LLVMComdatRef, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
@@ -263,7 +264,7 @@ except AttributeError: pass
 try: (LLVMSetComdatSelectionKind:=dll.LLVMSetComdatSelectionKind).restype, LLVMSetComdatSelectionKind.argtypes = None, [LLVMComdatRef, LLVMComdatSelectionKind]
 except AttributeError: pass
 
-LLVMFatalErrorHandler = ctypes.CFUNCTYPE(None, ctypes.POINTER(ctypes.c_char))
+LLVMFatalErrorHandler: TypeAlias = ctypes.CFUNCTYPE(None, ctypes.POINTER(ctypes.c_char))
 try: (LLVMInstallFatalErrorHandler:=dll.LLVMInstallFatalErrorHandler).restype, LLVMInstallFatalErrorHandler.argtypes = None, [LLVMFatalErrorHandler]
 except AttributeError: pass
 
@@ -600,7 +601,7 @@ _anonenum0 = CEnum(ctypes.c_int32)
 LLVMAttributeReturnIndex = _anonenum0.define('LLVMAttributeReturnIndex', 0)
 LLVMAttributeFunctionIndex = _anonenum0.define('LLVMAttributeFunctionIndex', -1)
 
-LLVMAttributeIndex = ctypes.c_uint32
+LLVMAttributeIndex: TypeAlias = ctypes.c_uint32
 LLVMTailCallKind = CEnum(ctypes.c_uint32)
 LLVMTailCallKindNone = LLVMTailCallKind.define('LLVMTailCallKindNone', 0)
 LLVMTailCallKindTail = LLVMTailCallKind.define('LLVMTailCallKindTail', 1)
@@ -618,13 +619,13 @@ LLVMFastMathApproxFunc = _anonenum1.define('LLVMFastMathApproxFunc', 64)
 LLVMFastMathNone = _anonenum1.define('LLVMFastMathNone', 0)
 LLVMFastMathAll = _anonenum1.define('LLVMFastMathAll', 127)
 
-LLVMFastMathFlags = ctypes.c_uint32
+LLVMFastMathFlags: TypeAlias = ctypes.c_uint32
 _anonenum2 = CEnum(ctypes.c_uint32)
 LLVMGEPFlagInBounds = _anonenum2.define('LLVMGEPFlagInBounds', 1)
 LLVMGEPFlagNUSW = _anonenum2.define('LLVMGEPFlagNUSW', 2)
 LLVMGEPFlagNUW = _anonenum2.define('LLVMGEPFlagNUW', 4)
 
-LLVMGEPNoWrapFlags = ctypes.c_uint32
+LLVMGEPNoWrapFlags: TypeAlias = ctypes.c_uint32
 try: (LLVMShutdown:=dll.LLVMShutdown).restype, LLVMShutdown.argtypes = None, []
 except AttributeError: pass
 
@@ -638,8 +639,8 @@ try: (LLVMDisposeMessage:=dll.LLVMDisposeMessage).restype, LLVMDisposeMessage.ar
 except AttributeError: pass
 
 class struct_LLVMOpaqueDiagnosticInfo(Struct): pass
-LLVMDiagnosticHandler = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_LLVMOpaqueDiagnosticInfo), ctypes.c_void_p)
-LLVMYieldCallback = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_LLVMOpaqueContext), ctypes.c_void_p)
+LLVMDiagnosticHandler: TypeAlias = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_LLVMOpaqueDiagnosticInfo), ctypes.c_void_p)
+LLVMYieldCallback: TypeAlias = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_LLVMOpaqueContext), ctypes.c_void_p)
 try: (LLVMContextCreate:=dll.LLVMContextCreate).restype, LLVMContextCreate.argtypes = LLVMContextRef, []
 except AttributeError: pass
 
@@ -667,7 +668,7 @@ except AttributeError: pass
 try: (LLVMContextDispose:=dll.LLVMContextDispose).restype, LLVMContextDispose.argtypes = None, [LLVMContextRef]
 except AttributeError: pass
 
-LLVMDiagnosticInfoRef = ctypes.POINTER(struct_LLVMOpaqueDiagnosticInfo)
+LLVMDiagnosticInfoRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueDiagnosticInfo)
 try: (LLVMGetDiagInfoDescription:=dll.LLVMGetDiagInfoDescription).restype, LLVMGetDiagInfoDescription.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMDiagnosticInfoRef]
 except AttributeError: pass
 
@@ -680,7 +681,7 @@ except AttributeError: pass
 try: (LLVMGetMDKindID:=dll.LLVMGetMDKindID).restype, LLVMGetMDKindID.argtypes = ctypes.c_uint32, [ctypes.POINTER(ctypes.c_char), ctypes.c_uint32]
 except AttributeError: pass
 
-size_t = ctypes.c_uint64
+size_t: TypeAlias = ctypes.c_uint64
 try: (LLVMGetSyncScopeID:=dll.LLVMGetSyncScopeID).restype, LLVMGetSyncScopeID.argtypes = ctypes.c_uint32, [LLVMContextRef, ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
@@ -691,8 +692,8 @@ try: (LLVMGetLastEnumAttributeKind:=dll.LLVMGetLastEnumAttributeKind).restype, L
 except AttributeError: pass
 
 class struct_LLVMOpaqueAttributeRef(Struct): pass
-LLVMAttributeRef = ctypes.POINTER(struct_LLVMOpaqueAttributeRef)
-uint64_t = ctypes.c_uint64
+LLVMAttributeRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueAttributeRef)
+uint64_t: TypeAlias = ctypes.c_uint64
 try: (LLVMCreateEnumAttribute:=dll.LLVMCreateEnumAttribute).restype, LLVMCreateEnumAttribute.argtypes = LLVMAttributeRef, [LLVMContextRef, ctypes.c_uint32, uint64_t]
 except AttributeError: pass
 
@@ -703,7 +704,7 @@ try: (LLVMGetEnumAttributeValue:=dll.LLVMGetEnumAttributeValue).restype, LLVMGet
 except AttributeError: pass
 
 class struct_LLVMOpaqueType(Struct): pass
-LLVMTypeRef = ctypes.POINTER(struct_LLVMOpaqueType)
+LLVMTypeRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueType)
 try: (LLVMCreateTypeAttribute:=dll.LLVMCreateTypeAttribute).restype, LLVMCreateTypeAttribute.argtypes = LLVMAttributeRef, [LLVMContextRef, ctypes.c_uint32, LLVMTypeRef]
 except AttributeError: pass
 
@@ -780,7 +781,7 @@ try: (LLVMSetTarget:=dll.LLVMSetTarget).restype, LLVMSetTarget.argtypes = None, 
 except AttributeError: pass
 
 class struct_LLVMOpaqueModuleFlagEntry(Struct): pass
-LLVMModuleFlagEntry = struct_LLVMOpaqueModuleFlagEntry
+LLVMModuleFlagEntry: TypeAlias = struct_LLVMOpaqueModuleFlagEntry
 try: (LLVMCopyModuleFlagsMetadata:=dll.LLVMCopyModuleFlagsMetadata).restype, LLVMCopyModuleFlagsMetadata.argtypes = ctypes.POINTER(LLVMModuleFlagEntry), [LLVMModuleRef, ctypes.POINTER(size_t)]
 except AttributeError: pass
 
@@ -794,7 +795,7 @@ try: (LLVMModuleFlagEntriesGetKey:=dll.LLVMModuleFlagEntriesGetKey).restype, LLV
 except AttributeError: pass
 
 class struct_LLVMOpaqueMetadata(Struct): pass
-LLVMMetadataRef = ctypes.POINTER(struct_LLVMOpaqueMetadata)
+LLVMMetadataRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueMetadata)
 try: (LLVMModuleFlagEntriesGetMetadata:=dll.LLVMModuleFlagEntriesGetMetadata).restype, LLVMModuleFlagEntriesGetMetadata.argtypes = LLVMMetadataRef, [ctypes.POINTER(LLVMModuleFlagEntry), ctypes.c_uint32]
 except AttributeError: pass
 
@@ -853,7 +854,7 @@ try: (LLVMGetTypeByName:=dll.LLVMGetTypeByName).restype, LLVMGetTypeByName.argty
 except AttributeError: pass
 
 class struct_LLVMOpaqueNamedMDNode(Struct): pass
-LLVMNamedMDNodeRef = ctypes.POINTER(struct_LLVMOpaqueNamedMDNode)
+LLVMNamedMDNodeRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueNamedMDNode)
 try: (LLVMGetFirstNamedMetadata:=dll.LLVMGetFirstNamedMetadata).restype, LLVMGetFirstNamedMetadata.argtypes = LLVMNamedMDNodeRef, [LLVMModuleRef]
 except AttributeError: pass
 
@@ -1188,7 +1189,7 @@ try: (LLVMGetValueContext:=dll.LLVMGetValueContext).restype, LLVMGetValueContext
 except AttributeError: pass
 
 class struct_LLVMOpaqueDbgRecord(Struct): pass
-LLVMDbgRecordRef = ctypes.POINTER(struct_LLVMOpaqueDbgRecord)
+LLVMDbgRecordRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueDbgRecord)
 try: (LLVMPrintDbgRecordToString:=dll.LLVMPrintDbgRecordToString).restype, LLVMPrintDbgRecordToString.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMDbgRecordRef]
 except AttributeError: pass
 
@@ -1487,7 +1488,7 @@ try: (LLVMSetValueName:=dll.LLVMSetValueName).restype, LLVMSetValueName.argtypes
 except AttributeError: pass
 
 class struct_LLVMOpaqueUse(Struct): pass
-LLVMUseRef = ctypes.POINTER(struct_LLVMOpaqueUse)
+LLVMUseRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueUse)
 try: (LLVMGetFirstUse:=dll.LLVMGetFirstUse).restype, LLVMGetFirstUse.argtypes = LLVMUseRef, [LLVMValueRef]
 except AttributeError: pass
 
@@ -1536,7 +1537,7 @@ except AttributeError: pass
 try: (LLVMConstIntOfArbitraryPrecision:=dll.LLVMConstIntOfArbitraryPrecision).restype, LLVMConstIntOfArbitraryPrecision.argtypes = LLVMValueRef, [LLVMTypeRef, ctypes.c_uint32, (uint64_t * 0)]
 except AttributeError: pass
 
-uint8_t = ctypes.c_ubyte
+uint8_t: TypeAlias = ctypes.c_ubyte
 try: (LLVMConstIntOfString:=dll.LLVMConstIntOfString).restype, LLVMConstIntOfString.argtypes = LLVMValueRef, [LLVMTypeRef, ctypes.POINTER(ctypes.c_char), uint8_t]
 except AttributeError: pass
 
@@ -1694,7 +1695,7 @@ try: (LLVMConstShuffleVector:=dll.LLVMConstShuffleVector).restype, LLVMConstShuf
 except AttributeError: pass
 
 class struct_LLVMOpaqueBasicBlock(Struct): pass
-LLVMBasicBlockRef = ctypes.POINTER(struct_LLVMOpaqueBasicBlock)
+LLVMBasicBlockRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueBasicBlock)
 try: (LLVMBlockAddress:=dll.LLVMBlockAddress).restype, LLVMBlockAddress.argtypes = LLVMValueRef, [LLVMValueRef, LLVMBasicBlockRef]
 except AttributeError: pass
 
@@ -1768,7 +1769,7 @@ try: (LLVMGlobalClearMetadata:=dll.LLVMGlobalClearMetadata).restype, LLVMGlobalC
 except AttributeError: pass
 
 class struct_LLVMOpaqueValueMetadataEntry(Struct): pass
-LLVMValueMetadataEntry = struct_LLVMOpaqueValueMetadataEntry
+LLVMValueMetadataEntry: TypeAlias = struct_LLVMOpaqueValueMetadataEntry
 try: (LLVMGlobalCopyAllMetadata:=dll.LLVMGlobalCopyAllMetadata).restype, LLVMGlobalCopyAllMetadata.argtypes = ctypes.POINTER(LLVMValueMetadataEntry), [LLVMValueRef, ctypes.POINTER(size_t)]
 except AttributeError: pass
 
@@ -2046,7 +2047,7 @@ try: (LLVMMDNode:=dll.LLVMMDNode).restype, LLVMMDNode.argtypes = LLVMValueRef, [
 except AttributeError: pass
 
 class struct_LLVMOpaqueOperandBundle(Struct): pass
-LLVMOperandBundleRef = ctypes.POINTER(struct_LLVMOpaqueOperandBundle)
+LLVMOperandBundleRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueOperandBundle)
 try: (LLVMCreateOperandBundle:=dll.LLVMCreateOperandBundle).restype, LLVMCreateOperandBundle.argtypes = LLVMOperandBundleRef, [ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(LLVMValueRef), ctypes.c_uint32]
 except AttributeError: pass
 
@@ -2102,7 +2103,7 @@ try: (LLVMGetEntryBasicBlock:=dll.LLVMGetEntryBasicBlock).restype, LLVMGetEntryB
 except AttributeError: pass
 
 class struct_LLVMOpaqueBuilder(Struct): pass
-LLVMBuilderRef = ctypes.POINTER(struct_LLVMOpaqueBuilder)
+LLVMBuilderRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueBuilder)
 try: (LLVMInsertExistingBasicBlockAfterInsertBlock:=dll.LLVMInsertExistingBasicBlockAfterInsertBlock).restype, LLVMInsertExistingBasicBlockAfterInsertBlock.argtypes = None, [LLVMBuilderRef, LLVMBasicBlockRef]
 except AttributeError: pass
 
@@ -2869,7 +2870,7 @@ try: (LLVMSetCmpXchgFailureOrdering:=dll.LLVMSetCmpXchgFailureOrdering).restype,
 except AttributeError: pass
 
 class struct_LLVMOpaqueModuleProvider(Struct): pass
-LLVMModuleProviderRef = ctypes.POINTER(struct_LLVMOpaqueModuleProvider)
+LLVMModuleProviderRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueModuleProvider)
 try: (LLVMCreateModuleProviderForExistingModule:=dll.LLVMCreateModuleProviderForExistingModule).restype, LLVMCreateModuleProviderForExistingModule.argtypes = LLVMModuleProviderRef, [LLVMModuleRef]
 except AttributeError: pass
 
@@ -2898,7 +2899,7 @@ try: (LLVMDisposeMemoryBuffer:=dll.LLVMDisposeMemoryBuffer).restype, LLVMDispose
 except AttributeError: pass
 
 class struct_LLVMOpaquePassManager(Struct): pass
-LLVMPassManagerRef = ctypes.POINTER(struct_LLVMOpaquePassManager)
+LLVMPassManagerRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaquePassManager)
 try: (LLVMCreatePassManager:=dll.LLVMCreatePassManager).restype, LLVMCreatePassManager.argtypes = LLVMPassManagerRef, []
 except AttributeError: pass
 
@@ -3149,8 +3150,8 @@ LLVMDIGenericSubrangeMetadataKind = _anonenum3.define('LLVMDIGenericSubrangeMeta
 LLVMDIArgListMetadataKind = _anonenum3.define('LLVMDIArgListMetadataKind', 34)
 LLVMDIAssignIDMetadataKind = _anonenum3.define('LLVMDIAssignIDMetadataKind', 35)
 
-LLVMMetadataKind = ctypes.c_uint32
-LLVMDWARFTypeEncoding = ctypes.c_uint32
+LLVMMetadataKind: TypeAlias = ctypes.c_uint32
+LLVMDWARFTypeEncoding: TypeAlias = ctypes.c_uint32
 LLVMDWARFMacinfoRecordType = CEnum(ctypes.c_uint32)
 LLVMDWARFMacinfoRecordTypeDefine = LLVMDWARFMacinfoRecordType.define('LLVMDWARFMacinfoRecordTypeDefine', 1)
 LLVMDWARFMacinfoRecordTypeMacro = LLVMDWARFMacinfoRecordType.define('LLVMDWARFMacinfoRecordTypeMacro', 2)
@@ -3168,7 +3169,7 @@ try: (LLVMStripModuleDebugInfo:=dll.LLVMStripModuleDebugInfo).restype, LLVMStrip
 except AttributeError: pass
 
 class struct_LLVMOpaqueDIBuilder(Struct): pass
-LLVMDIBuilderRef = ctypes.POINTER(struct_LLVMOpaqueDIBuilder)
+LLVMDIBuilderRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueDIBuilder)
 try: (LLVMCreateDIBuilderDisallowUnresolved:=dll.LLVMCreateDIBuilderDisallowUnresolved).restype, LLVMCreateDIBuilderDisallowUnresolved.argtypes = LLVMDIBuilderRef, [LLVMModuleRef]
 except AttributeError: pass
 
@@ -3256,11 +3257,11 @@ except AttributeError: pass
 try: (LLVMDIBuilderCreateTempMacroFile:=dll.LLVMDIBuilderCreateTempMacroFile).restype, LLVMDIBuilderCreateTempMacroFile.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.c_uint32, LLVMMetadataRef]
 except AttributeError: pass
 
-int64_t = ctypes.c_int64
+int64_t: TypeAlias = ctypes.c_int64
 try: (LLVMDIBuilderCreateEnumerator:=dll.LLVMDIBuilderCreateEnumerator).restype, LLVMDIBuilderCreateEnumerator.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, ctypes.POINTER(ctypes.c_char), size_t, int64_t, LLVMBool]
 except AttributeError: pass
 
-uint32_t = ctypes.c_uint32
+uint32_t: TypeAlias = ctypes.c_uint32
 try: (LLVMDIBuilderCreateEnumerationType:=dll.LLVMDIBuilderCreateEnumerationType).restype, LLVMDIBuilderCreateEnumerationType.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, uint64_t, uint32_t, ctypes.POINTER(LLVMMetadataRef), ctypes.c_uint32, LLVMMetadataRef]
 except AttributeError: pass
 
@@ -3366,7 +3367,7 @@ except AttributeError: pass
 try: (LLVMDIBuilderCreateGlobalVariableExpression:=dll.LLVMDIBuilderCreateGlobalVariableExpression).restype, LLVMDIBuilderCreateGlobalVariableExpression.argtypes = LLVMMetadataRef, [LLVMDIBuilderRef, LLVMMetadataRef, ctypes.POINTER(ctypes.c_char), size_t, ctypes.POINTER(ctypes.c_char), size_t, LLVMMetadataRef, ctypes.c_uint32, LLVMMetadataRef, LLVMBool, LLVMMetadataRef, LLVMMetadataRef, uint32_t]
 except AttributeError: pass
 
-uint16_t = ctypes.c_uint16
+uint16_t: TypeAlias = ctypes.c_uint16
 try: (LLVMGetDINodeTag:=dll.LLVMGetDINodeTag).restype, LLVMGetDINodeTag.argtypes = uint16_t, [LLVMMetadataRef]
 except AttributeError: pass
 
@@ -3478,9 +3479,9 @@ except AttributeError: pass
 try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
 except AttributeError: pass
 
-LLVMDisasmContextRef = ctypes.c_void_p
-LLVMOpInfoCallback = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_int32, ctypes.c_void_p)
-LLVMSymbolLookupCallback = ctypes.CFUNCTYPE(ctypes.POINTER(ctypes.c_char), ctypes.c_void_p, ctypes.c_uint64, ctypes.POINTER(ctypes.c_uint64), ctypes.c_uint64, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)))
+LLVMDisasmContextRef: TypeAlias = ctypes.c_void_p
+LLVMOpInfoCallback: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_int32, ctypes.c_void_p)
+LLVMSymbolLookupCallback: TypeAlias = ctypes.CFUNCTYPE(ctypes.POINTER(ctypes.c_char), ctypes.c_void_p, ctypes.c_uint64, ctypes.POINTER(ctypes.c_uint64), ctypes.c_uint64, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)))
 try: (LLVMCreateDisasm:=dll.LLVMCreateDisasm).restype, LLVMCreateDisasm.argtypes = LLVMDisasmContextRef, [ctypes.POINTER(ctypes.c_char), ctypes.c_void_p, ctypes.c_int32, LLVMOpInfoCallback, LLVMSymbolLookupCallback]
 except AttributeError: pass
 
@@ -3549,8 +3550,8 @@ struct_LLVMOpInfo1._fields_ = [
   ('VariantKind', uint64_t),
 ]
 class struct_LLVMOpaqueError(Struct): pass
-LLVMErrorRef = ctypes.POINTER(struct_LLVMOpaqueError)
-LLVMErrorTypeId = ctypes.c_void_p
+LLVMErrorRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueError)
+LLVMErrorTypeId: TypeAlias = ctypes.c_void_p
 try: (LLVMGetErrorTypeId:=dll.LLVMGetErrorTypeId).restype, LLVMGetErrorTypeId.argtypes = LLVMErrorTypeId, [LLVMErrorRef]
 except AttributeError: pass
 
@@ -3999,7 +4000,7 @@ try: (LLVMInitializeXtensaDisassembler:=dll.LLVMInitializeXtensaDisassembler).re
 except AttributeError: pass
 
 class struct_LLVMOpaqueTargetData(Struct): pass
-LLVMTargetDataRef = ctypes.POINTER(struct_LLVMOpaqueTargetData)
+LLVMTargetDataRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueTargetData)
 try: (LLVMGetModuleDataLayout:=dll.LLVMGetModuleDataLayout).restype, LLVMGetModuleDataLayout.argtypes = LLVMTargetDataRef, [LLVMModuleRef]
 except AttributeError: pass
 
@@ -4013,7 +4014,7 @@ try: (LLVMDisposeTargetData:=dll.LLVMDisposeTargetData).restype, LLVMDisposeTarg
 except AttributeError: pass
 
 class struct_LLVMOpaqueTargetLibraryInfotData(Struct): pass
-LLVMTargetLibraryInfoRef = ctypes.POINTER(struct_LLVMOpaqueTargetLibraryInfotData)
+LLVMTargetLibraryInfoRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueTargetLibraryInfotData)
 try: (LLVMAddTargetLibraryInfo:=dll.LLVMAddTargetLibraryInfo).restype, LLVMAddTargetLibraryInfo.argtypes = None, [LLVMTargetLibraryInfoRef, LLVMPassManagerRef]
 except AttributeError: pass
 
@@ -4073,7 +4074,7 @@ try: (LLVMOffsetOfElement:=dll.LLVMOffsetOfElement).restype, LLVMOffsetOfElement
 except AttributeError: pass
 
 class struct_LLVMTarget(Struct): pass
-LLVMTargetRef = ctypes.POINTER(struct_LLVMTarget)
+LLVMTargetRef: TypeAlias = ctypes.POINTER(struct_LLVMTarget)
 try: (LLVMGetFirstTarget:=dll.LLVMGetFirstTarget).restype, LLVMGetFirstTarget.argtypes = LLVMTargetRef, []
 except AttributeError: pass
 
@@ -4102,7 +4103,7 @@ try: (LLVMTargetHasAsmBackend:=dll.LLVMTargetHasAsmBackend).restype, LLVMTargetH
 except AttributeError: pass
 
 class struct_LLVMOpaqueTargetMachineOptions(Struct): pass
-LLVMTargetMachineOptionsRef = ctypes.POINTER(struct_LLVMOpaqueTargetMachineOptions)
+LLVMTargetMachineOptionsRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueTargetMachineOptions)
 try: (LLVMCreateTargetMachineOptions:=dll.LLVMCreateTargetMachineOptions).restype, LLVMCreateTargetMachineOptions.argtypes = LLVMTargetMachineOptionsRef, []
 except AttributeError: pass
 
@@ -4152,7 +4153,7 @@ try: (LLVMTargetMachineOptionsSetCodeModel:=dll.LLVMTargetMachineOptionsSetCodeM
 except AttributeError: pass
 
 class struct_LLVMOpaqueTargetMachine(Struct): pass
-LLVMTargetMachineRef = ctypes.POINTER(struct_LLVMOpaqueTargetMachine)
+LLVMTargetMachineRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueTargetMachine)
 try: (LLVMCreateTargetMachineWithOptions:=dll.LLVMCreateTargetMachineWithOptions).restype, LLVMCreateTargetMachineWithOptions.argtypes = LLVMTargetMachineRef, [LLVMTargetRef, ctypes.POINTER(ctypes.c_char), LLVMTargetMachineOptionsRef]
 except AttributeError: pass
 
@@ -4229,11 +4230,11 @@ try: (LLVMLinkInInterpreter:=dll.LLVMLinkInInterpreter).restype, LLVMLinkInInter
 except AttributeError: pass
 
 class struct_LLVMOpaqueGenericValue(Struct): pass
-LLVMGenericValueRef = ctypes.POINTER(struct_LLVMOpaqueGenericValue)
+LLVMGenericValueRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueGenericValue)
 class struct_LLVMOpaqueExecutionEngine(Struct): pass
-LLVMExecutionEngineRef = ctypes.POINTER(struct_LLVMOpaqueExecutionEngine)
+LLVMExecutionEngineRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueExecutionEngine)
 class struct_LLVMOpaqueMCJITMemoryManager(Struct): pass
-LLVMMCJITMemoryManagerRef = ctypes.POINTER(struct_LLVMOpaqueMCJITMemoryManager)
+LLVMMCJITMemoryManagerRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueMCJITMemoryManager)
 class struct_LLVMMCJITCompilerOptions(Struct): pass
 struct_LLVMMCJITCompilerOptions._fields_ = [
   ('OptLevel', ctypes.c_uint32),
@@ -4332,10 +4333,10 @@ except AttributeError: pass
 try: (LLVMExecutionEngineGetErrMsg:=dll.LLVMExecutionEngineGetErrMsg).restype, LLVMExecutionEngineGetErrMsg.argtypes = LLVMBool, [LLVMExecutionEngineRef, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
 
-LLVMMemoryManagerAllocateCodeSectionCallback = ctypes.CFUNCTYPE(ctypes.POINTER(ctypes.c_ubyte), ctypes.c_void_p, ctypes.c_uint64, ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char))
-LLVMMemoryManagerAllocateDataSectionCallback = ctypes.CFUNCTYPE(ctypes.POINTER(ctypes.c_ubyte), ctypes.c_void_p, ctypes.c_uint64, ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), ctypes.c_int32)
-LLVMMemoryManagerFinalizeMemoryCallback = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)))
-LLVMMemoryManagerDestroyCallback = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
+LLVMMemoryManagerAllocateCodeSectionCallback: TypeAlias = ctypes.CFUNCTYPE(ctypes.POINTER(ctypes.c_ubyte), ctypes.c_void_p, ctypes.c_uint64, ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char))
+LLVMMemoryManagerAllocateDataSectionCallback: TypeAlias = ctypes.CFUNCTYPE(ctypes.POINTER(ctypes.c_ubyte), ctypes.c_void_p, ctypes.c_uint64, ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), ctypes.c_int32)
+LLVMMemoryManagerFinalizeMemoryCallback: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)))
+LLVMMemoryManagerDestroyCallback: TypeAlias = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
 try: (LLVMCreateSimpleMCJITMemoryManager:=dll.LLVMCreateSimpleMCJITMemoryManager).restype, LLVMCreateSimpleMCJITMemoryManager.argtypes = LLVMMCJITMemoryManagerRef, [ctypes.c_void_p, LLVMMemoryManagerAllocateCodeSectionCallback, LLVMMemoryManagerAllocateDataSectionCallback, LLVMMemoryManagerFinalizeMemoryCallback, LLVMMemoryManagerDestroyCallback]
 except AttributeError: pass
 
@@ -4343,7 +4344,7 @@ try: (LLVMDisposeMCJITMemoryManager:=dll.LLVMDisposeMCJITMemoryManager).restype,
 except AttributeError: pass
 
 class struct_LLVMOpaqueJITEventListener(Struct): pass
-LLVMJITEventListenerRef = ctypes.POINTER(struct_LLVMOpaqueJITEventListener)
+LLVMJITEventListenerRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueJITEventListener)
 try: (LLVMCreateGDBRegistrationListener:=dll.LLVMCreateGDBRegistrationListener).restype, LLVMCreateGDBRegistrationListener.argtypes = LLVMJITEventListenerRef, []
 except AttributeError: pass
 
@@ -5011,13 +5012,13 @@ try: (LLVMAddAnalysisPasses:=dll.LLVMAddAnalysisPasses).restype, LLVMAddAnalysis
 except AttributeError: pass
 
 class struct_LLVMOrcOpaqueExecutionSession(Struct): pass
-LLVMOrcExecutionSessionRef = ctypes.POINTER(struct_LLVMOrcOpaqueExecutionSession)
-LLVMOrcErrorReporterFunction = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.POINTER(struct_LLVMOpaqueError))
+LLVMOrcExecutionSessionRef: TypeAlias = ctypes.POINTER(struct_LLVMOrcOpaqueExecutionSession)
+LLVMOrcErrorReporterFunction: TypeAlias = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.POINTER(struct_LLVMOpaqueError))
 try: (LLVMOrcExecutionSessionSetErrorReporter:=dll.LLVMOrcExecutionSessionSetErrorReporter).restype, LLVMOrcExecutionSessionSetErrorReporter.argtypes = None, [LLVMOrcExecutionSessionRef, LLVMOrcErrorReporterFunction, ctypes.c_void_p]
 except AttributeError: pass
 
 class struct_LLVMOrcOpaqueSymbolStringPool(Struct): pass
-LLVMOrcSymbolStringPoolRef = ctypes.POINTER(struct_LLVMOrcOpaqueSymbolStringPool)
+LLVMOrcSymbolStringPoolRef: TypeAlias = ctypes.POINTER(struct_LLVMOrcOpaqueSymbolStringPool)
 try: (LLVMOrcExecutionSessionGetSymbolStringPool:=dll.LLVMOrcExecutionSessionGetSymbolStringPool).restype, LLVMOrcExecutionSessionGetSymbolStringPool.argtypes = LLVMOrcSymbolStringPoolRef, [LLVMOrcExecutionSessionRef]
 except AttributeError: pass
 
@@ -5025,7 +5026,7 @@ try: (LLVMOrcSymbolStringPoolClearDeadEntries:=dll.LLVMOrcSymbolStringPoolClearD
 except AttributeError: pass
 
 class struct_LLVMOrcOpaqueSymbolStringPoolEntry(Struct): pass
-LLVMOrcSymbolStringPoolEntryRef = ctypes.POINTER(struct_LLVMOrcOpaqueSymbolStringPoolEntry)
+LLVMOrcSymbolStringPoolEntryRef: TypeAlias = ctypes.POINTER(struct_LLVMOrcOpaqueSymbolStringPoolEntry)
 try: (LLVMOrcExecutionSessionIntern:=dll.LLVMOrcExecutionSessionIntern).restype, LLVMOrcExecutionSessionIntern.argtypes = LLVMOrcSymbolStringPoolEntryRef, [LLVMOrcExecutionSessionRef, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
@@ -5035,7 +5036,7 @@ LLVMOrcLookupKindDLSym = LLVMOrcLookupKind.define('LLVMOrcLookupKindDLSym', 1)
 
 class LLVMOrcCJITDylibSearchOrderElement(Struct): pass
 class struct_LLVMOrcOpaqueJITDylib(Struct): pass
-LLVMOrcJITDylibRef = ctypes.POINTER(struct_LLVMOrcOpaqueJITDylib)
+LLVMOrcJITDylibRef: TypeAlias = ctypes.POINTER(struct_LLVMOrcOpaqueJITDylib)
 LLVMOrcJITDylibLookupFlags = CEnum(ctypes.c_uint32)
 LLVMOrcJITDylibLookupFlagsMatchExportedSymbolsOnly = LLVMOrcJITDylibLookupFlags.define('LLVMOrcJITDylibLookupFlagsMatchExportedSymbolsOnly', 0)
 LLVMOrcJITDylibLookupFlagsMatchAllSymbols = LLVMOrcJITDylibLookupFlags.define('LLVMOrcJITDylibLookupFlagsMatchAllSymbols', 1)
@@ -5044,7 +5045,7 @@ LLVMOrcCJITDylibSearchOrderElement._fields_ = [
   ('JD', LLVMOrcJITDylibRef),
   ('JDLookupFlags', LLVMOrcJITDylibLookupFlags),
 ]
-LLVMOrcCJITDylibSearchOrder = ctypes.POINTER(LLVMOrcCJITDylibSearchOrderElement)
+LLVMOrcCJITDylibSearchOrder: TypeAlias = ctypes.POINTER(LLVMOrcCJITDylibSearchOrderElement)
 class LLVMOrcCLookupSetElement(Struct): pass
 LLVMOrcSymbolLookupFlags = CEnum(ctypes.c_uint32)
 LLVMOrcSymbolLookupFlagsRequiredSymbol = LLVMOrcSymbolLookupFlags.define('LLVMOrcSymbolLookupFlagsRequiredSymbol', 0)
@@ -5054,10 +5055,10 @@ LLVMOrcCLookupSetElement._fields_ = [
   ('Name', LLVMOrcSymbolStringPoolEntryRef),
   ('LookupFlags', LLVMOrcSymbolLookupFlags),
 ]
-LLVMOrcCLookupSet = ctypes.POINTER(LLVMOrcCLookupSetElement)
+LLVMOrcCLookupSet: TypeAlias = ctypes.POINTER(LLVMOrcCLookupSetElement)
 class LLVMOrcCSymbolMapPair(Struct): pass
 class LLVMJITEvaluatedSymbol(Struct): pass
-LLVMOrcExecutorAddress = ctypes.c_uint64
+LLVMOrcExecutorAddress: TypeAlias = ctypes.c_uint64
 class LLVMJITSymbolFlags(Struct): pass
 LLVMJITSymbolFlags._fields_ = [
   ('GenericFlags', uint8_t),
@@ -5071,7 +5072,7 @@ LLVMOrcCSymbolMapPair._fields_ = [
   ('Name', LLVMOrcSymbolStringPoolEntryRef),
   ('Sym', LLVMJITEvaluatedSymbol),
 ]
-LLVMOrcExecutionSessionLookupHandleResultFunction = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_LLVMOpaqueError), ctypes.POINTER(LLVMOrcCSymbolMapPair), ctypes.c_uint64, ctypes.c_void_p)
+LLVMOrcExecutionSessionLookupHandleResultFunction: TypeAlias = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_LLVMOpaqueError), ctypes.POINTER(LLVMOrcCSymbolMapPair), ctypes.c_uint64, ctypes.c_void_p)
 try: (LLVMOrcExecutionSessionLookup:=dll.LLVMOrcExecutionSessionLookup).restype, LLVMOrcExecutionSessionLookup.argtypes = None, [LLVMOrcExecutionSessionRef, LLVMOrcLookupKind, LLVMOrcCJITDylibSearchOrder, size_t, LLVMOrcCLookupSet, size_t, LLVMOrcExecutionSessionLookupHandleResultFunction, ctypes.c_void_p]
 except AttributeError: pass
 
@@ -5085,7 +5086,7 @@ try: (LLVMOrcSymbolStringPoolEntryStr:=dll.LLVMOrcSymbolStringPoolEntryStr).rest
 except AttributeError: pass
 
 class struct_LLVMOrcOpaqueResourceTracker(Struct): pass
-LLVMOrcResourceTrackerRef = ctypes.POINTER(struct_LLVMOrcOpaqueResourceTracker)
+LLVMOrcResourceTrackerRef: TypeAlias = ctypes.POINTER(struct_LLVMOrcOpaqueResourceTracker)
 try: (LLVMOrcReleaseResourceTracker:=dll.LLVMOrcReleaseResourceTracker).restype, LLVMOrcReleaseResourceTracker.argtypes = None, [LLVMOrcResourceTrackerRef]
 except AttributeError: pass
 
@@ -5096,12 +5097,12 @@ try: (LLVMOrcResourceTrackerRemove:=dll.LLVMOrcResourceTrackerRemove).restype, L
 except AttributeError: pass
 
 class struct_LLVMOrcOpaqueDefinitionGenerator(Struct): pass
-LLVMOrcDefinitionGeneratorRef = ctypes.POINTER(struct_LLVMOrcOpaqueDefinitionGenerator)
+LLVMOrcDefinitionGeneratorRef: TypeAlias = ctypes.POINTER(struct_LLVMOrcOpaqueDefinitionGenerator)
 try: (LLVMOrcDisposeDefinitionGenerator:=dll.LLVMOrcDisposeDefinitionGenerator).restype, LLVMOrcDisposeDefinitionGenerator.argtypes = None, [LLVMOrcDefinitionGeneratorRef]
 except AttributeError: pass
 
 class struct_LLVMOrcOpaqueMaterializationUnit(Struct): pass
-LLVMOrcMaterializationUnitRef = ctypes.POINTER(struct_LLVMOrcOpaqueMaterializationUnit)
+LLVMOrcMaterializationUnitRef: TypeAlias = ctypes.POINTER(struct_LLVMOrcOpaqueMaterializationUnit)
 try: (LLVMOrcDisposeMaterializationUnit:=dll.LLVMOrcDisposeMaterializationUnit).restype, LLVMOrcDisposeMaterializationUnit.argtypes = None, [LLVMOrcMaterializationUnitRef]
 except AttributeError: pass
 
@@ -5110,22 +5111,22 @@ LLVMOrcCSymbolFlagsMapPair._fields_ = [
   ('Name', LLVMOrcSymbolStringPoolEntryRef),
   ('Flags', LLVMJITSymbolFlags),
 ]
-LLVMOrcCSymbolFlagsMapPairs = ctypes.POINTER(LLVMOrcCSymbolFlagsMapPair)
+LLVMOrcCSymbolFlagsMapPairs: TypeAlias = ctypes.POINTER(LLVMOrcCSymbolFlagsMapPair)
 class struct_LLVMOrcOpaqueMaterializationResponsibility(Struct): pass
-LLVMOrcMaterializationUnitMaterializeFunction = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.POINTER(struct_LLVMOrcOpaqueMaterializationResponsibility))
-LLVMOrcMaterializationUnitDiscardFunction = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.POINTER(struct_LLVMOrcOpaqueJITDylib), ctypes.POINTER(struct_LLVMOrcOpaqueSymbolStringPoolEntry))
-LLVMOrcMaterializationUnitDestroyFunction = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
+LLVMOrcMaterializationUnitMaterializeFunction: TypeAlias = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.POINTER(struct_LLVMOrcOpaqueMaterializationResponsibility))
+LLVMOrcMaterializationUnitDiscardFunction: TypeAlias = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.POINTER(struct_LLVMOrcOpaqueJITDylib), ctypes.POINTER(struct_LLVMOrcOpaqueSymbolStringPoolEntry))
+LLVMOrcMaterializationUnitDestroyFunction: TypeAlias = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
 try: (LLVMOrcCreateCustomMaterializationUnit:=dll.LLVMOrcCreateCustomMaterializationUnit).restype, LLVMOrcCreateCustomMaterializationUnit.argtypes = LLVMOrcMaterializationUnitRef, [ctypes.POINTER(ctypes.c_char), ctypes.c_void_p, LLVMOrcCSymbolFlagsMapPairs, size_t, LLVMOrcSymbolStringPoolEntryRef, LLVMOrcMaterializationUnitMaterializeFunction, LLVMOrcMaterializationUnitDiscardFunction, LLVMOrcMaterializationUnitDestroyFunction]
 except AttributeError: pass
 
-LLVMOrcCSymbolMapPairs = ctypes.POINTER(LLVMOrcCSymbolMapPair)
+LLVMOrcCSymbolMapPairs: TypeAlias = ctypes.POINTER(LLVMOrcCSymbolMapPair)
 try: (LLVMOrcAbsoluteSymbols:=dll.LLVMOrcAbsoluteSymbols).restype, LLVMOrcAbsoluteSymbols.argtypes = LLVMOrcMaterializationUnitRef, [LLVMOrcCSymbolMapPairs, size_t]
 except AttributeError: pass
 
 class struct_LLVMOrcOpaqueLazyCallThroughManager(Struct): pass
-LLVMOrcLazyCallThroughManagerRef = ctypes.POINTER(struct_LLVMOrcOpaqueLazyCallThroughManager)
+LLVMOrcLazyCallThroughManagerRef: TypeAlias = ctypes.POINTER(struct_LLVMOrcOpaqueLazyCallThroughManager)
 class struct_LLVMOrcOpaqueIndirectStubsManager(Struct): pass
-LLVMOrcIndirectStubsManagerRef = ctypes.POINTER(struct_LLVMOrcOpaqueIndirectStubsManager)
+LLVMOrcIndirectStubsManagerRef: TypeAlias = ctypes.POINTER(struct_LLVMOrcOpaqueIndirectStubsManager)
 class LLVMOrcCSymbolAliasMapPair(Struct): pass
 class LLVMOrcCSymbolAliasMapEntry(Struct): pass
 LLVMOrcCSymbolAliasMapEntry._fields_ = [
@@ -5136,11 +5137,11 @@ LLVMOrcCSymbolAliasMapPair._fields_ = [
   ('Name', LLVMOrcSymbolStringPoolEntryRef),
   ('Entry', LLVMOrcCSymbolAliasMapEntry),
 ]
-LLVMOrcCSymbolAliasMapPairs = ctypes.POINTER(LLVMOrcCSymbolAliasMapPair)
+LLVMOrcCSymbolAliasMapPairs: TypeAlias = ctypes.POINTER(LLVMOrcCSymbolAliasMapPair)
 try: (LLVMOrcLazyReexports:=dll.LLVMOrcLazyReexports).restype, LLVMOrcLazyReexports.argtypes = LLVMOrcMaterializationUnitRef, [LLVMOrcLazyCallThroughManagerRef, LLVMOrcIndirectStubsManagerRef, LLVMOrcJITDylibRef, LLVMOrcCSymbolAliasMapPairs, size_t]
 except AttributeError: pass
 
-LLVMOrcMaterializationResponsibilityRef = ctypes.POINTER(struct_LLVMOrcOpaqueMaterializationResponsibility)
+LLVMOrcMaterializationResponsibilityRef: TypeAlias = ctypes.POINTER(struct_LLVMOrcOpaqueMaterializationResponsibility)
 try: (LLVMOrcDisposeMaterializationResponsibility:=dll.LLVMOrcDisposeMaterializationResponsibility).restype, LLVMOrcDisposeMaterializationResponsibility.argtypes = None, [LLVMOrcMaterializationResponsibilityRef]
 except AttributeError: pass
 
@@ -5179,7 +5180,7 @@ LLVMOrcCDependenceMapPair._fields_ = [
   ('JD', LLVMOrcJITDylibRef),
   ('Names', LLVMOrcCSymbolsList),
 ]
-LLVMOrcCDependenceMapPairs = ctypes.POINTER(LLVMOrcCDependenceMapPair)
+LLVMOrcCDependenceMapPairs: TypeAlias = ctypes.POINTER(LLVMOrcCDependenceMapPair)
 LLVMOrcCSymbolDependenceGroup._fields_ = [
   ('Symbols', LLVMOrcCSymbolsList),
   ('Dependencies', LLVMOrcCDependenceMapPairs),
@@ -5225,16 +5226,16 @@ try: (LLVMOrcJITDylibAddGenerator:=dll.LLVMOrcJITDylibAddGenerator).restype, LLV
 except AttributeError: pass
 
 class struct_LLVMOrcOpaqueLookupState(Struct): pass
-LLVMOrcCAPIDefinitionGeneratorTryToGenerateFunction = ctypes.CFUNCTYPE(ctypes.POINTER(struct_LLVMOpaqueError), ctypes.POINTER(struct_LLVMOrcOpaqueDefinitionGenerator), ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(struct_LLVMOrcOpaqueLookupState)), LLVMOrcLookupKind, ctypes.POINTER(struct_LLVMOrcOpaqueJITDylib), LLVMOrcJITDylibLookupFlags, ctypes.POINTER(LLVMOrcCLookupSetElement), ctypes.c_uint64)
-LLVMOrcDisposeCAPIDefinitionGeneratorFunction = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
+LLVMOrcCAPIDefinitionGeneratorTryToGenerateFunction: TypeAlias = ctypes.CFUNCTYPE(ctypes.POINTER(struct_LLVMOpaqueError), ctypes.POINTER(struct_LLVMOrcOpaqueDefinitionGenerator), ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(struct_LLVMOrcOpaqueLookupState)), LLVMOrcLookupKind, ctypes.POINTER(struct_LLVMOrcOpaqueJITDylib), LLVMOrcJITDylibLookupFlags, ctypes.POINTER(LLVMOrcCLookupSetElement), ctypes.c_uint64)
+LLVMOrcDisposeCAPIDefinitionGeneratorFunction: TypeAlias = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
 try: (LLVMOrcCreateCustomCAPIDefinitionGenerator:=dll.LLVMOrcCreateCustomCAPIDefinitionGenerator).restype, LLVMOrcCreateCustomCAPIDefinitionGenerator.argtypes = LLVMOrcDefinitionGeneratorRef, [LLVMOrcCAPIDefinitionGeneratorTryToGenerateFunction, ctypes.c_void_p, LLVMOrcDisposeCAPIDefinitionGeneratorFunction]
 except AttributeError: pass
 
-LLVMOrcLookupStateRef = ctypes.POINTER(struct_LLVMOrcOpaqueLookupState)
+LLVMOrcLookupStateRef: TypeAlias = ctypes.POINTER(struct_LLVMOrcOpaqueLookupState)
 try: (LLVMOrcLookupStateContinueLookup:=dll.LLVMOrcLookupStateContinueLookup).restype, LLVMOrcLookupStateContinueLookup.argtypes = None, [LLVMOrcLookupStateRef, LLVMErrorRef]
 except AttributeError: pass
 
-LLVMOrcSymbolPredicate = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.POINTER(struct_LLVMOrcOpaqueSymbolStringPoolEntry))
+LLVMOrcSymbolPredicate: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.POINTER(struct_LLVMOrcOpaqueSymbolStringPoolEntry))
 try: (LLVMOrcCreateDynamicLibrarySearchGeneratorForProcess:=dll.LLVMOrcCreateDynamicLibrarySearchGeneratorForProcess).restype, LLVMOrcCreateDynamicLibrarySearchGeneratorForProcess.argtypes = LLVMErrorRef, [ctypes.POINTER(LLVMOrcDefinitionGeneratorRef), ctypes.c_char, LLVMOrcSymbolPredicate, ctypes.c_void_p]
 except AttributeError: pass
 
@@ -5242,12 +5243,12 @@ try: (LLVMOrcCreateDynamicLibrarySearchGeneratorForPath:=dll.LLVMOrcCreateDynami
 except AttributeError: pass
 
 class struct_LLVMOrcOpaqueObjectLayer(Struct): pass
-LLVMOrcObjectLayerRef = ctypes.POINTER(struct_LLVMOrcOpaqueObjectLayer)
+LLVMOrcObjectLayerRef: TypeAlias = ctypes.POINTER(struct_LLVMOrcOpaqueObjectLayer)
 try: (LLVMOrcCreateStaticLibrarySearchGeneratorForPath:=dll.LLVMOrcCreateStaticLibrarySearchGeneratorForPath).restype, LLVMOrcCreateStaticLibrarySearchGeneratorForPath.argtypes = LLVMErrorRef, [ctypes.POINTER(LLVMOrcDefinitionGeneratorRef), LLVMOrcObjectLayerRef, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
 class struct_LLVMOrcOpaqueThreadSafeContext(Struct): pass
-LLVMOrcThreadSafeContextRef = ctypes.POINTER(struct_LLVMOrcOpaqueThreadSafeContext)
+LLVMOrcThreadSafeContextRef: TypeAlias = ctypes.POINTER(struct_LLVMOrcOpaqueThreadSafeContext)
 try: (LLVMOrcCreateNewThreadSafeContext:=dll.LLVMOrcCreateNewThreadSafeContext).restype, LLVMOrcCreateNewThreadSafeContext.argtypes = LLVMOrcThreadSafeContextRef, []
 except AttributeError: pass
 
@@ -5258,19 +5259,19 @@ try: (LLVMOrcDisposeThreadSafeContext:=dll.LLVMOrcDisposeThreadSafeContext).rest
 except AttributeError: pass
 
 class struct_LLVMOrcOpaqueThreadSafeModule(Struct): pass
-LLVMOrcThreadSafeModuleRef = ctypes.POINTER(struct_LLVMOrcOpaqueThreadSafeModule)
+LLVMOrcThreadSafeModuleRef: TypeAlias = ctypes.POINTER(struct_LLVMOrcOpaqueThreadSafeModule)
 try: (LLVMOrcCreateNewThreadSafeModule:=dll.LLVMOrcCreateNewThreadSafeModule).restype, LLVMOrcCreateNewThreadSafeModule.argtypes = LLVMOrcThreadSafeModuleRef, [LLVMModuleRef, LLVMOrcThreadSafeContextRef]
 except AttributeError: pass
 
 try: (LLVMOrcDisposeThreadSafeModule:=dll.LLVMOrcDisposeThreadSafeModule).restype, LLVMOrcDisposeThreadSafeModule.argtypes = None, [LLVMOrcThreadSafeModuleRef]
 except AttributeError: pass
 
-LLVMOrcGenericIRModuleOperationFunction = ctypes.CFUNCTYPE(ctypes.POINTER(struct_LLVMOpaqueError), ctypes.c_void_p, ctypes.POINTER(struct_LLVMOpaqueModule))
+LLVMOrcGenericIRModuleOperationFunction: TypeAlias = ctypes.CFUNCTYPE(ctypes.POINTER(struct_LLVMOpaqueError), ctypes.c_void_p, ctypes.POINTER(struct_LLVMOpaqueModule))
 try: (LLVMOrcThreadSafeModuleWithModuleDo:=dll.LLVMOrcThreadSafeModuleWithModuleDo).restype, LLVMOrcThreadSafeModuleWithModuleDo.argtypes = LLVMErrorRef, [LLVMOrcThreadSafeModuleRef, LLVMOrcGenericIRModuleOperationFunction, ctypes.c_void_p]
 except AttributeError: pass
 
 class struct_LLVMOrcOpaqueJITTargetMachineBuilder(Struct): pass
-LLVMOrcJITTargetMachineBuilderRef = ctypes.POINTER(struct_LLVMOrcOpaqueJITTargetMachineBuilder)
+LLVMOrcJITTargetMachineBuilderRef: TypeAlias = ctypes.POINTER(struct_LLVMOrcOpaqueJITTargetMachineBuilder)
 try: (LLVMOrcJITTargetMachineBuilderDetectHost:=dll.LLVMOrcJITTargetMachineBuilderDetectHost).restype, LLVMOrcJITTargetMachineBuilderDetectHost.argtypes = LLVMErrorRef, [ctypes.POINTER(LLVMOrcJITTargetMachineBuilderRef)]
 except AttributeError: pass
 
@@ -5299,17 +5300,17 @@ try: (LLVMOrcDisposeObjectLayer:=dll.LLVMOrcDisposeObjectLayer).restype, LLVMOrc
 except AttributeError: pass
 
 class struct_LLVMOrcOpaqueIRTransformLayer(Struct): pass
-LLVMOrcIRTransformLayerRef = ctypes.POINTER(struct_LLVMOrcOpaqueIRTransformLayer)
+LLVMOrcIRTransformLayerRef: TypeAlias = ctypes.POINTER(struct_LLVMOrcOpaqueIRTransformLayer)
 try: (LLVMOrcIRTransformLayerEmit:=dll.LLVMOrcIRTransformLayerEmit).restype, LLVMOrcIRTransformLayerEmit.argtypes = None, [LLVMOrcIRTransformLayerRef, LLVMOrcMaterializationResponsibilityRef, LLVMOrcThreadSafeModuleRef]
 except AttributeError: pass
 
-LLVMOrcIRTransformLayerTransformFunction = ctypes.CFUNCTYPE(ctypes.POINTER(struct_LLVMOpaqueError), ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(struct_LLVMOrcOpaqueThreadSafeModule)), ctypes.POINTER(struct_LLVMOrcOpaqueMaterializationResponsibility))
+LLVMOrcIRTransformLayerTransformFunction: TypeAlias = ctypes.CFUNCTYPE(ctypes.POINTER(struct_LLVMOpaqueError), ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(struct_LLVMOrcOpaqueThreadSafeModule)), ctypes.POINTER(struct_LLVMOrcOpaqueMaterializationResponsibility))
 try: (LLVMOrcIRTransformLayerSetTransform:=dll.LLVMOrcIRTransformLayerSetTransform).restype, LLVMOrcIRTransformLayerSetTransform.argtypes = None, [LLVMOrcIRTransformLayerRef, LLVMOrcIRTransformLayerTransformFunction, ctypes.c_void_p]
 except AttributeError: pass
 
 class struct_LLVMOrcOpaqueObjectTransformLayer(Struct): pass
-LLVMOrcObjectTransformLayerRef = ctypes.POINTER(struct_LLVMOrcOpaqueObjectTransformLayer)
-LLVMOrcObjectTransformLayerTransformFunction = ctypes.CFUNCTYPE(ctypes.POINTER(struct_LLVMOpaqueError), ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(struct_LLVMOpaqueMemoryBuffer)))
+LLVMOrcObjectTransformLayerRef: TypeAlias = ctypes.POINTER(struct_LLVMOrcOpaqueObjectTransformLayer)
+LLVMOrcObjectTransformLayerTransformFunction: TypeAlias = ctypes.CFUNCTYPE(ctypes.POINTER(struct_LLVMOpaqueError), ctypes.c_void_p, ctypes.POINTER(ctypes.POINTER(struct_LLVMOpaqueMemoryBuffer)))
 try: (LLVMOrcObjectTransformLayerSetTransform:=dll.LLVMOrcObjectTransformLayerSetTransform).restype, LLVMOrcObjectTransformLayerSetTransform.argtypes = None, [LLVMOrcObjectTransformLayerRef, LLVMOrcObjectTransformLayerTransformFunction, ctypes.c_void_p]
 except AttributeError: pass
 
@@ -5319,7 +5320,7 @@ except AttributeError: pass
 try: (LLVMOrcDisposeIndirectStubsManager:=dll.LLVMOrcDisposeIndirectStubsManager).restype, LLVMOrcDisposeIndirectStubsManager.argtypes = None, [LLVMOrcIndirectStubsManagerRef]
 except AttributeError: pass
 
-LLVMOrcJITTargetAddress = ctypes.c_uint64
+LLVMOrcJITTargetAddress: TypeAlias = ctypes.c_uint64
 try: (LLVMOrcCreateLocalLazyCallThroughManager:=dll.LLVMOrcCreateLocalLazyCallThroughManager).restype, LLVMOrcCreateLocalLazyCallThroughManager.argtypes = LLVMErrorRef, [ctypes.POINTER(ctypes.c_char), LLVMOrcExecutionSessionRef, LLVMOrcJITTargetAddress, ctypes.POINTER(LLVMOrcLazyCallThroughManagerRef)]
 except AttributeError: pass
 
@@ -5327,7 +5328,7 @@ try: (LLVMOrcDisposeLazyCallThroughManager:=dll.LLVMOrcDisposeLazyCallThroughMan
 except AttributeError: pass
 
 class struct_LLVMOrcOpaqueDumpObjects(Struct): pass
-LLVMOrcDumpObjectsRef = ctypes.POINTER(struct_LLVMOrcOpaqueDumpObjects)
+LLVMOrcDumpObjectsRef: TypeAlias = ctypes.POINTER(struct_LLVMOrcOpaqueDumpObjects)
 try: (LLVMOrcCreateDumpObjects:=dll.LLVMOrcCreateDumpObjects).restype, LLVMOrcCreateDumpObjects.argtypes = LLVMOrcDumpObjectsRef, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
@@ -5337,11 +5338,11 @@ except AttributeError: pass
 try: (LLVMOrcDumpObjects_CallOperator:=dll.LLVMOrcDumpObjects_CallOperator).restype, LLVMOrcDumpObjects_CallOperator.argtypes = LLVMErrorRef, [LLVMOrcDumpObjectsRef, ctypes.POINTER(LLVMMemoryBufferRef)]
 except AttributeError: pass
 
-LLVMOrcLLJITBuilderObjectLinkingLayerCreatorFunction = ctypes.CFUNCTYPE(ctypes.POINTER(struct_LLVMOrcOpaqueObjectLayer), ctypes.c_void_p, ctypes.POINTER(struct_LLVMOrcOpaqueExecutionSession), ctypes.POINTER(ctypes.c_char))
+LLVMOrcLLJITBuilderObjectLinkingLayerCreatorFunction: TypeAlias = ctypes.CFUNCTYPE(ctypes.POINTER(struct_LLVMOrcOpaqueObjectLayer), ctypes.c_void_p, ctypes.POINTER(struct_LLVMOrcOpaqueExecutionSession), ctypes.POINTER(ctypes.c_char))
 class struct_LLVMOrcOpaqueLLJITBuilder(Struct): pass
-LLVMOrcLLJITBuilderRef = ctypes.POINTER(struct_LLVMOrcOpaqueLLJITBuilder)
+LLVMOrcLLJITBuilderRef: TypeAlias = ctypes.POINTER(struct_LLVMOrcOpaqueLLJITBuilder)
 class struct_LLVMOrcOpaqueLLJIT(Struct): pass
-LLVMOrcLLJITRef = ctypes.POINTER(struct_LLVMOrcOpaqueLLJIT)
+LLVMOrcLLJITRef: TypeAlias = ctypes.POINTER(struct_LLVMOrcOpaqueLLJIT)
 try: (LLVMOrcCreateLLJITBuilder:=dll.LLVMOrcCreateLLJITBuilder).restype, LLVMOrcCreateLLJITBuilder.argtypes = LLVMOrcLLJITBuilderRef, []
 except AttributeError: pass
 
@@ -6364,11 +6365,11 @@ try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.
 except AttributeError: pass
 
 class struct_LLVMOpaqueSectionIterator(Struct): pass
-LLVMSectionIteratorRef = ctypes.POINTER(struct_LLVMOpaqueSectionIterator)
+LLVMSectionIteratorRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueSectionIterator)
 class struct_LLVMOpaqueSymbolIterator(Struct): pass
-LLVMSymbolIteratorRef = ctypes.POINTER(struct_LLVMOpaqueSymbolIterator)
+LLVMSymbolIteratorRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueSymbolIterator)
 class struct_LLVMOpaqueRelocationIterator(Struct): pass
-LLVMRelocationIteratorRef = ctypes.POINTER(struct_LLVMOpaqueRelocationIterator)
+LLVMRelocationIteratorRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueRelocationIterator)
 LLVMBinaryType = CEnum(ctypes.c_uint32)
 LLVMBinaryTypeArchive = LLVMBinaryType.define('LLVMBinaryTypeArchive', 0)
 LLVMBinaryTypeMachOUniversalBinary = LLVMBinaryType.define('LLVMBinaryTypeMachOUniversalBinary', 1)
@@ -6388,7 +6389,7 @@ LLVMBinaryTypeWasm = LLVMBinaryType.define('LLVMBinaryTypeWasm', 14)
 LLVMBinaryTypeOffload = LLVMBinaryType.define('LLVMBinaryTypeOffload', 15)
 
 class struct_LLVMOpaqueBinary(Struct): pass
-LLVMBinaryRef = ctypes.POINTER(struct_LLVMOpaqueBinary)
+LLVMBinaryRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueBinary)
 try: (LLVMCreateBinary:=dll.LLVMCreateBinary).restype, LLVMCreateBinary.argtypes = LLVMBinaryRef, [LLVMMemoryBufferRef, LLVMContextRef, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
 
@@ -6483,7 +6484,7 @@ try: (LLVMGetRelocationValueString:=dll.LLVMGetRelocationValueString).restype, L
 except AttributeError: pass
 
 class struct_LLVMOpaqueObjectFile(Struct): pass
-LLVMObjectFileRef = ctypes.POINTER(struct_LLVMOpaqueObjectFile)
+LLVMObjectFileRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueObjectFile)
 try: (LLVMCreateObjectFile:=dll.LLVMCreateObjectFile).restype, LLVMCreateObjectFile.argtypes = LLVMObjectFileRef, [LLVMMemoryBufferRef]
 except AttributeError: pass
 
@@ -7124,9 +7125,9 @@ LLVMJITSymbolGenericFlagsWeak = LLVMJITSymbolGenericFlags.define('LLVMJITSymbolG
 LLVMJITSymbolGenericFlagsCallable = LLVMJITSymbolGenericFlags.define('LLVMJITSymbolGenericFlagsCallable', 4)
 LLVMJITSymbolGenericFlagsMaterializationSideEffectsOnly = LLVMJITSymbolGenericFlags.define('LLVMJITSymbolGenericFlagsMaterializationSideEffectsOnly', 8)
 
-LLVMJITSymbolTargetFlags = ctypes.c_ubyte
+LLVMJITSymbolTargetFlags: TypeAlias = ctypes.c_ubyte
 class struct_LLVMOrcOpaqueObjectLinkingLayer(Struct): pass
-LLVMOrcObjectLinkingLayerRef = ctypes.POINTER(struct_LLVMOrcOpaqueObjectLinkingLayer)
+LLVMOrcObjectLinkingLayerRef: TypeAlias = ctypes.POINTER(struct_LLVMOrcOpaqueObjectLinkingLayer)
 try: (LLVMOrcExecutionSessionSetErrorReporter:=dll.LLVMOrcExecutionSessionSetErrorReporter).restype, LLVMOrcExecutionSessionSetErrorReporter.argtypes = None, [LLVMOrcExecutionSessionRef, LLVMOrcErrorReporterFunction, ctypes.c_void_p]
 except AttributeError: pass
 
@@ -8264,8 +8265,8 @@ except AttributeError: pass
 try: (LLVMOrcDumpObjects_CallOperator:=dll.LLVMOrcDumpObjects_CallOperator).restype, LLVMOrcDumpObjects_CallOperator.argtypes = LLVMErrorRef, [LLVMOrcDumpObjectsRef, ctypes.POINTER(LLVMMemoryBufferRef)]
 except AttributeError: pass
 
-LLVMMemoryManagerCreateContextCallback = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p)
-LLVMMemoryManagerNotifyTerminatingCallback = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
+LLVMMemoryManagerCreateContextCallback: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_void_p)
+LLVMMemoryManagerNotifyTerminatingCallback: TypeAlias = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
 try: (LLVMOrcCreateRTDyldObjectLinkingLayerWithSectionMemoryManager:=dll.LLVMOrcCreateRTDyldObjectLinkingLayerWithSectionMemoryManager).restype, LLVMOrcCreateRTDyldObjectLinkingLayerWithSectionMemoryManager.argtypes = LLVMOrcObjectLayerRef, [LLVMOrcExecutionSessionRef]
 except AttributeError: pass
 
@@ -8321,7 +8322,7 @@ LLVMRemarkTypeAnalysisAliasing = enum_LLVMRemarkType.define('LLVMRemarkTypeAnaly
 LLVMRemarkTypeFailure = enum_LLVMRemarkType.define('LLVMRemarkTypeFailure', 6)
 
 class struct_LLVMRemarkOpaqueString(Struct): pass
-LLVMRemarkStringRef = ctypes.POINTER(struct_LLVMRemarkOpaqueString)
+LLVMRemarkStringRef: TypeAlias = ctypes.POINTER(struct_LLVMRemarkOpaqueString)
 try: (LLVMRemarkStringGetData:=dll.LLVMRemarkStringGetData).restype, LLVMRemarkStringGetData.argtypes = ctypes.POINTER(ctypes.c_char), [LLVMRemarkStringRef]
 except AttributeError: pass
 
@@ -8329,7 +8330,7 @@ try: (LLVMRemarkStringGetLen:=dll.LLVMRemarkStringGetLen).restype, LLVMRemarkStr
 except AttributeError: pass
 
 class struct_LLVMRemarkOpaqueDebugLoc(Struct): pass
-LLVMRemarkDebugLocRef = ctypes.POINTER(struct_LLVMRemarkOpaqueDebugLoc)
+LLVMRemarkDebugLocRef: TypeAlias = ctypes.POINTER(struct_LLVMRemarkOpaqueDebugLoc)
 try: (LLVMRemarkDebugLocGetSourceFilePath:=dll.LLVMRemarkDebugLocGetSourceFilePath).restype, LLVMRemarkDebugLocGetSourceFilePath.argtypes = LLVMRemarkStringRef, [LLVMRemarkDebugLocRef]
 except AttributeError: pass
 
@@ -8340,7 +8341,7 @@ try: (LLVMRemarkDebugLocGetSourceColumn:=dll.LLVMRemarkDebugLocGetSourceColumn).
 except AttributeError: pass
 
 class struct_LLVMRemarkOpaqueArg(Struct): pass
-LLVMRemarkArgRef = ctypes.POINTER(struct_LLVMRemarkOpaqueArg)
+LLVMRemarkArgRef: TypeAlias = ctypes.POINTER(struct_LLVMRemarkOpaqueArg)
 try: (LLVMRemarkArgGetKey:=dll.LLVMRemarkArgGetKey).restype, LLVMRemarkArgGetKey.argtypes = LLVMRemarkStringRef, [LLVMRemarkArgRef]
 except AttributeError: pass
 
@@ -8351,7 +8352,7 @@ try: (LLVMRemarkArgGetDebugLoc:=dll.LLVMRemarkArgGetDebugLoc).restype, LLVMRemar
 except AttributeError: pass
 
 class struct_LLVMRemarkOpaqueEntry(Struct): pass
-LLVMRemarkEntryRef = ctypes.POINTER(struct_LLVMRemarkOpaqueEntry)
+LLVMRemarkEntryRef: TypeAlias = ctypes.POINTER(struct_LLVMRemarkOpaqueEntry)
 try: (LLVMRemarkEntryDispose:=dll.LLVMRemarkEntryDispose).restype, LLVMRemarkEntryDispose.argtypes = None, [LLVMRemarkEntryRef]
 except AttributeError: pass
 
@@ -8383,7 +8384,7 @@ try: (LLVMRemarkEntryGetNextArg:=dll.LLVMRemarkEntryGetNextArg).restype, LLVMRem
 except AttributeError: pass
 
 class struct_LLVMRemarkOpaqueParser(Struct): pass
-LLVMRemarkParserRef = ctypes.POINTER(struct_LLVMRemarkOpaqueParser)
+LLVMRemarkParserRef: TypeAlias = ctypes.POINTER(struct_LLVMRemarkOpaqueParser)
 try: (LLVMRemarkParserCreateYAML:=dll.LLVMRemarkParserCreateYAML).restype, LLVMRemarkParserCreateYAML.argtypes = LLVMRemarkParserRef, [ctypes.c_void_p, uint64_t]
 except AttributeError: pass
 
@@ -10146,7 +10147,7 @@ try: (LLVMAddAnalysisPasses:=dll.LLVMAddAnalysisPasses).restype, LLVMAddAnalysis
 except AttributeError: pass
 
 class struct_LLVMOpaquePassBuilderOptions(Struct): pass
-LLVMPassBuilderOptionsRef = ctypes.POINTER(struct_LLVMOpaquePassBuilderOptions)
+LLVMPassBuilderOptionsRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaquePassBuilderOptions)
 try: (LLVMRunPasses:=dll.LLVMRunPasses).restype, LLVMRunPasses.argtypes = LLVMErrorRef, [LLVMModuleRef, ctypes.POINTER(ctypes.c_char), LLVMTargetMachineRef, LLVMPassBuilderOptionsRef]
 except AttributeError: pass
 
@@ -10283,7 +10284,7 @@ except AttributeError: pass
 try: (pselect:=dll.pselect).restype, pselect.argtypes = ctypes.c_int32, [ctypes.c_int32, ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(fd_set), ctypes.POINTER(struct_timespec), ctypes.POINTER(__sigset_t)]
 except AttributeError: pass
 
-lto_bool_t = ctypes.c_bool
+lto_bool_t: TypeAlias = ctypes.c_bool
 lto_symbol_attributes = CEnum(ctypes.c_uint32)
 LTO_SYMBOL_ALIGNMENT_MASK = lto_symbol_attributes.define('LTO_SYMBOL_ALIGNMENT_MASK', 31)
 LTO_SYMBOL_PERMISSIONS_MASK = lto_symbol_attributes.define('LTO_SYMBOL_PERMISSIONS_MASK', 224)
@@ -10316,11 +10317,11 @@ LTO_CODEGEN_PIC_MODEL_DYNAMIC_NO_PIC = lto_codegen_model.define('LTO_CODEGEN_PIC
 LTO_CODEGEN_PIC_MODEL_DEFAULT = lto_codegen_model.define('LTO_CODEGEN_PIC_MODEL_DEFAULT', 3)
 
 class struct_LLVMOpaqueLTOModule(Struct): pass
-lto_module_t = ctypes.POINTER(struct_LLVMOpaqueLTOModule)
+lto_module_t: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueLTOModule)
 class struct_LLVMOpaqueLTOCodeGenerator(Struct): pass
-lto_code_gen_t = ctypes.POINTER(struct_LLVMOpaqueLTOCodeGenerator)
+lto_code_gen_t: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueLTOCodeGenerator)
 class struct_LLVMOpaqueThinLTOCodeGenerator(Struct): pass
-thinlto_code_gen_t = ctypes.POINTER(struct_LLVMOpaqueThinLTOCodeGenerator)
+thinlto_code_gen_t: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueThinLTOCodeGenerator)
 try: (lto_get_version:=dll.lto_get_version).restype, lto_get_version.argtypes = ctypes.POINTER(ctypes.c_char), []
 except AttributeError: pass
 
@@ -10360,7 +10361,7 @@ except AttributeError: pass
 try: (lto_module_create_from_fd:=dll.lto_module_create_from_fd).restype, lto_module_create_from_fd.argtypes = lto_module_t, [ctypes.c_int32, ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
-off_t = ctypes.c_int64
+off_t: TypeAlias = ctypes.c_int64
 try: (lto_module_create_from_fd_at_offset:=dll.lto_module_create_from_fd_at_offset).restype, lto_module_create_from_fd_at_offset.argtypes = lto_module_t, [ctypes.c_int32, ctypes.POINTER(ctypes.c_char), size_t, size_t, off_t]
 except AttributeError: pass
 
@@ -10397,7 +10398,7 @@ LTO_DS_WARNING = lto_codegen_diagnostic_severity_t.define('LTO_DS_WARNING', 1)
 LTO_DS_REMARK = lto_codegen_diagnostic_severity_t.define('LTO_DS_REMARK', 3)
 LTO_DS_NOTE = lto_codegen_diagnostic_severity_t.define('LTO_DS_NOTE', 2)
 
-lto_diagnostic_handler_t = ctypes.CFUNCTYPE(None, lto_codegen_diagnostic_severity_t, ctypes.POINTER(ctypes.c_char), ctypes.c_void_p)
+lto_diagnostic_handler_t: TypeAlias = ctypes.CFUNCTYPE(None, lto_codegen_diagnostic_severity_t, ctypes.POINTER(ctypes.c_char), ctypes.c_void_p)
 try: (lto_codegen_set_diagnostic_handler:=dll.lto_codegen_set_diagnostic_handler).restype, lto_codegen_set_diagnostic_handler.argtypes = None, [lto_code_gen_t, lto_diagnostic_handler_t, ctypes.c_void_p]
 except AttributeError: pass
 
@@ -10471,7 +10472,7 @@ try: (lto_codegen_set_should_embed_uselists:=dll.lto_codegen_set_should_embed_us
 except AttributeError: pass
 
 class struct_LLVMOpaqueLTOInput(Struct): pass
-lto_input_t = ctypes.POINTER(struct_LLVMOpaqueLTOInput)
+lto_input_t: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueLTOInput)
 try: (lto_input_create:=dll.lto_input_create).restype, lto_input_create.argtypes = lto_input_t, [ctypes.c_void_p, size_t, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 

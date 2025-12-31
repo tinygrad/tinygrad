@@ -1,9 +1,10 @@
 # mypy: ignore-errors
 import ctypes
 from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from typing import TypeAlias
 class struct_vfio_info_cap_header(Struct): pass
-__u16 = ctypes.c_uint16
-__u32 = ctypes.c_uint32
+__u16: TypeAlias = ctypes.c_uint16
+__u32: TypeAlias = ctypes.c_uint32
 struct_vfio_info_cap_header._fields_ = [
   ('id', ctypes.c_uint16),
   ('version', ctypes.c_uint16),
@@ -30,7 +31,7 @@ struct_vfio_device_info_cap_pci_atomic_comp._fields_ = [
   ('reserved', ctypes.c_uint32),
 ]
 class struct_vfio_region_info(Struct): pass
-__u64 = ctypes.c_uint64
+__u64: TypeAlias = ctypes.c_uint64
 struct_vfio_region_info._fields_ = [
   ('argsz', ctypes.c_uint32),
   ('flags', ctypes.c_uint32),
@@ -93,7 +94,7 @@ struct_vfio_irq_info._fields_ = [
   ('count', ctypes.c_uint32),
 ]
 class struct_vfio_irq_set(Struct): pass
-__u8 = ctypes.c_ubyte
+__u8: TypeAlias = ctypes.c_ubyte
 struct_vfio_irq_set._fields_ = [
   ('argsz', ctypes.c_uint32),
   ('flags', ctypes.c_uint32),
@@ -157,7 +158,7 @@ struct_vfio_pci_hot_reset_info._fields_ = [
   ('devices', (struct_vfio_pci_dependent_device * 0)),
 ]
 class struct_vfio_pci_hot_reset(Struct): pass
-__s32 = ctypes.c_int32
+__s32: TypeAlias = ctypes.c_int32
 struct_vfio_pci_hot_reset._fields_ = [
   ('argsz', ctypes.c_uint32),
   ('flags', ctypes.c_uint32),

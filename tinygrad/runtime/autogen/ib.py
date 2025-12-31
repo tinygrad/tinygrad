@@ -1,11 +1,12 @@
 # mypy: ignore-errors
 import ctypes
 from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from typing import TypeAlias
 dll = DLL('ib', 'ibverbs', use_errno=True)
 class union_ibv_gid(ctypes.Union): pass
-uint8_t = ctypes.c_ubyte
+uint8_t: TypeAlias = ctypes.c_ubyte
 class union_ibv_gid_global(Struct): pass
-__be64 = ctypes.c_uint64
+__be64: TypeAlias = ctypes.c_uint64
 union_ibv_gid_global._fields_ = [
   ('subnet_prefix', ctypes.c_uint64),
   ('interface_id', ctypes.c_uint64),
@@ -20,7 +21,7 @@ IBV_GID_TYPE_ROCE_V1 = enum_ibv_gid_type.define('IBV_GID_TYPE_ROCE_V1', 1)
 IBV_GID_TYPE_ROCE_V2 = enum_ibv_gid_type.define('IBV_GID_TYPE_ROCE_V2', 2)
 
 class struct_ibv_gid_entry(Struct): pass
-uint32_t = ctypes.c_uint32
+uint32_t: TypeAlias = ctypes.c_uint32
 struct_ibv_gid_entry._fields_ = [
   ('gid', union_ibv_gid),
   ('gid_index', uint32_t),
@@ -83,7 +84,7 @@ IBV_ATOMIC_HCA = enum_ibv_atomic_cap.define('IBV_ATOMIC_HCA', 1)
 IBV_ATOMIC_GLOB = enum_ibv_atomic_cap.define('IBV_ATOMIC_GLOB', 2)
 
 class struct_ibv_alloc_dm_attr(Struct): pass
-size_t = ctypes.c_uint64
+size_t: TypeAlias = ctypes.c_uint64
 struct_ibv_alloc_dm_attr._fields_ = [
   ('length', size_t),
   ('log_align_req', uint32_t),
@@ -111,8 +112,8 @@ struct_ibv_device._fields_ = [
 ]
 class struct_ibv_context_ops(Struct): pass
 class struct_ibv_device_attr(Struct): pass
-uint64_t = ctypes.c_uint64
-uint16_t = ctypes.c_uint16
+uint64_t: TypeAlias = ctypes.c_uint64
+uint16_t: TypeAlias = ctypes.c_uint16
 struct_ibv_device_attr._fields_ = [
   ('fw_ver', (ctypes.c_char * 64)),
   ('node_guid', ctypes.c_uint64),
@@ -184,7 +185,7 @@ struct_ibv_comp_channel._fields_ = [
 class pthread_mutex_t(ctypes.Union): pass
 class struct___pthread_mutex_s(Struct): pass
 class struct___pthread_internal_list(Struct): pass
-__pthread_list_t = struct___pthread_internal_list
+__pthread_list_t: TypeAlias = struct___pthread_internal_list
 struct___pthread_internal_list._fields_ = [
   ('__prev', ctypes.POINTER(struct___pthread_internal_list)),
   ('__next', ctypes.POINTER(struct___pthread_internal_list)),
@@ -358,7 +359,7 @@ IBV_WC_DRIVER2 = enum_ibv_wc_opcode.define('IBV_WC_DRIVER2', 136)
 IBV_WC_DRIVER3 = enum_ibv_wc_opcode.define('IBV_WC_DRIVER3', 137)
 
 class struct_ibv_wc_0(ctypes.Union): pass
-__be32 = ctypes.c_uint32
+__be32: TypeAlias = ctypes.c_uint32
 struct_ibv_wc_0._fields_ = [
   ('imm_data', ctypes.c_uint32),
   ('invalidated_rkey', uint32_t),
@@ -874,7 +875,7 @@ struct_ibv_global_route._fields_ = [
   ('traffic_class', uint8_t),
 ]
 class struct_ibv_grh(Struct): pass
-__be16 = ctypes.c_uint16
+__be16: TypeAlias = ctypes.c_uint16
 struct_ibv_grh._fields_ = [
   ('version_tclass_flow', ctypes.c_uint32),
   ('paylen', ctypes.c_uint16),
@@ -1560,8 +1561,8 @@ IBV_FLOW_ACTION_ESP_MASK_ESN = enum_ibv_flow_action_esp_mask.define('IBV_FLOW_AC
 
 class struct_ibv_flow_action_esp_attr(Struct): pass
 class struct_ib_uverbs_flow_action_esp(Struct): pass
-__u32 = ctypes.c_uint32
-__u64 = ctypes.c_uint64
+__u32: TypeAlias = ctypes.c_uint32
+__u64: TypeAlias = ctypes.c_uint64
 struct_ib_uverbs_flow_action_esp._fields_ = [
   ('spi', ctypes.c_uint32),
   ('seq', ctypes.c_uint32),
@@ -1587,7 +1588,7 @@ struct_ib_uverbs_flow_action_esp_encap_1._fields_ = [
   ('next_ptr', ctypes.POINTER(struct_ib_uverbs_flow_action_esp_encap)),
   ('next_ptr_data_u64', ctypes.c_uint64),
 ]
-__u16 = ctypes.c_uint16
+__u16: TypeAlias = ctypes.c_uint16
 struct_ib_uverbs_flow_action_esp_encap._anonymous_ = ['_0', '_1']
 struct_ib_uverbs_flow_action_esp_encap._fields_ = [
   ('_0', struct_ib_uverbs_flow_action_esp_encap_0),
@@ -1666,8 +1667,8 @@ IBV_VALUES_MASK_RESERVED = enum_ibv_values_mask.define('IBV_VALUES_MASK_RESERVED
 
 class struct_ibv_values_ex(Struct): pass
 class struct_timespec(Struct): pass
-__time_t = ctypes.c_int64
-__syscall_slong_t = ctypes.c_int64
+__time_t: TypeAlias = ctypes.c_int64
+__syscall_slong_t: TypeAlias = ctypes.c_int64
 struct_timespec._fields_ = [
   ('tv_sec', ctypes.c_int64),
   ('tv_nsec', ctypes.c_int64),
@@ -1786,7 +1787,7 @@ except AttributeError: pass
 try: (_ibv_query_gid_ex:=dll._ibv_query_gid_ex).restype, _ibv_query_gid_ex.argtypes = ctypes.c_int32, [ctypes.POINTER(struct_ibv_context), uint32_t, uint32_t, ctypes.POINTER(struct_ibv_gid_entry), uint32_t, size_t]
 except AttributeError: pass
 
-ssize_t = ctypes.c_int64
+ssize_t: TypeAlias = ctypes.c_int64
 try: (_ibv_query_gid_table:=dll._ibv_query_gid_table).restype, _ibv_query_gid_table.argtypes = ssize_t, [ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_gid_entry), size_t, uint32_t, size_t]
 except AttributeError: pass
 
@@ -2031,7 +2032,7 @@ IB_UVERBS_ADVISE_MR_FLAG_FLUSH = enum_ib_uverbs_advise_mr_flag.define('IB_UVERBS
 
 class struct_ib_uverbs_query_port_resp_ex(Struct): pass
 class struct_ib_uverbs_query_port_resp(Struct): pass
-__u8 = ctypes.c_ubyte
+__u8: TypeAlias = ctypes.c_ubyte
 struct_ib_uverbs_query_port_resp._fields_ = [
   ('port_cap_flags', ctypes.c_uint32),
   ('max_msg_sz', ctypes.c_uint32),
@@ -2415,7 +2416,7 @@ struct_ib_uverbs_create_comp_channel_resp._fields_ = [
   ('fd', ctypes.c_uint32),
 ]
 class struct_ib_uverbs_create_cq(Struct): pass
-__s32 = ctypes.c_int32
+__s32: TypeAlias = ctypes.c_int32
 struct_ib_uverbs_create_cq._fields_ = [
   ('response', ctypes.c_uint64),
   ('user_handle', ctypes.c_uint64),

@@ -1,8 +1,9 @@
 # mypy: ignore-errors
 import ctypes
 from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-PPSMC_Result = ctypes.c_uint32
-PPSMC_MSG = ctypes.c_uint32
+from typing import TypeAlias
+PPSMC_Result: TypeAlias = ctypes.c_uint32
+PPSMC_MSG: TypeAlias = ctypes.c_uint32
 FEATURE_LIST_e = CEnum(ctypes.c_uint32)
 FEATURE_DATA_CALCULATION = FEATURE_LIST_e.define('FEATURE_DATA_CALCULATION', 0)
 FEATURE_DPM_CCLK = FEATURE_LIST_e.define('FEATURE_DPM_CCLK', 1)
@@ -87,8 +88,8 @@ VOLTAGE_HOT_7 = GFX_GUARDBAND_e.define('VOLTAGE_HOT_7', 23)
 VOLTAGE_GUARDBAND_COUNT = GFX_GUARDBAND_e.define('VOLTAGE_GUARDBAND_COUNT', 24)
 
 class MetricsTableX_t(Struct): pass
-uint32_t = ctypes.c_uint32
-uint64_t = ctypes.c_uint64
+uint32_t: TypeAlias = ctypes.c_uint32
+uint64_t: TypeAlias = ctypes.c_uint64
 MetricsTableX_t._fields_ = [
   ('AccumulationCounter', uint32_t),
   ('MaxSocketTemperature', uint32_t),
@@ -329,7 +330,7 @@ MP5_CODE_SMN_SLVERR = GC_ERROR_CODE_e.define('MP5_CODE_SMN_SLVERR', 40)
 MP5_CODE_UNKNOWN = GC_ERROR_CODE_e.define('MP5_CODE_UNKNOWN', 42)
 
 class SwI2cCmd_t(Struct): pass
-uint8_t = ctypes.c_ubyte
+uint8_t: TypeAlias = ctypes.c_ubyte
 SwI2cCmd_t._fields_ = [
   ('ReadWriteData', uint8_t),
   ('CmdConfig', uint8_t),
@@ -366,7 +367,7 @@ UCLK_DPM_MODE_BANDWIDTH = UCLK_DPM_MODE_e.define('UCLK_DPM_MODE_BANDWIDTH', 0)
 UCLK_DPM_MODE_LATENCY = UCLK_DPM_MODE_e.define('UCLK_DPM_MODE_LATENCY', 1)
 
 class AvfsDebugTableAid_t(Struct): pass
-uint16_t = ctypes.c_uint16
+uint16_t: TypeAlias = ctypes.c_uint16
 AvfsDebugTableAid_t._fields_ = [
   ('avgPsmCount', (uint16_t * 30)),
   ('minPsmCount', (uint16_t * 30)),

@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 import ctypes
 from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from typing import TypeAlias
 class union_PM4_MES_TYPE_3_HEADER(ctypes.Union): pass
 enum_mes_set_resources_queue_type_enum = CEnum(ctypes.c_uint32)
 queue_type__mes_set_resources__kernel_interface_queue_kiq = enum_mes_set_resources_queue_type_enum.define('queue_type__mes_set_resources__kernel_interface_queue_kiq', 0)

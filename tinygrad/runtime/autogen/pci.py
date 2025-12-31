@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 import ctypes
 from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from typing import TypeAlias
 PCI_CFG_SPACE_SIZE = 256
 PCI_CFG_SPACE_EXP_SIZE = 4096
 PCI_STD_HEADER_SIZEOF = 64

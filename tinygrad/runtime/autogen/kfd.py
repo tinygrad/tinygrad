@@ -1,14 +1,15 @@
 # mypy: ignore-errors
 import ctypes
 from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from typing import TypeAlias
 class struct_kfd_ioctl_get_version_args(Struct): pass
-__u32 = ctypes.c_uint32
+__u32: TypeAlias = ctypes.c_uint32
 struct_kfd_ioctl_get_version_args._fields_ = [
   ('major_version', ctypes.c_uint32),
   ('minor_version', ctypes.c_uint32),
 ]
 class struct_kfd_ioctl_create_queue_args(Struct): pass
-__u64 = ctypes.c_uint64
+__u64: TypeAlias = ctypes.c_uint64
 struct_kfd_ioctl_create_queue_args._fields_ = [
   ('ring_base_address', ctypes.c_uint64),
   ('write_pointer_address', ctypes.c_uint64),
@@ -417,7 +418,7 @@ struct_kfd_ioctl_svm_args._fields_ = [
   ('attrs', (struct_kfd_ioctl_svm_attribute * 0)),
 ]
 class struct_kfd_ioctl_set_xnack_mode_args(Struct): pass
-__s32 = ctypes.c_int32
+__s32: TypeAlias = ctypes.c_int32
 struct_kfd_ioctl_set_xnack_mode_args._fields_ = [
   ('xnack_enabled', ctypes.c_int32),
 ]

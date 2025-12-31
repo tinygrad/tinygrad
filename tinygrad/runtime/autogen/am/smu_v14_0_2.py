@@ -1,13 +1,14 @@
 # mypy: ignore-errors
 import ctypes
 from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from typing import TypeAlias
 class struct_SMU14_Firmware_Footer(Struct): pass
-uint32_t = ctypes.c_uint32
+uint32_t: TypeAlias = ctypes.c_uint32
 struct_SMU14_Firmware_Footer._packed_ = True
 struct_SMU14_Firmware_Footer._fields_ = [
   ('Signature', uint32_t),
 ]
-SMU14_Firmware_Footer = struct_SMU14_Firmware_Footer
+SMU14_Firmware_Footer: TypeAlias = struct_SMU14_Firmware_Footer
 class SMU_Firmware_Header(Struct): pass
 SMU_Firmware_Header._packed_ = True
 SMU_Firmware_Header._fields_ = [
@@ -162,7 +163,7 @@ I2C_CONTROLLER_PROTOCOL_TMP_MAX6604 = I2cControllerProtocol_e.define('I2C_CONTRO
 I2C_CONTROLLER_PROTOCOL_COUNT = I2cControllerProtocol_e.define('I2C_CONTROLLER_PROTOCOL_COUNT', 5)
 
 class I2cControllerConfig_t(Struct): pass
-uint8_t = ctypes.c_ubyte
+uint8_t: TypeAlias = ctypes.c_ubyte
 I2cControllerConfig_t._fields_ = [
   ('Enabled', uint8_t),
   ('Speed', uint8_t),
@@ -211,8 +212,8 @@ SwI2cRequestExternal_t._fields_ = [
   ('MmHubPadding', (uint32_t * 8)),
 ]
 class EccInfo_t(Struct): pass
-uint64_t = ctypes.c_uint64
-uint16_t = ctypes.c_uint16
+uint64_t: TypeAlias = ctypes.c_uint64
+uint16_t: TypeAlias = ctypes.c_uint16
 EccInfo_t._fields_ = [
   ('mca_umc_status', uint64_t),
   ('mca_umc_addr', uint64_t),
@@ -475,7 +476,7 @@ PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_4 = PP_GRTAVFS_FW_SEP_FUSE_e.de
 PP_GRTAVFS_FW_SEP_FUSE_COUNT = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_COUNT', 19)
 
 class SviTelemetryScale_t(Struct): pass
-int8_t = ctypes.c_byte
+int8_t: TypeAlias = ctypes.c_byte
 SviTelemetryScale_t._fields_ = [
   ('Offset', int8_t),
   ('Padding', uint8_t),
@@ -521,7 +522,7 @@ OD_OP_GFX_PCC_ERROR = OD_FAIL_e.define('OD_OP_GFX_PCC_ERROR', 26)
 OD_POWER_FEATURE_CTRL_ERROR = OD_FAIL_e.define('OD_POWER_FEATURE_CTRL_ERROR', 27)
 
 class OverDriveTable_t(Struct): pass
-int16_t = ctypes.c_int16
+int16_t: TypeAlias = ctypes.c_int16
 OverDriveTable_t._fields_ = [
   ('FeatureCtrlMask', uint32_t),
   ('VoltageOffsetPerZoneBoundary', (int16_t * 6)),
@@ -753,7 +754,7 @@ PFE_Settings_t._fields_ = [
   ('Spare', (uint32_t * 2)),
 ]
 class SkuTable_t(Struct): pass
-int32_t = ctypes.c_int32
+int32_t: TypeAlias = ctypes.c_int32
 SkuTable_t._fields_ = [
   ('Version', uint32_t),
   ('TotalPowerConfig', uint8_t),

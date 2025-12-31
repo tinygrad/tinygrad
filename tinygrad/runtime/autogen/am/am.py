@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 import ctypes
 from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from typing import TypeAlias
 class struct_v11_gfx_mqd(Struct): pass
 struct_v11_gfx_mqd._fields_ = [
   ('shadow_base_lo', ctypes.c_uint32),
@@ -1163,7 +1164,7 @@ struct_v11_compute_mqd._fields_ = [
   ('gws_63_val', ctypes.c_uint32),
 ]
 class struct_v12_gfx_mqd(Struct): pass
-uint32_t = ctypes.c_uint32
+uint32_t: TypeAlias = ctypes.c_uint32
 struct_v12_gfx_mqd._fields_ = [
   ('shadow_base_lo', uint32_t),
   ('shadow_base_hi', uint32_t),
@@ -2340,7 +2341,7 @@ NPS_INFO = table.define('NPS_INFO', 5)
 TOTAL_TABLES = table.define('TOTAL_TABLES', 6)
 
 class struct_table_info(Struct): pass
-uint16_t = ctypes.c_uint16
+uint16_t: TypeAlias = ctypes.c_uint16
 struct_table_info._packed_ = True
 struct_table_info._fields_ = [
   ('offset', uint16_t),
@@ -2348,7 +2349,7 @@ struct_table_info._fields_ = [
   ('size', uint16_t),
   ('padding', uint16_t),
 ]
-table_info = struct_table_info
+table_info: TypeAlias = struct_table_info
 class struct_binary_header(Struct): pass
 struct_binary_header._packed_ = True
 struct_binary_header._fields_ = [
@@ -2359,18 +2360,18 @@ struct_binary_header._fields_ = [
   ('binary_size', uint16_t),
   ('table_list', (table_info * 6)),
 ]
-binary_header = struct_binary_header
+binary_header: TypeAlias = struct_binary_header
 class struct_die_info(Struct): pass
 struct_die_info._packed_ = True
 struct_die_info._fields_ = [
   ('die_id', uint16_t),
   ('die_offset', uint16_t),
 ]
-die_info = struct_die_info
+die_info: TypeAlias = struct_die_info
 class struct_ip_discovery_header(Struct): pass
 class struct_ip_discovery_header_0(ctypes.Union): pass
 class struct_ip_discovery_header_0_0(Struct): pass
-uint8_t = ctypes.c_ubyte
+uint8_t: TypeAlias = ctypes.c_ubyte
 struct_ip_discovery_header_0_0._fields_ = [
   ('base_addr_64_bit', uint8_t,1),
   ('reserved', uint8_t,7),
@@ -2393,7 +2394,7 @@ struct_ip_discovery_header._fields_ = [
   ('die_info', (die_info * 16)),
   ('_0', struct_ip_discovery_header_0),
 ]
-ip_discovery_header = struct_ip_discovery_header
+ip_discovery_header: TypeAlias = struct_ip_discovery_header
 class struct_ip(Struct): pass
 struct_ip._packed_ = True
 struct_ip._fields_ = [
@@ -2407,7 +2408,7 @@ struct_ip._fields_ = [
   ('reserved', uint8_t,4),
   ('base_address', (uint32_t * 0)),
 ]
-ip = struct_ip
+ip: TypeAlias = struct_ip
 class struct_ip_v3(Struct): pass
 struct_ip_v3._packed_ = True
 struct_ip_v3._fields_ = [
@@ -2421,7 +2422,7 @@ struct_ip_v3._fields_ = [
   ('variant', uint8_t,4),
   ('base_address', (uint32_t * 0)),
 ]
-ip_v3 = struct_ip_v3
+ip_v3: TypeAlias = struct_ip_v3
 class struct_ip_v4(Struct): pass
 struct_ip_v4._packed_ = True
 struct_ip_v4._fields_ = [
@@ -2432,14 +2433,14 @@ struct_ip_v4._fields_ = [
   ('minor', uint8_t),
   ('revision', uint8_t),
 ]
-ip_v4 = struct_ip_v4
+ip_v4: TypeAlias = struct_ip_v4
 class struct_die_header(Struct): pass
 struct_die_header._packed_ = True
 struct_die_header._fields_ = [
   ('die_id', uint16_t),
   ('num_ips', uint16_t),
 ]
-die_header = struct_die_header
+die_header: TypeAlias = struct_die_header
 class struct_ip_structure(Struct): pass
 class struct_die(Struct): pass
 class struct_die_0(ctypes.Union): pass
@@ -2460,7 +2461,7 @@ struct_ip_structure._fields_ = [
   ('header', ctypes.POINTER(ip_discovery_header)),
   ('die', struct_die),
 ]
-ip_structure = struct_ip_structure
+ip_structure: TypeAlias = struct_ip_structure
 class struct_gpu_info_header(Struct): pass
 struct_gpu_info_header._packed_ = True
 struct_gpu_info_header._fields_ = [
@@ -2655,7 +2656,7 @@ struct_harvest_info_header._fields_ = [
   ('signature', uint32_t),
   ('version', uint32_t),
 ]
-harvest_info_header = struct_harvest_info_header
+harvest_info_header: TypeAlias = struct_harvest_info_header
 class struct_harvest_info(Struct): pass
 struct_harvest_info._packed_ = True
 struct_harvest_info._fields_ = [
@@ -2663,13 +2664,13 @@ struct_harvest_info._fields_ = [
   ('number_instance', uint8_t),
   ('reserved', uint8_t),
 ]
-harvest_info = struct_harvest_info
+harvest_info: TypeAlias = struct_harvest_info
 class struct_harvest_table(Struct): pass
 struct_harvest_table._fields_ = [
   ('header', harvest_info_header),
   ('list', (harvest_info * 32)),
 ]
-harvest_table = struct_harvest_table
+harvest_table: TypeAlias = struct_harvest_table
 class struct_mall_info_header(Struct): pass
 struct_mall_info_header._packed_ = True
 struct_mall_info_header._fields_ = [
@@ -2742,7 +2743,7 @@ struct_nps_info_header._fields_ = [
   ('size_bytes', uint32_t),
 ]
 class struct_nps_instance_info_v1_0(Struct): pass
-uint64_t = ctypes.c_uint64
+uint64_t: TypeAlias = ctypes.c_uint64
 struct_nps_instance_info_v1_0._packed_ = True
 struct_nps_instance_info_v1_0._fields_ = [
   ('base_address', uint64_t),

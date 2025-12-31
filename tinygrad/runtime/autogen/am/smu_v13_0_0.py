@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 import ctypes
 from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from typing import TypeAlias
 FEATURE_PWR_DOMAIN_e = CEnum(ctypes.c_uint32)
 FEATURE_PWR_ALL = FEATURE_PWR_DOMAIN_e.define('FEATURE_PWR_ALL', 0)
 FEATURE_PWR_S5 = FEATURE_PWR_DOMAIN_e.define('FEATURE_PWR_S5', 1)
@@ -77,7 +78,7 @@ I2C_CONTROLLER_PROTOCOL_TMP_MAX6604 = I2cControllerProtocol_e.define('I2C_CONTRO
 I2C_CONTROLLER_PROTOCOL_COUNT = I2cControllerProtocol_e.define('I2C_CONTROLLER_PROTOCOL_COUNT', 5)
 
 class I2cControllerConfig_t(Struct): pass
-uint8_t = ctypes.c_ubyte
+uint8_t: TypeAlias = ctypes.c_ubyte
 I2cControllerConfig_t._fields_ = [
   ('Enabled', uint8_t),
   ('Speed', uint8_t),
@@ -120,15 +121,15 @@ SwI2cRequest_t._fields_ = [
   ('SwI2cCmds', (SwI2cCmd_t * 24)),
 ]
 class SwI2cRequestExternal_t(Struct): pass
-uint32_t = ctypes.c_uint32
+uint32_t: TypeAlias = ctypes.c_uint32
 SwI2cRequestExternal_t._fields_ = [
   ('SwI2cRequest', SwI2cRequest_t),
   ('Spare', (uint32_t * 8)),
   ('MmHubPadding', (uint32_t * 8)),
 ]
 class EccInfo_t(Struct): pass
-uint64_t = ctypes.c_uint64
-uint16_t = ctypes.c_uint16
+uint64_t: TypeAlias = ctypes.c_uint64
+uint16_t: TypeAlias = ctypes.c_uint16
 EccInfo_t._fields_ = [
   ('mca_umc_status', uint64_t),
   ('mca_umc_addr', uint64_t),
@@ -388,7 +389,7 @@ PP_GRTAVFS_FW_SEP_FUSE_FREQUENCY_TO_COUNT_SCALER_4 = PP_GRTAVFS_FW_SEP_FUSE_e.de
 PP_GRTAVFS_FW_SEP_FUSE_COUNT = PP_GRTAVFS_FW_SEP_FUSE_e.define('PP_GRTAVFS_FW_SEP_FUSE_COUNT', 19)
 
 class SviTelemetryScale_t(Struct): pass
-int8_t = ctypes.c_byte
+int8_t: TypeAlias = ctypes.c_byte
 SviTelemetryScale_t._fields_ = [
   ('Offset', int8_t),
   ('Padding', uint8_t),
@@ -399,7 +400,7 @@ FAN_MODE_AUTO = FanMode_e.define('FAN_MODE_AUTO', 0)
 FAN_MODE_MANUAL_LINEAR = FanMode_e.define('FAN_MODE_MANUAL_LINEAR', 1)
 
 class OverDriveTable_t(Struct): pass
-int16_t = ctypes.c_int16
+int16_t: TypeAlias = ctypes.c_int16
 OverDriveTable_t._fields_ = [
   ('FeatureCtrlMask', uint32_t),
   ('VoltageOffsetPerZoneBoundary', (int16_t * 6)),
@@ -586,7 +587,7 @@ AvfsFuseOverride_t._fields_ = [
   ('qAvfsGb2', QuadraticInt_t),
 ]
 class SkuTable_t(Struct): pass
-int32_t = ctypes.c_int32
+int32_t: TypeAlias = ctypes.c_int32
 SkuTable_t._fields_ = [
   ('Version', uint32_t),
   ('FeaturesToRun', (uint32_t * 2)),

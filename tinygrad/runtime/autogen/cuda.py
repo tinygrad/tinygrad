@@ -1,82 +1,83 @@
 # mypy: ignore-errors
 import ctypes
 from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from typing import TypeAlias
 dll = DLL('cuda', 'cuda')
-cuuint32_t = ctypes.c_uint32
-cuuint64_t = ctypes.c_uint64
-CUdeviceptr_v2 = ctypes.c_uint64
-CUdeviceptr = ctypes.c_uint64
-CUdevice_v1 = ctypes.c_int32
-CUdevice = ctypes.c_int32
+cuuint32_t: TypeAlias = ctypes.c_uint32
+cuuint64_t: TypeAlias = ctypes.c_uint64
+CUdeviceptr_v2: TypeAlias = ctypes.c_uint64
+CUdeviceptr: TypeAlias = ctypes.c_uint64
+CUdevice_v1: TypeAlias = ctypes.c_int32
+CUdevice: TypeAlias = ctypes.c_int32
 class struct_CUctx_st(Struct): pass
-CUcontext = ctypes.POINTER(struct_CUctx_st)
+CUcontext: TypeAlias = ctypes.POINTER(struct_CUctx_st)
 class struct_CUmod_st(Struct): pass
-CUmodule = ctypes.POINTER(struct_CUmod_st)
+CUmodule: TypeAlias = ctypes.POINTER(struct_CUmod_st)
 class struct_CUfunc_st(Struct): pass
-CUfunction = ctypes.POINTER(struct_CUfunc_st)
+CUfunction: TypeAlias = ctypes.POINTER(struct_CUfunc_st)
 class struct_CUlib_st(Struct): pass
-CUlibrary = ctypes.POINTER(struct_CUlib_st)
+CUlibrary: TypeAlias = ctypes.POINTER(struct_CUlib_st)
 class struct_CUkern_st(Struct): pass
-CUkernel = ctypes.POINTER(struct_CUkern_st)
+CUkernel: TypeAlias = ctypes.POINTER(struct_CUkern_st)
 class struct_CUarray_st(Struct): pass
-CUarray = ctypes.POINTER(struct_CUarray_st)
+CUarray: TypeAlias = ctypes.POINTER(struct_CUarray_st)
 class struct_CUmipmappedArray_st(Struct): pass
-CUmipmappedArray = ctypes.POINTER(struct_CUmipmappedArray_st)
+CUmipmappedArray: TypeAlias = ctypes.POINTER(struct_CUmipmappedArray_st)
 class struct_CUtexref_st(Struct): pass
-CUtexref = ctypes.POINTER(struct_CUtexref_st)
+CUtexref: TypeAlias = ctypes.POINTER(struct_CUtexref_st)
 class struct_CUsurfref_st(Struct): pass
-CUsurfref = ctypes.POINTER(struct_CUsurfref_st)
+CUsurfref: TypeAlias = ctypes.POINTER(struct_CUsurfref_st)
 class struct_CUevent_st(Struct): pass
-CUevent = ctypes.POINTER(struct_CUevent_st)
+CUevent: TypeAlias = ctypes.POINTER(struct_CUevent_st)
 class struct_CUstream_st(Struct): pass
-CUstream = ctypes.POINTER(struct_CUstream_st)
+CUstream: TypeAlias = ctypes.POINTER(struct_CUstream_st)
 class struct_CUgraphicsResource_st(Struct): pass
-CUgraphicsResource = ctypes.POINTER(struct_CUgraphicsResource_st)
-CUtexObject_v1 = ctypes.c_uint64
-CUtexObject = ctypes.c_uint64
-CUsurfObject_v1 = ctypes.c_uint64
-CUsurfObject = ctypes.c_uint64
+CUgraphicsResource: TypeAlias = ctypes.POINTER(struct_CUgraphicsResource_st)
+CUtexObject_v1: TypeAlias = ctypes.c_uint64
+CUtexObject: TypeAlias = ctypes.c_uint64
+CUsurfObject_v1: TypeAlias = ctypes.c_uint64
+CUsurfObject: TypeAlias = ctypes.c_uint64
 class struct_CUextMemory_st(Struct): pass
-CUexternalMemory = ctypes.POINTER(struct_CUextMemory_st)
+CUexternalMemory: TypeAlias = ctypes.POINTER(struct_CUextMemory_st)
 class struct_CUextSemaphore_st(Struct): pass
-CUexternalSemaphore = ctypes.POINTER(struct_CUextSemaphore_st)
+CUexternalSemaphore: TypeAlias = ctypes.POINTER(struct_CUextSemaphore_st)
 class struct_CUgraph_st(Struct): pass
-CUgraph = ctypes.POINTER(struct_CUgraph_st)
+CUgraph: TypeAlias = ctypes.POINTER(struct_CUgraph_st)
 class struct_CUgraphNode_st(Struct): pass
-CUgraphNode = ctypes.POINTER(struct_CUgraphNode_st)
+CUgraphNode: TypeAlias = ctypes.POINTER(struct_CUgraphNode_st)
 class struct_CUgraphExec_st(Struct): pass
-CUgraphExec = ctypes.POINTER(struct_CUgraphExec_st)
+CUgraphExec: TypeAlias = ctypes.POINTER(struct_CUgraphExec_st)
 class struct_CUmemPoolHandle_st(Struct): pass
-CUmemoryPool = ctypes.POINTER(struct_CUmemPoolHandle_st)
+CUmemoryPool: TypeAlias = ctypes.POINTER(struct_CUmemPoolHandle_st)
 class struct_CUuserObject_st(Struct): pass
-CUuserObject = ctypes.POINTER(struct_CUuserObject_st)
+CUuserObject: TypeAlias = ctypes.POINTER(struct_CUuserObject_st)
 class struct_CUuuid_st(Struct): pass
 struct_CUuuid_st._fields_ = [
   ('bytes', (ctypes.c_char * 16)),
 ]
-CUuuid = struct_CUuuid_st
+CUuuid: TypeAlias = struct_CUuuid_st
 class struct_CUipcEventHandle_st(Struct): pass
 struct_CUipcEventHandle_st._fields_ = [
   ('reserved', (ctypes.c_char * 64)),
 ]
-CUipcEventHandle_v1 = struct_CUipcEventHandle_st
-CUipcEventHandle = struct_CUipcEventHandle_st
+CUipcEventHandle_v1: TypeAlias = struct_CUipcEventHandle_st
+CUipcEventHandle: TypeAlias = struct_CUipcEventHandle_st
 class struct_CUipcMemHandle_st(Struct): pass
 struct_CUipcMemHandle_st._fields_ = [
   ('reserved', (ctypes.c_char * 64)),
 ]
-CUipcMemHandle_v1 = struct_CUipcMemHandle_st
-CUipcMemHandle = struct_CUipcMemHandle_st
+CUipcMemHandle_v1: TypeAlias = struct_CUipcMemHandle_st
+CUipcMemHandle: TypeAlias = struct_CUipcMemHandle_st
 enum_CUipcMem_flags_enum = CEnum(ctypes.c_uint32)
 CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS = enum_CUipcMem_flags_enum.define('CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS', 1)
 
-CUipcMem_flags = enum_CUipcMem_flags_enum
+CUipcMem_flags: TypeAlias = enum_CUipcMem_flags_enum
 enum_CUmemAttach_flags_enum = CEnum(ctypes.c_uint32)
 CU_MEM_ATTACH_GLOBAL = enum_CUmemAttach_flags_enum.define('CU_MEM_ATTACH_GLOBAL', 1)
 CU_MEM_ATTACH_HOST = enum_CUmemAttach_flags_enum.define('CU_MEM_ATTACH_HOST', 2)
 CU_MEM_ATTACH_SINGLE = enum_CUmemAttach_flags_enum.define('CU_MEM_ATTACH_SINGLE', 4)
 
-CUmemAttach_flags = enum_CUmemAttach_flags_enum
+CUmemAttach_flags: TypeAlias = enum_CUmemAttach_flags_enum
 enum_CUctx_flags_enum = CEnum(ctypes.c_uint32)
 CU_CTX_SCHED_AUTO = enum_CUctx_flags_enum.define('CU_CTX_SCHED_AUTO', 0)
 CU_CTX_SCHED_SPIN = enum_CUctx_flags_enum.define('CU_CTX_SCHED_SPIN', 1)
@@ -88,50 +89,50 @@ CU_CTX_MAP_HOST = enum_CUctx_flags_enum.define('CU_CTX_MAP_HOST', 8)
 CU_CTX_LMEM_RESIZE_TO_MAX = enum_CUctx_flags_enum.define('CU_CTX_LMEM_RESIZE_TO_MAX', 16)
 CU_CTX_FLAGS_MASK = enum_CUctx_flags_enum.define('CU_CTX_FLAGS_MASK', 31)
 
-CUctx_flags = enum_CUctx_flags_enum
+CUctx_flags: TypeAlias = enum_CUctx_flags_enum
 enum_CUevent_sched_flags_enum = CEnum(ctypes.c_uint32)
 CU_EVENT_SCHED_AUTO = enum_CUevent_sched_flags_enum.define('CU_EVENT_SCHED_AUTO', 0)
 CU_EVENT_SCHED_SPIN = enum_CUevent_sched_flags_enum.define('CU_EVENT_SCHED_SPIN', 1)
 CU_EVENT_SCHED_YIELD = enum_CUevent_sched_flags_enum.define('CU_EVENT_SCHED_YIELD', 2)
 CU_EVENT_SCHED_BLOCKING_SYNC = enum_CUevent_sched_flags_enum.define('CU_EVENT_SCHED_BLOCKING_SYNC', 4)
 
-CUevent_sched_flags = enum_CUevent_sched_flags_enum
+CUevent_sched_flags: TypeAlias = enum_CUevent_sched_flags_enum
 enum_cl_event_flags_enum = CEnum(ctypes.c_uint32)
 NVCL_EVENT_SCHED_AUTO = enum_cl_event_flags_enum.define('NVCL_EVENT_SCHED_AUTO', 0)
 NVCL_EVENT_SCHED_SPIN = enum_cl_event_flags_enum.define('NVCL_EVENT_SCHED_SPIN', 1)
 NVCL_EVENT_SCHED_YIELD = enum_cl_event_flags_enum.define('NVCL_EVENT_SCHED_YIELD', 2)
 NVCL_EVENT_SCHED_BLOCKING_SYNC = enum_cl_event_flags_enum.define('NVCL_EVENT_SCHED_BLOCKING_SYNC', 4)
 
-cl_event_flags = enum_cl_event_flags_enum
+cl_event_flags: TypeAlias = enum_cl_event_flags_enum
 enum_cl_context_flags_enum = CEnum(ctypes.c_uint32)
 NVCL_CTX_SCHED_AUTO = enum_cl_context_flags_enum.define('NVCL_CTX_SCHED_AUTO', 0)
 NVCL_CTX_SCHED_SPIN = enum_cl_context_flags_enum.define('NVCL_CTX_SCHED_SPIN', 1)
 NVCL_CTX_SCHED_YIELD = enum_cl_context_flags_enum.define('NVCL_CTX_SCHED_YIELD', 2)
 NVCL_CTX_SCHED_BLOCKING_SYNC = enum_cl_context_flags_enum.define('NVCL_CTX_SCHED_BLOCKING_SYNC', 4)
 
-cl_context_flags = enum_cl_context_flags_enum
+cl_context_flags: TypeAlias = enum_cl_context_flags_enum
 enum_CUstream_flags_enum = CEnum(ctypes.c_uint32)
 CU_STREAM_DEFAULT = enum_CUstream_flags_enum.define('CU_STREAM_DEFAULT', 0)
 CU_STREAM_NON_BLOCKING = enum_CUstream_flags_enum.define('CU_STREAM_NON_BLOCKING', 1)
 
-CUstream_flags = enum_CUstream_flags_enum
+CUstream_flags: TypeAlias = enum_CUstream_flags_enum
 enum_CUevent_flags_enum = CEnum(ctypes.c_uint32)
 CU_EVENT_DEFAULT = enum_CUevent_flags_enum.define('CU_EVENT_DEFAULT', 0)
 CU_EVENT_BLOCKING_SYNC = enum_CUevent_flags_enum.define('CU_EVENT_BLOCKING_SYNC', 1)
 CU_EVENT_DISABLE_TIMING = enum_CUevent_flags_enum.define('CU_EVENT_DISABLE_TIMING', 2)
 CU_EVENT_INTERPROCESS = enum_CUevent_flags_enum.define('CU_EVENT_INTERPROCESS', 4)
 
-CUevent_flags = enum_CUevent_flags_enum
+CUevent_flags: TypeAlias = enum_CUevent_flags_enum
 enum_CUevent_record_flags_enum = CEnum(ctypes.c_uint32)
 CU_EVENT_RECORD_DEFAULT = enum_CUevent_record_flags_enum.define('CU_EVENT_RECORD_DEFAULT', 0)
 CU_EVENT_RECORD_EXTERNAL = enum_CUevent_record_flags_enum.define('CU_EVENT_RECORD_EXTERNAL', 1)
 
-CUevent_record_flags = enum_CUevent_record_flags_enum
+CUevent_record_flags: TypeAlias = enum_CUevent_record_flags_enum
 enum_CUevent_wait_flags_enum = CEnum(ctypes.c_uint32)
 CU_EVENT_WAIT_DEFAULT = enum_CUevent_wait_flags_enum.define('CU_EVENT_WAIT_DEFAULT', 0)
 CU_EVENT_WAIT_EXTERNAL = enum_CUevent_wait_flags_enum.define('CU_EVENT_WAIT_EXTERNAL', 1)
 
-CUevent_wait_flags = enum_CUevent_wait_flags_enum
+CUevent_wait_flags: TypeAlias = enum_CUevent_wait_flags_enum
 enum_CUstreamWaitValue_flags_enum = CEnum(ctypes.c_uint32)
 CU_STREAM_WAIT_VALUE_GEQ = enum_CUstreamWaitValue_flags_enum.define('CU_STREAM_WAIT_VALUE_GEQ', 0)
 CU_STREAM_WAIT_VALUE_EQ = enum_CUstreamWaitValue_flags_enum.define('CU_STREAM_WAIT_VALUE_EQ', 1)
@@ -139,12 +140,12 @@ CU_STREAM_WAIT_VALUE_AND = enum_CUstreamWaitValue_flags_enum.define('CU_STREAM_W
 CU_STREAM_WAIT_VALUE_NOR = enum_CUstreamWaitValue_flags_enum.define('CU_STREAM_WAIT_VALUE_NOR', 3)
 CU_STREAM_WAIT_VALUE_FLUSH = enum_CUstreamWaitValue_flags_enum.define('CU_STREAM_WAIT_VALUE_FLUSH', 1073741824)
 
-CUstreamWaitValue_flags = enum_CUstreamWaitValue_flags_enum
+CUstreamWaitValue_flags: TypeAlias = enum_CUstreamWaitValue_flags_enum
 enum_CUstreamWriteValue_flags_enum = CEnum(ctypes.c_uint32)
 CU_STREAM_WRITE_VALUE_DEFAULT = enum_CUstreamWriteValue_flags_enum.define('CU_STREAM_WRITE_VALUE_DEFAULT', 0)
 CU_STREAM_WRITE_VALUE_NO_MEMORY_BARRIER = enum_CUstreamWriteValue_flags_enum.define('CU_STREAM_WRITE_VALUE_NO_MEMORY_BARRIER', 1)
 
-CUstreamWriteValue_flags = enum_CUstreamWriteValue_flags_enum
+CUstreamWriteValue_flags: TypeAlias = enum_CUstreamWriteValue_flags_enum
 enum_CUstreamBatchMemOpType_enum = CEnum(ctypes.c_uint32)
 CU_STREAM_MEM_OP_WAIT_VALUE_32 = enum_CUstreamBatchMemOpType_enum.define('CU_STREAM_MEM_OP_WAIT_VALUE_32', 1)
 CU_STREAM_MEM_OP_WRITE_VALUE_32 = enum_CUstreamBatchMemOpType_enum.define('CU_STREAM_MEM_OP_WRITE_VALUE_32', 2)
@@ -153,12 +154,12 @@ CU_STREAM_MEM_OP_WRITE_VALUE_64 = enum_CUstreamBatchMemOpType_enum.define('CU_ST
 CU_STREAM_MEM_OP_BARRIER = enum_CUstreamBatchMemOpType_enum.define('CU_STREAM_MEM_OP_BARRIER', 6)
 CU_STREAM_MEM_OP_FLUSH_REMOTE_WRITES = enum_CUstreamBatchMemOpType_enum.define('CU_STREAM_MEM_OP_FLUSH_REMOTE_WRITES', 3)
 
-CUstreamBatchMemOpType = enum_CUstreamBatchMemOpType_enum
+CUstreamBatchMemOpType: TypeAlias = enum_CUstreamBatchMemOpType_enum
 enum_CUstreamMemoryBarrier_flags_enum = CEnum(ctypes.c_uint32)
 CU_STREAM_MEMORY_BARRIER_TYPE_SYS = enum_CUstreamMemoryBarrier_flags_enum.define('CU_STREAM_MEMORY_BARRIER_TYPE_SYS', 0)
 CU_STREAM_MEMORY_BARRIER_TYPE_GPU = enum_CUstreamMemoryBarrier_flags_enum.define('CU_STREAM_MEMORY_BARRIER_TYPE_GPU', 1)
 
-CUstreamMemoryBarrier_flags = enum_CUstreamMemoryBarrier_flags_enum
+CUstreamMemoryBarrier_flags: TypeAlias = enum_CUstreamMemoryBarrier_flags_enum
 class union_CUstreamBatchMemOpParams_union(ctypes.Union): pass
 class struct_CUstreamMemOpWaitValueParams_st(Struct): pass
 class struct_CUstreamMemOpWaitValueParams_st_0(ctypes.Union): pass
@@ -206,8 +207,8 @@ union_CUstreamBatchMemOpParams_union._fields_ = [
   ('memoryBarrier', struct_CUstreamMemOpMemoryBarrierParams_st),
   ('pad', (cuuint64_t * 6)),
 ]
-CUstreamBatchMemOpParams_v1 = union_CUstreamBatchMemOpParams_union
-CUstreamBatchMemOpParams = union_CUstreamBatchMemOpParams_union
+CUstreamBatchMemOpParams_v1: TypeAlias = union_CUstreamBatchMemOpParams_union
+CUstreamBatchMemOpParams: TypeAlias = union_CUstreamBatchMemOpParams_union
 class struct_CUDA_BATCH_MEM_OP_NODE_PARAMS_st(Struct): pass
 struct_CUDA_BATCH_MEM_OP_NODE_PARAMS_st._fields_ = [
   ('ctx', CUcontext),
@@ -215,17 +216,17 @@ struct_CUDA_BATCH_MEM_OP_NODE_PARAMS_st._fields_ = [
   ('paramArray', ctypes.POINTER(CUstreamBatchMemOpParams)),
   ('flags', ctypes.c_uint32),
 ]
-CUDA_BATCH_MEM_OP_NODE_PARAMS = struct_CUDA_BATCH_MEM_OP_NODE_PARAMS_st
+CUDA_BATCH_MEM_OP_NODE_PARAMS: TypeAlias = struct_CUDA_BATCH_MEM_OP_NODE_PARAMS_st
 enum_CUoccupancy_flags_enum = CEnum(ctypes.c_uint32)
 CU_OCCUPANCY_DEFAULT = enum_CUoccupancy_flags_enum.define('CU_OCCUPANCY_DEFAULT', 0)
 CU_OCCUPANCY_DISABLE_CACHING_OVERRIDE = enum_CUoccupancy_flags_enum.define('CU_OCCUPANCY_DISABLE_CACHING_OVERRIDE', 1)
 
-CUoccupancy_flags = enum_CUoccupancy_flags_enum
+CUoccupancy_flags: TypeAlias = enum_CUoccupancy_flags_enum
 enum_CUstreamUpdateCaptureDependencies_flags_enum = CEnum(ctypes.c_uint32)
 CU_STREAM_ADD_CAPTURE_DEPENDENCIES = enum_CUstreamUpdateCaptureDependencies_flags_enum.define('CU_STREAM_ADD_CAPTURE_DEPENDENCIES', 0)
 CU_STREAM_SET_CAPTURE_DEPENDENCIES = enum_CUstreamUpdateCaptureDependencies_flags_enum.define('CU_STREAM_SET_CAPTURE_DEPENDENCIES', 1)
 
-CUstreamUpdateCaptureDependencies_flags = enum_CUstreamUpdateCaptureDependencies_flags_enum
+CUstreamUpdateCaptureDependencies_flags: TypeAlias = enum_CUstreamUpdateCaptureDependencies_flags_enum
 enum_CUarray_format_enum = CEnum(ctypes.c_uint32)
 CU_AD_FORMAT_UNSIGNED_INT8 = enum_CUarray_format_enum.define('CU_AD_FORMAT_UNSIGNED_INT8', 1)
 CU_AD_FORMAT_UNSIGNED_INT16 = enum_CUarray_format_enum.define('CU_AD_FORMAT_UNSIGNED_INT16', 2)
@@ -263,19 +264,19 @@ CU_AD_FORMAT_BC6H_SF16 = enum_CUarray_format_enum.define('CU_AD_FORMAT_BC6H_SF16
 CU_AD_FORMAT_BC7_UNORM = enum_CUarray_format_enum.define('CU_AD_FORMAT_BC7_UNORM', 157)
 CU_AD_FORMAT_BC7_UNORM_SRGB = enum_CUarray_format_enum.define('CU_AD_FORMAT_BC7_UNORM_SRGB', 158)
 
-CUarray_format = enum_CUarray_format_enum
+CUarray_format: TypeAlias = enum_CUarray_format_enum
 enum_CUaddress_mode_enum = CEnum(ctypes.c_uint32)
 CU_TR_ADDRESS_MODE_WRAP = enum_CUaddress_mode_enum.define('CU_TR_ADDRESS_MODE_WRAP', 0)
 CU_TR_ADDRESS_MODE_CLAMP = enum_CUaddress_mode_enum.define('CU_TR_ADDRESS_MODE_CLAMP', 1)
 CU_TR_ADDRESS_MODE_MIRROR = enum_CUaddress_mode_enum.define('CU_TR_ADDRESS_MODE_MIRROR', 2)
 CU_TR_ADDRESS_MODE_BORDER = enum_CUaddress_mode_enum.define('CU_TR_ADDRESS_MODE_BORDER', 3)
 
-CUaddress_mode = enum_CUaddress_mode_enum
+CUaddress_mode: TypeAlias = enum_CUaddress_mode_enum
 enum_CUfilter_mode_enum = CEnum(ctypes.c_uint32)
 CU_TR_FILTER_MODE_POINT = enum_CUfilter_mode_enum.define('CU_TR_FILTER_MODE_POINT', 0)
 CU_TR_FILTER_MODE_LINEAR = enum_CUfilter_mode_enum.define('CU_TR_FILTER_MODE_LINEAR', 1)
 
-CUfilter_mode = enum_CUfilter_mode_enum
+CUfilter_mode: TypeAlias = enum_CUfilter_mode_enum
 enum_CUdevice_attribute_enum = CEnum(ctypes.c_uint32)
 CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK = enum_CUdevice_attribute_enum.define('CU_DEVICE_ATTRIBUTE_MAX_THREADS_PER_BLOCK', 1)
 CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_X = enum_CUdevice_attribute_enum.define('CU_DEVICE_ATTRIBUTE_MAX_BLOCK_DIM_X', 2)
@@ -413,7 +414,7 @@ CU_DEVICE_ATTRIBUTE_TENSOR_MAP_ACCESS_SUPPORTED = enum_CUdevice_attribute_enum.d
 CU_DEVICE_ATTRIBUTE_UNIFIED_FUNCTION_POINTERS = enum_CUdevice_attribute_enum.define('CU_DEVICE_ATTRIBUTE_UNIFIED_FUNCTION_POINTERS', 129)
 CU_DEVICE_ATTRIBUTE_MAX = enum_CUdevice_attribute_enum.define('CU_DEVICE_ATTRIBUTE_MAX', 130)
 
-CUdevice_attribute = enum_CUdevice_attribute_enum
+CUdevice_attribute: TypeAlias = enum_CUdevice_attribute_enum
 class struct_CUdevprop_st(Struct): pass
 struct_CUdevprop_st._fields_ = [
   ('maxThreadsPerBlock', ctypes.c_int32),
@@ -427,8 +428,8 @@ struct_CUdevprop_st._fields_ = [
   ('clockRate', ctypes.c_int32),
   ('textureAlign', ctypes.c_int32),
 ]
-CUdevprop_v1 = struct_CUdevprop_st
-CUdevprop = struct_CUdevprop_st
+CUdevprop_v1: TypeAlias = struct_CUdevprop_st
+CUdevprop: TypeAlias = struct_CUdevprop_st
 enum_CUpointer_attribute_enum = CEnum(ctypes.c_uint32)
 CU_POINTER_ATTRIBUTE_CONTEXT = enum_CUpointer_attribute_enum.define('CU_POINTER_ATTRIBUTE_CONTEXT', 1)
 CU_POINTER_ATTRIBUTE_MEMORY_TYPE = enum_CUpointer_attribute_enum.define('CU_POINTER_ATTRIBUTE_MEMORY_TYPE', 2)
@@ -451,7 +452,7 @@ CU_POINTER_ATTRIBUTE_MAPPING_SIZE = enum_CUpointer_attribute_enum.define('CU_POI
 CU_POINTER_ATTRIBUTE_MAPPING_BASE_ADDR = enum_CUpointer_attribute_enum.define('CU_POINTER_ATTRIBUTE_MAPPING_BASE_ADDR', 19)
 CU_POINTER_ATTRIBUTE_MEMORY_BLOCK_ID = enum_CUpointer_attribute_enum.define('CU_POINTER_ATTRIBUTE_MEMORY_BLOCK_ID', 20)
 
-CUpointer_attribute = enum_CUpointer_attribute_enum
+CUpointer_attribute: TypeAlias = enum_CUpointer_attribute_enum
 enum_CUfunction_attribute_enum = CEnum(ctypes.c_uint32)
 CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK = enum_CUfunction_attribute_enum.define('CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK', 0)
 CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES = enum_CUfunction_attribute_enum.define('CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES', 1)
@@ -471,39 +472,39 @@ CU_FUNC_ATTRIBUTE_NON_PORTABLE_CLUSTER_SIZE_ALLOWED = enum_CUfunction_attribute_
 CU_FUNC_ATTRIBUTE_CLUSTER_SCHEDULING_POLICY_PREFERENCE = enum_CUfunction_attribute_enum.define('CU_FUNC_ATTRIBUTE_CLUSTER_SCHEDULING_POLICY_PREFERENCE', 15)
 CU_FUNC_ATTRIBUTE_MAX = enum_CUfunction_attribute_enum.define('CU_FUNC_ATTRIBUTE_MAX', 16)
 
-CUfunction_attribute = enum_CUfunction_attribute_enum
+CUfunction_attribute: TypeAlias = enum_CUfunction_attribute_enum
 enum_CUfunc_cache_enum = CEnum(ctypes.c_uint32)
 CU_FUNC_CACHE_PREFER_NONE = enum_CUfunc_cache_enum.define('CU_FUNC_CACHE_PREFER_NONE', 0)
 CU_FUNC_CACHE_PREFER_SHARED = enum_CUfunc_cache_enum.define('CU_FUNC_CACHE_PREFER_SHARED', 1)
 CU_FUNC_CACHE_PREFER_L1 = enum_CUfunc_cache_enum.define('CU_FUNC_CACHE_PREFER_L1', 2)
 CU_FUNC_CACHE_PREFER_EQUAL = enum_CUfunc_cache_enum.define('CU_FUNC_CACHE_PREFER_EQUAL', 3)
 
-CUfunc_cache = enum_CUfunc_cache_enum
+CUfunc_cache: TypeAlias = enum_CUfunc_cache_enum
 enum_CUsharedconfig_enum = CEnum(ctypes.c_uint32)
 CU_SHARED_MEM_CONFIG_DEFAULT_BANK_SIZE = enum_CUsharedconfig_enum.define('CU_SHARED_MEM_CONFIG_DEFAULT_BANK_SIZE', 0)
 CU_SHARED_MEM_CONFIG_FOUR_BYTE_BANK_SIZE = enum_CUsharedconfig_enum.define('CU_SHARED_MEM_CONFIG_FOUR_BYTE_BANK_SIZE', 1)
 CU_SHARED_MEM_CONFIG_EIGHT_BYTE_BANK_SIZE = enum_CUsharedconfig_enum.define('CU_SHARED_MEM_CONFIG_EIGHT_BYTE_BANK_SIZE', 2)
 
-CUsharedconfig = enum_CUsharedconfig_enum
+CUsharedconfig: TypeAlias = enum_CUsharedconfig_enum
 enum_CUshared_carveout_enum = CEnum(ctypes.c_int32)
 CU_SHAREDMEM_CARVEOUT_DEFAULT = enum_CUshared_carveout_enum.define('CU_SHAREDMEM_CARVEOUT_DEFAULT', -1)
 CU_SHAREDMEM_CARVEOUT_MAX_SHARED = enum_CUshared_carveout_enum.define('CU_SHAREDMEM_CARVEOUT_MAX_SHARED', 100)
 CU_SHAREDMEM_CARVEOUT_MAX_L1 = enum_CUshared_carveout_enum.define('CU_SHAREDMEM_CARVEOUT_MAX_L1', 0)
 
-CUshared_carveout = enum_CUshared_carveout_enum
+CUshared_carveout: TypeAlias = enum_CUshared_carveout_enum
 enum_CUmemorytype_enum = CEnum(ctypes.c_uint32)
 CU_MEMORYTYPE_HOST = enum_CUmemorytype_enum.define('CU_MEMORYTYPE_HOST', 1)
 CU_MEMORYTYPE_DEVICE = enum_CUmemorytype_enum.define('CU_MEMORYTYPE_DEVICE', 2)
 CU_MEMORYTYPE_ARRAY = enum_CUmemorytype_enum.define('CU_MEMORYTYPE_ARRAY', 3)
 CU_MEMORYTYPE_UNIFIED = enum_CUmemorytype_enum.define('CU_MEMORYTYPE_UNIFIED', 4)
 
-CUmemorytype = enum_CUmemorytype_enum
+CUmemorytype: TypeAlias = enum_CUmemorytype_enum
 enum_CUcomputemode_enum = CEnum(ctypes.c_uint32)
 CU_COMPUTEMODE_DEFAULT = enum_CUcomputemode_enum.define('CU_COMPUTEMODE_DEFAULT', 0)
 CU_COMPUTEMODE_PROHIBITED = enum_CUcomputemode_enum.define('CU_COMPUTEMODE_PROHIBITED', 2)
 CU_COMPUTEMODE_EXCLUSIVE_PROCESS = enum_CUcomputemode_enum.define('CU_COMPUTEMODE_EXCLUSIVE_PROCESS', 3)
 
-CUcomputemode = enum_CUcomputemode_enum
+CUcomputemode: TypeAlias = enum_CUcomputemode_enum
 enum_CUmem_advise_enum = CEnum(ctypes.c_uint32)
 CU_MEM_ADVISE_SET_READ_MOSTLY = enum_CUmem_advise_enum.define('CU_MEM_ADVISE_SET_READ_MOSTLY', 1)
 CU_MEM_ADVISE_UNSET_READ_MOSTLY = enum_CUmem_advise_enum.define('CU_MEM_ADVISE_UNSET_READ_MOSTLY', 2)
@@ -512,14 +513,14 @@ CU_MEM_ADVISE_UNSET_PREFERRED_LOCATION = enum_CUmem_advise_enum.define('CU_MEM_A
 CU_MEM_ADVISE_SET_ACCESSED_BY = enum_CUmem_advise_enum.define('CU_MEM_ADVISE_SET_ACCESSED_BY', 5)
 CU_MEM_ADVISE_UNSET_ACCESSED_BY = enum_CUmem_advise_enum.define('CU_MEM_ADVISE_UNSET_ACCESSED_BY', 6)
 
-CUmem_advise = enum_CUmem_advise_enum
+CUmem_advise: TypeAlias = enum_CUmem_advise_enum
 enum_CUmem_range_attribute_enum = CEnum(ctypes.c_uint32)
 CU_MEM_RANGE_ATTRIBUTE_READ_MOSTLY = enum_CUmem_range_attribute_enum.define('CU_MEM_RANGE_ATTRIBUTE_READ_MOSTLY', 1)
 CU_MEM_RANGE_ATTRIBUTE_PREFERRED_LOCATION = enum_CUmem_range_attribute_enum.define('CU_MEM_RANGE_ATTRIBUTE_PREFERRED_LOCATION', 2)
 CU_MEM_RANGE_ATTRIBUTE_ACCESSED_BY = enum_CUmem_range_attribute_enum.define('CU_MEM_RANGE_ATTRIBUTE_ACCESSED_BY', 3)
 CU_MEM_RANGE_ATTRIBUTE_LAST_PREFETCH_LOCATION = enum_CUmem_range_attribute_enum.define('CU_MEM_RANGE_ATTRIBUTE_LAST_PREFETCH_LOCATION', 4)
 
-CUmem_range_attribute = enum_CUmem_range_attribute_enum
+CUmem_range_attribute: TypeAlias = enum_CUmem_range_attribute_enum
 enum_CUjit_option_enum = CEnum(ctypes.c_uint32)
 CU_JIT_MAX_REGISTERS = enum_CUjit_option_enum.define('CU_JIT_MAX_REGISTERS', 0)
 CU_JIT_THREADS_PER_BLOCK = enum_CUjit_option_enum.define('CU_JIT_THREADS_PER_BLOCK', 1)
@@ -554,7 +555,7 @@ CU_JIT_OPTIMIZE_UNUSED_DEVICE_VARIABLES = enum_CUjit_option_enum.define('CU_JIT_
 CU_JIT_POSITION_INDEPENDENT_CODE = enum_CUjit_option_enum.define('CU_JIT_POSITION_INDEPENDENT_CODE', 30)
 CU_JIT_NUM_OPTIONS = enum_CUjit_option_enum.define('CU_JIT_NUM_OPTIONS', 31)
 
-CUjit_option = enum_CUjit_option_enum
+CUjit_option: TypeAlias = enum_CUjit_option_enum
 enum_CUjit_target_enum = CEnum(ctypes.c_uint32)
 CU_TARGET_COMPUTE_30 = enum_CUjit_target_enum.define('CU_TARGET_COMPUTE_30', 30)
 CU_TARGET_COMPUTE_32 = enum_CUjit_target_enum.define('CU_TARGET_COMPUTE_32', 32)
@@ -576,18 +577,18 @@ CU_TARGET_COMPUTE_89 = enum_CUjit_target_enum.define('CU_TARGET_COMPUTE_89', 89)
 CU_TARGET_COMPUTE_90 = enum_CUjit_target_enum.define('CU_TARGET_COMPUTE_90', 90)
 CU_TARGET_COMPUTE_90A = enum_CUjit_target_enum.define('CU_TARGET_COMPUTE_90A', 65626)
 
-CUjit_target = enum_CUjit_target_enum
+CUjit_target: TypeAlias = enum_CUjit_target_enum
 enum_CUjit_fallback_enum = CEnum(ctypes.c_uint32)
 CU_PREFER_PTX = enum_CUjit_fallback_enum.define('CU_PREFER_PTX', 0)
 CU_PREFER_BINARY = enum_CUjit_fallback_enum.define('CU_PREFER_BINARY', 1)
 
-CUjit_fallback = enum_CUjit_fallback_enum
+CUjit_fallback: TypeAlias = enum_CUjit_fallback_enum
 enum_CUjit_cacheMode_enum = CEnum(ctypes.c_uint32)
 CU_JIT_CACHE_OPTION_NONE = enum_CUjit_cacheMode_enum.define('CU_JIT_CACHE_OPTION_NONE', 0)
 CU_JIT_CACHE_OPTION_CG = enum_CUjit_cacheMode_enum.define('CU_JIT_CACHE_OPTION_CG', 1)
 CU_JIT_CACHE_OPTION_CA = enum_CUjit_cacheMode_enum.define('CU_JIT_CACHE_OPTION_CA', 2)
 
-CUjit_cacheMode = enum_CUjit_cacheMode_enum
+CUjit_cacheMode: TypeAlias = enum_CUjit_cacheMode_enum
 enum_CUjitInputType_enum = CEnum(ctypes.c_uint32)
 CU_JIT_INPUT_CUBIN = enum_CUjitInputType_enum.define('CU_JIT_INPUT_CUBIN', 0)
 CU_JIT_INPUT_PTX = enum_CUjitInputType_enum.define('CU_JIT_INPUT_PTX', 1)
@@ -597,9 +598,9 @@ CU_JIT_INPUT_LIBRARY = enum_CUjitInputType_enum.define('CU_JIT_INPUT_LIBRARY', 4
 CU_JIT_INPUT_NVVM = enum_CUjitInputType_enum.define('CU_JIT_INPUT_NVVM', 5)
 CU_JIT_NUM_INPUT_TYPES = enum_CUjitInputType_enum.define('CU_JIT_NUM_INPUT_TYPES', 6)
 
-CUjitInputType = enum_CUjitInputType_enum
+CUjitInputType: TypeAlias = enum_CUjitInputType_enum
 class struct_CUlinkState_st(Struct): pass
-CUlinkState = ctypes.POINTER(struct_CUlinkState_st)
+CUlinkState: TypeAlias = ctypes.POINTER(struct_CUlinkState_st)
 enum_CUgraphicsRegisterFlags_enum = CEnum(ctypes.c_uint32)
 CU_GRAPHICS_REGISTER_FLAGS_NONE = enum_CUgraphicsRegisterFlags_enum.define('CU_GRAPHICS_REGISTER_FLAGS_NONE', 0)
 CU_GRAPHICS_REGISTER_FLAGS_READ_ONLY = enum_CUgraphicsRegisterFlags_enum.define('CU_GRAPHICS_REGISTER_FLAGS_READ_ONLY', 1)
@@ -607,13 +608,13 @@ CU_GRAPHICS_REGISTER_FLAGS_WRITE_DISCARD = enum_CUgraphicsRegisterFlags_enum.def
 CU_GRAPHICS_REGISTER_FLAGS_SURFACE_LDST = enum_CUgraphicsRegisterFlags_enum.define('CU_GRAPHICS_REGISTER_FLAGS_SURFACE_LDST', 4)
 CU_GRAPHICS_REGISTER_FLAGS_TEXTURE_GATHER = enum_CUgraphicsRegisterFlags_enum.define('CU_GRAPHICS_REGISTER_FLAGS_TEXTURE_GATHER', 8)
 
-CUgraphicsRegisterFlags = enum_CUgraphicsRegisterFlags_enum
+CUgraphicsRegisterFlags: TypeAlias = enum_CUgraphicsRegisterFlags_enum
 enum_CUgraphicsMapResourceFlags_enum = CEnum(ctypes.c_uint32)
 CU_GRAPHICS_MAP_RESOURCE_FLAGS_NONE = enum_CUgraphicsMapResourceFlags_enum.define('CU_GRAPHICS_MAP_RESOURCE_FLAGS_NONE', 0)
 CU_GRAPHICS_MAP_RESOURCE_FLAGS_READ_ONLY = enum_CUgraphicsMapResourceFlags_enum.define('CU_GRAPHICS_MAP_RESOURCE_FLAGS_READ_ONLY', 1)
 CU_GRAPHICS_MAP_RESOURCE_FLAGS_WRITE_DISCARD = enum_CUgraphicsMapResourceFlags_enum.define('CU_GRAPHICS_MAP_RESOURCE_FLAGS_WRITE_DISCARD', 2)
 
-CUgraphicsMapResourceFlags = enum_CUgraphicsMapResourceFlags_enum
+CUgraphicsMapResourceFlags: TypeAlias = enum_CUgraphicsMapResourceFlags_enum
 enum_CUarray_cubemap_face_enum = CEnum(ctypes.c_uint32)
 CU_CUBEMAP_FACE_POSITIVE_X = enum_CUarray_cubemap_face_enum.define('CU_CUBEMAP_FACE_POSITIVE_X', 0)
 CU_CUBEMAP_FACE_NEGATIVE_X = enum_CUarray_cubemap_face_enum.define('CU_CUBEMAP_FACE_NEGATIVE_X', 1)
@@ -622,7 +623,7 @@ CU_CUBEMAP_FACE_NEGATIVE_Y = enum_CUarray_cubemap_face_enum.define('CU_CUBEMAP_F
 CU_CUBEMAP_FACE_POSITIVE_Z = enum_CUarray_cubemap_face_enum.define('CU_CUBEMAP_FACE_POSITIVE_Z', 4)
 CU_CUBEMAP_FACE_NEGATIVE_Z = enum_CUarray_cubemap_face_enum.define('CU_CUBEMAP_FACE_NEGATIVE_Z', 5)
 
-CUarray_cubemap_face = enum_CUarray_cubemap_face_enum
+CUarray_cubemap_face: TypeAlias = enum_CUarray_cubemap_face_enum
 enum_CUlimit_enum = CEnum(ctypes.c_uint32)
 CU_LIMIT_STACK_SIZE = enum_CUlimit_enum.define('CU_LIMIT_STACK_SIZE', 0)
 CU_LIMIT_PRINTF_FIFO_SIZE = enum_CUlimit_enum.define('CU_LIMIT_PRINTF_FIFO_SIZE', 1)
@@ -633,23 +634,23 @@ CU_LIMIT_MAX_L2_FETCH_GRANULARITY = enum_CUlimit_enum.define('CU_LIMIT_MAX_L2_FE
 CU_LIMIT_PERSISTING_L2_CACHE_SIZE = enum_CUlimit_enum.define('CU_LIMIT_PERSISTING_L2_CACHE_SIZE', 6)
 CU_LIMIT_MAX = enum_CUlimit_enum.define('CU_LIMIT_MAX', 7)
 
-CUlimit = enum_CUlimit_enum
+CUlimit: TypeAlias = enum_CUlimit_enum
 enum_CUresourcetype_enum = CEnum(ctypes.c_uint32)
 CU_RESOURCE_TYPE_ARRAY = enum_CUresourcetype_enum.define('CU_RESOURCE_TYPE_ARRAY', 0)
 CU_RESOURCE_TYPE_MIPMAPPED_ARRAY = enum_CUresourcetype_enum.define('CU_RESOURCE_TYPE_MIPMAPPED_ARRAY', 1)
 CU_RESOURCE_TYPE_LINEAR = enum_CUresourcetype_enum.define('CU_RESOURCE_TYPE_LINEAR', 2)
 CU_RESOURCE_TYPE_PITCH2D = enum_CUresourcetype_enum.define('CU_RESOURCE_TYPE_PITCH2D', 3)
 
-CUresourcetype = enum_CUresourcetype_enum
-CUhostFn = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
+CUresourcetype: TypeAlias = enum_CUresourcetype_enum
+CUhostFn: TypeAlias = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
 enum_CUaccessProperty_enum = CEnum(ctypes.c_uint32)
 CU_ACCESS_PROPERTY_NORMAL = enum_CUaccessProperty_enum.define('CU_ACCESS_PROPERTY_NORMAL', 0)
 CU_ACCESS_PROPERTY_STREAMING = enum_CUaccessProperty_enum.define('CU_ACCESS_PROPERTY_STREAMING', 1)
 CU_ACCESS_PROPERTY_PERSISTING = enum_CUaccessProperty_enum.define('CU_ACCESS_PROPERTY_PERSISTING', 2)
 
-CUaccessProperty = enum_CUaccessProperty_enum
+CUaccessProperty: TypeAlias = enum_CUaccessProperty_enum
 class struct_CUaccessPolicyWindow_st(Struct): pass
-size_t = ctypes.c_uint64
+size_t: TypeAlias = ctypes.c_uint64
 struct_CUaccessPolicyWindow_st._fields_ = [
   ('base_ptr', ctypes.c_void_p),
   ('num_bytes', size_t),
@@ -657,8 +658,8 @@ struct_CUaccessPolicyWindow_st._fields_ = [
   ('hitProp', CUaccessProperty),
   ('missProp', CUaccessProperty),
 ]
-CUaccessPolicyWindow_v1 = struct_CUaccessPolicyWindow_st
-CUaccessPolicyWindow = struct_CUaccessPolicyWindow_st
+CUaccessPolicyWindow_v1: TypeAlias = struct_CUaccessPolicyWindow_st
+CUaccessPolicyWindow: TypeAlias = struct_CUaccessPolicyWindow_st
 class struct_CUDA_KERNEL_NODE_PARAMS_st(Struct): pass
 struct_CUDA_KERNEL_NODE_PARAMS_st._fields_ = [
   ('func', CUfunction),
@@ -672,7 +673,7 @@ struct_CUDA_KERNEL_NODE_PARAMS_st._fields_ = [
   ('kernelParams', ctypes.POINTER(ctypes.c_void_p)),
   ('extra', ctypes.POINTER(ctypes.c_void_p)),
 ]
-CUDA_KERNEL_NODE_PARAMS_v1 = struct_CUDA_KERNEL_NODE_PARAMS_st
+CUDA_KERNEL_NODE_PARAMS_v1: TypeAlias = struct_CUDA_KERNEL_NODE_PARAMS_st
 class struct_CUDA_KERNEL_NODE_PARAMS_v2_st(Struct): pass
 struct_CUDA_KERNEL_NODE_PARAMS_v2_st._fields_ = [
   ('func', CUfunction),
@@ -688,8 +689,8 @@ struct_CUDA_KERNEL_NODE_PARAMS_v2_st._fields_ = [
   ('kern', CUkernel),
   ('ctx', CUcontext),
 ]
-CUDA_KERNEL_NODE_PARAMS_v2 = struct_CUDA_KERNEL_NODE_PARAMS_v2_st
-CUDA_KERNEL_NODE_PARAMS = struct_CUDA_KERNEL_NODE_PARAMS_v2_st
+CUDA_KERNEL_NODE_PARAMS_v2: TypeAlias = struct_CUDA_KERNEL_NODE_PARAMS_v2_st
+CUDA_KERNEL_NODE_PARAMS: TypeAlias = struct_CUDA_KERNEL_NODE_PARAMS_v2_st
 class struct_CUDA_MEMSET_NODE_PARAMS_st(Struct): pass
 struct_CUDA_MEMSET_NODE_PARAMS_st._fields_ = [
   ('dst', CUdeviceptr),
@@ -699,15 +700,15 @@ struct_CUDA_MEMSET_NODE_PARAMS_st._fields_ = [
   ('width', size_t),
   ('height', size_t),
 ]
-CUDA_MEMSET_NODE_PARAMS_v1 = struct_CUDA_MEMSET_NODE_PARAMS_st
-CUDA_MEMSET_NODE_PARAMS = struct_CUDA_MEMSET_NODE_PARAMS_st
+CUDA_MEMSET_NODE_PARAMS_v1: TypeAlias = struct_CUDA_MEMSET_NODE_PARAMS_st
+CUDA_MEMSET_NODE_PARAMS: TypeAlias = struct_CUDA_MEMSET_NODE_PARAMS_st
 class struct_CUDA_HOST_NODE_PARAMS_st(Struct): pass
 struct_CUDA_HOST_NODE_PARAMS_st._fields_ = [
   ('fn', CUhostFn),
   ('userData', ctypes.c_void_p),
 ]
-CUDA_HOST_NODE_PARAMS_v1 = struct_CUDA_HOST_NODE_PARAMS_st
-CUDA_HOST_NODE_PARAMS = struct_CUDA_HOST_NODE_PARAMS_st
+CUDA_HOST_NODE_PARAMS_v1: TypeAlias = struct_CUDA_HOST_NODE_PARAMS_st
+CUDA_HOST_NODE_PARAMS: TypeAlias = struct_CUDA_HOST_NODE_PARAMS_st
 enum_CUgraphNodeType_enum = CEnum(ctypes.c_uint32)
 CU_GRAPH_NODE_TYPE_KERNEL = enum_CUgraphNodeType_enum.define('CU_GRAPH_NODE_TYPE_KERNEL', 0)
 CU_GRAPH_NODE_TYPE_MEMCPY = enum_CUgraphNodeType_enum.define('CU_GRAPH_NODE_TYPE_MEMCPY', 1)
@@ -723,7 +724,7 @@ CU_GRAPH_NODE_TYPE_MEM_ALLOC = enum_CUgraphNodeType_enum.define('CU_GRAPH_NODE_T
 CU_GRAPH_NODE_TYPE_MEM_FREE = enum_CUgraphNodeType_enum.define('CU_GRAPH_NODE_TYPE_MEM_FREE', 11)
 CU_GRAPH_NODE_TYPE_BATCH_MEM_OP = enum_CUgraphNodeType_enum.define('CU_GRAPH_NODE_TYPE_BATCH_MEM_OP', 12)
 
-CUgraphNodeType = enum_CUgraphNodeType_enum
+CUgraphNodeType: TypeAlias = enum_CUgraphNodeType_enum
 enum_CUgraphInstantiateResult_enum = CEnum(ctypes.c_uint32)
 CUDA_GRAPH_INSTANTIATE_SUCCESS = enum_CUgraphInstantiateResult_enum.define('CUDA_GRAPH_INSTANTIATE_SUCCESS', 0)
 CUDA_GRAPH_INSTANTIATE_ERROR = enum_CUgraphInstantiateResult_enum.define('CUDA_GRAPH_INSTANTIATE_ERROR', 1)
@@ -731,7 +732,7 @@ CUDA_GRAPH_INSTANTIATE_INVALID_STRUCTURE = enum_CUgraphInstantiateResult_enum.de
 CUDA_GRAPH_INSTANTIATE_NODE_OPERATION_NOT_SUPPORTED = enum_CUgraphInstantiateResult_enum.define('CUDA_GRAPH_INSTANTIATE_NODE_OPERATION_NOT_SUPPORTED', 3)
 CUDA_GRAPH_INSTANTIATE_MULTIPLE_CTXS_NOT_SUPPORTED = enum_CUgraphInstantiateResult_enum.define('CUDA_GRAPH_INSTANTIATE_MULTIPLE_CTXS_NOT_SUPPORTED', 4)
 
-CUgraphInstantiateResult = enum_CUgraphInstantiateResult_enum
+CUgraphInstantiateResult: TypeAlias = enum_CUgraphInstantiateResult_enum
 class struct_CUDA_GRAPH_INSTANTIATE_PARAMS_st(Struct): pass
 struct_CUDA_GRAPH_INSTANTIATE_PARAMS_st._fields_ = [
   ('flags', cuuint64_t),
@@ -739,31 +740,31 @@ struct_CUDA_GRAPH_INSTANTIATE_PARAMS_st._fields_ = [
   ('hErrNode_out', CUgraphNode),
   ('result_out', CUgraphInstantiateResult),
 ]
-CUDA_GRAPH_INSTANTIATE_PARAMS = struct_CUDA_GRAPH_INSTANTIATE_PARAMS_st
+CUDA_GRAPH_INSTANTIATE_PARAMS: TypeAlias = struct_CUDA_GRAPH_INSTANTIATE_PARAMS_st
 enum_CUsynchronizationPolicy_enum = CEnum(ctypes.c_uint32)
 CU_SYNC_POLICY_AUTO = enum_CUsynchronizationPolicy_enum.define('CU_SYNC_POLICY_AUTO', 1)
 CU_SYNC_POLICY_SPIN = enum_CUsynchronizationPolicy_enum.define('CU_SYNC_POLICY_SPIN', 2)
 CU_SYNC_POLICY_YIELD = enum_CUsynchronizationPolicy_enum.define('CU_SYNC_POLICY_YIELD', 3)
 CU_SYNC_POLICY_BLOCKING_SYNC = enum_CUsynchronizationPolicy_enum.define('CU_SYNC_POLICY_BLOCKING_SYNC', 4)
 
-CUsynchronizationPolicy = enum_CUsynchronizationPolicy_enum
+CUsynchronizationPolicy: TypeAlias = enum_CUsynchronizationPolicy_enum
 enum_CUclusterSchedulingPolicy_enum = CEnum(ctypes.c_uint32)
 CU_CLUSTER_SCHEDULING_POLICY_DEFAULT = enum_CUclusterSchedulingPolicy_enum.define('CU_CLUSTER_SCHEDULING_POLICY_DEFAULT', 0)
 CU_CLUSTER_SCHEDULING_POLICY_SPREAD = enum_CUclusterSchedulingPolicy_enum.define('CU_CLUSTER_SCHEDULING_POLICY_SPREAD', 1)
 CU_CLUSTER_SCHEDULING_POLICY_LOAD_BALANCING = enum_CUclusterSchedulingPolicy_enum.define('CU_CLUSTER_SCHEDULING_POLICY_LOAD_BALANCING', 2)
 
-CUclusterSchedulingPolicy = enum_CUclusterSchedulingPolicy_enum
+CUclusterSchedulingPolicy: TypeAlias = enum_CUclusterSchedulingPolicy_enum
 enum_CUlaunchMemSyncDomain_enum = CEnum(ctypes.c_uint32)
 CU_LAUNCH_MEM_SYNC_DOMAIN_DEFAULT = enum_CUlaunchMemSyncDomain_enum.define('CU_LAUNCH_MEM_SYNC_DOMAIN_DEFAULT', 0)
 CU_LAUNCH_MEM_SYNC_DOMAIN_REMOTE = enum_CUlaunchMemSyncDomain_enum.define('CU_LAUNCH_MEM_SYNC_DOMAIN_REMOTE', 1)
 
-CUlaunchMemSyncDomain = enum_CUlaunchMemSyncDomain_enum
+CUlaunchMemSyncDomain: TypeAlias = enum_CUlaunchMemSyncDomain_enum
 class struct_CUlaunchMemSyncDomainMap_st(Struct): pass
 struct_CUlaunchMemSyncDomainMap_st._fields_ = [
   ('default_', ctypes.c_ubyte),
   ('remote', ctypes.c_ubyte),
 ]
-CUlaunchMemSyncDomainMap = struct_CUlaunchMemSyncDomainMap_st
+CUlaunchMemSyncDomainMap: TypeAlias = struct_CUlaunchMemSyncDomainMap_st
 enum_CUlaunchAttributeID_enum = CEnum(ctypes.c_uint32)
 CU_LAUNCH_ATTRIBUTE_IGNORE = enum_CUlaunchAttributeID_enum.define('CU_LAUNCH_ATTRIBUTE_IGNORE', 0)
 CU_LAUNCH_ATTRIBUTE_ACCESS_POLICY_WINDOW = enum_CUlaunchAttributeID_enum.define('CU_LAUNCH_ATTRIBUTE_ACCESS_POLICY_WINDOW', 1)
@@ -777,7 +778,7 @@ CU_LAUNCH_ATTRIBUTE_PRIORITY = enum_CUlaunchAttributeID_enum.define('CU_LAUNCH_A
 CU_LAUNCH_ATTRIBUTE_MEM_SYNC_DOMAIN_MAP = enum_CUlaunchAttributeID_enum.define('CU_LAUNCH_ATTRIBUTE_MEM_SYNC_DOMAIN_MAP', 9)
 CU_LAUNCH_ATTRIBUTE_MEM_SYNC_DOMAIN = enum_CUlaunchAttributeID_enum.define('CU_LAUNCH_ATTRIBUTE_MEM_SYNC_DOMAIN', 10)
 
-CUlaunchAttributeID = enum_CUlaunchAttributeID_enum
+CUlaunchAttributeID: TypeAlias = enum_CUlaunchAttributeID_enum
 class union_CUlaunchAttributeValue_union(ctypes.Union): pass
 class union_CUlaunchAttributeValue_union_clusterDim(Struct): pass
 union_CUlaunchAttributeValue_union_clusterDim._fields_ = [
@@ -804,14 +805,14 @@ union_CUlaunchAttributeValue_union._fields_ = [
   ('memSyncDomainMap', CUlaunchMemSyncDomainMap),
   ('memSyncDomain', CUlaunchMemSyncDomain),
 ]
-CUlaunchAttributeValue = union_CUlaunchAttributeValue_union
+CUlaunchAttributeValue: TypeAlias = union_CUlaunchAttributeValue_union
 class struct_CUlaunchAttribute_st(Struct): pass
 struct_CUlaunchAttribute_st._fields_ = [
   ('id', CUlaunchAttributeID),
   ('pad', (ctypes.c_char * 4)),
   ('value', CUlaunchAttributeValue),
 ]
-CUlaunchAttribute = struct_CUlaunchAttribute_st
+CUlaunchAttribute: TypeAlias = struct_CUlaunchAttribute_st
 class struct_CUlaunchConfig_st(Struct): pass
 struct_CUlaunchConfig_st._fields_ = [
   ('gridDimX', ctypes.c_uint32),
@@ -825,48 +826,48 @@ struct_CUlaunchConfig_st._fields_ = [
   ('attrs', ctypes.POINTER(CUlaunchAttribute)),
   ('numAttrs', ctypes.c_uint32),
 ]
-CUlaunchConfig = struct_CUlaunchConfig_st
-CUkernelNodeAttrID = enum_CUlaunchAttributeID_enum
-CUkernelNodeAttrValue_v1 = union_CUlaunchAttributeValue_union
-CUkernelNodeAttrValue = union_CUlaunchAttributeValue_union
+CUlaunchConfig: TypeAlias = struct_CUlaunchConfig_st
+CUkernelNodeAttrID: TypeAlias = enum_CUlaunchAttributeID_enum
+CUkernelNodeAttrValue_v1: TypeAlias = union_CUlaunchAttributeValue_union
+CUkernelNodeAttrValue: TypeAlias = union_CUlaunchAttributeValue_union
 enum_CUstreamCaptureStatus_enum = CEnum(ctypes.c_uint32)
 CU_STREAM_CAPTURE_STATUS_NONE = enum_CUstreamCaptureStatus_enum.define('CU_STREAM_CAPTURE_STATUS_NONE', 0)
 CU_STREAM_CAPTURE_STATUS_ACTIVE = enum_CUstreamCaptureStatus_enum.define('CU_STREAM_CAPTURE_STATUS_ACTIVE', 1)
 CU_STREAM_CAPTURE_STATUS_INVALIDATED = enum_CUstreamCaptureStatus_enum.define('CU_STREAM_CAPTURE_STATUS_INVALIDATED', 2)
 
-CUstreamCaptureStatus = enum_CUstreamCaptureStatus_enum
+CUstreamCaptureStatus: TypeAlias = enum_CUstreamCaptureStatus_enum
 enum_CUstreamCaptureMode_enum = CEnum(ctypes.c_uint32)
 CU_STREAM_CAPTURE_MODE_GLOBAL = enum_CUstreamCaptureMode_enum.define('CU_STREAM_CAPTURE_MODE_GLOBAL', 0)
 CU_STREAM_CAPTURE_MODE_THREAD_LOCAL = enum_CUstreamCaptureMode_enum.define('CU_STREAM_CAPTURE_MODE_THREAD_LOCAL', 1)
 CU_STREAM_CAPTURE_MODE_RELAXED = enum_CUstreamCaptureMode_enum.define('CU_STREAM_CAPTURE_MODE_RELAXED', 2)
 
-CUstreamCaptureMode = enum_CUstreamCaptureMode_enum
-CUstreamAttrID = enum_CUlaunchAttributeID_enum
-CUstreamAttrValue_v1 = union_CUlaunchAttributeValue_union
-CUstreamAttrValue = union_CUlaunchAttributeValue_union
+CUstreamCaptureMode: TypeAlias = enum_CUstreamCaptureMode_enum
+CUstreamAttrID: TypeAlias = enum_CUlaunchAttributeID_enum
+CUstreamAttrValue_v1: TypeAlias = union_CUlaunchAttributeValue_union
+CUstreamAttrValue: TypeAlias = union_CUlaunchAttributeValue_union
 enum_CUdriverProcAddress_flags_enum = CEnum(ctypes.c_uint32)
 CU_GET_PROC_ADDRESS_DEFAULT = enum_CUdriverProcAddress_flags_enum.define('CU_GET_PROC_ADDRESS_DEFAULT', 0)
 CU_GET_PROC_ADDRESS_LEGACY_STREAM = enum_CUdriverProcAddress_flags_enum.define('CU_GET_PROC_ADDRESS_LEGACY_STREAM', 1)
 CU_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM = enum_CUdriverProcAddress_flags_enum.define('CU_GET_PROC_ADDRESS_PER_THREAD_DEFAULT_STREAM', 2)
 
-CUdriverProcAddress_flags = enum_CUdriverProcAddress_flags_enum
+CUdriverProcAddress_flags: TypeAlias = enum_CUdriverProcAddress_flags_enum
 enum_CUdriverProcAddressQueryResult_enum = CEnum(ctypes.c_uint32)
 CU_GET_PROC_ADDRESS_SUCCESS = enum_CUdriverProcAddressQueryResult_enum.define('CU_GET_PROC_ADDRESS_SUCCESS', 0)
 CU_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND = enum_CUdriverProcAddressQueryResult_enum.define('CU_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND', 1)
 CU_GET_PROC_ADDRESS_VERSION_NOT_SUFFICIENT = enum_CUdriverProcAddressQueryResult_enum.define('CU_GET_PROC_ADDRESS_VERSION_NOT_SUFFICIENT', 2)
 
-CUdriverProcAddressQueryResult = enum_CUdriverProcAddressQueryResult_enum
+CUdriverProcAddressQueryResult: TypeAlias = enum_CUdriverProcAddressQueryResult_enum
 enum_CUexecAffinityType_enum = CEnum(ctypes.c_uint32)
 CU_EXEC_AFFINITY_TYPE_SM_COUNT = enum_CUexecAffinityType_enum.define('CU_EXEC_AFFINITY_TYPE_SM_COUNT', 0)
 CU_EXEC_AFFINITY_TYPE_MAX = enum_CUexecAffinityType_enum.define('CU_EXEC_AFFINITY_TYPE_MAX', 1)
 
-CUexecAffinityType = enum_CUexecAffinityType_enum
+CUexecAffinityType: TypeAlias = enum_CUexecAffinityType_enum
 class struct_CUexecAffinitySmCount_st(Struct): pass
 struct_CUexecAffinitySmCount_st._fields_ = [
   ('val', ctypes.c_uint32),
 ]
-CUexecAffinitySmCount_v1 = struct_CUexecAffinitySmCount_st
-CUexecAffinitySmCount = struct_CUexecAffinitySmCount_st
+CUexecAffinitySmCount_v1: TypeAlias = struct_CUexecAffinitySmCount_st
+CUexecAffinitySmCount: TypeAlias = struct_CUexecAffinitySmCount_st
 class struct_CUexecAffinityParam_st(Struct): pass
 class struct_CUexecAffinityParam_st_param(ctypes.Union): pass
 struct_CUexecAffinityParam_st_param._fields_ = [
@@ -876,14 +877,14 @@ struct_CUexecAffinityParam_st._fields_ = [
   ('type', CUexecAffinityType),
   ('param', struct_CUexecAffinityParam_st_param),
 ]
-CUexecAffinityParam_v1 = struct_CUexecAffinityParam_st
-CUexecAffinityParam = struct_CUexecAffinityParam_st
+CUexecAffinityParam_v1: TypeAlias = struct_CUexecAffinityParam_st
+CUexecAffinityParam: TypeAlias = struct_CUexecAffinityParam_st
 enum_CUlibraryOption_enum = CEnum(ctypes.c_uint32)
 CU_LIBRARY_HOST_UNIVERSAL_FUNCTION_AND_DATA_TABLE = enum_CUlibraryOption_enum.define('CU_LIBRARY_HOST_UNIVERSAL_FUNCTION_AND_DATA_TABLE', 0)
 CU_LIBRARY_BINARY_IS_PRESERVED = enum_CUlibraryOption_enum.define('CU_LIBRARY_BINARY_IS_PRESERVED', 1)
 CU_LIBRARY_NUM_OPTIONS = enum_CUlibraryOption_enum.define('CU_LIBRARY_NUM_OPTIONS', 2)
 
-CUlibraryOption = enum_CUlibraryOption_enum
+CUlibraryOption: TypeAlias = enum_CUlibraryOption_enum
 class struct_CUlibraryHostUniversalFunctionAndDataTable_st(Struct): pass
 struct_CUlibraryHostUniversalFunctionAndDataTable_st._fields_ = [
   ('functionTable', ctypes.c_void_p),
@@ -891,7 +892,7 @@ struct_CUlibraryHostUniversalFunctionAndDataTable_st._fields_ = [
   ('dataTable', ctypes.c_void_p),
   ('dataWindowSize', size_t),
 ]
-CUlibraryHostUniversalFunctionAndDataTable = struct_CUlibraryHostUniversalFunctionAndDataTable_st
+CUlibraryHostUniversalFunctionAndDataTable: TypeAlias = struct_CUlibraryHostUniversalFunctionAndDataTable_st
 enum_cudaError_enum = CEnum(ctypes.c_uint32)
 CUDA_SUCCESS = enum_cudaError_enum.define('CUDA_SUCCESS', 0)
 CUDA_ERROR_INVALID_VALUE = enum_cudaError_enum.define('CUDA_ERROR_INVALID_VALUE', 1)
@@ -986,7 +987,7 @@ CUDA_ERROR_EXTERNAL_DEVICE = enum_cudaError_enum.define('CUDA_ERROR_EXTERNAL_DEV
 CUDA_ERROR_INVALID_CLUSTER_SIZE = enum_cudaError_enum.define('CUDA_ERROR_INVALID_CLUSTER_SIZE', 912)
 CUDA_ERROR_UNKNOWN = enum_cudaError_enum.define('CUDA_ERROR_UNKNOWN', 999)
 
-CUresult = enum_cudaError_enum
+CUresult: TypeAlias = enum_cudaError_enum
 enum_CUdevice_P2PAttribute_enum = CEnum(ctypes.c_uint32)
 CU_DEVICE_P2P_ATTRIBUTE_PERFORMANCE_RANK = enum_CUdevice_P2PAttribute_enum.define('CU_DEVICE_P2P_ATTRIBUTE_PERFORMANCE_RANK', 1)
 CU_DEVICE_P2P_ATTRIBUTE_ACCESS_SUPPORTED = enum_CUdevice_P2PAttribute_enum.define('CU_DEVICE_P2P_ATTRIBUTE_ACCESS_SUPPORTED', 2)
@@ -994,9 +995,9 @@ CU_DEVICE_P2P_ATTRIBUTE_NATIVE_ATOMIC_SUPPORTED = enum_CUdevice_P2PAttribute_enu
 CU_DEVICE_P2P_ATTRIBUTE_ACCESS_ACCESS_SUPPORTED = enum_CUdevice_P2PAttribute_enum.define('CU_DEVICE_P2P_ATTRIBUTE_ACCESS_ACCESS_SUPPORTED', 4)
 CU_DEVICE_P2P_ATTRIBUTE_CUDA_ARRAY_ACCESS_SUPPORTED = enum_CUdevice_P2PAttribute_enum.define('CU_DEVICE_P2P_ATTRIBUTE_CUDA_ARRAY_ACCESS_SUPPORTED', 4)
 
-CUdevice_P2PAttribute = enum_CUdevice_P2PAttribute_enum
-CUstreamCallback = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_CUstream_st), enum_cudaError_enum, ctypes.c_void_p)
-CUoccupancyB2DSize = ctypes.CFUNCTYPE(ctypes.c_uint64, ctypes.c_int32)
+CUdevice_P2PAttribute: TypeAlias = enum_CUdevice_P2PAttribute_enum
+CUstreamCallback: TypeAlias = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_CUstream_st), enum_cudaError_enum, ctypes.c_void_p)
+CUoccupancyB2DSize: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_uint64, ctypes.c_int32)
 class struct_CUDA_MEMCPY2D_st(Struct): pass
 struct_CUDA_MEMCPY2D_st._fields_ = [
   ('srcXInBytes', size_t),
@@ -1016,8 +1017,8 @@ struct_CUDA_MEMCPY2D_st._fields_ = [
   ('WidthInBytes', size_t),
   ('Height', size_t),
 ]
-CUDA_MEMCPY2D_v2 = struct_CUDA_MEMCPY2D_st
-CUDA_MEMCPY2D = struct_CUDA_MEMCPY2D_st
+CUDA_MEMCPY2D_v2: TypeAlias = struct_CUDA_MEMCPY2D_st
+CUDA_MEMCPY2D: TypeAlias = struct_CUDA_MEMCPY2D_st
 class struct_CUDA_MEMCPY3D_st(Struct): pass
 struct_CUDA_MEMCPY3D_st._fields_ = [
   ('srcXInBytes', size_t),
@@ -1046,8 +1047,8 @@ struct_CUDA_MEMCPY3D_st._fields_ = [
   ('Height', size_t),
   ('Depth', size_t),
 ]
-CUDA_MEMCPY3D_v2 = struct_CUDA_MEMCPY3D_st
-CUDA_MEMCPY3D = struct_CUDA_MEMCPY3D_st
+CUDA_MEMCPY3D_v2: TypeAlias = struct_CUDA_MEMCPY3D_st
+CUDA_MEMCPY3D: TypeAlias = struct_CUDA_MEMCPY3D_st
 class struct_CUDA_MEMCPY3D_PEER_st(Struct): pass
 struct_CUDA_MEMCPY3D_PEER_st._fields_ = [
   ('srcXInBytes', size_t),
@@ -1076,8 +1077,8 @@ struct_CUDA_MEMCPY3D_PEER_st._fields_ = [
   ('Height', size_t),
   ('Depth', size_t),
 ]
-CUDA_MEMCPY3D_PEER_v1 = struct_CUDA_MEMCPY3D_PEER_st
-CUDA_MEMCPY3D_PEER = struct_CUDA_MEMCPY3D_PEER_st
+CUDA_MEMCPY3D_PEER_v1: TypeAlias = struct_CUDA_MEMCPY3D_PEER_st
+CUDA_MEMCPY3D_PEER: TypeAlias = struct_CUDA_MEMCPY3D_PEER_st
 class struct_CUDA_ARRAY_DESCRIPTOR_st(Struct): pass
 struct_CUDA_ARRAY_DESCRIPTOR_st._fields_ = [
   ('Width', size_t),
@@ -1085,8 +1086,8 @@ struct_CUDA_ARRAY_DESCRIPTOR_st._fields_ = [
   ('Format', CUarray_format),
   ('NumChannels', ctypes.c_uint32),
 ]
-CUDA_ARRAY_DESCRIPTOR_v2 = struct_CUDA_ARRAY_DESCRIPTOR_st
-CUDA_ARRAY_DESCRIPTOR = struct_CUDA_ARRAY_DESCRIPTOR_st
+CUDA_ARRAY_DESCRIPTOR_v2: TypeAlias = struct_CUDA_ARRAY_DESCRIPTOR_st
+CUDA_ARRAY_DESCRIPTOR: TypeAlias = struct_CUDA_ARRAY_DESCRIPTOR_st
 class struct_CUDA_ARRAY3D_DESCRIPTOR_st(Struct): pass
 struct_CUDA_ARRAY3D_DESCRIPTOR_st._fields_ = [
   ('Width', size_t),
@@ -1096,8 +1097,8 @@ struct_CUDA_ARRAY3D_DESCRIPTOR_st._fields_ = [
   ('NumChannels', ctypes.c_uint32),
   ('Flags', ctypes.c_uint32),
 ]
-CUDA_ARRAY3D_DESCRIPTOR_v2 = struct_CUDA_ARRAY3D_DESCRIPTOR_st
-CUDA_ARRAY3D_DESCRIPTOR = struct_CUDA_ARRAY3D_DESCRIPTOR_st
+CUDA_ARRAY3D_DESCRIPTOR_v2: TypeAlias = struct_CUDA_ARRAY3D_DESCRIPTOR_st
+CUDA_ARRAY3D_DESCRIPTOR: TypeAlias = struct_CUDA_ARRAY3D_DESCRIPTOR_st
 class struct_CUDA_ARRAY_SPARSE_PROPERTIES_st(Struct): pass
 class struct_CUDA_ARRAY_SPARSE_PROPERTIES_st_tileExtent(Struct): pass
 struct_CUDA_ARRAY_SPARSE_PROPERTIES_st_tileExtent._fields_ = [
@@ -1112,16 +1113,16 @@ struct_CUDA_ARRAY_SPARSE_PROPERTIES_st._fields_ = [
   ('flags', ctypes.c_uint32),
   ('reserved', (ctypes.c_uint32 * 4)),
 ]
-CUDA_ARRAY_SPARSE_PROPERTIES_v1 = struct_CUDA_ARRAY_SPARSE_PROPERTIES_st
-CUDA_ARRAY_SPARSE_PROPERTIES = struct_CUDA_ARRAY_SPARSE_PROPERTIES_st
+CUDA_ARRAY_SPARSE_PROPERTIES_v1: TypeAlias = struct_CUDA_ARRAY_SPARSE_PROPERTIES_st
+CUDA_ARRAY_SPARSE_PROPERTIES: TypeAlias = struct_CUDA_ARRAY_SPARSE_PROPERTIES_st
 class struct_CUDA_ARRAY_MEMORY_REQUIREMENTS_st(Struct): pass
 struct_CUDA_ARRAY_MEMORY_REQUIREMENTS_st._fields_ = [
   ('size', size_t),
   ('alignment', size_t),
   ('reserved', (ctypes.c_uint32 * 4)),
 ]
-CUDA_ARRAY_MEMORY_REQUIREMENTS_v1 = struct_CUDA_ARRAY_MEMORY_REQUIREMENTS_st
-CUDA_ARRAY_MEMORY_REQUIREMENTS = struct_CUDA_ARRAY_MEMORY_REQUIREMENTS_st
+CUDA_ARRAY_MEMORY_REQUIREMENTS_v1: TypeAlias = struct_CUDA_ARRAY_MEMORY_REQUIREMENTS_st
+CUDA_ARRAY_MEMORY_REQUIREMENTS: TypeAlias = struct_CUDA_ARRAY_MEMORY_REQUIREMENTS_st
 class struct_CUDA_RESOURCE_DESC_st(Struct): pass
 class struct_CUDA_RESOURCE_DESC_st_res(ctypes.Union): pass
 class struct_CUDA_RESOURCE_DESC_st_res_array(Struct): pass
@@ -1164,8 +1165,8 @@ struct_CUDA_RESOURCE_DESC_st._fields_ = [
   ('res', struct_CUDA_RESOURCE_DESC_st_res),
   ('flags', ctypes.c_uint32),
 ]
-CUDA_RESOURCE_DESC_v1 = struct_CUDA_RESOURCE_DESC_st
-CUDA_RESOURCE_DESC = struct_CUDA_RESOURCE_DESC_st
+CUDA_RESOURCE_DESC_v1: TypeAlias = struct_CUDA_RESOURCE_DESC_st
+CUDA_RESOURCE_DESC: TypeAlias = struct_CUDA_RESOURCE_DESC_st
 class struct_CUDA_TEXTURE_DESC_st(Struct): pass
 struct_CUDA_TEXTURE_DESC_st._fields_ = [
   ('addressMode', (CUaddress_mode * 3)),
@@ -1179,8 +1180,8 @@ struct_CUDA_TEXTURE_DESC_st._fields_ = [
   ('borderColor', (ctypes.c_float * 4)),
   ('reserved', (ctypes.c_int32 * 12)),
 ]
-CUDA_TEXTURE_DESC_v1 = struct_CUDA_TEXTURE_DESC_st
-CUDA_TEXTURE_DESC = struct_CUDA_TEXTURE_DESC_st
+CUDA_TEXTURE_DESC_v1: TypeAlias = struct_CUDA_TEXTURE_DESC_st
+CUDA_TEXTURE_DESC: TypeAlias = struct_CUDA_TEXTURE_DESC_st
 enum_CUresourceViewFormat_enum = CEnum(ctypes.c_uint32)
 CU_RES_VIEW_FORMAT_NONE = enum_CUresourceViewFormat_enum.define('CU_RES_VIEW_FORMAT_NONE', 0)
 CU_RES_VIEW_FORMAT_UINT_1X8 = enum_CUresourceViewFormat_enum.define('CU_RES_VIEW_FORMAT_UINT_1X8', 1)
@@ -1218,7 +1219,7 @@ CU_RES_VIEW_FORMAT_UNSIGNED_BC6H = enum_CUresourceViewFormat_enum.define('CU_RES
 CU_RES_VIEW_FORMAT_SIGNED_BC6H = enum_CUresourceViewFormat_enum.define('CU_RES_VIEW_FORMAT_SIGNED_BC6H', 33)
 CU_RES_VIEW_FORMAT_UNSIGNED_BC7 = enum_CUresourceViewFormat_enum.define('CU_RES_VIEW_FORMAT_UNSIGNED_BC7', 34)
 
-CUresourceViewFormat = enum_CUresourceViewFormat_enum
+CUresourceViewFormat: TypeAlias = enum_CUresourceViewFormat_enum
 class struct_CUDA_RESOURCE_VIEW_DESC_st(Struct): pass
 struct_CUDA_RESOURCE_VIEW_DESC_st._fields_ = [
   ('format', CUresourceViewFormat),
@@ -1231,13 +1232,13 @@ struct_CUDA_RESOURCE_VIEW_DESC_st._fields_ = [
   ('lastLayer', ctypes.c_uint32),
   ('reserved', (ctypes.c_uint32 * 16)),
 ]
-CUDA_RESOURCE_VIEW_DESC_v1 = struct_CUDA_RESOURCE_VIEW_DESC_st
-CUDA_RESOURCE_VIEW_DESC = struct_CUDA_RESOURCE_VIEW_DESC_st
+CUDA_RESOURCE_VIEW_DESC_v1: TypeAlias = struct_CUDA_RESOURCE_VIEW_DESC_st
+CUDA_RESOURCE_VIEW_DESC: TypeAlias = struct_CUDA_RESOURCE_VIEW_DESC_st
 class struct_CUtensorMap_st(Struct): pass
 struct_CUtensorMap_st._fields_ = [
   ('opaque', (cuuint64_t * 16)),
 ]
-CUtensorMap = struct_CUtensorMap_st
+CUtensorMap: TypeAlias = struct_CUtensorMap_st
 enum_CUtensorMapDataType_enum = CEnum(ctypes.c_uint32)
 CU_TENSOR_MAP_DATA_TYPE_UINT8 = enum_CUtensorMapDataType_enum.define('CU_TENSOR_MAP_DATA_TYPE_UINT8', 0)
 CU_TENSOR_MAP_DATA_TYPE_UINT16 = enum_CUtensorMapDataType_enum.define('CU_TENSOR_MAP_DATA_TYPE_UINT16', 1)
@@ -1253,45 +1254,45 @@ CU_TENSOR_MAP_DATA_TYPE_FLOAT32_FTZ = enum_CUtensorMapDataType_enum.define('CU_T
 CU_TENSOR_MAP_DATA_TYPE_TFLOAT32 = enum_CUtensorMapDataType_enum.define('CU_TENSOR_MAP_DATA_TYPE_TFLOAT32', 11)
 CU_TENSOR_MAP_DATA_TYPE_TFLOAT32_FTZ = enum_CUtensorMapDataType_enum.define('CU_TENSOR_MAP_DATA_TYPE_TFLOAT32_FTZ', 12)
 
-CUtensorMapDataType = enum_CUtensorMapDataType_enum
+CUtensorMapDataType: TypeAlias = enum_CUtensorMapDataType_enum
 enum_CUtensorMapInterleave_enum = CEnum(ctypes.c_uint32)
 CU_TENSOR_MAP_INTERLEAVE_NONE = enum_CUtensorMapInterleave_enum.define('CU_TENSOR_MAP_INTERLEAVE_NONE', 0)
 CU_TENSOR_MAP_INTERLEAVE_16B = enum_CUtensorMapInterleave_enum.define('CU_TENSOR_MAP_INTERLEAVE_16B', 1)
 CU_TENSOR_MAP_INTERLEAVE_32B = enum_CUtensorMapInterleave_enum.define('CU_TENSOR_MAP_INTERLEAVE_32B', 2)
 
-CUtensorMapInterleave = enum_CUtensorMapInterleave_enum
+CUtensorMapInterleave: TypeAlias = enum_CUtensorMapInterleave_enum
 enum_CUtensorMapSwizzle_enum = CEnum(ctypes.c_uint32)
 CU_TENSOR_MAP_SWIZZLE_NONE = enum_CUtensorMapSwizzle_enum.define('CU_TENSOR_MAP_SWIZZLE_NONE', 0)
 CU_TENSOR_MAP_SWIZZLE_32B = enum_CUtensorMapSwizzle_enum.define('CU_TENSOR_MAP_SWIZZLE_32B', 1)
 CU_TENSOR_MAP_SWIZZLE_64B = enum_CUtensorMapSwizzle_enum.define('CU_TENSOR_MAP_SWIZZLE_64B', 2)
 CU_TENSOR_MAP_SWIZZLE_128B = enum_CUtensorMapSwizzle_enum.define('CU_TENSOR_MAP_SWIZZLE_128B', 3)
 
-CUtensorMapSwizzle = enum_CUtensorMapSwizzle_enum
+CUtensorMapSwizzle: TypeAlias = enum_CUtensorMapSwizzle_enum
 enum_CUtensorMapL2promotion_enum = CEnum(ctypes.c_uint32)
 CU_TENSOR_MAP_L2_PROMOTION_NONE = enum_CUtensorMapL2promotion_enum.define('CU_TENSOR_MAP_L2_PROMOTION_NONE', 0)
 CU_TENSOR_MAP_L2_PROMOTION_L2_64B = enum_CUtensorMapL2promotion_enum.define('CU_TENSOR_MAP_L2_PROMOTION_L2_64B', 1)
 CU_TENSOR_MAP_L2_PROMOTION_L2_128B = enum_CUtensorMapL2promotion_enum.define('CU_TENSOR_MAP_L2_PROMOTION_L2_128B', 2)
 CU_TENSOR_MAP_L2_PROMOTION_L2_256B = enum_CUtensorMapL2promotion_enum.define('CU_TENSOR_MAP_L2_PROMOTION_L2_256B', 3)
 
-CUtensorMapL2promotion = enum_CUtensorMapL2promotion_enum
+CUtensorMapL2promotion: TypeAlias = enum_CUtensorMapL2promotion_enum
 enum_CUtensorMapFloatOOBfill_enum = CEnum(ctypes.c_uint32)
 CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE = enum_CUtensorMapFloatOOBfill_enum.define('CU_TENSOR_MAP_FLOAT_OOB_FILL_NONE', 0)
 CU_TENSOR_MAP_FLOAT_OOB_FILL_NAN_REQUEST_ZERO_FMA = enum_CUtensorMapFloatOOBfill_enum.define('CU_TENSOR_MAP_FLOAT_OOB_FILL_NAN_REQUEST_ZERO_FMA', 1)
 
-CUtensorMapFloatOOBfill = enum_CUtensorMapFloatOOBfill_enum
+CUtensorMapFloatOOBfill: TypeAlias = enum_CUtensorMapFloatOOBfill_enum
 class struct_CUDA_POINTER_ATTRIBUTE_P2P_TOKENS_st(Struct): pass
 struct_CUDA_POINTER_ATTRIBUTE_P2P_TOKENS_st._fields_ = [
   ('p2pToken', ctypes.c_uint64),
   ('vaSpaceToken', ctypes.c_uint32),
 ]
-CUDA_POINTER_ATTRIBUTE_P2P_TOKENS_v1 = struct_CUDA_POINTER_ATTRIBUTE_P2P_TOKENS_st
-CUDA_POINTER_ATTRIBUTE_P2P_TOKENS = struct_CUDA_POINTER_ATTRIBUTE_P2P_TOKENS_st
+CUDA_POINTER_ATTRIBUTE_P2P_TOKENS_v1: TypeAlias = struct_CUDA_POINTER_ATTRIBUTE_P2P_TOKENS_st
+CUDA_POINTER_ATTRIBUTE_P2P_TOKENS: TypeAlias = struct_CUDA_POINTER_ATTRIBUTE_P2P_TOKENS_st
 enum_CUDA_POINTER_ATTRIBUTE_ACCESS_FLAGS_enum = CEnum(ctypes.c_uint32)
 CU_POINTER_ATTRIBUTE_ACCESS_FLAG_NONE = enum_CUDA_POINTER_ATTRIBUTE_ACCESS_FLAGS_enum.define('CU_POINTER_ATTRIBUTE_ACCESS_FLAG_NONE', 0)
 CU_POINTER_ATTRIBUTE_ACCESS_FLAG_READ = enum_CUDA_POINTER_ATTRIBUTE_ACCESS_FLAGS_enum.define('CU_POINTER_ATTRIBUTE_ACCESS_FLAG_READ', 1)
 CU_POINTER_ATTRIBUTE_ACCESS_FLAG_READWRITE = enum_CUDA_POINTER_ATTRIBUTE_ACCESS_FLAGS_enum.define('CU_POINTER_ATTRIBUTE_ACCESS_FLAG_READWRITE', 3)
 
-CUDA_POINTER_ATTRIBUTE_ACCESS_FLAGS = enum_CUDA_POINTER_ATTRIBUTE_ACCESS_FLAGS_enum
+CUDA_POINTER_ATTRIBUTE_ACCESS_FLAGS: TypeAlias = enum_CUDA_POINTER_ATTRIBUTE_ACCESS_FLAGS_enum
 class struct_CUDA_LAUNCH_PARAMS_st(Struct): pass
 struct_CUDA_LAUNCH_PARAMS_st._fields_ = [
   ('function', CUfunction),
@@ -1305,8 +1306,8 @@ struct_CUDA_LAUNCH_PARAMS_st._fields_ = [
   ('hStream', CUstream),
   ('kernelParams', ctypes.POINTER(ctypes.c_void_p)),
 ]
-CUDA_LAUNCH_PARAMS_v1 = struct_CUDA_LAUNCH_PARAMS_st
-CUDA_LAUNCH_PARAMS = struct_CUDA_LAUNCH_PARAMS_st
+CUDA_LAUNCH_PARAMS_v1: TypeAlias = struct_CUDA_LAUNCH_PARAMS_st
+CUDA_LAUNCH_PARAMS: TypeAlias = struct_CUDA_LAUNCH_PARAMS_st
 enum_CUexternalMemoryHandleType_enum = CEnum(ctypes.c_uint32)
 CU_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD = enum_CUexternalMemoryHandleType_enum.define('CU_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD', 1)
 CU_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32 = enum_CUexternalMemoryHandleType_enum.define('CU_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32', 2)
@@ -1317,7 +1318,7 @@ CU_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_RESOURCE = enum_CUexternalMemoryHandleType_
 CU_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_RESOURCE_KMT = enum_CUexternalMemoryHandleType_enum.define('CU_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_RESOURCE_KMT', 7)
 CU_EXTERNAL_MEMORY_HANDLE_TYPE_NVSCIBUF = enum_CUexternalMemoryHandleType_enum.define('CU_EXTERNAL_MEMORY_HANDLE_TYPE_NVSCIBUF', 8)
 
-CUexternalMemoryHandleType = enum_CUexternalMemoryHandleType_enum
+CUexternalMemoryHandleType: TypeAlias = enum_CUexternalMemoryHandleType_enum
 class struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st(Struct): pass
 class struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st_handle(ctypes.Union): pass
 class struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st_handle_win32(Struct): pass
@@ -1337,8 +1338,8 @@ struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st._fields_ = [
   ('flags', ctypes.c_uint32),
   ('reserved', (ctypes.c_uint32 * 16)),
 ]
-CUDA_EXTERNAL_MEMORY_HANDLE_DESC_v1 = struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st
-CUDA_EXTERNAL_MEMORY_HANDLE_DESC = struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st
+CUDA_EXTERNAL_MEMORY_HANDLE_DESC_v1: TypeAlias = struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st
+CUDA_EXTERNAL_MEMORY_HANDLE_DESC: TypeAlias = struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st
 class struct_CUDA_EXTERNAL_MEMORY_BUFFER_DESC_st(Struct): pass
 struct_CUDA_EXTERNAL_MEMORY_BUFFER_DESC_st._fields_ = [
   ('offset', ctypes.c_uint64),
@@ -1346,8 +1347,8 @@ struct_CUDA_EXTERNAL_MEMORY_BUFFER_DESC_st._fields_ = [
   ('flags', ctypes.c_uint32),
   ('reserved', (ctypes.c_uint32 * 16)),
 ]
-CUDA_EXTERNAL_MEMORY_BUFFER_DESC_v1 = struct_CUDA_EXTERNAL_MEMORY_BUFFER_DESC_st
-CUDA_EXTERNAL_MEMORY_BUFFER_DESC = struct_CUDA_EXTERNAL_MEMORY_BUFFER_DESC_st
+CUDA_EXTERNAL_MEMORY_BUFFER_DESC_v1: TypeAlias = struct_CUDA_EXTERNAL_MEMORY_BUFFER_DESC_st
+CUDA_EXTERNAL_MEMORY_BUFFER_DESC: TypeAlias = struct_CUDA_EXTERNAL_MEMORY_BUFFER_DESC_st
 class struct_CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC_st(Struct): pass
 struct_CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC_st._fields_ = [
   ('offset', ctypes.c_uint64),
@@ -1355,8 +1356,8 @@ struct_CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC_st._fields_ = [
   ('numLevels', ctypes.c_uint32),
   ('reserved', (ctypes.c_uint32 * 16)),
 ]
-CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC_v1 = struct_CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC_st
-CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC = struct_CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC_st
+CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC_v1: TypeAlias = struct_CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC_st
+CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC: TypeAlias = struct_CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC_st
 enum_CUexternalSemaphoreHandleType_enum = CEnum(ctypes.c_uint32)
 CU_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD = enum_CUexternalSemaphoreHandleType_enum.define('CU_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_FD', 1)
 CU_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32 = enum_CUexternalSemaphoreHandleType_enum.define('CU_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32', 2)
@@ -1369,7 +1370,7 @@ CU_EXTERNAL_SEMAPHORE_HANDLE_TYPE_D3D11_KEYED_MUTEX_KMT = enum_CUexternalSemapho
 CU_EXTERNAL_SEMAPHORE_HANDLE_TYPE_TIMELINE_SEMAPHORE_FD = enum_CUexternalSemaphoreHandleType_enum.define('CU_EXTERNAL_SEMAPHORE_HANDLE_TYPE_TIMELINE_SEMAPHORE_FD', 9)
 CU_EXTERNAL_SEMAPHORE_HANDLE_TYPE_TIMELINE_SEMAPHORE_WIN32 = enum_CUexternalSemaphoreHandleType_enum.define('CU_EXTERNAL_SEMAPHORE_HANDLE_TYPE_TIMELINE_SEMAPHORE_WIN32', 10)
 
-CUexternalSemaphoreHandleType = enum_CUexternalSemaphoreHandleType_enum
+CUexternalSemaphoreHandleType: TypeAlias = enum_CUexternalSemaphoreHandleType_enum
 class struct_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st(Struct): pass
 class struct_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st_handle(ctypes.Union): pass
 class struct_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st_handle_win32(Struct): pass
@@ -1388,8 +1389,8 @@ struct_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st._fields_ = [
   ('flags', ctypes.c_uint32),
   ('reserved', (ctypes.c_uint32 * 16)),
 ]
-CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_v1 = struct_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st
-CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC = struct_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st
+CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_v1: TypeAlias = struct_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st
+CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC: TypeAlias = struct_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st
 class struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st(Struct): pass
 class struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st_params(Struct): pass
 class struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st_params_fence(Struct): pass
@@ -1416,8 +1417,8 @@ struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st._fields_ = [
   ('flags', ctypes.c_uint32),
   ('reserved', (ctypes.c_uint32 * 16)),
 ]
-CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_v1 = struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st
-CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS = struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st
+CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_v1: TypeAlias = struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st
+CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS: TypeAlias = struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st
 class struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st(Struct): pass
 class struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st_params(Struct): pass
 class struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st_params_fence(Struct): pass
@@ -1445,26 +1446,26 @@ struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st._fields_ = [
   ('flags', ctypes.c_uint32),
   ('reserved', (ctypes.c_uint32 * 16)),
 ]
-CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_v1 = struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st
-CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS = struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st
+CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_v1: TypeAlias = struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st
+CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS: TypeAlias = struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st
 class struct_CUDA_EXT_SEM_SIGNAL_NODE_PARAMS_st(Struct): pass
 struct_CUDA_EXT_SEM_SIGNAL_NODE_PARAMS_st._fields_ = [
   ('extSemArray', ctypes.POINTER(CUexternalSemaphore)),
   ('paramsArray', ctypes.POINTER(CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS)),
   ('numExtSems', ctypes.c_uint32),
 ]
-CUDA_EXT_SEM_SIGNAL_NODE_PARAMS_v1 = struct_CUDA_EXT_SEM_SIGNAL_NODE_PARAMS_st
-CUDA_EXT_SEM_SIGNAL_NODE_PARAMS = struct_CUDA_EXT_SEM_SIGNAL_NODE_PARAMS_st
+CUDA_EXT_SEM_SIGNAL_NODE_PARAMS_v1: TypeAlias = struct_CUDA_EXT_SEM_SIGNAL_NODE_PARAMS_st
+CUDA_EXT_SEM_SIGNAL_NODE_PARAMS: TypeAlias = struct_CUDA_EXT_SEM_SIGNAL_NODE_PARAMS_st
 class struct_CUDA_EXT_SEM_WAIT_NODE_PARAMS_st(Struct): pass
 struct_CUDA_EXT_SEM_WAIT_NODE_PARAMS_st._fields_ = [
   ('extSemArray', ctypes.POINTER(CUexternalSemaphore)),
   ('paramsArray', ctypes.POINTER(CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS)),
   ('numExtSems', ctypes.c_uint32),
 ]
-CUDA_EXT_SEM_WAIT_NODE_PARAMS_v1 = struct_CUDA_EXT_SEM_WAIT_NODE_PARAMS_st
-CUDA_EXT_SEM_WAIT_NODE_PARAMS = struct_CUDA_EXT_SEM_WAIT_NODE_PARAMS_st
-CUmemGenericAllocationHandle_v1 = ctypes.c_uint64
-CUmemGenericAllocationHandle = ctypes.c_uint64
+CUDA_EXT_SEM_WAIT_NODE_PARAMS_v1: TypeAlias = struct_CUDA_EXT_SEM_WAIT_NODE_PARAMS_st
+CUDA_EXT_SEM_WAIT_NODE_PARAMS: TypeAlias = struct_CUDA_EXT_SEM_WAIT_NODE_PARAMS_st
+CUmemGenericAllocationHandle_v1: TypeAlias = ctypes.c_uint64
+CUmemGenericAllocationHandle: TypeAlias = ctypes.c_uint64
 enum_CUmemAllocationHandleType_enum = CEnum(ctypes.c_uint32)
 CU_MEM_HANDLE_TYPE_NONE = enum_CUmemAllocationHandleType_enum.define('CU_MEM_HANDLE_TYPE_NONE', 0)
 CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR = enum_CUmemAllocationHandleType_enum.define('CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR', 1)
@@ -1472,50 +1473,50 @@ CU_MEM_HANDLE_TYPE_WIN32 = enum_CUmemAllocationHandleType_enum.define('CU_MEM_HA
 CU_MEM_HANDLE_TYPE_WIN32_KMT = enum_CUmemAllocationHandleType_enum.define('CU_MEM_HANDLE_TYPE_WIN32_KMT', 4)
 CU_MEM_HANDLE_TYPE_MAX = enum_CUmemAllocationHandleType_enum.define('CU_MEM_HANDLE_TYPE_MAX', 2147483647)
 
-CUmemAllocationHandleType = enum_CUmemAllocationHandleType_enum
+CUmemAllocationHandleType: TypeAlias = enum_CUmemAllocationHandleType_enum
 enum_CUmemAccess_flags_enum = CEnum(ctypes.c_uint32)
 CU_MEM_ACCESS_FLAGS_PROT_NONE = enum_CUmemAccess_flags_enum.define('CU_MEM_ACCESS_FLAGS_PROT_NONE', 0)
 CU_MEM_ACCESS_FLAGS_PROT_READ = enum_CUmemAccess_flags_enum.define('CU_MEM_ACCESS_FLAGS_PROT_READ', 1)
 CU_MEM_ACCESS_FLAGS_PROT_READWRITE = enum_CUmemAccess_flags_enum.define('CU_MEM_ACCESS_FLAGS_PROT_READWRITE', 3)
 CU_MEM_ACCESS_FLAGS_PROT_MAX = enum_CUmemAccess_flags_enum.define('CU_MEM_ACCESS_FLAGS_PROT_MAX', 2147483647)
 
-CUmemAccess_flags = enum_CUmemAccess_flags_enum
+CUmemAccess_flags: TypeAlias = enum_CUmemAccess_flags_enum
 enum_CUmemLocationType_enum = CEnum(ctypes.c_uint32)
 CU_MEM_LOCATION_TYPE_INVALID = enum_CUmemLocationType_enum.define('CU_MEM_LOCATION_TYPE_INVALID', 0)
 CU_MEM_LOCATION_TYPE_DEVICE = enum_CUmemLocationType_enum.define('CU_MEM_LOCATION_TYPE_DEVICE', 1)
 CU_MEM_LOCATION_TYPE_MAX = enum_CUmemLocationType_enum.define('CU_MEM_LOCATION_TYPE_MAX', 2147483647)
 
-CUmemLocationType = enum_CUmemLocationType_enum
+CUmemLocationType: TypeAlias = enum_CUmemLocationType_enum
 enum_CUmemAllocationType_enum = CEnum(ctypes.c_uint32)
 CU_MEM_ALLOCATION_TYPE_INVALID = enum_CUmemAllocationType_enum.define('CU_MEM_ALLOCATION_TYPE_INVALID', 0)
 CU_MEM_ALLOCATION_TYPE_PINNED = enum_CUmemAllocationType_enum.define('CU_MEM_ALLOCATION_TYPE_PINNED', 1)
 CU_MEM_ALLOCATION_TYPE_MAX = enum_CUmemAllocationType_enum.define('CU_MEM_ALLOCATION_TYPE_MAX', 2147483647)
 
-CUmemAllocationType = enum_CUmemAllocationType_enum
+CUmemAllocationType: TypeAlias = enum_CUmemAllocationType_enum
 enum_CUmemAllocationGranularity_flags_enum = CEnum(ctypes.c_uint32)
 CU_MEM_ALLOC_GRANULARITY_MINIMUM = enum_CUmemAllocationGranularity_flags_enum.define('CU_MEM_ALLOC_GRANULARITY_MINIMUM', 0)
 CU_MEM_ALLOC_GRANULARITY_RECOMMENDED = enum_CUmemAllocationGranularity_flags_enum.define('CU_MEM_ALLOC_GRANULARITY_RECOMMENDED', 1)
 
-CUmemAllocationGranularity_flags = enum_CUmemAllocationGranularity_flags_enum
+CUmemAllocationGranularity_flags: TypeAlias = enum_CUmemAllocationGranularity_flags_enum
 enum_CUmemRangeHandleType_enum = CEnum(ctypes.c_uint32)
 CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD = enum_CUmemRangeHandleType_enum.define('CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD', 1)
 CU_MEM_RANGE_HANDLE_TYPE_MAX = enum_CUmemRangeHandleType_enum.define('CU_MEM_RANGE_HANDLE_TYPE_MAX', 2147483647)
 
-CUmemRangeHandleType = enum_CUmemRangeHandleType_enum
+CUmemRangeHandleType: TypeAlias = enum_CUmemRangeHandleType_enum
 enum_CUarraySparseSubresourceType_enum = CEnum(ctypes.c_uint32)
 CU_ARRAY_SPARSE_SUBRESOURCE_TYPE_SPARSE_LEVEL = enum_CUarraySparseSubresourceType_enum.define('CU_ARRAY_SPARSE_SUBRESOURCE_TYPE_SPARSE_LEVEL', 0)
 CU_ARRAY_SPARSE_SUBRESOURCE_TYPE_MIPTAIL = enum_CUarraySparseSubresourceType_enum.define('CU_ARRAY_SPARSE_SUBRESOURCE_TYPE_MIPTAIL', 1)
 
-CUarraySparseSubresourceType = enum_CUarraySparseSubresourceType_enum
+CUarraySparseSubresourceType: TypeAlias = enum_CUarraySparseSubresourceType_enum
 enum_CUmemOperationType_enum = CEnum(ctypes.c_uint32)
 CU_MEM_OPERATION_TYPE_MAP = enum_CUmemOperationType_enum.define('CU_MEM_OPERATION_TYPE_MAP', 1)
 CU_MEM_OPERATION_TYPE_UNMAP = enum_CUmemOperationType_enum.define('CU_MEM_OPERATION_TYPE_UNMAP', 2)
 
-CUmemOperationType = enum_CUmemOperationType_enum
+CUmemOperationType: TypeAlias = enum_CUmemOperationType_enum
 enum_CUmemHandleType_enum = CEnum(ctypes.c_uint32)
 CU_MEM_HANDLE_TYPE_GENERIC = enum_CUmemHandleType_enum.define('CU_MEM_HANDLE_TYPE_GENERIC', 0)
 
-CUmemHandleType = enum_CUmemHandleType_enum
+CUmemHandleType: TypeAlias = enum_CUmemHandleType_enum
 class struct_CUarrayMapInfo_st(Struct): pass
 class struct_CUarrayMapInfo_st_resource(ctypes.Union): pass
 struct_CUarrayMapInfo_st_resource._fields_ = [
@@ -1561,20 +1562,20 @@ struct_CUarrayMapInfo_st._fields_ = [
   ('flags', ctypes.c_uint32),
   ('reserved', (ctypes.c_uint32 * 2)),
 ]
-CUarrayMapInfo_v1 = struct_CUarrayMapInfo_st
-CUarrayMapInfo = struct_CUarrayMapInfo_st
+CUarrayMapInfo_v1: TypeAlias = struct_CUarrayMapInfo_st
+CUarrayMapInfo: TypeAlias = struct_CUarrayMapInfo_st
 class struct_CUmemLocation_st(Struct): pass
 struct_CUmemLocation_st._fields_ = [
   ('type', CUmemLocationType),
   ('id', ctypes.c_int32),
 ]
-CUmemLocation_v1 = struct_CUmemLocation_st
-CUmemLocation = struct_CUmemLocation_st
+CUmemLocation_v1: TypeAlias = struct_CUmemLocation_st
+CUmemLocation: TypeAlias = struct_CUmemLocation_st
 enum_CUmemAllocationCompType_enum = CEnum(ctypes.c_uint32)
 CU_MEM_ALLOCATION_COMP_NONE = enum_CUmemAllocationCompType_enum.define('CU_MEM_ALLOCATION_COMP_NONE', 0)
 CU_MEM_ALLOCATION_COMP_GENERIC = enum_CUmemAllocationCompType_enum.define('CU_MEM_ALLOCATION_COMP_GENERIC', 1)
 
-CUmemAllocationCompType = enum_CUmemAllocationCompType_enum
+CUmemAllocationCompType: TypeAlias = enum_CUmemAllocationCompType_enum
 class struct_CUmemAllocationProp_st(Struct): pass
 class struct_CUmemAllocationProp_st_allocFlags(Struct): pass
 struct_CUmemAllocationProp_st_allocFlags._fields_ = [
@@ -1590,15 +1591,15 @@ struct_CUmemAllocationProp_st._fields_ = [
   ('win32HandleMetaData', ctypes.c_void_p),
   ('allocFlags', struct_CUmemAllocationProp_st_allocFlags),
 ]
-CUmemAllocationProp_v1 = struct_CUmemAllocationProp_st
-CUmemAllocationProp = struct_CUmemAllocationProp_st
+CUmemAllocationProp_v1: TypeAlias = struct_CUmemAllocationProp_st
+CUmemAllocationProp: TypeAlias = struct_CUmemAllocationProp_st
 class struct_CUmemAccessDesc_st(Struct): pass
 struct_CUmemAccessDesc_st._fields_ = [
   ('location', CUmemLocation),
   ('flags', CUmemAccess_flags),
 ]
-CUmemAccessDesc_v1 = struct_CUmemAccessDesc_st
-CUmemAccessDesc = struct_CUmemAccessDesc_st
+CUmemAccessDesc_v1: TypeAlias = struct_CUmemAccessDesc_st
+CUmemAccessDesc: TypeAlias = struct_CUmemAccessDesc_st
 enum_CUgraphExecUpdateResult_enum = CEnum(ctypes.c_uint32)
 CU_GRAPH_EXEC_UPDATE_SUCCESS = enum_CUgraphExecUpdateResult_enum.define('CU_GRAPH_EXEC_UPDATE_SUCCESS', 0)
 CU_GRAPH_EXEC_UPDATE_ERROR = enum_CUgraphExecUpdateResult_enum.define('CU_GRAPH_EXEC_UPDATE_ERROR', 1)
@@ -1610,15 +1611,15 @@ CU_GRAPH_EXEC_UPDATE_ERROR_NOT_SUPPORTED = enum_CUgraphExecUpdateResult_enum.def
 CU_GRAPH_EXEC_UPDATE_ERROR_UNSUPPORTED_FUNCTION_CHANGE = enum_CUgraphExecUpdateResult_enum.define('CU_GRAPH_EXEC_UPDATE_ERROR_UNSUPPORTED_FUNCTION_CHANGE', 7)
 CU_GRAPH_EXEC_UPDATE_ERROR_ATTRIBUTES_CHANGED = enum_CUgraphExecUpdateResult_enum.define('CU_GRAPH_EXEC_UPDATE_ERROR_ATTRIBUTES_CHANGED', 8)
 
-CUgraphExecUpdateResult = enum_CUgraphExecUpdateResult_enum
+CUgraphExecUpdateResult: TypeAlias = enum_CUgraphExecUpdateResult_enum
 class struct_CUgraphExecUpdateResultInfo_st(Struct): pass
 struct_CUgraphExecUpdateResultInfo_st._fields_ = [
   ('result', CUgraphExecUpdateResult),
   ('errorNode', CUgraphNode),
   ('errorFromNode', CUgraphNode),
 ]
-CUgraphExecUpdateResultInfo_v1 = struct_CUgraphExecUpdateResultInfo_st
-CUgraphExecUpdateResultInfo = struct_CUgraphExecUpdateResultInfo_st
+CUgraphExecUpdateResultInfo_v1: TypeAlias = struct_CUgraphExecUpdateResultInfo_st
+CUgraphExecUpdateResultInfo: TypeAlias = struct_CUgraphExecUpdateResultInfo_st
 enum_CUmemPool_attribute_enum = CEnum(ctypes.c_uint32)
 CU_MEMPOOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES = enum_CUmemPool_attribute_enum.define('CU_MEMPOOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES', 1)
 CU_MEMPOOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC = enum_CUmemPool_attribute_enum.define('CU_MEMPOOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC', 2)
@@ -1629,7 +1630,7 @@ CU_MEMPOOL_ATTR_RESERVED_MEM_HIGH = enum_CUmemPool_attribute_enum.define('CU_MEM
 CU_MEMPOOL_ATTR_USED_MEM_CURRENT = enum_CUmemPool_attribute_enum.define('CU_MEMPOOL_ATTR_USED_MEM_CURRENT', 7)
 CU_MEMPOOL_ATTR_USED_MEM_HIGH = enum_CUmemPool_attribute_enum.define('CU_MEMPOOL_ATTR_USED_MEM_HIGH', 8)
 
-CUmemPool_attribute = enum_CUmemPool_attribute_enum
+CUmemPool_attribute: TypeAlias = enum_CUmemPool_attribute_enum
 class struct_CUmemPoolProps_st(Struct): pass
 struct_CUmemPoolProps_st._fields_ = [
   ('allocType', CUmemAllocationType),
@@ -1638,14 +1639,14 @@ struct_CUmemPoolProps_st._fields_ = [
   ('win32SecurityAttributes', ctypes.c_void_p),
   ('reserved', (ctypes.c_ubyte * 64)),
 ]
-CUmemPoolProps_v1 = struct_CUmemPoolProps_st
-CUmemPoolProps = struct_CUmemPoolProps_st
+CUmemPoolProps_v1: TypeAlias = struct_CUmemPoolProps_st
+CUmemPoolProps: TypeAlias = struct_CUmemPoolProps_st
 class struct_CUmemPoolPtrExportData_st(Struct): pass
 struct_CUmemPoolPtrExportData_st._fields_ = [
   ('reserved', (ctypes.c_ubyte * 64)),
 ]
-CUmemPoolPtrExportData_v1 = struct_CUmemPoolPtrExportData_st
-CUmemPoolPtrExportData = struct_CUmemPoolPtrExportData_st
+CUmemPoolPtrExportData_v1: TypeAlias = struct_CUmemPoolPtrExportData_st
+CUmemPoolPtrExportData: TypeAlias = struct_CUmemPoolPtrExportData_st
 class struct_CUDA_MEM_ALLOC_NODE_PARAMS_st(Struct): pass
 struct_CUDA_MEM_ALLOC_NODE_PARAMS_st._fields_ = [
   ('poolProps', CUmemPoolProps),
@@ -1654,34 +1655,34 @@ struct_CUDA_MEM_ALLOC_NODE_PARAMS_st._fields_ = [
   ('bytesize', size_t),
   ('dptr', CUdeviceptr),
 ]
-CUDA_MEM_ALLOC_NODE_PARAMS = struct_CUDA_MEM_ALLOC_NODE_PARAMS_st
+CUDA_MEM_ALLOC_NODE_PARAMS: TypeAlias = struct_CUDA_MEM_ALLOC_NODE_PARAMS_st
 enum_CUgraphMem_attribute_enum = CEnum(ctypes.c_uint32)
 CU_GRAPH_MEM_ATTR_USED_MEM_CURRENT = enum_CUgraphMem_attribute_enum.define('CU_GRAPH_MEM_ATTR_USED_MEM_CURRENT', 0)
 CU_GRAPH_MEM_ATTR_USED_MEM_HIGH = enum_CUgraphMem_attribute_enum.define('CU_GRAPH_MEM_ATTR_USED_MEM_HIGH', 1)
 CU_GRAPH_MEM_ATTR_RESERVED_MEM_CURRENT = enum_CUgraphMem_attribute_enum.define('CU_GRAPH_MEM_ATTR_RESERVED_MEM_CURRENT', 2)
 CU_GRAPH_MEM_ATTR_RESERVED_MEM_HIGH = enum_CUgraphMem_attribute_enum.define('CU_GRAPH_MEM_ATTR_RESERVED_MEM_HIGH', 3)
 
-CUgraphMem_attribute = enum_CUgraphMem_attribute_enum
+CUgraphMem_attribute: TypeAlias = enum_CUgraphMem_attribute_enum
 enum_CUflushGPUDirectRDMAWritesOptions_enum = CEnum(ctypes.c_uint32)
 CU_FLUSH_GPU_DIRECT_RDMA_WRITES_OPTION_HOST = enum_CUflushGPUDirectRDMAWritesOptions_enum.define('CU_FLUSH_GPU_DIRECT_RDMA_WRITES_OPTION_HOST', 1)
 CU_FLUSH_GPU_DIRECT_RDMA_WRITES_OPTION_MEMOPS = enum_CUflushGPUDirectRDMAWritesOptions_enum.define('CU_FLUSH_GPU_DIRECT_RDMA_WRITES_OPTION_MEMOPS', 2)
 
-CUflushGPUDirectRDMAWritesOptions = enum_CUflushGPUDirectRDMAWritesOptions_enum
+CUflushGPUDirectRDMAWritesOptions: TypeAlias = enum_CUflushGPUDirectRDMAWritesOptions_enum
 enum_CUGPUDirectRDMAWritesOrdering_enum = CEnum(ctypes.c_uint32)
 CU_GPU_DIRECT_RDMA_WRITES_ORDERING_NONE = enum_CUGPUDirectRDMAWritesOrdering_enum.define('CU_GPU_DIRECT_RDMA_WRITES_ORDERING_NONE', 0)
 CU_GPU_DIRECT_RDMA_WRITES_ORDERING_OWNER = enum_CUGPUDirectRDMAWritesOrdering_enum.define('CU_GPU_DIRECT_RDMA_WRITES_ORDERING_OWNER', 100)
 CU_GPU_DIRECT_RDMA_WRITES_ORDERING_ALL_DEVICES = enum_CUGPUDirectRDMAWritesOrdering_enum.define('CU_GPU_DIRECT_RDMA_WRITES_ORDERING_ALL_DEVICES', 200)
 
-CUGPUDirectRDMAWritesOrdering = enum_CUGPUDirectRDMAWritesOrdering_enum
+CUGPUDirectRDMAWritesOrdering: TypeAlias = enum_CUGPUDirectRDMAWritesOrdering_enum
 enum_CUflushGPUDirectRDMAWritesScope_enum = CEnum(ctypes.c_uint32)
 CU_FLUSH_GPU_DIRECT_RDMA_WRITES_TO_OWNER = enum_CUflushGPUDirectRDMAWritesScope_enum.define('CU_FLUSH_GPU_DIRECT_RDMA_WRITES_TO_OWNER', 100)
 CU_FLUSH_GPU_DIRECT_RDMA_WRITES_TO_ALL_DEVICES = enum_CUflushGPUDirectRDMAWritesScope_enum.define('CU_FLUSH_GPU_DIRECT_RDMA_WRITES_TO_ALL_DEVICES', 200)
 
-CUflushGPUDirectRDMAWritesScope = enum_CUflushGPUDirectRDMAWritesScope_enum
+CUflushGPUDirectRDMAWritesScope: TypeAlias = enum_CUflushGPUDirectRDMAWritesScope_enum
 enum_CUflushGPUDirectRDMAWritesTarget_enum = CEnum(ctypes.c_uint32)
 CU_FLUSH_GPU_DIRECT_RDMA_WRITES_TARGET_CURRENT_CTX = enum_CUflushGPUDirectRDMAWritesTarget_enum.define('CU_FLUSH_GPU_DIRECT_RDMA_WRITES_TARGET_CURRENT_CTX', 0)
 
-CUflushGPUDirectRDMAWritesTarget = enum_CUflushGPUDirectRDMAWritesTarget_enum
+CUflushGPUDirectRDMAWritesTarget: TypeAlias = enum_CUflushGPUDirectRDMAWritesTarget_enum
 enum_CUgraphDebugDot_flags_enum = CEnum(ctypes.c_uint32)
 CU_GRAPH_DEBUG_DOT_FLAGS_VERBOSE = enum_CUgraphDebugDot_flags_enum.define('CU_GRAPH_DEBUG_DOT_FLAGS_VERBOSE', 1)
 CU_GRAPH_DEBUG_DOT_FLAGS_RUNTIME_TYPES = enum_CUgraphDebugDot_flags_enum.define('CU_GRAPH_DEBUG_DOT_FLAGS_RUNTIME_TYPES', 2)
@@ -1699,22 +1700,22 @@ CU_GRAPH_DEBUG_DOT_FLAGS_MEM_FREE_NODE_PARAMS = enum_CUgraphDebugDot_flags_enum.
 CU_GRAPH_DEBUG_DOT_FLAGS_BATCH_MEM_OP_NODE_PARAMS = enum_CUgraphDebugDot_flags_enum.define('CU_GRAPH_DEBUG_DOT_FLAGS_BATCH_MEM_OP_NODE_PARAMS', 8192)
 CU_GRAPH_DEBUG_DOT_FLAGS_EXTRA_TOPO_INFO = enum_CUgraphDebugDot_flags_enum.define('CU_GRAPH_DEBUG_DOT_FLAGS_EXTRA_TOPO_INFO', 16384)
 
-CUgraphDebugDot_flags = enum_CUgraphDebugDot_flags_enum
+CUgraphDebugDot_flags: TypeAlias = enum_CUgraphDebugDot_flags_enum
 enum_CUuserObject_flags_enum = CEnum(ctypes.c_uint32)
 CU_USER_OBJECT_NO_DESTRUCTOR_SYNC = enum_CUuserObject_flags_enum.define('CU_USER_OBJECT_NO_DESTRUCTOR_SYNC', 1)
 
-CUuserObject_flags = enum_CUuserObject_flags_enum
+CUuserObject_flags: TypeAlias = enum_CUuserObject_flags_enum
 enum_CUuserObjectRetain_flags_enum = CEnum(ctypes.c_uint32)
 CU_GRAPH_USER_OBJECT_MOVE = enum_CUuserObjectRetain_flags_enum.define('CU_GRAPH_USER_OBJECT_MOVE', 1)
 
-CUuserObjectRetain_flags = enum_CUuserObjectRetain_flags_enum
+CUuserObjectRetain_flags: TypeAlias = enum_CUuserObjectRetain_flags_enum
 enum_CUgraphInstantiate_flags_enum = CEnum(ctypes.c_uint32)
 CUDA_GRAPH_INSTANTIATE_FLAG_AUTO_FREE_ON_LAUNCH = enum_CUgraphInstantiate_flags_enum.define('CUDA_GRAPH_INSTANTIATE_FLAG_AUTO_FREE_ON_LAUNCH', 1)
 CUDA_GRAPH_INSTANTIATE_FLAG_UPLOAD = enum_CUgraphInstantiate_flags_enum.define('CUDA_GRAPH_INSTANTIATE_FLAG_UPLOAD', 2)
 CUDA_GRAPH_INSTANTIATE_FLAG_DEVICE_LAUNCH = enum_CUgraphInstantiate_flags_enum.define('CUDA_GRAPH_INSTANTIATE_FLAG_DEVICE_LAUNCH', 4)
 CUDA_GRAPH_INSTANTIATE_FLAG_USE_NODE_PRIORITY = enum_CUgraphInstantiate_flags_enum.define('CUDA_GRAPH_INSTANTIATE_FLAG_USE_NODE_PRIORITY', 8)
 
-CUgraphInstantiate_flags = enum_CUgraphInstantiate_flags_enum
+CUgraphInstantiate_flags: TypeAlias = enum_CUgraphInstantiate_flags_enum
 try: (cuGetErrorString:=dll.cuGetErrorString).restype, cuGetErrorString.argtypes = CUresult, [CUresult, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
 
@@ -1881,7 +1882,7 @@ enum_CUmoduleLoadingMode_enum = CEnum(ctypes.c_uint32)
 CU_MODULE_EAGER_LOADING = enum_CUmoduleLoadingMode_enum.define('CU_MODULE_EAGER_LOADING', 1)
 CU_MODULE_LAZY_LOADING = enum_CUmoduleLoadingMode_enum.define('CU_MODULE_LAZY_LOADING', 2)
 
-CUmoduleLoadingMode = enum_CUmoduleLoadingMode_enum
+CUmoduleLoadingMode: TypeAlias = enum_CUmoduleLoadingMode_enum
 try: (cuModuleGetLoadingMode:=dll.cuModuleGetLoadingMode).restype, cuModuleGetLoadingMode.argtypes = CUresult, [ctypes.POINTER(CUmoduleLoadingMode)]
 except AttributeError: pass
 
@@ -2878,7 +2879,7 @@ except AttributeError: pass
 try: (cuTexRefSetAddress2D_v2:=dll.cuTexRefSetAddress2D_v2).restype, cuTexRefSetAddress2D_v2.argtypes = CUresult, [CUtexref, ctypes.POINTER(CUDA_ARRAY_DESCRIPTOR), CUdeviceptr, size_t]
 except AttributeError: pass
 
-CUdeviceptr_v1 = ctypes.c_uint32
+CUdeviceptr_v1: TypeAlias = ctypes.c_uint32
 class struct_CUDA_MEMCPY2D_v1_st(Struct): pass
 struct_CUDA_MEMCPY2D_v1_st._fields_ = [
   ('srcXInBytes', ctypes.c_uint32),
@@ -2898,7 +2899,7 @@ struct_CUDA_MEMCPY2D_v1_st._fields_ = [
   ('WidthInBytes', ctypes.c_uint32),
   ('Height', ctypes.c_uint32),
 ]
-CUDA_MEMCPY2D_v1 = struct_CUDA_MEMCPY2D_v1_st
+CUDA_MEMCPY2D_v1: TypeAlias = struct_CUDA_MEMCPY2D_v1_st
 class struct_CUDA_MEMCPY3D_v1_st(Struct): pass
 struct_CUDA_MEMCPY3D_v1_st._fields_ = [
   ('srcXInBytes', ctypes.c_uint32),
@@ -2927,7 +2928,7 @@ struct_CUDA_MEMCPY3D_v1_st._fields_ = [
   ('Height', ctypes.c_uint32),
   ('Depth', ctypes.c_uint32),
 ]
-CUDA_MEMCPY3D_v1 = struct_CUDA_MEMCPY3D_v1_st
+CUDA_MEMCPY3D_v1: TypeAlias = struct_CUDA_MEMCPY3D_v1_st
 class struct_CUDA_ARRAY_DESCRIPTOR_v1_st(Struct): pass
 struct_CUDA_ARRAY_DESCRIPTOR_v1_st._fields_ = [
   ('Width', ctypes.c_uint32),
@@ -2935,7 +2936,7 @@ struct_CUDA_ARRAY_DESCRIPTOR_v1_st._fields_ = [
   ('Format', CUarray_format),
   ('NumChannels', ctypes.c_uint32),
 ]
-CUDA_ARRAY_DESCRIPTOR_v1 = struct_CUDA_ARRAY_DESCRIPTOR_v1_st
+CUDA_ARRAY_DESCRIPTOR_v1: TypeAlias = struct_CUDA_ARRAY_DESCRIPTOR_v1_st
 class struct_CUDA_ARRAY3D_DESCRIPTOR_v1_st(Struct): pass
 struct_CUDA_ARRAY3D_DESCRIPTOR_v1_st._fields_ = [
   ('Width', ctypes.c_uint32),
@@ -2945,7 +2946,7 @@ struct_CUDA_ARRAY3D_DESCRIPTOR_v1_st._fields_ = [
   ('NumChannels', ctypes.c_uint32),
   ('Flags', ctypes.c_uint32),
 ]
-CUDA_ARRAY3D_DESCRIPTOR_v1 = struct_CUDA_ARRAY3D_DESCRIPTOR_v1_st
+CUDA_ARRAY3D_DESCRIPTOR_v1: TypeAlias = struct_CUDA_ARRAY3D_DESCRIPTOR_v1_st
 try: (cuDeviceTotalMem:=dll.cuDeviceTotalMem).restype, cuDeviceTotalMem.argtypes = CUresult, [ctypes.POINTER(ctypes.c_uint32), CUdevice]
 except AttributeError: pass
 

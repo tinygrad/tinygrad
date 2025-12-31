@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 import ctypes
 from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from typing import TypeAlias
 import sysconfig
 dll = DLL('nvjitlink', 'nvJitLink', f'/usr/local/cuda/targets/{sysconfig.get_config_vars().get("MULTIARCH", "").rsplit("-", 1)[0]}/lib')
 nvJitLinkResult = CEnum(ctypes.c_uint32)
@@ -22,15 +23,15 @@ NVJITLINK_INPUT_OBJECT = nvJitLinkInputType.define('NVJITLINK_INPUT_OBJECT', 5)
 NVJITLINK_INPUT_LIBRARY = nvJitLinkInputType.define('NVJITLINK_INPUT_LIBRARY', 6)
 
 class struct_nvJitLink(Struct): pass
-nvJitLinkHandle = ctypes.POINTER(struct_nvJitLink)
-uint32_t = ctypes.c_uint32
+nvJitLinkHandle: TypeAlias = ctypes.POINTER(struct_nvJitLink)
+uint32_t: TypeAlias = ctypes.c_uint32
 try: (nvJitLinkCreate:=dll.nvJitLinkCreate).restype, nvJitLinkCreate.argtypes = nvJitLinkResult, [ctypes.POINTER(nvJitLinkHandle), uint32_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 except AttributeError: pass
 
 try: (nvJitLinkDestroy:=dll.nvJitLinkDestroy).restype, nvJitLinkDestroy.argtypes = nvJitLinkResult, [ctypes.POINTER(nvJitLinkHandle)]
 except AttributeError: pass
 
-size_t = ctypes.c_uint64
+size_t: TypeAlias = ctypes.c_uint64
 try: (nvJitLinkAddData:=dll.nvJitLinkAddData).restype, nvJitLinkAddData.argtypes = nvJitLinkResult, [nvJitLinkHandle, nvJitLinkInputType, ctypes.c_void_p, size_t, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 

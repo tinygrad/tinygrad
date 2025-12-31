@@ -1,8 +1,9 @@
 # mypy: ignore-errors
 import ctypes
 from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from typing import TypeAlias
 class struct_sqtt_data_info(Struct): pass
-uint32_t = ctypes.c_uint32
+uint32_t: TypeAlias = ctypes.c_uint32
 class struct_sqtt_data_info_0(ctypes.Union): pass
 struct_sqtt_data_info_0._fields_ = [
   ('gfx9_write_counter', uint32_t),
@@ -46,14 +47,14 @@ SQTT_FILE_CHUNK_TYPE_INSTRUMENTATION_TABLE = enum_sqtt_file_chunk_type.define('S
 SQTT_FILE_CHUNK_TYPE_COUNT = enum_sqtt_file_chunk_type.define('SQTT_FILE_CHUNK_TYPE_COUNT', 13)
 
 class struct_sqtt_file_chunk_id(Struct): pass
-int32_t = ctypes.c_int32
+int32_t: TypeAlias = ctypes.c_int32
 struct_sqtt_file_chunk_id._fields_ = [
   ('type', int32_t,8),
   ('index', int32_t,8),
   ('reserved', int32_t,16),
 ]
 class struct_sqtt_file_chunk_header(Struct): pass
-uint16_t = ctypes.c_uint16
+uint16_t: TypeAlias = ctypes.c_uint16
 struct_sqtt_file_chunk_header._fields_ = [
   ('chunk_id', struct_sqtt_file_chunk_id),
   ('minor_version', uint16_t),
@@ -96,7 +97,7 @@ struct_sqtt_file_header._fields_ = [
   ('is_daylight_savings', int32_t),
 ]
 class struct_sqtt_file_chunk_cpu_info(Struct): pass
-uint64_t = ctypes.c_uint64
+uint64_t: TypeAlias = ctypes.c_uint64
 struct_sqtt_file_chunk_cpu_info._fields_ = [
   ('header', struct_sqtt_file_chunk_header),
   ('vendor_id', (uint32_t * 4)),
@@ -149,7 +150,7 @@ SQTT_MEMORY_TYPE_LPDDR4 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_LPDDR4'
 SQTT_MEMORY_TYPE_LPDDR5 = enum_sqtt_memory_type.define('SQTT_MEMORY_TYPE_LPDDR5', 49)
 
 class struct_sqtt_file_chunk_asic_info(Struct): pass
-int64_t = ctypes.c_int64
+int64_t: TypeAlias = ctypes.c_int64
 struct_sqtt_file_chunk_asic_info._fields_ = [
   ('header', struct_sqtt_file_chunk_header),
   ('flags', uint64_t),
@@ -318,7 +319,7 @@ struct_sqtt_file_chunk_sqtt_desc_0_v0._fields_ = [
   ('instrumentation_version', int32_t),
 ]
 class struct_sqtt_file_chunk_sqtt_desc_0_v1(Struct): pass
-int16_t = ctypes.c_int16
+int16_t: TypeAlias = ctypes.c_int16
 struct_sqtt_file_chunk_sqtt_desc_0_v1._fields_ = [
   ('instrumentation_spec_version', int16_t),
   ('instrumentation_api_version', int16_t),

@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import unwrap
-from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from typing import TypeAlias
 enum_HEVCNALUnitType = CEnum(ctypes.c_uint32)
 HEVC_NAL_TRAIL_N = enum_HEVCNALUnitType.define('HEVC_NAL_TRAIL_N', 0)
 HEVC_NAL_TRAIL_R = enum_HEVCNALUnitType.define('HEVC_NAL_TRAIL_R', 1)
@@ -110,13 +110,13 @@ HEVC_AUX_ALPHA = enum_HEVCAuxId.define('HEVC_AUX_ALPHA', 1)
 HEVC_AUX_DEPTH = enum_HEVCAuxId.define('HEVC_AUX_DEPTH', 2)
 
 class struct_H265RawNALUnitHeader(Struct): pass
-uint8_t = ctypes.c_ubyte
+uint8_t: TypeAlias = ctypes.c_ubyte
 struct_H265RawNALUnitHeader._fields_ = [
   ('nal_unit_type', uint8_t),
   ('nuh_layer_id', uint8_t),
   ('nuh_temporal_id_plus1', uint8_t),
 ]
-H265RawNALUnitHeader = struct_H265RawNALUnitHeader
+H265RawNALUnitHeader: TypeAlias = struct_H265RawNALUnitHeader
 class struct_H265RawProfileTierLevel(Struct): pass
 struct_H265RawProfileTierLevel._fields_ = [
   ('general_profile_space', uint8_t),
@@ -162,9 +162,9 @@ struct_H265RawProfileTierLevel._fields_ = [
   ('sub_layer_inbld_flag', (uint8_t * 7)),
   ('sub_layer_level_idc', (uint8_t * 7)),
 ]
-H265RawProfileTierLevel = struct_H265RawProfileTierLevel
+H265RawProfileTierLevel: TypeAlias = struct_H265RawProfileTierLevel
 class struct_H265RawSubLayerHRDParameters(Struct): pass
-uint32_t = ctypes.c_uint32
+uint32_t: TypeAlias = ctypes.c_uint32
 struct_H265RawSubLayerHRDParameters._fields_ = [
   ('bit_rate_value_minus1', (uint32_t * 32)),
   ('cpb_size_value_minus1', (uint32_t * 32)),
@@ -172,9 +172,9 @@ struct_H265RawSubLayerHRDParameters._fields_ = [
   ('bit_rate_du_value_minus1', (uint32_t * 32)),
   ('cbr_flag', (uint8_t * 32)),
 ]
-H265RawSubLayerHRDParameters = struct_H265RawSubLayerHRDParameters
+H265RawSubLayerHRDParameters: TypeAlias = struct_H265RawSubLayerHRDParameters
 class struct_H265RawHRDParameters(Struct): pass
-uint16_t = ctypes.c_uint16
+uint16_t: TypeAlias = ctypes.c_uint16
 struct_H265RawHRDParameters._fields_ = [
   ('nal_hrd_parameters_present_flag', uint8_t),
   ('vcl_hrd_parameters_present_flag', uint8_t),
@@ -197,7 +197,7 @@ struct_H265RawHRDParameters._fields_ = [
   ('nal_sub_layer_hrd_parameters', (H265RawSubLayerHRDParameters * 7)),
   ('vcl_sub_layer_hrd_parameters', (H265RawSubLayerHRDParameters * 7)),
 ]
-H265RawHRDParameters = struct_H265RawHRDParameters
+H265RawHRDParameters: TypeAlias = struct_H265RawHRDParameters
 class struct_H265RawVUI(Struct): pass
 struct_H265RawVUI._fields_ = [
   ('aspect_ratio_info_present_flag', uint8_t),
@@ -241,11 +241,11 @@ struct_H265RawVUI._fields_ = [
   ('log2_max_mv_length_horizontal', uint8_t),
   ('log2_max_mv_length_vertical', uint8_t),
 ]
-H265RawVUI = struct_H265RawVUI
+H265RawVUI: TypeAlias = struct_H265RawVUI
 class struct_H265RawExtensionData(Struct): pass
-H265RawExtensionData = struct_H265RawExtensionData
+H265RawExtensionData: TypeAlias = struct_H265RawExtensionData
 class struct_H265RawVPS(Struct): pass
-H265RawVPS = struct_H265RawVPS
+H265RawVPS: TypeAlias = struct_H265RawVPS
 class struct_H265RawSTRefPicSet(Struct): pass
 struct_H265RawSTRefPicSet._fields_ = [
   ('inter_ref_pic_set_prediction_flag', uint8_t),
@@ -261,27 +261,27 @@ struct_H265RawSTRefPicSet._fields_ = [
   ('delta_poc_s1_minus1', (uint16_t * 16)),
   ('used_by_curr_pic_s1_flag', (uint8_t * 16)),
 ]
-H265RawSTRefPicSet = struct_H265RawSTRefPicSet
+H265RawSTRefPicSet: TypeAlias = struct_H265RawSTRefPicSet
 class struct_H265RawScalingList(Struct): pass
-int16_t = ctypes.c_int16
-int8_t = ctypes.c_byte
+int16_t: TypeAlias = ctypes.c_int16
+int8_t: TypeAlias = ctypes.c_byte
 struct_H265RawScalingList._fields_ = [
   ('scaling_list_pred_mode_flag', ((uint8_t * 6) * 4)),
   ('scaling_list_pred_matrix_id_delta', ((uint8_t * 6) * 4)),
   ('scaling_list_dc_coef_minus8', ((int16_t * 6) * 4)),
   ('scaling_list_delta_coeff', (((int8_t * 64) * 6) * 4)),
 ]
-H265RawScalingList = struct_H265RawScalingList
+H265RawScalingList: TypeAlias = struct_H265RawScalingList
 class struct_H265RawSPS(Struct): pass
-H265RawSPS = struct_H265RawSPS
+H265RawSPS: TypeAlias = struct_H265RawSPS
 class struct_H265RawPPS(Struct): pass
-H265RawPPS = struct_H265RawPPS
+H265RawPPS: TypeAlias = struct_H265RawPPS
 class struct_H265RawAUD(Struct): pass
 struct_H265RawAUD._fields_ = [
   ('nal_unit_header', H265RawNALUnitHeader),
   ('pic_type', uint8_t),
 ]
-H265RawAUD = struct_H265RawAUD
+H265RawAUD: TypeAlias = struct_H265RawAUD
 class struct_H265RawSliceHeader(Struct): pass
 struct_H265RawSliceHeader._fields_ = [
   ('nal_unit_header', H265RawNALUnitHeader),
@@ -353,9 +353,9 @@ struct_H265RawSliceHeader._fields_ = [
   ('slice_segment_header_extension_length', uint16_t),
   ('slice_segment_header_extension_data_byte', (uint8_t * 256)),
 ]
-H265RawSliceHeader = struct_H265RawSliceHeader
+H265RawSliceHeader: TypeAlias = struct_H265RawSliceHeader
 class struct_H265RawSlice(Struct): pass
-H265RawSlice = struct_H265RawSlice
+H265RawSlice: TypeAlias = struct_H265RawSlice
 class struct_H265RawSEIBufferingPeriod(Struct): pass
 struct_H265RawSEIBufferingPeriod._fields_ = [
   ('bp_seq_parameter_set_id', uint8_t),
@@ -374,7 +374,7 @@ struct_H265RawSEIBufferingPeriod._fields_ = [
   ('vcl_initial_alt_cpb_removal_offset', (uint32_t * 32)),
   ('use_alt_cpb_params_flag', uint8_t),
 ]
-H265RawSEIBufferingPeriod = struct_H265RawSEIBufferingPeriod
+H265RawSEIBufferingPeriod: TypeAlias = struct_H265RawSEIBufferingPeriod
 class struct_H265RawSEIPicTiming(Struct): pass
 struct_H265RawSEIPicTiming._fields_ = [
   ('pic_struct', uint8_t),
@@ -389,9 +389,9 @@ struct_H265RawSEIPicTiming._fields_ = [
   ('num_nalus_in_du_minus1', (uint16_t * 600)),
   ('du_cpb_removal_delay_increment_minus1', (uint32_t * 600)),
 ]
-H265RawSEIPicTiming = struct_H265RawSEIPicTiming
+H265RawSEIPicTiming: TypeAlias = struct_H265RawSEIPicTiming
 class struct_H265RawSEIPanScanRect(Struct): pass
-int32_t = ctypes.c_int32
+int32_t: TypeAlias = ctypes.c_int32
 struct_H265RawSEIPanScanRect._fields_ = [
   ('pan_scan_rect_id', uint32_t),
   ('pan_scan_rect_cancel_flag', uint8_t),
@@ -402,14 +402,14 @@ struct_H265RawSEIPanScanRect._fields_ = [
   ('pan_scan_rect_bottom_offset', (int32_t * 3)),
   ('pan_scan_rect_persistence_flag', uint16_t),
 ]
-H265RawSEIPanScanRect = struct_H265RawSEIPanScanRect
+H265RawSEIPanScanRect: TypeAlias = struct_H265RawSEIPanScanRect
 class struct_H265RawSEIRecoveryPoint(Struct): pass
 struct_H265RawSEIRecoveryPoint._fields_ = [
   ('recovery_poc_cnt', int16_t),
   ('exact_match_flag', uint8_t),
   ('broken_link_flag', uint8_t),
 ]
-H265RawSEIRecoveryPoint = struct_H265RawSEIRecoveryPoint
+H265RawSEIRecoveryPoint: TypeAlias = struct_H265RawSEIRecoveryPoint
 class struct_H265RawFilmGrainCharacteristics(Struct): pass
 struct_H265RawFilmGrainCharacteristics._fields_ = [
   ('film_grain_characteristics_cancel_flag', uint8_t),
@@ -431,7 +431,7 @@ struct_H265RawFilmGrainCharacteristics._fields_ = [
   ('comp_model_value', (((int16_t * 6) * 256) * 3)),
   ('film_grain_characteristics_persistence_flag', uint8_t),
 ]
-H265RawFilmGrainCharacteristics = struct_H265RawFilmGrainCharacteristics
+H265RawFilmGrainCharacteristics: TypeAlias = struct_H265RawFilmGrainCharacteristics
 class struct_H265RawSEIDisplayOrientation(Struct): pass
 struct_H265RawSEIDisplayOrientation._fields_ = [
   ('display_orientation_cancel_flag', uint8_t),
@@ -441,7 +441,7 @@ struct_H265RawSEIDisplayOrientation._fields_ = [
   ('display_orientation_repetition_period', uint16_t),
   ('display_orientation_persistence_flag', uint8_t),
 ]
-H265RawSEIDisplayOrientation = struct_H265RawSEIDisplayOrientation
+H265RawSEIDisplayOrientation: TypeAlias = struct_H265RawSEIDisplayOrientation
 class struct_H265RawSEIActiveParameterSets(Struct): pass
 struct_H265RawSEIActiveParameterSets._fields_ = [
   ('active_video_parameter_set_id', uint8_t),
@@ -451,7 +451,7 @@ struct_H265RawSEIActiveParameterSets._fields_ = [
   ('active_seq_parameter_set_id', (uint8_t * 16)),
   ('layer_sps_idx', (uint8_t * 63)),
 ]
-H265RawSEIActiveParameterSets = struct_H265RawSEIActiveParameterSets
+H265RawSEIActiveParameterSets: TypeAlias = struct_H265RawSEIActiveParameterSets
 class struct_H265RawSEIDecodedPictureHash(Struct): pass
 struct_H265RawSEIDecodedPictureHash._fields_ = [
   ('hash_type', uint8_t),
@@ -459,7 +459,7 @@ struct_H265RawSEIDecodedPictureHash._fields_ = [
   ('picture_crc', (uint16_t * 3)),
   ('picture_checksum', (uint32_t * 3)),
 ]
-H265RawSEIDecodedPictureHash = struct_H265RawSEIDecodedPictureHash
+H265RawSEIDecodedPictureHash: TypeAlias = struct_H265RawSEIDecodedPictureHash
 class struct_H265RawSEITimeCode(Struct): pass
 struct_H265RawSEITimeCode._fields_ = [
   ('num_clock_ts', uint8_t),
@@ -479,7 +479,7 @@ struct_H265RawSEITimeCode._fields_ = [
   ('time_offset_length', (uint8_t * 3)),
   ('time_offset_value', (int32_t * 3)),
 ]
-H265RawSEITimeCode = struct_H265RawSEITimeCode
+H265RawSEITimeCode: TypeAlias = struct_H265RawSEITimeCode
 class struct_H265RawSEIAlphaChannelInfo(Struct): pass
 struct_H265RawSEIAlphaChannelInfo._fields_ = [
   ('alpha_channel_cancel_flag', uint8_t),
@@ -491,7 +491,7 @@ struct_H265RawSEIAlphaChannelInfo._fields_ = [
   ('alpha_channel_clip_flag', uint8_t),
   ('alpha_channel_clip_type_flag', uint8_t),
 ]
-H265RawSEIAlphaChannelInfo = struct_H265RawSEIAlphaChannelInfo
+H265RawSEIAlphaChannelInfo: TypeAlias = struct_H265RawSEIAlphaChannelInfo
 class struct_H265RawSEI3DReferenceDisplaysInfo(Struct): pass
 struct_H265RawSEI3DReferenceDisplaysInfo._fields_ = [
   ('prec_ref_display_width', uint8_t),
@@ -508,13 +508,13 @@ struct_H265RawSEI3DReferenceDisplaysInfo._fields_ = [
   ('num_sample_shift_plus512', (uint16_t * 32)),
   ('three_dimensional_reference_displays_extension_flag', uint8_t),
 ]
-H265RawSEI3DReferenceDisplaysInfo = struct_H265RawSEI3DReferenceDisplaysInfo
+H265RawSEI3DReferenceDisplaysInfo: TypeAlias = struct_H265RawSEI3DReferenceDisplaysInfo
 class struct_H265RawSEI(Struct): pass
 class struct_SEIRawMessageList(Struct): pass
-SEIRawMessageList = struct_SEIRawMessageList
+SEIRawMessageList: TypeAlias = struct_SEIRawMessageList
 class struct_SEIRawMessage(Struct): pass
-SEIRawMessage = struct_SEIRawMessage
-size_t = ctypes.c_uint64
+SEIRawMessage: TypeAlias = struct_SEIRawMessage
+size_t: TypeAlias = ctypes.c_uint64
 struct_SEIRawMessage._fields_ = [
   ('payload_type', uint32_t),
   ('payload_size', uint32_t),
@@ -532,12 +532,12 @@ struct_H265RawSEI._fields_ = [
   ('nal_unit_header', H265RawNALUnitHeader),
   ('message_list', SEIRawMessageList),
 ]
-H265RawSEI = struct_H265RawSEI
+H265RawSEI: TypeAlias = struct_H265RawSEI
 class struct_H265RawFiller(Struct): pass
 struct_H265RawFiller._fields_ = [
   ('nal_unit_header', H265RawNALUnitHeader),
   ('filler_size', uint32_t),
 ]
-H265RawFiller = struct_H265RawFiller
+H265RawFiller: TypeAlias = struct_H265RawFiller
 class struct_CodedBitstreamH265Context(Struct): pass
-CodedBitstreamH265Context = struct_CodedBitstreamH265Context
+CodedBitstreamH265Context: TypeAlias = struct_CodedBitstreamH265Context

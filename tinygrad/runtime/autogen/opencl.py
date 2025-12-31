@@ -1,88 +1,89 @@
 # mypy: ignore-errors
 import ctypes
 from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from typing import TypeAlias
 dll = DLL('opencl', 'OpenCL')
 class struct__cl_platform_id(Struct): pass
-cl_platform_id = ctypes.POINTER(struct__cl_platform_id)
+cl_platform_id: TypeAlias = ctypes.POINTER(struct__cl_platform_id)
 class struct__cl_device_id(Struct): pass
-cl_device_id = ctypes.POINTER(struct__cl_device_id)
+cl_device_id: TypeAlias = ctypes.POINTER(struct__cl_device_id)
 class struct__cl_context(Struct): pass
-cl_context = ctypes.POINTER(struct__cl_context)
+cl_context: TypeAlias = ctypes.POINTER(struct__cl_context)
 class struct__cl_command_queue(Struct): pass
-cl_command_queue = ctypes.POINTER(struct__cl_command_queue)
+cl_command_queue: TypeAlias = ctypes.POINTER(struct__cl_command_queue)
 class struct__cl_mem(Struct): pass
-cl_mem = ctypes.POINTER(struct__cl_mem)
+cl_mem: TypeAlias = ctypes.POINTER(struct__cl_mem)
 class struct__cl_program(Struct): pass
-cl_program = ctypes.POINTER(struct__cl_program)
+cl_program: TypeAlias = ctypes.POINTER(struct__cl_program)
 class struct__cl_kernel(Struct): pass
-cl_kernel = ctypes.POINTER(struct__cl_kernel)
+cl_kernel: TypeAlias = ctypes.POINTER(struct__cl_kernel)
 class struct__cl_event(Struct): pass
-cl_event = ctypes.POINTER(struct__cl_event)
+cl_event: TypeAlias = ctypes.POINTER(struct__cl_event)
 class struct__cl_sampler(Struct): pass
-cl_sampler = ctypes.POINTER(struct__cl_sampler)
-cl_bool = ctypes.c_uint32
-cl_bitfield = ctypes.c_uint64
-cl_properties = ctypes.c_uint64
-cl_device_type = ctypes.c_uint64
-cl_platform_info = ctypes.c_uint32
-cl_device_info = ctypes.c_uint32
-cl_device_fp_config = ctypes.c_uint64
-cl_device_mem_cache_type = ctypes.c_uint32
-cl_device_local_mem_type = ctypes.c_uint32
-cl_device_exec_capabilities = ctypes.c_uint64
-cl_device_svm_capabilities = ctypes.c_uint64
-cl_command_queue_properties = ctypes.c_uint64
-cl_device_partition_property = ctypes.c_int64
-cl_device_affinity_domain = ctypes.c_uint64
-cl_context_properties = ctypes.c_int64
-cl_context_info = ctypes.c_uint32
-cl_queue_properties = ctypes.c_uint64
-cl_command_queue_info = ctypes.c_uint32
-cl_channel_order = ctypes.c_uint32
-cl_channel_type = ctypes.c_uint32
-cl_mem_flags = ctypes.c_uint64
-cl_svm_mem_flags = ctypes.c_uint64
-cl_mem_object_type = ctypes.c_uint32
-cl_mem_info = ctypes.c_uint32
-cl_mem_migration_flags = ctypes.c_uint64
-cl_image_info = ctypes.c_uint32
-cl_buffer_create_type = ctypes.c_uint32
-cl_addressing_mode = ctypes.c_uint32
-cl_filter_mode = ctypes.c_uint32
-cl_sampler_info = ctypes.c_uint32
-cl_map_flags = ctypes.c_uint64
-cl_pipe_properties = ctypes.c_int64
-cl_pipe_info = ctypes.c_uint32
-cl_program_info = ctypes.c_uint32
-cl_program_build_info = ctypes.c_uint32
-cl_program_binary_type = ctypes.c_uint32
-cl_build_status = ctypes.c_int32
-cl_kernel_info = ctypes.c_uint32
-cl_kernel_arg_info = ctypes.c_uint32
-cl_kernel_arg_address_qualifier = ctypes.c_uint32
-cl_kernel_arg_access_qualifier = ctypes.c_uint32
-cl_kernel_arg_type_qualifier = ctypes.c_uint64
-cl_kernel_work_group_info = ctypes.c_uint32
-cl_kernel_sub_group_info = ctypes.c_uint32
-cl_event_info = ctypes.c_uint32
-cl_command_type = ctypes.c_uint32
-cl_profiling_info = ctypes.c_uint32
-cl_sampler_properties = ctypes.c_uint64
-cl_kernel_exec_info = ctypes.c_uint32
-cl_device_atomic_capabilities = ctypes.c_uint64
-cl_device_device_enqueue_capabilities = ctypes.c_uint64
-cl_khronos_vendor_id = ctypes.c_uint32
-cl_mem_properties = ctypes.c_uint64
-cl_version = ctypes.c_uint32
+cl_sampler: TypeAlias = ctypes.POINTER(struct__cl_sampler)
+cl_bool: TypeAlias = ctypes.c_uint32
+cl_bitfield: TypeAlias = ctypes.c_uint64
+cl_properties: TypeAlias = ctypes.c_uint64
+cl_device_type: TypeAlias = ctypes.c_uint64
+cl_platform_info: TypeAlias = ctypes.c_uint32
+cl_device_info: TypeAlias = ctypes.c_uint32
+cl_device_fp_config: TypeAlias = ctypes.c_uint64
+cl_device_mem_cache_type: TypeAlias = ctypes.c_uint32
+cl_device_local_mem_type: TypeAlias = ctypes.c_uint32
+cl_device_exec_capabilities: TypeAlias = ctypes.c_uint64
+cl_device_svm_capabilities: TypeAlias = ctypes.c_uint64
+cl_command_queue_properties: TypeAlias = ctypes.c_uint64
+cl_device_partition_property: TypeAlias = ctypes.c_int64
+cl_device_affinity_domain: TypeAlias = ctypes.c_uint64
+cl_context_properties: TypeAlias = ctypes.c_int64
+cl_context_info: TypeAlias = ctypes.c_uint32
+cl_queue_properties: TypeAlias = ctypes.c_uint64
+cl_command_queue_info: TypeAlias = ctypes.c_uint32
+cl_channel_order: TypeAlias = ctypes.c_uint32
+cl_channel_type: TypeAlias = ctypes.c_uint32
+cl_mem_flags: TypeAlias = ctypes.c_uint64
+cl_svm_mem_flags: TypeAlias = ctypes.c_uint64
+cl_mem_object_type: TypeAlias = ctypes.c_uint32
+cl_mem_info: TypeAlias = ctypes.c_uint32
+cl_mem_migration_flags: TypeAlias = ctypes.c_uint64
+cl_image_info: TypeAlias = ctypes.c_uint32
+cl_buffer_create_type: TypeAlias = ctypes.c_uint32
+cl_addressing_mode: TypeAlias = ctypes.c_uint32
+cl_filter_mode: TypeAlias = ctypes.c_uint32
+cl_sampler_info: TypeAlias = ctypes.c_uint32
+cl_map_flags: TypeAlias = ctypes.c_uint64
+cl_pipe_properties: TypeAlias = ctypes.c_int64
+cl_pipe_info: TypeAlias = ctypes.c_uint32
+cl_program_info: TypeAlias = ctypes.c_uint32
+cl_program_build_info: TypeAlias = ctypes.c_uint32
+cl_program_binary_type: TypeAlias = ctypes.c_uint32
+cl_build_status: TypeAlias = ctypes.c_int32
+cl_kernel_info: TypeAlias = ctypes.c_uint32
+cl_kernel_arg_info: TypeAlias = ctypes.c_uint32
+cl_kernel_arg_address_qualifier: TypeAlias = ctypes.c_uint32
+cl_kernel_arg_access_qualifier: TypeAlias = ctypes.c_uint32
+cl_kernel_arg_type_qualifier: TypeAlias = ctypes.c_uint64
+cl_kernel_work_group_info: TypeAlias = ctypes.c_uint32
+cl_kernel_sub_group_info: TypeAlias = ctypes.c_uint32
+cl_event_info: TypeAlias = ctypes.c_uint32
+cl_command_type: TypeAlias = ctypes.c_uint32
+cl_profiling_info: TypeAlias = ctypes.c_uint32
+cl_sampler_properties: TypeAlias = ctypes.c_uint64
+cl_kernel_exec_info: TypeAlias = ctypes.c_uint32
+cl_device_atomic_capabilities: TypeAlias = ctypes.c_uint64
+cl_device_device_enqueue_capabilities: TypeAlias = ctypes.c_uint64
+cl_khronos_vendor_id: TypeAlias = ctypes.c_uint32
+cl_mem_properties: TypeAlias = ctypes.c_uint64
+cl_version: TypeAlias = ctypes.c_uint32
 class struct__cl_image_format(Struct): pass
 struct__cl_image_format._fields_ = [
   ('image_channel_order', cl_channel_order),
   ('image_channel_data_type', cl_channel_type),
 ]
-cl_image_format = struct__cl_image_format
+cl_image_format: TypeAlias = struct__cl_image_format
 class struct__cl_image_desc(Struct): pass
-size_t = ctypes.c_uint64
-cl_uint = ctypes.c_uint32
+size_t: TypeAlias = ctypes.c_uint64
+cl_uint: TypeAlias = ctypes.c_uint32
 class struct__cl_image_desc_0(ctypes.Union): pass
 struct__cl_image_desc_0._fields_ = [
   ('buffer', cl_mem),
@@ -101,20 +102,20 @@ struct__cl_image_desc._fields_ = [
   ('num_samples', cl_uint),
   ('_0', struct__cl_image_desc_0),
 ]
-cl_image_desc = struct__cl_image_desc
+cl_image_desc: TypeAlias = struct__cl_image_desc
 class struct__cl_buffer_region(Struct): pass
 struct__cl_buffer_region._fields_ = [
   ('origin', size_t),
   ('size', size_t),
 ]
-cl_buffer_region = struct__cl_buffer_region
+cl_buffer_region: TypeAlias = struct__cl_buffer_region
 class struct__cl_name_version(Struct): pass
 struct__cl_name_version._fields_ = [
   ('version', cl_version),
   ('name', (ctypes.c_char * 64)),
 ]
-cl_name_version = struct__cl_name_version
-cl_int = ctypes.c_int32
+cl_name_version: TypeAlias = struct__cl_name_version
+cl_int: TypeAlias = ctypes.c_int32
 try: (clGetPlatformIDs:=dll.clGetPlatformIDs).restype, clGetPlatformIDs.argtypes = cl_int, [cl_uint, ctypes.POINTER(cl_platform_id), ctypes.POINTER(cl_uint)]
 except AttributeError: pass
 
@@ -139,7 +140,7 @@ except AttributeError: pass
 try: (clSetDefaultDeviceCommandQueue:=dll.clSetDefaultDeviceCommandQueue).restype, clSetDefaultDeviceCommandQueue.argtypes = cl_int, [cl_context, cl_device_id, cl_command_queue]
 except AttributeError: pass
 
-cl_ulong = ctypes.c_uint64
+cl_ulong: TypeAlias = ctypes.c_uint64
 try: (clGetDeviceAndHostTimer:=dll.clGetDeviceAndHostTimer).restype, clGetDeviceAndHostTimer.argtypes = cl_int, [cl_device_id, ctypes.POINTER(cl_ulong), ctypes.POINTER(cl_ulong)]
 except AttributeError: pass
 

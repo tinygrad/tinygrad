@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 import ctypes
 from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from typing import TypeAlias
 import os
 dll = DLL('hip', os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libamdhip64.so')
 hipError_t = CEnum(ctypes.c_uint32)
@@ -84,13 +85,13 @@ hipErrorRuntimeOther = hipError_t.define('hipErrorRuntimeOther', 1053)
 hipErrorTbd = hipError_t.define('hipErrorTbd', 1054)
 
 class ihipModuleSymbol_t(Struct): pass
-hipFunction_t = ctypes.POINTER(ihipModuleSymbol_t)
-uint32_t = ctypes.c_uint32
-size_t = ctypes.c_uint64
+hipFunction_t: TypeAlias = ctypes.POINTER(ihipModuleSymbol_t)
+uint32_t: TypeAlias = ctypes.c_uint32
+size_t: TypeAlias = ctypes.c_uint64
 class ihipStream_t(Struct): pass
-hipStream_t = ctypes.POINTER(ihipStream_t)
+hipStream_t: TypeAlias = ctypes.POINTER(ihipStream_t)
 class ihipEvent_t(Struct): pass
-hipEvent_t = ctypes.POINTER(ihipEvent_t)
+hipEvent_t: TypeAlias = ctypes.POINTER(ihipEvent_t)
 try: (hipExtModuleLaunchKernel:=dll.hipExtModuleLaunchKernel).restype, hipExtModuleLaunchKernel.argtypes = hipError_t, [hipFunction_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, uint32_t, size_t, hipStream_t, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_void_p), hipEvent_t, hipEvent_t, uint32_t]
 except AttributeError: pass
 
@@ -165,7 +166,7 @@ HIPRTC_JIT_INPUT_LLVM_ARCHIVES_OF_BUNDLED_BITCODE = hiprtcJITInputType.define('H
 HIPRTC_JIT_NUM_INPUT_TYPES = hiprtcJITInputType.define('HIPRTC_JIT_NUM_INPUT_TYPES', 9)
 
 class ihiprtcLinkState(Struct): pass
-hiprtcLinkState = ctypes.POINTER(ihiprtcLinkState)
+hiprtcLinkState: TypeAlias = ctypes.POINTER(ihiprtcLinkState)
 try: (hiprtcGetErrorString:=dll.hiprtcGetErrorString).restype, hiprtcGetErrorString.argtypes = ctypes.POINTER(ctypes.c_char), [hiprtcResult]
 except AttributeError: pass
 
@@ -173,7 +174,7 @@ try: (hiprtcVersion:=dll.hiprtcVersion).restype, hiprtcVersion.argtypes = hiprtc
 except AttributeError: pass
 
 class _hiprtcProgram(Struct): pass
-hiprtcProgram = ctypes.POINTER(_hiprtcProgram)
+hiprtcProgram: TypeAlias = ctypes.POINTER(_hiprtcProgram)
 try: (hiprtcAddNameExpression:=dll.hiprtcAddNameExpression).restype, hiprtcAddNameExpression.argtypes = hiprtcResult, [hiprtcProgram, ctypes.POINTER(ctypes.c_char)]
 except AttributeError: pass
 
@@ -252,7 +253,7 @@ class hipUUID_t(Struct): pass
 hipUUID_t._fields_ = [
   ('bytes', (ctypes.c_char * 16)),
 ]
-hipUUID = hipUUID_t
+hipUUID: TypeAlias = hipUUID_t
 class hipDeviceProp_tR0600(Struct): pass
 hipDeviceProp_tR0600._fields_ = [
   ('name', (ctypes.c_char * 256)),
@@ -521,8 +522,8 @@ try: (hip_init:=dll.hip_init).restype, hip_init.argtypes = hipError_t, []
 except AttributeError: pass
 
 class ihipCtx_t(Struct): pass
-hipCtx_t = ctypes.POINTER(ihipCtx_t)
-hipDevice_t = ctypes.c_int32
+hipCtx_t: TypeAlias = ctypes.POINTER(ihipCtx_t)
+hipDevice_t: TypeAlias = ctypes.c_int32
 hipDeviceP2PAttr = CEnum(ctypes.c_uint32)
 hipDevP2PAttrPerformanceRank = hipDeviceP2PAttr.define('hipDevP2PAttrPerformanceRank', 0)
 hipDevP2PAttrAccessSupported = hipDeviceP2PAttr.define('hipDevP2PAttrAccessSupported', 1)
@@ -533,16 +534,16 @@ class hipIpcMemHandle_st(Struct): pass
 hipIpcMemHandle_st._fields_ = [
   ('reserved', (ctypes.c_char * 64)),
 ]
-hipIpcMemHandle_t = hipIpcMemHandle_st
+hipIpcMemHandle_t: TypeAlias = hipIpcMemHandle_st
 class hipIpcEventHandle_st(Struct): pass
 hipIpcEventHandle_st._fields_ = [
   ('reserved', (ctypes.c_char * 64)),
 ]
-hipIpcEventHandle_t = hipIpcEventHandle_st
+hipIpcEventHandle_t: TypeAlias = hipIpcEventHandle_st
 class ihipModule_t(Struct): pass
-hipModule_t = ctypes.POINTER(ihipModule_t)
+hipModule_t: TypeAlias = ctypes.POINTER(ihipModule_t)
 class ihipMemPoolHandle_t(Struct): pass
-hipMemPool_t = ctypes.POINTER(ihipMemPoolHandle_t)
+hipMemPool_t: TypeAlias = ctypes.POINTER(ihipMemPoolHandle_t)
 class hipFuncAttributes(Struct): pass
 hipFuncAttributes._fields_ = [
   ('binaryVersion', ctypes.c_int32),
@@ -682,7 +683,7 @@ hipLaunchParams_t._fields_ = [
   ('sharedMem', size_t),
   ('stream', hipStream_t),
 ]
-hipLaunchParams = hipLaunchParams_t
+hipLaunchParams: TypeAlias = hipLaunchParams_t
 class hipFunctionLaunchParams_t(Struct): pass
 hipFunctionLaunchParams_t._fields_ = [
   ('function', hipFunction_t),
@@ -696,7 +697,7 @@ hipFunctionLaunchParams_t._fields_ = [
   ('hStream', hipStream_t),
   ('kernelParams', ctypes.POINTER(ctypes.c_void_p)),
 ]
-hipFunctionLaunchParams = hipFunctionLaunchParams_t
+hipFunctionLaunchParams: TypeAlias = hipFunctionLaunchParams_t
 hipExternalMemoryHandleType_enum = CEnum(ctypes.c_uint32)
 hipExternalMemoryHandleTypeOpaqueFd = hipExternalMemoryHandleType_enum.define('hipExternalMemoryHandleTypeOpaqueFd', 1)
 hipExternalMemoryHandleTypeOpaqueWin32 = hipExternalMemoryHandleType_enum.define('hipExternalMemoryHandleTypeOpaqueWin32', 2)
@@ -707,7 +708,7 @@ hipExternalMemoryHandleTypeD3D11Resource = hipExternalMemoryHandleType_enum.defi
 hipExternalMemoryHandleTypeD3D11ResourceKmt = hipExternalMemoryHandleType_enum.define('hipExternalMemoryHandleTypeD3D11ResourceKmt', 7)
 hipExternalMemoryHandleTypeNvSciBuf = hipExternalMemoryHandleType_enum.define('hipExternalMemoryHandleTypeNvSciBuf', 8)
 
-hipExternalMemoryHandleType = hipExternalMemoryHandleType_enum
+hipExternalMemoryHandleType: TypeAlias = hipExternalMemoryHandleType_enum
 class hipExternalMemoryHandleDesc_st(Struct): pass
 class hipExternalMemoryHandleDesc_st_handle(ctypes.Union): pass
 class hipExternalMemoryHandleDesc_st_handle_win32(Struct): pass
@@ -727,7 +728,7 @@ hipExternalMemoryHandleDesc_st._fields_ = [
   ('flags', ctypes.c_uint32),
   ('reserved', (ctypes.c_uint32 * 16)),
 ]
-hipExternalMemoryHandleDesc = hipExternalMemoryHandleDesc_st
+hipExternalMemoryHandleDesc: TypeAlias = hipExternalMemoryHandleDesc_st
 class hipExternalMemoryBufferDesc_st(Struct): pass
 hipExternalMemoryBufferDesc_st._fields_ = [
   ('offset', ctypes.c_uint64),
@@ -735,7 +736,7 @@ hipExternalMemoryBufferDesc_st._fields_ = [
   ('flags', ctypes.c_uint32),
   ('reserved', (ctypes.c_uint32 * 16)),
 ]
-hipExternalMemoryBufferDesc = hipExternalMemoryBufferDesc_st
+hipExternalMemoryBufferDesc: TypeAlias = hipExternalMemoryBufferDesc_st
 class hipExternalMemoryMipmappedArrayDesc_st(Struct): pass
 class hipChannelFormatDesc(Struct): pass
 hipChannelFormatKind = CEnum(ctypes.c_uint32)
@@ -764,8 +765,8 @@ hipExternalMemoryMipmappedArrayDesc_st._fields_ = [
   ('flags', ctypes.c_uint32),
   ('numLevels', ctypes.c_uint32),
 ]
-hipExternalMemoryMipmappedArrayDesc = hipExternalMemoryMipmappedArrayDesc_st
-hipExternalMemory_t = ctypes.c_void_p
+hipExternalMemoryMipmappedArrayDesc: TypeAlias = hipExternalMemoryMipmappedArrayDesc_st
+hipExternalMemory_t: TypeAlias = ctypes.c_void_p
 hipExternalSemaphoreHandleType_enum = CEnum(ctypes.c_uint32)
 hipExternalSemaphoreHandleTypeOpaqueFd = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeOpaqueFd', 1)
 hipExternalSemaphoreHandleTypeOpaqueWin32 = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeOpaqueWin32', 2)
@@ -778,7 +779,7 @@ hipExternalSemaphoreHandleTypeKeyedMutexKmt = hipExternalSemaphoreHandleType_enu
 hipExternalSemaphoreHandleTypeTimelineSemaphoreFd = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeTimelineSemaphoreFd', 9)
 hipExternalSemaphoreHandleTypeTimelineSemaphoreWin32 = hipExternalSemaphoreHandleType_enum.define('hipExternalSemaphoreHandleTypeTimelineSemaphoreWin32', 10)
 
-hipExternalSemaphoreHandleType = hipExternalSemaphoreHandleType_enum
+hipExternalSemaphoreHandleType: TypeAlias = hipExternalSemaphoreHandleType_enum
 class hipExternalSemaphoreHandleDesc_st(Struct): pass
 class hipExternalSemaphoreHandleDesc_st_handle(ctypes.Union): pass
 class hipExternalSemaphoreHandleDesc_st_handle_win32(Struct): pass
@@ -797,8 +798,8 @@ hipExternalSemaphoreHandleDesc_st._fields_ = [
   ('flags', ctypes.c_uint32),
   ('reserved', (ctypes.c_uint32 * 16)),
 ]
-hipExternalSemaphoreHandleDesc = hipExternalSemaphoreHandleDesc_st
-hipExternalSemaphore_t = ctypes.c_void_p
+hipExternalSemaphoreHandleDesc: TypeAlias = hipExternalSemaphoreHandleDesc_st
+hipExternalSemaphore_t: TypeAlias = ctypes.c_void_p
 class hipExternalSemaphoreSignalParams_st(Struct): pass
 class hipExternalSemaphoreSignalParams_st_params(Struct): pass
 class hipExternalSemaphoreSignalParams_st_params_fence(Struct): pass
@@ -825,7 +826,7 @@ hipExternalSemaphoreSignalParams_st._fields_ = [
   ('flags', ctypes.c_uint32),
   ('reserved', (ctypes.c_uint32 * 16)),
 ]
-hipExternalSemaphoreSignalParams = hipExternalSemaphoreSignalParams_st
+hipExternalSemaphoreSignalParams: TypeAlias = hipExternalSemaphoreSignalParams_st
 class hipExternalSemaphoreWaitParams_st(Struct): pass
 class hipExternalSemaphoreWaitParams_st_params(Struct): pass
 class hipExternalSemaphoreWaitParams_st_params_fence(Struct): pass
@@ -853,7 +854,7 @@ hipExternalSemaphoreWaitParams_st._fields_ = [
   ('flags', ctypes.c_uint32),
   ('reserved', (ctypes.c_uint32 * 16)),
 ]
-hipExternalSemaphoreWaitParams = hipExternalSemaphoreWaitParams_st
+hipExternalSemaphoreWaitParams: TypeAlias = hipExternalSemaphoreWaitParams_st
 try: (__hipGetPCH:=dll.__hipGetPCH).restype, __hipGetPCH.argtypes = None, [ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError: pass
 
@@ -865,16 +866,16 @@ hipGraphicsRegisterFlagsSurfaceLoadStore = hipGraphicsRegisterFlags.define('hipG
 hipGraphicsRegisterFlagsTextureGather = hipGraphicsRegisterFlags.define('hipGraphicsRegisterFlagsTextureGather', 8)
 
 class _hipGraphicsResource(Struct): pass
-hipGraphicsResource = _hipGraphicsResource
-hipGraphicsResource_t = ctypes.POINTER(_hipGraphicsResource)
+hipGraphicsResource: TypeAlias = _hipGraphicsResource
+hipGraphicsResource_t: TypeAlias = ctypes.POINTER(_hipGraphicsResource)
 class ihipGraph(Struct): pass
-hipGraph_t = ctypes.POINTER(ihipGraph)
+hipGraph_t: TypeAlias = ctypes.POINTER(ihipGraph)
 class hipGraphNode(Struct): pass
-hipGraphNode_t = ctypes.POINTER(hipGraphNode)
+hipGraphNode_t: TypeAlias = ctypes.POINTER(hipGraphNode)
 class hipGraphExec(Struct): pass
-hipGraphExec_t = ctypes.POINTER(hipGraphExec)
+hipGraphExec_t: TypeAlias = ctypes.POINTER(hipGraphExec)
 class hipUserObject(Struct): pass
-hipUserObject_t = ctypes.POINTER(hipUserObject)
+hipUserObject_t: TypeAlias = ctypes.POINTER(hipUserObject)
 hipGraphNodeType = CEnum(ctypes.c_uint32)
 hipGraphNodeTypeKernel = hipGraphNodeType.define('hipGraphNodeTypeKernel', 0)
 hipGraphNodeTypeMemcpy = hipGraphNodeType.define('hipGraphNodeTypeMemcpy', 1)
@@ -892,7 +893,7 @@ hipGraphNodeTypeMemcpyFromSymbol = hipGraphNodeType.define('hipGraphNodeTypeMemc
 hipGraphNodeTypeMemcpyToSymbol = hipGraphNodeType.define('hipGraphNodeTypeMemcpyToSymbol', 13)
 hipGraphNodeTypeCount = hipGraphNodeType.define('hipGraphNodeTypeCount', 14)
 
-hipHostFn_t = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
+hipHostFn_t: TypeAlias = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
 class hipHostNodeParams(Struct): pass
 hipHostNodeParams._fields_ = [
   ('fn', hipHostFn_t),
@@ -949,7 +950,7 @@ hipLaunchAttributeValue._fields_ = [
   ('priority', ctypes.c_int32),
 ]
 class HIP_MEMSET_NODE_PARAMS(Struct): pass
-hipDeviceptr_t = ctypes.c_void_p
+hipDeviceptr_t: TypeAlias = ctypes.c_void_p
 HIP_MEMSET_NODE_PARAMS._fields_ = [
   ('dst', hipDeviceptr_t),
   ('pitch', size_t),
@@ -1053,7 +1054,7 @@ hipExternalSemaphoreWaitNodeParams._fields_ = [
   ('numExtSems', ctypes.c_uint32),
 ]
 class ihipMemGenericAllocationHandle(Struct): pass
-hipMemGenericAllocationHandle_t = ctypes.POINTER(ihipMemGenericAllocationHandle)
+hipMemGenericAllocationHandle_t: TypeAlias = ctypes.POINTER(ihipMemGenericAllocationHandle)
 hipMemAllocationGranularity_flags = CEnum(ctypes.c_uint32)
 hipMemAllocationGranularityMinimum = hipMemAllocationGranularity_flags.define('hipMemAllocationGranularityMinimum', 0)
 hipMemAllocationGranularityRecommended = hipMemAllocationGranularity_flags.define('hipMemAllocationGranularityRecommended', 1)
@@ -1102,7 +1103,7 @@ hipMipmappedArray._fields_ = [
   ('num_channels', ctypes.c_uint32),
 ]
 class hipArray(Struct): pass
-hipArray_t = ctypes.POINTER(hipArray)
+hipArray_t: TypeAlias = ctypes.POINTER(hipArray)
 hipArrayMapInfo_resource._fields_ = [
   ('mipmap', hipMipmappedArray),
   ('array', hipArray_t),
@@ -1414,14 +1415,14 @@ except AttributeError: pass
 try: (hipExtStreamGetCUMask:=dll.hipExtStreamGetCUMask).restype, hipExtStreamGetCUMask.argtypes = hipError_t, [hipStream_t, uint32_t, ctypes.POINTER(uint32_t)]
 except AttributeError: pass
 
-hipStreamCallback_t = ctypes.CFUNCTYPE(None, ctypes.POINTER(ihipStream_t), hipError_t, ctypes.c_void_p)
+hipStreamCallback_t: TypeAlias = ctypes.CFUNCTYPE(None, ctypes.POINTER(ihipStream_t), hipError_t, ctypes.c_void_p)
 try: (hipStreamAddCallback:=dll.hipStreamAddCallback).restype, hipStreamAddCallback.argtypes = hipError_t, [hipStream_t, hipStreamCallback_t, ctypes.c_void_p, ctypes.c_uint32]
 except AttributeError: pass
 
 try: (hipStreamWaitValue32:=dll.hipStreamWaitValue32).restype, hipStreamWaitValue32.argtypes = hipError_t, [hipStream_t, ctypes.c_void_p, uint32_t, ctypes.c_uint32, uint32_t]
 except AttributeError: pass
 
-uint64_t = ctypes.c_uint64
+uint64_t: TypeAlias = ctypes.c_uint64
 try: (hipStreamWaitValue64:=dll.hipStreamWaitValue64).restype, hipStreamWaitValue64.argtypes = hipError_t, [hipStream_t, ctypes.c_void_p, uint64_t, ctypes.c_uint32, uint64_t]
 except AttributeError: pass
 
@@ -1504,7 +1505,7 @@ except AttributeError: pass
 try: (hipDestroyExternalMemory:=dll.hipDestroyExternalMemory).restype, hipDestroyExternalMemory.argtypes = hipError_t, [hipExternalMemory_t]
 except AttributeError: pass
 
-hipMipmappedArray_t = ctypes.POINTER(hipMipmappedArray)
+hipMipmappedArray_t: TypeAlias = ctypes.POINTER(hipMipmappedArray)
 try: (hipExternalMemoryGetMappedMipmappedArray:=dll.hipExternalMemoryGetMappedMipmappedArray).restype, hipExternalMemoryGetMappedMipmappedArray.argtypes = hipError_t, [ctypes.POINTER(hipMipmappedArray_t), hipExternalMemory_t, ctypes.POINTER(hipExternalMemoryMipmappedArrayDesc)]
 except AttributeError: pass
 
@@ -1804,7 +1805,7 @@ except AttributeError: pass
 try: (hipMemcpy2DToArrayAsync:=dll.hipMemcpy2DToArrayAsync).restype, hipMemcpy2DToArrayAsync.argtypes = hipError_t, [hipArray_t, size_t, size_t, ctypes.c_void_p, size_t, size_t, size_t, hipMemcpyKind, hipStream_t]
 except AttributeError: pass
 
-hipArray_const_t = ctypes.POINTER(hipArray)
+hipArray_const_t: TypeAlias = ctypes.POINTER(hipArray)
 try: (hipMemcpy2DArrayToArray:=dll.hipMemcpy2DArrayToArray).restype, hipMemcpy2DArrayToArray.argtypes = hipError_t, [hipArray_t, size_t, size_t, hipArray_const_t, size_t, size_t, size_t, size_t, hipMemcpyKind]
 except AttributeError: pass
 
@@ -1992,7 +1993,7 @@ hipAddressModeMirror = hipTextureAddressMode.define('hipAddressModeMirror', 2)
 hipAddressModeBorder = hipTextureAddressMode.define('hipAddressModeBorder', 3)
 
 class __hip_texture(Struct): pass
-hipTextureObject_t = ctypes.POINTER(__hip_texture)
+hipTextureObject_t: TypeAlias = ctypes.POINTER(__hip_texture)
 textureReference._fields_ = [
   ('normalized', ctypes.c_int32),
   ('readMode', hipTextureReadMode),
@@ -2205,14 +2206,14 @@ try: (hipGetTextureObjectTextureDesc:=dll.hipGetTextureObjectTextureDesc).restyp
 except AttributeError: pass
 
 class HIP_RESOURCE_DESC_st(Struct): pass
-HIP_RESOURCE_DESC = HIP_RESOURCE_DESC_st
+HIP_RESOURCE_DESC: TypeAlias = HIP_RESOURCE_DESC_st
 HIPresourcetype_enum = CEnum(ctypes.c_uint32)
 HIP_RESOURCE_TYPE_ARRAY = HIPresourcetype_enum.define('HIP_RESOURCE_TYPE_ARRAY', 0)
 HIP_RESOURCE_TYPE_MIPMAPPED_ARRAY = HIPresourcetype_enum.define('HIP_RESOURCE_TYPE_MIPMAPPED_ARRAY', 1)
 HIP_RESOURCE_TYPE_LINEAR = HIPresourcetype_enum.define('HIP_RESOURCE_TYPE_LINEAR', 2)
 HIP_RESOURCE_TYPE_PITCH2D = HIPresourcetype_enum.define('HIP_RESOURCE_TYPE_PITCH2D', 3)
 
-HIPresourcetype = HIPresourcetype_enum
+HIPresourcetype: TypeAlias = HIPresourcetype_enum
 class HIP_RESOURCE_DESC_st_res(ctypes.Union): pass
 class HIP_RESOURCE_DESC_st_res_array(Struct): pass
 HIP_RESOURCE_DESC_st_res_array._fields_ = [
@@ -2255,19 +2256,19 @@ HIP_RESOURCE_DESC_st._fields_ = [
   ('flags', ctypes.c_uint32),
 ]
 class HIP_TEXTURE_DESC_st(Struct): pass
-HIP_TEXTURE_DESC = HIP_TEXTURE_DESC_st
+HIP_TEXTURE_DESC: TypeAlias = HIP_TEXTURE_DESC_st
 HIPaddress_mode_enum = CEnum(ctypes.c_uint32)
 HIP_TR_ADDRESS_MODE_WRAP = HIPaddress_mode_enum.define('HIP_TR_ADDRESS_MODE_WRAP', 0)
 HIP_TR_ADDRESS_MODE_CLAMP = HIPaddress_mode_enum.define('HIP_TR_ADDRESS_MODE_CLAMP', 1)
 HIP_TR_ADDRESS_MODE_MIRROR = HIPaddress_mode_enum.define('HIP_TR_ADDRESS_MODE_MIRROR', 2)
 HIP_TR_ADDRESS_MODE_BORDER = HIPaddress_mode_enum.define('HIP_TR_ADDRESS_MODE_BORDER', 3)
 
-HIPaddress_mode = HIPaddress_mode_enum
+HIPaddress_mode: TypeAlias = HIPaddress_mode_enum
 HIPfilter_mode_enum = CEnum(ctypes.c_uint32)
 HIP_TR_FILTER_MODE_POINT = HIPfilter_mode_enum.define('HIP_TR_FILTER_MODE_POINT', 0)
 HIP_TR_FILTER_MODE_LINEAR = HIPfilter_mode_enum.define('HIP_TR_FILTER_MODE_LINEAR', 1)
 
-HIPfilter_mode = HIPfilter_mode_enum
+HIPfilter_mode: TypeAlias = HIPfilter_mode_enum
 HIP_TEXTURE_DESC_st._fields_ = [
   ('addressMode', (HIPaddress_mode * 3)),
   ('filterMode', HIPfilter_mode),
@@ -2281,7 +2282,7 @@ HIP_TEXTURE_DESC_st._fields_ = [
   ('reserved', (ctypes.c_int32 * 12)),
 ]
 class HIP_RESOURCE_VIEW_DESC_st(Struct): pass
-HIP_RESOURCE_VIEW_DESC = HIP_RESOURCE_VIEW_DESC_st
+HIP_RESOURCE_VIEW_DESC: TypeAlias = HIP_RESOURCE_VIEW_DESC_st
 HIPresourceViewFormat_enum = CEnum(ctypes.c_uint32)
 HIP_RES_VIEW_FORMAT_NONE = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_NONE', 0)
 HIP_RES_VIEW_FORMAT_UINT_1X8 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UINT_1X8', 1)
@@ -2319,7 +2320,7 @@ HIP_RES_VIEW_FORMAT_UNSIGNED_BC6H = HIPresourceViewFormat_enum.define('HIP_RES_V
 HIP_RES_VIEW_FORMAT_SIGNED_BC6H = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_SIGNED_BC6H', 33)
 HIP_RES_VIEW_FORMAT_UNSIGNED_BC7 = HIPresourceViewFormat_enum.define('HIP_RES_VIEW_FORMAT_UNSIGNED_BC7', 34)
 
-HIPresourceViewFormat = HIPresourceViewFormat_enum
+HIPresourceViewFormat: TypeAlias = HIPresourceViewFormat_enum
 HIP_RESOURCE_VIEW_DESC_st._fields_ = [
   ('format', HIPresourceViewFormat),
   ('width', size_t),
@@ -2352,7 +2353,7 @@ except AttributeError: pass
 try: (hipFreeMipmappedArray:=dll.hipFreeMipmappedArray).restype, hipFreeMipmappedArray.argtypes = hipError_t, [hipMipmappedArray_t]
 except AttributeError: pass
 
-hipMipmappedArray_const_t = ctypes.POINTER(hipMipmappedArray)
+hipMipmappedArray_const_t: TypeAlias = ctypes.POINTER(hipMipmappedArray)
 try: (hipGetMipmappedArrayLevel:=dll.hipGetMipmappedArrayLevel).restype, hipGetMipmappedArrayLevel.argtypes = hipError_t, [ctypes.POINTER(hipArray_t), hipMipmappedArray_const_t, ctypes.c_uint32]
 except AttributeError: pass
 
@@ -2813,15 +2814,15 @@ try: (hipGraphicsUnregisterResource:=dll.hipGraphicsUnregisterResource).restype,
 except AttributeError: pass
 
 class __hip_surface(Struct): pass
-hipSurfaceObject_t = ctypes.POINTER(__hip_surface)
+hipSurfaceObject_t: TypeAlias = ctypes.POINTER(__hip_surface)
 try: (hipCreateSurfaceObject:=dll.hipCreateSurfaceObject).restype, hipCreateSurfaceObject.argtypes = hipError_t, [ctypes.POINTER(hipSurfaceObject_t), ctypes.POINTER(hipResourceDesc)]
 except AttributeError: pass
 
 try: (hipDestroySurfaceObject:=dll.hipDestroySurfaceObject).restype, hipDestroySurfaceObject.argtypes = hipError_t, [hipSurfaceObject_t]
 except AttributeError: pass
 
-hipmipmappedArray = ctypes.POINTER(hipMipmappedArray)
-hipResourcetype = HIPresourcetype_enum
+hipmipmappedArray: TypeAlias = ctypes.POINTER(hipMipmappedArray)
+hipResourcetype: TypeAlias = HIPresourcetype_enum
 hipGetDeviceProperties = hipGetDevicePropertiesR0600
 hipDeviceProp_t = hipDeviceProp_tR0600
 hipChooseDevice = hipChooseDeviceR0600

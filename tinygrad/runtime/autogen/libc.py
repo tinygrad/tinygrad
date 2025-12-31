@@ -1,11 +1,12 @@
 # mypy: ignore-errors
 import ctypes
 from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from typing import TypeAlias
 dll = DLL('libc', 'c', use_errno=True)
-off_t = ctypes.c_int64
-mode_t = ctypes.c_uint32
-size_t = ctypes.c_uint64
-__off_t = ctypes.c_int64
+off_t: TypeAlias = ctypes.c_int64
+mode_t: TypeAlias = ctypes.c_uint32
+size_t: TypeAlias = ctypes.c_uint64
+__off_t: TypeAlias = ctypes.c_int64
 try: (mmap:=dll.mmap).restype, mmap.argtypes = ctypes.c_void_p, [ctypes.c_void_p, size_t, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_int64]
 except AttributeError: pass
 
@@ -99,7 +100,7 @@ struct___locale_struct._fields_ = [
   ('__ctype_toupper', ctypes.POINTER(ctypes.c_int32)),
   ('__names', (ctypes.POINTER(ctypes.c_char) * 13)),
 ]
-locale_t = ctypes.POINTER(struct___locale_struct)
+locale_t: TypeAlias = ctypes.POINTER(struct___locale_struct)
 try: (strcoll_l:=dll.strcoll_l).restype, strcoll_l.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), locale_t]
 except AttributeError: pass
 
@@ -196,24 +197,24 @@ except AttributeError: pass
 try: (strlcat:=dll.strlcat).restype, strlcat.argtypes = size_t, [ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
-Elf32_Half = ctypes.c_uint16
-Elf64_Half = ctypes.c_uint16
-Elf32_Word = ctypes.c_uint32
-Elf32_Sword = ctypes.c_int32
-Elf64_Word = ctypes.c_uint32
-Elf64_Sword = ctypes.c_int32
-Elf32_Xword = ctypes.c_uint64
-Elf32_Sxword = ctypes.c_int64
-Elf64_Xword = ctypes.c_uint64
-Elf64_Sxword = ctypes.c_int64
-Elf32_Addr = ctypes.c_uint32
-Elf64_Addr = ctypes.c_uint64
-Elf32_Off = ctypes.c_uint32
-Elf64_Off = ctypes.c_uint64
-Elf32_Section = ctypes.c_uint16
-Elf64_Section = ctypes.c_uint16
-Elf32_Versym = ctypes.c_uint16
-Elf64_Versym = ctypes.c_uint16
+Elf32_Half: TypeAlias = ctypes.c_uint16
+Elf64_Half: TypeAlias = ctypes.c_uint16
+Elf32_Word: TypeAlias = ctypes.c_uint32
+Elf32_Sword: TypeAlias = ctypes.c_int32
+Elf64_Word: TypeAlias = ctypes.c_uint32
+Elf64_Sword: TypeAlias = ctypes.c_int32
+Elf32_Xword: TypeAlias = ctypes.c_uint64
+Elf32_Sxword: TypeAlias = ctypes.c_int64
+Elf64_Xword: TypeAlias = ctypes.c_uint64
+Elf64_Sxword: TypeAlias = ctypes.c_int64
+Elf32_Addr: TypeAlias = ctypes.c_uint32
+Elf64_Addr: TypeAlias = ctypes.c_uint64
+Elf32_Off: TypeAlias = ctypes.c_uint32
+Elf64_Off: TypeAlias = ctypes.c_uint64
+Elf32_Section: TypeAlias = ctypes.c_uint16
+Elf64_Section: TypeAlias = ctypes.c_uint16
+Elf32_Versym: TypeAlias = ctypes.c_uint16
+Elf64_Versym: TypeAlias = ctypes.c_uint16
 class Elf32_Ehdr(Struct): pass
 Elf32_Ehdr._fields_ = [
   ('e_ident', (ctypes.c_ubyte * 16)),
@@ -337,8 +338,8 @@ Elf64_Rela._fields_ = [
   ('r_info', Elf64_Xword),
   ('r_addend', Elf64_Sxword),
 ]
-Elf32_Relr = ctypes.c_uint32
-Elf64_Relr = ctypes.c_uint64
+Elf32_Relr: TypeAlias = ctypes.c_uint32
+Elf64_Relr: TypeAlias = ctypes.c_uint64
 class Elf32_Phdr(Struct): pass
 Elf32_Phdr._fields_ = [
   ('p_type', Elf32_Word),
@@ -444,7 +445,7 @@ Elf64_Vernaux._fields_ = [
   ('vna_next', Elf64_Word),
 ]
 class Elf32_auxv_t(Struct): pass
-uint32_t = ctypes.c_uint32
+uint32_t: TypeAlias = ctypes.c_uint32
 class Elf32_auxv_t_a_un(ctypes.Union): pass
 Elf32_auxv_t_a_un._fields_ = [
   ('a_val', uint32_t),
@@ -454,7 +455,7 @@ Elf32_auxv_t._fields_ = [
   ('a_un', Elf32_auxv_t_a_un),
 ]
 class Elf64_auxv_t(Struct): pass
-uint64_t = ctypes.c_uint64
+uint64_t: TypeAlias = ctypes.c_uint64
 class Elf64_auxv_t_a_un(ctypes.Union): pass
 Elf64_auxv_t_a_un._fields_ = [
   ('a_val', uint64_t),
@@ -540,7 +541,7 @@ Elf64_Lib._fields_ = [
   ('l_version', Elf64_Word),
   ('l_flags', Elf64_Word),
 ]
-Elf32_Conflict = ctypes.c_uint32
+Elf32_Conflict: TypeAlias = ctypes.c_uint32
 class Elf_MIPS_ABIFlags_v0(Struct): pass
 Elf_MIPS_ABIFlags_v0._fields_ = [
   ('version', Elf32_Half),
@@ -566,13 +567,13 @@ Val_GNU_MIPS_ABI_FP_64 = _anonenum0.define('Val_GNU_MIPS_ABI_FP_64', 6)
 Val_GNU_MIPS_ABI_FP_64A = _anonenum0.define('Val_GNU_MIPS_ABI_FP_64A', 7)
 Val_GNU_MIPS_ABI_FP_MAX = _anonenum0.define('Val_GNU_MIPS_ABI_FP_MAX', 7)
 
-ssize_t = ctypes.c_int64
-gid_t = ctypes.c_uint32
-uid_t = ctypes.c_uint32
-useconds_t = ctypes.c_uint32
-pid_t = ctypes.c_int32
-intptr_t = ctypes.c_int64
-socklen_t = ctypes.c_uint32
+ssize_t: TypeAlias = ctypes.c_int64
+gid_t: TypeAlias = ctypes.c_uint32
+uid_t: TypeAlias = ctypes.c_uint32
+useconds_t: TypeAlias = ctypes.c_uint32
+pid_t: TypeAlias = ctypes.c_int32
+intptr_t: TypeAlias = ctypes.c_int64
+socklen_t: TypeAlias = ctypes.c_uint32
 try: (access:=dll.access).restype, access.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.c_int32]
 except AttributeError: pass
 
@@ -609,7 +610,7 @@ except AttributeError: pass
 try: (sleep:=dll.sleep).restype, sleep.argtypes = ctypes.c_uint32, [ctypes.c_uint32]
 except AttributeError: pass
 
-__useconds_t = ctypes.c_uint32
+__useconds_t: TypeAlias = ctypes.c_uint32
 try: (ualarm:=dll.ualarm).restype, ualarm.argtypes = ctypes.c_uint32, [ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
@@ -619,8 +620,8 @@ except AttributeError: pass
 try: (pause:=dll.pause).restype, pause.argtypes = ctypes.c_int32, []
 except AttributeError: pass
 
-__uid_t = ctypes.c_uint32
-__gid_t = ctypes.c_uint32
+__uid_t: TypeAlias = ctypes.c_uint32
+__gid_t: TypeAlias = ctypes.c_uint32
 try: (chown:=dll.chown).restype, chown.argtypes = ctypes.c_int32, [ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, ctypes.c_uint32]
 except AttributeError: pass
 
@@ -692,7 +693,7 @@ except AttributeError: pass
 try: (confstr:=dll.confstr).restype, confstr.argtypes = size_t, [ctypes.c_int32, ctypes.POINTER(ctypes.c_char), size_t]
 except AttributeError: pass
 
-__pid_t = ctypes.c_int32
+__pid_t: TypeAlias = ctypes.c_int32
 try: (getpid:=dll.getpid).restype, getpid.argtypes = ctypes.c_int32, []
 except AttributeError: pass
 

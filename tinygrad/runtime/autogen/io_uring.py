@@ -1,15 +1,16 @@
 # mypy: ignore-errors
 import ctypes
 from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+from typing import TypeAlias
 class struct_io_uring_sq(Struct): pass
 class struct_io_uring_sqe(Struct): pass
-__u8 = ctypes.c_ubyte
-__u16 = ctypes.c_uint16
-__s32 = ctypes.c_int32
+__u8: TypeAlias = ctypes.c_ubyte
+__u16: TypeAlias = ctypes.c_uint16
+__s32: TypeAlias = ctypes.c_int32
 class struct_io_uring_sqe_0(ctypes.Union): pass
-__u64 = ctypes.c_uint64
+__u64: TypeAlias = ctypes.c_uint64
 class struct_io_uring_sqe_0_0(Struct): pass
-__u32 = ctypes.c_uint32
+__u32: TypeAlias = ctypes.c_uint32
 struct_io_uring_sqe_0_0._fields_ = [
   ('cmd_op', ctypes.c_uint32),
   ('__pad1', ctypes.c_uint32),
@@ -26,7 +27,7 @@ struct_io_uring_sqe_1._fields_ = [
   ('splice_off_in', ctypes.c_uint64),
 ]
 class struct_io_uring_sqe_2(ctypes.Union): pass
-__kernel_rwf_t = ctypes.c_int32
+__kernel_rwf_t: TypeAlias = ctypes.c_int32
 struct_io_uring_sqe_2._fields_ = [
   ('rw_flags', ctypes.c_int32),
   ('fsync_flags', ctypes.c_uint32),
@@ -93,7 +94,7 @@ struct_io_uring_sqe._fields_ = [
   ('_4', struct_io_uring_sqe_4),
   ('_5', struct_io_uring_sqe_5),
 ]
-size_t = ctypes.c_uint64
+size_t: TypeAlias = ctypes.c_uint64
 struct_io_uring_sq._fields_ = [
   ('khead', ctypes.POINTER(ctypes.c_uint32)),
   ('ktail', ctypes.POINTER(ctypes.c_uint32)),
@@ -147,7 +148,7 @@ struct_io_uring._fields_ = [
 ]
 class struct_statx(Struct): pass
 class struct_statx_timestamp(Struct): pass
-__s64 = ctypes.c_int64
+__s64: TypeAlias = ctypes.c_int64
 struct_statx_timestamp._fields_ = [
   ('tv_sec', ctypes.c_int64),
   ('tv_nsec', ctypes.c_uint32),
@@ -448,7 +449,7 @@ struct_io_uring_getevents_arg._fields_ = [
 ]
 class struct_io_uring_sync_cancel_reg(Struct): pass
 class struct___kernel_timespec(Struct): pass
-__kernel_time64_t = ctypes.c_int64
+__kernel_time64_t: TypeAlias = ctypes.c_int64
 struct___kernel_timespec._fields_ = [
   ('tv_sec', ctypes.c_int64),
   ('tv_nsec', ctypes.c_int64),
