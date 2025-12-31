@@ -2,7 +2,7 @@
 # the Inst constructor should be looking at the types of the fields to correctly set the value
 
 import unittest, struct
-from extra.assembly.amd.autogen.rdna3 import *
+from extra.assembly.amd.autogen.rdna3.ins import *
 from extra.assembly.amd.dsl import Inst
 from extra.assembly.amd.asm import asm
 from extra.assembly.amd.test.test_roundtrip import compile_asm
