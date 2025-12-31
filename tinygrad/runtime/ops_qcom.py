@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, ctypes, functools, mmap, struct, array, math, sys, weakref, contextlib
+import os, ctypes, functools, mmap, struct, array, math, sys, weakref, contextlib, itertools
 assert sys.platform != 'win32'
 from types import SimpleNamespace
 from typing import Any, cast
@@ -191,35 +191,21 @@ class QCOMComputeQueue(HWQueue):
 class QCOMArgsState(HCQArgsState):
   def __init__(self, buf:HCQBuffer, prg:QCOMProgram, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=()):
     super().__init__(buf, prg, bufs, vals=vals)
-
-    if len(bufs) + len(vals) != len(prg.buf_info): raise RuntimeError(f'incorrect args size given={len(bufs)+len(vals)} != want={len(prg.buf_info)}')
-
-    self.buf_info, self.args_info = prg.buf_info[:len(bufs)], prg.buf_info[len(bufs):]
-
     ctypes.memset(cast(int, self.buf.va_addr), 0, prg.kernargs_alloc_size)
+
+    ubos, uavs = [b for b in bufs if b.texture_info is None], [b for b in bufs if b.texture_info is not None]
+    ibos, texs = (uavs, []) if prg.tex_cnt == 0 else (uavs[:-prg.tex_cnt], uavs[-prg.tex_cnt:])
+
     for cnst_val,cnst_off,cnst_sz in prg.consts_info: to_mv(self.buf.va_addr + cnst_off, cnst_sz)[:] = cnst_val.to_bytes(cnst_sz, byteorder='little')
 
     if prg.samp_cnt > 0: to_mv(self.buf.va_addr + prg.samp_off, len(prg.samplers) * 4).cast('I')[:] = array.array('I', prg.samplers)
-    for i, b in enumerate(bufs):
-      if prg.buf_info[i].type in {BUFTYPE_TEX, BUFTYPE_IBO}:
-        obj = b.texture_info.desc if prg.buf_info[i].type is BUFTYPE_TEX else b.texture_info.ibo
-        to_mv(self.buf.va_addr + prg.buf_info[i].offset, len(obj) * 4).cast('I')[:] = array.array('I', obj)
-      self.bind_sints_to_buf(b.va_addr, buf=self.buf, fmt='Q', offset=self.buf_info[i].offset+(0 if self.buf_info[i].type is BUFTYPE_BUF else 16))
+    if prg.NIR:
+      self.bind_sints_to_buf(*[b.va_addr for b in ubos], buf=self.buf, fmt='Q', offset=prg.buf_off)
+      self.bind_sints_to_buf(*vals, buf=self.buf, fmt='I', offset=prg.buf_off + len(ubos) * 8)
+    else:
+      for i, b in enumerate(ubos): self.bind_sints_to_buf(b.va_addr, buf=self.buf, fmt='Q', offset=prg.buf_offs[i])
+      for i, v in enumerate(vals): self.bind_sints_to_buf(v, buf=self.buf, fmt='I', offset=prg.buf_offs[i+len(ubos)])
 
-    for i, v in enumerate(vals): self.bind_sints_to_buf(v, buf=self.buf, fmt='I', offset=self.args_info[i].offset)
-
-class IR3ArgsState(HCQArgsState):
-  def __init__(self, buf:HCQBuffer, prg:QCOMProgram, bufs:tuple[HCQBuffer, ...], vals:tuple[int, ...]=()):
-    super().__init__(buf, prg, bufs, vals=vals)
-    ctypes.memset(cast(int, self.buf.va_addr), 0, prg.kernargs_alloc_size)
-    to_mv(self.buf.va_addr + prg.imm_off, len(prg.imm_vals))[:] = prg.imm_vals
-
-    ubos, uavs = [b for b in bufs if b.texture_info is None], [b for b in bufs if b.texture_info is not None]
-    ibos, texs = (uavs, []) if prg.tex_cnt == 0 else (uavs[:-prg.tex_cnt], uavs[-prg.tex_cnt:]) # textures are at the end
-
-    if prg.samp_cnt > 0: to_mv(self.buf.va_addr + prg.samp_off, len(prg.samplers) * 4).cast('I')[:] = array.array('I', prg.samplers)
-    self.bind_sints_to_buf(*[b.va_addr for b in ubos], buf=self.buf, fmt='Q', offset=prg.buf_off)
-    self.bind_sints_to_buf(*vals, buf=self.buf, fmt='I', offset=prg.buf_off + len(ubos) * 8)
     self.bind_sints_to_buf(*flatten([b.texture_info.desc + ([0] * 8) for b in texs]), buf=self.buf, fmt='I', offset=prg.tex_off)
     self.bind_sints_to_buf(*flatten([b.texture_info.ibo + ([0] * 8) for b in ibos]), buf=self.buf, fmt='I', offset=prg.ibo_off)
 
@@ -246,6 +232,7 @@ class QCOMProgram(HCQProgram):
 
       self.tex_off, self.ibo_off, self.samp_off = 2048, 2048 + 0x40 * self.tex_cnt, 2048 + 0x40 * (self.tex_cnt + self.ibo_cnt)
       self.fregs, self.hregs = v.info.max_reg + 1, v.info.max_half_reg + 1
+      self.consts_info = []
     else: self._parse_lib()
 
     self.lib_gpu: HCQBuffer = self.dev.allocator.alloc(self.image_size, buf_spec:=BufferSpec(cpu_access=True, nolru=True))
@@ -259,7 +246,7 @@ class QCOMProgram(HCQProgram):
     dev._ensure_stack_size(self.hw_stack_offset * 4)
 
     kernargs_alloc_size = round_up(2048 + (self.tex_cnt + self.ibo_cnt) * 0x40 + len(self.samplers) * 4, 0x100)
-    super().__init__(IR3ArgsState if self.NIR else QCOMArgsState, self.dev, self.name, kernargs_alloc_size=kernargs_alloc_size)
+    super().__init__(QCOMArgsState, self.dev, self.name, kernargs_alloc_size=kernargs_alloc_size)
     weakref.finalize(self, self._fini, self.dev, self.lib_gpu, buf_spec)
 
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
@@ -279,7 +266,7 @@ class QCOMProgram(HCQProgram):
     self.pvtmem, self.shmem = _read_lib(self.lib, image_desc_off+0xc8), _read_lib(self.lib, image_desc_off+0xd8)
 
     # Fill up constants and buffers info
-    self.buf_info, self.consts_info = [], []
+    self.consts_info = []
 
     # Collect sampler info.
     self.samp_cnt = samp_cnt_in_file = _read_lib(self.lib, image_desc_off + 0xdc)
@@ -291,20 +278,17 @@ class QCOMProgram(HCQProgram):
     else: self.samplers = []
 
     # Collect kernel arguments (buffers) info.
-    bdoff = round_up(image_desc_off + 0x158 + len(self.name), 4) + 8 * samp_cnt_in_file
+    bdoff, binfos = round_up(image_desc_off + 0x158 + len(self.name), 4) + 8 * samp_cnt_in_file, []
     while bdoff + 32 <= len(self.lib):
-      length, _, _, offset_words, _, _, _, typ = struct.unpack("IIIIIIII", self.lib[bdoff:bdoff+32])
+      length, _, _, offset_words, _, _, _, typ = struct.unpack("8I", self.lib[bdoff:bdoff+32])
       if length == 0: break
-      self.buf_info.append(SimpleNamespace(offset=offset_words * 4, type=typ))
+      binfos.append((offset_words * 4, typ))
       bdoff += length
+    self.buf_offs = [off for off,typ in binfos if typ not in {BUFTYPE_TEX, BUFTYPE_IBO}]
 
     # Setting correct offsets to textures/ibos.
-    self.tex_cnt, self.ibo_cnt = sum(x.type is BUFTYPE_TEX for x in self.buf_info), sum(x.type is BUFTYPE_IBO for x in self.buf_info)
+    self.tex_cnt, self.ibo_cnt = sum(typ is BUFTYPE_TEX for _,typ in binfos), sum(typ is BUFTYPE_IBO for _,typ in binfos)
     self.ibo_off, self.tex_off, self.samp_off = 2048, 2048 + 0x40 * self.ibo_cnt, 2048 + 0x40 * self.tex_cnt + 0x40 * self.ibo_cnt
-    cur_ibo_off, cur_tex_off = self.ibo_off, self.tex_off
-    for x in self.buf_info:
-      if x.type is BUFTYPE_IBO: x.offset, cur_ibo_off = cur_ibo_off, cur_ibo_off + 0x40
-      elif x.type is BUFTYPE_TEX: x.offset, cur_tex_off = cur_tex_off, cur_tex_off + 0x40
 
     if _read_lib(self.lib, 0xb0) != 0: # check if we have constants.
       cdoff = _read_lib(self.lib, 0xac)
