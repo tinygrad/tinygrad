@@ -224,8 +224,9 @@ def get_mlperf_bert_model():
     from extra.fp8 import convert_to_float8_training
     def module_filter_fn(mod, fqn):
       if isinstance(mod, LinearBert):
-        if mod.weight.shape[-1] >= 1024:
-          print(f"replacing linear to fp8: {fqn} {mod.weight.shape}")
+        skip_layers = [] if (ln:=config["num_hidden_layers"]) <= 2 else ["bert.encoder.layer.0.", f"bert.encoder.layer.{ln-1}"]
+        if mod.weight.shape[-1] >= 1024 and "encoder" in fqn and not any(name in fqn for name in skip_layers):
+          print(f"replacing linear with fp8: {fqn} {mod.weight.shape}")
           return True
       return False
     convert_to_float8_training(model, module_filter_fn)

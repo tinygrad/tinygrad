@@ -17,6 +17,5 @@ export BASEDIR="/raid/datasets/wiki"
 
 export WANDB=1 PARALLEL=0
 
-export BEAM_TIMEOUT_SEC=15
 export FP8_TRAIN=1
 RUNMLPERF=1 python3 examples/mlperf/model_train.py
