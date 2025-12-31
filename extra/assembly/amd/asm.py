@@ -113,12 +113,25 @@ def _disasm_vop1(inst: VOP1) -> str:
 
 def _disasm_vop2(inst: VOP2) -> str:
   name = inst.op_name.lower()
-  suf = "" if inst.op == VOP2Op.V_DOT2ACC_F32_F16 else "_e32"
+  # RDNA4 removed V_DOT2ACC_F32_F16, check if op exists
+  try: is_dot2acc = inst.op == VOP2Op.V_DOT2ACC_F32_F16
+  except ValueError: is_dot2acc = False
+  suf = "" if is_dot2acc else "_e32"
   # fmaak: dst = src0 * vsrc1 + K, fmamk: dst = src0 * K + vsrc1
-  if inst.op in (VOP2Op.V_FMAAK_F32, VOP2Op.V_FMAAK_F16): return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, v{inst.vsrc1}, 0x{inst._literal:x}"
-  if inst.op in (VOP2Op.V_FMAMK_F32, VOP2Op.V_FMAMK_F16): return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, 0x{inst._literal:x}, v{inst.vsrc1}"
+  try:
+    if inst.op in (VOP2Op.V_FMAAK_F32, VOP2Op.V_FMAAK_F16): return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, v{inst.vsrc1}, 0x{inst._literal:x}"
+    if inst.op in (VOP2Op.V_FMAMK_F32, VOP2Op.V_FMAMK_F16): return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, 0x{inst._literal:x}, v{inst.vsrc1}"
+  except ValueError: pass
+  try:
+    if inst.op == VOP2Op.V_CNDMASK_B32: return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, v{inst.vsrc1}, vcc_lo"
+  except ValueError: pass
   if inst.is_16bit(): return f"{name}{suf} {_fmt_v16(inst.vdst, 0, 128)}, {_src16(inst, inst.src0)}, {_fmt_v16(inst.vsrc1, 0, 128)}"
-  return f"{name}{suf} v{inst.vdst}, {inst.lit(inst.src0)}, v{inst.vsrc1}" + (", vcc_lo" if inst.op == VOP2Op.V_CNDMASK_B32 else "")
+  # Handle 64-bit VOP2 instructions (RDNA4)
+  dn, sn0, sn1 = inst.dst_regs(), inst.src_regs(0), inst.src_regs(1)
+  dst = _vreg(inst.vdst, dn) if dn > 1 else f"v{inst.vdst}"
+  src0 = _fmt_src(inst.src0, sn0) if sn0 > 1 else inst.lit(inst.src0)
+  src1 = _vreg(inst.vsrc1, sn1) if sn1 > 1 else f"v{inst.vsrc1}"
+  return f"{name}{suf} {dst}, {src0}, {src1}"
 
 def _disasm_vopc(inst: VOPC) -> str:
   name = inst.op_name.lower()
@@ -373,11 +386,125 @@ def _disasm_vinterp(inst: VINTERP) -> str:
   mods = _mods((inst.waitexp, f"wait_exp:{inst.waitexp}"), (inst.clmp, "clamp"))
   return f"{inst.op_name.lower()} v{inst.vdst}, {inst.lit(inst.src0, inst.neg & 1)}, {inst.lit(inst.src1, inst.neg & 2)}, {inst.lit(inst.src2, inst.neg & 4)}" + (" " + mods if mods else "")
 
+# RDNA4-specific handlers
+def _disasm_vexport(inst) -> str:
+  """Disassemble VEXPORT (export) instruction - RDNA4 format."""
+  targets = ['mrt0','mrt1','mrt2','mrt3','mrt4','mrt5','mrt6','mrt7','mrtz','null','prim','pos0','pos1','pos2','pos3','pos4','param0','param1','param2','param3','param4','param5','param6','param7','param8','param9','param10','param11','param12','param13','param14','param15','param16','param17','param18','param19','param20','param21','param22','param23','param24','param25','param26','param27','param28','param29','param30','param31']
+  target = targets[inst.target] if inst.target < len(targets) else f"invalid_target_{inst.target}"
+  en = inst.en
+  vsrc = lambda i, v: f"v{v}" if (en >> i) & 1 else "off"
+  srcs = f"{vsrc(0, inst.vsrc0)}, {vsrc(1, inst.vsrc1)}, {vsrc(2, inst.vsrc2)}, {vsrc(3, inst.vsrc3)}"
+  mods = _mods((inst.done, "done"), (inst.row, "row_en"))
+  return f"export {target} {srcs}" + (" " + mods if mods else "")
+
+def _disasm_vbuffer(inst) -> str:
+  """Disassemble VBUFFER instruction - RDNA4 96-bit buffer format."""
+  name = inst.op_name.lower()
+  # Data width: derive from instruction name (d16 packs 2 components per register)
+  suffix = name.split('_')[-1]
+  base_w = {'b32':1,'b64':2,'b96':3,'b128':4,'b16':1,'b8':1,'x':1,'xy':2,'xyz':3,'xyzw':4,'u32':1,'u64':2,'i32':1,'i64':2,'f32':1,'f64':2,'f16':1,'bf16':1}.get(suffix, 1)
+  if 'd16' in name:
+    w = (base_w + 1) // 2  # d16: pack 2 values per register (xy=1, xyz=2, xyzw=2)
+  else:
+    w = base_w
+  if 'cmpswap' in name: w *= 2
+  if inst.tfe: w += 1
+  # vaddr
+  vaddr = _vreg(inst.vaddr, 2) if inst.offen and inst.idxen else f"v{inst.vaddr}" if inst.offen or inst.idxen else "off"
+  # rsrc is stored directly (SGPR index), not multiplied by 4 like RDNA3 MUBUF
+  rsrc = _sreg_or_ttmp(inst.rsrc, 4)
+  # soffset
+  soffset = decode_src(inst.soffset)
+  # TH (temporal hint) and SCOPE names for RDNA4
+  th_load = ['','TH_LOAD_RT','TH_LOAD_NT','TH_LOAD_HT','TH_LOAD_LU','TH_LOAD_NT_RT','TH_LOAD_NT_HT','TH_LOAD_BYPASS']
+  th_store = ['','TH_STORE_RT','TH_STORE_NT','TH_STORE_HT','','TH_STORE_NT_RT','TH_STORE_NT_HT','TH_STORE_BYPASS']
+  th_atomic = ['','TH_ATOMIC_NT','','','','TH_ATOMIC_RETURN','TH_ATOMIC_RT_RETURN','TH_ATOMIC_CASCADE_NT']
+  scope_names = ['','SCOPE_SE','SCOPE_DEV','SCOPE_SYS']
+  is_atomic, is_store = 'atomic' in name, 'store' in name and 'atomic' not in name
+  th_names = th_atomic if is_atomic else th_store if is_store else th_load
+  # Modifiers
+  mods = []
+  if inst.idxen: mods.append("idxen")
+  if inst.offen: mods.append("offen")
+  if inst.ioffset: mods.append(f"offset:{inst.ioffset}")
+  if inst.th and inst.th < len(th_names) and th_names[inst.th]: mods.append(f"th:{th_names[inst.th]}")
+  if inst.scope and inst.scope < len(scope_names) and scope_names[inst.scope]: mods.append(f"scope:{scope_names[inst.scope]}")
+  if inst.tfe: mods.append("tfe")
+  mod_str = " " + " ".join(mods) if mods else ""
+  return f"{name} {_vreg(inst.vdata, w)}, {vaddr}, {rsrc}, {soffset}{mod_str}"
+
+def _disasm_vflat(inst) -> str:
+  """Disassemble VFLAT/VGLOBAL/VSCRATCH instruction - RDNA4 96-bit flat format."""
+  name = inst.op_name.lower()
+  cls_name = type(inst).__name__
+  # Determine segment from class name (VFLAT, VGLOBAL, VSCRATCH)
+  seg = 'flat' if cls_name == 'VFLAT' else 'global' if cls_name == 'VGLOBAL' else 'scratch'
+  # Build instruction name: replace prefix with segment
+  parts = name.split('_', 1)
+  instr = f"{seg}_{parts[1]}" if len(parts) > 1 else name
+  # Data width: derive from instruction name
+  suffix = name.split('_')[-1]
+  w = {'b32':1,'b64':2,'b96':3,'b128':4,'b16':1,'b8':1,'u32':1,'u64':2,'i32':1,'i64':2,'f32':1,'f64':2,'f16':1,'bf16':1}.get(suffix, 1)
+  if 'cmpswap' in name: w *= 2
+  # Signed offset (24-bit two's complement)
+  off_val = inst.ioffset if inst.ioffset < 0x800000 else inst.ioffset - 0x1000000
+  # saddr handling
+  if seg == 'flat':
+    saddr_s = ""
+    addr_width = 2
+  elif inst.saddr == 0x7F or (hasattr(inst, 'sve') and inst.sve == 0 and seg == 'scratch'):
+    saddr_s = ", off"
+    addr_width = 2
+  elif inst.saddr == 124:
+    saddr_s = ", off"
+    addr_width = 2
+  else:
+    saddr_s = f", {_fmt_src(inst.saddr, 2) if inst.saddr <= 105 else decode_src(inst.saddr)}"
+    addr_width = 1
+  # vaddr
+  vaddr = f"v{inst.vaddr}" if addr_width == 1 else _vreg(inst.vaddr, 2)
+  # TH and SCOPE
+  th_load = ['','TH_LOAD_RT','TH_LOAD_NT','TH_LOAD_HT','TH_LOAD_LU','TH_LOAD_NT_RT','TH_LOAD_NT_HT','TH_LOAD_BYPASS']
+  th_store = ['','TH_STORE_RT','TH_STORE_NT','TH_STORE_HT','','TH_STORE_NT_RT','TH_STORE_NT_HT','TH_STORE_BYPASS']
+  th_atomic = ['','TH_ATOMIC_NT','','','','TH_ATOMIC_RETURN','TH_ATOMIC_RT_RETURN','TH_ATOMIC_CASCADE_NT']
+  scope_names = ['','SCOPE_SE','SCOPE_DEV','SCOPE_SYS']
+  is_atomic, is_store = 'atomic' in name, 'store' in name and 'atomic' not in name
+  th_names = th_atomic if is_atomic else th_store if is_store else th_load
+  # Modifiers
+  mods = []
+  if off_val: mods.append(f"offset:{off_val}")
+  if inst.th and inst.th < len(th_names) and th_names[inst.th]: mods.append(f"th:{th_names[inst.th]}")
+  if inst.scope and inst.scope < len(scope_names) and scope_names[inst.scope]: mods.append(f"scope:{scope_names[inst.scope]}")
+  mod_str = " " + " ".join(mods) if mods else ""
+  # Determine data register
+  if 'store' in name and 'atomic' not in name:
+    return f"{instr} {vaddr}, {_vreg(inst.vsrc, w)}{saddr_s}{mod_str}"
+  elif 'atomic' in name:
+    if inst.th and inst.th >= 5:  # TH_ATOMIC_RETURN variants
+      return f"{instr} {_vreg(inst.vdst, w)}, {vaddr}, {_vreg(inst.vsrc, w)}{saddr_s}{mod_str}"
+    else:
+      return f"{instr} {vaddr}, {_vreg(inst.vsrc, w)}{saddr_s}{mod_str}"
+  else:  # load
+    return f"{instr} {_vreg(inst.vdst, w)}, {vaddr}{saddr_s}{mod_str}"
+
 DISASM_HANDLERS = {VOP1: _disasm_vop1, VOP2: _disasm_vop2, VOPC: _disasm_vopc, VOP3: _disasm_vop3, VOP3SD: _disasm_vop3sd, VOPD: _disasm_vopd, VOP3P: _disasm_vop3p,
                    VINTERP: _disasm_vinterp, SOPP: _disasm_sopp, SMEM: _disasm_smem, DS: _disasm_ds, FLAT: _disasm_flat, MUBUF: _disasm_buf, MTBUF: _disasm_buf,
                    MIMG: _disasm_mimg, SOP1: _disasm_sop1, SOP2: _disasm_sop2, SOPC: _disasm_sopc, SOPK: _disasm_sopk}
 
-def disasm(inst: Inst) -> str: return DISASM_HANDLERS[type(inst)](inst)
+# Name-based lookup for cross-architecture support (RDNA3/RDNA4 have different class objects with same names)
+_DISASM_BY_NAME = {
+  'VOP1': _disasm_vop1, 'VOP2': _disasm_vop2, 'VOPC': _disasm_vopc, 'VOP3': _disasm_vop3, 'VOP3SD': _disasm_vop3sd,
+  'VOPD': _disasm_vopd, 'VOP3P': _disasm_vop3p, 'VINTERP': _disasm_vinterp, 'SOPP': _disasm_sopp, 'SMEM': _disasm_smem,
+  'DS': _disasm_ds, 'VDS': _disasm_ds, 'FLAT': _disasm_flat, 'MUBUF': _disasm_buf, 'MTBUF': _disasm_buf, 'MIMG': _disasm_mimg,
+  'SOP1': _disasm_sop1, 'SOP2': _disasm_sop2, 'SOPC': _disasm_sopc, 'SOPK': _disasm_sopk,
+  'VEXPORT': _disasm_vexport, 'EXP': _disasm_vexport,
+  'VBUFFER': _disasm_vbuffer, 'VFLAT': _disasm_vflat, 'VGLOBAL': _disasm_vflat, 'VSCRATCH': _disasm_vflat,
+}
+
+def disasm(inst: Inst) -> str:
+  handler = DISASM_HANDLERS.get(type(inst)) or _DISASM_BY_NAME.get(type(inst).__name__)
+  if handler is None: raise KeyError(f"No disasm handler for {type(inst).__name__}")
+  return handler(inst)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ASSEMBLER

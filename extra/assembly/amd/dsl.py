@@ -56,6 +56,8 @@ _SPECIAL_REGS = {
   'V_CMP_CLASS_F16': (1, 1, 1, 1), 'V_CMPX_CLASS_F16': (1, 1, 1, 1),
   'V_MAD_U64_U32': (2, 1, 1, 2), 'V_MAD_I64_I32': (2, 1, 1, 2),
   'V_QSAD_PK_U16_U8': (2, 2, 1, 2), 'V_MQSAD_PK_U16_U8': (2, 2, 1, 2), 'V_MQSAD_U32_U8': (4, 2, 1, 4),
+  # RDNA4 CVT_PK_F32 instructions output 2 F32 values (64-bit)
+  'V_CVT_PK_F32_BF8': (2, 1, 1, 1), 'V_CVT_PK_F32_FP8': (2, 1, 1, 1),
 }
 _SPECIAL_DTYPE = {
   'V_LSHLREV_B64': ('B64', 'U32', 'B64', None), 'V_LSHRREV_B64': ('B64', 'U32', 'B64', None), 'V_ASHRREV_I64': ('I64', 'U32', 'I64', None),
@@ -70,6 +72,8 @@ _SPECIAL_DTYPE = {
   'V_MAD_U64_U32': ('U64', 'U32', 'U32', 'U64'), 'V_MAD_I64_I32': ('I64', 'I32', 'I32', 'I64'),
   'V_QSAD_PK_U16_U8': ('B64', 'B64', 'B64', 'B64'), 'V_MQSAD_PK_U16_U8': ('B64', 'B64', 'B64', 'B64'),
   'V_MQSAD_U32_U8': ('B128', 'B64', 'B64', 'B128'),
+  # RDNA4 CVT_PK_F32 instructions: source is 8-bit packed as 16-bit operand
+  'V_CVT_PK_F32_BF8': ('F32', 'B16', None, None), 'V_CVT_PK_F32_FP8': ('F32', 'B16', None, None),
 }
 def spec_regs(name: str) -> tuple[int, int, int, int]:
   name = name.upper()
@@ -124,6 +128,10 @@ class BitField:
   def __get__(self, obj: None, objtype: type) -> BitField: ...
   @overload
   def __get__(self, obj: object, objtype: type | None = None) -> int: ...
+  # Map RDNA4 class names to their corresponding enum names for op field dynamic lookup
+  _RDNA4_OP_ENUMS = {'VDS': 'DSOp', 'VBUFFER': 'VBUFFEROp', 'VEXPORT': 'EXPOp', 'VFLAT': 'VFLATOp', 'VGLOBAL': 'VGLOBALOp',
+                     'VSCRATCH': 'VSCRATCHOp', 'VIMAGE': 'VIMAGEOp', 'VSAMPLE': 'VSAMPLEOp', 'VDSDIR': 'VDSDIROp'}
+
   def __get__(self, obj, objtype=None):
     if obj is None: return self
     val = unwrap(obj._values.get(self.name, 0))
@@ -135,6 +143,15 @@ class BitField:
         if val in Inst._VOP3SD_OPS: return VOP3SDOp(val)
       try: return self.marker(val)
       except ValueError: pass
+    # For RDNA4 op fields without type annotations, dynamically look up enum
+    elif self.name == 'op' and 'rdna4' in obj.__class__.__module__:
+      import importlib
+      enum_mod = importlib.import_module('extra.assembly.amd.autogen.rdna4.enum')
+      cls_name = obj.__class__.__name__
+      enum_name = self._RDNA4_OP_ENUMS.get(cls_name, cls_name + 'Op')
+      if hasattr(enum_mod, enum_name):
+        try: return getattr(enum_mod, enum_name)(val)
+        except ValueError: pass
     return val
 
 class _Bits:
@@ -485,6 +502,10 @@ class Inst:
                'VOPD': VOPDOp, 'VINTERP': VINTERPOp}
   _VOP3SD_OPS = {288, 289, 290, 764, 765, 766, 767, 768, 769, 770}
 
+  # Map RDNA4 class names to their corresponding enum names
+  _rdna4_enum_names = {'VDS': 'DSOp', 'VBUFFER': 'VBUFFEROp', 'VEXPORT': 'EXPOp', 'VFLAT': 'VFLATOp', 'VGLOBAL': 'VGLOBALOp',
+                       'VSCRATCH': 'VSCRATCHOp', 'VIMAGE': 'VIMAGEOp', 'VSAMPLE': 'VSAMPLEOp', 'VDSDIR': 'VDSDIROp'}
+
   @property
   def op(self):
     """Return the op as an enum (e.g., VOP1Op.V_MOV_B32). VOP3 returns VOPCOp/VOP3SDOp for those op ranges."""
@@ -492,6 +513,20 @@ class Inst:
     if val is None: return None
     if hasattr(val, 'name'): return val  # already an enum
     cls_name = self.__class__.__name__
+    # First check if op field has an annotated enum type
+    import typing
+    if 'op' in self.__class__.__annotations__:
+      ann = self.__class__.__annotations__['op']
+      if hasattr(ann, '__metadata__'):
+        for m in typing.get_args(ann)[1:]:
+          if isinstance(m, type) and issubclass(m, IntEnum): return m(val)
+    # Check if this is an RDNA4 class (module path contains rdna4) and get enum from its module
+    if 'rdna4' in self.__class__.__module__:
+      import importlib
+      enum_mod = importlib.import_module('extra.assembly.amd.autogen.rdna4.enum')
+      enum_name = self._rdna4_enum_names.get(cls_name, cls_name + 'Op')
+      if hasattr(enum_mod, enum_name): return getattr(enum_mod, enum_name)(val)
+    # Fall back to static enum map
     assert cls_name in self._enum_map, f"no enum map for {cls_name}"
     return self._enum_map[cls_name](val)
 
