@@ -165,6 +165,10 @@ class NVComputeQueue(NVCommandQueue):
   def _submit(self, dev:NVDevice): self._submit_to_gpfifo(dev, dev.compute_gpfifo)
 
 class NVCopyQueue(NVCommandQueue):
+  def __init__(self, queue_idx=0):
+    self.queue_idx = queue_idx
+    super().__init__()
+
   def copy(self, dest:sint, src:sint, copy_size:int):
     for off in range(0, copy_size, step:=(1 << 31)):
       self.nvm(4, nv_gpu.NVC6B5_OFFSET_IN_UPPER, *data64(src+off), *data64(dest+off))
