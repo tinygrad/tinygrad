@@ -501,7 +501,7 @@ class AMDCopyQueue(HWQueue):
     self._q, self.cmd_sizes = hw_view, [len(self.indirect_cmd)]
 
   def _submit(self, dev:AMDDevice):
-    sdma_queue = dev.get_sdma_queue(self.queue_idx)
+    sdma_queue = dev.sdma_queue(self.queue_idx)
     if self.binded_device == dev:
       # An IB packet must end on a 8 DW boundary.
       add = (8 - (((sdma_queue.put_value % 32) // 4) + len(self.indirect_cmd) % 8)) % 8
@@ -758,7 +758,7 @@ class KFDIface:
     assert stm.n_success == 1
 
   def create_queue(self, queue_type, ring, gart, rptr, wptr, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0,
-                   xcc_id=0, sdma_idx=0):
+                   xcc_id=0, idx=0):
     queue = kfd.AMDKFD_IOC_CREATE_QUEUE(KFDIface.kfd, ring_base_address=ring.va_addr, ring_size=ring.size, gpu_id=self.gpu_id,
       queue_type=queue_type, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE|(xcc_id<<8), queue_priority=getenv("AMD_KFD_QUEUE_PRIORITY", 7),
       eop_buffer_address=eop_buffer.va_addr if eop_buffer else 0, eop_buffer_size=eop_buffer.size if eop_buffer else 0, ctl_stack_size=ctl_stack_size,
@@ -829,14 +829,13 @@ class PCIIface(PCIIfaceBase):
       'gfx_target_version': {90403: 90402}.get(gfxver, gfxver)}
 
   def create_queue(self, queue_type, ring, gart, rptr, wptr, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0,
-                   xcc_id=0, sdma_idx=0):
+                   xcc_id=0, idx=0):
     assert cwsr_buffer is None, "no cwsr buffer for am"
-    assert sdma_idx <= 1, "only sdma 0 and 1 supported"
 
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA:
-      doorbell_index = am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0 + sdma_idx * 10 * 4
+      assert idx <= 3, "only 4 SDMA queues supported in am"
       pv = self.dev_impl.sdma.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr+rptr, wptr_addr=gart.va_addr+wptr,
-                                    doorbell=doorbell_index, pipe=0, queue=sdma_idx*4)
+            doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0 + idx * 0xA * 4), pipe=idx, queue=0)
     else:
       pv = self.dev_impl.gfx.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr+rptr, wptr_addr=gart.va_addr+wptr,
         eop_addr=eop_buffer.va_addr, eop_size=eop_buffer.size, doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_MEC_RING0), pipe=0,
@@ -937,7 +936,6 @@ class AMDDevice(HCQCompiled):
       ctx_save_restore_size=0 if self.is_am() else wg_data_size + ctl_stack_size, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
 
     self.max_copy_size = 0x40000000 if self.iface.ip_versions[am.SDMA0_HWIP][0] >= 5 else 0x400000
-    self.sdma_queues: list = []
 
     compilers = CompilerSet([CompilerPair(functools.partial(AMDHIPRenderer, self.arch), None),
                              CompilerPair(functools.partial(AMDLLVMRenderer, self.arch), None, AMD_LLVM),
@@ -981,7 +979,7 @@ class AMDDevice(HCQCompiled):
       self.sqtt_wptrs = self.allocator.alloc(round_up(self.se_cnt * 4, 0x1000), BufferSpec(cpu_access=True, nolru=True))
       self.sqtt_next_cmd_id = itertools.count(0)
 
-  def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0, sdma_idx=0):
+  def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0, idx=0):
     ring = self.iface.alloc(ring_size, uncached=True, cpu_access=True)
     gart = self.iface.alloc(0x100, uncached=True, cpu_access=True)
 
@@ -998,14 +996,10 @@ class AMDDevice(HCQCompiled):
 
     return (self.iface.create_queue(queue_type, ring, gart, rptr=getattr(hsa.amd_queue_t, 'read_dispatch_id').offset,
             wptr=getattr(hsa.amd_queue_t, 'write_dispatch_id').offset, eop_buffer=eop_buffer, cwsr_buffer=cwsr_buffer,
-            ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size, sdma_idx=sdma_idx))
+            ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size, idx=idx))
 
-  def get_sdma_queue(self, idx:int=0):
-    """Lazily allocate and return the SDMA queue at the given index."""
-    while len(self.sdma_queues) <= idx:
-      sdma_idx = len(self.sdma_queues)
-      self.sdma_queues.append(self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else (16 << 20), sdma_idx=sdma_idx))
-    return self.sdma_queues[idx]
+  @functools.lru_cache(None)
+  def sdma_queue(self, idx:int=0): return self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else (16 << 20), idx=idx)
 
   def _ensure_has_local_memory(self, private_segment_size):
     if self.max_private_segment_size >= private_segment_size: return

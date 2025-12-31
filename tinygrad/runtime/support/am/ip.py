@@ -412,7 +412,7 @@ class AM_IH(AM_IP):
     self.adev.regIH_RB_RPTR.write(wptr % self.ring_size)
 
 class AM_SDMA(AM_IP):
-  def init_sw(self): self.sdma_name = "F32" if self.adev.ip_ver[am.SDMA0_HWIP] < (7,0,0) else "MCU"
+  def init_sw(self): self.sdma_reginst, self.sdma_name = [], "F32" if self.adev.ip_ver[am.SDMA0_HWIP] < (7,0,0) else "MCU"
   def init_hw(self):
     for pipe_id in range(16):
       pipe, inst = ("", pipe_id) if self.adev.ip_ver[am.SDMA0_HWIP] < (5,0,0) else (str(pipe_id), 0)
@@ -422,10 +422,10 @@ class AM_SDMA(AM_IP):
         self.adev.reg(f"regSDMA{pipe}_UTCL1_CNTL").update(resp_mode=3, redo_delay=9, inst=inst)
 
         # rd=noa, wr=bypass
-        self.adev.reg(f"regSDMA{pipe}_UTCL1_PAGE").update(rd_l2_policy=2, wr_l2_policy=3, **({'llc_noalloc':1} if self.sdma_name == "F32" else {}), inst=inst)
+        self.adev.reg(f"regSDMA{pipe}_UTCL1_PAGE").update(rd_l2_policy=2, wr_l2_policy=3, **({'llc_noalloc':1} if self.sdma_name == "F32" else {}),
+                                                          inst=inst)
         self.adev.reg(f"regSDMA{pipe}_{self.sdma_name}_CNTL").update(halt=0, **{f"{'th1_' if self.sdma_name == 'F32' else ''}reset":0}, inst=inst)
 
-      print(self.adev.reg(f"regSDMA{pipe}_{self.sdma_name}_CNTL").read_bitfields(inst=inst))
       self.adev.reg(f"regSDMA{pipe}_CNTL").update(ctxempty_int_enable=1, trap_enable=1,
         **({'utc_l1_enable':1} if self.adev.ip_ver[am.SDMA0_HWIP] <= (5,2,0) else {}), inst=inst)
 
@@ -437,10 +437,10 @@ class AM_SDMA(AM_IP):
     else: self.adev.soc.doorbell_enable(port=2, awid=0xe, awaddr_31_28_value=0x3, offset=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0*2, size=4)
 
   def fini_hw(self):
-    reg, inst = ("regSDMA_GFX", 0) if self.adev.ip_ver[am.SDMA0_HWIP][:2] == (4,4) else ("regSDMA0_QUEUE0", 0)
+    for reg, inst in self.sdma_reginst:
+      self.adev.reg(f"{reg}_RB_CNTL").update(rb_enable=0, inst=inst)
+      self.adev.reg(f"{reg}_IB_CNTL").update(ib_enable=0, inst=inst)
 
-    self.adev.reg(f"{reg}_RB_CNTL").update(rb_enable=0, inst=inst)
-    self.adev.reg(f"{reg}_IB_CNTL").update(ib_enable=0, inst=inst)
     if self.adev.ip_ver[am.SDMA0_HWIP] >= (6,0,0):
       self.adev.regGRBM_SOFT_RESET.write(soft_reset_sdma0=1)
       time.sleep(0.01)
@@ -449,6 +449,7 @@ class AM_SDMA(AM_IP):
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, doorbell:int, pipe:int, queue:int) -> int:
     # Setup the ring
     reg, inst = ("regSDMA_GFX", pipe*4+queue) if self.adev.ip_ver[am.SDMA0_HWIP][:2] == (4,4) else (f"regSDMA{pipe}_QUEUE{queue}", 0)
+    self.sdma_reginst.append((reg, inst))
 
     self.adev.reg(f"{reg}_MINOR_PTR_UPDATE").write(0x1, inst=inst)
     if not self.adev.partial_boot: self.adev.wreg_pair(f"{reg}_RB_RPTR", "", "_HI", 0, inst=inst)
@@ -462,7 +463,7 @@ class AM_SDMA(AM_IP):
     self.adev.reg(f"{reg}_RB_CNTL").write(**({f'{self.sdma_name.lower()}_wptr_poll_enable':1} if self.adev.ip_ver[am.SDMA0_HWIP][:2]!=(4,4) else {}),
       rb_vmid=0, rptr_writeback_enable=1, rptr_writeback_timer=4, rb_enable=1, rb_priv=1, rb_size=(ring_size//4).bit_length()-1, inst=inst)
     self.adev.reg(f"{reg}_IB_CNTL").update(ib_enable=1, inst=inst)
-    return self.adev.reg(f"{reg}_RB_WPTR").read() | (self.adev.reg(f"{reg}_RB_WPTR_HI").read() << 32)
+    return self.adev.reg(f"{reg}_RB_WPTR").read(inst=inst) | (self.adev.reg(f"{reg}_RB_WPTR_HI").read(inst=inst) << 32)
 
 class AM_PSP(AM_IP):
   def init_sw(self):
