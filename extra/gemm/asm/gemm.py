@@ -1,7 +1,7 @@
 import functools
 from extra.assembly.amd.autogen.cdna import *
 from extra.assembly.amd.asm import asm
-from extra.assembly.amd.dsl import Inst, RawImm, a
+from extra.assembly.amd.dsl import a
 from extra.assembly.amd.test.test_roundtrip import compile_asm
 
 compile_asm = functools.partial(compile_asm, mcpu='gfx950', mattr='+wavefrontsize64')
@@ -10,10 +10,10 @@ VCC = VCC_LO
 EXEC = EXEC_LO
 
 gemm = [
-  s_load_dwordx2(sdata=s[28:29], sbase=s[0:1], offset=0x0, imm=1, soffset=RawImm(0)),
-  s_load_dwordx4(sdata=s[32:35], sbase=s[0:1], offset=0x8, imm=1, soffset=RawImm(0)),
-  s_load_dword(sdata=s[24], sbase=s[0:1], offset=0x18, imm=1, soffset=RawImm(0)),
-  s_load_dword(sdata=s[54], sbase=s[0:1], offset=0x1C, imm=1, soffset=RawImm(0)),
+  s_load_dwordx2(sdata=s[28:29], sbase=s[0:1], offset=0x0, imm=1),
+  s_load_dwordx4(sdata=s[32:35], sbase=s[0:1], offset=0x8, imm=1),
+  s_load_dword(sdata=s[24], sbase=s[0:1], offset=0x18, imm=1),
+  s_load_dword(sdata=s[54], sbase=s[0:1], offset=0x1C, imm=1),
   s_waitcnt(simm16=0xc07f),
   s_mov_b32(s[51], 1),
   s_mov_b32(s[53], 1),
@@ -113,8 +113,8 @@ gemm = [
   v_cvt_u32_f32_e32(v[10], v[10]),
   v_mul_u32_u24_e32(v[13], v[10], v[12]),
   v_sub_u32_e32(v[13], v[11], v[13]),
-  v_cmp_ne_u32(vdst=VCC, src0=v[13], src1=0),  # vdst=VCC_LO=106
-  v_addc_co_u32(vdst=v[10], sdst=VCC, src0=v[10], src1=0, src2=VCC_LO),
+  v_cmp_ne_u32(vdst=VCC, src0=v[13], src1=0),  # vdst=VCC=106
+  v_addc_co_u32(vdst=v[10], sdst=VCC, src0=v[10], src1=0, src2=VCC),
   v_mov_b32_e32(v[12], 0x100),
   v_mov_b32_e32(v[11], s[25]),
   v_readfirstlane_b32_e32(vdst=s[14], src0=v[10]),
@@ -126,7 +126,7 @@ gemm = [
   v_mul_u32_u24_e32(v[13], v[10], v[12]),
   v_sub_u32_e32(v[13], v[11], v[13]),
   v_cmp_ne_u32(vdst=VCC, src0=v[13], src1=0),
-  v_addc_co_u32(vdst=v[10], sdst=VCC, src0=v[10], src1=0, src2=VCC_LO),
+  v_addc_co_u32(vdst=v[10], sdst=VCC, src0=v[10], src1=0, src2=VCC),
   s_nop(0),
   v_readfirstlane_b32_e32(vdst=s[15], src0=v[10]),
   s_waitcnt(simm16=0xc07f),
@@ -140,7 +140,7 @@ gemm = [
   v_cvt_u32_f32_e32(v[10], v[10]),
   v_mul_u32_u24(vdst=v[11], src0=v[10], src1=s[52]),
   v_sub_u32_e32(v[11], s[2], v[11]),
-  v_cmpx_eq_u32(vdst=EXEC, src0=v[11], src1=s[52]),  # vdst=EXEC_LO=126
+  v_cmpx_eq_u32(vdst=EXEC, src0=v[11], src1=s[52]),  # vdst=EXEC=126
   v_add_u32_e32(v[10], 1, v[10]),
   s_mov_b64(s[126:127], -1),  # EXEC = -1 (all ones)
   v_cmpx_gt_u32(vdst=EXEC, src0=v[11], src1=s[52]),
@@ -361,10 +361,10 @@ gemm = [
   v_sub_u32_e32(v[11], s[2], v[11]),
   v_cmpx_eq_u32(vdst=EXEC, src0=v[11], src1=s[52]),
   v_add_u32_e32(v[10], 1, v[10]),
-  s_mov_b64(EXEC_LO, -1),
+  s_mov_b64(EXEC, -1),
   v_cmpx_gt_u32(vdst=EXEC, src0=v[11], src1=s[52]),
   v_sub_u32(vdst=v[10], src0=v[10], src1=1),
-  s_mov_b64(EXEC_LO, -1),
+  s_mov_b64(EXEC, -1),
   v_readfirstlane_b32_e32(vdst=s[52], src0=v[10]),
   s_mov_b32(s[4], s[52]),
   s_mul_i32(s[52], s[15], s[14]),
@@ -380,10 +380,10 @@ gemm = [
   v_sub_u32_e32(v[11], s[2], v[11]),
   v_cmpx_eq_u32(vdst=EXEC, src0=v[11], src1=s[14]),
   v_add_u32_e32(v[10], 1, v[10]),
-  s_mov_b64(EXEC_LO, -1),
+  s_mov_b64(EXEC, -1),
   v_cmpx_gt_u32(vdst=EXEC, src0=v[11], src1=s[14]),
   v_sub_u32(vdst=v[10], src0=v[10], src1=1),
-  s_mov_b64(EXEC_LO, -1),
+  s_mov_b64(EXEC, -1),
   v_readfirstlane_b32_e32(vdst=s[52], src0=v[10]),
   s_mov_b32(s[3], s[52]),
   s_mul_i32(s[52], s[3], s[14]),
@@ -398,7 +398,7 @@ gemm = [
   s_mov_b32(s[9], 1),
   s_sext_i32_i16(s[11], s[11]),
   v_mul_lo_u32(v[10], s[40], v[4]),
-  v_add_co_u32_e32(v[0], VCC_LO, v[5], v[10]),
+  v_add_co_u32_e32(v[0], VCC, v[5], v[10]),
   v_add_u32_e32(v[0], 8, v[0]),
   v_lshlrev_b32_e32(v[0], 1, v[0]),
   s_mul_i32(s[70], s[40], 32),
@@ -416,7 +416,7 @@ gemm = [
   s_mul_i32(s[76], s[40], 0xe0),
   s_lshl_b32(s[76], s[76], 1),
   v_mul_lo_u32(v[10], s[42], v[6]),
-  v_add_co_u32_e32(v[1], VCC_LO, v[7], v[10]),
+  v_add_co_u32_e32(v[1], VCC, v[7], v[10]),
   v_add_u32_e32(v[1], 8, v[1]),
   v_lshlrev_b32_e32(v[1], 1, v[1]),
   s_mul_i32(s[77], s[42], 32),
@@ -1316,7 +1316,6 @@ gemm = [
   s_mul_i32(s[8], 0x100, s[3]),
   v_add_u32_e32(v[1], s[8], v[1]),
   v_add_lshl_u32(v[11], v[3], v[0], 1),
-  # TODO: should be AGPR
   v_accvgpr_read(v[16], a[0]),
   v_accvgpr_read(v[17], a[4]),
   v_accvgpr_read(v[18], a[8]),
