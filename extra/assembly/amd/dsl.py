@@ -38,6 +38,8 @@ def _suffix(name: str) -> tuple[str | None, str | None]:
   if m := re.search(r'CVT_([FIUB]\d+)_([FIUB]\d+)$', name): return m.group(1), m.group(2)
   if m := re.search(r'(?:MAD|MUL)_([IU]\d+)_([IU]\d+)$', name): return m.group(1), m.group(2)
   if m := re.search(r'PACK_([FIUB]\d+)_([FIUB]\d+)$', name): return m.group(1), m.group(2)
+  # Generic dst_src pattern: S_BCNT0_I32_B64, S_BITREPLICATE_B64_B32, V_FREXP_EXP_I32_F64, etc.
+  if m := re.search(r'_([FIUB]\d+)_([FIUB]\d+)$', name): return m.group(1), m.group(2)
   if m := re.search(r'_([FIUB](?:32|64|16|8|96|128|256|512))$', name): return m.group(1), m.group(1)
   return None, None
 _SPECIAL_REGS = {
@@ -84,7 +86,8 @@ def spec_dtype(name: str) -> tuple[str | None, str | None, str | None, str | Non
   return dst_suf, src_suf, src_suf, src_suf
 def spec_is_16bit(name: str) -> bool:
   name = name.upper()
-  if 'SAD' in name or 'PACK' in name: return False
+  if 'SAD' in name or 'PACK' in name or '_PK_' in name or 'SAT_PK' in name: return False
+  if '_F32' in name or '_I32' in name or '_U32' in name or '_B32' in name: return False  # mixed ops like V_DOT2ACC_F32_F16
   return bool(re.search(r'_[FIUB]16(?:_|$)', name))
 def spec_is_64bit(name: str) -> bool: return bool(re.search(r'_[FIUB]64(?:_|$)', name.upper()))
 def is_dtype_16(dt: str | None) -> bool: return dt is not None and '16' in dt
@@ -264,7 +267,8 @@ class Inst:
     if encoded == 255 and self._literal is None:
       import struct
       # Check if THIS source uses 64-bit encoding (not just src0)
-      src_regs = self.src_regs({'src0': 0, 'src1': 1, 'src2': 2}.get(name, 0))
+      src_idx = {'src0': 0, 'src1': 1, 'src2': 2, 'ssrc0': 0, 'ssrc1': 1}.get(name, 0)
+      src_regs = self.src_regs(src_idx)
       is_64 = src_regs == 2
       if isinstance(val, SrcMod) and not isinstance(val, Reg): lit32 = val.val & MASK32
       elif isinstance(val, int) and not isinstance(val, IntEnum): lit32 = val & MASK32
