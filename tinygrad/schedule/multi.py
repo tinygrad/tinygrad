@@ -1,6 +1,6 @@
 from typing import cast
 import functools, itertools, operator
-from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, ALL2ALL, getenv, ContextVar
+from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, ALL2ALL, getenv
 from tinygrad.uop.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp, graph_rewrite_map, graph_rewrite
 from tinygrad.device import Device
 
