@@ -1,10 +1,8 @@
 from typing import cast
 import functools, itertools, operator
-from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, getenv, ContextVar
+from tinygrad.helpers import all_same, all_int, prod, DEBUG, RING, ALL2ALL, getenv, ContextVar
 from tinygrad.uop.ops import Ops, UOp, sint, PatternMatcher, UPat, GroupOp, graph_rewrite_map, graph_rewrite
 from tinygrad.device import Device
-
-ALL2ALL = ContextVar("ALL2ALL", 0)
 
 # *** allreduce implementation ***
 def handle_allreduce_multirank(buf:UOp, red:UOp) -> UOp|None:
@@ -38,7 +36,6 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   assert all_int(buf.shape), f"does not support symbolic shape {buf.shape}"
   n_lbs, shape, numel = len(buf.device), buf.shape, prod(buf.shape)
 
-  # select algorithm: all2all (XGMI) > ring (large) > naive (small/2-device)
   use_all2all = (ALL2ALL >= 2 or (n_lbs > 2 and numel > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and ALL2ALL >= 1))
   use_ring = not use_all2all and (RING >= 2 or (n_lbs > 2 and numel > getenv("RING_ALLREDUCE_THRESHOLD", 256_000) and RING >= 1))
   if DEBUG >= 2: print(f"{'ALL2ALL' if use_all2all else 'RING' if use_ring else 'NAIVE'} ALLREDUCE {n_lbs}x{numel} | {buf.dtype}")
@@ -64,7 +61,8 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
       chunk, reduced = buf.reshape((numel,)).shrink(((s,e),)), buf.reshape((numel,)).shrink(((s,e),))
       for step in range(n_lbs-1):
         src, dest = (i+step)%n_lbs, (i+step+1)%n_lbs
-        reduced = reduced.copy_to_device(buf.device[dest], src if isinstance(reduced.device, tuple) else None).alu(red.arg, chunk.copy_to_device(buf.device[dest], dest))
+        cp = reduced.copy_to_device(buf.device[dest], src if isinstance(reduced.device, tuple) else None)
+        reduced = cp.alu(red.arg, chunk.copy_to_device(buf.device[dest], dest))
       reduced_chunks.append(reduced)
 
   # allgather
