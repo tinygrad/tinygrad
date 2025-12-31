@@ -641,8 +641,11 @@ def get_dsl(text: str) -> str:
 
   # VOP3A (CDNA native VOP3) needs keyword args since op is passed via partial
   is_vop3a_3src = _has(mn, 'lshl_add', 'add_lshl', 'lshl_or', 'and_or', 'xor3', 'or3', 'add3') and not mn.endswith(('_e32', '_e64'))
+  is_vop3a_2src = _has(mn, 'mul_lo_u32', 'mul_hi_u32', 'mul_lo_i32', 'mul_hi_i32') and not mn.endswith(('_e32', '_e64'))
   if is_vop3a_3src and len(args) == 4:
     args = [f'vdst={args[0]}', f'src0={args[1]}', f'src1={args[2]}', f'src2={args[3]}']
+  elif is_vop3a_2src and len(args) == 3:
+    args = [f'vdst={args[0]}', f'src0={args[1]}', f'src1={args[2]}']
 
   # v_fma_mix*: extract inline neg/abs modifiers
   if 'fma_mix' in mn and neg_lo is None and neg_hi is None:
