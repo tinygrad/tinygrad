@@ -296,6 +296,11 @@ def _disasm_vop3(inst: VOP3) -> str:
 
   # RDNA3 VOP3 encodes VOPC/VOP2/VOP1 in lower opcode ranges - skip these for CDNA VOP3A
   is_cdna_vop3a = stored_op is not None and type(stored_op).__name__ == 'VOP3AOp'
+  is_cmp = name.startswith('v_cmp') or name.startswith('v_cmpx')
+  if is_cdna_vop3a and is_cmp:
+    # CDNA VOP3A compare: vdst holds SGPR destination, use n=2 for VCC/EXEC pair (wavefrontsize64)
+    # For v_cmpx, destination is EXEC but must be explicit in VOP3A encoding
+    return f"{name} {_fmt_sdst(inst.vdst, 2)}, {s0}, {s1}" if name.startswith('v_cmpx') else f"{name} {_fmt_sdst(inst.vdst, 2)}, {s0}, {s1}"
   if not is_cdna_vop3a:
     if inst.op < 256:  # VOPC
       return f"{name}_e64 {s0}, {s1}" if name.startswith('v_cmpx') else f"{name}_e64 {_fmt_sdst(inst.vdst, 1)}, {s0}, {s1}"
@@ -323,10 +328,13 @@ def _disasm_vop3b(inst) -> str:
   """Disassemble CDNA VOP3B instructions (with sdst field for carry)."""
   stored_op = inst._values.get('op')
   name = stored_op.name.lower() if stored_op is not None and hasattr(stored_op, 'name') else f"op_{inst.op}"
-  s0, s1, s2 = inst.lit(inst.src0), inst.lit(inst.src1), inst.lit(inst.src2)
+  s0, s1 = inst.lit(inst.src0), inst.lit(inst.src1)
   is3src = 'addc' in name or 'subb' in name  # carry instructions have 3 sources
   suffix = "_e64" if 'co_' in name else ""
-  return f"{name}{suffix} v{inst.vdst}, {_fmt_sdst(inst.sdst, 1)}, {s0}, {s1}, {s2}" if is3src else f"{name}{suffix} v{inst.vdst}, {_fmt_sdst(inst.sdst, 1)}, {s0}, {s1}"
+  sdst = _fmt_sdst(inst.sdst, 2)  # Use n=2 for VCC pair (CDNA wavefrontsize64)
+  # For carry input (src2), use vcc format for CDNA wavefrontsize64
+  s2 = _fmt_src(inst.src2, 2) if is3src and inst.src2 in (106, 126) else inst.lit(inst.src2)
+  return f"{name}{suffix} v{inst.vdst}, {sdst}, {s0}, {s1}, {s2}" if is3src else f"{name}{suffix} v{inst.vdst}, {sdst}, {s0}, {s1}"
 
 def _disasm_vopd(inst: VOPD) -> str:
   lit = inst._literal or inst.literal
@@ -643,15 +651,16 @@ def get_dsl(text: str) -> str:
   vcc_ops = {'v_add_co_ci_u32', 'v_sub_co_ci_u32', 'v_subrev_co_ci_u32'}
   if mn.replace('_e32', '') in vcc_ops and len(args) >= 5: mn, args = mn.replace('_e32', '') + '_e32', [args[0], args[2], args[3]]
   if mn.replace('_e64', '') in vcc_ops and mn.endswith('_e64'): mn = mn.replace('_e64', '')
-  if mn.startswith('v_cmp') and not mn.endswith('_e64') and len(args) >= 3 and ops[0].strip().lower() in ('vcc_lo', 'vcc_hi', 'vcc'): args = args[1:]
+  # Only strip vcc for VOPC (e32) compares, NOT for CDNA VOP3A compares (no suffix)
+  if mn.startswith('v_cmp') and mn.endswith('_e32') and len(args) >= 3 and ops[0].strip().lower() in ('vcc_lo', 'vcc_hi', 'vcc'): args = args[1:]
   if 'cmpx' in mn and mn.endswith('_e64') and len(args) == 2: args = ['RawImm(126)'] + args
 
   fn = mn.replace('.', '_')
   if opsel is not None: args = [re.sub(r'\.[hl]$', '', a) for a in args]
 
   # VOP3A (CDNA native VOP3) needs keyword args since op is passed via partial
-  is_vop3a_3src = _has(mn, 'lshl_add', 'add_lshl', 'lshl_or', 'and_or', 'xor3', 'or3', 'add3') and not mn.endswith(('_e32', '_e64'))
-  is_vop3a_2src = _has(mn, 'mul_lo_u32', 'mul_hi_u32', 'mul_lo_i32', 'mul_hi_i32') and not mn.endswith(('_e32', '_e64'))
+  is_vop3a_3src = mn.startswith('v_') and _has(mn, 'lshl_add', 'add_lshl', 'lshl_or', 'and_or', 'xor3', 'or3', 'add3') and not mn.endswith(('_e32', '_e64'))
+  is_vop3a_2src = mn.startswith('v_') and _has(mn, 'mul_lo_u32', 'mul_hi_u32', 'mul_lo_i32', 'mul_hi_i32', 'mul_u32_u24', 'mul_i32_i24', 'sub_u32', 'add_u32') and not mn.endswith(('_e32', '_e64'))
   # VOP3A compare instructions: v_cmp_* and v_cmpx_* - either without suffix or with _e64 suffix (CDNA uses VOP3A)
   is_vop3a_cmp = (mn.startswith('v_cmp') or mn.startswith('v_cmpx')) and not mn.endswith('_e32')
   is_vop3a_cmp_e64 = is_vop3a_cmp and mn.endswith('_e64')
@@ -665,10 +674,15 @@ def get_dsl(text: str) -> str:
     args = [f'vdst={args[0]}', f'src0={args[1]}', f'src1={args[2]}']
   elif is_vop3a_cmp and len(args) == 3:
     # For VOP3A compares, vdst holds SGPR destination - convert to RawImm
-    dst = args[0]
+    dst = args[0].strip()
     if m := re.match(r'v\[(\d+)\]', dst):
       dst = f'RawImm({m.group(1)})'
-    # Keep VCC_LO, EXEC_LO etc as-is (they're passed to vdst which accepts them)
+    # Convert special SGPR names to RawImm (vdst field is VGPRField but holds SGPR for compares)
+    elif dst.lower() in ('vcc', 'vcc_lo'): dst = 'RawImm(106)'
+    elif dst.lower() == 'vcc_hi': dst = 'RawImm(107)'
+    elif dst.lower() in ('exec', 'exec_lo'): dst = 'RawImm(126)'
+    elif dst.lower() == 'exec_hi': dst = 'RawImm(127)'
+    elif m := re.match(r's\[?(\d+)\]?', dst): dst = f'RawImm({m.group(1)})'
     if is_vop3a_cmp_e64:
       fn = mn.replace('_e64', '')  # Strip _e64 suffix for CDNA VOP3A compare
     args = [f'vdst={dst}', f'src0={args[1]}', f'src1={args[2]}']
