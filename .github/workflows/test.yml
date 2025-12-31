@@ -102,15 +102,11 @@ jobs:
       run: |
         sudo apt update || true
         sudo apt install -y --no-install-recommends ninja-build
-    - name: Lint with ruff
-      run: |
-        pip3 install --upgrade --force-reinstall ruff==0.11.0
-        python3 -m ruff check extra/torch_backend/backend.py
     - name: Test one op
       run: FORWARD_ONLY=1 TINY_BACKEND=1 python3 test/test_ops.py TestOps.test_add
     - name: Test ResNet-18
       run: DEBUG=2 python3 extra/torch_backend/example.py
-    - name: My (custom) tests
+    - name: custom tests
       run: python3 extra/torch_backend/test.py
     - name: Test one op in torch tests
       run: DEBUG=2 python3 extra/torch_backend/torch_tests.py TestTinyBackendPRIVATEUSE1.test_unary_log_tiny_float32
@@ -233,10 +229,11 @@ jobs:
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' --recursive=y .
     - name: Lint with ruff
       run: |
-        pip3 install --upgrade --force-reinstall ruff==0.11.0
+        pip3 install --upgrade --force-reinstall ruff==0.14.10
         python3 -m ruff check .
         python3 -m ruff check examples/mlperf/ --ignore E501
         python3 -m ruff check extra/thunder/tiny/ --ignore E501 --ignore F841 --ignore E722
+        python3 -m ruff check extra/torch_backend/backend.py
     - name: Run mypy
       run: |
         python -m mypy --strict-equality --lineprecision-report .
