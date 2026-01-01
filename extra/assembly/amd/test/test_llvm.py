@@ -13,7 +13,7 @@ RDNA3_TEST_FILES = {
   'vop3_from_vop1': 'gfx11_asm_vop3_from_vop1.s', 'vop3_from_vop2': 'gfx11_asm_vop3_from_vop2.s',
   'vop3_from_vopc': 'gfx11_asm_vop3_from_vopc.s', 'vop3_from_vopcx': 'gfx11_asm_vop3_from_vopcx.s',
   'ds': 'gfx11_asm_ds.s', 'smem': 'gfx11_asm_smem.s', 'flat': 'gfx11_asm_flat.s',
-  'mubuf': 'gfx11_asm_mubuf.s', 'mtbuf': 'gfx11_asm_mtbuf.s', 'mimg': 'gfx11_asm_mimg.s', 'ldsdir': 'gfx11_asm_ldsdir.s',
+  'mubuf': 'gfx11_asm_mubuf.s', 'mtbuf': 'gfx11_asm_mtbuf.s', 'mimg': 'gfx11_asm_mimg.s', 'mimg_features': 'gfx11_asm_mimg_features.s', 'ldsdir': 'gfx11_asm_ldsdir.s',
   'exp': 'gfx11_asm_exp.s', 'wmma': 'gfx11_asm_wmma.s',
   'vop3_features': 'gfx11_asm_vop3_features.s', 'vop3p_features': 'gfx11_asm_vop3p_features.s', 'vopd_features': 'gfx11_asm_vopd_features.s',
   'vop3_alias': 'gfx11_asm_vop3_alias.s', 'vop3p_alias': 'gfx11_asm_vop3p_alias.s', 'vopc_alias': 'gfx11_asm_vopc_alias.s',
@@ -32,7 +32,8 @@ RDNA4_TEST_FILES = {
   'vop3_from_vop1': 'gfx12_asm_vop3_from_vop1.s', 'vop3_from_vop2': 'gfx12_asm_vop3_from_vop2.s',
   'ds': 'gfx12_asm_ds.s', 'ds_alias': 'gfx12_asm_ds_alias.s', 'smem': 'gfx12_asm_smem.s',
   'vflat': 'gfx12_asm_vflat.s', 'vflat_alias': 'gfx12_asm_vflat_alias.s',
-  'vscratch': 'gfx12_asm_vflat.s', 'vscratch_alias': 'gfx12_asm_vflat_alias.s',  # scratch instructions in vflat files
+  'vglobal': 'gfx12_asm_vflat.s', 'vglobal_alias': 'gfx12_asm_vflat_alias.s',  # global instructions in vflat files
+  'vscratch': 'gfx12_asm_vflat.s',  # scratch instructions in vflat file
   'vbuffer_mubuf': 'gfx12_asm_vbuffer_mubuf.s', 'vbuffer_mubuf_alias': 'gfx12_asm_vbuffer_mubuf_alias.s',
   'vbuffer_mtbuf': 'gfx12_asm_vbuffer_mtbuf.s', 'vbuffer_mtbuf_alias': 'gfx12_asm_vbuffer_mtbuf_alias.s',
   'vimage': 'gfx12_asm_vimage.s', 'vimage_alias': 'gfx12_asm_vimage_alias.s', 'vsample': 'gfx12_asm_vsample.s',
@@ -157,7 +158,7 @@ class TestLLVMRDNA3(TestLLVMBase):
       'sop1': SOP1, 'sop2': SOP2, 'sopc': SOPC, 'sopk': SOPK, 'sopp': SOPP,
       'vop1': VOP1, 'vop2': VOP2, 'vopc': VOPC, 'vopcx': VOPC, 'vop3': VOP3, 'vop3p': VOP3P,
       'vinterp': VINTERP, 'vopd': VOPD, 'ds': DS, 'smem': SMEM, 'flat': FLAT,
-      'mubuf': MUBUF, 'mtbuf': MTBUF, 'mimg': MIMG, 'wmma': VOP3P, 'ldsdir': LDSDIR, 'exp': EXP,
+      'mubuf': MUBUF, 'mtbuf': MTBUF, 'mimg': MIMG, 'mimg_features': MIMG, 'wmma': VOP3P, 'ldsdir': LDSDIR, 'exp': EXP,
       'vop3_from_vop1': VOP3, 'vop3_from_vop2': VOP3, 'vop3_from_vopc': VOP3, 'vop3_from_vopcx': VOP3,
       'vop3_features': VOP3, 'vop3p_features': VOP3P, 'vopd_features': VOPD,
       'vop3_alias': VOP3, 'vop3p_alias': VOP3P, 'vopc_alias': VOPC, 'vopcx_alias': VOPC,
@@ -186,7 +187,8 @@ class TestLLVMRDNA4(TestLLVMBase):
       'vbuffer_mtbuf': get('VBUFFER'), 'vbuffer_mtbuf_alias': get('VBUFFER'),
       'vdsdir': get('VDSDIR'), 'vdsdir_alias': get('VDSDIR'),
       'vflat': get('VFLAT'), 'vflat_alias': get('VFLAT'),
-      'vscratch': get('VSCRATCH'), 'vscratch_alias': get('VSCRATCH'),
+      'vglobal': get('VGLOBAL'), 'vglobal_alias': get('VGLOBAL'),
+      'vscratch': get('VSCRATCH'),
       'vimage': get('VIMAGE'), 'vimage_alias': get('VIMAGE'), 'vsample': get('VSAMPLE'),
       'wmma_w32': get('VOP3P'), 'wmma_w64': get('VOP3P'),
       'global_load_tr': get('VGLOBAL'),

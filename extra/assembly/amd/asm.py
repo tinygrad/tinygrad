@@ -498,8 +498,8 @@ def _disasm_mimg(inst: MIMG) -> str:
   dim = dim_names[inst.dim] if inst.dim < len(dim_names) else f"dim_{inst.dim}"
   vaddr = _mimg_vaddr_width(name, inst.dim, inst.a16)
   vaddr_str = f"v{inst.vaddr}" if vaddr == 1 else _vreg(inst.vaddr, vaddr)
-  # modifiers
-  mods = [f"dmask:0x{inst.dmask:x}"] if inst.dmask and (inst.dmask != 15 or 'atomic' in name) else []
+  # modifiers - always include dmask for image load/store/atomic (LLVM uses it for vdata size validation)
+  mods = [f"dmask:0x{inst.dmask:x}"] if inst.dmask else []
   mods.append(f"dim:SQ_RSRC_IMG_{dim.upper()}")
   for flag, mod in [(inst.unrm,"unorm"),(inst.glc,"glc"),(inst.slc,"slc"),(inst.dlc,"dlc"),(inst.r128,"r128"),
                     (inst.a16,"a16"),(inst.tfe,"tfe"),(inst.lwe,"lwe"),(inst.d16,"d16")]:
@@ -625,9 +625,21 @@ def _disasm_vflat(inst) -> str:
   else: op_enum, prefix = VFLATOp, 'flat'
   name = op_enum(inst.op).name.lower()
 
+  # global_wb, global_wbinv, global_inv are cache control instructions with no operands
+  if name in ('global_wb', 'global_wbinv', 'global_inv'):
+    mods = _rdna4_mem_mods(inst.th, inst.scope, False, False)
+    return f"{name}" + (f" {mods}" if mods else "")
+
+  # addtid instructions use thread ID as address offset, no vaddr operand
+  is_addtid = 'addtid' in name
+
   # Data width based on instruction name suffix
   suffix = name.split('_')[-1]
-  base_w = {'b32':1,'b64':2,'b96':3,'b128':4,'u8':1,'i8':1,'u16':1,'i16':1,'u32':1,'i32':1,'u64':2,'i64':2,'f32':1,'f64':2}.get(suffix, 1)
+  # block loads/stores use 32 VGPRs
+  if 'block' in name:
+    base_w = 32
+  else:
+    base_w = {'b32':1,'b64':2,'b96':3,'b128':4,'u8':1,'i8':1,'u16':1,'i16':1,'u32':1,'i32':1,'u64':2,'i64':2,'f32':1,'f64':2}.get(suffix, 1)
   # For cmpswap: vsrc holds cmp+data pairs (2x base), vdst is base width
   vsrc_w = base_w * 2 if 'cmpswap' in name else base_w
   vdst_w = base_w
@@ -640,16 +652,24 @@ def _disasm_vflat(inst) -> str:
   is_store, is_atomic = 'store' in name, 'atomic' in name
   mods = _rdna4_mem_mods(inst.th, inst.scope, is_store, is_atomic)
 
-  # saddr handling - VGLOBAL needs explicit "off" when saddr=124
-  if inst.saddr == 124: saddr_s = ", off" if prefix == 'global' else ""
-  elif inst.saddr in SPECIAL_PAIRS: saddr_s = f", {SPECIAL_PAIRS[inst.saddr]}"
-  else: saddr_s = f", {_sreg(inst.saddr, 2)}"
+  # saddr handling - VGLOBAL and VSCRATCH need explicit "off" when saddr=124
+  if inst.saddr == 124: saddr_s = "off" if prefix in ('global', 'scratch') else ""
+  elif inst.saddr in SPECIAL_PAIRS: saddr_s = SPECIAL_PAIRS[inst.saddr]
+  else: saddr_s = _sreg(inst.saddr, 2) if prefix == 'global' else decode_src(inst.saddr)
 
   # Address width: 1 for scratch with saddr, 2 otherwise
   addr_w = 1 if (prefix == 'scratch' or (inst.saddr != 124 and prefix != 'flat')) else 2
   vaddr_s = _vreg(inst.vaddr, addr_w)
   vsrc_s = _vreg(inst.vsrc, vsrc_w)
   vdst_s = _vreg(inst.vdst, vdst_w)
+
+  # addtid instructions don't have vaddr, just vdata and saddr
+  if is_addtid:
+    if is_store: return f"{name} {vsrc_s}, {saddr_s}{off_s}" + (f" {mods}" if mods else "")
+    return f"{name} {vdst_s}, {saddr_s}{off_s}" + (f" {mods}" if mods else "")
+
+  # Regular instructions need comma before saddr
+  saddr_s = f", {saddr_s}" if saddr_s else ""
 
   if is_atomic:
     if inst.th == 1:  # TH_ATOMIC_RETURN
