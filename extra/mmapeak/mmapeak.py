@@ -4,7 +4,8 @@ import os, pathlib
 os.environ["AMD_AQL"] = "1"
 
 from tinygrad.device import Device
-from tinygrad.runtime.ops_amd import AMDProgram, HIPCompiler
+from tinygrad.runtime.support.compiler_amd import HIPCompiler
+from tinygrad.runtime.ops_amd import AMDProgram
 
 NUM_WORKGROUPS = 96
 WAVE_SIZE = 32

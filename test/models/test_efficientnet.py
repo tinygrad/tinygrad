@@ -68,7 +68,7 @@ class TestEfficientNet(unittest.TestCase):
     self.assertEqual(_LABELS[labels[0]], "sports car, sport car")
 
   def test_chicken_car(self):
-    labels = _infer(self.model, np.concat([chicken_img, car_img], axis=0))
+    labels = _infer(self.model, np.concatenate([chicken_img, car_img], axis=0))
     self.assertEqual(_LABELS[labels[0]], "hen")
     self.assertEqual(_LABELS[labels[1]], "sports car, sport car")
 

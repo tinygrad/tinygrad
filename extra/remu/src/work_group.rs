@@ -1,5 +1,5 @@
 use crate::helpers::{colored, DEBUG};
-use crate::state::{Register, VecDataStore, WaveValue, VGPR};
+use crate::state::{Register, StateSnapshot, VecDataStore, WaveValue, VGPR};
 use crate::thread::{Thread, END_PRG, SGPR_COUNT};
 use std::collections::HashMap;
 
@@ -28,6 +28,96 @@ struct WaveState {
 
 const SYNCS: [u32; 4] = [0xBF89FC07, 0xBC7C0000, 0xBF890007, 0xbFB60003];
 const S_BARRIER: u32 = 0xBFBD0000;
+
+/// Context for single-stepping through a wave - holds all mutable state
+pub struct WaveContext {
+    pub kernel: Vec<u32>,
+    pub scalar_reg: [u32; SGPR_COUNT],
+    pub scc: u32,
+    pub pc: usize,
+    pub vec_reg: VGPR,
+    pub vcc: WaveValue,
+    pub exec: WaveValue,
+    pub lds: VecDataStore,
+    pub sds: HashMap<usize, VecDataStore>,
+    pub n_lanes: usize,
+}
+
+impl WaveContext {
+    pub fn new(kernel: Vec<u32>, n_lanes: usize) -> Self {
+        let active = (!0u32).wrapping_shr(32 - (n_lanes as u32));
+        Self {
+            kernel,
+            scalar_reg: [0; SGPR_COUNT],
+            scc: 0,
+            pc: 0,
+            vec_reg: VGPR::new(),
+            vcc: WaveValue::new(0, n_lanes),
+            exec: WaveValue::new(active, n_lanes),
+            lds: VecDataStore::new(),
+            sds: (0..=31).map(|i| (i, VecDataStore::new())).collect(),
+            n_lanes,
+        }
+    }
+
+    /// Execute a single instruction. Returns: 0=continue, -1=endpgm, -2=barrier, 1=done (pc past program), negative=error
+    pub fn step(&mut self) -> i32 {
+        if self.pc >= self.kernel.len() { return 1; }
+        if self.kernel[self.pc] == END_PRG { return -1; }
+        if self.kernel[self.pc] == S_BARRIER { self.pc += 1; return -2; }
+        // Skip sync/nop instructions
+        if SYNCS.contains(&self.kernel[self.pc]) || self.kernel[self.pc] >> 20 == 0xbf8 || self.kernel[self.pc] == 0x7E000000 {
+            self.pc += 1;
+            return 0;
+        }
+
+        let mut sgpr_co = None;
+        for lane_id in 0..self.n_lanes {
+            self.vec_reg.default_lane = Some(lane_id);
+            self.vcc.default_lane = Some(lane_id);
+            self.exec.default_lane = Some(lane_id);
+            let mut thread = Thread {
+                scalar_reg: &mut self.scalar_reg,
+                scc: &mut self.scc,
+                vec_reg: &mut self.vec_reg,
+                vcc: &mut self.vcc,
+                exec: &mut self.exec,
+                lds: &mut self.lds,
+                sds: &mut self.sds.get_mut(&lane_id).unwrap(),
+                pc_offset: 0,
+                stream: self.kernel[self.pc..].to_vec(),
+                scalar: false,
+                simm: None,
+                warp_size: self.n_lanes,
+                sgpr_co: &mut sgpr_co,
+            };
+            if let Err(e) = thread.interpret() { return e; }
+            if thread.scalar {
+                self.pc = ((self.pc as isize) + 1 + (thread.pc_offset as isize)) as usize;
+                break;
+            }
+            if lane_id == self.n_lanes - 1 {
+                self.pc = ((self.pc as isize) + 1 + (thread.pc_offset as isize)) as usize;
+            }
+        }
+        if self.vcc.mutations.is_some() { self.vcc.apply_muts(); self.vcc.mutations = None; }
+        if self.exec.mutations.is_some() { self.exec.apply_muts(); self.exec.mutations = None; }
+        if let Some((idx, mut wv)) = sgpr_co.take() { wv.apply_muts(); self.scalar_reg[idx] = wv.value; }
+        0
+    }
+
+    pub fn get_snapshot(&self) -> StateSnapshot {
+        let mut snap = StateSnapshot::new();
+        snap.pc = self.pc as u32;
+        snap.scc = self.scc;
+        snap.vcc = self.vcc.value;
+        snap.exec_mask = self.exec.value;
+        snap.sgpr = self.scalar_reg;
+        for lane in 0..32 { snap.vgpr[lane] = self.vec_reg.get_lane(lane); }
+        snap
+    }
+}
+
 impl<'a> WorkGroup<'a> {
     pub fn new(dispatch_dim: u32, id: [u32; 3], launch_bounds: [u32; 3], kernel: &'a Vec<u32>, kernel_args: *const u64) -> Self {
         Self { dispatch_dim, id, kernel, launch_bounds, kernel_args, lds: VecDataStore::new(), wave_state: HashMap::new() }

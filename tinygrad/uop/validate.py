@@ -1,6 +1,6 @@
 from typing import Callable, cast
 from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, python_alu
-from tinygrad.dtype import ImageDType, dtypes, Invalid
+from tinygrad.dtype import ImageDType, dtypes, Invalid, PtrDType
 from tinygrad.helpers import IGNORE_OOB, cpu_profile
 
 try:
@@ -11,9 +11,8 @@ try:
   # IDIV is truncated division but z3 does euclidian division (floor if b>0 ceil otherwise); mod by power of two sometimes uses Ops.AND
   def z3_cdiv(a, b):return z3.If((a<0), z3.If(0<b, (a+(b-1))/b, (a-(b+1))/b), a/b)
   def z3_xor(a,b):
-    if isinstance(a, z3.BoolRef): return a^b
-    assert a==-1 or b==-1, "xor can only be used in indexing if one of the aruments is -1"
-    return -a-1 if b==-1 else -b-1
+    assert isinstance(a, z3.BoolRef), f"{type(a)=}, {a=}"
+    return a^b
   z3_alu: dict[Ops, Callable] = python_alu | {Ops.MOD: lambda a,b: a-z3_cdiv(a,b)*b, Ops.IDIV: z3_cdiv, Ops.SHR: lambda a,b: a/(2**b.as_long()),
     Ops.SHL: lambda a,b: a*(2**b.as_long()), Ops.AND: lambda a,b: a%(b+1) if isinstance(b, z3.ArithRef) else a&b, Ops.WHERE: z3.If, Ops.XOR: z3_xor,
     Ops.MAX: lambda a,b: z3.If(a<b, b, a),}
@@ -34,7 +33,6 @@ try:
     (UPat(Ops.CONST, dtypes.ints+(dtypes.index,), name="x"), lambda x,ctx: (z3.IntVal(x.arg, ctx=ctx[0].ctx), None)),
     (UPat(Ops.CONST, dtypes.bool, name="x"), lambda x,ctx: (z3.BoolVal(x.arg, ctx=ctx[0].ctx), None)),
     # casts from floats create new variables
-    (UPat(Ops.CAST, dtypes.bool, src=(UPat(dtype=dtypes.floats),), name="x"), lambda x,ctx: (z3.Bool(f"cast{len(ctx[1])}",ctx=ctx[0].ctx), None)),
     (UPat(Ops.CAST, dtypes.ints+(dtypes.index,), src=(UPat(dtype=dtypes.floats),), name="x"), lambda x,ctx:
       create_bounded(f"cast{len(ctx[1])}", x.dtype.min, x.dtype.max, ctx[0])),
     # A comparison between floats introduces a new bool variable
@@ -67,10 +65,12 @@ def validate_index(buf:UOp, idx:UOp, gate:UOp|None=None):
   # We can use UOp min/max to do a faster check, but it can give false positive since its not an exact bound and doesn't consider the mask
   if 0<=idx.vmin and idx.vmax<sz: return True
 
-  # WEBGPU has a BITCAST in the index. TODO: fix
-  if any(x.op is Ops.BITCAST for x in idx.toposort()): return True
+  # TODO: validate these
+  # WEBGPU has a BITCAST in the index, PTX casts pointer to long
+  for x in idx.toposort() | gate.toposort():
+    if x.op is Ops.BITCAST or (x.op is Ops.CAST and isinstance(x.src[0].dtype, PtrDType)): return True
 
-  if not z3_imported: raise ImportError("z3 >= 4.12.4 is required for bounds checking, try IGNORE_OOB=0 or \"pip install 'z3-solver>=4.12.4\"")
+  if not z3_imported: raise ImportError("bounds checking requires z3 >= 4.12.4, use IGNORE_OOB=1 to disable, or \"pip install 'z3-solver>=4.12.4\"")
   solver = z3.Solver(ctx=z3.Context())
   z3_idx, z3_mask = uops_to_z3(solver, idx, gate)
   solver.add(z3_mask)
