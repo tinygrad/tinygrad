@@ -162,6 +162,9 @@ x86_extra_matcher = base_extra_matcher + PatternMatcher([
 
 # these must be done in a separate matcher because they violate the spec
 pre_isel_matcher = PatternMatcher([
+  # gated index becomes a conditional move on the index, the load/store are unconditional
+  (UPat.var("base").index(UPat.var("idx"), UPat.var("gate")).load(UPat.var("alt"), name="x"), lambda base,idx,gate,alt,x: gate.where(base.index(idx, ptr=True), (l:=UOp(Ops.DEFINE_LOCAL, base.dtype.base.ptr(x.dtype.count), arg=0)).after(l.store(alt)).index(UOp.const(dtypes.int32, 0), ptr=True)).load(dtype=x.dtype)),
+  #(UPat.var("base").index(UPat.var("idx"), UPat.var("gate")).store(UPat.var("val")), lambda base,idx,gate,val: gate.where(base.index(idx, ptr=True), UOp(Ops.DEFINE_LOCAL, base.dtype.base.ptr(val.dtype.count), arg=0).index(UOp.const(dtypes.int32, 0), ptr=True)).store(val)),
   # fold the displacement into the load/store to expose the base index for memory address fusion in isel
   # after this all load/stores have an extra const in the src
   (UPat(Ops.LOAD, src=(UPat.var("buf").index(UPat.cvar("disp")),), name="x"),
@@ -176,9 +179,6 @@ pre_isel_matcher = PatternMatcher([
   (UPat(Ops.STORE, src=(UPat.var("buf"), UPat.var("a")), name="x"), lambda buf,a,x: x.replace(src=(buf, UOp.const(dtypes.int32, 0), a))),
   # after extracting displacement cast idx to 64bit if it can be negative
   #(UPat.var("base").index(UPat.var("idx", dtypes.int32)), lambda base,idx: base.index(idx.cast(dtypes.int64), ptr=True) if idx.vmin < 0 else None),
-  # gated index becomes a conditional move on the index, the load/store are unconditional
-  #(UPat.var("base").index(UPat.var("idx"), UPat.var("gate")), lambda base,idx,gate: gate.where(base.index(idx, ptr=True), UOp(Ops.DEFINE_LOCAL, base.dtype, arg=0))),
-  (UPat.var("base").index(UPat.var("idx"), UPat.var("gate")).load(UPat.var("alt"), name="x"), lambda base,idx,gate,alt,x: gate.where(base.index(idx, ptr=True), (l:=UOp(Ops.DEFINE_LOCAL, base.dtype.base.ptr(x.dtype.count), arg=0)).after(l.store(alt)).index(UOp.const(dtypes.int32, 0), ptr=True)).load(dtype=x.dtype)),
   # NOTE: shared with x86_extra_matcher
   # if gate in scalar int cmove is not a comparison need to add one to set the flag
   (UPat.var("m", dtypes.bool).where(UPat.var("a"), UPat.var("b")),
@@ -303,10 +303,10 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat.var("base"), UPat.cvar("dis")), name="x"), lambda base,dis,x: x.replace(op=X86Ops.LEA, src=(base, UOp(Ops.NOOP), disp(dis.const_like(dis.arg * base.dtype.itemsize))))),
   (UPat(Ops.INDEX, src=(UPat.var("base"), UPat.var("idx")), name="x"), lambda base,idx,x: x.replace(op=X86Ops.LEA, src=(base, idx.cast(dtypes.int64) if idx.vmin < 0 else idx, imm(dtypes.int8, 0)))),
   # conditional moves that use flags (implicitly)
-  (UPat(Ops.CMPLT, dtypes.bool, (UPat(dtype=dtypes.uints), UPat()), name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: UOp(X86Ops.CMOVB, a.dtype, src=(a, b, cmp(m)))), # noqa: E501
-  (UPat(Ops.CMPLT, dtypes.bool, name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: UOp(X86Ops.CMOVL, a.dtype, src=(a, b, cmp(m)))), # noqa: E501
-  (UPat(Ops.CMPEQ, dtypes.bool, name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: UOp(X86Ops.CMOVE, a.dtype, src=(a, b, cmp(m)))), # noqa: E501
-  (UPat(Ops.CMPNE, dtypes.bool, name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: UOp(X86Ops.CMOVNE, a.dtype, src=(a, b, cmp(m)))), # noqa: E501
+  (UPat(Ops.CMPLT, dtypes.bool, (UPat(dtype=dtypes.uints), UPat()), name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: UOp(X86Ops.CMOVB, a.dtype, src=(b, a, cmp(m)))), # noqa: E501
+  (UPat(Ops.CMPLT, dtypes.bool, name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: UOp(X86Ops.CMOVL, a.dtype, src=(b, a, cmp(m)))), # noqa: E501
+  (UPat(Ops.CMPEQ, dtypes.bool, name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: UOp(X86Ops.CMOVE, a.dtype, src=(b, a, cmp(m)))), # noqa: E501
+  (UPat(Ops.CMPNE, dtypes.bool, name="m").where(UPat.var("a"), UPat.var("b")), lambda m,a,b: UOp(X86Ops.CMOVNE, a.dtype, src=(b, a, cmp(m)))), # noqa: E501
   # jumps
   (UPat(Ops.IF, src=(UPat(Ops.CMPLT, dtypes.bool, (UPat(dtype=dtypes.uints), UPat()), name="y"),), name="x"), lambda y,x: UOp(X86Ops.JB, x.dtype, (cmp(y),))), # noqa: E501
   (UPat(Ops.IF, src=(UPat(Ops.CMPLT, name="y"),)), lambda y: UOp(X86Ops.JL, src=(cmp(y),))),
@@ -493,7 +493,6 @@ post_regalloc_matcher = PatternMatcher([
   (UPat(X86Ops.IDIV, name="x"), lambda x: (nx:=x.replace(src=x.src[:-1]), [nx])),
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
   (UPat(X86GroupOp.TwoAddress1st, name="x"), lambda ctx,x: (nx:=x.replace(src=x.src[1:]), [assign(ctx, x.src[0], x.arg), nx] if x.arg != x.src[0].arg else [nx])),
-  (UPat(X86GroupOp.TwoAddress2nd, name="x"), lambda ctx,x: (nx:=x.replace(src=x.src[:1]+x.src[2:]), [assign(ctx, x.src[1], x.arg), nx] if x.arg != x.src[1].arg else [nx])),
 ])
 
 # ***** X86 instruction encoding *****
@@ -714,7 +713,7 @@ class X86Renderer(ISARenderer):
   isa_spec = x86_spec
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ)}
 
-  def two_address(self, x:UOp) -> int|None: return 0 if x.op in X86GroupOp.TwoAddress1st else 1 if x.op in X86GroupOp.TwoAddress2nd else None
+  def two_address(self, x:UOp) -> int|None: return 0 if x.op in X86GroupOp.TwoAddress1st else None
   def stack_pointer(self) -> UOp: return UOp(X86Ops.DEFINE_REG, dtypes.uint64, arg=RSP)
   def render(self, uops:list[UOp], lower:bool=True) -> str:
     if lower: uops = self.lower(uops[-1])
