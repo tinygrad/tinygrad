@@ -223,26 +223,26 @@ def xlog2(d:UOp) -> UOp:
   Paper: https://arxiv.org/pdf/2001.09258 5.5
   """
   assert d.dtype.scalar() in TRANSCENDENTAL_DTYPES
-  # TODO: float16 denormal need float32 to achieve precision
-  if d.dtype.scalar() == dtypes.float16: return xlog2(d.cast(dtypes.float32)).cast(dtypes.float16)
-  FLT_MIN = d.const_like(1e-6 if d.dtype.scalar() == dtypes.float16 else 1e-4)
+  # float16 uses 2^10 for denormal scaling (2^64 overflows), float32/64 use 2^64
+  denormal_exp = 10 if d.dtype.scalar() == dtypes.float16 else 64
+  FLT_MIN = d.const_like({dtypes.float16: 6.1e-5, dtypes.float32: 1e-4, dtypes.float64: 1e-4}[d.dtype.scalar()])
   is_denormal = d<FLT_MIN
-  a = is_denormal.where(d * (2 ** 64), d)
+  a = is_denormal.where(d * (2 ** denormal_exp), d)
 
   e = ilogb2k(a * (1.0 / 0.75)).cast(a.dtype)
   m = ldexp3k(a, -e)
-  e = is_denormal.where(e - 64, e)
+  e = is_denormal.where(e - denormal_exp, e)
 
   x = (m - 1.0) / (m + 1.0)
   x2 = x * x
   if d.dtype.scalar() == dtypes.float64:
     t = polyN(x2, [0.2211941750456081490e+0, 0.2200768693152277689e+0, 0.2623708057488514656e+0, 0.3205977477944495502e+0,
                    0.4121985945485324709e+0, 0.5770780162997058982e+0, 0.96179669392608091449])
-    s_hi, s_lo = e+x*2.885390081777926774, e.const_like(0)
+    r = t * (x * x2) + e + x * 2.885390081777926774
   else:
     t = polyN(x2, [0.4374550283e+0, 0.5764790177e+0, 0.9618012905120])
-    s_hi, s_lo = e+x*2.8853900432586669922, x*3.2734474483568488616e-08
-  r = t * (x * x2) + (s_hi + s_lo)
+    # s_lo term (x*3.27e-08) only for float32 - underflows in float16
+    r = t * (x * x2) + e + x * 2.8853900432586669922 + (x * 3.2734474483568488616e-08 if d.dtype.scalar() == dtypes.float32 else 0)
 
   # log2(Inf) = Inf
   r = d.ne(math.inf).where(r, r.const_like(math.inf))
