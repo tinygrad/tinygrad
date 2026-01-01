@@ -10,7 +10,7 @@ from tinygrad.renderer import ProgramSpec
 from tinygrad.helpers import TracingKey, getenv
 from tinygrad.engine.realize import ExecItem, CompiledRunner
 
-from extra.assembly.rdna3.autogen import *
+from extra.assembly.amd.autogen.rdna3.ins import *
 
 # TODO: use the RDNA3 renderer when it's in master
 template = """.text

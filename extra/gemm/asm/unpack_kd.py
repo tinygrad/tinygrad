@@ -1,12 +1,12 @@
-# unpack the complete kernel descriptor of an amdgpu ELF of for gfx950
+# unpack the complete kernel descriptor of an amdgpu ELF
 # https://rocm.docs.amd.com/projects/llvm-project/en/latest/LLVM/llvm/html/AMDGPUUsage.html#code-object-v3-kernel-descriptor
-import struct, pathlib
+import struct, pathlib, sys
 from tinygrad.runtime.support.elf import elf_loader
 
 def bits(x, lo, hi): return (x >> lo) & ((1 << (hi - lo + 1)) - 1)
 def assert_zero(x, lo, hi): assert bits(x, lo, hi) == 0
 
-with open(fp:=pathlib.Path(__file__).parent/"lib", "rb") as f:
+with open(sys.argv[1], "rb") as f:
   lib = f.read()
 
 image, sections, relocs = elf_loader(lib)
@@ -49,7 +49,7 @@ print("COMPUTE_PGM_RSRC3: 0x%08x" % pgm_rsrc3)
 print("COMPUTE_PGM_RSRC1: 0x%08x" % pgm_rsrc1)
 print("COMPUTE_PGM_RSRC2: 0x%08x" % pgm_rsrc2)
 
-# rsrc 3
+# rsrc 3 (gfx950)
 
 accum_offset_raw = bits(pgm_rsrc3, 0, 5)
 assert_zero(pgm_rsrc3, 6, 15)
@@ -169,10 +169,10 @@ assert_zero(desc, 458, 459)
 uses_dynamic_stack = bits(desc, 459, 460)
 print("DESC.USES_DYNAMIC_STACK:", uses_dynamic_stack)
 
+# gfx950 only
 assert_zero(desc, 460, 463)
 kernarg_preload_spec_length = bits(desc, 464, 470)
 print("DESC.KERNARG_PRELOAD_SPEC_LENGTH:", kernarg_preload_spec_length)
-
 kernarg_preload_spec_offset = bits(desc, 471, 479)
 print("DESC.KERNARG_PRELOAD_SPEC_OFFSET:", kernarg_preload_spec_offset)
 

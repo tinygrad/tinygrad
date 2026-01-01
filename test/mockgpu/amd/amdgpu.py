@@ -187,7 +187,7 @@ class PM4Executor(AMDQueue):
       if st <= prg_addr < st+sz: prg_sz = sz - (prg_addr - st)
 
     assert prg_sz > 0, "Invalid prg ptr (not found in mapped ranges)"
-    # Pass valid memory ranges and rsrc2 to Python emulator for bounds checking and SGPR layout
+    # Pass valid memory ranges and rsrc2 to Python emulator for bounds checking and SGPR/VGPR layout
     if hasattr(remu, 'valid_mem_ranges'): remu.valid_mem_ranges = self.gpu.mapped_ranges
     if hasattr(remu, 'rsrc2'): remu.rsrc2 = rsrc2
     err = remu.run_asm(prg_addr, prg_sz, *gl, *lc, args_addr)

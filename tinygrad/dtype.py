@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Final, ClassVar, Callable, Literal
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
-from tinygrad.helpers import getenv, prod
+from tinygrad.helpers import getenv, prod, round_up, next_power2
 from enum import Enum, auto
 
 class InvalidTypeMetaClass(type):
@@ -101,6 +101,15 @@ class ImageDType(PtrDType):
     assert addrspace == AddrSpace.GLOBAL, "images can't be local"
     return self
   def __repr__(self): return f"dtypes.{self.name}({self.shape})" + (f'.vec({self.v})' if self.v != 1 else '')
+  @property
+  def pitch(self):
+    imgw, imgh, itemsize_log = self.shape[1], self.shape[0], int(math.log2(self.itemsize))
+    pitchalign = max(6, 11 - int(math.log2(imgh))) if imgh > 1 else 6
+    align_up = max(1, (8 // itemsize_log + 1) - imgh // 32) if pitchalign == 6 else (2 ** (pitchalign - itemsize_log - 2))
+
+    granularity = 128 if self.itemsize == 4 else 256
+    pitch_add = (1 << pitchalign) if min(next_power2(imgw), round_up(imgw, granularity)) - align_up + 1 <= imgw and imgw > granularity//2 else 0
+    return round_up(imgw * 4 * self.itemsize, 1 << pitchalign) + pitch_add
 
 class dtypes:
   @staticmethod
