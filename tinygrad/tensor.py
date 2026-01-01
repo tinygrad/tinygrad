@@ -3672,7 +3672,7 @@ class Tensor(OpMixin):
       alpha, beta = U_permuted.square().sum(-2).unsqueeze(-2).split(num//2, -1)
       rot = gamma != 0
       tau = (beta - alpha) / (2 * rot.where(gamma, 1))
-      t = tau.sign() / (tau.abs() + (1 + tau.square()).sqrt())
+      t = (tau != 0).where(tau.sign(), 1) / (tau.abs() + (1 + tau.square()).sqrt())
       t = rot.where(t, 0)
       c = 1 / (1 + t.square()).sqrt()
       s = c * t

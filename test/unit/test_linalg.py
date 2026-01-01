@@ -83,6 +83,12 @@ class TestLinAlg(unittest.TestCase):
       s_diag = (S.unsqueeze(-2) * Tensor.eye(2))
       reconstruction_helper([U, s_diag, V], a)
 
+  def test_svd_rank1(self):
+    a = Tensor([[1.0, 1.0], [2.0, 2.0]]).realize()
+    U, S, V = a.svd()
+    np.testing.assert_allclose(S.numpy(), [np.sqrt(10), 0.0], atol=1e-4, rtol=1e-4)
+    reconstruction_helper([U, S.unsqueeze(-2) * Tensor.eye(2), V], a)
+
   def test_newton_schulz(self):
     coefficients = [(2, -1.5, 0.5), (2.0, -1.4, 0.2, 0.2)]#these params map to the sign function
     sizes = [(2,2), (3,2), (2,3), (2,2,2)]
