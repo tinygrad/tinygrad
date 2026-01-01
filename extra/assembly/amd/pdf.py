@@ -495,7 +495,7 @@ from extra.assembly.amd.pcode import *
   if 'VOP3Op' in enum_names:
     lines.append('''
 # V_WRITELANE_B32: Write scalar to specific lane's VGPR (not in PDF pseudocode)
-def _VOP3Op_V_WRITELANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+def _VOP3Op_V_WRITELANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
   wr_lane = s1 & 0x1f
   return {'d0': d0, 'scc': scc, 'vgpr_write': (wr_lane, vdst_idx, s0 & 0xffffffff)}
 VOP3Op_FUNCTIONS[VOP3Op.V_WRITELANE_B32] = _VOP3Op_V_WRITELANE_B32
