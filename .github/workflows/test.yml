@@ -687,7 +687,7 @@ jobs:
         run: AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=1 pytest -n=auto test/test_dtype_alu.py test/test_dtype.py
       # TODO: run all once emulator is faster
       - name: Run RDNA3 ops tests
-        run: SKIP_SLOW_TEST=1 AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=0 pytest -n=auto test/test_ops.py TestOps.test_sparse_categorical_crossentropy TestOps.test_tril
+        run: SKIP_SLOW_TEST=1 AMD=1 PYTHON_REMU=1 MOCKGPU=1 AMD_LLVM=0 pytest -n=auto test/test_ops.py -k "test_sparse_categorical_crossentropy or test_tril"
 
   testamdautogen:
     name: AMD autogen
