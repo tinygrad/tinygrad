@@ -5,6 +5,7 @@ env:
   CAPTURE_PROCESS_REPLAY: 1
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PYTHONPATH: ${{ github.workspace }}
+  IGNORE_OOB: 0
 
 on:
   push:
@@ -36,6 +37,8 @@ jobs:
     name: Docs
     runs-on: ubuntu-22.04
     timeout-minutes: 10
+    env:
+      IGNORE_OOB: 1
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -102,15 +105,11 @@ jobs:
       run: |
         sudo apt update || true
         sudo apt install -y --no-install-recommends ninja-build
-    - name: Lint with ruff
-      run: |
-        pip3 install --upgrade --force-reinstall ruff==0.11.0
-        python3 -m ruff check extra/torch_backend/backend.py
     - name: Test one op
       run: FORWARD_ONLY=1 TINY_BACKEND=1 python3 test/test_ops.py TestOps.test_add
     - name: Test ResNet-18
       run: DEBUG=2 python3 extra/torch_backend/example.py
-    - name: My (custom) tests
+    - name: custom tests
       run: python3 extra/torch_backend/test.py
     - name: Test one op in torch tests
       run: DEBUG=2 python3 extra/torch_backend/torch_tests.py TestTinyBackendPRIVATEUSE1.test_unary_log_tiny_float32
@@ -219,7 +218,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
-    # TODO: run the pre-commit hook to replace a lot of this
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -233,13 +231,14 @@ jobs:
       run: python -m pylint --disable=all -e W0311 -e C0303 --jobs=0 --indent-string='  ' --recursive=y .
     - name: Lint with ruff
       run: |
-        pip3 install --upgrade --force-reinstall ruff==0.11.0
-        python3 -m ruff check .
+        pip3 install --upgrade --force-reinstall ruff==0.14.10
+        pre-commit run ruff --all-files
         python3 -m ruff check examples/mlperf/ --ignore E501
         python3 -m ruff check extra/thunder/tiny/ --ignore E501 --ignore F841 --ignore E722
+        python3 -m ruff check extra/torch_backend/backend.py
     - name: Run mypy
       run: |
-        python -m mypy --strict-equality --lineprecision-report .
+        python -m mypy --lineprecision-report .
         cat lineprecision.txt
     - name: Run TYPED=1
       run: TYPED=1 python -c "import tinygrad"
@@ -310,7 +309,7 @@ jobs:
         deps: testing_unit
         python-version: '3.14'
     - name: Test SPEC=2
-      run: IGNORE_OOB=0 SPEC=2 pytest --maxfail=10 -n auto --durations=30 --ignore=test/models --ignore test/test_custom_kernel.py --ignore test/unit/test_hashing.py --timeout 60 -k "not test_setitem_big" --splits 2 --group ${{ matrix.group }}
+      run: SPEC=2 pytest --maxfail=10 -n auto --durations=30 --ignore=test/models --ignore test/test_custom_kernel.py --ignore test/unit/test_hashing.py --timeout 60 -k "not test_setitem_big" --splits 2 --group ${{ matrix.group }}
 
   fuzzing:
     name: Fuzzing
@@ -473,6 +472,8 @@ jobs:
     name: Test LLM
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    env:
+      IGNORE_OOB: 1
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4

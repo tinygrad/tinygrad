@@ -48,11 +48,11 @@ ast = sched[-1].ast
 # assembly gemm
 @track_rewrites(name=lambda ret: TracingKey(ret.name, (ret.function_name,), ret))
 def get_asm_prg() -> ProgramSpec:
-  src = fp.read_text()
+  src = (pathlib.Path(__file__).parent/"template.s").read_text().replace("INSTRUCTIONS", fp.read_text())
   lib = Device[Device.DEFAULT].compiler.compile(src)
   return ProgramSpec("gemm", src, Device.DEFAULT, ast, lib=lib, global_size=[NUM_WG, 1, 1], local_size=[THREADS_PER_WG, 1, 1],
                      globals=[0, 1, 2], vars=[UOp.variable("SZ", 256, 8192), UOp.variable("NUM_WG", 1, 1024)])
-eis.append(ExecItem(ast, [C_asm.uop.buffer, from_torch(B).uop.buffer, from_torch(A).uop.buffer], fixedvars={"SZ":N, "NUM_WG":NUM_WG},
+eis.append(ExecItem(ast, [C_asm.uop.buffer, from_torch(A).uop.buffer, from_torch(B).uop.buffer], fixedvars={"SZ":N, "NUM_WG":NUM_WG},
                     prg=CompiledRunner(get_asm_prg())))
 
 with Context(DEBUG=2):

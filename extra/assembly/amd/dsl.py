@@ -1,32 +1,121 @@
 # library for RDNA3 assembly DSL
 # mypy: ignore-errors
 from __future__ import annotations
-import struct, math
+import struct, math, re
 from enum import IntEnum
+from functools import cache, cached_property
 from typing import overload, Annotated, TypeVar, Generic
+from extra.assembly.amd.autogen.rdna3.enum import (VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, VOPDOp, SOP1Op, SOP2Op,
+  SOPCOp, SOPKOp, SOPPOp, SMEMOp, DSOp, FLATOp, MUBUFOp, MTBUFOp, MIMGOp, VINTERPOp)
 
 # Common masks and bit conversion functions
 MASK32, MASK64 = 0xffffffff, 0xffffffffffffffff
-def _f32(i): return struct.unpack("<f", struct.pack("<I", i & MASK32))[0]
+_struct_f, _struct_I = struct.Struct("<f"), struct.Struct("<I")
+_struct_e, _struct_H = struct.Struct("<e"), struct.Struct("<H")
+_struct_d, _struct_Q = struct.Struct("<d"), struct.Struct("<Q")
+def _f32(i): return _struct_f.unpack(_struct_I.pack(i & MASK32))[0]
 def _i32(f):
   if isinstance(f, int): f = float(f)
   if math.isnan(f): return 0xffc00000 if math.copysign(1.0, f) < 0 else 0x7fc00000
   if math.isinf(f): return 0x7f800000 if f > 0 else 0xff800000
-  try: return struct.unpack("<I", struct.pack("<f", f))[0]
+  try: return _struct_I.unpack(_struct_f.pack(f))[0]
   except (OverflowError, struct.error): return 0x7f800000 if f > 0 else 0xff800000
 def _sext(v, b): return v - (1 << b) if v & (1 << (b - 1)) else v
-def _f16(i): return struct.unpack("<e", struct.pack("<H", i & 0xffff))[0]
+def _f16(i): return _struct_e.unpack(_struct_H.pack(i & 0xffff))[0]
 def _i16(f):
   if math.isnan(f): return 0x7e00
   if math.isinf(f): return 0x7c00 if f > 0 else 0xfc00
-  try: return struct.unpack("<H", struct.pack("<e", f))[0]
+  try: return _struct_H.unpack(_struct_e.pack(f))[0]
   except (OverflowError, struct.error): return 0x7c00 if f > 0 else 0xfc00
-def _f64(i): return struct.unpack("<d", struct.pack("<Q", i & MASK64))[0]
+def _f64(i): return _struct_d.unpack(_struct_Q.pack(i & MASK64))[0]
 def _i64(f):
   if math.isnan(f): return 0x7ff8000000000000
   if math.isinf(f): return 0x7ff0000000000000 if f > 0 else 0xfff0000000000000
-  try: return struct.unpack("<Q", struct.pack("<d", f))[0]
+  try: return _struct_Q.unpack(_struct_d.pack(f))[0]
   except (OverflowError, struct.error): return 0x7ff0000000000000 if f > 0 else 0xfff0000000000000
+
+# Instruction spec - register counts and dtypes derived from instruction names
+_REGS = {'B32': 1, 'B64': 2, 'B96': 3, 'B128': 4, 'B256': 8, 'B512': 16,
+         'F32': 1, 'I32': 1, 'U32': 1, 'F64': 2, 'I64': 2, 'U64': 2,
+         'F16': 1, 'I16': 1, 'U16': 1, 'B16': 1, 'I8': 1, 'U8': 1, 'B8': 1}
+_CVT_RE = re.compile(r'CVT_([FIUB]\d+)_([FIUB]\d+)$')
+_MAD_MUL_RE = re.compile(r'(?:MAD|MUL)_([IU]\d+)_([IU]\d+)$')
+_PACK_RE = re.compile(r'PACK_([FIUB]\d+)_([FIUB]\d+)$')
+_DST_SRC_RE = re.compile(r'_([FIUB]\d+)_([FIUB]\d+)$')
+_SINGLE_RE = re.compile(r'_([FIUB](?:32|64|16|8|96|128|256|512))$')
+@cache
+def _suffix(name: str) -> tuple[str | None, str | None]:
+  name = name.upper()
+  if m := _CVT_RE.search(name): return m.group(1), m.group(2)
+  if m := _MAD_MUL_RE.search(name): return m.group(1), m.group(2)
+  if m := _PACK_RE.search(name): return m.group(1), m.group(2)
+  if m := _DST_SRC_RE.search(name): return m.group(1), m.group(2)
+  if m := _SINGLE_RE.search(name): return m.group(1), m.group(1)
+  return None, None
+_SPECIAL_REGS = {
+  'V_LSHLREV_B64': (2, 1, 2, 1), 'V_LSHRREV_B64': (2, 1, 2, 1), 'V_ASHRREV_I64': (2, 1, 2, 1),
+  'S_LSHL_B64': (2, 2, 1, 1), 'S_LSHR_B64': (2, 2, 1, 1), 'S_ASHR_I64': (2, 2, 1, 1),
+  'S_BFE_U64': (2, 2, 1, 1), 'S_BFE_I64': (2, 2, 1, 1), 'S_BFM_B64': (2, 1, 1, 1),
+  'S_BITSET0_B64': (2, 1, 1, 1), 'S_BITSET1_B64': (2, 1, 1, 1),
+  'S_BITCMP0_B64': (1, 2, 1, 1), 'S_BITCMP1_B64': (1, 2, 1, 1),
+  'V_LDEXP_F64': (2, 2, 1, 1), 'V_TRIG_PREOP_F64': (2, 2, 1, 1),
+  'V_CMP_CLASS_F64': (1, 2, 1, 1), 'V_CMPX_CLASS_F64': (1, 2, 1, 1),
+  'V_CMP_CLASS_F32': (1, 1, 1, 1), 'V_CMPX_CLASS_F32': (1, 1, 1, 1),
+  'V_CMP_CLASS_F16': (1, 1, 1, 1), 'V_CMPX_CLASS_F16': (1, 1, 1, 1),
+  'V_MAD_U64_U32': (2, 1, 1, 2), 'V_MAD_I64_I32': (2, 1, 1, 2),
+  'V_QSAD_PK_U16_U8': (2, 2, 1, 2), 'V_MQSAD_PK_U16_U8': (2, 2, 1, 2), 'V_MQSAD_U32_U8': (4, 2, 1, 4),
+}
+_SPECIAL_DTYPE = {
+  'V_LSHLREV_B64': ('B64', 'U32', 'B64', None), 'V_LSHRREV_B64': ('B64', 'U32', 'B64', None), 'V_ASHRREV_I64': ('I64', 'U32', 'I64', None),
+  'S_LSHL_B64': ('B64', 'B64', 'U32', None), 'S_LSHR_B64': ('B64', 'B64', 'U32', None), 'S_ASHR_I64': ('I64', 'I64', 'U32', None),
+  'S_BFE_U64': ('U64', 'U64', 'U32', None), 'S_BFE_I64': ('I64', 'I64', 'U32', None),
+  'S_BFM_B64': ('B64', 'U32', 'U32', None), 'S_BITSET0_B64': ('B64', 'U32', None, None), 'S_BITSET1_B64': ('B64', 'U32', None, None),
+  'S_BITCMP0_B64': ('SCC', 'B64', 'U32', None), 'S_BITCMP1_B64': ('SCC', 'B64', 'U32', None),
+  'V_LDEXP_F64': ('F64', 'F64', 'I32', None), 'V_TRIG_PREOP_F64': ('F64', 'F64', 'U32', None),
+  'V_CMP_CLASS_F64': ('VCC', 'F64', 'U32', None), 'V_CMPX_CLASS_F64': ('EXEC', 'F64', 'U32', None),
+  'V_CMP_CLASS_F32': ('VCC', 'F32', 'U32', None), 'V_CMPX_CLASS_F32': ('EXEC', 'F32', 'U32', None),
+  'V_CMP_CLASS_F16': ('VCC', 'F16', 'U32', None), 'V_CMPX_CLASS_F16': ('EXEC', 'F16', 'U32', None),
+  'V_MAD_U64_U32': ('U64', 'U32', 'U32', 'U64'), 'V_MAD_I64_I32': ('I64', 'I32', 'I32', 'I64'),
+  'V_QSAD_PK_U16_U8': ('B64', 'B64', 'B64', 'B64'), 'V_MQSAD_PK_U16_U8': ('B64', 'B64', 'B64', 'B64'),
+  'V_MQSAD_U32_U8': ('B128', 'B64', 'B64', 'B128'),
+}
+@cache
+def spec_regs(name: str) -> tuple[int, int, int, int]:
+  uname = name.upper()
+  if uname in _SPECIAL_REGS: return _SPECIAL_REGS[uname]
+  if 'SAD' in uname and 'U8' in uname and 'QSAD' not in uname and 'MQSAD' not in uname: return 1, 1, 1, 1
+  dst_suf, src_suf = _suffix(name)
+  return _REGS.get(dst_suf, 1), _REGS.get(src_suf, 1), _REGS.get(src_suf, 1), _REGS.get(src_suf, 1)
+@cache
+def spec_dtype(name: str) -> tuple[str | None, str | None, str | None, str | None]:
+  uname = name.upper()
+  if uname in _SPECIAL_DTYPE: return _SPECIAL_DTYPE[uname]
+  if 'SAD' in uname and ('U8' in uname or 'U16' in uname) and 'QSAD' not in uname and 'MQSAD' not in uname: return 'U32', 'U32', 'U32', 'U32'
+  if '_CMP_' in uname or '_CMPX_' in uname:
+    dst_suf, src_suf = _suffix(name)
+    return 'EXEC' if '_CMPX_' in uname else 'VCC', src_suf, src_suf, None
+  dst_suf, src_suf = _suffix(name)
+  return dst_suf, src_suf, src_suf, src_suf
+_F16_RE = re.compile(r'_[FIUB]16(?:_|$)')
+_F64_RE = re.compile(r'_[FIUB]64(?:_|$)')
+@cache
+def spec_is_16bit(name: str) -> bool:
+  uname = name.upper()
+  if 'SAD' in uname or 'PACK' in uname or '_PK_' in uname or 'SAT_PK' in uname or 'DOT2' in uname: return False
+  if '_F32' in uname or '_I32' in uname or '_U32' in uname or '_B32' in uname: return False
+  return bool(_F16_RE.search(uname))
+@cache
+def spec_is_64bit(name: str) -> bool: return bool(_F64_RE.search(name.upper()))
+_3SRC = {'FMA', 'MAD', 'MIN3', 'MAX3', 'MED3', 'DIV_FIX', 'DIV_FMAS', 'DIV_SCALE', 'SAD', 'LERP', 'ALIGN', 'CUBE', 'BFE', 'BFI',
+         'PERM_B32', 'PERMLANE', 'CNDMASK', 'XOR3', 'OR3', 'ADD3', 'LSHL_OR', 'AND_OR', 'LSHL_ADD', 'ADD_LSHL', 'XAD', 'MAXMIN',
+         'MINMAX', 'DOT2', 'DOT4', 'DOT8', 'WMMA', 'CVT_PK_U8', 'MULLIT', 'CO_CI'}
+_2SRC = {'FMAC'}  # FMAC uses dst as implicit accumulator, so only 2 explicit sources
+def spec_num_srcs(name: str) -> int:
+  name = name.upper()
+  if any(k in name for k in _2SRC): return 2
+  return 3 if any(k in name for k in _3SRC) else 2
+def is_dtype_16(dt: str | None) -> bool: return dt is not None and '16' in dt
+def is_dtype_64(dt: str | None) -> bool: return dt is not None and '64' in dt
 
 # Bit field DSL
 class BitField:
@@ -54,6 +143,10 @@ class BitField:
     val = unwrap(obj._values.get(self.name, 0))
     # Convert to IntEnum if marker is an IntEnum subclass
     if self.marker and isinstance(self.marker, type) and issubclass(self.marker, IntEnum):
+      # VOP3 with VOPC opcodes (0-255) -> VOPCOp, VOP3SD opcodes -> VOP3SDOp
+      if self.marker is VOP3Op:
+        if val < 256: return VOPCOp(val)
+        if val in Inst._VOP3SD_OPS: return VOP3SDOp(val)
       try: return self.marker(val)
       except ValueError: pass
     return val
@@ -201,10 +294,13 @@ class Inst:
     # Track literal value if needed
     if encoded == 255 and self._literal is None:
       import struct
-      is_64 = self._is_64bit_op()
+      # Check if THIS source uses 64-bit encoding (not just src0)
+      src_idx = {'src0': 0, 'src1': 1, 'src2': 2, 'ssrc0': 0, 'ssrc1': 1}.get(name, 0)
+      src_regs = self.src_regs(src_idx)
+      is_64 = src_regs == 2
       if isinstance(val, SrcMod) and not isinstance(val, Reg): lit32 = val.val & MASK32
       elif isinstance(val, int) and not isinstance(val, IntEnum): lit32 = val & MASK32
-      elif isinstance(val, float): lit32 = _i32(val)
+      elif isinstance(val, float): lit32 = (_i64(val) >> 32) if is_64 else _i32(val)  # f64: high 32 bits of f64 repr
       else: return
       self._literal = (lit32 << 32) if is_64 else lit32
 
@@ -235,11 +331,21 @@ class Inst:
           raise ValueError(f"SOP1 {orig_args['op'].name} expects {expected} register(s) for {fld}, got {orig_args[fld].count}")
 
   def __init__(self, *args, literal: int | None = None, **kwargs):
-    self._values, self._literal = dict(self._defaults), literal
+    self._values, self._literal = dict(self._defaults), None
     field_names = [n for n in self._fields if n != 'encoding']
     orig_args = dict(zip(field_names, args)) | kwargs
     self._values.update(orig_args)
     self._validate(orig_args)
+    # Pre-shift literal for 64-bit sources (literal param is always raw 32-bit value from user)
+    if literal is not None:
+      # Find which source uses the literal (255) and check its register count
+      for n, idx in [('src0', 0), ('src1', 1), ('src2', 2), ('ssrc0', 0), ('ssrc1', 1)]:
+        v = orig_args.get(n)
+        if (isinstance(v, RawImm) and v.val == 255) or (isinstance(v, int) and v == 255):
+          self._literal = (literal << 32) if self.src_regs(idx) == 2 else literal
+          break
+      else:
+        self._literal = literal  # fallback if no literal source found
     cls_name = self.__class__.__name__
 
     # Format-specific setup
@@ -297,11 +403,9 @@ class Inst:
     op_name = op.name if hasattr(op, 'name') else None
     # Look up op name from int if needed (happens in from_bytes path)
     if op_name is None and self.__class__.__name__ == 'VOP3':
-      from extra.assembly.amd.autogen.rdna3 import VOP3Op
       try: op_name = VOP3Op(op).name
       except ValueError: pass
     if op_name is None and self.__class__.__name__ == 'VOPC':
-      from extra.assembly.amd.autogen.rdna3 import VOPCOp
       try: op_name = VOPCOp(op).name
       except ValueError: pass
     if op_name is None: return False
@@ -312,8 +416,16 @@ class Inst:
     result = self.to_int().to_bytes(self._size(), 'little')
     lit = self._get_literal() or getattr(self, '_literal', None)
     if lit is None: return result
-    # For 64-bit ops, literal is stored in high 32 bits internally, but encoded as 4 bytes
-    lit32 = (lit >> 32) if self._is_64bit_op() else lit
+    # For 64-bit sources, literal is stored in high 32 bits internally, but encoded as 4 bytes
+    # Find which source uses the literal (255) and check its register count
+    lit_src_is_64 = False
+    for n, idx in [('src0', 0), ('src1', 1), ('src2', 2), ('ssrc0', 0), ('ssrc1', 1)]:
+      if n not in self._values: continue
+      v = self._values[n]
+      if (isinstance(v, RawImm) and v.val == 255) or (isinstance(v, int) and v == 255):
+        lit_src_is_64 = self.is_src_64(idx)
+        break
+    lit32 = (lit >> 32) if lit_src_is_64 else lit
     return result + (lit32 & MASK32).to_bytes(4, 'little')
 
   @classmethod
@@ -343,9 +455,16 @@ class Inst:
     if has_literal:
       # For 64-bit ops, the literal is 32 bits placed in the HIGH 32 bits of the 64-bit value
       # (low 32 bits are zero). This is how AMD hardware interprets 32-bit literals for 64-bit ops.
+      # Check which source uses the literal and whether THAT source is 64-bit
       if len(data) >= cls._size() + 4:
         lit32 = int.from_bytes(data[cls._size():cls._size()+4], 'little')
-        inst._literal = (lit32 << 32) if inst._is_64bit_op() else lit32
+        # Find which source has literal (255) and check its register count
+        lit_src_is_64 = False
+        for n, idx in [('src0', 0), ('src1', 1), ('src2', 2)]:
+          if n in inst._values and isinstance(inst._values[n], RawImm) and inst._values[n].val == 255:
+            lit_src_is_64 = inst.src_regs(idx) == 2
+            break
+        inst._literal = (lit32 << 32) if lit_src_is_64 else lit32
     return inst
 
   def __repr__(self):
@@ -360,7 +479,9 @@ class Inst:
     if name.startswith('_'): raise AttributeError(name)
     return unwrap(self._values.get(name, 0))
 
-  def lit(self, v: int) -> str: return f"0x{self._literal:x}" if v == 255 and self._literal else decode_src(v)
+  def lit(self, v: int, neg: bool = False) -> str:
+    s = f"0x{self._literal:x}" if v == 255 and self._literal else decode_src(v)
+    return f"-{s}" if neg else s
 
   def __eq__(self, other):
     if not isinstance(other, Inst): return NotImplemented
@@ -371,6 +492,42 @@ class Inst:
   def disasm(self) -> str:
     from extra.assembly.amd.asm import disasm
     return disasm(self)
+
+  _enum_map = {'VOP1': VOP1Op, 'VOP2': VOP2Op, 'VOP3': VOP3Op, 'VOP3SD': VOP3SDOp, 'VOP3P': VOP3POp, 'VOPC': VOPCOp,
+               'SOP1': SOP1Op, 'SOP2': SOP2Op, 'SOPC': SOPCOp, 'SOPK': SOPKOp, 'SOPP': SOPPOp,
+               'SMEM': SMEMOp, 'DS': DSOp, 'FLAT': FLATOp, 'MUBUF': MUBUFOp, 'MTBUF': MTBUFOp, 'MIMG': MIMGOp,
+               'VOPD': VOPDOp, 'VINTERP': VINTERPOp}
+  _VOP3SD_OPS = {288, 289, 290, 764, 765, 766, 767, 768, 769, 770}
+
+  @property
+  def op(self):
+    """Return the op as an enum (e.g., VOP1Op.V_MOV_B32). VOP3 returns VOPCOp/VOP3SDOp for those op ranges."""
+    val = self._values.get('op')
+    if val is None: return None
+    if hasattr(val, 'name'): return val  # already an enum
+    cls_name = self.__class__.__name__
+    assert cls_name in self._enum_map, f"no enum map for {cls_name}"
+    return self._enum_map[cls_name](val)
+
+  @cached_property
+  def op_name(self) -> str:
+    op = self.op
+    return op.name if hasattr(op, 'name') else ''
+
+  @cached_property
+  def _spec_regs(self) -> tuple[int, int, int, int]: return spec_regs(self.op_name)
+  @cached_property
+  def _spec_dtype(self) -> tuple[str | None, str | None, str | None, str | None]: return spec_dtype(self.op_name)
+  def dst_regs(self) -> int: return self._spec_regs[0]
+  def src_regs(self, n: int) -> int: return self._spec_regs[n + 1]
+  def num_srcs(self) -> int: return spec_num_srcs(self.op_name)
+  def dst_dtype(self) -> str | None: return self._spec_dtype[0]
+  def src_dtype(self, n: int) -> str | None: return self._spec_dtype[n + 1]
+  def is_src_16(self, n: int) -> bool: return self._spec_regs[n + 1] == 1 and is_dtype_16(self._spec_dtype[n + 1])
+  def is_src_64(self, n: int) -> bool: return self._spec_regs[n + 1] == 2
+  def is_16bit(self) -> bool: return spec_is_16bit(self.op_name)
+  def is_64bit(self) -> bool: return spec_is_64bit(self.op_name)
+  def is_dst_16(self) -> bool: return self._spec_regs[0] == 1 and is_dtype_16(self._spec_dtype[0])
 
 class Inst32(Inst): pass
 class Inst64(Inst): pass
