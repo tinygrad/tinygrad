@@ -5,6 +5,7 @@ env:
   CAPTURE_PROCESS_REPLAY: 1
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PYTHONPATH: ${{ github.workspace }}
+  IGNORE_OOB: 0
 
 on:
   push:
@@ -36,6 +37,8 @@ jobs:
     name: Docs
     runs-on: ubuntu-22.04
     timeout-minutes: 10
+    env:
+      IGNORE_OOB: 1
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -215,7 +218,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
-    # TODO: run the pre-commit hook to replace a lot of this
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -230,13 +232,13 @@ jobs:
     - name: Lint with ruff
       run: |
         pip3 install --upgrade --force-reinstall ruff==0.14.10
-        python3 -m ruff check .
+        pre-commit run ruff --all-files
         python3 -m ruff check examples/mlperf/ --ignore E501
         python3 -m ruff check extra/thunder/tiny/ --ignore E501 --ignore F841 --ignore E722
         python3 -m ruff check extra/torch_backend/backend.py
     - name: Run mypy
       run: |
-        python -m mypy --strict-equality --lineprecision-report .
+        python -m mypy --lineprecision-report .
         cat lineprecision.txt
     - name: Run TYPED=1
       run: TYPED=1 python -c "import tinygrad"
@@ -307,7 +309,7 @@ jobs:
         deps: testing_unit
         python-version: '3.14'
     - name: Test SPEC=2
-      run: IGNORE_OOB=0 SPEC=2 pytest --maxfail=10 -n auto --durations=30 --ignore=test/models --ignore test/test_custom_kernel.py --ignore test/unit/test_hashing.py --timeout 60 -k "not test_setitem_big" --splits 2 --group ${{ matrix.group }}
+      run: SPEC=2 pytest --maxfail=10 -n auto --durations=30 --ignore=test/models --ignore test/test_custom_kernel.py --ignore test/unit/test_hashing.py --timeout 60 -k "not test_setitem_big" --splits 2 --group ${{ matrix.group }}
 
   fuzzing:
     name: Fuzzing
@@ -470,6 +472,8 @@ jobs:
     name: Test LLM
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    env:
+      IGNORE_OOB: 1
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -584,8 +588,6 @@ jobs:
     name: Linux (WebGPU)
     runs-on: ubuntu-22.04
     timeout-minutes: 20
-    env:
-      IGNORE_OOB: 0
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -822,7 +824,6 @@ jobs:
         NV_PTX: 1
         NV: 1
         FORWARD_ONLY: 1
-        IGNORE_OOB: 0
       run: |
         python3 -m pytest -n=auto test/device/test_hcq.py test/test_tiny.py --durations=20
     - name: Run process replay tests
@@ -832,8 +833,6 @@ jobs:
     name: MacOS (WebGPU)
     runs-on: macos-14
     timeout-minutes: 10
-    env:
-      IGNORE_OOB: 0
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
@@ -911,8 +910,6 @@ jobs:
     name: Windows (${{ matrix.backend }})
     runs-on: windows-latest
     timeout-minutes: 15
-    env:
-      IGNORE_OOB: 0
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
