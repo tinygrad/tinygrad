@@ -9,8 +9,8 @@ For pretty trace output: DEBUG=2 python -m pytest extra/assembly/amd/test/test_s
 import os
 os.environ["SQTT"] = "1"
 os.environ["PROFILE"] = "1"
-os.environ["SQTT_ITRACE_SE_MASK"] = "2"  # Enable instruction tracing on SE1
-os.environ["SQTT_LIMIT_SE"] = "1"        # Limit execution
+os.environ["SQTT_ITRACE_SE_MASK"] = "1"  # Enable instruction tracing on SE0
+os.environ["SQTT_LIMIT_SE"] = "2"        # Force work to traced SE only
 
 import unittest
 from tinygrad.helpers import DEBUG, colored

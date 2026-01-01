@@ -7,11 +7,10 @@ For full traces: DEBUG=2 python extra/assembly/amd/test/discover_instops.py
 import os
 os.environ["SQTT"] = "1"
 os.environ["PROFILE"] = "1"
-os.environ["SQTT_ITRACE_SE_MASK"] = "2"  # Enable instruction tracing on SE1
+os.environ["SQTT_ITRACE_SE_MASK"] = "1"  # Enable instruction tracing on SE0
 os.environ["SQTT_LIMIT_SE"] = "2"        # Force work to traced SE only
 
 from tinygrad.helpers import DEBUG, colored
-from tinygrad.runtime.ops_amd import SQTT_SIMD_SEL
 
 from extra.assembly.amd.autogen.rdna3.ins import (
   # VALU - basic (these are safe, just register ops)
@@ -28,11 +27,19 @@ from extra.assembly.amd.autogen.rdna3.ins import (
   # SALU - basic (safe, just register ops)
   s_mov_b32, s_add_u32, s_and_b32, s_or_b32,
   s_lshl_b32, s_lshr_b32,
-  s_nop, s_endpgm,
+  s_nop, s_endpgm, s_waitcnt,
   # SALU - branch (safe if offset is 0 = next instruction)
   s_branch, s_cbranch_scc0, s_cbranch_execz,
   # SALU - message
   s_sendmsg,
+  # SMEM - scalar memory (load from kernarg pointer in s[0:1])
+  s_load_b32, s_load_b64,
+  # VMEM - vector memory (global load/store)
+  global_load_b32, global_store_b32,
+  # LDS - local data share
+  ds_load_b32, ds_store_b32,
+  # SrcEnum for NULL soffset
+  SrcEnum,
 )
 from extra.assembly.amd.dsl import v, s
 from extra.assembly.amd.sqtt import InstOp, INST
@@ -45,12 +52,20 @@ from extra.assembly.amd.test.test_sqtt_hw import (
 # INSTRUCTION TEST CASES - only safe instructions that don't access memory
 # ═══════════════════════════════════════════════════════════════════════════════
 
+# Helper: load buffer address from kernarg (s[0:1] -> s[2:3])
+# The runtime passes kernarg pointer in s[0:1], kernarg contains buffer address
+def _load_buf_addr():
+  return [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),  # load buf addr from kernarg
+    s_waitcnt(lgkmcnt=0),  # wait for SMEM load
+  ]
+
 INSTRUCTION_TESTS: dict[str, tuple[str, list]] = {
   # SALU (0x0) - scalar ALU, just register operations
-  "SALU_mov": ("s_mov_b32", [s_mov_b32(s[0], 0), s_mov_b32(s[1], 1)]),
-  "SALU_add": ("s_add_u32", [s_mov_b32(s[0], 1), s_mov_b32(s[1], 2), s_add_u32(s[2], s[0], s[1])]),
-  "SALU_logic": ("s_and/or", [s_and_b32(s[2], s[0], s[1]), s_or_b32(s[3], s[0], s[1])]),
-  "SALU_shift": ("s_lshl/lshr", [s_lshl_b32(s[2], s[0], 1), s_lshr_b32(s[3], s[0], 1)]),
+  "SALU_mov": ("s_mov_b32", [s_mov_b32(s[4], 0), s_mov_b32(s[5], 1)]),
+  "SALU_add": ("s_add_u32", [s_mov_b32(s[4], 1), s_mov_b32(s[5], 2), s_add_u32(s[6], s[4], s[5])]),
+  "SALU_logic": ("s_and/or", [s_and_b32(s[6], s[4], s[5]), s_or_b32(s[7], s[4], s[5])]),
+  "SALU_shift": ("s_lshl/lshr", [s_lshl_b32(s[6], s[4], 1), s_lshr_b32(s[7], s[4], 1)]),
   "SALU_nop": ("s_nop", [s_nop(0)]),
 
   # JUMP (0x3) - branch to next instruction (offset 0)
@@ -80,13 +95,62 @@ INSTRUCTION_TESTS: dict[str, tuple[str, list]] = {
 
   # VALU CMPX (0x73) - modifies EXEC
   "VALU_cmpx": ("v_cmpx_eq_u32", [v_cmpx_eq_u32_e32(v[0], v[1])]),
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # MEMORY INSTRUCTIONS - access real buffer passed via kernarg
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  # SMEM (0x1) - scalar memory load from buffer
+  "SMEM_load": ("s_load_b32", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),  # load buf addr from kernarg
+    s_waitcnt(lgkmcnt=0),
+    s_load_b32(s[4], s[2], 0, soffset=SrcEnum.NULL),  # load from buffer
+    s_waitcnt(lgkmcnt=0),
+  ]),
+
+  # VMEM load (0x21 VMEM_LOAD) - global load
+  "VMEM_load": ("global_load_b32", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),  # load buf addr from kernarg
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], 0),  # offset = 0
+    global_load_b32(v[1], addr=v[0], saddr=s[2], offset=0),  # load from buffer
+    s_waitcnt(vmcnt=0),
+  ]),
+
+  # VMEM store (0x24 VMEM_STORE) - global store
+  "VMEM_store": ("global_store_b32", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),  # load buf addr from kernarg
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], 0),  # offset = 0
+    v_mov_b32_e32(v[1], 42),  # data to store
+    global_store_b32(addr=v[0], data=v[1], saddr=s[2], offset=0),  # store to buffer
+    s_waitcnt(vmcnt=0),
+  ]),
+
+  # LDS load (0x29 LDS_LOAD) - local data share read
+  "LDS_load": ("ds_load_b32", [
+    v_mov_b32_e32(v[0], 0),  # LDS address = 0
+    ds_load_b32(v[1], v[0], offset=0),  # read from LDS
+    s_waitcnt(lgkmcnt=0),
+  ]),
+
+  # LDS store (0x2b LDS_STORE) - local data share write
+  "LDS_store": ("ds_store_b32", [
+    v_mov_b32_e32(v[0], 0),  # LDS address = 0
+    v_mov_b32_e32(v[1], 42),  # data to store
+    ds_store_b32(v[0], v[1], offset=0),  # write to LDS
+    s_waitcnt(lgkmcnt=0),
+  ]),
 }
 
 
-def run_with_simd_retry(instructions: list, max_retries: int = 4) -> tuple[list[bytes], list, set]:
-  """Run instructions and retry with different SIMD selections until we get INST packets."""
-  for simd in range(max_retries):
-    SQTT_SIMD_SEL.value = simd
+def run_with_retry(instructions: list, max_attempts: int = 10) -> tuple[list[bytes], list, set]:
+  """Run instructions and retry until we get INST packets.
+
+  The hardware scheduler picks which SIMD to run on (~50/50), and SQTT traces simd_sel=0.
+  We retry until the wave lands on the traced SIMD.
+  """
+  for _ in range(max_attempts):
     blobs = run_asm_sqtt(instructions)
     packets = decode_all_blobs(blobs)
     ops = get_inst_ops(packets)
@@ -102,7 +166,7 @@ def discover_all_instops() -> tuple[dict[int, set[str]], dict[str, Exception]]:
 
   for test_name, (instr_name, instructions) in INSTRUCTION_TESTS.items():
     try:
-      blobs, packets, ops = run_with_simd_retry(instructions)
+      blobs, packets, ops = run_with_retry(instructions)
 
       for op in ops:
         if op not in discovered:
@@ -111,7 +175,7 @@ def discover_all_instops() -> tuple[dict[int, set[str]], dict[str, Exception]]:
 
       if DEBUG >= 2:
         print(f"\n{'─'*60}")
-        print(f"{test_name} ({instr_name}): ops={[hex(op) for op in sorted(ops)]} simd_sel={SQTT_SIMD_SEL.value}")
+        print(f"{test_name} ({instr_name}): ops={[hex(op) for op in sorted(ops)]}")
         print_blobs(blobs, filter_timing=True)
       if DEBUG >= 1:
         status = colored("✓", "green") if ops else colored("∅", "yellow")
