@@ -1,6 +1,6 @@
 from typing import Literal, Callable, cast
 import os, math, sys
-from collections import namedtuple, defaultdict, Counter
+from collections import defaultdict, Counter
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters
 from tinygrad.helpers import strip_parens, getenv, prod, dedup, AMX, CPU_COUNT

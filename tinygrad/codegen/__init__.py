@@ -53,16 +53,22 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
     # split store range (only on CPU for now)
     sink = graph_rewrite(sink, pm_split_store, ctx=ren.device, name="cut store ranges")
 
-    def _tst(ctx, idx):
-      if (IMAGE and ctx in {"QCOM", "CL"} and (dt:=idx.src[0].dtype).base in {dtypes.float, dtypes.half} and not isinstance(dt, ImageDType)
-          and dt.size < 65536 and dt.nbytes() % 64 == 0
-          and any(c.op is Ops.RANGE and (c.vmax+1)%4 == 0 for c in idx.src[1].get_idx().split_uop(Ops.ADD))):
-        ndt = {dtypes.float:dtypes.imagef,dtypes.half:dtypes.imageh}[dt.base]((1, dt.size // 4, 4))
-        return idx.replace(src=(idx.src[0].replace(dtype=ndt), idx.src[1]))
+    if IMAGE == 1 and ren.device in {"QCOM", "CL"}:
+      def make_image(ctx, dg):
+        if (dt:=dg.dtype).base is dtypes.float and not isinstance(dt, ImageDType) and dt.size < 65536 and dt.nbytes() % 64 == 0:
+          ctx[dg.arg] = dt
+          return dg.replace(dtype=dtypes.imagef((1, dt.size // 4, 4)))
+      sink = graph_rewrite(sink, PatternMatcher([
+        (UPat(Ops.DEFINE_GLOBAL, name="dg"), make_image)
+      ]), ctx=(dg_types:={}), name="image upcast")
+      # undo unfoldable stores
+      def undo_image_store(ctx, st, idx, dg):
+        if dg.arg in ctx and not any(c.op is Ops.RANGE and (c.vmax+1)%4 == 0 for c in idx.src[1].get_idx().split_uop(Ops.ADD)):
+          return st.replace(src=(idx.replace(src=(dg.replace(dtype=ctx[dg.arg]),)+idx.src[1:]),)+st.src[1:])
 
-    sink = graph_rewrite(sink, PatternMatcher([
-      (UPat(Ops.INDEX, name="idx"), _tst),
-    ]), ctx=ren.device, name="image upcast")
+      sink = graph_rewrite(sink, PatternMatcher([
+        (UPat(Ops.DEFINE_GLOBAL, name="dg").index(UPat(), name="idx").store(UPat(), name="st"), undo_image_store)
+      ]), ctx=dg_types, name="legal images")
 
     # do postrange optimization, BEAM or hand_coded_optimizations
     sink = apply_opts(sink, ren)

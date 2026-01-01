@@ -1,7 +1,7 @@
 import itertools
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
-from tinygrad.helpers import getenv, DEBUG, prod, NOLOCALS, TC_OPT, TC_SELECT, USE_TC, AMX, IMAGE
-from tinygrad.dtype import ImageDType, dtypes
+from tinygrad.helpers import getenv, DEBUG, prod, NOLOCALS, TC_OPT, TC_SELECT, USE_TC, AMX
+from tinygrad.dtype import ImageDType
 from tinygrad.uop.ops import Ops, resolve, AxisType
 from tinygrad.codegen.opt.postrange import Scheduler
 
@@ -47,11 +47,6 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
 
   # make a copy so it does not mutate the input
   k = k.copy()
-
-  # if IMAGE and k.ren is not None and k.ren.device == "QCOM":
-  #   for buf in k.bufs:
-  #     if (dt:=buf.src[0].dtype).base in {dtypes.float, dtypes.half} and not isinstance(dt, ImageDType) and dt.nbytes() % 64 == 0:
-  #       buf.src[0].replace(dtype=(dtypes.imagef if dt.base == dtypes.float else dtypes.imageh)((1, buf.src[0].dtype.itemsize // 4, 4)))
 
   # upcast float4 images, this must be early so we don't accidentally add locals before the upcast
   for buf_index,buf in enumerate(k.bufs):
