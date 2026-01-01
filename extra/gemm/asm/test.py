@@ -2,9 +2,9 @@
 # VIZ=2 to profile
 import pathlib
 
-from tinygrad.helpers import getenv
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad import dtypes, Device
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.helpers import getenv
 
 from extra.gemm.amd_uop_matmul import test_matmul
 
@@ -33,4 +33,4 @@ def asm_kernel() -> UOp:
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src)))
 
 if __name__ == "__main__":
-  test_matmul(asm_kernel(), dtype=dtypes.bfloat16, N=N, fixedvars={"SZ":N, "WG":NUM_WG})
+  test_matmul(asm_kernel(), dtype=dtypes.bfloat16, N=N, fixedvars={"SZ":N, "WG":NUM_WG}, transpose_b=True)
