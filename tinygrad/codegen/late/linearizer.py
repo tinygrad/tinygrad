@@ -6,6 +6,7 @@ from tinygrad.uop.ops import PatternMatcher, UOp, Ops, UPat, multirange_str
 from tinygrad.helpers import prod, getenv, TUPLE_ORDER
 
 def linearize(sink:UOp) -> list[UOp]:
+  from tinygrad.renderer.x86 import RSP
   # this is a toposort with priority
   lst = list(sink.toposort())
   consumers: defaultdict[UOp, list[UOp]] = defaultdict(list)
@@ -37,7 +38,8 @@ def linearize(sink:UOp) -> list[UOp]:
       case Ops.RANGE: priority = 5    # placing RANGE is good
       case Ops.END: priority = -5     # placing END is bad
       # x86 op version
-      case X86Ops.DEFINE_REG: priority = -20
+      # stack pointer needs to be scheduled at the top of the kernel
+      case X86Ops.DEFINE_REG: priority = -21 if u.arg == RSP else -20
       case X86Ops.IMM: priority = -10
       case _: priority = 0            # everything else has priority 0
     priorities[u] = (run_count, priority, extra)

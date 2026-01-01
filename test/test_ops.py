@@ -609,7 +609,6 @@ class TestOps(unittest.TestCase):
     helper_test_op([()], lambda x: x/2)
     helper_test_op([()], lambda x: 2/x)
 
-  @unittest.skip("seg fault")
   def test_mod(self):
     a = [-4, 7, 5, 4, -7, 8, -9]
     b = [2, -3, 8, -2, 3, 5, -5]
@@ -2150,7 +2149,6 @@ class TestOps(unittest.TestCase):
         lambda x,w: torch.nn.functional.conv_transpose2d(x,w, stride=stride),
         lambda x,w: Tensor.conv_transpose2d(x,w,stride=stride), atol=1e-5, grad_rtol=1e-5)
 
-  @unittest.skip("seg fault")
   @slow_test
   def test_output_padded_conv_transpose2d(self):
     for output_padding, stride in [((1,1), (2,3)), ((2,1), (3,2))]:
@@ -2571,7 +2569,6 @@ class TestOps(unittest.TestCase):
     self.helper_test_exception([shape], lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(2,2), padding=(1,1,1)),
                                lambda x: Tensor.avg_pool2d(x, kernel_size=(2,2), padding=(1,1,1)), expected=(RuntimeError, ValueError))
 
-  @unittest.skip("seg fault")
   @slow_test
   def test_avg_pool2d_padding_not_counted(self):
     shape = (32,2,111,28)

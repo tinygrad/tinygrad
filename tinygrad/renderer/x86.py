@@ -1,6 +1,6 @@
 import sys, struct
 from typing import cast
-from tinygrad.dtype import dtypes, PtrDType, DType
+from tinygrad.dtype import dtypes, PtrDType, DType, truncate
 from tinygrad.uop import Ops, X86Ops, GroupOp, X86GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher
 from tinygrad.renderer import Renderer
@@ -154,6 +154,8 @@ x86_extra_matcher = base_extra_matcher + PatternMatcher([
   # if gate in scalar int cmove is not a comparison need to add one to set the flag
   (UPat.var("m", dtypes.bool).where(UPat.var("a", dtypes.ints), UPat.var("b")),
    lambda m,a,b: m.ne(0).where(a,b) if m.op not in GroupOp.Comparison and a.dtype.count == 1 else None),
+  # TODO: do we want this? Kinda not needed if DEVECTORIZE=0. If yes make it general
+  (UPat(Ops.VECTORIZE, dtypes.float16, name="x"), lambda x: x.replace(dtype=dtypes.float32.vec(x.dtype.count), src=tuple(s.src[0] for s in x.src)).cast(x.dtype) if all(s.op is Ops.CAST for s in x.src) else None),
 ])
 
 # ***** X86 instruction selection pre matcher *****
@@ -203,8 +205,9 @@ WGPR = tuple(r for r in GPR if r != RSP)
 def imm(dt:DType, v:int|float) -> UOp: return UOp(X86Ops.IMM, dt, arg=v)
 def to_imm(c:UOp) -> UOp|None:
   if c.op is not Ops.CONST: return None
-  if c.dtype in dtypes.uints+(dtypes.bool,) and not c.overflows(dtypes.uint32): return imm(min(dtypes.uint32, c.dtype), c.arg)
-  if c.dtype in dtypes.sints and not c.overflows(dtypes.int32): return imm(min(dtypes.int32, c.dtype), c.arg)
+  if c.dtype is dtypes.int64: return imm(dtypes.int32, c.arg) if not c.overflows(dtypes.int32) else None
+  if c.dtype is dtypes.uint64: return imm(dtypes.uint32, c.arg) if not c.overflows(dtypes.uint32) else None
+  if c.dtype in dtypes.ints+(dtypes.bool,): return imm(c.dtype, c.arg)
   return None
 def disp(c:UOp) -> UOp: return imm(dtypes.int32 if c.overflows(dtypes.int8) else dtypes.int8, c.arg)
 def cmp(x:UOp): return UOp(X86Ops.CMP, src=x.src) if (i:=to_imm(x.src[1])) is None else UOp(X86Ops.CMPi, src=(x.src[0], i))
@@ -239,10 +242,19 @@ def vpins(x:UOp) -> UOp:
   for i,s in enumerate(x.src[1:], 1): shuf = UOp(op, x.dtype, (shuf, s, imm(dtypes.uint8, i)))
   return shuf
 
+def div(ctx:IselContext, x:UOp):
+  # zero extend or move src[0] to x
+  move = UOp(X86Ops.MOV, x.dtype, (x.src[0],), ctx.vreg(RAX))
+  zero = UOp(X86Ops.MOVi, x.dtype, (imm(min(dtypes.uint32, x.dtype), 0),), ctx.vreg(RDX))
+  div = UOp(X86Ops.DIV, x.dtype, (UOp(X86Ops.MOV, x.dtype, (x.src[1],), ctx.vreg(tuple(r for r in WGPR if r not in (RAX, RDX)))), zero, move), ctx.vreg(RAX))
+  return UOp(X86Ops.MOV, x.dtype, (div,))
+
 def idiv(ctx:IselContext, x:UOp):
   cdq_op = {1: X86Ops.CBW, 2: X86Ops.CWD, 4: X86Ops.CDQ, 8: X86Ops.CQO}[x.dtype.itemsize]
   cdq = UOp(cdq_op, x.dtype, (UOp(X86Ops.MOV, x.dtype, (x.src[0],), ctx.vreg(RAX)),), ctx.vreg(RDX))
-  return UOp(X86Ops.IDIV, x.dtype, (UOp(X86Ops.MOV, x.dtype, (x.src[1],), ctx.vreg(tuple(r for r in WGPR if r != RAX))), cdq), ctx.vreg(RAX))
+  idiv = UOp(X86Ops.IDIV, x.dtype, (UOp(X86Ops.MOV, x.dtype, (x.src[1],), ctx.vreg(tuple(r for r in WGPR if r not in (RAX, RDX)))), cdq), ctx.vreg(RAX))
+  # this move "cleanses" the register constraint (rax) of idiv, this is because the constraint only applies on definition and not on the uses of idiv
+  return UOp(X86Ops.MOV, x.dtype, (idiv,))
 
 def fuse_index(ctx:IselContext, x:UOp) -> tuple[UOp, ...]:
   # fuse INDEX into the address if only used once, if there was a displacement it was already moved into the load/store to expose the base index
@@ -252,16 +264,12 @@ def fuse_index(ctx:IselContext, x:UOp) -> tuple[UOp, ...]:
 
 def fuse_load(ctx:IselContext, x:UOp, i:int) -> UOp|None:
   # if the load is used multiple times we don't fuse
-  return x.replace(src=x.src[:i] + fuse_index(ctx, x.src[i]) + x.src[i+1:]) if len(ctx.uses[x.src[i]]) == 1 and x.src.count(x.src[i]) == 1 else None
+  return x.replace(src=x.src[:i] + fuse_index(ctx, x.src[i]) + x.src[i+1:]) if len(ctx.uses[x.src[i]]) == x.src.count(x.src[i]) == 1 else None
 
-# TODO: args on the stack
-def x86_abi(ctx:IselContext, x:UOp):
-  # if arg is on the stack we move rsp to rbp, but this needs to be done before rsp is deincremented somehow
-  #def _stack_arg: return None
-  #if sys.platform == "win32": return x.replace(op=X86Ops.DEFINE_REG, arg=ctx.vreg(((RCX, RDX, GPR[8], GPR[9])[x.arg],))) if x.arg < 4 else None
-  #return x.replace(op=X86Ops.DEFINE_REG, arg=ctx.vreg(((RDI, RSI, RDX, RCX, GPR[8], GPR[9])[x.arg],))) if x.arg < 6 else x.replace(op=X86Ops.MOV, src=(def_reg(dtypes.uint64, RBP), UOp(Ops.NOOP), imm(dtypes.int8, (x.arg-5)*8)), arg=None)
-  reg = (RCX, RDX, GPR[8], GPR[9])[x.arg] if sys.platform == "win32" else (RDI, RSI, RDX, RCX, GPR[8], GPR[9])[x.arg]
-  return x.replace(op=X86Ops.DEFINE_REG, arg=ctx.vreg((reg,)))
+def abi(ctx:IselContext, x:UOp):
+  def _stack_arg(disp:int): return UOp(X86Ops.MOV, x.dtype, (def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP), UOp(X86Ops.FRAME_INDEX, dtypes.int32, arg=disp)))
+  if sys.platform == "win32": return x.replace(op=X86Ops.DEFINE_REG, arg=ctx.vreg(((RCX, RDX, GPR[8], GPR[9])[x.arg],))) if x.arg < 4 else _stack_arg((x.arg-3)*8+32)
+  return x.replace(op=X86Ops.DEFINE_REG, arg=ctx.vreg(((RDI, RSI, RDX, RCX, GPR[8], GPR[9])[x.arg],))) if x.arg < 6 else _stack_arg((x.arg-5)*8)
 
 dts = dtypes.ints + dtypes.masks + (dtypes.bool, dtypes.float16, dtypes.float32, dtypes.float64)
 dt_16bit = tuple(dt.vec(l) for dt in dts for l in [2,1] if dt.vec(l).itemsize == 2 and dt.vec(l) not in dtypes.int16s)
@@ -272,14 +280,14 @@ dt_128bit = tuple(dt.vec(l) for dt in dts for l in [16,8,4,2,1] if dt.vec(l).ite
 isel_matcher = PatternMatcher([
   # **** Op rewrites ****
   # TODO: add callee saved registers on windows to RET
-  # RET, add frame pointer to it. This makes it so the prologue and epilogue are automatically setup by the register allocator
-  (UPat(Ops.SINK, name="x"), lambda x: x.replace(op=X86Ops.RET, src=x.src + (UOp(X86Ops.DEFINE_REG, dtypes.uint64, arg=RBP),))),
+  # RET, add stack pointer to it. Also add add frame pointer, this makes it so the prologue and epilogue are automatically setup by the register allocator
+  (UPat(Ops.SINK, name="x"), lambda x: x.replace(op=X86Ops.RET, src=x.src + (UOp(X86Ops.DEFINE_REG, dtypes.uint64, arg=RSP),) + (UOp(X86Ops.DEFINE_REG, dtypes.uint64, arg=RBP),))),
   # TODO: RANGE and END is tricky. Both linearizer and regalloc need them so they stay as Ops. This gets into a broader issue with tinygrad
   # not being able to represent control flow properly. For now they are rewritten after regalloc
   # HACK: annoying hack so const doesn't get rewritten because linearizer needs it
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(src=(x.src[0].replace(tag=1),) + x.src[1:], arg=ctx.vreg(WGPR)) if x.src[0].tag is None else None),
   # function abi constraints
-  (UPat(Ops.DEFINE_GLOBAL, name="x"), x86_abi),
+  (UPat(Ops.DEFINE_GLOBAL, name="x"), abi),
   # these are treated the same for now
   (UPat((Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"),
    lambda ctx,x: x.replace(op=X86Ops.LEA, src=(UOp(X86Ops.DEFINE_REG, x.dtype, arg=RSP), UOp(Ops.NOOP), imm(dtypes.int32, ctx.inc_stack(x.dtype.nbytes()))), arg=None)), # noqa: E501
@@ -378,7 +386,8 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.SUB, dtypes.int64s, name="x"), lambda x: x.replace(op=X86Ops.VPSUBQ) if x.dtype.count > 1 else None),
   (UPat(Ops.MUL, dtypes.int16s, name="x"), lambda x: x.replace(op=X86Ops.VPMULLW) if x.dtype.count > 1 else None),
   (UPat(Ops.MUL, dtypes.int32s, name="x"), lambda x: x.replace(op=X86Ops.VPMULLD) if x.dtype.count > 1 else None),
-  # scalar int binary TODO: uint idiv
+  # scalar int binary
+  ((UPat(dtype=dtypes.uints) // UPat()).named("x"), div),
   ((UPat(dtype=dtypes.sints) // UPat()).named("x"), idiv),
   ((UPat.var("a", dtypes.ints) << UPat.var("b")).named("x"), lambda a,b,x: x.replace(op=X86Ops.SHLi, src=(a, imm(dtypes.uint8, b.arg))) if b.op is Ops.CONST else x.replace(op=X86Ops.SHL)), # noqa: E501
   ((UPat.var("a", dtypes.uints) >> UPat.var("b")).named("x"), lambda a,b,x: x.replace(op=X86Ops.SHRi, src=(a, imm(dtypes.uint8, b.arg))) if b.op is Ops.CONST else x.replace(op=X86Ops.SHR)), # noqa: E501
@@ -465,9 +474,11 @@ isel_matcher = PatternMatcher([
 # final rewrite to match the isa spec
 post_regalloc_matcher = PatternMatcher([
   # alloc stack space
-  (UPat(X86Ops.DEFINE_REG, arg=RDI, name="x"), lambda ctx,x: (x, [UOp(X86Ops.SUBi, dtypes.uint64, (imm(dtypes.uint32, ctx.stack_size),), RSP), x]) if ctx.stack_size > 0 else None),
+  (UPat(X86Ops.DEFINE_REG, dtypes.uint64, arg=RSP, name="x"), lambda ctx,x: (x, [x, UOp(X86Ops.SUBi, dtypes.uint64, (imm(dtypes.uint32, ctx.stack_size),), RSP)]) if ctx.stack_size > 0 else None),
   # dealloc stack space
   (UPat(X86Ops.RET, name="x"), lambda ctx,x: (x, [UOp(X86Ops.ADDi, dtypes.uint64, (imm(dtypes.uint32, ctx.stack_size),), RSP), x]) if ctx.stack_size > 0 else None),
+  # rewrite FRAME_INDEX to IMM now that the stack size is known
+  (UPat(X86Ops.FRAME_INDEX, name="x"), lambda ctx,x: (nx:=x.replace(op=X86Ops.IMM, arg=ctx.stack_size + x.arg), [nx])),
   # this is the CONST in RANGE
   (UPat(Ops.CONST, name="x"), lambda x: (nx:=imm(x.dtype, x.arg), [nx])),
   # rewrite RANGE to MOV reg, 0. Terrible HACK to pass the CONST to the END
@@ -475,6 +486,9 @@ post_regalloc_matcher = PatternMatcher([
   # rewrite END to ADD 1 -> CMPLT -> JUMP
   (UPat(Ops.END, name="x"), lambda x: (jl:=x.replace(op=X86Ops.JL, src=(x.src[1], cmp:=UOp(X86Ops.CMPi,
     src=(add:=UOp(X86Ops.ADDi, x.src[1].dtype, (imm(x.src[1].dtype, 1),), x.src[1].arg), imm(x.src[1].dtype, x.src[1].tag))))), [add, cmp, jl])),
+  # TODO: need a generic way to model clobbers, idiv and flags should be handled the same way, maybe add clobber field to Register?
+  # fixup div, zero rdx again because scheduling constraint isn't being respected
+  (UPat(X86Ops.DIV, name="x"), lambda x: (nx:=x.replace(src=x.src[:1]), [UOp(X86Ops.MOVi, x.dtype, (imm(min(dtypes.uint32, x.dtype), 0),), RDX), nx])),
   # remove cdq from idiv
   (UPat(X86Ops.IDIV, name="x"), lambda x: (nx:=x.replace(src=x.src[:-1]), [nx])),
   # rewrite two address instructions to two address form, if reused src wasn't coalesced insert a move
@@ -483,6 +497,11 @@ post_regalloc_matcher = PatternMatcher([
 ])
 
 # ***** X86 instruction encoding *****
+
+def to_bytes(dt:DType, v:int|float):
+  v = truncate[dt](v)
+  if dt in dtypes.floats: return struct.pack({dtypes.float16: "<e", dtypes.float32: "<f", dtypes.float64: "<d"}[dt], v)
+  return v.to_bytes(dt.itemsize, 'little', signed=dt in dtypes.sints)
 
 def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0):
   # get the encoding structure of the uop
@@ -573,9 +592,7 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0):
   # IMM byte
   if imm_uop is not None:
     if isinstance(imm_uop.arg, Register): inst += bytes([(imm_uop.arg.index & 0b1111) << 4 | 0b0000])
-    else:
-      _imm = int.from_bytes(struct.pack({2: "<e", 4: "<f", 8: "<d"}[imm_uop.dtype.itemsize], imm_uop.arg), "little") if isinstance(imm_uop.arg, float) else imm_uop.arg
-      inst += _imm.to_bytes(imm_uop.dtype.itemsize, 'little', signed=imm_uop.dtype in dtypes.sints)
+    else: inst += to_bytes(imm_uop.dtype, imm_uop.arg)
   return inst
 
 # https://www.felixcloutier.com/x86/
@@ -584,7 +601,7 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0):
 # map select: 0F == 1, 0F38 == 2, 0F3A == 3
 encodings = PatternMatcher([
   # moves
-  (UPat(X86Ops.MOVABS, name="x"), lambda x: bytes([0b0100 << 4 | 0b1 << 3 | 0b00 << 2 | x.arg.index >> 3, 0xB8 + (x.arg.index & 0b111)]) + cast(int, x.src[0].arg).to_bytes(8, 'little', signed=x.src[0].dtype in dtypes.sints)),
+  (UPat(X86Ops.MOVABS, name="x"), lambda x: bytes([0b0100 << 4 | 0b1 << 3 | 0b00 << 2 | x.arg.index >> 3, 0xB8 + (x.arg.index & 0b111)]) + to_bytes(x.src[0].dtype, x.src[0].arg)),
   (UPat(X86Ops.MOV, name="x"), lambda x: encode(x, 0x8B)), (UPat(X86Ops.MOVi, name="x"), lambda x: encode(x, 0xC7, reg=0)),
   (UPat(X86Ops.MOVm, name="x"), lambda x: encode(x, 0x89)), (UPat(X86Ops.LEA, name="x"), lambda x: encode(x, 0x8D)),
   (UPat(X86Ops.VMOVSS, name="x"), lambda x: encode(x, 0x10, pp=2, sel=1)), (UPat(X86Ops.VMOVSSm, name="x"), lambda x: encode(x, 0x11, pp=2, sel=1)),
@@ -613,7 +630,7 @@ encodings = PatternMatcher([
   # int division
   (UPat(X86Ops.CBW), lambda: bytes([0x66, 0x98])), (UPat(X86Ops.CWD), lambda: bytes([0x66, 0x99])),
   (UPat(X86Ops.CDQ), lambda: bytes([0x99])), (UPat(X86Ops.CQO), lambda: bytes([0x48, 0x99])),
-  (UPat(X86Ops.IDIV, name="x"), lambda x: encode(x, 0xF7, reg=7)), (UPat(X86Ops.IDIV, dtypes.uints, name="x"), lambda x: encode(x, 0xF7, reg=6)),
+  (UPat(X86Ops.IDIV, name="x"), lambda x: encode(x, 0xF7, reg=7)), (UPat(X86Ops.DIV, name="x"), lambda x: encode(x, 0xF7, reg=6)),
   # scalar int binary
   (UPat(X86Ops.SHLi, name="x"), lambda x: encode(x, 0xC1, reg=4)),
   (UPat(X86Ops.SHRi, name="x"), lambda x: encode(x, 0xC1, reg=5)), (UPat(X86Ops.SARi, name="x"), lambda x: encode(x, 0xC1, reg=7)),
