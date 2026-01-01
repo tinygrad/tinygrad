@@ -140,14 +140,14 @@ def hand_spec_kernel3():
 
   return sink.sink(arg=KernelInfo(opts_to_apply=())).simplify()
 
-def test_matmul(sink:UOp, N=N, dtype=dtypes.float32, fixedvars:dict[str, int]=None, transpose_b=False):
+def test_matmul(sink:UOp, N=N):
   rng = np.random.default_rng()
-  a = Tensor(rng.random((N, N), dtype=np.float32)-0.5).cast(dtype)
-  b = Tensor(rng.random((N, N), dtype=np.float32)-0.5).cast(dtype)
-  hc = Tensor.empty(N, N, dtype=dtype)
+  a = Tensor(rng.random((N, N), dtype=np.float32)-0.5)
+  b = Tensor(rng.random((N, N), dtype=np.float32)-0.5)
+  hc = Tensor.empty(N, N)
   Tensor.realize(a, b, hc)
 
-  ei = ExecItem(sink, [t.uop.buffer for t in [hc, a, b]], fixedvars=fixedvars, prg=get_runner(Device.DEFAULT, sink))
+  ei = ExecItem(sink, [t.uop.buffer for t in [hc, a, b]], prg=get_runner(Device.DEFAULT, sink))
 
   ets = []
   with Context(DEBUG=2):
@@ -158,9 +158,9 @@ def test_matmul(sink:UOp, N=N, dtype=dtypes.float32, fixedvars:dict[str, int]=No
   if getenv("VERIFY", 1):
     GlobalCounters.reset()
     with Context(DEBUG=2):
-      tc = (a @ (b.T if transpose_b else b)).realize()
+      tc = (a @ b).realize()
     with Context(DEBUG=0):
-      err = (hc - tc).square().mean().float().item()
+      err = (hc - tc).square().mean().item()
     print(f"mean squared error {err}")
     if err > 1e-06:
       raise RuntimeError("matmul is wrong!")
