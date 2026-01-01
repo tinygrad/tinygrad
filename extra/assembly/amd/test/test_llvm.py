@@ -32,12 +32,14 @@ RDNA4_TEST_FILES = {
   'vop3_from_vop1': 'gfx12_asm_vop3_from_vop1.s', 'vop3_from_vop2': 'gfx12_asm_vop3_from_vop2.s',
   'ds': 'gfx12_asm_ds.s', 'ds_alias': 'gfx12_asm_ds_alias.s', 'smem': 'gfx12_asm_smem.s',
   'vflat': 'gfx12_asm_vflat.s', 'vflat_alias': 'gfx12_asm_vflat_alias.s',
+  'vscratch': 'gfx12_asm_vflat.s', 'vscratch_alias': 'gfx12_asm_vflat_alias.s',  # scratch instructions in vflat files
   'vbuffer_mubuf': 'gfx12_asm_vbuffer_mubuf.s', 'vbuffer_mubuf_alias': 'gfx12_asm_vbuffer_mubuf_alias.s',
   'vbuffer_mtbuf': 'gfx12_asm_vbuffer_mtbuf.s', 'vbuffer_mtbuf_alias': 'gfx12_asm_vbuffer_mtbuf_alias.s',
   'vimage': 'gfx12_asm_vimage.s', 'vimage_alias': 'gfx12_asm_vimage_alias.s', 'vsample': 'gfx12_asm_vsample.s',
   'vdsdir': 'gfx12_asm_vdsdir.s', 'vdsdir_alias': 'gfx12_asm_vdsdir_alias.s',
   'exp': 'gfx12_asm_exp.s', 'wmma_w32': 'gfx12_asm_wmma_w32.s', 'wmma_w64': 'gfx12_asm_wmma_w64.s',
-  'features': 'gfx12_asm_features.s', 'global_load_tr': 'gfx12_asm_global_load_tr.s',
+  'global_load_tr': 'gfx12_asm_global_load_tr.s',
+  # NOTE: 'features' (gfx12_asm_features.s) tests DPP instruction variants which require separate format decoders
 }
 
 def parse_llvm_tests(text: str, gfx_prefix: str) -> list[tuple[str, bytes]]:
@@ -108,6 +110,10 @@ class TestLLVMBase(unittest.TestCase):
     fmt_cls = self.formats.get(name)
     if fmt_cls is None: self.skipTest(f"No format class for {name}")
 
+    # Determine wave size from test name (w64 = wave64, otherwise wave32)
+    wave_size = 64 if 'w64' in name else 32
+    mattr = f'+real-true16,+wavefrontsize{wave_size}'
+
     to_test: list[tuple[str, bytes, str | None, str | None]] = []
     for asm_text, data in self.tests.get(name, []):
       if len(data) > fmt_cls._size(): continue
@@ -117,14 +123,14 @@ class TestLLVMBase(unittest.TestCase):
         if decoded.to_bytes()[:len(data)] != data:
           to_test.append((asm_text, data, None, "decode roundtrip failed"))
           continue
-        to_test.append((asm_text, data, decoded.disasm(), None))
+        to_test.append((asm_text, data, decoded.disasm(wave_size), None))
       except Exception as e:
         to_test.append((asm_text, data, None, f"exception: {e}"))
 
     disasm_strs = [(i, t[2]) for i, t in enumerate(to_test) if t[2] is not None]
     llvm_map = {}
     if disasm_strs:
-      llvm_results = compile_asm_batch([s for _, s in disasm_strs], self.mcpu)
+      llvm_results = compile_asm_batch([s for _, s in disasm_strs], self.mcpu, mattr)
       llvm_map = {i: llvm_results[j] for j, (i, _) in enumerate(disasm_strs)}
 
     passed, failed, failures = 0, 0, []
@@ -180,9 +186,10 @@ class TestLLVMRDNA4(TestLLVMBase):
       'vbuffer_mtbuf': get('VBUFFER'), 'vbuffer_mtbuf_alias': get('VBUFFER'),
       'vdsdir': get('VDSDIR'), 'vdsdir_alias': get('VDSDIR'),
       'vflat': get('VFLAT'), 'vflat_alias': get('VFLAT'),
+      'vscratch': get('VSCRATCH'), 'vscratch_alias': get('VSCRATCH'),
       'vimage': get('VIMAGE'), 'vimage_alias': get('VIMAGE'), 'vsample': get('VSAMPLE'),
       'wmma_w32': get('VOP3P'), 'wmma_w64': get('VOP3P'),
-      'features': None, 'global_load_tr': get('VGLOBAL'),
+      'global_load_tr': get('VGLOBAL'),
     }
     cls._load_tests(RDNA4_TEST_FILES)
 

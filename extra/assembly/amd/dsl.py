@@ -497,9 +497,9 @@ class Inst:
 
   def __hash__(self): return hash((self.__class__.__name__, tuple(sorted((k, repr(v)) for k, v in self._values.items())), self._literal))
 
-  def disasm(self) -> str:
+  def disasm(self, wave_size: int = 32) -> str:
     from extra.assembly.amd.asm import disasm
-    return disasm(self)
+    return disasm(self, wave_size)
 
   _enum_map = {'VOP1': VOP1Op, 'VOP2': VOP2Op, 'VOP3': VOP3Op, 'VOP3SD': VOP3SDOp, 'VOP3P': VOP3POp, 'VOPC': VOPCOp,
                'SOP1': SOP1Op, 'SOP2': SOP2Op, 'SOPC': SOPCOp, 'SOPK': SOPKOp, 'SOPP': SOPPOp,
