@@ -303,24 +303,22 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
     topo = inp.toposort()
     ended_ranges = flatten([x.ended_ranges for x in topo if x.op is Ops.END])
     input_ranges = tuple([x for x in topo if x.op is Ops.RANGE and x not in reduce_range and x not in ended_ranges])
-    identity = red.const(red.dtype, identity_element(red.arg, red.dtype.scalar()))
-    # vector accumulator: no dependency chain between unrolled adds
-    if (vec_count:=len(lst)) > 1 and red.dtype.count == 1:
-      vec_dtype, idx0 = red.dtype.vec(vec_count), UOp.const(dtypes.int, 0)
-      acc = UOp(Ops.DEFINE_REG, vec_dtype.ptr(size=1, addrspace=AddrSpace.REG), arg=ctx.acc_num)
-      acc_init = (acc.after(*input_ranges) if input_ranges else acc).index(idx0).store(identity.broadcast(vec_count))
-      new_val = acc.after(acc_init, *reduce_range).index(idx0).alu(red.arg, UOp(Ops.VECTORIZE, vec_dtype, tuple(lst)))
-      acc_out = acc.after(acc.index(idx0).store(new_val).end(*reduce_range)).index(idx0)
-      ctx.acc_num += 1
-      return functools.reduce(lambda x,y: x.alu(red.arg, y), [acc_out.gep((i,)) for i in range(vec_count)])
-    acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=1, addrspace=AddrSpace.REG), arg=ctx.acc_num)
-    acc_init = acc.after(*input_ranges).index(UOp.const(dtypes.int, 0)).store(identity) if len(input_ranges) else \
-               acc.index(UOp.const(dtypes.int, 0)).store(identity)
-    lst = [acc.after(acc_init, *reduce_range).index(UOp.const(dtypes.int, 0))] + lst  # put acc as the first element
+    identity  = red.const(red.dtype, identity_element(red.arg, red.dtype.scalar()))
+    idx0 = UOp.const(dtypes.index, 0)
+    vec_count = len(lst) if red.dtype.count == 1 else 1
+    acc_dtype = red.dtype.vec(vec_count) if vec_count > 1 else red.dtype
+    acc = UOp(Ops.DEFINE_REG, acc_dtype.ptr(size=1, addrspace=AddrSpace.REG), arg=ctx.acc_num)
+    acc_init = (acc.after(*input_ranges) if input_ranges else acc).index(idx0).store(identity.broadcast(vec_count) if vec_count > 1 else identity)
     ctx.acc_num += 1
+    acc_val = acc.after(acc_init, *reduce_range).index(idx0)
+    def acc_end(val): return acc.after(acc.index(idx0).store(val).end(*reduce_range)).index(idx0)
+    if vec_count > 1: # vector accumulator: no dependency chain between unrolled adds
+      new_val = acc_val.alu(red.arg, UOp(Ops.VECTORIZE, acc_dtype, tuple(lst)))
+      return functools.reduce(lambda x,y: x.alu(red.arg, y), [acc_end(new_val).gep((i,)) for i in range(vec_count)])
+    lst = [acc_val] + lst  # put acc as the first element
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
   if len(reduce_range) == 0: return ret
-  return acc.after(acc.index(UOp.const(dtypes.int, 0)).store(ret).end(*reduce_range)).index(UOp.const(dtypes.int, 0))
+  return acc_end(ret)
 
 pm_reduce = PatternMatcher([
   # REDUCE -> DEFINE_ACC+ASSIGN
