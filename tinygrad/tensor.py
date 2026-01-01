@@ -127,7 +127,7 @@ class Tensor(OpMixin):
 
     # create a UOp from the different types of inputs
     if isinstance(data, UOp):
-      assert _dtype is None or _dtype==data.dtype, f"dtype doesn't match ({_dtype} vs {data.dtype}), and casting isn't supported"
+      assert _dtype is None or _dtype==data.dtype or data.dtype==dtypes.index, f"dtype mismatch: {_dtype} vs {data.dtype}"
       # if data is dtype.index that means that this is a symbolic int and we need to lower it to something we can make a Tensor out of
       if data.dtype==dtypes.index: data = _index_to_concrete_int(data)
       if data.op is Ops.BIND:  # type: ignore  # mypy type narrowing is bugged here
