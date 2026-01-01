@@ -245,7 +245,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: LDSMem | None = None)
       if 'VDATA' in result: _vgpr_write(V, vdst, result['VDATA']._val, ndwords)
       if 'RETURN_DATA' in result: V[vdst] = result['RETURN_DATA']._val & MASK32
     else:  # DS
-      DATA0, DATA1 = _vgpr_read(V, inst.data0, ndwords), _vgpr_read(V, inst.data1, ndwords) if inst.data1 else Reg(0)
+      DATA0, DATA1 = _vgpr_read(V, inst.data0, ndwords), _vgpr_read(V, inst.data1, ndwords) if inst.data1 is not None else Reg(0)
       result = fn(lds, Reg(V[inst.addr]), DATA0, DATA1, Reg(inst.offset0), Reg(inst.offset1), Reg(0))
       if 'RETURN_DATA' in result and ('_RTN' in op_name or '_LOAD' in op_name):
         _vgpr_write(V, vdst, result['RETURN_DATA']._val, ndwords * 2 if '_2ADDR_' in op_name else ndwords)

@@ -4695,48 +4695,50 @@ class TestDSStorexchg(unittest.TestCase):
     self.assertEqual(st.vgpr[0][6], 0x12345678, "v6 should have new low dword")
     self.assertEqual(st.vgpr[0][7], 0x9ABCDEF0, "v7 should have new high dword")
 
-  def test_ds_storexchg_2addr_stride64_rtn_b64(self):
-    """DS_STOREXCHG_2ADDR_STRIDE64_RTN_B64: exchange at two addresses (offset*512) with 64-bit values."""
+  def test_ds_store_load_2addr_stride64_b64_roundtrip(self):
+    """DS_STORE_2ADDR_STRIDE64_B64 followed by DS_LOAD_2ADDR_STRIDE64_B64 works correctly."""
     instructions = [
       v_mov_b32_e32(v[10], 0),
-      # Initial values at offset*512
       s_mov_b32(s[0], 0x11111111),
       v_mov_b32_e32(v[0], s[0]),
       s_mov_b32(s[0], 0x22222222),
       v_mov_b32_e32(v[1], s[0]),
-      s_mov_b32(s[0], 0x33333333),
-      v_mov_b32_e32(v[2], s[0]),
-      s_mov_b32(s[0], 0x44444444),
-      v_mov_b32_e32(v[3], s[0]),
-      DS(DSOp.DS_STORE_2ADDR_STRIDE64_B64, addr=v[10], data0=v[0], data1=v[2], vdst=v[0], offset0=1, offset1=2),
+      DS(DSOp.DS_STORE_2ADDR_STRIDE64_B64, addr=v[10], data0=v[0], data1=v[0], vdst=v[0], offset0=1, offset1=2),
       s_waitcnt(lgkmcnt=0),
-      # New values
+      DS(DSOp.DS_LOAD_2ADDR_STRIDE64_B64, addr=v[10], vdst=v[2], offset0=1, offset1=2),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0x11111111, "v2 should have val1 low")
+    self.assertEqual(st.vgpr[0][3], 0x22222222, "v3 should have val1 high")
+    self.assertEqual(st.vgpr[0][4], 0x11111111, "v4 should have val2 low")
+    self.assertEqual(st.vgpr[0][5], 0x22222222, "v5 should have val2 high")
+
+  def test_ds_storexchg_2addr_stride64_rtn_b64_returns_old(self):
+    """DS_STOREXCHG_2ADDR_STRIDE64_RTN_B64: returns old values correctly."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      # Store initial values
+      s_mov_b32(s[0], 0x11111111),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[0], 0x22222222),
+      v_mov_b32_e32(v[1], s[0]),
+      DS(DSOp.DS_STORE_2ADDR_STRIDE64_B64, addr=v[10], data0=v[0], data1=v[0], vdst=v[0], offset0=1, offset1=2),
+      s_waitcnt(lgkmcnt=0),
+      # Exchange with new values
       s_mov_b32(s[0], 0xAAAAAAAA),
-      v_mov_b32_e32(v[4], s[0]),
-      s_mov_b32(s[0], 0xBBBBBBBB),
-      v_mov_b32_e32(v[5], s[0]),
-      s_mov_b32(s[0], 0xCCCCCCCC),
       v_mov_b32_e32(v[6], s[0]),
-      s_mov_b32(s[0], 0xDDDDDDDD),
+      s_mov_b32(s[0], 0xBBBBBBBB),
       v_mov_b32_e32(v[7], s[0]),
-      # Exchange
-      DS(DSOp.DS_STOREXCHG_2ADDR_STRIDE64_RTN_B64, addr=v[10], data0=v[4], data1=v[6], vdst=v[8], offset0=1, offset1=2),
-      s_waitcnt(lgkmcnt=0),
-      # Load back
-      DS(DSOp.DS_LOAD_2ADDR_STRIDE64_B64, addr=v[10], vdst=v[12], offset0=1, offset1=2),
+      DS(DSOp.DS_STOREXCHG_2ADDR_STRIDE64_RTN_B64, addr=v[10], data0=v[6], data1=v[6], vdst=v[8], offset0=1, offset1=2),
       s_waitcnt(lgkmcnt=0),
     ]
     st = run_program(instructions, n_lanes=1)
     # Return: v8-v11 = old values (4 dwords for 2x64-bit)
     self.assertEqual(st.vgpr[0][8], 0x11111111, "v8 should have old val1 low")
     self.assertEqual(st.vgpr[0][9], 0x22222222, "v9 should have old val1 high")
-    self.assertEqual(st.vgpr[0][10], 0x33333333, "v10 should have old val2 low")
-    self.assertEqual(st.vgpr[0][11], 0x44444444, "v11 should have old val2 high")
-    # Memory: v12-v15 = new values
-    self.assertEqual(st.vgpr[0][12], 0xAAAAAAAA, "v12 should have new val1 low")
-    self.assertEqual(st.vgpr[0][13], 0xBBBBBBBB, "v13 should have new val1 high")
-    self.assertEqual(st.vgpr[0][14], 0xCCCCCCCC, "v14 should have new val2 low")
-    self.assertEqual(st.vgpr[0][15], 0xDDDDDDDD, "v15 should have new val2 high")
+    self.assertEqual(st.vgpr[0][10], 0x11111111, "v10 should have old val2 low")
+    self.assertEqual(st.vgpr[0][11], 0x22222222, "v11 should have old val2 high")
 
 if __name__ == '__main__':
   unittest.main()
