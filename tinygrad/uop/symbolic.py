@@ -318,6 +318,18 @@ def _valid_priority(v: UOp, valids:list[UOp]):
   # we want valid that's in other valids' parents to be first, so it's more likely the other valids get simplified
   return sum(-1 if (res:=parse_valid(v)) is not None and res[0] in other.toposort() else 0 for other in valids)
 
+def simplify_mod_valid(stmt: UOp) -> UOp|None:
+  # simplify mod constraint like ((r2*2+r3*3+3)%4 >= 2) to (r2 < 1) when a binary variable determines the outcome
+  if (res := parse_valid(stmt)) is None or res[0].op is not Ops.MOD or res[0].src[1].op is not Ops.CONST: return None
+  expr, is_upper, c = res
+  for rng in (u for u in expr.toposort() if u.op is Ops.RANGE and u.vmax - u.vmin == 1):
+    sub_min, sub_max = (expr.substitute({rng: rng.const_like(v)}).simplify() for v in (rng.vmin, rng.vmax))
+    min_sat, max_viol = (sub_min.vmax <= c, sub_max.vmin > c) if is_upper else (sub_min.vmin >= c, sub_max.vmax < c)
+    if min_sat and max_viol: return rng < rng.const_like(rng.vmin + 1)
+    min_viol, max_sat = (sub_min.vmin > c, sub_max.vmax <= c) if is_upper else (sub_min.vmax < c, sub_max.vmin >= c)
+    if min_viol and max_sat: return (rng < rng.const_like(rng.vmax)).ne(True)
+  return None
+
 def simplify_valid(valid:UOp) -> UOp|None:
   if valid.op_in_backward_slice_with_self(Ops.INDEX): return None  # this should only be for indexing, skip if there's a INDEX
   ret:list[UOp] = []
@@ -325,6 +337,8 @@ def simplify_valid(valid:UOp) -> UOp|None:
   valids = sorted(valids, key=lambda v: _valid_priority(v, valids))
   for stmt in dedup(valids):
     if ret: stmt = uop_given_valid(UOp.prod(*ret), stmt)
+    # try to simplify mod constraints to simpler variable constraints
+    if (simplified := simplify_mod_valid(stmt)) is not None: stmt = simplified
     ret.append(stmt)
   return UOp.prod(*ret) if ret != valids else None
 
@@ -367,6 +381,9 @@ pm_move_where_on_load = PatternMatcher([
 def gated_given_valid(cond:UOp, x:UOp, i:UOp) -> UOp|None:
   # Skip if x contains DIV/MOD AND IMAGE mode is enabled -> image index e.g. openpilot
   if IMAGE.value > 0 and x.op_in_backward_slice_with_self(Ops.IDIV, Ops.MOD): return None
+  # try to simplify the condition itself (e.g., mod constraints)
+  new_cond = simplify_mod_valid(cond) if cond.op is not Ops.AND else None
+  if new_cond is not None: cond = new_cond
   return cond.where(uop_given_valid(cond, x, try_simplex=False), i)
 
 pm_simplify_valid = PatternMatcher([
