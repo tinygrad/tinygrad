@@ -281,9 +281,10 @@ class AM_GFX(AM_IP):
         self._grbm_select(inst=xcc)
     for xcc in range(self.xccs): self.adev.regGCVM_CONTEXT0_CNTL.write(0, inst=xcc)
 
-  def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, doorbell:int, pipe:int, queue:int,
-                 aql:bool) -> int:
+  def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, eop_addr:int, eop_size:int, pipe:int, queue:int,
+                 aql:bool) -> tuple[int, int]:
     self._grbm_select(me=1, pipe=pipe, queue=queue, inst=0)
+    doorbell = am.AMDGPU_NAVI10_DOORBELL_MEC_RING0
     restore_queue = aql and self.xccs > 1 and self.adev.partial_boot and (self.adev.regCP_HQD_ACTIVE.read(inst=0) & 1)
     restore_ptr = (self.adev.regCP_HQD_PQ_WPTR_LO.read(inst=0) | (self.adev.regCP_HQD_PQ_WPTR_HI.read(inst=0) << 32)) if restore_queue else 0
     if DEBUG >= 2 and restore_queue: print(f"am {self.adev.devfmt}: GFX queue already active, continuing from saved state {restore_ptr=:#x}.")
@@ -327,7 +328,7 @@ class AM_GFX(AM_IP):
       self._grbm_select(inst=xcc)
 
       self.adev.reg(f"regCP_ME1_PIPE{pipe}_INT_CNTL").update(time_stamp_int_enable=1, generic0_int_enable=1, inst=xcc)
-    return restore_ptr // 16
+    return restore_ptr // 16, doorbell
 
   def set_clockgating_state(self):
     if hasattr(self.adev, 'regMM_ATC_L2_MISC_CG'): self.adev.regMM_ATC_L2_MISC_CG.write(enable=1, mem_ls_enable=1)
@@ -447,9 +448,9 @@ class AM_SDMA(AM_IP):
       time.sleep(0.01)
       self.adev.regGRBM_SOFT_RESET.write(0x0)
 
-  def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, doorbell:int, pipe:int, queue:int) -> int:
-    # Setup the ring
+  def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, pipe:int, queue:int) -> tuple[int, int]:
     reg, inst = ("regSDMA_GFX", pipe+queue*4) if self.adev.ip_ver[am.SDMA0_HWIP][:2] == (4,4) else (f"regSDMA{pipe}_QUEUE{queue}", 0)
+    doorbell = am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0 + (pipe+queue*4) * 0xA
     self.sdma_reginst.append((reg, inst))
 
     self.adev.reg(f"{reg}_MINOR_PTR_UPDATE").write(0x1, inst=inst)
@@ -464,7 +465,7 @@ class AM_SDMA(AM_IP):
     self.adev.reg(f"{reg}_RB_CNTL").write(**({f'{self.sdma_name.lower()}_wptr_poll_enable':1} if self.adev.ip_ver[am.SDMA0_HWIP][:2]!=(4,4) else {}),
       rb_vmid=0, rptr_writeback_enable=1, rptr_writeback_timer=4, rb_enable=1, rb_priv=1, rb_size=(ring_size//4).bit_length()-1, inst=inst)
     self.adev.reg(f"{reg}_IB_CNTL").update(ib_enable=1, inst=inst)
-    return self.adev.reg(f"{reg}_RB_WPTR").read(inst=inst) | (self.adev.reg(f"{reg}_RB_WPTR_HI").read(inst=inst) << 32)
+    return self.adev.reg(f"{reg}_RB_WPTR").read(inst=inst) | (self.adev.reg(f"{reg}_RB_WPTR_HI").read(inst=inst) << 32), doorbell
 
 class AM_PSP(AM_IP):
   def init_sw(self):
