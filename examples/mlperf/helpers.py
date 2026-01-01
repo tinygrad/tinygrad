@@ -221,7 +221,7 @@ def get_mlperf_bert_model():
     config["hidden_dropout_prob"] = config["attention_probs_dropout_prob"] = 0.0
   model = BertForPretraining(**config)
   if getenv("FP8_TRAIN"):
-    from extra.fp8 import convert_to_float8_training
+    from extra.fp8.fp8_linear import convert_to_float8_training
     def module_filter_fn(mod, fqn):
       if isinstance(mod, LinearBert):
         skip_layers = [] if (ln:=config["num_hidden_layers"]) <= 2 else ["bert.encoder.layer.0.", f"bert.encoder.layer.{ln-1}"]
