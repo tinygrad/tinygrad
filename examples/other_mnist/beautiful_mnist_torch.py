@@ -37,10 +37,17 @@ def tiny(gm:torch.fx.GraphModule, sample_inputs):
     @TinyJit
     def tiny_function(*args:Tensor):
       outs = gm(*[wrap(x) for x in args])
-      for x in outs: unwrap(x).realize()
+      # Filter out None values (can happen in backward pass)
+      for x in outs:
+        if x is not None: unwrap(x).realize()
       return outs
     # TODO: this should be able to pass in .tiny() Tensors, not need to convert them. it tries to access Storage if you pass in.
-    def torch_function(*args:torch.Tensor): return tiny_function(*[unwrap(x.tiny()) for x in args])
+    def torch_function(*args:torch.Tensor):
+      result = tiny_function(*[unwrap(x.tiny()) for x in args])
+      # Convert results back to CPU to match input device for autograd
+      if isinstance(result, (list, tuple)):
+        return type(result)(r.cpu() if r is not None and hasattr(r, 'cpu') else r for r in result)
+      return result.cpu() if result is not None and hasattr(result, 'cpu') else result
     return torch_function
   return aot_module_simplified(gm, sample_inputs, decompositions={}, fw_compiler=my_compiler)
 
@@ -49,7 +56,9 @@ def tiny(gm:torch.fx.GraphModule, sample_inputs):
 if __name__ == "__main__":
   if getenv("TINY_BACKEND"):
     import tinygrad.nn.torch  # noqa: F401
-    device = torch.device("tiny")
+    # When using torch.compile with tiny backend, keep everything on CPU
+    # The backend will handle conversion to tinygrad internally
+    device = torch.device("cpu")
   else:
     device = torch.device({"METAL":"mps","NV":"cuda"}.get(Device.DEFAULT, "cpu"))
   if DEBUG >= 1: print(f"using torch backend {device}")
@@ -68,12 +77,16 @@ if __name__ == "__main__":
   # Use "tiny" if we have "TINY_BACKEND" otherwise the default PyTorch's "inductor"
   compile_backend = "tiny" if getenv("TINY_BACKEND") else "inductor"
 
-
+  # Compile only the forward pass computation
   @torch.compile(backend=compile_backend)
-  def step(samples):
-    X,Y = X_train[samples], Y_train[samples]
+  def forward_and_loss(X, Y):
     out = model(X)
     loss = loss_fn(out, Y)
+    return loss
+
+  def step(samples):
+    X,Y = X_train[samples], Y_train[samples]
+    loss = forward_and_loss(X, Y)
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()

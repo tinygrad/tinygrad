@@ -697,8 +697,7 @@ if TORCH_DEBUG:
 
 # this implementation is needed to allow the batchnorm kernels to fuse in e.g. mnist training
 # aten::native_batch_norm does more than Tensor.batchnorm
-@torch.library.impl("aten::native_batch_norm", "privateuseone")
-def native_batch_norm(input, weight, bias, running_mean, running_var, training, momentum, eps):
+def _batch_norm_impl(input, weight, bias, running_mean, running_var, training, momentum, eps):
   input_t, weight_t, bias_t = unwrap(input), unwrap(weight) if weight is not None else None, unwrap(bias) if bias is not None else None
   running_mean_t, running_var_t = unwrap(running_mean) if running_mean is not None else None, unwrap(running_var) if running_var is not None else None
   if training:
@@ -713,6 +712,34 @@ def native_batch_norm(input, weight, bias, running_mean, running_var, training, 
   else:
     out = input_t.batchnorm(weight_t, bias_t, running_mean_t, running_var_t.add(eps).rsqrt())
     return wrap(out), wrap(running_mean_t), wrap(running_var_t.add(eps).rsqrt())
+
+@torch.library.impl("aten::native_batch_norm", "privateuseone")
+def native_batch_norm(input, weight, bias, running_mean, running_var, training, momentum, eps):
+  return _batch_norm_impl(input, weight, bias, running_mean, running_var, training, momentum, eps)
+
+@torch.library.impl("aten::_native_batch_norm_legit", "privateuseone")
+def _native_batch_norm_legit(input, weight, bias, running_mean, running_var, training, momentum, eps):
+  return _batch_norm_impl(input, weight, bias, running_mean, running_var, training, momentum, eps)
+
+@torch.library.impl("aten::_native_batch_norm_legit_functional", "privateuseone") #Maybe we could just use "tiny" directly instead of "privateuseone"?
+def _native_batch_norm_legit_functional(input, weight, bias, running_mean, running_var, training, momentum, eps): # PyTorch's expects this function (functional, a version without side effects)
+  # Functional version - doesn't update running stats, just returns them
+  input_t, weight_t, bias_t = unwrap(input), unwrap(weight) if weight is not None else None, unwrap(bias) if bias is not None else None
+  running_mean_t, running_var_t = unwrap(running_mean) if running_mean is not None else None, unwrap(running_var) if running_var is not None else None
+  if training:
+    batch_var, batch_mean = input_t.var_mean(axis=tuple(x for x in range(input_t.ndim) if x != 1), correction=0)
+    batch_invstd = batch_var.add(eps).rsqrt()
+    out = input_t.batchnorm(weight_t, bias_t, batch_mean, batch_invstd)
+    # Don't update running stats in functional version, but compute what they would be
+    if running_mean_t is not None and running_var_t is not None:
+      numel_ratio = input_t.numel() / (input_t.numel() - input_t.shape[1])
+      new_running_mean = (1 - momentum) * running_mean_t + momentum * batch_mean.detach()
+      new_running_var = (1 - momentum) * running_var_t + momentum * numel_ratio * batch_var.detach()
+      return wrap(out), wrap(batch_mean), wrap(batch_invstd), wrap(new_running_mean), wrap(new_running_var)
+    return wrap(out), wrap(batch_mean), wrap(batch_invstd), wrap(running_mean_t) if running_mean_t is not None else None, wrap(running_var_t) if running_var_t is not None else None
+  else:
+    out = input_t.batchnorm(weight_t, bias_t, running_mean_t, running_var_t.add(eps).rsqrt())
+    return wrap(out), wrap(running_mean_t), wrap(running_var_t.add(eps).rsqrt()), wrap(running_mean_t), wrap(running_var_t)
 
 @torch.library.impl("aten::native_batch_norm_backward", "privateuseone")
 def native_batch_norm_backward(grad_out, input, weight, running_mean, running_var, save_mean, save_invstd, train, eps, output_mask):
