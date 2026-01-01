@@ -241,7 +241,9 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: LDSMem | None = None)
     if isinstance(inst, FLAT):
       addr = V[inst.addr] | (V[inst.addr + 1] << 32)
       ADDR = (st.rsgpr64(inst.saddr) + V[inst.addr] + _sext(inst.offset, 13)) & MASK64 if inst.saddr not in (NULL, 0x7f) else (addr + _sext(inst.offset, 13)) & MASK64
-      result = fn(GlobalMem, ADDR, _vgpr_read(V, inst.data, ndwords), Reg(V[vdst]), Reg(0))
+      # D16_HI loads preserve low 16 bits of destination, so VDATA must be read from vdst not inst.data
+      vdata_src = vdst if 'D16_HI' in op_name and 'LOAD' in op_name else inst.data
+      result = fn(GlobalMem, ADDR, _vgpr_read(V, vdata_src, ndwords), Reg(V[vdst]), Reg(0))
       if 'VDATA' in result: _vgpr_write(V, vdst, result['VDATA']._val, ndwords)
       if 'RETURN_DATA' in result: _vgpr_write(V, vdst, result['RETURN_DATA']._val, ndwords)
     else:  # DS

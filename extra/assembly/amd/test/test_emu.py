@@ -5264,5 +5264,359 @@ class TestFLATAtomic(unittest.TestCase):
     check(st)
 
 
+class TestGlobalStoreB64(unittest.TestCase):
+  """Tests for global_store_b64 instruction."""
+
+  def test_global_store_b64_basic(self):
+    """GLOBAL_STORE_B64 stores 8 bytes from v[n:n+1] to memory."""
+    TEST_OFFSET = 256
+
+    instructions = [
+      # Get output buffer address into s[2:3]
+      s_load_b64(s[2:3], s[80], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      # Set up v[2:3] with known values
+      s_mov_b32(s[4], 0xDEADBEEF),
+      s_mov_b32(s[5], 0xCAFEBABE),
+      v_mov_b32_e32(v[2], s[4]),  # v2 = 0xDEADBEEF (low dword)
+      v_mov_b32_e32(v[3], s[5]),  # v3 = 0xCAFEBABE (high dword)
+      # Set up address
+      v_mov_b32_e32(v[0], 0),
+      # Store 64 bits
+      global_store_b64(addr=v[0], data=v[2], saddr=s[2], offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      # Load it back as two 32-bit values
+      FLAT(GLOBALOp.GLOBAL_LOAD_B64, addr=v[0], vdst=v[4], data=v[4], saddr=s[2], offset=TEST_OFFSET, seg=2),
+      s_waitcnt(vmcnt=0),
+      # Copy to v[0:1] for capture
+      v_mov_b32_e32(v[0], v[4]),
+      v_mov_b32_e32(v[1], v[5]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 0xDEADBEEF, f"Low dword: expected 0xDEADBEEF, got 0x{st.vgpr[0][0]:08x}")
+    self.assertEqual(st.vgpr[0][1], 0xCAFEBABE, f"High dword: expected 0xCAFEBABE, got 0x{st.vgpr[0][1]:08x}")
+
+  def test_global_store_b64_tril_pattern(self):
+    """Test the exact pattern from tril() kernel that was failing.
+
+    The kernel does:
+    - global_load_u16 v0, v2, s[2:3] offset:3  (loads bytes 3,4)
+    - global_load_d16_hi_b16 v1, v1, s[2:3] offset:6 (loads bytes 6,7 into v1 hi16)
+    - global_load_u8 v3, v2, s[2:3]  (loads byte 0)
+    - global_load_u8 v4, v2, s[2:3] offset:8 (loads byte 8)
+    - v_and_b32 v5, 0xffff, v0
+    - v_lshlrev_b32 v0, 24, v0
+    - v_lshrrev_b32 v5, 8, v5
+    - v_or_b32 v0, v3, v0
+    - v_or_b32 v1, v5, v1
+    - global_store_b64 v2, v[0:1], s[0:1]  (stores 8 bytes)
+
+    For input all 0x01, the output at byte 5 should be 0x00.
+    """
+    TEST_OFFSET = 256
+
+    instructions = [
+      # Get output buffer address into s[2:3]
+      s_load_b64(s[2:3], s[80], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      # Store input data: 9 bytes of 0x01
+      s_mov_b32(s[4], 0x01010101),
+      v_mov_b32_e32(v[10], s[4]),
+      v_mov_b32_e32(v[11], s[4]),
+      s_mov_b32(s[4], 0x01),
+      v_mov_b32_e32(v[12], s[4]),
+      v_mov_b32_e32(v[0], 0),
+      global_store_b64(addr=v[0], data=v[10], saddr=s[2], offset=TEST_OFFSET),
+      global_store_b8(addr=v[0], data=v[12], saddr=s[2], offset=TEST_OFFSET+8),
+      s_waitcnt(vmcnt=0),
+
+      # Now execute the tril pattern
+      v_mov_b32_e32(v[2], 0),
+      v_mov_b32_e32(v[1], 0),
+      # Load bytes 3,4 as u16
+      FLAT(GLOBALOp.GLOBAL_LOAD_U16, addr=v[2], vdst=v[0], data=v[0], saddr=s[2], offset=TEST_OFFSET+3, seg=2),
+      # Load bytes 6,7 into v1 hi16
+      FLAT(GLOBALOp.GLOBAL_LOAD_D16_HI_B16, addr=v[1], vdst=v[1], data=v[1], saddr=s[2], offset=TEST_OFFSET+6, seg=2),
+      # Load byte 0
+      FLAT(GLOBALOp.GLOBAL_LOAD_U8, addr=v[2], vdst=v[3], data=v[3], saddr=s[2], offset=TEST_OFFSET, seg=2),
+      # Load byte 8
+      FLAT(GLOBALOp.GLOBAL_LOAD_U8, addr=v[2], vdst=v[4], data=v[4], saddr=s[2], offset=TEST_OFFSET+8, seg=2),
+      s_waitcnt(vmcnt=0),
+
+      # Bit manipulation
+      v_and_b32_e32(v[5], 0xffff, v[0]),  # v5 = v0 & 0xffff = 0x0101
+      v_lshlrev_b32_e32(v[0], 24, v[0]),  # v0 = v0 << 24 = 0x01000000
+      v_lshrrev_b32_e32(v[5], 8, v[5]),   # v5 = v5 >> 8 = 0x01
+      v_or_b32_e32(v[0], v[3], v[0]),     # v0 = v3 | v0 = 0x01000001
+      v_or_b32_e32(v[1], v[5], v[1]),     # v1 = v5 | v1
+
+      # Store to different location so we can read it back
+      global_store_b64(addr=v[2], data=v[0], saddr=s[2], offset=TEST_OFFSET+16),
+      s_waitcnt(vmcnt=0),
+
+      # Load back to check
+      FLAT(GLOBALOp.GLOBAL_LOAD_B64, addr=v[2], vdst=v[6], data=v[6], saddr=s[2], offset=TEST_OFFSET+16, seg=2),
+      s_waitcnt(vmcnt=0),
+      v_mov_b32_e32(v[0], v[6]),
+      v_mov_b32_e32(v[1], v[7]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+
+    # v0 should be 0x01000001 (bytes 0,1,2,3 = 01,00,00,01)
+    # v1 should be 0x01010001 (bytes 4,5,6,7 = 01,00,01,01)
+    v0 = st.vgpr[0][0]
+    v1 = st.vgpr[0][1]
+    self.assertEqual(v0, 0x01000001, f"v0: expected 0x01000001, got 0x{v0:08x}")
+    self.assertEqual(v1, 0x01010001, f"v1: expected 0x01010001, got 0x{v1:08x}")
+
+    # Check individual bytes
+    byte5 = (v1 >> 8) & 0xff  # This is the bug - should be 0x00
+    self.assertEqual(byte5, 0x00, f"byte5 (position 1,2): expected 0x00, got 0x{byte5:02x}")
+
+
+class TestD16HiLoads(unittest.TestCase):
+  """Tests for D16_HI load instructions that load into high 16 bits, preserving low 16 bits."""
+
+  def test_global_load_d16_hi_b16_preserves_low_bits(self):
+    """GLOBAL_LOAD_D16_HI_B16 must preserve low 16 bits of destination.
+
+    Regression test for tril() bug where position (1,2) was incorrectly True.
+    The bug was that D16_HI loads were not preserving the low 16 bits of the
+    destination register.
+    """
+    # Set up: store 0xCAFE at some memory location, then load it into high 16 bits
+    # of a register that has 0xBEEF in low 16 bits. Result should be 0xCAFEBEEF.
+    TEST_OFFSET = 256
+
+    instructions = [
+      # Get output buffer address into s[2:3]
+      s_load_b64(s[2:3], s[80], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      # Set up address in v[0:1]
+      v_mov_b32_e32(v[0], s[2]),
+      v_mov_b32_e32(v[1], s[3]),
+      # Store 0xCAFE0000 at TEST_OFFSET (we'll load the low 16 bits as b16)
+      s_mov_b32(s[4], 0xCAFE),
+      v_mov_b32_e32(v[2], s[4]),
+      global_store_b16(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      # Set destination register v[3] to have 0xBEEF in low 16 bits
+      s_mov_b32(s[4], 0x0000BEEF),
+      v_mov_b32_e32(v[3], s[4]),
+      # Load 16 bits from memory into HIGH 16 bits of v[3], preserving low 16 bits
+      FLAT(GLOBALOp.GLOBAL_LOAD_D16_HI_B16, addr=v[0], vdst=v[3], data=v[3], saddr=SrcEnum.NULL, offset=TEST_OFFSET, seg=2),
+      s_waitcnt(vmcnt=0),
+      # Copy result to v[0] for capture
+      v_mov_b32_e32(v[0], v[3]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][0]
+    # Expected: hi=0xCAFE (from memory), lo=0xBEEF (preserved) -> 0xCAFEBEEF
+    self.assertEqual(result, 0xCAFEBEEF, f"Expected 0xCAFEBEEF, got 0x{result:08x}")
+
+  def test_global_load_d16_hi_b16_same_addr_and_dst_zero_addr(self):
+    """GLOBAL_LOAD_D16_HI_B16 with same register for addr and vdst, addr value=0.
+
+    This is the exact pattern from tril() that was failing:
+      global_load_d16_hi_b16 v1, v1, s[2:3] offset:6
+
+    Where v1=0 is used as both the address offset and destination.
+    After the load, low 16 bits should remain 0, high 16 bits should have loaded data.
+    """
+    TEST_OFFSET = 256
+
+    instructions = [
+      # Get output buffer address into s[2:3]
+      s_load_b64(s[2:3], s[80], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      # Store 0xCAFE at TEST_OFFSET
+      s_mov_b32(s[4], 0xCAFE),
+      v_mov_b32_e32(v[2], s[4]),
+      v_mov_b32_e32(v[3], 0),  # addr offset = 0
+      global_store_b16(addr=v[3], data=v[2], saddr=s[2], offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      # Set v[1] to 0 (addr offset = 0, and this is what low 16 bits should stay as)
+      v_mov_b32_e32(v[1], 0),
+      # Load using v[1] as both addr and destination
+      FLAT(GLOBALOp.GLOBAL_LOAD_D16_HI_B16, addr=v[1], vdst=v[1], data=v[1], saddr=s[2], offset=TEST_OFFSET, seg=2),
+      s_waitcnt(vmcnt=0),
+      # Copy result to v[0] for capture
+      v_mov_b32_e32(v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][0]
+    # Expected: hi=0xCAFE (from memory), lo=0x0000 (preserved) -> 0xCAFE0000
+    self.assertEqual(result, 0xCAFE0000, f"Expected 0xCAFE0000, got 0x{result:08x}")
+
+  def test_global_load_d16_hi_b16_data_differs_from_vdst(self):
+    """GLOBAL_LOAD_D16_HI_B16 where data field differs from vdst.
+
+    This is the ACTUAL pattern from tril() assembly:
+      global_load_d16_hi_b16 v1, v1, s[2:3] offset:6
+
+    The instruction encoding has:
+      vdst = v1 (destination register)
+      addr = v1 (address offset register)
+      data = v0 (data field - typically unused for loads but still encoded)
+
+    The bug: emulator was reading VDATA from inst.data (v0) instead of inst.vdst (v1),
+    so low 16 bits of v0 were preserved instead of low 16 bits of v1.
+    """
+    TEST_OFFSET = 256
+
+    instructions = [
+      # Get output buffer address into s[2:3]
+      s_load_b64(s[2:3], s[80], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      # Store 0xCAFE at TEST_OFFSET
+      s_mov_b32(s[4], 0xCAFE),
+      v_mov_b32_e32(v[2], s[4]),
+      v_mov_b32_e32(v[3], 0),
+      global_store_b16(addr=v[3], data=v[2], saddr=s[2], offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      # Set v[0] to a DIFFERENT value (0xDEAD) - this is the data field
+      # The bug would incorrectly preserve v[0]'s low bits instead of v[1]'s
+      s_mov_b32(s[4], 0x0000DEAD),
+      v_mov_b32_e32(v[0], s[4]),
+      # Set v[1] to 0 (this is vdst, whose low bits should be preserved)
+      v_mov_b32_e32(v[1], 0),
+      # Load using v[1] as addr AND vdst, but v[0] as data field
+      # Correct behavior: hi=0xCAFE (loaded), lo=0x0000 (from v1) -> 0xCAFE0000
+      # Bug behavior: hi=0xCAFE (loaded), lo=0xDEAD (from v0) -> 0xCAFEDEAD
+      FLAT(GLOBALOp.GLOBAL_LOAD_D16_HI_B16, addr=v[1], vdst=v[1], data=v[0], saddr=s[2], offset=TEST_OFFSET, seg=2),
+      s_waitcnt(vmcnt=0),
+      # Copy result to v[0] for capture
+      v_mov_b32_e32(v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][0]
+    # Expected: hi=0xCAFE (from memory), lo=0x0000 (preserved from vdst v1) -> 0xCAFE0000
+    # Bug would give: 0xCAFEDEAD (low bits from data field v0)
+    self.assertEqual(result, 0xCAFE0000, f"Expected 0xCAFE0000, got 0x{result:08x}")
+
+  def test_global_load_d16_hi_b16_tril_exact_pattern(self):
+    """Exact pattern from tril() failure: data=v0 differs from vdst=v1, with v1 having non-zero low bits initially.
+
+    Assembly from tril():
+      v_dual_mov_b32 v2, 0 :: v_dual_mov_b32 v1, 0
+      global_load_u16 v0, v2, s[2:3] offset:3        ; v0 = 0x0101 (loads 16 bits)
+      global_load_d16_hi_b16 v1, v1, s[2:3] offset:6 ; vdst=v1, addr=v1, data=v0
+      ...
+      v_or_b32_e32 v1, v5, v1
+
+    The bug: since data=v0=0x0101 and vdst=v1=0, the emulator incorrectly
+    preserved v0's low bits (0x0101) instead of v1's low bits (0x0000).
+    Result: v1 = 0x01010101 instead of 0x01010000
+    """
+    TEST_OFFSET = 256
+
+    instructions = [
+      # Get output buffer address into s[2:3]
+      s_load_b64(s[2:3], s[80], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      # Store test data: 0x0101 at offset, 0x0101 at offset+3
+      s_mov_b32(s[4], 0x0101),
+      v_mov_b32_e32(v[2], s[4]),
+      v_mov_b32_e32(v[3], 0),
+      global_store_b16(addr=v[3], data=v[2], saddr=s[2], offset=TEST_OFFSET),
+      global_store_b16(addr=v[3], data=v[2], saddr=s[2], offset=TEST_OFFSET + 3),
+      s_waitcnt(vmcnt=0),
+      # Replicate tril() pattern:
+      # v2 = 0, v1 = 0
+      v_mov_b32_e32(v[2], 0),
+      v_mov_b32_e32(v[1], 0),
+      # global_load_u16 v0, v2, s[2:3] offset:3  -> v0 gets 0x0101
+      FLAT(GLOBALOp.GLOBAL_LOAD_U16, addr=v[2], vdst=v[0], data=v[0], saddr=s[2], offset=TEST_OFFSET, seg=2),
+      s_waitcnt(vmcnt=0),
+      # global_load_d16_hi_b16 v1, v1, s[2:3] offset:6  -> vdst=v1, addr=v1, data=v0
+      # This should load 0x0101 into high 16 bits of v1, preserving low 16 bits (0x0000)
+      # Result should be 0x01010000, NOT 0x01010101
+      FLAT(GLOBALOp.GLOBAL_LOAD_D16_HI_B16, addr=v[1], vdst=v[1], data=v[0], saddr=s[2], offset=TEST_OFFSET + 3, seg=2),
+      s_waitcnt(vmcnt=0),
+      # Copy v1 to v[0] for capture
+      v_mov_b32_e32(v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][0]
+    # Expected: hi=0x0101 (from memory), lo=0x0000 (preserved from vdst v1) -> 0x01010000
+    # Bug would give: 0x01010101 (low bits from data field v0)
+    self.assertEqual(result, 0x01010000, f"Expected 0x01010000, got 0x{result:08x}")
+
+  def test_global_load_d16_hi_u8_data_differs_from_vdst(self):
+    """GLOBAL_LOAD_D16_HI_U8 where data field differs from vdst.
+
+    Similar to B16 test but loads unsigned 8 bits into high 16 bits.
+    The bug: emulator reads VDATA from inst.data instead of inst.vdst.
+    """
+    TEST_OFFSET = 256
+
+    instructions = [
+      # Get output buffer address into s[2:3]
+      s_load_b64(s[2:3], s[80], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      # Store 0xAB at TEST_OFFSET (single byte)
+      s_mov_b32(s[4], 0xAB),
+      v_mov_b32_e32(v[2], s[4]),
+      v_mov_b32_e32(v[3], 0),
+      global_store_b8(addr=v[3], data=v[2], saddr=s[2], offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      # Set v[4] to 0xDEAD (data field - should NOT affect result)
+      s_mov_b32(s[4], 0x0000DEAD),
+      v_mov_b32_e32(v[4], s[4]),
+      # Set v[5] to 0xBEEF (vdst - low bits should be preserved)
+      s_mov_b32(s[4], 0x0000BEEF),
+      v_mov_b32_e32(v[5], s[4]),
+      # v[3] = 0 for address offset
+      v_mov_b32_e32(v[3], 0),
+      # Load 8 bits into high 16 bits of v[5], preserving low 16 bits
+      # Correct: hi=0x00AB (zero-extended), lo=0xBEEF -> 0x00ABBEEF
+      # Bug: hi=0x00AB, lo=0xDEAD (from v4) -> 0x00ABDEAD
+      FLAT(GLOBALOp.GLOBAL_LOAD_D16_HI_U8, addr=v[3], vdst=v[5], data=v[4], saddr=s[2], offset=TEST_OFFSET, seg=2),
+      s_waitcnt(vmcnt=0),
+      v_mov_b32_e32(v[0], v[5]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][0]
+    self.assertEqual(result, 0x00ABBEEF, f"Expected 0x00ABBEEF, got 0x{result:08x}")
+
+  def test_global_load_d16_hi_i8_data_differs_from_vdst(self):
+    """GLOBAL_LOAD_D16_HI_I8 where data field differs from vdst.
+
+    Loads signed 8 bits (sign-extended to 16 bits) into high 16 bits.
+    The bug: emulator reads VDATA from inst.data instead of inst.vdst.
+    """
+    TEST_OFFSET = 256
+
+    instructions = [
+      # Get output buffer address into s[2:3]
+      s_load_b64(s[2:3], s[80], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      # Store 0x80 at TEST_OFFSET (negative signed byte = -128)
+      s_mov_b32(s[4], 0x80),
+      v_mov_b32_e32(v[2], s[4]),
+      v_mov_b32_e32(v[3], 0),
+      global_store_b8(addr=v[3], data=v[2], saddr=s[2], offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      # Set v[4] to 0xDEAD (data field - should NOT affect result)
+      s_mov_b32(s[4], 0x0000DEAD),
+      v_mov_b32_e32(v[4], s[4]),
+      # Set v[5] to 0xBEEF (vdst - low bits should be preserved)
+      s_mov_b32(s[4], 0x0000BEEF),
+      v_mov_b32_e32(v[5], s[4]),
+      # v[3] = 0 for address offset
+      v_mov_b32_e32(v[3], 0),
+      # Load signed 8 bits into high 16 bits of v[5], preserving low 16 bits
+      # 0x80 sign-extended to 16 bits = 0xFF80
+      # Correct: hi=0xFF80, lo=0xBEEF -> 0xFF80BEEF
+      # Bug: hi=0xFF80, lo=0xDEAD (from v4) -> 0xFF80DEAD
+      FLAT(GLOBALOp.GLOBAL_LOAD_D16_HI_I8, addr=v[3], vdst=v[5], data=v[4], saddr=s[2], offset=TEST_OFFSET, seg=2),
+      s_waitcnt(vmcnt=0),
+      v_mov_b32_e32(v[0], v[5]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][0]
+    self.assertEqual(result, 0xFF80BEEF, f"Expected 0xFF80BEEF, got 0x{result:08x}")
+
+
 if __name__ == '__main__':
   unittest.main()

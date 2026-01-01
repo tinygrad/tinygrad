@@ -1,6 +1,6 @@
 # DSL for RDNA3 pseudocode - makes pseudocode expressions work directly as Python
 import struct, math
-from extra.assembly.amd.dsl import MASK32, MASK64, _f32, _i32, _sext, _f16, _i16, _f64, _i64
+from extra.assembly.amd.dsl import MASK32, MASK64, MASK128, _f32, _i32, _sext, _f16, _i16, _f64, _i64
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # HELPER FUNCTIONS
@@ -466,8 +466,6 @@ class TypedView:
   def i32(s): return s if s._bits == 32 and s._signed else _sext(int(s) & MASK32, 32)
   @property
   def u32(s): return s if s._bits == 32 and not s._signed else int(s) & MASK32
-
-MASK128 = (1 << 128) - 1
 
 class Reg:
   """GPU register: D0.f32 = S0.f32 + S1.f32 just works. Supports up to 128 bits for DS_LOAD_B128."""
