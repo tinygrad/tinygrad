@@ -206,47 +206,6 @@ def signext_from_bit(val, bit):
   if val & (1 << (bit - 1)): return val - (1 << bit)
   return val
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# DSL EXPORTS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-__all__ = [
-  # Classes
-  'Reg', 'SliceProxy', 'TypedView',
-  # Pack functions
-  '_pack', '_pack32', 'pack', 'pack32',
-  # Constants
-  'WAVE32', 'WAVE64', 'MASK32', 'MASK64', 'WAVE_MODE', 'DENORM', 'OVERFLOW_F32', 'UNDERFLOW_F32',
-  'OVERFLOW_F64', 'UNDERFLOW_F64', 'MAX_FLOAT_F32', 'ROUND_MODE', 'cvtToQuietNAN', 'DST', 'INF', 'PI',
-  'TWO_OVER_PI_1201',
-  # Aliases for pseudocode
-  's_ff1_i32_b32', 's_ff1_i32_b64', 'GT_NEG_ZERO', 'LT_NEG_ZERO',
-  'isNAN', 'isQuietNAN', 'isSignalNAN', 'fma', 'ldexp', 'sign', 'exponent', 'F', 'signext',
-  # Conversion functions
-  '_f32', '_i32', '_f16', '_i16', '_f64', '_i64', '_sext', '_to_f16_bits', '_f16_to_f32_bits',
-  'i32_to_f32', 'u32_to_f32', 'i32_to_f64', 'u32_to_f64', 'f32_to_f64', 'f64_to_f32',
-  'f32_to_i32', 'f32_to_u32', 'f64_to_i32', 'f64_to_u32', 'f32_to_f16', 'f16_to_f32',
-  'i16_to_f16', 'u16_to_f16', 'f16_to_i16', 'f16_to_u16', 'u32_to_u16', 'i32_to_i16',
-  'f16_to_snorm', 'f16_to_unorm', 'f32_to_snorm', 'f32_to_unorm', 'v_cvt_i16_f32', 'v_cvt_u16_f32',
-  'SAT8', 'f32_to_u8', 'u8_to_u32', 'u4_to_u32',
-  # BF16 conversion functions
-  '_bf16', '_ibf16', 'bf16_to_f32', 'f32_to_bf16',
-  # Math functions
-  'trunc', 'floor', 'ceil', 'sqrt', 'log2', 'sin', 'cos', 'pow', 'fract', 'isEven', 'mantissa',
-  # Min/max functions
-  'v_min_f32', 'v_max_f32', 'v_min_i32', 'v_max_i32', 'v_min_u32', 'v_max_u32',
-  'v_min_f16', 'v_max_f16', 'v_min_i16', 'v_max_i16', 'v_min_u16', 'v_max_u16',
-  'v_min3_f32', 'v_max3_f32', 'v_min3_i32', 'v_max3_i32', 'v_min3_u32', 'v_max3_u32',
-  'v_min3_f16', 'v_max3_f16', 'v_min3_i16', 'v_max3_i16', 'v_min3_u16', 'v_max3_u16',
-  'ABSDIFF',
-  # Byte/SAD helper functions
-  'BYTE_PERMUTE', 'v_sad_u8', 'v_msad_u8',
-  # Bit manipulation
-  '_brev32', '_brev64', '_ctz32', '_ctz64', '_exponent', '_is_denorm_f32', '_is_denorm_f64',
-  '_sign', '_mantissa_f32', '_div', '_isnan', '_isquietnan', '_issignalnan', '_gt_neg_zero', '_lt_neg_zero', '_fma', '_ldexp', '_signext',
-  'signext_from_bit',
-]
-
 # Aliases used in pseudocode
 s_ff1_i32_b32, s_ff1_i32_b64 = _ctz32, _ctz64
 GT_NEG_ZERO, LT_NEG_ZERO = _gt_neg_zero, _lt_neg_zero
