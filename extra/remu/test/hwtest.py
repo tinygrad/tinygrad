@@ -8,7 +8,7 @@ from tinygrad import Tensor, dtypes, Device, UOp
 from tinygrad.uop.ops import Ops, KernelInfo
 from tinygrad.helpers import getenv
 
-from extra.assembly.amd.autogen.rdna3 import *
+from extra.assembly.amd.autogen.rdna3.ins import *
 from extra.assembly.amd.asm import waitcnt
 from test.testextra.test_cfg_viz import template
 

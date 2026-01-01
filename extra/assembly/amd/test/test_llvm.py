@@ -2,7 +2,7 @@
 """Test RDNA3 assembler/disassembler against LLVM test vectors."""
 import unittest, re, subprocess
 from tinygrad.helpers import fetch
-from extra.assembly.amd.autogen.rdna3 import *
+from extra.assembly.amd.autogen.rdna3.ins import *
 from extra.assembly.amd.asm import asm
 from extra.assembly.amd.test.helpers import get_llvm_mc
 
@@ -65,12 +65,18 @@ def parse_llvm_tests(text: str) -> list[tuple[str, bytes]]:
     if not asm_text: continue
     for j in range(i, min(i + 3, len(lines))):
       # Match GFX11, W32, or W64 encodings (all valid for gfx11)
+      # Format 1: "// GFX11: v_foo ... ; encoding: [0x01,0x02,...]"
+      # Format 2: "// GFX11: [0x01,0x02,...]" (used by DS, older files)
       if m := re.search(r'(?:GFX11|W32|W64)[^:]*:.*?encoding:\s*\[(.*?)\]', lines[j]):
         hex_bytes = m.group(1).replace('0x', '').replace(',', '').replace(' ', '')
-        if hex_bytes:
-          try: tests.append((asm_text, bytes.fromhex(hex_bytes)))
-          except ValueError: pass
-        break
+      elif m := re.search(r'(?:GFX11|W32|W64)[^:]*:\s*\[(0x[0-9a-fA-F,x\s]+)\]', lines[j]):
+        hex_bytes = m.group(1).replace('0x', '').replace(',', '').replace(' ', '')
+      else:
+        continue
+      if hex_bytes:
+        try: tests.append((asm_text, bytes.fromhex(hex_bytes)))
+        except ValueError: pass
+      break
   return tests
 
 def try_assemble(text: str):

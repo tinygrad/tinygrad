@@ -1,48 +1,11 @@
 #!/usr/bin/env python3
 """Roundtrip tests: generate tinygrad kernels, decode instructions, re-encode, verify match."""
 import unittest, io, sys, re, subprocess, os
-from extra.assembly.amd.autogen.rdna3 import *
+from extra.assembly.amd.autogen.rdna3.ins import *
 from extra.assembly.amd.dsl import Inst
 from extra.assembly.amd.asm import asm
+from extra.assembly.amd.asm import detect_format
 from extra.assembly.amd.test.helpers import get_llvm_mc, get_llvm_objdump
-
-# Instruction format detection based on encoding bits
-def detect_format(data: bytes) -> type[Inst] | None:
-  """Detect instruction format from machine code bytes."""
-  if len(data) < 4: return None
-  word = int.from_bytes(data[:4], 'little')
-  enc_9bit = (word >> 23) & 0x1FF  # 9-bit encoding for SOP1/SOPC/SOPP
-  enc_8bit = (word >> 24) & 0xFF
-
-  # Check 9-bit encodings first (most specific)
-  if enc_9bit == 0x17D: return SOP1  # bits 31:23 = 101111101
-  if enc_9bit == 0x17E: return SOPC  # bits 31:23 = 101111110
-  if enc_9bit == 0x17F: return SOPP  # bits 31:23 = 101111111
-  # SOPK: bits 31:28 = 1011, bits 27:23 = opcode (check after SOP1/SOPC/SOPP)
-  if enc_8bit in range(0xB0, 0xC0): return SOPK
-  # SOP2: bits 31:23 in range 0x100-0x17C (0x80-0xBE in bits 31:24, but not SOPK)
-  if 0x80 <= enc_8bit <= 0x9F: return SOP2
-  # VOP1: bits 31:25 = 0111111 (0x3F)
-  if (word >> 25) == 0x3F: return VOP1
-  # VOPC: bits 31:25 = 0111110 (0x3E)
-  if (word >> 25) == 0x3E: return VOPC
-  # VOP2: bits 31:30 = 00
-  if (word >> 30) == 0: return VOP2
-
-  # Check 64-bit formats
-  if len(data) >= 8:
-    if enc_8bit in (0xD4, 0xD5, 0xD7): return VOP3
-    if enc_8bit == 0xD6: return VOP3SD
-    if enc_8bit == 0xCC: return VOP3P
-    if enc_8bit == 0xCD: return VINTERP
-    if enc_8bit in (0xC8, 0xC9): return VOPD
-    if enc_8bit == 0xF4: return SMEM
-    if enc_8bit == 0xD8: return DS
-    if enc_8bit in (0xDC, 0xDD, 0xDE, 0xDF): return FLAT
-    if enc_8bit in (0xE0, 0xE1, 0xE2, 0xE3): return MUBUF
-    if enc_8bit in (0xE8, 0xE9, 0xEA, 0xEB): return MTBUF
-
-  return None
 
 def disassemble_lib(lib: bytes, compiler) -> list[tuple[str, bytes]]:
   """Disassemble ELF binary and return list of (instruction_text, machine_code_bytes)."""
