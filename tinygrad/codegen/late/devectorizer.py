@@ -305,7 +305,7 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
     input_ranges = tuple([x for x in topo if x.op is Ops.RANGE and x not in reduce_range and x not in ended_ranges])
     identity  = red.const(red.dtype, identity_element(red.arg, red.dtype.scalar()))
     idx0 = UOp.const(dtypes.index, 0)
-    vec_count = len(lst) if red.dtype.count == 1 else 1
+    vec_count = len(lst) if red.dtype.count == 1 and red.dtype.scalar() in dtypes.floats else 1
     acc_dtype = red.dtype.vec(vec_count) if vec_count > 1 else red.dtype
     acc = UOp(Ops.DEFINE_REG, acc_dtype.ptr(size=1, addrspace=AddrSpace.REG), arg=ctx.acc_num)
     acc_init = (acc.after(*input_ranges) if input_ranges else acc).index(idx0).store(identity.broadcast(vec_count) if vec_count > 1 else identity)
