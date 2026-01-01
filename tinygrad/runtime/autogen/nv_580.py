@@ -1,17 +1,1326 @@
 # mypy: ignore-errors
 import ctypes
-from tinygrad.helpers import unwrap
-from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-class _anonunion0(ctypes.Union): pass
-NvUPtr = ctypes.c_uint64
-_anonunion0._fields_ = [
-  ('v', NvUPtr),
-  ('p', ctypes.c_void_p),
+from tinygrad.runtime.support.c import DLL, Struct, CEnum, _IO, _IOW, _IOR, _IOWR
+_anonenum0 = CEnum(ctypes.c_uint32)
+AES128_NONE = _anonenum0.define('AES128_NONE', 0)
+AES128_CTR = _anonenum0.define('AES128_CTR', 1)
+AES128_CBC = _anonenum0.define('AES128_CBC', 2)
+AES128_ECB = _anonenum0.define('AES128_ECB', 3)
+AES128_OFB = _anonenum0.define('AES128_OFB', 4)
+AES128_CTR_LSB16B = _anonenum0.define('AES128_CTR_LSB16B', 5)
+AES128_CLR_AS_ENCRYPT = _anonenum0.define('AES128_CLR_AS_ENCRYPT', 6)
+AES128_RESERVED = _anonenum0.define('AES128_RESERVED', 7)
+
+_anonenum1 = CEnum(ctypes.c_uint32)
+AES128_CTS_DISABLE = _anonenum1.define('AES128_CTS_DISABLE', 0)
+AES128_CTS_ENABLE = _anonenum1.define('AES128_CTS_ENABLE', 1)
+
+_anonenum2 = CEnum(ctypes.c_uint32)
+AES128_PADDING_NONE = _anonenum2.define('AES128_PADDING_NONE', 0)
+AES128_PADDING_CARRY_OVER = _anonenum2.define('AES128_PADDING_CARRY_OVER', 1)
+AES128_PADDING_RFC2630 = _anonenum2.define('AES128_PADDING_RFC2630', 2)
+AES128_PADDING_RESERVED = _anonenum2.define('AES128_PADDING_RESERVED', 7)
+
+ENCR_MODE = CEnum(ctypes.c_uint32)
+ENCR_MODE_CTR64 = ENCR_MODE.define('ENCR_MODE_CTR64', 0)
+ENCR_MODE_CBC = ENCR_MODE.define('ENCR_MODE_CBC', 1)
+ENCR_MODE_ECB = ENCR_MODE.define('ENCR_MODE_ECB', 2)
+ENCR_MODE_ECB_PARTIAL = ENCR_MODE.define('ENCR_MODE_ECB_PARTIAL', 3)
+ENCR_MODE_CBC_PARTIAL = ENCR_MODE.define('ENCR_MODE_CBC_PARTIAL', 4)
+ENCR_MODE_CLEAR_INTO_VPR = ENCR_MODE.define('ENCR_MODE_CLEAR_INTO_VPR', 5)
+ENCR_MODE_FORCE_INTO_VPR = ENCR_MODE.define('ENCR_MODE_FORCE_INTO_VPR', 6)
+
+_anonenum3 = CEnum(ctypes.c_uint32)
+DRM_MS_PIFF_CTR = _anonenum3.define('DRM_MS_PIFF_CTR', 17)
+
+_anonenum4 = CEnum(ctypes.c_uint32)
+DRM_MS_PIFF_CBC = _anonenum4.define('DRM_MS_PIFF_CBC', 2)
+
+_anonenum5 = CEnum(ctypes.c_uint32)
+DRM_MARLIN_CTR = _anonenum5.define('DRM_MARLIN_CTR', 1)
+
+_anonenum6 = CEnum(ctypes.c_uint32)
+DRM_MARLIN_CBC = _anonenum6.define('DRM_MARLIN_CBC', 34)
+
+_anonenum7 = CEnum(ctypes.c_uint32)
+DRM_WIDEVINE = _anonenum7.define('DRM_WIDEVINE', 10)
+
+_anonenum8 = CEnum(ctypes.c_uint32)
+DRM_WIDEVINE_CTR = _anonenum8.define('DRM_WIDEVINE_CTR', 17)
+
+_anonenum9 = CEnum(ctypes.c_uint32)
+DRM_ULTRA_VIOLET = _anonenum9.define('DRM_ULTRA_VIOLET', 5)
+
+_anonenum10 = CEnum(ctypes.c_uint32)
+DRM_NONE = _anonenum10.define('DRM_NONE', 0)
+
+_anonenum11 = CEnum(ctypes.c_uint32)
+DRM_CLR_AS_ENCRYPT = _anonenum11.define('DRM_CLR_AS_ENCRYPT', 6)
+
+class struct__nvdec_ssm_s(Struct): pass
+struct__nvdec_ssm_s._fields_ = [
+  ('bytes_of_protected_data', ctypes.c_uint32),
+  ('bytes_of_clear_data', ctypes.c_uint32,16),
+  ('skip_byte_blk', ctypes.c_uint32,4),
+  ('crypt_byte_blk', ctypes.c_uint32,4),
+  ('skip', ctypes.c_uint32,1),
+  ('last', ctypes.c_uint32,1),
+  ('pad', ctypes.c_uint32,1),
+  ('mode', ctypes.c_uint32,1),
+  ('entry_type', ctypes.c_uint32,1),
+  ('reserved', ctypes.c_uint32,3),
 ]
-class _anonunion1(ctypes.Union): pass
-_anonunion1._fields_ = [
-  ('v', NvUPtr),
-  ('p', ctypes.c_void_p),
+nvdec_ssm_s = struct__nvdec_ssm_s
+class struct__nvdec_pass2_otf_ext_s(Struct): pass
+struct__nvdec_pass2_otf_ext_s._fields_ = [
+  ('ssm_entry_num', ctypes.c_uint32,16),
+  ('ssm_iv_num', ctypes.c_uint32,16),
+  ('real_stream_length', ctypes.c_uint32),
+  ('non_slice_data', ctypes.c_uint32,16),
+  ('drm_mode', ctypes.c_uint32,7),
+  ('reserved', ctypes.c_uint32,9),
+]
+nvdec_pass2_otf_ext_s = struct__nvdec_pass2_otf_ext_s
+class struct__nvdec_substream_entry_s(Struct): pass
+struct__nvdec_substream_entry_s._fields_ = [
+  ('substream_start_offset', ctypes.c_uint32),
+  ('substream_length', ctypes.c_uint32),
+  ('substream_first_tile_idx', ctypes.c_uint32,8),
+  ('substream_last_tile_idx', ctypes.c_uint32,8),
+  ('last_substream_entry_in_frame', ctypes.c_uint32,1),
+  ('reserved', ctypes.c_uint32,15),
+]
+nvdec_substream_entry_s = struct__nvdec_substream_entry_s
+class struct__nvdec_ecdma_config_s(Struct): pass
+struct__nvdec_ecdma_config_s._fields_ = [
+  ('ecdma_enable', ctypes.c_uint32),
+  ('ecdma_blk_x_src', ctypes.c_uint16),
+  ('ecdma_blk_y_src', ctypes.c_uint16),
+  ('ecdma_blk_x_dst', ctypes.c_uint16),
+  ('ecdma_blk_y_dst', ctypes.c_uint16),
+  ('ref_pic_idx', ctypes.c_uint16),
+  ('boundary0_top', ctypes.c_uint16),
+  ('boundary0_bottom', ctypes.c_uint16),
+  ('boundary1_left', ctypes.c_uint16),
+  ('boundary1_right', ctypes.c_uint16),
+  ('blk_copy_flag', ctypes.c_ubyte),
+  ('ctb_size', ctypes.c_ubyte),
+]
+nvdec_ecdma_config_s = struct__nvdec_ecdma_config_s
+class struct__nvdec_status_hevc_s(Struct): pass
+struct__nvdec_status_hevc_s._fields_ = [
+  ('frame_status_intra_cnt', ctypes.c_uint32),
+  ('frame_status_inter_cnt', ctypes.c_uint32),
+  ('frame_status_skip_cnt', ctypes.c_uint32),
+  ('frame_status_fwd_mvx_cnt', ctypes.c_uint32),
+  ('frame_status_fwd_mvy_cnt', ctypes.c_uint32),
+  ('frame_status_bwd_mvx_cnt', ctypes.c_uint32),
+  ('frame_status_bwd_mvy_cnt', ctypes.c_uint32),
+  ('error_ctb_pos', ctypes.c_uint32),
+  ('error_slice_pos', ctypes.c_uint32),
+]
+nvdec_status_hevc_s = struct__nvdec_status_hevc_s
+class struct__nvdec_status_vp9_s(Struct): pass
+struct__nvdec_status_vp9_s._fields_ = [
+  ('frame_status_intra_cnt', ctypes.c_uint32),
+  ('frame_status_inter_cnt', ctypes.c_uint32),
+  ('frame_status_skip_cnt', ctypes.c_uint32),
+  ('frame_status_fwd_mvx_cnt', ctypes.c_uint32),
+  ('frame_status_fwd_mvy_cnt', ctypes.c_uint32),
+  ('frame_status_bwd_mvx_cnt', ctypes.c_uint32),
+  ('frame_status_bwd_mvy_cnt', ctypes.c_uint32),
+  ('error_ctb_pos', ctypes.c_uint32),
+  ('error_slice_pos', ctypes.c_uint32),
+]
+nvdec_status_vp9_s = struct__nvdec_status_vp9_s
+class struct__nvdec_status_s(Struct): pass
+class struct__nvdec_status_s_0(ctypes.Union): pass
+struct__nvdec_status_s_0._fields_ = [
+  ('hevc', nvdec_status_hevc_s),
+  ('vp9', nvdec_status_vp9_s),
+]
+struct__nvdec_status_s._anonymous_ = ['_0']
+struct__nvdec_status_s._fields_ = [
+  ('mbs_correctly_decoded', ctypes.c_uint32),
+  ('mbs_in_error', ctypes.c_uint32),
+  ('cycle_count', ctypes.c_uint32),
+  ('error_status', ctypes.c_uint32),
+  ('_0', struct__nvdec_status_s_0),
+  ('slice_header_error_code', ctypes.c_uint32),
+]
+nvdec_status_s = struct__nvdec_status_s
+class struct__external_mv_s(Struct): pass
+struct__external_mv_s._fields_ = [
+  ('mvx', ctypes.c_int32,14),
+  ('mvy', ctypes.c_int32,14),
+  ('refidx', ctypes.c_uint32,4),
+]
+external_mv_s = struct__external_mv_s
+class struct__nvdec_hevc_main10_444_ext_s(Struct): pass
+struct__nvdec_hevc_main10_444_ext_s._fields_ = [
+  ('transformSkipRotationEnableFlag', ctypes.c_uint32,1),
+  ('transformSkipContextEnableFlag', ctypes.c_uint32,1),
+  ('intraBlockCopyEnableFlag', ctypes.c_uint32,1),
+  ('implicitRdpcmEnableFlag', ctypes.c_uint32,1),
+  ('explicitRdpcmEnableFlag', ctypes.c_uint32,1),
+  ('extendedPrecisionProcessingFlag', ctypes.c_uint32,1),
+  ('intraSmoothingDisabledFlag', ctypes.c_uint32,1),
+  ('highPrecisionOffsetsEnableFlag', ctypes.c_uint32,1),
+  ('fastRiceAdaptationEnableFlag', ctypes.c_uint32,1),
+  ('cabacBypassAlignmentEnableFlag', ctypes.c_uint32,1),
+  ('sps_444_extension_reserved', ctypes.c_uint32,22),
+  ('log2MaxTransformSkipSize', ctypes.c_uint32,4),
+  ('crossComponentPredictionEnableFlag', ctypes.c_uint32,1),
+  ('chromaQpAdjustmentEnableFlag', ctypes.c_uint32,1),
+  ('diffCuChromaQpAdjustmentDepth', ctypes.c_uint32,2),
+  ('chromaQpAdjustmentTableSize', ctypes.c_uint32,3),
+  ('log2SaoOffsetScaleLuma', ctypes.c_uint32,3),
+  ('log2SaoOffsetScaleChroma', ctypes.c_uint32,3),
+  ('pps_444_extension_reserved', ctypes.c_uint32,15),
+  ('cb_qp_adjustment', (ctypes.c_char * 6)),
+  ('cr_qp_adjustment', (ctypes.c_char * 6)),
+  ('HevcFltAboveOffset', ctypes.c_uint32),
+  ('HevcSaoAboveOffset', ctypes.c_uint32),
+]
+nvdec_hevc_main10_444_ext_s = struct__nvdec_hevc_main10_444_ext_s
+class struct__nvdec_hevc_pic_v1_s(Struct): pass
+struct__nvdec_hevc_pic_v1_s._fields_ = [
+  ('hevc_main10_444_ext', nvdec_hevc_main10_444_ext_s),
+  ('sw_skip_start_length', ctypes.c_uint32,14),
+  ('external_ref_mem_dis', ctypes.c_uint32,1),
+  ('error_recovery_start_pos', ctypes.c_uint32,2),
+  ('error_external_mv_en', ctypes.c_uint32,1),
+  ('reserved0', ctypes.c_uint32,14),
+]
+nvdec_hevc_pic_v1_s = struct__nvdec_hevc_pic_v1_s
+class struct__nvdec_hevc_pic_v2_s(Struct): pass
+struct__nvdec_hevc_pic_v2_s._fields_ = [
+  ('mv_hevc_enable', ctypes.c_uint32,1),
+  ('nuh_layer_id', ctypes.c_uint32,6),
+  ('default_ref_layers_active_flag', ctypes.c_uint32,1),
+  ('NumDirectRefLayers', ctypes.c_uint32,6),
+  ('max_one_active_ref_layer_flag', ctypes.c_uint32,1),
+  ('NumActiveRefLayerPics', ctypes.c_uint32,6),
+  ('poc_lsb_not_present_flag', ctypes.c_uint32,1),
+  ('reserved0', ctypes.c_uint32,10),
+]
+nvdec_hevc_pic_v2_s = struct__nvdec_hevc_pic_v2_s
+class struct__nvdec_hevc_pic_v3_s(Struct): pass
+struct__nvdec_hevc_pic_v3_s._fields_ = [
+  ('slice_decoding_enable', ctypes.c_uint32,1),
+  ('slice_ec_enable', ctypes.c_uint32,1),
+  ('slice_ec_mv_type', ctypes.c_uint32,2),
+  ('err_detected_sw', ctypes.c_uint32,1),
+  ('slice_ec_slice_type', ctypes.c_uint32,2),
+  ('slice_strm_recfg_en', ctypes.c_uint32,1),
+  ('reserved', ctypes.c_uint32,24),
+  ('HevcSliceEdgeOffset', ctypes.c_uint32),
+]
+nvdec_hevc_pic_v3_s = struct__nvdec_hevc_pic_v3_s
+class struct__nvdec_hevc_pic_s(Struct): pass
+struct__nvdec_hevc_pic_s._fields_ = [
+  ('wrapped_session_key', (ctypes.c_uint32 * 4)),
+  ('wrapped_content_key', (ctypes.c_uint32 * 4)),
+  ('initialization_vector', (ctypes.c_uint32 * 4)),
+  ('stream_len', ctypes.c_uint32),
+  ('enable_encryption', ctypes.c_uint32),
+  ('key_increment', ctypes.c_uint32,6),
+  ('encryption_mode', ctypes.c_uint32,4),
+  ('key_slot_index', ctypes.c_uint32,4),
+  ('ssm_en', ctypes.c_uint32,1),
+  ('enable_histogram', ctypes.c_uint32,1),
+  ('enable_substream_decoding', ctypes.c_uint32,1),
+  ('reserved0', ctypes.c_uint32,15),
+  ('gptimer_timeout_value', ctypes.c_uint32),
+  ('tileformat', ctypes.c_ubyte,2),
+  ('gob_height', ctypes.c_ubyte,3),
+  ('reserverd_surface_format', ctypes.c_ubyte,3),
+  ('sw_start_code_e', ctypes.c_ubyte),
+  ('disp_output_mode', ctypes.c_ubyte),
+  ('reserved1', ctypes.c_ubyte),
+  ('framestride', (ctypes.c_uint32 * 2)),
+  ('colMvBuffersize', ctypes.c_uint32),
+  ('HevcSaoBufferOffset', ctypes.c_uint32),
+  ('HevcBsdCtrlOffset', ctypes.c_uint32),
+  ('pic_width_in_luma_samples', ctypes.c_uint16),
+  ('pic_height_in_luma_samples', ctypes.c_uint16),
+  ('chroma_format_idc', ctypes.c_uint32,4),
+  ('bit_depth_luma', ctypes.c_uint32,4),
+  ('bit_depth_chroma', ctypes.c_uint32,4),
+  ('log2_min_luma_coding_block_size', ctypes.c_uint32,4),
+  ('log2_max_luma_coding_block_size', ctypes.c_uint32,4),
+  ('log2_min_transform_block_size', ctypes.c_uint32,4),
+  ('log2_max_transform_block_size', ctypes.c_uint32,4),
+  ('reserved2', ctypes.c_uint32,4),
+  ('max_transform_hierarchy_depth_inter', ctypes.c_uint32,3),
+  ('max_transform_hierarchy_depth_intra', ctypes.c_uint32,3),
+  ('scalingListEnable', ctypes.c_uint32,1),
+  ('amp_enable_flag', ctypes.c_uint32,1),
+  ('sample_adaptive_offset_enabled_flag', ctypes.c_uint32,1),
+  ('pcm_enabled_flag', ctypes.c_uint32,1),
+  ('pcm_sample_bit_depth_luma', ctypes.c_uint32,4),
+  ('pcm_sample_bit_depth_chroma', ctypes.c_uint32,4),
+  ('log2_min_pcm_luma_coding_block_size', ctypes.c_uint32,4),
+  ('log2_max_pcm_luma_coding_block_size', ctypes.c_uint32,4),
+  ('pcm_loop_filter_disabled_flag', ctypes.c_uint32,1),
+  ('sps_temporal_mvp_enabled_flag', ctypes.c_uint32,1),
+  ('strong_intra_smoothing_enabled_flag', ctypes.c_uint32,1),
+  ('reserved3', ctypes.c_uint32,3),
+  ('dependent_slice_segments_enabled_flag', ctypes.c_uint32,1),
+  ('output_flag_present_flag', ctypes.c_uint32,1),
+  ('num_extra_slice_header_bits', ctypes.c_uint32,3),
+  ('sign_data_hiding_enabled_flag', ctypes.c_uint32,1),
+  ('cabac_init_present_flag', ctypes.c_uint32,1),
+  ('num_ref_idx_l0_default_active', ctypes.c_uint32,4),
+  ('num_ref_idx_l1_default_active', ctypes.c_uint32,4),
+  ('init_qp', ctypes.c_uint32,7),
+  ('constrained_intra_pred_flag', ctypes.c_uint32,1),
+  ('transform_skip_enabled_flag', ctypes.c_uint32,1),
+  ('cu_qp_delta_enabled_flag', ctypes.c_uint32,1),
+  ('diff_cu_qp_delta_depth', ctypes.c_uint32,2),
+  ('reserved4', ctypes.c_uint32,5),
+  ('pps_cb_qp_offset', ctypes.c_char),
+  ('pps_cr_qp_offset', ctypes.c_char),
+  ('pps_beta_offset', ctypes.c_char),
+  ('pps_tc_offset', ctypes.c_char),
+  ('pps_slice_chroma_qp_offsets_present_flag', ctypes.c_uint32,1),
+  ('weighted_pred_flag', ctypes.c_uint32,1),
+  ('weighted_bipred_flag', ctypes.c_uint32,1),
+  ('transquant_bypass_enabled_flag', ctypes.c_uint32,1),
+  ('tiles_enabled_flag', ctypes.c_uint32,1),
+  ('entropy_coding_sync_enabled_flag', ctypes.c_uint32,1),
+  ('num_tile_columns', ctypes.c_uint32,5),
+  ('num_tile_rows', ctypes.c_uint32,5),
+  ('loop_filter_across_tiles_enabled_flag', ctypes.c_uint32,1),
+  ('loop_filter_across_slices_enabled_flag', ctypes.c_uint32,1),
+  ('deblocking_filter_control_present_flag', ctypes.c_uint32,1),
+  ('deblocking_filter_override_enabled_flag', ctypes.c_uint32,1),
+  ('pps_deblocking_filter_disabled_flag', ctypes.c_uint32,1),
+  ('lists_modification_present_flag', ctypes.c_uint32,1),
+  ('log2_parallel_merge_level', ctypes.c_uint32,3),
+  ('slice_segment_header_extension_present_flag', ctypes.c_uint32,1),
+  ('reserved5', ctypes.c_uint32,6),
+  ('num_ref_frames', ctypes.c_ubyte),
+  ('reserved6', ctypes.c_ubyte),
+  ('longtermflag', ctypes.c_uint16),
+  ('initreflistidxl0', (ctypes.c_ubyte * 16)),
+  ('initreflistidxl1', (ctypes.c_ubyte * 16)),
+  ('RefDiffPicOrderCnts', (ctypes.c_int16 * 16)),
+  ('IDR_picture_flag', ctypes.c_ubyte),
+  ('RAP_picture_flag', ctypes.c_ubyte),
+  ('curr_pic_idx', ctypes.c_ubyte),
+  ('pattern_id', ctypes.c_ubyte),
+  ('sw_hdr_skip_length', ctypes.c_uint16),
+  ('reserved7', ctypes.c_uint16),
+  ('ecdma_cfg', nvdec_ecdma_config_s),
+  ('separate_colour_plane_flag', ctypes.c_uint32,1),
+  ('log2_max_pic_order_cnt_lsb_minus4', ctypes.c_uint32,4),
+  ('num_short_term_ref_pic_sets', ctypes.c_uint32,7),
+  ('num_long_term_ref_pics_sps', ctypes.c_uint32,6),
+  ('bBitParsingDisable', ctypes.c_uint32,1),
+  ('num_delta_pocs_of_rps_idx', ctypes.c_uint32,8),
+  ('long_term_ref_pics_present_flag', ctypes.c_uint32,1),
+  ('reserved_dxva', ctypes.c_uint32,4),
+  ('num_bits_short_term_ref_pics_in_slice', ctypes.c_uint32),
+  ('v1', nvdec_hevc_pic_v1_s),
+  ('v2', nvdec_hevc_pic_v2_s),
+  ('v3', nvdec_hevc_pic_v3_s),
+  ('ssm', nvdec_pass2_otf_ext_s),
+]
+nvdec_hevc_pic_s = struct__nvdec_hevc_pic_s
+class struct__hevc_slice_info_s(Struct): pass
+struct__hevc_slice_info_s._fields_ = [
+  ('first_flag', ctypes.c_uint32,1),
+  ('err_flag', ctypes.c_uint32,1),
+  ('last_flag', ctypes.c_uint32,1),
+  ('conceal_partial_slice', ctypes.c_uint32,1),
+  ('available', ctypes.c_uint32,1),
+  ('reserved0', ctypes.c_uint32,7),
+  ('ctb_count', ctypes.c_uint32,20),
+  ('bs_offset', ctypes.c_uint32),
+  ('bs_length', ctypes.c_uint32),
+  ('start_ctbx', ctypes.c_uint16),
+  ('start_ctby', ctypes.c_uint16),
+]
+hevc_slice_info_s = struct__hevc_slice_info_s
+class struct__slice_edge_ctb_pos_ctx_s(Struct): pass
+struct__slice_edge_ctb_pos_ctx_s._fields_ = [
+  ('next_slice_pos_ctbxy', ctypes.c_uint32),
+  ('next_slice_segment_addr', ctypes.c_uint32),
+]
+slice_edge_ctb_pos_ctx_s = struct__slice_edge_ctb_pos_ctx_s
+class struct__slice_edge_tile_ctx_s(Struct): pass
+struct__slice_edge_tile_ctx_s._fields_ = [
+  ('tileInfo1', ctypes.c_uint32),
+  ('tileInfo2', ctypes.c_uint32),
+  ('tileInfo3', ctypes.c_uint32),
+]
+slice_edge_tile_ctx_s = struct__slice_edge_tile_ctx_s
+class struct__slice_edge_stats_ctx_s(Struct): pass
+struct__slice_edge_stats_ctx_s._fields_ = [
+  ('frame_status_intra_cnt', ctypes.c_uint32),
+  ('frame_status_inter_cnt', ctypes.c_uint32),
+  ('frame_status_skip_cnt', ctypes.c_uint32),
+  ('frame_status_fwd_mvx_cnt', ctypes.c_uint32),
+  ('frame_status_fwd_mvy_cnt', ctypes.c_uint32),
+  ('frame_status_bwd_mvx_cnt', ctypes.c_uint32),
+  ('frame_status_bwd_mvy_cnt', ctypes.c_uint32),
+  ('frame_status_mv_cnt_ext', ctypes.c_uint32),
+]
+slice_edge_stats_ctx_s = struct__slice_edge_stats_ctx_s
+class struct__slice_vpc_edge_ctx_s(Struct): pass
+struct__slice_vpc_edge_ctx_s._fields_ = [
+  ('reserved', ctypes.c_uint32),
+]
+slice_vpc_edge_ctx_s = struct__slice_vpc_edge_ctx_s
+class struct__slice_vpc_main_ctx_s(Struct): pass
+struct__slice_vpc_main_ctx_s._fields_ = [
+  ('reserved', ctypes.c_uint32),
+]
+slice_vpc_main_ctx_s = struct__slice_vpc_main_ctx_s
+class struct__slice_edge_ctx_s(Struct): pass
+struct__slice_edge_ctx_s._fields_ = [
+  ('slice_ctb_pos_ctx', slice_edge_ctb_pos_ctx_s),
+  ('slice_stats_ctx', slice_edge_stats_ctx_s),
+  ('slice_tile_ctx', slice_edge_tile_ctx_s),
+  ('slice_vpc_edge_ctx', slice_vpc_edge_ctx_s),
+  ('slice_vpc_main_ctx', slice_vpc_main_ctx_s),
+]
+slice_edge_ctx_s = struct__slice_edge_ctx_s
+class struct__nvdec_vp9_pic_v1_s(Struct): pass
+struct__nvdec_vp9_pic_v1_s._fields_ = [
+  ('Vp9FltAboveOffset', ctypes.c_uint32),
+  ('external_ref_mem_dis', ctypes.c_uint32,1),
+  ('bit_depth', ctypes.c_uint32,4),
+  ('error_recovery_start_pos', ctypes.c_uint32,2),
+  ('error_external_mv_en', ctypes.c_uint32,1),
+  ('Reserved0', ctypes.c_uint32,24),
+]
+nvdec_vp9_pic_v1_s = struct__nvdec_vp9_pic_v1_s
+enum_VP9_FRAME_SFC_ID = CEnum(ctypes.c_uint32)
+VP9_LAST_FRAME_SFC = enum_VP9_FRAME_SFC_ID.define('VP9_LAST_FRAME_SFC', 0)
+VP9_GOLDEN_FRAME_SFC = enum_VP9_FRAME_SFC_ID.define('VP9_GOLDEN_FRAME_SFC', 1)
+VP9_ALTREF_FRAME_SFC = enum_VP9_FRAME_SFC_ID.define('VP9_ALTREF_FRAME_SFC', 2)
+VP9_CURR_FRAME_SFC = enum_VP9_FRAME_SFC_ID.define('VP9_CURR_FRAME_SFC', 3)
+
+class struct__nvdec_vp9_pic_s(Struct): pass
+struct__nvdec_vp9_pic_s._fields_ = [
+  ('wrapped_session_key', (ctypes.c_uint32 * 4)),
+  ('wrapped_content_key', (ctypes.c_uint32 * 4)),
+  ('initialization_vector', (ctypes.c_uint32 * 4)),
+  ('stream_len', ctypes.c_uint32),
+  ('enable_encryption', ctypes.c_uint32),
+  ('key_increment', ctypes.c_uint32,6),
+  ('encryption_mode', ctypes.c_uint32,4),
+  ('sw_hdr_skip_length', ctypes.c_uint32,14),
+  ('key_slot_index', ctypes.c_uint32,4),
+  ('ssm_en', ctypes.c_uint32,1),
+  ('enable_histogram', ctypes.c_uint32,1),
+  ('reserved0', ctypes.c_uint32,2),
+  ('gptimer_timeout_value', ctypes.c_uint32),
+  ('tileformat', ctypes.c_ubyte,2),
+  ('gob_height', ctypes.c_ubyte,3),
+  ('reserverd_surface_format', ctypes.c_ubyte,3),
+  ('reserved1', (ctypes.c_ubyte * 3)),
+  ('Vp9BsdCtrlOffset', ctypes.c_uint32),
+  ('ref0_width', ctypes.c_uint16),
+  ('ref0_height', ctypes.c_uint16),
+  ('ref0_stride', (ctypes.c_uint16 * 2)),
+  ('ref1_width', ctypes.c_uint16),
+  ('ref1_height', ctypes.c_uint16),
+  ('ref1_stride', (ctypes.c_uint16 * 2)),
+  ('ref2_width', ctypes.c_uint16),
+  ('ref2_height', ctypes.c_uint16),
+  ('ref2_stride', (ctypes.c_uint16 * 2)),
+  ('width', ctypes.c_uint16),
+  ('height', ctypes.c_uint16),
+  ('framestride', (ctypes.c_uint16 * 2)),
+  ('keyFrame', ctypes.c_ubyte,1),
+  ('prevIsKeyFrame', ctypes.c_ubyte,1),
+  ('resolutionChange', ctypes.c_ubyte,1),
+  ('errorResilient', ctypes.c_ubyte,1),
+  ('prevShowFrame', ctypes.c_ubyte,1),
+  ('intraOnly', ctypes.c_ubyte,1),
+  ('reserved2', ctypes.c_ubyte,2),
+  ('reserved3', (ctypes.c_ubyte * 3)),
+  ('refFrameSignBias', (ctypes.c_ubyte * 4)),
+  ('loopFilterLevel', ctypes.c_char),
+  ('loopFilterSharpness', ctypes.c_char),
+  ('qpYAc', ctypes.c_ubyte),
+  ('qpYDc', ctypes.c_char),
+  ('qpChAc', ctypes.c_char),
+  ('qpChDc', ctypes.c_char),
+  ('lossless', ctypes.c_char),
+  ('transform_mode', ctypes.c_char),
+  ('allow_high_precision_mv', ctypes.c_char),
+  ('mcomp_filter_type', ctypes.c_char),
+  ('comp_pred_mode', ctypes.c_char),
+  ('comp_fixed_ref', ctypes.c_char),
+  ('comp_var_ref', (ctypes.c_char * 2)),
+  ('log2_tile_columns', ctypes.c_char),
+  ('log2_tile_rows', ctypes.c_char),
+  ('segmentEnabled', ctypes.c_ubyte),
+  ('segmentMapUpdate', ctypes.c_ubyte),
+  ('segmentMapTemporalUpdate', ctypes.c_ubyte),
+  ('segmentFeatureMode', ctypes.c_ubyte),
+  ('segmentFeatureEnable', ((ctypes.c_ubyte * 4) * 8)),
+  ('segmentFeatureData', ((ctypes.c_int16 * 4) * 8)),
+  ('modeRefLfEnabled', ctypes.c_char),
+  ('mbRefLfDelta', (ctypes.c_char * 4)),
+  ('mbModeLfDelta', (ctypes.c_char * 2)),
+  ('reserved5', ctypes.c_char),
+  ('v1', nvdec_vp9_pic_v1_s),
+  ('ssm', nvdec_pass2_otf_ext_s),
+]
+nvdec_vp9_pic_s = struct__nvdec_vp9_pic_s
+class nvdec_nmv_context(Struct): pass
+nvdec_nmv_context._fields_ = [
+  ('joints', (ctypes.c_ubyte * 3)),
+  ('sign', (ctypes.c_ubyte * 2)),
+  ('class0', ((ctypes.c_ubyte * 1) * 2)),
+  ('fp', ((ctypes.c_ubyte * 3) * 2)),
+  ('class0_hp', (ctypes.c_ubyte * 2)),
+  ('hp', (ctypes.c_ubyte * 2)),
+  ('classes', ((ctypes.c_ubyte * 10) * 2)),
+  ('class0_fp', (((ctypes.c_ubyte * 3) * 2) * 2)),
+  ('bits', ((ctypes.c_ubyte * 10) * 2)),
+]
+class nvdec_nmv_context_counts(Struct): pass
+nvdec_nmv_context_counts._fields_ = [
+  ('joints', (ctypes.c_uint32 * 4)),
+  ('sign', ((ctypes.c_uint32 * 2) * 2)),
+  ('classes', ((ctypes.c_uint32 * 11) * 2)),
+  ('class0', ((ctypes.c_uint32 * 2) * 2)),
+  ('bits', (((ctypes.c_uint32 * 2) * 10) * 2)),
+  ('class0_fp', (((ctypes.c_uint32 * 4) * 2) * 2)),
+  ('fp', ((ctypes.c_uint32 * 4) * 2)),
+  ('class0_hp', ((ctypes.c_uint32 * 2) * 2)),
+  ('hp', ((ctypes.c_uint32 * 2) * 2)),
+]
+class struct_nvdec_vp9AdaptiveEntropyProbs_s(Struct): pass
+struct_nvdec_vp9AdaptiveEntropyProbs_s._fields_ = [
+  ('inter_mode_prob', ((ctypes.c_ubyte * 4) * 7)),
+  ('intra_inter_prob', (ctypes.c_ubyte * 4)),
+  ('uv_mode_prob', ((ctypes.c_ubyte * 8) * 10)),
+  ('tx8x8_prob', ((ctypes.c_ubyte * 1) * 2)),
+  ('tx16x16_prob', ((ctypes.c_ubyte * 2) * 2)),
+  ('tx32x32_prob', ((ctypes.c_ubyte * 3) * 2)),
+  ('sb_ymode_probB', ((ctypes.c_ubyte * 1) * 4)),
+  ('sb_ymode_prob', ((ctypes.c_ubyte * 8) * 4)),
+  ('partition_prob', (((ctypes.c_ubyte * 4) * 16) * 2)),
+  ('uv_mode_probB', ((ctypes.c_ubyte * 1) * 10)),
+  ('switchable_interp_prob', ((ctypes.c_ubyte * 2) * 4)),
+  ('comp_inter_prob', (ctypes.c_ubyte * 5)),
+  ('mbskip_probs', (ctypes.c_ubyte * 3)),
+  ('pad1', (ctypes.c_ubyte * 1)),
+  ('nmvc', nvdec_nmv_context),
+  ('single_ref_prob', ((ctypes.c_ubyte * 2) * 5)),
+  ('comp_ref_prob', (ctypes.c_ubyte * 5)),
+  ('pad2', (ctypes.c_ubyte * 17)),
+  ('probCoeffs', (((((ctypes.c_ubyte * 4) * 6) * 6) * 2) * 2)),
+  ('probCoeffs8x8', (((((ctypes.c_ubyte * 4) * 6) * 6) * 2) * 2)),
+  ('probCoeffs16x16', (((((ctypes.c_ubyte * 4) * 6) * 6) * 2) * 2)),
+  ('probCoeffs32x32', (((((ctypes.c_ubyte * 4) * 6) * 6) * 2) * 2)),
+]
+nvdec_vp9AdaptiveEntropyProbs_t = struct_nvdec_vp9AdaptiveEntropyProbs_s
+class struct_nvdec_vp9EntropyProbs_s(Struct): pass
+struct_nvdec_vp9EntropyProbs_s._fields_ = [
+  ('kf_bmode_prob', (((ctypes.c_ubyte * 8) * 10) * 10)),
+  ('kf_bmode_probB', (((ctypes.c_ubyte * 1) * 10) * 10)),
+  ('ref_pred_probs', (ctypes.c_ubyte * 3)),
+  ('mb_segment_tree_probs', (ctypes.c_ubyte * 7)),
+  ('segment_pred_probs', (ctypes.c_ubyte * 3)),
+  ('ref_scores', (ctypes.c_ubyte * 4)),
+  ('prob_comppred', (ctypes.c_ubyte * 2)),
+  ('pad1', (ctypes.c_ubyte * 9)),
+  ('kf_uv_mode_prob', ((ctypes.c_ubyte * 8) * 10)),
+  ('kf_uv_mode_probB', ((ctypes.c_ubyte * 1) * 10)),
+  ('pad2', (ctypes.c_ubyte * 6)),
+  ('a', nvdec_vp9AdaptiveEntropyProbs_t),
+]
+nvdec_vp9EntropyProbs_t = struct_nvdec_vp9EntropyProbs_s
+class struct_nvdec_vp9EntropyCounts_s(Struct): pass
+struct_nvdec_vp9EntropyCounts_s._fields_ = [
+  ('inter_mode_counts', (((ctypes.c_uint32 * 2) * 3) * 7)),
+  ('sb_ymode_counts', ((ctypes.c_uint32 * 10) * 4)),
+  ('uv_mode_counts', ((ctypes.c_uint32 * 10) * 10)),
+  ('partition_counts', ((ctypes.c_uint32 * 4) * 16)),
+  ('switchable_interp_counts', ((ctypes.c_uint32 * 3) * 4)),
+  ('intra_inter_count', ((ctypes.c_uint32 * 2) * 4)),
+  ('comp_inter_count', ((ctypes.c_uint32 * 2) * 5)),
+  ('single_ref_count', (((ctypes.c_uint32 * 2) * 2) * 5)),
+  ('comp_ref_count', ((ctypes.c_uint32 * 2) * 5)),
+  ('tx32x32_count', ((ctypes.c_uint32 * 4) * 2)),
+  ('tx16x16_count', ((ctypes.c_uint32 * 3) * 2)),
+  ('tx8x8_count', ((ctypes.c_uint32 * 2) * 2)),
+  ('mbskip_count', ((ctypes.c_uint32 * 2) * 3)),
+  ('nmvcount', nvdec_nmv_context_counts),
+  ('countCoeffs', (((((ctypes.c_uint32 * 4) * 6) * 6) * 2) * 2)),
+  ('countCoeffs8x8', (((((ctypes.c_uint32 * 4) * 6) * 6) * 2) * 2)),
+  ('countCoeffs16x16', (((((ctypes.c_uint32 * 4) * 6) * 6) * 2) * 2)),
+  ('countCoeffs32x32', (((((ctypes.c_uint32 * 4) * 6) * 6) * 2) * 2)),
+  ('countEobs', (((((ctypes.c_uint32 * 6) * 6) * 2) * 2) * 4)),
+]
+nvdec_vp9EntropyCounts_t = struct_nvdec_vp9EntropyCounts_s
+class struct__nvdec_pass2_otf_s(Struct): pass
+struct__nvdec_pass2_otf_s._fields_ = [
+  ('wrapped_session_key', (ctypes.c_uint32 * 4)),
+  ('wrapped_content_key', (ctypes.c_uint32 * 4)),
+  ('initialization_vector', (ctypes.c_uint32 * 4)),
+  ('enable_encryption', ctypes.c_uint32,1),
+  ('key_increment', ctypes.c_uint32,6),
+  ('encryption_mode', ctypes.c_uint32,4),
+  ('key_slot_index', ctypes.c_uint32,4),
+  ('ssm_en', ctypes.c_uint32,1),
+  ('reserved1', ctypes.c_uint32,16),
+]
+nvdec_pass2_otf_s = struct__nvdec_pass2_otf_s
+class struct__nvdec_display_param_s(Struct): pass
+struct__nvdec_display_param_s._fields_ = [
+  ('enableTFOutput', ctypes.c_uint32,1),
+  ('VC1MapYFlag', ctypes.c_uint32,1),
+  ('MapYValue', ctypes.c_uint32,3),
+  ('VC1MapUVFlag', ctypes.c_uint32,1),
+  ('MapUVValue', ctypes.c_uint32,3),
+  ('OutStride', ctypes.c_uint32,8),
+  ('TilingFormat', ctypes.c_uint32,3),
+  ('OutputStructure', ctypes.c_uint32,1),
+  ('reserved0', ctypes.c_uint32,11),
+  ('OutputTop', (ctypes.c_int32 * 2)),
+  ('OutputBottom', (ctypes.c_int32 * 2)),
+  ('enableHistogram', ctypes.c_uint32,1),
+  ('HistogramStartX', ctypes.c_uint32,12),
+  ('HistogramStartY', ctypes.c_uint32,12),
+  ('reserved1', ctypes.c_uint32,7),
+  ('HistogramEndX', ctypes.c_uint32,12),
+  ('HistogramEndY', ctypes.c_uint32,12),
+  ('reserved2', ctypes.c_uint32,8),
+]
+nvdec_display_param_s = struct__nvdec_display_param_s
+class struct__nvdec_dpb_entry_s(Struct): pass
+struct__nvdec_dpb_entry_s._fields_ = [
+  ('index', ctypes.c_uint32,7),
+  ('col_idx', ctypes.c_uint32,5),
+  ('state', ctypes.c_uint32,2),
+  ('is_long_term', ctypes.c_uint32,1),
+  ('not_existing', ctypes.c_uint32,1),
+  ('is_field', ctypes.c_uint32,1),
+  ('top_field_marking', ctypes.c_uint32,4),
+  ('bottom_field_marking', ctypes.c_uint32,4),
+  ('output_memory_layout', ctypes.c_uint32,1),
+  ('reserved', ctypes.c_uint32,6),
+  ('FieldOrderCnt', (ctypes.c_uint32 * 2)),
+  ('FrameIdx', ctypes.c_int32),
+]
+nvdec_dpb_entry_s = struct__nvdec_dpb_entry_s
+class struct__nvdec_h264_pic_s(Struct): pass
+struct__nvdec_h264_pic_s._fields_ = [
+  ('encryption_params', nvdec_pass2_otf_s),
+  ('eos', (ctypes.c_ubyte * 16)),
+  ('explicitEOSPresentFlag', ctypes.c_ubyte),
+  ('hint_dump_en', ctypes.c_ubyte),
+  ('reserved0', (ctypes.c_ubyte * 2)),
+  ('stream_len', ctypes.c_uint32),
+  ('slice_count', ctypes.c_uint32),
+  ('mbhist_buffer_size', ctypes.c_uint32),
+  ('gptimer_timeout_value', ctypes.c_uint32),
+  ('log2_max_pic_order_cnt_lsb_minus4', ctypes.c_int32),
+  ('delta_pic_order_always_zero_flag', ctypes.c_int32),
+  ('frame_mbs_only_flag', ctypes.c_int32),
+  ('PicWidthInMbs', ctypes.c_int32),
+  ('FrameHeightInMbs', ctypes.c_int32),
+  ('tileFormat', ctypes.c_uint32,2),
+  ('gob_height', ctypes.c_uint32,3),
+  ('reserverd_surface_format', ctypes.c_uint32,27),
+  ('entropy_coding_mode_flag', ctypes.c_int32),
+  ('pic_order_present_flag', ctypes.c_int32),
+  ('num_ref_idx_l0_active_minus1', ctypes.c_int32),
+  ('num_ref_idx_l1_active_minus1', ctypes.c_int32),
+  ('deblocking_filter_control_present_flag', ctypes.c_int32),
+  ('redundant_pic_cnt_present_flag', ctypes.c_int32),
+  ('transform_8x8_mode_flag', ctypes.c_int32),
+  ('pitch_luma', ctypes.c_uint32),
+  ('pitch_chroma', ctypes.c_uint32),
+  ('luma_top_offset', ctypes.c_uint32),
+  ('luma_bot_offset', ctypes.c_uint32),
+  ('luma_frame_offset', ctypes.c_uint32),
+  ('chroma_top_offset', ctypes.c_uint32),
+  ('chroma_bot_offset', ctypes.c_uint32),
+  ('chroma_frame_offset', ctypes.c_uint32),
+  ('HistBufferSize', ctypes.c_uint32),
+  ('MbaffFrameFlag', ctypes.c_uint32,1),
+  ('direct_8x8_inference_flag', ctypes.c_uint32,1),
+  ('weighted_pred_flag', ctypes.c_uint32,1),
+  ('constrained_intra_pred_flag', ctypes.c_uint32,1),
+  ('ref_pic_flag', ctypes.c_uint32,1),
+  ('field_pic_flag', ctypes.c_uint32,1),
+  ('bottom_field_flag', ctypes.c_uint32,1),
+  ('second_field', ctypes.c_uint32,1),
+  ('log2_max_frame_num_minus4', ctypes.c_uint32,4),
+  ('chroma_format_idc', ctypes.c_uint32,2),
+  ('pic_order_cnt_type', ctypes.c_uint32,2),
+  ('pic_init_qp_minus26', ctypes.c_int32,6),
+  ('chroma_qp_index_offset', ctypes.c_int32,5),
+  ('second_chroma_qp_index_offset', ctypes.c_int32,5),
+  ('weighted_bipred_idc', ctypes.c_uint32,2),
+  ('CurrPicIdx', ctypes.c_uint32,7),
+  ('CurrColIdx', ctypes.c_uint32,5),
+  ('frame_num', ctypes.c_uint32,16),
+  ('frame_surfaces', ctypes.c_uint32,1),
+  ('output_memory_layout', ctypes.c_uint32,1),
+  ('CurrFieldOrderCnt', (ctypes.c_int32 * 2)),
+  ('dpb', (nvdec_dpb_entry_s * 16)),
+  ('WeightScale', (((ctypes.c_ubyte * 4) * 4) * 6)),
+  ('WeightScale8x8', (((ctypes.c_ubyte * 8) * 8) * 2)),
+  ('num_inter_view_refs_lX', (ctypes.c_ubyte * 2)),
+  ('reserved1', (ctypes.c_char * 14)),
+  ('inter_view_refidx_lX', ((ctypes.c_byte * 16) * 2)),
+  ('lossless_ipred8x8_filter_enable', ctypes.c_uint32,1),
+  ('qpprime_y_zero_transform_bypass_flag', ctypes.c_uint32,1),
+  ('reserved2', ctypes.c_uint32,30),
+  ('displayPara', nvdec_display_param_s),
+  ('ssm', nvdec_pass2_otf_ext_s),
+]
+nvdec_h264_pic_s = struct__nvdec_h264_pic_s
+enum__vc1_fcm_e = CEnum(ctypes.c_uint32)
+FCM_PROGRESSIVE = enum__vc1_fcm_e.define('FCM_PROGRESSIVE', 0)
+FCM_FRAME_INTERLACE = enum__vc1_fcm_e.define('FCM_FRAME_INTERLACE', 2)
+FCM_FIELD_INTERLACE = enum__vc1_fcm_e.define('FCM_FIELD_INTERLACE', 3)
+
+vc1_fcm_e = enum__vc1_fcm_e
+enum__syntax_vc1_ptype_e = CEnum(ctypes.c_uint32)
+PTYPE_I = enum__syntax_vc1_ptype_e.define('PTYPE_I', 0)
+PTYPE_P = enum__syntax_vc1_ptype_e.define('PTYPE_P', 1)
+PTYPE_B = enum__syntax_vc1_ptype_e.define('PTYPE_B', 2)
+PTYPE_BI = enum__syntax_vc1_ptype_e.define('PTYPE_BI', 3)
+PTYPE_SKIPPED = enum__syntax_vc1_ptype_e.define('PTYPE_SKIPPED', 4)
+
+syntax_vc1_ptype_e = enum__syntax_vc1_ptype_e
+enum_vc1_mvmode_e = CEnum(ctypes.c_uint32)
+MVMODE_MIXEDMV = enum_vc1_mvmode_e.define('MVMODE_MIXEDMV', 0)
+MVMODE_1MV = enum_vc1_mvmode_e.define('MVMODE_1MV', 1)
+MVMODE_1MV_HALFPEL = enum_vc1_mvmode_e.define('MVMODE_1MV_HALFPEL', 2)
+MVMODE_1MV_HALFPEL_BILINEAR = enum_vc1_mvmode_e.define('MVMODE_1MV_HALFPEL_BILINEAR', 3)
+MVMODE_INTENSITY_COMPENSATION = enum_vc1_mvmode_e.define('MVMODE_INTENSITY_COMPENSATION', 4)
+
+enum__vc1_fptype_e = CEnum(ctypes.c_uint32)
+FPTYPE_I_I = enum__vc1_fptype_e.define('FPTYPE_I_I', 0)
+FPTYPE_I_P = enum__vc1_fptype_e.define('FPTYPE_I_P', 1)
+FPTYPE_P_I = enum__vc1_fptype_e.define('FPTYPE_P_I', 2)
+FPTYPE_P_P = enum__vc1_fptype_e.define('FPTYPE_P_P', 3)
+FPTYPE_B_B = enum__vc1_fptype_e.define('FPTYPE_B_B', 4)
+FPTYPE_B_BI = enum__vc1_fptype_e.define('FPTYPE_B_BI', 5)
+FPTYPE_BI_B = enum__vc1_fptype_e.define('FPTYPE_BI_B', 6)
+FPTYPE_BI_BI = enum__vc1_fptype_e.define('FPTYPE_BI_BI', 7)
+
+vc1_fptype_e = enum__vc1_fptype_e
+enum__vc1_dqprofile_e = CEnum(ctypes.c_uint32)
+DQPROFILE_ALL_FOUR_EDGES = enum__vc1_dqprofile_e.define('DQPROFILE_ALL_FOUR_EDGES', 0)
+DQPROFILE_DOUBLE_EDGE = enum__vc1_dqprofile_e.define('DQPROFILE_DOUBLE_EDGE', 1)
+DQPROFILE_SINGLE_EDGE = enum__vc1_dqprofile_e.define('DQPROFILE_SINGLE_EDGE', 2)
+DQPROFILE_ALL_MACROBLOCKS = enum__vc1_dqprofile_e.define('DQPROFILE_ALL_MACROBLOCKS', 3)
+
+vc1_dqprofile_e = enum__vc1_dqprofile_e
+class struct__nvdec_vc1_pic_s(Struct): pass
+struct__nvdec_vc1_pic_s._fields_ = [
+  ('encryption_params', nvdec_pass2_otf_s),
+  ('eos', (ctypes.c_ubyte * 16)),
+  ('prefixStartCode', (ctypes.c_ubyte * 4)),
+  ('bitstream_offset', ctypes.c_uint32),
+  ('explicitEOSPresentFlag', ctypes.c_ubyte),
+  ('reserved0', (ctypes.c_ubyte * 3)),
+  ('stream_len', ctypes.c_uint32),
+  ('slice_count', ctypes.c_uint32),
+  ('scratch_pic_buffer_size', ctypes.c_uint32),
+  ('gptimer_timeout_value', ctypes.c_uint32),
+  ('FrameWidth', ctypes.c_uint16),
+  ('FrameHeight', ctypes.c_uint16),
+  ('profile', ctypes.c_ubyte),
+  ('postprocflag', ctypes.c_ubyte),
+  ('pulldown', ctypes.c_ubyte),
+  ('interlace', ctypes.c_ubyte),
+  ('tfcntrflag', ctypes.c_ubyte),
+  ('finterpflag', ctypes.c_ubyte),
+  ('psf', ctypes.c_ubyte),
+  ('tileFormat', ctypes.c_ubyte,2),
+  ('gob_height', ctypes.c_ubyte,3),
+  ('reserverd_surface_format', ctypes.c_ubyte,3),
+  ('multires', ctypes.c_ubyte),
+  ('syncmarker', ctypes.c_ubyte),
+  ('rangered', ctypes.c_ubyte),
+  ('maxbframes', ctypes.c_ubyte),
+  ('dquant', ctypes.c_ubyte),
+  ('panscan_flag', ctypes.c_ubyte),
+  ('refdist_flag', ctypes.c_ubyte),
+  ('quantizer', ctypes.c_ubyte),
+  ('extended_mv', ctypes.c_ubyte),
+  ('extended_dmv', ctypes.c_ubyte),
+  ('overlap', ctypes.c_ubyte),
+  ('vstransform', ctypes.c_ubyte),
+  ('refdist', ctypes.c_char),
+  ('reserved1', (ctypes.c_char * 3)),
+  ('fcm', vc1_fcm_e),
+  ('ptype', syntax_vc1_ptype_e),
+  ('tfcntr', ctypes.c_int32),
+  ('rptfrm', ctypes.c_int32),
+  ('tff', ctypes.c_int32),
+  ('rndctrl', ctypes.c_int32),
+  ('pqindex', ctypes.c_int32),
+  ('halfqp', ctypes.c_int32),
+  ('pquantizer', ctypes.c_int32),
+  ('postproc', ctypes.c_int32),
+  ('condover', ctypes.c_int32),
+  ('transacfrm', ctypes.c_int32),
+  ('transacfrm2', ctypes.c_int32),
+  ('transdctab', ctypes.c_int32),
+  ('pqdiff', ctypes.c_int32),
+  ('abspq', ctypes.c_int32),
+  ('dquantfrm', ctypes.c_int32),
+  ('dqprofile', vc1_dqprofile_e),
+  ('dqsbedge', ctypes.c_int32),
+  ('dqdbedge', ctypes.c_int32),
+  ('dqbilevel', ctypes.c_int32),
+  ('mvrange', ctypes.c_int32),
+  ('mvmode', enum_vc1_mvmode_e),
+  ('mvmode2', enum_vc1_mvmode_e),
+  ('lumscale', ctypes.c_int32),
+  ('lumshift', ctypes.c_int32),
+  ('mvtab', ctypes.c_int32),
+  ('cbptab', ctypes.c_int32),
+  ('ttmbf', ctypes.c_int32),
+  ('ttfrm', ctypes.c_int32),
+  ('bfraction', ctypes.c_int32),
+  ('fptype', vc1_fptype_e),
+  ('numref', ctypes.c_int32),
+  ('reffield', ctypes.c_int32),
+  ('dmvrange', ctypes.c_int32),
+  ('intcompfield', ctypes.c_int32),
+  ('lumscale1', ctypes.c_int32),
+  ('lumshift1', ctypes.c_int32),
+  ('lumscale2', ctypes.c_int32),
+  ('lumshift2', ctypes.c_int32),
+  ('mbmodetab', ctypes.c_int32),
+  ('imvtab', ctypes.c_int32),
+  ('icbptab', ctypes.c_int32),
+  ('fourmvbptab', ctypes.c_int32),
+  ('fourmvswitch', ctypes.c_int32),
+  ('intcomp', ctypes.c_int32),
+  ('twomvbptab', ctypes.c_int32),
+  ('rangeredfrm', ctypes.c_int32),
+  ('HistBufferSize', ctypes.c_uint32),
+  ('FrameStride', (ctypes.c_uint32 * 2)),
+  ('luma_top_offset', ctypes.c_uint32),
+  ('luma_bot_offset', ctypes.c_uint32),
+  ('luma_frame_offset', ctypes.c_uint32),
+  ('chroma_top_offset', ctypes.c_uint32),
+  ('chroma_bot_offset', ctypes.c_uint32),
+  ('chroma_frame_offset', ctypes.c_uint32),
+  ('CodedWidth', ctypes.c_uint16),
+  ('CodedHeight', ctypes.c_uint16),
+  ('loopfilter', ctypes.c_ubyte),
+  ('fastuvmc', ctypes.c_ubyte),
+  ('output_memory_layout', ctypes.c_ubyte),
+  ('ref_memory_layout', (ctypes.c_ubyte * 2)),
+  ('reserved3', (ctypes.c_ubyte * 3)),
+  ('displayPara', nvdec_display_param_s),
+  ('ssm', nvdec_pass2_otf_ext_s),
+]
+nvdec_vc1_pic_s = struct__nvdec_vc1_pic_s
+class struct__nvdec_mpeg2_pic_s(Struct): pass
+struct__nvdec_mpeg2_pic_s._fields_ = [
+  ('encryption_params', nvdec_pass2_otf_s),
+  ('eos', (ctypes.c_ubyte * 16)),
+  ('explicitEOSPresentFlag', ctypes.c_ubyte),
+  ('reserved0', (ctypes.c_ubyte * 3)),
+  ('stream_len', ctypes.c_uint32),
+  ('slice_count', ctypes.c_uint32),
+  ('gptimer_timeout_value', ctypes.c_uint32),
+  ('FrameWidth', ctypes.c_int16),
+  ('FrameHeight', ctypes.c_int16),
+  ('picture_structure', ctypes.c_ubyte),
+  ('picture_coding_type', ctypes.c_ubyte),
+  ('intra_dc_precision', ctypes.c_ubyte),
+  ('frame_pred_frame_dct', ctypes.c_char),
+  ('concealment_motion_vectors', ctypes.c_char),
+  ('intra_vlc_format', ctypes.c_char),
+  ('tileFormat', ctypes.c_ubyte,2),
+  ('gob_height', ctypes.c_ubyte,3),
+  ('reserverd_surface_format', ctypes.c_ubyte,3),
+  ('reserved1', ctypes.c_char),
+  ('f_code', (ctypes.c_char * 4)),
+  ('PicWidthInMbs', ctypes.c_uint16),
+  ('FrameHeightInMbs', ctypes.c_uint16),
+  ('pitch_luma', ctypes.c_uint32),
+  ('pitch_chroma', ctypes.c_uint32),
+  ('luma_top_offset', ctypes.c_uint32),
+  ('luma_bot_offset', ctypes.c_uint32),
+  ('luma_frame_offset', ctypes.c_uint32),
+  ('chroma_top_offset', ctypes.c_uint32),
+  ('chroma_bot_offset', ctypes.c_uint32),
+  ('chroma_frame_offset', ctypes.c_uint32),
+  ('HistBufferSize', ctypes.c_uint32),
+  ('output_memory_layout', ctypes.c_uint16),
+  ('alternate_scan', ctypes.c_uint16),
+  ('secondfield', ctypes.c_uint16),
+  ('rounding_type', ctypes.c_uint16),
+  ('MbInfoSizeInBytes', ctypes.c_uint32),
+  ('q_scale_type', ctypes.c_uint32),
+  ('top_field_first', ctypes.c_uint32),
+  ('full_pel_fwd_vector', ctypes.c_uint32),
+  ('full_pel_bwd_vector', ctypes.c_uint32),
+  ('quant_mat_8x8intra', (ctypes.c_ubyte * 64)),
+  ('quant_mat_8x8nonintra', (ctypes.c_ubyte * 64)),
+  ('ref_memory_layout', (ctypes.c_uint32 * 2)),
+  ('displayPara', nvdec_display_param_s),
+  ('ssm', nvdec_pass2_otf_ext_s),
+]
+nvdec_mpeg2_pic_s = struct__nvdec_mpeg2_pic_s
+class struct__nvdec_mpeg4_pic_s(Struct): pass
+struct__nvdec_mpeg4_pic_s._fields_ = [
+  ('encryption_params', nvdec_pass2_otf_s),
+  ('eos', (ctypes.c_ubyte * 16)),
+  ('explicitEOSPresentFlag', ctypes.c_ubyte),
+  ('reserved2', (ctypes.c_ubyte * 3)),
+  ('stream_len', ctypes.c_uint32),
+  ('slice_count', ctypes.c_uint32),
+  ('scratch_pic_buffer_size', ctypes.c_uint32),
+  ('gptimer_timeout_value', ctypes.c_uint32),
+  ('FrameWidth', ctypes.c_int16),
+  ('FrameHeight', ctypes.c_int16),
+  ('vop_time_increment_bitcount', ctypes.c_char),
+  ('resync_marker_disable', ctypes.c_char),
+  ('tileFormat', ctypes.c_ubyte,2),
+  ('gob_height', ctypes.c_ubyte,3),
+  ('reserverd_surface_format', ctypes.c_ubyte,3),
+  ('reserved3', ctypes.c_char),
+  ('width', ctypes.c_int32),
+  ('height', ctypes.c_int32),
+  ('FrameStride', (ctypes.c_uint32 * 2)),
+  ('luma_top_offset', ctypes.c_uint32),
+  ('luma_bot_offset', ctypes.c_uint32),
+  ('luma_frame_offset', ctypes.c_uint32),
+  ('chroma_top_offset', ctypes.c_uint32),
+  ('chroma_bot_offset', ctypes.c_uint32),
+  ('chroma_frame_offset', ctypes.c_uint32),
+  ('HistBufferSize', ctypes.c_uint32),
+  ('trd', (ctypes.c_int32 * 2)),
+  ('trb', (ctypes.c_int32 * 2)),
+  ('divx_flags', ctypes.c_int32),
+  ('vop_fcode_forward', ctypes.c_int16),
+  ('vop_fcode_backward', ctypes.c_int16),
+  ('interlaced', ctypes.c_ubyte),
+  ('quant_type', ctypes.c_ubyte),
+  ('quarter_sample', ctypes.c_ubyte),
+  ('short_video_header', ctypes.c_ubyte),
+  ('curr_output_memory_layout', ctypes.c_ubyte),
+  ('ptype', ctypes.c_ubyte),
+  ('rnd', ctypes.c_ubyte),
+  ('alternate_vertical_scan_flag', ctypes.c_ubyte),
+  ('top_field_flag', ctypes.c_ubyte),
+  ('reserved0', (ctypes.c_ubyte * 3)),
+  ('intra_quant_mat', (ctypes.c_ubyte * 64)),
+  ('nonintra_quant_mat', (ctypes.c_ubyte * 64)),
+  ('ref_memory_layout', (ctypes.c_ubyte * 2)),
+  ('reserved1', (ctypes.c_ubyte * 34)),
+  ('displayPara', nvdec_display_param_s),
+]
+nvdec_mpeg4_pic_s = struct__nvdec_mpeg4_pic_s
+enum_VP8_FRAME_TYPE = CEnum(ctypes.c_uint32)
+VP8_KEYFRAME = enum_VP8_FRAME_TYPE.define('VP8_KEYFRAME', 0)
+VP8_INTERFRAME = enum_VP8_FRAME_TYPE.define('VP8_INTERFRAME', 1)
+
+enum_VP8_FRAME_SFC_ID = CEnum(ctypes.c_uint32)
+VP8_GOLDEN_FRAME_SFC = enum_VP8_FRAME_SFC_ID.define('VP8_GOLDEN_FRAME_SFC', 0)
+VP8_ALTREF_FRAME_SFC = enum_VP8_FRAME_SFC_ID.define('VP8_ALTREF_FRAME_SFC', 1)
+VP8_LAST_FRAME_SFC = enum_VP8_FRAME_SFC_ID.define('VP8_LAST_FRAME_SFC', 2)
+VP8_CURR_FRAME_SFC = enum_VP8_FRAME_SFC_ID.define('VP8_CURR_FRAME_SFC', 3)
+
+class struct__nvdec_vp8_pic_s(Struct): pass
+struct__nvdec_vp8_pic_s._fields_ = [
+  ('encryption_params', nvdec_pass2_otf_s),
+  ('gptimer_timeout_value', ctypes.c_uint32),
+  ('FrameWidth', ctypes.c_uint16),
+  ('FrameHeight', ctypes.c_uint16),
+  ('keyFrame', ctypes.c_ubyte),
+  ('version', ctypes.c_ubyte),
+  ('tileFormat', ctypes.c_ubyte,2),
+  ('gob_height', ctypes.c_ubyte,3),
+  ('reserverd_surface_format', ctypes.c_ubyte,3),
+  ('errorConcealOn', ctypes.c_ubyte),
+  ('firstPartSize', ctypes.c_uint32),
+  ('HistBufferSize', ctypes.c_uint32),
+  ('VLDBufferSize', ctypes.c_uint32),
+  ('FrameStride', (ctypes.c_uint32 * 2)),
+  ('luma_top_offset', ctypes.c_uint32),
+  ('luma_bot_offset', ctypes.c_uint32),
+  ('luma_frame_offset', ctypes.c_uint32),
+  ('chroma_top_offset', ctypes.c_uint32),
+  ('chroma_bot_offset', ctypes.c_uint32),
+  ('chroma_frame_offset', ctypes.c_uint32),
+  ('displayPara', nvdec_display_param_s),
+  ('current_output_memory_layout', ctypes.c_char),
+  ('output_memory_layout', (ctypes.c_char * 3)),
+  ('segmentation_feature_data_update', ctypes.c_ubyte),
+  ('reserved1', (ctypes.c_ubyte * 3)),
+  ('resultValue', ctypes.c_uint32),
+  ('partition_offset', (ctypes.c_uint32 * 8)),
+  ('ssm', nvdec_pass2_otf_ext_s),
+]
+nvdec_vp8_pic_s = struct__nvdec_vp8_pic_s
+class struct__bytes_of_data_s(Struct): pass
+struct__bytes_of_data_s._fields_ = [
+  ('clear_bytes', ctypes.c_uint32),
+  ('encypted_bytes', ctypes.c_uint32),
+]
+bytes_of_data_s = struct__bytes_of_data_s
+class struct__nvdec_pass1_input_data_s(Struct): pass
+struct__nvdec_pass1_input_data_s._fields_ = [
+  ('sample_size', (bytes_of_data_s * 32)),
+  ('initialization_vector', ((ctypes.c_uint32 * 4) * 32)),
+  ('IvValid', (ctypes.c_ubyte * 32)),
+  ('stream_len', ctypes.c_uint32),
+  ('clearBufferSize', ctypes.c_uint32),
+  ('reencryptBufferSize', ctypes.c_uint32),
+  ('vp8coeffPartitonBufferSize', ctypes.c_uint32),
+  ('PrevWidth', ctypes.c_uint32),
+  ('num_nals', ctypes.c_uint32,16),
+  ('drm_mode', ctypes.c_uint32,8),
+  ('key_sel', ctypes.c_uint32,4),
+  ('codec', ctypes.c_uint32,4),
+  ('TotalSizeOfClearData', ctypes.c_uint32),
+  ('SliceHdrOffset', ctypes.c_uint32),
+  ('EncryptBlkCnt', ctypes.c_uint32,16),
+  ('SkipBlkCnt', ctypes.c_uint32,16),
+]
+nvdec_pass1_input_data_s = struct__nvdec_pass1_input_data_s
+class struct__nvdec_pass1_output_data_s(Struct): pass
+class struct__nvdec_pass1_output_data_s_0(ctypes.Union): pass
+struct__nvdec_pass1_output_data_s_0._fields_ = [
+  ('partition_size', (ctypes.c_uint32 * 8)),
+  ('vp9_frame_sizes', (ctypes.c_uint32 * 8)),
+]
+struct__nvdec_pass1_output_data_s._anonymous_ = ['_0']
+struct__nvdec_pass1_output_data_s._fields_ = [
+  ('clear_header_size', ctypes.c_uint32),
+  ('reencrypt_data_size', ctypes.c_uint32),
+  ('clear_token_data_size', ctypes.c_uint32),
+  ('key_increment', ctypes.c_uint32,6),
+  ('encryption_mode', ctypes.c_uint32,4),
+  ('bReEncrypted', ctypes.c_uint32,1),
+  ('bvp9SuperFrame', ctypes.c_uint32,1),
+  ('vp9NumFramesMinus1', ctypes.c_uint32,3),
+  ('reserved1', ctypes.c_uint32,17),
+  ('wrapped_session_key', (ctypes.c_uint32 * 4)),
+  ('wrapped_content_key', (ctypes.c_uint32 * 4)),
+  ('initialization_vector', (ctypes.c_uint32 * 4)),
+  ('_0', struct__nvdec_pass1_output_data_s_0),
+  ('vp9_clear_hdr_size', (ctypes.c_uint32 * 8)),
+]
+nvdec_pass1_output_data_s = struct__nvdec_pass1_output_data_s
+class struct__scale_factors_reference_s(Struct): pass
+struct__scale_factors_reference_s._fields_ = [
+  ('x_scale_fp', ctypes.c_int16),
+  ('y_scale_fp', ctypes.c_int16),
+]
+scale_factors_reference_s = struct__scale_factors_reference_s
+class struct__frame_info_t(Struct): pass
+struct__frame_info_t._fields_ = [
+  ('width', ctypes.c_uint16),
+  ('height', ctypes.c_uint16),
+  ('stride', (ctypes.c_uint16 * 2)),
+  ('frame_buffer_idx', ctypes.c_uint32),
+]
+frame_info_t = struct__frame_info_t
+class struct__ref_frame_struct_s(Struct): pass
+struct__ref_frame_struct_s._fields_ = [
+  ('info', frame_info_t),
+  ('sf', scale_factors_reference_s),
+  ('sign_bias', ctypes.c_ubyte,1),
+  ('wmtype', ctypes.c_ubyte,2),
+  ('reserved_rf', ctypes.c_ubyte,5),
+  ('frame_off', ctypes.c_int16),
+  ('roffset', ctypes.c_int16),
+]
+ref_frame_struct_s = struct__ref_frame_struct_s
+class struct__av1_fgs_cfg_t(Struct): pass
+struct__av1_fgs_cfg_t._fields_ = [
+  ('apply_grain', ctypes.c_uint16,1),
+  ('overlap_flag', ctypes.c_uint16,1),
+  ('clip_to_restricted_range', ctypes.c_uint16,1),
+  ('chroma_scaling_from_luma', ctypes.c_uint16,1),
+  ('num_y_points_b', ctypes.c_uint16,1),
+  ('num_cb_points_b', ctypes.c_uint16,1),
+  ('num_cr_points_b', ctypes.c_uint16,1),
+  ('scaling_shift', ctypes.c_uint16,4),
+  ('reserved_fgs', ctypes.c_uint16,5),
+  ('sw_random_seed', ctypes.c_uint16),
+  ('cb_offset', ctypes.c_int16),
+  ('cr_offset', ctypes.c_int16),
+  ('cb_mult', ctypes.c_char),
+  ('cb_luma_mult', ctypes.c_char),
+  ('cr_mult', ctypes.c_char),
+  ('cr_luma_mult', ctypes.c_char),
+]
+av1_fgs_cfg_t = struct__av1_fgs_cfg_t
+class struct__nvdec_av1_pic_s(Struct): pass
+struct__nvdec_av1_pic_s._fields_ = [
+  ('encryption_params', nvdec_pass2_otf_s),
+  ('ssm', nvdec_pass2_otf_ext_s),
+  ('fgs_cfg', av1_fgs_cfg_t),
+  ('gptimer_timeout_value', ctypes.c_uint32),
+  ('stream_len', ctypes.c_uint32),
+  ('reserved12', ctypes.c_uint32),
+  ('use_128x128_superblock', ctypes.c_uint32,1),
+  ('chroma_format', ctypes.c_uint32,2),
+  ('bit_depth', ctypes.c_uint32,4),
+  ('enable_filter_intra', ctypes.c_uint32,1),
+  ('enable_intra_edge_filter', ctypes.c_uint32,1),
+  ('enable_interintra_compound', ctypes.c_uint32,1),
+  ('enable_masked_compound', ctypes.c_uint32,1),
+  ('enable_dual_filter', ctypes.c_uint32,1),
+  ('reserved10', ctypes.c_uint32,1),
+  ('reserved0', ctypes.c_uint32,3),
+  ('enable_jnt_comp', ctypes.c_uint32,1),
+  ('reserved1', ctypes.c_uint32,1),
+  ('enable_cdef', ctypes.c_uint32,1),
+  ('reserved11', ctypes.c_uint32,1),
+  ('enable_fgs', ctypes.c_uint32,1),
+  ('enable_substream_decoding', ctypes.c_uint32,1),
+  ('reserved2', ctypes.c_uint32,10),
+  ('frame_type', ctypes.c_uint32,2),
+  ('show_frame', ctypes.c_uint32,1),
+  ('reserved13', ctypes.c_uint32,1),
+  ('disable_cdf_update', ctypes.c_uint32,1),
+  ('allow_screen_content_tools', ctypes.c_uint32,1),
+  ('cur_frame_force_integer_mv', ctypes.c_uint32,1),
+  ('scale_denom_minus9', ctypes.c_uint32,3),
+  ('allow_intrabc', ctypes.c_uint32,1),
+  ('allow_high_precision_mv', ctypes.c_uint32,1),
+  ('interp_filter', ctypes.c_uint32,3),
+  ('switchable_motion_mode', ctypes.c_uint32,1),
+  ('use_ref_frame_mvs', ctypes.c_uint32,1),
+  ('refresh_frame_context', ctypes.c_uint32,1),
+  ('delta_q_present_flag', ctypes.c_uint32,1),
+  ('delta_q_res', ctypes.c_uint32,2),
+  ('delta_lf_present_flag', ctypes.c_uint32,1),
+  ('delta_lf_res', ctypes.c_uint32,2),
+  ('delta_lf_multi', ctypes.c_uint32,1),
+  ('reserved3', ctypes.c_uint32,1),
+  ('coded_lossless', ctypes.c_uint32,1),
+  ('tile_enabled', ctypes.c_uint32,1),
+  ('reserved4', ctypes.c_uint32,2),
+  ('superres_is_scaled', ctypes.c_uint32,1),
+  ('reserved_fh', ctypes.c_uint32,1),
+  ('tile_cols', ctypes.c_uint32,8),
+  ('tile_rows', ctypes.c_uint32,8),
+  ('context_update_tile_id', ctypes.c_uint32,16),
+  ('cdef_damping_minus_3', ctypes.c_uint32,2),
+  ('cdef_bits', ctypes.c_uint32,2),
+  ('frame_tx_mode', ctypes.c_uint32,3),
+  ('frame_reference_mode', ctypes.c_uint32,2),
+  ('skip_mode_flag', ctypes.c_uint32,1),
+  ('skip_ref0', ctypes.c_uint32,4),
+  ('skip_ref1', ctypes.c_uint32,4),
+  ('allow_warp', ctypes.c_uint32,1),
+  ('reduced_tx_set_used', ctypes.c_uint32,1),
+  ('ref_scaling_enable', ctypes.c_uint32,1),
+  ('reserved5', ctypes.c_uint32,1),
+  ('reserved6', ctypes.c_uint32,10),
+  ('superres_upscaled_width', ctypes.c_uint16),
+  ('superres_luma_step', ctypes.c_uint16),
+  ('superres_chroma_step', ctypes.c_uint16),
+  ('superres_init_luma_subpel_x', ctypes.c_uint16),
+  ('superres_init_chroma_subpel_x', ctypes.c_uint16),
+  ('base_qindex', ctypes.c_ubyte),
+  ('y_dc_delta_q', ctypes.c_char),
+  ('u_dc_delta_q', ctypes.c_char),
+  ('v_dc_delta_q', ctypes.c_char),
+  ('u_ac_delta_q', ctypes.c_char),
+  ('v_ac_delta_q', ctypes.c_char),
+  ('qm_y', ctypes.c_ubyte),
+  ('qm_u', ctypes.c_ubyte),
+  ('qm_v', ctypes.c_ubyte),
+  ('cdef_y_pri_strength', ctypes.c_uint32),
+  ('cdef_uv_pri_strength', ctypes.c_uint32),
+  ('cdef_y_sec_strength', ctypes.c_uint32,16),
+  ('cdef_uv_sec_strength', ctypes.c_uint32,16),
+  ('segment_enabled', ctypes.c_ubyte),
+  ('segment_update_map', ctypes.c_ubyte),
+  ('reserved7', ctypes.c_ubyte),
+  ('segment_temporal_update', ctypes.c_ubyte),
+  ('segment_feature_data', ((ctypes.c_int16 * 8) * 8)),
+  ('last_active_segid', ctypes.c_ubyte),
+  ('segid_preskip', ctypes.c_ubyte),
+  ('prevsegid_flag', ctypes.c_ubyte),
+  ('segment_quant_sign', ctypes.c_ubyte,8),
+  ('filter_level', (ctypes.c_ubyte * 2)),
+  ('filter_level_u', ctypes.c_ubyte),
+  ('filter_level_v', ctypes.c_ubyte),
+  ('lf_sharpness_level', ctypes.c_ubyte),
+  ('lf_ref_deltas', (ctypes.c_char * 8)),
+  ('lf_mode_deltas', (ctypes.c_char * 2)),
+  ('lr_type', ctypes.c_ubyte),
+  ('lr_unit_size', ctypes.c_ubyte),
+  ('current_frame', frame_info_t),
+  ('ref_frame', (ref_frame_struct_s * 7)),
+  ('use_temporal0_mvs', ctypes.c_uint32,1),
+  ('use_temporal1_mvs', ctypes.c_uint32,1),
+  ('use_temporal2_mvs', ctypes.c_uint32,1),
+  ('mf1_type', ctypes.c_uint32,3),
+  ('mf2_type', ctypes.c_uint32,3),
+  ('mf3_type', ctypes.c_uint32,3),
+  ('reserved_mfmv', ctypes.c_uint32,20),
+  ('mfmv_offset', ((ctypes.c_int16 * 7) * 3)),
+  ('mfmv_side', ((ctypes.c_char * 7) * 3)),
+  ('tileformat', ctypes.c_ubyte,2),
+  ('gob_height', ctypes.c_ubyte,3),
+  ('errorConcealOn', ctypes.c_ubyte,1),
+  ('reserver8', ctypes.c_ubyte,2),
+  ('stream_error_detection', ctypes.c_ubyte,1),
+  ('mv_error_detection', ctypes.c_ubyte,1),
+  ('coeff_error_detection', ctypes.c_ubyte,1),
+  ('reserved_eh', ctypes.c_ubyte,5),
+  ('Av1FltTopOffset', ctypes.c_uint32),
+  ('Av1FltVertOffset', ctypes.c_uint32),
+  ('Av1CdefVertOffset', ctypes.c_uint32),
+  ('Av1LrVertOffset', ctypes.c_uint32),
+  ('Av1HusVertOffset', ctypes.c_uint32),
+  ('Av1FgsVertOffset', ctypes.c_uint32),
+  ('enable_histogram', ctypes.c_uint32,1),
+  ('sw_skip_start_length', ctypes.c_uint32,14),
+  ('reserved_stat', ctypes.c_uint32,17),
+]
+nvdec_av1_pic_s = struct__nvdec_av1_pic_s
+class struct__AV1FilmGrainMemory(Struct): pass
+struct__AV1FilmGrainMemory._fields_ = [
+  ('scaling_lut_y', (ctypes.c_ubyte * 256)),
+  ('scaling_lut_cb', (ctypes.c_ubyte * 256)),
+  ('scaling_lut_cr', (ctypes.c_ubyte * 256)),
+  ('cropped_luma_grain_block', (ctypes.c_int16 * 4096)),
+  ('cropped_cb_grain_block', (ctypes.c_int16 * 1024)),
+  ('cropped_cr_grain_block', (ctypes.c_int16 * 1024)),
+]
+AV1FilmGrainMemory = struct__AV1FilmGrainMemory
+class struct__AV1TileInfo_OLD(Struct): pass
+struct__AV1TileInfo_OLD._fields_ = [
+  ('width_in_sb', ctypes.c_ubyte),
+  ('height_in_sb', ctypes.c_ubyte),
+  ('tile_start_b0', ctypes.c_ubyte),
+  ('tile_start_b1', ctypes.c_ubyte),
+  ('tile_start_b2', ctypes.c_ubyte),
+  ('tile_start_b3', ctypes.c_ubyte),
+  ('tile_end_b0', ctypes.c_ubyte),
+  ('tile_end_b1', ctypes.c_ubyte),
+  ('tile_end_b2', ctypes.c_ubyte),
+  ('tile_end_b3', ctypes.c_ubyte),
+  ('padding', (ctypes.c_ubyte * 6)),
+]
+AV1TileInfo_OLD = struct__AV1TileInfo_OLD
+class struct__AV1TileInfo(Struct): pass
+struct__AV1TileInfo._fields_ = [
+  ('width_in_sb', ctypes.c_ubyte),
+  ('padding_w', ctypes.c_ubyte),
+  ('height_in_sb', ctypes.c_ubyte),
+  ('padding_h', ctypes.c_ubyte),
+]
+AV1TileInfo = struct__AV1TileInfo
+class struct__AV1TileStreamInfo(Struct): pass
+struct__AV1TileStreamInfo._fields_ = [
+  ('tile_start', ctypes.c_uint32),
+  ('tile_end', ctypes.c_uint32),
+  ('padding', (ctypes.c_ubyte * 8)),
+]
+AV1TileStreamInfo = struct__AV1TileStreamInfo
+class struct__nvdec_new_h264_pic_s(Struct): pass
+struct__nvdec_new_h264_pic_s._fields_ = [
+  ('encryption_params', nvdec_pass2_otf_s),
+  ('eos', (ctypes.c_ubyte * 16)),
+  ('explicitEOSPresentFlag', ctypes.c_ubyte),
+  ('hint_dump_en', ctypes.c_ubyte),
+  ('reserved0', (ctypes.c_ubyte * 2)),
+  ('stream_len', ctypes.c_uint32),
+  ('slice_count', ctypes.c_uint32),
+  ('mbhist_buffer_size', ctypes.c_uint32),
+  ('gptimer_timeout_value', ctypes.c_uint32),
+  ('log2_max_pic_order_cnt_lsb_minus4', ctypes.c_int32),
+  ('delta_pic_order_always_zero_flag', ctypes.c_int32),
+  ('frame_mbs_only_flag', ctypes.c_int32),
+  ('PicWidthInMbs', ctypes.c_int32),
+  ('FrameHeightInMbs', ctypes.c_int32),
+  ('tileFormat', ctypes.c_uint32,2),
+  ('gob_height', ctypes.c_uint32,3),
+  ('reserverd_surface_format', ctypes.c_uint32,27),
+  ('entropy_coding_mode_flag', ctypes.c_int32),
+  ('pic_order_present_flag', ctypes.c_int32),
+  ('num_ref_idx_l0_active_minus1', ctypes.c_int32),
+  ('num_ref_idx_l1_active_minus1', ctypes.c_int32),
+  ('deblocking_filter_control_present_flag', ctypes.c_int32),
+  ('redundant_pic_cnt_present_flag', ctypes.c_int32),
+  ('transform_8x8_mode_flag', ctypes.c_int32),
+  ('pitch_luma', ctypes.c_uint32),
+  ('pitch_chroma', ctypes.c_uint32),
+  ('luma_top_offset', ctypes.c_uint32),
+  ('luma_bot_offset', ctypes.c_uint32),
+  ('luma_frame_offset', ctypes.c_uint32),
+  ('chroma_top_offset', ctypes.c_uint32),
+  ('chroma_bot_offset', ctypes.c_uint32),
+  ('chroma_frame_offset', ctypes.c_uint32),
+  ('HistBufferSize', ctypes.c_uint32),
+  ('MbaffFrameFlag', ctypes.c_uint32,1),
+  ('direct_8x8_inference_flag', ctypes.c_uint32,1),
+  ('weighted_pred_flag', ctypes.c_uint32,1),
+  ('constrained_intra_pred_flag', ctypes.c_uint32,1),
+  ('ref_pic_flag', ctypes.c_uint32,1),
+  ('field_pic_flag', ctypes.c_uint32,1),
+  ('bottom_field_flag', ctypes.c_uint32,1),
+  ('second_field', ctypes.c_uint32,1),
+  ('log2_max_frame_num_minus4', ctypes.c_uint32,4),
+  ('chroma_format_idc', ctypes.c_uint32,2),
+  ('pic_order_cnt_type', ctypes.c_uint32,2),
+  ('pic_init_qp_minus26', ctypes.c_int32,6),
+  ('chroma_qp_index_offset', ctypes.c_int32,5),
+  ('second_chroma_qp_index_offset', ctypes.c_int32,5),
+  ('weighted_bipred_idc', ctypes.c_uint32,2),
+  ('CurrPicIdx', ctypes.c_uint32,7),
+  ('CurrColIdx', ctypes.c_uint32,5),
+  ('frame_num', ctypes.c_uint32,16),
+  ('frame_surfaces', ctypes.c_uint32,1),
+  ('output_memory_layout', ctypes.c_uint32,1),
+  ('CurrFieldOrderCnt', (ctypes.c_int32 * 2)),
+  ('dpb', (nvdec_dpb_entry_s * 16)),
+  ('WeightScale', (((ctypes.c_ubyte * 4) * 4) * 6)),
+  ('WeightScale8x8', (((ctypes.c_ubyte * 8) * 8) * 2)),
+  ('num_inter_view_refs_lX', (ctypes.c_ubyte * 2)),
+  ('reserved1', (ctypes.c_char * 14)),
+  ('inter_view_refidx_lX', ((ctypes.c_byte * 16) * 2)),
+  ('lossless_ipred8x8_filter_enable', ctypes.c_uint32,1),
+  ('qpprime_y_zero_transform_bypass_flag', ctypes.c_uint32,1),
+  ('reserved2', ctypes.c_uint32,30),
+  ('displayPara', nvdec_display_param_s),
+  ('ssm', nvdec_pass2_otf_ext_s),
+]
+nvdec_new_h264_pic_s = struct__nvdec_new_h264_pic_s
+class nvdec_crc_s(Struct): pass
+nvdec_crc_s._fields_ = [
+  ('dbg_crc_enable_partb', ctypes.c_uint32,1),
+  ('dbg_crc_enable_partc', ctypes.c_uint32,1),
+  ('dbg_crc_enable_partd', ctypes.c_uint32,1),
+  ('dbg_crc_enable_parte', ctypes.c_uint32,1),
+  ('dbg_crc_intf_partb', ctypes.c_uint32,6),
+  ('dbg_crc_intf_partc', ctypes.c_uint32,6),
+  ('dbg_crc_intf_partd', ctypes.c_uint32,6),
+  ('dbg_crc_intf_parte', ctypes.c_uint32,6),
+  ('reserved0', ctypes.c_uint32,4),
+  ('dbg_crc_partb_golden', (ctypes.c_uint32 * 4)),
+  ('dbg_crc_partc_golden', (ctypes.c_uint32 * 4)),
+  ('dbg_crc_partd_golden', (ctypes.c_uint32 * 4)),
+  ('dbg_crc_parte_golden', (ctypes.c_uint32 * 4)),
+  ('dbg_crc_comp_partb', ctypes.c_uint32,4),
+  ('dbg_crc_comp_partc', ctypes.c_uint32,4),
+  ('dbg_crc_comp_partd', ctypes.c_uint32,4),
+  ('dbg_crc_comp_parte', ctypes.c_uint32,4),
+  ('reserved1', ctypes.c_uint32,16),
+  ('reserved2', (ctypes.c_ubyte * 56)),
 ]
 class struct_NV0000_ALLOC_PARAMETERS(Struct): pass
 NvHandle = ctypes.c_uint32
@@ -24,9 +1333,16 @@ struct_NV0000_ALLOC_PARAMETERS._fields_ = [
   ('pOsPidInfo', NvP64),
 ]
 NV0000_ALLOC_PARAMETERS = struct_NV0000_ALLOC_PARAMETERS
+class struct_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS(Struct): pass
+NvU64 = ctypes.c_uint64
+struct_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS._fields_ = [
+  ('offset', NvU64),
+  ('limit', NvU64),
+  ('hVASpace', NvHandle),
+]
+NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS = struct_NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS
 class struct_NV0080_ALLOC_PARAMETERS(Struct): pass
 NvV32 = ctypes.c_uint32
-NvU64 = ctypes.c_uint64
 struct_NV0080_ALLOC_PARAMETERS._fields_ = [
   ('deviceId', NvU32),
   ('hClientShare', NvHandle),
@@ -2142,6 +3458,36 @@ struct_NV90F1_CTRL_VASPACE_GET_VAS_HEAP_INFO_PARAMS._fields_ = [
   ('numFreeBlocks', NvU32),
 ]
 NV90F1_CTRL_VASPACE_GET_VAS_HEAP_INFO_PARAMS = struct_NV90F1_CTRL_VASPACE_GET_VAS_HEAP_INFO_PARAMS
+NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS = struct_NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS
+NVA06F_CTRL_BIND_PARAMS = struct_NVA06F_CTRL_BIND_PARAMS
+class struct_NVA06F_CTRL_SET_ERROR_NOTIFIER_PARAMS(Struct): pass
+struct_NVA06F_CTRL_SET_ERROR_NOTIFIER_PARAMS._fields_ = [
+  ('bNotifyEachChannelInTSG', NvBool),
+]
+NVA06F_CTRL_SET_ERROR_NOTIFIER_PARAMS = struct_NVA06F_CTRL_SET_ERROR_NOTIFIER_PARAMS
+class struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS(Struct): pass
+struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS._fields_ = [
+  ('channelInterleaveLevel', NvU32),
+]
+NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS = struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS
+NVA06F_CTRL_SET_INTERLEAVE_LEVEL_PARAMS = struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS
+NVA06F_CTRL_GET_INTERLEAVE_LEVEL_PARAMS = struct_NVA06F_CTRL_INTERLEAVE_LEVEL_PARAMS
+class struct_NVA06F_CTRL_RESTART_RUNLIST_PARAMS(Struct): pass
+struct_NVA06F_CTRL_RESTART_RUNLIST_PARAMS._fields_ = [
+  ('bForceRestart', NvBool),
+  ('bBypassWait', NvBool),
+]
+NVA06F_CTRL_RESTART_RUNLIST_PARAMS = struct_NVA06F_CTRL_RESTART_RUNLIST_PARAMS
+class struct_NVA06F_CTRL_STOP_CHANNEL_PARAMS(Struct): pass
+struct_NVA06F_CTRL_STOP_CHANNEL_PARAMS._fields_ = [
+  ('bImmediate', NvBool),
+]
+NVA06F_CTRL_STOP_CHANNEL_PARAMS = struct_NVA06F_CTRL_STOP_CHANNEL_PARAMS
+class struct_NVA06F_CTRL_GET_CONTEXT_ID_PARAMS(Struct): pass
+struct_NVA06F_CTRL_GET_CONTEXT_ID_PARAMS._fields_ = [
+  ('contextId', NvU32),
+]
+NVA06F_CTRL_GET_CONTEXT_ID_PARAMS = struct_NVA06F_CTRL_GET_CONTEXT_ID_PARAMS
 class struct_NV0000_CTRL_CLIENT_GET_ADDR_SPACE_TYPE_PARAMS(Struct): pass
 struct_NV0000_CTRL_CLIENT_GET_ADDR_SPACE_TYPE_PARAMS._fields_ = [
   ('hObject', NvHandle),
@@ -5861,6 +7207,7 @@ struct_NV2080_CTRL_FLCN_USTREAMER_EVENT_FILTER._fields_ = [
 ]
 NV2080_CTRL_FLCN_USTREAMER_EVENT_FILTER = struct_NV2080_CTRL_FLCN_USTREAMER_EVENT_FILTER
 class struct_NV2080_CTRL_FLCN_USTREAMER_QUEUE_INFO_PARAMS(Struct): pass
+NvUPtr = ctypes.c_uint64
 struct_NV2080_CTRL_FLCN_USTREAMER_QUEUE_INFO_PARAMS._fields_ = [
   ('engine', NvU32),
   ('pageSize', NvU32),
@@ -11859,6 +13206,402 @@ NV_WARN_NULL_OBJECT = nv_status_codes.define('NV_WARN_NULL_OBJECT', 65543)
 NV_WARN_OUT_OF_RANGE = nv_status_codes.define('NV_WARN_OUT_OF_RANGE', 65544)
 NV_WARN_THRESHOLD_CROSSED = nv_status_codes.define('NV_WARN_THRESHOLD_CROSSED', 65545)
 
+NVC9B0_VIDEO_DECODER = (0x0000C9B0)
+NVC9B0_NOP = (0x00000100)
+NVC9B0_PM_TRIGGER = (0x00000140)
+NVC9B0_SET_APPLICATION_ID = (0x00000200)
+NVC9B0_SET_APPLICATION_ID_ID_MPEG12 = (0x00000001)
+NVC9B0_SET_APPLICATION_ID_ID_VC1 = (0x00000002)
+NVC9B0_SET_APPLICATION_ID_ID_H264 = (0x00000003)
+NVC9B0_SET_APPLICATION_ID_ID_MPEG4 = (0x00000004)
+NVC9B0_SET_APPLICATION_ID_ID_VP8 = (0x00000005)
+NVC9B0_SET_APPLICATION_ID_ID_CTR64 = (0x00000006)
+NVC9B0_SET_APPLICATION_ID_ID_HEVC = (0x00000007)
+NVC9B0_SET_APPLICATION_ID_ID_NEW_H264 = (0x00000008)
+NVC9B0_SET_APPLICATION_ID_ID_VP9 = (0x00000009)
+NVC9B0_SET_APPLICATION_ID_ID_PASS1 = (0x0000000A)
+NVC9B0_SET_APPLICATION_ID_ID_HEVC_PARSER = (0x0000000C)
+NVC9B0_SET_APPLICATION_ID_ID_UCODE_TEST = (0x0000000D)
+NVC9B0_SET_APPLICATION_ID_ID_HWDRM_PR_DECRYPTAUDIO = (0x0000000E)
+NVC9B0_SET_APPLICATION_ID_ID_HWDRM_PR_DECRYPTAUDIOMULTIPLE = (0x0000000F)
+NVC9B0_SET_APPLICATION_ID_ID_HWDRM_PR_PREPROCESSENCRYPTEDDATA = (0x00000010)
+NVC9B0_SET_APPLICATION_ID_ID_VP9_WITH_PARSER = (0x00000011)
+NVC9B0_SET_APPLICATION_ID_ID_AVD = (0x00000012)
+NVC9B0_SET_APPLICATION_ID_ID_HW_DRM_PR4_DECRYPTCONTENTMULTIPLE = (0x00000013)
+NVC9B0_SET_APPLICATION_ID_ID_DHKE = (0x00000020)
+NVC9B0_SET_WATCHDOG_TIMER = (0x00000204)
+NVC9B0_SEMAPHORE_A = (0x00000240)
+NVC9B0_SEMAPHORE_B = (0x00000244)
+NVC9B0_SEMAPHORE_C = (0x00000248)
+NVC9B0_CTX_SAVE_AREA = (0x0000024C)
+NVC9B0_CTX_SWITCH = (0x00000250)
+NVC9B0_CTX_SWITCH_OP_CTX_UPDATE = (0x00000000)
+NVC9B0_CTX_SWITCH_OP_CTX_SAVE = (0x00000001)
+NVC9B0_CTX_SWITCH_OP_CTX_RESTORE = (0x00000002)
+NVC9B0_CTX_SWITCH_OP_CTX_FORCERESTORE = (0x00000003)
+NVC9B0_CTX_SWITCH_CTXID_VALID_FALSE = (0x00000000)
+NVC9B0_CTX_SWITCH_CTXID_VALID_TRUE = (0x00000001)
+NVC9B0_SET_SEMAPHORE_PAYLOAD_LOWER = (0x00000254)
+NVC9B0_SET_SEMAPHORE_PAYLOAD_UPPER = (0x00000258)
+NVC9B0_SET_MONITORED_FENCE_SIGNAL_ADDRESS_BASE_A = (0x0000025C)
+NVC9B0_SET_MONITORED_FENCE_SIGNAL_ADDRESS_BASE_B = (0x00000260)
+NVC9B0_EXECUTE = (0x00000300)
+NVC9B0_EXECUTE_NOTIFY_DISABLE = (0x00000000)
+NVC9B0_EXECUTE_NOTIFY_ENABLE = (0x00000001)
+NVC9B0_EXECUTE_NOTIFY_ON_END = (0x00000000)
+NVC9B0_EXECUTE_NOTIFY_ON_BEGIN = (0x00000001)
+NVC9B0_EXECUTE_PREDICATION_DISABLE = (0x00000000)
+NVC9B0_EXECUTE_PREDICATION_ENABLE = (0x00000001)
+NVC9B0_EXECUTE_PREDICATION_OP_EQUAL_ZERO = (0x00000000)
+NVC9B0_EXECUTE_PREDICATION_OP_NOT_EQUAL_ZERO = (0x00000001)
+NVC9B0_EXECUTE_AWAKEN_DISABLE = (0x00000000)
+NVC9B0_EXECUTE_AWAKEN_ENABLE = (0x00000001)
+NVC9B0_SEMAPHORE_D = (0x00000304)
+NVC9B0_SEMAPHORE_D_STRUCTURE_SIZE_ONE = (0x00000000)
+NVC9B0_SEMAPHORE_D_STRUCTURE_SIZE_FOUR = (0x00000001)
+NVC9B0_SEMAPHORE_D_STRUCTURE_SIZE_TWO = (0x00000002)
+NVC9B0_SEMAPHORE_D_AWAKEN_ENABLE_FALSE = (0x00000000)
+NVC9B0_SEMAPHORE_D_AWAKEN_ENABLE_TRUE = (0x00000001)
+NVC9B0_SEMAPHORE_D_OPERATION_RELEASE = (0x00000000)
+NVC9B0_SEMAPHORE_D_OPERATION_RESERVED_0 = (0x00000001)
+NVC9B0_SEMAPHORE_D_OPERATION_RESERVED_1 = (0x00000002)
+NVC9B0_SEMAPHORE_D_OPERATION_TRAP = (0x00000003)
+NVC9B0_SEMAPHORE_D_FLUSH_DISABLE_FALSE = (0x00000000)
+NVC9B0_SEMAPHORE_D_FLUSH_DISABLE_TRUE = (0x00000001)
+NVC9B0_SEMAPHORE_D_TRAP_TYPE_UNCONDITIONAL = (0x00000000)
+NVC9B0_SEMAPHORE_D_TRAP_TYPE_CONDITIONAL = (0x00000001)
+NVC9B0_SEMAPHORE_D_TRAP_TYPE_CONDITIONAL_EXT = (0x00000002)
+NVC9B0_SEMAPHORE_D_PAYLOAD_SIZE_32BIT = (0x00000000)
+NVC9B0_SEMAPHORE_D_PAYLOAD_SIZE_64BIT = (0x00000001)
+NVC9B0_SET_PREDICATION_OFFSET_UPPER = (0x00000308)
+NVC9B0_SET_PREDICATION_OFFSET_LOWER = (0x0000030C)
+NVC9B0_SET_AUXILIARY_DATA_BUFFER = (0x00000310)
+NVC9B0_SET_CONTROL_PARAMS = (0x00000400)
+NVC9B0_SET_CONTROL_PARAMS_CODEC_TYPE_MPEG1 = (0x00000000)
+NVC9B0_SET_CONTROL_PARAMS_CODEC_TYPE_MPEG2 = (0x00000001)
+NVC9B0_SET_CONTROL_PARAMS_CODEC_TYPE_VC1 = (0x00000002)
+NVC9B0_SET_CONTROL_PARAMS_CODEC_TYPE_H264 = (0x00000003)
+NVC9B0_SET_CONTROL_PARAMS_CODEC_TYPE_MPEG4 = (0x00000004)
+NVC9B0_SET_CONTROL_PARAMS_CODEC_TYPE_DIVX3 = (0x00000004)
+NVC9B0_SET_CONTROL_PARAMS_CODEC_TYPE_VP8 = (0x00000005)
+NVC9B0_SET_CONTROL_PARAMS_CODEC_TYPE_HEVC = (0x00000007)
+NVC9B0_SET_CONTROL_PARAMS_CODEC_TYPE_VP9 = (0x00000009)
+NVC9B0_SET_CONTROL_PARAMS_CODEC_TYPE_AV1 = (0x0000000A)
+NVC9B0_SET_CONTROL_PARAMS_TESTRUN_ENV_TRACE3D_RUN = (0x00000000)
+NVC9B0_SET_CONTROL_PARAMS_TESTRUN_ENV_PROD_RUN = (0x00000001)
+NVC9B0_SET_DRV_PIC_SETUP_OFFSET = (0x00000404)
+NVC9B0_SET_IN_BUF_BASE_OFFSET = (0x00000408)
+NVC9B0_SET_PICTURE_INDEX = (0x0000040C)
+NVC9B0_SET_SLICE_OFFSETS_BUF_OFFSET = (0x00000410)
+NVC9B0_SET_COLOC_DATA_OFFSET = (0x00000414)
+NVC9B0_SET_HISTORY_OFFSET = (0x00000418)
+NVC9B0_SET_DISPLAY_BUF_SIZE = (0x0000041C)
+NVC9B0_SET_HISTOGRAM_OFFSET = (0x00000420)
+NVC9B0_SET_NVDEC_STATUS_OFFSET = (0x00000424)
+NVC9B0_SET_DISPLAY_BUF_LUMA_OFFSET = (0x00000428)
+NVC9B0_SET_DISPLAY_BUF_CHROMA_OFFSET = (0x0000042C)
+NVC9B0_SET_PICTURE_LUMA_OFFSET0 = (0x00000430)
+NVC9B0_SET_PICTURE_LUMA_OFFSET1 = (0x00000434)
+NVC9B0_SET_PICTURE_LUMA_OFFSET2 = (0x00000438)
+NVC9B0_SET_PICTURE_LUMA_OFFSET3 = (0x0000043C)
+NVC9B0_SET_PICTURE_LUMA_OFFSET4 = (0x00000440)
+NVC9B0_SET_PICTURE_LUMA_OFFSET5 = (0x00000444)
+NVC9B0_SET_PICTURE_LUMA_OFFSET6 = (0x00000448)
+NVC9B0_SET_PICTURE_LUMA_OFFSET7 = (0x0000044C)
+NVC9B0_SET_PICTURE_LUMA_OFFSET8 = (0x00000450)
+NVC9B0_SET_PICTURE_LUMA_OFFSET9 = (0x00000454)
+NVC9B0_SET_PICTURE_LUMA_OFFSET10 = (0x00000458)
+NVC9B0_SET_PICTURE_LUMA_OFFSET11 = (0x0000045C)
+NVC9B0_SET_PICTURE_LUMA_OFFSET12 = (0x00000460)
+NVC9B0_SET_PICTURE_LUMA_OFFSET13 = (0x00000464)
+NVC9B0_SET_PICTURE_LUMA_OFFSET14 = (0x00000468)
+NVC9B0_SET_PICTURE_LUMA_OFFSET15 = (0x0000046C)
+NVC9B0_SET_PICTURE_LUMA_OFFSET16 = (0x00000470)
+NVC9B0_SET_PICTURE_CHROMA_OFFSET0 = (0x00000474)
+NVC9B0_SET_PICTURE_CHROMA_OFFSET1 = (0x00000478)
+NVC9B0_SET_PICTURE_CHROMA_OFFSET2 = (0x0000047C)
+NVC9B0_SET_PICTURE_CHROMA_OFFSET3 = (0x00000480)
+NVC9B0_SET_PICTURE_CHROMA_OFFSET4 = (0x00000484)
+NVC9B0_SET_PICTURE_CHROMA_OFFSET5 = (0x00000488)
+NVC9B0_SET_PICTURE_CHROMA_OFFSET6 = (0x0000048C)
+NVC9B0_SET_PICTURE_CHROMA_OFFSET7 = (0x00000490)
+NVC9B0_SET_PICTURE_CHROMA_OFFSET8 = (0x00000494)
+NVC9B0_SET_PICTURE_CHROMA_OFFSET9 = (0x00000498)
+NVC9B0_SET_PICTURE_CHROMA_OFFSET10 = (0x0000049C)
+NVC9B0_SET_PICTURE_CHROMA_OFFSET11 = (0x000004A0)
+NVC9B0_SET_PICTURE_CHROMA_OFFSET12 = (0x000004A4)
+NVC9B0_SET_PICTURE_CHROMA_OFFSET13 = (0x000004A8)
+NVC9B0_SET_PICTURE_CHROMA_OFFSET14 = (0x000004AC)
+NVC9B0_SET_PICTURE_CHROMA_OFFSET15 = (0x000004B0)
+NVC9B0_SET_PICTURE_CHROMA_OFFSET16 = (0x000004B4)
+NVC9B0_SET_PIC_SCRATCH_BUF_OFFSET = (0x000004B8)
+NVC9B0_SET_EXTERNAL_MVBUFFER_OFFSET = (0x000004BC)
+NVC9B0_SET_SUB_SAMPLE_MAP_OFFSET = (0x000004C0)
+NVC9B0_SET_SUB_SAMPLE_MAP_IV_OFFSET = (0x000004C4)
+NVC9B0_SET_INTRA_TOP_BUF_OFFSET = (0x000004C8)
+NVC9B0_SET_TILE_SIZE_BUF_OFFSET = (0x000004CC)
+NVC9B0_SET_FILTER_BUFFER_OFFSET = (0x000004D0)
+NVC9B0_SET_CRC_STRUCT_OFFSET = (0x000004D4)
+NVC9B0_SET_PR_SSM_CONTENT_INFO_BUF_OFFSET = (0x000004D8)
+NVC9B0_H264_SET_MBHIST_BUF_OFFSET = (0x00000500)
+NVC9B0_VP8_SET_PROB_DATA_OFFSET = (0x00000540)
+NVC9B0_VP8_SET_HEADER_PARTITION_BUF_BASE_OFFSET = (0x00000544)
+NVC9B0_HEVC_SET_SCALING_LIST_OFFSET = (0x00000580)
+NVC9B0_HEVC_SET_TILE_SIZES_OFFSET = (0x00000584)
+NVC9B0_HEVC_SET_FILTER_BUFFER_OFFSET = (0x00000588)
+NVC9B0_HEVC_SET_SAO_BUFFER_OFFSET = (0x0000058C)
+NVC9B0_HEVC_SET_SLICE_INFO_BUFFER_OFFSET = (0x00000590)
+NVC9B0_HEVC_SET_SLICE_GROUP_INDEX = (0x00000594)
+NVC9B0_VP9_SET_PROB_TAB_BUF_OFFSET = (0x000005C0)
+NVC9B0_VP9_SET_CTX_COUNTER_BUF_OFFSET = (0x000005C4)
+NVC9B0_VP9_SET_SEGMENT_READ_BUF_OFFSET = (0x000005C8)
+NVC9B0_VP9_SET_SEGMENT_WRITE_BUF_OFFSET = (0x000005CC)
+NVC9B0_VP9_SET_TILE_SIZE_BUF_OFFSET = (0x000005D0)
+NVC9B0_VP9_SET_COL_MVWRITE_BUF_OFFSET = (0x000005D4)
+NVC9B0_VP9_SET_COL_MVREAD_BUF_OFFSET = (0x000005D8)
+NVC9B0_VP9_SET_FILTER_BUFFER_OFFSET = (0x000005DC)
+NVC9B0_VP9_PARSER_SET_PIC_SETUP_OFFSET = (0x000005E0)
+NVC9B0_VP9_PARSER_SET_PREV_PIC_SETUP_OFFSET = (0x000005E4)
+NVC9B0_VP9_PARSER_SET_PROB_TAB_BUF_OFFSET = (0x000005E8)
+NVC9B0_VP9_SET_HINT_DUMP_BUF_OFFSET = (0x000005EC)
+NVC9B0_PASS1_SET_CLEAR_HEADER_OFFSET = (0x00000600)
+NVC9B0_PASS1_SET_RE_ENCRYPT_OFFSET = (0x00000604)
+NVC9B0_PASS1_SET_VP8_TOKEN_OFFSET = (0x00000608)
+NVC9B0_PASS1_SET_INPUT_DATA_OFFSET = (0x0000060C)
+NVC9B0_PASS1_SET_OUTPUT_DATA_SIZE_OFFSET = (0x00000610)
+NVC9B0_AV1_SET_PROB_TAB_READ_BUF_OFFSET = (0x00000640)
+NVC9B0_AV1_SET_PROB_TAB_WRITE_BUF_OFFSET = (0x00000644)
+NVC9B0_AV1_SET_SEGMENT_READ_BUF_OFFSET = (0x00000648)
+NVC9B0_AV1_SET_SEGMENT_WRITE_BUF_OFFSET = (0x0000064C)
+NVC9B0_AV1_SET_COL_MV0_READ_BUF_OFFSET = (0x00000650)
+NVC9B0_AV1_SET_COL_MV1_READ_BUF_OFFSET = (0x00000654)
+NVC9B0_AV1_SET_COL_MV2_READ_BUF_OFFSET = (0x00000658)
+NVC9B0_AV1_SET_COL_MVWRITE_BUF_OFFSET = (0x0000065C)
+NVC9B0_AV1_SET_GLOBAL_MODEL_BUF_OFFSET = (0x00000660)
+NVC9B0_AV1_SET_FILM_GRAIN_BUF_OFFSET = (0x00000664)
+NVC9B0_AV1_SET_TILE_STREAM_INFO_BUF_OFFSET = (0x00000668)
+NVC9B0_AV1_SET_SUB_STREAM_ENTRY_BUF_OFFSET = (0x0000066C)
+NVC9B0_AV1_SET_HINT_DUMP_BUF_OFFSET = (0x00000670)
+NVC9B0_H264_SET_SCALING_LIST_OFFSET = (0x00000680)
+NVC9B0_H264_SET_VLDHIST_BUF_OFFSET = (0x00000684)
+NVC9B0_H264_SET_EDOBOFFSET0 = (0x00000688)
+NVC9B0_H264_SET_EDOBOFFSET1 = (0x0000068C)
+NVC9B0_H264_SET_EDOBOFFSET2 = (0x00000690)
+NVC9B0_H264_SET_EDOBOFFSET3 = (0x00000694)
+NVC9B0_SET_CONTENT_INITIAL_VECTOR = lambda b: (0x00000C00 + (b)*0x00000004)
+NVC9B0_SET_CTL_COUNT = (0x00000C10)
+NVC9B0_SET_UPPER_SRC = (0x00000C14)
+NVC9B0_SET_LOWER_SRC = (0x00000C18)
+NVC9B0_SET_UPPER_DST = (0x00000C1C)
+NVC9B0_SET_LOWER_DST = (0x00000C20)
+NVC9B0_SET_BLOCK_COUNT = (0x00000C24)
+NVC9B0_PR_SET_REQUEST_BUF_OFFSET = (0x00000D00)
+NVC9B0_PR_SET_REQUEST_BUF_SIZE = (0x00000D04)
+NVC9B0_PR_SET_RESPONSE_BUF_OFFSET = (0x00000D08)
+NVC9B0_PR_SET_RESPONSE_BUF_SIZE = (0x00000D0C)
+NVC9B0_PR_SET_REQUEST_MESSAGE_BUF_OFFSET = (0x00000D10)
+NVC9B0_PR_SET_RESPONSE_MESSAGE_BUF_OFFSET = (0x00000D14)
+NVC9B0_PR_SET_LOCAL_DECRYPT_BUF_OFFSET = (0x00000D18)
+NVC9B0_PR_SET_LOCAL_DECRYPT_BUF_SIZE = (0x00000D1C)
+NVC9B0_PR_SET_CONTENT_DECRYPT_INFO_BUF_OFFSET = (0x00000D20)
+NVC9B0_PR_SET_REENCRYPTED_BITSTREAM_BUF_OFFSET = (0x00000D24)
+NVC9B0_DH_KE_SET_CHALLENGE_BUF_OFFSET = (0x00000E00)
+NVC9B0_DH_KE_SET_RESPONSE_BUF_OFFSET = (0x00000E04)
+NVC9B0_SET_SESSION_KEY = lambda b: (0x00000F00 + (b)*0x00000004)
+NVC9B0_SET_CONTENT_KEY = lambda b: (0x00000F10 + (b)*0x00000004)
+NVC9B0_PM_TRIGGER_END = (0x00001114)
+NVC9B0_ERROR_NONE = (0x00000000)
+NVC9B0_OS_ERROR_EXECUTE_INSUFFICIENT_DATA = (0x00000001)
+NVC9B0_OS_ERROR_SEMAPHORE_INSUFFICIENT_DATA = (0x00000002)
+NVC9B0_OS_ERROR_INVALID_METHOD = (0x00000003)
+NVC9B0_OS_ERROR_INVALID_DMA_PAGE = (0x00000004)
+NVC9B0_OS_ERROR_UNHANDLED_INTERRUPT = (0x00000005)
+NVC9B0_OS_ERROR_EXCEPTION = (0x00000006)
+NVC9B0_OS_ERROR_INVALID_CTXSW_REQUEST = (0x00000007)
+NVC9B0_OS_ERROR_APPLICATION = (0x00000008)
+NVC9B0_OS_ERROR_SW_BREAKPT = (0x00000009)
+NVC9B0_OS_INTERRUPT_EXECUTE_AWAKEN = (0x00000100)
+NVC9B0_OS_INTERRUPT_BACKEND_SEMAPHORE_AWAKEN = (0x00000200)
+NVC9B0_OS_INTERRUPT_CTX_ERROR_FBIF = (0x00000300)
+NVC9B0_OS_INTERRUPT_LIMIT_VIOLATION = (0x00000400)
+NVC9B0_OS_INTERRUPT_LIMIT_AND_FBIF_CTX_ERROR = (0x00000500)
+NVC9B0_OS_INTERRUPT_HALT_ENGINE = (0x00000600)
+NVC9B0_OS_INTERRUPT_TRAP_NONSTALL = (0x00000700)
+NVC9B0_H264_VLD_ERR_SEQ_DATA_INCONSISTENT = (0x00004001)
+NVC9B0_H264_VLD_ERR_PIC_DATA_INCONSISTENT = (0x00004002)
+NVC9B0_H264_VLD_ERR_SLC_DATA_BUF_ADDR_OUT_OF_BOUNDS = (0x00004100)
+NVC9B0_H264_VLD_ERR_BITSTREAM_ERROR = (0x00004101)
+NVC9B0_H264_VLD_ERR_CTX_DMA_ID_CTRL_IN_INVALID = (0x000041F8)
+NVC9B0_H264_VLD_ERR_SLC_HDR_OUT_SIZE_NOT_MULT256 = (0x00004200)
+NVC9B0_H264_VLD_ERR_SLC_DATA_OUT_SIZE_NOT_MULT256 = (0x00004201)
+NVC9B0_H264_VLD_ERR_CTX_DMA_ID_FLOW_CTRL_INVALID = (0x00004203)
+NVC9B0_H264_VLD_ERR_CTX_DMA_ID_SLC_HDR_OUT_INVALID = (0x00004204)
+NVC9B0_H264_VLD_ERR_SLC_HDR_OUT_BUF_TOO_SMALL = (0x00004205)
+NVC9B0_H264_VLD_ERR_SLC_HDR_OUT_BUF_ALREADY_VALID = (0x00004206)
+NVC9B0_H264_VLD_ERR_SLC_DATA_OUT_BUF_TOO_SMALL = (0x00004207)
+NVC9B0_H264_VLD_ERR_DATA_BUF_CNT_TOO_SMALL = (0x00004208)
+NVC9B0_H264_VLD_ERR_BITSTREAM_EMPTY = (0x00004209)
+NVC9B0_H264_VLD_ERR_FRAME_WIDTH_TOO_LARGE = (0x0000420A)
+NVC9B0_H264_VLD_ERR_FRAME_HEIGHT_TOO_LARGE = (0x0000420B)
+NVC9B0_H264_VLD_ERR_HIST_BUF_TOO_SMALL = (0x00004300)
+NVC9B0_VC1_VLD_ERR_PIC_DATA_BUF_ADDR_OUT_OF_BOUND = (0x00005100)
+NVC9B0_VC1_VLD_ERR_BITSTREAM_ERROR = (0x00005101)
+NVC9B0_VC1_VLD_ERR_PIC_HDR_OUT_SIZE_NOT_MULT256 = (0x00005200)
+NVC9B0_VC1_VLD_ERR_PIC_DATA_OUT_SIZE_NOT_MULT256 = (0x00005201)
+NVC9B0_VC1_VLD_ERR_CTX_DMA_ID_CTRL_IN_INVALID = (0x00005202)
+NVC9B0_VC1_VLD_ERR_CTX_DMA_ID_FLOW_CTRL_INVALID = (0x00005203)
+NVC9B0_VC1_VLD_ERR_CTX_DMA_ID_PIC_HDR_OUT_INVALID = (0x00005204)
+NVC9B0_VC1_VLD_ERR_SLC_HDR_OUT_BUF_TOO_SMALL = (0x00005205)
+NVC9B0_VC1_VLD_ERR_PIC_HDR_OUT_BUF_ALREADY_VALID = (0x00005206)
+NVC9B0_VC1_VLD_ERR_PIC_DATA_OUT_BUF_TOO_SMALL = (0x00005207)
+NVC9B0_VC1_VLD_ERR_DATA_INFO_IN_BUF_TOO_SMALL = (0x00005208)
+NVC9B0_VC1_VLD_ERR_BITSTREAM_EMPTY = (0x00005209)
+NVC9B0_VC1_VLD_ERR_FRAME_WIDTH_TOO_LARGE = (0x0000520A)
+NVC9B0_VC1_VLD_ERR_FRAME_HEIGHT_TOO_LARGE = (0x0000520B)
+NVC9B0_VC1_VLD_ERR_PIC_DATA_OUT_BUF_FULL_TIME_OUT = (0x00005300)
+NVC9B0_MPEG12_VLD_ERR_SLC_DATA_BUF_ADDR_OUT_OF_BOUNDS = (0x00006100)
+NVC9B0_MPEG12_VLD_ERR_BITSTREAM_ERROR = (0x00006101)
+NVC9B0_MPEG12_VLD_ERR_SLC_DATA_OUT_SIZE_NOT_MULT256 = (0x00006200)
+NVC9B0_MPEG12_VLD_ERR_CTX_DMA_ID_CTRL_IN_INVALID = (0x00006201)
+NVC9B0_MPEG12_VLD_ERR_CTX_DMA_ID_FLOW_CTRL_INVALID = (0x00006202)
+NVC9B0_MPEG12_VLD_ERR_SLC_DATA_OUT_BUF_TOO_SMALL = (0x00006203)
+NVC9B0_MPEG12_VLD_ERR_DATA_INFO_IN_BUF_TOO_SMALL = (0x00006204)
+NVC9B0_MPEG12_VLD_ERR_BITSTREAM_EMPTY = (0x00006205)
+NVC9B0_MPEG12_VLD_ERR_INVALID_PIC_STRUCTURE = (0x00006206)
+NVC9B0_MPEG12_VLD_ERR_INVALID_PIC_CODING_TYPE = (0x00006207)
+NVC9B0_MPEG12_VLD_ERR_FRAME_WIDTH_TOO_LARGE = (0x00006208)
+NVC9B0_MPEG12_VLD_ERR_FRAME_HEIGHT_TOO_LARGE = (0x00006209)
+NVC9B0_MPEG12_VLD_ERR_SLC_DATA_OUT_BUF_FULL_TIME_OUT = (0x00006300)
+NVC9B0_CMN_VLD_ERR_PDEC_RETURNED_ERROR = (0x00007101)
+NVC9B0_CMN_VLD_ERR_EDOB_FLUSH_TIME_OUT = (0x00007102)
+NVC9B0_CMN_VLD_ERR_EDOB_REWIND_TIME_OUT = (0x00007103)
+NVC9B0_CMN_VLD_ERR_VLD_WD_TIME_OUT = (0x00007104)
+NVC9B0_CMN_VLD_ERR_NUM_SLICES_ZERO = (0x00007105)
+NVC9B0_MPEG4_VLD_ERR_PIC_DATA_BUF_ADDR_OUT_OF_BOUND = (0x00008100)
+NVC9B0_MPEG4_VLD_ERR_BITSTREAM_ERROR = (0x00008101)
+NVC9B0_MPEG4_VLD_ERR_PIC_HDR_OUT_SIZE_NOT_MULT256 = (0x00008200)
+NVC9B0_MPEG4_VLD_ERR_PIC_DATA_OUT_SIZE_NOT_MULT256 = (0x00008201)
+NVC9B0_MPEG4_VLD_ERR_CTX_DMA_ID_CTRL_IN_INVALID = (0x00008202)
+NVC9B0_MPEG4_VLD_ERR_CTX_DMA_ID_FLOW_CTRL_INVALID = (0x00008203)
+NVC9B0_MPEG4_VLD_ERR_CTX_DMA_ID_PIC_HDR_OUT_INVALID = (0x00008204)
+NVC9B0_MPEG4_VLD_ERR_SLC_HDR_OUT_BUF_TOO_SMALL = (0x00008205)
+NVC9B0_MPEG4_VLD_ERR_PIC_HDR_OUT_BUF_ALREADY_VALID = (0x00008206)
+NVC9B0_MPEG4_VLD_ERR_PIC_DATA_OUT_BUF_TOO_SMALL = (0x00008207)
+NVC9B0_MPEG4_VLD_ERR_DATA_INFO_IN_BUF_TOO_SMALL = (0x00008208)
+NVC9B0_MPEG4_VLD_ERR_BITSTREAM_EMPTY = (0x00008209)
+NVC9B0_MPEG4_VLD_ERR_FRAME_WIDTH_TOO_LARGE = (0x0000820A)
+NVC9B0_MPEG4_VLD_ERR_FRAME_HEIGHT_TOO_LARGE = (0x0000820B)
+NVC9B0_MPEG4_VLD_ERR_PIC_DATA_OUT_BUF_FULL_TIME_OUT = (0x00051E01)
+NVC9B0_DEC_ERROR_MPEG12_APPTIMER_EXPIRED = (0xDEC10001)
+NVC9B0_DEC_ERROR_MPEG12_MVTIMER_EXPIRED = (0xDEC10002)
+NVC9B0_DEC_ERROR_MPEG12_INVALID_TOKEN = (0xDEC10003)
+NVC9B0_DEC_ERROR_MPEG12_SLICEDATA_MISSING = (0xDEC10004)
+NVC9B0_DEC_ERROR_MPEG12_HWERR_INTERRUPT = (0xDEC10005)
+NVC9B0_DEC_ERROR_MPEG12_DETECTED_VLD_FAILURE = (0xDEC10006)
+NVC9B0_DEC_ERROR_MPEG12_PICTURE_INIT = (0xDEC10100)
+NVC9B0_DEC_ERROR_MPEG12_STATEMACHINE_FAILURE = (0xDEC10101)
+NVC9B0_DEC_ERROR_MPEG12_INVALID_CTXID_PIC = (0xDEC10901)
+NVC9B0_DEC_ERROR_MPEG12_INVALID_CTXID_UCODE = (0xDEC10902)
+NVC9B0_DEC_ERROR_MPEG12_INVALID_CTXID_FC = (0xDEC10903)
+NVC9B0_DEC_ERROR_MPEG12_INVALID_CTXID_SLH = (0xDEC10904)
+NVC9B0_DEC_ERROR_MPEG12_INVALID_UCODE_SIZE = (0xDEC10905)
+NVC9B0_DEC_ERROR_MPEG12_INVALID_SLICE_COUNT = (0xDEC10906)
+NVC9B0_DEC_ERROR_VC1_APPTIMER_EXPIRED = (0xDEC20001)
+NVC9B0_DEC_ERROR_VC1_MVTIMER_EXPIRED = (0xDEC20002)
+NVC9B0_DEC_ERROR_VC1_INVALID_TOKEN = (0xDEC20003)
+NVC9B0_DEC_ERROR_VC1_SLICEDATA_MISSING = (0xDEC20004)
+NVC9B0_DEC_ERROR_VC1_HWERR_INTERRUPT = (0xDEC20005)
+NVC9B0_DEC_ERROR_VC1_DETECTED_VLD_FAILURE = (0xDEC20006)
+NVC9B0_DEC_ERROR_VC1_TIMEOUT_POLLING_FOR_DATA = (0xDEC20007)
+NVC9B0_DEC_ERROR_VC1_PDEC_PIC_END_UNALIGNED = (0xDEC20008)
+NVC9B0_DEC_ERROR_VC1_WDTIMER_EXPIRED = (0xDEC20009)
+NVC9B0_DEC_ERROR_VC1_ERRINTSTART = (0xDEC20010)
+NVC9B0_DEC_ERROR_VC1_IQT_ERRINT = (0xDEC20011)
+NVC9B0_DEC_ERROR_VC1_MC_ERRINT = (0xDEC20012)
+NVC9B0_DEC_ERROR_VC1_MC_IQT_ERRINT = (0xDEC20013)
+NVC9B0_DEC_ERROR_VC1_REC_ERRINT = (0xDEC20014)
+NVC9B0_DEC_ERROR_VC1_REC_IQT_ERRINT = (0xDEC20015)
+NVC9B0_DEC_ERROR_VC1_REC_MC_ERRINT = (0xDEC20016)
+NVC9B0_DEC_ERROR_VC1_REC_MC_IQT_ERRINT = (0xDEC20017)
+NVC9B0_DEC_ERROR_VC1_DBF_ERRINT = (0xDEC20018)
+NVC9B0_DEC_ERROR_VC1_DBF_IQT_ERRINT = (0xDEC20019)
+NVC9B0_DEC_ERROR_VC1_DBF_MC_ERRINT = (0xDEC2001A)
+NVC9B0_DEC_ERROR_VC1_DBF_MC_IQT_ERRINT = (0xDEC2001B)
+NVC9B0_DEC_ERROR_VC1_DBF_REC_ERRINT = (0xDEC2001C)
+NVC9B0_DEC_ERROR_VC1_DBF_REC_IQT_ERRINT = (0xDEC2001D)
+NVC9B0_DEC_ERROR_VC1_DBF_REC_MC_ERRINT = (0xDEC2001E)
+NVC9B0_DEC_ERROR_VC1_DBF_REC_MC_IQT_ERRINT = (0xDEC2001F)
+NVC9B0_DEC_ERROR_VC1_PICTURE_INIT = (0xDEC20100)
+NVC9B0_DEC_ERROR_VC1_STATEMACHINE_FAILURE = (0xDEC20101)
+NVC9B0_DEC_ERROR_VC1_INVALID_CTXID_PIC = (0xDEC20901)
+NVC9B0_DEC_ERROR_VC1_INVALID_CTXID_UCODE = (0xDEC20902)
+NVC9B0_DEC_ERROR_VC1_INVALID_CTXID_FC = (0xDEC20903)
+NVC9B0_DEC_ERROR_VC1_INVAILD_CTXID_SLH = (0xDEC20904)
+NVC9B0_DEC_ERROR_VC1_INVALID_UCODE_SIZE = (0xDEC20905)
+NVC9B0_DEC_ERROR_VC1_INVALID_SLICE_COUNT = (0xDEC20906)
+NVC9B0_DEC_ERROR_H264_APPTIMER_EXPIRED = (0xDEC30001)
+NVC9B0_DEC_ERROR_H264_MVTIMER_EXPIRED = (0xDEC30002)
+NVC9B0_DEC_ERROR_H264_INVALID_TOKEN = (0xDEC30003)
+NVC9B0_DEC_ERROR_H264_SLICEDATA_MISSING = (0xDEC30004)
+NVC9B0_DEC_ERROR_H264_HWERR_INTERRUPT = (0xDEC30005)
+NVC9B0_DEC_ERROR_H264_DETECTED_VLD_FAILURE = (0xDEC30006)
+NVC9B0_DEC_ERROR_H264_ERRINTSTART = (0xDEC30010)
+NVC9B0_DEC_ERROR_H264_IQT_ERRINT = (0xDEC30011)
+NVC9B0_DEC_ERROR_H264_MC_ERRINT = (0xDEC30012)
+NVC9B0_DEC_ERROR_H264_MC_IQT_ERRINT = (0xDEC30013)
+NVC9B0_DEC_ERROR_H264_REC_ERRINT = (0xDEC30014)
+NVC9B0_DEC_ERROR_H264_REC_IQT_ERRINT = (0xDEC30015)
+NVC9B0_DEC_ERROR_H264_REC_MC_ERRINT = (0xDEC30016)
+NVC9B0_DEC_ERROR_H264_REC_MC_IQT_ERRINT = (0xDEC30017)
+NVC9B0_DEC_ERROR_H264_DBF_ERRINT = (0xDEC30018)
+NVC9B0_DEC_ERROR_H264_DBF_IQT_ERRINT = (0xDEC30019)
+NVC9B0_DEC_ERROR_H264_DBF_MC_ERRINT = (0xDEC3001A)
+NVC9B0_DEC_ERROR_H264_DBF_MC_IQT_ERRINT = (0xDEC3001B)
+NVC9B0_DEC_ERROR_H264_DBF_REC_ERRINT = (0xDEC3001C)
+NVC9B0_DEC_ERROR_H264_DBF_REC_IQT_ERRINT = (0xDEC3001D)
+NVC9B0_DEC_ERROR_H264_DBF_REC_MC_ERRINT = (0xDEC3001E)
+NVC9B0_DEC_ERROR_H264_DBF_REC_MC_IQT_ERRINT = (0xDEC3001F)
+NVC9B0_DEC_ERROR_H264_PICTURE_INIT = (0xDEC30100)
+NVC9B0_DEC_ERROR_H264_STATEMACHINE_FAILURE = (0xDEC30101)
+NVC9B0_DEC_ERROR_H264_INVALID_CTXID_PIC = (0xDEC30901)
+NVC9B0_DEC_ERROR_H264_INVALID_CTXID_UCODE = (0xDEC30902)
+NVC9B0_DEC_ERROR_H264_INVALID_CTXID_FC = (0xDEC30903)
+NVC9B0_DEC_ERROR_H264_INVALID_CTXID_SLH = (0xDEC30904)
+NVC9B0_DEC_ERROR_H264_INVALID_UCODE_SIZE = (0xDEC30905)
+NVC9B0_DEC_ERROR_H264_INVALID_SLICE_COUNT = (0xDEC30906)
+NVC9B0_DEC_ERROR_MPEG4_APPTIMER_EXPIRED = (0xDEC40001)
+NVC9B0_DEC_ERROR_MPEG4_MVTIMER_EXPIRED = (0xDEC40002)
+NVC9B0_DEC_ERROR_MPEG4_INVALID_TOKEN = (0xDEC40003)
+NVC9B0_DEC_ERROR_MPEG4_SLICEDATA_MISSING = (0xDEC40004)
+NVC9B0_DEC_ERROR_MPEG4_HWERR_INTERRUPT = (0xDEC40005)
+NVC9B0_DEC_ERROR_MPEG4_DETECTED_VLD_FAILURE = (0xDEC40006)
+NVC9B0_DEC_ERROR_MPEG4_TIMEOUT_POLLING_FOR_DATA = (0xDEC40007)
+NVC9B0_DEC_ERROR_MPEG4_PDEC_PIC_END_UNALIGNED = (0xDEC40008)
+NVC9B0_DEC_ERROR_MPEG4_WDTIMER_EXPIRED = (0xDEC40009)
+NVC9B0_DEC_ERROR_MPEG4_ERRINTSTART = (0xDEC40010)
+NVC9B0_DEC_ERROR_MPEG4_IQT_ERRINT = (0xDEC40011)
+NVC9B0_DEC_ERROR_MPEG4_MC_ERRINT = (0xDEC40012)
+NVC9B0_DEC_ERROR_MPEG4_MC_IQT_ERRINT = (0xDEC40013)
+NVC9B0_DEC_ERROR_MPEG4_REC_ERRINT = (0xDEC40014)
+NVC9B0_DEC_ERROR_MPEG4_REC_IQT_ERRINT = (0xDEC40015)
+NVC9B0_DEC_ERROR_MPEG4_REC_MC_ERRINT = (0xDEC40016)
+NVC9B0_DEC_ERROR_MPEG4_REC_MC_IQT_ERRINT = (0xDEC40017)
+NVC9B0_DEC_ERROR_MPEG4_DBF_ERRINT = (0xDEC40018)
+NVC9B0_DEC_ERROR_MPEG4_DBF_IQT_ERRINT = (0xDEC40019)
+NVC9B0_DEC_ERROR_MPEG4_DBF_MC_ERRINT = (0xDEC4001A)
+NVC9B0_DEC_ERROR_MPEG4_DBF_MC_IQT_ERRINT = (0xDEC4001B)
+NVC9B0_DEC_ERROR_MPEG4_DBF_REC_ERRINT = (0xDEC4001C)
+NVC9B0_DEC_ERROR_MPEG4_DBF_REC_IQT_ERRINT = (0xDEC4001D)
+NVC9B0_DEC_ERROR_MPEG4_DBF_REC_MC_ERRINT = (0xDEC4001E)
+NVC9B0_DEC_ERROR_MPEG4_DBF_REC_MC_IQT_ERRINT = (0xDEC4001F)
+NVC9B0_DEC_ERROR_MPEG4_PICTURE_INIT = (0xDEC40100)
+NVC9B0_DEC_ERROR_MPEG4_STATEMACHINE_FAILURE = (0xDEC40101)
+NVC9B0_DEC_ERROR_MPEG4_INVALID_CTXID_PIC = (0xDEC40901)
+NVC9B0_DEC_ERROR_MPEG4_INVALID_CTXID_UCODE = (0xDEC40902)
+NVC9B0_DEC_ERROR_MPEG4_INVALID_CTXID_FC = (0xDEC40903)
+NVC9B0_DEC_ERROR_MPEG4_INVALID_CTXID_SLH = (0xDEC40904)
+NVC9B0_DEC_ERROR_MPEG4_INVALID_UCODE_SIZE = (0xDEC40905)
+NVC9B0_DEC_ERROR_MPEG4_INVALID_SLICE_COUNT = (0xDEC40906)
 NVC6C0_QMDV02_03_OUTER_PUT = (30, 0)
 NVC6C0_QMDV02_03_OUTER_OVERFLOW = (31, 31)
 NVC6C0_QMDV02_03_OUTER_GET = (62, 32)
@@ -13370,6 +15113,77 @@ NVCEC0_QMDV04_01_OUTER_PUT = (3038, 3008)
 NVCEC0_QMDV04_01_OUTER_OVERFLOW = (3039, 3039)
 NVCEC0_QMDV04_01_OUTER_GET = (3070, 3040)
 NVCEC0_QMDV04_01_OUTER_STICKY_OVERFLOW = (3071, 3071)
+ALIGN_UP = lambda v,n: (((v) + ((n)-1)) &~ ((n)-1))
+NVDEC_ALIGN = lambda value: ALIGN_UP(value,256)
+NVDEC_MAX_MPEG2_SLICE = 65536
+NVDEC_CODEC_MPEG1 = 0
+NVDEC_CODEC_MPEG2 = 1
+NVDEC_CODEC_VC1 = 2
+NVDEC_CODEC_H264 = 3
+NVDEC_CODEC_MPEG4 = 4
+NVDEC_CODEC_DIVX = NVDEC_CODEC_MPEG4
+NVDEC_CODEC_VP8 = 5
+NVDEC_CODEC_HEVC = 7
+NVDEC_CODEC_VP9 = 9
+NVDEC_CODEC_HEVC_PARSER = 12
+NVDEC_CODEC_AV1 = 10
+AES_MODE_MASK = 0x7
+AES_CTS_MASK = 0x1
+AES_PADDING_TYPE_MASK = 0x7
+AES_UNWRAP_KEY_MASK = 0x1
+AES_MODE_SHIFT = 0
+AES_CTS_SHIFT = 3
+AES_PADDING_TYPE_SHIFT = 4
+AES_UNWRAP_KEY_SHIFT = 7
+AES_SET_FLAG = lambda M,C,P: ((M & AES_MODE_MASK) << AES_MODE_SHIFT) | ((C & AES_CTS_MASK) << AES_CTS_SHIFT) | ((P & AES_PADDING_TYPE_MASK) << AES_PADDING_TYPE_SHIFT)
+DRM_MODE_MASK = 0x7f
+AES_GET_DRM_MODE = lambda V: (V & DRM_MODE_MASK)
+GIP_ASIC_VERT_FILTER_RAM_SIZE = 16
+GIP_ASIC_BSD_CTRL_RAM_SIZE = 4
+GIP_ASIC_SCALING_LIST_SIZE = (16*64)
+GIP_ASIC_VERT_SAO_RAM_SIZE = 16
+GIP_ASIC_TILE_SIZE = ((20*22*2*2+16+15) & ~0xF)
+GIP_ASIC_VP9_CTB_SEG_SIZE = 32
+HEVC_DBLK_TOP_SIZE_IN_SB16 = ALIGN_UP(632, 128)
+HEVC_DBLK_TOP_BUF_SIZE = lambda w: NVDEC_ALIGN( (ALIGN_UP(w,16)/16 + 2) * HEVC_DBLK_TOP_SIZE_IN_SB16)
+HEVC_DBLK_LEFT_SIZE_IN_SB16 = ALIGN_UP(506, 128)
+HEVC_DBLK_LEFT_BUF_SIZE = lambda h: NVDEC_ALIGN( (ALIGN_UP(h,16)/16 + 2) * HEVC_DBLK_LEFT_SIZE_IN_SB16)
+HEVC_SAO_LEFT_SIZE_IN_SB16 = ALIGN_UP(713, 128)
+HEVC_SAO_LEFT_BUF_SIZE = lambda h: NVDEC_ALIGN( (ALIGN_UP(h,16)/16 + 2) * HEVC_SAO_LEFT_SIZE_IN_SB16)
+VP9_DBLK_TOP_SIZE_IN_SB64 = ALIGN_UP(2000, 128)
+VP9_DBLK_TOP_BUF_SIZE = lambda w: NVDEC_ALIGN( (ALIGN_UP(w,64)/64 + 2) * VP9_DBLK_TOP_SIZE_IN_SB64)
+VP9_DBLK_LEFT_SIZE_IN_SB64 = ALIGN_UP(1600, 128)
+VP9_DBLK_LEFT_BUF_SIZE = lambda h: NVDEC_ALIGN( (ALIGN_UP(h,64)/64 + 2) * VP9_DBLK_LEFT_SIZE_IN_SB64)
+VP9_HINT_DUMP_SIZE_IN_SB64 = ((64*64)/(4*4)*8)
+VP9_HINT_DUMP_SIZE = lambda w,h: NVDEC_ALIGN(VP9_HINT_DUMP_SIZE_IN_SB64*((w+63)/64)*((h+63)/64))
+NUM_SUBSAMPLES = 32
+VP8_MAX_TOKEN_PARTITIONS = 8
+VP9_MAX_FRAMES_IN_SUPERFRAME = 8
+AV1_MAX_TILES = 256
+MAX_SUBSTREAM_ENTRY_SIZE = 32
+AV1_TEMPORAL_MV_SIZE_IN_64x64 = 256
+AV1_TEMPORAL_MV_BUF_SIZE = lambda w,h: ALIGN_UP( ALIGN_UP(w,128) * ALIGN_UP(h,128) / (64*64) * AV1_TEMPORAL_MV_SIZE_IN_64x64, 4096)
+AV1_SEGMENT_ID_SIZE_IN_64x64 = 128
+AV1_SEGMENT_ID_BUF_SIZE = lambda w,h: ALIGN_UP( ALIGN_UP(w,128) * ALIGN_UP(h,128) / (64*64) * AV1_SEGMENT_ID_SIZE_IN_64x64, 4096)
+AV1_GLOBAL_MOTION_BUF_SIZE = NVDEC_ALIGN(7*32)
+AV1_INTRA_TOP_BUF_SIZE = NVDEC_ALIGN(8*8192)
+AV1_HISTOGRAM_BUF_SIZE = NVDEC_ALIGN(1024)
+AV1_DBLK_TOP_SIZE_IN_SB64 = ALIGN_UP(1920, 128)
+AV1_DBLK_TOP_BUF_SIZE = lambda w: NVDEC_ALIGN( (ALIGN_UP(w,64)/64 + 2) * AV1_DBLK_TOP_SIZE_IN_SB64)
+AV1_DBLK_LEFT_SIZE_IN_SB64 = ALIGN_UP(1536, 128)
+AV1_DBLK_LEFT_BUF_SIZE = lambda h: NVDEC_ALIGN( (ALIGN_UP(h,64)/64 + 2) * AV1_DBLK_LEFT_SIZE_IN_SB64)
+AV1_CDEF_LEFT_SIZE_IN_SB64 = ALIGN_UP(1792, 128)
+AV1_CDEF_LEFT_BUF_SIZE = lambda h: NVDEC_ALIGN( (ALIGN_UP(h,64)/64 + 2) * AV1_CDEF_LEFT_SIZE_IN_SB64)
+AV1_HUS_LEFT_SIZE_IN_SB64 = ALIGN_UP(12544, 128)
+AV1_ASIC_HUS_LEFT_BUFFER_SIZE = lambda h: NVDEC_ALIGN( (ALIGN_UP(h,64)/64 + 2) * AV1_HUS_LEFT_SIZE_IN_SB64)
+AV1_HUS_LEFT_BUF_SIZE = lambda h: 2*AV1_ASIC_HUS_LEFT_BUFFER_SIZE(h)
+AV1_LR_LEFT_SIZE_IN_SB64 = ALIGN_UP(1920, 128)
+AV1_LR_LEFT_BUF_SIZE = lambda h: NVDEC_ALIGN( (ALIGN_UP(h,64)/64 + 2) * AV1_LR_LEFT_SIZE_IN_SB64)
+AV1_FGS_LEFT_SIZE_IN_SB64 = ALIGN_UP(320, 128)
+AV1_FGS_LEFT_BUF_SIZE = lambda h: NVDEC_ALIGN( (ALIGN_UP(h,64)/64 + 2) * AV1_FGS_LEFT_SIZE_IN_SB64)
+AV1_HINT_DUMP_SIZE_IN_SB64 = ((64*64)/(4*4)*8)
+AV1_HINT_DUMP_SIZE_IN_SB128 = ((128*128)/(4*4)*8)
+AV1_HINT_DUMP_SIZE = lambda w,h: NVDEC_ALIGN(AV1_HINT_DUMP_SIZE_IN_SB128*((w+127)/128)*((h+127)/128))
 NVBIT = lambda b: (1<<(b))
 NVBIT32 = lambda b: NVBIT_TYPE(b, NvU32)
 NVBIT64 = lambda b: NVBIT_TYPE(b, NvU64)
@@ -13429,6 +15243,10 @@ NV01_NULL_OBJECT = (0x0)
 NV1_NULL_OBJECT = NV01_NULL_OBJECT
 NV01_ROOT = (0x0)
 NV0000_ALLOC_PARAMETERS_MESSAGE_ID = (0x0000)
+NV01_MEMORY_VIRTUAL = (0x70)
+NV01_MEMORY_SYSTEM_DYNAMIC = (0x70)
+NV_MEMORY_VIRTUAL_ALLOCATION_PARAMS_MESSAGE_ID = (0x0070)
+NV_MEMORY_VIRTUAL_SYSMEM_DYNAMIC_HVASPACE = 0xffffffff
 NV01_DEVICE_0 = (0x80)
 NV0080_ALLOC_PARAMETERS_MESSAGE_ID = (0x0080)
 NV20_SUBDEVICE_0 = (0x2080)
@@ -15969,6 +17787,22 @@ NV90F1_CTRL_CMD_VASPACE_GET_HOST_RM_MANAGED_SIZE = (0x90f10107)
 NV90F1_CTRL_VASPACE_GET_HOST_RM_MANAGED_SIZE_PARAMS_MESSAGE_ID = (0x7)
 NV90F1_CTRL_CMD_VASPACE_GET_VAS_HEAP_INFO = (0x90f10108)
 NV90F1_CTRL_VASPACE_GET_VAS_HEAP_INFO_PARAMS_MESSAGE_ID = (0x8)
+NVA06F_CTRL_CMD_GPFIFO_SCHEDULE = (0xa06f0103)
+NVA06F_CTRL_GPFIFO_SCHEDULE_PARAMS_MESSAGE_ID = (0x3)
+NVA06F_CTRL_CMD_BIND = (0xa06f0104)
+NVA06F_CTRL_BIND_PARAMS_MESSAGE_ID = (0x4)
+NVA06F_CTRL_CMD_SET_ERROR_NOTIFIER = (0xa06f0108)
+NVA06F_CTRL_SET_ERROR_NOTIFIER_PARAMS_MESSAGE_ID = (0x8)
+NVA06F_CTRL_CMD_SET_INTERLEAVE_LEVEL = (0xa06f0109)
+NVA06F_CTRL_SET_INTERLEAVE_LEVEL_PARAMS_MESSAGE_ID = (0x9)
+NVA06F_CTRL_CMD_GET_INTERLEAVE_LEVEL = (0xa06f0110)
+NVA06F_CTRL_GET_INTERLEAVE_LEVEL_PARAMS_MESSAGE_ID = (0x10)
+NVA06F_CTRL_CMD_RESTART_RUNLIST = (0xa06f0111)
+NVA06F_CTRL_RESTART_RUNLIST_PARAMS_MESSAGE_ID = (0x11)
+NVA06F_CTRL_CMD_STOP_CHANNEL = (0xa06f0112)
+NVA06F_CTRL_STOP_CHANNEL_PARAMS_MESSAGE_ID = (0x12)
+NVA06F_CTRL_CMD_GET_CONTEXT_ID = (0xa06f0113)
+NVA06F_CTRL_GET_CONTEXT_ID_PARAMS_MESSAGE_ID = (0x13)
 NV0000_CTRL_RESERVED = (0x00)
 NV0000_CTRL_SYSTEM = (0x01)
 NV0000_CTRL_GPU = (0x02)

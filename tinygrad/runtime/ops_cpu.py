@@ -1,14 +1,14 @@
 from __future__ import annotations
 import platform, sys, ctypes, functools, time, mmap, threading, queue
 from tinygrad.helpers import from_mv, to_mv, OSX, WIN, mv_address, wait_cond, cpu_profile, suppress_finalizing, unwrap, data64_le
-from tinygrad.device import BufferSpec, DMACPURef, CompilerPairT
+from tinygrad.helpers import CPU_CC, CPU_LVP, CPU_LLVM
+from tinygrad.device import BufferSpec, DMACPURef, CompilerSet, CompilerPair
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocatorBase, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
 from tinygrad.runtime.support.hcq import CLikeArgsState
-from tinygrad.renderer.cstyle import ClangRenderer
+from tinygrad.renderer.cstyle import ClangJITRenderer
 from tinygrad.renderer.llvmir import LLVMRenderer
 from tinygrad.renderer.nir import LVPRenderer
-from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler
-from tinygrad.runtime.support.compiler_mesa import LVPCompiler
+from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler
 from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.uop.ops import sint
 
@@ -71,7 +71,7 @@ class CPUProgram(HCQProgram):
   except OSError: pass
 
   def __init__(self, dev, name:str, lib:bytes):
-    LVP = isinstance(dev.compiler, LVPCompiler)
+    LVP = isinstance(dev.renderer, LVPRenderer)
     if sys.platform == "win32": # mypy doesn't understand when WIN is used here
       PAGE_EXECUTE_READWRITE, MEM_COMMIT, MEM_RESERVE = 0x40, 0x1000, 0x2000
       ctypes.windll.kernel32.VirtualAlloc.restype = ctypes.c_void_p
@@ -114,7 +114,7 @@ class CPUAllocator(HCQAllocatorBase):
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
     if options.external_ptr: addr, buf = options.external_ptr, None
     elif WIN: addr = mv_address(buf:=mmap.mmap(-1, size, access=mmap.ACCESS_WRITE))
-    else: addr = mv_address(buf:=mmap.mmap(-1, size, mmap.MAP_ANON | mmap.MAP_PRIVATE, mmap.PROT_READ | mmap.PROT_WRITE))
+    else: addr = mv_address(buf:=mmap.mmap(-1, size, mmap.MAP_ANON | mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE))
     return HCQBuffer(va:=addr, sz:=size, meta=buf, view=MMIOInterface(va, sz, fmt='B'), owner=self.dev)
   def _as_buffer(self, src) -> memoryview:
     self.dev.synchronize()
@@ -135,5 +135,6 @@ class CPUDevice(HCQCompiled):
   def __init__(self, device:str=""):
     self.tasks:queue.Queue = queue.Queue()
     CPUWorker(self, self.tasks, thread_id=0).start()
-    compilers:list[CompilerPairT] = [(ClangRenderer, ClangJITCompiler), (LLVMRenderer, CPULLVMCompiler), (LVPRenderer, LVPCompiler)]
+    compilers = CompilerSet([CompilerPair(ClangJITRenderer, None), CompilerPair(LLVMRenderer, CPULLVMCompiler, ctrl_var=CPU_LLVM),
+                             CompilerPair(LVPRenderer, None, ctrl_var=CPU_LVP)], ctrl_var=CPU_CC)
     super().__init__(device, CPUAllocator(self), compilers, functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue)

@@ -6,7 +6,8 @@ from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, di
 from tinygrad.helpers import IGNORE_BEAM_CACHE
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.tensor import Tensor
-from tinygrad.engine.realize import CompiledRunner, get_program
+from tinygrad.engine.realize import CompiledRunner
+from tinygrad.codegen import get_program
 from tinygrad.renderer import ProgramSpec
 from tinygrad.codegen.opt.postrange import Scheduler
 
@@ -37,10 +38,10 @@ def get_test_global_size(global_size, max_global_size, var_vals):
 def _time_program(p:ProgramSpec, lib:bytes, var_vals:dict[str, int], rawbufs:list[Buffer], early_stop:float|None=None,
                   allow_test_size:int=True, max_global_size:int|None=65536, clear_l2=False, cnt=3, name="test") -> list[float]:
   factor = 1
-  if allow_test_size and p.global_size is not None and max_global_size is not None:
+  if allow_test_size and max_global_size is not None:
     global_size, factor = get_test_global_size(p.global_size, max_global_size, var_vals)
     p = replace(p, global_size=global_size)
-  try: car = CompiledRunner(p, precompiled=lib)
+  try: car = CompiledRunner(replace(p, lib=lib))
   except AssertionError: return [math.inf] * cnt
   tms = []
   input_bufs = [rawbufs[i] for i in car.p.globals]
@@ -71,7 +72,7 @@ def _try_compile(x:tuple[int,Scheduler], compiler:Compiler) -> tuple[int, tuple[
       if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too many uops. {len(p.uops)=}, {uops_max=}")
       raise RuntimeError("too many uops")
     st = time.perf_counter()
-    prog = compiler.compile(p.src)
+    prog = p.lib if p.lib is not None else compiler.compile(p.src)
     et = time.perf_counter() - st
     ret = (p, prog, et)
   except RuntimeError:
@@ -92,9 +93,9 @@ def _ensure_buffer_alloc(bufs:list[Buffer]) -> list[Buffer]: return [buf.ensure_
 # *** external API ***
 
 # get dictionary of all possible actions
-def get_kernel_actions(s:Scheduler, include_0=True, candidates:list[Opt]|None=None, max_up:int|None=None) -> dict[int, Scheduler]:
+def get_kernel_actions(s:Scheduler, include_0=True, max_up:int|None=None) -> dict[int, Scheduler]:
   acted, max_up, max_lcl = {0:s} if include_0 else {}, getenv("BEAM_UPCAST_MAX", 256) if max_up is None else max_up, getenv("BEAM_LOCAL_MAX", 1024)
-  kernel_actions = (actions if candidates is None else candidates).copy()
+  kernel_actions = actions.copy()
 
   for i,a in enumerate(kernel_actions):
     if a.axis is not None and a.op is not OptOps.TC:

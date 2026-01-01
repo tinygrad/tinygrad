@@ -12,9 +12,8 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat
 from tinygrad.helpers import CI, DEBUG, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
-from tinygrad.schedule.rangeify import get_rangeify_map, Kernel
-from tinygrad.engine.schedule import create_schedule_with_vars
-from tinygrad.engine.realize import CompiledRunner, run_schedule, lower_schedule
+from tinygrad.schedule.rangeify import Kernel
+from tinygrad.engine.realize import CompiledRunner, run_schedule
 
 class KernelCountException(Exception): pass
 def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Tensor]|None=None, filter_sink=True):
@@ -24,13 +23,12 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
   elif isinstance(t, list) and isinstance(t[0], Tensor): sched = Tensor.schedule(*t)
   else:
     assert isinstance(t, UOp), f"can't schedule {t}"
-    sink = UOp.sink(t) if t.op is not Ops.SINK else t
-    becomes_map = get_rangeify_map(sink)
-    sched, _ = create_schedule_with_vars(sink.substitute(becomes_map))
-  # test lowering all the ScheduleItems to ExecItems
-  kernel_cnt = len([si for si,ei in lower_schedule(sched.copy()) if isinstance(ei.prg, CompiledRunner) or not filter_sink])
+    sched = Tensor(t).schedule()
+  # test lowering all the ExecItems
+  for si in sched: si.lower()
+  kernel_cnt = len([si for si in sched if isinstance(si.prg, CompiledRunner) or not filter_sink])
   if kernel_cnt != allowed:
-    print(f"SCHEDULE ISSUE, expecting {allowed} got {len(sched)}")
+    print(f"SCHEDULE ISSUE, expecting {allowed} got {kernel_cnt}")
     if DEBUG >= 3:
       for i,s in enumerate(sched):
         print("kernel", i+1)
@@ -177,7 +175,7 @@ class TestSchedule(unittest.TestCase):
     child.realize()
     assert a.uop.is_realized
 
-  # NOTE: because empty does not have an ExecItem if realize is called on a childless empty, it never gets allocated.
+  # NOTE: because empty does not have a lowered ExecItem if realize is called on a childless empty, it never gets allocated.
   def test_childless_empty_never_allocates(self):
     a = Tensor.empty(10)
     a.realize()
@@ -672,33 +670,6 @@ class TestSchedule(unittest.TestCase):
     c = (a.sum(2).contiguous() + b).contiguous()
     check_schedule(c, 2)
 
-  def test_kernelize(self):
-    a = Tensor.empty(10)
-    b = Tensor.empty(10)
-    c = (a+b).kernelize()
-    d = c+2
-    check_schedule(d, 2)
-
-  def test_kernelize_view(self):
-    a = Tensor.empty(4,1)
-    b = a*2
-    c = b.kernelize()+Tensor.empty(4,4)
-    check_schedule(c, 2)
-
-  def test_kernelize_diamond(self):
-    a = Tensor([0]).realize()
-    prev_a = (a+1).contiguous()
-    a.assign(Tensor([2]))
-    a.kernelize(prev_a)
-    self.assertEqual((prev_a+a*3).item(), 1+2*3)
-
-  def test_kernelize_sym(self):
-    a = Tensor([1])+Tensor([2])
-    a.kernelize()
-    b = a/a
-    check_schedule(b, 0)
-    self.assertEqual(b.item(), 1)
-
   # TODO: this requires supporting multiple stores in the AST
   @unittest.expectedFailure
   def test_multioutput_ast(self):
@@ -709,35 +680,6 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(UOp.sink(a.assign(kernel), b.assign(kernel)), 1))
     self.assertEqual(a.buffer.numpy(), [7])
     self.assertEqual(b.buffer.numpy(), [12])
-
-  # unlike schedule, kernelize can be called multiple times on a Tensor
-  def test_double_kernelize(self):
-    a = Tensor.empty(10)
-    b = Tensor.empty(10)
-    c = (a+b)
-    d = c.kernelize()+2
-    e = c.kernelize()+d.kernelize()
-    check_schedule(e, 3)
-
-  def test_kernelize_bw(self):
-    a = Tensor.full((3,), 2.0, requires_grad=True).contiguous()
-    b = Tensor.full((3,), 3.0, requires_grad=True).contiguous()
-    x = (a*b).kernelize()
-    y = Tensor.eye(3, requires_grad=True)
-    z = y.matmul(x).sum()
-    z.backward()
-    self.assertEqual(z.item(), 18.0)
-    self.assertEqual(z.grad.item(), 1.0)
-
-  def test_kernelize_bw_view(self):
-    a = Tensor.full((3,1), 2.0, requires_grad=True).contiguous()
-    b = Tensor.full((3,1), 3.0, requires_grad=True).contiguous()
-    x = (a*b).kernelize()
-    y = Tensor.eye(6, requires_grad=True)
-    z = y.matmul(x.expand(3,2).reshape(6)).sum()
-    z.backward()
-    self.assertEqual(z.item(), 36.0)
-    self.assertEqual(z.grad.item(), 1.0)
 
   @unittest.skip("no longer supported")
   def test_double_from(self):
@@ -1814,7 +1756,7 @@ class TestSchedule(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_precompute_freqs_cis(self):
     from extra.models.llama import precompute_freqs_cis
-    args = {"dim":32 if CI else 128, "end":2048 if CI else 8192, "theta":10000}
+    args = {"dim":32, "end":2048, "theta":10000}
     fused = precompute_freqs_cis(**args)
     run_schedule(check_schedule(fused, 1))
     if getenv("CHECK", 1):
@@ -1914,18 +1856,6 @@ class TestSchedule(unittest.TestCase):
     root = bufs[0][vi] + bufs[0][vj]
     for X in range(1,N): root = root + bufs[X][vi] + bufs[X][vj]
     self.assertEqual(root.item(), N * 2)
-
-  def test_limit_bufs_kernelize(self):
-    N = 31
-    with Context(TRACK_MATCH_STATS=0, DEBUG=0):
-      bufs = [Tensor(i).contiguous().realize() for i in range(N)]
-    x = bufs[0]
-    for y in bufs[1:]: x = x+y
-    x.kernelize()
-    kcount = len([s for s in x.uop.toposort() if s.op is Ops.KERNEL])
-    z = x+Tensor.empty(1) # z only loads 2 buffers
-    sched = z.schedule()
-    self.assertEqual(len(sched), kcount+1)
 
 class TestSwizzle(unittest.TestCase):
   def test_swizzle_simple(self):
@@ -2118,7 +2048,7 @@ class TestCopyFolding(unittest.TestCase):
     b = Tensor.empty(4, device="CPU")
     add = a+b
     assert all_same([x.device for x in add.uop.src]), f"ALU has different devices! {[x.device for x in add.src]}"
-    add.kernelize()
+    add.schedule()
 
   def test_alu_before_copy(self):
     buf = Tensor.ones(1).contiguous().realize()
@@ -2437,6 +2367,13 @@ class TestUOpBecome(unittest.TestCase):
     a_view = a[4:].reshape(3, 4).shrink(((0,2),(0,2))).reshape((4,))
     b.shrink(((0,4),)).assign(a_view).realize()
     self.assertListEqual(b.tolist(), [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+
+class TestSimpleSchedule(unittest.TestCase):
+  def test_reduce_doesnt_split(self):
+    a = Tensor.empty(16,16).sum(axis=1)
+    a1 = a.reshape(4,4)
+    a2 = a.reshape(16,1,1)
+    self.assertEqual(len(Tensor.schedule(a1, a2)), 1)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

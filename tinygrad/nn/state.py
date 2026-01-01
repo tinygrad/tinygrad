@@ -1,4 +1,4 @@
-import json, pathlib, zipfile, pickle, tarfile, struct, functools, io
+import json, pathlib, zipfile, pickle, tarfile, struct, functools, io, zlib
 from collections import OrderedDict
 from typing import Any, Callable, BinaryIO, Iterable, cast
 from tinygrad.tensor import Tensor
@@ -151,7 +151,8 @@ def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=Tr
         if DEBUG >= 1: print(f"WARNING: not loading {k}")
         continue
       if v.shape != state_dict[k].shape:
-        raise ValueError(f'Shape mismatch in layer `{k}`: Expected shape {v.shape}, but found {state_dict[k].shape} in state dict.')
+        if {(), (1,)} == {state_dict[k].shape, v.shape}: state_dict[k] = state_dict[k].reshape(v.shape)
+        else: raise ValueError(f'Shape mismatch in layer `{k}`: Expected shape {v.shape}, but found {state_dict[k].shape} in state dict.')
       if isinstance(v.device, tuple):
         if isinstance(state_dict[k].device, tuple): v.replace(state_dict[k])
         else: v.replace(state_dict[k].shard(v.device, v.uop.axis))
@@ -160,6 +161,27 @@ def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=Tr
       if consume: del state_dict[k]
       ret.append(v)
   return ret
+
+@accept_filename
+def zip_extract(t: Tensor) -> dict[str, Tensor]:
+  files: dict[str, Tensor] = {}
+  file_offsets: dict[str, tuple[Tensor, int, int]] = {}
+  with zipfile.ZipFile(TensorIO(t), "r") as myzip:
+    for zi in myzip.filelist:
+      file_offset = zi.header_offset+30+t[zi.header_offset+26:zi.header_offset+30].bitcast(dtypes.uint16).to("CPU").sum()
+      file_offsets[zi.filename] = (file_offset, zi.compress_size, zi.compress_type)
+  # sadly, the extra length needs to be read from the local header of each file. this is a limitation of the zip file format
+  Tensor.realize(*[x[0] for x in file_offsets.values()])
+  for filename, (file_offset, compress_size, compress_type) in file_offsets.items():
+    # possible to remove this realize/item? it's slow
+    file_offset_int = int(file_offset.item())
+    files[filename] = t[file_offset_int:file_offset_int+compress_size]
+    match compress_type:
+      case zipfile.ZIP_STORED: pass
+      # TODO: we need a zlib UOp so this can be lazy
+      case zipfile.ZIP_DEFLATED: files[filename] = Tensor(zlib.decompress(files[filename].data(), -15))
+      case _: raise NotImplementedError(f"compression {compress_type} not supported")
+  return files
 
 @accept_filename
 def tar_extract(t: Tensor) -> dict[str, Tensor]:
@@ -179,6 +201,7 @@ def tar_extract(t: Tensor) -> dict[str, Tensor]:
 
 # torch support!
 
+# TODO: this should use tar_extract and zip_extract
 @accept_filename
 def torch_load(t:Tensor) -> dict[str, Tensor]:
   """
@@ -285,7 +308,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   Converts ggml tensor data to a tinygrad tensor.
 
   Supported native types: float32 (id: 0), float16 (id: 1), int8 (id: 16), int16 (id: 17), int32 (id: 18)
-  Supported quantized types: Q4_0 (id: 2), Q4_1 (id: 3), Q8_0 (id: 8), Q6_K (id: 14), MXFP4 (id: 39)
+  Supported quantized types: Q4_0 (id: 2), Q4_1 (id: 3), Q8_0 (id: 8), Q4_K (id: 12), Q6_K (id: 14), MXFP4 (id: 39)
   """
   # https://github.com/ggerganov/ggml/blob/323951f1bdcdfbd5b5ff3a9a7c3770e63b1a560e/include/ggml.h#L356
 
@@ -299,13 +322,20 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
     return t.unsqueeze(-1).expand((*t.shape,8//b)).idiv(shift_tensor).bitwise_and(bitmask).transpose(-1, -2).flatten(-2)
 
   # map to (number of elements, number of bytes)
-  if (nelements_nbytes := { 2: (32, 18), 3: (32, 20), 14: (256, 210), 8: (32, 34), 39: (32, 17) }.get(ggml_type)) is not None:
+  if (nelements_nbytes := { 2: (32, 18), 3: (32, 20), 8: (32, 34), 12: (256, 144), 14: (256, 210), 39: (32, 17) }.get(ggml_type)) is not None:
     blocks = t[:(n//nelements_nbytes[0])*nelements_nbytes[1]].reshape((-1, nelements_nbytes[1]))
     if ggml_type == 2: return (q_to_uint8(blocks[:,2:], 4).bitcast(dtypes.int8) - 8) * blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32)
     if ggml_type == 3:
       d, m = (blocks[:,s:s+2].bitcast(dtypes.float16).cast(dtypes.float32) for s in [ 0, 2 ])
       return q_to_uint8(blocks[:,4:], 4).bitcast(dtypes.int8) * d + m
     if ggml_type == 8: return blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32) * blocks[:,2:].bitcast(dtypes.int8)
+    if ggml_type == 12:  # Q4_K: 256 elements per 144-byte block (d:2, dmin:2, scales:12, qs:128)
+      d, dmin = (blocks[:,i:i+2].bitcast(dtypes.float16).cast(dtypes.float32).unsqueeze(-1) for i in [0, 2])
+      s = blocks[:,4:16]  # 12 bytes: 6-bit scales[0-3], 6-bit mins[0-3], high bits[4-7]
+      sc = s[:,0:4].bitwise_and(63).cat(s[:,8:12].bitwise_and(0xF).bitwise_or(s[:,0:4].rshift(6).lshift(4)), dim=-1)
+      mn = s[:,4:8].bitwise_and(63).cat(s[:,8:12].rshift(4).bitwise_or(s[:,4:8].rshift(6).lshift(4)), dim=-1)
+      q = Tensor.stack((qs:=blocks[:,16:144].reshape(-1,4,32)).bitwise_and(0xF), qs.rshift(4), dim=2).reshape(-1,8,32).cast(dtypes.float32)
+      return (d * sc.unsqueeze(-1) * q - dmin * mn.unsqueeze(-1)).flatten(-2)
     if ggml_type == 14:
       xl, xh = q_to_uint8(blocks[:,:128].reshape((-1, 2, 64)), 4), q_to_uint8(blocks[:,128:192].reshape((-1, 2, 32)), 2).lshift(4)
       scales = blocks[:,192:208].bitcast(dtypes.int8).unsqueeze(-1).expand((-1, 16, 16)).reshape((-1, 256))

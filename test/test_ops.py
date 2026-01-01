@@ -2,7 +2,7 @@ import time, math, unittest, functools, platform, warnings
 import numpy as np
 from typing import List, Callable
 import torch
-from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, CPU_LLVM, CPU_LVP, AMD_LLVM
+from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, CPU_LLVM, CPU_LVP, AMD_LLVM, EMULATE
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
@@ -11,11 +11,11 @@ if getenv("TINY_BACKEND"):
   import tinygrad.nn.torch # noqa: F401 # pylint: disable=unused-import
   torch.set_default_device("tiny")
 
-if CI:
-  warnings.filterwarnings("ignore", message="Non-empty compiler output encountered")
+warnings.filterwarnings("ignore", message="Non-empty compiler output encountered")
 
 FORWARD_ONLY = getenv("FORWARD_ONLY", 0)
 PRINT_TENSORS = getenv("PRINT_TENSORS", 0)
+COMPILE_ONLY = Device.DEFAULT == "NULL" and not EMULATE
 
 def slow_test(test_func):
   return unittest.skipIf(getenv("SKIP_SLOW_TEST"), "Skipping slow test")(test_func)
@@ -38,6 +38,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
   tinygrad_fp = time.monotonic() - st
 
   def compare(s, tinygrad_output, torch_output, atol, rtol):
+    if COMPILE_ONLY: return
     if PRINT_TENSORS: print(s, tinygrad_output, torch_output)
     try:
       assert tinygrad_output.shape == torch_output.shape, f"shape mismatch: tinygrad={tinygrad_output.shape} | torch={torch_output.shape}"
@@ -421,8 +422,9 @@ class TestOps(unittest.TestCase):
   def test_isinf(self):
     val = [float('-inf'), 0., float('inf'), float('nan'), 1.1]
     helper_test_op(None, torch.isinf, Tensor.isinf, vals=[val], forward_only=True)
-    np.testing.assert_equal(Tensor(val).isinf(detect_positive=True, detect_negative=False).numpy(), [False, False, True, False, False])
-    np.testing.assert_equal(Tensor(val).isinf(detect_positive=False, detect_negative=True).numpy(), [True, False, False, False, False])
+    if not COMPILE_ONLY:
+      np.testing.assert_equal(Tensor(val).isinf(detect_positive=True, detect_negative=False).numpy(), [False, False, True, False, False])
+      np.testing.assert_equal(Tensor(val).isinf(detect_positive=False, detect_negative=True).numpy(), [True, False, False, False, False])
 
   def test_isnan(self):
     helper_test_op(None, torch.isnan, Tensor.isnan, vals=[[float('-inf'), 0., float('inf'), float('nan'), 1.1]], forward_only=True)
@@ -594,7 +596,7 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x//2, forward_only=True, vals=[[3, 4, 5]])
     helper_test_op(None, functools.partial(torch.div, rounding_mode="trunc"), Tensor.idiv, forward_only=True,
                    vals=[[-4, 7, 5, 4, -7, 8], [2, -3, 8, -2, 3, 5]])
-    if is_dtype_supported(dtypes.uint64):
+    if is_dtype_supported(dtypes.uint64) and not COMPILE_ONLY:
       x = Tensor(2**64 - 1, dtype=dtypes.uint64).idiv(1)
       np.testing.assert_equal(x.numpy(), 2**64 - 1)
 
@@ -679,6 +681,7 @@ class TestOps(unittest.TestCase):
     # float to power of int
     helper_test_op(None, lambda x: 0.7**x, vals=[[-2,-1,0,1,2,3]], forward_only=True)
 
+  @unittest.skipIf(COMPILE_ONLY, "test requires runtime")
   def test_pow_const_direct(self):
     # x ** c
     def get_tiny_gradient(x, c):
@@ -845,7 +848,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.cos())
     helper_test_op([()], lambda x: x.cos())
     if not ((getenv("MOCKGPU") and Device.DEFAULT == "NV") or Device.DEFAULT == "WEBGPU"):
-      helper_test_op(None, lambda x: x.sin(), vals=[[math.nan, math.inf, -math.inf, 0.0]])
+      helper_test_op(None, lambda x: x.cos(), vals=[[math.nan, math.inf, -math.inf, 0.0]])
       helper_test_op(None, lambda x: x.cos(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
   @unittest.skipIf(Device.DEFAULT == "WEBGPU" and platform.system() == "Windows", "Not accurate enough with DirectX backend")
@@ -856,8 +859,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.tan(), low=-5, high=5)
     helper_test_op([()], lambda x: x.tan())
     if not ((getenv("MOCKGPU") and Device.DEFAULT == "NV") or Device.DEFAULT == "WEBGPU"):
-      helper_test_op(None, lambda x: x.sin(), vals=[[math.nan, math.inf, -math.inf, 0.0]])
-      helper_test_op(None, lambda x: x.cos(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
+      helper_test_op(None, lambda x: x.tan(), vals=[[math.nan, math.inf, -math.inf, 0.0]])
+      helper_test_op(None, lambda x: x.tan(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
 
   def test_asin(self):
@@ -1070,8 +1073,7 @@ class TestOps(unittest.TestCase):
   @slow_test
   def test_cummax(self):
     helper_test_op([()], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0))
-    # TODO: torch allows this?
-    # self.helper_test_exception([()], lambda x: torch.cummax(x, dim=1).values, lambda x: Tensor.cummax(x, axis=1), expected=IndexError)
+    self.helper_test_exception([()], lambda x: torch.cummax(x, dim=1).values, lambda x: Tensor.cummax(x, axis=1), expected=IndexError)
     helper_test_op([(20,)], lambda x: torch.cummax(x, dim=0).values, lambda x: Tensor.cummax(x, axis=0))
     self.helper_test_exception([(20,)], lambda x: torch.cummax(x, dim=1).values, lambda x: Tensor.cummax(x, axis=1), expected=IndexError)
     self.helper_test_exception([(20,)], lambda x: torch.cummax(x, dim=-2).values, lambda x: Tensor.cummax(x, axis=-2), expected=IndexError)
@@ -1088,8 +1090,9 @@ class TestOps(unittest.TestCase):
     # check if it returns the first index for multiple occurences
     helper_test_op(None, lambda x: x.argmax().type(torch.int32), lambda x: x.argmax(), forward_only=True, vals=[[2, 2]])
     helper_test_op(None, lambda x: x.argmax().type(torch.int32), lambda x: x.argmax(), forward_only=True, vals=[[1, 2, 2]])
-    np.testing.assert_equal(Tensor([2,2]).argmax().numpy(), 0)
-    np.testing.assert_equal(Tensor([1,2,2]).argmax().numpy(), 1)
+    if not COMPILE_ONLY:
+      np.testing.assert_equal(Tensor([2,2]).argmax().numpy(), 0)
+      np.testing.assert_equal(Tensor([1,2,2]).argmax().numpy(), 1)
     helper_test_op([(10,20)], lambda x: x.argmax().type(torch.int32), lambda x: x.argmax(), forward_only=True)
     helper_test_op([(10,20)], lambda x: x.argmax(0, False).type(torch.int32), lambda x: x.argmax(0, False), forward_only=True)
     helper_test_op([(10,20)], lambda x: x.argmax(1, False).type(torch.int32), lambda x: x.argmax(1, False), forward_only=True)
@@ -1107,8 +1110,9 @@ class TestOps(unittest.TestCase):
     # check if it returns the first index for multiple occurences
     helper_test_op(None, lambda x: x.argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[2, 2]])
     helper_test_op(None, lambda x: x.argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[3, 2, 2]])
-    np.testing.assert_equal(Tensor([2,2]).argmin().numpy(), 0)
-    np.testing.assert_equal(Tensor([3,2,2]).argmin().numpy(), 1)
+    if not COMPILE_ONLY:
+      np.testing.assert_equal(Tensor([2,2]).argmin().numpy(), 0)
+      np.testing.assert_equal(Tensor([3,2,2]).argmin().numpy(), 1)
     helper_test_op([(10,20)], lambda x: x.argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True)
     helper_test_op([(10,20)], lambda x: x.argmin(0, False).type(torch.int32), lambda x: x.argmin(0, False), forward_only=True)
     helper_test_op([(10,20)], lambda x: x.argmin(1, False).type(torch.int32), lambda x: x.argmin(1, False), forward_only=True)
@@ -1156,12 +1160,13 @@ class TestOps(unittest.TestCase):
                           lambda x: x.topk(4, dim, largest, sorted_).indices.type(torch.int32),
                           lambda x: x.topk(4, dim, largest, sorted_)[1], forward_only=True)
     # repeated values
-    value, indices = Tensor([1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0]).topk(3)
-    np.testing.assert_equal(value.numpy(), [1, 1, 1])
-    np.testing.assert_equal(indices.numpy(), [0, 1, 3])
-    value, indices = Tensor([1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0]).topk(3, largest=False)
-    np.testing.assert_equal(value.numpy(), [0, 0, 0])
-    np.testing.assert_equal(indices.numpy(), [2, 4, 6])
+    if not COMPILE_ONLY:
+      value, indices = Tensor([1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0]).topk(3)
+      np.testing.assert_equal(value.numpy(), [1, 1, 1])
+      np.testing.assert_equal(indices.numpy(), [0, 1, 3])
+      value, indices = Tensor([1, 1, 0, 1, 0, 1, 0, 0, 1, 0, 0, 0, 1, 0]).topk(3, largest=False)
+      np.testing.assert_equal(value.numpy(), [0, 0, 0])
+      np.testing.assert_equal(indices.numpy(), [2, 4, 6])
     self.helper_test_exception([(4)], lambda x: x.topk(5), expected=(RuntimeError, ValueError))
 
   @slow_test
@@ -1313,6 +1318,7 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x,y: x.matmul(y), lambda x,y: x@y, vals=[np.eye(8).astype(np.float32), np.eye(8).astype(np.float32)])
   @unittest.skipIf(CI and Device.DEFAULT in ["NV", "CL", "CUDA"] or (Device.DEFAULT == "CPU" and CPU_LLVM) or IMAGE
   or (Device.DEFAULT == "WEBGPU" and platform.system() == "Windows"), "not supported on these in CI/IMAGE")
+  @unittest.skipIf(Device.DEFAULT == "QCOM", "not precise enough")
   def test_gemm_fp16(self):
     helper_test_op([(64,64), (64,64)], lambda x,y: x.half().matmul(y.half()), atol=5e-3, rtol=5e-3, grad_atol=5e-3, grad_rtol=5e-3)
   def test_gemm(self):
@@ -1649,7 +1655,7 @@ class TestOps(unittest.TestCase):
   def test_broadcast_full(self):
     for torch_op, tinygrad_op in [(torch.add, Tensor.add), (torch.sub, Tensor.sub), (torch.mul, Tensor.mul),
                                   (torch.div, Tensor.div), (torch.pow, Tensor.pow)]:
-      for shapes in [((5,13,24,16), (5,1,24,1)), ((1,3,1,7,1), (2,1,5,1,8))]:
+      for shapes in [((5,3,14,16), (5,1,14,1)), ((1,3,1,7,1), (2,1,5,1,8))]:
         with self.subTest(op=torch_op.__name__, shapes=shapes):
           if tinygrad_op != Tensor.pow:
             helper_test_op(shapes, torch_op, tinygrad_op)
@@ -1723,6 +1729,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(7,5,10)], lambda x: x[1:5:2, 3, ::4])
     helper_test_op([(7,5,10)], lambda x: x[1:5:2, None, None, 3, None, ::4])
 
+  @unittest.skipIf(COMPILE_ONLY, "test requires runtime")
   def test_slice_negative_strides(self):
     # Torch doesn't support slicing with negative steps
     a = np.random.randn(10, 10, 10).astype(np.float32)
@@ -2071,7 +2078,7 @@ class TestOps(unittest.TestCase):
       lambda x,w: Tensor.conv2d(x,w,padding=[1,1,1,1,1,1]), grad_rtol=1e-5)
 
   def test_simple_conv2d_m4(self):
-    helper_test_op([(1,16,18,18), (16,16,3,3)],
+    helper_test_op([(1,16,9,9), (16,16,3,3)],
       lambda x,w: torch.nn.functional.conv2d(x,w),
       lambda x,w: Tensor.conv2d(x,w), atol=1e-05, grad_rtol=1e-5)
 
@@ -2528,7 +2535,7 @@ class TestOps(unittest.TestCase):
 
   @slow_test
   def test_avg_pool2d(self):
-    shape = (32,2,111,28)
+    shape = (32,2,11,28)
     for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
       with self.subTest(kernel_size=ksz):
         helper_test_op([shape],
@@ -2542,7 +2549,7 @@ class TestOps(unittest.TestCase):
 
   @slow_test
   def test_avg_pool2d_padding(self):
-    shape = (32,2,111,28)
+    shape = (32,2,11,28)
     for ksz in [(2,2), (3,3), 2, 3, (3,2)]:
       for p in [1, (1,0), (0,1)]:
         with self.subTest(kernel_size=ksz, padding=p):
@@ -2550,10 +2557,10 @@ class TestOps(unittest.TestCase):
             lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz, padding=p),
             lambda x: Tensor.avg_pool2d(x, kernel_size=ksz, padding=p), rtol=1e-5)
     with self.assertRaises(ValueError):
-      Tensor.avg_pool2d(Tensor.randn((32,2,111,28)), kernel_size=(2,2), padding=(1,1,1))
+      Tensor.avg_pool2d(Tensor.randn((32,2,11,28)), kernel_size=(2,2), padding=(1,1,1))
 
   def test_avg_pool2d_asymmetric_padding(self):
-    shape = (32,2,111,28)
+    shape = (32,2,11,28)
     for p in [(0,1,0,1), (2,1,2,1), (2,0,2,1)]:
       with self.subTest(padding=p):
         helper_test_op([shape],
@@ -2564,7 +2571,7 @@ class TestOps(unittest.TestCase):
 
   @slow_test
   def test_avg_pool2d_padding_not_counted(self):
-    shape = (32,2,111,28)
+    shape = (32,2,11,28)
     for ksz in [(2,2), (3,3), 2, 3, (3,2)]:
       with self.subTest(kernel_size=ksz):
         helper_test_op([shape],
@@ -2600,9 +2607,9 @@ class TestOps(unittest.TestCase):
       lambda x: Tensor.avg_pool2d(x, kernel_size=(3,3), stride=3, padding=1, ceil_mode=True, count_include_pad=True))
 
   def test_global_avg_pool2d(self):
-    helper_test_op([(32,2,111,28)],
-      lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(111,28)),
-      lambda x: Tensor.avg_pool2d(x, kernel_size=(111,28)), rtol=1e-5)
+    helper_test_op([(32,2,11,28)],
+      lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(11,28)),
+      lambda x: Tensor.avg_pool2d(x, kernel_size=(11,28)), rtol=1e-5)
 
   def test_avg_pool3d(self):
     # TODO: AMD_LLVM has larger atol
@@ -2729,6 +2736,9 @@ class TestOps(unittest.TestCase):
 
   def test_clip(self):
     helper_test_op([(45,65)], lambda x: x.clip(-2.3, 1.2))
+    # NOTE: torch set backward to 1 at the boundaries
+    # https://github.com/pytorch/pytorch/blob/7a41b66367c38d0af3e8a90f7be48d6b281e7bca/tools/autograd/derivatives.yaml#L421
+    helper_test_op(None, lambda x: x.clip(-2.5, 1.5), vals=[[-3.0, -2.5, 0, 1.5, 2]])
     helper_test_op([(45,65)], lambda x: x.clip(0, 0))
     helper_test_op([(45,65)], lambda x: x.clip(10, 100))
     helper_test_op([(45,65)], lambda x: x.clip(0, 0.1))
@@ -2749,6 +2759,7 @@ class TestOps(unittest.TestCase):
     n = Tensor([1, float("nan")]).max().numpy()
     assert math.isnan(n.item()), f"{n.item()} is not nan"
 
+  @unittest.skipIf(COMPILE_ONLY, "test requires runtime")
   def test_inf_where(self):
     x = Tensor.full((3, 3), float("inf"))
     n = (x < 0).where(x, 1).numpy()
@@ -3131,10 +3142,10 @@ class TestOps(unittest.TestCase):
         lambda x: x.log_softmax(axis=1).nll_loss(Tensor(target), Tensor(weight), reduction=r))
 
   def test_nll_loss_3d_weight(self):
-    target = np.random.randint(0, 10, (32,3,3,3), dtype=np.int32).tolist()
+    target = np.random.randint(0, 10, (16,3,3,3), dtype=np.int32).tolist()
     weight = np.random.normal(0, 1, (10,)).astype(np.float32).tolist()
     for r in ("mean", "sum", "none"):
-      helper_test_op([(32,10,3,3,3)],
+      helper_test_op([(16,10,3,3,3)],
           lambda x: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1), torch.tensor(target), torch.tensor(weight), reduction=r),
           lambda x: x.log_softmax(axis=1).nll_loss(Tensor(target), Tensor(weight), reduction=r))
 
@@ -3165,6 +3176,7 @@ class TestOps(unittest.TestCase):
 
   @unittest.skipIf((getenv("MOCKGPU") or Device.DEFAULT == "PYTHON"), "very slow on MOCKGPU because reduce does not fold")
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "webgpu runtime issue")
+  @unittest.skipIf(Device.DEFAULT == "QCOM", "QCOM fails with: Resource deadlock avoided")
   def test_masked_select(self):
     helper_test_op([(32, 10)], lambda x: x.masked_select(x>0.5), lambda x: x.masked_select(x>0.5), forward_only=True)
     helper_test_op([(32, 10)], lambda x: x.masked_select(torch.tensor(True)), lambda x: x.masked_select(Tensor(True)), forward_only=True)

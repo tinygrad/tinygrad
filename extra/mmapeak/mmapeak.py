@@ -4,7 +4,8 @@ import os, pathlib
 os.environ["AMD_AQL"] = "1"
 
 from tinygrad.device import Device
-from tinygrad.runtime.ops_amd import AMDProgram, HIPCompiler
+from tinygrad.runtime.support.compiler_amd import HIPCompiler
+from tinygrad.runtime.ops_amd import AMDProgram
 
 NUM_WORKGROUPS = 96
 WAVE_SIZE = 32
@@ -48,7 +49,7 @@ if __name__=="__main__":
   COMPILER = HIPCompiler(DEV.arch)
   if DEV.arch in {'gfx1100', 'gfx1103', 'gfx1151'}:
     if DEV.arch == 'gfx1103': NUM_WORKGROUPS = 8
-    if DEV.arch == 'gfx1151': NUM_WORKGROUPS = 40
+    if DEV.arch == 'gfx1151': NUM_WORKGROUPS = 32
     launchBenchmark("v_wmma_bf16_16x16x16_bf16", (7,8,15))
     launchBenchmark("v_wmma_f16_16x16x16_f16", (7,8,15))
     launchBenchmark("v_wmma_f32_16x16x16_bf16", (7,8,15))

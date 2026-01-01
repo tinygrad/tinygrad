@@ -6,7 +6,7 @@ from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatch
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
-from tinygrad.helpers import VIZ
+from tinygrad.helpers import VIZ, cpu_profile
 from tinygrad.device import Buffer
 
 @track_rewrites(name=True)
@@ -167,7 +167,8 @@ class TestViz(BaseTestViz):
       (UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4)),
       (UPat(Ops.CONST, arg=4, name="x"), lambda x: x.replace(arg=3)),
     ])
-    with self.assertRaises(RuntimeError): exec_rewrite(a, [pm])
+    # use smaller stack limit for faster test (default is 250000)
+    with Context(REWRITE_STACK_LIMIT=100): self.assertRaises(RuntimeError, exec_rewrite, a, [pm])
     graphs = flatten(x["graph"].values() for x in get_viz_details(0, 0))
     self.assertEqual(graphs[0], uop_to_json(a)[id(a)])
     self.assertEqual(graphs[1], uop_to_json(b)[id(b)])
@@ -232,7 +233,7 @@ import gc
 
 def bufs_allocated() -> int:
   gc.collect()
-  return sum([isinstance(x, Buffer) for x in gc.get_objects()])
+  return sum([type(x).__name__ == "Buffer" and type(x).__module__ == "tinygrad.device" for x in gc.get_objects()])
 
 class TestVizGC(BaseTestViz):
   def test_gc(self):
@@ -262,14 +263,6 @@ from tinygrad import Tensor, Device
 from tinygrad.engine.realize import get_program
 
 class TestVizIntegration(BaseTestViz):
-  # kernelize has a custom name function in VIZ
-  def test_kernelize_tracing(self):
-    a = Tensor.empty(4, 4)
-    Tensor.kernelize(a+1, a+2)
-    lst = get_viz_list()
-    self.assertEqual(len(lst), 1)
-    self.assertEqual(lst[0]["name"], "Schedule 2 Kernels n1")
-
   # codegen supports rendering of code blocks
   def test_codegen_tracing(self):
     ast = Tensor.schedule(Tensor.empty(4)+Tensor.empty(4))[0].ast
@@ -284,7 +277,7 @@ class TestVizIntegration(BaseTestViz):
       a = Tensor.empty(1)
       b = Tensor.empty(1)
       metadata = (alu:=a+b).uop.metadata
-      alu.kernelize()
+      alu.schedule()
       graph = next(get_viz_details(0, 0))["graph"]
     self.assertEqual(len([n for n in graph.values() if repr(metadata) in n["label"]]), 1)
 
@@ -367,7 +360,7 @@ def load_profile(lst:list[ProfileEvent]) -> dict:
       for _ in range(event_count):
         alloc, ts, key = u("<BII")
         if alloc: v["events"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
-        else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[u("<IIBB") for _ in range(u("<I")[0])]}})
+        else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[u("<IIIB") for _ in range(u("<I")[0])]}})
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
 class TestVizProfiler(BaseTestViz):
@@ -415,8 +408,8 @@ class TestVizProfiler(BaseTestViz):
 
     tracks = list(j['layout'])
     self.assertEqual(tracks[0], 'NV')
-    self.assertEqual(tracks[1], 'NV:1')
-    self.assertEqual(tracks[2], 'NV Graph')
+    self.assertEqual(tracks[1], 'NV Graph')
+    self.assertEqual(tracks[2], 'NV:1')
 
     nv_events = j['layout']['NV']['events']
     self.assertEqual(nv_events[0]['name'], 'E_25_4n2')
@@ -469,6 +462,14 @@ class TestVizProfiler(BaseTestViz):
     self.assertEqual(len(markers), 2)
     assert kernels[0]["st"] <= markers[0]["ts"] <= kernels[1]["st"]
     assert markers[1]["ts"] >= kernels[1]["st"]+kernels[1]["dur"]
+
+  def test_layout_order(self):
+    def fn(): return
+    for dname in ["TINY", "USER", "TEST:1 N1", "TEST:2 N1", "TEST:1 N2"]:
+      with cpu_profile("fn", dname): fn()
+    layout = list(load_profile(cpu_events)["layout"])
+    self.assertListEqual(layout[:2], ["USER","TINY"])
+    self.assertListEqual(layout[2:], ["TEST:1 N1","TEST:1 N2", "TEST:2 N1"])
 
 def _alloc(b:int):
   a = Tensor.empty(b, device="NULL", dtype=dtypes.char)
