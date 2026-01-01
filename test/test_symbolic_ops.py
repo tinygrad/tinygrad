@@ -288,20 +288,22 @@ class TestSymbolicOps(unittest.TestCase):
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=0)
 
   def test_conv2d_ceildiv_edge_case(self):
-    v = Variable('v', 11, 50_000)
-    val = 39601
-    x_full = Tensor.randn(1, 22, 50_000)
-    weight = Tensor.randn(256, 22, 12)
+    # tests symbolic ceildiv in conv2d output shape calculation
+    # val=79 triggers the edge case where old ceildiv simplifies incorrectly: old gives floor=12, correct ceildiv=13
+    v = Variable('v', 11, 100)
+    val = 79
+    x_full = Tensor.randn(1, 8, 100)
+    weight = Tensor.randn(16, 8, 12)
 
     # symbolic version
     result = x_full[:, :, :v.bind(val)].conv2d(weight=weight, groups=1, stride=6, dilation=1, padding=(3, 3))
     var_val = {v.expr: val}
     shape = tuple(sym_infer(s, var_val) for s in result.shape)
-    self.assertEqual(shape, (1, 256, 6600))
+    self.assertEqual(shape, (1, 16, 13))
 
     # concrete version for comparison
     expected = x_full[:, :, :val].conv2d(weight=weight, groups=1, stride=6, dilation=1, padding=(3, 3))
-    np.testing.assert_allclose(result[:, :, :6600].numpy(), expected.numpy(), atol=1e-5, rtol=1e-5)
+    np.testing.assert_allclose(result[:, :, :13].numpy(), expected.numpy(), atol=1e-5, rtol=1e-5)
 
 if __name__ == '__main__':
   unittest.main()
