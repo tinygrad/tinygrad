@@ -2,6 +2,7 @@
 # mypy: ignore-errors
 from __future__ import annotations
 import ctypes
+from enum import IntEnum
 from extra.assembly.amd.dsl import Inst, unwrap, FLOAT_ENC, MASK32, MASK64, _f32, _i32, _sext, _f16, _i16, _f64, _i64
 from extra.assembly.amd.pcode import Reg
 from extra.assembly.amd.asm import detect_format
@@ -89,6 +90,164 @@ class LDSMem:
   def __getitem__(self, addr): return _make_mem_accessor(self._read, self._write)(addr)
 
 SMEM_LOAD = {SMEMOp.S_LOAD_B32: 1, SMEMOp.S_LOAD_B64: 2, SMEMOp.S_LOAD_B128: 4, SMEMOp.S_LOAD_B256: 8, SMEMOp.S_LOAD_B512: 16}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TIMING MODEL - Instruction latencies and register dependency tracking
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class InstType(IntEnum):
+  """Instruction type for timing model."""
+  SALU = 0      # Scalar ALU
+  VALU = 1      # Vector ALU (simple)
+  TRANS32 = 2   # Transcendental (v_rcp, v_rsq, v_sqrt, v_log, v_exp, v_sin, v_cos)
+  SMEM = 3      # Scalar memory
+  VMEM = 4      # Vector memory (global/scratch)
+  LDS = 5       # LDS operations
+  BRANCH = 6    # Branch/control flow
+  NOP = 7       # No operation
+  OTHER = 8     # Other
+
+# Latencies from s_delay_alu encoding (VALU_DEP_1-4, TRANS32_DEP_1-3, SALU_CYCLE_1-3)
+INST_LATENCY = {
+  InstType.SALU: 1,      # SALU_CYCLE_1
+  InstType.VALU: 1,      # VALU_DEP_1 (with forwarding, no stall)
+  InstType.TRANS32: 4,   # TRANS32_DEP_3 (conservative)
+  InstType.SMEM: 4,      # Variable, use small fixed value
+  InstType.VMEM: 1,      # Variable, skip for now (issue immediately)
+  InstType.LDS: 1,       # Variable, skip for now
+  InstType.BRANCH: 1,
+  InstType.NOP: 1,
+  InstType.OTHER: 1,
+}
+
+# Transcendental ops - higher latency
+_TRANS_OPS = {'V_RCP_F32', 'V_RCP_F64', 'V_RSQ_F32', 'V_RSQ_F64', 'V_SQRT_F32', 'V_SQRT_F64',
+              'V_LOG_F32', 'V_EXP_F32', 'V_SIN_F32', 'V_COS_F32', 'V_RCP_F16', 'V_RSQ_F16', 'V_SQRT_F16'}
+
+def classify_inst(inst: Inst) -> InstType:
+  """Classify instruction for timing model."""
+  if isinstance(inst, (SOP1, SOP2, SOPC, SOPK)):
+    return InstType.SALU
+  if isinstance(inst, SOPP):
+    if inst.op in (SOPPOp.S_ENDPGM, SOPPOp.S_BARRIER): return InstType.OTHER
+    if hasattr(inst, 'op') and 'BRANCH' in getattr(inst.op, 'name', ''): return InstType.BRANCH
+    return InstType.NOP
+  if isinstance(inst, SMEM):
+    return InstType.SMEM
+  if isinstance(inst, (VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC)):
+    op_name = inst.op_name if hasattr(inst, 'op_name') else ''
+    if any(t in op_name for t in _TRANS_OPS):
+      return InstType.TRANS32
+    return InstType.VALU
+  if isinstance(inst, VOPD):
+    return InstType.VALU
+  if isinstance(inst, FLAT):
+    return InstType.VMEM
+  if isinstance(inst, DS):
+    return InstType.LDS
+  return InstType.OTHER
+
+class TimingState:
+  """Timing state for cycle-accurate emulation with SQTT output."""
+  __slots__ = ('cycle', 'sgpr_ready', 'vgpr_ready', 'packets', 'wave_id', 'simd', 'cu')
+
+  def __init__(self, wave_id: int = 0, simd: int = 0, cu: int = 0):
+    self.cycle = 0                          # Current cycle
+    self.sgpr_ready: dict[int, int] = {}    # SGPR -> cycle when ready
+    self.vgpr_ready: dict[int, int] = {}    # VGPR -> cycle when ready (all lanes same for now)
+    self.packets: list = []                 # SQTT packets
+    self.wave_id, self.simd, self.cu = wave_id, simd, cu
+
+  def stall_for_read(self, inst: Inst, st: 'WaveState') -> int:
+    """Calculate stall cycles needed before executing this instruction."""
+    max_ready = self.cycle
+
+    # Get source registers
+    srcs = []
+    if isinstance(inst, (SOP1, SOP2, SOPC)):
+      if hasattr(inst, 'ssrc0') and inst.ssrc0 < SGPR_COUNT: srcs.append(('s', inst.ssrc0))
+      if hasattr(inst, 'ssrc1') and inst.ssrc1 < SGPR_COUNT: srcs.append(('s', inst.ssrc1))
+    elif isinstance(inst, SOPK):
+      if hasattr(inst, 'sdst') and inst.sdst < SGPR_COUNT: srcs.append(('s', inst.sdst))
+    elif isinstance(inst, SMEM):
+      if hasattr(inst, 'sbase'): srcs.append(('s', inst.sbase * 2)); srcs.append(('s', inst.sbase * 2 + 1))
+      if hasattr(inst, 'soffset') and inst.soffset < SGPR_COUNT: srcs.append(('s', inst.soffset))
+    elif isinstance(inst, (VOP1, VOP2, VOP3, VOP3SD, VOPC)):
+      if hasattr(inst, 'src0'):
+        if inst.src0 < SGPR_COUNT: srcs.append(('s', inst.src0))
+        elif inst.src0 >= 256: srcs.append(('v', inst.src0 - 256))
+      if hasattr(inst, 'src1'):
+        if inst.src1 < SGPR_COUNT: srcs.append(('s', inst.src1))
+        elif inst.src1 >= 256: srcs.append(('v', inst.src1 - 256))
+      if hasattr(inst, 'src2'):
+        if inst.src2 < SGPR_COUNT: srcs.append(('s', inst.src2))
+        elif inst.src2 >= 256: srcs.append(('v', inst.src2 - 256))
+      if hasattr(inst, 'vsrc1'): srcs.append(('v', inst.vsrc1))
+
+    # Find max ready time across sources
+    for typ, reg in srcs:
+      if typ == 's':
+        ready = self.sgpr_ready.get(reg, 0)
+      else:
+        ready = self.vgpr_ready.get(reg, 0)
+      if ready > max_ready:
+        max_ready = ready
+
+    return max(0, max_ready - self.cycle)
+
+  def schedule_write(self, inst: Inst, latency: int):
+    """Record when destination registers will be ready."""
+    ready_cycle = self.cycle + latency
+
+    # Get destination registers
+    if isinstance(inst, (SOP1, SOP2, SOPK)):
+      if hasattr(inst, 'sdst') and inst.sdst < SGPR_COUNT:
+        self.sgpr_ready[inst.sdst] = ready_cycle
+        if inst.dst_regs() == 2:
+          self.sgpr_ready[inst.sdst + 1] = ready_cycle
+    elif isinstance(inst, SMEM):
+      if hasattr(inst, 'sdata'):
+        cnt = SMEM_LOAD.get(inst.op, 1)
+        for i in range(cnt):
+          self.sgpr_ready[inst.sdata + i] = ready_cycle
+    elif isinstance(inst, (VOP1, VOP2, VOP3, VOP3SD, VOPC, VOPD)):
+      if hasattr(inst, 'vdst'):
+        self.vgpr_ready[inst.vdst] = ready_cycle
+        if inst.dst_regs() == 2:
+          self.vgpr_ready[inst.vdst + 1] = ready_cycle
+    elif isinstance(inst, FLAT):
+      if 'LOAD' in inst.op.name and hasattr(inst, 'vdst'):
+        ndwords = _op_ndwords(inst.op.name)
+        for i in range(ndwords):
+          self.vgpr_ready[inst.vdst + i] = ready_cycle
+
+  def emit_wavestart(self):
+    """Emit WAVESTART packet."""
+    from extra.assembly.amd.sqtt import Packet, Op
+    fields = (self.wave_id & 0xF) << 8 | (self.simd & 0x3) << 12
+    self.packets.append(Packet(opcode=Op.WAVESTART, delta=0, fields=fields, time=self.cycle))
+
+  def emit_inst(self, inst: Inst, pc: int, stall: int, dur: int):
+    """Emit INST packet for instruction dispatch."""
+    from extra.assembly.amd.sqtt import Packet, Op
+    inst_type = classify_inst(inst)
+    # Fields: wave[3:0] at [11:8], inst_type at higher bits
+    fields = (self.wave_id & 0xF) << 8 | (inst_type & 0xFF) << 12
+    delta = stall + dur
+    self.packets.append(Packet(opcode=Op.INST, delta=delta, fields=fields, time=self.cycle))
+
+  def emit_waveend(self):
+    """Emit WAVEEND packet."""
+    from extra.assembly.amd.sqtt import Packet, Op
+    fields = (self.wave_id & 0xF) << 8 | (self.simd & 0x3) << 12
+    self.packets.append(Packet(opcode=Op.WAVEEND, delta=0, fields=fields, time=self.cycle))
+
+  def to_sqtt_blob(self) -> bytes:
+    """Encode all packets to raw SQTT blob."""
+    from extra.assembly.amd.sqtt import Packet, Op, encode
+    # Prepend LAYOUT_HEADER
+    header = Packet(opcode=Op.LAYOUT_HEADER, delta=0, fields=0x68900180, time=0)
+    return encode([header] + self.packets)
 
 # VOPD op -> VOP3 op mapping (VOPD is dual-issue of VOP1/VOP2 ops, use VOP3 enums for pseudocode lookup)
 _VOPD_TO_VOP = {
