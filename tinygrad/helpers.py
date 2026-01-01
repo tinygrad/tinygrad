@@ -43,7 +43,10 @@ def fully_flatten(l):
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 def _is_balanced(s:str) -> bool: return (d := 0, all((d := d + (c == '(') - (c == ')')) >= 0 for c in s))[1] and d == 0
 def strip_parens(fst:str) -> str: return fst[1:-1] if fst[:1]=='(' and fst[-1:]==')' and _is_balanced(fst[1:-1]) else fst
-def ceildiv(num, amt): return int(ret) if isinstance((ret:=-(num//-amt)), float) else ret
+def ceildiv(num, amt):
+  # use (num + amt - 1) // amt when num is a UOp and non-negative to avoid C/Python division mismatch
+  if hasattr(num, 'vmin') and num.vmin >= 0 and (amt > 0 if isinstance(amt, int) else amt.vmin > 0): return (num + amt - 1) // amt
+  return int(ret) if isinstance((ret:=-(num//-amt)), float) else ret
 def round_up(num:int, amt:int) -> int: return (num+amt-1)//amt * amt
 def round_down(num:int, amt:int) -> int: return -round_up(-num, amt)
 def next_power2(x): return 1 if x == 0 else 1 << (x - 1).bit_length()
