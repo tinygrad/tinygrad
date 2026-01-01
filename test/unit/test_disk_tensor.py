@@ -383,6 +383,38 @@ class TestDiskTensor(unittest.TestCase):
     np.testing.assert_equal(t1.numpy(), np.arange(128, dtype=np.uint8))
     np.testing.assert_equal(t2.numpy(), np.arange(64, dtype=np.uint8))
 
+  def test_disk_open_failure_state(self):
+    from tinygrad.runtime.ops_disk import DiskDevice
+    fn = pathlib.Path(temp("dt_open_failure"))
+    fn.unlink(missing_ok=True)
+    fn.write_bytes(bytes(range(256)))
+    os.chmod(fn, 0o000)
+    try:
+      t = Tensor.empty(100, device=f"disk:{fn}", dtype=dtypes.uint8)
+      t.numpy()
+    except PermissionError: pass
+    # device state should be clean after failed open
+    disk_device = Device[f"DISK:{fn}"]
+    assert isinstance(disk_device, DiskDevice)
+    assert disk_device.size is None, "size should be None after failed open"
+    assert not hasattr(disk_device, "mem"), "mem should not exist after failed open"
+    # should be able to open with any size after failure
+    os.chmod(fn, 0o644)
+    t2 = Tensor.empty(200, device=f"disk:{fn}", dtype=dtypes.uint8)
+    t2.to("CPU").realize()
+    assert disk_device.size == 200
+
+  def test_disk_permission_error(self):
+    fn = pathlib.Path(temp("dt_permission"))
+    fn.unlink(missing_ok=True)
+    fn.write_bytes(bytes(range(256)))
+    os.chmod(fn, 0o000)
+    try:
+      with self.assertRaises(PermissionError):
+        Tensor.empty(100, device=f"disk:{fn}", dtype=dtypes.uint8).numpy()
+    finally:
+      os.chmod(fn, 0o644)
+
 class TestPathTensor(unittest.TestCase):
   def setUp(self):
     self.temp_dir = tempfile.TemporaryDirectory()
