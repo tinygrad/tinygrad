@@ -4740,5 +4740,45 @@ class TestDSStorexchg(unittest.TestCase):
     self.assertEqual(st.vgpr[0][10], 0x11111111, "v10 should have old val2 low")
     self.assertEqual(st.vgpr[0][11], 0x22222222, "v11 should have old val2 high")
 
+class TestFLATAtomic(unittest.TestCase):
+  """Tests for FLAT atomic instructions."""
+
+  def test_flat_atomic_inc_u64_returns_old_value(self):
+    """FLAT_ATOMIC_INC_U64 should return full 64-bit old value."""
+    # Use offset 2000 within the output buffer (OUT_BYTES = 2120)
+    TEST_OFFSET = 2000
+    instructions = [
+      # Load output buffer address from args (saved in s[80:81] by prologue)
+      s_load_b64(s[2:3], s[80], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      v_mov_b32_e32(v[0], s[2]),  # addr low
+      v_mov_b32_e32(v[1], s[3]),  # addr high
+      # Store initial 64-bit value: 0xCAFEBABE_DEADBEEF at offset
+      s_mov_b32(s[0], 0xDEADBEEF),
+      v_mov_b32_e32(v[2], s[0]),  # data low
+      s_mov_b32(s[0], 0xCAFEBABE),
+      v_mov_b32_e32(v[3], s[0]),  # data high
+      global_store_b64(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      # Threshold for INC: 0xFFFFFFFF_FFFFFFFF (always increment since value < threshold)
+      s_mov_b32(s[0], 0xFFFFFFFF),
+      v_mov_b32_e32(v[4], s[0]),
+      v_mov_b32_e32(v[5], s[0]),
+      # FLAT_ATOMIC_INC_U64: returns old value in v[6:7]
+      FLAT(FLATOp.FLAT_ATOMIC_INC_U64, addr=v[0], data=v[4], vdst=v[6], saddr=SrcEnum.NULL, offset=TEST_OFFSET, glc=1),
+      s_waitcnt(vmcnt=0),
+      # Clear address registers that differ between emu/hw to avoid spurious comparison failures
+      v_mov_b32_e32(v[0], 0),
+      v_mov_b32_e32(v[1], 0),
+      s_mov_b32(s[2], 0),
+      s_mov_b32(s[3], 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # v[6] should have low dword of old value: 0xDEADBEEF
+    # v[7] should have high dword of old value: 0xCAFEBABE
+    self.assertEqual(st.vgpr[0][6], 0xDEADBEEF, "v6 should have old value low dword")
+    self.assertEqual(st.vgpr[0][7], 0xCAFEBABE, "v7 should have old value high dword")
+
+
 if __name__ == '__main__':
   unittest.main()

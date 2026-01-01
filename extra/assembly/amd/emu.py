@@ -48,7 +48,7 @@ _valid_mem_ranges: list[tuple[int, int]] = []
 def set_valid_mem_ranges(ranges: set[tuple[int, int]]) -> None: _valid_mem_ranges.clear(); _valid_mem_ranges.extend(ranges)
 def _mem_valid(addr: int, size: int) -> bool:
   return not _valid_mem_ranges or any(s <= addr and addr + size <= s + z for s, z in _valid_mem_ranges)
-def _ctypes_at(addr: int, size: int): return (ctypes.c_uint8 if size == 1 else ctypes.c_uint16 if size == 2 else ctypes.c_uint32).from_address(addr)
+def _ctypes_at(addr: int, size: int): return (ctypes.c_uint8 if size == 1 else ctypes.c_uint16 if size == 2 else ctypes.c_uint64 if size == 8 else ctypes.c_uint32).from_address(addr)
 def mem_read(addr: int, size: int) -> int: return _ctypes_at(addr, size).value if _mem_valid(addr, size) else 0
 def mem_write(addr: int, size: int, val: int) -> None:
   if _mem_valid(addr, size): _ctypes_at(addr, size).value = val
@@ -243,7 +243,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: LDSMem | None = None)
       ADDR = (st.rsgpr64(inst.saddr) + V[inst.addr] + _sext(inst.offset, 13)) & MASK64 if inst.saddr not in (NULL, 0x7f) else (addr + _sext(inst.offset, 13)) & MASK64
       result = fn(GlobalMem, ADDR, _vgpr_read(V, inst.data, ndwords), Reg(V[vdst]), Reg(0))
       if 'VDATA' in result: _vgpr_write(V, vdst, result['VDATA']._val, ndwords)
-      if 'RETURN_DATA' in result: V[vdst] = result['RETURN_DATA']._val & MASK32
+      if 'RETURN_DATA' in result: _vgpr_write(V, vdst, result['RETURN_DATA']._val, ndwords)
     else:  # DS
       DATA0, DATA1 = _vgpr_read(V, inst.data0, ndwords), _vgpr_read(V, inst.data1, ndwords) if inst.data1 is not None else Reg(0)
       result = fn(lds, Reg(V[inst.addr]), DATA0, DATA1, Reg(inst.offset0), Reg(inst.offset1), Reg(0))
