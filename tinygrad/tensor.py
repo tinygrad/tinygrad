@@ -1141,7 +1141,7 @@ class Tensor(OpMixin):
           boundary, stride = [start, stop], step
           if all(isinstance(s, int) for s in (start,stop,step)):
             # handle int slicing
-            # if we're slicing a symbolic dimension into a int dimension, we can slice untill the bind size
+            # if we're slicing a symbolic dimension into a int dimension, we can slice until the bind size
             # TODO: right now this is using vmax instead of the bind size because jit doesnt update the bound value of the returned tensor
             if isinstance(size, UOp): size = int(size.vmax)
             *boundary, stride = index.indices(cast(SupportsIndex, size))
