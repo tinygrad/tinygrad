@@ -6,7 +6,7 @@ from tinygrad.uop.ops import axis_letters, axis_colors, axis_to_pos
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes, ImageDType
 from tinygrad.helpers import colored, BEAM, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element, flatten
-from tinygrad.helpers import ALLOW_TF32, count
+from tinygrad.helpers import IMAGE, ALLOW_TF32, count
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError, check
 from tinygrad.codegen.simplify import pm_flatten_range
 from tinygrad.renderer import Renderer
@@ -349,3 +349,24 @@ def apply_opts(ast:UOp, ren:Renderer) -> UOp:
     if not any(u.op is Ops.BUFFERIZE for u in ast.backward_slice):
       k = hand_coded_optimizations(k)
   return k.get_optimized_ast(name_override=ast.arg.name if ast.arg is not None and ast.arg.name != "test" else None)
+
+# create image buffers
+def make_images(ast:UOp, ren:Renderer) -> UOp:
+  if IMAGE == 1 and ren.device in {"QCOM", "CL"}:
+    dg_types: dict = {}
+    def make_image(ctx, dg):
+      if (dt:=dg.dtype).base is dtypes.float and not isinstance(dt, ImageDType) and dt.size < 65536 and dt.nbytes() % 64 == 0:
+        ctx[dg.arg] = dt
+        return dg.replace(dtype=dtypes.imagef((1, dt.size // 4, 4), dt.nbytes()))
+
+    ast = graph_rewrite(ast, PatternMatcher([(UPat(Ops.DEFINE_GLOBAL, name="dg"), make_image)]), ctx=dg_types, name="create image buffers")
+
+    # undo unfoldable stores
+    def undo_image_store(ctx, st, idx, dg):
+      if dg.arg in ctx and not any(c.op is Ops.RANGE and (c.vmax+1)%4 == 0 for c in idx.src[1].get_idx().split_uop(Ops.ADD)):
+        return st.replace(src=(idx.replace(src=(dg.replace(dtype=ctx[dg.arg]),)+idx.src[1:]),)+st.src[1:])
+
+    ast = graph_rewrite(ast, PatternMatcher([
+      (UPat(Ops.DEFINE_GLOBAL, name="dg").index(UPat(), name="idx").store(UPat(), name="st"), undo_image_store)
+    ]), ctx=dg_types, name="remove unfoldable image stores")
+  return ast

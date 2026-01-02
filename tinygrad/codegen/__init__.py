@@ -1,10 +1,10 @@
 from typing import cast
 import itertools
-from tinygrad.helpers import DEVECTORIZE, TRANSCENDENTAL, SPEC, IMAGE, DEBUG, getenv, TracingKey
+from tinygrad.helpers import DEVECTORIZE, TRANSCENDENTAL, SPEC, IMAGE as IMAGE, DEBUG, getenv, TracingKey
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, pyrender
 from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
 from tinygrad.renderer import Renderer, ProgramSpec
-from tinygrad.dtype import dtypes, PtrDType, ImageDType
+from tinygrad.dtype import dtypes, PtrDType, ImageDType as ImageDType
 from tinygrad.helpers import panic
 from tinygrad.codegen.opt import Opt
 
@@ -15,7 +15,7 @@ from tinygrad.uop.decompositions import get_late_rewrite_patterns
 from tinygrad.codegen.late.expander import expander, pm_pre_expander, pm_group_for_reduce
 from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
   ReduceContext, correct_load_store, pm_render, pm_add_loads
-from tinygrad.codegen.opt.postrange import apply_opts
+from tinygrad.codegen.opt.postrange import apply_opts, make_images
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse, pm_split_store
 from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, pm_mops
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
@@ -53,23 +53,8 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
     # split store range (only on CPU for now)
     sink = graph_rewrite(sink, pm_split_store, ctx=ren.device, name="cut store ranges")
 
-    if IMAGE == 1 and ren.device in {"QCOM", "CL"}:
-      dg_types: dict = {}
-      def make_image(ctx, dg):
-        if (dt:=dg.dtype).base is dtypes.float and not isinstance(dt, ImageDType) and dt.size < 65536 and dt.nbytes() % 64 == 0:
-          ctx[dg.arg] = dt
-          return dg.replace(dtype=dtypes.imagef((1, dt.size // 4, 4)))
-      sink = graph_rewrite(sink, PatternMatcher([
-        (UPat(Ops.DEFINE_GLOBAL, name="dg"), make_image)
-      ]), ctx=dg_types, name="image upcast")
-      # undo unfoldable stores
-      def undo_image_store(ctx, st, idx, dg):
-        if dg.arg in ctx and not any(c.op is Ops.RANGE and (c.vmax+1)%4 == 0 for c in idx.src[1].get_idx().split_uop(Ops.ADD)):
-          return st.replace(src=(idx.replace(src=(dg.replace(dtype=ctx[dg.arg]),)+idx.src[1:]),)+st.src[1:])
-
-      sink = graph_rewrite(sink, PatternMatcher([
-        (UPat(Ops.DEFINE_GLOBAL, name="dg").index(UPat(), name="idx").store(UPat(), name="st"), undo_image_store)
-      ]), ctx=dg_types, name="legal images")
+    # create image buffers
+    sink = make_images(sink, ren)
 
     # do postrange optimization, BEAM or hand_coded_optimizations
     sink = apply_opts(sink, ren)
