@@ -451,6 +451,15 @@ VALU_FORWARD_LATENCY = 5  # result available 5 cycles after dispatch (writeback 
 TRANS_FORWARD_LATENCY = 13  # result available 13 cycles after dispatch
 SALU_FORWARD_LATENCY = 1  # result available 1 cycle after dispatch (writeback at 2)
 
+# Forwarding depth limit: after this many dependent ops in a chain, latency increases
+FORWARD_DEPTH_LIMIT = 4
+FORWARD_DEEP_LATENCY = 9  # latency for deep dependency chains (beyond depth limit)
+
+# Register cache bypass timeout: s_nop(N) with N >= 4 causes VALU results to go through
+# the full register file instead of bypass path, adding +4 cycles to ALUEXEC
+REGCACHE_BYPASS_TIMEOUT = 4
+REGCACHE_BYPASS_PENALTY = 4
+
 # Transcendental ops (use TRANS unit)
 _TRANS_OPS = {'V_RCP_F32', 'V_RCP_F64', 'V_RSQ_F32', 'V_RSQ_F64', 'V_SQRT_F32', 'V_SQRT_F64',
               'V_LOG_F32', 'V_EXP_F32', 'V_SIN_F32', 'V_COS_F32', 'V_RCP_F16', 'V_RSQ_F16', 'V_SQRT_F16'}
@@ -462,7 +471,7 @@ _DP_OPS = {'V_ADD_F64', 'V_MUL_F64', 'V_FMA_F64', 'V_DIV_F64', 'V_MIN_F64', 'V_M
            'V_DIV_FMAS_F64', 'V_DIV_FIXUP_F64', 'V_CVT_F64_I32', 'V_CVT_F64_U32',
            'V_CVT_I32_F64', 'V_CVT_U32_F64', 'V_CVT_F32_F64', 'V_CVT_F64_F32'}
 
-from extra.assembly.amd.sqtt import WAVESTART, WAVEEND, IMMEDIATE
+from extra.assembly.amd.sqtt import WAVESTART, WAVEEND, IMMEDIATE, VALUINST, ALUEXEC, AluSrc
 
 class SQTTState:
   """SQTT tracing state - emits packets when instructions dispatch."""
@@ -472,6 +481,14 @@ class SQTTState:
     self.wave_id, self.simd, self.cu = wave_id, simd, cu
     self.cycle = 0
     self.inst_count = 0  # track instruction count for first-instruction detection
+    # VGPR dependency tracking: vgpr_ready[i] = cycle when VGPR i result is available for forwarding
+    self.vgpr_ready: dict[int, int] = {}
+    # Track dependency chain depth per VGPR: how many dependent ops produced this result
+    self.vgpr_chain_depth: dict[int, int] = {}
+    # Pending ALUEXEC completions: list of (completion_cycle, alu_src)
+    self.pending_aluexec: list[tuple[int, AluSrc]] = []
+    # Track last VALU dispatch cycle for s_nop pipeline delay
+    self.last_valu_dispatch: int = -100
 
   def emit(self, pkt_class, **kwargs):
     self.packets.append(pkt_class(_time=self.cycle, **kwargs))
@@ -482,24 +499,109 @@ class SQTTState:
       self.tick()
 
   def tick(self):
-    """Process one cycle: emit any completing ALUEXECs, then advance cycle."""
+    """Emit any completing ALUEXECs at current cycle, then advance."""
+    while self.pending_aluexec and self.pending_aluexec[0][0] <= self.cycle:
+      _, alu_src = self.pending_aluexec.pop(0)
+      self.emit(ALUEXEC, src=alu_src)
     self.cycle += 1
+
+  def _get_valu_src_regs(self, inst: Inst) -> list[int]:
+    """Extract source VGPR indices from a VALU instruction."""
+    src_vgprs = []
+    if isinstance(inst, VOP1):
+      if inst.src0 >= 256: src_vgprs.append(inst.src0 - 256)
+    elif isinstance(inst, VOP2):
+      if inst.src0 >= 256: src_vgprs.append(inst.src0 - 256)
+      src_vgprs.append(inst.vsrc1)  # vsrc1 is always a VGPR index
+    elif isinstance(inst, VOP3):
+      for src in [inst.src0, inst.src1, getattr(inst, 'src2', None)]:
+        if src is not None and src >= 256: src_vgprs.append(src - 256)
+    return src_vgprs
+
+  def _get_valu_dst_reg(self, inst: Inst) -> int | None:
+    """Extract destination VGPR index from a VALU instruction."""
+    if isinstance(inst, (VOP1, VOP2, VOP3)):
+      return inst.vdst
+    return None
 
   def process_instruction(self, inst: Inst):
     """Simulate cycles until instruction dispatches, emitting SQTT packets."""
 
     if inst.op == SOPPOp.S_NOP:
+      # s_nop(N) with N >= REGCACHE_BYPASS_TIMEOUT causes pending VALU results to go through
+      # the full register file instead of bypass path, adding REGCACHE_BYPASS_PENALTY cycles
+      bypass_penalty = REGCACHE_BYPASS_PENALTY if inst.simm16 >= REGCACHE_BYPASS_TIMEOUT and self.pending_aluexec else 0
+      if bypass_penalty:
+        self.pending_aluexec = [(c + bypass_penalty, src) for c, src in self.pending_aluexec]
+
+      # After VALU, there's a pipeline delay before first s_nop IMMEDIATE
+      pipeline_delay = max(0, self.last_valu_dispatch + SNOP_PIPELINE_DELAY - self.cycle)
+      for _ in range(pipeline_delay): self.tick()
+
       # s_nop(N) with SNOP_EXTRA_DELAY_MIN <= N <= SNOP_EXTRA_DELAY_MAX has extra cycles when not first instruction
       extra_delay = SNOP_EXTRA_DELAY_CYCLES if SNOP_EXTRA_DELAY_MIN <= inst.simm16 <= SNOP_EXTRA_DELAY_MAX and self.inst_count > 0 else 0
-      for _ in range(inst.simm16 + extra_delay): self.tick()
+      # With bypass penalty, the s_nop delay also includes the penalty (waiting for register writeback)
+      snop_delay = inst.simm16 + extra_delay + bypass_penalty
+      if bypass_penalty and self.pending_aluexec:
+        # Wait until one cycle after the earliest pending ALUEXEC completes
+        earliest_aluexec = min(c for c, _ in self.pending_aluexec)
+        wait_for_aluexec = max(0, earliest_aluexec + 1 - self.cycle - snop_delay)
+        snop_delay += wait_for_aluexec
+      for _ in range(snop_delay): self.tick()
       self.emit(IMMEDIATE, wave=self.wave_id)
+      self.tick()
+
+    elif isinstance(inst, (VOP1, VOP2, VOP3)):
+      # VALU instruction - handle dependencies and emit VALUINST/ALUEXEC
+      dispatch_cycle = self.cycle
+
+      # Find source VGPRs and check when they're ready
+      src_vgprs = self._get_valu_src_regs(inst)
+      has_vgpr_src = len(src_vgprs) > 0 and any(r in self.vgpr_ready for r in src_vgprs)
+      source_ready = max((self.vgpr_ready.get(r, 0) for r in src_vgprs), default=0)
+
+      # Calculate chain depth: max depth of any source VGPR + 1
+      chain_depth = max((self.vgpr_chain_depth.get(r, 0) for r in src_vgprs), default=0) + 1 if has_vgpr_src else 0
+
+      # Effective start is when all sources are ready
+      effective_start = max(dispatch_cycle, source_ready)
+
+      # Emit VALUINST at dispatch time
+      self.emit(VALUINST, wave=self.wave_id)
+      self.last_valu_dispatch = dispatch_cycle
+
+      # ALUEXEC latency depends on chain depth:
+      # - depth 0-1: full latency (6) - no forwarding benefit yet
+      # - depth 2-3: forwarding saves 1 cycle (5)
+      # - depth >= 4: deep chain penalty (9)
+      if chain_depth >= FORWARD_DEPTH_LIMIT:
+        exec_latency = FORWARD_DEEP_LATENCY
+      elif chain_depth >= 2:
+        exec_latency = VALU_FORWARD_LATENCY
+      else:
+        exec_latency = VALU_LATENCY
+      completion_cycle = effective_start + exec_latency
+      # Only one ALUEXEC can be emitted per cycle - ensure spacing
+      if self.pending_aluexec:
+        last_pending = max(c for c, _ in self.pending_aluexec)
+        completion_cycle = max(completion_cycle, last_pending + 1)
+      self.pending_aluexec.append((completion_cycle, AluSrc.VALU))
+      self.pending_aluexec.sort(key=lambda x: x[0])
+
+      # Forward-ready time matches ALUEXEC completion
+      dst_reg = self._get_valu_dst_reg(inst)
+      if dst_reg is not None:
+        self.vgpr_ready[dst_reg] = completion_cycle
+        self.vgpr_chain_depth[dst_reg] = chain_depth if has_vgpr_src else 0
+
       self.tick()
 
     self.inst_count += 1
 
   def finalize(self):
-    """Emit pending ALUEXECs and WAVEEND."""
-    # Emit any remaining ALUEXECs
+    """Tick until all pending ALUEXECs complete, then emit WAVEEND."""
+    while self.pending_aluexec:
+      self.tick()
     self.emit(WAVEEND, wave=self.wave_id, simd=self.simd, cu_lo=self.cu & 0x7, flag7=self.cu >> 3)
 
 # ═══════════════════════════════════════════════════════════════════════════════

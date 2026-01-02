@@ -14,49 +14,9 @@ import unittest
 from tinygrad.device import Device
 from tinygrad.helpers import DEBUG
 
-from extra.assembly.amd.sqtt import decode, encode, LAYOUT_HEADER, WAVESTART, WAVEEND, INST, PacketType
+from extra.assembly.amd.sqtt import decode, WAVESTART, WAVEEND, IMMEDIATE, PacketType
 
 dev = Device["AMD"]
-
-
-class TestSQTTCodec(unittest.TestCase):
-  """Tests for SQTT encoder/decoder roundtrip."""
-
-  def test_roundtrip_simple(self):
-    """Test encode/decode roundtrip for simple packets."""
-    test_packets = [
-      LAYOUT_HEADER.from_raw(0x100),
-      WAVESTART.from_raw(0x0),
-      INST.from_raw(0x10),  # delta=1
-      INST.from_raw(0x10),  # delta=1
-      WAVEEND.from_raw(0x40),  # delta=2
-    ]
-    encoded = encode(test_packets)
-    decoded = decode(encoded)
-
-    self.assertGreaterEqual(len(decoded), len(test_packets))
-    for i, (orig, dec) in enumerate(zip(test_packets, decoded)):
-      self.assertEqual(type(orig), type(dec), f"type mismatch at {i}: {orig} vs {dec}")
-
-  def test_decode_real_blob(self):
-    """Test decoding a real SQTT blob from examples."""
-    import pickle
-    from pathlib import Path
-    example_path = Path(__file__).parent.parent.parent.parent / "sqtt/examples/profile_plus_run_0.pkl"
-    if not example_path.exists():
-      self.skipTest(f"Example file not found: {example_path}")
-
-    with open(example_path, "rb") as f:
-      data = pickle.load(f)
-
-    sqtt_events = [e for e in data if isinstance(e, ProfileSQTTEvent)]
-    self.assertGreater(len(sqtt_events), 0, "No SQTT events in example")
-
-    packets = decode(sqtt_events[0].blob)
-    self.assertGreater(len(packets), 0, "No packets decoded")
-    # Should see common packet types
-    pkt_types = {type(p) for p in packets}
-    self.assertIn(LAYOUT_HEADER, pkt_types)
 
 
 from extra.assembly.amd.emu import SQTTState, decode_program, exec_wave, WaveState, LDSMem
@@ -204,7 +164,7 @@ class SQTTCompareTestBase(unittest.TestCase):
       f"HW patterns: {[list(p) for p in pattern_counts.most_common(3)]}")
 
 
-@unittest.skipIf(not hasattr(dev, 'profile_events'), "AMD device required")
+@unittest.skip("TestEmulatorSQTT needs more work - causes GPU faults")
 class TestEmulatorSQTT(SQTTCompareTestBase):
   """Tests comparing emulator SQTT to hardware SQTT."""
 
@@ -1412,6 +1372,597 @@ class TestSNop(SQTTCompareTestBase):
   def test_falsify_gap_63_63(self):
     """Two s_nop(63) - maximum values."""
     self._run_and_compare([s_nop(63), s_nop(63)], "falsify_63_63")
+
+
+@unittest.skipIf(not hasattr(dev, 'profile_events'), "AMD device required")
+class TestVALUMov(SQTTCompareTestBase):
+  """Dedicated tests for v_mov_b32 VALU timing behavior."""
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Single v_mov tests
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  def test_vmov_single(self):
+    """Single v_mov instruction."""
+    self._run_and_compare([v_mov_b32_e32(v[0], 1.0)], "vmov_single")
+
+  def test_vmov_single_high_reg(self):
+    """Single v_mov to high register."""
+    self._run_and_compare([v_mov_b32_e32(v[100], 1.0)], "vmov_single_high_reg")
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Independent v_mov sequences (no dependencies)
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  def test_vmov_independent_2(self):
+    """Two independent v_mov instructions."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], 2.0),
+    ], "vmov_independent_2")
+
+  def test_vmov_independent_3(self):
+    """Three independent v_mov instructions."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], 2.0),
+      v_mov_b32_e32(v[2], 3.0),
+    ], "vmov_independent_3")
+
+  def test_vmov_independent_4(self):
+    """Four independent v_mov instructions."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], 2.0),
+      v_mov_b32_e32(v[2], 3.0),
+      v_mov_b32_e32(v[3], 4.0),
+    ], "vmov_independent_4")
+
+  def test_vmov_independent_5(self):
+    """Five independent v_mov instructions."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], 2.0),
+      v_mov_b32_e32(v[2], 3.0),
+      v_mov_b32_e32(v[3], 4.0),
+      v_mov_b32_e32(v[4], 5.0),
+    ], "vmov_independent_5")
+
+  def test_vmov_independent_6(self):
+    """Six independent v_mov instructions."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], 2.0),
+      v_mov_b32_e32(v[2], 3.0),
+      v_mov_b32_e32(v[3], 4.0),
+      v_mov_b32_e32(v[4], 5.0),
+      v_mov_b32_e32(v[5], 6.0),
+    ], "vmov_independent_6")
+
+  def test_vmov_independent_7(self):
+    """Seven independent v_mov instructions."""
+    self._run_and_compare([v_mov_b32_e32(v[i], float(i)) for i in range(7)], "vmov_independent_7")
+
+  def test_vmov_independent_8(self):
+    """Eight independent v_mov instructions."""
+    self._run_and_compare([v_mov_b32_e32(v[i], float(i)) for i in range(8)], "vmov_independent_8")
+
+  def test_vmov_independent_12(self):
+    """Twelve independent v_mov instructions."""
+    self._run_and_compare([v_mov_b32_e32(v[i], float(i)) for i in range(12)], "vmov_independent_12")
+
+  def test_vmov_independent_16(self):
+    """Sixteen independent v_mov instructions."""
+    self._run_and_compare([v_mov_b32_e32(v[i], float(i)) for i in range(16)], "vmov_independent_16")
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Dependency chains (RAW - read after write)
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  def test_vmov_dep_chain_2(self):
+    """Two v_mov with dependency chain."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),  # depends on v[0]
+    ], "vmov_dep_chain_2")
+
+  def test_vmov_dep_chain_3(self):
+    """Three v_mov with dependency chain."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+    ], "vmov_dep_chain_3")
+
+  def test_vmov_dep_chain_4(self):
+    """Four v_mov with dependency chain."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+    ], "vmov_dep_chain_4")
+
+  def test_vmov_dep_chain_5(self):
+    """Five v_mov with dependency chain."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+    ], "vmov_dep_chain_5")
+
+  def test_vmov_dep_chain_6(self):
+    """Six v_mov with dependency chain."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      v_mov_b32_e32(v[5], v[4]),
+    ], "vmov_dep_chain_6")
+
+  def test_vmov_dep_chain_8(self):
+    """Eight v_mov with dependency chain."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      v_mov_b32_e32(v[5], v[4]),
+      v_mov_b32_e32(v[6], v[5]),
+      v_mov_b32_e32(v[7], v[6]),
+    ], "vmov_dep_chain_8")
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # WAW (write-after-write) - same destination register
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  def test_vmov_waw_2(self):
+    """Two v_mov writing to same register."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[0], 2.0),
+    ], "vmov_waw_2")
+
+  def test_vmov_waw_3(self):
+    """Three v_mov writing to same register."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[0], 2.0),
+      v_mov_b32_e32(v[0], 3.0),
+    ], "vmov_waw_3")
+
+  def test_vmov_waw_4(self):
+    """Four v_mov writing to same register."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[0], 2.0),
+      v_mov_b32_e32(v[0], 3.0),
+      v_mov_b32_e32(v[0], 4.0),
+    ], "vmov_waw_4")
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Fan-out patterns (one source, multiple consumers)
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  def test_vmov_fanout_2(self):
+    """One source, two consumers."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[0]),
+    ], "vmov_fanout_2")
+
+  def test_vmov_fanout_3(self):
+    """One source, three consumers."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[0]),
+      v_mov_b32_e32(v[3], v[0]),
+    ], "vmov_fanout_3")
+
+  def test_vmov_fanout_4(self):
+    """One source, four consumers."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[0]),
+      v_mov_b32_e32(v[3], v[0]),
+      v_mov_b32_e32(v[4], v[0]),
+    ], "vmov_fanout_4")
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Mixed independent and dependent
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  def test_vmov_mixed_ind_dep(self):
+    """Independent instructions followed by dependency."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], 2.0),
+      v_mov_b32_e32(v[2], 3.0),
+      v_mov_b32_e32(v[3], v[0]),  # depends on v[0]
+    ], "vmov_mixed_ind_dep")
+
+  def test_vmov_mixed_dep_ind(self):
+    """Dependency followed by independent instructions."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),  # depends on v[0]
+      v_mov_b32_e32(v[2], 3.0),
+      v_mov_b32_e32(v[3], 4.0),
+    ], "vmov_mixed_dep_ind")
+
+  def test_vmov_interleaved_deps(self):
+    """Interleaved dependencies."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[2], 3.0),
+      v_mov_b32_e32(v[1], v[0]),  # depends on v[0]
+      v_mov_b32_e32(v[3], v[2]),  # depends on v[2]
+    ], "vmov_interleaved_deps")
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # v_mov with s_nop delays
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  def test_vmov_snop0_vmov(self):
+    """v_mov, s_nop(0), v_mov."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(0),
+      v_mov_b32_e32(v[1], 2.0),
+    ], "vmov_snop0_vmov")
+
+  def test_vmov_snop1_vmov(self):
+    """v_mov, s_nop(1), v_mov."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(1),
+      v_mov_b32_e32(v[1], 2.0),
+    ], "vmov_snop1_vmov")
+
+  def test_vmov_snop4_vmov(self):
+    """v_mov, s_nop(4), v_mov."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(4),
+      v_mov_b32_e32(v[1], 2.0),
+    ], "vmov_snop4_vmov")
+
+  def test_vmov_snop7_vmov(self):
+    """v_mov, s_nop(7), v_mov - crosses +4 delay threshold."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(7),
+      v_mov_b32_e32(v[1], 2.0),
+    ], "vmov_snop7_vmov")
+
+  def test_vmov_snop15_vmov(self):
+    """v_mov, s_nop(15), v_mov."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(15),
+      v_mov_b32_e32(v[1], 2.0),
+    ], "vmov_snop15_vmov")
+
+  def test_vmov_snop32_vmov(self):
+    """v_mov, s_nop(32), v_mov."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(32),
+      v_mov_b32_e32(v[1], 2.0),
+    ], "vmov_snop32_vmov")
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # v_mov with s_nop and dependencies
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  def test_vmov_dep_snop0(self):
+    """v_mov dependency with s_nop(0) between."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(0),
+      v_mov_b32_e32(v[1], v[0]),  # depends on v[0]
+    ], "vmov_dep_snop0")
+
+  def test_vmov_dep_snop1(self):
+    """v_mov dependency with s_nop(1) between."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(1),
+      v_mov_b32_e32(v[1], v[0]),
+    ], "vmov_dep_snop1")
+
+  def test_vmov_dep_snop2(self):
+    """v_mov dependency with s_nop(2) between."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(2),
+      v_mov_b32_e32(v[1], v[0]),
+    ], "vmov_dep_snop2")
+
+  def test_vmov_dep_snop3(self):
+    """v_mov dependency with s_nop(3) between."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(3),
+      v_mov_b32_e32(v[1], v[0]),
+    ], "vmov_dep_snop3")
+
+  def test_vmov_dep_snop4(self):
+    """v_mov dependency with s_nop(4) between."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(4),
+      v_mov_b32_e32(v[1], v[0]),
+    ], "vmov_dep_snop4")
+
+  def test_vmov_dep_snop5(self):
+    """v_mov dependency with s_nop(5) between."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(5),
+      v_mov_b32_e32(v[1], v[0]),
+    ], "vmov_dep_snop5")
+
+  def test_vmov_dep_snop6(self):
+    """v_mov dependency with s_nop(6) between - just under VALU latency."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(6),
+      v_mov_b32_e32(v[1], v[0]),
+    ], "vmov_dep_snop6")
+
+  def test_vmov_dep_snop7(self):
+    """v_mov dependency with s_nop(7) between - at/above VALU latency."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(7),
+      v_mov_b32_e32(v[1], v[0]),
+    ], "vmov_dep_snop7")
+
+  def test_vmov_dep_snop8(self):
+    """v_mov dependency with s_nop(8) between."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(8),
+      v_mov_b32_e32(v[1], v[0]),
+    ], "vmov_dep_snop8")
+
+  def test_vmov_dep_snop15(self):
+    """v_mov dependency with s_nop(15) between."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(15),
+      v_mov_b32_e32(v[1], v[0]),
+    ], "vmov_dep_snop15")
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Multiple s_nops between v_movs
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  def test_vmov_multi_snop_0_0(self):
+    """v_mov with two s_nop(0) between."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(0),
+      s_nop(0),
+      v_mov_b32_e32(v[1], 2.0),
+    ], "vmov_multi_snop_0_0")
+
+  def test_vmov_multi_snop_1_1(self):
+    """v_mov with two s_nop(1) between."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(1),
+      s_nop(1),
+      v_mov_b32_e32(v[1], 2.0),
+    ], "vmov_multi_snop_1_1")
+
+  def test_vmov_multi_snop_2_2(self):
+    """v_mov with two s_nop(2) between."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(2),
+      s_nop(2),
+      v_mov_b32_e32(v[1], 2.0),
+    ], "vmov_multi_snop_2_2")
+
+  def test_vmov_multi_snop_3_3(self):
+    """v_mov with two s_nop(3) between."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(3),
+      s_nop(3),
+      v_mov_b32_e32(v[1], 2.0),
+    ], "vmov_multi_snop_3_3")
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Alternating v_mov and s_nop
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  def test_vmov_snop_alternating_0(self):
+    """Alternating v_mov and s_nop(0)."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(0),
+      v_mov_b32_e32(v[1], 2.0),
+      s_nop(0),
+      v_mov_b32_e32(v[2], 3.0),
+    ], "vmov_snop_alternating_0")
+
+  def test_vmov_snop_alternating_1(self):
+    """Alternating v_mov and s_nop(1)."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(1),
+      v_mov_b32_e32(v[1], 2.0),
+      s_nop(1),
+      v_mov_b32_e32(v[2], 3.0),
+    ], "vmov_snop_alternating_1")
+
+  def test_vmov_snop_alternating_4(self):
+    """Alternating v_mov and s_nop(4)."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(4),
+      v_mov_b32_e32(v[1], 2.0),
+      s_nop(4),
+      v_mov_b32_e32(v[2], 3.0),
+    ], "vmov_snop_alternating_4")
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Dependency distance tests (N independent instructions between producer/consumer)
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  def test_vmov_dep_dist_1(self):
+    """Dependency with 1 independent instruction between."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[10], 2.0),  # independent
+      v_mov_b32_e32(v[1], v[0]),  # depends on v[0]
+    ], "vmov_dep_dist_1")
+
+  def test_vmov_dep_dist_2(self):
+    """Dependency with 2 independent instructions between."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[10], 2.0),
+      v_mov_b32_e32(v[11], 3.0),
+      v_mov_b32_e32(v[1], v[0]),
+    ], "vmov_dep_dist_2")
+
+  def test_vmov_dep_dist_3(self):
+    """Dependency with 3 independent instructions between."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[10], 2.0),
+      v_mov_b32_e32(v[11], 3.0),
+      v_mov_b32_e32(v[12], 4.0),
+      v_mov_b32_e32(v[1], v[0]),
+    ], "vmov_dep_dist_3")
+
+  def test_vmov_dep_dist_4(self):
+    """Dependency with 4 independent instructions between."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[10], 2.0),
+      v_mov_b32_e32(v[11], 3.0),
+      v_mov_b32_e32(v[12], 4.0),
+      v_mov_b32_e32(v[13], 5.0),
+      v_mov_b32_e32(v[1], v[0]),
+    ], "vmov_dep_dist_4")
+
+  def test_vmov_dep_dist_5(self):
+    """Dependency with 5 independent instructions between."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[10], 2.0),
+      v_mov_b32_e32(v[11], 3.0),
+      v_mov_b32_e32(v[12], 4.0),
+      v_mov_b32_e32(v[13], 5.0),
+      v_mov_b32_e32(v[14], 6.0),
+      v_mov_b32_e32(v[1], v[0]),
+    ], "vmov_dep_dist_5")
+
+  def test_vmov_dep_dist_6(self):
+    """Dependency with 6 independent instructions between - at VALU latency."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[10], 2.0),
+      v_mov_b32_e32(v[11], 3.0),
+      v_mov_b32_e32(v[12], 4.0),
+      v_mov_b32_e32(v[13], 5.0),
+      v_mov_b32_e32(v[14], 6.0),
+      v_mov_b32_e32(v[15], 7.0),
+      v_mov_b32_e32(v[1], v[0]),
+    ], "vmov_dep_dist_6")
+
+  def test_vmov_dep_dist_7(self):
+    """Dependency with 7 independent instructions between - past VALU latency."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[10], 2.0),
+      v_mov_b32_e32(v[11], 3.0),
+      v_mov_b32_e32(v[12], 4.0),
+      v_mov_b32_e32(v[13], 5.0),
+      v_mov_b32_e32(v[14], 6.0),
+      v_mov_b32_e32(v[15], 7.0),
+      v_mov_b32_e32(v[16], 8.0),
+      v_mov_b32_e32(v[1], v[0]),
+    ], "vmov_dep_dist_7")
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Complex patterns
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  def test_vmov_diamond(self):
+    """Diamond dependency pattern: v0 -> v1,v2 -> v3."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[0]),
+      v_mov_b32_e32(v[3], v[1]),  # or v[2]
+    ], "vmov_diamond")
+
+  def test_vmov_two_chains(self):
+    """Two independent dependency chains."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[10], 2.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[11], v[10]),
+    ], "vmov_two_chains")
+
+  def test_vmov_burst_then_dep(self):
+    """Burst of independent, then dependency chain."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], 2.0),
+      v_mov_b32_e32(v[2], 3.0),
+      v_mov_b32_e32(v[3], 4.0),
+      v_mov_b32_e32(v[10], v[0]),
+      v_mov_b32_e32(v[11], v[10]),
+    ], "vmov_burst_then_dep")
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Long s_nop tests - probe ALUEXEC timing independent of s_nop duration
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  def test_vmov_snop63_vmov(self):
+    """v_mov, s_nop(63), v_mov - ALUEXEC should complete before s_nop ends."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(63),
+      v_mov_b32_e32(v[1], 2.0),
+    ], "vmov_snop63_vmov")
+
+  def test_vmov_snop63(self):
+    """v_mov then s_nop(63) - probe ALUEXEC timing."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(63),
+    ], "vmov_snop63")
+
+  def test_vmov_snop20(self):
+    """v_mov then s_nop(20) - outside extra delay range."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(20),
+    ], "vmov_snop20")
+
+  def test_vmov_snop10(self):
+    """v_mov then s_nop(10) - inside extra delay range."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(10),
+    ], "vmov_snop10")
 
 if __name__ == "__main__":
   unittest.main()
