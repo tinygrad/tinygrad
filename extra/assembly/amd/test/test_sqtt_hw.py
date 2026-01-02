@@ -132,6 +132,10 @@ def print_all_packets(packets: list) -> None:
 def assemble(instructions: list) -> bytes:
   return b''.join(inst.to_bytes() for inst in instructions)
 
+def wrap_with_nops(instructions: list) -> list:
+  """Add trailing NOPs and s_endpgm for clean SQTT timing."""
+  return instructions + [s_nop(0)]*64 + [s_endpgm()]
+
 def compile_asm_sqtt(instructions: list, alu_only: bool = False) -> AMDProgram:
   """Compile instructions to an AMDProgram for SQTT tracing.
 
@@ -142,8 +146,8 @@ def compile_asm_sqtt(instructions: list, alu_only: bool = False) -> AMDProgram:
     Compiled AMDProgram ready to run
   """
   compiler = HIPCompiler(dev.arch)
-  instructions = instructions + [s_endpgm()]
-  code = assemble(instructions)
+  # Add NOPs before s_endpgm to flush pipeline and get clean timing
+  code = assemble(wrap_with_nops(instructions))
   byte_str = ', '.join(f'0x{b:02x}' for b in code)
 
   if alu_only:
@@ -157,7 +161,7 @@ test:
 .rodata
 .p2align 6
 .amdhsa_kernel test
-  .amdhsa_next_free_vgpr 8
+  .amdhsa_next_free_vgpr 64
   .amdhsa_next_free_sgpr 8
   .amdhsa_wavefront_size32 1
   .amdhsa_group_segment_fixed_size 0
@@ -178,7 +182,7 @@ amdhsa.kernels:
     .kernarg_segment_align: 8
     .wavefront_size: 32
     .sgpr_count: 8
-    .vgpr_count: 8
+    .vgpr_count: 64
     .max_flat_workgroup_size: 1024
 ...
 .end_amdgpu_metadata

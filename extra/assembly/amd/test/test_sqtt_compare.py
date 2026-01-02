@@ -61,16 +61,13 @@ class TestSQTTCodec(unittest.TestCase):
 
 from extra.assembly.amd.emu import SQTTState, decode_program
 from extra.assembly.amd.sqtt import VALUINST, ALUEXEC
-from extra.assembly.amd.autogen.rdna3.ins import v_mov_b32_e32, v_add_f32_e32, s_mov_b32, s_add_u32, s_endpgm
+from extra.assembly.amd.autogen.rdna3.ins import v_mov_b32_e32, v_add_f32_e32, v_rcp_f32_e32, v_sqrt_f32_e32, v_exp_f32_e32, s_mov_b32, s_add_u32
 from extra.assembly.amd.dsl import v, s
-from extra.assembly.amd.test.test_sqtt_hw import compile_asm_sqtt, run_prg_sqtt, run_prg_sqtt_batch, get_wave_packets, format_packet
-
-def assemble(instructions: list) -> bytes:
-  return b''.join(inst.to_bytes() for inst in instructions)
+from extra.assembly.amd.test.test_sqtt_hw import compile_asm_sqtt, run_prg_sqtt, run_prg_sqtt_batch, get_wave_packets, format_packet, assemble, wrap_with_nops
 
 def run_emulator_sqtt(instructions: list) -> list[PacketType]:
   """Run instructions through emulator and return SQTT packets."""
-  code = assemble(instructions + [s_endpgm()])
+  code = assemble(wrap_with_nops(instructions))
   program = decode_program(code)
 
   sqtt = SQTTState(wave_id=0, simd=0, cu=0)
@@ -103,7 +100,7 @@ def get_timing_deltas(packets: list) -> list[tuple[str, int]]:
 class TestEmulatorSQTT(unittest.TestCase):
   """Tests comparing emulator SQTT to hardware SQTT."""
 
-  def _run_and_compare(self, instructions: list, name: str = "", n_runs: int = 100, min_identical: int = 30, max_attempts: int = 5):
+  def _run_and_compare(self, instructions: list, name: str = "", n_runs: int = 100, min_identical: int = 25, max_attempts: int = 10):
     """Run instructions on both hardware and emulator, compare SQTT structure."""
     from collections import Counter
 
@@ -187,14 +184,12 @@ class TestEmulatorSQTT(unittest.TestCase):
         t = p._time - emu_t0 if hasattr(p, '_time') else 0
         print(f"  {t:8d}: {format_packet(p)}")
 
-    # Compare packet structure (types only, ignoring timing jitter)
-    # Extract just packet types from emulator
-    emu_types = tuple(t for t, _ in emu_deltas)
-    # Find HW patterns with matching structure
-    matching_structures = [p for p in pattern_counts if tuple(t for t, _ in p) == emu_types]
-    self.assertGreater(len(matching_structures), 0,
-      f"{name}: emulator packet structure {emu_types} not found in any HW traces.\n"
-      f"HW structures: {set(tuple(t for t, _ in p) for p in pattern_counts)}")
+    # Assert emulator pattern matches most common HW pattern exactly
+    emu_pattern = tuple(emu_deltas)
+    self.assertIn(emu_pattern, pattern_counts,
+      f"{name}: emulator pattern not found in HW traces.\n"
+      f"Emulator: {emu_deltas}\n"
+      f"HW patterns: {[list(p) for p in pattern_counts.most_common(3)]}")
 
   def test_salu_independent(self):
     """SALU instructions with no dependencies."""
@@ -216,13 +211,21 @@ class TestEmulatorSQTT(unittest.TestCase):
     """Empty program - just s_endpgm."""
     self._run_and_compare([], "empty")
 
-  def test_valu_independent(self):
+  def _test_valu_independent_n(self, n: int):
     """VALU instructions with no dependencies."""
     self._run_and_compare([
-      v_mov_b32_e32(v[0], 1.0),
-      v_mov_b32_e32(v[1], 2.0),
-      v_mov_b32_e32(v[2], 3.0),
-    ], "3 VALU independent")
+      v_mov_b32_e32(v[i], float(i)) for i in range(n)
+    ], f"{n} VALU independent")
+
+  def test_valu_independent_1(self): self._test_valu_independent_n(1)
+  def test_valu_independent_2(self): self._test_valu_independent_n(2)
+  def test_valu_independent_3(self): self._test_valu_independent_n(3)
+  def test_valu_independent_4(self): self._test_valu_independent_n(4)
+  def test_valu_independent_5(self): self._test_valu_independent_n(5)
+  def test_valu_independent_6(self): self._test_valu_independent_n(6)
+  def test_valu_independent_7(self): self._test_valu_independent_n(7)
+  def test_valu_independent_8(self): self._test_valu_independent_n(8)
+  def test_valu_independent_16(self): self._test_valu_independent_n(16)
 
   def test_valu_chain(self):
     """VALU instructions with chain dependencies."""
@@ -231,6 +234,22 @@ class TestEmulatorSQTT(unittest.TestCase):
       v_add_f32_e32(v[1], v[0], v[0]),
       v_add_f32_e32(v[2], v[1], v[1]),
     ], "3 VALU chain")
+
+  def test_trans_independent(self):
+    """Transcendental instructions with no dependencies."""
+    self._run_and_compare([
+      v_rcp_f32_e32(v[0], v[0]),
+      v_sqrt_f32_e32(v[1], v[1]),
+      v_exp_f32_e32(v[2], v[2]),
+    ], "3 TRANS independent")
+
+  def test_trans_chain(self):
+    """Transcendental instructions with chain dependencies."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_rcp_f32_e32(v[1], v[0]),
+      v_sqrt_f32_e32(v[2], v[1]),
+    ], "3 TRANS chain")
 
 
 if __name__ == "__main__":
