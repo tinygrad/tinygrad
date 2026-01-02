@@ -41,6 +41,12 @@ class InstOp(IntEnum):
   VALU_MAD64 = 0xe        # 64-bit multiply-add
   VALU_64 = 0xf           # 64-bit: add, mul, fma, rcp, sqrt, rounding, frexp, div helpers
   VALU_64_2 = 0x10        # (not yet discovered)
+  # FLAT memory ops on traced SIMD (0x1x range)
+  FLAT_LOAD = 0x1c
+  FLAT_STORE = 0x1d
+  FLAT_STORE_64 = 0x1e
+  FLAT_STORE_96 = 0x1f
+  FLAT_STORE_128 = 0x20
   # Memory ops on traced SIMD (0x2x range)
   VMEM_LOAD = 0x21
   VMEM_STORE = 0x24
@@ -57,6 +63,11 @@ class InstOp(IntEnum):
   OTHER_LDS_STORE = 0x51
   OTHER_LDS_STORE_64 = 0x52
   OTHER_LDS_STORE_128 = 0x54
+  OTHER_FLAT_LOAD = 0x55
+  OTHER_FLAT_STORE = 0x56
+  OTHER_FLAT_STORE_64 = 0x57
+  OTHER_FLAT_STORE_96 = 0x58
+  OTHER_FLAT_STORE_128 = 0x59
   OTHER_VMEM_LOAD = 0x5a
   OTHER_VMEM_STORE = 0x5b
   OTHER_VMEM_STORE_64 = 0x5c

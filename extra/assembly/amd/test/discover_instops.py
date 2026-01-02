@@ -63,8 +63,11 @@ from extra.assembly.amd.autogen.rdna3.ins import (
   # SMEM - scalar memory (load from kernarg pointer in s[0:1])
   s_load_b32, s_load_b64,
   # VMEM - vector memory (global load/store) - various widths
-  global_load_b32, global_load_b64, global_load_b96, global_load_b128,
-  global_store_b32, global_store_b64, global_store_b96, global_store_b128,
+  global_load_u8, global_load_u16, global_load_b32, global_load_b64, global_load_b96, global_load_b128,
+  global_store_b8, global_store_b16, global_store_b32, global_store_b64, global_store_b96, global_store_b128,
+  # FLAT - flat memory access
+  flat_load_b32, flat_load_b64, flat_load_b96, flat_load_b128,
+  flat_store_b8, flat_store_b16, flat_store_b32, flat_store_b64, flat_store_b96, flat_store_b128,
   # LDS - local data share - various widths
   ds_load_b32, ds_load_b64, ds_load_b128,
   ds_store_b32, ds_store_b64, ds_store_b128,
@@ -179,6 +182,12 @@ INSTRUCTION_TESTS: dict[str, tuple[str, list]] = {
   # VALU CMPX (0x73) - modifies EXEC
   "VALU_cmpx_eq_u32": ("v_cmpx_eq_u32", [v_cmpx_eq_u32_e32(v[0], v[1])]),
 
+  # SALU saveexec (0x72) - modifies EXEC safely by ANDing with all-ones mask
+  "SALU_saveexec": ("s_and_saveexec_b32", [
+    s_mov_b32(s[5], 0xFFFFFFFF),  # all lanes mask
+    s_and_saveexec_b32(s[4], s[5]),  # EXEC = EXEC & 0xFFFFFFFF = EXEC (unchanged)
+  ]),
+
   # SALU float ops
   "SALU_ceil": ("s_ceil_f32", [s_ceil_f32(s[4], s[5])]),
   "SALU_floor": ("s_floor_f32", [s_floor_f32(s[4], s[5])]),
@@ -253,6 +262,42 @@ INSTRUCTION_TESTS: dict[str, tuple[str, list]] = {
     v_mov_b32_e32(v[0], 0),  # offset = 0
     v_mov_b32_e32(v[1], 42),  # data to store
     global_store_b32(addr=v[0], data=v[1], saddr=s[2], offset=0),  # store to buffer
+    s_waitcnt(vmcnt=0),
+  ]),
+
+  # VMEM 8-bit load/store
+  "VMEM_load8": ("global_load_u8", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], 0),
+    global_load_u8(v[1], addr=v[0], saddr=s[2], offset=0),
+    s_waitcnt(vmcnt=0),
+  ]),
+
+  "VMEM_store8": ("global_store_b8", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], 0),
+    v_mov_b32_e32(v[1], 42),
+    global_store_b8(addr=v[0], data=v[1], saddr=s[2], offset=0),
+    s_waitcnt(vmcnt=0),
+  ]),
+
+  # VMEM 16-bit load/store
+  "VMEM_load16": ("global_load_u16", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], 0),
+    global_load_u16(v[1], addr=v[0], saddr=s[2], offset=0),
+    s_waitcnt(vmcnt=0),
+  ]),
+
+  "VMEM_store16": ("global_store_b16", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], 0),
+    v_mov_b32_e32(v[1], 42),
+    global_store_b16(addr=v[0], data=v[1], saddr=s[2], offset=0),
     s_waitcnt(vmcnt=0),
   ]),
 
@@ -376,6 +421,119 @@ INSTRUCTION_TESTS: dict[str, tuple[str, list]] = {
   "MESSAGE": ("s_sendmsg", [
     s_sendmsg(0),  # send message 0 (NOP message)
   ]),
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # FLAT MEMORY - uses 64-bit virtual address in VGPRs
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  # FLAT load - load using 64-bit address from buffer
+  "FLAT_load": ("flat_load_b32", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),  # load buf addr from kernarg
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], s[2]),  # addr lo
+    v_mov_b32_e32(v[1], s[3]),  # addr hi
+    flat_load_b32(v[2], addr=v[0:1]),
+    s_waitcnt(vmcnt=0, lgkmcnt=0),
+  ]),
+
+  # FLAT store
+  "FLAT_store": ("flat_store_b32", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], s[2]),
+    v_mov_b32_e32(v[1], s[3]),
+    v_mov_b32_e32(v[2], 42),
+    flat_store_b32(addr=v[0:1], data=v[2]),
+    s_waitcnt(vmcnt=0, lgkmcnt=0),
+  ]),
+
+  # FLAT 64-bit
+  "FLAT_load64": ("flat_load_b64", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], s[2]),
+    v_mov_b32_e32(v[1], s[3]),
+    flat_load_b64(v[2:3], addr=v[0:1]),
+    s_waitcnt(vmcnt=0, lgkmcnt=0),
+  ]),
+
+  "FLAT_store64": ("flat_store_b64", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], s[2]),
+    v_mov_b32_e32(v[1], s[3]),
+    v_mov_b32_e32(v[4], 42),
+    v_mov_b32_e32(v[5], 43),
+    flat_store_b64(addr=v[0:1], data=v[4:5]),
+    s_waitcnt(vmcnt=0, lgkmcnt=0),
+  ]),
+
+  # FLAT 96-bit
+  "FLAT_load96": ("flat_load_b96", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], s[2]),
+    v_mov_b32_e32(v[1], s[3]),
+    flat_load_b96(v[4:6], addr=v[0:1]),
+    s_waitcnt(vmcnt=0, lgkmcnt=0),
+  ]),
+
+  "FLAT_store96": ("flat_store_b96", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], s[2]),
+    v_mov_b32_e32(v[1], s[3]),
+    v_mov_b32_e32(v[4], 42),
+    v_mov_b32_e32(v[5], 43),
+    v_mov_b32_e32(v[6], 44),
+    flat_store_b96(addr=v[0:1], data=v[4:6]),
+    s_waitcnt(vmcnt=0, lgkmcnt=0),
+  ]),
+
+  # FLAT 128-bit
+  "FLAT_load128": ("flat_load_b128", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], s[2]),
+    v_mov_b32_e32(v[1], s[3]),
+    flat_load_b128(v[4:7], addr=v[0:1]),
+    s_waitcnt(vmcnt=0, lgkmcnt=0),
+  ]),
+
+  "FLAT_store128": ("flat_store_b128", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], s[2]),
+    v_mov_b32_e32(v[1], s[3]),
+    v_mov_b32_e32(v[4], 42),
+    v_mov_b32_e32(v[5], 43),
+    v_mov_b32_e32(v[6], 44),
+    v_mov_b32_e32(v[7], 45),
+    flat_store_b128(addr=v[0:1], data=v[4:7]),
+    s_waitcnt(vmcnt=0, lgkmcnt=0),
+  ]),
+
+  # FLAT 8/16-bit stores
+  "FLAT_store8": ("flat_store_b8", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], s[2]),
+    v_mov_b32_e32(v[1], s[3]),
+    v_mov_b32_e32(v[2], 42),
+    flat_store_b8(addr=v[0:1], data=v[2]),
+    s_waitcnt(vmcnt=0, lgkmcnt=0),
+  ]),
+
+  "FLAT_store16": ("flat_store_b16", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], s[2]),
+    v_mov_b32_e32(v[1], s[3]),
+    v_mov_b32_e32(v[2], 42),
+    flat_store_b16(addr=v[0:1], data=v[2]),
+    s_waitcnt(vmcnt=0, lgkmcnt=0),
+  ]),
+
 }
 
 

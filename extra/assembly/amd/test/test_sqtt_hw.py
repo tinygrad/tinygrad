@@ -155,6 +155,7 @@ test:
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
   .amdhsa_kernarg_size 8
   .amdhsa_group_segment_fixed_size 65536
+  .amdhsa_private_segment_fixed_size 4096
 .end_amdhsa_kernel
 
 .amdgpu_metadata
@@ -167,7 +168,7 @@ amdhsa.kernels:
     .symbol: test.kd
     .kernarg_segment_size: 8
     .group_segment_fixed_size: 65536
-    .private_segment_fixed_size: 0
+    .private_segment_fixed_size: 4096
     .kernarg_segment_align: 8
     .wavefront_size: 32
     .sgpr_count: 96
