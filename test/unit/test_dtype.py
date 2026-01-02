@@ -1,6 +1,6 @@
-import unittest
+import unittest, pickle
 from tinygrad.tensor import Tensor
-from tinygrad.dtype import dtypes, DType, ImageDType, PtrDType, to_dtype
+from tinygrad.dtype import dtypes, DType, ImageDType, PtrDType, to_dtype, Invalid, InvalidType
 
 class TestImageDType(unittest.TestCase):
   def test_image_scalar(self):
@@ -81,6 +81,13 @@ class TestCanLosslessCast(unittest.TestCase):
     # half has more mantissa bits
     self.assertTrue(can_lossless_cast(dtypes.int8, dtypes.half))
     self.assertFalse(can_lossless_cast(dtypes.int8, dtypes.bfloat16))
+
+class TestInvalidSingleton(unittest.TestCase):
+  def test_singleton(self):
+    self.assertIs(InvalidType(), InvalidType())
+    self.assertIs(InvalidType(), Invalid)
+  def test_pickle(self):
+    self.assertIs(pickle.loads(pickle.dumps(Invalid)), Invalid)
 
 if __name__ == "__main__":
   unittest.main()

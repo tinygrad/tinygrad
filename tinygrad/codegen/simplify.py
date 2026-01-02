@@ -1,8 +1,8 @@
 import itertools
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start, ImageDType
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import partition, dedup
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, ImageDType
 
 def flatten_range(r:UOp):
   off = range_start[r.op]

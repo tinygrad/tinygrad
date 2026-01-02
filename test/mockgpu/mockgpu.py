@@ -12,10 +12,10 @@ libc.mmap.restype = ctypes.c_void_p
 drivers = [AMDDriver(), NVDriver()]
 tracked_fds = {}
 
-orignal_memoryview = builtins.memoryview
+original_memoryview = builtins.memoryview
 class TrackedMemoryView:
   def __init__(self, data, rcb, wcb):
-    self.mv = orignal_memoryview(data)
+    self.mv = original_memoryview(data)
     self.rcb, self.wcb = rcb, wcb
 
   def __getitem__(self, index):
@@ -41,7 +41,7 @@ def _memoryview(cls, mem):
     for d in drivers:
       for st,en,rcb,wcb in d.tracked_addresses:
         if st <= addr <= en: return TrackedMemoryView(mem, rcb, wcb)
-  return orignal_memoryview(mem)
+  return original_memoryview(mem)
 builtins.memoryview = type("memoryview", (), {'__new__': _memoryview}) # type: ignore
 
 def _open(path, flags):
