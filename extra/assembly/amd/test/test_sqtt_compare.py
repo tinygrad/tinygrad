@@ -84,32 +84,6 @@ def run_emulator_sqtt(instructions: list) -> list[PacketType]:
   sqtt.finalize()
   return sqtt.packets
 
-def compare_sqtt_structure(hw_packets: list, emu_packets: list) -> list[str]:
-  """Compare SQTT packet structure (types and order), return list of differences."""
-  diffs = []
-
-  # Filter to instruction-related packets only
-  hw_filtered = [p for p in hw_packets if isinstance(p, (WAVESTART, WAVEEND, INST, VALUINST, ALUEXEC))]
-  emu_filtered = [p for p in emu_packets if isinstance(p, (WAVESTART, WAVEEND, INST, VALUINST, ALUEXEC))]
-
-  # Compare types
-  hw_types = [type(p).__name__ for p in hw_filtered]
-  emu_types = [type(p).__name__ for p in emu_filtered]
-
-  if hw_types != emu_types:
-    diffs.append(f"Packet types differ:\n  HW:  {hw_types}\n  EMU: {emu_types}")
-
-  # Compare InstOp values for INST packets
-  hw_ops = [(type(p).__name__, p.op if isinstance(p, INST) else None) for p in hw_filtered]
-  emu_ops = [(type(p).__name__, p.op if isinstance(p, INST) else None) for p in emu_filtered]
-
-  for i, (hw, emu) in enumerate(zip(hw_ops, emu_ops)):
-    if hw != emu:
-      diffs.append(f"Packet {i}: HW={hw}, EMU={emu}")
-
-  return diffs
-
-
 def filter_timing_packets(packets: list) -> list:
   """Filter to packets relevant for timing comparison."""
   return [p for p in packets if isinstance(p, (WAVESTART, WAVEEND, INST, VALUINST, ALUEXEC))]
@@ -151,72 +125,64 @@ class TestEmulatorSQTT(unittest.TestCase):
 
     # Run on emulator
     emu_packets = run_emulator_sqtt(instructions)
-    emu_deltas = get_timing_deltas(emu_packets, skip_startup=True)
-    emu_times = get_times(emu_packets)
+    emu_deltas = get_post_startup_deltas(emu_packets)  # skip startup jitter for comparison
 
-    # Analyze hardware timing patterns (skip startup time which has jitter)
-    hw_delta_sets = [get_timing_deltas(t, skip_startup=True) for t in hw_traces]
-    hw_times_sets = [get_times(t) for t in hw_traces]
+    # Analyze hardware timing patterns (skip startup jitter)
+    hw_delta_sets = [get_post_startup_deltas(t) for t in hw_traces]
     pattern_counts = Counter(tuple(d) for d in hw_delta_sets)
 
     # Find most common pattern and a representative trace for it
     most_common_pattern = list(pattern_counts.most_common(1)[0][0]) if pattern_counts else []
     most_common_trace = next((t for t, d in zip(hw_traces, hw_delta_sets) if d == most_common_pattern), hw_traces[0])
 
-    # Compute startup time jitter
-    startup_times = [get_startup_time(t) for t in hw_traces]
-    from collections import Counter as Ctr
-    startup_counts = Ctr(startup_times)
-
-    # Get most common startup time to use for emulator
-    most_common_startup = startup_counts.most_common(1)[0][0] if startup_counts else 405
+    # Compute startup time jitter range
+    startup_deltas = [get_timing_deltas(t)[0][1] if get_timing_deltas(t) else 0 for t in hw_traces]
+    startup_min, startup_max = min(startup_deltas), max(startup_deltas)
 
     if DEBUG >= 2:
       print(f"\n{'='*70}")
       print(f"TEST: {name} ({len(hw_traces)}/{n_traces} traces in {attempts} attempts)")
       print(f"{'='*70}")
 
-      print(f"Jitter analysis (startup={most_common_startup}):")
+      print(f"Startup jitter: {startup_min}-{startup_max} cycles")
+      print(f"Post-startup patterns:")
       for pattern, count in pattern_counts.most_common():
-        match = "✓ MATCH" if list(pattern) == emu_deltas else ""
-        print(f"  {count:2d}x: {list(pattern)} {match}")
+        match = " <- MATCH" if list(pattern) == emu_deltas else ""
+        print(f"  {count:2d}x: {list(pattern)}{match}")
 
-      # Pretty print most common HW trace and emulator trace side by side
-      # Adjust emulator times to match HW startup
-      hw_t0 = most_common_trace[0]._time
-      emu_t0 = emu_packets[0]._time
-      hw_startup = get_startup_time(most_common_trace)
-      emu_startup = get_startup_time(emu_packets)
-      
-      hw_filtered = [p for p in most_common_trace if isinstance(p, (WAVESTART, WAVEEND, INST, VALUINST, ALUEXEC))]
-      emu_filtered = [p for p in emu_packets if isinstance(p, (WAVESTART, WAVEEND, INST, VALUINST, ALUEXEC))]
-      
+      # Pretty print HW trace and emulator trace side by side (all packets)
+      # Align by shifting emulator times to match HW startup
+      hw_t0 = filter_timing_packets(most_common_trace)[0]._time if filter_timing_packets(most_common_trace) else 0
+      emu_t0 = filter_timing_packets(emu_packets)[0]._time if filter_timing_packets(emu_packets) else 0
+      hw_startup = get_timing_deltas(most_common_trace)[0][1] if get_timing_deltas(most_common_trace) else 0
+      emu_startup = get_timing_deltas(emu_packets)[0][1] if get_timing_deltas(emu_packets) else 0
+
       print(f"\n{'HW':^40} | {'Emulator':^40}")
       print(f"{'-'*40} | {'-'*40}")
-      
-      max_len = max(len(hw_filtered), len(emu_filtered))
+
+      max_len = max(len(most_common_trace), len(emu_packets))
       for i in range(max_len):
-        if i < len(hw_filtered):
-          hp = hw_filtered[i]
-          hw_time = hp._time - hw_t0
-          hw_str = f"{hw_time:6d}: {type(hp).__name__}"
+        if i < len(most_common_trace):
+          hp = most_common_trace[i]
+          hw_time = hp._time - hw_t0 if hasattr(hp, '_time') else 0
+          hw_str = f"{hw_time:6d}: {format_packet(hp)}"
         else:
           hw_str = ""
-        
-        if i < len(emu_filtered):
-          ep = emu_filtered[i]
-          # Adjust emulator time to match HW startup (WAVESTART stays at 0)
-          if isinstance(ep, WAVESTART):
-            emu_time = 0
-          else:
+
+        if i < len(emu_packets):
+          ep = emu_packets[i]
+          # Adjust emulator time to align with HW startup
+          if hasattr(ep, '_time'):
             emu_time = ep._time - emu_t0 - emu_startup + hw_startup
-          emu_str = f"{emu_time:6d}: {type(ep).__name__}"
+          else:
+            emu_time = 0
+          emu_str = f"{emu_time:6d}: {format_packet(ep)}"
         else:
           emu_str = ""
-        
+
         print(f"{hw_str:40} | {emu_str:40}")
 
-    # Assert emulator matches most common hardware pattern
+    # Assert emulator matches most common hardware pattern (post-startup)
     self.assertEqual(emu_deltas, most_common_pattern, f"{name}: emulator doesn't match most common HW pattern")
 
   def test_salu_independent(self):
