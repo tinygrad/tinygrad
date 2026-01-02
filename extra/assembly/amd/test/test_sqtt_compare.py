@@ -59,7 +59,7 @@ class TestSQTTCodec(unittest.TestCase):
     self.assertIn(LAYOUT_HEADER, pkt_types)
 
 
-from extra.assembly.amd.emu import SQTTState, decode_program
+from extra.assembly.amd.emu import SQTTState, decode_program, exec_wave, WaveState, LDSMem
 from extra.assembly.amd.sqtt import VALUINST, ALUEXEC
 from extra.assembly.amd.autogen.rdna3.ins import (v_mov_b32_e32, v_add_f32_e32, v_rcp_f32_e32, v_sqrt_f32_e32, v_exp_f32_e32, v_log_f32_e32, s_delay_alu,
   v_mul_f32_e32, v_sub_f32_e32, s_mov_b32, s_add_u32, s_sub_u32, s_mul_i32, s_nop,
@@ -74,15 +74,13 @@ def run_emulator_sqtt(instructions: list) -> list[PacketType]:
   code = assemble(wrap_with_nops(instructions))
   program = decode_program(code)
 
-  sqtt = SQTTState(wave_id=0, simd=0, cu=0)
-  sqtt.emit_wavestart()  # advances cycle by WAVE_STARTUP_CYCLES
+  st = WaveState()
+  st.exec_mask = (1 << 32) - 1
+  lds = LDSMem(bytearray(65536))
+  trace = SQTTState(wave_id=0, simd=0, cu=0)
 
-  for pc, inst in sorted(program.items()):
-    if inst.op_name == 'S_ENDPGM': break
-    sqtt.trace_inst(inst)
-
-  sqtt.finalize()
-  return sqtt.packets
+  exec_wave(program, st, lds, 32, trace)
+  return trace.packets
 
 def filter_timing_packets(packets: list) -> list:
   """Filter to packets within WAVESTART..WAVEEND."""
@@ -1014,7 +1012,6 @@ class TestEmulatorSQTT(unittest.TestCase):
       v_wmma_f32_16x16x16_f16(vdst=v[0], src0=v[16], src1=v[24], src2=v[0]),
       v_mov_b32_e32(v[50], 1.0),
     ], "WMMA then VALU")
-
 
 if __name__ == "__main__":
   unittest.main()

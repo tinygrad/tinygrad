@@ -420,13 +420,119 @@ def exec_wmma(st: WaveState, inst, op: VOP3POp) -> None:
     for i in range(256): st.vgpr[i % 32][vdst + i//32] = _i32(mat_d[i])
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# SQTT TRACING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+WAVESTART_TO_INST_CYCLES = 32  # cycles from WAVESTART to first instruction
+
+# Issue intervals (fixed, independent of lane count)
+VALU_ISSUE_CYCLES = 1
+TRANS_ISSUE_CYCLES = 4
+DP_ISSUE_CYCLES = 32
+SALU_ISSUE_CYCLES = 1
+
+# ALU latencies (cycles from dispatch to result ready)
+VALU_LATENCY = 6
+SALU_LATENCY = 2
+TRANS_LATENCY = 9
+DP_LATENCY = 38
+
+# Transcendental ops (use TRANS unit)
+_TRANS_OPS = {'V_RCP_F32', 'V_RCP_F64', 'V_RSQ_F32', 'V_RSQ_F64', 'V_SQRT_F32', 'V_SQRT_F64',
+              'V_LOG_F32', 'V_EXP_F32', 'V_SIN_F32', 'V_COS_F32', 'V_RCP_F16', 'V_RSQ_F16', 'V_SQRT_F16'}
+
+# Double precision ops (use DP unit)
+_DP_OPS = {'V_ADD_F64', 'V_MUL_F64', 'V_FMA_F64', 'V_DIV_F64', 'V_MIN_F64', 'V_MAX_F64',
+           'V_LDEXP_F64', 'V_FREXP_MANT_F64', 'V_FREXP_EXP_I32_F64', 'V_FRACT_F64',
+           'V_TRUNC_F64', 'V_CEIL_F64', 'V_RNDNE_F64', 'V_FLOOR_F64', 'V_DIV_SCALE_F64',
+           'V_DIV_FMAS_F64', 'V_DIV_FIXUP_F64', 'V_CVT_F64_I32', 'V_CVT_F64_U32',
+           'V_CVT_I32_F64', 'V_CVT_U32_F64', 'V_CVT_F32_F64', 'V_CVT_F64_F32'}
+
+class SQTTState:
+  """SQTT tracing state - emits packets when instructions dispatch."""
+  __slots__ = ('packets', 'wave_id', 'simd', 'cu', 'cycle', 'vgpr_ready', 'sgpr_ready',
+               'pending_completions', 'trans_busy_until', 'dp_busy_until')
+
+  def __init__(self, wave_id: int = 0, simd: int = 0, cu: int = 0):
+    self.packets = []
+    self.wave_id, self.simd, self.cu = wave_id, simd, cu
+    self.cycle = 0
+    self.vgpr_ready = {}  # vgpr -> cycle when result ready
+    self.sgpr_ready = {}  # sgpr -> cycle when result ready
+    self.pending_completions = []  # list of (cycle, AluSrc)
+    self.trans_busy_until = 0  # when TRANS unit is free
+    self.dp_busy_until = 0     # when DP unit is free
+
+  def emit(self, pkt_class, **kwargs):
+    self.packets.append(pkt_class(_time=self.cycle, **kwargs))
+
+  def emit_wavestart(self):
+    from extra.assembly.amd.sqtt import WAVESTART
+    self.emit(WAVESTART, wave=self.wave_id, simd=self.simd, cu_lo=self.cu & 0x7, flag7=self.cu >> 3)
+    self.cycle = WAVESTART_TO_INST_CYCLES
+
+  def emit_waveend(self):
+    from extra.assembly.amd.sqtt import WAVEEND
+    self.emit(WAVEEND, wave=self.wave_id, simd=self.simd, cu_lo=self.cu & 0x7, flag7=self.cu >> 3)
+
+  def emit_dispatch_inst(self, inst: Inst):
+    """Emit SQTT packet for instruction dispatch with proper timing."""
+    from extra.assembly.amd.sqtt import INST, VALUINST, IMMEDIATE, InstOp
+
+    if isinstance(inst, (SOP1, SOP2, SOPC, SOPK)):
+      # SALU: 1-cycle issue
+      self.emit(INST, wave=self.wave_id, op=InstOp.SALU)
+      self.cycle += SALU_ISSUE_CYCLES
+
+    elif isinstance(inst, SOPP):
+      if inst.op == SOPPOp.S_NOP:
+        # s_nop emits IMMEDIATE and delays
+        self.emit(IMMEDIATE, wave=self.wave_id)
+        self.cycle += inst.simm16 + 1
+      # Other SOPP (s_endpgm, etc.) - no packet
+
+    elif isinstance(inst, (VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, VOPD)):
+      op_name = inst.op_name if hasattr(inst, 'op_name') else ''
+
+      if any(t in op_name for t in _TRANS_OPS):
+        # TRANS: wait for unit, 4-cycle issue interval
+        self.cycle = max(self.cycle, self.trans_busy_until)
+        self.emit(INST, wave=self.wave_id, op=InstOp.VALU_TRANS)
+        self.trans_busy_until = self.cycle + TRANS_ISSUE_CYCLES
+        self.cycle += 1  # next instruction can issue next cycle (different unit)
+
+      elif any(t in op_name for t in _DP_OPS):
+        # DP: wait for unit, 32-cycle issue interval
+        self.cycle = max(self.cycle, self.dp_busy_until)
+        self.emit(INST, wave=self.wave_id, op=InstOp.VALU_64)
+        self.dp_busy_until = self.cycle + DP_ISSUE_CYCLES
+        self.cycle += 1
+
+      else:
+        # Regular VALU: 1-cycle issue
+        self.emit(VALUINST, wave=self.wave_id)
+        self.cycle += VALU_ISSUE_CYCLES
+
+  def finalize(self):
+    """Emit pending ALUEXECs and WAVEEND."""
+    # TODO: emit any pending ALUEXECs before WAVEEND
+    self.emit_waveend()
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # MAIN EXECUTION LOOP
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def step_wave(program: Program, st: WaveState, lds: LDSMem, n_lanes: int) -> int:
+def step_wave(program: Program, st: WaveState, lds: LDSMem, n_lanes: int, trace: SQTTState | None = None) -> int:
   inst = program.get(st.pc)
   if inst is None: return 1
   inst_words, st.literal = inst._words, getattr(inst, '_literal', None) or 0
+
+  # TODO: add ALUEXEC emits if anything completed
+
+  # Emit SQTT packet for this instruction dispatch
+  # TODO: see if we ahve to block the dispatch
+  if trace is not None:
+    trace.emit_dispatch_inst(inst)
 
   if isinstance(inst, (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM)):
     delta = exec_scalar(st, inst)
@@ -443,11 +549,15 @@ def step_wave(program: Program, st: WaveState, lds: LDSMem, n_lanes: int) -> int
     st.pc += inst_words
   return 0
 
-def exec_wave(program: Program, st: WaveState, lds: LDSMem, n_lanes: int) -> int:
+def exec_wave(program: Program, st: WaveState, lds: LDSMem, n_lanes: int, trace: SQTTState | None = None) -> int:
+  if trace is not None:
+    trace.emit_wavestart()
   while st.pc in program:
-    result = step_wave(program, st, lds, n_lanes)
-    if result == -1: return 0
+    result = step_wave(program, st, lds, n_lanes, trace)
+    if result == -1: break
     if result == -2: return -2
+  if trace is not None:
+    trace.finalize()
   return 0
 
 def exec_workgroup(program: Program, workgroup_id: tuple[int, int, int], local_size: tuple[int, int, int], args_ptr: int,
