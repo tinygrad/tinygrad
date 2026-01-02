@@ -104,12 +104,26 @@ def print_wave_trace(packets: list) -> None:
     print(format_packet(p, last_time, time_offset))
     last_time = p._time
 
-def print_blobs(blobs: list[bytes]) -> None:
-  """Print wave traces for all blobs."""
+def print_blobs(blobs: list[bytes], wave_only: bool = True) -> None:
+  """Print traces for all blobs. wave_only=True filters to WAVESTART..WAVEEND only."""
   for i, blob in enumerate(blobs):
     packets = decode(blob)
     print(f"\n--- Blob {i}: {len(blob)} bytes, {len(packets)} packets ---")
-    print_wave_trace(packets)
+    if wave_only:
+      print_wave_trace(packets)
+    else:
+      print_all_packets(packets)
+
+def print_all_packets(packets: list) -> None:
+  """Print all packets, filtering out pure timing packets."""
+  skip_types = {"NOP", "TS_DELTA_SHORT", "TS_WAVE_STATE", "TS_DELTA_OR_MARK", "TS_DELTA_S5_W2", "TS_DELTA_S5_W3", "TS_DELTA_S8_W3"}
+  if not packets: return
+  time_offset = packets[0]._time
+  last_time = time_offset
+  for p in packets:
+    if type(p).__name__ not in skip_types:
+      print(format_packet(p, last_time, time_offset))
+    last_time = p._time
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ASSEMBLY HELPERS
@@ -177,12 +191,17 @@ def decode_all_blobs(blobs: list[bytes]) -> list:
     all_packets.extend(decode(blob))
   return all_packets
 
-def get_inst_ops(packets: list) -> set:
-  """Extract all InstOp values from INST packets."""
+def get_inst_ops(packets: list, traced_simd: int | None = None) -> set:
+  """Extract all InstOp values from INST packets within WAVESTART..WAVEEND on traced SIMD."""
   ops = set()
+  in_wave = False
   for p in packets:
-    if isinstance(p, INST):
+    if isinstance(p, WAVESTART):
+      in_wave = traced_simd is None or p.simd == traced_simd
+    if in_wave and isinstance(p, INST):
       ops.add(p.op if isinstance(p.op, int) else p.op.value)
+    if isinstance(p, WAVEEND):
+      in_wave = False
   return ops
 
 # ═══════════════════════════════════════════════════════════════════════════════

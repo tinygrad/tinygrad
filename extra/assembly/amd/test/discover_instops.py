@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """SQTT InstOp discovery tool - finds instruction opcodes by running different instructions.
 
+Requires profiling enabled:
+  echo 'profile_standard' | sudo tee /sys/class/drm/card1/device/power_dpm_force_performance_level
+
 Run with: DEBUG=1 python extra/assembly/amd/test/discover_instops.py
 For full traces: DEBUG=2 python extra/assembly/amd/test/discover_instops.py
 """
@@ -20,21 +23,43 @@ from extra.assembly.amd.autogen.rdna3.ins import (
   v_lshlrev_b32_e32, v_lshrrev_b32_e32,
   # VALU - transcendental
   v_exp_f32_e32, v_log_f32_e32, v_rcp_f32_e32, v_sqrt_f32_e32,
+  v_sin_f32_e32, v_cos_f32_e32,
   # VALU - 64-bit
-  v_lshlrev_b64, v_lshrrev_b64,
+  v_lshlrev_b64, v_lshrrev_b64, v_ashrrev_i64,
+  v_add_f64, v_mul_f64, v_max_f64, v_min_f64,
+  v_fma_f64,
+  # VALU - 64-bit transcendental
+  v_rcp_f64_e32, v_rsq_f64_e32, v_sqrt_f64_e32,
+  v_trunc_f64_e32, v_ceil_f64_e32, v_floor_f64_e32, v_fract_f64_e32,
+  v_frexp_exp_i32_f64_e32, v_frexp_mant_f64_e32,
+  # VALU - div helpers
+  v_div_fixup_f64, v_div_fmas_f64,
   # VALU - MAD64
-  v_mad_u64_u32,
+  v_mad_u64_u32, v_mad_i64_i32,
   # VALU - compare (writes to VCC, safe)
   v_cmp_eq_u32_e32,
-  v_cmpx_eq_u32_e32,
+  # VALU - cmpx (modifies EXEC) - various types
+  v_cmpx_eq_u32_e32, v_cmpx_lt_u32_e32, v_cmpx_gt_u32_e32,
+  v_cmpx_eq_f32_e32, v_cmpx_lt_f32_e32,
+  v_cmpx_eq_i32_e32,
+  v_cmpx_class_f32_e32,
+  # VALU - readlane/writelane
+  v_readlane_b32, v_writelane_b32,
+  v_readfirstlane_b32_e32,
   # SALU - basic (safe, just register ops)
   s_mov_b32, s_add_u32, s_and_b32, s_or_b32,
   s_lshl_b32, s_lshr_b32,
   s_nop, s_endpgm, s_waitcnt,
+  # SALU - float
+  s_ceil_f32, s_floor_f32, s_trunc_f32,
   # SALU - branch (safe if offset is 0 = next instruction)
   s_branch, s_cbranch_scc0, s_cbranch_execz,
   # SALU - message
   s_sendmsg,
+  # SALU - bit manipulation
+  s_brev_b32, s_bcnt1_i32_b32, s_ctz_i32_b32, s_clz_i32_u32,
+  # SALU - saveexec (modifies EXEC)
+  s_and_saveexec_b32, s_or_saveexec_b32, s_xor_saveexec_b32,
   # SMEM - scalar memory (load from kernarg pointer in s[0:1])
   s_load_b32, s_load_b64,
   # VMEM - vector memory (global load/store) - various widths
@@ -43,16 +68,27 @@ from extra.assembly.amd.autogen.rdna3.ins import (
   # LDS - local data share - various widths
   ds_load_b32, ds_load_b64, ds_load_b128,
   ds_store_b32, ds_store_b64, ds_store_b128,
+  # LDS - atomics
+  ds_add_u32, ds_max_u32, ds_min_u32,
+  # VOP3P - packed
+  v_pk_add_f16, v_pk_mul_f16, v_pk_fma_f16, v_pk_add_i16,
+  # VOP3 - misc
+  v_bfe_u32, v_bfi_b32, v_alignbit_b32, v_fma_f32,
+  # VOP2 - fmac
+  v_fmac_f32_e32,
+  # DOT
+  v_dot2_f16_f16,
+  # WMMA
+  v_wmma_f32_16x16x16_f16, v_wmma_f16_16x16x16_f16, v_wmma_i32_16x16x16_iu8,
   # SrcEnum for NULL soffset
   SrcEnum,
 )
 from extra.assembly.amd.dsl import v, s
-from extra.assembly.amd.sqtt import InstOp, INST
+from extra.assembly.amd.sqtt import InstOp, INST, WAVESTART, WAVEEND, ALUEXEC, VMEMEXEC
 
 from extra.assembly.amd.test.test_sqtt_hw import (
-  run_asm_sqtt, decode_all_blobs, get_inst_ops, print_blobs, get_wave_packets, format_packet
+  run_asm_sqtt, decode_all_blobs, get_inst_ops, print_blobs, get_wave_packets, format_packet, PACKET_COLORS
 )
-from extra.assembly.amd.sqtt import WAVESTART
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # INSTRUCTION TEST CASES - only safe instructions that don't access memory
@@ -90,23 +126,104 @@ INSTRUCTION_TESTS: dict[str, tuple[str, list]] = {
   "VALU_rcp": ("v_rcp_f32", [v_mov_b32_e32(v[0], 1.0), v_rcp_f32_e32(v[1], v[0])]),
   "VALU_sqrt": ("v_sqrt_f32", [v_mov_b32_e32(v[0], 1.0), v_sqrt_f32_e32(v[1], v[0])]),
 
-  # VALU 64-bit (0xd)
+  # VALU 64-bit shift (0xd)
   "VALU64_lshl": ("v_lshlrev_b64", [v_lshlrev_b64(v[0:1], 1, v[2:3])]),
+  "VALU64_lshr": ("v_lshrrev_b64", [v_lshrrev_b64(v[0:1], 1, v[2:3])]),
+  "VALU64_ashr": ("v_ashrrev_i64", [v_ashrrev_i64(v[0:1], 1, v[2:3])]),
+
+  # VALU 64-bit arithmetic
+  "VALU64_add": ("v_add_f64", [v_add_f64(v[0:1], v[2:3], v[4:5])]),
+  "VALU64_mul": ("v_mul_f64", [v_mul_f64(v[0:1], v[2:3], v[4:5])]),
+  "VALU64_max": ("v_max_f64", [v_max_f64(v[0:1], v[2:3], v[4:5])]),
+  "VALU64_min": ("v_min_f64", [v_min_f64(v[0:1], v[2:3], v[4:5])]),
+  "VALU64_fma": ("v_fma_f64", [v_fma_f64(v[0:1], v[2:3], v[4:5], v[6:7])]),
+
+  # VALU 64-bit transcendental
+  "VALU64_rcp": ("v_rcp_f64", [v_rcp_f64_e32(v[0:1], v[2:3])]),
+  "VALU64_rsq": ("v_rsq_f64", [v_rsq_f64_e32(v[0:1], v[2:3])]),
+  "VALU64_sqrt": ("v_sqrt_f64", [v_sqrt_f64_e32(v[0:1], v[2:3])]),
+
+  # VALU 64-bit rounding
+  "VALU64_trunc": ("v_trunc_f64", [v_trunc_f64_e32(v[0:1], v[2:3])]),
+  "VALU64_ceil": ("v_ceil_f64", [v_ceil_f64_e32(v[0:1], v[2:3])]),
+  "VALU64_floor": ("v_floor_f64", [v_floor_f64_e32(v[0:1], v[2:3])]),
+  "VALU64_fract": ("v_fract_f64", [v_fract_f64_e32(v[0:1], v[2:3])]),
+
+  # VALU 64-bit frexp
+  "VALU64_frexp_exp": ("v_frexp_exp_i32_f64", [v_frexp_exp_i32_f64_e32(v[0], v[2:3])]),
+  "VALU64_frexp_mant": ("v_frexp_mant_f64", [v_frexp_mant_f64_e32(v[0:1], v[2:3])]),
+
+  # VALU 64-bit div helpers
+  "VALU64_div_fixup": ("v_div_fixup_f64", [v_div_fixup_f64(v[0:1], v[2:3], v[4:5], v[6:7])]),
+  "VALU64_div_fmas": ("v_div_fmas_f64", [v_div_fmas_f64(v[0:1], v[2:3], v[4:5], v[6:7])]),
 
   # VALU MAD64 (0xe)
-  "VALU_mad64": ("v_mad_u64_u32", [
+  "VALU_mad64u": ("v_mad_u64_u32", [
     v_mov_b32_e32(v[2], 2),
     v_mov_b32_e32(v[3], 3),
     v_mov_b32_e32(v[4], 0),
     v_mov_b32_e32(v[5], 0),
-    v_mad_u64_u32(v[0:1], SrcEnum.NULL, v[2], v[3], v[4:5]),  # 2*3+0 = 6
+    v_mad_u64_u32(v[0:1], SrcEnum.NULL, v[2], v[3], v[4:5]),
+  ]),
+  "VALU_mad64i": ("v_mad_i64_i32", [
+    v_mov_b32_e32(v[2], 2),
+    v_mov_b32_e32(v[3], 3),
+    v_mov_b32_e32(v[4], 0),
+    v_mov_b32_e32(v[5], 0),
+    v_mad_i64_i32(v[0:1], SrcEnum.NULL, v[2], v[3], v[4:5]),
   ]),
 
   # VALU compare - writes to VCC
   "VALU_cmp": ("v_cmp_eq_u32", [v_cmp_eq_u32_e32(v[0], v[1])]),
 
   # VALU CMPX (0x73) - modifies EXEC
-  "VALU_cmpx": ("v_cmpx_eq_u32", [v_cmpx_eq_u32_e32(v[0], v[1])]),
+  "VALU_cmpx_eq_u32": ("v_cmpx_eq_u32", [v_cmpx_eq_u32_e32(v[0], v[1])]),
+
+  # SALU float ops
+  "SALU_ceil": ("s_ceil_f32", [s_ceil_f32(s[4], s[5])]),
+  "SALU_floor": ("s_floor_f32", [s_floor_f32(s[4], s[5])]),
+  "SALU_trunc": ("s_trunc_f32", [s_trunc_f32(s[4], s[5])]),
+
+  # SALU bit ops
+  "SALU_brev": ("s_brev_b32", [s_brev_b32(s[4], s[5])]),
+  "SALU_bcnt1": ("s_bcnt1_i32_b32", [s_bcnt1_i32_b32(s[4], s[5])]),
+  "SALU_ctz": ("s_ctz_i32_b32", [s_ctz_i32_b32(s[4], s[5])]),
+  "SALU_clz": ("s_clz_i32_u32", [s_clz_i32_u32(s[4], s[5])]),
+
+  # VALU sin/cos
+  "VALU_sin": ("v_sin_f32", [v_sin_f32_e32(v[0], v[1])]),
+  "VALU_cos": ("v_cos_f32", [v_cos_f32_e32(v[0], v[1])]),
+
+  # VOP3P - packed operations
+  "VALU_pk_add_f16": ("v_pk_add_f16", [v_pk_add_f16(v[0], v[1], v[2])]),
+  "VALU_pk_mul_f16": ("v_pk_mul_f16", [v_pk_mul_f16(v[0], v[1], v[2])]),
+  "VALU_pk_fma_f16": ("v_pk_fma_f16", [v_pk_fma_f16(v[0], v[1], v[2], v[3])]),
+  "VALU_pk_add_i16": ("v_pk_add_i16", [v_pk_add_i16(v[0], v[1], v[2])]),
+
+  # VOP3 - misc
+  "VALU_bfe_u32": ("v_bfe_u32", [v_bfe_u32(v[0], v[1], 0, 8)]),
+  "VALU_bfi_b32": ("v_bfi_b32", [v_bfi_b32(v[0], v[1], v[2], v[3])]),
+  "VALU_alignbit": ("v_alignbit_b32", [v_alignbit_b32(v[0], v[1], v[2], 4)]),
+  "VALU_fma_f32": ("v_fma_f32", [v_fma_f32(v[0], v[1], v[2], v[3])]),
+
+  # VOP2 - fmac
+  "VALU_fmac": ("v_fmac_f32", [v_fmac_f32_e32(v[0], v[1], v[0])]),
+
+  # DOT products
+  "VALU_dot2": ("v_dot2_f16_f16", [v_dot2_f16_f16(v[0], v[1], v[2], v[3])]),
+
+  # WMMA - wave matrix multiply accumulate
+  "VALU_wmma_f32_f16": ("v_wmma_f32_16x16x16_f16", [v_wmma_f32_16x16x16_f16(v[0:7], v[8:15], v[16:23], v[0:7])]),
+  "VALU_wmma_f16_f16": ("v_wmma_f16_16x16x16_f16", [v_wmma_f16_16x16x16_f16(v[0:7], v[8:15], v[16:23], v[0:7])]),
+  "VALU_wmma_i32_iu8": ("v_wmma_i32_16x16x16_iu8", [v_wmma_i32_16x16x16_iu8(v[0:7], v[8:11], v[12:15], v[0:7])]),
+
+  # LDS atomics
+  "LDS_atomic_add": ("ds_add_u32", [
+    v_mov_b32_e32(v[0], 0),  # LDS address
+    v_mov_b32_e32(v[1], 1),  # data to add
+    ds_add_u32(addr=v[0], data0=v[1]),
+    s_waitcnt(lgkmcnt=0),
+  ]),
 
   # ═══════════════════════════════════════════════════════════════════════════════
   # MEMORY INSTRUCTIONS - access real buffer passed via kernarg
@@ -262,28 +379,30 @@ INSTRUCTION_TESTS: dict[str, tuple[str, list]] = {
 }
 
 
-def run_with_retry(instructions: list, max_attempts: int = 10) -> tuple[list[tuple[int, list[bytes]]], list[list], set]:
-  """Run instructions multiple times with both SIMD selections to collect all InstOp variants.
+def run_with_retry(instructions: list, max_attempts: int = 20) -> tuple[list[tuple[int, list[bytes]]], list[list], set]:
+  """Run instructions multiple times to collect InstOp variants.
 
   Memory ops produce different InstOp values (0x2x vs 0x5x) depending on which SIMD executes them:
   - 0x2x range: wave ran on traced SIMD (matched)
   - 0x5x range: wave ran on other SIMD (not matched)
 
-  We trace SIMD 0 and SIMD 2, and collect ALL runs to capture both matched and unmatched cases.
   Returns list of (traced_simd, blobs) tuples.
   """
   all_ops = set()
   all_runs: list[tuple[int, list[bytes]]] = []
   all_packets = []
-  for simd_sel in [0, 2]:  # trace SIMD 0 and SIMD 2
-    SQTT_SIMD_SEL.value = simd_sel
-    for _ in range(max_attempts):
-      blobs = run_asm_sqtt(instructions)
-      packets = decode_all_blobs(blobs)
-      ops = get_inst_ops(packets)
-      all_runs.append((simd_sel, blobs))
-      all_packets.append(packets)
-      all_ops.update(ops)
+  SQTT_SIMD_SEL.value = 0  # only trace SIMD 0
+  for _ in range(max_attempts):
+    blobs = run_asm_sqtt(instructions)
+    packets = decode_all_blobs(blobs)
+    # get ops from waves on traced SIMD 0 (gives 0x2x range)
+    ops = get_inst_ops(packets, traced_simd=0)
+    # also get ops from waves on other SIMDs (gives 0x5x range for memory ops)
+    for simd in [1, 2, 3]:
+      ops.update(get_inst_ops(packets, traced_simd=simd))
+    all_runs.append((0, blobs))
+    all_packets.append(packets)
+    all_ops.update(ops)
   return all_runs, all_packets, all_ops
 
 def discover_all_instops() -> tuple[dict[int, set[str]], dict[str, Exception]]:
@@ -304,8 +423,8 @@ def discover_all_instops() -> tuple[dict[int, set[str]], dict[str, Exception]]:
         print(f"\n{'─'*60}")
         print(f"{test_name} ({instr_name}): ops={[hex(op) for op in sorted(ops)]}")
 
-        # collect wave patterns from traced SIMD runs (group by packet type sequence, ignore timing)
-        patterns: dict[tuple, list] = {}  # pattern (types only) -> list of (wave_packets, t0)
+        # collect wave patterns from traced SIMD runs (group by exact timing)
+        patterns: dict[tuple, list] = {}  # pattern (types + timing) -> list of (wave_packets, t0)
         for traced_simd, blobs in all_runs:
           for blob in blobs:
             packets = decode_all_blobs([blob])
@@ -314,7 +433,8 @@ def discover_all_instops() -> tuple[dict[int, set[str]], dict[str, Exception]]:
             ws = next((p for p in wave_packets if isinstance(p, WAVESTART)), None)
             if ws and ws.simd == traced_simd and wave_packets:
               t0 = wave_packets[0]._time
-              pattern = tuple(type(p).__name__ for p in wave_packets)  # types only, no timing
+              # pattern includes types AND normalized timing
+              pattern = tuple((type(p).__name__, p._time - t0) for p in wave_packets)
               if pattern not in patterns:
                 patterns[pattern] = []
               patterns[pattern].append((wave_packets, t0))
@@ -325,19 +445,18 @@ def discover_all_instops() -> tuple[dict[int, set[str]], dict[str, Exception]]:
           count = counts[most_common]
           total = sum(counts.values())
           print(f"\n=== most common pattern ({count}/{total} runs) ===")
-          # print using actual packets from one of the matching runs
           wave_packets, t0 = patterns[most_common][0]
           last_time = t0
           for p in wave_packets:
             print(format_packet(p, last_time, t0))
             last_time = p._time
           if len(patterns) > 1:
-            print(f"\n  variations: {len(patterns)} unique patterns")
+            print(f"\n  variations: {len(patterns)} unique timing patterns")
 
       if DEBUG >= 3:
         for traced_simd, blobs in all_runs:
           print(f"\n=== traced simd={traced_simd} ===")
-          print_blobs(blobs)
+          print_blobs(blobs, wave_only=False)
       if DEBUG >= 1:
         status = colored("✓", "green") if ops else colored("∅", "yellow")
         ops_str = ", ".join(hex(op) for op in sorted(ops)) if ops else "none"

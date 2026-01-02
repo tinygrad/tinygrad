@@ -36,10 +36,11 @@ class InstOp(IntEnum):
   SMEM = 0x1
   JUMP = 0x3
   MESSAGE = 0x9
-  VALU = 0xb
-  VALU_64 = 0xd
-  VALU_MAD64 = 0xe
-  VALU_64_2 = 0x10
+  VALU_TRANS = 0xb        # transcendental: exp, log, rcp, sqrt, sin, cos
+  VALU_64_SHIFT = 0xd     # 64-bit shifts: lshl, lshr, ashr
+  VALU_MAD64 = 0xe        # 64-bit multiply-add
+  VALU_64 = 0xf           # 64-bit: add, mul, fma, rcp, sqrt, rounding, frexp, div helpers
+  VALU_64_2 = 0x10        # (not yet discovered)
   # Memory ops on traced SIMD (0x2x range)
   VMEM_LOAD = 0x21
   VMEM_STORE = 0x24
@@ -50,7 +51,7 @@ class InstOp(IntEnum):
   LDS_STORE = 0x2b
   LDS_STORE_64 = 0x2c
   LDS_STORE_128 = 0x2e
-  OTHER_VALU_64 = 0x3a
+  OTHER_VALU_64 = 0x3a    # (not yet discovered)
   # Memory ops on other SIMD (0x5x range)
   OTHER_LDS_LOAD = 0x50
   OTHER_LDS_STORE = 0x51
@@ -61,7 +62,9 @@ class InstOp(IntEnum):
   OTHER_VMEM_STORE_64 = 0x5c
   OTHER_VMEM_STORE_96 = 0x5d
   OTHER_VMEM_STORE_128 = 0x5e
-  VALU_CMPX = 0x73
+  # EXEC-modifying ops (0x7x range)
+  SALU_SAVEEXEC = 0x72    # s_*_saveexec_b32/b64
+  VALU_CMPX = 0x73        # v_cmpx_*
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PACKET TYPE BASE CLASS
