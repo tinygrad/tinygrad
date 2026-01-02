@@ -8,7 +8,7 @@ import os
 os.environ["SQTT"] = "1"
 os.environ["PROFILE"] = "1"
 os.environ["SQTT_LIMIT_SE"] = "2"
-os.environ["SQTT_TOKEN_EXCLUDE"] = "3786"  # exclude WAVERDY, REG, EVENT, UTILCTR, WAVEALLOC, PERF, ALUEXEC
+os.environ["SQTT_TOKEN_EXCLUDE"] = "3784"  # Exclude WAVERDY, REG, EVENT, UTILCTR, WAVEALLOC, PERF
 
 import unittest
 from tinygrad.device import Device
@@ -242,7 +242,7 @@ class TestEmulatorSQTT(unittest.TestCase):
   def test_valu_independent_8(self): self._test_valu_independent_n(8)
   def test_valu_independent_16(self): self._test_valu_independent_n(16)
 
-  def test_trans_independent_16(self): self._test_valu_independent_n(16, True)
+  def test_trans_independent_16(self): self._test_valu_independent_n(16, trans=True)
 
   def test_valu_chain(self):
     """VALU instructions with chain dependencies."""
