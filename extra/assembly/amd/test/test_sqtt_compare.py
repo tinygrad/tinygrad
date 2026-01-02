@@ -196,7 +196,6 @@ class TestEmulatorSQTT(unittest.TestCase):
       f"{name}: emulator packet structure {emu_types} not found in any HW traces.\n"
       f"HW structures: {set(tuple(t for t, _ in p) for p in pattern_counts)}")
 
-  @unittest.skip("SALU packet ordering varies significantly in HW traces - needs investigation")
   def test_salu_independent(self):
     """SALU instructions with no dependencies."""
     self._run_and_compare([
@@ -205,7 +204,6 @@ class TestEmulatorSQTT(unittest.TestCase):
       s_mov_b32(s[6], 3),
     ], "3 SALU independent")
 
-  @unittest.skip("SALU packet ordering varies significantly in HW traces - needs investigation")
   def test_salu_chain(self):
     """SALU instructions with chain dependencies."""
     self._run_and_compare([
