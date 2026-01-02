@@ -33,7 +33,7 @@ from extra.assembly.amd.autogen.rdna3.ins import (
   v_trunc_f64_e32, v_ceil_f64_e32, v_floor_f64_e32, v_fract_f64_e32,
   v_frexp_exp_i32_f64_e32, v_frexp_mant_f64_e32,
   # VALU - div helpers
-  v_div_fixup_f64, v_div_fmas_f64,
+  v_div_fixup_f32, v_div_fixup_f64, v_div_fmas_f32, v_div_fmas_f64, v_div_scale_f32,
   # VALU - MAD64
   v_mad_u64_u32, v_mad_i64_i32,
   # VALU - compare (writes to VCC, safe)
@@ -53,7 +53,7 @@ from extra.assembly.amd.autogen.rdna3.ins import (
   # SALU - float
   s_ceil_f32, s_floor_f32, s_trunc_f32,
   # SALU - branch (safe if offset is 0 = next instruction)
-  s_branch, s_cbranch_scc0, s_cbranch_execz,
+  s_branch, s_cbranch_scc0, s_cbranch_execz, s_cbranch_execnz,
   # SALU - message
   s_sendmsg,
   # SALU - bit manipulation
@@ -62,9 +62,11 @@ from extra.assembly.amd.autogen.rdna3.ins import (
   s_and_saveexec_b32, s_or_saveexec_b32, s_xor_saveexec_b32,
   # SMEM - scalar memory (load from kernarg pointer in s[0:1])
   s_load_b32, s_load_b64,
-  # VMEM - vector memory (global load/store) - various widths
+  # GLOBAL - global memory (load/store) - various widths
   global_load_u8, global_load_u16, global_load_b32, global_load_b64, global_load_b96, global_load_b128,
   global_store_b8, global_store_b16, global_store_b32, global_store_b64, global_store_b96, global_store_b128,
+  # GLOBAL - atomics
+  global_atomic_add_u32, global_atomic_add_u64,
   # FLAT - flat memory access
   flat_load_b32, flat_load_b64, flat_load_b96, flat_load_b128,
   flat_store_b8, flat_store_b16, flat_store_b32, flat_store_b64, flat_store_b96, flat_store_b128,
@@ -77,6 +79,11 @@ from extra.assembly.amd.autogen.rdna3.ins import (
   v_pk_add_f16, v_pk_mul_f16, v_pk_fma_f16, v_pk_add_i16,
   # VOP3 - misc
   v_bfe_u32, v_bfi_b32, v_alignbit_b32, v_fma_f32,
+  v_add3_u32, v_xad_u32, v_lshl_or_b32, v_add_nc_u32_e32,
+  # VOP3 - carry-out
+  v_add_co_u32, v_add_co_ci_u32_e32,
+  # VOPD - dual issue
+  v_dual_add_f32, v_dual_mul_f32,
   # VOP2 - fmac
   v_fmac_f32_e32,
   # DOT
@@ -113,8 +120,12 @@ INSTRUCTION_TESTS: dict[str, tuple[str, list]] = {
   "SALU_shift": ("s_lshl/lshr", [s_lshl_b32(s[6], s[4], 1), s_lshr_b32(s[7], s[4], 1)]),
   "SALU_nop": ("s_nop", [s_nop(0)]),
 
-  # JUMP (0x3) - branch to next instruction (offset 0)
+  # JUMP (0x3) - branch taken
   "JUMP_branch": ("s_branch", [s_branch(0)]),
+  "JUMP_cbranch_execnz": ("s_cbranch_execnz", [s_cbranch_execnz(0)]),  # EXEC != 0, branch taken
+
+  # JUMP_NO (0x4) - branch not taken
+  "JUMP_NO_cbranch_execz": ("s_cbranch_execz", [s_cbranch_execz(0)]),  # EXEC != 0, branch not taken
 
   # VALU (0xb) - vector ALU, just register operations
   "VALU_mov": ("v_mov_b32", [v_mov_b32_e32(v[0], 0), v_mov_b32_e32(v[1], 1.0)]),
@@ -159,6 +170,11 @@ INSTRUCTION_TESTS: dict[str, tuple[str, list]] = {
   # VALU 64-bit div helpers
   "VALU64_div_fixup": ("v_div_fixup_f64", [v_div_fixup_f64(v[0:1], v[2:3], v[4:5], v[6:7])]),
   "VALU64_div_fmas": ("v_div_fmas_f64", [v_div_fmas_f64(v[0:1], v[2:3], v[4:5], v[6:7])]),
+
+  # VALU 32-bit div helpers
+  "VALU_div_fixup": ("v_div_fixup_f32", [v_div_fixup_f32(v[0], v[1], v[2], v[3])]),
+  "VALU_div_fmas": ("v_div_fmas_f32", [v_div_fmas_f32(v[0], v[1], v[2], v[3])]),
+  "VALU_div_scale": ("v_div_scale_f32", [v_div_scale_f32(v[0], SrcEnum.VCC_LO, v[1], v[2], v[3])]),
 
   # VALU MAD64 (0xe)
   "VALU_mad64u": ("v_mad_u64_u32", [
@@ -215,6 +231,20 @@ INSTRUCTION_TESTS: dict[str, tuple[str, list]] = {
   "VALU_alignbit": ("v_alignbit_b32", [v_alignbit_b32(v[0], v[1], v[2], 4)]),
   "VALU_fma_f32": ("v_fma_f32", [v_fma_f32(v[0], v[1], v[2], v[3])]),
 
+  # VOP3 - integer add variants (used by tinygrad kernels)
+  "VALU_add3": ("v_add3_u32", [v_add3_u32(v[0], v[1], v[2], v[3])]),
+  "VALU_xad": ("v_xad_u32", [v_xad_u32(v[0], v[1], v[2], v[3])]),
+  "VALU_lshl_or": ("v_lshl_or_b32", [v_lshl_or_b32(v[0], v[1], 4, v[2])]),
+  "VALU_add_nc": ("v_add_nc_u32", [v_add_nc_u32_e32(v[0], v[1], v[2])]),
+
+  # VOP3 - carry-out adds (used for 64-bit address calculation)
+  "VALU_add_co": ("v_add_co_u32", [v_add_co_u32(v[0], SrcEnum.VCC_LO, v[1], v[2])]),
+  "VALU_add_co_ci": ("v_add_co_ci_u32", [v_add_co_ci_u32_e32(v[0], v[1], v[2])]),
+
+  # VOPD - dual issue (used by tinygrad kernels)
+  "VALU_dual_add": ("v_dual_add_f32", [v_dual_add_f32(v[0], v[1], v[2], v[3], v[4], v[5])]),
+  "VALU_dual_mul": ("v_dual_mul_f32", [v_dual_mul_f32(v[0], v[1], v[2], v[3], v[4], v[5])]),
+
   # VOP2 - fmac
   "VALU_fmac": ("v_fmac_f32", [v_fmac_f32_e32(v[0], v[1], v[0])]),
 
@@ -235,6 +265,31 @@ INSTRUCTION_TESTS: dict[str, tuple[str, list]] = {
   ]),
 
   # ═══════════════════════════════════════════════════════════════════════════════
+  # GLOBAL ATOMICS - access real buffer passed via kernarg
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  # GLOBAL atomic add 32-bit (0x28 GLOBAL_ATOMIC)
+  "GLOBAL_atomic_add": ("global_atomic_add_u32", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),  # load buf addr from kernarg
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], 0),  # offset = 0
+    v_mov_b32_e32(v[1], 1),  # data to add
+    global_atomic_add_u32(addr=v[0], data=v[1], saddr=s[2]),
+    s_waitcnt(vmcnt=0),
+  ]),
+
+  # GLOBAL atomic add 64-bit
+  "GLOBAL_atomic_add64": ("global_atomic_add_u64", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], 0),
+    v_mov_b32_e32(v[2], 1),
+    v_mov_b32_e32(v[3], 0),
+    global_atomic_add_u64(addr=v[0], data=v[2:3], saddr=s[2]),
+    s_waitcnt(vmcnt=0),
+  ]),
+
+  # ═══════════════════════════════════════════════════════════════════════════════
   # MEMORY INSTRUCTIONS - access real buffer passed via kernarg
   # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -246,8 +301,8 @@ INSTRUCTION_TESTS: dict[str, tuple[str, list]] = {
     s_waitcnt(lgkmcnt=0),
   ]),
 
-  # VMEM load (0x21 VMEM_LOAD) - global load
-  "VMEM_load": ("global_load_b32", [
+  # GLOBAL load (0x21 GLOBAL_LOAD) - global memory load
+  "GLOBAL_load": ("global_load_b32", [
     s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),  # load buf addr from kernarg
     s_waitcnt(lgkmcnt=0),
     v_mov_b32_e32(v[0], 0),  # offset = 0
@@ -255,8 +310,8 @@ INSTRUCTION_TESTS: dict[str, tuple[str, list]] = {
     s_waitcnt(vmcnt=0),
   ]),
 
-  # VMEM store (0x24 VMEM_STORE) - global store
-  "VMEM_store": ("global_store_b32", [
+  # GLOBAL store (0x24 GLOBAL_STORE) - global memory store
+  "GLOBAL_store": ("global_store_b32", [
     s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),  # load buf addr from kernarg
     s_waitcnt(lgkmcnt=0),
     v_mov_b32_e32(v[0], 0),  # offset = 0
@@ -265,8 +320,8 @@ INSTRUCTION_TESTS: dict[str, tuple[str, list]] = {
     s_waitcnt(vmcnt=0),
   ]),
 
-  # VMEM 8-bit load/store
-  "VMEM_load8": ("global_load_u8", [
+  # GLOBAL 8-bit load/store
+  "GLOBAL_load8": ("global_load_u8", [
     s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
     s_waitcnt(lgkmcnt=0),
     v_mov_b32_e32(v[0], 0),
@@ -274,7 +329,7 @@ INSTRUCTION_TESTS: dict[str, tuple[str, list]] = {
     s_waitcnt(vmcnt=0),
   ]),
 
-  "VMEM_store8": ("global_store_b8", [
+  "GLOBAL_store8": ("global_store_b8", [
     s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
     s_waitcnt(lgkmcnt=0),
     v_mov_b32_e32(v[0], 0),
@@ -283,8 +338,8 @@ INSTRUCTION_TESTS: dict[str, tuple[str, list]] = {
     s_waitcnt(vmcnt=0),
   ]),
 
-  # VMEM 16-bit load/store
-  "VMEM_load16": ("global_load_u16", [
+  # GLOBAL 16-bit load/store
+  "GLOBAL_load16": ("global_load_u16", [
     s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
     s_waitcnt(lgkmcnt=0),
     v_mov_b32_e32(v[0], 0),
@@ -292,7 +347,7 @@ INSTRUCTION_TESTS: dict[str, tuple[str, list]] = {
     s_waitcnt(vmcnt=0),
   ]),
 
-  "VMEM_store16": ("global_store_b16", [
+  "GLOBAL_store16": ("global_store_b16", [
     s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
     s_waitcnt(lgkmcnt=0),
     v_mov_b32_e32(v[0], 0),
@@ -320,8 +375,8 @@ INSTRUCTION_TESTS: dict[str, tuple[str, list]] = {
   # WIDER MEMORY OPERATIONS - to discover more InstOp variants
   # ═══════════════════════════════════════════════════════════════════════════════
 
-  # VMEM 64-bit load
-  "VMEM_load64": ("global_load_b64", [
+  # GLOBAL 64-bit load
+  "GLOBAL_load64": ("global_load_b64", [
     s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
     s_waitcnt(lgkmcnt=0),
     v_mov_b32_e32(v[0], 0),
@@ -329,8 +384,8 @@ INSTRUCTION_TESTS: dict[str, tuple[str, list]] = {
     s_waitcnt(vmcnt=0),
   ]),
 
-  # VMEM 96-bit load
-  "VMEM_load96": ("global_load_b96", [
+  # GLOBAL 96-bit load
+  "GLOBAL_load96": ("global_load_b96", [
     s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
     s_waitcnt(lgkmcnt=0),
     v_mov_b32_e32(v[0], 0),
@@ -338,8 +393,8 @@ INSTRUCTION_TESTS: dict[str, tuple[str, list]] = {
     s_waitcnt(vmcnt=0),
   ]),
 
-  # VMEM 128-bit load
-  "VMEM_load128": ("global_load_b128", [
+  # GLOBAL 128-bit load
+  "GLOBAL_load128": ("global_load_b128", [
     s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
     s_waitcnt(lgkmcnt=0),
     v_mov_b32_e32(v[0], 0),
@@ -347,8 +402,8 @@ INSTRUCTION_TESTS: dict[str, tuple[str, list]] = {
     s_waitcnt(vmcnt=0),
   ]),
 
-  # VMEM 64-bit store
-  "VMEM_store64": ("global_store_b64", [
+  # GLOBAL 64-bit store
+  "GLOBAL_store64": ("global_store_b64", [
     s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
     s_waitcnt(lgkmcnt=0),
     v_mov_b32_e32(v[0], 0),
@@ -358,8 +413,8 @@ INSTRUCTION_TESTS: dict[str, tuple[str, list]] = {
     s_waitcnt(vmcnt=0),
   ]),
 
-  # VMEM 96-bit store
-  "VMEM_store96": ("global_store_b96", [
+  # GLOBAL 96-bit store
+  "GLOBAL_store96": ("global_store_b96", [
     s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
     s_waitcnt(lgkmcnt=0),
     v_mov_b32_e32(v[0], 0),
@@ -370,8 +425,8 @@ INSTRUCTION_TESTS: dict[str, tuple[str, list]] = {
     s_waitcnt(vmcnt=0),
   ]),
 
-  # VMEM 128-bit store
-  "VMEM_store128": ("global_store_b128", [
+  # GLOBAL 128-bit store
+  "GLOBAL_store128": ("global_store_b128", [
     s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
     s_waitcnt(lgkmcnt=0),
     v_mov_b32_e32(v[0], 0),
@@ -380,6 +435,76 @@ INSTRUCTION_TESTS: dict[str, tuple[str, list]] = {
     v_mov_b32_e32(v[6], 44),
     v_mov_b32_e32(v[7], 45),
     global_store_b128(addr=v[0], data=v[4:7], saddr=s[2], offset=0),
+    s_waitcnt(vmcnt=0),
+  ]),
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # GLOBAL VADDR (vector-only addressing, saddr=NULL) - used by tinygrad kernels
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  # GLOBAL VADDR load (all sizes use same opcode 0x22)
+  "GLOBAL_VADDR_load": ("global_load_b32 vaddr", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], s[2]),
+    v_mov_b32_e32(v[1], s[3]),
+    global_load_b32(v[4], addr=v[0:1], saddr=SrcEnum.NULL, offset=0),
+    s_waitcnt(vmcnt=0),
+  ]),
+
+  "GLOBAL_VADDR_load128": ("global_load_b128 vaddr", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], s[2]),
+    v_mov_b32_e32(v[1], s[3]),
+    global_load_b128(v[4:7], addr=v[0:1], saddr=SrcEnum.NULL, offset=0),
+    s_waitcnt(vmcnt=0),
+  ]),
+
+  # GLOBAL VADDR stores (size encoded: 32->0x25, 64->0x26, 96->0x27, 128->0x28)
+  "GLOBAL_VADDR_store": ("global_store_b32 vaddr", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], s[2]),
+    v_mov_b32_e32(v[1], s[3]),
+    v_mov_b32_e32(v[4], 42),
+    global_store_b32(addr=v[0:1], data=v[4], saddr=SrcEnum.NULL, offset=0),
+    s_waitcnt(vmcnt=0),
+  ]),
+
+  "GLOBAL_VADDR_store64": ("global_store_b64 vaddr", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], s[2]),
+    v_mov_b32_e32(v[1], s[3]),
+    v_mov_b32_e32(v[4], 42),
+    v_mov_b32_e32(v[5], 43),
+    global_store_b64(addr=v[0:1], data=v[4:5], saddr=SrcEnum.NULL, offset=0),
+    s_waitcnt(vmcnt=0),
+  ]),
+
+  "GLOBAL_VADDR_store96": ("global_store_b96 vaddr", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], s[2]),
+    v_mov_b32_e32(v[1], s[3]),
+    v_mov_b32_e32(v[4], 42),
+    v_mov_b32_e32(v[5], 43),
+    v_mov_b32_e32(v[6], 44),
+    global_store_b96(addr=v[0:1], data=v[4:6], saddr=SrcEnum.NULL, offset=0),
+    s_waitcnt(vmcnt=0),
+  ]),
+
+  "GLOBAL_VADDR_store128": ("global_store_b128 vaddr", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], s[2]),
+    v_mov_b32_e32(v[1], s[3]),
+    v_mov_b32_e32(v[4], 42),
+    v_mov_b32_e32(v[5], 43),
+    v_mov_b32_e32(v[6], 44),
+    v_mov_b32_e32(v[7], 45),
+    global_store_b128(addr=v[0:1], data=v[4:7], saddr=SrcEnum.NULL, offset=0),
     s_waitcnt(vmcnt=0),
   ]),
 

@@ -29,12 +29,21 @@ class InstOp(IntEnum):
   """SQTT instruction operation types.
 
   Memory ops appear in two ranges depending on which SIMD executes them:
-  - 0x2x range: ops on traced SIMD
+  - 0x1x-0x2x range: ops on traced SIMD
   - 0x5x range: ops on other SIMD (OTHER_ prefix)
+
+  GLOBAL memory ops encoding depends on addressing mode AND size:
+  - Loads: 0x21 (saddr=SGPR) or 0x22 (saddr=NULL), all sizes same
+  - Stores: base + size_offset, where VADDR is shifted +1 from SADDR
+    SADDR: 0x24(32) 0x25(64) 0x26(96) 0x27(128)
+    VADDR: 0x25(32) 0x26(64) 0x27(96) 0x28(128)
+
+  OTHER_ range follows same pattern but values overlap differently.
   """
   SALU = 0x0
   SMEM = 0x1
-  JUMP = 0x3
+  JUMP = 0x3              # branch taken
+  JUMP_NO = 0x4           # branch not taken
   MESSAGE = 0x9
   VALU_TRANS = 0xb        # transcendental: exp, log, rcp, sqrt, sin, cos
   VALU_64_SHIFT = 0xd     # 64-bit shifts: lshl, lshr, ashr
@@ -47,12 +56,17 @@ class InstOp(IntEnum):
   FLAT_STORE_64 = 0x1e
   FLAT_STORE_96 = 0x1f
   FLAT_STORE_128 = 0x20
-  # Memory ops on traced SIMD (0x2x range)
-  VMEM_LOAD = 0x21
-  VMEM_STORE = 0x24
-  VMEM_STORE_64 = 0x25
-  VMEM_STORE_96 = 0x26
-  VMEM_STORE_128 = 0x27
+
+  # GLOBAL memory ops on traced SIMD (0x2x range)
+  GLOBAL_LOAD = 0x21             # saddr=SGPR, all sizes
+  GLOBAL_LOAD_VADDR = 0x22       # saddr=NULL, all sizes
+  GLOBAL_STORE = 0x24            # saddr=SGPR, 32-bit
+  GLOBAL_STORE_64 = 0x25         # saddr=SGPR 64 or saddr=NULL 32
+  GLOBAL_STORE_96 = 0x26         # saddr=SGPR 96 or saddr=NULL 64
+  GLOBAL_STORE_128 = 0x27        # saddr=SGPR 128 or saddr=NULL 96
+  GLOBAL_STORE_VADDR_128 = 0x28  # saddr=NULL, 128-bit
+
+  # LDS ops on traced SIMD
   LDS_LOAD = 0x29
   LDS_STORE = 0x2b
   LDS_STORE_64 = 0x2c
@@ -68,11 +82,13 @@ class InstOp(IntEnum):
   OTHER_FLAT_STORE_64 = 0x57
   OTHER_FLAT_STORE_96 = 0x58
   OTHER_FLAT_STORE_128 = 0x59
-  OTHER_VMEM_LOAD = 0x5a
-  OTHER_VMEM_STORE = 0x5b
-  OTHER_VMEM_STORE_64 = 0x5c
-  OTHER_VMEM_STORE_96 = 0x5d
-  OTHER_VMEM_STORE_128 = 0x5e
+  OTHER_GLOBAL_LOAD = 0x5a             # saddr=SGPR, all sizes
+  OTHER_GLOBAL_LOAD_VADDR = 0x5b       # saddr=NULL or saddr=SGPR store 32
+  OTHER_GLOBAL_STORE_64 = 0x5c         # saddr=SGPR 64 or saddr=NULL 32
+  OTHER_GLOBAL_STORE_96 = 0x5d         # saddr=SGPR 96 or saddr=NULL 64
+  OTHER_GLOBAL_STORE_128 = 0x5e        # saddr=SGPR 128 or saddr=NULL 96
+  OTHER_GLOBAL_STORE_VADDR_128 = 0x5f  # saddr=NULL, 128-bit
+
   # EXEC-modifying ops (0x7x range)
   SALU_SAVEEXEC = 0x72    # s_*_saveexec_b32/b64
   VALU_CMPX = 0x73        # v_cmpx_*
