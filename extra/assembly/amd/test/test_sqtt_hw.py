@@ -205,6 +205,19 @@ def get_inst_ops(packets: list, traced_simd: int | None = None) -> set:
       in_wave = False
   return ops
 
+def count_valuinst(packets: list, traced_simd: int | None = None) -> int:
+  """Count VALUINST packets within WAVESTART..WAVEEND on traced SIMD."""
+  count = 0
+  in_wave = False
+  for p in packets:
+    if isinstance(p, WAVESTART):
+      in_wave = traced_simd is None or p.simd == traced_simd
+    if in_wave and isinstance(p, VALUINST):
+      count += 1
+    if isinstance(p, WAVEEND):
+      in_wave = False
+  return count
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # TESTS
 # ═══════════════════════════════════════════════════════════════════════════════

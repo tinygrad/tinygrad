@@ -49,6 +49,7 @@ class InstOp(IntEnum):
   VALU_64_SHIFT = 0xd     # 64-bit shifts: lshl, lshr, ashr
   VALU_MAD64 = 0xe        # 64-bit multiply-add
   VALU_64 = 0xf           # 64-bit: add, mul, fma, rcp, sqrt, rounding, frexp, div helpers
+  VINTERP = 0x12          # interpolation: v_interp_p10_f32, v_interp_p2_f32
 
   # FLAT memory ops on traced SIMD (0x1x range)
   FLAT_LOAD = 0x1c
