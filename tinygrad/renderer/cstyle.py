@@ -448,6 +448,8 @@ class CUDARenderer(CStyleLanguage):
 
     return super().render_kernel(function_name, kernel, bufs, uops, prefix=prefix)
 
+def fp8_index(dtype: DType): return (dtypes.fp8e4m3, dtypes.fp8e5m2).index(dtype.scalar())
+
 class AMDHIPRenderer(CStyleLanguage):
   device = "AMD"
   shared_max = 65536
@@ -465,12 +467,13 @@ class AMDHIPRenderer(CStyleLanguage):
     self.tensor_cores = self.get_tensor_cores(arch)
     if self.is_cdna(self.arch):
       self.string_rewrite = PatternMatcher([
-        (UPat(Ops.WMMA, name="x"),
-          lambda ctx,x: f"__{x.arg[0]}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]}, 0, 0, 0{',0,0,0' if x.arg[1][2]==128 else ''})"),
+        (UPat(Ops.WMMA, name="x"), lambda ctx,x: f"__{x.arg[0]}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]},"
+          f" {fp8_index(x.src[0].dtype)}, {fp8_index(x.src[0].dtype)}, 0, 0, 0, 0)" if x.arg[1][2] == 128 else None),
+        (UPat(Ops.WMMA, name="x"), lambda ctx,x: f"__{x.arg[0]}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]}, 0, 0, 0)"),
         (UPat(Ops.CAST, dtypes.fp8s, (UPat.var("y", dtypes.float),), name="x",),
-          lambda ctx,x, y: f"f32_to_fp8({ctx[x.src[0]]}, {'1' if x.dtype == dtypes.fp8e5m2 else '0'})"),
+          lambda ctx,x,y: f"f32_to_fp8({ctx[x.src[0]]}, {fp8_index(x.dtype)})"),
         (UPat(Ops.CAST, dtypes.float, (UPat.var("y", dtypes.fp8s),), name="x",),
-          lambda ctx,x, y: f"__builtin_amdgcn_cvt_f32_{'bf8' if y.dtype == dtypes.fp8e5m2 else 'fp8'}((unsigned int){ctx[x.src[0]]}, 0)"),
+          lambda ctx,x,y: f"__builtin_amdgcn_cvt_f32_{('fp8', 'bf8')[fp8_index(y.dtype)]}((unsigned int){ctx[x.src[0]]}, 0)"),
       ]) + base_rewrite
   def __reduce__(self): return self.__class__, (self.arch,)
 
@@ -531,7 +534,7 @@ class AMDHIPRenderer(CStyleLanguage):
         if (N, M, K) == (16, 16, 16): type_map[dtypes.bfloat16] = 'bf16_1k'
         elif (N, M, K) == (16, 16, 32): type_map = {**type_map, dtypes.bfloat16: "_bf16", dtypes.half: "_f16"}
         elif (N, M, K) == (16, 16, 128): type_map = {**type_map, dtypes.fp8e4m3: "_f8f6f4", dtypes.fp8e5m2: "_f8f6f4"}
-        prefix.append(f"#define __{name} __builtin_amdgcn_mfma_{'scale_' if K==128 else ''}f32_{N}x{M}x{K}{type_map[dtype_in]}")
+        prefix.append(f"#define __{name} __builtin_amdgcn_mfma_{'scale_' if K == 128 else ''}f32_{N}x{M}x{K}{type_map[dtype_in]}")
       # #define __WMMA_16_16_16_half_half __builtin_amdgcn_wmma_f16_16x16x16_f16_w32_gfx12
       elif self.tensor_cores == tc.amd_rdna4:
         prefix.append(f"#define __{name} __builtin_amdgcn_wmma_{type_map[dtype_out]}_16x16x16_{type_map[dtype_in]}_w32_gfx12")

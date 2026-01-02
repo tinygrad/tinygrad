@@ -36,14 +36,18 @@ FIELD_ORDER = {
 SRC_EXTRAS = {233: 'DPP8', 234: 'DPP8FI', 250: 'DPP16', 251: 'VCCZ', 252: 'EXECZ', 254: 'LDS_DIRECT'}
 FLOAT_MAP = {'0.5': 'POS_HALF', '-0.5': 'NEG_HALF', '1.0': 'POS_ONE', '-1.0': 'NEG_ONE', '2.0': 'POS_TWO', '-2.0': 'NEG_TWO',
   '4.0': 'POS_FOUR', '-4.0': 'NEG_FOUR', '1/(2*PI)': 'INV_2PI', '0': 'ZERO'}
-INST_PATTERN = re.compile(r'^([SV]_[A-Z0-9_]+)\s+(\d+)\s*$', re.M)
+INST_PATTERN = re.compile(r'^([SVD]S?_[A-Z0-9_]+|(?:FLAT|GLOBAL|SCRATCH)_[A-Z0-9_]+)\s+(\d+)\s*$', re.M)
 
 # Patterns that can't be handled by the DSL (require special handling in emu.py)
 UNSUPPORTED = ['SGPR[', 'V_SWAP', 'eval ', 'FATAL_HALT', 'HW_REGISTERS',
                'vscnt', 'vmcnt', 'expcnt', 'lgkmcnt',
                'CVT_OFF_TABLE', 'ThreadMask',
                'S1[i', 'C.i32', 'S[i]', 'in[',
-               'if n.', 'DST.u32', 'addrd = DST', 'addr = DST']  # Malformed pseudocode from PDF
+               'if n.', 'DST.u32', 'addrd = DST', 'addr = DST',
+               'BARRIER_STATE', 'ReallocVgprs',
+               'GPR_IDX', 'VSKIP', 'specified in', 'TTBL',
+               'fp6', 'bf6', 'GS_REGS', 'M0.base', 'DS_DATA', '= 0..', 'sign(src', 'if no LDS', 'gds_base', 'vector mask',
+               'SGPR_ADDR', 'INST_OFFSET', 'laneID']  # FLAT ops with non-standard vars
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # COMPILER: pseudocode -> Python (minimal transforms)
@@ -51,6 +55,7 @@ UNSUPPORTED = ['SGPR[', 'V_SWAP', 'eval ', 'FATAL_HALT', 'HW_REGISTERS',
 
 def compile_pseudocode(pseudocode: str) -> str:
   """Compile pseudocode to Python. Transforms are minimal - most syntax just works."""
+  pseudocode = re.sub(r'\bpass\b', 'pass_', pseudocode)  # 'pass' is Python keyword
   raw_lines = pseudocode.strip().split('\n')
   joined_lines: list[str] = []
   for line in raw_lines:
@@ -64,8 +69,8 @@ def compile_pseudocode(pseudocode: str) -> str:
   lines = []
   indent, need_pass, in_first_match_loop = 0, False, False
   for line in joined_lines:
-    line = line.strip()
-    if not line or line.startswith('//'): continue
+    line = line.split('//')[0].strip()  # Strip C-style comments
+    if not line: continue
     if line.startswith('if '):
       lines.append('  ' * indent + f"if {_expr(line[3:].rstrip(' then'))}:")
       indent += 1
@@ -113,7 +118,7 @@ def compile_pseudocode(pseudocode: str) -> str:
             break
       else:
         lhs, rhs = line.split('=', 1)
-        lhs_s, rhs_s = lhs.strip(), rhs.strip()
+        lhs_s, rhs_s = _expr(lhs.strip()), rhs.strip()
         stmt = _assign(lhs_s, _expr(rhs_s))
         if in_first_match_loop and rhs_s == 'i' and (lhs_s == 'tmp' or lhs_s == 'D0.i32'):
           stmt += "; break"
@@ -216,8 +221,16 @@ def _parse_fields_table(table: list, fmt: str, enums: set[str]) -> list[tuple]:
     if not (bits := _parse_bits(bits_str)): continue
     enc_val, hi, lo = None, bits[0], bits[1]
     if name == 'ENCODING' and row[2]:
-      if m := re.search(r"(?:'b|Must be:\s*)([01_]+)", row[2]):
+      desc = row[2]
+      # Handle shared FLAT/GLOBAL/SCRATCH table: look for format-specific encoding
+      fmt_key = fmt.lstrip('V').lower().capitalize()  # VFLAT -> Flat, VGLOBAL -> Global
+      if m := re.search(rf"{fmt_key}='b([01_]+)", desc):
         enc_bits = m.group(1).replace('_', '')
+      elif m := re.search(r"(?:'b|Must be:\s*)([01_]+)", desc):
+        enc_bits = m.group(1).replace('_', '')
+      else:
+        enc_bits = None
+      if enc_bits:
         enc_val, declared_width, actual_width = int(enc_bits, 2), hi - lo + 1, len(enc_bits)
         if actual_width > declared_width: lo = hi - actual_width + 1
     ftype = f"{fmt}Op" if name == 'OP' and f"{fmt}Op" in enums else FIELD_TYPES.get(name.upper())
@@ -288,6 +301,16 @@ def _parse_single_pdf(url: str):
         next_text = pdf.text(microcode_start + i + 1).lstrip()
         if next_text.startswith('Description') or (next_text.startswith('"RDNA') and 'Description' in next_text[:200]):
           format_headers.append((fmt_name, i, m.start()))
+    # RDNA4: Look for "Table X. Y Fields" patterns (e.g., VIMAGE, VSAMPLE, or shared FLAT/GLOBAL/SCRATCH)
+    for m in re.finditer(r'Table \d+\.\s+([\w,\s]+?)\s+Fields', text):
+      table_name = m.group(1).strip()
+      # Handle shared table like "FLAT, GLOBAL and SCRATCH"
+      if ',' in table_name or ' and ' in table_name:
+        for part in re.split(r',\s*|\s+and\s+', table_name):
+          fmt_name = 'V' + part.strip()
+          if fmt_name not in [h[0] for h in format_headers]: format_headers.append((fmt_name, i, m.start()))
+      elif table_name.startswith('V'):
+        if table_name not in [h[0] for h in format_headers]: format_headers.append((table_name, i, m.start()))
 
   formats: dict[str, list] = {}
   for fmt_name, rel_idx, header_pos in format_headers:
@@ -320,6 +343,10 @@ def _parse_single_pdf(url: str):
   if 'SMEM' in formats:
     formats['SMEM'] = [(n, 13 if n == 'DLC' else 14 if n == 'GLC' else h, 13 if n == 'DLC' else 14 if n == 'GLC' else l, e, t)
                        for n, h, l, e, t in formats['SMEM']]
+  # RDNA4: VFLAT/VGLOBAL/VSCRATCH OP field is [20:14] not [20:13] (PDF documentation error)
+  for fmt_name in ['VFLAT', 'VGLOBAL', 'VSCRATCH']:
+    if fmt_name in formats:
+      formats[fmt_name] = [(n, h, 14 if n == 'OP' else l, e, t) for n, h, l, e, t in formats[fmt_name]]
   if doc_name in ('RDNA3', 'RDNA3.5'):
     if 'SOPPOp' in enums: assert 8 not in enums['SOPPOp']; enums['SOPPOp'][8] = 'S_WAITCNT_DEPCTR'
     if 'DSOp' in enums:
@@ -347,8 +374,9 @@ def _extract_pseudocode(text: str) -> str | None:
   for line in lines:
     s = line.strip()
     if not s or re.match(r'^\d+ of \d+$', s) or re.match(r'^\d+\.\d+\..*Instructions', s): continue
-    if s.startswith(('Notes', 'Functional examples')): break
+    if s.startswith(('Notes', 'Functional examples', '•', '-')): break  # Stop at notes/bullets
     if s.startswith(('"RDNA', 'AMD ', 'CDNA')): continue
+    if '•' in s or '–' in s: continue  # Skip lines with bullets/dashes
     if '= lambda(' in s: in_lambda += 1; continue
     if in_lambda > 0:
       if s.endswith(');'): in_lambda -= 1
@@ -358,7 +386,8 @@ def _extract_pseudocode(text: str) -> str | None:
     if s.endswith('.') and not any(p in s for p in ['D0', 'D1', 'S0', 'S1', 'S2', 'SCC', 'VCC', 'tmp', '=']): continue
     if re.match(r'^[a-z].*\.$', s) and '=' not in s: continue
     is_code = (any(p in s for p in ['D0.', 'D1.', 'S0.', 'S1.', 'S2.', 'SCC =', 'SCC ?', 'VCC', 'EXEC', 'tmp =', 'tmp[', 'lane =', 'PC =',
-                                    'D0[', 'D1[', 'S0[', 'S1[', 'S2[']) or
+                                    'D0[', 'D1[', 'S0[', 'S1[', 'S2[', 'MEM[', 'RETURN_DATA',
+                                    'VADDR', 'VDATA', 'VDST', 'SADDR', 'OFFSET']) or
                s.startswith(('if ', 'else', 'elsif', 'endif', 'declare ', 'for ', 'endfor', '//')) or
                re.match(r'^[a-z_]+\s*=', s) or re.match(r'^[a-z_]+\[', s) or (depth > 0 and '=' in s))
     if is_code: result.append(s)
@@ -393,18 +422,29 @@ def _merge_results(results: list[dict]) -> dict:
 # CODE GENERATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def _generate_init_py(formats, enums, src_enum, doc_name) -> str:
-  """Generate __init__.py content (instruction formats and enums)."""
+def _generate_enum_py(enums, src_enum, doc_name) -> str:
+  """Generate enum.py content (just enums, no dsl.py dependency)."""
   def enum_lines(name, items): return [f"class {name}(IntEnum):"] + [f"  {n} = {v}" for v, n in sorted(items.items())] + [""]
-  def field_key(f, order): return order.index(f[0].lower()) if f[0].lower() in order else 1000
-  lines = [f"# autogenerated from AMD {doc_name} ISA PDF by pdf.py - do not edit", "from enum import IntEnum", "from typing import Annotated",
-           "from extra.assembly.amd.dsl import bits, BitField, Inst32, Inst64, SGPR, VGPR, TTMP as TTMP, s as s, v as v, ttmp as ttmp, SSrc, Src, SImm, Imm, VDSTYEnc, SGPRField, VGPRField",
-           "import functools", ""]
+  lines = [f"# autogenerated from AMD {doc_name} ISA PDF by pdf.py - do not edit", "from enum import IntEnum", ""]
   lines += enum_lines("SrcEnum", src_enum) + sum([enum_lines(n, ops) for n, ops in sorted(enums.items())], [])
+  return '\n'.join(lines)
+
+def _generate_ins_py(formats, enums, src_enum, doc_name) -> str:
+  """Generate ins.py content (instruction formats and helpers, imports dsl.py and enum.py)."""
+  def field_key(f, order): return order.index(f[0].lower()) if f[0].lower() in order else 1000
+  lines = [f"# autogenerated from AMD {doc_name} ISA PDF by pdf.py - do not edit",
+           "# ruff: noqa: F401,F403", "from typing import Annotated",
+           "from extra.assembly.amd.dsl import bits, BitField, Inst32, Inst64, Inst96, SGPR, VGPR, TTMP as TTMP, s as s, v as v, ttmp as ttmp, SSrc, Src, SImm, Imm, VDSTYEnc, SGPRField, VGPRField",
+           "from extra.assembly.amd.autogen.{arch}.enum import *",
+           "import functools", ""]
   format_defaults = {'VOP3P': {'opsel_hi': 3, 'opsel_hi2': 1}}
   lines.append("# instruction formats")
+  # MIMG has optional NSA (Non-Sequential Address) fields that extend beyond 64 bits, but base encoding is 64-bit
+  inst64_override = {'MIMG'}
   for fmt_name, fields in sorted(formats.items()):
-    base = "Inst64" if max(f[1] for f in fields) > 31 or fmt_name == 'VOP3SD' else "Inst32"
+    max_bit = max(f[1] for f in fields)
+    if fmt_name in inst64_override: base = "Inst64"
+    else: base = "Inst96" if max_bit > 63 else "Inst64" if max_bit > 31 or fmt_name == 'VOP3SD' else "Inst32"
     order = FIELD_ORDER.get(fmt_name, [])
     lines.append(f"class {fmt_name}({base}):")
     if enc := next((f for f in fields if f[0] == 'ENCODING'), None):
@@ -434,31 +474,26 @@ def _generate_init_py(formats, enums, src_enum, doc_name) -> str:
 
 def _generate_gen_pcode_py(enums, pseudocode, arch) -> str:
   """Generate gen_pcode.py content (compiled pseudocode functions)."""
-  # Get op enums for this arch
+  # Get op enums for this arch (import from .ins which re-exports from .enum)
   import importlib
-  autogen = importlib.import_module(f"extra.assembly.amd.autogen.{arch}")
-  OP_ENUMS = [getattr(autogen, name) for name in ['SOP1Op', 'SOP2Op', 'SOPCOp', 'SOPKOp', 'SOPPOp', 'VOP1Op', 'VOP2Op', 'VOP3Op', 'VOP3SDOp', 'VOP3POp', 'VOPCOp', 'VOP3AOp', 'VOP3BOp'] if hasattr(autogen, name)]
+  autogen = importlib.import_module(f"extra.assembly.amd.autogen.{arch}.ins")
+  OP_ENUMS = [getattr(autogen, name) for name in ['SOP1Op', 'SOP2Op', 'SOPCOp', 'SOPKOp', 'SOPPOp', 'VOP1Op', 'VOP2Op', 'VOP3Op', 'VOP3SDOp', 'VOP3POp', 'VOPCOp', 'VOP3AOp', 'VOP3BOp', 'DSOp', 'FLATOp', 'GLOBALOp', 'SCRATCHOp'] if hasattr(autogen, name)]
 
   # Build defined ops mapping
   defined_ops: dict[tuple, list] = {}
   for enum_cls in OP_ENUMS:
     for op in enum_cls:
-      if op.name.startswith(('S_', 'V_')): defined_ops.setdefault((op.name, op.value), []).append((enum_cls, op))
+      if op.name.startswith(('S_', 'V_', 'DS_', 'FLAT_', 'GLOBAL_', 'SCRATCH_')): defined_ops.setdefault((op.name, op.value), []).append((enum_cls, op))
 
   enum_names = [e.__name__ for e in OP_ENUMS]
-  lines = [f'''# autogenerated by pdf.py - do not edit
-# to regenerate: python -m extra.assembly.amd.pdf --arch {arch}
-# ruff: noqa: E501,F405,F403
-# mypy: ignore-errors
-from extra.assembly.amd.autogen.{arch} import {", ".join(enum_names)}
-from extra.assembly.amd.pcode import *
-''']
-
   instructions: dict = {cls: {} for cls in OP_ENUMS}
   for key, pc in pseudocode.items():
     if key in defined_ops:
       for enum_cls, enum_val in defined_ops[key]: instructions[enum_cls][enum_val] = pc
 
+  # First pass: generate all function code
+  fn_lines: list[str] = []
+  all_fn_entries: dict = {}
   for enum_cls in OP_ENUMS:
     cls_name = enum_cls.__name__
     if not instructions.get(enum_cls): continue
@@ -469,28 +504,44 @@ from extra.assembly.amd.pcode import *
         code = compile_pseudocode(pc)
         code = _apply_pseudocode_fixes(op, code)
         fn_name, fn_code = _generate_function(cls_name, op, pc, code)
-        lines.append(fn_code)
+        fn_lines.append(fn_code)
         fn_entries.append((op, fn_name))
       except Exception as e: print(f"  Warning: Failed to compile {op.name}: {e}")
     if fn_entries:
-      lines.append(f'{cls_name}_FUNCTIONS = {{')
-      for op, fn_name in fn_entries: lines.append(f"  {cls_name}.{op.name}: {fn_name},")
-      lines.append('}\n')
+      all_fn_entries[enum_cls] = fn_entries
+      fn_lines.append(f'{cls_name}_FUNCTIONS = {{')
+      for op, fn_name in fn_entries: fn_lines.append(f"  {cls_name}.{op.name}: {fn_name},")
+      fn_lines.append('}\n')
 
   # Add V_WRITELANE_B32 if VOP3Op exists
   if 'VOP3Op' in enum_names:
-    lines.append('''
+    fn_lines.append('''
 # V_WRITELANE_B32: Write scalar to specific lane's VGPR (not in PDF pseudocode)
-def _VOP3Op_V_WRITELANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0):
+def _VOP3Op_V_WRITELANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
   wr_lane = s1 & 0x1f
   return {'d0': d0, 'scc': scc, 'vgpr_write': (wr_lane, vdst_idx, s0 & 0xffffffff)}
 VOP3Op_FUNCTIONS[VOP3Op.V_WRITELANE_B32] = _VOP3Op_V_WRITELANE_B32
 ''')
 
-  lines.append('COMPILED_FUNCTIONS = {')
+  fn_lines.append('COMPILED_FUNCTIONS = {')
   for enum_cls in OP_ENUMS:
-    if instructions.get(enum_cls): lines.append(f'  {enum_cls.__name__}: {enum_cls.__name__}_FUNCTIONS,')
-  lines.append('}\n\ndef get_compiled_functions(): return COMPILED_FUNCTIONS')
+    if all_fn_entries.get(enum_cls): fn_lines.append(f'  {enum_cls.__name__}: {enum_cls.__name__}_FUNCTIONS,')
+  fn_lines.append('}\n\ndef get_compiled_functions(): return COMPILED_FUNCTIONS')
+
+  # Second pass: scan generated code for pcode imports
+  fn_code_str = '\n'.join(fn_lines)
+  import extra.assembly.amd.pcode as pcode_module
+  pcode_exports = [name for name in dir(pcode_module) if not name.startswith('_') or name.startswith('_') and not name.startswith('__')]
+  used_imports = sorted(name for name in pcode_exports if re.search(rf'\b{re.escape(name)}\b', fn_code_str))
+
+  # Build final output with explicit imports
+  lines = [f'''# autogenerated by pdf.py - do not edit
+# to regenerate: python -m extra.assembly.amd.pdf --arch {arch}
+# ruff: noqa: E501
+# mypy: ignore-errors
+from extra.assembly.amd.autogen.{arch}.enum import {", ".join(enum_names)}
+from extra.assembly.amd.pcode import {", ".join(used_imports)}
+'''] + fn_lines
   return '\n'.join(lines)
 
 def _apply_pseudocode_fixes(op, code: str) -> str:
@@ -526,52 +577,83 @@ def _apply_pseudocode_fixes(op, code: str) -> str:
 
 def _generate_function(cls_name: str, op, pc: str, code: str) -> tuple[str, str]:
   """Generate a single compiled pseudocode function."""
-  is_64 = any(p in pc for p in ['D0.u64', 'D0.b64', 'D0.f64', 'D0.i64', 'D1.u64', 'D1.b64', 'D1.f64', 'D1.i64'])
   has_d1 = '{ D1' in pc
-  if has_d1: is_64 = True
-  is_cmp = (cls_name in ('VOPCOp', 'VOP3Op')) and 'D0.u64[laneId]' in pc
   is_cmpx = (cls_name in ('VOPCOp', 'VOP3Op')) and 'EXEC.u64[laneId]' in pc
   is_div_scale = 'DIV_SCALE' in op.name
   has_sdst = cls_name == 'VOP3SDOp' and ('VCC.u64[laneId]' in pc or is_div_scale)
-  has_pc = 'PC' in pc
+  is_ds = cls_name == 'DSOp'
+  is_flat = cls_name in ('FLATOp', 'GLOBALOp', 'SCRATCHOp')
   combined = code + pc
 
   fn_name = f"_{cls_name}_{op.name}"
-  lines = [f"def {fn_name}(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, _vars, src0_idx=0, vdst_idx=0, pc=0):"]
-  for pc_line in pc.split('\n'): lines.append(f"  # {pc_line}")
+  # Function accepts Reg objects directly (uppercase names), laneId is passed directly as int
+  # DSOp functions get additional MEM and offset parameters
+  # FLAT/GLOBAL ops get MEM, vaddr, vdata, saddr, offset parameters
+  if is_ds:
+    lines = [f"def {fn_name}(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):"]
+  elif is_flat:
+    lines = [f"def {fn_name}(MEM, ADDR, VDATA, VDST, RETURN_DATA):"]
+  else:
+    lines = [f"def {fn_name}(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):"]
 
-  regs = [('S0', 'Reg(s0)'), ('S1', 'Reg(s1)'), ('S2', 'Reg(s2)'),
-          ('D0', 'Reg(s0)' if is_div_scale else 'Reg(d0)'), ('D1', 'Reg(0)'),
-          ('SCC', 'Reg(scc)'), ('VCC', 'Reg(vcc)'), ('EXEC', 'Reg(exec_mask)'),
-          ('tmp', 'Reg(0)'), ('saveexec', 'Reg(exec_mask)'), ('laneId', 'lane'),
-          ('SIMM16', 'Reg(literal)'), ('SIMM32', 'Reg(literal)'),
-          ('SRC0', 'Reg(src0_idx)'), ('VDST', 'Reg(vdst_idx)'), ('PC', 'Reg(pc)')]
-  used = {name for name, _ in regs if name in combined}
-  if 'EXEC_LO' in combined or 'EXEC_HI' in combined: used.add('EXEC')
-  if 'VCCZ' in combined: used.add('VCC')
-  if 'EXECZ' in combined: used.add('EXEC')
-  for name, init in regs:
-    if name in used: lines.append(f"  {name} = {init}")
-  if 'EXEC_LO' in combined: lines.append("  EXEC_LO = SliceProxy(EXEC, 31, 0)")
-  if 'EXEC_HI' in combined: lines.append("  EXEC_HI = SliceProxy(EXEC, 63, 32)")
-  if 'VCCZ' in combined: lines.append("  VCCZ = Reg(1 if VCC._val == 0 else 0)")
-  if 'EXECZ' in combined: lines.append("  EXECZ = Reg(1 if EXEC._val == 0 else 0)")
-  lines.append("  # --- compiled pseudocode ---")
-  for line in code.split('\n'): lines.append(f"  {line}")
-  lines.append("  # --- end pseudocode ---")
-  d0_val, scc_val = ("D0._val" if 'D0' in used else "d0"), ("SCC._val & 1" if 'SCC' in used else "scc & 1")
-  lines.append(f"  result = {{'d0': {d0_val}, 'scc': {scc_val}}}")
-  if has_sdst: lines.append("  result['vcc_lane'] = (VCC._val >> lane) & 1")
-  elif 'VCC' in used: lines.append("  if VCC._val != vcc: result['vcc_lane'] = (VCC._val >> lane) & 1")
-  if is_cmpx: lines.append("  result['exec_lane'] = (EXEC._val >> lane) & 1")
-  elif 'EXEC' in used: lines.append("  if EXEC._val != exec_mask: result['exec'] = EXEC._val")
-  if is_cmp: lines.append("  result['vcc_lane'] = (D0._val >> lane) & 1")
-  if is_64: lines.append("  result['d0_64'] = True")
-  if has_d1: lines.append("  result['d1'] = D1._val & 1")
-  if has_pc:
-    lines.append("  _pc = PC._val if PC._val < 0x8000000000000000 else PC._val - 0x10000000000000000")
-    lines.append("  result['new_pc'] = _pc")
-  lines.append("  return result\n")
+  # Registers that need special handling (aliases or init)
+  def needs_init(name): return name in combined and not re.search(rf'^\s*{name}\s*=\s*Reg\(', code, re.MULTILINE)
+  special_regs = []
+  if is_ds: special_regs = [('DATA', 'DATA0'), ('DATA2', 'DATA1'), ('OFFSET', 'OFFSET0'), ('ADDR_BASE', 'ADDR')]
+  elif is_flat: special_regs = [('DATA', 'VDATA')]
+  else:
+    special_regs = [('D1', 'Reg(0)'), ('SIMM16', 'Reg(literal)'), ('SIMM32', 'Reg(literal)'),
+                    ('SRC0', 'Reg(src0_idx)'), ('VDST', 'Reg(vdst_idx)')]
+    if needs_init('tmp'): special_regs.insert(0, ('tmp', 'Reg(0)'))
+    if needs_init('saveexec'): special_regs.insert(0, ('saveexec', 'Reg(EXEC._val)'))
+
+  used = {name for name, _ in special_regs if name in combined}
+
+  # Detect which registers are modified (not just read) - look for assignments
+  modifies_d0 = is_div_scale or bool(re.search(r'\bD0\b[.\[]', combined))
+  modifies_exec = is_cmpx or bool(re.search(r'EXEC\.(u32|u64|b32|b64)\s*=', combined))
+  modifies_vcc = has_sdst or bool(re.search(r'VCC\.(u32|u64|b32|b64)\s*=|VCC\.u64\[laneId\]\s*=', combined))
+  modifies_scc = bool(re.search(r'\bSCC\s*=', combined))
+  modifies_pc = bool(re.search(r'\bPC\s*=', combined))
+  # DS/FLAT ops: detect memory writes (MEM[...] = ...)
+  modifies_mem = (is_ds or is_flat) and bool(re.search(r'MEM\[.*\]\.[a-z0-9]+\s*=', combined))
+  # FLAT ops: detect VDST writes
+  modifies_vdst = is_flat and bool(re.search(r'VDST[\.\[].*=', combined))
+
+  # Build init code for special registers
+  init_lines = []
+  if is_div_scale: init_lines.append("  D0 = Reg(S0._val)")
+  for name, init in special_regs:
+    if name in used: init_lines.append(f"  {name} = {init}")
+  if 'EXEC_LO' in code: init_lines.append("  EXEC_LO = SliceProxy(EXEC, 31, 0)")
+  if 'EXEC_HI' in code: init_lines.append("  EXEC_HI = SliceProxy(EXEC, 63, 32)")
+  if 'VCCZ' in code and not re.search(r'^\s*VCCZ\s*=', code, re.MULTILINE): init_lines.append("  VCCZ = Reg(1 if VCC._val == 0 else 0)")
+  if 'EXECZ' in code and not re.search(r'^\s*EXECZ\s*=', code, re.MULTILINE): init_lines.append("  EXECZ = Reg(1 if EXEC._val == 0 else 0)")
+  code_lines = [line for line in code.split('\n') if line.strip()]
+  if init_lines:
+    lines.extend(init_lines)
+    if code_lines: lines.append("  # --- compiled pseudocode ---")
+  for line in code_lines:
+    lines.append(f"  {line}")
+
+  # Build result dict - only include registers that are modified
+  result_items = []
+  if modifies_d0: result_items.append("'D0': D0")
+  if modifies_scc: result_items.append("'SCC': SCC")
+  if modifies_vcc: result_items.append("'VCC': VCC")
+  if modifies_exec: result_items.append("'EXEC': EXEC")
+  if has_d1: result_items.append("'D1': D1")
+  if modifies_pc: result_items.append("'PC': PC")
+  # DS ops: return RETURN_DATA if it was written (left side of assignment)
+  if is_ds and 'RETURN_DATA' in combined and re.search(r'^\s*RETURN_DATA[\.\[].*=', code, re.MULTILINE):
+    result_items.append("'RETURN_DATA': RETURN_DATA")
+  # FLAT ops: return RETURN_DATA for atomics, VDATA for loads (only if written to)
+  if is_flat:
+    if 'RETURN_DATA' in combined and re.search(r'^\s*RETURN_DATA[\.\[].*=', code, re.MULTILINE):
+      result_items.append("'RETURN_DATA': RETURN_DATA")
+    if re.search(r'^\s*VDATA[\.\[].*=', code, re.MULTILINE):
+      result_items.append("'VDATA': VDATA")
+  lines.append(f"  return {{{', '.join(result_items)}}}\n")
   return fn_name, '\n'.join(lines)
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -579,7 +661,7 @@ def _generate_function(cls_name: str, op, pc: str, code: str) -> tuple[str, str]
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def generate_arch(arch: str) -> dict:
-  """Generate both __init__.py and gen_pcode.py for a single architecture."""
+  """Generate enum.py, ins.py and gen_pcode.py for a single architecture."""
   urls = PDF_URLS[arch]
   if isinstance(urls, str): urls = [urls]
 
@@ -589,15 +671,24 @@ def generate_arch(arch: str) -> dict:
   merged = _merge_results(results) if len(results) > 1 else results[0]
   doc_name = "+".join(merged["doc_names"]) if len(results) > 1 else merged["doc_name"]
 
-  # Write __init__.py
-  init_path = Path(f"extra/assembly/amd/autogen/{arch}/__init__.py")
-  init_path.parent.mkdir(parents=True, exist_ok=True)
-  init_content = _generate_init_py(merged["formats"], merged["enums"], merged["src_enum"], doc_name)
-  init_path.write_text(init_content)
-  print(f"Generated {init_path}: SrcEnum ({len(merged['src_enum'])}) + {len(merged['enums'])} enums + {len(merged['formats'])} formats")
+  base_path = Path(f"extra/assembly/amd/autogen/{arch}")
+  base_path.mkdir(parents=True, exist_ok=True)
+  (base_path / "__init__.py").touch()
 
-  # Write gen_pcode.py (needs __init__.py to exist first for imports)
-  pcode_path = Path(f"extra/assembly/amd/autogen/{arch}/gen_pcode.py")
+  # Write enum.py (enums only, no dsl.py dependency)
+  enum_path = base_path / "enum.py"
+  enum_content = _generate_enum_py(merged["enums"], merged["src_enum"], doc_name)
+  enum_path.write_text(enum_content)
+  print(f"Generated {enum_path}: SrcEnum ({len(merged['src_enum'])}) + {len(merged['enums'])} enums")
+
+  # Write ins.py (instruction formats and helpers, imports dsl.py and enum.py)
+  ins_path = base_path / "ins.py"
+  ins_content = _generate_ins_py(merged["formats"], merged["enums"], merged["src_enum"], doc_name).replace("{arch}", arch)
+  ins_path.write_text(ins_content)
+  print(f"Generated {ins_path}: {len(merged['formats'])} formats")
+
+  # Write gen_pcode.py (needs enum.py to exist first for imports)
+  pcode_path = base_path / "gen_pcode.py"
   pcode_content = _generate_gen_pcode_py(merged["enums"], merged["pseudocode"], arch)
   pcode_path.write_text(pcode_content)
   print(f"Generated {pcode_path}: {len(merged['pseudocode'])} instructions")

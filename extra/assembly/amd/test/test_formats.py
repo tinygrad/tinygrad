@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Test MUBUF, MTBUF, MIMG, EXP, DS formats against LLVM."""
 import unittest
-from extra.assembly.amd.autogen.rdna3 import *
+from extra.assembly.amd.autogen.rdna3.ins import *
 from extra.assembly.amd.dsl import encode_src, RawImm
 from extra.assembly.amd.asm import detect_format
 

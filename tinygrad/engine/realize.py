@@ -125,7 +125,7 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
 
 # NOTE: ctx is the buffers
 si_lowerer = PatternMatcher([
-  (UPat(Ops.SINK, name="sink"), lambda ctx,sink: get_runner(ctx[0].device, sink)),
+  (UPat((Ops.SINK, Ops.PROGRAM), name="sink"), lambda ctx,sink: get_runner(ctx[0].device, sink)),
   (UPat(Ops.BUFFER_VIEW), lambda ctx: ViewOp(ctx[0])),
   (UPat(Ops.COPY, name="copy"), lambda ctx,copy: (BufferXfer(ctx[0].nbytes, ctx[0].device, ctx[1].device) \
       if hasattr(Device[ctx[0].device].allocator, '_transfer') and all_same([x.device.split(":")[0] for x in ctx]) \

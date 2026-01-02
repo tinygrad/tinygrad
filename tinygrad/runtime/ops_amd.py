@@ -446,8 +446,8 @@ class AMDComputeAQLQueue(AMDComputeQueue):
     dev.compute_queue.signal_doorbell(dev, doorbell_value=dev.compute_queue.put_value-1)
 
 class AMDCopyQueue(HWQueue):
-  def __init__(self, dev, max_copy_size=0x40000000):
-    self.dev, self.sdma, self.internal_cmd_sizes, self.max_copy_size = dev, dev.sdma, [], max_copy_size
+  def __init__(self, dev, max_copy_size=0x40000000, queue_idx=0):
+    self.dev, self.sdma, self.internal_cmd_sizes, self.max_copy_size, self.queue_idx = dev, dev.sdma, [], max_copy_size, queue_idx
     super().__init__()
 
   def q(self, *arr):
@@ -501,41 +501,42 @@ class AMDCopyQueue(HWQueue):
     self._q, self.cmd_sizes = hw_view, [len(self.indirect_cmd)]
 
   def _submit(self, dev:AMDDevice):
+    sdma_queue = dev.sdma_queue(self.queue_idx)
     if self.binded_device == dev:
       # An IB packet must end on a 8 DW boundary.
-      add = (8 - (((dev.sdma_queue.put_value % 32) // 4) + len(self.indirect_cmd) % 8)) % 8
+      add = (8 - (((sdma_queue.put_value % 32) // 4) + len(self.indirect_cmd) % 8)) % 8
       cmds, cmd_sizes = ([0] * add) + self.indirect_cmd, [len(self.indirect_cmd) + add]
 
-      if len(cmds) * 4 >= (dev.sdma_queue.ring.nbytes - dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes):
+      if len(cmds) * 4 >= (sdma_queue.ring.nbytes - sdma_queue.put_value % sdma_queue.ring.nbytes):
         cmds, cmd_sizes = [0, 0] + self.indirect_cmd, [8]
     else: cmds, cmd_sizes = self._q, self.internal_cmd_sizes
 
     tail_blit_dword = 0
     for cmdsz in cmd_sizes:
-      if (tail_blit_dword + cmdsz) * 4 >= dev.sdma_queue.ring.nbytes - dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes: break
+      if (tail_blit_dword + cmdsz) * 4 >= sdma_queue.ring.nbytes - sdma_queue.put_value % sdma_queue.ring.nbytes: break
       tail_blit_dword += cmdsz
 
     # Force align of submits to hit our usb layer write cache.
     if (rem_packet_cnt := len(cmds) - tail_blit_dword) > 0 and dev.is_usb(): tail_blit_dword = 0
 
     # USB devices run in single-step mode, so they can't overrun the queue.
-    total_bytes = (tail_blit_dword * 4 if rem_packet_cnt == 0 else -dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes) + rem_packet_cnt * 4
-    assert total_bytes < dev.sdma_queue.ring.nbytes, "SDMA queue overrun"
-    while not dev.is_usb() and dev.sdma_queue.put_value + total_bytes - dev.sdma_queue.read_ptr > dev.sdma_queue.ring.nbytes: pass
+    total_bytes = (tail_blit_dword * 4 if rem_packet_cnt == 0 else -sdma_queue.put_value % sdma_queue.ring.nbytes) + rem_packet_cnt * 4
+    assert total_bytes < sdma_queue.ring.nbytes, "SDMA queue overrun"
+    while not dev.is_usb() and sdma_queue.put_value + total_bytes - sdma_queue.read_ptr > sdma_queue.ring.nbytes: pass
 
-    start_idx = (dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes) // 4
-    dev.sdma_queue.ring[start_idx : start_idx + tail_blit_dword] = array.array('I', cmds[:tail_blit_dword])
-    dev.sdma_queue.put_value += tail_blit_dword * 4
+    start_idx = (sdma_queue.put_value % sdma_queue.ring.nbytes) // 4
+    sdma_queue.ring[start_idx : start_idx + tail_blit_dword] = array.array('I', cmds[:tail_blit_dword])
+    sdma_queue.put_value += tail_blit_dword * 4
 
     if (rem_packet_cnt := len(cmds) - tail_blit_dword) > 0:
-      zero_fill = dev.sdma_queue.ring.nbytes - dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes
-      dev.sdma_queue.ring.view(dev.sdma_queue.put_value % dev.sdma_queue.ring.nbytes, zero_fill, fmt='B')[:] = bytes(zero_fill)
-      dev.sdma_queue.put_value += zero_fill
+      zero_fill = sdma_queue.ring.nbytes - sdma_queue.put_value % sdma_queue.ring.nbytes
+      sdma_queue.ring.view(sdma_queue.put_value % sdma_queue.ring.nbytes, zero_fill, fmt='B')[:] = bytes(zero_fill)
+      sdma_queue.put_value += zero_fill
 
-      dev.sdma_queue.ring[0:rem_packet_cnt] = array.array('I', cmds[tail_blit_dword:])
-      dev.sdma_queue.put_value += rem_packet_cnt * 4
+      sdma_queue.ring[0:rem_packet_cnt] = array.array('I', cmds[tail_blit_dword:])
+      sdma_queue.put_value += rem_packet_cnt * 4
 
-    dev.sdma_queue.signal_doorbell(dev)
+    sdma_queue.signal_doorbell(dev)
 
 class AMDProgram(HCQProgram):
   def __init__(self, dev:AMDDevice, name:str, lib:bytes):
@@ -756,7 +757,8 @@ class KFDIface:
     stm = kfd.AMDKFD_IOC_MAP_MEMORY_TO_GPU(self.kfd, handle=mem.meta.handle, device_ids_array_ptr=ctypes.addressof(c_gpus), n_devices=1)
     assert stm.n_success == 1
 
-  def create_queue(self, queue_type, ring, gart, rptr, wptr, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, xcc_id=0):
+  def create_queue(self, queue_type, ring, gart, rptr, wptr, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0,
+                   xcc_id=0, idx=0):
     queue = kfd.AMDKFD_IOC_CREATE_QUEUE(KFDIface.kfd, ring_base_address=ring.va_addr, ring_size=ring.size, gpu_id=self.gpu_id,
       queue_type=queue_type, queue_percentage=kfd.KFD_MAX_QUEUE_PERCENTAGE|(xcc_id<<8), queue_priority=getenv("AMD_KFD_QUEUE_PRIORITY", 7),
       eop_buffer_address=eop_buffer.va_addr if eop_buffer else 0, eop_buffer_size=eop_buffer.size if eop_buffer else 0, ctl_stack_size=ctl_stack_size,
@@ -826,16 +828,17 @@ class PCIIface(PCIIfaceBase):
       'simd_arrays_per_engine': max_sh_per_se, 'lds_size_in_kb': self.dev_impl.gc_info.gc_lds_size, 'num_xcc': self.dev_impl.gfx.xccs,
       'gfx_target_version': {90403: 90402}.get(gfxver, gfxver)}
 
-  def create_queue(self, queue_type, ring, gart, rptr, wptr, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, xcc_id=0):
+  def create_queue(self, queue_type, ring, gart, rptr, wptr, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0,
+                   xcc_id=0, idx=0):
     assert cwsr_buffer is None, "no cwsr buffer for am"
 
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA:
-      pv = self.dev_impl.sdma.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr+rptr, wptr_addr=gart.va_addr+wptr,
-                                    doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0), pipe=0, queue=0)
+      pv, doorbell_index = self.dev_impl.sdma.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr+rptr,
+                                                         wptr_addr=gart.va_addr+wptr, idx=idx)
     else:
-      pv = self.dev_impl.gfx.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr+rptr, wptr_addr=gart.va_addr+wptr,
-        eop_addr=eop_buffer.va_addr, eop_size=eop_buffer.size, doorbell=(doorbell_index:=am.AMDGPU_NAVI10_DOORBELL_MEC_RING0), pipe=0,
-        queue=int(is_aql:=(queue_type==kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL)), aql=is_aql)
+      pv, doorbell_index = self.dev_impl.gfx.setup_ring(ring_addr=ring.va_addr, ring_size=ring.size, rptr_addr=gart.va_addr+rptr,
+        wptr_addr=gart.va_addr+wptr, eop_addr=eop_buffer.va_addr, eop_size=eop_buffer.size,
+        idx=int(is_aql:=(queue_type==kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL)), aql=is_aql)
 
     return AMDQueueDesc(ring=ring.cpu_view().view(fmt='I'), doorbells=[self.dev_impl.doorbell64.view(doorbell_index * 8, 8, fmt='Q')],
       read_ptrs=[gart.cpu_view().view(offset=rptr, size=8, fmt='Q')], write_ptrs=[gart.cpu_view().view(offset=wptr, size=8, fmt='Q')], put_value=pv)
@@ -875,9 +878,10 @@ class USBIface(PCIIface):
     barview = self.pci_dev.map_bar(bar=0, off=mapping.paddrs[0][0], size=mapping.size) if cpu_access else None
     return HCQBuffer(mapping.va_addr, size, meta=PCIAllocationMeta(mapping, has_cpu_mapping=False), view=barview, owner=self.dev)
 
-  def create_queue(self, queue_type, ring, gart, rptr, wptr, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0, xcc_id=0):
+  def create_queue(self, queue_type, ring, gart, rptr, wptr, eop_buffer=None, cwsr_buffer=None, ctl_stack_size=0, ctx_save_restore_size=0,
+                   xcc_id=0, idx=0):
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE: self.pci_dev.usb._pci_cacheable += [(ring.cpu_view().addr, ring.size)]
-    return super().create_queue(queue_type, ring, gart, rptr, wptr, eop_buffer, cwsr_buffer, ctl_stack_size, ctx_save_restore_size, xcc_id)
+    return super().create_queue(queue_type, ring, gart, rptr, wptr, eop_buffer, cwsr_buffer, ctl_stack_size, ctx_save_restore_size, xcc_id, idx)
 
   def sleep(self, timeout): pass
 
@@ -931,8 +935,7 @@ class AMDDevice(HCQCompiled):
       0x2000 if self.is_usb() else (16 << 20), eop_buffer_size=0x1000,
       ctx_save_restore_size=0 if self.is_am() else wg_data_size + ctl_stack_size, ctl_stack_size=ctl_stack_size, debug_memory_size=debug_memory_size)
 
-    max_copy_size = 0x40000000 if self.iface.ip_versions[am.SDMA0_HWIP][0] >= 5 else 0x400000
-    self.sdma_queue = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else (16 << 20))
+    self.max_copy_size = 0x40000000 if self.iface.ip_versions[am.SDMA0_HWIP][0] >= 5 else 0x400000
 
     compilers = CompilerSet([CompilerPair(functools.partial(AMDHIPRenderer, self.arch), None),
                              CompilerPair(functools.partial(AMDLLVMRenderer, self.arch), None, AMD_LLVM),
@@ -940,7 +943,7 @@ class AMDDevice(HCQCompiled):
 
     super().__init__(device, AMDAllocator(self), compilers, functools.partial(AMDProgram, self), AMDSignal,
                      functools.partial(AMDComputeAQLQueue if self.is_aql else AMDComputeQueue, self),
-                     functools.partial(AMDCopyQueue, self, max_copy_size=max_copy_size),
+                     functools.partial(AMDCopyQueue, self, max_copy_size=self.max_copy_size),
                      kernargs_size=(8 << 10) if self.is_usb() else (16 << 20), sigalloc_size=0x100 if self.is_usb() else 0x1000)
 
     # Scratch setup
@@ -976,7 +979,7 @@ class AMDDevice(HCQCompiled):
       self.sqtt_wptrs = self.allocator.alloc(round_up(self.se_cnt * 4, 0x1000), BufferSpec(cpu_access=True, nolru=True))
       self.sqtt_next_cmd_id = itertools.count(0)
 
-  def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0):
+  def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0, idx=0):
     ring = self.iface.alloc(ring_size, uncached=True, cpu_access=True)
     gart = self.iface.alloc(0x100, uncached=True, cpu_access=True)
 
@@ -993,7 +996,10 @@ class AMDDevice(HCQCompiled):
 
     return (self.iface.create_queue(queue_type, ring, gart, rptr=getattr(hsa.amd_queue_t, 'read_dispatch_id').offset,
             wptr=getattr(hsa.amd_queue_t, 'write_dispatch_id').offset, eop_buffer=eop_buffer, cwsr_buffer=cwsr_buffer,
-            ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size))
+            ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size, idx=idx))
+
+  @functools.lru_cache(None)
+  def sdma_queue(self, idx:int=0): return self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else (16 << 20), idx=idx)
 
   def _ensure_has_local_memory(self, private_segment_size):
     if self.max_private_segment_size >= private_segment_size: return
