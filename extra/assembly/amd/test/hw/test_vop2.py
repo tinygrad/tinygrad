@@ -393,5 +393,59 @@ class TestCndmask(unittest.TestCase):
     self.assertEqual(lo, 0x0000, f"Expected lo preserved as 0, got 0x{lo:04x}")
 
 
+class TestSpecialFloatValues(unittest.TestCase):
+  """Tests for special float value handling in VOP2 instructions."""
+
+  def test_neg_zero_add(self):
+    """-0.0 + 0.0 = +0.0 (IEEE 754)."""
+    neg_zero = 0x80000000
+    instructions = [
+      s_mov_b32(s[0], neg_zero),
+      v_mov_b32_e32(v[0], s[0]),
+      v_add_f32_e32(v[1], 0.0, v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0x00000000, "Should be +0.0")
+
+  def test_neg_zero_mul(self):
+    """-0.0 * -1.0 = +0.0."""
+    neg_zero = 0x80000000
+    instructions = [
+      s_mov_b32(s[0], neg_zero),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mul_f32_e32(v[1], -1.0, v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0x00000000, "Should be +0.0")
+
+  def test_inf_minus_inf(self):
+    """+inf - inf = NaN."""
+    import math
+    pos_inf = 0x7f800000
+    neg_inf = 0xff800000
+    instructions = [
+      s_mov_b32(s[0], pos_inf),
+      s_mov_b32(s[1], neg_inf),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_sub_f32_e32(v[2], v[0], v[1]),  # inf - (-inf) = inf
+      v_add_f32_e32(v[3], v[0], v[1]),  # inf + (-inf) = NaN
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], pos_inf, "inf - (-inf) = inf")
+    self.assertTrue(math.isnan(i2f(st.vgpr[0][3])), "inf + (-inf) = NaN")
+
+  def test_denormal_f32_mul_ftz(self):
+    """Denormal * normal - RDNA3 flushes denormals to zero (FTZ mode)."""
+    smallest_denorm = 0x00000001  # Smallest positive denormal
+    instructions = [
+      s_mov_b32(s[0], smallest_denorm),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mul_f32_e32(v[1], 2.0, v[0]),  # Denormal input gets flushed to 0
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0x00000000)
+
+
 if __name__ == '__main__':
   unittest.main()

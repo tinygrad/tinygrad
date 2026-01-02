@@ -627,5 +627,70 @@ class TestCvtF16Modifiers(unittest.TestCase):
     self.assertAlmostEqual(hi, f32_val, places=1)
 
 
+class TestConversionRounding(unittest.TestCase):
+  """Tests for conversion rounding behavior."""
+
+  def test_cvt_f32_to_i32_round_toward_zero(self):
+    """F32 to I32 should truncate (round toward zero)."""
+    instructions = [
+      v_mov_b32_e32(v[0], 2.9),
+      v_mov_b32_e32(v[1], -2.9),
+      v_cvt_i32_f32_e32(v[2], v[0]),
+      v_cvt_i32_f32_e32(v[3], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 2, "2.9 -> 2")
+    self.assertEqual(st.vgpr[0][3] & 0xFFFFFFFF, 0xFFFFFFFE, "-2.9 -> -2")
+
+  def test_cvt_f32_to_u32_negative(self):
+    """F32 to U32 with negative input should clamp to 0."""
+    instructions = [
+      v_mov_b32_e32(v[0], -1.0),
+      v_cvt_u32_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0)
+
+  def test_rndne_f32_half_even(self):
+    """V_RNDNE_F32 should round to nearest even."""
+    instructions = [
+      v_mov_b32_e32(v[0], 2.5),
+      v_mov_b32_e32(v[1], 3.5),
+      v_mov_b32_e32(v[2], 4.5),
+      v_rndne_f32_e32(v[3], v[0]),
+      v_rndne_f32_e32(v[4], v[1]),
+      v_rndne_f32_e32(v[5], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][3]), 2.0, places=5)  # 2.5 -> 2 (even)
+    self.assertAlmostEqual(i2f(st.vgpr[0][4]), 4.0, places=5)  # 3.5 -> 4 (even)
+    self.assertAlmostEqual(i2f(st.vgpr[0][5]), 4.0, places=5)  # 4.5 -> 4 (even)
+
+  def test_f16_to_f32_precision(self):
+    """F16 to F32 conversion precision."""
+    from extra.assembly.amd.pcode import f32_to_f16
+    f16_val = f32_to_f16(1.5)
+    instructions = [
+      s_mov_b32(s[0], f16_val),
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_f32_f16_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 1.5, places=5)
+
+  def test_f16_denormal_to_f32(self):
+    """F16 denormal converts to small positive f32."""
+    from extra.assembly.amd.pcode import _f16
+    f16_denorm = 0x0001  # Smallest positive f16 denormal
+    instructions = [
+      v_mov_b32_e32(v[0], f16_denorm),
+      v_cvt_f32_f16_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][1])
+    self.assertGreater(result, 0)
+    self.assertLess(result, 1e-6)
+
+
 if __name__ == '__main__':
   unittest.main()

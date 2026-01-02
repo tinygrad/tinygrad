@@ -1415,5 +1415,210 @@ class TestTrigPreop(unittest.TestCase):
     self.assertFalse(math.isinf(result))
 
 
+class TestModifierInteractions(unittest.TestCase):
+  """Tests for abs/neg/clamp/omod modifier interactions."""
+
+  def test_neg_abs_combination(self):
+    """-|x| should negate the absolute value."""
+    instructions = [
+      v_mov_b32_e32(v[0], -5.0),
+      VOP3(VOP3Op.V_MUL_F32, vdst=v[1], src0=1.0, src1=v[0], neg=0b10, abs_=0b10),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), -5.0, places=5)
+
+  def test_abs_neg_on_neg_zero(self):
+    """|(-0.0)| = +0.0, -|(-0.0)| = -0.0."""
+    neg_zero = 0x80000000
+    instructions = [
+      s_mov_b32(s[0], neg_zero),
+      v_mov_b32_e32(v[0], s[0]),
+      VOP3(VOP3Op.V_MUL_F32, vdst=v[1], src0=1.0, src1=v[0], abs_=0b10),
+      VOP3(VOP3Op.V_MUL_F32, vdst=v[2], src0=1.0, src1=v[0], neg=0b10, abs_=0b10),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0x00000000, "|(-0.0)| = +0.0")
+    self.assertEqual(st.vgpr[0][2], 0x80000000, "-|(-0.0)| = -0.0")
+
+  def test_clamp_with_nan(self):
+    """Clamp with NaN input should still produce NaN."""
+    import math
+    quiet_nan = 0x7fc00000
+    instructions = [
+      s_mov_b32(s[0], quiet_nan),
+      v_mov_b32_e32(v[0], s[0]),
+      VOP3(VOP3Op.V_ADD_F32, vdst=v[1], src0=v[0], src1=0.0, clamp=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertTrue(math.isnan(i2f(st.vgpr[0][1])))
+
+  def test_omod_ignored(self):
+    """OMOD field is ignored on RDNA3 hardware."""
+    instructions = [
+      v_mov_b32_e32(v[0], 3.0),
+      VOP3(VOP3Op.V_ADD_F32, vdst=v[1], src0=v[0], src1=1.0, omod=1),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 4.0, places=5)
+
+  def test_nan_propagation(self):
+    """NaN should propagate through FMA operations."""
+    import math
+    quiet_nan = 0x7fc00000
+    instructions = [
+      s_mov_b32(s[0], quiet_nan),
+      v_mov_b32_e32(v[0], s[0]),
+      v_fma_f32(v[1], v[0], 1.0, 0.0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertTrue(math.isnan(i2f(st.vgpr[0][1])), "fma(NaN, 1, 0) = NaN")
+
+
+class TestBitfieldEdges(unittest.TestCase):
+  """Tests for bitfield operation edge cases."""
+
+  def test_bfe_u32_max_width(self):
+    """V_BFE_U32 extracting max 31 bits (width field is 5 bits)."""
+    instructions = [
+      s_mov_b32(s[0], 0xDEADBEEF),
+      v_mov_b32_e32(v[0], s[0]),
+      v_bfe_u32(v[1], v[0], 0, 31),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0x5EADBEEF)
+
+  def test_bfe_u32_zero_width(self):
+    """V_BFE_U32 with zero width should return 0."""
+    instructions = [
+      s_mov_b32(s[0], 0xFFFFFFFF),
+      v_mov_b32_e32(v[0], s[0]),
+      v_bfe_u32(v[1], v[0], 16, 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0)
+
+  def test_bfe_i32_sign_extend(self):
+    """V_BFE_I32 should sign extend."""
+    instructions = [
+      s_mov_b32(s[0], 0x000000F0),
+      v_mov_b32_e32(v[0], s[0]),
+      v_bfe_i32(v[1], v[0], 4, 4),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0xFFFFFFFF)
+
+  def test_bfi_b32_basic(self):
+    """V_BFI_B32 bit field insert."""
+    instructions = [
+      s_mov_b32(s[0], 0x0000FFFF),
+      s_mov_b32(s[1], 0xAAAAAAAA),
+      s_mov_b32(s[2], 0x55555555),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_bfi_b32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][3], 0x5555AAAA)
+
+
+class TestCarryBorrow(unittest.TestCase):
+  """Tests for carry/borrow operations (VOP3SD)."""
+
+  def test_add_co_u32_no_carry(self):
+    """V_ADD_CO_U32 without carry."""
+    instructions = [
+      v_mov_b32_e32(v[0], 100),
+      v_mov_b32_e32(v[1], 50),
+      v_add_co_u32(v[2], VCC, v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 150)
+    self.assertEqual(st.vcc & 1, 0, "No carry")
+
+  def test_add_co_u32_with_carry(self):
+    """V_ADD_CO_U32 with carry."""
+    instructions = [
+      s_mov_b32(s[0], 0xFFFFFFFF),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], 2),
+      v_add_co_u32(v[2], VCC, v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 1)
+    self.assertEqual(st.vcc & 1, 1, "Should have carry")
+
+  def test_sub_co_u32_no_borrow(self):
+    """V_SUB_CO_U32 without borrow."""
+    instructions = [
+      v_mov_b32_e32(v[0], 100),
+      v_mov_b32_e32(v[1], 50),
+      v_sub_co_u32(v[2], VCC, v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 50)
+    self.assertEqual(st.vcc & 1, 0, "No borrow")
+
+  def test_sub_co_u32_with_borrow(self):
+    """V_SUB_CO_U32 with borrow."""
+    instructions = [
+      v_mov_b32_e32(v[0], 50),
+      v_mov_b32_e32(v[1], 100),
+      v_sub_co_u32(v[2], VCC, v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0xFFFFFFCE)
+    self.assertEqual(st.vcc & 1, 1, "Should have borrow")
+
+  def test_addc_co_u32_chain(self):
+    """V_ADD_CO_CI_U32 chained addition (64-bit add via two 32-bit adds)."""
+    instructions = [
+      s_mov_b32(s[0], 0xFFFFFFFF),
+      s_mov_b32(s[1], 0x00000001),
+      s_mov_b32(s[2], 0x00000001),
+      s_mov_b32(s[3], 0x00000001),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_mov_b32_e32(v[3], s[3]),
+      v_add_co_u32(v[4], VCC, v[0], v[2]),
+      v_add_co_ci_u32_e32(v[5], VCC, v[1], v[3]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][4], 0x00000000, "lo result")
+    self.assertEqual(st.vgpr[0][5], 0x00000003, "hi result")
+
+
+class TestReadlane(unittest.TestCase):
+  """Tests for V_READLANE_B32 and related cross-lane operations."""
+
+  def test_lane_id_distinct(self):
+    """Each lane should have distinct lane_id in v255."""
+    instructions = [
+      v_mov_b32_e32(v[0], v[255]),
+    ]
+    st = run_program(instructions, n_lanes=32)
+    for lane in range(32):
+      self.assertEqual(st.vgpr[lane][0], lane)
+
+  def test_reduction_pattern(self):
+    """Test reduction using readlane."""
+    def _readlane(sdst_idx, vsrc, lane_idx):
+      return VOP3(VOP3Op.V_READLANE_B32, vdst=RawImm(sdst_idx), src0=vsrc, src1=lane_idx)
+
+    instructions = [
+      v_mov_b32_e32(v[0], v[255]),
+      _readlane(0, v[0], 0),
+      _readlane(1, v[0], 1),
+      _readlane(2, v[0], 2),
+      _readlane(3, v[0], 3),
+      s_add_u32(s[4], s[0], s[1]),
+      s_add_u32(s[4], s[4], s[2]),
+      s_add_u32(s[4], s[4], s[3]),
+    ]
+    st = run_program(instructions, n_lanes=4)
+    self.assertEqual(st.sgpr[4], 6)
+
+
 if __name__ == '__main__':
   unittest.main()

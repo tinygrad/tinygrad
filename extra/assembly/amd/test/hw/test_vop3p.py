@@ -499,5 +499,40 @@ class TestSpecialOps(unittest.TestCase):
     self.assertAlmostEqual(result, 3.0, places=4)
 
 
+class TestPackedMixedSigns(unittest.TestCase):
+  """Tests for packed operations with mixed sign values."""
+
+  def test_pk_add_f16_mixed_signs(self):
+    """V_PK_ADD_F16 with mixed positive/negative values."""
+    from extra.assembly.amd.pcode import _f16
+    instructions = [
+      s_mov_b32(s[0], 0xc0003c00),  # packed: hi=-2.0, lo=1.0
+      s_mov_b32(s[1], 0x3c003c00),  # packed: hi=1.0, lo=1.0
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_pk_add_f16(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    lo = _f16(result & 0xffff)
+    hi = _f16((result >> 16) & 0xffff)
+    self.assertAlmostEqual(lo, 2.0, places=2)   # 1.0 + 1.0
+    self.assertAlmostEqual(hi, -1.0, places=2)  # -2.0 + 1.0
+
+  def test_pk_mul_f16_zero(self):
+    """V_PK_MUL_F16 with zero."""
+    from extra.assembly.amd.pcode import _f16
+    instructions = [
+      s_mov_b32(s[0], 0x40004000),  # packed: 2.0, 2.0
+      s_mov_b32(s[1], 0x00000000),  # packed: 0.0, 0.0
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_pk_mul_f16(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    self.assertEqual(result, 0x00000000, "2.0 * 0.0 should be 0.0")
+
+
 if __name__ == '__main__':
   unittest.main()

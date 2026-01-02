@@ -458,5 +458,29 @@ class TestCmpFloat(unittest.TestCase):
     self.assertEqual((st.vcc >> 1) & 1, 0, "Lane 1: expected vcc=0 (2.0 < 1.0)")
 
 
+class TestVCCBehavior(unittest.TestCase):
+  """Tests for VCC condition code behavior."""
+
+  def test_vcc_all_lanes_true(self):
+    """VCC should have all bits set when all lanes compare true."""
+    instructions = [
+      v_mov_b32_e32(v[0], 5),
+      v_mov_b32_e32(v[1], 5),
+      v_cmp_eq_u32_e32(v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=32)
+    self.assertEqual(st.vcc, 0xFFFFFFFF, "All 32 lanes should be true")
+
+  def test_vcc_lane_dependent(self):
+    """VCC should differ per lane based on lane_id comparison."""
+    instructions = [
+      v_mov_b32_e32(v[0], 16),
+      v_cmp_lt_u32_e32(v[255], v[0]),  # lanes 0-15 are < 16
+    ]
+    st = run_program(instructions, n_lanes=32)
+    self.assertEqual(st.vcc & 0xFFFF, 0xFFFF, "Lanes 0-15 should be true")
+    self.assertEqual(st.vcc >> 16, 0x0000, "Lanes 16-31 should be false")
+
+
 if __name__ == '__main__':
   unittest.main()

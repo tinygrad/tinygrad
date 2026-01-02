@@ -601,5 +601,29 @@ class TestDS2AddrStride64(unittest.TestCase):
     self.assertEqual(st.vgpr[0][11], 0x22222222, "v11 should have old val2 high")
 
 
+class TestAtomicOrdering(unittest.TestCase):
+  """Tests for atomic operation return values and ordering."""
+
+  def test_ds_add_rtn_sequence(self):
+    """DS_ADD_RTN returns correct old values in sequence."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      v_mov_b32_e32(v[0], 100),
+      DS(DSOp.DS_STORE_B32, addr=v[10], data0=v[0], vdst=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      v_mov_b32_e32(v[1], 25),
+      DS(DSOp.DS_ADD_RTN_U32, addr=v[10], data0=v[1], vdst=v[2], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      DS(DSOp.DS_ADD_RTN_U32, addr=v[10], data0=v[1], vdst=v[3], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      DS(DSOp.DS_LOAD_B32, addr=v[10], vdst=v[4], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 100, "First add should return 100")
+    self.assertEqual(st.vgpr[0][3], 125, "Second add should return 125")
+    self.assertEqual(st.vgpr[0][4], 150, "Final value should be 150")
+
+
 if __name__ == '__main__':
   unittest.main()

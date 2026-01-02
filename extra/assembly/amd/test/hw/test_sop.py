@@ -175,5 +175,31 @@ class Test64BitLiterals(unittest.TestCase):
     self.assertEqual(actual_lit, large_val, f"Literal should be {large_val:#x}, got {actual_lit:#x}")
 
 
+class TestSCCBehavior(unittest.TestCase):
+  """Tests for SCC condition code behavior."""
+
+  def test_scc_from_s_cmp(self):
+    """SCC should be set by scalar compare."""
+    instructions = [
+      s_mov_b32(s[0], 10),
+      s_cmp_eq_u32(s[0], 10),
+      s_cselect_b32(s[1], 1, 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[1], 1, "SCC should be true")
+    self.assertEqual(st.scc, 1)
+
+  def test_scc_clear(self):
+    """SCC should be cleared by failing compare."""
+    instructions = [
+      s_mov_b32(s[0], 10),
+      s_cmp_eq_u32(s[0], 20),
+      s_cselect_b32(s[1], 1, 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.sgpr[1], 0, "SCC should be false")
+    self.assertEqual(st.scc, 0)
+
+
 if __name__ == '__main__':
   unittest.main()
