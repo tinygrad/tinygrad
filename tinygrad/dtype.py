@@ -5,20 +5,17 @@ from dataclasses import dataclass, fields
 from tinygrad.helpers import getenv, prod, round_up, next_power2
 from enum import Enum, auto
 
-class InvalidTypeMetaClass(type):
-  instance:None|InvalidType = None
-  def __call__(cls):
-    if (ret:=InvalidTypeMetaClass.instance) is not None: return ret
-    InvalidTypeMetaClass.instance = ret = super().__call__()
-    return ret
-
-class InvalidType(metaclass=InvalidTypeMetaClass):
+class InvalidType:
+  _instance: ClassVar[InvalidType|None] = None
+  def __new__(cls):
+    if cls._instance is None: cls._instance = object.__new__(cls)
+    return cls._instance
   def __eq__(self, other): return self is other
   def __lt__(self, other): return self is not other
   def __gt__(self, other): return self is not other
   def __hash__(self): return id(self)
   def __repr__(self): return "Invalid"
-  def __reduce__(self): return (InvalidType, ())  # Return the global Invalid instance
+  def __reduce__(self): return (InvalidType, ())  # unpickle returns the singleton
 
 Invalid = InvalidType()
 

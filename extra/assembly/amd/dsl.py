@@ -9,7 +9,7 @@ from extra.assembly.amd.autogen.rdna3.enum import (VOP1Op, VOP2Op, VOP3Op, VOP3S
   SOPCOp, SOPKOp, SOPPOp, SMEMOp, DSOp, FLATOp, MUBUFOp, MTBUFOp, MIMGOp, VINTERPOp)
 
 # Common masks and bit conversion functions
-MASK32, MASK64 = 0xffffffff, 0xffffffffffffffff
+MASK32, MASK64, MASK128 = 0xffffffff, 0xffffffffffffffff, (1 << 128) - 1
 _struct_f, _struct_I = struct.Struct("<f"), struct.Struct("<I")
 _struct_e, _struct_H = struct.Struct("<e"), struct.Struct("<H")
 _struct_d, _struct_Q = struct.Struct("<d"), struct.Struct("<Q")

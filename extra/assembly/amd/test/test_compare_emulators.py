@@ -9,7 +9,7 @@ os.environ["AMD"] = "1"
 os.environ["MOCKGPU"] = "1"
 os.environ["PYTHON_REMU"] = "1"
 
-from extra.assembly.amd.emu import WaveState, decode_program, step_wave, WAVE_SIZE, set_valid_mem_ranges
+from extra.assembly.amd.emu import WaveState, decode_program, step_wave, WAVE_SIZE, set_valid_mem_ranges, LDSMem
 from extra.assembly.amd.test.helpers import KernelInfo
 
 REMU_PATH = Path(__file__).parents[3] / "remu/target/release/libremu.so"
@@ -99,7 +99,7 @@ class PythonEmulator:
     self.program = decode_program(kernel)
     self.state = WaveState()
     self.state.exec_mask = (1 << n_lanes) - 1
-    self.lds = bytearray(65536)
+    self.lds = LDSMem(bytearray(65536))
     self.n_lanes = n_lanes
 
   def step(self) -> int:
