@@ -224,7 +224,9 @@ class ClangRenderer(CStyleLanguage):
   gep_arr_threshold = 0
   has_local = False
   has_threads = bool(getenv("THREADS", 1))
-  global_max = (CPU_COUNT.value, 0, 0)
+  # global_max is a property to respect ContextVar changes at runtime
+  @property
+  def global_max(self) -> tuple[int, int, int]: return (CPU_COUNT.value, 0, 0)
   infinity = "__builtin_inff()"
   nan = '__builtin_nanf("")'
   code_for_workitem = {"g": lambda _: "core_id"}
