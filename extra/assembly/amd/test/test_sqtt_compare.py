@@ -2356,5 +2356,361 @@ class TestVALUMov(SQTTCompareTestBase):
       s_nop(10),
     ], "vmov_snop10")
 
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Random/fuzz tests - try to falsify the timing model
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  @unittest.expectedFailure
+  def test_vmov_fuzz_chain3_snop_chain2(self):
+    """Chain of 3, s_nop, then chain of 2."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      s_nop(0),
+      v_mov_b32_e32(v[10], 2.0),
+      v_mov_b32_e32(v[11], v[10]),
+    ], "vmov_fuzz_chain3_snop_chain2")
+
+  @unittest.expectedFailure
+  def test_vmov_fuzz_chain4_ind_chain4(self):
+    """Chain of 4, independent, chain of 4."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[20], 5.0),  # independent
+      v_mov_b32_e32(v[10], 2.0),
+      v_mov_b32_e32(v[11], v[10]),
+      v_mov_b32_e32(v[12], v[11]),
+      v_mov_b32_e32(v[13], v[12]),
+    ], "vmov_fuzz_chain4_ind_chain4")
+
+  def test_vmov_fuzz_interleaved_chains(self):
+    """Two interleaved dependency chains."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[10], 2.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[11], v[10]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[12], v[11]),
+    ], "vmov_fuzz_interleaved_chains")
+
+  def test_vmov_fuzz_chain5_snop2_middle(self):
+    """Chain of 5 with s_nop(2) in the middle."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      s_nop(2),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+    ], "vmov_fuzz_chain5_snop2_middle")
+
+  def test_vmov_fuzz_chain6_snop1_after3(self):
+    """Chain of 6 with s_nop(1) after 3rd instruction."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      s_nop(1),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      v_mov_b32_e32(v[5], v[4]),
+    ], "vmov_fuzz_chain6_snop1_after3")
+
+  def test_vmov_fuzz_many_snops(self):
+    """Chain with multiple s_nops interspersed."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(0),
+      v_mov_b32_e32(v[1], v[0]),
+      s_nop(1),
+      v_mov_b32_e32(v[2], v[1]),
+      s_nop(0),
+      v_mov_b32_e32(v[3], v[2]),
+    ], "vmov_fuzz_many_snops")
+
+  def test_vmov_fuzz_snop_burst(self):
+    """Chain with burst of s_nops."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      s_nop(0),
+      s_nop(0),
+      s_nop(0),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+    ], "vmov_fuzz_snop_burst")
+
+  @unittest.expectedFailure
+  def test_vmov_fuzz_ind_snop_dep(self):
+    """Independent, s_nop, then dependent."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[10], 2.0),
+      v_mov_b32_e32(v[11], 3.0),
+      s_nop(3),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+    ], "vmov_fuzz_ind_snop_dep")
+
+  @unittest.expectedFailure
+  def test_vmov_fuzz_long_snop_chain(self):
+    """Chain with long s_nop in middle."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      s_nop(15),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+    ], "vmov_fuzz_long_snop_chain")
+
+  def test_vmov_fuzz_chain7_snop0_after4(self):
+    """Chain of 7 with s_nop(0) after 4th - at exhaustion boundary."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      s_nop(0),
+      v_mov_b32_e32(v[4], v[3]),
+      v_mov_b32_e32(v[5], v[4]),
+      v_mov_b32_e32(v[6], v[5]),
+    ], "vmov_fuzz_chain7_snop0_after4")
+
+  def test_vmov_fuzz_chain7_snop2_after4(self):
+    """Chain of 7 with s_nop(2) after 4th - warmth test."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      s_nop(0),
+      s_nop(0),
+      v_mov_b32_e32(v[4], v[3]),
+      v_mov_b32_e32(v[5], v[4]),
+      v_mov_b32_e32(v[6], v[5]),
+    ], "vmov_fuzz_chain7_snop2_after4")
+
+  def test_vmov_fuzz_fanout_then_chain(self):
+    """Fan-out followed by chain."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[0]),
+      v_mov_b32_e32(v[3], v[0]),
+      v_mov_b32_e32(v[4], v[1]),
+      v_mov_b32_e32(v[5], v[4]),
+    ], "vmov_fuzz_fanout_then_chain")
+
+  def test_vmov_fuzz_diamond(self):
+    """Diamond dependency pattern."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[0]),
+      v_mov_b32_e32(v[3], v[1]),  # merges back
+    ], "vmov_fuzz_diamond")
+
+  @unittest.expectedFailure
+  def test_vmov_fuzz_chain8_ind2_chain3(self):
+    """Long chain, independent pair, short chain."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      v_mov_b32_e32(v[5], v[4]),
+      v_mov_b32_e32(v[6], v[5]),
+      v_mov_b32_e32(v[7], v[6]),
+      v_mov_b32_e32(v[20], 2.0),
+      v_mov_b32_e32(v[21], 3.0),
+      v_mov_b32_e32(v[30], 4.0),
+      v_mov_b32_e32(v[31], v[30]),
+      v_mov_b32_e32(v[32], v[31]),
+    ], "vmov_fuzz_chain8_ind2_chain3")
+
+  def test_vmov_fuzz_alternating_dep_ind(self):
+    """Alternating dependent and independent instructions."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[10], 2.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[11], 3.0),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[12], 4.0),
+      v_mov_b32_e32(v[3], v[2]),
+    ], "vmov_fuzz_alternating_dep_ind")
+
+  def test_vmov_fuzz_snop4_chain5(self):
+    """s_nop(4) before chain of 5 - bypass penalty test."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      s_nop(4),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+    ], "vmov_fuzz_snop4_chain5")
+
+  @unittest.expectedFailure
+  def test_vmov_fuzz_chain3_snop7_chain3(self):
+    """Two chains with s_nop(7) between - bypass penalty."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      s_nop(7),
+      v_mov_b32_e32(v[10], 2.0),
+      v_mov_b32_e32(v[11], v[10]),
+      v_mov_b32_e32(v[12], v[11]),
+    ], "vmov_fuzz_chain3_snop7_chain3")
+
+  @unittest.expectedFailure
+  def test_vmov_fuzz_waw_in_chain(self):
+    """Chain with WAW hazard."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[1], 2.0),  # WAW on v[1]
+      v_mov_b32_e32(v[2], v[1]),
+    ], "vmov_fuzz_waw_in_chain")
+
+  def test_vmov_fuzz_multi_producer(self):
+    """Multiple producers for same consumer."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], 2.0),
+      v_mov_b32_e32(v[2], v[0]),  # reads v[0]
+      v_mov_b32_e32(v[3], v[1]),  # reads v[1]
+      v_mov_b32_e32(v[4], v[2]),
+      v_mov_b32_e32(v[5], v[3]),
+    ], "vmov_fuzz_multi_producer")
+
+  def test_vmov_fuzz_random_seed42(self):
+    """Pseudo-random pattern (seed 42)."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[5], 1.0),
+      v_mov_b32_e32(v[12], 2.0),
+      s_nop(1),
+      v_mov_b32_e32(v[6], v[5]),
+      v_mov_b32_e32(v[13], v[12]),
+      v_mov_b32_e32(v[7], v[6]),
+      s_nop(0),
+      v_mov_b32_e32(v[14], 3.0),
+      v_mov_b32_e32(v[8], v[7]),
+    ], "vmov_fuzz_random_seed42")
+
+  @unittest.expectedFailure
+  def test_vmov_fuzz_random_seed123(self):
+    """Pseudo-random pattern (seed 123)."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[10], 2.0),
+      v_mov_b32_e32(v[2], v[1]),
+      s_nop(2),
+      v_mov_b32_e32(v[11], v[10]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      v_mov_b32_e32(v[12], v[11]),
+      s_nop(0),
+      v_mov_b32_e32(v[5], v[4]),
+    ], "vmov_fuzz_random_seed123")
+
+  def test_vmov_fuzz_random_seed456(self):
+    """Pseudo-random pattern (seed 456) - long chains."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      v_mov_b32_e32(v[5], v[4]),
+      s_nop(1),
+      v_mov_b32_e32(v[20], 2.0),
+      v_mov_b32_e32(v[6], v[5]),
+      v_mov_b32_e32(v[21], v[20]),
+      v_mov_b32_e32(v[7], v[6]),
+    ], "vmov_fuzz_random_seed456")
+
+  @unittest.expectedFailure
+  def test_vmov_fuzz_random_seed789(self):
+    """Pseudo-random pattern (seed 789) - mixed."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[10], 2.0),
+      v_mov_b32_e32(v[20], 3.0),
+      v_mov_b32_e32(v[1], v[0]),
+      s_nop(0),
+      v_mov_b32_e32(v[11], v[10]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[21], v[20]),
+      s_nop(1),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[12], v[11]),
+      v_mov_b32_e32(v[4], v[3]),
+      v_mov_b32_e32(v[5], v[4]),
+    ], "vmov_fuzz_random_seed789")
+
+  def test_vmov_fuzz_exhaustion_warmth(self):
+    """Test warmth at exhaustion boundary with varying IMMEDIATEs."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),  # depth 5 - exhaustion boundary
+      s_nop(0),  # 1 IMMEDIATE - not enough for warmth
+      v_mov_b32_e32(v[10], 2.0),  # independent - should wait
+    ], "vmov_fuzz_exhaustion_warmth")
+
+  def test_vmov_fuzz_exhaustion_warmth2(self):
+    """Test warmth at exhaustion boundary with 2 IMMEDIATEs."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),  # depth 5 - exhaustion boundary
+      s_nop(0),
+      s_nop(0),  # 2 IMMEDIATEs - should be warm
+      v_mov_b32_e32(v[10], 2.0),
+    ], "vmov_fuzz_exhaustion_warmth2")
+
+  def test_vmov_fuzz_double_exhaustion(self):
+    """Test double exhaustion with chains."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),  # exhaustion 1
+      v_mov_b32_e32(v[5], v[4]),
+      v_mov_b32_e32(v[6], v[5]),
+      v_mov_b32_e32(v[7], v[6]),
+      v_mov_b32_e32(v[8], v[7]),  # exhaustion 2
+      s_nop(0),
+      v_mov_b32_e32(v[9], v[8]),
+    ], "vmov_fuzz_double_exhaustion")
+
+  def test_vmov_fuzz_chain_break_restart(self):
+    """Chain broken by independent, then restarted."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[10], 5.0),  # breaks chain
+      v_mov_b32_e32(v[3], v[2]),  # continues chain
+      v_mov_b32_e32(v[4], v[3]),
+      v_mov_b32_e32(v[5], v[4]),
+    ], "vmov_fuzz_chain_break_restart")
+
 if __name__ == "__main__":
   unittest.main()
