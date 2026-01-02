@@ -127,7 +127,7 @@ class Tensor(OpMixin):
 
     # create a UOp from the different types of inputs
     if isinstance(data, UOp):
-      assert _dtype is None or _dtype==data.dtype, f"dtype doesn't match ({_dtype} vs {data.dtype}), and casting isn't supported"
+      assert _dtype is None or _dtype==data.dtype or data.dtype==dtypes.index, f"dtype mismatch: {_dtype} vs {data.dtype}"
       # if data is dtype.index that means that this is a symbolic int and we need to lower it to something we can make a Tensor out of
       if data.dtype==dtypes.index: data = _index_to_concrete_int(data)
       if data.op is Ops.BIND:  # type: ignore  # mypy type narrowing is bugged here
@@ -3637,11 +3637,13 @@ class Tensor(OpMixin):
     Q = Tensor.eye(m, dtype=self.dtype).reshape((1,) * len(b_shape) + (m, m)).expand(b_shape + (m, m)).contiguous()
     for i in range(min(m, n)):
       x = R[..., i:m, i].contiguous()  # TODO: without contigous this can silently be wrong, should at least assert
-      s = -x[..., 0].sign()
-      u1 = x[..., 0] - s * x.square().sum(-1).sqrt()
-      w = x.unsqueeze(-1) / u1.reshape(b_shape + (1, 1))
+      norm = x.square().sum(-1).sqrt()
+      s = (x[..., 0] != 0).where(-x[..., 0].sign(), -1)
+      u1 = x[..., 0] - s * norm
+      w = x.unsqueeze(-1) / (norm != 0).where(u1, 1).reshape(b_shape + (1, 1))
       w[..., 0, 0] = 1
-      tau = (-s * u1 / x.square().sum(-1).sqrt()).reshape(b_shape + (1, 1))
+      tau = (-s * u1 / (norm != 0).where(norm, 1)).reshape(b_shape + (1, 1))
+      tau = (norm != 0).reshape(b_shape + (1, 1)).where(tau, 0)
       R[..., i:m, :] = R[..., i:m, :] - (w * tau) @ (w.transpose(-2, -1) @ R[..., i:m, :])
       Q[..., :, i:m] = Q[..., :, i:m] - (Q[..., :, i:m] @ w) @ (tau * w).transpose(-2, -1)
     return Q,R
@@ -3668,8 +3670,10 @@ class Tensor(OpMixin):
       #compute the jacobi rotations for each pairing
       gamma = (U_left * U_right).sum(-2).reshape(b_shape + (1, num//2))
       alpha, beta = U_permuted.square().sum(-2).unsqueeze(-2).split(num//2, -1)
-      tau = (beta - alpha) / (2 * gamma)
-      t = tau.sign() / (tau.abs() + (1 + tau.square()).sqrt())
+      rot = gamma != 0
+      tau = (beta - alpha) / (2 * rot.where(gamma, 1))
+      t = (tau != 0).where(tau.sign(), 1) / (tau.abs() + (1 + tau.square()).sqrt())
+      t = rot.where(t, 0)
       c = 1 / (1 + t.square()).sqrt()
       s = c * t
       #apply the rotations
@@ -3686,9 +3690,9 @@ class Tensor(OpMixin):
     for _ in range(max_iterations * iterations_per_round): U, V, permute, inverse_permute = one_round_jacobi(U, V, permute, inverse_permute)
     #extract singular values and sort. construct U from Q
     S, indices = U.square().sum(-2).sqrt().sort(dim = -1, descending=True)
-    new_indices = Tensor.arange(num).reshape((1,) * (self.ndim - 1) + (num,)).expand(b_shape + (num, num)).contiguous()
-    new_indices[..., :num] = indices.reshape(b_shape + (1, num)).expand(b_shape + (num, num))
-    U, V = U.gather(-1, new_indices[...,0:num,0:num]) / S.unsqueeze(-2), V.gather(-1, new_indices[..., 0:num, 0:num]).realize()
+    new_indices = indices.reshape(b_shape + (1, num)).expand(b_shape + (num, num))
+    U = U.gather(-1, new_indices) / (S != 0).where(S, 1).unsqueeze(-2)
+    V = V.gather(-1, new_indices).realize()
 
     padded_u = Tensor.eye(q_num, dtype=U.dtype).reshape((1,) * len(b_shape) + (q_num, q_num)).expand(b_shape + (q_num, q_num)).contiguous()
     padded_u[..., 0:num, 0:num] = U

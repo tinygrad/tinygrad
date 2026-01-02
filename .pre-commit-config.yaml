@@ -16,7 +16,7 @@ repos:
         pass_filenames: false
       - id: mypy
         name: mypy
-        entry: python3 -m mypy tinygrad/ --strict-equality
+        entry: python3 -m mypy
         language: system
         always_run: true
         pass_filenames: false

@@ -6,7 +6,7 @@ Set USE_HW=1 to run on both emulator and real hardware, comparing results.
 """
 
 import ctypes, unittest, os, struct
-from extra.assembly.amd.autogen.rdna3 import *
+from extra.assembly.amd.autogen.rdna3.ins import *
 from extra.assembly.amd.dsl import RawImm
 from extra.assembly.amd.emu import WaveState, run_asm, set_valid_mem_ranges
 from extra.assembly.amd.pcode import _i32, _f32
@@ -142,6 +142,7 @@ test:
   .amdhsa_wavefront_size32 1
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
   .amdhsa_kernarg_size 8
+  .amdhsa_group_segment_fixed_size 65536
 .end_amdhsa_kernel
 
 .amdgpu_metadata
@@ -153,7 +154,7 @@ amdhsa.kernels:
   - .name: test
     .symbol: test.kd
     .kernarg_segment_size: 8
-    .group_segment_fixed_size: 0
+    .group_segment_fixed_size: 65536
     .private_segment_fixed_size: 0
     .kernarg_segment_align: 8
     .wavefront_size: 32
@@ -988,6 +989,152 @@ class TestLaneInstructions(unittest.TestCase):
     st = run_program(instructions, n_lanes=4)
     for lane in range(4):
       self.assertEqual(st.vgpr[lane][1], 10, f"Sum 1+2+3+4 should be 10")
+
+  def test_v_writelane_b32_different_vgpr(self):
+    """V_WRITELANE_B32 writes to a non-zero VGPR index.
+
+    Regression test for bug where vdst_idx was always 0 due to function signature
+    mismatch (_vars parameter shifted all arguments). This caused all WRITELANE
+    operations to write to v[0] regardless of the actual destination register.
+    """
+    instructions = [
+      v_mov_b32_e32(v[0], 0),              # Initialize v0 = 0
+      v_mov_b32_e32(v[5], 0),              # Initialize v5 = 0
+      s_mov_b32(s[0], 0x12345678),         # Value to write
+      v_writelane_b32(v[5], s[0], 1),      # Write to lane 1's v5 (NOT v0!)
+    ]
+    st = run_program(instructions, n_lanes=4)
+    # v[0] should remain 0 for all lanes (bug would have written here)
+    for lane in range(4):
+      self.assertEqual(st.vgpr[lane][0], 0, f"v[0] lane {lane} should be 0 (untouched)")
+    # v[5] should have the value only in lane 1
+    for lane in range(4):
+      if lane == 1:
+        self.assertEqual(st.vgpr[lane][5], 0x12345678, f"v[5] lane 1 should have 0x12345678")
+      else:
+        self.assertEqual(st.vgpr[lane][5], 0, f"v[5] lane {lane} should be 0")
+
+  def test_v_writelane_b32_high_vgpr_index(self):
+    """V_WRITELANE_B32 writes to a high VGPR index (v[15]).
+
+    Tests that the vdst_idx is correctly passed through for larger register indices.
+    """
+    instructions = [
+      v_mov_b32_e32(v[0], 0),              # Initialize v0 = 0
+      v_mov_b32_e32(v[15], 0),             # Initialize v15 = 0
+      s_mov_b32(s[0], 0xCAFEBABE),         # Value to write
+      v_writelane_b32(v[15], s[0], 0),     # Write to lane 0's v15
+    ]
+    st = run_program(instructions, n_lanes=4)
+    # v[0] should remain 0 for all lanes
+    for lane in range(4):
+      self.assertEqual(st.vgpr[lane][0], 0, f"v[0] lane {lane} should be 0")
+    # v[15] should have the value only in lane 0
+    self.assertEqual(st.vgpr[0][15], 0xCAFEBABE, "v[15] lane 0 should have 0xCAFEBABE")
+    for lane in range(1, 4):
+      self.assertEqual(st.vgpr[lane][15], 0, f"v[15] lane {lane} should be 0")
+
+  def test_v_writelane_b32_multiple_writes_different_vgprs(self):
+    """V_WRITELANE_B32 writes to multiple different VGPRs.
+
+    This is the pattern used in sparse_categorical_crossentropy where values
+    are written to different VGPR indices via writelane, then read back.
+    """
+    instructions = [
+      # Initialize all target VGPRs to 0
+      v_mov_b32_e32(v[0], 0),
+      v_mov_b32_e32(v[3], 0),
+      v_mov_b32_e32(v[7], 0),
+      v_mov_b32_e32(v[10], 0),
+      # Write different values to different VGPRs at different lanes
+      s_mov_b32(s[0], 100),
+      v_writelane_b32(v[3], s[0], 0),      # v[3] lane 0 = 100
+      s_mov_b32(s[0], 200),
+      v_writelane_b32(v[7], s[0], 1),      # v[7] lane 1 = 200
+      s_mov_b32(s[0], 300),
+      v_writelane_b32(v[10], s[0], 2),     # v[10] lane 2 = 300
+    ]
+    st = run_program(instructions, n_lanes=4)
+
+    # v[0] should remain 0 everywhere
+    for lane in range(4):
+      self.assertEqual(st.vgpr[lane][0], 0, f"v[0] lane {lane} should be 0")
+
+    # Check each target VGPR
+    self.assertEqual(st.vgpr[0][3], 100, "v[3] lane 0 should be 100")
+    for lane in range(1, 4):
+      self.assertEqual(st.vgpr[lane][3], 0, f"v[3] lane {lane} should be 0")
+
+    self.assertEqual(st.vgpr[1][7], 200, "v[7] lane 1 should be 200")
+    for lane in [0, 2, 3]:
+      self.assertEqual(st.vgpr[lane][7], 0, f"v[7] lane {lane} should be 0")
+
+    self.assertEqual(st.vgpr[2][10], 300, "v[10] lane 2 should be 300")
+    for lane in [0, 1, 3]:
+      self.assertEqual(st.vgpr[lane][10], 0, f"v[10] lane {lane} should be 0")
+
+  def test_v_writelane_then_readlane_different_vgpr(self):
+    """V_WRITELANE followed by V_READLANE on a non-zero VGPR.
+
+    Regression test: the original bug caused writelane to always write to v[0],
+    so reading back from the intended VGPR would return 0 instead of the written value.
+    This is the exact pattern that failed in sparse_categorical_crossentropy.
+    """
+    instructions = [
+      v_mov_b32_e32(v[0], 0),              # Initialize v0 = 0
+      v_mov_b32_e32(v[8], 0),              # Initialize v8 = 0
+      s_mov_b32(s[0], 0xABCD1234),
+      v_writelane_b32(v[8], s[0], 2),      # Write to lane 2's v8
+      self._readlane(1, v[8], 2),          # Read back from lane 2's v8 into s1
+      v_mov_b32_e32(v[1], s[1]),           # Broadcast to all lanes
+    ]
+    st = run_program(instructions, n_lanes=4)
+    # The read value should be what we wrote
+    for lane in range(4):
+      self.assertEqual(st.vgpr[lane][1], 0xABCD1234,
+                       f"Lane {lane}: readlane should return 0xABCD1234, got 0x{st.vgpr[lane][1]:08x}")
+    # v[0] should still be 0 (bug would have written here instead of v[8])
+    for lane in range(4):
+      self.assertEqual(st.vgpr[lane][0], 0, f"v[0] lane {lane} should be 0 (untouched)")
+
+  def test_v_writelane_b32_accumulate_pattern(self):
+    """V_WRITELANE_B32 used to accumulate values across lanes into a single VGPR.
+
+    This pattern is used in reductions where each lane writes its result to
+    a different lane of the same VGPR, then the results are read back.
+    """
+    instructions = [
+      v_mov_b32_e32(v[6], 0),              # Initialize accumulator v6 = 0
+      # Each "iteration" writes to a different lane
+      s_mov_b32(s[0], 10),
+      v_writelane_b32(v[6], s[0], 0),      # lane 0 gets 10
+      s_mov_b32(s[0], 20),
+      v_writelane_b32(v[6], s[0], 1),      # lane 1 gets 20
+      s_mov_b32(s[0], 30),
+      v_writelane_b32(v[6], s[0], 2),      # lane 2 gets 30
+      s_mov_b32(s[0], 40),
+      v_writelane_b32(v[6], s[0], 3),      # lane 3 gets 40
+      # Now read them all back and sum
+      self._readlane(0, v[6], 0),          # s0 = 10
+      self._readlane(1, v[6], 1),          # s1 = 20
+      s_add_u32(s[0], s[0], s[1]),         # s0 = 30
+      self._readlane(1, v[6], 2),          # s1 = 30
+      s_add_u32(s[0], s[0], s[1]),         # s0 = 60
+      self._readlane(1, v[6], 3),          # s1 = 40
+      s_add_u32(s[0], s[0], s[1]),         # s0 = 100
+      v_mov_b32_e32(v[7], s[0]),           # Broadcast sum to all lanes
+    ]
+    st = run_program(instructions, n_lanes=4)
+
+    # Check that each lane of v[6] has the correct value
+    self.assertEqual(st.vgpr[0][6], 10, "v[6] lane 0 should be 10")
+    self.assertEqual(st.vgpr[1][6], 20, "v[6] lane 1 should be 20")
+    self.assertEqual(st.vgpr[2][6], 30, "v[6] lane 2 should be 30")
+    self.assertEqual(st.vgpr[3][6], 40, "v[6] lane 3 should be 40")
+
+    # Check the sum
+    for lane in range(4):
+      self.assertEqual(st.vgpr[lane][7], 100, f"Sum should be 100, got {st.vgpr[lane][7]}")
 
 
 class TestTrigonometry(unittest.TestCase):
@@ -2454,6 +2601,82 @@ class TestF64Conversions(unittest.TestCase):
     result = struct.unpack('<q', struct.pack('<II', lo, hi))[0]
     self.assertEqual(result, -8, f"Expected -8, got {result} (lo=0x{lo:08x}, hi=0x{hi:08x})")
 
+  def test_v_cvt_i32_f64_writes_32bit_only(self):
+    """V_CVT_I32_F64 should only write 32 bits, not 64.
+
+    Regression test: V_CVT_I32_F64 has a 64-bit source (f64) but 32-bit destination (i32).
+    The emulator was incorrectly writing 64 bits (clobbering vdst+1) because
+    is_64bit_op was True for any op ending in '_F64'.
+    """
+    # Pre-fill v3 with a canary value that should NOT be clobbered
+    val_bits = f2i64(-1.0)
+    instructions = [
+      s_mov_b32(s[0], val_bits & 0xffffffff),
+      s_mov_b32(s[1], val_bits >> 32),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      s_mov_b32(s[2], 0xDEADBEEF),  # Canary value
+      v_mov_b32_e32(v[3], s[2]),    # Put canary in v3
+      v_cvt_i32_f64_e32(v[2], v[0:2]),  # Convert -1.0 -> -1 (0xffffffff)
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][2]
+    canary = st.vgpr[0][3]
+    # V_CVT_I32_F64 of -1.0 should produce 0xffffffff (-1)
+    self.assertEqual(result, 0xffffffff, f"Expected 0xffffffff (-1), got 0x{result:08x}")
+    # v3 should still contain the canary (not clobbered by 64-bit write)
+    self.assertEqual(canary, 0xDEADBEEF, f"v3 canary should be 0xDEADBEEF, got 0x{canary:08x} (clobbered!)")
+
+  def test_v_frexp_mant_f64_range(self):
+    """V_FREXP_MANT_F64 should return mantissa in [0.5, 1.0) range.
+
+    Regression test: The mantissa() helper was incorrectly multiplying by 2.0,
+    returning values in [1.0, 2.0) instead of the correct [0.5, 1.0) range.
+    """
+    # Test with 2.0: frexp(2.0) should give mantissa=0.5, exponent=2
+    two_f64 = f2i64(2.0)
+    instructions = [
+      s_mov_b32(s[0], two_f64 & 0xffffffff),
+      s_mov_b32(s[1], two_f64 >> 32),
+      v_frexp_mant_f64_e32(v[0:2], s[0:2]),
+      v_frexp_exp_i32_f64_e32(v[2], s[0:2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    mant = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
+    exp = st.vgpr[0][2]
+    if exp >= 0x80000000: exp -= 0x100000000  # sign extend
+    # frexp(2.0) = 0.5 * 2^2
+    self.assertAlmostEqual(mant, 0.5, places=10, msg=f"Expected mantissa 0.5, got {mant}")
+    self.assertEqual(exp, 2, f"Expected exponent 2, got {exp}")
+
+  def test_v_div_scale_f64_reads_64bit_sources(self):
+    """V_DIV_SCALE_F64 must read all sources as 64-bit values.
+
+    Regression test: VOP3SD was reading sources as 32-bit for V_DIV_SCALE_F64,
+    causing incorrect results when the low 32 bits happened to look like 0 or denorm.
+    """
+    # Set up v0:v1 = sqrt(2) ≈ 1.414, v2:v3 = 1.0
+    sqrt2_f64 = f2i64(1.4142135623730951)
+    one_f64 = f2i64(1.0)
+    instructions = [
+      s_mov_b32(s[0], sqrt2_f64 & 0xffffffff),
+      s_mov_b32(s[1], sqrt2_f64 >> 32),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      s_mov_b32(s[2], one_f64 & 0xffffffff),
+      s_mov_b32(s[3], one_f64 >> 32),
+      v_mov_b32_e32(v[2], s[2]),
+      v_mov_b32_e32(v[3], s[3]),
+      # V_DIV_SCALE_F64: src0=v0:v1, src1=v0:v1, src2=v2:v3
+      # For normal inputs, should pass through src0 unchanged
+      VOP3SD(VOP3SDOp.V_DIV_SCALE_F64, vdst=v[4], sdst=s[10], src0=v[0], src1=v[0], src2=v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f(st.vgpr[0][4] | (st.vgpr[0][5] << 32))
+    # For normal (non-denorm, non-edge-case) inputs, V_DIV_SCALE_F64 passes through src0
+    self.assertAlmostEqual(result, 1.4142135623730951, places=10,
+                           msg=f"Expected ~1.414, got {result} (may be nan if 64-bit sources not read correctly)")
+
 
 class TestNewPcodeHelpers(unittest.TestCase):
   """Tests for newly added pcode helper functions (SAD, BYTE_PERMUTE, BF16)."""
@@ -3614,10 +3837,6 @@ class TestVOP3F16Modifiers(unittest.TestCase):
     self.assertAlmostEqual(result, -6.0, delta=0.01, msg=f"Expected -6.0, got {result}")
 
 
-if __name__ == '__main__':
-  unittest.main()
-
-
 class TestVFmaMixSinCase(unittest.TestCase):
   """Tests for the specific V_FMA_MIXLO_F16 case that fails in AMD_LLVM sin(0) kernel."""
 
@@ -3650,3 +3869,1900 @@ class TestVFmaMixSinCase(unittest.TestCase):
     # Result should be approximately -π = -3.14...
     # f16 -π ≈ 0xc248 = -3.140625
     self.assertAlmostEqual(lo, -3.14159, delta=0.01, msg=f"Expected ~-π, got {lo}")
+
+
+class TestVTrigPreopF64(unittest.TestCase):
+  """Tests for V_TRIG_PREOP_F64 instruction.
+
+  V_TRIG_PREOP_F64 extracts chunks of 2/PI for Payne-Hanek trig range reduction.
+  For input S0 (f64) and index S1 (0, 1, or 2), it returns a portion of 2/PI
+  scaled appropriately for computing |S0| * (2/PI) in extended precision.
+
+  The three chunks (index 0, 1, 2) when summed should equal 2/PI.
+  """
+
+  def test_trig_preop_f64_index0(self):
+    """V_TRIG_PREOP_F64 index=0: primary chunk of 2/PI."""
+    import math
+    two_over_pi = 2.0 / math.pi
+    instructions = [
+      # S0 = 1.0 (f64), S1 = 0 (index)
+      s_mov_b32(s[0], 0x00000000),  # low bits of 1.0
+      s_mov_b32(s[1], 0x3ff00000),  # high bits of 1.0
+      v_trig_preop_f64(v[0], abs(s[0]), 0),  # index 0
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
+    # For x=1.0, index=0 should give the main part of 2/PI
+    self.assertAlmostEqual(result, two_over_pi, places=10, msg=f"Expected ~{two_over_pi}, got {result}")
+
+  def test_trig_preop_f64_index1(self):
+    """V_TRIG_PREOP_F64 index=1: secondary chunk (extended precision bits)."""
+    instructions = [
+      s_mov_b32(s[0], 0x00000000),  # low bits of 1.0
+      s_mov_b32(s[1], 0x3ff00000),  # high bits of 1.0
+      v_trig_preop_f64(v[0], abs(s[0]), 1),  # index 1
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
+    # Index 1 gives the next 53 bits, should be very small (~1e-16)
+    self.assertLess(abs(result), 1e-15, msg=f"Expected tiny value, got {result}")
+    self.assertGreater(abs(result), 0, msg="Expected non-zero value")
+
+  def test_trig_preop_f64_index2(self):
+    """V_TRIG_PREOP_F64 index=2: tertiary chunk (more extended precision bits)."""
+    instructions = [
+      s_mov_b32(s[0], 0x00000000),  # low bits of 1.0
+      s_mov_b32(s[1], 0x3ff00000),  # high bits of 1.0
+      v_trig_preop_f64(v[0], abs(s[0]), 2),  # index 2
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
+    # Index 2 gives the next 53 bits after index 1, should be tiny (~1e-32)
+    self.assertLess(abs(result), 1e-30, msg=f"Expected very tiny value, got {result}")
+
+  def test_trig_preop_f64_sum_equals_two_over_pi(self):
+    """V_TRIG_PREOP_F64: sum of chunks 0,1,2 should equal 2/PI."""
+    import math
+    two_over_pi = 2.0 / math.pi
+    instructions = [
+      s_mov_b32(s[0], 0x00000000),  # low bits of 1.0
+      s_mov_b32(s[1], 0x3ff00000),  # high bits of 1.0
+      v_trig_preop_f64(v[0], abs(s[0]), 0),  # index 0 -> v[0:1]
+      v_trig_preop_f64(v[2], abs(s[0]), 1),  # index 1 -> v[2:3]
+      v_trig_preop_f64(v[4], abs(s[0]), 2),  # index 2 -> v[4:5]
+    ]
+    st = run_program(instructions, n_lanes=1)
+    p0 = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
+    p1 = i642f(st.vgpr[0][2] | (st.vgpr[0][3] << 32))
+    p2 = i642f(st.vgpr[0][4] | (st.vgpr[0][5] << 32))
+    total = p0 + p1 + p2
+    self.assertAlmostEqual(total, two_over_pi, places=14, msg=f"Expected {two_over_pi}, got {total} (p0={p0}, p1={p1}, p2={p2})")
+
+  def test_trig_preop_f64_large_input(self):
+    """V_TRIG_PREOP_F64 with larger input should adjust shift based on exponent."""
+    import math
+    # For x=2.0, exponent(2.0)=1024 which is <= 1077, so no adjustment
+    # But let's test with x=2^60 where exponent > 1077
+    large_val = 2.0 ** 60  # exponent = 1083 > 1077
+    large_bits = f2i64(large_val)
+    instructions = [
+      s_mov_b32(s[0], large_bits & 0xffffffff),
+      s_mov_b32(s[1], (large_bits >> 32) & 0xffffffff),
+      v_trig_preop_f64(v[0], abs(s[0]), 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f(st.vgpr[0][0] | (st.vgpr[0][1] << 32))
+    # Result should still be a valid float (not NaN or inf)
+    self.assertFalse(math.isnan(result), "Result should not be NaN")
+    self.assertFalse(math.isinf(result), "Result should not be inf")
+
+
+class Test64BitLiterals(unittest.TestCase):
+  """Regression tests for 64-bit instruction literal encoding.
+  Tests verify that Inst.to_bytes() correctly encodes 64-bit literals."""
+
+  def test_64bit_literal_negative_encoding(self):
+    """Verify 64-bit instruction encodes negative literals correctly.
+    Regression test: -33 should encode as 0xffffffdf in the literal field,
+    NOT as 0xffffffff (which would happen with incorrect sign extension)."""
+    neg_val = -33
+    expected_lit = neg_val & 0xffffffff  # 0xffffffdf
+    inst = v_add_f64(v[2], v[0], neg_val)
+    # Check the literal is stored correctly (in high 32 bits for 64-bit ops)
+    self.assertIsNotNone(inst._literal, "Literal should be set")
+    # Literal is stored as (lit32 << 32) for 64-bit ops
+    actual_lit = (inst._literal >> 32) & 0xffffffff
+    self.assertEqual(actual_lit, expected_lit, f"Literal should be {expected_lit:#x}, got {actual_lit:#x}")
+    # Also verify the encoded bytes
+    code = inst.to_bytes()
+    # Literal is last 4 bytes
+    lit_bytes = code[-4:]
+    lit_val = int.from_bytes(lit_bytes, 'little')
+    self.assertEqual(lit_val, expected_lit, f"Encoded literal should be {expected_lit:#x}, got {lit_val:#x}")
+
+  def test_64bit_literal_positive_encoding(self):
+    """Verify 64-bit instruction encodes large positive literals correctly."""
+    large_val = 0x12345678
+    inst = v_add_f64(v[2], v[0], large_val)
+    self.assertIsNotNone(inst._literal, "Literal should be set")
+    actual_lit = (inst._literal >> 32) & 0xffffffff
+    self.assertEqual(actual_lit, large_val, f"Literal should be {large_val:#x}, got {actual_lit:#x}")
+    # Verify encoded bytes
+    code = inst.to_bytes()
+    lit_bytes = code[-4:]
+    lit_val = int.from_bytes(lit_bytes, 'little')
+    self.assertEqual(lit_val, large_val, f"Encoded literal should be {large_val:#x}, got {lit_val:#x}")
+
+
+class TestWave32VCCBranch(unittest.TestCase):
+  """Regression tests for wave32 VCC branch behavior.
+  In wave32 mode, S_CBRANCH_VCCNZ/VCCZ should only check VCC_LO (lower 32 bits),
+  ignoring VCC_HI. Bug: emulator was checking full 64-bit VCC, causing incorrect
+  branches when VCC_LO=0 but VCC_HI!=0."""
+
+  def test_cbranch_vccnz_ignores_vcc_hi(self):
+    """S_CBRANCH_VCCNZ should NOT branch when VCC_LO=0, even if VCC_HI!=0.
+    This is the fix for test_avg_pool3d failure where the emulator incorrectly
+    branched due to stale VCC_HI bits."""
+    instructions = [
+      # Set VCC_HI to non-zero (simulating stale bits from previous ops)
+      s_mov_b32(s[SrcEnum.VCC_HI - 128], 0x80000000),  # VCC_HI = 0x80000000
+      # Set VCC_LO to zero (the condition we're testing)
+      s_mov_b32(s[SrcEnum.VCC_LO - 128], 0),  # VCC_LO = 0
+      # Now S_CBRANCH_VCCNZ should NOT branch since VCC_LO is 0
+      # If it doesn't branch, we'll set v0 = 1; if it branches, v0 stays 0
+      v_mov_b32_e32(v[0], 0),
+      s_cbranch_vccnz(2),  # Skip next instruction if VCC != 0
+      v_mov_b32_e32(v[0], 1),  # This should execute
+      s_nop(0),  # Jump target
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # v0 should be 1 because VCC_LO=0 means no branch
+    self.assertEqual(st.vgpr[0][0], 1, "Should NOT branch when VCC_LO=0 (VCC_HI ignored in wave32)")
+
+  def test_cbranch_vccz_ignores_vcc_hi(self):
+    """S_CBRANCH_VCCZ should branch when VCC_LO=0, regardless of VCC_HI."""
+    instructions = [
+      # Set VCC_HI to non-zero (simulating stale bits)
+      s_mov_b32(s[SrcEnum.VCC_HI - 128], 0x80000000),  # VCC_HI = 0x80000000
+      # Set VCC_LO to zero
+      s_mov_b32(s[SrcEnum.VCC_LO - 128], 0),  # VCC_LO = 0
+      # S_CBRANCH_VCCZ should branch since VCC_LO is 0
+      v_mov_b32_e32(v[0], 0),
+      s_cbranch_vccz(2),  # Skip next instruction if VCC == 0
+      v_mov_b32_e32(v[0], 1),  # This should NOT execute
+      s_nop(0),  # Jump target
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # v0 should be 0 because VCC_LO=0 means branch is taken
+    self.assertEqual(st.vgpr[0][0], 0, "Should branch when VCC_LO=0 (VCC_HI ignored in wave32)")
+
+  def test_cbranch_vccnz_branches_on_vcc_lo(self):
+    """S_CBRANCH_VCCNZ should branch when VCC_LO!=0."""
+    instructions = [
+      # Set VCC_LO to non-zero
+      s_mov_b32(s[SrcEnum.VCC_LO - 128], 1),  # VCC_LO = 1
+      s_mov_b32(s[SrcEnum.VCC_HI - 128], 0),  # VCC_HI = 0
+      v_mov_b32_e32(v[0], 0),
+      s_cbranch_vccnz(2),  # Skip next instruction if VCC != 0
+      v_mov_b32_e32(v[0], 1),  # This should NOT execute
+      s_nop(0),  # Jump target
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # v0 should be 0 because VCC_LO=1 means branch is taken
+    self.assertEqual(st.vgpr[0][0], 0, "Should branch when VCC_LO!=0")
+
+
+class TestVOP3VOPC16Bit(unittest.TestCase):
+  """Regression tests for VOP3-encoded VOPC 16-bit comparison instructions.
+  When VOPC comparisons are encoded in VOP3 format, they use opsel bits to select
+  which 16-bit half of each source to compare.
+  Bug: Emulator was ignoring opsel and using VGPR bit 7 encoding instead."""
+
+  def test_cmp_eq_u16_opsel_lo_lo(self):
+    """V_CMP_EQ_U16 VOP3 with opsel=0 compares lo halves."""
+    # v0 = 0x12340005 (lo=5, hi=0x1234)
+    # v1 = 0x56780005 (lo=5, hi=0x5678)
+    # opsel=0: compare lo halves -> 5 == 5 -> true
+    instructions = [
+      s_mov_b32(s[2], 0x12340005),
+      v_mov_b32_e32(v[0], s[2]),
+      s_mov_b32(s[2], 0x56780005),
+      v_mov_b32_e32(v[1], s[2]),
+      VOP3(VOP3Op.V_CMP_EQ_U16, vdst=v[0], src0=v[0], src1=v[1], opsel=0),  # dst=s0
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # s0 should have bit 0 set (comparison true for lane 0)
+    self.assertEqual(st.sgpr[0] & 1, 1, "lo==lo should be true: 5==5")
+
+  def test_cmp_eq_u16_opsel_hi_hi(self):
+    """V_CMP_EQ_U16 VOP3 with opsel=3 compares hi halves."""
+    # v0 = 0x12340005 (lo=5, hi=0x1234)
+    # v1 = 0x56780005 (lo=5, hi=0x5678)
+    # opsel=3 (bits 0 and 1 set): compare hi halves -> 0x1234 != 0x5678 -> false
+    instructions = [
+      s_mov_b32(s[2], 0x12340005),
+      v_mov_b32_e32(v[0], s[2]),
+      s_mov_b32(s[2], 0x56780005),
+      v_mov_b32_e32(v[1], s[2]),
+      VOP3(VOP3Op.V_CMP_EQ_U16, vdst=v[0], src0=v[0], src1=v[1], opsel=3),  # dst=s0, hi vs hi
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # s0 should have bit 0 clear (comparison false for lane 0)
+    self.assertEqual(st.sgpr[0] & 1, 0, "hi==hi should be false: 0x1234!=0x5678")
+
+  def test_cmp_eq_u16_opsel_hi_hi_equal(self):
+    """V_CMP_EQ_U16 VOP3 with opsel=3 compares hi halves (equal case)."""
+    # v0 = 0x12340005 (lo=5, hi=0x1234)
+    # v1 = 0x12340009 (lo=9, hi=0x1234)
+    # opsel=3: compare hi halves -> 0x1234 == 0x1234 -> true
+    instructions = [
+      s_mov_b32(s[2], 0x12340005),
+      v_mov_b32_e32(v[0], s[2]),
+      s_mov_b32(s[2], 0x12340009),
+      v_mov_b32_e32(v[1], s[2]),
+      VOP3(VOP3Op.V_CMP_EQ_U16, vdst=v[0], src0=v[0], src1=v[1], opsel=3),  # dst=s0, hi vs hi
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # s0 should have bit 0 set (comparison true for lane 0)
+    self.assertEqual(st.sgpr[0] & 1, 1, "hi==hi should be true: 0x1234==0x1234")
+
+  def test_cmp_gt_u16_opsel_hi(self):
+    """V_CMP_GT_U16 VOP3 with opsel=3 compares hi halves."""
+    # v0 = 0x99990005 (lo=5, hi=0x9999)
+    # v1 = 0x12340005 (lo=5, hi=0x1234)
+    # opsel=3: compare hi halves -> 0x9999 > 0x1234 -> true
+    instructions = [
+      s_mov_b32(s[2], 0x99990005),
+      v_mov_b32_e32(v[0], s[2]),
+      s_mov_b32(s[2], 0x12340005),
+      v_mov_b32_e32(v[1], s[2]),
+      VOP3(VOP3Op.V_CMP_GT_U16, vdst=v[0], src0=v[0], src1=v[1], opsel=3),  # dst=s0, hi vs hi
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # s0 should have bit 0 set (comparison true for lane 0)
+    self.assertEqual(st.sgpr[0] & 1, 1, "hi>hi should be true: 0x9999>0x1234")
+
+
+class Test64BitLiteralSources(unittest.TestCase):
+  """Regression tests for 64-bit instruction literal source handling.
+
+  For f64 operations, a 32-bit literal in the instruction stream represents the
+  HIGH 32 bits of the 64-bit value (low 32 bits are implicitly 0).
+
+  Bug: rsrc64() was returning the 32-bit literal as-is instead of shifting it
+  left by 32 bits. This caused V_FMA_F64 and V_LDEXP_F64 to use wrong values
+  when their source is a literal, breaking the f64->i64 conversion sequence.
+
+  The f64->i64 conversion sequence is:
+    v_trunc_f64 -> v_ldexp_f64 (by -32) -> v_floor_f64 -> v_fma_f64 (by -2^32)
+    -> v_cvt_u32_f64 (low bits) -> v_cvt_i32_f64 (high bits)
+
+  The V_FMA_F64 uses literal 0xC1F00000 which is the high 32 bits of f64 -2^32.
+  """
+
+  def test_v_fma_f64_literal_neg_2pow32(self):
+    """V_FMA_F64 with literal encoding of -2^32.
+
+    The f64 value -2^32 (-4294967296.0) has bits 0xC1F0000000000000.
+    The compiler encodes only the high 32 bits (0xC1F00000) as a literal.
+    The emulator must interpret this as 0xC1F00000_00000000.
+    """
+    # v[0:1] = -41.0 (trunc), v[2:3] = -1.0 (floor of -41/2^32)
+    # FMA: result = (-2^32) * (-1.0) + (-41.0) = 4294967296 - 41 = 4294967255.0
+    val_41 = f2i64(-41.0)
+    val_m1 = f2i64(-1.0)
+    # Literal 0xC1F00000 is high 32 bits of f64 -2^32
+    lit = 0xC1F00000
+    instructions = [
+      s_mov_b32(s[0], val_41 & 0xffffffff),
+      s_mov_b32(s[1], (val_41 >> 32) & 0xffffffff),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      s_mov_b32(s[2], val_m1 & 0xffffffff),
+      s_mov_b32(s[3], (val_m1 >> 32) & 0xffffffff),
+      v_mov_b32_e32(v[2], s[2]),
+      v_mov_b32_e32(v[3], s[3]),
+      # V_FMA_F64 v[4:5], literal, v[2:3], v[0:1]
+      # = (-2^32) * (-1.0) + (-41.0) = 4294967255.0
+      VOP3(VOP3Op.V_FMA_F64, vdst=v[4], src0=RawImm(255), src1=v[2], src2=v[0], literal=lit),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f(st.vgpr[0][4] | (st.vgpr[0][5] << 32))
+    expected = 4294967255.0  # 2^32 - 41
+    self.assertAlmostEqual(result, expected, places=0, msg=f"Expected {expected}, got {result}")
+
+  def test_v_ldexp_f64_literal_neg32(self):
+    """V_LDEXP_F64 with literal -32 for exponent.
+
+    V_LDEXP_F64 computes src0 * 2^src1 where src1 is an integer exponent.
+    The literal 0xFFFFFFE0 represents -32 as a 32-bit signed integer.
+    For V_LDEXP_F64, src1 is 32-bit (not 64-bit), so this is correct as-is.
+    """
+    val = f2i64(-41.0)
+    expected = -41.0 * (2.0 ** -32)  # -9.5367431640625e-09
+    instructions = [
+      s_mov_b32(s[0], val & 0xffffffff),
+      s_mov_b32(s[1], (val >> 32) & 0xffffffff),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      # V_LDEXP_F64 v[2:3], v[0:1], -32
+      v_ldexp_f64(v[2:4], v[0:2], 0xFFFFFFE0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i642f(st.vgpr[0][2] | (st.vgpr[0][3] << 32))
+    self.assertAlmostEqual(result, expected, places=15, msg=f"Expected {expected}, got {result}")
+
+  def test_f64_to_i64_full_sequence(self):
+    """Full f64->i64 conversion sequence with negative value.
+
+    This is the exact sequence generated by the compiler for (long)(-41.0):
+      v_trunc_f64 v[0:1], v[0:1]
+      v_ldexp_f64 v[2:3], v[0:1], -32
+      v_floor_f64 v[2:3], v[2:3]
+      v_fma_f64 v[0:1], 0xc1f00000, v[2:3], v[0:1]  # -2^32
+      v_cvt_u32_f64 v0, v[0:1]
+      v_cvt_i32_f64 v1, v[2:3]
+
+    Result: v1:v0 = 0xFFFFFFFF:0xFFFFFFD7 = -41 as i64
+    """
+    val = f2i64(-41.0)
+    lit = 0xC1F00000  # high 32 bits of f64 -2^32
+    instructions = [
+      s_mov_b32(s[0], val & 0xffffffff),
+      s_mov_b32(s[1], (val >> 32) & 0xffffffff),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_trunc_f64_e32(v[0:2], v[0:2]),
+      v_ldexp_f64(v[2:4], v[0:2], 0xFFFFFFE0),  # -32
+      v_floor_f64_e32(v[2:4], v[2:4]),
+      VOP3(VOP3Op.V_FMA_F64, vdst=v[0], src0=RawImm(255), src1=v[2], src2=v[0], literal=lit),
+      v_cvt_u32_f64_e32(v[4], v[0:2]),
+      v_cvt_i32_f64_e32(v[5], v[2:4]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    lo = st.vgpr[0][4]
+    hi = st.vgpr[0][5]
+    result = struct.unpack('<q', struct.pack('<II', lo, hi))[0]
+    self.assertEqual(result, -41, f"Expected -41, got {result} (lo=0x{lo:08x}, hi=0x{hi:08x})")
+
+  def test_f64_to_i64_large_negative(self):
+    """f64->i64 conversion with larger negative value (-1000000).
+
+    Tests that the conversion sequence works for values that span both
+    high and low 32-bit parts of the result.
+    """
+    val = f2i64(-1000000.0)
+    lit = 0xC1F00000
+    instructions = [
+      s_mov_b32(s[0], val & 0xffffffff),
+      s_mov_b32(s[1], (val >> 32) & 0xffffffff),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_trunc_f64_e32(v[0:2], v[0:2]),
+      v_ldexp_f64(v[2:4], v[0:2], 0xFFFFFFE0),
+      v_floor_f64_e32(v[2:4], v[2:4]),
+      VOP3(VOP3Op.V_FMA_F64, vdst=v[0], src0=RawImm(255), src1=v[2], src2=v[0], literal=lit),
+      v_cvt_u32_f64_e32(v[4], v[0:2]),
+      v_cvt_i32_f64_e32(v[5], v[2:4]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    lo = st.vgpr[0][4]
+    hi = st.vgpr[0][5]
+    result = struct.unpack('<q', struct.pack('<II', lo, hi))[0]
+    self.assertEqual(result, -1000000, f"Expected -1000000, got {result}")
+
+  def test_f64_to_i64_positive(self):
+    """f64->i64 conversion with positive value (1000000)."""
+    val = f2i64(1000000.0)
+    lit = 0xC1F00000
+    instructions = [
+      s_mov_b32(s[0], val & 0xffffffff),
+      s_mov_b32(s[1], (val >> 32) & 0xffffffff),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_trunc_f64_e32(v[0:2], v[0:2]),
+      v_ldexp_f64(v[2:4], v[0:2], 0xFFFFFFE0),
+      v_floor_f64_e32(v[2:4], v[2:4]),
+      VOP3(VOP3Op.V_FMA_F64, vdst=v[0], src0=RawImm(255), src1=v[2], src2=v[0], literal=lit),
+      v_cvt_u32_f64_e32(v[4], v[0:2]),
+      v_cvt_i32_f64_e32(v[5], v[2:4]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    lo = st.vgpr[0][4]
+    hi = st.vgpr[0][5]
+    result = struct.unpack('<q', struct.pack('<II', lo, hi))[0]
+    self.assertEqual(result, 1000000, f"Expected 1000000, got {result}")
+
+  def test_f64_to_i64_large_positive(self):
+    """f64->i64 conversion with value > 2^32 (requires 64-bit result)."""
+    val = f2i64(5000000000.0)  # 5 billion, > 2^32
+    lit = 0xC1F00000
+    instructions = [
+      s_mov_b32(s[0], val & 0xffffffff),
+      s_mov_b32(s[1], (val >> 32) & 0xffffffff),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_trunc_f64_e32(v[0:2], v[0:2]),
+      v_ldexp_f64(v[2:4], v[0:2], 0xFFFFFFE0),
+      v_floor_f64_e32(v[2:4], v[2:4]),
+      VOP3(VOP3Op.V_FMA_F64, vdst=v[0], src0=RawImm(255), src1=v[2], src2=v[0], literal=lit),
+      v_cvt_u32_f64_e32(v[4], v[0:2]),
+      v_cvt_i32_f64_e32(v[5], v[2:4]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    lo = st.vgpr[0][4]
+    hi = st.vgpr[0][5]
+    result = struct.unpack('<q', struct.pack('<II', lo, hi))[0]
+    self.assertEqual(result, 5000000000, f"Expected 5000000000, got {result}")
+
+
+class TestDS2Addr(unittest.TestCase):
+  """Regression tests for DS_LOAD_2ADDR and DS_STORE_2ADDR instructions.
+  These ops use offset scaling: offset * sizeof(data) for address calculation.
+  Bug: Emulator was using offset*4 for both B32 and B64, but B64 needs offset*8."""
+
+  def test_ds_store_load_2addr_b32(self):
+    """DS_STORE_2ADDR_B32 and DS_LOAD_2ADDR_B32 with offset scaling by 4."""
+    # Store 0x12345678 at offset0=0 (*4=0) and 0xDEADBEEF at offset1=1 (*4=4)
+    # Then load them back
+    instructions = [
+      v_mov_b32_e32(v[10], 0),  # addr base = 0
+      s_mov_b32(s[2], 0x12345678),
+      v_mov_b32_e32(v[0], s[2]),  # data0
+      s_mov_b32(s[2], 0xDEADBEEF),
+      v_mov_b32_e32(v[1], s[2]),  # data1
+      DS(DSOp.DS_STORE_2ADDR_B32, addr=v[10], data0=v[0], data1=v[1], vdst=v[0], offset0=0, offset1=1),
+      s_waitcnt(lgkmcnt=0),
+      DS(DSOp.DS_LOAD_2ADDR_B32, addr=v[10], vdst=v[2], offset0=0, offset1=1),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0x12345678, "v2 should have value from offset 0")
+    self.assertEqual(st.vgpr[0][3], 0xDEADBEEF, "v3 should have value from offset 4")
+
+  def test_ds_store_load_2addr_b32_nonzero_offsets(self):
+    """DS_STORE_2ADDR_B32 with non-zero offsets (offset*4 scaling)."""
+    # Store at offset0=2 (*4=8) and offset1=5 (*4=20)
+    instructions = [
+      v_mov_b32_e32(v[10], 0),  # addr base = 0
+      s_mov_b32(s[2], 0x11111111),
+      v_mov_b32_e32(v[0], s[2]),
+      s_mov_b32(s[2], 0x22222222),
+      v_mov_b32_e32(v[1], s[2]),
+      DS(DSOp.DS_STORE_2ADDR_B32, addr=v[10], data0=v[0], data1=v[1], vdst=v[0], offset0=2, offset1=5),
+      s_waitcnt(lgkmcnt=0),
+      DS(DSOp.DS_LOAD_2ADDR_B32, addr=v[10], vdst=v[2], offset0=2, offset1=5),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0x11111111, "v2 should have value from offset 8 (2*4)")
+    self.assertEqual(st.vgpr[0][3], 0x22222222, "v3 should have value from offset 20 (5*4)")
+
+  def test_ds_store_load_2addr_b64(self):
+    """DS_STORE_2ADDR_B64 and DS_LOAD_2ADDR_B64 with offset scaling by 8."""
+    # For B64: each value is 8 bytes (2 dwords), offsets scaled by 8
+    # Store 64-bit value at offset0=0 (*8=0) and another at offset1=1 (*8=8)
+    instructions = [
+      v_mov_b32_e32(v[10], 0),  # addr base = 0
+      # First 64-bit value: 0x123456789ABCDEF0
+      s_mov_b32(s[2], 0x9ABCDEF0),
+      v_mov_b32_e32(v[0], s[2]),  # low dword
+      s_mov_b32(s[2], 0x12345678),
+      v_mov_b32_e32(v[1], s[2]),  # high dword
+      # Second 64-bit value: 0xDEADBEEFCAFEBABE
+      s_mov_b32(s[2], 0xCAFEBABE),
+      v_mov_b32_e32(v[2], s[2]),  # low dword
+      s_mov_b32(s[2], 0xDEADBEEF),
+      v_mov_b32_e32(v[3], s[2]),  # high dword
+      DS(DSOp.DS_STORE_2ADDR_B64, addr=v[10], data0=v[0], data1=v[2], vdst=v[0], offset0=0, offset1=1),
+      s_waitcnt(lgkmcnt=0),
+      DS(DSOp.DS_LOAD_2ADDR_B64, addr=v[10], vdst=v[4], offset0=0, offset1=1),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # v4,v5 = first 64-bit value from offset 0
+    self.assertEqual(st.vgpr[0][4], 0x9ABCDEF0, "v4 should have low dword of first value")
+    self.assertEqual(st.vgpr[0][5], 0x12345678, "v5 should have high dword of first value")
+    # v6,v7 = second 64-bit value from offset 8 (1*8)
+    self.assertEqual(st.vgpr[0][6], 0xCAFEBABE, "v6 should have low dword of second value")
+    self.assertEqual(st.vgpr[0][7], 0xDEADBEEF, "v7 should have high dword of second value")
+
+  def test_ds_2addr_b64_no_overlap(self):
+    """DS_LOAD_2ADDR_B64 with adjacent offsets should not overlap.
+    Regression test: offset1=1 should access bytes 8-15, not overlap with offset0=0 (bytes 0-7)."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      # Store 4 distinct dwords at addresses 0,4,8,12 using regular DS_STORE
+      s_mov_b32(s[2], 0x11111111),
+      v_mov_b32_e32(v[0], s[2]),
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_mov_b32(s[2], 0x22222222),
+      v_mov_b32_e32(v[0], s[2]),
+      ds_store_b32(addr=v[10], data0=v[0], offset0=4),
+      s_mov_b32(s[2], 0x33333333),
+      v_mov_b32_e32(v[0], s[2]),
+      ds_store_b32(addr=v[10], data0=v[0], offset0=8),
+      s_mov_b32(s[2], 0x44444444),
+      v_mov_b32_e32(v[0], s[2]),
+      ds_store_b32(addr=v[10], data0=v[0], offset0=12),
+      s_waitcnt(lgkmcnt=0),
+      # Load with DS_LOAD_2ADDR_B64: offset0=0 should get 0-7, offset1=1 should get 8-15
+      DS(DSOp.DS_LOAD_2ADDR_B64, addr=v[10], vdst=v[4], offset0=0, offset1=1),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # v4,v5 from addr 0-7: 0x11111111, 0x22222222
+    self.assertEqual(st.vgpr[0][4], 0x11111111, "v4 should be 0x11111111")
+    self.assertEqual(st.vgpr[0][5], 0x22222222, "v5 should be 0x22222222")
+    # v6,v7 from addr 8-15: 0x33333333, 0x44444444
+    self.assertEqual(st.vgpr[0][6], 0x33333333, "v6 should be 0x33333333")
+    self.assertEqual(st.vgpr[0][7], 0x44444444, "v7 should be 0x44444444")
+
+
+class TestDSAtomic(unittest.TestCase):
+  """Tests for DS atomic instructions (add, max, min, and, or, xor, cmpstore, etc.)."""
+
+  def test_ds_max_rtn_u32(self):
+    """DS_MAX_RTN_U32: atomically store max(mem, data) and return old value."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),  # addr = 0
+      s_mov_b32(s[2], 100),
+      v_mov_b32_e32(v[0], s[2]),  # initial value = 100
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[2], 200),
+      v_mov_b32_e32(v[1], s[2]),  # data = 200 (greater than 100)
+      ds_max_rtn_u32(addr=v[10], data0=v[1], vdst=v[2], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[10], vdst=v[3], offset0=0),  # read result
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 100, "v2 should have old value (100)")
+    self.assertEqual(st.vgpr[0][3], 200, "v3 should have max(100, 200) = 200")
+
+  def test_ds_max_u32_no_rtn(self):
+    """DS_MAX_U32 (no RTN): atomically store max, no return value."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[2], 100),
+      v_mov_b32_e32(v[0], s[2]),  # initial = 100
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[2], 200),
+      v_mov_b32_e32(v[1], s[2]),  # data = 200
+      ds_max_u32(addr=v[10], data0=v[1], vdst=v[2], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[10], vdst=v[3], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][3], 200, "v3 should have max(100, 200) = 200")
+
+  def test_ds_add_u32_no_rtn_preserves_vdst(self):
+    """DS_ADD_U32 (no RTN) should NOT write to vdst - vdst should preserve sentinel value."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      # Set sentinel value in vdst
+      s_mov_b32(s[2], 0xDEADBEEF),
+      v_mov_b32_e32(v[2], s[2]),  # sentinel in v2
+      # Store initial value
+      s_mov_b32(s[2], 100),
+      v_mov_b32_e32(v[0], s[2]),
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      # Do non-RTN add (should NOT write to v2)
+      s_mov_b32(s[2], 50),
+      v_mov_b32_e32(v[1], s[2]),
+      ds_add_u32(addr=v[10], data0=v[1], vdst=v[2], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      # Load result to verify add worked
+      ds_load_b32(addr=v[10], vdst=v[3], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0xDEADBEEF, "v2 should preserve sentinel (no RTN)")
+    self.assertEqual(st.vgpr[0][3], 150, "v3 should have 100 + 50 = 150")
+
+  def test_ds_add_rtn_u32_writes_vdst(self):
+    """DS_ADD_RTN_U32 should write old value to vdst."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      # Set sentinel value in vdst
+      s_mov_b32(s[2], 0xDEADBEEF),
+      v_mov_b32_e32(v[2], s[2]),  # sentinel in v2
+      # Store initial value
+      s_mov_b32(s[2], 100),
+      v_mov_b32_e32(v[0], s[2]),
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      # Do RTN add (SHOULD write old value to v2)
+      s_mov_b32(s[2], 50),
+      v_mov_b32_e32(v[1], s[2]),
+      ds_add_rtn_u32(addr=v[10], data0=v[1], vdst=v[2], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      # Load result to verify add worked
+      ds_load_b32(addr=v[10], vdst=v[3], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 100, "v2 should have old value (100)")
+    self.assertEqual(st.vgpr[0][3], 150, "v3 should have 100 + 50 = 150")
+
+  def test_ds_min_rtn_u32(self):
+    """DS_MIN_RTN_U32: atomically store min(mem, data) and return old value."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[2], 200),
+      v_mov_b32_e32(v[0], s[2]),  # initial = 200
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[2], 100),
+      v_mov_b32_e32(v[1], s[2]),  # data = 100
+      ds_min_rtn_u32(addr=v[10], data0=v[1], vdst=v[2], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[10], vdst=v[3], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 200, "v2 should have old value (200)")
+    self.assertEqual(st.vgpr[0][3], 100, "v3 should have min(200, 100) = 100")
+
+  def test_ds_and_rtn_b32(self):
+    """DS_AND_RTN_B32: atomically AND mem with data and return old value."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[2], 0xFF00FF00),
+      v_mov_b32_e32(v[0], s[2]),  # initial = 0xFF00FF00
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[2], 0xFFFF0000),
+      v_mov_b32_e32(v[1], s[2]),  # data = 0xFFFF0000
+      ds_and_rtn_b32(addr=v[10], data0=v[1], vdst=v[2], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[10], vdst=v[3], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0xFF00FF00, "v2 should have old value")
+    self.assertEqual(st.vgpr[0][3], 0xFF000000, "v3 should have 0xFF00FF00 & 0xFFFF0000 = 0xFF000000")
+
+  def test_ds_or_rtn_b32(self):
+    """DS_OR_RTN_B32: atomically OR mem with data and return old value."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[2], 0x00FF0000),
+      v_mov_b32_e32(v[0], s[2]),  # initial = 0x00FF0000
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[2], 0x000000FF),
+      v_mov_b32_e32(v[1], s[2]),  # data = 0x000000FF
+      ds_or_rtn_b32(addr=v[10], data0=v[1], vdst=v[2], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[10], vdst=v[3], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0x00FF0000, "v2 should have old value")
+    self.assertEqual(st.vgpr[0][3], 0x00FF00FF, "v3 should have 0x00FF0000 | 0x000000FF = 0x00FF00FF")
+
+  def test_ds_xor_rtn_b32(self):
+    """DS_XOR_RTN_B32: atomically XOR mem with data and return old value."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[2], 0xAAAAAAAA),
+      v_mov_b32_e32(v[0], s[2]),  # initial = 0xAAAAAAAA
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[2], 0xFFFFFFFF),
+      v_mov_b32_e32(v[1], s[2]),  # data = 0xFFFFFFFF
+      ds_xor_rtn_b32(addr=v[10], data0=v[1], vdst=v[2], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[10], vdst=v[3], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0xAAAAAAAA, "v2 should have old value")
+    self.assertEqual(st.vgpr[0][3], 0x55555555, "v3 should have 0xAAAAAAAA ^ 0xFFFFFFFF = 0x55555555")
+
+  def test_ds_cmpstore_b32_match(self):
+    """DS_CMPSTORE_B32: conditional store when compare matches."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[2], 100),
+      v_mov_b32_e32(v[0], s[2]),  # initial = 100
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[2], 200),
+      v_mov_b32_e32(v[1], s[2]),  # new value = 200
+      s_mov_b32(s[2], 100),
+      v_mov_b32_e32(v[2], s[2]),  # compare = 100 (matches current)
+      ds_cmpstore_b32(addr=v[10], data0=v[1], data1=v[2], vdst=v[3], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[10], vdst=v[4], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][4], 200, "mem should be updated to 200 (compare matched)")
+
+  def test_ds_cmpstore_b32_no_match(self):
+    """DS_CMPSTORE_B32: no store when compare doesn't match."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[2], 100),
+      v_mov_b32_e32(v[0], s[2]),  # initial = 100
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[2], 200),
+      v_mov_b32_e32(v[1], s[2]),  # new value = 200
+      s_mov_b32(s[2], 50),
+      v_mov_b32_e32(v[2], s[2]),  # compare = 50 (doesn't match 100)
+      ds_cmpstore_b32(addr=v[10], data0=v[1], data1=v[2], vdst=v[3], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[10], vdst=v[4], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][4], 100, "mem should still be 100 (compare didn't match)")
+
+  def test_ds_inc_rtn_u32(self):
+    """DS_INC_RTN_U32: increment with wrap, return old value."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[2], 5),
+      v_mov_b32_e32(v[0], s[2]),  # initial = 5
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[2], 10),
+      v_mov_b32_e32(v[1], s[2]),  # limit = 10
+      ds_inc_rtn_u32(addr=v[10], data0=v[1], vdst=v[2], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[10], vdst=v[3], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 5, "v2 should have old value (5)")
+    self.assertEqual(st.vgpr[0][3], 6, "v3 should have incremented value (6)")
+
+  def test_ds_dec_rtn_u32(self):
+    """DS_DEC_RTN_U32: decrement with wrap, return old value."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[2], 5),
+      v_mov_b32_e32(v[0], s[2]),  # initial = 5
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[2], 10),
+      v_mov_b32_e32(v[1], s[2]),  # limit = 10
+      ds_dec_rtn_u32(addr=v[10], data0=v[1], vdst=v[2], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[10], vdst=v[3], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 5, "v2 should have old value (5)")
+    self.assertEqual(st.vgpr[0][3], 4, "v3 should have decremented value (4)")
+
+  def test_ds_dec_rtn_u32_wrap(self):
+    """DS_DEC_RTN_U32: wraps to limit when value is 0 or > limit."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[2], 0),
+      v_mov_b32_e32(v[0], s[2]),  # initial = 0
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[2], 10),
+      v_mov_b32_e32(v[1], s[2]),  # limit = 10
+      ds_dec_rtn_u32(addr=v[10], data0=v[1], vdst=v[2], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[10], vdst=v[3], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0, "v2 should have old value (0)")
+    self.assertEqual(st.vgpr[0][3], 10, "v3 should wrap to limit (10)")
+
+
+class TestDSRegisterWidth(unittest.TestCase):
+  """Regression tests: DS loads should only write the correct number of VGPRs."""
+
+  def test_ds_load_b32_no_overwrite(self):
+    """DS_LOAD_B32 should only write 1 VGPR, not overwrite subsequent registers."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),      # addr = 0
+      s_mov_b32(s[0], 0xDEADBEEF),
+      v_mov_b32_e32(v[1], s[0]),   # store value
+      s_mov_b32(s[0], 0x11111111),
+      v_mov_b32_e32(v[2], s[0]),   # sentinel
+      s_mov_b32(s[0], 0x22222222),
+      v_mov_b32_e32(v[3], s[0]),   # sentinel
+      s_mov_b32(s[0], 0x33333333),
+      v_mov_b32_e32(v[4], s[0]),   # sentinel
+      ds_store_b32(addr=v[0], data0=v[1], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[0], vdst=v[1], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0xDEADBEEF, "v1 should have loaded value")
+    self.assertEqual(st.vgpr[0][2], 0x11111111, "v2 should be untouched")
+    self.assertEqual(st.vgpr[0][3], 0x22222222, "v3 should be untouched")
+    self.assertEqual(st.vgpr[0][4], 0x33333333, "v4 should be untouched")
+
+  def test_ds_load_b64_no_overwrite(self):
+    """DS_LOAD_B64 should only write 2 VGPRs, not overwrite subsequent registers."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),      # addr = 0
+      s_mov_b32(s[0], 0xDEADBEEF),
+      v_mov_b32_e32(v[1], s[0]),   # low dword
+      s_mov_b32(s[0], 0xCAFEBABE),
+      v_mov_b32_e32(v[2], s[0]),   # high dword
+      s_mov_b32(s[0], 0x11111111),
+      v_mov_b32_e32(v[5], s[0]),   # sentinel
+      s_mov_b32(s[0], 0x22222222),
+      v_mov_b32_e32(v[6], s[0]),   # sentinel
+      DS(DSOp.DS_STORE_B64, addr=v[0], data0=v[1], vdst=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      DS(DSOp.DS_LOAD_B64, addr=v[0], vdst=v[3], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][3], 0xDEADBEEF, "v3 should have low dword")
+    self.assertEqual(st.vgpr[0][4], 0xCAFEBABE, "v4 should have high dword")
+    self.assertEqual(st.vgpr[0][5], 0x11111111, "v5 should be untouched")
+    self.assertEqual(st.vgpr[0][6], 0x22222222, "v6 should be untouched")
+
+  def test_ds_load_2addr_b32_no_overwrite(self):
+    """DS_LOAD_2ADDR_B32 should only write 2 VGPRs, not overwrite subsequent registers."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),      # addr = 0
+      s_mov_b32(s[0], 0xAAAAAAAA),
+      v_mov_b32_e32(v[1], s[0]),   # first value
+      s_mov_b32(s[0], 0xBBBBBBBB),
+      v_mov_b32_e32(v[2], s[0]),   # second value
+      s_mov_b32(s[0], 0x11111111),
+      v_mov_b32_e32(v[5], s[0]),   # sentinel
+      s_mov_b32(s[0], 0x22222222),
+      v_mov_b32_e32(v[6], s[0]),   # sentinel
+      DS(DSOp.DS_STORE_2ADDR_B32, addr=v[0], data0=v[1], data1=v[2], vdst=v[0], offset0=0, offset1=1),
+      s_waitcnt(lgkmcnt=0),
+      DS(DSOp.DS_LOAD_2ADDR_B32, addr=v[0], vdst=v[3], offset0=0, offset1=1),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][3], 0xAAAAAAAA, "v3 should have first value")
+    self.assertEqual(st.vgpr[0][4], 0xBBBBBBBB, "v4 should have second value")
+    self.assertEqual(st.vgpr[0][5], 0x11111111, "v5 should be untouched")
+    self.assertEqual(st.vgpr[0][6], 0x22222222, "v6 should be untouched")
+
+
+class TestDS2AddrStride64(unittest.TestCase):
+  """Tests for DS_*_2ADDR_STRIDE64 instructions (offset * 256 for B32, offset * 512 for B64)."""
+
+  def test_ds_store_load_2addr_stride64_b32(self):
+    """DS_STORE_2ADDR_STRIDE64_B32: stores at ADDR + offset*256."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),     # base addr = 0
+      s_mov_b32(s[0], 0xAAAAAAAA),
+      v_mov_b32_e32(v[0], s[0]),   # first value
+      s_mov_b32(s[0], 0xBBBBBBBB),
+      v_mov_b32_e32(v[1], s[0]),   # second value
+      # Store with STRIDE64: offset0=1 -> addr 256, offset1=2 -> addr 512
+      DS(DSOp.DS_STORE_2ADDR_STRIDE64_B32, addr=v[10], data0=v[0], data1=v[1], vdst=v[0], offset0=1, offset1=2),
+      s_waitcnt(lgkmcnt=0),
+      # Load back using STRIDE64
+      DS(DSOp.DS_LOAD_2ADDR_STRIDE64_B32, addr=v[10], vdst=v[2], offset0=1, offset1=2),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0xAAAAAAAA, "v2 should have value from addr 256")
+    self.assertEqual(st.vgpr[0][3], 0xBBBBBBBB, "v3 should have value from addr 512")
+
+  def test_ds_store_load_2addr_stride64_b64(self):
+    """DS_STORE_2ADDR_STRIDE64_B64: stores at ADDR + offset*512."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),     # base addr = 0
+      s_mov_b32(s[0], 0xDEADBEEF),
+      v_mov_b32_e32(v[0], s[0]),   # first value low
+      s_mov_b32(s[0], 0xCAFEBABE),
+      v_mov_b32_e32(v[1], s[0]),   # first value high
+      s_mov_b32(s[0], 0x12345678),
+      v_mov_b32_e32(v[2], s[0]),   # second value low
+      s_mov_b32(s[0], 0x9ABCDEF0),
+      v_mov_b32_e32(v[3], s[0]),   # second value high
+      # Store with STRIDE64: offset0=1 -> addr 512, offset1=2 -> addr 1024
+      DS(DSOp.DS_STORE_2ADDR_STRIDE64_B64, addr=v[10], data0=v[0], data1=v[2], vdst=v[0], offset0=1, offset1=2),
+      s_waitcnt(lgkmcnt=0),
+      # Load back using STRIDE64
+      DS(DSOp.DS_LOAD_2ADDR_STRIDE64_B64, addr=v[10], vdst=v[4], offset0=1, offset1=2),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][4], 0xDEADBEEF, "v4 should have first low dword")
+    self.assertEqual(st.vgpr[0][5], 0xCAFEBABE, "v5 should have first high dword")
+    self.assertEqual(st.vgpr[0][6], 0x12345678, "v6 should have second low dword")
+    self.assertEqual(st.vgpr[0][7], 0x9ABCDEF0, "v7 should have second high dword")
+
+
+class TestDSStorexchg(unittest.TestCase):
+  """Tests for DS_STOREXCHG (exchange) instructions."""
+
+  def test_ds_storexchg_rtn_b32(self):
+    """DS_STOREXCHG_RTN_B32: exchange value and return old."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[0], 0xAAAAAAAA),
+      v_mov_b32_e32(v[0], s[0]),   # initial value
+      ds_store_b32(addr=v[10], data0=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[0], 0xBBBBBBBB),
+      v_mov_b32_e32(v[1], s[0]),   # new value
+      DS(DSOp.DS_STOREXCHG_RTN_B32, addr=v[10], data0=v[1], vdst=v[2], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      ds_load_b32(addr=v[10], vdst=v[3], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0xAAAAAAAA, "v2 should have old value")
+    self.assertEqual(st.vgpr[0][3], 0xBBBBBBBB, "memory should have new value")
+
+  def test_ds_storexchg_2addr_rtn_b32(self):
+    """DS_STOREXCHG_2ADDR_RTN_B32: exchange at two addresses (offset*4)."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[0], 0x11111111),
+      v_mov_b32_e32(v[0], s[0]),   # initial at offset0
+      s_mov_b32(s[0], 0x22222222),
+      v_mov_b32_e32(v[1], s[0]),   # initial at offset1
+      # Store initial values at offset 0 and 4 (offset0=0, offset1=1, each *4)
+      DS(DSOp.DS_STORE_2ADDR_B32, addr=v[10], data0=v[0], data1=v[1], vdst=v[0], offset0=0, offset1=1),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[0], 0xAAAAAAAA),
+      v_mov_b32_e32(v[2], s[0]),   # new value for offset0
+      s_mov_b32(s[0], 0xBBBBBBBB),
+      v_mov_b32_e32(v[3], s[0]),   # new value for offset1
+      # Exchange: write new values, return old
+      DS(DSOp.DS_STOREXCHG_2ADDR_RTN_B32, addr=v[10], data0=v[2], data1=v[3], vdst=v[4], offset0=0, offset1=1),
+      s_waitcnt(lgkmcnt=0),
+      # Load back to verify new values
+      DS(DSOp.DS_LOAD_2ADDR_B32, addr=v[10], vdst=v[6], offset0=0, offset1=1),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # Return value: v4=old[0], v5=old[1]
+    self.assertEqual(st.vgpr[0][4], 0x11111111, "v4 should have old value from offset0")
+    self.assertEqual(st.vgpr[0][5], 0x22222222, "v5 should have old value from offset1")
+    # Memory should have new values
+    self.assertEqual(st.vgpr[0][6], 0xAAAAAAAA, "v6 should have new value at offset0")
+    self.assertEqual(st.vgpr[0][7], 0xBBBBBBBB, "v7 should have new value at offset1")
+
+  def test_ds_storexchg_2addr_stride64_rtn_b32(self):
+    """DS_STOREXCHG_2ADDR_STRIDE64_RTN_B32: exchange at two addresses (offset*256)."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[0], 0x11111111),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[0], 0x22222222),
+      v_mov_b32_e32(v[1], s[0]),
+      # Store initial values at offset*256
+      DS(DSOp.DS_STORE_2ADDR_STRIDE64_B32, addr=v[10], data0=v[0], data1=v[1], vdst=v[0], offset0=1, offset1=2),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[0], 0xAAAAAAAA),
+      v_mov_b32_e32(v[2], s[0]),
+      s_mov_b32(s[0], 0xBBBBBBBB),
+      v_mov_b32_e32(v[3], s[0]),
+      # Exchange
+      DS(DSOp.DS_STOREXCHG_2ADDR_STRIDE64_RTN_B32, addr=v[10], data0=v[2], data1=v[3], vdst=v[4], offset0=1, offset1=2),
+      s_waitcnt(lgkmcnt=0),
+      # Load back
+      DS(DSOp.DS_LOAD_2ADDR_STRIDE64_B32, addr=v[10], vdst=v[6], offset0=1, offset1=2),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][4], 0x11111111, "v4 should have old value")
+    self.assertEqual(st.vgpr[0][5], 0x22222222, "v5 should have old value")
+    self.assertEqual(st.vgpr[0][6], 0xAAAAAAAA, "v6 should have new value")
+    self.assertEqual(st.vgpr[0][7], 0xBBBBBBBB, "v7 should have new value")
+
+  def test_ds_storexchg_rtn_b64(self):
+    """DS_STOREXCHG_RTN_B64: exchange 64-bit value and return old."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[0], 0xDEADBEEF),
+      v_mov_b32_e32(v[0], s[0]),   # initial low
+      s_mov_b32(s[0], 0xCAFEBABE),
+      v_mov_b32_e32(v[1], s[0]),   # initial high
+      DS(DSOp.DS_STORE_B64, addr=v[10], data0=v[0], vdst=v[0], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      s_mov_b32(s[0], 0x12345678),
+      v_mov_b32_e32(v[2], s[0]),   # new low
+      s_mov_b32(s[0], 0x9ABCDEF0),
+      v_mov_b32_e32(v[3], s[0]),   # new high
+      DS(DSOp.DS_STOREXCHG_RTN_B64, addr=v[10], data0=v[2], vdst=v[4], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+      DS(DSOp.DS_LOAD_B64, addr=v[10], vdst=v[6], offset0=0),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][4], 0xDEADBEEF, "v4 should have old low dword")
+    self.assertEqual(st.vgpr[0][5], 0xCAFEBABE, "v5 should have old high dword")
+    self.assertEqual(st.vgpr[0][6], 0x12345678, "v6 should have new low dword")
+    self.assertEqual(st.vgpr[0][7], 0x9ABCDEF0, "v7 should have new high dword")
+
+  def test_ds_store_load_2addr_stride64_b64_roundtrip(self):
+    """DS_STORE_2ADDR_STRIDE64_B64 followed by DS_LOAD_2ADDR_STRIDE64_B64 works correctly."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      s_mov_b32(s[0], 0x11111111),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[0], 0x22222222),
+      v_mov_b32_e32(v[1], s[0]),
+      DS(DSOp.DS_STORE_2ADDR_STRIDE64_B64, addr=v[10], data0=v[0], data1=v[0], vdst=v[0], offset0=1, offset1=2),
+      s_waitcnt(lgkmcnt=0),
+      DS(DSOp.DS_LOAD_2ADDR_STRIDE64_B64, addr=v[10], vdst=v[2], offset0=1, offset1=2),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0x11111111, "v2 should have val1 low")
+    self.assertEqual(st.vgpr[0][3], 0x22222222, "v3 should have val1 high")
+    self.assertEqual(st.vgpr[0][4], 0x11111111, "v4 should have val2 low")
+    self.assertEqual(st.vgpr[0][5], 0x22222222, "v5 should have val2 high")
+
+  def test_ds_storexchg_2addr_stride64_rtn_b64_returns_old(self):
+    """DS_STOREXCHG_2ADDR_STRIDE64_RTN_B64: returns old values correctly."""
+    instructions = [
+      v_mov_b32_e32(v[10], 0),
+      # Store initial values
+      s_mov_b32(s[0], 0x11111111),
+      v_mov_b32_e32(v[0], s[0]),
+      s_mov_b32(s[0], 0x22222222),
+      v_mov_b32_e32(v[1], s[0]),
+      DS(DSOp.DS_STORE_2ADDR_STRIDE64_B64, addr=v[10], data0=v[0], data1=v[0], vdst=v[0], offset0=1, offset1=2),
+      s_waitcnt(lgkmcnt=0),
+      # Exchange with new values
+      s_mov_b32(s[0], 0xAAAAAAAA),
+      v_mov_b32_e32(v[6], s[0]),
+      s_mov_b32(s[0], 0xBBBBBBBB),
+      v_mov_b32_e32(v[7], s[0]),
+      DS(DSOp.DS_STOREXCHG_2ADDR_STRIDE64_RTN_B64, addr=v[10], data0=v[6], data1=v[6], vdst=v[8], offset0=1, offset1=2),
+      s_waitcnt(lgkmcnt=0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # Return: v8-v11 = old values (4 dwords for 2x64-bit)
+    self.assertEqual(st.vgpr[0][8], 0x11111111, "v8 should have old val1 low")
+    self.assertEqual(st.vgpr[0][9], 0x22222222, "v9 should have old val1 high")
+    self.assertEqual(st.vgpr[0][10], 0x11111111, "v10 should have old val2 low")
+    self.assertEqual(st.vgpr[0][11], 0x22222222, "v11 should have old val2 high")
+
+class TestFLATAtomic(unittest.TestCase):
+  """Tests for FLAT and GLOBAL atomic instructions."""
+
+  # Helper to set up address in v[0:1] and clear after test
+  def _make_test(self, setup_instrs, atomic_instr, check_fn, test_offset=2000):
+    """Helper to create atomic test instructions."""
+    instructions = [
+      # Load output buffer address from args (saved in s[80:81] by prologue)
+      s_load_b64(s[2:3], s[80], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      v_mov_b32_e32(v[0], s[2]),  # addr low
+      v_mov_b32_e32(v[1], s[3]),  # addr high
+    ] + setup_instrs + [atomic_instr, s_waitcnt(vmcnt=0),
+      # Clear address registers that differ between emu/hw
+      v_mov_b32_e32(v[0], 0),
+      v_mov_b32_e32(v[1], 0),
+      s_mov_b32(s[2], 0),
+      s_mov_b32(s[3], 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    check_fn(st)
+
+  def test_flat_atomic_inc_u64_returns_old_value(self):
+    """FLAT_ATOMIC_INC_U64 should return full 64-bit old value."""
+    TEST_OFFSET = 2000
+    setup = [
+      # Store initial 64-bit value: 0xCAFEBABE_DEADBEEF
+      s_mov_b32(s[0], 0xDEADBEEF),
+      v_mov_b32_e32(v[2], s[0]),
+      s_mov_b32(s[0], 0xCAFEBABE),
+      v_mov_b32_e32(v[3], s[0]),
+      global_store_b64(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      # Threshold: 0xFFFFFFFF_FFFFFFFF
+      s_mov_b32(s[0], 0xFFFFFFFF),
+      v_mov_b32_e32(v[4], s[0]),
+      v_mov_b32_e32(v[5], s[0]),
+    ]
+    atomic = FLAT(FLATOp.FLAT_ATOMIC_INC_U64, addr=v[0], data=v[4], vdst=v[6], saddr=SrcEnum.NULL, offset=TEST_OFFSET, glc=1)
+    def check(st):
+      self.assertEqual(st.vgpr[0][6], 0xDEADBEEF, "v6 should have old value low dword")
+      self.assertEqual(st.vgpr[0][7], 0xCAFEBABE, "v7 should have old value high dword")
+    self._make_test(setup, atomic, check, TEST_OFFSET)
+
+  def test_flat_atomic_add_u32(self):
+    """FLAT_ATOMIC_ADD_U32 adds to memory and returns old value."""
+    TEST_OFFSET = 2000
+    setup = [
+      s_mov_b32(s[0], 100),
+      v_mov_b32_e32(v[2], s[0]),
+      global_store_b32(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      s_mov_b32(s[0], 50),
+      v_mov_b32_e32(v[3], s[0]),  # add 50
+    ]
+    atomic = FLAT(FLATOp.FLAT_ATOMIC_ADD_U32, addr=v[0], data=v[3], vdst=v[4], saddr=SrcEnum.NULL, offset=TEST_OFFSET, glc=1)
+    def check(st):
+      self.assertEqual(st.vgpr[0][4], 100, "v4 should have old value (100)")
+    self._make_test(setup, atomic, check, TEST_OFFSET)
+
+  def test_flat_atomic_sub_u32(self):
+    """FLAT_ATOMIC_SUB_U32 subtracts from memory and returns old value."""
+    TEST_OFFSET = 2000
+    setup = [
+      s_mov_b32(s[0], 100),
+      v_mov_b32_e32(v[2], s[0]),
+      global_store_b32(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      s_mov_b32(s[0], 30),
+      v_mov_b32_e32(v[3], s[0]),  # sub 30
+    ]
+    atomic = FLAT(FLATOp.FLAT_ATOMIC_SUB_U32, addr=v[0], data=v[3], vdst=v[4], saddr=SrcEnum.NULL, offset=TEST_OFFSET, glc=1)
+    def check(st):
+      self.assertEqual(st.vgpr[0][4], 100, "v4 should have old value (100)")
+    self._make_test(setup, atomic, check, TEST_OFFSET)
+
+  def test_flat_atomic_swap_b32(self):
+    """FLAT_ATOMIC_SWAP_B32 swaps memory value and returns old value."""
+    TEST_OFFSET = 2000
+    setup = [
+      s_mov_b32(s[0], 0xAAAAAAAA),
+      v_mov_b32_e32(v[2], s[0]),
+      global_store_b32(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      s_mov_b32(s[0], 0xBBBBBBBB),
+      v_mov_b32_e32(v[3], s[0]),  # new value
+    ]
+    atomic = FLAT(FLATOp.FLAT_ATOMIC_SWAP_B32, addr=v[0], data=v[3], vdst=v[4], saddr=SrcEnum.NULL, offset=TEST_OFFSET, glc=1)
+    def check(st):
+      self.assertEqual(st.vgpr[0][4], 0xAAAAAAAA, "v4 should have old value")
+    self._make_test(setup, atomic, check, TEST_OFFSET)
+
+  def test_flat_atomic_and_b32(self):
+    """FLAT_ATOMIC_AND_B32 ANDs with memory and returns old value."""
+    TEST_OFFSET = 2000
+    setup = [
+      s_mov_b32(s[0], 0xFF00FF00),
+      v_mov_b32_e32(v[2], s[0]),
+      global_store_b32(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      s_mov_b32(s[0], 0xFFFF0000),
+      v_mov_b32_e32(v[3], s[0]),  # AND mask
+    ]
+    atomic = FLAT(FLATOp.FLAT_ATOMIC_AND_B32, addr=v[0], data=v[3], vdst=v[4], saddr=SrcEnum.NULL, offset=TEST_OFFSET, glc=1)
+    def check(st):
+      self.assertEqual(st.vgpr[0][4], 0xFF00FF00, "v4 should have old value")
+    self._make_test(setup, atomic, check, TEST_OFFSET)
+
+  def test_flat_atomic_or_b32(self):
+    """FLAT_ATOMIC_OR_B32 ORs with memory and returns old value."""
+    TEST_OFFSET = 2000
+    setup = [
+      s_mov_b32(s[0], 0x00FF0000),
+      v_mov_b32_e32(v[2], s[0]),
+      global_store_b32(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      s_mov_b32(s[0], 0x0000FF00),
+      v_mov_b32_e32(v[3], s[0]),  # OR mask
+    ]
+    atomic = FLAT(FLATOp.FLAT_ATOMIC_OR_B32, addr=v[0], data=v[3], vdst=v[4], saddr=SrcEnum.NULL, offset=TEST_OFFSET, glc=1)
+    def check(st):
+      self.assertEqual(st.vgpr[0][4], 0x00FF0000, "v4 should have old value")
+    self._make_test(setup, atomic, check, TEST_OFFSET)
+
+  def test_flat_atomic_xor_b32(self):
+    """FLAT_ATOMIC_XOR_B32 XORs with memory and returns old value."""
+    TEST_OFFSET = 2000
+    setup = [
+      s_mov_b32(s[0], 0xAAAAAAAA),
+      v_mov_b32_e32(v[2], s[0]),
+      global_store_b32(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      s_mov_b32(s[0], 0xFFFFFFFF),
+      v_mov_b32_e32(v[3], s[0]),  # XOR mask
+    ]
+    atomic = FLAT(FLATOp.FLAT_ATOMIC_XOR_B32, addr=v[0], data=v[3], vdst=v[4], saddr=SrcEnum.NULL, offset=TEST_OFFSET, glc=1)
+    def check(st):
+      self.assertEqual(st.vgpr[0][4], 0xAAAAAAAA, "v4 should have old value")
+    self._make_test(setup, atomic, check, TEST_OFFSET)
+
+  def test_flat_atomic_min_u32(self):
+    """FLAT_ATOMIC_MIN_U32 stores min and returns old value."""
+    TEST_OFFSET = 2000
+    setup = [
+      s_mov_b32(s[0], 100),
+      v_mov_b32_e32(v[2], s[0]),
+      global_store_b32(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      s_mov_b32(s[0], 50),
+      v_mov_b32_e32(v[3], s[0]),  # compare value (smaller)
+    ]
+    atomic = FLAT(FLATOp.FLAT_ATOMIC_MIN_U32, addr=v[0], data=v[3], vdst=v[4], saddr=SrcEnum.NULL, offset=TEST_OFFSET, glc=1)
+    def check(st):
+      self.assertEqual(st.vgpr[0][4], 100, "v4 should have old value (100)")
+    self._make_test(setup, atomic, check, TEST_OFFSET)
+
+  def test_flat_atomic_max_u32(self):
+    """FLAT_ATOMIC_MAX_U32 stores max and returns old value."""
+    TEST_OFFSET = 2000
+    setup = [
+      s_mov_b32(s[0], 50),
+      v_mov_b32_e32(v[2], s[0]),
+      global_store_b32(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      s_mov_b32(s[0], 100),
+      v_mov_b32_e32(v[3], s[0]),  # compare value (larger)
+    ]
+    atomic = FLAT(FLATOp.FLAT_ATOMIC_MAX_U32, addr=v[0], data=v[3], vdst=v[4], saddr=SrcEnum.NULL, offset=TEST_OFFSET, glc=1)
+    def check(st):
+      self.assertEqual(st.vgpr[0][4], 50, "v4 should have old value (50)")
+    self._make_test(setup, atomic, check, TEST_OFFSET)
+
+  def test_flat_atomic_inc_u32(self):
+    """FLAT_ATOMIC_INC_U32 increments and returns old value."""
+    TEST_OFFSET = 2000
+    setup = [
+      s_mov_b32(s[0], 10),
+      v_mov_b32_e32(v[2], s[0]),
+      global_store_b32(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      s_mov_b32(s[0], 100),  # threshold
+      v_mov_b32_e32(v[3], s[0]),
+    ]
+    atomic = FLAT(FLATOp.FLAT_ATOMIC_INC_U32, addr=v[0], data=v[3], vdst=v[4], saddr=SrcEnum.NULL, offset=TEST_OFFSET, glc=1)
+    def check(st):
+      self.assertEqual(st.vgpr[0][4], 10, "v4 should have old value (10)")
+    self._make_test(setup, atomic, check, TEST_OFFSET)
+
+  def test_flat_atomic_dec_u32(self):
+    """FLAT_ATOMIC_DEC_U32 decrements and returns old value."""
+    TEST_OFFSET = 2000
+    setup = [
+      s_mov_b32(s[0], 10),
+      v_mov_b32_e32(v[2], s[0]),
+      global_store_b32(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      s_mov_b32(s[0], 100),  # threshold
+      v_mov_b32_e32(v[3], s[0]),
+    ]
+    atomic = FLAT(FLATOp.FLAT_ATOMIC_DEC_U32, addr=v[0], data=v[3], vdst=v[4], saddr=SrcEnum.NULL, offset=TEST_OFFSET, glc=1)
+    def check(st):
+      self.assertEqual(st.vgpr[0][4], 10, "v4 should have old value (10)")
+    self._make_test(setup, atomic, check, TEST_OFFSET)
+
+  def test_flat_atomic_add_u64(self):
+    """FLAT_ATOMIC_ADD_U64 adds 64-bit value and returns old value."""
+    TEST_OFFSET = 2000
+    setup = [
+      s_mov_b32(s[0], 0x11111111),
+      v_mov_b32_e32(v[2], s[0]),
+      s_mov_b32(s[0], 0x22222222),
+      v_mov_b32_e32(v[3], s[0]),
+      global_store_b64(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      s_mov_b32(s[0], 0x00000001),  # add 1
+      v_mov_b32_e32(v[4], s[0]),
+      s_mov_b32(s[0], 0x00000000),
+      v_mov_b32_e32(v[5], s[0]),
+    ]
+    atomic = FLAT(FLATOp.FLAT_ATOMIC_ADD_U64, addr=v[0], data=v[4], vdst=v[6], saddr=SrcEnum.NULL, offset=TEST_OFFSET, glc=1)
+    def check(st):
+      self.assertEqual(st.vgpr[0][6], 0x11111111, "v6 should have old value low")
+      self.assertEqual(st.vgpr[0][7], 0x22222222, "v7 should have old value high")
+    self._make_test(setup, atomic, check, TEST_OFFSET)
+
+  def test_flat_atomic_swap_b64(self):
+    """FLAT_ATOMIC_SWAP_B64 swaps 64-bit value and returns old value."""
+    TEST_OFFSET = 2000
+    setup = [
+      s_mov_b32(s[0], 0xAAAAAAAA),
+      v_mov_b32_e32(v[2], s[0]),
+      s_mov_b32(s[0], 0xBBBBBBBB),
+      v_mov_b32_e32(v[3], s[0]),
+      global_store_b64(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      s_mov_b32(s[0], 0xCCCCCCCC),
+      v_mov_b32_e32(v[4], s[0]),
+      s_mov_b32(s[0], 0xDDDDDDDD),
+      v_mov_b32_e32(v[5], s[0]),
+    ]
+    atomic = FLAT(FLATOp.FLAT_ATOMIC_SWAP_B64, addr=v[0], data=v[4], vdst=v[6], saddr=SrcEnum.NULL, offset=TEST_OFFSET, glc=1)
+    def check(st):
+      self.assertEqual(st.vgpr[0][6], 0xAAAAAAAA, "v6 should have old value low")
+      self.assertEqual(st.vgpr[0][7], 0xBBBBBBBB, "v7 should have old value high")
+    self._make_test(setup, atomic, check, TEST_OFFSET)
+
+  def test_global_atomic_add_u32(self):
+    """GLOBAL_ATOMIC_ADD_U32 adds to memory and returns old value."""
+    TEST_OFFSET = 2000
+    setup = [
+      s_mov_b32(s[0], 100),
+      v_mov_b32_e32(v[2], s[0]),
+      global_store_b32(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      s_mov_b32(s[0], 50),
+      v_mov_b32_e32(v[3], s[0]),
+    ]
+    atomic = FLAT(GLOBALOp.GLOBAL_ATOMIC_ADD_U32, addr=v[0], data=v[3], vdst=v[4], saddr=SrcEnum.NULL, offset=TEST_OFFSET, glc=1, seg=2)
+    def check(st):
+      self.assertEqual(st.vgpr[0][4], 100, "v4 should have old value (100)")
+    self._make_test(setup, atomic, check, TEST_OFFSET)
+
+  def test_global_atomic_add_u64(self):
+    """GLOBAL_ATOMIC_ADD_U64 adds 64-bit value and returns old value."""
+    TEST_OFFSET = 2000
+    setup = [
+      s_mov_b32(s[0], 0xFFFFFFFF),
+      v_mov_b32_e32(v[2], s[0]),
+      s_mov_b32(s[0], 0x00000000),
+      v_mov_b32_e32(v[3], s[0]),
+      global_store_b64(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      # Add 1 to cause carry
+      s_mov_b32(s[0], 0x00000001),
+      v_mov_b32_e32(v[4], s[0]),
+      s_mov_b32(s[0], 0x00000000),
+      v_mov_b32_e32(v[5], s[0]),
+    ]
+    atomic = FLAT(GLOBALOp.GLOBAL_ATOMIC_ADD_U64, addr=v[0], data=v[4], vdst=v[6], saddr=SrcEnum.NULL, offset=TEST_OFFSET, glc=1, seg=2)
+    def check(st):
+      self.assertEqual(st.vgpr[0][6], 0xFFFFFFFF, "v6 should have old value low")
+      self.assertEqual(st.vgpr[0][7], 0x00000000, "v7 should have old value high")
+    self._make_test(setup, atomic, check, TEST_OFFSET)
+
+  def test_flat_load_b32(self):
+    """FLAT_LOAD_B32 loads 32-bit value correctly."""
+    TEST_OFFSET = 2000
+    setup = [
+      s_mov_b32(s[0], 0xDEADBEEF),
+      v_mov_b32_e32(v[2], s[0]),
+      global_store_b32(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+    ]
+    load = FLAT(FLATOp.FLAT_LOAD_B32, addr=v[0], vdst=v[4], saddr=SrcEnum.NULL, offset=TEST_OFFSET)
+    def check(st):
+      self.assertEqual(st.vgpr[0][4], 0xDEADBEEF, "v4 should have loaded value")
+    instructions = [
+      s_load_b64(s[2:3], s[80], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      v_mov_b32_e32(v[0], s[2]),
+      v_mov_b32_e32(v[1], s[3]),
+    ] + setup + [load, s_waitcnt(vmcnt=0),
+      v_mov_b32_e32(v[0], 0),
+      v_mov_b32_e32(v[1], 0),
+      s_mov_b32(s[2], 0),
+      s_mov_b32(s[3], 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    check(st)
+
+  def test_flat_load_b64(self):
+    """FLAT_LOAD_B64 loads 64-bit value correctly."""
+    TEST_OFFSET = 2000
+    setup = [
+      s_mov_b32(s[0], 0xDEADBEEF),
+      v_mov_b32_e32(v[2], s[0]),
+      s_mov_b32(s[0], 0xCAFEBABE),
+      v_mov_b32_e32(v[3], s[0]),
+      global_store_b64(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+    ]
+    load = FLAT(FLATOp.FLAT_LOAD_B64, addr=v[0], vdst=v[4], saddr=SrcEnum.NULL, offset=TEST_OFFSET)
+    def check(st):
+      self.assertEqual(st.vgpr[0][4], 0xDEADBEEF, "v4 should have loaded low dword")
+      self.assertEqual(st.vgpr[0][5], 0xCAFEBABE, "v5 should have loaded high dword")
+    instructions = [
+      s_load_b64(s[2:3], s[80], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      v_mov_b32_e32(v[0], s[2]),
+      v_mov_b32_e32(v[1], s[3]),
+    ] + setup + [load, s_waitcnt(vmcnt=0),
+      v_mov_b32_e32(v[0], 0),
+      v_mov_b32_e32(v[1], 0),
+      s_mov_b32(s[2], 0),
+      s_mov_b32(s[3], 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    check(st)
+
+  def test_flat_load_b96(self):
+    """FLAT_LOAD_B96 loads 96-bit (3 dword) value correctly."""
+    TEST_OFFSET = 2000
+    setup = [
+      s_mov_b32(s[0], 0x11111111),
+      v_mov_b32_e32(v[2], s[0]),
+      s_mov_b32(s[0], 0x22222222),
+      v_mov_b32_e32(v[3], s[0]),
+      s_mov_b32(s[0], 0x33333333),
+      v_mov_b32_e32(v[4], s[0]),
+      global_store_b96(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+    ]
+    load = FLAT(FLATOp.FLAT_LOAD_B96, addr=v[0], vdst=v[5], saddr=SrcEnum.NULL, offset=TEST_OFFSET)
+    def check(st):
+      self.assertEqual(st.vgpr[0][5], 0x11111111, "v5 should have dword 0")
+      self.assertEqual(st.vgpr[0][6], 0x22222222, "v6 should have dword 1")
+      self.assertEqual(st.vgpr[0][7], 0x33333333, "v7 should have dword 2")
+    instructions = [
+      s_load_b64(s[2:3], s[80], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      v_mov_b32_e32(v[0], s[2]),
+      v_mov_b32_e32(v[1], s[3]),
+    ] + setup + [load, s_waitcnt(vmcnt=0),
+      v_mov_b32_e32(v[0], 0),
+      v_mov_b32_e32(v[1], 0),
+      s_mov_b32(s[2], 0),
+      s_mov_b32(s[3], 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    check(st)
+
+  def test_flat_load_b128(self):
+    """FLAT_LOAD_B128 loads 128-bit (4 dword) value correctly."""
+    TEST_OFFSET = 2000
+    setup = [
+      s_mov_b32(s[0], 0x11111111),
+      v_mov_b32_e32(v[2], s[0]),
+      s_mov_b32(s[0], 0x22222222),
+      v_mov_b32_e32(v[3], s[0]),
+      s_mov_b32(s[0], 0x33333333),
+      v_mov_b32_e32(v[4], s[0]),
+      s_mov_b32(s[0], 0x44444444),
+      v_mov_b32_e32(v[5], s[0]),
+      global_store_b128(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+    ]
+    load = FLAT(FLATOp.FLAT_LOAD_B128, addr=v[0], vdst=v[6], saddr=SrcEnum.NULL, offset=TEST_OFFSET)
+    def check(st):
+      self.assertEqual(st.vgpr[0][6], 0x11111111, "v6 should have dword 0")
+      self.assertEqual(st.vgpr[0][7], 0x22222222, "v7 should have dword 1")
+      self.assertEqual(st.vgpr[0][8], 0x33333333, "v8 should have dword 2")
+      self.assertEqual(st.vgpr[0][9], 0x44444444, "v9 should have dword 3")
+    instructions = [
+      s_load_b64(s[2:3], s[80], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      v_mov_b32_e32(v[0], s[2]),
+      v_mov_b32_e32(v[1], s[3]),
+    ] + setup + [load, s_waitcnt(vmcnt=0),
+      v_mov_b32_e32(v[0], 0),
+      v_mov_b32_e32(v[1], 0),
+      s_mov_b32(s[2], 0),
+      s_mov_b32(s[3], 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    check(st)
+
+  def test_global_load_b96(self):
+    """GLOBAL_LOAD_B96 loads 96-bit value correctly."""
+    TEST_OFFSET = 2000
+    setup = [
+      s_mov_b32(s[0], 0xAAAAAAAA),
+      v_mov_b32_e32(v[2], s[0]),
+      s_mov_b32(s[0], 0xBBBBBBBB),
+      v_mov_b32_e32(v[3], s[0]),
+      s_mov_b32(s[0], 0xCCCCCCCC),
+      v_mov_b32_e32(v[4], s[0]),
+      global_store_b96(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+    ]
+    load = FLAT(GLOBALOp.GLOBAL_LOAD_B96, addr=v[0], vdst=v[5], saddr=SrcEnum.NULL, offset=TEST_OFFSET, seg=2)
+    def check(st):
+      self.assertEqual(st.vgpr[0][5], 0xAAAAAAAA, "v5 should have dword 0")
+      self.assertEqual(st.vgpr[0][6], 0xBBBBBBBB, "v6 should have dword 1")
+      self.assertEqual(st.vgpr[0][7], 0xCCCCCCCC, "v7 should have dword 2")
+    instructions = [
+      s_load_b64(s[2:3], s[80], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      v_mov_b32_e32(v[0], s[2]),
+      v_mov_b32_e32(v[1], s[3]),
+    ] + setup + [load, s_waitcnt(vmcnt=0),
+      v_mov_b32_e32(v[0], 0),
+      v_mov_b32_e32(v[1], 0),
+      s_mov_b32(s[2], 0),
+      s_mov_b32(s[3], 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    check(st)
+
+  def test_global_load_b128(self):
+    """GLOBAL_LOAD_B128 loads 128-bit value correctly."""
+    TEST_OFFSET = 2000
+    setup = [
+      s_mov_b32(s[0], 0xDEADBEEF),
+      v_mov_b32_e32(v[2], s[0]),
+      s_mov_b32(s[0], 0xCAFEBABE),
+      v_mov_b32_e32(v[3], s[0]),
+      s_mov_b32(s[0], 0x12345678),
+      v_mov_b32_e32(v[4], s[0]),
+      s_mov_b32(s[0], 0x9ABCDEF0),
+      v_mov_b32_e32(v[5], s[0]),
+      global_store_b128(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+    ]
+    load = FLAT(GLOBALOp.GLOBAL_LOAD_B128, addr=v[0], vdst=v[6], saddr=SrcEnum.NULL, offset=TEST_OFFSET, seg=2)
+    def check(st):
+      self.assertEqual(st.vgpr[0][6], 0xDEADBEEF, "v6 should have dword 0")
+      self.assertEqual(st.vgpr[0][7], 0xCAFEBABE, "v7 should have dword 1")
+      self.assertEqual(st.vgpr[0][8], 0x12345678, "v8 should have dword 2")
+      self.assertEqual(st.vgpr[0][9], 0x9ABCDEF0, "v9 should have dword 3")
+    instructions = [
+      s_load_b64(s[2:3], s[80], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      v_mov_b32_e32(v[0], s[2]),
+      v_mov_b32_e32(v[1], s[3]),
+    ] + setup + [load, s_waitcnt(vmcnt=0),
+      v_mov_b32_e32(v[0], 0),
+      v_mov_b32_e32(v[1], 0),
+      s_mov_b32(s[2], 0),
+      s_mov_b32(s[3], 0),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    check(st)
+
+
+class TestGlobalStoreB64(unittest.TestCase):
+  """Tests for global_store_b64 instruction."""
+
+  def test_global_store_b64_basic(self):
+    """GLOBAL_STORE_B64 stores 8 bytes from v[n:n+1] to memory."""
+    TEST_OFFSET = 256
+
+    instructions = [
+      # Get output buffer address into s[2:3]
+      s_load_b64(s[2:3], s[80], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      # Set up v[2:3] with known values
+      s_mov_b32(s[4], 0xDEADBEEF),
+      s_mov_b32(s[5], 0xCAFEBABE),
+      v_mov_b32_e32(v[2], s[4]),  # v2 = 0xDEADBEEF (low dword)
+      v_mov_b32_e32(v[3], s[5]),  # v3 = 0xCAFEBABE (high dword)
+      # Set up address
+      v_mov_b32_e32(v[0], 0),
+      # Store 64 bits
+      global_store_b64(addr=v[0], data=v[2], saddr=s[2], offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      # Load it back as two 32-bit values
+      FLAT(GLOBALOp.GLOBAL_LOAD_B64, addr=v[0], vdst=v[4], data=v[4], saddr=s[2], offset=TEST_OFFSET, seg=2),
+      s_waitcnt(vmcnt=0),
+      # Copy to v[0:1] for capture
+      v_mov_b32_e32(v[0], v[4]),
+      v_mov_b32_e32(v[1], v[5]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][0], 0xDEADBEEF, f"Low dword: expected 0xDEADBEEF, got 0x{st.vgpr[0][0]:08x}")
+    self.assertEqual(st.vgpr[0][1], 0xCAFEBABE, f"High dword: expected 0xCAFEBABE, got 0x{st.vgpr[0][1]:08x}")
+
+  def test_global_store_b64_tril_pattern(self):
+    """Test the exact pattern from tril() kernel that was failing.
+
+    The kernel does:
+    - global_load_u16 v0, v2, s[2:3] offset:3  (loads bytes 3,4)
+    - global_load_d16_hi_b16 v1, v1, s[2:3] offset:6 (loads bytes 6,7 into v1 hi16)
+    - global_load_u8 v3, v2, s[2:3]  (loads byte 0)
+    - global_load_u8 v4, v2, s[2:3] offset:8 (loads byte 8)
+    - v_and_b32 v5, 0xffff, v0
+    - v_lshlrev_b32 v0, 24, v0
+    - v_lshrrev_b32 v5, 8, v5
+    - v_or_b32 v0, v3, v0
+    - v_or_b32 v1, v5, v1
+    - global_store_b64 v2, v[0:1], s[0:1]  (stores 8 bytes)
+
+    For input all 0x01, the output at byte 5 should be 0x00.
+    """
+    TEST_OFFSET = 256
+
+    instructions = [
+      # Get output buffer address into s[2:3]
+      s_load_b64(s[2:3], s[80], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      # Store input data: 9 bytes of 0x01
+      s_mov_b32(s[4], 0x01010101),
+      v_mov_b32_e32(v[10], s[4]),
+      v_mov_b32_e32(v[11], s[4]),
+      s_mov_b32(s[4], 0x01),
+      v_mov_b32_e32(v[12], s[4]),
+      v_mov_b32_e32(v[0], 0),
+      global_store_b64(addr=v[0], data=v[10], saddr=s[2], offset=TEST_OFFSET),
+      global_store_b8(addr=v[0], data=v[12], saddr=s[2], offset=TEST_OFFSET+8),
+      s_waitcnt(vmcnt=0),
+
+      # Now execute the tril pattern
+      v_mov_b32_e32(v[2], 0),
+      v_mov_b32_e32(v[1], 0),
+      # Load bytes 3,4 as u16
+      FLAT(GLOBALOp.GLOBAL_LOAD_U16, addr=v[2], vdst=v[0], data=v[0], saddr=s[2], offset=TEST_OFFSET+3, seg=2),
+      # Load bytes 6,7 into v1 hi16
+      FLAT(GLOBALOp.GLOBAL_LOAD_D16_HI_B16, addr=v[1], vdst=v[1], data=v[1], saddr=s[2], offset=TEST_OFFSET+6, seg=2),
+      # Load byte 0
+      FLAT(GLOBALOp.GLOBAL_LOAD_U8, addr=v[2], vdst=v[3], data=v[3], saddr=s[2], offset=TEST_OFFSET, seg=2),
+      # Load byte 8
+      FLAT(GLOBALOp.GLOBAL_LOAD_U8, addr=v[2], vdst=v[4], data=v[4], saddr=s[2], offset=TEST_OFFSET+8, seg=2),
+      s_waitcnt(vmcnt=0),
+
+      # Bit manipulation
+      v_and_b32_e32(v[5], 0xffff, v[0]),  # v5 = v0 & 0xffff = 0x0101
+      v_lshlrev_b32_e32(v[0], 24, v[0]),  # v0 = v0 << 24 = 0x01000000
+      v_lshrrev_b32_e32(v[5], 8, v[5]),   # v5 = v5 >> 8 = 0x01
+      v_or_b32_e32(v[0], v[3], v[0]),     # v0 = v3 | v0 = 0x01000001
+      v_or_b32_e32(v[1], v[5], v[1]),     # v1 = v5 | v1
+
+      # Store to different location so we can read it back
+      global_store_b64(addr=v[2], data=v[0], saddr=s[2], offset=TEST_OFFSET+16),
+      s_waitcnt(vmcnt=0),
+
+      # Load back to check
+      FLAT(GLOBALOp.GLOBAL_LOAD_B64, addr=v[2], vdst=v[6], data=v[6], saddr=s[2], offset=TEST_OFFSET+16, seg=2),
+      s_waitcnt(vmcnt=0),
+      v_mov_b32_e32(v[0], v[6]),
+      v_mov_b32_e32(v[1], v[7]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+
+    # v0 should be 0x01000001 (bytes 0,1,2,3 = 01,00,00,01)
+    # v1 should be 0x01010001 (bytes 4,5,6,7 = 01,00,01,01)
+    v0 = st.vgpr[0][0]
+    v1 = st.vgpr[0][1]
+    self.assertEqual(v0, 0x01000001, f"v0: expected 0x01000001, got 0x{v0:08x}")
+    self.assertEqual(v1, 0x01010001, f"v1: expected 0x01010001, got 0x{v1:08x}")
+
+    # Check individual bytes
+    byte5 = (v1 >> 8) & 0xff  # This is the bug - should be 0x00
+    self.assertEqual(byte5, 0x00, f"byte5 (position 1,2): expected 0x00, got 0x{byte5:02x}")
+
+
+class TestD16HiLoads(unittest.TestCase):
+  """Tests for D16_HI load instructions that load into high 16 bits, preserving low 16 bits."""
+
+  def test_global_load_d16_hi_b16_preserves_low_bits(self):
+    """GLOBAL_LOAD_D16_HI_B16 must preserve low 16 bits of destination.
+
+    Regression test for tril() bug where position (1,2) was incorrectly True.
+    The bug was that D16_HI loads were not preserving the low 16 bits of the
+    destination register.
+    """
+    # Set up: store 0xCAFE at some memory location, then load it into high 16 bits
+    # of a register that has 0xBEEF in low 16 bits. Result should be 0xCAFEBEEF.
+    TEST_OFFSET = 256
+
+    instructions = [
+      # Get output buffer address into s[2:3]
+      s_load_b64(s[2:3], s[80], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      # Set up address in v[0:1]
+      v_mov_b32_e32(v[0], s[2]),
+      v_mov_b32_e32(v[1], s[3]),
+      # Store 0xCAFE0000 at TEST_OFFSET (we'll load the low 16 bits as b16)
+      s_mov_b32(s[4], 0xCAFE),
+      v_mov_b32_e32(v[2], s[4]),
+      global_store_b16(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      # Set destination register v[3] to have 0xBEEF in low 16 bits
+      s_mov_b32(s[4], 0x0000BEEF),
+      v_mov_b32_e32(v[3], s[4]),
+      # Load 16 bits from memory into HIGH 16 bits of v[3], preserving low 16 bits
+      FLAT(GLOBALOp.GLOBAL_LOAD_D16_HI_B16, addr=v[0], vdst=v[3], data=v[3], saddr=SrcEnum.NULL, offset=TEST_OFFSET, seg=2),
+      s_waitcnt(vmcnt=0),
+      # Copy result to v[0] for capture
+      v_mov_b32_e32(v[0], v[3]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][0]
+    # Expected: hi=0xCAFE (from memory), lo=0xBEEF (preserved) -> 0xCAFEBEEF
+    self.assertEqual(result, 0xCAFEBEEF, f"Expected 0xCAFEBEEF, got 0x{result:08x}")
+
+  def test_global_load_d16_hi_b16_same_addr_and_dst_zero_addr(self):
+    """GLOBAL_LOAD_D16_HI_B16 with same register for addr and vdst, addr value=0.
+
+    This is the exact pattern from tril() that was failing:
+      global_load_d16_hi_b16 v1, v1, s[2:3] offset:6
+
+    Where v1=0 is used as both the address offset and destination.
+    After the load, low 16 bits should remain 0, high 16 bits should have loaded data.
+    """
+    TEST_OFFSET = 256
+
+    instructions = [
+      # Get output buffer address into s[2:3]
+      s_load_b64(s[2:3], s[80], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      # Store 0xCAFE at TEST_OFFSET
+      s_mov_b32(s[4], 0xCAFE),
+      v_mov_b32_e32(v[2], s[4]),
+      v_mov_b32_e32(v[3], 0),  # addr offset = 0
+      global_store_b16(addr=v[3], data=v[2], saddr=s[2], offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      # Set v[1] to 0 (addr offset = 0, and this is what low 16 bits should stay as)
+      v_mov_b32_e32(v[1], 0),
+      # Load using v[1] as both addr and destination
+      FLAT(GLOBALOp.GLOBAL_LOAD_D16_HI_B16, addr=v[1], vdst=v[1], data=v[1], saddr=s[2], offset=TEST_OFFSET, seg=2),
+      s_waitcnt(vmcnt=0),
+      # Copy result to v[0] for capture
+      v_mov_b32_e32(v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][0]
+    # Expected: hi=0xCAFE (from memory), lo=0x0000 (preserved) -> 0xCAFE0000
+    self.assertEqual(result, 0xCAFE0000, f"Expected 0xCAFE0000, got 0x{result:08x}")
+
+  def test_global_load_d16_hi_b16_data_differs_from_vdst(self):
+    """GLOBAL_LOAD_D16_HI_B16 where data field differs from vdst.
+
+    This is the ACTUAL pattern from tril() assembly:
+      global_load_d16_hi_b16 v1, v1, s[2:3] offset:6
+
+    The instruction encoding has:
+      vdst = v1 (destination register)
+      addr = v1 (address offset register)
+      data = v0 (data field - typically unused for loads but still encoded)
+
+    The bug: emulator was reading VDATA from inst.data (v0) instead of inst.vdst (v1),
+    so low 16 bits of v0 were preserved instead of low 16 bits of v1.
+    """
+    TEST_OFFSET = 256
+
+    instructions = [
+      # Get output buffer address into s[2:3]
+      s_load_b64(s[2:3], s[80], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      # Store 0xCAFE at TEST_OFFSET
+      s_mov_b32(s[4], 0xCAFE),
+      v_mov_b32_e32(v[2], s[4]),
+      v_mov_b32_e32(v[3], 0),
+      global_store_b16(addr=v[3], data=v[2], saddr=s[2], offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      # Set v[0] to a DIFFERENT value (0xDEAD) - this is the data field
+      # The bug would incorrectly preserve v[0]'s low bits instead of v[1]'s
+      s_mov_b32(s[4], 0x0000DEAD),
+      v_mov_b32_e32(v[0], s[4]),
+      # Set v[1] to 0 (this is vdst, whose low bits should be preserved)
+      v_mov_b32_e32(v[1], 0),
+      # Load using v[1] as addr AND vdst, but v[0] as data field
+      # Correct behavior: hi=0xCAFE (loaded), lo=0x0000 (from v1) -> 0xCAFE0000
+      # Bug behavior: hi=0xCAFE (loaded), lo=0xDEAD (from v0) -> 0xCAFEDEAD
+      FLAT(GLOBALOp.GLOBAL_LOAD_D16_HI_B16, addr=v[1], vdst=v[1], data=v[0], saddr=s[2], offset=TEST_OFFSET, seg=2),
+      s_waitcnt(vmcnt=0),
+      # Copy result to v[0] for capture
+      v_mov_b32_e32(v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][0]
+    # Expected: hi=0xCAFE (from memory), lo=0x0000 (preserved from vdst v1) -> 0xCAFE0000
+    # Bug would give: 0xCAFEDEAD (low bits from data field v0)
+    self.assertEqual(result, 0xCAFE0000, f"Expected 0xCAFE0000, got 0x{result:08x}")
+
+  def test_global_load_d16_hi_b16_tril_exact_pattern(self):
+    """Exact pattern from tril() failure: data=v0 differs from vdst=v1, with v1 having non-zero low bits initially.
+
+    Assembly from tril():
+      v_dual_mov_b32 v2, 0 :: v_dual_mov_b32 v1, 0
+      global_load_u16 v0, v2, s[2:3] offset:3        ; v0 = 0x0101 (loads 16 bits)
+      global_load_d16_hi_b16 v1, v1, s[2:3] offset:6 ; vdst=v1, addr=v1, data=v0
+      ...
+      v_or_b32_e32 v1, v5, v1
+
+    The bug: since data=v0=0x0101 and vdst=v1=0, the emulator incorrectly
+    preserved v0's low bits (0x0101) instead of v1's low bits (0x0000).
+    Result: v1 = 0x01010101 instead of 0x01010000
+    """
+    TEST_OFFSET = 256
+
+    instructions = [
+      # Get output buffer address into s[2:3]
+      s_load_b64(s[2:3], s[80], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      # Store test data: 0x0101 at offset, 0x0101 at offset+3
+      s_mov_b32(s[4], 0x0101),
+      v_mov_b32_e32(v[2], s[4]),
+      v_mov_b32_e32(v[3], 0),
+      global_store_b16(addr=v[3], data=v[2], saddr=s[2], offset=TEST_OFFSET),
+      global_store_b16(addr=v[3], data=v[2], saddr=s[2], offset=TEST_OFFSET + 3),
+      s_waitcnt(vmcnt=0),
+      # Replicate tril() pattern:
+      # v2 = 0, v1 = 0
+      v_mov_b32_e32(v[2], 0),
+      v_mov_b32_e32(v[1], 0),
+      # global_load_u16 v0, v2, s[2:3] offset:3  -> v0 gets 0x0101
+      FLAT(GLOBALOp.GLOBAL_LOAD_U16, addr=v[2], vdst=v[0], data=v[0], saddr=s[2], offset=TEST_OFFSET, seg=2),
+      s_waitcnt(vmcnt=0),
+      # global_load_d16_hi_b16 v1, v1, s[2:3] offset:6  -> vdst=v1, addr=v1, data=v0
+      # This should load 0x0101 into high 16 bits of v1, preserving low 16 bits (0x0000)
+      # Result should be 0x01010000, NOT 0x01010101
+      FLAT(GLOBALOp.GLOBAL_LOAD_D16_HI_B16, addr=v[1], vdst=v[1], data=v[0], saddr=s[2], offset=TEST_OFFSET + 3, seg=2),
+      s_waitcnt(vmcnt=0),
+      # Copy v1 to v[0] for capture
+      v_mov_b32_e32(v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][0]
+    # Expected: hi=0x0101 (from memory), lo=0x0000 (preserved from vdst v1) -> 0x01010000
+    # Bug would give: 0x01010101 (low bits from data field v0)
+    self.assertEqual(result, 0x01010000, f"Expected 0x01010000, got 0x{result:08x}")
+
+  def test_global_load_d16_hi_u8_data_differs_from_vdst(self):
+    """GLOBAL_LOAD_D16_HI_U8 where data field differs from vdst.
+
+    Similar to B16 test but loads unsigned 8 bits into high 16 bits.
+    The bug: emulator reads VDATA from inst.data instead of inst.vdst.
+    """
+    TEST_OFFSET = 256
+
+    instructions = [
+      # Get output buffer address into s[2:3]
+      s_load_b64(s[2:3], s[80], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      # Store 0xAB at TEST_OFFSET (single byte)
+      s_mov_b32(s[4], 0xAB),
+      v_mov_b32_e32(v[2], s[4]),
+      v_mov_b32_e32(v[3], 0),
+      global_store_b8(addr=v[3], data=v[2], saddr=s[2], offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      # Set v[4] to 0xDEAD (data field - should NOT affect result)
+      s_mov_b32(s[4], 0x0000DEAD),
+      v_mov_b32_e32(v[4], s[4]),
+      # Set v[5] to 0xBEEF (vdst - low bits should be preserved)
+      s_mov_b32(s[4], 0x0000BEEF),
+      v_mov_b32_e32(v[5], s[4]),
+      # v[3] = 0 for address offset
+      v_mov_b32_e32(v[3], 0),
+      # Load 8 bits into high 16 bits of v[5], preserving low 16 bits
+      # Correct: hi=0x00AB (zero-extended), lo=0xBEEF -> 0x00ABBEEF
+      # Bug: hi=0x00AB, lo=0xDEAD (from v4) -> 0x00ABDEAD
+      FLAT(GLOBALOp.GLOBAL_LOAD_D16_HI_U8, addr=v[3], vdst=v[5], data=v[4], saddr=s[2], offset=TEST_OFFSET, seg=2),
+      s_waitcnt(vmcnt=0),
+      v_mov_b32_e32(v[0], v[5]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][0]
+    self.assertEqual(result, 0x00ABBEEF, f"Expected 0x00ABBEEF, got 0x{result:08x}")
+
+  def test_global_load_d16_hi_i8_data_differs_from_vdst(self):
+    """GLOBAL_LOAD_D16_HI_I8 where data field differs from vdst.
+
+    Loads signed 8 bits (sign-extended to 16 bits) into high 16 bits.
+    The bug: emulator reads VDATA from inst.data instead of inst.vdst.
+    """
+    TEST_OFFSET = 256
+
+    instructions = [
+      # Get output buffer address into s[2:3]
+      s_load_b64(s[2:3], s[80], 0, soffset=SrcEnum.NULL),
+      s_waitcnt(lgkmcnt=0),
+      # Store 0x80 at TEST_OFFSET (negative signed byte = -128)
+      s_mov_b32(s[4], 0x80),
+      v_mov_b32_e32(v[2], s[4]),
+      v_mov_b32_e32(v[3], 0),
+      global_store_b8(addr=v[3], data=v[2], saddr=s[2], offset=TEST_OFFSET),
+      s_waitcnt(vmcnt=0),
+      # Set v[4] to 0xDEAD (data field - should NOT affect result)
+      s_mov_b32(s[4], 0x0000DEAD),
+      v_mov_b32_e32(v[4], s[4]),
+      # Set v[5] to 0xBEEF (vdst - low bits should be preserved)
+      s_mov_b32(s[4], 0x0000BEEF),
+      v_mov_b32_e32(v[5], s[4]),
+      # v[3] = 0 for address offset
+      v_mov_b32_e32(v[3], 0),
+      # Load signed 8 bits into high 16 bits of v[5], preserving low 16 bits
+      # 0x80 sign-extended to 16 bits = 0xFF80
+      # Correct: hi=0xFF80, lo=0xBEEF -> 0xFF80BEEF
+      # Bug: hi=0xFF80, lo=0xDEAD (from v4) -> 0xFF80DEAD
+      FLAT(GLOBALOp.GLOBAL_LOAD_D16_HI_I8, addr=v[3], vdst=v[5], data=v[4], saddr=s[2], offset=TEST_OFFSET, seg=2),
+      s_waitcnt(vmcnt=0),
+      v_mov_b32_e32(v[0], v[5]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = st.vgpr[0][0]
+    self.assertEqual(result, 0xFF80BEEF, f"Expected 0xFF80BEEF, got 0x{result:08x}")
+
+
+if __name__ == '__main__':
+  unittest.main()

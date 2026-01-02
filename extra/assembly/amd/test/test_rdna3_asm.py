@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import unittest, subprocess
-from extra.assembly.amd.autogen.rdna3 import *
+from extra.assembly.amd.autogen.rdna3.ins import *
 from extra.assembly.amd.test.helpers import get_llvm_mc
 
 def llvm_assemble(asm: str) -> bytes:

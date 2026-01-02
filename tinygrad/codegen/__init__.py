@@ -183,8 +183,10 @@ def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> Program
   if ast.arg is None: ast = ast.replace(arg=KernelInfo())
 
   # rewrite to prg
-  full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None)
-  prg = UOp(Ops.PROGRAM, src=(full_sink, UOp(Ops.DEVICE, arg=renderer.device)))
+  if ast.op is Ops.PROGRAM: prg = ast
+  else:
+    full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None)
+    prg = UOp(Ops.PROGRAM, src=(full_sink, UOp(Ops.DEVICE, arg=renderer.device)))
   prg = graph_rewrite(prg, pm_to_program, ctx=renderer, name="linearize/render")
 
   # create the ProgramSpec
