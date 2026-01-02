@@ -62,8 +62,10 @@ _SPECIAL_REGS = {
   'V_CMP_CLASS_F64': (1, 2, 1, 1), 'V_CMPX_CLASS_F64': (1, 2, 1, 1),
   'V_CMP_CLASS_F32': (1, 1, 1, 1), 'V_CMPX_CLASS_F32': (1, 1, 1, 1),
   'V_CMP_CLASS_F16': (1, 1, 1, 1), 'V_CMPX_CLASS_F16': (1, 1, 1, 1),
-  'V_MAD_U64_U32': (2, 1, 1, 2), 'V_MAD_I64_I32': (2, 1, 1, 2),
+  'V_MAD_U64_U32': (2, 1, 1, 2), 'V_MAD_I64_I32': (2, 1, 1, 2), 'V_MAD_CO_U64_U32': (2, 1, 1, 2), 'V_MAD_CO_I64_I32': (2, 1, 1, 2),
   'V_QSAD_PK_U16_U8': (2, 2, 1, 2), 'V_MQSAD_PK_U16_U8': (2, 2, 1, 2), 'V_MQSAD_U32_U8': (4, 2, 1, 4),
+  # RDNA4 CVT_PK_F32 instructions output 2 F32 values (64-bit)
+  'V_CVT_PK_F32_BF8': (2, 1, 1, 1), 'V_CVT_PK_F32_FP8': (2, 1, 1, 1),
 }
 _SPECIAL_DTYPE = {
   'V_LSHLREV_B64': ('B64', 'U32', 'B64', None), 'V_LSHRREV_B64': ('B64', 'U32', 'B64', None), 'V_ASHRREV_I64': ('I64', 'U32', 'I64', None),
@@ -78,6 +80,8 @@ _SPECIAL_DTYPE = {
   'V_MAD_U64_U32': ('U64', 'U32', 'U32', 'U64'), 'V_MAD_I64_I32': ('I64', 'I32', 'I32', 'I64'),
   'V_QSAD_PK_U16_U8': ('B64', 'B64', 'B64', 'B64'), 'V_MQSAD_PK_U16_U8': ('B64', 'B64', 'B64', 'B64'),
   'V_MQSAD_U32_U8': ('B128', 'B64', 'B64', 'B128'),
+  # RDNA4 CVT_PK_F32 instructions: source is 8-bit packed as 16-bit operand
+  'V_CVT_PK_F32_BF8': ('F32', 'B16', None, None), 'V_CVT_PK_F32_FP8': ('F32', 'B16', None, None),
 }
 @cache
 def spec_regs(name: str) -> tuple[int, int, int, int]:
@@ -108,7 +112,7 @@ def spec_is_16bit(name: str) -> bool:
 def spec_is_64bit(name: str) -> bool: return bool(_F64_RE.search(name.upper()))
 _3SRC = {'FMA', 'MAD', 'MIN3', 'MAX3', 'MED3', 'DIV_FIX', 'DIV_FMAS', 'DIV_SCALE', 'SAD', 'LERP', 'ALIGN', 'CUBE', 'BFE', 'BFI',
          'PERM_B32', 'PERMLANE', 'CNDMASK', 'XOR3', 'OR3', 'ADD3', 'LSHL_OR', 'AND_OR', 'LSHL_ADD', 'ADD_LSHL', 'XAD', 'MAXMIN',
-         'MINMAX', 'DOT2', 'DOT4', 'DOT8', 'WMMA', 'CVT_PK_U8', 'MULLIT', 'CO_CI'}
+         'MINMAX', 'MAXIMUMMINIMUM', 'MINIMUMMAXIMUM', 'MAXIMUM3', 'MINIMUM3', 'DOT2', 'DOT4', 'DOT8', 'WMMA', 'CVT_PK_U8', 'MULLIT', 'CO_CI'}
 _2SRC = {'FMAC'}  # FMAC uses dst as implicit accumulator, so only 2 explicit sources
 def spec_num_srcs(name: str) -> int:
   name = name.upper()
@@ -138,17 +142,35 @@ class BitField:
   def __get__(self, obj: None, objtype: type) -> BitField: ...
   @overload
   def __get__(self, obj: object, objtype: type | None = None) -> int: ...
+  # Map RDNA4 class names to their corresponding enum names for op field dynamic lookup
+  _RDNA4_OP_ENUMS = {'VDS': 'DSOp', 'VBUFFER': 'VBUFFEROp', 'VEXPORT': 'EXPOp', 'VFLAT': 'VFLATOp', 'VGLOBAL': 'VGLOBALOp',
+                     'VSCRATCH': 'VSCRATCHOp', 'VIMAGE': 'VIMAGEOp', 'VSAMPLE': 'VSAMPLEOp', 'VDSDIR': 'VDSDIROp'}
+
   def __get__(self, obj, objtype=None):
     if obj is None: return self
     val = unwrap(obj._values.get(self.name, 0))
     # Convert to IntEnum if marker is an IntEnum subclass
     if self.marker and isinstance(self.marker, type) and issubclass(self.marker, IntEnum):
       # VOP3 with VOPC opcodes (0-255) -> VOPCOp, VOP3SD opcodes -> VOP3SDOp
-      if self.marker is VOP3Op:
-        if val < 256: return VOPCOp(val)
-        if val in Inst._VOP3SD_OPS: return VOP3SDOp(val)
+      # Check by name to handle both RDNA3 and RDNA4 enums
+      if self.marker.__name__ == 'VOP3Op':
+        # Get the appropriate enums from the same module as the marker
+        marker_mod = self.marker.__module__
+        import importlib
+        enum_mod = importlib.import_module(marker_mod)
+        if val < 256: return enum_mod.VOPCOp(val)
+        if val in Inst._VOP3SD_OPS: return enum_mod.VOP3SDOp(val)
       try: return self.marker(val)
       except ValueError: pass
+    # For RDNA4 op fields without type annotations, dynamically look up enum
+    elif self.name == 'op' and 'rdna4' in obj.__class__.__module__:
+      import importlib
+      enum_mod = importlib.import_module('extra.assembly.amd.autogen.rdna4.enum')
+      cls_name = obj.__class__.__name__
+      enum_name = self._RDNA4_OP_ENUMS.get(cls_name, cls_name + 'Op')
+      if hasattr(enum_mod, enum_name):
+        try: return getattr(enum_mod, enum_name)(val)
+        except ValueError: pass
     return val
 
 class _Bits:
@@ -429,7 +451,7 @@ class Inst:
     return result + (lit32 & MASK32).to_bytes(4, 'little')
 
   @classmethod
-  def _size(cls) -> int: return 4 if issubclass(cls, Inst32) else 8
+  def _size(cls) -> int: return 4 if issubclass(cls, Inst32) else 12 if issubclass(cls, Inst96) else 8
   def size(self) -> int:
     # Literal is always 4 bytes in the binary (for 64-bit ops, it's in high 32 bits)
     return self._size() + (4 if self._literal is not None else 0)
@@ -489,15 +511,19 @@ class Inst:
 
   def __hash__(self): return hash((self.__class__.__name__, tuple(sorted((k, repr(v)) for k, v in self._values.items())), self._literal))
 
-  def disasm(self) -> str:
+  def disasm(self, wave_size: int = 32) -> str:
     from extra.assembly.amd.asm import disasm
-    return disasm(self)
+    return disasm(self, wave_size)
 
   _enum_map = {'VOP1': VOP1Op, 'VOP2': VOP2Op, 'VOP3': VOP3Op, 'VOP3SD': VOP3SDOp, 'VOP3P': VOP3POp, 'VOPC': VOPCOp,
                'SOP1': SOP1Op, 'SOP2': SOP2Op, 'SOPC': SOPCOp, 'SOPK': SOPKOp, 'SOPP': SOPPOp,
                'SMEM': SMEMOp, 'DS': DSOp, 'FLAT': FLATOp, 'MUBUF': MUBUFOp, 'MTBUF': MTBUFOp, 'MIMG': MIMGOp,
                'VOPD': VOPDOp, 'VINTERP': VINTERPOp}
   _VOP3SD_OPS = {288, 289, 290, 764, 765, 766, 767, 768, 769, 770}
+
+  # Map RDNA4 class names to their corresponding enum names
+  _rdna4_enum_names = {'VDS': 'DSOp', 'VBUFFER': 'VBUFFEROp', 'VEXPORT': 'EXPOp', 'VFLAT': 'VFLATOp', 'VGLOBAL': 'VGLOBALOp',
+                       'VSCRATCH': 'VSCRATCHOp', 'VIMAGE': 'VIMAGEOp', 'VSAMPLE': 'VSAMPLEOp', 'VDSDIR': 'VDSDIROp'}
 
   @property
   def op(self):
@@ -506,6 +532,20 @@ class Inst:
     if val is None: return None
     if hasattr(val, 'name'): return val  # already an enum
     cls_name = self.__class__.__name__
+    # First check if op field has an annotated enum type
+    import typing
+    if 'op' in self.__class__.__annotations__:
+      ann = self.__class__.__annotations__['op']
+      if hasattr(ann, '__metadata__'):
+        for m in typing.get_args(ann)[1:]:
+          if isinstance(m, type) and issubclass(m, IntEnum): return m(val)
+    # Check if this is an RDNA4 class (module path contains rdna4) and get enum from its module
+    if 'rdna4' in self.__class__.__module__:
+      import importlib
+      enum_mod = importlib.import_module('extra.assembly.amd.autogen.rdna4.enum')
+      enum_name = self._rdna4_enum_names.get(cls_name, cls_name + 'Op')
+      if hasattr(enum_mod, enum_name): return getattr(enum_mod, enum_name)(val)
+    # Fall back to static enum map
     assert cls_name in self._enum_map, f"no enum map for {cls_name}"
     return self._enum_map[cls_name](val)
 
@@ -531,3 +571,4 @@ class Inst:
 
 class Inst32(Inst): pass
 class Inst64(Inst): pass
+class Inst96(Inst): pass
