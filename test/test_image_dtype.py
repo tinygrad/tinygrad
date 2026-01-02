@@ -194,7 +194,7 @@ class TestImageDType(unittest.TestCase):
           lst = s.bufs[0].as_buffer().cast("f").tolist()
           print(lst)
           assert not np.any(np.isnan(lst))
-      # NOTE: the w1 grad must realize to a seperate kernel
+      # NOTE: the w1 grad must realize to a separate kernel
       assert w1.grad.uop.is_realized, f"never realized {w1.grad}"
       self.assertEqual(w1.grad.uop.base.buffer.dtype, dtypes.float32)
       self.assertEqual(len(sched), 9)
