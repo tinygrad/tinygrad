@@ -132,20 +132,20 @@ def print_all_packets(packets: list) -> None:
 def assemble(instructions: list) -> bytes:
   return b''.join(inst.to_bytes() for inst in instructions)
 
-def run_asm_sqtt(instructions: list, n_lanes: int = 1, alu_only: bool = False) -> list[bytes]:
-  """Run instructions on AMD hardware and return SQTT blobs.
-  
+def compile_asm_sqtt(instructions: list, alu_only: bool = False) -> AMDProgram:
+  """Compile instructions to an AMDProgram for SQTT tracing.
+
   Args:
-    instructions: List of instructions to run
-    n_lanes: Number of lanes to use
-    alu_only: If True, use minimal kernel config with no kernargs/LDS/scratch for faster startup
+    instructions: List of instructions to compile
+    alu_only: If True, use minimal kernel config with no kernargs/LDS/scratch
+  Returns:
+    Compiled AMDProgram ready to run
   """
   compiler = HIPCompiler(dev.arch)
   instructions = instructions + [s_endpgm()]
   code = assemble(instructions)
-
   byte_str = ', '.join(f'0x{b:02x}' for b in code)
-  
+
   if alu_only:
     asm_src = f""".text
 .globl test
@@ -224,7 +224,27 @@ amdhsa.kernels:
 """
 
   lib = compiler.compile(asm_src)
-  prg = AMDProgram(dev, "test", lib)
+  return AMDProgram(dev, "test", lib)
+
+def run_asm_sqtt(instructions: list, n_lanes: int = 1, alu_only: bool = False) -> list[bytes]:
+  """Compile and run instructions on AMD hardware, return SQTT blobs.
+
+  Args:
+    instructions: List of instructions to run
+    n_lanes: Number of lanes to use
+    alu_only: If True, use minimal kernel config with no kernargs/LDS/scratch
+  """
+  prg = compile_asm_sqtt(instructions, alu_only=alu_only)
+  return run_prg_sqtt(prg, n_lanes=n_lanes, alu_only=alu_only)
+
+def run_prg_sqtt(prg: AMDProgram, n_lanes: int = 1, alu_only: bool = False) -> list[bytes]:
+  """Run a compiled AMDProgram and return SQTT blobs.
+
+  Args:
+    prg: Compiled AMDProgram to run
+    n_lanes: Number of lanes to use
+    alu_only: If True, don't allocate kernarg buffer
+  """
   dev.profile_events.clear()
   if alu_only:
     prg(global_size=(1, 1, 1), local_size=(n_lanes, 1, 1), wait=True)
@@ -232,6 +252,53 @@ amdhsa.kernels:
     out_gpu = dev.allocator.alloc(2048)
     prg(out_gpu, global_size=(1, 1, 1), local_size=(n_lanes, 1, 1), wait=True)
   return [ev.blob for ev in dev.profile_events if isinstance(ev, ProfileSQTTEvent)]
+
+def run_prg_sqtt_batch(prg: AMDProgram, n_runs: int, n_lanes: int = 1) -> list[bytes]:
+  """Run a compiled AMDProgram N times in a single queue submission and return SQTT blobs.
+
+  This builds one queue with N kernel executions, submits it once, and collects SQTT.
+  All N runs are captured in the same SQTT trace, reducing startup jitter.
+
+  Args:
+    prg: Compiled AMDProgram to run
+    n_runs: Number of times to execute the kernel in the queue
+    n_lanes: Number of lanes to use
+  Returns:
+    List of SQTT blobs (one per shader engine)
+  """
+  from typing import cast
+  from tinygrad.runtime.ops_amd import AMDComputeQueue, SQTT_ITRACE_SE_MASK
+  from tinygrad.device import Compiled
+  import struct
+
+  dev.profile_events.clear()
+
+  # Build queue with sqtt_start, N kernel executions, sqtt_stop
+  kernargs = prg.fill_kernargs([], ())
+  q = cast(AMDComputeQueue, dev.hw_compute_queue_t())
+  q.wait(dev.timeline_signal, dev.timeline_value - 1).memory_barrier()
+  q.sqtt_start(dev.sqtt_buffers)
+
+  # Execute kernel N times
+  for _ in range(n_runs):
+    q.exec(prg, kernargs, (1, 1, 1), (n_lanes, 1, 1))
+
+  q.sqtt_stop(dev.sqtt_wptrs)
+  q.signal(dev.timeline_signal, dev.next_timeline())
+  q.submit(dev)
+  dev.synchronize()
+
+  # Collect SQTT blobs
+  blobs = []
+  for se, buf in enumerate(dev.sqtt_buffers):
+    wptr = (dev.sqtt_wptrs.cpu_view().view(fmt='I')[se] & 0x1FFFFFFF) * 32
+    if dev.target[:2] == (11, 0): wptr -= ((buf.va_addr // 32) & 0x1FFFFFFF) * 32
+    if wptr > 0 and wptr <= buf.size:
+      dev.allocator._copyout(sqtt_mv:=memoryview(bytearray(wptr)), buf)
+      resbuf = (struct.pack('<Q', 0x11 | (4 << 13) | (0xf << 16) | (se << 24)) + bytes(sqtt_mv)) if dev.target[0] == 9 else bytes(sqtt_mv)
+      blobs.append(resbuf)
+
+  return blobs
 
 def decode_all_blobs(blobs: list[bytes]) -> list:
   """Decode all blobs and combine packets."""

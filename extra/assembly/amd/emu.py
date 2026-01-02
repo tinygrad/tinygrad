@@ -99,18 +99,18 @@ SMEM_LOAD = {SMEMOp.S_LOAD_B32: 1, SMEMOp.S_LOAD_B64: 2, SMEMOp.S_LOAD_B128: 4, 
 _TRANS_OPS = {'V_RCP_F32', 'V_RCP_F64', 'V_RSQ_F32', 'V_RSQ_F64', 'V_SQRT_F32', 'V_SQRT_F64',
               'V_LOG_F32', 'V_EXP_F32', 'V_SIN_F32', 'V_COS_F32', 'V_RCP_F16', 'V_RSQ_F16', 'V_SQRT_F16'}
 
-# Latency model from hardware measurements:
-#   Startup: WAVESTART -> REG (~137 cycles) -> first instruction (~270 cycles)
+# Latency model from hardware measurements (warm instruction cache):
+#   Startup: WAVESTART -> first instruction (~32 cycles with warm cache, no REG packet)
+#   Cold cache: WAVESTART -> REG (~137 cycles) -> first instruction (~150 cycles after REG)
 #   SALU: issues every cycle, result ready 2 cycles after issue, ALUEXEC at ready time
 #   VALU: issues every cycle, ALUEXEC at issue+8 for each inst, serialized with +1 intervals
 #   For dependent instructions, ALUEXEC is at source_ready + 10 (first dep) or + 9 (chained)
-WAVESTART_TO_REG_CYCLES = 137  # cycles from WAVESTART to REG packet
-REG_TO_INST_CYCLES = 270       # cycles from REG to first instruction issue
+WAVESTART_TO_INST_CYCLES = 32  # cycles from WAVESTART to first instruction (warm cache)
 SALU_LATENCY = 2   # cycles from issue to result ready
 VALU_EXEC_LATENCY = 8  # cycles from issue to ALUEXEC for each instruction
 
 class SQTTState:
-  """SQTT tracing state - emits packets matching real hardware."""
+  """SQTT tracing state - emits packets matching real hardware (warm cache model)."""
   __slots__ = ('cycle', 'packets', 'pending_exec', 'wave_id', 'simd', 'cu', 'sgpr_ready', 'vgpr_ready',
                'last_salu_exec', 'last_valu_exec', 'valu_issue_cycles')
 
@@ -126,12 +126,9 @@ class SQTTState:
     self.valu_issue_cycles: list[int] = []  # issue cycles for pending independent VALU
 
   def emit_wavestart(self):
-    from extra.assembly.amd.sqtt import WAVESTART, REG
+    from extra.assembly.amd.sqtt import WAVESTART
     self.packets.append(WAVESTART(_time=self.cycle, wave=self.wave_id, simd=self.simd, cu_lo=self.cu & 0x7, flag7=self.cu >> 3))
-    self.cycle += WAVESTART_TO_REG_CYCLES
-    # REG packet with slot=4, hi_byte=130, subop=126 (observed from hardware)
-    self.packets.append(REG(_time=self.cycle, slot=4, hi_byte=130, subop=126, val32=0))
-    self.cycle += REG_TO_INST_CYCLES  # advance to first instruction issue
+    self.cycle += WAVESTART_TO_INST_CYCLES
 
   def emit_waveend(self):
     from extra.assembly.amd.sqtt import WAVEEND
@@ -308,8 +305,11 @@ class SQTTState:
       self.emit_aluexec(src)
       last_src = src
     self.pending_exec.clear()
-    # WAVEEND timing: 7 cycles after last SALU exec, 15 cycles after last VALU exec
-    self.cycle += 15 if last_src == AluSrc.VALU else 7
+    # WAVEEND timing: 14 cycles after last instruction if no ALU, 13/15 after last ALUEXEC
+    if last_src is None:
+      self.cycle += 14  # empty program or no ALU ops
+    else:
+      self.cycle += 15 if last_src == AluSrc.VALU else 13
     self.emit_waveend()
 
 # VOPD op -> VOP3 op mapping (VOPD is dual-issue of VOP1/VOP2 ops, use VOP3 enums for pseudocode lookup)
