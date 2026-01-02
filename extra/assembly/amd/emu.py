@@ -440,10 +440,21 @@ DP_LATENCY = 38
 # Pipeline delay from last ALU dispatch to first s_nop IMMEDIATE
 SNOP_PIPELINE_DELAY = 3
 
-# s_nop extra delay: s_nop(N) where 7 <= N <= 18 has +4 extra cycles when not the first instruction after WAVESTART
-# This appears to be a hardware quirk - possibly related to instruction fetch pipeline stages
+# s_nop(N) delays the next instruction's issue by:
+#   issue_delay = N + 1 + SNOP_ISSUE_OVERHEAD + bypass_penalty + extra_stall
+#
+# where:
+#   - SNOP_ISSUE_OVERHEAD = 3 (pipeline overhead)
+#   - bypass_penalty = 4 if N >= 4 and pending ALUEXEC (register cache bypass timeout)
+#   - extra_stall = 4 if N in 11-22 and pending ALUEXEC (additional pipeline hazard)
+#
+# For s_nop IMMEDIATE packet timing (without pending ALUEXEC):
+#   - N in 7-18 has +4 extra delay
+SNOP_ISSUE_OVERHEAD = 3
 SNOP_EXTRA_DELAY_MIN = 7
 SNOP_EXTRA_DELAY_MAX = 18
+SNOP_EXTRA_DELAY_MIN_PENDING = 11
+SNOP_EXTRA_DELAY_MAX_PENDING = 22
 SNOP_EXTRA_DELAY_CYCLES = 4
 
 # Forwarding latencies (cycles until result available for dependent instruction)
@@ -489,6 +500,8 @@ class SQTTState:
     self.pending_aluexec: list[tuple[int, AluSrc]] = []
     # Track last VALU dispatch cycle for s_nop pipeline delay
     self.last_valu_dispatch: int = -100
+    # Track s_nop issue penalty for next VALU (bypass + extra stall)
+    self.snop_issue_penalty: int = 0
 
   def emit(self, pkt_class, **kwargs):
     self.packets.append(pkt_class(_time=self.cycle, **kwargs))
@@ -528,9 +541,12 @@ class SQTTState:
     """Simulate cycles until instruction dispatches, emitting SQTT packets."""
 
     if inst.op == SOPPOp.S_NOP:
+      N = inst.simm16
+      has_pending = bool(self.pending_aluexec)
+
       # s_nop(N) with N >= REGCACHE_BYPASS_TIMEOUT causes pending VALU results to go through
       # the full register file instead of bypass path, adding REGCACHE_BYPASS_PENALTY cycles
-      bypass_penalty = REGCACHE_BYPASS_PENALTY if inst.simm16 >= REGCACHE_BYPASS_TIMEOUT and self.pending_aluexec else 0
+      bypass_penalty = REGCACHE_BYPASS_PENALTY if N >= REGCACHE_BYPASS_TIMEOUT and has_pending else 0
       if bypass_penalty:
         self.pending_aluexec = [(c + bypass_penalty, src) for c, src in self.pending_aluexec]
 
@@ -538,18 +554,23 @@ class SQTTState:
       pipeline_delay = max(0, self.last_valu_dispatch + SNOP_PIPELINE_DELAY - self.cycle)
       for _ in range(pipeline_delay): self.tick()
 
-      # s_nop(N) with SNOP_EXTRA_DELAY_MIN <= N <= SNOP_EXTRA_DELAY_MAX has extra cycles when not first instruction
-      extra_delay = SNOP_EXTRA_DELAY_CYCLES if SNOP_EXTRA_DELAY_MIN <= inst.simm16 <= SNOP_EXTRA_DELAY_MAX and self.inst_count > 0 else 0
-      # With bypass penalty, the s_nop delay also includes the penalty (waiting for register writeback)
-      snop_delay = inst.simm16 + extra_delay + bypass_penalty
-      if bypass_penalty and self.pending_aluexec:
-        # Wait until one cycle after the earliest pending ALUEXEC completes
-        earliest_aluexec = min(c for c, _ in self.pending_aluexec)
-        wait_for_aluexec = max(0, earliest_aluexec + 1 - self.cycle - snop_delay)
-        snop_delay += wait_for_aluexec
+      # Extra delay for s_nop IMMEDIATE timing (affects when IMMEDIATE packets appear)
+      # The range differs based on whether there's a pending ALUEXEC
+      if has_pending:
+        imm_extra_delay = SNOP_EXTRA_DELAY_CYCLES if SNOP_EXTRA_DELAY_MIN_PENDING <= N <= SNOP_EXTRA_DELAY_MAX_PENDING else 0
+      else:
+        imm_extra_delay = SNOP_EXTRA_DELAY_CYCLES if SNOP_EXTRA_DELAY_MIN <= N <= SNOP_EXTRA_DELAY_MAX and self.inst_count > 0 else 0
+
+      # s_nop delay for IMMEDIATE timing
+      snop_delay = N + imm_extra_delay + bypass_penalty
       for _ in range(snop_delay): self.tick()
       self.emit(IMMEDIATE, wave=self.wave_id)
       self.tick()
+
+      # Track issue delay for next instruction (affects when next VALU can dispatch)
+      # This is stored and applied when the next VALU is processed
+      issue_extra_stall = SNOP_EXTRA_DELAY_CYCLES if has_pending and SNOP_EXTRA_DELAY_MIN_PENDING <= N <= SNOP_EXTRA_DELAY_MAX_PENDING else 0
+      self.snop_issue_penalty = bypass_penalty + issue_extra_stall
 
     elif isinstance(inst, (VOP1, VOP2, VOP3)):
       # VALU instruction - handle dependencies and emit VALUINST/ALUEXEC
@@ -563,24 +584,40 @@ class SQTTState:
       # Calculate chain depth: max depth of any source VGPR + 1
       chain_depth = max((self.vgpr_chain_depth.get(r, 0) for r in src_vgprs), default=0) + 1 if has_vgpr_src else 0
 
-      # Effective start is when all sources are ready
-      effective_start = max(dispatch_cycle, source_ready)
-
       # Emit VALUINST at dispatch time
       self.emit(VALUINST, wave=self.wave_id)
       self.last_valu_dispatch = dispatch_cycle
 
-      # ALUEXEC latency depends on chain depth:
-      # - depth 0-1: full latency (6) - no forwarding benefit yet
-      # - depth 2-3: forwarding saves 1 cycle (5)
-      # - depth >= 4: deep chain penalty (9)
-      if chain_depth >= FORWARD_DEPTH_LIMIT:
-        exec_latency = FORWARD_DEEP_LATENCY
-      elif chain_depth >= 2:
-        exec_latency = VALU_FORWARD_LATENCY
+      # ALUEXEC latency calculation for dependent VALUs:
+      # The timing depends on the gap between dispatch and producer completion:
+      # - gap >= 2 (V2 <= source_ready - 2): Pure forwarding, A2 = source_ready + 6 (or 5 for chain depth 2-4)
+      # - gap == 1 (V2 == source_ready - 1): 1-cycle hazard, A2 = source_ready + 7
+      # - gap <= 0 (V2 >= source_ready): Register file read, A2 = max(V2 + 8, source_ready + 9)
+      #
+      # Chain depth affects forwarding:
+      # - depth 1: 6-cycle forwarding (producer wrote to bypass, consumer reads it)
+      # - depth 2-4: 5-cycle forwarding (result already in bypass network, faster access)
+      # - depth >= 5: 9-cycle latency (forwarding network exhausted, back to register file)
+      if has_vgpr_src:
+        gap = source_ready - dispatch_cycle
+        if chain_depth >= FORWARD_DEPTH_LIMIT + 1:  # >= 5 (6th+ instruction in chain, depth 5+)
+          # Forwarding network exhausted - must go through register file
+          completion_cycle = source_ready + FORWARD_DEEP_LATENCY
+        elif gap >= 2:
+          # Pure forwarding: consumer waits for producer, then latency cycles
+          # Chain depth 2-4 gets 5-cycle forwarding, depth 1 gets 6-cycle
+          forwarding_latency = VALU_LATENCY - 1 if chain_depth >= 2 else VALU_LATENCY
+          completion_cycle = source_ready + forwarding_latency
+        elif gap == 1:
+          # 1-cycle hazard: slight delay in forwarding
+          completion_cycle = source_ready + 7
+        else:
+          # No gap or consumer dispatches after producer: register file read
+          completion_cycle = max(dispatch_cycle + 8, source_ready + 9)
       else:
-        exec_latency = VALU_LATENCY
-      completion_cycle = effective_start + exec_latency
+        # Independent VALU: 6 cycle latency
+        completion_cycle = dispatch_cycle + VALU_LATENCY
+
       # Only one ALUEXEC can be emitted per cycle - ensure spacing
       if self.pending_aluexec:
         last_pending = max(c for c, _ in self.pending_aluexec)
