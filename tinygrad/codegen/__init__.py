@@ -1,10 +1,10 @@
 from typing import cast
 import itertools
-from tinygrad.helpers import DEVECTORIZE, TRANSCENDENTAL, SPEC, IMAGE as IMAGE, DEBUG, getenv, TracingKey
+from tinygrad.helpers import DEVECTORIZE, TRANSCENDENTAL, SPEC, DEBUG, getenv, TracingKey
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, pyrender
 from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
 from tinygrad.renderer import Renderer, ProgramSpec
-from tinygrad.dtype import dtypes, PtrDType, ImageDType as ImageDType
+from tinygrad.dtype import dtypes, PtrDType
 from tinygrad.helpers import panic
 from tinygrad.codegen.opt import Opt
 
