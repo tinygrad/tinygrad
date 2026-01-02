@@ -24,7 +24,7 @@ class Group:
 
   # ops that only work on a single warp
 
-  clear_rid = 1000
+  clear_rid = 1000000
   def clear(self, reg:ALL_TILES, value:float=0):
     reg = cast(UOp, reg)
     assert self.warps == 1
@@ -41,7 +41,7 @@ class Group:
   def ones(self, reg:ALL_TILES): return self.clear(reg, 1)
   def neg_inf(self, reg:ALL_TILES): return self.clear(reg, -math.inf)
 
-  copy_rid = 300
+  copy_rid = 3000000
   def copy(self, dst:ALL_TILES, src:ALL_TILES):
     dst, src = cast(UOp, dst), cast(UOp, src)
     assert self.warps == 1
