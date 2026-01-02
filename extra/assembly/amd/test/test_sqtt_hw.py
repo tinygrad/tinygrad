@@ -134,11 +134,11 @@ def assemble(instructions: list) -> bytes:
 
 def wrap_with_nops(instructions: list) -> list:
   """Add epilogue for clean SQTT timing.
-  
+
   Need enough NOPs to cover long-latency ops (DP: 42 cycles, WMMA: 47 cycles).
   With 64 NOPs, the IMMEDIATE phase extends to cover these completions.
   """
-  return instructions + [s_nop(0)]*64 + [s_endpgm()]
+  return instructions + [s_nop(0)]*16 + [s_endpgm()]
 
 def compile_asm_sqtt(instructions: list, alu_only: bool = False) -> AMDProgram:
   """Compile instructions to an AMDProgram for SQTT tracing.

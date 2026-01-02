@@ -88,7 +88,7 @@ def filter_timing_packets(packets: list) -> list:
 
 def filter_noise_packets(packets: list) -> list:
   """Filter out pure timing/noise packets, keeping all meaningful packets."""
-  skip_types = {"NOP", "TS_DELTA_SHORT", "TS_WAVE_STATE", "TS_DELTA_OR_MARK", "TS_DELTA_S5_W2", "TS_DELTA_S5_W3", "TS_DELTA_S8_W3"}
+  skip_types = {"NOP", "TS_DELTA_SHORT", "TS_WAVE_STATE", "TS_DELTA_OR_MARK", "TS_DELTA_S5_W2", "TS_DELTA_S5_W3", "TS_DELTA_S8_W3", "REG"}
   return [p for p in packets if type(p).__name__ not in skip_types]
 
 def get_timing_deltas(packets: list) -> list[tuple[str, int]]:
@@ -223,6 +223,15 @@ class TestEmulatorSQTT(unittest.TestCase):
   def test_empty(self):
     """Empty program - just s_endpgm."""
     self._run_and_compare([], "empty")
+
+  def test_snop32(self):
+    self._run_and_compare([s_nop(32)], "snop32")
+
+  def test_snop_several(self):
+    self._run_and_compare([s_nop(32), s_nop(6), s_nop(12)], "snop_several")
+
+  def test_snop_several_2(self):
+    self._run_and_compare([s_nop(32), s_nop(6), s_nop(12), s_nop(1), s_nop(0), s_nop(11)], "snop_several_2")
 
   def _test_valu_independent_n(self, n: int, trans=False):
     """VALU instructions with no dependencies."""

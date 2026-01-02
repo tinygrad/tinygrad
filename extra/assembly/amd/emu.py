@@ -456,6 +456,8 @@ _DP_OPS = {'V_ADD_F64', 'V_MUL_F64', 'V_FMA_F64', 'V_DIV_F64', 'V_MIN_F64', 'V_M
            'V_DIV_FMAS_F64', 'V_DIV_FIXUP_F64', 'V_CVT_F64_I32', 'V_CVT_F64_U32',
            'V_CVT_I32_F64', 'V_CVT_U32_F64', 'V_CVT_F32_F64', 'V_CVT_F64_F32'}
 
+from extra.assembly.amd.sqtt import WAVESTART, WAVEEND, IMMEDIATE
+
 class SQTTState:
   """SQTT tracing state - emits packets when instructions dispatch."""
 
@@ -468,14 +470,9 @@ class SQTTState:
     self.packets.append(pkt_class(_time=self.cycle, **kwargs))
 
   def emit_wavestart(self):
-    from extra.assembly.amd.sqtt import WAVESTART
     self.emit(WAVESTART, wave=self.wave_id, simd=self.simd, cu_lo=self.cu & 0x7, flag7=self.cu >> 3)
     for _ in range(WAVESTART_TO_INST_CYCLES):
       self.tick()
-
-  def emit_waveend(self):
-    from extra.assembly.amd.sqtt import WAVEEND
-    self.emit(WAVEEND, wave=self.wave_id, simd=self.simd, cu_lo=self.cu & 0x7, flag7=self.cu >> 3)
 
   def tick(self):
     """Process one cycle: emit any completing ALUEXECs, then advance cycle."""
@@ -483,12 +480,16 @@ class SQTTState:
 
   def process_instruction(self, inst: Inst):
     """Simulate cycles until instruction dispatches, emitting SQTT packets."""
-    pass
+
+    if inst.op == SOPPOp.S_NOP:
+      for i in range(inst.simm16): self.tick()
+      self.emit(IMMEDIATE, wave=self.wave_id)
+      self.tick()
 
   def finalize(self):
     """Emit pending ALUEXECs and WAVEEND."""
     # Emit any remaining ALUEXECs
-    self.emit_waveend()
+    self.emit(WAVEEND, wave=self.wave_id, simd=self.simd, cu_lo=self.cu & 0x7, flag7=self.cu >> 3)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # MAIN EXECUTION LOOP
