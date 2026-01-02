@@ -355,7 +355,9 @@ def is_dtype_supported(dtype:DType, device:str|None=None) -> bool:
   if dtype in dtypes.fp8s:
     if device == "CUDA": return not CI and not CUDA_PTX
     if device == "NV": return not CI and not NV_PTX and not NV_NAK
-    if device == "AMD": return not CI and getattr(Device["AMD"], "target") in {(9,4,2), (9,5,0)}
+    if device == "AMD":
+      # target is (major, minor, stepping) derived from gfx_target_version in ops_amd
+      return not CI and getattr(Device["AMD"], "target") in {(9,4,2), (9,5,0), (12,0,0), (12,0,1)}
     return device in {"PYTHON", "NULL"}
   if device == "WEBGPU": return dtype in [dtypes.bool, dtypes.char, dtypes.uchar, dtypes.short,
                                           dtypes.ushort, dtypes.float, dtypes.int32, dtypes.uint32, dtypes.half]
