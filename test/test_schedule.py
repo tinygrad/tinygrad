@@ -11,7 +11,7 @@ from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat
-from tinygrad.helpers import DEBUG, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp, CI
+from tinygrad.helpers import CI, DEBUG, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp
 from tinygrad.schedule.rangeify import Kernel
 from tinygrad.engine.realize import CompiledRunner, run_schedule
 

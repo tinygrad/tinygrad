@@ -1,7 +1,7 @@
 # basic self-contained tests of the external functionality of tinygrad
 import unittest, random
 from tinygrad import Tensor, Context, Variable, TinyJit, dtypes, Device, nn
-from tinygrad.helpers import IMAGE, getenv, CI
+from tinygrad.helpers import IMAGE, CI, getenv
 
 class TestTiny(unittest.TestCase):
 

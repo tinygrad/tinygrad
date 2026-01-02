@@ -60,8 +60,7 @@ class TestDevice(unittest.TestCase):
                         shell=True, check=True, env={**os.environ, "DEV": "AMD", "AMD_CC": "HIP"})
     else: self.skipTest("only run on CPU/AMD")
 
-  #@unittest.skipIf((WIN and CI) or (not Device.DEFAULT == "CPU"), "skipping windows test")
-  @unittest.skipIf(not Device.DEFAULT == "CPU", "only run on CPU")
+  @unittest.skipIf((WIN and CI) or (not Device.DEFAULT == "CPU"), "skipping windows test")
   def test_env_online(self):
     from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler
     try: _, _ = CPULLVMCompiler(), ClangJITCompiler()

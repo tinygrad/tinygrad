@@ -1,13 +1,13 @@
 from typing_extensions import Callable
 import hashlib, random, unittest
-from tinygrad import Tensor, Device, dtypes #, getenv
+from tinygrad import Tensor, Device, getenv, dtypes
 from test.helpers import slow
 from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import UOp
 from tinygrad.engine.jit import TinyJit
 
 @unittest.skipUnless(is_dtype_supported(dtypes.uint8) and is_dtype_supported(dtypes.uint64), "Device must support uint8 and uint64")
-#@unittest.skipIf(getenv("MOCKGPU") and Device.DEFAULT == "NV", "crashes in NV CI")
+@unittest.skipIf(getenv("MOCKGPU") and Device.DEFAULT == "NV", "crashes in NV CI")
 class TestHashing(unittest.TestCase):
   def _python_hash_1mb(self, data:bytes):
     chunks = [data[i:i+4096] for i in range(0, len(data), 4096)]
@@ -21,7 +21,7 @@ class TestHashing(unittest.TestCase):
     self.assertEqual(bytes(out.data()), expected)
 
 @unittest.skipUnless(is_dtype_supported(dtypes.uint8) and is_dtype_supported(dtypes.uint64), "Device must support uint8 and uint64")
-#@unittest.skipIf(getenv("MOCKGPU") and Device.DEFAULT == "NV", "crashes in NV CI")
+@unittest.skipIf(getenv("MOCKGPU") and Device.DEFAULT == "NV", "crashes in NV CI")
 class TestKeccak(unittest.TestCase):
   def setUp(self) -> None: random.seed(1337)
 
