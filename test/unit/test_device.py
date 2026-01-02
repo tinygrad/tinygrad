@@ -2,7 +2,7 @@
 import unittest, os, subprocess
 from tinygrad import Tensor
 from tinygrad.device import Device, Compiler, enumerate_devices_str
-from tinygrad.helpers import diskcache_get, diskcache_put, getenv, Context #, WIN, CI
+from tinygrad.helpers import diskcache_get, diskcache_put, getenv, Context, WIN, CI
 
 class TestDevice(unittest.TestCase):
   def test_canonicalize(self):
@@ -28,7 +28,7 @@ class TestDevice(unittest.TestCase):
     self.assertEqual(Device.canonicalize(None), device)
     Device.DEFAULT = device
 
-  #@unittest.skipIf(WIN and CI, "skipping windows test") # TODO: subproccess causes memory violation?
+  @unittest.skipIf(WIN and CI, "skipping windows test") # TODO: subproccess causes memory violation?
   def test_env_overwrite_default_compiler(self):
     if Device.DEFAULT == "CPU":
       from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler

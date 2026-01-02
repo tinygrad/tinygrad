@@ -11,7 +11,7 @@ from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, ImageDType
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat
-from tinygrad.helpers import DEBUG, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp #, CI
+from tinygrad.helpers import DEBUG, SPLIT_REDUCEOP, GlobalCounters, Context, getenv, all_same, temp, CI
 from tinygrad.schedule.rangeify import Kernel
 from tinygrad.engine.realize import CompiledRunner, run_schedule
 
@@ -126,7 +126,7 @@ class TestSchedule(unittest.TestCase):
     run_schedule(check_schedule(xt, 1))
     np.testing.assert_equal(xt.numpy(), X.numpy()[1][0])
 
-  #@unittest.skipIf(CI and Device.DEFAULT == "NV", "crashes on NV CI")
+  @unittest.skipIf(CI and Device.DEFAULT == "NV", "crashes on NV CI")
   def test_add_chain_buffers(self):
     N = 31
     with Context(TRACK_MATCH_STATS=0, DEBUG=0):
@@ -1845,7 +1845,7 @@ class TestSchedule(unittest.TestCase):
     new_uop = a.reshape(4,1).realize().uop
     assert new_uop.base.op is Ops.BUFFER
 
-  #@unittest.skipIf(CI and Device.DEFAULT == "NV", "crashes on NV CI")
+  @unittest.skipIf(CI and Device.DEFAULT == "NV", "crashes on NV CI")
   def test_limit_bufs_with_var(self):
     N = 31
     with Context(TRACK_MATCH_STATS=0, DEBUG=0):
