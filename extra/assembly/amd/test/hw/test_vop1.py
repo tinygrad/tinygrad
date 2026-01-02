@@ -692,5 +692,551 @@ class TestConversionRounding(unittest.TestCase):
     self.assertLess(result, 1e-6)
 
 
+class TestSqrt(unittest.TestCase):
+  """Tests for V_SQRT_F32 - square root."""
+
+  def test_v_sqrt_f32_normal(self):
+    """V_SQRT_F32 of 4.0 returns 2.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 4.0),
+      v_sqrt_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 2.0, places=5)
+
+  def test_v_sqrt_f32_one(self):
+    """V_SQRT_F32 of 1.0 returns 1.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 1.0),
+      v_sqrt_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 1.0, places=5)
+
+  def test_v_sqrt_f32_zero(self):
+    """V_SQRT_F32 of 0.0 returns 0.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),
+      v_sqrt_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(i2f(st.vgpr[0][1]), 0.0)
+
+  def test_v_sqrt_f32_neg_zero(self):
+    """V_SQRT_F32 of -0.0 returns -0.0."""
+    instructions = [
+      s_mov_b32(s[0], 0x80000000),  # -0.0
+      v_mov_b32_e32(v[0], s[0]),
+      v_sqrt_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0x80000000)  # -0.0
+
+  def test_v_sqrt_f32_inf(self):
+    """V_SQRT_F32 of +inf returns +inf."""
+    import math
+    instructions = [
+      s_mov_b32(s[0], 0x7f800000),  # +inf
+      v_mov_b32_e32(v[0], s[0]),
+      v_sqrt_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertTrue(math.isinf(i2f(st.vgpr[0][1])))
+    self.assertGreater(i2f(st.vgpr[0][1]), 0)
+
+  def test_v_sqrt_f32_negative(self):
+    """V_SQRT_F32 of negative value returns NaN."""
+    import math
+    instructions = [
+      v_mov_b32_e32(v[0], -1.0),
+      v_sqrt_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertTrue(math.isnan(i2f(st.vgpr[0][1])))
+
+  def test_v_sqrt_f32_nan(self):
+    """V_SQRT_F32 of NaN returns NaN."""
+    import math
+    instructions = [
+      s_mov_b32(s[0], 0x7fc00000),  # quiet NaN
+      v_mov_b32_e32(v[0], s[0]),
+      v_sqrt_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertTrue(math.isnan(i2f(st.vgpr[0][1])))
+
+  def test_v_sqrt_f32_small(self):
+    """V_SQRT_F32 of small value (0.25) returns 0.5."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0.25),
+      v_sqrt_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 0.5, places=5)
+
+
+class TestRsq(unittest.TestCase):
+  """Tests for V_RSQ_F32 - reciprocal square root (1/sqrt(x))."""
+
+  def test_v_rsq_f32_normal(self):
+    """V_RSQ_F32 of 4.0 returns 0.5."""
+    instructions = [
+      v_mov_b32_e32(v[0], 4.0),
+      v_rsq_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 0.5, places=5)
+
+  def test_v_rsq_f32_one(self):
+    """V_RSQ_F32 of 1.0 returns 1.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 1.0),
+      v_rsq_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 1.0, places=5)
+
+  def test_v_rsq_f32_zero(self):
+    """V_RSQ_F32 of 0 returns +inf."""
+    import math
+    instructions = [
+      v_mov_b32_e32(v[0], 0),
+      v_rsq_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertTrue(math.isinf(i2f(st.vgpr[0][1])))
+    self.assertGreater(i2f(st.vgpr[0][1]), 0)
+
+  def test_v_rsq_f32_neg_zero(self):
+    """V_RSQ_F32 of -0.0 returns -inf."""
+    import math
+    instructions = [
+      s_mov_b32(s[0], 0x80000000),  # -0.0
+      v_mov_b32_e32(v[0], s[0]),
+      v_rsq_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertTrue(math.isinf(i2f(st.vgpr[0][1])))
+    self.assertLess(i2f(st.vgpr[0][1]), 0)
+
+  def test_v_rsq_f32_inf(self):
+    """V_RSQ_F32 of +inf returns 0."""
+    instructions = [
+      s_mov_b32(s[0], 0x7f800000),  # +inf
+      v_mov_b32_e32(v[0], s[0]),
+      v_rsq_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(i2f(st.vgpr[0][1]), 0.0)
+
+  def test_v_rsq_f32_negative(self):
+    """V_RSQ_F32 of negative value returns NaN."""
+    import math
+    instructions = [
+      v_mov_b32_e32(v[0], -1.0),
+      v_rsq_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertTrue(math.isnan(i2f(st.vgpr[0][1])))
+
+  def test_v_rsq_f32_large(self):
+    """V_RSQ_F32 of large value."""
+    instructions = [
+      s_mov_b32(s[0], f2i(1e10)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_rsq_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][1])
+    # 1/sqrt(1e10) ~= 1e-5
+    self.assertAlmostEqual(result, 1e-5, places=8)
+
+
+class TestLog(unittest.TestCase):
+  """Tests for V_LOG_F32 - base-2 logarithm."""
+
+  def test_v_log_f32_one(self):
+    """V_LOG_F32 of 1.0 returns 0.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 1.0),
+      v_log_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 0.0, places=4)
+
+  def test_v_log_f32_two(self):
+    """V_LOG_F32 of 2.0 returns 1.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 2.0),
+      v_log_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 1.0, places=4)
+
+  def test_v_log_f32_four(self):
+    """V_LOG_F32 of 4.0 returns 2.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 4.0),
+      v_log_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 2.0, places=4)
+
+  def test_v_log_f32_half(self):
+    """V_LOG_F32 of 0.5 returns -1.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0.5),
+      v_log_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), -1.0, places=4)
+
+  def test_v_log_f32_zero(self):
+    """V_LOG_F32 of 0 returns -inf."""
+    import math
+    instructions = [
+      v_mov_b32_e32(v[0], 0),
+      v_log_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertTrue(math.isinf(i2f(st.vgpr[0][1])))
+    self.assertLess(i2f(st.vgpr[0][1]), 0)
+
+  def test_v_log_f32_inf(self):
+    """V_LOG_F32 of +inf returns +inf."""
+    import math
+    instructions = [
+      s_mov_b32(s[0], 0x7f800000),  # +inf
+      v_mov_b32_e32(v[0], s[0]),
+      v_log_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertTrue(math.isinf(i2f(st.vgpr[0][1])))
+    self.assertGreater(i2f(st.vgpr[0][1]), 0)
+
+  def test_v_log_f32_negative(self):
+    """V_LOG_F32 of negative value returns NaN."""
+    import math
+    instructions = [
+      v_mov_b32_e32(v[0], -1.0),
+      v_log_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertTrue(math.isnan(i2f(st.vgpr[0][1])))
+
+
+class TestCos(unittest.TestCase):
+  """Tests for V_COS_F32 - cosine (input in cycles, not radians)."""
+
+  def test_v_cos_f32_zero(self):
+    """V_COS_F32 at 0 cycles = cos(0) = 1.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),
+      v_cos_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 1.0, places=4)
+
+  def test_v_cos_f32_quarter(self):
+    """V_COS_F32 at 0.25 cycles = cos(pi/2) = 0.0."""
+    instructions = [
+      s_mov_b32(s[0], f2i(0.25)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_cos_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 0.0, places=4)
+
+  def test_v_cos_f32_half(self):
+    """V_COS_F32 at 0.5 cycles = cos(pi) = -1.0."""
+    instructions = [
+      s_mov_b32(s[0], f2i(0.5)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_cos_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), -1.0, places=4)
+
+  def test_v_cos_f32_full(self):
+    """V_COS_F32 at 1.0 cycles = cos(2*pi) = 1.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 1.0),
+      v_cos_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 1.0, places=4)
+
+  def test_v_cos_f32_large(self):
+    """V_COS_F32 for large input value."""
+    import math
+    val = 132000.0
+    instructions = [
+      s_mov_b32(s[0], f2i(val)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_cos_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][1])
+    expected = math.cos(val * 2 * math.pi)
+    self.assertAlmostEqual(result, expected, places=2)
+
+
+class TestFractEdgeCases(unittest.TestCase):
+  """Additional edge case tests for V_FRACT_F32."""
+
+  def test_v_fract_f32_negative(self):
+    """V_FRACT_F32 of -1.25 should return 0.75 (fract is always positive)."""
+    instructions = [
+      s_mov_b32(s[0], f2i(-1.25)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_fract_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][1])
+    self.assertAlmostEqual(result, 0.75, places=5)
+
+  def test_v_fract_f32_negative_small(self):
+    """V_FRACT_F32 of -0.25 should return 0.75."""
+    instructions = [
+      s_mov_b32(s[0], f2i(-0.25)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_fract_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][1])
+    self.assertAlmostEqual(result, 0.75, places=5)
+
+  def test_v_fract_f32_whole_number(self):
+    """V_FRACT_F32 of 5.0 should return 0.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 5.0),
+      v_fract_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][1])
+    self.assertAlmostEqual(result, 0.0, places=5)
+
+  def test_v_fract_f32_negative_whole(self):
+    """V_FRACT_F32 of -5.0 should return 0.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], -5.0),
+      v_fract_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][1])
+    self.assertAlmostEqual(result, 0.0, places=5)
+
+  def test_v_fract_f32_zero(self):
+    """V_FRACT_F32 of 0.0 returns 0.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),
+      v_fract_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(i2f(st.vgpr[0][1]), 0.0)
+
+  def test_v_fract_f32_inf(self):
+    """V_FRACT_F32 of +inf returns NaN."""
+    import math
+    instructions = [
+      s_mov_b32(s[0], 0x7f800000),  # +inf
+      v_mov_b32_e32(v[0], s[0]),
+      v_fract_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertTrue(math.isnan(i2f(st.vgpr[0][1])))
+
+  def test_v_fract_f32_nan(self):
+    """V_FRACT_F32 of NaN returns NaN."""
+    import math
+    instructions = [
+      s_mov_b32(s[0], 0x7fc00000),  # quiet NaN
+      v_mov_b32_e32(v[0], s[0]),
+      v_fract_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertTrue(math.isnan(i2f(st.vgpr[0][1])))
+
+
+class TestF16EdgeCases(unittest.TestCase):
+  """Additional F16 conversion edge cases."""
+
+  def test_v_cvt_f32_f16_inf(self):
+    """V_CVT_F32_F16 converts f16 infinity to f32 infinity."""
+    import math
+    instructions = [
+      s_mov_b32(s[0], 0x7c00),  # f16 +inf
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_f32_f16_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertTrue(math.isinf(i2f(st.vgpr[0][1])))
+    self.assertGreater(i2f(st.vgpr[0][1]), 0)
+
+  def test_v_cvt_f32_f16_neg_inf(self):
+    """V_CVT_F32_F16 converts f16 -inf to f32 -inf."""
+    import math
+    instructions = [
+      s_mov_b32(s[0], 0xfc00),  # f16 -inf
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_f32_f16_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertTrue(math.isinf(i2f(st.vgpr[0][1])))
+    self.assertLess(i2f(st.vgpr[0][1]), 0)
+
+  def test_v_cvt_f32_f16_nan(self):
+    """V_CVT_F32_F16 converts f16 NaN to f32 NaN."""
+    import math
+    instructions = [
+      s_mov_b32(s[0], 0x7e00),  # f16 quiet NaN
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_f32_f16_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertTrue(math.isnan(i2f(st.vgpr[0][1])))
+
+  def test_v_cvt_f32_f16_neg_zero(self):
+    """V_CVT_F32_F16 preserves negative zero."""
+    instructions = [
+      s_mov_b32(s[0], 0x8000),  # f16 -0.0
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_f32_f16_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0x80000000)
+
+  def test_v_cvt_f16_f32_overflow(self):
+    """V_CVT_F16_F32 converts large f32 to f16 infinity."""
+    instructions = [
+      s_mov_b32(s[0], f2i(100000.0)),  # too large for f16
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_f16_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    lo_bits = st.vgpr[0][1] & 0xffff
+    self.assertEqual(lo_bits, 0x7c00)  # f16 +inf
+
+  def test_v_cvt_f16_f32_underflow(self):
+    """V_CVT_F16_F32 converts very small f32 to f16 zero or denormal."""
+    instructions = [
+      s_mov_b32(s[0], f2i(1e-10)),  # very small, below f16 range
+      v_mov_b32_e32(v[0], s[0]),
+      v_cvt_f16_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    lo_bits = st.vgpr[0][1] & 0xffff
+    # Should be zero or very small denormal
+    self.assertLess(lo_bits, 0x0400)  # Less than smallest normal f16
+
+
+class TestExpEdgeCases(unittest.TestCase):
+  """Additional edge cases for V_EXP_F32."""
+
+  def test_v_exp_f32_zero(self):
+    """V_EXP_F32 of 0.0 returns 1.0 (2^0 = 1)."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),
+      v_exp_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 1.0, places=5)
+
+  def test_v_exp_f32_one(self):
+    """V_EXP_F32 of 1.0 returns 2.0 (2^1 = 2)."""
+    instructions = [
+      v_mov_b32_e32(v[0], 1.0),
+      v_exp_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 2.0, places=5)
+
+  def test_v_exp_f32_neg_one(self):
+    """V_EXP_F32 of -1.0 returns 0.5 (2^-1 = 0.5)."""
+    instructions = [
+      v_mov_b32_e32(v[0], -1.0),
+      v_exp_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 0.5, places=5)
+
+  def test_v_exp_f32_inf(self):
+    """V_EXP_F32 of +inf returns +inf."""
+    import math
+    instructions = [
+      s_mov_b32(s[0], 0x7f800000),  # +inf
+      v_mov_b32_e32(v[0], s[0]),
+      v_exp_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertTrue(math.isinf(i2f(st.vgpr[0][1])))
+    self.assertGreater(i2f(st.vgpr[0][1]), 0)
+
+  def test_v_exp_f32_neg_inf(self):
+    """V_EXP_F32 of -inf returns 0."""
+    instructions = [
+      s_mov_b32(s[0], 0xff800000),  # -inf
+      v_mov_b32_e32(v[0], s[0]),
+      v_exp_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(i2f(st.vgpr[0][1]), 0.0)
+
+  def test_v_exp_f32_nan(self):
+    """V_EXP_F32 of NaN returns NaN."""
+    import math
+    instructions = [
+      s_mov_b32(s[0], 0x7fc00000),  # quiet NaN
+      v_mov_b32_e32(v[0], s[0]),
+      v_exp_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertTrue(math.isnan(i2f(st.vgpr[0][1])))
+
+
+class TestFloorEdgeCases(unittest.TestCase):
+  """Additional edge cases for V_FLOOR_F32."""
+
+  def test_v_floor_f32_negative(self):
+    """V_FLOOR_F32 of -2.3 returns -3.0."""
+    instructions = [
+      s_mov_b32(s[0], f2i(-2.3)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_floor_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), -3.0, places=5)
+
+  def test_v_floor_f32_neg_zero(self):
+    """V_FLOOR_F32 of -0.0 returns -0.0."""
+    instructions = [
+      s_mov_b32(s[0], 0x80000000),  # -0.0
+      v_mov_b32_e32(v[0], s[0]),
+      v_floor_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0x80000000)
+
+  def test_v_floor_f32_small_positive(self):
+    """V_FLOOR_F32 of 0.9 returns 0.0."""
+    instructions = [
+      s_mov_b32(s[0], f2i(0.9)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_floor_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(i2f(st.vgpr[0][1]), 0.0)
+
+  def test_v_floor_f32_small_negative(self):
+    """V_FLOOR_F32 of -0.9 returns -1.0."""
+    instructions = [
+      s_mov_b32(s[0], f2i(-0.9)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_floor_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), -1.0, places=5)
+
+
 if __name__ == '__main__':
   unittest.main()

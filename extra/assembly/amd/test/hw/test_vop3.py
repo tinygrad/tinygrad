@@ -1620,5 +1620,647 @@ class TestReadlane(unittest.TestCase):
     self.assertEqual(st.sgpr[4], 6)
 
 
+class TestMed3(unittest.TestCase):
+  """Tests for V_MED3 - median of 3 values."""
+
+  def test_v_med3_f32_basic(self):
+    """V_MED3_F32: median of 1.0, 2.0, 3.0 is 2.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], 2.0),
+      v_mov_b32_e32(v[2], 3.0),
+      v_med3_f32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][3]), 2.0, places=5)
+
+  def test_v_med3_f32_reversed(self):
+    """V_MED3_F32: median of 3.0, 2.0, 1.0 is still 2.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 3.0),
+      v_mov_b32_e32(v[1], 2.0),
+      v_mov_b32_e32(v[2], 1.0),
+      v_med3_f32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][3]), 2.0, places=5)
+
+  def test_v_med3_f32_two_equal(self):
+    """V_MED3_F32: median of 1.0, 3.0, 3.0 is 3.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], 3.0),
+      v_mov_b32_e32(v[2], 3.0),
+      v_med3_f32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][3]), 3.0, places=5)
+
+  def test_v_med3_f32_all_equal(self):
+    """V_MED3_F32: median of 5.0, 5.0, 5.0 is 5.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 5.0),
+      v_mov_b32_e32(v[1], 5.0),
+      v_mov_b32_e32(v[2], 5.0),
+      v_med3_f32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][3]), 5.0, places=5)
+
+  def test_v_med3_f32_negative(self):
+    """V_MED3_F32: median of -1.0, 0.0, 1.0 is 0.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], -1.0),
+      v_mov_b32_e32(v[1], 0.0),
+      v_mov_b32_e32(v[2], 1.0),
+      v_med3_f32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][3]), 0.0, places=5)
+
+  def test_v_med3_f32_with_nan(self):
+    """V_MED3_F32: NaN handling - returns min of non-NaN values."""
+    import math
+    instructions = [
+      s_mov_b32(s[0], 0x7fc00000),  # NaN
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], 1.0),
+      v_mov_b32_e32(v[2], 2.0),
+      v_med3_f32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][3])
+    # With one NaN, result should be min of non-NaN values
+    self.assertAlmostEqual(result, 1.0, places=5)
+
+  def test_v_med3_i32_basic(self):
+    """V_MED3_I32: median of signed integers."""
+    instructions = [
+      s_mov_b32(s[0], (-5) & 0xFFFFFFFF),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], 0),
+      v_mov_b32_e32(v[2], 10),
+      v_med3_i32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][3], 0)
+
+  def test_v_med3_i32_all_negative(self):
+    """V_MED3_I32: median of -10, -5, -1 is -5."""
+    instructions = [
+      s_mov_b32(s[0], (-10) & 0xFFFFFFFF),
+      s_mov_b32(s[1], (-5) & 0xFFFFFFFF),
+      s_mov_b32(s[2], (-1) & 0xFFFFFFFF),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], s[2]),
+      v_med3_i32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][3], (-5) & 0xFFFFFFFF)
+
+  def test_v_med3_u32_basic(self):
+    """V_MED3_U32: median of unsigned integers."""
+    instructions = [
+      v_mov_b32_e32(v[0], 100),
+      v_mov_b32_e32(v[1], 200),
+      v_mov_b32_e32(v[2], 150),
+      v_med3_u32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][3], 150)
+
+  def test_v_med3_u32_large(self):
+    """V_MED3_U32: median with large unsigned values."""
+    instructions = [
+      s_mov_b32(s[0], 0xFFFFFFFF),
+      s_mov_b32(s[1], 0x80000000),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], 0),
+      v_med3_u32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][3], 0x80000000)
+
+
+class TestMinMax(unittest.TestCase):
+  """Tests for V_MIN/V_MAX with edge cases including NaN."""
+
+  def test_v_min_f32_basic(self):
+    """V_MIN_F32: min of 1.0 and 2.0 is 1.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], 2.0),
+      v_min_f32_e32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][2]), 1.0, places=5)
+
+  def test_v_max_f32_basic(self):
+    """V_MAX_F32: max of 1.0 and 2.0 is 2.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], 2.0),
+      v_max_f32_e32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][2]), 2.0, places=5)
+
+  def test_v_min_f32_with_nan_first(self):
+    """V_MIN_F32: min(NaN, 1.0) returns 1.0 (IEEE 754-2008)."""
+    instructions = [
+      s_mov_b32(s[0], 0x7fc00000),  # NaN
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], 1.0),
+      v_min_f32_e32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][2]), 1.0, places=5)
+
+  def test_v_min_f32_with_nan_second(self):
+    """V_MIN_F32: min(1.0, NaN) returns 1.0."""
+    instructions = [
+      s_mov_b32(s[0], 0x7fc00000),  # NaN
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], s[0]),
+      v_min_f32_e32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][2]), 1.0, places=5)
+
+  def test_v_max_f32_with_nan(self):
+    """V_MAX_F32: max(NaN, 1.0) returns 1.0."""
+    instructions = [
+      s_mov_b32(s[0], 0x7fc00000),  # NaN
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], 1.0),
+      v_max_f32_e32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][2]), 1.0, places=5)
+
+  def test_v_min_f32_neg_zero(self):
+    """V_MIN_F32: min(+0, -0) should return -0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),          # +0
+      s_mov_b32(s[0], 0x80000000),     # -0
+      v_mov_b32_e32(v[1], s[0]),
+      v_min_f32_e32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # -0 < +0 according to IEEE 754 totalOrder
+    self.assertEqual(st.vgpr[0][2], 0x80000000)
+
+  def test_v_max_f32_neg_zero(self):
+    """V_MAX_F32: max(+0, -0) should return +0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),          # +0
+      s_mov_b32(s[0], 0x80000000),     # -0
+      v_mov_b32_e32(v[1], s[0]),
+      v_max_f32_e32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0)
+
+  def test_v_min_i32_signed(self):
+    """V_MIN_I32: handles signed comparison correctly."""
+    instructions = [
+      s_mov_b32(s[0], (-5) & 0xFFFFFFFF),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], 5),
+      v_min_i32_e32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], (-5) & 0xFFFFFFFF)
+
+  def test_v_max_u32_large(self):
+    """V_MAX_U32: handles large unsigned values."""
+    instructions = [
+      s_mov_b32(s[0], 0xFFFFFFFF),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], 100),
+      v_max_u32_e32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0xFFFFFFFF)
+
+
+class TestCeil(unittest.TestCase):
+  """Tests for V_CEIL_F32."""
+
+  def test_v_ceil_f32_positive_frac(self):
+    """V_CEIL_F32: ceil(2.3) = 3.0."""
+    instructions = [
+      s_mov_b32(s[0], f2i(2.3)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_ceil_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 3.0, places=5)
+
+  def test_v_ceil_f32_negative_frac(self):
+    """V_CEIL_F32: ceil(-2.3) = -2.0."""
+    instructions = [
+      s_mov_b32(s[0], f2i(-2.3)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_ceil_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), -2.0, places=5)
+
+  def test_v_ceil_f32_whole(self):
+    """V_CEIL_F32: ceil(5.0) = 5.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 5.0),
+      v_ceil_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 5.0, places=5)
+
+  def test_v_ceil_f32_zero(self):
+    """V_CEIL_F32: ceil(0.0) = 0.0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),
+      v_ceil_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(i2f(st.vgpr[0][1]), 0.0)
+
+  def test_v_ceil_f32_neg_zero(self):
+    """V_CEIL_F32: ceil(-0.0) = -0.0."""
+    instructions = [
+      s_mov_b32(s[0], 0x80000000),
+      v_mov_b32_e32(v[0], s[0]),
+      v_ceil_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0x80000000)
+
+  def test_v_ceil_f32_small_positive(self):
+    """V_CEIL_F32: ceil(0.1) = 1.0."""
+    instructions = [
+      s_mov_b32(s[0], f2i(0.1)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_ceil_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 1.0, places=5)
+
+  def test_v_ceil_f32_small_negative(self):
+    """V_CEIL_F32: ceil(-0.1) = -0.0."""
+    instructions = [
+      s_mov_b32(s[0], f2i(-0.1)),
+      v_mov_b32_e32(v[0], s[0]),
+      v_ceil_f32_e32(v[1], v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    result = i2f(st.vgpr[0][1])
+    self.assertEqual(result, 0.0)
+
+
+class TestAlignBit(unittest.TestCase):
+  """Tests for V_ALIGNBIT_B32 and V_ALIGNBYTE_B32."""
+
+  def test_v_alignbit_b32_zero_shift(self):
+    """V_ALIGNBIT_B32: shift by 0 returns src1."""
+    instructions = [
+      s_mov_b32(s[0], 0x12345678),
+      s_mov_b32(s[1], 0xAABBCCDD),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], 0),
+      v_alignbit_b32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][3], 0xAABBCCDD)
+
+  def test_v_alignbit_b32_shift_8(self):
+    """V_ALIGNBIT_B32: shift by 8 bits."""
+    instructions = [
+      s_mov_b32(s[0], 0x12345678),
+      s_mov_b32(s[1], 0xAABBCCDD),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], 8),
+      v_alignbit_b32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # (0x12345678 << 24) | (0xAABBCCDD >> 8) = 0x78AABBCC
+    self.assertEqual(st.vgpr[0][3], 0x78AABBCC)
+
+  def test_v_alignbit_b32_shift_16(self):
+    """V_ALIGNBIT_B32: shift by 16 bits."""
+    instructions = [
+      s_mov_b32(s[0], 0x12345678),
+      s_mov_b32(s[1], 0xAABBCCDD),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], 16),
+      v_alignbit_b32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # (0x12345678 << 16) | (0xAABBCCDD >> 16) = 0x5678AABB
+    self.assertEqual(st.vgpr[0][3], 0x5678AABB)
+
+  def test_v_alignbit_b32_shift_32(self):
+    """V_ALIGNBIT_B32: shift by 32 returns src0."""
+    instructions = [
+      s_mov_b32(s[0], 0x12345678),
+      s_mov_b32(s[1], 0xAABBCCDD),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], 32),
+      v_alignbit_b32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # Hardware only uses low 5 bits of shift, so shift 32 = shift 0
+    self.assertEqual(st.vgpr[0][3], 0xAABBCCDD)
+
+  def test_v_alignbyte_b32_shift_1(self):
+    """V_ALIGNBYTE_B32: shift by 1 byte."""
+    instructions = [
+      s_mov_b32(s[0], 0x12345678),
+      s_mov_b32(s[1], 0xAABBCCDD),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], 1),
+      v_alignbyte_b32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # (0x12345678 << 24) | (0xAABBCCDD >> 8) = 0x78AABBCC
+    self.assertEqual(st.vgpr[0][3], 0x78AABBCC)
+
+  def test_v_alignbyte_b32_shift_3(self):
+    """V_ALIGNBYTE_B32: shift by 3 bytes."""
+    instructions = [
+      s_mov_b32(s[0], 0x12345678),
+      s_mov_b32(s[1], 0xAABBCCDD),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mov_b32_e32(v[2], 3),
+      v_alignbyte_b32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # (0x12345678 << 8) | (0xAABBCCDD >> 24) = 0x345678AA
+    self.assertEqual(st.vgpr[0][3], 0x345678AA)
+
+
+class TestShiftEdgeCases(unittest.TestCase):
+  """Tests for shift operations with edge cases."""
+
+  def test_v_lshlrev_b32_by_0(self):
+    """V_LSHLREV_B32: shift by 0 returns original."""
+    instructions = [
+      s_mov_b32(s[0], 0x12345678),
+      v_mov_b32_e32(v[0], s[0]),
+      v_lshlrev_b32_e32(v[1], 0, v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0x12345678)
+
+  def test_v_lshlrev_b32_by_31(self):
+    """V_LSHLREV_B32: shift by 31 bits."""
+    instructions = [
+      v_mov_b32_e32(v[0], 1),
+      v_lshlrev_b32_e32(v[1], 31, v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0x80000000)
+
+  def test_v_lshlrev_b32_by_32(self):
+    """V_LSHLREV_B32: shift by 32 - only low 5 bits used."""
+    instructions = [
+      v_mov_b32_e32(v[0], 1),
+      v_lshlrev_b32_e32(v[1], 32, v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # 32 & 0x1f = 0, so no shift
+    self.assertEqual(st.vgpr[0][1], 1)
+
+  def test_v_lshrrev_b32_by_32(self):
+    """V_LSHRREV_B32: shift by 32 - only low 5 bits used."""
+    instructions = [
+      s_mov_b32(s[0], 0x80000000),
+      v_mov_b32_e32(v[0], s[0]),
+      v_lshrrev_b32_e32(v[1], 32, v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # 32 & 0x1f = 0, so no shift
+    self.assertEqual(st.vgpr[0][1], 0x80000000)
+
+  def test_v_ashrrev_i32_negative(self):
+    """V_ASHRREV_I32: arithmetic shift preserves sign."""
+    instructions = [
+      s_mov_b32(s[0], 0x80000000),  # -2147483648
+      v_mov_b32_e32(v[0], s[0]),
+      v_ashrrev_i32_e32(v[1], 4, v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # Arithmetic right shift fills with sign bit
+    self.assertEqual(st.vgpr[0][1], 0xF8000000)
+
+  def test_v_ashrrev_i32_by_31(self):
+    """V_ASHRREV_I32: shift by 31 gives all 1s for negative."""
+    instructions = [
+      s_mov_b32(s[0], 0x80000000),
+      v_mov_b32_e32(v[0], s[0]),
+      v_ashrrev_i32_e32(v[1], 31, v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 0xFFFFFFFF)
+
+  def test_v_lshrrev_b32_by_31(self):
+    """V_LSHRREV_B32: logical shift by 31 gives 0 or 1."""
+    instructions = [
+      s_mov_b32(s[0], 0x80000000),
+      v_mov_b32_e32(v[0], s[0]),
+      v_lshrrev_b32_e32(v[1], 31, v[0]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][1], 1)
+
+
+class TestMulHiLo(unittest.TestCase):
+  """Tests for V_MUL_HI/V_MUL_LO operations."""
+
+  def test_v_mul_lo_u32_basic(self):
+    """V_MUL_LO_U32: low 32 bits of 32x32 multiply."""
+    instructions = [
+      v_mov_b32_e32(v[0], 100),
+      v_mov_b32_e32(v[1], 200),
+      v_mul_lo_u32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 20000)
+
+  def test_v_mul_lo_u32_overflow(self):
+    """V_MUL_LO_U32: result wraps on overflow."""
+    instructions = [
+      s_mov_b32(s[0], 0x10000),
+      s_mov_b32(s[1], 0x10000),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mul_lo_u32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # 0x10000 * 0x10000 = 0x100000000, low 32 bits = 0
+    self.assertEqual(st.vgpr[0][2], 0)
+
+  def test_v_mul_hi_u32_basic(self):
+    """V_MUL_HI_U32: high 32 bits of 32x32 multiply."""
+    instructions = [
+      s_mov_b32(s[0], 0x10000),
+      s_mov_b32(s[1], 0x10000),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mul_hi_u32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # 0x10000 * 0x10000 = 0x100000000, high 32 bits = 1
+    self.assertEqual(st.vgpr[0][2], 1)
+
+  def test_v_mul_hi_u32_large(self):
+    """V_MUL_HI_U32: large values."""
+    instructions = [
+      s_mov_b32(s[0], 0xFFFFFFFF),
+      s_mov_b32(s[1], 0xFFFFFFFF),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mul_hi_u32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # 0xFFFFFFFF * 0xFFFFFFFF = 0xFFFFFFFE00000001, high = 0xFFFFFFFE
+    self.assertEqual(st.vgpr[0][2], 0xFFFFFFFE)
+
+  def test_v_mul_hi_i32_positive(self):
+    """V_MUL_HI_I32: signed multiply with positive values."""
+    instructions = [
+      s_mov_b32(s[0], 0x10000),
+      s_mov_b32(s[1], 0x10000),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mul_hi_i32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 1)
+
+  def test_v_mul_hi_i32_negative(self):
+    """V_MUL_HI_I32: signed multiply with negative value."""
+    instructions = [
+      s_mov_b32(s[0], (-10000) & 0xFFFFFFFF),
+      s_mov_b32(s[1], 100000),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mul_hi_i32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # -10000 * 100000 = -1000000000, which fits in 32 bits
+    # high 32 bits should be -1 (0xFFFFFFFF) for negative numbers that fit
+    self.assertEqual(st.vgpr[0][2], 0xFFFFFFFF)
+
+  def test_v_mul_hi_i32_both_negative(self):
+    """V_MUL_HI_I32: both values negative."""
+    instructions = [
+      s_mov_b32(s[0], (-0x10000) & 0xFFFFFFFF),
+      s_mov_b32(s[1], (-0x10000) & 0xFFFFFFFF),
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_mul_hi_i32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    # -0x10000 * -0x10000 = 0x100000000, high = 1
+    self.assertEqual(st.vgpr[0][2], 1)
+
+
+class TestMulF32EdgeCases(unittest.TestCase):
+  """Edge cases for V_MUL_F32."""
+
+  def test_v_mul_f32_inf_by_zero(self):
+    """V_MUL_F32: inf * 0 = NaN."""
+    import math
+    instructions = [
+      s_mov_b32(s[0], 0x7f800000),  # +inf
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], 0),
+      v_mul_f32_e32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertTrue(math.isnan(i2f(st.vgpr[0][2])))
+
+  def test_v_mul_f32_inf_by_inf(self):
+    """V_MUL_F32: inf * inf = inf."""
+    import math
+    instructions = [
+      s_mov_b32(s[0], 0x7f800000),  # +inf
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[0]),
+      v_mul_f32_e32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertTrue(math.isinf(i2f(st.vgpr[0][2])))
+
+  def test_v_mul_f32_neg_zero_by_pos(self):
+    """V_MUL_F32: -0 * positive = -0."""
+    instructions = [
+      s_mov_b32(s[0], 0x80000000),  # -0.0
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], 1.0),
+      v_mul_f32_e32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0x80000000)
+
+  def test_v_mul_f32_neg_zero_by_neg(self):
+    """V_MUL_F32: -0 * negative = +0."""
+    instructions = [
+      s_mov_b32(s[0], 0x80000000),  # -0.0
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], -1.0),
+      v_mul_f32_e32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0)  # +0
+
+
+class TestAddF32EdgeCases(unittest.TestCase):
+  """Edge cases for V_ADD_F32."""
+
+  def test_v_add_f32_inf_minus_inf(self):
+    """V_ADD_F32: inf + (-inf) = NaN."""
+    import math
+    instructions = [
+      s_mov_b32(s[0], 0x7f800000),  # +inf
+      s_mov_b32(s[1], 0xff800000),  # -inf
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[1]),
+      v_add_f32_e32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertTrue(math.isnan(i2f(st.vgpr[0][2])))
+
+  def test_v_add_f32_pos_neg_zero(self):
+    """V_ADD_F32: +0 + (-0) = +0."""
+    instructions = [
+      v_mov_b32_e32(v[0], 0),
+      s_mov_b32(s[0], 0x80000000),  # -0.0
+      v_mov_b32_e32(v[1], s[0]),
+      v_add_f32_e32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0)  # +0
+
+  def test_v_add_f32_neg_neg_zero(self):
+    """V_ADD_F32: -0 + (-0) = -0."""
+    instructions = [
+      s_mov_b32(s[0], 0x80000000),  # -0.0
+      v_mov_b32_e32(v[0], s[0]),
+      v_mov_b32_e32(v[1], s[0]),
+      v_add_f32_e32(v[2], v[0], v[1]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][2], 0x80000000)  # -0
+
+
 if __name__ == '__main__':
   unittest.main()
