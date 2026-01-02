@@ -54,13 +54,14 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
     sink = graph_rewrite(sink, pm_split_store, ctx=ren.device, name="cut store ranges")
 
     if IMAGE == 1 and ren.device in {"QCOM", "CL"}:
+      dg_types: dict = {}
       def make_image(ctx, dg):
         if (dt:=dg.dtype).base is dtypes.float and not isinstance(dt, ImageDType) and dt.size < 65536 and dt.nbytes() % 64 == 0:
           ctx[dg.arg] = dt
           return dg.replace(dtype=dtypes.imagef((1, dt.size // 4, 4)))
       sink = graph_rewrite(sink, PatternMatcher([
         (UPat(Ops.DEFINE_GLOBAL, name="dg"), make_image)
-      ]), ctx=(dg_types:={}), name="image upcast")
+      ]), ctx=dg_types, name="image upcast")
       # undo unfoldable stores
       def undo_image_store(ctx, st, idx, dg):
         if dg.arg in ctx and not any(c.op is Ops.RANGE and (c.vmax+1)%4 == 0 for c in idx.src[1].get_idx().split_uop(Ops.ADD)):
