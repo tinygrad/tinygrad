@@ -48,8 +48,6 @@ def format_packet(p, last_time: int = 0, time_offset: int = 0) -> str:
   """Format a packet for pretty printing."""
   name = type(p).__name__
   color = PACKET_COLORS.get(name, "white")
-  normalized_time = p._time - time_offset
-  delta = p._time - last_time
 
   fields = []
   if isinstance(p, INST):
@@ -72,9 +70,11 @@ def format_packet(p, last_time: int = 0, time_offset: int = 0) -> str:
   elif isinstance(p, WAVEEND):
     fields = [f"wave={p.wave}", f"simd={p.simd}", f"cu={p.cu}"]
   elif hasattr(p, '_values'):
-    fields = [f"{k}={v}" for k, v in p._values.items() if not k.startswith('_') and k != 'delta']
+    # Format hex fields appropriately
+    hex_fields = {'snap', 'val32'}
+    fields = [f"{k}=0x{v:x}" if k in hex_fields else f"{k}={v}" for k, v in p._values.items() if not k.startswith('_') and k != 'delta']
 
-  return f"{normalized_time:8d} +{delta:6d} : " + colored(f"{name:18s}", color) + f" {', '.join(fields)}"
+  return colored(f"{name:18s}", color) + " " + ", ".join(fields)
 
 def get_wave_packets(packets: list) -> list:
   """Extract packets from WAVESTART to WAVEEND, filtering pure timing packets."""

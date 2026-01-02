@@ -100,9 +100,12 @@ _TRANS_OPS = {'V_RCP_F32', 'V_RCP_F64', 'V_RSQ_F32', 'V_RSQ_F64', 'V_SQRT_F32', 
               'V_LOG_F32', 'V_EXP_F32', 'V_SIN_F32', 'V_COS_F32', 'V_RCP_F16', 'V_RSQ_F16', 'V_SQRT_F16'}
 
 # Latency model from hardware measurements:
+#   Startup: WAVESTART -> REG (~137 cycles) -> first instruction (~270 cycles)
 #   SALU: issues every cycle, result ready 2 cycles after issue, ALUEXEC at ready time
 #   VALU: issues every cycle, ALUEXEC at issue+8 for each inst, serialized with +1 intervals
 #   For dependent instructions, ALUEXEC is at source_ready + 10 (first dep) or + 9 (chained)
+WAVESTART_TO_REG_CYCLES = 137  # cycles from WAVESTART to REG packet
+REG_TO_INST_CYCLES = 270       # cycles from REG to first instruction issue
 SALU_LATENCY = 2   # cycles from issue to result ready
 VALU_EXEC_LATENCY = 8  # cycles from issue to ALUEXEC for each instruction
 
@@ -123,8 +126,12 @@ class SQTTState:
     self.valu_issue_cycles: list[int] = []  # issue cycles for pending independent VALU
 
   def emit_wavestart(self):
-    from extra.assembly.amd.sqtt import WAVESTART
+    from extra.assembly.amd.sqtt import WAVESTART, REG
     self.packets.append(WAVESTART(_time=self.cycle, wave=self.wave_id, simd=self.simd, cu_lo=self.cu & 0x7, flag7=self.cu >> 3))
+    self.cycle += WAVESTART_TO_REG_CYCLES
+    # REG packet with slot=4, hi_byte=130, subop=126 (observed from hardware)
+    self.packets.append(REG(_time=self.cycle, slot=4, hi_byte=130, subop=126, val32=0))
+    self.cycle += REG_TO_INST_CYCLES  # advance to first instruction issue
 
   def emit_waveend(self):
     from extra.assembly.amd.sqtt import WAVEEND

@@ -8,7 +8,7 @@ import os
 os.environ["SQTT"] = "1"
 os.environ["PROFILE"] = "1"
 os.environ["SQTT_LIMIT_SE"] = "2"
-os.environ["SQTT_TOKEN_EXCLUDE"] = "3784"  # exclude WAVERDY, REG, EVENT, UTILCTR, WAVEALLOC, PERF
+os.environ["SQTT_TOKEN_EXCLUDE"] = "3720"  # exclude WAVERDY, EVENT, UTILCTR, WAVEALLOC, PERF (keep REG)
 
 import unittest
 from tinygrad.device import Device
@@ -74,8 +74,7 @@ def run_emulator_sqtt(instructions: list) -> list[PacketType]:
   program = decode_program(code)
 
   sqtt = SQTTState(wave_id=0, simd=0, cu=0)
-  sqtt.emit_wavestart()
-  # cycle stays at 0 - emulator doesn't model startup jitter
+  sqtt.emit_wavestart()  # advances cycle by WAVE_STARTUP_CYCLES
 
   for pc, inst in sorted(program.items()):
     if inst.op_name == 'S_ENDPGM': break
@@ -85,8 +84,14 @@ def run_emulator_sqtt(instructions: list) -> list[PacketType]:
   return sqtt.packets
 
 def filter_timing_packets(packets: list) -> list:
-  """Filter to packets relevant for timing comparison."""
-  return [p for p in packets if isinstance(p, (WAVESTART, WAVEEND, INST, VALUINST, ALUEXEC))]
+  """Filter to packets relevant for timing comparison (within WAVESTART..WAVEEND)."""
+  wave_pkts = get_wave_packets(packets)
+  return [p for p in wave_pkts if isinstance(p, (WAVESTART, WAVEEND, INST, VALUINST, ALUEXEC))]
+
+def filter_noise_packets(packets: list) -> list:
+  """Filter out pure timing/noise packets, keeping all meaningful packets."""
+  skip_types = {"NOP", "TS_DELTA_SHORT", "TS_WAVE_STATE", "TS_DELTA_OR_MARK", "TS_DELTA_S5_W2", "TS_DELTA_S5_W3", "TS_DELTA_S8_W3"}
+  return [p for p in packets if type(p).__name__ not in skip_types]
 
 def get_timing_deltas(packets: list) -> list[tuple[str, int]]:
   """Extract timing deltas between consecutive packets (includes startup as first delta)."""
@@ -114,11 +119,14 @@ class TestEmulatorSQTT(unittest.TestCase):
     while len(hw_traces) < n_traces and attempts < max_attempts:
       attempts += 1
       blobs = run_asm_sqtt(instructions, alu_only=True)
-      packets = decode_all_blobs(blobs)
-      wave_pkts = get_wave_packets(packets)
-      ws = next((p for p in wave_pkts if isinstance(p, WAVESTART)), None)
-      if ws and ws.simd == 0:
-        hw_traces.append(wave_pkts)
+      # Find the blob containing our wave on SIMD 0
+      for blob in blobs:
+        packets = decode(blob)
+        wave_pkts = get_wave_packets(packets)
+        ws = next((p for p in wave_pkts if isinstance(p, WAVESTART) and p.simd == 0), None)
+        if ws:
+          hw_traces.append(packets)
+          break
 
     if not hw_traces:
       self.skipTest(f"Could not capture hardware trace on SIMD 0 after {max_attempts} attempts")
@@ -150,37 +158,21 @@ class TestEmulatorSQTT(unittest.TestCase):
         match = " <- MATCH" if list(pattern) == emu_deltas else ""
         print(f"  {count:2d}x: {list(pattern)}{match}")
 
-      # Pretty print HW trace and emulator trace side by side (all packets)
-      # Align by shifting emulator times to match HW startup
-      hw_t0 = filter_timing_packets(most_common_trace)[0]._time if filter_timing_packets(most_common_trace) else 0
-      emu_t0 = filter_timing_packets(emu_packets)[0]._time if filter_timing_packets(emu_packets) else 0
-      hw_startup = get_timing_deltas(most_common_trace)[0][1] if get_timing_deltas(most_common_trace) else 0
-      emu_startup = get_timing_deltas(emu_packets)[0][1] if get_timing_deltas(emu_packets) else 0
+      # Print HW trace (filter noise, normalize to WAVESTART time)
+      hw_filtered = filter_noise_packets(most_common_trace)
+      ws = next((p for p in hw_filtered if isinstance(p, WAVESTART) and p.simd == 0), None)
+      hw_t0 = ws._time if ws else (hw_filtered[0]._time if hw_filtered else 0)
+      print(f"\nHW:")
+      for p in hw_filtered:
+        t = p._time - hw_t0 if hasattr(p, '_time') else 0
+        print(f"  {t:8d}: {format_packet(p)}")
 
-      print(f"\n{'HW':^40} | {'Emulator':^40}")
-      print(f"{'-'*40} | {'-'*40}")
-
-      max_len = max(len(most_common_trace), len(emu_packets))
-      for i in range(max_len):
-        if i < len(most_common_trace):
-          hp = most_common_trace[i]
-          hw_time = hp._time - hw_t0 if hasattr(hp, '_time') else 0
-          hw_str = f"{hw_time:6d}: {format_packet(hp)}"
-        else:
-          hw_str = ""
-
-        if i < len(emu_packets):
-          ep = emu_packets[i]
-          # Adjust emulator time to align with HW startup
-          if hasattr(ep, '_time'):
-            emu_time = ep._time - emu_t0 - emu_startup + hw_startup
-          else:
-            emu_time = 0
-          emu_str = f"{emu_time:6d}: {format_packet(ep)}"
-        else:
-          emu_str = ""
-
-        print(f"{hw_str:40} | {emu_str:40}")
+      # Print emulator trace
+      emu_t0 = emu_packets[0]._time if emu_packets else 0
+      print(f"\nEmulator:")
+      for p in emu_packets:
+        t = p._time - emu_t0 if hasattr(p, '_time') else 0
+        print(f"  {t:8d}: {format_packet(p)}")
 
     # Assert emulator matches most common hardware pattern (post-startup)
     self.assertEqual(emu_deltas, most_common_pattern, f"{name}: emulator doesn't match most common HW pattern")
