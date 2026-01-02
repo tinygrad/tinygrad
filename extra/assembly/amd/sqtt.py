@@ -120,6 +120,28 @@ class PacketType:
     cls._fields = {k: v for k, v in cls.__dict__.items() if isinstance(v, BitField) and k != 'encoding'}
     cls._extract_info = [(name, bf.lo, bf.mask(), cls._field_types.get(name)) for name, bf in cls._fields.items()]
 
+  def __init__(self, _time: int = 0, **kwargs):
+    """Construct packet from named fields (like assembly instructions)."""
+    # Build raw value from encoding + fields
+    raw = 0
+    if self._encoding:
+      bf, pattern = self._encoding
+      raw |= pattern << bf.lo
+    for name, bf in self._fields.items():
+      val = kwargs.get(name, 0)
+      if isinstance(val, IntEnum): val = val.value
+      raw |= (val & bf.mask()) << bf.lo
+    self._raw = raw
+    self._time = _time
+    # Extract values back (handles enum conversion)
+    self._values = {}
+    for name, lo, mask, enum_type in self._extract_info:
+      val = (raw >> lo) & mask
+      if enum_type is not None:
+        try: val = enum_type(val)
+        except ValueError: pass
+      self._values[name] = val
+
   @classmethod
   def fields(cls) -> dict[str, BitField]:
     return cls._fields

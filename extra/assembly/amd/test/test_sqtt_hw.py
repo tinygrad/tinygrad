@@ -132,14 +132,22 @@ def print_all_packets(packets: list) -> None:
 def assemble(instructions: list) -> bytes:
   return b''.join(inst.to_bytes() for inst in instructions)
 
-def run_asm_sqtt(instructions: list, n_lanes: int = 1) -> list[bytes]:
-  """Run instructions on AMD hardware and return SQTT blobs."""
+def run_asm_sqtt(instructions: list, n_lanes: int = 1, alu_only: bool = False) -> list[bytes]:
+  """Run instructions on AMD hardware and return SQTT blobs.
+  
+  Args:
+    instructions: List of instructions to run
+    n_lanes: Number of lanes to use
+    alu_only: If True, use minimal kernel config with no kernargs/LDS/scratch for faster startup
+  """
   compiler = HIPCompiler(dev.arch)
   instructions = instructions + [s_endpgm()]
   code = assemble(instructions)
 
   byte_str = ', '.join(f'0x{b:02x}' for b in code)
-  asm_src = f""".text
+  
+  if alu_only:
+    asm_src = f""".text
 .globl test
 .p2align 8
 .type test,@function
@@ -149,13 +157,50 @@ test:
 .rodata
 .p2align 6
 .amdhsa_kernel test
-  .amdhsa_next_free_vgpr 256
-  .amdhsa_next_free_sgpr 96
+  .amdhsa_next_free_vgpr 8
+  .amdhsa_next_free_sgpr 8
+  .amdhsa_wavefront_size32 1
+  .amdhsa_group_segment_fixed_size 0
+  .amdhsa_private_segment_fixed_size 0
+.end_amdhsa_kernel
+
+.amdgpu_metadata
+---
+amdhsa.version:
+  - 1
+  - 0
+amdhsa.kernels:
+  - .name: test
+    .symbol: test.kd
+    .kernarg_segment_size: 0
+    .group_segment_fixed_size: 0
+    .private_segment_fixed_size: 0
+    .kernarg_segment_align: 8
+    .wavefront_size: 32
+    .sgpr_count: 8
+    .vgpr_count: 8
+    .max_flat_workgroup_size: 1024
+...
+.end_amdgpu_metadata
+"""
+  else:
+    asm_src = f""".text
+.globl test
+.p2align 8
+.type test,@function
+test:
+.byte {byte_str}
+
+.rodata
+.p2align 6
+.amdhsa_kernel test
+  .amdhsa_next_free_vgpr 8
+  .amdhsa_next_free_sgpr 16
   .amdhsa_wavefront_size32 1
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
   .amdhsa_kernarg_size 8
-  .amdhsa_group_segment_fixed_size 65536
-  .amdhsa_private_segment_fixed_size 4096
+  .amdhsa_group_segment_fixed_size 0
+  .amdhsa_private_segment_fixed_size 0
 .end_amdhsa_kernel
 
 .amdgpu_metadata
@@ -167,12 +212,12 @@ amdhsa.kernels:
   - .name: test
     .symbol: test.kd
     .kernarg_segment_size: 8
-    .group_segment_fixed_size: 65536
-    .private_segment_fixed_size: 4096
+    .group_segment_fixed_size: 0
+    .private_segment_fixed_size: 0
     .kernarg_segment_align: 8
     .wavefront_size: 32
-    .sgpr_count: 96
-    .vgpr_count: 256
+    .sgpr_count: 16
+    .vgpr_count: 8
     .max_flat_workgroup_size: 1024
 ...
 .end_amdgpu_metadata
@@ -180,9 +225,12 @@ amdhsa.kernels:
 
   lib = compiler.compile(asm_src)
   prg = AMDProgram(dev, "test", lib)
-  out_gpu = dev.allocator.alloc(2048)
   dev.profile_events.clear()
-  prg(out_gpu, global_size=(1, 1, 1), local_size=(n_lanes, 1, 1), wait=True)
+  if alu_only:
+    prg(global_size=(1, 1, 1), local_size=(n_lanes, 1, 1), wait=True)
+  else:
+    out_gpu = dev.allocator.alloc(2048)
+    prg(out_gpu, global_size=(1, 1, 1), local_size=(n_lanes, 1, 1), wait=True)
   return [ev.blob for ev in dev.profile_events if isinstance(ev, ProfileSQTTEvent)]
 
 def decode_all_blobs(blobs: list[bytes]) -> list:

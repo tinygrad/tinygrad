@@ -92,162 +92,218 @@ class LDSMem:
 SMEM_LOAD = {SMEMOp.S_LOAD_B32: 1, SMEMOp.S_LOAD_B64: 2, SMEMOp.S_LOAD_B128: 4, SMEMOp.S_LOAD_B256: 8, SMEMOp.S_LOAD_B512: 16}
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TIMING MODEL - Instruction latencies and register dependency tracking
+# SQTT TRACING - Emit packets matching real hardware output
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class InstType(IntEnum):
-  """Instruction type for timing model."""
-  SALU = 0      # Scalar ALU
-  VALU = 1      # Vector ALU (simple)
-  TRANS32 = 2   # Transcendental (v_rcp, v_rsq, v_sqrt, v_log, v_exp, v_sin, v_cos)
-  SMEM = 3      # Scalar memory
-  VMEM = 4      # Vector memory (global/scratch)
-  LDS = 5       # LDS operations
-  BRANCH = 6    # Branch/control flow
-  NOP = 7       # No operation
-  OTHER = 8     # Other
-
-# Latencies from s_delay_alu encoding (VALU_DEP_1-4, TRANS32_DEP_1-3, SALU_CYCLE_1-3)
-INST_LATENCY = {
-  InstType.SALU: 1,      # SALU_CYCLE_1
-  InstType.VALU: 1,      # VALU_DEP_1 (with forwarding, no stall)
-  InstType.TRANS32: 4,   # TRANS32_DEP_3 (conservative)
-  InstType.SMEM: 4,      # Variable, use small fixed value
-  InstType.VMEM: 1,      # Variable, skip for now (issue immediately)
-  InstType.LDS: 1,       # Variable, skip for now
-  InstType.BRANCH: 1,
-  InstType.NOP: 1,
-  InstType.OTHER: 1,
-}
-
-# Transcendental ops - higher latency
+# Transcendental ops that produce INST packets with op=VALU_TRANS (0x0b)
 _TRANS_OPS = {'V_RCP_F32', 'V_RCP_F64', 'V_RSQ_F32', 'V_RSQ_F64', 'V_SQRT_F32', 'V_SQRT_F64',
               'V_LOG_F32', 'V_EXP_F32', 'V_SIN_F32', 'V_COS_F32', 'V_RCP_F16', 'V_RSQ_F16', 'V_SQRT_F16'}
 
-def classify_inst(inst: Inst) -> InstType:
-  """Classify instruction for timing model."""
-  if isinstance(inst, (SOP1, SOP2, SOPC, SOPK)):
-    return InstType.SALU
-  if isinstance(inst, SOPP):
-    if inst.op in (SOPPOp.S_ENDPGM, SOPPOp.S_BARRIER): return InstType.OTHER
-    if hasattr(inst, 'op') and 'BRANCH' in getattr(inst.op, 'name', ''): return InstType.BRANCH
-    return InstType.NOP
-  if isinstance(inst, SMEM):
-    return InstType.SMEM
-  if isinstance(inst, (VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC)):
-    op_name = inst.op_name if hasattr(inst, 'op_name') else ''
-    if any(t in op_name for t in _TRANS_OPS):
-      return InstType.TRANS32
-    return InstType.VALU
-  if isinstance(inst, VOPD):
-    return InstType.VALU
-  if isinstance(inst, FLAT):
-    return InstType.VMEM
-  if isinstance(inst, DS):
-    return InstType.LDS
-  return InstType.OTHER
+# Latency model from hardware measurements:
+#   SALU: issues every cycle, result ready 2 cycles after issue, ALUEXEC at ready time
+#   VALU: issues every cycle, ALUEXEC at issue+8 for each inst, serialized with +1 intervals
+#   For dependent instructions, ALUEXEC is at source_ready + 10 (first dep) or + 9 (chained)
+SALU_LATENCY = 2   # cycles from issue to result ready
+VALU_EXEC_LATENCY = 8  # cycles from issue to ALUEXEC for each instruction
 
-class TimingState:
-  """Timing state for cycle-accurate emulation with SQTT output."""
-  __slots__ = ('cycle', 'sgpr_ready', 'vgpr_ready', 'packets', 'wave_id', 'simd', 'cu')
+class SQTTState:
+  """SQTT tracing state - emits packets matching real hardware."""
+  __slots__ = ('cycle', 'packets', 'pending_exec', 'wave_id', 'simd', 'cu', 'sgpr_ready', 'vgpr_ready',
+               'last_salu_exec', 'last_valu_exec', 'valu_issue_cycles')
 
   def __init__(self, wave_id: int = 0, simd: int = 0, cu: int = 0):
-    self.cycle = 0                          # Current cycle
-    self.sgpr_ready: dict[int, int] = {}    # SGPR -> cycle when ready
-    self.vgpr_ready: dict[int, int] = {}    # VGPR -> cycle when ready (all lanes same for now)
-    self.packets: list = []                 # SQTT packets
+    self.cycle = 0
+    self.packets: list = []
+    self.pending_exec: list[tuple[int, int]] = []  # (completion_cycle, src) for ALUEXEC
     self.wave_id, self.simd, self.cu = wave_id, simd, cu
+    self.sgpr_ready: dict[int, int] = {}  # sgpr -> cycle when result ready
+    self.vgpr_ready: dict[int, int] = {}  # vgpr -> cycle when result ready
+    self.last_salu_exec = 0  # last SALU ALUEXEC time (for +1 spacing)
+    self.last_valu_exec = 0  # last VALU ALUEXEC time (for +1 spacing)
+    self.valu_issue_cycles: list[int] = []  # issue cycles for pending independent VALU
 
-  def stall_for_read(self, inst: Inst, st: 'WaveState') -> int:
-    """Calculate stall cycles needed before executing this instruction."""
-    max_ready = self.cycle
+  def emit_wavestart(self):
+    from extra.assembly.amd.sqtt import WAVESTART
+    self.packets.append(WAVESTART(_time=self.cycle, wave=self.wave_id, simd=self.simd, cu_lo=self.cu & 0x7, flag7=self.cu >> 3))
 
-    # Get source registers
+  def emit_waveend(self):
+    from extra.assembly.amd.sqtt import WAVEEND
+    self.packets.append(WAVEEND(_time=self.cycle, wave=self.wave_id, simd=self.simd, cu_lo=self.cu & 0x7, flag7=self.cu >> 3))
+
+  def emit_inst(self, inst_op: int):
+    from extra.assembly.amd.sqtt import INST
+    self.packets.append(INST(_time=self.cycle, wave=self.wave_id, op=inst_op))
+
+  def emit_valuinst(self):
+    from extra.assembly.amd.sqtt import VALUINST
+    self.packets.append(VALUINST(_time=self.cycle, wave=self.wave_id))
+
+  def emit_aluexec(self, src: int):
+    from extra.assembly.amd.sqtt import ALUEXEC
+    self.packets.append(ALUEXEC(_time=self.cycle, src=src))
+
+  def _get_src_regs(self, inst: Inst) -> list[tuple[str, int]]:
+    """Extract source register references from instruction."""
     srcs = []
     if isinstance(inst, (SOP1, SOP2, SOPC)):
       if hasattr(inst, 'ssrc0') and inst.ssrc0 < SGPR_COUNT: srcs.append(('s', inst.ssrc0))
       if hasattr(inst, 'ssrc1') and inst.ssrc1 < SGPR_COUNT: srcs.append(('s', inst.ssrc1))
     elif isinstance(inst, SOPK):
-      if hasattr(inst, 'sdst') and inst.sdst < SGPR_COUNT: srcs.append(('s', inst.sdst))
-    elif isinstance(inst, SMEM):
-      if hasattr(inst, 'sbase'): srcs.append(('s', inst.sbase * 2)); srcs.append(('s', inst.sbase * 2 + 1))
-      if hasattr(inst, 'soffset') and inst.soffset < SGPR_COUNT: srcs.append(('s', inst.soffset))
-    elif isinstance(inst, (VOP1, VOP2, VOP3, VOP3SD, VOPC)):
-      if hasattr(inst, 'src0'):
-        if inst.src0 < SGPR_COUNT: srcs.append(('s', inst.src0))
-        elif inst.src0 >= 256: srcs.append(('v', inst.src0 - 256))
-      if hasattr(inst, 'src1'):
-        if inst.src1 < SGPR_COUNT: srcs.append(('s', inst.src1))
-        elif inst.src1 >= 256: srcs.append(('v', inst.src1 - 256))
-      if hasattr(inst, 'src2'):
-        if inst.src2 < SGPR_COUNT: srcs.append(('s', inst.src2))
-        elif inst.src2 >= 256: srcs.append(('v', inst.src2 - 256))
-      if hasattr(inst, 'vsrc1'): srcs.append(('v', inst.vsrc1))
+      pass  # immediate only
+    elif isinstance(inst, VOP1):
+      # VOP1: only src0
+      if inst.src0 < SGPR_COUNT: srcs.append(('s', inst.src0))
+      elif inst.src0 >= 256: srcs.append(('v', inst.src0 - 256))
+    elif isinstance(inst, VOP2):
+      # VOP2: src0 (can be SGPR/VGPR/const) + vsrc1 (always VGPR)
+      if inst.src0 < SGPR_COUNT: srcs.append(('s', inst.src0))
+      elif inst.src0 >= 256: srcs.append(('v', inst.src0 - 256))
+      srcs.append(('v', inst.vsrc1))
+    elif isinstance(inst, (VOP3, VOP3SD, VOP3P, VOPC)):
+      for attr in ('src0', 'src1', 'src2'):
+        if hasattr(inst, attr):
+          src = getattr(inst, attr)
+          if src < SGPR_COUNT: srcs.append(('s', src))
+          elif src >= 256: srcs.append(('v', src - 256))
+    return srcs
 
-    # Find max ready time across sources
-    for typ, reg in srcs:
-      if typ == 's':
-        ready = self.sgpr_ready.get(reg, 0)
-      else:
-        ready = self.vgpr_ready.get(reg, 0)
-      if ready > max_ready:
-        max_ready = ready
-
-    return max(0, max_ready - self.cycle)
-
-  def schedule_write(self, inst: Inst, latency: int):
-    """Record when destination registers will be ready."""
-    ready_cycle = self.cycle + latency
-
-    # Get destination registers
+  def _get_dst_regs(self, inst: Inst) -> list[tuple[str, int]]:
+    """Extract destination register references from instruction."""
+    dsts = []
     if isinstance(inst, (SOP1, SOP2, SOPK)):
       if hasattr(inst, 'sdst') and inst.sdst < SGPR_COUNT:
-        self.sgpr_ready[inst.sdst] = ready_cycle
-        if inst.dst_regs() == 2:
-          self.sgpr_ready[inst.sdst + 1] = ready_cycle
-    elif isinstance(inst, SMEM):
-      if hasattr(inst, 'sdata'):
-        cnt = SMEM_LOAD.get(inst.op, 1)
-        for i in range(cnt):
-          self.sgpr_ready[inst.sdata + i] = ready_cycle
-    elif isinstance(inst, (VOP1, VOP2, VOP3, VOP3SD, VOPC, VOPD)):
+        dsts.append(('s', inst.sdst))
+        if inst.dst_regs() == 2: dsts.append(('s', inst.sdst + 1))
+    elif isinstance(inst, (VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC, VOPD)):
       if hasattr(inst, 'vdst'):
-        self.vgpr_ready[inst.vdst] = ready_cycle
-        if inst.dst_regs() == 2:
-          self.vgpr_ready[inst.vdst + 1] = ready_cycle
-    elif isinstance(inst, FLAT):
-      if 'LOAD' in inst.op.name and hasattr(inst, 'vdst'):
-        ndwords = _op_ndwords(inst.op.name)
-        for i in range(ndwords):
-          self.vgpr_ready[inst.vdst + i] = ready_cycle
+        dsts.append(('v', inst.vdst))
+        if inst.dst_regs() == 2: dsts.append(('v', inst.vdst + 1))
+    return dsts
 
-  def emit_wavestart(self):
-    """Emit WAVESTART packet."""
-    from extra.assembly.amd.sqtt import Packet, Op
-    fields = (self.wave_id & 0xF) << 8 | (self.simd & 0x3) << 12
-    self.packets.append(Packet(opcode=Op.WAVESTART, delta=0, fields=fields, time=self.cycle))
+  def _check_dep_stall(self, inst: Inst) -> int:
+    """Calculate stall cycles due to RAW dependencies - wait until all sources ready."""
+    max_ready = 0
+    for typ, reg in self._get_src_regs(inst):
+      ready = (self.sgpr_ready if typ == 's' else self.vgpr_ready).get(reg, 0)
+      max_ready = max(max_ready, ready)
+    return max(0, max_ready - self.cycle)
 
-  def emit_inst(self, inst: Inst, pc: int, stall: int, dur: int):
-    """Emit INST packet for instruction dispatch."""
-    from extra.assembly.amd.sqtt import Packet, Op
-    inst_type = classify_inst(inst)
-    # Fields: wave[3:0] at [11:8], inst_type at higher bits
-    fields = (self.wave_id & 0xF) << 8 | (inst_type & 0xFF) << 12
-    delta = stall + dur
-    self.packets.append(Packet(opcode=Op.INST, delta=delta, fields=fields, time=self.cycle))
+  def _record_dst_ready(self, inst: Inst, ready_cycle: int):
+    """Record when destination registers will be ready."""
+    for typ, reg in self._get_dst_regs(inst):
+      (self.sgpr_ready if typ == 's' else self.vgpr_ready)[reg] = ready_cycle
 
-  def emit_waveend(self):
-    """Emit WAVEEND packet."""
-    from extra.assembly.amd.sqtt import Packet, Op
-    fields = (self.wave_id & 0xF) << 8 | (self.simd & 0x3) << 12
-    self.packets.append(Packet(opcode=Op.WAVEEND, delta=0, fields=fields, time=self.cycle))
+  def trace_inst(self, inst: Inst):
+    """Emit appropriate SQTT packets for an instruction.
+    
+    Key insight from hardware traces:
+    - Instructions issue every cycle (INST/VALUINST packets at +1 intervals)
+    - ALUEXEC shows when instruction completes (result ready)
+    - For independent ops: ALUEXEC at issue+latency, then +1 each (pipeline throughput)
+    - For dependent ops: ALUEXEC delayed until source ready + latency
+    """
+    from extra.assembly.amd.sqtt import InstOp, AluSrc
 
-  def to_sqtt_blob(self) -> bytes:
-    """Encode all packets to raw SQTT blob."""
-    from extra.assembly.amd.sqtt import Packet, Op, encode
-    # Prepend LAYOUT_HEADER
-    header = Packet(opcode=Op.LAYOUT_HEADER, delta=0, fields=0x68900180, time=0)
-    return encode([header] + self.packets)
+    if isinstance(inst, (SOP1, SOP2, SOPC, SOPK)):
+      # SALU: issue now, complete after latency (or wait for deps)
+      self.emit_inst(InstOp.SALU)
+      # Completion time: max of (issue + latency) and (source_ready + latency) and (last_exec + 1)
+      src_ready = max((self.sgpr_ready.get(r, 0) for _, r in self._get_src_regs(inst)), default=0)
+      ready_cycle = max(self.cycle, src_ready) + SALU_LATENCY
+      exec_cycle = max(ready_cycle, self.last_salu_exec + 1)
+      self.pending_exec.append((exec_cycle, AluSrc.SALU))
+      self.last_salu_exec = exec_cycle
+      self._record_dst_ready(inst, ready_cycle)
+
+    elif isinstance(inst, SOPP):
+      pass  # nop, waitcnt, etc don't emit packets
+
+    elif isinstance(inst, SMEM):
+      pass  # skip for ALU focus
+
+    elif isinstance(inst, (VOP1, VOP2, VOP3, VOP3SD, VOP3P, VOPC)):
+      # VALU: issue now, track for ALUEXEC timing in finalize()
+      # All ALUEXEC start at last_issue + 8, then serialize based on dependencies
+      op_name = inst.op_name if hasattr(inst, 'op_name') else ''
+      if any(t in op_name for t in _TRANS_OPS):
+        self.emit_inst(InstOp.VALU_TRANS)
+      else:
+        self.emit_valuinst()
+      # Check for dependency
+      src_ready = max((self.vgpr_ready.get(r, 0) for _, r in self._get_src_regs(inst) if _ == 'v'), default=0)
+      has_dep = src_ready > self.cycle
+      # Record issue info: (issue_cycle, has_dep, src_ready)
+      self.valu_issue_cycles.append((self.cycle, has_dep, src_ready))
+      # For dependency tracking, estimate result ready
+      # Note: we don't know last_issue yet, so use a placeholder that will be corrected in finalize
+      # The key insight is dependent instructions use src_ready + 10
+      if has_dep:
+        est_exec = src_ready + 10
+      else:
+        # For independent, result will be ready at (final last_issue + 8 + position)
+        # We approximate with current cycle + 8, which is close enough for dependency detection
+        est_exec = self.cycle + VALU_EXEC_LATENCY
+      self._record_dst_ready(inst, est_exec)
+
+    elif isinstance(inst, VOPD):
+      self.emit_valuinst()
+      src_ready = max((self.vgpr_ready.get(r, 0) for _, r in self._get_src_regs(inst) if _ == 'v'), default=0)
+      has_dep = src_ready > self.cycle
+      self.valu_issue_cycles.append((self.cycle, has_dep, src_ready))
+      if has_dep:
+        est_exec = src_ready + 10
+      else:
+        est_exec = self.cycle + VALU_EXEC_LATENCY
+      self._record_dst_ready(inst, est_exec)
+
+    self.cycle += 1
+
+  def finalize(self):
+    """Emit all pending ALUEXEC packets and WAVEEND."""
+    from extra.assembly.amd.sqtt import AluSrc
+
+    # Process VALU instructions
+    # First pass: compute actual exec times for all instructions
+    # - Independent: at last_issue + 8 + position, serialized at +1 intervals
+    # - Dependent: at src_exec + 10 (first dep) or + 9 (chained dep)
+    if self.valu_issue_cycles:
+      last_issue = self.valu_issue_cycles[-1][0]
+      base_exec = last_issue + VALU_EXEC_LATENCY
+      
+      # Build exec_times list with actual completion times
+      exec_times = []
+      last_exec = 0
+      last_was_dep = False
+      
+      for i, (issue_cycle, has_dep, src_ready_idx) in enumerate(self.valu_issue_cycles):
+        if has_dep:
+          # src_ready_idx is the vgpr_ready value at trace time, which was an estimate
+          # We need to find the actual exec time of the instruction that wrote this value
+          # For now, use a simpler model: dependent instructions get +10 from previous exec (first dep) or +9 (chained)
+          exec_cycle = last_exec + (10 if not last_was_dep else 9)
+          last_was_dep = True
+        else:
+          # Independent: at base_exec + position, serialized at +1 intervals
+          exec_cycle = max(base_exec + i, last_exec + 1)
+          last_was_dep = False
+        exec_times.append(exec_cycle)
+        last_exec = exec_cycle
+      
+      for exec_cycle in exec_times:
+        self.pending_exec.append((exec_cycle, AluSrc.VALU))
+      self.valu_issue_cycles.clear()
+
+    # Sort and emit all pending ALUEXEC
+    self.pending_exec.sort(key=lambda x: x[0])
+    last_src = None
+    for exec_cycle, src in self.pending_exec:
+      self.cycle = exec_cycle
+      self.emit_aluexec(src)
+      last_src = src
+    self.pending_exec.clear()
+    # WAVEEND timing: 7 cycles after last SALU exec, 15 cycles after last VALU exec
+    self.cycle += 15 if last_src == AluSrc.VALU else 7
+    self.emit_waveend()
 
 # VOPD op -> VOP3 op mapping (VOPD is dual-issue of VOP1/VOP2 ops, use VOP3 enums for pseudocode lookup)
 _VOPD_TO_VOP = {
