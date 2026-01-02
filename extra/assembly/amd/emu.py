@@ -440,6 +440,12 @@ DP_LATENCY = 38
 # Pipeline delay from last ALU dispatch to first s_nop IMMEDIATE
 SNOP_PIPELINE_DELAY = 3
 
+# s_nop extra delay: s_nop(N) where 7 <= N <= 18 has +4 extra cycles when not the first instruction after WAVESTART
+# This appears to be a hardware quirk - possibly related to instruction fetch pipeline stages
+SNOP_EXTRA_DELAY_MIN = 7
+SNOP_EXTRA_DELAY_MAX = 18
+SNOP_EXTRA_DELAY_CYCLES = 4
+
 # Forwarding latencies (cycles until result available for dependent instruction)
 VALU_FORWARD_LATENCY = 5  # result available 5 cycles after dispatch (writeback at 6)
 TRANS_FORWARD_LATENCY = 13  # result available 13 cycles after dispatch
@@ -465,6 +471,7 @@ class SQTTState:
     self.packets = []
     self.wave_id, self.simd, self.cu = wave_id, simd, cu
     self.cycle = 0
+    self.inst_count = 0  # track instruction count for first-instruction detection
 
   def emit(self, pkt_class, **kwargs):
     self.packets.append(pkt_class(_time=self.cycle, **kwargs))
@@ -482,9 +489,13 @@ class SQTTState:
     """Simulate cycles until instruction dispatches, emitting SQTT packets."""
 
     if inst.op == SOPPOp.S_NOP:
-      for i in range(inst.simm16): self.tick()
+      # s_nop(N) with SNOP_EXTRA_DELAY_MIN <= N <= SNOP_EXTRA_DELAY_MAX has extra cycles when not first instruction
+      extra_delay = SNOP_EXTRA_DELAY_CYCLES if SNOP_EXTRA_DELAY_MIN <= inst.simm16 <= SNOP_EXTRA_DELAY_MAX and self.inst_count > 0 else 0
+      for _ in range(inst.simm16 + extra_delay): self.tick()
       self.emit(IMMEDIATE, wave=self.wave_id)
       self.tick()
+
+    self.inst_count += 1
 
   def finalize(self):
     """Emit pending ALUEXECs and WAVEEND."""

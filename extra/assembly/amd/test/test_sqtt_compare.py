@@ -102,9 +102,8 @@ def get_timing_deltas(packets: list) -> list[tuple[str, int]]:
     result[-1] = ('WAVEEND', 0)
   return result
 
-@unittest.skipIf(not hasattr(dev, 'profile_events'), "AMD device required")
-class TestEmulatorSQTT(unittest.TestCase):
-  """Tests comparing emulator SQTT to hardware SQTT."""
+class SQTTCompareTestBase(unittest.TestCase):
+  """Base class with shared _run_and_compare method for SQTT tests."""
 
   def _run_and_compare(self, instructions: list, name: str = "", n_runs: int = 200, min_identical: int = 20, max_attempts: int = 10):
     """Run instructions on both hardware and emulator, compare SQTT structure."""
@@ -204,6 +203,11 @@ class TestEmulatorSQTT(unittest.TestCase):
       f"Emulator: {emu_deltas}\n"
       f"HW patterns: {[list(p) for p in pattern_counts.most_common(3)]}")
 
+
+@unittest.skipIf(not hasattr(dev, 'profile_events'), "AMD device required")
+class TestEmulatorSQTT(SQTTCompareTestBase):
+  """Tests comparing emulator SQTT to hardware SQTT."""
+
   def test_salu_independent(self):
     """SALU instructions with no dependencies."""
     self._run_and_compare([
@@ -223,15 +227,6 @@ class TestEmulatorSQTT(unittest.TestCase):
   def test_empty(self):
     """Empty program - just s_endpgm."""
     self._run_and_compare([], "empty")
-
-  def test_snop32(self):
-    self._run_and_compare([s_nop(32)], "snop32")
-
-  def test_snop_several(self):
-    self._run_and_compare([s_nop(32), s_nop(6), s_nop(12)], "snop_several")
-
-  def test_snop_several_2(self):
-    self._run_and_compare([s_nop(32), s_nop(6), s_nop(12), s_nop(1), s_nop(0), s_nop(11)], "snop_several_2")
 
   def _test_valu_independent_n(self, n: int, trans=False):
     """VALU instructions with no dependencies."""
@@ -314,14 +309,6 @@ class TestEmulatorSQTT(unittest.TestCase):
       s_mov_b32(s[4], 3),
     ], "3 SALU WAW")
 
-  def test_salu_with_snop32(self):
-    """SALU with s_nop(32) - tests s_nop delay timing."""
-    self._run_and_compare([
-      s_mov_b32(s[4], 1),
-      s_nop(32),
-      s_mov_b32(s[5], 2),
-    ], "SALU with s_nop(32)")
-
   def test_mixed_salu_valu(self):
     """Mixed SALU and VALU sequence."""
     self._run_and_compare([
@@ -370,22 +357,6 @@ class TestEmulatorSQTT(unittest.TestCase):
       s_mov_b32(s[8], 5),
       s_mov_b32(s[9], 6),
     ], "6 SALU independent")
-
-  def test_salu_with_snop1(self):
-    """SALU with s_nop(1) - minimal delay."""
-    self._run_and_compare([
-      s_mov_b32(s[4], 1),
-      s_nop(1),
-      s_mov_b32(s[5], 2),
-    ], "SALU with s_nop(1)")
-
-  def test_salu_with_snop7(self):
-    """SALU with s_nop(7) - medium delay."""
-    self._run_and_compare([
-      s_mov_b32(s[4], 1),
-      s_nop(7),
-      s_mov_b32(s[5], 2),
-    ], "SALU with s_nop(7)")
 
   # ─────────────────────────────────────────────────────────────────────────────
   # Additional TRANS tests
@@ -1021,6 +992,426 @@ class TestEmulatorSQTT(unittest.TestCase):
       v_wmma_f32_16x16x16_f16(vdst=v[0], src0=v[16], src1=v[24], src2=v[0]),
       v_mov_b32_e32(v[50], 1.0),
     ], "WMMA then VALU")
+
+@unittest.skipIf(not hasattr(dev, 'profile_events'), "AMD device required")
+class TestSNop(SQTTCompareTestBase):
+  """Dedicated tests for s_nop timing behavior."""
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Single s_nop tests - probe the basic delay behavior
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  def test_snop_0(self):
+    """s_nop(0) - minimum delay (1 cycle)."""
+    self._run_and_compare([s_nop(0)], "snop_0")
+
+  def test_snop_1(self):
+    """s_nop(1) - 2 cycle delay."""
+    self._run_and_compare([s_nop(1)], "snop_1")
+
+  def test_snop_2(self):
+    """s_nop(2) - 3 cycle delay."""
+    self._run_and_compare([s_nop(2)], "snop_2")
+
+  def test_snop_3(self):
+    """s_nop(3) - 4 cycle delay."""
+    self._run_and_compare([s_nop(3)], "snop_3")
+
+  def test_snop_4(self):
+    """s_nop(4) - 5 cycle delay."""
+    self._run_and_compare([s_nop(4)], "snop_4")
+
+  def test_snop_5(self):
+    """s_nop(5) - 6 cycle delay."""
+    self._run_and_compare([s_nop(5)], "snop_5")
+
+  def test_snop_6(self):
+    """s_nop(6) - 7 cycle delay."""
+    self._run_and_compare([s_nop(6)], "snop_6")
+
+  def test_snop_7(self):
+    """s_nop(7) - 8 cycle delay."""
+    self._run_and_compare([s_nop(7)], "snop_7")
+
+  def test_snop_8(self):
+    """s_nop(8) - 9 cycle delay."""
+    self._run_and_compare([s_nop(8)], "snop_8")
+
+  def test_snop_15(self):
+    """s_nop(15) - 16 cycle delay."""
+    self._run_and_compare([s_nop(15)], "snop_15")
+
+  def test_snop_16(self):
+    """s_nop(16) - 17 cycle delay."""
+    self._run_and_compare([s_nop(16)], "snop_16")
+
+  def test_snop_31(self):
+    """s_nop(31) - 32 cycle delay."""
+    self._run_and_compare([s_nop(31)], "snop_31")
+
+  def test_snop_32(self):
+    """s_nop(32) - 33 cycle delay."""
+    self._run_and_compare([s_nop(32)], "snop_32")
+
+  def test_snop_63(self):
+    """s_nop(63) - 64 cycle delay."""
+    self._run_and_compare([s_nop(63)], "snop_63")
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Two consecutive s_nop tests - probe inter-nop timing
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  def test_snop_0_0(self):
+    """Two s_nop(0)."""
+    self._run_and_compare([s_nop(0), s_nop(0)], "snop_0_0")
+
+  def test_snop_0_1(self):
+    """s_nop(0) followed by s_nop(1)."""
+    self._run_and_compare([s_nop(0), s_nop(1)], "snop_0_1")
+
+  def test_snop_1_0(self):
+    """s_nop(1) followed by s_nop(0)."""
+    self._run_and_compare([s_nop(1), s_nop(0)], "snop_1_0")
+
+  def test_snop_1_1(self):
+    """Two s_nop(1)."""
+    self._run_and_compare([s_nop(1), s_nop(1)], "snop_1_1")
+
+  def test_snop_2_2(self):
+    """Two s_nop(2)."""
+    self._run_and_compare([s_nop(2), s_nop(2)], "snop_2_2")
+
+  def test_snop_3_3(self):
+    """Two s_nop(3)."""
+    self._run_and_compare([s_nop(3), s_nop(3)], "snop_3_3")
+
+  def test_snop_4_4(self):
+    """Two s_nop(4)."""
+    self._run_and_compare([s_nop(4), s_nop(4)], "snop_4_4")
+
+  def test_snop_5_5(self):
+    """Two s_nop(5)."""
+    self._run_and_compare([s_nop(5), s_nop(5)], "snop_5_5")
+
+  def test_snop_6_6(self):
+    """Two s_nop(6)."""
+    self._run_and_compare([s_nop(6), s_nop(6)], "snop_6_6")
+
+  def test_snop_7_7(self):
+    """Two s_nop(7)."""
+    self._run_and_compare([s_nop(7), s_nop(7)], "snop_7_7")
+
+  def test_snop_8_8(self):
+    """Two s_nop(8)."""
+    self._run_and_compare([s_nop(8), s_nop(8)], "snop_8_8")
+
+  def test_snop_15_15(self):
+    """Two s_nop(15)."""
+    self._run_and_compare([s_nop(15), s_nop(15)], "snop_15_15")
+
+  def test_snop_16_16(self):
+    """Two s_nop(16)."""
+    self._run_and_compare([s_nop(16), s_nop(16)], "snop_16_16")
+
+  def test_snop_31_31(self):
+    """Two s_nop(31)."""
+    self._run_and_compare([s_nop(31), s_nop(31)], "snop_31_31")
+
+  def test_snop_32_32(self):
+    """Two s_nop(32)."""
+    self._run_and_compare([s_nop(32), s_nop(32)], "snop_32_32")
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Three consecutive s_nop tests - detect accumulation effects
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  def test_snop_0_0_0(self):
+    """Three s_nop(0)."""
+    self._run_and_compare([s_nop(0), s_nop(0), s_nop(0)], "snop_0_0_0")
+
+  def test_snop_1_1_1(self):
+    """Three s_nop(1)."""
+    self._run_and_compare([s_nop(1), s_nop(1), s_nop(1)], "snop_1_1_1")
+
+  def test_snop_2_2_2(self):
+    """Three s_nop(2)."""
+    self._run_and_compare([s_nop(2), s_nop(2), s_nop(2)], "snop_2_2_2")
+
+  def test_snop_4_4_4(self):
+    """Three s_nop(4)."""
+    self._run_and_compare([s_nop(4), s_nop(4), s_nop(4)], "snop_4_4_4")
+
+  def test_snop_8_8_8(self):
+    """Three s_nop(8)."""
+    self._run_and_compare([s_nop(8), s_nop(8), s_nop(8)], "snop_8_8_8")
+
+  def test_snop_16_16_16(self):
+    """Three s_nop(16)."""
+    self._run_and_compare([s_nop(16), s_nop(16), s_nop(16)], "snop_16_16_16")
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Mixed s_nop sequences - probe transition timing
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  def test_snop_1_2_3(self):
+    """s_nop(1), s_nop(2), s_nop(3)."""
+    self._run_and_compare([s_nop(1), s_nop(2), s_nop(3)], "snop_1_2_3")
+
+  def test_snop_3_2_1(self):
+    """s_nop(3), s_nop(2), s_nop(1)."""
+    self._run_and_compare([s_nop(3), s_nop(2), s_nop(1)], "snop_3_2_1")
+
+  def test_snop_1_4_1(self):
+    """s_nop(1), s_nop(4), s_nop(1)."""
+    self._run_and_compare([s_nop(1), s_nop(4), s_nop(1)], "snop_1_4_1")
+
+  def test_snop_4_1_4(self):
+    """s_nop(4), s_nop(1), s_nop(4)."""
+    self._run_and_compare([s_nop(4), s_nop(1), s_nop(4)], "snop_4_1_4")
+
+  def test_snop_0_8_0(self):
+    """s_nop(0), s_nop(8), s_nop(0)."""
+    self._run_and_compare([s_nop(0), s_nop(8), s_nop(0)], "snop_0_8_0")
+
+  def test_snop_8_0_8(self):
+    """s_nop(8), s_nop(0), s_nop(8)."""
+    self._run_and_compare([s_nop(8), s_nop(0), s_nop(8)], "snop_8_0_8")
+
+  def test_snop_0_16_0(self):
+    """s_nop(0), s_nop(16), s_nop(0)."""
+    self._run_and_compare([s_nop(0), s_nop(16), s_nop(0)], "snop_0_16_0")
+
+  def test_snop_16_0_16(self):
+    """s_nop(16), s_nop(0), s_nop(16)."""
+    self._run_and_compare([s_nop(16), s_nop(0), s_nop(16)], "snop_16_0_16")
+
+  def test_snop_32_6_12(self):
+    """s_nop(32), s_nop(6), s_nop(12) - the original failing case."""
+    self._run_and_compare([s_nop(32), s_nop(6), s_nop(12)], "snop_32_6_12")
+
+  def test_snop_6_32_12(self):
+    """s_nop(6), s_nop(32), s_nop(12) - reordered."""
+    self._run_and_compare([s_nop(6), s_nop(32), s_nop(12)], "snop_6_32_12")
+
+  def test_snop_12_6_32(self):
+    """s_nop(12), s_nop(6), s_nop(32) - reordered."""
+    self._run_and_compare([s_nop(12), s_nop(6), s_nop(32)], "snop_12_6_32")
+
+  def test_snop_several_mixed(self):
+    """s_nop(32), s_nop(6), s_nop(12), s_nop(1), s_nop(0), s_nop(11) - longer mixed sequence."""
+    self._run_and_compare([s_nop(32), s_nop(6), s_nop(12), s_nop(1), s_nop(0), s_nop(11)], "snop_several_mixed")
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Long s_nop sequences - detect patterns
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  def test_snop_many_0(self):
+    """8 consecutive s_nop(0)."""
+    self._run_and_compare([s_nop(0)] * 8, "snop_many_0")
+
+  def test_snop_many_1(self):
+    """8 consecutive s_nop(1)."""
+    self._run_and_compare([s_nop(1)] * 8, "snop_many_1")
+
+  def test_snop_many_4(self):
+    """8 consecutive s_nop(4)."""
+    self._run_and_compare([s_nop(4)] * 8, "snop_many_4")
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # s_nop boundary tests - around power of 2 boundaries
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  def test_snop_boundary_7_8(self):
+    """s_nop around 8 boundary."""
+    self._run_and_compare([s_nop(7), s_nop(8)], "snop_7_8")
+
+  def test_snop_boundary_15_16(self):
+    """s_nop around 16 boundary."""
+    self._run_and_compare([s_nop(15), s_nop(16)], "snop_15_16")
+
+  def test_snop_boundary_31_32(self):
+    """s_nop around 32 boundary."""
+    self._run_and_compare([s_nop(31), s_nop(32)], "snop_31_32")
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Extra +4 cycle delay boundary tests
+  # s_nop(N) where 7 <= N <= 18 has +4 extra cycles when not first instruction
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  def test_snop_extra_delay_boundary_6_7(self):
+    """s_nop(6) then s_nop(7) - 7 is first value with +4 delay."""
+    self._run_and_compare([s_nop(6), s_nop(7)], "snop_6_7")
+
+  def test_snop_extra_delay_boundary_18_19(self):
+    """s_nop(18) then s_nop(19) - 18 is last value with +4 delay."""
+    self._run_and_compare([s_nop(0), s_nop(18)], "snop_0_18")
+
+  def test_snop_extra_delay_boundary_0_19(self):
+    """s_nop(0) then s_nop(19) - 19 has no +4 delay."""
+    self._run_and_compare([s_nop(0), s_nop(19)], "snop_0_19")
+
+  def test_snop_no_extra_delay_small(self):
+    """s_nop(0) then s_nop(6) - values < 7 have no +4 delay."""
+    self._run_and_compare([s_nop(0), s_nop(6)], "snop_0_6")
+
+  def test_snop_no_extra_delay_large(self):
+    """s_nop(0) then s_nop(31) - values > 18 have no +4 delay."""
+    self._run_and_compare([s_nop(0), s_nop(31)], "snop_0_31")
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Falsification tests - try to break the 7 <= N <= 18 hypothesis
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  # Test if first s_nop value affects the rule
+  def test_falsify_first_value_7_7(self):
+    """Does s_nop(7) as first affect s_nop(7) as second?"""
+    self._run_and_compare([s_nop(7), s_nop(7)], "falsify_7_7")
+
+  def test_falsify_first_value_18_7(self):
+    """Does s_nop(18) as first affect s_nop(7) as second?"""
+    self._run_and_compare([s_nop(18), s_nop(7)], "falsify_18_7")
+
+  def test_falsify_first_value_19_7(self):
+    """Does s_nop(19) as first affect s_nop(7) as second?"""
+    self._run_and_compare([s_nop(19), s_nop(7)], "falsify_19_7")
+
+  def test_falsify_first_value_31_7(self):
+    """Does s_nop(31) as first affect s_nop(7) as second?"""
+    self._run_and_compare([s_nop(31), s_nop(7)], "falsify_31_7")
+
+  def test_falsify_first_value_6_18(self):
+    """Does s_nop(6) as first affect s_nop(18)?"""
+    self._run_and_compare([s_nop(6), s_nop(18)], "falsify_6_18")
+
+  def test_falsify_first_value_7_18(self):
+    """Does s_nop(7) as first affect s_nop(18)?"""
+    self._run_and_compare([s_nop(7), s_nop(18)], "falsify_7_18")
+
+  def test_falsify_first_value_19_18(self):
+    """Does s_nop(19) as first affect s_nop(18)?"""
+    self._run_and_compare([s_nop(19), s_nop(18)], "falsify_19_18")
+
+  # Test third instruction behavior
+  def test_falsify_third_inst_0_0_7(self):
+    """Does third s_nop(7) get +4 delay after two s_nop(0)?"""
+    self._run_and_compare([s_nop(0), s_nop(0), s_nop(7)], "falsify_0_0_7")
+
+  def test_falsify_third_inst_0_7_7(self):
+    """Does third s_nop(7) get +4 delay after s_nop(0), s_nop(7)?"""
+    self._run_and_compare([s_nop(0), s_nop(7), s_nop(7)], "falsify_0_7_7")
+
+  def test_falsify_third_inst_7_0_7(self):
+    """Does third s_nop(7) get +4 delay after s_nop(7), s_nop(0)?"""
+    self._run_and_compare([s_nop(7), s_nop(0), s_nop(7)], "falsify_7_0_7")
+
+  def test_falsify_third_inst_7_7_7(self):
+    """Does third s_nop(7) get +4 delay after two s_nop(7)?"""
+    self._run_and_compare([s_nop(7), s_nop(7), s_nop(7)], "falsify_7_7_7")
+
+  def test_falsify_third_inst_0_0_19(self):
+    """Does third s_nop(19) get +4 delay? (should NOT)"""
+    self._run_and_compare([s_nop(0), s_nop(0), s_nop(19)], "falsify_0_0_19")
+
+  def test_falsify_third_inst_7_7_19(self):
+    """Does third s_nop(19) get +4 delay after two s_nop(7)? (should NOT)"""
+    self._run_and_compare([s_nop(7), s_nop(7), s_nop(19)], "falsify_7_7_19")
+
+  # Test exact boundaries with different predecessors
+  def test_falsify_boundary_1_6(self):
+    """s_nop(1) then s_nop(6) - just below threshold."""
+    self._run_and_compare([s_nop(1), s_nop(6)], "falsify_1_6")
+
+  def test_falsify_boundary_1_7(self):
+    """s_nop(1) then s_nop(7) - at lower threshold."""
+    self._run_and_compare([s_nop(1), s_nop(7)], "falsify_1_7")
+
+  def test_falsify_boundary_1_18(self):
+    """s_nop(1) then s_nop(18) - at upper threshold."""
+    self._run_and_compare([s_nop(1), s_nop(18)], "falsify_1_18")
+
+  def test_falsify_boundary_1_19(self):
+    """s_nop(1) then s_nop(19) - just above threshold."""
+    self._run_and_compare([s_nop(1), s_nop(19)], "falsify_1_19")
+
+  def test_falsify_boundary_6_6(self):
+    """s_nop(6) then s_nop(6) - both below threshold."""
+    self._run_and_compare([s_nop(6), s_nop(6)], "falsify_6_6")
+
+  def test_falsify_boundary_19_19(self):
+    """s_nop(19) then s_nop(19) - both above threshold."""
+    self._run_and_compare([s_nop(19), s_nop(19)], "falsify_19_19")
+
+  def test_falsify_boundary_6_19(self):
+    """s_nop(6) then s_nop(19) - both outside threshold."""
+    self._run_and_compare([s_nop(6), s_nop(19)], "falsify_6_19")
+
+  # Test longer sequences to see pattern
+  def test_falsify_long_7_7_7_7(self):
+    """Four s_nop(7) - do all get +4 delay?"""
+    self._run_and_compare([s_nop(7), s_nop(7), s_nop(7), s_nop(7)], "falsify_7_7_7_7")
+
+  def test_falsify_long_0_7_0_7(self):
+    """Alternating s_nop(0) and s_nop(7)."""
+    self._run_and_compare([s_nop(0), s_nop(7), s_nop(0), s_nop(7)], "falsify_0_7_0_7")
+
+  def test_falsify_long_7_0_7_0(self):
+    """Alternating s_nop(7) and s_nop(0)."""
+    self._run_and_compare([s_nop(7), s_nop(0), s_nop(7), s_nop(0)], "falsify_7_0_7_0")
+
+  def test_falsify_long_6_7_6_7(self):
+    """Alternating s_nop(6) and s_nop(7)."""
+    self._run_and_compare([s_nop(6), s_nop(7), s_nop(6), s_nop(7)], "falsify_6_7_6_7")
+
+  def test_falsify_long_18_19_18_19(self):
+    """Alternating s_nop(18) and s_nop(19) around upper boundary."""
+    self._run_and_compare([s_nop(18), s_nop(19), s_nop(18), s_nop(19)], "falsify_18_19_18_19")
+
+  # Test middle values in range
+  def test_falsify_middle_0_10(self):
+    """s_nop(0) then s_nop(10) - middle of range."""
+    self._run_and_compare([s_nop(0), s_nop(10)], "falsify_0_10")
+
+  def test_falsify_middle_0_12(self):
+    """s_nop(0) then s_nop(12) - middle of range."""
+    self._run_and_compare([s_nop(0), s_nop(12)], "falsify_0_12")
+
+  def test_falsify_middle_0_15(self):
+    """s_nop(0) then s_nop(15) - middle of range."""
+    self._run_and_compare([s_nop(0), s_nop(15)], "falsify_0_15")
+
+  def test_falsify_middle_10_10(self):
+    """Two s_nop(10) - middle of range."""
+    self._run_and_compare([s_nop(10), s_nop(10)], "falsify_10_10")
+
+  # Test values just inside/outside boundaries
+  def test_falsify_just_inside_0_8(self):
+    """s_nop(0) then s_nop(8) - just inside lower bound."""
+    self._run_and_compare([s_nop(0), s_nop(8)], "falsify_0_8")
+
+  def test_falsify_just_inside_0_17(self):
+    """s_nop(0) then s_nop(17) - just inside upper bound."""
+    self._run_and_compare([s_nop(0), s_nop(17)], "falsify_0_17")
+
+  def test_falsify_just_outside_0_5(self):
+    """s_nop(0) then s_nop(5) - just outside lower bound."""
+    self._run_and_compare([s_nop(0), s_nop(5)], "falsify_0_5")
+
+  def test_falsify_just_outside_0_20(self):
+    """s_nop(0) then s_nop(20) - just outside upper bound."""
+    self._run_and_compare([s_nop(0), s_nop(20)], "falsify_0_20")
+
+  # Test large gaps
+  def test_falsify_gap_0_63(self):
+    """s_nop(0) then s_nop(63) - maximum value."""
+    self._run_and_compare([s_nop(0), s_nop(63)], "falsify_0_63")
+
+  def test_falsify_gap_63_7(self):
+    """s_nop(63) then s_nop(7) - large first, in-range second."""
+    self._run_and_compare([s_nop(63), s_nop(7)], "falsify_63_7")
+
+  def test_falsify_gap_63_63(self):
+    """Two s_nop(63) - maximum values."""
+    self._run_and_compare([s_nop(63), s_nop(63)], "falsify_63_63")
 
 if __name__ == "__main__":
   unittest.main()
