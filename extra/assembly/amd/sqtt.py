@@ -40,7 +40,7 @@ class InstOp(IntEnum):
   VALU_64_SHIFT = 0xd     # 64-bit shifts: lshl, lshr, ashr
   VALU_MAD64 = 0xe        # 64-bit multiply-add
   VALU_64 = 0xf           # 64-bit: add, mul, fma, rcp, sqrt, rounding, frexp, div helpers
-  VALU_64_2 = 0x10        # (not yet discovered)
+
   # FLAT memory ops on traced SIMD (0x1x range)
   FLAT_LOAD = 0x1c
   FLAT_STORE = 0x1d
@@ -57,7 +57,7 @@ class InstOp(IntEnum):
   LDS_STORE = 0x2b
   LDS_STORE_64 = 0x2c
   LDS_STORE_128 = 0x2e
-  OTHER_VALU_64 = 0x3a    # (not yet discovered)
+
   # Memory ops on other SIMD (0x5x range)
   OTHER_LDS_LOAD = 0x50
   OTHER_LDS_STORE = 0x51
