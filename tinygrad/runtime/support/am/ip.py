@@ -451,7 +451,7 @@ class AM_SDMA(AM_IP):
       self.adev.regGRBM_SOFT_RESET.write(0x0)
 
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, idx:int) -> tuple[int, int]:
-    pipe, queue = idx % 4, idx // 4
+    pipe, queue = idx // 4, idx % 4
     reg, inst = ("regSDMA_GFX", pipe+queue*4) if self.adev.ip_ver[am.SDMA0_HWIP][:2] == (4,4) else (f"regSDMA{pipe}_QUEUE{queue}", 0)
     doorbell = am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0 + (pipe+queue*4) * 0xA
     self.sdma_reginst.append((reg, inst))
