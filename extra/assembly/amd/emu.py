@@ -291,6 +291,9 @@ class SQTTState:
         self.cycle = exec_cycle
         self.emit_aluexec(src)
         self.cycle = old_cycle
+      # s_nop(N) waits N+1 cycles - apply delay for N > 0 (simm16 field)
+      if inst.op == SOPPOp.S_NOP and inst.simm16 > 0:
+        self.cycle += inst.simm16  # add delay before next instruction
       self.last_inst_type = 'SOPP'
 
     elif isinstance(inst, SMEM):

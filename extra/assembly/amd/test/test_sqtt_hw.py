@@ -18,7 +18,7 @@ from tinygrad.device import Device
 from tinygrad.runtime.ops_amd import AMDProgram, ProfileSQTTEvent
 from tinygrad.runtime.support.compiler_amd import HIPCompiler
 
-from extra.assembly.amd.autogen.rdna3.ins import v_mov_b32_e32, v_add_f32_e32, v_mul_f32_e32, s_mov_b32, s_add_u32, s_nop, s_endpgm
+from extra.assembly.amd.autogen.rdna3.ins import v_mov_b32_e32, v_add_f32_e32, v_mul_f32_e32, s_mov_b32, s_add_u32, s_nop, s_waitcnt, s_endpgm
 from extra.assembly.amd.dsl import v, s
 from extra.assembly.amd.sqtt import decode, LAYOUT_HEADER, WAVESTART, WAVEEND, INST, VALUINST, ALUEXEC, VMEMEXEC, InstOp, AluSrc, MemSrc
 
@@ -133,8 +133,8 @@ def assemble(instructions: list) -> bytes:
   return b''.join(inst.to_bytes() for inst in instructions)
 
 def wrap_with_nops(instructions: list) -> list:
-  """Add trailing NOPs and s_endpgm for clean SQTT timing."""
-  return instructions + [s_nop(0)]*64 + [s_endpgm()]
+  """Add epilogue for clean SQTT timing."""
+  return instructions + [s_nop(0)]*32 + [s_endpgm()]
 
 def compile_asm_sqtt(instructions: list, alu_only: bool = False) -> AMDProgram:
   """Compile instructions to an AMDProgram for SQTT tracing.

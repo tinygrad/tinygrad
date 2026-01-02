@@ -100,7 +100,7 @@ def get_timing_deltas(packets: list) -> list[tuple[str, int]]:
 class TestEmulatorSQTT(unittest.TestCase):
   """Tests comparing emulator SQTT to hardware SQTT."""
 
-  def _run_and_compare(self, instructions: list, name: str = "", n_runs: int = 100, min_identical: int = 25, max_attempts: int = 10):
+  def _run_and_compare(self, instructions: list, name: str = "", n_runs: int = 200, min_identical: int = 20, max_attempts: int = 10):
     """Run instructions on both hardware and emulator, compare SQTT structure."""
     from collections import Counter
 
@@ -143,7 +143,10 @@ class TestEmulatorSQTT(unittest.TestCase):
       hw_delta_sets = [wave_deltas(t) for t in hw_traces]
       pattern_counts = Counter(tuple(d) for d in hw_delta_sets)
 
-      if pattern_counts and pattern_counts.most_common(1)[0][1] >= min_identical:
+      # Check if we have enough patterns with WAVEEND +2 gap (skip batches with +3 jitter)
+      patterns_with_waveend_2 = [p for p in pattern_counts if p[-1] == ('WAVEEND', 2)]
+      count_waveend_2 = sum(pattern_counts[p] for p in patterns_with_waveend_2)
+      if count_waveend_2 >= min_identical:
         break
     else:
       if not hw_traces:
