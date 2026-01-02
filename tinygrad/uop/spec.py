@@ -276,7 +276,7 @@ full_spec = PatternMatcher([
 
 x86_spec = PatternMatcher([
   # these are the only non X86Ops allowed
-  (UPat((Ops.NOOP, Ops.GROUP, Ops.AFTER)), lambda: True),
+  (UPat((Ops.NOOP, Ops.GROUP, Ops.AFTER, Ops.BARRIER)), lambda: True),
   (UPat(GroupOp.All), lambda: False),
   (UPat(X86GroupOp.All), lambda: True),
 ])

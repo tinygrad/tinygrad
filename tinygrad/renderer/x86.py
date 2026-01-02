@@ -164,7 +164,7 @@ x86_extra_matcher = base_extra_matcher + PatternMatcher([
 pre_isel_matcher = PatternMatcher([
   # gated index becomes a conditional move on the index, the load/store are unconditional
   (UPat.var("base").index(UPat.var("idx"), UPat.var("gate")).load(UPat.var("alt"), name="x"), lambda base,idx,gate,alt,x: gate.where(base.index(idx, ptr=True), (l:=UOp(Ops.DEFINE_LOCAL, base.dtype.base.ptr(x.dtype.count), arg=0)).after(l.store(alt)).index(UOp.const(dtypes.int32, 0), ptr=True)).load(dtype=x.dtype)),
-  #(UPat.var("base").index(UPat.var("idx"), UPat.var("gate")).store(UPat.var("val")), lambda base,idx,gate,val: gate.where(base.index(idx, ptr=True), UOp(Ops.DEFINE_LOCAL, base.dtype.base.ptr(val.dtype.count), arg=0).index(UOp.const(dtypes.int32, 0), ptr=True)).store(val)),
+  (UPat.var("base").index(UPat.var("idx"), UPat.var("gate")).store(UPat.var("val")), lambda base,idx,gate,val: gate.where(base.index(idx, ptr=True), UOp(Ops.DEFINE_LOCAL, base.dtype.base.ptr(val.dtype.count), arg=0).index(UOp.const(dtypes.int32, 0), ptr=True)).store(val)),
   # fold the displacement into the load/store to expose the base index for memory address fusion in isel
   # after this all load/stores have an extra const in the src
   (UPat(Ops.LOAD, src=(UPat.var("buf").index(UPat.cvar("disp")),), name="x"),
@@ -285,9 +285,13 @@ isel_matcher = PatternMatcher([
   # TODO: RANGE and END is tricky. Both linearizer and regalloc need them so they stay as Ops. This gets into a broader issue with tinygrad
   # not being able to represent control flow properly. For now they are rewritten after regalloc
   # HACK: annoying hack so const doesn't get rewritten because linearizer needs it
-  (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(src=(x.src[0].replace(tag=1),) + x.src[1:], arg=ctx.vreg(WGPR)) if x.src[0].tag is None else None),
+  (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(src=(x.src[0].replace(tag=1 if x.src[0].op is Ops.CONST else None),) + x.src[1:], arg=ctx.vreg(WGPR)) if not isinstance(x.arg, Register) else None),
   # function abi constraints
   (UPat(Ops.DEFINE_GLOBAL, name="x"), abi),
+  # HACK: the register that holds the DEFINE_VAR is unknown until after linearizing, we add vreg to it that can't be allocated to any register
+  # after linearizing we know the position of DEFINE_VAR in the function args and rewrite the vreg to the real reg
+  # the right fix for this is to add the function arg position to DEFINE_VAR like DEFINE_GLOBAL
+  #(UPat(Ops.DEFINE_VAR, name="x")),
   # these are treated the same for now
   (UPat((Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"),
    lambda ctx,x: x.replace(op=X86Ops.LEA, src=(UOp(X86Ops.DEFINE_REG, x.dtype, arg=RSP), UOp(Ops.NOOP), imm(dtypes.int32, ctx.inc_stack(x.dtype.nbytes()))), arg=None)), # noqa: E501
@@ -723,7 +727,7 @@ class X86Renderer(ISARenderer):
     for u in uops:
       if u.op in (X86Ops.JL, X86Ops.JB, X86Ops.JE, X86Ops.JNE): targets.add(u.src[0])
     for u in uops:
-      if u.op in (Ops.GROUP, Ops.NOOP, Ops.AFTER): continue
+      if u.op in (Ops.GROUP, Ops.NOOP, Ops.AFTER, Ops.BARRIER): continue
       if u.op in (X86Ops.IMM, X86Ops.DEFINE_REG): continue
       if (l:=cast(bytes|None, encodings.rewrite(u))) is None:
         raise RuntimeError(f"failed to encode {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
