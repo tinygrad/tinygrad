@@ -2,7 +2,7 @@ import unittest, math
 from functools import partial
 
 from tinygrad import nn, dtypes, Tensor, Device, TinyJit, Variable
-from tinygrad.helpers import getenv, CI, OSX
+from tinygrad.helpers import getenv, OSX #, CI
 from tinygrad.device import is_dtype_supported
 from tinygrad.engine.realize import CompiledRunner
 from tinygrad.renderer.ptx import PTXRenderer
@@ -80,7 +80,7 @@ class TestRandomness(unittest.TestCase):
     assert nx[nx == 0].size > 0
     equal_distribution(lambda *x: Tensor.rand(*x, dtype=dtypes.float16), torch.rand, lambda x: np.random.rand(*x), shape=(2, N, N))
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"NV", "CUDA"}, "gpuocelot doesn't support certain ops needed for threefry")
+  #@unittest.skipIf(CI and Device.DEFAULT in {"NV", "CUDA"}, "gpuocelot doesn't support certain ops needed for threefry")
   def test_threefry_against_reference(self):
     Tensor.manual_seed(1337)
 

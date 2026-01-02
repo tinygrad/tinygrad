@@ -2,7 +2,7 @@ from typing import Optional, Any
 import unittest, math
 import numpy as np
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.helpers import CI, DEBUG, getenv, Timing, Context
+from tinygrad.helpers import DEBUG, getenv, Timing, Context #, CI
 from tinygrad.dtype import dtypes, DType, AddrSpace
 from tinygrad.device import Buffer, Device
 from tinygrad.uop.ops import Ops, UOp, UPat, KernelInfo, exec_alu, AxisType
@@ -330,7 +330,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
 
 class TestLocalAccess(unittest.TestCase):
   # NOTE: this is failing on METAL CI, no idea why. Works locally.
-  @unittest.skipIf(Device.DEFAULT == "METAL" and CI, "failing only in CI")
+  #@unittest.skipIf(Device.DEFAULT == "METAL" and CI, "failing only in CI")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
   def test_local_basic(self):
     uops = []

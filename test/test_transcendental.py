@@ -82,7 +82,7 @@ class TestFromFuzzer(unittest.TestCase):
     _test_value(np.pi * 2, unit=1.5)
 
   @given(strat.sampled_from(dtypes_float))
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and CI, "Nan location mismatch on Vulkan, Metal works")
+  #@unittest.skipIf(Device.DEFAULT == "WEBGPU" and CI, "Nan location mismatch on Vulkan, Metal works")
   def test_log2(self, dtype):
     if not is_dtype_supported(dtype): return
     if dtype == dtypes.float64:
@@ -114,7 +114,7 @@ class TestFloat16Log2(unittest.TestCase):
         np.testing.assert_allclose(result, expected, rtol=1e-3, err_msg=f"log2({val})")
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16, Device.DEFAULT), f"no float16 on {Device.DEFAULT}")
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and CI, "Nan handling differs on Vulkan")
+  #@unittest.skipIf(Device.DEFAULT == "WEBGPU" and CI, "Nan handling differs on Vulkan")
   def test_float16_log2_special(self):
     # special values: inf, -inf, nan, 0, negative
     with Context(TRANSCENDENTAL=2), np.errstate(all='ignore'):

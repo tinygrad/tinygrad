@@ -1,6 +1,6 @@
 import unittest, struct, contextlib, statistics, time, gc
 from tinygrad import Device, Tensor, dtypes, TinyJit
-from tinygrad.helpers import CI, getenv, Context, ProfileRangeEvent, cpu_profile, cpu_events, ProfilePointEvent, dedup
+from tinygrad.helpers import getenv, Context, ProfileRangeEvent, cpu_profile, cpu_events, ProfilePointEvent, dedup #, CI
 from tinygrad.device import Buffer, BufferSpec, Compiled, ProfileDeviceEvent, ProfileGraphEvent
 from tinygrad.runtime.support.hcq import HCQCompiled
 from tinygrad.engine.realize import get_runner
@@ -146,7 +146,8 @@ class TestProfiler(unittest.TestCase):
     assert len(graph_evs) == 1, "one graph event is expected"
     assert len(graph_evs[0].ents) == 2, "two entities are expected"
 
-  @unittest.skipIf(CI or not issubclass(type(Device[Device.DEFAULT]), HCQCompiled), "skip CI")
+  #@unittest.skipIf(CI or not issubclass(type(Device[Device.DEFAULT]), HCQCompiled), "skip CI")
+  @unittest.skipUnless(issubclass(type(Device[Device.DEFAULT]), HCQCompiled), "requires HCQ device")
   def test_dev_jitter_matrix(self):
     dev_cnt = 6
     try: devs = [Device[f"{Device.DEFAULT}:{i}"] for i in range(dev_cnt)]

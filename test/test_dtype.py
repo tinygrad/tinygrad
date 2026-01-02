@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from typing import Any, List
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import getenv, DEBUG, CI
+from tinygrad.helpers import getenv, DEBUG #, CI
 from tinygrad.dtype import DType, DTYPES_DICT, least_upper_dtype, fp8_to_float, float_to_fp8, _to_np_dtype, _to_torch_dtype, truncate
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
@@ -259,8 +259,9 @@ class TestFloatDType(TestDType):
 
 class TestDoubleDType(TestDType):
   DTYPE = dtypes.double
-  @unittest.skipIf((CI and Device.DEFAULT in {"CUDA", "NV"}) or \
-   isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer)), "conversion not supported on CI CUDA, PTX, and NIR")  # TODO: why not?
+  #@unittest.skipIf((CI and Device.DEFAULT in {"CUDA", "NV"}) or \
+  # isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer)), "conversion not supported on CI CUDA, PTX, and NIR")  # TODO: why not?
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer)), "conversion not supported on PTX and NIR")
   def test_float64_increased_precision(self):
     for func in [
       lambda t: t.exp(),
