@@ -1517,6 +1517,398 @@ class TestVALUMov(SQTTCompareTestBase):
       v_mov_b32_e32(v[7], v[6]),
     ], "vmov_dep_chain_8")
 
+  def test_vmov_dep_chain_7(self):
+    """Seven v_mov with dependency chain - tests forwarding network exhaustion boundary."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      v_mov_b32_e32(v[5], v[4]),
+      v_mov_b32_e32(v[6], v[5]),
+    ], "vmov_dep_chain_7")
+
+  def test_vmov_dep_chain_9(self):
+    """Nine v_mov with dependency chain."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      v_mov_b32_e32(v[5], v[4]),
+      v_mov_b32_e32(v[6], v[5]),
+      v_mov_b32_e32(v[7], v[6]),
+      v_mov_b32_e32(v[8], v[7]),
+    ], "vmov_dep_chain_9")
+
+  def test_vmov_dep_chain_10(self):
+    """Ten v_mov with dependency chain."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      v_mov_b32_e32(v[5], v[4]),
+      v_mov_b32_e32(v[6], v[5]),
+      v_mov_b32_e32(v[7], v[6]),
+      v_mov_b32_e32(v[8], v[7]),
+      v_mov_b32_e32(v[9], v[8]),
+    ], "vmov_dep_chain_10")
+
+  def test_vmov_dep_chain_12(self):
+    """Twelve v_mov with dependency chain - tests multiple forwarding exhaustion cycles."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      v_mov_b32_e32(v[5], v[4]),
+      v_mov_b32_e32(v[6], v[5]),
+      v_mov_b32_e32(v[7], v[6]),
+      v_mov_b32_e32(v[8], v[7]),
+      v_mov_b32_e32(v[9], v[8]),
+      v_mov_b32_e32(v[10], v[9]),
+      v_mov_b32_e32(v[11], v[10]),
+    ], "vmov_dep_chain_12")
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Chain with trailing independent VALUs - tests IMMEDIATE interleaving edge case
+  # The number of trailing VALUs affects when s_nops start, which affects
+  # how many IMMEDIATEs are interleaved with ALUEXECs at the forwarding boundary.
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  def test_vmov_chain5_trail0(self):
+    """5-chain with 0 trailing independent VALUs - baseline for edge case."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+    ], "vmov_chain5_trail0")
+
+  def test_vmov_chain5_trail1(self):
+    """5-chain with 1 trailing independent VALU."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      v_mov_b32_e32(v[10], 2.0),  # independent
+    ], "vmov_chain5_trail1")
+
+  def test_vmov_chain5_trail2(self):
+    """5-chain with 2 trailing independent VALUs."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      v_mov_b32_e32(v[10], 2.0),  # independent
+      v_mov_b32_e32(v[11], 3.0),  # independent
+    ], "vmov_chain5_trail2")
+
+  def test_vmov_chain5_trail3(self):
+    """5-chain with 3 trailing independent VALUs."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      v_mov_b32_e32(v[10], 2.0),  # independent
+      v_mov_b32_e32(v[11], 3.0),  # independent
+      v_mov_b32_e32(v[12], 4.0),  # independent
+    ], "vmov_chain5_trail3")
+
+  def test_vmov_chain5_trail4(self):
+    """5-chain with 4 trailing independent VALUs - should change forwarding behavior."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      v_mov_b32_e32(v[10], 2.0),  # independent
+      v_mov_b32_e32(v[11], 3.0),  # independent
+      v_mov_b32_e32(v[12], 4.0),  # independent
+      v_mov_b32_e32(v[13], 5.0),  # independent
+    ], "vmov_chain5_trail4")
+
+  def test_vmov_chain5_trail5(self):
+    """5-chain with 5 trailing independent VALUs."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      v_mov_b32_e32(v[10], 2.0),  # independent
+      v_mov_b32_e32(v[11], 3.0),  # independent
+      v_mov_b32_e32(v[12], 4.0),  # independent
+      v_mov_b32_e32(v[13], 5.0),  # independent
+      v_mov_b32_e32(v[14], 6.0),  # independent
+    ], "vmov_chain5_trail5")
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Chain with trailing s_nops - tests IMMEDIATE interleaving with precise control
+  # Each s_nop(0) delays s_nop processing start by 1 cycle, affecting how many
+  # IMMEDIATEs are interleaved with ALUEXECs at the forwarding exhaustion boundary.
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  def test_vmov_chain5_nop0(self):
+    """5-chain with 0 extra s_nops before epilogue."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+    ], "vmov_chain5_nop0")
+
+  def test_vmov_chain5_nop1(self):
+    """5-chain with 1 extra s_nop before epilogue."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      s_nop(0),
+    ], "vmov_chain5_nop1")
+
+  def test_vmov_chain5_nop2(self):
+    """5-chain with 2 extra s_nops before epilogue."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      s_nop(0),
+      s_nop(0),
+    ], "vmov_chain5_nop2")
+
+  def test_vmov_chain5_nop3(self):
+    """5-chain with 3 extra s_nops before epilogue."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      s_nop(0),
+      s_nop(0),
+      s_nop(0),
+    ], "vmov_chain5_nop3")
+
+  def test_vmov_chain5_nop4(self):
+    """5-chain with 4 extra s_nops before epilogue."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      s_nop(0),
+      s_nop(0),
+      s_nop(0),
+      s_nop(0),
+    ], "vmov_chain5_nop4")
+
+  def test_vmov_chain5_nop5(self):
+    """5-chain with 5 extra s_nops before epilogue."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      s_nop(0),
+      s_nop(0),
+      s_nop(0),
+      s_nop(0),
+      s_nop(0),
+    ], "vmov_chain5_nop5")
+
+  def test_vmov_chain5_nop8(self):
+    """5-chain with 8 extra s_nops before epilogue."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      s_nop(0),
+      s_nop(0),
+      s_nop(0),
+      s_nop(0),
+      s_nop(0),
+      s_nop(0),
+      s_nop(0),
+      s_nop(0),
+    ], "vmov_chain5_nop8")
+
+  def test_vmov_chain5_nop16(self):
+    """5-chain with 16 extra s_nops before epilogue."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+    ] + [s_nop(0)] * 16, "vmov_chain5_nop16")
+
+  # Test with longer s_nops to add more delay per instruction
+  def test_vmov_chain5_nop3_long(self):
+    """5-chain with 3 s_nop(3) - each adds more delay."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      s_nop(3),
+      s_nop(3),
+      s_nop(3),
+    ], "vmov_chain5_nop3_long")
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Chain6 with trailing s_nops - same edge case but with 6-chain
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  def test_vmov_chain6_nop0(self):
+    """6-chain with 0 extra s_nops before epilogue."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      v_mov_b32_e32(v[5], v[4]),
+    ], "vmov_chain6_nop0")
+
+  def test_vmov_chain6_nop1(self):
+    """6-chain with 1 extra s_nop before epilogue."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      v_mov_b32_e32(v[5], v[4]),
+      s_nop(0),
+    ], "vmov_chain6_nop1")
+
+  def test_vmov_chain6_nop2(self):
+    """6-chain with 2 extra s_nops before epilogue."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      v_mov_b32_e32(v[5], v[4]),
+      s_nop(0),
+      s_nop(0),
+    ], "vmov_chain6_nop2")
+
+  def test_vmov_chain6_nop3(self):
+    """6-chain with 3 extra s_nops before epilogue."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      v_mov_b32_e32(v[5], v[4]),
+      s_nop(0),
+      s_nop(0),
+      s_nop(0),
+    ], "vmov_chain6_nop3")
+
+  def test_vmov_chain6_nop4(self):
+    """6-chain with 4 extra s_nops before epilogue."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      v_mov_b32_e32(v[5], v[4]),
+      s_nop(0),
+      s_nop(0),
+      s_nop(0),
+      s_nop(0),
+    ], "vmov_chain6_nop4")
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Chain12 with trailing instructions - tests second forwarding exhaustion cycle
+  # ─────────────────────────────────────────────────────────────────────────────
+
+  def test_vmov_chain12_nop0(self):
+    """12-chain with 0 extra s_nops - tests second exhaustion boundary."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      v_mov_b32_e32(v[5], v[4]),
+      v_mov_b32_e32(v[6], v[5]),
+      v_mov_b32_e32(v[7], v[6]),
+      v_mov_b32_e32(v[8], v[7]),
+      v_mov_b32_e32(v[9], v[8]),
+      v_mov_b32_e32(v[10], v[9]),
+      v_mov_b32_e32(v[11], v[10]),
+    ], "vmov_chain12_nop0")
+
+  def test_vmov_chain12_nop2(self):
+    """12-chain with 2 extra s_nops."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      v_mov_b32_e32(v[5], v[4]),
+      v_mov_b32_e32(v[6], v[5]),
+      v_mov_b32_e32(v[7], v[6]),
+      v_mov_b32_e32(v[8], v[7]),
+      v_mov_b32_e32(v[9], v[8]),
+      v_mov_b32_e32(v[10], v[9]),
+      v_mov_b32_e32(v[11], v[10]),
+      s_nop(0),
+      s_nop(0),
+    ], "vmov_chain12_nop2")
+
+  def test_vmov_chain12_nop4(self):
+    """12-chain with 4 extra s_nops."""
+    self._run_and_compare([
+      v_mov_b32_e32(v[0], 1.0),
+      v_mov_b32_e32(v[1], v[0]),
+      v_mov_b32_e32(v[2], v[1]),
+      v_mov_b32_e32(v[3], v[2]),
+      v_mov_b32_e32(v[4], v[3]),
+      v_mov_b32_e32(v[5], v[4]),
+      v_mov_b32_e32(v[6], v[5]),
+      v_mov_b32_e32(v[7], v[6]),
+      v_mov_b32_e32(v[8], v[7]),
+      v_mov_b32_e32(v[9], v[8]),
+      v_mov_b32_e32(v[10], v[9]),
+      v_mov_b32_e32(v[11], v[10]),
+      s_nop(0),
+      s_nop(0),
+      s_nop(0),
+      s_nop(0),
+    ], "vmov_chain12_nop4")
+
   # ─────────────────────────────────────────────────────────────────────────────
   # WAW (write-after-write) - same destination register
   # ─────────────────────────────────────────────────────────────────────────────
