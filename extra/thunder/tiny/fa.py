@@ -45,7 +45,6 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       k_smem = ker.st((KV_BLOCK_SIZE, D), dtypes.bfloat16)
       v_smem = ker.st((KV_BLOCK_SIZE, D), dtypes.bfloat16)
 
-      q_reg_fl = ker.rt((Q_BLOCK_SIZE, D), dtypes.float32)
       q_reg = ker.rt((Q_BLOCK_SIZE, D), dtypes.bfloat16)
       q_reg_transposed = ker.rt((D, Q_BLOCK_SIZE), dtypes.bfloat16, TileLayout.COL)
       k_reg = ker.rt((KV_BLOCK_SIZE, D), dtypes.bfloat16)
@@ -69,9 +68,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
       scale_vec = warp.ones(scale_vec)
 
       # load q tile
-      q_reg_fl = warp.load(q_reg_fl, q, (), (batch, q_seq, head, 0), axis=1)
-      q_reg_fl *= (1.0 / math.sqrt(D)) * (1.0 / math.log(2))
-      q_reg = warp.copy(q_reg, q_reg_fl)
+      q_reg = warp.load(q_reg, q, (), (batch, q_seq, head, 0), axis=1)
       q_reg_transposed = warp.transpose(q_reg_transposed, q_reg)
 
       for kv_idx in ker.range(N // KV_BLOCK_SIZE):
@@ -85,6 +82,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
         att_block = warp.zero(att_block.after(kv_idx))
         k_reg_transposed = warp.transpose(k_reg_transposed, k_reg)
         att_block = warp.mma_AtB(att_block, k_reg_transposed, q_reg_transposed)
+        att_block *= (1.0 / math.sqrt(D)) * (1.0 / math.log(2))
 
         # apply attention mask
         mask_reg = warp.load(mask_reg, mask, (), (batch, 0, q_seq, kv_idx), axis=2)
@@ -415,7 +413,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
     grad_v = Tensor.empty_like(v := Tensor(kernel.src[4])).contiguous()
     mask = Tensor(kernel.src[5])
 
-    delta_vec = (grad * attn).sum(-1).transpose(1, 2).unsqueeze(-2).detach()
+    delta_vec = (grad * attn).sum(-1, dtype=dtypes.float32).transpose(1, 2).unsqueeze(-2).detach()
 
     grad_q = Tensor.custom_kernel(grad_q, grad, q, k, v, mask, l_vec, delta_vec, fxn=custom_backward_q)[0]
     grad_k = Tensor.custom_kernel(grad_k, grad, q, k, v, mask, l_vec, delta_vec, fxn=custom_backward_k)[0]
