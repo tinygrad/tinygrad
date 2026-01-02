@@ -85,10 +85,13 @@ class PacketType:
                           if isinstance(v, type) and issubclass(v, IntEnum)}
     except Exception:
       cls._field_types = {}
+    # Cache fields and precompute extraction info: (name, lo, mask, enum_type)
+    cls._fields = {k: v for k, v in cls.__dict__.items() if isinstance(v, BitField) and k != 'encoding'}
+    cls._extract_info = [(name, bf.lo, bf.mask(), cls._field_types.get(name)) for name, bf in cls._fields.items()]
 
   @classmethod
   def fields(cls) -> dict[str, BitField]:
-    return {k: v for k, v in cls.__dict__.items() if isinstance(v, BitField) and k != 'encoding'}
+    return cls._fields
 
   @classmethod
   def size_bits(cls) -> int:
@@ -104,15 +107,14 @@ class PacketType:
     inst = object.__new__(cls)
     inst._raw = raw
     inst._time = time
-    inst._values = {}
-    for name, bf in cls.fields().items():
-      val = (raw >> bf.lo) & bf.mask()
-      # Convert to enum if annotated
-      enum_type = cls._field_types.get(name)
+    values = {}
+    for name, lo, mask, enum_type in cls._extract_info:
+      val = (raw >> lo) & mask
       if enum_type is not None:
         try: val = enum_type(val)
         except ValueError: pass
-      inst._values[name] = val
+      values[name] = val
+    inst._values = values
     return inst
 
   def __getattr__(self, name: str):
@@ -127,33 +129,33 @@ class PacketType:
 # PACKET TYPE DEFINITIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class VALUINST(PacketType):
+class VALUINST(PacketType):  # exclude: 1 << 2
   encoding = bits[2:0] == 0b011
   delta = bits[5:3]
   flag = bits[6:6]
   wave = bits[11:7]
 
-class VMEMEXEC(PacketType):
+class VMEMEXEC(PacketType):  # exclude: 1 << 0
   encoding = bits[3:0] == 0b1111
   delta = bits[5:4]
   src: MemSrc = bits[7:6]
 
-class ALUEXEC(PacketType):
+class ALUEXEC(PacketType):  # exclude: 1 << 1
   encoding = bits[3:0] == 0b1110
   delta = bits[5:4]
   src: AluSrc = bits[7:6]
 
-class IMMEDIATE(PacketType):
+class IMMEDIATE(PacketType):  # exclude: 1 << 5
   encoding = bits[3:0] == 0b1101
   delta = bits[6:4]
   wave = bits[11:7]
 
-class IMMEDIATE_MASK(PacketType):
+class IMMEDIATE_MASK(PacketType):  # exclude: 1 << 5
   encoding = bits[4:0] == 0b00100
   delta = bits[7:5]
   mask = bits[23:8]
 
-class WAVERDY(PacketType):
+class WAVERDY(PacketType):  # exclude: 1 << 3
   encoding = bits[4:0] == 0b10100
   delta = bits[7:5]
   mask = bits[23:8]
@@ -163,7 +165,7 @@ class TS_DELTA_S8_W3(PacketType):
   delta = bits[10:8]
   _padding = bits[63:11]
 
-class WAVEEND(PacketType):
+class WAVEEND(PacketType):  # exclude: 1 << 4
   encoding = bits[4:0] == 0b10101
   delta = bits[7:5]
   flag7 = bits[8:8]
@@ -173,7 +175,7 @@ class WAVEEND(PacketType):
   @property
   def cu(self) -> int: return self.cu_lo | (self.flag7 << 3)
 
-class WAVESTART(PacketType):
+class WAVESTART(PacketType):  # exclude: 1 << 4
   encoding = bits[4:0] == 0b01100
   delta = bits[6:5]
   flag7 = bits[7:7]
@@ -189,7 +191,7 @@ class TS_DELTA_S5_W2(PacketType):
   delta = bits[6:5]
   _padding = bits[47:7]
 
-class WAVEALLOC(PacketType):
+class WAVEALLOC(PacketType):  # exclude: 1 << 10
   encoding = bits[4:0] == 0b00101
   delta = bits[7:5]
   _padding = bits[19:8]
@@ -199,7 +201,7 @@ class TS_DELTA_S5_W3(PacketType):
   delta = bits[7:5]
   _padding = bits[51:8]
 
-class PERF(PacketType):
+class PERF(PacketType):  # exclude: 1 << 11
   encoding = bits[4:0] == 0b10110
   delta = bits[7:5]
   arg = bits[27:8]
@@ -222,7 +224,7 @@ class TS_WAVE_STATE(PacketType):
   @property
   def terminate_all(self) -> bool: return bool(self.coarse & 8)
 
-class EVENT(PacketType):
+class EVENT(PacketType):  # exclude: 1 << 7
   encoding = bits[7:0] == 0b01100001
   delta = bits[10:8]
   event = bits[23:11]
@@ -314,6 +316,22 @@ for _byte_val, _opcode in enumerate(STATE_TO_OPCODE):
 
 BUDGET = {opcode: pkt_cls.size_nibbles() for opcode, pkt_cls in OPCODE_TO_CLASS.items()}
 
+# Precompute special case opcodes
+_TS_DELTA_OR_MARK_OPCODE = next(op for op, cls in OPCODE_TO_CLASS.items() if cls is TS_DELTA_OR_MARK)
+_TS_DELTA_SHORT_OPCODE = next(op for op, cls in OPCODE_TO_CLASS.items() if cls is TS_DELTA_SHORT)
+_TS_DELTA_OR_MARK_BIT8 = (TS_DELTA_OR_MARK.bit8.lo, TS_DELTA_OR_MARK.bit8.mask())
+_TS_DELTA_OR_MARK_BIT9 = (TS_DELTA_OR_MARK.bit9.lo, TS_DELTA_OR_MARK.bit9.mask())
+
+# Combined lookup: opcode -> (pkt_cls, nib_count, delta_lo, delta_mask, special_case)
+# special_case: 0=none, 1=TS_DELTA_OR_MARK, 2=TS_DELTA_SHORT
+_DECODE_INFO: dict[int, tuple] = {}
+for _opcode, _pkt_cls in OPCODE_TO_CLASS.items():
+  _delta_field = getattr(_pkt_cls, 'delta', None)
+  _delta_lo = _delta_field.lo if _delta_field else 0
+  _delta_mask = _delta_field.mask() if _delta_field else 0
+  _special = 1 if _opcode == _TS_DELTA_OR_MARK_OPCODE else (2 if _opcode == _TS_DELTA_SHORT_OPCODE else 0)
+  _DECODE_INFO[_opcode] = (_pkt_cls, BUDGET[_opcode], _delta_lo, _delta_mask, _special)
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # DECODER
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -321,38 +339,39 @@ BUDGET = {opcode: pkt_cls.size_nibbles() for opcode, pkt_cls in OPCODE_TO_CLASS.
 def decode(data: bytes) -> list[PacketType]:
   """Decode raw SQTT blob into list of packet instances."""
   packets: list[PacketType] = []
+  packets_append = packets.append
   n = len(data)
   reg = 0
   offset = 0
   nib_count = 16
   time = 0
+  state_to_opcode = STATE_TO_OPCODE
+  decode_info = _DECODE_INFO
+  mask64 = (1 << 64) - 1
 
   while (offset >> 3) < n:
     target = offset + nib_count * 4
     while offset < target and (offset >> 3) < n:
       byte = data[offset >> 3]
       nib = (byte >> (offset & 4)) & 0xF
-      reg = ((reg >> 4) | (nib << 60)) & ((1 << 64) - 1)
+      reg = ((reg >> 4) | (nib << 60)) & mask64
       offset += 4
     if offset < target: break
 
-    opcode = STATE_TO_OPCODE[reg & 0xFF]
-    pkt_cls = OPCODE_TO_CLASS[opcode]
-    nib_count = BUDGET[opcode]
+    opcode = state_to_opcode[reg & 0xFF]
+    pkt_cls, nib_count, delta_lo, delta_mask, special = decode_info[opcode]
 
-    delta_field = getattr(pkt_cls, 'delta', None)
-    delta = (reg >> delta_field.lo) & delta_field.mask() if delta_field is not None else 0
+    delta = (reg >> delta_lo) & delta_mask
 
-    if pkt_cls is TS_DELTA_OR_MARK:
-      bit8 = (reg >> TS_DELTA_OR_MARK.bit8.lo) & TS_DELTA_OR_MARK.bit8.mask()
-      bit9 = (reg >> TS_DELTA_OR_MARK.bit9.lo) & TS_DELTA_OR_MARK.bit9.mask()
+    if special == 1:  # TS_DELTA_OR_MARK
+      bit8 = (reg >> _TS_DELTA_OR_MARK_BIT8[0]) & _TS_DELTA_OR_MARK_BIT8[1]
+      bit9 = (reg >> _TS_DELTA_OR_MARK_BIT9[0]) & _TS_DELTA_OR_MARK_BIT9[1]
       if bit9 and not bit8: delta = 0
-    elif pkt_cls is TS_DELTA_SHORT:
+    elif special == 2:  # TS_DELTA_SHORT
       delta = delta + 8
 
     time += delta
-    pkt = pkt_cls.from_raw(reg, time)
-    packets.append(pkt)
+    packets_append(pkt_cls.from_raw(reg, time))
 
   return packets
 

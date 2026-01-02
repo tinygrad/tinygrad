@@ -91,6 +91,8 @@ def get_wave_packets(packets: list) -> list:
       in_wave = False
   return result
 
+
+
 def print_wave_trace(packets: list) -> None:
   """Print packets from WAVESTART to WAVEEND with normalized time."""
   wave_packets = get_wave_packets(packets)

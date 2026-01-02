@@ -8,6 +8,7 @@ import os
 os.environ["SQTT"] = "1"
 os.environ["PROFILE"] = "1"
 os.environ["SQTT_LIMIT_SE"] = "2"  # Force work to traced SE only
+os.environ["SQTT_TOKEN_EXCLUDE"] = "3784"  # Exclude WAVERDY, REG, EVENT, UTILCTR, WAVEALLOC, PERF
 
 from tinygrad.helpers import DEBUG, colored
 from tinygrad.runtime.ops_amd import SQTT_SIMD_SEL
@@ -303,9 +304,8 @@ def discover_all_instops() -> tuple[dict[int, set[str]], dict[str, Exception]]:
         print(f"\n{'─'*60}")
         print(f"{test_name} ({instr_name}): ops={[hex(op) for op in sorted(ops)]}")
 
-        # collect wave patterns from traced SIMD runs
-        from collections import Counter
-        patterns: dict[tuple, list] = {}  # pattern -> list of (wave_packets, t0)
+        # collect wave patterns from traced SIMD runs (group by packet type sequence, ignore timing)
+        patterns: dict[tuple, list] = {}  # pattern (types only) -> list of (wave_packets, t0)
         for traced_simd, blobs in all_runs:
           for blob in blobs:
             packets = decode_all_blobs([blob])
@@ -314,7 +314,7 @@ def discover_all_instops() -> tuple[dict[int, set[str]], dict[str, Exception]]:
             ws = next((p for p in wave_packets if isinstance(p, WAVESTART)), None)
             if ws and ws.simd == traced_simd and wave_packets:
               t0 = wave_packets[0]._time
-              pattern = tuple((type(p).__name__, p._time - t0) for p in wave_packets)
+              pattern = tuple(type(p).__name__ for p in wave_packets)  # types only, no timing
               if pattern not in patterns:
                 patterns[pattern] = []
               patterns[pattern].append((wave_packets, t0))
