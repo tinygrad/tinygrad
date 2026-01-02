@@ -6,7 +6,7 @@ from tinygrad.renderer.cstyle import AMDHIPRenderer, create_non_native_float_pat
 from tinygrad.uop.decompositions import xexp2, xlog2
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
 from tinygrad.dtype import dtypes, float_to_fp8, DType, PtrDType, truncate
-from tinygrad.helpers import prod, AMX
+from tinygrad.helpers import prod, AMX, CPU_COUNT, getenv
 
 def ldt(dt:DType):
   if dt.vcount > 1: return f"<{dt.vcount} x {ldt(dt.scalar())}>"
@@ -72,10 +72,17 @@ float_lop = {Ops.ADD: "fadd"+flags, Ops.MUL: "fmul"+flags, Ops.CMPLT: f"fcmp{fla
     Ops.CMPNE: f"fcmp{flags} une", Ops.CMPEQ: f"fcmp{flags} oeq", Ops.FDIV: "fdiv"+flags}
 lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop for x in dtypes.sints}, **{x:float_lop for x in dtypes.floats}}
 
+def render_index(ctx, x):
+  # When indexing produces a vector pointer from a scalar pointer, use scalar GEP then bitcast
+  buf_t, idx_t, out_t = ldt(x.src[0].dtype), ldt(x.src[1].dtype), ldt(x.dtype)
+  if x.dtype.base.vcount > 1 and x.src[0].dtype.base.vcount == 1:
+    return f"  {ctx[x]}_scalar = getelementptr inbounds {ldt(x.src[0].dtype.base)}, {buf_t} {ctx[x.src[0]]}, {idx_t} {ctx[x.src[1]]}\n" \
+           f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype.base)}* {ctx[x]}_scalar to {out_t}"
+  return f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype.base)}, {buf_t} {ctx[x.src[0]]}, {idx_t} {ctx[x.src[1]]}"
+
 base_rewrite = PatternMatcher([
   # memory load/store
-  (UPat(Ops.INDEX, name="x"), lambda ctx,x:
-   f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype.base)}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}"),
+  (UPat(Ops.INDEX, name="x"), render_index),
   (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat.var("mask"))).or_casted("idx"), UPat.var("alt")), allow_any_len=True, name="x"),
    lambda ctx,x,idx,alt,mask:
    f"  br label {ctx[x]}_entry\n{ctx[x][1:]}_entry:\n"
@@ -97,6 +104,11 @@ base_rewrite = PatternMatcher([
                                                             f", {ldt(u.dtype)} {ctx[u]}, i32 {i}" for i,u in enumerate(x.src)])),
   # unary/binary/ternary ops
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
+  (UPat(Ops.CAST, src=(UPat.var("y"),), name="x"),
+   lambda ctx,x,y:
+   (f"  {ctx[x]} = {'addrspacecast' if x.dtype.addrspace != y.dtype.addrspace else 'bitcast'} "
+    f"{ldt(y.dtype)} {ctx[y]} to {ldt(x.dtype)}")
+   if isinstance(x.dtype, PtrDType) and isinstance(y.dtype, PtrDType) else None),
   # rewrite cast to bool to CMPNE 0
   (UPat(Ops.CAST, name="x", dtype=dtypes.bool),
    lambda ctx,x: f"  {ctx[x]} = {lop[x.src[0].dtype.scalar()][Ops.CMPNE]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, zeroinitializer"),
@@ -137,8 +149,13 @@ class LLVMRenderer(Renderer):
   abi = 'win64cc' if sys.platform == 'win32' else None
   supports_float4 = True
   has_local = False
-  global_max: tuple[int, ...] | None = None
-  string_rewrite = base_rewrite + PatternMatcher([(UPat(Ops.WMMA, name="wmma"), render_wmma_amx)])
+  has_threads = bool(getenv("THREADS", 1))
+  global_max = (CPU_COUNT.value, 0, 0)
+  string_rewrite = base_rewrite + PatternMatcher([
+    (UPat(Ops.WMMA, name="wmma"), render_wmma_amx),
+    # CPU threading: core_id is passed as the last argument - use bitcast as no-op to assign it
+    (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = add i32 %core_id, 0" if x.arg[0] == "g" else f"  ; skip {x.arg}"),
+  ])
   code_for_op = {Ops.FDIV: lambda: None, Ops.CMPLT: lambda: None}
   if AMX: tensor_cores = tc.amx
 
@@ -180,15 +197,17 @@ class LLVMRenderer(Renderer):
         r[u] = f"%{'local' if u.op is Ops.DEFINE_LOCAL else 'reg'}_{str(u.arg).replace('(', '').replace(')', '').replace(',', '_').replace(' ', '')}"
         assert isinstance(u.dtype, PtrDType)
         if u.op is Ops.DEFINE_REG:
-          kernel.append(f"  {r[u]} = alloca [{u.dtype.size} x {ldt(u.dtype.base)}]")
+          array_type = f"[{u.dtype.size} x {ldt(u.dtype.base)}]"
+          kernel.append(f"  {r[u]}_alloc = alloca {array_type}")
+          kernel.append(f"  {r[u]} = getelementptr {array_type}, {array_type}* {r[u]}_alloc, i32 0, i32 0")
         elif self.device == "CPU" and u.op is Ops.DEFINE_LOCAL:
           kernel.append(f"  {r[u]} = alloca [{u.dtype.size} x {ldt(u.dtype.base)}], align 16")
         else:
           local_args.append(f"@{r[u][1:]} = internal unnamed_addr addrspace(3) global [{u.dtype.size} x {ldt(u.dtype)}] undef, align 16")
           kernel.append(f"  {r[u]} = addrspacecast [{u.dtype.size} x {ldt(u.dtype)}] addrspace(3)* @{r[u][1:]} to [{u.dtype.size} x {ldt(u.dtype)}]*")
       elif u.op is Ops.CONST: r[u] = lconst(u.arg, u.dtype)
-      elif u.op is Ops.CAST and (ldt(u.dtype) == ldt(u.src[0].dtype) or isinstance(u.dtype, PtrDType)):
-        r[u] = r[u.src[0]] # cast from signed to unsigned of the same size is a noop, or pointer cast
+      elif u.op is Ops.CAST and ldt(u.dtype) == ldt(u.src[0].dtype):
+        r[u] = r[u.src[0]] # cast from signed to unsigned of the same size is a noop
       else:
         # if it's an assign target, it's already preallocated
         if u not in r:
@@ -199,6 +218,9 @@ class LLVMRenderer(Renderer):
         if (l:=self.string_rewrite.rewrite(u, ctx=r)) is None:
           raise RuntimeError(f"failed to render {u.op} with {u.dtype} srcs {[x.dtype for x in u.src]}")
         kernel.append(cast(str, l))
+    # Add core_id argument for CPU threading (passed as the last argument by the runtime)
+    if self.device == "CPU" and self.has_threads:
+      args.append(("%core_id", dtypes.int32))
     return tuple(local_args), self._render_fn(name, args, kernel, prefix)
 
 barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'

@@ -342,7 +342,14 @@ def apply_opts(ast:UOp, ren:Renderer) -> UOp:
   elif BEAM >= 1:
     from tinygrad.codegen.opt.search import beam_search
     rawbufs = bufs_from_ast(ast, ren.device)
-    k = beam_search(k, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
+    beam_k = beam_search(k, rawbufs, BEAM.value, bool(getenv("BEAM_ESTIMATE", 1)))
+    # Fall back to heuristics if BEAM didn't find any optimizations
+    if not beam_k.applied_opts and not NOOPT and not any(u.op is Ops.BUFFERIZE for u in ast.backward_slice):
+      from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
+      k = hand_coded_optimizations(k)
+      if DEBUG >= 2: print(f"BEAM found no optimizations, falling back to heuristics: {k.applied_opts}")
+    else:
+      k = beam_k
   elif not NOOPT and (ast.arg is None or ast.arg.applied_opts == ()):
     from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
     # NOTE: hand_coded_optimizations doesn't support multiblock opts yet
