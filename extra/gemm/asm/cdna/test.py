@@ -21,8 +21,8 @@ import torch
 torch.manual_seed(0)
 A = (torch.randn(N, N, dtype=torch.float32, device="cpu") / scale).to(torch.bfloat16).contiguous()
 B = (torch.randn(N, N, dtype=torch.float32, device="cpu") / scale).to(torch.bfloat16).contiguous()
-Bt = B.t().contiguous() # transpose B for the baseline gemm
-C_torch = A@Bt
+Bt = B.t().contiguous() # transpose B for the asm gemm
+C_torch = A@B
 
 # ** copy buffers to AMD
 
@@ -31,7 +31,7 @@ C_torch = A@Bt
 def from_torch(t:torch.Tensor) -> Tensor:
   return Tensor.from_blob(t.data_ptr(), t.shape, dtype=dtypes.bfloat16, device="cpu").to(Device.DEFAULT).realize()
 
-C_tiny = Tensor.matmul(from_torch(A), from_torch(Bt), dtype=dtypes.float32).cast(dtypes.bfloat16)
+C_tiny = from_torch(A) @ from_torch(B)
 C_asm = Tensor.empty_like(C_tiny)
 
 # ** assembly custom kernel
@@ -48,7 +48,7 @@ def custom_asm_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   sink = UOp.sink(C.base, A.base, B.base, sz, wg, lidx, gidx, arg=KernelInfo(name="gemm"))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=Device.DEFAULT), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src)))
 
-C_asm = Tensor.custom_kernel(C_asm, from_torch(A), from_torch(B), fxn=custom_asm_gemm)[0]
+C_asm = Tensor.custom_kernel(C_asm, from_torch(A), from_torch(Bt), fxn=custom_asm_gemm)[0]
 
 # ** run gemms
 
