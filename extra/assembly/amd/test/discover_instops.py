@@ -7,10 +7,10 @@ For full traces: DEBUG=2 python extra/assembly/amd/test/discover_instops.py
 import os
 os.environ["SQTT"] = "1"
 os.environ["PROFILE"] = "1"
-os.environ["SQTT_ITRACE_SE_MASK"] = "1"  # Enable instruction tracing on SE0
-os.environ["SQTT_LIMIT_SE"] = "2"        # Force work to traced SE only
+os.environ["SQTT_LIMIT_SE"] = "2"  # Force work to traced SE only
 
 from tinygrad.helpers import DEBUG, colored
+from tinygrad.runtime.ops_amd import SQTT_SIMD_SEL
 
 from extra.assembly.amd.autogen.rdna3.ins import (
   # VALU - basic (these are safe, just register ops)
@@ -21,6 +21,8 @@ from extra.assembly.amd.autogen.rdna3.ins import (
   v_exp_f32_e32, v_log_f32_e32, v_rcp_f32_e32, v_sqrt_f32_e32,
   # VALU - 64-bit
   v_lshlrev_b64, v_lshrrev_b64,
+  # VALU - MAD64
+  v_mad_u64_u32,
   # VALU - compare (writes to VCC, safe)
   v_cmp_eq_u32_e32,
   v_cmpx_eq_u32_e32,
@@ -34,10 +36,12 @@ from extra.assembly.amd.autogen.rdna3.ins import (
   s_sendmsg,
   # SMEM - scalar memory (load from kernarg pointer in s[0:1])
   s_load_b32, s_load_b64,
-  # VMEM - vector memory (global load/store)
-  global_load_b32, global_store_b32,
-  # LDS - local data share
-  ds_load_b32, ds_store_b32,
+  # VMEM - vector memory (global load/store) - various widths
+  global_load_b32, global_load_b64, global_load_b96, global_load_b128,
+  global_store_b32, global_store_b64, global_store_b96, global_store_b128,
+  # LDS - local data share - various widths
+  ds_load_b32, ds_load_b64, ds_load_b128,
+  ds_store_b32, ds_store_b64, ds_store_b128,
   # SrcEnum for NULL soffset
   SrcEnum,
 )
@@ -45,8 +49,9 @@ from extra.assembly.amd.dsl import v, s
 from extra.assembly.amd.sqtt import InstOp, INST
 
 from extra.assembly.amd.test.test_sqtt_hw import (
-  run_asm_sqtt, decode_all_blobs, get_inst_ops, print_blobs
+  run_asm_sqtt, decode_all_blobs, get_inst_ops, print_blobs, get_wave_packets, format_packet
 )
+from extra.assembly.amd.sqtt import WAVESTART
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # INSTRUCTION TEST CASES - only safe instructions that don't access memory
@@ -87,8 +92,14 @@ INSTRUCTION_TESTS: dict[str, tuple[str, list]] = {
   # VALU 64-bit (0xd)
   "VALU64_lshl": ("v_lshlrev_b64", [v_lshlrev_b64(v[0:1], 1, v[2:3])]),
 
-  # VALU MAD64 (0xe) - commented out, needs proper clamp arg
-  # "VALU_mad64": ("v_mad_u64_u32", [v_mad_u64_u32(v[0:1], None, v[2], v[3], v[4:5])]),
+  # VALU MAD64 (0xe)
+  "VALU_mad64": ("v_mad_u64_u32", [
+    v_mov_b32_e32(v[2], 2),
+    v_mov_b32_e32(v[3], 3),
+    v_mov_b32_e32(v[4], 0),
+    v_mov_b32_e32(v[5], 0),
+    v_mad_u64_u32(v[0:1], SrcEnum.NULL, v[2], v[3], v[4:5]),  # 2*3+0 = 6
+  ]),
 
   # VALU compare - writes to VCC
   "VALU_cmp": ("v_cmp_eq_u32", [v_cmp_eq_u32_e32(v[0], v[1])]),
@@ -141,23 +152,138 @@ INSTRUCTION_TESTS: dict[str, tuple[str, list]] = {
     ds_store_b32(v[0], v[1], offset=0),  # write to LDS
     s_waitcnt(lgkmcnt=0),
   ]),
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # WIDER MEMORY OPERATIONS - to discover more InstOp variants
+  # ═══════════════════════════════════════════════════════════════════════════════
+
+  # VMEM 64-bit load
+  "VMEM_load64": ("global_load_b64", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], 0),
+    global_load_b64(v[2:3], addr=v[0], saddr=s[2], offset=0),
+    s_waitcnt(vmcnt=0),
+  ]),
+
+  # VMEM 96-bit load
+  "VMEM_load96": ("global_load_b96", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], 0),
+    global_load_b96(v[4:6], addr=v[0], saddr=s[2], offset=0),
+    s_waitcnt(vmcnt=0),
+  ]),
+
+  # VMEM 128-bit load
+  "VMEM_load128": ("global_load_b128", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], 0),
+    global_load_b128(v[4:7], addr=v[0], saddr=s[2], offset=0),
+    s_waitcnt(vmcnt=0),
+  ]),
+
+  # VMEM 64-bit store
+  "VMEM_store64": ("global_store_b64", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], 0),
+    v_mov_b32_e32(v[2], 42),
+    v_mov_b32_e32(v[3], 43),
+    global_store_b64(addr=v[0], data=v[2:3], saddr=s[2], offset=0),
+    s_waitcnt(vmcnt=0),
+  ]),
+
+  # VMEM 96-bit store
+  "VMEM_store96": ("global_store_b96", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], 0),
+    v_mov_b32_e32(v[4], 42),
+    v_mov_b32_e32(v[5], 43),
+    v_mov_b32_e32(v[6], 44),
+    global_store_b96(addr=v[0], data=v[4:6], saddr=s[2], offset=0),
+    s_waitcnt(vmcnt=0),
+  ]),
+
+  # VMEM 128-bit store
+  "VMEM_store128": ("global_store_b128", [
+    s_load_b64(s[2:3], s[0], 0, soffset=SrcEnum.NULL),
+    s_waitcnt(lgkmcnt=0),
+    v_mov_b32_e32(v[0], 0),
+    v_mov_b32_e32(v[4], 42),
+    v_mov_b32_e32(v[5], 43),
+    v_mov_b32_e32(v[6], 44),
+    v_mov_b32_e32(v[7], 45),
+    global_store_b128(addr=v[0], data=v[4:7], saddr=s[2], offset=0),
+    s_waitcnt(vmcnt=0),
+  ]),
+
+  # LDS 64-bit load
+  "LDS_load64": ("ds_load_b64", [
+    v_mov_b32_e32(v[0], 0),
+    ds_load_b64(v[2:3], v[0], offset=0),
+    s_waitcnt(lgkmcnt=0),
+  ]),
+
+  # LDS 128-bit load
+  "LDS_load128": ("ds_load_b128", [
+    v_mov_b32_e32(v[0], 0),
+    ds_load_b128(v[4:7], v[0], offset=0),
+    s_waitcnt(lgkmcnt=0),
+  ]),
+
+  # LDS 64-bit store
+  "LDS_store64": ("ds_store_b64", [
+    v_mov_b32_e32(v[0], 0),
+    v_mov_b32_e32(v[2], 42),
+    v_mov_b32_e32(v[3], 43),
+    ds_store_b64(v[0], v[2:3], offset=0),
+    s_waitcnt(lgkmcnt=0),
+  ]),
+
+  # LDS 128-bit store
+  "LDS_store128": ("ds_store_b128", [
+    v_mov_b32_e32(v[0], 0),
+    v_mov_b32_e32(v[4], 42),
+    v_mov_b32_e32(v[5], 43),
+    v_mov_b32_e32(v[6], 44),
+    v_mov_b32_e32(v[7], 45),
+    ds_store_b128(v[0], v[4:7], offset=0),
+    s_waitcnt(lgkmcnt=0),
+  ]),
+
+  # MESSAGE (0x9) - s_sendmsg
+  "MESSAGE": ("s_sendmsg", [
+    s_sendmsg(0),  # send message 0 (NOP message)
+  ]),
 }
 
 
-def run_with_retry(instructions: list, max_attempts: int = 10) -> tuple[list[bytes], list, set]:
-  """Run instructions and retry until we get INST packets.
+def run_with_retry(instructions: list, max_attempts: int = 10) -> tuple[list[tuple[int, list[bytes]]], list[list], set]:
+  """Run instructions multiple times with both SIMD selections to collect all InstOp variants.
 
-  The hardware scheduler picks which SIMD to run on (~50/50), and SQTT traces simd_sel=0.
-  We retry until the wave lands on the traced SIMD.
+  Memory ops produce different InstOp values (0x2x vs 0x5x) depending on which SIMD executes them:
+  - 0x2x range: wave ran on traced SIMD (matched)
+  - 0x5x range: wave ran on other SIMD (not matched)
+
+  We trace SIMD 0 and SIMD 2, and collect ALL runs to capture both matched and unmatched cases.
+  Returns list of (traced_simd, blobs) tuples.
   """
-  for _ in range(max_attempts):
-    blobs = run_asm_sqtt(instructions)
-    packets = decode_all_blobs(blobs)
-    ops = get_inst_ops(packets)
-    if ops:
-      return blobs, packets, ops
-  # Return last attempt even if no ops found
-  return blobs, packets, ops
+  all_ops = set()
+  all_runs: list[tuple[int, list[bytes]]] = []
+  all_packets = []
+  for simd_sel in [0, 2]:  # trace SIMD 0 and SIMD 2
+    SQTT_SIMD_SEL.value = simd_sel
+    for _ in range(max_attempts):
+      blobs = run_asm_sqtt(instructions)
+      packets = decode_all_blobs(blobs)
+      ops = get_inst_ops(packets)
+      all_runs.append((simd_sel, blobs))
+      all_packets.append(packets)
+      all_ops.update(ops)
+  return all_runs, all_packets, all_ops
 
 def discover_all_instops() -> tuple[dict[int, set[str]], dict[str, Exception]]:
   """Run all instruction tests and collect InstOp values."""
@@ -166,7 +292,7 @@ def discover_all_instops() -> tuple[dict[int, set[str]], dict[str, Exception]]:
 
   for test_name, (instr_name, instructions) in INSTRUCTION_TESTS.items():
     try:
-      blobs, packets, ops = run_with_retry(instructions)
+      all_runs, _, ops = run_with_retry(instructions)
 
       for op in ops:
         if op not in discovered:
@@ -176,7 +302,42 @@ def discover_all_instops() -> tuple[dict[int, set[str]], dict[str, Exception]]:
       if DEBUG >= 2:
         print(f"\n{'─'*60}")
         print(f"{test_name} ({instr_name}): ops={[hex(op) for op in sorted(ops)]}")
-        print_blobs(blobs, filter_timing=True)
+
+        # collect wave patterns from traced SIMD runs
+        from collections import Counter
+        patterns: dict[tuple, list] = {}  # pattern -> list of (wave_packets, t0)
+        for traced_simd, blobs in all_runs:
+          for blob in blobs:
+            packets = decode_all_blobs([blob])
+            wave_packets = get_wave_packets(packets)
+            # only include runs where wave ran on traced SIMD
+            ws = next((p for p in wave_packets if isinstance(p, WAVESTART)), None)
+            if ws and ws.simd == traced_simd and wave_packets:
+              t0 = wave_packets[0]._time
+              pattern = tuple((type(p).__name__, p._time - t0) for p in wave_packets)
+              if pattern not in patterns:
+                patterns[pattern] = []
+              patterns[pattern].append((wave_packets, t0))
+
+        if patterns:
+          counts = {p: len(runs) for p, runs in patterns.items()}
+          most_common = max(counts, key=counts.get)
+          count = counts[most_common]
+          total = sum(counts.values())
+          print(f"\n=== most common pattern ({count}/{total} runs) ===")
+          # print using actual packets from one of the matching runs
+          wave_packets, t0 = patterns[most_common][0]
+          last_time = t0
+          for p in wave_packets:
+            print(format_packet(p, last_time, t0))
+            last_time = p._time
+          if len(patterns) > 1:
+            print(f"\n  variations: {len(patterns)} unique patterns")
+
+      if DEBUG >= 3:
+        for traced_simd, blobs in all_runs:
+          print(f"\n=== traced simd={traced_simd} ===")
+          print_blobs(blobs)
       if DEBUG >= 1:
         status = colored("✓", "green") if ops else colored("∅", "yellow")
         ops_str = ", ".join(hex(op) for op in sorted(ops)) if ops else "none"

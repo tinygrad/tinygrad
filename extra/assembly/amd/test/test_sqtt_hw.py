@@ -29,20 +29,26 @@ dev = Device["AMD"]
 # ═══════════════════════════════════════════════════════════════════════════════
 
 PACKET_COLORS = {
-  "INST": "WHITE", "VALUINST": "WHITE",
-  "ALUEXEC": "yellow", "VMEMEXEC": "yellow",
-  "WAVESTART": "blue", "WAVEEND": "blue", "WAVEALLOC": "cyan", "WAVERDY": "cyan",
-  "LAYOUT_HEADER": "magenta",
-  "NOP": "BLACK", "TS_DELTA_SHORT": "BLACK", "TS_WAVE_STATE": "BLACK",
-  "TS_DELTA_OR_MARK": "BLACK", "TS_DELTA_S5_W2": "BLACK", "TS_DELTA_S5_W3": "BLACK", "TS_DELTA_S8_W3": "BLACK",
-  "REG": "green", "EVENT": "red", "EVENT_BIG": "red", "SNAPSHOT": "green", "UTILCTR": "green", "PERF": "green",
-  "IMMEDIATE": "cyan", "IMMEDIATE_MASK": "cyan",
+  "INST": "WHITE", "VALUINST": "BLACK",
+  "VMEMEXEC": "yellow", "ALUEXEC": "yellow",
+  "IMMEDIATE": "YELLOW", "IMMEDIATE_MASK": "YELLOW",
+  "WAVERDY": "cyan", "WAVEALLOC": "cyan",
+  "WAVEEND": "blue", "WAVESTART": "blue",
+  "PERF": "magenta",
+  "EVENT": "red", "EVENT_BIG": "red",
+  "REG": "green",
+  "LAYOUT_HEADER": "white",
+  "TS_DELTA_SHORT": "BLACK", "NOP": "BLACK", "TS_WAVE_STATE": "BLACK",
+  "SNAPSHOT": "white", "TS_DELTA_OR_MARK": "BLACK",
+  "TS_DELTA_S8_W3": "BLACK", "TS_DELTA_S5_W2": "BLACK", "TS_DELTA_S5_W3": "BLACK",
+  "UTILCTR": "green",
 }
 
-def format_packet(p, last_time: int = 0) -> str:
+def format_packet(p, last_time: int = 0, time_offset: int = 0) -> str:
   """Format a packet for pretty printing."""
   name = type(p).__name__
   color = PACKET_COLORS.get(name, "white")
+  normalized_time = p._time - time_offset
   delta = p._time - last_time
 
   fields = []
@@ -68,26 +74,40 @@ def format_packet(p, last_time: int = 0) -> str:
   elif hasattr(p, '_values'):
     fields = [f"{k}={v}" for k, v in p._values.items() if not k.startswith('_') and k != 'delta']
 
-  return f"{p._time:8d} +{delta:6d} : " + colored(f"{name:18s}", color) + f" {', '.join(fields)}"
+  return f"{normalized_time:8d} +{delta:6d} : " + colored(f"{name:18s}", color) + f" {', '.join(fields)}"
 
-def print_trace(packets: list, filter_timing: bool = True) -> None:
-  """Print a pretty trace of a single blob's packets."""
-  last_time = 0
-  skip_types = {"NOP", "TS_DELTA_SHORT", "TS_WAVE_STATE", "TS_DELTA_OR_MARK", "TS_DELTA_S5_W2", "TS_DELTA_S5_W3", "TS_DELTA_S8_W3", "REG", "UTILCTR"}
+def get_wave_packets(packets: list) -> list:
+  """Extract packets from WAVESTART to WAVEEND, filtering pure timing packets."""
+  skip_types = {"NOP", "TS_DELTA_SHORT", "TS_WAVE_STATE", "TS_DELTA_OR_MARK", "TS_DELTA_S5_W2", "TS_DELTA_S5_W3", "TS_DELTA_S8_W3"}
+  result = []
+  in_wave = False
   for p in packets:
     name = type(p).__name__
-    if filter_timing and name in skip_types:
-      last_time = p._time
-      continue
-    print(format_packet(p, last_time))
+    if isinstance(p, WAVESTART):
+      in_wave = True
+    if in_wave and name not in skip_types:
+      result.append(p)
+    if isinstance(p, WAVEEND):
+      in_wave = False
+  return result
+
+def print_wave_trace(packets: list) -> None:
+  """Print packets from WAVESTART to WAVEEND with normalized time."""
+  wave_packets = get_wave_packets(packets)
+  if not wave_packets:
+    return
+  time_offset = wave_packets[0]._time
+  last_time = time_offset
+  for p in wave_packets:
+    print(format_packet(p, last_time, time_offset))
     last_time = p._time
 
-def print_blobs(blobs: list[bytes], filter_timing: bool = True) -> None:
-  """Print traces for all blobs."""
+def print_blobs(blobs: list[bytes]) -> None:
+  """Print wave traces for all blobs."""
   for i, blob in enumerate(blobs):
     packets = decode(blob)
     print(f"\n--- Blob {i}: {len(blob)} bytes, {len(packets)} packets ---")
-    print_trace(packets, filter_timing)
+    print_wave_trace(packets)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ASSEMBLY HELPERS

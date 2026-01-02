@@ -26,34 +26,41 @@ class AluSrc(IntEnum):
   VALU_ALT = 3
 
 class InstOp(IntEnum):
+  """SQTT instruction operation types.
+
+  Memory ops appear in two ranges depending on which SIMD executes them:
+  - 0x2x range: ops on traced SIMD
+  - 0x5x range: ops on other SIMD (OTHER_ prefix)
+  """
   SALU = 0x0
   SMEM = 0x1
   JUMP = 0x3
-  NEXT = 0x4
   MESSAGE = 0x9
   VALU = 0xb
   VALU_64 = 0xd
   VALU_MAD64 = 0xe
+  VALU_64_2 = 0x10
+  # Memory ops on traced SIMD (0x2x range)
   VMEM_LOAD = 0x21
-  VMEM_LOAD_ALT = 0x22
   VMEM_STORE = 0x24
   VMEM_STORE_64 = 0x25
   VMEM_STORE_96 = 0x26
   VMEM_STORE_128 = 0x27
-  VMEM_STORE_ALT = 0x28
   LDS_LOAD = 0x29
   LDS_STORE = 0x2b
+  LDS_STORE_64 = 0x2c
   LDS_STORE_128 = 0x2e
-  SIMD_LDS_LOAD = 0x50
-  SIMD_LDS_LOAD_ALT = 0x51
-  SIMD_LDS_STORE = 0x54
-  SIMD_VMEM_LOAD = 0x5a
-  SIMD_VMEM_LOAD_ALT = 0x5b
-  SIMD_VMEM_STORE = 0x5c
-  SIMD_VMEM_STORE_ALT = 0x5d
-  SIMD_VMEM_STORE_96 = 0x5e
-  SIMD_VMEM_STORE_128 = 0x5f
-  SALU_OR = 0x72
+  OTHER_VALU_64 = 0x3a
+  # Memory ops on other SIMD (0x5x range)
+  OTHER_LDS_LOAD = 0x50
+  OTHER_LDS_STORE = 0x51
+  OTHER_LDS_STORE_64 = 0x52
+  OTHER_LDS_STORE_128 = 0x54
+  OTHER_VMEM_LOAD = 0x5a
+  OTHER_VMEM_STORE = 0x5b
+  OTHER_VMEM_STORE_64 = 0x5c
+  OTHER_VMEM_STORE_96 = 0x5d
+  OTHER_VMEM_STORE_128 = 0x5e
   VALU_CMPX = 0x73
 
 # ═══════════════════════════════════════════════════════════════════════════════
