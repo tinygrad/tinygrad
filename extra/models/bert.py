@@ -149,7 +149,7 @@ class BertPredictionHeadTransform:
     self.LayerNorm = LayerNorm(hidden_size, eps=1e-12)
 
   def __call__(self, hidden_states:Tensor):
-    return self.LayerNorm(gelu(self.dense(hidden_states)))
+    return self.LayerNorm(gelu(self.dense(hidden_states).contiguous().contiguous_backward()))
 
 class BertPooler:
   def __init__(self, hidden_size:int):
@@ -227,7 +227,7 @@ class BertOutput:
     self.dropout = hidden_dropout_prob
 
   def __call__(self, hidden_states, input_tensor):
-    hidden_states = self.dense(hidden_states)
+    hidden_states = self.dense(hidden_states).contiguous().contiguous_backward()
     hidden_states = hidden_states.dropout(self.dropout)
     hidden_states = self.LayerNorm(hidden_states + input_tensor)
     return hidden_states
@@ -240,7 +240,7 @@ class BertIntermediate:
     self.dense = Linear(hidden_size, intermediate_size)
 
   def __call__(self, hidden_states):
-    x = self.dense(hidden_states)
+    x = self.dense(hidden_states).contiguous().contiguous_backward()
     # tinygrad gelu is openai gelu but we need the original bert gelu
     # NOTE: contiguous for speed
     return gelu(x).contiguous()
@@ -294,7 +294,7 @@ class BertSelfOutput:
     self.dropout = hidden_dropout_prob
 
   def __call__(self, hidden_states, input_tensor):
-    hidden_states = self.dense(hidden_states)
+    hidden_states = self.dense(hidden_states).contiguous().contiguous_backward()
     hidden_states = hidden_states.dropout(self.dropout)
     hidden_states = self.LayerNorm(hidden_states + input_tensor)
     return hidden_states
