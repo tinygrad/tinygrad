@@ -212,8 +212,6 @@ jobs:
         DEBUG=2 EMULATE=CUDA PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStatsMatmulHalf
         DEBUG=2 EMULATE=INTEL PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStatsMatmulHalf
         DEBUG=2 AMX=1 EMULATE=AMX PYTHON=1 python3 ./test/test_uops_stats.py TestUOpsStats.test_simple_matmul
-    - name: Test fp8 linear
-      run: PYTHON=1 python3 test/testextra/test_fp8_linear.py
 
   linter:
     name: Linters

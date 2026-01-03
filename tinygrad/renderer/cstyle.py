@@ -71,8 +71,6 @@ extra_pm = PatternMatcher([
 
 def create_non_native_float_pats(dts:tuple[DType, ...], casting:bool=True):
   patterns = PatternMatcher([
-    # simplify CAST(float, CAST(fp8, float_expr)) -> float_expr (avoid precision loss from round-trip)
-    (UPat(Ops.CAST, dtypes.float, (UPat(Ops.CAST, dts, (UPat.var("x", dtypes.float),)),)), lambda x: x),
     (UPat(Ops.WHERE, src=(UPat.var("b"), UPat.var("x", dtype=dts), UPat.var("y", dtype=dts))),
      lambda b,x,y: UOp(Ops.WHERE, dtype=dtypes.float, src=(b,x.cast(dtypes.float),y.cast(dtypes.float))).cast(x.dtype)),
     (UPat(GroupOp.ALU, dtype=dts, name="x"),
