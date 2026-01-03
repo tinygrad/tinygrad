@@ -289,34 +289,15 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: LDSMem | None = None)
   if isinstance(inst, VOP3SD):
     def rsrc_n(src, regs): return st.rsrc64(src, lane) if regs == 2 else st.rsrc(src, lane)
     s0, s1, s2 = rsrc_n(inst.src0, inst.src_regs(0)), rsrc_n(inst.src1, inst.src_regs(1)), rsrc_n(inst.src2, inst.src_regs(2))
-    # Carry-in ops use src2 as carry bitmask instead of VCC
-    vcc = st.rsgpr64(inst.src2) if 'CO_CI' in inst.op_name else st.vcc
+    vcc = st.rsgpr64(inst.src2) if 'CO_CI' in inst.op_name else st.vcc  # Carry-in ops use src2 as carry bitmask
     result = fn(s0, s1, s2, V[inst.vdst], st.scc, vcc, lane, st.exec_mask, st.literal, None)
-    d0_val = result['D0']
-    V[inst.vdst] = d0_val & MASK32
-    if inst.dst_regs() == 2: V[inst.vdst + 1] = (d0_val >> 32) & MASK32
+    V[inst.vdst] = result['D0'] & MASK32
+    if inst.dst_regs() == 2: V[inst.vdst + 1] = (result['D0'] >> 32) & MASK32
     if 'VCC' in result: st.pend_sgpr_lane(inst.sdst, lane, (result['VCC'] >> lane) & 1)
     return
 
-  # Get op enum and sources (None means "no source" for that operand)
-  # dst_hi: for VOP1/VOP2 16-bit dst ops, bit 7 of vdst indicates .h (high 16-bit) destination
-  dst_hi = False
-  if isinstance(inst, VOP1):
-    src0, src1, src2 = inst.src0, None, None
-    dst_hi = (inst.vdst & 0x80) != 0 and inst.is_dst_16()
-    vdst = inst.vdst & 0x7f if inst.is_dst_16() else inst.vdst
-  elif isinstance(inst, VOP2):
-    src0, src1, src2 = inst.src0, inst.vsrc1 + 256, None
-    dst_hi = (inst.vdst & 0x80) != 0 and inst.is_dst_16()
-    vdst = inst.vdst & 0x7f if inst.is_dst_16() else inst.vdst
-  elif isinstance(inst, VOP3):
-    # VOP3 ops 0-255 are VOPC comparisons encoded as VOP3 - inst.op returns VOPCOp for these
-    src0, src1, src2, vdst = inst.src0, inst.src1, (None if inst.op.value < 256 else inst.src2), inst.vdst
-  elif isinstance(inst, VOPC):
-    # For 16-bit VOPC, vsrc1 uses same encoding as VOP2 16-bit: bit 7 selects hi(1) or lo(0) half
-    src0, src1, src2, vdst = inst.src0, inst.vsrc1 + 256, None, VCC_LO
-  elif isinstance(inst, VOP3P):
-    # VOP3P: read sources with opsel half-selection and neg modifiers
+  # VOP3P: packed 16-bit ops with opsel half-selection and neg modifiers
+  if isinstance(inst, VOP3P):
     raws = [st.rsrc_f16(inst.src0, lane), st.rsrc_f16(inst.src1, lane), st.rsrc_f16(inst.src2, lane) if inst.src2 is not None else 0]
     opsel_hi = inst.opsel_hi | (inst.opsel_hi2 << 2)
     if 'FMA_MIX' in inst.op_name:
@@ -334,22 +315,31 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: LDSMem | None = None)
       result = fn(srcs[0], srcs[1], srcs[2], 0, st.scc, st.vcc, lane, st.exec_mask, st.literal, None)
     st.vgpr[lane][inst.vdst] = result['D0'] & MASK32
     return
+
+  # VOP1/VOP2/VOP3/VOPC: extract sources and vdst (dst_hi: bit 7 of vdst indicates .h for 16-bit ops)
+  if isinstance(inst, VOP1):
+    src0, src1, src2, vdst = inst.src0, None, None, inst.vdst & 0x7f if inst.is_dst_16() else inst.vdst
+    dst_hi = (inst.vdst & 0x80) != 0 and inst.is_dst_16()
+  elif isinstance(inst, VOP2):
+    src0, src1, src2, vdst = inst.src0, inst.vsrc1 + 256, None, inst.vdst & 0x7f if inst.is_dst_16() else inst.vdst
+    dst_hi = (inst.vdst & 0x80) != 0 and inst.is_dst_16()
+  elif isinstance(inst, VOP3):
+    src0, src1, src2, vdst = inst.src0, inst.src1, (None if inst.op.value < 256 else inst.src2), inst.vdst
+    dst_hi = False
+  elif isinstance(inst, VOPC):
+    src0, src1, src2, vdst, dst_hi = inst.src0, inst.vsrc1 + 256, None, VCC_LO, False
   else: raise NotImplementedError(f"Unknown vector type {type(inst)}")
 
-  # Read sources (with VOP3 modifiers if applicable)
-  neg, abs_ = (getattr(inst, 'neg', 0), getattr(inst, 'abs', 0)) if isinstance(inst, VOP3) else (0, 0)
-  opsel = getattr(inst, 'opsel', 0) if isinstance(inst, VOP3) else 0
-
+  # Read sources with VOP3 modifiers
+  neg, abs_, opsel = (inst.neg, inst.abs, inst.opsel) if isinstance(inst, VOP3) else (0, 0, 0)
   s0 = _read_src(st, inst, src0, 0, lane, neg, abs_, opsel)
   s1 = _read_src(st, inst, src1, 1, lane, neg, abs_, opsel) if src1 is not None else 0
   s2 = _read_src(st, inst, src2, 2, lane, neg, abs_, opsel) if src2 is not None else 0
-  # Read destination (accumulator for VOP2 f16, 64-bit for 64-bit ops)
   if isinstance(inst, VOP2) and inst.is_16bit(): d0 = _src16(V[vdst], dst_hi)
   elif inst.dst_regs() == 2: d0 = V[vdst] | (V[vdst + 1] << 32)
   else: d0 = V[vdst]
 
-  # V_CNDMASK_B32/B16: VOP3 encoding uses src2 as mask (not VCC); VOP2 uses VCC implicitly
-  # Pass the correct mask as vcc to the function so pseudocode VCC.u64[laneId] works correctly
+  # V_CNDMASK: VOP3 uses src2 as mask, VOP2 uses VCC implicitly
   vcc_for_fn = st.rsgpr64(src2) if inst.op in (VOP3Op.V_CNDMASK_B32, VOP3Op.V_CNDMASK_B16) and isinstance(inst, VOP3) and src2 is not None and src2 < 256 else st.vcc
 
   # Execute compiled function - pass src0_idx and vdst_idx for lane instructions
