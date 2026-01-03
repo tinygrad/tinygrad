@@ -35,7 +35,15 @@ def _gt_neg_zero(a, b): return (a > b) or (a == 0 and b == 0 and not math.copysi
 def _lt_neg_zero(a, b): return (a < b) or (a == 0 and b == 0 and math.copysign(1, a) < 0 and not math.copysign(1, b) < 0)
 def _fma(a, b, c): return a * b + c
 def _signext(v): return v
-def _fpop(fn): return lambda x: (x := float(x), x if math.isnan(x) or math.isinf(x) else float(fn(x)))[1]
+def _fpop(fn):
+  def wrapper(x):
+    x = float(x)
+    if math.isnan(x) or math.isinf(x): return x
+    result = float(fn(x))
+    # Preserve sign of zero (IEEE 754: ceil(-0.0) = -0.0, ceil(-0.1) = -0.0)
+    if result == 0.0: return math.copysign(0.0, x)
+    return result
+  return wrapper
 trunc, floor, ceil = _fpop(math.trunc), _fpop(math.floor), _fpop(math.ceil)
 class _SafeFloat(float):
   """Float subclass that uses _div for division to handle 0/inf correctly."""
@@ -75,7 +83,11 @@ def _trig(fn, x):
   # V_SIN/COS_F32: hardware does frac on input cycles before computing
   if math.isinf(x) or math.isnan(x): return float("nan")
   frac_cycles = fract(x / (2 * math.pi))
-  return fn(frac_cycles * 2 * math.pi)
+  result = fn(frac_cycles * 2 * math.pi)
+  # Hardware returns exactly 0 for cos(π/2), sin(π), etc. due to lookup table
+  # Round very small results (below f32 precision) to exactly 0
+  if abs(result) < 1e-7: return 0.0
+  return result
 def sin(x): return _trig(math.sin, x)
 def cos(x): return _trig(math.cos, x)
 def pow(a, b):

@@ -13,12 +13,21 @@ MASK32, MASK64, MASK128 = 0xffffffff, 0xffffffffffffffff, (1 << 128) - 1
 _struct_f, _struct_I = struct.Struct("<f"), struct.Struct("<I")
 _struct_e, _struct_H = struct.Struct("<e"), struct.Struct("<H")
 _struct_d, _struct_Q = struct.Struct("<d"), struct.Struct("<Q")
-def _f32(i): return _struct_f.unpack(_struct_I.pack(i & MASK32))[0]
+def _f32(i):
+  i = i & MASK32
+  # RDNA3 default mode: flush f32 denormals to zero (FTZ)
+  # Denormal: exponent=0 (bits 23-30) and mantissa!=0 (bits 0-22)
+  if (i & 0x7f800000) == 0 and (i & 0x007fffff) != 0: return 0.0
+  return _struct_f.unpack(_struct_I.pack(i))[0]
 def _i32(f):
   if isinstance(f, int): f = float(f)
   if math.isnan(f): return 0xffc00000 if math.copysign(1.0, f) < 0 else 0x7fc00000
   if math.isinf(f): return 0x7f800000 if f > 0 else 0xff800000
-  try: return _struct_I.unpack(_struct_f.pack(f))[0]
+  try:
+    bits = _struct_I.unpack(_struct_f.pack(f))[0]
+    # RDNA3 default mode: flush f32 denormals to zero (FTZ)
+    if (bits & 0x7f800000) == 0 and (bits & 0x007fffff) != 0: return 0x80000000 if bits & 0x80000000 else 0
+    return bits
   except (OverflowError, struct.error): return 0x7f800000 if f > 0 else 0xff800000
 def _sext(v, b): return v - (1 << b) if v & (1 << (b - 1)) else v
 def _f16(i): return _struct_e.unpack(_struct_H.pack(i & 0xffff))[0]
@@ -333,6 +342,8 @@ class Inst:
   def __init__(self, *args, literal: int | None = None, **kwargs):
     self._values, self._literal = dict(self._defaults), None
     field_names = [n for n in self._fields if n != 'encoding']
+    # Map Python-friendly names to actual field names (abs_ -> abs for Python reserved word)
+    if 'abs_' in kwargs: kwargs['abs'] = kwargs.pop('abs_')
     orig_args = dict(zip(field_names, args)) | kwargs
     self._values.update(orig_args)
     self._validate(orig_args)
