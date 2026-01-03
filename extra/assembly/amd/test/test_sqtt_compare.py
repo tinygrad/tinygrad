@@ -2607,7 +2607,6 @@ class TestVALUMov(SQTTCompareTestBase):
       v_mov_b32_e32(v[8], v[7]),
     ], "vmov_fuzz_random_seed42")
 
-  @unittest.expectedFailure
   def test_vmov_fuzz_random_seed123(self):
     """Pseudo-random pattern (seed 123)."""
     self._run_and_compare([

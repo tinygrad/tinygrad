@@ -488,25 +488,13 @@ class SQTTState:
   """SQTT tracing state - emits packets when instructions dispatch."""
 
   def __init__(self, wave_id: int = 0, simd: int = 0, cu: int = 0):
-    self.packets = []
+    self.packets, self.cycle, self.inst_count = [], 0, 0
     self.wave_id, self.simd, self.cu = wave_id, simd, cu
-    self.cycle = 0
-    self.inst_count = 0  # track instruction count for first-instruction detection
-    # VGPR dependency tracking: vgpr_ready[i] = cycle when VGPR i result is available for forwarding
-    self.vgpr_ready: dict[int, int] = {}
-    # Track dependency chain depth per VGPR: how many dependent ops produced this result
-    self.vgpr_chain_depth: dict[int, int] = {}
-    # Pending ALUEXEC completions: list of (completion_cycle, alu_src)
-    self.pending_aluexec: list[tuple[int, AluSrc]] = []
-    # Deferred ALUEXECs at exhaustion boundary: list of (src_vgpr, alu_src, chain_depth, dst_reg)
-    # src_vgpr is the VGPR index we depend on; we look up vgpr_ready[src_vgpr] when processing
-    self.deferred_aluexec: list[tuple[int, AluSrc, int, int | None]] = []
-    # Track last VALU dispatch cycle for s_nop pipeline delay
-    self.last_valu_dispatch: int = -100
-    # Track s_nop issue penalty for next VALU (bypass + extra stall)
-    self.snop_issue_penalty: int = 0
-    # Track IMMEDIATE cycles (need 2+ IMMEDIATEs after source_ready to keep network warm)
-    self.immediate_cycles: list[int] = []
+    self.vgpr: dict[int, tuple[int, int]] = {}  # reg -> (ready_cycle, chain_depth)
+    self.pending_aluexec: list[tuple[int, AluSrc]] = []  # (completion_cycle, alu_src)
+    self.deferred_aluexec: list[tuple[int, AluSrc, int, int | None]] = []  # (src_vgpr, alu_src, chain_depth, dst_reg)
+    self.last_valu_dispatch, self.snop_issue_penalty = -100, 0
+    self.immediate_cycles: list[int] = []  # for warmth check
 
   def emit(self, pkt_class, **kwargs):
     self.packets.append(pkt_class(_time=self.cycle, **kwargs))
@@ -519,52 +507,40 @@ class SQTTState:
   def tick(self):
     """Emit any completing ALUEXECs at current cycle, then advance."""
     # Check if deferred ALUEXEC can be scheduled
-    # There's at most one active deferred at a time; others wait for their source
     if self.deferred_aluexec:
       src_vgpr, alu_src, chain_depth, dst_reg = self.deferred_aluexec[0]
       if src_vgpr == -1:
-        # Independent instruction waiting for previous deferred - schedule immediately after last pending
-        if self.pending_aluexec:
-          last_pending = max(c for c, _ in self.pending_aluexec)
-          completion_cycle = last_pending + 1
-        else:
-          completion_cycle = self.cycle
-        self._schedule_aluexec(completion_cycle, alu_src, dst_reg)
+        # Independent instruction waiting for previous deferred - schedule after last pending
+        last_pending = max((c for c, _ in self.pending_aluexec), default=self.cycle - 1)
+        self._schedule_aluexec(last_pending + 1, alu_src, dst_reg)
         self.deferred_aluexec.pop(0)
       else:
-        source_ready = self.vgpr_ready.get(src_vgpr, 0)
+        source_ready = self.vgpr.get(src_vgpr, (0, 0))[0]
         if source_ready <= self.cycle:
           # Check if 2+ IMMEDIATEs happened after source became ready (keeps forwarding warm)
           imm_count = sum(1 for c in self.immediate_cycles if c > source_ready)
           if imm_count >= 2:
-            # Forwarding works: 5-cycle latency from source_ready
-            completion_cycle = source_ready + VALU_LATENCY - 1
-            self._schedule_aluexec(completion_cycle, alu_src, dst_reg)
+            # Warm: 5-cycle latency from source_ready
+            self._schedule_aluexec(source_ready + VALU_LATENCY - 1, alu_src, dst_reg)
             self.deferred_aluexec.pop(0)
           elif self.cycle >= source_ready + 2:
-            # No IMMEDIATE for 2+ cycles after source ready: forwarding exhausted
-            completion_cycle = source_ready + FORWARD_DEEP_LATENCY
-            self._schedule_aluexec(completion_cycle, alu_src, dst_reg)
+            # Cold: 9-cycle latency (forwarding exhausted)
+            self._schedule_aluexec(source_ready + FORWARD_DEEP_LATENCY, alu_src, dst_reg)
             self.deferred_aluexec.pop(0)
-          # else: keep waiting to see if an IMMEDIATE comes
 
     # Emit any completing ALUEXECs
     while self.pending_aluexec and self.pending_aluexec[0][0] <= self.cycle:
-      _, alu_src = self.pending_aluexec.pop(0)
-      self.emit(ALUEXEC, src=alu_src)
+      self.emit(ALUEXEC, src=self.pending_aluexec.pop(0)[1])
     self.cycle += 1
 
   def _schedule_aluexec(self, completion_cycle: int, alu_src: AluSrc, dst_reg: int | None):
-    """Schedule an ALUEXEC at the given completion cycle, ensuring proper ordering."""
-    # Ensure spacing from other pending ALUEXECs
-    if self.pending_aluexec:
-      last_pending = max(c for c, _ in self.pending_aluexec)
-      completion_cycle = max(completion_cycle, last_pending + 1)
+    """Schedule an ALUEXEC, ensuring one per cycle. Updates scoreboard."""
+    last_pending = max((c for c, _ in self.pending_aluexec), default=completion_cycle - 1)
+    completion_cycle = max(completion_cycle, last_pending + 1)
     self.pending_aluexec.append((completion_cycle, alu_src))
-    self.pending_aluexec.sort(key=lambda x: x[0])
-    # Update vgpr_ready for dependent instructions
+    self.pending_aluexec.sort()
     if dst_reg is not None:
-      self.vgpr_ready[dst_reg] = completion_cycle
+      self.vgpr[dst_reg] = (completion_cycle, self.vgpr.get(dst_reg, (0, 0))[1])
 
   def _get_valu_src_regs(self, inst: Inst) -> list[int]:
     """Extract source VGPR indices from a VALU instruction."""
@@ -586,117 +562,65 @@ class SQTTState:
     return None
 
   def process_instruction(self, inst: Inst):
-    """Simulate cycles until instruction dispatches, emitting SQTT packets."""
-
-    if inst.op == SOPPOp.S_NOP:
-      N = inst.simm16
-      has_pending = bool(self.pending_aluexec)
-
-      # s_nop(N) with N >= REGCACHE_BYPASS_TIMEOUT causes pending VALU results to go through
-      # the full register file instead of bypass path, adding REGCACHE_BYPASS_PENALTY cycles
-      bypass_penalty = REGCACHE_BYPASS_PENALTY if N >= REGCACHE_BYPASS_TIMEOUT and has_pending else 0
-      if bypass_penalty:
-        self.pending_aluexec = [(c + bypass_penalty, src) for c, src in self.pending_aluexec]
-
-      # After VALU, there's a pipeline delay before first s_nop IMMEDIATE
-      pipeline_delay = max(0, self.last_valu_dispatch + SNOP_PIPELINE_DELAY - self.cycle)
-      for _ in range(pipeline_delay): self.tick()
-
-      # Extra delay for s_nop IMMEDIATE timing (affects when IMMEDIATE packets appear)
-      # The range differs based on whether there's a pending ALUEXEC
-      if has_pending:
-        imm_extra_delay = SNOP_EXTRA_DELAY_CYCLES if SNOP_EXTRA_DELAY_MIN_PENDING <= N <= SNOP_EXTRA_DELAY_MAX_PENDING else 0
-      else:
-        imm_extra_delay = SNOP_EXTRA_DELAY_CYCLES if SNOP_EXTRA_DELAY_MIN <= N <= SNOP_EXTRA_DELAY_MAX and self.inst_count > 0 else 0
-
-      # s_nop delay for IMMEDIATE timing
-      snop_delay = N + imm_extra_delay + bypass_penalty
-      for _ in range(snop_delay): self.tick()
-      self.emit(IMMEDIATE, wave=self.wave_id)
-      self.immediate_cycles.append(self.cycle)  # track for warmth check
-      self.tick()
-
-      # Track issue delay for next instruction (affects when next VALU can dispatch)
-      # This is stored and applied when the next VALU is processed
-      issue_extra_stall = SNOP_EXTRA_DELAY_CYCLES if has_pending and SNOP_EXTRA_DELAY_MIN_PENDING <= N <= SNOP_EXTRA_DELAY_MAX_PENDING else 0
-      self.snop_issue_penalty = bypass_penalty + issue_extra_stall
-
-    elif isinstance(inst, (VOP1, VOP2, VOP3)):
-      # VALU instruction - handle dependencies and emit VALUINST/ALUEXEC
-      dispatch_cycle = self.cycle
-
-      # Find source VGPRs and check when they're ready
-      src_vgprs = self._get_valu_src_regs(inst)
-      has_vgpr_src = len(src_vgprs) > 0 and any(r in self.vgpr_ready for r in src_vgprs)
-      # Find the source VGPR with the latest ready time
-      src_vgpr_max = max((r for r in src_vgprs if r in self.vgpr_ready), key=lambda r: self.vgpr_ready[r], default=None)
-      source_ready = self.vgpr_ready.get(src_vgpr_max, 0) if src_vgpr_max is not None else 0
-
-      # Calculate chain depth: max depth of any source VGPR + 1
-      chain_depth = max((self.vgpr_chain_depth.get(r, 0) for r in src_vgprs), default=0) + 1 if has_vgpr_src else 0
-
-      # Emit VALUINST at dispatch time
-      self.emit(VALUINST, wave=self.wave_id)
-      self.last_valu_dispatch = dispatch_cycle
-
-      # ALUEXEC latency calculation for dependent VALUs:
-      # The timing depends on the gap between dispatch and producer completion:
-      # - gap >= 2 (V2 <= source_ready - 2): Pure forwarding, A2 = source_ready + 6 (or 5 for chain depth 2-4)
-      # - gap == 1 (V2 == source_ready - 1): 1-cycle hazard, A2 = source_ready + 7
-      # - gap <= 0 (V2 >= source_ready): Register file read, A2 = max(V2 + 8, source_ready + 9)
-      #
-      # Chain depth affects forwarding:
-      # - depth 1: 6-cycle forwarding (producer wrote to bypass, consumer reads it)
-      # - depth 2-4: 5-cycle forwarding (result already in bypass network, faster access)
-      # - depth >= 5: depends on forwarding network warmth (deferred until source_ready)
-      dst_reg = self._get_valu_dst_reg(inst)
-
-      if has_vgpr_src:
-        gap = source_ready - dispatch_cycle
-        if chain_depth >= FORWARD_DEPTH_LIMIT:  # >= 4 (5th+ instruction in chain)
-          # At exhaustion boundary - defer until we know if forwarding network is warm
-          # Store the source VGPR so we can look up its ready time when processing
-          self.deferred_aluexec.append((src_vgpr_max, AluSrc.VALU, chain_depth, dst_reg))
-          # Estimate completion for dependent instructions (will be updated when scheduled)
-          completion_cycle = source_ready + VALU_LATENCY - 1  # optimistic estimate
-        elif gap >= 2:
-          # Pure forwarding: consumer waits for producer, then latency cycles
-          # Chain depth 2-3 gets 5-cycle forwarding, depth 1 gets 6-cycle
-          forwarding_latency = VALU_LATENCY - 1 if chain_depth >= 2 else VALU_LATENCY
-          completion_cycle = source_ready + forwarding_latency
-        elif gap == 1:
-          # 1-cycle hazard: slight delay in forwarding
-          completion_cycle = source_ready + 7
-        else:
-          # No gap or consumer dispatches after producer: register file read
-          completion_cycle = max(dispatch_cycle + 8, source_ready + 9)
-      else:
-        # Independent VALU: 6 cycle latency
-        completion_cycle = dispatch_cycle + VALU_LATENCY
-
-      # For non-deferred ALUEXECs, schedule them now
-      # But if there's a deferred ALUEXEC, this one must wait (ALUEXECs are in-order)
-      if not has_vgpr_src or chain_depth < FORWARD_DEPTH_LIMIT:
-        if self.deferred_aluexec:
-          # Must wait for deferred to complete first - add to deferred queue
-          # Use a sentinel src_vgpr of -1 to indicate this is independent (no warmth check)
-          self.deferred_aluexec.append((-1, AluSrc.VALU, 0, dst_reg))
-        else:
-          # Only one ALUEXEC can be emitted per cycle - ensure spacing
-          if self.pending_aluexec:
-            last_pending = max(c for c, _ in self.pending_aluexec)
-            completion_cycle = max(completion_cycle, last_pending + 1)
-          self.pending_aluexec.append((completion_cycle, AluSrc.VALU))
-          self.pending_aluexec.sort(key=lambda x: x[0])
-
-      # Forward-ready time matches ALUEXEC completion
-      if dst_reg is not None:
-        self.vgpr_ready[dst_reg] = completion_cycle
-        self.vgpr_chain_depth[dst_reg] = chain_depth if has_vgpr_src else 0
-
-      self.tick()
-
+    if inst.op == SOPPOp.S_NOP: self._process_snop(inst.simm16)
+    elif isinstance(inst, (VOP1, VOP2, VOP3)): self._process_valu(inst)
     self.inst_count += 1
+
+  def _process_snop(self, N: int):
+    """Process s_nop(N) - handle bypass penalty and emit IMMEDIATE."""
+    has_pending = bool(self.pending_aluexec)
+    bypass = REGCACHE_BYPASS_PENALTY if N >= REGCACHE_BYPASS_TIMEOUT and has_pending else 0
+    if bypass: self.pending_aluexec = [(c + bypass, src) for c, src in self.pending_aluexec]
+
+    # Pipeline delay before IMMEDIATE
+    for _ in range(max(0, self.last_valu_dispatch + SNOP_PIPELINE_DELAY - self.cycle)): self.tick()
+
+    # Extra delay for certain N ranges
+    in_pending_range = SNOP_EXTRA_DELAY_MIN_PENDING <= N <= SNOP_EXTRA_DELAY_MAX_PENDING
+    in_no_pending_range = SNOP_EXTRA_DELAY_MIN <= N <= SNOP_EXTRA_DELAY_MAX and self.inst_count > 0
+    extra = SNOP_EXTRA_DELAY_CYCLES if (has_pending and in_pending_range) or (not has_pending and in_no_pending_range) else 0
+
+    for _ in range(N + extra + bypass): self.tick()
+    self.emit(IMMEDIATE, wave=self.wave_id)
+    self.immediate_cycles.append(self.cycle)
+    self.tick()
+
+    self.snop_issue_penalty = bypass + (SNOP_EXTRA_DELAY_CYCLES if has_pending and in_pending_range else 0)
+
+  def _process_valu(self, inst: Inst):
+    """Process VALU instruction - emit VALUINST and schedule ALUEXEC."""
+    dispatch, dst = self.cycle, self._get_valu_dst_reg(inst)
+
+    # Find critical dependency: source VGPR with latest ready time
+    deps = [(r, self.vgpr[r]) for r in self._get_valu_src_regs(inst) if r in self.vgpr]
+    src_vgpr, (source_ready, src_depth) = max(deps, key=lambda x: x[1][0]) if deps else (None, (0, 0))
+    depth = src_depth + 1 if deps else 0
+
+    self.emit(VALUINST, wave=self.wave_id)
+    self.last_valu_dispatch = dispatch
+
+    # Compute completion cycle based on dependency timing
+    if deps:
+      gap = source_ready - dispatch
+      if depth >= FORWARD_DEPTH_LIMIT:
+        self.deferred_aluexec.append((src_vgpr, AluSrc.VALU, depth, dst))
+        completion = source_ready + VALU_LATENCY - 1  # optimistic
+      elif gap >= 2:
+        completion = source_ready + (VALU_LATENCY - 1 if depth >= 2 else VALU_LATENCY)
+      elif gap == 1:
+        completion = source_ready + 7
+      else:
+        completion = max(dispatch + 8, source_ready + 9)
+    else:
+      completion = dispatch + VALU_LATENCY
+
+    # Schedule ALUEXEC (or defer if blocked)
+    if not deps or depth < FORWARD_DEPTH_LIMIT:
+      if self.deferred_aluexec: self.deferred_aluexec.append((-1, AluSrc.VALU, 0, dst))
+      else: self._schedule_aluexec(completion, AluSrc.VALU, dst)
+
+    if dst is not None: self.vgpr[dst] = (completion, depth)
+    self.tick()
 
   def finalize(self):
     """Tick until all pending and deferred ALUEXECs complete, then emit WAVEEND."""
