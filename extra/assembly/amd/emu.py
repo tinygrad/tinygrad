@@ -29,6 +29,29 @@ def _dst16(cur: int, val: int, is_hi: bool) -> int: return (cur & 0x0000ffff) | 
 def _vgpr_hi(src: int) -> bool: return src >= 256 and ((src - 256) & 0x80) != 0
 def _vgpr_masked(src: int) -> int: return ((src - 256) & 0x7f) + 256 if src >= 256 else src
 
+# VOP3 source modifier: apply abs/neg to value
+def _mod_src(val: int, idx: int, neg: int, abs_: int, is64: bool = False) -> int:
+  to_f, to_i = (_f64, _i64) if is64 else (_f32, _i32)
+  if (abs_ >> idx) & 1: val = to_i(abs(to_f(val)))
+  if (neg >> idx) & 1: val = to_i(-to_f(val))
+  return val
+
+# Read source operand with VOP3 modifiers
+def _read_src(st, inst, src, idx: int, lane: int, neg: int, abs_: int, opsel: int) -> int:
+  if src is None: return 0
+  regs, is_src_16 = inst.src_regs(idx), inst.is_src_16(idx)
+  if regs == 2: return _mod_src(st.rsrc64(src, lane), idx, neg, abs_, is64=True)
+  if is_src_16 and isinstance(inst, VOP3):
+    raw = st.rsrc_f16(src, lane) if 128 <= src < 255 else st.rsrc(src, lane)
+    val = _src16(raw, bool(opsel & (1 << idx)))
+    if abs_ & (1 << idx): val &= 0x7fff
+    if neg & (1 << idx): val ^= 0x8000
+    return val
+  if is_src_16 and isinstance(inst, (VOP1, VOP2, VOPC)):
+    if src >= 256: return _src16(_mod_src(st.rsrc(_vgpr_masked(src), lane), idx, neg, abs_), _vgpr_hi(src))
+    return _mod_src(st.rsrc_f16(src, lane), idx, neg, abs_) & 0xffff
+  return _mod_src(st.rsrc(src, lane), idx, neg, abs_)
+
 # Helper: get number of dwords from memory op name
 def _op_ndwords(name: str) -> int:
   if '_B128' in name: return 4
@@ -302,24 +325,20 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: LDSMem | None = None)
       return
     # V_FMA_MIX: Mixed precision FMA - opsel_hi controls f32(0) vs f16(1), opsel selects which f16 half
     if 'FMA_MIX' in inst.op_name:
-      opsel, opsel_hi, opsel_hi2 = getattr(inst, 'opsel', 0), getattr(inst, 'opsel_hi', 0), getattr(inst, 'opsel_hi2', 0)
-      neg, abs_ = getattr(inst, 'neg', 0), getattr(inst, 'neg_hi', 0)  # neg_hi reused as abs
       raws = [st.rsrc(inst.src0, lane), st.rsrc(inst.src1, lane), st.rsrc(inst.src2, lane) if inst.src2 is not None else 0]
-      is_f16 = [opsel_hi & 1, opsel_hi & 2, opsel_hi2]
-      srcs = [_f16(_src16(raws[i], bool(opsel & (1<<i)))) if is_f16[i] else _f32(raws[i]) for i in range(3)]
+      is_f16 = [inst.opsel_hi & 1, inst.opsel_hi & 2, inst.opsel_hi2]
+      srcs = [_f16(_src16(raws[i], bool(inst.opsel & (1<<i)))) if is_f16[i] else _f32(raws[i]) for i in range(3)]
       for i in range(3):
-        if abs_ & (1<<i): srcs[i] = abs(srcs[i])
-        if neg & (1<<i): srcs[i] = -srcs[i]
+        if inst.neg_hi & (1<<i): srcs[i] = abs(srcs[i])  # neg_hi reused as abs
+        if inst.neg & (1<<i): srcs[i] = -srcs[i]
       result = srcs[0] * srcs[1] + srcs[2]
       st.vgpr[lane][inst.vdst] = _i32(result) if inst.op == VOP3POp.V_FMA_MIX_F32 else _dst16(V[inst.vdst], _i16(result), inst.op == VOP3POp.V_FMA_MIXHI_F16)
       return
     # VOP3P packed ops: opsel selects halves for lo, opsel_hi for hi; neg toggles f16 sign
     raws = [st.rsrc_f16(inst.src0, lane), st.rsrc_f16(inst.src1, lane), st.rsrc_f16(inst.src2, lane) if inst.src2 is not None else 0]
-    opsel, opsel_hi, opsel_hi2 = getattr(inst, 'opsel', 0), getattr(inst, 'opsel_hi', 3), getattr(inst, 'opsel_hi2', 1)
-    neg, neg_hi = getattr(inst, 'neg', 0), getattr(inst, 'neg_hi', 0)
-    hi_sels = [opsel_hi & 1, opsel_hi & 2, opsel_hi2]
-    srcs = [((_src16(raws[i], hi_sels[i]) ^ (0x8000 if neg_hi & (1<<i) else 0)) << 16) |
-            (_src16(raws[i], opsel & (1<<i)) ^ (0x8000 if neg & (1<<i) else 0)) for i in range(3)]
+    hi_sels = [inst.opsel_hi & 1, inst.opsel_hi & 2, inst.opsel_hi2]
+    srcs = [((_src16(raws[i], hi_sels[i]) ^ (0x8000 if inst.neg_hi & (1<<i) else 0)) << 16) |
+            (_src16(raws[i], inst.opsel & (1<<i)) ^ (0x8000 if inst.neg & (1<<i) else 0)) for i in range(3)]
     result = compiled[VOP3POp][inst.op](srcs[0], srcs[1], srcs[2], 0, st.scc, st.vcc, lane, st.exec_mask, st.literal, None)
     st.vgpr[lane][inst.vdst] = result['D0'] & MASK32
     return
@@ -331,35 +350,14 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: LDSMem | None = None)
   # Read sources (with VOP3 modifiers if applicable)
   neg, abs_ = (getattr(inst, 'neg', 0), getattr(inst, 'abs', 0)) if isinstance(inst, VOP3) else (0, 0)
   opsel = getattr(inst, 'opsel', 0) if isinstance(inst, VOP3) else 0
-  def mod_src(val: int, idx: int, is64=False) -> int:
-    to_f, to_i = (_f64, _i64) if is64 else (_f32, _i32)
-    if (abs_ >> idx) & 1: val = to_i(abs(to_f(val)))
-    if (neg >> idx) & 1: val = to_i(-to_f(val))
-    return val
 
-  # Use inst methods to determine operand sizes (inst.is_src_16, inst.is_src_64, etc.)
-  is_vop2_16bit = isinstance(inst, VOP2) and inst.is_16bit()
-
-  # Read sources based on register counts and dtypes from inst properties
-  def read_src(src, idx, regs, is_src_16):
-    if src is None: return 0
-    if regs == 2: return mod_src(st.rsrc64(src, lane), idx, is64=True)
-    if is_src_16 and isinstance(inst, VOP3):
-      raw = st.rsrc_f16(src, lane) if 128 <= src < 255 else st.rsrc(src, lane)
-      val = _src16(raw, bool(opsel & (1 << idx)))
-      if abs_ & (1 << idx): val &= 0x7fff
-      if neg & (1 << idx): val ^= 0x8000
-      return val
-    if is_src_16 and isinstance(inst, (VOP1, VOP2, VOPC)):
-      if src >= 256: return _src16(mod_src(st.rsrc(_vgpr_masked(src), lane), idx), _vgpr_hi(src))
-      return mod_src(st.rsrc_f16(src, lane), idx) & 0xffff
-    return mod_src(st.rsrc(src, lane), idx)
-
-  s0 = read_src(src0, 0, inst.src_regs(0), inst.is_src_16(0))
-  s1 = read_src(src1, 1, inst.src_regs(1), inst.is_src_16(1)) if src1 is not None else 0
-  s2 = read_src(src2, 2, inst.src_regs(2), inst.is_src_16(2)) if src2 is not None else 0
+  s0 = _read_src(st, inst, src0, 0, lane, neg, abs_, opsel)
+  s1 = _read_src(st, inst, src1, 1, lane, neg, abs_, opsel) if src1 is not None else 0
+  s2 = _read_src(st, inst, src2, 2, lane, neg, abs_, opsel) if src2 is not None else 0
   # Read destination (accumulator for VOP2 f16, 64-bit for 64-bit ops)
-  d0 = _src16(V[vdst], dst_hi) if is_vop2_16bit else (V[vdst] | (V[vdst + 1] << 32)) if inst.dst_regs() == 2 else V[vdst]
+  if isinstance(inst, VOP2) and inst.is_16bit(): d0 = _src16(V[vdst], dst_hi)
+  elif inst.dst_regs() == 2: d0 = V[vdst] | (V[vdst + 1] << 32)
+  else: d0 = V[vdst]
 
   # V_CNDMASK_B32/B16: VOP3 encoding uses src2 as mask (not VCC); VOP2 uses VCC implicitly
   # Pass the correct mask as vcc to the function so pseudocode VCC.u64[laneId] works correctly
