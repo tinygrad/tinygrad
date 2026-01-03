@@ -164,8 +164,8 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   # get ops to realize
   graph_rewrite(tsink, pm_generate_realize_map, ctx=rctx.realize_map, name="get realize")
 
-  # get the traversal order
-  with cpu_profile("consumer map from toposort", "TINY"):
+  # get the consumer map
+  with cpu_profile("consumer map", "TINY"):
     consumer_map = consumer_map_from_toposort(tsink_toposort:=tsink.toposort())
 
   # explicit rangeify
