@@ -355,13 +355,11 @@ def dispatch_barrier(st, inst): st.pc += inst._words; return -2
 def dispatch_nop(st, inst): st.pc += inst._words; return 0
 def dispatch_wmma(st, inst): exec_wmma(st, inst, inst.op); st.pc += inst._words; return 0
 def dispatch_writelane(st, inst): st.vgpr[st.rsrc(inst.src1, 0, inst._literal) & 0x1f][inst.vdst] = st.rsrc(inst.src0, 0, inst._literal) & MASK32; st.pc += inst._words; return 0
-def dispatch_readfirstlane(st, inst):
-  first_lane = next((i for i in range(st.n_lanes) if st.exec_mask & (1 << i)), 0)
-  st.wsgpr(inst.vdst, st.vgpr[first_lane][inst.src0 - 256] if inst.src0 >= 256 else st.rsrc(inst.src0, first_lane, inst._literal))
-  st.pc += inst._words; return 0
 def dispatch_readlane(st, inst):
-  rd_lane = st.rsrc(inst.src1, 0, inst._literal) & 0x1f
-  st.wsgpr(inst.vdst, st.vgpr[rd_lane][inst.src0 - 256] if inst.src0 >= 256 else st.rsrc(inst.src0, rd_lane, inst._literal))
+  src0_idx = (inst.src0 - 256) if inst.src0 >= 256 else inst.src0
+  s1 = st.rsrc(inst.src1, 0, inst._literal) if getattr(inst, 'src1', None) is not None else 0
+  result = inst._fn(0, s1, 0, 0, st.scc, st.vcc, 0, st.exec_mask, inst._literal, st.vgpr, src0_idx, inst.vdst)
+  st.wsgpr(inst.vdst, result['D0'])
   st.pc += inst._words; return 0
 
 # Per-lane dispatch wrapper: wraps per-lane exec functions into wave-level dispatch
@@ -393,8 +391,7 @@ def decode_program(data: bytes) -> dict[int, Inst]:
     elif isinstance(inst, VOP1) and inst.op == VOP1Op.V_NOP: inst._dispatch = dispatch_nop
     elif isinstance(inst, VOP3P) and 'WMMA' in inst.op_name: inst._dispatch = dispatch_wmma
     elif isinstance(inst, VOP3) and inst.op == VOP3Op.V_WRITELANE_B32: inst._dispatch = dispatch_writelane
-    elif isinstance(inst, (VOP1, VOP3)) and 'READFIRSTLANE' in inst.op_name: inst._dispatch = dispatch_readfirstlane
-    elif isinstance(inst, VOP3) and 'READLANE' in inst.op_name: inst._dispatch = dispatch_readlane
+    elif isinstance(inst, (VOP1, VOP3)) and inst.op in (VOP1Op.V_READFIRSTLANE_B32, VOP3Op.V_READFIRSTLANE_B32, VOP3Op.V_READLANE_B32): inst._dispatch = dispatch_readlane
     elif isinstance(inst, VOPD): inst._dispatch = dispatch_lane(exec_vopd)
     elif isinstance(inst, FLAT): inst._dispatch = dispatch_lane(exec_flat)
     elif isinstance(inst, DS): inst._dispatch = dispatch_lane(exec_ds)
@@ -404,7 +401,7 @@ def decode_program(data: bytes) -> dict[int, Inst]:
 
     # Validate pcode exists for instructions that need it (scalar/wave-level ops and VOPD don't need pcode)
     needs_pcode = inst._dispatch not in (dispatch_endpgm, dispatch_barrier, exec_scalar, dispatch_nop, dispatch_wmma,
-                                         dispatch_writelane, dispatch_readfirstlane, dispatch_readlane, dispatch_lane(exec_vopd))
+                                         dispatch_writelane, dispatch_readlane, dispatch_lane(exec_vopd))
     if fn is None and inst.op_name and needs_pcode: raise NotImplementedError(f"{inst.op_name} not in pseudocode")
     inst._fn = fn if fn else lambda *args, **kwargs: {}
     result[i // 4] = inst
