@@ -123,9 +123,7 @@ _VOPD_TO_VOP = {
   VOPDOp.V_DUAL_MAX_F32: VOP3Op.V_MAX_F32, VOPDOp.V_DUAL_MIN_F32: VOP3Op.V_MIN_F32,
   VOPDOp.V_DUAL_ADD_NC_U32: VOP3Op.V_ADD_NC_U32, VOPDOp.V_DUAL_LSHLREV_B32: VOP3Op.V_LSHLREV_B32, VOPDOp.V_DUAL_AND_B32: VOP3Op.V_AND_B32,
 }
-def _exec_vopd(vopd_op, s0, s1, d0, st: 'WaveState', lane: int):
-  op = _VOPD_TO_VOP[vopd_op]
-  return COMPILED_FUNCTIONS[type(op)][op](s0, s1, 0, d0, st.scc, st.vcc, lane, st.exec_mask, st.literal, None)['D0']
+
 
 class WaveState:
   __slots__ = ('sgpr', 'vgpr', 'scc', 'pc', 'literal', '_pend_sgpr')
@@ -236,67 +234,64 @@ def exec_scalar(st: WaveState, inst: Inst) -> int:
     return new_pc_words - st.pc - 1  # -1 because emulator adds inst_words (1 for scalar)
   return 0
 
-def exec_vector(st: WaveState, inst: Inst, lane: int, lds: LDSMem | None = None) -> None:
-  """Execute vector instruction for one lane."""
-  V = st.vgpr[lane]
+def exec_vopd(st: WaveState, inst, V: list, lane: int) -> None:
+  """VOPD: dual-issue, execute two ops simultaneously (read all inputs before writes)."""
+  vdsty = (inst.vdsty << 1) | ((inst.vdstx & 1) ^ 1)
+  inputs = [(inst.opx, st.rsrc(inst.srcx0, lane), V[inst.vsrcx1], V[inst.vdstx], inst.vdstx),
+            (inst.opy, st.rsrc(inst.srcy0, lane), V[inst.vsrcy1], V[vdsty], vdsty)]
+  for vopd_op, s0, s1, d0, dst in inputs:
+    op = _VOPD_TO_VOP[vopd_op]
+    V[dst] = COMPILED_FUNCTIONS[type(op)][op](s0, s1, 0, d0, st.scc, st.vcc, lane, st.exec_mask, st.literal, None)['D0']
 
-  # VOPD: dual-issue, execute two ops simultaneously (read all inputs before writes)
-  if isinstance(inst, VOPD):
-    vdsty = (inst.vdsty << 1) | ((inst.vdstx & 1) ^ 1)
-    inputs = [(inst.opx, st.rsrc(inst.srcx0, lane), V[inst.vsrcx1], V[inst.vdstx], inst.vdstx),
-              (inst.opy, st.rsrc(inst.srcy0, lane), V[inst.vsrcy1], V[vdsty], vdsty)]
-    for vopd_op, s0, s1, d0, dst in inputs: V[dst] = _exec_vopd(vopd_op, s0, s1, d0, st, lane)
-    return
+def exec_flat(st: WaveState, inst, V: list, lane: int) -> None:
+  """FLAT/GLOBAL/SCRATCH memory ops."""
+  ndwords = _op_ndwords(inst.op_name)
+  addr = V[inst.addr] | (V[inst.addr + 1] << 32)
+  ADDR = (st.rsgpr64(inst.saddr) + V[inst.addr] + _sext(inst.offset, 13)) & MASK64 if inst.saddr not in (NULL, 0x7f) else (addr + _sext(inst.offset, 13)) & MASK64
+  vdata_src = inst.vdst if 'LOAD' in inst.op_name else inst.data
+  result = inst._fn(GlobalMem, ADDR, _vgpr_read(V, vdata_src, ndwords), V[inst.vdst])
+  if 'VDATA' in result: _vgpr_write(V, inst.vdst, result['VDATA'], ndwords)
+  if 'RETURN_DATA' in result: _vgpr_write(V, inst.vdst, result['RETURN_DATA'], ndwords)
 
-  # Memory ops (FLAT/GLOBAL/SCRATCH and DS)
-  if isinstance(inst, (FLAT, DS)):
-    ndwords = _op_ndwords(inst.op_name)
-    if isinstance(inst, FLAT):
-      addr = V[inst.addr] | (V[inst.addr + 1] << 32)
-      ADDR = (st.rsgpr64(inst.saddr) + V[inst.addr] + _sext(inst.offset, 13)) & MASK64 if inst.saddr not in (NULL, 0x7f) else (addr + _sext(inst.offset, 13)) & MASK64
-      vdata_src = inst.vdst if 'LOAD' in inst.op_name else inst.data
-      result = inst._fn(GlobalMem, ADDR, _vgpr_read(V, vdata_src, ndwords), V[inst.vdst])
-      if 'VDATA' in result: _vgpr_write(V, inst.vdst, result['VDATA'], ndwords)
-      if 'RETURN_DATA' in result: _vgpr_write(V, inst.vdst, result['RETURN_DATA'], ndwords)
-    else:  # DS
-      data0, data1 = _vgpr_read(V, inst.data0, ndwords), _vgpr_read(V, inst.data1, ndwords) if inst.data1 is not None else 0
-      result = inst._fn(lds, V[inst.addr], data0, data1, inst.offset0, inst.offset1)
-      if 'RETURN_DATA' in result and ('_RTN' in inst.op_name or '_LOAD' in inst.op_name):
-        _vgpr_write(V, inst.vdst, result['RETURN_DATA'], ndwords * 2 if '_2ADDR_' in inst.op_name else ndwords)
-    return
+def exec_ds(st: WaveState, inst, V: list, lane: int, lds: LDSMem) -> None:
+  """DS (LDS) memory ops."""
+  ndwords = _op_ndwords(inst.op_name)
+  data0, data1 = _vgpr_read(V, inst.data0, ndwords), _vgpr_read(V, inst.data1, ndwords) if inst.data1 is not None else 0
+  result = inst._fn(lds, V[inst.addr], data0, data1, inst.offset0, inst.offset1)
+  if 'RETURN_DATA' in result and ('_RTN' in inst.op_name or '_LOAD' in inst.op_name):
+    _vgpr_write(V, inst.vdst, result['RETURN_DATA'], ndwords * 2 if '_2ADDR_' in inst.op_name else ndwords)
 
-  # VOP3SD: has extra scalar dest for carry output
-  if isinstance(inst, VOP3SD):
-    def rsrc_n(src, regs): return st.rsrc64(src, lane) if regs == 2 else st.rsrc(src, lane)
-    s0, s1, s2 = rsrc_n(inst.src0, inst.src_regs(0)), rsrc_n(inst.src1, inst.src_regs(1)), rsrc_n(inst.src2, inst.src_regs(2))
-    vcc = st.rsgpr64(inst.src2) if 'CO_CI' in inst.op_name else st.vcc  # Carry-in ops use src2 as carry bitmask
-    result = inst._fn(s0, s1, s2, V[inst.vdst], st.scc, vcc, lane, st.exec_mask, st.literal, None)
-    V[inst.vdst] = result['D0'] & MASK32
-    if inst.dst_regs() == 2: V[inst.vdst + 1] = (result['D0'] >> 32) & MASK32
-    if 'VCC' in result: st.pend_sgpr_lane(inst.sdst, lane, (result['VCC'] >> lane) & 1)
-    return
+def exec_vop3sd(st: WaveState, inst, V: list, lane: int) -> None:
+  """VOP3SD: has extra scalar dest for carry output."""
+  def rsrc_n(src, regs): return st.rsrc64(src, lane) if regs == 2 else st.rsrc(src, lane)
+  s0, s1, s2 = rsrc_n(inst.src0, inst.src_regs(0)), rsrc_n(inst.src1, inst.src_regs(1)), rsrc_n(inst.src2, inst.src_regs(2))
+  vcc = st.rsgpr64(inst.src2) if 'CO_CI' in inst.op_name else st.vcc  # Carry-in ops use src2 as carry bitmask
+  result = inst._fn(s0, s1, s2, V[inst.vdst], st.scc, vcc, lane, st.exec_mask, st.literal, None)
+  V[inst.vdst] = result['D0'] & MASK32
+  if inst.dst_regs() == 2: V[inst.vdst + 1] = (result['D0'] >> 32) & MASK32
+  if 'VCC' in result: st.pend_sgpr_lane(inst.sdst, lane, (result['VCC'] >> lane) & 1)
 
-  # VOP3P: packed 16-bit ops with opsel half-selection and neg modifiers
-  if isinstance(inst, VOP3P):
-    raws = [st.rsrc_f16(inst.src0, lane), st.rsrc_f16(inst.src1, lane), st.rsrc_f16(inst.src2, lane) if inst.src2 is not None else 0]
-    opsel_hi = inst.opsel_hi | (inst.opsel_hi2 << 2)
-    if 'FMA_MIX' in inst.op_name:
-      # FMA_MIX: apply abs(neg_hi)/neg to sign bit based on f32 vs f16 mode
-      raws = [st.rsrc(inst.src0, lane), st.rsrc(inst.src1, lane), st.rsrc(inst.src2, lane) if inst.src2 is not None else 0]
-      for i in range(3):
-        sign_bit = (15 if not (inst.opsel & (1 << i)) else 31) if (opsel_hi >> i) & 1 else 31
-        if inst.neg_hi & (1 << i): raws[i] &= ~(1 << sign_bit)
-        if inst.neg & (1 << i): raws[i] ^= (1 << sign_bit)
-      result = inst._fn(raws[0], raws[1], raws[2], V[inst.vdst], st.scc, st.vcc, lane, st.exec_mask, st.literal, None, opsel=inst.opsel, opsel_hi=opsel_hi)
-    else:
-      # Packed ops: pack lo/hi halves with neg applied
-      srcs = [((_src16(raws[i], opsel_hi & (1 << i)) ^ (0x8000 if inst.neg_hi & (1 << i) else 0)) << 16) |
-              (_src16(raws[i], inst.opsel & (1 << i)) ^ (0x8000 if inst.neg & (1 << i) else 0)) for i in range(3)]
-      result = inst._fn(srcs[0], srcs[1], srcs[2], 0, st.scc, st.vcc, lane, st.exec_mask, st.literal, None)
-    st.vgpr[lane][inst.vdst] = result['D0'] & MASK32
-    return
+def exec_vop3p(st: WaveState, inst, V: list, lane: int) -> None:
+  """VOP3P: packed 16-bit ops with opsel half-selection and neg modifiers."""
+  raws = [st.rsrc_f16(inst.src0, lane), st.rsrc_f16(inst.src1, lane), st.rsrc_f16(inst.src2, lane) if inst.src2 is not None else 0]
+  opsel_hi = inst.opsel_hi | (inst.opsel_hi2 << 2)
+  if 'FMA_MIX' in inst.op_name:
+    # FMA_MIX: apply abs(neg_hi)/neg to sign bit based on f32 vs f16 mode
+    raws = [st.rsrc(inst.src0, lane), st.rsrc(inst.src1, lane), st.rsrc(inst.src2, lane) if inst.src2 is not None else 0]
+    for i in range(3):
+      sign_bit = (15 if not (inst.opsel & (1 << i)) else 31) if (opsel_hi >> i) & 1 else 31
+      if inst.neg_hi & (1 << i): raws[i] &= ~(1 << sign_bit)
+      if inst.neg & (1 << i): raws[i] ^= (1 << sign_bit)
+    result = inst._fn(raws[0], raws[1], raws[2], V[inst.vdst], st.scc, st.vcc, lane, st.exec_mask, st.literal, None, opsel=inst.opsel, opsel_hi=opsel_hi)
+  else:
+    # Packed ops: pack lo/hi halves with neg applied
+    srcs = [((_src16(raws[i], opsel_hi & (1 << i)) ^ (0x8000 if inst.neg_hi & (1 << i) else 0)) << 16) |
+            (_src16(raws[i], inst.opsel & (1 << i)) ^ (0x8000 if inst.neg & (1 << i) else 0)) for i in range(3)]
+    result = inst._fn(srcs[0], srcs[1], srcs[2], 0, st.scc, st.vcc, lane, st.exec_mask, st.literal, None)
+  V[inst.vdst] = result['D0'] & MASK32
 
-  # VOP1/VOP2/VOP3/VOPC: extract sources and vdst (dst_hi: bit 7 of vdst indicates .h for 16-bit ops)
+def exec_vop(st: WaveState, inst: Inst, V: list, lane: int) -> None:
+  """VOP1/VOP2/VOP3/VOPC: standard ALU ops (dst_hi: bit 7 of vdst indicates .h for 16-bit ops)."""
   if isinstance(inst, VOP1):
     src0, src1, src2, vdst = inst.src0, None, None, inst.vdst & 0x7f if inst.is_dst_16() else inst.vdst
     dst_hi = (inst.vdst & 0x80) != 0 and inst.is_dst_16()
@@ -308,7 +303,8 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: LDSMem | None = None)
     dst_hi = False
   elif isinstance(inst, VOPC):
     src0, src1, src2, vdst, dst_hi = inst.src0, inst.vsrc1 + 256, None, VCC_LO, False
-  else: raise NotImplementedError(f"Unknown vector type {type(inst)}")
+  else:
+    raise NotImplementedError(f"exec_vop: unhandled instruction type {type(inst).__name__}")
 
   # Read sources with VOP3 modifiers
   neg, abs_, opsel = (inst.neg, inst.abs, inst.opsel) if isinstance(inst, VOP3) else (0, 0, 0)
@@ -321,22 +317,17 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: LDSMem | None = None)
 
   # V_CNDMASK: VOP3 uses src2 as mask, VOP2 uses VCC implicitly
   vcc_for_fn = st.rsgpr64(src2) if inst.op in (VOP3Op.V_CNDMASK_B32, VOP3Op.V_CNDMASK_B16) and isinstance(inst, VOP3) and src2 is not None and src2 < 256 else st.vcc
-
   # Execute compiled function - pass src0_idx and vdst_idx for lane instructions
-  # For VGPR access: src0 index is the VGPR number (src0 - 256 if VGPR, else src0 for SGPR)
   src0_idx = (src0 - 256) if src0 is not None and src0 >= 256 else (src0 if src0 is not None else 0)
   result = inst._fn(s0, s1, s2, d0, st.scc, vcc_for_fn, lane, st.exec_mask, st.literal, st.vgpr, src0_idx, vdst)
 
-  # Apply results (already int values)
+  # Apply results
   if 'VCC' in result:
-    # VOP2 carry ops write to VCC implicitly; VOPC/VOP3 write to vdst
-    st.pend_sgpr_lane(VCC_LO if isinstance(inst, VOP2) and 'CO_CI' in inst.op_name else vdst, lane, (result['VCC'] >> lane) & 1)
+    st.pend_sgpr_lane(VCC_LO if isinstance(inst, VOP2) and 'CO_CI' in inst.op_name else vdst, lane, (result['VCC'] >> lane) & 1)  # VOP2 carry ops write to VCC implicitly
   if 'EXEC' in result:
-    # V_CMPX instructions write to EXEC per-lane (not to vdst)
-    st.pend_sgpr_lane(EXEC_LO, lane, (result['EXEC'] >> lane) & 1)
+    st.pend_sgpr_lane(EXEC_LO, lane, (result['EXEC'] >> lane) & 1)  # V_CMPX instructions write to EXEC per-lane
   elif isinstance(inst.op, VOPCOp):
-    # VOPC comparison result stored in D0 bitmask, extract lane bit (non-CMPX only)
-    st.pend_sgpr_lane(vdst, lane, (result['D0'] >> lane) & 1)
+    st.pend_sgpr_lane(vdst, lane, (result['D0'] >> lane) & 1)  # VOPC comparison result stored in D0 bitmask
   if not isinstance(inst.op, VOPCOp):
     d0_val = result['D0']
     if inst.dst_regs() == 2: V[vdst], V[vdst + 1] = d0_val & MASK32, (d0_val >> 32) & MASK32
@@ -395,9 +386,15 @@ def step_wave(program: Program, st: WaveState, lds: LDSMem, n_lanes: int) -> int
     rd_lane = st.rsrc(inst.src1, 0) & 0x1f
     st.wsgpr(inst.vdst, st.vgpr[rd_lane][inst.src0 - 256] if inst.src0 >= 256 else st.rsrc(inst.src0, rd_lane))
   else:
-    # Per-lane vector ops
+    # Per-lane vector ops - dispatch based on instruction type
+    if isinstance(inst, VOPD): fn = exec_vopd
+    elif isinstance(inst, FLAT): fn = exec_flat
+    elif isinstance(inst, DS): fn = lambda st, inst, V, lane: exec_ds(st, inst, V, lane, lds)
+    elif isinstance(inst, VOP3SD): fn = exec_vop3sd
+    elif isinstance(inst, VOP3P): fn = exec_vop3p
+    else: fn = exec_vop
     for lane in range(n_lanes):
-      if st.exec_mask & (1 << lane): exec_vector(st, inst, lane, lds)
+      if st.exec_mask & (1 << lane): fn(st, inst, st.vgpr[lane], lane)
     st.commit_pends()
   st.pc += inst_words
   return 0
