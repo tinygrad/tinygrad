@@ -6626,6 +6626,45 @@ def _VOP3POp_V_DOT2_F32_BF16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, litera
   D0.f32 = tmp
   return {'D0': D0._val}
 
+def _VOP3POp_V_FMA_MIX_F32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None, opsel=0, opsel_hi=0):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); S=[S0,S1,S2]; D0=Reg(d0); OPSEL=Reg(opsel); OPSEL_HI=Reg(opsel_hi); ins=[Reg(0),Reg(0),Reg(0)]
+  # --- compiled pseudocode ---
+  for i in range(0, int(2)+1):
+    if  not OPSEL_HI.u3[i]:
+      ins[i] = S[i].f32
+    elif OPSEL.u3[i]:
+      ins[i] = f16_to_f32(S[i][31 : 16].f16)
+    else:
+      ins[i] = f16_to_f32(S[i][15 : 0].f16)
+  D0[31 : 0].f32 = fma(ins[0], ins[1], ins[2])
+  return {'D0': D0._val}
+
+def _VOP3POp_V_FMA_MIXLO_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None, opsel=0, opsel_hi=0):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); S=[S0,S1,S2]; D0=Reg(d0); OPSEL=Reg(opsel); OPSEL_HI=Reg(opsel_hi); ins=[Reg(0),Reg(0),Reg(0)]
+  # --- compiled pseudocode ---
+  for i in range(0, int(2)+1):
+    if  not OPSEL_HI.u3[i]:
+      ins[i] = S[i].f32
+    elif OPSEL.u3[i]:
+      ins[i] = f16_to_f32(S[i][31 : 16].f16)
+    else:
+      ins[i] = f16_to_f32(S[i][15 : 0].f16)
+  D0[15 : 0].f16 = f32_to_f16(fma(ins[0], ins[1], ins[2]))
+  return {'D0': D0._val}
+
+def _VOP3POp_V_FMA_MIXHI_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None, opsel=0, opsel_hi=0):
+  S0=Reg(s0); S1=Reg(s1); S2=Reg(s2); S=[S0,S1,S2]; D0=Reg(d0); OPSEL=Reg(opsel); OPSEL_HI=Reg(opsel_hi); ins=[Reg(0),Reg(0),Reg(0)]
+  # --- compiled pseudocode ---
+  for i in range(0, int(2)+1):
+    if  not OPSEL_HI.u3[i]:
+      ins[i] = S[i].f32
+    elif OPSEL.u3[i]:
+      ins[i] = f16_to_f32(S[i][31 : 16].f16)
+    else:
+      ins[i] = f16_to_f32(S[i][15 : 0].f16)
+  D0[31 : 16].f16 = f32_to_f16(fma(ins[0], ins[1], ins[2]))
+  return {'D0': D0._val}
+
 VOP3POp_FUNCTIONS = {
   VOP3POp.V_PK_MAD_I16: _VOP3POp_V_PK_MAD_I16,
   VOP3POp.V_PK_MUL_LO_U16: _VOP3POp_V_PK_MUL_LO_U16,
@@ -6650,6 +6689,9 @@ VOP3POp_FUNCTIONS = {
   VOP3POp.V_DOT4_U32_U8: _VOP3POp_V_DOT4_U32_U8,
   VOP3POp.V_DOT8_U32_U4: _VOP3POp_V_DOT8_U32_U4,
   VOP3POp.V_DOT2_F32_BF16: _VOP3POp_V_DOT2_F32_BF16,
+  VOP3POp.V_FMA_MIX_F32: _VOP3POp_V_FMA_MIX_F32,
+  VOP3POp.V_FMA_MIXLO_F16: _VOP3POp_V_FMA_MIXLO_F16,
+  VOP3POp.V_FMA_MIXHI_F16: _VOP3POp_V_FMA_MIXHI_F16,
 }
 
 def _VOPCOp_V_CMP_F_F16(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):

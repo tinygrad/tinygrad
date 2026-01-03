@@ -42,7 +42,7 @@ INST_PATTERN = re.compile(r'^([SVD]S?_[A-Z0-9_]+|(?:FLAT|GLOBAL|SCRATCH)_[A-Z0-9
 UNSUPPORTED = ['SGPR[', 'V_SWAP', 'eval ', 'FATAL_HALT', 'HW_REGISTERS',
                'vscnt', 'vmcnt', 'expcnt', 'lgkmcnt',
                'CVT_OFF_TABLE', 'ThreadMask',
-               'S1[i', 'C.i32', 'S[i]', 'in[',
+               'S1[i', 'C.i32', 'thread_',
                'if n.', 'DST.u32', 'addrd = DST', 'addr = DST',
                'BARRIER_STATE', 'ReallocVgprs',
                'GPR_IDX', 'VSKIP', 'specified in', 'TTBL',
@@ -586,6 +586,7 @@ def _generate_function(cls_name: str, op, pc: str, code: str) -> tuple[str, str]
   has_sdst = cls_name == 'VOP3SDOp' and ('VCC.u64[laneId]' in pc or is_div_scale)
   is_ds = cls_name == 'DSOp'
   is_flat = cls_name in ('FLATOp', 'GLOBALOp', 'SCRATCHOp')
+  has_s_array = 'S[i]' in pc  # FMA_MIX style: S[0], S[1], S[2] array access
   combined = code + pc
 
   fn_name = f"_{cls_name}_{op.name}"
@@ -607,6 +608,15 @@ def _generate_function(cls_name: str, op, pc: str, code: str) -> tuple[str, str]
     lines = [f"def {fn_name}(MEM, addr, vdata, vdst):"]
     reg_inits = ["ADDR=addr", "VDATA=Reg(vdata)", "VDST=Reg(vdst)", "RETURN_DATA=Reg(0)"]
     special_regs = [('DATA', 'VDATA')]
+  elif has_s_array:
+    # FMA_MIX style: needs S[i] array, opsel, opsel_hi for source selection (neg/neg_hi applied in emu.py before call)
+    lines = [f"def {fn_name}(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None, opsel=0, opsel_hi=0):"]
+    reg_inits = ["S0=Reg(s0)", "S1=Reg(s1)", "S2=Reg(s2)", "S=[S0,S1,S2]", "D0=Reg(d0)", "OPSEL=Reg(opsel)", "OPSEL_HI=Reg(opsel_hi)"]
+    special_regs = []
+    # Detect array declarations like "declare in : 32'F[3]" and create them (rename 'in' to 'ins' since 'in' is a keyword)
+    if "in[" in combined:
+      reg_inits.append("ins=[Reg(0),Reg(0),Reg(0)]")
+      code = code.replace("in[", "ins[")
   else:
     lines = [f"def {fn_name}(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):"]
     # Only create Regs for registers actually used in the pseudocode

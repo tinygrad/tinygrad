@@ -461,6 +461,7 @@ class Reg:
   bf16 = property(lambda s: TypedView(s, 16, is_float=True, is_bf16=True), lambda s, v: setattr(s, '_val', (s._val & 0xffff0000) | ((v if isinstance(v, int) else _ibf16(float(v))) & 0xffff)))
   u8 = property(lambda s: TypedView(s, 8))
   i8 = property(lambda s: TypedView(s, 8, signed=True))
+  u3 = property(lambda s: TypedView(s, 3))  # 3-bit for opsel fields
   u1 = property(lambda s: TypedView(s, 1))  # single bit
 
   def __getitem__(s, key):

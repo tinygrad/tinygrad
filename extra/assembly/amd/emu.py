@@ -323,16 +323,20 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: LDSMem | None = None)
       if lane == 0:  # Only execute once per wave, write results for all lanes
         exec_wmma(st, inst, inst.op)
       return
-    # V_FMA_MIX: Mixed precision FMA - opsel_hi controls f32(0) vs f16(1), opsel selects which f16 half
+    # V_FMA_MIX: Mixed precision FMA - uses generated pcode with opsel parameters
+    # Apply abs/neg modifiers to sources: for f32 mode modify bit 31, for f16 mode modify bit 15 or 31 based on opsel
     if 'FMA_MIX' in inst.op_name:
       raws = [st.rsrc(inst.src0, lane), st.rsrc(inst.src1, lane), st.rsrc(inst.src2, lane) if inst.src2 is not None else 0]
-      is_f16 = [inst.opsel_hi & 1, inst.opsel_hi & 2, inst.opsel_hi2]
-      srcs = [_f16(_src16(raws[i], bool(inst.opsel & (1<<i)))) if is_f16[i] else _f32(raws[i]) for i in range(3)]
+      opsel_hi = inst.opsel_hi | (inst.opsel_hi2 << 2)
+      # Apply modifiers: neg_hi is abs, neg is negate. Sign bit is 31 for f32, or 15/31 for f16 lo/hi
       for i in range(3):
-        if inst.neg_hi & (1<<i): srcs[i] = abs(srcs[i])  # neg_hi reused as abs
-        if inst.neg & (1<<i): srcs[i] = -srcs[i]
-      result = srcs[0] * srcs[1] + srcs[2]
-      st.vgpr[lane][inst.vdst] = _i32(result) if inst.op == VOP3POp.V_FMA_MIX_F32 else _dst16(V[inst.vdst], _i16(result), inst.op == VOP3POp.V_FMA_MIXHI_F16)
+        is_f16 = (opsel_hi >> i) & 1
+        sign_bit = (15 if not (inst.opsel & (1 << i)) else 31) if is_f16 else 31
+        if inst.neg_hi & (1 << i): raws[i] &= ~(1 << sign_bit)  # abs: clear sign bit
+        if inst.neg & (1 << i): raws[i] ^= (1 << sign_bit)  # neg: flip sign bit
+      result = compiled[VOP3POp][inst.op](raws[0], raws[1], raws[2], V[inst.vdst], st.scc, st.vcc, lane, st.exec_mask, st.literal, None,
+                                          opsel=inst.opsel, opsel_hi=opsel_hi)
+      st.vgpr[lane][inst.vdst] = result['D0'] & MASK32
       return
     # VOP3P packed ops: opsel selects halves for lo, opsel_hi for hi; neg toggles f16 sign
     raws = [st.rsrc_f16(inst.src0, lane), st.rsrc_f16(inst.src1, lane), st.rsrc_f16(inst.src2, lane) if inst.src2 is not None else 0]
