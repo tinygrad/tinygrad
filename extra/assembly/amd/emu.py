@@ -420,13 +420,138 @@ def exec_wmma(st: WaveState, inst, op: VOP3POp) -> None:
     for i in range(256): st.vgpr[i % 32][vdst + i//32] = _i32(mat_d[i])
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# SQTT TRACING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+WAVESTART_TO_INST_CYCLES = 32
+VALU_LATENCY = 6
+SNOP_PIPELINE_DELAY = 3
+SNOP_EXTRA_DELAY_MIN, SNOP_EXTRA_DELAY_MAX = 7, 18  # extra +4 delay range (no pending)
+SNOP_EXTRA_DELAY_MIN_PENDING, SNOP_EXTRA_DELAY_MAX_PENDING = 11, 22  # extra +4 delay range (pending)
+SNOP_EXTRA_DELAY_CYCLES = 4
+FORWARD_DEPTH_LIMIT = 4  # chain depth where forwarding exhaustion starts
+FORWARD_DEEP_LATENCY = 9  # latency for exhausted forwarding
+REGCACHE_BYPASS_TIMEOUT = 4  # s_nop(N>=4) triggers bypass penalty
+REGCACHE_BYPASS_PENALTY = 4
+
+from extra.assembly.amd.sqtt import WAVESTART, WAVEEND, IMMEDIATE, VALUINST, ALUEXEC, AluSrc
+
+class SQTTState:
+  """SQTT tracing state - cycle-accurate VALU pipeline simulation."""
+
+  def __init__(self, wave_id: int = 0, simd: int = 0, cu: int = 0):
+    self.packets, self.cycle, self.inst_count = [], 0, 0
+    self.wave_id, self.simd, self.cu = wave_id, simd, cu
+    self.vgpr: dict[int, tuple[int, int]] = {}  # reg -> (ready_cycle, chain_depth)
+    self.pending: list[int] = []  # completion cycles for scheduled ALUEXECs
+    self.deferred: list[tuple[int | None, int | None]] = []  # (src_vgpr, dst) - waiting for warmth
+    self.last_valu_dispatch, self.immediate_cycles = -100, []
+
+  def emit(self, pkt_class, **kwargs): self.packets.append(pkt_class(_time=self.cycle, **kwargs))
+
+  def emit_wavestart(self):
+    self.emit(WAVESTART, wave=self.wave_id, simd=self.simd, cu_lo=self.cu & 0x7, flag7=self.cu >> 3)
+    for _ in range(WAVESTART_TO_INST_CYCLES): self.tick()
+
+  def _schedule(self, completion: int, dst: int | None):
+    completion = max(completion, (max(self.pending) if self.pending else self.cycle - 1) + 1)
+    self.pending.append(completion)
+    self.pending.sort()
+    if dst is not None: self.vgpr[dst] = (completion, self.vgpr.get(dst, (0, 0))[1])
+
+  def _resolve_deferred(self):
+    if not self.deferred: return
+    src_vgpr, dst = self.deferred[0]
+    if src_vgpr is None:
+      self._schedule((max(self.pending) if self.pending else self.cycle - 1) + 1, dst)
+      self.deferred.pop(0)
+    else:
+      source_ready = self.vgpr.get(src_vgpr, (0, 0))[0]
+      if source_ready <= self.cycle:
+        warm = sum(1 for c in self.immediate_cycles if c > source_ready) >= 2
+        if warm or self.cycle >= source_ready + 2:
+          self._schedule(source_ready + (VALU_LATENCY - 1 if warm else FORWARD_DEEP_LATENCY), dst)
+          self.deferred.pop(0)
+
+  def tick(self):
+    self._resolve_deferred()
+    while self.pending and self.pending[0] <= self.cycle:
+      self.pending.pop(0)
+      self.emit(ALUEXEC, src=AluSrc.VALU)
+    self.cycle += 1
+
+  def _get_src_vgprs(self, inst: Inst) -> list[int]:
+    if isinstance(inst, VOP1): return [inst.src0 - 256] if inst.src0 >= 256 else []
+    if isinstance(inst, VOP2): return ([inst.src0 - 256] if inst.src0 >= 256 else []) + [inst.vsrc1]
+    if isinstance(inst, VOP3): return [s - 256 for s in [inst.src0, inst.src1, getattr(inst, 'src2', None)] if s is not None and s >= 256]
+    return []
+
+  def _valu_latency(self, dispatch: int, source_ready: int, depth: int) -> int:
+    if depth == 0: return dispatch + VALU_LATENCY
+    if depth >= FORWARD_DEPTH_LIMIT: return -1
+    gap = source_ready - dispatch
+    if gap >= 2: return source_ready + (VALU_LATENCY - 1 if depth >= 2 else VALU_LATENCY)
+    if gap == 1: return source_ready + 7
+    return max(dispatch + 8, source_ready + 9)
+
+  def process_instruction(self, inst: Inst):
+    if inst.op == SOPPOp.S_NOP: self._process_snop(inst.simm16)
+    elif isinstance(inst, (VOP1, VOP2, VOP3)): self._process_valu(inst)
+    self.inst_count += 1
+
+  def _process_snop(self, N: int):
+    has_pending = bool(self.pending)
+    bypass = REGCACHE_BYPASS_PENALTY if N >= REGCACHE_BYPASS_TIMEOUT and has_pending else 0
+    if bypass: self.pending = [c + bypass for c in self.pending]
+
+    for _ in range(max(0, self.last_valu_dispatch + SNOP_PIPELINE_DELAY - self.cycle)): self.tick()
+    in_range = (SNOP_EXTRA_DELAY_MIN_PENDING <= N <= SNOP_EXTRA_DELAY_MAX_PENDING) if has_pending else \
+               (SNOP_EXTRA_DELAY_MIN <= N <= SNOP_EXTRA_DELAY_MAX and self.inst_count > 0)
+
+    for _ in range(N + (SNOP_EXTRA_DELAY_CYCLES if in_range else 0) + bypass): self.tick()
+    self.emit(IMMEDIATE, wave=self.wave_id)
+    self.immediate_cycles.append(self.cycle)
+    self.tick()
+
+  def _process_valu(self, inst: Inst):
+    dispatch, dst = self.cycle, inst.vdst
+    deps = [(r, self.vgpr[r]) for r in self._get_src_vgprs(inst) if r in self.vgpr]
+    src_vgpr, (source_ready, src_depth) = max(deps, key=lambda x: x[1][0]) if deps else (None, (0, 0))
+    depth = src_depth + 1 if deps else 0
+
+    self.emit(VALUINST, wave=self.wave_id)
+    self.last_valu_dispatch = dispatch
+
+    completion = self._valu_latency(dispatch, source_ready, depth)
+    if completion == -1:
+      self.deferred.append((src_vgpr, dst))
+      completion = source_ready + VALU_LATENCY - 1
+    elif self.deferred:
+      self.deferred.append((None, dst))
+    else:
+      self._schedule(completion, dst)
+
+    if dst is not None: self.vgpr[dst] = (completion, depth)
+    self.tick()
+
+  def finalize(self):
+    while self.pending or self.deferred: self.tick()
+    self.emit(WAVEEND, wave=self.wave_id, simd=self.simd, cu_lo=self.cu & 0x7, flag7=self.cu >> 3)
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # MAIN EXECUTION LOOP
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def step_wave(program: Program, st: WaveState, lds: LDSMem, n_lanes: int) -> int:
+def step_wave(program: Program, st: WaveState, lds: LDSMem, n_lanes: int, trace: SQTTState | None = None) -> int:
   inst = program.get(st.pc)
   if inst is None: return 1
   inst_words, st.literal = inst._words, getattr(inst, '_literal', None) or 0
+
+  # TODO: add ALUEXEC emits if anything completed
+
+  # Emit SQTT packets for this instruction
+  if trace is not None:
+    trace.process_instruction(inst)
 
   if isinstance(inst, (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM)):
     delta = exec_scalar(st, inst)
@@ -443,11 +568,15 @@ def step_wave(program: Program, st: WaveState, lds: LDSMem, n_lanes: int) -> int
     st.pc += inst_words
   return 0
 
-def exec_wave(program: Program, st: WaveState, lds: LDSMem, n_lanes: int) -> int:
+def exec_wave(program: Program, st: WaveState, lds: LDSMem, n_lanes: int, trace: SQTTState | None = None) -> int:
+  if trace is not None:
+    trace.emit_wavestart()
   while st.pc in program:
-    result = step_wave(program, st, lds, n_lanes)
-    if result == -1: return 0
+    result = step_wave(program, st, lds, n_lanes, trace)
+    if result == -1: break
     if result == -2: return -2
+  if trace is not None:
+    trace.finalize()
   return 0
 
 def exec_workgroup(program: Program, workgroup_id: tuple[int, int, int], local_size: tuple[int, int, int], args_ptr: int,
