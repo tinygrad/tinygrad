@@ -2,8 +2,8 @@
 """Test CDNA assembler/disassembler against LLVM test vectors.
 
 NOTE: CDNA (gfx908/gfx90a/gfx940/gfx942) instruction encodings differ from GFX9 (gfx900/Vega)
-in several ways, particularly for memory instructions with format fields. This test focuses on
-instruction formats where CDNA3 (MI300) encodings match or can be validated.
+in several ways, particularly for memory instructions. We use CDNA-specific test files (gfx90a/gfx942)
+for memory instructions to ensure correct bit-level compatibility.
 """
 import unittest, re, subprocess
 from tinygrad.helpers import fetch
@@ -13,30 +13,52 @@ from extra.assembly.amd.test.helpers import get_llvm_mc
 
 LLVM_BASE = "https://raw.githubusercontent.com/llvm/llvm-project/main/llvm/test/MC/AMDGPU"
 
-# Use gfx9 tests for compatible scalar/vector formats and gfx942 tests for CDNA-specific instructions
+# Use gfx9 tests for compatible scalar/vector formats and gfx90a/gfx942 tests for CDNA-specific instructions
+# Format: (filename, format_class, op_enum, mcpu, mnemonic_filter, size_filter)
 CDNA_TEST_FILES = {
   # Scalar ALU - encoding is stable across GFX9/CDNA
-  'sop1': ('gfx9_asm_sop1.s', SOP1, SOP1Op, 'gfx940'),
-  'sop2': ('gfx9_asm_sop2.s', SOP2, SOP2Op, 'gfx940'),
-  'sopp': ('gfx9_asm_sopp.s', SOPP, SOPPOp, 'gfx940'),
-  'sopk': ('gfx9_asm_sopk.s', SOPK, SOPKOp, 'gfx940'),
-  'sopc': ('gfx9_asm_sopc.s', SOPC, SOPCOp, 'gfx940'),
+  'sop1': ('gfx9_asm_sop1.s', SOP1, SOP1Op, 'gfx940', None, None),
+  'sop2': ('gfx9_asm_sop2.s', SOP2, SOP2Op, 'gfx940', None, None),
+  'sopp': ('gfx9_asm_sopp.s', SOPP, SOPPOp, 'gfx940', None, None),
+  'sopp_gfx9': ('sopp-gfx9.s', SOPP, SOPPOp, 'gfx940', None, None),
+  'sopk': ('gfx9_asm_sopk.s', SOPK, SOPKOp, 'gfx940', None, None),
+  'sopc': ('gfx9_asm_sopc.s', SOPC, SOPCOp, 'gfx940', None, None),
   # Vector ALU - encoding is mostly stable
-  'vop1': ('gfx9_asm_vop1.s', VOP1, VOP1Op, 'gfx940'),
-  'vop2': ('gfx9_asm_vop2.s', VOP2, VOP2Op, 'gfx940'),
-  'vopc': ('gfx9_asm_vopc.s', VOPC, VOPCOp, 'gfx940'),
+  'vop1': ('gfx9_asm_vop1.s', VOP1, VOP1Op, 'gfx940', None, None),
+  'vop1_gfx9': ('vop1-gfx9.s', VOP1, VOP1Op, 'gfx940', None, None),
+  'vop2': ('gfx9_asm_vop2.s', VOP2, VOP2Op, 'gfx940', None, None),
+  'vopc': ('gfx9_asm_vopc.s', VOPC, VOPCOp, 'gfx940', None, None),
+  'vop3p': ('gfx9_asm_vop3p.s', VOP3P, VOP3POp, 'gfx940', None, None),
+  'vop3_gfx9': ('vop3-gfx9.s', VOP3A, VOP3AOp, 'gfx940', None, 8),  # Only 64-bit VOP3 instructions
+  # Memory instructions
+  'ds': ('gfx9_asm_ds.s', DS, DSOp, 'gfx940', None, None),
+  'ds_gfx9': ('ds-gfx9.s', DS, DSOp, 'gfx940', None, None),
+  # CDNA memory instructions (gfx90a has correct FLAT/MUBUF encodings with acc registers)
+  'flat_gfx90a': ('gfx90a_ldst_acc.s', FLAT, FLATOp, 'gfx90a', 'flat_', None),
+  'global_gfx90a': ('gfx90a_ldst_acc.s', FLAT, FLATOp, 'gfx90a', 'global_', None),
+  'mubuf_gfx90a': ('gfx90a_ldst_acc.s', MUBUF, MUBUFOp, 'gfx90a', 'buffer_', None),
+  'mubuf_gfx9': ('mubuf-gfx9.s', MUBUF, MUBUFOp, 'gfx940', None, None),
+  'scratch_gfx942': ('flat-scratch-gfx942.s', FLAT, FLATOp, 'gfx942', 'scratch_', None),
   # CDNA-specific: MFMA/MAI instructions
-  'mai': ('mai-gfx942.s', VOP3P, VOP3POp, 'gfx942'),
+  'mai': ('mai-gfx942.s', VOP3P, VOP3POp, 'gfx942', None, None),
 }
 
-def parse_llvm_tests(text: str) -> list[tuple[str, bytes]]:
-  """Parse LLVM test format into (asm, expected_bytes) pairs."""
+def parse_llvm_tests(text: str, mnemonic_filter: str = None, size_filter: int = None) -> list[tuple[str, bytes]]:
+  """Parse LLVM test format into (asm, expected_bytes) pairs.
+  
+  Args:
+    text: LLVM test file content
+    mnemonic_filter: Optional prefix filter (e.g. 'flat_', 'buffer_', 'global_', 'scratch_')
+    size_filter: Optional instruction size filter (4 for 32-bit, 8 for 64-bit)
+  """
   tests, lines = [], text.split('\n')
   for i, line in enumerate(lines):
     line = line.strip()
     if not line or line.startswith(('//', '.', ';')): continue
     asm_text = line.split('//')[0].strip()
     if not asm_text: continue
+    # Apply mnemonic filter if specified
+    if mnemonic_filter and not asm_text.startswith(mnemonic_filter): continue
     for j in range(i, min(i + 3, len(lines))):
       # Match various CHECK formats
       if m := re.search(r'CHECK[^:]*:\s*\[(0x[0-9a-fA-F,x\s]+)\]', lines[j]):
@@ -48,7 +70,11 @@ def parse_llvm_tests(text: str) -> list[tuple[str, bytes]]:
       else:
         continue
       if hex_bytes:
-        try: tests.append((asm_text, bytes.fromhex(hex_bytes)))
+        try:
+          data = bytes.fromhex(hex_bytes)
+          # Apply size filter if specified
+          if size_filter and len(data) != size_filter: continue
+          tests.append((asm_text, data))
         except ValueError: pass
       break
   return tests
@@ -76,17 +102,17 @@ class TestLLVMCDNA(unittest.TestCase):
 
   @classmethod
   def setUpClass(cls):
-    for name, (filename, _, _, _) in CDNA_TEST_FILES.items():
+    for name, (filename, _, _, _, mnemonic_filter, size_filter) in CDNA_TEST_FILES.items():
       try:
         data = fetch(f"{LLVM_BASE}/{filename}").read_bytes()
-        cls.tests[name] = parse_llvm_tests(data.decode('utf-8', errors='ignore'))
+        cls.tests[name] = parse_llvm_tests(data.decode('utf-8', errors='ignore'), mnemonic_filter, size_filter)
       except Exception as e:
         print(f"Warning: couldn't fetch {filename}: {e}")
         cls.tests[name] = []
 
 def _make_roundtrip_test(name):
   def test(self):
-    _, fmt_cls, op_enum, mcpu = CDNA_TEST_FILES[name]
+    _, fmt_cls, op_enum, mcpu, _, _ = CDNA_TEST_FILES[name]
     passed, failed, skipped, enum_missing = 0, 0, 0, 0
     failures: list[str] = []
 
@@ -120,7 +146,7 @@ def _make_roundtrip_test(name):
 
 def _make_disasm_test(name):
   def test(self):
-    _, fmt_cls, op_enum, mcpu = CDNA_TEST_FILES[name]
+    _, fmt_cls, op_enum, mcpu, _, _ = CDNA_TEST_FILES[name]
     passed, failed, skipped, enum_missing = 0, 0, 0, 0
     failures: list[str] = []
 
