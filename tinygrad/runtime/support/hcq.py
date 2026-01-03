@@ -258,11 +258,12 @@ class HCQSignal(Generic[HCQDeviceType]):
       value: The value to wait for.
       timeout: Maximum time to wait in milliseconds. Defaults to 30s.
     """
-    start_time = int(time.perf_counter() * 1000)
+    start_time, fault = int(time.perf_counter() * 1000), False
     while (not_passed:=(prev_value:=self.value) < value) and (time_spent:=int(time.perf_counter() * 1000) - start_time) < timeout:
-      if self._sleep(time_spent): break
+      if fault:=self._sleep(time_spent): break
       if self.value != prev_value: start_time = int(time.perf_counter() * 1000) # progress was made, reset timer
-    if not_passed and self.value < value: raise RuntimeError(f"Wait timeout: {timeout} ms! (the signal is not set to {value}, but {self.value})")
+    if not_passed and self.value < value:
+      raise RuntimeError("Device fault detected" if fault else f"Wait timeout: {timeout} ms! (the signal is not set to {value}, but {self.value})")
 
 @contextlib.contextmanager
 def hcq_profile(dev:HCQCompiled, enabled, desc, queue_type:Callable[[], HWQueue]|None=None, queue:HWQueue|None=None):
