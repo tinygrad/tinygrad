@@ -2,6 +2,7 @@
 # mypy: ignore-errors
 from __future__ import annotations
 import ctypes
+from tinygrad.runtime.autogen import hsa
 from extra.assembly.amd.dsl import Inst, unwrap, FLOAT_ENC, MASK32, MASK64, _f32, _i32, _sext, _f16, _i16, _f64, _i64
 from extra.assembly.amd.pcode import Reg
 from extra.assembly.amd.asm import detect_format
@@ -446,37 +447,37 @@ def step_wave(program: Program, st: WaveState, lds: LDSMem, n_lanes: int) -> int
 def exec_wave(program: Program, st: WaveState, lds: LDSMem, n_lanes: int) -> int:
   while st.pc in program:
     result = step_wave(program, st, lds, n_lanes)
-    if result == -1: return 0
-    if result == -2: return -2
+    if result == -1: return -1  # endpgm
+    if result == -2: return -2  # barrier
   return 0
 
-def exec_workgroup(program: Program, workgroup_id: tuple[int, int, int], local_size: tuple[int, int, int], args_ptr: int,
-                   wg_id_sgpr_base: int, wg_id_enables: tuple[bool, bool, bool]) -> None:
+def exec_workgroup(program: Program, workgroup_id: tuple[int, int, int], local_size: tuple[int, int, int], args_ptr: int, rsrc2: int) -> None:
   lx, ly, lz = local_size
-  total_threads, lds = lx * ly * lz, LDSMem(bytearray(65536))
-  waves: list[tuple[WaveState, int, int]] = []
+  total_threads = lx * ly * lz
+  # GRANULATED_LDS_SIZE is in 512-byte units (see ops_amd.py: lds_size = ((group_segment_size + 511) // 512))
+  lds_size = ((rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_GRANULATED_LDS_SIZE_SHIFT) * 512
+  lds = LDSMem(bytearray(lds_size)) if lds_size else None
+  waves: list[tuple[WaveState, int]] = []
   for wave_start in range(0, total_threads, WAVE_SIZE):
-    n_lanes, st = min(WAVE_SIZE, total_threads - wave_start), WaveState()
+    n_lanes = min(WAVE_SIZE, total_threads - wave_start)
+    st = WaveState()
     st.exec_mask = (1 << n_lanes) - 1
-    st.wsgpr64(0, args_ptr)
-    # Set workgroup IDs in SGPRs based on USER_SGPR_COUNT and enable flags from COMPUTE_PGM_RSRC2
-    sgpr_idx = wg_id_sgpr_base
-    for wg_id, enabled in zip(workgroup_id, wg_id_enables):
-      if enabled: st.sgpr[sgpr_idx] = wg_id; sgpr_idx += 1
-    # Set workitem IDs in VGPR0 using packed method: v0 = (Z << 20) | (Y << 10) | X
-    for i in range(n_lanes):
-      tid = wave_start + i
-      st.vgpr[i][0] = ((tid // (lx * ly)) << 20) | (((tid // lx) % ly) << 10) | (tid % lx)
-    waves.append((st, n_lanes, wave_start))
-  has_barrier = any(isinstance(inst, SOPP) and inst.op == SOPPOp.S_BARRIER for inst in program.values())
-  for _ in range(2 if has_barrier else 1):
-    for st, n_lanes, _ in waves: exec_wave(program, st, lds, n_lanes)
+    st.wsgpr64(0, args_ptr)  # s[0:1] = kernel arguments pointer
+    # COMPUTE_PGM_RSRC2: USER_SGPR_COUNT is where workgroup IDs start, ENABLE_SGPR_WORKGROUP_ID_X/Y/Z control which are passed
+    sgpr_idx = (rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT) >> hsa.AMD_COMPUTE_PGM_RSRC_TWO_USER_SGPR_COUNT_SHIFT
+    if rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_X: st.sgpr[sgpr_idx] = workgroup_id[0]; sgpr_idx += 1
+    if rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Y: st.sgpr[sgpr_idx] = workgroup_id[1]; sgpr_idx += 1
+    if rsrc2 & hsa.AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_Z: st.sgpr[sgpr_idx] = workgroup_id[2]
+    # VGPR0 = packed workitem IDs: (Z << 20) | (Y << 10) | X
+    for tid in range(wave_start, wave_start + n_lanes):
+      st.vgpr[tid - wave_start][0] = ((tid // (lx * ly)) << 20) | (((tid // lx) % ly) << 10) | (tid % lx)
+    waves.append((st, n_lanes))
+  while waves:
+    waves = [(st, n_lanes) for st, n_lanes in waves if exec_wave(program, st, lds, n_lanes) != -1]
 
 def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int, rsrc2: int = 0x19c) -> int:
   program = decode_program((ctypes.c_char * lib_sz).from_address(lib).raw)
-  if not program: return -1
-  wg_id_enables = tuple(bool((rsrc2 >> (7+i)) & 1) for i in range(3))
   for gidz in range(gz):
     for gidy in range(gy):
-      for gidx in range(gx): exec_workgroup(program, (gidx, gidy, gidz), (lx, ly, lz), args_ptr, (rsrc2 >> 1) & 0x1f, wg_id_enables)
+      for gidx in range(gx): exec_workgroup(program, (gidx, gidy, gidz), (lx, ly, lz), args_ptr, rsrc2)
   return 0
