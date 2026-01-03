@@ -358,10 +358,6 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: LDSMem | None = None)
   result = fn(s0, s1, s2, d0, st.scc, vcc_for_fn, lane, st.exec_mask, st.literal, st.vgpr, src0_idx, vdst)
 
   # Apply results (already int values)
-  if 'vgpr_write' in result:
-    # Lane instruction wrote to VGPR: (lane, vgpr_idx, value)
-    wr_lane, wr_idx, wr_val = result['vgpr_write']
-    st.vgpr[wr_lane][wr_idx] = wr_val
   if 'VCC' in result:
     # VOP2 carry ops write to VCC implicitly; VOPC/VOP3 write to vdst
     st.pend_sgpr_lane(VCC_LO if isinstance(inst, VOP2) and 'CO_CI' in inst.op_name else vdst, lane, (result['VCC'] >> lane) & 1)
@@ -371,7 +367,7 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: LDSMem | None = None)
   elif isinstance(inst.op, VOPCOp):
     # VOPC comparison result stored in D0 bitmask, extract lane bit (non-CMPX only)
     st.pend_sgpr_lane(vdst, lane, (result['D0'] >> lane) & 1)
-  if not isinstance(inst.op, VOPCOp) and 'vgpr_write' not in result:
+  if not isinstance(inst.op, VOPCOp):
     d0_val = result['D0']
     if inst.dst_regs() == 2: V[vdst], V[vdst + 1] = d0_val & MASK32, (d0_val >> 32) & MASK32
     elif inst.is_dst_16(): V[vdst] = _dst16(V[vdst], d0_val, bool(opsel & 8) if isinstance(inst, VOP3) else dst_hi)
