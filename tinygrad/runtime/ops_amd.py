@@ -42,9 +42,10 @@ class ProfilePMCEvent(ProfileEvent): device:str; kern:str; sched:list[PMCSample]
 class AMDSignal(HCQSignal):
   def __init__(self, *args, **kwargs): super().__init__(*args, **{**kwargs, 'timestamp_divider': 100})
 
-  def _sleep(self, time_spent_waiting_ms:int):
+  def _sleep(self, time_spent_waiting_ms:int) -> bool:
     # Resonable to sleep for long workloads (which take more than 2s) and only timeline signals.
-    if time_spent_waiting_ms > 2000 and self.is_timeline and self.owner is not None: self.owner.iface.sleep(200)
+    if time_spent_waiting_ms > 2000 and self.is_timeline and self.owner is not None: return self.owner.iface.sleep(200)
+    return False
 
 class AMDComputeQueue(HWQueue):
   def __init__(self, dev:AMDDevice):
@@ -773,7 +774,9 @@ class KFDIface:
                         write_ptrs=[MMIOInterface(queue.write_pointer_address, 8, fmt='Q')],
                         doorbells=[MMIOInterface(self.doorbells + queue.doorbell_offset - self.doorbells_base, 8, fmt='Q')])
 
-  def sleep(self, tm:int): kfd.AMDKFD_IOC_WAIT_EVENTS(KFDIface.kfd, events_ptr=self.queue_event_arr_ptr, num_events=1, wait_for_all=1, timeout=tm)
+  def sleep(self, tm:int) -> bool:
+    kfd.AMDKFD_IOC_WAIT_EVENTS(KFDIface.kfd, events_ptr=self.queue_event_arr_ptr, num_events=1, wait_for_all=1, timeout=tm)
+    return False
 
   def on_device_hang(self):
     def _collect_str(st): return ' '.join(f'{k[0]}={getattr(st, k[0])}' for k in st._fields_)
@@ -843,15 +846,16 @@ class PCIIface(PCIIfaceBase):
     return AMDQueueDesc(ring=ring.cpu_view().view(fmt='I'), doorbells=[self.dev_impl.doorbell64.view(doorbell_index * 8, 8, fmt='Q')],
       read_ptrs=[gart.cpu_view().view(offset=rptr, size=8, fmt='Q')], write_ptrs=[gart.cpu_view().view(offset=wptr, size=8, fmt='Q')], put_value=pv)
 
-  def sleep(self, timeout):
+  def sleep(self, timeout) -> bool:
     if hasattr(self.pci_dev, 'irq_poller') and self.pci_dev.irq_poller is not None and (events_cnt:=len(self.pci_dev.irq_poller.poll(timeout))):
       self.pci_dev.irq_fd.read(8 * events_cnt)
       self.dev_impl.ih.interrupt_handler()
+    return self.dev_impl.gmc.check_fault() is not None
 
   def on_device_hang(self):
     devs:list[AMDDevice] = [d for pg in HCQCompiled.peer_groups.values() for d in pg if isinstance(d, AMDDevice) and d.is_am()]
-    for d in devs: d.iface.dev_impl.gmc.on_interrupt()
-    raise RuntimeError("Device hang detected")
+    faults = [f for d in devs if (f:=d.iface.dev_impl.gmc.check_fault())]
+    raise RuntimeError(f"Device hang detected: {faults[0]}" if faults else "Device hang detected")
 
   def device_fini(self): self.dev_impl.fini()
 
@@ -883,7 +887,7 @@ class USBIface(PCIIface):
     if queue_type == kfd.KFD_IOC_QUEUE_TYPE_COMPUTE: self.pci_dev.usb._pci_cacheable += [(ring.cpu_view().addr, ring.size)]
     return super().create_queue(queue_type, ring, gart, rptr, wptr, eop_buffer, cwsr_buffer, ctl_stack_size, ctx_save_restore_size, xcc_id, idx)
 
-  def sleep(self, timeout): pass
+  def sleep(self, timeout) -> bool: return False
 
 class AMDDevice(HCQCompiled):
   def is_am(self) -> bool: return isinstance(self.iface, (PCIIface, USBIface))

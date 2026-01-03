@@ -243,10 +243,12 @@ class HCQSignal(Generic[HCQDeviceType]):
     """
     return self.timestamp_mv[0] / self.timestamp_divider
 
-  def _sleep(self, time_spent_waiting_ms:int):
+  def _sleep(self, time_spent_waiting_ms:int) -> bool:
     """
     Optional function which can implement sleep functionality for the signal.
+    Returns True if a fault was detected, False otherwise.
     """
+    return False
 
   def wait(self, value:int, timeout:int=getenv("HCQDEV_WAIT_TIMEOUT_MS", 30000)):
     """
@@ -258,7 +260,7 @@ class HCQSignal(Generic[HCQDeviceType]):
     """
     start_time = int(time.perf_counter() * 1000)
     while (not_passed:=(prev_value:=self.value) < value) and (time_spent:=int(time.perf_counter() * 1000) - start_time) < timeout:
-      self._sleep(time_spent)
+      if self._sleep(time_spent): break
       if self.value != prev_value: start_time = int(time.perf_counter() * 1000) # progress was made, reset timer
     if not_passed and self.value < value: raise RuntimeError(f"Wait timeout: {timeout} ms! (the signal is not set to {value}, but {self.value})")
 
