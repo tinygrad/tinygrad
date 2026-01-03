@@ -18,12 +18,13 @@ def _try_dlopen_gpuocelot():
 class PythonRemu:
   """Python RDNA3 emulator wrapper that matches the libremu.so interface."""
   valid_mem_ranges: set[tuple[int, int]] = set()
+  rsrc2: int = 0x19c  # Default: USER_SGPR_COUNT=14, enable X and Y workgroup IDs
 
   def run_asm(self, lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, lz: int, args_ptr: int) -> int:
-    from extra.assembly.rdna3.emu import run_asm, set_valid_mem_ranges
+    from extra.assembly.amd.emu import run_asm, set_valid_mem_ranges
     # Pad ranges to handle GPU loads that may read past small buffers (e.g. s_load_b128 on 12-byte buffer)
     set_valid_mem_ranges({(start, size + 4096) for start, size in self.valid_mem_ranges})
-    return run_asm(lib, lib_sz, gx, gy, gz, lx, ly, lz, args_ptr)
+    return run_asm(lib, lib_sz, gx, gy, gz, lx, ly, lz, args_ptr, self.rsrc2)
 
 def _try_dlopen_remu():
   # Use Python emulator only if PYTHON_REMU=1

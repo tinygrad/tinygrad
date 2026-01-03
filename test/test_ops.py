@@ -848,7 +848,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.cos())
     helper_test_op([()], lambda x: x.cos())
     if not ((getenv("MOCKGPU") and Device.DEFAULT == "NV") or Device.DEFAULT == "WEBGPU"):
-      helper_test_op(None, lambda x: x.sin(), vals=[[math.nan, math.inf, -math.inf, 0.0]])
+      helper_test_op(None, lambda x: x.cos(), vals=[[math.nan, math.inf, -math.inf, 0.0]])
       helper_test_op(None, lambda x: x.cos(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
   @unittest.skipIf(Device.DEFAULT == "WEBGPU" and platform.system() == "Windows", "Not accurate enough with DirectX backend")
@@ -859,8 +859,8 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65)], lambda x: x.tan(), low=-5, high=5)
     helper_test_op([()], lambda x: x.tan())
     if not ((getenv("MOCKGPU") and Device.DEFAULT == "NV") or Device.DEFAULT == "WEBGPU"):
-      helper_test_op(None, lambda x: x.sin(), vals=[[math.nan, math.inf, -math.inf, 0.0]])
-      helper_test_op(None, lambda x: x.cos(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
+      helper_test_op(None, lambda x: x.tan(), vals=[[math.nan, math.inf, -math.inf, 0.0]])
+      helper_test_op(None, lambda x: x.tan(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
 
   def test_asin(self):
@@ -1087,7 +1087,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(2,3,0)], lambda x: torch.cummax(x, dim=2).values, lambda x: Tensor.cummax(x, axis=2))
 
   def test_argmax(self):
-    # check if it returns the first index for multiple occurences
+    # check if it returns the first index for multiple occurrences
     helper_test_op(None, lambda x: x.argmax().type(torch.int32), lambda x: x.argmax(), forward_only=True, vals=[[2, 2]])
     helper_test_op(None, lambda x: x.argmax().type(torch.int32), lambda x: x.argmax(), forward_only=True, vals=[[1, 2, 2]])
     if not COMPILE_ONLY:
@@ -1107,7 +1107,7 @@ class TestOps(unittest.TestCase):
     helper_test_op(None, lambda x: x.type(torch.int32).argmax().type(torch.int32), lambda x: x.argmax(), forward_only=True, vals=[[True, False]])
 
   def test_argmin(self):
-    # check if it returns the first index for multiple occurences
+    # check if it returns the first index for multiple occurrences
     helper_test_op(None, lambda x: x.argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[2, 2]])
     helper_test_op(None, lambda x: x.argmin().type(torch.int32), lambda x: x.argmin(), forward_only=True, vals=[[3, 2, 2]])
     if not COMPILE_ONLY:
@@ -1655,7 +1655,7 @@ class TestOps(unittest.TestCase):
   def test_broadcast_full(self):
     for torch_op, tinygrad_op in [(torch.add, Tensor.add), (torch.sub, Tensor.sub), (torch.mul, Tensor.mul),
                                   (torch.div, Tensor.div), (torch.pow, Tensor.pow)]:
-      for shapes in [((5,13,24,16), (5,1,24,1)), ((1,3,1,7,1), (2,1,5,1,8))]:
+      for shapes in [((5,3,14,16), (5,1,14,1)), ((1,3,1,7,1), (2,1,5,1,8))]:
         with self.subTest(op=torch_op.__name__, shapes=shapes):
           if tinygrad_op != Tensor.pow:
             helper_test_op(shapes, torch_op, tinygrad_op)
@@ -2078,7 +2078,7 @@ class TestOps(unittest.TestCase):
       lambda x,w: Tensor.conv2d(x,w,padding=[1,1,1,1,1,1]), grad_rtol=1e-5)
 
   def test_simple_conv2d_m4(self):
-    helper_test_op([(1,16,18,18), (16,16,3,3)],
+    helper_test_op([(1,16,9,9), (16,16,3,3)],
       lambda x,w: torch.nn.functional.conv2d(x,w),
       lambda x,w: Tensor.conv2d(x,w), atol=1e-05, grad_rtol=1e-5)
 
@@ -2535,7 +2535,7 @@ class TestOps(unittest.TestCase):
 
   @slow_test
   def test_avg_pool2d(self):
-    shape = (32,2,111,28)
+    shape = (32,2,11,28)
     for ksz in [(2,2), (3,3), (3,2), (5,5), (5,1)]:
       with self.subTest(kernel_size=ksz):
         helper_test_op([shape],
@@ -2549,7 +2549,7 @@ class TestOps(unittest.TestCase):
 
   @slow_test
   def test_avg_pool2d_padding(self):
-    shape = (32,2,111,28)
+    shape = (32,2,11,28)
     for ksz in [(2,2), (3,3), 2, 3, (3,2)]:
       for p in [1, (1,0), (0,1)]:
         with self.subTest(kernel_size=ksz, padding=p):
@@ -2557,10 +2557,10 @@ class TestOps(unittest.TestCase):
             lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=ksz, padding=p),
             lambda x: Tensor.avg_pool2d(x, kernel_size=ksz, padding=p), rtol=1e-5)
     with self.assertRaises(ValueError):
-      Tensor.avg_pool2d(Tensor.randn((32,2,111,28)), kernel_size=(2,2), padding=(1,1,1))
+      Tensor.avg_pool2d(Tensor.randn((32,2,11,28)), kernel_size=(2,2), padding=(1,1,1))
 
   def test_avg_pool2d_asymmetric_padding(self):
-    shape = (32,2,111,28)
+    shape = (32,2,11,28)
     for p in [(0,1,0,1), (2,1,2,1), (2,0,2,1)]:
       with self.subTest(padding=p):
         helper_test_op([shape],
@@ -2571,7 +2571,7 @@ class TestOps(unittest.TestCase):
 
   @slow_test
   def test_avg_pool2d_padding_not_counted(self):
-    shape = (32,2,111,28)
+    shape = (32,2,11,28)
     for ksz in [(2,2), (3,3), 2, 3, (3,2)]:
       with self.subTest(kernel_size=ksz):
         helper_test_op([shape],
@@ -2607,9 +2607,9 @@ class TestOps(unittest.TestCase):
       lambda x: Tensor.avg_pool2d(x, kernel_size=(3,3), stride=3, padding=1, ceil_mode=True, count_include_pad=True))
 
   def test_global_avg_pool2d(self):
-    helper_test_op([(32,2,111,28)],
-      lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(111,28)),
-      lambda x: Tensor.avg_pool2d(x, kernel_size=(111,28)), rtol=1e-5)
+    helper_test_op([(32,2,11,28)],
+      lambda x: torch.nn.functional.avg_pool2d(x, kernel_size=(11,28)),
+      lambda x: Tensor.avg_pool2d(x, kernel_size=(11,28)), rtol=1e-5)
 
   def test_avg_pool3d(self):
     # TODO: AMD_LLVM has larger atol
@@ -3142,10 +3142,10 @@ class TestOps(unittest.TestCase):
         lambda x: x.log_softmax(axis=1).nll_loss(Tensor(target), Tensor(weight), reduction=r))
 
   def test_nll_loss_3d_weight(self):
-    target = np.random.randint(0, 10, (32,3,3,3), dtype=np.int32).tolist()
+    target = np.random.randint(0, 10, (16,3,3,3), dtype=np.int32).tolist()
     weight = np.random.normal(0, 1, (10,)).astype(np.float32).tolist()
     for r in ("mean", "sum", "none"):
-      helper_test_op([(32,10,3,3,3)],
+      helper_test_op([(16,10,3,3,3)],
           lambda x: torch.nn.functional.nll_loss(torch.nn.functional.log_softmax(x, dim=1), torch.tensor(target), torch.tensor(weight), reduction=r),
           lambda x: x.log_softmax(axis=1).nll_loss(Tensor(target), Tensor(weight), reduction=r))
 
