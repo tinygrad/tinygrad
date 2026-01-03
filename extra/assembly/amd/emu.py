@@ -443,8 +443,8 @@ class SQTTState:
     self.packets, self.cycle, self.inst_count = [], 0, 0
     self.wave_id, self.simd, self.cu = wave_id, simd, cu
     self.vgpr: dict[int, tuple[int, int]] = {}  # reg -> (ready_cycle, chain_depth)
-    self.pending: list[tuple[int, AluSrc]] = []  # (completion_cycle, alu_src) - scheduled
-    self.deferred: list[tuple[int | None, int | None, int]] = []  # (src_vgpr, dst, depth) - waiting for warmth
+    self.pending: list[int] = []  # completion cycles for scheduled ALUEXECs
+    self.deferred: list[tuple[int | None, int | None]] = []  # (src_vgpr, dst) - waiting for warmth
     self.last_valu_dispatch, self.immediate_cycles = -100, []
 
   def emit(self, pkt_class, **kwargs): self.packets.append(pkt_class(_time=self.cycle, **kwargs))
@@ -453,35 +453,31 @@ class SQTTState:
     self.emit(WAVESTART, wave=self.wave_id, simd=self.simd, cu_lo=self.cu & 0x7, flag7=self.cu >> 3)
     for _ in range(WAVESTART_TO_INST_CYCLES): self.tick()
 
-  def _last_pending(self): return max((c for c, _ in self.pending), default=self.cycle - 1)
-
   def _schedule(self, completion: int, dst: int | None):
-    """Schedule ALUEXEC at completion cycle (or later if queue busy)."""
-    completion = max(completion, self._last_pending() + 1)
-    self.pending.append((completion, AluSrc.VALU))
+    completion = max(completion, (max(self.pending) if self.pending else self.cycle - 1) + 1)
+    self.pending.append(completion)
     self.pending.sort()
     if dst is not None: self.vgpr[dst] = (completion, self.vgpr.get(dst, (0, 0))[1])
 
   def _resolve_deferred(self):
-    """Try to schedule first deferred instruction."""
     if not self.deferred: return
-    src_vgpr, dst, depth = self.deferred[0]
-    if src_vgpr is None:  # blocked by earlier deferred, schedule after pending
-      self._schedule(self._last_pending() + 1, dst)
+    src_vgpr, dst = self.deferred[0]
+    if src_vgpr is None:
+      self._schedule((max(self.pending) if self.pending else self.cycle - 1) + 1, dst)
       self.deferred.pop(0)
     else:
       source_ready = self.vgpr.get(src_vgpr, (0, 0))[0]
       if source_ready <= self.cycle:
         warm = sum(1 for c in self.immediate_cycles if c > source_ready) >= 2
         if warm or self.cycle >= source_ready + 2:
-          latency = VALU_LATENCY - 1 if warm else FORWARD_DEEP_LATENCY
-          self._schedule(source_ready + latency, dst)
+          self._schedule(source_ready + (VALU_LATENCY - 1 if warm else FORWARD_DEEP_LATENCY), dst)
           self.deferred.pop(0)
 
   def tick(self):
     self._resolve_deferred()
-    while self.pending and self.pending[0][0] <= self.cycle:
-      self.emit(ALUEXEC, src=self.pending.pop(0)[1])
+    while self.pending and self.pending[0] <= self.cycle:
+      self.pending.pop(0)
+      self.emit(ALUEXEC, src=AluSrc.VALU)
     self.cycle += 1
 
   def _get_src_vgprs(self, inst: Inst) -> list[int]:
@@ -491,9 +487,8 @@ class SQTTState:
     return []
 
   def _valu_latency(self, dispatch: int, source_ready: int, depth: int) -> int:
-    """Compute VALU completion cycle. Returns -1 if must defer for warmth check."""
-    if depth == 0: return dispatch + VALU_LATENCY  # independent
-    if depth >= FORWARD_DEPTH_LIMIT: return -1  # defer for warmth check
+    if depth == 0: return dispatch + VALU_LATENCY
+    if depth >= FORWARD_DEPTH_LIMIT: return -1
     gap = source_ready - dispatch
     if gap >= 2: return source_ready + (VALU_LATENCY - 1 if depth >= 2 else VALU_LATENCY)
     if gap == 1: return source_ready + 7
@@ -507,14 +502,13 @@ class SQTTState:
   def _process_snop(self, N: int):
     has_pending = bool(self.pending)
     bypass = REGCACHE_BYPASS_PENALTY if N >= REGCACHE_BYPASS_TIMEOUT and has_pending else 0
-    if bypass: self.pending = [(c + bypass, src) for c, src in self.pending]
+    if bypass: self.pending = [c + bypass for c in self.pending]
 
     for _ in range(max(0, self.last_valu_dispatch + SNOP_PIPELINE_DELAY - self.cycle)): self.tick()
     in_range = (SNOP_EXTRA_DELAY_MIN_PENDING <= N <= SNOP_EXTRA_DELAY_MAX_PENDING) if has_pending else \
                (SNOP_EXTRA_DELAY_MIN <= N <= SNOP_EXTRA_DELAY_MAX and self.inst_count > 0)
-    extra = SNOP_EXTRA_DELAY_CYCLES if in_range else 0
 
-    for _ in range(N + extra + bypass): self.tick()
+    for _ in range(N + (SNOP_EXTRA_DELAY_CYCLES if in_range else 0) + bypass): self.tick()
     self.emit(IMMEDIATE, wave=self.wave_id)
     self.immediate_cycles.append(self.cycle)
     self.tick()
@@ -529,11 +523,11 @@ class SQTTState:
     self.last_valu_dispatch = dispatch
 
     completion = self._valu_latency(dispatch, source_ready, depth)
-    if completion == -1:  # defer for warmth check
-      self.deferred.append((src_vgpr, dst, depth))
-      completion = source_ready + VALU_LATENCY - 1  # optimistic for scoreboard
-    elif self.deferred:  # blocked by earlier deferred
-      self.deferred.append((None, dst, depth))
+    if completion == -1:
+      self.deferred.append((src_vgpr, dst))
+      completion = source_ready + VALU_LATENCY - 1
+    elif self.deferred:
+      self.deferred.append((None, dst))
     else:
       self._schedule(completion, dst)
 
