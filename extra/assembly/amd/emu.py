@@ -173,13 +173,8 @@ def decode_program(data: bytes) -> Program:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def exec_scalar(st: WaveState, inst: Inst) -> int:
-  """Execute scalar instruction. Returns PC delta or negative for special cases."""
+  """Execute scalar instruction. Returns PC delta."""
   compiled = _get_compiled()
-
-  # SOPP: special cases for control flow that has no pseudocode
-  if isinstance(inst, SOPP):
-    if inst.op == SOPPOp.S_ENDPGM: return -1
-    if inst.op == SOPPOp.S_BARRIER: return -2
 
   # SMEM: memory loads (not ALU)
   if isinstance(inst, SMEM):
@@ -429,11 +424,13 @@ def step_wave(program: Program, st: WaveState, lds: LDSMem, n_lanes: int) -> int
   if inst is None: return 1
   inst_words, st.literal = inst._words, getattr(inst, '_literal', None) or 0
 
+  # SOPP: special cases for control flow
+  if isinstance(inst, SOPP):
+    if inst.op == SOPPOp.S_ENDPGM: return -1
+    if inst.op == SOPPOp.S_BARRIER: st.pc += inst_words; return -2
+
   if isinstance(inst, (SOP1, SOP2, SOPC, SOPK, SOPP, SMEM)):
-    delta = exec_scalar(st, inst)
-    if delta == -1: return -1  # endpgm
-    if delta == -2: st.pc += inst_words; return -2  # barrier
-    st.pc += inst_words + delta
+    st.pc += inst_words + exec_scalar(st, inst)
   else:
     # V_READFIRSTLANE/V_READLANE write to SGPR, execute once; others execute per-lane with exec_mask
     is_readlane = isinstance(inst, (VOP1, VOP3)) and ('READFIRSTLANE' in inst.op_name or 'READLANE' in inst.op_name)
@@ -445,11 +442,8 @@ def step_wave(program: Program, st: WaveState, lds: LDSMem, n_lanes: int) -> int
   return 0
 
 def exec_wave(program: Program, st: WaveState, lds: LDSMem, n_lanes: int) -> int:
-  while st.pc in program:
-    result = step_wave(program, st, lds, n_lanes)
-    if result == -1: return -1  # endpgm
-    if result == -2: return -2  # barrier
-  return 0
+  while st.pc in program and (result := step_wave(program, st, lds, n_lanes)) == 0: pass
+  return result
 
 def exec_workgroup(program: Program, workgroup_id: tuple[int, int, int], local_size: tuple[int, int, int], args_ptr: int, rsrc2: int) -> None:
   lx, ly, lz = local_size
