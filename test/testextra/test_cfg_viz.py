@@ -176,5 +176,25 @@ class TestCfg(unittest.TestCase):
         s_endpgm(),
     ])
 
+  def test_function_call(self):
+    run_asm("function_call", [
+      # pc of the caller (by spec: writes the byte address of the *next* instruction)
+      s_getpc_b64(s[6:7]),
+      "base:",
+        # todo: dsl err
+        #s_add_u32(s[6], s[6], "fxn - base"),
+        "s_add_u32  s6, s6, fxn - base",
+        s_addc_u32(s[7], s[7], 0),
+        # function call
+        s_swappc_b64(s[0:1], s[6:7]),
+        # resume here after return
+        s_nop(1),
+        s_endpgm(),
+      "fxn:",
+        s_add_u32(s[4], s[4], 1),
+        # return
+        s_swappc_b64(s[2:3], s[0:1]),
+    ])
+
 if __name__ == "__main__":
   unittest.main()
