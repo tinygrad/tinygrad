@@ -855,7 +855,7 @@ class PCIIface(PCIIfaceBase):
   def on_device_hang(self):
     devs:list[AMDDevice] = [d for pg in HCQCompiled.peer_groups.values() for d in pg if isinstance(d, AMDDevice) and d.is_am()]
     faults = [f for d in devs if (f:=d.iface.dev_impl.gmc.check_fault())]
-    raise RuntimeError(f"Device hang detected: {faults[0]}" if faults else "Device hang detected")
+    raise RuntimeError(f"Device hang detected: {'; '.join(faults)}" if faults else "Device hang detected")
 
   def device_fini(self): self.dev_impl.fini()
 
