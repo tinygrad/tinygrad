@@ -517,9 +517,10 @@ def _generate_gen_pcode_py(enums, pseudocode, arch) -> str:
   if 'VOP3Op' in enum_names:
     fn_lines.append('''
 # V_WRITELANE_B32: Write scalar to specific lane's VGPR (not in PDF pseudocode)
-def _VOP3Op_V_WRITELANE_B32(s0, s1, s2, d0, scc, vcc, lane, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):
+def _VOP3Op_V_WRITELANE_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
+  # --- compiled pseudocode ---
   wr_lane = s1 & 0x1f
-  return {'d0': d0, 'scc': scc, 'vgpr_write': (wr_lane, vdst_idx, s0 & 0xffffffff)}
+  return {'D0': d0, 'vgpr_write': (wr_lane, vdst_idx, s0 & 0xffffffff)}
 VOP3Op_FUNCTIONS[VOP3Op.V_WRITELANE_B32] = _VOP3Op_V_WRITELANE_B32
 ''')
 
@@ -576,7 +577,9 @@ def _apply_pseudocode_fixes(op, code: str) -> str:
   return code
 
 def _generate_function(cls_name: str, op, pc: str, code: str) -> tuple[str, str]:
-  """Generate a single compiled pseudocode function."""
+  """Generate a single compiled pseudocode function.
+  Functions take int parameters and return dict of int values.
+  Reg wrapping happens inside the function, only for registers actually used."""
   has_d1 = '{ D1' in pc
   is_cmpx = (cls_name in ('VOPCOp', 'VOP3Op')) and 'EXEC.u64[laneId]' in pc
   is_div_scale = 'DIV_SCALE' in op.name
@@ -586,73 +589,73 @@ def _generate_function(cls_name: str, op, pc: str, code: str) -> tuple[str, str]
   combined = code + pc
 
   fn_name = f"_{cls_name}_{op.name}"
-  # Function accepts Reg objects directly (uppercase names), laneId is passed directly as int
-  # DSOp functions get additional MEM and offset parameters
-  # FLAT/GLOBAL ops get MEM, vaddr, vdata, saddr, offset parameters
-  if is_ds:
-    lines = [f"def {fn_name}(MEM, ADDR, DATA0, DATA1, OFFSET0, OFFSET1, RETURN_DATA):"]
-  elif is_flat:
-    lines = [f"def {fn_name}(MEM, ADDR, VDATA, VDST, RETURN_DATA):"]
-  else:
-    lines = [f"def {fn_name}(S0, S1, S2, D0, SCC, VCC, laneId, EXEC, literal, VGPR, src0_idx=0, vdst_idx=0, PC=None):"]
 
-  # Registers that need special handling (aliases or init)
+  # Detect which registers are used/modified
   def needs_init(name): return name in combined and not re.search(rf'^\s*{name}\s*=\s*Reg\(', code, re.MULTILINE)
-  special_regs = []
-  if is_ds: special_regs = [('DATA', 'DATA0'), ('DATA2', 'DATA1'), ('OFFSET', 'OFFSET0'), ('ADDR_BASE', 'ADDR')]
-  elif is_flat: special_regs = [('DATA', 'VDATA')]
-  else:
-    special_regs = [('D1', 'Reg(0)'), ('SIMM16', 'Reg(literal)'), ('SIMM32', 'Reg(literal)'),
-                    ('SRC0', 'Reg(src0_idx)'), ('VDST', 'Reg(vdst_idx)')]
-    if needs_init('tmp'): special_regs.insert(0, ('tmp', 'Reg(0)'))
-    if needs_init('saveexec'): special_regs.insert(0, ('saveexec', 'Reg(EXEC._val)'))
-
-  used = {name for name, _ in special_regs if name in combined}
-
-  # Detect which registers are modified (not just read) - look for assignments
   modifies_d0 = is_div_scale or bool(re.search(r'\bD0\b[.\[]', combined))
   modifies_exec = is_cmpx or bool(re.search(r'EXEC\.(u32|u64|b32|b64)\s*=', combined))
   modifies_vcc = has_sdst or bool(re.search(r'VCC\.(u32|u64|b32|b64)\s*=|VCC\.u64\[laneId\]\s*=', combined))
   modifies_scc = bool(re.search(r'\bSCC\s*=', combined))
   modifies_pc = bool(re.search(r'\bPC\s*=', combined))
-  # DS/FLAT ops: detect memory writes (MEM[...] = ...)
-  modifies_mem = (is_ds or is_flat) and bool(re.search(r'MEM\[.*\]\.[a-z0-9]+\s*=', combined))
-  # FLAT ops: detect VDST writes
-  modifies_vdst = is_flat and bool(re.search(r'VDST[\.\[].*=', combined))
 
-  # Build init code for special registers
-  init_lines = []
-  if is_div_scale: init_lines.append("  D0 = Reg(S0._val)")
+  # Build function signature and Reg init lines
+  if is_ds:
+    lines = [f"def {fn_name}(MEM, addr, data0, data1, offset0, offset1):"]
+    reg_inits = ["ADDR=Reg(addr)", "DATA0=Reg(data0)", "DATA1=Reg(data1)", "OFFSET0=Reg(offset0)", "OFFSET1=Reg(offset1)", "RETURN_DATA=Reg(0)"]
+    special_regs = [('DATA', 'DATA0'), ('DATA2', 'DATA1'), ('OFFSET', 'OFFSET0'), ('ADDR_BASE', 'ADDR')]
+  elif is_flat:
+    lines = [f"def {fn_name}(MEM, addr, vdata, vdst):"]
+    reg_inits = ["ADDR=addr", "VDATA=Reg(vdata)", "VDST=Reg(vdst)", "RETURN_DATA=Reg(0)"]
+    special_regs = [('DATA', 'VDATA')]
+  else:
+    lines = [f"def {fn_name}(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):"]
+    # Only create Regs for registers actually used in the pseudocode
+    reg_inits = []
+    if 'S0' in combined: reg_inits.append("S0=Reg(s0)")
+    if 'S1' in combined: reg_inits.append("S1=Reg(s1)")
+    if 'S2' in combined: reg_inits.append("S2=Reg(s2)")
+    if modifies_d0 or 'D0' in combined: reg_inits.append("D0=Reg(s0)" if is_div_scale else "D0=Reg(d0)")
+    if modifies_scc or 'SCC' in combined: reg_inits.append("SCC=Reg(scc)")
+    if modifies_vcc or 'VCC' in combined: reg_inits.append("VCC=Reg(vcc)")
+    if modifies_exec or 'EXEC' in combined: reg_inits.append("EXEC=Reg(exec_mask)")
+    if modifies_pc or 'PC' in combined: reg_inits.append("PC=Reg(pc) if pc is not None else None")
+    special_regs = [('D1', 'Reg(0)'), ('SIMM16', 'Reg(literal)'), ('SIMM32', 'Reg(literal)'),
+                    ('SRC0', 'Reg(src0_idx)'), ('VDST', 'Reg(vdst_idx)')]
+    if needs_init('tmp'): special_regs.insert(0, ('tmp', 'Reg(0)'))
+    if needs_init('saveexec'): special_regs.insert(0, ('saveexec', 'Reg(EXEC._val)'))
+
+  # Build init code
+  init_parts = reg_inits.copy()
   for name, init in special_regs:
-    if name in used: init_lines.append(f"  {name} = {init}")
-  if 'EXEC_LO' in code: init_lines.append("  EXEC_LO = SliceProxy(EXEC, 31, 0)")
-  if 'EXEC_HI' in code: init_lines.append("  EXEC_HI = SliceProxy(EXEC, 63, 32)")
-  if 'VCCZ' in code and not re.search(r'^\s*VCCZ\s*=', code, re.MULTILINE): init_lines.append("  VCCZ = Reg(1 if VCC._val == 0 else 0)")
-  if 'EXECZ' in code and not re.search(r'^\s*EXECZ\s*=', code, re.MULTILINE): init_lines.append("  EXECZ = Reg(1 if EXEC._val == 0 else 0)")
-  code_lines = [line for line in code.split('\n') if line.strip()]
-  if init_lines:
-    lines.extend(init_lines)
-    if code_lines: lines.append("  # --- compiled pseudocode ---")
-  for line in code_lines:
-    lines.append(f"  {line}")
+    if name in combined: init_parts.append(f"{name}={init}")
+  if 'EXEC_LO' in code: init_parts.append("EXEC_LO=SliceProxy(EXEC, 31, 0)")
+  if 'EXEC_HI' in code: init_parts.append("EXEC_HI=SliceProxy(EXEC, 63, 32)")
+  if 'VCCZ' in code and not re.search(r'^\s*VCCZ\s*=', code, re.MULTILINE): init_parts.append("VCCZ=Reg(1 if VCC._val == 0 else 0)")
+  if 'EXECZ' in code and not re.search(r'^\s*EXECZ\s*=', code, re.MULTILINE): init_parts.append("EXECZ=Reg(1 if EXEC._val == 0 else 0)")
 
-  # Build result dict - only include registers that are modified
+  # Add init line and separator
+  if init_parts: lines.append(f"  {'; '.join(init_parts)}")
+  lines.append("  # --- compiled pseudocode ---")
+
+  # Add compiled pseudocode
+  for line in code.split('\n'):
+    if line.strip(): lines.append(f"  {line}")
+
+  # Build result dict
   result_items = []
-  if modifies_d0: result_items.append("'D0': D0")
-  if modifies_scc: result_items.append("'SCC': SCC")
-  if modifies_vcc: result_items.append("'VCC': VCC")
-  if modifies_exec: result_items.append("'EXEC': EXEC")
-  if has_d1: result_items.append("'D1': D1")
-  if modifies_pc: result_items.append("'PC': PC")
-  # DS ops: return RETURN_DATA if it was written (left side of assignment)
+  if modifies_d0: result_items.append("'D0': D0._val")
+  if modifies_scc: result_items.append("'SCC': SCC._val")
+  if modifies_vcc: result_items.append("'VCC': VCC._val")
+  if modifies_exec: result_items.append("'EXEC': EXEC._val")
+  if has_d1: result_items.append("'D1': D1._val")
+  if modifies_pc: result_items.append("'PC': PC._val")
   if is_ds and 'RETURN_DATA' in combined and re.search(r'^\s*RETURN_DATA[\.\[].*=', code, re.MULTILINE):
-    result_items.append("'RETURN_DATA': RETURN_DATA")
-  # FLAT ops: return RETURN_DATA for atomics, VDATA for loads (only if written to)
+    result_items.append("'RETURN_DATA': RETURN_DATA._val")
   if is_flat:
     if 'RETURN_DATA' in combined and re.search(r'^\s*RETURN_DATA[\.\[].*=', code, re.MULTILINE):
-      result_items.append("'RETURN_DATA': RETURN_DATA")
+      result_items.append("'RETURN_DATA': RETURN_DATA._val")
     if re.search(r'^\s*VDATA[\.\[].*=', code, re.MULTILINE):
-      result_items.append("'VDATA': VDATA")
+      result_items.append("'VDATA': VDATA._val")
   lines.append(f"  return {{{', '.join(result_items)}}}\n")
   return fn_name, '\n'.join(lines)
 
