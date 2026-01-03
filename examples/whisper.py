@@ -1,9 +1,10 @@
 # thanks to https://github.com/openai/whisper for a good chunk of MIT licensed code
 
-import sys, base64, multiprocessing, itertools, collections
+import sys, base64, multiprocessing, itertools, collections, math
 from typing import Optional, Union, Literal, List
 
-from tinygrad import Tensor, TinyJit, Variable, nn, dtypes
+from examples.webgpu.whisper.audio_helpers import stft_full, mel, resample_batched_helper
+from tinygrad import Tensor, TinyJit, Variable, nn
 from tinygrad.nn.state import torch_load, load_state_dict
 from tinygrad.helpers import getenv, fetch
 
@@ -123,7 +124,6 @@ class Whisper:
     self.is_multilingual = dims["n_vocab"] == 51865
     self.batch_size = batch_size
 
-
 RATE = 16000
 SEGMENT_SECONDS=30
 SAMPLES_PER_SEGMENT = RATE * SEGMENT_SECONDS # 480000
@@ -132,37 +132,35 @@ HOP_LENGTH = 160
 N_MELS = 80
 FRAMES_PER_SEGMENT = SAMPLES_PER_SEGMENT // HOP_LENGTH # 3000
 
-def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> np.ndarray:
+def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False, sr=RATE) -> np.ndarray:
   """
   :param waveforms: A list of possibly variable length 16000Hz audio samples
   :param batch_size: The batch_size associated with the Whisper model being used to transcribe the audio.
                      Used to prevent JIT mismatch errors since the encoder does not accept symbolic shapes
   :param truncate: If true, truncates (or pads) audio to exactly 30s for a single encoder pass
+  :param sr: Sample rate of all waveforms. Waveforms will be resampled to 16000Hz if different.
   :return: mel spectrogram of the given waveforms
   """
-  def pad_or_trim(arr, target_len):
-    curr_len = len(arr)
-    if curr_len == target_len:
-      return arr
-    elif curr_len < target_len:
-      return np.pad(arr, (0, target_len - curr_len), 'constant')
-    else:
-      return arr[:target_len]
+  waveforms = [(resample_batched_helper(Tensor(wv), sr, RATE) if sr != RATE else Tensor(wv)).flatten()[:wv.shape[-1]] for wv in waveforms]
+  max_len = max(len(wav) for wav in waveforms)
+  waveforms = Tensor.cat(*[wv.pad((0, max_len-wv.shape[-1]))[None] for wv in waveforms])
+  max_len = SAMPLES_PER_SEGMENT if truncate else max_len
 
-  max_len = SAMPLES_PER_SEGMENT if truncate else max(len(wav) for wav in waveforms)
   if (r := max_len % SAMPLES_PER_SEGMENT) > 0: max_len += SAMPLES_PER_SEGMENT - r
-  waveforms = np.array(list(map(lambda w: pad_or_trim(w, max_len), waveforms)))
+
   assert waveforms.shape[0] <= batch_size
-  if waveforms.shape[0] < batch_size:
-    # we could have a symbolic batch_size dim instead of manually padding here if conv/layernorm supported symbolic shapes
-    waveforms = np.pad(waveforms, pad_width=((0, batch_size - waveforms.shape[0]), (0, 0)))
+  waveforms = waveforms.pad(((0, batch_size-waveforms.shape[0]), (0, max_len-waveforms.shape[-1])))
+  # we could have a symbolic batch_size dim instead of manually padding here if conv/layernorm supported symbolic shapes
+  # TODO: pad_mode="reflect" to match openai
+  stft = stft_full(waveforms, N_FFT, stride=HOP_LENGTH, pad=(200, 200))
+  magnitudes = (stft[..., :-1] ** 2)
+  mel_spec = mel(sr=RATE, n_fft=N_FFT, n_mels=N_MELS) @ magnitudes
 
-  stft = librosa.stft(waveforms, n_fft=N_FFT, hop_length=HOP_LENGTH, window='hann', dtype=np.csingle)
-  magnitudes = np.absolute(stft[..., :-1]) ** 2
-  mel_spec = librosa.filters.mel(sr=RATE, n_fft=N_FFT, n_mels=N_MELS) @ magnitudes
+  def log10(x:Tensor):
+    return x.log2() * (math.log(2) / math.log(10))
 
-  log_spec = np.log10(np.clip(mel_spec, 1e-10, None))
-  log_spec = np.maximum(log_spec, log_spec.max((1,2), keepdims=True) - 8.0)
+  log_spec = log10(mel_spec.clip(1e-10, None))
+  log_spec = log_spec.maximum(log_spec.max((1,2), keepdim=True) - 8.0)
   log_spec = (log_spec + 4.0) / 4.0
 
   return log_spec
@@ -230,30 +228,30 @@ def init_whisper(model_name="tiny.en", batch_size=1):
   return model, enc
 
 def load_file_waveform(filename):
-  waveform, _ = librosa.load(filename, sr=RATE)
+  waveform, sr = librosa.load(filename, sr=RATE)
   return waveform
 
 def transcribe_file(model, enc, filename):
-  return transcribe_waveform(model, enc, [load_file_waveform(filename)])
+  wav = load_file_waveform(filename)
+  return transcribe_waveform(model, enc, [wav])
 
-def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False):
+def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False, sr=RATE):
   """
   Expects an array of shape (N,S) where N is the number waveforms to transcribe in parallel and S is number of 16000Hz samples
   Returns the transcribed text if a single waveform is provided, or an array of transcriptions if multiple are provided
   """
 
-  log_spec = prep_audio(waveforms, model.batch_size, truncate)
+  log_spec = prep_audio(waveforms, model.batch_size, truncate, sr=sr)
   nsample = model.decoder.max_tokens_to_sample
-  nctx = model.decoder.max_self_attn_cache_len
 
   def inferloop(ctx: Union[np.ndarray, List[np.ndarray]], encoded_audio):
     pos, next_tokens = 0, ctx
-    for i in range(nsample):
-      next_tokens = model.decoder(Tensor(next_tokens, dtype=dtypes.int32), pos, encoded_audio)[:, -1].argmax(axis=-1).numpy().astype(np.int32).reshape(-1, 1)
+    for i in range((nsample)):
+      next_tokens = model.decoder(Tensor(next_tokens), pos, encoded_audio)[:, -1].argmax(axis=-1).numpy().astype(np.int32).reshape(-1, 1)
       next_tokens[ctx[:, -1] == eot] = eot
       ctx = np.concatenate((ctx, next_tokens), axis=1)
       pos = ctx.shape[-1] - 1
-      if (next_tokens == eot).all() or pos == nctx: break
+      if (next_tokens == eot).all(): break
     return ctx
 
   def gettexttoks(line): return [tok for tok in line if tok < eot or tok > enc._special_tokens["<|notimestamps|>"]][-nsample+len(start_tokens):]
@@ -271,7 +269,7 @@ def transcribe_waveform(model: Whisper, enc, waveforms, truncate=False):
   transcriptions = [[] for _ in waveforms]
 
   for curr_frame in range(0, log_spec.shape[-1], FRAMES_PER_SEGMENT):
-    encoded_audio = model.encoder.encode(Tensor(log_spec[:, :, curr_frame:curr_frame + FRAMES_PER_SEGMENT]))
+    encoded_audio = model.encoder.encode((log_spec[:, :, curr_frame:curr_frame + FRAMES_PER_SEGMENT].contiguous()))
 
     if all(len(c) == len(ctx[0]) for c in ctx): ctx = inferloop(np.array(ctx), encoded_audio)
     else: ctx = [inferloop((np.array([c]*model.batch_size)), encoded_audio)[i] for i,c in enumerate(ctx)]
