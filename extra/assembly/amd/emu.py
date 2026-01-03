@@ -179,9 +179,8 @@ def decode_program(data: bytes) -> Program:
     base_size = inst_class._size()
     # Pass enough data for potential 64-bit literal (base + 8 bytes max)
     inst = inst_class.from_bytes(data[i:i+base_size+8])
-    for name, val in inst._values.items():
-      if name != 'op': setattr(inst, name, unwrap(val))  # skip op to preserve property access
     inst._words = inst.size() // 4
+    inst._fn = COMPILED_FUNCTIONS.get(type(inst.op), {}).get(inst.op)
     result[i // 4] = inst
     i += inst._words * 4
   return result
@@ -201,10 +200,10 @@ def exec_scalar(st: WaveState, inst: Inst) -> int:
   elif isinstance(inst, SOPP): ssrc0, sdst = None, None
   else: raise NotImplementedError(f"Unknown scalar type {type(inst)}")
 
-  fn = COMPILED_FUNCTIONS.get(type(inst.op), {}).get(inst.op)
+  fn = inst._fn
   if fn is None:
     if isinstance(inst, SOPP): return 0  # SOPP without pseudocode (waits, hints, nops) are no-ops
-    raise NotImplementedError(f"{inst.op.name} not in pseudocode")
+    raise NotImplementedError(f"{inst.op_name} not in pseudocode")
 
   # SMEM: memory loads
   if isinstance(inst, SMEM):
@@ -250,26 +249,24 @@ def exec_vector(st: WaveState, inst: Inst, lane: int, lds: LDSMem | None = None)
     for vopd_op, s0, s1, d0, dst in inputs: V[dst] = _exec_vopd(vopd_op, s0, s1, d0, st, lane)
     return
 
-  # Lookup compiled function for this op (V_NOP has no pcode)
-  if isinstance(inst, VOP1) and inst.op == VOP1Op.V_NOP: return
-  fn = COMPILED_FUNCTIONS.get(type(inst.op), {}).get(inst.op)
+  fn = inst._fn
   if fn is None: raise NotImplementedError(f"{inst.op_name} not in pseudocode")
 
   # Memory ops (FLAT/GLOBAL/SCRATCH and DS)
   if isinstance(inst, (FLAT, DS)):
-    ndwords = _op_ndwords(inst.op.name)
+    ndwords = _op_ndwords(inst.op_name)
     if isinstance(inst, FLAT):
       addr = V[inst.addr] | (V[inst.addr + 1] << 32)
       ADDR = (st.rsgpr64(inst.saddr) + V[inst.addr] + _sext(inst.offset, 13)) & MASK64 if inst.saddr not in (NULL, 0x7f) else (addr + _sext(inst.offset, 13)) & MASK64
-      vdata_src = inst.vdst if 'LOAD' in inst.op.name else inst.data
+      vdata_src = inst.vdst if 'LOAD' in inst.op_name else inst.data
       result = fn(GlobalMem, ADDR, _vgpr_read(V, vdata_src, ndwords), V[inst.vdst])
       if 'VDATA' in result: _vgpr_write(V, inst.vdst, result['VDATA'], ndwords)
       if 'RETURN_DATA' in result: _vgpr_write(V, inst.vdst, result['RETURN_DATA'], ndwords)
     else:  # DS
       data0, data1 = _vgpr_read(V, inst.data0, ndwords), _vgpr_read(V, inst.data1, ndwords) if inst.data1 is not None else 0
       result = fn(lds, V[inst.addr], data0, data1, inst.offset0, inst.offset1)
-      if 'RETURN_DATA' in result and ('_RTN' in inst.op.name or '_LOAD' in inst.op.name):
-        _vgpr_write(V, inst.vdst, result['RETURN_DATA'], ndwords * 2 if '_2ADDR_' in inst.op.name else ndwords)
+      if 'RETURN_DATA' in result and ('_RTN' in inst.op_name or '_LOAD' in inst.op_name):
+        _vgpr_write(V, inst.vdst, result['RETURN_DATA'], ndwords * 2 if '_2ADDR_' in inst.op_name else ndwords)
     return
 
   # VOP3SD: has extra scalar dest for carry output
@@ -389,7 +386,8 @@ def step_wave(program: Program, st: WaveState, lds: LDSMem, n_lanes: int) -> int
     st.pc += inst_words + exec_scalar(st, inst)
     return 0
   # Wave-level vector ops: execute once for entire wave (not per-lane)
-  if isinstance(inst, VOP3P) and 'WMMA' in inst.op_name:
+  if isinstance(inst, VOP1) and inst.op == VOP1Op.V_NOP: pass
+  elif isinstance(inst, VOP3P) and 'WMMA' in inst.op_name:
     exec_wmma(st, inst, inst.op)
   elif isinstance(inst, VOP3) and inst.op == VOP3Op.V_WRITELANE_B32:
     wr_lane = st.rsrc(inst.src1, 0) & 0x1f
