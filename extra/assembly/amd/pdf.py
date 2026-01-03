@@ -477,7 +477,7 @@ def _generate_gen_pcode_py(enums, pseudocode, arch) -> str:
   # Get op enums for this arch (import from .ins which re-exports from .enum)
   import importlib
   autogen = importlib.import_module(f"extra.assembly.amd.autogen.{arch}.ins")
-  OP_ENUMS = [getattr(autogen, name) for name in ['SOP1Op', 'SOP2Op', 'SOPCOp', 'SOPKOp', 'SOPPOp', 'VOP1Op', 'VOP2Op', 'VOP3Op', 'VOP3SDOp', 'VOP3POp', 'VOPCOp', 'VOP3AOp', 'VOP3BOp', 'DSOp', 'FLATOp', 'GLOBALOp', 'SCRATCHOp'] if hasattr(autogen, name)]
+  OP_ENUMS = [getattr(autogen, name) for name in ['SOP1Op', 'SOP2Op', 'SOPCOp', 'SOPKOp', 'SOPPOp', 'SMEMOp', 'VOP1Op', 'VOP2Op', 'VOP3Op', 'VOP3SDOp', 'VOP3POp', 'VOPCOp', 'VOP3AOp', 'VOP3BOp', 'DSOp', 'FLATOp', 'GLOBALOp', 'SCRATCHOp'] if hasattr(autogen, name)]
 
   # Build defined ops mapping
   defined_ops: dict[tuple, list] = {}
@@ -575,6 +575,7 @@ def _generate_function(cls_name: str, op, pc: str, code: str) -> tuple[str, str]
   has_sdst = cls_name == 'VOP3SDOp' and ('VCC.u64[laneId]' in pc or is_div_scale)
   is_ds = cls_name == 'DSOp'
   is_flat = cls_name in ('FLATOp', 'GLOBALOp', 'SCRATCHOp')
+  is_smem = cls_name == 'SMEMOp'
   has_s_array = 'S[i]' in pc  # FMA_MIX style: S[0], S[1], S[2] array access
   combined = code + pc
 
@@ -589,7 +590,11 @@ def _generate_function(cls_name: str, op, pc: str, code: str) -> tuple[str, str]
   modifies_pc = bool(re.search(r'\bPC\s*=', combined))
 
   # Build function signature and Reg init lines
-  if is_ds:
+  if is_smem:
+    lines = [f"def {fn_name}(MEM, addr):"]
+    reg_inits = ["ADDR=Reg(addr)", "SDATA=Reg(0)"]
+    special_regs = []
+  elif is_ds:
     lines = [f"def {fn_name}(MEM, addr, data0, data1, offset0, offset1):"]
     reg_inits = ["ADDR=Reg(addr)", "DATA0=Reg(data0)", "DATA1=Reg(data1)", "OFFSET0=Reg(offset0)", "OFFSET1=Reg(offset1)", "RETURN_DATA=Reg(0)"]
     special_regs = [('DATA', 'DATA0'), ('DATA2', 'DATA1'), ('OFFSET', 'OFFSET0'), ('ADDR_BASE', 'ADDR')]
@@ -648,6 +653,8 @@ def _generate_function(cls_name: str, op, pc: str, code: str) -> tuple[str, str]
   if modifies_exec: result_items.append("'EXEC': EXEC._val")
   if has_d1: result_items.append("'D1': D1._val")
   if modifies_pc: result_items.append("'PC': PC._val")
+  if is_smem and 'SDATA' in combined and re.search(r'^\s*SDATA[\.\[].*=', code, re.MULTILINE):
+    result_items.append("'SDATA': SDATA._val")
   if is_ds and 'RETURN_DATA' in combined and re.search(r'^\s*RETURN_DATA[\.\[].*=', code, re.MULTILINE):
     result_items.append("'RETURN_DATA': RETURN_DATA._val")
   if is_flat:

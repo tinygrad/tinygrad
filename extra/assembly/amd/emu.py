@@ -111,7 +111,8 @@ class LDSMem:
     if addr + size <= len(self._lds): self._lds[addr:addr+size] = (int(val) & ((1 << (size*8)) - 1)).to_bytes(size, 'little')
   def __getitem__(self, addr): return _make_mem_accessor(self._read, self._write)(addr)
 
-SMEM_LOAD = {SMEMOp.S_LOAD_B32: 1, SMEMOp.S_LOAD_B64: 2, SMEMOp.S_LOAD_B128: 4, SMEMOp.S_LOAD_B256: 8, SMEMOp.S_LOAD_B512: 16}
+# SMEM dst register count (for writing result back to SGPRs)
+SMEM_DST_COUNT = {SMEMOp.S_LOAD_B32: 1, SMEMOp.S_LOAD_B64: 2, SMEMOp.S_LOAD_B128: 4, SMEMOp.S_LOAD_B256: 8, SMEMOp.S_LOAD_B512: 16}
 
 # VOPD op -> VOP3 op mapping (VOPD is dual-issue of VOP1/VOP2 ops, use VOP3 enums for pseudocode lookup)
 _VOPD_TO_VOP = {
@@ -198,32 +199,29 @@ def exec_scalar(st: WaveState, inst: Inst) -> int:
   """Execute scalar instruction. Returns PC delta."""
   compiled = _get_compiled()
 
-  # SMEM: memory loads (not ALU)
-  if isinstance(inst, SMEM):
-    addr = st.rsgpr64(inst.sbase * 2) + _sext(inst.offset, 21)
-    if inst.soffset not in (NULL, 0x7f): addr += st.rsrc(inst.soffset, 0)
-    if (cnt := SMEM_LOAD.get(inst.op)) is None: raise NotImplementedError(f"SMEM op {inst.op}")
-    for i in range(cnt): st.wsgpr(inst.sdata + i, mem_read((addr + i * 4) & MASK64, 4))
-    return 0
-
   # Get op enum and lookup compiled function
-  if isinstance(inst, SOP1): ssrc0, sdst = inst.ssrc0, inst.sdst
+  if isinstance(inst, SMEM): ssrc0, sdst = None, None
+  elif isinstance(inst, SOP1): ssrc0, sdst = inst.ssrc0, inst.sdst
   elif isinstance(inst, SOP2): ssrc0, sdst = inst.ssrc0, inst.sdst
   elif isinstance(inst, SOPC): ssrc0, sdst = inst.ssrc0, None
   elif isinstance(inst, SOPK): ssrc0, sdst = inst.sdst, inst.sdst  # sdst is both src and dst
   elif isinstance(inst, SOPP): ssrc0, sdst = None, None
   else: raise NotImplementedError(f"Unknown scalar type {type(inst)}")
 
-  # SOPP has gaps in the opcode enum - treat unknown opcodes as no-ops
-  try: op = inst.op
-  except ValueError:
-    if isinstance(inst, SOPP): return 0
-    raise
-  fn = compiled.get(type(op), {}).get(op)
+  fn = compiled.get(type(inst.op), {}).get(inst.op)
   if fn is None:
-    # SOPP instructions without pseudocode (waits, hints, nops) are no-ops
-    if isinstance(inst, SOPP): return 0
-    raise NotImplementedError(f"{op.name} not in pseudocode")
+    if isinstance(inst, SOPP): return 0  # SOPP without pseudocode (waits, hints, nops) are no-ops
+    raise NotImplementedError(f"{inst.op.name} not in pseudocode")
+
+  # SMEM: memory loads
+  if isinstance(inst, SMEM):
+    addr = st.rsgpr64(inst.sbase * 2) + _sext(inst.offset, 21)
+    if inst.soffset not in (NULL, 0x7f): addr += st.rsrc(inst.soffset, 0)
+    result = fn(GlobalMem, addr & MASK64)
+    if 'SDATA' in result:
+      sdata = result['SDATA']
+      for i in range(SMEM_DST_COUNT.get(inst.op, 1)): st.wsgpr(inst.sdata + i, (sdata >> (i * 32)) & MASK32)
+    return 0
 
   # Build context - use inst methods to determine operand sizes
   s0 = st.rsrc64(ssrc0, 0) if inst.is_src_64(0) else (st.rsrc(ssrc0, 0) if not isinstance(inst, (SOPK, SOPP)) else (st.rsgpr(inst.sdst) if isinstance(inst, SOPK) else 0))

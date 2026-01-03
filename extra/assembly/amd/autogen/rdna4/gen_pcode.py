@@ -2,7 +2,7 @@
 # to regenerate: python -m extra.assembly.amd.pdf --arch rdna4
 # ruff: noqa: E501
 # mypy: ignore-errors
-from extra.assembly.amd.autogen.rdna4.enum import SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp
+from extra.assembly.amd.autogen.rdna4.enum import SOP1Op, SOP2Op, SOPCOp, SOPKOp, SOPPOp, SMEMOp, VOP1Op, VOP2Op, VOP3Op, VOP3SDOp, VOP3POp, VOPCOp, DSOp
 from extra.assembly.amd.pcode import ABSDIFF, BYTE_PERMUTE, DENORM, F, INF, MAX_FLOAT_F32, OVERFLOW_F32, OVERFLOW_F64, PI, ROUND_MODE, Reg, SAT8, SliceProxy, TWO_OVER_PI_1201, UNDERFLOW_F32, UNDERFLOW_F64, WAVE32, WAVE64, _pack, _pack32, bf16_to_f32, cos, cvtToQuietNAN, exponent, f16_to_f32, f16_to_i16, f16_to_snorm, f16_to_u16, f16_to_unorm, f32_to_f16, f32_to_f64, f32_to_i32, f32_to_snorm, f32_to_u32, f32_to_u8, f32_to_unorm, f64_to_f32, f64_to_i32, f64_to_u32, floor, fma, fract, i16_to_f16, i32_to_f32, i32_to_f64, i32_to_i16, isEven, isNAN, isQuietNAN, isSignalNAN, ldexp, log2, mantissa, pow, s_ff1_i32_b32, s_ff1_i32_b64, sign, signext, signext_from_bit, sin, sqrt, trunc, u16_to_f16, u32_to_f32, u32_to_f64, u32_to_u16, u4_to_u32, u8_to_u32, v_cvt_i16_f32, v_cvt_u16_f32, v_max3_i16, v_max3_i32, v_max3_u16, v_max3_u32, v_max_i16, v_max_i32, v_max_u16, v_max_u32, v_min_i16, v_min_i32, v_min_u16, v_min_u32, v_msad_u8, v_sad_u8
 
 def _SOP1Op_S_MOV_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
@@ -1822,6 +1822,277 @@ SOPPOp_FUNCTIONS = {
   SOPPOp.S_CBRANCH_VCCNZ: _SOPPOp_S_CBRANCH_VCCNZ,
   SOPPOp.S_CBRANCH_EXECZ: _SOPPOp_S_CBRANCH_EXECZ,
   SOPPOp.S_CBRANCH_EXECNZ: _SOPPOp_S_CBRANCH_EXECNZ,
+}
+
+def _SMEMOp_S_LOAD_B32(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(sgpr_base.b64, offset.b64)
+  SDATA[31 : 0] = MEM[addr].b32
+  return {'SDATA': SDATA._val}
+
+def _SMEMOp_S_LOAD_B64(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(sgpr_base.b64, offset.b64)
+  SDATA[31 : 0] = MEM[addr].b32
+  SDATA[63 : 32] = MEM[addr + 4].b32
+  return {'SDATA': SDATA._val}
+
+def _SMEMOp_S_LOAD_B128(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(sgpr_base.b64, offset.b64)
+  SDATA[31 : 0] = MEM[addr].b32
+  SDATA[63 : 32] = MEM[addr + 4].b32
+  SDATA[95 : 64] = MEM[addr + 8].b32
+  SDATA[127 : 96] = MEM[addr + 12].b32
+  return {'SDATA': SDATA._val}
+
+def _SMEMOp_S_LOAD_B256(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(sgpr_base.b64, offset.b64)
+  SDATA[31 : 0] = MEM[addr].b32
+  SDATA[63 : 32] = MEM[addr + 4].b32
+  SDATA[95 : 64] = MEM[addr + 8].b32
+  SDATA[127 : 96] = MEM[addr + 12].b32
+  SDATA[159 : 128] = MEM[addr + 16].b32
+  SDATA[191 : 160] = MEM[addr + 20].b32
+  SDATA[223 : 192] = MEM[addr + 24].b32
+  SDATA[255 : 224] = MEM[addr + 28].b32
+  return {'SDATA': SDATA._val}
+
+def _SMEMOp_S_LOAD_B512(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(sgpr_base.b64, offset.b64)
+  SDATA[31 : 0] = MEM[addr].b32
+  SDATA[63 : 32] = MEM[addr + 4].b32
+  SDATA[95 : 64] = MEM[addr + 8].b32
+  SDATA[127 : 96] = MEM[addr + 12].b32
+  SDATA[159 : 128] = MEM[addr + 16].b32
+  SDATA[191 : 160] = MEM[addr + 20].b32
+  SDATA[223 : 192] = MEM[addr + 24].b32
+  SDATA[255 : 224] = MEM[addr + 28].b32
+  SDATA[287 : 256] = MEM[addr + 32].b32
+  SDATA[319 : 288] = MEM[addr + 36].b32
+  SDATA[351 : 320] = MEM[addr + 40].b32
+  SDATA[383 : 352] = MEM[addr + 44].b32
+  SDATA[415 : 384] = MEM[addr + 48].b32
+  SDATA[447 : 416] = MEM[addr + 52].b32
+  SDATA[479 : 448] = MEM[addr + 56].b32
+  SDATA[511 : 480] = MEM[addr + 60].b32
+  return {'SDATA': SDATA._val}
+
+def _SMEMOp_S_LOAD_B96(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  addr = CalcGlobalAddr(sgpr_base.b64, offset.b64)
+  SDATA[31 : 0] = MEM[addr].b32
+  SDATA[63 : 32] = MEM[addr + 4].b32
+  SDATA[95 : 64] = MEM[addr + 8].b32
+  return {'SDATA': SDATA._val}
+
+def _SMEMOp_S_LOAD_I8(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  SDATA.i32 = (signext(MEM[ADDR].i8))
+  return {'SDATA': SDATA._val}
+
+def _SMEMOp_S_LOAD_U8(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  SDATA.u32 = (_pack(0, MEM[ADDR].u8))
+  return {'SDATA': SDATA._val}
+
+def _SMEMOp_S_LOAD_I16(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  SDATA.i32 = (signext(MEM[ADDR].i16))
+  return {'SDATA': SDATA._val}
+
+def _SMEMOp_S_LOAD_U16(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  SDATA.u32 = (_pack(0, MEM[ADDR].u16))
+  return {'SDATA': SDATA._val}
+
+def _SMEMOp_S_BUFFER_LOAD_B32(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  addr = CalcBufferAddr(sgpr_base.b64, offset.b64)
+  SDATA[31 : 0] = MEM[addr].b32
+  return {'SDATA': SDATA._val}
+
+def _SMEMOp_S_BUFFER_LOAD_B64(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  addr = CalcBufferAddr(sgpr_base.b64, offset.b64)
+  SDATA[31 : 0] = MEM[addr].b32
+  SDATA[63 : 32] = MEM[addr + 4].b32
+  return {'SDATA': SDATA._val}
+
+def _SMEMOp_S_BUFFER_LOAD_B128(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  addr = CalcBufferAddr(sgpr_base.b64, offset.b64)
+  SDATA[31 : 0] = MEM[addr].b32
+  SDATA[63 : 32] = MEM[addr + 4].b32
+  SDATA[95 : 64] = MEM[addr + 8].b32
+  SDATA[127 : 96] = MEM[addr + 12].b32
+  return {'SDATA': SDATA._val}
+
+def _SMEMOp_S_BUFFER_LOAD_B256(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  addr = CalcBufferAddr(sgpr_base.b64, offset.b64)
+  SDATA[31 : 0] = MEM[addr].b32
+  SDATA[63 : 32] = MEM[addr + 4].b32
+  SDATA[95 : 64] = MEM[addr + 8].b32
+  SDATA[127 : 96] = MEM[addr + 12].b32
+  SDATA[159 : 128] = MEM[addr + 16].b32
+  SDATA[191 : 160] = MEM[addr + 20].b32
+  SDATA[223 : 192] = MEM[addr + 24].b32
+  SDATA[255 : 224] = MEM[addr + 28].b32
+  return {'SDATA': SDATA._val}
+
+def _SMEMOp_S_BUFFER_LOAD_B512(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  addr = CalcBufferAddr(sgpr_base.b64, offset.b64)
+  SDATA[31 : 0] = MEM[addr].b32
+  SDATA[63 : 32] = MEM[addr + 4].b32
+  SDATA[95 : 64] = MEM[addr + 8].b32
+  SDATA[127 : 96] = MEM[addr + 12].b32
+  SDATA[159 : 128] = MEM[addr + 16].b32
+  SDATA[191 : 160] = MEM[addr + 20].b32
+  SDATA[223 : 192] = MEM[addr + 24].b32
+  SDATA[255 : 224] = MEM[addr + 28].b32
+  SDATA[287 : 256] = MEM[addr + 32].b32
+  SDATA[319 : 288] = MEM[addr + 36].b32
+  SDATA[351 : 320] = MEM[addr + 40].b32
+  SDATA[383 : 352] = MEM[addr + 44].b32
+  SDATA[415 : 384] = MEM[addr + 48].b32
+  SDATA[447 : 416] = MEM[addr + 52].b32
+  SDATA[479 : 448] = MEM[addr + 56].b32
+  SDATA[511 : 480] = MEM[addr + 60].b32
+  return {'SDATA': SDATA._val}
+
+def _SMEMOp_S_BUFFER_LOAD_B96(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  addr = CalcBufferAddr(sgpr_base.b64, offset.b64)
+  SDATA[31 : 0] = MEM[addr].b32
+  SDATA[63 : 32] = MEM[addr + 4].b32
+  SDATA[95 : 64] = MEM[addr + 8].b32
+  return {'SDATA': SDATA._val}
+
+def _SMEMOp_S_BUFFER_LOAD_I8(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  SDATA.i32 = (signext(MEM[ADDR].i8))
+  return {'SDATA': SDATA._val}
+
+def _SMEMOp_S_BUFFER_LOAD_U8(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  SDATA.u32 = (_pack(0, MEM[ADDR].u8))
+  return {'SDATA': SDATA._val}
+
+def _SMEMOp_S_BUFFER_LOAD_I16(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  SDATA.i32 = (signext(MEM[ADDR].i16))
+  return {'SDATA': SDATA._val}
+
+def _SMEMOp_S_BUFFER_LOAD_U16(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  SDATA.u32 = (_pack(0, MEM[ADDR].u16))
+  return {'SDATA': SDATA._val}
+
+def _SMEMOp_S_PREFETCH_INST(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  if MODE.SCALAR_PREFETCH_EN.u1:
+    mem_addr = ((S0[63 : 0].i64 + (IOFFSET.i24)) & 0xffffffffffffff80)
+    length = S2.u32
+    length += SDATA.u32
+    length = (length & 31)
+    length = (length + 1) * 128
+  return {}
+
+def _SMEMOp_S_PREFETCH_INST_PC_REL(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  if MODE.SCALAR_PREFETCH_EN.u1:
+    mem_addr = ((PC[63 : 0].i64 + 8 + (IOFFSET.i24)) & 0xffffffffffffff80)
+    length = S1.u32
+    length += SDATA.u32
+    length = (length & 31)
+    length = (length + 1) * 128
+  return {}
+
+def _SMEMOp_S_PREFETCH_DATA(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  if MODE.SCALAR_PREFETCH_EN.u1:
+    mem_addr = ((S0[63 : 0].i64 + (IOFFSET.i24)) & 0xffffffffffffff80)
+    length = S2.u32
+    length += SDATA.u32
+    length = (length & 31)
+    length = (length + 1) * 128
+  return {}
+
+def _SMEMOp_S_BUFFER_PREFETCH_DATA(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  if MODE.SCALAR_PREFETCH_EN.u1:
+    mem_addr = ((S0[47 : 0].i64 + (IOFFSET.i24)) & 0xffffffffffffff80)
+    length = S2.u32
+    length += SDATA.u32
+    length = (length & 31)
+    length = (length + 1) * 128
+  return {}
+
+def _SMEMOp_S_PREFETCH_DATA_PC_REL(MEM, addr):
+  ADDR=Reg(addr); SDATA=Reg(0)
+  # --- compiled pseudocode ---
+  if MODE.SCALAR_PREFETCH_EN.u1:
+    mem_addr = ((PC[63 : 0].i64 + 8 + (IOFFSET.i24)) & 0xffffffffffffff80)
+    length = S1.u32
+    length += SDATA.u32
+    length = (length & 31)
+    length = (length + 1) * 128
+  return {}
+
+SMEMOp_FUNCTIONS = {
+  SMEMOp.S_LOAD_B32: _SMEMOp_S_LOAD_B32,
+  SMEMOp.S_LOAD_B64: _SMEMOp_S_LOAD_B64,
+  SMEMOp.S_LOAD_B128: _SMEMOp_S_LOAD_B128,
+  SMEMOp.S_LOAD_B256: _SMEMOp_S_LOAD_B256,
+  SMEMOp.S_LOAD_B512: _SMEMOp_S_LOAD_B512,
+  SMEMOp.S_LOAD_B96: _SMEMOp_S_LOAD_B96,
+  SMEMOp.S_LOAD_I8: _SMEMOp_S_LOAD_I8,
+  SMEMOp.S_LOAD_U8: _SMEMOp_S_LOAD_U8,
+  SMEMOp.S_LOAD_I16: _SMEMOp_S_LOAD_I16,
+  SMEMOp.S_LOAD_U16: _SMEMOp_S_LOAD_U16,
+  SMEMOp.S_BUFFER_LOAD_B32: _SMEMOp_S_BUFFER_LOAD_B32,
+  SMEMOp.S_BUFFER_LOAD_B64: _SMEMOp_S_BUFFER_LOAD_B64,
+  SMEMOp.S_BUFFER_LOAD_B128: _SMEMOp_S_BUFFER_LOAD_B128,
+  SMEMOp.S_BUFFER_LOAD_B256: _SMEMOp_S_BUFFER_LOAD_B256,
+  SMEMOp.S_BUFFER_LOAD_B512: _SMEMOp_S_BUFFER_LOAD_B512,
+  SMEMOp.S_BUFFER_LOAD_B96: _SMEMOp_S_BUFFER_LOAD_B96,
+  SMEMOp.S_BUFFER_LOAD_I8: _SMEMOp_S_BUFFER_LOAD_I8,
+  SMEMOp.S_BUFFER_LOAD_U8: _SMEMOp_S_BUFFER_LOAD_U8,
+  SMEMOp.S_BUFFER_LOAD_I16: _SMEMOp_S_BUFFER_LOAD_I16,
+  SMEMOp.S_BUFFER_LOAD_U16: _SMEMOp_S_BUFFER_LOAD_U16,
+  SMEMOp.S_PREFETCH_INST: _SMEMOp_S_PREFETCH_INST,
+  SMEMOp.S_PREFETCH_INST_PC_REL: _SMEMOp_S_PREFETCH_INST_PC_REL,
+  SMEMOp.S_PREFETCH_DATA: _SMEMOp_S_PREFETCH_DATA,
+  SMEMOp.S_BUFFER_PREFETCH_DATA: _SMEMOp_S_BUFFER_PREFETCH_DATA,
+  SMEMOp.S_PREFETCH_DATA_PC_REL: _SMEMOp_S_PREFETCH_DATA_PC_REL,
 }
 
 def _VOP1Op_V_MOV_B32(s0, s1, s2, d0, scc, vcc, laneId, exec_mask, literal, VGPR, src0_idx=0, vdst_idx=0, pc=None):
@@ -9170,6 +9441,7 @@ COMPILED_FUNCTIONS = {
   SOPCOp: SOPCOp_FUNCTIONS,
   SOPKOp: SOPKOp_FUNCTIONS,
   SOPPOp: SOPPOp_FUNCTIONS,
+  SMEMOp: SMEMOp_FUNCTIONS,
   VOP1Op: VOP1Op_FUNCTIONS,
   VOP2Op: VOP2Op_FUNCTIONS,
   VOP3Op: VOP3Op_FUNCTIONS,
